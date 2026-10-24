@@ -157,6 +157,65 @@ async function completeTurn(root: string, sessionId: string, prompt = 'implement
 }
 
 describe('turn recorder state machine', () => {
+  it.each(['claude', 'codex', 'qoder', 'opencode'] as const)('missing-start %s Stop preserves bounded payload once instead of claiming duplicate', async (provider) => {
+    const root = await workspace()
+    const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8'))
+    config.capture.toolOutput = 'full'
+    config.capture.toolContentFieldBytes = 1024
+    await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
+    // OpenCode's session.idle plugin dispatches Stop, not session.idle itself.
+    const input = { provider, workspace: root, event: 'Stop', payload: payload('missing-start', {
+      transcript_path: join(root, 'absent-transcript.jsonl'), detail: 'provider detail'
+    }) }
+    await expect(handleRecorderHook(input)).resolves.toMatchObject({ status: 'orphan' })
+    await expect(handleRecorderHook(input)).resolves.toMatchObject({ status: 'orphan' })
+    await recoverRecorder(root)
+    const orphans = join(root, '.scry/runtime', provider, safeKey('missing-start'), 'orphans')
+    const files = await readdir(orphans)
+    expect(files).toHaveLength(1)
+    const orphan = JSON.parse(await readFile(join(orphans, files[0]), 'utf8'))
+    expect(orphan).toMatchObject({ event: 'Stop', reason: 'missing_start', payload: { storage: 'complete' } })
+    expect(JSON.parse(orphan.payload.content)).toEqual(input.payload)
+    expect(await readHealth(join(root, '.scry'))).toMatchObject({ orphanEvents: 1, missingStartTerminals: 1 })
+    expect(await readFile(join(root, '.scry/logs/recorder.log'), 'utf8')).toContain('missing_start')
+    expect(await listRecords(join(root, '.scry'))).toHaveLength(0)
+  })
+
+  it('missing-start after a committed turn is not proved duplicate by session identity alone', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'later-missing')
+    await recoverRecorder(root)
+    await expect(handleRecorderHook({ provider: 'claude', workspace: root, event: 'Stop',
+      payload: payload('later-missing', { timestamp: '2026-07-19T13:00:00.000Z' })
+    })).resolves.toMatchObject({ status: 'orphan' })
+    expect(await listRecords(join(root, '.scry'))).toHaveLength(1)
+    expect(await readHealth(join(root, '.scry'))).toMatchObject({ missingStartTerminals: 1 })
+  })
+
+  it('orphan tool payload respects capture policy and byte limits', async () => {
+    const root = await workspace()
+    const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8'))
+    config.capture.toolOutput = 'full'
+    config.capture.toolContentFieldBytes = 1024
+    await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
+    const input = { provider: 'claude' as const, workspace: root, event: 'PostToolUse',
+      payload: payload('orphan-tool', { tool_response: '秘'.repeat(2000) }) }
+    await handleRecorderHook(input)
+    const directory = join(root, '.scry/runtime/claude', safeKey('orphan-tool'), 'orphans')
+    const [file] = await readdir(directory)
+    const orphan = JSON.parse(await readFile(join(directory, file), 'utf8'))
+    expect(orphan.payload).toMatchObject({ storage: 'truncated', encoding: 'json-fragment', reasons: ['field_budget'] })
+    expect(Buffer.byteLength(orphan.payload.content)).toBeLessThanOrEqual(1024)
+    config.capture.prompt = false
+    await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
+    await handleRecorderHook({ ...input, payload: payload('private-orphan', { prompt: 'DO_NOT_STORE' }) })
+    const privateDirectory = join(root, '.scry/runtime/claude', safeKey('private-orphan'), 'orphans')
+    const [privateFile] = await readdir(privateDirectory)
+    const privateText = await readFile(join(privateDirectory, privateFile), 'utf8')
+    expect(privateText).not.toContain('DO_NOT_STORE')
+    expect(JSON.parse(privateText)).toMatchObject({ payload: { storage: 'omitted' }, omissionReason: 'capture_policy' })
+  })
+
   it('interrupted turn ends at its last credible evidence, never at the next prompt', async () => {
     const root = await workspace()
     const base = { provider: 'claude' as const, workspace: root }
