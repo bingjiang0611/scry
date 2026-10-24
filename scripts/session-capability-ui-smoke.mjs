@@ -10,6 +10,7 @@ import { exerciseMotionTokens } from './motion-tokens-ui-checks.mjs'
 import { exerciseStructure } from './structure-ui-checks.mjs'
 import { exerciseOverlays } from './overlays-ui-checks.mjs'
 import { exerciseLists } from './lists-ui-checks.mjs'
+import { exerciseLoading } from './loading-ui-checks.mjs'
 import { nativeUiPointer } from './native-ui-pointer.mjs'
 import { exerciseSessionCache } from './session-cache-ui-checks.mjs'
 import { exerciseSidebarActivity } from './sidebar-activity-ui-checks.mjs'
@@ -22,6 +23,7 @@ const paneBenchOnly = process.argv.includes('--structure-pane-bench')
 const structureOnly = process.argv.includes('--structure-only')
 const overlaysOnly = process.argv.includes('--overlays-only')
 const listsOnly = process.argv.includes('--lists-only')
+const loadingOnly = process.argv.includes('--loading-only')
 const sidebarActivityOnly = process.argv.includes('--sidebar-activity-only')
 const selectionOnly = process.argv.includes('--selection-only')
 const piCommandsOnly = process.argv.includes('--pi-commands-only')
@@ -34,10 +36,10 @@ const workspaceDiffOnly = process.argv.includes('--workspace-diff-only')
 const performanceOnly = process.argv.includes('--performance-only')
 // Opt-in only: this native hide/show check necessarily displays a window.
 const nativeVisibility = process.argv.includes('--native-visibility')
-const offscreen = overlaysOnly || listsOnly
+const offscreen = overlaysOnly || listsOnly || loadingOnly
 if (nativeVisibility && !performanceOnly) throw new Error('--native-visibility requires --performance-only and user approval to display a window')
 const metaPromptsOnly = process.argv.includes('--meta-prompts-only')
-const fixtures = listsOnly ? ['lists'] : overlaysOnly ? ['overlays'] : structureOnly ? ['session-cache'] : paneBenchOnly ? ['structure-pane-bench'] : motionTokensOnly ? ['motion-tokens'] : workspaceDiffOnly ? ['workspace-diff'] : sidebarActivityOnly ? ['sidebar-activity'] : cacheOnly ? ['session-cache'] : metaPromptsOnly ? ['meta-prompts'] : performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability', 'workspace-diff']
+const fixtures = loadingOnly ? ['loading'] : listsOnly ? ['lists'] : overlaysOnly ? ['overlays'] : structureOnly ? ['session-cache'] : paneBenchOnly ? ['structure-pane-bench'] : motionTokensOnly ? ['motion-tokens'] : workspaceDiffOnly ? ['workspace-diff'] : sidebarActivityOnly ? ['sidebar-activity'] : cacheOnly ? ['session-cache'] : metaPromptsOnly ? ['meta-prompts'] : performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability', 'workspace-diff']
   : questionResultOnly ? ['session-capability'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance', 'llm-performance', 'meta-prompts', 'session-cache', 'sidebar-activity', 'workspace-diff', 'motion-tokens']
 
 const temp = await mkdtemp(join(tmpdir(), 'scry-capability-ui-'))
@@ -1581,7 +1583,7 @@ try {
       })
     }
   }
-  for (const fixture of fixtures) await writeFile(join(temp, `${fixture}.html`), `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'${['sidebar-activity', 'motion-tokens', 'session-cache', 'overlays', 'lists'].includes(fixture) ? '; img-src data:' : ''}"><link rel="stylesheet" href="${fixture}.css"><div id="root"></div><script src="${fixture}.js"></script>`)
+  for (const fixture of fixtures) await writeFile(join(temp, `${fixture}.html`), `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'${['sidebar-activity', 'motion-tokens', 'session-cache', 'overlays', 'lists', 'loading'].includes(fixture) ? '; img-src data:' : ''}"><link rel="stylesheet" href="${fixture}.css"><div id="root"></div><script src="${fixture}.js"></script>`)
   await writeFile(join(temp, 'main.cjs'), `
     const { app, BrowserWindow, clipboard, ipcMain } = require('electron')
     if (!${nativeVisibility}) require(${JSON.stringify(join(root, 'scripts/hidden-electron-windows.cjs'))})(app)
@@ -1602,6 +1604,12 @@ try {
       let diagnosticContents = win.webContents
       try {
         let result = {}, piCommands = {}
+        if (${loadingOnly}) {
+          win.setSize(1400, 900)
+          await win.loadFile(${JSON.stringify(join(temp, 'loading.html'))})
+          result.loading = await (${exerciseLoading.toString()})(win.webContents, win, ${JSON.stringify(nativeUiPointer.toString())}, ${JSON.stringify(process.env.SCRY_LOADING_UI_SCREENSHOT ?? '')})
+          finish(result); return
+        }
         if (${listsOnly}) {
           win.setSize(1400, 900)
           await win.loadFile(${JSON.stringify(join(temp, 'lists.html'))})

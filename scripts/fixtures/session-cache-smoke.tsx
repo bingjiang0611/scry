@@ -34,7 +34,7 @@ status.id = 'cache-state'
 const update = () => { status.textContent = JSON.stringify({ reads, starts, forks, traceAcknowledgements, traceRecoveries, recoveryReads, pending: pending.map(item => item.sessionId) }) }
 const noopSubscribe = () => () => {}
 const agent = { id: 'claude', name: 'Claude Code', path: '/fixture/claude', bin: 'claude', health: { state: 'ready' } }
-function page(sessionId: string): SessionHistoryPage {
+export function page(sessionId: string): SessionHistoryPage {
   const runId = `${sessionId}-turn`
   return { turns: [{ runId, providerTurnId: `${sessionId}-native-turn`, userText: `Prompt ${sessionId}`,
     done: true, items: [{ id: `${runId}-text`, runId, ts: '2026-10-14T00:00:00Z', kind: 'model', stage: 'text',
@@ -110,11 +110,14 @@ for (const [id, action] of Object.entries({
       bufferedBytes: 0, inFlightBytes: 0, resyncRequired: true })); update()
   },
   'reject-a': () => { const index = pending.findIndex(item => item.sessionId === 'cache-a'); pending.splice(index, 1)[0].reject(new Error('fixture source unavailable')); update() },
-  'invalidate-cache': () => { dataListeners.forEach(listener => listener({ runId: 'deleted-turn', kind: 'session_deleted' })); update() }
+  'invalidate-cache': invalidateCache
 })) {
   const button = document.createElement('button')
   button.id = id; button.textContent = id; button.onclick = action
   controls.append(button)
+}
+export function invalidateCache(): void {
+  dataListeners.forEach(listener => listener({ runId: 'deleted-turn', kind: 'session_deleted' })); update()
 }
 function resolve(sessionId: string): void {
   const index = pending.findIndex(item => item.sessionId === sessionId)
