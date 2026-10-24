@@ -53,6 +53,7 @@ import {
   drainCommitNotifications,
   listRecords,
   recordError,
+  findRecordById,
   stableHash,
   updateHealth
 } from './store.js'
@@ -2790,6 +2791,37 @@ async function isCommittedProviderTurn(
   )
 }
 
+async function storeOrphanEvent(
+  enablement: Extract<RecorderEnablement, { enabled: true }>,
+  root: string,
+  input: RecorderHookInput,
+  missingStart: boolean
+): Promise<{ status: 'orphan' }> {
+  const id = stableHash({ event: input.event, payload: input.payload })
+  const path = join(root, 'orphans', `${id}.json`)
+  // The session lock serializes delivery and inbox replay. Replays keep the first observation.
+  if (await readJson(path)) return { status: 'orphan' }
+  const capture = enablement.config.capture
+  // Opaque payloads mix prompts, assistant text and tools. Do not bypass disabled categories.
+  const capturePayload = capture.prompt && capture.assistant && isFullToolContentPolicy(capture)
+  const reason = missingStart ? 'missing_start' : 'no_matching_open_turn'
+  const at = observedNow()
+  await writeJsonAtomic(path, {
+    schemaVersion: 1, event: input.event, observedAt: at, reason,
+    payload: captureToolContent(capturePayload ? input.payload : undefined, {
+      source: 'orphan_hook', maxBytes: Math.min(capture.toolContentFieldBytes ?? 8 * 1024, capture.toolContentTurnBytes ?? 128 * 1024)
+    }),
+    ...(!capturePayload ? { omissionReason: 'capture_policy' } : {})
+  })
+  await updateHealth(enablement.dataRoot, {
+    lastError: { at, message: `orphan recorder event: ${input.event} (${reason})` },
+    increment: { orphanEvents: 1, ...(missingStart ? { missingStartTerminals: 1 } : {}) }
+  })
+  await appendRotatingLog(join(enablement.dataRoot, 'logs', 'recorder.log'),
+    `${at} WARN orphan ${input.provider} ${input.event} ${reason} id=${id}`)
+  return { status: 'orphan' }
+}
+
 async function applyHookLocked(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   input: RecorderHookInput,
@@ -2889,16 +2921,24 @@ async function applyHookLocked(
     return { status: 'started' as const }
   }
   if (!open) {
-    // Repeated Stop/SessionEnd for an already committed turn is normal shutdown noise.
-    if (END_EVENTS.has(input.event) || SESSION_END_EVENTS.has(input.event)) return { status: 'duplicate' as const }
-    if (input.managed) return { status: 'ignored' as const, reason: 'managed turn has no open identity' }
-    const orphanId = stableHash({ event: input.event, payload: input.payload })
-    await writeJsonAtomic(join(root, 'orphans', `${orphanId}.json`), { event: input.event, observedAt: observedNow() }, { sync: false })
-    await updateHealth(enablement.dataRoot, {
-      lastError: { at: new Date().toISOString(), message: `orphan recorder event: ${input.event}` },
-      increment: { orphanEvents: 1 }
-    })
-    return { status: 'orphan' as const }
+    const terminal = END_EVENTS.has(input.event) || SESSION_END_EVENTS.has(input.event)
+    if (terminal) {
+      if (incomingProviderTurnId && await isCommittedProviderTurn(enablement.dataRoot, root, input.provider, sessionId, incomingProviderTurnId)) {
+        return { status: 'duplicate' as const }
+      }
+      const terminalAt = explicitTimestampOf(input.payload)
+      if (!incomingProviderTurnId && terminalAt) {
+        const state = await readJson<SessionState>(statePath(root))
+        const record = state?.lastCommittedRecordId ? await findRecordById(enablement.dataRoot, state.lastCommittedRecordId) : undefined
+        if (record?.provider.id === input.provider && record.sessionId === sessionId &&
+          terminalAt >= record.startedAt && terminalAt <= record.completedAt &&
+          record.termination?.value?.completedAtSource === 'provider_terminal_event') {
+          return { status: 'duplicate' as const }
+        }
+      }
+    }
+    if (input.managed && !terminal) return { status: 'ignored' as const, reason: 'managed turn has no open identity' }
+    return storeOrphanEvent(enablement, root, input, terminal)
   }
   if (open.managedByScry) {
     if (!END_EVENTS.has(input.event) && !SESSION_END_EVENTS.has(input.event)) return { status: 'recorded' as const }
@@ -2923,13 +2963,7 @@ async function applyHookLocked(
       await storeLifecycleEvent(enablement, open, input.event, input.payload)
       return { status: 'recorded' as const, reason: 'sub-agent turn attributed to the open parent turn' }
     }
-    const orphanId = stableHash({ event: input.event, payload: input.payload })
-    await writeJsonAtomic(join(root, 'orphans', `${orphanId}.json`), { event: input.event, observedAt: observedNow() }, { sync: false })
-    await updateHealth(enablement.dataRoot, {
-      lastError: { at: new Date().toISOString(), message: `orphan recorder event: ${input.event}` },
-      increment: { orphanEvents: 1 }
-    })
-    return { status: 'orphan' as const }
+    return storeOrphanEvent(enablement, root, input, END_EVENTS.has(input.event) || SESSION_END_EVENTS.has(input.event))
   }
   const sessionEndEvent = SESSION_END_EVENTS.has(input.event)
   const endEvent = END_EVENTS.has(input.event) || sessionEndEvent

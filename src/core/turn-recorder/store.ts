@@ -15,6 +15,7 @@ export interface RecorderHealth {
   lastError?: { at: string; message: string }
   droppedEvents: number
   orphanEvents: number
+  missingStartTerminals: number
   pendingCount: number
   oldestPendingAgeMs: number
   recoveredRecords: number
@@ -1062,19 +1063,20 @@ const EMPTY_HEALTH: RecorderHealth = {
   schemaVersion: 1,
   droppedEvents: 0,
   orphanEvents: 0,
+  missingStartTerminals: 0,
   pendingCount: 0,
   oldestPendingAgeMs: 0,
   recoveredRecords: 0
 }
 
 export async function readHealth(dataRoot: string): Promise<RecorderHealth> {
-  return await readJson<RecorderHealth>(join(dataRoot, 'health.json')) ?? { ...EMPTY_HEALTH }
+  return { ...EMPTY_HEALTH, ...await readJson<RecorderHealth>(join(dataRoot, 'health.json')) }
 }
 
 export async function updateHealth(
   dataRoot: string,
   update: Partial<Omit<RecorderHealth, 'schemaVersion'>> & {
-    increment?: Partial<Pick<RecorderHealth, 'droppedEvents' | 'orphanEvents' | 'recoveredRecords'>>
+    increment?: Partial<Pick<RecorderHealth, 'droppedEvents' | 'orphanEvents' | 'missingStartTerminals' | 'recoveredRecords'>>
   }
 ): Promise<RecorderHealth> {
   return withDirectoryLock(join(dataRoot, 'locks', 'health.lock'), async () => {
@@ -1085,6 +1087,7 @@ export async function updateHealth(
       schemaVersion: 1,
       droppedEvents: current.droppedEvents + (update.increment?.droppedEvents ?? 0),
       orphanEvents: current.orphanEvents + (update.increment?.orphanEvents ?? 0),
+      missingStartTerminals: current.missingStartTerminals + (update.increment?.missingStartTerminals ?? 0),
       recoveredRecords: current.recoveredRecords + (update.increment?.recoveredRecords ?? 0)
     }
     delete (next as RecorderHealth & { increment?: unknown }).increment
