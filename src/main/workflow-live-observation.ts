@@ -142,3 +142,25 @@ export function workflowLiveDiagnostics(
     attempts: attempts.slice(-WORKFLOW_LIVE_MAX_IDS)
   }
 }
+
+/** Scoped feed lifecycle shared with the Runner; late observations cannot
+ * mutate a replacement owner and physical close remains idempotent. */
+export function trackWorkflowLiveAttempt(trackers: Map<string, Map<string, WorkflowLiveObservationTracker>>, identity: LiveIdentity & { workflowId: string },
+  now: () => number, changed: () => void, current: () => boolean) {
+  const { workflowId, ...attemptIdentity } = identity
+  const tracker = new WorkflowLiveObservationTracker(attemptIdentity, now)
+  const attempts = trackers.get(workflowId) ?? new Map<string, WorkflowLiveObservationTracker>()
+  attempts.set(identity.attemptId, tracker)
+  trackers.set(workflowId, attempts)
+  const releaseLive = (): void => {
+    tracker.close()
+    if (!attempts.delete(identity.attemptId)) return
+    if (attempts.size === 0) trackers.delete(workflowId)
+    changed()
+  }
+  const observe = (observation: WorkflowLiveObservation): void => {
+    if (!current() || !tracker.observe(observation)) return
+    changed()
+  }
+  return { observe, releaseLive }
+}

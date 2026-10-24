@@ -1,233 +1,14 @@
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { WorkflowService, type WorkflowServiceOptions } from './workflow-service'
-import { FileWorkflowStore, MemoryWorkflowStore, type WorkflowStore } from './workflow-store'
-import { WorkflowSystemHost, type WorkflowReplicaRun } from './workflow-system-host'
-import type { WorkflowControlFrame } from '../shared/workflow'
-import { WorkflowSlots, type WorkflowProviderExecutionRequest } from './workflow-runner'
+import { describe, expect, it, vi } from 'vitest'
+import { FileWorkflowStore } from './workflow-store'
 import * as checks from './workflow-check'
-import { workflowSystemSourceBody } from './workflow-program'
 import { templateExtractionSource } from './workflow-template-extraction'
 import { validateWorkflowTemplate } from './workflow-template-definition'
-
-const roots: string[] = []
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
-class CutParentStore extends MemoryWorkflowStore {
-  cut = false
-  override async saveFrame(frame: Omit<WorkflowControlFrame, 'revision'>, expected: number) {
-    if (this.cut && frame.nodeId === 'root' && frame.cursor === 2) throw new Error('fixture system parent checkpoint failure')
-    return super.saveFrame(frame, expected)
-  }
-}
-async function fixture(code = 0, store: WorkflowStore = new CutParentStore(), agent: false | 'copy' | 'forged' = false) {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'scry-system-runner-')))
-  roots.push(root)
-  const source = join(root, 'source'), directory = join(root, 'copies')
-  await mkdir(source)
-  await writeFile(join(source, 'check.cjs'), `const fs = require('node:fs'); const path = 'native-count'; let n = 0; try { n = Number(fs.readFileSync(path, 'utf8')) } catch (e) { if(e.code !== 'ENOENT') throw e } fs.writeFileSync(path, String(n + 1)); console.log('observed'); process.exitCode = ${code}`)
-  const body = agent ? { kind: 'sequence', blockId: 'root', blocks: [
-    { kind: 'replica', blockId: 'copy' },
-    { kind: 'call', blockId: 'work', role: 'orchestrator', prompt: 'modify copy', replica: agent === 'copy' ? { kind: 'ref', name: 'copy' }
-      : { kind: 'literal', value: { workflowId: 'forged', replicaId: 'forged', inputHash: 'a'.repeat(64) } } },
-    { kind: 'return', blockId: 'report', ref: { nodeId: 'work' } }
-  ] } : { kind: 'sequence', blockId: 'root', blocks: [
-    { kind: 'replica', blockId: 'copy' },
-    { kind: 'check', blockId: 'verify', replica: { kind: 'ref', name: 'copy' }, check: { argv: [process.execPath, 'check.cjs'], cwd: '.', timeoutMs: 2000, parser: 'exit_code' } },
-    { kind: 'return', blockId: 'report', ref: { nodeId: 'verify', path: ['passed'] } }
-  ] }
-  const role = { role: 'orchestrator' as const, providerId: 'claude' as const }
-  const execute = vi.fn<WorkflowServiceOptions['execute']>()
-  const env = { HOME: root, PATH: '/usr/bin:/bin' }
-  const create = (currentStore = store, currentBody: unknown = body) => {
-    const host = new WorkflowSystemHost(directory, currentStore, () => env), slots = new WorkflowSlots(1)
-    const service = new WorkflowService({ store: currentStore, slots, systems: host, execute, plan: async () => ({ output: JSON.stringify({ body: currentBody }) }), providerRegistered: () => true,
-      runControls: async () => ({ descriptor: { id: 'claude', label: 'fixture', runtimeProvider: 'claude_sdk', transport: 'fixture', available: true, capabilities: { skills: 'none', mcp: 'none', commands: 'none', account: 'none' }, health: { state: 'ready', transport: 'fixture' } }, identity: 'fixture', model: true, stop: true, independentRun: true, terminalOutput: true }) })
-    return { service, host, slots }
-  }
-  const instance = create(), preview = await instance.service.planCommand({ command: '/scry-workflow run check', workspace: source, orchestrator: role, roles: [] })
-  const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }
-  await instance.service.approve(approval)
-  return { ...instance, create, preview, approval, store, root, source, execute }
-}
+import { roots, CutParentStore, fixture } from './workflow-system.fixture'
 
 describe('SystemSteps under canonical Service/Runner/Interpreter', () => {
-  it.each([true, false])('feeds actual derived diagnostics into the canonical map; available=%s (unavailable is not [])', async available => {
-    const store = new CutParentStore(), f = await fixture(1, store)
-    const output = available ? 'src/a.ts(2,3): error TS2322: wrong type\nsrc/b.ts(4,5): error TS7006: missing type' : 'unrecognized compiler protocol'
-    const script = await readFile(join(f.source, 'check.cjs'), 'utf8')
-    await writeFile(join(f.source, 'check.cjs'), script.replace("console.log('observed')", `console.log(${JSON.stringify(output)})`))
-    const body = workflowSystemSourceBody(f.preview.program.body)
-    if (body.kind !== 'sequence' || body.blocks[1].kind !== 'check') throw new Error('fixture shape')
-    body.blocks[1].check.parser = 'typescript'
-    body.blocks.splice(2, 1,
-      { kind: 'map', blockId: 'diagnostics', items: { kind: 'field', source: { kind: 'ref', name: 'verify' }, path: ['diagnostics', 'items'] }, item: 'diagnostic', key: ['code'], maxItems: 4,
-        body: { kind: 'bind', blockId: 'entry', value: { kind: 'ref', name: 'diagnostic' } } },
-      { kind: 'collect', blockId: 'collected', items: { kind: 'ref', name: 'diagnostics' } },
-      { kind: 'return', blockId: 'report', ref: { nodeId: 'collected' } })
-    const { service } = f.create(store, body)
-    const preview = await service.planCommand({ command: '/scry-workflow run inspect diagnostics', workspace: f.source, orchestrator: { role: 'orchestrator', providerId: 'claude' }, roles: [] })
-    const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }
-    await service.approve(approval)
-    if (available) {
-      store.cut = true
-      await expect(service.start(preview.workflowId, approval)).rejects.toThrow('system parent checkpoint')
-      store.cut = false
-      const cold = f.create().service
-      await cold.approve(approval)
-      const progress = (await cold.resume(preview.workflowId, approval, 'consume-recorded-diagnostics')).progress!
-      expect(progress.state).toBe('completed')
-      const values = JSON.parse(progress.finalReport!).map((row: { value: unknown }) => row.value)
-      expect(values).toEqual([{ file: 'src/a.ts', line: 2, column: 3, code: 'TS2322', message: 'wrong type' }, { file: 'src/b.ts', line: 4, column: 5, code: 'TS7006', message: 'missing type' }])
-    } else {
-      const progress = await service.start(preview.workflowId, approval)
-      expect(progress.state).toBe('blocked')
-      expect(progress.finalReport).toBeUndefined()
-    }
-    const record = (await store.load(preview.workflowId))!
-    expect(record.progress.dispatchAttempts).toBe(0)
-    expect(record.systemOutcomes![1].check!.diagnostics.state).toBe(available ? 'available' : 'unavailable')
-    const value = await store.loadValue(preview.workflowId, record.systemOutcomes![1].resultRef!)
-    expect(value).toMatchObject({ state: 'known', value: { diagnosticCount: available ? 2 : null, diagnostics: available ? { state: 'available', source: 'derived' } : { state: 'unavailable' } } })
-    const receipt = await f.host.replicas.resolve(record.systemOutcomes![0].replica!)
-    expect(await readFile(join(receipt.directory, 'native-count'), 'utf8')).toBe('1')
-    expect(f.execute).not.toHaveBeenCalled()
-  })
-  it('continues a frozen old check value without inventing diagnostics or rerunning it', async () => {
-    const store = new CutParentStore(), f = await fixture(0, store), execute = f.host.execute.bind(f.host)
-    vi.spyOn(f.host, 'execute').mockImplementation((...args) => {
-      const execution = execute(...args)
-      return { ...execution, result: execution.result.then(result => {
-        const prior = structuredClone(result)
-        if (prior.value.state === 'known' && prior.value.value && typeof prior.value.value === 'object' && !Array.isArray(prior.value.value)) delete prior.value.value.diagnostics
-        return prior
-      }) }
-    })
-    store.cut = true
-    await expect(f.service.start(f.preview.workflowId, f.approval)).rejects.toThrow('system parent checkpoint')
-    store.cut = false
-    const record = (await store.load(f.preview.workflowId))!, frozen = await store.loadValue(f.preview.workflowId, record.systemOutcomes![1].resultRef!)
-    expect(frozen).toMatchObject({ state: 'known', value: { passed: true } })
-    if (frozen.state !== 'known' || !frozen.value || typeof frozen.value !== 'object') throw new Error('fixture shape')
-    expect(Object.hasOwn(frozen.value, 'diagnostics')).toBe(false)
-    const cold = f.create().service
-    await cold.approve(f.approval)
-    expect((await cold.resume(f.preview.workflowId, f.approval, 'legacy-check-data')).progress).toMatchObject({ state: 'completed', finalReport: 'true' })
-    const receipt = await f.host.replicas.resolve(record.systemOutcomes![0].replica!)
-    expect(await readFile(join(receipt.directory, 'native-count'), 'utf8')).toBe('1')
-    expect(f.execute).not.toHaveBeenCalled()
-  })
-  it('dispatches one Agent in the owned copy, links its intent, and expires its unforgeable main grant', async () => {
-    const f = await fixture(0, new CutParentStore(), 'copy')
-    let grant: WorkflowReplicaRun | undefined
-    f.execute.mockImplementation(request => ({ stop: () => true, result: (async () => {
-      grant = request.replicaRun!
-      expect(await f.host.assertRun(grant, request.workspace)).toBe(grant)
-      await expect(f.host.assertRun(structuredClone(grant), request.workspace)).rejects.toThrow()
-      await expect(f.create().host.assertRun(grant, request.workspace)).rejects.toThrow()
-      await expect(f.host.assertRun(grant, f.source)).rejects.toThrow()
-      await writeFile(join(request.workspace, 'agent-output'), 'copy only')
-      return { runId: 'copy-agent', status: 'completed', output: 'done', archiveRef: 'fixture-archive', settled: true }
-    })() }))
-    expect(await f.service.start(f.preview.workflowId, f.approval)).toMatchObject({ state: 'completed', dispatchAttempts: 1, finalReport: 'done' })
-    expect(f.execute).toHaveBeenCalledTimes(1)
-    const record = (await f.store.load(f.preview.workflowId))!, reference = record.systemOutcomes![0].replica!
-    expect(record.intents[0].replica).toEqual(reference)
-    expect(record.outcomes[0].archiveRef).toBe('fixture-archive')
-    const copy = await f.host.replicas.resolve(reference)
-    expect(await readFile(join(copy.directory, 'agent-output'), 'utf8')).toBe('copy only')
-    await expect(readFile(join(f.source, 'agent-output'))).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(f.host.assertRun(grant!, copy.directory)).rejects.toThrow()
-    expect(f.slots.active).toBe(0)
-  })
-  it('rejects literal copy descriptors before invoking the Agent, without refunding its durable reservation', async () => {
-    const f = await fixture(0, new CutParentStore(), 'forged')
-    expect(await f.service.start(f.preview.workflowId, f.approval)).toMatchObject({ state: 'failed', dispatchAttempts: 1 })
-    expect(f.execute).not.toHaveBeenCalled()
-    expect((await f.store.load(f.preview.workflowId))!.outcomes[0]).toMatchObject({ settled: true, providerDispatch: 'not_attempted' })
-    expect(f.slots.active).toBe(0)
-  })
-  it('reuses a committed copy-Agent outcome after a parent checkpoint failure, never dispatching a second Agent', async () => {
-    const store = new CutParentStore(), f = await fixture(0, store, 'copy')
-    f.execute.mockImplementation(() => ({ result: Promise.resolve({ runId: 'copy-agent', status: 'completed', output: 'done', settled: true }), stop: () => true }))
-    store.cut = true
-    await expect(f.service.start(f.preview.workflowId, f.approval)).rejects.toThrow('system parent checkpoint')
-    store.cut = false
-    const before = (await store.load(f.preview.workflowId))!, cold = f.create()
-    await cold.service.approve(f.approval)
-    expect((await cold.service.resume(f.preview.workflowId, f.approval, 'resume-copy-agent')).progress).toMatchObject({ state: 'completed', dispatchAttempts: 1, finalReport: 'done' })
-    expect((await store.load(f.preview.workflowId))!.intents).toEqual(before.intents)
-    expect(f.execute).toHaveBeenCalledTimes(1)
-  })
-  it('refuses cold replay when a copy-Agent intent loses its copy association', async () => {
-    const store = new CutParentStore(), f = await fixture(0, store, 'copy')
-    f.execute.mockImplementation(() => ({ result: Promise.resolve({ runId: 'copy-agent', status: 'completed', output: 'done', settled: true }), stop: () => true }))
-    store.cut = true
-    await expect(f.service.start(f.preview.workflowId, f.approval)).rejects.toThrow('system parent checkpoint')
-    store.cut = false
-    const record = (await store.load(f.preview.workflowId))!
-    delete record.intents[0].replica
-    await store.save(record)
-    const cold = f.create()
-    await cold.service.approve(f.approval)
-    await expect(cold.service.resume(f.preview.workflowId, f.approval, 'lost-copy-association')).rejects.toThrow('控制帧')
-    expect(f.execute).toHaveBeenCalledTimes(1)
-  })
-  it('never treats a stored descriptor as a live main run grant', async () => {
-    const f = await fixture()
-    await f.service.start(f.preview.workflowId, f.approval)
-    const reference = (await f.store.load(f.preview.workflowId))!.systemOutcomes![0].replica!, receipt = await f.host.replicas.resolve(reference)
-    const forged: WorkflowReplicaRun = { workflowId: f.preview.workflowId, sourceWorkspace: f.source, workspace: receipt.directory, reference }
-    await expect(f.host.assertRun(forged, receipt.directory)).rejects.toThrow()
-    expect(f.execute).not.toHaveBeenCalled()
-  })
-  it('cancels an Agent waiting for a copy lease without executing it or releasing the existing owner', async () => {
-    const f = await fixture()
-    await f.service.start(f.preview.workflowId, f.approval)
-    const reference = (await f.store.load(f.preview.workflowId))!.systemOutcomes![0].replica!, owner = await f.host.replicas.acquire(reference)
-    const execute = vi.fn()
-    const request: WorkflowProviderExecutionRequest = { workflowId: f.preview.workflowId, taskId: 'cancel-task', attemptId: 'cancel-attempt', role: f.preview.program.roles[0], prompt: 'fixture', cwd: f.source }
-    try {
-      const running = f.host.executeAgent(f.preview, { state: 'known', value: { ...reference }, replica: reference, derivedFrom: [] }, request, execute)
-      expect(running.stop()).toBe(true)
-      await expect(running.result).rejects.toMatchObject({ settled: true, providerDispatch: 'not_attempted' })
-      await running.settled
-      expect(execute).not.toHaveBeenCalled()
-    } finally { owner.release() }
-    const next = await f.host.replicas.acquire(reference)
-    next.release()
-  })
-  it('holds the copy lease until both result production and physical settlement, not a stop ACK', async () => {
-    const f = await fixture()
-    await f.service.start(f.preview.workflowId, f.approval)
-    const reference = (await f.store.load(f.preview.workflowId))!.systemOutcomes![0].replica!
-    let close!: () => void, finish!: (result: { runId: string; status: 'unknown'; settled: false }) => void, entered!: () => void
-    const physical = new Promise<void>(resolve => { close = resolve }), ready = new Promise<void>(resolve => { entered = resolve })
-    const result = new Promise<{ runId: string; status: 'unknown'; settled: false }>(resolve => { finish = resolve })
-    const acquire = f.host.replicas.acquire.bind(f.host.replicas), release = vi.fn()
-    const leaseSpy = vi.spyOn(f.host.replicas, 'acquire').mockImplementation(async (...args) => {
-      const lease = await acquire(...args)
-      return { ...lease, release: () => { release(); lease.release() } }
-    })
-    const request: WorkflowProviderExecutionRequest = { workflowId: f.preview.workflowId, taskId: 'lease-task', attemptId: 'lease-attempt', role: f.preview.program.roles[0], prompt: 'fixture', cwd: f.source }
-    const running = f.host.executeAgent(f.preview, { state: 'known', value: { ...reference }, replica: reference, derivedFrom: [] }, request, () => { entered(); return { result, settled: physical, stop: () => true } })
-    await ready
-    try {
-      expect(running.stop()).toBe(true)
-      expect(release).not.toHaveBeenCalled()
-      close()
-      await physical
-      expect(release).not.toHaveBeenCalled()
-      finish({ runId: 'lease-agent', status: 'unknown', settled: false })
-      await running.result
-      await running.settled
-      expect(release).toHaveBeenCalledTimes(1)
-      leaseSpy.mockRestore()
-      const lease = await f.host.replicas.acquire(reference)
-      lease.release()
-    } finally { close(); finish({ runId: 'lease-agent', status: 'unknown', settled: false }); await running.result; await running.settled; leaseSpy.mockRestore() }
-  })
   it('prepares an owned current-input copy, runs frozen main check in it, and spends zero Agent attempts', async () => {
     const f = await fixture()
     const progress = await f.service.start(f.preview.workflowId, f.approval)
@@ -297,7 +78,7 @@ describe('SystemSteps under canonical Service/Runner/Interpreter', () => {
     let close!: () => void
     const physical = new Promise<void>(resolve => { close = resolve })
     const original = f.host.execute.bind(f.host)
-    const spy = vi.spyOn(f.host, 'execute').mockImplementation((preview, block, stepId, input) => block.kind !== 'check' ? original(preview, block, stepId, input) : {
+    const spy = vi.spyOn(f.host, 'execute').mockImplementation((preview, block, stepId, input, beforeCheck) => block.kind !== 'check' ? original(preview, block, stepId, input, beforeCheck) : {
       result: Promise.resolve({ state: 'unknown', settled: false, value: { state: 'unknown', reason: 'controlled unknown result', derivedFrom: ['system:' + stepId] } }), settled: physical, stop: () => true
     })
     let neighbor: Promise<void> | undefined
@@ -322,8 +103,8 @@ describe('SystemSteps under canonical Service/Runner/Interpreter', () => {
     const original = f.host.execute.bind(f.host), save = f.store.saveValue.bind(f.store)
     let failingStep: string | undefined
     vi.spyOn(f.store, 'saveValue').mockImplementation((workflowId, key, value) => key === failingStep ? Promise.reject(new Error('fixture result artifact failure')) : save(workflowId, key, value))
-    vi.spyOn(f.host, 'execute').mockImplementation((preview, block, stepId, input) => {
-      if (block.kind !== 'check') return original(preview, block, stepId, input)
+    vi.spyOn(f.host, 'execute').mockImplementation((preview, block, stepId, input, beforeCheck) => {
+      if (block.kind !== 'check') return original(preview, block, stepId, input, beforeCheck)
       failingStep = stepId
       return { result: Promise.resolve({ state: 'unknown', settled: false, value: { state: 'unknown', reason: 'controlled unknown', derivedFrom: [] } }), settled: physical, stop: () => true }
     })

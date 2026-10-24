@@ -42,6 +42,10 @@ async function hashFile(path: string, stopped: () => boolean): Promise<string> {
  * absolute/dangling links and submodules are rejected. No filters, hooks or
  * Git config execution is involved in acquiring this snapshot. */
 export async function snapshotWorkflowInputs(root: string, stopped = () => false): Promise<WorkflowReplicaManifestEntry[]> {
+  return (await snapshotWorkflowInputManifest(root, stopped)).entries
+}
+
+export async function snapshotWorkflowInputManifest(root: string, stopped = () => false): Promise<{ entries: WorkflowReplicaManifestEntry[]; text: string }> {
   if (stopped()) throw new Error(copy.stopped)
   const entries: WorkflowReplicaManifestEntry[] = []
   let bytes = 0, scanned = 0
@@ -77,8 +81,9 @@ export async function snapshotWorkflowInputs(root: string, stopped = () => false
     }
   }
   await visit(root)
-  if (Buffer.byteLength(JSON.stringify(entries)) > WORKFLOW_REPLICA_MAX_MANIFEST) throw new Error(copy.limit)
-  return entries
+  const text = JSON.stringify(entries)
+  if (Buffer.byteLength(text) > WORKFLOW_REPLICA_MAX_MANIFEST) throw new Error(copy.limit)
+  return { entries, text }
 }
 
 /** Private main registry; no renderer-supplied directory becomes an authority.

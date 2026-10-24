@@ -2,6 +2,13 @@
 
 本文件记录已落地语法，不替代 [M1–M6目标](m1-m6-delivery.md) 或 [完整执行语义](execution-semantics.md)。仍复用唯一 WorkflowProgram/schemaVersion1、修订指纹、审批、Runner 与 outcome/artifact 存储；不另建解释器或把表达式当 JavaScript 执行。
 
+## 按领域查看程序合同
+
+- [动态集合与读取权投影](program-ir-collections.md)
+- [持久控制帧、跨进程继续与恢复证据](program-ir-recovery.md)
+
+本页保留模板参数、main 系统步骤、结构输出、表达式及 loop 合同；拆分不增加执行能力。
+
 ## 模板实例与声明式参数
 
 - `workflow.instantiateTemplate` 接受准确 saved ref 或 draftId/revision/candidateHash、commandId、已授权 cwd、目标、参数及明确的实际角色绑定。它不调用规划模型，不占 Agent 槽位，不扣尝试预算，也不自动审批或执行。
@@ -20,7 +27,7 @@
 - `check`：`{kind:'check',blockId,replica:expression,check:{argv,cwd,timeoutMs?,parser?}}`。cwd 为副本内相对目录；默认超时 10 分钟，parser 为 exit_code（默认）或 typescript。main 在准备计划时解析并冻结 executable、解释器、环境及适用入口文件的指纹；执行前在真实副本上重验，拒绝变化，不另找解释器。模板只保留请求，禁止携带 authorization；提取时删除该 main 字段，实例化重新冻结与审批。
 - 明确的 shell/env 命令入口及内联 runtime 代码不属于检查语法；识别到的 runtime CLI 只支持仓库入口文件（不支持 `-e/-c/-m` 等入口选项），组合命令使用仓库可执行脚本或 package scripts。这不是代码沙箱；仓库脚本及其依赖仍以本机用户权限运行，不能完整枚举所有传递代码。
 - argv、目标、相对 cwd、超时与诊断解析器在计划确认界面逐项分页显示；确认整个 programRevision 才授权这些命令。检查使用共享槽位但不计 Agent attempt；每根至多 16,384 个持久系统 intent，不退款、不重放未知效果。stdout/stderr 各至多 1 MiB，超限不能判通过；完整有界文本和诊断保存为 main 不可变 value 引用，不能伪装成 Agent 工具调用。
-- check 的数据值包含 passed/state/exitCode/settled/truncated/diagnosticCount。检查退出非零时，步骤可以成功记录一个 `passed:false` 的真实结果；Workflow 执行完成不等于目标通过，质量程序须据该结果分支。无解析器或无法完整识别时 diagnosticCount 为 null，不是 0。程序值另带 diagnostics envelope：available/derived/items（file/line/column/code/message），或 unavailable/reason、无 items；可交给原 field/map/collect 消费。旧的冻结结果允许没有该新增字段，缺失不会补成空集合或触发重跑。Jev target、检查快照/变化归属及必需验证清单的完整质量编译合同仍未提供。
+- check 的数据值包含 passed/state/exitCode/settled/truncated/diagnosticCount。检查退出非零时，步骤可以成功记录一个 `passed:false` 的真实结果；Workflow 执行完成不等于目标通过，质量程序须据该结果分支。无解析器或无法完整识别时 diagnosticCount 为 null，不是 0。程序值另带 diagnostics envelope：available/derived/items（file/line/column/code/message），或 unavailable/reason、无 items；可交给原 field/map/collect 消费。旧的冻结结果允许没有该新增字段，缺失不会补成空集合或触发重跑。还可读取 inputs.before/after/changes：before完整清单须在native前写入原intent，after只在登记scope关闭后采集；available的期间差异含path和added/modified/removed，可经field/concat/map消费。缺失、仍开放或采集/上限失败为unavailable，无items；差异不代表完整审计或某进程独占写入。观察包含原manifest字段，不是原子或可还原的文件版本，仍排除根.git/.scry；具体上限与证据见交付台账。旧冻结值也允许没有inputs，不补证据或重跑。Jev target、候选/验证副本输入绑定、必需验证和可信进展/回归比较的完整质量编译合同仍未提供。
 - 根账本保留独立 systemIntents/systemOutcomes；intent 先于副本/进程 effect，结果与不可变值先于控制帧推进。父 checkpoint 失败可以复用已提交结果，不再次复制或启动检查；缺失 stdout/结果/副本收据拒绝复用，不转为重跑。未知组收敛、停止 ACK 或结果写入失败不能释放已启动范围的槽位；重启保留未知系统容量，退出治理也检查系统账本。settled 的当前证明范围是登记的进程组，不是全部逃逸后代或完整沙箱；finishedAt 是 main 收到结果的时间，不冒充物理范围退出时间。
 - 副本捕获实际已修改、未跟踪及 ignored 内容，排除根 .git/.scry；内部相对符号链接保留，外链、绝对/悬空链接、嵌套 .git/子模块和特殊文件拒绝。上限为 32,768 项、8 MiB 清单、2 GiB 文件内容；超限拒绝，升级需分页清单/流式归档，不截断输入。部分失败现场保留，不覆盖或自动补做。Manager 的登记与租约原语不等于完整清理 UI/流程。
 - `call.replica?:expression`：用同根 main 副本值选择本次 Agent 的工作区；省略仍为原源项目。类型/控制帧依赖和持久 intent 都绑定引用。main 限时内存 grant 与租约经原 App executor 校验源项目授权及副本身份，实际副本运行时目录须保持已冻结 Provider/profile/model/permission/entry 指纹；普通路径/JSON 不能生成 grant。结果 producer 和原 physical scope 同时收敛才撤销 grant/释放租约，停止 ACK 不足。catalog 保留 scoped 来源而不产生全局项目权限，Recorder/trace archive 关联实际副本 cwd。生产离线 App 验证见交付台账；真实 SDK 未验收，副本无 .git 基线，不能外推完整 diff/patch 证据。
@@ -84,45 +91,6 @@
 - 只有own JSON字段可读；数据含constructor等名称不成为原型访问。有限数值、false、0、null保持原值。已封口的空集合有效；缺失来源不是空集合。
 - 单表达式深度≤16、指令节点≤256；值≤4MiB UTF-8 JSON、深度≤64、数组≤4096。超过限制整项拒绝，不截尾。动态map及集合引用见下节；streaming group/filter等剩余能力仍待实现；有界loop见下节，不能只提高数据上限绕过。
 
-## 动态 map 与显式 collect
-
-`map`使用`{kind,blockId,items:expression,item:localName,key:[field,...],maxItems,body}`。maxItems省略时为4096；这是冻结、可见的整批拒绝边界，不是截断条数。Native调用的最坏预算为maxItems×body预算；若过于保守，须在确认前声明真实允许的上限，而非运行时少做部分任务。
-
-- 派发前校验完整逻辑集合、唯一有限标量key以及≤4096/已确认maxItems。重复key、超限或未知来源不派发子项；封口的空输入才产生合法空结果。
-- 每项执行真实子程序，拥有独立scope和输入指纹；body私有绑定不会逃逸。共享slots/根1000 Agent预算仍由原Runner控制，未创建另一个executor。
-- 同时活跃的map fiber有界，任何一项完成即可补位。已测试慢a未完成时，b的verify完成并准入c，不等待整页结束；不是先扫完全部再统一复核。
-- 父结果为宿主mint的集合描述符及typed metadata，manifest保留全部key/index/state/settled/result reference。业务unknown和物理settled分开；unknown时停止新项准入，未执行项仍pending，不伪装成功或丢掉。
-- manifest为独立、内容寻址的`.collection.json`，受现有8MiB记录限制，不复制每项原始输出；普通数据值仍限4MiB。已验证4096项、超过4MiB的纯引用/状态清单可独立保存并冷读。
-- Native JSON schema和literal不能mint集合权限；形似描述符的普通对象不是受控引用。cold load校验manifest存在、hash、workflow、count、slot结构及封口状态。
-
-`collect`使用`{kind:"collect",blockId,items:expression}`，显式读取已封口集合，产生保留全部outcome的有界数组；失败项没有伪造value/0/null，仍有状态和错误。它可紧随其直接依赖的已知、已settled失败map读取摘要；unknown不会因collect推进。执行失败与partial报告可用性分开，不把失败结果改成completed。
-
-map也可读取受控集合：必须沿用`key:["key"]`；只为活跃fiber读取该项payload。需要重分组时先显式collect；collect展开超过4MiB则失败并保留原引用，不声称完整展开。更大的分组/投影需要后续流式引用操作，不能调大普通value上限绕过。
-
-嵌套字段的host读取权投影及受控集合的按项group/filter现已支持，范围如下。完整失败/修订依赖恢复尚未完成，不据此宣称全部map/循环/恢复合同通过。
-
-本阶段14文件172项focused、Node/web types及build通过；关闭重复key预检后1项失败（已发出1次本应禁止的调用），按SHA256恢复后11项通过。首次fixture表参数、误删同内容hash的另一个artifact、回调/联合类型推断失败均保留于证据说明；未删除断言或放宽超时。只读证据：`~/.local/state/rotom/verification-evidence/workflow-m3-map.Yvzbbh/`。这些是生产Runner/临时文件存储加Provider test double，不是完整App或真实账号验收。
-
-### 嵌套 collection 的读取权投影
-
-- known value 可携带 main 专用 `collectionFields: [{path, collection}]`，只保存普通 JSON 内各个受控集合的准确位置。根受控集合仍使用原 `collection` 字段；二者不混用，不从 literal、Agent JSON 或看似相同的 descriptor 推断读取权。
-- outcome 的 `value`、parallel 对象、collect 数组和 field 投影保留/重定位这些位置。普通数组的 concat、group/unique、filter/partition 也保留读取权，包括 predicate 中读取成员集合的 count；改变数组位置时按显式索引映射，不逐项扫描整个 authority 列表。
-- durable value 逐条校验同一 workflow、非空路径、唯一位置与准确 descriptor；最多4096条，深度64，metadata及整体持久文件仍受8MiB边界约束。冷读核对引用 manifest 的存在、hash、count及sealed状态，同一次读取去重相同引用。不存在的manifest不能仅凭缓存 descriptor 继续报告计数；子项实际输出仍按需要加载。
-- 已有普通JSON不补发读取权。旧版本若已保存了没有 sidecar 的嵌套 descriptor，它仍是普通数据；需要显式重建受控产出，不能凭当前磁盘内容猜测历史授权。
-- 此投影增量当时不包括host collection的streaming group/filter；后续实现见下一节。嵌套manifest校验有额外I/O；尚无相应collector，不宣称更快。若受控测量证明校验是热点，应增加绑定单次已验证读取快照的resolver，不能用跨读取缓存假定文件仍持久存在。
-- 当前源码：11文件/140项focused测试、Node/Web types、build和生产preload/main→Service→Runner→Interpreter场景通过；新增嵌套map/collect真实使用0与false、预算/Provider调用均为0。未修复bundle在相同生产场景明确报“map来源必须是已提交数组或受控集合引用”。这是离线生产接线证据，不是完整M3、真实SDK或断电验收。
-
-### 受控集合的按项 group/filter
-
-- 表达式仍只有同一个解释实现。generator只为group/unique/filter/partition发出封闭的host读取请求，由原Control owner解析；普通数组/纯值仍走同一语义，没有新增可执行语言或模型调度器。bind、branch、map、collect和loop各阶段均使用此入口。
-- source必须有main读取权且sealed；literal/model descriptor不授予读取权。清单仍整体限8MiB/4096项，payload一次读一项，数据总量可超过普通JSON值4MiB。group/unique的members为受控集合，保留全部原成员和原索引；保留的group keys累计先受4MiB约束，最终普通group数组也按4MiB检查。
-- filter/partition均保留matched/rejected/unknown三组及原索引/理由；各组为受控集合。源outcome的state、settled、key和error不改写。predicate unknown是分类明确的unknown组，不伪造一个未知native副作用。
-- 新增清单valueRef只引用main保存的纯变换数据，不是Agent/SystemStep效果收据，不能与frame reference同时声明。冷读仍核对workflow/hash/实际文件，缺失不返回空值。嵌套集合读取权经派生行持久化保留。老版本不认识此附加字段时应拒绝，不靠删字段兼容。
-- 派生行先持久化，后写各分组manifest，最后由原控制帧提交。停止在按项边界检查，不发布部分结果；未引用的immutable数据不授权继续或派发。纯产物身份绑定冻结program/input scope，不绑定controller generation；负控证明错误绑定generation会使恢复的消费者inputKey不一致，修复后不同进程复用准确原引用且派发为0。
-- 新增合同覆盖4.5MiB总payload、一次一个live item read、0/false、失败/unknown、未sealed、停止、冷读/缺失数据、保留key边界、嵌套predicate/读取权及同类collection union。当前4文件/52项focused、types/build、workflow UI与完整生产conversation IPC通过；新模板/集合步骤的Provider增量为0（完整conversation另有21次离线fixture调用，非真实账号）。
-- 组合回归仍非全绿：首轮12文件/156项有4项原process恢复用例5000ms超时；generation修复后12文件/157项为156通过、原loop跨进程用例1项5000ms超时。原5项随后单独通过；冻结旧实现5项也通过；不能据此认定首败原因或关闭组合门禁。受控phase诊断当前/旧实现均约2.1s，只证明当时该场景，不证明历史超时源于负载。
-- 尚无对应performance collector；必需measure仍unavailable，不宣称更快。完整failed/revised恢复、check/classifier和其余M1–M6仍缺。证据见m1-m6台账。
-
 ## 有界 loop、显式 carry 与退出报告
 
 loop仍属于同一WorkflowProgram。`WorkflowLoopExecution`只负责提交循环状态；body回调仍调用唯一Interpreter，Native效果仍走原Runner，不额外向规划模型询问下一步。
@@ -144,40 +112,3 @@ loop仍属于同一WorkflowProgram。`WorkflowLoopExecution`只负责提交循�
 只读证据：`~/.local/state/rotom/verification-evidence/workflow-m3-loop.xauZEM/`。全部Provider调用仍为test double，不能替代App、真实账号、独立质量检查或M6验收。
 
 当前限制：暂无主进程定时事件截止、带可靠系统比较器的省略轮数模式、完整依赖重启和全指令。受限的跨进程继续已有下述证据，不能外推为每个崩溃边界均已验收。默认质量模板的三轮、真实main check与可信评价来源还需M4实现；不能由generic until布尔自行认证。
-
-## 控制状态持久化的当前范围
-
-新Runner根执行（包括普通sequence/parallel/call/return）统一写入内容寻址的值artifact与CAS控制帧。帧记录程序修订、作用域、输入来源、分支选择与decision/result引用。值先落盘，再提交引用它的帧；选择帧成功后才派发被选子任务。校验失败、缺artifact、修订/输入不符或已终态帧均拒绝覆盖。unknown帧不可重置为entered/completed。
-
-新运行的作用域身份含程序修订及分支选择来源；无version2执行所有权的旧记录只保留观察路径，不自动升级为可执行运行。现有Agent预算/intent与outcome仍由同一Runner提交，不因控制帧退款或重发。
-
-控制求值现已从Runner递归方法迁入唯一`WorkflowInterpreter`：sequence/branch通过显式activation stack求值，parallel各fiber有独立栈，Native调用仍委托原Runner/slots/intent/outcome链。带控制帧的sequence在子结果提交后持久更新cursor和带revision/resultRef的children引用，然后才进入后继；cursor表示已登记子结果数量，不单独授权派发，未知/失败结果仍停止依赖。
-
-测试注入父cursor提交失败后，首个子调用的outcome/终态帧/值仍可由独立store读取，第二个调用不执行。引用读取同时校验frame revision、resultRef和内容hash，不把未完成帧当已提交结果。省略父checkpoint的负对照使3项测试失败。
-
-最初显式栈阶段的161项回归与限制保留于`~/.local/state/rotom/verification-evidence/workflow-m3-stack.CQmGyT/`；后续普通程序统一持久化与显式继续见下节。**这仍不是M3整体恢复完成**，观察式历史恢复本身始终不派发。
-
-## 显式继续与跨进程恢复的当前范围
-
-`window.scry.workflow.resume(workflowId, approval, commandId)`复用Service、唯一Interpreter/Runner及原App executor链。新根记录带`execution.version:2`、owner与最多256个控制段；命令回执有界且持久，重复命令不重发。完成运行返回`nothing_to_resume`并附原进度；缺失记录返回`{state:"nothing_to_resume",progress:null}`，不合成进度、空根或新执行。已有记录的workspace授权仍来自校验后的冻结程序，不以进度摘要代替。完整依赖恢复及已知失败attempt的明确重试仍待实现。
-
-- 先核对冻结程序、角色/profile/模型/权限、当前runtime能力、原意图/outcome与单调根预算。未知业务结果即使物理settled也拒绝；PID仍存活或无法证明原owner退出则不接管。旧无所有权记录只读。PID复用按仍存活拒绝，不声称识别并接管复用后的进程。
-- 接管以根元数据CAS提交新epoch/控制段；旧epoch不能覆盖根、增加预算或再派发。旧终态帧不改写；新帧通过generation与origin关联旧证据。恢复核对分支选择及输入来源，复用有hash校验的原输出和已封口集合引用，不重新调用已完成或已知失败的任务。
-- 每个逻辑节点的历史帧读取成本随控制段线性增长，最多256段；若实际量测显示这成为主因，再增加受canonical帧校验的索引，不以索引取代权威记录。loop从持久ready/committed恢复carry、initial/current/best、invariants、迭代记录、内容历史及无进展计数；不把逻辑迭代当transport重试。两个进程间在第二轮ready处退出的场景验证了第二轮消费candidate-1、两轮无进展退出、原seed/best保留及根预算3而非重置。
-- 5项独立控制进程场景使用真实本地Node子进程和effect ledger；覆盖子结果完成后硬退出、活owner拒绝、无outcome意图拒绝、loop恢复，以及第二个控制器只写entered帧后再次退出。最近控制帧不覆盖更早已提交结果/loop/decision的证据；三进程回归要求两个已提交依赖调用都复用，零新增效果。macOS用deny-network策略、隔离HOME/工作区；不是文件系统沙箱，也不是账号/模型、真实Provider SDK或完整App的Workflow验收。
-- 18文件217项focused在`--maxWorkers=1`通过；其后仅将三进程fixture专注到两个已提交依赖调用（不再附加本已另测的新调用），最终12项恢复回归及types通过。当前App代码的build、conversation IPC、589项CLI release合同及打包安全smoke通过。故意绕过旧效果复用后，用例失败且effect ledger确有两次first；故意只取最近空帧后，已提交依赖链恢复失败。两处均按原SHA恢复；产品源码与通过217项时相同，最终fixture日志另存。初始化存储故障注入随新CAS入口移至claim，同时保留save故障及全部断言。
-- 两轮默认并行focused各有1项5秒超时（活owner、loop）；新增三进程用例后，一轮专用串行进程检查也超时1项，日志和失败现场均保留。最终活owner用调用测试的独立进程做拒绝检查，三进程用例要求零新增效果；删除的是重复冷启动/非本场景必需的新调用，不删除owner、依赖链、预算或旧引用断言。10核机器曾记录load38/109/98，后一次约24/20/25，不能据此断言根因。最终12项通过不抹掉这些失败，不提高deadline，不声称默认并行门禁已绿；后续由本任务继续定位争用/收敛。既有7项延期全套失败、Runner性能collector缺口也未关闭。
-
-缺失历史响应后续验证：18文件223项focused串行通过；生产构建的preload/main在独立Electron实例中执行3次缺失历史请求（含同commandId重复），均返回无进度no-op，目录和测试Provider入口账本不变。恢复旧legacy抛错使2项回归失败；错误地采用进度摘要作workspace授权使1项回归失败，之后按SHA恢复产品源码。证据：`~/.local/state/rotom/verification-evidence/workflow-m3-missing-history.ZhQY4H/`。此API局部验收不证明已有运行的完整恢复、真实Provider/SQLite或生产管理UI。
-
-源码与日志：`~/.local/state/rotom/verification-evidence/workflow-m3-recovery.46r4VG/`。产物为未安装的本地Scry0.2.210；打包/通用IPC smoke不代表新的恢复API已在生产Workflow UI、SQLite归档链和每个提交边界端到端验收。
-
-## 证据
-
-结构化输出前一阶段：11文件131项Workflow回归、types/build通过；故意关闭输出合同后6项失败。证据范围保留于目标台账。
-
-本阶段命令、源码快照和负对照保留在`~/.local/state/rotom/verification-evidence/workflow-m2-controls.boPZeS/`。生产Runner与真实临时文件存储的合同测试证明选择先持久化、未选arm不执行、unknown不当false、跨store CAS、内容hash及不可覆盖终态。故意将unknown路由为else后两条回归失败（错误completed及额外派发），随后恢复原字节并通过。
-
-首轮测试发现长ID的临时文件名超限，已在原atomic writer修复；首轮typecheck发现测试数据的可选undefined推断，已用准确JSON值类型修正。未扩大超时或删断言。最终检查数与日志见证据目录及台账。
-
-真实App、真实Provider/费用、Provider原生JSON/工具禁用及M2/M3完整控制指令尚未验收。性能命令对providers.catalog返回`No counter collector matches`，不是性能通过；尚无Runner专用计数证据，不作更快声明。

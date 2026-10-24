@@ -59,14 +59,44 @@ async function exerciseWorkflowDiagnosticConsumption(evaluate, fixture) {
   const workflow = (method, ...args) => evaluate(`window.scry.workflow.${method}(...${JSON.stringify(args)})`)
   const script = 'scry-diagnostics-fixture.cjs', marker = 'scry-diagnostics-count'
   const output = 'src/a.ts(2,3): error TS2322: wrong type\nsrc/b.ts(4,5): error TS7006: missing type'
-  await writeFile(join(fixture.templateWorkspace, script), `const fs = require('node:fs'); let n = 0; try { n = Number(fs.readFileSync(${JSON.stringify(marker)}, 'utf8')) } catch (e) { if(e.code !== 'ENOENT') throw e } fs.writeFileSync(${JSON.stringify(marker)}, String(n+1)); console.log(${JSON.stringify(output)}); process.exitCode = 1`)
+  await writeFile(join(fixture.templateWorkspace, script), `
+const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto'), assert = require('node:assert/strict')
+const directory = ${JSON.stringify(join(fixture.userData, 'workflows'))}
+const hash = text => crypto.createHash('sha256').update(text).digest('hex')
+const load = ref => {
+  const text = fs.readFileSync(path.join(directory, ref.workflowId + '.' + hash(ref.key) + '.' + ref.hash + '.value.json'), 'utf8')
+  assert.equal(hash(text), ref.hash)
+  const value = JSON.parse(text)
+  assert.equal(value.state, 'known')
+  return value.value
+}
+let intent
+for (const name of fs.readdirSync(directory)) {
+  if (!/^workflow-[a-f0-9]{64}\\.json$/.test(name)) continue
+  const record = JSON.parse(fs.readFileSync(path.join(directory, name), 'utf8'))
+  intent = record.systemIntents?.find(item => item.nodeId === 'verify_inputs' && !record.systemOutcomes?.some(outcome => outcome.stepId === item.stepId))
+  if (intent) break
+}
+assert.ok(intent?.inputSnapshot, 'native invocation preceded its input-intent checkpoint')
+const header = load(intent.inputSnapshot.reference)
+assert.equal(hash(header.parts.map(load).join('')), intent.inputSnapshot.inputHash)
+let n = 0
+try { n = Number(fs.readFileSync(${JSON.stringify(marker)}, 'utf8')) } catch (e) { if (e.code !== 'ENOENT') throw e }
+fs.writeFileSync(${JSON.stringify(marker)}, String(n + 1))
+console.log(${JSON.stringify(output)})
+process.exitCode = 1
+`)
   const definition = { schemaVersion: 1, name: 'Diagnostic dataflow fixture', description: '', parameters: {}, roles: [], body: { kind: 'sequence', blockId: 'root', blocks: [
     { kind: 'replica', blockId: 'copy' },
-    { kind: 'check', blockId: 'verify', replica: { kind: 'ref', name: 'copy' }, check: { argv: [process.execPath, script], cwd: '.', timeoutMs: 2000, parser: 'typescript' } },
-    { kind: 'map', blockId: 'diagnostics', items: { kind: 'field', source: { kind: 'ref', name: 'verify' }, path: ['diagnostics', 'items'] }, item: 'diagnostic', key: ['code'], maxItems: 4,
+    { kind: 'check', blockId: 'verify_inputs', replica: { kind: 'ref', name: 'copy' }, check: { argv: [process.execPath, script], cwd: '.', timeoutMs: 2000, parser: 'typescript' } },
+    { kind: 'map', blockId: 'diagnostics', items: { kind: 'field', source: { kind: 'ref', name: 'verify_inputs' }, path: ['diagnostics', 'items'] }, item: 'diagnostic', key: ['code'], maxItems: 4,
       body: { kind: 'bind', blockId: 'entry', value: { kind: 'ref', name: 'diagnostic' } } },
     { kind: 'collect', blockId: 'collected', items: { kind: 'ref', name: 'diagnostics' } },
-    { kind: 'return', blockId: 'report', ref: { nodeId: 'collected' } }
+    { kind: 'bind', blockId: 'summary', value: { kind: 'concat', values: [
+      { kind: 'ref', name: 'collected' },
+      { kind: 'field', source: { kind: 'ref', name: 'verify_inputs' }, path: ['inputs', 'changes', 'items'] }
+    ] } },
+    { kind: 'return', blockId: 'report', ref: { nodeId: 'summary' } }
   ] } }
   const draft = await templates('saveDraft', { scope: { kind: 'personal' }, source: JSON.stringify(definition) })
   assert.equal(draft.validation.state, 'valid', JSON.stringify(draft.validation))
@@ -77,7 +107,8 @@ async function exerciseWorkflowDiagnosticConsumption(evaluate, fixture) {
   await workflow('approve', approval)
   const progress = await workflow('start', preview.workflowId, approval, 'diagnostic-start')
   assert.equal(progress.state, 'completed', JSON.stringify(progress))
-  assert.deepEqual(JSON.parse(progress.finalReport).map(row => row.value), [
+  const report = JSON.parse(progress.finalReport)
+  assert.deepEqual(report.slice(0, 2).map(row => row.value), [
     { file: 'src/a.ts', line: 2, column: 3, code: 'TS2322', message: 'wrong type' },
     { file: 'src/b.ts', line: 4, column: 5, code: 'TS7006', message: 'missing type' }
   ])
@@ -85,12 +116,16 @@ async function exerciseWorkflowDiagnosticConsumption(evaluate, fixture) {
   const record = JSON.parse(await readFile(join(fixture.userData, 'workflows', preview.workflowId + '.json'), 'utf8'))
   assert.equal(record.systemOutcomes[1].check.state, 'failed')
   assert.equal(record.systemOutcomes[1].check.diagnostics.count, 2)
+  assert.deepEqual(report.slice(2), [{ path: marker, kind: 'added' }])
+  assert.notEqual(record.systemOutcomes[1].check.inputs.before.inputHash, record.systemOutcomes[1].check.inputs.changes.after.inputHash)
+  assert.deepEqual(record.systemIntents[1].inputSnapshot, record.systemOutcomes[1].check.inputs.before)
+  assert.equal(record.systemOutcomes[1].check.inputs.changes.source, 'snapshot_comparison')
   const reference = record.systemOutcomes[0].replica
   const receipt = JSON.parse(await readFile(join(fixture.userData, 'workflow-replicas', preview.workflowId, reference.replicaId + '.replica.json'), 'utf8'))
   await workflow('start', preview.workflowId, approval, 'diagnostic-start')
   assert.equal(await readFile(join(receipt.directory, marker), 'utf8'), '1')
   await assert.rejects(readFile(join(fixture.templateWorkspace, marker)), { code: 'ENOENT' })
-  return { actualCheckFailed: true, derivedDiagnosticsConsumed: 2, agentAttempts: 0, nativeExecutions: 1, sourceUnchanged: true }
+  return { actualCheckFailed: true, derivedDiagnosticsConsumed: 2, inputIntentReadByNative: true, observedChangesConsumed: 1, agentAttempts: 0, nativeExecutions: 1, sourceUnchanged: true }
 }
 
 export async function exerciseWorkflowReplicaAgent(evaluate, fixture) {

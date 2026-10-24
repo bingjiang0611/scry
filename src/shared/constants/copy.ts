@@ -114,6 +114,8 @@ export const workflowTemplateCopy = {
 }
 
 export const workflowSystemCopy = {
+  snapshotUnsettled: '登记的检查作用域尚未关闭，检查后输入与期间差异不可用',
+  snapshotLimit: '期间差异超过 4096 项或 2 MiB；完整输入清单已保留，不能将截断清单用于比较',
   unavailable: '此宿主没有可用的工作副本或主进程检查执行器',
   intent: '系统步骤账本或冻结身份不一致，不能执行',
   unknown: '系统步骤的结果或作用域未知，不会重新执行',

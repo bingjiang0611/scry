@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { WorkflowLiveObservation } from '../shared/workflow'
-import { workflowLiveDiagnostics, WorkflowLiveObservationTracker } from './workflow-live-observation'
+import { workflowLiveDiagnostics, WorkflowLiveObservationTracker, trackWorkflowLiveAttempt } from './workflow-live-observation'
 
 const identity = (attemptId: string, runId = `workflow-${attemptId}`) => ({
   taskId: `workflow-1:node-${attemptId}`, attemptId, runId, providerId: 'pi' as const
@@ -12,6 +12,21 @@ const observe = (tracker: WorkflowLiveObservationTracker, ...events: WorkflowLiv
 }
 
 describe('WorkflowLiveObservationTracker', () => {
+  it('keeps the scoped feed identity unchanged, fences a replacement owner and closes idempotently', () => {
+    const trackers = new Map<string, Map<string, WorkflowLiveObservationTracker>>()
+    let current = true, changed = 0
+    const feed = trackWorkflowLiveAttempt(trackers, { ...identity('scoped'), workflowId: 'root' }, () => 100, () => { changed++ }, () => current)
+    feed.observe({ source: 'pi_native', kind: 'model_progress', channel: 'text' })
+    const snapshot = trackers.get('root')!.get('scoped')!.snapshot()
+    expect(snapshot).toMatchObject({ ...identity('scoped'), modelProgressCount: 1 })
+    expect(Object.hasOwn(snapshot, 'workflowId')).toBe(false)
+    current = false
+    feed.observe({ source: 'pi_native', kind: 'model_progress', channel: 'text' })
+    expect(changed).toBe(1)
+    feed.releaseLive(); feed.releaseLive()
+    expect(changed).toBe(2)
+    expect(trackers.has('root')).toBe(false)
+  })
   it('does not accept Pi evidence for a different provider', () => {
     const tracker = new WorkflowLiveObservationTracker({ ...identity('wrong-provider'), providerId: 'codex' })
     expect(tracker.observe({ source: 'pi_native', kind: 'model_progress', channel: 'text' })).toBe(false)
