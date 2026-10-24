@@ -2205,8 +2205,9 @@ async function beginOpenTurn(
     ...(staleTerminalProtection ? { staleTerminalProtection: true } : {}),
     captures: []
   }
-  await writeJsonAtomic(openPath(root), open, { sync: false })
-  await writeJsonAtomic(statePath(root), { ...session, lastGeneration: generation, lastTurnIndex: turnIndex }, { sync: false })
+  // Publish the initial identity durably before acknowledging the start hook.
+  await writeJsonAtomic(openPath(root), open)
+  await writeJsonAtomic(statePath(root), { ...session, lastGeneration: generation, lastTurnIndex: turnIndex })
   if (!managedByScry && enablement.config.capture.diff) {
     const captureDir = join(turnRoot(root, generation), 'captures')
     const repositories = await discoverRepositories(enablement.workspaceRoot, enablement.config)
@@ -2946,7 +2947,7 @@ async function applyHookLocked(
     open.status = 'closing'
     open.closingAt = timestampOf(input.payload)
     open.endReason ??= SESSION_END_EVENTS.has(input.event) ? 'session_end' : 'provider_terminal'
-    await writeJsonAtomic(openPath(root), open, { sync: false })
+    await writeJsonAtomic(openPath(root), open)
     return { status: 'pending' as const, reason: 'managed turn awaits canonical Scry evidence' }
   }
   if (
@@ -2997,7 +2998,7 @@ async function applyHookLocked(
       open.endReason ??= 'provider_terminal'
       open.deferredTerminalAt = new Date().toISOString()
       open.deferredTerminalEventId = eventId
-      await writeJsonAtomic(openPath(root), open, { sync: false })
+      await writeJsonAtomic(openPath(root), open)
       return { status: 'pending' as const, reason: 'unidentified early terminal deferred for stale-event protection' }
     }
   }
@@ -3014,7 +3015,7 @@ async function applyHookLocked(
   // transcript parsing and Git diff work: the end time is already fixed, so deferring cannot
   // stretch it, and a killed hook leaves a closing turn that recovery still finalizes.
   if (sessionEndEvent) open.terminalFallbackStatus ??= 'interrupted'
-  await writeJsonAtomic(openPath(root), open, { sync: false })
+  await writeJsonAtomic(openPath(root), open)
   if (sessionEndEvent) {
     return { status: 'pending' as const, reason: 'session end persisted; turn aggregation deferred to recovery' }
   }

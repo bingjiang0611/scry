@@ -361,6 +361,8 @@ shell 只追加；CLI 诊断在文件超过 1 MiB 时轮转并保留一代，每
 
 缺少开始事件的终态不会仅凭会话存在就判为 duplicate。无法通过已提交 turn ID 或已提交轮次的明确时间边界证明重复时，事件保存到 `runtime/<provider>/<session-key>/orphans/<payload-hash>.json`，`health.json` 的 `missingStartTerminals` 和 `orphanEvents` 各加一，并写 `recorder.log`；相同 payload 重放不重复计数。工具 orphan 同样保存 payload。原始 payload 使用 content envelope，受 `toolContentFieldBytes` / `toolContentTurnBytes` 上限约束；只有 prompt、assistant、完整工具采集都启用时才保存正文，否则标明 `capture_policy` 省略。orphan 不是 record，不会猜测 token、轮首时间或 diff。
 
+开始 hook 首次发布 `open.json` / `session.json`，以及终态钉住 `closing` 时，均等待原子写的文件和父目录 fsync；中间工具状态仍不增加 fsync。这保证调用了持久化屏障，不等同于验证所有文件系统上的断电恢复。
+
 ## 证据口径
 
 - 无调用记为 `available + []`;Provider 未暴露的记为 `unavailable`,**不会伪装成 0**。
