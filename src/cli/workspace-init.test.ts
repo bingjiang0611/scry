@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { chmod, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { createServer } from 'node:net'
 import { join, resolve } from 'node:path'
@@ -44,6 +44,19 @@ describe('scry init', () => {
       if (reason.endsWith('_failed')) expect(log.trim().split('\t').at(-1)).toBe('17')
     }
   )
+
+  it('hook skip remains fail open without writing through a diagnostic symlink', async () => {
+    const root = await gitWorkspace()
+    await initWorkspace({ workspace: root, providers: 'codex', cliPath: process.execPath })
+    const outside = await gitWorkspace()
+    const log = join(outside, 'hook-skip.log')
+    await writeFile(log, 'KEEP\n')
+    await symlink(outside, join(root, '.scry/logs'), 'dir')
+    await rm(join(root, '.scry/cli-path'))
+    const result = spawnSync('/bin/sh', [join(root, '.scry/provider-hook.sh'), 'codex', 'Stop'], { input: '{}' })
+    expect(result.status).toBe(0)
+    expect(await readFile(log, 'utf8')).toBe('KEEP\n')
+  })
 
   it('daemon fast path starts only the existing dirname, cat and curl commands', async () => {
     const root = await gitWorkspace()

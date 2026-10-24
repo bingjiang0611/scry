@@ -160,7 +160,7 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
-async function hasSymlinkComponent(root: string, relativePath: string): Promise<boolean> {
+export async function hasSymlinkComponent(root: string, relativePath: string): Promise<boolean> {
   let cursor = root
   for (const part of relativePath.split(/[\\/]+/).filter((value) => value && value !== '.')) {
     cursor = join(cursor, part)

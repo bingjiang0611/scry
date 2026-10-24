@@ -189,6 +189,8 @@ set -u
 workspace="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 0
 # Failure-only diagnostics: the successful fast path starts no extra process.
 skip() {
+  # Invalid storage must not turn an observational error into a write outside this workspace.
+  [ ! -L "$workspace/.scry" ] && [ ! -L "$workspace/.scry/logs" ] && [ ! -L "$workspace/.scry/logs/hook-skip.log" ] || exit 0
   (umask 077; mkdir -p "$workspace/.scry/logs" &&
     printf '%s\\t%s\\t%s\\t%s\\t%s\\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$provider" "$event" "$1" "\${2:-0}" >> "$workspace/.scry/logs/hook-skip.log") 2>/dev/null || :
   exit 0

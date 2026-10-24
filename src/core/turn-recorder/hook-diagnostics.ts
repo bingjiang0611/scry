@@ -1,6 +1,7 @@
 import { open, rename, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { appendRotatingLog, withDirectoryLock } from './io.js'
+import { hasSymlinkComponent } from './config.js'
 
 const MAX_LOG_BYTES = 1024 * 1024
 
@@ -13,6 +14,8 @@ export interface HookSkipSummary {
 
 // This fixed bootstrap location is usable even when config/dataDir cannot be trusted.
 export async function recordInvalidHookConfig(workspace: string, provider: string, event: string): Promise<void> {
+  // A rejected dataDir may itself be a symlink. Diagnostics must not write through it.
+  if (await hasSymlinkComponent(workspace, '.scry/logs/hook-skip.log')) return
   const safeEvent = /^[A-Za-z0-9_.:-]{1,128}$/.test(event) ? event : 'unknown'
   await appendRotatingLog(join(workspace, '.scry/logs/hook-skip.log'),
     `${new Date().toISOString()}\t${provider}\t${safeEvent}\tinvalid_config\t0`)
@@ -37,6 +40,10 @@ async function logTail(path: string): Promise<{ text: string; truncated: boolean
 }
 
 export async function readHookSkips(workspace: string): Promise<HookSkipSummary> {
+  if (await hasSymlinkComponent(workspace, '.scry/logs/hook-skip.log') ||
+    await hasSymlinkComponent(workspace, '.scry/logs/hook-skip.log.1')) {
+    throw new Error('hook diagnostics unavailable: symbolic link')
+  }
   const path = join(workspace, '.scry/logs/hook-skip.log')
   const size = await stat(path).then(value => value.size).catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') return 0
