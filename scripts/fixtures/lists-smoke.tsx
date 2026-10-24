@@ -83,6 +83,13 @@ writeMetaPrompts(localStorage, Array.from({ length: 12 }, (_, index) => ({
   id: `prompt-${index}`, title: `Prompt ${index}`, body: `${copy.prompt} ${index}`
 })))
 const noop = (): void => {}
+const turnRefs = new Map<string, HTMLDivElement>()
+const refEvents: Array<{ runId: string; attached: boolean }> = []
+const onTurnRef = (runId: string, element: HTMLDivElement | null): void => {
+  refEvents.push({ runId, attached: element !== null })
+  if (element) turnRefs.set(runId, element)
+  else turnRefs.delete(runId)
+}
 const agent = { id: 'claude', name: 'Claude Code', path: '/fixture/claude', bin: 'claude' }
 function events(runId: string, count: number): TraceEvent[] {
   return Array.from({ length: count }, (_, index) => [
@@ -148,7 +155,8 @@ function Fixture() {
   }
   useEffect(() => {
     Object.assign(window, { listFixture: {
-      setCache, setLoading, setBusy, appendTool, appendHook, loading,
+      setCache, setLoading, setBusy, appendTool, appendHook, loading, turnRefs, refEvents,
+      referenceScope: (next: string, pending: boolean) => { setScope(next); setLoading(pending); setCache(false); setBusy(false) },
       longOutput: () => appendTool(Array.from({ length: 55 }, (_, line) => `line ${line}`).join('\n')),
       switchScope: () => { setScope(previous => `${previous}:switch`); appendTool() },
       pinCount: (count: number) => setCatalog(previous => previous.map((session, index) => ({ ...session, pinnedAt: index < count ? index + 1 : undefined }))),
@@ -177,7 +185,7 @@ function Fixture() {
               runControlCatalog={{ models: [], permissions: [{ id: 'default', label: copy.provider, description: copy.description }] }}
               input={input} composerScopeKey={scope} busy={busy} sessionLoading={loading} sessionCacheVisible={cache}
               draftAttachments={[]} queuedPrompts={queued} slashOpen={false} slashLoading={false} slashCmds={[]} slashSel={0}
-              onSelect={noop} onInput={setInput} onChooseFolder={noop} onPickRecent={noop} onRemoveRecent={noop}
+              onTurnRef={onTurnRef} onSelect={noop} onInput={setInput} onChooseFolder={noop} onPickRecent={noop} onRemoveRecent={noop}
               onRetrySlash={noop} onPickSlash={noop} onSlashSel={noop} onHideSlash={noop} onSend={noop} onStop={noop}
               onPasteImages={noop} onPasteClipboardImage={noop} onRemoveDraftAttachment={noop}
               onRemoveQueuedPrompt={id => setQueued(previous => previous.filter(prompt => prompt.messageId !== id))}

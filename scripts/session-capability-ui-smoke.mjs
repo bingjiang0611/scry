@@ -22,7 +22,8 @@ const motionTokensOnly = process.argv.includes('--motion-tokens-only')
 const paneBenchOnly = process.argv.includes('--structure-pane-bench')
 const structureOnly = process.argv.includes('--structure-only')
 const overlaysOnly = process.argv.includes('--overlays-only')
-const listsOnly = process.argv.includes('--lists-only')
+const turnRefsOnly = process.argv.includes('--turn-refs-only')
+const listsOnly = turnRefsOnly || process.argv.includes('--lists-only')
 const loadingOnly = process.argv.includes('--loading-only')
 const sidebarActivityOnly = process.argv.includes('--sidebar-activity-only')
 const selectionOnly = process.argv.includes('--selection-only')
@@ -1781,7 +1782,7 @@ try {
   // Preserve the 30s watchdog and every workload. Independent list campaigns
   // get fresh isolated processes instead of extending timeouts for more cases.
   const campaignResults = []
-  for (const campaign of listsOnly ? ['structure', 'history', 'live'] : ['all']) await new Promise((resolve, reject) => {
+  for (const campaign of turnRefsOnly ? ['refs'] : listsOnly ? ['structure', 'history', 'live', 'refs'] : ['all']) await new Promise((resolve, reject) => {
     // The fixture window is shown inactive and may sit behind the user's windows. Occluded windows stop
     // producing frames, which stalls requestAnimationFrame and frame-aligned mousemove; hide() still hides.
     const child = spawn(electron, [join(temp, 'main.cjs'), '--disable-gpu', '--disable-backgrounding-occluded-windows', ...(listsOnly ? [`--scry-lists-campaign=${campaign}`] : [])], {
