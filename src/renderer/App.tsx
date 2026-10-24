@@ -2887,6 +2887,7 @@ export function App() {
               skills={integrations.skills}
               skillCapability={integrations.skillCapability}
               skillsRefreshing={integrations.skillsRefreshing}
+              onRefreshSkills={integrations.refreshSkills}
               mcps={integrations.mcps}
               status={integrations.mcpStatus}
               live={integrations.mcpLive}

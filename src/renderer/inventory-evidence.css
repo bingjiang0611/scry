@@ -1336,6 +1336,7 @@
   text-align: center;
 }
 
+.capabilities-empty > .capabilities-refresh { justify-self: center; }
 .capabilities-empty > strong { color: var(--fg); font-size: 14px; }
 .capabilities-empty > span { font-size: 12.5px; }
 

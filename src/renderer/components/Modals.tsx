@@ -632,6 +632,12 @@ function InventoryContext({
   )
 }
 
+function useReadStarted(refreshing: boolean): boolean {
+  const [started, setStarted] = useState(refreshing)
+  if (refreshing && !started) setStarted(true)
+  return started || refreshing
+}
+
 export function SkillsModal({
   skills,
   capability,
@@ -661,6 +667,8 @@ export function SkillsModal({
   const filtered = filterSkillsForScope(skills, scope, query)
   // Null evidence is not an empty result, even before the read effect starts.
   const initialSkillsLoading = (refreshing || capability === null) && skills.length === 0
+  const readStarted = useReadStarted(refreshing)
+  const skillsUnavailable = capability === null && !refreshing && readStarted
   const showSkillsLoading = useDelayedFlag(refreshing)
   const listMotion = useFirstReadyList(filtered.length > 0)
   const projectCount = skills.filter((skill) => skill.scope === 'project').length
@@ -798,7 +806,8 @@ export function SkillsModal({
         aria-labelledby={titleId + '-' + scope + '-tab'}
         aria-busy={refreshing}
       >
-        {initialSkillsLoading && <DelayedLoadingStatus loading={refreshing} title={LOADING_COPY.skills} />}
+        {skillsUnavailable ? <div className="inventory-empty" role="status">{LOADING_COPY.skillsUnavailable}</div>
+          : initialSkillsLoading && <DelayedLoadingStatus loading={refreshing} title={LOADING_COPY.skills} />}
         {filtered.length === 0 && !initialSkillsLoading && (
           <div className="inventory-empty" role="status">
             <strong>{scopeSkills.length === 0 ? LOADING_COPY.skillsEmpty(scopeLabel) : LOADING_COPY.skillsNoMatch(scopeLabel)}</strong>
@@ -937,6 +946,8 @@ export function McpModal({
   const closeRef = useRef<HTMLButtonElement>(null)
   const loadingConfig = configRefreshing && !capability
   const loading = loadingConfig || refreshing
+  const readStarted = useReadStarted(configRefreshing)
+  const mcpUnavailable = capability === null && !loading && readStarted
   const showMcpLoading = useDelayedFlag(loading)
   const authenticationInProgress = Object.values(status).some((item) => item.authenticating)
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -994,7 +1005,8 @@ export function McpModal({
       </div>
 
       <div className="modal-body inventory-modal__body inventory-modal__body--mcp" aria-busy={loading}>
-        {mcps.length === 0 && (loadingConfig || capability === null) ? <DelayedLoadingStatus loading={loadingConfig} title={LOADING_COPY.mcp} /> : mcps.length === 0 ? (
+        {mcps.length === 0 && mcpUnavailable ? <div className="inventory-empty" role="status">{LOADING_COPY.mcpUnavailable}</div>
+          : mcps.length === 0 && (loadingConfig || capability === null) ? <DelayedLoadingStatus loading={loading} title={LOADING_COPY.mcp} /> : mcps.length === 0 ? (
           <div className="inventory-empty" role="status">
             <strong>{LOADING_COPY.mcpEmpty}</strong>
             <p>{LOADING_COPY.mcpNoConfigEvidence}</p>
@@ -1200,6 +1212,7 @@ export function CapabilitiesModal({
   skills,
   skillCapability,
   skillsRefreshing = false,
+  onRefreshSkills,
   mcps,
   status,
   live,
@@ -1216,6 +1229,7 @@ export function CapabilitiesModal({
   skills: SkillMeta[]
   skillCapability?: CapabilityEnvelope<SkillMeta[]> | null
   skillsRefreshing?: boolean
+  onRefreshSkills: () => void
   mcps: McpMeta[]
   status: Record<string, McpStatus>
   live: McpLiveStatus[]
@@ -1234,6 +1248,10 @@ export function CapabilitiesModal({
   const activeCapability = view === 'skills' ? skillCapability : mcpCapability
   const loadingMcpConfig = mcpConfigRefreshing && !mcpCapability
   const loadingMcp = loadingMcpConfig || mcpRefreshing
+  const skillsReadStarted = useReadStarted(skillsRefreshing)
+  const mcpReadStarted = useReadStarted(mcpConfigRefreshing)
+  const skillsUnavailable = skillCapability === null && !skillsRefreshing && skillsReadStarted
+  const mcpUnavailable = mcpCapability === null && !loadingMcp && mcpReadStarted
   const showMcpLoading = useDelayedFlag(loadingMcp)
   const authenticationInProgress = Object.values(status).some((item) => item.authenticating)
   const liveByName = new Map(live.map((item) => [item.name, item]))
@@ -1302,7 +1320,12 @@ export function CapabilitiesModal({
               <strong>{skill.name}</strong>
               <p title={skill.description}>{skill.description}</p>
             </article>
-          )) : (skillsRefreshing || skillCapability === null) && skills.length === 0 ? <DelayedLoadingStatus loading={skillsRefreshing} title={LOADING_COPY.skills} /> : (
+          )) : skillsUnavailable ? (
+            <div className="capabilities-empty" role="status">
+              <strong>{LOADING_COPY.skillsUnavailable}</strong>
+              <button type="button" className="capabilities-refresh" onClick={onRefreshSkills}>{LOADING_COPY.refresh}</button>
+            </div>
+          ) : (skillsRefreshing || skillCapability === null) && skills.length === 0 ? <DelayedLoadingStatus loading={skillsRefreshing} title={LOADING_COPY.skills} /> : (
             <div className="capabilities-empty" role="status">
               <strong>{LOADING_COPY.skillsSourceEmpty}</strong>
             </div>
@@ -1389,7 +1412,8 @@ export function CapabilitiesModal({
                 )}
               </article>
             )
-          }) : loadingMcpConfig || mcpCapability === null ? <DelayedLoadingStatus loading={loadingMcpConfig} title={LOADING_COPY.mcp} /> : (
+          }) : mcpUnavailable ? <div className="capabilities-empty" role="status"><strong>{LOADING_COPY.mcpUnavailable}</strong></div>
+            : loadingMcpConfig || mcpCapability === null ? <DelayedLoadingStatus loading={loadingMcp} title={LOADING_COPY.mcp} /> : (
             <div className="capabilities-empty" role="status">
               <strong>{LOADING_COPY.mcpSourceEmpty}</strong>
             </div>

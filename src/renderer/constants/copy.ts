@@ -418,6 +418,8 @@ export const QUEUE_COPY = {
 } as const
 
 export const LOADING_COPY = {
+  skillsUnavailable: '未取得 Skill 清单，可点刷新重试',
+  mcpUnavailable: '未取得 MCP 配置，可点刷新重试',
   session: '正在加载会话历史',
   cache: '正在更新最近会话缓存',
   cacheDetail: '先展示上次读取的最近一页；核对完成前不能发送或分叉。',
