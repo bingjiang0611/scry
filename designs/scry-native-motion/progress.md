@@ -9,7 +9,7 @@
 | 01 基础 | 通过 | `22b0358`（实现修正）、`3abbfeb`（验收修正）、`7fbbf106`（经用户批准隔离验收前置主题过渡） |
 | 02 结构过渡 | 通过 | `42f3f9dc`、`3305911d`（修正）；`3145cd79`、`06defe55`（回归）；按「02 · 核验」授权，修正验收后进入 03 |
 | 03 弹窗与浮层 | 通过 | `b6f42801`（实现）、`5e3e14ee`（验收）；范围取舍见本轮用户确认；一项小修正并入 04 开头，见「03 · 核验」 |
-| 04 列表 | 待核验 | `5f3484c1`（实现）、`6ffa5eed` / `72abd3e3`（回归）；安装被基线同样失败的终端录制 gate 阻挡，详见本步记录 |
+| 04 列表 | 需修改 | `5f3484c1`（实现）、`6ffa5eed` / `72abd3e3`（回归）；两处修正见「03-fix 与 04 · 核验」，其中安装阻挡源自 03 的弹窗挂载位置，不是既有问题 |
 | 05 加载防闪 | 未开始 | — |
 | 06 侧栏材质（可选） | 需用户确认 | — |
 
@@ -330,6 +330,42 @@
 - 先前 09:32→09:38:59 的完整安装在 pane 静止几何检查失败，load 8.25 / 13.05 / 14.46→9.85 / 11.48 / 13.27；日志 `/tmp/scry-motion-04-install-final.log`。修正等待实际动画完成的前置条件后，最后一次通过该项，才暴露基线也失败的终端 gate。最初 07:08 的 tooltip 安装首败见「问题」，不覆盖任何第一次失败。
 - 未验证真实付费 Provider、真实远程手机、120Hz 设备与低负载 L2 / 发布后 L3；本步使用真实 Electron 输入和本地 fixture Provider，不以虚构数据假冒这些场景。基线临时 worktree 已移除，截图 / 日志留本机临时目录、不提交。用户当前 App 未更新、未要求用户重启作为验收前置条件。
 - 下一步由设计方核验 04；维护者另行决定终端录制 gate 排查与低负载复测。本执行方推送后停下，不进入 05、不更改无关终端业务。
+
+### 03-fix 与 04 · 核验（2026-10-24，设计方）
+
+结论：**03-fix 通过；04 需修改（两处）**。核验方式：读完 `db53ca7..3e460f0` 全部实现与测试 diff，并对照 `electron-security-smoke.mjs` 与 `App.tsx` 定位安装阻挡。核验环境连不上 npm 源，单测、构建与 UI 套件未重跑，依据执行方记录。
+
+**03-fix 通过**
+- 入场统一 `backwards`、出场保留 `both`，负对照两次有效。
+- `458742bf` 把悬停卡对外的 `dismiss` 改为立即退休，与菜单接管合同一致；普通离开仍走装饰退出。通过。
+
+**04 通过的部分**
+- `useFlipList`：先读后写、打断续接（`offsetTop` 不受 transform 影响，加上当前位移得到显示位置）、减弱动效直达终点，逻辑正确。
+- `useFirstReadyList`：只在首次就绪时错开，刷新不重播，pointerdown / keydown 立即结束，减弱动效整组淡入。符合规格。
+- `Disclosure`：懒挂载、收起后卸载、收起当帧 inert + aria-hidden；初始已展开的内容不播入场，`lockedOpen` / 待回答问题走 `immediate`。长内容只淡入。Thinking 保留原生 details。符合规格。
+- 流式新块：`useLiveArrivalKeys` 以「运行中 owner + 会话身份 + 就绪状态」为重置键，挂载基线后才判新增，历史、缓存、切换不入场，token 更新不重播。设计合理，负对照有效。
+- 标签指示条：只在选中变化且标签顺序不变时滑动，增删与 resize 直接定位。符合规格。
+
+**必须修正 1：安装阻挡是 03 引入的回归，不是既有问题**
+- 失败点是 `electron-security-smoke.mjs` 录制冒烟里 `button('终端录制历史').click()` 之后的 `waitFor(() => !!query('[data-recording-id="…"] button'))`。`query()` 把选择器限定在 `[data-session-surface-current="true"]` 内。
+- 03（`b6f42801`）让 `ModalFrame` 经 `createPortal` 挂到 `document.body`，`TerminalHistory` 用的就是 `ModalFrame`，所以这个弹窗已不在 session surface 里，测试永远找不到它。
+- 执行方的「基线」`db53ca71` 已包含 03，所以基线复现不能说明是旧问题。此前 01、02 的安装都在单测阶段就失败，从未跑到这个 gate。03 核验时我也漏了这一点。
+- 修法：测试侧把录制历史弹窗内的查询改为在 `document` 里找（例如 `[data-recording-id]` 前缀的选择器不走 surface 作用域，或在 `.modal-overlay` 里找），其余 surface 内查询保持作用域。这是跟随 03 已核验的 DOM 结构变化，不放宽断言、不改 timeout。另外请 `grep` 所有 smoke / fixture 中经 surface 作用域查询弹窗内容的地方，一并改。
+- 验收：`node scripts/electron-security-smoke.mjs --dev` 通过；负对照为把 `ModalFrame` 临时改回不 portal，确认修改后的查询仍能找到（证明不是靠新路径凑巧通过），或说明为何无法做该对照。随后完整 `npm run install:mac:dev`。
+- 风险记录（暂不要求改）：非当前 session surface 以 `display: none` 保留挂载，弹窗 portal 后会脱离这层隐藏。目前没找到弹窗打开时切换会话的入口，如果执行方发现有（例如远程控制切会话），请记入「问题」。
+
+**必须修正 2（待用户决定）：动态视图原有的 FLIP 对大多数用户失效**
+- 改动前，`SidebarActivity` 的位置过渡作用于整个列表，节点受 `GROUP_LIMIT` 约束（3 组 × 40 行 + 3 个标题，最多 123 个）。
+- 现在接入 `useFlipList` 后统一受 40 节点预算约束。「已完成」组只要有 37 条以上会话，整个动态视图就不再播位置过渡，包括会话从「已完成」移到「进行中」这一最主要的场景。有一定历史的用户基本都会超过。
+- `--sidebar-activity-only` 仍通过，是因为 fixture 行数少，没有覆盖这种情况。
+- 用户当初选择「超限不播 FLIP」时，问题描述没有指出这会关掉已上线的动态视图动画。设计方建议：`useFlipList` 接受一个预算参数，动态视图沿用原有上限（`GROUP_LIMIT * activityGroups.length + activityGroups.length`），其他列表保持 40。请以用户最终选择为准。
+- 验收（若采纳建议）：`--sidebar-activity-only` 增加一个「已完成」组 40 行 + 1 行从已完成移到进行中的用例，断言存活行有 300ms transform；负对照为预算改回 40 时该断言失败。
+
+**不阻塞，顺手处理**
+- `useTabIndicator` 的 layout effect 没有依赖数组，每次 Sidebar / RightSurfacePanel 渲染都读一次 `offsetLeft`（强制同步布局），`ResizeObserver` 也每次重建。建议 layout effect 依赖 `[selected, 顺序字符串]`，`ResizeObserver` 只在标签集合变化时重建。
+- 减弱动效下长内容折叠仍是 160ms（`[data-long][data-state='enter']` 的优先级高于减弱动效里的 120ms 规则），可补一条覆盖。
+- 工具卡、Thinking 的箭头静止方向由「向下」改为「向右」（展开后转为向下），符合 macOS 展开三角惯例，请在截图里给用户确认一眼。
+- 性能：`trace.delivery` 计算耗时 +113% 在高负载下测得，执行方已注明不作结论。修正 1 后重跑安装时，如负载低于 10，请顺带重跑这一项。
 
 <!--
 ### NN · <步骤名>
