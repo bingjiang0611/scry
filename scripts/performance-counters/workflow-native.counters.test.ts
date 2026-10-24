@@ -1,5 +1,6 @@
 import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { randomUUID } from 'node:crypto'
 import { join, sep } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { defaultRepeats, measured, repeatCounters, writeCollector } from '../performance-counters.mjs'
@@ -70,33 +71,43 @@ async function workload(extraWrite = false) {
   }
 }
 
-async function admissionWorkload(extraObservation = false) {
+async function revisionWorkload(extraObservation = false, changedCall = false) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'scry-admission-counter-')))
   await writeFile(join(directory, 'input'), 'x')
   const store = new MemoryWorkflowStore(), host = new WorkflowSystemHost(join(directory, 'replicas'), store, () => ({}))
-  const observe = vi.spyOn(host, 'observeAgentInputs'), execute = vi.fn(() => { throw new Error('This pure workload has no Agent') })
+  const observe = vi.spyOn(host, 'observeAgentInputs'), execute = vi.fn(() => {
+    if (!changedCall) throw new Error('This pure workload has no Agent')
+    return { result: Promise.resolve({ runId: randomUUID(), status: 'completed' as const, settled: true, actualModel: 'counter-model', output: 'counter-output' }), stop: () => true }
+  })
+  const child: WorkflowBlock = changedCall ? { kind: 'call', blockId: 'value', role: 'worker', prompt: 'v1' } : { kind: 'bind', blockId: 'value', value: { kind: 'literal', value: 1 } }
   const body: WorkflowBlock = { kind: 'sequence', blockId: 'root', blocks: [
     { kind: 'bind', blockId: 'items', value: { kind: 'literal', value: [{ id: 'key' }] } },
-    { kind: 'map', blockId: 'mapped', item: 'item', key: ['id'], items: { kind: 'ref', name: 'items' }, body: { kind: 'bind', blockId: 'value', value: { kind: 'literal', value: 1 } } },
+    { kind: 'map', blockId: 'mapped', item: 'item', key: ['id'], ...(changedCall ? { maxItems: 1 } : {}), items: { kind: 'ref', name: 'items' }, body: child },
     { kind: 'return', blockId: 'finish', ref: { nodeId: 'mapped' } }
   ] }
   const service = new WorkflowService({ store, systems: host, slots: new WorkflowSlots(1), providerRegistered: () => true, runControls,
     plan: async () => ({ output: JSON.stringify({ body }) }), execute })
   try {
-    const preview = await service.planCommand({ workspace: directory, command: '/scry-workflow run pure admission', orchestrator: { role: 'orchestrator', providerId: 'claude' }, roles: [] })
+    const preview = await service.planCommand({ workspace: directory, command: '/scry-workflow run revision observation', orchestrator: { role: 'orchestrator', providerId: 'claude' }, roles: changedCall ? [{ role: 'worker', providerId: 'claude', requestedModel: { providerId: 'anthropic', id: 'counter-model' } }] : [] })
+    expect(preview.state, JSON.stringify(preview.unavailableReasons)).toBe('ready')
     const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }
     await service.approve(approval)
     expect((await service.start(preview.workflowId, approval)).state).toBe('completed')
     const candidate = structuredClone(preview.program)
     if (candidate.body.kind !== 'sequence') throw new Error('Fixture shape')
     candidate.body.blocks.at(-1)!.blockId = 'finish-next'
+    if (changedCall) {
+      const mapped = candidate.body.blocks[1]
+      if (mapped.kind !== 'map' || mapped.body.kind !== 'call') throw new Error('Fixture shape')
+      mapped.body.prompt = 'v2'
+    }
     const prepared = validateWorkflowProgram(candidate), { programRevision: _revision, ...snapshot } = prepared
     prepared.programRevision = workflowRevision(snapshot)
     const next = makePlanPreview(prepared, preview.roles, preview.orchestrator)
     const progress = await service.revise(next, { ...approval, programRevision: next.programRevision }, { expectedRevision: (await store.load(preview.workflowId))!.progress.revision! }, 'counter-revision')
     expect(progress.state).toBe('completed')
-    expect(progress.dispatchAttempts).toBe(0)
-    expect(execute).not.toHaveBeenCalled()
+    expect(progress.dispatchAttempts).toBe(changedCall ? 2 : 0)
+    expect(execute).toHaveBeenCalledTimes(changedCall ? 2 : 0)
     const record = (await store.load(preview.workflowId))!
     expect(record.execution!.segments).toHaveLength(2)
     expect(record.systemIntents ?? []).toHaveLength(0)
@@ -125,13 +136,24 @@ describe('native result fixed workload', () => {
   })
 
   it('counts unused admission observations without replacing the full disk-backed revision workload', async () => {
-    const counters = await repeatCounters(defaultRepeats, async () => ({ calls: await admissionWorkload() }))
+    const counters = await repeatCounters(defaultRepeats, async () => ({ calls: await revisionWorkload() }))
     writeCollector('workflow-admission', [measured({ scenario: 'workflow.dynamic-revision-admission', metric: 'io.input-observation.calls', layer: 'io', unit: 'count',
       workload: 'source-files=1;source-bytes=1;roots=1;revisions=2;map-items=1;agent-attempts=0;store=memory',
       source: 'pass-through main input-observation calls on the canonical Service revision path with real source-file observation and production MemoryStore' }, counters.calls)])
   })
 
   it('observes one deliberately added real source scan', async () => {
-    expect(await admissionWorkload(true)).toBe(await admissionWorkload() + 1)
+    expect(await revisionWorkload(true)).toBe(await revisionWorkload() + 1)
+  })
+
+  it('counts selection observations when a changed definition cannot reuse its predecessor', async () => {
+    const counters = await repeatCounters(defaultRepeats, async () => ({ calls: await revisionWorkload(false, true) }))
+    writeCollector('workflow-selection', [measured({ scenario: 'workflow.dynamic-revision-selection', metric: 'io.input-observation.calls', layer: 'io', unit: 'count',
+      workload: 'source-files=1;source-bytes=1;roots=1;revisions=2;map-items=1;agent-attempts=2;store=memory;provider=synthetic-settled',
+      source: 'pass-through main input observations on the canonical Service with two completed synthetic Provider executions and a changed call definition' }, counters.calls)])
+  })
+
+  it('observes an extra real scan without excluding dispatch observations', async () => {
+    expect(await revisionWorkload(true, true)).toBe(await revisionWorkload(false, true) + 1)
   })
 })
