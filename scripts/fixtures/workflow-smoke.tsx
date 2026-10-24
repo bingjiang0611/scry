@@ -53,7 +53,8 @@ const api: WorkflowApi = {
       slots: { limit: 2, inUse: 1, queued: 0 },
       systemSteps: [{ stepId: 'fixture-system', nodeId: 'verify', kind: 'check', state: 'completed', settled: true,
         result: { state: 'failed', exitCode: 17, signal: null, startedAt: 1, finishedAt: 2, settled: true, truncated: false, evidence: 'exact',
-          stdoutRef: { workflowId: 'ui-workflow', key: 'stdout', hash: '0'.repeat(64) }, stderrRef: { workflowId: 'ui-workflow', key: 'stderr', hash: '0'.repeat(64) }, diagnostics: { state: 'unavailable', reason: 'fixture only' } } }] }
+          stdoutRef: { workflowId: 'ui-workflow', key: 'stdout', hash: '0'.repeat(64) }, stderrRef: { workflowId: 'ui-workflow', key: 'stderr', hash: '0'.repeat(64) }, diagnostics: { state: 'unavailable', reason: 'fixture only' } } },
+        { stepId: 'fixture-verification', nodeId: 'required', kind: 'verification', state: 'completed', settled: true }] }
     notify()
     return progress
   },

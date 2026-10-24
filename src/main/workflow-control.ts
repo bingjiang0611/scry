@@ -31,7 +31,7 @@ export class WorkflowControl {
     let framed = false
     while (pending.length) {
       const block = pending.pop()!
-      if (block.kind === 'replica' || block.kind === 'check' || block.kind === 'bind' || block.kind === 'branch' || block.kind === 'map' || block.kind === 'collect' || block.kind === 'loop' || (block.kind === 'return' && block.ref.path !== undefined) || (block.kind === 'call' && (block.replica || block.inputRefs?.some(ref => ref.path !== undefined)))) framed = true
+      if (block.kind === 'replica' || block.kind === 'check' || block.kind === 'verification' || block.kind === 'bind' || block.kind === 'branch' || block.kind === 'map' || block.kind === 'collect' || block.kind === 'loop' || (block.kind === 'return' && block.ref.path !== undefined) || (block.kind === 'call' && (block.replica || block.inputRefs?.some(ref => ref.path !== undefined)))) framed = true
       pending.push(...workflowChildBlocks(block))
     }
     this.framed = framed || execution !== undefined
@@ -59,6 +59,7 @@ export class WorkflowControl {
   async enter(block: WorkflowBlock, scope: WorkflowControlScope): Promise<WorkflowControlFrame | undefined> {
     if (!this.framed) return undefined
     const names = block.kind === 'loop' ? [...new Set([...Object.values(block.initial), ...Object.values(block.invariants)].flatMap(workflowExpressionReferences))] : block.kind === 'map' || block.kind === 'collect' ? workflowExpressionReferences(block.items) : block.kind === 'bind' ? workflowExpressionReferences(block.value) : block.kind === 'branch' ? workflowExpressionReferences(block.when)
+      : block.kind === 'verification' ? [...Object.values(block.required).flatMap(entry => workflowExpressionReferences(entry.result)), ...(block.baseline ? workflowExpressionReferences(block.baseline) : [])]
       : block.kind === 'check' ? workflowExpressionReferences(block.replica) : block.kind === 'replica' ? block.source ? workflowExpressionReferences(block.source) : [] : block.kind === 'call' ? [...(block.inputRefs ?? []).map(ref => ref.nodeId), ...(block.replica ? workflowExpressionReferences(block.replica) : [])] : block.kind === 'return' ? [block.ref.nodeId] : []
     const inputKey = digest({ revision: this.preview.programRevision, nodeId: block.blockId, scope: scope.path,
       sources: names.map(name => [name, scope.bindings.get(name)?.state, scope.bindings.get(name)?.derivedFrom]) })
@@ -99,7 +100,7 @@ export class WorkflowControl {
         await this.store.loadValue(this.preview.workflowId, origin.resultRef)
         reference = origin.resultRef
       } else {
-        if (origin?.resultRef && (block.kind === 'call' || block.kind === 'check' || block.kind === 'replica')) throw new Error(workflowRecoveryCopy.frame)
+        if (origin?.resultRef && (block.kind === 'call' || block.kind === 'check' || block.kind === 'replica' || block.kind === 'verification')) throw new Error(workflowRecoveryCopy.frame)
         reference = await this.store.saveValue(this.preview.workflowId, digest([frame.frameId, 'result']), value)
       }
       const { revision, ...input } = frame

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { validateWorkflowVerificationInputs } from './workflow-verification-inputs'
 import { WORKFLOW_MAX_BATCH, workflowChildBlocks, type WorkflowBlock } from '../shared/workflow'
 import { WORKFLOW_MAX_SYSTEM_STEPS, type WorkflowInputSnapshot, type WorkflowInputMaterialization, type WorkflowMaterializedInput } from '../shared/workflow-system'
 import { workflowSystemCopy as copy } from '../shared/constants/copy'
@@ -40,7 +41,11 @@ export function validateWorkflowSystemLedger(record: WorkflowStoreRecord): Reado
   for (const intent of intents) {
     const node = nodes.get(intent.nodeId), task = intent.taskId.split(':')
     if (!/^[A-Za-z0-9_-]{1,96}$/.test(intent.stepId) || !Number.isSafeInteger(intent.createdAt) || task.length !== 3 || task[0] !== record.preview.workflowId || !/^[a-f0-9]{64}$/.test(task[1]) || task[2] !== intent.nodeId ||
-      intent.programRevision !== record.preview.programRevision || (intent.kind !== 'prepare_replica' && intent.kind !== 'check') || node?.kind !== (intent.kind === 'prepare_replica' ? 'replica' : 'check')) throw new Error(copy.intent)
+      intent.programRevision !== record.preview.programRevision || (intent.kind !== 'prepare_replica' && intent.kind !== 'check' && intent.kind !== 'verification') || node?.kind !== (intent.kind === 'prepare_replica' ? 'replica' : intent.kind)) throw new Error(copy.intent)
+    if (node?.kind === 'verification') {
+      validateWorkflowVerificationInputs(intent.verificationInputs, node)
+      if (intent.replica || intent.inputSnapshot || intent.inputMaterialization) throw new Error(copy.intent)
+    } else if (intent.verificationInputs !== undefined) throw new Error(copy.intent)
     if (intent.replica) validateWorkflowReplicaReference(intent.replica, record.preview.workflowId)
     if (intent.inputSnapshot) {
       if (intent.kind !== 'check' || !intent.replica) throw new Error(copy.intent)
@@ -61,7 +66,8 @@ export function validateWorkflowSystemLedger(record: WorkflowStoreRecord): Reado
       validateWorkflowReplicaReference(outcome.replica, record.preview.workflowId)
       if (intent.kind === 'prepare_replica' ? outcome.replica.replicaId !== intent.stepId : JSON.stringify(intent.replica) !== JSON.stringify(outcome.replica)) throw new Error(copy.intent)
     }
-    if (outcome.state === 'completed' && (!outcome.replica || (intent.kind === 'check' && !outcome.check))) throw new Error(copy.intent)
+    if (intent.kind === 'verification' && (outcome.replica || outcome.check)) throw new Error(copy.intent)
+    if (outcome.state === 'completed' && intent.kind !== 'verification' && (!outcome.replica || (intent.kind === 'check' && !outcome.check))) throw new Error(copy.intent)
     const node = nodes.get(intent.nodeId)
     if (outcome.state === 'completed' && node?.kind === 'replica' && ((node.source !== undefined) !== Boolean(intent.replica) ||
       (intent.replica && (intent.replica.replicaId === outcome.replica!.replicaId || !prepared.has(JSON.stringify(intent.replica)))))) throw new Error(copy.intent)

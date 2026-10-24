@@ -3,6 +3,7 @@ import type { WorkflowFrozenCheck } from '../shared/workflow-check'
 import type { WorkflowCheckInputs, WorkflowCheckSummary, WorkflowInputChange, WorkflowInputSnapshot, WorkflowInputMaterialization, WorkflowSystemOutcome } from '../shared/workflow-system'
 import { workflowSystemCopy as copy } from '../shared/constants/copy'
 import type { WorkflowStore } from './workflow-store'
+import { WorkflowVerification } from './workflow-verification'
 import { bindWorkflowCheck, executeWorkflowCheck, freezeWorkflowCheck, type WorkflowCheckExecution } from './workflow-check'
 import { WorkflowReplicas, validateWorkflowReplicaReference } from './workflow-replica'
 import { shellEnv } from './claude-locate'
@@ -19,7 +20,7 @@ export interface WorkflowReplicaRun {
   readonly reference: WorkflowReplicaReference
 }
 
-type SystemBlock = Extract<WorkflowBlock, { kind: 'replica' | 'check' }>
+type SystemBlock = Extract<WorkflowBlock, { kind: 'replica' | 'check' | 'verification' }>
 export type WorkflowSystemExecutionResult = Pick<WorkflowSystemOutcome, 'state' | 'settled' | 'replica' | 'check' | 'error'> & { value: WorkflowEvaluation }
 export type WorkflowSystemExecution = { result: Promise<WorkflowSystemExecutionResult>; settled: Promise<void>; stop: () => boolean }
 
@@ -27,8 +28,10 @@ export type WorkflowSystemExecution = { result: Promise<WorkflowSystemExecutionR
  * template scheduler or renderer command API. */
 export class WorkflowSystemHost {
   readonly replicas: WorkflowReplicas
+  readonly verification: WorkflowVerification
   private readonly runs = new WeakSet<WorkflowReplicaRun>()
   constructor(directory: string, private readonly store: WorkflowStore, private readonly environment = shellEnv) {
+    this.verification = new WorkflowVerification(store, async reference => (await this.replicas.resolve(reference)).directory)
     this.replicas = new WorkflowReplicas(directory, async reference => {
       const record = await store.load(reference.workflowId)
       if (!record || record.intents.some(intent => !record.outcomes.some(outcome => outcome.attemptId === intent.attemptId && outcome.settled && outcome.state !== 'unknown')) ||
@@ -117,6 +120,12 @@ export class WorkflowSystemHost {
           const value: WorkflowValue = { workflowId: replica.workflowId, replicaId: replica.replicaId, inputHash: replica.inputHash }
           return { state: 'completed', settled: true, replica, value: { state: 'known', value, replica, derivedFrom: ['system:' + stepId] } }
         }
+        if (block.kind === 'verification') {
+          const record = await this.store.load(preview.workflowId)
+          if (!record) throw new Error(copy.intent)
+          const value = await this.verification.execute(record, block, stepId)
+          return { state: 'completed', settled: true, value: { state: 'known', value, derivedFrom: ['system:' + stepId] } }
+        }
         if (!block.authorization || block.authorization.replicaRoot !== preview.workspace) throw new Error(copy.unavailable)
         const reference = this.target(input, preview.workflowId)
         lease = await this.replicas.acquire(reference, false, abort.signal)
@@ -161,7 +170,7 @@ export class WorkflowSystemHost {
           : observed.diagnostics
         const { stdout: _stdout, stderr: _stderr, diagnostics: _diagnostics, ...metadata } = observed
         const check: WorkflowCheckSummary = { ...metadata, stdoutRef, stderrRef, diagnostics, inputs }
-        const value: WorkflowValue = { passed: observed.state === 'passed', state: observed.state, exitCode: observed.exitCode, settled: observed.settled, truncated: observed.truncated, diagnosticCount: diagnostics.state === 'available' ? diagnostics.count : null, diagnostics: observed.diagnostics, inputs: workflowCheckInputValue(inputs, items) }
+        const value: WorkflowValue = { stepId, passed: observed.state === 'passed', state: observed.state, exitCode: observed.exitCode, settled: observed.settled, truncated: observed.truncated, diagnosticCount: diagnostics.state === 'available' ? diagnostics.count : null, diagnostics: observed.diagnostics, inputs: workflowCheckInputValue(inputs, items) }
         const phase = observed.state === 'unknown' ? 'unknown' : observed.state === 'rejected' ? 'blocked' : observed.state === 'cancelled' ? 'stopped' : 'completed'
         return { state: phase, settled: observed.settled, replica: reference, check, value: phase === 'unknown' || phase === 'blocked'
           ? { state: 'unknown', reason: observed.error ?? copy.unknown, derivedFrom: ['system:' + stepId] }

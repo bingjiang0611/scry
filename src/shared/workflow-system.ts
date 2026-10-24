@@ -1,4 +1,5 @@
 import { WORKFLOW_MAX_BATCH, type WorkflowValueReference, type WorkflowValueSchema } from './workflow'
+import type { WorkflowVerificationInputs } from './workflow-verification'
 import type { WorkflowCheckResult } from './workflow-check'
 import type { WorkflowReplicaReference } from './workflow-replica'
 
@@ -10,7 +11,7 @@ const inputSnapshotSchema: WorkflowValueSchema = { type: 'object', properties: {
 }, required: ['inputHash', 'entryCount', 'contentBytes', 'manifestBytes', 'startedAt', 'finishedAt'] }
 
 export const workflowCheckValueSchema: WorkflowValueSchema = { type: 'object', properties: {
-  passed: { type: 'boolean' }, state: { type: 'string' }, exitCode: { type: 'union', variants: [{ type: 'number' }, { type: 'null' }] },
+  stepId: { type: 'string' }, passed: { type: 'boolean' }, state: { type: 'string' }, exitCode: { type: 'union', variants: [{ type: 'number' }, { type: 'null' }] },
   settled: { type: 'boolean' }, truncated: { type: 'boolean' }, diagnosticCount: { type: 'union', variants: [{ type: 'number' }, { type: 'null' }] },
   // Optional for already committed checks: missing evidence remains unknown,
   // never a fabricated empty diagnostic list or a reason to rerun the process.
@@ -71,7 +72,7 @@ export type WorkflowCheckSummary = Omit<WorkflowCheckResult, 'stdout' | 'stderr'
   stderrRef: WorkflowValueReference
   diagnostics: { state: 'available'; source: 'derived'; count: number; reference: WorkflowValueReference } | { state: 'unavailable'; reason: string }
 }
-export type WorkflowSystemKind = 'prepare_replica' | 'check'
+export type WorkflowSystemKind = 'prepare_replica' | 'check' | 'verification'
 export type WorkflowSystemIntent = {
   stepId: string
   taskId: string
@@ -80,6 +81,7 @@ export type WorkflowSystemIntent = {
   kind: WorkflowSystemKind
   createdAt: number
   inputSnapshot?: WorkflowInputSnapshot
+  verificationInputs?: WorkflowVerificationInputs
   inputMaterialization?: WorkflowInputMaterialization
   replica?: WorkflowReplicaReference
 }

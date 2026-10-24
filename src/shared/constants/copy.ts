@@ -113,6 +113,15 @@ export const workflowTemplateCopy = {
   parameter: '模板参数缺失、类型不符或包含未声明参数'
 }
 
+export const workflowVerificationCopy = {
+  missing: '必需检查的原结果缺失或尚未关闭，不能认证验证集合',
+  binding: '必需检查没有绑定同一个完整的候选输入版本',
+  diagnostics: '诊断证据不可用、超限或路径无法归一到验证副本',
+  baseline: '没有同根、同必需检查合同的完整基线，不能比较',
+  coverage: '仅提供实际检查与诊断差异；尚无测试覆盖及验证范围完整性证明，不认证可信进展',
+  contract: '必需检查或验证结果与冻结合同、原账本或不可变证据不一致'
+}
+
 export const workflowSystemCopy = {
   materializationChanged: '检查前输入已不同于物化时的候选，不能将本次检查归给该候选版本',
   snapshotUnsettled: '登记的检查作用域尚未关闭，检查后输入与期间差异不可用',

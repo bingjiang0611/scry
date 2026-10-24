@@ -104,6 +104,9 @@ try {
         await wait('document.querySelector("[data-workflow-system-step=verify]")')
         const systemRow = await read('document.querySelector("[data-workflow-system-step=verify]").textContent')
         assert.equal(systemRow.includes('未通过') && systemRow.includes('17') && systemRow.includes('已收敛'), true, 'recorded result and native check failure are distinct')
+        const verificationRow = await read('document.querySelector("[data-workflow-system-step=required]").textContent')
+        assert.equal(verificationRow.includes('汇总必需检查') && verificationRow.includes('已记录'), true)
+        assert.equal(verificationRow.includes('已通过'), false, 'recorded verification is not a fabricated successful check')
         const stopSelector = '[data-workflow-id=ui-workflow] > button:last-of-type'
         await wait('document.querySelector("[data-workflow-id=ui-workflow] > button:last-of-type").textContent.includes("停止工作流")')
         await click(stopSelector)

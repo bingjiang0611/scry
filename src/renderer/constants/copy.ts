@@ -250,7 +250,7 @@ export const WORKFLOW_COPY = {
   nextPage: '下一页',
   systemResults: '主进程系统步骤 · 最近 64 项',
   systemColumns: ['节点', '类型', '步骤状态', '检查结果', '退出码', '作用域'],
-  systemKind: { prepare_replica: '准备工作副本', check: '执行检查' },
+  systemKind: { prepare_replica: '准备工作副本', check: '执行检查', verification: '汇总必需检查' },
   systemState: { queued: '排队', running: '运行中', completed: '已记录结果', failed: '执行失败', blocked: '受阻', unknown: '结果未知', stopped: '已停止' },
   checkState: { passed: '通过', failed: '未通过', timed_out: '超时', cancelled: '已取消', rejected: '拒绝执行', unknown: '未知' },
   scopeClosed: '已收敛',

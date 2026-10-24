@@ -246,11 +246,18 @@ export interface WorkflowReturnBlock {
   ref: WorkflowOutputRef
 }
 
-export type WorkflowBlock = WorkflowSequenceBlock | WorkflowParallelBlock | WorkflowCallBlock | WorkflowReturnBlock | WorkflowBindBlock | WorkflowBranchBlock | WorkflowMapBlock | WorkflowCollectBlock | WorkflowLoopBlock | WorkflowReplicaBlock | WorkflowCheckBlock
+export interface WorkflowVerificationBlock {
+  kind: 'verification'
+  blockId: string
+  required: Record<string, { check: string; result: WorkflowExpression }>
+  baseline?: WorkflowExpression
+}
+
+export type WorkflowBlock = WorkflowVerificationBlock | WorkflowSequenceBlock | WorkflowParallelBlock | WorkflowCallBlock | WorkflowReturnBlock | WorkflowBindBlock | WorkflowBranchBlock | WorkflowMapBlock | WorkflowCollectBlock | WorkflowLoopBlock | WorkflowReplicaBlock | WorkflowCheckBlock
 
 export function workflowChildBlocks(block: WorkflowBlock): WorkflowBlock[] {
   switch (block.kind) {
-    case 'call': case 'return': case 'bind': case 'collect': case 'replica': case 'check': return []
+    case 'call': case 'return': case 'bind': case 'collect': case 'replica': case 'check': case 'verification': return []
     case 'map': case 'loop': return [block.body]
     case 'branch': return [block.then, block.else, ...(block.unknown === 'blocked' ? [] : [block.unknown])]
     case 'sequence': case 'parallel': return block.blocks

@@ -7,9 +7,11 @@ import type { WorkflowInterpreterState } from './workflow-interpreter'
 import type { WorkflowStoreRecord } from './workflow-store'
 import type { WorkflowRunnerEffects } from './workflow-runner-effects'
 import { workflowFrameId } from './workflow-frames'
+import type { WorkflowVerificationInputs } from '../shared/workflow-verification'
+import { evaluateWorkflowVerification } from './workflow-verification-inputs'
 import { verifyWorkflowCheckInputs, verifyWorkflowInputMaterialization } from './workflow-input-snapshot'
 
-export async function runWorkflowSystem(effects: WorkflowRunnerEffects, preview: WorkflowPlanPreview, block: Extract<WorkflowBlock, { kind: 'replica' | 'check' }>, scope: WorkflowControlScope,
+export async function runWorkflowSystem(effects: WorkflowRunnerEffects, preview: WorkflowPlanPreview, block: Extract<WorkflowBlock, { kind: 'replica' | 'check' | 'verification' }>, scope: WorkflowControlScope,
     frame: WorkflowControlFrame | undefined, control: WorkflowControl, record: WorkflowStoreRecord, controller: WorkflowInterpreterState, activeStops: Set<() => boolean>): Promise<{ value: WorkflowEvaluation; phase: WorkflowControlFrame['phase'] }> {
     const recovered = control.recoveredSystem(block, scope, frame)
     if (recovered) {
@@ -24,13 +26,21 @@ export async function runWorkflowSystem(effects: WorkflowRunnerEffects, preview:
       await verifyWorkflowInputMaterialization(effects.options.store, record, intent.inputMaterialization)
       if (recovered.check) for (const reference of [recovered.check.stdoutRef, recovered.check.stderrRef,
         ...(recovered.check.diagnostics.state === 'available' ? [recovered.check.diagnostics.reference] : [])]) await effects.options.store.loadValue(preview.workflowId, reference)
-      return { value: await effects.options.store.loadValue(preview.workflowId, recovered.resultRef!), phase: recovered.state }
+      const value = await effects.options.store.loadValue(preview.workflowId, recovered.resultRef!)
+      if (block.kind === 'verification') {
+        const verification = effects.options.systems?.verification
+        if (!verification) throw new Error(workflowSystemCopy.unavailable)
+        verification.value(record, intent, value)
+        if (JSON.stringify(value.state === 'known' ? value.value : null) !== JSON.stringify(await verification.execute(record, block, intent.stepId))) throw new Error(workflowSystemCopy.intent)
+      }
+      return { value, phase: recovered.state }
     }
     const unavailable = (reason: string, phase: WorkflowControlFrame['phase'] = 'blocked') => ({ value: { state: 'unknown' as const, reason, derivedFrom: [] }, phase })
     if (!effects.options.systems) return unavailable(workflowSystemCopy.unavailable)
     if (controller.stopped) return unavailable(workflowSystemCopy.stopped, 'stopped')
-    const expression = block.kind === 'replica' ? block.source : block.replica
-    const input = expression ? await control.evaluate(expression, scope, block.blockId, () => controller.stopped) : undefined
+    const expression = block.kind === 'replica' ? block.source : block.kind === 'check' ? block.replica : undefined
+    const input = block.kind === 'verification' ? await evaluateWorkflowVerification(control, block, scope, () => controller.stopped)
+      : expression ? await control.evaluate(expression, scope, block.blockId, () => controller.stopped) : undefined
     if (input?.state === 'unknown') return unavailable(input.reason)
     const host = effects.options.systems
     let held: Promise<void> | undefined
@@ -43,8 +53,8 @@ export async function runWorkflowSystem(effects: WorkflowRunnerEffects, preview:
           const intents = record.systemIntents ??= []
           if (intents.length >= WORKFLOW_MAX_SYSTEM_STEPS) throw new Error(workflowSystemCopy.limit)
           if (intents.some(intent => intent.taskId === taskId)) throw new Error(workflowSystemCopy.intent)
-          const kind = block.kind === 'replica' ? 'prepare_replica' : 'check'
-          intents.push({ stepId, taskId, nodeId: block.blockId, kind, programRevision: preview.programRevision, createdAt: effects.options.now(), ...(input?.state === 'known' && input.replica ? { replica: input.replica } : {}) })
+          const kind = block.kind === 'replica' ? 'prepare_replica' : block.kind
+          intents.push({ stepId, taskId, nodeId: block.blockId, kind, programRevision: preview.programRevision, createdAt: effects.options.now(), ...(input?.state === 'known' && input.replica ? { replica: input.replica } : {}), ...(block.kind === 'verification' && input?.state === 'known' ? { verificationInputs: input.value as WorkflowVerificationInputs } : {}) })
           const visible: WorkflowSystemProgress = { stepId, nodeId: block.blockId, kind, state: 'running', settled: false, startedAt: effects.options.now() }
           record.progress.systemSteps = [...(record.progress.systemSteps ?? []), visible].slice(-64)
           await effects.options.persist(record, record.progress)

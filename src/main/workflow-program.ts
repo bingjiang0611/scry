@@ -1,6 +1,8 @@
+import { assertId, assertText, validateRole, rejectUnknownFields, MAX_GOAL_LENGTH, ROLES } from './workflow-program-fields'
+import { validateBlock } from './workflow-program-blocks'
+import { validateReferenceDominance } from './workflow-program-types'
+export { workflowLoopStateTypes } from './workflow-program-types'
 import { createHash } from 'node:crypto'
-import { validateWorkflowCheck, validateWorkflowFrozenCheck } from './workflow-check'
-import { workflowCheckValueSchema, workflowReplicaValueSchema } from '../shared/workflow-system'
 import type { ProviderDescriptor, ProviderId } from '../shared/provider'
 import type {
   WorkflowBlock,
@@ -11,17 +13,12 @@ import type {
   WorkflowRole,
   WorkflowRoleBinding,
   WorkflowRoleCapability,
-  WorkflowOutputRef,
   WorkflowValueSchema,
   WorkflowSequenceBlock
 } from '../shared/workflow'
-import { WORKFLOW_MAX_BATCH, WORKFLOW_MAX_ATTEMPTS, WORKFLOW_SCHEMA_VERSION, providerCapabilityState, workflowChildBlocks } from '../shared/workflow'
-import { validateWorkflowValueSchema, workflowSchemaAssignable } from './workflow-values'
-import { validateWorkflowLoop, workflowLoopOutcomeSchema } from './workflow-loops'
-import { collectionItemSchema } from './workflow-collections'
+import { WORKFLOW_MAX_ATTEMPTS, WORKFLOW_SCHEMA_VERSION, providerCapabilityState, workflowChildBlocks } from '../shared/workflow'
 import { templateInstance } from './workflow-template-identity'
-import { inferWorkflowExpression, validateWorkflowExpression, workflowBooleanSchema, workflowItemsSchema, workflowScalarSchema } from './workflow-expressions'
-import { workflowCollectionCopy, workflowExpressionCopy, workflowFrameCopy, workflowLoopCopy, workflowValueCopy } from '../shared/constants/copy'
+import { workflowCollectionCopy, workflowExpressionCopy } from '../shared/constants/copy'
 import { normalizeAgentStartRequest, type AgentRunControlCatalog, type AgentStartRequest } from '../shared/runtime'
 
 /** Portable syntax excludes host-resolved paths/fingerprints. Main freezes
@@ -35,15 +32,6 @@ export function workflowSystemSourceBody(body: WorkflowBlock): WorkflowBlock {
   }
   return result
 }
-
-const ID_PATTERN = /^[A-Za-z0-9_-]{1,96}$/
-const MAX_GOAL_LENGTH = 16_000
-const MAX_PROMPT_LENGTH = 16_000
-const MAX_DEPTH = 64
-// The collection cap counts logical items, not their container/return nodes.
-const MAX_BLOCKS = WORKFLOW_MAX_BATCH * 2 + 2
-const MAX_PROGRAM_TEXT = 4 * 1024 * 1024
-const ROLES: readonly WorkflowRole[] = ['orchestrator', 'worker', 'reviewer', 'summarizer']
 
 export interface WorkflowCapabilityInput {
   descriptor?: ProviderDescriptor
@@ -66,6 +54,7 @@ export function workflowPlanningPrompt(roles: readonly WorkflowRoleBinding[], go
     { kind: 'return', blockId: 'result', ref: { nodeId: 'combine' } }
   ] }
   return [
+    'A verification is {kind:"verification",blockId,required:{key:{check:existingCheckBlockId,result:expression},...},baseline?:expression}. Every required key names an actual check block; results/baseline select same-root main stepId handles, never self-reported pass/fail. Main verifies immutable input versions and command identities. Comparison reports check/diagnostic deltas; progress remains unavailable without coverage evidence. It launches no checks or Provider calls itself.',
     "Only author the plan. Do not perform the user's task, edit files, run checks, launch agents or invoke native Workflow tools while planning.",
     'You are the selected Scry workflow orchestrator. Produce only one JSON object with schemaVersion 1 and body. Allowed nodes are sequence, parallel, call, bind, branch, map, collect, loop, and exactly one final return. Every node must include kind and a unique blockId.',
     'A sequence is {kind:"sequence",blockId,blocks:[...]}. A parallel is {kind:"parallel",blockId,blocks:[...]}. Both containers use blocks, never children.',
@@ -86,18 +75,6 @@ export function workflowPlanningPrompt(roles: readonly WorkflowRoleBinding[], go
 export function workflowRevision(program: Omit<WorkflowProgram, 'programRevision'>): string {
   const canonical = JSON.stringify(program)
   return createHash('sha256').update(canonical).digest('hex')
-}
-
-function assertText(value: unknown, label: string, max: number): asserts value is string {
-  if (typeof value !== 'string' || !value.trim() || value.length > max) throw new Error(`${label} 无效`)
-}
-
-function assertId(value: unknown, label: string): asserts value is string {
-  if (typeof value !== 'string' || !ID_PATTERN.test(value)) throw new Error(`${label} 无效`)
-}
-
-function validateRole(value: unknown): asserts value is WorkflowRole {
-  if (typeof value !== 'string' || !(ROLES as readonly string[]).includes(value)) throw new Error('工作流角色无效')
 }
 
 export function validateWorkflowRolePreference(value: unknown, index = 0): Pick<WorkflowRoleBinding, 'role' | 'providerId' | 'requestedModel'> {
@@ -144,233 +121,10 @@ export function validateWorkflowRoleBinding(value: unknown, index = 0, frozen = 
     ...(input.runtimeIdentity ? { runtimeIdentity: input.runtimeIdentity as string } : {}) }
 }
 
-function rejectUnknownFields(input: Record<string, unknown>, allowed: readonly string[]): void {
-  for (const key of Object.keys(input)) if (!allowed.includes(key)) throw new Error(`程序块字段不受支持：${key}`)
-}
-
-function validateRefs(value: unknown, label: string): WorkflowOutputRef[] {
-  if (!Array.isArray(value) || value.length > MAX_BLOCKS) throw new Error(`${label} 引用无效`)
-  return value.map((entry) => {
-    if (!entry || typeof entry !== 'object') throw new Error(`${label} 引用无效`)
-    const input = entry as Record<string, unknown>
-    rejectUnknownFields(input, ['nodeId', 'path'])
-    assertId(input.nodeId, `${label} 引用节点`)
-    if (input.path !== undefined && (!Array.isArray(input.path) || input.path.length > 16 || !input.path.every(part => typeof part === 'string' && part.length <= 256))) throw new Error(workflowFrameCopy.invalid)
-    return { nodeId: input.nodeId, ...(input.path === undefined ? {} : { path: [...input.path] as string[] }) }
-  })
-}
-
-function validateBlock(value: unknown, seen: Set<string>, depth: number, count: { value: number; textBytes: number }): WorkflowBlock {
-  if (!value || typeof value !== 'object') throw new Error('程序块无效')
-  if (depth > MAX_DEPTH) throw new Error('程序嵌套超过上限')
-  const input = value as Record<string, unknown>
-  const forbidden = ['eval', 'javascript', 'js', 'import', 'shell', 'command', 'path']
-  if (forbidden.some((key) => key in input)) throw new Error('程序块包含不允许的宿主执行字段')
-  assertId(input.blockId, '程序块 ID')
-  if (seen.has(input.blockId)) throw new Error(`程序块 ID 重复：${input.blockId}`)
-  seen.add(input.blockId)
-  count.value += 1
-  if (count.value > MAX_BLOCKS) throw new Error(`程序块数量不能超过 ${MAX_BLOCKS}`)
-  if (input.kind === 'call') {
-    rejectUnknownFields(input, ['kind', 'blockId', 'role', 'prompt', 'inputRefs', 'outputSchema', 'replica'])
-    validateRole(input.role)
-    assertText(input.prompt, 'Agent 调用提示', MAX_PROMPT_LENGTH)
-    const outputSchema = input.outputSchema === undefined ? undefined : validateWorkflowValueSchema(input.outputSchema)
-    const replica = input.replica === undefined ? undefined : validateWorkflowExpression(input.replica)
-    count.textBytes += Buffer.byteLength(JSON.stringify(replica) ?? '') + Buffer.byteLength(input.prompt) + (outputSchema ? Buffer.byteLength(JSON.stringify(outputSchema)) : 0)
-    if (count.textBytes > MAX_PROGRAM_TEXT) throw new Error(workflowValueCopy.programLimit)
-    const inputRefs = input.inputRefs === undefined ? undefined : validateRefs(input.inputRefs, '输入')
-    return { kind: 'call', blockId: input.blockId, role: input.role, prompt: input.prompt,
-      ...(inputRefs ? { inputRefs } : {}), ...(replica ? { replica } : {}), ...(outputSchema ? { outputSchema } : {}) }
-  }
-  if (input.kind === 'replica' || input.kind === 'check') {
-    rejectUnknownFields(input, input.kind === 'replica' ? ['kind', 'blockId', 'source'] : ['kind', 'blockId', 'replica', 'check', 'authorization'])
-    const expression = input.kind === 'replica' ? input.source === undefined ? undefined : validateWorkflowExpression(input.source) : validateWorkflowExpression(input.replica)
-    count.textBytes += Buffer.byteLength(JSON.stringify(expression) ?? '')
-    if (count.textBytes > MAX_PROGRAM_TEXT) throw new Error(workflowValueCopy.programLimit)
-    if (input.kind === 'replica') return { kind: 'replica', blockId: input.blockId, ...(expression ? { source: expression } : {}) }
-    const check = validateWorkflowCheck(input.check), authorization = input.authorization === undefined ? undefined : validateWorkflowFrozenCheck(input.authorization)
-    if (authorization && JSON.stringify(check) !== JSON.stringify(validateWorkflowCheck({ argv: authorization.argv, cwd: authorization.cwd, timeoutMs: authorization.timeoutMs, parser: authorization.parser }))) throw new Error(workflowValueCopy.bindingContract)
-    count.textBytes += Buffer.byteLength(JSON.stringify({ check, authorization }))
-    if (count.textBytes > MAX_PROGRAM_TEXT) throw new Error(workflowValueCopy.programLimit)
-    return { kind: 'check', blockId: input.blockId, replica: expression!, check, ...(authorization ? { authorization } : {}) }
-  }
-  if (input.kind === 'bind') {
-    rejectUnknownFields(input, ['kind', 'blockId', 'value', 'schema'])
-    const expression = validateWorkflowExpression(input.value)
-    const schema = input.schema === undefined ? undefined : validateWorkflowValueSchema(input.schema)
-    count.textBytes += Buffer.byteLength(JSON.stringify(expression)) + (schema ? Buffer.byteLength(JSON.stringify(schema)) : 0)
-    if (count.textBytes > MAX_PROGRAM_TEXT) throw new Error(workflowValueCopy.programLimit)
-    return { kind: 'bind', blockId: input.blockId, value: expression, ...(schema ? { schema } : {}) }
-  }
-  if (input.kind === 'branch') {
-    rejectUnknownFields(input, ['kind', 'blockId', 'when', 'then', 'else', 'unknown'])
-    if (input.unknown === undefined) throw new Error(workflowFrameCopy.unknownArm)
-    const when = validateWorkflowExpression(input.when)
-    count.textBytes += Buffer.byteLength(JSON.stringify(when))
-    if (count.textBytes > MAX_PROGRAM_TEXT) throw new Error(workflowValueCopy.programLimit)
-    return { kind: 'branch', blockId: input.blockId, when,
-      then: validateBlock(input.then, seen, depth + 1, count),
-      else: validateBlock(input.else, seen, depth + 1, count),
-      unknown: input.unknown === 'blocked' ? 'blocked' : validateBlock(input.unknown, seen, depth + 1, count) }
-  }
-  if (input.kind === 'loop') {
-    rejectUnknownFields(input, ['kind', 'blockId', 'initial', 'stateSchema', 'invariants', 'iteration', 'best', 'outcome', 'maxIterations', 'body', 'until', 'carry', 'result', 'progress', 'policy'])
-    const loop = validateWorkflowLoop(input)
-    count.textBytes += Buffer.byteLength(JSON.stringify(loop))
-    if (count.textBytes > MAX_PROGRAM_TEXT) throw new Error(workflowValueCopy.programLimit)
-    return { ...loop, body: validateBlock(input.body, seen, depth + 1, count) }
-  }
-  if (input.kind === 'map' || input.kind === 'collect') {
-    rejectUnknownFields(input, input.kind === 'map' ? ['kind', 'blockId', 'items', 'item', 'key', 'maxItems', 'body'] : ['kind', 'blockId', 'items'])
-    const items = validateWorkflowExpression(input.items)
-    count.textBytes += Buffer.byteLength(JSON.stringify(items))
-    if (count.textBytes > MAX_PROGRAM_TEXT) throw new Error(workflowValueCopy.programLimit)
-    if (input.kind === 'collect') return { kind: 'collect', blockId: input.blockId, items }
-    assertId(input.item, 'map item')
-    if (!Array.isArray(input.key) || input.key.length > 16 || !input.key.every(part => typeof part === 'string' && part.length <= 256)) throw new Error(workflowCollectionCopy.key)
-    const maxItems = input.maxItems ?? WORKFLOW_MAX_BATCH
-    if (typeof maxItems !== 'number' || !Number.isInteger(maxItems) || maxItems < 0 || maxItems > WORKFLOW_MAX_BATCH) throw new Error(workflowCollectionCopy.limit)
-    return { kind: 'map', blockId: input.blockId, items, item: input.item, key: [...input.key] as string[], maxItems, body: validateBlock(input.body, seen, depth + 1, count) }
-  }
-  if (input.kind === 'return') {
-    rejectUnknownFields(input, ['kind', 'blockId', 'value', 'ref'])
-    const ref = input.ref === undefined ? undefined : validateRefs([input.ref], '返回')[0]
-    if (ref === undefined || input.value !== undefined) throw new Error('根 return 必须只引用一个已提交输出')
-    return { kind: 'return', blockId: input.blockId, ref }
-  }
-  if (input.kind === 'sequence' || input.kind === 'parallel') {
-    rejectUnknownFields(input, ['kind', 'blockId', 'blocks'])
-    if (!Array.isArray(input.blocks) || input.blocks.length === 0) throw new Error(`${input.kind} 必须包含程序块`)
-    if (input.blocks.length > WORKFLOW_MAX_BATCH) throw new Error(`批次不能超过 ${WORKFLOW_MAX_BATCH}`)
-    return {
-      kind: input.kind,
-      blockId: input.blockId,
-      blocks: input.blocks.map((child) => validateBlock(child, seen, depth + 1, count))
-    }
-  }
-  throw new Error(workflowFrameCopy.unsupportedBlock)
-}
-
 function referencedRoles(body: WorkflowBlock, roles = new Set<WorkflowRole>()): Set<WorkflowRole> {
   if (body.kind === 'call') roles.add(body.role)
   else for (const child of workflowChildBlocks(body)) referencedRoles(child, roles)
   return roles
-}
-
-const loopStateTypes = new WeakMap<WorkflowBlock, Map<string, Record<string, WorkflowValueSchema>>>()
-
-function validateReferenceDominance(body: WorkflowBlock, inputs: ReadonlyMap<string, WorkflowValueSchema> = new Map()): Map<string, Record<string, WorkflowValueSchema>> {
-  if (body.kind !== 'sequence' || body.blocks.at(-1)?.kind !== 'return') throw new Error('根 sequence 必须以 return 结束')
-  const available = new Map(inputs)
-  const resolvedLoops = new Map<string, Record<string, WorkflowValueSchema>>()
-  let returnCount = 0
-  const referenceType = (ref: WorkflowOutputRef, scope: ReadonlyMap<string, WorkflowValueSchema>, label = '输入'): WorkflowValueSchema => {
-    if (!scope.has(ref.nodeId)) throw new Error(`${label}引用不是已提交的前置输出：${ref.nodeId}`)
-    return inferWorkflowExpression(ref.path?.length ? { kind: 'field', source: { kind: 'ref', name: ref.nodeId }, path: ref.path } : { kind: 'ref', name: ref.nodeId }, scope)
-  }
-  const bind = (scope: Map<string, WorkflowValueSchema>, name: string, schema: WorkflowValueSchema): WorkflowValueSchema => {
-    if (scope.has(name)) throw new Error(workflowExpressionCopy.binding(name))
-    scope.set(name, schema)
-    return schema
-  }
-  const visit = (block: WorkflowBlock, scope: Map<string, WorkflowValueSchema>): WorkflowValueSchema => {
-    if (block.kind === 'call') {
-      for (const ref of block.inputRefs ?? []) referenceType(ref, scope)
-      if (block.replica && !workflowSchemaAssignable(inferWorkflowExpression(block.replica, scope), workflowReplicaValueSchema)) throw new Error(workflowValueCopy.bindingContract)
-      return bind(scope, block.blockId, block.outputSchema ?? { type: 'string' })
-    }
-    if (block.kind === 'replica' || block.kind === 'check') {
-      const expression = block.kind === 'replica' ? block.source : block.replica
-      if (expression && !workflowSchemaAssignable(inferWorkflowExpression(expression, scope), workflowReplicaValueSchema)) throw new Error(workflowValueCopy.bindingContract)
-      return bind(scope, block.blockId, block.kind === 'replica' ? workflowReplicaValueSchema : workflowCheckValueSchema)
-    }
-    if (block.kind === 'bind') {
-      const actual = inferWorkflowExpression(block.value, scope)
-      if (block.schema && !workflowSchemaAssignable(actual, block.schema)) throw new Error(workflowValueCopy.bindingContract)
-      return bind(scope, block.blockId, block.schema ?? actual)
-    }
-    if (block.kind === 'loop') {
-      const invariantScope = new Map(scope)
-      for (const [name, expression] of Object.entries(block.invariants)) bind(invariantScope, name, inferWorkflowExpression(expression, scope))
-      const stateScope = new Map(invariantScope)
-      for (const [name, expression] of Object.entries(block.initial)) {
-        const actual = inferWorkflowExpression(expression, invariantScope)
-        const expected = block.stateSchema[name] === 'inferred' ? actual : block.stateSchema[name] as WorkflowValueSchema
-        if (!workflowSchemaAssignable(actual, expected)) throw new Error(workflowLoopCopy.schema)
-        bind(stateScope, name, expected)
-      }
-      resolvedLoops.set(block.blockId, Object.fromEntries(Object.keys(block.initial).map(name => [name, stateScope.get(name)!])))
-      if (block.iteration) bind(stateScope, block.iteration, { type: 'number' })
-      const bodyScope = new Map(stateScope)
-      visit(block.body, bodyScope)
-      if (!workflowBooleanSchema(inferWorkflowExpression(block.until, bodyScope))) throw new Error(workflowLoopCopy.condition)
-      for (const [name, expression] of Object.entries(block.carry)) if (!workflowSchemaAssignable(inferWorkflowExpression(expression, bodyScope), stateScope.get(name)!)) throw new Error(workflowLoopCopy.schema)
-      if (block.progress !== 'bounded_only') {
-        if (inferWorkflowExpression(block.progress.baseline, stateScope).type === 'collection' || inferWorkflowExpression(block.progress.key, bodyScope).type === 'collection') throw new Error(workflowLoopCopy.progress)
-        if (!workflowBooleanSchema(inferWorkflowExpression(block.progress.improved, bodyScope))) throw new Error(workflowLoopCopy.condition)
-      }
-      const result = inferWorkflowExpression(block.result, stateScope)
-      bind(scope, block.outcome, workflowLoopOutcomeSchema)
-      return bind(scope, block.blockId, result)
-    }
-    if (block.kind === 'map' || block.kind === 'collect') {
-      const source = inferWorkflowExpression(block.items, scope)
-      if (block.kind === 'collect') {
-        if (source.type !== 'collection') throw new Error(workflowCollectionCopy.source)
-        return bind(scope, block.blockId, { type: 'array', items: source.items, maxItems: WORKFLOW_MAX_BATCH })
-      }
-      if (scope.has(block.item)) throw new Error(workflowExpressionCopy.binding(block.item))
-      const itemSchema = workflowItemsSchema(source)
-      if (source.type === 'collection' && (block.key.length !== 1 || block.key[0] !== 'key')) throw new Error(workflowCollectionCopy.collectionKey)
-      const local = new Map(scope).set(block.item, itemSchema)
-      const keySchema = inferWorkflowExpression({ kind: 'field', source: { kind: 'ref', name: block.item }, path: block.key }, local)
-      if (!workflowScalarSchema(keySchema)) throw new Error(workflowCollectionCopy.key)
-      return bind(scope, block.blockId, { type: 'collection', items: collectionItemSchema(visit(block.body, local)) })
-    }
-    if (block.kind === 'branch') {
-      if (!workflowBooleanSchema(inferWorkflowExpression(block.when, scope))) throw new Error(workflowFrameCopy.expectedBoolean)
-      const arms: Array<['then' | 'else' | 'unknown', WorkflowBlock]> = [['then', block.then], ['else', block.else]]
-      if (block.unknown !== 'blocked') arms.push(['unknown', block.unknown])
-      const variants: WorkflowValueSchema[] = arms.map(([arm, child]) => ({
-        type: 'object', properties: { arm: { type: 'enum', values: [arm] }, value: visit(child, new Map(scope)) }, required: ['arm', 'value']
-      }))
-      return bind(scope, block.blockId, { type: 'union', variants })
-    }
-    if (block.kind === 'return') {
-      if (block !== body.blocks.at(-1)) throw new Error('return 只能位于根 sequence 的末尾')
-      returnCount++
-      return referenceType(block.ref, scope, '返回')
-    }
-    if (block.kind === 'sequence') {
-      let schema: WorkflowValueSchema = { type: 'null' }
-      for (const child of block.blocks) schema = visit(child, scope)
-      return bind(scope, block.blockId, schema)
-    }
-    const inherited = new Map(scope)
-    const exported = new Map<string, WorkflowValueSchema>()
-    const properties: Record<string, WorkflowValueSchema> = Object.create(null) as Record<string, WorkflowValueSchema>
-    for (const child of block.blocks) {
-      const branchScope = new Map(inherited)
-      properties[child.blockId] = visit(child, branchScope)
-      for (const [name, schema] of branchScope) if (!inherited.has(name)) {
-        if (exported.has(name)) throw new Error(workflowExpressionCopy.binding(name))
-        exported.set(name, schema)
-      }
-    }
-    for (const [name, schema] of exported) bind(scope, name, schema)
-    return bind(scope, block.blockId, { type: 'object', properties, required: Object.keys(properties) })
-  }
-  visit(body, available)
-  if (returnCount !== 1) throw new Error('工作流程序必须包含且只能包含一个根 return')
-  loopStateTypes.set(body, resolvedLoops)
-  return resolvedLoops
-}
-
-export function workflowLoopStateTypes(body: WorkflowBlock, nodeId: string): Record<string, WorkflowValueSchema> {
-  const types = (loopStateTypes.get(body) ?? validateReferenceDominance(body)).get(nodeId)
-  if (!types) throw new Error(workflowLoopCopy.schema)
-  return types
 }
 
 export { ROLES as WORKFLOW_ROLES }

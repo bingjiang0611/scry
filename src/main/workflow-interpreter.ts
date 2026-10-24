@@ -5,6 +5,7 @@ import { workflowCollectionCopy, workflowValueCopy, workflowFrameCopy as copy } 
 import { workflowArrayAuthorities, workflowCollectionFields, workflowExpressionReferences, workflowField, workflowValueKey } from './workflow-expressions'
 import { WorkflowControl, type WorkflowControlScope } from './workflow-control'
 import { WorkflowLoopExecution } from './workflow-loop-execution'
+import { retainPhase, unavailable, workflowExecutionPhase } from './workflow-interpreter-results'
 import { matchesWorkflowValue } from './workflow-values'
 
 export type WorkflowInterpreterState = {
@@ -20,9 +21,6 @@ type Activation =
   | { stage: 'enter'; block: WorkflowBlock; scope: WorkflowControlScope }
   | (Base & { stage: 'sequence'; block: Extract<WorkflowBlock, { kind: 'sequence' }>; cursor: number; outcomes: WorkflowAttemptOutcome[]; value: WorkflowEvaluation; partial: boolean; terminal?: WorkflowControlFrame['phase']; critical: boolean })
   | (Base & { stage: 'branch'; block: Extract<WorkflowBlock, { kind: 'branch' }>; arm: 'then' | 'else' | 'unknown'; decision: WorkflowEvaluation; childScope: WorkflowControlScope })
-const retainPhase = (previous: WorkflowControlFrame['phase'], next: WorkflowControlFrame['phase']): WorkflowControlFrame['phase'] =>
-  (['unknown', 'stopped', 'failed', 'blocked', 'completed'] as const).find(phase => phase === previous || phase === next) ?? 'unknown'
-const unavailable = (reason = copy.failedValue): WorkflowEvaluation => ({ state: 'unknown', reason, derivedFrom: [] })
 
 /** The sole WorkflowProgram evaluator. Each fork owns an explicit activation
  * stack; sequence/branch nesting never uses the JavaScript call stack. Native
@@ -30,13 +28,10 @@ const unavailable = (reason = copy.failedValue): WorkflowEvaluation => ({ state:
 export class WorkflowInterpreter {
   constructor(private readonly control: WorkflowControl, private readonly state: WorkflowInterpreterState,
     private readonly call: (block: Extract<WorkflowBlock, { kind: 'call' }>, scope: WorkflowControlScope, frame?: WorkflowControlFrame) => Promise<{ outcome: WorkflowAttemptOutcome; value: WorkflowEvaluation }>, private readonly parallelism: () => number,
-    private readonly system: (block: Extract<WorkflowBlock, { kind: 'replica' | 'check' }>, scope: WorkflowControlScope, frame?: WorkflowControlFrame) => Promise<{ value: WorkflowEvaluation; phase: WorkflowControlFrame['phase'] }>) {}
+    private readonly system: (block: Extract<WorkflowBlock, { kind: 'replica' | 'check' | 'verification' }>, scope: WorkflowControlScope, frame?: WorkflowControlFrame) => Promise<{ value: WorkflowEvaluation; phase: WorkflowControlFrame['phase'] }>) {}
 
   private phase(outcomes: WorkflowAttemptOutcome[], scope: WorkflowControlScope): WorkflowControlFrame['phase'] {
-    return outcomes.some(outcome => !outcome.settled || outcome.state === 'unknown') ? 'unknown'
-      : this.state.stopped ? 'stopped'
-        : scope.blockedReason || outcomes.some(outcome => outcome.state === 'blocked') ? 'blocked'
-          : outcomes.some(outcome => outcome.state !== 'completed') ? 'failed' : 'completed'
+    return workflowExecutionPhase(outcomes, this.state.stopped, scope.blockedReason)
   }
   private async finish(block: WorkflowBlock, scope: WorkflowControlScope, frame: WorkflowControlFrame | undefined,
     value: WorkflowEvaluation, phase: WorkflowControlFrame['phase'], outcomes: WorkflowAttemptOutcome[] = [], reportPartial = false): Promise<Result> {
@@ -131,7 +126,7 @@ export class WorkflowInterpreter {
           returned = await this.finish(current, top.scope, frame, value, this.phase([outcome], top.scope), [outcome])
           break
         }
-        case 'replica': case 'check': {
+        case 'replica': case 'check': case 'verification': {
           const result = await this.system(current, top.scope, frame)
           if (result.phase === 'blocked' && result.value.state === 'unknown') top.scope.blockedReason = result.value.reason
           stack.pop()

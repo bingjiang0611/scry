@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { exerciseWorkflowVerification } from './workflow-verification-ipc-checks.mjs'
 import { glob, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -51,7 +52,8 @@ export async function exerciseWorkflowSystemSteps(evaluate, fixture) {
     results.push({ exitCode, observed: native.state, agentAttempts: 0, nativeExecutions: 1, sourceUnchanged: true })
   }
   const diagnosticConsumption = await exerciseWorkflowDiagnosticConsumption(evaluate, fixture)
-  return { test: 'main-owned SystemSteps production preload/main IPC', results, diagnosticConsumption }
+  const verificationComparison = await exerciseWorkflowVerification(evaluate, fixture)
+  return { test: 'main-owned SystemSteps production preload/main IPC', results, diagnosticConsumption, verificationComparison }
 }
 
 async function exerciseWorkflowDiagnosticConsumption(evaluate, fixture) {
