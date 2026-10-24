@@ -14,6 +14,7 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
     contents.sendInputEvent({ type: 'mouseMove', ...point })
     contents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
     contents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
+    await wait('window.__nativeUiPointerReceipt?.trusted && window.__nativeUiPointerReceipt.targetMatched')
   }
   const settle = () => read(`Promise.all(document.getAnimations().filter(a=>a.effect?.getComputedTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})))`)
   const screenshot = async name => {
@@ -26,7 +27,9 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
   for (const id of ['cache-a', 'cache-b', 'cache-a']) {
     await select(id); await ready(id); await settle()
     if (await read("!document.querySelector('.runtime-composer textarea').value")) {
-      await click('.runtime-composer textarea'); await contents.insertText(`draft ${id}`)
+      await click('.runtime-composer textarea')
+      await wait("document.activeElement===document.querySelector('.runtime-composer textarea')")
+      await contents.insertText(`draft ${id}`)
       await wait("document.querySelector('.runtime-composer textarea').value.length>0")
     }
   }
@@ -64,7 +67,14 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
       }
       state.replacement ||= document.getAnimations().some(a=>a.id==='scry-structure' && a.effect.getTiming().duration===180 && a.effect.getKeyframes().every(frame=>!('transform' in frame)))
     }
-    window.__loadingObserver=new MutationObserver(scan)
+    window.__loadingObserver=new MutationObserver(mutations => {
+      // Inspect inserted subtrees even if React removed them again before this callback.
+      // A current-DOM-only scan cannot prove that a short request never mounted a loader.
+      const request=window.loadingFixture.records.find(r=>r.kind==='session' && r.start>=state.since)
+      if(request && mutations.some(m=>[...m.addedNodes].some(n=>n instanceof Element &&
+        (n.matches('.chat-session-evidence-gap[data-status=loading]') || n.querySelector('.chat-session-evidence-gap[data-status=loading]'))))) state.seen=true
+      scan()
+    })
     window.__loadingObserver.observe(document.body,{subtree:true,childList:true,attributes:true})
     const frame=()=>{scan(); window.__loadingFrame=requestAnimationFrame(frame)}
     window.__loadingFrame=requestAnimationFrame(frame)
