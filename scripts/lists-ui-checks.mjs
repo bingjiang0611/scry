@@ -58,6 +58,24 @@ export async function exerciseLists(contents, win, screenshotPrefix = '', pointe
     await expandTools(2)
   }
   win.setSize(1400, 900)
+  if (campaign === 'material') {
+    contents.debugger.attach('1.3')
+    for (const theme of ['dark', 'light']) {
+      await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-transparency', value: 'no-preference' }] })
+      await read(`document.documentElement.dataset.theme=${JSON.stringify(theme)};document.documentElement.dataset.platform='other'`)
+      const colours = () => read("({root:getComputedStyle(document.documentElement).backgroundColor,body:getComputedStyle(document.body).backgroundColor,sidebar:getComputedStyle(document.querySelector('.sidebar')).backgroundColor})")
+      const original = await colours()
+      check(Object.values(original).every(colour=>!colour.includes('rgba')), 'non-macOS material changed opaque surfaces')
+      await read("document.documentElement.dataset.platform='macos'")
+      const material = await colours()
+      check(material.root==='rgba(0, 0, 0, 0)' && material.body==='rgba(0, 0, 0, 0)' && material.sidebar.endsWith(theme==='dark' ? '0.98)' : '0.996)'), 'macOS material was blocked or lost its contrast-preserving base: '+JSON.stringify({ theme, material }))
+      await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-transparency', value: 'reduce' }] })
+      const reduced = await colours()
+      check(JSON.stringify(reduced)===JSON.stringify(original), 'Reduce Transparency did not restore the original opaque surfaces')
+    }
+    contents.debugger.detach()
+    return { macOSMaterialCss: true, nonMacOSUnchanged: true, reducedTransparencyOpaque: true }
+  }
   if (campaign === 'refs') {
     await wait("window.listFixture.turnRefs.size===1")
     const runId = await read("[...window.listFixture.turnRefs.keys()][0]")
