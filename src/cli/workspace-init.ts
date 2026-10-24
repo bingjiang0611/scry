@@ -187,17 +187,28 @@ function providerHookSource(): string {
   return `#!/bin/sh
 set -u
 workspace="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 0
-IFS= read -r scry_bin < "$workspace/.scry/cli-path" || exit 0
-IFS= read -r node_bin_dir < "$workspace/.scry/node-bin-dir" || exit 0
+# Failure-only diagnostics: the successful fast path starts no extra process.
+skip() {
+  (umask 077; mkdir -p "$workspace/.scry/logs" &&
+    printf '%s\\t%s\\t%s\\t%s\\t%s\\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$provider" "$event" "$1" "\${2:-0}" >> "$workspace/.scry/logs/hook-skip.log") 2>/dev/null || :
+  exit 0
+}
+provider="\${1:-unknown}"
+event="\${2:-unknown}"
+IFS= read -r scry_bin < "$workspace/.scry/cli-path" || skip cli_path_missing
+IFS= read -r node_bin_dir < "$workspace/.scry/node-bin-dir" || skip node_bin_dir_missing
 PATH="$node_bin_dir:$PATH"
 export PATH SCRY_HANDLER_ID=${HANDLER_ID}
 if [ "\${SCRY_RECORDER_MANAGED:-0}" = "1" ]; then
-  [ -x "\${SCRY_CLI_PATH:-}" ] || exit 0
+  [ -x "\${SCRY_CLI_PATH:-}" ] || skip managed_cli_invalid
   scry_bin="$SCRY_CLI_PATH"
-  exec "$scry_bin" recorder hook --provider "$1" --event "$2" --workspace "$workspace" --stdin --quiet --managed
+  "$scry_bin" recorder hook --provider "$provider" --event "$event" --workspace "$workspace" --stdin --quiet --managed
+  result=$?
+  [ "$result" = "0" ] || skip managed_cli_failed "$result"
+  exit 0
 fi
 # Read the payload once so the fallback can resend it: stdin cannot be replayed.
-payload="$(cat)"
+payload="$(cat)" || skip payload_read_failed
 # Posting straight to a running daemon skips a Node start per event, which dominates hook cost.
 # Anything other than HTTP 200 falls through to the CLI, so an old or wedged daemon cannot drop events.
 socket="\${SCRY_RECORDER_SOCKET:-$workspace/.scry/recorder-v1.sock}"
@@ -212,8 +223,10 @@ if [ "\${SCRY_RECORDER_TRANSPORT:-}" != "direct" ] && [ -S "$socket" ] && comman
     -H 'content-type: application/json' --data-binary @- http://localhost/v1/hook 2>/dev/null)" || code=""
   [ "$code" = "200" ] && exit 0
 fi
-[ -x "$scry_bin" ] || exit 0
-printf '%s' "$payload" | "$scry_bin" recorder hook --provider "$1" --event "$2" --workspace "$workspace" --stdin --quiet
+[ -x "$scry_bin" ] || skip cli_not_executable
+printf '%s' "$payload" | "$scry_bin" recorder hook --provider "$provider" --event "$event" --workspace "$workspace" --stdin --quiet
+result=$?
+[ "$result" = "0" ] || skip cli_failed "$result"
 exit 0
 `
 }

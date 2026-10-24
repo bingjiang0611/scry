@@ -12,6 +12,7 @@ import {
   verifyStore
 } from '../core/turn-recorder/store.js'
 import { detectWorkspaceProviders, providerHookInstalled, type InitProvider } from './workspace-init.js'
+import { readHookSkips, type HookSkipSummary } from '../core/turn-recorder/hook-diagnostics.js'
 
 /**
  * Sanitised diagnostics for maintainer support. It carries versions, detection results, config
@@ -35,6 +36,7 @@ export interface SupportBundle {
         commitHook: { activation: string; ackedThrough: number | null; notifyBacklog: number | null }
       }
   providers: Array<{ provider: string; detected: boolean; configured: boolean; hookEvents: number; lastEventAt: string | null }>
+  hookSkips: HookSkipSummary
   recorderLogTail: string[]
   omitted: string[]
 }
@@ -99,6 +101,7 @@ export async function collectSupportBundle(
       capture: enablement.enabled ? enablement.config.capture : null
     },
     providers,
+    hookSkips: await readHookSkips(workspaceRoot),
     omitted
   }
 

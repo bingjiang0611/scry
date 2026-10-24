@@ -28,6 +28,7 @@ import { writeRecorderContent } from './content-store.js'
 import { turnChangeHints } from './change-journal.js'
 import { commitHookEnv, resolveCommitHookActivation } from './commit-hook-grant.js'
 import { recordProviderActivity } from './provider-activity.js'
+import { recordInvalidHookConfig } from './hook-diagnostics.js'
 import { discoverRepositories, resolveRecorderEnablement, type RecorderEnablement } from './config.js'
 import { beginGitTurnDiff, cancelGitTurnDiff, finishGitTurnDiff, limitTurnDiffPatchBytes } from './git.js'
 import { appendRotatingLog, listFiles, readJson, writeJsonAtomic } from './io.js'
@@ -3114,7 +3115,13 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
     payload: trustedManagedIdentityPayload(input.payload, input.managed, input.env ?? process.env)
   }
   const enablement = await resolveRecorderEnablement(input.workspace, input.env)
-  if (!enablement.enabled) return { status: 'disabled', reason: enablement.reason }
+  if (!enablement.enabled) {
+    if (enablement.reason === 'invalid_config') {
+      // Observational hook remains fail-open even if the diagnostic directory is unwritable.
+      await recordInvalidHookConfig(input.workspace, input.provider, input.event).catch(() => undefined)
+    }
+    return { status: 'disabled', reason: enablement.reason }
+  }
   const sessionId = sessionIdOf(input.payload)
   if (!sessionId) {
     await recordError(enablement.dataRoot, `missing session id for ${input.event}`)

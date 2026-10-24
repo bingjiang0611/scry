@@ -355,6 +355,10 @@ scry support-bundle create --out ./scry-support.json    # 写文件（0600）
 
 正常运行**不产生日志文件**;`.scry/logs/recorder.log` 只在出错时创建,单文件 1 MiB 轮转、保留一代。
 
+hook 路径/Node 路径缺失、managed CLI 无效、CLI 非零退出和配置无效会写入工作区固定位置 `.scry/logs/hook-skip.log`（即使配置指定了其他 dataDir）。仅记录 UTC 时间、provider、event、原因码和 CLI 返回码，不含 payload；对 Provider 的返回码仍为 0。时间和目录命令只在失败分支执行，daemon 正常快路径不新增进程。`recorder status`、`doctor` 和 support-bundle 的 `hookSkips` 汇总保留日志窗口的条数、最近时间；不是历史累计数。`doctor` 对已观测 skip 报 `error`（退出 5），对 invalid_config 报 `error`（退出 3）；主动禁用仍走原有路径。
+
+shell 只追加；CLI 诊断在文件超过 1 MiB 时轮转并保留一代，每代最多读取末尾 1 MiB，截断时 `hookSkips.truncated=true`。只运行失败 hook 而不调用 CLI 诊断时，磁盘日志可暂时超过阈值；这不是硬磁盘配额。目录不可写时无法保证留痕，hook 仍 fail open。修复原因后可由用户保存并移走日志及 `.1` 来清除该窗口的告警。新增 shell 留痕需执行 `scry integrations repair --yes`；仅 invalid_config 和 CLI 诊断改进升级 CLI 即可生效。不增加 CLI 路径自动回退。
+
 缺少开始事件的终态不会仅凭会话存在就判为 duplicate。无法通过已提交 turn ID 或已提交轮次的明确时间边界证明重复时，事件保存到 `runtime/<provider>/<session-key>/orphans/<payload-hash>.json`，`health.json` 的 `missingStartTerminals` 和 `orphanEvents` 各加一，并写 `recorder.log`；相同 payload 重放不重复计数。工具 orphan 同样保存 payload。原始 payload 使用 content envelope，受 `toolContentFieldBytes` / `toolContentTurnBytes` 上限约束；只有 prompt、assistant、完整工具采集都启用时才保存正文，否则标明 `capture_policy` 省略。orphan 不是 record，不会猜测 token、轮首时间或 diff。
 
 ## 证据口径

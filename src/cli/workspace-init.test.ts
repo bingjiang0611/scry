@@ -1,6 +1,7 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { chmod, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { createServer } from 'node:net'
 import { join, resolve } from 'node:path'
 import { runInNewContext } from 'node:vm'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -43,6 +44,36 @@ describe('scry init', () => {
       if (reason.endsWith('_failed')) expect(log.trim().split('\t').at(-1)).toBe('17')
     }
   )
+
+  it('daemon fast path starts only the existing dirname, cat and curl commands', async () => {
+    const root = await gitWorkspace()
+    await initWorkspace({ workspace: root, providers: 'codex', cliPath: process.execPath })
+    const bin = join(root, 'bin')
+    await mkdir(bin)
+    const calls = join(root, 'calls')
+    for (const [name, body] of Object.entries({
+      dirname: 'exec /usr/bin/dirname "$@"', cat: 'exec /bin/cat "$@"', curl: "printf 200",
+      date: 'exit 99', mkdir: 'exit 99'
+    })) {
+      const path = join(bin, name)
+      await writeFile(path, `#!/bin/sh\nprintf '%s\\n' '${name}' >> "$CALLS"\n${body}\n`)
+      await chmod(path, 0o700)
+    }
+    await writeFile(join(root, '.scry/node-bin-dir'), `${bin}\n`)
+    const socket = join(root, 'daemon.sock')
+    const server = createServer()
+    await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(socket, resolve) })
+    try {
+      const result = spawnSync('/bin/sh', [join(root, '.scry/provider-hook.sh'), 'codex', 'Stop'], {
+        input: '{}', encoding: 'utf8', env: { PATH: bin, CALLS: calls, SCRY_RECORDER_SOCKET: socket }
+      })
+      expect(result.status).toBe(0)
+      expect((await readFile(calls, 'utf8')).trim().split('\n')).toEqual(['dirname', 'cat', 'curl'])
+      await expect(readFile(join(root, '.scry/logs/hook-skip.log'))).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+    }
+  })
 
   it('幂等合并三种 JSON Hook 并安装 OpenCode 插件', async () => {
     const root = await gitWorkspace()
