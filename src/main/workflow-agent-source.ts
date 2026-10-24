@@ -2,13 +2,13 @@ import { lstat, realpath } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { ScGit } from './source-control/git'
 import { ScProcess } from './source-control/process'
-import type { WorkflowValue } from '../shared/workflow'
+import type { WorkflowRepositorySource } from '../shared/workflow-system'
 import { workflowRevisionCopy as copy } from '../shared/constants/workflow-revision-copy'
 
 /** Repository revision is an effective input even when checkout bytes match.
  * Reuse the read-only, environment-scrubbed git transport; no hooks/filters or
  * caller-provided argv. Non-repository fixtures do not require an installed CLI. */
-export async function workflowAgentSource(workspace: string, environment: () => NodeJS.ProcessEnv): Promise<WorkflowValue> {
+export async function workflowAgentSource(workspace: string, environment: () => NodeJS.ProcessEnv): Promise<WorkflowRepositorySource> {
   let directory = await realpath(workspace)
   for (;;) {
     let repository = false

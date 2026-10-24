@@ -39,6 +39,7 @@ export const workflowCheckValueSchema: WorkflowValueSchema = { type: 'object', p
 export const WORKFLOW_MAX_SYSTEM_STEPS = 16384
 /** A bounded manifest observation, not an atomic filesystem snapshot, saved
  * file contents, sandbox audit, or proof of which process caused a change. */
+export type WorkflowRepositorySource = { kind: 'non_repository' } | { kind: 'repository'; root: string; head: string }
 export type WorkflowInputSnapshot = {
   inputHash: string
   entryCount: number
@@ -46,6 +47,7 @@ export type WorkflowInputSnapshot = {
   manifestBytes: number
   startedAt: number
   finishedAt: number
+  repositorySource?: WorkflowRepositorySource
   reference: WorkflowValueReference
 }
 export type WorkflowInputChange = { path: string; kind: 'added' | 'modified' | 'removed' }

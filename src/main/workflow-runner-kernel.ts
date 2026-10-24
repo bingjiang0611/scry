@@ -1,19 +1,20 @@
+import { runWorkflowCall } from './workflow-runner-call'
 import { type WorkflowRunnerOptions } from './workflow-runner-contracts'
 import { WorkflowSlots } from './workflow-slots'
 import { WorkflowRunnerEffects } from './workflow-runner-effects'
 import { runWorkflowSystem } from './workflow-runner-system'
 import { randomUUID } from 'node:crypto'
-import { workflowControlCopy, workflowFrameCopy, workflowRecoveryCopy } from '../shared/constants/copy'
-import type { WorkflowApproval, WorkflowEvaluation, WorkflowPlanPreview, WorkflowProgress, WorkflowRoleBinding } from '../shared/workflow'
+import { workflowControlCopy, workflowRecoveryCopy } from '../shared/constants/copy'
+import type { WorkflowApproval, WorkflowPlanPreview, WorkflowProgress, WorkflowRoleBinding } from '../shared/workflow'
 import { WORKFLOW_MAX_STOP_REQUESTS, workflowProgressSnapshot } from '../shared/workflow'
-import { decodeWorkflowOutput } from './workflow-values'
+
 import { WorkflowControl } from './workflow-control'
 import { WorkflowInterpreter, type WorkflowInterpreterState } from './workflow-interpreter'
 import { assertWorkflowRecovery, workflowRecordFingerprint } from './workflow-recovery'
 import type { WorkflowRetryTarget } from '../shared/workflow-api'
 
 import type { WorkflowStore, WorkflowStoreRecord } from './workflow-store'
-import { assertWorkflowRevisionReuseInputs } from './workflow-revision-reuse'
+
 import type { WorkflowRevisionReuse, WorkflowRevisionTarget } from './workflow-revisions'
 import type { WorkflowSystemHost } from './workflow-system-host'
 import { workflowLiveDiagnostics, WorkflowLiveObservationTracker, trackWorkflowLiveAttempt } from './workflow-live-observation'
@@ -119,28 +120,9 @@ export class WorkflowRunnerKernel {
     let finalCommitted = false
     try {
       const control = new WorkflowControl(this.store, preview, { record, previous, generationId })
-      const interpreter = new WorkflowInterpreter(control, controller, async (block, scope, frame) => {
-        if (record.revisions?.at(-1)?.reuse.some(entry => entry.nodeId === block.blockId)) {
-          const role = preview.program.roles.find(candidate => candidate.role === block.role)!
-          await this.effects.options.beforeDispatch?.(role, preview.workspace)
-        }
-        await assertWorkflowRevisionReuseInputs(this.store, this.systems, record, block.blockId)
-        const recovered = control.recoveredOutcome(block, scope, frame)
-        if (recovered && block.replica) {
-          const input = await control.evaluate(block.replica, scope, block.blockId, () => controller.stopped)
-          const intent = record.intents.find(value => value.attemptId === recovered.attemptId)
-          if (JSON.stringify(intent?.replica) !== JSON.stringify(input.state === 'known' ? input.replica : undefined)) throw new Error(workflowRecoveryCopy.frame)
-        }
-        const outcome = recovered ?? await this.effects.dispatch(preview, block, record, controller, activeStops, scope, control)
-        const output = recovered ? await this.store.loadOutput(preview.workflowId, outcome) : outcome.output
-        let value: WorkflowEvaluation = { state: 'unknown', reason: outcome.error ?? workflowFrameCopy.failedValue, derivedFrom: ['attempt:' + outcome.attemptId] }
-        if (outcome.state === 'completed' && outcome.settled && output !== undefined) {
-          const key = preview.workflowId + ':' + preview.programRevision + ':' + outcome.attemptId
-          const data = block.outputSchema ? this.effects.structuredOutputs.get(key) ?? decodeWorkflowOutput(output, block.outputSchema) : output
-          value = { state: 'known', value: data, derivedFrom: ['attempt:' + outcome.attemptId] }
-        }
-        return { outcome, value }
-      }, () => this.slots.limit, (block, scope, frame) => runWorkflowSystem(this.effects, preview, block, scope, frame, control, record, controller, activeStops))
+      const interpreter = new WorkflowInterpreter(control, controller,
+        (block, scope, frame) => runWorkflowCall(this.effects, this.store, preview, control, record, controller, activeStops, block, scope, frame),
+        () => this.slots.limit, (block, scope, frame) => runWorkflowSystem(this.effects, preview, block, scope, frame, control, record, controller, activeStops))
       const { outcomes, phase: controlPhase } = await interpreter.run(preview.program.body, control.root)
       progress.state = controlPhase === 'unknown' || outcomes.some(outcome => outcome.state === 'unknown' || !outcome.settled) ? 'unknown' : (controlPhase === 'blocked' || control.root.blockedReason || outcomes.some(outcome => outcome.state === 'blocked')) ? 'blocked' : controller.stopped || controlPhase === 'stopped' ? 'stopped' : controlPhase === 'failed' || outcomes.some(outcome => outcome.state === 'failed') ? 'failed' : 'completed'
       const legacyReport = !control.framed && controller.returnPath === undefined && controller.returnNode !== undefined ? outcomes.find(outcome =>

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { WORKFLOW_MAX_ATTEMPTS, WORKFLOW_MAX_OUTPUT_LENGTH, type WorkflowAttemptOutcome, type WorkflowBlock, type WorkflowEvaluation, type WorkflowLiveObservation, type WorkflowPlanPreview, type WorkflowProgress, type WorkflowRoleBinding, type WorkflowValue } from '../shared/workflow'
+import { WORKFLOW_MAX_ATTEMPTS, WORKFLOW_MAX_OUTPUT_LENGTH, type WorkflowControlFrame, type WorkflowAttemptOutcome, type WorkflowBlock, type WorkflowEvaluation, type WorkflowLiveObservation, type WorkflowPlanPreview, type WorkflowProgress, type WorkflowRoleBinding, type WorkflowValue } from '../shared/workflow'
 import { workflowFrameCopy, workflowSystemCopy } from '../shared/constants/copy'
 import { WorkflowScopeError, type WorkflowProviderExecution, type WorkflowRunnerOptions } from './workflow-runner-contracts'
 import type { WorkflowSlots } from './workflow-slots'
@@ -37,7 +37,7 @@ export class WorkflowRunnerEffects {
     try { return await action() } finally { release() }
   }
 
-  async dispatch(preview: WorkflowPlanPreview, block: Extract<WorkflowBlock, { kind: 'call' }>, record: WorkflowStoreRecord, controller: { stopped: boolean }, activeStops: Set<() => boolean>, scope: WorkflowControlScope, control: WorkflowControl): Promise<WorkflowAttemptOutcome> {
+  async dispatch(preview: WorkflowPlanPreview, block: Extract<WorkflowBlock, { kind: 'call' }>, record: WorkflowStoreRecord, controller: { stopped: boolean }, activeStops: Set<() => boolean>, scope: WorkflowControlScope, control: WorkflowControl, frame?: WorkflowControlFrame): Promise<WorkflowAttemptOutcome> {
     if (controller.stopped) return this.outcome(preview, block, 'stopped', { settled: true, error: '工作流已停止' })
     const role = preview.program.roles.find((candidate) => candidate.role === block.role)
     if (!role) throw new Error(`程序引用了未配置角色：${block.role}`)
@@ -69,7 +69,7 @@ export class WorkflowRunnerEffects {
           return { outcome }
         }
         if (!controller.stopped) {
-          try { await this.reserveDispatch(preview, block, role, taskId, attemptId, record, controller, replicaInput) } catch (error) {
+          try { await this.reserveDispatch(preview, block, role, taskId, attemptId, record, controller, replicaInput, frame) } catch (error) {
             // No executor has been called. Persist that fact before releasing capacity;
             // persistence failure still propagates and retains the uncertain reservation.
             const outcome = this.outcome(preview, block, 'failed', { attemptId, taskId, settled: true, error: String(error) })
@@ -203,13 +203,13 @@ export class WorkflowRunnerEffects {
   }
 
   private async reserveDispatch(preview: WorkflowPlanPreview, block: Extract<WorkflowBlock, { kind: 'call' }>, role: WorkflowRoleBinding,
-    taskId: string, attemptId: string, record: WorkflowStoreRecord, controller: { stopped: boolean }, replicaInput?: WorkflowEvaluation): Promise<void> {
+    taskId: string, attemptId: string, record: WorkflowStoreRecord, controller: { stopped: boolean }, replicaInput?: WorkflowEvaluation, frame?: WorkflowControlFrame): Promise<void> {
     await this.reserve(async () => {
       if (controller.stopped) return
       if (record.progress.dispatchAttempts >= WORKFLOW_MAX_ATTEMPTS) throw new Error(`已达到根执行 ${WORKFLOW_MAX_ATTEMPTS} 次 Agent 派发上限`)
       const retry = workflowRetryAdmission(record, taskId)
       record.progress.dispatchAttempts += 1
-      record.intents.push({ workflowId: preview.workflowId, programRevision: preview.programRevision, taskId, attemptId, ...retry,
+      record.intents.push({ workflowId: preview.workflowId, programRevision: preview.programRevision, taskId, attemptId, ...retry, ...(frame?.callInputRef ? { callFrameId: frame.frameId } : {}),
         ...(replicaInput?.state === 'known' && replicaInput.replica ? { replica: replicaInput.replica } : {}),
         role: role.role, providerId: role.providerId, ...(role.requestedModel ? { requestedModel: role.requestedModel.id } : {}), createdAt: this.options.now() })
       record.progress.attempts.push(this.outcome(preview, block, 'intent_persisted', { taskId, attemptId, settled: false }))

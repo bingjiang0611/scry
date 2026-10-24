@@ -7,6 +7,7 @@ import { workflowExpressionReferences } from './workflow-expressions'
 import { validateWorkflowProgram, workflowRevision } from './workflow-program'
 import { workflowFrameId } from './workflow-frames'
 import type { WorkflowStoreRecord } from './workflow-store'
+import { assertWorkflowRevisionEffects, workflowCallDefinition, workflowHasDynamicRevision, workflowRevisionBlocks } from './workflow-call-semantics'
 
 export interface WorkflowRevisionReuse { nodeId: string; attemptId: string; reference: WorkflowFrameReference }
 export interface WorkflowGoverningRevision {
@@ -78,6 +79,7 @@ export function validateWorkflowRevisions(record: WorkflowStoreRecord): void {
 }
 
 function validateWorkflowRevisionReuse(record: WorkflowStoreRecord, revision: WorkflowGoverningRevision): void {
+  if (!revision.reuse.length) return
   const next = workflowStaticRevisionNodes(revision.preview)
   const reused = new Set(revision.reuse.map(entry => entry.nodeId))
   const dependenciesReused = (id: string): boolean => {
@@ -137,6 +139,19 @@ export function assertWorkflowRevisionChange(current: WorkflowStoreRecord, previ
   if (!target || Object.keys(target).length !== 1 || !Number.isSafeInteger(target.expectedRevision) || target.expectedRevision !== current.progress.revision) throw new Error(copy.stale)
   assertWorkflowFrozenRevision(preview)
   if (preview.workflowId !== current.preview.workflowId || preview.workspace !== current.preview.workspace || preview.programRevision === current.preview.programRevision || current.revisions?.some(revision => revision.preview.programRevision === preview.programRevision)) throw new Error(copy.identity)
+  assertWorkflowRevisionEffects(current.preview)
+  assertWorkflowRevisionEffects(preview)
+  if (workflowHasDynamicRevision(current.preview) || workflowHasDynamicRevision(preview)) {
+    const old = workflowRevisionBlocks(current.preview), next = workflowRevisionBlocks(preview)
+    for (const intent of current.intents) {
+      const outcome = current.outcomes.find(value => value.attemptId === intent.attemptId)
+      const previous = outcome && old.get(outcome.nodeId), candidate = outcome && next.get(outcome.nodeId)
+      // Legacy dynamic failures have no authoritative invocation descriptor.
+      // A different sibling/revision is not permission to guess replay safety.
+      if (!intent.callFrameId && outcome && outcome.state !== 'completed' && outcome.providerDispatch !== 'not_attempted' && previous?.kind === 'call' && candidate?.kind === 'call' && workflowCallDefinition(current.preview, previous) === workflowCallDefinition(preview, candidate)) throw new Error(workflowRetryCopy.unsafe)
+    }
+    return
+  }
   const old = workflowStaticRevisionNodes(current.preview), next = workflowStaticRevisionNodes(preview)
   for (const [nodeId, node] of old.nodes) {
     if (node.block.kind !== 'call' || old.fingerprints.get(nodeId) !== next.fingerprints.get(nodeId)) continue

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { WORKFLOW_MAX_BATCH, WORKFLOW_MAX_VALUE_BYTES, type WorkflowValue, type WorkflowValueReference } from '../shared/workflow'
-import type { WorkflowCheckInputs, WorkflowInputChange, WorkflowInputSnapshot, WorkflowInputMaterialization } from '../shared/workflow-system'
+import type { WorkflowCheckInputs, WorkflowInputChange, WorkflowInputSnapshot, WorkflowInputMaterialization, WorkflowRepositorySource } from '../shared/workflow-system'
 import type { WorkflowReplicaManifestEntry } from '../shared/workflow-replica'
 import { workflowSystemCopy as copy } from '../shared/constants/copy'
 import type { WorkflowStore, WorkflowStoreRecord } from './workflow-store'
@@ -24,7 +24,7 @@ export async function captureWorkflowInputs(directory: string, stopped: () => bo
 }
 export const workflowInputSnapshotInfo = ({ reference: _reference, ...info }: WorkflowInputSnapshot) => info
 
-export async function saveWorkflowInputSnapshot(store: WorkflowStore, workflowId: string, stepId: string, phase: 'before' | 'after', captured: WorkflowCapturedInputs): Promise<WorkflowInputSnapshot> {
+export async function saveWorkflowInputSnapshot(store: WorkflowStore, workflowId: string, stepId: string, phase: 'before' | 'after', captured: WorkflowCapturedInputs, repositorySource?: WorkflowRepositorySource): Promise<WorkflowInputSnapshot> {
   const parts: WorkflowValueReference[] = []
   for (let offset = 0; offset < captured.text.length;) {
     let end = Math.min(offset + PART_CHARACTERS, captured.text.length)
@@ -35,10 +35,11 @@ export async function saveWorkflowInputSnapshot(store: WorkflowStore, workflowId
     }))
     offset = end
   }
+  const info = { ...captured.info, ...(repositorySource ? { repositorySource } : {}) }
   const reference = await store.saveValue(workflowId, workflowSystemArtifactKey(stepId, 'input-' + phase), {
-    state: 'known', value: { ...captured.info, parts: parts.map(part => ({ ...part })) }, derivedFrom: ['system:' + stepId]
+    state: 'known', value: { ...info, parts: parts.map(part => ({ ...part })) }, derivedFrom: ['system:' + stepId]
   })
-  return { ...captured.info, reference }
+  return { ...info, reference }
 }
 
 export type WorkflowInputSnapshotObserver = (stepId: string, phase: 'before' | 'after', snapshot: WorkflowInputSnapshot, chunks: readonly string[]) => void

@@ -19,6 +19,7 @@ export function validateWorkflowValueReference(value: unknown, workflowId: strin
 
 export function validateWorkflowLoopCheckpoint(value: unknown, workflowId: string): asserts value is WorkflowLoopCheckpoint {
   if (!object(value) || !Number.isSafeInteger(value.iteration) || (value.iteration as number) < 0 || (value.iteration as number) > 1000 || (typeof value.stage !== 'string' || !['ready', 'committed'].includes(value.stage)) || !Number.isSafeInteger(value.noProgress) || (value.noProgress as number) < 0 || (value.noProgress as number) > 1000) throw new Error(workflowLoopCopy.checkpoint)
+  for (const field of ['semanticStateRef', 'initialSemanticStateRef', 'invariantSemanticRef'] as const) if (value[field] !== undefined) validateWorkflowValueReference(value[field], workflowId)
   for (const field of ['stateRefs', 'initialStateRefs', 'invariantRefs'] as const) {
     const bindings = value[field]
     if (!object(bindings) || !Object.keys(bindings).length || Object.keys(bindings).length > 4096) throw new Error(workflowLoopCopy.checkpoint)
@@ -42,6 +43,15 @@ export function validateWorkflowFrame(value: unknown, workflowId: string, frameI
   if (value.reason !== undefined && (typeof value.reason !== 'string' || value.reason.length > 4096)) throw new Error(copy.invalid)
   if (value.decisionRef !== undefined) validateWorkflowValueReference(value.decisionRef, workflowId)
   if (value.resultRef !== undefined) validateWorkflowValueReference(value.resultRef, workflowId)
+  if ((value.callInputRef === undefined) !== (value.callInputKey === undefined)) throw new Error(copy.invalid)
+  if (value.callInputRef !== undefined) validateWorkflowValueReference(value.callInputRef, workflowId)
+  for (const field of ['callInputKey', 'resultSemanticKey', 'sourceSemanticKey', 'decisionSemanticKey'] as const) if (value[field] !== undefined && (typeof value[field] !== 'string' || !/^[a-f0-9]{64}$/.test(value[field]))) throw new Error(copy.invalid)
+  if (value.callReuse !== undefined) {
+    const source = value.callReuse
+    if (!object(source) || !id(source.programRevision) || !id(source.attemptId) || !object(source.reference) || !id(source.reference.frameId) || !Number.isSafeInteger(source.reference.revision) || (source.reference.revision as number) < 1 || value.callInputRef === undefined) throw new Error(copy.invalid)
+    validateWorkflowValueReference(source.inputRef, workflowId)
+    validateWorkflowValueReference(source.reference.resultRef, workflowId)
+  }
   if (value.sourceRef !== undefined) validateWorkflowValueReference(value.sourceRef, workflowId)
   if (value.loop !== undefined) validateWorkflowLoopCheckpoint(value.loop, workflowId)
   if (value.continuation !== undefined && (value.continuation !== 'report_partial' || value.phase !== 'blocked')) throw new Error(copy.invalid)
@@ -67,15 +77,19 @@ export function nextWorkflowFrame(current: WorkflowControlFrame | undefined, inp
   validateWorkflowFrame(next, input.workflowId, input.frameId)
   if (current) {
     if (current.nodeId !== next.nodeId || current.executionEpoch !== next.executionEpoch || current.generationId !== next.generationId || JSON.stringify(current.origin) !== JSON.stringify(next.origin) || current.programRevision !== next.programRevision || current.inputKey !== next.inputKey || JSON.stringify(current.scopePath) !== JSON.stringify(next.scopePath)) throw new Error(copy.identity)
+    if ((current.sourceSemanticKey !== undefined && current.sourceSemanticKey !== next.sourceSemanticKey) || (current.decisionSemanticKey !== undefined && current.decisionSemanticKey !== next.decisionSemanticKey)) throw new Error(copy.identity)
+    if (!sameRef(current.callInputRef, next.callInputRef) || current.callInputKey !== next.callInputKey || (current.callReuse && JSON.stringify(current.callReuse) !== JSON.stringify(next.callReuse)) || (current.resultSemanticKey !== undefined && current.resultSemanticKey !== next.resultSemanticKey)) throw new Error(copy.identity)
     if (terminal.has(current.phase)) throw new Error(copy.terminal)
     if (current.loop) {
       const previous = current.loop, loop = next.loop
       if (!loop ||
         JSON.stringify(previous.invariantRefs) !== JSON.stringify(loop.invariantRefs) ||
         JSON.stringify(previous.initialStateRefs) !== JSON.stringify(loop.initialStateRefs) ||
+        (previous.initialSemanticStateRef !== undefined && !sameRef(previous.initialSemanticStateRef, loop.initialSemanticStateRef)) ||
+        (previous.invariantSemanticRef !== undefined && !sameRef(previous.invariantSemanticRef, loop.invariantSemanticRef)) ||
         JSON.stringify(Object.keys(previous.stateRefs).sort()) !== JSON.stringify(Object.keys(loop.stateRefs).sort()) ||
         loop.iteration < previous.iteration || loop.iteration > previous.iteration + 1) throw new Error(workflowLoopCopy.checkpoint)
-      const stateChanged = JSON.stringify(loop.stateRefs) !== JSON.stringify(previous.stateRefs)
+      const stateChanged = JSON.stringify(loop.stateRefs) !== JSON.stringify(previous.stateRefs) || !sameRef(previous.semanticStateRef, loop.semanticStateRef)
       const progressChanged = loop.noProgress !== previous.noProgress ||
         JSON.stringify(loop.history) !== JSON.stringify(previous.history) ||
         JSON.stringify(loop.iterations) !== JSON.stringify(previous.iterations)

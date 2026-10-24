@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { WORKFLOW_MAX_VALUE_BYTES, type WorkflowCollectionEntry, type WorkflowCollectionField, type WorkflowEvaluation, type WorkflowScalar, type WorkflowValue } from '../shared/workflow'
 import { workflowCollectionCopy, workflowExpressionCopy } from '../shared/constants/copy'
-import type { WorkflowControl } from './workflow-control'
+import type { WorkflowControlValues } from './workflow-control-values'
 import { assertWorkflowValue, workflowCollectionFields, workflowField, workflowValueKey, type WorkflowCollectionExpressionRequest } from './workflow-expressions'
 
 const digest = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex')
@@ -12,7 +12,7 @@ const known = (value: WorkflowValue, derivedFrom: string[], fields: WorkflowColl
 
 /** Only the canonical control owner can resolve these requests. Read one item
  * payload at a time; derived rows are immutable data, not new effect receipts. */
-export async function evaluateWorkflowCollection(control: WorkflowControl, request: WorkflowCollectionExpressionRequest,
+export async function evaluateWorkflowCollection(control: WorkflowControlValues, request: WorkflowCollectionExpressionRequest,
   identity: string, scopePath: string[], stopped: () => boolean): Promise<WorkflowEvaluation> {
   const { expression, source } = request
   const unavailable = (reason: string): WorkflowEvaluation => ({ state: 'unknown', reason, derivedFrom: source.derivedFrom })

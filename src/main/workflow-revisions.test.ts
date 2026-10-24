@@ -1,63 +1,14 @@
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { readFile, rm, symlink, writeFile } from 'node:fs/promises'
+
 import { join } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
-import { describe, expect, it, vi } from 'vitest'
-import type { WorkflowApproval, WorkflowBlock, WorkflowPlanPreview } from '../shared/workflow'
-import type { ProviderDescriptor, ProviderId } from '../shared/provider'
-import { WorkflowService, type WorkflowServiceOptions } from './workflow-service'
-import { FileWorkflowStore, MemoryWorkflowStore, type WorkflowStore } from './workflow-store'
-import { WorkflowSystemHost } from './workflow-system-host'
-import { WorkflowDispatch, WorkflowSlots } from './workflow-runner'
-import { validateWorkflowProgram, workflowRevision, makePlanPreview } from './workflow-program'
+import { describe, expect, it } from 'vitest'
+
+import { WorkflowDispatch } from './workflow-runner'
+
 import { assertWorkflowRecovery } from './workflow-recovery'
 
-const call = (blockId: string, input?: string): WorkflowBlock => ({ kind: 'call', blockId, role: 'worker', prompt: blockId, ...(input ? { inputRefs: [{ nodeId: input }] } : {}) })
-const body: WorkflowBlock = { kind: 'sequence', blockId: 'root', blocks: [
-  { kind: 'parallel', blockId: 'siblings', blocks: [call('a'), call('b'), call('c')] }, call('d', 'b'), { kind: 'return', blockId: 'finish', ref: { nodeId: 'd' } }
-] }
-function descriptor(id: ProviderId): ProviderDescriptor {
-  return { id, label: id, runtimeProvider: 'codex_cli', transport: 'fixture', available: true,
-    capabilities: { skills: 'none', mcp: 'none', commands: 'none', account: 'none' }, health: { state: 'ready', transport: 'fixture' } }
-}
-function revision(preview: WorkflowPlanPreview, edit: (body: WorkflowBlock) => void, roles = preview.program.roles): WorkflowPlanPreview {
-  const candidate = structuredClone(preview.program)
-  edit(candidate.body)
-  candidate.roles = structuredClone(roles)
-  const program = validateWorkflowProgram(candidate), { programRevision: _revision, ...snapshot } = program
-  program.programRevision = workflowRevision(snapshot)
-  return makePlanPreview(program, preview.roles, preview.orchestrator)
-}
-const approval = (preview: WorkflowPlanPreview): WorkflowApproval => ({ workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 })
-const changedB = (preview: WorkflowPlanPreview) => revision(preview, root => {
-  if (root.kind !== 'sequence' || root.blocks[0].kind !== 'parallel' || root.blocks[0].blocks[1].kind !== 'call') throw new Error('fixture shape')
-  root.blocks[0].blocks[1].prompt = 'b-v2'
-})
-async function fixture(file = false, withHost = true, serial = false) {
-  const directory = await mkdtemp(join(tmpdir(), 'scry-revision-')), workspace = join(directory, 'workspace')
-  await mkdir(workspace)
-  await writeFile(join(workspace, 'input.txt'), 'baseline')
-  const store: WorkflowStore = file ? new FileWorkflowStore(join(directory, 'userData')) : new MemoryWorkflowStore()
-  const host = withHost ? new WorkflowSystemHost(join(directory, 'replicas'), store, () => ({})) : undefined
-  const calls: Array<{ node: string; prompt: string }> = []
-  const execute = vi.fn<WorkflowServiceOptions['execute']>(request => {
-    const node = request.taskId.split(':').at(-1)!
-    calls.push({ node, prompt: request.prompt })
-    return { result: Promise.resolve({ runId: randomUUID(), status: 'completed', settled: true, actualModel: 'fixture-model', output: request.prompt + '-output' }), stop: () => true }
-  })
-  const makeService = (identity = 'fixture-runtime') => new WorkflowService({ store, systems: host, slots: new WorkflowSlots(serial ? 1 : 2), providerRegistered: () => true,
-    runControls: async role => ({ descriptor: descriptor(role.providerId), identity, model: true, stop: true, independentRun: true, terminalOutput: true }),
-    plan: async () => ({ output: JSON.stringify({ body }) }), execute })
-  const service = makeService()
-  const preview = await service.planCommand({ workspace, commandId: 'plan-' + randomUUID(), command: '/scry-workflow run inspect',
-    orchestrator: { role: 'orchestrator', providerId: 'codex' }, roles: [{ role: 'worker', providerId: 'codex', requestedModel: { providerId: 'openai', id: 'fixture-model' } }] })
-  await service.approve(approval(preview))
-  const start = () => service.start(preview.workflowId, approval(preview))
-  const record = async () => (await store.load(preview.workflowId))!
-  const revise = async (next: WorkflowPlanPreview, commandId = 'revise', controller = service) => controller.revise(next, approval(next), { expectedRevision: (await record()).progress.revision! }, commandId)
-  const cleanup = async () => { service.close(); await rm(directory, { recursive: true, force: true }) }
-  return { directory, workspace, store, host, service, makeService, preview, calls, execute, record, start, revise, cleanup }
-}
+import { call, revision, approval, changedB, fixture } from './workflow-revision.fixture'
 
 describe('same-root frozen revision admission and static dependency reuse', () => {
   it('runs only changed B and its actual consumer D, preserving A/C facts, history and root budget', async () => {
@@ -257,7 +208,7 @@ describe('same-root frozen revision admission and static dependency reuse', () =
     } finally { await f.cleanup() }
   })
 
-  it('rejects dynamic consumers instead of claiming generalized revision recovery', async () => {
+  it('accepts a new pure map without redispatching unrelated historical calls', async () => {
     const f = await fixture()
     try {
       await f.start()
@@ -266,9 +217,9 @@ describe('same-root frozen revision admission and static dependency reuse', () =
         root.blocks.splice(1, 0, { kind: 'map', blockId: 'dynamic', items: { kind: 'literal', value: [{ id: 'x' }] }, item: 'entry', key: ['id'], maxItems: 1,
           body: { kind: 'bind', blockId: 'mappedValue', value: { kind: 'literal', value: 'x' } } })
       })
-      await expect(f.revise(next)).rejects.toThrow('动态控制')
+      expect(await f.revise(next)).toMatchObject({ state: 'completed', dispatchAttempts: 4 })
       expect(f.execute).toHaveBeenCalledTimes(4)
-      expect((await f.record()).execution?.segments).toHaveLength(1)
+      expect((await f.record()).execution?.segments).toHaveLength(2)
     } finally { await f.cleanup() }
   })
 

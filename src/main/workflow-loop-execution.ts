@@ -27,8 +27,16 @@ export class WorkflowLoopExecution {
   private scope(values: Record<string, WorkflowEvaluation>, invariants: Record<string, WorkflowEvaluation>, iteration: number, label: string): WorkflowControlScope {
     const scope = this.control.child(this.parent, label)
     for (const [name, value] of [...Object.entries(invariants), ...Object.entries(values)]) this.control.bind(scope, name, value)
+    scope.legacyInputs ||= iteration > 0 && !this.frame.loop?.semanticStateRef
+    if (iteration > 0 && this.frame.loop?.semanticStateRef && this.frame.loop.invariantSemanticRef) scope.callContexts!.push({ kind: 'loop', frameId: this.frame.frameId, blockId: this.block.blockId, iteration,
+      semanticStateRef: this.frame.loop.semanticStateRef, invariantSemanticRef: this.frame.loop.invariantSemanticRef, stateRefs: this.frame.loop.stateRefs, invariantRefs: this.frame.loop.invariantRefs })
     if (this.block.iteration) this.control.bind(scope, this.block.iteration, { state: 'known', value: iteration, derivedFrom: [] })
     return scope
+  }
+  private async semanticState(expressions: WorkflowLoopBlock['carry'], scope: WorkflowControlScope, values: Record<string, WorkflowEvaluation>) {
+    const identities: Record<string, string> = {}
+    for (const [name, expression] of Object.entries(expressions)) identities[name] = await this.control.expressionSemantic(expression, scope, values[name])
+    return this.control.saveLoopRecord(identities)
   }
   private valid(values: Record<string, WorkflowEvaluation>): boolean {
     return Object.keys(values).length === Object.keys(this.schemas).length && Object.entries(this.schemas).every(([name, schema]) => {
@@ -62,6 +70,10 @@ export class WorkflowLoopExecution {
     let values = restored?.values ?? await this.evaluate(this.block.initial, initialScope)
     const initialStateRefs = restored?.checkpoint.initialStateRefs ?? await this.control.saveBindings(values)
     let checkpoint: WorkflowLoopCheckpoint = restored?.checkpoint ?? { iteration: 0, stage: 'ready', stateRefs: initialStateRefs, initialStateRefs, invariantRefs: await this.control.saveBindings(invariants), noProgress: 0, history: [], iterations: [], reasons: [] }
+    if (!restored) {
+      const semanticStateRef = await this.semanticState(this.block.initial, initialScope, values)
+      checkpoint = { ...checkpoint, semanticStateRef, initialSemanticStateRef: semanticStateRef, invariantSemanticRef: await this.semanticState(this.block.invariants, this.parent, invariants) }
+    }
     if (this.block.best) checkpoint.bestRef = checkpoint.stateRefs[this.block.best]
     await this.checkpoint(checkpoint)
     if (Object.values(invariants).some(value => value.state === 'unknown') || Object.values(values).some(value => value.state === 'unknown')) return this.finish(checkpoint, values, invariants, ['unknown'])
@@ -109,7 +121,7 @@ export class WorkflowLoopExecution {
       // conditions are known. Partial carry artifacts never authorize a round.
       if (carry && !reasons.some(reason => reason !== 'success')) {
         values = carry
-        checkpoint = { ...checkpoint, stateRefs: await this.control.saveBindings(values) }
+        checkpoint = { ...checkpoint, stateRefs: await this.control.saveBindings(values), semanticStateRef: await this.semanticState(this.block.carry, scope, values) }
         if (this.block.best) checkpoint.bestRef = checkpoint.stateRefs[this.block.best]
         if (key !== undefined) {
           const previous = checkpoint.history.at(-1)!
@@ -122,7 +134,7 @@ export class WorkflowLoopExecution {
       }
       if (iteration === this.block.maxIterations) reasons.push('exhausted')
       const record = await this.control.saveLoopRecord({ iteration, stateRefs: checkpoint.stateRefs, invariantRefs: checkpoint.invariantRefs,
-        noProgress: checkpoint.noProgress, reasons: [...new Set(reasons)], ...(body.reference ? { body: body.reference } : {}), ...(checkpoint.bestRef ? { bestRef: checkpoint.bestRef } : {}) })
+        noProgress: checkpoint.noProgress, reasons: [...new Set(reasons)], ...(checkpoint.semanticStateRef ? { semanticStateRef: checkpoint.semanticStateRef } : {}), ...(body.reference ? { body: body.reference } : {}), ...(checkpoint.bestRef ? { bestRef: checkpoint.bestRef } : {}) })
       checkpoint = { ...checkpoint, stage: 'committed', iterations: [...checkpoint.iterations, record], reasons: [...new Set(reasons)] }
       await this.checkpoint(checkpoint)
       if (reasons.length) return this.finish(checkpoint, values, invariants, reasons, body)

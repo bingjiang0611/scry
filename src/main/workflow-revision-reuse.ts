@@ -7,10 +7,14 @@ import { workflowStaticRevisionNodes, workflowRevisionTaskId, type WorkflowRevis
 import type { WorkflowStore, WorkflowStoreRecord } from './workflow-store'
 import type { WorkflowSystemHost } from './workflow-system-host'
 import { randomUUID } from 'node:crypto'
+import { workflowHasDynamicRevision } from './workflow-call-semantics'
 
 /** Only main-issued frames + canonical outcomes authorize reuse. A descriptor,
  * model result or derivedFrom string by itself never becomes a reusable fact. */
 export async function prepareWorkflowRevisionReuse(store: WorkflowStore, record: WorkflowStoreRecord, preview: WorkflowPlanPreview, current: WorkflowAgentInputObservation | undefined): Promise<WorkflowRevisionReuse[]> {
+  // Dynamic invocations are selected by actual frame input/context at reach
+  // time. Frozen governing arrays are never populated lazily by nodeId.
+  if (workflowHasDynamicRevision(record.preview) || workflowHasDynamicRevision(preview)) return []
   const old = workflowStaticRevisionNodes(record.preview), next = workflowStaticRevisionNodes(preview)
   const selected = new Map<string, WorkflowRevisionReuse>(), checked = new Map<string, boolean>()
   const check = async (nodeId: string): Promise<boolean> => {

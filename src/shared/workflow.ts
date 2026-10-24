@@ -117,6 +117,9 @@ export type WorkflowCollectionEntry = {
 
 export type WorkflowLoopExitReason = 'success' | 'no_progress' | 'oscillation' | 'exhausted' | 'failed' | 'blocked' | 'unknown' | 'stopped'
 export type WorkflowLoopCheckpoint = {
+  semanticStateRef?: WorkflowValueReference
+  initialSemanticStateRef?: WorkflowValueReference
+  invariantSemanticRef?: WorkflowValueReference
   iteration: number
   stage: 'ready' | 'committed'
   stateRefs: Record<string, WorkflowValueReference>
@@ -131,6 +134,13 @@ export type WorkflowLoopCheckpoint = {
 }
 
 export interface WorkflowControlFrame {
+  /** Immutable semantic input artifact; legacy frames have none. */
+  callInputRef?: WorkflowValueReference
+  callInputKey?: string
+  sourceSemanticKey?: string
+  decisionSemanticKey?: string
+  callReuse?: import('./workflow-call').WorkflowCallReuseSource
+  resultSemanticKey?: string
   schemaVersion: 1
   workflowId: string
   programRevision: string

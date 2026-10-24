@@ -10,7 +10,7 @@ import { collectionEntries, validateCollectionReference } from './workflow-colle
 import type { WorkflowAttemptOutcome, WorkflowCollectionEntry, WorkflowCollectionReference, WorkflowControlFrame, WorkflowEvaluation, WorkflowValueReference } from '../shared/workflow'
 import { WORKFLOW_MAX_STOP_REQUESTS, workflowProgressSnapshot } from '../shared/workflow'
 
-import type { WorkflowStore, WorkflowStoreRecord, WorkflowStorePage, WorkflowPlanningIntent } from './workflow-store-contracts'
+import type { WorkflowFrameValueCheckpoint, WorkflowStore, WorkflowStoreRecord, WorkflowStorePage, WorkflowPlanningIntent } from './workflow-store-contracts'
 import { fileSafe, absent, MAX_RECORD_BYTES, frameName, valueName, collectionName, validateEvaluation, validateCollectionArtifacts } from './workflow-store-artifacts'
 export * from './workflow-store-contracts'
 export { MemoryWorkflowStore } from './workflow-memory-store'
@@ -37,7 +37,7 @@ export class FileWorkflowStore implements WorkflowStore {
 
   private atomic(name: string, value: unknown): Promise<void> { return this.atomicText(name, JSON.stringify(value)) }
 
-  private async atomicText(name: string, text: string): Promise<void> {
+  private async atomicText(name: string, text: string, options?: { deferDirectorySync?: boolean }): Promise<void> {
     if (Buffer.byteLength(text) > MAX_RECORD_BYTES) throw new Error('工作流记录超过 8 MiB 写入上限')
     // Serialize per canonical target, and capture bytes before yielding. Later
     // snapshots cannot be overwritten by an earlier, slower rename.
@@ -49,23 +49,34 @@ export class FileWorkflowStore implements WorkflowStore {
       try {
         await writeFile(temporary, text, { encoding: 'utf8', mode: 0o600, flush: true })
         await rename(temporary, target)
-        const directory = await open(this.directory, 'r')
-        try { await directory.sync() } finally { await directory.close() }
+        if (!options?.deferDirectorySync) {
+          const directory = await open(this.directory, 'r')
+          try { await directory.sync() } finally { await directory.close() }
+        }
       } finally { await rm(temporary, { force: true }) }
     })
     this.writes.set(name, write)
     try { await write } finally { if (this.writes.get(name) === write) this.writes.delete(name) }
   }
 
-  async saveValue(workflowId: string, key: string, evaluation: WorkflowEvaluation): Promise<WorkflowValueReference> {
+  private valueCheckpoint(workflowId: string, key: string, evaluation: WorkflowEvaluation): { text: string; reference: WorkflowValueReference; name: string } {
     validateEvaluation(evaluation, workflowId)
     const text = JSON.stringify(evaluation)
     const reference = { workflowId: fileSafe(workflowId), key: fileSafe(key), hash: createHash('sha256').update(text).digest('hex') }
-    const name = valueName(reference)
+    return { text, reference, name: valueName(reference) }
+  }
+
+  private rememberOutput(name: string): void {
+    this.outputs.set(name, true)
+    if (this.outputs.size > 1024) this.outputs.delete(this.outputs.keys().next().value!)
+  }
+
+  async saveValue(workflowId: string, key: string, evaluation: WorkflowEvaluation): Promise<WorkflowValueReference> {
+    const checkpoint = this.valueCheckpoint(workflowId, key, evaluation)
+    const { text, reference, name } = checkpoint
     if (!this.outputs.has(name)) {
       await this.atomicText(name, text)
-      this.outputs.set(name, true)
-      if (this.outputs.size > 1024) this.outputs.delete(this.outputs.keys().next().value!)
+      this.rememberOutput(name)
     }
     return reference
   }
@@ -105,13 +116,26 @@ export class FileWorkflowStore implements WorkflowStore {
     validateWorkflowFrame(frame, workflowId, frameId)
     return frame
   }
-  async saveFrame(input: Omit<WorkflowControlFrame, 'revision'>, expectedRevision: number): Promise<WorkflowControlFrame> {
+  private async withFrameLock(input: Omit<WorkflowControlFrame, 'revision'>, expectedRevision: number, publish: (name: string, next: WorkflowControlFrame) => Promise<void>): Promise<WorkflowControlFrame> {
     const name = frameName(input.workflowId, input.frameId)
     return withDirectoryLock(join(this.directory, 'locks', name + '.lock'), async () => {
       const next = nextWorkflowFrame(await this.loadFrame(input.workflowId, input.frameId), input, expectedRevision)
-      await this.atomic(name, next)
+      await publish(name, next)
       return next
     }, { requireDeadOwner: true })
+  }
+
+  async saveFrame(input: Omit<WorkflowControlFrame, 'revision'>, expectedRevision: number): Promise<WorkflowControlFrame> {
+    return this.withFrameLock(input, expectedRevision, (name, next) => this.atomic(name, next))
+  }
+  async saveFrameWithValue(input: Omit<WorkflowControlFrame, 'revision'>, expectedRevision: number, checkpoint: WorkflowFrameValueCheckpoint): Promise<WorkflowControlFrame> {
+    const value = this.valueCheckpoint(input.workflowId, checkpoint.key, checkpoint.evaluation)
+    const frame = { ...input, [checkpoint.field]: value.reference } as Omit<WorkflowControlFrame, 'revision'>
+    return this.withFrameLock(frame, expectedRevision, async (name, next) => {
+      if (!this.outputs.has(value.name)) await this.atomicText(value.name, value.text, { deferDirectorySync: true })
+      await this.atomic(name, next)
+      this.rememberOutput(value.name)
+    })
   }
 
   async readConcurrency(): Promise<number | undefined> {
@@ -150,10 +174,14 @@ export class FileWorkflowStore implements WorkflowStore {
     }, { requireDeadOwner: true })
   }
   async loadOutput(workflowId: string, outcome: WorkflowAttemptOutcome): Promise<string | undefined> {
-    if (outcome.outputRef === undefined) return undefined
-    const match = new RegExp(`^${fileSafe(workflowId)}\\.${fileSafe(outcome.attemptId)}\\.([a-f0-9]{64})\\.output\\.json$`).exec(outcome.outputRef)
+    // Live committed outcomes still carry their body; disk snapshots carry only
+    // its content address. Both must read the same durable, hash-checked artifact.
+    const reference = outcome.outputRef ?? (outcome.output === undefined ? undefined
+      : `${fileSafe(workflowId)}.${fileSafe(outcome.attemptId)}.${createHash('sha256').update(outcome.output).digest('hex')}.output.json`)
+    if (reference === undefined) return undefined
+    const match = new RegExp(`^${fileSafe(workflowId)}\\.${fileSafe(outcome.attemptId)}\\.([a-f0-9]{64})\\.output\\.json$`).exec(reference)
     if (!match) throw new Error(workflowRecoveryCopy.output)
-    const data = await this.readJson(outcome.outputRef)
+    const data = await this.readJson(reference)
     if (!data || typeof data !== 'object' || !('output' in data) || typeof data.output !== 'string' || createHash('sha256').update(data.output).digest('hex') !== match[1]) throw new Error(workflowRecoveryCopy.output)
     return data.output
   }

@@ -9,7 +9,7 @@ import { validateWorkflowOwnership, validateWorkflowClaim, workflowEpochMatches,
 import { collectionEntries, validateCollectionReference } from './workflow-collections'
 import type { WorkflowAttemptOutcome, WorkflowCollectionEntry, WorkflowCollectionReference, WorkflowControlFrame, WorkflowEvaluation, WorkflowValueReference } from '../shared/workflow'
 
-import type { WorkflowStore, WorkflowStoreRecord, WorkflowStorePage, WorkflowPlanningIntent } from './workflow-store-contracts'
+import type { WorkflowFrameValueCheckpoint, WorkflowStore, WorkflowStoreRecord, WorkflowStorePage, WorkflowPlanningIntent } from './workflow-store-contracts'
 import { fileSafe, MAX_RECORD_BYTES, frameName, valueName, collectionName, validateEvaluation, validateCollectionArtifacts } from './workflow-store-artifacts'
 
 export class MemoryWorkflowStore implements WorkflowStore {
@@ -55,6 +55,18 @@ export class MemoryWorkflowStore implements WorkflowStore {
   async saveFrame(input: Omit<WorkflowControlFrame, 'revision'>, expectedRevision: number): Promise<WorkflowControlFrame> {
     const key = frameName(input.workflowId, input.frameId)
     const next = nextWorkflowFrame(this.frames.get(key), input, expectedRevision)
+    this.frames.set(key, next)
+    return structuredClone(next)
+  }
+  async saveFrameWithValue(input: Omit<WorkflowControlFrame, 'revision'>, expectedRevision: number, checkpoint: WorkflowFrameValueCheckpoint): Promise<WorkflowControlFrame> {
+    validateEvaluation(checkpoint.evaluation, input.workflowId)
+    const text = JSON.stringify(checkpoint.evaluation)
+    if (Buffer.byteLength(text) > MAX_RECORD_BYTES) throw new Error(workflowFrameCopy.invalid)
+    const reference = { workflowId: fileSafe(input.workflowId), key: fileSafe(checkpoint.key), hash: createHash('sha256').update(text).digest('hex') }
+    const key = frameName(input.workflowId, input.frameId)
+    const frame = { ...input, [checkpoint.field]: reference } as Omit<WorkflowControlFrame, 'revision'>
+    const next = nextWorkflowFrame(this.frames.get(key), frame, expectedRevision)
+    this.values.set(valueName(reference), JSON.parse(text) as WorkflowEvaluation)
     this.frames.set(key, next)
     return structuredClone(next)
   }

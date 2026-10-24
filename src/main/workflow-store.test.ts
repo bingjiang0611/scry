@@ -70,6 +70,23 @@ describe('actual workflow filesystem', () => {
     expect(await readFile(join(path, 'workflows', intent!.result!.outputRef!), 'utf8')).toBe('PRIVATE_PLANNING_BODY')
     expect(await readFile(join(path, 'workflows', 'plan.planning.json'), 'utf8')).not.toContain('PRIVATE_PLANNING_BODY')
   })
+  it('resolves live and reopened output bodies through the same durable content address', async () => {
+    const { path, store } = await fixture()
+    const value = record('live-output')
+    const outcome = { attemptId: 'attempt', taskId: 'task', nodeId: 'call', role: 'worker' as const, providerId: 'pi' as const,
+      actualModelStatus: 'unknown' as const, state: 'completed' as const, settled: true, output: 'durable body' }
+    value.outcomes.push(outcome)
+    await expect(store.loadOutput('live-output', outcome)).rejects.toThrow()
+    await store.save(value)
+    expect(await store.loadOutput('live-output', outcome)).toBe('durable body')
+    const cold = (await store.load('live-output'))!.outcomes[0]
+    expect(cold.output).toBeUndefined()
+    expect(await store.loadOutput('live-output', cold)).toBe('durable body')
+    await writeFile(join(path, 'workflows', cold.outputRef!), JSON.stringify({ output: 'changed' }))
+    await expect(store.loadOutput('live-output', outcome)).rejects.toThrow()
+    await expect(store.loadOutput('live-output', cold)).rejects.toThrow()
+  })
+
   it('reopens and pages all records once, without double-closing the directory iterator', async () => {
     const { path, store } = await fixture()
     for (const id of ['c', 'a', 'b']) await store.save(record(id))

@@ -10,6 +10,7 @@ export interface WorkflowIntent {
   programRevision: string
   taskId: string
   attemptId: string
+  callFrameId?: string
   previousAttemptId?: string
   retryCommandId?: string
   replica?: WorkflowReplicaReference
@@ -62,12 +63,18 @@ export interface WorkflowPlanningIntent {
   error?: string
 }
 export interface WorkflowStorePage { records: WorkflowStoreRecord[]; nextCursor?: string }
+export type WorkflowFrameValueCheckpoint = {
+  field: 'resultRef' | 'sourceRef'
+  key: string
+  evaluation: WorkflowEvaluation
+}
 export interface WorkflowStore {
   create(record: WorkflowStoreRecord): Promise<boolean>
   save(record: WorkflowStoreRecord): Promise<void>
   claim(record: WorkflowStoreRecord, expectedFingerprint: string | undefined): Promise<void>
   loadOutput(workflowId: string, outcome: WorkflowAttemptOutcome): Promise<string | undefined>
   saveFrame(frame: Omit<WorkflowControlFrame, 'revision'>, expectedRevision: number): Promise<WorkflowControlFrame>
+  saveFrameWithValue(frame: Omit<WorkflowControlFrame, 'revision'>, expectedRevision: number, checkpoint: WorkflowFrameValueCheckpoint): Promise<WorkflowControlFrame>
   loadFrame(workflowId: string, frameId: string): Promise<WorkflowControlFrame | undefined>
   saveValue(workflowId: string, key: string, evaluation: WorkflowEvaluation): Promise<WorkflowValueReference>
   loadValue(workflowId: string, reference: WorkflowValueReference): Promise<WorkflowEvaluation>
