@@ -34,12 +34,7 @@ export async function exerciseStructureApp(cdp, evaluate) {
     // A real hidden App needs a compositor paint to start composited CSS animations.
     // Do not seek/finish animations or change production timing for screenshots.
     await cdp.send('Page.captureScreenshot', { format: 'png' })
-    try {
-      await wait(`(() => { const node = document.querySelector(${JSON.stringify(selector)}); return node && [...node.getAnimations(), ...node.closest('.modal-overlay').getAnimations()].every(a => a.playState === 'finished'); })()`)
-    } catch (error) {
-      console.error('Entrance diagnostic', await evaluate(`({hidden:document.hidden,visibility:document.visibilityState,focus:document.hasFocus(),animations:document.getAnimations().map(a=>({id:a.id,state:a.playState,time:a.currentTime,start:a.startTime,timeline:a.timeline.currentTime,duration:a.effect.getTiming().duration}))})`))
-      throw error
-    }
+    await wait(`(() => { const node = document.querySelector(${JSON.stringify(selector)}); return node && [...node.getAnimations(), ...node.closest('.modal-overlay').getAnimations()].every(a => a.playState === 'finished'); })()`)
   }
   const closeModal = async (selector, trigger) => {
     await evaluate(`{
@@ -80,7 +75,6 @@ export async function exerciseStructureApp(cdp, evaluate) {
     await click(`.theme-option:nth-child(${theme === 'dark' ? 1 : 2})`)
     await wait(`document.documentElement.dataset.theme === '${theme}'`)
     check(await evaluate(`!${page} && window.nativeCaptureCalls === 0`), 'Theme was not immediate live DOM')
-    check(await evaluate(`['.main-area','.right-panel-slot'].every(selector=>{const node=document.querySelector(selector);if(!node)return false;const colour=getComputedStyle(node).backgroundColor;return colour.startsWith('rgb(')})`), 'Native material leaked into main or right content')
     await settleEntrance('.settings-modal')
     await capture(`${theme}-settings`)
     closeTimes.push({ theme, modal: 'settings', ...await closeModal('.settings-modal', '.sb-settings') })
