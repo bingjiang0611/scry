@@ -702,6 +702,14 @@
 - `git diff --check` 通过；新增文件大小独立检查全过；源码 / 原生 fixture / 日志使用临时目录，不提交截图或个人数据。基线对照 worktree 与临时诊断已清理；本记录单独在归档分支提交，代码工作区保持新分支已验证的干净版本。
 - 未验证真实付费 Provider、真机手机 / 真实远程网络、120Hz、真实屏幕阅读器、低负载 L2 与发布后 L3；默认 files smoke 中未启用的可选外部文件动作不作为已执行场景。停下等待设计方核验移植，不开 PR、不合入 main、不进入新步骤。
 
+### 移植 · 核验（2026-10-24，设计方）
+
+结论：**通过，可开 PR**。核验方式：对 `origin/main`（`ba1a20c5`）与 `motion/native-motion-main`（`ba9c9a1a`）做逐文件对照。
+- 设计分支改动的 91 个文件中，main 未改动的 72 个与本分支 `caef2d2` 逐字节一致；`lists-ui-checks.mjs` 按职责拆为两份。
+- 双方都改动的 19 个文件，用 `git merge-file`（基线 `531e88c`）重放后与移植版对照：14 个完全一致；`package.json`、`RemotePairing.tsx`、`desktop-remote-ui-smoke.mjs` 的冲突解决保留了 main 的新增内容；`ChatView.tsx` 的逻辑按 main 的拆分落在 `ChatView.tsx` / `chat-view/transcript.tsx` / `chat-view/ComposerQueue.tsx`，`liveRunId` 的推导与 main `Composer.tsx` 中的 `inFlightTurn` 等价。
+- 测试侧另修了 main 自身已失败的模型标签与搜索焦点断言（执行方在未改动的 `ba1a20c5` 上复现了失败）。这部分超出动效范围，PR 说明中单列。
+- 无 `designs/` 文件，新文件均 ≤ 20,000 字节，大小 hook 仅以命令级方式跳过。
+
 <!--
 ### NN · <步骤名>
 
