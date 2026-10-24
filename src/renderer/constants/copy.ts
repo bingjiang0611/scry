@@ -441,6 +441,9 @@ export const LOADING_COPY = {
   remoteProjects: (host: string) => `正在读取 ${host} 的项目…`,
   directoryCount: (shown: number, total: number) => `${shown} / ${total} 个文件夹`,
   directoryUnread: '尚未读取目录',
+  skillScope: { project: '项目 Skill', user: '用户 Skill', provider: 'Provider Skill' },
   skillsResults: (count: number) => `${count} 个结果`,
+  skillsVisible: (shown: number, total: number) => `显示 ${shown} / ${total}`,
+  mcpNoConfigEvidence: '没有配置证据不等于运行正常，也不等于连接失败。',
   mcpSummary: (configured: number, connected: number, runtime: number, tests: number) => `${configured} 配置 · ${runtime > 0 ? connected + ' 已连接 / ' + runtime + ' 运行态' : '运行态未返回'} · ${tests} 测试证据`
 } as const

@@ -666,7 +666,7 @@ export function SkillsModal({
   const projectCount = skills.filter((skill) => skill.scope === 'project').length
   const userCount = skills.filter((skill) => skill.scope === 'user').length
   const providerCount = skills.length - projectCount - userCount
-  const scopeLabel = scope === 'project' ? '项目 Skill' : scope === 'user' ? '用户 Skill' : 'Provider Skill'
+  const scopeLabel = LOADING_COPY.skillScope[scope]
   const visibleScopes: SkillScopeFilter[] = providerCount > 0
     ? ['project', 'user', 'provider']
     : ['project', 'user']
@@ -742,7 +742,7 @@ export function SkillsModal({
           onClick={() => chooseScope('project')}
           onKeyDown={onScopeKeyDown}
         >
-          项目 Skill {!initialSkillsLoading && <span>{projectCount}</span>}
+          {LOADING_COPY.skillScope.project} {!initialSkillsLoading && <span>{projectCount}</span>}
         </button>
         <button
           type="button"
@@ -755,7 +755,7 @@ export function SkillsModal({
           onClick={() => chooseScope('user')}
           onKeyDown={onScopeKeyDown}
         >
-          用户 Skill {!initialSkillsLoading && <span>{userCount}</span>}
+          {LOADING_COPY.skillScope.user} {!initialSkillsLoading && <span>{userCount}</span>}
         </button>
         {providerCount > 0 && (
           <button
@@ -769,7 +769,7 @@ export function SkillsModal({
             onClick={() => chooseScope('provider')}
             onKeyDown={onScopeKeyDown}
           >
-            Provider Skill <span>{providerCount}</span>
+            {LOADING_COPY.skillScope.provider} <span>{providerCount}</span>
           </button>
         )}
       </div>
@@ -788,7 +788,7 @@ export function SkillsModal({
           />
           {query && <button type="button" onClick={() => setQuery('')} aria-label="清空搜索">清除</button>}
         </label>
-        {!initialSkillsLoading && <span className="inventory-toolbar__count" aria-live="polite">显示 {filtered.length} / {scopeSkills.length}</span>}
+        {!initialSkillsLoading && <span className="inventory-toolbar__count" aria-live="polite">{LOADING_COPY.skillsVisible(filtered.length, scopeSkills.length)}</span>}
       </div>
 
       <div
@@ -997,7 +997,7 @@ export function McpModal({
         {mcps.length === 0 && (loadingConfig || capability === null) ? <DelayedLoadingStatus loading={loadingConfig} title={LOADING_COPY.mcp} /> : mcps.length === 0 ? (
           <div className="inventory-empty" role="status">
             <strong>{LOADING_COPY.mcpEmpty}</strong>
-            <p>没有配置证据不等于运行正常，也不等于连接失败。</p>
+            <p>{LOADING_COPY.mcpNoConfigEvidence}</p>
           </div>
         ) : (
           <div className="mcp-fleet-wrap">
