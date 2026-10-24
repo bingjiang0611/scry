@@ -101,9 +101,17 @@ Object.defineProperty(window, 'scry', { value: {
     if (holdControls) await new Promise<void>((resolve) => { releaseControls = resolve })
     if (detectionFailure) return { ...context, mode: 'read', state: 'unavailable', data: null, reason: 'fixture detection timeout' }
     return { ...context, mode: 'read', state: 'ready', data: {
-    models: ['model-1', 'model-2'].map((id) => ({
-      model: { id }, label: id, efforts: [{ id: 'high', label: 'High' }]
-    })),
+    models: [
+      ...['model-1', 'model-2'].map((id) => ({
+        model: { id }, label: id, efforts: [{ id: 'high', label: 'High' }]
+      })),
+      ...(new URLSearchParams(location.search).has('provider-models') ? [
+        ...['provider-a', 'provider-b'].map((providerId) => ({
+          model: { id: 'shared-id', providerId }, label: 'Shared Model', efforts: []
+        })),
+        { model: { id: 'internal-42', providerId: 'provider-a' }, label: 'Friendly Name', efforts: [] }
+      ] : [])
+    ],
     permissions: [{ id: 'default', label: '默认审批', description: 'fixture' }]
     } }
   },
