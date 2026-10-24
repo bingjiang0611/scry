@@ -302,6 +302,7 @@ const rendererEntryUrl = resolveRendererEntryUrl(
 )
 const useDevelopmentRenderer = rendererEntryUrl !== packagedRendererEntryUrl
 let win: BrowserWindow | null = null
+let rendererAppReady = false
 let runSeq = 0
 let isShuttingDown = false
 const isOwnedTestApp = process.env.SCRY_TEST_APP === '1'
@@ -1173,6 +1174,7 @@ async function archiveTraceTurn(args: ArchiveTraceTurnArgs): Promise<void> {
 const rendererAutoReloadCooldownMs = 60_000
 
 function createWindow(): void {
+  rendererAppReady = false
   win = new BrowserWindow({
     width: 1280,
     height: 880,
@@ -1277,6 +1279,8 @@ function createWindow(): void {
     // renderer 已经挂好监听：恢复 trace 投递，而不是靠定时器轮询等它就绪。
     // 监听器刻意不在首次 show 之后摘除，这样 renderer 重挂后也能重新驱动投递。
     traceOutput.rendererReady()
+    rendererAppReady = true
+    if (process.platform === 'darwin') win.setBackgroundColor(windowBackgroundColor('dark', true))
     showWindow()
   }
   const showWindow = (): void => {
@@ -1322,7 +1326,7 @@ function handleTrusted<TArgs extends unknown[], TResult>(
 handleTrusted('app:setTheme', (_event, theme: unknown) => {
   if (theme !== 'dark' && theme !== 'light') throw new Error('无效的界面主题')
   nativeTheme.themeSource = theme
-  win?.setBackgroundColor(windowBackgroundColor(theme))
+  win?.setBackgroundColor(windowBackgroundColor(theme, rendererAppReady))
   return true as const
 })
 
