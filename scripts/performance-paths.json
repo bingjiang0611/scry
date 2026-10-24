@@ -45,6 +45,18 @@
         "src/main/context-admission.bench.ts",
         "src/main/providers/registry.ts",
         "src/main/providers/pi.ts",
+        "src/main/providers/pi-catalog.ts",
+        "src/main/providers/pi-entry-proof.ts",
+        "src/main/providers/pi-events.ts",
+        "src/main/providers/pi-rpc.ts",
+        "src/main/providers/pi-run.ts",
+        "src/main/providers/pi-run-events.ts",
+        "src/main/providers/pi-run-success.ts",
+        "src/main/providers/pi-runtime.ts",
+        "src/main/providers/pi-session-proof.ts",
+        "src/main/providers/pi-shared.ts",
+        "src/main/providers/pi-types.ts",
+        "src/main/providers/pi-usage.ts",
         "src/main/remote/provider-discovery.ts"
       ],
       "benchmarks": [

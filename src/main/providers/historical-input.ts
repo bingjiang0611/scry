@@ -102,6 +102,13 @@ export class HistoricalInput {
     this.emit()
   }
 
+  unverified(reason: string): void {
+    if (!this.receipt) return
+    if (this.receipt.status !== 'unknown') throw new Error('输入没有待确认的投递尝试')
+    this.receipt = { ...this.receipt, reason }
+    this.emit()
+  }
+
   snapshot(): ProviderInputReceipt | undefined {
     return this.receipt ? { ...this.receipt } : undefined
   }
