@@ -116,9 +116,9 @@ function Fixture() {
   const scroll = useRef<HTMLDivElement>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
   const projects: ProjectMeta[] = useMemo(() => [{ cwd: '/fixture/lists', name: copy.title, mtime: 1, sessions: catalog }], [catalog])
-  const appendTool = (): void => setTurns(previous => previous.map(turn => ({ ...turn, items: [...turn.items,
+  const appendTool = (output: string = copy.output): void => setTurns(previous => previous.map(turn => ({ ...turn, items: [...turn.items,
     { id: `${turn.runId}-added-${turn.items.length}`, runId: turn.runId, ts: stamp, kind: 'tool', stage: 'tool_use',
-      tool: 'Read', fileOp: 'read', filePath: '/fixture/added.ts', input: { file_path: '/fixture/added.ts' }, output: copy.output }
+      tool: 'Read', fileOp: 'read', filePath: '/fixture/added.ts', input: { file_path: '/fixture/added.ts' }, output }
   ] })))
   const appendHook = (): void => setTurns(previous => previous.map(turn => ({ ...turn, items: [...turn.items,
     { id: 'hook-start', runId: turn.runId, ts: stamp, kind: 'hook', stage: 'hook_started', hookId: 'fixture-hook',
@@ -131,7 +131,7 @@ function Fixture() {
     large: () => setCatalog(Array.from({ length: 45 }, (_, index) => ({ ...sessions[0], sessionId: `large-${index}`, preview: `Large ${index}` }))),
     small: () => setCatalog(sessions), history: () => { setScene('chat'); setBusy(false); setTurns([makeTurn('history', 50, true)]) },
     live: () => { setScene('chat'); setBusy(true); setCache(false); setLoading(false); setTurns([makeTurn(`live-${Date.now()}`, 2, false)]) },
-    tool: appendTool, text: () => setTurns(previous => previous.map(turn => {
+    tool: () => appendTool(), text: () => setTurns(previous => previous.map(turn => {
       const last = turn.items.at(-1)
       return { ...turn, items: last?.stage === 'text_delta'
         ? [...turn.items.slice(0, -1), { ...last, text: `${last.text} streaming` }]
@@ -149,13 +149,14 @@ function Fixture() {
   useEffect(() => {
     Object.assign(window, { listFixture: {
       setCache, setLoading, setBusy, appendTool, appendHook, loading,
+      longOutput: () => appendTool(Array.from({ length: 55 }, (_, line) => `line ${line}`).join('\n')),
       switchScope: () => { setScope(previous => `${previous}:switch`); appendTool() },
       pinCount: (count: number) => setCatalog(previous => previous.map((session, index) => ({ ...session, pinnedAt: index < count ? index + 1 : undefined }))),
       removeFirstTask: () => setTasks(previous => previous.slice(1)),
       hookResponse: () => setTurns(previous => previous.map(turn => ({ ...turn, items: [...turn.items,
         { id: 'hook-response', runId: turn.runId, ts: stamp, kind: 'hook', stage: 'hook_response', hookId: 'fixture-hook',
           hookEvent: 'PostToolUse', hookName: 'PostToolUse:Read', hookCommand: '/fixture/hook.sh', hookOutcome: 'success' }
-      ] }))), refreshes
+      ] }))), refreshes, hookResponses: turns.reduce((count, turn) => count + turn.items.filter(item => item.stage === 'hook_response').length, 0)
     } })
   })
   return <>

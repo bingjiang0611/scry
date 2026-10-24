@@ -1706,8 +1706,10 @@ async function main() {
     query('.terminal-tab.active .terminal-tab-close').click()
     const beforeHistory = (await window.scry.terminalRecordingList()).items.map((item) => item.id)
     button('终端录制历史').click()
-    await waitFor(() => !!query('[data-recording-id="' + ended.id + '"] button'))
-    query('[data-recording-id="' + ended.id + '"] button').click()
+    // ModalFrame portals to body; terminal controls remain scoped to the current surface.
+    const historyButton = () => document.querySelector('.modal-overlay [data-recording-id="' + ended.id + '"] button')
+    await waitFor(() => !!historyButton())
+    historyButton().click()
     await waitFor(() => query('.terminal-foot')?.textContent.includes('录制回放完成'))
     const readonly = button('重新启动终端').disabled
     const afterHistory = (await window.scry.terminalRecordingList()).items.map((item) => item.id)

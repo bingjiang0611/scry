@@ -122,6 +122,31 @@ export async function exerciseLists(contents, win, screenshotPrefix = '', pointe
     check(pinnedMotion.some(animation=>animation.duration===220) && pinnedMotion.filter(animation=>animation.duration===300).length===2, 'pinned list omitted arrival or survivor FLIP')
     await click('#list-small')
     await settle()
+    // Count the real layout getters and tab-root observations across unrelated renders.
+    await read(`(() => {
+      window.__tabReads = 0
+      window.__tabObservations = 0
+      window.__tabNodes = [...document.querySelectorAll('.sb-view-tabs [role=tab], .surface-tab')]
+      for (const node of window.__tabNodes) for (const key of ['offsetLeft', 'offsetWidth']) {
+        const getter = Object.getOwnPropertyDescriptor(HTMLElement.prototype, key).get
+        Object.defineProperty(node, key, { configurable: true, get() { window.__tabReads++; return getter.call(this) } })
+      }
+      window.__originalTabObserver = window.ResizeObserver
+      window.ResizeObserver = class extends window.__originalTabObserver {
+        observe(node, options) {
+          if (node.matches('.sb-view-tabs, .surface-tabs')) window.__tabObservations++
+          super.observe(node, options)
+        }
+      }
+    })()`)
+    try {
+      for (const busy of [true, false]) {
+        await read(`window.listFixture.setBusy(${busy}); new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`)
+      }
+      check(await read('window.__tabReads===0 && window.__tabObservations===0'), 'unrelated renders reread tab geometry or rebuilt observers')
+    } finally {
+      await read(`window.ResizeObserver=window.__originalTabObserver; for(const node of window.__tabNodes) { delete node.offsetLeft; delete node.offsetWidth }`)
+    }
     // Selection color changes in the same commit as aria-selected, not a color tween.
     const switchTab = async (root, selector) => {
       selector = `[id=${JSON.stringify(await read(`document.querySelector(${JSON.stringify(selector)}).id`))}]`
@@ -162,7 +187,7 @@ export async function exerciseLists(contents, win, screenshotPrefix = '', pointe
     await read('window.listFixture.removeFirstTask()')
     check((await captured()).every(animation=>animation.duration===300), 'background task survivors did not close the gap')
     await wait("document.querySelectorAll('.background-work-task').length===1")
-    return { themes: reports, oversized45RetainedWithoutFlip: true, pinnedArrival220AndSurvivors300: true, selection220AndImmediateColor: true, dynamicTabsAndResizeJump: true, queueAndTaskSurvivors300: true }
+    return { themes: reports, oversized45RetainedWithoutFlip: true, pinnedArrival220AndSurvivors300: true, unrelatedRendersNoTabReadsOrObserverRebuild: true, selection220AndImmediateColor: true, dynamicTabsAndResizeJump: true, queueAndTaskSurvivors300: true }
   }
   if (campaign === 'history') {
     await click('#list-analytics')
@@ -233,9 +258,12 @@ export async function exerciseLists(contents, win, screenshotPrefix = '', pointe
   if (await read("!document.querySelector('.turn-hooks-summary').open")) await click('.turn-hooks-summary>summary')
   const hookArrival = await captured()
   if (await read("!document.querySelector('.turn-hook-phase').open")) await click('.turn-hook-phase>summary')
+  await wait("document.querySelector('.turn-hook-phase').open")
   check(hookArrival.every(animation=>animation.duration===180), 'new hook rows did not enter for 180ms')
   await settle()
+  check(await read("!document.getAnimations().some(a=>a.effect.getTiming().duration===180 && a.effect.target.closest('.turn-hooks-summary'))"), 'hook disclosure entrance had not settled before lifecycle response')
   await read('window.listFixture.hookResponse()')
+  await wait('window.listFixture.hookResponses===1')
   check(await read("!document.getAnimations().some(a=>a.effect.getTiming().duration===180 && a.effect.target.closest('.turn-hooks-summary'))"), 'hook lifecycle response replayed row')
   await arm("a.effect.getTiming().duration===180 && node.matches('.turn-tail')")
   await click('#list-complete')
@@ -285,10 +313,26 @@ export async function exerciseLists(contents, win, screenshotPrefix = '', pointe
     await click('#list-tool')
     const reducedArrival = await captured()
     check(opacityOnly(reducedArrival), 'reduced stream block retained transform')
+    await settle()
+    await read('window.listFixture.longOutput()')
+    await wait("document.querySelectorAll('.tool-card').length===4")
+    await expandTools(4)
+    await settle()
+    const reducedLongTool = `[aria-controls=${JSON.stringify(await read("[...document.querySelectorAll('.tool-card .tool-row')].at(-1).getAttribute('aria-controls')"))}]`
+    await arm("node.classList.contains('motion-disclosure') && !!node.querySelector('.tool-detail-region')")
+    await click(reducedLongTool)
+    const reducedLongEnter = await captured()
+    check(await read("document.querySelector('.tool-detail-region').closest('.motion-disclosure').dataset.long==='true'"), 'Reduced long-output fixture did not render long content')
+    check(reducedLongEnter.every(a=>a.duration===120) && opacityOnly(reducedLongEnter), `reduced long output did not enter in 120ms: ${JSON.stringify(reducedLongEnter)}`)
+    await settle()
+    await arm("node.classList.contains('motion-disclosure') && !!node.querySelector('.tool-detail-region')")
+    await click(reducedLongTool)
+    const reducedLongExit = await captured()
+    check(reducedLongExit.every(a=>a.duration===120) && opacityOnly(reducedLongExit), `reduced long output did not exit in 120ms: ${JSON.stringify(reducedLongExit)}`)
   } finally {
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[]})
     contents.debugger.detach()
     await read('window.__listObserver?.disconnect()')
   }
-  return { appendedToolOnly180: true, hookRows180AndLifecycleDoesNotReplay: true, tokensDoNotReplay: true, liveMetrics180: true, cacheNoEntry: true, loadingAndSessionIdentityNoEntry: true, reducedOpacityOnly: true }
+  return { appendedToolOnly180: true, hookRows180AndLifecycleDoesNotReplay: true, tokensDoNotReplay: true, liveMetrics180: true, cacheNoEntry: true, loadingAndSessionIdentityNoEntry: true, reducedOpacityOnly: true, reducedLongEnterAndExit120: true }
 }

@@ -56,9 +56,9 @@ beforeEach(() => {
 })
 afterEach(() => { harness.cleanups.forEach(cleanup => cleanup?.()); vi.unstubAllGlobals() })
 
-function render(revision: unknown): void {
+function render(revision: unknown, budget?: number): void {
   harness.refIndex = 0
-  useFlipList({ current: { querySelectorAll: () => currentNodes } } as unknown as { current: HTMLElement }, revision)
+  useFlipList({ current: { querySelectorAll: () => currentNodes } } as unknown as { current: HTMLElement }, revision, budget)
 }
 
 describe('useFlipList', () => {
@@ -112,6 +112,21 @@ describe('useFlipList', () => {
     expect(reducedListener).toBeTypeOf('function')
     reducedListener?.({ matches: true })
     expect(log).toEqual(['cancel:0', 'cancel:1'])
+  })
+
+  it('allows the activity budget while keeping its existing 123-node bound', () => {
+    currentNodes = nodes(123, Array.from({ length: 123 }, (_, index) => index * 20), log)
+    render('activity-initial', 123)
+    log.length = 0
+    currentNodes = nodes(123, Array.from({ length: 123 }, (_, index) => (122 - index) * 20), log)
+    render('activity-reorder', 123)
+    expect(log.filter(entry => entry.startsWith('read:'))).toHaveLength(123)
+    expect(currentNodes[0].animate).toHaveBeenCalledWith(expect.any(Array), expect.objectContaining({ id: 'scry-list-reorder', duration: 300 }))
+    log.length = 0
+    currentNodes = nodes(124, Array.from({ length: 124 }, (_, index) => index), log)
+    render('activity-over-budget', 123)
+    expect(log.filter(entry => entry.startsWith('read:'))).toHaveLength(0)
+    expect(log.filter(entry => entry.startsWith('cancel:'))).toHaveLength(122)
   })
 
   it('does not read geometry for oversized lists and seeds resumed rows without arrivals', () => {
