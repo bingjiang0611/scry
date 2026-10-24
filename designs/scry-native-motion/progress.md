@@ -10,7 +10,7 @@
 | 02 结构过渡 | 通过 | `42f3f9dc`、`3305911d`（修正）；`3145cd79`、`06defe55`（回归）；按「02 · 核验」授权，修正验收后进入 03 |
 | 03 弹窗与浮层 | 通过 | `b6f42801`（实现）、`5e3e14ee`（验收）；范围取舍见本轮用户确认；一项小修正并入 04 开头，见「03 · 核验」 |
 | 04 列表 | 通过 | `5f3484c1`（实现）；`b8537f5e` / `5aa66684`（04-fix）；完整安装通过，见「04-fix · 核验」 |
-| 05 加载防闪 | 需修改 | `7861d4be` / `b74c6726`（实现）；一处修正见「05 · 核验」 |
+| 05 加载防闪 | 待核验 | `e935f2e8`（05-fix 实现）、`532edf1f` / `d4ed56d4`（原生断言与截图）；三态修正及完整安装结果见「05-fix」 |
 | 06 侧栏材质（可选） | 需用户确认 | — |
 
 状态取值：待开始 / 进行中 / 待核验 / 需修改 / 通过。
@@ -490,6 +490,39 @@
 
 **不阻塞**
 - 跨会话保留的旧转录仍会调用 `onTurnRef` 注册旧 runId 的 DOM，直到新内容替换后卸载。它们是 inert 的，目前看不会出错；如果执行方知道 `setTurnRef` 有按 runId 定位或滚动的逻辑会读到这些旧节点，请在记录里说明。
+
+### 05-fix · 清单读取终态与刷新重试（2026-10-24，待核验）
+
+- 提交：`e935f2e8` 实现；`532edf1f` 原生断言 / fixture 与新增 callback 的测试调用方适配；`d4ed56d4` 仅修可选截图的绘制就绪前置条件。开始前从 `eff07bb4` 拉到 `eaf4fe2b`，读完「05 · 核验」。只处理本轮必须修正，未进入 06，未改 brief、步骤说明、依赖、权限、请求时机或 `useIntegrations` 的数据语义。
+- `Modals.tsx` 的私有 `useReadStarted` 在每次打开的组件实例内记住是否见过原始 refreshing 为真。① 尚未开始 / 正在读取：保持原 150ms 延迟提示，不显示未知计数或空结果；② 已结束且 capability 仍为 null：SkillsModal、McpModal 与 CapabilitiesModal 两栏显示明确的「未取得」状态，不再空白；③ 成功返回空数组：仍用各自原空态。失败态 `role="status"`，原始 busy / 禁用当帧生效，读取重试期间退休旧失败提示。
+- 两条失败文案集中在 `LOADING_COPY`。实际 CapabilitiesModal 的 Skills 栏原来没有刷新入口，因此仅在失败态接上已有 `integrations.refreshSkills`，并复用现有刷新样式 / 文案，避免提示「点刷新」却没有按钮；其余路径复用原刷新入口。MCP 在首次配置读取失败后的运行态刷新，也使用当前真实 loading 显示延迟条，不把上次失败继续当作当前终态。
+
+#### 验收与负对照
+
+| 项目 | 实际检查与结果 | 证据 |
+| --- | --- | --- |
+| 类型 / 构建 / focused | Node 22.22.1、Electron 42.10.1；`npm run typecheck`、`npm run build` 通过；`npm run test:unit -- src/renderer/components/render.test.tsx src/renderer/hooks/useDelayedFlag.test.ts` 251/251 通过，原 SSR 首帧与防闪断言不减 | `/tmp/scry-motion-05-fix-type-final.log`、`/tmp/scry-motion-05-fix-build.log`、`/tmp/scry-motion-05-fix-focused.log` |
+| 四条原生失败与恢复 | `node scripts/session-capability-ui-smoke.mjs --loading-only` 通过。legacy Skills / MCP 与实际 Capabilities Skills / MCP 均用生产 `useIntegrations`，让真实 bridge 方法 `listSkills` / `mcpSnapshot` 各拒绝一次（受控 400ms）；断言未开始时无提前请求，读取中 busy / 延迟条，无假空态或 0；拒绝后显示「未取得」、busy 为 false、无加载残留或 0；随后原生点击刷新，仅新增一次成功读取，恢复各自原成功空态 | `/tmp/scry-motion-05-fix-native-reviewed.log`；四项 `inventoryFailures` 均通过；同时旧 60ms 不闪、400ms 约 151.2ms 显示、减弱静态条、会话权限 / 旧 DOM 淡出等原断言全保留 |
+| 四个独立负对照 | 分别仅令四处「读取已结束但未取得」判定恒为 false，四次原生检查均 exit 1，在等待对应「未取得 Skill 清单 / MCP 配置」的新断言失败；未改请求、timeout 或数据。每次 finally 恢复该处后再测下一处，最后恢复正例通过 | `/tmp/scry-motion-05-fix-negative-{legacy-skills,legacy-mcp,capabilities-skills,capabilities-mcp}.log`、`/tmp/scry-motion-05-fix-native-restored.log` |
+| 完整 renderer / 后台 | `npm run test:renderer:ui` 在最终测试代码 `d4ed56d4` 全套通过，含本轮四个面板、既有深浅主题列表、Credits、后台、source-control、真实 IPC 与 Pi 43 轮历史 | `/tmp/scry-motion-05-fix-ui-final.log`；此前 `/tmp/scry-motion-05-fix-ui-full.log` 也通过 |
+| 独立实际 App | 当前构建的 `node scripts/electron-security-smoke.mjs --dev-structure-only` 通过深浅主题、Skills / MCP / LLM、pane、原生 fixture Provider 发送及草稿保留；独立 userData / workspace、隐藏后台、不操作日常实例。该检查覆盖正常成功路径，四种抛错由上方生产 hook / 组件 fixture 验证 | `/tmp/scry-motion-05-fix-app.log`；App modal close 记录为 242.0–243.3ms fallback，`nativeAnimationEnd: false`，不据此声称 CSS animationend |
+| 性能计数 | `npm run performance:measure -- --compare eaf4fe2b --scenario history.page --out /tmp/scry-motion-05-fix-history` 通过；baseline / candidate 均 10020 bytes、1 message、1 stringify，ratchet 通过、无 worse | `/tmp/scry-motion-05-fix-history/measure.json`；候选 `532edf1f`，后续只改截图前置与记录，无 App 生产源码变化；仅 L1，不宣称 L2 / L3 更快 |
+| 完整安装 | `npm run install:mac:dev` exit 0；305 文件 / 3734 unit 通过，4 个既有条件检查跳过（性能相关性、三个真实探针）；typecheck、shell、App / CLI build、签名打包、资源 / 大小、external links、crash、完整 security / files / desktop remote host 门禁均按默认范围执行并通过，最终安装 `/Applications/Scry.app` | `/tmp/scry-motion-05-fix-install.log`、`/tmp/scry-motion-05-fix-install-load.log` |
+
+- 所有原生输入沿用 `native-ui-pointer.mjs` 的几何 / 命中与 trusted pointerup 回执；没有 `.click()` 替代、OS 激活、sleep、扩大 timeout、跳过断言或真实 Provider 调用。fixture 只控制读边界与开面板，不模拟请求结束后的 state：失败、finally、重试数据均由生产 hook 写回。四个面板未开始 / 失败 / 成功空态均有独立可运行断言。
+- 首轮正例（类型、251 个 focused、四条原生、完整 UI、完整安装）均通过。一次负对照驱动脚本只读取日志尾部，误将已正确失败的第一条判为「Invalid negative control」；读回原始日志首部确认就是对应新断言失败，未重跑以覆盖结果，随后三个负对照从原始日志取证。没有将预期负对照失败写成生产回归。
+- 首次可选截图曾捕获到前一张 loading 帧，而同期 DOM 已是失败状态。参照既有 Credits fixture，capture 前 `invalidate()` 并等两次 rAF 后截图与当前 DOM 一致；仅改可选截图分支，随后原生专项与完整 UI 均通过。实际抽看最终 `capabilities-skills-failed` 与 `legacy-mcp-failed` 两张截图，失败说明可见、Skills 刷新按钮居中；不宣称审阅全部截图。文件 `/tmp/scry-motion-05-fix-reviewed-*.png`，不提交截图。
+
+#### 不阻塞项与边界
+
+- 按评审要求补充代码证据：`App.setTurnRef` 将旧 runId 的 DOM 放入 `turnRefs`；`pendingChatEvent` 与 `focusedTurnRunId` 的两个 effect 均先读该 map，再查全局 DOM，没有 inert 过滤。因此程序化定位逻辑确有读到保留旧节点的窗口；这不是「已证明没有风险」。旧转录仍 inert / aria-hidden、不能被用户直接点击，实际误滚动未复现。本轮按评审「不阻塞」只记录，不扩展修改跨会话滚动；设计方在核验时决定是否另开引用生命周期修正。
+- 未执行真实付费 Provider、真实远端网络 / 手机、120Hz 与实际屏幕阅读器播报；失败专项为受控本地 read 拒绝，真实 App 正常路径为 fixture Provider。没有将这些范围冒充真实外部端到端验收。未改 collector、workload、ratchet 或性能预算。
+- 正常提交首次仍被共享 pre-commit 的 `MODULE_NOT_FOUND: scripts/check-staged-file-size.mjs` 阻挡。用户明确选择本轮 05-fix「本轮也豁免大小 hook」；仅使用命令级 hook 路径豁免，不改共享配置，不跳过 unit、安全、构建或安装门禁。此授权不延伸到下一步。
+
+#### 安装与交付状态
+
+- 安装对应源码 / 测试 `532edf1f`，2026-10-23 22:15:19→22:22:29 PDT，Node 22.22.1，10 核 load 9.61 / 7.60 / 7.48→13.88 / 9.66 / 8.29，exit 0。App 0.2.219、私有 CLI 0.2.51；安装与打包的 `app.asar` SHA-256 均为 `39b38400a202d1c215d874b1f788ab3344a2d15e824a5bdb6a0af74242c07264`；备份 `/Applications/.Scry.app.backup`。安装后仅改测试截图前置与本记录，未改变 App 产物源码。
+- 用户日常实例未停止 / 重启；安装成功不代表该运行实例已加载新版，需用户自行重启。日志及截图只留本机 `/tmp` 与系统 temp；协议旧记录与核验不改写。推送后停在 05-fix，等待设计方核验，不进入 06。
 
 <!--
 ### NN · <步骤名>
