@@ -653,6 +653,55 @@
 6. 验证：`npm run typecheck`、`npm run test:unit`、`npm run build`、`npm run test:renderer:ui`（含 `--lists-only`、`--overlays-only`、`--loading-only`、`--turn-refs-only`、`--sidebar-activity-only` 等本系列专项）、`node scripts/electron-security-smoke.mjs --dev`，最后完整 `npm run install:mac:dev`。`performance:measure` 对 `origin/main` 做 L1 对比，每个 worse 说明原因。
 7. 只推送 `motion/native-motion-main`，不开 PR、不合入 main、不 force push。把移植记录（冲突点及处理、验证结果）追加到本文件（在 `design/native-motion` 分支上），然后停下等待核验；设计方核验后开 PR。
 
+### 01–05 与 wrap · 新 main 基线移植（2026-10-24，待核验）
+
+- 代码分支：从当时最新且交付前再次 fetch 确认未变的 `origin/main`（`ba1a20c5bdc632e3fb782d1fb7aa9269ec084634`）新建 `motion/native-motion-main`。按指定的 `git diff 531e88c caef2d2 -- . ':!designs'` 移植净改动，未将两套历史合并，未移入已回退的 06 材质。
+- 提交：`8a2bdb47` **motion: 01–05 与 wrap 运行时代码移植**（50 文件）；`ba9c9a1a` **motion: 01–05 与 wrap 原生断言移植**（44 文件）。提交说明列明来源步骤，按共享运行时 / 断言两条清楚边界合并，避免拆出中途不自洽的 presence / loading 调用链。代码已仅推送到 `motion/native-motion-main`，本机与远端均为 `ba9c9a1afdeae32b337b777d8f16d66105decc78`；未开 PR、未合入 main、未 force push。本记录仅提交在归档 `design/native-motion`。
+
+#### 冲突与适配
+
+- 三方应用后四处冲突：`package.json` 保留 main 所有新增门禁，再接入本系列专项；`desktop-remote-ui-smoke.mjs` 合并 structure 开关而不丢失 main 新场景参数；`RemotePairing.tsx` 同时保留 main 的 visibility polling 和 modal close 路由；`ChatView.tsx` 保留 main 拆分后的结构，手动落入当前模块，不恢复旧大组件。
+- 下列源码路径均指代码分支：`ChatView.tsx` 只承载延迟加载、旧真实 DOM 的装饰保留及 live owner 识别；`chat-view/transcript.tsx` 仅补入场 props，保留 main 的共享 observer、虚拟高度锚定、选中保留和 memoized ref callback；队列 FLIP 落在 `chat-view/ComposerQueue.tsx`。保留的旧转录仍只限跨 scope、无当前 cache 的读取期，当帧 inert / aria-hidden / 不登记 onTurnRef，未把旧展示恢复为当前会话 authority。
+- main 的 provider 分组 / 搜索模型选择器、provider+model 选中键、新 turn navigation 与远端完成后 durable queue 对账次序均保留；相关 main-only 源文件未回退。`RemoteChat` 只增加页面装饰过渡。主进程、共享数据 / IPC 合同、权限和 Provider 调用未改。
+- 超限的新列表检查按 structure 与其余 campaign 职责拆为 `lists-structure-ui-checks.mjs` / `lists-ui-checks.mjs`，由现有 launcher 序列化传入同一隐藏 fixture。32 个新文件全部 ≤20,000 bytes，最大 16,541 bytes；没有为大小规则拆分 main 的既有大文件。代码分支不含任何 `designs/` 变更，也没有依赖本归档路径的源码注释。
+- 大小 hook 仅按本次用户批准，通过每条提交命令的 `git -c core.hooksPath=/dev/null commit …` 豁免；共享配置、`.githooks` 与检查脚本未改。其余测试、安全、打包和安装门禁全部照常执行。
+
+#### 验证
+
+环境：Node 22.22.1、Electron 42.10.1，App 0.2.221 / 私有 CLI 0.2.51。独立临时 workspace / HOME / userData 与 fixture Provider，不写用户真实会话、不启动真实付费 Provider、不停止用户日常实例。
+
+| 项目 | 实际执行与结果 | 证据 |
+| --- | --- | --- |
+| 类型 / unit / build | `npm run typecheck`、`npm run test:unit`、`npm run build` 通过；319 文件 / 3871 测试通过，4 个既有条件检查跳过（性能相关性及三个真实探针）；安装内再次通过相同全量检查 | `/tmp/scry-motion-port-{type-final,unit,build}.log`、`/tmp/scry-motion-port-install.log` |
+| 原生专项 | `node scripts/session-capability-ui-smoke.mjs` 分别运行 `--turn-refs-only`、`--sidebar-activity-only`、`--overlays-only`、`--lists-only`、`--loading-only`、`--structure-only` 全通过；活动原有 123 预算、其余列表 40 预算、45 行保留 / 50 历史工具、深浅主题、短 / 长折叠、标签与真实新增 / 缓存 / 加载 / 切换边界均保留 | `/tmp/scry-motion-port-{turn-refs,sidebar-activity,overlays}-first.log`、`/tmp/scry-motion-port-{lists,loading,structure}-second.log` |
+| wrap 负对照 | 临时恢复旧 `onTurnRef={onTurnRef}`，新原生断言明确失败：`retained transcript remained registered for turn navigation`；恢复移植实现后相同检查通过 | `/tmp/scry-motion-port-refs-{negative,restored}.log` |
+| 完整 renderer UI | `npm run test:renderer:ui` 最终全套通过；含上述系列专项、main 新模型搜索 / turn navigation / unknown receipt 正负例、Credits、后台、source-control、真实 IPC 与 Pi 55 轮历史；默认 capability 完整路径亦单独通过 | `/tmp/scry-motion-port-ui-fourth.log`、`/tmp/scry-motion-port-capability-final.log` |
+| 完整 dev 安全测试 | `npm run build:cli` 后 `node scripts/electron-security-smoke.mjs --dev` 通过；115 preload API、终端录制捕获 / 回放 / 只读 / noSpawn / 删除及 session / reload / window 安全链路均执行 | `/tmp/scry-motion-port-build-cli.log`、`/tmp/scry-motion-port-security-dev.log` |
+| 独立实际 App | 当前构建的 `node scripts/electron-security-smoke.mjs --dev-structure-only` 通过深浅主题、pane / modal、草稿焦点和原生 fixture 发送；只抽看当前 light-chat / dark-settings 两张截图，不声称逐张审阅所有截图 | `/tmp/scry-motion-port-structure-app.log`；截图仅留本机临时目录 |
+
+- loading 专项实际观测 151.2ms onset，保留 60ms 无闪烁、400ms 慢读、四种真实 useIntegrations 失败后重试与减弱动效静态条。actual App modal 关闭仍是 242.2–244.1ms fallback / `nativeAnimationEnd: false`，不冒称 CSS animationend；原生 overlay 专项本轮记录 11 次 animationend、1 次 fallback，入场结束释放 transform 的断言通过。
+
+#### 首轮失败与修正
+
+- 列表检查职责拆分后首跑漏传 `contents`，得到 ReferenceError；补齐同一已有 context 参数，再跑通过，没有改断言或 watchdog。
+- 完整 UI 首轮远端 opening 期望 `Alpha Default`，而 main 新合同显示 `claude / Alpha Default`。在未改源码 / 未改断言的独立 `ba1a20c5` worktree 复现同一失败；依据 main 的 qualified copy，将八处模型标题期望改为完整 provider-qualified 字符串，仍校验 provider+model 绑定，不改成宽泛 includes。第三轮暴露漏改的两处 Remembered，再补齐。证据 `/tmp/scry-motion-port-ui-first.log`、`/tmp/scry-motion-port-main-opening-control.log`、`/tmp/scry-motion-port-ui-third.log`。
+- 第二轮旧默认模型用例仍要求隐藏 scrollbar / 聚焦当前项，与 main 新 thin scrollbar / 搜索输入焦点合同冲突；沿用 main 专用模型原生门禁的语义修订该旧用例，保留 search、逐项键盘选择与重复打开定位断言。其 wait helper 原只观测 DOM mutation，不能看到纯 focus 改变，补 `focusin` 监听及清理，原 5000ms deadline 不变。随后原生 SelectAll 仅获 dispatch 时就输入，留下已有草稿；补等待真实 selectionStart / selectionEnd 再插入，草稿隔离断言保留。日志 `/tmp/scry-motion-port-{ui-second,capability-model-adapted,capability-model-focus}.log`；最终默认 capability 正例通过。
+- 一次远端 focused 测试触发既有 55000ms watchdog、无结果；先检查原进程已退出及 fixture 进度，再临时加只读 checkpoint 定位，完整诊断旅程通过（含准备 58.3s）。已移除诊断输出；最终全 UI 在原 watchdog 下通过。首次超时根因未确认，不把后续通过当成它从未发生；没有扩大 deadline、加 sleep 或自动重试分支。日志 `/tmp/scry-motion-port-{remote-model-final,remote-checkpoints,ui-fourth}.log`。
+- 暂存分组脚本曾首败并产生未发布的混合提交；只软回退该自有未发布节点、保留全部文件后重分为上述两个提交，没有改写归档、main 或任何已发布历史，也没有丢用户改动。
+
+#### L1 对比与每项 worse
+
+- `npm run performance:measure -- --compare origin/main --out /tmp/scry-motion-port-counters` → 通过，固定基线 `ba1a20c5`；candidate 报告为提交前 `ba1a20c5-dirty`，生产源码即上述运行时提交，后续只适配测试。43 项均 measured，42 项与 main 完全相同；history 10020 bytes / 1 message / 1 stringify、trace 165996 bytes / 2 messages 均不变。
+- 对 main 唯一增加为 `files.fixed-operations / io.read.bytes`：1227421→1227446（+25B，约 0.002%）。原 main 五次读量 1227421 / 1227405 / 1227395 / 1227399 / 1227415，candidate 为 1227446 / 1227438 / 1227426 / 1227424 / 1227426；相关生产 I/O 函数与 collector 完全未改，调用次数一致。补充一个只留临时诊断、原样保留 workload 的六测试正例：五次总读量 1227413 / 1227407 / 1227450 / 1227412 / 1227420，减去索引 `mtimeMs` / `ctimeMs` / `ino` 数字序列化长度后，五次余量均为 1216660B。变化可由 fixture 真实文件元数据的可变数字长度解释，不是新增读取；未把非零差异抹成零。日志 `/tmp/scry-motion-port-bytes-diagnostic.log`，临时诊断文件已删除，既有 collector / workload 未修改。
+- ratchet 的四个旧 ledger worse 逐项核对：`io.read` 336→417（main 已是 417）；`io.readdir` 18→20（main 已是 20）；`io.read.bytes` 1183197→1227446（main 已是 1227421，另 +25B 见上）；`persistence.archive / ipc.bytes` 10536→10558（main 已是 10558）。两项调用计数和归档 payload 没有本次新增工作，读取字节微差有上述诊断；ratchet 仍通过，没有放宽预算。证据 `/tmp/scry-motion-port-counters/measure.json`、`/tmp/scry-motion-port-counters.log`。不把 L1 计数或该非耗时诊断当作 L2 / L3 更快结论。
+
+#### 安装与交付边界
+
+- 最终 `npm run install:mac:dev` 在 `ba9c9a1a` 完整执行，**exit 0**，2026-10-24 02:48:24→02:56:41 PDT，10 核 load 13.38 / 23.39 / 28.11→17.26 / 16.05 / 21.76。typecheck、3871 unit（4 条件跳过）、shell、App / CLI 构建、签名、打包资源与体积检查、external links、crash recovery、完整 packaged security / files / 默认 desktop remote host gates 全通过，再完成安装；没有绕过任何 gate。日志 `/tmp/scry-motion-port-install{,-load}.log`。
+- 安装目标 `/Applications/Scry.app`（App 0.2.221 / 私有 CLI 0.2.51），备份 `/Applications/.Scry.app.backup`。安装与 dist 的 `app.asar` SHA-256 均为 `82e92e3831b111b6ee2999005d02ba655886ff21547cc8f58fdb917bd0b83df3`。用户日常实例未停止 / 重启；需要用户自行重启才加载新安装版本，不能把安装成功当作当前运行实例已更新。
+- `git diff --check` 通过；新增文件大小独立检查全过；源码 / 原生 fixture / 日志使用临时目录，不提交截图或个人数据。基线对照 worktree 与临时诊断已清理；本记录单独在归档分支提交，代码工作区保持新分支已验证的干净版本。
+- 未验证真实付费 Provider、真机手机 / 真实远程网络、120Hz、真实屏幕阅读器、低负载 L2 与发布后 L3；默认 files smoke 中未启用的可选外部文件动作不作为已执行场景。停下等待设计方核验移植，不开 PR、不合入 main、不进入新步骤。
+
 <!--
 ### NN · <步骤名>
 
