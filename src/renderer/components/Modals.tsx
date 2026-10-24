@@ -18,7 +18,9 @@ import type { McpLiveStatus } from '@shared/trace'
 import type { CapabilityEnvelope, DeleteArchivedSessionsResult, McpSnapshot } from '@shared/provider'
 import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
-import { MODAL_COPY } from '../constants/copy'
+import { MODAL_COPY, LOADING_COPY } from '../constants/copy'
+import { useDelayedFlag } from '../hooks/useDelayedFlag'
+import { DelayedLoadingStatus } from './LoadingStatus'
 import { ArchivedRemoteChatsPanel } from './ArchivedRemoteChatsPanel'
 import { useRemoteProjectGroups } from './SidebarRemoteProjects'
 import './archived-sessions.css'
@@ -657,6 +659,9 @@ export function SkillsModal({
   const [query, setQuery] = useState('')
   const scopeSkills = filterSkillsForScope(skills, scope)
   const filtered = filterSkillsForScope(skills, scope, query)
+  // Null evidence is not an empty result, even before the read effect starts.
+  const initialSkillsLoading = (refreshing || capability === null) && skills.length === 0
+  const showSkillsLoading = useDelayedFlag(refreshing)
   const listMotion = useFirstReadyList(filtered.length > 0)
   const projectCount = skills.filter((skill) => skill.scope === 'project').length
   const userCount = skills.filter((skill) => skill.scope === 'user').length
@@ -705,7 +710,7 @@ export function SkillsModal({
           <p>查看当前 Provider 在这个工作目录里实际发现了哪些 Skill。</p>
         </div>
         <div className="inventory-modal__head-actions">
-          {refreshing && <EvidenceState value={{ state: 'pending', label: '读取中…', role: 'status' }} quiet />}
+          {showSkillsLoading && <EvidenceState value={{ state: 'pending', label: LOADING_COPY.reading, role: 'status' }} quiet />}
           <button className="modal-refresh" onClick={onRefresh} disabled={refreshing} title="重新读取当前 Provider 的 Skill 清单" aria-label="刷新 Skills">
             <Icon name="refresh" />
           </button>
@@ -716,7 +721,7 @@ export function SkillsModal({
       <InventoryContext
         capability={capability}
         kind="Skills"
-        summary={`${filtered.length} 个结果`}
+        summary={initialSkillsLoading ? '' : LOADING_COPY.skillsResults(filtered.length)}
       />
 
       {capability && capability.state !== 'ready' && (
@@ -737,7 +742,7 @@ export function SkillsModal({
           onClick={() => chooseScope('project')}
           onKeyDown={onScopeKeyDown}
         >
-          项目 Skill <span>{projectCount}</span>
+          项目 Skill {!initialSkillsLoading && <span>{projectCount}</span>}
         </button>
         <button
           type="button"
@@ -750,7 +755,7 @@ export function SkillsModal({
           onClick={() => chooseScope('user')}
           onKeyDown={onScopeKeyDown}
         >
-          用户 Skill <span>{userCount}</span>
+          用户 Skill {!initialSkillsLoading && <span>{userCount}</span>}
         </button>
         {providerCount > 0 && (
           <button
@@ -783,7 +788,7 @@ export function SkillsModal({
           />
           {query && <button type="button" onClick={() => setQuery('')} aria-label="清空搜索">清除</button>}
         </label>
-        <span className="inventory-toolbar__count" aria-live="polite">显示 {filtered.length} / {scopeSkills.length}</span>
+        {!initialSkillsLoading && <span className="inventory-toolbar__count" aria-live="polite">显示 {filtered.length} / {scopeSkills.length}</span>}
       </div>
 
       <div
@@ -791,10 +796,12 @@ export function SkillsModal({
         id={titleId + '-skills-panel'}
         role="tabpanel"
         aria-labelledby={titleId + '-' + scope + '-tab'}
+        aria-busy={refreshing}
       >
-        {filtered.length === 0 && (
+        {initialSkillsLoading && <DelayedLoadingStatus loading={refreshing} title={LOADING_COPY.skills} />}
+        {filtered.length === 0 && !initialSkillsLoading && (
           <div className="inventory-empty" role="status">
-            <strong>{refreshing && skills.length === 0 ? '正在读取 Skill…' : scopeSkills.length === 0 ? `未发现${scopeLabel}` : `${scopeLabel}中没有匹配结果`}</strong>
+            <strong>{scopeSkills.length === 0 ? LOADING_COPY.skillsEmpty(scopeLabel) : LOADING_COPY.skillsNoMatch(scopeLabel)}</strong>
             <p>{scopeSkills.length === 0 ? `当前 Provider 没有返回${scopeLabel}。` : '换一个关键词，或清空搜索查看全部条目。'}</p>
             {query && <button type="button" onClick={() => setQuery('')}>清空搜索</button>}
           </div>
@@ -930,6 +937,7 @@ export function McpModal({
   const closeRef = useRef<HTMLButtonElement>(null)
   const loadingConfig = configRefreshing && !capability
   const loading = loadingConfig || refreshing
+  const showMcpLoading = useDelayedFlag(loading)
   const authenticationInProgress = Object.values(status).some((item) => item.authenticating)
   const [expanded, setExpanded] = useState<string | null>(null)
   const mcpMotion = useFirstReadyList(mcps.length > 0)
@@ -948,7 +956,7 @@ export function McpModal({
           </div>
         </div>
         <div className="inventory-modal__head-actions">
-          {loading && <EvidenceState value={{ state: 'pending', label: loadingConfig ? '读取配置中…' : readsPiSnapshot ? '正在刷新 Pi MCP 快照…' : '正在检测全部 MCP…', role: 'status' }} quiet />}
+          {showMcpLoading && <EvidenceState value={{ state: 'pending', label: loadingConfig ? LOADING_COPY.readingConfig : readsPiSnapshot ? LOADING_COPY.piSnapshot : LOADING_COPY.detectingMcp, role: 'status' }} quiet />}
           <button
             className={'modal-refresh' + (readsRuntime ? ' mcp-refresh-all' : '')}
             onClick={onRefresh}
@@ -960,8 +968,8 @@ export function McpModal({
                 : '重新读取当前 Provider 的原生 MCP 配置与运行状态'}
             aria-label={readsPiSnapshot ? '刷新 Pi MCP 快照' : readsRuntime ? '检测全部 MCP 运行状态' : '刷新 MCP 状态'}
           >
-            {refreshing && readsRuntime ? <span className="spinner" /> : <Icon name="refresh" />}
-            {readsRuntime && <span>{refreshing ? (readsPiSnapshot ? '刷新中…' : '检测中…') : refreshLabel}</span>}
+            {showMcpLoading && refreshing && readsRuntime ? <span className="spinner" /> : <Icon name="refresh" />}
+            {readsRuntime && <span>{showMcpLoading && refreshing ? (readsPiSnapshot ? LOADING_COPY.refreshing : LOADING_COPY.detecting) : refreshLabel}</span>}
           </button>
           <ModalCloseButton ref={closeRef} onClick={() => requestModalClose()} aria-label={MODAL_COPY.closeMcp} />
         </div>
@@ -970,7 +978,7 @@ export function McpModal({
       <InventoryContext
         capability={capability}
         kind="MCP"
-        summary={`${mcps.length} 配置 · ${live.length > 0 ? connectedCount + ' 已连接 / ' + live.length + ' 运行态' : '运行态未返回'} · ${testEvidenceCount} 测试证据`}
+        summary={loadingConfig || capability === null ? '' : LOADING_COPY.mcpSummary(mcps.length, connectedCount, live.length, testEvidenceCount)}
       />
 
       {capability && capability.state !== 'ready' && (
@@ -985,11 +993,11 @@ export function McpModal({
         <EvidenceState value={{ state: 'unsupported', label: '不支持：能力不存在' }} quiet />
       </div>
 
-      <div className="modal-body inventory-modal__body inventory-modal__body--mcp">
-        {mcps.length === 0 ? (
+      <div className="modal-body inventory-modal__body inventory-modal__body--mcp" aria-busy={loading}>
+        {mcps.length === 0 && (loadingConfig || capability === null) ? <DelayedLoadingStatus loading={loadingConfig} title={LOADING_COPY.mcp} /> : mcps.length === 0 ? (
           <div className="inventory-empty" role="status">
-            <strong>{loadingConfig ? '正在读取 MCP 配置…' : '未发现 MCP 配置'}</strong>
-            <p>{loadingConfig ? '等待当前 Provider 返回配置清单。' : '没有配置证据不等于运行正常，也不等于连接失败。'}</p>
+            <strong>{LOADING_COPY.mcpEmpty}</strong>
+            <p>没有配置证据不等于运行正常，也不等于连接失败。</p>
           </div>
         ) : (
           <div className="mcp-fleet-wrap">
@@ -1226,6 +1234,7 @@ export function CapabilitiesModal({
   const activeCapability = view === 'skills' ? skillCapability : mcpCapability
   const loadingMcpConfig = mcpConfigRefreshing && !mcpCapability
   const loadingMcp = loadingMcpConfig || mcpRefreshing
+  const showMcpLoading = useDelayedFlag(loadingMcp)
   const authenticationInProgress = Object.values(status).some((item) => item.authenticating)
   const liveByName = new Map(live.map((item) => [item.name, item]))
   const visibleSkills = source === 'all' ? skills : skills.filter((skill) => skill.scope === source)
@@ -1262,8 +1271,8 @@ export function CapabilitiesModal({
             disabled={loadingMcp || authenticationInProgress}
             aria-label="刷新 MCP 运行状态"
           >
-            {mcpRefreshing ? <span className="spinner" /> : <Icon name="refresh" />}
-            <span>{mcpRefreshing ? '检测中…' : '刷新'}</span>
+            {showMcpLoading && mcpRefreshing ? <span className="spinner" /> : <Icon name="refresh" />}
+            <span>{showMcpLoading && mcpRefreshing ? LOADING_COPY.detecting : LOADING_COPY.refresh}</span>
           </button>
         )}
         <ModalCloseButton ref={closeRef} className="capabilities-close" onClick={() => requestModalClose()} aria-label={MODAL_COPY.closeCapabilities} />
@@ -1287,20 +1296,20 @@ export function CapabilitiesModal({
       )}
 
       {view === 'skills' ? (
-        <div className={`capabilities-body capabilities-skills ${capabilityMotion.className}`} role="tabpanel">
+        <div className={`capabilities-body capabilities-skills ${capabilityMotion.className}`} role="tabpanel" aria-busy={skillsRefreshing}>
           {visibleSkills.length > 0 ? visibleSkills.map((skill, index) => (
             <article className="capability-skill motion-stagger-item" style={capabilityMotion.itemStyle(index)} key={skill.scope + ':' + skill.name}>
               <strong>{skill.name}</strong>
               <p title={skill.description}>{skill.description}</p>
             </article>
-          )) : (
+          )) : (skillsRefreshing || skillCapability === null) && skills.length === 0 ? <DelayedLoadingStatus loading={skillsRefreshing} title={LOADING_COPY.skills} /> : (
             <div className="capabilities-empty" role="status">
-              <strong>{skillsRefreshing && skills.length === 0 ? '正在读取 Skill…' : '当前来源没有 Skill'}</strong>
+              <strong>{LOADING_COPY.skillsSourceEmpty}</strong>
             </div>
           )}
         </div>
       ) : (
-        <div className={`capabilities-body capability-mcp-list ${capabilityMotion.className}`} role="tabpanel">
+        <div className={`capabilities-body capability-mcp-list ${capabilityMotion.className}`} role="tabpanel" aria-busy={loadingMcp}>
           {visibleMcps.length > 0 ? visibleMcps.map((mcp, index) => {
             const targetId = mcp.targetId ?? mcp.name
             const runtime = liveByName.get(mcp.name)
@@ -1367,7 +1376,7 @@ export function CapabilitiesModal({
                   <div className={`capability-tools ${open ? 'open' : ''}`}>
                     <div className="capability-tools__inner">
                       {currentStatus?.testing ? (
-                        <span className="capability-tools__message">正在读取工具明细…</span>
+                        <DelayedLoadingStatus loading title={LOADING_COPY.tools} className="capability-tools__message" />
                       ) : toolNames?.length ? (
                         <div className="capability-tools__list">{toolNames.map((tool) => <code key={tool}>{tool}</code>)}</div>
                       ) : currentStatus?.ok === false ? (
@@ -1380,9 +1389,9 @@ export function CapabilitiesModal({
                 )}
               </article>
             )
-          }) : (
+          }) : loadingMcpConfig || mcpCapability === null ? <DelayedLoadingStatus loading={loadingMcpConfig} title={LOADING_COPY.mcp} /> : (
             <div className="capabilities-empty" role="status">
-              <strong>{loadingMcpConfig ? '正在读取 MCP 配置…' : '当前来源没有 MCP'}</strong>
+              <strong>{LOADING_COPY.mcpSourceEmpty}</strong>
             </div>
           )}
         </div>

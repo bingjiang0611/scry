@@ -6,7 +6,9 @@ import { bridge, errorText } from './DesktopRemote'
 import { ModalFrame, requestModalClose } from './Modals'
 import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
-import { MODAL_COPY } from '../constants/copy'
+import { MODAL_COPY, LOADING_COPY } from '../constants/copy'
+import { useDelayedFlag } from '../hooks/useDelayedFlag'
+import { LoadingStatus } from './LoadingStatus'
 
 export function RemoteDirectoryPicker({ connection, initialPath, onPick, onClose }: {
   connection: DesktopRemoteConnection
@@ -25,6 +27,7 @@ export function RemoteDirectoryPicker({ connection, initialPath, onPick, onClose
   const { connections, error: connectionError } = useDesktopConnections()
   const connected = !connectionError && connections.some(item => item.id === connection.id && item.state === 'connected')
   const busy = loading || selecting
+  const showLoading = useDelayedFlag(loading)
   const close = (): void => { if (!selecting) onClose() }
 
   const browse = async (target?: string, older?: DesktopDirectoryPage): Promise<void> => {
@@ -81,10 +84,11 @@ export function RemoteDirectoryPicker({ connection, initialPath, onPick, onClose
         <div className="remote-directory-navigation">
           <button type="button" className="hosts-button" disabled={busy || !connected} onClick={() => void browse()}>主目录</button>
           <button type="button" className="hosts-button" disabled={busy || !connected || !page?.parent} onClick={() => void browse(page!.parent!.path)}>上一级</button>
-          <span className="hosts-muted">{page ? `${page.directories.length} / ${page.total} 个文件夹` : loading ? '正在读取…' : '尚未读取目录'}</span>
+          <span className="hosts-muted">{page ? LOADING_COPY.directoryCount(page.directories.length, page.total) : loading ? '' : LOADING_COPY.directoryUnread}</span>
         </div>
         {!connected && <p role="alert" className="desktop-remote__error">{connection.label} 未连接或连接状态未知；不会改用本机选择或执行。</p>}
         {error && <p role="alert" className="desktop-remote__error">{error}</p>}
+        {showLoading && <LoadingStatus title={LOADING_COPY.reading} />}
         <div className="remote-directory-list" role="group" aria-label={`${connection.label} 的文件夹`}>
           {page?.directories.map(directory => (
             <button type="button" key={`${directory.label}:${directory.path}`} className="mitem remote-directory-entry" title={directory.path} data-remote-directory={directory.path} disabled={busy || !connected} onClick={() => void browse(directory.path)}>

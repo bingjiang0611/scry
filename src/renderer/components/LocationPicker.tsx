@@ -5,7 +5,8 @@ import type { DesktopRemoteConnection } from '@shared/desktop-remote'
 import { basename } from '../format'
 import { refreshDesktopConnections, useDesktopConnections } from '../hooks/useDesktopConnections'
 import { refreshRemoteCatalog, useRemoteCatalogs, type RemoteCatalogEntry } from '../hooks/useRemoteCatalogs'
-import { REMOTE_ACCESS_COPY as copy } from '../constants/copy'
+import { REMOTE_ACCESS_COPY as copy, LOADING_COPY } from '../constants/copy'
+import { DelayedLoadingStatus } from './LoadingStatus'
 import { Icon } from './primitives/Icon'
 import { bridge } from './DesktopRemote'
 import { RemoteDirectoryPicker } from './RemoteDirectoryPicker'
@@ -277,7 +278,7 @@ function RemoteProjects({
   if (!entry?.catalog) {
     return entry?.error
       ? <div className="location-empty"><p role="alert" className="location-error">无法读取项目：{entry.error}</p><button type="button" className="location-action" onClick={onRetry}>重试</button></div>
-      : <p className="location-empty">正在读取 {connection.label} 的项目…</p>
+      : <div className="location-empty" aria-busy="true"><DelayedLoadingStatus loading title={LOADING_COPY.remoteProjects(connection.label)} /></div>
   }
   const projects = entry.catalog.projects
   return (

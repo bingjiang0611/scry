@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useFirstReadyList } from '../hooks/useFirstReadyList'
+import { useDelayedFlag } from '../hooks/useDelayedFlag'
+import { LoadingStatus } from './LoadingStatus'
 import type {
   UsageAnalytics,
   UsageAnalyticsAggregate,
@@ -361,9 +363,10 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
   const [chartMetric, setChartMetric] = useState<ChartMetric>('cost')
   const [breakdownMode, setBreakdownMode] = useState<BreakdownMode>('model')
   const breakdownMotion = useFirstReadyList(Boolean(analytics?.status === 'ready'))
+  const showLoading = useDelayedFlag(loading)
 
   if (!analytics && loading) {
-    return <main className="usage-page"><div className="usage-state">{copy.loading}</div></main>
+    return <main className="usage-page" aria-busy="true">{showLoading && <LoadingStatus className="usage-state" title={copy.loading} />}</main>
   }
   if (!analytics || analytics.status !== 'ready') {
     return (
@@ -413,7 +416,7 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
                 <button type="button" key={days} className={rangeDays === days ? 'active' : ''} aria-pressed={rangeDays === days} onClick={() => onRangeChange(days)}>{copy.range(days)}</button>
               ))}
             </div>
-            <button className={`usage-refresh ${loading ? 'is-loading' : ''}`} type="button" onClick={onRefresh} disabled={loading} aria-label={copy.refresh} title={copy.refresh}>
+            <button className={`usage-refresh ${showLoading ? 'is-loading' : ''}`} type="button" onClick={onRefresh} disabled={loading} aria-label={copy.refresh} title={copy.refresh}>
               <Icon name="refresh" />
             </button>
           </div>
