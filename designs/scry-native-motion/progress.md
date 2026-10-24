@@ -10,7 +10,7 @@
 | 02 结构过渡 | 通过 | `42f3f9dc`、`3305911d`（修正）；`3145cd79`、`06defe55`（回归）；按「02 · 核验」授权，修正验收后进入 03 |
 | 03 弹窗与浮层 | 通过 | `b6f42801`（实现）、`5e3e14ee`（验收）；范围取舍见本轮用户确认；一项小修正并入 04 开头，见「03 · 核验」 |
 | 04 列表 | 通过 | `5f3484c1`（实现）；`b8537f5e` / `5aa66684`（04-fix）；完整安装通过，见「04-fix · 核验」 |
-| 05 加载防闪 | 待核验 | `7861d4be` / `b74c6726`（实现与文案）；`a9cdc143` / `b1380cc9`（断言）；完整安装通过，见下方 05 记录 |
+| 05 加载防闪 | 需修改 | `7861d4be` / `b74c6726`（实现）；一处修正见「05 · 核验」 |
 | 06 侧栏材质（可选） | 需用户确认 | — |
 
 状态取值：待开始 / 进行中 / 待核验 / 需修改 / 通过。
@@ -469,6 +469,27 @@
 - 普通提交先被共享 pre-commit 调用本分支不存在的 `scripts/check-staged-file-size.mjs` 阻挡（MODULE_NOT_FOUND）。用户本轮明确选择「本轮也豁免大小 hook」，仅命令级 hook 路径豁免；共享配置未修改，目录仅含该 pre-commit 链接，运行 / 测试 / 安全 / 安装门禁没有跳过。
 - 已抽看普通加载、减弱加载、远端子目录三个当前生产组件截图；截图与日志仅留本机临时目录（`/tmp` 与系统 temp），未提交个人数据。60 / 400ms 是真实生产 App renderer 的可控 read 桩，不是假 UI；它们不代表真实大归档 I/O、真实远端网络或付费 Provider 的耗时。工具明细的装饰分支未另做独立原生时间案例，不把其代码接入说成单独端到端验收。
 - 用户日常实例未停止或重启；已安装不等于正在运行的实例已加载新版本。当前实现 / 验证 / 记录推送后停在 05，等待设计方核验，不进入 06。
+
+### 05 · 核验（2026-10-24，设计方）
+
+结论：**需修改（一处）**，其余通过。核验方式：读完 `ec3193d..eff07bb` 全部实现 diff，并对照 `useIntegrations.ts` 的请求失败路径。核验环境连不上 npm 源，测试与安装依据执行方记录。
+
+**通过的部分**
+- `useDelayedFlag`：在 render 内退休上一周期的 visible，避免快速 false→true 复用旧提示；变假当帧生效，卸载清理。正确。
+- 会话加载：发送、分叉、`aria-busy` 与 live-arrival 都用原始 `sessionLoading`，第一帧生效。跨会话时保留的旧转录立即 inert + aria-hidden，超过 150ms 用 WAAPI 在实时 DOM 上 120ms 淡出；同一会话的缓存撤销仍立即移除。符合规格与 brief 场景 2。
+- 加载条位于时间线的 `aria-busy` 区域之外，读屏能播报；减弱动效为静态细条，有负对照。
+- 分析页、远端项目、远端目录、MCP / Skill 装饰提示都改为延迟，原始 busy / 禁用不受影响。未知时不显示 0 或空结果，这个方向是对的。
+- 原 SSR 断言的修改理由成立；「新会话加载不能显示旧转录」的断言原样保留并修了实现，处理得当。
+
+**必须修正：清单读取失败后，Skills / MCP 面板变成一片空白**
+- `useIntegrations.refreshSkills` 在 `listSkills` 抛错时设置 `skillCapability = null`、`skillsRefreshing = false`。MCP 首次读取（`refreshMcp` → `loadMcpLive`）抛错时，`mcpCapability` 也保持 `null`，`mcpConfigRefreshing` 回到 false。
+- 本步把 `capability === null` 一律当作「未观测、可能在加载」：`initialSkillsLoading` 为真，但 `DelayedLoadingStatus loading={refreshing}` 的 `loading` 已是 false，于是什么都不渲染；计数、`summary` 也被隐藏。`McpModal` 与 `CapabilitiesModal` 的 Skills / MCP 两栏同理。
+- 结果是读取失败后面板没有任何说明，用户也不知道该点刷新。这违反了步骤里的「不把失败或 `unavailable` 当作加载中处理」，也违背「证据不能说谎」：没有取得清单必须明确说出来。改动前至少还会显示一行空态。
+- 修法（不改请求与 `useIntegrations` 的数据语义）：在这几个面板里区分三种情况。① 请求尚未开始或正在进行：保持现在的延迟加载提示。② 请求已经结束但 capability 仍为 `null`：显示明确的「未取得 Skill 清单 / 未取得 MCP 配置，可点刷新重试」，用 `role="status"` 或 `alert`，文案进 `LOADING_COPY`，不显示 0。③ 成功的空结果：保持原有的空态文案。区分 ① 和 ② 只需在组件里记住「本次打开后是否见过 refreshing 为真」，不要提前发起请求，也不要改 hook。
+- 验收：原生 fixture 让 `listSkills` 与 `mcpSnapshot` 各抛错一次，断言 Skills 弹窗、MCP 弹窗以及 `CapabilitiesModal` 的两栏都出现「未取得」说明，且没有残留加载条，也没有出现 0。负对照：去掉 ② 的分支后断言失败。
+
+**不阻塞**
+- 跨会话保留的旧转录仍会调用 `onTurnRef` 注册旧 runId 的 DOM，直到新内容替换后卸载。它们是 inert 的，目前看不会出错；如果执行方知道 `setTurnRef` 有按 runId 定位或滚动的逻辑会读到这些旧节点，请在记录里说明。
 
 <!--
 ### NN · <步骤名>
