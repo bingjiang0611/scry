@@ -7,13 +7,12 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { stopOwnedApp } from './owned-app-processes.mjs'
-import { exerciseMetaPromptsApp } from './meta-prompts-ui-checks.mjs'
 import { exerciseUnified } from './electron-security-unified.mjs'
 import { exerciseOwnership } from './electron-security-ownership.mjs'
 import { exerciseMeta } from './electron-security-meta.mjs'
 import { exerciseSourceControlApp } from './source-control-ui-checks.mjs'
-import { exerciseUnifiedConversation, verifyUnifiedConversationRestart } from './unified-conversation-smoke.mjs'
-import { seedConversationOwnership, exerciseConversationOwnership, prepareOwnershipRecoveryFailure, exerciseOwnershipRecoveryFailure } from './conversation-ownership-smoke.mjs'
+import { exerciseWorkspaceSessions } from './workspace-session-ui-checks.mjs'
+import { seedConversationOwnership } from './conversation-ownership-smoke.mjs'
 import { exerciseFileHistory } from './electron-security-file-history.mjs'
 import { exerciseNativeHistory } from './electron-security-native-history.mjs'
 import { exerciseProductionPerformance } from './electron-security-performance.mjs'
@@ -250,7 +249,7 @@ async function main() {
     console.log(JSON.stringify(result))
     return
   }
-  if (unifiedConversationOnly) return exerciseUnified(context())
+  if (unifiedConversationOnly) return process.argv.includes('--workspace-start') ? exerciseWorkspaceSessions(context()) : exerciseUnified(context())
   if (devMetaPromptsOnly) return exerciseMeta(context())
   const boundary = await evaluate(`(() => ({
     requireType: typeof require,

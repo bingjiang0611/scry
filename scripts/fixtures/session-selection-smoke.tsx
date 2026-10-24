@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client'
+import { unavailableWorkspaceSelection } from './workspace-selection-unavailable'
 import { App } from '../../src/renderer/App'
 import type { ActiveRun } from '../../src/shared/trace'
 import type { ProviderContext } from '../../src/shared/provider'
@@ -53,6 +54,7 @@ const update = () => {
   status.textContent = JSON.stringify({ cwd, activeReads, activeListReads, adoptedRuns, historyReads, cancelledLoads, newSessions, starts, snapshots: pendingSnapshots.length })
 }
 const bridge = {
+  workspaceSelection: unavailableWorkspaceSelection,
   activeRun: () => {
     activeReads += 1
     update()

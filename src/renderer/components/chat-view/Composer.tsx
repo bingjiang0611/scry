@@ -8,6 +8,7 @@ import { providerHasEnded, runStopStatus } from '../../run-stop-status'
 import { latestBackgroundWork } from '@shared/background-work'
 import { backgroundWorkStatus } from '../../background-work-status'
 import { SLASH_COMMAND_COPY } from '../../constants/copy'
+import { workspaceCopy } from '../../constants/workspace-copy'
 import { filterSlashCommands, composerPromptHistory } from './composer-utils'
 import { modelPickerOptions } from '../model-picker-options'
 
@@ -24,7 +25,7 @@ export function Composer({
   onInput, onChooseFolder, onUnbindProject = () => {}, onPickRecent, onRemoveRecent, onRetrySlash, onPickSlash,
   onSlashSel, onHideSlash, onSend, onStop, onPasteImages, onPasteClipboardImage, onRemoveDraftAttachment,
   onRemoveQueuedPrompt, onSelectAgent, onAddPiAgent, onRemovePiAgent, onRunModel, onRunEffort, onPermissionMode,
-  onRescan, unavailableAgentIds, agentScopeLabel, renderLocationPicker, remoteHost, composerNotice = null
+  onRescan, unavailableAgentIds, agentScopeLabel, renderLocationPicker, remoteHost, composerNotice = null, workspaceContext, workspaceSendLabel
 }: Omit<ChatViewProps, 'selectedId' | 'scrollRef' | 'onSelect' | 'onOpenDiff' | 'onForkTurn' | 'forkableRunIds' | 'onOpenFile' | 'onAnswerQuestion' | 'focusedTurnRunId' | 'scrollNavigation' | 'onTurnRef' | 'historyWindow'>) {
   const remote = remoteHost != null
   const resettingNewConversation = sessionLoading && !hasSelectedSession
@@ -90,7 +91,7 @@ export function Composer({
     }))
   ]
   const queueing = busy && queueWhileBusy
-  const sendActionLabel = submitting ? '正在启动' : queueing ? '加入队列' : '发送'
+  const sendActionLabel = submitting ? workspaceCopy.starting : queueing ? workspaceCopy.queue : workspaceSendLabel ?? workspaceCopy.send
   const hasDraft = input.trim().length > 0 || draftAttachments.length > 0
   const composerStatus = composerError ?? detectionIssue ?? (hasDraft ? sendBlockedReason : null)
 
@@ -195,6 +196,7 @@ export function Composer({
           sendActionLabel={sendActionLabel} queueing={queueing} resetPromptHistory={resetPromptHistory}
           onSend={onSend} runControlCatalog={runControlCatalog}
         />
+        {workspaceContext}
         </div>
         </div>
   )

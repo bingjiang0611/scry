@@ -101,6 +101,8 @@ export interface ChatViewProps {
   onRescan?: () => void
   unavailableAgentIds?: ReadonlySet<string>
   agentScopeLabel?: string
+  workspaceContext?: ReactNode
+  workspaceSendLabel?: string
   renderLocationPicker?: (menu: { open: boolean; onOpenChange: (open: boolean) => void }) => ReactNode
   remoteHost?: string
   composerNotice?: { text: string; tone: 'blocked' | 'error' | 'info'; action?: { label: string; onClick: () => void; disabled?: boolean } } | null

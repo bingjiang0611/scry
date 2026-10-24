@@ -94,6 +94,7 @@ const invokeChannels = {
   syncBillingAdmin: 'agent:syncBillingAdmin',
   importBillingFixture: 'agent:importBillingFixture',
   gitDiff: 'agent:gitDiff',
+  gitDiffSnapshot: 'agent:gitDiffSnapshot',
   recorderContentPage: 'agent:recorderContentPage',
   loadSession: 'agent:loadSession',
   loadSessionOlder: 'agent:loadSessionOlder',
@@ -170,6 +171,7 @@ describe('preload IPC boundary', () => {
       'rendererReady',
       'desktopRemote',
       'sourceControl',
+      'workspaceSelection',
       'conversations',
       ...Object.keys(invokeChannels),
       ...Object.keys(listenerChannels)
@@ -233,6 +235,19 @@ describe('preload IPC boundary', () => {
       await namespace[method](request)
       expect(electron.invoke).toHaveBeenCalledExactlyOnceWith(`sourceControl:${method}`, request)
     }
+  })
+
+  it('exposes read-only workspace selection routes without arbitrary Git execution', async () => {
+    expect(Object.keys(api.workspaceSelection).sort()).toEqual(['inspectStart', 'read', 'validateBranch'])
+    const request = { cwd: '/workspace', kind: 'branches' as const, query: 'topic' }
+    await api.workspaceSelection.read(request)
+    expect(electron.invoke).toHaveBeenLastCalledWith('workspaceSelection:read', request)
+    const name = { repositoryId: 'a'.repeat(64), name: 'topic' }
+    await api.workspaceSelection.validateBranch(name)
+    expect(electron.invoke).toHaveBeenLastCalledWith('workspaceSelection:validateBranch', name)
+    const pending = { repositoryId: name.repositoryId, operationId: 'f4826a0a-ef56-4309-8d70-e3cd76f0181c' }
+    await api.workspaceSelection.inspectStart(pending)
+    expect(electron.invoke).toHaveBeenLastCalledWith('workspaceSelection:inspectStart', pending)
   })
 
   it('exposes only enumerated desktop business operations, never arbitrary transport IPC', async () => {

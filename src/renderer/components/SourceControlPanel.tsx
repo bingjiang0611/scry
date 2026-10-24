@@ -9,11 +9,14 @@ import { defaultSourceControlApi, type SourceControlApi } from '../workbench-api
 import { SourceControlCommitDialog } from './SourceControlCommitDialog'
 import '../source-control.css'
 
-const actionNames = {
-  stage: '暂存', unstage: '取消暂存', commit: '提交', fetch: '获取远端',
-  push: '推送', createPr: '创建 PR', review: '提交审查', merge: '合并 PR'
-}
-const statusNames = { running: '执行中', succeeded: '已确认', failed: '失败', unknown: '结果未知' }
+import { SourceControlOperations } from './SourceControlOperations'
+import { SourceControlFileRow } from './SourceControlFileRow'
+import { SourceControlTransportDialog } from './SourceControlTransportDialog'
+import { SourceControlRepositoryDialog } from './SourceControlRepositoryDialog'
+import {
+  sourceControlActionNames as actionNames, sourceControlStatusNames as statusNames,
+  sourceControlOperationCopy, sourceControlFileCopy
+} from '../constants/source-control-copy'
 
 export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: string; active: boolean; api?: SourceControlApi }) {
   const api = useMemo(() => injectedApi ?? defaultSourceControlApi, [injectedApi])
@@ -239,16 +242,11 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
               <header><strong>文件</strong><span>已选 {scope.length} / {repo.files.length}</span></header>
               <p className="sc-selection-help">勾选要提交的文件，点击文件查看差异</p>
               {!repo.files.length && <p className="sc-empty">没有未提交的改动。</p>}
-              {repo.files.map((file) => <div className={`sc-file-row${selection?.path === file.path ? ' selected' : ''}`} key={file.path}>
-                <input type="checkbox" aria-label={`纳入本次提交 ${file.path}`} checked={isStaged(file) || selected.includes(file.path)}
-                  disabled={busy || isStaged(file)} onChange={() => toggleFile(file.path)} />
-                <button id={`${dialogId}-${file.path}`} className="sc-file-name" title={file.path} aria-pressed={selection?.path === file.path} onClick={() => void inspectFile(file.path, isStaged(file))}>
-                  <strong>{basename(file.path)}</strong><small>{isStaged(file) ? file.worktree !== '.' ? '部分已暂存 · 保留原有选择' : '已暂存 · 将纳入提交' : file.path}</small>
-                </button>
-                {isStaged(file) ? <button className="sc-unstage" aria-label={`取消暂存 ${file.path}`} disabled={disabled || !!repo.actionBlockers.unstage}
-                  onClick={() => confirm({ ...expected, action: 'unstage', paths: [file.path] }, `取消暂存 ${file.path}。保留工作区文件，不丢弃改动。`)}>−</button>
-                  : <span className="sc-file-status">{file.untracked ? 'U' : file.worktree}</span>}
-              </div>)}
+              {repo.files.map(file => <SourceControlFileRow key={file.path} file={file} buttonId={`${dialogId}-${file.path}`}
+                selected={selection?.path === file.path} included={isStaged(file) || selected.includes(file.path)}
+                busy={busy} unstageDisabled={disabled || !!repo.actionBlockers.unstage}
+                onToggle={() => toggleFile(file.path)} onInspect={() => void inspectFile(file.path, isStaged(file))}
+                onUnstage={() => confirm({ ...expected, action: 'unstage', paths: [file.path] }, sourceControlFileCopy.unstageDetail(file.path))} />)}
               <p className="sc-scope-note">勾选只确定提交范围。确认提交时才暂存所选文件；已有暂存内容始终纳入，未选工作区改动保留。</p>
             </section>
             <section className="sc-diff-pane" aria-label="文件差异">
@@ -273,23 +271,13 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
         <div className="sc-scroll" hidden={tab !== 'pr'}>
           <GithubPullRequestPanel key={`${repo.id}:${repo.branch}`} repo={repo} active={active && tab === 'pr'} busy={busy} suggestedTitle={delivery?.head === repo.head ? commitTitle : ''} ask={confirm} report={report} api={api} />
         </div>
-        {tab === 'operations' && <div className="sc-scroll"><section className="sc-section"><h3>操作证据 · 不自动重放</h3>
-          {!operations.length && <p>本仓库没有本机操作记录。</p>}
-          {operations.map((op) => <article className="sc-operation" key={op.id}>
-            <strong>{actionNames[op.action]} · {statusNames[op.status]}{op.acknowledged ? ' · 已人工核查' : ''}</strong>
-            <small>{new Date(op.startedAt).toLocaleString()}</small><p className="sc-wrap">{op.message}</p>
-            {op.evidence?.sha && <code>{op.evidence.sha}</code>}
-            {op.evidence?.url && <a href={op.evidence.url} target="_blank" rel="noreferrer">查看 PR</a>}
-            {op.evidence?.reviewId && <small>review ID {op.evidence.reviewId}</small>}
-            {op.status === 'unknown' && <div className="sc-actions">
-              <button disabled={busy} onClick={() => void api.reconcile({ repositoryId: repo.id, operationId: op.id }).then(() => refresh()).catch(report)}>只读核查</button>
-              {!op.acknowledged && <button disabled={busy} onClick={() => setConfirmation({ title: '确认已人工核查',
-                detail: '结果仍保留为 unknown。仅解除后续操作阻断，不重试、不回滚、不宣称成功。请先在 Git/GitHub 确认现场。',
-                run: async () => { await api.acknowledge({ repositoryId: repo.id, operationId: op.id }); await refresh() }
-              })}>我已人工核查…</button>}
-            </div>}
-          </article>)}
-        </section></div>}
+        {tab === 'operations' && <SourceControlOperations operations={operations} busy={busy}
+          onReconcile={operationId => void api.reconcile({ repositoryId: repo.id, operationId }).then(() => refresh()).catch(report)}
+          onAcknowledge={operationId => setConfirmation({
+            title: sourceControlOperationCopy.acknowledgeTitle,
+            detail: sourceControlOperationCopy.acknowledgeDetail,
+            run: async () => { await api.acknowledge({ repositoryId: repo.id, operationId }); await refresh() }
+          })} />}
         <footer className="sc-action-dock">
           <div className="sc-next-summary"><span>0{primary.step} / 03</span><div><strong>{primary.step === 1 ? scope.length ? `本次提交 ${scope.length} 个文件` : '先确认这次要提交哪些文件' : primary.step === 2 ? unknown ? '先核查未知操作，不重复发送' : '下一步：推送已存在的本地提交' : '下一步：查看或创建当前分支 PR'}</strong>
             <small>{primary.step === 1 ? '未选的工作区文件不会自动加入提交。' : primary.step === 2 ? '推送不包含未提交的工作区改动。' : '本次推送已确认；GitHub 状态需另行读取。'}</small></div></div>
@@ -305,12 +293,7 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
           setCommitOpen(false)
           void execute({ ...expected, action: 'commit', paths: selected, message }).catch(report)
         }} />}
-      {repo && detailsOpen && <ModalFrame labelledBy={dialogId} onClose={() => setDetailsOpen(false)}>
-        <h2 id={dialogId}>仓库详情</h2><div className="sc-identity"><small title={repo.root}>{repo.root}</small><code>HEAD {repo.head ?? '尚无提交'}</code><p>分支：{repo.branch ?? 'Detached HEAD'} · 上游：{repo.upstream ?? '未设置'}</p>
-          <p>跟踪引用：↑{repo.ahead ?? '未知'} ↓{repo.behind ?? '未知'}，不代表实时远端状态。</p><p>读取时间：{new Date(repo.observedAt).toLocaleString()}</p></div>
-        <p className="sc-muted">真实 Git 状态不等于 Agent 文件足迹。刷新会清除候选文件选择，不修改实际暂存区。</p>
-        <button onClick={() => setDetailsOpen(false)}>关闭</button>
-      </ModalFrame>}
+      {repo && detailsOpen && <SourceControlRepositoryDialog repo={repo} labelledBy={dialogId} onClose={() => setDetailsOpen(false)} />}
       {repo && actionsOpen && <ModalFrame labelledBy={dialogId} onClose={() => setActionsOpen(false)}>
         <h2 id={dialogId}>其他 Git 操作</h2><div className="sc-other-actions">
           <button disabled={!repo.files.length} onClick={() => { setActionsOpen(false); setCommitOpen(true) }}>提交改动…</button>
@@ -320,19 +303,14 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
           <button onClick={() => { setActionsOpen(false); setTab('operations') }}>操作记录与核查</button>
         </div><button onClick={() => setActionsOpen(false)}>关闭</button>
       </ModalFrame>}
-      {repo && expected && transport && <ModalFrame labelledBy={dialogId} onClose={() => setTransport(null)}>
-        <h2 id={dialogId}>{transport === 'push' ? '确认推送' : '确认获取远端'}</h2>
-        <label>选择 remote<select value={remote} onChange={(event) => setRemote(event.target.value)}><option value="" disabled>请选择 remote</option>{repo.remotes.map((item) => <option key={item.name}>{item.name}</option>)}</select></label>
-        <pre className="sc-confirm-detail">{(transport === 'push' ? destination?.pushUrls : destination?.fetchUrls)?.join('\n') ?? '没有可用远端'}</pre>
-        <p>{transport === 'push' ? `将 ${repo.head?.slice(0, 10) ?? '无提交'} 推送到 refs/heads/${repo.branch ?? '无分支'}。直接更新此分支，包括它是默认分支的情况；不强推，不自动提交或创建分支/PR。` : '更新远端跟踪引用；不改工作区，不 prune。'}</p>
-        {transportBlocker && <p className="sc-notice" role="alert">{transportBlocker}</p>}
-        {!repo.remotes.length && <p className="sc-notice">尚未配置远端，请先在终端添加 remote。</p>}
-        <div className="sc-actions"><button onClick={() => setTransport(null)}>取消</button><button className="sc-primary"
-          disabled={disabled || !!transportBlocker || !remote || (transport === 'push' && (!repo.branch || !repo.head))}
-          onClick={() => { const action = transport; setTransport(null); void execute({ ...expected, action, remote }).catch(report) }}>
-          {transport === 'push' ? `确认推送到 ${repo.branch ?? '无分支'}` : '确认 Fetch'}
-        </button></div>
-      </ModalFrame>}
+      {repo && expected && transport && <SourceControlTransportDialog repo={repo} action={transport}
+        remote={remote} destination={destination} disabled={disabled} blocker={transportBlocker}
+        labelledBy={dialogId} onRemoteChange={setRemote} onClose={() => setTransport(null)}
+        onConfirm={() => {
+          const action = transport
+          setTransport(null)
+          void execute({ ...expected, action, remote }).catch(report)
+        }} />}
       {confirmation && <ModalFrame labelledBy={dialogId} onClose={() => setConfirmation(null)}>
         <h2 id={dialogId}>{confirmation.title}</h2><pre className="sc-confirm-detail">{confirmation.detail}</pre>
         {confirmation.blocker && <p className="sc-notice" role="alert">{confirmation.blocker}</p>}

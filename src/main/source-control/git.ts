@@ -6,7 +6,7 @@ import type { ScDiff, ScFile, ScGitAction, ScRepository } from '../../shared/sou
 import { ScCommandError, ScProcess } from './process'
 
 const hash = (value: string | Buffer): string => createHash('sha256').update(value).digest('hex')
-const readConfig = [
+export const readConfig = [
   '--no-pager',
   '-c',
   'core.fsmonitor=false',
@@ -15,7 +15,7 @@ const readConfig = [
   '-c',
   'maintenance.auto=false'
 ]
-const readOnly = ['-c', 'core.hooksPath=/dev/null']
+export const readOnly = ['-c', 'core.hooksPath=/dev/null']
 // Match the native commands below: no checkout/merge/rebase/am/receive or amend,
 // and automatic maintenance is disabled. Unused hooks do not block unrelated operations.
 const hookActions = new Map<string, readonly ScGitAction[]>([
@@ -24,8 +24,9 @@ const hookActions = new Map<string, readonly ScGitAction[]>([
   ['commit-msg', ['commit']],
   ['post-commit', ['commit']],
   ['pre-push', ['push']],
-  ['post-index-change', ['stage', 'unstage', 'commit']],
-  ['reference-transaction', ['commit', 'fetch', 'push']]
+  ['post-index-change', ['stage', 'unstage', 'commit', 'prepareWorkspace']],
+  ['post-checkout', ['prepareWorkspace']],
+  ['reference-transaction', ['commit', 'fetch', 'push', 'prepareWorkspace']]
 ])
 
 export interface GitIdentity {

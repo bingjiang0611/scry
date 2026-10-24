@@ -1,0 +1,38 @@
+export {
+  applyStopState,
+  beginOptimisticTurn,
+  buildAgentStartRequest,
+  clearSessionTurns,
+  clearStopState,
+  confirmOptimisticTurn,
+  currentVisibleRunId,
+  discardOptimisticTurn,
+  markTurnDone,
+  markTurnError,
+  mergeActiveRun,
+  mergeRecoveredRun,
+  parsedSessionTurns,
+  prependOlderSessionTurns,
+  removePendingQuestion,
+  replayPendingQuestionDeltas,
+  replayRunLifecycleDeltas,
+  resynchronizeLiveTrace,
+  restoredRunRuntimeState,
+  sessionBusy,
+  sessionHistoryWindowOf,
+  sessionTurnsWithActiveRun,
+  traceLiveHealthOf,
+  TRACE_LIVE_HEALTHY,
+  turnBlocksInput,
+  upsertPendingQuestion,
+  visibleTurnsBeforeReplacement
+} from './useAgentSession-helpers'
+export type {
+  OlderSessionPage,
+  PendingQuestionDelta,
+  SessionHistoryWindow,
+  StopStateMap,
+  TraceLiveHealth,
+  TraceResyncBridge,
+  TraceResyncOutcome
+} from './useAgentSession-helpers'

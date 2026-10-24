@@ -3,8 +3,11 @@ import { mkdir, readFile, readdir, rm } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import { writeJsonAtomic } from '../../core/turn-recorder/io'
 import type { ScCommitDraft, ScOperation, ScPrRef, ScReviewDraft } from '../../shared/source-control'
+import { workspaceOperationIdPattern } from '../../shared/workspace-selection-input'
+import { assertWorkspaceJournal, type WorkspaceJournal } from './workspace-journal'
 
 export interface ScIntent {
+  workspace?: WorkspaceJournal
   head?: string
   parent?: string | null
   tree?: string
@@ -23,8 +26,8 @@ export interface StoredOperation {
   acknowledged: boolean
 }
 const digest = (value: string): string => createHash('sha256').update(value).digest('hex')
-export const operationIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-const actions = new Set(['stage', 'unstage', 'commit', 'fetch', 'push', 'createPr', 'review', 'merge'])
+export const operationIdPattern = workspaceOperationIdPattern
+const actions = new Set(['stage', 'unstage', 'commit', 'fetch', 'push', 'createPr', 'review', 'merge', 'prepareWorkspace'])
 
 function decodeRecord(value: unknown): StoredOperation {
   if (typeof value !== 'object' || value === null) throw new Error('源代码管理操作日志格式错误')
@@ -48,6 +51,11 @@ function decodeRecord(value: unknown): StoredOperation {
     typeof record.acknowledged !== 'boolean'
   )
     throw new Error('源代码管理操作日志损坏；停止新写入，不能当作没有恢复记录')
+  if (op.action === 'prepareWorkspace') {
+    assertWorkspaceJournal(record.intent.workspace)
+    if (record.intent.workspace.prepared && record.intent.workspace.prepared.operationId !== op.id)
+      throw new Error('工作区准备日志身份不一致')
+  }
   return record as StoredOperation
 }
 
@@ -76,6 +84,7 @@ export class ScStore {
       const record = decodeRecord(JSON.parse(await readFile(file, 'utf8')))
       if (record.operation.id !== id) throw new Error('操作日志身份不一致')
       if (
+        record.operation.action !== 'prepareWorkspace' &&
         ['succeeded', 'failed'].includes(record.operation.status) &&
         Date.now() - record.operation.startedAt > 30 * 86_400_000
       ) {
@@ -94,6 +103,8 @@ export class ScStore {
   async save(record: StoredOperation): Promise<void> {
     await this.ready
     decodeRecord(record)
+    if (!this.records.has(record.operation.id) && this.records.size >= 10_000)
+      throw new Error('源代码管理日志已达上限，请先归档已完成操作')
     await writeJsonAtomic(join(this.directory, 'operations', `${record.operation.id}.json`), record)
     this.records.set(record.operation.id, structuredClone(record))
   }
@@ -112,11 +123,20 @@ export class ScStore {
       .map((record) => structuredClone(record))
   }
 
-  async unresolved(commonDir: string): Promise<boolean> {
+  async recentWorktrees(commonDir: string): Promise<string[]> {
+    await this.ready
+    return [...new Set([...this.records.values()]
+      .filter(record => record.commonDir === commonDir && record.intent.workspace?.phase === 'registered')
+      .sort((a, b) => b.operation.startedAt - a.operation.startedAt)
+      .flatMap(record => record.intent.workspace?.prepared ? [record.intent.workspace.prepared.worktreeId] : []))]
+  }
+
+  async unresolved(commonDir: string, exceptOperationId?: string): Promise<boolean> {
     await this.ready
     return [...this.records.values()].some(
       (record) =>
         record.commonDir === commonDir &&
+        record.operation.id !== exceptOperationId &&
         !record.acknowledged &&
         ['running', 'unknown'].includes(record.operation.status)
     )
