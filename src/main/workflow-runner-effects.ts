@@ -82,6 +82,17 @@ export class WorkflowRunnerEffects {
           await this.commitOutcome(record, outcome)
           return { outcome }
         }
+        if (this.options.systems && !block.replica) {
+          const before = await this.options.systems.observeAgentInputs(preview.workflowId, attemptId, preview.workspace, 'before')
+          ;(record.agentInputs ??= {})[attemptId] = { before }
+          await this.options.persist(record, record.progress)
+        }
+        // An observation can race stop; it never authorizes a new dispatch.
+        if (controller.stopped) {
+          const outcome = this.outcome(preview, block, 'stopped', { attemptId, taskId, settled: true })
+          await this.commitOutcome(record, outcome)
+          return { outcome }
+        }
         let execution: WorkflowProviderExecution
         const { observe, releaseLive } = this.options.track(record, preview, role, taskId, attemptId)
         try {
@@ -135,6 +146,7 @@ export class WorkflowRunnerEffects {
           attemptId, taskId, runId: result.runId, output: result.output, actualModel: result.actualModel,
           archiveRef: result.archiveRef, settled: result.settled, error: outputError ?? result.error, providerId: role.providerId
         })
+        if (result.settled) await this.observeAfter(record, attemptId)
         await this.commitOutcome(record, outcome)
         if (decoded !== undefined) {
           this.structuredOutputs.set(preview.workflowId + ':' + preview.programRevision + ':' + attemptId, decoded)
@@ -146,12 +158,18 @@ export class WorkflowRunnerEffects {
           outcome.settled = true
           activeStops.delete(stop)
           releaseLive()
+          await this.observeAfter(record, attemptId)
           await this.options.persist(record, record.progress)
           this.options.finishSettledRoot(preview.workflowId)
         }) }
       }
     })
     return queued
+  }
+
+  private async observeAfter(record: WorkflowStoreRecord, attemptId: string): Promise<void> {
+    const inputs = record.agentInputs?.[attemptId]
+    if (inputs && this.options.systems) inputs.after = await this.options.systems.observeAgentInputs(record.preview.workflowId, attemptId, record.preview.workspace, 'after')
   }
 
   hasUnsettledIntents(record: WorkflowStoreRecord): boolean {

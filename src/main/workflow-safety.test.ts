@@ -1,22 +1,26 @@
 import { describe, expect, it } from 'vitest'
 import type { WorkflowBlock, WorkflowPlanPreview } from '../shared/workflow'
 import { callBlocks } from './workflow-program'
+import { workflowFixtureApproval } from './workflow-runner.fixture'
 import { MemoryWorkflowStore } from './workflow-store'
 import { WorkflowRunner, WorkflowSlots, type WorkflowProviderExecutionResult } from './workflow-runner'
 
 function preview(body: WorkflowBlock): WorkflowPlanPreview {
   const role = { role: 'worker' as const, providerId: 'codex' as const }
+  const sequence: WorkflowBlock = body.kind === 'sequence'
+    ? { ...body, blocks: [...body.blocks, { kind: 'return', blockId: 'fixture-return', ref: { nodeId: body.blocks.at(-1)!.blockId } }] }
+    : { kind: 'sequence', blockId: 'fixture-entry', blocks: [body, { kind: 'return', blockId: 'fixture-return', ref: { nodeId: body.blockId } }] }
   return {
     workflowId: 'workflow-safety', programRevision: 'revision', userGoal: 'inspect', workspace: '/fixture',
     orchestrator: { ...role, role: 'orchestrator' },
     roles: [{ ...role, actualModelStatus: 'unknown', startIndependentSession: 'available', observeTerminalOutput: 'available', confirmStopConvergence: 'available', state: 'available' }],
-    program: { schemaVersion: 1, workflowId: 'workflow-safety', programRevision: 'revision', userGoal: 'inspect', workspace: '/fixture', roles: [role], body },
+    program: { schemaVersion: 1, workflowId: 'workflow-safety', programRevision: 'revision', userGoal: 'inspect', workspace: '/fixture', roles: [role], body: sequence },
     plannedCalls: callBlocks(body).length, state: 'ready', unavailableReasons: [], observedAt: 1
   }
 }
 const call = (blockId: string): WorkflowBlock => ({ kind: 'call', blockId, role: 'worker', prompt: blockId })
 const approve = (runner: WorkflowRunner, plan: WorkflowPlanPreview) => {
-  const approval = { workflowId: plan.workflowId, programRevision: plan.programRevision, approvedAt: 1 }
+  const approval = workflowFixtureApproval(plan)
   runner.approve(plan, approval)
   return approval
 }

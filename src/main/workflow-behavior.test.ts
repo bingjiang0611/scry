@@ -3,7 +3,7 @@ import type { WorkflowBlock, WorkflowPlanPreview } from '../shared/workflow'
 import { workflowProgressSnapshot, workflowSlotLimit } from '../shared/workflow'
 import { MemoryWorkflowStore, type WorkflowStoreRecord } from './workflow-store'
 import { WorkflowDispatch, WorkflowRunner, WorkflowSlots } from './workflow-runner'
-import { makePlanPreview, validateWorkflowProgram } from './workflow-program'
+import { makePlanPreview, validateWorkflowProgram, workflowRevision } from './workflow-program'
 
 const worker = { role: 'worker' as const, providerId: 'codex' as const }
 const reviewer = { role: 'reviewer' as const, providerId: 'qoder' as const }
@@ -11,7 +11,8 @@ const call = (blockId: string, role: 'worker' | 'reviewer' = 'worker', inputRefs
 const returned = (nodeId: string): WorkflowBlock => ({ kind: 'return', blockId: 'return', ref: { nodeId } })
 function plan(blocks: WorkflowBlock[], id = 'workflow-fixture'): WorkflowPlanPreview {
   const program = validateWorkflowProgram({ schemaVersion: 1, workflowId: id, programRevision: 'revision', userGoal: 'fixture', workspace: '/fixture', roles: [worker, reviewer], body: { kind: 'sequence', blockId: 'root', blocks } })
-  return makePlanPreview(program, [], { ...worker, role: 'orchestrator' })
+  const { programRevision: _revision, ...source } = program
+  return makePlanPreview({ ...source, programRevision: workflowRevision(source) }, [], { ...worker, role: 'orchestrator' })
 }
 function begin(runner: WorkflowRunner, preview: WorkflowPlanPreview) {
   const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }

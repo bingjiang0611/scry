@@ -4,147 +4,16 @@ import { join } from 'node:path'
 import { workflowControlCopy, workflowFrameCopy, workflowRecoveryCopy } from '../shared/constants/copy'
 import { withDirectoryLock } from '../core/turn-recorder/io'
 import { nextWorkflowFrame, validateWorkflowFrame, validateWorkflowValueReference } from './workflow-frames'
-import { assertWorkflowValue, workflowField } from './workflow-expressions'
+
 import { validateWorkflowOwnership, validateWorkflowClaim, workflowEpochMatches, workflowRecordFingerprint } from './workflow-recovery'
-import { collectionDescriptor, collectionEntries, validateCollectionReference } from './workflow-collections'
-import type { WorkflowAttemptOutcome, WorkflowCollectionEntry, WorkflowCollectionReference, WorkflowControlFrame, WorkflowEvaluation, WorkflowPlanPreview, WorkflowProgress, WorkflowValueReference } from '../shared/workflow'
-import { WORKFLOW_MAX_BATCH, WORKFLOW_MAX_STOP_REQUESTS, WORKFLOW_MAX_VALUE_DEPTH, workflowProgressSnapshot } from '../shared/workflow'
-import type { WorkflowRetryTarget } from '../shared/workflow-api'
-import type { WorkflowSystemIntent, WorkflowSystemOutcome } from '../shared/workflow-system'
-import type { WorkflowReplicaReference } from '../shared/workflow-replica'
-import { validateWorkflowReplicaReference } from './workflow-replica'
+import { collectionEntries, validateCollectionReference } from './workflow-collections'
+import type { WorkflowAttemptOutcome, WorkflowCollectionEntry, WorkflowCollectionReference, WorkflowControlFrame, WorkflowEvaluation, WorkflowValueReference } from '../shared/workflow'
+import { WORKFLOW_MAX_STOP_REQUESTS, workflowProgressSnapshot } from '../shared/workflow'
 
-export interface WorkflowIntent {
-  workflowId: string
-  programRevision: string
-  taskId: string
-  attemptId: string
-  previousAttemptId?: string
-  retryCommandId?: string
-  replica?: WorkflowReplicaReference
-  role: string
-  providerId: string
-  requestedModel?: string
-  createdAt: number
-}
-export type WorkflowExecutionOwnership = {
-  version: 2
-  epoch: string
-  owner: { pid: number; instanceId: string; state: 'active' | 'closed' }
-  segments: Array<{ id: string; generationId?: string; commandId?: string; createdAt: number; mode: 'start' | 'continue' | 'retry'; retry?: WorkflowRetryTarget }>
-}
-
-export interface WorkflowStoreRecord {
-  preview: WorkflowPlanPreview
-  executionStarted?: number
-  execution?: WorkflowExecutionOwnership
-  /** Durable user intents only. Presence never proves a native signal or settlement. */
-  stopRequests?: Array<{ commandId: string; requestedAt: number }>
-  receipt?: { commandId: string; fingerprint: string; status: 'accepted' | 'completed' | 'failed' | 'unknown' }
-  progress: WorkflowProgress
-  intents: WorkflowIntent[]
-  outcomes: WorkflowAttemptOutcome[]
-  systemIntents?: WorkflowSystemIntent[]
-  systemOutcomes?: WorkflowSystemOutcome[]
-}
-export interface WorkflowPlanningIntent {
-  workflowId: string
-  commandId?: string
-  command?: string
-  fingerprint?: string
-  role: string
-  providerId: string
-  agentProfileId?: string
-  requestedModel?: string
-  workspace: string
-  goal: string
-  createdAt: number
-  status?: 'queued' | 'running' | 'completed' | 'failed' | 'unknown' | 'stopped'
-  scopeSettled?: boolean
-  providerDispatch?: 'not_attempted'
-  /** Durable shutdown/cancel intent. It does not prove planner settlement. */
-  stopCommandId?: string
-  stopRequestedAt?: number
-  result?: { output?: string; outputRef?: string; actualModel?: string; archiveRef?: string }
-  error?: string
-}
-export interface WorkflowStorePage { records: WorkflowStoreRecord[]; nextCursor?: string }
-export interface WorkflowStore {
-  create(record: WorkflowStoreRecord): Promise<boolean>
-  save(record: WorkflowStoreRecord): Promise<void>
-  claim(record: WorkflowStoreRecord, expectedFingerprint: string | undefined): Promise<void>
-  loadOutput(workflowId: string, outcome: WorkflowAttemptOutcome): Promise<string | undefined>
-  saveFrame(frame: Omit<WorkflowControlFrame, 'revision'>, expectedRevision: number): Promise<WorkflowControlFrame>
-  loadFrame(workflowId: string, frameId: string): Promise<WorkflowControlFrame | undefined>
-  saveValue(workflowId: string, key: string, evaluation: WorkflowEvaluation): Promise<WorkflowValueReference>
-  loadValue(workflowId: string, reference: WorkflowValueReference): Promise<WorkflowEvaluation>
-  saveCollection(workflowId: string, key: string, entries: WorkflowCollectionEntry[], sealed: boolean): Promise<WorkflowCollectionReference>
-  loadCollection(workflowId: string, reference: WorkflowCollectionReference): Promise<WorkflowCollectionEntry[]>
-  savePlanningIntent(intent: WorkflowPlanningIntent): Promise<void>
-  loadPlanningIntent(workflowId: string): Promise<WorkflowPlanningIntent | undefined>
-  planningIntents(): AsyncIterable<WorkflowPlanningIntent>
-  /** Output bodies are immutable artifacts, not part of a history page. */
-  load(workflowId: string): Promise<WorkflowStoreRecord | undefined>
-  listPage(cursor?: string, limit?: number): Promise<WorkflowStorePage>
-}
-const fileSafe = (id: string): string => {
-  if (!/^[A-Za-z0-9_-]{1,96}$/.test(id)) throw new Error('工作流记录身份无效')
-  return id
-}
-const absent = (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT'
-const MAX_RECORD_BYTES = 8 * 1024 * 1024
-const frameName = (id: string, frameId: string): string => `${fileSafe(id)}.${fileSafe(frameId)}.frame.json`
-const valueName = (reference: WorkflowValueReference): string => `${fileSafe(reference.workflowId)}.${createHash('sha256').update(fileSafe(reference.key)).digest('hex')}.${reference.hash}.value.json`
-const collectionName = (reference: WorkflowValueReference): string => valueName(reference).replace(/\.value\.json$/, '.collection.json')
-function validateEvaluation(value: unknown, workflowId: string): asserts value is WorkflowEvaluation {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(workflowFrameCopy.invalid)
-  const input = value as Record<string, unknown>
-  if (!Array.isArray(input.derivedFrom) || !input.derivedFrom.every(item => typeof item === 'string' && item.length <= 512)) throw new Error(workflowFrameCopy.invalid)
-  const allowed = input.state === 'known' ? ['state', 'value', 'derivedFrom', 'collection', 'collectionFields', 'replica'] : ['state', 'reason', 'derivedFrom']
-  if (Object.keys(input).some(key => !allowed.includes(key)) || (input.state === 'known' ? !Object.hasOwn(input, 'value') : input.state !== 'unknown' || typeof input.reason !== 'string' || !input.reason || input.reason.length > 4096)) throw new Error(workflowFrameCopy.invalid)
-  if (input.state === 'known') {
-    assertWorkflowValue(input.value)
-    if (input.replica !== undefined) {
-      validateWorkflowReplicaReference(input.replica, workflowId)
-      if (JSON.stringify(input.replica) !== JSON.stringify(input.value)) throw new Error(workflowFrameCopy.invalid)
-    }
-    if (input.collection !== undefined) {
-      validateCollectionReference(input.collection, workflowId)
-      if (JSON.stringify(input.value) !== JSON.stringify(collectionDescriptor(input.collection))) throw new Error(workflowFrameCopy.invalid)
-    }
-    if (input.collectionFields !== undefined) {
-      if (!Array.isArray(input.collectionFields) || !input.collectionFields.length || input.collectionFields.length > WORKFLOW_MAX_BATCH || input.collection) throw new Error(workflowFrameCopy.invalid)
-      const paths = new Set<string>()
-      let bytes = 0
-      for (const field of input.collectionFields) {
-        if (!field || typeof field !== 'object' || Object.keys(field).some(key => !['path', 'collection'].includes(key)) || !Array.isArray(field.path) || !field.path.length || field.path.length > WORKFLOW_MAX_VALUE_DEPTH || !field.path.every((part: unknown) => typeof part === 'string' && part.length <= 512)) throw new Error(workflowFrameCopy.invalid)
-        bytes += Buffer.byteLength(JSON.stringify(field))
-        if (bytes > MAX_RECORD_BYTES) throw new Error(workflowFrameCopy.invalid)
-        const key = JSON.stringify(field.path)
-        if (paths.has(key)) throw new Error(workflowFrameCopy.invalid)
-        paths.add(key)
-        validateCollectionReference(field.collection, workflowId)
-        const selected = workflowField(input.value, field.path)
-        if (selected.state !== 'known' || JSON.stringify(selected.value) !== JSON.stringify(collectionDescriptor(field.collection))) throw new Error(workflowFrameCopy.invalid)
-      }
-    }
-  }
-}
-
-/** A descriptor's count is not evidence that its manifest is still durable.
- * Verify nested manifests before exposing their authority; item payloads stay
- * lazy. Deduplicate within this read, never cache absence checks across reads. */
-async function validateCollectionArtifacts(store: Pick<WorkflowStore, 'loadCollection'>, workflowId: string, value: WorkflowEvaluation): Promise<void> {
-  if (value.state !== 'known') return
-  const collections = [...(value.collection ? [value.collection] : []), ...(value.collectionFields ?? []).map(field => field.collection)]
-  const seen = new Set<string>()
-  for (const collection of collections) {
-    const key = JSON.stringify([collection.reference.key, collection.reference.hash, collection.count, collection.sealed])
-    if (seen.has(key)) continue
-    seen.add(key)
-    await store.loadCollection(workflowId, collection)
-  }
-}
+import type { WorkflowStore, WorkflowStoreRecord, WorkflowStorePage, WorkflowPlanningIntent } from './workflow-store-contracts'
+import { fileSafe, absent, MAX_RECORD_BYTES, frameName, valueName, collectionName, validateEvaluation, validateCollectionArtifacts } from './workflow-store-artifacts'
+export * from './workflow-store-contracts'
+export { MemoryWorkflowStore } from './workflow-memory-store'
 
 export class FileWorkflowStore implements WorkflowStore {
   private readonly directory: string
@@ -307,7 +176,20 @@ export class FileWorkflowStore implements WorkflowStore {
     }
     snapshot.progress = workflowProgressSnapshot(snapshot.progress)
     delete snapshot.progress.live
-    await this.atomic(`${id}.json`, snapshot)
+    const revisions = [] as Array<{ reference: string }>
+    for (const revision of snapshot.revisions ?? []) {
+      const text = JSON.stringify(revision)
+      const name = `${id}.${createHash('sha256').update(text).digest('hex')}.governing.json`
+      if (!this.outputs.has(name)) {
+        await this.atomicText(name, text)
+        this.outputs.set(name, true)
+        if (this.outputs.size > 1024) this.outputs.delete(this.outputs.keys().next().value!)
+      }
+      revisions.push({ reference: name })
+    }
+    // The root manifest retains only immutable revision references. Artifacts
+    // precede the single atomic claim; orphan artifacts never authorize work.
+    await this.atomic(`${id}.json`, { ...snapshot, ...(snapshot.revisions ? { revisions } : {}) })
   }
 
   async savePlanningIntent(intent: WorkflowPlanningIntent): Promise<void> {
@@ -350,6 +232,19 @@ export class FileWorkflowStore implements WorkflowStore {
     if (value === undefined) return undefined
     if (!value || typeof value !== 'object') throw new Error('工作流记录已损坏')
     const record = value as WorkflowStoreRecord
+    if (record.revisions !== undefined) {
+      const references = (value as { revisions: unknown }).revisions
+      if (!Array.isArray(references) || !references.length || references.length > 256) throw new Error(workflowRecoveryCopy.fingerprint)
+      record.revisions = []
+      for (const entry of references) {
+        if (!entry || typeof entry !== 'object' || Object.keys(entry).length !== 1 || typeof entry.reference !== 'string') throw new Error(workflowRecoveryCopy.fingerprint)
+        const match = new RegExp(`^${fileSafe(id)}\\.([a-f0-9]{64})\\.governing\\.json$`).exec(entry.reference)
+        if (!match) throw new Error(workflowRecoveryCopy.fingerprint)
+        const text = await this.readText(entry.reference)
+        if (text === undefined || createHash('sha256').update(text).digest('hex') !== match[1]) throw new Error(workflowRecoveryCopy.fingerprint)
+        record.revisions.push(JSON.parse(text))
+      }
+    }
     validateWorkflowOwnership(record)
     if (record.preview?.workflowId !== id || record.progress?.workflowId !== id || !Array.isArray(record.intents) || !Array.isArray(record.outcomes)) throw new Error('工作流记录合同无效')
     if (record.stopRequests !== undefined && (!Array.isArray(record.stopRequests) || record.stopRequests.length > WORKFLOW_MAX_STOP_REQUESTS || record.stopRequests.some(request =>
@@ -380,91 +275,5 @@ export class FileWorkflowStore implements WorkflowStore {
       records.push(record)
     }
     return { records, ...(names.length > limit ? { nextCursor: names[limit - 1] } : {}) }
-  }
-}
-
-export class MemoryWorkflowStore implements WorkflowStore {
-  private readonly records = new Map<string, WorkflowStoreRecord>()
-  private readonly planning = new Map<string, WorkflowPlanningIntent>()
-  private readonly frames = new Map<string, WorkflowControlFrame>()
-  private readonly values = new Map<string, WorkflowEvaluation>()
-  private readonly collections = new Map<string, string>()
-  async saveValue(workflowId: string, key: string, evaluation: WorkflowEvaluation): Promise<WorkflowValueReference> {
-    validateEvaluation(evaluation, workflowId)
-    const text = JSON.stringify(evaluation)
-    const reference = { workflowId: fileSafe(workflowId), key: fileSafe(key), hash: createHash('sha256').update(text).digest('hex') }
-    if (Buffer.byteLength(text) > MAX_RECORD_BYTES) throw new Error(workflowFrameCopy.invalid)
-    this.values.set(valueName(reference), JSON.parse(text) as WorkflowEvaluation)
-    return reference
-  }
-  async loadValue(workflowId: string, reference: WorkflowValueReference): Promise<WorkflowEvaluation> {
-    validateWorkflowValueReference(reference, workflowId)
-    const value = this.values.get(valueName(reference))
-    if (!value) throw new Error(workflowFrameCopy.missing)
-    await validateCollectionArtifacts(this, workflowId, value)
-    return structuredClone(value)
-  }
-  async saveCollection(workflowId: string, key: string, entries: WorkflowCollectionEntry[], sealed: boolean): Promise<WorkflowCollectionReference> {
-    const data = { schemaVersion: 1, sealed, entries }
-    collectionEntries(data, workflowId, entries.length, sealed)
-    const text = JSON.stringify(data)
-    if (Buffer.byteLength(text) > MAX_RECORD_BYTES) throw new Error(workflowFrameCopy.invalid)
-    const reference = { workflowId: fileSafe(workflowId), key: fileSafe(key), hash: createHash('sha256').update(text).digest('hex') }
-    this.collections.set(collectionName(reference), text)
-    return { reference, count: entries.length, sealed }
-  }
-  async loadCollection(workflowId: string, reference: WorkflowCollectionReference): Promise<WorkflowCollectionEntry[]> {
-    validateCollectionReference(reference, workflowId)
-    const text = this.collections.get(collectionName(reference.reference))
-    if (text === undefined) throw new Error(workflowFrameCopy.missing)
-    return collectionEntries(JSON.parse(text) as unknown, workflowId, reference.count, reference.sealed)
-  }
-  async loadFrame(workflowId: string, frameId: string): Promise<WorkflowControlFrame | undefined> {
-    const value = this.frames.get(frameName(workflowId, frameId))
-    return value && structuredClone(value)
-  }
-  async saveFrame(input: Omit<WorkflowControlFrame, 'revision'>, expectedRevision: number): Promise<WorkflowControlFrame> {
-    const key = frameName(input.workflowId, input.frameId)
-    const next = nextWorkflowFrame(this.frames.get(key), input, expectedRevision)
-    this.frames.set(key, next)
-    return structuredClone(next)
-  }
-  async claim(record: WorkflowStoreRecord, expectedFingerprint: string | undefined): Promise<void> {
-    const id = record.preview.workflowId
-    const current = this.records.get(id)
-    if (workflowRecordFingerprint(current) !== expectedFingerprint) throw new Error(workflowRecoveryCopy.stale)
-    validateWorkflowClaim(current, record)
-    const snapshot = structuredClone(record)
-    delete snapshot.progress.live
-    this.records.set(id, snapshot)
-  }
-  async loadOutput(workflowId: string, outcome: WorkflowAttemptOutcome): Promise<string | undefined> {
-    const stored = this.records.get(workflowId)?.outcomes.find(value => value.attemptId === outcome.attemptId && value.taskId === outcome.taskId)
-    return stored?.output
-  }
-  async create(record: WorkflowStoreRecord): Promise<boolean> {
-    if (this.records.has(record.preview.workflowId)) return false
-    validateWorkflowOwnership(record)
-    const snapshot = structuredClone(record)
-    delete snapshot.progress.live
-    this.records.set(record.preview.workflowId, snapshot)
-    return true
-  }
-  async save(record: WorkflowStoreRecord): Promise<void> {
-    workflowEpochMatches(this.records.get(record.preview.workflowId), record)
-    validateWorkflowOwnership(record)
-    const snapshot = structuredClone(record)
-    delete snapshot.progress.live
-    this.records.set(record.preview.workflowId, snapshot)
-  }
-  async savePlanningIntent(intent: WorkflowPlanningIntent): Promise<void> { this.planning.set(intent.workflowId, structuredClone(intent)) }
-  async loadPlanningIntent(id: string): Promise<WorkflowPlanningIntent | undefined> { const value = this.planning.get(id); return value && structuredClone(value) }
-  async *planningIntents(): AsyncIterable<WorkflowPlanningIntent> { for (const intent of this.planning.values()) yield structuredClone(intent) }
-  async load(id: string): Promise<WorkflowStoreRecord | undefined> { const value = this.records.get(id); return value && structuredClone(value) }
-  async listPage(cursor?: string, limit = 64): Promise<WorkflowStorePage> {
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 256) throw new Error('工作流历史页大小无效')
-    const ids = [...this.records.keys()].sort().filter(id => !cursor || id > cursor)
-    const page = ids.slice(0, limit)
-    return { records: page.map(id => structuredClone(this.records.get(id)!)), ...(ids.length > limit ? { nextCursor: page.at(-1) } : {}) }
   }
 }

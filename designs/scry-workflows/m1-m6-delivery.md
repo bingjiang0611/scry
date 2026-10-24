@@ -6,6 +6,7 @@
 - [必需检查集合、诊断比较与声明保护端点子集](verification.md)
 - [模板、编辑、发布与冻结实例](delivery-templates.md)
 - [解释器、集合、loop、继续与显式重试](delivery-recovery.md)
+- [同根修订与静态历史结果复用子集](same-root-revisions-status.md)
 
 以下保留总合同、里程碑验收表与全局缺口。分文件不表示这些里程碑已完成。
 

@@ -74,6 +74,16 @@ export class WorkflowControl {
       origins.push(prior)
     }
     if (origins.length) this.origins.set(frameId, origins)
+    const reuse = block.kind === 'call' ? this.execution?.record.revisions?.at(-1)?.reuse.find(entry => entry.nodeId === block.blockId) : undefined
+    if (reuse) {
+      const prior = await this.store.loadFrame(this.preview.workflowId, reuse.reference.frameId)
+      if (!prior || prior.phase !== 'completed' || prior.revision !== reuse.reference.revision || JSON.stringify(prior.resultRef) !== JSON.stringify(reuse.reference.resultRef)) throw new Error(workflowRecoveryCopy.frame)
+      await this.store.loadValue(this.preview.workflowId, reuse.reference.resultRef)
+      // Cross-revision reuse preserves the old immutable result authority. It
+      // does not rewrite old inputKey/scopePath into the new revision.
+      origins.push(prior)
+      this.origins.set(frameId, origins)
+    }
     const origin = origins[0]
     return this.store.saveFrame({ schemaVersion: 1, workflowId: this.preview.workflowId, programRevision: this.preview.programRevision,
       frameId, nodeId: block.blockId, scopePath: scope.path, inputKey, phase: 'entered',
@@ -116,8 +126,9 @@ export class WorkflowControl {
     if (!this.execution?.previous.length) return undefined
     const taskId = this.preview.workflowId + ':' + workflowFrameId(block.blockId, scope.path) + ':' + block.blockId
     if (workflowPendingRetry(this.execution.record, taskId)) return undefined
+    const reuse = this.execution.record.revisions?.at(-1)?.reuse.find(entry => entry.nodeId === block.blockId)
     const intent = [...this.execution.record.intents].reverse().find(value => value.taskId === taskId)
-    const outcome = [...this.execution.record.outcomes].reverse().find(value => value.taskId === taskId)
+    const outcome = [...this.execution.record.outcomes].reverse().find(value => value.taskId === taskId) ?? (reuse ? this.execution.record.outcomes.find(value => value.attemptId === reuse.attemptId) : undefined)
     if (!intent && !outcome) return undefined
     if (!frame || !this.origins.has(frame.frameId)) throw new Error(workflowRecoveryCopy.frame)
     if (!outcome || !outcome.settled || outcome.state === 'unknown') throw new Error(workflowRecoveryCopy.unknown)

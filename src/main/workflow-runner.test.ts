@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { MemoryWorkflowStore } from './workflow-store'
 import { WorkflowRunner, WorkflowSlots, type WorkflowProviderExecutionRequest } from './workflow-runner'
 import type { WorkflowPlanPreview } from '../shared/workflow'
+import { workflowFixtureApproval as approvalFor } from './workflow-runner.fixture'
 
 const preview: WorkflowPlanPreview = {
   workflowId: 'workflow-runner-test', programRevision: 'revision-test', userGoal: 'test', workspace: '/tmp/workspace',
@@ -12,10 +13,10 @@ const preview: WorkflowPlanPreview = {
   ],
   program: { schemaVersion: 1, workflowId: 'workflow-runner-test', programRevision: 'revision-test', userGoal: 'test', workspace: '/tmp/workspace',
     roles: [{ role: 'worker', providerId: 'codex', requestedModel: { id: 'codex-fixture' } }, { role: 'reviewer', providerId: 'qoder', requestedModel: { id: 'qoder-fixture' } }],
-    body: { kind: 'parallel', blockId: 'root', blocks: [
+    body: { kind: 'sequence', blockId: 'program', blocks: [{ kind: 'parallel', blockId: 'root', blocks: [
       { kind: 'call', blockId: 'worker-1', role: 'worker', prompt: 'worker' },
       { kind: 'call', blockId: 'reviewer-1', role: 'reviewer', prompt: 'reviewer' }
-    ] }
+    ] }, { kind: 'return', blockId: 'result', ref: { nodeId: 'root' } }] }
   }, plannedCalls: 2, state: 'ready', unavailableReasons: [], observedAt: 1
 }
 
@@ -37,7 +38,7 @@ describe('WorkflowRunner M0 scheduler', () => {
     const store = new InitializingStore()
     const execute = vi.fn(() => ({ result: Promise.resolve({ runId: 'unexpected', status: 'completed' as const, settled: true }), stop: () => true }))
     const runner = new WorkflowRunner({ store, execute })
-    const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }
+    const approval = approvalFor(preview)
     runner.approve(preview, approval)
     const pending = runner.start(preview, approval)
     const completion = pending.then(value => ({ value }), error => ({ error }))
@@ -64,7 +65,7 @@ describe('WorkflowRunner M0 scheduler', () => {
         return { result: Promise.resolve({ runId: request.attemptId, status: 'completed' as const, output: request.prompt, settled: true }), stop: () => true }
       }
     })
-    const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }
+    const approval = approvalFor(preview)
     runner.approve(preview, approval)
     const result = await runner.start(preview, approval)
     expect(starts).toEqual(['codex', 'qoder'])
@@ -88,7 +89,7 @@ describe('WorkflowRunner M0 scheduler', () => {
     }))
     const slots = new WorkflowSlots(1)
     const runner = new WorkflowRunner({ store, slots, execute })
-    const approval = { workflowId: plan.workflowId, programRevision: plan.programRevision, approvedAt: 1 }
+    const approval = approvalFor(plan)
     runner.approve(plan, approval)
     const result = await runner.start(plan, approval)
     expect(result.state).toBe('blocked')
@@ -126,7 +127,7 @@ describe('WorkflowRunner M0 scheduler', () => {
     }))
     const slots = new WorkflowSlots(1)
     const runner = new WorkflowRunner({ store, slots, execute })
-    const approval = { workflowId: plan.workflowId, programRevision: plan.programRevision, approvedAt: 1 }
+    const approval = approvalFor(plan)
     runner.approve(plan, approval)
     const result = await runner.start(plan, approval)
     expect(result.state).toBe(state)
@@ -159,7 +160,7 @@ describe('WorkflowRunner M0 scheduler', () => {
       result: Promise.resolve({ runId: 'unsettled', status: 'completed', output: 'not JSON', settled: false }),
       stop: () => true
     }) })
-    const approval = { workflowId: plan.workflowId, programRevision: plan.programRevision, approvedAt: 1 }
+    const approval = approvalFor(plan)
     runner.approve(plan, approval)
     const result = await runner.start(plan, approval)
     expect(result.state).toBe('unknown')
@@ -171,7 +172,7 @@ describe('WorkflowRunner M0 scheduler', () => {
   it('publishes bounded live evidence through the canonical attempt observer without persisting it', async () => {
     const store = new MemoryWorkflowStore()
     const plan = structuredClone(preview)
-    plan.program.roles.forEach(role => { role.providerId = 'pi' })
+    plan.program.roles.forEach(role => { role.providerId = 'pi'; role.agentProfileId = 'pi:fixture' })
     let publish!: (snapshot: import('../shared/workflow').WorkflowProgress) => void
     let finish!: (result: import('./workflow-runner').WorkflowProviderExecutionResult) => void
     const observed = new Promise<import('../shared/workflow').WorkflowProgress>(resolve => { publish = resolve })
@@ -187,7 +188,7 @@ describe('WorkflowRunner M0 scheduler', () => {
         if (snapshot.live?.attempts.some(attempt => attempt.activeToolIds.includes('same-id') && attempt.modelProgressCount === 1)) publish(snapshot)
       }
     })
-    const approval = { workflowId: plan.workflowId, programRevision: plan.programRevision, approvedAt: 1 }
+    const approval = approvalFor(plan)
     runner.approve(plan, approval)
     const pending = runner.start(plan, approval)
     try {
@@ -208,7 +209,7 @@ describe('WorkflowRunner M0 scheduler', () => {
     const started = new Promise<void>(resolve => { ready = resolve })
     const terminal = new Promise<import('./workflow-runner').WorkflowProviderExecutionResult>(resolve => { finish = resolve })
     const plan = structuredClone(preview)
-    plan.program.roles.forEach(role => { role.providerId = 'pi' })
+    plan.program.roles.forEach(role => { role.providerId = 'pi'; role.agentProfileId = 'pi:fixture' })
     const store = new MemoryWorkflowStore()
     const writes = vi.spyOn(store, 'save')
     const runner = new WorkflowRunner({ store, slots: new WorkflowSlots(1), execute: request => {
@@ -216,7 +217,7 @@ describe('WorkflowRunner M0 scheduler', () => {
       ready()
       return { result: terminal, stop: () => true }
     } })
-    const approval = { workflowId: plan.workflowId, programRevision: plan.programRevision, approvedAt: 1 }
+    const approval = approvalFor(plan)
     runner.approve(plan, approval)
     const pending = runner.start(plan, approval)
     await started
@@ -251,14 +252,14 @@ describe('WorkflowRunner M0 scheduler', () => {
       }
     }
     const plan = structuredClone(preview)
-    plan.program.roles.forEach(role => { role.providerId = 'pi' })
+    plan.program.roles.forEach(role => { role.providerId = 'pi'; role.agentProfileId = 'pi:fixture' })
     const slots = new WorkflowSlots(1)
     const runner = new WorkflowRunner({ store: new CommitStore(), slots, execute: request => {
       observe = request.onObservation!
       ready()
       return { result: terminal, stop: () => true }
     } })
-    const approval = { workflowId: plan.workflowId, programRevision: plan.programRevision, approvedAt: 1 }
+    const approval = approvalFor(plan)
     runner.approve(plan, approval)
     const pending = runner.start(plan, approval)
     await started
@@ -285,7 +286,7 @@ describe('WorkflowRunner M0 scheduler', () => {
       store, slots: new WorkflowSlots(1),
       execute: () => ({ result: Promise.resolve({ runId: 'run-unknown', status: 'unknown' as const, settled: false }), stop: () => true })
     })
-    const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }
+    const approval = approvalFor(preview)
     runner.approve(preview, approval)
     const result = await runner.start(preview, approval)
     expect(result.state).toBe('unknown')

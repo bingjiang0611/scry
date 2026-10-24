@@ -7,6 +7,7 @@ import { WorkflowVerification } from './workflow-verification'
 import { bindWorkflowCheck, executeWorkflowCheck, freezeWorkflowCheck, type WorkflowCheckExecution } from './workflow-check'
 import { WorkflowReplicas, validateWorkflowReplicaReference } from './workflow-replica'
 import { shellEnv } from './claude-locate'
+import { observeWorkflowAgentInputs } from './workflow-agent-inputs'
 import { validateWorkflowSystemLedger, workflowInputMaterialization, workflowSystemArtifactKey } from './workflow-system-ledger'
 import { captureWorkflowInputs, compareWorkflowInputs, saveWorkflowInputChanges, saveWorkflowInputSnapshot, verifyWorkflowInputMaterialization, workflowCheckInputValue, type WorkflowCapturedInputs } from './workflow-input-snapshot'
 import type { WorkflowReplicaReference } from '../shared/workflow-replica'
@@ -37,6 +38,10 @@ export class WorkflowSystemHost {
       if (!record || record.intents.some(intent => !record.outcomes.some(outcome => outcome.attemptId === intent.attemptId && outcome.settled && outcome.state !== 'unknown')) ||
         (record.systemIntents ?? []).some(intent => !(record.systemOutcomes ?? []).some(outcome => outcome.stepId === intent.stepId && outcome.settled && outcome.state !== 'unknown'))) throw new Error(copy.unknown)
     })
+  }
+
+  observeAgentInputs(workflowId: string, attemptId: string, workspace: string, phase: 'before' | 'after') {
+    return observeWorkflowAgentInputs(this.store, workflowId, attemptId, workspace, phase, this.environment)
   }
 
   async prepare(program: WorkflowProgram): Promise<WorkflowProgram> {
