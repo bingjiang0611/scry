@@ -11,7 +11,7 @@
 | 03 弹窗与浮层 | 通过 | `b6f42801`（实现）、`5e3e14ee`（验收）；范围取舍见本轮用户确认；一项小修正并入 04 开头，见「03 · 核验」 |
 | 04 列表 | 通过 | `5f3484c1`（实现）；`b8537f5e` / `5aa66684`（04-fix）；完整安装通过，见「04-fix · 核验」 |
 | 05 加载防闪 | 通过 | `7861d4be` / `b74c6726`（实现）；`e935f2e8`（05-fix）；完整安装通过，见「05-fix · 核验」 |
-| 06 侧栏材质（可选） | 暂不采用（用户 2026-10-24 决定回退） | `fe1e60ca`、`047acbfb` 待以 `git revert` 回退 |
+| 06 侧栏材质（可选） | 已评估，暂不采用（已回退，待核验） | `978e128e` / `41612756` 已回退；完整安装通过，保留原 06 记录 |
 
 状态取值：待开始 / 进行中 / 待核验 / 需修改 / 通过。
 
@@ -614,6 +614,28 @@
 
 - 用户选择「回退 06，只合入动效」。执行方用 `git revert`（不改写历史、不 force push）回退 `fe1e60ca` 与 `047acbfb`，以 `motion(06-revert)` 提交；`progress.md` 与 06 的记录保留，作为「已评估，暂不采用」的依据。`DESIGN.md` 中新增的材质段落随回退移除。
 - 回退后跑 `npm run typecheck`、`npm run build`、`npm run test:renderer:ui`，再跑完整 `npm run install:mac:dev`，按协议记录、推送后停下。设计方核验后开 PR 合入 main。
+
+### 06-revert · 按用户决定仅保留动效（2026-10-24，待核验）
+
+- 开始前从 `30023519` fast-forward 到 `235d1b09`，完整读取末尾「用户决定：回退 06，只合入动效」。严格使用 `git revert --no-commit` 生成反向改动，再分别提交：`978e128e` 撤销 `047acbfb` 的材质断言 / 原生采集；`41612756` 撤销 `fe1e60ca` 的生产实现 / DESIGN 段落。两个提交均以 `motion(06-revert)` 开头，body 保留完整原提交哈希；没有 amend、reset、改写历史或 force push。
+- 回退范围：删除仅服务于 06 的 Swift / 可见材质 fixture 与 material campaign，恢复原窗口 chrome 单测和结构 App 检查；移除 vibrancy / followWindow、renderer-ready 清窗口背景生命周期、macOS 透明 root / body / sidebar CSS 及新增 DESIGN 材质说明。01–05 与 wrap 的源码、测试和旧转录引用修复全部保留。
+- 独立内容核对：`git diff --exit-code adc84e63 HEAD -- . ':!designs/scry-native-motion/progress.md'` 为 0，即除记录外，所有 tracked 文件逐字节等于 06 前的 wrap 状态；`git diff --exit-code 235d1b09 HEAD -- designs/scry-native-motion/progress.md` 在追加本节之前也为 0，原 06 的实现、测量、核验与用户决定完整保留。不是用新 CSS 覆盖或在症状处掩盖材质。
+
+| 检查 | 实际结果 | 证据 |
+| --- | --- | --- |
+| `npm run typecheck` | Node 22.22.1，node / web 均通过 | `/tmp/scry-motion-06-revert-type.log` |
+| `npm run build` | main / preload / renderer 构建通过 | `/tmp/scry-motion-06-revert-build.log` |
+| `npm run test:renderer:ui` | 最终完整套件通过，含 01–05、wrap refs、加载失败重试、Credits / 后台 / source-control、真实 IPC、Pi 43 轮历史；只随指定提交移除 06 专用检查，不改保留路径断言 | `/tmp/scry-motion-06-revert-ui-final.log` |
+| 实际 App 深浅主题重放 | `node scripts/electron-security-smoke.mjs --dev-structure-only` 通过，含 pane、弹窗、原生 fixture Provider 发送、草稿保留；使用隔离 userData / 临时 workspace，不操作日常实例 | `/tmp/scry-motion-06-revert-app.log`，截图目录 `scry-structure-app-zqc0nv`（系统 temp）；抽看 light-chat / dark-settings 两张，不宣称审阅全部截图 |
+| 热路径 L1 | 因回退涉及 index.ts，补跑 `npm run performance:measure -- --compare 235d1b09 --out /tmp/scry-motion-06-revert-counters`，全部 collector 完成，ratchet 通过 | `/tmp/scry-motion-06-revert-counters/measure.json` |
+| 完整安装 | `npm run install:mac:dev` exit 0；305 文件 / 3734 unit 通过、4 个既有条件检查跳过。typecheck、shell、App / CLI build、签名、packaged resource / size 及 external-links / crash / 完整 security / files / desktop-remote-host 默认门禁全部执行并通过，随后安装 | `/tmp/scry-motion-06-revert-install.log`、`/tmp/scry-motion-06-revert-install-load.log` |
+
+- 首轮失败保留：第一次完整 UI 在既有远程输入历史用例的 `typing still opens command completion` 等待超时，DOM 仍为回忆的 slash prompt，没有菜单。检查 fixture / ChatView 历史与输入调用链后，未修改任何代码，执行 `node scripts/desktop-remote-ui-smoke.mjs --composer-history-only` 通过，再完整 UI 通过。日志 `/tmp/scry-motion-06-revert-ui.log`、`/tmp/scry-motion-06-revert-composer-focused.log`；根因未确认、不声称已修复，也不以复跑通过抹去首败。未加 sleep / retry 分支、扩大 timeout、删断言或顺手改 01–05。
+- L1 对比 43 项均 measured：42 项不变，仅 files.fixed-operations/io.read.bytes 1227428→1227427（-1，运行范围重叠），不据此宣称性能提高。ratchet 相对更早台账的四个 worse 仍为 files read 336→417、readdir 18→20、read.bytes 1183197→1227427、archive ipc.bytes 10536→10558；本次 235d1b09 基线同样为 read 417 / readdir 20 / archive 10558，bytes 仅上述轮内差异，不是回退新增工作。三项 CPU instructions 为 unavailable / missing，不记 0。未修改 collector / workload / ratchet / 预算；未另跑毫秒 bench，不对 L2 / L3 作结论。
+- 安装对应 `41612756`，2026-10-24 **01:11:25→01:18:17 PDT**，10 核 load 7.15 / 6.94 / 6.96→8.10 / 7.45 / 7.14，Node 22.22.1 / Electron 42.10.1。App 0.2.219、私有 CLI 0.2.51；已安装 `/Applications/Scry.app`，备份 `/Applications/.Scry.app.backup`；安装与 dist 的 app.asar SHA-256 均为 `a06feff4e3d44353902596626c46add1c3bac51368b4543d23917cf357750629`。3734 比 06 少 1 个仅为透明背景时序新增的 unit，随指定 `047acbfb` 一并 revert；4 跳过仍为性能相关性及三个真实探针，不是本次跳过新失败。
+- 共享 pre-commit 的正常运行仍因本分支缺 `scripts/check-staged-file-size.mjs` 报 MODULE_NOT_FOUND。用户针对本轮另行明确选择「本轮也豁免大小 hook」，仅命令级豁免，不改共享配置；没有跳过测试、安全、构建或安装门禁。
+- 与要求无额外偏差：本次未重新开启 06、未更改系统透明度设置、未运行付费 Provider 或真实手机操作。真实 Windows / Linux、120Hz、屏幕阅读器及日常运行实例未验收；modal close 仍为 242.0–243.9ms fallback / nativeAnimationEnd false，不冒充 CSS animationend 证据。旧 06 记录中的材质验收是历史评估，不代表本次安装仍含材质。
+- 用户日常实例未停止或重启，需自行重启才加载已安装的回退版。截图 / 测量 / 日志只留本机临时目录，不提交个人数据；测量临时 worktree 由原流程正常清理。仅推送 `design/native-motion` 后停下等待设计方核验，不开 PR、不合入 main；首轮未稳定复现的输入测试问题如需继续排查，由维护者另行确定范围。
 
 <!--
 ### NN · <步骤名>
