@@ -6,9 +6,9 @@
 
 | # | 问题 | 批次 | 状态 | 报告 | 核验备注 |
 |---|---|---|---|---|---|
-| H1 | 缺开始事件时整轮被当 duplicate 丢弃 | A1 | 待核验 | [A 报告](reports/A.md) | orphan/计数/日志已补；transcript 自动重建未做，部分交付待决定 |
-| H2 | hook 脚本静默跳过无痕迹；invalid_config 当作禁用 | A2 | 待核验 | [A 报告](reports/A.md) | 留痕、诊断、fail-open、符号链接保护已测；需 repair，真实 Provider 待用户验收 |
-| L2 | 开始/终态 open.json 不 fsync | A3 | 待核验 | [A 报告](reports/A.md) | L1 每轮新增 6 次 fsync；未做断电测试 |
+| H1 | 缺开始事件时整轮被当 duplicate 丢弃 | A1 | 需修改 | [A 报告](reports/A.md) | 证实测试与修复均复跑通过；orphan-only 范围接受。但正常会话结束的 SessionEnd、Claude 续跑 Stop 被误计为 missing_start（误报），见核验意见 V1 |
+| H2 | hook 脚本静默跳过无痕迹；invalid_config 当作禁用 | A2 | 已核验 | [A 报告](reports/A.md) | 快路径无新增进程、始终 exit 0、符号链接保护成立；需 repair；doctor 告警时间窗见 V3（不阻塞）；真实 Provider 待用户验收 |
+| L2 | 开始/终态 open.json 不 fsync | A3 | 已核验 | [A 报告](reports/A.md) | 只在开始与终态边界加 sync，中间事件不变；每轮 +6 次 fsync 属必要工作；未做断电测试 |
 | H4 | inbox 重放或读取失败即删除 | B1 | 未开始 | | |
 | M1 | recover 被单个会话打断，投递不执行 | B2 | 未开始 | | |
 | M5 | 回退链路超时与三重处理 | C1 | 未开始 | | |

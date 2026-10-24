@@ -279,3 +279,46 @@ node "$SCRY_A_CLI" doctor
 5. 审查方核验本报告及真实 Provider 回报后决定 A 的接受范围。执行方到此停止；**B 必须等 A 核验，不自动继续**。
 
 本机验证日志保留在 `/tmp/scry-A-*.log`；测试临时目录由 fixture 清理，无本批启动的长期 Provider/daemon。构建产物只在本仓库 ignored 的 `out/`、`packages/turn-recorder-cli/dist/`，未全局安装、未发布。
+
+## 核验意见（审查方，2026-10-24）
+
+核验对象：`fc0aa87a`（生产代码 `25f9382a`）。环境：Linux x86_64，Node 22.22.0，与执行方的 macOS / Node 24 互补。
+
+已复跑：
+- 5 个 focused 文件 214/214 通过；`npm run typecheck` 通过。
+- 在 `258cacaf`（只有 A1 测试、无修复）上跑 `-t 'missing-start|orphan tool payload'`：6 个失败，与报告一致，证实测试有效。
+- 逐行读了 `recorder.ts`、`store.ts`、`hook-diagnostics.ts`、`workspace-init.ts`、`scry.ts` 的 diff。
+
+结论：**A2、A3 已核验；A1 需修改（一个误报问题），orphan-only 范围本身接受。**
+
+### V1（需修改）A1：正常的会话结束和续跑 Stop 被计成 missing_start
+
+真实 Claude hook payload 没有 `timestamp` 字段（fixture 里的 `payload()` 总是带 timestamp，所以现有测试覆盖不到）。新逻辑在没有 open turn 时，只有拿到 turn ID 或显式时间戳才判 duplicate，否则一律 orphan + `missingStartTerminals++`。
+
+复现（临时探针，未提交）：Claude `UserPromptSubmit` → `Stop` → `recover` 提交 1 条 record，然后：
+- `SessionEnd`（`{ session_id, hook_event_name, reason: 'exit' }`）→ `orphan`
+- `Stop`（`stop_hook_active: true`，续跑）→ `orphan`
+
+结果 `missingStartTerminals: 2`、`orphanEvents: 2`，`lastError` 被改写为 orphan，但实际**没有丢任何数据**。每个正常退出的 Claude 会话都会产生一次这样的误报，计数会失去意义，并且掩盖真正的问题。
+
+修改要求：
+1. `SESSION_END_EVENTS` 在没有 open turn 时，说明会话在两轮之间结束，这是正常情况，不能当作缺开始的证据。返回 `duplicate`（或新增一个不计数的状态），不写 orphan，不加计数。缺开始的那一轮如果存在，它的 Stop 已经单独被记成 orphan 了。
+2. Claude 的 `stop_hook_active: true` 是对已有一轮的续跑，没有 open turn 时同样不算缺开始。请执行方确认其他 Provider 有没有类似的「同一轮重复终态」信号（例如 OpenCode 的 `session.idle` 在空闲期间是否会重复触发），有的话一并处理，没有就在报告中写明。
+3. 时间窗口比较改用 `Date.parse`，不要直接比较字符串：`terminalAt >= record.startedAt` 在两边格式不一致时会出错（`explicitTimestampOf` 已规范化，但 record 字段来源不同，不要依赖这一点）。
+4. 补回归测试，使用**不带 timestamp 的真实形状 payload**：正常一轮之后的 SessionEnd、`stop_hook_active: true` 的 Stop，断言 `missingStartTerminals` 为 0；同时保留现有「缺开始的 Stop 记为 orphan」的测试。
+
+### V2（接受）A1 orphan-only 范围
+
+接受不做 transcript 重建。理由：目标是「不再无痕丢失」，orphan 已保留 payload（含 `transcript_path`），事后可以离线重建；而在线重建在没有轮首身份时容易把别的轮次内容归到这一轮，违反证据诚实。Codex 有权威 turn ID 时的降级重建，作为可选的后续项，等用户手验后再决定要不要做。
+
+### V3（不阻塞，留给用户决定）A2：doctor 对历史 skip 永久报 error
+
+只要保留窗口内有一条 skip，`doctor` 就一直是 `error` / 退出 5，修复之后也不会恢复，除非手动移走日志。建议改成按时间分级（例如最近 24 小时内有 skip 报 error，更早的报 warn），这样修复后能看到恢复。是否要做由用户决定，可以和 V1 一起改。
+
+### V4（记录）managed 分支从 `exec` 改为子进程
+
+managed 分支原来用 `exec` 让 CLI 替换 shell，现在 shell 会留下来等待 CLI 返回。宿主超时杀掉 shell 时，CLI 子进程不一定被一起杀掉，会继续跑完。这不会丢数据，只是行为有变化，记录在此，不要求修改。
+
+### 下一步
+
+执行方只修 V1（V3 视用户决定），在本报告末尾追加「V1 修改记录」，STATUS 中 A1 改回 `待核验` 后 push。B 继续等待。
