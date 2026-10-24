@@ -1,4 +1,7 @@
+import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { CapabilitiesModal, McpModal, SkillsModal } from '../../src/renderer/components/Modals'
+import { useIntegrations } from '../../src/renderer/hooks/useIntegrations'
 import { invalidateCache, page } from './session-cache-smoke'
 import { LocationPicker } from '../../src/renderer/components/LocationPicker'
 import { RemoteDirectoryPicker } from '../../src/renderer/components/RemoteDirectoryPicker'
@@ -57,8 +60,30 @@ const extra = document.createElement('div')
 extra.id = 'loading-extra'
 document.body.append(extra)
 const extraRoot = createRoot(extra)
+const inventoryProjects: [] = []
+let inventoryKey = 0
+let startInventory: () => void
+function InventoryRead({ kind, legacy }: { kind: 'skills' | 'mcp'; legacy: boolean }) {
+  const [started, setStarted] = useState(false)
+  startInventory = () => setStarted(true)
+  const integrations = useIntegrations('/fixture/cache', null, inventoryProjects, started ? kind : null)
+  const close = () => extraRoot.render(null)
+  if (legacy && kind === 'skills') return <SkillsModal skills={integrations.skills} capability={integrations.skillCapability}
+    refreshing={integrations.skillsRefreshing} onRefresh={integrations.refreshSkills} onClose={close} />
+  if (legacy) return <McpModal mcps={integrations.mcps} capability={integrations.mcpCapability} status={integrations.mcpStatus}
+    live={integrations.mcpLive} refreshing={integrations.mcpRefreshing} configRefreshing={integrations.mcpConfigRefreshing}
+    onTest={integrations.testMcp} onRefresh={() => { void integrations.refreshMcp().catch(() => {}) }} onClose={close} />
+  return <CapabilitiesModal view={kind} onViewChange={() => {}} skills={integrations.skills} skillCapability={integrations.skillCapability}
+    skillsRefreshing={integrations.skillsRefreshing} onRefreshSkills={integrations.refreshSkills} mcps={integrations.mcps}
+    mcpCapability={integrations.mcpCapability} status={integrations.mcpStatus} live={integrations.mcpLive}
+    mcpRefreshing={integrations.mcpRefreshing} mcpConfigRefreshing={integrations.mcpConfigRefreshing}
+    onTestMcp={integrations.testMcp} onRefreshMcp={integrations.pullMcpLive} onClose={close} />
+}
 Object.assign(window, { loadingFixture: {
   records,
+  inventory: (kind: 'skills' | 'mcp', legacy: boolean) => extraRoot.render(<InventoryRead key={++inventoryKey} kind={kind} legacy={legacy} />),
+  startInventory: () => startInventory(),
+  closeInventory: () => extraRoot.render(null),
   configure: (nextDelay: number, nextFail = false) => { delay = nextDelay; fail = nextFail },
   invalidateCache,
   remote: async (kind: 'projects' | 'directory') => {

@@ -5444,6 +5444,7 @@ describe('CapabilitiesModal 精简能力页', () => {
     view: 'skills',
     onViewChange: () => {},
     skills: [],
+    onRefreshSkills: () => {},
     skillCapability: { providerId: 'qoder', cwd: '/repo', mode: 'read', state: 'ready', data: [] },
     mcps: [],
     status: {},
