@@ -71,7 +71,7 @@ export function RightSurfacePanel({
     targetKind: RightSurfaceKind | null
   } | null>(null)
   const activeKind = activeId && openIds.includes(activeId) ? activeId : openIds[0] ?? null
-  const { indicatorRef: surfaceIndicatorRef } = useTabIndicator(surfaceTabsRef, activeKind, tabItemRefs.current)
+  const { indicatorRef: surfaceIndicatorRef } = useTabIndicator(surfaceTabsRef, activeKind, tabItemRefs.current, openIds)
   const mountedKinds: readonly RightSurfaceKind[] = retainTerminal && !openIds.includes('terminal')
     ? [...openIds, 'terminal'] : openIds
 

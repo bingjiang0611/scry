@@ -5,7 +5,7 @@ const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLa
 
 // The budget includes keyed headings. Oversized lists retain every DOM row but
 // skip decoration; resuming below the budget seeds positions without fake arrivals.
-export function useFlipList(root: RefObject<HTMLElement>, revision: unknown): void {
+export function useFlipList(root: RefObject<HTMLElement>, revision: unknown, budget = 40): void {
   const positions = useRef(new Map<string, number>())
   const animations = useRef(new Map<string, Animation>())
   const initialized = useRef(false)
@@ -20,7 +20,7 @@ export function useFlipList(root: RefObject<HTMLElement>, revision: unknown): vo
     const nodes = Array.from(element.querySelectorAll<HTMLElement>('[data-motion-key]'))
     // Keep every row in the DOM. An oversized list is a deliberate no-FLIP
     // boundary: querying keys is cheap, but geometry reads would be O(n) layout.
-    if (nodes.length > 40) {
+    if (nodes.length > budget) {
       cancel()
       positions.current.clear()
       oversized.current = true
@@ -57,7 +57,7 @@ export function useFlipList(root: RefObject<HTMLElement>, revision: unknown): vo
       animations.current.set(key, animation)
       animation.onfinish = () => { if (animations.current.get(key) === animation) animations.current.delete(key) }
     }
-  }, [revision])
+  }, [revision, budget])
   useEffect(() => {
     const unsubscribe = subscribeReducedMotion(reduced => { if (reduced) cancel() })
     return () => { unsubscribe(); cancel() }

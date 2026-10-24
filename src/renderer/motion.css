@@ -85,7 +85,8 @@
   @keyframes stream-arrival { from { opacity: 0; } to { opacity: 1; } }
   @keyframes disclosure-in { from { opacity: 0; } to { opacity: 1; } }
   @keyframes disclosure-out { from { opacity: 1; } to { opacity: 0; } }
-  .stream-arrival, .motion-disclosure[data-state] { animation-duration: 120ms; }
+  .stream-arrival, .motion-disclosure[data-state],
+  .motion-disclosure[data-long='true'][data-state] { animation-duration: 120ms; }
   .motion-chevron { transition: none; }
   .thinking::details-content,
   .thinking[data-long='true']::details-content { transition: opacity 120ms linear, content-visibility 120ms allow-discrete; }

@@ -149,7 +149,7 @@ export const Sidebar = memo(function Sidebar({
   const [view, setView] = useState<'projects' | 'activity'>('projects')
   const viewTabRefs = useRef(new Map<string, HTMLElement | null>())
   const viewTabsRef = useRef<HTMLDivElement>(null)
-  const { indicatorRef: viewIndicatorRef } = useTabIndicator(viewTabsRef, view, viewTabRefs.current)
+  const { indicatorRef: viewIndicatorRef } = useTabIndicator(viewTabsRef, view, viewTabRefs.current, ['projects', 'activity'])
   const remoteGroups = useRemoteProjectGroups(q)
   const showRemote = Boolean(onPickRemoteSession && onNewRemoteProjectChat) && remoteGroups.length > 0
   const activity = useMemo(() => view === 'activity'

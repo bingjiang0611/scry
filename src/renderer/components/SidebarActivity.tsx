@@ -47,7 +47,7 @@ export function SidebarActivity({ entries, renderEntry }: {
     }
   }, [heldEntries])
 
-  useFlipList(root, displayed)
+  useFlipList(root, displayed, GROUP_LIMIT * activityGroups.length + activityGroups.length)
 
   const children: ReactNode[] = []
   for (const group of activityGroups) {

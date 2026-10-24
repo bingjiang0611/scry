@@ -3,7 +3,8 @@ import { MOTION, prefersReducedMotion, subscribeReducedMotion } from '../motion'
 
 const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
-export function useTabIndicator(container: RefObject<HTMLElement>, selected: string | null, items: ReadonlyMap<string, HTMLElement | null>) {
+export function useTabIndicator(container: RefObject<HTMLElement>, selected: string | null, items: ReadonlyMap<string, HTMLElement | null>, keys: readonly string[]) {
+  const order = keys.join('\0')
   const indicatorRef = useRef<HTMLSpanElement>(null)
   const animation = useRef<Animation | null>(null)
   const previous = useRef<{ selected: string | null; order: string }>()
@@ -36,20 +37,20 @@ export function useTabIndicator(container: RefObject<HTMLElement>, selected: str
   const latestPosition = useRef(position)
   latestPosition.current = position
   useBrowserLayoutEffect(() => {
-    // Ref maps retain null entries after close; compare the actual DOM order.
-    const order = [...items].filter((entry): entry is [string, HTMLElement] => entry[1] !== null)
-      .sort((a, b) => a[1].compareDocumentPosition(b[1]) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)
-      .map(([key]) => key).join('\0')
+    // Rendered keys are authoritative; ref maps may still contain closed tabs.
     const animate = previous.current !== undefined && previous.current.order === order && previous.current.selected !== selected
-    position(animate)
+    latestPosition.current(animate)
     previous.current = { selected, order }
-  })
+  }, [selected, order])
   useEffect(() => {
     const observer = new ResizeObserver(() => latestPosition.current(false))
     if (container.current) observer.observe(container.current)
-    for (const item of items.values()) if (item) observer.observe(item)
+    for (const key of keys) {
+      const item = items.get(key)
+      if (item) observer.observe(item)
+    }
     return () => observer.disconnect()
-  })
+  }, [order])
   useEffect(() => {
     const unsubscribe = subscribeReducedMotion(reduced => { if (reduced) { cancel(); latestPosition.current(false) } })
     return () => { unsubscribe(); cancel() }
