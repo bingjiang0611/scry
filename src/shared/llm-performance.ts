@@ -177,35 +177,3 @@ export function quantile(values: readonly number[], p: number): number {
   const low = Math.floor(index)
   return sorted[low] + (sorted[Math.ceil(index)] - sorted[low]) * (index - low)
 }
-
-export interface LlmMetricPoint {
-  ts: number
-  /** Smoothed measured value; null when no round lies within 1.5 bandwidths (idle). */
-  value: number | null
-  /** Drawing height: eases to the 0 axis when idle. It is not a measurement. */
-  drawn: number
-}
-
-/**
- * Gaussian-weighted geometric mean of one model's rounds on a regular grid. The geometric mean keeps
- * one outlier from dominating. The curve stays continuous, but idle points are marked with value=null
- * so no tooltip or statistic presents the 0 baseline as a measurement.
- */
-export function smoothLlmMetric(samples: readonly LlmMetricSample[], from: number, to: number, bandwidthMs: number, points: number): LlmMetricPoint[] {
-  return Array.from({ length: points }, (_, index) => {
-    const ts = from + (to - from) * index / (points - 1)
-    let weight = 0
-    let logSum = 0
-    let near = false
-    for (const sample of samples) {
-      const distance = (sample.ts - ts) / bandwidthMs
-      if (Math.abs(distance) > 3) continue
-      if (Math.abs(distance) <= 1.5) near = true
-      const w = Math.exp(-distance * distance / 2)
-      weight += w
-      logSum += w * Math.log(sample.value)
-    }
-    const value = weight > 1e-6 ? Math.exp(logSum / weight) : 0
-    return { ts, value: near ? value : null, drawn: value * Math.min(1, weight / 0.6) }
-  })
-}

@@ -1,14 +1,14 @@
 # LLM 性能
 
-左侧「LLM 性能」位于技能上方。点击打开居中弹窗，内容分为「运行中」和带所选时间范围的「历史表现」。后者包含各模型曲线（「输出速度 / 首 token」切换）和模型对比。右上角切换 1 小时 / 24 小时 / 7 天。关闭、Escape 和焦点返回沿用 ModalFrame。设计原型与反馈见 [brief](../designs/scry-llm-token-speed/brief.md)。
+左侧「LLM 性能」位于技能上方。弹窗先显示模型分布对比，再显示选中模型的时间区间图。已移除顶部「运行中」标题与会话卡片，但保留进行中轮次的已完成调用数据。右上角切换 1 小时 / 24 小时 / 7 天。关闭和焦点返回沿用 ModalFrame；图表上的 Escape 先关闭测量提示。设计依据是已确认的分布优先精简稿（本机 `designs/scry-llm-scatter/design-demos/Distribution-refined-v3.html`），正式组件使用实时 IPC，不读取设计稿快照。
 
 ## 速度口径
 
 - 只用 token/s。不从字符、消息块、分词器或经验比例换算。
 - 一轮速度 = 本轮主 Agent 成功调用的输出 token 之和 ÷ 这些调用的耗时之和。耗时从请求开始到消息结束，包含首 token 等待，不含工具执行。子 Agent 调用不计入。
 - 输出 token 含 Provider 计入的 reasoning token。reasoning 不流式输出，所以不用「首 token 之后」的口径，否则会高估速度。
-- 运行中的轮次只用已完成调用的证据，作为临时样本进入曲线和模型对比。每个主 run 只占一个样本，后续调用更新它，不把每次轮询计成新轮次。「测速轮次」只计有速度数据的轮次，显示为「已完成 + 暂计*」，列头可展开解释。
-- 整轮完成后，历史记录按 runId 替换临时样本。失败或停止的轮次保留在历史里，但不进入曲线和中位数；其临时样本也移除。没有 token 或耗时证据的轮次直接省略，不显示为 0。
+- 运行中的轮次只用已完成调用的证据，作为临时样本进入区间图和模型对比。每个主 run 只占一个样本，后续调用更新它，不把每次轮询计成新轮次。模型名旁的轮数默认只计有速度数据的轮次，显示为「已完成 + 暂计* 轮」；只有首 token 数据时标注「首 token N 轮」。「含运行中数据」可展开解释。
+- 整轮完成后，历史记录按 runId 替换临时样本。失败或停止的轮次保留在历史里，但不进入区间图和中位数；其临时样本也移除。没有 token 或耗时证据的轮次直接省略，不显示为 0。
 
 ## 首 token 口径
 
@@ -51,18 +51,19 @@ Codex 等这次请求调用的工具全部跑完，才发出它的 usage 通知�
 
 `observed_calls` 是本机计时的估算：包含本机 IPC 延迟，Codex 还依赖 usage 通知紧随响应结束这一时序。Provider API 时间存在时优先用它，不与本机计时混用。单次调用证据记在 trace 事件的 `llmCall` 字段（`outputTokens`、`durationMs`、可选 `firstTokenMs`；Pi 在 `runtime:llm_stream_end`，Codex 在 `runtime:llm_call`），不参与计费用量。
 
-## 曲线
+## 分布对比与时间区间
 
-- 每个模型一条连续曲线：在 180 个时间点上，对附近轮次做高斯加权几何平均。带宽 1 小时 = 4 分钟、24 小时 = 40 分钟、7 天 = 4 小时。几何平均让单个异常轮次不主导曲线。
-- 1.5 倍带宽内没有轮次的时段，曲线平滑落到 0 轴。0 轴只是绘图基线，不是测量值：悬停显示「空闲」；中位数、分布和轮数都不计入空闲。落向 0 轴的过渡段高度只是视觉过渡。空闲与非测量过渡段使用较淡的连续线，完整测量段以原色覆盖；两层使用同一路径，不修改样本或统计算法。
-- 纵轴上限 = 测量值 98 分位 × 1.1。输出速度向上取整到 20；首 token 取 1/2/5 × 10ⁿ。更高的值贴顶。7 天视图在本地零点放刻度。
-- 首 token 图沿用同一条连续曲线规则：空闲落到 0 轴。0 秒在这里同样只是基线，悬停显示「空闲」。
-- 模型颜色按全部历史的轮数排序，切换范围时不变。图表附近显示当前指标的模型图例；点击图例或模型行突出该模型，两个入口共享选择状态，再次点击取消。选中模型缺少当前指标或时间范围的数据时，保留该模型的图例与取消入口，明确显示缺失，不把其他模型变暗后误报「空闲」。图表可用左右方向键逐点查看，Home / End 跳到两端。
-- 模型对比的分布列和测速轮次列提供可点击、可用键盘展开的说明，不再使用横穿图表的常驻解释。分布色带表示 P25–P75，竖线表示 P50；排序不是受控性能评测。
+- 主表四列：模型（含轮数）、速度分布、中位速度、首 token 中位数。两个指标各用自己的有效样本；只有首 token 数据的模型也保留，速度显示 —。
+- 分布细线表示最小–最大值，色带表示 P25–P75，短线表示 P50。少于 3 轮时只画实际测量，不用两次测量制造一段分布。所有模型共用完整速度刻度；按中位速度排序不是受控性能评测。
+- 默认选中当前范围测量最多的模型。点击另一行切换单模型时间图；再点当前行不取消。切换范围后原模型完全没有数据时，改选范围内测量最多的模型。模型有数据但缺少当前指标时明确显示缺失，不画零值。
+- 时间分桶：1 小时按 10 分钟，24 小时按 2 小时，7 天按 1 天。桶按 epoch 对齐，边缘时间区间裁到窗口内；每桶至少 3 轮时显示中位数、P25–P75 与最小–最大值，1–2 轮保留真实时间和值。没有测量的时段留空，不补零、不平滑、不连线。
+- 两类图的轴上限都覆盖最大实测值（最大值 × 1.05，向上取 1/2/4/5 × 10ⁿ），不再用 98 分位贴顶。极值可以压缩其他值的视觉差异，但不被隐藏；必要时通过选中模型单独查看。
+- 模型颜色沿用全部历史轮数排序。测量提示支持指针与左右方向键，Home / End 跳到两端，Escape 关闭提示；“如何读图”和分桶说明均可用键盘展开。低密度样本提示标明实测，聚合提示包含样本数、完整范围与暂计数。
+- 保留深浅主题、关闭与焦点返回；窄窗口主表局部横向滚动，不缩小数字和模型文字来塞列。
 
-## 运行中的会话
+## 进行中的数据
 
-摘要只读取 run registry 里每个主 run 的最新 observer 小摘要，不扫描 trace，不随当前查看会话变化；一个会话只取当前主 run。弹窗打开且可见时每秒读取一次，隐藏或关闭即停止。相同模型跨项目和 Provider 合并为一行，显示会话总数；模型未知时仍按会话分别显示 Provider，避免误合并。速度和首 token 分别取有对应证据的会话的算术平均值，每个会话权重相同；这不是并发总吞吐或按调用数加权的平均值。缺失指标不计入该指标的分母，也不当作 0；没有单次调用证据的 Provider（如运行中的 Claude）显示 —，不伪造速度。各状态及其会话数直接显示，不再使用「多种状态」占位；点击或用键盘展开模型行，可检查实际 Provider、工作区、状态以及速度和首 token 各自的有数据会话数／总会话数。曲线使用 observer 的最后更新时间，不使用轮询时间；运行中样本不写入历史或 billing。读取失败时清空旧摘要及临时样本并显示错误。
+摘要仍只读取 run registry 里每个主 run 的最新 observer 小摘要，不扫描 trace，不随当前查看会话变化。弹窗打开且可见时每秒读取一次，隐藏或关闭即停止。移除运行区不影响临时样本；图表使用 observer 的最后更新时间，不使用轮询时间。运行中样本不写入历史或 billing。读取失败时清空旧摘要及临时样本并显示错误。
 
 ## 历史与归属
 
@@ -76,13 +77,13 @@ Codex 等这次请求调用的工具全部跑完，才发出它的 usage 通知�
 ## 验证入口
 
 ```sh
-npm run test:unit -- src/shared/llm-performance.test.ts src/main/llm-performance.test.ts src/main/llm-performance-history.test.ts src/main/providers/pi.test.ts src/main/providers/codex.test.ts src/main/llm-network-configuration.test.ts src/main/usage-jsonl.test.ts src/preload/index.test.ts src/main/ipc-trust.test.ts --exclude '.local/**'
+npm run test:unit -- src/shared/llm-performance.test.ts src/renderer/components/llm-performance-data.test.ts src/main/llm-performance.test.ts src/main/llm-performance-history.test.ts src/main/providers/pi.test.ts src/main/providers/codex.test.ts src/main/llm-network-configuration.test.ts src/main/usage-jsonl.test.ts src/preload/index.test.ts src/main/ipc-trust.test.ts --exclude '.local/**'
 node scripts/session-capability-ui-smoke.mjs --performance-only
 npm run typecheck:web
 npm run build
 node scripts/electron-security-smoke.mjs --dev-performance-only
 ```
 
-UI fixture 使用生产 App、registry 和 observer，配合预置历史。它用真实指针事件验证：失败与无证据轮次不进图、模型中位数、首 token 列与指标切换（无证据显示 —）、悬停（有数据处显示速度，空闲处显示「空闲」）、选中模型、范围切换、运行中会话的单次调用速度、同模型跨项目/Provider 合并与缺失指标的独立分母、混合状态和成员离开后的重新计算、成员结束/停止/空闲、焦点独立、隐藏/关闭停止刷新、读取错误清空，以及两种主题和窄窗口。生产 IPC smoke 使用当前构建与临时 HOME/userData 及 smoke adapter。两者都不启动真实付费 Provider。
+UI fixture 使用生产 App、registry 和 observer，配合预置历史。验收覆盖四列表格、首 token 列、选中模型的区间图、缺失指标、范围切换、临时样本替换、运行区确实移除、关闭与焦点返回、隐藏/关闭停止刷新、读取错误，以及两种主题和窄窗口。纯函数测试验证低样本、极值、时间边界、有效样本数与暂计数据守恒。生产 IPC smoke 使用当前构建与临时 HOME/userData 及 smoke adapter；两者都不启动真实付费 Provider。
 
-UI fixture 默认使用隐藏窗口、临时 HOME/userData，不显示窗口或抢占用户焦点；真实指针与键盘输入仍经 Chromium。原生隐藏／恢复刷新检查仅在用户授权后使用 `--native-visibility`，默认明确报告为 not-run。fixture 进程带 `--disable-backgrounding-occluded-windows`；`win.setSize()` 是异步的，点击和测量前等待 `innerWidth` 更新。可设置 `SCRY_LLM_UI_SCREENSHOT=/tmp/scry-llm`，保存运行中、对比表、深浅主题和窄窗口截图。截图显式保持窗口隐藏，并在捕获期间保持绘制，避免把上一帧当作新主题。
+UI fixture 默认使用隐藏窗口、临时 HOME/userData，不显示窗口或抢占用户焦点；真实指针与键盘输入仍经 Chromium。原生隐藏／恢复刷新检查仅在用户授权后使用 `--native-visibility`，默认明确报告为 not-run。fixture 进程带 `--disable-backgrounding-occluded-windows`；`win.setSize()` 是异步的，点击和测量前等待 `innerWidth` 更新。可设置 `SCRY_LLM_UI_SCREENSHOT=/tmp/scry-llm`，保存对比表、深浅主题和窄窗口截图。截图显式保持窗口隐藏，并在捕获期间保持绘制，避免把上一帧当作新主题。

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { groupRunningLlmSessions, llmMetricSamples, smoothLlmMetric, summarizeRunningLlmSessions, type LlmPerformance, type LlmPerformanceHistoryRow, type LlmRunningSession } from './llm-performance'
+import { groupRunningLlmSessions, llmMetricSamples, summarizeRunningLlmSessions, type LlmPerformance, type LlmPerformanceHistoryRow, type LlmRunningSession } from './llm-performance'
 import type { ActiveRun } from './trace'
 import { RunRegistry } from '../main/run-registry'
 
@@ -133,17 +133,4 @@ describe('LLM speed history', () => {
     expect(llmMetricSamples([], 'speed', [])).toEqual([])
   })
 
-  it('keeps the curve continuous on the 0 axis while marking idle points as unmeasured', () => {
-    const minute = 60_000
-    const samples = [{ ts: 10 * minute, model: 'm', value: 20 }, { ts: 11 * minute, model: 'm', value: 80 }]
-    const points = smoothLlmMetric(samples, 0, 60 * minute, minute, 61)
-    const busy = points[10]
-    const idle = points[40]
-    // Weighted geometric mean (≈33.8) stays below the weighted arithmetic mean (≈42.6) of a 4x outlier.
-    expect(busy.value).toBeCloseTo(Math.exp((Math.log(20) + Math.exp(-0.5) * Math.log(80)) / (1 + Math.exp(-0.5))))
-    expect(busy.value).toBeLessThan((20 + Math.exp(-0.5) * 80) / (1 + Math.exp(-0.5)))
-    expect(busy.drawn).toBeCloseTo(busy.value!)
-    expect(idle).toEqual({ ts: 40 * minute, value: null, drawn: 0 })
-    expect(points.every(point => Number.isFinite(point.drawn))).toBe(true)
-  })
 })
