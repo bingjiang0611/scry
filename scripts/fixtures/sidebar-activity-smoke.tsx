@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Sidebar } from '../../src/renderer/components/Sidebar'
 import type { SessionMeta } from '../../src/renderer/env'
+import { sessionAttentionKey } from '../../src/shared/session-attention'
 import '../../src/renderer/styles.css'
 import '../../src/renderer/codex-alignment.css'
 
 function Fixture() {
   const [phase, setPhase] = useState<'working' | 'attention' | 'completed' | 'unknown' | 'failed'>('working')
   const [active, setActive] = useState<string | null>(null)
+  const [unread, setUnread] = useState(false)
   const [archived, setArchived] = useState(false)
   const [pinned, setPinned] = useState(false)
   const [bulk, setBulk] = useState(false)
@@ -27,14 +29,15 @@ function Fixture() {
     sessionId: `history-${index}`, providerId: 'pi', preview: `历史记录 ${index}`, mtime: 0, count: 1, lastRunOutcome: 'completed'
   })))
   useEffect(() => {
-    Object.assign(window, { activityFixture: { setPhase, setBulk, setReversed, setLongTitle, unmount: () => setMounted(false) } })
+    Object.assign(window, { activityFixture: { setPhase, setBulk, setReversed, setLongTitle, setUnread, unmount: () => setMounted(false) } })
   }, [])
   return <div className="app" style={{ gridTemplateColumns: '280px 1px 1fr' }}>
     {mounted && <Sidebar id="activity-sidebar" projects={[{ cwd: '/fixture/storefront', name: 'storefront', mtime: 3, sessions }]}
       activeCwd="/fixture/storefront" activeSessionId={active} activeProviderId={active === 'webhook' ? 'pi' : 'claude'}
       runningRunIds={new Set(['run-layout', ...(['working', 'attention'].includes(phase) ? ['run-webhook'] : [])])}
       waitingQuestionRunIds={new Set(phase === 'attention' ? ['run-webhook'] : [])}
-      onNewChat={() => setActive(null)} onPick={(_cwd, id) => setActive(id)}
+      unreadSessionKeys={new Set(unread ? [sessionAttentionKey({ providerId: 'pi', cwd: '/fixture/storefront', sessionId: 'webhook' })] : [])}
+      onNewChat={() => setActive(null)} onPick={(_cwd, id) => { setActive(id); if (id === 'webhook') setUnread(false) }}
       onTogglePin={() => setPinned((value) => !value)} onArchive={() => setArchived(true)} />}
     <div /><main style={{ padding: 40 }}><h1>会话动态</h1><p>隔离交互夹具 · 无真实 Provider</p>
       <output id="activity-selection">{active ?? 'none'}</output>

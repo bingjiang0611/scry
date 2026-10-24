@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { activityGroups, sidebarActivity } from './sidebar-activity'
 import type { ProjectMeta } from './env'
+import { sessionAttentionKey } from '@shared/session-attention'
 
 const remoteProject = {
   key: '["mac2","/remote/rotom-team"]',
@@ -32,7 +33,7 @@ describe('sidebar activity projection', () => {
     expect(rows.map((row) => [row.kind, row.group])).toEqual([
       ['conversation', 'attention'], ['session', 'attention'], ['session', 'completed']
     ])
-    expect(activityGroups.map((group) => group.label)).toEqual(['需要回复', '进行中', '已完成'])
+    expect(activityGroups.map((group) => group.label)).toEqual(['需要回复', '进行中', '待查看', '已完成'])
     expect(sidebarActivity(projects, new Set(['run-a']), empty, '').map((row) => row.group))
       .toEqual(['working', 'working', 'completed'])
   })
@@ -65,6 +66,29 @@ describe('sidebar activity projection', () => {
       { ...projects[0].conversations![0], activeRunId: undefined, lastRunOutcome: 'completed' as const }
     ] }]
     expect(sidebarActivity(completed, empty, empty, '')[0].group).toBe('completed')
+  })
+
+  it('keeps unread terminal results visible without claiming unknown or failed runs succeeded', () => {
+    const session = { ...projects[0].sessions[0], externalSessionId: 'native-id' }
+    const source = [{ ...projects[0], conversations: [], sessions: [session] }]
+    const unread = new Set([sessionAttentionKey({ providerId: session.providerId, cwd: source[0].cwd, sessionId: 'native-id' })])
+    for (const lastRunOutcome of [undefined, 'failed', 'cancelled', 'interrupted'] as const) {
+      const catalog = [{ ...source[0], sessions: [{ ...session, lastRunOutcome }] }]
+      const rows = sidebarActivity(catalog, empty, empty, '', [], unread)
+      expect(rows).toHaveLength(1)
+      expect(rows[0].group).toBe('updates')
+      expect(sidebarActivity(catalog, empty, empty, '', [], empty)).toEqual([])
+      expect(sidebarActivity(catalog, new Set(['run-a']), empty, '', [], unread)[0].group).toBe('working')
+      expect(sidebarActivity(catalog, new Set(['run-a']), new Set(['run-a']), '', [], unread)[0].group).toBe('attention')
+      expect(sidebarActivity(catalog, empty, empty, 'missing', [], unread)).toEqual([])
+      expect(sidebarActivity([{ ...catalog[0], sessions: [{ ...catalog[0].sessions[0], archivedAt: 1 }] }], empty, empty, '', [], unread)).toEqual([])
+      for (const change of [{ providerId: 'pi' }, { agentProfileId: 'work' }, { externalSessionId: 'another' }] as const) {
+        expect(sidebarActivity([{ ...catalog[0], sessions: [{ ...catalog[0].sessions[0], ...change }] }], empty, empty, '', [], unread)).toEqual([])
+      }
+      expect(sidebarActivity([{ ...catalog[0], cwd: '/another' }], empty, empty, '', [], unread)).toEqual([])
+    }
+    expect(sidebarActivity(source, empty, empty, '', [], unread)[0].group).toBe('completed')
+    expect(sidebarActivity(source, empty, empty, '', [], empty)[0].group).toBe('completed')
   })
 
   it('preserves catalog reordering without changing task identities', () => {

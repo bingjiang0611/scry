@@ -20,6 +20,7 @@ import { exerciseSessionModels } from './session-models-ui-check.mjs'
 import { exerciseOverviewDensity } from './session-overview-ui-check.mjs'
 import { exercisePiPermission } from './pi-permission-ui-check.mjs'
 import { exerciseSidebarActivity } from './sidebar-activity-ui-checks.mjs'
+import { exerciseSidebarUnreadResults } from './sidebar-unread-results-ui-checks.mjs'
 import { exerciseWorkspaceDiff } from './workspace-diff-ui-checks.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -101,6 +102,8 @@ try {
           win.setSize(1100, 760)
           await win.loadFile(${JSON.stringify(join(temp, 'sidebar-activity.html'))})
           result.sidebarActivity = await (${exerciseSidebarActivity.toString()})(win.webContents, ${JSON.stringify(process.env.SCRY_SIDEBAR_ACTIVITY_SCREENSHOT ?? '')})
+          await win.loadFile(${JSON.stringify(join(temp, 'sidebar-activity.html'))})
+          result.sidebarUnreadResults = await (${exerciseSidebarUnreadResults.toString()})(win.webContents)
           if (${sidebarActivityOnly}) { finish(result); return }
         }
         if (${fixtures.includes('session-cache')}) {

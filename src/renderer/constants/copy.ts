@@ -158,13 +158,16 @@ export const OVERVIEW_COST_COPY = {
 
 export const SESSION_DRAFT_LABEL = '草稿'
 
+export { SIDEBAR_SESSION_COPY, SIDEBAR_PROJECT_COPY } from './sidebar-copy'
+
 export const SIDEBAR_ACTIVITY_COPY = {
   navigation: '侧栏视图',
   projects: '项目',
   activity: '动态',
-  scope: '本机任务：需要回复、进行中和明确完成的任务；其他会话请在项目中查看',
+  scope: '本机任务：需要回复、进行中、待查看的新结果和明确完成的任务；其他会话请在项目中查看',
   attention: '需要回复',
   working: '进行中',
+  updates: '待查看',
   completed: '已完成',
   empty: '暂无匹配的任务，其他会话请在「项目」中查看',
   overflow: (count: number) => `另有 ${count} 条，请搜索定位`

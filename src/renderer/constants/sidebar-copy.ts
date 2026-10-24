@@ -1,0 +1,42 @@
+export const SIDEBAR_SESSION_COPY = {
+  providers: { claude: 'Claude', codex: 'Codex', qoder: 'Qoder', opencode: 'OpenCode', pi: 'Pi' },
+  legacy: '历史?',
+  noPreview: '(无预览)',
+  unread: '有新结果，未查看',
+  waiting: '等待你的回答',
+  answer: '待回答',
+  running: '正在运行',
+  actions: '会话操作',
+  moreGlyph: '···',
+  sessionActions: (preview: string) => `会话操作：${preview || '(无预览)'}`,
+  unpin: '取消置顶',
+  pin: '置顶会话',
+  pinSession: (preview: string, pinned: boolean) => `${pinned ? '取消置顶' : '置顶会话'}：${preview || '(无预览)'}`,
+  archiveRunning: '存档并停止运行，取消排队消息',
+  archive: '存档会话（取消排队消息）',
+  archiveSession: (preview: string) => `存档会话：${preview || '(无预览)'}`
+} as const
+
+export const SIDEBAR_PROJECT_COPY = {
+  pinned: '置顶',
+  projects: '项目',
+  noProjects: '暂无项目',
+  noMatches: '无匹配项目或会话',
+  noSessions: '暂无会话',
+  noSessionMatches: '无匹配会话',
+  sessionsPinned: '会话已置顶',
+  projectLabel: (name: string, cwd: string) => `${name} · ${cwd || '未关联工作目录'}`,
+  newChat: (name: string) => `在 ${name} 中新建会话`,
+  newChatLabel: (name: string, cwd: string) => `在 ${name} 中新建会话 · ${cwd}`,
+  manage: (name: string) => `管理项目 ${name}`,
+  manageLabel: (name: string, cwd: string) => `管理项目 ${name} · ${cwd}`,
+  moreGlyph: '···',
+  closeGlyph: '×',
+  rename: '编辑项目名称',
+  removeTitle: (name: string) => `移除“${name}”？`,
+  displayName: '显示名称',
+  cancel: '取消',
+  save: '保存',
+  remove: '移除项目',
+  removeHint: '只会移除 Scry 中的项目入口，不会删除目录、Git 仓库、会话历史或分析数据。'
+} as const

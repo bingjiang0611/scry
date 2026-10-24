@@ -1,10 +1,11 @@
 import type { ConversationSummary } from '@shared/conversation-api'
+import { sessionAttentionKey } from '@shared/session-attention'
 import type { ProjectMeta, SessionMeta } from './env'
 import type { RemoteSessionRef } from '@shared/desktop-remote'
 import type { RemoteProjectGroup } from './components/SidebarRemoteProjects'
 import { SIDEBAR_ACTIVITY_COPY as copy } from './constants/copy'
 
-export type ActivityGroup = 'attention' | 'working' | 'completed'
+export type ActivityGroup = 'attention' | 'working' | 'updates' | 'completed'
 export type ActivityEntry = {
   key: string
   group: ActivityGroup
@@ -17,6 +18,7 @@ export type ActivityEntry = {
 export const activityGroups: { id: ActivityGroup; label: string }[] = [
   { id: 'attention', label: copy.attention },
   { id: 'working', label: copy.working },
+  { id: 'updates', label: copy.updates },
   { id: 'completed', label: copy.completed }
 ]
 
@@ -25,7 +27,8 @@ export function sidebarActivity(
   runningRunIds: ReadonlySet<string>,
   waitingQuestionRunIds: ReadonlySet<string>,
   query: string,
-  remoteProjects: readonly RemoteProjectGroup[] = []
+  remoteProjects: readonly RemoteProjectGroup[] = [],
+  unreadSessionKeys: ReadonlySet<string> = new Set()
 ): ActivityEntry[] {
   const entries: ActivityEntry[] = []
   const needle = query.trim().toLocaleLowerCase()
@@ -43,7 +46,11 @@ export function sidebarActivity(
     }
     for (const session of project.sessions) {
       if (session.archivedAt || !matches(session.preview)) continue
-      const status = group(session.runId, session.lastRunOutcome)
+      // The same unread evidence powers the project-list blue dot. It proves a new
+      // result needs review, not success: older catalogs can lack an outcome.
+      const unread = unreadSessionKeys.has(sessionAttentionKey({ providerId: session.providerId,
+        agentProfileId: session.agentProfileId, cwd: project.cwd, sessionId: session.externalSessionId ?? session.sessionId }))
+      const status = group(session.runId, session.lastRunOutcome) ?? (unread ? 'updates' : undefined)
       if (status) entries.push({ key: `session:${JSON.stringify([project.cwd, session.providerId, session.agentProfileId, session.sessionId])}`,
         kind: 'session', project, session, group: status })
     }

@@ -5,21 +5,19 @@ import { relTime } from '../format'
 import { sidebarActivity } from '../sidebar-activity'
 import { SIDEBAR_ACTIVITY_COPY as activityCopy } from '../constants/copy'
 import { SidebarActivity } from './SidebarActivity'
+import { SessionRow } from './SidebarSessionRow'
+import { SidebarProjects } from './SidebarProjects'
+import { ProjectDialog } from './SidebarProjectDialog'
 import type { BackgroundWork } from '@shared/background-work'
 import type { ConversationSummary } from '@shared/conversation-api'
 import { sessionAttentionKey } from '@shared/session-attention'
-import { backgroundWorkStatus } from '../background-work-status'
 import { Icon } from './primitives/Icon'
-import { ModalCloseButton } from './primitives/ModalCloseButton'
-import { MODAL_COPY } from '../constants/copy'
-import { ModalFrame } from './Modals'
 import type { ProjectMeta, SessionMeta } from '../env'
 import type { SessionProviderId } from '@shared/provider'
 import type { CatalogHealth } from '@shared/provider'
 import { sessionMatchesSelection } from '../session-selection'
 import { SessionRenameMenu, type SessionMenuTarget } from './SessionRename'
-import { SessionHoverProvider, useSessionHoverCard } from './SessionHoverCard'
-import { ProviderGlyph } from './ProviderGlyph'
+import { SessionHoverProvider } from './SessionHoverCard'
 import { composerDraftKey, type ComposerDraftStore } from '../composer-drafts'
 import { SessionDraftIndicator } from './SessionDraftIndicator'
 import type { RemoteSessionRef } from '@shared/desktop-remote'
@@ -27,17 +25,6 @@ import { SidebarRemoteProjects, useRemoteProjectGroups, type ActiveRemoteLocatio
 
 const sessionKey = (cwd: string, session: SessionMeta): string =>
   `${cwd}:${session.providerId}:${session.agentProfileId ?? ''}:${session.sessionId}`
-
-// 会话行的 Provider 身份用真实品牌字形呈现（见 codex-alignment.css 的 .sb-provider mask）；
-// 这里保留可访问名，legacy_unknown 无品牌，仍用「历史?」文字。
-const providerDisplayName: Record<SessionProviderId, string> = {
-  claude: 'Claude',
-  codex: 'Codex',
-  qoder: 'Qoder',
-  opencode: 'OpenCode',
-  pi: 'Pi',
-  legacy_unknown: '历史会话'
-}
 
 export const Sidebar = memo(function Sidebar({
   id,
@@ -139,8 +126,8 @@ export const Sidebar = memo(function Sidebar({
   const remoteGroups = useRemoteProjectGroups(q)
   const showRemote = Boolean(onPickRemoteSession && onNewRemoteProjectChat) && remoteGroups.length > 0
   const activity = useMemo(() => view === 'activity'
-    ? sidebarActivity(projects, runningRunIds, waitingQuestionRunIds, q, showRemote ? remoteGroups : []) : [],
-  [view, projects, runningRunIds, waitingQuestionRunIds, q, showRemote, remoteGroups])
+    ? sidebarActivity(projects, runningRunIds, waitingQuestionRunIds, q, showRemote ? remoteGroups : [], unreadSessionKeys) : [],
+  [view, projects, runningRunIds, waitingQuestionRunIds, q, showRemote, remoteGroups, unreadSessionKeys])
   const tabId = `${id ?? 'sidebar'}-view`
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [projectMenu, setProjectMenu] = useState<{ project: ProjectMeta; left: number; top: number } | null>(null)
@@ -167,43 +154,6 @@ export const Sidebar = memo(function Sidebar({
       document.removeEventListener('keydown', dismissEscape)
     }
   }, [projectMenu])
-  const ql = q.trim().toLowerCase()
-  const { pinned, filtered } = useMemo(() => {
-    const matches = (session: SessionMeta): boolean => !ql || session.preview.toLowerCase().includes(ql)
-    // 置顶会话跨项目平铺，从原项目分组里移出；行内带项目名。
-    const pinned = projects
-      .flatMap((project) => project.sessions
-        .filter((session) => session.pinnedAt && matches(session))
-        .map((session) => ({ session, cwd: project.cwd, name: project.name })))
-      .sort((a, b) => (b.session.pinnedAt ?? 0) - (a.session.pinnedAt ?? 0))
-    const pinnedRows = [
-      ...pinned.map(row => ({ kind: 'native' as const, ...row, pinnedAt: row.session.pinnedAt ?? 0 })),
-      ...projects.flatMap(project => (project.conversations ?? []).filter(conversation => conversation.pinnedAt && !conversation.archivedAt &&
-        (!ql || conversation.title.toLowerCase().includes(ql) || project.cwd.toLowerCase().includes(ql)))
-        .map(conversation => ({ kind: 'conversation' as const, conversation, pinnedAt: conversation.pinnedAt ?? 0 })))
-    ].sort((a, b) => b.pinnedAt - a.pinnedAt)
-    const filtered = projects
-      .map((project) => ({
-        ...project,
-        totalSessions: project.sessions.length + (project.conversations?.filter(conversation => !conversation.archivedAt).length ?? 0),
-        conversations: (project.conversations ?? []).filter((conversation) => !conversation.pinnedAt && !conversation.archivedAt && (!ql || conversation.title.toLowerCase().includes(ql) || project.cwd.toLowerCase().includes(ql))),
-        projectMatch: !ql || project.name.toLowerCase().includes(ql) || project.cwd.toLowerCase().includes(ql),
-        sessions: project.sessions.filter((session) => !session.pinnedAt && matches(session))
-      }))
-      .filter((project) => project.projectMatch || project.sessions.length > 0 || project.conversations.length > 0)
-    return { pinned: pinnedRows, filtered }
-  }, [projects, ql])
-  // Match local project ordering: named roots, explicit pins, then recent activity.
-  // Remote projects must not live in a separate tail section below every local root.
-  const projectGroups = [
-    ...filtered.map((project) => ({ kind: 'local' as const, project, cwd: project.cwd, pinnedAt: project.pinnedAt, mtime: project.mtime })),
-    ...(showRemote ? remoteGroups.map((project) => ({ kind: 'remote' as const, project, cwd: project.cwd, pinnedAt: undefined, mtime: project.mtime })) : [])
-  ].sort((a, b) =>
-    Number(!a.cwd) - Number(!b.cwd) ||
-    Number(Boolean(b.pinnedAt)) - Number(Boolean(a.pinnedAt)) ||
-    (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0) ||
-    b.mtime - a.mtime
-  )
   const isActive = (cwd: string, session: SessionMeta): boolean => sessionMatchesSelection(cwd, session, {
     cwd: activeCwd,
     sessionId: activeSessionId,
@@ -218,6 +168,16 @@ export const Sidebar = memo(function Sidebar({
       top: Math.max(8, Math.min(rect.top - 8, window.innerHeight - 292))
     })
   }
+  const renderSession = (cwd: string, session: SessionMeta, projectName: string, showProjectName = false) => <SessionRow
+    key={sessionKey(cwd, session)} cwd={cwd} session={session} projectName={projectName} showProjectName={showProjectName}
+    relativeTime={relTime(session.mtime)} draftStore={draftStore} active={isActive(cwd, session)}
+    running={Boolean(session.runId && runningRunIds.has(session.runId))}
+    waitingForAnswer={Boolean(session.runId && waitingQuestionRunIds.has(session.runId))}
+    unread={unreadSessionKeys.has(sessionAttentionKey({ providerId: session.providerId,
+      agentProfileId: session.agentProfileId, cwd, sessionId: session.externalSessionId ?? session.sessionId }))}
+    backgroundWork={session.runId ? backgroundWorkByRun[session.runId] : undefined}
+    onPick={onPick} onTogglePin={onTogglePin} onArchive={onArchive}
+    onMenu={onRenameSession ? openSessionMenu : undefined} />
   const renderConversation = (conversation: ConversationSummary) => <div className="sb-sess-row" key={conversation.id}>
     <button className={`sb-sess${activeConversationId === conversation.id ? ' active' : ''}`} aria-current={activeConversationId === conversation.id ? 'true' : undefined} onClick={() => onPickConversation?.(conversation)} data-conversation-id={conversation.id}>
       <span className="sb-session-main">
@@ -317,151 +277,17 @@ export const Sidebar = memo(function Sidebar({
               draftStore={draftStore} layout="activity" active={activeRemote} collapsed={collapsed} onToggle={toggle}
               onPickSession={onPickRemoteSession!} onNewProjectChat={onNewRemoteProjectChat!}
               onArchiveSession={onArchiveRemoteSession} onArchivedSession={onArchivedRemoteSession} />
-            : <SessionRow cwd={entry.project.cwd} projectName={entry.project.name} session={entry.session} draftStore={draftStore}
-              relativeTime={relTime(entry.session.mtime)}
-              active={isActive(entry.project.cwd, entry.session)}
-              running={Boolean(entry.session.runId && runningRunIds.has(entry.session.runId))}
-              waitingForAnswer={Boolean(entry.session.runId && waitingQuestionRunIds.has(entry.session.runId))}
-              unread={unreadSessionKeys.has(sessionAttentionKey({ providerId: entry.session.providerId,
-                agentProfileId: entry.session.agentProfileId, cwd: entry.project.cwd,
-                sessionId: entry.session.externalSessionId ?? entry.session.sessionId }))}
-              backgroundWork={entry.session.runId ? backgroundWorkByRun[entry.session.runId] : undefined}
-              onPick={onPick} onTogglePin={onTogglePin} onArchive={onArchive}
-              onMenu={onRenameSession ? openSessionMenu : undefined} />}
+            : renderSession(entry.project.cwd, entry.session, entry.project.name)}
           />
         </> : <>
-        {pinned.length > 0 && (
-          <>
-            <div className="sb-section">置顶</div>
-            <div className="sb-pinned">
-              {pinned.map(row => {
-                if (row.kind === 'conversation') return renderConversation(row.conversation)
-                const { session, cwd, name } = row
-                return <SessionRow
-                  key={sessionKey(cwd, session)}
-                  session={session}
-                  relativeTime={relTime(session.mtime)}
-                  draftStore={draftStore}
-                  cwd={cwd}
-                  projectName={name}
-                  showProjectName
-                  active={isActive(cwd, session)}
-                  running={Boolean(session.runId && runningRunIds.has(session.runId))}
-                  waitingForAnswer={Boolean(session.runId && waitingQuestionRunIds.has(session.runId))}
-                  unread={unreadSessionKeys.has(sessionAttentionKey({
-                    providerId: session.providerId,
-                    agentProfileId: session.agentProfileId,
-                    cwd,
-                    sessionId: session.externalSessionId ?? session.sessionId
-                  }))}
-                  backgroundWork={session.runId ? backgroundWorkByRun[session.runId] : undefined}
-                  onPick={onPick}
-                  onTogglePin={onTogglePin}
-                  onArchive={onArchive}
-                  onMenu={onRenameSession ? openSessionMenu : undefined}
-                />
-              })}
-            </div>
-            <div className="sb-divider" />
-          </>
-        )}
-        <div className="sb-section sb-project-section">项目</div>
-        {filtered.length === 0 && pinned.length === 0 && !showRemote && (
-          <div className="sb-empty">{projects.length === 0 ? '暂无项目' : '无匹配项目或会话'}</div>
-        )}
-        {projectGroups.map((group) => {
-          if (group.kind === 'remote') return (
-            <SidebarRemoteProjects
-              key={group.project.key}
-              groups={[group.project]}
-              draftStore={draftStore}
-              active={activeRemote}
-              collapsed={collapsed}
-              onToggle={toggle}
-              onPickSession={onPickRemoteSession!}
-              onNewProjectChat={onNewRemoteProjectChat!}
-              onArchiveSession={onArchiveRemoteSession}
-              onArchivedSession={onArchivedRemoteSession}
-            />
-          )
-          const p = group.project
-          const open = !collapsed.has(p.cwd)
-          const active = p.cwd ? p.cwd === activeCwd : activeCwd == null
-          const projectSelected = active && activeSessionId == null
-          const emptyLabel = p.totalSessions === 0 ? '暂无会话' : ql ? '无匹配会话' : '会话已置顶'
-          return (
-            <div key={p.cwd} className={`sb-proj ${open ? 'open' : ''}`}>
-              <div className={`sb-proj-row ${projectSelected ? 'active' : ''}`}>
-                <button
-                  type="button"
-                  className={`sb-proj-head ${projectSelected ? 'on' : ''}`}
-                  aria-label={p.cwd ? `${p.name} · ${p.cwd}` : `${p.name} · 未关联工作目录`}
-                  aria-expanded={open}
-                  data-project-path={p.cwd}
-                  onClick={() => toggle(p.cwd)}
-                >
-                  <Icon name="folder" className="sb-project-folder" />
-                  <span className="pname">{p.name}</span>
-                  {p.pinnedAt && <Icon name="pin" className="sb-project-pin" />}
-                </button>
-                {p.cwd && onNewProjectChat && (
-                  <span className="sb-proj-acts">
-                    <button
-                      type="button"
-                      className="sb-proj-act sb-proj-new"
-                      title={`在 ${p.name} 中新建会话`}
-                      aria-label={`在 ${p.name} 中新建会话 · ${p.cwd}`}
-                      onClick={() => onNewProjectChat(p.cwd)}
-                    >
-                      <Icon name="plus" />
-                    </button>
-                    <button
-                      type="button"
-                      className="sb-proj-act sb-proj-more"
-                      title={`管理项目 ${p.name}`}
-                      aria-label={`管理项目 ${p.name} · ${p.cwd}`}
-                      onClick={(event) => openProjectMenu(event, p)}
-                    >
-                      ···
-                    </button>
-                  </span>
-                )}
-              </div>
-              {open && (
-                <div className="sb-sess-list">
-                  {p.conversations.sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0)).map(renderConversation)}
-                  {p.sessions.map((s) => (
-                    <SessionRow
-                      key={sessionKey(p.cwd, s)}
-                      session={s}
-                      relativeTime={relTime(s.mtime)}
-                      draftStore={draftStore}
-                      cwd={p.cwd}
-                      projectName={p.name}
-                      active={isActive(p.cwd, s)}
-                      running={Boolean(s.runId && runningRunIds.has(s.runId))}
-                      waitingForAnswer={Boolean(s.runId && waitingQuestionRunIds.has(s.runId))}
-                      unread={unreadSessionKeys.has(sessionAttentionKey({
-                        providerId: s.providerId,
-                        agentProfileId: s.agentProfileId,
-                        cwd: p.cwd,
-                        sessionId: s.externalSessionId ?? s.sessionId
-                      }))}
-                      backgroundWork={s.runId ? backgroundWorkByRun[s.runId] : undefined}
-                      onPick={onPick}
-                      onTogglePin={onTogglePin}
-                      onArchive={onArchive}
-                      onMenu={onRenameSession ? openSessionMenu : undefined}
-                    />
-                  ))}
-                  {p.sessions.length === 0 && p.conversations.length === 0 && (
-                    <div className="sb-project-empty">{emptyLabel}</div>
-                  )}
-                </div>
-              )}
-            </div>
-          )
-        })}
+          <SidebarProjects projects={projects} q={q} remoteGroups={remoteGroups} showRemote={showRemote}
+            activeCwd={activeCwd} activeSessionId={activeSessionId} collapsed={collapsed} toggle={toggle}
+            onNewProjectChat={onNewProjectChat} openProjectMenu={openProjectMenu}
+            renderSession={renderSession} renderConversation={renderConversation}
+            renderRemoteProject={(project) => <SidebarRemoteProjects key={project.key} groups={[project]}
+              draftStore={draftStore} active={activeRemote} collapsed={collapsed} onToggle={toggle}
+              onPickSession={onPickRemoteSession!} onNewProjectChat={onNewRemoteProjectChat!}
+              onArchiveSession={onArchiveRemoteSession} onArchivedSession={onArchivedRemoteSession} />} />
         </>}
       </div></SessionHoverProvider>
 
@@ -553,178 +379,5 @@ export const Sidebar = memo(function Sidebar({
         </div>
       )}
     </aside>
-  )
-})
-
-function ProjectDialog({
-  mode,
-  project,
-  onClose,
-  onRename,
-  onRemove
-}: {
-  mode: 'rename' | 'remove'
-  project: ProjectMeta
-  onClose: () => void
-  onRename: (name: string) => void | Promise<void>
-  onRemove: () => void | Promise<void>
-}) {
-  const [name, setName] = useState(project.name)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const titleId = `project-dialog-${mode}`
-  return (
-    <ModalFrame labelledBy={titleId} initialFocusRef={mode === 'rename' ? inputRef : undefined} className="project-dialog" onClose={onClose}>
-      <div className="modal-head">
-        <b id={titleId}>{mode === 'rename' ? '编辑项目名称' : `移除“${project.name}”？`}</b>
-        <ModalCloseButton aria-label={MODAL_COPY.close} onClick={onClose}>×</ModalCloseButton>
-      </div>
-      {mode === 'rename' ? (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault()
-            const next = name.trim()
-            if (next) void onRename(next)
-          }}
-        >
-          <div className="project-dialog-body">
-            <label>
-              <span>显示名称</span>
-              <input ref={inputRef} value={name} maxLength={120} onChange={(event) => setName(event.target.value)} />
-            </label>
-            <code>{project.cwd}</code>
-          </div>
-          <div className="project-dialog-actions">
-            <button type="button" className="btn" onClick={onClose}>取消</button>
-            <button type="submit" className="btn primary" disabled={!name.trim()}>保存</button>
-          </div>
-        </form>
-      ) : (
-        <>
-          <div className="project-dialog-body">
-            <p>只会移除 Scry 中的项目入口，不会删除目录、Git 仓库、会话历史或分析数据。</p>
-            <code>{project.cwd}</code>
-          </div>
-          <div className="project-dialog-actions">
-            <button type="button" className="btn" onClick={onClose}>取消</button>
-            <button type="button" className="btn project-remove-confirm" onClick={() => void onRemove()}>移除项目</button>
-          </div>
-        </>
-      )}
-    </ModalFrame>
-  )
-}
-
-// 行是 wrapper + 内部 button：会话按钮里不能再嵌按钮，操作区必须是它的兄弟节点。
-const SessionRow = memo(function SessionRow({
-  session,
-  cwd,
-  projectName,
-  showProjectName = false,
-  active,
-  running,
-  waitingForAnswer,
-  unread,
-  backgroundWork,
-  draftStore,
-  onPick,
-  onTogglePin,
-  onArchive,
-  onMenu
-}: {
-  session: SessionMeta
-  // Invalidate memo on parent refreshes; local hover/focus renders also refresh the age below.
-  relativeTime: string
-  cwd: string
-  projectName?: string
-  showProjectName?: boolean
-  active: boolean
-  running: boolean
-  waitingForAnswer: boolean
-  unread: boolean
-  backgroundWork?: BackgroundWork
-  draftStore?: ComposerDraftStore
-  onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string) => void
-  onTogglePin: (cwd: string, session: SessionMeta) => void
-  onArchive: (cwd: string, session: SessionMeta) => void
-  onMenu?: (event: ReactMouseEvent<HTMLButtonElement>, cwd: string, session: SessionMeta) => void
-}) {
-  const pinned = Boolean(session.pinnedAt)
-  const status = running ? backgroundWorkStatus(backgroundWork) : undefined
-  const hover = useSessionHoverCard(session, cwd, projectName, running, status?.label)
-  return (
-    <div className="sb-sess-row">
-      <button
-        type="button"
-        className={['sb-sess', active && 'active', running && 'running', waitingForAnswer && 'waiting-answer', unread && 'unread'].filter(Boolean).join(' ')}
-        data-provider={session.providerId}
-        {...hover.triggerProps}
-        aria-current={active ? 'true' : undefined}
-        onContextMenu={onMenu ? (event) => { hover.dismiss(); onMenu(event, cwd, session) } : undefined}
-        onClick={() => {
-          hover.dismiss()
-          onPick(
-            cwd,
-            session.sessionId,
-            session.providerId,
-            session.externalSessionId,
-            running ? session.runId : undefined,
-            session.agentProfileId
-          )
-        }}
-      >
-        <span className="sb-session-main">
-          {session.providerId === 'legacy_unknown' ? (
-            <span className="sb-provider" data-provider="legacy_unknown">历史?</span>
-          ) : (
-            <ProviderGlyph
-              className="sb-provider"
-              provider={session.providerId}
-              label={providerDisplayName[session.providerId]}
-            />
-          )}
-          {draftStore && <SessionDraftIndicator store={draftStore} draftKey={composerDraftKey({
-            providerId: session.providerId, agentProfileId: session.agentProfileId, cwd,
-            sessionId: session.externalSessionId ?? session.sessionId
-          })} />}
-          <span className="sb-sesstext">{session.preview || '(无预览)'}</span>
-        </span>
-        <span className="sb-session-meta">
-          {!waitingForAnswer && <span className="sb-sesstime">{relTime(session.mtime)}</span>}
-          {unread && !waitingForAnswer && <span className="sb-unread" role="status" aria-label="有新结果，未查看" title="有新结果，未查看" />}
-          {waitingForAnswer && (
-            <span className="sb-question-pending" role="status" aria-label="等待你的回答" title="等待你的回答">
-              <Icon name="message" /> 待回答
-            </span>
-          )}
-          {showProjectName && projectName && <span className="sb-sess-proj">{projectName}</span>}
-        </span>
-        {running && !waitingForAnswer && <span className="sb-running" role="status" data-background-waiting={status?.waiting || undefined} aria-label={status?.label ?? '正在运行'} title={status?.label ?? '正在运行'} />}
-      </button>
-      {hover.tooltip}
-      <span className="sb-sess-acts" onMouseEnter={hover.dismiss} onFocus={hover.dismiss}>
-        {onMenu && <button type="button" className="sb-act" aria-haspopup="menu"
-          title="会话操作" aria-label={`会话操作：${session.preview || '(无预览)'}`}
-          onClick={(event) => onMenu(event, cwd, session)}>···</button>}
-        <button
-          type="button"
-          className={`sb-act ${pinned ? 'on' : ''}`}
-          title={pinned ? '取消置顶' : '置顶会话'}
-          aria-label={pinned ? `取消置顶：${session.preview || '(无预览)'}` : `置顶会话：${session.preview || '(无预览)'}`}
-          aria-pressed={pinned}
-          onClick={() => onTogglePin(cwd, session)}
-        >
-          <Icon name="pin" />
-        </button>
-        <button
-          type="button"
-          className="sb-act"
-          title={running ? '存档并停止运行，取消排队消息' : '存档会话（取消排队消息）'}
-          aria-label={`存档会话：${session.preview || '(无预览)'}`}
-          onClick={() => onArchive(cwd, session)}
-        >
-          <Icon name="archive" />
-        </button>
-      </span>
-    </div>
   )
 })
