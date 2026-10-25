@@ -7,6 +7,7 @@ import { defaultRepeats, measured, repeatCounters, writeCollector } from '../per
 import { FileWorkflowStore, MemoryWorkflowStore } from '../../src/main/workflow-store'
 import { WorkflowService, type WorkflowServiceOptions } from '../../src/main/workflow-service'
 import type { WorkflowBlock } from '../../src/shared/workflow'
+import { workflowFrameId } from '../../src/main/workflow-frames'
 import { makePlanPreview, validateWorkflowProgram, workflowRevision } from '../../src/main/workflow-program'
 import { WorkflowSystemHost } from '../../src/main/workflow-system-host'
 import { WorkflowSlots } from '../../src/main/workflow-slots'
@@ -116,6 +117,51 @@ async function revisionWorkload(extraObservation = false, changedCall = false) {
   } finally { observe.mockRestore(); service.close(); await rm(directory, { recursive: true, force: true }) }
 }
 
+async function sequenceWorkload(extraPublication = false) {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'scry-sequence-counter-'))), source = join(directory, 'source'), data = join(directory, 'data')
+  await mkdir(source)
+  await writeFile(join(source, 'input'), 'x')
+  const store = new FileWorkflowStore(data), host = new WorkflowSystemHost(join(directory, 'replicas'), store, () => ({}))
+  let publications = 0, added = false
+  const save = store.saveFrame.bind(store), saveValue = store.saveFrameWithValue.bind(store)
+  const frameSpy = vi.spyOn(store, 'saveFrame').mockImplementation(async (input, expected) => {
+    const result = await save(input, expected)
+    if (input.nodeId === 'root') {
+      publications++
+      if (extraPublication && !added) {
+        added = true
+        const { revision, ...next } = result
+        return store.saveFrame(next, revision)
+      }
+    }
+    return result
+  })
+  const valueSpy = vi.spyOn(store, 'saveFrameWithValue').mockImplementation(async (...args) => {
+    const result = await saveValue(...args)
+    if (args[0].nodeId === 'root') publications++
+    return result
+  })
+  const execute = vi.fn(() => { throw new Error('This pure sequence has no Agent') })
+  const service = new WorkflowService({ store, systems: host, slots: new WorkflowSlots(1), providerRegistered: () => true, runControls,
+    plan: async () => ({ output: JSON.stringify({ body: { kind: 'sequence', blockId: 'root', blocks: [
+      { kind: 'bind', blockId: 'fact', value: { kind: 'literal', value: 'known' } }, { kind: 'return', blockId: 'finish', ref: { nodeId: 'fact' } }
+    ] } }) }), execute })
+  try {
+    const preview = await service.planCommand({ workspace: source, command: '/scry-workflow run sequence publication', orchestrator: { role: 'orchestrator', providerId: 'claude' }, roles: [] })
+    const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }
+    await service.approve(approval)
+    expect((await service.start(preview.workflowId, approval)).state).toBe('completed')
+    expect(execute).not.toHaveBeenCalled()
+    const cold = new FileWorkflowStore(data)
+    const parent = await cold.loadFrame(preview.workflowId, workflowFrameId('root', ['revision:' + preview.programRevision]))
+    expect(parent).toMatchObject({ phase: 'completed', cursor: 2 })
+    expect(parent!.children).toHaveLength(2)
+    expect(await cold.loadValue(preview.workflowId, parent!.resultRef!)).toMatchObject({ state: 'known', value: 'known' })
+    for (const child of parent!.children!) expect(await cold.loadValue(preview.workflowId, child.resultRef)).toMatchObject({ state: 'known', value: 'known' })
+    return publications
+  } finally { frameSpy.mockRestore(); valueSpy.mockRestore(); service.close(); await rm(directory, { recursive: true, force: true }) }
+}
+
 describe('native result fixed workload', () => {
   it('counts flushed native-value writes through the canonical Service and FileStore', async () => {
     const durations: number[] = []
@@ -155,5 +201,16 @@ describe('native result fixed workload', () => {
 
   it('observes an extra real scan without excluding dispatch observations', async () => {
     expect(await revisionWorkload(true, true)).toBe(await revisionWorkload(false, true) + 1)
+  })
+
+  it('counts durable parent publications with cold child/result readback', async () => {
+    const counters = await repeatCounters(defaultRepeats, async () => ({ publications: await sequenceWorkload() }))
+    writeCollector('workflow-sequence', [measured({ scenario: 'workflow.sequence-completion', metric: 'io.parent-frame.publications', layer: 'io', unit: 'count',
+      workload: 'source-files=1;source-bytes=1;roots=1;sequence-children=2;agent-attempts=0;store=file',
+      source: 'completed production FileStore parent frame checkpoints on the canonical Service with cold result and both child-reference validation' }, counters.publications)])
+  })
+
+  it('counts a deliberately added real CAS-valid parent publication', async () => {
+    expect(await sequenceWorkload(true)).toBe(await sequenceWorkload() + 1)
   })
 })
