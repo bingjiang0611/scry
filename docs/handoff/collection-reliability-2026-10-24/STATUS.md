@@ -14,8 +14,8 @@
 | M5 | 回退链路超时与三重处理 | C1 | 已核验 | [C 报告](reports/C.md) | 红测 2→通过；curl 回退只发一次请求并持久入 inbox；VC1：rc=7（stale socket）恢复直写并拉起 daemon，2 失败→通过；Linux 全量无新增失败；需 repair + restart |
 | L1 | 长路径下快路径失效 | C2 | 已核验 | [C 报告](reports/C.md) | 红测 2→通过；发布实际 socket 路径，stale hint 安全；VC2 已加 `-O` 属主检查；需 repair + restart |
 | M6 | 子目录启动找不到 hook 脚本 | C3 | 已核验 | [C 报告](reports/C.md) | 红测 9→通过（fixture 范围）；需 repair 并重启 Provider；待用户按 C-U2 实测，另需在多仓库工作区的子仓库内启动一次 |
-| D1 | 发现深度之外的子仓库静默缺席 | D1 | 待核验 | [D 报告](reports/D.md) | `d1321fe5` 3 失败→`acddcc75` 修复；深度截断保留原因，doctor 有界下一层探测；默认深度不变 |
-| D2 | 每轮仓库清单与快照状态可见性 | D2 | 待核验 | [D 报告](reports/D.md) | `8b82f9cd` 10 失败→`0febe9e7` 修复；清单/逐仓库结果、用户级 bridge 日志、入口 unset；最终 focused 569 通过，全量 2 项原有超时见报告；需 repair + restart，待用户手验 |
+| D1 | 发现深度之外的子仓库静默缺席 | D1 | 需修改 | [D 报告](reports/D.md) | 红测 3→通过；VD1：边界目录计数让几乎所有 record 变 partial、doctor 恒 warn（规格问题，待用户选方案）；VD2：恢复拆分时删除的证据注释 |
+| D2 | 每轮仓库清单与快照状态可见性 | D2 | 已核验 | [D 报告](reports/D.md) | 红测 10→通过；同毫秒多仓库快照不再合并，requestedRoot/repoRoot 分离；用户级 bridge_not_found 独立告警；入口无条件 unset 标记；需 repair + restart |
 | H3 | daemon env 串会话（显式 UPLOAD_ENABLED=0 时会误 ACK） | E1 | 未开始 | | 用户 2026-10-25 已确认 uploader 语义，见 E.md |
 | M2 | commit hook 队头阻塞无死信 | E3 | 未开始 | | 2026-10-25 重新升为必做：新 uploader 在哈希不符、路径不符、源文件缺失时持续返回非 0，recorder 会永久停在该 sequence（`store.ts:515-521`），见 E.md |
 | M3 | ACK 身份绑定 bundle 内容指纹 | E3 | 未开始 | | 降为低优先级（只带来重复校验），可放弃 |

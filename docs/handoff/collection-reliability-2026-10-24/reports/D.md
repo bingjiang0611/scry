@@ -221,3 +221,55 @@ npm run test:unit -- src/core/turn-recorder/repository-snapshots.test.ts src/cor
 - doctor 的 32/128 上限有意限制成本；出现 incomplete 时先显式配置范围或人工检查，完整盘点需另行评估，不自动扩大默认扫描。
 - 未测 Linux、Node 20/22、断电、真实多仓库 timeout 比率或冷启动 L2；L1 8→8 不替代这些验证，不宣称更快。原有全量超时交维护者统一处理，本批不修、不放宽。
 - 未改 trust/fingerprint、ACK、fsync、并发或 uploader；无 main push、PR、发布、日常安装。保留忽略的构建产物和 `/tmp` 日志/脚本；新增 fixture/probe/临时 npm 安装已清理。
+
+## 核验意见（审查方，2026-10-25）
+
+**结论：D2 及两个附项已核验；前置拆分逐声明比对通过，但需要恢复被删掉的注释（VD2）；D1 的语义需要调整（VD1），等用户选定方案。**
+
+### 复跑
+
+- 红测在各自的测试提交上复现：`d1321fe` repository-coverage 3 个失败；`8b82f9c` user-hook-diagnostics、hook-environment、repository-snapshots 共 10 个失败。与报告一致。
+- HEAD `9f408fc` 全量（Linux/Node 22）：8 个失败、3965 个通过、5 个跳过。其中 7 个是此前记录的环境失败。新出现的 1 个是 `desktop-client.test.ts > does not evict recorded runs merely to satisfy receipt capacity`：单独重跑 3 次都通过，D 批次没有改动 `src/main`，它只从 `shared/trace` 引入类型。按「首次失败」如实记录，判断为负载下的偶发，不归因到本批。
+- Recorder Core 独立性：`src/core/turn-recorder/` 下新拆出的文件没有引入 Electron、SQLite 或 Provider SDK。
+
+### 前置拆分的核验方法与结果
+
+我用 TypeScript AST 把拆分前后的顶层声明逐个按名字比对（去掉 `export` 前缀后归一化空白），测试则按 `describe > it` 的标题比对函数体：
+
+- `recorder.ts`、`scry.ts`、`workspace-init.ts`（`ffbc022`）对比 `1e3c269` 的全部新文件：202 个声明中只有 `parseCodexRollout` 有变化，原因是末尾的 skill 注入循环被抽成 `finalizeCodexTurns`，逐行等价。两个同名的 `hookCommand` 哈希一致。**行为没有变化。**
+- `scry.test.ts`（`d1321fe`）对比拆出的 4 个测试文件（`acddcc7`）：41 个测试没有缺失；只有 doctor 健康用例的 checks 列表多了 `repositories.depth`，符合预期。
+- `shared/trace.ts`、`turn-record.ts`（`8b82f9c`）对比 7 个文件（`0febe9e`）：136 个声明没有缺失，变化只出现在 D2 的合同、normalizer 和校验里。
+- 流程问题（记录，不要求返工）：测试文件拆分混进了 D1 修复提交 `acddcc7`，shared 和 README 的拆分混进了 D2 修复提交 `0febe9e`，红测和修复的边界因此不如前几批清楚。以后拆分请单独提交。
+
+### VD2（必改，小）：恢复拆分时删掉的注释
+
+拆分时删掉了 9 行解释证据来源的注释，而且 `parseCodexRollout` 里出现了缩进错乱。CLAUDE.md 要求注释解释证据来源和失败模式，如果是 20 KB 门禁迫使删注释，应该继续拆文件，而不是删注释：
+
+- `parseCodexRollout`：`turn_context` / `token_count` 是 host-authored 事实；只有一个模型时才归因；每轮重建 `CodexUsageDeltaFilter` 的原因；`last_token_usage` 相邻同值帧必须丢弃，否则会高估。
+- `recorder.ts:133`（`ffbc022`）：`// These Provider Stop contracts expose the same-turn continuation flag; do not infer parity.`
+
+用 `git show 1e3c269 | grep -E '^-\s*//'` 与新增注释对比就能找出原文。只恢复注释和缩进，不改代码。
+
+### VD1（需要用户决定）：深度截断几乎让所有 record 都变成 partial
+
+问题出在我写的 D1 规格，执行方是照规格做的。
+
+- `depthLimitedDirectories` 统计的是走到深度边界、没有继续下探的**所有非 Git 目录**，而不是「可能漏掉的仓库」。`init` 默认是 `discover-nested-git`、`maxDepth=2`。
+- 探针（临时，已删除）：一个普通的单仓库，只有 `src/features/auth` 这种三层目录，就得到 `{"repositories":[root],"maxDepth":2,"depthLimitedDirectories":1}`。
+- 结果是几乎所有工作区（包括没有任何嵌套仓库的单仓库）的每一条 record 的 diff 都会被降为 `partial`，`doctor` 的 `repositories.depth` 也永远是 warn。partial 和 warn 因此不再携带信号，下游分析无法再区分「确实可能漏了仓库」和「只是目录比较深」。
+
+推荐方案（A）：
+
+1. record 的 diff 状态**不再因为 `depthLimitedDirectories > 0` 降级**。`diff.discovery.maxDepth` 和 `depthLimitedDirectories` 照常写入，作为覆盖边界的元数据，供分析侧过滤。`omissionReason` 只在有缺失证据时写。
+2. doctor 只有在下一层探测**实际看到 `.git`** 时才 warn，并列出路径。探测不完整但没有发现时保持 pass，detail 写明「下一层探测不完整（32 个目录 / 128 个条目上限）」，不声称已经确认没有。
+3. 原有的红测按新语义调整断言，并在提交说明里写明依据：断言改变是因为规格修订，不是为了变绿。新增两个反例测试：普通的深目录单仓库，record 保持 available，doctor pass；`root/a/b/c/.git`，doctor warn 并列出路径，record 带有 discovery 元数据。
+
+另一个选项（B）是保持现状：任何目录深的工作区都会出现 partial 和 warn。
+
+### D2 与附项
+
+接受。同一毫秒内不同仓库的快照不再被合并：去重键加入了仓库身份、scope、baseline 和 status，相同快照重放仍然去重。`requestedRoot` 与 `repoRoot` 分开，Git 没有解析到时不冒充。缺少 discovery 证据时直接省略，不补 0。旧 record 仍能通过校验。用户级 `bridge_not_found` 作为独立 evidence，不计入当前 workspace 的退出码；日志被截断时标 partial 并 warn。`unset SCRY_RECORDER_DAEMON_TRIED` 放在 `set -u` 之后，所有分支之前。
+
+### 状态
+
+D2 → 已核验。D1 → 需修改（VD1 待用户选定方案，另含 VD2）。在此之前不开始 E。
