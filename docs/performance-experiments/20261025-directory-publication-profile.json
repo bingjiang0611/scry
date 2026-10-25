@@ -1,0 +1,494 @@
+{
+  "scope": "instrumented compiled Core publication only; excludes App trace projection and cwd hashing",
+  "bodies": 4,
+  "bodyBytes": 262144,
+  "samples": [
+    {
+      "authorities": 1,
+      "repeat": 0,
+      "elapsedMs": 210.501875,
+      "stages": {
+        "readFile": {
+          "calls": 4,
+          "ms": 0.9183340000000122
+        },
+        "stat": {
+          "calls": 44,
+          "ms": 2.674377000000078
+        },
+        "open": {
+          "calls": 56,
+          "ms": 10.807577999999953
+        },
+        "directorySync": {
+          "calls": 52,
+          "ms": 151.898207
+        },
+        "close": {
+          "calls": 56,
+          "ms": 3.739207000000061
+        },
+        "mkdir": {
+          "calls": 8,
+          "ms": 5.653916000000006
+        },
+        "writeFile": {
+          "calls": 4,
+          "ms": 1.173458999999987
+        },
+        "fileSync": {
+          "calls": 4,
+          "ms": 18.549042999999962
+        },
+        "link": {
+          "calls": 4,
+          "ms": 4.667668000000035
+        },
+        "rm": {
+          "calls": 4,
+          "ms": 5.838083999999995
+        }
+      }
+    },
+    {
+      "authorities": 1,
+      "repeat": 1,
+      "elapsedMs": 128.14520800000003,
+      "stages": {
+        "readFile": {
+          "calls": 4,
+          "ms": 0.7603330000000312
+        },
+        "stat": {
+          "calls": 44,
+          "ms": 2.8957099999998093
+        },
+        "open": {
+          "calls": 56,
+          "ms": 10.143124000000057
+        },
+        "directorySync": {
+          "calls": 52,
+          "ms": 77.39300199999985
+        },
+        "close": {
+          "calls": 56,
+          "ms": 3.109412999999904
+        },
+        "mkdir": {
+          "calls": 8,
+          "ms": 2.9070430000000442
+        },
+        "writeFile": {
+          "calls": 4,
+          "ms": 0.9648760000000038
+        },
+        "fileSync": {
+          "calls": 4,
+          "ms": 17.150165999999956
+        },
+        "link": {
+          "calls": 4,
+          "ms": 6.063126000000011
+        },
+        "rm": {
+          "calls": 4,
+          "ms": 2.2794570000000363
+        }
+      }
+    },
+    {
+      "authorities": 1,
+      "repeat": 2,
+      "elapsedMs": 125.67279200000002,
+      "stages": {
+        "readFile": {
+          "calls": 4,
+          "ms": 0.8081670000000827
+        },
+        "stat": {
+          "calls": 44,
+          "ms": 3.4265819999999394
+        },
+        "open": {
+          "calls": 56,
+          "ms": 13.141376000000093
+        },
+        "directorySync": {
+          "calls": 52,
+          "ms": 70.58745999999991
+        },
+        "close": {
+          "calls": 56,
+          "ms": 3.458542000000193
+        },
+        "mkdir": {
+          "calls": 8,
+          "ms": 3.390709000000072
+        },
+        "writeFile": {
+          "calls": 4,
+          "ms": 1.0872079999999755
+        },
+        "fileSync": {
+          "calls": 4,
+          "ms": 15.545957999999928
+        },
+        "link": {
+          "calls": 4,
+          "ms": 6.346915999999965
+        },
+        "rm": {
+          "calls": 4,
+          "ms": 2.611500000000035
+        }
+      }
+    },
+    {
+      "authorities": 1,
+      "repeat": 3,
+      "elapsedMs": 129.82783299999994,
+      "stages": {
+        "readFile": {
+          "calls": 4,
+          "ms": 0.9130410000000211
+        },
+        "stat": {
+          "calls": 44,
+          "ms": 3.588622999999643
+        },
+        "open": {
+          "calls": 56,
+          "ms": 13.46416699999952
+        },
+        "directorySync": {
+          "calls": 52,
+          "ms": 69.913002
+        },
+        "close": {
+          "calls": 56,
+          "ms": 4.23982799999942
+        },
+        "mkdir": {
+          "calls": 8,
+          "ms": 4.550249999999778
+        },
+        "writeFile": {
+          "calls": 4,
+          "ms": 1.411042999999836
+        },
+        "fileSync": {
+          "calls": 4,
+          "ms": 15.513417000000004
+        },
+        "link": {
+          "calls": 4,
+          "ms": 7.230916999999863
+        },
+        "rm": {
+          "calls": 4,
+          "ms": 3.9496670000000904
+        }
+      }
+    },
+    {
+      "authorities": 1,
+      "repeat": 4,
+      "elapsedMs": 118.62858300000005,
+      "stages": {
+        "readFile": {
+          "calls": 4,
+          "ms": 0.7405419999998912
+        },
+        "stat": {
+          "calls": 44,
+          "ms": 4.107668999999646
+        },
+        "open": {
+          "calls": 56,
+          "ms": 11.802829000000202
+        },
+        "directorySync": {
+          "calls": 52,
+          "ms": 66.9408740000008
+        },
+        "close": {
+          "calls": 56,
+          "ms": 3.837627000000225
+        },
+        "mkdir": {
+          "calls": 8,
+          "ms": 3.7361669999997957
+        },
+        "writeFile": {
+          "calls": 4,
+          "ms": 1.2519589999998288
+        },
+        "fileSync": {
+          "calls": 4,
+          "ms": 13.39862400000004
+        },
+        "link": {
+          "calls": 4,
+          "ms": 6.438458999999966
+        },
+        "rm": {
+          "calls": 4,
+          "ms": 2.4628750000000537
+        }
+      }
+    },
+    {
+      "authorities": 2,
+      "repeat": 0,
+      "elapsedMs": 247.01095899999996,
+      "stages": {
+        "readFile": {
+          "calls": 8,
+          "ms": 1.7468760000001566
+        },
+        "stat": {
+          "calls": 92,
+          "ms": 7.498581000000627
+        },
+        "open": {
+          "calls": 116,
+          "ms": 26.832121999999572
+        },
+        "directorySync": {
+          "calls": 108,
+          "ms": 131.79458999999986
+        },
+        "close": {
+          "calls": 116,
+          "ms": 7.53507900000011
+        },
+        "mkdir": {
+          "calls": 17,
+          "ms": 7.571998999999892
+        },
+        "writeFile": {
+          "calls": 8,
+          "ms": 2.737207999999896
+        },
+        "fileSync": {
+          "calls": 8,
+          "ms": 31.125499000000218
+        },
+        "link": {
+          "calls": 8,
+          "ms": 16.75524999999982
+        },
+        "rm": {
+          "calls": 8,
+          "ms": 5.45216599999992
+        }
+      }
+    },
+    {
+      "authorities": 2,
+      "repeat": 1,
+      "elapsedMs": 265.428042,
+      "stages": {
+        "readFile": {
+          "calls": 8,
+          "ms": 2.0016669999997703
+        },
+        "stat": {
+          "calls": 92,
+          "ms": 8.470293999999512
+        },
+        "open": {
+          "calls": 116,
+          "ms": 27.762845999998945
+        },
+        "directorySync": {
+          "calls": 108,
+          "ms": 142.52074800000082
+        },
+        "close": {
+          "calls": 116,
+          "ms": 8.32845800000041
+        },
+        "mkdir": {
+          "calls": 17,
+          "ms": 7.356208999999808
+        },
+        "writeFile": {
+          "calls": 8,
+          "ms": 3.227832000000035
+        },
+        "fileSync": {
+          "calls": 8,
+          "ms": 34.007375999999795
+        },
+        "link": {
+          "calls": 8,
+          "ms": 14.901790000000119
+        },
+        "rm": {
+          "calls": 8,
+          "ms": 8.207832999999937
+        }
+      }
+    },
+    {
+      "authorities": 2,
+      "repeat": 2,
+      "elapsedMs": 272.1830830000001,
+      "stages": {
+        "readFile": {
+          "calls": 8,
+          "ms": 2.386541999999963
+        },
+        "stat": {
+          "calls": 92,
+          "ms": 6.860957999999982
+        },
+        "open": {
+          "calls": 116,
+          "ms": 25.065741999998863
+        },
+        "directorySync": {
+          "calls": 108,
+          "ms": 161.48262999999997
+        },
+        "close": {
+          "calls": 116,
+          "ms": 7.734993999999006
+        },
+        "mkdir": {
+          "calls": 17,
+          "ms": 7.244710999999597
+        },
+        "writeFile": {
+          "calls": 8,
+          "ms": 2.224582999999484
+        },
+        "fileSync": {
+          "calls": 8,
+          "ms": 34.87500100000034
+        },
+        "link": {
+          "calls": 8,
+          "ms": 11.488415999999688
+        },
+        "rm": {
+          "calls": 8,
+          "ms": 5.094998999999689
+        }
+      }
+    },
+    {
+      "authorities": 2,
+      "repeat": 3,
+      "elapsedMs": 276.7165829999999,
+      "stages": {
+        "readFile": {
+          "calls": 8,
+          "ms": 1.4315820000001622
+        },
+        "stat": {
+          "calls": 92,
+          "ms": 6.705582000000504
+        },
+        "open": {
+          "calls": 116,
+          "ms": 23.42478600000095
+        },
+        "directorySync": {
+          "calls": 108,
+          "ms": 168.47495399999934
+        },
+        "close": {
+          "calls": 116,
+          "ms": 8.521583000001556
+        },
+        "mkdir": {
+          "calls": 17,
+          "ms": 6.280791999999792
+        },
+        "writeFile": {
+          "calls": 8,
+          "ms": 2.216291000000183
+        },
+        "fileSync": {
+          "calls": 8,
+          "ms": 33.57974899999999
+        },
+        "link": {
+          "calls": 8,
+          "ms": 13.823958000000403
+        },
+        "rm": {
+          "calls": 8,
+          "ms": 4.737123999999767
+        }
+      }
+    },
+    {
+      "authorities": 2,
+      "repeat": 4,
+      "elapsedMs": 262.43195900000023,
+      "stages": {
+        "readFile": {
+          "calls": 8,
+          "ms": 2.8173329999999623
+        },
+        "stat": {
+          "calls": 92,
+          "ms": 6.959169000002021
+        },
+        "open": {
+          "calls": 116,
+          "ms": 26.992584999999508
+        },
+        "directorySync": {
+          "calls": 108,
+          "ms": 140.65379200000007
+        },
+        "close": {
+          "calls": 116,
+          "ms": 10.030920999999353
+        },
+        "mkdir": {
+          "calls": 17,
+          "ms": 7.301332000000457
+        },
+        "writeFile": {
+          "calls": 8,
+          "ms": 2.887458000000379
+        },
+        "fileSync": {
+          "calls": 8,
+          "ms": 32.90925099999936
+        },
+        "link": {
+          "calls": 8,
+          "ms": 16.24979199999939
+        },
+        "rm": {
+          "calls": 8,
+          "ms": 6.559584000000086
+        }
+      }
+    }
+  ],
+  "lock": {
+    "label": "mac2-cold-core-profile",
+    "command": [
+      "node",
+      "--no-addons",
+      "/Users/test/scry-performance-climb-mac2.cO3N5W/profile-cold-core.mjs",
+      "/Users/test/scry-performance-climb-mac2.cO3N5W/logs/publication/core-profile.json"
+    ],
+    "exit": 0,
+    "signal": null,
+    "wallMs": 2562,
+    "cores": 8,
+    "loadBefore": 2.99,
+    "loadAfter": 2.99,
+    "highLoad": false
+  },
+  "limitation": "instrumented compiled Core only, no before/after comparison; excludes App projection and cwd hashing"
+}

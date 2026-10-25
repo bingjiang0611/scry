@@ -35,8 +35,8 @@
 |---|---|---|---|
 | 0 身份与计划 | agent：隔离cwd、依赖、源码与结果目录，核对既有实验 | 无他人WIP混入，测量与生产分别提交 | 已完成；计划`7787c78a`，测量`cd40ee06`，结构`138b4217`/`3afb730f` |
 | 1 删除无消费者计算 | agent：迁移上述统计刷新collector和最小生产变更 | 旧实现负对照；5轮L1；受锁L2；可见analytics刷新仍有效；UI/全量unit/type/build检查 | L1/L2已补证；组合全量unit/type/build/IPC通过；保留mac2基线共同的UI总期限阻塞 |
-| 2 证据写入窄切片 | agent：测量content突发、重复body、双authority写入、directory/file sync | 先定位实际成本；不改格式、不减fsync；必要才做批量准备/提交实验 | 首个窄切片`34a6371f`完成：复用SHA64→32，sync32不变；冷写/双authority待下一轮 |
-| 3 查询与归档索引 | agent：固定40/400/4000轮与大账本；外部修改/删除/repair验证 | 先移除重复查询，再决定增量projection和专用执行进程；derived可重建、canonical不变 | 后续爬坡 |
+| 2 证据写入窄切片 | agent：测量content突发、重复body、双authority写入、directory/file sync | 先定位实际成本；不改格式、不减fsync；必要才做批量准备/提交实验 | 复用`34a6371f`、首次发布`16941f1f`完成；目录API约降35%，sync不减。剩余Core等待以sync为主，本路径暂收敛 |
+| 3 查询与归档索引 | agent：固定40/400/4000轮与大账本；外部修改/删除/repair验证 | 先移除重复查询，再决定增量projection和专用执行进程；derived可重建、canonical不变 | 下一轮优先：先测分页实际扫描/解析范围 |
 | 4 Provider运行层 | agent + 上游维护者：完整刷新合同与隔离reload夹具 | 配置/模型/auth/extension/executable变化正确失效；再验证热目录收益、冷启动与驻留成本 | 原刷新边界阻塞，禁止重复旧假设 |
 | 5 客户端增量 | agent：在写入点产生event revision，真正窗口化投影 | 固定大负载O(变化/可见)，重连、tombstone、选择、读屏、anchor不回归 | 后续爬坡 |
 | 6 交付与L3 | agent准备产物；用户批准合入/安装并正常使用 | build→源码映射明确；每侧同场景≥30样本、≥2会话 | 未开始 |
@@ -63,6 +63,18 @@ L2前后两侧均highLoad=true，本轮按持续高负载收尾，不开展第�
 - 完整UI仍在mac2的55秒综合夹具期限失败；原始基线同样失败，诊断显示53.6秒才开始等待断线。其余26段已验证，没有扩大期限。该夹具由agent另列维护任务，发布前收敛。
 - 性能门禁通过，52条观测、3项CPU指令candidate未测。4个历史`worse`已做`cd40ee06`同机对照，前后相同或处于既有4-byte tolerance内；不抬基线或升门禁。
 - 约两小时预算内收尾。下一轮由agent测量冷写与双authority路径；不启动第三实验，不默认改格式、减sync或增加驻留资源。未合入原工作区、未push、未安装，L3仍未验证。
+
+## 目录发布续跑（2026-10-25）
+
+详见[实验记录](performance-experiments/20261025-directory-publication.md)、[计数/样本](performance-experiments/20261025-directory-publication-evidence.json)和[阶段诊断](performance-experiments/20261025-directory-publication-profile.json)。
+
+- 冻结旧实现后，在共享`mkdirDurable`先检查目录，取消注定失败的mkdir。单份/双份目录API80→52、167→109；sync56/116及其顺序不变。
+- 有明确取舍：stat36→44、75→92，作为2项有意增加的candidate `worse`保留，不抬基线；不能用总量下降把它们抹掉。另4项历史偏差已重做本轮基线同机对照。
+- 低负载单组中位154.854→141.336ms、292.670→289.947ms，样本重叠，不宣称稳定提速。额外诊断显示当前编译Core的sync等待占66%–81%，不含App投影，也不是CPU占比。
+- 生产`16941f1f`；组合验证快照`dd5abea1`含已有CLI修复：3985 unit通过、4既有探针跳过；类型、App/CLI构建、真实生产IPC、编译Core无native-addon检查通过。
+- 新用例证明旧实现仍有多余mkdir，故意删除父目录sync也会失败。没有减少sync、改格式、删断言或抬超时。
+- 本轮没有UI源变更，不重跑已知总期限不足的完整UI大夹具；发布前仍需单独收敛该问题。未合入原工作区、未push/安装，L3未验证。
+- 下一轮由agent转向查询/归档索引的固定规模测量。不继续在当前持久化约束下微调目录；批量sync和格式迁移要另行确认。
 
 ## 单实验流程
 
