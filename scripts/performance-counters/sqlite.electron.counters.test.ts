@@ -1,8 +1,10 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { performance } from 'node:perf_hooks'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { defaultRepeats, measured, repeatCounters, unavailable, writeCollector } from '../performance-counters.mjs'
+import { applyDataUpdatedEffects } from '../../src/renderer/hooks/useIntegrations'
 
 // Production analytics read path (src/main/db.ts statsQuery) on a temporary SQLite file.
 // better-sqlite3 is built for Electron's ABI, so `performance-counters.mjs collect` runs
@@ -67,7 +69,7 @@ async function seededDatabase() {
   return db
 }
 
-// Seed once per file; both tests read the same fixed database.
+// Seed once per file; all tests read the same fixed database.
 let seeded: ReturnType<typeof seededDatabase> | undefined
 const database = () => seeded ??= seededDatabase()
 
@@ -87,6 +89,71 @@ function coldStats(db: NonNullable<Awaited<ReturnType<typeof seededDatabase>>>, 
   } finally { sqlite.active = false }
   return { 'sqlite.prepare': sqlite.prepare, 'sqlite.queries': sqlite.queries, 'sqlite.exec': sqlite.exec }
 }
+
+// Frozen workload from 436d63d; keep callbacks present after removing their production consumers.
+const refreshWorkload = 'span-results=240;tools=240;data-updates=5;analytics-active=0;invalidate-per-update=1'
+const refreshSource = 'production data-updated effects with real temporary SQLite stats/billing queries; existing cache invalidation before each update'
+const refreshMetrics = ['refresh.stats.calls', 'refresh.billing.calls', 'sqlite.queries']
+const refreshMeta = (metric: string) => ({
+  scenario: 'analytics.data-updated', metric,
+  layer: metric.startsWith('sqlite.') ? 'io' as const : 'ui' as const,
+  unit: 'count' as const, workload: refreshWorkload, source: refreshSource
+})
+
+function dataUpdatedWorkload(db: NonNullable<Awaited<ReturnType<typeof seededDatabase>>>) {
+  const stats: ReturnType<typeof db.statsQuery>[] = []
+  const billing: ReturnType<typeof db.billingStateQuery>[] = []
+  const effects = {
+    loadStats: () => { stats.push(db.statsQuery()) },
+    loadBillingState: () => { billing.push(db.billingStateQuery()) },
+    loadAnalytics: () => { throw new Error('inactive analytics must not refresh') },
+    analyticsActive: false
+  }
+  sqlite.queries = 0
+  let durationMs = 0
+  for (let update = 0; update < 5; update++) {
+    db.setBillingEnvProvider(() => process.env)
+    sqlite.active = true
+    const started = performance.now()
+    try { applyDataUpdatedEffects(effects) } finally {
+      durationMs += performance.now() - started
+      sqlite.active = false
+    }
+  }
+  expect(stats.length).toBe(billing.length)
+  for (const result of stats) expect(result).toMatchObject({ status: 'ready', totals: { turns: 240, toolCalls: 240 } })
+  for (const result of billing) expect(result.status).toBe('ready')
+  return { durationMs, counters: { 'refresh.stats.calls': stats.length, 'refresh.billing.calls': billing.length, 'sqlite.queries': sqlite.queries } }
+}
+
+describe('data-updated analytics work counters', () => {
+  it('measures complete refresh bodies without changing the source workload', async () => {
+    const db = await database()
+    if (!db) {
+      writeCollector('data-updated', refreshMetrics.map(metric => unavailable(refreshMeta(metric), 'temporary SQLite unavailable in this runtime ABI')))
+      return
+    }
+    const times: number[] = []
+    const runs = await repeatCounters(defaultRepeats, () => {
+      const result = dataUpdatedWorkload(db)
+      times.push(result.durationMs)
+      return result.counters
+    })
+    writeCollector('data-updated', refreshMetrics.map(metric => measured(refreshMeta(metric), runs[metric])))
+    if (process.env.SCRY_DATA_UPDATED_TIMINGS) writeFileSync(process.env.SCRY_DATA_UPDATED_TIMINGS,
+      JSON.stringify({ workload: refreshWorkload, durationMs: times, counters: runs }, null, 2))
+  })
+
+  it('detects an extra real refresh even when no panel consumes its result', async () => {
+    const db = await database()
+    if (!db) return
+    db.setBillingEnvProvider(() => process.env)
+    sqlite.queries = 0
+    sqlite.active = true
+    try { expect(db.statsQuery().status).toBe('ready') } finally { sqlite.active = false }
+    expect(sqlite.queries).toBeGreaterThan(0)
+  })
+})
 
 describe('SQLite analytics work counters', () => {
   it('counts statements for one cold analytics read, or reports SQLite unavailable', async () => {
