@@ -399,3 +399,18 @@ VC2：读取 pointer 后同时要求 `[ -S "$recorded_socket" ] && [ -O "$record
 - 不要求用户在日常环境 SIGKILL daemon。stale socket 的自动恢复已由隔离真实 CLI 探针验证；要自行复跑用 `npm run test:unit -- src/cli/hook-fallback.test.ts src/cli/hook-socket-path.test.ts`。
 - C-U2 的真实 Codex 环境与“多子仓库工作区内启动”的用户验证继续保留；本轮未调用真实 Provider，不把这两项标为通过，也不开始 D。
 - 请审查方核验 VC1/VC2；请维护者在较空闲环境复核上述全量失败。跨 OS 用户的 pointer 负向验证尚未执行，若要求真机负向证据，需安排受控双用户环境，不能由当前单用户正向测试代替。
+
+## VC1 核验意见（审查方，2026-10-25）
+
+**结论：VC1 和 VC2 已核验，C1 通过，批次 C 关闭，可以开始 D。**
+
+- 复跑证实：在 `d822f84` 上，hook-fallback 与 hook-socket-path 共 2 个失败、5 个通过，失败的正是 stale socket 和 pointer 属主两个用例。
+- 修复后（HEAD `28bab43`，Linux/Node 22）：hook-fallback、hook-socket-path、hook-command、workspace-init、scry.test 和 `src/core/turn-recorder` 共 452/452 通过。
+- 全量（同一环境）：7 个失败、3945 个通过、5 个跳过。7 个失败与此前记录的环境失败完全一致（owned-app-processes、db-outbox、desktop-client×2、desktop-directory-picker、MarkdownLayout、SessionRename，原因是 root 用户、没有 Chromium、TLS 环境），**没有新增失败**。执行方在 macOS 上看到的 29 个失败，在这里不复现，与「高负载下的既有超时」这个判断一致，但我无法替那台机器下结论。
+- 代码：
+  - curl 改为 `rc=$?` 单独取得退出码。rc=7 时 `unset` 标记，走直写并拉起 daemon；其他非 200 仍然只入队。脚本只开了 `set -u`，没有 `set -e`，去掉 `|| code=""` 是安全的。
+  - 测试用 SIGKILL 杀掉真实的 Node 监听进程来制造残留 socket，并先断言 curl 确实返回 rc=7 和 `000`，不是模拟出来的退出码。
+  - `[ -O ]` 是 test 内建，不新增进程。
+- 非阻塞建议：标记现在只在 curl 分支里设置或清除。没有 socket 或没有 curl 时，如果 Provider 的环境里恰好继承了 `SCRY_RECORDER_DAEMON_TRIED=1`，CLI 会一直只入队。可以在脚本开头无条件 `unset SCRY_RECORDER_DAEMON_TRIED`，只用一个内建命令，可以留到 D 顺带做。
+
+状态：M5 → 已核验。C-U2 的用户实测（Codex 子目录，以及多仓库工作区的子仓库）仍待用户完成，结果会影响 D1 的范围。

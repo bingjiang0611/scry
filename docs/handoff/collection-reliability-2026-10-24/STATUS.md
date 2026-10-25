@@ -11,8 +11,8 @@
 | L2 | 开始/终态 open.json 不 fsync | A3 | 已核验 | [A 报告](reports/A.md) | 只在开始与终态边界加 sync，中间事件不变；每轮 +6 次 fsync 属必要工作；未做断电测试 |
 | H4 | inbox 重放或读取失败即删除 | B1 | 已核验 | [B 报告](reports/B.md) | 8 失败→通过；VB1 3 失败→通过（`8a29edf`→`aaee897`），sidecar 不可读时不再阻止 daemon 空闲退出，仍计 pending；VB2 人工重试文档已核验；升级 CLI 后需 `recorder restart` |
 | M1 | recover 被单个会话打断，投递不执行 | B2 | 已核验 | [B 报告](reports/B.md) | 5 失败→通过；逐会话 try/catch、finally 投递、daemon 日志成立；Linux/Node 22 focused 266/266 |
-| M5 | 回退链路超时与三重处理 | C1 | 待核验 | [C 报告](reports/C.md) | VC1/VC2：`d822f840` 红测 → `5bb630e1` 修复；rc=7 恢复直写与启动，pointer 加属主 guard；focused 99 pass，真实 CLI 自动启动并提交 record；全量 29 条既有用例失败，详见 VC1 修改记录 |
-| L1 | 长路径下快路径失效 | C2 | 已核验 | [C 报告](reports/C.md) | 红测 2→通过；发布实际 socket 路径，stale hint 安全；建议 VC2 加 `-O` 属主检查；需 repair + restart |
+| M5 | 回退链路超时与三重处理 | C1 | 已核验 | [C 报告](reports/C.md) | 红测 2→通过；curl 回退只发一次请求并持久入 inbox；VC1：rc=7（stale socket）恢复直写并拉起 daemon，2 失败→通过；Linux 全量无新增失败；需 repair + restart |
+| L1 | 长路径下快路径失效 | C2 | 已核验 | [C 报告](reports/C.md) | 红测 2→通过；发布实际 socket 路径，stale hint 安全；VC2 已加 `-O` 属主检查；需 repair + restart |
 | M6 | 子目录启动找不到 hook 脚本 | C3 | 已核验 | [C 报告](reports/C.md) | 红测 9→通过（fixture 范围）；需 repair 并重启 Provider；待用户按 C-U2 实测，另需在多仓库工作区的子仓库内启动一次 |
 | D1 | 发现深度之外的子仓库静默缺席 | D1 | 未开始 | | |
 | D2 | 每轮仓库清单与快照状态可见性 | D2 | 未开始 | | 另含：用户级 `bridge_not_found` 日志（C3）纳入 doctor/support-bundle |
