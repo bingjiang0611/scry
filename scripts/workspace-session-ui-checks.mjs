@@ -7,6 +7,7 @@ import { nativeUiPointer } from './native-ui-pointer.mjs'
 import { exerciseWorkspaceDiffBounds } from './workspace-session-ui-stress.mjs'
 import { assertPickerAnchored, assertNewWorktreeDefaults, assertCompactMenus } from './workspace-session-ui-picker.mjs'
 import { wait, sendWorkspacePrompt } from './workspace-session-ui-run.mjs'
+import { selectDiffScope, exerciseTurnMenu } from './diff-inspector-ui.mjs'
 
 const json = JSON.stringify
 /** Production App + preload + native Git, with the existing isolated, non-network Provider fixture. */
@@ -185,24 +186,28 @@ export async function exerciseWorkspaceSessions(context) {
     await wait(() => evaluate(`document.querySelector('.diff-inspector')?.dataset.diffScope === 'workspace' &&
       document.querySelector('.diff-virtual-files')?.textContent.includes('remote-second.txt')`), 'workspace inspector snapshot')
     assert.equal(await evaluate(`document.querySelector('.diff-virtual-files').textContent.includes('remote-first.txt')`), false)
-    await click('.diff-scope-tabs button', '本会话')
+    await selectDiffScope({ click, wait, evaluate }, 'session')
     await wait(() => evaluate(`document.querySelector('.diff-virtual-files')?.textContent.includes('remote-first.txt') &&
       document.querySelector('.diff-virtual-files')?.textContent.includes('remote-second.txt')`), 'session net snapshot')
-    await click('.diff-scope-tabs button', '本轮')
+    await selectDiffScope({ click, wait, evaluate }, 'latest')
     await wait(() => evaluate(`document.querySelector('.diff-virtual-files')?.textContent.includes('remote-second.txt')`), 'latest turn snapshot')
     assert.equal(await evaluate(`document.querySelector('.diff-virtual-files').textContent.includes('remote-first.txt')`), false)
     git(target, 'add', '--', 'remote-second.txt')
     git(target, 'commit', '-m', 'clean workspace keeps session evidence')
-    await click('.diff-scope-tabs button', '工作区')
+    await selectDiffScope({ click, wait, evaluate }, 'workspace')
     await wait(() => evaluate(`document.querySelector('.diff-review-empty')?.textContent.includes('工作区没有未提交净改动')`), 'captured zero never falls back to session')
     assert.equal(await evaluate(`document.querySelector('.diff-review-totals .add')?.textContent`), '+0')
-    await click('.diff-scope-tabs button', '本会话')
+    await selectDiffScope({ click, wait, evaluate }, 'session')
     await wait(() => evaluate(`document.querySelector('.diff-virtual-files')?.textContent.includes('remote-first.txt') &&
       document.querySelector('.diff-virtual-files')?.textContent.includes('remote-second.txt')`), 'retained session patches after both files are committed')
+    await exerciseTurnMenu({ click, key, wait, evaluate, screenshot, target, firstRunId: created.run.runId, latestRunId: second.run.runId })
     await screenshot('inspector-wide')
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 900, deviceScaleFactor: 1, mobile: false })
     await wait(() => evaluate(`document.querySelector('.main-area')?.inert === true`), 'narrow inspector replaces and inerts conversation')
     await screenshot('inspector-narrow')
+    await click('.diff-scope-trigger')
+    await screenshot('diff-scope-narrow')
+    await key('Escape', 'Escape', 27)
     await click('.diff-inspector-actions button[aria-label="关闭改动面板"]')
     await wait(() => evaluate(`document.querySelector('.main-area')?.inert === false`), 'closing inspector restores conversation')
     await cdp.send('Emulation.clearDeviceMetricsOverride')

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { TurnDiffSnapshot } from '@shared/trace'
 import type { Turn } from '../format'
 import { TurnDiffReviewPanel } from '../components/TurnDiffReviewPanel'
-import { scopedDiffReview } from './useDiffInspector'
+import { diffTurnOptions, scopedDiffReview } from './useDiffInspector'
 
 const snapshot = (overrides: Partial<TurnDiffSnapshot> = {}): TurnDiffSnapshot => ({
   version: 1, status: 'captured', files: [], beforeAt: '2026-10-24T00:00:00Z',
@@ -21,6 +21,30 @@ const render = (turnDiff: TurnDiffSnapshot) => renderToStaticMarkup(<TurnDiffRev
   review={{ runId: 'run', userText: '', scope: 'session', turnDiff }} onClose={() => {}} />)
 
 describe('exact diff scope and evidence presentation', () => {
+  it('lists every loaded turn, including those older than the previous 100-turn cutoff', () => {
+    const turns = Array.from({ length: 150 }, (_, index) => turn(`run-${index}`, changed))
+    const options = diffTurnOptions(turns, 40)
+    expect(options).toHaveLength(150)
+    expect(options[0]).toEqual({ runId: 'run-0', index: 40, prompt: 'run-0' })
+    expect(options.at(-1)?.index).toBe(189)
+    expect(scopedDiffReview(turns, { scope: 'turn', runId: options[0].runId })?.turnDiff).toBe(changed)
+  })
+
+  it('switches from a specific historical turn back to the actual latest turn, including an empty one', () => {
+    const empty = snapshot()
+    const turns = [turn('old', changed), turn('latest', changed, empty)]
+    expect(scopedDiffReview(turns, { scope: 'turn', runId: 'old' })?.turnDiff).toBe(changed)
+    expect(scopedDiffReview(turns, { scope: 'turn' })?.turnDiff).toBe(empty)
+  })
+
+  it('keeps a turn with missing evidence selectable without borrowing another turn', () => {
+    const missing: Turn = { runId: 'missing', userText: 'not captured', done: true, items: [] }
+    const turns = [turn('old', changed), missing]
+    expect(diffTurnOptions(turns)[1].runId).toBe('missing')
+    expect(scopedDiffReview(turns, { scope: 'turn', runId: 'missing' })).toBeNull()
+    expect(scopedDiffReview(turns, { scope: 'turn' })).toBeNull()
+  })
+
   it('does not replace an empty or failed latest session snapshot with older changes or turn totals', () => {
     for (const latest of [snapshot(), snapshot({ status: 'failed' })]) {
       const turns = [turn('old', changed), turn('new', latest)]

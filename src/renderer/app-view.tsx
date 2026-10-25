@@ -299,6 +299,7 @@ export function useAppView(context: AppViewContext) {
     summary: integrations.gitDiff,
     summaryRefreshing: integrations.gitDiffRefreshing,
     turns: displayedTurns,
+    turnOffset: view === 'chat' ? session.historyWindow?.offset : undefined,
     selection: turnDiffSelection,
     select: setTurnDiffSelection,
     enabled: panelVisible && rightSurface.activeId === 'diff',

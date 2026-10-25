@@ -38,12 +38,17 @@ export function useNarrowDiffLayout(): boolean {
   return narrow
 }
 
+export function diffTurnOptions(turns: readonly Turn[], offset = 0) {
+  return turns.map((turn, index) => ({ runId: turn.runId, index: offset + index, prompt: turn.userText }))
+}
+
 export function useDiffInspector(input: {
   cwd: string | null
   summaryCwd: string | null
   summary: WorkspaceDiffResult | null | undefined
   summaryRefreshing: boolean
   turns: readonly Turn[]
+  turnOffset?: number
   selection: DiffReviewSelection | null
   select: (selection: DiffReviewSelection) => void
   enabled: boolean
@@ -117,13 +122,7 @@ export function useDiffInspector(input: {
       ? { status: 'captured', files: result.snapshot.files, collectedAt: result.collectedAt }
       : result
     : baseSummary
-  const turnOptions = turns.slice(-100).map((turn, index) => ({
-    runId: turn.runId, index: turns.length - Math.min(turns.length, 100) + index, prompt: turn.userText
-  }))
-  if (selection?.runId && !turnOptions.some(turn => turn.runId === selection.runId)) {
-    const index = turns.findIndex(turn => turn.runId === selection.runId)
-    if (index >= 0) turnOptions.unshift({ runId: selection.runId, index, prompt: turns[index].userText })
-  }
+  const turnOptions = useMemo(() => diffTurnOptions(turns, input.turnOffset), [turns, input.turnOffset])
   return {
     cwd, scope, review, refreshing, summary,
     summaryRefreshing: snapshotEnabled ? refreshing : baseRefreshing,
@@ -131,6 +130,7 @@ export function useDiffInspector(input: {
     failure: scope === 'workspace' && result && result.status !== 'captured' ? result : undefined,
     emptySession: turns.length === 0,
     selectedRunId: selection?.runId ?? turns.at(-1)?.runId ?? '', turnOptions,
+    latestTurn: scope === 'turn' && !selection?.runId,
     refresh,
     selectScope: (next: DiffScope): void => select({ scope: next }),
     selectTurn: (runId: string): void => select({ scope: 'turn', runId })

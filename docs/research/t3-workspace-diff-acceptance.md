@@ -26,7 +26,15 @@
 - 最近排序只使用 Scry 已成功登记的准备记录；没有记录的目录保持 Git 清单顺序，不宣称完整跨工具使用历史。
 - 文件与代码 DOM 虚拟化。真实 App 的 1,000 文件 / 2,000 行检查证明文件节点 <80、代码节点 <100，且能用原生键盘到最后文件/行，不是只截掉后面的数据。
 
-## T3 风格简化后的增量验证
+## Diff 下拉与逐轮选择的增量验证
+
+- 沿用右侧既有 Diff 标签及面板控制；内部改成单行范围工具栏。下拉包含未提交改动、最新一轮、轮次子菜单，以及保留的本会话净差异。子菜单展示轮次序号和提示词摘要，支持键盘导航、Escape 返回、窗口内定位和虚拟滚动。
+- 删除仅列最近 100 轮的静默限制。所有已加载轮次均可选择；原生会话复用已有历史分页入口，序号包含 archive offset。统一对话仍通过对话里的“更早记录”分页，菜单展示当前已加载页，不假装已加载全部历史。未采集或未保留的 patch 仍显示不可用，绝不从当前工作区补历史。
+- `npm run typecheck` 和 `npm run test:unit -- src/renderer/hooks/useDiffInspector.test.tsx src/renderer/hooks/useAgentSession.test.ts`：通过，2 文件、44 测试。新增检查覆盖 150 轮及分页序号、旧轮切回最新空轮、缺失轮次不借用其他证据。恢复旧的 `slice(-100)` 后，150 轮检查按预期失败；恢复修复后通过。负向控制使用 `-t`，未修改或新增 skip。
+- `npm run test:workspace:ui`：构建及隔离完整 App 通过；原生输入切换两轮及最新一轮，真实临时 Git 的旧文件在改写后仍显示原 patch，两个轮次的文件集合互不混用。深浅主题、窄屏、子菜单边界、键盘及已有 workspace/session/turn 场景通过。证据：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-workspace-session-ui-VrxWue/`，包含 `diff-scope-menu-dark.png`、`diff-turn-menu-dark.png`、`diff-first-turn.png`。
+- `npm run performance:measure -- --scenario source-control.diff --out /tmp/scry-diff-turn-menu-performance`：两项计数各 5 次、均为 8，ratchet 通过；不据此宣称菜单毫秒提速。不新增 fetch、Provider 探针或安装动作。
+
+## T3 风格简化后的增量验证（`45b1fcc5`）
 
 用户查看 test 实例后要求 UI 与提供的 T3 Code 截图对齐。保留两端入口，删除大表单、手填新分支名、应用按钮、常驻准备说明及正常选择时的核查按钮。异常恢复仍可核查，权限、首次发送、持久化及 Git 行为不变。远端仍是已获取的 ref，不新增自动 fetch 开关。
 

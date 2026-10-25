@@ -2,7 +2,15 @@ import type { DiffScope } from '../turn-diff'
 import type { TurnDiffPatchReason, TurnDiffSnapshot } from '@shared/trace'
 
 export const DIFF_COPY = {
-  title: '改动',
+  title: 'Diff',
+  changes: '改动',
+  uncommitted: '未提交改动',
+  turns: '轮次',
+  backToScopes: '返回改动范围',
+  loadOlderTurns: '加载更早轮次',
+  loadingTurns: '正在加载轮次…',
+  noTurns: '暂无轮次',
+  loadedTurns: '已加载的轮次',
   scopes: { workspace: '工作区', session: '本会话', turn: '本轮' },
   scopeLabel: '比较范围',
   turnPicker: '选择轮次',

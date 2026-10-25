@@ -36,4 +36,7 @@ export async function exerciseWorkspaceDiffBounds({ target, newDraft, click, eva
   await wait(() => evaluate(`document.querySelector('.tb-thread')?.title === ${JSON.stringify(target)}`), 'pressure workspace restored')
   await open()
   await screenshot('inspector-pressure-light')
+  await click('.diff-scope-trigger')
+  await screenshot('diff-scope-light')
+  await key('Escape', 'Escape', 27)
 }
