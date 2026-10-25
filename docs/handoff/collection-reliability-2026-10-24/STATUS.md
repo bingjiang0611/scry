@@ -6,7 +6,7 @@
 
 | # | 问题 | 批次 | 状态 | 报告 | 核验备注 |
 |---|---|---|---|---|---|
-| H1 | 缺开始事件时整轮被当 duplicate 丢弃 | A1 | 需修改 | [A 报告](reports/A.md) | 证实测试与修复均复跑通过；orphan-only 范围接受。但正常会话结束的 SessionEnd、Claude 续跑 Stop 被误计为 missing_start（误报），见核验意见 V1 |
+| H1 | 缺开始事件时整轮被当 duplicate 丢弃 | A1 | 待核验 | [A 报告](reports/A.md) | V1 已修：无 open turn 的会话结束/续跑不误报；OpenCode 重复 idle 去重；时间值比较及真实形状 payload 回归通过。orphan-only 范围维持接受，见报告末尾 V1 修改记录 |
 | H2 | hook 脚本静默跳过无痕迹；invalid_config 当作禁用 | A2 | 已核验 | [A 报告](reports/A.md) | 快路径无新增进程、始终 exit 0、符号链接保护成立；需 repair；doctor 告警时间窗见 V3（不阻塞）；真实 Provider 待用户验收 |
 | L2 | 开始/终态 open.json 不 fsync | A3 | 已核验 | [A 报告](reports/A.md) | 只在开始与终态边界加 sync，中间事件不变；每轮 +6 次 fsync 属必要工作；未做断电测试 |
 | H4 | inbox 重放或读取失败即删除 | B1 | 未开始 | | |
