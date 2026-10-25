@@ -11,6 +11,5 @@
     "declaration": false,
     "sourceMap": false
   },
-  "include": ["src/cli/**/*"],
-  "exclude": ["src/cli/**/*.test.ts", "src/cli/scry.ts", "src/cli/status.ts", "src/cli/support-bundle.ts", "src/cli/update.ts", "src/cli/workspace-init.ts"]
+  "include": ["src/cli/mcpguard.ts", "src/cli/pi-integration.ts"]
 }
