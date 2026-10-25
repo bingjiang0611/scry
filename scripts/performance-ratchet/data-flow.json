@@ -1,6 +1,90 @@
 {
   "schema": 1,
   "metrics": {
+    "recorder.content-reuse/crypto.sha256.calls": {
+      "scenario": "recorder.content-reuse",
+      "metric": "crypto.sha256.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "durable-bodies=4;body-bytes=262144;reuse-passes=8;file-and-directory-sync=unchanged",
+      "source": "real existing content publication; pass-through SHA256/read/open/FileHandle sync/write counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 64
+      }
+    },
+    "recorder.content-reuse/io.read.calls": {
+      "scenario": "recorder.content-reuse",
+      "metric": "io.read.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "durable-bodies=4;body-bytes=262144;reuse-passes=8;file-and-directory-sync=unchanged",
+      "source": "real existing content publication; pass-through SHA256/read/open/FileHandle sync/write counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 32
+      }
+    },
+    "recorder.content-reuse/io.read.bytes": {
+      "scenario": "recorder.content-reuse",
+      "metric": "io.read.bytes",
+      "layer": "io",
+      "unit": "bytes",
+      "workload": "durable-bodies=4;body-bytes=262144;reuse-passes=8;file-and-directory-sync=unchanged",
+      "source": "real existing content publication; pass-through SHA256/read/open/FileHandle sync/write counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 8388608
+      }
+    },
+    "recorder.content-reuse/io.open.calls": {
+      "scenario": "recorder.content-reuse",
+      "metric": "io.open.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "durable-bodies=4;body-bytes=262144;reuse-passes=8;file-and-directory-sync=unchanged",
+      "source": "real existing content publication; pass-through SHA256/read/open/FileHandle sync/write counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 32
+      }
+    },
+    "recorder.content-reuse/io.sync.calls": {
+      "scenario": "recorder.content-reuse",
+      "metric": "io.sync.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "durable-bodies=4;body-bytes=262144;reuse-passes=8;file-and-directory-sync=unchanged",
+      "source": "real existing content publication; pass-through SHA256/read/open/FileHandle sync/write counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 32
+      }
+    },
+    "recorder.content-reuse/io.write.calls": {
+      "scenario": "recorder.content-reuse",
+      "metric": "io.write.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "durable-bodies=4;body-bytes=262144;reuse-passes=8;file-and-directory-sync=unchanged",
+      "source": "real existing content publication; pass-through SHA256/read/open/FileHandle sync/write counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 0
+      }
+    },
     "files.fixed-operations/io.open": {
       "scenario": "files.fixed-operations",
       "metric": "io.open",
