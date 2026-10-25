@@ -1,0 +1,280 @@
+{
+  "schema": 1,
+  "productionRevision": "b51b3b82",
+  "timing": {
+    "label": "renderer-idle-controls",
+    "command": [
+      "node",
+      "scripts/performance-renderer-idle.mjs"
+    ],
+    "exit": 0,
+    "signal": null,
+    "wallMs": 34095,
+    "cores": 10,
+    "loadBefore": 10.8,
+    "loadAfter": 16.79,
+    "highLoad": true
+  },
+  "result": {
+    "electron": "42.10.1",
+    "scope": "production Sidebar fixture, two running rows, hidden offscreen GPU rendering with readback; frame/observer overhead only: each condition ends before the 5s reporting interval, report callback is a no-op, no reporting IPC or journal I/O",
+    "samples": [
+      {
+        "monitor": true,
+        "sweep": true,
+        "elapsedMs": 3000.5498749999997,
+        "paints": 353,
+        "frameCallbacks": 352,
+        "processes": [
+          {
+            "type": "Browser",
+            "cpuMs": 396.63899999999995,
+            "oneCoreCpuPercent": 13.218877089986714
+          },
+          {
+            "type": "GPU",
+            "cpuMs": 563.442,
+            "oneCoreCpuPercent": 18.777958156752852
+          },
+          {
+            "type": "Tab",
+            "cpuMs": 329.03099999999995,
+            "oneCoreCpuPercent": 10.965690080389017
+          }
+        ],
+        "renderer": {
+          "TaskDuration": 0.134602,
+          "ScriptDuration": 0.007599000000000001,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0.02836,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 352
+        }
+      },
+      {
+        "monitor": false,
+        "sweep": true,
+        "elapsedMs": 3000.282709,
+        "paints": 360,
+        "frameCallbacks": 0,
+        "processes": [
+          {
+            "type": "Browser",
+            "cpuMs": 393.78100000000006,
+            "oneCoreCpuPercent": 13.12479650063537
+          },
+          {
+            "type": "GPU",
+            "cpuMs": 606.903,
+            "oneCoreCpuPercent": 20.228193769189232
+          },
+          {
+            "type": "Tab",
+            "cpuMs": 340.3189999999999,
+            "oneCoreCpuPercent": 11.342897753572993
+          }
+        ],
+        "renderer": {
+          "TaskDuration": 0.13987999999999998,
+          "ScriptDuration": 0.0006300000000000004,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0.031068,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 360
+        }
+      },
+      {
+        "monitor": true,
+        "sweep": false,
+        "elapsedMs": 3005.6727919999994,
+        "paints": 361,
+        "frameCallbacks": 361,
+        "processes": [
+          {
+            "type": "Browser",
+            "cpuMs": 422.84600000000006,
+            "oneCoreCpuPercent": 14.068264553795121
+          },
+          {
+            "type": "GPU",
+            "cpuMs": 385.961,
+            "oneCoreCpuPercent": 12.841085065123751
+          },
+          {
+            "type": "Tab",
+            "cpuMs": 189.2849999999999,
+            "oneCoreCpuPercent": 6.297591690745822
+          }
+        ],
+        "renderer": {
+          "TaskDuration": 0.09126700000000004,
+          "ScriptDuration": 0.006997999999999999,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0.022781999999999997,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 361
+        }
+      },
+      {
+        "monitor": false,
+        "sweep": false,
+        "elapsedMs": 3001.127666999999,
+        "paints": 361,
+        "frameCallbacks": 0,
+        "processes": [
+          {
+            "type": "Browser",
+            "cpuMs": 404.7080000000001,
+            "oneCoreCpuPercent": 13.485197729177452
+          },
+          {
+            "type": "GPU",
+            "cpuMs": 384.64700000000016,
+            "oneCoreCpuPercent": 12.816748991704936
+          },
+          {
+            "type": "Tab",
+            "cpuMs": 92.10200000000013,
+            "oneCoreCpuPercent": 3.068913095991933
+          }
+        ],
+        "renderer": {
+          "TaskDuration": 0.013423000000000018,
+          "ScriptDuration": 0.0006470000000000017,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0.002034000000000008,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 28
+        }
+      },
+      {
+        "monitor": false,
+        "sweep": false,
+        "elapsedMs": 3001.7872080000016,
+        "paints": 360,
+        "frameCallbacks": 0,
+        "processes": [
+          {
+            "type": "Browser",
+            "cpuMs": 403.56599999999963,
+            "oneCoreCpuPercent": 13.444190811542676
+          },
+          {
+            "type": "GPU",
+            "cpuMs": 390.89399999999983,
+            "oneCoreCpuPercent": 13.022042300607994
+          },
+          {
+            "type": "Tab",
+            "cpuMs": 94.21400000000003,
+            "oneCoreCpuPercent": 3.1385968915089055
+          }
+        ],
+        "renderer": {
+          "TaskDuration": 0.012351999999999974,
+          "ScriptDuration": 0.0005669999999999981,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0.0017669999999999908,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 28
+        }
+      },
+      {
+        "monitor": true,
+        "sweep": false,
+        "elapsedMs": 3001.4898749999993,
+        "paints": 361,
+        "frameCallbacks": 360,
+        "processes": [
+          {
+            "type": "Browser",
+            "cpuMs": 371.9109999999999,
+            "oneCoreCpuPercent": 12.390879712696016
+          },
+          {
+            "type": "GPU",
+            "cpuMs": 387.594,
+            "oneCoreCpuPercent": 12.913386889236136
+          },
+          {
+            "type": "Tab",
+            "cpuMs": 193.13399999999993,
+            "oneCoreCpuPercent": 6.434604414582607
+          }
+        ],
+        "renderer": {
+          "TaskDuration": 0.09448100000000004,
+          "ScriptDuration": 0.007037999999999999,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0.023437000000000013,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 360
+        }
+      },
+      {
+        "monitor": false,
+        "sweep": true,
+        "elapsedMs": 3002.8462919999984,
+        "paints": 361,
+        "frameCallbacks": 0,
+        "processes": [
+          {
+            "type": "Browser",
+            "cpuMs": 428.9489999999998,
+            "oneCoreCpuPercent": 14.284747146158622
+          },
+          {
+            "type": "GPU",
+            "cpuMs": 662.9929999999997,
+            "oneCoreCpuPercent": 22.078819077962986
+          },
+          {
+            "type": "Tab",
+            "cpuMs": 359.0050000000002,
+            "oneCoreCpuPercent": 11.955490394444752
+          }
+        ],
+        "renderer": {
+          "TaskDuration": 0.15455799999999997,
+          "ScriptDuration": 0.0005900000000000002,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0.03464599999999998,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 361
+        }
+      },
+      {
+        "monitor": true,
+        "sweep": true,
+        "elapsedMs": 3002.6510419999977,
+        "paints": 360,
+        "frameCallbacks": 361,
+        "processes": [
+          {
+            "type": "Browser",
+            "cpuMs": 386.2730000000001,
+            "oneCoreCpuPercent": 12.864398646294656
+          },
+          {
+            "type": "GPU",
+            "cpuMs": 635.7650000000001,
+            "oneCoreCpuPercent": 21.173456092870904
+          },
+          {
+            "type": "Tab",
+            "cpuMs": 371.68999999999966,
+            "oneCoreCpuPercent": 12.37872782421048
+          }
+        ],
+        "renderer": {
+          "TaskDuration": 0.170995,
+          "ScriptDuration": 0.007524000000000003,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0.035685999999999996,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 361
+        }
+      }
+    ]
+  }
+}
