@@ -97,6 +97,7 @@
         "src/main/workflow-system-ledger.ts",
         "src/main/workflow-input-snapshot.ts",
         "src/main/workflow-check.ts",
+        "src/main/workflow-check-command.ts",
         "src/main/workflow-check-process.ts",
         "src/main/workflow-replica.ts",
         "src/main/workflow-control.ts",
