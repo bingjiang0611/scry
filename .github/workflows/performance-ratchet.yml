@@ -39,7 +39,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if git diff --quiet -- scripts/performance-ratchet.json; then
+          if git diff --quiet -- scripts/performance-ratchet.json scripts/performance-ratchet/; then
             echo 'No gating ceiling is tightenable.'
             exit 0
           fi
@@ -47,7 +47,7 @@ jobs:
           git switch -c "$branch"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add scripts/performance-ratchet.json
+          git add scripts/performance-ratchet.json scripts/performance-ratchet/
           git commit -m 'chore: tighten performance counter ceilings'
           git push --set-upstream origin "$branch"
           gh pr create \

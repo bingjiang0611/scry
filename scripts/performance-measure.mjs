@@ -3,6 +3,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { readLedger } from './performance-ledger.mjs'
 import { checkRatchet, formatRatchet, layers, metricKey, validateObservations } from './performance-ratchet.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -149,10 +150,13 @@ function freezeCounterHarness(candidate, baseline) {
   const files = [
     'scripts/performance-counters.mjs',
     'scripts/performance-ratchet.mjs',
+    'scripts/performance-ledger.mjs',
     'scripts/performance-ratchet.json',
     'vitest.config.ts'
   ]
   for (const relative of files) cpSync(join(candidate, relative), join(baseline, relative), { force: true })
+  rmSync(join(baseline, 'scripts/performance-ratchet'), { recursive: true, force: true })
+  cpSync(join(candidate, 'scripts/performance-ratchet'), join(baseline, 'scripts/performance-ratchet'), { recursive: true })
   // Replace, not overlay: a collector the candidate removed or renamed must not keep running on the baseline side.
   rmSync(join(baseline, 'scripts/performance-counters'), { recursive: true, force: true })
   cpSync(join(candidate, 'scripts/performance-counters'), join(baseline, 'scripts/performance-counters'), { recursive: true, force: true })
@@ -207,7 +211,7 @@ function profileSummary(profileDirs) {
 }
 
 function runRatchet(candidate, report, outputDirectory, options) {
-  const ledger = readJson(join(candidate, 'scripts/performance-ratchet.json'))
+  const ledger = readLedger(join(candidate, 'scripts/performance-ratchet.json'))
   const metrics = Object.fromEntries(Object.entries(ledger.metrics).filter(([, entry]) => (!options.scenario || entry.scenario === options.scenario) && (!options.layer || entry.layer === options.layer)))
   const result = checkRatchet({ ...ledger, metrics }, report)
   writeFileSync(join(outputDirectory, 'ratchet.md'), `${formatRatchet(result)}\n`)

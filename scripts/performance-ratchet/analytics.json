@@ -1,0 +1,142 @@
+{
+  "schema": 1,
+  "metrics": {
+    "analytics.data-updated/refresh.stats.calls": {
+      "scenario": "analytics.data-updated",
+      "metric": "refresh.stats.calls",
+      "layer": "ui",
+      "unit": "count",
+      "workload": "span-results=240;tools=240;data-updates=5;analytics-active=0;invalidate-per-update=1",
+      "source": "production data-updated effects with real temporary SQLite stats/billing queries; existing cache invalidation before each update",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 5
+      }
+    },
+    "analytics.data-updated/refresh.billing.calls": {
+      "scenario": "analytics.data-updated",
+      "metric": "refresh.billing.calls",
+      "layer": "ui",
+      "unit": "count",
+      "workload": "span-results=240;tools=240;data-updates=5;analytics-active=0;invalidate-per-update=1",
+      "source": "production data-updated effects with real temporary SQLite stats/billing queries; existing cache invalidation before each update",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 5
+      }
+    },
+    "analytics.data-updated/sqlite.queries": {
+      "scenario": "analytics.data-updated",
+      "metric": "sqlite.queries",
+      "layer": "io",
+      "unit": "count",
+      "workload": "span-results=240;tools=240;data-updates=5;analytics-active=0;invalidate-per-update=1",
+      "source": "production data-updated effects with real temporary SQLite stats/billing queries; existing cache invalidation before each update",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 130
+      }
+    },
+    "analytics.usage-mixed-append/io.read.calls": {
+      "scenario": "analytics.usage-mixed-append",
+      "metric": "io.read.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "usage-rows=10000;warm-cache=1;performance-append-and-stats=5",
+      "source": "pass-through subprocess and file-read counters around production Pi environment and mixed usage append/read",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 0
+      }
+    },
+    "analytics.usage-mixed-append/io.read.bytes": {
+      "scenario": "analytics.usage-mixed-append",
+      "metric": "io.read.bytes",
+      "layer": "io",
+      "unit": "bytes",
+      "workload": "usage-rows=10000;warm-cache=1;performance-append-and-stats=5",
+      "source": "pass-through subprocess and file-read counters around production Pi environment and mixed usage append/read",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 0
+      }
+    },
+    "analytics.stats/json.stringify.calls": {
+      "scenario": "analytics.stats",
+      "metric": "json.stringify.calls",
+      "layer": "main",
+      "unit": "count",
+      "workload": "analytics-results=240;days=90",
+      "source": "production implementation with counted main-side JSON IPC boundary wrapper; UTF-8 JSON bytes, not structured-clone wire bytes",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 1
+      }
+    },
+    "analytics.sqlite/sqlite.prepare": {
+      "scenario": "analytics.sqlite",
+      "metric": "sqlite.prepare",
+      "layer": "io",
+      "unit": "count",
+      "workload": "span-results=240;tools=240",
+      "source": "better-sqlite3 Database.prepare/exec and statement all/get/run/iterate pass-through wrappers; cold statsQuery",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 11
+      }
+    },
+    "analytics.sqlite/sqlite.queries": {
+      "scenario": "analytics.sqlite",
+      "metric": "sqlite.queries",
+      "layer": "io",
+      "unit": "count",
+      "workload": "span-results=240;tools=240",
+      "source": "better-sqlite3 Database.prepare/exec and statement all/get/run/iterate pass-through wrappers; cold statsQuery",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 11
+      }
+    },
+    "analytics.sqlite/sqlite.exec": {
+      "scenario": "analytics.sqlite",
+      "metric": "sqlite.exec",
+      "layer": "io",
+      "unit": "count",
+      "workload": "span-results=240;tools=240",
+      "source": "better-sqlite3 Database.prepare/exec and statement all/get/run/iterate pass-through wrappers; cold statsQuery",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 0
+      }
+    },
+    "analytics.stats/cpu.instructions": {
+      "scenario": "analytics.stats",
+      "metric": "cpu.instructions",
+      "layer": "main",
+      "unit": "instructions",
+      "workload": "analytics-results=240;days=90",
+      "source": "esbuild bundle of production src/ modules; Node --jitless fixed seeds; instructions(setup+op) - instructions(setup)",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0
+    }
+  }
+}
