@@ -11,6 +11,8 @@
 - 非 Claude Provider 的 Stop 是否也改为「钉住边界 + 返回 pending，聚合交给 daemon/recover」（Claude 与 SessionEnd 已经这样做，见 `recorder.ts:2976-2991`）。这会改变直写模式下的提交时机：没有 daemon（`SCRY_RECORDER_TRANSPORT=direct`）时谁来聚合？执行方先评估，确保 direct 模式下仍会在合理时间内提交（例如直写后同步 recover 一次、或下一个事件触发），在报告中写明。
 - 预算核算写进报告：每个 Provider、每类事件，最坏情况下 hook 总耗时 vs 宿主超时（Claude Stop 15s、其他 10s、SessionEnd 3s；Codex/Qoder 以 `init` 写入值为准；OpenCode 插件用 `spawnSync`，确认其超时）。
 
+- **附带确认（来自 A 手验）**：OpenCode/Qoder 短轮次的 Stop 会被延后 180 秒（`DEFERRED_TERMINAL_GRACE_MS`，`recorder.ts:3000-3013`、`3340-3345`）。daemon 在线时由 recover 轮询收尾；没有 daemon 时只能等下一次 hook 或 scry 命令。评估 direct 模式下谁来触发宽限期结束后的 recover，结论写进报告（只评估，不改宽限时长）。
+
 **红线**：不能为了快而在超时前丢弃事件；超时必须落 inbox。
 
 ## C2（L1）长路径下快路径失效
