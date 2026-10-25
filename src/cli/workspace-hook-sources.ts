@@ -41,6 +41,7 @@ export const PROJECT_DIR_ENV: Record<Exclude<InitProvider, 'opencode'>, string> 
 export function providerHookSource(): string {
   return `#!/bin/sh
 set -u
+unset SCRY_RECORDER_DAEMON_TRIED
 workspace="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 0
 # Failure-only diagnostics: the successful fast path starts no extra process.
 skip() {

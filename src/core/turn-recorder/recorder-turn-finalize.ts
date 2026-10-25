@@ -93,13 +93,16 @@ export async function finalizeOpenTurn(
     ? []
     : limitTurnDiffPatchBytes(await persistTurnDiffContent(
         enablement.dataRoot,
-        await Promise.all(open.captures.map(async ({ repository, capture }) =>
-          finishGitTurnDiff(capture, undefined, {
+        await Promise.all(open.captures.map(async ({ repository, capture }) => ({
+          ...await finishGitTurnDiff(capture, undefined, {
             ...turnChangeHints(repository, mergedEvents),
             patchExcludeBasenames: enablement.config.capture.patchExcludeBasenames,
             completePatches: true
-          })
-        ))
+          }),
+          // A failed Git baseline may not resolve repoRoot. Preserve the known request
+          // directory separately, without inventing a successful Git-root observation.
+          requestedRoot: repository
+        })))
       ))
   const diffEvents: TraceEvent[] = diffs.map((turnDiff, index) => ({
     id: `diff-${open.generation}-${index}`,
@@ -187,6 +190,15 @@ export async function finalizeOpenTurn(
       source: [...evidence.diff.source, 'repository_discovery'],
       omissionReason: [evidence.diff.omissionReason, reason].filter(Boolean).join('; ')
     }
+  }
+  if (open.repositoryDiscovery) {
+    evidence.diff.discovery = {
+      ...open.repositoryDiscovery,
+      requestedRoots: open.captures.map(capture => capture.repository)
+    }
+  }
+  if ((diffs.length > 0 || evidence.diff.discovery) && !evidence.diff.source.includes('repository_discovery')) {
+    evidence.diff.source.push('repository_discovery')
   }
   if (!enablement.config.capture.prompt) evidence.user = disabled('prompt capture disabled by config')
   if (!enablement.config.capture.assistant) {

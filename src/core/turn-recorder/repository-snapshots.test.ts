@@ -6,6 +6,8 @@ import { promisify } from 'node:util'
 import { afterEach, expect, it, vi } from 'vitest'
 import { handleRecorderHook } from './recorder.js'
 import { listRecords } from './store.js'
+import { isAgentTurnRecord } from '../../shared/turn-record.js'
+import { normalizeTurnDiffSnapshot } from '../../shared/trace.js'
 
 // Inject two baseline failures, not synthetic records. Discovery, successful Git capture,
 // finish, aggregation, commit and cold record reads all use production implementations.
@@ -52,6 +54,7 @@ it('retains every discovered repository and its captured/timeout/failed outcome 
   const records = await listRecords(join(root, '.scry'))
   expect(records).toHaveLength(1)
   const diff = records[0].diff
+  expect(diff).toMatchObject({ discovery: { requestedRoots: [captured, join(root, 'failed'), join(root, 'timeout')], maxDepth: 2, depthLimitedDirectories: 0 } })
   expect(diff.status).toBe('partial')
   expect(diff.value).toHaveLength(3)
   expect(diff.value).toEqual([
@@ -61,4 +64,12 @@ it('retains every discovered repository and its captured/timeout/failed outcome 
   ])
   expect(diff.value?.[1]).not.toHaveProperty('repoRoot')
   expect(diff.value?.[2]).not.toHaveProperty('repoRoot')
+  expect(normalizeTurnDiffSnapshot({ version: 1, ...diff.value?.[1] })?.requestedRoot).toBe(join(root, 'failed'))
+  const invalid = { ...records[0], diff: { ...diff, value: diff.value?.map(snapshot => ({ ...snapshot, requestedRoot: 42 })) } }
+  expect(isAgentTurnRecord(invalid)).toBe(false)
+  expect(isAgentTurnRecord({ ...records[0], diff: { ...diff, discovery: { ...diff.discovery, requestedRoots: [captured, captured] } } })).toBe(false)
+  expect(isAgentTurnRecord({ ...records[0], diff: { ...diff, discovery: { ...diff.discovery, depthLimitedDirectories: -1 } } })).toBe(false)
+  const { discovery: _discovery, ...legacyDiff } = diff
+  const legacy = { ...records[0], diff: { ...legacyDiff, value: diff.value?.map(({ requestedRoot: _requestedRoot, ...snapshot }) => snapshot) } }
+  expect(isAgentTurnRecord(legacy)).toBe(true)
 }, 15_000)

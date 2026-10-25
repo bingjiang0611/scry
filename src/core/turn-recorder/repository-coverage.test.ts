@@ -82,6 +82,7 @@ it('keeps a stalled closing diff unavailable and retains both the attribution ga
   expect(records).toHaveLength(1)
   expect(records[0].diff.status).toBe('unavailable')
   expect(records[0].diff.value).toBeUndefined()
+  expect(records[0].diff).toMatchObject({ discovery: { requestedRoots: [root], maxDepth: 2, depthLimitedDirectories: 1 } })
   expect(records[0].diff.omissionReason).toContain('baseline')
   expect(records[0].diff.omissionReason).toContain('maxDepth=2')
 }, 15_000)

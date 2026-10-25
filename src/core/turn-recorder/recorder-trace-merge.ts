@@ -40,7 +40,16 @@ export function dedupeTraceEvents(events: TraceEvent[]): TraceEvent[] {
       hookOutcome: event.hookOutcome,
       tool: event.tool,
       text: event.text,
-      ts: event.ts
+      ts: event.ts,
+      // Concurrent repository snapshots can finish in the same millisecond. Their
+      // identity is the requested/resolved repository and baseline, not just stage/time.
+      diff: event.turnDiff ? {
+        requestedRoot: event.turnDiff.requestedRoot,
+        repoRoot: event.turnDiff.repoRoot,
+        scope: event.turnDiff.scope,
+        beforeAt: event.turnDiff.beforeAt,
+        status: event.turnDiff.status
+      } : undefined
     })
     if (seen.has(key)) return false
     seen.add(key)

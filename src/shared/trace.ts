@@ -1,36 +1,52 @@
-import type {
-  AgentInputAttachment,
-  AgentIntervention,
-  AgentQuestionRequest,
-  AgentStopState,
-  AgentSteerCapability,
-  AgentSteerEvidence,
-  RunTerminationReason,
-  RuntimeFailureStage,
-  RuntimeProvider
-} from './runtime.js'
 import type { ProviderId } from './provider.js'
-import type { BillingProvider } from './billing.js'
+import type { AgentInputAttachment, AgentQuestionRequest, AgentStopState, RuntimeProvider, RuntimeFailureStage, RunTerminationReason, AgentIntervention, AgentSteerCapability, AgentSteerEvidence } from './runtime.js'
 import type { CreditUsageEvidence } from './credit-usage.js'
+import type { CostSource, CostConfidence, CostUnit, ModelUsageRow } from './trace-usage.js'
+import type { TurnDiffSnapshot } from './turn-diff.js'
+import type { BillingProvider } from './billing.js'
 import type { BackgroundWork } from './background-work.js'
-import { isToolContent, type ToolContent } from './tool-content.js'
+
+export type {
+  CostSource,
+  CostConfidence,
+  CostUnit,
+  ModelUsageRow,
+  DbStats,
+  UsageAnalyticsRangeDays,
+  QoderCreditEvidence,
+  UsageAnalyticsAggregate,
+  UsageAnalyticsDayRow,
+  UsageAnalyticsDailyProviderRow,
+  UsageAnalyticsBreakdownRow,
+  UsageAnalytics,
+  UsageStats
+} from './trace-usage.js'
+export {
+  type DiffFileChange,
+  type DiffFile,
+  type TurnDiffStatus,
+  type TurnDiffReason,
+  type WorkspaceDiffResult,
+  TURN_DIFF_STAGE,
+  SESSION_DIFF_STAGE,
+  TURN_DIFF_PREVIEW_STAGE,
+  SESSION_DIFF_PREVIEW_STAGE,
+  isDiffSnapshotStage,
+  isDiffPreviewStage,
+  type TurnDiffBaselineOrigin,
+  type TurnDiffPatchStatus,
+  type TurnDiffPatchReason,
+  type TurnDiffFallbackReason,
+  type TurnDiffCollection,
+  type TurnDiffSnapshot,
+  normalizeTurnDiffSnapshot
+} from './turn-diff.js'
 
 // 统一 trace 事件模型 —— 所有 Provider 共享 kind/baggage/stage 设计，
 // 让 SDK stream 和未来 codex adapter 都归一化到同一格式（一份数据多处用）。
 
 export type TraceKind = 'tool' | 'skill' | 'agent' | 'human' | 'model' | 'harness' | 'hook'
 export type FileOp = 'read' | 'write' | 'edit'
-export type CostSource =
-  | 'sdk_estimate'
-  | 'gateway_reported'
-  | 'provider_reported'
-  | 'provider_bill'
-  | 'official_telemetry'
-  | 'analytics_report'
-  | 'price_table'
-  | 'user_override'
-export type CostConfidence = 'exact' | 'provider_reported' | 'estimated' | 'inferred'
-export type CostUnit = 'usd' | 'credits' | 'token' | 'custom'
 
 // P3 审计：危险工具调用的标记（观测，不阻塞）。danger=高危(删/提权/push/远程脚本)，warn=可疑(跨项目写/MCP写)。
 export type DangerLevel = 'danger' | 'warn'
@@ -94,353 +110,12 @@ export interface McpLiveStatus {
   toolNames?: string[]
 }
 
-// P2 Files & Diff（RFC §8.4）：最终 git diff 的每文件增删（绝对路径），与工具足迹对照。
-export type DiffFileChange = 'added' | 'modified' | 'deleted'
-
-export interface DiffFile {
-  path: string
-  added: number
-  deleted: number
-  change?: DiffFileChange
-  binary?: boolean
-  patch?: string
-  /** Complete patch body plus a bounded inline preview. Absence is legacy or unavailable capture. */
-  patchContent?: ToolContent
-  patchStatus?: TurnDiffPatchStatus
-  patchReason?: TurnDiffPatchReason
-}
-
-export type TurnDiffStatus = 'captured' | 'unavailable' | 'timeout' | 'failed'
-export type TurnDiffReason = 'not_git' | 'no_head' | 'deadline' | 'git_error' | 'no_baseline'
-
-export type WorkspaceDiffResult = (
-  | { status: 'captured'; files: DiffFile[] }
-  | { status: Exclude<TurnDiffStatus, 'captured'>; reason: TurnDiffReason | 'request_failed' | 'workspace_limit' | 'workspace_attributes' | 'workspace_file_type' | 'workspace_index' | 'workspace_submodule'; files: [] }
-) & { collectedAt?: string }
-
-// Diff 快照的四个 harness stage。`*_preview` 是运行中的临时快照（同一 Git capture 的非消费式重算），
-// 终态 `turn_diff` / `session_diff` 一到达就在展示上取代它，且不写入会话 archive。
-export const TURN_DIFF_STAGE = 'turn_diff'
-export const SESSION_DIFF_STAGE = 'session_diff'
-export const TURN_DIFF_PREVIEW_STAGE = 'turn_diff_preview'
-export const SESSION_DIFF_PREVIEW_STAGE = 'session_diff_preview'
-
-export function isDiffSnapshotStage(stage: string): boolean {
-  return (
-    stage === TURN_DIFF_STAGE ||
-    stage === SESSION_DIFF_STAGE ||
-    stage === TURN_DIFF_PREVIEW_STAGE ||
-    stage === SESSION_DIFF_PREVIEW_STAGE
-  )
-}
-
-export function isDiffPreviewStage(stage: string): boolean {
-  return stage === TURN_DIFF_PREVIEW_STAGE || stage === SESSION_DIFF_PREVIEW_STAGE
-}
-
 /**
  * Hook 生命周期投递 stage。Provider 只把 hook 事件投递给外部 hook 进程（Codex 终端会话就是这样），
  * 不暴露被执行脚本的 command / exit code / outcome 时，recorder 只能证明「该 hook 事件确实触发过」。
  * 这类事件不得与 `hook_started` / `hook_response`（带脚本身份的真实 hook 运行）混为一谈。
  */
 export const HOOK_DELIVERY_STAGE = 'hook_delivery'
-
-/**
- * 会话净 diff 的基线来源：`session_start` = 会话第一轮开始前捕获的原始基线；
- * `resumed` = 该基线在本进程内不存在（恢复/选择会话/重启后）而当场重锚，
- * 净 diff 只覆盖「自重锚以来」，UI 必须照实说明，不得冒充整段会话。
- */
-export type TurnDiffBaselineOrigin = 'session_start' | 'resumed'
-export type TurnDiffPatchStatus = 'captured' | 'truncated' | 'binary' | 'unavailable'
-export type TurnDiffPatchReason = 'deadline' | 'git_error' | 'budget' | 'policy'
-export type TurnDiffFallbackReason = 'forced' | 'discovery_failed' | 'candidate_limit' | 'git_semantics' | 'targeted_failed'
-
-export interface TurnDiffCollection {
-  strategy: 'targeted' | 'full_fallback'
-  evidence: 'git_status' | 'git_status+structured' | 'fallback'
-  candidatePathCount: number
-  discoveryMs: number
-  targetedMs?: number
-  fallbackMs?: number
-  fallbackReason?: TurnDiffFallbackReason
-  /** The collection timings/path count belong to the turn's same-afterAt capture, not another scan. */
-  sharedAfter?: 'turn'
-}
-
-export interface TurnDiffSnapshot {
-  version: 1
-  status: TurnDiffStatus
-  reason?: TurnDiffReason
-  files: DiffFile[]
-  repoRoot?: string
-  scope?: string
-  beforeAt: string
-  afterAt: string
-  captureMs: number
-  /** Releases this capture's ownership; a referenced shared store lives until its last peer releases it. */
-  cleanup: 'ok' | 'failed'
-  collection?: TurnDiffCollection
-  /** 仅 session_diff / session_diff_preview 携带：净 diff 的基线是会话首轮前还是恢复后重锚。 */
-  baseline?: TurnDiffBaselineOrigin
-}
-
-function nonNegativeInteger(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.floor(value) : null
-}
-
-export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | undefined {
-  if (!value || typeof value !== 'object') return undefined
-  const raw = value as Record<string, unknown>
-  if (raw.version !== 1) return undefined
-  if (!['captured', 'unavailable', 'timeout', 'failed'].includes(String(raw.status))) return undefined
-  if (!Array.isArray(raw.files) || typeof raw.beforeAt !== 'string' || typeof raw.afterAt !== 'string') return undefined
-  const captureMs = nonNegativeInteger(raw.captureMs)
-  if (captureMs == null || (raw.cleanup !== 'ok' && raw.cleanup !== 'failed')) return undefined
-  const files = raw.files.flatMap((entry): DiffFile[] => {
-    if (!entry || typeof entry !== 'object') return []
-    const file = entry as Record<string, unknown>
-    const added = nonNegativeInteger(file.added)
-    const deleted = nonNegativeInteger(file.deleted)
-    if (typeof file.path !== 'string' || !file.path || added == null || deleted == null) return []
-    const binary = file.binary === true
-    const change = ['added', 'modified', 'deleted'].includes(String(file.change))
-      ? (file.change as DiffFileChange)
-      : undefined
-    const patch = typeof file.patch === 'string' && file.patch.length > 0 && file.patch.length <= 1_100_000 ? file.patch : undefined
-    const patchContent = isToolContent(file.patchContent) ? file.patchContent : undefined
-    const patchStatus = ['captured', 'truncated', 'binary', 'unavailable'].includes(String(file.patchStatus))
-      ? (file.patchStatus as TurnDiffPatchStatus)
-      : undefined
-    const patchReason = ['deadline', 'git_error', 'budget', 'policy'].includes(String(file.patchReason))
-      ? (file.patchReason as TurnDiffPatchReason)
-      : undefined
-    const patchFields =
-      (patchStatus === 'captured' || patchStatus === 'truncated') && (patch || patchContent?.contentRef)
-        ? { ...(patch ? { patch } : {}), ...(patchContent ? { patchContent } : {}), patchStatus }
-        : patchStatus === 'binary' && binary
-          ? { patchStatus }
-          : patchStatus === 'unavailable' && patchReason
-            ? { patchStatus, patchReason }
-            : {}
-    return [{ path: file.path, added, deleted, ...(change ? { change } : {}), ...(binary ? { binary: true } : {}), ...patchFields }]
-  })
-  const reason = ['not_git', 'no_head', 'deadline', 'git_error', 'no_baseline'].includes(String(raw.reason))
-    ? (raw.reason as TurnDiffReason)
-    : undefined
-  const collectionRaw = raw.collection && typeof raw.collection === 'object'
-    ? raw.collection as Record<string, unknown>
-    : undefined
-  const candidatePathCount = nonNegativeInteger(collectionRaw?.candidatePathCount)
-  const discoveryMs = nonNegativeInteger(collectionRaw?.discoveryMs)
-  const targetedMs = nonNegativeInteger(collectionRaw?.targetedMs)
-  const fallbackMs = nonNegativeInteger(collectionRaw?.fallbackMs)
-  const fallbackReason = ['forced', 'discovery_failed', 'candidate_limit', 'git_semantics', 'targeted_failed']
-    .includes(String(collectionRaw?.fallbackReason))
-    ? collectionRaw?.fallbackReason as TurnDiffFallbackReason
-    : undefined
-  const collectionShapeValid =
-    (collectionRaw?.strategy === 'targeted' &&
-      (collectionRaw.evidence === 'git_status' || collectionRaw.evidence === 'git_status+structured') &&
-      fallbackReason == null) ||
-    (collectionRaw?.strategy === 'full_fallback' &&
-      collectionRaw.evidence === 'fallback' &&
-      fallbackReason != null)
-  const collection =
-    collectionRaw &&
-    collectionShapeValid &&
-    candidatePathCount != null &&
-    discoveryMs != null
-      ? {
-          strategy: collectionRaw.strategy as TurnDiffCollection['strategy'],
-          evidence: collectionRaw.evidence as TurnDiffCollection['evidence'],
-          candidatePathCount,
-          discoveryMs,
-          ...(targetedMs != null ? { targetedMs } : {}),
-          ...(fallbackMs != null ? { fallbackMs } : {}),
-          ...(fallbackReason ? { fallbackReason } : {}),
-          ...(collectionRaw.sharedAfter === 'turn' ? { sharedAfter: 'turn' as const } : {})
-        }
-      : undefined
-  const baseline = raw.baseline === 'session_start' || raw.baseline === 'resumed'
-    ? (raw.baseline as TurnDiffBaselineOrigin)
-    : undefined
-  return {
-    version: 1,
-    status: raw.status as TurnDiffStatus,
-    ...(reason ? { reason } : {}),
-    files,
-    ...(typeof raw.repoRoot === 'string' ? { repoRoot: raw.repoRoot } : {}),
-    ...(typeof raw.scope === 'string' ? { scope: raw.scope } : {}),
-    beforeAt: raw.beforeAt,
-    afterAt: raw.afterAt,
-    captureMs,
-    cleanup: raw.cleanup,
-    ...(collection ? { collection } : {}),
-    ...(baseline ? { baseline } : {})
-  }
-}
-
-// P0：result 的 per-model 用量明细（SDK result.modelUsage 展开，落 model_usage 子表）。
-export interface ModelUsageRow {
-  model: string
-  inputTokens?: number
-  outputTokens?: number
-  cacheReadTokens?: number
-  cacheCreationTokens?: number
-  cacheCreation5mTokens?: number
-  cacheCreation1hTokens?: number
-  reasoningTokens?: number
-  costUsd?: number
-  costSource?: CostSource
-  costConfidence?: CostConfidence
-  costUnit?: CostUnit
-  contextWindow?: number
-  billingProvider?: BillingProvider
-  upstreamProvider?: string
-  accountLabel?: string
-  usageSource?: string
-}
-
-// B2/P0/P2：sqlite 跨会话分析结果（从 spans/model_usage 聚合），跨 main/preload/renderer 共用。
-export interface DbStats {
-  status?: 'ready' | 'unavailable' | 'query_error'
-  totals: { cost: number | null; tin: number | null; tout: number | null; turns: number; toolCalls?: number; dangerEvents?: number }
-  topTools: { tool: string; n: number; mcp: number }[]
-  byCwd: { cwd: string; cost: number | null; turns: number }[]
-  byModel: { model: string; tin: number | null; tout: number | null; cost: number | null }[]
-  // P2 Analytics：工具耗时（墙钟推算）+ 成功率。avgMs 来自 tool_use→tool_result 墙钟差，errors=失败次数。
-  toolStats: { tool: string; n: number; avgMs: number; errors: number }[]
-  // P3 跨会话危险审计趋势：哪些危险操作最频繁（从 spans.danger_* 聚合）。
-  dangerTrend: { reason: string; level: string; n: number }[]
-  // Analytics v7：字段可选以兼容 dev/HMR 中旧 preload；main 的当前实现始终返回完整形状。
-  tokenDaily?: {
-    day: string
-    input: number | null
-    output: number | null
-    cacheRead: number | null
-    cacheWrite: number | null
-    turns: number
-    inputKnownTurns: number
-    outputKnownTurns: number
-    cacheReadKnownTurns: number
-    cacheWriteKnownTurns: number
-  }[]
-  dangerDaily?: { day: string; danger: number; warn: number }[]
-  comparison?: {
-    current: { tokens: number | null; tokenKnownTurns: number; turns: number; toolCalls: number; danger: number }
-    previous: { tokens: number | null; tokenKnownTurns: number; turns: number; toolCalls: number; danger: number }
-    change: { tokensPct: number | null; turnsPct: number | null; toolCallsPct: number | null; dangerPct: number | null }
-  }
-  cacheReuse?: {
-    providerId: ProviderId
-    turns: number
-    inputTokens: number | null
-    cacheReadTokens: number | null
-    cacheWriteTokens: number | null
-    inputKnownTurns: number
-    cacheReadKnownTurns: number
-    cacheWriteKnownTurns: number
-    comparableTurns: number
-    reuseRate: number | null
-    denominator: 'separate_input' | 'input_includes_cache' | 'upstream_dependent' | 'unknown'
-  }[]
-  mcpLatency?: { server: string; calls: number; p50Ms: number | null; p95Ms: number | null; errors: number }[]
-  providerCoverage?: {
-    providerId: ProviderId
-    turns: number
-    inputKnownTurns: number
-    outputKnownTurns: number
-    cacheReadKnownTurns: number
-    cacheWriteKnownTurns: number
-    dangerCoverage: 'classified' | 'unsupported'
-  }[]
-  interventions?: {
-    requested: number
-    total: number
-    answered: number
-    cancelled: number
-    questions: number
-    clarification: number
-    permission: number
-    waitMs: number
-  }
-}
-
-export type UsageAnalyticsRangeDays = 7 | 30 | 90
-
-export interface QoderCreditEvidence {
-  credits: number | null
-  knownRequests: number
-  missingRequests: number
-  matchedTurns: number
-  totalTurns: number
-  source: 'qoder_native_transcript' | 'qoder_recorded_usage' | 'pi_qoder_credit_observation' | 'qoder_mixed_usage'
-  omissionReason?: string
-  // Only matched main-transcript requests; never a complete account bill.
-  completeness: 'partial'
-}
-
-export interface UsageAnalyticsAggregate {
-  qoderCredits?: QoderCreditEvidence
-  officialApiCostRows?: number
-  inputTokens: number | null
-  outputTokens: number | null
-  cacheReadTokens: number | null
-  cacheWriteTokens: number | null
-  reasoningTokens: number | null
-  costUsd: number | null
-  turns: number
-  usageRows: number
-  inputKnownRows: number
-  outputKnownRows: number
-  cacheReadKnownRows: number
-  cacheWriteKnownRows: number
-  reasoningKnownRows: number
-  tokenKnownRows: number
-  costKnownRows: number
-  exactCostRows: number
-  providerReportedCostRows: number
-  estimatedCostRows: number
-  inferredCostRows: number
-}
-
-export interface UsageAnalyticsDayRow extends UsageAnalyticsAggregate {
-  day: string
-}
-
-export interface UsageAnalyticsDailyProviderRow extends UsageAnalyticsDayRow {
-  provider: BillingProvider
-}
-
-export interface UsageAnalyticsBreakdownRow extends UsageAnalyticsAggregate {
-  provider: BillingProvider
-  model: string | null
-}
-
-export interface UsageAnalytics {
-  status: 'ready' | 'unavailable' | 'query_error'
-  rangeDays: UsageAnalyticsRangeDays
-  fromDay: string
-  toDay: string
-  observedAt: number
-  days: string[]
-  totals: UsageAnalyticsAggregate
-  byDay: UsageAnalyticsDayRow[]
-  dailyByProvider: UsageAnalyticsDailyProviderRow[]
-  byProvider: UsageAnalyticsBreakdownRow[]
-  byModel: UsageAnalyticsBreakdownRow[]
-}
-
-export interface UsageStats {
-  status: 'ready' | 'partial' | 'unavailable' | 'query_error'
-  cost: number | null
-  tin: number | null
-  tout: number | null
-  turns: number
-  invalidLines: number
-  sourceBytes?: number
-  error?: string
-}
 
 export type CompactionTrigger = 'auto' | 'manual'
 

@@ -1,5 +1,6 @@
 import { open, rename, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, dirname, isAbsolute, join } from 'node:path'
+import { available, partial, unavailable, type Evidence } from '../../shared/turn-record.js'
 import { appendRotatingLog, withDirectoryLock } from './io.js'
 import { hasSymlinkComponent } from './config.js'
 
@@ -61,7 +62,10 @@ export async function readHookSkips(workspace: string): Promise<HookSkipSummary>
       }
     })
   }
-  const tails = await Promise.all([logTail(`${path}.1`), logTail(path)])
+  return summarizeTails(await Promise.all([logTail(`${path}.1`), logTail(path)]))
+}
+
+function summarizeTails(tails: Array<{ text: string; truncated: boolean }>, reasonFilter?: string): HookSkipSummary {
   let count = 0
   let recentCount = 0
   const recentSince = Date.now() - 24 * 60 * 60 * 1000
@@ -69,7 +73,7 @@ export async function readHookSkips(workspace: string): Promise<HookSkipSummary>
   for (const { text } of tails) {
     for (const line of text.split('\n')) {
       const [at, provider, event, reason, code] = line.split('\t')
-      if (!provider || !event || !reason || !/^\d+$/.test(code ?? '')) continue
+      if (!provider || !event || !reason || !/^\d+$/.test(code ?? '') || (reasonFilter !== undefined && reason !== reasonFilter)) continue
       count++
       const timestamp = Date.parse(at)
       // Unknown clocks must not hide failures. Future clocks also remain actionable.
@@ -79,4 +83,32 @@ export async function readHookSkips(workspace: string): Promise<HookSkipSummary>
     }
   }
   return { count, recentCount, lastAt, scope: 'retained_log_window', truncated: tails.some(tail => tail.truncated) }
+}
+
+export type UserHookSkipEvidence = Evidence<HookSkipSummary & {
+  reason: 'bridge_not_found'
+  workspaceAttribution: 'unknown'
+}>
+
+/** C3's bootstrap log contains no workspace identity. Never merge it into workspace counters. */
+export async function readUserHookSkips(env: NodeJS.ProcessEnv = process.env): Promise<UserHookSkipEvidence> {
+  const source = ['user_global_hook_skip_log']
+  const stateRoot = env.XDG_STATE_HOME || (env.HOME ? join(env.HOME, '.local/state') : undefined)
+  if (!stateRoot || !isAbsolute(stateRoot)) return unavailable('user state directory unavailable', source)
+  try {
+    const relativeLog = join(basename(stateRoot), 'scry/hook-skip.log')
+    if (await hasSymlinkComponent(dirname(stateRoot), relativeLog) ||
+      await hasSymlinkComponent(dirname(stateRoot), `${relativeLog}.1`)) {
+      return unavailable('user hook diagnostics symbolic link', source)
+    }
+    const path = join(stateRoot, 'scry/hook-skip.log')
+    // Read-only: diagnostics must not rotate, rewrite, or claim ownership of user-global evidence.
+    const summary = summarizeTails(await Promise.all([logTail(`${path}.1`), logTail(path)]), 'bridge_not_found')
+    const value = { ...summary, reason: 'bridge_not_found' as const, workspaceAttribution: 'unknown' as const }
+    return summary.truncated
+      ? partial(value, source, 'only bounded retained user log tails were read', 'exact')
+      : available(value, source)
+  } catch {
+    return unavailable('user hook diagnostics unreadable', source)
+  }
 }

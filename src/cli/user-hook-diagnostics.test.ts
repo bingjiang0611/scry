@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { runScryCli } from './scry.js'
@@ -67,6 +67,27 @@ it('uses HOME when XDG state is empty, keeps unknown clocks actionable, and does
   expect(JSON.stringify(bundle)).not.toContain('PRIVATE_UNPARSEABLE_CLOCK')
 })
 
+it('still exposes user-global bridge failures when this workspace has no recorder config', async () => {
+  const root = await workspace()
+  await rm(join(root, 'scry.config.json'))
+  await writeFile(await userLogPath(), `${new Date().toISOString()}\tcodex\tStop\tbridge_not_found\t0\n`)
+  const result = await doctor(root)
+  expect(result.code).toBe(3)
+  expect(result.report.userHookSkips).toMatchObject({ status: 'available', value: { count: 1, workspaceAttribution: 'unknown' } })
+  expect(result.check?.status).toBe('warn')
+  expect(await collectSupportBundle(root)).toMatchObject({ recorder: { enabled: false }, userHookSkips: { value: { count: 1 } } })
+})
+
+it.each(['relative-state', ''])('does not guess a user log location for an unusable state directory (%s)', async state => {
+  const root = await workspace()
+  vi.stubEnv('HOME', '')
+  vi.stubEnv('XDG_STATE_HOME', state)
+  const result = await doctor(root)
+  expect(result.report.userHookSkips).toMatchObject({ status: 'unavailable', omissionReason: 'user state directory unavailable' })
+  expect(result.report.userHookSkips).not.toHaveProperty('value')
+  expect(result.check?.status).toBe('warn')
+})
+
 it('reports a missing user log as an observed empty retained window', async () => {
   const root = await workspace()
   const result = await doctor(root)
@@ -96,6 +117,17 @@ it('keeps unreadable user diagnostics unavailable without breaking workspace dia
   expect(result.report.userHookSkips).not.toHaveProperty('value')
   expect(result.check?.status).toBe('warn')
   expect(await collectSupportBundle(root)).toMatchObject({ userHookSkips: { status: 'unavailable' } })
+})
+
+it('warns when truncation hides earlier bridge failures even if the visible tail has no matching rows', async () => {
+  const root = await workspace()
+  const path = await userLogPath()
+  const at = new Date().toISOString()
+  await writeFile(path, `${at}\tcodex\tStop\tbridge_not_found\t0\n` + `${at}\tcodex\tStop\tignored_reason\t0\n`.repeat(30_000))
+  const result = await doctor(root)
+  expect(result.report.userHookSkips).toMatchObject({ status: 'partial', value: { count: 0, truncated: true } })
+  expect(result.check?.status).toBe('warn')
+  expect(result.code).toBe(0)
 })
 
 it('bounds user-log reads without rotating or rewriting the user log', async () => {

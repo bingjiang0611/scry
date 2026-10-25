@@ -1,6 +1,6 @@
 import { type ParsedArgs, workspaceOf, print } from './command-args.js'
 import { recorderEnablement, refreshRecorderPendingHealth, OPEN_TURN_EXPIRY_MS } from '../core/turn-recorder/recorder.js'
-import { readHookSkips } from '../core/turn-recorder/hook-diagnostics.js'
+import { readHookSkips, readUserHookSkips } from '../core/turn-recorder/hook-diagnostics.js'
 import { RECORDER_VERSION, readHealth, verifyStore, lastRecordVersion } from '../core/turn-recorder/store.js'
 import { recorderStaleOpenTurns } from '../core/turn-recorder/runtime-state.js'
 import { providerHookScriptState } from './workspace-init.js'
@@ -16,13 +16,28 @@ import { relative } from 'node:path'
 export async function doctorCommand(args: ParsedArgs): Promise<number> {
   const workspace = workspaceOf(args)
   const enablement = await recorderEnablement(workspace)
-  const hookSkips = await readHookSkips(workspace)
+  const [hookSkips, userHookSkips] = await Promise.all([readHookSkips(workspace), readUserHookSkips()])
   const runtime = {
     recorderVersion: RECORDER_VERSION,
     nodeVersion: process.versions.node,
     platform: `${process.platform}-${process.arch}`
   }
   type Check = { id: string; status: 'pass' | 'fail' | 'warn'; detail: string; remediation?: string }
+  const userSummary = userHookSkips.value
+  const userWindowEmpty = userHookSkips.status === 'available' && userSummary?.count === 0
+  // This log cannot identify a workspace. Show the warning without changing this
+  // workspace's health/exit code or adding its rows to workspace failure counters.
+  const userHookCheck: Check = {
+    id: 'hook.userBridgeSkips',
+    status: userWindowEmpty ? 'pass' : 'warn',
+    detail: userSummary
+      ? `user-global bridge_not_found; workspace unknown; ${userSummary.recentCount} within 24h or with unknown time; ${userSummary.count} in retained log window` +
+        (userSummary.truncated ? '; bounded tail only' : '')
+      : `user-global bridge_not_found; workspace unknown; unavailable: ${userHookSkips.omissionReason}`,
+    ...(userWindowEmpty ? {} : {
+      remediation: 'inspect the user state scry/hook-skip.log, identify the originating repository, then init or repair its bridge; no workspace identity is stored in this log'
+    })
+  }
   if (!enablement.enabled) {
     const missing = enablement.reason === 'invalid_config' || enablement.reason === 'missing_config'
     const checks: Check[] = [{
@@ -30,11 +45,12 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
       status: 'fail',
       detail: enablement.detail ? `${enablement.reason}: ${enablement.detail}` : enablement.reason,
       remediation: missing ? 'run `scry init` in the Git repository root' : 'remove `.scry-disabled` or set SCRY_RECORDER_ENABLED=1'
-    }]
+    }, userHookCheck]
     print({
       schemaVersion: 1,
       status: enablement.reason === 'invalid_config' ? 'error' : 'unavailable',
       hookSkips,
+      userHookSkips,
       healthy: false,
       enabled: false,
       ...runtime,
@@ -74,6 +90,7 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
       detail: `${hookSkips.recentCount} hook failure(s) within 24h or with unknown time; ${hookSkips.count} in retained log window; latest ${hookSkips.lastAt ?? 'unavailable'}`,
       ...(hookSkips.count > 0 ? { remediation: 'inspect .scry/logs/hook-skip.log and repair the CLI/Node paths with `scry integrations repair --yes`' } : {})
     },
+    userHookCheck,
     {
       id: 'store.integrity',
       status: store.ok ? 'pass' : 'fail',
@@ -135,6 +152,7 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
     schemaVersion: 1,
     status: !store.ok ? 'corrupt' : hookSkips.recentCount > 0 ? 'error' : degraded ? 'degraded' : 'healthy',
     hookSkips,
+    userHookSkips,
     healthy: store.ok && !degraded,
     enabled: true,
     ...runtime,
