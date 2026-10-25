@@ -5,6 +5,7 @@ import type { AgentTurnRecord } from '../../shared/turn-record.js'
 import type { GitTurnDiffCapture } from './git.js'
 import { listFiles, readJson, withDirectoryLock } from './io.js'
 import { safeKey } from './store.js'
+import { recorderHasRetryableInbox, recorderInboxEntries } from './inbox.js'
 
 export interface RecorderSessionState {
   schemaVersion: 1
@@ -76,7 +77,15 @@ export function withRecorderSessionLock<T>(
   dataRoot: string, provider: ProviderId, sessionId: string,
   action: () => Promise<T>, options: { waitMs?: number; ttlMs?: number } = {}
 ): Promise<T> {
-  return withDirectoryLock(recorderSessionLock(dataRoot, provider, sessionId), async () => {
+  return withRecorderSessionKeyLock(dataRoot, provider, safeKey(sessionId), action, options)
+}
+
+/** Recovery can lock a corrupt inbox without trusting its first payload for a session id. */
+export function withRecorderSessionKeyLock<T>(
+  dataRoot: string, provider: ProviderId, sessionKey: string,
+  action: () => Promise<T>, options: { waitMs?: number; ttlMs?: number } = {}
+): Promise<T> {
+  return withDirectoryLock(join(dataRoot, 'locks', 'sessions', provider, `${sessionKey}.lock`), async () => {
     // Admission only: GC either observes our session lock, or finishes before we publish.
     // Release the maintenance gate before work so independent sessions remain concurrent.
     await withDirectoryLock(join(dataRoot, 'locks', 'maintenance.lock'), async () => {}, options)
@@ -108,6 +117,12 @@ export async function recorderPendingHealth(
     const providerRoot = join(dataRoot, 'runtime', provider)
     for (const session of await listFiles(providerRoot)) {
       const root = join(providerRoot, session)
+      for (const entry of await recorderInboxEntries(root)) {
+        pendingCount++
+        // queueHook encodes the arrival clock in the name; file mtime would reset on repair.
+        const arrival = /^(\d{15})-/.exec(entry.name)
+        if (arrival) oldestPendingAgeMs = Math.max(oldestPendingAgeMs, Math.max(0, now - Number(arrival[1])))
+      }
       const open = await readJson<RecorderOpenTurnState>(
         recorderOpenPath(root)
       )
@@ -175,7 +190,7 @@ export async function recorderHasOpenTurn(dataRoot: string): Promise<boolean> {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return true
       }
       // A hook queued behind a busy session lock still needs a recovery pass to be applied.
-      if ((await listFiles(join(providerRoot, session, 'inbox'))).some((name) => name.endsWith('.json'))) return true
+      if (await recorderHasRetryableInbox(join(providerRoot, session))) return true
     }
   }
   return false

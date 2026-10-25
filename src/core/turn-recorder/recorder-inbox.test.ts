@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { recoverRecorder } from './recorder'
+import { runScryCli } from '../../cli/scry'
 import { readHealth, safeKey } from './store'
 import { recorderHasOpenTurn, recorderPendingHealth } from './runtime-state'
 
@@ -40,6 +41,7 @@ afterEach(async () => {
   faults.readPath = ''
   faults.readCode = 'EACCES'
   faults.attempts = 0
+  vi.restoreAllMocks()
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
 
@@ -148,6 +150,25 @@ describe('recorder inbox failure isolation', () => {
     expect(await readdir(f.inbox)).toEqual([])
     expect((await recorderPendingHealth(f.dataRoot)).pendingCount).toBe(0)
     expect((await readHealth(f.dataRoot)).droppedEvents).toBe(0)
+  })
+
+  it('exposes quarantine backlog through real CLI status and doctor checks', async () => {
+    const f = await fixture()
+    await f.queue(1, 'reject first')
+    faults.apply = true
+    await recoverRecorder(f.root)
+    let output = ''
+    vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string | Uint8Array) => {
+      output += String(chunk)
+      return true
+    }) as typeof process.stdout.write)
+    expect(await runScryCli(['recorder', 'status', '--workspace', f.root])).toBe(0)
+    expect(JSON.parse(output).health.pendingCount).toBe(1)
+    output = ''
+    expect(await runScryCli(['doctor', '--workspace', f.root])).toBe(5)
+    expect(JSON.parse(output).checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'turns.pending', status: 'warn' })
+    ]))
   })
 
   it('keeps a quarantine-only session eligible for daemon recovery and counts its pending age', async () => {

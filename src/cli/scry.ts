@@ -450,7 +450,13 @@ async function recorderCommand(args: ParsedArgs): Promise<number> {
   }
   if (action === 'status') {
     const workspace = workspaceOf(args)
-    print({ ...await recorderDaemonStatus(workspace), hookSkips: await readHookSkips(workspace) })
+    const enablement = await recorderEnablement(workspace)
+    if (enablement.enabled) await refreshRecorderPendingHealth(enablement.dataRoot)
+    print({
+      ...await recorderDaemonStatus(workspace),
+      health: enablement.enabled ? await readHealth(enablement.dataRoot) : null,
+      hookSkips: await readHookSkips(workspace)
+    })
     return 0
   }
   if (action === 'stop') {
@@ -657,8 +663,8 @@ async function doctorCommand(args: ParsedArgs): Promise<number> {
     {
       id: 'turns.pending',
       status: health.pendingCount > 0 ? 'warn' : 'pass',
-      detail: `${health.pendingCount} turn(s) awaiting recovery`,
-      ...(health.pendingCount > 0 ? { remediation: 'run `scry recorder recover`' } : {})
+      detail: `${health.pendingCount} pending item(s): turns or queued hooks`,
+      ...(health.pendingCount > 0 ? { remediation: 'run `scry recorder recover`; inspect runtime/*/*/inbox-failed for exhausted retries' } : {})
     },
     {
       // Upgrading the CLI leaves this file alone, so an old script keeps running silently. It still

@@ -33,12 +33,14 @@ import { discoverRepositories, resolveRecorderEnablement, type RecorderEnablemen
 import { beginGitTurnDiff, cancelGitTurnDiff, finishGitTurnDiff, limitTurnDiffPatchBytes } from './git.js'
 import { appendRotatingLog, listFiles, readJson, writeJsonAtomic } from './io.js'
 import { recoverManagedRecorderTurns } from './managed.js'
+import { INBOX_MAX_ATTEMPTS, quarantineInboxEntry, readInboxFailure, readInboxJson, recorderInboxEntries } from './inbox.js'
 import {
   HOOK_LOCK_WAIT_MS,
   SESSION_LOCK_WAIT_MS,
   recorderOpenPath as openPath,
   recorderPendingHealth,
   withRecorderSessionLock,
+  withRecorderSessionKeyLock,
   recorderSessionRoot as sessionRoot,
   recorderStatePath as statePath,
   recorderTurnRoot as turnRoot,
@@ -56,6 +58,7 @@ import {
   recordError,
   findRecordById,
   stableHash,
+  safeKey,
   updateHealth
 } from './store.js'
 
@@ -3087,31 +3090,65 @@ async function queueHook(
 async function replayQueuedHooks(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   provider: ProviderId,
-  sessionId: string
+  sessionKey: string,
+  includeFailed = false
 ): Promise<number> {
-  const inbox = hookInbox(enablement.dataRoot, provider, sessionId)
+  const root = join(enablement.dataRoot, 'runtime', provider, sessionKey)
+  const warn = (name: string, error: unknown) => appendRotatingLog(
+    join(enablement.dataRoot, 'logs', 'recorder.log'),
+    `${new Date().toISOString()} WARN inbox ${provider}/${sessionKey}/${name}: ${error instanceof Error ? error.message : String(error)}`
+  ).catch(() => undefined)
   let replayed = 0
-  for (const name of (await listFiles(inbox)).filter((file) => file.endsWith('.json')).sort()) {
-    const path = join(inbox, name)
-    const queued = await readJson<QueuedHook>(path)
-    if (queued?.schemaVersion === 1 && queued.provider === provider && queued.sessionId === sessionId) {
-      try {
-        await hookArrival.run(queued.arrivedAt, () => applyHookLocked(enablement, {
-          provider,
-          event: queued.event,
-          workspace: enablement.workspaceRoot,
-          payload: queued.payload,
-          managed: queued.managed
-        }, sessionId))
-        replayed++
-      } catch (error) {
-        // Same accounting as a live hook that fails: counted as dropped, never silently retried forever.
-        await recordError(enablement.dataRoot, error)
-      }
-    } else {
-      await recordError(enablement.dataRoot, `unreadable queued recorder hook: ${name}`)
+  // Each pass is arrival-ordered. An isolated older failure cannot block later arrivals; a retry
+  // can therefore execute after them. Lifecycle deduplication, not exactly-once delivery, applies.
+  for (const entry of await recorderInboxEntries(root, includeFailed)) {
+    let attempts: number
+    try {
+      attempts = (await readInboxFailure(entry))?.attempts ?? 0
+    } catch (error) {
+      // Do not overwrite an unreadable attempt counter or block the remaining files.
+      await warn(entry.name, error)
+      continue
     }
-    await rm(path, { force: true })
+    if (attempts >= INBOX_MAX_ATTEMPTS) continue
+    try {
+      const queued = await readInboxJson<QueuedHook>(entry.path)
+      if (queued === null) continue // ENOENT only: another completed cleanup, not a lost event.
+      if (queued.schemaVersion !== 1 || queued.provider !== provider ||
+        typeof queued.sessionId !== 'string' || safeKey(queued.sessionId) !== sessionKey ||
+        typeof queued.event !== 'string' || !queued.payload || typeof queued.payload !== 'object' ||
+        Array.isArray(queued.payload) || typeof queued.arrivedAt !== 'string' ||
+        !Number.isFinite(Date.parse(queued.arrivedAt))) {
+        throw new Error(`invalid queued recorder hook: ${entry.name}`)
+      }
+      await hookArrival.run(queued.arrivedAt, () => applyHookLocked(enablement, {
+        provider,
+        event: queued.event,
+        workspace: enablement.workspaceRoot,
+        payload: queued.payload,
+        managed: queued.managed
+      }, queued.sessionId))
+    } catch (error) {
+      try {
+        await quarantineInboxEntry(entry, attempts + 1, error)
+        if (attempts + 1 === INBOX_MAX_ATTEMPTS) {
+          await recordError(enablement.dataRoot, `inbox retries exhausted ${provider}/${sessionKey}/${entry.name}: ${error instanceof Error ? error.message : String(error)}`)
+        }
+      } catch (isolationError) {
+        // The source remains in place if it cannot be moved; never delete it to make progress.
+        await warn(entry.name, isolationError)
+      }
+      await warn(entry.name, error)
+      continue
+    }
+    // Cleanup failure is not another failed apply. Keeping the event gives at-least-once replay.
+    try {
+      await rm(entry.path, { force: true })
+      await rm(entry.failurePath, { force: true })
+      replayed++
+    } catch (error) {
+      await warn(entry.name, error)
+    }
   }
   return replayed
 }
@@ -3149,7 +3186,7 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
     try {
       result = await withRecorderSessionLock(enablement.dataRoot, input.provider, sessionId, async () => {
         entered = true
-        await replayQueuedHooks(enablement, input.provider, sessionId)
+        await replayQueuedHooks(enablement, input.provider, safeKey(sessionId))
         return applyHookLocked(enablement, input, sessionId)
       }, { waitMs: HOOK_LOCK_WAIT_MS })
     } catch (error) {
@@ -3253,14 +3290,13 @@ export async function recoverRecorder(
   let managedPresent = false
   for (const item of await runtimeSessions(enablement.dataRoot)) {
     // Hooks queued behind a busy lock must land before this pass judges the open turn.
-    const queuedNames = (await listFiles(join(item.sessionDir, 'inbox'))).filter((name) => name.endsWith('.json')).sort()
-    const queuedSessionId = queuedNames.length > 0
-      ? (await readJson<QueuedHook>(join(item.sessionDir, 'inbox', queuedNames[0])))?.sessionId
-      : undefined
-    if (queuedSessionId) {
+    if ((await recorderInboxEntries(item.sessionDir)).length) {
+      // A corrupt first event must not prevent admission or later entries from replaying.
+      // This on-disk key selects exactly the same lock as a live hook with that session id.
+      const sessionKey = basename(item.sessionDir)
       try {
-        await withRecorderSessionLock(enablement.dataRoot, item.provider, queuedSessionId,
-          () => replayQueuedHooks(enablement, item.provider, queuedSessionId), { waitMs: SESSION_LOCK_WAIT_MS })
+        await withRecorderSessionKeyLock(enablement.dataRoot, item.provider, sessionKey,
+          () => replayQueuedHooks(enablement, item.provider, sessionKey, true), { waitMs: SESSION_LOCK_WAIT_MS })
       } catch (error) {
         if (!isLockTimeout(error)) throw error
         pending++
