@@ -1,0 +1,549 @@
+{
+  "schema": 1,
+  "machine": {
+    "alias": "mac2",
+    "cpu": "Apple M1",
+    "cores": 8,
+    "os": "26.3.2",
+    "arch": "arm64",
+    "node": "v24.18.0",
+    "electronRuntime": {
+      "electron": "42.10.1",
+      "node": "24.18.1",
+      "abi": "146"
+    },
+    "validationCommit": "f80510741faaf4eb1dde0491fef9980375edce67",
+    "build": "c2a52cf70313f06b4524836010626463a203775fc8a911a4166358e1c0c111c9",
+    "contentSourceSha256": "c6e311219ec5447ae2ece5c8d1a3e3773dc492fbb70c59dfad1e27dff3a71743",
+    "trackedStatus": ""
+  },
+  "source": {
+    "analyticsBaseline": "cd40ee069046a1968e434feeb3fafc3f6ed0492c",
+    "analyticsCandidate": "65d8f6ea7ca172a38a5d8b3223d86a12fadd7d25",
+    "contentBaseline": "a17d68672221e77579868ef294e07a7b94ed681c",
+    "contentCandidate": "34a6371fe90c92c2dc41657b8cd4d352e7001410",
+    "contentMeasuredAs": "698ae8e609fe42f8a5a13a3a169c99a50dae91e9-dirty",
+    "patchSha256": "ca5ceccfc2d284d4e502c463a4038e1b4a3a38e37392ea08978cd247b6ff8c1c",
+    "contentSourceBeforeSha256": "3bb3d928f0a3840c8498a9b87950acada85602139c09012d22a78f345301fb02",
+    "contentSourceAfterSha256": "c6e311219ec5447ae2ece5c8d1a3e3773dc492fbb70c59dfad1e27dff3a71743",
+    "analyticsCollectorSha256": "ce682f84cfb85a155e98d83f49e086a24024ab1c898310b02f08c40124bd99a9",
+    "contentCollectorSha256": "0814ba047cd264f2b56ab2c0efb36428de8ccd6041c7e1226cf25da9c07b4732",
+    "packageLockSha256": "625e9bc25c388af4925c02e5e59c34ea82cfb74afa115648464692a32ec93338",
+    "prerequisite": "5bb630e1f69794e23cb85c4efdc534046f65b8a2",
+    "firstIntegration": "db137b609a84c380cd74848eace48f9438248ee0",
+    "finalIntegration": "f80510741faaf4eb1dde0491fef9980375edce67"
+  },
+  "analytics": {
+    "before": {
+      "workload": "span-results=240;tools=240;data-updates=5;analytics-active=0;invalidate-per-update=1",
+      "durationMs": [
+        20.050709000000097,
+        15.972040999999876,
+        16.235750000000053,
+        15.26929099999984,
+        15.386083000000099
+      ],
+      "counters": {
+        "refresh.stats.calls": [
+          5,
+          5,
+          5,
+          5,
+          5
+        ],
+        "refresh.billing.calls": [
+          5,
+          5,
+          5,
+          5,
+          5
+        ],
+        "sqlite.queries": [
+          130,
+          130,
+          130,
+          130,
+          130
+        ]
+      }
+    },
+    "after": {
+      "workload": "span-results=240;tools=240;data-updates=5;analytics-active=0;invalidate-per-update=1",
+      "durationMs": [
+        0.012584000000003925,
+        0.0029979999998772655,
+        0.0036250000000563887,
+        0.0014989999999670545,
+        0.0013330000000451037
+      ],
+      "counters": {
+        "refresh.stats.calls": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "refresh.billing.calls": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "sqlite.queries": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    "clock": {
+      "label": "mac2-analytics-paired",
+      "exit": 0,
+      "signal": null,
+      "wallMs": 4575,
+      "cores": 8,
+      "loadBefore": 2.51,
+      "loadAfter": 2.71,
+      "highLoad": false
+    }
+  },
+  "contentReuse": {
+    "registrationBaseline": {
+      "workload": "durable-bodies=4;body-bytes=262144;reuse-passes=8;file-and-directory-sync=unchanged",
+      "durationMs": [
+        42.87212499999998,
+        37.22079199999996,
+        80.94762500000002,
+        34.707374999999956,
+        35.049041999999986
+      ],
+      "counters": {
+        "crypto.sha256.calls": [
+          64,
+          64,
+          64,
+          64,
+          64
+        ],
+        "io.read.calls": [
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "io.read.bytes": [
+          8388608,
+          8388608,
+          8388608,
+          8388608,
+          8388608
+        ],
+        "io.open.calls": [
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "io.sync.calls": [
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "io.write.calls": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    "before": {
+      "workload": "durable-bodies=4;body-bytes=262144;reuse-passes=8;file-and-directory-sync=unchanged",
+      "durationMs": [
+        28.714499999999987,
+        66.05929200000003,
+        72.30104200000005,
+        42.39712499999996,
+        43.74308300000007
+      ],
+      "counters": {
+        "crypto.sha256.calls": [
+          64,
+          64,
+          64,
+          64,
+          64
+        ],
+        "io.read.calls": [
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "io.read.bytes": [
+          8388608,
+          8388608,
+          8388608,
+          8388608,
+          8388608
+        ],
+        "io.open.calls": [
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "io.sync.calls": [
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "io.write.calls": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    "after": {
+      "workload": "durable-bodies=4;body-bytes=262144;reuse-passes=8;file-and-directory-sync=unchanged",
+      "durationMs": [
+        33.222083000000055,
+        34.04249999999996,
+        59.21741600000007,
+        39.198792000000026,
+        35.14858300000003
+      ],
+      "counters": {
+        "crypto.sha256.calls": [
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "io.read.calls": [
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "io.read.bytes": [
+          8388608,
+          8388608,
+          8388608,
+          8388608,
+          8388608
+        ],
+        "io.open.calls": [
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "io.sync.calls": [
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "io.write.calls": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    "clock": {
+      "label": "mac2-content-paired",
+      "exit": 0,
+      "signal": null,
+      "wallMs": 6637,
+      "cores": 8,
+      "loadBefore": 2.14,
+      "loadAfter": 2.2,
+      "highLoad": false
+    }
+  },
+  "validation": {
+    "firstUnit": {
+      "files": 338,
+      "passed": 3959,
+      "failed": 3,
+      "skipped": 4,
+      "success": false
+    },
+    "firstUnitFailures": [
+      "skill guidance mirrors differ",
+      "CLI stale-socket fallback",
+      "CLI socket ownership pointer"
+    ],
+    "prerequisiteIntegrationUnit": {
+      "files": 338,
+      "passed": 3962,
+      "failed": 0,
+      "skipped": 4,
+      "success": true
+    },
+    "contentIntegrationUnit": {
+      "files": 339,
+      "passed": 3968,
+      "failed": 0,
+      "skipped": 4,
+      "success": true
+    },
+    "contentUnitClock": {
+      "label": "mac2-content-unit",
+      "exit": 0,
+      "signal": null,
+      "wallMs": 320214,
+      "cores": 8,
+      "loadBefore": 2.54,
+      "loadAfter": 8.69,
+      "highLoad": true
+    },
+    "typecheck": 0,
+    "buildCli": 0,
+    "build": 0,
+    "productionIpc": {
+      "label": "mac2-content-ipc",
+      "exit": 0,
+      "signal": null,
+      "wallMs": 51360,
+      "cores": 8,
+      "loadBefore": 2.87,
+      "loadAfter": 2.4,
+      "highLoad": false
+    },
+    "compiledCore": {
+      "compiledCore": true,
+      "runtime": "v24.18.0",
+      "nativeAddonsDisabled": true,
+      "duplicateRef": true,
+      "sameLengthCorruptionRejected": true
+    },
+    "performance": {
+      "clock": {
+        "label": "mac2-content-performance",
+        "exit": 0,
+        "signal": null,
+        "wallMs": 40423,
+        "cores": 8,
+        "loadBefore": 2.45,
+        "loadAfter": 4.23,
+        "highLoad": false
+      },
+      "passed": true,
+      "registeredMetrics": 55,
+      "observations": 52,
+      "unavailable": [],
+      "worse": [
+        "files.fixed-operations/io.read",
+        "files.fixed-operations/io.readdir",
+        "files.fixed-operations/io.read.bytes",
+        "persistence.archive/ipc.bytes"
+      ],
+      "missing": [
+        "analytics.stats/cpu.instructions",
+        "history.page/cpu.instructions",
+        "remote.trace.preview/cpu.instructions"
+      ],
+      "historicalBaselineControls": {
+        "baseline": "cd40ee069046a1968e434feeb3fafc3f6ed0492c",
+        "candidate": "f80510741faaf4eb1dde0491fef9980375edce67",
+        "comparisons": [
+          {
+            "key": "files.fixed-operations/io.read",
+            "layer": "io",
+            "unit": "count",
+            "workload": "fixed-local-temp-workloads",
+            "baseline": 417,
+            "candidate": 417,
+            "baselineRuns": [
+              417,
+              417,
+              417,
+              417,
+              417
+            ],
+            "candidateRuns": [
+              417,
+              417,
+              417,
+              417,
+              417
+            ],
+            "delta": 0,
+            "percent": 0,
+            "status": "measured"
+          },
+          {
+            "key": "files.fixed-operations/io.read.bytes",
+            "layer": "io",
+            "unit": "bytes",
+            "workload": "fixed-local-temp-workloads",
+            "baseline": 1227198,
+            "candidate": 1227194,
+            "baselineRuns": [
+              1227195,
+              1227198,
+              1227185,
+              1227188,
+              1227178
+            ],
+            "candidateRuns": [
+              1227176,
+              1227178,
+              1227184,
+              1227182,
+              1227194
+            ],
+            "delta": -4,
+            "percent": -0.0003259457724018455,
+            "status": "measured"
+          },
+          {
+            "key": "files.fixed-operations/io.readdir",
+            "layer": "io",
+            "unit": "count",
+            "workload": "fixed-local-temp-workloads",
+            "baseline": 20,
+            "candidate": 20,
+            "baselineRuns": [
+              20,
+              20,
+              20,
+              20,
+              20
+            ],
+            "candidateRuns": [
+              20,
+              20,
+              20,
+              20,
+              20
+            ],
+            "delta": 0,
+            "percent": 0,
+            "status": "measured"
+          },
+          {
+            "key": "persistence.archive/ipc.bytes",
+            "layer": "ipc",
+            "unit": "bytes",
+            "workload": "archive-turns=120;page=40",
+            "baseline": 10558,
+            "candidate": 10558,
+            "baselineRuns": [
+              10558,
+              10558,
+              10558,
+              10558,
+              10558
+            ],
+            "candidateRuns": [
+              10558,
+              10558,
+              10558,
+              10558,
+              10558
+            ],
+            "delta": 0,
+            "percent": 0,
+            "status": "measured"
+          }
+        ]
+      }
+    },
+    "renderer": {
+      "fullChainExit": 1,
+      "baselineControlExit": 1,
+      "diagnosticClock": {
+        "label": "mac2-baseline-ui-diagnostic",
+        "exit": 1,
+        "signal": null,
+        "wallMs": 57589,
+        "cores": 8,
+        "loadBefore": 2.73,
+        "loadAfter": 4.39,
+        "highLoad": false
+      },
+      "tail": [
+        {
+          "index": 20,
+          "command": "node scripts/desktop-remote-ui-smoke.mjs --session-parity-only",
+          "status": 0,
+          "signal": null
+        },
+        {
+          "index": 21,
+          "command": "node scripts/desktop-remote-ui-smoke.mjs --composer-history-only",
+          "status": 0,
+          "signal": null
+        },
+        {
+          "index": 22,
+          "command": "node scripts/desktop-remote-ui-smoke.mjs --remote-settings-only",
+          "status": 0,
+          "signal": null
+        },
+        {
+          "index": 23,
+          "command": "node scripts/desktop-remote-ui-smoke.mjs --session-lifecycle-only",
+          "status": 0,
+          "signal": null
+        },
+        {
+          "index": 24,
+          "command": "npm run test:source-control:ui",
+          "status": 0,
+          "signal": null
+        },
+        {
+          "index": 25,
+          "command": "npm run test:conversation:ipc",
+          "status": 0,
+          "signal": null
+        },
+        {
+          "index": 26,
+          "command": "node scripts/electron-security-smoke.mjs --dev-pi-history-only",
+          "status": 0,
+          "signal": null
+        }
+      ],
+      "explanation": "Both baseline and candidate reach the unchanged 55s whole-fixture deadline; diagnostic baseline first starts bound-session disconnect at 53571ms after exercise start. No timeout increase or assertion removal."
+    }
+  },
+  "delivery": {
+    "mergedIntoOriginalWorkspace": false,
+    "pushed": false,
+    "installed": false,
+    "paidProviderExecuted": false,
+    "l3": false
+  },
+  "processCheck": {
+    "checkedAt": "2026-10-25T15:18:18.899Z",
+    "experimentCwdPids": []
+  }
+}

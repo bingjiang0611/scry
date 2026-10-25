@@ -34,8 +34,8 @@
 | 阶段 | 范围、所有者 | 完成条件 | 状态 |
 |---|---|---|---|
 | 0 身份与计划 | agent：隔离cwd、依赖、源码与结果目录，核对既有实验 | 无他人WIP混入，测量与生产分别提交 | 已完成；计划`7787c78a`，测量`cd40ee06`，结构`138b4217`/`3afb730f` |
-| 1 删除无消费者计算 | agent：迁移上述统计刷新collector和最小生产变更 | 旧实现负对照；5轮L1；受锁L2；可见analytics刷新仍有效；UI/全量unit/type/build检查 | 已实现`a50bfad9`，L1通过；L2和单次全量unit仍待收敛 |
-| 2 证据写入窄切片 | agent：测量content突发、重复body、双authority写入、directory/file sync | 先定位实际成本；不改格式、不减fsync；必要才做批量准备/提交实验 | 本轮未开始；先收敛阶段1验证 |
+| 1 删除无消费者计算 | agent：迁移上述统计刷新collector和最小生产变更 | 旧实现负对照；5轮L1；受锁L2；可见analytics刷新仍有效；UI/全量unit/type/build检查 | L1/L2已补证；组合全量unit/type/build/IPC通过；保留mac2基线共同的UI总期限阻塞 |
+| 2 证据写入窄切片 | agent：测量content突发、重复body、双authority写入、directory/file sync | 先定位实际成本；不改格式、不减fsync；必要才做批量准备/提交实验 | 首个窄切片`34a6371f`完成：复用SHA64→32，sync32不变；冷写/双authority待下一轮 |
 | 3 查询与归档索引 | agent：固定40/400/4000轮与大账本；外部修改/删除/repair验证 | 先移除重复查询，再决定增量projection和专用执行进程；derived可重建、canonical不变 | 后续爬坡 |
 | 4 Provider运行层 | agent + 上游维护者：完整刷新合同与隔离reload夹具 | 配置/模型/auth/extension/executable变化正确失效；再验证热目录收益、冷启动与驻留成本 | 原刷新边界阻塞，禁止重复旧假设 |
 | 5 客户端增量 | agent：在写入点产生event revision，真正窗口化投影 | 固定大负载O(变化/可见)，重连、tombstone、选择、读屏、anchor不回归 | 后续爬坡 |
@@ -43,7 +43,7 @@
 
 原生桌面、blob pack格式迁移和常驻预热资源增加不在本轮自动实施范围。不是因为不够激进，而是先证明能解决当前瓶颈，再承担不可逆迁移成本。
 
-## 首轮结果（2026-10-25）
+## 本机首轮结果（2026-10-25，历史记录）
 
 详见[实验与验证记录](performance-experiments/20261025-unused-analytics-climb.md)。固定5次dataUpdated：stats 5→0、billing 5→0、SQL 130→0，重复5/5一致；native回归保留已打开分析的刷新。工作是真的不再执行，没有后台补算。
 
@@ -52,6 +52,17 @@
 结构与优化分别提交。类型、构建、focused60用例通过；UI检查中断后续完剩余7段，含当前production App的临时Git和真实IPC。全量unit组合执行仍未完成，存在冻结起点的2项CLI失败及Git基准阶段阻塞；分段验证不冒充全量成功。
 
 L2前后两侧均highLoad=true，本轮按持续高负载收尾，不开展第二实验。下一步由agent在负载合适时先完成L2与全量unit；再进入证据写入窄切片。未合入、未push、未安装，用户运行实例不变。
+
+## mac2续跑结果（2026-10-25）
+
+用户已授权mac2。详见[续跑记录](performance-experiments/20261025-mac2-climb.md)和[原始样本](performance-experiments/20261025-mac2-climb-evidence.json)。
+
+- 统计固定5次后台刷新：低负载中位15.972→0.002998ms，SQL130→0。只证明受控后台工作，不外推整App延迟。
+- 新增内容复用窄切片：完整字节比较替代第二次SHA-256；固定32次复用，hash64→32、读8MiB不变、sync32不变、写0不变。单组中位43.743→35.149ms，但波动较大，不承诺稳定百分比。
+- 修复本轮skill镜像漏同步。原有CLI两项失败用已提交的`5bb630e1`作为独立验证依赖，不改原工作区WIP。最终组合树`f8051074`：3968 unit通过、4既有探针跳过；类型、App/CLI构建、生产IPC与编译Core检查通过。
+- 完整UI仍在mac2的55秒综合夹具期限失败；原始基线同样失败，诊断显示53.6秒才开始等待断线。其余26段已验证，没有扩大期限。该夹具由agent另列维护任务，发布前收敛。
+- 性能门禁通过，52条观测、3项CPU指令candidate未测。4个历史`worse`已做`cd40ee06`同机对照，前后相同或处于既有4-byte tolerance内；不抬基线或升门禁。
+- 约两小时预算内收尾。下一轮由agent测量冷写与双authority路径；不启动第三实验，不默认改格式、减sync或增加驻留资源。未合入原工作区、未push、未安装，L3仍未验证。
 
 ## 单实验流程
 
