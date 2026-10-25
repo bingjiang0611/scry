@@ -17,7 +17,7 @@ const text = (value: string): TraceEvent => ({
 // ONLY for L1. L2 runs first on plain arrays, without this instrumentation.
 function exercise(instrumented: boolean, extraRead = false) {
   const structural: TraceEvent[] = Array.from({ length: structuralCount }, (_, index) => ({
-    id: `tool-${index}`, runId: meta.runId, ts: '', kind: 'tool', stage: 'tool_start', toolUseId: `tool-${index}`, toolName: 'Read'
+    id: `tool-${index}`, runId: meta.runId, ts: '', kind: 'tool', stage: 'tool_use', toolUseId: `tool-${index}`, tool: 'Read'
   }))
   const initial = { ...meta, items: [...structural, text('answer 0')] }
   let view: RemoteTraceView = { run: initial, cursor: { revision: 'e:0', count: initial.items.length } }
