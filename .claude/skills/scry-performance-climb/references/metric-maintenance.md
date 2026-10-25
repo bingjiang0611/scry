@@ -1,6 +1,6 @@
 # 指标维护
 
-台账：`scripts/performance-ratchet.json`。合同细节以 `docs/performance-loop.md` 为准。
+台账入口：`scripts/performance-ratchet.json`；定义按领域放在 `scripts/performance-ratchet/*.json`。工具用 `scripts/performance-ledger.mjs` 的 `readLedger` 展开，提案写回原领域文件；旧单文件 baseline 仍可读取。不要直接把入口 manifest 当成空台账校验。合同细节以 `docs/performance-loop.md` 为准。
 
 ## 日常回归检查
 
@@ -22,7 +22,7 @@ npm run performance:measure -- --out /tmp/perf         # 只测当前版本
 1. collector 放在 `scripts/performance-counters/<名称>.counters.test.ts`（需要 Electron ABI 的用 `.electron.counters.test.ts`）。
 2. 直接调用生产代码，固定负载，用 `repeatCounters` 重复，`measured`/`unavailable` 写结果。
 3. 附带敏感性测试。
-4. 台账登记 `candidate`（`ceiling: null`），再运行 `performance:propose --write` 记录当前平台基线。
+4. 在对应领域文件登记 `candidate`（`ceiling: null`），再运行 `performance:propose --write` 记录当前平台基线。完整入口需要完整门禁观测；只收紧单个领域时，可用既有 `makeProposal` 的 `ledgerPath` 参数指定领域文件，之后仍对完整入口运行 `guard`，不把未覆盖的其它门禁宣称为通过。
 5. 负载、单位或层级变化 = 新 key，不能改旧 key 的定义（guard 会拒绝）。
 
 ## 升为门禁（三项证据缺一不可，并需用户确认）
