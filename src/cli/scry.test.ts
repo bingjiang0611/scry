@@ -28,6 +28,7 @@ const roots: string[] = []
 
 afterEach(async () => {
   recordReads.clear()
+  vi.useRealTimers()
   vi.restoreAllMocks()
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
@@ -85,6 +86,8 @@ describe('Scry CLI arguments', () => {
 
 describe('Scry CLI health and lookup contracts', () => {
   it.each(['status', 'doctor', 'bundle'])('hook-skip %s reports retained counts and the latest timestamp', async (command) => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-24T13:00:00Z'))
     const root = await workspace()
     await mkdir(join(root, '.scry/logs'), { recursive: true })
     await writeFile(join(root, '.scry/logs/hook-skip.log'),
