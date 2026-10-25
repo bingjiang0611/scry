@@ -55,14 +55,19 @@ enum Motion {
 private struct ListRowEntrance: ViewModifier {
   let index: Int
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @State private var appeared = false
+  @State private var appeared: Bool
+
+  init(index: Int, enabled: Bool) {
+    self.index = index
+    _appeared = State(initialValue: !enabled)
+  }
 
   func body(content: Content) -> some View {
     content
       .opacity(appeared ? 1 : 0)
       .offset(y: appeared || reduceMotion ? 0 : 4)
       .onAppear {
-        // Stable row identity preserves this state across refreshes/reappearances.
+        // The owner disables entrance for previously seen IDs after lazy-row recycling.
         guard !appeared else { return }
         withAnimation(Motion.animation(.rowIn, reduceMotion: reduceMotion)
           .delay(reduceMotion ? 0 : Motion.rowDelay(index: index))) {
@@ -73,5 +78,7 @@ private struct ListRowEntrance: ViewModifier {
 }
 
 extension View {
-  func listRowEntrance(index: Int) -> some View { modifier(ListRowEntrance(index: index)) }
+  func listRowEntrance(index: Int, enabled: Bool = true) -> some View {
+    modifier(ListRowEntrance(index: index, enabled: enabled))
+  }
 }

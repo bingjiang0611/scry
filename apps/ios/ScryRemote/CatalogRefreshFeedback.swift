@@ -23,22 +23,22 @@ struct CatalogRefreshBanner: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 7) {
       HStack(alignment: .top, spacing: 8) {
-        Image(systemName: "exclamationmark.circle").font(.system(size: 14, weight: .medium)).padding(.top, 1)
+        Image(systemName: "exclamationmark.circle").font(Typography.rowTitle.weight(.medium)).padding(.top, 1)
         VStack(alignment: .leading, spacing: 3) {
-          Text(title).font(.system(size: 13, weight: .semibold))
-          Text(ConnectionCopy.lastFullRefresh(lastFullRefresh)).font(.system(size: 11))
+          Text(title).font(Typography.groupLabel)
+          Text(ConnectionCopy.lastFullRefresh(lastFullRefresh)).font(Typography.meta)
         }
         Spacer(minLength: 4)
       }
       HStack(spacing: 16) {
         Button(failure.requiresPairing ? ConnectionCopy.pairAgain : ConnectionCopy.retry, action: onRetry)
-          .font(.system(size: 12, weight: .semibold)).frame(minWidth: 44, minHeight: 44).disabled(refreshing)
-        Button(ConnectionCopy.details, action: onDetails).font(.system(size: 12, weight: .medium))
+          .font(Typography.meta.weight(.semibold)).frame(minWidth: 44, minHeight: 44).disabled(refreshing)
+        Button(ConnectionCopy.details, action: onDetails).font(Typography.meta.weight(.medium))
           .frame(minWidth: 44, minHeight: 44)
       }
     }
-    .foregroundStyle(Palette.warnInk).padding(12)
-    .background(Palette.warnBg, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .foregroundStyle(Palette.warn).padding(12)
+    .background(Palette.panel2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     .padding(.horizontal, 16).padding(.vertical, 8)
   }
 }

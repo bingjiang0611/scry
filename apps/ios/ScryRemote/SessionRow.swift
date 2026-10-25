@@ -1,13 +1,12 @@
 import SwiftUI
 import RemoteTransport
 
-// One row projection for the home peek and the drawer list. Row actions are the
-// host's session actions; a local optimistic state is never shown, so the row
-// always describes what the Mac last confirmed.
+// Shared home row. The state column reads live evidence; catalog activity is
+// explicitly historical. Context-menu actions retain the row's immutable scope.
 struct SessionRowView: View {
   let row: ExecutionTargetCoordinator.HomeSession
-  let showsContext: Bool
-  let aggregatesHosts: Bool
+  var activityOnly = false
+  var showsProject = false
   let onOpen: () -> Void
   let onAction: (SessionRowAction) -> Void
   var indent: CGFloat = 0
@@ -20,24 +19,23 @@ struct SessionRowView: View {
 
   var body: some View {
     Button(action: onOpen) {
-      HStack(alignment: .top, spacing: 10) {
-        VStack(alignment: .leading, spacing: 4) {
-          Text(session.label.isEmpty ? ConnectionCopy.noPreview : session.label)
-            .font(.system(size: 15.5)).foregroundStyle(openable ? Palette.ink : Palette.muted)
-            .lineLimit(2).multilineTextAlignment(.leading)
-          if showsContext {
-            Text(ConnectionCopy.rowContext(host: aggregatesHosts ? row.scope.label : nil,
-                                           project: projectName(session.cwd), provider: session.providerId))
-              .font(.system(size: 11.5)).foregroundStyle(Palette.muted).lineLimit(1)
-          }
-        }
-        Spacer(minLength: 8)
+      HStack(spacing: 10) {
+        Image(systemName: ProviderSymbol.name(session.providerId)).resizable().scaledToFit()
+          .foregroundStyle(Palette.provider(session.providerId))
+          .frame(width: 16, height: 16).accessibilityLabel(ConnectionCopy.providerLabel(session.providerId))
+        Text(session.label.isEmpty ? ConnectionCopy.noPreview : session.label)
+          .font(Typography.rowTitle).foregroundStyle(openable ? Palette.fg : Palette.dim)
+          .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
         stateBadge
+        if showsProject {
+          Text(projectName(session.cwd)).font(Typography.meta).foregroundStyle(Palette.dim2)
+            .lineLimit(1).frame(width: 70, alignment: .trailing)
+        }
       }
-      .padding(.leading, indent).padding(.vertical, 12)
+      .padding(.leading, indent).frame(minHeight: 48)
       .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
     }
-    .buttonStyle(.plain)
+    .buttonStyle(HomeRowButtonStyle())
     .disabled(!openable)
     .contextMenu {
       rowActions
@@ -48,11 +46,22 @@ struct SessionRowView: View {
   @ViewBuilder private var stateBadge: some View {
     if let live = store.liveRun(providerId: session.providerId, cwd: session.cwd,
                                 externalSessionId: session.externalSessionId, agentProfileId: session.agentProfileId) {
-      LiveRunBadge(live: live, waiting: store.openLiveQuestion(live) != nil)
-    } else if session.isActive == true {
-      Text(ConnectionCopy.lastRunning).font(.system(size: 10, weight: .semibold)).foregroundStyle(Palette.muted)
-    } else if !openable {
-      Text(ConnectionCopy.noSession).font(.system(size: 10)).foregroundStyle(Palette.muted)
+      if store.openLiveQuestion(live) != nil {
+        Text(ConnectionCopy.homeWaiting).font(Typography.meta.weight(.semibold)).foregroundStyle(Palette.warn)
+          .padding(.horizontal, 6).padding(.vertical, 3)
+          .background(Palette.warn.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+      } else {
+        RunningRing()
+      }
+    } else if !activityOnly {
+      if session.isActive == true {
+        Text(ConnectionCopy.lastRunning).font(Typography.meta).foregroundStyle(Palette.dim2)
+      } else if !openable {
+        Text(ConnectionCopy.noSession).font(Typography.meta).foregroundStyle(Palette.dim2)
+      } else if !showsProject {
+        Text(Date(timeIntervalSince1970: session.ts / 1_000), style: .relative)
+          .font(Typography.meta).foregroundStyle(Palette.dim2).lineLimit(1)
+      }
     }
   }
 
@@ -85,6 +94,38 @@ struct SessionRowView: View {
   }
 }
 
+enum ProviderSymbol {
+  static func name(_ id: String) -> String {
+    switch id {
+    case "claude": return "sun.max"
+    case "codex": return "chevron.left.forwardslash.chevron.right"
+    case "qoder": return "q.circle"
+    case "opencode": return "terminal"
+    case "pi": return "p.circle"
+    default: return "cpu"
+    }
+  }
+}
+
+struct RunningRing: View {
+  var body: some View {
+    TimelineView(.animation) { context in
+      Circle().trim(from: 0, to: 0.75).stroke(Palette.dim, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+        .rotationEffect(.degrees(context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9 * 360))
+    }
+    .frame(width: 14, height: 14).accessibilityLabel(ConnectionCopy.running)
+  }
+}
+
+struct HomeRowButtonStyle: ButtonStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+      .background(configuration.isPressed ? Palette.hover : .clear,
+                  in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+  }
+}
+
 enum SessionRowAction: Equatable {
   case pin(Bool)
   case rename
@@ -92,7 +133,7 @@ enum SessionRowAction: Equatable {
   case archive(Bool)
 }
 
-// The drawer shows the same row for an archived session, with restore/delete.
+// Archived sessions keep their restore/delete controls in the existing sheet.
 struct ArchivedSessionRowView: View {
   let session: G0Transport.RunSessionRef
   let onRestore: () -> Void
