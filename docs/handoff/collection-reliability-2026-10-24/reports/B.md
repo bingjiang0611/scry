@@ -200,3 +200,38 @@ B-U6 是本地故障注入验证，不冒充 OpenCode/Qoder/Codex 的真实会�
 2. 当前采用文档建议的 5 次总尝试，耗尽后保留、告警、不自动清理/重置。若实际工作流需要更长窗口、人工重入队命令或积压保留上限，请另行确定策略再实施；没有擅自加配置或删除证据。
 3. 如需故障瞬间 `droppedEvents` 也具备跨文件精确一次计数，需要另定持久化事务/派生计数范围。当前保留事件与次数证据，但不作该承诺。
 4. 请按上述真实 Provider 清单核验 B1/B2；核验通过后再决定是否授权 C。执行方在 B 报告提交并推送后停止，不自动开始 C。
+
+## 核验意见（审查方，2026-10-25）
+
+核验对象：`e70b27e`（生产代码 `c93f081a`）。环境：Linux x86_64，Node 22.22.0。
+
+- `549b928`（只有 B1 测试）上 `recorder-inbox.test.ts`：8/8 失败；`52a0a90`（只有 B2 测试）上两个文件：5 失败 / 19 通过。与报告一致。
+- 修复后 9 个 focused 文件 266/266 通过。
+- 逐行读了 `inbox.ts`、`recorder.ts`（`replayQueuedHooks`、`recoverRecorder`）、`runtime-state.ts`、`daemon.ts`、`scry.ts` 的 diff。
+
+结论：**B2 已核验；B1 需修改一处（VB1），其余接受。**
+
+### VB1（需修改）sidecar 读不出来时，daemon 永远不会空闲退出
+
+`replayQueuedHooks` 遇到读不出来的 `.failure.json` 会 `continue` 跳过这一条，永远不重试；但 `recorderHasRetryableInbox` 遇到同样的情况返回 `true`（注释写的是「读错误不能证明尝试已耗尽」）。两边判断不一致：daemon 认为还有活要干，所以不进入空闲退出，也就不会做空闲时的自动更新，同时一直按退避间隔轮询 recover；而 recover 每次都跳过这一条，永远收敛不了。
+
+复现（临时探针，未提交）：在 `inbox-failed/` 放一条合法事件，sidecar 写成 `{corrupt`，连续 `recoverRecorder` 三次，之后 `recorderHasOpenTurn` 仍然是 `true`。
+
+sidecar 是原子写的，正常情况下很少损坏，但手工编辑、权限变化（EACCES）或磁盘错误都可能触发，触发后不会自愈。
+
+修改要求：
+1. daemon 的存活判断必须与 replay 的实际行为一致：replay 会跳过的条目（sidecar 读不出来、或已耗尽），`recorderHasRetryableInbox` 都不应返回 true。二选一：要么 replay 把读不出来的 sidecar 当作一次失败来处理（例如另存一份损坏副本，再重写一个计数），让它能继续计数直到耗尽；要么存活判断把它视为不可重试。不管哪种，这条都要继续计入 `pendingCount`，让 `doctor` 报 warn。
+2. 补回归测试：sidecar 损坏（以及 sidecar EACCES）时，若干次 recover 后 `recorderHasOpenTurn` 为 false，`pendingCount` 仍 ≥ 1，原事件文件没有被删除。
+
+### VB2（文档，随 VB1 一起改）已耗尽条目如何人工重试
+
+耗尽的条目永久保留，但没有任何命令可以重新尝试。请在 README 写明人工重试的方法（例如：修好原因后删除对应的 `.failure.json`，下一次 `scry recorder recover` 会重新尝试），并让 `doctor` 的 remediation 指向这一说明。不需要新增命令。
+
+### 接受的取舍（记录）
+
+- 失败条目的重试可能晚于后续已经成功的条目。例如 `UserPromptSubmit` 进入隔离、随后的 `Stop` 先被应用：`Stop` 会按 A1 的逻辑记成 missing_start orphan；之后 `UserPromptSubmit` 重试成功，打开的这一轮等不到终态，只能被下一轮 superseded 或在 24 小时后过期。结果是同一轮被记了两次（一个 orphan、一个 interrupted record），但没有丢。报告已经写明这个取舍，接受。
+- B 不需要 `integrations repair`，已有 daemon 需要重启才能加载新代码。
+
+### 下一步
+
+执行方按顺序做：VB1 + VB2 → V3（时间分级）→ 手验 A。完成 VB1 后在本报告末尾追加「VB1 修改记录」，STATUS 中 B1 改回「待核验」。C 等 B1 核验后再开始。
