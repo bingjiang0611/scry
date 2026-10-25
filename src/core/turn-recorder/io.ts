@@ -56,16 +56,24 @@ export async function mkdirDurable(path: string, mode = 0o700): Promise<void> {
   let current = root
   for (const part of relative(root, absolute).split(sep).filter(Boolean)) {
     const next = join(current, part)
+    // Most ancestors already exist; do not issue a mkdir that must fail for each blob.
+    let isDirectory = false
     try {
-      await mkdir(next, { mode })
-      await syncDirectory(current)
+      isDirectory = (await stat(next)).isDirectory()
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-      const info = await stat(next)
-      if (!info.isDirectory()) throw error
-      // A previous attempt may have created this entry but failed its parent fsync.
-      await syncDirectory(current)
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
+    if (!isDirectory) {
+      try {
+        await mkdir(next, { mode })
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+        // A concurrent creator may have won since our stat; it must have created a directory.
+        if (!(await stat(next)).isDirectory()) throw error
+      }
+    }
+    // Even an existing entry may come from an attempt that failed its parent fsync.
+    await syncDirectory(current)
     current = next
   }
 }
