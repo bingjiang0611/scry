@@ -23,14 +23,17 @@ describe('Skill/MCP 操作后的权威状态同步', () => {
     const loadBillingState = vi.fn()
     const loadAnalytics = vi.fn()
 
-    applyDataUpdatedEffects({ loadStats, loadBillingState, loadAnalytics, analyticsActive: false })
+    const effects = { loadStats, loadBillingState, loadAnalytics, analyticsActive: false }
+    applyDataUpdatedEffects(effects)
 
-    expect(loadStats).toHaveBeenCalledOnce()
-    expect(loadBillingState).toHaveBeenCalledOnce()
+    expect(loadStats).not.toHaveBeenCalled()
+    expect(loadBillingState).not.toHaveBeenCalled()
     expect(loadAnalytics).not.toHaveBeenCalled()
 
-    applyDataUpdatedEffects({ loadStats, loadBillingState, loadAnalytics, analyticsActive: true })
+    applyDataUpdatedEffects({ ...effects, analyticsActive: true })
     expect(loadAnalytics).toHaveBeenCalledOnce()
+    expect(loadStats).not.toHaveBeenCalled()
+    expect(loadBillingState).not.toHaveBeenCalled()
   })
 
   it('Provider 或 cwd 改变后不暴露旧上下文的能力证据', () => {

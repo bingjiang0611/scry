@@ -63,5 +63,13 @@ export async function exerciseWorkspaceDiff(contents) {
   if (!(await read(state('captured', '无改动')))) throw new Error('Stale Git reply replaced the current workspace')
   await click('#diff-unbind')
   await wait(`!document.querySelector('#diff-summary [role="status"]') && !document.querySelector('#diff-overview [data-evidence]')`)
-  return { clean: true, dirty: true, unavailable: true, timeout: true, ipcRejection: true, refreshRetainsEvidence: true, sourceTime: true, sameWorkspaceReplyOrdered: true, staleReplyRejected: true, unbound: true, nativeInput: true }
+  await click('#diff-analytics')
+  await wait(`document.querySelector('#integration-reads')?.dataset.analytics === '1'`)
+  await click('#diff-data-updated')
+  await wait(`document.querySelector('#integration-reads')?.dataset.analytics === '2'`)
+  const reads = await read(`({ ...document.querySelector('#integration-reads').dataset })`)
+  if (reads.stats !== '0' || reads.billing !== '0') {
+    throw new Error(`Unused global queries still ran: ${JSON.stringify(reads)}`)
+  }
+  return { clean: true, dirty: true, unavailable: true, timeout: true, ipcRejection: true, refreshRetainsEvidence: true, sourceTime: true, sameWorkspaceReplyOrdered: true, staleReplyRejected: true, unbound: true, nativeInput: true, analyticsStillRefreshes: true, unusedGlobalQueries: reads }
 }

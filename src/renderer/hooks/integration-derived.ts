@@ -15,13 +15,9 @@ export async function authoritativeRefreshAfterToggle<T>(
 }
 
 export function applyDataUpdatedEffects(effects: {
-  loadStats: () => void
-  loadBillingState: () => void
   loadAnalytics: () => void
   analyticsActive: boolean
 }): void {
-  effects.loadStats()
-  effects.loadBillingState()
   // Analytics is a comparatively expensive, optional SQLite projection. Keep it fresh once the
   // user has opened the surface, but do not query it during every chat-only application launch.
   if (effects.analyticsActive) effects.loadAnalytics()

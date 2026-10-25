@@ -381,8 +381,6 @@ export function useIntegrations(
       timer = window.setTimeout(() => {
         timer = null
         applyDataUpdatedEffects({
-          loadStats: metrics.loadStats,
-          loadBillingState: metrics.loadBillingState,
           loadAnalytics: metrics.loadAnalytics,
           analyticsActive: metrics.analyticsActiveRef.current
         })
@@ -392,7 +390,7 @@ export function useIntegrations(
       if (timer != null) window.clearTimeout(timer)
       unsubscribe()
     }
-  }, [metrics.loadAnalytics, metrics.loadBillingState, metrics.loadStats])
+  }, [metrics.loadAnalytics])
 
   useEffect(() => {
     let cancelled = false

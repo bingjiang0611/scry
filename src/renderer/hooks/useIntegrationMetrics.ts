@@ -128,9 +128,9 @@ export function useIntegrationMetrics(
   }, [cwd, loadGitDiff, loadUsage, providerContext, providerContextRef])
 
   useEffect(() => {
-    const timers = [window.setTimeout(loadUsage, 260), window.setTimeout(loadStats, 900), window.setTimeout(loadBillingState, 980)]
-    return () => timers.forEach((id) => window.clearTimeout(id))
-  }, [loadAnalytics, loadBillingState, loadStats, loadUsage])
+    const timer = window.setTimeout(loadUsage, 260)
+    return () => window.clearTimeout(timer)
+  }, [loadUsage])
 
   return {
     usage,

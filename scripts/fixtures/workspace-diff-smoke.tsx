@@ -8,12 +8,20 @@ import { buildSessionReport } from '../../src/renderer/format'
 import '../../src/renderer/styles.css'
 import '../../src/renderer/motion.css'
 
+const reads = { stats: 0, billing: 0, analytics: 0 }
+let dataUpdated: (() => void) | undefined
 let mode = 'clean'
 let release: ((value: WorkspaceDiffResult) => void) | undefined
 window.scry = {
   detect: async () => [],
   usageStats: async () => null,
-  stats: async () => null,
+  stats: async () => { reads.stats++; return null },
+  billingState: async () => { reads.billing++; return null },
+  usageAnalytics: async () => { reads.analytics++; return { status: 'unavailable' } },
+  onDataUpdated: (listener: () => void) => {
+    dataUpdated = listener
+    return () => { dataUpdated = undefined }
+  },
   gitDiff: async () => {
     if (mode === 'reject') throw new Error('fixture: IPC rejected')
     if (mode === 'pending') return new Promise<WorkspaceDiffResult>((resolve) => { release = resolve })
@@ -27,9 +35,13 @@ window.scry = {
 function Fixture() {
   const [cwd, setCwd] = useState<string | null>('/fixture/first')
   const integrations = useIntegrations(cwd, null, [], null)
-  const controls = ['clean', 'dirty', 'unavailable', 'timeout', 'reject', 'pending', 'switch', 'release', 'unbind']
+  const controls = ['clean', 'dirty', 'unavailable', 'timeout', 'reject', 'pending', 'switch', 'release', 'unbind', 'analytics', 'data-updated']
   const change = (next: string): void => {
-    if (next === 'release') {
+    if (next === 'analytics') {
+      integrations.loadAnalytics()
+    } else if (next === 'data-updated') {
+      dataUpdated?.()
+    } else if (next === 'release') {
       release?.({ status: 'captured', files: [{ path: '/fixture/stale.ts', added: 999, deleted: 0 }] })
     } else if (next === 'unbind') {
       setCwd(null)
@@ -51,6 +63,7 @@ function Fixture() {
     <section id="diff-overview">
       <OverviewPanel turns={[{ runId: 'fixture', userText: '', done: true, items: [] }]} selected={null} usage={null} stats={null} gitDiff={integrations.gitDiff} gitDiffRefreshing={integrations.gitDiffRefreshing} onSelect={() => undefined} />
     </section>
+    <output id="integration-reads" data-stats={reads.stats} data-billing={reads.billing} data-analytics={reads.analytics} />
     <pre id="diff-report">{buildSessionReport([], integrations.gitDiff)}</pre>
   </>
 }
