@@ -218,7 +218,7 @@ if [ -n "\${SCRY_RECORDER_SOCKET:-}" ]; then
   case "$socket" in /*) ;; *) socket="$workspace/$socket" ;; esac
 elif [ -r "$workspace/.scry/recorder-socket-path" ]; then
   IFS= read -r recorded_socket < "$workspace/.scry/recorder-socket-path" || recorded_socket=""
-  [ -S "$recorded_socket" ] && socket="$recorded_socket"
+  [ -S "$recorded_socket" ] && [ -O "$recorded_socket" ] && socket="$recorded_socket"
 fi
 if [ "\${SCRY_RECORDER_TRANSPORT:-}" != "direct" ] && [ -S "$socket" ] && command -v curl >/dev/null 2>&1; then
   case "$2" in
@@ -228,10 +228,16 @@ if [ "\${SCRY_RECORDER_TRANSPORT:-}" != "direct" ] && [ -S "$socket" ] && comman
   code="$(printf '%s' "$payload" | curl -s -o /dev/null -w '%{http_code}' --max-time "$deadline" \
     --unix-socket "$socket" -X POST \
     -H 'x-scry-protocol: ${PROTOCOL_VERSION}' -H "x-scry-provider: $1" -H "x-scry-event: $2" \
-    -H 'content-type: application/json' --data-binary @- http://localhost/v1/hook 2>/dev/null)" || code=""
-  [ "$code" = "200" ] && exit 0
-  # The daemon may already be applying this payload. Persist it for replay, not a second send.
-  export SCRY_RECORDER_DAEMON_TRIED=1
+    -H 'content-type: application/json' --data-binary @- http://localhost/v1/hook 2>/dev/null)"
+  rc=$?
+  [ "$rc" = "0" ] && [ "$code" = "200" ] && exit 0
+  if [ "$rc" = "7" ]; then
+    # Connection failed before delivery: let the CLI apply and restart a stale daemon.
+    unset SCRY_RECORDER_DAEMON_TRIED
+  else
+    # Timeout, broken response or HTTP rejection may follow delivery; preserve for replay.
+    export SCRY_RECORDER_DAEMON_TRIED=1
+  fi
 fi
 [ -x "$scry_bin" ] || skip cli_not_executable
 printf '%s' "$payload" | "$scry_bin" recorder hook --provider "$provider" --event "$event" --workspace "$workspace" --stdin --quiet

@@ -8,7 +8,7 @@ import { promisify } from 'node:util'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as daemon from '../core/turn-recorder/daemon'
 import * as recorder from '../core/turn-recorder/recorder'
-import { readHealth, safeKey } from '../core/turn-recorder/store'
+import { listRecords, readHealth, safeKey } from '../core/turn-recorder/store'
 import { initWorkspace } from './workspace-init'
 import { runScryCli } from './scry'
 
@@ -125,7 +125,16 @@ it('a stale socket (curl rc=7) applies hooks directly and requests daemon startu
     expect(captured).toBe(payload)
     expect(await runScryCli(['recorder', 'hook', '--provider', 'claude', '--event', event, '--workspace', root, '--quiet'])).toBe(0)
     const open = await readFile(join(sessionRoot, 'open.json'), 'utf8').then(JSON.parse).catch(() => null)
-    expect.soft(open).toMatchObject({ status: event === 'Stop' ? 'closing' : 'open' })
+    if (event === 'UserPromptSubmit') {
+      expect.soft(open).toMatchObject({ status: 'open' })
+      expect.soft(await listRecords(join(root, '.scry'))).toEqual([])
+    } else {
+      // Without a provider turn id, Claude Stop finalizes synchronously (it is not deferred).
+      expect.soft(open).toBeNull()
+      const records = await listRecords(join(root, '.scry'))
+      expect.soft(records).toHaveLength(1)
+      expect.soft(records[0]).toMatchObject({ sessionId: 'stale-session', status: 'completed' })
+    }
     expect.soft(await readdir(join(sessionRoot, 'inbox')).catch(() => [])).toEqual([])
   }
   expect.soft(send).toHaveBeenCalledTimes(2)
