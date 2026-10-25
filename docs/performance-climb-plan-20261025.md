@@ -33,15 +33,25 @@
 
 | 阶段 | 范围、所有者 | 完成条件 | 状态 |
 |---|---|---|---|
-| 0 身份与计划 | agent：隔离cwd、依赖、源码与结果目录，核对既有实验 | 无他人WIP混入，测量与生产分别提交 | 已建立，计划待提交 |
-| 1 删除无消费者计算 | agent：迁移上述统计刷新collector和最小生产变更 | 旧实现负对照；5轮L1；受锁L2；可见analytics刷新仍有效；UI/全量unit/type/build检查 | 下一步执行 |
-| 2 证据写入窄切片 | agent：测量content突发、重复body、双authority写入、directory/file sync | 先定位实际成本；不改格式、不减fsync；必要才做批量准备/提交实验 | 待阶段1结束，计入本轮实验上限 |
+| 0 身份与计划 | agent：隔离cwd、依赖、源码与结果目录，核对既有实验 | 无他人WIP混入，测量与生产分别提交 | 已完成；计划`7787c78a`，测量`cd40ee06`，结构`138b4217`/`3afb730f` |
+| 1 删除无消费者计算 | agent：迁移上述统计刷新collector和最小生产变更 | 旧实现负对照；5轮L1；受锁L2；可见analytics刷新仍有效；UI/全量unit/type/build检查 | 已实现`a50bfad9`，L1通过；L2和单次全量unit仍待收敛 |
+| 2 证据写入窄切片 | agent：测量content突发、重复body、双authority写入、directory/file sync | 先定位实际成本；不改格式、不减fsync；必要才做批量准备/提交实验 | 本轮未开始；先收敛阶段1验证 |
 | 3 查询与归档索引 | agent：固定40/400/4000轮与大账本；外部修改/删除/repair验证 | 先移除重复查询，再决定增量projection和专用执行进程；derived可重建、canonical不变 | 后续爬坡 |
 | 4 Provider运行层 | agent + 上游维护者：完整刷新合同与隔离reload夹具 | 配置/模型/auth/extension/executable变化正确失效；再验证热目录收益、冷启动与驻留成本 | 原刷新边界阻塞，禁止重复旧假设 |
 | 5 客户端增量 | agent：在写入点产生event revision，真正窗口化投影 | 固定大负载O(变化/可见)，重连、tombstone、选择、读屏、anchor不回归 | 后续爬坡 |
 | 6 交付与L3 | agent准备产物；用户批准合入/安装并正常使用 | build→源码映射明确；每侧同场景≥30样本、≥2会话 | 未开始 |
 
 原生桌面、blob pack格式迁移和常驻预热资源增加不在本轮自动实施范围。不是因为不够激进，而是先证明能解决当前瓶颈，再承担不可逆迁移成本。
+
+## 首轮结果（2026-10-25）
+
+详见[实验与验证记录](performance-experiments/20261025-unused-analytics-climb.md)。固定5次dataUpdated：stats 5→0、billing 5→0、SQL 130→0，重复5/5一致；native回归保留已打开分析的刷新。工作是真的不再执行，没有后台补算。
+
+用户选择严格遵守完整文件20KB门禁，因此先按职责拆分台账与integration hook。最初扩大到大组件的拆分未通过检查，已撤回；保留既有props/API后无需修改大组件。没有放宽门禁、删测试或缩小固定负载。
+
+结构与优化分别提交。类型、构建、focused60用例通过；UI检查中断后续完剩余7段，含当前production App的临时Git和真实IPC。全量unit组合执行仍未完成，存在冻结起点的2项CLI失败及Git基准阶段阻塞；分段验证不冒充全量成功。
+
+L2前后两侧均highLoad=true，本轮按持续高负载收尾，不开展第二实验。下一步由agent在负载合适时先完成L2与全量unit；再进入证据写入窄切片。未合入、未push、未安装，用户运行实例不变。
 
 ## 单实验流程
 
