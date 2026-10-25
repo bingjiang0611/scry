@@ -190,12 +190,12 @@ struct HomeSessions: View {
   private var projects: some View {
     LazyVStack(alignment: .leading, spacing: 0) {
       if !catalog.pinned.isEmpty {
-        section(ConnectionCopy.sectionPinned)
+        section(ConnectionCopy.sectionPinned, directory: true)
         ForEach(Array(catalog.pinned.enumerated()), id: \.element.id) { index, row in
           sessionRow(row, index: index, pinned: true)
         }
       }
-      section(ConnectionCopy.tabProjects)
+      section(ConnectionCopy.tabProjects, directory: true)
       if catalog.rows.isEmpty {
         Text(ConnectionCopy.noRecent).font(Typography.rowTitle).foregroundStyle(Palette.dim).padding(.vertical, 16)
       }
@@ -258,10 +258,10 @@ struct HomeSessions: View {
       .onAppear { seenRows.insert(row.id) }
   }
 
-  private func section(_ title: String) -> some View {
+  private func section(_ title: String, directory: Bool = false) -> some View {
     HStack(spacing: 10) {
-      Text(title).font(Typography.groupLabel).foregroundStyle(Palette.fg)
-      Rectangle().fill(Palette.border2).frame(height: 0.5)
+      Text(title).font(Typography.groupLabel).foregroundStyle(directory ? Palette.dim2 : Palette.fg)
+      Rectangle().fill(directory ? Palette.border3 : Palette.border2).frame(height: 1)
     }.padding(.top, 12).padding(.bottom, 4)
   }
   private func projectName(_ cwd: String) -> String { cwd.split(separator: "/").last.map(String.init) ?? cwd }

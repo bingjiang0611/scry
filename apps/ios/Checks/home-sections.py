@@ -13,12 +13,15 @@ import tempfile
 root = Path(__file__).resolve().parents[3]
 parser = argparse.ArgumentParser()
 parser.add_argument('--source', type=Path, default=root / 'apps/ios/ScryRemote/HomeSessions.swift')
+parser.add_argument('--copy-source', type=Path, default=root / 'apps/ios/ScryRemote/HomeCopy.swift')
 args = parser.parse_args()
 source = args.source.read_text()
 projection = source[source.index('struct HomeSessionCatalog:'):source.index('struct HomeSessions:')]
+copy = args.copy_source.read_text()
 fixture = r'''
 import Foundation
 
+enum ConnectionCopy {}
 enum HomeTab { case projects, activity }
 struct ExecutionTargetScope: Equatable { let id: String; let label: String }
 struct Session: Equatable {
@@ -66,12 +69,25 @@ check(search.rows.map(\.id) == ["title", "cwd", "provider", "host"], "search tit
 check(search.running.map(\.id) == search.rows.map(\.id), "search filters activity too")
 let large = HomeSessionCatalog(rows: (0..<45).map { row("\($0)") }, query: "", activity: { _ in .waiting })
 check(large.waiting.count == 45, "projection retains overflow for explicit UI count")
-print("\(count) R2 projection checks passed")
+// Expected values follow Mac relTime: choose the unit before rounding.
+// In particular, 23.6 hours stays 24h, and 6.9 days stays 7d.
+let now = 1_800_000_000_000.0
+let timeCases: [(Double, String)] = [
+  (-60, "1m"), (0, "1m"), (59 * 60, "59m"), (59.5 * 60, "60m"),
+  (3_600, "1h"), (23.6 * 3_600, "24h"), (24 * 3_600, "1d"),
+  (6.9 * 86_400, "7d"), (7 * 86_400, "1w"), (29 * 86_400, "4w"),
+  (30 * 86_400, "1mo"), (45 * 86_400, "2mo")
+]
+for (seconds, expected) in timeCases {
+  check(ConnectionCopy.relTime(now - seconds * 1_000, now: now) == expected,
+        "relTime \(seconds)s → \(expected)")
+}
+print("\(count) R2 projection/time checks passed")
 '''
 with tempfile.TemporaryDirectory(prefix='scry-home-sections-') as tmp:
     tmp = Path(tmp)
     main = tmp / 'main.swift'
-    main.write_text(fixture + projection + checks)
+    main.write_text(fixture + projection + copy + checks)
     binary = tmp / 'home-sections'
     subprocess.run(['xcrun', 'swiftc', str(main), '-o', str(binary)], check=True)
     subprocess.run(['codesign', '--force', '--sign', os.environ.get('SCRY_IOS_CHECK_SIGN_IDENTITY', '-'), str(binary)], check=True)

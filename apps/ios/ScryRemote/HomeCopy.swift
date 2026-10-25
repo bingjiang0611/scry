@@ -3,6 +3,18 @@ import Foundation
 // Copy touched by the R2 home/composer redesign. Shared legacy copy stays in
 // ConnectionCopy.swift; keeping this extension separate avoids growing that file.
 extension ConnectionCopy {
+  // Port of src/renderer/format.ts relTime. Static copy, not a ticking Date Text.
+  static func relTime(_ milliseconds: Double, now: Double = Date().timeIntervalSince1970 * 1_000) -> String {
+    let elapsed = now - milliseconds
+    if elapsed < 3_600_000 { return "\(Int(max(1, (elapsed / 60_000).rounded())))m" }
+    let hours = elapsed / 3_600_000
+    if hours < 24 { return "\(Int(hours.rounded()))h" }
+    let days = hours / 24
+    if days < 7 { return "\(Int(days.rounded()))d" }
+    if days < 30 { return "\(Int((days / 7).rounded()))w" }
+    return "\(Int((days / 30).rounded()))mo"
+  }
+
   static let tabActivity = "动态"
   static let homeNeedsReply = "需要回复"
   static let sectionRunning = "进行中"

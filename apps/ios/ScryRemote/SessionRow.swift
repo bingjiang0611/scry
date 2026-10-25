@@ -59,7 +59,7 @@ struct SessionRowView: View {
       } else if !openable {
         Text(ConnectionCopy.noSession).font(Typography.meta).foregroundStyle(Palette.dim2)
       } else if !showsProject {
-        Text(Date(timeIntervalSince1970: session.ts / 1_000), style: .relative)
+        Text(ConnectionCopy.relTime(session.ts))
           .font(Typography.meta).foregroundStyle(Palette.dim2).lineLimit(1)
       }
     }
