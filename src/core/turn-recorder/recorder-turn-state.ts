@@ -79,8 +79,12 @@ export async function beginOpenTurn(
   await writeJsonAtomic(statePath(root), { ...session, lastGeneration: generation, lastTurnIndex: turnIndex })
   if (!managedByScry && enablement.config.capture.diff) {
     const captureDir = join(turnRoot(root, generation), 'captures')
-    const repositories = await discoverRepositories(enablement.workspaceRoot, enablement.config)
-    open.captures = await Promise.all(repositories.map(async (repository) => ({
+    const discovery = await discoverRepositories(enablement.workspaceRoot, enablement.config)
+    open.repositoryDiscovery = {
+      maxDepth: discovery.maxDepth,
+      depthLimitedDirectories: discovery.depthLimitedDirectories
+    }
+    open.captures = await Promise.all(discovery.repositories.map(async (repository) => ({
       repository,
       capture: await beginGitTurnDiff(repository, 5_000, captureDir, [enablement.dataRoot])
     })))

@@ -174,6 +174,20 @@ export async function finalizeOpenTurn(
       evidence.modelSegments = unavailable(`${options.forcedReason}; the transcript no longer contains this turn`)
     }
   }
+  if (open.repositoryDiscovery?.depthLimitedDirectories) {
+    const { maxDepth, depthLimitedDirectories: count } = open.repositoryDiscovery
+    const reason = `repository discovery stopped at maxDepth=${maxDepth} before scanning ${count} ${count === 1 ? 'directory' : 'directories'}`
+    // Keep unavailable/disabled evidence and any earlier omission reason. A known snapshot
+    // remains present, but it cannot prove coverage of directories we did not traverse.
+    const status = evidence.diff.status === 'available' ? 'partial' : evidence.diff.status
+    evidence.diff = {
+      ...evidence.diff,
+      status,
+      quality: status === 'partial' ? 'inferred' : evidence.diff.quality,
+      source: [...evidence.diff.source, 'repository_discovery'],
+      omissionReason: [evidence.diff.omissionReason, reason].filter(Boolean).join('; ')
+    }
+  }
   if (!enablement.config.capture.prompt) evidence.user = disabled('prompt capture disabled by config')
   if (!enablement.config.capture.assistant) {
     evidence.assistant = disabled('assistant capture disabled by config')

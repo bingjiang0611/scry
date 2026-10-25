@@ -1,4 +1,4 @@
-import { lstat, readFile, readdir } from 'node:fs/promises'
+import { lstat, opendir, readFile, readdir } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 
 export interface RecorderConfig {
@@ -215,14 +215,35 @@ async function isGitRepository(path: string): Promise<boolean> {
   return exists(join(path, '.git'))
 }
 
-export async function discoverRepositories(root: string, config: RecorderConfig): Promise<string[]> {
+export interface RepositoryDiscovery {
+  repositories: string[]
+  maxDepth: number
+  /** Directories not entered because of the configured depth, not a count of missing repos. */
+  depthLimitedDirectories: number
+  nextDepth?: { repositories: string[]; incomplete: boolean }
+}
+
+export async function discoverRepositories(
+  root: string,
+  config: RecorderConfig,
+  probeNextDepth = false
+): Promise<RepositoryDiscovery> {
   const repositories = new Set<string>()
-  if (await isGitRepository(root)) repositories.add(root)
-  if (config.repositories.mode !== 'discover-nested-git') return [...repositories]
-  const excluded = new Set(['.git', '.scry', 'node_modules', 'target', 'dist', 'build', ...(config.repositories.exclude ?? [])])
   const maxDepth = config.repositories.maxDepth ?? 2
+  if (await isGitRepository(root)) repositories.add(root)
+  if (config.repositories.mode !== 'discover-nested-git') {
+    return { repositories: [...repositories], maxDepth, depthLimitedDirectories: 0 }
+  }
+  const excluded = new Set(['.git', '.scry', 'node_modules', 'target', 'dist', 'build', ...(config.repositories.exclude ?? [])])
+  let depthLimitedDirectories = 0
+  const frontier: string[] = []
   const walk = async (dir: string, depth: number): Promise<void> => {
-    if (depth > maxDepth) return
+    if (depth > maxDepth) {
+      depthLimitedDirectories++
+      // Only doctor retains a bounded frontier. Start hooks do no additional filesystem work.
+      if (probeNextDepth && frontier.length < 32) frontier.push(dir)
+      return
+    }
     let entries
     try {
       entries = await readdir(dir, { withFileTypes: true })
@@ -240,5 +261,30 @@ export async function discoverRepositories(root: string, config: RecorderConfig)
     }))
   }
   await walk(root, 1)
-  return [...repositories].sort()
+  const result: RepositoryDiscovery = { repositories: [...repositories].sort(), maxDepth, depthLimitedDirectories }
+  if (probeNextDepth) {
+    const nextDepth = { repositories: [] as string[], incomplete: frontier.length < depthLimitedDirectories }
+    let examinedEntries = 0
+    // This is a diagnostic sample, never an extension of the capture scope. At most 32
+    // frontier directories / 128 entries are examined; unreadable or capped probes stay partial.
+    probe: for (const dir of frontier) {
+      try {
+        for await (const entry of await opendir(dir)) {
+          if (examinedEntries >= 128) {
+            nextDepth.incomplete = true
+            break probe
+          }
+          examinedEntries++
+          if (!entry.isDirectory() || entry.isSymbolicLink() || excluded.has(entry.name)) continue
+          const child = join(dir, entry.name)
+          if (await isGitRepository(child)) nextDepth.repositories.push(child)
+        }
+      } catch {
+        nextDepth.incomplete = true
+      }
+    }
+    nextDepth.repositories.sort()
+    result.nextDepth = nextDepth
+  }
+  return result
 }

@@ -1,12 +1,12 @@
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, expect, it, vi } from 'vitest'
 import { runScryCli } from '../../cli/scry.js'
 import { discoverRepositories, type RecorderConfig } from './config.js'
-import { handleRecorderHook } from './recorder.js'
+import { handleRecorderHook, recoverRecorder } from './recorder.js'
 import { recorderSessionRoot } from './runtime-state.js'
 import { listRecords } from './store.js'
 
@@ -42,6 +42,48 @@ it('reports the depth boundary without silently increasing the default discovery
   expect(await discoverRepositories(root, config)).toMatchObject({
     repositories: [root], maxDepth: 2, depthLimitedDirectories: 1
   })
+}, 15_000)
+
+it('honors explicit depth, exclusions and symlink boundaries without following the diagnostic probe', async () => {
+  const root = await workspace()
+  await symlink(join(root, 'a/b/c'), join(root, 'linked-repo'))
+  expect(await discoverRepositories(root, { ...config, repositories: { mode: 'discover-nested-git', maxDepth: 3 } }, true)).toEqual({
+    repositories: [root, join(root, 'a/b/c')], maxDepth: 3, depthLimitedDirectories: 0,
+    nextDepth: { repositories: [], incomplete: false }
+  })
+  expect(await discoverRepositories(root, { ...config, repositories: { mode: 'discover-nested-git', exclude: ['a'] } }, true)).toEqual({
+    repositories: [root], maxDepth: 2, depthLimitedDirectories: 0,
+    nextDepth: { repositories: [], incomplete: false }
+  })
+  expect(await discoverRepositories(root, { ...config, repositories: { mode: 'discover-nested-git', maxDepth: 0 } })).toEqual({
+    repositories: [root], maxDepth: 0, depthLimitedDirectories: 1
+  })
+}, 15_000)
+
+it('bounds the doctor-only extra-depth scan and labels an incomplete probe', async () => {
+  const root = await workspace()
+  await Promise.all(Array.from({ length: 128 }, (_, i) => mkdir(join(root, 'a/b', `entry-${i}`))))
+  const discovery = await discoverRepositories(root, config, true)
+  expect(discovery).toMatchObject({ repositories: [root], depthLimitedDirectories: 1, nextDepth: { incomplete: true } })
+  expect(discovery.nextDepth?.repositories.length).toBeLessThanOrEqual(128)
+}, 15_000)
+
+it('keeps a stalled closing diff unavailable and retains both the attribution gap and depth gap', async () => {
+  const root = await workspace()
+  const base = { provider: 'claude' as const, workspace: root, env: {},
+    payload: { session_id: 'expired-coverage', turn_id: 'expired', prompt: 'go', timestamp: '2000-01-01T00:00:00Z' } }
+  await handleRecorderHook({ ...base, event: 'UserPromptSubmit' })
+  await handleRecorderHook({ ...base, event: 'SessionEnd', payload: { ...base.payload, timestamp: '2000-01-01T00:00:01Z' } })
+  const openPath = join(recorderSessionRoot(join(root, '.scry'), 'claude', 'expired-coverage'), 'open.json')
+  expect(JSON.parse(await readFile(openPath, 'utf8')).status).toBe('closing')
+  await utimes(openPath, new Date('2000-01-01'), new Date('2000-01-01'))
+  await recoverRecorder(root, {})
+  const records = await listRecords(join(root, '.scry'))
+  expect(records).toHaveLength(1)
+  expect(records[0].diff.status).toBe('unavailable')
+  expect(records[0].diff.value).toBeUndefined()
+  expect(records[0].diff.omissionReason).toContain('baseline')
+  expect(records[0].diff.omissionReason).toContain('maxDepth=2')
 }, 15_000)
 
 it('persists discovery coverage and marks the committed diff partial while retaining captured snapshots', async () => {

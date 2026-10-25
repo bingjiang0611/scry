@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import type { AgentTurnRecord } from '../../shared/turn-record.js'
 import type { GitTurnDiffCapture } from './git.js'
+import type { RepositoryDiscovery } from './config.js'
 import { listFiles, readJson, withDirectoryLock } from './io.js'
 import { safeKey } from './store.js'
 import { recorderHasRetryableInbox, recorderInboxEntries } from './inbox.js'
@@ -45,6 +46,7 @@ export interface RecorderOpenTurnState {
   staleTerminalProtection?: boolean
   deferredTerminalAt?: string
   deferredTerminalEventId?: string
+  repositoryDiscovery?: Pick<RepositoryDiscovery, 'maxDepth' | 'depthLimitedDirectories'>
   captures: Array<{ repository: string; capture: GitTurnDiffCapture }>
 }
 

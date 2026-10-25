@@ -4,6 +4,8 @@ import { readHookSkips } from '../core/turn-recorder/hook-diagnostics.js'
 import { RECORDER_VERSION, readHealth, verifyStore, lastRecordVersion } from '../core/turn-recorder/store.js'
 import { recorderStaleOpenTurns } from '../core/turn-recorder/runtime-state.js'
 import { providerHookScriptState } from './workspace-init.js'
+import { discoverRepositories } from '../core/turn-recorder/config.js'
+import { relative } from 'node:path'
 
 
 /**
@@ -44,18 +46,29 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
     return missing ? 3 : 2
   }
   await refreshRecorderPendingHealth(enablement.dataRoot)
-  const [health, store, staleOpenTurns, recordingVersion, hookScript] = await Promise.all([
+  const [health, store, staleOpenTurns, recordingVersion, hookScript, discovery] = await Promise.all([
     readHealth(enablement.dataRoot),
     verifyStore(enablement.dataRoot),
     recorderStaleOpenTurns(enablement.dataRoot, OPEN_TURN_EXPIRY_MS),
     lastRecordVersion(enablement.dataRoot),
-    providerHookScriptState(enablement.workspaceRoot)
+    providerHookScriptState(enablement.workspaceRoot),
+    discoverRepositories(enablement.workspaceRoot, enablement.config, true)
   ])
   // Stale open turns need investigation, not a fabricated interruption. Warn separately from
   // pendingCount (managed/closing/quarantined); elapsed time does not prove the Provider stopped.
   const degraded = !!health.lastError || health.pendingCount > 0 || staleOpenTurns.length > 0 || hookSkips.recentCount > 0
   const checks: Check[] = [
     { id: 'recorder.enabled', status: 'pass', detail: 'workspace has a valid recorder config' },
+    {
+      id: 'repositories.depth',
+      status: discovery.depthLimitedDirectories > 0 ? 'warn' : 'pass',
+      detail: enablement.config.repositories.mode === 'workspace-only'
+        ? `${discovery.repositories.length} workspace-root repository; nested discovery not requested`
+        : `${discovery.repositories.length} repositories discovered now; ${discovery.depthLimitedDirectories} directories not traversed at maxDepth=${discovery.maxDepth}; ` +
+          `repositories observed one level deeper: ${discovery.nextDepth?.repositories.map(path => relative(enablement.workspaceRoot, path)).join(', ') || 'none observed'}` +
+          (discovery.nextDepth?.incomplete ? '; next-level probe incomplete (bounded to 32 directories / 128 entries, or unreadable)' : ''),
+      ...(discovery.depthLimitedDirectories > 0 ? { remediation: 'review repositories.maxDepth or add intentional exclusions to repositories.exclude; this probe does not expand capture scope' } : {})
+    },
     {
       id: 'hook.skips', status: hookSkips.recentCount > 0 ? 'fail' : hookSkips.count > 0 ? 'warn' : 'pass',
       detail: `${hookSkips.recentCount} hook failure(s) within 24h or with unknown time; ${hookSkips.count} in retained log window; latest ${hookSkips.lastAt ?? 'unavailable'}`,
