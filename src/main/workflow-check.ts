@@ -1,4 +1,4 @@
-import { spawn, execFile, type ChildProcess } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createReadStream, constants } from 'node:fs'
 import { access, open, realpath, stat } from 'node:fs/promises'
@@ -7,6 +7,7 @@ import { sanitizeProviderEnv, shellEnv } from './claude-locate'
 import type { WorkflowCheckRequest, WorkflowCheckResult, WorkflowFrozenCheck } from '../shared/workflow-check'
 import type { WorkflowReplicaReceipt } from '../shared/workflow-replica'
 import { workflowCheckCopy as copy } from '../shared/constants/copy'
+import { workflowCheckProcessIdentity as identity, workflowCheckGroupEmpty as groupEmpty } from './workflow-check-process'
 
 const OUTPUT_BYTES = 1024 * 1024
 const DEFAULT_TIMEOUT = 10 * 60 * 1000
@@ -138,28 +139,6 @@ export function bindWorkflowCheck(check: WorkflowFrozenCheck, replica: WorkflowR
     interpreters: check.interpreters.map(artifact => ({ ...artifact, path: map(artifact.path) })),
     launch: { executable: map(check.launch.executable), args: check.launch.args.map(map) }, environmentHash: environmentHash(boundEnv)
   }, environment: boundEnv }
-}
-
-function ps(args: string[]): Promise<string> {
-  return new Promise((resolveResult, reject) => execFile('/bin/ps', args, { encoding: 'utf8', maxBuffer: 1024 * 1024, env: { PATH: '/usr/bin:/bin', LC_ALL: 'C' } }, (error, stdout) => error ? reject(error) : resolveResult(stdout)))
-}
-
-async function identity(pid: number): Promise<string | undefined> {
-  // Only this registered PID's arguments, not a machine-wide command dump.
-  try { return (await ps(['-p', String(pid), '-o', 'lstart=,command='])).trim() || undefined } catch (error) {
-    if ((error as { code?: number }).code === 1) return undefined
-    throw error
-  }
-}
-async function groupEmpty(pid: number): Promise<boolean> {
-  const rows = (await ps(['-axo', 'pid=,pgid=,stat='])).trim().split('\n')
-  let live = false
-  for (const row of rows) {
-    const columns = row.trim().split(/\s+/)
-    if (columns.length !== 3 || !/^\d+$/.test(columns[0]) || !/^\d+$/.test(columns[1])) throw new Error(copy.scope)
-    if (Number(columns[1]) === pid && !columns[2].startsWith('Z')) live = true
-  }
-  return !live
 }
 
 export function workflowCheckDiagnostics(parser: WorkflowCheckRequest['parser'], stdout: string, stderr: string, truncated: boolean, exitCode?: number | null): WorkflowCheckResult['diagnostics'] {
