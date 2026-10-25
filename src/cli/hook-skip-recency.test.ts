@@ -16,12 +16,15 @@ beforeEach(() => {
 afterEach(async () => {
   vi.useRealTimers()
   vi.restoreAllMocks()
+  vi.unstubAllEnvs()
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
 
 async function workspace(times: string[]): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'scry-hook-recency-'))
   roots.push(root)
+  vi.stubEnv('HOME', join(root, 'isolated-home'))
+  vi.stubEnv('XDG_STATE_HOME', join(root, 'isolated-state'))
   await writeFile(join(root, 'scry.config.json'), JSON.stringify({
     schemaVersion: 1, enabled: true, workspaceId: 'recency-test', dataDir: '.scry',
     repositories: { mode: 'workspace-only' },

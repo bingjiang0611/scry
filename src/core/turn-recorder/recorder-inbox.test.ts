@@ -42,12 +42,15 @@ afterEach(async () => {
   faults.readCode = 'EACCES'
   faults.attempts = 0
   vi.restoreAllMocks()
+  vi.unstubAllEnvs()
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'scry-inbox-test-'))
   roots.push(root)
+  vi.stubEnv('HOME', join(root, 'isolated-home'))
+  vi.stubEnv('XDG_STATE_HOME', join(root, 'isolated-state'))
   await writeFile(join(root, 'scry.config.json'), JSON.stringify({
     schemaVersion: 1, enabled: true, workspaceId: 'inbox-fixture', dataDir: '.scry',
     repositories: { mode: 'workspace-only' },

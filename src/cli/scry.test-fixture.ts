@@ -2,14 +2,22 @@ import { execFileSync } from 'node:child_process'
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, vi } from 'vitest'
+import { afterEach, beforeEach, vi } from 'vitest'
 
 
 export const roots: string[] = []
 
+beforeEach(async () => {
+  const home = await mkdtemp(join(tmpdir(), 'scry-cli-test-home-'))
+  roots.push(home)
+  vi.stubEnv('HOME', home)
+  vi.stubEnv('XDG_STATE_HOME', join(home, '.local/state'))
+})
+
 afterEach(async () => {
   vi.useRealTimers()
   vi.restoreAllMocks()
+  vi.unstubAllEnvs()
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
 
