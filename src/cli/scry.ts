@@ -664,7 +664,7 @@ async function doctorCommand(args: ParsedArgs): Promise<number> {
       id: 'turns.pending',
       status: health.pendingCount > 0 ? 'warn' : 'pass',
       detail: `${health.pendingCount} pending item(s): turns or queued hooks`,
-      ...(health.pendingCount > 0 ? { remediation: 'run `scry recorder recover`; inspect runtime/*/*/inbox-failed for exhausted retries' } : {})
+      ...(health.pendingCount > 0 ? { remediation: 'run `scry recorder recover`; for exhausted or unreadable inbox-failed sidecars see scry-turn-recorder README: Retry quarantined hooks' } : {})
     },
     {
       // Upgrading the CLI leaves this file alone, so an old script keeps running silently. It still

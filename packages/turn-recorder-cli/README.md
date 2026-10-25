@@ -365,6 +365,46 @@ OpenCode 插件对同一实例内已投递的 `session.idle` 去重；新 chat.m
 
 开始 hook 首次发布 `open.json` / `session.json`，以及终态钉住 `closing` 时，均等待原子写的文件和父目录 fsync；中间工具状态仍不增加 fsync。这保证调用了持久化屏障，不等同于验证所有文件系统上的断电恢复。
 
+### Retry quarantined hooks
+
+`runtime/<provider>/<session-key>/inbox-failed/<entry>.json` 保留失败事件原文；同名追加 `.failure.json` 的 sidecar 保存尝试次数与最近错误。可重试条目由 `scry recorder recover` 重放，累计 5 次失败后不再自动尝试。sidecar 损坏或不可读时，replay 同样跳过，不猜测或重置计数。
+
+已耗尽和 sidecar 不可读的条目仍计入 `pendingCount`，使 doctor 的 `turns.pending` 为 warn；它们本身不阻止 daemon 空闲退出。其他可重试条目或 open turn 仍按原规则保活。升级 CLI 后已有 daemon 需要 `scry recorder restart` 才能加载新逻辑；不需要 `integrations repair`。
+
+人工重试只针对确认过的单个事件：
+
+1. 先结束使用此工作区的 Provider，停止 recorder daemon，并通过 `recorder status` 确认它已停止，避免与新 hook 或其他 recover 并发。
+2. 查看该 sidecar 与 recorder 日志，修好失败原因（例如权限、磁盘或已定位的应用逻辑错误）。损坏/不可读的 sidecar 必须先恢复到能原样备份的状态；不要覆盖原事件、猜造字段或直接把计数写成 0。事件本体已损坏且缺少权威恢复来源时，应保留证据，不靠反复重置计数期待自愈。
+3. 备份事件与 sidecar 到 dataDir 之外，再仅删除对应 sidecar。缺少 sidecar 表示重新开始一轮最多 5 次的尝试，不需要搬动事件。
+4. 执行 recover，读回状态与目标文件。recover 退出 0 不代表该事件已成功；成功应用后原队列事件会清理，若失败则重新生成 sidecar。开始事件可能只打开一轮，不会立刻产生 record。
+
+以下以默认 dataDir 为例；按 doctor 的 dataRoot 和实际文件名逐项替换占位值。若之前隔离移动失败、原事件仍在 `inbox/`，只把 EVENT 改为那份实际文件的路径；SIDECAR 仍在 `inbox-failed/`。不要用通配符批量删除：
+
+```bash
+WORKSPACE='/absolute/path/to/workspace'
+scry recorder stop --workspace "$WORKSPACE"
+scry recorder status --workspace "$WORKSPACE"
+```
+
+仅在确认输出 `running=false` 且 Provider 已退出后，在同一终端继续：
+
+```bash
+DATA_ROOT="$WORKSPACE/.scry"                    # 自定义 dataDir 时改为实际 dataRoot
+SESSION_DIR="$DATA_ROOT/runtime/<provider>/<session-key>"
+NAME='<实际事件文件名>.json'
+EVENT="$SESSION_DIR/inbox-failed/$NAME"
+SIDECAR="$SESSION_DIR/inbox-failed/$NAME.failure.json"
+BACKUP="$(mktemp -d)"                           # 保留此备份，供后续核验
+printf 'Backup: %s\n' "$BACKUP"
+cp "$EVENT" "$SIDECAR" "$BACKUP/" &&
+  rm -- "$SIDECAR" &&
+  scry recorder recover --workspace "$WORKSPACE"
+scry recorder status --workspace "$WORKSPACE"
+scry doctor --workspace "$WORKSPACE"
+```
+
+不要删除 event、records 或 health.json 来清告警。重试成功不会扣除历史 droppedEvents；其他 pending/lastError 也可能仍让 doctor 告警。重放可能晚于后续事件，不保证严格 FIFO 或 exactly-once；确认事件身份及失败原因后再重试。恢复日常使用前按需启动 recorder/Provider。
+
 ## 证据口径
 
 - 无调用记为 `available + []`;Provider 未暴露的记为 `unavailable`,**不会伪装成 0**。

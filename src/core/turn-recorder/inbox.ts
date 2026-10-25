@@ -80,8 +80,9 @@ export async function recorderHasRetryableInbox(root: string): Promise<boolean> 
     try {
       if (((await readInboxFailure(entry))?.attempts ?? 0) < INBOX_MAX_ATTEMPTS) return true
     } catch {
-      // A read error is not proof that all attempts have been exhausted.
-      return true
+      // Replay also skips unreadable sidecars. Keep their pending evidence, but do not
+      // keep an idle daemon alive for work it cannot retry without manual repair.
+      continue
     }
   }
   return false
