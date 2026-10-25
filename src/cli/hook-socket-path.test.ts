@@ -43,6 +43,10 @@ it('publishes the actual long-workspace socket and the shell posts without start
     await hook(root)
     await expect(readFile(join(root, 'cli-calls'))).rejects.toMatchObject({ code: 'ENOENT' })
     expect(await readFile(join(root, '.scry/recorder-socket-path'), 'utf8')).toBe(`${daemon.socketPath}\n`)
+    // Contract check only: an unprivileged test cannot create another user's socket.
+    // The real round-trip above separately proves the current user's socket is accepted.
+    expect(await readFile(join(root, '.scry/provider-hook.sh'), 'utf8'))
+      .toContain('[ -S "$recorded_socket" ] && [ -O "$recorded_socket" ]')
     const status = await promisify(execFile)('/usr/bin/curl', ['-s', '--unix-socket', daemon.socketPath, 'http://localhost/v1/status'])
     expect(JSON.parse(status.stdout).requestCount).toBe(2)
   } finally { await daemon.close() }

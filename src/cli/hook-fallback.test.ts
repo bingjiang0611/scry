@@ -1,5 +1,6 @@
-import { execFile, execFileSync } from 'node:child_process'
-import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { execFile, execFileSync, spawn } from 'node:child_process'
+import { once } from 'node:events'
+import { chmod, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -71,4 +72,63 @@ it.each(['Stop', 'SessionEnd'])('a wedged daemon receives only one %s attempt; f
     server.closeAllConnections()
     await promisify(server.close.bind(server))()
   }
+}, 15_000)
+
+it('a stale socket (curl rc=7) applies hooks directly and requests daemon startup instead of stranding them in inbox', async () => {
+  const root = await mkdtemp('/tmp/scry-stale-')
+  roots.push(root)
+  execFileSync('git', ['init', '-q', root])
+  const cli = join(root, 'capture-cli')
+  await writeFile(cli, `#!/bin/sh\nprintf '%s' "\${SCRY_RECORDER_DAEMON_TRIED:-}" > '${root}/tried'\ncat > '${root}/payload'\n`)
+  await chmod(cli, 0o700)
+  await initWorkspace({ workspace: root, providers: 'claude', cliPath: cli })
+  const socket = join(root, '.scry/recorder-v1.sock')
+  // Kill only this newly spawned fixture. Unlike server.close(), SIGKILL leaves a real socket
+  // inode behind, reproducing the crash path without Python, sudo or a simulated curl exit.
+  const peer = spawn(process.execPath, ['-e',
+    'require("node:net").createServer().listen(process.argv[1], () => process.stdout.write("ready"))', socket],
+  { stdio: ['ignore', 'pipe', 'pipe'] })
+  try {
+    await once(peer.stdout!, 'data')
+  } finally {
+    const exited = once(peer, 'exit')
+    peer.kill('SIGKILL')
+    await exited
+  }
+  expect((await stat(socket)).isSocket()).toBe(true)
+  await expect(promisify(execFile)('curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}',
+    '--max-time', '1', '--unix-socket', socket, 'http://localhost/v1/hook']))
+    .rejects.toMatchObject({ code: 7, stdout: '000' })
+  const start = vi.spyOn(daemon, 'startRecorderDaemon').mockResolvedValue({ started: false,
+    status: { running: false, protocol: daemon.PROTOCOL_VERSION, socketPath: socket } })
+  const send = vi.spyOn(daemon, 'sendRecorderDaemonHook')
+  const handle = vi.spyOn(recorder, 'handleRecorderHook')
+  const sessionRoot = join(root, '.scry/runtime/claude', safeKey('stale-session'))
+  let captured = ''
+  vi.spyOn(process.stdin, Symbol.asyncIterator).mockImplementation(async function* () { yield Buffer.from(captured) })
+  for (const event of ['UserPromptSubmit', 'Stop']) {
+    const payload = JSON.stringify({ session_id: 'stale-session', prompt: 'hello',
+      timestamp: event === 'Stop' ? '2026-10-25T12:00:01Z' : '2026-10-25T12:00:00Z' })
+    await new Promise<void>((resolve, reject) => {
+      const child = execFile('/bin/sh', [join(root, '.scry/provider-hook.sh'), 'claude', event], {
+        env: { ...process.env, SCRY_RECORDER_SOCKET: socket, SCRY_RECORDER_MANAGED: '0',
+          SCRY_RECORDER_TRANSPORT: '', SCRY_RECORDER_DAEMON_TRIED: '' }
+      }, error => error ? reject(error) : resolve())
+      child.stdin!.end(payload)
+    })
+    const tried = await readFile(join(root, 'tried'), 'utf8')
+    expect.soft(tried).toBe('')
+    vi.stubEnv('SCRY_RECORDER_SOCKET', socket)
+    vi.stubEnv('SCRY_RECORDER_TRANSPORT', '')
+    vi.stubEnv('SCRY_RECORDER_DAEMON_TRIED', tried)
+    captured = await readFile(join(root, 'payload'), 'utf8')
+    expect(captured).toBe(payload)
+    expect(await runScryCli(['recorder', 'hook', '--provider', 'claude', '--event', event, '--workspace', root, '--quiet'])).toBe(0)
+    const open = await readFile(join(sessionRoot, 'open.json'), 'utf8').then(JSON.parse).catch(() => null)
+    expect.soft(open).toMatchObject({ status: event === 'Stop' ? 'closing' : 'open' })
+    expect.soft(await readdir(join(sessionRoot, 'inbox')).catch(() => [])).toEqual([])
+  }
+  expect.soft(send).toHaveBeenCalledTimes(2)
+  expect.soft(start).toHaveBeenCalledTimes(2)
+  expect(handle).toHaveBeenCalledTimes(2)
 }, 15_000)
