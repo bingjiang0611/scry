@@ -242,7 +242,18 @@ exit 0
 }
 
 function hookCommand(provider: Exclude<InitProvider, 'opencode'>, event: string): string {
-  const body = `root="\${${PROJECT_DIR_ENV[provider]}:-$PWD}"; exec "$root/.scry/provider-hook.sh" ${provider} ${event}`
+  // Only shell builtins run on successful lookup. Stop at the nearest git boundary so a
+  // nested repository cannot silently send its hooks to an enclosing workspace's recorder.
+  const body = [
+    `root="\${${PROJECT_DIR_ENV[provider]}:-$PWD}"`,
+    'case "$root" in /*) ;; *) root="$PWD/$root" ;; esac',
+    `while :; do if [ -x "$root/.scry/provider-hook.sh" ]; then exec "$root/.scry/provider-hook.sh" ${provider} ${event}; fi; [ -e "$root/.git" ] && break; [ "$root" = "/" ] && break; root="\${root%/*}"; [ -n "$root" ] || root="/"; done`,
+    'state="${XDG_STATE_HOME:-${HOME:+$HOME/.local/state}}"',
+    '[ -n "$state" ] || exit 0',
+    '[ ! -L "$state" ] && [ ! -L "$state/scry" ] && [ ! -L "$state/scry/hook-skip.log" ] || exit 0',
+    `(umask 077; mkdir -p "$state/scry" && printf "%s\\t${provider}\\t${event}\\tbridge_not_found\\t0\\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$state/scry/hook-skip.log") 2>/dev/null || :`,
+    'exit 0'
+  ].join('; ')
   return `SCRY_HANDLER_ID=${HANDLER_ID} sh -c '${body}'`
 }
 

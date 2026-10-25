@@ -73,12 +73,17 @@ describe('scry init', () => {
       await chmod(path, 0o700)
     }
     await writeFile(join(root, '.scry/node-bin-dir'), `${bin}\n`)
+    await symlink('/bin/sh', join(bin, 'sh'))
+    const nested = join(root, 'src/deep')
+    await mkdir(nested, { recursive: true })
+    const settings = JSON.parse(await readFile(join(root, '.codex/hooks.json'), 'utf8'))
+    const command = settings.hooks.Stop[0].hooks[0].command as string
     const socket = join(root, 'daemon.sock')
     const server = createServer()
     await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(socket, resolve) })
     try {
-      const result = spawnSync('/bin/sh', [join(root, '.scry/provider-hook.sh'), 'codex', 'Stop'], {
-        input: '{}', encoding: 'utf8', env: { PATH: bin, CALLS: calls, SCRY_RECORDER_SOCKET: socket }
+      const result = spawnSync('/bin/sh', ['-c', command], {
+        cwd: nested, input: '{}', encoding: 'utf8', env: { PATH: bin, CALLS: calls, SCRY_RECORDER_SOCKET: socket }
       })
       expect(result.status).toBe(0)
       expect((await readFile(calls, 'utf8')).trim().split('\n')).toEqual(['dirname', 'cat', 'curl'])
