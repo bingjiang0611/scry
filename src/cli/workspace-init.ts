@@ -286,6 +286,9 @@ import { fileURLToPath } from 'node:url'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const hook = resolve(root, '.scry/provider-hook.sh')
 const turns = new Map()
+// session.idle can repeat without new work. Retain only this instance's last 128 idle sessions;
+// after eviction/reload the first unpaired idle is unknown and must still reach the recorder.
+const idleSessions = new Set()
 
 const object = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {}
 const first = (...values) => values.find((value) => value !== undefined && value !== null && value !== '')
@@ -367,6 +370,7 @@ function deliver(event, payload) {
     timeout: event === 'Stop' ? 15000 : 10000
   })
   if (result.error) process.stderr.write('[scry-recorder] ' + event + ': ' + result.error.message + '\\n')
+  return result
 }
 
 function payload(event, input, output = {}) {
@@ -387,6 +391,7 @@ export const ScryRecorder = async () => ({
   'chat.message': async (input, output) => {
     const id = sessionId(input)
     const prompt = first(input?.prompt, text(input?.parts), text(output?.parts), '')
+    idleSessions.delete(id)
     turns.set(id, { assistant: new Map(), assistantMessages: new Set(), usage: new Map() })
     deliver('UserPromptSubmit', { ...payload('UserPromptSubmit', input, output), prompt })
   },
@@ -400,6 +405,8 @@ export const ScryRecorder = async () => ({
     const properties = object(envelope.properties)
     const id = sessionId(input)
     const state = turns.get(id)
+    const status = object(properties.status)
+    if (envelope.type === 'session.status' && (status.type === 'busy' || status.type === 'retry')) idleSessions.delete(id)
     if (envelope.type === 'message.updated' && state) {
       const info = object(properties.info)
       if (info.role === 'assistant' && info.id) {
@@ -414,9 +421,10 @@ export const ScryRecorder = async () => ({
       }
     }
     if (envelope.type === 'session.idle') {
+      if (idleSessions.has(id)) return
       const assistant = utf8Prefix(state ? [...state.assistant.values()].join('\\n') : '', 262144)
       const observedUsage = usage(state)
-      deliver('Stop', {
+      const delivered = deliver('Stop', {
         ...payload('Stop', input),
         assistant_response: assistant.value,
         ...(assistant.capture ? { scry_capture: { schemaVersion: 1, fields: { assistant_response: assistant.capture } } } : {}),
@@ -427,6 +435,11 @@ export const ScryRecorder = async () => ({
         } : {})
       })
       turns.delete(id)
+      // Failed dispatch is not evidence of a delivered terminal. Do not suppress a later retry.
+      if (!delivered.error && delivered.status === 0) {
+        idleSessions.add(id)
+        if (idleSessions.size > 128) idleSessions.delete(idleSessions.values().next().value)
+      }
     }
   }
 })

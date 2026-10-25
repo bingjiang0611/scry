@@ -195,17 +195,19 @@ describe('scry init', () => {
       .replace('export const ScryRecorder', 'const ScryRecorder')
       .replace('export default ScryRecorder', 'ScryRecorder()')
     const delivered: Record<string, unknown>[] = []
+    let deliveryStatus = 0
     const hooks = await runInNewContext(source, {
       resolve, Buffer, TextDecoder, process,
       spawnSync: (_hook: string, _args: string[], options: { input: string }) => {
         delivered.push(JSON.parse(options.input))
-        return { status: 0 }
+        return { status: deliveryStatus }
       }
     }) as Record<string, (input: unknown, output?: unknown) => Promise<void>>
     const idle = (id: string) => hooks.event({ event: { type: 'session.idle', properties: { sessionID: id } } })
     const stops = () => delivered.filter(payload => payload.hook_event_name === 'Stop')
     await hooks['chat.message']({ sessionID: 'known', prompt: 'go' })
     await idle('known')
+    await hooks.event({ event: { type: 'session.status', properties: { sessionID: 'known', status: { type: 'idle' } } } })
     await idle('known')
     expect.soft(stops()).toHaveLength(1)
     await hooks['chat.message']({ sessionID: 'known', prompt: 'again' })
@@ -219,11 +221,18 @@ describe('scry init', () => {
     await hooks.event({ event: { type: 'session.status', properties: { sessionID: 'unmatched', status: { type: 'busy' } } } })
     await idle('unmatched')
     expect.soft(stops()).toHaveLength(4)
+    await hooks.event({ event: { type: 'session.status', properties: { sessionID: 'unmatched', status: { type: 'retry', attempt: 1, message: 'retry', next: 100 } } } })
+    await idle('unmatched')
+    expect.soft(stops()).toHaveLength(5)
     // Keep suppression bounded: an evicted identity is unknown, not silently discarded.
     for (let i = 0; i < 128; i++) await idle(`other-${i}`)
     const before = stops().length
     await idle('known')
     expect(stops()).toHaveLength(before + 1)
+    deliveryStatus = 1
+    await idle('failed-dispatch')
+    await idle('failed-dispatch')
+    expect(stops()).toHaveLength(before + 3)
   })
 
   it.each(['none', 'summary'])('保留已有显式 %s 配置，不猜测用户意图', async (toolOutput) => {

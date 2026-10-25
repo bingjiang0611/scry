@@ -125,6 +125,8 @@ interface TranscriptRead {
 
 const START_EVENTS = new Set(['UserPromptSubmit', 'chat.message', 'turn.started'])
 const END_EVENTS = new Set(['Stop', 'session.idle', 'session.stop', 'turn/completed', 'turn.completed'])
+// These Provider Stop contracts expose the same-turn continuation flag; do not infer parity.
+const STOP_HOOK_ACTIVE_PROVIDERS = new Set<ProviderId>(['claude', 'codex', 'qoder'])
 /**
  * The session or process ended, so an open turn stops here: it cannot converge, and waiting only
  * lets a later prompt look like this turn's end. It is not a normal terminal — nothing proves the
@@ -2923,17 +2925,23 @@ async function applyHookLocked(
     return { status: 'started' as const }
   }
   if (!open) {
-    const terminal = END_EVENTS.has(input.event) || SESSION_END_EVENTS.has(input.event)
+    // Shutdown between turns is normal. A Stop-hook continuation also does not prove a missing
+    // start; only an actual first terminal can provide that evidence. Keep open-turn handling below.
+    if (SESSION_END_EVENTS.has(input.event) || (
+      input.event === 'Stop' && STOP_HOOK_ACTIVE_PROVIDERS.has(input.provider) && input.payload.stop_hook_active === true
+    )) return { status: 'duplicate' as const }
+    const terminal = END_EVENTS.has(input.event)
     if (terminal) {
       if (incomingProviderTurnId && await isCommittedProviderTurn(enablement.dataRoot, root, input.provider, sessionId, incomingProviderTurnId)) {
         return { status: 'duplicate' as const }
       }
       const terminalAt = explicitTimestampOf(input.payload)
       if (!incomingProviderTurnId && terminalAt) {
+        const terminalMs = Date.parse(terminalAt)
         const state = await readJson<SessionState>(statePath(root))
         const record = state?.lastCommittedRecordId ? await findRecordById(enablement.dataRoot, state.lastCommittedRecordId) : undefined
         if (record?.provider.id === input.provider && record.sessionId === sessionId &&
-          terminalAt >= record.startedAt && terminalAt <= record.completedAt &&
+          terminalMs >= Date.parse(record.startedAt) && terminalMs <= Date.parse(record.completedAt) &&
           record.termination?.value?.completedAtSource === 'provider_terminal_event') {
           return { status: 'duplicate' as const }
         }

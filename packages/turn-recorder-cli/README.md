@@ -359,7 +359,9 @@ hook 路径/Node 路径缺失、managed CLI 无效、CLI 非零退出和配置�
 
 shell 只追加；CLI 诊断在文件超过 1 MiB 时轮转并保留一代，每代最多读取末尾 1 MiB，截断时 `hookSkips.truncated=true`。只运行失败 hook 而不调用 CLI 诊断时，磁盘日志可暂时超过阈值；这不是硬磁盘配额。目录不可写时无法保证留痕，hook 仍 fail open。修复原因后可由用户保存并移走日志及 `.1` 来清除该窗口的告警。新增 shell 留痕需执行 `scry integrations repair --yes`；仅 invalid_config 和 CLI 诊断改进升级 CLI 即可生效。不增加 CLI 路径自动回退。
 
-缺少开始事件的终态不会仅凭会话存在就判为 duplicate。无法通过已提交 turn ID 或已提交轮次的明确时间边界证明重复时，事件保存到 `runtime/<provider>/<session-key>/orphans/<payload-hash>.json`，`health.json` 的 `missingStartTerminals` 和 `orphanEvents` 各加一，并写 `recorder.log`；相同 payload 重放不重复计数。工具 orphan 同样保存 payload。原始 payload 使用 content envelope，受 `toolContentFieldBytes` / `toolContentTurnBytes` 上限约束；只有 prompt、assistant、完整工具采集都启用时才保存正文，否则标明 `capture_policy` 省略。orphan 不是 record，不会猜测 token、轮首时间或 diff。
+无 open turn 的 SessionEnd/进程退出只是两轮之间的正常会话结束；Claude、Codex、Qoder 的 `Stop` 携带布尔 `stop_hook_active:true` 表示同轮续跑。这两类返回 duplicate，不写 orphan、不加 missingStartTerminals。有 open turn 时仍正常处理终态。其他缺少开始事件的终态不会仅凭会话存在就判为 duplicate。无法通过已提交 turn ID 或已提交轮次的明确时间边界（按时间值而非字符串比较）证明重复时，事件保存到 `runtime/<provider>/<session-key>/orphans/<payload-hash>.json`，`health.json` 的 `missingStartTerminals` 和 `orphanEvents` 各加一，并写 `recorder.log`；相同 payload 重放不重复计数。工具 orphan 同样保存 payload。原始 payload 使用 content envelope，受 `toolContentFieldBytes` / `toolContentTurnBytes` 上限约束；只有 prompt、assistant、完整工具采集都启用时才保存正文，否则标明 `capture_policy` 省略。orphan 不是 record，不会猜测 token、轮首时间或 diff。
+
+OpenCode 插件对同一实例内已投递的 `session.idle` 去重；新 chat.message 或 busy/retry 状态会重置。只记住最近 128 个 idle session；首次、重载或淘汰后无法归属的 idle 仍交给 recorder，不用“没有活动轮”猜测重复。已知投递失败不会抑制后续 idle。此插件更新需要 `scry integrations repair --yes`；上述核心终态判定只需升级 CLI。若实际并发/交错会话超过 128 并造成误报，应先测量重载及淘汰频率，再考虑持久化终态身份，而不是无限扩充内存缓存。
 
 开始 hook 首次发布 `open.json` / `session.json`，以及终态钉住 `closing` 时，均等待原子写的文件和父目录 fsync；中间工具状态仍不增加 fsync。这保证调用了持久化屏障，不等同于验证所有文件系统上的断电恢复。
 
