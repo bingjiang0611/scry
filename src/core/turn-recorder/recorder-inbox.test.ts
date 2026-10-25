@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -114,6 +114,70 @@ describe('recorder inbox failure isolation', () => {
     expect(await recorderHasOpenTurn(f.dataRoot)).toBe(false)
   })
 
+  it.each(['invalid JSON', 'EACCES'] as const)('VB1: unreadable %s sidecar stays pending without keeping an idle daemon alive', async (failure) => {
+    const f = await fixture()
+    const first = await f.queue(1, 'retained event')
+    await mkdir(f.failed)
+    const eventPath = join(f.failed, first.name)
+    const sidecarPath = `${eventPath}.failure.json`
+    const sidecar = failure === 'invalid JSON' ? '{corrupt' : JSON.stringify({
+      attempts: 2, lastError: 'earlier failure', lastFailedAt: new Date().toISOString()
+    })
+    await rename(first.path, eventPath)
+    await writeFile(sidecarPath, sidecar)
+    if (failure === 'EACCES') faults.readPath = sidecarPath
+
+    for (let i = 0; i < 3; i++) await recoverRecorder(f.root)
+    expect.soft(await recorderHasOpenTurn(f.dataRoot)).toBe(false)
+    expect(await readHealth(f.dataRoot)).toMatchObject({ pendingCount: 1, droppedEvents: 0 })
+    expect((await recorderPendingHealth(f.dataRoot)).pendingCount).toBe(1)
+    expect(await readFile(eventPath, 'utf8')).toBe(first.source)
+    await expect(readFile(join(f.sessionRoot, 'open.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+
+    let output = ''
+    vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string | Uint8Array) => {
+      output += String(chunk)
+      return true
+    }) as typeof process.stdout.write)
+    expect(await runScryCli(['doctor', '--workspace', f.root])).toBe(5)
+    expect(JSON.parse(output)).toMatchObject({
+      status: 'degraded', health: { pendingCount: 1 },
+      checks: expect.arrayContaining([expect.objectContaining({ id: 'turns.pending', status: 'warn' })])
+    })
+
+    // Skipping one unreadable sidecar must not hide a later, actually retryable event.
+    await f.queue(2, 'retryable arrival')
+    expect(await recorderHasOpenTurn(f.dataRoot)).toBe(true)
+    faults.readPath = ''
+    expect(await readFile(sidecarPath, 'utf8')).toBe(sidecar)
+  })
+
+  it('VB2: removing only the backed-up exhausted sidecar re-enables replay without erasing drop history', async () => {
+    const f = await fixture()
+    const first = await f.queue(1, 'reject first')
+    faults.apply = true
+    for (let i = 0; i < 5; i++) await recoverRecorder(f.root)
+    expect(await recorderHasOpenTurn(f.dataRoot)).toBe(false)
+    const eventPath = join(f.failed, first.name)
+    const sidecarPath = `${eventPath}.failure.json`
+    const sidecar = await readFile(sidecarPath, 'utf8')
+    expect(JSON.parse(sidecar).attempts).toBe(5)
+    expect(await readFile(eventPath, 'utf8')).toBe(first.source)
+    await writeFile(join(f.root, 'event-backup.json'), first.source)
+    await writeFile(join(f.root, 'sidecar-backup.json'), sidecar)
+
+    faults.apply = false
+    await rm(sidecarPath)
+    expect(await recorderHasOpenTurn(f.dataRoot)).toBe(true)
+    await recoverRecorder(f.root)
+    expect(faults.attempts).toBe(6)
+    expect(JSON.parse(await readFile(join(f.sessionRoot, 'open.json'), 'utf8')).prompt).toBe('reject first')
+    await expect(readFile(eventPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(sidecarPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readHealth(f.dataRoot)).toMatchObject({ pendingCount: 0, droppedEvents: 1 })
+    expect(await readFile(join(f.root, 'sidecar-backup.json'), 'utf8')).toBe(sidecar)
+  })
+
   it.each(['EACCES', 'invalid JSON'] as const)('retains %s instead of deleting it, and does not block the next file', async (failure) => {
     const f = await fixture()
     const first = await f.queue(1, 'unreadable')
@@ -167,7 +231,10 @@ describe('recorder inbox failure isolation', () => {
     output = ''
     expect(await runScryCli(['doctor', '--workspace', f.root])).toBe(5)
     expect(JSON.parse(output).checks).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'turns.pending', status: 'warn' })
+      expect.objectContaining({
+        id: 'turns.pending', status: 'warn',
+        remediation: expect.stringContaining('scry-turn-recorder README: Retry quarantined hooks')
+      })
     ]))
   })
 
