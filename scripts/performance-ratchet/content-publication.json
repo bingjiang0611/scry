@@ -1,0 +1,285 @@
+{
+  "schema": 1,
+  "metrics": {
+    "recorder.content-cold/crypto.sha256.calls": {
+      "scenario": "recorder.content-cold",
+      "metric": "crypto.sha256.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "new-bodies=4;body-bytes=262144;authorities=1;initial-publication=included;sync=unchanged",
+      "source": "real cold publication; actual trace dual-authority caller; pass-through crypto/fs/FileHandle counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 4
+      }
+    },
+    "recorder.content-cold/io.read.calls": {
+      "scenario": "recorder.content-cold",
+      "metric": "io.read.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "new-bodies=4;body-bytes=262144;authorities=1;initial-publication=included;sync=unchanged",
+      "source": "real cold publication; actual trace dual-authority caller; pass-through crypto/fs/FileHandle counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 4
+      }
+    },
+    "recorder.content-cold/io.mkdir.calls": {
+      "scenario": "recorder.content-cold",
+      "metric": "io.mkdir.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "new-bodies=4;body-bytes=262144;authorities=1;initial-publication=included;sync=unchanged",
+      "source": "real cold publication; actual trace dual-authority caller; pass-through crypto/fs/FileHandle counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 44
+      }
+    },
+    "recorder.content-cold/io.stat.calls": {
+      "scenario": "recorder.content-cold",
+      "metric": "io.stat.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "new-bodies=4;body-bytes=262144;authorities=1;initial-publication=included;sync=unchanged",
+      "source": "real cold publication; actual trace dual-authority caller; pass-through crypto/fs/FileHandle counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 36
+      }
+    },
+    "recorder.content-cold/io.directory.metadata.calls": {
+      "scenario": "recorder.content-cold",
+      "metric": "io.directory.metadata.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "new-bodies=4;body-bytes=262144;authorities=1;initial-publication=included;sync=unchanged",
+      "source": "real cold publication; actual trace dual-authority caller; pass-through crypto/fs/FileHandle counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 80
+      }
+    },
+    "recorder.content-cold/io.open.calls": {
+      "scenario": "recorder.content-cold",
+      "metric": "io.open.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "new-bodies=4;body-bytes=262144;authorities=1;initial-publication=included;sync=unchanged",
+      "source": "real cold publication; actual trace dual-authority caller; pass-through crypto/fs/FileHandle counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 56
+      }
+    },
+    "recorder.content-cold/io.sync.calls": {
+      "scenario": "recorder.content-cold",
+      "metric": "io.sync.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "new-bodies=4;body-bytes=262144;authorities=1;initial-publication=included;sync=unchanged",
+      "source": "real cold publication; actual trace dual-authority caller; pass-through crypto/fs/FileHandle counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 56
+      }
+    },
+    "recorder.content-cold/io.write.calls": {
+      "scenario": "recorder.content-cold",
+      "metric": "io.write.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "new-bodies=4;body-bytes=262144;authorities=1;initial-publication=included;sync=unchanged",
+      "source": "real cold publication; actual trace dual-authority caller; pass-through crypto/fs/FileHandle counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 4
+      }
+    },
+    "recorder.content-cold/io.link.calls": {
+      "scenario": "recorder.content-cold",
+      "metric": "io.link.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "new-bodies=4;body-bytes=262144;authorities=1;initial-publication=included;sync=unchanged",
+      "source": "real cold publication; actual trace dual-authority caller; pass-through crypto/fs/FileHandle counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 4
+      }
+    },
+    "recorder.content-cold/io.rm.calls": {
+      "scenario": "recorder.content-cold",
+      "metric": "io.rm.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "new-bodies=4;body-bytes=262144;authorities=1;initial-publication=included;sync=unchanged",
+      "source": "real cold publication; actual trace dual-authority caller; pass-through crypto/fs/FileHandle counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 4
+      }
+    },
+    "recorder.content-dual/crypto.sha256.calls": {
+      "scenario": "recorder.content-dual",
+      "metric": "crypto.sha256.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+      "source": "real cold publication; actual trace dual-authority caller; pass-through crypto/fs/FileHandle counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 12
+      }
+    },
+    "recorder.content-dual/io.read.calls": {
+      "scenario": "recorder.content-dual",
+      "metric": "io.read.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+      "source": "real cold publication; actual trace dual-authority caller; pass-through crypto/fs/FileHandle counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 8
+      }
+    },
+    "recorder.content-dual/io.mkdir.calls": {
+      "scenario": "recorder.content-dual",
+      "metric": "io.mkdir.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+      "source": "real cold publication; actual trace dual-authority caller; pass-through crypto/fs/FileHandle counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 92
+      }
+    },
+    "recorder.content-dual/io.stat.calls": {
+      "scenario": "recorder.content-dual",
+      "metric": "io.stat.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+      "source": "real cold publication; actual trace dual-authority caller; pass-through crypto/fs/FileHandle counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 75
+      }
+    },
+    "recorder.content-dual/io.directory.metadata.calls": {
+      "scenario": "recorder.content-dual",
+      "metric": "io.directory.metadata.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+      "source": "real cold publication; actual trace dual-authority caller; pass-through crypto/fs/FileHandle counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 167
+      }
+    },
+    "recorder.content-dual/io.open.calls": {
+      "scenario": "recorder.content-dual",
+      "metric": "io.open.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+      "source": "real cold publication; actual trace dual-authority caller; pass-through crypto/fs/FileHandle counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 116
+      }
+    },
+    "recorder.content-dual/io.sync.calls": {
+      "scenario": "recorder.content-dual",
+      "metric": "io.sync.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+      "source": "real cold publication; actual trace dual-authority caller; pass-through crypto/fs/FileHandle counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 116
+      }
+    },
+    "recorder.content-dual/io.write.calls": {
+      "scenario": "recorder.content-dual",
+      "metric": "io.write.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+      "source": "real cold publication; actual trace dual-authority caller; pass-through crypto/fs/FileHandle counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 8
+      }
+    },
+    "recorder.content-dual/io.link.calls": {
+      "scenario": "recorder.content-dual",
+      "metric": "io.link.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+      "source": "real cold publication; actual trace dual-authority caller; pass-through crypto/fs/FileHandle counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 8
+      }
+    },
+    "recorder.content-dual/io.rm.calls": {
+      "scenario": "recorder.content-dual",
+      "metric": "io.rm.calls",
+      "layer": "io",
+      "unit": "count",
+      "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+      "source": "real cold publication; actual trace dual-authority caller; pass-through crypto/fs/FileHandle counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 8
+      }
+    }
+  }
+}

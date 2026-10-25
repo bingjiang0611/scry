@@ -4,7 +4,8 @@
     "performance-ratchet/analytics.json",
     "performance-ratchet/providers.json",
     "performance-ratchet/source-control.json",
-    "performance-ratchet/data-flow.json"
+    "performance-ratchet/data-flow.json",
+    "performance-ratchet/content-publication.json"
   ],
   "metrics": {}
 }
