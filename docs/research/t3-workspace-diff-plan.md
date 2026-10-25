@@ -58,11 +58,12 @@ type WorkspaceIntent =
 
 非 Git 继续使用现有 cwd 草稿，不强行构造 Git intent。只允许新会话修改 intent；开始后的会话显示只读实际分支/工作区。要换目录就新建会话，不把旧 Provider resume ID 带到新 cwd。
 
-- 当前工作区：可保留当前分支，或选择另一条本地分支；待执行状态写「发送时切换」。按钮写「切换分支并发送」，不把磁盘变化藏在普通“发送”后面。
-- 新建 worktree：右侧改为「基于 main」，新分支名可编辑，默认 `scry/<短唯一标识>`。默认由宿主管理目录，例如 `userData/worktrees/<repo-id>/<worktree-id>`；renderer 只传意图，不能传任意目标路径。
+- 2026-10-24 UI 简化：按用户给出的 T3 Code 截图，composer 下方只保留左右两个入口。左侧菜单选当前/新建/之前的 worktree；右侧菜单搜索并选择 ref。点击即保存草稿；方向键只移动焦点，Enter 确认。取消不修改选择，不使用模态大表单或额外应用按钮。
+- 当前工作区：可保留当前分支，或选择另一条本地分支。发送按钮写「切换分支并发送」，不再常驻重复的待执行说明。
+- 新建 worktree：右侧改为「基于 main」，自动生成 `scry/<短唯一标识>`，通过左侧入口的 tooltip 查看，不再要求填写名称。默认由宿主管理目录，例如 `userData/worktrees/<repo-id>/<worktree-id>`；renderer 只传意图，不能传任意目标路径。
 - 已有 worktree：列出真实 worktree 清单、分支、缩略路径、正在使用状态；最近成功准备并登记的一项按操作账本置顶；无记录不猜测外部使用时间。已被其他 worktree 占用的分支导向对应 worktree，不强行 checkout。
 - 首版选择本地分支和已存在的远端跟踪 ref。远端 ref 只可作新 worktree 起点；当前目录模式不隐式创建 tracking branch、不自动联网 fetch。UI 写明使用本地已获取的 ref。
-- 新 worktree 不复制主工作区未提交文件；在选项下明确说明。当前目录有改动仍可留在原分支发送，或创建干净 worktree；切到别的分支保守阻止，不自动 stash/reset。
+- 新 worktree 不复制主工作区未提交文件；新建选项 tooltip 明确说明。当前目录有改动仍可留在原分支发送，或创建干净 worktree；切到别的分支保守阻止，不自动 stash/reset。
 - detached HEAD：当前 checkout 可聊天并显示短 SHA；新 worktree 必须显式选有效起点。unborn/非 Git 不提供创建入口。
 - 名称验证使用 Git check-ref-format；ref 参数不能被当选项；NUL/换行/超长输入在 IPC 边界校验。合法文件名解析用 NUL 分隔，不按空格拆分。
 

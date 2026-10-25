@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { nativeUiPointer } from './native-ui-pointer.mjs'
 import { exerciseWorkspaceDiffBounds } from './workspace-session-ui-stress.mjs'
-import { assertPickerAboveSend, assertNewWorktreeDefaults } from './workspace-session-ui-picker.mjs'
+import { assertPickerAnchored, assertNewWorktreeDefaults, assertCompactMenus } from './workspace-session-ui-picker.mjs'
 import { wait, sendWorkspacePrompt } from './workspace-session-ui-run.mjs'
 
 const json = JSON.stringify
@@ -50,19 +50,18 @@ export async function exerciseWorkspaceSessions(context) {
       document.querySelector('textarea') && !document.querySelector('.workspace-picker')`), 'fresh native draft')
   }
   const openPicker = async () => {
-    await click('.workspace-context-strip button')
+    await click('[data-workspace-menu="refs"]')
     await wait(() => evaluate(`Boolean(document.querySelector('.workspace-picker .workspace-choice'))`), 'bounded branch inventory')
-    await assertPickerAboveSend(evaluate)
+    await assertPickerAnchored(evaluate)
   }
   const selectBranch = async name => {
-    await type('.workspace-search input', name)
+    await type('.workspace-ref-search input', name)
     await wait(() => evaluate(`[...document.querySelectorAll('.workspace-choice strong')].some(node => node.textContent === ${json(name)})`), `branch ${name}`)
     await click('.workspace-choice', name)
   }
   const apply = async () => {
-    await click('.workspace-apply')
     await wait(() => evaluate(`!document.querySelector('.workspace-picker') &&
-      !document.querySelector('.workspace-context').textContent.includes('正在读取')`), 'draft selection saved')
+      !document.querySelector('[data-workspace-menu="workspace"]').disabled`), 'click immediately saves draft selection')
   }
   const send = (prompt, pause = false, expectedReply) =>
     sendWorkspacePrompt({ inputs, type, click, cdp, evaluate, record }, prompt, pause, expectedReply)
@@ -100,22 +99,26 @@ export async function exerciseWorkspaceSessions(context) {
     const initialIndex = readFileSync(join(workspace, '.git/index'))
     const initialMtime = statSync(join(workspace, '.git/index')).mtimeMs
     await openPicker()
+    await assertCompactMenus({ cdp, evaluate, click, key, wait, screenshot, newDraft, cwd: canonicalWorkspace, openPicker })
     await wait(() => evaluate(`document.querySelector('.workspace-choice')?.getAttribute('aria-setsize') === '100'`), '100-ref page')
     assert.ok(await evaluate(`document.querySelectorAll('.workspace-choice').length < 60`), 'branch DOM stays bounded')
-    await click('.workspace-choice-list')
+    await key('ArrowDown', 'ArrowDown', 40)
     await key('End', 'End', 35)
-    await wait(() => evaluate(`document.querySelector('.workspace-choice[aria-selected="true"]')?.getAttribute('aria-posinset') === '100'`), 'keyboard reveals last virtual branch')
+    await wait(() => evaluate(`document.getElementById(document.querySelector('.workspace-choice-list')?.getAttribute('aria-activedescendant'))?.getAttribute('aria-posinset') === '100'`), 'keyboard reveals last virtual branch without committing')
     await click('.workspace-picker-footer button', '下一页')
     await wait(() => evaluate(`document.querySelector('.workspace-choice')?.getAttribute('aria-posinset') === '1' &&
       document.querySelector('.workspace-choice strong')?.textContent === 'fixture/ref-099'`), 'next page resets virtual scroll')
-    await selectBranch('workspace-feature')
+    await type('.workspace-ref-search input', 'workspace-feature')
     await key('Escape', 'Escape', 27)
     assert.equal(await evaluate(`Boolean(document.querySelector('.workspace-picker'))`), false)
-    assert.equal(await evaluate(`document.activeElement === document.querySelector('.workspace-context-strip button')`), true)
+    assert.equal(await evaluate(`document.activeElement === document.querySelector('[data-workspace-menu="refs"]')`), true)
     assert.equal(git(workspace, 'branch', '--show-current'), 'main')
     assert.equal(inputs().length, 0)
     await openPicker()
-    await selectBranch('workspace-feature')
+    await type('.workspace-ref-search input', 'workspace-feature')
+    await wait(() => evaluate(`document.querySelector('.workspace-choice strong')?.textContent === 'workspace-feature'`), 'keyboard candidate')
+    await key('ArrowDown', 'ArrowDown', 40)
+    await key('Enter', 'Enter', 13)
     await apply()
     const stored = () => evaluate(`JSON.parse(localStorage.getItem('scry.composer-drafts.v1') || '[]').find(([, draft]) => draft.workspace?.intent?.kind === 'current')?.[1].workspace.operationId`)
     const savedId = await wait(stored, 'workspace-only draft persisted')
@@ -148,18 +151,23 @@ export async function exerciseWorkspaceSessions(context) {
     const sourceIndex = readFileSync(join(workspace, '.git/index'))
     const sourceMtime = statSync(join(workspace, '.git/index')).mtimeMs
     await openPicker()
-    await click('input[value="newWorktree"]')
-    await assertNewWorktreeDefaults(evaluate)
-    await selectBranch('main')
-    await type('.workspace-new-branch input', 'topic/ui-worktree')
-    await screenshot('picker-dark')
+    await key('Escape', 'Escape', 27)
+    await click('[data-workspace-menu="workspace"]')
+    await wait(() => evaluate(`document.querySelectorAll('.workspace-mode-choice')[1]?.disabled === false`), 'new worktree available')
+    await screenshot('workspace-menu-dark')
+    await click('.workspace-mode-choice', '新建 worktree')
     await apply()
-    assert.equal(git(workspace, 'branch', '--list', 'topic/ui-worktree'), '', 'selection must not create a branch')
+    const generatedBranch = await assertNewWorktreeDefaults(evaluate)
+    await openPicker()
+    await screenshot('picker-dark')
+    await selectBranch('main')
+    await apply()
+    assert.equal(git(workspace, 'branch', '--list', generatedBranch), '', 'selection must not create a branch')
     assert.equal(await evaluate(`document.querySelector('.send')?.getAttribute('aria-label')`), '创建 worktree 并发送')
     const created = await send('desktop remote write one', true)
     const target = created.run.cwd
     assert.ok(target.startsWith(join(realpathSync(userDataDir), 'worktrees') + '/'), target)
-    assert.equal(git(target, 'branch', '--show-current'), 'topic/ui-worktree')
+    assert.equal(git(target, 'branch', '--show-current'), generatedBranch)
     assert.deepEqual(readFileSync(join(workspace, 'remote-first.txt')), sourceDirt)
     assert.deepEqual(readFileSync(join(workspace, '.git/index')), sourceIndex)
     assert.equal(statSync(join(workspace, '.git/index')).mtimeMs, sourceMtime)
@@ -200,11 +208,9 @@ export async function exerciseWorkspaceSessions(context) {
     await cdp.send('Emulation.clearDeviceMetricsOverride')
 
     await newDraft(canonicalWorkspace)
-    await openPicker()
-    await click('input[value="existingWorktree"]')
-    await type('.workspace-search input', 'existing worktree with spaces')
-    await wait(() => evaluate(`document.querySelector('.workspace-choice strong')?.textContent === ${json(existingCanonical)}`), 'existing worktree option')
-    await click('.workspace-choice', 'existing worktree with spaces')
+    await click('[data-workspace-menu="workspace"]')
+    await wait(() => evaluate(`[...document.querySelectorAll('.workspace-choice small')].some(node => node.textContent === 'existing-feature')`), 'previous worktree option')
+    await click('.workspace-choice', 'existing-feature')
     await apply()
     const reused = await send('desktop remote write three')
     assert.equal(reused.run.cwd, existingCanonical)
@@ -219,15 +225,18 @@ export async function exerciseWorkspaceSessions(context) {
     assert.equal(inputs().length, 4, 'read-only scope changes never start a Provider')
     await screenshot('inspector-unavailable')
     await newDraft(canonicalWorkspace)
+    await click('[data-workspace-menu="workspace"]')
+    await wait(() => evaluate(`document.querySelectorAll('.workspace-mode-choice')[1]?.disabled === false`), 'failure fixture worktree available')
+    await click('.workspace-mode-choice', '新建 worktree')
+    await apply()
+    const failedBranch = await assertNewWorktreeDefaults(evaluate)
     await openPicker()
-    await click('input[value="newWorktree"]')
     await selectBranch('main')
-    await type('.workspace-new-branch input', 'topic/ui-provider-failure')
     await apply()
     const failed = await send('remote provider failure smoke', false, 'fixture_provider_failure')
     const failedRecord = await record(failed.run.cwd, failed.run.runId)
     assert.equal(failedRecord.status, 'failed')
-    assert.equal(git(failed.run.cwd, 'branch', '--show-current'), 'topic/ui-provider-failure')
+    assert.equal(git(failed.run.cwd, 'branch', '--show-current'), failedBranch)
     assert.ok(existsSync(failed.run.cwd), 'Provider failure must not delete the prepared worktree')
     await exerciseWorkspaceDiffBounds({ target, newDraft, click, evaluate, key, wait, screenshot, cdp })
     assert.equal(inputs().length, 5, 'three workspace paths, one follow-up and one explicit failure; pressure and reload never launch a Provider')

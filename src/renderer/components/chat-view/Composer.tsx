@@ -196,8 +196,8 @@ export function Composer({
           sendActionLabel={sendActionLabel} queueing={queueing} resetPromptHistory={resetPromptHistory}
           onSend={onSend} runControlCatalog={runControlCatalog}
         />
-        {workspaceContext}
         </div>
+        {workspaceContext}
         </div>
   )
 }

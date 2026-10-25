@@ -9,7 +9,7 @@
 | 入口拆分 | main/preload、App、integrations、agent-session、runtime、recorder Git、Source Control 按已有职责拆分。所有本次完整文件 ≤20,000 UTF-8 字节。保留动态 window、startup recovery、session identity、React refs/effect 清理与请求代际。新拆分模块的超长依赖行已展开，并比较编译后 JS AST；检查同时有空白变化正对照和值变化负对照。 |
 | A：三个 diff 范围 | 工作区比较 HEAD→一次捕获的不可变 tree；不再拼接两次读取的统计与正文。会话使用 baseline→最新净变化；单轮使用 before→after。零、失败、不可用不跨范围回退。历史有归档正文就显示归档正文，不拿当前文件补历史。 |
 | A：界面 | 保留 shell/composer。小摘要按需打开可关闭 inspector。范围标签、轮次选择、来源时间、刷新、文件/代码虚拟列表、键盘导航、主题及窄屏替换布局；窄屏对话 inert，关闭恢复焦点。 |
-| B：选择器 | 本地与已缓存 remote refs、真实 worktree 清单、搜索、分页、占用/锁定/失效状态。两个入口向上展开，不盖发送按钮；已有 worktree 分支只读。新分支默认 `scry/<短 UUID>`，说明不复制未提交文件。最近成功准备并登记的 worktree 根据同 commonDir 的已有操作账本置顶，不用文件 mtime 猜测。 |
+| B：选择器 | 本地与已缓存 remote refs、真实 worktree 清单、搜索、分页、占用/锁定/失效状态。composer 下方细条的左右入口分别向上展开轻量菜单；点选即保存，不使用模态表单或应用按钮。已有 worktree 分支只读。新分支自动命名 `scry/<短 UUID>`，新建选项 tooltip 说明不复制未提交文件。最近成功准备并登记的 worktree 根据同 commonDir 的已有操作账本置顶，不用文件 mtime 猜测。 |
 | B：草稿 | 复用现有有界草稿存储，按 cwd/provider/profile/session 隔离；选择不改 Git。损坏选择保留文本但阻止发送。发送按钮明确切换、创建或复用；准备期间保留真实输入并禁止重复发送。ACK 只消费匹配操作及已提交输入，保留期间新输入和其他草稿。 |
 | C：真实首次发送 | 保留 legacy `App → useAgentSession.send → agent:start`。复用 SourceControlService commonDir 队列和 journal，保留预约直到授权、trust、baseline 收敛及同步 runs.register。登记前不启动 Provider，不制造 renderer 串行 IPC 的空窗。 |
 | C：目标与权限 | 宿主控制新路径 `userData/worktrees/<repo-id>/<operation-id>`；原生 ref 校验；已检出分支复用对应 worktree。切脏分支拒绝；目标 tree 的 filter/submodule、native checkout hooks 先检查。实际 cwd/commonDir/HEAD/分支再读回，经原项目 authority 和既有 trust/fingerprint 链绑定。 |
@@ -26,7 +26,18 @@
 - 最近排序只使用 Scry 已成功登记的准备记录；没有记录的目录保持 Git 清单顺序，不宣称完整跨工具使用历史。
 - 文件与代码 DOM 虚拟化。真实 App 的 1,000 文件 / 2,000 行检查证明文件节点 <80、代码节点 <100，且能用原生键盘到最后文件/行，不是只截掉后面的数据。
 
-## 主要验证
+## T3 风格简化后的增量验证
+
+用户查看 test 实例后要求 UI 与提供的 T3 Code 截图对齐。保留两端入口，删除大表单、手填新分支名、应用按钮、常驻准备说明及正常选择时的核查按钮。异常恢复仍可核查，权限、首次发送、持久化及 Git 行为不变。远端仍是已获取的 ref，不新增自动 fetch 开关。
+
+- `npm run typecheck`：通过。
+- `npm run test:unit -- src/renderer/workspace-drafts.test.ts src/renderer/hooks/useDiffInspector.test.tsx src/renderer/hooks/useAgentSession.test.ts src/renderer/components/WorkspacePicker.test.tsx`：4 文件、54 测试通过。新增 SSR 检查只证明正常选择不展示表单、核查失败仍可恢复；不把 SSR 当作真实交互证据。
+- 当前代码构建后，`node scripts/electron-security-smoke.mjs --dev-unified-conversation-only --workspace-start`：完整工作区/发送/diff 场景通过；新加真实窗口的菜单开关、外部点击、Escape/焦点、Enter 提交、100 项虚拟列表末项导航、自动命名、深浅主题及 960px 宽度检查。证据：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-workspace-session-ui-c4vABH/`。
+- 新增主题重载检查首轮失败：重载过渡期 `document.documentElement` 尚不存在，测试直接访问 `.dataset`。改为等待文档存在后检查原条件，未增加超时、跳过断言或重试写入；随后上述完整场景通过。首轮证据：`scry-workspace-session-ui-v0VMD1`。新增 SSR 的段落断言曾把 SVG `<path>` 误判成 `<p>`，改为精确标签边界；不是删去无说明文案的要求。负向控制：暂时仅在返回 operation 时显示恢复入口，核查失败测试按预期失败；恢复修复后通过。
+- `npm run performance:measure -- --scenario source-control.diff --out /tmp/scry-compact-workspace-performance`：两项计数各 5 次，Git/总子进程均 8，ratchet 通过。只是既有 Git 计数门禁，不宣称菜单 L2/L3 更快。
+- 用户已明确保留 `/Applications/Scry.app` 0.2.223；此次仅构建当前源码供独立 test 实例，不覆盖安装。下节全量/打包结果属于之前交付，不冒充此次重跑。
+
+## 首次功能交付验证（`81ddc4b2` 及之前）
 
 环境：macOS arm64，Node 24.18.0，Electron 42.10.1，App 包版本 0.2.222，私有 CLI 0.2.51。所有自动化使用隔离 userData / 临时工作区。
 
