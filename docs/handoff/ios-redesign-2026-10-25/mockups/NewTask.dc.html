@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>新建会话</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}a:hover{color:inherit}
+.t-dark{--side:#181818;--main:#1c1c1c;--panel:#1c1c1c;--panel2:#232323;--panel3:#2b2b2b;--border:#333331;--border2:#454541;--border3:#292927;--fg:#f1f1ef;--dim:#b5b5af;--sub:#8d8d87;--accent:#5b9cff;--accent-soft:rgb(91 156 255 / 12%);--claude:#d37ec8;--hover:rgb(255 255 255 / 6%);--muted-s:rgb(255 255 255 / 4%);--pop:0 24px 64px rgb(0 0 0 / 50%),0 2px 6px rgb(0 0 0 / 30%);--shadow:0 10px 30px rgb(0 0 0 / 28%),0 1px 2px rgb(0 0 0 / 20%)}
+.scr{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","SF Pro Text",system-ui,sans-serif;letter-spacing:-0.004em;-webkit-font-smoothing:antialiased}
+.chip{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 12px;border:0;border-radius:11px;background:var(--muted-s);color:var(--fg);font:500 14px/1 inherit;font-family:inherit;cursor:pointer;white-space:nowrap}
+.ctl{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 9px;border:0;border-radius:9px;background:transparent;color:var(--dim);font:500 12.5px/1 inherit;font-family:inherit;cursor:pointer}
+.mrow{display:flex;align-items:center;gap:10px;width:100%;min-height:46px;padding:0 12px;border:0;border-radius:10px;background:transparent;color:var(--fg);font-family:inherit;text-align:left;cursor:pointer;transition:background-color 100ms linear}
+.mrow:active{background:var(--hover)}
+.pop{transform-origin:bottom right;animation:pop-in 220ms cubic-bezier(.23,1,.32,1) backwards}
+@keyframes pop-in{from{opacity:0;transform:scale(.96) translateY(6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion: reduce){.pop{animation:fade 120ms linear backwards}@keyframes fade{from{opacity:0}}}
+</style>
+</helmet>
+<div class="scr t-dark" style="width: 390px; height: 844px; box-sizing: border-box; background: var(--main); color: var(--fg); display: flex; flex-direction: column; overflow: hidden; position: relative">
+  <div style="height: 54px; flex: none"></div>
+  <div style="display: flex; align-items: center; padding: 0 4px; min-height: 52px; flex: none">
+    <a href="Main.dc.html" aria-label="返回" style="width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg>
+    </a>
+    <div style="flex: 1; font-size: 16px; font-weight: 600">新建会话</div>
+  </div>
+
+  <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 0 32px; text-align: center">
+    <div style="font-size: 24px; font-weight: 650; letter-spacing: -0.02em">要在 scry 里做什么？</div>
+    <div style="margin-top: 8px; font-size: 14px; line-height: 1.5; color: var(--sub)">任务在 bob 的 MacBook Pro 上运行，手机只负责下达和查看。</div>
+  </div>
+
+  <div style="flex: none; padding: 8px 12px 30px; position: relative">
+    <sc-if value="{{open}}" hint-placeholder-val="{{ true }}">
+      <div class="pop" role="dialog" aria-label="模型与推理强度" style="position: absolute; right: 12px; bottom: 96px; width: 290px; box-sizing: border-box; padding: 6px; border-radius: 16px; border: 1px solid var(--border); background: var(--panel2); box-shadow: var(--pop)">
+        <div style="padding: 10px 12px 6px; font-size: 12px; font-weight: 600; color: var(--sub)">模型</div>
+        <sc-for list="{{models}}" as="m" hint-placeholder-count="3">
+          <button type="button" class="mrow" onClick="{{m.pick}}" aria-pressed="{{m.sel}}">
+            <span style="flex: 1">
+              <span style="display: block; font-size: 15px">{{m.name}}</span>
+              <span style="display: block; margin-top: 2px; font-size: 12px; color: var(--sub)">{{m.desc}}</span>
+            </span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: var(--accent); opacity: {{m.check}}; transition: opacity 160ms cubic-bezier(.23,1,.32,1)"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+          </button>
+        </sc-for>
+        <div style="height: 1px; background: var(--border3); margin: 6px 6px"></div>
+        <div style="padding: 6px 12px 6px; font-size: 12px; font-weight: 600; color: var(--sub)">推理强度</div>
+        <div style="position: relative; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0 6px 6px; padding: 3px; border-radius: 11px; background: var(--panel3)">
+          <span aria-hidden="true" style="position: absolute; top: 3px; left: 3px; width: calc((100% - 6px) / 4); height: 36px; border-radius: 8px; background: var(--panel); box-shadow: 0 1px 3px rgb(0 0 0 / 30%); transform: translateX({{thumbX}}); transition: transform 220ms cubic-bezier(.32,.72,0,1)"></span>
+          <sc-for list="{{efforts}}" as="e" hint-placeholder-count="4">
+            <button type="button" onClick="{{e.pick}}" aria-pressed="{{e.sel}}" style="position: relative; height: 36px; border: 0; background: transparent; color: {{e.color}}; font: 500 13.5px/1 inherit; font-family: inherit; cursor: pointer; transition: color 160ms cubic-bezier(.23,1,.32,1)">{{e.label}}</button>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+
+    <div style="border: 1px solid var(--border2); border-radius: 20px; background: var(--panel); box-shadow: var(--shadow), 0 0 0 1px var(--accent-soft); padding: 0 10px 6px">
+      <div style="display: flex; gap: 6px; align-items: center; margin: 0 -10px; padding: 6px 10px; border-bottom: 1px solid var(--border3)">
+        <button type="button" class="chip">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true" style="color: var(--dim)"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"></path></svg>scry</button>
+        <button type="button" class="chip">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" style="color: var(--claude)"><path d="M12 3.6v5M12 15.4v5M3.6 12h5M15.4 12h5M6 6l3.6 3.6M14.4 14.4l3.6 3.6M18 6l-3.6 3.6M9.6 14.4L6 18"></path></svg>Claude Code</button>
+      </div>
+      <div style="padding: 12px 4px 8px; font-size: 16px; line-height: 1.5; min-height: 48px">把 iOS 的配对错误映射成可行动的文案，技术细节放进可展开区域</div>
+      <div style="display: flex; align-items: center; gap: 2px">
+        <button type="button" aria-label="添加附件" style="width: 38px; height: 38px; border: 0; background: transparent; color: var(--dim); display: inline-flex; align-items: center; justify-content: center; cursor: pointer"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
+        <button type="button" class="ctl">默认权限</button>
+        <div style="flex: 1"></div>
+        <button type="button" class="ctl" onClick="{{toggle}}" aria-expanded="{{openAttr}}" style="background: {{triggerBg}}"><span style="color: var(--fg)">{{modelName}}</span><span>{{effortName}}</span>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 15l5-5 5 5"></path></svg></button>
+        <button type="button" aria-label="发送" style="width: 34px; height: 34px; border-radius: 50%; border: 0; background: var(--fg); color: var(--main); display: inline-flex; align-items: center; justify-content: center; margin: 5px; cursor: pointer; box-shadow: 0 8px 20px rgb(0 0 0 / 18%)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"></path></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { open: true, model: 0, effort: 2 }; }
+  renderVals() {
+    const md = [['Opus 4.5', '复杂任务'], ['Sonnet 4.5', '日常任务'], ['Haiku 4.5', '快速小改']];
+    const ef = ['低', '中', '高', '极高'];
+    const s = this.state;
+    return {
+      open: s.open, openAttr: s.open ? 'true' : 'false', triggerBg: s.open ? 'var(--hover)' : 'transparent',
+      toggle: () => this.setState({ open: !s.open }),
+      modelName: md[s.model][0], effortName: ef[s.effort],
+      models: md.map((m, i) => ({ name: m[0], desc: m[1], sel: i === s.model ? 'true' : 'false', check: i === s.model ? '1' : '0', pick: () => this.setState({ model: i }) })),
+      efforts: ef.map((label, i) => ({ label, sel: i === s.effort ? 'true' : 'false', color: i === s.effort ? 'var(--fg)' : 'var(--sub)', pick: () => this.setState({ effort: i }) })),
+      thumbX: (s.effort * 100) + '%'
+    };
+  }
+}
+</script>
+</body>
+</html>
