@@ -9,8 +9,8 @@
 | H1 | 缺开始事件时整轮被当 duplicate 丢弃 | A1 | 已核验 | [A 报告](reports/A.md) | orphan-only 范围接受；V1 误报已修，`7ced5ba` 上 13 个测试失败、修复后 233/233 通过（Linux/Node 22 复跑）；OpenCode idle 去重需 repair |
 | H2 | hook 脚本静默跳过无痕迹；invalid_config 当作禁用 | A2 | 已核验 | [A 报告](reports/A.md) | 快路径无新增进程、始终 exit 0、符号链接保护成立；需 repair；doctor 告警时间窗见 V3（不阻塞）；真实 Provider 待用户验收 |
 | L2 | 开始/终态 open.json 不 fsync | A3 | 已核验 | [A 报告](reports/A.md) | 只在开始与终态边界加 sync，中间事件不变；每轮 +6 次 fsync 属必要工作；未做断电测试 |
-| H4 | inbox 重放或读取失败即删除 | B1 | 未开始 | | |
-| M1 | recover 被单个会话打断，投递不执行 | B2 | 未开始 | | |
+| H4 | inbox 重放或读取失败即删除 | B1 | 待核验 | [B 报告](reports/B.md) | 测试 `549b928a`；修复 `15fd68e2`；原文件隔离、5 次总尝试、pending/doctor 可见；顺序与计数边界见报告 |
+| M1 | recover 被单个会话打断，投递不执行 | B2 | 待核验 | [B 报告](reports/B.md) | 测试 `52a0a90c`；修复 `c93f081a`；逐会话隔离、finally 投递、daemon 错误日志；最终全量 3927 通过 / 4 既有跳过 |
 | M5 | 回退链路超时与三重处理 | C1 | 未开始 | | |
 | L1 | 长路径下快路径失效 | C2 | 未开始 | | |
 | M6 | 子目录启动找不到 hook 脚本 | C3 | 未开始 | | 需用户实测 |
