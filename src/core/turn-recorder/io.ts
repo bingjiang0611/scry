@@ -11,12 +11,16 @@ export async function readJson<T>(path: string): Promise<T | null> {
 }
 
 export async function writeJsonAtomic(path: string, value: unknown, options: { sync?: boolean } = {}): Promise<void> {
+  await writeTextAtomic(path, `${JSON.stringify(value)}\n`, options)
+}
+
+export async function writeTextAtomic(path: string, content: string, options: { sync?: boolean } = {}): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 })
   const temp = `${path}.${process.pid}.${randomUUID()}.tmp`
   let handle
   try {
     handle = await open(temp, 'wx', 0o600)
-    await handle.writeFile(`${JSON.stringify(value)}\n`)
+    await handle.writeFile(content)
     if (options.sync !== false) await handle.sync()
     await handle.close()
     handle = undefined

@@ -214,6 +214,12 @@ payload="$(cat)" || skip payload_read_failed
 # Posting straight to a running daemon skips a Node start per event, which dominates hook cost.
 # Anything other than HTTP 200 falls through to the CLI, so an old or wedged daemon cannot drop events.
 socket="\${SCRY_RECORDER_SOCKET:-$workspace/.scry/recorder-v1.sock}"
+if [ -n "\${SCRY_RECORDER_SOCKET:-}" ]; then
+  case "$socket" in /*) ;; *) socket="$workspace/$socket" ;; esac
+elif [ -r "$workspace/.scry/recorder-socket-path" ]; then
+  IFS= read -r recorded_socket < "$workspace/.scry/recorder-socket-path" || recorded_socket=""
+  [ -S "$recorded_socket" ] && socket="$recorded_socket"
+fi
 if [ "\${SCRY_RECORDER_TRANSPORT:-}" != "direct" ] && [ -S "$socket" ] && command -v curl >/dev/null 2>&1; then
   case "$2" in
     UserPromptSubmit|Stop) deadline=4 ;;

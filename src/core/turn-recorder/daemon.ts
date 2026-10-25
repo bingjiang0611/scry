@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { drainRecorderDelivery, handleRecorderHook, recoverRecorder, recorderEnablement } from './recorder.js'
-import { appendRotatingLog, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
+import { appendRotatingLog, readJson, withDirectoryLock, writeJsonAtomic, writeTextAtomic } from './io.js'
+import { hasSymlinkComponent } from './config.js'
 import { recorderHasOpenTurn } from './runtime-state.js'
 import { RECORDER_VERSION } from './store.js'
 
@@ -583,7 +584,14 @@ export async function listenRecorderDaemon(args: {
     })
     await chmod(socketPath, 0o600)
     await writeJsonAtomic(markerPath, { ...owner, state: 'running' }, { sync: false })
+    // The shell cannot hash a long endpoint without starting another process. Publish only
+    // after listen succeeds; a stale hint is harmless because the shell checks that it is a socket.
+    if (await hasSymlinkComponent(enablement.workspaceRoot, '.scry')) {
+      throw new Error('cannot publish recorder socket through a symlinked .scry directory')
+    }
+    await writeTextAtomic(join(enablement.workspaceRoot, '.scry', 'recorder-socket-path'), `${socketPath}\n`)
   } catch (error) {
+    if (server.listening) await close()
     await removeOwnedMarker(markerPath, instanceId)
     throw error
   }
