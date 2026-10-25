@@ -1,4 +1,5 @@
 import { monitorEventLoopDelay } from 'node:perf_hooks'
+import { cpus } from 'node:os'
 
 export interface ElectronProcessMetricLike {
   pid: number
@@ -42,6 +43,7 @@ const nsToMs = (value: unknown): number => Math.round(Math.max(0, finite(value))
 export function buildPerformanceResourceSample(args: {
   sampledAt?: string
   windowMs: number
+  cpuCount: number
   memory: NodeJS.MemoryUsage
   eventLoopP95Ns: number
   eventLoopMaxNs: number
@@ -64,8 +66,9 @@ export function buildPerformanceResourceSample(args: {
     processes: args.processes.map((metric) => ({
       pid: metric.pid,
       type: metric.type,
-      // Electron documents this as percentage of one CPU core, not a fraction of total machine CPU.
-      cpuPercentOfOneCore: Math.max(0, finite(metric.cpu?.percentCPUUsage)),
+      // Electron getAppMetrics divides platform-independent CPU usage by the logical CPU count.
+      // Restore one-core percent (which can exceed 100) rather than reporting whole-machine percent.
+      cpuPercentOfOneCore: Math.max(0, finite(metric.cpu?.percentCPUUsage)) * args.cpuCount,
       // Electron exposes these memory values in KiB.
       workingSetBytes: mibToBytes(metric.memory?.workingSetSize),
       peakWorkingSetBytes: mibToBytes(metric.memory?.peakWorkingSetSize),
@@ -92,12 +95,14 @@ export function startPerformanceResourceMonitor(options: {
 }): PerformanceResourceMonitor {
   if (!(options.enabled ?? process.env.SCRY_PERF_LOG === '1')) return { stop() {} }
   const intervalMs = Math.max(1_000, options.intervalMs ?? 2_000)
+  const cpuCount = cpus().length
   const histogram = monitorEventLoopDelay({ resolution: 20 })
   histogram.enable()
   const sink = options.sink ?? ((sample) => console.info(`[scry:resource] ${JSON.stringify(sample)}`))
   const timer = setInterval(() => {
     sink(buildPerformanceResourceSample({
       windowMs: intervalMs,
+      cpuCount,
       memory: process.memoryUsage(),
       eventLoopP95Ns: histogram.percentile(95),
       eventLoopMaxNs: histogram.max,

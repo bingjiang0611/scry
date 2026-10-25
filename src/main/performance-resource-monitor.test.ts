@@ -6,6 +6,7 @@ describe('performance resource monitor', () => {
     const sample = buildPerformanceResourceSample({
       sampledAt: '2026-09-16T00:00:00.000Z',
       windowMs: 2_000,
+      cpuCount: 10,
       memory: {
         rss: 100,
         heapTotal: 80,
@@ -40,13 +41,26 @@ describe('performance resource monitor', () => {
       processes: [{
         pid: 42,
         type: 'Tab',
-        cpuPercentOfOneCore: 3.5,
+        cpuPercentOfOneCore: 35,
         workingSetBytes: 128 * 1024,
         peakWorkingSetBytes: 256 * 1024,
         privateBytes: 64 * 1024
       }],
       counters: { traceBufferedBytes: 12 }
     })
+  })
+
+  it.each([1, 10])('converts whole-machine CPU to one-core percent on %i CPUs without capping', (cpuCount) => {
+    const sample = buildPerformanceResourceSample({
+      windowMs: 5_000,
+      cpuCount,
+      memory: process.memoryUsage(),
+      eventLoopP95Ns: 0,
+      eventLoopMaxNs: 0,
+      processes: [{ pid: 42, type: 'Tab', cpu: { percentCPUUsage: 25 } }]
+    })
+
+    expect(sample.processes[0].cpuPercentOfOneCore).toBe(25 * cpuCount)
   })
 
   it('does not schedule a monitor when diagnostics are disabled', () => {
