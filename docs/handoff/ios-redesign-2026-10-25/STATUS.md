@@ -4,7 +4,7 @@
 |---|---|---|---|
 | R1 基础层 | 已核验 | `2f4cf1bb342a2db66e99c0475d46015879cbfaca` | 2026-10-25，见 reports/R1.md 末尾 |
 | R2 首页 | 已核验 | `e20dbefe8865f6c0ea8e60ca6dc5f63aca1a138d` | 2026-10-25 复核通过（修复 `e20dbefe`），见 reports/R2.md 末尾 |
-| R3 会话页 | 已提交 | `061fa69dd6d9a94e5462b9fc8dbaefd8f3e22bed` | 待核验，见 reports/R3.md（含既有失败与验收阻碍） |
+| R3 会话页 | 需修改 | `061fa69dd6d9a94e5462b9fc8dbaefd8f3e22bed` | 2026-10-25，见 reports/R3.md 末尾 |
 | R4 Sheet | 未开始 | | |
 | R5 动效与走查 | 未开始 | | |
 
