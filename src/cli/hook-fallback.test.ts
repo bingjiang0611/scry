@@ -64,6 +64,9 @@ it.each(['Stop', 'SessionEnd'])('a wedged daemon receives only one %s attempt; f
       expect(JSON.parse(await readFile(join(sessionRoot, 'inbox', entries[0]), 'utf8'))).toMatchObject({ event, payload: JSON.parse(payload) })
     }
     expect((await readHealth(join(root, '.scry'))).orphanEvents).toBe(0)
+    await recorder.recoverRecorder(root)
+    expect(await readdir(join(sessionRoot, 'inbox'))).toEqual([])
+    expect((await readHealth(join(root, '.scry'))).orphanEvents).toBe(event === 'Stop' ? 1 : 0)
   } finally {
     server.closeAllConnections()
     await promisify(server.close.bind(server))()

@@ -69,6 +69,8 @@ export interface RecorderHookInput {
   payload: Record<string, unknown>
   env?: NodeJS.ProcessEnv
   managed?: boolean
+  /** Persist an uncertain transport delivery for lifecycle-deduplicated recovery, without applying it. */
+  queueOnly?: boolean
   /**
    * Skip commit-hook delivery so a long-lived caller can run it after answering the Provider.
    * Recording is what the hook must wait for; waking an external uploader is not, and its budget
@@ -3078,7 +3080,7 @@ async function queueHook(
   await writeJsonAtomic(join(hookInbox(enablement.dataRoot, input.provider, sessionId), name), entry)
   await appendRotatingLog(
     join(enablement.dataRoot, 'logs', 'recorder.log'),
-    `${new Date().toISOString()} WARN session lock busy; queued ${input.provider} ${input.event} for replay (arrived ${arrivedAt})`
+    `${new Date().toISOString()} WARN ${input.queueOnly ? 'daemon delivery uncertain' : 'session lock busy'}; queued ${input.provider} ${input.event} for replay (arrived ${arrivedAt})`
   ).catch(() => undefined)
 }
 
@@ -3181,6 +3183,10 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
     input = { ...input, payload: { ...input.payload, [CODEX_SUBAGENT_MARKER]: true } }
   }
   try {
+    if (input.queueOnly) {
+      await queueHook(enablement, input, sessionId, arrivedAt)
+      return { status: 'pending', reason: 'daemon delivery uncertain; event queued for replay' }
+    }
     let entered = false
     let result: RecorderHookResult
     try {

@@ -224,6 +224,8 @@ if [ "\${SCRY_RECORDER_TRANSPORT:-}" != "direct" ] && [ -S "$socket" ] && comman
     -H 'x-scry-protocol: ${PROTOCOL_VERSION}' -H "x-scry-provider: $1" -H "x-scry-event: $2" \
     -H 'content-type: application/json' --data-binary @- http://localhost/v1/hook 2>/dev/null)" || code=""
   [ "$code" = "200" ] && exit 0
+  # The daemon may already be applying this payload. Persist it for replay, not a second send.
+  export SCRY_RECORDER_DAEMON_TRIED=1
 fi
 [ -x "$scry_bin" ] || skip cli_not_executable
 printf '%s' "$payload" | "$scry_bin" recorder hook --provider "$provider" --event "$event" --workspace "$workspace" --stdin --quiet

@@ -139,7 +139,8 @@ async function hookCommand(args: ParsedArgs): Promise<number> {
     const provider = providerOf(args)
     const managed = args.flags.has('managed')
     const daemonEnabled = !managed && process.env.SCRY_RECORDER_TRANSPORT !== 'direct'
-    if (daemonEnabled) {
+    const daemonTried = daemonEnabled && process.env.SCRY_RECORDER_DAEMON_TRIED === '1'
+    if (daemonEnabled && !daemonTried) {
       try {
         const result = await sendRecorderDaemonHook({
           provider,
@@ -160,9 +161,11 @@ async function hookCommand(args: ParsedArgs): Promise<number> {
       event,
       workspace,
       payload,
-      managed
+      managed,
+      queueOnly: daemonTried
     })
-    if (daemonEnabled && result.status !== 'disabled') {
+    // A failed curl response is unknown delivery, not permission to stop/restart a live peer.
+    if (daemonEnabled && !daemonTried && result.status !== 'disabled') {
       const scriptPath = process.argv[1]
       if (scriptPath) await startRecorderDaemon({ workspace, scriptPath, waitForReady: false }).catch(() => undefined)
     }
