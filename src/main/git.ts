@@ -10,22 +10,24 @@ import type { WorkspaceDiffSnapshotResult } from '../shared/workspace-diff'
 export * from '../core/turn-recorder/git.js'
 
 export function registerGitDiffIpc(
-  register: (channel: string, listener: (event: IpcMainInvokeEvent, cwd: unknown) => unknown) => void,
+  register: (channel: string, listener: (event: IpcMainInvokeEvent, cwd: unknown, scope?: unknown) => unknown) => void,
   authorizeDirectory: (cwd: string) => string
 ): void {
   // Only share ongoing reads. Completed results cannot be validated cheaply against
   // arbitrary worktree edits, so there is deliberately no settled-result cache.
   const snapshots = new Map<string, Promise<WorkspaceDiffSnapshotResult>>()
-  register('agent:gitDiffSnapshot', async (_event, cwd) => {
+  register('agent:gitDiffSnapshot', async (_event, cwd, scope = 'workspace') => {
+    if (scope !== 'workspace' && scope !== 'branch') throw new Error(workspaceDiffCopy.invalidScope)
     if (typeof cwd !== 'string') throw new Error(workspaceDiffCopy.invalidDirectory)
     const canonicalCwd = await realpath(authorizeDirectory(cwd))
-    const existing = snapshots.get(canonicalCwd)
+    const key = JSON.stringify([canonicalCwd, scope])
+    const existing = snapshots.get(key)
     if (existing) return existing
     if (snapshots.size >= 4) {
       return { status: 'failed', reason: 'request_failed', files: [] } satisfies WorkspaceDiffSnapshotResult
     }
-    const request = readWorkspaceDiffSnapshot(canonicalCwd).finally(() => snapshots.delete(canonicalCwd))
-    snapshots.set(canonicalCwd, request)
+    const request = readWorkspaceDiffSnapshot(canonicalCwd, [], undefined, scope).finally(() => snapshots.delete(key))
+    snapshots.set(key, request)
     return request
   })
   const inFlight = new Map<string, Promise<WorkspaceDiffResult>>()

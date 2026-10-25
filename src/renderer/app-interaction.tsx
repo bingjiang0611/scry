@@ -315,7 +315,6 @@ export function useAppInteraction(context: AppInteractionContext) {
     insertMetaPrompt: appView.insertMetaPrompt,
     diffInspector: appView.diffInspector,
     openWorkspaceDiff: appView.openWorkspaceDiff,
-    openSessionNetDiff: appView.openSessionNetDiff,
     handleRightSurfaceAction: appView.handleRightSurfaceAction
   }
   return <AppShell {...shellProps} />

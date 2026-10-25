@@ -179,16 +179,17 @@ export async function exerciseWorkspaceSessions(context) {
     assert.equal(second.input.cwd, target)
     const secondRecord = await record(target, second.run.runId)
 
-    // Workspace HEAD→files excludes the committed first file; session baseline still includes it.
+    // Uncommitted excludes the first committed file; Changes includes branch commits and working files.
     await click('[data-pinned-summary-toggle]')
     await wait(() => evaluate(`[...document.querySelectorAll('button.pinned-summary-row')].some(node => node.textContent.includes('Changes'))`), 'workspace summary')
     await click('button.pinned-summary-row', 'Changes')
     await wait(() => evaluate(`document.querySelector('.diff-inspector')?.dataset.diffScope === 'workspace' &&
       document.querySelector('.diff-virtual-files')?.textContent.includes('remote-second.txt')`), 'workspace inspector snapshot')
     assert.equal(await evaluate(`document.querySelector('.diff-virtual-files').textContent.includes('remote-first.txt')`), false)
-    await selectDiffScope({ click, wait, evaluate }, 'session')
-    await wait(() => evaluate(`document.querySelector('.diff-virtual-files')?.textContent.includes('remote-first.txt') &&
-      document.querySelector('.diff-virtual-files')?.textContent.includes('remote-second.txt')`), 'session net snapshot')
+    await selectDiffScope({ click, wait, evaluate }, 'branch')
+    await wait(() => evaluate(`document.querySelector('.diff-inspector')?.dataset.diffScope === 'branch' &&
+      document.querySelector('.diff-virtual-files')?.textContent.includes('remote-first.txt') &&
+      document.querySelector('.diff-virtual-files')?.textContent.includes('remote-second.txt')`), 'branch Changes includes committed and uncommitted files')
     await selectDiffScope({ click, wait, evaluate }, 'latest')
     await wait(() => evaluate(`document.querySelector('.diff-virtual-files')?.textContent.includes('remote-second.txt')`), 'latest turn snapshot')
     assert.equal(await evaluate(`document.querySelector('.diff-virtual-files').textContent.includes('remote-first.txt')`), false)
@@ -197,9 +198,9 @@ export async function exerciseWorkspaceSessions(context) {
     await selectDiffScope({ click, wait, evaluate }, 'workspace')
     await wait(() => evaluate(`document.querySelector('.diff-review-empty')?.textContent.includes('工作区没有未提交净改动')`), 'captured zero never falls back to session')
     assert.equal(await evaluate(`document.querySelector('.diff-review-totals .add')?.textContent`), '+0')
-    await selectDiffScope({ click, wait, evaluate }, 'session')
+    await selectDiffScope({ click, wait, evaluate }, 'branch')
     await wait(() => evaluate(`document.querySelector('.diff-virtual-files')?.textContent.includes('remote-first.txt') &&
-      document.querySelector('.diff-virtual-files')?.textContent.includes('remote-second.txt')`), 'retained session patches after both files are committed')
+      document.querySelector('.diff-virtual-files')?.textContent.includes('remote-second.txt')`), 'branch Changes persists after both files are committed')
     await exerciseTurnMenu({ click, key, wait, evaluate, screenshot, target, firstRunId: created.run.runId, latestRunId: second.run.runId })
     await screenshot('inspector-wide')
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 900, deviceScaleFactor: 1, mobile: false })
@@ -248,7 +249,7 @@ export async function exerciseWorkspaceSessions(context) {
     writeFileSync(join(evidence, 'result.json'), json({ current, created, second, reused, failed, firstRecord, secondRecord, reusedRecord, failedRecord }))
     console.log(json({ test: 'production workspace first-send and scoped diff UI', current: current.run.cwd,
       created: target, reused: existingCanonical, providerInvocations: inputs().length, records: 4, providerFailureRetainedWorktree: true,
-      sourceIndexUnchanged: true, readonlySelection: true, scopes: ['workspace', 'session', 'turn'], narrowInert: true, evidence }))
+      sourceIndexUnchanged: true, readonlySelection: true, scopes: ['branch', 'workspace', 'latest', 'turn'], narrowInert: true, evidence }))
   } catch (error) {
     writeFileSync(join(evidence, 'failure.json'), json({ error: String(error), inputs: inputs(),
       focused: await evaluate('window.scry.focusedRunSnapshot()').catch(() => null),

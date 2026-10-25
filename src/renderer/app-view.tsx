@@ -289,9 +289,6 @@ export function useAppView(context: AppViewContext) {
   const openTurnDiffReview = useCallback((turn: { runId: string; userText: string }, _snapshot: TurnDiffSnapshot, path?: string): void => {
     openDiff({ scope: 'turn', runId: turn.runId, ...(path ? { initialPath: path } : {}) })
   }, [openDiff])
-  const openSessionNetDiff = useCallback((path?: string): void => {
-    openDiff({ scope: 'session', ...(path ? { initialPath: path } : {}) })
-  }, [openDiff])
   const openWorkspaceDiff = useCallback((): void => openDiff({ scope: 'workspace' }), [openDiff])
   const diffInspector = useDiffInspector({
     cwd: view === 'conversation' ? logicalConversation?.cwd ?? null : cwd,
@@ -369,7 +366,6 @@ export function useAppView(context: AppViewContext) {
     openTurnDiffReview,
     diffInspector,
     openWorkspaceDiff,
-    openSessionNetDiff,
     handleRightSurfaceAction
   }
 }

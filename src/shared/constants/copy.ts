@@ -46,6 +46,7 @@ export const historyCopy = {
 
 export const workspaceDiffCopy = {
   invalidDirectory: '无效的工作目录',
+  invalidScope: '无效的差异范围',
   heading: 'Changes',
   overviewHeading: '工作区未提交改动（vs HEAD）',
   freshness: (result: WorkspaceDiffState, refreshing: boolean): string => {

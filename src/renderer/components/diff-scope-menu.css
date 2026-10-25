@@ -31,7 +31,6 @@
   font-size: 13px;
 }
 .diff-turn-menu { z-index: 1201; }
-.diff-menu-caption { padding: 7px 9px; margin: 0; color: var(--muted); font-size: 12px; }
 .diff-scope-menu > button,
 .diff-turn-menu > button,
 .diff-turn-choice {
@@ -59,7 +58,6 @@
 .diff-turn-choice[aria-checked="true"] { background: var(--panel3); }
 .diff-scope-menu .ico,
 .diff-turn-menu .ico { width: 14px; height: 14px; color: var(--muted); }
-.diff-scope-menu .diff-session-choice { margin-top: 6px; border-top: 1px solid var(--border); border-radius: 0 0 7px 7px; }
 .diff-turn-menu > .diff-turn-back { justify-content: flex-start; gap: 6px; }
 .diff-turn-back .ico { transform: rotate(180deg); }
 .diff-turn-list { overflow: auto; max-height: 288px; min-height: 0; }

@@ -8,8 +8,8 @@ import { useWorkspaceDiff } from './useWorkspaceDiff'
 
 /** Select exactly one scope. Missing/empty/failed evidence never falls back to another scope. */
 export function scopedDiffReview(turns: readonly Turn[], selection: DiffReviewSelection | null): TurnDiffReview | null {
-  const scope = selection?.scope ?? 'session'
-  if (scope === 'workspace') return null
+  const scope = selection?.scope ?? 'branch'
+  if (scope === 'workspace' || scope === 'branch') return null
   if (scope === 'session') {
     const found = sessionDiffViewFromTurns(turns)
     return found ? {
@@ -55,11 +55,12 @@ export function useDiffInspector(input: {
   refreshKey: number
 }) {
   const { cwd, turns, selection, select, enabled, refreshKey } = input
-  const scope = selection?.scope ?? 'session'
-  const snapshotEnabled = enabled && scope === 'workspace' && cwd !== null
+  const scope = selection?.scope ?? 'branch'
+  const liveScope = scope === 'workspace' || scope === 'branch'
+  const snapshotEnabled = enabled && liveScope && cwd !== null
   const [refreshSequence, setRefreshSequence] = useState(0)
   const request = useRef(0)
-  const [capture, setCapture] = useState<{ cwd: string; result?: WorkspaceDiffSnapshotResult; refreshing: boolean }>()
+  const [capture, setCapture] = useState<{ cwd: string; scope: typeof scope; result?: WorkspaceDiffSnapshotResult; refreshing: boolean }>()
   const refresh = useCallback(() => setRefreshSequence(value => value + 1), [])
 
   // A unified conversation may display a different cwd from the retained native draft.
@@ -72,21 +73,21 @@ export function useDiffInspector(input: {
   useEffect(() => {
     const id = ++request.current
     if (!snapshotEnabled || !cwd) return
-    setCapture(previous => ({ cwd, result: previous?.cwd === cwd ? previous.result : undefined, refreshing: true }))
+    setCapture(previous => ({ cwd, scope, result: previous?.cwd === cwd && previous.scope === scope ? previous.result : undefined, refreshing: true }))
     const load = async (): Promise<void> => {
       let result: WorkspaceDiffSnapshotResult
       try {
         result = typeof window.scry.gitDiffSnapshot === 'function'
-          ? await window.scry.gitDiffSnapshot(cwd)
+          ? await window.scry.gitDiffSnapshot(cwd, scope === 'branch' ? 'branch' : 'workspace')
           : { status: 'unavailable', reason: 'request_failed', files: [] }
       } catch {
         result = { status: 'failed', reason: 'request_failed', files: [] }
       }
-      if (request.current === id) setCapture({ cwd, result, refreshing: false })
+      if (request.current === id) setCapture({ cwd, scope, result, refreshing: false })
     }
     void load()
     return () => { request.current++ }
-  }, [cwd, snapshotEnabled, refreshKey, refreshSequence])
+  }, [cwd, scope, snapshotEnabled, refreshKey, refreshSequence])
 
   useEffect(() => {
     if (!snapshotEnabled && !secondaryCwd) return
@@ -106,19 +107,19 @@ export function useDiffInspector(input: {
     }
   }, [snapshotEnabled, secondaryCwd, refresh])
 
-  const result = capture?.cwd === cwd ? capture.result : undefined
-  const refreshing = snapshotEnabled && (capture?.cwd !== cwd || capture.refreshing)
+  const result = capture?.cwd === cwd && capture.scope === scope ? capture.result : undefined
+  const refreshing = snapshotEnabled && (capture?.cwd !== cwd || capture.scope !== scope || capture.refreshing)
   const review = useMemo<TurnDiffReview | null>(() => {
-    if (scope !== 'workspace') return scopedDiffReview(turns, selection)
+    if (!liveScope) return scopedDiffReview(turns, selection)
     return result?.status === 'captured' ? {
-      scope, runId: result.revision, revision: result.revision, head: result.head,
+      scope, runId: result.revision, revision: result.revision, head: result.head, comparison: result.comparison,
       userText: '', turnDiff: result.snapshot, initialPath: selection?.initialPath
     } : null
-  }, [scope, turns, selection, result])
+  }, [scope, liveScope, turns, selection, result])
   const baseSummary = secondaryCwd ? secondary.gitDiff : cwd ? input.summary : undefined
   const baseRefreshing = secondaryCwd ? secondary.gitDiffRefreshing : input.summaryRefreshing
-  const summary: WorkspaceDiffResult | null | undefined = snapshotEnabled && result
-    ? result.status === 'captured'
+  const summary: WorkspaceDiffResult | null | undefined = snapshotEnabled
+    ? result?.status === 'captured'
       ? { status: 'captured', files: result.snapshot.files, collectedAt: result.collectedAt }
       : result
     : baseSummary
@@ -127,7 +128,7 @@ export function useDiffInspector(input: {
     cwd, scope, review, refreshing, summary,
     summaryRefreshing: snapshotEnabled ? refreshing : baseRefreshing,
     pending: snapshotEnabled && !result,
-    failure: scope === 'workspace' && result && result.status !== 'captured' ? result : undefined,
+    failure: liveScope && result && result.status !== 'captured' ? result : undefined,
     emptySession: turns.length === 0,
     selectedRunId: selection?.runId ?? turns.at(-1)?.runId ?? '', turnOptions,
     latestTurn: scope === 'turn' && !selection?.runId,

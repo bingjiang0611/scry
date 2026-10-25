@@ -36,7 +36,7 @@ export function AppShell(props: AppShellProps) {
     setRemoteAdoptedSession, setRemoteTarget, dispatchRemoteSurface, returnFromMetaPrompts, insertMetaPrompt,
     metaPromptTarget, integrations, session, displayedTurns, displayedBusy, selectedProviderSessionId,
     panelRuntimeProvider, showSessionOverview, panelVisible, currentSurface, rightSurface, rightSurfaces,
-    handleRightSurfaceAction, openTurnInChat, openSessionNetDiff, diffInspector, openWorkspaceDiff, workspaceRefreshKey,
+    handleRightSurfaceAction, openTurnInChat, diffInspector, openWorkspaceDiff, workspaceRefreshKey,
     workspaceOpenRequests, setScopeDirty, addWorkspaceReference, showLlmPerformance, setShowLlmPerformance,
     showSkills, showMcp, openSkills, openMcp, settingsTab, setSettingsTab, theme, changeTheme, archiveUndo,
     setArchiveUndo, workspace, runningRunIds, waitingQuestionRunIds, unreadSessionKeys, backgroundWorkByRun,
@@ -95,7 +95,6 @@ export function AppShell(props: AppShellProps) {
             temporary={!summaryPersistent}
             onDismiss={summary.dismiss}
             onOpenChanges={() => { summary.dismiss(); openWorkspaceDiff() }}
-            onOpenSessionDiff={() => { summary.dismiss(); openSessionNetDiff() }}
             onOpenCall={(runId, event) => { summary.dismiss(); openTurnInChat(runId, event, 'event') }}
             onOpenAgents={() => { summary.dismiss(); surfacePane.restore(); rightSurfaces.dispatch({ type: 'open', kind: 'agents' }) }}
           />
@@ -112,7 +111,7 @@ export function AppShell(props: AppShellProps) {
                   workbenchPicker={surface.id === currentSurface.id && rightSurfaces.choices.length > 1 ? <button type="button" className="surface-tab-activate" aria-label="切换此会话的保留工作区" title="会话身份合并后保留了多个工作区；点击切换，不会关闭终端" onClick={rightSurfaces.selectNext}>工作区 {rightSurfaces.selectedIndex + 1}/{rightSurfaces.choices.length}</button> : null}
                   maximized={surface.state.maximized} onOpen={(kind) => { surfacePane.restore(); handleRightSurfaceAction({ type: 'open', kind }) }} onActivate={(kind) => handleRightSurfaceAction({ type: 'activate', kind })} onClose={(kind) => handleRightSurfaceAction({ type: 'close', kind })} onHide={() => handleRightSurfaceAction({ type: 'hide' })} onToggleMaximized={() => handleRightSurfaceAction({ type: 'toggle-maximized' })}
                   contents={{
-                    overview: surface.id !== currentSurface.id ? null : showSessionOverview ? <OverviewPanel turns={displayedTurns} sessionId={selectedProviderSessionId} selected={session.selected} usage={integrations.usage} stats={integrations.stats} runtimeProvider={panelRuntimeProvider} gitDiff={integrations.gitDiff} gitDiffRefreshing={integrations.gitDiffRefreshing} busy={displayedBusy} onSelect={session.setSelected} onOpenTurn={openTurnInChat} onOpenSessionDiff={openSessionNetDiff} /> : <EmptySessionOverview />,
+                    overview: surface.id !== currentSurface.id ? null : showSessionOverview ? <OverviewPanel turns={displayedTurns} sessionId={selectedProviderSessionId} selected={session.selected} usage={integrations.usage} stats={integrations.stats} runtimeProvider={panelRuntimeProvider} gitDiff={integrations.gitDiff} gitDiffRefreshing={integrations.gitDiffRefreshing} busy={displayedBusy} onSelect={session.setSelected} onOpenTurn={openTurnInChat} /> : <EmptySessionOverview />,
                     'source-control': surface.cwd ? <SourceControlPanel key={surface.cwd} cwd={surface.cwd} active={surface.id === currentSurface.id && panelVisible && surface.state.activeId === 'source-control'} /> : <div className="surface-unavailable"><b>源代码管理不可用</b><span>先绑定本机 Git 工作区。</span></div>,
                     files: surface.cwd ? <WorkspacePanel cwd={surface.cwd} active={surface.id === currentSurface.id} refreshKey={workspaceRefreshKey} openRequest={workspaceOpenRequests.get(surface.id)} onDirtyChange={(dirty) => setScopeDirty(surface.id, dirty)} onAddReference={addWorkspaceReference} onClose={() => handleRightSurfaceAction({ type: 'close', kind: 'files' })} /> : <div className="surface-unavailable"><b>文件不可用</b><span>先绑定一个工作区。</span></div>,
                     diff: surface.id !== currentSurface.id ? null : <DiffInspector state={diffInspector} onClose={() => handleRightSurfaceAction({ type: 'close', kind: 'diff' })}

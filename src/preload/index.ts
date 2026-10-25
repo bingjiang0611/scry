@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { eventApi } from './event-api'
 import { remoteApi } from './remote-api'
-import type { WorkspaceDiffSnapshotResult } from '../shared/workspace-diff'
+import type { GitDiffScope, WorkspaceDiffSnapshotResult } from '../shared/workspace-diff'
 import type { SourceControlApi } from '../shared/source-control'
 import type { WorkspaceSelectionApi } from '../shared/workspace-selection'
 import type { ConversationApi, ConversationSummary } from '../shared/conversation-api'
@@ -245,7 +245,7 @@ const api = {
   syncBillingAdmin: (): Promise<BillingSyncResult> => ipcRenderer.invoke('agent:syncBillingAdmin'),
   importBillingFixture: (): Promise<BillingFixtureImportResult> => ipcRenderer.invoke('agent:importBillingFixture'),
   gitDiff: (cwd: string): Promise<WorkspaceDiffResult> => ipcRenderer.invoke('agent:gitDiff', cwd),
-  gitDiffSnapshot: (cwd: string): Promise<WorkspaceDiffSnapshotResult> => ipcRenderer.invoke('agent:gitDiffSnapshot', cwd),
+  gitDiffSnapshot: (cwd: string, scope: GitDiffScope = 'workspace'): Promise<WorkspaceDiffSnapshotResult> => ipcRenderer.invoke('agent:gitDiffSnapshot', cwd, scope),
   recorderContentPage: (request: RecorderContentPageRequest): Promise<RecorderContentPage> =>
     ipcRenderer.invoke('agent:recorderContentPage', request),
   // 只拿最近一页：完整历史不作为单个 payload 过 IPC。更早轮次用 loadSessionOlder 取回。

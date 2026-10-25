@@ -317,6 +317,7 @@
         "src/main/source-control/mutation.ts",
         "src/main/git.ts",
         "src/core/turn-recorder/git-workspace-snapshot.ts",
+        "src/core/turn-recorder/git-branch-base.ts",
         "src/core/turn-recorder/git-workspace-limits.ts",
         "src/core/turn-recorder/git-workspace.ts",
         "src/core/turn-recorder/git-capture.ts",

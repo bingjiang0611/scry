@@ -44,6 +44,7 @@ export interface GitTurnDiffCapture {
   beforeTree?: string
   /** HEAD observed by the same layout/status read that starts this capture. */
   head?: string
+  branch?: string
   baselineClean?: boolean
   indexPath?: string
   tempDir?: string
@@ -257,6 +258,8 @@ export async function beginGitTurnDiff(
     if (!head || head === '(initial)') {
       return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'no_head' }
     }
+    const branchName = statusRecords.find(record => record.startsWith('# branch.head '))?.slice('# branch.head '.length)
+    const branch = branchName && branchName !== '(detached)' ? branchName : undefined
     const commonDir = isAbsolute(commonDirRaw) ? commonDirRaw : resolve(canonicalCwd, commonDirRaw)
     const indexPath = isAbsolute(indexPathRaw) ? indexPathRaw : resolve(canonicalCwd, indexPathRaw)
     const scope = relative(repoRoot, canonicalCwd) || '.'
@@ -305,6 +308,7 @@ export async function beginGitTurnDiff(
         requestedRoot,
         beforeTree: head,
         head,
+        branch,
         baselineClean,
         indexPath,
         tempDir,
@@ -341,6 +345,7 @@ export async function beginGitTurnDiff(
       requestedRoot,
       beforeTree,
       head,
+      branch,
       baselineClean,
       indexPath,
       tempDir,

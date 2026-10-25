@@ -71,7 +71,6 @@ export interface AppShellProps {
   rightSurfaces: ReturnType<typeof useSessionRightSurfaces>
   handleRightSurfaceAction: (action: RightSurfaceAction) => void
   openTurnInChat: (runId: string, event?: import('@shared/trace').TraceEvent | null, target?: 'turn' | 'event') => void
-  openSessionNetDiff: (path?: string) => void
   diffInspector: ReturnType<typeof import('./hooks/useDiffInspector').useDiffInspector>
   openWorkspaceDiff: () => void
   workspaceRefreshKey: number

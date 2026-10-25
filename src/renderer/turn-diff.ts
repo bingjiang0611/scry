@@ -13,7 +13,7 @@ import {
 } from '@shared/trace'
 import { basename, type Turn } from './format'
 
-export type DiffScope = 'workspace' | 'session' | 'turn'
+export type DiffScope = 'branch' | 'workspace' | 'session' | 'turn'
 
 export interface TurnDiffReview {
   runId: string
@@ -23,6 +23,7 @@ export interface TurnDiffReview {
   /** Defaults to the per-turn snapshot for existing callers. */
   scope?: DiffScope
   head?: string
+  comparison?: import('@shared/workspace-diff').BranchDiffComparison
   revision?: string
   /** true = 运行中的临时 Git 快照，本轮还没结束；UI 必须标出来。 */
   preview?: boolean

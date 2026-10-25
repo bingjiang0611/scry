@@ -19,6 +19,8 @@ export async function exerciseTurnMenu({ click, key, wait, evaluate, screenshot,
       oldTabs: Boolean(document.querySelector('.diff-scope-tabs, .diff-turn-picker select')) } })()`)
   assert.ok(menu.width <= 240 && menu.left >= 0 && menu.right <= menu.viewport)
   assert.equal(menu.oldTabs, false)
+  assert.deepEqual(await evaluate(`[...document.querySelectorAll('.diff-scope-menu > button')].map(node => node.dataset.diffChoice)`), ['branch', 'workspace', 'latest', 'turns'])
+  assert.deepEqual(await evaluate(`[...document.querySelectorAll('.diff-scope-menu > button')].map(node => node.textContent.trim())`), ['Changes', 'Uncommitted', 'Latest turn', 'Turn'])
   await screenshot('diff-scope-menu-dark')
   await key('Escape', 'Escape', 27)
   assert.equal(await evaluate(`document.activeElement?.classList.contains('diff-scope-trigger')`), true)
@@ -50,5 +52,5 @@ export async function exerciseTurnMenu({ click, key, wait, evaluate, screenshot,
   await selectDiffScope(actions, 'latest')
   await wait(() => evaluate(`document.querySelector('.diff-virtual-files')?.textContent.includes('remote-second.txt')`), 'latest turn restored')
   assert.equal(await evaluate(`document.querySelector('.diff-virtual-files').textContent.includes('remote-first.txt')`), false)
-  assert.equal(await evaluate(`document.querySelector('.diff-scope-trigger').textContent.trim()`), '最新一轮')
+  assert.equal(await evaluate(`document.querySelector('.diff-scope-trigger').textContent.trim()`), 'Latest turn')
 }

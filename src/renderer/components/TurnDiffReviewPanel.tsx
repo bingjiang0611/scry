@@ -132,9 +132,10 @@ export function TurnDiffReviewPanel({ review, onClose, embedded = false }: {
   const added = turnDiff.files.reduce((sum, file) => sum + file.added, 0)
   const deleted = turnDiff.files.reduce((sum, file) => sum + file.deleted, 0)
   const available = turnDiff.status === 'captured'
-  const label = scope === 'workspace' ? detail.workspaceLabel : scope === 'session' ? copy.sessionLabel : copy.turnLabel
-  const title = scope === 'workspace' ? detail.workspaceTitle : scope === 'session' ? copy.sessionTitle : copy.turnTitle
-  const range = scope === 'workspace' ? detail.workspaceRange(review.head)
+  const label = scope === 'branch' ? detail.branchLabel : scope === 'workspace' ? detail.workspaceLabel : scope === 'session' ? copy.sessionLabel : copy.turnLabel
+  const title = scope === 'branch' ? detail.branchTitle : scope === 'workspace' ? detail.workspaceTitle : scope === 'session' ? copy.sessionTitle : copy.turnTitle
+  const range = scope === 'branch' ? detail.branchRange(review.comparison?.baseRef, review.comparison?.headRef, review.comparison?.baseCommit)
+    : scope === 'workspace' ? detail.workspaceRange(review.head)
     : scope === 'session' ? copy.sessionRange(turnDiff.baseline === 'resumed', review.preview === true)
       : review.preview ? copy.preview : detail.turnRange
 

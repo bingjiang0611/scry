@@ -17,7 +17,7 @@ export function DiffInspector({ state, onClose, history }: {
       <div className="diff-inspector-toolbar">
         <DiffScopeMenu state={state} history={history} />
         <div className="diff-inspector-actions">
-          {state.scope === 'workspace' && <button type="button" disabled={!state.cwd || state.refreshing}
+          {(state.scope === 'workspace' || state.scope === 'branch') && <button type="button" disabled={!state.cwd || state.refreshing}
             onClick={state.refresh} title={copy.refresh} aria-label={copy.refresh}><Icon name="refresh" /></button>}
           <button type="button" onClick={onClose} title={copy.closeTitle} aria-label={copy.close}><Icon name="x" /></button>
         </div>
@@ -27,7 +27,7 @@ export function DiffInspector({ state, onClose, history }: {
         {state.review ? <TurnDiffReviewPanel review={state.review} onClose={onClose} embedded /> : <div className="diff-review-empty" role="status">
           <Icon name={state.pending ? 'clock' : 'info'} />
           <b>{state.pending ? copy.pending : state.failure ? workspaceDiffCopy.label(state.failure)
-            : state.emptySession && state.scope !== 'workspace' ? copy.beforeSend : copy.missing(state.scope)}</b>
+            : state.emptySession && state.scope === 'turn' ? copy.beforeSend : copy.missing(state.scope)}</b>
           {state.failure && <span>{workspaceDiffCopy.detail(state.failure)}</span>}
         </div>}
       </div>

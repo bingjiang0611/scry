@@ -70,7 +70,7 @@ export function DiffScopeMenu({ state, history }: { state: InspectorState; histo
   const [position, setPosition] = useState<CSSProperties>({})
   const [turnPosition, setTurnPosition] = useState<CSSProperties>({})
   const selected = state.turnOptions.find(turn => turn.runId === state.selectedRunId)
-  const label = state.scope === 'workspace' ? copy.uncommitted : state.scope === 'session' ? copy.scopes.session
+  const label = state.scope === 'workspace' ? copy.uncommitted : state.scope === 'branch' ? copy.changes
     : state.latestTurn ? copy.latestTurn : selected ? copy.turnOption(selected.index, '') : copy.scopes.turn
   const close = (restore = true): void => {
     setOpen(false); setTurnsOpen(false)
@@ -129,14 +129,13 @@ export function DiffScopeMenu({ state, history }: { state: InspectorState; histo
       event.preventDefault(); items[next]?.focus()
     }}>
       <div ref={root} id={id} className="diff-scope-menu" style={position} role="menu" aria-label={copy.changes}>
-        <div className="diff-menu-caption">{copy.changes}</div>
+        <button type="button" role="menuitemradio" aria-checked={state.scope === 'branch'} data-diff-choice="branch" onClick={() => chooseScope('branch')}>{copy.changes}</button>
         <button type="button" role="menuitemradio" aria-checked={state.scope === 'workspace'} data-diff-choice="workspace" onClick={() => chooseScope('workspace')}>{copy.uncommitted}</button>
         <button type="button" role="menuitemradio" aria-checked={state.latestTurn} data-diff-choice="latest" onClick={() => chooseScope('turn')}>{copy.latestTurn}</button>
         <button ref={turnTrigger} type="button" role="menuitem" aria-haspopup="menu" aria-expanded={turnsOpen}
           aria-controls={`${id}-turns`} data-diff-choice="turns" onClick={() => setTurnsOpen(!turnsOpen)}>
           <span>{copy.turns}</span><Icon name="chevronRight" />
         </button>
-        <button type="button" role="menuitemradio" className="diff-session-choice" aria-checked={state.scope === 'session'} data-diff-choice="session" onClick={() => chooseScope('session')}>{copy.scopes.session}</button>
       </div>
       {turnsOpen && <div ref={submenu} id={`${id}-turns`} className="diff-turn-menu" style={turnPosition} role="menu" aria-label={copy.turnPicker}>
         <button type="button" className="diff-turn-back" aria-label={copy.backToScopes} onClick={() => { setTurnsOpen(false); turnTrigger.current?.focus() }}>
