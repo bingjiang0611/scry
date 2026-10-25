@@ -53,7 +53,8 @@ export async function writeRecorderContent(
       existing = await readFile(path)
     }
   }
-  if (existing.length !== bytes.length || digest(existing) !== sha256) {
+  // Incoming bytes already determine the address; compare complete payloads without hashing twice.
+  if (!existing.equals(bytes)) {
     throw new Error(`recorder content collision or corruption: ${sha256}`)
   }
   // The exclusive writer syncs the bytes and ancestor directories before publishing the link.

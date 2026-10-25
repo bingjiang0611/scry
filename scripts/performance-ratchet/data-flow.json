@@ -12,7 +12,7 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 64
+        "darwin-arm64": 32
       }
     },
     "recorder.content-reuse/io.read.calls": {
