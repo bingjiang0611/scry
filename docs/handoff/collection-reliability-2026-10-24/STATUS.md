@@ -16,7 +16,9 @@
 | M6 | 子目录启动找不到 hook 脚本 | C3 | 未开始 | | 需用户实测 |
 | D1 | 发现深度之外的子仓库静默缺席 | D1 | 未开始 | | |
 | D2 | 每轮仓库清单与快照状态可见性 | D2 | 未开始 | | |
-| H3 | daemon env 串会话 | E | 阻塞 | | 等用户确认 uploader 语义 |
-| M2 | commit hook 队头阻塞无死信 | E | 阻塞 | | 同上 |
-| M3 | ACK 身份绑定 bundle 内容指纹 | E | 阻塞 | | 同上 |
-| M4 | ACK 只代表回调 exit 0 | E | 阻塞 | | 同上 |
+| H3 | daemon env 串会话（显式 UPLOAD_ENABLED=0 时会误 ACK） | E1 | 未开始 | | 用户 2026-10-25 已确认 uploader 语义，见 E.md |
+| M2 | commit hook 队头阻塞无死信 | E3 | 未开始 | | 降为低优先级，可放弃 |
+| M3 | ACK 身份绑定 bundle 内容指纹 | E3 | 未开始 | | 降为低优先级（只带来重复校验），可放弃 |
+| M4 | ACK 只代表入队；归档后回源校验阻止发送 | E2 + U1/U2 | 未开始 | | recorder 侧 E2；uploader 侧 U1/U2 不在本仓库 |
+| U3 | uploader 不可重试错误返回 0 | U3 | 未开始 | | uploader 侧，不在本仓库 |
+| U4 | 显式关闭上传无痕迹 | U4 | 未开始 | | uploader 侧，不在本仓库 |

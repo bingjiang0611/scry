@@ -9,7 +9,7 @@
 - **审查方**（Claude，本会话）：写交接文档、核验执行结果。
 - **执行方**（另一个 agent）：按批次实施，推送到本分支 `reliability/collection`。
 - 执行方完成一个批次 → 写 `reports/<批次>.md` 并更新 [STATUS.md](STATUS.md) 为 `待核验` → push。审查方核验后标 `已核验`，或在报告末尾写「核验意见」并标 `需修改`。
-- 批次在同一分支上**串行**进行：A → B → C → D。E 要等用户先确认 uploader 的行为（见 [E.md](E.md)），确认之前不要开工。
+- 批次在同一分支上**串行**进行：A → B → C → D。E 在 D 之后做，用户已于 2026-10-25 确认 uploader 行为（见 [E.md](E.md)）；其中 uploader 侧任务不在本仓库。
 - 不 push `main`，不开 PR，不合入。合入由用户决定。
 - 用户本地可以验证 OpenCode、Qoder、Codex。每个批次需要用户在真实 Provider 上手动确认的步骤，执行方写进报告的「用户验证」一节，参考 [USER-VERIFY.md](USER-VERIFY.md) 的格式。
 
@@ -27,7 +27,7 @@
 | B | H4 inbox 失败即删除；M1 recover 被单个会话打断 | A 核验后 | [B.md](B.md) |
 | C | M5 回退链路超时与三重处理；L1 长路径快路径失效；M6 子目录启动找不到 hook | B 核验后 | [C.md](C.md) |
 | D | 多仓库覆盖可见性（发现深度、仓库数、diff 超时如实标注） | C 核验后 | [D.md](D.md) |
-| E | H3 daemon env 串会话；M2 队头阻塞与死信；M3 ACK 身份；M4 ACK 语义 | **用户确认 uploader 语义后** | [E.md](E.md) |
+| E | E1 daemon env 按轮快照；E2 通知带内容指纹；E3 ACK 身份与死信（可选）；uploader 侧 U1–U4 不在本仓库 | D 核验后（用户已于 2026-10-25 确认 uploader 语义） | [E.md](E.md) |
 
 ## 硬约束
 
