@@ -1,0 +1,586 @@
+{
+  "schema": 1,
+  "environment": {
+    "host": "mac2",
+    "platform": "darwin-arm64",
+    "cores": 8,
+    "node": "v24.18.0",
+    "electron": "42.10.1"
+  },
+  "source": {
+    "measurement": "2866eed1611bf27fc6534e306234f1abfc25f812",
+    "registration": "b26116e987e3f98673b7e60ff62a97cb1e5203d0",
+    "prerequisite": "5bb630e1",
+    "hashes": {
+      "src/renderer/remote-trace.ts": "0acc4068e93fc881750ccffd989ab9cf65708604efe4a180d42f0b4cac374a42",
+      "src/renderer/turn-stream-projection.ts": "2aa23230ba8d7a333d0359f3f58bf7e49ee62bfd22656625a6686228f723efe5",
+      "src/renderer/remote-trace.projection.test.ts": "f2c6505f93b920425e8ee3292f6bb9f6948b1309fb5cae0ae46c2a213d56c53f"
+    },
+    "candidate": "67952e75929116d2651a248091e047049db40976",
+    "validation": "0f4fadc187715abcddcfc67428aa5493c480e958",
+    "buildExcerpt": "\"unfrozen-development\" : \"d42af910ace0c33cfdcc96a6f9392c23780416e4f5e587e393554eee0285a6a2\", packaged),\n      onError\n    });\n    "
+  },
+  "counts": {
+    "before": [
+      {
+        "scenario": "renderer.remote-tail",
+        "metric": "projection.prefix.reads",
+        "layer": "ui",
+        "unit": "count",
+        "workload": "structural-items=5000;live-tail=1;updates=20;indexed-delta=true",
+        "source": "production delta merge + stream projection; pass-through structural array accessors",
+        "availability": "measured",
+        "runs": [
+          100020,
+          100020,
+          100020,
+          100020,
+          100020
+        ]
+      },
+      {
+        "scenario": "renderer.remote-tail",
+        "metric": "merge.prefix.reads",
+        "layer": "ui",
+        "unit": "count",
+        "workload": "structural-items=5000;live-tail=1;updates=20;indexed-delta=true",
+        "source": "production delta merge + stream projection; pass-through structural array accessors",
+        "availability": "measured",
+        "runs": [
+          100000,
+          100000,
+          100000,
+          100000,
+          100000
+        ]
+      }
+    ],
+    "after": [
+      {
+        "scenario": "renderer.remote-tail",
+        "metric": "projection.prefix.reads",
+        "layer": "ui",
+        "unit": "count",
+        "workload": "structural-items=5000;live-tail=1;updates=20;indexed-delta=true",
+        "source": "production delta merge + stream projection; pass-through structural array accessors",
+        "availability": "measured",
+        "runs": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "scenario": "renderer.remote-tail",
+        "metric": "merge.prefix.reads",
+        "layer": "ui",
+        "unit": "count",
+        "workload": "structural-items=5000;live-tail=1;updates=20;indexed-delta=true",
+        "source": "production delta merge + stream projection; pass-through structural array accessors",
+        "availability": "measured",
+        "runs": [
+          100000,
+          100000,
+          100000,
+          100000,
+          100000
+        ]
+      }
+    ]
+  },
+  "timing": {
+    "scope": "Node hot merge + projection, not Chromium paint; initial projection excluded; uninstrumented arrays",
+    "before": {
+      "workload": "structural-items=5000;live-tail=1;updates=20;indexed-delta=true",
+      "scope": "20 mergeRemoteTrace + project calls on plain arrays; initial projection excluded",
+      "durationMs": [
+        0.6935839999999871,
+        0.3664579999999944,
+        0.19712499999999977,
+        0.2759580000000028,
+        0.47887499999998795
+      ]
+    },
+    "after": {
+      "workload": "structural-items=5000;live-tail=1;updates=20;indexed-delta=true",
+      "scope": "20 mergeRemoteTrace + project calls on plain arrays; initial projection excluded",
+      "durationMs": [
+        0.3213749999999891,
+        0.16020900000000893,
+        0.12470899999999574,
+        1.828249999999997,
+        0.06474999999997522
+      ]
+    },
+    "lock": {
+      "label": "mac2-remote-tail-paired",
+      "command": [
+        "bash",
+        "/Users/test/scry-performance-climb-mac2.cO3N5W/logs/query/paired-remote-tail.sh"
+      ],
+      "exit": 0,
+      "signal": null,
+      "wallMs": 4728,
+      "cores": 8,
+      "loadBefore": 2.15,
+      "loadAfter": 2.15,
+      "highLoad": false
+    }
+  },
+  "validation": {
+    "unit": {
+      "files": 343,
+      "passed": 3990,
+      "failed": 0,
+      "skipped": 4,
+      "success": true
+    },
+    "focusedPassed": 43,
+    "typecheck": 0,
+    "build": 0,
+    "ui": {
+      "fullExit": 1,
+      "completedBeforeFailure": 19,
+      "failedPhase": 19,
+      "reason": "existing DesktopRemote full fixture 55s deadline; baseline reproduction retained in prior report",
+      "remaining": [
+        {
+          "index": 20,
+          "command": "node scripts/desktop-remote-ui-smoke.mjs --session-parity-only",
+          "status": 0,
+          "signal": null
+        },
+        {
+          "index": 21,
+          "command": "node scripts/desktop-remote-ui-smoke.mjs --composer-history-only",
+          "status": 0,
+          "signal": null
+        },
+        {
+          "index": 22,
+          "command": "node scripts/desktop-remote-ui-smoke.mjs --remote-settings-only",
+          "status": 0,
+          "signal": null
+        },
+        {
+          "index": 23,
+          "command": "node scripts/desktop-remote-ui-smoke.mjs --session-lifecycle-only",
+          "status": 0,
+          "signal": null
+        },
+        {
+          "index": 24,
+          "command": "npm run test:source-control:ui",
+          "status": 0,
+          "signal": null
+        },
+        {
+          "index": 25,
+          "command": "npm run test:conversation:ipc",
+          "status": 0,
+          "signal": null
+        },
+        {
+          "index": 26,
+          "command": "node scripts/electron-security-smoke.mjs --dev-pi-history-only",
+          "status": 0,
+          "signal": null
+        }
+      ]
+    },
+    "negativeControls": [
+      "old producer: expected prefixReads 0, actual 5001",
+      "deliberately incorrect prefix boundary: earlier tool correction lost, assertion failed; exact source restored"
+    ]
+  },
+  "ratchet": {
+    "passed": true,
+    "registered": 77,
+    "rows": [
+      {
+        "key": "analytics.stats/cpu.instructions",
+        "layer": "main",
+        "unit": "instructions",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "result": "missing",
+        "gateFailed": false
+      },
+      {
+        "key": "files.fixed-operations/io.read",
+        "layer": "io",
+        "unit": "count",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "value": 417,
+        "min": 417,
+        "runs": 5,
+        "spread": 0,
+        "result": "worse",
+        "baseline": 336,
+        "gateFailed": false
+      },
+      {
+        "key": "files.fixed-operations/io.readdir",
+        "layer": "io",
+        "unit": "count",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "value": 20,
+        "min": 20,
+        "runs": 5,
+        "spread": 0,
+        "result": "worse",
+        "baseline": 18,
+        "gateFailed": false
+      },
+      {
+        "key": "files.fixed-operations/io.read.bytes",
+        "layer": "io",
+        "unit": "bytes",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 4,
+        "value": 1227197,
+        "min": 1227162,
+        "runs": 5,
+        "spread": 35,
+        "result": "worse",
+        "baseline": 1183197,
+        "gateFailed": false
+      },
+      {
+        "key": "persistence.archive/ipc.bytes",
+        "layer": "ipc",
+        "unit": "bytes",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "value": 10558,
+        "min": 10558,
+        "runs": 5,
+        "spread": 0,
+        "result": "worse",
+        "baseline": 10536,
+        "gateFailed": false
+      },
+      {
+        "key": "history.page/cpu.instructions",
+        "layer": "main",
+        "unit": "instructions",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "result": "missing",
+        "gateFailed": false
+      },
+      {
+        "key": "remote.trace.preview/cpu.instructions",
+        "layer": "main",
+        "unit": "instructions",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "result": "missing",
+        "gateFailed": false
+      },
+      {
+        "key": "recorder.content-cold/io.stat.calls",
+        "layer": "io",
+        "unit": "count",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "value": 44,
+        "min": 44,
+        "runs": 5,
+        "spread": 0,
+        "result": "worse",
+        "baseline": 36,
+        "gateFailed": false
+      },
+      {
+        "key": "recorder.content-dual/io.stat.calls",
+        "layer": "io",
+        "unit": "count",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "value": 92,
+        "min": 92,
+        "runs": 5,
+        "spread": 0,
+        "result": "worse",
+        "baseline": 75,
+        "gateFailed": false
+      }
+    ]
+  },
+  "controls": {
+    "files.fixed-operations": [
+      {
+        "key": "files.fixed-operations/io.open",
+        "layer": "io",
+        "unit": "count",
+        "workload": "fixed-local-temp-workloads",
+        "baseline": 6,
+        "candidate": 6,
+        "baselineRuns": [
+          6,
+          6,
+          6,
+          6,
+          6
+        ],
+        "candidateRuns": [
+          6,
+          6,
+          6,
+          6,
+          6
+        ],
+        "delta": 0,
+        "percent": 0,
+        "status": "measured"
+      },
+      {
+        "key": "files.fixed-operations/io.read",
+        "layer": "io",
+        "unit": "count",
+        "workload": "fixed-local-temp-workloads",
+        "baseline": 417,
+        "candidate": 417,
+        "baselineRuns": [
+          417,
+          417,
+          417,
+          417,
+          417
+        ],
+        "candidateRuns": [
+          417,
+          417,
+          417,
+          417,
+          417
+        ],
+        "delta": 0,
+        "percent": 0,
+        "status": "measured"
+      },
+      {
+        "key": "files.fixed-operations/io.read.bytes",
+        "layer": "io",
+        "unit": "bytes",
+        "workload": "fixed-local-temp-workloads",
+        "baseline": 1227197,
+        "candidate": 1227201,
+        "baselineRuns": [
+          1227171,
+          1227167,
+          1227183,
+          1227164,
+          1227197
+        ],
+        "candidateRuns": [
+          1227170,
+          1227201,
+          1227182,
+          1227160,
+          1227160
+        ],
+        "delta": 4,
+        "percent": 0.0003259460380036783,
+        "status": "measured"
+      },
+      {
+        "key": "files.fixed-operations/io.readdir",
+        "layer": "io",
+        "unit": "count",
+        "workload": "fixed-local-temp-workloads",
+        "baseline": 20,
+        "candidate": 20,
+        "baselineRuns": [
+          20,
+          20,
+          20,
+          20,
+          20
+        ],
+        "candidateRuns": [
+          20,
+          20,
+          20,
+          20,
+          20
+        ],
+        "delta": 0,
+        "percent": 0,
+        "status": "measured"
+      },
+      {
+        "key": "files.fixed-operations/io.rename",
+        "layer": "io",
+        "unit": "count",
+        "workload": "fixed-local-temp-workloads",
+        "baseline": 3,
+        "candidate": 3,
+        "baselineRuns": [
+          3,
+          3,
+          3,
+          3,
+          3
+        ],
+        "candidateRuns": [
+          3,
+          3,
+          3,
+          3,
+          3
+        ],
+        "delta": 0,
+        "percent": 0,
+        "status": "measured"
+      },
+      {
+        "key": "files.fixed-operations/io.stat",
+        "layer": "io",
+        "unit": "count",
+        "workload": "fixed-local-temp-workloads",
+        "baseline": 1038,
+        "candidate": 1038,
+        "baselineRuns": [
+          1038,
+          1038,
+          1038,
+          1038,
+          1038
+        ],
+        "candidateRuns": [
+          1038,
+          1038,
+          1038,
+          1038,
+          1038
+        ],
+        "delta": 0,
+        "percent": 0,
+        "status": "measured"
+      },
+      {
+        "key": "files.fixed-operations/io.write",
+        "layer": "io",
+        "unit": "count",
+        "workload": "fixed-local-temp-workloads",
+        "baseline": 3,
+        "candidate": 3,
+        "baselineRuns": [
+          3,
+          3,
+          3,
+          3,
+          3
+        ],
+        "candidateRuns": [
+          3,
+          3,
+          3,
+          3,
+          3
+        ],
+        "delta": 0,
+        "percent": 0,
+        "status": "measured"
+      }
+    ],
+    "persistence.archive": [
+      {
+        "key": "persistence.archive/ipc.bytes",
+        "layer": "ipc",
+        "unit": "bytes",
+        "workload": "archive-turns=120;page=40",
+        "baseline": 10558,
+        "candidate": 10558,
+        "baselineRuns": [
+          10558,
+          10558,
+          10558,
+          10558,
+          10558
+        ],
+        "candidateRuns": [
+          10558,
+          10558,
+          10558,
+          10558,
+          10558
+        ],
+        "delta": 0,
+        "percent": 0,
+        "status": "measured"
+      },
+      {
+        "key": "persistence.archive/ipc.messages",
+        "layer": "ipc",
+        "unit": "count",
+        "workload": "archive-turns=120;page=40",
+        "baseline": 1,
+        "candidate": 1,
+        "baselineRuns": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "candidateRuns": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "delta": 0,
+        "percent": 0,
+        "status": "measured"
+      },
+      {
+        "key": "persistence.archive/json.parse.calls",
+        "layer": "main",
+        "unit": "count",
+        "workload": "archive-turns=120;page=40",
+        "baseline": 41,
+        "candidate": 41,
+        "baselineRuns": [
+          41,
+          40,
+          40,
+          40,
+          40
+        ],
+        "candidateRuns": [
+          41,
+          40,
+          40,
+          40,
+          40
+        ],
+        "delta": 0,
+        "percent": 0,
+        "status": "measured"
+      }
+    ]
+  },
+  "delivery": {
+    "mergedIntoOriginal": false,
+    "pushed": false,
+    "installed": false,
+    "L3": "not deployed"
+  }
+}
