@@ -5,7 +5,7 @@
 - 已修正 `app.resources.processes[].cpuPercentOfOneCore`：Electron 的整机占比乘以逻辑 CPU 数，恢复字段承诺的单核占比，不把多核使用量截到 100。CPU 数只在 monitor 启动时读取一次。
 - 生产修复提交：`b51b3b82`，基于 `04fcaf68`，分支 `perf/cpu-observation-20261025`。只改变 CPU 单位，不改变采集频率、字段结构、保留策略或历史文件。旧 build 的错误数据不能与修正后的 build 混用。
 - 日常实例：0.2.223，build `2d6b6d7e0d9dba6cce72d3fbc23f842c1a99e726ff793e3be6578eddbfe5a56a`；安装包内 build 与同进程性能日志一致。安装日期 unknown；本次确认运行日期为 2026-10-25。
-- 本次工作区基线为 0.2.221；已通过开发构建，不代表完整 App 打包产物。尚未合入 main、打包或安装。main 的 0.2.223 工作区有并行修改，不能用旧分支覆盖日常安装版，也不能混入他人改动。另从 main `51b26fcf` 的干净 Git archive 计算 source build ID，得到 `747b6dc33420283e12e1c699da2a26692435b94e1fd0a762ce1cc3e32776c0c9`，与已安装 build 不同；版本号相同不能证明可无损替换，安装源映射仍需维护者确认。
+- 初始工作区基线为 0.2.221；首阶段只通过开发构建，当时尚未合入 main、打包或安装。最终交付以本文「main 交付续记」为准。main 的 0.2.223 工作区有并行修改，不能用旧分支覆盖日常安装版，也不能混入他人改动。另从 main `51b26fcf` 的干净 Git archive 计算 source build ID，得到 `747b6dc33420283e12e1c699da2a26692435b94e1fd0a762ce1cc3e32776c0c9`，与已安装 build 不同；版本号相同不能证明可无损替换，安装源映射仍需维护者确认。
 - 只有 CPU 计量修复进入生产代码。下述帧监控/扫光开关只在隔离实验中生效；持久化生产代码未改。没有启动真实 Provider、停止日常任务或修改日常性能记录。
 
 ## 1. CPU 单位：错误与负对照
@@ -102,8 +102,19 @@ node .agents/skills/scry-performance-climb/scripts/timing-run.mjs trace-content-
 
 当前 main 候选验证：`npm test` 为 3,873 通过、4 既有跳过，shell 通过；`npm run test:renderer:ui` 全链通过（含 Credits、真实隔离 App 的 IPC/归属/三轮对话与重启）；`npm run check:cli-release` 为 627 通过，CLI package smoke 通过。typecheck/build、30 项 focused 回归通过。`performance:measure` 46 项的分类与上文相同，四个 worse 均为已核对的既有台账差异，未改基线；本次不声称 CPU 工作量下降。
 
+2026-10-25 11:48 UTC 已核对最终安装：
+
+- 产物源码提交 `8922949e` 已推送远端 main；推送前 fetch，远端基线仍为 `205521e9`，只推送本次三项相关提交。
+- `/Applications/Scry.app` 为 0.2.224，内置 CLI 0.2.51；旧 0.2.223 保留在 `/Applications/.Scry.app.backup`。
+- 源码、打包目录和安装目录 build ID 均为 `4453afda3babb0c9612ad0a95011aa8758f25ac21f99dcc1b3030e672155fef0`；后两者 app.asar SHA-256 均为 `c09b31b1c68f01137176ca08d9044b60be3af7cf9dd292c81038a34ddda82ede`，且包内包含 CPU 换算修复。
+- 日常进程 PID 43114 及启动时间未改变；没有停止或重启用户实例。安装成功不表示当前运行实例已加载修复。
+
+安装首次运行 `npm run install:mac:dev` 在既有 remote receipt capacity 测试的 5000ms 截止处失败（此前同提交全量为 998ms）。已核对 fixture 循环、finally 清理和生产模块未被本次修改；隔离该文件 58 项全部通过，目标用例 1089ms。没有修改测试或扩大 timeout。完整安装流程第二次 unit 3,873 通过/4 跳过、目标用例 880ms，shell 通过。
+
+第二次打包首次执行私有 CLI `--version` 收到 SIGKILL（具体原因 unknown）。未替换安装目录；先核对 `codesign --verify --deep --strict` 通过、同一二进制 Node 模式正常启动，再对**同一产物**运行 `check:packaged-app` 和全部 `smoke:electron`，均通过。随后从标准流程的安装器 `node scripts/install-macos.mjs` 继续，原子安装并保留备份；没有绕过任何打包/安全/安装校验，也没有重新生成另一份包。产物为本机 Apple Development 签名开发包，未声称正式公证发布。若 SIGKILL 再现，由 Agent 在该 PID/时间窗采集 AMFI/系统终止证据，不把本次复查通过解释为原因已修复。
+
 ## 下一步与责任
 
-1. Agent 按已确认的远端 main 基线推送上述相关提交并运行 `npm run install:mac:dev`；安装结果仍待验证，不将已构建当作已安装。
+1. 用户在当前任务结束后自行重启 Scry，加载已安装的 0.2.224；Agent 不为验收中断其会话。
 2. 维护者决定是否将全时帧监控改为明确标注的按需采样，或调整扫光效果；Agent 在该决定和低负载窗口之后继续单变量实验，不将当前高负载结果当作优化验收。
 3. 持久化优化由 Agent 在低负载、真实大小分布证据具备后再评估，不先碰 fsync、完整性或证据收敛边界。
