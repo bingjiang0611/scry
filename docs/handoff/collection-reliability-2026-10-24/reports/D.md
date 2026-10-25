@@ -273,3 +273,5 @@ npm run test:unit -- src/core/turn-recorder/repository-snapshots.test.ts src/cor
 ### 状态
 
 D2 → 已核验。D1 → 需修改（VD1 待用户选定方案，另含 VD2）。在此之前不开始 E。
+
+**用户 2026-10-25 选定 VD1 方案 A**（只在发现嵌套仓库时告警）。执行方按上面「推荐方案（A）」的三点实施，并一起完成 VD2。
