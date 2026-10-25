@@ -323,3 +323,13 @@ Tests       3 failed | 9 passed (12)
 5. 退出所有临时实例并保留需核验的证据。本次没有新增账号/费用授权，没有发起真实 Provider 请求、日常 CLI/App 安装或全局配置变更。
 
 **留给用户决定的事**：无新增实现取舍；本次选择在核验意见明确允许的范围内。请审查方核验 VB1/VB2 后决定 B1 是否通过。B2 与已接受的乱序/非事务取舍不变，执行方到此停止，不开始 C。
+
+## VB1 核验意见（审查方，2026-10-25）
+
+**结论：VB1 和 VB2 已核验，B1 通过，批次 B 关闭，可以开始 C。**
+
+- 复跑证实：在 `8a29edf` 的独立 worktree 上，`recorder-inbox.test.ts` 有 3 个失败、9 个通过，失败的正是两个 VB1 保活用例和 doctor 提示用例，与报告一致。VB2 的「只删 sidecar 后能重放」用例在旧实现上就能通过，报告如实说明它验证的是已有能力，没有当作新修复。
+- 修复后（Linux/Node 22，HEAD `3034c21`）：`src/core/turn-recorder`、`hook-skip-recency`、`scry.test.ts` 共 26 个文件 427/427 通过。
+- 代码：修复只有一行，把 `recorderHasRetryableInbox` 读 sidecar 失败时的处理从 `return true` 改成 `continue`，与 replay 的跳过逻辑一致；后面的有效条目仍然会让函数返回 true。条目仍计入 pendingCount，doctor 继续告警，不会把积压显示成健康。没有新增 droppedEvents，也不覆盖损坏的 sidecar，方向正确。
+- VB2 文档：人工重试流程要求先停 daemon 并确认已停止、在 dataDir 之外备份、只删除单个 sidecar、recover 之后读回结果，并明确说明这不保证 FIFO 或 exactly-once、历史 droppedEvents 不扣减。`scry recorder stop` 命令确实存在（`scry.ts:462`）。可以接受。
+- 生效方式：升级 CLI 后要执行 `scry recorder restart`，不需要 repair。
