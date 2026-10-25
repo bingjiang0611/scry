@@ -186,6 +186,46 @@ describe('scry init', () => {
     }
   })
 
+  it('V1 OpenCode repeats idle only after new activity, while preserving the first unmatched idle', async () => {
+    const root = await gitWorkspace()
+    await initWorkspace({ workspace: root, providers: 'opencode', cliPath: process.execPath })
+    const source = (await readFile(join(root, '.opencode/plugins/scry-recorder.js'), 'utf8'))
+      .replace(/^import .*$/gm, '')
+      .replace("const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')", `const root = ${JSON.stringify(root)}`)
+      .replace('export const ScryRecorder', 'const ScryRecorder')
+      .replace('export default ScryRecorder', 'ScryRecorder()')
+    const delivered: Record<string, unknown>[] = []
+    const hooks = await runInNewContext(source, {
+      resolve, Buffer, TextDecoder, process,
+      spawnSync: (_hook: string, _args: string[], options: { input: string }) => {
+        delivered.push(JSON.parse(options.input))
+        return { status: 0 }
+      }
+    }) as Record<string, (input: unknown, output?: unknown) => Promise<void>>
+    const idle = (id: string) => hooks.event({ event: { type: 'session.idle', properties: { sessionID: id } } })
+    const stops = () => delivered.filter(payload => payload.hook_event_name === 'Stop')
+    await hooks['chat.message']({ sessionID: 'known', prompt: 'go' })
+    await idle('known')
+    await idle('known')
+    expect.soft(stops()).toHaveLength(1)
+    await hooks['chat.message']({ sessionID: 'known', prompt: 'again' })
+    await idle('known')
+    expect.soft(stops()).toHaveLength(2)
+    await idle('unmatched')
+    await idle('unmatched')
+    expect.soft(stops()).toHaveLength(3)
+    expect(stops().at(-1)).toMatchObject({ session_id: 'unmatched', assistant_response: '' })
+    expect(stops().every(payload => !('timestamp' in payload))).toBe(true)
+    await hooks.event({ event: { type: 'session.status', properties: { sessionID: 'unmatched', status: { type: 'busy' } } } })
+    await idle('unmatched')
+    expect.soft(stops()).toHaveLength(4)
+    // Keep suppression bounded: an evicted identity is unknown, not silently discarded.
+    for (let i = 0; i < 128; i++) await idle(`other-${i}`)
+    const before = stops().length
+    await idle('known')
+    expect(stops()).toHaveLength(before + 1)
+  })
+
   it.each(['none', 'summary'])('保留已有显式 %s 配置，不猜测用户意图', async (toolOutput) => {
     const root = await gitWorkspace()
     const configPath = join(root, 'scry.config.json')
