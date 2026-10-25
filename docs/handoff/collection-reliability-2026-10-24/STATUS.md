@@ -17,8 +17,8 @@
 | D1 | 发现深度之外的子仓库静默缺席 | D1 | 未开始 | | |
 | D2 | 每轮仓库清单与快照状态可见性 | D2 | 未开始 | | |
 | H3 | daemon env 串会话（显式 UPLOAD_ENABLED=0 时会误 ACK） | E1 | 未开始 | | 用户 2026-10-25 已确认 uploader 语义，见 E.md |
-| M2 | commit hook 队头阻塞无死信 | E3 | 未开始 | | 降为低优先级，可放弃 |
+| M2 | commit hook 队头阻塞无死信 | E3 | 未开始 | | 2026-10-25 重新升为必做：新 uploader 在哈希不符、路径不符、源文件缺失时持续返回非 0，recorder 会永久停在该 sequence（`store.ts:515-521`），见 E.md |
 | M3 | ACK 身份绑定 bundle 内容指纹 | E3 | 未开始 | | 降为低优先级（只带来重复校验），可放弃 |
-| M4 | ACK 只代表入队；归档后回源校验阻止发送 | E2 + U1/U2 | 未开始 | | recorder 侧 E2；uploader 侧 U1/U2 不在本仓库 |
-| U3 | uploader 不可重试错误返回 0 | U3 | 未开始 | | uploader 侧，不在本仓库 |
-| U4 | 显式关闭上传无痕迹 | U4 | 未开始 | | uploader 侧，不在本仓库 |
+| M4 | ACK 只代表入队；归档后回源校验阻止发送 | E2 + U1/U2 | 未开始 | | recorder 侧 E2 未开始；uploader 侧 U1/U2 已在 `reliability/uploader` 本地完成（53928688），只按报告审阅，见 [uploader 审阅](reports/uploader-review.md) |
+| U3 | uploader 不可重试错误返回 0 | U3 | 需修改 | [uploader 审阅](reports/uploader-review.md) | 方向通过；上线前有 3 项必改（bundle 清单、升级重放、非默认 dataDir） |
+| U4 | 显式关闭上传无痕迹 | U4 | 需修改 | [uploader 审阅](reports/uploader-review.md) | 语义符合用户确认；同上 3 项必改 |

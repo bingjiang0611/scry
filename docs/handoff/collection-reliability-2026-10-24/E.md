@@ -36,7 +36,7 @@ uploader 不在本仓库，位于团队工作区的 `.claude/hooks/scry_turn_upl
 - `RecordCommittedNotification` 新增 `recordPath`（相对于 dataRoot）和 `sha256`（record 文件内容的哈希），让 commit hook 不必扫描目录就能接管并校验正文。schema 版本递增，保持向后兼容（旧字段不变）。
 - README 写清楚 ACK 的语义：**hook exit 0 表示「已接管完整记录」**。这是 uploader 侧 U1 完成后才成立的约定。在那之前，归档前要先人工确认 uploader 的 outbox 已经覆盖待归档的记录（README 现有归档章节补充这一句）。
 
-**E3（M3、M2，低优先级，可放弃）**：配置增加稳定的 `commitHook.id` 作为 ACK key，与 trust 指纹分离（trust 指纹仍然每次校验，fail closed）；按 sequence 计失败次数，超过阈值进入 recorder 侧死信。执行方评估成本后决定做或放弃，放弃时在 STATUS 写明理由。
+**E3（M3、M2）**：2026-10-25 起 M2 部分改为必做。新 uploader（`reliability/uploader`）把「正文已接管」作为 ACK 前提，哈希不符、路径不符、源文件缺失时会持续返回非 0；recorder 现在遇到非 0 就停在该 sequence，后面的记录全部卡住（`store.ts:515-521`）。至少要做到：按 sequence 计失败次数，超过阈值把该条移入 recorder 侧死信并继续投递后面的记录，doctor 报出「卡在哪个 sequence、失败几次」。稳定 `commitHook.id`（M3）仍可选。原文：配置增加稳定的 `commitHook.id` 作为 ACK key，与 trust 指纹分离（trust 指纹仍然每次校验，fail closed）；按 sequence 计失败次数，超过阈值进入 recorder 侧死信。执行方评估成本后决定做或放弃，放弃时在 STATUS 写明理由。
 
 ### uploader 侧（不在本仓库，需要用户决定由谁、在哪个仓库做）
 
