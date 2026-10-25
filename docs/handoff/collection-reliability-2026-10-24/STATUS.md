@@ -7,11 +7,11 @@
 | # | 问题 | 批次 | 状态 | 报告 | 核验备注 |
 |---|---|---|---|---|---|
 | H1 | 缺开始事件时整轮被当 duplicate 丢弃 | A1 | 已核验 | [A 报告](reports/A.md) | orphan-only 范围接受；V1 误报已修，`7ced5ba` 上 13 个测试失败、修复后 233/233 通过（Linux/Node 22 复跑）；OpenCode idle 去重需 repair |
-| H2 | hook 脚本静默跳过无痕迹；invalid_config 当作禁用 | A2 | 已核验 | [A 报告](reports/A.md) | 快路径无新增进程、始终 exit 0、符号链接保护成立；需 repair；doctor 告警时间窗见 V3（不阻塞）；真实 Provider 待用户验收 |
+| H2 | hook 脚本静默跳过无痕迹；invalid_config 当作禁用 | A2 | 已核验 | [A 报告](reports/A.md) | 快路径无新增进程、始终 exit 0、符号链接保护成立；需 repair；V3 时间分级已核验（7 失败→通过，升级 CLI 即生效）；真实 Provider 在 OpenCode/Qoder/Codex 隔离验收通过（a21110c），OpenCode/Qoder 短轮次 180 秒宽限按现有行为接受 |
 | L2 | 开始/终态 open.json 不 fsync | A3 | 已核验 | [A 报告](reports/A.md) | 只在开始与终态边界加 sync，中间事件不变；每轮 +6 次 fsync 属必要工作；未做断电测试 |
 | H4 | inbox 重放或读取失败即删除 | B1 | 需修改 | [B 报告](reports/B.md) | 证实与修复复跑通过（8 失败→通过）；隔离、5 次上限、不阻塞后续条目成立。sidecar 损坏时 daemon 永不空闲退出（VB1），见核验意见 |
 | M1 | recover 被单个会话打断，投递不执行 | B2 | 已核验 | [B 报告](reports/B.md) | 5 失败→通过；逐会话 try/catch、finally 投递、daemon 日志成立；Linux/Node 22 focused 266/266 |
-| M5 | 回退链路超时与三重处理 | C1 | 未开始 | | |
+| M5 | 回退链路超时与三重处理 | C1 | 未开始 | | 顺带确认无 daemon 时谁触发宽限后的 recover（见 A 报告 V3 核验意见） |
 | L1 | 长路径下快路径失效 | C2 | 未开始 | | |
 | M6 | 子目录启动找不到 hook 脚本 | C3 | 未开始 | | 需用户实测 |
 | D1 | 发现深度之外的子仓库静默缺席 | D1 | 未开始 | | |
