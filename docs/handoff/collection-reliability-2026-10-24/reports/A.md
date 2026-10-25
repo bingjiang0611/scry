@@ -429,3 +429,205 @@ npm run test:unit -- src/core/turn-recorder/recorder-terminal-replay.test.ts src
 接受的取舍：用户中途关掉会话、且这一轮的开始事件恰好也丢了时，唯一的信号是 SessionEnd，现在会被判 duplicate。这种情况需要两个故障同时发生，代价可以接受。
 
 **结论：A1 已核验，批次 A 全部通过。** V3 仍等用户决定。可以开始批次 B。
+
+## V3 修改记录
+
+用户已批准本次策略：hook skip 按最近 24 小时分级。实现/原始验证基线 `e70b27e0`；最终测试提交 `17a5333f`（原本地 `782dd61c`），修复提交 `830b010e`（原本地 `112f9414`）。只改诊断汇总/doctor，不改 shell 快路径、hook 退出码、fsync 或 trust gate。
+
+手验期间远端新增了 E 计划与 B 核验两条纯文档提交。推送前已将本次未推送的三个提交 rebase 到 `25ba1251`，没有改写远端历史；`git diff 112f9414 HEAD -- src` 为空，确认已验证的源码/测试未变。没有实施 E 或修改 B。
+
+- `readHookSkips` 新增 `recentCount`，按当前保留的两代日志中的行时间戳计算，不按 mtime；24 小时边界包含在内。时间无法解析及未来时间均保守计 recent，避免时钟异常把问题隐藏。
+- `count` 仍是保留窗口总数，不是终身计数。`lastAt` 只返回可解析且符合原有安全格式的时间，不导出任意日志内容。
+- doctor：recent > 0 为 `hook.skips=fail`、`status=error`、退出 5；仅旧条目为 warn，不因它改变退出码。没有其他问题时仍 healthy/0；已有 pending 等问题仍按原合同 degraded/5，损坏/未启用配置的退出码也未改。
+- recorder status 和 support-bundle 复用同一汇总，均输出 recentCount；不复制第二套统计逻辑。
+- 不需要 integrations repair。已有 daemon 的 hook 协议未变；诊断要用升级后的 CLI。本次要求的 A 手验另用 `a21110c`，**那个版本没有 V3，不能用它验证新告警策略**。
+
+### 旧实现失败输出
+
+```sh
+npm run test:unit -- src/cli/hook-skip-recency.test.ts
+```
+
+`/tmp/scry-V3-before.log`：7 项失败。固定时钟 `2026-10-25T12:00:00Z`，覆盖 1 小时前、25 小时前、混合、坏时间戳、恰好 24 小时、无历史、旧条目与其他 pending 共存。输出中的关键差异：
+
+```text
+× hook skip severity uses a rolling 24-hour window > 'one hour ago'
+  → expected { count: 1, …(3) } to match object { count: 1, recentCount: 1, …(2) }
+× hook skip severity uses a rolling 24-hour window > '25 hours ago'
+  → expected 5 to be +0 // Object.is equality
+  → expected { schemaVersion: 1, …(16) } to match object { status: 'healthy', …(3) }
+× hook skip severity uses a rolling 24-hour window > 'both old and recent'
+  → expected { count: 2, …(3) } to match object { count: 2, recentCount: 1, …(2) }
+× hook skip severity uses a rolling 24-hour window > does not mask an unrelated pending warning when all skips are old
+  → expected { schemaVersion: 1, …(16) } to match object { status: 'degraded', …(2) }
+Test Files  1 failed (1)
+Tests       7 failed (7)
+```
+
+上面是原输出的字段差异节选；完整本机日志保留在上述路径，未包含 Provider 原文。原有 scry.test.ts 的固定日期样本改用固定 Date 时钟，避免测试随日历过期；没有删除或降低断言。测试提交前 typecheck 通过；全量仅新增 7 项失败，原有 3927 项通过、4 项既有跳过。
+
+### 修复后验证
+
+| 检查 | 结果 | 日志 |
+|---|---|---|
+| focused：hook-skip-recency、hook-diagnostics、scry 三个测试文件 | 55 通过 | `/tmp/scry-V3-focused.log` |
+| `npm run typecheck` | node / web 通过 | `/tmp/scry-V3-typecheck.log` |
+| `npm run build:cli` | 通过；仅本地忽略产物，未安装 | `/tmp/scry-V3-build.log` |
+| 提交前 `npm run test:unit` | 3934 通过、4 项既有跳过；325 文件通过 | `/tmp/scry-V3-unit.log` |
+| `git diff --check` | 通过 | 提交前检查 |
+| 纯文档远端同步后重跑上述三个 focused 文件及 typecheck | 55 通过；node / web 通过；源码与原全量通过版本一致 | `/tmp/scry-V3-after-rebase-focused.log`、`/tmp/scry-V3-after-rebase-typecheck.log` |
+
+环境：macOS arm64、Node v24.18.0、Vitest 3.2.7。所有夹具使用临时 workspace。四个既有跳过仍是 performance-correlation、billing-admin-real、p0-integration、p1-integration；没有新增 skip 或修复无关失败。focused 首次命令多传了不存在的 support-bundle.test.ts，Vitest 实际执行的是表中三个文件；support-bundle 由新测试直接调用真实 collectSupportBundle 验证，未把不存在的文件算作通过。
+
+用户明确批准了本次 V3 / 手验报告的既有大文件提交门禁临时豁免；未改持久 hook 配置或运行时信任校验。
+
+## 手验记录
+
+执行日期：2026-10-25（以下日志时间均为 UTC）。**本节只验证 A 基线，不包含 B 或 V3。** 真实 OpenCode / Qoder / Codex 均已完成 A-1～A-4 的请求；成功收敛后的证据满足记录、fail-open、missing_start orphan 和恢复要求，但 **OpenCode/Qoder 并非终态后立即落盘**，见宽限期说明。V3 仍交审查方核验。
+
+### 身份、隔离与原始命令
+
+- 独立 detached worktree：`/tmp/scry-A-manual.dx5bmD/source`，HEAD `a21110c4fdf5cb8e938eeda24c42c7c7e462f9ba`。
+- 在该 worktree 执行 `npm run build:cli`，退出 0；构建日志 `/tmp/scry-A-manual.dx5bmD/build.log`。依赖复用现有 node_modules 链接，源码/编译产物均来自该 worktree；`git diff a21110c -- src packages` 为空。未调用主工作区含 B/V3 的 CLI。
+- CLI 入口：`/tmp/scry-A-manual.dx5bmD/source/packages/turn-recorder-cli/dist/cli/scry.js`；`--version` 输出 `0.2.51`、退出 0；SHA-256 `5b467ffb79cfc6b2c2cf3dfaa8a442ba0618330eac519108bc51ea7e00b4836b`。
+- Node v24.18.0、macOS arm64；Provider 实际版本 OpenCode 1.18.31、Qoder CLI 1.1.73、Codex CLI 0.164.0。没有安装分支 CLI 到日常环境。
+- RUN=`/tmp/scry-A-manual.dx5bmD`，权限 0700。三个正式临时仓库分别为 `$RUN/opencode-authorized/workspace`、`$RUN/qoder/workspace`、`$RUN/codex/workspace`；每个有独立 HOME、TMPDIR、XDG config/data/state/cache。失败的首次 OpenCode 环境另保留在 `$RUN/opencode`，没有删除或覆盖其证据。
+- 环境显式 allowlist：PATH、USER/LOGNAME/SHELL、LANG/LC_ALL、现有代理变量，以及隔离目录和 `SCRY_RECORDER_TRANSPORT=direct SCRY_AUTO_UPDATE=0 SCRY_NO_UPDATE_CHECK=1`。没有继承 managed recorder 状态；recorder status 均确认 running=false。
+- Qoder 仅复制认证文件、模型和 region 配置；Codex 仅复制认证及选定模型，未复制日常项目 trust。OpenCode 最初配置依赖的两个环境变量缺失；用户随后批准使用 Scry 当前 Profile，按 Scry 的实际登录 shell 取环境路径，仅提取 `OPENCODE_ANTHROPIC_BASE_URL/API_KEY` 到临时环境，没有更换账号或输出密钥。
+- 用户追加授权“你来帮我信任 hook”后，执行方通过 Codex 原生 TUI 的项目信任及 “Trust all and continue” 完成授权。`/hooks` 读回显示 UserPromptSubmit、PreToolUse、PostToolUse、Stop 的 Installed/Active 均为 2/2（包括原生 managed hook），已无待审项目 hook。没有使用 hook-trust bypass 或直接编辑信任记录。主机管理的原生 hook 策略仍存在，没有为隔离而关闭它。
+
+每个临时仓库都执行了以下真实 CLI 命令；init/repair 均退出 0，首次 repair 的 rewritten=[]。下文用变量缩写绝对路径；请求正文通过本地变量/标准输入传递，不在报告中回传。
+
+```sh
+NODE=/Users/baobingjiang/.nvm/versions/node/v24.18.0/bin/node
+CLI=/tmp/scry-A-manual.dx5bmD/source/packages/turn-recorder-cli/dist/cli/scry.js
+# cwd 为各自临时 workspace；进程环境来自上述 allowlist
+git init -q
+"$NODE" "$CLI" init --providers "$PROVIDER"
+"$NODE" "$CLI" integrations repair --yes
+
+# OpenCode：每次 run 都是新会话，没有 --continue / --auto / --pure
+/Users/baobingjiang/.opencode/bin/opencode run --format json "$SCRY_A_PROMPT"
+# Qoder：每次新会话，未跳过权限
+"$NODE" /Users/baobingjiang/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js \
+  -p --output-format json --max-model-request-retries 0 "$SCRY_A_PROMPT"
+# Codex：请求从 stdin 输入；使用已由原生 UI 信任的临时配置
+/Users/baobingjiang/.local/bin/codex exec --json --sandbox read-only -
+
+"$NODE" "$CLI" recorder recover
+"$NODE" "$CLI" turns list
+"$NODE" "$CLI" recorder status
+"$NODE" "$CLI" doctor
+# A-2，绝对路径不受损坏的 .scry/cli-path 影响：
+"$NODE" "$CLI" support-bundle create --out "$PROVIDER_ROOT/logs/support-A.json"
+```
+
+A-2 实际将 cli-path 备份后写为 `/does-not-exist/scry-A`；A-3 使用前文只抑制 UserPromptSubmit 的包装器，恢复后 repair；A-4 备份配置并写入 `{invalid-json\n`，随后恢复并解析确认有效，再发新轮次。所有这些修改都只在临时仓库。
+
+诊断采集脚本为 `$RUN/run-step.py`，实际调用为 `python3 "$RUN/run-step.py" <provider> <标签> snapshot`。它执行上述 CLI、保存每条 stdout/stderr/退出码，再提取指定字段。下面是这些**原始输出的指定字段投影**，不是完整文件阅读或记录正文；没有填猜测值。turnsList.count 是实际 list JSON 数组的长度；invalid_config 下 CLI stdout 为空、stderr 报错，计数为 unavailable/null，绝不当作 0。health 来自当时真实 health.json；缺省 lastError 用 null 表示未出现该字段。hookSkips 的 scope 一直是 retained_log_window、truncated=false；此旧版没有 recentCount。
+
+### 逐项结论与运行偏差
+
+| 场景 | OpenCode | Qoder | Codex |
+|---|---|---|---|
+| A-1 正常采集 | 最初 0/pending=1；宽限后生成 1 条，归属 A1 session | 最初 0/pending=1；宽限后 1 条 | 直接得到 1 条 |
+| A-2 CLI 失效 | Provider 0 / stop；2 条 cli_not_executable | Provider 0 / success；2 条 cli_not_executable | Provider 0 / turn.completed；2 条 cli_not_executable |
+| A-3 缺开始 | record 不新增，orphan/missingStartTerminals 各 +1 | 同左 | 同左 |
+| A-3 同一 Stop 重放 | bridge 退出 0，计数保持 1/1 | 同左 | 同左 |
+| A-4 无效配置 | Provider 0；doctor error/3 | 同左；驱动器误多发一轮，见下文 | 同左；驱动器误多发一轮，见下文 |
+| A-4 真正恢复后 | 宽限后 record 从 1 增为 2 | 宽限后 record 从 1 增为 2 | record 从 1 增为 2 |
+| 保存并移走历史 skip 日志后 | doctor healthy/0 | doctor healthy/0 | doctor healthy/0 |
+
+- 所有正式 Provider 请求均正常终态：OpenCode 的 step_finish.reason=stop；Qoder result.subtype=success、is_error=false、num_turns=1；Codex turn.completed。不以进程退出码单独替代此证据。
+- **宽限期**：该基线 `recorder.ts` 的 `DEFERRED_TERMINAL_GRACE_MS=180_000` 从 deferredTerminalAt 起算。OpenCode/Qoder 本次收到无可归属 provider turn ID/明确时间戳的 Stop，进入现有延迟终态路径。首次 recover/pending 是实际结果，没有隐藏。OpenCode 的 `A1-after-grace` 文件标签起得不准确：当时 startedAt 已过 180 秒，但 deferredTerminalAt 尚未过；它仍是 pending。后来 A-2 的 recover 才提交 A-1，已用 sessionId 对照证明那不是故障轮次生成的 record。A-4 最终也在真实终态宽限过后单独 recover 收敛，没有靠增加测试超时、改生产状态或伪造时间变绿。
+- **首次 OpenCode 失败保留**：缺少认证环境时 Provider exit=1、UnknownError `fetch() URL is invalid`；turns list=0、pendingCount=1、hookSkips.count=0、doctor degraded/5。日志 `$RUN/opencode/logs/A1-*`。随后经用户指定认证来源，在全新 opencode-authorized 仓库验证，没有清除第一次失败。旧失败仓库的 pending 仍保留供审查，不能把它宣称为健康。
+- **驱动器首次失败保留**：invalid_config 时 turns list 实际输出为空并退出 1，驱动器最初却直接 JSON.parse，出现 `JSONDecodeError: Expecting value: line 1 column 1 (char 0)`。当时 shell 组合命令未 fail-fast，导致 Codex/Qoder 各额外执行一次仍处于 invalid_config 的请求，被误标为 `A4-restored-provider.*`。原日志完整保留；这两轮绝不作为恢复成功。修正的是临时采集脚本，读取已保存结果继续诊断，不重放已执行命令；后续组合命令启用 fail-fast，并在发出 `A4-restored-confirmed` 前解析确认恢复后的配置。正式恢复证据只取 confirmed 轮次。故这两个 Provider 的 skip 总数为 6（2 CLI 失效 + 4 无效配置），OpenCode 为 4。
+- 总计 18 次 Provider CLI 调用：17 次正常终态（包括上述额外 2 次无效配置轮次），1 次首次认证配置失败。没有执行超时、自动重发或新增账号；费用以 Provider 账单为准，本次未独立核对结算金额。
+- A-3 三份 orphan 均为 reason=missing_start。payload storage=complete、redaction=disabled、sourceCompleteness=unknown，savedBytes 分别为 OpenCode 383、Qoder 697、Codex 463。这里的完整只指已收到 payload 的保存，不是完整会话证据。重放使用保存的原 payload，三个 bridge 均退出 0，计数未增加；没有重建/伪造 record，也未输出 payload。
+- 最终 turns list 的两条记录均按 sessionId 匹配到各 Provider 的 A1 和 A4-restored-confirmed 输出；A-2、A-3、无效配置轮次没有混成正常记录。对照结果保存在各自 `logs/final-record-attribution.json`。
+
+### 每一步的诊断原始字段
+
+日志中 A2/A3/A4 对应前文 A-2/A-3/A-4。after-terminal-grace 为按终态时间确认后的收敛检查；log-archived 为把 skip 日志移到 evidence 目录之后的健康检查。原先的 skip 条目并未删除，更没有删除 records 来清告警。
+
+#### OpenCode 1.18.31
+
+以下标签对应 `/tmp/scry-A-manual.dx5bmD/opencode-authorized/logs/<标签>-snapshot.json`，其同名前缀的各 CLI `.stdout/.stderr/.meta.json` 是原始命令证据。
+
+```jsonl
+{"step":"A1","turnsList":{"exit":0,"count":0},"health":{"droppedEvents":0,"orphanEvents":0,"missingStartTerminals":0,"pendingCount":1,"recoveredRecords":0,"lastError":null},"recover":{"exit":0,"recovered":0,"pending":1,"expired":0},"doctor":{"status":"degraded","healthy":false,"hookSkips":{"count":0,"lastAt":null,"scope":"retained_log_window","truncated":false},"exit":5,"hook.skips":"pass"}}
+{"step":"A1-after-grace","turnsList":{"exit":0,"count":0},"health":{"droppedEvents":0,"orphanEvents":0,"missingStartTerminals":0,"pendingCount":1,"recoveredRecords":0,"lastError":null},"recover":{"exit":0,"recovered":0,"pending":1,"expired":0},"doctor":{"status":"degraded","healthy":false,"hookSkips":{"count":0,"lastAt":null,"scope":"retained_log_window","truncated":false},"exit":5,"hook.skips":"pass"}}
+{"step":"A2","turnsList":{"exit":0,"count":1},"health":{"droppedEvents":0,"orphanEvents":0,"missingStartTerminals":0,"pendingCount":0,"recoveredRecords":1,"lastError":null},"recover":{"exit":0,"recovered":1,"pending":0,"expired":0},"doctor":{"status":"error","healthy":false,"hookSkips":{"count":2,"lastAt":"2026-10-25T06:40:22Z","scope":"retained_log_window","truncated":false},"exit":5,"hook.skips":"fail"}}
+{"step":"A3","turnsList":{"exit":0,"count":1},"health":{"droppedEvents":0,"orphanEvents":1,"missingStartTerminals":1,"pendingCount":0,"recoveredRecords":1,"lastError":{"at":"2026-10-25T06:41:23.337Z","message":"orphan recorder event: Stop (missing_start)"}},"recover":{"exit":0,"recovered":0,"pending":0,"expired":0},"doctor":{"status":"error","healthy":false,"hookSkips":{"count":2,"lastAt":"2026-10-25T06:40:22Z","scope":"retained_log_window","truncated":false},"exit":5,"hook.skips":"fail"}}
+{"step":"A4-invalid","turnsList":{"exit":1,"count":null,"stderr":"scry: recorder storage unavailable: invalid_config (Expected property name or '}' in JSON at position 1 (line 1 column 2))\n"},"health":{"droppedEvents":0,"orphanEvents":1,"missingStartTerminals":1,"pendingCount":0,"recoveredRecords":1,"lastError":{"at":"2026-10-25T06:41:23.337Z","message":"orphan recorder event: Stop (missing_start)"}},"recover":{"exit":0,"recovered":0,"pending":0,"expired":0},"doctor":{"status":"error","healthy":false,"hookSkips":{"count":4,"lastAt":"2026-10-25T06:42:06.178Z","scope":"retained_log_window","truncated":false},"exit":3,"hook.skips":null}}
+{"step":"A4-restored-confirmed","turnsList":{"exit":0,"count":1},"health":{"droppedEvents":0,"orphanEvents":1,"missingStartTerminals":1,"pendingCount":1,"recoveredRecords":1,"lastError":null},"recover":{"exit":0,"recovered":0,"pending":1,"expired":0},"doctor":{"status":"error","healthy":false,"hookSkips":{"count":4,"lastAt":"2026-10-25T06:42:06.178Z","scope":"retained_log_window","truncated":false},"exit":5,"hook.skips":"fail"}}
+{"step":"A4-after-terminal-grace","turnsList":{"exit":0,"count":2},"health":{"droppedEvents":0,"orphanEvents":1,"missingStartTerminals":1,"pendingCount":0,"recoveredRecords":2,"lastError":null},"recover":{"exit":0,"recovered":1,"pending":0,"expired":0},"doctor":{"status":"error","healthy":false,"hookSkips":{"count":4,"lastAt":"2026-10-25T06:42:06.178Z","scope":"retained_log_window","truncated":false},"exit":5,"hook.skips":"fail"}}
+{"step":"A4-log-archived","turnsList":{"exit":0,"count":2},"health":{"droppedEvents":0,"orphanEvents":1,"missingStartTerminals":1,"pendingCount":0,"recoveredRecords":2,"lastError":null},"recover":{"exit":0,"recovered":0,"pending":0,"expired":0},"doctor":{"status":"healthy","healthy":true,"hookSkips":{"count":0,"lastAt":null,"scope":"retained_log_window","truncated":false},"exit":0,"hook.skips":"pass"}}
+```
+
+`hook-skip.log` 原文（A-2 的前两行在 A-3 不变；其余为 A-4 新增；清告警前原样保存到 `logs/preserved-hook-skip.log`）：
+
+```text
+2026-10-25T06:40:19Z	opencode	UserPromptSubmit	cli_not_executable	0
+2026-10-25T06:40:22Z	opencode	Stop	cli_not_executable	0
+2026-10-25T06:42:02.682Z	opencode	UserPromptSubmit	invalid_config	0
+2026-10-25T06:42:06.178Z	opencode	Stop	invalid_config	0
+```
+
+#### Qoder 1.1.73
+
+以下标签对应 `/tmp/scry-A-manual.dx5bmD/qoder/logs/<标签>-snapshot.json`，其同名前缀的各 CLI `.stdout/.stderr/.meta.json` 是原始命令证据。
+
+```jsonl
+{"step":"A1","turnsList":{"exit":0,"count":0},"health":{"droppedEvents":0,"orphanEvents":0,"missingStartTerminals":0,"pendingCount":1,"lastError":null},"recover":{"exit":0,"recovered":0,"pending":1,"expired":0},"doctor":{"status":"degraded","healthy":false,"hookSkips":{"count":0,"lastAt":null,"scope":"retained_log_window","truncated":false},"exit":5,"hook.skips":"pass"}}
+{"step":"A1-after-grace","turnsList":{"exit":0,"count":1},"health":{"droppedEvents":0,"orphanEvents":0,"missingStartTerminals":0,"pendingCount":0,"recoveredRecords":1,"lastError":null},"recover":{"exit":0,"recovered":1,"pending":0,"expired":0},"doctor":{"status":"healthy","healthy":true,"hookSkips":{"count":0,"lastAt":null,"scope":"retained_log_window","truncated":false},"exit":0,"hook.skips":"pass"}}
+{"step":"A2","turnsList":{"exit":0,"count":1},"health":{"droppedEvents":0,"orphanEvents":0,"missingStartTerminals":0,"pendingCount":0,"recoveredRecords":1,"lastError":null},"recover":{"exit":0,"recovered":0,"pending":0,"expired":0},"doctor":{"status":"error","healthy":false,"hookSkips":{"count":2,"lastAt":"2026-10-25T06:29:23Z","scope":"retained_log_window","truncated":false},"exit":5,"hook.skips":"fail"}}
+{"step":"A3","turnsList":{"exit":0,"count":1},"health":{"droppedEvents":0,"orphanEvents":1,"missingStartTerminals":1,"pendingCount":0,"recoveredRecords":1,"lastError":{"at":"2026-10-25T06:30:40.059Z","message":"orphan recorder event: Stop (missing_start)"}},"recover":{"exit":0,"recovered":0,"pending":0,"expired":0},"doctor":{"status":"error","healthy":false,"hookSkips":{"count":2,"lastAt":"2026-10-25T06:29:23Z","scope":"retained_log_window","truncated":false},"exit":5,"hook.skips":"fail"}}
+{"step":"A4-invalid","turnsList":{"exit":1,"count":null,"stderr":"scry: recorder storage unavailable: invalid_config (Expected property name or '}' in JSON at position 1 (line 1 column 2))\n"},"health":{"droppedEvents":0,"orphanEvents":1,"missingStartTerminals":1,"pendingCount":0,"recoveredRecords":1,"lastError":{"at":"2026-10-25T06:30:40.059Z","message":"orphan recorder event: Stop (missing_start)"}},"recover":{"exit":0,"recovered":0,"pending":0,"expired":0},"doctor":{"status":"error","healthy":false,"hookSkips":{"count":6,"lastAt":"2026-10-25T06:38:35.228Z","scope":"retained_log_window","truncated":false},"exit":3,"hook.skips":null}}
+{"step":"A4-restored-confirmed","turnsList":{"exit":0,"count":1},"health":{"droppedEvents":0,"orphanEvents":1,"missingStartTerminals":1,"pendingCount":1,"recoveredRecords":1,"lastError":null},"recover":{"exit":0,"recovered":0,"pending":1,"expired":0},"doctor":{"status":"error","healthy":false,"hookSkips":{"count":6,"lastAt":"2026-10-25T06:38:35.228Z","scope":"retained_log_window","truncated":false},"exit":5,"hook.skips":"fail"}}
+{"step":"A4-after-terminal-grace","turnsList":{"exit":0,"count":2},"health":{"droppedEvents":0,"orphanEvents":1,"missingStartTerminals":1,"pendingCount":0,"recoveredRecords":2,"lastError":null},"recover":{"exit":0,"recovered":1,"pending":0,"expired":0},"doctor":{"status":"error","healthy":false,"hookSkips":{"count":6,"lastAt":"2026-10-25T06:38:35.228Z","scope":"retained_log_window","truncated":false},"exit":5,"hook.skips":"fail"}}
+{"step":"A4-log-archived","turnsList":{"exit":0,"count":2},"health":{"droppedEvents":0,"orphanEvents":1,"missingStartTerminals":1,"pendingCount":0,"recoveredRecords":2,"lastError":null},"recover":{"exit":0,"recovered":0,"pending":0,"expired":0},"doctor":{"status":"healthy","healthy":true,"hookSkips":{"count":0,"lastAt":null,"scope":"retained_log_window","truncated":false},"exit":0,"hook.skips":"pass"}}
+```
+
+`hook-skip.log` 原文（A-2 的前两行在 A-3 不变；其余为 A-4 新增；清告警前原样保存到 `logs/preserved-hook-skip.log`）：
+
+```text
+2026-10-25T06:29:17Z	qoder	UserPromptSubmit	cli_not_executable	0
+2026-10-25T06:29:23Z	qoder	Stop	cli_not_executable	0
+2026-10-25T06:37:10.464Z	qoder	UserPromptSubmit	invalid_config	0
+2026-10-25T06:37:16.048Z	qoder	Stop	invalid_config	0
+2026-10-25T06:38:30.372Z	qoder	UserPromptSubmit	invalid_config	0
+2026-10-25T06:38:35.228Z	qoder	Stop	invalid_config	0
+```
+
+#### Codex 0.164.0
+
+以下标签对应 `/tmp/scry-A-manual.dx5bmD/codex/logs/<标签>-snapshot.json`，其同名前缀的各 CLI `.stdout/.stderr/.meta.json` 是原始命令证据。
+
+```jsonl
+{"step":"A1","turnsList":{"exit":0,"count":1},"health":{"droppedEvents":0,"orphanEvents":0,"missingStartTerminals":0,"pendingCount":0,"lastError":null},"recover":{"exit":0,"recovered":0,"pending":0,"expired":0},"doctor":{"status":"healthy","healthy":true,"hookSkips":{"count":0,"lastAt":null,"scope":"retained_log_window","truncated":false},"exit":0,"hook.skips":"pass"}}
+{"step":"A2","turnsList":{"exit":0,"count":1},"health":{"droppedEvents":0,"orphanEvents":0,"missingStartTerminals":0,"pendingCount":0,"recoveredRecords":0,"lastError":null},"recover":{"exit":0,"recovered":0,"pending":0,"expired":0},"doctor":{"status":"error","healthy":false,"hookSkips":{"count":2,"lastAt":"2026-10-25T06:29:03Z","scope":"retained_log_window","truncated":false},"exit":5,"hook.skips":"fail"}}
+{"step":"A3","turnsList":{"exit":0,"count":1},"health":{"droppedEvents":0,"orphanEvents":1,"missingStartTerminals":1,"pendingCount":0,"recoveredRecords":0,"lastError":{"at":"2026-10-25T06:30:20.616Z","message":"orphan recorder event: Stop (missing_start)"}},"recover":{"exit":0,"recovered":0,"pending":0,"expired":0},"doctor":{"status":"error","healthy":false,"hookSkips":{"count":2,"lastAt":"2026-10-25T06:29:03Z","scope":"retained_log_window","truncated":false},"exit":5,"hook.skips":"fail"}}
+{"step":"A4-invalid","turnsList":{"exit":1,"count":null,"stderr":"scry: recorder storage unavailable: invalid_config (Expected property name or '}' in JSON at position 1 (line 1 column 2))\n"},"health":{"droppedEvents":0,"orphanEvents":1,"missingStartTerminals":1,"pendingCount":0,"recoveredRecords":0,"lastError":{"at":"2026-10-25T06:30:20.616Z","message":"orphan recorder event: Stop (missing_start)"}},"recover":{"exit":0,"recovered":0,"pending":0,"expired":0},"doctor":{"status":"error","healthy":false,"hookSkips":{"count":6,"lastAt":"2026-10-25T06:38:15.079Z","scope":"retained_log_window","truncated":false},"exit":3,"hook.skips":null}}
+{"step":"A4-restored-confirmed","turnsList":{"exit":0,"count":2},"health":{"droppedEvents":0,"orphanEvents":1,"missingStartTerminals":1,"pendingCount":0,"recoveredRecords":0,"lastError":null},"recover":{"exit":0,"recovered":0,"pending":0,"expired":0},"doctor":{"status":"error","healthy":false,"hookSkips":{"count":6,"lastAt":"2026-10-25T06:38:15.079Z","scope":"retained_log_window","truncated":false},"exit":5,"hook.skips":"fail"}}
+{"step":"A4-log-archived","turnsList":{"exit":0,"count":2},"health":{"droppedEvents":0,"orphanEvents":1,"missingStartTerminals":1,"pendingCount":0,"recoveredRecords":0,"lastError":null},"recover":{"exit":0,"recovered":0,"pending":0,"expired":0},"doctor":{"status":"healthy","healthy":true,"hookSkips":{"count":0,"lastAt":null,"scope":"retained_log_window","truncated":false},"exit":0,"hook.skips":"pass"}}
+```
+
+`hook-skip.log` 原文（A-2 的前两行在 A-3 不变；其余为 A-4 新增；清告警前原样保存到 `logs/preserved-hook-skip.log`）：
+
+```text
+2026-10-25T06:29:00Z	codex	UserPromptSubmit	cli_not_executable	0
+2026-10-25T06:29:03Z	codex	Stop	cli_not_executable	0
+2026-10-25T06:36:51.766Z	codex	UserPromptSubmit	invalid_config	0
+2026-10-25T06:36:55.061Z	codex	Stop	invalid_config	0
+2026-10-25T06:38:11.324Z	codex	UserPromptSubmit	invalid_config	0
+2026-10-25T06:38:15.079Z	codex	Stop	invalid_config	0
+```
+
+### 收尾、限制与留给用户决定的事
+
+- 三个正式仓库最终各 2 条 record、1 个 orphan，droppedEvents=0、orphanEvents=1、missingStartTerminals=1、pendingCount=0；doctor healthy、退出 0。旧 skip 日志已原样移至各自 logs/preserved-hook-skip.log，原始错误、失败请求和字段投影都还在 RUN 下。
+- 临时 Codex app-server 使用其原生 daemon stop 停止（status=stopped）；随后对仍存活的测试 TUI 和 pid-update-loop，逐 PID 重验 executable 与隔离 HOME 后发送 SIGTERM。最终查询确认本次三个 Provider 无存活进程，没有模糊 pkill，也没有停止日常实例。
+- 临时认证副本已清理：Codex auth.json、Qoder .auth 目录、两份 OpenCode 临时 env 中的认证变量。全局 Provider 配置/认证未修改；workspace、原始本地日志、独立 worktree 保留供核验。原始 Provider stdout/transcript 可能含内容，**不上传、不纳入 Git**；报告只有必要元数据。
+- 本次是三种原生 CLI 的真实非交互轮次验收，Codex 信任走真实 TUI；不是 mock、不是 Scry App/SDK 验收，也不是 daemon curl 快路径、实际工具调用或掉电测试。a21110c 的结果不能证明 B/V3 的真实 Provider 表现；V3 的时间分级由独立受控回归验证。
+- **留给用户决定的事**：是否接受 A-1 在 OpenCode/Qoder 上现有的 180 秒终态宽限及随后 recover 才落盘？若标准要求终态后第一次 recover 就有 record，本次这条即时标准未通过，应另列修复，执行方没有借手验扩大生产改动。其余已授权场景已有上述结果；本轮不进入 C 或后续批次。
