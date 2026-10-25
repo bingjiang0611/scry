@@ -1,0 +1,281 @@
+/* Session transcript and fixed composer */
+.chat { padding-block: 18px 16px; }
+
+/* 选中的历史会话读不到证据：这是一个明确的“证据不可用”状态，不是新会话空态。 */
+.chat-session-evidence-gap {
+  min-height: 100%;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 7px;
+  padding: 24px;
+  text-align: center;
+}
+
+.chat-session-evidence-gap b {
+  color: var(--fg);
+  font: 620 14px/1.4 var(--font-ui);
+}
+
+.chat-session-evidence-gap span {
+  max-width: 520px;
+  color: var(--dim2);
+  font: 12.5px/1.6 var(--font-ui);
+}
+
+.turn {
+  max-width: 880px;
+  margin-bottom: 30px;
+  padding-inline: 24px;
+}
+
+.turn + .turn {
+  padding-top: 28px;
+  border-top: 1px solid var(--border3);
+}
+
+.turn-assistant {
+  padding-left: 14px;
+  border-left: 1px solid var(--border);
+}
+
+.turn.turn-jump-target {
+  background: var(--selected-soft);
+  box-shadow: inset 2px 0 0 var(--selected);
+}
+
+.turn.turn-jump-target .turn-assistant { border-left-color: var(--selected); }
+
+.bubble-user {
+  max-width: min(76%, 720px);
+  border-color: var(--border2);
+  border-radius: var(--r-md);
+  background: var(--panel2);
+}
+
+.who .av {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.model-text { max-width: 72ch; }
+
+.files-summary,
+.turn-hooks-summary,
+.tool-card,
+.skillinject,
+.turn-footer {
+  border-color: var(--border);
+}
+
+.tool-card.selected {
+  background: var(--selected-soft);
+  box-shadow: inset 2px 0 0 var(--selected);
+}
+
+.composer {
+  max-width: 880px;
+  padding-bottom: 14px;
+}
+
+.composer-shell {
+  border-color: var(--border2);
+  background: var(--panel2);
+}
+
+.composer-shell:focus-within {
+  border-color: var(--selected-line);
+  box-shadow: 0 0 0 1px var(--selected-soft);
+}
+
+/* Overview evidence dossier */
+.right-panel-slot,
+.panel {
+  background: var(--overview-surface);
+}
+
+.right-panel-slot { border-left: 1px solid var(--border); }
+
+.ov-topbar {
+  padding: 0 12px;
+  background: var(--overview-surface);
+}
+
+.panel-tabs {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.panel-tabs button {
+  min-width: 0;
+  height: 46px;
+  padding-inline: 4px;
+}
+
+.ctx-gauge {
+  padding: 16px 14px;
+  background: var(--surface-faint);
+}
+
+.panel .verdict-card {
+  border-bottom-color: var(--border);
+}
+
+.panel .verdict-right {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.panel .verdict-pillar {
+  min-height: 86px;
+  padding: 13px 14px;
+}
+
+.metric-grid,
+.billing-grid {
+  gap: 1px;
+  background: var(--border);
+}
+
+.panel-section {
+  padding: 14px 12px;
+  border-bottom-color: var(--border);
+}
+
+.panel-section h4 {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.overview-data-tabs {
+  gap: 0;
+  padding: 0 12px;
+  background: var(--overview-surface);
+}
+
+.overview-data-tabs button {
+  height: 42px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+
+.overview-data-tabs button.active {
+  border-bottom-color: var(--selected);
+  background: transparent;
+  color: var(--fg);
+}
+
+.turn-call-row:focus-visible,
+button.turn-call-open:focus-visible,
+button.turn-id.turn-call-open:hover,
+button.turn-id.turn-call-open:focus-visible {
+  outline-color: var(--selected);
+  border-color: var(--selected-line);
+}
+
+/* Graph and segment ledgers */
+.turn-head {
+  border-top: 1px solid var(--border);
+  border-bottom-color: var(--border);
+  background: var(--panel);
+}
+
+.turn-head .num { color: var(--dim2); }
+
+.gline {
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+}
+
+.gline.selected {
+  border-color: var(--selected-line);
+  background: var(--selected-soft);
+  box-shadow: inset 2px 0 0 var(--selected);
+}
+
+.gpane { background: var(--overview-surface); }
+.gp-h { border-bottom-color: var(--border); }
+.gp-h .breadcrumb b { color: var(--selected); }
+
+.seg-note {
+  background: var(--accent-soft);
+  border-bottom-color: var(--accent-line);
+  color: var(--dim);
+}
+
+.seg-ribbon { padding-top: 30px; }
+.seg-ribbon h2 { letter-spacing: -0.025em; }
+
+.seg-compare,
+.seg-card,
+.seg-bar {
+  border-color: var(--border);
+  border-radius: var(--r-sm);
+}
+
+.seg-compare { background: var(--border); }
+.seg-card { background: var(--panel); }
+.seg-r { background: var(--panel2); }
+.seg-card .val.accent { color: var(--accent); }
+
+/* Skills and MCP remain operational ledgers, not a card wall. */
+.modal {
+  border-color: var(--border2);
+  border-radius: var(--r-lg);
+  background: var(--panel);
+}
+
+.modal-head {
+  min-height: 54px;
+  border-bottom-color: var(--border);
+}
+
+.modal-search {
+  border-color: var(--border);
+  background: var(--panel2);
+}
+
+.skill-row,
+.mcp-row {
+  border-radius: 0;
+  border-bottom-color: var(--border);
+  background: transparent;
+}
+
+.skill-row:hover,
+.mcp-row:hover { background: var(--surface-hover); }
+
+.switch input:checked + .slider {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.switch input:checked + .slider::before { background: var(--accent); }
+.skill-switch:has(input:checked) .skill-switch-state { color: var(--accent); }
+
+@container main-pane (max-width: 700px) {
+  .a-hero {
+    grid-template-columns: 1fr;
+    align-items: start;
+    gap: 22px;
+  }
+
+  .a-hero-reading {
+    justify-items: start;
+    text-align: left;
+  }
+
+}
+
+/* 窄主区：卡片矩阵收成一列，「重新扫描」只留图标（可访问名称靠 aria-label）。 */
+@container main-pane (max-width: 640px) {
+  .welcome-provider-grid { grid-template-columns: minmax(0, 1fr); }
+  .welcome-profile-list { grid-template-columns: minmax(0, 1fr); }
+
+  .welcome-rescan > span { display: none; }
+}
+
+@container main-pane (max-width: 520px) {
+  .welcome-heading h1 { font-size: 24px; }
+}

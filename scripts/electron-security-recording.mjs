@@ -4,8 +4,8 @@ export async function exerciseRecording(smokeContext) {
   const { evaluate, initialTargets, page, port, waitForTarget } = smokeContext
   const recordingSmoke = await evaluate(`(async () => {
     const root = () => document.querySelector('[data-session-surface-current="true"]')
-    const query = (selector) => selector.startsWith('button.sb-sess') || selector.includes('title="右侧工作区"')
-      ? document.querySelector(selector) : root()?.querySelector(selector)
+    const query = (selector) => selector.startsWith('button.sb-sess') || selector.includes('title="右侧工作区"') || selector.includes('[data-recording-id=')
+      ? document.querySelector(selector.startsWith('[data-recording-id=') ? '.modal-overlay ' + selector : selector) : root()?.querySelector(selector)
     const queryAll = (selector) => root()?.querySelectorAll(selector) ?? []
     const waitFor = async (predicate) => {
       const deadline = Date.now() + 8_000

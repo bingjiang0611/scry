@@ -1,6 +1,6 @@
 import type { ScRemote, ScRepository } from '@shared/source-control'
 import { sourceControlTransportCopy as copy } from '../constants/source-control-copy'
-import { ModalFrame } from './Modals'
+import { ModalFrame, requestModalClose } from './Modals'
 
 export function SourceControlTransportDialog({
   repo, action, remote, destination, disabled, blocker, labelledBy,
@@ -27,7 +27,7 @@ export function SourceControlTransportDialog({
     <p>{copy.detail(action, repo)}</p>
     {blocker && <p className="sc-notice" role="alert">{blocker}</p>}
     {!repo.remotes.length && <p className="sc-notice">{copy.missingRemote}</p>}
-    <div className="sc-actions"><button onClick={onClose}>{copy.cancel}</button>
+    <div className="sc-actions"><button onClick={() => requestModalClose()}>{copy.cancel}</button>
       <button className="sc-primary" disabled={disabled || !!blocker || !remote || (action === 'push' && (!repo.branch || !repo.head))}
         onClick={onConfirm}>{copy.confirm(action, repo.branch)}</button>
     </div>

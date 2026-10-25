@@ -1,5 +1,5 @@
 import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'react'
-import { flushSync } from 'react-dom'
+import { runStructuralTransition } from './structural-motion'
 import { workspaceRunSession } from './workspace-drafts'
 import type { ProviderContext, ProviderId, SessionProviderId } from '@shared/provider'
 import type { ProjectMeta, SessionMeta, SessionRef } from './env'
@@ -96,7 +96,7 @@ export function createSessionActions({
     const pendingDraftKey = sessionComposerDraftKey({ ...draftContextRef.current, sessionId: null })
     // Reopen this workspace's unsent draft without discarding text or attachments.
     // Queued send intents are still reset below; restoring a draft never sends it.
-    flushSync(() => {
+    runStructuralTransition('session', () => {
       setSessionLoading(true)
       setSessionEvidenceGap(null)
       selectSessionId(null)
@@ -189,6 +189,7 @@ export function createSessionActions({
     const cachedPage = switchingSession ? sessionSnapshots.get(historyContext) : undefined
     setSessionLoading(switchingSession || session.turns.length === 0)
     setSessionCacheVisible(Boolean(cachedPage?.turns.length))
+    setView('chat')
     if (switchingSession) {
       if (cachedPage) session.replaceWithParsedSession(sessionId, cachedPage.turns, { activeRun: null, page: cachedPage, source: 'cache' })
       else session.clearTurns()
@@ -196,7 +197,6 @@ export function createSessionActions({
     resetPromptQueueControl()
     requestChatBottom(true)
     selectSessionId(sessionId)
-    setView('chat')
     setCwd(projectCwd || null)
     integrations.setSelectedId(agentProfileId ?? providerId)
     try {

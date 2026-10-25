@@ -1,0 +1,379 @@
+/* Stable workbench composer: one quiet frame, no floating-card treatment. */
+.composer {
+  max-width: 960px;
+  margin: 0 auto;
+  /* 内边距跟主区（container）走而不是跟 viewport 走：拖宽右栏时窗口没变，
+     3vw 会继续留 32px 白边，把本来就不够的输入区再挤窄。 */
+  padding: 8px clamp(12px, 3cqi, 32px) 10px;
+  border-top: 0;
+  background: transparent;
+}
+
+.composer-shell {
+  position: relative;
+  padding: 9px 11px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--panel);
+  box-shadow: none;
+}
+
+/* 运行状态条：busy 时把「运行中」从 placeholder 提升为显式状态。
+   时长按当前 run 首个事件时间戳（TraceEvent.ts）本地计时，runId 为真实 ActiveRun.runId。 */
+.run-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 30px;
+  padding: 0 2px 8px;
+  margin-bottom: 1px;
+  border-bottom: 1px solid var(--border);
+}
+
+.run-status-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.run-status-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--selected);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--selected) 14%, transparent);
+}
+
+.run-status-left b {
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+.run-status-hint {
+  font-size: 12px;
+  color: var(--dim2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.run-status-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.run-status-elapsed {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+}
+
+.run-status-stop {
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+/* 停止阶段是请求进度而不是终止证据：升级中用 warn，Provider 未确认终止用 bad，
+   并且允许提示换行完整显示，避免把「可能仍在后台运行」这类关键限定截断。 */
+.run-status[data-stop-tone='stopping'] .run-status-dot,
+.run-status[data-stop-tone='unsettled'] .run-status-dot {
+  animation: none;
+}
+
+.run-status[data-stop-tone='stopping'] .run-status-dot {
+  background: var(--warn);
+}
+
+.run-status[data-stop-tone='unsettled'] .run-status-dot {
+  background: var(--bad);
+}
+
+.run-status[data-stop-tone='unsettled'] .run-status-left b {
+  color: var(--bad);
+}
+
+.run-status[data-stop-tone='stopping'] .run-status-hint,
+.run-status[data-stop-tone='unsettled'] .run-status-hint {
+  white-space: normal;
+  overflow: visible;
+}
+
+/* 运行配置分组：会话环境（目录/Provider）与运行配置（模型/强度/权限）之间 */
+.run-group-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 3px;
+  background: var(--border2);
+  flex: none;
+  align-self: center;
+}
+
+.composer-top {
+  margin-bottom: 2px;
+}
+
+.composer-shell .wdbtn {
+  min-height: 40px;
+  padding: 3px 5px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--dim);
+  font-size: 12.5px;
+}
+
+.composer-shell .wdbtn:hover {
+  background: var(--panel3);
+  color: var(--fg);
+}
+
+.composer .input,
+.composer textarea {
+  min-height: 56px;
+  padding: 9px 6px 7px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 14px;
+  line-height: 1.55;
+  resize: none;
+}
+
+.composer .input:focus,
+.composer textarea:focus {
+  border: 0;
+  box-shadow: none;
+}
+
+.composer-status {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0 4px 3px;
+  padding: 7px 9px;
+  border-radius: var(--r-sm);
+  color: var(--dim);
+  font: 11.5px/1.45 var(--font-ui);
+}
+
+.composer-status .ico {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin-top: 1px;
+}
+
+.composer-status span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.composer-retry-detection {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 2px 6px;
+  border: 1px solid currentColor;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.composer-retry-detection:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.composer-retry-detection:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+.composer-status.is-blocked {
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+  color: var(--warn);
+}
+
+.composer-status.is-error {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
+.composer-bottom {
+  min-width: 0;
+  flex-wrap: nowrap;
+  /* 运行配置换行成多排时，发送/停止跟最后一排对齐，而不是悬在两排中间 */
+  align-items: flex-end;
+  gap: 6px;
+  margin-top: 3px;
+}
+
+.composer-controls {
+  min-width: 0;
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 3px;
+}
+
+.run-control-select {
+  position: relative;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  color: var(--dim);
+  font: 12px/1 var(--font-ui);
+}
+
+.permission-mode-trigger {
+  min-width: 0;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.rc-prefix {
+  color: var(--dim3);
+  white-space: nowrap;
+}
+
+.run-control-select .rc-value {
+  min-width: 0;
+  max-width: min(210px, 34cqi);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.run-control-select .rc-icon,
+.run-control-select .chev {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+
+.run-control-select .chev {
+  color: var(--dim2);
+}
+
+.permission-mode-trigger:hover,
+.permission-mode-trigger:focus-visible,
+.run-control-select:has(.permission-mode-trigger[aria-expanded='true']) .permission-mode-trigger {
+  border-color: var(--border2);
+  background: var(--panel3);
+  color: var(--fg);
+}
+
+.run-control-select.warning,
+.run-control-select.danger {
+  color: var(--warn);
+}
+
+.run-control-select.danger .permission-mode-trigger {
+  border-color: color-mix(in srgb, var(--bad) 38%, transparent);
+  background: color-mix(in srgb, var(--bad) 8%, transparent);
+  color: var(--bad);
+}
+
+.run-control-select.danger .permission-mode-trigger:hover,
+.run-control-select.danger .permission-mode-trigger:focus-visible,
+.run-control-select.danger:has(.permission-mode-trigger[aria-expanded='true']) .permission-mode-trigger {
+  border-color: color-mix(in srgb, var(--bad) 52%, transparent);
+  background: color-mix(in srgb, var(--bad) 14%, transparent);
+  color: var(--bad);
+}
+
+.permission-mode-trigger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.clibtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.composer .send {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  justify-content: center;
+  padding: 0;
+  border-radius: var(--r-md);
+}
+
+/* 发送键保持图标按钮（session-evidence 皮肤把它做成 38px 圆形）：
+   文字放不进圆里会竖排折行，所以「加入队列 / 发送」只走 aria-label + title，
+   运行中的排队语义由上方 .run-status 承担。 */
+.composer .send-label {
+  display: none;
+}
+
+.composer .stop {
+  height: 40px;
+  flex: none;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+.unbound-empty {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 32px;
+  color: var(--dim);
+  text-align: center;
+}
+
+.unbound-empty .unbound-icon {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border2);
+  border-radius: 10px;
+  background: var(--panel2);
+}
+
+.unbound-empty .unbound-icon .ico {
+  width: 17px;
+  height: 17px;
+}
+
+.unbound-empty strong {
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.unbound-empty > span:last-child {
+  max-width: 360px;
+  font-size: 12px;
+  line-height: 1.5;
+}

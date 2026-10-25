@@ -1,7 +1,7 @@
 import { useId, useRef } from 'react'
 import type { ScRepository } from '@shared/source-control'
 import { commitBlocker, commitFiles, isStaged } from '../source-control-workflow'
-import { ModalFrame } from './Modals'
+import { ModalFrame, requestModalClose } from './Modals'
 
 export function SourceControlCommitDialog({ repo, selected, message, messageHead, onSelect, onMessage, onClose, onCommit }: {
   repo: ScRepository
@@ -41,7 +41,7 @@ export function SourceControlCommitDialog({ repo, selected, message, messageHead
       {blocker && <p className="sc-notice" role="alert">{blocker}</p>}
       <p className="sc-muted">目的地：本地 {repo.branch ?? 'Detached HEAD'}。已有暂存内容不会被重新整文件暂存。</p>
       <div className="sc-actions">
-        <button onClick={onClose}>取消</button>
+        <button onClick={() => requestModalClose()}>取消</button>
         <button className="sc-primary" disabled={!!blocker || !files.length || !message.trim()} onClick={onCommit}>
           确认提交 {files.length} 个文件
         </button>

@@ -1,0 +1,122 @@
+/* MCP Trust：mcpguard 报告只读展示 */
+.mcp-trust-section {
+  background: var(--panel);
+}
+.mcp-trust-actions {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 10px;
+}
+.mcp-trust-error {
+  margin: 8px 0;
+  padding: 7px 8px;
+  border: 1px solid rgba(255, 100, 113, 0.28);
+  border-radius: 6px;
+  color: var(--bad);
+  background: rgba(255, 100, 113, 0.08);
+  font: 11px/1.45 var(--font-mono);
+}
+.mcp-auth-banner {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 5px 0 8px;
+  padding: 7px 8px;
+  border: 1px solid rgba(246, 197, 96, 0.26);
+  border-radius: 6px;
+  color: var(--warn);
+  background: rgba(246, 197, 96, 0.08);
+  font: 11.5px/1.35 var(--font-mono);
+}
+.mcp-trust-grid {
+  margin-top: 8px;
+}
+.mcp-labels,
+.mcp-severity-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.mcp-labels.compact {
+  margin-top: 6px;
+}
+.trust-label {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  border: 1px solid var(--border2);
+  border-radius: 5px;
+  padding: 2px 7px;
+  font: 10.5px/1.4 var(--font-mono);
+  color: var(--dim);
+  background: var(--surface-muted);
+  white-space: nowrap;
+}
+.trust-label.ok,
+.trust-text.ok {
+  color: var(--ok);
+  border-color: rgba(79, 209, 161, 0.26);
+}
+.trust-label.warn,
+.trust-text.warn {
+  color: var(--warn);
+  border-color: rgba(246, 197, 96, 0.28);
+}
+.trust-label.bad,
+.trust-text.bad {
+  color: var(--bad);
+  border-color: rgba(255, 100, 113, 0.3);
+}
+.trust-label.muted,
+.trust-text.muted {
+  color: var(--dim2);
+}
+.mcp-finding,
+.mcp-target {
+  min-width: 0;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid rgba(143, 157, 184, 0.14);
+}
+.mcp-finding {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 8px;
+  align-items: center;
+}
+.mcp-finding .fname {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mcp-finding .dim {
+  grid-column: 2;
+  color: var(--dim2);
+  font: 11px/1.35 var(--font-mono);
+}
+.mcp-target-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.mcp-target-head .fname {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--fg);
+  font: 600 12.5px/1.25 var(--font-ui);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mcp-target > .dim {
+  margin-top: 5px;
+  color: var(--dim);
+  font: 11px/1.4 var(--font-mono);
+}
+.turn-id {
+  color: var(--accent);
+  border-color: var(--accent-line);
+}

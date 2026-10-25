@@ -1,4 +1,4 @@
-import { useMemo, useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
+import { useMemo, useEffect, useCallback, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
 import type { ProviderId } from '@shared/provider'
 import type { useIntegrations } from './hooks/useIntegrations'
 import type { SessionComposerDraft, SessionPromptQueues } from './app-model'
@@ -7,6 +7,7 @@ import { recordedSessionModel } from './hooks/useIntegrations'
 import { updateQueuedPromptByMessageId } from './steer'
 import { latestSteerCapability, latestSteerEvidenceForTurns, type QueuedSteerState } from './steer'
 import { useAgentSession as createAgentSession } from './hooks/useAgentSession'
+import { runStructuralTransition } from './structural-motion'
 
 export interface AppSessionRuntimeContext {
   activeSessionIdRef: MutableRefObject<string | null>
@@ -57,6 +58,21 @@ export function useAppSessionRuntime(context: AppSessionRuntimeContext) {
       loadProjects()
     }
   })
+  const presentedSessionId = useRef<string | null>(null)
+  const clearPresentedSession = useCallback((...args: Parameters<typeof session.clearTurns>): void => {
+    presentedSessionId.current = null
+    session.clearTurns(...args)
+  }, [session.clearTurns])
+  const replacePresentedSession = useCallback((...args: Parameters<typeof session.replaceWithParsedSession>): void => {
+    const [sessionId, parsed, options] = args
+    const hasContent = parsed.length > 0 || Boolean(options?.activeRun?.items.length)
+    const commit = (): void => {
+      session.replaceWithParsedSession(...args)
+      if (hasContent) presentedSessionId.current = sessionId
+    }
+    if (hasContent && presentedSessionId.current !== sessionId) runStructuralTransition('session', commit)
+    else commit()
+  }, [session.replaceWithParsedSession])
   const steerEvidenceByMessageId = useMemo(
     () => latestSteerEvidenceForTurns(session.turns),
     [session.turns]
@@ -87,5 +103,8 @@ export function useAppSessionRuntime(context: AppSessionRuntimeContext) {
     const recorded = recordedSessionModel(session.turns)
     if (recorded) integrations.restoreSessionModel(draftKey, recorded)
   }, [activeSessionId, draftKey, integrations.hasSessionModel, integrations.restoreSessionModel, session.turns, sessionLoading])
-  return { session, steerEvidenceByMessageId, steerCapability }
+  return {
+    session: { ...session, clearTurns: clearPresentedSession, replaceWithParsedSession: replacePresentedSession },
+    steerEvidenceByMessageId, steerCapability
+  }
 }

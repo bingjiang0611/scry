@@ -1,0 +1,437 @@
+/* Execution Graph 拓扑（蓝本 graph.html）：full verdict 卡 + latency 节点树 + 右侧 span 详情 */
+.graph-pane {
+  flex: 1;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--pane-resizer-w) var(--graph-detail-w);
+  min-height: 0;
+}
+.graph-detail-resizer {
+  background: var(--bg);
+}
+.gtree {
+  overflow: auto;
+  padding: 20px 24px 40px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.gempty {
+  color: var(--dim2);
+  padding: 60px 32px;
+  text-align: center;
+}
+.turn-block {
+  margin-bottom: 30px;
+}
+.turn-head {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) 280px;
+  align-items: center;
+  column-gap: 14px;
+  padding: 10px 20px;
+  border-left: 3px solid var(--accent);
+  background: var(--panel);
+  margin-bottom: 4px;
+}
+.turn-head.running {
+  border-left-color: var(--warn);
+  background: var(--panel);
+}
+.turn-head .num {
+  font: 600 14px/1 var(--font-mono);
+  color: var(--accent);
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.turn-head.running .num {
+  color: var(--warn);
+}
+.turn-toggle {
+  width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  color: currentColor;
+  cursor: default;
+  flex: none;
+}
+.turn-toggle .ico {
+  width: 16px;
+  height: 16px;
+}
+.turn-head .preview {
+  color: var(--fg);
+  font: 13px/1.4 var(--font-ui);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.turn-head .meta {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  font: 11px/1 var(--font-mono);
+  color: var(--dim);
+  white-space: nowrap;
+  min-width: 0;
+}
+.turn-head .meta b {
+  color: var(--fg);
+  font-weight: 550;
+}
+.turn-head .meta .cost b {
+  color: var(--accent);
+}
+.gnode {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  position: relative;
+}
+.gnode.sub {
+  grid-template-columns: 56px 1fr;
+}
+.gnode .gutter {
+  position: relative;
+}
+.gnode:not(.depth-0) .gutter::before {
+  content: '';
+  position: absolute;
+  left: 14px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border3);
+}
+.gnode.last:not(.depth-0) .gutter::before {
+  bottom: auto;
+  height: 14px;
+}
+.gnode:not(.depth-0) .gutter::after {
+  content: '';
+  position: absolute;
+  left: 14px;
+  top: 14px;
+  width: 12px;
+  height: 1px;
+  background: var(--border3);
+}
+.gnode.sub .gutter::before {
+  left: 42px;
+  background: var(--agent);
+  opacity: 0.5;
+}
+.gnode.sub .gutter::after {
+  left: 42px;
+  background: var(--agent);
+  opacity: 0.5;
+}
+.gcontent {
+  padding: 5px 12px 5px 0;
+  min-width: 0;
+}
+.gline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 5px 10px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+button.gline,
+button.callrow,
+button.filerow,
+button.toptool {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.gtype {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  font: 10px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+  white-space: nowrap;
+  flex: none;
+}
+.gtype.tool {
+  border-color: var(--border);
+  color: var(--fg);
+  background: var(--panel);
+}
+.gtype.skill {
+  color: var(--skill);
+}
+.gtype.agent {
+  color: var(--agent);
+}
+.gtype.mcp {
+  color: var(--mcp);
+}
+.gtype.harness {
+  border-color: var(--dim3);
+  color: var(--dim2);
+}
+.gtype .st {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.gtype.skill .st {
+  background: var(--skill);
+}
+.gtype.agent .st {
+  background: var(--agent);
+}
+.gtype.harness .st {
+  background: var(--bad);
+}
+.gtype.err {
+  color: var(--bad);
+  border-color: rgba(255, 107, 107, 0.3);
+}
+.gtype.err .st {
+  background: var(--bad);
+}
+.gname {
+  font: 600 12.5px/1 var(--font-mono);
+  color: var(--fg);
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+}
+.gname.err {
+  color: var(--bad);
+}
+.gargs {
+  color: var(--dim);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.gmeta {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font: 10.5px/1 var(--font-mono);
+  color: var(--dim2);
+  white-space: nowrap;
+  flex: none;
+}
+.gmeta .dur {
+  color: var(--dim);
+}
+.gmeta .cost {
+  color: var(--accent);
+}
+.gmeta .danger {
+  color: var(--bad);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.gmeta .pass {
+  color: var(--ok);
+}
+.latbar {
+  width: 80px;
+  height: 4px;
+  background: var(--border3);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+  flex: none;
+}
+.latbar > i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--accent);
+}
+.latbar > i.bad {
+  background: var(--bad);
+}
+.latbar > i.agent {
+  background: var(--agent);
+}
+/* right detail panel */
+.gpane {
+  border-left: 1px solid var(--border3);
+  overflow-y: auto;
+  min-height: 0;
+}
+.gp-empty {
+  padding: 40px 18px;
+  color: var(--dim2);
+  font-size: 13px;
+}
+.gp-h {
+  padding: 14px 18px 10px;
+  border-bottom: 1px solid var(--border3);
+}
+.gp-h .breadcrumb {
+  font: 10.5px/1 var(--font-mono);
+  color: var(--dim2);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.gp-h .breadcrumb b {
+  color: var(--accent);
+}
+.gp-h h2 {
+  font: 600 16px/1.2 var(--font-mono);
+  letter-spacing: -0.005em;
+  word-break: break-all;
+}
+.gp-h .subhead {
+  margin-top: 8px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font: 11.5px/1 var(--font-mono);
+  color: var(--dim);
+  flex-wrap: wrap;
+}
+.gp-section {
+  border-bottom: 1px solid var(--border3);
+  padding: 14px 18px;
+}
+.gp-section.last {
+  border-bottom: 0;
+}
+.gp-section h4 {
+  font: 10.5px/1 var(--font-mono);
+  color: var(--dim2);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+.kv {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  row-gap: 6px;
+  font: 12px/1.5 var(--font-mono);
+}
+.kv dt {
+  color: var(--dim2);
+}
+.kv dd {
+  color: var(--fg);
+  word-break: break-all;
+  margin: 0;
+}
+.gp-section pre {
+  font: 11.5px/1.5 var(--font-mono);
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border3);
+  border-radius: var(--r-sm);
+  padding: 10px;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.gp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.gp-actions .btn {
+  font-size: 11.5px;
+  padding: 5px 10px;
+}
+/* full verdict 卡（graph 顶部，非 compact，4 pillar 一排） */
+.verdict-card.full {
+  /* 都用 minmax(0, …)：1fr 的下限是 min-content，pillar 里的
+     「审计·未拦截」这类文案会把整排顶出卡片，再被 overflow:hidden 切一半。 */
+  grid-template-columns: minmax(0, 280px) minmax(0, 1fr);
+  margin: 14px 0 18px;
+}
+.verdict-card.full .verdict-left {
+  border-right: 1px solid var(--border3);
+  border-bottom: 0;
+}
+.verdict-card.full .verdict-left .judgement {
+  font-size: 22px;
+}
+.verdict-card.full .verdict-right {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.verdict-card.full .verdict-pillar {
+  border-bottom: 0;
+  border-right: 1px solid var(--border3);
+}
+.verdict-card.full .verdict-pillar:last-child {
+  border-right: 0;
+}
+.verdict-card.full .verdict-pillar .v {
+  font-size: 15px;
+}
+
+/* 卡片可能被视图内部的分栏压窄（拓扑左树右详情），这跟主区宽度无关，
+   所以 pillar 列数按卡片自身宽度判定：4 列挤到 ~74px 会把 SUBAGENT 折断。 */
+.verdict-card.full {
+  container-type: inline-size;
+}
+
+@container (max-width: 640px) {
+  .verdict-card.full .verdict-right {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .verdict-card.full .verdict-pillar:nth-child(2n) {
+    border-right: 0;
+  }
+
+  /* 除最后一排外都补一条底线，2 列 4/5 个 pillar 都成立 */
+  .verdict-card.full .verdict-pillar:nth-last-child(n + 3) {
+    border-bottom: 1px solid var(--border3);
+  }
+}
+
+/* 判决卡 / 分段卡都活在主区里：断点按主区（container）判，不按窗口。
+   拖宽右栏或放大缩放都会把主区压窄，而 viewport 断点这两种情况都看不到。 */
+@container main-pane (max-width: 920px) {
+  .verdict-card.full {
+    grid-template-columns: 1fr;
+  }
+  .verdict-card.full .verdict-left {
+    border-right: 0;
+    border-bottom: 1px solid var(--border3);
+  }
+  .verdict-card.full .verdict-right {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .seg-card {
+    grid-template-columns: 1fr;
+  }
+  .seg-l {
+    border-right: 0;
+    border-bottom: 1px solid var(--border3);
+  }
+  .seg-r {
+    border-left: 0;
+    border-top: 1px solid var(--border3);
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  }
+}

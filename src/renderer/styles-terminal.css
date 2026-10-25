@@ -1,0 +1,183 @@
+/* Real PTY terminal. It deliberately stays dark in both app themes. */
+.terminal-surface {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 39px minmax(0, 1fr) 29px;
+  overflow: hidden;
+  background: #090b0e;
+  color: #eceef2;
+}
+
+.terminal-toolbar {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 7px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.terminal-tabs {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 3px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.terminal-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.terminal-tab {
+  height: 27px;
+  display: flex;
+  flex: none;
+  align-items: center;
+  border-radius: var(--r-md);
+  color: #8f98a7;
+}
+
+.terminal-tab.active {
+  color: #f2f4f7;
+  background: rgba(255, 255, 255, 0.075);
+}
+
+.terminal-tab > button:first-child {
+  height: 27px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px 0 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 11px;
+}
+
+.terminal-tab-close,
+.terminal-action {
+  width: 25px;
+  height: 25px;
+  display: grid;
+  flex: none;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: #8f98a7;
+}
+
+.terminal-tab-close {
+  width: 20px;
+  opacity: 0;
+}
+
+.terminal-tab.active .terminal-tab-close,
+.terminal-tab:focus-within .terminal-tab-close {
+  opacity: 0.72;
+}
+
+.terminal-state {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 50%;
+  background: #68707d;
+}
+
+.terminal-state.running { background: #7ed9a0; }
+.terminal-state.error { background: #ef767a; }
+.terminal-state.starting { background: #d9b86c; }
+
+.terminal-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 1px;
+}
+
+.terminal-action:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.terminal-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.terminal-pane {
+  position: absolute;
+  inset: 0;
+  padding: 10px 4px 6px 10px;
+}
+
+.terminal-pane[hidden] {
+  display: none;
+}
+
+.terminal-xterm,
+.terminal-xterm .xterm {
+  width: 100%;
+  height: 100%;
+}
+
+.terminal-xterm .xterm-viewport {
+  scrollbar-color: #4f5865 transparent;
+}
+
+.terminal-restart {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--r-md);
+  background: #15191f;
+  color: #d9dde5;
+  font-size: 10.5px;
+}
+
+.terminal-empty {
+  height: 100%;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 7px;
+  padding: 24px;
+  color: #8f98a7;
+  text-align: center;
+}
+
+.terminal-empty strong {
+  margin-top: 3px;
+  color: #eceef2;
+}
+
+.terminal-empty .btn {
+  margin-top: 6px;
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.07);
+  color: #eceef2;
+}
+
+.terminal-foot {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  color: #7c8592;
+  font: var(--text-compact-size)/1 var(--font-mono);
+  white-space: nowrap;
+}

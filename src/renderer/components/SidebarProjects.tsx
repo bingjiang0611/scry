@@ -1,9 +1,17 @@
-import { useMemo, type MouseEvent, type ReactNode } from 'react'
+import { useMemo, useRef, type MouseEvent, type ReactNode } from 'react'
 import type { ConversationSummary } from '@shared/conversation-api'
 import type { ProjectMeta, SessionMeta } from '../env'
 import { SIDEBAR_PROJECT_COPY as copy } from '../constants/copy'
 import { Icon } from './primitives/Icon'
 import type { RemoteProjectGroup } from './SidebarRemoteProjects'
+import { Disclosure } from './Disclosure'
+import { useFlipList } from '../hooks/useFlipList'
+
+function SessionMotionList({ revision, children, className = 'sb-sess-list' }: { revision: unknown; children: ReactNode; className?: string }) {
+  const root = useRef<HTMLDivElement>(null)
+  useFlipList(root, revision)
+  return <div className={className} ref={root}>{children}</div>
+}
 
 export function SidebarProjects({
   projects, q, remoteGroups, showRemote, activeCwd, activeSessionId, collapsed, toggle,
@@ -19,7 +27,7 @@ export function SidebarProjects({
   toggle: (key: string) => void
   onNewProjectChat?: (cwd: string) => void
   openProjectMenu: (event: MouseEvent<HTMLButtonElement>, project: ProjectMeta) => void
-  renderSession: (cwd: string, session: SessionMeta, projectName: string, showProjectName?: boolean) => ReactNode
+  renderSession: (cwd: string, session: SessionMeta, projectName: string, showProjectName?: boolean, motionKey?: string) => ReactNode
   renderConversation: (conversation: ConversationSummary) => ReactNode
   renderRemoteProject: (project: RemoteProjectGroup) => ReactNode
 }) {
@@ -64,13 +72,13 @@ export function SidebarProjects({
     {pinned.length > 0 && (
       <>
         <div className="sb-section">{copy.pinned}</div>
-        <div className="sb-pinned">
+        <SessionMotionList className="sb-pinned" revision={pinned}>
           {pinned.map(row => {
             if (row.kind === 'conversation') return renderConversation(row.conversation)
             const { session, cwd, name } = row
-            return renderSession(cwd, session, name, true)
+            return renderSession(cwd, session, name, true, `${cwd}:${session.sessionId}`)
           })}
-        </div>
+        </SessionMotionList>
         <div className="sb-divider" />
       </>
     )}
@@ -96,6 +104,7 @@ export function SidebarProjects({
               data-project-path={p.cwd}
               onClick={() => toggle(p.cwd)}
             >
+              <Icon name="chevronRight" className={`sb-project-chevron motion-chevron ${open ? 'is-open' : ''}`} />
               <Icon name="folder" className="sb-project-folder" />
               <span className="pname">{p.name}</span>
               {p.pinnedAt && <Icon name="pin" className="sb-project-pin" />}
@@ -123,15 +132,15 @@ export function SidebarProjects({
               </span>
             )}
           </div>
-          {open && (
-            <div className="sb-sess-list">
+          <Disclosure open={open}>{() => (
+            <SessionMotionList revision={`${p.cwd}:${p.conversations.map(conversation => conversation.id).join(',')}:${p.sessions.map(session => session.sessionId).join(',')}`}>
               {p.conversations.sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0)).map(renderConversation)}
-              {p.sessions.map((session) => renderSession(p.cwd, session, p.name))}
+              {p.sessions.map((session) => renderSession(p.cwd, session, p.name, false, `${p.cwd}:${session.sessionId}`))}
               {p.sessions.length === 0 && p.conversations.length === 0 && (
                 <div className="sb-project-empty">{emptyLabel}</div>
               )}
-            </div>
-          )}
+            </SessionMotionList>
+          )}</Disclosure>
         </div>
       )
     })}

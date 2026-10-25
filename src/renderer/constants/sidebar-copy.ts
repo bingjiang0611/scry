@@ -38,5 +38,8 @@ export const SIDEBAR_PROJECT_COPY = {
   cancel: '取消',
   save: '保存',
   remove: '移除项目',
+  pin: '置顶项目',
+  unpin: '取消置顶项目',
+  reveal: '在 Finder 中显示',
   removeHint: '只会移除 Scry 中的项目入口，不会删除目录、Git 仓库、会话历史或分析数据。'
 } as const

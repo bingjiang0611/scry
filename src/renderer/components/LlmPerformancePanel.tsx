@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useState } from 'react'
 import type { LlmMetric, LlmMetricSample, LlmPerformanceHistory, LlmPerformanceSummary } from '@shared/llm-performance'
 import { llmMetricSamples } from '@shared/llm-performance'
-import { ModalFrame } from './Modals'
+import { ModalFrame, requestModalClose } from './Modals'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY } from '../constants/copy'
 import { LLM_PERFORMANCE_COPY as copy } from '../constants/llm-performance-copy'
@@ -89,7 +89,7 @@ export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose:
         <div className="llm-perf-range" role="group" aria-label={copy.rangeLabel}>
           {RANGES.map(range => <button key={range} type="button" aria-pressed={hours === range} onClick={() => setHours(range)}>{copy.ranges[range]}</button>)}
         </div>
-        <ModalCloseButton onClick={onClose} aria-label={MODAL_COPY.closeLlmPerformance} />
+        <ModalCloseButton onClick={() => requestModalClose()} aria-label={MODAL_COPY.closeLlmPerformance} />
       </header>
       <div className="llm-perf-body">
         {summaryError && <p className="llm-perf-alert" role="alert">{copy.summaryError(summaryError)}</p>}

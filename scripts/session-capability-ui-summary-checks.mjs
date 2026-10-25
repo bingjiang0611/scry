@@ -3,10 +3,14 @@ export async function exerciseSessionCapabilitySummary() {
   const check = (condition, message) => { if (!condition) throw new Error(message) }
   const waitFor = (predicate) => new Promise((resolve, reject) => {
     if (predicate()) return resolve()
-    const observer = new MutationObserver(() => {
-      if (predicate()) { clearTimeout(timer); observer.disconnect(); resolve() }
-    })
-    const timer = setTimeout(() => { observer.disconnect(); reject(new Error(`DOM condition timed out: ${predicate.toString()}`)) }, 5000)
+    const changed = () => {
+      if (!predicate()) return
+      clearTimeout(timer); observer.disconnect(); document.removeEventListener('focusin', changed, true); resolve()
+    }
+    // Search autofocus does not necessarily mutate the DOM.
+    const observer = new MutationObserver(changed)
+    const timer = setTimeout(() => { observer.disconnect(); document.removeEventListener('focusin', changed, true); reject(new Error(`DOM condition timed out: ${predicate.toString()}`)) }, 5000)
+    document.addEventListener('focusin', changed, true)
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true })
   })
   const button = (scope, fragment) => {

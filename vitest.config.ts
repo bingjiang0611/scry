@@ -11,7 +11,10 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.{ts,tsx}'],
-      exclude: ['src/**/*.test.{ts,tsx}', 'src/**/*.bench.{ts,tsx}', 'src/**/*.d.ts'],
+      exclude: [
+        'src/**/*.test.{ts,tsx}', 'src/**/*.bench.{ts,tsx}', 'src/**/*.d.ts',
+        'src/renderer/components/render-tests/**', 'src/renderer/css-test-reader.ts'
+      ],
       reporter: ['text-summary', 'json', 'json-summary', 'html']
     }
   },

@@ -1,0 +1,164 @@
+/* ============ 蓝本 tool-card（PR#2 P1 chat 重排） ============ */
+.tool-card {
+  display: block;
+  margin: 6px 0;
+  position: relative;
+  overflow: hidden;
+  padding: 9px 12px 9px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border3);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: border-color var(--dur-micro) linear, background var(--dur-micro) linear;
+}
+.tool-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--kind, var(--border2));
+}
+.tool-card.sub { margin-left: 18px; }
+.tool-card.k-tool { --kind: var(--dim3); }
+.tool-card.k-skill { --kind: var(--skill); }
+.tool-card.k-mcp { --kind: var(--mcp); }
+.tool-card.k-agent { --kind: var(--agent); }
+.tool-card.k-hook { --kind: var(--warn); }
+.tool-card.k-err { --kind: var(--bad); }
+.tool-row { display: flex; align-items: center; gap: 9px; }
+.tool-row .st { width: 14px; height: 14px; display: grid; place-items: center; flex: none; }
+.tool-row .st.ok { color: var(--ok); }
+.tool-row .st.err { color: var(--bad); }
+.tool-row .name { font: 600 12.5px/1 var(--font-mono); color: var(--fg); letter-spacing: -0.005em; }
+.tool-card.k-mcp .tool-row .name {
+  min-width: 0;
+  max-width: min(42%, 320px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tool-row .kindtag {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--kind, var(--border2));
+  box-shadow: 0 0 0 3px var(--surface-subtle);
+}
+.tool-row .kindtag.skill { background: var(--skill); }
+.tool-row .kindtag.mcp { background: var(--mcp); }
+.tool-row .kindtag.agent { background: var(--agent); }
+.tool-row .arg {
+  flex: 1 1 0;
+  min-width: 0;
+  font: 12px/1 var(--font-mono); color: var(--dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 460px;
+}
+.tool-row .meta {
+  flex: 0 0 200px;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 11px/1 var(--font-mono);
+  color: var(--dim2);
+}
+.tool-card.k-mcp .tool-row .meta {
+  min-width: 0;
+  flex-shrink: 1;
+  justify-content: flex-end;
+}
+.tool-row .meta .dur {
+  flex: 0 0 6ch;
+  color: var(--dim2);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.tool-row .meta .tok {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dim2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tool-row .meta .edit-lines {
+  flex: none;
+  display: inline-flex;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.tool-row .meta .edit-lines .add {
+  color: var(--ok);
+}
+.tool-row .meta .edit-lines .del {
+  color: var(--bad);
+}
+.tool-row .meta .bar {
+  flex: 0 0 54px;
+  height: 4px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--panel3);
+}
+.tool-row .meta .bar i {
+  display: block;
+  height: 100%;
+  background: var(--dim3);
+}
+.tool-row .meta .bar.slow i {
+  background: var(--warn);
+}
+.tool-row .meta .danger { color: var(--bad); display: inline-flex; align-items: center; }
+
+.tool-row .meta .warn { color: var(--warn); display: inline-flex; align-items: center; }
+.tool-row .chev { color: var(--dim2); flex: none; }
+.tool-row .op {
+  width: 16px; height: 14px; font: 700 9px/14px var(--font-mono); letter-spacing: 0.04em;
+  border-radius: 3px; text-align: center; flex: none;
+}
+.tool-row .op.r { color: var(--read); }
+.tool-row .op.w { color: var(--write); }
+.tool-row .op.e { color: var(--edit); }
+/* 蓝本：工具卡内联展开详情（选中/点开时显 old/new string 或 input + output） */
+.tool-detail {
+  margin-top: 8px;
+  padding: 10px;
+  background: var(--bg);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border3);
+}
+.tool-detail .lbl {
+  font: 10.5px/1 var(--font-mono);
+  color: var(--dim);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.tool-detail .lbl + pre {
+  margin-bottom: 10px;
+}
+.tool-detail pre {
+  font: 11.5px/1.5 var(--font-mono);
+  color: var(--fg);
+  max-height: 280px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
+.recorder-content-page { margin-top: 8px; }
+.recorder-content-page > button,
+.recorder-content-page-actions button {
+  border: 1px solid var(--border3);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--dim);
+  font: 11px/1.2 var(--font-mono);
+  padding: 5px 8px;
+  cursor: pointer;
+}
+.recorder-content-page button:disabled { cursor: default; opacity: 0.5; }
+.recorder-content-page-actions { display: flex; gap: 6px; margin-top: 6px; }
+.recorder-content-page [role='alert'] { color: var(--danger); font-size: 11px; margin-top: 6px; }

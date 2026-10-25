@@ -1,0 +1,266 @@
+/* GIT DIFF 行 */
+.gdrow {
+  display: flex;
+  gap: 10px;
+  padding: 3px 0;
+  font: 11.5px/1.7 var(--font-mono);
+  align-items: baseline;
+}
+.gdrow .gd-path {
+  color: var(--fg);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gdrow .gd-mark {
+  width: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.gdrow .gd-add {
+  color: var(--ok);
+}
+.gdrow .gd-del {
+  color: var(--bad);
+}
+.gdrow.click {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.gdrow.click:hover {
+  background: var(--panel3);
+}
+.gdrow.click:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.gdrow .gd-open {
+  width: 13px;
+  height: 13px;
+  color: var(--dim2);
+  flex: none;
+}
+/* compact verdict card（蓝本侧栏 SESSION 锚点；内联用，抽 primitive 是 PR#9） */
+.verdict-card {
+  display: grid;
+  grid-template-columns: 1fr;
+  background: var(--panel);
+  border: 1px solid var(--border3);
+  border-left: 3px solid var(--ok);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  margin: 12px 14px;
+}
+.verdict-card.warn {
+  border-left-color: var(--warn);
+}
+.verdict-card.bad {
+  border-left-color: var(--bad);
+}
+.verdict-left {
+  padding: 13px 15px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-bottom: 1px solid var(--border3);
+  background: var(--panel);
+}
+.verdict-card.warn .verdict-left {
+  background: var(--panel);
+}
+.verdict-card.bad .verdict-left {
+  background: var(--panel);
+}
+.verdict-left .lbl {
+  font: 500 11px/1.2 var(--font-ui);
+  color: var(--dim2);
+  letter-spacing: 0;
+  text-transform: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.verdict-left .lbl .live {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: 10px/1 var(--font-ui);
+  color: var(--ok);
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 600;
+}
+.verdict-left .lbl .live .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.verdict-left .judgement {
+  font: 600 16px/1.1 var(--font-ui);
+  letter-spacing: -0.012em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.verdict-left .judgement.ok {
+  color: var(--ok);
+}
+.verdict-left .judgement.warn {
+  color: var(--warn);
+}
+.verdict-left .judgement.bad {
+  color: var(--bad);
+}
+.verdict-left .since {
+  font: 11px/1.3 var(--font-mono);
+  color: var(--dim2);
+  margin-top: 4px;
+  letter-spacing: 0.04em;
+}
+.verdict-right {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.verdict-pillar {
+  min-width: 0;
+  padding: 11px 14px 12px;
+  border-right: 1px solid var(--border3);
+  border-bottom: 1px solid var(--border3);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.verdict-pillar:nth-child(2n) {
+  border-right: 0;
+}
+.verdict-pillar:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+.verdict-pillar .nm {
+  min-width: 0;
+  font: 10.5px/1 var(--font-mono);
+  color: var(--dim2);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* SUBAGENT 这类单词在窄列里断不开，不允许它顶进隔壁 pillar */
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+.verdict-pillar .v {
+  font: 600 14px/1.1 var(--font-mono);
+  color: var(--fg);
+  margin-top: 4px;
+  letter-spacing: -0.005em;
+  font-variant-numeric: tabular-nums;
+}
+.verdict-pillar.warn .v {
+  color: var(--warn);
+}
+.verdict-pillar.bad .v {
+  color: var(--bad);
+}
+.verdict-pillar.accent .v {
+  color: var(--accent);
+}
+.verdict-pillar.accent .nm .sdot {
+  background: var(--accent);
+}
+.verdict-pillar.warn .nm .sdot {
+  background: var(--warn);
+}
+.verdict-pillar.bad .nm .sdot {
+  background: var(--bad);
+}
+.verdict-pillar .sub {
+  min-width: 0;
+  font: 10px/1.4 var(--font-mono);
+  color: var(--dim2);
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+.verdict-pillar-action {
+  appearance: none;
+  width: 100%;
+  border-top: 0;
+  border-left: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.verdict-pillar-action:hover {
+  background: var(--surface-subtle);
+}
+.verdict-pillar-action:focus-visible {
+  outline: 2px solid var(--warn);
+  outline-offset: -2px;
+}
+.verdict-pillar-action .danger-view-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.verdict-pillar-action .danger-view-hint .ico {
+  width: 12px;
+  height: 12px;
+}
+.danger-audit-section:focus {
+  outline: none;
+}
+.danger-audit-section:focus-visible {
+  box-shadow: 0 0 0 2px var(--warn) inset;
+}
+.danger-audit-row {
+  width: 100%;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+}
+.danger-audit-row:focus-visible {
+  outline: 2px solid var(--warn);
+  outline-offset: -1px;
+}
+.danger-audit-jump {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  color: var(--dim3);
+}
+.verdict-foot {
+  padding: 9px 15px;
+  border-top: 1px solid var(--border3);
+  background: var(--surface-inset);
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font: 11px/1 var(--font-mono);
+}
+.verdict-foot .it {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.verdict-foot .it span {
+  color: var(--dim2);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.verdict-foot .it b {
+  color: var(--fg);
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+}

@@ -136,8 +136,8 @@ try {
     configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
     plugins: [
       instrument('src/renderer/hooks/useVisibilityPolling.ts', '  refreshRef.current = refresh\n', '  window.__visibilityPolls?.set(key, () => refreshRef.current())\n'),
-      instrument('src/renderer/components/RemoteChat.tsx', '  const [activeRun, setActiveRun] = useState<ActiveRun | null>(null)\n', '  window.__profileActiveRun = activeRun\n'),
-      instrument('src/renderer/components/RemoteChat.tsx', '    pollIntervalMs.current = intervalMs\n', '    window.__profilePollInterval = intervalMs\n', true)
+      instrument('src/renderer/components/RemoteChatFoundation.tsx', '  const [activeRun, setActiveRun] = useState<ActiveRun | null>(null)\n', '  window.__profileActiveRun = activeRun\n'),
+      instrument('src/renderer/components/RemoteChatFoundation.tsx', '    pollIntervalMs.current = intervalMs\n', '    window.__profilePollInterval = intervalMs\n', true)
     ],
     // Production React with the profiling renderer, so <Profiler> reports commit durations.
     resolve: { alias: [{ find: '@shared', replacement: join(root, 'src/shared') }, { find: /^react-dom$/, replacement: 'react-dom/profiling' }] },

@@ -1,0 +1,421 @@
+/* Codex-aligned product skin.
+   Scry keeps its evidence semantics; this last-loaded layer only changes hierarchy and disclosure. */
+
+:root {
+  --bg: #151515;
+  --panel: #1c1c1c;
+  --panel2: #232323;
+  --panel3: #2b2b2b;
+  --panel-hi: #343434;
+  --border: #333331;
+  --border2: #454541;
+  --border3: #292927;
+  --fg: #f1f1ef;
+  --dim: #b5b5af;
+  --dim2: #8d8d87;
+  --dim3: #686864;
+  --draft-fg: #c7b795;
+  --accent: #5b9cff;
+  --accent-fg: #ffffff;
+  --accent-soft: rgb(91 156 255 / 12%);
+  --accent-line: rgb(91 156 255 / 48%);
+  --selected: #5b9cff;
+  --selected-soft: rgb(91 156 255 / 10%);
+  --selected-line: rgb(91 156 255 / 42%);
+  --surface-faint: rgb(255 255 255 / 2%);
+  --surface-subtle: rgb(255 255 255 / 3%);
+  --surface-muted: rgb(255 255 255 / 4%);
+  --surface-hover: rgb(255 255 255 / 6%);
+  --surface-raised: rgb(255 255 255 / 8%);
+  --surface-strong: rgb(255 255 255 / 10%);
+  --sidebar-surface: #181818;
+  --main-surface: #1c1c1c;
+  --overview-surface: #1c1c1c;
+  --r-xs: 7px;
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 20px;
+  --topbar-h: 52px;
+  --shadow-pop:
+    0 32px 88px rgb(0 0 0 / 46%),
+    0 10px 28px rgb(0 0 0 / 24%),
+    inset 0 0 0 1px rgb(255 255 255 / 2.5%);
+  --shadow-card:
+    0 1px 0 rgb(255 255 255 / 3%),
+    0 10px 30px rgb(0 0 0 / 18%);
+}
+
+:root[data-theme='light'] {
+  --bg: #f7f7f5;
+  --panel: #ffffff;
+  --panel2: #f6f6f3;
+  --panel3: #eeeeeb;
+  --panel-hi: #e7e7e3;
+  --border: #e4e4df;
+  --border2: #d3d3cd;
+  --border3: #eeeeea;
+  --fg: #222220;
+  --dim: #62625e;
+  --dim2: #85857f;
+  --dim3: #aaa9a2;
+  --draft-fg: #78613a;
+  --scrollbar-thumb: #c5c5bf;
+  --scrollbar-thumb-hover: #aaa9a2;
+  --resizer-line: #e8e8e4;
+  --accent: #3f7ee8;
+  --accent-fg: #ffffff;
+  --accent-soft: rgb(63 126 232 / 9%);
+  --accent-line: rgb(63 126 232 / 42%);
+  --selected: #3f7ee8;
+  --selected-soft: rgb(63 126 232 / 8%);
+  --selected-line: rgb(63 126 232 / 38%);
+  --surface-faint: rgb(34 34 32 / 1.8%);
+  --surface-subtle: rgb(34 34 32 / 2.8%);
+  --surface-muted: rgb(34 34 32 / 3.8%);
+  --surface-hover: rgb(34 34 32 / 5%);
+  --surface-raised: rgb(34 34 32 / 6.5%);
+  --surface-strong: rgb(34 34 32 / 8%);
+  --surface-inset-soft: rgb(34 34 32 / 2%);
+  --surface-inset: rgb(34 34 32 / 3.5%);
+  --surface-inset-strong: rgb(34 34 32 / 5%);
+  --sidebar-surface: #f7f7f5;
+  --main-surface: #ffffff;
+  --overview-surface: #ffffff;
+  --modal-overlay: rgb(35 35 32 / 24%);
+  --shadow-pop:
+    0 32px 80px rgb(35 35 32 / 16%),
+    0 10px 28px rgb(35 35 32 / 9%),
+    inset 0 0 0 1px rgb(255 255 255 / 74%);
+  --shadow-card:
+    0 1px 2px rgb(35 35 32 / 6%),
+    0 12px 30px rgb(35 35 32 / 7%);
+}
+
+body {
+  font: 14px/1.55 var(--font-ui);
+  letter-spacing: -0.004em;
+}
+
+button,
+input,
+textarea,
+select {
+  font-family: var(--font-ui);
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[role='button']:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 2px;
+}
+
+/* Shell and sidebar ---------------------------------------------------------- */
+
+.sidebar {
+  padding: 12px 8px 8px;
+  border-right: 1px solid var(--border3);
+  background: var(--sidebar-surface);
+}
+
+.sidebar-resizer {
+  background: var(--main-surface);
+}
+
+.pane-resizer::before {
+  background: transparent;
+}
+
+.pane-resizer:hover::before,
+.pane-resizer.active::before,
+.pane-resizer:focus-visible::before {
+  background: var(--border2);
+  box-shadow: none;
+}
+
+.sb-brand {
+  height: 42px;
+  min-height: 42px;
+  gap: 6px;
+  padding: 0 9px;
+}
+
+.sb-brand::before,
+.sb-brand .ver {
+  display: none;
+}
+
+.sb-brand .name {
+  font-size: 16px;
+  font-weight: 670;
+  letter-spacing: -0.025em;
+}
+
+.sb-new,
+.sb-navitem,
+.sb-proj-head,
+.sb-sess,
+.sb-settings {
+  border: 0;
+  border-radius: 9px;
+}
+
+.sb-new {
+  height: 36px;
+  min-height: 36px;
+  margin: 1px 0 0;
+  padding: 0 10px;
+  background: transparent;
+  font-size: 13.5px;
+  font-weight: 540;
+}
+
+.sb-new:hover {
+  border-color: transparent;
+  background: var(--surface-strong);
+}
+
+.sb-new .kbd {
+  color: var(--dim3);
+  font-size: 10px;
+}
+
+.sb-search {
+  height: 36px;
+  min-height: 36px;
+  margin: 7px 0 10px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--panel3);
+}
+
+.sb-search:focus-within {
+  background: var(--panel);
+  box-shadow: 0 0 0 1px var(--border2);
+}
+
+.sb-search input {
+  font-size: 13px;
+}
+
+.sb-nav {
+  gap: 1px;
+}
+
+.sb-navitem {
+  height: 34px;
+  min-height: 34px;
+  padding: 0 10px;
+  color: var(--dim);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.sb-navitem:hover,
+.sb-navitem.active,
+.sb-sess:hover,
+.sb-sess-row:focus-within .sb-sess {
+  background: var(--surface-hover);
+}
+
+.sb-sess.active {
+  background: var(--selected-soft);
+  color: var(--fg);
+  box-shadow: inset 2px 0 0 var(--selected);
+}
+
+.sb-proj-row.active .sb-proj-head {
+  background: var(--surface-strong);
+  color: var(--fg);
+  box-shadow: none;
+}
+
+.sb-sess.active .sb-sesstext {
+  color: var(--fg);
+  font-weight: 550;
+}
+
+.sb-navitem.active .ico,
+.sb-sess.active .sb-provider,
+.sb-proj-row.active .sb-proj-head {
+  color: var(--fg);
+}
+
+.sb-section {
+  margin: 19px 8px 7px;
+  color: var(--dim3);
+  font: 620 11px/1 var(--font-ui);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.sb-proj {
+  margin-bottom: 7px;
+}
+
+.sb-proj-head {
+  height: 32px;
+  min-height: 32px;
+  padding-inline: 8px;
+  color: var(--dim);
+}
+
+.sb-proj-head .pname {
+  font-size: 13px;
+  font-weight: 540;
+}
+
+.sb-proj-row.active .sb-proj-head {
+  box-shadow: none;
+}
+
+.sb-proj-acts {
+  top: 3px;
+  background: transparent;
+}
+
+.sb-sess {
+  height: 34px;
+  min-height: 34px;
+  padding: 0 8px 0 27px;
+}
+
+.sb-sesstext {
+  font-size: 13px;
+  font-weight: 450;
+}
+
+.sb-draft {
+  flex: none;
+  color: var(--draft-fg);
+  font-size: var(--text-compact-size);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.sidebar .sb-sess .sb-provider {
+  color: var(--dim2);
+  font: 620 var(--text-compact-size)/1 var(--font-ui);
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.sb-session-meta,
+.sb-sesstime,
+.sb-count {
+  color: var(--dim3);
+  font-family: var(--font-ui);
+  font-size: var(--text-compact-size);
+}
+
+.sb-footer {
+  height: 44px;
+  border-top-color: var(--border3);
+}
+
+.sb-settings {
+  height: 38px;
+  min-height: 38px;
+  margin-top: 6px;
+  padding-top: 0;
+}
+
+:root[data-platform='macos'] .sidebar {
+  padding-top: 0;
+}
+
+:root[data-platform='macos'] .sb-brand {
+  height: 52px;
+  min-height: 52px;
+  padding: 0 8px 0 80px;
+  border-bottom-color: transparent;
+}
+
+/* Conversation chrome ------------------------------------------------------- */
+
+.topbar {
+  gap: 10px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border3);
+  background: color-mix(in srgb, var(--main-surface) 96%, transparent);
+}
+
+.tb-thread {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg);
+}
+
+.tb-thread .ico {
+  flex: none;
+  color: var(--dim2);
+}
+
+.tb-thread b {
+  max-width: min(36vw, 360px);
+  overflow: hidden;
+  font-size: 13.5px;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tb-statusbar {
+  gap: 6px;
+}
+
+.tb-agent-status,
+.tb-context,
+.tb-action {
+  height: 32px;
+  min-height: 32px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  font-family: var(--font-ui);
+}
+
+.tb-agent-status {
+  max-width: 240px;
+  padding-inline: 8px;
+  color: var(--dim);
+  font-size: 12px;
+  font-weight: 520;
+}
+
+.tb-agent-status .agent-version {
+  color: var(--dim2);
+  font-family: var(--font-mono);
+  font-size: var(--text-compact-size);
+  font-weight: 550;
+}
+
+.tb-agent-status .dot {
+  width: 6px;
+  height: 6px;
+  background: var(--ok);
+}
+
+.panel-pill {
+  width: 32px;
+  padding: 0;
+  justify-content: center;
+  color: var(--dim2);
+}
+
+.panel-pill:hover,
+.panel-pill.on {
+  border-color: transparent;
+  background: var(--surface-strong);
+  color: var(--fg);
+}
+
+.tb-action-label {
+  display: none;
+}

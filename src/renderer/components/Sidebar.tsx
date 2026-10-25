@@ -1,6 +1,6 @@
 // 左侧栏（蓝本 welcome/chat 通用）：brand+版本 / 新建会话 / 搜索 / 置顶分组 / 按工作目录分组的历史会话。
 // 会话行的置顶与存档是行内 hover 按钮；删除只在设置的「已存档会话」里发生，这里没有删除入口。
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { memo, useCallback, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { relTime } from '../format'
 import { sidebarActivity } from '../sidebar-activity'
 import { SIDEBAR_ACTIVITY_COPY as activityCopy } from '../constants/copy'
@@ -22,6 +22,8 @@ import { composerDraftKey, type ComposerDraftStore } from '../composer-drafts'
 import { SessionDraftIndicator } from './SessionDraftIndicator'
 import type { RemoteSessionRef } from '@shared/desktop-remote'
 import { SidebarRemoteProjects, useRemoteProjectGroups, type ActiveRemoteLocation } from './SidebarRemoteProjects'
+import { SidebarProjectMenu } from './SidebarProjectMenu'
+import { useTabIndicator } from '../hooks/useTabIndicator'
 
 const sessionKey = (cwd: string, session: SessionMeta): string =>
   `${cwd}:${session.providerId}:${session.agentProfileId ?? ''}:${session.sessionId}`
@@ -132,28 +134,15 @@ export const Sidebar = memo(function Sidebar({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [projectMenu, setProjectMenu] = useState<{ project: ProjectMeta; left: number; top: number } | null>(null)
   const [projectDialog, setProjectDialog] = useState<{ mode: 'rename' | 'remove'; project: ProjectMeta } | null>(null)
-  const projectMenuRef = useRef<HTMLDivElement>(null)
+  const viewTabRefs = useRef(new Map<string, HTMLElement | null>())
+  const viewTabsRef = useRef<HTMLDivElement>(null)
+  const { indicatorRef: viewIndicatorRef } = useTabIndicator(viewTabsRef, view, viewTabRefs.current, ['projects', 'activity'])
   const toggle = (key: string): void =>
     setCollapsed((prev) => {
       const next = new Set(prev)
       next.has(key) ? next.delete(key) : next.add(key)
       return next
     })
-  useEffect(() => {
-    if (!projectMenu) return
-    const dismissPointer = (event: PointerEvent): void => {
-      if (event.target instanceof Node && !projectMenuRef.current?.contains(event.target)) setProjectMenu(null)
-    }
-    const dismissEscape = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setProjectMenu(null)
-    }
-    document.addEventListener('pointerdown', dismissPointer, true)
-    document.addEventListener('keydown', dismissEscape)
-    return () => {
-      document.removeEventListener('pointerdown', dismissPointer, true)
-      document.removeEventListener('keydown', dismissEscape)
-    }
-  }, [projectMenu])
   const isActive = (cwd: string, session: SessionMeta): boolean => sessionMatchesSelection(cwd, session, {
     cwd: activeCwd,
     sessionId: activeSessionId,
@@ -168,8 +157,8 @@ export const Sidebar = memo(function Sidebar({
       top: Math.max(8, Math.min(rect.top - 8, window.innerHeight - 292))
     })
   }
-  const renderSession = (cwd: string, session: SessionMeta, projectName: string, showProjectName = false) => <SessionRow
-    key={sessionKey(cwd, session)} cwd={cwd} session={session} projectName={projectName} showProjectName={showProjectName}
+  const renderSession = (cwd: string, session: SessionMeta, projectName: string, showProjectName = false, motionKey?: string) => <SessionRow
+    key={sessionKey(cwd, session)} cwd={cwd} session={session} projectName={projectName} showProjectName={showProjectName} motionKey={motionKey}
     relativeTime={relTime(session.mtime)} draftStore={draftStore} active={isActive(cwd, session)}
     running={Boolean(session.runId && runningRunIds.has(session.runId))}
     waitingForAnswer={Boolean(session.runId && waitingQuestionRunIds.has(session.runId))}
@@ -178,7 +167,7 @@ export const Sidebar = memo(function Sidebar({
     backgroundWork={session.runId ? backgroundWorkByRun[session.runId] : undefined}
     onPick={onPick} onTogglePin={onTogglePin} onArchive={onArchive}
     onMenu={onRenameSession ? openSessionMenu : undefined} />
-  const renderConversation = (conversation: ConversationSummary) => <div className="sb-sess-row" key={conversation.id}>
+  const renderConversation = (conversation: ConversationSummary) => <div className="sb-sess-row" data-motion-key={view === 'projects' ? `conversation:${conversation.id}` : undefined} key={conversation.id}>
     <button className={`sb-sess${activeConversationId === conversation.id ? ' active' : ''}`} aria-current={activeConversationId === conversation.id ? 'true' : undefined} onClick={() => onPickConversation?.(conversation)} data-conversation-id={conversation.id}>
       <span className="sb-session-main">
         <Icon name={conversation.pinnedAt ? 'pin' : 'message'} />
@@ -249,18 +238,19 @@ export const Sidebar = memo(function Sidebar({
         </nav>
       )}
 
-      <div className="sb-view-tabs" role="tablist" aria-label={activityCopy.navigation} onKeyDown={(event) => {
+      <div className="sb-view-tabs" ref={viewTabsRef} role="tablist" aria-label={activityCopy.navigation} onKeyDown={(event) => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
         event.preventDefault()
         const next = event.key === 'Home' ? 'projects' : event.key === 'End' ? 'activity' : view === 'projects' ? 'activity' : 'projects'
         setView(next)
         document.getElementById(`${tabId}-${next}`)?.focus()
       }}>
-        {(['projects', 'activity'] as const).map((tab) => <button key={tab} type="button" role="tab"
+        {(['projects', 'activity'] as const).map((tab) => <button key={tab} ref={(node) => { viewTabRefs.current.set(tab, node) }} type="button" role="tab"
           id={`${tabId}-${tab}`} aria-selected={view === tab} aria-controls={`${tabId}-panel`}
           tabIndex={view === tab ? 0 : -1} title={tab === 'activity' ? activityCopy.scope : undefined} onClick={() => setView(tab)}>
           {activityCopy[tab]}
         </button>)}
+        <span ref={viewIndicatorRef} className="motion-tab-indicator" aria-hidden="true" />
       </div>
       <SessionHoverProvider><div className="sb-list" role="tabpanel" id={`${tabId}-panel`} aria-labelledby={`${tabId}-${view}`} tabIndex={0}>
         {catalogHealth && catalogHealth.status !== 'ready' && (
@@ -304,45 +294,15 @@ export const Sidebar = memo(function Sidebar({
       )}
 
       {projectMenu && (
-        <div
-          ref={projectMenuRef}
-          className="menu sb-project-menu"
-          role="menu"
-          aria-label={`管理项目 ${projectMenu.project.name}`}
-          style={{ left: projectMenu.left, top: projectMenu.top }}
-        >
-          <div className="sb-project-menu-head">
-            <b>{projectMenu.project.name}</b>
-            <code>{projectMenu.project.cwd}</code>
-          </div>
-          {onNewProjectChat && (
-            <button type="button" className="mitem on" onClick={() => { setProjectMenu(null); onNewProjectChat(projectMenu.project.cwd) }}>
-              <Icon name="plus" /> 在此项目新建会话
-            </button>
-          )}
-          <div className="mdiv" />
-          {onToggleProjectPin && (
-            <button type="button" className="mitem" onClick={() => { setProjectMenu(null); onToggleProjectPin(projectMenu.project) }}>
-              <Icon name="pin" /> {projectMenu.project.pinnedAt ? '取消置顶项目' : '置顶项目'}
-            </button>
-          )}
-          {onRevealProject && (
-            <button type="button" className="mitem" onClick={() => { setProjectMenu(null); onRevealProject(projectMenu.project) }}>
-              <Icon name="folder" /> 在 Finder 中显示
-            </button>
-          )}
-          {onRenameProject && (
-            <button type="button" className="mitem" onClick={() => { setProjectDialog({ mode: 'rename', project: projectMenu.project }); setProjectMenu(null) }}>
-              <Icon name="settings" /> 编辑项目名称
-            </button>
-          )}
-          <div className="mdiv" />
-          {onRemoveProject && (
-            <button type="button" className="mitem sb-project-remove" onClick={() => { setProjectDialog({ mode: 'remove', project: projectMenu.project }); setProjectMenu(null) }}>
-              <Icon name="x" /> 从 Scry 移除项目
-            </button>
-          )}
-        </div>
+        <SidebarProjectMenu
+          menu={projectMenu}
+          onClose={() => setProjectMenu(null)}
+          onNewProjectChat={onNewProjectChat}
+          onToggleProjectPin={onToggleProjectPin}
+          onRevealProject={onRevealProject}
+          onRenameProject={(project) => { setProjectDialog({ mode: 'rename', project }); setProjectMenu(null) }}
+          onRemoveProject={(project) => { setProjectDialog({ mode: 'remove', project }); setProjectMenu(null) }}
+        />
       )}
 
       {projectDialog && (

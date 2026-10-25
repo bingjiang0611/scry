@@ -1,13 +1,14 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
-import { createPortal } from 'react-dom'
 import type { DesktopDirectoryPage, DesktopRemoteConnection } from '@shared/desktop-remote'
 import { useDesktopConnections } from '../hooks/useDesktopConnections'
 import { refreshRemoteCatalog } from '../hooks/useRemoteCatalogs'
 import { bridge, errorText } from './DesktopRemote'
-import { ModalFrame } from './Modals'
+import { ModalFrame, requestModalClose } from './Modals'
 import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
-import { MODAL_COPY } from '../constants/copy'
+import { MODAL_COPY, LOADING_COPY } from '../constants/copy'
+import { useDelayedFlag } from '../hooks/useDelayedFlag'
+import { LoadingStatus } from './LoadingStatus'
 
 export function RemoteDirectoryPicker({ connection, initialPath, onPick, onClose }: {
   connection: DesktopRemoteConnection
@@ -26,6 +27,7 @@ export function RemoteDirectoryPicker({ connection, initialPath, onPick, onClose
   const { connections, refreshing, error: connectionError } = useDesktopConnections()
   const connected = !refreshing && !connectionError && connections.some(item => item.id === connection.id && item.state === 'connected')
   const busy = loading || selecting
+  const showLoading = useDelayedFlag(loading)
   const close = (): void => { if (!selecting) onClose() }
 
   const browse = async (target?: string, older?: DesktopDirectoryPage): Promise<void> => {
@@ -67,11 +69,11 @@ export function RemoteDirectoryPicker({ connection, initialPath, onPick, onClose
 
   // Composer transforms create a containing block for fixed descendants. Keep
   // this modal in the document overlay layer, not inside the floating picker.
-  return createPortal(
-    <ModalFrame labelledBy={titleId} initialFocusRef={pathRef} className="remote-directory-modal" onClose={close}>
+  return (
+    <ModalFrame labelledBy={titleId} initialFocusRef={pathRef} className="remote-directory-modal" closeDisabled={selecting} onClose={close}>
       <div className="modal-head">
         <b id={titleId}>选择 {connection.label} 上的目录</b>
-        <ModalCloseButton disabled={selecting} aria-label={MODAL_COPY.closeRemoteDirectory} onClick={close} />
+        <ModalCloseButton disabled={selecting} aria-label={MODAL_COPY.closeRemoteDirectory} onClick={() => requestModalClose()} />
       </div>
       <div className="modal-body remote-directory-body" aria-busy={busy}>
         <p className="hosts-muted">这里浏览的是 {connection.label}，不是这台 Mac。浏览不会授权；明确选择后，目录将加入远端可运行项目，已配对设备也可访问。原有 Agent 权限与仓库信任检查保持不变。</p>
@@ -82,10 +84,11 @@ export function RemoteDirectoryPicker({ connection, initialPath, onPick, onClose
         <div className="remote-directory-navigation">
           <button type="button" className="hosts-button" disabled={busy || !connected} onClick={() => void browse()}>主目录</button>
           <button type="button" className="hosts-button" disabled={busy || !connected || !page?.parent} onClick={() => void browse(page!.parent!.path)}>上一级</button>
-          <span className="hosts-muted">{page ? `${page.directories.length} / ${page.total} 个文件夹` : loading ? '正在读取…' : '尚未读取目录'}</span>
+          <span className="hosts-muted">{page ? LOADING_COPY.directoryCount(page.directories.length, page.total) : loading ? '' : LOADING_COPY.directoryUnread}</span>
         </div>
         {!connected && <p role="alert" className="desktop-remote__error">{connection.label} 未连接或连接状态未知；不会改用本机选择或执行。</p>}
         {error && <p role="alert" className="desktop-remote__error">{error}</p>}
+        {showLoading && <LoadingStatus title={LOADING_COPY.reading} />}
         <div className="remote-directory-list" role="group" aria-label={`${connection.label} 的文件夹`}>
           {page?.directories.map(directory => (
             <button type="button" key={`${directory.label}:${directory.path}`} className="mitem remote-directory-entry" title={directory.path} data-remote-directory={directory.path} disabled={busy || !connected} onClick={() => void browse(directory.path)}>
@@ -96,11 +99,10 @@ export function RemoteDirectoryPicker({ connection, initialPath, onPick, onClose
           {page?.hasMore && <button type="button" className="hosts-button" disabled={busy || !connected} onClick={() => void browse(page.current.path, page)}>加载更多文件夹</button>}
         </div>
         <div className="remote-directory-actions">
-          <button type="button" className="hosts-button" disabled={selecting} onClick={close}>取消</button>
+          <button type="button" className="hosts-button" disabled={selecting} onClick={() => requestModalClose()}>取消</button>
           <button type="button" className="hosts-button is-primary" disabled={busy || !connected || !page || path !== page.current.path} onClick={() => void choose()}>{selecting ? '正在确认…' : '选择此目录'}</button>
         </div>
       </div>
-    </ModalFrame>,
-    document.body
+    </ModalFrame>
   )
 }

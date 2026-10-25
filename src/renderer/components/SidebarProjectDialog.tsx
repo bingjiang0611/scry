@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import type { ProjectMeta } from '../env'
 import { MODAL_COPY, SIDEBAR_PROJECT_COPY as copy } from '../constants/copy'
-import { ModalFrame } from './Modals'
+import { ModalFrame, requestModalClose } from './Modals'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 
 export function ProjectDialog({
@@ -24,7 +24,7 @@ export function ProjectDialog({
     <ModalFrame labelledBy={titleId} initialFocusRef={mode === 'rename' ? inputRef : undefined} className="project-dialog" onClose={onClose}>
       <div className="modal-head">
         <b id={titleId}>{mode === 'rename' ? copy.rename : copy.removeTitle(project.name)}</b>
-        <ModalCloseButton aria-label={MODAL_COPY.close} onClick={onClose}>{copy.closeGlyph}</ModalCloseButton>
+        <ModalCloseButton aria-label={MODAL_COPY.close} onClick={() => requestModalClose()}>{copy.closeGlyph}</ModalCloseButton>
       </div>
       {mode === 'rename' ? (
         <form
@@ -42,7 +42,7 @@ export function ProjectDialog({
             <code>{project.cwd}</code>
           </div>
           <div className="project-dialog-actions">
-            <button type="button" className="btn" onClick={onClose}>{copy.cancel}</button>
+            <button type="button" className="btn" onClick={() => requestModalClose()}>{copy.cancel}</button>
             <button type="submit" className="btn primary" disabled={!name.trim()}>{copy.save}</button>
           </div>
         </form>
@@ -53,7 +53,7 @@ export function ProjectDialog({
             <code>{project.cwd}</code>
           </div>
           <div className="project-dialog-actions">
-            <button type="button" className="btn" onClick={onClose}>{copy.cancel}</button>
+            <button type="button" className="btn" onClick={() => requestModalClose()}>{copy.cancel}</button>
             <button type="button" className="btn project-remove-confirm" onClick={() => void onRemove()}>{copy.remove}</button>
           </div>
         </>

@@ -1,0 +1,424 @@
+/* Turn Diff Review：点击“本轮改动”后，与对话并排审阅该轮实时 Git patch。 */
+.app.right-panel-review {
+  grid-template-columns:
+    var(--sidebar-w)
+    var(--pane-resizer-w)
+    minmax(420px, 1fr)
+    var(--pane-resizer-w)
+    minmax(0, min(var(--overview-panel-w), 55vw));
+}
+
+.right-panel-slot {
+  container-type: inline-size;
+}
+
+.files-summary.diff > summary {
+  min-height: 40px;
+}
+
+.files-summary.diff > summary:focus-visible,
+.file-row.diff-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.files-summary .fh-review {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--accent);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.files-summary .fh-review svg,
+.file-row .diff-row-open {
+  width: 13px;
+  height: 13px;
+}
+
+.file-row.diff-row {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.file-row .diff-row-open {
+  flex: none;
+  color: var(--dim3);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .file-row.diff-row:hover {
+    background: var(--panel2);
+  }
+
+  .file-row.diff-row:hover .diff-row-open {
+    color: var(--accent);
+  }
+}
+
+.diff-review-panel {
+  background: var(--bg);
+}
+
+.diff-review-head {
+  height: var(--topbar-h);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.diff-review-title {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.diff-review-title > svg {
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+}
+
+.diff-review-title > div {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.diff-review-title b {
+  color: var(--fg);
+  font: 600 13px/1 var(--font-ui);
+}
+
+.diff-review-title span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dim2);
+  font: 10.5px/1 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-review-close {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--dim2);
+  cursor: pointer;
+  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear, color var(--dur-micro) linear;
+}
+
+.diff-review-close svg {
+  width: 15px;
+  height: 15px;
+}
+
+.diff-review-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .diff-review-close:hover {
+    border-color: var(--border2);
+    background: var(--panel2);
+    color: var(--fg);
+  }
+}
+
+.diff-review-summary {
+  min-height: 48px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border3);
+  background: var(--panel);
+}
+
+.diff-review-prompt {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--dim);
+  font: 12px/1.4 var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-review-totals {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--dim2);
+  font: 10.5px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.diff-review-totals .add,
+.diff-file-nav-count .add {
+  color: var(--ok);
+}
+
+.diff-review-totals .del,
+.diff-file-nav-count .del {
+  color: var(--bad);
+}
+
+.diff-review-layout {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 210px;
+  overflow: hidden;
+}
+
+.diff-review-content {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  background: var(--bg);
+}
+
+.diff-file-nav-count {
+  flex: none;
+  display: inline-flex;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.diff-review-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(230, 178, 77, 0.24);
+  background: var(--warn-soft);
+  color: var(--warn);
+  font: 11px/1.45 var(--font-ui);
+}
+
+.diff-review-notice svg {
+  width: 14px;
+  height: 14px;
+}
+
+.unified-diff {
+  min-width: max-content;
+  padding: 8px 0 18px;
+  color: var(--dim);
+  font: 11.5px/1.55 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.diff-line {
+  min-height: 20px;
+  display: grid;
+  grid-template-columns: 44px 44px minmax(max-content, 1fr);
+}
+
+.diff-line .diff-ln {
+  padding: 0 8px;
+  border-right: 1px solid var(--border3);
+  color: var(--dim3);
+  text-align: right;
+  user-select: none;
+}
+
+.diff-line code {
+  display: block;
+  padding: 0 12px;
+  color: inherit;
+  font: inherit;
+  white-space: pre;
+}
+
+.diff-line.meta {
+  color: var(--dim2);
+}
+
+.diff-line.hunk {
+  border-top: 1px solid rgba(59, 130, 246, 0.16);
+  border-bottom: 1px solid rgba(59, 130, 246, 0.16);
+  background: rgba(59, 130, 246, 0.09);
+  color: var(--read);
+}
+
+.diff-line.add {
+  background: rgba(84, 201, 138, 0.11);
+  color: var(--diff-add-fg);
+}
+
+.diff-line.del {
+  background: rgba(242, 100, 95, 0.11);
+  color: var(--diff-del-fg);
+}
+
+.diff-review-empty {
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 32px;
+  color: var(--dim2);
+  text-align: center;
+}
+
+.diff-review-empty svg {
+  width: 22px;
+  height: 22px;
+  color: var(--dim3);
+}
+
+.diff-review-empty b {
+  color: var(--fg);
+  font: 600 13px/1.3 var(--font-ui);
+}
+
+.diff-review-empty span {
+  max-width: 42ch;
+  font: 11.5px/1.55 var(--font-ui);
+}
+
+.diff-file-nav {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.diff-file-nav::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.diff-file-nav::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--border2);
+  background-clip: padding-box;
+}
+
+.diff-file-nav-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 12px 8px;
+  background: var(--panel);
+  color: var(--dim3);
+  font: 10px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.diff-file-nav button {
+  width: 100%;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px 7px 12px;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: var(--dim);
+  text-align: left;
+  cursor: pointer;
+}
+
+.diff-file-nav button > span:first-child {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font: 10.5px/1.35 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-file-nav button.active {
+  border-left-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+
+.diff-file-nav button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.diff-file-nav-count {
+  color: var(--dim3);
+  font: 10px/1.15 var(--font-mono);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .diff-file-nav button:hover:not(.active) {
+    background: var(--panel2);
+    color: var(--fg);
+  }
+}
+
+@container (max-width: 620px) {
+  .diff-review-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .diff-file-nav {
+    grid-row: 1;
+    max-height: min(38vh, 320px);
+    border-left: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .diff-file-nav-title {
+    padding-bottom: 6px;
+  }
+}
+
+@media (max-width: 1420px) {
+  .app.right-panel-review {
+    grid-template-columns: var(--sidebar-w) var(--pane-resizer-w) minmax(0, 1fr);
+  }
+
+  .app.right-panel-review > .panel-resizer {
+    display: none;
+  }
+
+  .app.right-panel-review > .right-panel-slot {
+    position: fixed;
+    inset: 0 0 0 calc(var(--sidebar-w) + var(--pane-resizer-w));
+    z-index: 30;
+    display: flex;
+    width: auto;
+    box-shadow: -18px 0 48px rgba(0, 0, 0, 0.5);
+  }
+}

@@ -19,6 +19,8 @@ import { useDiffInspector, useNarrowDiffLayout } from './hooks/useDiffInspector'
 import { useWorkspaceSelection } from './hooks/useWorkspaceSelection'
 import { WorkspaceContext } from './components/WorkspacePicker'
 import type { DiffReviewSelection } from './hooks/useDiffReviewSelection'
+import { runStructuralTransition } from './structural-motion'
+import { animatePaneChange, cancelPaneMotion } from './pane-motion'
 
 export function useAppView(context: AppViewContext) {
   const { setTheme, setShowSkills, setShowMcp, setShowLlmPerformance, refreshProviderCatalogs,
@@ -50,9 +52,12 @@ export function useAppView(context: AppViewContext) {
     if (!integrations.mcpCapability) void integrations.refreshMcp().catch(() => { })
   }
   const changeTheme = (nextTheme: AppTheme): void => {
-    setTheme(nextTheme)
-    applyTheme(nextTheme, document.documentElement)
-    persistTheme(nextTheme, browserThemeStorage())
+    cancelPaneMotion()
+    runStructuralTransition('theme', () => {
+      setTheme(nextTheme)
+      applyTheme(nextTheme, document.documentElement)
+      persistTheme(nextTheme, browserThemeStorage())
+    })
   }
 
   const appStyle: AppStyle = {
@@ -103,17 +108,20 @@ export function useAppView(context: AppViewContext) {
   )
   const toggleOverviewPanel = (): void => {
     if (view !== 'chat' && view !== 'conversation') return
-    if (!rightSurface.visible || surfacePane.collapsed) {
-      surfacePane.restore()
-      dispatchRightSurface({ type: 'show' })
-      return
-    }
-    dispatchRightSurface({ type: 'hide' })
+    animatePaneChange(() => {
+      if (!rightSurface.visible || surfacePane.collapsed) {
+        surfacePane.restore()
+        dispatchRightSurface({ type: 'show' })
+        return
+      }
+      dispatchRightSurface({ type: 'hide' })
+    })
   }
   const changeView = (next: AppView): boolean => {
     if (view === 'remote' && next !== 'remote' && remoteWorkspaceDirty && !window.confirm('当前远程文件有未保存修改。放弃修改并继续吗？')) return false
     setRemoteWorkspaceDirty(false)
-    setView(next)
+    cancelPaneMotion()
+    runStructuralTransition('page', () => setView(next))
     if (next === 'analytics') integrations.loadAnalytics()
     return true
   }
@@ -283,8 +291,10 @@ export function useAppView(context: AppViewContext) {
   const openDiff = useCallback((selection: DiffReviewSelection): void => {
     diffOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setTurnDiffSelection(selection)
-    surfacePane.restore()
-    dispatchRightSurface({ type: 'open', kind: 'diff' })
+    animatePaneChange(() => {
+      surfacePane.restore()
+      dispatchRightSurface({ type: 'open', kind: 'diff' })
+    })
   }, [dispatchRightSurface, setTurnDiffSelection, surfacePane.restore])
   const openTurnDiffReview = useCallback((turn: { runId: string; userText: string }, _snapshot: TurnDiffSnapshot, path?: string): void => {
     openDiff({ scope: 'turn', runId: turn.runId, ...(path ? { initialPath: path } : {}) })
@@ -307,14 +317,18 @@ export function useAppView(context: AppViewContext) {
       if (!confirmWorkspaceTransition()) return
       setWorkspaceDirty(false)
     }
-    if (action.type === 'close' && action.kind === 'diff') {
-      setTurnDiffSelection(null)
-      window.requestAnimationFrame(() => {
-        const target = diffOpener.current?.isConnected ? diffOpener.current : taRef.current
-        target?.focus()
-      })
+    const commit = (): void => {
+      if (action.type === 'close' && action.kind === 'diff') {
+        setTurnDiffSelection(null)
+        window.requestAnimationFrame(() => {
+          const target = diffOpener.current?.isConnected ? diffOpener.current : taRef.current
+          target?.focus()
+        })
+      }
+      dispatchRightSurface(action)
     }
-    dispatchRightSurface(action)
+    if (action.type === 'activate') commit()
+    else animatePaneChange(commit)
   }, [confirmWorkspaceTransition, dispatchRightSurface, setWorkspaceDirty, setTurnDiffSelection])
   useEffect(() => {
     if (rightSurface.activeId !== 'diff' || !panelVisible) return

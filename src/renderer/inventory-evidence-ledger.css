@@ -1,0 +1,607 @@
+/* Skills ledger + MCP fleet. All values come from production props in Modals.tsx. */
+
+.inventory-modal {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.modal-overlay:has(.inventory-modal) {
+  padding: 24px;
+  background: rgba(2, 4, 7, 0.7);
+  backdrop-filter: blur(8px);
+}
+
+.inventory-modal--skills {
+  width: min(860px, 94vw);
+  max-height: min(680px, calc(100vh - 48px));
+}
+
+.inventory-modal--mcp {
+  width: min(1160px, 96vw);
+  max-height: min(760px, calc(100vh - 48px));
+}
+
+.inventory-modal .inventory-modal__head {
+  min-height: 76px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 14px 17px 13px 20px;
+  background: var(--bg);
+}
+
+/* MCP 头部没有副标题，只有 eyebrow + 标题两行；Skills 仍有副标题，保持 76px */
+.inventory-modal--mcp .inventory-modal__head {
+  min-height: 62px;
+  padding-top: 12px;
+  padding-bottom: 11px;
+}
+
+.inventory-modal__title {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.inventory-modal__eyebrow {
+  color: var(--dim2);
+  font: 700 10px/1 var(--font-mono);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.inventory-modal__title-line {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.inventory-modal__title-line > b {
+  color: var(--fg);
+  font: 700 18px/1 var(--font-ui);
+  letter-spacing: -0.02em;
+}
+
+.inventory-provider,
+.inventory-scope {
+  width: max-content;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  color: var(--dim2);
+  background: var(--panel2);
+  font: 650 10px/1 var(--font-mono);
+  white-space: nowrap;
+}
+
+.inventory-provider {
+  color: var(--accent);
+  text-transform: uppercase;
+}
+
+.inventory-scope--project {
+  border-color: var(--accent-line);
+  color: var(--accent);
+}
+
+.inventory-scope--unknown {
+  border-style: dashed;
+  color: var(--warn);
+}
+
+/* 配置列移除后唯一保留的配置证据：仅在「已关闭」这个例外态出现 */
+.inventory-scope--off {
+  border-style: dashed;
+  border-color: var(--border2);
+  color: var(--dim2);
+  background: transparent;
+}
+
+.inventory-modal__title > p {
+  max-width: 720px;
+  margin: 0;
+  color: var(--dim);
+  font: 12px/1.4 var(--font-mono);
+  text-wrap: pretty;
+}
+
+.inventory-modal__head-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.inventory-modal__head-actions .modal-refresh,
+.inventory-modal__head-actions .modal-x {
+  flex: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+}
+
+.inventory-modal__head-actions .modal-refresh:focus-visible,
+.inventory-modal__head-actions .modal-x:focus-visible {
+  outline-offset: -3px;
+  background: var(--surface-hover);
+}
+
+.inventory-capability-note {
+  flex: none;
+  margin: 10px 22px 0;
+  padding: 9px 11px;
+  border-left: 2px solid var(--warn);
+  background: var(--warn-soft);
+  color: var(--dim);
+  font: 12.5px/1.5 var(--font-ui);
+}
+
+.inventory-context {
+  min-width: 0;
+  min-height: 52px;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 14px;
+  margin: 0 22px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.inventory-context__item {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.inventory-context__item > span {
+  color: var(--dim2);
+  font: 700 var(--text-compact-size)/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.inventory-context__item strong,
+.inventory-context__item code {
+  overflow: hidden;
+  color: var(--dim);
+  font: 620 12px/1.35 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inventory-context__item strong {
+  color: var(--fg);
+  text-transform: uppercase;
+}
+
+.inventory-context__cwd {
+  max-width: min(34vw, 320px);
+}
+
+.inventory-context__divider {
+  width: 1px;
+  height: 23px;
+  flex: none;
+  background: var(--border);
+}
+
+.inventory-context__spacer {
+  min-width: 8px;
+  flex: 1;
+}
+
+.inventory-context__summary {
+  overflow: hidden;
+  color: var(--dim);
+  font: 650 11.5px/1.3 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inventory-context__time {
+  color: var(--dim2);
+  font: 600 10px/1 var(--font-mono);
+  white-space: nowrap;
+}
+
+.skill-scope-tabs {
+  min-height: 42px;
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 0 22px;
+  border-bottom: 1px solid var(--border);
+}
+
+.skill-scope-tabs button {
+  position: relative;
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--dim2);
+  font: 620 12.5px/1 var(--font-ui);
+  transition: color var(--dur-micro) linear;
+}
+
+.skill-scope-tabs button::after {
+  position: absolute;
+  right: 8px;
+  bottom: -1px;
+  left: 8px;
+  height: 2px;
+  background: transparent;
+  content: "";
+}
+
+.skill-scope-tabs button.active {
+  color: var(--fg);
+}
+
+.skill-scope-tabs button.active::after {
+  background: var(--selected);
+}
+
+.skill-scope-tabs button:focus-visible {
+  outline: 2px solid var(--selected);
+  outline-offset: -4px;
+}
+
+.skill-scope-tabs button span {
+  margin-left: 6px;
+  color: var(--dim3);
+  font: 600 10px/1 var(--font-mono);
+}
+
+.inventory-toolbar {
+  min-width: 0;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 22px;
+  border-bottom: 1px solid var(--border);
+}
+
+.inventory-search {
+  min-width: 0;
+  height: 34px;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 9px;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--panel2);
+  color: var(--dim2);
+}
+
+.inventory-search:focus-within {
+  border-color: var(--selected-line);
+  background: var(--panel);
+}
+
+.inventory-search > span {
+  flex: none;
+  font: 700 10px/1 var(--font-mono);
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.inventory-search .modal-search {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--fg);
+  font: 13px/1 var(--font-ui);
+}
+
+.inventory-search .modal-search:focus,
+.inventory-search .modal-search:focus-visible {
+  border: 0;
+  outline: 0;
+  box-shadow: none;
+}
+
+.inventory-search button,
+.inventory-empty button {
+  flex: none;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--panel2);
+  color: var(--accent);
+  font: 600 12px/1 var(--font-ui);
+  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear, color var(--dur-micro) linear;
+}
+
+.inventory-toolbar__count {
+  flex: none;
+  color: var(--dim2);
+  font: 600 11.5px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.inventory-modal .inventory-modal__body {
+  min-height: 0;
+  padding: 0 0 16px;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--border2) transparent;
+  scrollbar-width: thin;
+}
+
+.inventory-state {
+  width: max-content;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dim);
+  font: 650 11.5px/1.3 var(--font-mono);
+}
+
+.inventory-state > i {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 9%, transparent);
+}
+
+.inventory-state--enabled,
+.inventory-state--connected,
+.inventory-state--passed {
+  color: var(--ok);
+}
+
+.inventory-state--pending {
+  color: var(--accent);
+}
+
+.inventory-state--failed {
+  color: var(--bad);
+}
+
+.inventory-state--needs-auth,
+.inventory-state--required {
+  color: var(--warn);
+}
+
+.inventory-state--disabled,
+.inventory-state--unsupported {
+  color: var(--dim2);
+}
+
+.inventory-state--unsupported > i {
+  border-radius: 1px;
+  box-shadow: none;
+}
+
+.inventory-state--unknown > i {
+  border: 1px solid currentColor;
+  background: transparent;
+  box-shadow: none;
+}
+
+.inventory-state--quiet {
+  font-size: 10px;
+}
+
+.inventory-switch {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  cursor: pointer;
+}
+
+.inventory-switch input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+}
+
+.inventory-switch__track {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  display: block;
+  border: 1px solid var(--border2);
+  border-radius: var(--r-pill);
+  background: var(--panel3);
+  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear;
+}
+
+.inventory-switch__track > span {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--dim);
+  transition: background-color var(--dur-micro) linear, transform var(--dur-fast) var(--ease-struct);
+}
+
+.inventory-switch input:checked + .inventory-switch__track {
+  border-color: var(--selected-line);
+  background: var(--selected-soft);
+}
+
+.inventory-switch input:checked + .inventory-switch__track > span {
+  background: var(--selected);
+  transform: translateX(14px);
+}
+
+.inventory-switch input:focus-visible + .inventory-switch__track {
+  outline: 2px solid var(--selected);
+  outline-offset: 2px;
+}
+
+.inventory-switch:has(input:disabled) {
+  cursor: not-allowed;
+}
+
+.inventory-switch input:disabled + .inventory-switch__track {
+  border-style: dashed;
+  opacity: 0.55;
+}
+
+.skill-ledger__row {
+  min-width: 0;
+  min-height: 74px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 18px;
+  padding: 11px 22px;
+  border-bottom: 1px solid var(--border3);
+  transition: background-color var(--dur-micro) linear;
+}
+
+.skill-ledger__main {
+  min-width: 0;
+}
+
+.skill-ledger__name-line {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.skill-ledger__name-line strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font: 650 13px/1.25 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-ledger__main > p {
+  margin: 6px 0 0;
+  overflow: hidden;
+  color: var(--dim);
+  font: 12.5px/1.45 var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-ledger__source {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 7px;
+}
+
+.skill-ledger__source > span {
+  flex: none;
+  color: var(--dim2);
+  font: 700 10px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.skill-ledger__source code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dim2);
+  font: 550 11.5px/1.3 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inventory-empty {
+  min-height: 190px;
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  padding: 30px 22px;
+  border-bottom: 1px solid var(--border);
+}
+
+.inventory-empty strong {
+  color: var(--fg);
+  font: 650 13px/1.2 var(--font-ui);
+}
+
+.inventory-empty p {
+  margin: 6px 0 13px;
+  color: var(--dim);
+  font: 13px/1.5 var(--font-ui);
+}
+
+.inventory-footnote {
+  min-height: 45px;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 11px 22px;
+}
+
+.inventory-footnote > span {
+  flex: none;
+  color: var(--dim2);
+  font: 700 var(--text-compact-size)/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.inventory-footnote > p {
+  margin: 0;
+  color: var(--dim2);
+  font: var(--text-supporting-size)/1.45 var(--font-ui);
+}
+
+.inventory-state-legend {
+  min-height: 39px;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 14px;
+  margin: 0 22px;
+  border-bottom: 1px solid var(--border3);
+}
+
+.inventory-state-legend > span:first-child {
+  margin-right: 2px;
+  color: var(--dim2);
+  font: 700 10px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.inventory-modal .inventory-modal__body--mcp {
+  padding-right: 0;
+  padding-left: 0;
+}
+
+.mcp-fleet-wrap {
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-color: var(--border2) transparent;
+  scrollbar-width: thin;
+}

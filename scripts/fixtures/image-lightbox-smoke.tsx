@@ -5,6 +5,7 @@ import { WorkspacePreviewFixture } from './workspace-preview-smoke'
 import { AssistantTurn, UserMessage } from '../../src/renderer/components/ChatTurn'
 import MarkdownImpl from '../../src/renderer/components/MarkdownImpl'
 import '../../src/renderer/styles.css'
+import '../../src/renderer/motion.css'
 import '../../src/renderer/codex-alignment.css'
 
 // Synthetic images only; no Provider, preload, persisted session or private screenshot.

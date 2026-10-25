@@ -17,6 +17,7 @@ export const SessionRow = memo(function SessionRow({
   cwd,
   projectName,
   showProjectName = false,
+  motionKey,
   active,
   running,
   waitingForAnswer,
@@ -34,6 +35,7 @@ export const SessionRow = memo(function SessionRow({
   cwd: string
   projectName?: string
   showProjectName?: boolean
+  motionKey?: string
   active: boolean
   running: boolean
   waitingForAnswer: boolean
@@ -49,7 +51,7 @@ export const SessionRow = memo(function SessionRow({
   const status = running ? backgroundWorkStatus(backgroundWork) : undefined
   const hover = useSessionHoverCard(session, cwd, projectName, running, status?.label)
   return (
-    <div className="sb-sess-row">
+    <div className="sb-sess-row" data-motion-key={motionKey}>
       <button
         type="button"
         className={['sb-sess', active && 'active', running && 'running', waitingForAnswer && 'waiting-answer', unread && 'unread'].filter(Boolean).join(' ')}

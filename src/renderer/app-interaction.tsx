@@ -26,6 +26,7 @@ import { useAppSessionRuntime } from './app-session-runtime'
 import { useAppDraftPersistence } from './app-draft-persistence'
 import { useDiffReviewSelection } from './hooks/useDiffReviewSelection'
 import { useConversationWorkspace } from './hooks/useConversationWorkspace'
+import { animatePaneChange } from './pane-motion'
 const SIDEBAR_MIN = 190
 const SIDEBAR_MAX = 260
 const PANEL_MIN = 360
@@ -87,8 +88,12 @@ export function useAppInteraction(context: AppInteractionContext) {
   const [remoteSurfaceTarget, setRemoteSurfaceTarget] = useState<HTMLDivElement | null>(null)
   const remotePanelVisible = view === 'remote' && remoteSurface.visible && !surfacePane.collapsed
   const dispatchRemoteSurface = (action: RightSurfaceAction): void => {
-    if (action.type === 'open' || action.type === 'show') surfacePane.restore()
-    remoteSurfaces.dispatch(action)
+    const commit = (): void => {
+      if (action.type === 'open' || action.type === 'show') surfacePane.restore()
+      remoteSurfaces.dispatch(action)
+    }
+    if (action.type === 'activate') commit()
+    else animatePaneChange(commit)
   }
   const desktopConnections = useDesktopConnections()
   useConnectedCatalogLoader(desktopConnections.connections, desktopConnections.error, desktopConnections.refreshing)

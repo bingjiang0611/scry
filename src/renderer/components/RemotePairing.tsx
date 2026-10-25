@@ -7,7 +7,7 @@ import { RemoteHostPanel } from './DesktopRemote'
 import { RemoteConnectionsSettings } from './HostsView'
 import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
-import { ModalFrame } from './Modals'
+import { ModalFrame, requestModalClose } from './Modals'
 import { useVisibilityPolling } from '../hooks/useVisibilityPolling'
 
 // Draw the scannable scry1: device code as a QR onto a canvas (CSP-safe: no
@@ -113,7 +113,7 @@ export function RemotePairing({ onNewSession }: { onNewSession: (connectionId: s
             )}
             {code && (
               <ModalFrame labelledBy={titleId} className="hosts-add-modal" onClose={() => setCode(null)}>
-                <div className="modal-head"><b id={titleId}>{copy.pairPhone}</b><ModalCloseButton aria-label={copy.closePairing} onClick={() => setCode(null)} /></div>
+                <div className="modal-head"><b id={titleId}>{copy.pairPhone}</b><ModalCloseButton aria-label={copy.closePairing} onClick={() => requestModalClose()} /></div>
                 <div className="modal-body remote-pairing__code">
                 {code.deviceCode ? (
                   <>

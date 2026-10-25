@@ -1,0 +1,121 @@
+/* PR#2：Sidebar chevron 展开/折叠 + 项目头可点 */
+
+/* 侧栏 视图 nav */
+.sb-nav { border-top: 1px solid var(--border3); }
+.sb-navitem {
+  width: 100%; display: flex; align-items: center; gap: 8px; border: 0;
+  background: transparent; color: var(--dim); font: inherit; text-align: left; cursor: pointer;
+  font-size: 12.5px;
+}
+.sb-navitem:hover { color: var(--fg); }
+
+/* ============================================================
+   UI/UX system pass: right panel topbar/context ring + chat micro metrics
+   ============================================================ */
+.ov-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  flex: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 9px;
+  border-bottom: 1px solid var(--border3);
+}
+.ov-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.ctx-gauge {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border3);
+}
+.ctx-gauge .ring {
+  --p: 0;
+  position: relative;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: conic-gradient(var(--accent) calc(var(--p) * 1%), var(--panel3) 0);
+  display: grid;
+  place-items: center;
+  font: 650 12px/1 var(--font-mono);
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.ctx-gauge .ring::before {
+  content: '';
+  position: absolute;
+  inset: 7px;
+  border-radius: 50%;
+  background: var(--panel);
+  border: 1px solid var(--border3);
+}
+.ctx-gauge .ring span {
+  position: relative;
+  z-index: 1;
+}
+.ctx-gauge.warm .ring {
+  background: conic-gradient(var(--warn) calc(var(--p) * 1%), var(--panel3) 0);
+}
+.ctx-gauge.hot .ring {
+  background: conic-gradient(var(--bad) calc(var(--p) * 1%), var(--panel3) 0);
+}
+.ctx-gauge.empty .ring {
+  background: var(--panel3);
+  color: var(--dim2);
+}
+.ctx-copy {
+  min-width: 0;
+}
+.ctx-copy .lbl {
+  font: 10.5px/1 var(--font-mono);
+  color: var(--dim2);
+  letter-spacing: 0.14em;
+}
+.ctx-copy .v {
+  margin-top: 6px;
+  font: 650 18px/1 var(--font-mono);
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.ctx-copy .sub {
+  margin-top: 6px;
+  font: 11px/1.35 var(--font-mono);
+  color: var(--dim2);
+}
+.who .mini {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  font: 10.5px/1 var(--font-mono);
+  color: var(--dim2);
+}
+.who .mini .m {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 3px 6px;
+  border: 1px solid var(--border3);
+  border-radius: var(--r-xs);
+  white-space: nowrap;
+}
+.who .mini b {
+  color: var(--fg);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.who .mini .cost b {
+  color: var(--accent);
+}
+.who .mini .err,
+.who .mini .err b {
+  color: var(--bad);
+}

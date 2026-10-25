@@ -25,8 +25,10 @@ import { exerciseWindowBoundary } from './electron-security-window-boundary.mjs'
 import { exerciseTerminalCore } from './electron-security-terminal-core.mjs'
 import { exerciseRecording } from './electron-security-recording.mjs'
 import { exerciseRestart } from './electron-security-restart.mjs'
+import { exerciseStructureApp } from './structure-app-checks.mjs'
 
 
+const structureOnly = process.argv[2] === '--dev-structure-only'
 const sourceControlOnly = process.argv[2] === '--dev-source-control-only'
 const conversationOwnershipOnly = process.argv[2] === '--dev-conversation-ownership-only'
 const unifiedConversationOnly = process.argv[2] === '--dev-unified-conversation-only'
@@ -46,7 +48,7 @@ if (devQuestionOnly && !foreground) {
 }
 const devFilesOnly = process.argv[2] === '--dev-files-only'
 const filesOnly = devFilesOnly || process.argv[2] === '--files-only'
-const devApp = unifiedConversationOnly || conversationOwnershipOnly || sourceControlOnly || devMetaPromptsOnly || nativeHistoryOnly || process.argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
+const devApp = structureOnly || unifiedConversationOnly || conversationOwnershipOnly || sourceControlOnly || devMetaPromptsOnly || nativeHistoryOnly || process.argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
 const packagedAppArgument = ['--files-only', '--performance-only', '--file-history-only'].includes(process.argv[2]) ? undefined : process.argv[2]
 const appPath = resolve(devApp ? 'node_modules/electron/dist/Electron.app' : packagedAppArgument || join('dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'Scry.app'))
 const executable = join(appPath, 'Contents', 'MacOS', devApp ? 'Electron' : 'Scry')
@@ -242,6 +244,12 @@ async function main() {
     return response.result?.value
   }
   const context = () => ({ ownershipFixture, smokeIdentity, setSmokeIdentity: (value) => { smokeIdentity = value }, conversationInputs, conversationCalls, sourceFileHistory, evaluate, cdp, workspace, secondWorkspace, canonicalWorkspace, canonicalHome, home, temp, userDataDir, openReceipt, badgeReceipt, nativeHistoryPerformanceOnly, nativeSessionId, performanceOnly, filesOnly, devFilesOnly, devQuestionOnly, foreground, waitForTarget, stopOwnedApp, launchApp, port, child, stderr, initialTargets, page })
+  if (structureOnly) {
+    const result = await exerciseStructureApp(cdp, evaluate)
+    cdp.close()
+    console.log(JSON.stringify(result))
+    return
+  }
   if (ownershipFixture) return exerciseOwnership(context())
   if (sourceControlOnly) {
     const result = await exerciseSourceControlApp(cdp, evaluate, { workspace: canonicalWorkspace, remote: realpathSync(secondWorkspace), home })
@@ -290,9 +298,7 @@ async function main() {
   const { historyRestart } = restart
 
   cdp.close()
-  // Ownership is captured outside Electron before the crash. Confirm the registered tree is
-  // gone before restarting, rather than treating only the parent's exit as cleanup success.
-  console.log(JSON.stringify({
+    console.log(JSON.stringify({
     appPath,
     rendererUrl: page.url,
     preloadKeys: boundary.preloadKeys.length,

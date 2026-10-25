@@ -3,10 +3,14 @@ export async function exerciseSessionCapabilityCore() {
   const check = (condition, message) => { if (!condition) throw new Error(message) }
   const waitFor = (predicate) => new Promise((resolve, reject) => {
     if (predicate()) return resolve()
-    const observer = new MutationObserver(() => {
-      if (predicate()) { clearTimeout(timer); observer.disconnect(); resolve() }
-    })
-    const timer = setTimeout(() => { observer.disconnect(); reject(new Error(`DOM condition timed out: ${predicate.toString()}`)) }, 5000)
+    const changed = () => {
+      if (!predicate()) return
+      clearTimeout(timer); observer.disconnect(); document.removeEventListener('focusin', changed, true); resolve()
+    }
+    // Search autofocus does not necessarily mutate the DOM.
+    const observer = new MutationObserver(changed)
+    const timer = setTimeout(() => { observer.disconnect(); document.removeEventListener('focusin', changed, true); reject(new Error(`DOM condition timed out: ${predicate.toString()}`)) }, 5000)
+    document.addEventListener('focusin', changed, true)
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true })
   })
   const button = (scope, fragment) => {
@@ -79,9 +83,12 @@ export async function exerciseSessionCapabilityCore() {
   currentModelButton.click()
   await waitFor(() => document.querySelector('#model-effort [aria-label="选择 Model"]') != null)
   const modelList = document.querySelector('#model-effort [aria-label="选择 Model"]')
-  check(getComputedStyle(modelList).scrollbarWidth === 'none', 'Model list scrollbar is still visible')
-  await new Promise((resolve) => setTimeout(resolve, 0))
-  check(document.activeElement?.getAttribute('aria-selected') === 'true', 'Selected Model did not receive focus after drill-in')
+  check(getComputedStyle(modelList).scrollbarWidth === 'thin', 'Grouped Model list lost its scroll affordance')
+  await waitFor(() => document.activeElement === document.querySelector('#model-effort .model-effort-search'))
+  document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+  check(document.activeElement?.textContent.includes('自动模型'), 'Search ArrowDown did not enter the Model list')
+  document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+  check(document.activeElement?.getAttribute('aria-selected') === 'true', 'Keyboard navigation lost the selected Model')
   document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
   await new Promise((resolve) => requestAnimationFrame(() => resolve()))
   check(document.activeElement?.textContent.includes('Performance'), 'ArrowDown did not move focus to the next Model')
@@ -89,8 +96,9 @@ export async function exerciseSessionCapabilityCore() {
   await waitFor(() => modelEffortTrigger.textContent.includes('Performance') && modelEffortTrigger.textContent.includes('默认'))
   document.querySelector('#model-effort .model-effort-current').click()
   await waitFor(() => document.querySelector('#model-effort [aria-label="选择 Model"]') != null)
-  await new Promise((resolve) => setTimeout(resolve, 0))
-  check(document.activeElement?.textContent.includes('Performance'), 'Current Model did not receive focus on repeated drill-in')
+  await waitFor(() => document.activeElement === document.querySelector('#model-effort .model-effort-search'))
+  document.querySelector('#model-effort [aria-label="选择 Model"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
+  check(document.activeElement?.textContent.includes('Performance') && document.activeElement?.getAttribute('aria-selected') === 'true', 'Repeated drill-in lost keyboard access to the current Model')
   document.activeElement.click()
   await waitFor(() => modelEffortTrigger.textContent.includes('Performance') && modelEffortTrigger.textContent.includes('默认'))
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))

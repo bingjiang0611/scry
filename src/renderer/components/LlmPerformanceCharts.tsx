@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { LlmMetric, LlmMetricSample } from '@shared/llm-performance'
 import { LLM_PERFORMANCE_COPY as copy } from '../constants/llm-performance-copy'
 import { Icon } from './primitives/Icon'
+import { useFirstReadyList } from '../hooks/useFirstReadyList'
 import { clock, day, formatMetric, INTERVAL_MS, metricAxisMax, metricIntervals, type ModelDistribution, type RangeHours } from './llm-performance-data'
 
 export function MetricHelp({ label, text }: { label: string; text: string }) {
@@ -15,18 +16,19 @@ export function ModelComparison({ groups, selected, colorOf, onSelect }: {
   onSelect: (model: string) => void
 }) {
   const max = metricAxisMax(groups.flatMap(group => group.speed.map(sample => sample.value)))
+  const motion = useFirstReadyList(groups.length > 0)
   const x = (value: number): number => 8 + value / max * 384
-  return <div className="llm-perf-comparison-scroll"><div className="llm-perf-models">
+  return <div className="llm-perf-comparison-scroll"><div className={`llm-perf-models ${motion.className}`}>
     <div className="llm-perf-mhead">
       <span>{copy.columns.model}</span><span>{copy.columns.distribution}</span>
       <span>{copy.columns.speed}<small>{copy.metrics.speed.unit}</small></span>
       <span>{copy.columns.firstToken}<small>{copy.metrics.firstToken.unit}</small></span>
     </div>
-    {groups.map(group => {
+    {groups.map((group, index) => {
       const speed = group.speedSummary, wait = group.waitSummary
       const count = speed ?? wait!
       const rounds = copy.rounds(count.count - count.provisional, count.provisional)
-      return <button key={group.model} type="button" className="llm-perf-mrow" aria-pressed={selected === group.model}
+      return <button key={group.model} type="button" className="llm-perf-mrow motion-stagger-item" style={motion.itemStyle(index)} aria-pressed={selected === group.model}
         onClick={() => onSelect(group.model)}>
         <span className="llm-perf-mname"><i aria-hidden="true" style={{ background: colorOf(group.model) }} /><b>{group.model}</b>
           <small aria-label={copy.roundsLabel(copy.metrics[speed ? 'speed' : 'firstToken'].label, count.count - count.provisional, count.provisional)}>

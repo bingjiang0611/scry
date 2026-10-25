@@ -7,7 +7,7 @@ import { desktopConnectionLabel, refreshDesktopConnections, useDesktopConnection
 import { forgetRemoteCatalog, refreshRemoteCatalog, useRemoteCatalogs } from '../hooks/useRemoteCatalogs'
 import { bridge, ClientPairForm } from './DesktopRemote'
 import { HostStateDot, hostState } from './LocationPicker'
-import { ModalFrame } from './Modals'
+import { ModalFrame, requestModalClose } from './Modals'
 import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import './hosts-view.css'
@@ -63,7 +63,7 @@ export function RemoteConnectionsSettings({ onNewSession }: { onNewSession: (con
         <ModalFrame labelledBy={titleId} className="hosts-add-modal" onClose={() => setAdding(false)}>
           <div className="modal-head">
             <b id={titleId}>{copy.addHost}</b>
-            <ModalCloseButton onClick={() => setAdding(false)} aria-label={copy.closeAddHost} />
+            <ModalCloseButton onClick={() => requestModalClose()} aria-label={copy.closeAddHost} />
           </div>
           <div className="modal-body">
             <ClientPairForm onPaired={async (id) => { await refreshDesktopConnections(); setExpanded(id) }} />
@@ -197,10 +197,10 @@ function HostAddressEditor({ connection, onClose }: { connection: DesktopRemoteC
     } finally { setSaving(false) }
   }
   return (
-    <ModalFrame labelledBy={titleId} initialFocusRef={hostnameRef} className="hosts-add-modal" onClose={close}>
+    <ModalFrame labelledBy={titleId} initialFocusRef={hostnameRef} className="hosts-add-modal" closeDisabled={saving} onClose={close}>
       <div className="modal-head">
         <b id={titleId}>{copy.editAddress}</b>
-        <ModalCloseButton disabled={saving} onClick={close} aria-label={copy.closeEditAddress} />
+        <ModalCloseButton disabled={saving} onClick={() => requestModalClose()} aria-label={copy.closeEditAddress} />
       </div>
       <form className="modal-body desktop-remote__card hosts-address-form" onSubmit={(event) => void save(event)} aria-describedby={noteId} aria-busy={saving}>
         <p><strong>{connection.label}</strong></p>
@@ -212,7 +212,7 @@ function HostAddressEditor({ connection, onClose }: { connection: DesktopRemoteC
         </div>
         {error && <p className="desktop-remote__error" role="alert">{error}</p>}
         <div className="hosts-address-actions">
-          <button type="button" className="hosts-button" disabled={saving} onClick={close}>{copy.cancel}</button>
+          <button type="button" className="hosts-button" disabled={saving} onClick={() => requestModalClose()}>{copy.cancel}</button>
           <button type="submit" className="hosts-button is-primary" disabled={saving || !changed}>{saving ? copy.saving : copy.saveAddress}</button>
         </div>
       </form>

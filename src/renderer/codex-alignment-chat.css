@@ -1,0 +1,797 @@
+/* Transcript --------------------------------------------------------------- */
+
+.chat-body,
+.runtime-composer {
+  --evidence-column: 960px;
+  --evidence-content: calc(var(--evidence-column) - 2 * var(--evidence-gutter));
+  --evidence-gutter: clamp(20px, 3cqi, 36px);
+}
+
+.chat-body .chat-transcript {
+  padding: 24px var(--evidence-gutter) 42px;
+}
+
+.chat-body .welcome-field {
+  width: min(var(--evidence-content), 100%);
+  gap: 24px;
+  padding-block: 34px;
+  text-align: center;
+}
+
+.welcome-kicker {
+  justify-content: center;
+  color: var(--dim2);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 550;
+  letter-spacing: 0;
+}
+
+.welcome-heading {
+  justify-items: center;
+  gap: 12px;
+}
+
+.welcome-heading h1 {
+  max-width: 680px;
+  font-size: clamp(27px, 3.2cqi, 34px);
+  font-weight: 650;
+  letter-spacing: -0.04em;
+}
+
+.welcome-heading p {
+  max-width: 580px;
+  color: var(--dim2);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.welcome-provider-field {
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: var(--shadow-card);
+  text-align: left;
+}
+
+.welcome-provider-head {
+  padding-bottom: 12px;
+  border-bottom-color: var(--border3);
+}
+
+.welcome-provider-head b {
+  font-size: 13.5px;
+}
+
+.welcome-provider-head small {
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
+.welcome-provider {
+  padding: 12px 13px;
+  border-color: var(--border);
+  border-radius: 12px;
+  background: var(--panel2);
+}
+
+.welcome-provider.is-selected,
+.welcome-profile-pick.is-selected {
+  border-color: var(--border2);
+  background: var(--panel3);
+  box-shadow: none;
+}
+
+.welcome-provider small,
+.welcome-provider code,
+.welcome-profile-count {
+  font-size: 11px;
+}
+
+.chat-body .transcript-turn {
+  width: min(var(--evidence-content), 100%);
+  padding: 5px 0 34px;
+}
+
+.chat-body .transcript-turn + .transcript-turn {
+  padding-top: 40px;
+  border-top: 0;
+}
+
+.chat-body .transcript-turn.is-selected::before,
+.chat-body .transcript-turn.turn-jump-target::before {
+  left: -18px;
+  width: 3px;
+  background: var(--accent);
+}
+
+.chat-body .turn-user {
+  display: flex;
+  justify-content: flex-end;
+  padding-left: 18%;
+}
+
+.chat-body .bubble-user {
+  width: fit-content;
+  max-width: 100%;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 18px;
+  background: var(--panel2);
+  box-shadow: var(--shadow-card);
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+
+.chat-body .turn-assistant {
+  margin-top: 20px;
+}
+
+.chat-body .who {
+  min-height: 26px;
+  padding-bottom: 8px;
+  color: var(--dim2);
+  font-size: 11.5px;
+  font-weight: 540;
+}
+
+.chat-body .who .av {
+  width: 6px;
+  height: 6px;
+  background: var(--dim2);
+}
+
+.chat-body .who .runid,
+.chat-body .who .mini,
+.chat-body .who .mini b {
+  color: var(--dim3);
+  font-size: var(--text-compact-size);
+}
+
+.chat-body .model-text {
+  max-width: 100%;
+  color: var(--fg);
+  font-size: 14.5px;
+  line-height: 1.72;
+}
+
+.chat-body .turn-flow {
+  gap: 15px;
+  padding-left: 22px;
+}
+
+.chat-body .turn-flow::before {
+  left: 2px;
+  background: var(--border3);
+}
+
+.chat-body .thinking {
+  color: var(--dim);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.chat-body .tool-group-row .tg-label,
+.chat-body .tool-group-row .tg-dur {
+  color: var(--dim2);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+}
+
+.chat-body .tool-group-row .tg-pill {
+  border-color: var(--border);
+  border-radius: 6px;
+  background: var(--panel2);
+}
+
+.chat-body .tool-group-body {
+  padding-inline: 10px;
+  border: 1px solid var(--border3);
+  border-radius: 10px;
+  background: var(--panel2);
+}
+
+.chat-body .tool-card {
+  border-color: var(--border3);
+  background: transparent;
+}
+
+.chat-body .tool-row .name,
+.chat-body .tool-row .arg {
+  font-family: var(--font-ui);
+}
+
+.chat-body .turn-footer {
+  margin-top: 12px;
+  border-top-color: var(--border3);
+}
+
+/* Composer ---------------------------------------------------------------- */
+
+.runtime-composer {
+  width: min(var(--evidence-column), 100%);
+  padding: 8px var(--evidence-gutter) 12px;
+  container-name: composer-pane;
+  container-type: inline-size;
+}
+
+.runtime-composer .evidence-composer-shell {
+  padding: 8px 12px 9px;
+  overflow: visible;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--panel);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 10%), 0 1px 2px rgb(0 0 0 / 7%);
+}
+
+.runtime-composer .evidence-composer-shell:focus-within {
+  border-color: var(--border2);
+  box-shadow: 0 12px 34px rgb(0 0 0 / 13%), 0 0 0 1px var(--accent-soft);
+}
+
+.composer-context {
+  min-width: 0;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin: -8px -12px 3px;
+  padding: 5px 14px;
+  border-bottom: 1px solid var(--border3);
+  border-radius: 19px 19px 0 0;
+  background: transparent;
+}
+
+.composer-context .wdpick {
+  min-width: 0;
+  max-width: min(280px, 70%);
+}
+
+.composer-context .wdbtn {
+  width: auto;
+  max-width: 100%;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--surface-muted);
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.composer-context .wdbtn:hover {
+  border-color: transparent;
+  background: var(--surface-strong);
+  color: var(--fg);
+}
+
+.composer-context .workdir-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-composer .input,
+.runtime-composer textarea {
+  min-height: 76px;
+  padding: 14px 8px 10px;
+  color: var(--fg);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.runtime-composer textarea::placeholder {
+  color: var(--dim3);
+}
+
+.runtime-composer .composer-bottom {
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.runtime-composer .composer-controls {
+  min-width: 0;
+  overflow: visible;
+}
+
+.runtime-composer .run-control-select {
+  color: var(--dim);
+  font-size: 11.5px;
+}
+
+.runtime-composer .permission-mode-trigger {
+  height: 32px;
+  min-height: 32px;
+  padding-inline: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+}
+
+.runtime-composer .permission-mode-trigger:hover,
+.runtime-composer .permission-mode-trigger:focus-visible,
+.runtime-composer .run-control-select:has(.permission-mode-trigger[aria-expanded='true']) .permission-mode-trigger {
+  border-color: transparent;
+  background: var(--surface-strong);
+  color: var(--fg);
+}
+
+.runtime-composer .run-control-select:last-child {
+  order: -1;
+}
+
+.runtime-composer .run-control-select .rc-prefix {
+  display: none;
+}
+
+.runtime-composer .run-control-select.warning,
+.runtime-composer .run-control-select.danger {
+  color: var(--warn);
+}
+
+.runtime-composer .run-control-select.danger .permission-mode-trigger {
+  border-color: transparent;
+  background: transparent;
+}
+
+.runtime-composer .run-control-select.danger .permission-mode-trigger:hover,
+.runtime-composer .run-control-select.danger .permission-mode-trigger:focus-visible,
+.runtime-composer .run-control-select.danger:has(.permission-mode-trigger[aria-expanded='true']) .permission-mode-trigger {
+  border-color: transparent;
+  background: var(--warn-soft);
+}
+
+.runtime-composer .composer-action-controls {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+}
+
+.runtime-composer .composer-action-controls .clipick,
+.runtime-composer .model-effort-picker {
+  position: relative;
+  min-width: 0;
+}
+
+.runtime-composer .composer-action-controls .clibtn,
+.runtime-composer .model-effort-trigger {
+  min-width: 0;
+  height: 34px;
+  min-height: 34px;
+  padding: 0 8px;
+  border: 0;
+  overflow: hidden;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--dim);
+  font-size: 11.5px;
+}
+
+.runtime-composer .composer-action-controls .clibtn {
+  max-width: 126px;
+}
+
+.runtime-composer .composer-action-controls .clibtn > span:not(.agicon) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-composer .composer-action-controls .clibtn:focus-visible,
+.runtime-composer .model-effort-trigger:focus-visible,
+.runtime-composer .model-effort-current:focus-visible,
+.runtime-composer .model-effort-list button:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 1px;
+}
+
+.runtime-composer .composer-action-controls .clibtn:hover:not(:disabled),
+.runtime-composer .model-effort-trigger:hover:not(:disabled),
+.runtime-composer .model-effort-trigger[aria-expanded='true'] {
+  background: var(--surface-strong);
+  color: var(--fg);
+}
+
+
+.runtime-composer .composer-action-controls .climenu {
+  right: 0;
+  left: auto;
+}
+
+.runtime-composer .model-effort-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.runtime-composer .model-effort-trigger:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.runtime-composer .model-effort-model,
+.runtime-composer .model-effort-effort {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-composer .model-effort-model {
+  max-width: min(150px, 24cqi);
+  color: var(--fg);
+}
+
+.runtime-composer .model-effort-effort {
+  max-width: 72px;
+  color: var(--dim2);
+}
+
+.runtime-composer .model-effort-trigger .chev {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  color: var(--dim2);
+}
+
+.runtime-composer .permission-mode-popover {
+  position: absolute;
+  z-index: 32;
+  left: 0;
+  bottom: calc(100% + 9px);
+  width: min(400px, calc(100vw - 32px));
+  padding: 7px;
+  border: 1px solid var(--border2);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel) 97%, transparent);
+  box-shadow: var(--shadow-pop);
+  backdrop-filter: blur(18px);
+}
+
+.runtime-composer .permission-mode-popover.is-single-option {
+  width: min(360px, calc(100vw - 32px));
+}
+
+.runtime-composer .permission-mode-heading {
+  padding: 7px 10px 6px;
+  color: var(--dim2);
+  font-size: 11px;
+  font-weight: 550;
+  letter-spacing: 0.01em;
+}
+
+.runtime-composer .permission-mode-option {
+  width: 100%;
+  min-height: 62px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  text-align: left;
+}
+
+.runtime-composer .permission-mode-option:hover,
+.runtime-composer .permission-mode-option:focus-visible,
+.runtime-composer .permission-mode-option.is-selected {
+  background: var(--surface-strong);
+}
+
+.runtime-composer .permission-mode-option:focus-visible {
+  outline: 1px solid var(--accent-line);
+  outline-offset: -1px;
+}
+
+.runtime-composer .permission-mode-option:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.runtime-composer .permission-mode-icon {
+  width: 20px;
+  height: 20px;
+  color: var(--dim2);
+}
+
+.runtime-composer .permission-mode-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.runtime-composer .permission-mode-copy strong {
+  color: inherit;
+  font-size: 14px;
+  font-weight: 520;
+  line-height: 1.2;
+}
+
+.runtime-composer .permission-mode-copy > span {
+  color: var(--dim2);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.runtime-composer .permission-mode-check {
+  width: 17px;
+  height: 17px;
+  justify-self: end;
+  color: var(--accent);
+}
+
+.runtime-composer .permission-mode-option.is-danger .permission-mode-icon,
+.runtime-composer .permission-mode-option.is-danger .permission-mode-check {
+  color: var(--warn);
+}
+
+.runtime-composer .permission-mode-option.is-danger:hover,
+.runtime-composer .permission-mode-option.is-danger:focus-visible,
+.runtime-composer .permission-mode-option.is-danger.is-selected {
+  background: color-mix(in srgb, var(--warn) 9%, transparent);
+}
+
+.runtime-composer .model-effort-popover {
+  position: absolute;
+  z-index: 30;
+  right: 0;
+  bottom: calc(100% + 7px);
+  width: min(258px, calc(100vw - 24px));
+  padding: 8px;
+  border: 1px solid var(--border2);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel) 97%, transparent);
+  box-shadow: var(--shadow-pop);
+  backdrop-filter: blur(18px);
+}
+
+.runtime-composer .model-effort-summary {
+  display: grid;
+}
+
+.runtime-composer .model-effort-current,
+.runtime-composer .model-effort-strength {
+  min-width: 0;
+  min-height: 34px;
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+}
+
+.runtime-composer .model-effort-current {
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.runtime-composer .model-effort-current:hover,
+.runtime-composer .model-effort-current:focus-visible {
+  background: var(--surface-muted);
+}
+
+.runtime-composer .model-effort-field-label {
+  color: var(--dim3);
+  font-size: 11px;
+}
+
+.runtime-composer .model-effort-current-effort {
+  grid-column: 2 / 4;
+  justify-self: end;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.runtime-composer .model-effort-current-model {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 450;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-composer .model-effort-current .chev {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  color: var(--dim3);
+}
+
+.runtime-composer .model-effort-slider {
+  position: relative;
+  min-height: 24px;
+  display: grid;
+  align-items: center;
+  margin: 0 8px 3px;
+}
+
+.runtime-composer .model-effort-slider input[type='range'] {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  height: 20px;
+  margin: 0;
+  appearance: none;
+  border-radius: 999px;
+  outline: none;
+  background: linear-gradient(
+    to right,
+    var(--accent) 0,
+    var(--accent) var(--effort-progress),
+    var(--border2) var(--effort-progress),
+    var(--border2) 100%
+  ) center / calc(100% - 14px) 3px no-repeat;
+  cursor: pointer;
+}
+
+.runtime-composer .model-effort-slider input[type='range']:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent-line);
+}
+
+.runtime-composer .model-effort-slider input[type='range']::-webkit-slider-runnable-track {
+  height: 20px;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.runtime-composer .model-effort-slider input[type='range']::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  appearance: none;
+  border: 1px solid var(--accent-line);
+  border-radius: 50%;
+  background: var(--panel);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 20%);
+}
+
+.runtime-composer .model-effort-slider input[type='range']::-moz-range-track {
+  height: 20px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.runtime-composer .model-effort-slider input[type='range']::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--accent-line);
+  border-radius: 50%;
+  background: var(--panel);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 20%);
+}
+
+.runtime-composer .model-effort-slider-dots {
+  position: absolute;
+  z-index: 3;
+  right: 7px;
+  left: 7px;
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.runtime-composer .model-effort-slider-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--dim3);
+}
+
+.runtime-composer .model-effort-slider-dots i.active {
+  background: color-mix(in srgb, var(--accent-fg) 48%, transparent);
+}
+
+.runtime-composer .model-effort-list {
+  max-height: 300px;
+  display: grid;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.runtime-composer .model-effort-list::-webkit-scrollbar {
+  display: none;
+}
+
+.runtime-composer .model-effort-list button {
+  min-width: 0;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+}
+
+.runtime-composer .model-effort-list button:hover:not(:disabled),
+.runtime-composer .model-effort-list button:focus-visible {
+  background: var(--surface-strong);
+  color: var(--fg);
+}
+
+.runtime-composer .model-effort-list button[aria-selected='true'] {
+  color: var(--fg);
+}
+
+.runtime-composer .model-effort-list button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-composer .model-effort-list button .ico {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin-left: auto;
+  color: var(--accent);
+}
+
+.runtime-composer .send {
+  width: 34px;
+  height: 34px;
+  min-height: 34px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--fg);
+  color: var(--main-surface);
+  box-shadow: none;
+}
+
+.runtime-composer .send:hover:not(:disabled) {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--fg) 86%, var(--dim2));
+}
+
+.runtime-composer .send:disabled {
+  background: var(--panel3);
+  color: var(--dim3);
+  opacity: 1;
+}
+
+.runtime-composer .run-status {
+  border-bottom-color: var(--border3);
+  color: var(--dim);
+}
+
+.runtime-composer .draft-attachments,
+.runtime-composer .slash-menu {
+  border-color: var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow-pop);
+}
+
+/* 排队块是贴着输入框的内联证据块，不是浮层：内嵌面 + 发丝边框，
+   --shadow-pop 的 64px 投影会让它读成弹窗。 */
+.runtime-composer .prompt-queue {
+  border-color: var(--border3);
+  border-radius: 12px;
+  background: var(--surface-inset-soft);
+  box-shadow: none;
+}

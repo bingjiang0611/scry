@@ -1,0 +1,190 @@
+/* 分页历史窗口提示：明确说明当前只挂载了最近一段轮次，更早轮次仍在本机归档里可取回，
+   不是被丢弃也不是不存在。 */
+.history-window-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--border3);
+  border-radius: 8px;
+  background: var(--surface-faint);
+  color: var(--dim2);
+  font-size: 12px;
+}
+
+.history-window-note b {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.history-window-more {
+  flex: none;
+  min-height: 26px;
+  padding: 0 11px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+/* 实时视图降级提示：只描述 live 镜像落后，明确不影响归档与 runState 的完整证据。 */
+.run-status-trace-degraded {
+  flex: none;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+  border-radius: 5px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 已回答的 AskUserQuestion 是人工决定记录，不是遥测行：状态、问题数与等待压成一行等宽小字，
+   问答按行对齐、答案落在与等待同一条右轨。这块的基础规则在 ab5601b 从 styles.css 删除后
+   一直没有补回，此前渲染的是浏览器默认的 <dl>/<dd>/<summary>。 */
+.question-result {
+  margin-top: 6px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border3);
+  cursor: default;
+}
+.question-result-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.question-result-head > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ok);
+  font: 650 10px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+}
+.question-result-head > span .ico {
+  width: 11px;
+  height: 11px;
+  stroke-width: 2.2;
+}
+.question-result.error .question-result-head > span {
+  color: var(--bad);
+}
+.question-result-head small {
+  color: var(--dim2);
+  font: 400 10.5px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.question-result-head .question-result-wait {
+  margin-left: auto;
+}
+.question-result-list {
+  display: grid;
+  margin: 6px 0 0;
+  border-top: 1px solid var(--border3);
+}
+.question-result-list > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(84px, 38%);
+  align-items: baseline;
+  gap: 20px;
+  padding: 8px 0;
+}
+.question-result-list > div + div {
+  border-top: 1px solid var(--border3);
+}
+.question-result-list dt {
+  min-width: 0;
+  margin: 0;
+  color: var(--dim);
+  font: 400 12.5px/1.55 var(--font-ui);
+  overflow-wrap: anywhere;
+}
+.question-result-list dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--fg);
+  font: 600 13px/1.5 var(--font-ui);
+  text-align: right;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+/* 没拿到答案时不能读成“用户选了这个”。 */
+.question-result-list dd.missing {
+  color: var(--dim2);
+  font-weight: 500;
+}
+.question-result-fallback {
+  margin-top: 8px;
+  padding: 8px 9px;
+  border: 1px solid var(--border3);
+  border-radius: var(--r-sm);
+  background: var(--surface-inset);
+  color: var(--dim);
+  font: 11.5px/1.6 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.question-raw {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border3);
+}
+.question-raw > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+  color: var(--dim2);
+  font: 400 10.5px/1.4 var(--font-mono);
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: color var(--dur-micro) linear;
+}
+.question-raw > summary::-webkit-details-marker {
+  display: none;
+}
+.question-raw > summary:hover {
+  color: var(--fg);
+}
+.question-raw > summary:focus-visible {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 2px;
+}
+.question-raw > summary .ico {
+  width: 10px;
+  height: 10px;
+  transition: transform var(--dur-base) var(--ease-struct);
+}
+.question-raw[open] > summary .ico {
+  transform: rotate(90deg);
+}
+.question-raw .lbl {
+  margin: 8px 0 6px;
+  color: var(--dim);
+  font: 400 10.5px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.question-raw pre {
+  margin: 0;
+  padding: 8px 9px;
+  max-height: 280px;
+  overflow: auto;
+  border: 1px solid var(--border3);
+  border-radius: var(--r-sm);
+  background: var(--surface-inset);
+  color: var(--fg);
+  font: 11.5px/1.5 var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* 右栏打开或窗口变窄时，两列读不出对应关系，退化成上下两行。 */
+@container main-pane (max-width: 640px) {
+  .question-result-list > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+  .question-result-list dd {
+    text-align: left;
+  }
+}

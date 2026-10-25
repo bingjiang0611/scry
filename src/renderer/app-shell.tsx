@@ -56,14 +56,14 @@ export function AppShell(props: AppShellProps) {
         analyticsActive={view === 'analytics'} metaPromptsActive={view === 'meta-prompts'} catalogHealth={catalogHealth} />
       <PaneSplitter className="sidebar-resizer" label="调整左侧栏宽度" controls="sidebar-pane" min={sidebarMin} max={sidebarMax}
         value={sidebarPane.width} collapsed={sidebarPane.collapsed} active={sidebarPane.resizing} onPointerDown={sidebarPane.startResize} onKeyDown={sidebarPane.onKeyDown} />
-      <div className="main-area" id="main-pane" aria-hidden={shellPanelMaximized || undefined} {...(shellPanelMaximized ? { inert: '' } : {})}>
+      <div className="main-area has-main-content" id="main-pane" aria-hidden={shellPanelMaximized || undefined} {...(shellPanelMaximized ? { inert: '' } : {})}>
         <>
           {view !== 'chat' && view !== 'conversation' && view !== 'remote' && <div className="aux-view-topbar" aria-hidden="true" />}
           {view === 'conversation' ? <>
             {conversationError && <p role="alert">{conversationError}</p>}
             {logicalConversation ? <>
               <ViewChrome cwd={logicalConversation.cwd} showSummary={summaryVisible} showPanel={panelVisible} onToggleSummary={summary.toggle} onTogglePanel={toggleOverviewPanel} />
-              <ConversationView key={logicalConversation.id} conversation={logicalConversation} draftStore={draftStore} chatProps={chatProps} initialAgentId={conversationAgent} onChanged={() => { void loadProjects() }} onProjection={setConversationProjection} onOpenConversation={pickConversation} />
+              <div className="main-content main-content--single"><ConversationView key={logicalConversation.id} conversation={logicalConversation} draftStore={draftStore} chatProps={chatProps} initialAgentId={conversationAgent} onChanged={() => { void loadProjects() }} onProjection={setConversationProjection} onOpenConversation={pickConversation} /></div>
             </> : !conversationError && <p role="status">正在打开对话…</p>}
           </> : (view === 'remote' || (view === 'meta-prompts' && metaPromptTarget.current.view === 'remote')) && remoteTarget ? <>
             <div style={{ display: view === 'remote' ? 'contents' : 'none' }}>
@@ -78,12 +78,12 @@ export function AppShell(props: AppShellProps) {
                 }} showPanel={remotePanelVisible} onTogglePanel={() => dispatchRemoteSurface(remotePanelVisible ? { type: 'hide' } : { type: 'show' })}
                 surface={{ target: remoteSurfaceTarget, state: remoteSurface, scopeId: remoteSurfaces.current.id, retainTerminal: remoteSurfaces.current.terminalMounted, onDirtyChange: setRemoteWorkspaceDirty, onAction: dispatchRemoteSurface }} />
             </div>
-            {view === 'meta-prompts' && <MetaPromptsView onBack={returnFromMetaPrompts} onInsert={insertMetaPrompt} />}
-          </> : view === 'analytics' ? <Suspense fallback={<div className="lazy-panel-loading">正在加载分析视图…</div>}>
+            {view === 'meta-prompts' && <div className="main-content main-content--single"><MetaPromptsView onBack={returnFromMetaPrompts} onInsert={insertMetaPrompt} /></div>}
+          </> : view === 'analytics' ? <div className="main-content main-content--single"><Suspense fallback={<div className="lazy-panel-loading">正在加载分析视图…</div>}>
             <AnalyticsView analytics={integrations.analytics} rangeDays={integrations.analyticsRange} loading={integrations.analyticsLoading} error={integrations.analyticsError} onRangeChange={integrations.setAnalyticsRange} onRefresh={() => integrations.loadAnalytics()} onBack={() => { changeView('chat') }} />
-          </Suspense> : view === 'meta-prompts' ? <MetaPromptsView onBack={returnFromMetaPrompts} onInsert={insertMetaPrompt} /> : <>
+          </Suspense></div> : view === 'meta-prompts' ? <div className="main-content main-content--single"><MetaPromptsView onBack={returnFromMetaPrompts} onInsert={insertMetaPrompt} /></div> : <>
             <ViewChrome cwd={cwd} showSummary={summaryVisible} showPanel={panelVisible} onToggleSummary={summary.toggle} onTogglePanel={toggleOverviewPanel} />
-            <SessionChatView {...chatProps} />
+            <div className="main-content"><SessionChatView {...chatProps} /></div>
           </>}
           <PinnedSummaryHost
             visible={(view === 'chat' || view === 'conversation') && summaryVisible}
@@ -133,6 +133,7 @@ export function AppShell(props: AppShellProps) {
         skills={integrations.skills}
         skillCapability={integrations.skillCapability}
         skillsRefreshing={integrations.skillsRefreshing}
+        onRefreshSkills={integrations.refreshSkills}
         mcps={integrations.mcps}
         status={integrations.mcpStatus}
         live={integrations.mcpLive}
@@ -150,5 +151,5 @@ export function AppShell(props: AppShellProps) {
 
 function RemoteView({ target, connections, showPanel, onTogglePanel, ...chat }: { target: RemoteTarget; connections: ReturnType<typeof useDesktopConnections>; showPanel: boolean; onTogglePanel: () => void } & Omit<ComponentProps<typeof RemoteChat>, 'connectionId' | 'cwd' | 'session'>) {
   const connection = connections.connections.find((item) => item.id === target.connectionId)
-  return <><ViewChrome cwd={target.cwd} showSummary={false} showPanel={showPanel} onTogglePanel={onTogglePanel} machine={{ label: connection?.label ?? '远程主机不可用', remote: true, state: connection ? hostState(connection, connections.error, connections.refreshing) : 'unknown' }} /><RemoteChat key={target.generation} connectionId={target.connectionId} cwd={target.cwd} session={target.session} {...chat} /></>
+  return <><ViewChrome cwd={target.cwd} showSummary={false} showPanel={showPanel} onTogglePanel={onTogglePanel} machine={{ label: connection?.label ?? '远程主机不可用', remote: true, state: connection ? hostState(connection, connections.error, connections.refreshing) : 'unknown' }} /><div className="main-content"><RemoteChat key={target.generation} connectionId={target.connectionId} cwd={target.cwd} session={target.session} {...chat} /></div></>
 }

@@ -1,0 +1,375 @@
+.ov-topbar {
+  padding: 6px 10px 0;
+  background: var(--panel);
+  border-bottom-color: var(--border);
+  backdrop-filter: none;
+}
+
+
+.panel-tabs {
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.panel-tabs button {
+  height: 40px;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+}
+
+.panel-tabs button.active {
+  color: var(--fg);
+  background: transparent;
+  border-bottom-color: var(--accent);
+  box-shadow: none;
+}
+
+.panel-tabs button.active svg {
+  color: var(--accent);
+}
+
+.ctx-gauge {
+  background: transparent;
+  border-bottom-color: var(--border3);
+}
+
+.metric-grid,
+.billing-grid {
+  background: var(--border3);
+  border-color: var(--border);
+}
+
+.billing-section,
+.mcp-trust-section {
+  background: var(--panel);
+}
+
+.source-pill.estimate,
+.turn-id {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.mcp-finding,
+.mcp-target {
+  border-color: var(--border);
+  background: var(--panel2);
+}
+
+.panel .verdict-card {
+  border: 0;
+  border-bottom: 1px solid var(--border3);
+  border-radius: 0;
+}
+
+.panel .verdict-card.ok {
+  border-color: var(--border3);
+}
+
+.panel .verdict-card.warn {
+  border-color: var(--border3);
+}
+
+.panel .verdict-card.bad {
+  border-color: var(--border3);
+}
+
+.panel .verdict-left,
+.panel .verdict-card.warn .verdict-left,
+.panel .verdict-card.bad .verdict-left {
+  background: transparent;
+}
+
+.seg-note {
+  background: var(--accent-soft);
+  border-bottom-color: var(--accent-line);
+}
+
+.seg-shell {
+  width: min(100% - 60px, 1180px);
+}
+
+.seg-bar {
+  height: 30px;
+  border-radius: var(--r-md);
+  border-color: var(--border);
+}
+
+.seg-legend {
+  gap: 14px;
+}
+
+.seg-compare {
+  background: var(--border3);
+  border-color: var(--border);
+}
+
+.seg-card {
+  grid-template-columns: 190px minmax(0, 1fr) 150px;
+  border-color: var(--border);
+  border-radius: var(--r-lg);
+}
+
+.seg-l,
+.seg-m,
+.seg-r {
+  padding: 14px 16px;
+}
+
+.seg-l {
+  background: var(--panel) !important;
+}
+
+.seg-r {
+  background: var(--panel2);
+}
+
+.seg-act {
+  border-color: var(--border3) !important;
+}
+
+.turn-head,
+.turn-head.running {
+  border-left: 0;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border3);
+}
+
+.gline {
+  transition: background-color var(--dur-micro) linear;
+}
+
+.gline:hover {
+  background: var(--panel2);
+}
+
+.gline.selected {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+.gtype.llm {
+  border-color: rgba(86, 168, 245, 0.32);
+  color: var(--read);
+  background: rgba(86, 168, 245, 0.08);
+}
+
+.gtype.skill {
+  border-color: rgba(230, 178, 77, 0.3);
+}
+
+.gtype.agent {
+  border-color: rgba(199, 125, 187, 0.32);
+}
+
+.gtype.mcp {
+  border-color: var(--accent-line);
+}
+
+.gpane {
+  background: var(--panel);
+}
+
+.modal-overlay {
+  background: var(--modal-overlay);
+  backdrop-filter: blur(3px);
+}
+
+.modal {
+  width: min(760px, 92vw);
+  max-height: 82vh;
+  background: var(--panel);
+  border-color: var(--border2);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-pop);
+}
+
+.modal-head {
+  padding: 14px 18px;
+}
+
+.modal-search {
+  margin: 12px 18px 4px;
+  background: var(--panel2);
+  border-color: var(--border);
+}
+
+.modal-search:focus {
+  border-color: var(--accent-line);
+}
+
+.modal-body {
+  padding: 4px 8px 12px;
+}
+
+.modal-foot {
+  padding: 10px 18px;
+}
+
+.settings-modal {
+  width: min(480px, 92vw);
+}
+
+.settings-modal .modal-x {
+  margin-left: auto;
+}
+
+.settings-body {
+  display: grid;
+  gap: 16px;
+  padding: 20px 18px 22px;
+}
+
+.settings-copy {
+  display: grid;
+  gap: 5px;
+}
+
+.settings-copy b {
+  color: var(--fg);
+  font: 600 13px/1.2 var(--font-ui);
+}
+
+.settings-copy span {
+  color: var(--dim2);
+  font: 11.5px/1.45 var(--font-ui);
+}
+
+.theme-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.theme-option {
+  min-width: 0;
+  min-height: 72px;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--panel2);
+  color: var(--dim);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear, color var(--dur-micro) linear;
+}
+
+.theme-option.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+
+.theme-preview {
+  width: 48px;
+  height: 38px;
+  display: grid;
+  grid-template-columns: 13px 1fr;
+  grid-template-rows: 8px 1fr;
+  overflow: hidden;
+  border: 1px solid;
+  border-radius: var(--r-xs);
+}
+
+.theme-preview::before {
+  content: '';
+  grid-column: 1 / -1;
+  border-bottom: 1px solid;
+}
+
+.theme-preview span {
+  grid-row: 2;
+  border-right: 1px solid;
+}
+
+.theme-preview i {
+  grid-row: 2;
+  margin: 5px;
+  border-radius: 2px;
+}
+
+.theme-preview.dark {
+  border-color: #343942;
+  background: #0c0d0f;
+}
+
+.theme-preview.dark::before,
+.theme-preview.dark span {
+  border-color: #343942;
+  background: #15171b;
+}
+
+.theme-preview.dark i {
+  background: #22262c;
+}
+
+.theme-preview.light {
+  border-color: #c5ccd6;
+  background: #f3f5f7;
+}
+
+.theme-preview.light::before,
+.theme-preview.light span {
+  border-color: #c5ccd6;
+  background: #ffffff;
+}
+
+.theme-preview.light i {
+  background: #e4e8ed;
+}
+
+.theme-option-copy {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.theme-option-copy b {
+  color: var(--fg);
+  font: 600 12.5px/1 var(--font-ui);
+}
+
+.theme-option-copy small {
+  overflow: hidden;
+  color: var(--dim2);
+  font: 10.5px/1 var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.theme-check {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border2);
+  border-radius: 50%;
+  color: transparent;
+}
+
+.theme-option.active .theme-check {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.theme-check .ico {
+  width: 11px;
+  height: 11px;
+  stroke-width: 2.2;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .theme-option:hover:not(.active) {
+    border-color: var(--border2);
+    background: var(--panel3);
+  }
+}

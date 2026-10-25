@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { ScDiff, ScMutation, ScOperation, ScRead, ScRepository } from '@shared/source-control'
 import { basename } from '../format'
 import { commitFiles, isStaged, nextGitAction, type ScDelivery } from '../source-control-workflow'
-import { ModalFrame } from './Modals'
+import { ModalFrame, requestModalClose } from './Modals'
 import { Patch } from './SourceControlPatch'
 import { GithubPullRequestPanel } from './GithubPullRequestPanel'
 import { defaultSourceControlApi, type SourceControlApi } from '../workbench-api'
@@ -13,10 +13,7 @@ import { SourceControlOperations } from './SourceControlOperations'
 import { SourceControlFileRow } from './SourceControlFileRow'
 import { SourceControlTransportDialog } from './SourceControlTransportDialog'
 import { SourceControlRepositoryDialog } from './SourceControlRepositoryDialog'
-import {
-  sourceControlActionNames as actionNames, sourceControlStatusNames as statusNames,
-  sourceControlOperationCopy, sourceControlFileCopy
-} from '../constants/source-control-copy'
+import { sourceControlActionNames as actionNames, sourceControlStatusNames as statusNames, sourceControlOperationCopy, sourceControlFileCopy } from '../constants/source-control-copy'
 
 export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: string; active: boolean; api?: SourceControlApi }) {
   const api = useMemo(() => injectedApi ?? defaultSourceControlApi, [injectedApi])
@@ -301,7 +298,7 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
           <button onClick={() => { setActionsOpen(false); setTransport('fetch') }}>获取远端（Fetch）…</button>
           <button onClick={() => { setActionsOpen(false); setTab('pr') }}>查看 / 创建 Pull Request</button>
           <button onClick={() => { setActionsOpen(false); setTab('operations') }}>操作记录与核查</button>
-        </div><button onClick={() => setActionsOpen(false)}>关闭</button>
+        </div><button onClick={() => requestModalClose()}>关闭</button>
       </ModalFrame>}
       {repo && expected && transport && <SourceControlTransportDialog repo={repo} action={transport}
         remote={remote} destination={destination} disabled={disabled} blocker={transportBlocker}

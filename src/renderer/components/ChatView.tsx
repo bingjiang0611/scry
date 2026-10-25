@@ -1,4 +1,8 @@
-import { useSyncExternalStore } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react'
+import { LOADING_COPY } from '../constants/copy'
+import { useDelayedFlag } from '../hooks/useDelayedFlag'
+import { MOTION, prefersReducedMotion } from '../motion'
+import { LoadingStatus } from './LoadingStatus'
 import type { AgentQuestionRequest } from '@shared/runtime'
 import { ChatTranscriptTurns } from './chat-view/transcript'
 import { Composer } from './chat-view/Composer'
@@ -7,6 +11,8 @@ import { Icon } from './primitives/Icon'
 import { WorkspaceFileLinkProvider } from './MarkdownImpl'
 
 const NO_PENDING_QUESTIONS: AgentQuestionRequest[] = []
+const NO_TURNS: ChatViewProps['turns'] = []
+const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
 export type { ChatViewProps } from './chat-view/types'
 export { ChatTranscriptTurns } from './chat-view/transcript'
@@ -21,6 +27,7 @@ export function SessionChatView({ draftStore, draftKey, ...props }: SessionChatV
 export function ChatView(props: ChatViewProps) {
   const {
     turns,
+    composerScopeKey,
     selectedId,
     scrollRef,
     cwd,
@@ -47,17 +54,47 @@ export function ChatView(props: ChatViewProps) {
   } = props
   const remote = remoteHost != null
   const workspaceName = cwd?.split('/').filter(Boolean).at(-1) ?? null
+  const delayedSessionLoading = useDelayedFlag(sessionLoading)
+  const previousPresentation = useRef({ scope: composerScopeKey, turns })
+  const retainPrevious = sessionLoading && hasSelectedSession && !sessionCacheVisible && previousPresentation.current.scope !== composerScopeKey
+  const transcriptContent = useRef<HTMLDivElement>(null)
+  useBrowserLayoutEffect(() => {
+    if (!sessionLoading || sessionCacheVisible) previousPresentation.current = { scope: composerScopeKey, turns }
+  }, [sessionLoading, sessionCacheVisible, composerScopeKey, turns])
+  // Revoking this session's cache clears it immediately; only another scope can linger.
+  const displayedTurns = !sessionLoading || sessionCacheVisible ? turns : retainPrevious ? previousPresentation.current.turns : NO_TURNS
+  useBrowserLayoutEffect(() => {
+    const element = transcriptContent.current
+    if (!element) return
+    // Retained DOM is presentation, not selected-session authority or navigation.
+    element.inert = retainPrevious
+    if (!retainPrevious || !delayedSessionLoading) { element.style.opacity = ''; return }
+    element.style.opacity = '0'
+    const animation = element.animate([{ opacity: 1 }, { opacity: 0 }], {
+      id: 'scry-loading-previous', duration: 120, easing: prefersReducedMotion() ? 'linear' : MOTION.easeExit
+    })
+    animation.onfinish = () => animation.cancel()
+    return () => { animation.cancel(); element.style.opacity = '' }
+  }, [retainPrevious, delayedSessionLoading])
+  const ownerReady = !sessionLoading && !sessionCacheVisible
+  const liveRunId = ownerReady && busy ? turns.find(turn => !turn.done && !turn.error)?.runId ?? null : null
+  const lastLive = useRef<{ scope: string | undefined; runId: string | null }>({ scope: composerScopeKey, runId: null })
+  const completedLiveRunId = ownerReady && lastLive.current.scope === composerScopeKey ? lastLive.current.runId : null
+  const liveArrivalResetKey = useMemo(() => ({ scope: composerScopeKey, ready: ownerReady }), [composerScopeKey, ownerReady])
+  useBrowserLayoutEffect(() => {
+    if (!ownerReady || lastLive.current.scope !== composerScopeKey) lastLive.current = { scope: composerScopeKey, runId: liveRunId }
+    else if (liveRunId) lastLive.current.runId = liveRunId
+  }, [ownerReady, composerScopeKey, liveRunId])
   return (
     <>
       <WorkspaceFileLinkProvider workspaces={workspaceRoots} onOpen={onOpenFile}>
         <div className="body chat-body" data-screen-label="对话 · 真实 Turn transcript">
+          {delayedSessionLoading && hasSelectedSession && (
+            <LoadingStatus className="chat-session-evidence-gap"
+              title={sessionCacheVisible ? LOADING_COPY.cache : LOADING_COPY.session}
+              detail={sessionCacheVisible ? LOADING_COPY.cacheDetail : remote ? LOADING_COPY.remoteArchive(remoteHost) : LOADING_COPY.localArchive} />
+          )}
           <div className="chat chat-transcript" ref={scrollRef} aria-label="执行时间线" aria-busy={sessionLoading}>
-            {sessionLoading && hasSelectedSession && (
-              <div className="chat-session-evidence-gap" role="status" data-status="loading">
-                <b>{sessionCacheVisible ? '正在更新最近会话缓存' : '正在加载会话历史'}</b>
-                <span>{sessionCacheVisible ? '先展示上次读取的最近一页；核对完成前不能发送或分叉。' : remote ? `正在读取 ${remoteHost} 的归档，请稍候。` : '正在读取本机归档，请稍候。'}</span>
-              </div>
-            )}
             {turns.length === 0 && !sessionLoading && sessionEvidenceGap && (
               <div className="chat-session-evidence-gap" role="status" data-status={sessionEvidenceGap.status}>
                 <b>{sessionEvidenceGap.status === 'error' ? '会话历史加载失败' : sessionEvidenceGap.status === 'unavailable' ? (remote ? `这条会话没有可读的 ${remoteHost} 证据` : '这条会话没有可读的本机证据') : '这条会话的归档里没有轮次'}</b>
@@ -82,7 +119,10 @@ export function ChatView(props: ChatViewProps) {
                 <button type="button" className="history-window-more" onClick={() => onLoadOlderTurns?.()} disabled={historyOlderLoading || !onLoadOlderTurns}>{historyOlderLoading ? '加载中…' : '加载更早轮次'}</button>
               </div>
             )}
-            {(!sessionLoading || sessionCacheVisible) && <ChatTranscriptTurns turns={turns} selectedId={selectedId} focusedTurnRunId={focusedTurnRunId} onTurnRef={onTurnRef} onSelect={onSelect} onOpenDiff={onOpenDiff} forkableRunIds={forkableRunIds} onForkTurn={!sessionLoading && !busy && queuedPrompts.length === 0 && pendingQuestions.length === 0 ? onForkTurn : undefined} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote} />}
+            <div ref={transcriptContent} className="chat-transcript-content" data-loading-previous={retainPrevious || undefined} aria-hidden={retainPrevious || undefined}>
+              <ChatTranscriptTurns turns={displayedTurns} selectedId={selectedId} focusedTurnRunId={focusedTurnRunId} onTurnRef={retainPrevious ? undefined : onTurnRef} onSelect={onSelect} onOpenDiff={onOpenDiff} forkableRunIds={forkableRunIds} onForkTurn={!sessionLoading && !busy && queuedPrompts.length === 0 && pendingQuestions.length === 0 ? onForkTurn : undefined} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote}
+                liveRunId={liveRunId} completedLiveRunId={completedLiveRunId} liveArrivalResetKey={liveArrivalResetKey} />
+            </div>
           </div>
         </div>
       </WorkspaceFileLinkProvider>

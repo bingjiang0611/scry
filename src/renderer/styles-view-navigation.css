@@ -1,0 +1,127 @@
+/* P1：视图 tab + Timeline 过滤 */
+/* 顶栏：会话视图与低权重工具组。 */
+.vtabs {
+  grid-column: 1;
+  grid-row: 1;
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 100%;
+  display: flex;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.vtabs::-webkit-scrollbar {
+  display: none;
+}
+.vtab {
+  flex: 0 0 auto;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--dim);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.vtab .ico {
+  opacity: 0.7;
+}
+.vtab.active {
+  color: var(--fg);
+}
+.vtab.active .ico {
+  opacity: 1;
+  color: var(--accent);
+}
+.vtab:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.tb-spacer {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+}
+.tb-statusbar {
+  grid-column: 2 / -1;
+  grid-row: 1;
+  justify-self: end;
+  width: min(100%, 680px);
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.tb-action,
+.tb-agent-status,
+.tb-context {
+  justify-self: end;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  font: 11.5px/1 var(--font-ui);
+  color: var(--dim);
+  background: transparent;
+}
+.tb-action {
+  cursor: pointer;
+}
+.agent-pill {
+  flex: 1 1 320px;
+  max-width: 460px;
+}
+.cwd-pill {
+  flex: 0 1 180px;
+  max-width: 180px;
+}
+.panel-pill {
+  flex: 0 0 auto;
+  max-width: none;
+  justify-content: center;
+}
+.tb-action > span:not(.dot),
+.tb-action b,
+.tb-agent-status > span:not(.dot),
+.tb-agent-status b,
+.tb-context > span:not(.dot),
+.tb-context b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tb-action:hover {
+  color: var(--fg);
+}
+.tb-action.on {
+  background: var(--panel2);
+}
+.tb-action .dot,
+.tb-agent-status .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.tb-action .dot.off,
+.tb-agent-status .dot.off {
+  background: var(--dim3);
+}
+.tb-action .dot.checking,
+.tb-agent-status .dot.checking {
+  background: var(--warn);
+}
+.tb-action b,
+.tb-agent-status b,
+.tb-context b {
+  color: var(--fg);
+  font-weight: 550;
+}

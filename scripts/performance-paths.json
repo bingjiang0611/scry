@@ -197,6 +197,10 @@
         "src/main/trace-output.ts",
         "src/renderer/format.ts",
         "src/renderer/chat-scroll.ts",
+        "src/renderer/components/ChatTurn.tsx",
+        "src/renderer/components/ChatTurnAssistant.tsx",
+        "src/renderer/components/ChatTurnAssistantView.tsx",
+        "src/renderer/components/ChatTurnTools.tsx",
         "src/renderer/performance.bench.tsx"
       ],
       "benchmarks": [
@@ -381,6 +385,12 @@
       "sources": [
         "src/main/remote/desktop-client-ipc.ts",
         "src/main/remote/remote-host-service.ts",
+        "src/renderer/components/RemoteChat.tsx",
+        "src/renderer/components/RemoteChatFoundation.tsx",
+        "src/renderer/components/RemoteChatControls.tsx",
+        "src/renderer/components/RemoteChatPresentation.tsx",
+        "src/renderer/components/RemoteChatExecution.tsx",
+        "src/renderer/components/RemoteChatView.tsx",
         "apps/ios/ScryRemote"
       ],
       "benchmarks": [

@@ -1,0 +1,258 @@
+/* Pinned context summary ---------------------------------------------------- */
+
+.app.pinned-summary-visible .main-area {
+  position: relative;
+}
+
+.app.pinned-summary-persistent :is(.main-area, .main-content) > .chat-body {
+  width: 100%;
+  padding-right: 326px;
+  background: transparent;
+}
+
+.app.pinned-summary-persistent :is(.main-area, .main-content) > .runtime-composer {
+  width: 100%;
+  max-width: none;
+  padding-right: calc(326px + var(--evidence-gutter));
+}
+
+.app.pinned-summary-persistent :is(.main-area, .main-content) > .runtime-composer > .composer-shell {
+  width: 100%;
+  max-width: var(--evidence-content);
+  margin-inline: auto;
+}
+
+
+.pinned-summary-layer {
+  position: absolute;
+  z-index: 16;
+  top: var(--window-titlebar-h, var(--topbar-h));
+  right: 0;
+  width: min(326px, 100%);
+  height: calc(100% - var(--window-titlebar-h, var(--topbar-h)));
+  padding: 16px 14px 0 8px;
+  pointer-events: none;
+}
+
+.pinned-summary-layer.is-temporary {
+  padding-top: 12px;
+}
+
+.pinned-summary-card {
+  width: 100%;
+  height: min(520px, calc(100% - 16px));
+  overflow-y: auto;
+  padding: 14px;
+  border: 1px solid var(--border2);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--panel) 98%, transparent);
+  box-shadow: 0 18px 45px rgb(0 0 0 / 10%), 0 2px 10px rgb(0 0 0 / 4%);
+  pointer-events: auto;
+  scrollbar-width: none;
+}
+
+.pinned-summary-card::-webkit-scrollbar {
+  display: none;
+}
+
+.pinned-summary-card button {
+  color: inherit;
+  font: inherit;
+}
+
+.pinned-summary-section-title {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  margin-bottom: 2px;
+  color: var(--dim2);
+  font-size: 11px;
+  font-weight: 550;
+  letter-spacing: 0.06em;
+}
+
+.pinned-summary-row {
+  width: 100%;
+  min-height: 47px;
+  display: grid;
+  grid-template-columns: 31px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 3px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pinned-summary-row:hover:not(:disabled),
+.pinned-summary-expandable.is-open > .pinned-summary-row {
+  background: var(--surface-hover);
+}
+
+.pinned-summary-row:disabled,
+.pinned-summary-row.is-static {
+  cursor: default;
+}
+
+.pinned-summary-row + .pinned-summary-row {
+  margin-top: 1px;
+}
+
+.pinned-summary-row-icon {
+  width: 29px;
+  height: 29px;
+  display: grid;
+  place-items: center;
+  color: var(--fg);
+}
+
+.pinned-summary-row-icon .ico {
+  width: 17px;
+  height: 17px;
+}
+
+.pinned-summary-row-main {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pinned-summary-row-value {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--dim2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.pinned-summary-row-value .ico {
+  width: 15px;
+  height: 15px;
+  color: var(--dim3);
+}
+
+.pinned-summary-row-value .additions {
+  color: var(--ok);
+}
+
+.pinned-summary-row-value .deletions {
+  color: var(--bad);
+}
+
+.pinned-summary-row-value[data-evidence='unknown'],
+.pinned-summary-count[data-evidence='unknown'],
+.pinned-summary-count[data-evidence='unavailable'] {
+  color: var(--dim3);
+}
+
+.pinned-summary-count {
+  min-width: 24px;
+  height: 23px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--surface-hover);
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.pinned-summary-divider {
+  height: 1px;
+  margin: 14px 0 15px;
+  background: var(--border3);
+}
+
+.pinned-summary-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 10px 39px;
+}
+
+.pinned-summary-detail[hidden] {
+  display: none;
+}
+
+.pinned-summary-card .pinned-summary-detail-row {
+  width: 100%;
+  min-height: 39px;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 3px 4px 3px 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font-size: var(--text-supporting-size);
+  text-align: left;
+}
+
+button.pinned-summary-detail-row {
+  cursor: pointer;
+}
+
+button.pinned-summary-detail-row:hover {
+  background: var(--surface-hover);
+}
+
+.pinned-summary-detail-row > span:nth-child(2) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pinned-summary-detail-icon {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--dim);
+}
+
+.pinned-summary-detail-icon .ico {
+  width: 15px;
+  height: 15px;
+}
+
+.pinned-summary-detail-row em {
+  color: var(--dim3);
+  font-size: var(--text-compact-size);
+  font-style: normal;
+}
+
+.pinned-summary-detail-row em[data-status='running'] {
+  color: var(--ok);
+}
+
+.pinned-summary-detail-row em[data-status='failed'] {
+  color: var(--bad);
+}
+
+@container main-pane (max-width: 760px) {
+  .app.pinned-summary-persistent :is(.main-area, .main-content) > .chat-body {
+    padding-right: 310px;
+  }
+
+  .app.pinned-summary-persistent :is(.main-area, .main-content) > .runtime-composer {
+    padding-right: calc(310px + var(--evidence-gutter));
+  }
+
+  .pinned-summary-layer {
+    width: min(310px, 100%);
+    padding-right: 10px;
+    padding-left: 6px;
+  }
+}

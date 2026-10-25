@@ -1,0 +1,278 @@
+/* 顶栏 */
+.topbar {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  align-items: center;
+  gap: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: nowrap;
+  overflow: hidden;
+  min-width: 0;
+  scrollbar-width: none;
+  flex: none;
+}
+.topbar::-webkit-scrollbar {
+  display: none;
+}
+.brand {
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+.spacer {
+  flex: 1;
+}
+.badge {
+  font-size: 12px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--border2);
+  color: var(--dim);
+  white-space: nowrap;
+}
+.badge.ok {
+  color: var(--ok);
+}
+.badge.bad {
+  color: var(--bad);
+}
+.badge.cwd {
+  color: var(--fg);
+}
+
+/* 对话区 */
+.body {
+  grid-row: 2;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.chat {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  /* Session replacement is positioned explicitly by App. Native scroll
+     anchoring can otherwise restore an arbitrary old turn after the new
+     transcript grows, making a freshly opened session land in the middle. */
+  overflow-anchor: none;
+  padding: 22px 0 10px;
+}
+/* welcome 空态屏（蓝本 welcome.html，全宽 no-right hero） */
+.welcome-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+.welcome-inner {
+  max-width: 920px;
+  margin: 0 auto;
+  width: 100%;
+}
+.wc-eyebrow {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--dim2);
+  font: 600 12px/1.2 var(--font-ui);
+}
+.wc-hero h2 {
+  margin: 0;
+  font: 620 30px/1.18 var(--font-ui);
+  letter-spacing: -0.02em;
+  max-width: 24ch;
+}
+.wc-hero p {
+  margin: 12px 0 0;
+  font-size: 14px;
+  line-height: 1.6;
+  max-width: 56ch;
+}
+.wc-environment {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+  margin-top: 36px;
+  padding: 13px 0;
+  border-top: 1px solid var(--border3);
+  border-bottom: 1px solid var(--border3);
+}
+.wc-status-label {
+  padding-top: 2px;
+  color: var(--dim2);
+  font: 600 11.5px/1.4 var(--font-ui);
+}
+.wc-status {
+  display: flex;
+  gap: 8px 18px;
+  flex-wrap: wrap;
+}
+.stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  font: 11.5px/1.4 var(--font-ui);
+  color: var(--dim);
+}
+.stat-pill b {
+  color: var(--dim);
+  font-weight: 550;
+}
+.stat-pill .sub {
+  color: var(--dim2);
+  font: 10.5px/1.4 var(--font-mono);
+}
+.wc-actions {
+  margin-top: 34px;
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+}
+.wc-act-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.wc-act-h h3 {
+  margin: 0;
+  font: 600 12px/1.2 var(--font-ui);
+  color: var(--dim);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.wc-act-h > span {
+  color: var(--dim3);
+  font-size: 11px;
+}
+.recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-top: 1px solid var(--border3);
+  border-radius: 0;
+  overflow: hidden;
+}
+.recent {
+  display: grid;
+  grid-template-columns: 24px 1fr auto auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 6px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  border: 0;
+  border-bottom: 1px solid var(--border3);
+  color: inherit;
+  font: inherit;
+  width: 100%;
+}
+.recent:hover {
+  background: var(--panel2);
+}
+.recent .ico {
+  color: var(--dim2);
+}
+.recent.last .ico {
+  color: var(--accent);
+}
+.recent .meta {
+  font-size: 13.5px;
+  min-width: 0;
+}
+.recent .meta .name {
+  color: var(--fg);
+  font-weight: 550;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.recent .meta .last-tag {
+  color: var(--dim2);
+  font: 10.5px/1 var(--font-ui);
+  letter-spacing: 0;
+}
+.recent .meta .path {
+  font: 11.5px/1 var(--font-mono);
+  color: var(--dim2);
+  margin-top: 4px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.recent .sess {
+  font: 11px/1 var(--font-mono);
+  color: var(--dim);
+}
+.recent .when {
+  font: 11px/1 var(--font-mono);
+  color: var(--dim2);
+  min-width: 56px;
+  text-align: right;
+}
+.wc-browse {
+  margin-top: 24px;
+  display: flex;
+  gap: 10px;
+}
+.wc-browse .btn {
+  flex: 0 0 auto;
+  justify-content: center;
+  padding: 9px 13px;
+}
+.wc-suggest h3 {
+  font: 600 12px/1.2 var(--font-ui);
+  color: var(--dim);
+  letter-spacing: 0;
+  text-transform: none;
+  margin: 32px 0 10px;
+}
+.sg-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 24px;
+  border-top: 1px solid var(--border3);
+}
+.sg-card {
+  min-width: 0;
+  padding: 11px 4px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border3);
+  border-radius: 0;
+  font-size: 13px;
+  color: var(--dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+}
+.sg-card:hover {
+  background: var(--panel2);
+  color: var(--fg);
+}
+.sg-card .ico {
+  flex: none;
+  color: var(--dim3);
+}
+.wc-footnote {
+  margin-top: 34px;
+  padding-top: 0;
+  border-top: 0;
+  font: 11.5px/1.6 var(--font-ui);
+  color: var(--dim2);
+}
+
+.turn {
+  margin: 0 auto 26px;
+  border-radius: var(--r-lg);
+  scroll-margin-top: 16px;
+  transition: background-color var(--dur-micro) linear;
+}

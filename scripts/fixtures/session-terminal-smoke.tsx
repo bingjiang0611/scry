@@ -5,6 +5,7 @@ import type { ProviderContext } from '../../src/shared/provider'
 import type { WorkspaceFileOpenTarget, WorkspacePathRequest } from '../../src/shared/workspace'
 import type { TerminalDataEvent, TerminalExitEvent, TerminalRecordingRequest, TerminalSessionInfo, TerminalStartRequest } from '../../src/shared/terminal'
 import '../../src/renderer/styles.css'
+import '../../src/renderer/motion.css'
 import '../../src/renderer/codex-alignment.css'
 
 // Production App/xterm with an isolated bridge. No real Shell, Provider, or user data.

@@ -1,0 +1,333 @@
+/* Unified right Surface workbench: persistent tabs for overview/files/diff/terminal/agents. */
+.app.right-panel-surface {
+  grid-template-columns:
+    var(--sidebar-w)
+    var(--pane-resizer-w)
+    minmax(420px, 1fr)
+    var(--pane-resizer-w)
+    minmax(0, min(var(--overview-panel-w), 55vw));
+}
+
+.app.right-panel-surface.right-panel-hidden {
+  grid-template-columns: var(--sidebar-w) var(--pane-resizer-w) minmax(0, 1fr);
+}
+
+.app.right-panel-surface.right-panel-hidden > .right-panel-slot,
+.app.right-panel-surface.right-panel-hidden > .panel-resizer {
+  display: none;
+}
+
+.app.right-panel-surface.right-panel-maximized {
+  grid-template-columns: var(--sidebar-w) var(--pane-resizer-w) minmax(0, 1fr);
+}
+
+.app.right-panel-surface.right-panel-maximized > .main-area,
+.app.right-panel-surface.right-panel-maximized > .panel-resizer {
+  display: none;
+}
+
+.app.right-panel-surface.right-panel-maximized > .right-panel-slot {
+  grid-column: 3;
+}
+
+.right-surface-panel {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--overview-surface);
+}
+
+.surface-topbar {
+  height: var(--topbar-h);
+  min-height: var(--topbar-h);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  border-bottom: 1px solid var(--border3);
+  background: var(--overview-surface);
+}
+
+.surface-tabs {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 3px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.surface-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.surface-tab {
+  min-width: 0;
+  max-width: 150px;
+  height: 29px;
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  border-radius: var(--r-md);
+  color: var(--dim2);
+}
+
+.surface-tab.active {
+  color: var(--fg);
+  background: var(--surface-strong);
+}
+
+.surface-tab-activate,
+.surface-tab-close,
+.right-surface-panel .icon-button,
+.surface-menu .menu-item,
+.surface-card {
+  border: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.surface-tab-activate {
+  min-width: 0;
+  height: 29px;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px 0 8px;
+  background: transparent;
+}
+
+.surface-tab-activate .label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  font-weight: 550;
+}
+
+.surface-icon {
+  flex: none;
+}
+
+.surface-tab-close {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  flex: none;
+  place-items: center;
+  margin-right: 3px;
+  padding: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  opacity: 0;
+}
+
+.surface-tab.active .surface-tab-close,
+.surface-tab:focus-within .surface-tab-close {
+  opacity: 0.72;
+}
+
+.surface-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.surface-add-wrap {
+  position: relative;
+}
+
+.right-surface-panel .icon-button {
+  width: 29px;
+  height: 29px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--dim2);
+}
+
+.right-surface-panel .icon-button.on {
+  color: var(--fg);
+  background: var(--surface-strong);
+}
+
+.surface-menu {
+  position: absolute;
+  z-index: 60;
+  top: 34px;
+  right: 0;
+  width: 214px;
+  display: grid;
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid var(--border2);
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--panel2) 97%, transparent);
+  box-shadow: var(--shadow-pop);
+  transform-origin: top right;
+  animation: surface-menu-in var(--dur-fast) var(--ease-out) backwards;
+}
+.surface-menu[data-state='exit'] {
+  pointer-events: none;
+  animation: overlay-menu-out 100ms linear both;
+}
+
+@keyframes surface-menu-in {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.surface-menu .menu-item {
+  width: 100%;
+  height: 35px;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 9px;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--dim);
+  text-align: left;
+}
+
+.surface-menu .menu-item small {
+  color: var(--dim3);
+  font: var(--text-compact-size)/1 var(--font-mono);
+}
+
+.surface-body {
+  min-height: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.surface-content {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+  outline: none;
+}
+
+.surface-content[hidden] {
+  display: none;
+}
+
+.surface-content > .panel,
+.surface-content > .workspace-panel,
+.surface-content > .terminal-surface,
+.surface-content > .agents-surface {
+  min-height: 0;
+  flex: 1;
+}
+
+.surface-content .workspace-head > .iconbtn:last-child,
+.surface-content .diff-review-close {
+  display: none;
+}
+
+.empty-surface,
+.surface-unavailable {
+  min-height: 0;
+  display: grid;
+  flex: 1;
+  place-items: center;
+  padding: 24px;
+}
+
+.empty-inner {
+  width: min(100%, 560px);
+}
+
+.empty-heading {
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.empty-heading h2 {
+  margin: 0;
+  color: var(--fg);
+  font-size: 16px;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+}
+
+.empty-heading p {
+  margin: 5px 0 0;
+  color: var(--dim2);
+  font-size: 12px;
+}
+
+.surface-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.surface-card {
+  min-height: 124px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 15px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--panel2);
+  color: var(--fg);
+  text-align: left;
+  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
+}
+
+.surface-card .card-icon {
+  margin-bottom: 18px;
+  color: var(--dim);
+}
+
+.surface-card .card-icon .ico {
+  width: 19px;
+  height: 19px;
+}
+
+.surface-card strong {
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.surface-card p {
+  margin: 5px 0 0;
+  color: var(--dim2);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.surface-unavailable {
+  align-content: center;
+  gap: 5px;
+  color: var(--dim2);
+  text-align: center;
+}
+
+.surface-unavailable b {
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.surface-unavailable span {
+  font-size: 11.5px;
+}

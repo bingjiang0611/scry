@@ -1,0 +1,623 @@
+/* Editorial refinement ------------------------------------------------------ */
+
+:where(
+  .sb-count,
+  .sb-sesstime,
+  .sb-session-meta,
+  .who .mini,
+  .turn-footer,
+  .tool-row .meta,
+  .overview-metric,
+  .overview-metric-foot,
+  .turn-call-row,
+  .pinned-summary-row-value,
+  .pinned-summary-count,
+  .ctx-gauge
+) {
+  font-variant-numeric: tabular-nums;
+}
+
+:where(
+  .welcome-kicker,
+  .overview-verdict-line .verdict-kicker,
+  .overview-metric > span,
+  .overview-metric > small,
+  .pinned-summary-section-title
+) {
+  font-size: 10px;
+  font-weight: 680;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+/* The active workspace should read as one quiet, layered instrument. */
+
+.topbar {
+  border-color: var(--border3);
+  /* Nearly opaque blur kept a full-width offscreen surface alive during every trace repaint. */
+  background: var(--main-surface);
+}
+
+.surface-topbar {
+  border-color: var(--border3);
+  background: transparent;
+}
+
+.sb-new,
+.sb-navitem,
+.sb-proj-head,
+.sb-sess,
+.sb-settings,
+.tb-action,
+.surface-tab,
+.icon-button {
+  transition: color var(--dur-micro) linear, background-color var(--dur-micro) linear, border-color var(--dur-micro) linear;
+}
+
+/* Tab selection is immediate; a shared moving indicator requires step 04's DOM work. */
+.surface-tab,
+.surface-tab-activate {
+  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear;
+}
+
+/* 会话行保持静止：横向位移会扩大滚动区域，并在列表底部反复触发/取消 hover。 */
+.sb-sess.active {
+  border: 1px solid color-mix(in srgb, var(--selected-line) 58%, var(--border3));
+  background:
+    linear-gradient(90deg, var(--selected-soft), transparent 76%),
+    var(--surface-hover);
+  box-shadow:
+    inset 2px 0 0 var(--selected),
+    0 8px 22px rgb(0 0 0 / 10%);
+}
+
+:root[data-theme='light'] .sb-sess.active {
+  box-shadow:
+    inset 2px 0 0 var(--selected),
+    0 8px 22px rgb(35 35 32 / 6%);
+}
+
+.sb-search:focus-within {
+  border-color: var(--accent-line);
+  box-shadow:
+    0 0 0 1px var(--accent-line),
+    0 0 0 4px var(--accent-soft);
+}
+
+/* Welcome: a quiet Codex-like prompt. Provider discovery stays in the composer menu. */
+
+.chat-body:has(.welcome-field) {
+  background: var(--main-surface);
+}
+
+.chat-body .welcome-field {
+  gap: 0;
+  padding-block: 24px 20px;
+}
+
+.welcome-heading-minimal {
+  justify-items: center;
+  gap: 28px;
+}
+
+.welcome-hero-icon {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  place-items: center;
+  color: var(--dim2);
+}
+
+.welcome-hero-icon .ico {
+  width: 52px;
+  height: 52px;
+  stroke-width: 1.2;
+}
+
+.welcome-heading-minimal h1 {
+  max-width: 760px;
+  font-size: clamp(29px, 3.4cqi, 38px);
+  font-weight: 520;
+  line-height: 1.2;
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+}
+
+.welcome-heading-minimal h1 span {
+  text-decoration: underline dotted var(--dim3);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 7px;
+}
+
+.welcome-provider-field {
+  gap: 10px;
+  padding: 16px;
+  border-color: var(--border3);
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  box-shadow: var(--shadow-card);
+}
+
+.welcome-provider-head {
+  padding-bottom: 12px;
+}
+
+.welcome-provider-grid {
+  gap: 8px;
+}
+
+.welcome-provider {
+  min-height: 80px;
+  padding: 12px;
+  border-color: var(--border3);
+  border-radius: var(--r-md);
+  background: var(--surface-subtle);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 2%);
+  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
+}
+
+.welcome-provider:hover {
+  border-color: var(--border2);
+  background: var(--surface-hover);
+  box-shadow: var(--shadow-card);
+}
+
+.welcome-provider.is-selected,
+.welcome-profile-pick.is-selected {
+  border-color: var(--selected-line);
+  background:
+    linear-gradient(145deg, var(--selected-soft), transparent 68%),
+    var(--surface-muted);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--selected-line) 42%, transparent),
+    var(--shadow-card);
+}
+
+.runtime-composer .composer-context {
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border3);
+}
+
+.runtime-composer .composer-context .wdbtn {
+  min-height: 34px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: var(--surface-subtle);
+  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
+}
+
+.runtime-composer .composer-context .wdbtn:hover,
+.runtime-composer .composer-context .wdbtn.on {
+  border-color: var(--border3);
+  background: var(--surface-hover);
+}
+
+/* Conversation: turn cards, tool blocks and measured telemetry. */
+
+.chat-body .chat-transcript {
+  padding-block: 24px 40px;
+}
+
+/* A turn already contains both the user prompt and assistant response. Keep the
+   boundary visible without stacking two oversized padding bands between turns. */
+.chat-body .transcript-turn {
+  padding-bottom: 18px;
+}
+
+.chat-body .transcript-turn + .transcript-turn {
+  padding-top: 22px;
+}
+
+.chat-body .turn-assistant {
+  margin-top: 14px;
+  padding: 16px 18px;
+  border: 0;
+  border-radius: 20px;
+  background: var(--surface-faint);
+  box-shadow: none;
+  transition: background-color var(--dur-micro) linear;
+}
+
+.chat-body .transcript-turn:hover .turn-assistant,
+.chat-body .transcript-turn:focus-within .turn-assistant {
+  border-color: transparent;
+  background: var(--surface-subtle);
+  box-shadow: none;
+  transform: none;
+}
+
+.chat-body .who {
+  min-height: 22px;
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.015em;
+}
+
+.chat-body .model-text {
+  max-width: 76ch;
+  font-size: 15px;
+  line-height: 1.72;
+}
+
+.chat-body .turn-flow {
+  gap: 12px;
+  margin: 4px 0 0;
+  padding-left: 0;
+}
+
+.chat-body .turn-flow::before {
+  display: none;
+}
+
+.chat-body .tool-card {
+  margin-top: 10px;
+  padding: 11px 12px;
+  border-color: var(--border3);
+  border-radius: 12px;
+  background: var(--surface-subtle);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 2%);
+  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
+}
+
+.chat-body .tool-card:hover {
+  border-color: var(--border2);
+  background: var(--surface-hover);
+  box-shadow: var(--shadow-card);
+}
+
+.chat-body .tool-row .name {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.chat-body .tool-row .op {
+  font-size: 9px;
+  font-weight: 720;
+  letter-spacing: 0.075em;
+}
+
+.chat-body .turn-hooks-summary,
+.chat-body .files-summary {
+  margin-top: 14px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 14px;
+  background: var(--surface-subtle);
+  box-shadow: none;
+}
+
+.chat-body .turn-hooks-summary > summary,
+.chat-body .files-summary > summary {
+  min-height: 44px;
+  padding: 10px 14px;
+  color: var(--dim);
+  letter-spacing: 0.02em;
+  text-transform: none;
+  transition: color var(--dur-micro) linear, background-color var(--dur-micro) linear;
+}
+
+.chat-body .turn-hooks-summary > summary:hover,
+.chat-body .files-summary > summary:hover {
+  background: var(--surface-hover);
+  color: var(--fg);
+}
+
+.chat-body .turn-hooks-body,
+.chat-body .files-body {
+  border-top: 0;
+}
+
+.chat-body .turn-hook-phase + .turn-hook-phase {
+  border-top: 0;
+}
+
+.chat-body .turn-tail {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border3);
+}
+
+.chat-body .turn-footer {
+  flex: 1 1 auto;
+  gap: 10px;
+  min-width: 0;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.015em;
+}
+
+.chat-body .turn-branch-row {
+  flex: 0 0 auto;
+  min-height: 28px;
+  margin: 0;
+}
+
+.chat-body .turn-footer .lbl {
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Composer: one floating surface with calm footer chips and focus light. */
+
+.runtime-composer {
+  padding: 0 var(--evidence-gutter) 20px;
+}
+
+.runtime-composer .composer-shell {
+  border-color: var(--border);
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--panel) 96%, transparent);
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 4%),
+    0 20px 52px rgb(0 0 0 / 24%);
+  transition: border-color var(--dur-micro) linear;
+}
+
+:root[data-theme='light'] .runtime-composer .composer-shell {
+  box-shadow:
+    0 1px 2px rgb(35 35 32 / 6%),
+    0 20px 48px rgb(35 35 32 / 11%);
+}
+
+.runtime-composer .composer-shell:focus-within {
+  border-color: var(--accent-line);
+  box-shadow:
+    0 0 0 1px var(--accent-line),
+    0 0 0 5px var(--accent-soft),
+    0 24px 56px rgb(0 0 0 / 28%);
+}
+
+:root[data-theme='light'] .runtime-composer .composer-shell:focus-within {
+  box-shadow:
+    0 0 0 1px var(--accent-line),
+    0 0 0 5px var(--accent-soft),
+    0 24px 56px rgb(35 35 32 / 13%);
+}
+
+.runtime-composer .composer-bottom {
+  gap: 10px;
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border3);
+}
+
+.runtime-composer .permission-mode-trigger,
+.runtime-composer .model-effort-trigger {
+  min-height: 30px;
+  padding-inline: 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--surface-subtle);
+  transition: color var(--dur-micro) linear, background-color var(--dur-micro) linear, border-color var(--dur-micro) linear;
+}
+
+
+.runtime-composer .permission-mode-trigger:hover,
+.runtime-composer .model-effort-trigger:hover {
+  border-color: var(--border3);
+  background: var(--surface-hover);
+}
+
+.runtime-composer .send {
+  box-shadow:
+    0 8px 20px rgb(0 0 0 / 18%),
+    inset 0 1px 0 rgb(255 255 255 / 22%);
+  transition: background-color var(--dur-micro) linear;
+}
+
+.runtime-composer .send:not(:disabled):hover {
+  box-shadow:
+    0 12px 26px rgb(0 0 0 / 24%),
+    inset 0 1px 0 rgb(255 255 255 / 22%);
+}
+
+/* Overview: editorial session verdict, independent KPI tiles and evidence rows. */
+
+.overview-dossier .ov-topbar {
+  min-height: 44px;
+  padding: 0;
+}
+
+.overview-panel-title strong {
+  font-size: 16px;
+  font-weight: 680;
+  letter-spacing: -0.025em;
+}
+
+.overview-panel-title p {
+  font-size: 11px;
+}
+
+.overview-dossier .ov-scroll {
+  padding: 8px 0 16px;
+}
+
+.overview-session-hero {
+  gap: 14px;
+}
+
+.overview-session-gauge {
+  padding: 2px 2px 14px;
+  border-bottom: 1px solid var(--border3);
+}
+
+.overview-session-verdict {
+  overflow: hidden;
+  border: 1px solid var(--border3);
+  border-radius: 18px;
+  background:
+    linear-gradient(145deg, var(--surface-subtle), transparent 58%),
+    var(--panel);
+  box-shadow: var(--shadow-card);
+}
+
+.overview-verdict-line {
+  gap: 12px;
+  padding: 14px;
+}
+
+.overview-verdict-line strong {
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.overview-verdict-line p {
+  color: var(--dim);
+  line-height: 1.55;
+}
+
+.overview-metric-grid {
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.overview-metric {
+  min-height: 78px;
+  padding: 12px;
+  border: 1px solid var(--border3);
+  border-radius: 13px;
+  background: var(--surface-subtle);
+  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
+}
+
+.overview-metric:hover {
+  border-color: var(--border2);
+  background: var(--surface-hover);
+}
+
+.overview-metric > strong {
+  margin-block: 4px 0;
+  font-size: 22px;
+  font-weight: 610;
+  line-height: 1;
+  letter-spacing: -0.035em;
+}
+
+.overview-metric-foot {
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--border3);
+}
+
+.overview-dossier .overview-data-tabs {
+  margin: 8px 12px 0;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+}
+
+.overview-data-tabs button {
+  min-height: 32px;
+  border-radius: 8px;
+  transition: color var(--dur-micro) linear, background-color var(--dur-micro) linear;
+}
+
+.overview-data-tabs button.active {
+  background: var(--surface-raised);
+  box-shadow: inset 0 0 0 1px var(--border3);
+}
+
+.overview-dossier .panel-section {
+  padding-top: 0;
+}
+
+.overview-dossier .panel-section .filerow {
+  min-height: 28px;
+  padding-block: 4px;
+}
+
+.overview-dossier .panel-section > h4 {
+  min-height: 24px;
+  margin-bottom: 4px;
+  color: var(--dim2);
+  font-size: 10px;
+  font-weight: 680;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+}
+
+.overview-dossier .turn-call-row {
+  margin-bottom: 10px;
+  padding: 14px;
+  border: 1px solid var(--border3);
+  border-radius: 14px;
+  background: var(--surface-faint);
+  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
+}
+
+.overview-dossier .turn-call-row:hover,
+.overview-dossier .turn-call-row:focus-within {
+  border-color: var(--border2);
+  background: var(--surface-subtle);
+  box-shadow: var(--shadow-card);
+}
+
+.overview-dossier .turn-call-heading strong {
+  font-size: 14px;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+}
+
+.overview-dossier .turn-call-groups {
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.overview-dossier .turn-call-group {
+  min-height: 27px;
+  padding: 6px 8px;
+  border-color: var(--border3);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+}
+
+/* Pinned summary: a light, inspectable floating sheet. */
+
+.pinned-summary-card {
+  padding: 14px;
+  border-color: var(--border);
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  box-shadow: var(--shadow-pop);
+  backdrop-filter: blur(22px) saturate(120%);
+}
+
+.pinned-summary-section-title {
+  padding: 8px 10px 6px;
+  color: var(--dim2);
+}
+
+.pinned-summary-row {
+  min-height: 46px;
+  padding-inline: 10px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear;
+}
+
+button.pinned-summary-row:hover,
+button.pinned-summary-row:focus-visible {
+  border-color: var(--border3);
+  background: var(--surface-hover);
+}
+
+.pinned-summary-divider {
+  margin: 10px 8px;
+  background: var(--border3);
+}

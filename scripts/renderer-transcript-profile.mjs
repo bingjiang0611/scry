@@ -3,7 +3,7 @@
 import { spawn } from 'node:child_process'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'vite'
 import electron from 'electron'
@@ -13,16 +13,17 @@ const temp = await mkdtemp(join(tmpdir(), 'scry-transcript-profile-'))
 const controls = process.argv.includes('--controls')
 const fullApp = process.argv.includes('--app')
 const anchors = {
-  'App.tsx': [['App', '  const [theme, setTheme] = useState<AppTheme>']],
-  'Sidebar.tsx': [['Sidebar', '  const [sessionMenu, setSessionMenu] = useState<SessionMenuTarget | null>(null)']],
-  'ChatView.tsx': [
-    ['ChatView', "  const [composerMenu, setComposerMenu] = useState"],
+  'App.tsx': [['App', '  const appState = useAppState()']],
+  'app-interaction.tsx': [],
+  'components/Sidebar.tsx': [['Sidebar', '  const [sessionMenu, setSessionMenu] = useState<SessionMenuTarget | null>(null)']],
+  'components/chat-view/Composer.tsx': [['ChatView', '  const [composerMenu, setComposerMenu] = useState']],
+  'components/chat-view/transcript.tsx': [
     ['ChatTranscriptTurns', '  const windowed = shouldWindowTranscript(turns)'],
     ['TranscriptTurn', '  const selected = useMemo(() => selectedId != null'],
     ['releaseChecks', '    const release = (focusTarget: Node | null) => {', false]
   ],
-  'ChatTurn.tsx': [['AssistantTurn', '  const [forking, setForking] = useState(false)']],
-  'MarkdownImpl.tsx': [['Markdown', '  const sampledChildren = useSampledMarkdownSource(children, streaming)']]
+  'components/ChatTurnAssistant.tsx': [['AssistantTurn', '  const [forking, setForking] = useState(false)']],
+  'components/MarkdownImpl.tsx': [['Markdown', '  const sampledChildren = useSampledMarkdownSource(children, streaming)']]
 }
 
 // Runs before React; observe actual listener/observer lifetimes, not source-code counts.
@@ -157,9 +158,9 @@ try {
   await build({
     configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
     plugins: [{ name: 'profile-production-components', enforce: 'pre', transform(source, id) {
-      const entries = anchors[id.split('/').at(-1)]
-      if (!entries || !id.startsWith(join(root, 'src/renderer/'))) return
-      let code = "import { useLayoutEffect as profileCommit } from 'react'\n" + source
+      const entries = anchors[relative(join(root, 'src/renderer'), id)]
+      if (!entries) return
+      let code = entries.length ? "import { useLayoutEffect as profileCommit } from 'react'\n" + source : source
       for (const [key, anchor, commit = true] of entries) {
         if (code.split(anchor).length !== 2) throw new Error(`Profile anchor changed: ${key}`)
         const increment = `window.profileCounts.${key} = (window.profileCounts.${key} ?? 0) + 1;`
@@ -167,10 +168,14 @@ try {
       }
       if (id === join(root, 'src/renderer/App.tsx')) {
         const start = 'export function App() {'
-        const end = '  return (\n    <div\n      className={`app app-shell'
-        if (code.split(start).length !== 2 || code.split(end).length !== 2) throw new Error('App body timing anchor changed')
-        code = code.replace(start, `${start}\n  const profileAppStarted = performance.now()`)
-          .replace(end, `  window.profileAppBodyMs.push(performance.now() - profileAppStarted)\n${end}`)
+        if (code.split(start).length !== 2) throw new Error('App body start anchor changed')
+        code = code.replace(start, `${start}\n  window.profileAppStarted = performance.now()`)
+      }
+      if (id === join(root, 'src/renderer/app-interaction.tsx')) {
+        // Include all extracted hooks, stopping at the same pre-JSX boundary.
+        const end = '  return <AppShell {...shellProps} />'
+        if (code.split(end).length !== 2) throw new Error('App body end anchor changed')
+        code = code.replace(end, `  window.profileAppBodyMs.push(performance.now() - window.profileAppStarted)\n${end}`)
       }
       return code
     } }],

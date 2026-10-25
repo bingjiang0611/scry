@@ -1,0 +1,260 @@
+/* 每轮 footer：cost / token / duration / tool·mcp / 文件统计 */
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+.fchip {
+  font-size: 11.5px;
+  color: var(--dim);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+.fchip.cost {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.fbadge.bash {
+  background: var(--dim2);
+  color: var(--bg);
+}
+/* 右侧纵览/详情栏 */
+.panel {
+  width: 100%;
+  flex: none;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.panel-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.panel-tabs button {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  font: 11.5px/1 var(--font-ui);
+  cursor: pointer;
+}
+.panel-tabs button svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* （.psec/.ptitle 已被蓝本 .panel-section/h4 取代——OverviewPanel 是唯一消费者，迁移后移除） */
+.pstats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.psub {
+  font-size: 11px;
+  color: var(--dim);
+  margin: 8px 0 4px;
+}
+.psrc {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--dim2);
+}
+
+/* P2 Files：写覆盖率 / 只写不读风险 */
+.covrow {
+  font-size: 12px;
+  color: var(--dim);
+  padding: 2px 0 4px;
+}
+.cov-warn {
+  color: var(--write, var(--write));
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* P3 审计：危险操作徽标 */
+.tag.danger {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255, 107, 107, 0.12);
+  color: var(--bad);
+  white-space: nowrap;
+}
+
+.tag.danger.warn {
+  background: var(--warn-soft);
+  color: var(--write);
+}
+
+/* ============================================================
+   蓝本视觉升级：右栏 panel-section / verdict-card / mini-bar / sdot
+   （从 9 屏高保真蓝本 shared.css 移植，hex/间距照搬不调）
+   ============================================================ */
+.panel-section {
+  border-bottom: 1px solid var(--border3);
+  padding: 12px 16px;
+}
+.panel-section.grow {
+  flex: 1;
+  border-bottom: 0;
+}
+.panel-section h4 {
+  font: 600 11.5px/1.2 var(--font-ui);
+  color: var(--dim);
+  letter-spacing: 0;
+  text-transform: none;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.panel-section h4.clickable {
+  cursor: pointer;
+}
+.panel-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.panel-section-heading .more {
+  margin-left: auto;
+}
+.panel-section h4 .more {
+  margin-left: auto;
+  color: var(--dim2);
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.overview-data-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border3);
+  background: var(--panel);
+}
+
+.overview-data-tabs button {
+  min-width: 0;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dim2);
+  font: 500 11.5px/1 var(--font-ui);
+  cursor: pointer;
+}
+
+.overview-data-tabs button.active {
+  border-color: var(--border2);
+  background: var(--panel3);
+  color: var(--fg);
+}
+
+/* 行内状态点（蓝本）——补上现有代码已引用、但 CSS 一直缺失的 .sdot */
+.sdot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  vertical-align: middle;
+  background: var(--ok);
+}
+.sdot.ok {
+  background: var(--ok);
+}
+.sdot.bad {
+  background: var(--bad);
+}
+.sdot.warn {
+  background: var(--warn);
+}
+.sdot.checking {
+  background: var(--warn);
+}
+.sdot.off {
+  background: var(--dim3);
+}
+
+/* TOP TOOLS 排名 mini bar */
+.top-tools-section h4 {
+  color: var(--dim);
+}
+.top-tools-section h4 .more {
+  color: var(--dim);
+}
+.mini-bar {
+  display: block;
+  width: 100%;
+  height: 6px;
+  background: var(--border2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.mini-bar > i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.mini-bar.read > i {
+  background: var(--read);
+}
+.mini-bar.edit > i {
+  background: var(--edit);
+}
+.mini-bar.mcp > i {
+  background: var(--mcp);
+}
+.toptool {
+  display: grid;
+  grid-template-columns: 1fr auto 90px;
+  gap: 10px;
+  align-items: center;
+  min-height: 40px;
+  font: 12px/1.3 var(--font-mono);
+  padding: 3px 0;
+}
+.toptool .tt-nm {
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.toptool .tt-nm.read {
+  color: var(--read);
+}
+.toptool .tt-nm.edit {
+  color: var(--edit);
+}
+.toptool .tt-nm.mcp {
+  color: var(--ok);
+}
+.toptool .tt-n {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}

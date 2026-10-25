@@ -1,0 +1,322 @@
+/* 模态（Skills / MCP） */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 100;
+}
+.modal-overlay[data-state='enter'] {
+  animation: modal-backdrop-in 180ms linear backwards;
+}
+.modal-overlay[data-state='exit'] {
+  pointer-events: none;
+  animation: modal-backdrop-out 160ms var(--ease-exit) both;
+}
+.modal-overlay[data-state='enter'] > .modal {
+  animation: modal-dialog-in 260ms var(--ease-struct) backwards;
+}
+.modal-overlay[data-state='exit'] > .modal {
+  pointer-events: none;
+  animation: modal-dialog-out 150ms var(--ease-exit) both;
+}
+@keyframes modal-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes modal-backdrop-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes modal-dialog-in {
+  from { opacity: 0; transform: scale(0.97) translateY(6px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes modal-dialog-out {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.98); }
+}
+.ctx-overlay[data-state='exit'] {
+  pointer-events: none;
+}
+.menu[data-state='enter'],
+.ctxmenu[data-state='enter'],
+.session-hover-card[data-state='enter'] {
+  animation: overlay-menu-in 160ms var(--ease-out) backwards;
+}
+.menu[data-state='exit'],
+.ctxmenu[data-state='exit'],
+.session-hover-card[data-state='exit'] {
+  pointer-events: none;
+  animation: overlay-menu-out 100ms linear both;
+}
+@keyframes overlay-menu-in {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes overlay-menu-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+.modal {
+  max-width: 92vw;
+  border: 1px solid var(--border2);
+  display: flex;
+  flex-direction: column;
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-x {
+  width: 40px;
+  height: 40px;
+  margin-left: 0;
+  background: transparent;
+  border: 0;
+  color: var(--dim);
+  font-size: 16px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal-refresh {
+  width: 40px;
+  height: 40px;
+  margin-left: auto;
+  background: transparent;
+  border: 0;
+  color: var(--dim);
+  font-size: 15px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal-refresh:hover {
+  color: var(--fg);
+}
+.modal-search {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--fg);
+  font-size: 13px;
+  outline: none;
+}
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+}
+.modal-foot {
+  border-top: 1px solid var(--border);
+  font-size: 11.5px;
+}
+.modal-foot code {
+  background: var(--panel2);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.mcp-scope {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--dim2);
+  margin: 12px 0 4px;
+}
+.skill-row {
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+}
+.skill-tog {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* iOS 风格滑动开关 */
+.switch {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  cursor: pointer;
+}
+.switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.switch .slider {
+  position: absolute;
+  width: 34px;
+  height: 19px;
+  left: 3px;
+  top: 10.5px;
+  border-radius: 999px;
+  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear;
+}
+.switch .slider::before {
+  content: '';
+  position: absolute;
+  height: 15px;
+  width: 15px;
+  left: 2px;
+  top: 2px;
+  background: var(--fg);
+  border-radius: 50%;
+  transition: transform var(--dur-fast) var(--ease-struct);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+.switch input:checked + .slider::before {
+  transform: translateX(15px);
+}
+.skill-name {
+  font-weight: 600;
+}
+.skill-name.off {
+  color: var(--dim2);
+  text-decoration: line-through;
+}
+.skill-desc {
+  color: var(--dim);
+  font-size: 12px;
+  margin: 2px 0 0 24px;
+}
+.mcp-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+}
+.mcp-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.mcp-name {
+  font-weight: 600;
+}
+.mcp-transport {
+  font-size: 10px;
+  color: var(--dim);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  padding: 0 5px;
+}
+.mcp-ok {
+  color: var(--ok);
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.mcp-bad {
+  color: var(--bad);
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.mcp-neutral {
+  color: var(--dim);
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.mcp-detail {
+  grid-column: 1;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  color: var(--dim2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mcp-name.off {
+  text-decoration: line-through;
+  color: var(--dim);
+}
+.mcp-actions {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.mcp-test {
+  min-height: 40px;
+  border: 1px solid var(--border2);
+  color: var(--fg);
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.mcp-test:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.mcp-test:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.spinner {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  vertical-align: -1px;
+  margin-right: 4px;
+  border: 2px solid var(--border2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+.mcp-runtime {
+  font-size: 10px;
+  color: var(--dim2);
+  white-space: nowrap;
+}
+.mcp-test-result {
+  max-width: 260px;
+  color: var(--dim2);
+  font-size: 10px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+.mcp-test-result.ok {
+  color: var(--ok);
+}
+.mcp-test-result.warn {
+  color: var(--warn);
+}
+.mcp-test-result.bad {
+  color: var(--danger);
+}
+.mcp-tools {
+  grid-column: 1 / span 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.mcp-tool {
+  font-size: 10.5px;
+  font-family: ui-monospace, Menlo, monospace;
+  color: var(--dim);
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+}

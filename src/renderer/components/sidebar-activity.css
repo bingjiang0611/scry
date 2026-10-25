@@ -1,4 +1,5 @@
 .sb-view-tabs {
+  position: relative;
   display: flex;
   gap: 22px;
   margin: 8px 10px 12px;
@@ -15,10 +16,7 @@
   cursor: pointer;
 }
 
-.sb-view-tabs [aria-selected='true'] {
-  border-bottom-color: var(--fg);
-  color: var(--fg);
-}
+.sb-view-tabs [aria-selected='true'] { color: var(--fg); border-bottom-color: var(--fg); }
 
 .sb-activity {
   position: relative;

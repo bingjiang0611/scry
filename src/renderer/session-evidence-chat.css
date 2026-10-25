@@ -1,0 +1,316 @@
+/* --------------------------------------------------------------------------
+   Blueprint convergence
+   The evidence prototype is deliberately dense: transcript 820px, dossier
+   360–400px, fixed graph lanes, and a narrow segment inspector. These scoped
+   rules replace the older dashboard/card proportions without changing data.
+   -------------------------------------------------------------------------- */
+
+/* Chat · stable transcript rhythm ------------------------------------------------ */
+
+/* transcript、零 turn 欢迎区、composer 共用同一条正文列：列宽与两侧 gutter 只在这里定义。 */
+.chat-body,
+.runtime-composer {
+  --evidence-column: 880px;
+  --evidence-gutter: clamp(20px, 3.2cqi, 38px);
+}
+
+.chat-body .chat-transcript {
+  padding: 20px var(--evidence-gutter) 34px;
+  scroll-padding-block: 42px;
+}
+
+/* welcome 的左右边界要和 composer 卡片重合：composer 卡片是 min(880px, 100%)
+   去掉两侧 gutter，welcome 在 transcript 内容盒里取同一宽度再居中。 */
+.chat-body .welcome-field {
+  width: min(100%, calc(var(--evidence-column) - 2 * var(--evidence-gutter)));
+}
+
+.chat-body .transcript-turn {
+  position: relative;
+  width: min(820px, 100%);
+  max-width: none;
+  margin: 0 auto;
+  padding: 4px 0 28px;
+  border-radius: 0;
+  scroll-margin-block: 42px;
+}
+
+.chat-body .transcript-turn + .transcript-turn {
+  margin-top: 0;
+  padding-top: 24px;
+  border-top: 1px solid var(--border3);
+}
+
+.chat-body .transcript-turn.is-selected::before,
+.chat-body .transcript-turn.turn-jump-target::before {
+  position: absolute;
+  top: 18px;
+  bottom: 20px;
+  left: -14px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--selected);
+  content: "";
+}
+
+.chat-body .transcript-turn.turn-jump-target {
+  background: transparent;
+  box-shadow: none;
+}
+
+.chat-body .turn-user {
+  margin: 0;
+  padding-left: 18%;
+}
+
+.chat-body .bubble-user {
+  max-width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 11px 11px 3px 11px;
+  background: var(--panel2);
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.chat-body .user-md { font-size: inherit; }
+
+.chat-body .turn-assistant {
+  margin-top: 17px;
+  padding-left: 0;
+  border-left: 0;
+}
+
+.chat-body .who {
+  min-width: 0;
+  min-height: 25px;
+  gap: 7px;
+  margin: 0;
+  padding: 0 0 7px;
+  color: var(--dim);
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+.chat-body .who .av {
+  width: 7px;
+  height: 7px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: transparent;
+  font-size: 0;
+}
+
+.chat-body .who .runid {
+  min-width: 0;
+  margin-left: 0;
+  overflow: hidden;
+  color: var(--dim3);
+  font-size: var(--text-compact-size);
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-body .who .mini {
+  flex: none;
+  gap: 7px;
+  color: var(--dim3);
+  font-size: var(--text-compact-size);
+}
+
+.chat-body .who .mini .m {
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.chat-body .who .mini b { color: var(--dim); font-size: var(--text-compact-size); }
+.chat-body .who .mini .cost b { color: var(--dim); }
+
+.chat-body .files-summary,
+.chat-body .turn-hooks-summary,
+.chat-body .tool-card,
+.chat-body .skillinject {
+  border-color: var(--border3);
+  border-radius: 0;
+  background: var(--panel);
+}
+
+.chat-body .files-summary,
+.chat-body .turn-hooks-summary {
+  margin-top: 0;
+  border-right: 0;
+  border-left: 0;
+}
+
+.chat-body .files-summary > summary,
+.chat-body .turn-hooks-summary > summary {
+  min-height: 36px;
+  gap: 8px;
+  padding: 6px 0;
+  color: var(--dim2);
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.chat-body .files-summary .fh-total,
+.chat-body .turn-hooks-summary .hook-total { color: var(--dim3); font-size: 10px; }
+
+.chat-body .files-body,
+.chat-body .turn-hooks-body {
+  padding: 6px 8px 8px;
+  border-color: var(--border3);
+}
+
+.chat-body .turn-hook-phase-row { min-height: 36px; font-size: 11px; }
+.chat-body .turn-hook-row { min-height: 34px; font-size: 11px; }
+.chat-body .hook-issue .hook-run-status,
+.chat-body .hook-issue-meta,
+.chat-body .hook-config-scope,
+.chat-body .hook-config-matcher { font-size: 10px; }
+.chat-body .hook-evidence pre { font-size: 10.5px; line-height: 1.5; }
+
+.chat-body .model-text {
+  max-width: 72ch;
+  margin: 10px 0;
+  color: var(--dim);
+  font-size: 14px;
+  line-height: 1.72;
+}
+
+.chat-body .model-text.md a,
+.chat-body .model-text.md :not(pre) > code {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.chat-body .tool-card {
+  margin: 7px 0 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border3);
+  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
+}
+
+.chat-body .tool-card::before { display: none; }
+.chat-body .tool-card.sub { margin-left: 16px; border-left: 1px solid color-mix(in srgb, var(--agent) 52%, var(--border)); }
+.chat-body .tool-card.selected { border-color: var(--selected-line); background: var(--selected-soft); box-shadow: inset 2px 0 var(--selected); }
+
+.chat-body .tool-row { min-width: 0; min-height: 28px; gap: 8px; }
+.chat-body .tool-row .st { width: 13px; height: 13px; }
+.chat-body .tool-row .name { flex: none; font-size: 11.5px; }
+.chat-body .tool-row .kindtag { width: 5px; height: 5px; }
+.chat-body .tool-row .op { width: 22px; height: 20px; font-size: 10px; line-height: 20px; }
+.chat-body .tool-row .arg { max-width: none; color: var(--dim3); font-size: 11.5px; line-height: 1.4; }
+.chat-body .tool-row .meta { min-width: 0; flex: 0 1 auto; gap: 6px; font-size: var(--text-compact-size); }
+.chat-body .tool-row .meta .dur { flex-basis: auto; }
+.chat-body .tool-row .meta .bar { flex-basis: 42px; height: 2px; }
+.chat-body .tool-row .meta .tok { max-width: 72px; }
+.chat-body .tool-row .chev { width: 11px; height: 11px; }
+
+.chat-body .tool-detail {
+  margin-top: 6px;
+  padding: 8px;
+  border-color: var(--border3);
+  border-radius: 0;
+  background: var(--bg);
+  font-size: 11.5px;
+}
+
+/* 方案 C：整轮左轨 + 思考主线 + 工具组脚注（对话视图内的密度收敛） */
+.chat-body .turn-flow { gap: 14px; margin: 8px 0 2px; }
+.chat-body .turn-flow > .model-text { margin: 0; }
+.chat-body .thinking { color: var(--dim); font-size: 13px; line-height: 1.65; }
+.chat-body .tool-group-body {
+  background: var(--panel);
+  border-color: var(--border3);
+  border-radius: 0;
+  padding: 0 8px;
+}
+.chat-body .tool-group-body .tool-card {
+  margin: 0;
+  padding: 6px 0;
+  border: 0;
+  border-top: 1px solid var(--border3);
+  background: transparent;
+}
+.chat-body .tool-group-body > div:first-child .tool-card { border-top: 0; }
+.chat-body .tool-group-body .tool-card.selected {
+  background: var(--selected-soft);
+  box-shadow: inset 2px 0 var(--selected);
+}
+
+.chat-body .turn-footer {
+  min-height: 29px;
+  align-items: center;
+  gap: 4px 11px;
+  margin-top: 10px;
+  padding: 8px 0 0;
+  border: 0;
+  border-top: 1px solid var(--border3);
+  border-radius: 0;
+  background: transparent;
+  color: var(--dim3);
+  font-size: var(--text-compact-size);
+}
+
+.chat-body .turn-footer .stat {
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  flex-direction: row;
+  gap: 4px;
+}
+
+.chat-body .turn-footer .stat .lbl,
+.chat-body .turn-footer .stat b { color: var(--dim3); font-size: var(--text-compact-size); letter-spacing: 0; text-transform: lowercase; }
+.chat-body .turn-footer .stat b { color: var(--dim); }
+.chat-body .turn-footer .sep { display: none; }
+
+.runtime-composer {
+  width: min(var(--evidence-column), 100%);
+  max-width: none;
+  padding: 8px var(--evidence-gutter) 10px;
+}
+
+.runtime-composer .evidence-composer-shell {
+  padding: 10px 12px 11px;
+  border-color: var(--border2);
+  border-radius: 20px;
+  background: var(--panel2);
+  box-shadow: 0 12px 30px -22px rgba(0, 0, 0, 0.45);
+}
+
+.runtime-composer .evidence-composer-shell:focus-within {
+  border-color: var(--selected-line);
+  box-shadow: 0 0 0 1px var(--selected-soft), 0 14px 32px -24px rgba(0, 0, 0, 0.48);
+}
+.runtime-composer .input,
+.runtime-composer textarea { min-height: 74px; padding: 8px 4px 12px; font-size: 14px; line-height: 1.55; }
+.runtime-composer textarea:focus-visible { outline: none; }
+.runtime-composer .composer-bottom { margin-top: 0; }
+.runtime-composer .composer-controls { gap: 2px; }
+.runtime-composer .run-control-select { height: 36px; font-size: 11.5px; }
+.runtime-composer .workdir-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runtime-composer .wdbtn > .ico { flex: none; }
+.runtime-composer .run-control-select { padding-right: 23px; padding-left: 7px; }
+.runtime-composer .run-control-select .rc-value { max-width: min(178px, 31cqi); }
+.runtime-composer .composer .send,
+.runtime-composer .send { width: 38px; height: 38px; min-height: 38px; border-radius: 50%; }
+.runtime-composer .send .ico { width: 15px; height: 15px; }
+.runtime-composer .stop { height: 36px; min-height: 36px; padding-inline: 10px; border-radius: 18px; font-size: 11px; }
+/* 运行状态条跟随本皮肤的紧凑刻度：停止键收成小药丸，和右侧圆形发送键呼应 */
+.runtime-composer .run-status { padding: 0 2px 8px; }
+.runtime-composer .run-status-stop { height: 28px; min-height: 28px; padding-inline: 11px; border-radius: 14px; font-size: 11px; }
+.runtime-composer .run-status-stop .ico { width: 11px; height: 11px; }

@@ -1,13 +1,13 @@
-import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { readCssManifest } from './css-test-reader'
 
 // 会话行的操作区（···/置顶/存档）是绝对定位的兄弟节点，盖在会话按钮上方。
 // 它自己不处理点击：一旦整块 pointer-events: auto，渐变遮罩的 padding 与图标之间的
 // 间隙就变成盲区——点上去既进不了会话，也不触发任何操作。jsdom 不做布局，
 // 所以这条不变式只能在样式源码上锁住。
-const css = readFileSync(join(__dirname, 'styles.css'), 'utf8')
-const alignmentCss = readFileSync(join(__dirname, 'codex-alignment.css'), 'utf8')
+const css = readCssManifest(join(__dirname, 'styles.css'))
+const alignmentCss = readCssManifest(join(__dirname, 'codex-alignment.css'))
 
 function ruleBody(selector: string): string {
   const index = css.indexOf(`\n${selector} {`)

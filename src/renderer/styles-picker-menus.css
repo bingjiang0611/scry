@@ -1,0 +1,253 @@
+/* 下拉菜单（workdir / cli picker 共用） */
+.wdpick,
+.clipick {
+  position: relative;
+}
+.wdbtn,
+.clibtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--panel2);
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  color: var(--fg);
+  padding: 6px 11px;
+  cursor: pointer;
+  font: inherit;
+}
+.menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  min-width: 240px;
+  background: var(--panel2);
+  border: 1px solid var(--border2);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  padding: 6px;
+  z-index: 20;
+}
+.wdmenu {
+  left: 0;
+}
+.wdrecent-list {
+  max-height: 200px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.wdrecent-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+}
+.wdrecent-pick {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding-right: 42px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.wdrecent-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  text-align: left;
+}
+.wdrecent-copy b,
+.wdrecent-copy code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wdrecent-copy b {
+  color: var(--fg);
+  font: 600 12px/1.2 var(--font-ui);
+}
+.wdrecent-copy code {
+  color: var(--dim3);
+  font: 10px/1.2 var(--font-mono);
+}
+.wdrecent-remove {
+  position: absolute;
+  right: 6px;
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dim2);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+}
+.wdrecent-row:hover .wdrecent-pick,
+.wdrecent-row:focus-within .wdrecent-pick {
+  background: var(--panel3);
+}
+.wdrecent-row:hover .wdrecent-remove,
+.wdrecent-row:focus-within .wdrecent-remove {
+  opacity: 1;
+  pointer-events: auto;
+}
+.wdrecent-remove:hover {
+  background: var(--border2);
+  color: var(--fg);
+}
+.wdrecent-remove:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+.climenu {
+  left: 0;
+  width: min(286px, calc(100vw - 32px));
+  min-width: 0;
+}
+.cltitle,
+.mhdr {
+  padding: 8px 10px 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--dim2);
+}
+.cltitle .dim {
+  overflow: hidden;
+  text-transform: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: 0;
+  font-size: 13px;
+  color: var(--fg);
+}
+.climenu .mitem {
+  min-width: 0;
+}
+.agent-option-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-option-row {
+  position: relative;
+  min-width: 0;
+}
+.agent-option-pick {
+  padding-right: 38px;
+}
+.agent-option-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  text-align: left;
+}
+.agent-option-copy b,
+.agent-option-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-option-copy b {
+  color: var(--fg);
+  font: 600 12px/1.2 var(--font-ui);
+}
+.agent-option-copy small {
+  color: var(--dim3);
+  font: 10px/1.2 var(--font-mono);
+}
+.agent-option-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dim2);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: background-color var(--dur-micro) linear, color var(--dur-micro) linear, opacity var(--dur-micro) linear;
+}
+.agent-option-row:hover .agent-option-remove,
+.agent-option-row:focus-within .agent-option-remove {
+  opacity: 1;
+  pointer-events: auto;
+}
+.agent-option-remove:hover {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+.agent-option-remove:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+.climenu .ck {
+  flex: none;
+}
+.mitem {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 40px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+button.mitem {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+button.mitem:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.mitem:hover {
+  background: var(--panel2);
+}
+.mitem.on {
+  color: var(--fg);
+}
+.mitem .ck {
+  margin-left: auto;
+  color: var(--ok);
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.agicon {
+  width: 18px;
+  display: inline-grid;
+  place-items: center;
+}
+.mdiv {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 4px;
+}
+.dim {
+  color: var(--dim);
+}
+.pad {
+  padding: 6px 10px;
+}

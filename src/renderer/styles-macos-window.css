@@ -1,0 +1,98 @@
+/* macOS: let each app column paint through the native titlebar, matching T3 Code's hiddenInset shell. */
+.aux-view-topbar {
+  display: none;
+}
+
+:root[data-platform='macos'] {
+  --window-titlebar-h: 52px;
+}
+
+:root[data-platform='macos'] .sidebar {
+  padding-top: 0;
+}
+
+:root[data-platform='macos'] .sb-brand {
+  height: var(--window-titlebar-h);
+  min-height: var(--window-titlebar-h);
+  padding: 0 8px 0 80px;
+  border-bottom: 1px solid var(--border3);
+  container-name: sidebar-brand;
+  container-type: inline-size;
+}
+
+:root[data-platform='macos'] .topbar,
+:root[data-platform='macos'] .surface-topbar,
+:root[data-platform='macos'] .aux-view-topbar {
+  height: var(--window-titlebar-h);
+  min-height: var(--window-titlebar-h);
+}
+
+:root[data-platform='macos'] .aux-view-topbar {
+  display: block;
+  border-bottom: 1px solid var(--border3);
+  background: var(--main-surface);
+  -webkit-app-region: drag;
+}
+
+:root[data-platform='macos'] .main-area > .aux-view-topbar + .main-content > .usage-page {
+  grid-row: 1;
+}
+
+:root[data-platform='macos'] .topbar {
+  background: var(--main-surface);
+}
+
+:root[data-platform='macos'] .sb-brand,
+:root[data-platform='macos'] .topbar,
+:root[data-platform='macos'] .surface-topbar {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+:root[data-platform='macos'] .topbar button,
+:root[data-platform='macos'] .topbar input,
+:root[data-platform='macos'] .topbar select,
+:root[data-platform='macos'] .topbar textarea,
+:root[data-platform='macos'] .topbar a,
+:root[data-platform='macos'] .topbar [role='button'],
+:root[data-platform='macos'] .surface-topbar button,
+:root[data-platform='macos'] .surface-topbar input,
+:root[data-platform='macos'] .surface-topbar select,
+:root[data-platform='macos'] .surface-topbar textarea,
+:root[data-platform='macos'] .surface-topbar a,
+:root[data-platform='macos'] .surface-topbar [role='button'] {
+  -webkit-app-region: no-drag;
+}
+
+/* 覆盖整个窗口的弹层画在窗口拖拽带之上，但拖拽带仍然吞掉原生鼠标命中：
+   不加 no-drag，落在标题栏 52px 内的点击变成拖动窗口，弹层里的按钮收不到 click。 */
+:root[data-platform='macos'] .modal-overlay,
+:root[data-platform='macos'] .workspace-dialog-backdrop,
+:root[data-platform='macos'] .ctx-overlay {
+  -webkit-app-region: no-drag;
+}
+
+/* The left pane can collapse to zero while native traffic lights stay put. */
+:root[data-platform='macos'] .app.sidebar-collapsed .topbar,
+:root[data-platform='macos'] .app.sidebar-collapsed.right-panel-maximized .surface-topbar {
+  padding-left: 80px;
+}
+
+@container sidebar-brand (max-width: 100px) {
+  :root[data-platform='macos'] .sb-brand .ver {
+    display: none;
+  }
+}
+
+/* Keep long histories in the accessibility/layout tree without eagerly painting every turn. */
+.transcript-turn {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 600px;
+}
+
+/* Chromium does not consistently throttle compositor animations in minimized Electron windows. */
+:root[data-page-visibility='hidden'] *,
+:root[data-page-visibility='hidden'] *::before,
+:root[data-page-visibility='hidden'] *::after {
+  animation-play-state: paused !important;
+}

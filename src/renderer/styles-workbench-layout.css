@@ -1,0 +1,252 @@
+/* ============================================================
+   Quiet workbench convergence
+   Content leads; chrome, status, and evidence stay subordinate.
+   ============================================================ */
+html {
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+[role='button']:focus-visible,
+[tabindex]:focus-visible {
+  outline: 1px solid var(--accent-line);
+  outline-offset: 2px;
+}
+
+.sidebar {
+  background: var(--sidebar-surface);
+  border-right: 1px solid var(--border3);
+}
+
+.sidebar-resizer,
+.graph-detail-resizer {
+  background: var(--main-surface);
+}
+
+.app.right-panel-overview > .panel-resizer,
+.app.right-panel-overview > .right-panel-slot {
+  background: var(--overview-surface);
+}
+
+.pane-resizer:hover::before,
+.pane-resizer.active::before,
+.pane-resizer:focus-visible::before {
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-soft);
+}
+
+.sb-brand {
+  min-height: var(--topbar-h);
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border3);
+}
+
+.sb-brand .ver {
+  color: var(--dim3);
+}
+
+.sb-new {
+  min-height: 40px;
+  margin: 8px 10px 5px;
+  padding: 9px 11px;
+  background: var(--panel2);
+  border-color: transparent;
+  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear;
+}
+
+.sb-new:hover {
+  background: var(--panel3);
+  border-color: transparent;
+}
+
+.sb-search {
+  margin: 0 10px 7px;
+  min-height: 40px;
+  padding: 0 9px;
+  background: transparent;
+  border-color: transparent;
+  border-radius: var(--r-sm);
+}
+
+.sb-search input::placeholder {
+  color: var(--dim3);
+}
+
+.sb-search input {
+  align-self: stretch;
+  min-height: 40px;
+}
+
+.sb-search:focus-within {
+  background: var(--panel2);
+  border-color: var(--border2);
+  box-shadow: none;
+}
+
+.sb-search input:focus-visible {
+  outline: none;
+}
+
+.sb-nav {
+  padding: 4px 8px;
+  border-top-color: transparent;
+}
+
+.sb-navitem {
+  min-height: 40px;
+  padding: 8px 11px;
+  border-radius: var(--r-md);
+  transition: background-color var(--dur-micro) linear, color var(--dur-micro) linear;
+}
+
+.sb-navitem:hover {
+  background: var(--panel2);
+}
+
+.sb-navitem.active .ico {
+  color: var(--accent);
+}
+
+.sb-section {
+  padding: 12px 11px 5px;
+  color: var(--dim3);
+  font: 600 11px/1.2 var(--font-ui);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.sb-list {
+  padding: 0 10px 10px;
+}
+
+.sb-footer {
+  flex: none;
+  padding: 7px 8px 8px;
+  border-top: 1px solid var(--border3);
+}
+
+.sb-settings .ico {
+  color: var(--dim2);
+}
+
+.sb-proj-head {
+  min-height: 40px;
+  padding: 6px 7px;
+}
+
+.sb-proj-head:hover {
+  background: var(--panel2);
+}
+
+.sb-proj-head.on .pname {
+  color: var(--fg);
+}
+
+.ctxmenu,
+.menu,
+.slash-menu,
+.clipick .menu,
+.wdpick .menu {
+  background: var(--panel2);
+  border-color: var(--border2);
+  box-shadow: var(--shadow-pop);
+}
+
+.sb-sess-list {
+  border-left-color: var(--border3);
+}
+
+.sb-sess {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "main running"
+    "meta running";
+  align-items: center;
+  gap: 4px 8px;
+  min-height: 40px;
+  margin: 2px 0;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+}
+
+.sb-sess:hover {
+  background: var(--panel2);
+}
+
+.sb-sess.active {
+  background: var(--panel2);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.sb-sess.active::before {
+  display: none;
+}
+
+.sb-sess.active .sb-provider {
+  color: var(--dim);
+}
+
+.sb-session-main {
+  grid-area: main;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.sb-provider {
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--dim3);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.sb-sesstext {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-session-meta {
+  grid-area: meta;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--dim3);
+  font: 10px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.sb-count,
+.sb-sesstime {
+  color: inherit;
+  font: inherit;
+}
+
+.sb-running {
+  grid-area: running;
+}

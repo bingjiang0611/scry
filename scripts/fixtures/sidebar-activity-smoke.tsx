@@ -4,6 +4,7 @@ import { Sidebar } from '../../src/renderer/components/Sidebar'
 import type { SessionMeta } from '../../src/renderer/env'
 import { sessionAttentionKey } from '../../src/shared/session-attention'
 import '../../src/renderer/styles.css'
+import '../../src/renderer/motion.css'
 import '../../src/renderer/codex-alignment.css'
 
 function Fixture() {

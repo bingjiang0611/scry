@@ -1,9 +1,9 @@
-import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { readCssManifest } from './css-test-reader'
 
-const styles = readFileSync(join(__dirname, 'styles.css'), 'utf8')
-const alignedStyles = readFileSync(join(__dirname, 'codex-alignment.css'), 'utf8')
+const styles = readCssManifest(join(__dirname, 'styles.css'))
+const alignedStyles = readCssManifest(join(__dirname, 'codex-alignment.css'))
 
 function declaration(css: string, selector: string): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

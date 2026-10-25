@@ -1,0 +1,307 @@
+/* Evidence-only child Agent roster; unknown remains distinct from completed. */
+.agents-surface {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  background: var(--overview-surface);
+}
+
+.agents-surface-header {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border3);
+}
+
+.agents-surface-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.agents-surface-title > .ico {
+  color: var(--agent);
+}
+
+.agents-surface-title strong {
+  font-size: 12.5px;
+}
+
+.agents-surface-title > span {
+  min-width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  color: var(--dim2);
+  font: 9px/1 var(--font-mono);
+}
+
+.agents-surface-summary {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  justify-content: flex-end;
+  gap: 7px;
+  color: var(--dim3);
+  font: var(--text-compact-size)/1 var(--font-mono);
+}
+
+.agents-surface-summary .running { color: var(--ok); }
+.agents-surface-summary .failed { color: var(--bad); }
+.agents-surface-summary .unknown { color: var(--warn); }
+
+.agents-list {
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  overflow: auto;
+  padding: 11px;
+}
+
+.agent-row {
+  position: relative;
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  margin-left: calc(var(--agent-depth, 0) * 14px);
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--panel2);
+}
+
+.agent-row[data-depth]:not([data-depth='0'])::before {
+  position: absolute;
+  top: -9px;
+  bottom: -9px;
+  left: -9px;
+  width: 1px;
+  background: var(--border);
+  content: '';
+}
+
+.agent-row-head {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-status-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--dim3);
+}
+
+.agent-status-dot.running { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+.agent-status-dot.failed { background: var(--bad); }
+.agent-status-dot.unknown { background: var(--warn); }
+
+.agent-identity {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.agent-identity strong {
+  overflow: hidden;
+  color: var(--fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+}
+
+.agent-identity code {
+  overflow: hidden;
+  color: var(--dim3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: var(--text-compact-size)/1 var(--font-mono);
+}
+
+.agent-status {
+  flex: none;
+  color: var(--dim2);
+  font: var(--text-compact-size)/1 var(--font-mono);
+}
+
+.agent-status.running { color: var(--ok); }
+.agent-status.failed { color: var(--bad); }
+.agent-status.unknown { color: var(--warn); }
+
+.agent-row-context,
+.agent-row-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding-left: 14px;
+  color: var(--dim3);
+  font: var(--text-compact-size)/1.3 var(--font-mono);
+}
+
+.agent-row-context span + span::before {
+  margin-right: 7px;
+  color: var(--border2);
+  content: '·';
+}
+
+.agent-row-metrics span,
+.agent-row-metrics time {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.agent-row-metrics .ico {
+  width: 11px;
+  height: 11px;
+}
+
+.agent-recent {
+  display: grid;
+  gap: 5px;
+  margin: 0 0 0 14px;
+  padding: 8px 0 0 14px;
+  border-top: 1px solid var(--border3);
+  color: var(--dim2);
+  font-size: var(--text-compact-size);
+}
+
+.agent-recent li {
+  min-width: 0;
+  padding-left: 2px;
+}
+
+.agent-recent li::marker {
+  color: var(--dim3);
+  font: 8px/1 var(--font-mono);
+}
+
+.agent-recent li span {
+  overflow-wrap: anywhere;
+}
+
+
+.agent-recent time {
+  float: right;
+  margin-left: 8px;
+  color: var(--dim3);
+  font: var(--text-compact-size)/1.4 var(--font-mono);
+}
+
+.agents-empty {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 7px;
+  padding: 28px;
+  color: var(--dim2);
+  text-align: center;
+}
+
+.agents-empty strong {
+  margin-top: 4px;
+  color: var(--fg);
+  font-size: 12.5px;
+}
+
+.agents-empty p {
+  max-width: 300px;
+  margin: 0;
+  font-size: var(--text-supporting-size);
+  line-height: 1.55;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .surface-tab:hover,
+  .right-surface-panel .icon-button:hover,
+  .surface-tab-close:hover,
+  .surface-menu .menu-item:hover {
+    color: var(--fg);
+    background: var(--surface-hover);
+  }
+
+  .surface-tab:hover .surface-tab-close,
+  .terminal-tab:hover .terminal-tab-close {
+    opacity: 0.72;
+  }
+
+  .surface-card:hover {
+    border-color: var(--border2);
+    background: var(--panel3);
+  }
+
+  .terminal-action:hover:not(:disabled),
+  .terminal-tab-close:hover,
+  .terminal-restart:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.08);
+  }
+}
+
+@media (max-width: 1180px) {
+  .app.right-panel-surface:not(.right-panel-hidden):not(.right-panel-maximized) {
+    grid-template-columns: var(--sidebar-w) var(--pane-resizer-w) minmax(0, 1fr);
+  }
+
+  .app.right-panel-surface:not(.right-panel-hidden):not(.right-panel-maximized) > .panel-resizer {
+    display: none;
+  }
+
+  .app.right-panel-surface:not(.right-panel-hidden):not(.right-panel-maximized) > .right-panel-slot {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: auto;
+    z-index: 30;
+    width: min(var(--overview-panel-w), calc(100vw - var(--sidebar-w) - var(--pane-resizer-w)));
+    box-shadow: -18px 0 48px rgba(0, 0, 0, 0.44);
+  }
+}
+
+@container (max-width: 410px) {
+  .surface-card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .agents-surface-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .agents-surface-summary {
+    justify-content: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Keep overlay feedback, but remove all spatial motion. */
+  @keyframes modal-dialog-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes modal-dialog-out {
+    from { opacity: 1; }
+    to { opacity: 0; }
+  }
+  @keyframes overlay-menu-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes surface-menu-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+}

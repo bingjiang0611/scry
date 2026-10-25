@@ -1,0 +1,196 @@
+/* Pending questions are actionable attention, not background progress. */
+.sb-question-pending {
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--warn) 38%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--warn);
+  font: 600 10px/1 var(--font-ui);
+  white-space: nowrap;
+}
+
+.sb-question-pending .ico {
+  width: 11px;
+  height: 11px;
+}
+
+.sb-sess.waiting-answer .sb-sesstext {
+  color: var(--fg);
+  font-weight: 550;
+}
+
+.sb-sess.waiting-answer .sb-session-meta {
+  padding-right: 0;
+}
+
+.question-count {
+  color: var(--dim2);
+  font-size: 11px;
+}
+
+.question-inline-form {
+  position: relative;
+  margin-top: 0;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 88%, var(--bg));
+}
+
+.question-inline-form > .question-queue {
+  position: absolute;
+  z-index: 1;
+  top: 18px;
+  right: 22px;
+}
+
+.question-dialog-body {
+  padding: 22px;
+}
+
+.question-field legend {
+  margin-bottom: 16px;
+}
+
+.question-field legend > span:last-child {
+  gap: 7px;
+}
+
+.question-field legend b {
+  color: var(--accent);
+  font: 650 11px/1 var(--font-ui);
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+.question-field legend span span {
+  color: var(--fg);
+  font-size: 16px;
+  font-weight: 620;
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.question-index {
+  padding-top: 3px;
+}
+
+.question-options {
+  gap: 8px;
+}
+
+.question-option {
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 11px;
+  min-height: 58px;
+  padding: 11px 13px;
+  border-color: var(--border2);
+  background: var(--panel2);
+}
+
+.question-option.selected {
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel2));
+  border-color: color-mix(in srgb, var(--accent) 68%, var(--border));
+}
+
+.question-option b {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+}
+
+.question-option small {
+  font-size: 11.5px;
+}
+
+.question-recommended {
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: color-mix(in srgb, var(--accent) 82%, white);
+  font: 650 9.5px/1.2 var(--font-ui);
+  font-style: normal;
+}
+
+.question-other-input {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border2);
+  border-radius: var(--r-sm);
+  outline: none;
+  font: 12.5px/1.4 var(--font-ui);
+}
+
+.question-other-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.question-free-text-input {
+  min-height: 46px;
+}
+
+.question-preview {
+  margin-top: 10px;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+}
+
+.question-preview > span {
+  color: var(--dim3);
+  font: 10px/1 var(--font-mono);
+}
+
+.question-dialog-foot {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 22px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 34%, transparent);
+}
+
+.question-status {
+  min-width: 0;
+  color: var(--dim3);
+  font-size: 11px;
+}
+
+.question-status.complete {
+  color: var(--dim2);
+}
+
+.question-status.error {
+  color: var(--bad);
+}
+
+.question-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.question-cancel,
+.question-submit {
+  min-height: 36px;
+}
+
+.question-shortcut {
+  margin-left: 6px;
+  color: inherit;
+  font: 10px/1 var(--font-mono);
+  opacity: 0.72;
+}

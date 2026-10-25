@@ -1,0 +1,238 @@
+/* Billing Guardian：本地估算账单解释，不伪装官方账单 */
+.billing-section {
+  background: var(--panel);
+}
+.billing-source {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 9px;
+}
+.source-pill {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  border: 1px solid var(--border2);
+  border-radius: 5px;
+  padding: 2px 7px;
+  font: 10.5px/1.45 var(--font-mono);
+  color: var(--dim);
+  background: var(--surface-hover);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.source-pill.estimate {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+.source-pill.off {
+  color: var(--dim2);
+}
+.billing-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--border3);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--surface-subtle);
+}
+.billing-grid > div {
+  min-width: 0;
+  padding: 8px 10px;
+  border-right: 1px solid var(--border3);
+  border-bottom: 1px solid var(--border3);
+}
+.billing-grid > div:nth-child(2n) {
+  border-right: 0;
+}
+.billing-grid > div:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+.billing-grid span {
+  display: block;
+  color: var(--dim2);
+  font: 11px/1.2 var(--font-ui);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.billing-grid b {
+  display: block;
+  margin-top: 5px;
+  color: var(--fg);
+  font: 600 13px/1.1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.billing-coverage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.billing-coverage span,
+.turn-id {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border2);
+  border-radius: 5px;
+  padding: 1px 6px;
+  font: 10.5px/1.45 var(--font-mono);
+  color: var(--dim);
+  background: var(--surface-muted);
+  white-space: nowrap;
+}
+.billing-details {
+  margin-top: 10px;
+}
+.billing-details.billing-priority {
+  padding-top: 2px;
+}
+.billing-details > summary {
+  min-height: 40px;
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--dim);
+  font: 11.5px/1.2 var(--font-mono);
+  padding: 2px 0 5px;
+}
+.billing-details > summary::-webkit-details-marker {
+  display: none;
+}
+.billing-details > summary::before {
+  content: "›";
+  color: var(--accent);
+  transform: rotate(0deg);
+  transition: transform var(--dur-base) var(--ease-struct);
+}
+.billing-details[open] > summary::before {
+  transform: rotate(90deg);
+}
+.billing-details > summary span {
+  margin-left: auto;
+  color: var(--dim2);
+  font-variant-numeric: tabular-nums;
+}
+.billing-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 0;
+  font: 11.5px/1.45 var(--font-mono);
+}
+.billing-row.click {
+  min-height: 40px;
+  cursor: pointer;
+  border-radius: 6px;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+.billing-row.click:hover {
+  background: var(--panel2);
+}
+.billing-row.click:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  background: var(--panel2);
+}
+.billing-row .fname {
+  min-width: 0;
+  flex: 1 1 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.billing-row .dim {
+  min-width: 0;
+  flex: 1 1 100%;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  font-variant-numeric: tabular-nums;
+}
+.billing-token-table {
+  margin-top: 4px;
+  overflow-x: auto;
+  border: 1px solid var(--border3);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+}
+.billing-token-row {
+  display: grid;
+  grid-template-columns: 54px minmax(92px, 1.2fr) minmax(72px, 0.9fr) minmax(72px, 0.9fr) minmax(78px, 1fr) 42px 54px;
+  align-items: center;
+  gap: 10px;
+  min-width: 540px;
+  padding: 7px 10px;
+  border-top: 1px solid var(--border3);
+  font: 11.5px/1.35 var(--font-mono);
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+.billing-token-row:first-child {
+  border-top: 0;
+}
+.billing-token-row.head {
+  padding-top: 6px;
+  padding-bottom: 6px;
+  color: var(--dim2);
+  background: var(--surface-subtle);
+  font-size: 10.5px;
+}
+.billing-token-row.click {
+  min-height: 40px;
+  cursor: pointer;
+}
+.billing-token-row.click:hover {
+  background: var(--panel2);
+}
+.billing-token-row.click:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  background: var(--panel2);
+}
+.billing-token-row > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.billing-token-row > span:not(:first-child) {
+  text-align: right;
+}
+.billing-token-row .tok-total {
+  color: var(--fg);
+}
+
+.billing-sync {
+  width: 100%;
+  min-height: 40px;
+  margin-top: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid rgba(93, 210, 168, 0.24);
+  background: rgba(34, 197, 141, 0.09);
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.billing-sync:disabled {
+  cursor: default;
+  opacity: 0.56;
+}
+
+.billing-sync.fixture {
+  border-color: rgba(123, 171, 255, 0.24);
+  background: rgba(78, 161, 255, 0.08);
+  color: var(--read);
+}
