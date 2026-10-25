@@ -3,8 +3,9 @@ import type { WorkflowService } from './workflow-service'
 import { validateWorkflowRoleBinding } from './workflow-program'
 import { workflowRecoveryCopy } from '../shared/constants/copy'
 import { validateWorkflowRetryTarget } from './workflow-retry'
+import { validateWorkflowRevisionDraft, validateWorkflowRevisionTarget } from './workflow-revision-draft'
 
-type Service = Pick<WorkflowService, 'planCommand' | 'preview' | 'findPreview' | 'approve' | 'start' | 'resume' | 'retry' | 'stop' | 'snapshot' | 'list' | 'cancelPlanning'>
+type Service = Pick<WorkflowService, 'planCommand' | 'preview' | 'findPreview' | 'approve' | 'start' | 'resume' | 'retry' | 'prepareRevision' | 'revisePrepared' | 'stop' | 'snapshot' | 'list' | 'cancelPlanning'>
 const identity = (value: unknown): string => {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,96}$/.test(value)) throw new Error('工作流身份无效')
   return value
@@ -68,6 +69,23 @@ export function registerWorkflowIpc({ register, service, resolveWorkspace, asser
     const preview = await service.preview(accepted.workflowId)
     resolveWorkspace(preview.workspace)
     return service.retry(accepted.workflowId, accepted, target, commandId)
+  })
+  register('workflow:prepareRevision', async payload => {
+    const draft = validateWorkflowRevisionDraft(payload)
+    const preview = await service.preview(draft.workflowId)
+    resolveWorkspace(preview.workspace)
+    return service.prepareRevision(draft)
+  })
+  register('workflow:revise', async (workflowId, payload) => {
+    const accepted = approval(payload)
+    if (identity(workflowId) !== accepted.workflowId) throw new Error(workflowRecoveryCopy.fingerprint)
+    const value = payload as Record<string, unknown>
+    if (Object.keys(value).some(key => !['workflowId', 'programRevision', 'approvedAt', 'target', 'commandId'].includes(key))) throw new Error(workflowRecoveryCopy.fingerprint)
+    const target = validateWorkflowRevisionTarget(value.target)
+    const commandId = identity(value.commandId)
+    const preview = await service.preview(accepted.workflowId)
+    resolveWorkspace(preview.workspace)
+    return service.revisePrepared(accepted.workflowId, accepted, target, commandId)
   })
   register('workflow:stop', (workflowId, commandId) => service.stop(identity(workflowId), identity(commandId)))
   register('workflow:snapshot', async workflowId => {

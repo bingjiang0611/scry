@@ -209,6 +209,26 @@ export const WORKFLOW_TEMPLATE_COPY = {
   sourceIdentity: (scope: string, id: string) => `${scope} · ${id}`
 } as const
 
+export const WORKFLOW_REVISION_COPY = {
+  title: '修订工作流',
+  open: '修订并继续',
+  source: '修订源程序（JSON）',
+  loading: '正在读取冻结程序…',
+  prepare: '预览修订',
+  preparing: '正在校验修订…',
+  edit: '返回修改',
+  confirm: '确认修订并运行',
+  executing: '正在提交修订并等待运行结果…',
+  cancel: '关闭',
+  notice: '修订保留原工作流历史和累计预算。预览不会运行程序；确认后才会派发。',
+  templateNotice: '此次修订只影响当前工作流，不会修改或发布原模板。',
+  invalidSource: '源程序必须是包含 userGoal、roles 和 body 的 JSON 对象。',
+  stale: '工作流状态已变化或尚未收敛，请关闭后重新读取。',
+  review: '待确认的冻结程序',
+  authority: '工作区、运行身份和检查授权由宿主重新校验，不能在源程序中指定。',
+  expectedRevision: (revision: number) => `基于状态版本 ${revision}`
+}
+
 export const WORKFLOW_COPY = {
   commandHint: '/scry-workflow run <目标>',
   attachmentsUnsupported: 'M0 工作流暂不接收附件，请仅提交文字目标；未发送附件。',

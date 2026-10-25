@@ -20,6 +20,8 @@ function fixture(actualService?: Parameters<typeof registerWorkflowIpc>[0]['serv
     findPreview: vi.fn(async (): Promise<{ workspace: string } | undefined> => ({ workspace: '/authorized' })),
     resume: vi.fn(async () => ({ state: 'nothing_to_resume', progress: null })),
     retry: vi.fn(async () => null),
+    prepareRevision: vi.fn(async () => null),
+    revisePrepared: vi.fn(async () => null),
     planCommand: vi.fn(async () => null),
     approve: vi.fn(async () => true),
     start: vi.fn(async () => null),
@@ -45,10 +47,37 @@ const commands: Array<[string, unknown[]]> = [
   ['plan', [plan]], ['approve', [approval]], ['start', ['workflow-test', approval]], ['stop', ['workflow-test', 'stop-command']],
   ['resume', ['workflow-test', { ...approval, commandId: 'resume-command' }]],
   ['retry', ['workflow-test', { ...approval, commandId: 'retry-command', target: { taskId: 'workflow-test:' + 'a'.repeat(64) + ':node', attemptId: 'failed-attempt', expectedRevision: 1 } }]],
+  ['prepareRevision', [{ workflowId: 'workflow-test', expectedRevision: 1, userGoal: 'inspect', roles: [plan.orchestrator], body: {} }]],
+  ['revise', ['workflow-test', { ...approval, commandId: 'revision-command', target: { expectedRevision: 1 } }]],
   ['snapshot', ['workflow-test']], ['list', ['/authorized']], ['cancelPlanning', ['command-test']]
 ]
 
 describe('workflow production IPC registrations', () => {
+  it('validates revision source, target and frozen workspace before admission', async () => {
+    const { handlers, event, service } = fixture()
+    const draft = { workflowId: 'workflow-test', expectedRevision: 1, userGoal: 'inspect', roles: [plan.orchestrator], body: {} }
+    const prepare = async (payload: unknown) => handlers.get('workflow:prepareRevision')!(event, payload)
+    for (const payload of [{ ...draft, workspace: '/other' }, { ...draft, roles: [{ ...plan.orchestrator, runtimeIdentity: 'forged' }] }, { ...draft, expectedRevision: -1 }]) {
+      await expect(prepare(payload)).rejects.toThrow()
+    }
+    expect(service.prepareRevision).not.toHaveBeenCalled()
+    await prepare(draft)
+    expect(service.prepareRevision).toHaveBeenCalledWith({ ...draft, roles: [{ ...plan.orchestrator, permissionMode: 'default' }] })
+    service.prepareRevision.mockClear()
+    service.preview.mockResolvedValue({ workspace: '/other' })
+    await expect(prepare(draft)).rejects.toThrow('unauthorized')
+    expect(service.prepareRevision).not.toHaveBeenCalled()
+    const revise = async (payload: unknown) => handlers.get('workflow:revise')!(event, 'workflow-test', payload)
+    const accepted = { ...approval, commandId: 'revision-command', target: { expectedRevision: 1 } }
+    await expect(revise(accepted)).rejects.toThrow('unauthorized')
+    service.preview.mockResolvedValue({ workspace: '/authorized' })
+    for (const payload of [{ ...accepted, preview: {} }, { ...accepted, target: { expectedRevision: 1, workspace: '/other' } }, { ...accepted, workflowId: 'other' }]) {
+      await expect(revise(payload)).rejects.toThrow()
+    }
+    expect(service.revisePrepared).not.toHaveBeenCalled()
+    await revise(accepted)
+    expect(service.revisePrepared).toHaveBeenCalledWith('workflow-test', approval, { expectedRevision: 1 }, 'revision-command')
+  })
   it('validates both stop identities before the production privileged listener', async () => {
     const { handlers, event, service } = fixture()
     const invoke = async (id: unknown, commandId: unknown) => handlers.get('workflow:stop')!(event, id, commandId)

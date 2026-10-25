@@ -73,7 +73,8 @@ async function fingerprint(path: string): Promise<string> {
   const before = await stat(path)
   if (!before.isFile()) throw new Error(copy.executable)
   const hash = createHash('sha256')
-  for await (const chunk of createReadStream(path)) hash.update(chunk)
+  // Use 1 MiB read chunks without caching or omitting any bytes.
+  for await (const chunk of createReadStream(path, { highWaterMark: 1024 * 1024 })) hash.update(chunk)
   const after = await stat(path)
   if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) throw new Error(copy.changed)
   return hash.digest('hex')

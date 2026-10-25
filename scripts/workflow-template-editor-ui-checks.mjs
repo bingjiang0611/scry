@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { nativeUiPointer } from './native-ui-pointer.mjs'
+import { exerciseWorkflowRevisionEditor } from './workflow-revision-ui-checks.mjs'
 
 const json = JSON.stringify
 const hash = text => createHash('sha256').update(text).digest('hex')
@@ -169,6 +170,7 @@ export async function exerciseWorkflowTemplateEditor(cdp, evaluate, fixture, scr
   await wait(async () => await readFile(path, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error }) === finalSource, 'reviewed restoration of same identity')
   await capture('workflow-template-restored')
   await button('关闭')
+  const revisionEditor = await exerciseWorkflowRevisionEditor(cdp, evaluate, fixture, { click, replace, key, capture, wait })
   assert.equal(await readFile(fixture.inputsFile, 'utf8'), callsBefore)
-  return { test: 'production template editor native input', fixedBuiltinReadOnly: true, saveAsNewIdentity: true, invalidDraftRetained: true, invalidDraftReopened: true, responsiveDesktopViewport: true, fullSourceReview: true, sourceAndStructureSameCandidate: true, exactPublishedBytes: true, explicitApprovalAfterPreparation: true, deletionAndReviewedRestore: true, providerInvocations: 0, templateId: edited.templateId, revisionHash: hash(finalSource) }
+  return { revisionEditor, test: 'production template editor native input', fixedBuiltinReadOnly: true, saveAsNewIdentity: true, invalidDraftRetained: true, invalidDraftReopened: true, responsiveDesktopViewport: true, fullSourceReview: true, sourceAndStructureSameCandidate: true, exactPublishedBytes: true, explicitApprovalAfterPreparation: true, deletionAndReviewedRestore: true, providerInvocations: 0, templateId: edited.templateId, revisionHash: hash(finalSource) }
 }

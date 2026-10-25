@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { exerciseWorkflowVerification } from './workflow-verification-ipc-checks.mjs'
+import { exerciseWorkflowRevisions, verifyWorkflowRevisionRestart } from './workflow-revision-ipc-checks.mjs'
 import { glob, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -53,7 +54,8 @@ export async function exerciseWorkflowSystemSteps(evaluate, fixture) {
   }
   const diagnosticConsumption = await exerciseWorkflowDiagnosticConsumption(evaluate, fixture)
   const verificationComparison = await exerciseWorkflowVerification(evaluate, fixture)
-  return { test: 'main-owned SystemSteps production preload/main IPC', results, diagnosticConsumption, verificationComparison }
+  const revisions = await exerciseWorkflowRevisions(evaluate, fixture)
+  return { test: 'main-owned SystemSteps production preload/main IPC', results, diagnosticConsumption, verificationComparison, revisions }
 }
 
 async function exerciseWorkflowDiagnosticConsumption(evaluate, fixture) {
@@ -211,5 +213,6 @@ export async function verifyWorkflowReplicaAgentRestart(evaluate, fixture, resul
   assert.equal(progress.state, 'completed')
   assert.equal(progress.dispatchAttempts, 1)
   assert.equal(await readFile(fixture.callsFile, 'utf8'), before, 'cold receipt replay and denied start cannot dispatch a Provider')
-  return { coldScopedAuthorityPreserved: true, duplicateStartNoDispatch: true }
+  const revisionRestart = await verifyWorkflowRevisionRestart(evaluate, fixture)
+  return { coldScopedAuthorityPreserved: true, duplicateStartNoDispatch: true, revisionRestart }
 }

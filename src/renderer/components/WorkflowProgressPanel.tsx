@@ -1,10 +1,12 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { WorkflowRolePicker } from './WorkflowRolePicker'
-import type { WorkflowBlock, WorkflowPlanPreview, WorkflowProgress, WorkflowRole, WorkflowRoleBinding } from '@shared/workflow'
-import { parseWorkflowRunCommand, workflowChildBlocks } from '@shared/workflow'
+import type { WorkflowPlanPreview, WorkflowProgress, WorkflowRole, WorkflowRoleBinding } from '@shared/workflow'
+import { parseWorkflowRunCommand } from '@shared/workflow'
 import type { DetectedAgent } from '../env'
-import { WORKFLOW_COPY as copy, WORKFLOW_TEMPLATE_COPY as templateCopy } from '../constants/copy'
+import { WORKFLOW_COPY as copy, WORKFLOW_TEMPLATE_COPY as templateCopy, WORKFLOW_REVISION_COPY as revisionCopy } from '../constants/copy'
 import { WorkflowTemplateWorkbench } from './WorkflowTemplateWorkbench'
+import { WorkflowSystemPlan } from './WorkflowSystemPlan'
+import { WorkflowRevisionEditor } from './WorkflowRevisionEditor'
 import { ModalFrame } from './Modals'
 import './workflow.css'
 
@@ -31,44 +33,6 @@ export function mergeWorkflowProgress(current: WorkflowProgress[], incoming: Wor
   return [...combined.values()]
 }
 
-
-function SystemPlan({ preview }: { preview: WorkflowPlanPreview }) {
-  const [page, setPage] = useState(0)
-  const steps = useMemo(() => {
-    const pending = [preview.program.body], result: Extract<WorkflowBlock, { kind: 'replica' | 'check' | 'call' }>[] = []
-    while (pending.length) {
-      const block = pending.pop()!
-      if (block.kind === 'replica' || block.kind === 'check' || (block.kind === 'call' && block.replica)) result.push(block)
-      pending.push(...workflowChildBlocks(block).reverse())
-    }
-    return result
-  }, [preview])
-  if (!steps.length) return null
-  const pages = Math.ceil(steps.length / 16)
-  return <section className="workflow-system-plan" aria-label={copy.systemPlan}>
-    <h3>{copy.systemPlan}</h3>
-    {steps.some(step => step.kind === 'check') && <p>{copy.checkExecutionNotice}</p>}
-    {steps.some(step => step.kind === 'call') && <p>{copy.replicaAgentExecutionNotice}</p>}
-    <p>{copy.systemPlanCount(steps.length)}</p>
-    {steps.slice(page * 16, page * 16 + 16).map(step => <div key={step.blockId} data-workflow-system-node={step.blockId}>
-      <h4>{step.blockId} · {step.kind === 'call' ? copy.replicaAgentKind : copy.systemKind[step.kind === 'replica' ? 'prepare_replica' : 'check']}</h4>
-      <dl>
-        <dt>{copy.systemTarget}</dt><dd><code>{JSON.stringify(step.kind === 'replica' ? step.source ?? preview.workspace : step.replica)}</code></dd>
-        {step.kind === 'check' && <>
-          <dt>{copy.systemArgv}</dt><dd><code>{JSON.stringify(step.check.argv)}</code></dd>
-          <dt>{copy.systemCwd}</dt><dd><code>{step.check.cwd}</code></dd>
-          <dt>{copy.systemTimeout}</dt><dd>{step.check.timeoutMs}</dd>
-          <dt>{copy.systemParser}</dt><dd><code>{step.check.parser}</code></dd>
-        </>}
-      </dl>
-    </div>)}
-    {pages > 1 && <nav aria-label={copy.systemPlanPages}>
-      <button type="button" disabled={page === 0} onClick={() => setPage(value => value - 1)}>{copy.previousPage}</button>
-      <span>{copy.systemPage(page + 1, pages)}</span>
-      <button type="button" disabled={page + 1 >= pages} onClick={() => setPage(value => value + 1)}>{copy.nextPage}</button>
-    </nav>}
-  </section>
-}
 
 function Launch({ request, agents, onDismiss, onStarted, onError, onEdit }: {
   request: WorkflowLaunchRequest
@@ -150,7 +114,7 @@ function Launch({ request, agents, onDismiss, onStarted, onError, onEdit }: {
       <p>{copy.previewNotice}</p>
       <dl><dt>{copy.revision}</dt><dd>{preview.programRevision}</dd></dl>
       <p>{copy.plannedCalls(preview.plannedCalls)}</p>
-      <SystemPlan key={preview.programRevision} preview={preview} />
+      <WorkflowSystemPlan key={preview.programRevision} preview={preview} />
       <p>{copy.updatedAt}: {new Date(preview.observedAt).toLocaleString()}</p>
       <table><tbody>{preview.program.roles.map(binding => <tr key={binding.role}>
         <th>{copy.roles[binding.role]}</th><td>{binding.providerId}</td><td>{binding.agentProfileId}</td>
@@ -181,9 +145,10 @@ export function WorkflowProgressPanel({ request, agents, cwd, onDismiss, onNew }
 }) {
   const [restored, setRestored] = useState<WorkflowLaunchRequest | null>(null)
   const [workbench, setWorkbench] = useState<{ id: string; cwd: string; preview?: WorkflowPlanPreview } | null>(null)
+  const [revising, setRevising] = useState<string | null>(null)
   const launchPreview = (preview: WorkflowPlanPreview): WorkflowLaunchRequest => ({ id: crypto.randomUUID(), command: `/scry-workflow run ${preview.userGoal}`, cwd: preview.workspace, orchestrator: preview.orchestrator, preview })
   const previewEpoch = useRef(0)
-  useEffect(() => { if (request) { previewEpoch.current++; setRestored(null) } }, [request?.id])
+  useEffect(() => { if (request) { previewEpoch.current++; setRestored(null); setRevising(null) } }, [request?.id])
   const activeRequest = request ?? restored
   const [recent, setRecent] = useState<WorkflowProgress[]>([])
   const [history, setHistory] = useState<WorkflowProgress[]>([])
@@ -212,7 +177,7 @@ export function WorkflowProgressPanel({ request, agents, cwd, onDismiss, onNew }
       .finally(() => { if (historyEpoch.current === epoch) setLoadingHistory(false) })
   }
   useEffect(() => {
-    setRecent([]); setHistory([]); setRestored(null); setNextCursor(undefined); setUnresolvedPlanning(0); setError(null)
+    setRecent([]); setHistory([]); setRestored(null); setRevising(null); setNextCursor(undefined); setUnresolvedPlanning(0); setError(null)
     previewEpoch.current++
     loadHistory()
     return () => { historyEpoch.current++; previewEpoch.current++ }
@@ -226,7 +191,8 @@ export function WorkflowProgressPanel({ request, agents, cwd, onDismiss, onNew }
       <button className="workflow-entry" type="button" onClick={() => setWorkbench({ id: crypto.randomUUID(), cwd })}>{templateCopy.title}</button>
       {onNew && <button className="workflow-entry" type="button" onClick={onNew} title={copy.commandHint}>{copy.title}</button>}
     </div>}
-    {activeRequest && !workbench && <Launch key={activeRequest.id} request={activeRequest} agents={agents}
+    {revising && <WorkflowRevisionEditor key={revising} workflowId={revising} onClose={() => setRevising(null)} onStarted={observe} />}
+    {activeRequest && !workbench && !revising && <Launch key={activeRequest.id} request={activeRequest} agents={agents}
       onDismiss={() => { previewEpoch.current++; setRestored(null); onDismiss() }} onStarted={observe} onError={setError}
       onEdit={preview => { setRestored(launchPreview(preview)); onDismiss(); setWorkbench({ id: crypto.randomUUID(), cwd: preview.workspace, preview }) }} />}
     {workbench && <WorkflowTemplateWorkbench key={workbench.id} cwd={workbench.cwd} agents={agents} orchestrator={workbench.preview?.orchestrator ?? activeRequest?.orchestrator} sourcePreview={workbench.preview}
@@ -238,6 +204,7 @@ export function WorkflowProgressPanel({ request, agents, cwd, onDismiss, onNew }
       {progresses.map(progress => <details key={progress.workflowId} data-workflow-id={progress.workflowId}>
         <summary>{progress.goal} · {progress.stopRequestedAt !== undefined && ['queued', 'running'].includes(progress.state) ? copy.stopPending : copy.status[progress.state]}</summary>
         <code>{progress.workflowId}</code>
+        {['completed', 'failed', 'stopped', 'blocked'].includes(progress.state) && <button type="button" data-workflow-action="revise" onClick={() => setRevising(progress.workflowId)}>{revisionCopy.open}</button>}
         <button type="button" onClick={() => {
           const epoch = ++previewEpoch.current
           void window.scry.workflow.preview(progress.workflowId).then(preview => {

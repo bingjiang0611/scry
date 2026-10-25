@@ -39,6 +39,10 @@
 .workflow-workbench label:has(input[type="checkbox"]) { flex-direction: row; align-items: center; }
 .workflow-workbench input:not([type="checkbox"]), .workflow-workbench select, .workflow-workbench textarea { min-width: 0; max-width: 100%; color: var(--fg); background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 8px; font: inherit; box-sizing: border-box; }
 .workflow-workbench textarea { width: 100%; min-height: 220px; font-family: monospace; font-size: 12px; line-height: 1.6; resize: vertical; tab-size: 2; }
+.workflow-revision-editor label { display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
+.workflow-revision-editor textarea { width: 100%; min-height: 300px; box-sizing: border-box; color: var(--fg); background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 8px; font-family: monospace; font-size: 12px; line-height: 1.6; resize: vertical; tab-size: 2; }
+.workflow-revision-editor footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+.workflow-revision-editor footer button:first-child { margin-right: auto; }
 .workflow-template-editor-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(220px, 1fr); gap: 20px; align-items: start; }
 .workflow-template-editor-grid .workflow-template-source { min-height: 420px; }
 .workflow-template-editor-grid h3 { margin: 0 0 8px; font-size: 13px; }

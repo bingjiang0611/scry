@@ -14,6 +14,13 @@ export async function workflowCheckProcessIdentity(pid: number): Promise<string 
 }
 
 export async function workflowCheckGroupEmpty(pid: number): Promise<boolean> {
+  // Signal 0 only queries this registered group. ESRCH is kernel evidence that
+  // no member remains; a present group still needs the zombie-aware census.
+  // Permission or other query errors are not evidence of closure.
+  try { process.kill(-pid, 0) } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return true
+    throw error
+  }
   const rows = (await ps(['-axo', 'pid=,pgid=,stat='])).trim().split('\n')
   let live = false
   for (const row of rows) {

@@ -260,6 +260,7 @@ export class FileWorkflowStore implements WorkflowStore {
     if (value === undefined) return undefined
     if (!value || typeof value !== 'object') throw new Error('工作流记录已损坏')
     const record = value as WorkflowStoreRecord
+    const governingArtifacts: string[] = []
     if (record.revisions !== undefined) {
       const references = (value as { revisions: unknown }).revisions
       if (!Array.isArray(references) || !references.length || references.length > 256) throw new Error(workflowRecoveryCopy.fingerprint)
@@ -271,6 +272,7 @@ export class FileWorkflowStore implements WorkflowStore {
         const text = await this.readText(entry.reference)
         if (text === undefined || createHash('sha256').update(text).digest('hex') !== match[1]) throw new Error(workflowRecoveryCopy.fingerprint)
         record.revisions.push(JSON.parse(text))
+        governingArtifacts.push(entry.reference)
       }
     }
     validateWorkflowOwnership(record)
@@ -278,6 +280,10 @@ export class FileWorkflowStore implements WorkflowStore {
     if (record.stopRequests !== undefined && (!Array.isArray(record.stopRequests) || record.stopRequests.length > WORKFLOW_MAX_STOP_REQUESTS || record.stopRequests.some(request =>
       !request || typeof request.commandId !== 'string' || !/^[A-Za-z0-9_-]{1,96}$/.test(request.commandId) || !Number.isFinite(request.requestedAt) || request.requestedAt < 0) ||
       new Set(record.stopRequests.map(request => request.commandId)).size !== record.stopRequests.length)) throw new Error(workflowControlCopy.invalidStopReceipt)
+    // Only a fully validated root can establish these existing content addresses.
+    // Every load still reads and hashes them. A subsequent root publication retains
+    // its own file flush, atomic rename and directory sync before acknowledgement.
+    for (const name of governingArtifacts) this.rememberOutput(name)
     // Historical observations are not live authority, including files written
     // by an older or interrupted producer that accidentally persisted the field.
     delete record.progress.live
