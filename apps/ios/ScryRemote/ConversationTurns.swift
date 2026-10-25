@@ -29,133 +29,300 @@ struct ConversationEntry: Identifiable, Equatable {
   }
 }
 
+// A second, read-only projection: tool_result is already absorbed by Entry.
+// An orphan result remains an independent row and never increases call count.
+struct ConversationBlock: Identifiable, Equatable {
+  let entries: [ConversationEntry]
+  var id: Int { entries[0].id }
+  var isToolGroup: Bool { entries[0].kind == "tool" }
+  static func isTruncated(_ entries: [ConversationEntry], reported: Bool) -> Bool {
+    reported || entries.contains { $0.kind == "truncated" }
+  }
+
+  static func group(_ entries: [ConversationEntry]) -> [ConversationBlock] {
+    var blocks: [ConversationBlock] = []
+    var tools: [ConversationEntry] = []
+    for entry in entries {
+      if entry.kind == "tool" { tools.append(entry) }
+      else {
+        if !tools.isEmpty { blocks.append(.init(entries: tools)); tools = [] }
+        blocks.append(.init(entries: [entry]))
+      }
+    }
+    if !tools.isEmpty { blocks.append(.init(entries: tools)) }
+    return blocks
+  }
+}
+
 struct ConversationChunk: View {
   let kind: String
   let text: String
   var result: String?
   @State private var expanded = false
 
-  private var lineCount: Int { Self.lines(text) }
-  private static func lines(_ value: String) -> Int {
-    max(1, value.split(separator: "\n", omittingEmptySubsequences: false).count)
-  }
-
   @ViewBuilder var body: some View {
     switch kind {
     case "reasoning", "tool", "tool_result": evidenceDetail
-    case "truncated": truncated
+    case "truncated":
+      Label(text, systemImage: "exclamationmark.triangle")
+        .font(Typography.meta).foregroundStyle(Palette.warn)
+        .padding(.vertical, 8).padding(.horizontal, 10)
+        .background(Palette.warn.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
     default: ConversationMarkdownText(source: text)
     }
   }
 
   private var detailLabel: String {
-    switch kind {
-    case "reasoning": return "思考过程"
-    case "tool_result": return "工具结果 · \(lineCount) 行"
-    default: return text
-    }
+    kind == "reasoning" ? ConversationCopy.reasoning : kind == "tool_result" ? ConversationCopy.toolResult : text
   }
 
-  // A tool payload alone cannot prove success; only the run lifecycle carries
-  // a status indicator. Expanding always exposes the supplied evidence.
   private var evidenceDetail: some View {
     VStack(alignment: .leading, spacing: 0) {
       Button { expanded.toggle() } label: {
-        HStack(spacing: 10) {
-          Image(systemName: kind == "reasoning" ? "sparkle" : "terminal")
-            .frame(width: 18)
-          Text(detailLabel)
-            .font(kind == "tool" ? .system(size: 13, design: .monospaced) : .system(size: 13))
+        HStack(spacing: 8) {
+          Image(systemName: Symbol.chevron).font(Typography.meta)
+            .rotationEffect(.degrees(expanded ? 90 : 0))
+          Text(detailLabel).font(kind == "tool" ? Typography.mono : Typography.meta)
             .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-          if let result {
-            Text("\(Self.lines(result)) 行").font(.system(size: 11)).monospacedDigit()
-          }
-          Image(systemName: expanded ? "chevron.down" : Symbol.chevron)
-            .font(.system(size: 11, weight: .medium))
         }
-        .foregroundStyle(Palette.muted)
-        .frame(minHeight: 44).contentShape(Rectangle())
+        .foregroundStyle(Palette.dim2).frame(minHeight: 44).contentShape(Rectangle())
       }
       .buttonStyle(.plain)
       .accessibilityIdentifier(kind == "reasoning" ? "reasoning-toggle" : "tool-detail-toggle")
-      .accessibilityLabel(kind == "tool" ? "工具调用：\(text)" : detailLabel)
-      .accessibilityValue(expanded ? "已展开" : "已折叠")
+      .accessibilityLabel(kind == "tool" ? ConversationCopy.tool(text) : detailLabel)
+      .accessibilityValue(expanded ? ConversationCopy.expanded : ConversationCopy.collapsed)
       if expanded {
         if kind == "reasoning" {
-          ConversationMarkdownText(source: text, muted: true).padding(.bottom, 10)
+          ConversationMarkdownText(source: text, muted: true).padding(.bottom, 10).transition(.opacity)
         } else {
           VStack(alignment: .leading, spacing: 8) {
-            Text(text).font(.system(size: 13, design: .monospaced))
-              .foregroundStyle(Palette.ink).textSelection(.enabled)
+            Text(text).font(Typography.mono).foregroundStyle(Palette.fg).textSelection(.enabled)
             if let result {
-              Rectangle().fill(Palette.line).frame(height: 0.5)
-              Text(ConnectionCopy.result).font(.system(size: 11, weight: .semibold)).foregroundStyle(Palette.muted)
-              Text(result).font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(Palette.ink).textSelection(.enabled)
+              Rectangle().fill(Palette.border3).frame(height: 1)
+              Text(ConnectionCopy.result).font(Typography.meta).foregroundStyle(Palette.dim2)
+              Text(result).font(Typography.mono).foregroundStyle(Palette.fg).textSelection(.enabled)
             }
           }
           .frame(maxWidth: .infinity, alignment: .leading)
-          .padding(12).background(Palette.canvas, in: RoundedRectangle(cornerRadius: 6))
+          .padding(.bottom, 12).transition(.opacity)
         }
       }
     }
+    .conversationDisclosure(expanded)
   }
+}
 
-  private var truncated: some View {
-    Label(text, systemImage: "exclamationmark.triangle")
-      .font(.system(size: 12))
-      .foregroundStyle(Palette.warnInk)
-      .padding(.vertical, 8).padding(.horizontal, 10)
-      .background(Palette.warnBg, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+struct ConversationToolGroup: View {
+  let entries: [ConversationEntry]
+  let truncated: Bool
+  @State private var expanded = false
+  var body: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      Button { expanded.toggle() } label: {
+        HStack(spacing: 8) {
+          Image(systemName: Symbol.chevron).rotationEffect(.degrees(expanded ? 90 : 0))
+          Text(ConversationCopy.tools(entries.count, truncated: truncated))
+          Spacer(minLength: 0)
+        }.font(Typography.meta).foregroundStyle(Palette.dim2)
+          .frame(minHeight: 44).contentShape(Rectangle())
+      }
+      .buttonStyle(.plain).accessibilityIdentifier("tool-group-toggle")
+      .accessibilityValue(expanded ? ConversationCopy.expanded : ConversationCopy.collapsed)
+      if expanded {
+        VStack(alignment: .leading, spacing: 0) {
+          ForEach(entries) { entry in
+            ConversationChunk(kind: entry.kind, text: entry.text, result: entry.result)
+          }
+        }
+        .padding(.horizontal, 10)
+        .background(Palette.panel2, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.border3))
+        .transition(.opacity)
+      }
+    }.conversationDisclosure(expanded)
   }
+}
+
+private struct ConversationDisclosure: ViewModifier {
+  let expanded: Bool
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  func body(content: Content) -> some View {
+    let reduceMotion = reduceMotion
+    return content
+      .animation(reduceMotion ? nil : Motion.animation(expanded ? .disclosureOpen : .disclosureClose, reduceMotion: false), value: expanded)
+      .keyframeAnimator(initialValue: 1.0, trigger: expanded) { view, opacity in
+        view.opacity(reduceMotion ? opacity : 1)
+      } keyframes: { _ in
+        MoveKeyframe(0)
+        LinearKeyframe(1, duration: 0.12)
+      }
+  }
+}
+
+extension View {
+  func conversationDisclosure(_ expanded: Bool) -> some View { modifier(ConversationDisclosure(expanded: expanded)) }
 }
 
 // MARK: - Turns and session status
 
-// One conversation turn for every source: the Mac's session record, this
-// device's follow-up, or a run started elsewhere. The source decides which
-// evidence exists, never the layout. A normal finish stays silent; usage and
-// run id sit in the prompt's context menu, and a value the host did not send
-// says so instead of showing 0 (CLAUDE.md 证据不能说谎).
+// All sources use the same turn shell; only the evidence and reading strategy differ.
+private struct ConversationProviderKey: EnvironmentKey { static let defaultValue = "" }
+extension EnvironmentValues {
+  var conversationProvider: String {
+    get { self[ConversationProviderKey.self] }
+    set { self[ConversationProviderKey.self] = newValue }
+  }
+}
+
+@MainActor
+struct ConversationTurn {
+  var prompt: String?
+  var attachments: [RemoteRunStore.SentAttachment] = []
+  var runId: String?
+  var running = false
+  var resultSummary: String?
+  var usagePending = false
+  let entries: [ConversationEntry]
+  var truncated = false
+  var archived = false
+  var outcome: TurnOutcomeNote?
+  var notice: String?
+
+  fileprivate enum Row: Identifiable {
+    enum ID: Hashable { case prompt, provider, block(Int), outcome, notice, usage }
+    case prompt(String), provider, block(ConversationBlock), outcome(TurnOutcomeNote), notice(String), usage(String)
+    var id: ID {
+      switch self {
+      case .prompt: return .prompt
+      case .provider: return .provider
+      case let .block(block): return .block(block.id)
+      case .outcome: return .outcome
+      case .notice: return .notice
+      case .usage: return .usage
+      }
+    }
+  }
+
+  private var rows: [Row] {
+    var rows: [Row] = []
+    if let prompt { rows.append(.prompt(prompt)) }
+    rows.append(.provider)
+    rows += ConversationBlock.group(entries).map(Row.block)
+    if let outcome { rows.append(.outcome(outcome)) }
+    if let notice { rows.append(.notice(notice)) }
+    if !running, let resultSummary { rows.append(.usage(resultSummary)) }
+    return rows
+  }
+
+  // Give the lazy reader one identified element per presentation row. A whole
+  // tall turn or a variable-size nested Group hides committed message heights.
+  func rows<ID: Hashable>(id: ID) -> [ConversationTurnRow<ID>] {
+    let content = rows
+    let cut = ConversationBlock.isTruncated(entries, reported: truncated)
+    return content.enumerated().map { index, row in
+      ConversationTurnRow(id: .init(turn: id, row: row.id), turn: self, row: row,
+        truncated: cut, last: index == content.count - 1)
+    }
+  }
+
+  @ViewBuilder fileprivate func rowView(_ row: Row, truncated: Bool, provider: String, reduceMotion: Bool) -> some View {
+    switch row {
+    case let .prompt(text):
+      TurnUserBubble(text: text, attachments: attachments, runId: runId,
+                     usage: resultSummary, usagePending: usagePending).padding(.bottom, 18)
+    case .provider:
+      HStack(spacing: 7) {
+        if running { RunningRing(size: 11, color: Palette.accent) }
+        else { Circle().fill(Palette.dim2).frame(width: 6, height: 6) }
+        Text(provider).font(Typography.meta).foregroundStyle(Palette.dim2)
+      }
+    case let .block(block):
+      blockView(block, truncated: truncated).conversationFlowBlock()
+        .transition(archived ? .identity : Motion.transition(.streamIn, reduceMotion: reduceMotion)
+          .animation(Motion.animation(.streamIn, reduceMotion: reduceMotion)))
+    case let .outcome(note): note.conversationFlowBlock()
+    case let .notice(text): Text(text).font(Typography.meta).foregroundStyle(Palette.dim).conversationFlowBlock()
+    case let .usage(text):
+      VStack(spacing: 8) {
+        Rectangle().fill(Palette.border3).frame(height: 1)
+        Text(text).font(Typography.meta).foregroundStyle(Palette.dim2)
+          .frame(maxWidth: .infinity, alignment: .trailing)
+      }.padding(.top, 12)
+    }
+  }
+
+  @ViewBuilder private func blockView(_ block: ConversationBlock, truncated: Bool) -> some View {
+    let entry = block.entries[0]
+    if block.isToolGroup {
+      ConversationToolGroup(entries: block.entries, truncated: truncated)
+    } else if archived {
+      HistoryChunkView(kind: entry.kind, text: entry.text, result: entry.result)
+    } else {
+      ConversationChunk(kind: entry.kind, text: entry.text, result: entry.result)
+    }
+  }
+}
+
+struct ConversationTurnRow<TurnID: Hashable>: View, Identifiable {
+  struct ID: Hashable {
+    let turn: TurnID
+    fileprivate let row: ConversationTurn.Row.ID
+  }
+  let id: ID
+  fileprivate let turn: ConversationTurn
+  fileprivate let row: ConversationTurn.Row
+  fileprivate let truncated: Bool
+  fileprivate let last: Bool
+  @Environment(\.conversationProvider) private var provider
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  var body: some View {
+    turn.rowView(row, truncated: truncated, provider: provider, reduceMotion: reduceMotion)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.bottom, last ? 34 : 0)
+  }
+}
+
+private extension View {
+  func conversationFlowBlock() -> some View {
+    self.frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.leading, 20).padding(.top, 12)
+      .overlay(alignment: .leading) { Rectangle().fill(Palette.border3).frame(width: 1).offset(x: 3) }
+  }
+}
+
 struct TurnUserBubble: View {
   let text: String
   var attachments: [RemoteRunStore.SentAttachment] = []
   var runId: String?
   var usage: String?
-  // The run has not ended, so its usage cannot exist yet.
   var usagePending = false
+  @Environment(\.colorScheme) private var colorScheme
 
   var body: some View {
-    HStack {
-      Spacer(minLength: 40)
-      VStack(alignment: .leading, spacing: 8) {
-        if !attachments.isEmpty { SentAttachmentList(attachments: attachments) }
-        Text(text).font(.system(size: 16)).lineSpacing(3)
-      }
-      .foregroundStyle(Palette.ink)
-      .padding(.vertical, 10).padding(.horizontal, 14)
-      .frame(maxWidth: 320, alignment: .leading)
-      .background(Palette.message, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-      // Long press opens the menu instead of text selection; copy keeps the prompt reusable.
-      .contextMenu {
-        #if canImport(UIKit)
-        Button { UIPasteboard.general.string = text } label: { Label("复制", systemImage: "doc.on.doc") }
-        #endif
-        Section("本轮详情") {
-          Text("用量 · " + (usage ?? (usagePending ? "运行结束后由 Mac 提供" : "Mac 未提供")))
-          Text("Run · " + (runId ?? "未提供"))
-        }
+    VStack(alignment: .leading, spacing: 8) {
+      if !attachments.isEmpty { SentAttachmentList(attachments: attachments) }
+      Text(text).font(Typography.bubble).lineSpacing(3)
+    }
+    .foregroundStyle(Palette.fg)
+    .padding(.vertical, 10).padding(.horizontal, 14)
+    .background(Palette.panel2, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+      .strokeBorder(colorScheme == .light ? Palette.border3 : .clear))
+    .shadow(color: .black.opacity(colorScheme == .dark ? 0.30 : 0.06), radius: 2, y: 1)
+    .contextMenu {
+      #if canImport(UIKit)
+      Button { UIPasteboard.general.string = text } label: { Label(ConversationCopy.copy, systemImage: "doc.on.doc") }
+      #endif
+      Section(ConversationCopy.details) {
+        Text(ConversationCopy.usage(usage, pending: usagePending))
+        Text(ConversationCopy.runID(runId))
       }
     }
-  }
-}
-
-struct TurnOutputList: View {
-  let lines: [RemoteRunStore.OutputLine]
-  var body: some View {
-    ForEach(ConversationEntry.group(lines, kind: \.kind, text: \.text)) { entry in
-      ConversationChunk(kind: entry.kind, text: entry.text, result: entry.result)
-    }
+    // The reader has 16pt content padding on each side. Keep the native
+    // container measurement instead of inventing an unspecified Layout width.
+    .containerRelativeFrame(.horizontal, alignment: .trailing) { width, _ in (width - 32) * 0.85 }
+    .frame(maxWidth: .infinity, alignment: .trailing)
   }
 }
 
@@ -168,12 +335,12 @@ struct TurnOutcomeNote: View {
   init?(lifecycle: RemoteRunStore.Lifecycle, hasOutput: Bool, truncated: Bool = false) {
     var parts: [String] = []
     switch lifecycle {
-    case .failed: parts.append("运行失败")
-    case .cancelled: parts.append("已停止")
+    case .failed: parts.append(ConversationCopy.failed)
+    case .cancelled: parts.append(ConversationCopy.cancelled)
     default: break
     }
-    if !hasOutput, [.settled, .failed, .cancelled].contains(lifecycle) { parts.append("未读取到输出") }
-    if truncated { parts.append("输出已达上限，内容被截断") }
+    if !hasOutput, [.settled, .failed, .cancelled].contains(lifecycle) { parts.append(ConversationCopy.noOutput) }
+    if truncated { parts.append(ConversationCopy.truncated) }
     guard !parts.isEmpty else { return nil }
     text = parts.joined(separator: " · ")
     failed = lifecycle == .failed
@@ -181,41 +348,28 @@ struct TurnOutcomeNote: View {
 
   var body: some View {
     Label(text, systemImage: "exclamationmark.circle")
-      .font(.system(size: 12.5, weight: .medium))
-      .foregroundStyle(failed ? Palette.negative : Palette.warnInk)
+      .font(Typography.meta.weight(.medium))
+      .foregroundStyle(failed ? Palette.bad : Palette.warn)
       .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
       .accessibilityIdentifier("turn-outcome")
   }
 }
 
-// A turn this device already saw end. Same layout as a Mac history turn.
-struct CompletedTurnView: View {
-  let turn: RemoteRunStore.CompletedLiveTurn
-  var body: some View {
-    Group {
-      TurnUserBubble(text: turn.prompt, attachments: turn.attachments,
-                     runId: turn.hostRunId ?? turn.runId, usage: turn.resultSummary)
-      TurnOutputList(lines: turn.output)
-      if let note = TurnOutcomeNote(lifecycle: turn.lifecycle, hasOutput: !turn.output.isEmpty) { note }
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
+// The source decides which evidence exists; the renderer never invents it.
+extension ConversationTurn {
+  static func completed(_ turn: RemoteRunStore.CompletedLiveTurn) -> Self {
+    Self(prompt: turn.prompt, attachments: turn.attachments,
+      runId: turn.hostRunId ?? turn.runId, resultSummary: turn.resultSummary,
+      entries: ConversationEntry.group(turn.output, kind: \.kind, text: \.text),
+      outcome: TurnOutcomeNote(lifecycle: turn.lifecycle, hasOutput: !turn.output.isEmpty))
   }
-}
 
-// The run this store is driving. While it runs, the transcript shows only real
-// content; its state is in the status strip.
-struct FocusedTurnView: View {
-  @Environment(RemoteRunStore.self) var run
-  var body: some View {
-    Group {
-      if let prompt = run.prompt {
-        TurnUserBubble(text: prompt, attachments: run.sentAttachments, runId: run.runId,
-                       usage: run.resultSummary, usagePending: !run.terminalLifecycleKnown)
-      }
-      TurnOutputList(lines: run.output)
-      if let note = TurnOutcomeNote(lifecycle: run.lifecycle, hasOutput: !run.output.isEmpty, truncated: run.truncated) { note }
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
+  static func focused(_ run: RemoteRunStore) -> Self {
+    Self(prompt: run.prompt, attachments: run.sentAttachments, runId: run.runId,
+      running: run.lifecycle == .running, resultSummary: run.terminalLifecycleKnown ? run.resultSummary : nil,
+      usagePending: !run.terminalLifecycleKnown,
+      entries: ConversationEntry.group(run.output, kind: \.kind, text: \.text), truncated: run.truncated,
+      outcome: TurnOutcomeNote(lifecycle: run.lifecycle, hasOutput: !run.output.isEmpty, truncated: run.truncated))
   }
 }
 
@@ -267,64 +421,5 @@ struct SessionStatusLine {
     }
     if run.lifecycle == .submitting { return .init(text: "发送中", busy: true) }
     return nil
-  }
-}
-
-struct SessionStatusStrip: View {
-  let status: SessionStatusLine
-
-  private var color: Color {
-    switch status.tone {
-    case .neutral: return Palette.muted
-    case .running: return Palette.blue
-    case .attention: return Palette.amber
-    case .warning: return Palette.warnInk
-    }
-  }
-  private var symbol: String {
-    switch status.tone {
-    case .attention: return "hand.raised"
-    case .warning: return "exclamationmark.circle"
-    case .neutral, .running: return "info.circle"
-    }
-  }
-
-  var body: some View {
-    HStack(spacing: 9) {
-      if status.busy { ProgressView().controlSize(.mini).tint(color) }
-      else { Image(systemName: symbol).font(.system(size: 13, weight: .medium)) }
-      Text(status.text).fixedSize(horizontal: false, vertical: true)
-        .frame(maxWidth: .infinity, alignment: .leading)
-      if let action = status.action {
-        Button(action.title, action: action.perform)
-          .font(.system(size: 13, weight: .semibold))
-          .foregroundStyle(action.destructive ? Palette.negative : color)
-          .disabled(action.disabled)
-          .frame(minWidth: 44, minHeight: 44)
-          .accessibilityIdentifier("session-status-action")
-      }
-    }
-    .font(.system(size: 13, weight: .medium))
-    .foregroundStyle(color)
-    .padding(.leading, 12).padding(.trailing, status.action == nil ? 12 : 4)
-    .frame(minHeight: 44)
-    .background(status.tone == .warning ? Palette.warnBg : Palette.canvas,
-                in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    .padding(.horizontal, 12).padding(.top, 8)
-    .accessibilityElement(children: .contain)
-    .accessibilityIdentifier("session-runtime-status")
-  }
-}
-
-// Host-proven live state for one run. "Mac" marks a run the owner started in
-// the Mac app, so the phone never implies it started it.
-struct LiveRunBadge: View {
-  let live: G0Transport.LiveRun
-  let waiting: Bool
-  var body: some View {
-    let origin = live.origin == "mac" ? "Mac · " : ""
-    let (text, color): (String, Color) = live.state == "stopping" ? ("停止中", Palette.muted)
-      : waiting ? ("等待决定", Palette.amber) : ("运行中", Palette.blue)
-    Text(origin + text).font(.system(size: 10, weight: .semibold)).foregroundStyle(color)
   }
 }

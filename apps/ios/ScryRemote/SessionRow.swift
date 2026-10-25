@@ -108,12 +108,14 @@ enum ProviderSymbol {
 }
 
 struct RunningRing: View {
+  var size: CGFloat = 14
+  var color: Color = Palette.dim
   var body: some View {
     TimelineView(.animation) { context in
-      Circle().trim(from: 0, to: 0.75).stroke(Palette.dim, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+      Circle().trim(from: 0, to: 0.75).stroke(color, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
         .rotationEffect(.degrees(context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9 * 360))
     }
-    .frame(width: 14, height: 14).accessibilityLabel(ConnectionCopy.running)
+    .frame(width: size, height: size).accessibilityLabel(ConnectionCopy.running)
   }
 }
 

@@ -16,7 +16,7 @@ struct ConversationScrollView<Content: View>: View {
     GeometryReader { viewport in
       ScrollViewReader { proxy in
         ScrollView {
-          LazyVStack(alignment: .leading, spacing: 18) {
+          LazyVStack(alignment: .leading, spacing: 0) {
             content()
             Color.clear.frame(height: 1).id("bottom")
               .background(GeometryReader { geometry in
@@ -24,7 +24,7 @@ struct ConversationScrollView<Content: View>: View {
                   value: geometry.frame(in: .named("conversation-scroll")).maxY)
               })
           }
-          .padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 10)
+          .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 10)
           .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { _ in
             // Read the committed lazy-layout height, not a background reader's
             // placeholder size, then scroll after the new layout is installed.
@@ -71,9 +71,9 @@ struct ConversationScrollView<Content: View>: View {
               withAnimation(reduceMotion ? nil : Motion.animation(.select, reduceMotion: false)) { proxy.scrollTo("bottom", anchor: .bottom) }
             } label: {
               Label(ConnectionCopy.returnToLatest, systemImage: "arrow.down")
-                .font(.system(size: 13, weight: .semibold)).padding(.horizontal, 14).frame(minHeight: 44)
-                .background(Palette.surface, in: Capsule())
-                .overlay(Capsule().stroke(Palette.line))
+                .font(Typography.meta.weight(.semibold)).padding(.horizontal, 14).frame(minHeight: 44)
+                .background(Palette.main, in: Capsule())
+                .overlay(Capsule().stroke(Palette.border))
             }
             .buttonStyle(.plain).padding(12)
           }

@@ -36,26 +36,27 @@ struct ChatView: View {
       header
       ConversationScrollView(revision: "\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)", followLatestRequest: latestReadRequest) {
             if !hasTurn {
-              EmptyState(title: "开始一段新会话",
-                         detail: "你发送的消息会在这里显示；Agent 的执行状态与输出从主机实时读取，不沿用其他会话。")
+              EmptyState(title: ConversationCopy.startTitle,
+                         detail: ConversationCopy.startDetail)
             } else {
-              ForEach(completedTurns) { turn in CompletedTurnView(turn: turn) }
-              if run.prompt != nil { FocusedTurnView() }
+              ForEach(completedTurns.flatMap { ConversationTurn.completed($0).rows(id: $0.id) }) { $0 }
+              if run.prompt != nil { ForEach(ConversationTurn.focused(run).rows(id: "focused")) { $0 } }
             }
       }
       .id(run.activeSessionIdentity)
       if let status { SessionStatusStrip(status: status) }
       footer
     }
-    .background(Palette.surface)
+    .background(Palette.main)
+    .environment(\.conversationProvider, run.chosenProvider?.label.components(separatedBy: " · ").first ?? run.activeSessionIdentity?.providerId ?? "")
     .sheet(isPresented: $showFiles) {
       if let projectCwd { WorkspaceBrowserView(cwd: projectCwd).id(projectCwd) }
     }
     .macLocalLinks(cwd: projectCwd)
-    .confirmationDialog("停止这次运行？", isPresented: $confirmStop, titleVisibility: .visible) {
-      Button("停止运行", role: .destructive) { run.stopRun() }
+    .confirmationDialog(ConversationCopy.stopTitle, isPresented: $confirmStop, titleVisibility: .visible) {
+      Button(ConversationCopy.stop, role: .destructive) { run.stopRun() }
     } message: {
-      Text("请求 Agent 停止，结果以 Agent 实际结束为准。")
+      Text(ConversationCopy.stopDetail)
     }
     .onAppear { controlsVisible = true; run.loadActiveContext() }
     .onDisappear { controlsVisible = false }
@@ -71,23 +72,24 @@ struct ChatView: View {
 
   private var header: some View {
     RemoteHeader(title: completedTurns.first?.prompt ?? run.prompt ?? ConnectionCopy.session,
-                 subtitle: sessionContext, link: model.link, titleLineLimit: 2,
+                 subtitle: sessionContext, providerId: run.activeSessionIdentity?.providerId ?? run.chosenProvider?.id, titleLineLimit: 2,
                  backAction: { model.goBack() }) {
-      Button { showFiles = true } label: {
-        Image(systemName: "folder").font(.system(size: 18)).frame(width: 44, height: 44)
-      }.accessibilityLabel(ConnectionCopy.projectFilesAndDiff).disabled(projectCwd == nil)
       MoreMenu {
+        Button { showFiles = true } label: {
+          Label(ConnectionCopy.projectFilesAndDiff, systemImage: Symbol.folder)
+        }.disabled(projectCwd == nil)
         // Leaving keeps an unsent message sending and a run running on the Mac.
-        Button { if model.targetCoordinator.beginNewTask(scope: model.targetCoordinator.selectedScope) { model.route = .newSession } } label: { Label("新任务", systemImage: Symbol.compose) }
-        Button { model.route = .settings } label: { Label("设置", systemImage: Symbol.gear) }
+        Button { if model.targetCoordinator.beginNewTask(scope: model.targetCoordinator.selectedScope) { model.route = .newSession } } label: { Label(ConversationCopy.newTask, systemImage: Symbol.compose) }
+        Button { model.route = .settings } label: { Label(ConversationCopy.settings, systemImage: Symbol.gear) }
       }
     }
   }
 
   private var sessionContext: String {
-    let value = [run.chosen?.label, run.chosenProvider?.label].compactMap { $0 }.joined(separator: " · ")
+    let value = ConversationCopy.context(project: projectCwd?.split(separator: "/").last.map(String.init),
+                                         provider: run.chosenProvider?.label.components(separatedBy: " · ").first)
     if !value.isEmpty { return value }
-    return run.hasConnection ? "已配对的 Mac" : "未连接"
+    return run.hasConnection ? ConversationCopy.pairedMac : ConversationCopy.disconnected
   }
 
   // Design A: this run's state in one line above the composer, most urgent first.
@@ -110,10 +112,10 @@ struct ChatView: View {
   private var footer: some View {
     VStack(alignment: .leading, spacing: 6) {
       MessageComposer(text: composer.text, attachments: composer.attachments,
-                      placeholder: !paired ? "连接后可输入" : runBusy ? "运行结束后可发送，先写也行" : "继续这段对话…",
+                      placeholder: !paired ? ConversationCopy.connectedInput : runBusy ? ConversationCopy.busyInput : ConversationCopy.followUpInput,
                       disabled: !paired,
                       sendDisabled: runBusy || run.chosen == nil || !run.controlsReady || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                      contextLabel: run.chosenProvider?.label, contextLocked: true,
+                      contextLocked: true,
                       modelOptions: run.modelOptions, selectedModelId: run.chosenModelId,
                       modelSelectionIssue: run.modelSelectionIssue,
                       onModel: { run.chooseModel($0) },
@@ -146,8 +148,7 @@ struct ChatView: View {
       }
     }
     .padding(.horizontal, 14).padding(.bottom, 4)
-    .background(Palette.surface)
-    .overlay(alignment: .top) { Rectangle().fill(Palette.line.opacity(0.7)).frame(height: 0.5) }
+    .background(Palette.main)
   }
 
 }

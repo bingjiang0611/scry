@@ -93,6 +93,8 @@ final class ConversationUITests: XCTestCase {
     let strip = app.descendants(matching: .any)["session-runtime-status"]
     XCTAssertTrue(strip.waitForExistence(timeout: 10))
     XCTAssertTrue(strip.staticTexts["运行中"].exists)
+    XCTAssertGreaterThanOrEqual(app.buttons["session-status-action"].frame.height, 44)
+    app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "更多选项")).firstMatch.tap()
     app.buttons["项目文件与 Diff"].tap()
     XCTAssertTrue(app.buttons["README.md"].waitForExistence(timeout: 10))
     app.buttons["README.md"].tap()
@@ -111,11 +113,25 @@ final class ConversationUITests: XCTestCase {
     XCTAssertTrue(app.staticTexts["-old"].exists)
     capture("workspace-diff")
     app.buttons["完成"].tap()
+    app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "更多选项")).firstMatch.tap()
     XCTAssertTrue(app.buttons["项目文件与 Diff"].exists)
   }
 
   func testToolAndReasoningDisclosure() {
     launch("transcript")
+    // R3 retains each tool's disclosure inside a new contiguous-call group.
+    let groups = app.buttons.matching(identifier: "tool-group-toggle")
+    XCTAssertTrue(groups.firstMatch.waitForExistence(timeout: 5))
+    XCTAssertGreaterThan(groups.count, 0)
+    let group = groups.element(boundBy: groups.count - 1)
+    for _ in 0..<6 {
+      if group.isHittable { break }
+      app.scrollViews["conversation-scroll"].swipeDown()
+    }
+    XCTAssertTrue(group.isHittable)
+    XCTAssertEqual(group.value as? String, "已折叠")
+    group.tap()
+    XCTAssertEqual(group.value as? String, "已展开")
     let tool = app.buttons.matching(identifier: "tool-detail-toggle").matching(NSPredicate(format: "label CONTAINS %@", "编辑 HomeView.swift")).firstMatch
     XCTAssertTrue(tool.waitForExistence(timeout: 5))
     XCTAssertEqual(tool.value as? String, "已折叠")
@@ -126,11 +142,19 @@ final class ConversationUITests: XCTestCase {
     tool.tap()
     XCTAssertEqual(tool.value as? String, "已折叠")
 
-    let reasoning = app.buttons["reasoning-toggle"].firstMatch
+    let reasonings = app.buttons.matching(identifier: "reasoning-toggle")
+    let reasoning = reasonings.element(boundBy: reasonings.count - 1)
+    for _ in 0..<6 {
+      if reasoning.isHittable { break }
+      app.scrollViews["conversation-scroll"].swipeDown()
+    }
+    XCTAssertTrue(reasoning.isHittable)
     reasoning.tap()
     XCTAssertEqual(reasoning.value as? String, "已展开")
     reasoning.tap()
     XCTAssertEqual(reasoning.value as? String, "已折叠")
+    group.tap()
+    XCTAssertEqual(group.value as? String, "已折叠")
   }
 
   func testKeyboardAndModelControlsPreserveDraft() {
@@ -308,7 +332,8 @@ final class ConversationUITests: XCTestCase {
       XCTAssertFalse(app.staticTexts["|---|:---:|---:|"].exists)
       XCTAssertTrue(app.staticTexts["表格之后的正文"].isHittable)
       let firstColumn = app.staticTexts["问题"].frame
-      let longCell = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "reload_tree.bg.scan")).firstMatch
+      // Inline code now uses native TextKit for rounded backgrounds and full-height layout.
+      let longCell = app.textViews.matching(identifier: "markdown-inline-code").matching(NSPredicate(format: "label CONTAINS %@", "reload_tree.bg.scan")).firstMatch
       XCTAssertGreaterThan(longCell.frame.height, 40, "长单元格应换行而不是截断")
       capture("markdown-\(route)-left")
       table.swipeLeft()

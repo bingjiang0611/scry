@@ -1,4 +1,5 @@
 import SwiftUI
+import RemoteTransport
 
 // MARK: - Symbols
 
@@ -45,10 +46,10 @@ struct CircleButton: View {
   var body: some View {
     Button(action: action) {
       Image(systemName: symbol)
-        .font(.system(size: filled ? 18 : 17, weight: .medium))
+        .font(Typography.reply.weight(.medium))
         .frame(width: filled ? 46 : 44, height: filled ? 46 : 44)
-        .foregroundStyle(filled ? Palette.surface : Palette.ink)
-        .background(filled ? AnyShapeStyle(Palette.blue) : AnyShapeStyle(Color.clear), in: Circle())
+        .foregroundStyle(filled ? Palette.main : Palette.fg)
+        .background(filled ? AnyShapeStyle(Palette.accent) : AnyShapeStyle(Color.clear), in: Circle())
         .contentShape(Circle())
     }
     .buttonStyle(.plain)
@@ -66,7 +67,7 @@ struct MoreMenu<Content: View>: View {
   var body: some View {
     Menu(content: content) {
       Image(systemName: Symbol.more)
-        .font(.system(size: 17, weight: .medium))
+        .font(Typography.reply.weight(.medium))
         .frame(width: 44, height: 44)
     }
     .accessibilityLabel(label)
@@ -76,13 +77,13 @@ struct MoreMenu<Content: View>: View {
 struct PlainIcon: View {
   let symbol: String
   let label: String
-  var tint: Color = Palette.ink
+  var tint: Color = Palette.fg
   var disabled = false
   let action: () -> Void
   var body: some View {
     Button(action: action) {
       Image(systemName: symbol)
-        .font(.system(size: 17, weight: .medium))
+        .font(Typography.reply.weight(.medium))
         .frame(minWidth: 44, minHeight: 44)
         .foregroundStyle(tint)
         .contentShape(Rectangle())
@@ -100,12 +101,12 @@ struct Notice: View {
   var body: some View {
     HStack(alignment: .top, spacing: 8) {
       Image(systemName: warning ? "exclamationmark.circle" : "info.circle")
-        .font(.system(size: 13, weight: .medium)).padding(.top, 1)
-      Text(text).font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading)
+        .font(Typography.meta.weight(.medium)).padding(.top, 1)
+      Text(text).font(Typography.meta).frame(maxWidth: .infinity, alignment: .leading)
     }
-    .foregroundStyle(warning ? Palette.warnInk : Palette.noticeInk)
+    .foregroundStyle(warning ? Palette.warn : Palette.dim)
     .padding(.vertical, 10).padding(.horizontal, 12)
-    .background(warning ? Palette.warnBg : Palette.noticeBg, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .background(warning ? Palette.warn.opacity(0.12) : Palette.panel2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     .padding(.horizontal, 16).padding(.bottom, 9)
   }
 }
@@ -116,9 +117,9 @@ struct EmptyState: View {
   var symbol: String = "bubble.left.and.bubble.right"
   var body: some View {
     VStack(spacing: 10) {
-      Image(systemName: symbol).font(.system(size: 27, weight: .light)).foregroundStyle(Palette.faint)
-      Text(title).font(.system(size: 16, weight: .semibold)).multilineTextAlignment(.center)
-      Text(detail).font(.system(size: 13)).foregroundStyle(Palette.muted).multilineTextAlignment(.center)
+      Image(systemName: symbol).font(.title.weight(.light)).foregroundStyle(Palette.dim2)
+      Text(title).font(Typography.headerTitle).multilineTextAlignment(.center)
+      Text(detail).font(Typography.meta).foregroundStyle(Palette.dim).multilineTextAlignment(.center)
     }
     .frame(maxWidth: .infinity)
     .padding(.vertical, 54).padding(.horizontal, 26)
@@ -130,9 +131,9 @@ struct StatusDot: View {
   var body: some View { Circle().fill(color).frame(width: 7, height: 7) }
   private var color: Color {
     switch link {
-    case .connected: return Palette.green
-    case .pairing: return Palette.amber
-    case .notPaired, .offline: return Palette.faint
+    case .connected: return Palette.ok
+    case .pairing: return Palette.warn
+    case .notPaired, .offline: return Palette.dim2
     }
   }
 }
@@ -140,6 +141,7 @@ struct StatusDot: View {
 struct RemoteHeader<Right: View>: View {
   let title: String
   var subtitle: String?
+  var providerId: String?
   var link: HostLink?
   var titleLineLimit = 1
   var backAction: (() -> Void)?
@@ -153,24 +155,27 @@ struct RemoteHeader<Right: View>: View {
         if let backAction { backAction() } else { menuAction?() }
       }
       VStack(alignment: .leading, spacing: 3) {
-        Text(title).font(.system(size: 17, weight: .semibold)).lineLimit(titleLineLimit)
+        Text(title).font(Typography.headerTitle).lineLimit(titleLineLimit)
           .fixedSize(horizontal: false, vertical: true)
         if let subtitle {
           HStack(spacing: 5) {
-            if let link { StatusDot(link: link) }
-            Text(subtitle).lineLimit(titleLineLimit == 1 ? 1 : 2)
+            if let providerId {
+              Image(systemName: ProviderSymbol.name(providerId)).foregroundStyle(Palette.provider(providerId))
+            }
+            else if let link { StatusDot(link: link) }
+            Text(subtitle).lineLimit(1)
           }
-          .font(.system(size: 11.5)).foregroundStyle(Palette.muted)
+          .font(Typography.meta).foregroundStyle(Palette.dim2)
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       right()
         .frame(minWidth: 44, minHeight: 44)
     }
-    .padding(.horizontal, 10).padding(.vertical, 6)
+    .padding(.horizontal, 10)
     .frame(minHeight: 56)
-    .background(Palette.surface)
-    .overlay(alignment: .bottom) { Rectangle().fill(Palette.line.opacity(0.7)).frame(height: 0.5) }
+    .background(Palette.main)
+    .overlay(alignment: .bottom) { Rectangle().fill(Palette.border3).frame(height: 1) }
     .zIndex(2)
   }
 }
@@ -181,5 +186,66 @@ extension RemoteHeader where Right == EmptyView {
     self.title = title; self.subtitle = subtitle; self.link = link; self.titleLineLimit = titleLineLimit
     self.backAction = backAction; self.menuAction = menuAction
     self.right = { EmptyView() }
+  }
+}
+
+struct SessionStatusStrip: View {
+  let status: SessionStatusLine
+
+  private var color: Color {
+    switch status.tone {
+    case .neutral: return Palette.dim
+    case .running: return Palette.accent
+    case .attention: return Palette.warn
+    case .warning: return Palette.warn
+    }
+  }
+  private var symbol: String {
+    switch status.tone {
+    case .attention: return "hand.raised"
+    case .warning: return "exclamationmark.circle"
+    case .neutral, .running: return "info.circle"
+    }
+  }
+
+  var body: some View {
+    HStack(spacing: 9) {
+      if status.tone == .running { RunningRing(color: color) }
+      else if status.busy { ProgressView().controlSize(.mini).tint(color) }
+      else { Image(systemName: symbol).font(Typography.meta.weight(.medium)) }
+      Text(status.text).fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+      if let action = status.action {
+        Button(action: action.perform) {
+          Text(action.title).font(Typography.meta.weight(.semibold))
+            .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(action.destructive ? Palette.bad : color)
+        .disabled(action.disabled)
+        .accessibilityIdentifier("session-status-action")
+      }
+    }
+    .font(Typography.meta.weight(.medium))
+    .foregroundStyle(color)
+    .padding(.horizontal, 12)
+    .frame(minHeight: 44)
+    .background(status.tone == .running ? Palette.accentSoft : (status.tone == .warning || status.tone == .attention) ? Palette.warn.opacity(0.12) : Palette.panel2,
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .padding(.horizontal, 12).padding(.top, 8)
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("session-runtime-status")
+  }
+}
+
+// Host-proven live state for one run. "Mac" marks a run the owner started in
+// the Mac app, so the phone never implies it started it.
+struct LiveRunBadge: View {
+  let live: G0Transport.LiveRun
+  let waiting: Bool
+  var body: some View {
+    let color = live.state == "stopping" ? Palette.dim : waiting ? Palette.warn : Palette.accent
+    Text(ConversationCopy.liveState(mac: live.origin == "mac", stopping: live.state == "stopping", waiting: waiting))
+      .font(Typography.meta.weight(.semibold)).foregroundStyle(color)
   }
 }

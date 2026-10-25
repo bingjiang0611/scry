@@ -31,7 +31,7 @@ for path in [
     module_maps.append(package / '.build/checkouts' / path)
 sources = ['RemoteRunStore', 'RemoteRunClient', 'RemoteHistoryCache', 'RemoteConnection',
            'RemoteKeychain', 'RemotePairingClient', 'PairingCode', 'AppModel', 'ConnectionCopy',
-           'ExecutionTargetCoordinator']
+           'ExecutionTargetCoordinator', 'ConversationCopy']
 with tempfile.TemporaryDirectory(prefix='scry-catalog-binary-') as temporary:
     executable = Path(temporary) / 'catalog-refresh-checks'
     command = ['xcrun', 'swiftc', '-D', 'DEBUG', '-swift-version', '5', '-parse-as-library',
@@ -45,8 +45,8 @@ with tempfile.TemporaryDirectory(prefix='scry-catalog-binary-') as temporary:
     components = (root / 'apps/ios/ScryRemote/ConversationTurns.swift').read_text()
     view_models = Path(temporary) / 'ReferencedViewModels.swift'
     view_models.write_text('import SwiftUI\n' +
-        components[components.index('struct TurnOutcomeNote:'):components.index('// A turn this device already')] +
-        components[components.index('struct SessionStatusLine {'):components.index('struct SessionStatusStrip:')])
+        components[components.index('struct TurnOutcomeNote:'):components.index('extension ConversationTurn {')] +
+        components[components.index('struct SessionStatusLine {'):])
     home = (root / 'apps/ios/ScryRemote/CatalogRefreshFeedback.swift').read_text()
     details_snapshot = Path(temporary) / 'CatalogRefreshDetailsSnapshot.swift'
     details_snapshot.write_text('import Foundation\n' +
