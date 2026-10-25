@@ -6,6 +6,8 @@ import { sessionCapabilityCalls } from '../session-capability-calls'
 import { deriveAgentRows, type AgentRowStatus } from '../agent-panel'
 import type { Turn } from '../format'
 import { Icon } from './primitives/Icon'
+import { SessionDiffSummaryRow } from './SessionDiffSummaryRow'
+import { DIFF_COPY } from '../constants/diff-copy'
 
 const MAX_WEB_SOURCES = 6
 const MAX_SOURCE_TEXT = 120_000
@@ -32,6 +34,7 @@ export interface PinnedSummaryProps {
   onDismiss: () => void
   onToggleSection: (section: PinnedSummarySection) => void
   onOpenChanges?: () => void
+  onOpenSessionDiff?: () => void
   onOpenCall: (runId: string, event: TraceEvent) => void
   onOpenAgents: () => void
 }
@@ -135,6 +138,7 @@ function PinnedSummaryBody({
   onDismiss,
   onToggleSection,
   onOpenChanges,
+  onOpenSessionDiff,
   onOpenCall,
   onOpenAgents
 }: PinnedSummaryProps) {
@@ -193,11 +197,13 @@ function PinnedSummaryBody({
             <span className="pinned-summary-row-value" role="status" data-evidence={gitDiffRefreshing ? 'refreshing' : gitDiff?.status ?? 'pending'}>
               <span className="dim">{workspaceDiffCopy.freshness(gitDiff, gitDiffRefreshing)}</span>
               {gitDiff?.status === 'captured' && files.length ? <>
+                <span className="dim">{DIFF_COPY.fileCount(files.length)}</span>
                 <span className="additions">+{additions.toLocaleString()}</span><span className="deletions">−{deletions.toLocaleString()}</span>
               </> : workspaceDiffCopy.label(gitDiff)}
             </span>
           </button>
         )}
+        {onOpenSessionDiff && <SessionDiffSummaryRow turns={turns} onOpen={onOpenSessionDiff} />}
         <div className="pinned-summary-row is-static">
           <span className="pinned-summary-row-icon"><Icon name="folder" /></span>
           <span className="pinned-summary-row-main" title={cwd ?? '当前会话未绑定工作区'}>{workspaceName}</span>

@@ -14,9 +14,13 @@ import type {
   ScReviewDraft
 } from '../../shared/source-control'
 import { githubRepositoryFromUrl } from '../../shared/source-control'
+import type { WorkspaceChoices, WorkspaceChoicesRequest, WorkspaceStartStatus } from '../../shared/workspace-selection'
+import { inspectWorkspaceStart, startWorkspace, type StartPreparedWorkspace, type WorkspaceStartDependencies, type WorkspaceStartRequest } from './workspace-start'
+import { readWorkspaceChoices, validateWorkspaceBranch } from './workspace-choices'
 import { ScGit, isNotRepository, type GitIdentity } from './git'
-import { ScGithub, ScGithubError, type GithubSession } from './github'
-import { ScCommandError, ScProcess, scMessage } from './process'
+import { ScGithub, type GithubSession } from './github'
+import { executeMutation } from './mutation'
+import { ScProcess, scMessage } from './process'
 import { ScStore, type StoredOperation } from './store'
 
 export class SourceControlService {
@@ -34,6 +38,7 @@ export class SourceControlService {
       userData: string
       authorizeDirectory: (cwd: string) => string
       unsettledDirectories: () => Array<string | undefined>
+      registeredWorkspaceRun?: (runId: string, cwd: string) => boolean
       process?: ScProcess
       github?: ScGithub
     }
@@ -57,11 +62,12 @@ export class SourceControlService {
     return identity
   }
 
-  private async busy(commonDir: string): Promise<boolean> {
+  private async busy(commonDir: string, root?: string): Promise<boolean> {
     for (const cwd of this.options.unsettledDirectories()) {
       if (!cwd) return true // Provider-specific default cwd is not a proved repository identity.
       try {
-        if ((await this.git.identity(cwd)).commonDir === commonDir) return true
+        const active = await this.git.identity(cwd)
+        if (active.commonDir === commonDir && (!root || active.root === root)) return true
       } catch (error) {
         if (!isNotRepository(error)) throw error
       }
@@ -136,6 +142,85 @@ export class SourceControlService {
       return { status: 'available', data: snapshot }
     } catch (error) {
       return { status: isNotRepository(error) ? 'unavailable' : 'failed', reason: scMessage(error) }
+    }
+  }
+
+  async workspaceChoices(request: WorkspaceChoicesRequest): Promise<ScRead<WorkspaceChoices>> {
+    try {
+      if (this.closed) throw new Error('应用正在退出')
+      await this.store.ready
+      const directory = this.options.authorizeDirectory(request.cwd)
+      const identity = await this.git.identity(directory)
+      this.options.authorizeDirectory(identity.root)
+      this.identities.set(identity.id, identity)
+      const snapshot = await this.git.revisionSnapshot(identity)
+      const busyRoots = new Set<string>()
+      let unknownCwd = false
+      for (const cwd of new Set(this.options.unsettledDirectories())) {
+        if (!cwd) {
+          unknownCwd = true
+          continue
+        }
+        try {
+          const active = await this.git.identity(cwd)
+          if (active.commonDir === identity.commonDir) busyRoots.add(active.root)
+        } catch (error) {
+          if (!isNotRepository(error)) throw error
+        }
+      }
+      const commonDirBusy = unknownCwd || busyRoots.size > 0 || this.active.has(identity.commonDir)
+      if (await this.store.unresolved(identity.commonDir))
+        snapshot.writeBlocker = '有尚未核查的操作，请先查看操作记录'
+      return { status: 'available', data: await readWorkspaceChoices(this.git, identity, snapshot, request, {
+        commonDirBusy, busyRoots, unknownCwd, recentWorktrees: await this.store.recentWorktrees(identity.commonDir)
+      }) }
+    } catch (error) {
+      return { status: isNotRepository(error) ? 'unavailable' : 'failed', reason: scMessage(error) }
+    }
+  }
+
+  async validateWorkspaceBranch(request: ScRef & { name: string }): Promise<ScRead<{ name: string }>> {
+    try {
+      const identity = await this.identity(request)
+      await validateWorkspaceBranch(this.git, identity, request.name)
+      return { status: 'available', data: { name: request.name } }
+    } catch (error) {
+      return { status: 'failed', reason: scMessage(error) }
+    }
+  }
+
+  private workspaceDependencies(identity: GitIdentity): WorkspaceStartDependencies {
+    return {
+      git: this.git, store: this.store, userData: this.options.userData,
+      busy: root => this.busy(identity.commonDir, root),
+      authorize: cwd => {
+        if (this.closed) throw new Error('应用正在退出')
+        return this.options.authorizeDirectory(cwd)
+      },
+      registeredRun: (runId, cwd) => this.options.registeredWorkspaceRun?.(runId, cwd) === true
+    }
+  }
+
+  async startWorkspace(request: WorkspaceStartRequest, start: StartPreparedWorkspace) {
+    const identity = await this.identity(request.workspace.intent)
+    return this.exclusive(identity, async () => {
+      await this.identity(request.workspace.intent)
+      const cwd = this.options.authorizeDirectory(request.cwd)
+      if ((await this.git.identity(cwd)).id !== identity.id) throw new Error('所选仓库与发送目录不一致')
+      return startWorkspace(identity, { ...request, cwd }, this.workspaceDependencies(identity), start)
+    })
+  }
+
+  async inspectWorkspaceStart(ref: ScRef & { operationId: string }): Promise<ScRead<WorkspaceStartStatus | null>> {
+    try {
+      const identity = await this.identity(ref)
+      return await this.exclusive(identity, async () => {
+        const record = await this.store.get(ref.operationId)
+        if (!record) return { status: 'available', data: null }
+        return { status: 'available', data: await inspectWorkspaceStart(identity, record, this.workspaceDependencies(identity)) }
+      })
+    } catch (error) {
+      return { status: 'failed', reason: scMessage(error) }
     }
   }
 
@@ -243,194 +328,13 @@ export class SourceControlService {
       }
       await this.store.save(record)
       if (blocker) return record.operation
-      let dispatched = false
-      let completionNote = ''
-      try {
-        if (request.action === 'review' || request.action === 'merge') {
-          const session = await this.github.connect()
-          await this.githubScope(identity, request.repository, session)
-          if (session.account !== request.account) throw new Error('GitHub 账户已变化，请重新确认')
-          const pr = await session.detail(request.repository, request.number)
-          if (pr.head !== request.head || pr.base !== request.base)
-            throw new Error('PR 的 HEAD/base 已变化，请重新审查；旧草稿不能自动沿用')
-          record.intent = {
-            repository: request.repository,
-            number: request.number,
-            account: request.account,
-            head: request.head
-          }
-          await this.store.save(record)
-          authorize?.()
-          dispatched = true
-          record.operation.evidence =
-            request.action === 'review'
-              ? { reviewId: await session.review(pr, request) }
-              : { sha: await session.merge(pr, request.method) }
-          if (request.action === 'review') {
-            try {
-              await this.store.saveDraft({
-                repositoryId: identity.id,
-                repository: pr.repository,
-                number: pr.number,
-                account: session.account,
-                head: pr.head,
-                base: pr.base,
-                body: '',
-                verdict: 'COMMENT',
-                comments: []
-              })
-            } catch {
-              completionNote = '。审查已提交，但本机草稿未能清空；请勿重复提交'
-            }
-          }
-        } else {
-          const snapshot = await this.expected(identity, request)
-          if (snapshot.writeBlocker) throw new Error(snapshot.writeBlocker)
-          if (request.action !== 'createPr' && snapshot.actionBlockers[request.action])
-            throw new Error(snapshot.actionBlockers[request.action])
-          if (request.action === 'stage' || request.action === 'unstage') {
-            const files = request.paths.map((path) => {
-              const file = snapshot.files.find((file) => file.path === path)
-              if (!file) throw new Error('暂存范围不属于当前快照')
-              return file
-            })
-            if (
-              request.action === 'stage' &&
-              !request.allowStagedOverwrite &&
-              files.some((file) => file.index !== '.' && !file.untracked && file.worktree !== '.')
-            ) {
-              throw new Error('此文件已有部分暂存；必须另行确认用完整工作区版本替换该文件的 index 选择')
-            }
-            authorize?.()
-            dispatched = true
-            await this.git.stage(identity, files, request.action === 'unstage', snapshot.head)
-            await this.git.status(identity)
-          } else if (request.action === 'commit') {
-            const selected = (request.paths ?? []).map((path) => {
-              const file = snapshot.files.find((file) => file.path === path)
-              if (!file) throw new Error('提交范围不属于当前快照')
-              if (!file.untracked && file.index !== '.')
-                throw new Error('已有暂存内容会直接纳入提交，不能重新暂存并覆盖原有选择')
-              return file
-            })
-            if (!selected.length && !snapshot.files.some((file) => file.index !== '.' && !file.untracked))
-              throw new Error('没有已暂存内容；请选择本次要提交的文件')
-            let tree: string
-            if (selected.length) {
-              if (snapshot.actionBlockers.stage) throw new Error(snapshot.actionBlockers.stage)
-              const previousTree = (await this.git.run(identity.root, ['write-tree'])).trim()
-              record.intent = { parent: snapshot.head }
-              record.operation.message = '正在暂存明确选择的文件；尚未创建提交'
-              await this.store.save(record)
-              authorize?.()
-              dispatched = true
-              const paths = await this.git.stage(identity, selected, false, snapshot.head)
-              tree = (await this.git.run(identity.root, ['write-tree'])).trim()
-              const changed = (await this.git.run(identity.root, [
-                'diff-tree', '--no-ext-diff', '--no-textconv', '--no-renames', '--no-commit-id',
-                '--name-only', '-z', '-r', previousTree, tree
-              ])).split('\0').filter(Boolean)
-              if (changed.some((path) => !paths.includes(path)))
-                throw new Error('暂存期间其他文件的 index 发生变化；请核查，不夹带提交或自动回滚')
-              const staged = await this.git.status(identity)
-              if (staged.head !== snapshot.head || staged.writeBlocker || staged.actionBlockers.commit)
-                throw new Error('暂存已执行，但仓库或提交授权已变化；请核查，不自动提交或回滚')
-            } else tree = (await this.git.run(identity.root, ['write-tree'])).trim()
-            record.intent = {
-              parent: snapshot.head,
-              tree
-            }
-            await this.store.save(record)
-            authorize?.()
-            dispatched = true
-            const sha = await this.git.commitIndex(identity, request.message)
-            const [actualTree, parents] = (
-              await this.git.run(identity.root, ['show', '--no-patch', '--format=%T%n%P', sha])
-            )
-              .trimEnd()
-              .split('\n')
-            if (actualTree !== record.intent.tree || (parents ?? '') !== (snapshot.head ?? ''))
-              throw new Error('提交已经执行，但实际 tree/parent 与预检不一致；请核查，不自动回滚')
-            record.operation.evidence = { sha }
-            try {
-              await this.store.saveCommitDraft({ repositoryId: identity.id, head: sha, message: '' })
-            } catch {
-              completionNote = '。提交已完成，但本机消息草稿未能清空'
-            }
-          } else if (request.action === 'push' || request.action === 'fetch') {
-            if (!snapshot.remotes.some((remote) => remote.name === request.remote))
-              throw new Error('远端不属于当前仓库')
-            const target = await this.git.transportTarget(identity, request.remote, request.action)
-            await this.expected(identity, request)
-            if (request.action === 'push') {
-              if (!snapshot.branch || !snapshot.head)
-                throw new Error('detached/unborn HEAD 不能推送；请先创建分支和提交')
-              const remoteHead = await this.git.remoteHead(identity, target, snapshot.branch)
-              if (remoteHead)
-                await this.git.run(identity.root, ['merge-base', '--is-ancestor', remoteHead, snapshot.head])
-              record.intent = { target, branch: snapshot.branch, head: snapshot.head }
-              await this.store.save(record)
-              await this.expected(identity, request)
-              authorize?.()
-              dispatched = true
-              await this.git.push(identity, target, snapshot.branch, snapshot.head)
-              if ((await this.git.remoteHead(identity, target, snapshot.branch)) !== snapshot.head)
-                throw new Error('推送已执行但远端无法确认到达预期 SHA')
-              record.operation.evidence = { sha: snapshot.head }
-            } else {
-              record.intent = { target }
-              await this.store.save(record)
-              authorize?.()
-              dispatched = true
-              await this.git.fetch(identity, target, request.remote)
-            }
-          } else {
-            if (!snapshot.branch || snapshot.branch !== request.headBranch || !snapshot.head)
-              throw new Error('创建 PR 的源分支必须是当前已确认分支')
-            if (request.headRepository.toLowerCase() === request.repository.toLowerCase() && request.headBranch === request.baseBranch)
-              throw new Error('PR 源分支与目标分支相同，请先创建功能分支')
-            const session = await this.github.connect()
-            if (session.account !== request.account) throw new Error('GitHub 账户已变化，请重新读取')
-            await this.githubScope(identity, request.repository, session)
-            await this.githubScope(identity, request.headRepository, session)
-            const branch = await session.request<{ commit: { sha: string } }>(
-              'GET',
-              `/repos/${request.headRepository}/branches/${encodeURIComponent(request.headBranch)}`
-            )
-            if (branch.commit?.sha !== snapshot.head)
-              throw new Error('GitHub 源分支不等于本地 HEAD；先推送并核实，不夹带自动推送')
-            record.intent = {
-              repository: request.repository,
-              head: snapshot.head,
-              branch: snapshot.branch,
-              account: session.account
-            }
-            await this.store.save(record)
-            authorize?.()
-            dispatched = true
-            record.operation.evidence = await session.create(request, authorize)
-          }
-        }
-        record.operation.status = 'succeeded'
-        record.operation.message = `${request.action} 已确认完成；其他步骤不会自动执行${completionNote}`
-      } catch (error) {
-        record.operation.status =
-          !dispatched || (error instanceof ScGithubError && !error.uncertain) ? 'failed' : 'unknown'
-        record.operation.message = scMessage(error)
-        if (
-          error instanceof ScCommandError &&
-          !dispatched &&
-          /ancestor|not a valid|bad object/.test(error.message)
-        )
-          record.operation.message = '远端与本地不能确认快进；请先 fetch 或在终端处理分叉，不强制推送'
-      }
-      try {
-        await this.store.save(record)
-      } catch {
-        record.operation.status = 'unknown'
-        record.operation.message = '操作可能已执行，但结果日志保存失败；请核查，不重复发送'
-      }
-      return record.operation
+      return executeMutation(request, identity, record, {
+        git: this.git,
+        github: this.github,
+        store: this.store,
+        expected: (target, expected) => this.expected(target, expected),
+        githubScope: (target, repository, session) => this.githubScope(target, repository, session)
+      }, authorize)
     })
   }
 
@@ -448,6 +352,8 @@ export class SourceControlService {
       const record = await this.store.get(ref.operationId)
       if (!record || record.operation.repositoryId !== identity.id) throw new Error('操作不属于此仓库')
       if (record.operation.status !== 'unknown') return record.operation
+      if (record.operation.action === 'prepareWorkspace')
+        return (await inspectWorkspaceStart(identity, record, this.workspaceDependencies(identity))).operation
       const { intent } = record
       try {
         if (record.operation.action === 'push' && intent.branch && intent.target && intent.head) {

@@ -1,10 +1,15 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import { eventApi } from './event-api'
+import { remoteApi } from './remote-api'
+import type { GitDiffScope, WorkspaceDiffSnapshotResult } from '../shared/workspace-diff'
+import type { DiffCommitPage, DiffCommitPageRequest, DiffCommitSnapshot, DiffCommitSnapshotRequest } from '../shared/diff-history'
 import type { SourceControlApi } from '../shared/source-control'
+import type { WorkspaceSelectionApi } from '../shared/workspace-selection'
 import type { ConversationApi, ConversationSummary } from '../shared/conversation-api'
-import type { BackgroundTaskStopResult, BackgroundWork } from '../shared/background-work'
+import type { BackgroundTaskStopResult } from '../shared/background-work'
+import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import type { RecorderContentPage, RecorderContentPageRequest } from '../shared/tool-content'
 import type {
-  TraceEvent,
   ActiveRun,
   DbStats,
   WorkspaceDiffResult,
@@ -16,17 +21,15 @@ import type { BillingFixtureImportResult, BillingGuardianState, BillingSyncResul
 import type { RendererPerformanceSample } from '../shared/performance'
 import type { LlmPerformanceHistory, LlmPerformanceSummary } from '../shared/llm-performance'
 import type {
-  AgentDataUpdated,
   AgentForkSessionRequest,
   AgentForkSessionResult,
   AgentInputAttachment,
-  AgentQuestionRequest,
   AgentQuestionResponse,
   AgentRunControlCatalog,
   AgentStartRequest,
+  AgentStartResult,
   AgentSteerRequest,
   AgentSteerResult,
-  AgentStopState,
   RuntimeProvider
 } from '../shared/runtime'
 import type {
@@ -49,7 +52,7 @@ import type {
   SessionHistoryPage,
   SessionHistoryPageRequest
 } from '../main/session-history'
-import type { TraceBacklogState, TraceBatch, TraceBatchReceipt } from '../main/trace-output'
+import type { TraceBacklogState, TraceBatchReceipt } from '../main/trace-output'
 import type {
   WorkspaceCreateRequest,
   WorkspaceEntry,
@@ -64,19 +67,13 @@ import type {
   WorkspaceRenameRequest,
   WorkspaceWriteRequest
 } from '../shared/workspace'
-import type { RemoteStatus, RemotePairingCode, RemoteDevice } from '../shared/remote'
-import type { DesktopRemoteAPI, DesktopHostAccess } from '../shared/desktop-remote'
-import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import type { ScanReport } from '../cli/mcpguard-core'
 import { isMcpGuardReport } from '../shared/mcpguard-report'
 import type {
-  TerminalDataEvent,
-  TerminalRecordingErrorEvent,
   TerminalRecordingRequest,
   TerminalRecordingPage,
   TerminalRecordingListRequest,
   TerminalRecordingListPage,
-  TerminalExitEvent,
   TerminalSessionDescriptor,
   TerminalSessionInfo,
   TerminalAttachInfo,
@@ -165,6 +162,11 @@ const api = {
   chooseFolder: (): Promise<string | null> => ipcRenderer.invoke('agent:chooseFolder'),
   clipboardImage: (): Promise<AgentInputAttachment | null> => ipcRenderer.invoke('agent:clipboardImage'),
   sourceControl,
+  workspaceSelection: {
+    read: request => ipcRenderer.invoke('workspaceSelection:read', request),
+    inspectStart: request => ipcRenderer.invoke('workspaceSelection:inspectStart', request),
+    validateBranch: request => ipcRenderer.invoke('workspaceSelection:validateBranch', request)
+  } satisfies WorkspaceSelectionApi,
   conversations: {
     create: (cwd: string): ReturnType<ConversationApi['create']> => ipcRenderer.invoke('conversation:create', cwd),
     fork: (request: Parameters<ConversationApi['fork']>[0]): ReturnType<ConversationApi['fork']> => ipcRenderer.invoke('conversation:fork', request),
@@ -244,6 +246,9 @@ const api = {
   syncBillingAdmin: (): Promise<BillingSyncResult> => ipcRenderer.invoke('agent:syncBillingAdmin'),
   importBillingFixture: (): Promise<BillingFixtureImportResult> => ipcRenderer.invoke('agent:importBillingFixture'),
   gitDiff: (cwd: string): Promise<WorkspaceDiffResult> => ipcRenderer.invoke('agent:gitDiff', cwd),
+  gitDiffSnapshot: (cwd: string, scope: GitDiffScope = 'workspace'): Promise<WorkspaceDiffSnapshotResult> => ipcRenderer.invoke('agent:gitDiffSnapshot', cwd, scope),
+  gitDiffCommits: (request: DiffCommitPageRequest): Promise<DiffCommitPage> => ipcRenderer.invoke('agent:gitDiffCommits', request),
+  gitCommitDiffSnapshot: (request: DiffCommitSnapshotRequest): Promise<DiffCommitSnapshot> => ipcRenderer.invoke('agent:gitCommitDiffSnapshot', request),
   recorderContentPage: (request: RecorderContentPageRequest): Promise<RecorderContentPage> =>
     ipcRenderer.invoke('agent:recorderContentPage', request),
   // 只拿最近一页：完整历史不作为单个 payload 过 IPC。更早轮次用 loadSessionOlder 取回。
@@ -261,7 +266,7 @@ const api = {
     ipcRenderer.invoke('agent:setSessionArchived', context, archived),
   deleteArchivedSessions: (): Promise<DeleteArchivedSessionsResult> => ipcRenderer.invoke('agent:deleteArchivedSessions'),
   /** commandStatus='duplicate' 表示这条 commandId 已被受理过，runId 是第一次的那个。 */
-  start: (request: AgentStartRequest): Promise<{ runId: string; commandStatus?: 'executed' | 'duplicate'; commandSequence?: number }> =>
+  start: (request: AgentStartRequest): Promise<AgentStartResult & { commandStatus?: 'executed' | 'duplicate'; commandSequence?: number }> =>
     ipcRenderer.invoke('agent:start', request),
   activeRun: (): Promise<ActiveRun | null> => ipcRenderer.invoke('agent:activeRun'),
   unreadSessions: (): Promise<SessionAttentionSnapshot> => ipcRenderer.invoke('agent:unreadSessions'),
@@ -274,152 +279,8 @@ const api = {
   stop: (runId: string): Promise<boolean> => ipcRenderer.invoke('agent:stop', runId),
   steer: (request: AgentSteerRequest): Promise<AgentSteerResult> => ipcRenderer.invoke('agent:steer', request),
   stopBackgroundTask: (request: { runId: string; taskId: string }): Promise<BackgroundTaskStopResult> => ipcRenderer.invoke('agent:stopBackgroundTask', request),
-  onBackgroundWork: (cb: (event: { runId: string; work: BackgroundWork }) => void): (() => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, value: { runId: string; work: BackgroundWork }): void => cb(value)
-    ipcRenderer.on('agent:backgroundWork', listener)
-    return () => ipcRenderer.removeListener('agent:backgroundWork', listener)
-  },
-  onTrace: (cb: (events: TraceEvent[], receipt: TraceBatchReceipt) => void): (() => void) => {
-    // The full batch crosses contextBridge once. Credit is returned by the renderer only after its
-    // batched React update commits; merely invoking this callback is not proof of consumption.
-    const l = (_: unknown, payload: TraceBatch): void => {
-      const receipt = { generation: payload.generation, batchId: payload.batchId, bytes: payload.bytes }
-      try {
-        cb(payload.events, receipt)
-      } catch (error) {
-        // An exception means the batch was explicitly rejected rather than queued for a React
-        // commit. Return only this fenced receipt so one bad consumer cannot deadlock all future
-        // live delivery; canonical run/archive evidence remains authoritative.
-        void ipcRenderer.invoke('agent:traceAck', receipt).catch(() => {})
-        throw error
-      }
-    }
-    ipcRenderer.on('agent:trace', l)
-    return () => ipcRenderer.removeListener('agent:trace', l)
-  },
-  traceAck: (receipt: TraceBatchReceipt): Promise<boolean> => ipcRenderer.invoke('agent:traceAck', receipt),
-  onTraceHealth: (cb: (state: TraceBacklogState) => void): (() => void) => {
-    const l = (_: unknown, state: TraceBacklogState): void => cb(state)
-    ipcRenderer.on('agent:traceHealth', l)
-    return () => ipcRenderer.removeListener('agent:traceHealth', l)
-  },
-  traceResynchronized: (): Promise<true> => ipcRenderer.invoke('agent:traceResynchronized'),
-  onTerminalData: (cb: (event: TerminalDataEvent) => void): (() => void) => {
-    const listener = (_: unknown, events: TerminalDataEvent[]): void => {
-      for (const event of events) cb(event)
-    }
-    ipcRenderer.on('terminal:data', listener)
-    return () => ipcRenderer.removeListener('terminal:data', listener)
-  },
-  onTerminalRecordingError: (cb: (event: TerminalRecordingErrorEvent) => void): (() => void) => {
-    const listener = (_: unknown, event: TerminalRecordingErrorEvent): void => cb(event)
-    ipcRenderer.on('terminal:recordingError', listener)
-    return () => ipcRenderer.removeListener('terminal:recordingError', listener)
-  },
-  onTerminalExit: (cb: (event: TerminalExitEvent) => void): (() => void) => {
-    const listener = (_: unknown, event: TerminalExitEvent): void => cb(event)
-    ipcRenderer.on('terminal:exit', listener)
-    return () => ipcRenderer.removeListener('terminal:exit', listener)
-  },
-  onTurnDone: (cb: (e: { runId: string; sessionId?: string; externalSessionId?: string; providerId?: string; agentProfileId?: string; stopped?: boolean }) => void): (() => void) => {
-    const l = (_: unknown, e: { runId: string; sessionId?: string; externalSessionId?: string; providerId?: string; agentProfileId?: string; stopped?: boolean }): void => cb(e)
-    ipcRenderer.on('agent:turnDone', l)
-    return () => ipcRenderer.removeListener('agent:turnDone', l)
-  },
-  onUnreadSessions: (cb: (snapshot: SessionAttentionSnapshot) => void): (() => void) => {
-    const listener = (_: unknown, snapshot: SessionAttentionSnapshot): void => cb(snapshot)
-    ipcRenderer.on('agent:unreadSessions', listener)
-    return () => ipcRenderer.removeListener('agent:unreadSessions', listener)
-  },
-  onStopState: (cb: (state: AgentStopState) => void): (() => void) => {
-    const l = (_: unknown, state: AgentStopState): void => cb(state)
-    ipcRenderer.on('agent:stopState', l)
-    return () => ipcRenderer.removeListener('agent:stopState', l)
-  },
-  onDataUpdated: (cb: (e: AgentDataUpdated) => void): (() => void) => {
-    const l = (_: unknown, e: AgentDataUpdated): void => cb(e)
-    ipcRenderer.on('agent:dataUpdated', l)
-    return () => ipcRenderer.removeListener('agent:dataUpdated', l)
-  },
-  onSession: (cb: (e: { runId: string; sessionId: string; previousSessionId?: string; externalSessionId?: string; providerId?: string; agentProfileId?: string; pending?: boolean }) => void): (() => void) => {
-    const l = (_: unknown, e: { runId: string; sessionId: string; previousSessionId?: string; externalSessionId?: string; providerId?: string; agentProfileId?: string; pending?: boolean }): void => cb(e)
-    ipcRenderer.on('agent:session', l)
-    return () => ipcRenderer.removeListener('agent:session', l)
-  },
-  onFocusedRun: (cb: (run: ActiveRun) => void): (() => void) => {
-    const l = (_: unknown, run: ActiveRun): void => cb(run)
-    ipcRenderer.on('agent:focusedRun', l)
-    return () => ipcRenderer.removeListener('agent:focusedRun', l)
-  },
-  // A device-initiated (remote) run just wrote an AppSession into the catalog.
-  // This is a refresh hint only (no active-run semantics), so the Mac session
-  // list shows the phone's conversation live without corrupting local run state.
-  onRemoteSessionRecorded: (cb: (e: { cwd: string }) => void): (() => void) => {
-    const l = (_: unknown, e: { cwd: string }): void => cb(e)
-    ipcRenderer.on('remote:sessionRecorded', l)
-    return () => ipcRenderer.removeListener('remote:sessionRecorded', l)
-  },
-  onQuestion: (cb: (request: AgentQuestionRequest) => void): (() => void) => {
-    const l = (_: unknown, request: AgentQuestionRequest): void => cb(request)
-    ipcRenderer.on('agent:userQuestion', l)
-    return () => ipcRenderer.removeListener('agent:userQuestion', l)
-  },
-  onQuestionAttention: (cb: (event: { runId: string; pendingCount: number }) => void): (() => void) => {
-    const l = (_: unknown, event: { runId: string; pendingCount: number }): void => cb(event)
-    ipcRenderer.on('agent:questionAttention', l)
-    return () => ipcRenderer.removeListener('agent:questionAttention', l)
-  },
-  onQuestionClosed: (cb: (event: { runId: string; questionId: string }) => void): (() => void) => {
-    const l = (_: unknown, event: { runId: string; questionId: string }): void => cb(event)
-    ipcRenderer.on('agent:userQuestionClosed', l)
-    return () => ipcRenderer.removeListener('agent:userQuestionClosed', l)
-  },
-  onError: (cb: (e: { runId: string; message: string; category?: string; hint?: string }) => void): (() => void) => {
-    const l = (_: unknown, e: { runId: string; message: string; category?: string; hint?: string }): void => cb(e)
-    ipcRenderer.on('agent:error', l)
-    return () => ipcRenderer.removeListener('agent:error', l)
-  },
-  desktopRemote: {
-    workbench: (id, request) => ipcRenderer.invoke('desktopRemote:workbench', id, request),
-    list: () => ipcRenderer.invoke('desktopRemote:list'),
-    pair: (input) => ipcRenderer.invoke('desktopRemote:pair', input),
-    finishPairing: (id) => ipcRenderer.invoke('desktopRemote:finishPairing', id),
-    updateSsh: (id, ssh) => ipcRenderer.invoke('desktopRemote:updateSsh', id, ssh),
-    connect: (id) => ipcRenderer.invoke('desktopRemote:connect', id),
-    disconnect: (id) => ipcRenderer.invoke('desktopRemote:disconnect', id),
-    forget: (id) => ipcRenderer.invoke('desktopRemote:forget', id),
-    catalog: (id) => ipcRenderer.invoke('desktopRemote:catalog', id),
-    providerControls: (id, context) => ipcRenderer.invoke('desktopRemote:providerControls', id, context),
-    commands: (id, context) => ipcRenderer.invoke('desktopRemote:commands', id, context),
-    sessionAction: (id, context, action) => ipcRenderer.invoke('desktopRemote:sessionAction', id, context, action),
-    forkSession: (id, request) => ipcRenderer.invoke('desktopRemote:forkSession', id, request),
-    deleteSession: (id, request) => ipcRenderer.invoke('desktopRemote:deleteSession', id, request),
-    directories: (id, path, cursor, snapshot) => ipcRenderer.invoke('desktopRemote:directories', id, path, cursor, snapshot),
-    selectDirectory: (id, path) => ipcRenderer.invoke('desktopRemote:selectDirectory', id, path),
-    history: (id, context, before, snapshot) => ipcRenderer.invoke('desktopRemote:history', id, context, before, snapshot),
-    trace: (id, context, runId, knownAttachmentCount?: number) => ipcRenderer.invoke('desktopRemote:trace', id, context, runId, knownAttachmentCount),
-    traceDelta: (id, context, runId, after, knownAttachmentCount?: number) => ipcRenderer.invoke('desktopRemote:traceDelta', id, context, runId, after, knownAttachmentCount),
-    intents: (id) => ipcRenderer.invoke('desktopRemote:intents', id),
-    submit: (id, input) => ipcRenderer.invoke('desktopRemote:submit', id, input),
-    intentStatus: (id, intentId) => ipcRenderer.invoke('desktopRemote:intentStatus', id, intentId),
-    resolveIntent: (id, intentId) => ipcRenderer.invoke('desktopRemote:resolveIntent', id, intentId),
-    runStatus: (id, runId) => ipcRenderer.invoke('desktopRemote:runStatus', id, runId),
-    liveRun: (id, context) => ipcRenderer.invoke('desktopRemote:liveRun', id, context),
-    stop: (id, runId) => ipcRenderer.invoke('desktopRemote:stop', id, runId),
-    answer: (id, runId, response) => ipcRenderer.invoke('desktopRemote:answer', id, runId, response),
-    files: (id, context, path, cursor) => ipcRenderer.invoke('desktopRemote:files', id, context, path, cursor),
-    file: (id, context, path, offset, snapshot) => ipcRenderer.invoke('desktopRemote:file', id, context, path, offset, snapshot)
-  } satisfies DesktopRemoteAPI,
-  remoteDesktopHostStatus: (): Promise<DesktopHostAccess> => ipcRenderer.invoke('remote:desktop:status'),
-  remoteDesktopHostInvite: (): Promise<string> => ipcRenderer.invoke('remote:desktop:invite'),
-  remoteDesktopHostDisable: (): Promise<void> => ipcRenderer.invoke('remote:desktop:disable'),
-  // Trusted-LOCAL remote-access pairing (Mac's own UI only).
-  remoteStatus: (): Promise<RemoteStatus> => ipcRenderer.invoke('remote:status'),
-  remoteBeginPairing: (): Promise<RemotePairingCode> => ipcRenderer.invoke('remote:pairing:begin'),
-  remoteConfirmPairing: (pairingId: string, expectedPublicKeySHA256: string): Promise<RemoteDevice> =>
-    ipcRenderer.invoke('remote:pairing:confirm', pairingId, expectedPublicKeySHA256),
-  remoteCancelPairing: (pairingId: string): Promise<void> => ipcRenderer.invoke('remote:pairing:cancel', pairingId),
-  remoteRevokeDevice: (deviceId: string): Promise<void> => ipcRenderer.invoke('remote:device:revoke', deviceId)
+  ...eventApi,
+  ...remoteApi
 }
 
 contextBridge.exposeInMainWorld('scry', api)

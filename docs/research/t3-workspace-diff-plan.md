@@ -1,6 +1,6 @@
 # T3 Code → Scry：新会话工作区与 Diff 设计方案
 
-状态：**待评审，未实现 App 功能**。本轮只交付研究、设计稿和设计稿检查。
+状态：**A–D 已实现，本地功能验收通过；完整 UI 门禁仍有已复现的原有失败**。详见 [实现与验收](t3-workspace-diff-acceptance.md)。用户选择先拆分再实现：本次修改或新增的完整文件均须不超过 20,000 UTF-8 字节，不绕过门禁或压缩格式。
 
 ## 1. 已确认目标与建议
 
@@ -12,7 +12,7 @@
 - 新会话先选择，不立刻改 Git。首次发送明确执行切换或创建，成功后绑定实际 cwd，再启动 Provider。
 - 右侧工作台：工作区 / 本会话 / 本轮，展示文件数、增删行、比较基准、采集时间及证据状态。
 - 不承诺精确归因给 Agent：文件快照差异也可能包含用户、终端或外部程序的写入。
-- 不顺带引入自动 fetch、worktree 初始化脚本、自动清理、提交、推送、PR 或历史源码持久化。
+- 不顺带引入自动 fetch、worktree 初始化脚本、自动清理、提交、推送、PR，也不扩大既有历史源码保留范围。
 
 可点击设计稿：[../../designs/scry-workspace-diff/index.html](../../designs/scry-workspace-diff/index.html)。设计稿数据全部为示例；没有 Git、Provider 或磁盘写入能力。按本仓库 `.gitignore` 约定，`designs/` 是仅保留在本机的工作素材，不随提交分发；上面的本地链接在其他检出中不可用。
 
@@ -41,11 +41,13 @@
 - Scry 当前使用不识别重命名的部分路径，重命名可表现为删除+新增；本次不引入另一套启发式来调整总数。以后若统一 rename detection，要同时迁移各比较路径和回归 oracle。
 - 保留空白变化的原始 numstat。首版不新增“忽略空白”开关，避免正文忽略空白而总数未忽略。
 - 非 Git/无 HEAD 仍允许正常聊天，只是 Git diff 不可用；没有会话基线时显示「发送后开始记录」。
-- 历史会话目前只保留统计，正文不持久化。**不照搬 T3 durable checkpoint**；长期保存源码正文会改变隐私、磁盘、删除和 recorder 合同，需独立批准，不是这轮迁移的前置条件。
+- 历史归档已保存有界 patch 正文，见 `src/main/transcript-archive.ts` 及对应测试；保留既有保存、截断与删除合同。有已归档正文时展示该正文，只有正文缺失时才显示仅统计，不读取当前文件补历史。**不照搬 T3 durable checkpoint**；扩大保留周期、容量或源码范围需独立批准，不是这轮迁移的前置条件。
+
+实现上限：工作区沿用 1,000 文件、16 MiB 未跟踪内容、默认 5 秒；inspector patch 总读取预算 256 KiB，正文超限不伪造完整内容。清单单页 100、inventory 1,000、响应 256 KiB，超限需缩小搜索。更大正文应升级为同 snapshot 的按文件分页，不直接放大全量 IPC。
 
 ## 4. 工作区选择合同
 
-### 4.1 草稿意图（建议类型，不是现有 API）
+### 4.1 草稿意图（设计概要；权威 API 见 `src/shared/workspace-selection.ts`）
 
 ```ts
 type WorkspaceIntent =
@@ -56,11 +58,12 @@ type WorkspaceIntent =
 
 非 Git 继续使用现有 cwd 草稿，不强行构造 Git intent。只允许新会话修改 intent；开始后的会话显示只读实际分支/工作区。要换目录就新建会话，不把旧 Provider resume ID 带到新 cwd。
 
-- 当前工作区：可保留当前分支，或选择另一条本地分支；待执行状态写「发送时切换」。按钮写「切换分支并发送」，不把磁盘变化藏在普通“发送”后面。
-- 新建 worktree：右侧改为「基于 main」，新分支名可编辑，默认 `scry/<短唯一标识>`。默认由宿主管理目录，例如 `userData/worktrees/<repo-id>/<worktree-id>`；renderer 只传意图，不能传任意目标路径。
-- 已有 worktree：列出真实 worktree 清单、分支、缩略路径、正在使用状态；最近一项置顶。已被其他 worktree 占用的分支导向对应 worktree，不强行 checkout。
+- 2026-10-24 UI 简化：按用户给出的 T3 Code 截图，composer 下方只保留左右两个入口。左侧菜单选当前/新建/之前的 worktree；右侧菜单搜索并选择 ref。点击即保存草稿；方向键只移动焦点，Enter 确认。取消不修改选择，不使用模态大表单或额外应用按钮。
+- 当前工作区：可保留当前分支，或选择另一条本地分支。发送按钮写「切换分支并发送」，不再常驻重复的待执行说明。
+- 新建 worktree：右侧改为「基于 main」，自动生成 `scry/<短唯一标识>`，通过左侧入口的 tooltip 查看，不再要求填写名称。默认由宿主管理目录，例如 `userData/worktrees/<repo-id>/<worktree-id>`；renderer 只传意图，不能传任意目标路径。
+- 已有 worktree：列出真实 worktree 清单、分支、缩略路径、正在使用状态；最近成功准备并登记的一项按操作账本置顶；无记录不猜测外部使用时间。已被其他 worktree 占用的分支导向对应 worktree，不强行 checkout。
 - 首版选择本地分支和已存在的远端跟踪 ref。远端 ref 只可作新 worktree 起点；当前目录模式不隐式创建 tracking branch、不自动联网 fetch。UI 写明使用本地已获取的 ref。
-- 新 worktree 不复制主工作区未提交文件；在选项下明确说明。当前目录有改动仍可留在原分支发送，或创建干净 worktree；切到别的分支保守阻止，不自动 stash/reset。
+- 新 worktree 不复制主工作区未提交文件；新建选项 tooltip 明确说明。当前目录有改动仍可留在原分支发送，或创建干净 worktree；切到别的分支保守阻止，不自动 stash/reset。
 - detached HEAD：当前 checkout 可聊天并显示短 SHA；新 worktree 必须显式选有效起点。unborn/非 Git 不提供创建入口。
 - 名称验证使用 Git check-ref-format；ref 参数不能被当选项；NUL/换行/超长输入在 IPC 边界校验。合法文件名解析用 NUL 分隔，不按空格拆分。
 
@@ -163,14 +166,14 @@ flowchart TD
 | 创建后崩溃/Provider 启动失败/响应丢失 | 草稿保留；只读核查唯一结果；无重复 worktree；用户目录不被清理。 |
 | 现有 Provider 恢复、fork、后台会话、Source Control stage/commit | 原合同不回归。实验 Provider 明确能力差异。 |
 
-实现阶段按受影响测试使用 `npm run test:unit -- <已定位测试文件>`，执行 `npm run typecheck`、`npm run build`；跨权限/持久化边界按 `docs/agent/verification.md` 扩大 gate，重点复用 production wrapper 与临时文件系统。UI 必须在当前代码的隔离 Electron test 实例重放，不能用本 HTML 的点击当 App 证据。相关热路径运行 `npm run performance:measure` 并解释所有 worse。真实 Provider 费用另行授权。App 功能实现并通过验证后才走默认构建安装流程，本轮不安装。
+实现阶段按受影响测试使用 `npm run test:unit -- <已定位测试文件>`，执行 `npm run typecheck`、`npm run build`；跨权限/持久化边界按 `docs/agent/verification.md` 扩大 gate，重点复用 production wrapper 与临时文件系统。UI 必须在当前代码的隔离 Electron test 实例重放，不能用本 HTML 的点击当 App 证据。相关热路径运行 `npm run performance:measure` 并解释所有 worse。真实 Provider 费用另行授权。App 功能实现并通过验证后执行默认构建安装流程；仅安装成功不证明用户当前运行实例已加载新版本。
 
 至少一个负向控制：暂时取消 commonDir gate 后，并发拒绝测试应失败；暂时把 unavailable 改成空数组后，证据 UI 测试应失败。测试改回后通过，保留首轮失败记录。
 
 ## 8. 评审决定与后续责任
 
-已确定：两类需求都做；融入 Scry；这一轮不实现 App。
+已确定：两类需求都做；融入 Scry；用户已批准实现完整 A–D，并要求先拆分超限文件。
 
-建议默认批准范围：本方案 A–D，保留现有历史正文策略、同仓库 Git 写门禁与 trust 合同。待用户评审设计稿后，由实现 Agent 执行并补实际验收记录。
+实现 Agent 负责保留现有历史正文策略、同仓库 Git 写门禁与 trust 合同，补实际验收记录，验证后提交并本机安装，不推送。
 
-若用户要求“像 T3 一样重启后还能看完整历史 patch”，需要用户先批准历史源码保存策略；另出保留周期、删除与配额设计。本方案没有把这一能力假装成已覆盖。
+既有有界历史 patch 可在重启后读取；不得误称为完整、永久的 checkpoint。若要扩大历史源码保留范围，需另行批准保留周期、删除与配额设计。

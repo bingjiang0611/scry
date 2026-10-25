@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client'
+import { unavailableWorkspaceSelection } from './workspace-selection-unavailable'
 import { App, sessionComposerDraftKey } from '../../src/renderer/App'
 import type { ProviderContext } from '../../src/shared/provider'
 import type { WorkspaceFileOpenTarget, WorkspacePathRequest } from '../../src/shared/workspace'
@@ -44,6 +45,7 @@ const projects = [
 ]
 const noopSubscribe = () => () => {}
 Object.defineProperty(window, 'scry', { value: {
+  workspaceSelection: unavailableWorkspaceSelection,
   activeRun: async () => null, activeRuns: async () => [],
   onTrace: noopSubscribe, onTurnDone: noopSubscribe, onError: noopSubscribe,
   onSession: (listener: (event: { runId: string; sessionId: string; previousSessionId: string }) => void) => {

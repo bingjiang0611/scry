@@ -30,7 +30,7 @@
 | `src/main/git.ts` | 授权 canonical cwd，按 cwd 合并正在执行的工作区统计读取，不缓存已完成结果 | 保留权限检查和并发合并；统一入口不应多发一次相同读取。 |
 | `src/main/session-diff.ts` | `SessionDiffBaselineRegistry`、运行中预览、终态封口；恢复会话基线可标 resumed | 复用会话净 diff；新 cwd 不能携带旧基线。 |
 | `src/renderer/components/PinnedSummary.tsx`、`hooks/useIntegrations.ts` | 工作区摘要、时间、刷新状态和 cwd 防串结果 | 摘要变成右侧 Diff 入口，仍共用一次采集。 |
-| `src/renderer/components/TurnDiffReviewPanel.tsx`、`turn-diff.ts` | 单轮/会话展示、partial、预览、历史只有统计无正文的诚实状态 | 扩展为统一查看入口，不把历史统计伪装为可展开完整 patch。 |
+| `src/renderer/components/TurnDiffReviewPanel.tsx`、`turn-diff.ts` | 单轮/会话展示、partial、预览；归档已保存有界 patch，缺失时才仅统计 | 扩展为统一查看入口，保留既有正文，不拿当前文件补历史。 |
 | `src/main/source-control/{git,service,ipc,store}.ts` | root/gitDir/commonDir 身份，revision、同仓库串行写入、operation ID、unknown 持久化；已有 stage/commit/fetch/push | 在现有 service/操作记录上加 switch/create worktree，不建立第二套 Git mutation manager。 |
 | `src/shared/source-control.ts` | typed IPC 请求、操作状态、仓库快照 | 增加有界 ref/worktree 查询和创建意图。当前没有切分支/worktree action，不能只加 UI 即宣称完成。 |
 | `src/renderer/composer-drafts.ts`、`App.tsx`、`components/chat-view/Composer.tsx` | 草稿身份、输入、附件迁移、会话与 cwd 流程 | 把 workspace intent 放入同一草稿生命周期，不能使用全局“最近分支”覆盖其他草稿。 |

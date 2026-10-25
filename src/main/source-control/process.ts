@@ -34,6 +34,8 @@ export class ScProcess {
       timeout?: number
       maxBytes?: number
       input?: string
+      /** Host-owned temporary index for checkout attribute validation; never renderer input. */
+      gitIndexFile?: string
     } = {}
   ): Promise<string> {
     if (this.closed) throw new Error('源代码管理已关闭')
@@ -59,12 +61,14 @@ export class ScProcess {
     Object.assign(env, {
       GIT_TERMINAL_PROMPT: '0',
       GIT_OPTIONAL_LOCKS: '0',
+      GIT_NO_LAZY_FETCH: '1',
       GIT_PAGER: 'cat',
       PAGER: 'cat',
       LC_ALL: 'C',
       GH_PROMPT_DISABLED: '1',
       NO_COLOR: '1'
     })
+    if (command === 'git' && options.gitIndexFile) env.GIT_INDEX_FILE = options.gitIndexFile
     // Preserve an explicit opt-out of machine configuration, but no injected config paths/values.
     if (inherited.GIT_CONFIG_NOSYSTEM === '1') env.GIT_CONFIG_NOSYSTEM = '1'
     const executable = resolveCommandOnPath(command, env.PATH ?? '')

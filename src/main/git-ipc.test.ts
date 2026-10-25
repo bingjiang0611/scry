@@ -4,10 +4,12 @@ import { join } from 'node:path'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readWorkspaceNumstat, registerGitDiffIpc } from './git'
+import { readWorkspaceDiffSnapshot } from '../core/turn-recorder/git-workspace-snapshot'
 import { registerTrustedIpcHandler } from './ipc-trust'
 import { knownProjectDirectory } from './workspace-authorization'
 
 vi.mock('../core/turn-recorder/git.js', () => ({ readWorkspaceNumstat: vi.fn() }))
+vi.mock('../core/turn-recorder/git-workspace-snapshot.js', () => ({ readWorkspaceDiffSnapshot: vi.fn() }))
 
 const roots: string[] = []
 afterEach(async () => {
@@ -44,7 +46,25 @@ describe('registered workspace Git diff boundary', () => {
     expect(capture).toHaveBeenCalledTimes(3)
   })
 
-  it('checks sender, payload and canonical project authority before Git capture', async () => {
+  it('does not coalesce different comparison scopes for the same authorized cwd', async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'scry-git-scope-flight-')))
+    roots.push(root)
+    const authorize = vi.fn(() => root)
+    let handler!: (event: IpcMainInvokeEvent, cwd: unknown, scope?: unknown) => unknown
+    registerGitDiffIpc((channel, listener) => { if (channel === 'agent:gitDiffSnapshot') handler = listener }, authorize)
+    const pending: Array<() => void> = []
+    const capture = vi.mocked(readWorkspaceDiffSnapshot)
+    capture.mockImplementation(() => new Promise(resolve => pending.push(() => resolve({ status: 'unavailable', reason: 'no_head', files: [] }))))
+    const event = {} as IpcMainInvokeEvent
+    const requests = [handler(event, root, 'branch'), handler(event, root, 'workspace'), handler(event, root, 'branch')]
+    await vi.waitFor(() => expect(capture).toHaveBeenCalledTimes(2))
+    expect(capture.mock.calls.map(call => call[3]).sort()).toEqual(['branch', 'workspace'])
+    expect(authorize).toHaveBeenCalledTimes(3)
+    pending.forEach(finish => finish())
+    await Promise.all(requests)
+  })
+
+  it.each(['agent:gitDiff', 'agent:gitDiffSnapshot'])('checks sender, payload and canonical project authority before %s capture', async channel => {
     const root = await mkdtemp(join(tmpdir(), 'scry-git-ipc-'))
     roots.push(root)
     const approved = join(root, 'approved')
@@ -57,15 +77,15 @@ describe('registered workspace Git diff boundary', () => {
     const frame = { url: 'file:///app/renderer/index.html' }
     const contents = { mainFrame: frame }
     const win = { webContents: contents, isDestroyed: () => false } as unknown as BrowserWindow
-    let handler!: (event: IpcMainInvokeEvent, cwd: unknown) => unknown
-    registerGitDiffIpc((channel, listener) => {
-      expect(channel).toBe('agent:gitDiff')
+    let handler!: (event: IpcMainInvokeEvent, cwd: unknown, scope?: unknown) => unknown
+    registerGitDiffIpc((registeredChannel, listener) => {
+      if (registeredChannel !== channel) return
       registerTrustedIpcHandler({ handle: (_channel, registered) => { handler = registered } }, channel, () => win, frame.url, listener)
     }, (cwd) => knownProjectDirectory(cwd, [approved]))
     const event = { sender: contents, senderFrame: frame } as unknown as IpcMainInvokeEvent
-    const invoke = async (cwd: unknown, sender = event): Promise<unknown> => handler(sender, cwd)
-    const capture = vi.mocked(readWorkspaceNumstat)
-    capture.mockResolvedValue({ status: 'captured', files: [] })
+    const invoke = async (cwd: unknown, sender = event, scope?: unknown): Promise<unknown> => handler(sender, cwd, scope)
+    const capture = channel === 'agent:gitDiff' ? vi.mocked(readWorkspaceNumstat) : vi.mocked(readWorkspaceDiffSnapshot)
+    capture.mockResolvedValue({ status: 'unavailable', reason: 'no_head', files: [] })
 
     for (const sender of [
       { ...event, sender: {} },
@@ -78,8 +98,16 @@ describe('registered workspace Git diff boundary', () => {
     }
     expect(capture).not.toHaveBeenCalled()
 
-    await expect(invoke(approvedAlias)).resolves.toEqual({ status: 'captured', files: [] })
-    expect(capture).toHaveBeenCalledExactlyOnceWith(canonical)
+    if (channel === 'agent:gitDiffSnapshot') {
+      for (const scope of ['session', 'HEAD', {}, null]) await expect(invoke(approved, event, scope)).rejects.toThrow()
+      expect(capture).not.toHaveBeenCalled()
+      await invoke(approvedAlias, event, 'branch')
+      expect(capture).toHaveBeenCalledExactlyOnceWith(canonical, [], undefined, 'branch')
+      capture.mockClear()
+    }
+
+    await expect(invoke(approvedAlias)).resolves.toEqual({ status: 'unavailable', reason: 'no_head', files: [] })
+    expect(capture).toHaveBeenCalledExactlyOnceWith(...(channel === 'agent:gitDiff' ? [canonical] : [canonical, [], undefined, 'workspace']))
 
     capture.mockClear()
     frame.url = 'https://untrusted.invalid/'

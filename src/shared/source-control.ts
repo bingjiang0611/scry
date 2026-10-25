@@ -14,7 +14,7 @@ export interface ScRemote {
   fetchUrls: string[]
 }
 
-export type ScGitAction = 'stage' | 'unstage' | 'commit' | 'fetch' | 'push'
+export type ScGitAction = 'stage' | 'unstage' | 'commit' | 'fetch' | 'push' | 'prepareWorkspace'
 
 export interface ScRepository {
   id: string
@@ -105,7 +105,7 @@ export type ScMutation =
 export interface ScOperation {
   id: string
   repositoryId: string
-  action: ScMutation['action']
+  action: ScMutation['action'] | 'prepareWorkspace'
   status: 'running' | 'succeeded' | 'failed' | 'unknown'
   startedAt: number
   acknowledged?: boolean

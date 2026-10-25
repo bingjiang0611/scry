@@ -1,4 +1,5 @@
 import { isSupportedImageMimeType, type AgentInputAttachment } from '@shared/runtime'
+import { readWorkspaceDraft, type WorkspaceDraftSelection } from './workspace-drafts'
 
 function pastedImageName(file: File, index: number): string {
   if (file.name) return file.name
@@ -51,11 +52,13 @@ export function attachmentsAfterSuccessfulSubmit(current: ComposerDraftAttachmen
 }
 
 export interface ComposerDraft {
+  workspace?: WorkspaceDraftSelection
   input: string
   attachments: ComposerDraftAttachment[]
 }
 
 interface StoredDraft {
+  workspace?: WorkspaceDraftSelection
   input: string
   attachments: AgentInputAttachment[]
 }
@@ -160,8 +163,9 @@ export function readComposerDrafts(storage: Pick<Storage, 'getItem'>): ReadonlyM
       const value = row[1] as Partial<StoredDraft>
       if (typeof value.input !== 'string' || !Array.isArray(value.attachments)) continue
       const attachments = value.attachments.filter(validAttachment).map(draftAttachment)
-      if (!value.input && attachments.length === 0) continue
-      drafts.set(row[0], { input: value.input, attachments })
+      const workspace = readWorkspaceDraft(value.workspace)
+      if (!value.input && attachments.length === 0 && !workspace) continue
+      drafts.set(row[0], { input: value.input, attachments, ...(workspace ? { workspace } : {}) })
     }
     return drafts
   } catch {
@@ -174,8 +178,9 @@ export function writeComposerDrafts(
   drafts: ReadonlyMap<string, ComposerDraft>
 ): boolean {
   try {
-    const entries = [...drafts.entries()].filter(([, draft]) => draft.input.length > 0 || draft.attachments.length > 0)
+    const entries = [...drafts.entries()].filter(([, draft]) => draft.input.length > 0 || draft.attachments.length > 0 || Boolean(draft.workspace))
     const rows: Array<[string, StoredDraft]> = entries.map(([key, draft]) => [key, {
+      ...(draft.workspace ? { workspace: draft.workspace } : {}),
       input: draft.input,
       attachments: draft.attachments.map(({ id: _id, previewUrl: _previewUrl, ...attachment }) => attachment)
     }])

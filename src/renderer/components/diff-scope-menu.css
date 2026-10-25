@@ -1,0 +1,70 @@
+.diff-scope-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--panel3);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.diff-scope-trigger span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diff-scope-trigger .ico { width: 14px; height: 14px; flex-shrink: 0; color: var(--muted); }
+.diff-scope-menu,
+.diff-turn-menu {
+  position: fixed;
+  z-index: 1200;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  overflow: auto;
+  border: 1px solid var(--border2);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--fg);
+  box-shadow: 0 12px 36px #0003;
+  font-size: 13px;
+}
+.diff-turn-menu { z-index: 1201; }
+.diff-scope-menu > button,
+.diff-turn-menu > button,
+.diff-turn-choice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.diff-scope-menu > button:hover,
+.diff-scope-menu > button[aria-checked="true"],
+.diff-scope-menu > button[aria-expanded="true"],
+.diff-turn-menu > button:hover,
+.diff-turn-choice:hover,
+.diff-turn-choice[aria-checked="true"] { background: var(--panel3); }
+.diff-scope-menu .ico,
+.diff-turn-menu .ico { width: 14px; height: 14px; color: var(--muted); }
+.diff-turn-menu > .diff-turn-back { justify-content: flex-start; gap: 6px; }
+.diff-turn-back .ico { transform: rotate(180deg); }
+.diff-turn-list { overflow: auto; max-height: 288px; min-height: 0; }
+.diff-turn-choice { display: grid; align-content: center; justify-content: stretch; gap: 3px; }
+.diff-turn-choice small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: 11px; }
+.diff-turn-menu > .diff-load-turns { margin-top: 4px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+.diff-turn-menu > .diff-load-turns:disabled { cursor: default; opacity: .6; }
+.diff-scope-trigger:focus-visible,
+.diff-menu-layer button:focus-visible,
+.diff-turn-list:focus-visible .keyboard-active { outline: 2px solid var(--selected); outline-offset: -2px; }

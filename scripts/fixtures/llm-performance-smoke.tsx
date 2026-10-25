@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client'
+import { unavailableWorkspaceSelection } from './workspace-selection-unavailable'
 import { App } from '../../src/renderer/App'
 import { LlmPerformanceObserver } from '../../src/main/llm-performance'
 import { RunRegistry } from '../../src/main/run-registry'
@@ -61,6 +62,7 @@ const subscribe = <T,>(listeners: Set<T>) => (callback: T) => { listeners.add(ca
 const noopSubscribe = () => () => {}
 const agents = [{ id: 'claude', name: 'Claude Code', path: '/fixture/claude', bin: 'claude', health: { state: 'ready', transport: 'sdk' } }]
 Object.defineProperty(window, 'scry', { value: {
+  workspaceSelection: unavailableWorkspaceSelection,
   activeRun: async () => null, activeRuns: async () => [],
   onDataUpdated: subscribe(dataListeners),
   onTrace: subscribe(traceListeners), onTurnDone: subscribe(doneListeners), onError: noopSubscribe,

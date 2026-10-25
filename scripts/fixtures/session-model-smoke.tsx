@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client'
+import { unavailableWorkspaceSelection } from './workspace-selection-unavailable'
 import { App } from '../../src/renderer/App'
 import type { ActiveRun } from '../../src/shared/trace'
 import type { AgentStartRequest } from '../../src/shared/runtime'
@@ -44,6 +45,7 @@ const agents = [
   { id: 'pi:second', name: 'Pi second', path: '/fixture/pi', bin: 'pi' }
 ]
 Object.defineProperty(window, 'scry', { value: {
+  workspaceSelection: unavailableWorkspaceSelection,
   activeRun: async () => focusedRun ? runs.get(focusedRun) : null,
   activeRuns: async () => [...runs.values()],
   onTrace: (cb: (event: unknown) => void) => subscribe('trace', cb),

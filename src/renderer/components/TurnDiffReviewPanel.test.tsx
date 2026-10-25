@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { TurnDiffBaselineOrigin, TurnDiffSnapshot } from '@shared/trace'
 import type { TurnDiffReview } from '../turn-diff'
-import { parseUnifiedDiff, TurnDiffReviewPanel } from './TurnDiffReviewPanel'
+import { TurnDiffReviewPanel } from './TurnDiffReviewPanel'
+import { parseUnifiedDiff } from '../diff-lines'
 
 function snapshot(baseline?: TurnDiffBaselineOrigin): TurnDiffSnapshot {
   return {
@@ -105,7 +106,9 @@ describe('TurnDiffReviewPanel 会话基线文案', () => {
 
     const html = markup({ turnDiff })
     expect(html).toContain('<span>Files</span><span>17</span>')
-    expect((html.match(/title="\/repo\/file-/g) ?? []).length).toBe(17)
+    // Stacked code now has its own file headers. Count the navigation entries, not both regions.
+    const navigation = html.match(/<nav class="diff-file-nav"[\s\S]*?<\/nav>/)?.[0] ?? ''
+    expect((navigation.match(/title="\/repo\/file-/g) ?? []).length).toBe(17)
     expect(html).toContain('/repo/file-17.ts')
   })
 })

@@ -13,13 +13,19 @@ import {
 } from '@shared/trace'
 import { basename, type Turn } from './format'
 
+export type DiffScope = 'branch' | 'workspace' | 'session' | 'turn'
+
 export interface TurnDiffReview {
   runId: string
   userText: string
   turnDiff: TurnDiffSnapshot
   initialPath?: string
-  /** 'turn' = 单轮 diff；'session' = 会话净 diff（第一轮前基线 → 当前）。缺省按单轮处理。 */
-  scope?: 'turn' | 'session'
+  /** Defaults to the per-turn snapshot for existing callers. */
+  scope?: DiffScope
+  head?: string
+  comparison?: import('@shared/workspace-diff').BranchDiffComparison
+  revision?: string
+  commit?: import('@shared/diff-history').DiffCommit
   /** true = 运行中的临时 Git 快照，本轮还没结束；UI 必须标出来。 */
   preview?: boolean
 }
@@ -124,11 +130,11 @@ export function sessionDiffOf(items: readonly TraceEvent[]): TurnDiffSnapshot | 
  * 哪怕是空/超时/失败，它对那个时间点就是权威的，绝不越过它去复活更早的过期净 diff。
  * 停下的那条快照是否可审阅，交给调用方按 reviewable 判定。
  */
-function sessionDiffViewFromTurns(turns: readonly Turn[]): { turn: Turn; view: TurnDiffView } | null {
+export function sessionDiffViewFromTurns(turns: readonly Turn[]): { turn: Turn; view: TurnDiffView } | null {
   for (let index = turns.length - 1; index >= 0; index--) {
     const turn = turns[index]
     const view = sessionDiffViewOf(turn.items)
-    if (view) return reviewable(view.turnDiff) ? { turn, view } : null
+    if (view) return { turn, view }
   }
   return null
 }
@@ -139,7 +145,7 @@ function sessionDiffViewFromTurns(turns: readonly Turn[]): { turn: Turn; view: T
  */
 export function sessionNetDiffReview(turns: readonly Turn[], path?: string): TurnDiffReview | null {
   const found = sessionDiffViewFromTurns(turns)
-  if (!found) return null
+  if (!found || !reviewable(found.view.turnDiff)) return null
   if (path && !found.view.turnDiff.files.some((file) => file.path === path)) return null
   return {
     runId: found.turn.runId,
@@ -167,7 +173,7 @@ export interface SessionNetDiffSummary {
  */
 export function sessionNetDiffSummary(turns: readonly Turn[]): SessionNetDiffSummary | null {
   const found = sessionDiffViewFromTurns(turns)
-  if (!found) return null
+  if (!found || !reviewable(found.view.turnDiff)) return null
   const { turnDiff } = found.view
   return {
     files: turnDiff.files,

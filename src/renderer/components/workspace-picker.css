@@ -1,0 +1,103 @@
+.workspace-composer-context {
+  margin: -1px 12px 0;
+  padding: 4px 8px;
+  min-width: 0;
+  border: 1px solid var(--border2);
+  border-top: 0;
+  border-radius: 0 0 12px 12px;
+  color: var(--muted);
+  background: var(--panel);
+  font-size: 12px;
+}
+.workspace-context-strip { display: flex; justify-content: space-between; gap: 12px; }
+.workspace-context-strip button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 28px;
+  max-width: 55%;
+  padding: 3px 5px;
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+.workspace-context-strip button:disabled { cursor: default; }
+.workspace-context-strip button:not(:disabled):hover,
+.workspace-context-strip button[aria-expanded="true"] { background: var(--panel3); color: var(--fg); }
+.workspace-context-strip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-context-strip .ico { flex-shrink: 0; width: 14px; height: 14px; }
+.workspace-composer-context p { margin: 4px 5px; line-height: 1.5; }
+.workspace-context-recovery { display: flex; gap: 8px; margin: 4px; }
+.workspace-context-recovery button { color: var(--fg); background: transparent; border: 1px solid var(--border); border-radius: 5px; padding: 4px 7px; font: inherit; }
+.workspace-picker {
+  position: fixed;
+  z-index: 1100;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--border2);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--fg);
+  box-shadow: 0 12px 36px #0003;
+  font-size: 13px;
+}
+.workspace-picker-label { padding: 5px 8px 8px; color: var(--muted); font-size: 12px; }
+.workspace-mode-choice,
+.workspace-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.workspace-mode-choice { min-height: 36px; flex-shrink: 0; }
+.workspace-mode-choice .ico,
+.workspace-choice .ico { width: 16px; height: 16px; flex-shrink: 0; }
+.workspace-choice.selected,
+.workspace-mode-choice.selected,
+.workspace-choice:not(:disabled):hover,
+.workspace-mode-choice:not(:disabled):hover { background: var(--panel3); }
+.workspace-choice:disabled,
+.workspace-mode-choice:disabled { color: var(--muted); cursor: not-allowed; opacity: .6; }
+.workspace-choice-name { display: grid; min-width: 0; gap: 2px; }
+.workspace-choice strong { font-weight: 400; }
+.workspace-choice strong,
+.workspace-choice small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-choice small { color: var(--muted); font-size: 12px; }
+.workspace-choice-note { color: var(--muted); font-size: 11px; margin-left: auto; flex-shrink: 0; }
+.workspace-choice-list { overflow-y: auto; min-height: 0; flex-shrink: 1; }
+.workspace-ref-search { display: flex; align-items: center; gap: 8px; margin: 0 6px 6px; border-bottom: 1px solid var(--border); }
+.workspace-ref-search:focus-within { border-bottom-color: var(--selected); }
+.workspace-ref-search .ico { width: 16px; height: 16px; color: var(--muted); flex-shrink: 0; }
+.workspace-picker .workspace-ref-search input { width: 100%; min-width: 0; height: 38px; padding: 5px 0; border: 0; outline: none; background: transparent; color: var(--fg); font: inherit; }
+.workspace-picker .workspace-ref-search input:focus-visible { outline: none; box-shadow: none; }
+.workspace-ref-search input::placeholder { color: var(--muted); }
+.workspace-picker-note { margin: 8px; color: var(--muted); line-height: 1.5; }
+.workspace-picker-error { margin: 8px; color: var(--danger); line-height: 1.5; }
+.workspace-picker-error button { display: block; margin-top: 6px; }
+.workspace-picker-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 6px 8px 2px; border-top: 1px solid var(--border); }
+.workspace-picker-footer button,
+.workspace-picker-error button { padding: 4px; border: 0; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+.workspace-choice-list:focus-visible .workspace-choice.keyboard-active { outline: 2px solid var(--selected); outline-offset: -2px; }
+.workspace-picker button:focus-visible,
+.workspace-context-strip button:focus-visible,
+.workspace-context-recovery button:focus-visible { outline: 2px solid var(--selected); outline-offset: -2px; }
+@media (max-width: 700px) {
+  .workspace-composer-context { margin-inline: 6px; }
+  .workspace-context-strip { gap: 4px; }
+}

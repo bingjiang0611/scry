@@ -3,16 +3,35 @@ import { realpath } from 'node:fs/promises'
 import type { WorkspaceDiffResult } from '../shared/trace'
 import { workspaceDiffCopy } from '../shared/constants/copy'
 import { readWorkspaceNumstat } from '../core/turn-recorder/git.js'
+import { readWorkspaceDiffSnapshot } from '../core/turn-recorder/git-workspace-snapshot.js'
+import type { WorkspaceDiffSnapshotResult } from '../shared/workspace-diff'
+import { registerGitDiffHistoryIpc } from './git-diff-history'
 
 // Electron 与 CLI 共用同一套 Git turn snapshot 实现。
 export * from '../core/turn-recorder/git.js'
 
 export function registerGitDiffIpc(
-  register: (channel: string, listener: (event: IpcMainInvokeEvent, cwd: unknown) => unknown) => void,
+  register: (channel: string, listener: (event: IpcMainInvokeEvent, cwd: unknown, scope?: unknown) => unknown) => void,
   authorizeDirectory: (cwd: string) => string
 ): void {
+  registerGitDiffHistoryIpc(register, authorizeDirectory)
   // Only share ongoing reads. Completed results cannot be validated cheaply against
   // arbitrary worktree edits, so there is deliberately no settled-result cache.
+  const snapshots = new Map<string, Promise<WorkspaceDiffSnapshotResult>>()
+  register('agent:gitDiffSnapshot', async (_event, cwd, scope = 'workspace') => {
+    if (scope !== 'workspace' && scope !== 'branch') throw new Error(workspaceDiffCopy.invalidScope)
+    if (typeof cwd !== 'string') throw new Error(workspaceDiffCopy.invalidDirectory)
+    const canonicalCwd = await realpath(authorizeDirectory(cwd))
+    const key = JSON.stringify([canonicalCwd, scope])
+    const existing = snapshots.get(key)
+    if (existing) return existing
+    if (snapshots.size >= 4) {
+      return { status: 'failed', reason: 'request_failed', files: [] } satisfies WorkspaceDiffSnapshotResult
+    }
+    const request = readWorkspaceDiffSnapshot(canonicalCwd, [], undefined, scope).finally(() => snapshots.delete(key))
+    snapshots.set(key, request)
+    return request
+  })
   const inFlight = new Map<string, Promise<WorkspaceDiffResult>>()
   register('agent:gitDiff', async (_event, cwd) => {
     if (typeof cwd !== 'string') throw new Error(workspaceDiffCopy.invalidDirectory)

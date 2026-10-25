@@ -44,7 +44,7 @@ export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' | 'pi'
       const outgoingPrompt = history.text(request.prompt)
       const sessionId = request.resume ?? `smoke-session-${request.runId}`
       const inputsFile = process.env.SCRY_ELECTRON_SMOKE_INPUTS
-      if (inputsFile) appendFileSync(inputsFile, `${JSON.stringify({ providerId, agentProfileId: request.agentProfileId, runId: request.runId, prompt: request.prompt,
+      if (inputsFile) appendFileSync(inputsFile, `${JSON.stringify({ providerId, agentProfileId: request.agentProfileId, cwd: request.cwd, runId: request.runId, prompt: request.prompt,
         resume: request.resume ?? null, sessionId, historicalContext: request.historicalContext ?? null, outgoingPrompt,
         ...(request.attachments.length ? { attachments: request.attachments.map(attachment => ({ kind: attachment.kind, name: attachment.name,
           path: attachment.path, mimeType: attachment.mimeType, contentHash: createHash('sha256').update(Buffer.from(attachment.dataBase64, 'base64')).digest('hex') })) } : {}) })}\n`)

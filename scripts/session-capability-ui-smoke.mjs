@@ -28,6 +28,7 @@ const cacheOnly = process.argv.includes('--cache-only')
 const sidebarActivityOnly = process.argv.includes('--sidebar-activity-only')
 const selectionOnly = process.argv.includes('--selection-only')
 const piCommandsOnly = process.argv.includes('--pi-commands-only')
+const piPermissionOnly = process.argv.includes('--pi-permission-only')
 const modelsOnly = process.argv.includes('--models-only')
 const terminalsOnly = process.argv.includes('--terminals-only')
 const overviewOnly = process.argv.includes('--overview-only')
@@ -39,7 +40,7 @@ const performanceOnly = process.argv.includes('--performance-only')
 const nativeVisibility = process.argv.includes('--native-visibility')
 if (nativeVisibility && !performanceOnly) throw new Error('--native-visibility requires --performance-only and user approval to display a window')
 const metaPromptsOnly = process.argv.includes('--meta-prompts-only')
-const fixtures = workspaceDiffOnly ? ['workspace-diff'] : sidebarActivityOnly ? ['sidebar-activity'] : cacheOnly ? ['session-cache'] : metaPromptsOnly ? ['meta-prompts'] : performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability', 'workspace-diff']
+const fixtures = piPermissionOnly ? ['pi-permission'] : workspaceDiffOnly ? ['workspace-diff'] : sidebarActivityOnly ? ['sidebar-activity'] : cacheOnly ? ['session-cache'] : metaPromptsOnly ? ['meta-prompts'] : performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability', 'workspace-diff']
   : questionResultOnly ? ['session-capability'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance', 'llm-performance', 'meta-prompts', 'session-cache', 'sidebar-activity', 'workspace-diff']
 
 const temp = await mkdtemp(join(tmpdir(), 'scry-capability-ui-'))
@@ -188,7 +189,7 @@ try {
           finish(result)
           return
         }
-        if (!${selectionOnly || modelsOnly || terminalsOnly}) {
+        if (!${selectionOnly || modelsOnly || terminalsOnly || piPermissionOnly}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-capability.html'))})
           if (!${piCommandsOnly || overviewOnly}) Object.assign(result, await win.webContents.executeJavaScript(${JSON.stringify(`(${exerciseSessionCapabilityCore.toString()})()`)}), await win.webContents.executeJavaScript(${JSON.stringify(`(${exerciseSessionCapabilitySummary.toString()})()`)}), await win.webContents.executeJavaScript(${JSON.stringify(`(${exerciseSessionCapabilityQuestionResult.toString()})()`)}))
           if (!${overviewOnly}) piCommands = await (${exercisePiCommands.toString()})(win.webContents)
@@ -200,7 +201,7 @@ try {
         }
         const selection = []
         win.setSize(1200, 900)
-        for (const scenario of ${JSON.stringify(overviewOnly || piCommandsOnly || modelsOnly || terminalsOnly ? [] : ['repeat-pending', 'late-startup-loading', 'provider-switch', 'same-provider', 'late-startup', 'rapid-switch', 'focused-event', 'new-draft', 'stale-live', 'stale-run'])}) {
+        for (const scenario of ${JSON.stringify(overviewOnly || piCommandsOnly || modelsOnly || terminalsOnly || piPermissionOnly ? [] : ['repeat-pending', 'late-startup-loading', 'provider-switch', 'same-provider', 'late-startup', 'rapid-switch', 'focused-event', 'new-draft', 'stale-live', 'stale-run'])}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-selection.html'))}, { query: { scenario } })
           selection.push(await (${exerciseSessionSelection.toString()})(win.webContents, scenario))
         }
@@ -210,12 +211,12 @@ try {
           piPermissions.push(await (${exercisePiPermission.toString()})(win.webContents, scenario))
         }
         let sessionModels = null
-        if (${!overviewOnly && !selectionOnly && !piCommandsOnly && !terminalsOnly}) {
+        if (${!overviewOnly && !selectionOnly && !piCommandsOnly && !terminalsOnly && !piPermissionOnly}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-model.html'))})
           sessionModels = await (${exerciseSessionModels.toString()})(win.webContents, ${JSON.stringify(process.env.SCRY_CAPABILITIES_UI_SCREENSHOT ?? '')})
         }
         const sessionTerminals = []
-        for (const scenario of ${JSON.stringify(overviewOnly || selectionOnly || piCommandsOnly || modelsOnly ? [] : ['restored', 'pending'])}) {
+        for (const scenario of ${JSON.stringify(overviewOnly || selectionOnly || piCommandsOnly || modelsOnly || piPermissionOnly ? [] : ['restored', 'pending'])}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-terminal.html'))}, { query: { scenario } })
           sessionTerminals.push(await (${exerciseSessionTerminals.toString()})(win.webContents, scenario))
         }
