@@ -262,6 +262,7 @@ export interface NormalizedCodexCall {
 
 export const START_EVENTS = new Set(['UserPromptSubmit', 'chat.message', 'turn.started'])
 export const END_EVENTS = new Set(['Stop', 'session.idle', 'session.stop', 'turn/completed', 'turn.completed'])
+// These Provider Stop contracts expose the same-turn continuation flag; do not infer parity.
 export const STOP_HOOK_ACTIVE_PROVIDERS = new Set<ProviderId>(['claude', 'codex', 'qoder'])
 export const SESSION_END_EVENTS = new Set(['SessionEnd', 'session.end', 'session_end', 'session.exited', 'process.exit'])
 export const TERMINAL_CLOCK_SKEW_MS = 60_000

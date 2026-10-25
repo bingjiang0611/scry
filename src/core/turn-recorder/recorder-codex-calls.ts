@@ -19,6 +19,58 @@ export function finalizeCodexTurns(
 }
 
 
+export function appendCodexPatchResult(
+  current: ParsedTranscriptTurn,
+  payload: Record<string, unknown>,
+  runId: string,
+  at: string,
+  logicalIdsByOuterCall: Map<string, string[]>,
+  toolById: Map<string, string>
+): void {
+  const outerId = stringAt(payload, 'call_id', 'callId')
+  if (outerId) {
+    const ids = logicalIdsByOuterCall.get(outerId) ?? [outerId]
+    const output = outputText(payload.stdout ?? payload.stderr)
+    for (const toolUseId of ids) {
+      current.events.push({
+        id: `codex-patch-result-${stableHash([toolUseId, at]).slice(0, 16)}`,
+        ts: at,
+        runId,
+        kind: 'tool',
+        stage: 'tool_result',
+        tool: toolById.get(toolUseId) ?? 'Edit',
+        toolUseId,
+        text: output,
+        output,
+        isError: payload.success === false
+      })
+    }
+  }
+  const rawChanges = payload.changes
+  const changes: Array<[string, Record<string, unknown>]> = Array.isArray(rawChanges)
+    ? rawChanges.flatMap((path) => typeof path === 'string' ? [[path, {}] as [string, Record<string, unknown>]] : [])
+    : rawChanges && typeof rawChanges === 'object'
+      ? Object.entries(rawChanges as Record<string, unknown>).map(([path, rawChange]) => [
+          path,
+          rawChange && typeof rawChange === 'object' && !Array.isArray(rawChange)
+            ? rawChange as Record<string, unknown>
+            : {}
+        ])
+      : []
+  for (const [path] of changes) {
+    current.events.push({
+      id: `codex-file-${stableHash([path, at]).slice(0, 16)}`,
+      ts: at,
+      runId,
+      kind: 'harness',
+      stage: 'file_op',
+      filePath: path,
+      fileOp: 'edit'
+    })
+  }
+  current.observable.files = current.observable.files || changes.length > 0
+}
+
 export function callInput(payload: Record<string, unknown>): Record<string, unknown> {
   const raw = payload.arguments ?? payload.input
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw as Record<string, unknown>

@@ -2,7 +2,7 @@ import { type TraceEvent, classifyTool, fileOpOf, parseMcp } from '../../shared/
 import { type ParsedTranscriptTurn, stringAt, nestedRecord, timestampOf, epochSecondsAt, terminalStatus, inferredSkillEvents, summarize } from './recorder-contracts.js'
 import { classifyDanger } from '../../main/danger.js'
 import { stableHash } from './store.js'
-import { finalizeCodexTurns, callInput, codexHookEvent, explicitSkillEvent, indexedToolOutputs, normalizedCodexCalls, outputFailed, outputText, rejectedBeforeExecution, runningCellId, skillInjection, textContent } from './recorder-codex-calls.js'
+import { appendCodexPatchResult, finalizeCodexTurns, callInput, codexHookEvent, explicitSkillEvent, indexedToolOutputs, normalizedCodexCalls, outputFailed, outputText, rejectedBeforeExecution, runningCellId, skillInjection, textContent } from './recorder-codex-calls.js'
 import { CodexUsageDeltaFilter } from '../../shared/usage-dedupe.js'
 
 export function parseCodexRollout(content: string, runId: string): { recognized: boolean; turns: ParsedTranscriptTurn[] } {
@@ -30,7 +30,10 @@ export function parseCodexRollout(content: string, runId: string): { recognized:
   let usageObserved = false
   let usageFinished = false
   let lastUsageFilter = new CodexUsageDeltaFilter()
-        let turnModels = new Set<string>()
+  // Codex writes the model of every request into `turn_context` and the window plus the latest
+  // request's input size into `token_count`. Both are host-authored facts, so they bind the
+  // turn's usage to a model and its context occupancy without consulting any config default.
+  let turnModels = new Set<string>()
   let contextWindow: number | undefined
   let lastRequestInputTokens: number | undefined
   let lastAssistant: string | undefined
@@ -70,7 +73,9 @@ export function parseCodexRollout(content: string, runId: string): { recognized:
           reasoningTokens: Math.max(0, latestTurnCumulative.reasoningTokens - turnUsageBaseline.reasoningTokens)
         }
       : usage
-            const model = turnModels.size === 1 ? [...turnModels][0] : undefined
+    // One model per turn is the only case where usage and context can be attributed; several
+    // models stay unattributed instead of picking one.
+    const model = turnModels.size === 1 ? [...turnModels][0] : undefined
     const context = model && contextWindow && lastRequestInputTokens != null
     current.events.push({
       id: `codex-usage-${stableHash([current.providerTurnId, finalUsage]).slice(0, 16)}`,
@@ -222,7 +227,8 @@ export function parseCodexRollout(content: string, runId: string): { recognized:
       turnUsageBaseline = { ...cumulativeUsage }
       latestTurnCumulative = undefined
       usage = { tokensIn: 0, tokensOut: 0, cacheReadTokens: 0, cacheCreationTokens: 0, reasoningTokens: 0 }
-            lastUsageFilter = new CodexUsageDeltaFilter()
+      // 去重只在一轮之内成立：新一轮的第一帧即使和上一轮末帧相同，也是真实用量。
+      lastUsageFilter = new CodexUsageDeltaFilter()
       usageObserved = false
       usageFinished = false
       turnModels = new Set()
@@ -278,48 +284,7 @@ export function parseCodexRollout(content: string, runId: string): { recognized:
       continue
     }
     if (type === 'event_msg' && payload.type === 'patch_apply_end') {
-      const outerId = stringAt(payload, 'call_id', 'callId')
-      if (outerId) {
-        const ids = logicalIdsByOuterCall.get(outerId) ?? [outerId]
-        const output = outputText(payload.stdout ?? payload.stderr)
-        for (const toolUseId of ids) {
-          current.events.push({
-            id: `codex-patch-result-${stableHash([toolUseId, at]).slice(0, 16)}`,
-            ts: at,
-            runId,
-            kind: 'tool',
-            stage: 'tool_result',
-            tool: toolById.get(toolUseId) ?? 'Edit',
-            toolUseId,
-            text: output,
-            output,
-            isError: payload.success === false
-          })
-        }
-      }
-      const rawChanges = payload.changes
-      const changes: Array<[string, Record<string, unknown>]> = Array.isArray(rawChanges)
-        ? rawChanges.flatMap((path) => typeof path === 'string' ? [[path, {}] as [string, Record<string, unknown>]] : [])
-        : rawChanges && typeof rawChanges === 'object'
-          ? Object.entries(rawChanges as Record<string, unknown>).map(([path, rawChange]) => [
-              path,
-              rawChange && typeof rawChange === 'object' && !Array.isArray(rawChange)
-                ? rawChange as Record<string, unknown>
-                : {}
-            ])
-          : []
-      for (const [path] of changes) {
-        current.events.push({
-          id: `codex-file-${stableHash([path, at]).slice(0, 16)}`,
-          ts: at,
-          runId,
-          kind: 'harness',
-          stage: 'file_op',
-          filePath: path,
-          fileOp: 'edit'
-        })
-      }
-      current.observable.files = current.observable.files || changes.length > 0
+      appendCodexPatchResult(current, payload, runId, at, logicalIdsByOuterCall, toolById)
       continue
     }
     if (type === 'event_msg' && payload.type === 'token_count') {
@@ -343,7 +308,9 @@ export function parseCodexRollout(content: string, runId: string): { recognized:
         cumulativeUsage = { ...latestTurnCumulative }
         usageObserved = true
       }
-                  if (last && lastUsageFilter.admit(last)) {
+      // `total_token_usage` 缺失时才会用到这些增量求和。Codex 可能把同一帧
+      // `last_token_usage` 连续广播多次，相邻同值帧必须丢掉，否则求和会高估。
+      if (last && lastUsageFilter.admit(last)) {
         const add = (key: string): number => typeof last[key] === 'number' && Number.isFinite(last[key]) ? last[key] as number : 0
         usage.tokensIn += add('input_tokens')
         usage.tokensOut += add('output_tokens')

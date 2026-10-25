@@ -103,9 +103,9 @@ Agent、skill 与提示词不应主动调用这些命令。
 - `diff.discovery.requestedRoots`：本轮发现并请求采集的目录清单，数组长度是该清单的数量，不是磁盘上的全部仓库数，也不保证每个目录已解析出有效 Git root。仅在发现阶段有证据时出现。
 - `diff.discovery.maxDepth` 与 `depthLimitedDirectories`：本轮使用的深度上限、因该上限未继续下探的目录数。后者不是“漏掉的仓库数”。默认深度仍为 2，上限 5；排除目录及目录符号链接仍不下探。
 - `diff.value[]`：逐项查看 `status`（`captured` / `timeout` / `failed` / `unavailable`）及可用的 `reason`。`requestedRoot` 是已知请求目录；`repoRoot` 只在 Git 解析到它时提供。不同仓库即使同时结束也保留独立结果。
-- 深度截断会使本来可用的 diff 降为 `partial` 并写 `omissionReason`；不会把 `unavailable` 或 `disabled` 改成可用。恢复时无法提供可信 diff，可保留已知 `discovery` 清单，但不补造每仓库快照、耗时或成功状态。没有 `diff.value` 不等于发现了零个仓库。
+- 深度边界只作为 `discovery` 元数据保留，不单独改变 diff 的 status/quality 或增加 `omissionReason`。`available` 表示已纳入清单的快照可用，不证明磁盘上所有仓库都已采集。真实缺失证据仍按原规则降级并写原因；恢复时无法可信归因 diff，仍为 `unavailable`，不补造快照、耗时或成功状态。没有 `diff.value` 不等于发现了零个仓库。
 
-`doctor` 的 `repositories.depth` 只额外查看 depth+1 一层，最多探测 32 个边界目录、128 个目录项；达到上限或读取失败会说明探测不完整。它提示显式调大 `repositories.maxDepth` 或使用 `repositories.exclude`，不会自动扩大采集范围。
+`doctor` 的 `repositories.depth` 只额外查看 depth+1 一层，最多探测 32 个边界目录、128 个目录项。仅在实际发现 `.git` 时 warn、列出路径并提示调整 `repositories.maxDepth` / `repositories.exclude`。没有发现时 pass；即使探测不完整也不告警，但 detail 会明确说明上限或不可读，不能把 pass 当作已确认没有更深仓库。不会自动扩大采集范围。
 
 `doctor` 和 `support-bundle` 的 `userHookSkips` 单独汇总 `${XDG_STATE_HOME:-$HOME/.local/state}/scry/hook-skip.log` 中的 `bridge_not_found`。其 `value.workspaceAttribution` 固定为 `unknown`：日志没有工作区身份，不能加到当前工作区的 `hookSkips` 或失败计数中。`hook.userBridgeSkips` 对非空、截断或不可用的窗口给出 warning，但不改变当前工作区退出码。缺失日志是已观察的空窗口，不证明 Provider 加载过 hook；不可读或受检路径为符号链接则为 `unavailable`，没有伪造的零值。
 

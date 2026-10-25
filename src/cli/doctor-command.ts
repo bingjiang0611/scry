@@ -77,13 +77,13 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
     { id: 'recorder.enabled', status: 'pass', detail: 'workspace has a valid recorder config' },
     {
       id: 'repositories.depth',
-      status: discovery.depthLimitedDirectories > 0 ? 'warn' : 'pass',
+      status: discovery.nextDepth?.repositories.length ? 'warn' : 'pass',
       detail: enablement.config.repositories.mode === 'workspace-only'
         ? `${discovery.repositories.length} workspace-root repository; nested discovery not requested`
         : `${discovery.repositories.length} repositories discovered now; ${discovery.depthLimitedDirectories} directories not traversed at maxDepth=${discovery.maxDepth}; ` +
           `repositories observed one level deeper: ${discovery.nextDepth?.repositories.map(path => relative(enablement.workspaceRoot, path)).join(', ') || 'none observed'}` +
           (discovery.nextDepth?.incomplete ? '; next-level probe incomplete (bounded to 32 directories / 128 entries, or unreadable)' : ''),
-      ...(discovery.depthLimitedDirectories > 0 ? { remediation: 'review repositories.maxDepth or add intentional exclusions to repositories.exclude; this probe does not expand capture scope' } : {})
+      ...(discovery.nextDepth?.repositories.length ? { remediation: 'review repositories.maxDepth or add intentional exclusions to repositories.exclude; this probe does not expand capture scope' } : {})
     },
     {
       id: 'hook.skips', status: hookSkips.recentCount > 0 ? 'fail' : hookSkips.count > 0 ? 'warn' : 'pass',
