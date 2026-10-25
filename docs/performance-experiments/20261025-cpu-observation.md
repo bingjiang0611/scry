@@ -96,8 +96,14 @@ node .agents/skills/scry-performance-climb/scripts/timing-run.mjs trace-content-
 
 本地完整日志和日常记录快照留在 `/tmp/scry-cpu-analysis-gPsxOX/`，未把用户会话内容加入仓库。新计数脚本不参与日常 App 构建，不改变生产采集。
 
+## main 交付续记
+
+维护者随后明确授权“推送到 main 分支，然后安装”。从远端 main `205521e9` 建立独立工作区，移植本次提交为 `e68fcff3`（CPU 修复）与 `bc546a03`（实验）。本地 main 的 12 个未推送提交未夹带，现有并行工作区未修改。远端 main 当时仍为 0.2.221；新的 App 安装版本统一升为 0.2.224，CLI 保持 0.2.51。版本提升不代表包含本地未推送的功能。
+
+当前 main 候选验证：`npm test` 为 3,873 通过、4 既有跳过，shell 通过；`npm run test:renderer:ui` 全链通过（含 Credits、真实隔离 App 的 IPC/归属/三轮对话与重启）；`npm run check:cli-release` 为 627 通过，CLI package smoke 通过。typecheck/build、30 项 focused 回归通过。`performance:measure` 46 项的分类与上文相同，四个 worse 均为已核对的既有台账差异，未改基线；本次不声称 CPU 工作量下降。
+
 ## 下一步与责任
 
-1. 维护者确认集成目标：将 CPU 修复移植到 0.2.223/main 的干净集成工作区，再验证、打包安装；不直接覆盖有并行 WIP 的 main 或用 0.2.221 替换已安装版本。没有 push 授权。
+1. Agent 按已确认的远端 main 基线推送上述相关提交并运行 `npm run install:mac:dev`；安装结果仍待验证，不将已构建当作已安装。
 2. 维护者决定是否将全时帧监控改为明确标注的按需采样，或调整扫光效果；Agent 在该决定和低负载窗口之后继续单变量实验，不将当前高负载结果当作优化验收。
 3. 持久化优化由 Agent 在低负载、真实大小分布证据具备后再评估，不先碰 fsync、完整性或证据收敛边界。
