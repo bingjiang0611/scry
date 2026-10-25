@@ -341,7 +341,10 @@ export async function computeGitTurnDiff(
       new Set(options.patchExcludeBasenames ?? []),
       deadline,
       options.completePatches === true,
-      options.workspaceSnapshot ? WORKSPACE_PATCH_BYTES : undefined
+      options.workspaceSnapshot ? WORKSPACE_PATCH_BYTES : undefined,
+      // Review context comes from the same immutable tree pair, within the existing byte cap.
+      // Recorder history keeps its original three-line capture contract.
+      options.workspaceSnapshot ? 20 : 3
     )
   } catch (error) {
     if (error instanceof WorkspaceReadUnavailable) {

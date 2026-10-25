@@ -1,175 +1,80 @@
-import { useEffect, useId, useMemo, useState } from 'react'
-import type { DiffFile } from '@shared/trace'
-import { displayDiffPath as displayPath, type DiffScope, type TurnDiffReview } from '../turn-diff'
+import { useEffect, useState } from 'react'
+import type { TurnDiffReview } from '../turn-diff'
+import type { DiffLayout } from '../diff-stack'
+import type { DiffCommitHistory } from '../hooks/useDiffCommitHistory'
 import { Icon } from './primitives/Icon'
 import { TURN_DIFF_REVIEW_COPY as copy } from '../constants/copy'
 import { DIFF_COPY as detail } from '../constants/diff-copy'
-import { useFixedVirtualRows } from '../hooks/useFixedVirtualRows'
+import { DiffFiles } from './DiffFiles'
+import { DiffNavigation } from './DiffNavigation'
+import { StackedDiff } from './StackedDiff'
 import './diff-inspector.css'
+import './diff-stack.css'
+export { parseUnifiedDiff } from '../diff-lines'
 
-interface DiffLine {
-  kind: 'meta' | 'hunk' | 'add' | 'del' | 'context'
-  text: string
-  oldLine?: number
-  newLine?: number
-}
-
-export function parseUnifiedDiff(patch: string): DiffLine[] {
-  let oldLine: number | undefined
-  let newLine: number | undefined
-  return patch.split('\n').map((text) => {
-    if (text.startsWith('diff --git ')) { oldLine = undefined; newLine = undefined }
-    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(text)
-    if (hunk) {
-      oldLine = Number(hunk[1])
-      newLine = Number(hunk[2])
-      return { kind: 'hunk', text }
-    }
-    if (text.startsWith('+') && newLine != null) {
-      const line = { kind: 'add' as const, text, newLine }
-      if (newLine != null) newLine += 1
-      return line
-    }
-    if (text.startsWith('-') && oldLine != null) {
-      const line = { kind: 'del' as const, text, oldLine }
-      if (oldLine != null) oldLine += 1
-      return line
-    }
-    if (text.startsWith(' ') && oldLine != null && newLine != null) {
-      const line = { kind: 'context' as const, text, oldLine, newLine }
-      oldLine += 1
-      newLine += 1
-      return line
-    }
-    return { kind: 'meta', text }
-  })
-}
-
-
-function PatchLines({ patch, path }: { patch: string; path: string }) {
-  const lines = useMemo(() => parseUnifiedDiff(patch), [patch])
-  const rows = useFixedVirtualRows(lines.length, 22)
-  return (
-    <div ref={rows.ref} className="unified-diff diff-virtual-code" role="table" tabIndex={0} aria-label={detail.diffTable(path)} aria-rowcount={lines.length}>
-      <div style={{ height: rows.totalHeight, position: 'relative', minWidth: 'max-content' }}>
-        <div style={{ position: 'absolute', top: rows.offset, left: 0, minWidth: '100%' }}>
-          {lines.slice(rows.start, rows.end).map((line, index) => (
-            <div className={`diff-line ${line.kind}`} role="row" aria-rowindex={rows.start + index + 1} key={rows.start + index}>
-              <span className="diff-ln old" role="cell">{line.oldLine ?? ''}</span>
-              <span className="diff-ln new" role="cell">{line.newLine ?? ''}</span>
-              <code role="cell">{line.text || ' '}</code>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function DiffFiles({ files, selectedPath, select, scope, repoRoot }: {
-  files: DiffFile[]
-  selectedPath: string
-  select: (path: string) => void
-  scope: DiffScope
-  repoRoot?: string
-}) {
-  const id = useId()
-  const rows = useFixedVirtualRows(files.length, 38)
-  const selectedIndex = files.findIndex(file => file.path === selectedPath)
-  return (
-    <nav className="diff-file-nav" aria-label={detail.fileList(scope)}>
-      <div className="diff-file-nav-title"><span>{detail.files}</span><span>{files.length}</span></div>
-      <div ref={rows.ref} className="diff-virtual-files" role="listbox" tabIndex={0} aria-label={detail.fileList(scope)}
-        aria-activedescendant={selectedIndex >= rows.start && selectedIndex < rows.end ? `${id}-${selectedIndex}` : undefined}
-        onKeyDown={event => {
-          if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) || files.length === 0) return
-          event.preventDefault()
-          const next = event.key === 'Home' ? 0 : event.key === 'End' ? files.length - 1
-            : Math.max(0, Math.min(files.length - 1, selectedIndex + (event.key === 'ArrowDown' ? 1 : -1)))
-          select(files[next].path)
-          rows.reveal(next)
-        }}>
-        <div style={{ height: rows.totalHeight, position: 'relative' }}>
-          <div style={{ position: 'absolute', top: rows.offset, left: 0, right: 0 }}>
-            {files.slice(rows.start, rows.end).map((file, index) => (
-              <button type="button" role="option" id={`${id}-${rows.start + index}`} tabIndex={-1}
-                aria-selected={file.path === selectedPath} aria-posinset={rows.start + index + 1} aria-setsize={files.length}
-                className={file.path === selectedPath ? 'active' : ''} onClick={() => select(file.path)}
-                title={file.path} key={file.path}>
-                <span>{displayPath(file.path, repoRoot)}</span>
-                <span className="diff-file-nav-count">
-                  {file.binary ? detail.binary : <><b className="add">+{file.added}</b><b className="del">−{file.deleted}</b></>}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-    </nav>
-  )
-}
-
-export function TurnDiffReviewPanel({ review, onClose, embedded = false }: {
+export function TurnDiffReviewPanel({ review: source, onClose, embedded = false, history }: {
   review: TurnDiffReview
   onClose: () => void
   embedded?: boolean
+  history?: DiffCommitHistory
 }) {
-  const { turnDiff } = review
-  const scope = review.scope ?? 'turn'
-  const [selectedPath, setSelectedPath] = useState(review.initialPath ?? turnDiff.files[0]?.path ?? '')
-  const identity = scope === 'turn' ? review.runId : `${scope}:${turnDiff.repoRoot}:${turnDiff.scope}:${scope === 'session' ? turnDiff.beforeAt : ''}`
+  // A selected commit that is loading/missing never shows branch or working-tree bodies.
+  const review = history?.selected ? history.review : source
+  const turnDiff = review?.turnDiff
+  const files = turnDiff?.files ?? []
+  const scope = source.scope ?? 'turn'
+  const [selectedPath, setSelectedPath] = useState(source.initialPath ?? source.turnDiff.files[0]?.path ?? '')
+  const [jump, setJump] = useState(0)
+  const [layout, setLayout] = useState<DiffLayout>('unified')
+  const identity = history?.selected ?? (scope === 'turn' ? source.runId
+    : `${scope}:${source.turnDiff.repoRoot}:${source.turnDiff.scope}:${scope === 'session' ? source.turnDiff.beforeAt : ''}`)
   useEffect(() => {
-    setSelectedPath(review.initialPath ?? turnDiff.files[0]?.path ?? '')
-  }, [review.initialPath, identity])
+    setSelectedPath(review?.initialPath ?? files[0]?.path ?? '')
+  }, [review?.initialPath, identity])
   useEffect(() => {
-    setSelectedPath(current => turnDiff.files.some(file => file.path === current) ? current : turnDiff.files[0]?.path ?? '')
-  }, [turnDiff.files])
-
-  const selected = turnDiff.files.find(file => file.path === selectedPath) ?? turnDiff.files[0]
-  const completeContent = selected?.patchContent?.storage === 'complete' ? selected.patchContent.content : undefined
-  const patch = completeContent ?? selected?.patch ?? selected?.patchContent?.content
-  const truncated = completeContent === undefined && (selected?.patchStatus === 'truncated' || selected?.patchContent?.storage === 'truncated')
-  const added = turnDiff.files.reduce((sum, file) => sum + file.added, 0)
-  const deleted = turnDiff.files.reduce((sum, file) => sum + file.deleted, 0)
-  const available = turnDiff.status === 'captured'
+    setSelectedPath(current => files.some(file => file.path === current) ? current : files[0]?.path ?? '')
+  }, [turnDiff?.files])
+  const select = (path: string): void => { setSelectedPath(path); setJump(value => value + 1) }
+  const selected = files.find(file => file.path === selectedPath) ?? files[0]
+  const added = files.reduce((sum, file) => sum + file.added, 0)
+  const deleted = files.reduce((sum, file) => sum + file.deleted, 0)
+  const available = turnDiff?.status === 'captured'
   const label = scope === 'branch' ? detail.branchLabel : scope === 'workspace' ? detail.workspaceLabel : scope === 'session' ? copy.sessionLabel : copy.turnLabel
   const title = scope === 'branch' ? detail.branchTitle : scope === 'workspace' ? detail.workspaceTitle : scope === 'session' ? copy.sessionTitle : copy.turnTitle
-  const range = scope === 'branch' ? detail.branchRange(review.comparison?.baseRef, review.comparison?.headRef, review.comparison?.baseCommit)
-    : scope === 'workspace' ? detail.workspaceRange(review.head)
-    : scope === 'session' ? copy.sessionRange(turnDiff.baseline === 'resumed', review.preview === true)
-      : review.preview ? copy.preview : detail.turnRange
+  const range = review?.commit ? detail.commitRange(review.commit.hash, review.commit.parents)
+    : scope === 'branch' ? detail.branchRange(review?.comparison?.baseRef, review?.comparison?.headRef, review?.comparison?.baseCommit)
+      : scope === 'workspace' ? detail.workspaceRange(review?.head)
+        : scope === 'session' ? copy.sessionRange(turnDiff?.baseline === 'resumed', review?.preview === true)
+          : review?.preview ? copy.preview : detail.turnRange
 
-  return (
-    <aside className={`panel diff-review-panel${embedded ? ' is-embedded' : ''}`} aria-label={label}>
-      {!embedded && <header className="diff-review-head">
-        <div className="diff-review-title"><Icon name="file" /><div><b title={review.runId}>{title}</b><span>{range}</span></div></div>
-        <button type="button" className="diff-review-close" onClick={onClose} title={detail.closeTitle} aria-label={detail.close}><Icon name="x" /></button>
-      </header>}
-      <div className="diff-review-summary">
-        <div className="diff-review-prompt" title={detail.notAttribution}>{scope === 'turn' ? review.userText || detail.missingPrompt : range}</div>
-        {available ? <div className="diff-review-totals">
-          <span>{detail.fileCount(turnDiff.files.length)}</span><b className="add">+{added}</b><b className="del">−{deleted}</b>
-        </div> : <span role="status">{detail.evidence(turnDiff)}</span>}
-        <small className="diff-source-time">{detail.sourceTime(turnDiff.afterAt)}</small>
-        {review.preview && scope !== 'session' && <small>{copy.preview}</small>}
-        {available && turnDiff.files.some(file => file.patchStatus === 'unavailable' || file.patchStatus === 'truncated') &&
-          <small className="diff-partial">{detail.partial}</small>}
-      </div>
-      <div className="diff-review-layout">
-        <section className="diff-review-content" aria-live="polite">
-          {!available ? <div className="diff-review-empty"><Icon name="alert" /><b>{detail.evidence(turnDiff)}</b></div>
-            : selected ? <>
-              {truncated && <div className="diff-review-notice warn"><Icon name="alert" />{detail.patchTruncated(scope)}</div>}
-              {selected.binary || selected.patchStatus === 'binary' ? (
-                <div className="diff-review-empty"><Icon name="image" /><b>{detail.binaryTitle}</b><span>{detail.binaryDetail}</span></div>
-              ) : patch ? <PatchLines patch={patch} path={displayPath(selected.path, turnDiff.repoRoot)} />
-                : selected.patchStatus === 'unavailable' ? (
-                  <div className="diff-review-empty"><Icon name="alert" /><b>{detail.patchUnavailable}</b><span>{detail.patchReason(selected.patchReason)}</span></div>
-                ) : <div className="diff-review-empty"><Icon name="info" /><b>{detail.patchMissing}</b><span>{detail.patchMissingDetail}</span></div>}
-            </> : <div className="diff-review-empty"><Icon name="check" /><b>{detail.empty(scope)}</b></div>}
-        </section>
-        {available && <DiffFiles files={turnDiff.files} selectedPath={selected?.path ?? ''} select={setSelectedPath} scope={scope} repoRoot={turnDiff.repoRoot} />}
-      </div>
-    </aside>
-  )
+  return <aside className={`panel diff-review-panel${embedded ? ' is-embedded' : ''}`} aria-label={label}>
+    {!embedded && <header className="diff-review-head">
+      <div className="diff-review-title"><Icon name="file" /><div><b title={review?.runId}>{title}</b><span>{range}</span></div></div>
+      <button type="button" className="diff-review-close" onClick={onClose} title={detail.closeTitle} aria-label={detail.close}><Icon name="x" /></button>
+    </header>}
+    {review && turnDiff && <div className="diff-review-summary" aria-live="polite">
+      <div className="diff-review-prompt" title={detail.notAttribution}>{review.commit?.subject ?? (scope === 'turn' ? review.userText || detail.missingPrompt : range)}</div>
+      {review.commit && <small className="diff-commit-range">{range}</small>}
+      {available ? <div className="diff-review-totals">
+        <span>{detail.fileCount(files.length)}</span><b className="add">{detail.added(added)}</b><b className="del">{detail.deleted(deleted)}</b>
+      </div> : <span role="status">{detail.evidence(turnDiff)}</span>}
+      <small className="diff-source-time">{detail.sourceTime(turnDiff.afterAt)}</small>
+      {review.preview && scope !== 'session' && <small>{copy.preview}</small>}
+      {available && files.some(file => file.patchStatus === 'unavailable' || file.patchStatus === 'truncated') &&
+        <small className="diff-partial">{detail.partial}</small>}
+    </div>}
+    <div className="diff-review-layout">
+      {(available || history) && <DiffNavigation history={history} fileCount={available ? files.length : undefined}>
+        {available && <DiffFiles files={files} selectedPath={selected?.path ?? ''} select={select} scope={scope} repoRoot={turnDiff?.repoRoot} showTitle={!history} />}
+      </DiffNavigation>}
+      <section className="diff-review-content" aria-busy={history?.pending || undefined}>
+        {!review || !turnDiff ? <div className="diff-review-empty" role="status"><Icon name={history?.pending ? 'clock' : 'alert'} />
+          <b>{history?.pending ? detail.commitPending : detail.commitUnavailable}</b>
+        </div> : !available ? <div className="diff-review-empty"><Icon name="alert" /><b>{detail.evidence(turnDiff)}</b></div>
+          : selected ? <StackedDiff key={identity} files={files} path={selected.path} jump={jump} scope={scope} repoRoot={turnDiff.repoRoot}
+            layout={layout} setLayout={setLayout} />
+            : <div className="diff-review-empty"><Icon name="check" /><b>{review.commit ? detail.commitEmpty : detail.empty(scope)}</b></div>}
+      </section>
+    </div>
+  </aside>
 }

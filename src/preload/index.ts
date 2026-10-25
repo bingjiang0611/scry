@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { eventApi } from './event-api'
 import { remoteApi } from './remote-api'
 import type { GitDiffScope, WorkspaceDiffSnapshotResult } from '../shared/workspace-diff'
+import type { DiffCommitPage, DiffCommitPageRequest, DiffCommitSnapshot, DiffCommitSnapshotRequest } from '../shared/diff-history'
 import type { SourceControlApi } from '../shared/source-control'
 import type { WorkspaceSelectionApi } from '../shared/workspace-selection'
 import type { ConversationApi, ConversationSummary } from '../shared/conversation-api'
@@ -246,6 +247,8 @@ const api = {
   importBillingFixture: (): Promise<BillingFixtureImportResult> => ipcRenderer.invoke('agent:importBillingFixture'),
   gitDiff: (cwd: string): Promise<WorkspaceDiffResult> => ipcRenderer.invoke('agent:gitDiff', cwd),
   gitDiffSnapshot: (cwd: string, scope: GitDiffScope = 'workspace'): Promise<WorkspaceDiffSnapshotResult> => ipcRenderer.invoke('agent:gitDiffSnapshot', cwd, scope),
+  gitDiffCommits: (request: DiffCommitPageRequest): Promise<DiffCommitPage> => ipcRenderer.invoke('agent:gitDiffCommits', request),
+  gitCommitDiffSnapshot: (request: DiffCommitSnapshotRequest): Promise<DiffCommitSnapshot> => ipcRenderer.invoke('agent:gitCommitDiffSnapshot', request),
   recorderContentPage: (request: RecorderContentPageRequest): Promise<RecorderContentPage> =>
     ipcRenderer.invoke('agent:recorderContentPage', request),
   // 只拿最近一页：完整历史不作为单个 payload 过 IPC。更早轮次用 loadSessionOlder 取回。

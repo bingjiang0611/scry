@@ -5,6 +5,7 @@ import { workspaceDiffCopy } from '../shared/constants/copy'
 import { readWorkspaceNumstat } from '../core/turn-recorder/git.js'
 import { readWorkspaceDiffSnapshot } from '../core/turn-recorder/git-workspace-snapshot.js'
 import type { WorkspaceDiffSnapshotResult } from '../shared/workspace-diff'
+import { registerGitDiffHistoryIpc } from './git-diff-history'
 
 // Electron 与 CLI 共用同一套 Git turn snapshot 实现。
 export * from '../core/turn-recorder/git.js'
@@ -13,6 +14,7 @@ export function registerGitDiffIpc(
   register: (channel: string, listener: (event: IpcMainInvokeEvent, cwd: unknown, scope?: unknown) => unknown) => void,
   authorizeDirectory: (cwd: string) => string
 ): void {
+  registerGitDiffHistoryIpc(register, authorizeDirectory)
   // Only share ongoing reads. Completed results cannot be validated cheaply against
   // arbitrary worktree edits, so there is deliberately no settled-result cache.
   const snapshots = new Map<string, Promise<WorkspaceDiffSnapshotResult>>()

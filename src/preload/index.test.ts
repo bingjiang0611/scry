@@ -95,6 +95,8 @@ const invokeChannels = {
   importBillingFixture: 'agent:importBillingFixture',
   gitDiff: 'agent:gitDiff',
   gitDiffSnapshot: 'agent:gitDiffSnapshot',
+  gitDiffCommits: 'agent:gitDiffCommits',
+  gitCommitDiffSnapshot: 'agent:gitCommitDiffSnapshot',
   recorderContentPage: 'agent:recorderContentPage',
   loadSession: 'agent:loadSession',
   loadSessionOlder: 'agent:loadSessionOlder',

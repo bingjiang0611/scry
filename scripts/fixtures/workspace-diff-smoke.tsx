@@ -5,11 +5,13 @@ import { PinnedSummary } from '../../src/renderer/components/PinnedSummary'
 import { OverviewPanel } from '../../src/renderer/components/OverviewPanel'
 import { useIntegrations } from '../../src/renderer/hooks/useIntegrations'
 import { buildSessionReport } from '../../src/renderer/format'
+import { DiffHistorySmoke, historyApi } from './diff-history-smoke'
 import '../../src/renderer/styles.css'
 
 let mode = 'clean'
 let release: ((value: WorkspaceDiffResult) => void) | undefined
 window.scry = {
+  ...historyApi,
   detect: async () => [],
   usageStats: async () => null,
   stats: async () => null,
@@ -41,6 +43,7 @@ function Fixture() {
     }
   }
   return <>
+    <DiffHistorySmoke />
     <nav>{controls.map((control) => <button key={control} id={`diff-${control}`} onClick={() => change(control)}>{control}</button>)}</nav>
     <section id="diff-summary">
       <PinnedSummary cwd={cwd} gitDiff={integrations.gitDiff} gitDiffRefreshing={integrations.gitDiffRefreshing} turns={[]} busy={false} temporary={false}

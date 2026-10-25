@@ -229,7 +229,8 @@ export async function captureTurnPatches(
   excludedBasenames: ReadonlySet<string>,
   operationDeadline: number,
   completePatches: boolean,
-  byteLimit?: number
+  byteLimit?: number,
+  contextLines = 3
 ): Promise<DiffFile[]> {
   if (!capture.repoRoot || !capture.beforeTree || !capture.tempDir) return files
   const deadline = Math.min(
@@ -287,7 +288,7 @@ export async function captureTurnPatches(
           '--raw',
           '-z',
           '--patch',
-          '--unified=3',
+          `--unified=${contextLines}`,
           '--src-prefix=a/',
           '--dst-prefix=b/',
           '--line-prefix=',

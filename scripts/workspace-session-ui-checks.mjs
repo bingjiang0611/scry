@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { nativeUiPointer } from './native-ui-pointer.mjs'
 import { exerciseWorkspaceDiffBounds } from './workspace-session-ui-stress.mjs'
+import { exerciseDiffWorkbench, contextFixture } from './diff-workbench-ui.mjs'
 import { assertPickerAnchored, assertNewWorktreeDefaults, assertCompactMenus } from './workspace-session-ui-picker.mjs'
 import { wait, sendWorkspacePrompt } from './workspace-session-ui-run.mjs'
 import { selectDiffScope, exerciseTurnMenu } from './diff-inspector-ui.mjs'
@@ -83,6 +84,7 @@ export async function exerciseWorkspaceSessions(context) {
     writeFileSync(join(workspace, '.gitignore'), '.scry/\n')
     writeFileSync(join(workspace, 'scry.config.json'), json({ schemaVersion: 1, workspaceId: 'workspace-ui-fixture' }))
     writeFileSync(join(workspace, 'workspace-baseline.txt'), 'baseline\n')
+    writeFileSync(join(workspace, 'workbench-context.ts'), contextFixture())
     git(workspace, 'add', '--all')
     git(workspace, 'commit', '--allow-empty', '-m', 'workspace selection fixture')
     git(workspace, 'branch', '-M', 'main')
@@ -201,6 +203,7 @@ export async function exerciseWorkspaceSessions(context) {
     await selectDiffScope({ click, wait, evaluate }, 'branch')
     await wait(() => evaluate(`document.querySelector('.diff-virtual-files')?.textContent.includes('remote-first.txt') &&
       document.querySelector('.diff-virtual-files')?.textContent.includes('remote-second.txt')`), 'branch Changes persists after both files are committed')
+    await exerciseDiffWorkbench({ target, git, click, key, wait, evaluate, screenshot, cdp })
     await exerciseTurnMenu({ click, key, wait, evaluate, screenshot, target, firstRunId: created.run.runId, latestRunId: second.run.runId })
     await screenshot('inspector-wide')
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 900, deviceScaleFactor: 1, mobile: false })

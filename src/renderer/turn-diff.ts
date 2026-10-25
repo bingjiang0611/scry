@@ -25,6 +25,7 @@ export interface TurnDiffReview {
   head?: string
   comparison?: import('@shared/workspace-diff').BranchDiffComparison
   revision?: string
+  commit?: import('@shared/diff-history').DiffCommit
   /** true = 运行中的临时 Git 快照，本轮还没结束；UI 必须标出来。 */
   preview?: boolean
 }

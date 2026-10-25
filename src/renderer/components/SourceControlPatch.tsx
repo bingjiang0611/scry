@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import type { ScDiff } from '@shared/source-control'
-import { parseUnifiedDiff } from './TurnDiffReviewPanel'
+import { parseUnifiedDiff } from '../diff-lines'
 
 export function Patch({
   diff,

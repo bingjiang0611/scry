@@ -298,7 +298,9 @@
         "ipc.sourceControl:",
         "ipc.workspaceSelection:",
         "ipc.agent:gitDiff",
-        "ipc.agent:gitDiffSnapshot"
+        "ipc.agent:gitDiffSnapshot",
+        "ipc.agent:gitDiffCommits",
+        "ipc.agent:gitCommitDiffSnapshot"
       ],
       "sources": [
         "src/main/source-control/ipc.ts",
@@ -310,6 +312,12 @@
         "src/renderer/hooks/useFixedVirtualRows.ts",
         "src/renderer/components/DiffInspector.tsx",
         "src/renderer/components/TurnDiffReviewPanel.tsx",
+        "src/renderer/components/DiffNavigation.tsx",
+        "src/renderer/components/DiffFiles.tsx",
+        "src/renderer/components/StackedDiff.tsx",
+        "src/renderer/hooks/useDiffCommitHistory.ts",
+        "src/renderer/diff-stack.ts",
+        "src/renderer/diff-lines.ts",
         "src/main/source-control/service.ts",
         "src/main/source-control/store.ts",
         "src/main/source-control/git.ts",
@@ -318,6 +326,8 @@
         "src/main/git.ts",
         "src/core/turn-recorder/git-workspace-snapshot.ts",
         "src/core/turn-recorder/git-branch-base.ts",
+        "src/core/turn-recorder/git-diff-history.ts",
+        "src/main/git-diff-history.ts",
         "src/core/turn-recorder/git-workspace-limits.ts",
         "src/core/turn-recorder/git-workspace.ts",
         "src/core/turn-recorder/git-capture.ts",
@@ -330,7 +340,7 @@
       "benchmarks": [
         "source-control.diff"
       ],
-      "gap": "已测临时 Git 仓库真实 diff；日常 read/mutate handler 尚未细分所有操作。远程 push、PR、review 及网络授权另验。"
+      "gap": "已测临时 Git 仓库真实 diff；提交历史、单提交快照与堆叠 Diff 渲染暂无专用计数门禁。日常 read/mutate handler 尚未细分所有操作；远程 push、PR、review 及网络授权另验。"
     },
     {
       "id": "terminal",

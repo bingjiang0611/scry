@@ -1,4 +1,5 @@
 import { workspaceDiffCopy } from '@shared/constants/copy'
+import { useDiffCommitHistory } from '../hooks/useDiffCommitHistory'
 import type { useDiffInspector } from '../hooks/useDiffInspector'
 import { DIFF_COPY as copy } from '../constants/diff-copy'
 import { Icon } from './primitives/Icon'
@@ -11,6 +12,7 @@ export function DiffInspector({ state, onClose, history }: {
   onClose: () => void
   history?: DiffHistoryNavigation
 }) {
+  const commits = useDiffCommitHistory(state.cwd, state.scope === 'branch' ? state.review : null)
   return (
     <section className="diff-inspector" aria-label={copy.title} data-diff-scope={state.scope}
       data-diff-run-id={state.scope === 'turn' ? state.selectedRunId : undefined}>
@@ -24,7 +26,7 @@ export function DiffInspector({ state, onClose, history }: {
       </div>
       {state.refreshing && <div className="diff-refresh-state" role="status">{copy.refreshing}</div>}
       <div className="diff-inspector-body" role="region" aria-label={copy.scopes[state.scope]}>
-        {state.review ? <TurnDiffReviewPanel review={state.review} onClose={onClose} embedded /> : <div className="diff-review-empty" role="status">
+        {state.review ? <TurnDiffReviewPanel review={state.review} onClose={onClose} history={state.scope === 'branch' ? commits : undefined} embedded /> : <div className="diff-review-empty" role="status">
           <Icon name={state.pending ? 'clock' : 'info'} />
           <b>{state.pending ? copy.pending : state.failure ? workspaceDiffCopy.label(state.failure)
             : state.emptySession && state.scope === 'turn' ? copy.beforeSend : copy.missing(state.scope)}</b>
