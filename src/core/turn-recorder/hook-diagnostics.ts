@@ -7,6 +7,7 @@ const MAX_LOG_BYTES = 1024 * 1024
 
 export interface HookSkipSummary {
   count: number
+  recentCount: number
   lastAt: string | null
   scope: 'retained_log_window'
   truncated: boolean
@@ -62,15 +63,20 @@ export async function readHookSkips(workspace: string): Promise<HookSkipSummary>
   }
   const tails = await Promise.all([logTail(`${path}.1`), logTail(path)])
   let count = 0
+  let recentCount = 0
+  const recentSince = Date.now() - 24 * 60 * 60 * 1000
   let lastAt: string | null = null
   for (const { text } of tails) {
     for (const line of text.split('\n')) {
       const [at, provider, event, reason, code] = line.split('\t')
       if (!provider || !event || !reason || !/^\d+$/.test(code ?? '')) continue
       count++
+      const timestamp = Date.parse(at)
+      // Unknown clocks must not hide failures. Future clocks also remain actionable.
+      if (!Number.isFinite(timestamp) || timestamp >= recentSince) recentCount++
       // Do not export arbitrary log text in the sanitized support bundle.
-      if (/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{3})?Z$/.test(at) && (!lastAt || Date.parse(at) > Date.parse(lastAt))) lastAt = at
+      if (Number.isFinite(timestamp) && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{3})?Z$/.test(at) && (!lastAt || timestamp > Date.parse(lastAt))) lastAt = at
     }
   }
-  return { count, lastAt, scope: 'retained_log_window', truncated: tails.some(tail => tail.truncated) }
+  return { count, recentCount, lastAt, scope: 'retained_log_window', truncated: tails.some(tail => tail.truncated) }
 }

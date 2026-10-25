@@ -646,12 +646,12 @@ async function doctorCommand(args: ParsedArgs): Promise<number> {
   ])
   // Stale open turns need investigation, not a fabricated interruption. Warn separately from
   // pendingCount (managed/closing/quarantined); elapsed time does not prove the Provider stopped.
-  const degraded = !!health.lastError || health.pendingCount > 0 || staleOpenTurns.length > 0 || hookSkips.count > 0
+  const degraded = !!health.lastError || health.pendingCount > 0 || staleOpenTurns.length > 0 || hookSkips.recentCount > 0
   const checks: Check[] = [
     { id: 'recorder.enabled', status: 'pass', detail: 'workspace has a valid recorder config' },
     {
-      id: 'hook.skips', status: hookSkips.count > 0 ? 'fail' : 'pass',
-      detail: `${hookSkips.count} hook failure(s) in retained log window; latest ${hookSkips.lastAt ?? 'unavailable'}`,
+      id: 'hook.skips', status: hookSkips.recentCount > 0 ? 'fail' : hookSkips.count > 0 ? 'warn' : 'pass',
+      detail: `${hookSkips.recentCount} hook failure(s) within 24h or with unknown time; ${hookSkips.count} in retained log window; latest ${hookSkips.lastAt ?? 'unavailable'}`,
       ...(hookSkips.count > 0 ? { remediation: 'inspect .scry/logs/hook-skip.log and repair the CLI/Node paths with `scry integrations repair --yes`' } : {})
     },
     {
@@ -713,7 +713,7 @@ async function doctorCommand(args: ParsedArgs): Promise<number> {
   ]
   print({
     schemaVersion: 1,
-    status: !store.ok ? 'corrupt' : hookSkips.count > 0 ? 'error' : degraded ? 'degraded' : 'healthy',
+    status: !store.ok ? 'corrupt' : hookSkips.recentCount > 0 ? 'error' : degraded ? 'degraded' : 'healthy',
     hookSkips,
     healthy: store.ok && !degraded,
     enabled: true,
