@@ -332,8 +332,8 @@ final class ConversationUITests: XCTestCase {
       XCTAssertFalse(app.staticTexts["|---|:---:|---:|"].exists)
       XCTAssertTrue(app.staticTexts["表格之后的正文"].isHittable)
       let firstColumn = app.staticTexts["问题"].frame
-      // Inline code now uses native TextKit for rounded backgrounds and full-height layout.
-      let longCell = app.textViews.matching(identifier: "markdown-inline-code").matching(NSPredicate(format: "label CONTAINS %@", "reload_tree.bg.scan")).firstMatch
+      // Inline code remains part of the SwiftUI Text, including its full cell label.
+      let longCell = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "reload_tree.bg.scan")).firstMatch
       XCTAssertGreaterThan(longCell.frame.height, 40, "长单元格应换行而不是截断")
       capture("markdown-\(route)-left")
       table.swipeLeft()
