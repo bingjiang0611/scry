@@ -144,6 +144,31 @@ describe('turn recorder daemon', () => {
     await expect(recorderDaemonStatus(root, env)).resolves.toMatchObject({ running: false })
   })
 
+  it.each(['sync', 'async'] as const)('logs %s background recovery failures without stopping the daemon', async (failure) => {
+    const root = await workspace()
+    const dir = await isolatedSocketDir(root)
+    const env = { SCRY_RECORDER_SOCKET: join(dir, 'recorder.sock') }
+    const timeouts = manualRecoveryTimeouts()
+    const daemon = await listenRecorderDaemon({
+      workspace: root, env, idleMs: 5_000,
+      scheduleRecoveryTimeout: timeouts.schedule,
+      recoveryProbe: () => {
+        const error = new Error(`injected ${failure} recovery failure`)
+        if (failure === 'sync') throw error
+        return Promise.reject(error)
+      }
+    })
+    try {
+      await sendRecorderDaemonHook({ workspace: root, provider: 'pi', event: 'UserPromptSubmit', env,
+        payload: { session_id: 'recovery-error', prompt: 'keep recovery eligible' } })
+      await expect(timeouts.fireNext()).resolves.toBeGreaterThan(0)
+      expect(await readFile(join(dir, 'logs', 'daemon.log'), 'utf8')).toContain(`injected ${failure} recovery failure`)
+      expect(await recorderDaemonStatus(root, env)).toMatchObject({ running: true })
+    } finally {
+      await daemon.close()
+    }
+  })
+
   it('无 open turn 时不运行 recovery poll', async () => {
     const root = await workspace()
     const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
