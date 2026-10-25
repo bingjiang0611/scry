@@ -416,3 +416,16 @@ npm run test:unit -- src/core/turn-recorder/recorder-terminal-replay.test.ts src
 - 真实 Provider 验证仍由用户执行：使用前文的独立临时项目和分支 CLI。Qoder/Codex 正常一轮后观察后续续跑终态不再增加 missingStartTerminals；OpenCode repair 后完成一轮、保持空闲，再发送新 prompt，确认重复 idle 不新增 orphan，第二轮仍新增 record。真正抑制开始 hook 的 A-3 步骤仍应产生 orphan。不要用已接受的旧版本手验结果代替本次版本。
 - Linux/Node 20/22、本机真实 Provider 版本和插件重载后的事件序列未在本轮验证。OpenCode 的重载/缓存淘汰会失去重复证明，选择保留未知终态而非静默丢弃；若实际出现频繁淘汰误报，再测量并决定是否需要持久化终态身份，不在本次扩展。
 - V3 的历史 skip 告警策略保持原样。无额外待用户选择的实现分歧；执行方到此停止，等待 V1 核验，不启动 B。
+
+## V1 核验意见（审查方，2026-10-25）
+
+核验对象：`6097bbfc`（生产代码 `82f6e5e3`）。环境：Linux x86_64，Node 22.22.0。
+
+- 在 `7ced5ba5`（只有 V1 测试）上跑 `-t V1`：13 失败 / 6 通过，与报告一致。
+- 修复后 6 个 focused 文件 233/233 通过。
+- 全量 `npm run test:unit`：3905 通过，7 失败，全部在本批未改动的文件里（`owned-app-processes`、`db-outbox`、`MarkdownLayout`、`SessionRename`、`desktop-client`、`desktop-directory-picker`）。原因是审查环境以 root 运行（「不可读目录」类断言对 root 不成立）、没有 Chromium，以及 TLS 环境差异；执行方在 macOS 上全量通过。recorder 与 CLI 相关测试在 Linux 上全部通过。
+- 读了 `recorder.ts` 与 OpenCode 插件的 diff：SessionEnd 无 open turn 直接 duplicate；`stop_hook_active` 只对给出合同依据的三个 Provider 生效，且要求严格 `=== true`；OpenCode 去重有 128 上限，投递失败不进入去重集合，首次未知 idle 仍投递。这些都符合要求。
+
+接受的取舍：用户中途关掉会话、且这一轮的开始事件恰好也丢了时，唯一的信号是 SessionEnd，现在会被判 duplicate。这种情况需要两个故障同时发生，代价可以接受。
+
+**结论：A1 已核验，批次 A 全部通过。** V3 仍等用户决定。可以开始批次 B。
