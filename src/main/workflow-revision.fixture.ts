@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -32,12 +32,12 @@ export const changedB = (preview: WorkflowPlanPreview) => revision(preview, root
   if (root.kind !== 'sequence' || root.blocks[0].kind !== 'parallel' || root.blocks[0].blocks[1].kind !== 'call') throw new Error('fixture shape')
   root.blocks[0].blocks[1].prompt = 'b-v2'
 })
-export async function fixture(file = false, withHost = true, serial = false, programBody: WorkflowBlock = body) {
-  const directory = await mkdtemp(join(tmpdir(), 'scry-revision-')), workspace = join(directory, 'workspace')
+export async function fixture(file = false, withHost = true, serial = false, programBody: WorkflowBlock = body, providedStore?: WorkflowStore) {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'scry-revision-'))), workspace = join(directory, 'workspace')
   await mkdir(workspace)
   await writeFile(join(workspace, 'input.txt'), 'baseline')
   const userData = join(directory, 'userData')
-  const store: WorkflowStore = file ? new FileWorkflowStore(userData) : new MemoryWorkflowStore()
+  const store: WorkflowStore = providedStore ?? (file ? new FileWorkflowStore(userData) : new MemoryWorkflowStore())
   const host = withHost ? new WorkflowSystemHost(join(directory, 'replicas'), store, () => ({})) : undefined
   const calls: Array<{ node: string; prompt: string }> = []
   const execute = vi.fn<WorkflowServiceOptions['execute']>(request => {

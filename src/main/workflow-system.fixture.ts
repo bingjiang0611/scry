@@ -9,7 +9,23 @@ import type { WorkflowControlFrame } from '../shared/workflow'
 import { WorkflowSlots } from './workflow-runner'
 
 export const roots: string[] = []
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
+const services = new Set<WorkflowService>(), work = new Set<Promise<unknown>>()
+function track<T>(result: Promise<T>): Promise<T> {
+  const pending = result.finally(() => work.delete(pending))
+  work.add(pending)
+  return pending
+}
+afterEach(async () => {
+  if (work.size) {
+    // A timed-out assertion does not cancel its asynchronous workflow. Freeze
+    // further admission and converge owned execution before removing its files.
+    await Promise.all([...services].map(service => service.prepareForShutdown()))
+    await Promise.allSettled([...work])
+  }
+  for (const service of services) service.close()
+  services.clear()
+  await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
+})
 export class CutParentStore extends MemoryWorkflowStore {
   cut = false
   override async saveFrame(frame: Omit<WorkflowControlFrame, 'revision'>, expected: number) {
@@ -40,6 +56,10 @@ export async function fixture(code = 0, store: WorkflowStore = new CutParentStor
     const host = new WorkflowSystemHost(directory, currentStore, () => env), slots = new WorkflowSlots(1)
     const service = new WorkflowService({ store: currentStore, slots, systems: host, execute, plan: async () => ({ output: JSON.stringify({ body: currentBody }) }), providerRegistered: () => true,
       runControls: async () => ({ descriptor: { id: 'claude', label: 'fixture', runtimeProvider: 'claude_sdk', transport: 'fixture', available: true, capabilities: { skills: 'none', mcp: 'none', commands: 'none', account: 'none' }, health: { state: 'ready', transport: 'fixture' } }, identity: 'fixture', model: true, stop: true, independentRun: true, terminalOutput: true }) })
+    services.add(service)
+    const start = service.start.bind(service), revise = service.revise.bind(service)
+    service.start = (...args) => track(start(...args))
+    service.revise = (...args) => track(revise(...args))
     return { service, host, slots }
   }
   const instance = create(), preview = await instance.service.planCommand({ command: '/scry-workflow run check', workspace: source, orchestrator: role, roles: [] })

@@ -78,6 +78,7 @@
         "src/main/workflow-runner-kernel.ts",
          "src/main/workflow-runner-call.ts",
         "src/main/workflow-revisions.ts",
+        "src/main/workflow-revision-boundaries.ts",
         "src/main/workflow-revision-reuse.ts",
         "src/main/workflow-agent-inputs.ts",
         "src/main/workflow-agent-source.ts",

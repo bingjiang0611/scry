@@ -82,6 +82,8 @@ export class WorkflowRunnerEffects {
           await this.commitOutcome(record, outcome)
           return { outcome }
         }
+        // Replica-scoped Agents have a leased owned-copy authority, not the
+        // ordinary ambient workspace observation/cache channel.
         if (this.options.systems && !block.replica) {
           const before = await this.options.systems.observeAgentInputs(preview.workflowId, attemptId, preview.workspace, 'before')
           ;(record.agentInputs ??= {})[attemptId] = { before }

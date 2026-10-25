@@ -1,4 +1,4 @@
-import { workflowOpaqueProvenance } from './workflow-opaque-provenance'
+import { workflowOpaqueProvenance, workflowNativeProvenance, type WorkflowProvenanceContext } from './workflow-opaque-provenance'
 import { createHash } from 'node:crypto'
 import type { WorkflowBlock, WorkflowEvaluation, WorkflowPlanPreview, WorkflowValue, WorkflowValueReference } from '../shared/workflow'
 import { workflowChildBlocks } from '../shared/workflow'
@@ -22,15 +22,18 @@ export function workflowRevisionBlocks(preview: WorkflowPlanPreview): Map<string
 export function workflowHasDynamicRevision(preview: WorkflowPlanPreview): boolean {
   return [...workflowRevisionBlocks(preview).values()].some(block => ['branch', 'map', 'loop', 'collect'].includes(block.kind))
 }
-export function assertWorkflowRevisionEffects(preview: WorkflowPlanPreview): void {
-  for (const block of workflowRevisionBlocks(preview).values()) if (block.kind === 'replica' || block.kind === 'check' || block.kind === 'verification' || (block.kind === 'call' && block.replica)) throw new Error(copy.unsupported)
-}
-
 /** Strip only physical artifact names. Collection authority is resolved through
  * sealed main manifests and committed frames, never from descriptor JSON. */
-export async function workflowSemanticValue(store: WorkflowStore, workflowId: string, evaluation: WorkflowEvaluation, depth = 0): Promise<WorkflowValue> {
-  if (depth > 64 || (evaluation.state === 'known' && evaluation.replica)) throw new Error(copy.invalid)
+export async function workflowSemanticValue(store: WorkflowStore, workflowId: string, evaluation: WorkflowEvaluation, context?: WorkflowProvenanceContext, depth = 0): Promise<WorkflowValue> {
+  if (depth > 64) throw new Error(copy.invalid)
   if (evaluation.state === 'unknown') return { state: 'unknown', reason: evaluation.reason }
+  if (evaluation.replica) {
+    const producer = await workflowNativeProvenance(store, workflowId, evaluation, context)
+    if (!producer.length) throw new Error(copy.invalid)
+    // A semantic fingerprint is JSON, not a materialized-copy grant. Only the
+    // freshly executed native result retains the separate replica envelope.
+    return { state: 'known', value: evaluation.value, replica: { ...evaluation.replica }, producer }
+  }
   const collection = async (reference: NonNullable<Extract<WorkflowEvaluation, { state: 'known' }>['collection']>): Promise<WorkflowValue> => {
     if (!reference.sealed) throw new Error(copy.invalid)
     const entries = await store.loadCollection(workflowId, reference)
@@ -41,12 +44,12 @@ export async function workflowSemanticValue(store: WorkflowStore, workflowId: st
       if (entry.reference) {
         const frame = await store.loadFrame(workflowId, entry.reference.frameId)
         if (!frame || frame.revision !== entry.reference.revision || JSON.stringify(frame.resultRef) !== JSON.stringify(entry.reference.resultRef) || !['completed', 'failed', 'blocked', 'stopped'].includes(frame.phase)) throw new Error(copy.invalid)
-        value = await workflowSemanticValue(store, workflowId, await store.loadValue(workflowId, entry.reference.resultRef), depth + 1)
+        value = await workflowSemanticValue(store, workflowId, await store.loadValue(workflowId, entry.reference.resultRef), context, depth + 1)
         semantic = frame.resultSemanticKey ?? { legacyFrame: frame.frameId, revision: frame.revision }
       } else if (entry.valueRef) {
         const member = await store.loadValue(workflowId, entry.valueRef)
-        value = await workflowSemanticValue(store, workflowId, member, depth + 1)
-        semantic = await workflowOpaqueProvenance(store, workflowId, member)
+        value = await workflowSemanticValue(store, workflowId, member, context, depth + 1)
+        semantic = await workflowOpaqueProvenance(store, workflowId, member, context)
       }
       else throw new Error(copy.invalid)
       normalized.push({ key: entry.key, state: entry.state, settled: entry.settled, value, semantic, ...(entry.error ? { error: entry.error } : {}) })
@@ -128,7 +131,7 @@ export async function createWorkflowCallInputs(store: WorkflowStore, preview: Wo
 
 /** Producer identities use effective data and local definitions, not new frame
  * keys, whole-revision hashes or unrelated sibling bodies. */
-export async function workflowBindingSemantic(store: WorkflowStore, preview: WorkflowPlanPreview, block: WorkflowBlock, scope: WorkflowControlScope, value: WorkflowEvaluation, callInputKey?: string): Promise<string> {
+export async function workflowBindingSemantic(store: WorkflowStore, preview: WorkflowPlanPreview, block: WorkflowBlock, scope: WorkflowControlScope, value: WorkflowEvaluation, callInputKey?: string, context?: WorkflowProvenanceContext): Promise<string> {
   const local = { ...block } as Record<string, unknown>
   for (const name of ['blocks', 'body', 'then', 'else', 'unknown', 'initial', 'carry']) delete local[name]
   const refs = block.kind === 'bind' ? workflowExpressionReferences(block.value) : block.kind === 'return' ? [block.ref.nodeId] : block.kind === 'collect' ? workflowExpressionReferences(block.items) : []
@@ -136,15 +139,15 @@ export async function workflowBindingSemantic(store: WorkflowStore, preview: Wor
   dependencies.push(...(scope.semanticChildren?.get(block.blockId) ?? []).map((value, index) => [String(index), value]))
   if (block.kind === 'sequence') dependencies.push(...block.blocks.map(child => [child.blockId, scope.semanticBindings?.get(child.blockId) ?? null]))
   if (block.kind === 'parallel') dependencies.push(...block.blocks.map(child => [child.blockId, scope.semanticBindings?.get(child.blockId) ?? null]))
-  return workflowSemanticHash({ local, dependencies, ...(callInputKey ? { callInputKey } : {}), ...(block.kind === 'call' ? { attempt: value.derivedFrom } : {}), value: await workflowSemanticValue(store, preview.workflowId, value) })
+  return workflowSemanticHash({ local, dependencies, ...(callInputKey ? { callInputKey } : {}), ...(block.kind === 'call' ? { attempt: value.derivedFrom } : {}), value: await workflowSemanticValue(store, preview.workflowId, value, context) })
 }
 
 export function workflowExpressionSource(expression: import('../shared/workflow').WorkflowExpression, scope: WorkflowControlScope): string {
   const local = expression.kind === 'literal' ? { kind: 'literal' } : expression
   return workflowSemanticHash({ local, definitions: workflowExpressionReferences(expression).map(name => [name, scope.semanticDefinitions?.get(name) ?? null]) })
 }
-export async function workflowExpressionSemantic(store: WorkflowStore, preview: WorkflowPlanPreview, expression: import('../shared/workflow').WorkflowExpression, scope: WorkflowControlScope, value: WorkflowEvaluation): Promise<string> {
-  return workflowSemanticHash({ expression, dependencies: workflowExpressionDependencies(expression, scope), value: await workflowSemanticValue(store, preview.workflowId, value) })
+export async function workflowExpressionSemantic(store: WorkflowStore, preview: WorkflowPlanPreview, expression: import('../shared/workflow').WorkflowExpression, scope: WorkflowControlScope, value: WorkflowEvaluation, context?: WorkflowProvenanceContext): Promise<string> {
+  return workflowSemanticHash({ expression, dependencies: workflowExpressionDependencies(expression, scope), value: await workflowSemanticValue(store, preview.workflowId, value, context) })
 }
 export function workflowProducerDefinition(preview: WorkflowPlanPreview, block: WorkflowBlock, scope: WorkflowControlScope, value: WorkflowEvaluation, sourceSemanticKey?: string): string {
   if (block.kind === 'call') return workflowSemanticHash({ definition: workflowCallDefinition(preview, block), attempt: value.derivedFrom })

@@ -6,6 +6,7 @@ import { workflowSystemCopy as copy } from '../shared/constants/copy'
 import { validateWorkflowValueReference } from './workflow-frames'
 import { WORKFLOW_REPLICA_MAX_CONTENT, WORKFLOW_REPLICA_MAX_ENTRIES, WORKFLOW_REPLICA_MAX_MANIFEST, validateWorkflowReplicaReference } from './workflow-replica'
 import type { WorkflowStoreRecord } from './workflow-store'
+import { governingWorkflowSystemPreview } from './workflow-revision-boundaries'
 import type { WorkflowReplicaReference } from '../shared/workflow-replica'
 
 export const workflowSystemArtifactKey = (stepId: string, label: string): string => createHash('sha256').update(JSON.stringify([stepId, label])).digest('hex')
@@ -26,8 +27,15 @@ export function validateWorkflowSystemLedger(record: WorkflowStoreRecord): Reado
   if (!intents.length && !outcomes.length) return new Map()
   if (intents.length > WORKFLOW_MAX_SYSTEM_STEPS || outcomes.length > WORKFLOW_MAX_SYSTEM_STEPS ||
     new Set(intents.map(value => value.stepId)).size !== intents.length || new Set(intents.map(value => value.taskId)).size !== intents.length || new Set(outcomes.map(value => value.stepId)).size !== outcomes.length) throw new Error(copy.intent)
-  const nodes = new Map<string, WorkflowBlock>(), pending = [record.preview.program.body]
-  while (pending.length) { const block = pending.pop()!; nodes.set(block.blockId, block); pending.push(...workflowChildBlocks(block)) }
+  const nodeCache = new WeakMap<object, Map<string, WorkflowBlock>>()
+  const nodesFor = (preview: WorkflowStoreRecord['preview']) => {
+    const cached = nodeCache.get(preview.program)
+    if (cached) return cached
+    const nodes = new Map<string, WorkflowBlock>(), pending = [preview.program.body]
+    while (pending.length) { const block = pending.pop()!; nodes.set(block.blockId, block); pending.push(...workflowChildBlocks(block)) }
+    nodeCache.set(preview.program, nodes)
+    return nodes
+  }
   const admitted = new Map(intents.map(intent => [intent.stepId, intent]))
   // One origin index, not a scan per check. Only committed main-produced pairs
   // establish materialization; Agent JSON cannot supply a candidate association.
@@ -38,10 +46,10 @@ export function validateWorkflowSystemLedger(record: WorkflowStoreRecord): Reado
       source: 'main_ledger', preparationStepId: intent.stepId, materialized: outcome.replica, ...(intent.replica ? { candidate: intent.replica } : {})
     })
   }
-  for (const intent of intents) {
-    const node = nodes.get(intent.nodeId), task = intent.taskId.split(':')
-    if (!/^[A-Za-z0-9_-]{1,96}$/.test(intent.stepId) || !Number.isSafeInteger(intent.createdAt) || task.length !== 3 || task[0] !== record.preview.workflowId || !/^[a-f0-9]{64}$/.test(task[1]) || task[2] !== intent.nodeId ||
-      intent.programRevision !== record.preview.programRevision || (intent.kind !== 'prepare_replica' && intent.kind !== 'check' && intent.kind !== 'verification') || node?.kind !== (intent.kind === 'prepare_replica' ? 'replica' : intent.kind)) throw new Error(copy.intent)
+  for (const [index, intent] of intents.entries()) {
+    const governing = governingWorkflowSystemPreview(record, 'intent', index), node = nodesFor(governing).get(intent.nodeId), task = intent.taskId.split(':')
+    if (!/^[A-Za-z0-9_-]{1,96}$/.test(intent.stepId) || !Number.isSafeInteger(intent.createdAt) || task.length !== 3 || task[0] !== governing.workflowId || !/^[a-f0-9]{64}$/.test(task[1]) || task[2] !== intent.nodeId ||
+      intent.programRevision !== governing.programRevision || (intent.kind !== 'prepare_replica' && intent.kind !== 'check' && intent.kind !== 'verification') || node?.kind !== (intent.kind === 'prepare_replica' ? 'replica' : intent.kind)) throw new Error(copy.intent)
     if (node?.kind === 'verification') {
       validateWorkflowVerificationInputs(intent.verificationInputs, node)
       if (intent.replica || intent.inputSnapshot || intent.inputMaterialization) throw new Error(copy.intent)
@@ -54,9 +62,10 @@ export function validateWorkflowSystemLedger(record: WorkflowStoreRecord): Reado
     if (intent.inputMaterialization !== undefined && (!intent.inputSnapshot || !intent.replica ||
       JSON.stringify(intent.inputMaterialization) !== JSON.stringify(workflowInputMaterialization(prepared, intent.replica, intent.inputSnapshot)))) throw new Error(copy.intent)
   }
-  for (const outcome of outcomes) {
-    const intent = admitted.get(outcome.stepId)
-    if (!intent || outcome.taskId !== intent.taskId || typeof outcome.settled !== 'boolean' || !['completed', 'failed', 'blocked', 'unknown', 'stopped'].includes(outcome.state) || !Number.isSafeInteger(outcome.startedAt) || !Number.isSafeInteger(outcome.finishedAt)) throw new Error(copy.intent)
+  for (const [index, outcome] of outcomes.entries()) {
+    const intent = admitted.get(outcome.stepId), governing = governingWorkflowSystemPreview(record, 'outcome', index)
+    const node = intent ? nodesFor(governing).get(intent.nodeId) : undefined
+    if (!intent || intent.programRevision !== governing.programRevision || outcome.taskId !== intent.taskId || typeof outcome.settled !== 'boolean' || !['completed', 'failed', 'blocked', 'unknown', 'stopped'].includes(outcome.state) || !Number.isSafeInteger(outcome.startedAt) || !Number.isSafeInteger(outcome.finishedAt)) throw new Error(copy.intent)
     if (outcome.resultRef) {
       validateWorkflowValueReference(outcome.resultRef, record.preview.workflowId)
       if (outcome.resultRef.key !== intent.stepId) throw new Error(copy.intent)
@@ -68,7 +77,6 @@ export function validateWorkflowSystemLedger(record: WorkflowStoreRecord): Reado
     }
     if (intent.kind === 'verification' && (outcome.replica || outcome.check)) throw new Error(copy.intent)
     if (outcome.state === 'completed' && intent.kind !== 'verification' && (!outcome.replica || (intent.kind === 'check' && !outcome.check))) throw new Error(copy.intent)
-    const node = nodes.get(intent.nodeId)
     if (outcome.state === 'completed' && node?.kind === 'replica' && ((node.source !== undefined) !== Boolean(intent.replica) ||
       (intent.replica && (intent.replica.replicaId === outcome.replica!.replicaId || !prepared.has(JSON.stringify(intent.replica)))))) throw new Error(copy.intent)
     if (outcome.check) {

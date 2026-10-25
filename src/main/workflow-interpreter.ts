@@ -1,4 +1,5 @@
 import { runWorkflowMap } from './workflow-interpreter-map'
+import { workflowSequenceProgress } from './workflow-frames'
 
 import { WORKFLOW_MAX_VALUE_BYTES, type WorkflowCollectionField, type WorkflowValue } from '../shared/workflow'
 import type { WorkflowAttemptOutcome, WorkflowBlock, WorkflowControlFrame, WorkflowEvaluation, WorkflowFrameReference } from '../shared/workflow'
@@ -57,8 +58,16 @@ export class WorkflowInterpreter {
         if (returned) {
           top.outcomes.push(...returned.outcomes)
           top.value = returned.value
-          if (returned.reference) top.frame = await this.control.advanceSequence(top.frame, top.cursor + 1, returned.reference)
-          top.cursor++
+          const cursor = top.cursor + 1
+          if (returned.reference) {
+            // No further child runs after a successful final result. Publish
+            // its link/cursor with the terminal parent value, at the same CAS
+            // and durability barrier, rather than acknowledging a draft.
+            const final = cursor === top.block.blocks.length && returned.phase === 'completed' && !this.state.stopped
+            top.frame = final ? workflowSequenceProgress(top.frame, cursor, returned.reference)
+              : await this.control.advanceSequence(top.frame, cursor, returned.reference)
+          }
+          top.cursor = cursor
           const next = top.block.blocks[top.cursor]
           const explicitCollect = (returned.phase === 'failed' || returned.phase === 'blocked') && returned.outcomes.every(outcome => outcome.settled) && next?.kind === 'collect' && workflowExpressionReferences(next.items).includes(top.block.blocks[top.cursor - 1].blockId)
           const partial = returned.reportPartial === true && returned.phase === 'blocked'

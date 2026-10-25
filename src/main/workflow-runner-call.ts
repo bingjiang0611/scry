@@ -23,11 +23,11 @@ export async function runWorkflowCall(effects: WorkflowRunnerEffects, store: Wor
   }
   if (staticReuse) await assertWorkflowRevisionReuseInputs(store, effects.options.systems, record, block.blockId)
   if (frame && dynamicSelection) {
-    const current = await effects.options.systems?.observeAgentInputs(preview.workflowId, randomUUID(), preview.workspace, 'before')
     if (frame.callReuse) {
+      const current = await effects.options.systems?.observeAgentInputs(preview.workflowId, randomUUID(), preview.workspace, 'before')
       if (!await reusableWorkflowAgentInputs(store, preview.workflowId, frame.callReuse.attemptId, record.agentInputs?.[frame.callReuse.attemptId], current)) throw new Error(workflowRevisionCopy.sourceChanged)
     } else if (!controller.stopped) {
-      recovered = await control.selectCall(frame, current)
+      recovered = await control.selectCall(frame, async () => effects.options.systems?.observeAgentInputs(preview.workflowId, randomUUID(), preview.workspace, 'before'))
     }
   }
   if (recovered && block.replica) {

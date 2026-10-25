@@ -2,7 +2,7 @@ import type { WorkflowPlanPreview } from '../shared/workflow'
 import { workflowRevisionCopy as copy } from '../shared/constants/workflow-revision-copy'
 import { workflowFrameId } from './workflow-frames'
 import { decodeWorkflowOutput } from './workflow-values'
-import { reusableWorkflowAgentInputs, type WorkflowAgentInputObservation } from './workflow-agent-inputs'
+import { reusableWorkflowAgentInputs } from './workflow-agent-inputs'
 import { workflowStaticRevisionNodes, workflowRevisionTaskId, type WorkflowRevisionReuse } from './workflow-revisions'
 import type { WorkflowStore, WorkflowStoreRecord } from './workflow-store'
 import type { WorkflowSystemHost } from './workflow-system-host'
@@ -11,10 +11,11 @@ import { workflowHasDynamicRevision } from './workflow-call-semantics'
 
 /** Only main-issued frames + canonical outcomes authorize reuse. A descriptor,
  * model result or derivedFrom string by itself never becomes a reusable fact. */
-export async function prepareWorkflowRevisionReuse(store: WorkflowStore, record: WorkflowStoreRecord, preview: WorkflowPlanPreview, current: WorkflowAgentInputObservation | undefined): Promise<WorkflowRevisionReuse[]> {
+export async function prepareWorkflowRevisionReuse(store: WorkflowStore, record: WorkflowStoreRecord, preview: WorkflowPlanPreview, host: WorkflowSystemHost | undefined, commandId: string): Promise<WorkflowRevisionReuse[]> {
   // Dynamic invocations are selected by actual frame input/context at reach
   // time. Frozen governing arrays are never populated lazily by nodeId.
   if (workflowHasDynamicRevision(record.preview) || workflowHasDynamicRevision(preview)) return []
+  const current = await host?.observeAgentInputs(preview.workflowId, commandId, preview.workspace, 'before')
   const old = workflowStaticRevisionNodes(record.preview), next = workflowStaticRevisionNodes(preview)
   const selected = new Map<string, WorkflowRevisionReuse>(), checked = new Map<string, boolean>()
   const check = async (nodeId: string): Promise<boolean> => {
@@ -22,6 +23,7 @@ export async function prepareWorkflowRevisionReuse(store: WorkflowStore, record:
     const node = next.nodes.get(nodeId)!
     checked.set(nodeId, false)
     if (old.fingerprints.get(nodeId) !== next.fingerprints.get(nodeId)) return false
+    if (node.block.kind === 'replica' || node.block.kind === 'check' || node.block.kind === 'verification' || (node.block.kind === 'call' && node.block.replica)) return false
     for (const dependency of node.dependencies) if (!await check(dependency)) return false
     if (node.block.kind !== 'call') { checked.set(nodeId, true); return true }
     const previousNode = old.nodes.get(nodeId)!

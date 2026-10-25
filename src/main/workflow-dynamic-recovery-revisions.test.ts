@@ -109,18 +109,49 @@ describe('dynamic revision cold canonical authority', () => {
     } finally { await f.cleanup() }
   })
 
-  it('keeps owned-copy revision effects unavailable on the actual Service path', async () => {
+  it('runs a revised owned-copy effect through the Host without an extra Agent attempt', async () => {
     const f = await fixture(false, true, true, body)
+    const observations = vi.spyOn(f.host!, 'observeAgentInputs')
     try {
       await f.start()
+      observations.mockClear()
       const next = revision(f.preview, root => {
         if (root.kind !== 'sequence') throw new Error('fixture shape')
         root.blocks.splice(2, 0, { kind: 'replica', blockId: 'ownedCopy' })
       })
-      await expect(f.revise(next)).rejects.toThrow('不支持')
+      const progress = await f.revise(next)
+      expect(progress.state).toBe('completed')
+      expect(progress.workflowId).toBe(f.preview.workflowId)
       expect(f.execute).toHaveBeenCalledTimes(1)
-      expect((await f.record()).execution?.segments).toHaveLength(1)
-    } finally { await f.cleanup() }
+      const record = await f.record()
+      expect(record.execution?.segments).toHaveLength(2)
+      expect(record.systemIntents).toHaveLength(1)
+      expect(record.systemIntents![0].kind).toBe('prepare_replica')
+      expect(record.systemOutcomes).toHaveLength(1)
+      expect(record.systemOutcomes![0]).toMatchObject({ state: 'completed', settled: true, replica: { workflowId: f.preview.workflowId } })
+      expect(observations.mock.calls.some(([, commandId]) => commandId === 'revise')).toBe(false)
+      // The historical call still observes the source at actual consumption.
+      expect(observations.mock.calls).toHaveLength(1)
+      expect(observations.mock.calls[0][3]).toBe('before')
+    } finally { observations.mockRestore(); await f.cleanup() }
+  })
+
+  it('skips ineligible selection scans but retains both fresh-dispatch input observations', async () => {
+    const f = await fixture(false, true, true, body), observations = vi.spyOn(f.host!, 'observeAgentInputs')
+    try {
+      await f.start()
+      observations.mockClear()
+      const next = revision(f.preview, root => {
+        if (root.kind !== 'sequence' || root.blocks[1].kind !== 'branch' || root.blocks[1].then.kind !== 'call') throw new Error('fixture shape')
+        root.blocks[1].then.prompt = 'fact-v2'
+      })
+      expect((await f.revise(next)).dispatchAttempts).toBe(2)
+      expect(f.execute).toHaveBeenCalledTimes(2)
+      expect(observations.mock.calls.map(call => call[3])).toEqual(['before', 'after'])
+      const record = await f.record(), attemptId = record.intents.at(-1)!.attemptId
+      expect(observations.mock.calls.every(call => call[1] === attemptId)).toBe(true)
+      expect(record.agentInputs?.[attemptId]).toMatchObject({ before: { state: 'available' }, after: { state: 'available' } })
+    } finally { observations.mockRestore(); await f.cleanup() }
   })
 
   it('blocks a removed historical unknown before entering a new static program', async () => {

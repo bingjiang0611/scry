@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { WorkflowControlFrame, WorkflowLoopCheckpoint, WorkflowValueReference } from '../shared/workflow'
+import type { WorkflowControlFrame, WorkflowFrameReference, WorkflowLoopCheckpoint, WorkflowValueReference } from '../shared/workflow'
 import { workflowFrameCopy as copy, workflowLoopCopy } from '../shared/constants/copy'
 
 const id = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,96}$/.test(value)
@@ -64,6 +64,14 @@ export function validateWorkflowFrame(value: unknown, workflowId: string, frameI
     }
     if (new Set(value.children.map(child => (child as Record<string, unknown>).frameId)).size !== value.children.length) throw new Error(copy.invalid)
   }
+}
+
+/** Unpublished sequence draft. The caller must checkpoint it before another
+ * child, or include it in the immediate terminal parent checkpoint. */
+export function workflowSequenceProgress(frame: WorkflowControlFrame | undefined, cursor: number, child: WorkflowFrameReference | undefined): WorkflowControlFrame | undefined {
+  if (!frame) return undefined
+  if (!child || cursor !== (frame.cursor ?? 0) + 1) throw new Error(copy.invalid)
+  return { ...frame, cursor, children: [...(frame.children ?? []), child] }
 }
 
 const sameRef = (a: WorkflowValueReference | undefined, b: WorkflowValueReference | undefined): boolean =>

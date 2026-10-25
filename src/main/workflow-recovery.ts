@@ -92,7 +92,9 @@ export function validateWorkflowClaim(current: WorkflowStoreRecord | undefined, 
     assertWorkflowRevisionChange(current, next.preview, { expectedRevision: segments.at(-1)!.expectedRevision! })
     const history = next.revisions!
     const old = current.revisions ?? [{ preview: current.preview, segmentId: current.execution.segments[0].id, intentOffset: 0, outcomeOffset: 0, reuse: [] }]
-    if (history.at(-1)!.segmentId !== next.execution.epoch || history.length !== old.length + 1 || JSON.stringify(history.slice(0, -1)) !== JSON.stringify(old) || history.at(-1)!.intentOffset !== current.intents.length || history.at(-1)!.outcomeOffset !== current.outcomes.length) throw new Error(copy.ledger)
+    if (history.at(-1)!.segmentId !== next.execution.epoch || history.length !== old.length + 1 || JSON.stringify(history.slice(0, -1)) !== JSON.stringify(old) ||
+      history.at(-1)!.intentOffset !== current.intents.length || history.at(-1)!.outcomeOffset !== current.outcomes.length ||
+      history.at(-1)!.systemIntentOffset !== (current.systemIntents?.length ?? 0) || history.at(-1)!.systemOutcomeOffset !== (current.systemOutcomes?.length ?? 0)) throw new Error(copy.ledger)
   } else if (JSON.stringify(next.revisions) !== JSON.stringify(current.revisions)) throw new Error(copy.ledger)
   if (segments.at(-1)?.mode === 'retry') assertWorkflowRetryTarget(current, segments.at(-1)!.retry!)
   if (next.execution.epoch === current.execution.epoch || segments.length !== current.execution.segments.length + 1 ||

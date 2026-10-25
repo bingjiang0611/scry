@@ -7,7 +7,9 @@ import { workflowExpressionReferences } from './workflow-expressions'
 import { validateWorkflowProgram, workflowRevision } from './workflow-program'
 import { workflowFrameId } from './workflow-frames'
 import type { WorkflowStoreRecord } from './workflow-store'
-import { assertWorkflowRevisionEffects, workflowCallDefinition, workflowHasDynamicRevision, workflowRevisionBlocks } from './workflow-call-semantics'
+import { workflowCallDefinition, workflowHasDynamicRevision, workflowRevisionBlocks } from './workflow-call-semantics'
+import { workflowLegacySystemPrefixLength } from './workflow-revision-boundaries'
+export { governingWorkflowSystemPreview } from './workflow-revision-boundaries'
 
 export interface WorkflowRevisionReuse { nodeId: string; attemptId: string; reference: WorkflowFrameReference }
 export interface WorkflowGoverningRevision {
@@ -17,6 +19,9 @@ export interface WorkflowGoverningRevision {
   segmentId: string
   intentOffset: number
   outcomeOffset: number
+  /** System-ledger boundaries were added after the legacy single-revision format. */
+  systemIntentOffset?: number
+  systemOutcomeOffset?: number
   reuse: WorkflowRevisionReuse[]
 }
 export interface WorkflowRevisionTarget { expectedRevision: number }
@@ -54,7 +59,7 @@ export function validateWorkflowRevisions(record: WorkflowStoreRecord): void {
   }
   const segments = record.execution?.segments
   if (!segments || !revisions.length || revisions.length > 256) throw new Error(copy.invalid)
-  const seen = new Set<string>(), revisionSegments = new Set<string>()
+  const seen = new Set<string>(), revisionSegments = new Set<string>(), legacyPrefix = workflowLegacySystemPrefixLength(record)
   let priorSegmentIndex = -1
   for (const [index, revision] of revisions.entries()) {
     assertWorkflowFrozenRevision(revision.preview)
@@ -68,6 +73,12 @@ export function validateWorkflowRevisions(record: WorkflowStoreRecord): void {
       !Number.isSafeInteger(revision.intentOffset) || !Number.isSafeInteger(revision.outcomeOffset) || revision.intentOffset < 0 || revision.outcomeOffset < 0 ||
       revision.intentOffset > record.intents.length || revision.outcomeOffset > record.outcomes.length ||
       (index === 0 ? revision.intentOffset !== 0 || revision.outcomeOffset !== 0 : revision.intentOffset < revisions[index - 1].intentOffset || revision.outcomeOffset < revisions[index - 1].outcomeOffset) ||
+      (revision.systemIntentOffset !== undefined && (!Number.isSafeInteger(revision.systemIntentOffset) || revision.systemIntentOffset < 0 || revision.systemIntentOffset > (record.systemIntents?.length ?? 0))) ||
+      (revision.systemOutcomeOffset !== undefined && (!Number.isSafeInteger(revision.systemOutcomeOffset) || revision.systemOutcomeOffset < 0 || revision.systemOutcomeOffset > (record.systemOutcomes?.length ?? 0))) ||
+      (index === 0 ? ((revision.systemIntentOffset !== undefined && revision.systemIntentOffset !== 0) || (revision.systemOutcomeOffset !== undefined && revision.systemOutcomeOffset !== 0)) :
+        ((index >= legacyPrefix && (revision.systemIntentOffset === undefined || revision.systemOutcomeOffset === undefined)) ||
+          (revision.systemIntentOffset !== undefined && revision.systemIntentOffset < (revisions[index - 1].systemIntentOffset ?? 0)) ||
+          (revision.systemOutcomeOffset !== undefined && revision.systemOutcomeOffset < (revisions[index - 1].systemOutcomeOffset ?? 0)))) ||
       !Array.isArray(revision.reuse) || revision.reuse.length > 1000 || new Set(revision.reuse.map(entry => entry.nodeId)).size !== revision.reuse.length) throw new Error(copy.invalid)
     if ((index && !revision.approval) || (revision.approval && (revision.approval.workflowId !== record.preview.workflowId || revision.approval.programRevision !== revision.preview.programRevision))) throw new Error(copy.invalid)
     if (index) validateWorkflowRevisionReuse(record, revision)
@@ -84,7 +95,8 @@ function validateWorkflowRevisionReuse(record: WorkflowStoreRecord, revision: Wo
   const reused = new Set(revision.reuse.map(entry => entry.nodeId))
   const dependenciesReused = (id: string): boolean => {
     const node = next.nodes.get(id)
-    return !!node && (node.block.kind !== 'call' || reused.has(id)) && node.dependencies.every(dependenciesReused)
+    if (!node || node.block.kind === 'replica' || node.block.kind === 'check' || node.block.kind === 'verification' || (node.block.kind === 'call' && node.block.replica)) return false
+    return (node.block.kind !== 'call' || reused.has(id)) && node.dependencies.every(dependenciesReused)
   }
   for (const entry of revision.reuse) {
     const index = record.outcomes.findIndex(outcome => outcome.attemptId === entry.attemptId)
@@ -104,13 +116,19 @@ export function governingWorkflowPreview(record: WorkflowStoreRecord, kind: 'int
 
 /** This bounded graph uses IR references, not launch order. Container outputs
  * depend on their children; bind expressions retain transitive call inputs.
- * Dynamic and external-effect programs are deliberately rejected, not replayed. */
+ * Dynamic programs are rejected by the static selector; closed SystemSteps are
+ * represented as non-reusable dependencies rather than historical replays. */
 export function workflowStaticRevisionNodes(preview: WorkflowPlanPreview) {
   const nodes = new Map<string, { block: WorkflowBlock; path: string[]; dependencies: string[] }>()
   const visit = (block: WorkflowBlock, path: string[]) => {
-    if (!['sequence', 'parallel', 'bind', 'call', 'return'].includes(block.kind) || (block.kind === 'call' && block.replica)) throw new Error(copy.unsupported)
+    if (!['sequence', 'parallel', 'bind', 'call', 'return', 'replica', 'check', 'verification'].includes(block.kind)) throw new Error(copy.unsupported)
     const children = workflowChildBlocks(block)
-    const dependencies = block.kind === 'call' ? (block.inputRefs ?? []).map(ref => ref.nodeId) : block.kind === 'bind' ? workflowExpressionReferences(block.value) : block.kind === 'return' ? [block.ref.nodeId] : children.map(child => child.blockId)
+    const dependencies = block.kind === 'call' ? [...(block.inputRefs ?? []).map(ref => ref.nodeId), ...(block.replica ? workflowExpressionReferences(block.replica) : [])]
+      : block.kind === 'bind' ? workflowExpressionReferences(block.value) : block.kind === 'return' ? [block.ref.nodeId]
+      : block.kind === 'replica' ? (block.source ? workflowExpressionReferences(block.source) : [])
+      : block.kind === 'check' ? workflowExpressionReferences(block.replica)
+      : block.kind === 'verification' ? [...Object.values(block.required).flatMap(entry => workflowExpressionReferences(entry.result)), ...(block.baseline ? workflowExpressionReferences(block.baseline) : [])]
+      : children.map(child => child.blockId)
     nodes.set(block.blockId, { block, path, dependencies })
     for (const child of children) visit(child, block.kind === 'parallel' ? [...path, 'parallel:' + child.blockId] : path)
   }
@@ -139,8 +157,6 @@ export function assertWorkflowRevisionChange(current: WorkflowStoreRecord, previ
   if (!target || Object.keys(target).length !== 1 || !Number.isSafeInteger(target.expectedRevision) || target.expectedRevision !== current.progress.revision) throw new Error(copy.stale)
   assertWorkflowFrozenRevision(preview)
   if (preview.workflowId !== current.preview.workflowId || preview.workspace !== current.preview.workspace || preview.programRevision === current.preview.programRevision || current.revisions?.some(revision => revision.preview.programRevision === preview.programRevision)) throw new Error(copy.identity)
-  assertWorkflowRevisionEffects(current.preview)
-  assertWorkflowRevisionEffects(preview)
   if (workflowHasDynamicRevision(current.preview) || workflowHasDynamicRevision(preview)) {
     const old = workflowRevisionBlocks(current.preview), next = workflowRevisionBlocks(preview)
     for (const intent of current.intents) {

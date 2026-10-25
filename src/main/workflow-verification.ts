@@ -12,6 +12,7 @@ import { matchesWorkflowValue } from './workflow-values'
 import { normalizeWorkflowDiagnostics, compareWorkflowDiagnostics } from './workflow-verification-diagnostics'
 
 import { workflowVerificationSelectionHash } from './workflow-verification-inputs'
+import { governingWorkflowSystemPreview } from './workflow-revision-boundaries'
 
 /** Selectors never certify facts. Main joins them to same-root durable intents,
  * closed outcomes, frozen check commands and hash-checked immutable evidence. */
@@ -52,8 +53,15 @@ export class WorkflowVerification {
       if (surface) value.protectedSurface = surface.result(value.state === 'available' ? referenceStepId : undefined)
       return value
     }
-    const nodes = new Map<string, WorkflowBlock>(), pending = [record.preview.program.body]
-    while (pending.length) { const node = pending.pop()!; nodes.set(node.blockId, node); pending.push(...workflowChildBlocks(node)) }
+    const nodeCache = new WeakMap<object, Map<string, WorkflowBlock>>()
+    const nodesFor = (preview: WorkflowStoreRecord['preview']) => {
+      const cached = nodeCache.get(preview.program)
+      if (cached) return cached
+      const nodes = new Map<string, WorkflowBlock>(), pending = [preview.program.body]
+      while (pending.length) { const node = pending.pop()!; nodes.set(node.blockId, node); pending.push(...workflowChildBlocks(node)) }
+      nodeCache.set(preview.program, nodes)
+      return nodes
+    }
     const cache = new Map<string, ReturnType<WorkflowVerification['check']>>()
     const readCheck = (intent: WorkflowSystemIntent, outcome: WorkflowSystemOutcome, node: Extract<WorkflowBlock, { kind: 'check' }>) => {
       let pending = cache.get(intent.stepId)
@@ -63,8 +71,9 @@ export class WorkflowVerification {
     const rows: NonNullable<WorkflowVerificationValue['checks']> = [], diagnostics: NonNullable<WorkflowVerificationValue['diagnostics']> = { state: 'available', source: 'derived', items: [] }
     let hash: string | undefined, candidate: string | undefined, candidateReference: WorkflowReplicaReference | undefined, diagnosticBytes = 0
     for (const [key, required] of Object.entries(block.required).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
-      const selected = inputs.checks[key], origin = selected ? intents.get(selected) : undefined, outcome = selected ? outcomes.get(selected) : undefined, node = nodes.get(required.check)
-      if (!origin || origin.index >= own.index || !outcome || origin.item.nodeId !== required.check || node?.kind !== 'check') return finish()
+      const selected = inputs.checks[key], origin = selected ? intents.get(selected) : undefined, outcome = selected ? outcomes.get(selected) : undefined
+      const node = origin ? nodesFor(governingWorkflowSystemPreview(record, 'intent', origin.index)).get(required.check) : undefined
+      if (!origin || origin.item.programRevision !== own.item.programRevision || origin.index >= own.index || !outcome || origin.item.nodeId !== required.check || node?.kind !== 'check') return finish()
       const checked = await readCheck(origin.item, outcome, node)
       if (!checked || (hash !== undefined && (hash !== checked.inputHash || candidate !== JSON.stringify(checked.candidate ?? null)))) return finish({ ...result, reason: copy.binding })
       hash = checked.inputHash; candidate = JSON.stringify(checked.candidate ?? null); candidateReference = checked.candidate
@@ -84,15 +93,16 @@ export class WorkflowVerification {
     result.comparison = { state: 'unavailable', reason: copy.baseline, progress }
     if (!block.baseline) { referenceStepId = rows[0].stepId; return finish() }
     const baseline = inputs.baseline ? intents.get(inputs.baseline) : undefined, baselineOutcome = inputs.baseline ? outcomes.get(inputs.baseline) : undefined
-    if (!baseline || baseline.index >= own.index || baseline.item.kind !== 'verification' || baselineOutcome?.state !== 'completed' || !baselineOutcome.settled || !baselineOutcome.resultRef) return finish()
+    if (!baseline || baseline.item.programRevision !== own.item.programRevision || baseline.index >= own.index || baseline.item.kind !== 'verification' || baselineOutcome?.state !== 'completed' || !baselineOutcome.settled || !baselineOutcome.resultRef) return finish()
     const prior = await this.store.loadValue(record.preview.workflowId, baselineOutcome.resultRef)
     const before = this.value(record, baseline.item, prior)
-    const baselineNode = nodes.get(baseline.item.nodeId)
+    const baselineNode = nodesFor(governingWorkflowSystemPreview(record, 'intent', baseline.index)).get(baseline.item.nodeId)
     if (before.state !== 'available' || !before.checks || JSON.stringify(before.checks.map(row => [row.key, row.contractHash])) !== JSON.stringify(rows.map(row => [row.key, row.contractHash])) ||
       baselineNode?.kind !== 'verification' || JSON.stringify(baselineNode.protectedPaths) !== JSON.stringify(block.protectedPaths)) return finish()
     // Comparison needs the prior checks' source evidence, not just a green JSON.
     for (const row of before.checks) {
-      const origin = intents.get(row.stepId), outcome = outcomes.get(row.stepId), node = nodes.get(row.nodeId)
+      const origin = intents.get(row.stepId), outcome = outcomes.get(row.stepId)
+      const node = origin ? nodesFor(governingWorkflowSystemPreview(record, 'intent', origin.index)).get(row.nodeId) : undefined
       if (!origin || origin.index >= baseline.index || !outcome || node?.kind !== 'check' || origin.item.nodeId !== row.nodeId) return finish()
       const checked = await readCheck(origin.item, outcome, node)
       if (!checked || checked.passed !== row.passed || checked.contractHash !== row.contractHash || checked.inputHash !== before.inputHash || baseline.item.verificationInputs?.checks[row.key] !== row.stepId) return finish()
@@ -111,7 +121,9 @@ export class WorkflowVerification {
   }
 
   value(record: WorkflowStoreRecord, intent: WorkflowSystemIntent, evaluation: WorkflowEvaluation): WorkflowVerificationValue {
-    if (intent.programRevision !== record.preview.programRevision || intent.kind !== 'verification' || !intent.verificationInputs || evaluation.state !== 'known' || !matchesWorkflowValue(evaluation.value, workflowVerificationValueSchema)) throw new Error(copy.contract)
+    if (intent.kind !== 'verification' || !intent.verificationInputs || evaluation.state !== 'known' || !matchesWorkflowValue(evaluation.value, workflowVerificationValueSchema)) throw new Error(copy.contract)
+    const index = (record.systemIntents ?? []).findIndex(value => value.stepId === intent.stepId)
+    if (index < 0 || governingWorkflowSystemPreview(record, 'intent', index).programRevision !== intent.programRevision) throw new Error(copy.contract)
     const value = evaluation.value as WorkflowVerificationValue
     if (value.stepId !== intent.stepId || value.selectionHash !== workflowVerificationSelectionHash(intent.verificationInputs)) throw new Error(copy.contract)
     return value

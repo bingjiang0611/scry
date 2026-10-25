@@ -1,14 +1,14 @@
-import { workflowOpaqueProvenance } from './workflow-opaque-provenance'
+import { workflowOpaqueProvenance, workflowNativeProvenance, type WorkflowProvenanceContext } from './workflow-opaque-provenance'
 import type { WorkflowBlock, WorkflowEvaluation, WorkflowPlanPreview, WorkflowValue } from '../shared/workflow'
 import type { WorkflowCallContext } from '../shared/workflow-call'
 import { workflowRevisionCopy as copy } from '../shared/constants/workflow-revision-copy'
-import type { WorkflowStore, WorkflowStoreRecord } from './workflow-store'
+import type { WorkflowStore } from './workflow-store'
 import { workflowCollectionFields, workflowField, workflowValueKey } from './workflow-expressions'
 import { workflowRevisionBlocks, workflowSemanticHash, workflowSemanticValue } from './workflow-call-semantics'
 
 /** Validate historical control evidence, then normalize only its effective
  * context. No sibling AST, physical ref names or map array positions enter it. */
-export async function workflowCallContextIdentity(store: WorkflowStore, preview: WorkflowPlanPreview, contexts: WorkflowCallContext[], scopePath: string[], record?: WorkflowStoreRecord): Promise<WorkflowValue[]> {
+export async function workflowCallContextIdentity(store: WorkflowStore, preview: WorkflowPlanPreview, contexts: WorkflowCallContext[], scopePath: string[], provenance?: WorkflowProvenanceContext): Promise<WorkflowValue[]> {
   if (!Array.isArray(contexts) || contexts.length > 64) throw new Error(copy.invalid)
   const blocks = workflowRevisionBlocks(preview), result: WorkflowValue[] = []
   for (const context of contexts) {
@@ -16,9 +16,9 @@ export async function workflowCallContextIdentity(store: WorkflowStore, preview:
     if (!block || !frame || frame.nodeId !== context.blockId || frame.programRevision !== preview.programRevision || frame.scopePath.some((part, index) => scopePath[index] !== part) || scopePath.length <= frame.scopePath.length) throw new Error(copy.invalid)
     if (context.kind === 'branch') {
       if (block.kind !== 'branch' || frame.arm !== context.arm || JSON.stringify(frame.decisionRef) !== JSON.stringify(context.decisionRef)) throw new Error(copy.invalid)
-      const decision = await store.loadValue(preview.workflowId, context.decisionRef)
+      const decision = await store.loadValue(preview.workflowId, context.decisionRef), native = await workflowNativeProvenance(store, preview.workflowId, decision, provenance)
       result.push({ kind: 'branch', blockId: block.blockId, when: JSON.parse(JSON.stringify(block.when)) as WorkflowValue, decisionSemantic: frame.decisionSemanticKey ?? null, arm: context.arm,
-        decision: await workflowSemanticValue(store, preview.workflowId, decision) })
+        decision: await workflowSemanticValue(store, preview.workflowId, decision, provenance), ...(native.length ? { producer: native } : {}) })
     } else if (context.kind === 'map') {
       if (block.kind !== 'map' || !frame.sourceRef) throw new Error(copy.invalid)
       const source = await store.loadValue(preview.workflowId, frame.sourceRef), input = await store.loadValue(preview.workflowId, context.itemRef)
@@ -38,9 +38,9 @@ export async function workflowCallContextIdentity(store: WorkflowStore, preview:
           if (!child || child.revision !== entry.reference.revision || JSON.stringify(child.resultRef) !== JSON.stringify(entry.reference.resultRef)) throw new Error(copy.invalid)
           // Nested controlled outputs are inputs only when actually selected.
           // Their main map keys retain upstream key-source provenance below.
-          producer = value.state === 'known' && (value.collection || value.collectionFields?.length) ? null : await workflowOpaqueProvenance(store, preview.workflowId, value, record)
+          producer = value.state === 'known' && (value.collection || value.collectionFields?.length) ? null : await workflowOpaqueProvenance(store, preview.workflowId, value, provenance)
         }
-        if (!entry.reference && entry.valueRef) producer = await workflowOpaqueProvenance(store, preview.workflowId, value, record)
+        if (!entry.reference && entry.valueRef) producer = await workflowOpaqueProvenance(store, preview.workflowId, value, provenance)
         const fields = workflowCollectionFields(value, ['value'])
         expected = { state: 'known' as const, value: { key: entry.key, index: entry.index, state: entry.state, settled: entry.settled,
           ...(value.state === 'known' ? { value: value.value } : {}), ...(entry.error || value.state === 'unknown' ? { error: entry.error ?? (value.state === 'unknown' ? value.reason : '') } : {}) }, derivedFrom: [], ...(fields.length ? { collectionFields: fields } : {}) }
@@ -55,9 +55,13 @@ export async function workflowCallContextIdentity(store: WorkflowStore, preview:
         // Group/unique items carry their own member manifests. Key-only
         // consumers retain those opaque member origins, not unrelated groups
         // reachable through the aggregate's outer derivedFrom reference.
-        if (input.collectionFields?.length) producer = await workflowOpaqueProvenance(store, preview.workflowId, { ...input, derivedFrom: [] }, record)
+        if (input.collectionFields?.length) producer = await workflowOpaqueProvenance(store, preview.workflowId, { ...input, derivedFrom: [] }, provenance)
+        else {
+          const native = await workflowNativeProvenance(store, preview.workflowId, input, provenance)
+          producer = native.length ? native : null
+        }
       }
-      if (workflowSemanticHash(await workflowSemanticValue(store, preview.workflowId, expected)) !== workflowSemanticHash(await workflowSemanticValue(store, preview.workflowId, input))) throw new Error(copy.invalid)
+      if (workflowSemanticHash(await workflowSemanticValue(store, preview.workflowId, expected, provenance)) !== workflowSemanticHash(await workflowSemanticValue(store, preview.workflowId, input, provenance))) throw new Error(copy.invalid)
       result.push({ kind: 'map', blockId: block.blockId, item: block.item, keyPath: block.key, sourceDefinition: frame.sourceSemanticKey ?? null, key: context.key, producer })
     } else if (context.kind === 'loop') {
       if (block.kind !== 'loop' || !frame.loop || !Number.isSafeInteger(context.iteration) || context.iteration < 1 || context.iteration > block.maxIterations || frame.loop.iteration < context.iteration) throw new Error(copy.invalid)
@@ -80,7 +84,11 @@ export async function workflowCallContextIdentity(store: WorkflowStore, preview:
       if (JSON.stringify(expected) !== JSON.stringify(context.stateRefs) || JSON.stringify(frame.loop.invariantRefs) !== JSON.stringify(context.invariantRefs)) throw new Error(copy.invalid)
       const load = async (refs: typeof expected): Promise<WorkflowValue> => {
         const values: Record<string, WorkflowValue> = {}
-        for (const [name, reference] of Object.entries(refs)) values[name] = await workflowSemanticValue(store, preview.workflowId, await store.loadValue(preview.workflowId, reference))
+        for (const [name, reference] of Object.entries(refs)) {
+          const value = await store.loadValue(preview.workflowId, reference), native = await workflowNativeProvenance(store, preview.workflowId, value, provenance)
+          const semantic = await workflowSemanticValue(store, preview.workflowId, value, provenance)
+          values[name] = native.length ? { value: semantic, producer: native } : semantic
+        }
         return values
       }
       const { body: _body, initial: _initial, carry: _carry, ...control } = block

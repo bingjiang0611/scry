@@ -83,9 +83,12 @@ export class WorkflowRunnerKernel {
     if (continuation?.revision) {
       const history = continuation.record.revisions ?? [{ preview: structuredClone(continuation.record.preview), segmentId: previous[0].id, intentOffset: 0, outcomeOffset: 0, reuse: [] }]
       record.revisions = [...history, { preview: structuredClone(preview), approval: structuredClone(approval), segmentId: epoch,
-        intentOffset: record.intents.length, outcomeOffset: record.outcomes.length, reuse: continuation.revision.reuse }]
+        intentOffset: record.intents.length, outcomeOffset: record.outcomes.length,
+        systemIntentOffset: record.systemIntents?.length ?? 0, systemOutcomeOffset: record.systemOutcomes?.length ?? 0,
+        reuse: continuation.revision.reuse }]
     } else if (!continuation) {
-      record.revisions = [{ preview: structuredClone(preview), approval: structuredClone(approval), segmentId: epoch, intentOffset: 0, outcomeOffset: 0, reuse: [] }]
+      record.revisions = [{ preview: structuredClone(preview), approval: structuredClone(approval), segmentId: epoch, intentOffset: 0, outcomeOffset: 0,
+        systemIntentOffset: 0, systemOutcomeOffset: 0, reuse: [] }]
     }
     const controller: WorkflowInterpreterState = { stopped: false }
     const activeStops = new Set<() => boolean>()
@@ -119,7 +122,7 @@ export class WorkflowRunnerKernel {
     this.publish(progress)
     let finalCommitted = false
     try {
-      const control = new WorkflowControl(this.store, preview, { record, previous, generationId })
+      const control = new WorkflowControl(this.store, preview, { record, previous, generationId }, this.systems?.verification)
       const interpreter = new WorkflowInterpreter(control, controller,
         (block, scope, frame) => runWorkflowCall(this.effects, this.store, preview, control, record, controller, activeStops, block, scope, frame),
         () => this.slots.limit, (block, scope, frame) => runWorkflowSystem(this.effects, preview, block, scope, frame, control, record, controller, activeStops))

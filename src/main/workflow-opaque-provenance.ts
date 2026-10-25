@@ -1,14 +1,23 @@
-import type { WorkflowEvaluation, WorkflowValue, WorkflowValueReference } from '../shared/workflow'
+import type { WorkflowEvaluation, WorkflowValueReference, WorkflowBlock } from '../shared/workflow'
 import { workflowRevisionCopy as copy } from '../shared/constants/workflow-revision-copy'
+import { workflowCheckValueSchema, workflowReplicaValueSchema } from '../shared/workflow-system'
+import { workflowVerificationValueSchema } from '../shared/workflow-verification'
+import { workflowChildBlocks } from '../shared/workflow'
+import { matchesWorkflowValue } from './workflow-values'
+import { governingWorkflowSystemPreview } from './workflow-revision-boundaries'
+import { validateWorkflowSystemLedger } from './workflow-system-ledger'
+import type { WorkflowVerification } from './workflow-verification'
 import type { WorkflowStore, WorkflowStoreRecord } from './workflow-store'
 import { validateWorkflowValueReference } from './workflow-frames'
+
+export type WorkflowProvenanceContext = { record?: WorkflowStoreRecord; verification?: WorkflowVerification }
 
 /** Resolve main envelopes, never identically named fields inside model JSON.
  * A linear chain of committed bindings is not nested expression syntax. Walk
  * refs iteratively, retaining the distinct-reference bound without a stack cap. */
-export async function workflowOpaqueProvenance(store: WorkflowStore, workflowId: string, evaluation: WorkflowEvaluation, currentRecord?: WorkflowStoreRecord): Promise<WorkflowValue> {
+export async function workflowOpaqueProvenance(store: WorkflowStore, workflowId: string, evaluation: WorkflowEvaluation, context: WorkflowProvenanceContext = {}): Promise<string[]> {
   const leaves = new Set<string>(), visited = new Set<string>(), pending: WorkflowValueReference[] = []
-  let record: WorkflowStoreRecord | undefined = currentRecord
+  let record: WorkflowStoreRecord | undefined = context.record
   const enqueue = (reference: WorkflowValueReference) => {
     validateWorkflowValueReference(reference, workflowId)
     const identity = reference.key + ':' + reference.hash
@@ -30,6 +39,26 @@ export async function workflowOpaqueProvenance(store: WorkflowStore, workflowId:
         const match = /^value:([A-Za-z0-9_-]{1,96}):([a-f0-9]{64})$/.exec(source)
         if (!match) throw new Error(copy.invalid)
         enqueue({ workflowId, key: match[1], hash: match[2] })
+      } else if (source.startsWith('system:')) {
+        record ??= await store.load(workflowId)
+        const stepId = source.slice('system:'.length), intents = record?.systemIntents ?? [], outcomes = record?.systemOutcomes ?? []
+        const matches = intents.filter(item => item.stepId === stepId), outcomeMatches = outcomes.filter(item => item.stepId === stepId)
+        const index = intents.findIndex(item => item.stepId === stepId), intent = matches.length === 1 ? matches[0] : undefined, outcome = outcomeMatches.length === 1 ? outcomeMatches[0] : undefined
+        if (!record || !intent || !outcome || !outcome.settled || outcome.state !== 'completed' || !outcome.resultRef || outcome.resultRef.key !== stepId) throw new Error(copy.invalid)
+        validateWorkflowSystemLedger(record)
+        const canonical = await store.loadValue(workflowId, outcome.resultRef)
+        if (JSON.stringify(canonical) !== JSON.stringify(value) || canonical.state !== 'known' || !canonical.derivedFrom.includes('system:' + stepId)) throw new Error(copy.invalid)
+        const preview = governingWorkflowSystemPreview(record, 'intent', index), pendingNodes: WorkflowBlock[] = [preview.program.body], nodes = new Map<string, WorkflowBlock>()
+        while (pendingNodes.length) { const node = pendingNodes.pop()!; nodes.set(node.blockId, node); pendingNodes.push(...workflowChildBlocks(node)) }
+        const node = nodes.get(intent.nodeId), schema = intent.kind === 'prepare_replica' ? workflowReplicaValueSchema : intent.kind === 'check' ? workflowCheckValueSchema : workflowVerificationValueSchema
+        if ((intent.kind === 'prepare_replica' && node?.kind !== 'replica') || (intent.kind === 'check' && node?.kind !== 'check') || (intent.kind === 'verification' && node?.kind !== 'verification') || !matchesWorkflowValue(canonical.value, schema)) throw new Error(copy.invalid)
+        if (intent.kind === 'prepare_replica' && (JSON.stringify(canonical.replica) !== JSON.stringify(outcome.replica) || JSON.stringify(canonical.value) !== JSON.stringify(outcome.replica))) throw new Error(copy.invalid)
+        if (intent.kind === 'verification' && node?.kind === 'verification') {
+          if (!context.verification || JSON.stringify(await context.verification.execute(record, node, stepId)) !== JSON.stringify(canonical.value)) throw new Error(copy.invalid)
+        }
+        // Include the immutable result hash. Equal JSON from a reexecuted native
+        // step is still a different opaque source and cannot preserve reuse.
+        leaves.add(JSON.stringify(['system', intent.programRevision, stepId, outcome.resultRef.hash]))
       }
     }
     const collections = value.state === 'known' ? [...(value.collection ? [value.collection] : []), ...(value.collectionFields ?? []).map(field => field.collection)] : []
@@ -49,4 +78,12 @@ export async function workflowOpaqueProvenance(store: WorkflowStore, workflowId:
     value = await store.loadValue(workflowId, reference)
   }
   return [...leaves].sort()
+}
+
+/** Ordinary JSON equality never erases a real native producer. Keep this
+ * separate from ordinary attempt lineage: only SystemSteps are always fresh. */
+export async function workflowNativeProvenance(store: WorkflowStore, workflowId: string, value: WorkflowEvaluation, context: WorkflowProvenanceContext = {}): Promise<string[]> {
+  const record = context.record ?? await store.load(workflowId)
+  if (!record?.systemIntents?.length) return []
+  return (await workflowOpaqueProvenance(store, workflowId, value, { ...context, record })).filter(source => JSON.parse(source)[0] === 'system')
 }

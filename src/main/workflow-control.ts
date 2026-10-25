@@ -1,6 +1,8 @@
 import type { WorkflowCallContext } from '../shared/workflow-call'
 import { WorkflowCallReuse } from './workflow-call-reuse'
-import { workflowBindingSemantic, workflowRevisionBlocks, workflowExpressionSource, workflowExpressionSemantic, workflowProducerDefinition, workflowSemanticHash, workflowCallDefinition } from './workflow-call-semantics'
+import type { WorkflowVerification } from './workflow-verification'
+import type { WorkflowProvenanceContext } from './workflow-opaque-provenance'
+import { workflowBindingSemantic, workflowExpressionSource, workflowExpressionSemantic, workflowProducerDefinition, workflowSemanticHash, workflowCallDefinition } from './workflow-call-semantics'
 import { WorkflowControlRecovery } from './workflow-control-recovery'
 import { createHash } from 'node:crypto'
 import type { WorkflowAttemptOutcome, WorkflowBlock, WorkflowControlFrame, WorkflowEvaluation, WorkflowExpression, WorkflowFrameReference, WorkflowPlanPreview } from '../shared/workflow'
@@ -8,7 +10,7 @@ import { workflowChildBlocks } from '../shared/workflow'
 import { workflowExpressionCopy, workflowFrameCopy, workflowRecoveryCopy } from '../shared/constants/copy'
 import { workflowExpressionReferences } from './workflow-expressions'
 
-import { workflowFrameId } from './workflow-frames'
+import { workflowFrameId, workflowSequenceProgress } from './workflow-frames'
 import { workflowPendingRetry, workflowRetryBoundary } from './workflow-retry'
 import type { WorkflowExecutionOwnership, WorkflowStore, WorkflowStoreRecord } from './workflow-store'
 
@@ -31,12 +33,12 @@ export class WorkflowControl extends WorkflowControlRecovery {
   readonly framed: boolean
   readonly root: WorkflowControlScope
   private readonly callReuse: WorkflowCallReuse
-  private readonly semanticCalls: boolean
+  private readonly provenance: WorkflowProvenanceContext
   constructor(store: WorkflowStore, preview: WorkflowPlanPreview,
-    execution?: { record: WorkflowStoreRecord; previous: WorkflowExecutionOwnership['segments']; generationId?: string }) {
+    execution?: { record: WorkflowStoreRecord; previous: WorkflowExecutionOwnership['segments']; generationId?: string }, verification?: WorkflowVerification) {
     super(store, preview, execution)
-    this.callReuse = new WorkflowCallReuse(store, preview, execution?.record)
-    this.semanticCalls = [...workflowRevisionBlocks(preview).values()].every(block => !['replica', 'check', 'verification'].includes(block.kind) && !(block.kind === 'call' && block.replica))
+    this.provenance = { record: execution?.record, verification }
+    this.callReuse = new WorkflowCallReuse(store, preview, execution?.record, verification)
     const pending = [preview.program.body]
     let framed = false
     while (pending.length) {
@@ -107,7 +109,7 @@ export class WorkflowControl extends WorkflowControlRecovery {
       frameId, nodeId: block.blockId, scopePath: scope.path, inputKey, phase: 'entered',
       ...(this.execution ? { executionEpoch: this.execution.record.execution!.epoch } : {}), ...(this.execution?.generationId ? { generationId: this.execution.generationId } : {}),
       ...(origin ? { origin: { frameId: origin.frameId, revision: origin.revision } } : {}) }
-    if (captureCall && this.semanticCalls && !scope.legacyInputs && block.kind === 'call') {
+    if (captureCall && !scope.legacyInputs && block.kind === 'call' && !block.replica) {
       Object.assign(input, await this.callReuse.inputs(block, scope, input))
       for (const prior of origins) if (prior.programRevision === input.programRevision && prior.callInputKey && prior.callInputKey !== input.callInputKey) throw new Error(workflowRecoveryCopy.frame)
       const selection = origins.find(prior => prior.callReuse)?.callReuse
@@ -137,8 +139,20 @@ export class WorkflowControl extends WorkflowControlRecovery {
       } else {
         if (origin?.resultRef && (block.kind === 'call' || block.kind === 'check' || block.kind === 'replica' || block.kind === 'verification')) throw new Error(workflowRecoveryCopy.frame)
       }
+      if (!reference && this.execution && phase === 'completed' && (block.kind === 'replica' || block.kind === 'check' || block.kind === 'verification')) {
+        const record = this.execution.record, taskId = this.preview.workflowId + ':' + workflowFrameId(block.blockId, scope.path) + ':' + block.blockId
+        const intent = record.systemIntents?.findLast(item => item.taskId === taskId && item.programRevision === frame.programRevision)
+        const outcome = record.systemOutcomes?.find(item => item.stepId === intent?.stepId)
+        if (!intent || intent.nodeId !== block.blockId || intent.kind !== (block.kind === 'replica' ? 'prepare_replica' : block.kind) || outcome?.taskId !== taskId || outcome.state !== 'completed' || !outcome.resultRef || outcome.resultRef.key !== intent.stepId) throw new Error(workflowRecoveryCopy.frame)
+        // The effect already durably committed this main-issued result. Publish
+        // its exact reference under normal frame CAS/directory synchronization;
+        // do not write a second copy or promote its separate settlement status.
+        const canonical = await this.store.loadValue(this.preview.workflowId, outcome.resultRef)
+        if (digest(canonical) !== digest(value)) throw new Error(workflowRecoveryCopy.frame)
+        reference = outcome.resultRef
+      }
       const { revision, ...input } = frame
-      const resultSemanticKey = this.semanticCalls && phase === 'completed' ? await workflowBindingSemantic(this.store, this.preview, block, scope, value, frame.callInputKey) : undefined
+      const resultSemanticKey = phase === 'completed' ? await workflowBindingSemantic(this.store, this.preview, block, scope, value, frame.callInputKey, this.provenance) : undefined
       const nextInput = { ...input, phase, ...(reference ? { resultRef: reference } : {}), ...(resultSemanticKey ? { resultSemanticKey } : {}), ...(reportPartial ? { continuation: 'report_partial' as const } : {}), ...(value.state === 'unknown' ? { reason: value.reason.slice(0, 4096) } : {}) }
       completed = reference
         ? await this.store.saveFrame(nextInput, revision)
@@ -150,7 +164,7 @@ export class WorkflowControl extends WorkflowControlRecovery {
     // rather than copying the whole transitive history into every checkpoint.
     const result = reference ? { ...value, derivedFrom: [`value:${reference.key}:${reference.hash}`] } : value
     this.bind(scope, block.blockId, result, block.kind === 'call' && frame?.callInputKey ? workflowSemanticHash({ definition: workflowCallDefinition(this.preview, block), inputs: frame.callInputKey, attempt: value.derivedFrom }) : completed?.resultSemanticKey)
-    if (this.semanticCalls) (scope.semanticDefinitions ??= new Map()).set(block.blockId, workflowProducerDefinition(this.preview, block, scope, value, frame?.sourceSemanticKey))
+    ;(scope.semanticDefinitions ??= new Map()).set(block.blockId, workflowProducerDefinition(this.preview, block, scope, value, frame?.sourceSemanticKey))
     if (block.kind === 'parallel') {
       const fields = new Map<string, string>()
       for (const child of block.blocks) {
@@ -162,7 +176,7 @@ export class WorkflowControl extends WorkflowControlRecovery {
     return completed
   }
   expressionSource(expression: WorkflowExpression, scope: WorkflowControlScope) { return workflowExpressionSource(expression, scope) }
-  expressionSemantic(expression: WorkflowExpression, scope: WorkflowControlScope, value: WorkflowEvaluation) { return workflowExpressionSemantic(this.store, this.preview, expression, scope, value) }
+  expressionSemantic(expression: WorkflowExpression, scope: WorkflowControlScope, value: WorkflowEvaluation) { return workflowExpressionSemantic(this.store, this.preview, expression, scope, value, this.provenance) }
   async selectedCall(frame: WorkflowControlFrame): Promise<WorkflowAttemptOutcome | undefined> {
     const outcome = await this.callReuse.validateSelection(frame)
     if (frame.callReuse) {
@@ -173,9 +187,9 @@ export class WorkflowControl extends WorkflowControlRecovery {
     }
     return outcome
   }
-  async selectCall(frame: WorkflowControlFrame, current: import('./workflow-agent-inputs').WorkflowAgentInputObservation | undefined): Promise<WorkflowAttemptOutcome | undefined> {
+  async selectCall(frame: WorkflowControlFrame, observe: () => Promise<import('./workflow-agent-inputs').WorkflowAgentInputObservation | undefined>): Promise<WorkflowAttemptOutcome | undefined> {
     if (frame.callReuse) return this.selectedCall(frame)
-    const selection = await this.callReuse.select(frame, current)
+    const selection = await this.callReuse.select(frame, observe)
     if (!selection) return undefined
     const { revision, ...input } = frame
     const selected = await this.store.saveFrame({ ...input, callReuse: selection }, revision)
@@ -203,10 +217,10 @@ export class WorkflowControl extends WorkflowControlRecovery {
       { field: 'sourceRef', key: digest([frame.frameId, 'source']), evaluation: value })
   }
   async advanceSequence(frame: WorkflowControlFrame | undefined, cursor: number, child: WorkflowFrameReference | undefined): Promise<WorkflowControlFrame | undefined> {
-    if (!frame) return undefined
-    if (!child || cursor !== (frame.cursor ?? 0) + 1) throw new Error(workflowFrameCopy.invalid)
-    const { revision, ...input } = frame
-    return this.store.saveFrame({ ...input, cursor, children: [...(frame.children ?? []), child] }, revision)
+    const next = workflowSequenceProgress(frame, cursor, child)
+    if (!next) return undefined
+    const { revision, ...input } = next
+    return this.store.saveFrame(input, revision)
   }
   async skip(block: WorkflowBlock, scope: WorkflowControlScope): Promise<void> {
     const frame = await this.enter(block, scope, false)
