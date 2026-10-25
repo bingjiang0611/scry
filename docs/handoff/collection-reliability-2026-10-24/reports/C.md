@@ -260,3 +260,48 @@ Qoder 可在独立 workspace 用同一目录探针，子目录启动 `qodercli`�
 5. **全局诊断与特殊 socket（审查方）**：用户级 bridge-not-found 日志暂不汇总/轮转；显式超长 socket 仍走 CLI。若这两项要扩展，在核验意见中明确范围。
 
 以上开放项均未被悄悄视为成功。C1/C2/C3 标为待核验，等待审查和用户验证；不进入 D。
+
+## 核验意见（审查方，2026-10-25）
+
+**结论：C2 已核验；C3 已核验（fixture 范围，真实 Provider 待用户实测）；C1 需修改（VC1：stale socket 回归）。**
+
+### 复跑
+
+- 红测在各自的测试提交上复现：`78d599f` hook-fallback 2 个失败；`3c5f9ac` hook-socket-path 2 个失败、2 个通过；`ac1104b` hook-command 9 个失败。与报告一致。
+- HEAD `04fcaf6`（Linux/Node 22）：三个新测试文件，加上 workspace-init、scry.test 和 `src/core/turn-recorder`，451/451 通过。没有跑全量；`src/main/git.test.ts` 那条失败与本批无关（无 diff），按报告单列。
+
+### VC1（必改）：daemon 崩溃或重启后留下的 socket 让所有事件只进 inbox、不再拉起 daemon
+
+- 机制：shell 只用 `-S` 判断 socket 文件存在。daemon 被 SIGKILL、OOM 或机器重启之后，`$workspace/.scry/recorder-v1.sock` 这个文件还在，但没有进程在监听，curl 立即以 rc=7（连接失败）返回。新代码把所有非 200 都当成「投递结果未知」，设置 `SCRY_RECORDER_DAEMON_TRIED=1`；CLI 随后只入队（`queueOnly`），并且跳过 `startRecorderDaemon`（`scry.ts:142-170`）。下一个事件遇到的是同一个 stale socket，于是同样只入队。没有任何东西会去重放 inbox，除非有人手动执行 recover 或 restart。
+- 证实（临时探针，已删除，未提交）：用 python bind 一个 socket 后不监听，模拟崩溃或重启后的残留；再走生成的 shell 和真实 `runScryCli`，依次投递 UserPromptSubmit 和 Stop。
+  - HEAD：`{"tried":"1","daemonStartCalls":0,"inbox":2,"openTurn":false}`，两条事件都停在 inbox，daemon 没有被拉起。
+  - 基线 `17f22ed`：`{"daemonStartCalls":2,"inbox":0,"openTurn":false}`，事件直接应用，并尝试拉起 daemon。
+  - 本机 curl 对这种 socket 的退出码是 `000 rc=7`。
+- 影响：数据没有丢（在 inbox 里，doctor 显示 pending warn），但重启机器是最常见的情况。之后这台机器上这个 workspace 的所有轮次都不会自动成为 record，也不会上传，直到有人手动处理。这违背了「无人值守、多台机器」的使用场景。
+- 改法：只有在**确实可能已经送达**时才设置标记。shell 在 `code="$(curl ...)"` 之后用内建的 `rc=$?` 区分结果：
+  - rc=7（连不上）：daemon 一定没有收到这条事件。保持原来的回退：不设置标记，CLI 正常直写，并 `startRecorderDaemon`（它会清理 stale socket）。
+  - 其他非 200（超时 28、空回复 52、接收失败 56、HTTP 非 200）：投递结果未知，维持现在的 queueOnly 行为。
+- 测试：先补一个在当前实现上失败的测试，即 stale socket（无监听）时事件被应用、daemon 启动被调用、inbox 为空；再单独提交修复。原有 wedged 用例保持不变。
+
+### VC2（建议，可与 VC1 一起做）：pointer 目标加属主检查
+
+`.scry/recorder-socket-path` 的内容会被 shell 直接采用，hook payload（包括 prompt）会 POST 到它指向的 socket。建议在 `[ -S "$recorded_socket" ]` 之外再加 `[ -O "$recorded_socket" ]`（test 内建，不新增进程），只接受当前用户拥有的 socket，避免被指向其他本机用户的 socket。同一用户下的攻击者不在信任模型保证范围内，所以这只是低成本加固，不是承诺。
+
+### C1 范围
+
+除 VC1 外，范围接受：curl 回退只发一次请求，事件先持久落入 inbox，不在同一进程里同步重做；direct/cold-start 保持原有时序，语义仍是 at-least-once；不做全模式的硬实时 deadline。报告如实纠正了「三重处理」的说法（实测是两次 POST 加一次本地 apply），这一点做得好。180 秒宽限的评估结论接受：direct 且没有 daemon 时，需要显式 recover；`status`、`doctor`、`turns list` 不会代替 recover 收尾。
+
+### C2
+
+接受。只在 listen 成功后才发布 pointer；`.scry` 是符号链接时拒绝发布并关闭本次 daemon；stale hint 只有在目标仍是 socket 时才采用；相对路径的 override 按 workspace 解析，与 Node 一致。`writeTextAtomic` 是从原实现原样抽出来的，fsync 没有变。显式超长 override 仍走 CLI，这种情况少见，可以接受。
+
+### C3
+
+- 接受。成功时只用 shell 内建向上查找，stdin 不会被提前读取，在最近的 `.git` 处停止。
+- `repair` 按 handler id 去重，三种 JSON Provider 都验证过两次 repair 结果幂等。
+- 用户级的 `bridge_not_found` 日志还没有进入 doctor，已转到 D2 处理（见 STATUS）。
+- **用户验证补一项**：bob 的主要场景是带十几个子仓库的工作区。请在 C-U2 之外，再在该类工作区的某个**子仓库**里启动 Codex 跑一轮。按现在的设计，查找会在子仓库的 `.git` 处停下，不会借用外层 workspace 的 bridge；而且 Provider 很可能根本不会加载外层的 hook 配置，那样连 skip 日志也不会有。实测结果决定 D 批次是否要处理「在子仓库启动的会话」这类覆盖缺口。
+
+### 状态
+
+M5 → 需修改（VC1）；L1 → 已核验；M6 → 已核验（待用户实测）。执行方先做 VC1（以及可选的 VC2），在本报告末尾追加「VC1 修改记录」，M5 改回「待核验」。在此之前不开始 D。

@@ -11,11 +11,11 @@
 | L2 | 开始/终态 open.json 不 fsync | A3 | 已核验 | [A 报告](reports/A.md) | 只在开始与终态边界加 sync，中间事件不变；每轮 +6 次 fsync 属必要工作；未做断电测试 |
 | H4 | inbox 重放或读取失败即删除 | B1 | 已核验 | [B 报告](reports/B.md) | 8 失败→通过；VB1 3 失败→通过（`8a29edf`→`aaee897`），sidecar 不可读时不再阻止 daemon 空闲退出，仍计 pending；VB2 人工重试文档已核验；升级 CLI 后需 `recorder restart` |
 | M1 | recover 被单个会话打断，投递不执行 | B2 | 已核验 | [B 报告](reports/B.md) | 5 失败→通过；逐会话 try/catch、finally 投递、daemon 日志成立；Linux/Node 22 focused 266/266 |
-| M5 | 回退链路超时与三重处理 | C1 | 待核验 | [C 报告](reports/C.md) | 部分：`78d599fc` 红测 2 fail → `b8ad9b1e` 回退只请求一次并持久入队；全模式硬 deadline / exactly-once 未承诺；direct 宽限后需显式 recover，未改 180 秒 |
-| L1 | 长路径下快路径失效 | C2 | 待核验 | [C 报告](reports/C.md) | `3c5f9acc` 2 fail → `de4baedb` 4 pass；原子发布实际 socket，真实长路径 curl 不启动 CLI；需 repair + restart |
-| M6 | 子目录启动找不到 hook 脚本 | C3 | 待核验 | [C 报告](reports/C.md) | `ac1104bc` 9 fail → `4d60564c` 通过；repair 幂等且保留 foreign hook；Codex 实测步骤见 C-U2；最终全量有 1 条未改动 Git patch 路径失败，见报告 |
+| M5 | 回退链路超时与三重处理 | C1 | 需修改 | [C 报告](reports/C.md) | 红测 2→通过；curl 回退只发一次请求并持久入 inbox，范围接受。VC1：daemon 崩溃/重启残留的 socket（curl rc=7）让所有事件只入队、不拉起 daemon，探针已证实，见核验意见 |
+| L1 | 长路径下快路径失效 | C2 | 已核验 | [C 报告](reports/C.md) | 红测 2→通过；发布实际 socket 路径，stale hint 安全；建议 VC2 加 `-O` 属主检查；需 repair + restart |
+| M6 | 子目录启动找不到 hook 脚本 | C3 | 已核验 | [C 报告](reports/C.md) | 红测 9→通过（fixture 范围）；需 repair 并重启 Provider；待用户按 C-U2 实测，另需在多仓库工作区的子仓库内启动一次 |
 | D1 | 发现深度之外的子仓库静默缺席 | D1 | 未开始 | | |
-| D2 | 每轮仓库清单与快照状态可见性 | D2 | 未开始 | | |
+| D2 | 每轮仓库清单与快照状态可见性 | D2 | 未开始 | | 另含：用户级 `bridge_not_found` 日志（C3）纳入 doctor/support-bundle |
 | H3 | daemon env 串会话（显式 UPLOAD_ENABLED=0 时会误 ACK） | E1 | 未开始 | | 用户 2026-10-25 已确认 uploader 语义，见 E.md |
 | M2 | commit hook 队头阻塞无死信 | E3 | 未开始 | | 2026-10-25 重新升为必做：新 uploader 在哈希不符、路径不符、源文件缺失时持续返回非 0，recorder 会永久停在该 sequence（`store.ts:515-521`），见 E.md |
 | M3 | ACK 身份绑定 bundle 内容指纹 | E3 | 未开始 | | 降为低优先级（只带来重复校验），可放弃 |
