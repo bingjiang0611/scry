@@ -12,7 +12,7 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 100020
+        "darwin-arm64": 0
       }
     },
     "renderer.remote-tail/merge.prefix.reads": {
