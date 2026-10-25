@@ -7,7 +7,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { runScryCli } from '../../cli/scry.js'
 import { discoverRepositories, type RecorderConfig } from './config.js'
 import { handleRecorderHook, recoverRecorder } from './recorder.js'
-import { recorderSessionRoot } from './runtime-state.js'
+import { recorderSessionRoot, type RecorderOpenTurnState } from './runtime-state.js'
 import { listRecords } from './store.js'
 
 const exec = promisify(execFile)
@@ -18,10 +18,10 @@ const config: RecorderConfig = {
   capture: { prompt: true, assistant: true, toolOutput: 'summary', diff: true, hooks: true }
 }
 
-async function workspace(): Promise<string> {
+async function workspace(nestedRepository = true): Promise<string> {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'scry-repository-coverage-')))
   roots.push(root)
-  await mkdir(join(root, 'a/b/c/.git'), { recursive: true })
+  await mkdir(join(root, nestedRepository ? 'a/b/c/.git' : 'src/features/auth'), { recursive: true })
   await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
   await writeFile(join(root, '.gitignore'), '.scry/\na/\nscry.config.json\n')
   await writeFile(join(root, 'README.md'), 'before\n')
@@ -29,6 +29,29 @@ async function workspace(): Promise<string> {
   await exec('git', ['-C', root, 'add', '.gitignore', 'README.md'])
   await exec('git', ['-C', root, '-c', 'user.name=bingjiang0611', '-c', 'user.email=307659028+bingjiang0611@users.noreply.github.com', 'commit', '-qm', 'fixture'])
   return root
+}
+
+async function recordTurn(root: string) {
+  const base = { provider: 'pi' as const, workspace: root, env: {},
+    payload: { session_id: 'coverage-session', turn_id: 'turn-1', timestamp: '2026-10-24T10:00:00.000Z' } }
+  await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: { ...base.payload, prompt: 'change README' } })
+  const open = JSON.parse(await readFile(join(recorderSessionRoot(join(root, '.scry'), 'pi', 'coverage-session'), 'open.json'), 'utf8')) as RecorderOpenTurnState
+  await writeFile(join(root, 'README.md'), 'after\n')
+  await handleRecorderHook({ ...base, event: 'Stop', payload: { ...base.payload,
+    timestamp: '2026-10-24T10:00:01.000Z', assistant_response: 'done' } })
+  const records = await listRecords(join(root, '.scry'))
+  expect(records).toHaveLength(1)
+  return { open, record: records[0] }
+}
+
+async function depthCheck(root: string) {
+  vi.stubEnv('HOME', join(root, 'isolated-home'))
+  vi.stubEnv('XDG_STATE_HOME', join(root, 'isolated-state'))
+  let output = ''
+  vi.spyOn(process.stdout, 'write').mockImplementation(chunk => { output += String(chunk); return true })
+  await runScryCli(['doctor', '--workspace', root, '--json'])
+  const result = JSON.parse(output) as { checks: Array<{ id: string; status: string; detail: string; remediation?: string }> }
+  return result.checks.find(check => check.id === 'repositories.depth')
 }
 
 afterEach(async () => {
@@ -68,7 +91,7 @@ it('bounds the doctor-only extra-depth scan and labels an incomplete probe', asy
   expect(discovery.nextDepth?.repositories.length).toBeLessThanOrEqual(128)
 }, 15_000)
 
-it('keeps a stalled closing diff unavailable and retains both the attribution gap and depth gap', async () => {
+it('keeps the real stalled-closing omission without turning the depth boundary into an omission', async () => {
   const root = await workspace()
   const base = { provider: 'claude' as const, workspace: root, env: {},
     payload: { session_id: 'expired-coverage', turn_id: 'expired', prompt: 'go', timestamp: '2000-01-01T00:00:00Z' } }
@@ -84,39 +107,55 @@ it('keeps a stalled closing diff unavailable and retains both the attribution ga
   expect(records[0].diff.value).toBeUndefined()
   expect(records[0].diff).toMatchObject({ discovery: { requestedRoots: [root], maxDepth: 2, depthLimitedDirectories: 1 } })
   expect(records[0].diff.omissionReason).toContain('baseline')
-  expect(records[0].diff.omissionReason).toContain('maxDepth=2')
+  expect(records[0].diff.omissionReason).not.toContain('maxDepth=2')
 }, 15_000)
 
-it('persists discovery coverage and marks the committed diff partial while retaining captured snapshots', async () => {
+// VD1 option A is the user-approved specification revision: a depth boundary is
+// metadata, not proof of missing diff evidence. Real Git/transcript gaps still degrade.
+it('persists discovery coverage without degrading the captured diff merely for its depth boundary', async () => {
   const root = await workspace()
-  const base = { provider: 'pi' as const, workspace: root, env: {},
-    payload: { session_id: 'coverage-session', turn_id: 'turn-1', timestamp: '2026-10-24T10:00:00.000Z' } }
-  await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: { ...base.payload, prompt: 'change README' } })
-  const open = JSON.parse(await readFile(join(recorderSessionRoot(join(root, '.scry'), 'pi', 'coverage-session'), 'open.json'), 'utf8'))
-  expect.soft(open.repositoryDiscovery).toEqual({ maxDepth: 2, depthLimitedDirectories: 1 })
-  await writeFile(join(root, 'README.md'), 'after\n')
-  await handleRecorderHook({ ...base, event: 'Stop', payload: { ...base.payload,
-    timestamp: '2026-10-24T10:00:01.000Z', assistant_response: 'done' } })
-  const records = await listRecords(join(root, '.scry'))
-  expect(records).toHaveLength(1)
-  expect(records[0].diff).toMatchObject({
-    status: 'partial',
-    omissionReason: expect.stringContaining('maxDepth=2'),
+  const { open, record } = await recordTurn(root)
+  expect(open.repositoryDiscovery).toEqual({ maxDepth: 2, depthLimitedDirectories: 1 })
+  expect(record.diff).toMatchObject({
+    status: 'available', quality: 'exact',
+    discovery: { requestedRoots: [root], maxDepth: 2, depthLimitedDirectories: 1 },
     value: [expect.objectContaining({ repoRoot: root, status: 'captured' })]
   })
-  expect(records[0].diff.omissionReason).toContain('1 directory')
+  expect(record.diff.omissionReason).toBeUndefined()
 }, 15_000)
 
 it('doctor names the repository one level beyond the boundary and recommends an explicit scope decision', async () => {
   const root = await workspace()
-  vi.stubEnv('HOME', join(root, 'isolated-home'))
-  vi.stubEnv('XDG_STATE_HOME', join(root, 'isolated-state'))
-  let output = ''
-  vi.spyOn(process.stdout, 'write').mockImplementation(chunk => { output += String(chunk); return true })
-  await runScryCli(['doctor', '--workspace', root, '--json'])
-  const result = JSON.parse(output) as { checks: Array<{ id: string; status: string; detail: string; remediation?: string }> }
-  const check = result.checks.find(check => check.id === 'repositories.depth')
+  const check = await depthCheck(root)
   expect(check).toMatchObject({ status: 'warn', detail: expect.stringContaining('a/b/c') })
   expect(check?.remediation).toContain('maxDepth')
   expect(check?.remediation).toContain('exclude')
+}, 15_000)
+
+it.each([
+  { name: 'ordinary src/features/auth single repository', nested: false, status: 'pass' },
+  { name: 'root/a/b/c/.git beyond the configured depth', nested: true, status: 'warn' }
+])('$name keeps an available record and reports doctor $status', async ({ nested, status }) => {
+  const root = await workspace(nested)
+  const { record } = await recordTurn(root)
+  expect.soft(record.diff.status).toBe('available')
+  expect.soft(record.diff.omissionReason).toBeUndefined()
+  expect(record.diff.discovery).toEqual({ requestedRoots: [root], maxDepth: 2, depthLimitedDirectories: 1 })
+  const check = await depthCheck(root)
+  expect(check?.status).toBe(status)
+  if (nested) expect(check?.detail).toContain('a/b/c')
+  else expect(check?.remediation).toBeUndefined()
+}, 15_000)
+
+it('passes an incomplete next-depth probe with no observed repository and discloses its limits', async () => {
+  const root = await workspace(false)
+  await Promise.all(Array.from({ length: 128 }, (_, i) => mkdir(join(root, 'src/features', `entry-${i}`))))
+  expect(await discoverRepositories(root, config, true)).toMatchObject({
+    depthLimitedDirectories: 1, nextDepth: { repositories: [], incomplete: true }
+  })
+  const check = await depthCheck(root)
+  expect.soft(check?.status).toBe('pass')
+  expect(check?.detail).toContain('probe incomplete')
+  expect(check?.detail).toContain('32 directories / 128 entries')
+  expect(check?.remediation).toBeUndefined()
 }, 15_000)
