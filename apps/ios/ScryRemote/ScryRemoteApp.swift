@@ -33,6 +33,7 @@ struct RootView: View {
 
   private var run: RemoteRunStore { model.route == .newSession ? targets.newTaskStore : targets.selectedStore }
   @Environment(\.scenePhase) private var scenePhase
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     Group {
@@ -107,7 +108,7 @@ struct RootView: View {
     // Route replacement can remove a focused TextField while the system is
     // resizing for its keyboard. An implicit animation of the entire root
     // loops SwiftUI layout on iOS 26.5; keep page replacement unanimated.
-    .animation(.easeInOut(duration: 0.2), value: model.canShowWorkspace)
+    .animation(reduceMotion ? nil : Motion.animation(.select, reduceMotion: false), value: model.canShowWorkspace)
     // The run channel is the honest source of reachability: reflect a real
     // successful/failed host exchange into the paired link status so the UI never
     // shows "offline" while sending actually works.
