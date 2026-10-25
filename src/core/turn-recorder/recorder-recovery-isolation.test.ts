@@ -81,7 +81,10 @@ describe('recorder recovery session isolation', () => {
     expect.soft((await listRecords(f.dataRoot)).map((record) => record.sessionId)).toEqual(['s2'])
     expect(JSON.parse(await readFile(first, 'utf8')).status).toBe('closing')
     await expect.soft(notifications(f.capture)).resolves.toEqual([expect.objectContaining({ sessionId: 's2' })])
-    expect(await readHealth(f.dataRoot)).toMatchObject({ pendingCount: 1, droppedEvents: 0, lastError: expect.stringContaining('s1 finalize failure') })
+    expect(await readHealth(f.dataRoot)).toMatchObject({
+      pendingCount: 1, droppedEvents: 0,
+      lastError: { at: expect.any(String), message: expect.stringContaining('s1 finalize failure') }
+    })
     expect(await readFile(join(f.dataRoot, 'logs', 'recorder.log'), 'utf8')).toContain('s1 finalize failure')
     faults.finalize = false
     await expect(recoverRecorder(f.root, {})).resolves.toMatchObject({ recovered: 1, pending: 0 })

@@ -401,9 +401,14 @@ export async function listenRecorderDaemon(args: {
 
   const runRecovery = (): Promise<{ recovered: number; pending: number }> => {
     if (recoveryInFlight) return recoveryInFlight
-    recoveryInFlight = Promise.resolve(args.recoveryProbe?.())
+    recoveryInFlight = Promise.resolve()
+      .then(() => args.recoveryProbe?.())
       .then(() => recoverRecorder(enablement.workspaceRoot, env))
-      .catch(() => ({ recovered: 0, pending: 0 }))
+      .catch(async (error) => {
+        const message = error instanceof Error ? error.message : String(error)
+        await appendRotatingLog(daemonLog, `${new Date().toISOString()} ERROR recovery: ${message}`).catch(() => undefined)
+        return { recovered: 0, pending: 0 }
+      })
       .finally(() => { recoveryInFlight = undefined })
     return recoveryInFlight
   }
