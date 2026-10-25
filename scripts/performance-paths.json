@@ -100,6 +100,12 @@
       ],
       "sources": [
         "src/renderer/App.tsx",
+        "src/renderer/app-state.ts",
+        "src/renderer/app-interaction.tsx",
+        "src/renderer/app-view.tsx",
+        "src/renderer/app-shell.tsx",
+        "src/renderer/components/SidebarProjects.tsx",
+        "src/renderer/components/SidebarSessionRow.tsx",
         "src/main/index.ts"
       ],
       "benchmarks": [
@@ -121,6 +127,9 @@
       ],
       "sources": [
         "src/main/session-history.ts",
+        "src/renderer/app-session-actions.ts",
+        "src/renderer/app-session-runtime.ts",
+        "src/renderer/app-runtime.ts",
         "scripts/session-open-bench.mjs",
         "scripts/session-open-timing.mjs"
       ],
@@ -138,6 +147,7 @@
       ],
       "sources": [
         "src/renderer/composer-drafts.ts",
+        "src/renderer/components/chat-view/Composer.tsx",
         "src/renderer/App.tsx"
       ],
       "benchmarks": [
@@ -201,6 +211,10 @@
         "src/renderer/components/ChatTurnAssistant.tsx",
         "src/renderer/components/ChatTurnAssistantView.tsx",
         "src/renderer/components/ChatTurnTools.tsx",
+        "src/renderer/components/chat-view/transcript.tsx",
+        "scripts/renderer-transcript-profile.mjs",
+        "scripts/session-performance-ui-smoke.mjs",
+        "scripts/session-performance-sidebar-checks.mjs",
         "src/renderer/performance.bench.tsx"
       ],
       "benchmarks": [
