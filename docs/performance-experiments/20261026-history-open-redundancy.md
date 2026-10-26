@@ -144,6 +144,32 @@ node .agents/skills/scry-performance-climb/scripts/timing-run.mjs history-load-b
 也就是说：**Stage 2 能把「几秒」降到「一两百毫秒」，但真正的毫秒级必须连工具正文与 per-turn patch 一起改成按需读取**，
 那会改变 transcript 的默认显示方式，需要单独确认。
 
+## Stage 2 已实施：累积快照正文转内容引用（commit `f2ab79ab`）
+
+- 写入端（`upsertTraceArchiveTurnAsync`）把 `session_diff` / `session_diff_preview` 与
+  `turnEvidence.diff` 的每文件 patch 正文写进 `trace-content-v1` 内容库（sha256 去重），
+  turn 文件只留 `patchContent` 引用 + 2 KB 预览；小于 4 KB 的 patch 保持 inline。
+- 单轮 `turn_diff` **保持 inline**：历史页按轮展示它，换引用会让既有 UI 失去正文。
+- 读取端（`readTraceArchivePageAsync`）把**页面内最新一条** session 快照的正文按引用取回，
+  渲染层看到的行为不变；旧累积快照在页里本来就被投影裁掉，不再读回。
+- 新增测试 `src/main/trace-diff-content.test.ts`（7 项）：引用+预览落盘、单轮 diff 不动、
+  小 patch 不转、幂等、evidence 同步转、只回填最新一条、写入磁盘不再重复正文、相同正文只落一份。
+  负对照：去掉读取回填 3 项失败；去掉写入转换 4 项失败。
+
+### 真实会话压实实测（789 MB 会话的副本，未动真实数据）
+
+96 轮全部重放一遍（37 s，后台可做）：
+
+| 指标 | 压实前 | 压实后 |
+|---|---:|---:|
+| 归档磁盘体积 | 791 MB | 226 MB |
+| 最新 40 轮页读取 | 3745 ms | 396 ms |
+| 该页 turns JSON | 261 MB | 83 MB |
+| 含 inline patch 的轮次 | 52 | 52（单轮 diff 仍在） |
+
+- 本机 load average 约 15–20，毫秒数偏悲观；但同一时段同机前后对比，读取工作量降到约 1/9。
+- 剩余 83 MB 是工具正文与 per-turn diff，属于「要真正毫秒级就必须懒加载」的部分。
+
 ## 剩余限制（Stage 1 之后）
 
 页面读取仍是 302–407 MB / 40 文件，JSON.parse 无法跳过，所以「打开一次读全页」有一个物理下限。
