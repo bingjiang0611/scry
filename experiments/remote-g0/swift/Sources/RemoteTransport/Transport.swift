@@ -63,8 +63,13 @@ final class TunnelCodec: ChannelDuplexHandler, @unchecked Sendable {
   // The upgrade can deliver a close before the inner consumer exists. Retain
   // that bounded diagnostic even after pipeline teardown. Never replace a real
   // TLS failure: doing so could turn a certificate rejection into a retry.
+  // The caller can also lose the race outright: installing the inner TLS
+  // handler on a pipeline the close already tore down throws
+  // ioOnClosedChannel, which is just as anonymous as a disconnect.
   func retainingCloseCause(for error: Error) -> Error {
-    if case ProbeError.disconnected = error, let closeCause { return closeCause }
+    guard let closeCause else { return error }
+    if case ProbeError.disconnected = error { return closeCause }
+    if let channelError = error as? ChannelError, channelError == .ioOnClosedChannel || channelError == .alreadyClosed { return closeCause }
     return error
   }
 

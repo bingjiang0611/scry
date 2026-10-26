@@ -57,6 +57,14 @@ final class TunnelCodecTests: XCTestCase {
     }
     XCTAssertEqual(code, 1013)
     XCTAssertEqual(reason, "no_host_leg")
+    // The inner TLS handler can arrive after teardown and fail to install.
+    for lateInstall in [ChannelError.ioOnClosedChannel, .alreadyClosed] {
+      guard case let RelayTransportError.closed(lateCode, lateReason) = codec.retainingCloseCause(for: lateInstall) else {
+        return XCTFail("A failed late install lost the original relay close: \(lateInstall)")
+      }
+      XCTAssertEqual(lateCode, 1013)
+      XCTAssertEqual(lateReason, "no_host_leg")
+    }
     let rejected = NIOSSLError.handshakeFailed(.sslError([]))
     XCTAssertEqual(codec.retainingCloseCause(for: rejected) as? NIOSSLError, rejected)
     guard case ProbeError.invalidFrame = codec.retainingCloseCause(for: ProbeError.invalidFrame) else {
