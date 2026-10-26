@@ -6,6 +6,9 @@ enum Motion {
   static let fast = 0.16
   static let base = 0.22
   static let slow = 0.30
+  static let reducedDuration = 0.12
+  static let fade: AnyTransition = .opacity
+  static let none: AnyTransition = .identity
 
   enum Effect: CaseIterable {
     case press, select, tab, disclosureOpen, disclosureClose, rowIn, streamIn, sheet
@@ -24,7 +27,7 @@ enum Motion {
   }
 
   static func animation(_ effect: Effect, reduceMotion: Bool) -> Animation {
-    if reduceMotion { return .linear(duration: 0.12) }
+    if reduceMotion { return .linear(duration: reducedDuration) }
     switch effect {
     case .press: return .linear(duration: micro)
     case .select: return easeOut(duration: fast)

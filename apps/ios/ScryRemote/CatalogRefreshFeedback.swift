@@ -65,10 +65,10 @@ struct CatalogRefreshDetails: View {
       LabeledContent(ConnectionCopy.pairing, value: paired ? ConnectionCopy.pairingSaved : ConnectionCopy.pairingAbsent)
       LabeledContent(ConnectionCopy.connectionAddress, value: address ?? ConnectionCopy.unavailableAddress)
       LabeledContent(ConnectionCopy.listRequest, value: failure.summary)
-      Text(ConnectionCopy.lastFullRefresh(lastFullRefresh)).font(.caption).foregroundStyle(Palette.muted)
+      Text(ConnectionCopy.lastFullRefresh(lastFullRefresh)).font(.caption).foregroundStyle(Palette.dim)
       DisclosureGroup(ConnectionCopy.technicalDetails, isExpanded: $technicalExpanded) {
         Text(issues.isEmpty ? failure.technicalDetail : issues.map(\.diagnostic).joined(separator: "\n\n"))
-          .font(.caption.monospaced()).foregroundStyle(Palette.muted)
+          .font(.caption.monospaced()).foregroundStyle(Palette.dim)
           .textSelection(.enabled).padding(.top, 8)
       }
       Spacer()

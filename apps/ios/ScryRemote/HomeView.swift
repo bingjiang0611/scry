@@ -28,7 +28,7 @@ struct HomeView: View {
       if refreshToastVisible && failure == nil {
         Text(ConnectionCopy.refreshSuccess).font(Typography.meta.weight(.semibold))
           .foregroundStyle(Palette.main).padding(.horizontal, 16).frame(minHeight: 36)
-          .background(Palette.fg, in: Capsule()).padding(.top, 64).transition(.opacity)
+          .background(Palette.fg, in: Capsule()).padding(.top, 64).transition(Motion.fade)
       }
     }
     .overlay(alignment: .bottom) {
@@ -135,7 +135,7 @@ struct HomeView: View {
         }.buttonStyle(.plain).accessibilityLabel(ConnectionCopy.clearSearch)
       }
     }
-    .padding(.leading, 12).frame(height: 38)
+    .padding(.leading, 12).frame(minHeight: 38)
     .background(Palette.subtle, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.border3))
     .padding(.horizontal, 16).padding(.vertical, 6)
@@ -162,7 +162,7 @@ struct HomeView: View {
       Spacer(minLength: 4)
       PlainIcon(symbol: Symbol.gear, label: ConnectionCopy.settings) { model.route = .settings }
     }
-    .padding(.horizontal, 16).frame(height: 48)
+    .padding(.horizontal, 16).frame(minHeight: 48)
   }
 
   private var hostChip: some View {
@@ -170,7 +170,7 @@ struct HomeView: View {
       if refreshing {
         ProgressView().controlSize(.mini).accessibilityLabel(ConnectionCopy.refreshing)
       } else {
-        Circle().fill(run.hasConnection ? Palette.ok : Palette.dim2).frame(width: 7, height: 7)
+        Circle().fill(run.hasConnection ? Palette.ok : Palette.dim2).frame(width: 7, height: 7).accessibilityHidden(true)
       }
       Text(targets.filterLabel).font(Typography.headerTitle).lineLimit(1)
       Image(systemName: Symbol.chevrons).font(Typography.meta).foregroundStyle(Palette.dim)

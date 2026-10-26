@@ -10,6 +10,7 @@ struct RemoteQuestionSheet: View {
   let onCancel: () -> Void
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @State private var answers: [String: String]
   @State private var selections: [String: Set<String>]
 
@@ -103,11 +104,10 @@ struct RemoteQuestionSheet: View {
           Text(error).font(Typography.meta).foregroundStyle(Palette.bad)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        GeometryReader { geometry in
-          HStack(spacing: 10) {
+        QuestionActionsLayout(stacked: dynamicTypeSize.isAccessibilitySize) {
             Button(action: onCancel) {
               Text(SheetCopy.cancelRequest).font(Typography.rowTitle.weight(.semibold)).foregroundStyle(Palette.fg)
-                .frame(width: (geometry.size.width - 10) / 2.4, height: 48)
+                .frame(maxWidth: .infinity, minHeight: 48)
                 .background(Palette.panel, in: RoundedRectangle(cornerRadius: 14))
                 .overlay(RoundedRectangle(cornerRadius: 14).stroke(Palette.border2, lineWidth: 1))
                 .contentShape(RoundedRectangle(cornerRadius: 14))
@@ -115,17 +115,15 @@ struct RemoteQuestionSheet: View {
             .disabled(submitting).accessibilityIdentifier("question-cancel")
             Button { onAnswer(resolvedAnswers) } label: {
               Text(submitting ? SheetCopy.submitting : SheetCopy.submit)
-                .font(Typography.rowTitle.weight(.semibold)).foregroundStyle(.white)
+                .font(Typography.rowTitle.weight(.semibold)).foregroundStyle(Palette.onAccent)
                 .frame(maxWidth: .infinity, minHeight: 48)
-                .background(Palette.accent, in: RoundedRectangle(cornerRadius: 14))
+                .background(Palette.accentFill, in: RoundedRectangle(cornerRadius: 14))
                 .opacity(submitting || !complete ? 0.5 : 1)
                 .contentShape(RoundedRectangle(cornerRadius: 14))
             }
             .disabled(submitting || !complete).accessibilityIdentifier("question-submit")
-          }
-          .buttonStyle(.plain)
         }
-        .frame(height: 48)
+        .buttonStyle(.plain)
       }
       .padding(16)
     }
@@ -171,5 +169,33 @@ struct RemoteQuestionSheet: View {
       .stroke(selected ? Palette.accent : Palette.border, lineWidth: selected ? 1.5 : 1))
     .contentShape(RoundedRectangle(cornerRadius: 12))
     .animation(Motion.animation(.select, reduceMotion: reduceMotion), value: selected)
+  }
+}
+
+// Preserve the default 1:1.4 widths, but measure intrinsic text height at every text size.
+private struct QuestionActionsLayout: Layout {
+  let stacked: Bool
+
+  private func sizes(width: CGFloat, subviews: Subviews) -> [CGSize] {
+    subviews.enumerated().map { index, view in
+      let proposedWidth = stacked ? width : (width - 10) * (index == 0 ? 1 : 1.4) / 2.4
+      return view.sizeThatFits(.init(width: proposedWidth, height: nil))
+    }
+  }
+
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    let width = proposal.width ?? subviews.map { $0.sizeThatFits(.unspecified).width }.reduce(10, +)
+    let measured = sizes(width: width, subviews: subviews)
+    return CGSize(width: width, height: stacked ? measured.reduce(10) { $0 + $1.height } : measured.map(\.height).max() ?? 0)
+  }
+
+  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    let measured = sizes(width: bounds.width, subviews: subviews)
+    var origin = bounds.origin
+    for (index, view) in subviews.enumerated() {
+      let size = measured[index]
+      view.place(at: origin, anchor: .topLeading, proposal: .init(width: size.width, height: stacked ? size.height : bounds.height))
+      if stacked { origin.y += size.height + 10 } else { origin.x += size.width + 10 }
+    }
   }
 }

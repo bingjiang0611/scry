@@ -21,6 +21,8 @@ enum Palette {
   static let dim = adaptive(dark: 0xB5B5AF, light: 0x62625E)
   static let dim2 = adaptive(dark: 0x8D8D87, light: 0x62625E)
   static let accent = adaptive(dark: 0x5B9CFF, light: 0x3F7EE8)
+  static let accentFill = adaptive(dark: 0x2F6AD8, light: 0x2F6AD8)
+  static let onAccent = adaptive(dark: 0xFFFFFF, light: 0xFFFFFF)
   static let accentSoft = adaptive(dark: 0x5B9CFF, light: 0x3F7EE8, darkAlpha: 0.12, lightAlpha: 0.09)
   static let ok = adaptive(dark: 0x69CC93, light: 0x18794E)
   static let warn = adaptive(dark: 0xEFB958, light: 0x94620B)
@@ -44,25 +46,6 @@ enum Palette {
     }
   }
 
-  // R2–R4 迁移后删除。
-  static let ink = fg
-  static let muted = dim
-  static let faint = dim2
-  static let line = border
-  static let blue = accent
-  static let green = ok
-  static let amber = warn
-  static let surface = main
-  static let canvas = panel2
-  static let message = panel2
-  static let glass = panel
-  static let noticeBg = panel2
-  static let noticeInk = dim
-  static let warnBg = warn.opacity(0.12)
-  static let warnInk = warn
-  static let positive = ok
-  static let negative = bad
-
   private static func adaptive(dark: UInt32, light: UInt32, darkAlpha: CGFloat = 1, lightAlpha: CGFloat = 1) -> Color {
     #if canImport(UIKit)
     return Color(uiColor: UIColor { traits in
@@ -85,7 +68,7 @@ enum Palette {
   }
 }
 
-// Semantic text styles keep Dynamic Type. Adoption belongs to R2–R4.
+// Semantic text styles keep Dynamic Type.
 enum Typography {
   static let reply: Font = .callout
   static let replyLineSpacing: CGFloat = 5
@@ -113,10 +96,10 @@ struct GlassBackground: ViewModifier {
   var cornerRadius: CGFloat
   func body(content: Content) -> some View {
     content
-      .background(Palette.glass, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+      .background(Palette.panel, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
       .overlay(
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-          .strokeBorder(Palette.line, lineWidth: 1)
+          .strokeBorder(Palette.border, lineWidth: 1)
       )
   }
 }

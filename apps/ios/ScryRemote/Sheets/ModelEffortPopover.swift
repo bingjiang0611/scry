@@ -9,6 +9,7 @@ struct ModelEffortPopover: View {
   let onModel: ((String?) -> Void)?
   let onEffort: ((String?) -> Void)?
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @Environment(\.colorScheme) private var colorScheme
   @Namespace private var selection
   @State private var appeared = false
@@ -47,7 +48,7 @@ struct ModelEffortPopover: View {
       if !activeEfforts.isEmpty {
         Rectangle().fill(Palette.border3).frame(height: 1)
         Text(ConnectionCopy.reasoningEffort).font(Typography.meta).foregroundStyle(Palette.dim2)
-        if activeEfforts.count + 1 <= 5 {
+        if activeEfforts.count + 1 <= 5 && !dynamicTypeSize.isAccessibilitySize {
           HStack(spacing: 0) {
             effortSegment(ConnectionCopy.defaultEffort, id: nil)
             ForEach(activeEfforts, id: \.id) { option in effortSegment(option.label, id: option.id) }
@@ -111,7 +112,7 @@ struct ModelEffortPopover: View {
         .background {
           if selectedEffort == id {
             if reduceMotion {
-              RoundedRectangle(cornerRadius: 10).fill(Palette.panel3).transition(.opacity)
+              RoundedRectangle(cornerRadius: 10).fill(Palette.panel3).transition(Motion.fade)
             } else {
               RoundedRectangle(cornerRadius: 10).fill(Palette.panel3)
                 .matchedGeometryEffect(id: "effort", in: selection)

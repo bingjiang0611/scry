@@ -11,6 +11,7 @@ spec = (root / 'docs/handoff/ios-redesign-2026-10-25/SPEC.md').read_text()
 colors = {name: (int(dark, 16), int(light, 16)) for name, dark, light in
           re.findall(r'\| `(\w+)` \| `#([0-9a-f]{6})` \| `#([0-9a-f]{6})`', spec)}
 assert len(colors) == 21
+colors.update(accentFill=(0x2f6ad8, 0x2f6ad8), onAccent=(0xffffff, 0xffffff))
 checks = []
 for name, values in colors.items():
     for mode, value in zip(('dark', 'light'), values):
@@ -47,8 +48,6 @@ import AppKit
     precondition(Palette.provider("opencode") == Palette.providerOpenCode)
     precondition(Palette.provider("pi") == Palette.providerPi)
     precondition(Palette.provider("unknown") == Palette.dim2)
-    precondition(Palette.ink == Palette.fg && Palette.surface == Palette.main)
-    precondition(Palette.canvas == Palette.panel2 && Palette.warnBg == Palette.warn.opacity(0.12))
     precondition(Motion.micro == 0.10 && Motion.fast == 0.16 && Motion.base == 0.22 && Motion.slow == 0.30)
     let expected: [(Motion.Effect, Animation)] = [
       (.press, .linear(duration: 0.10)),
@@ -75,7 +74,7 @@ import AppKit
     precondition(Typography.mono == .system(.footnote, design: .monospaced))
     precondition(Typography.codeBlock == .system(.caption, design: .monospaced))
     precondition(Typography.sheetTitle == .headline)
-    print("PASS 48 color resolutions, provider mapping, aliases, 8 motion presets/reduced motion, row delay bounds, 9 font roles")
+    print("PASS 52 color resolutions, provider mapping, 8 motion presets/reduced motion, row delay bounds, 9 font roles")
   }
 }
 '''

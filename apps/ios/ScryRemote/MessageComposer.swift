@@ -45,6 +45,7 @@ struct MessageComposer: View {
   @FocusState private var inputFocused: Bool
   @Environment(\.colorScheme) private var colorScheme
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
   private let maxCount = DraftAttachment.maxCount
   private let maxEachBytes = DraftAttachment.maxEachBytes
@@ -95,30 +96,27 @@ struct MessageComposer: View {
           .focused($inputFocused)
           .accessibilityIdentifier("message-input")
           .padding(.horizontal, 4).padding(.top, 12).padding(.bottom, 6)
-        HStack(spacing: 2) {
-          attachmentPermissionMenu
-          Menu { permissionItems } label: {
-            Text(permissionLabel).font(Typography.meta.weight(.medium)).foregroundStyle(Palette.dim)
-              .lineLimit(1).frame(minHeight: 44)
-          }.disabled(disabled || permissionOptions.isEmpty)
-          Spacer(minLength: 0)
-          if !modelOptions.isEmpty || !effortOptions.isEmpty || selectedModelId != nil || selectedEffort != nil { modelEffortControl }
-          if inputFocused {
-            Button { inputFocused = false } label: {
-              Image(systemName: "keyboard.chevron.compact.down").font(Typography.rowTitle)
-                .foregroundStyle(Palette.dim).frame(width: 44, height: 44).contentShape(Rectangle())
-            }.buttonStyle(.plain).accessibilityLabel(ConnectionCopy.hideKeyboard)
+        if dynamicTypeSize.isAccessibilitySize {
+          HStack(spacing: 2) {
+            attachmentPermissionMenu
+            permissionControl
+            Spacer(minLength: 0)
+            keyboardControl
           }
-          // Stop lives in the session status strip, so send never changes meaning.
-          Button(action: onSend) {
-            Image(systemName: Symbol.send).font(Typography.rowTitle.weight(.semibold))
-              .foregroundStyle(disabled || sendDisabled ? Palette.dim2 : Palette.main)
-              .frame(width: 34, height: 34)
-              .background(disabled || sendDisabled ? Palette.panel3 : Palette.fg, in: Circle())
-              .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+          HStack(spacing: 2) {
+            if hasModelControl { modelEffortControl }
+            Spacer(minLength: 0)
+            sendControl
           }
-          .buttonStyle(.plain).disabled(disabled || sendDisabled)
-          .accessibilityLabel(ConnectionCopy.sendMessage)
+        } else {
+          HStack(spacing: 2) {
+            attachmentPermissionMenu
+            permissionControl
+            Spacer(minLength: 0)
+            if hasModelControl { modelEffortControl }
+            keyboardControl
+            sendControl
+          }
         }
         if let modelSelectionIssue { Text(modelSelectionIssue).font(Typography.meta).foregroundStyle(Palette.bad) }
         if let attachmentError { Text(attachmentError).font(Typography.meta).foregroundStyle(Palette.bad) }
@@ -241,6 +239,39 @@ struct MessageComposer: View {
     }
   }
 
+  private var permissionControl: some View {
+    Menu { permissionItems } label: {
+      Text(permissionLabel).font(Typography.meta.weight(.medium)).foregroundStyle(Palette.dim)
+        .lineLimit(1).frame(minHeight: 44)
+    }.disabled(disabled || permissionOptions.isEmpty)
+  }
+
+  @ViewBuilder private var keyboardControl: some View {
+    if inputFocused {
+      Button { inputFocused = false } label: {
+        Image(systemName: "keyboard.chevron.compact.down").font(Typography.rowTitle)
+          .foregroundStyle(Palette.dim).frame(width: 44, height: 44).contentShape(Rectangle())
+      }.buttonStyle(.plain).accessibilityLabel(ConnectionCopy.hideKeyboard)
+    }
+  }
+
+  private var sendControl: some View {
+    // Stop lives in the session status strip, so send never changes meaning.
+    Button(action: onSend) {
+      Image(systemName: Symbol.send).font(Typography.rowTitle.weight(.semibold))
+        .foregroundStyle(disabled || sendDisabled ? Palette.dim2 : Palette.main)
+        .frame(width: 34, height: 34)
+        .background(disabled || sendDisabled ? Palette.panel3 : Palette.fg, in: Circle())
+        .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+    }
+    .buttonStyle(.plain).disabled(disabled || sendDisabled)
+    .accessibilityLabel(ConnectionCopy.sendMessage)
+  }
+
+  private var hasModelControl: Bool {
+    !modelOptions.isEmpty || !effortOptions.isEmpty || selectedModelId != nil || selectedEffort != nil
+  }
+
   private var modelEffortControl: some View {
     Button { showModelEffort = true } label: {
       HStack(spacing: 4) {
@@ -268,7 +299,7 @@ struct MessageComposer: View {
       Image(systemName: symbol).foregroundStyle(symbol == Symbol.folder ? Palette.dim : Palette.provider(providerId ?? ""))
       Text(label).foregroundStyle(Palette.fg).lineLimit(1)
     }
-    .font(Typography.rowTitle.weight(.medium)).padding(.horizontal, 10).frame(height: 36)
+    .font(Typography.rowTitle.weight(.medium)).padding(.horizontal, 10).frame(minHeight: 36)
     .background(Palette.subtle, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
     .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Palette.border3))
     .frame(minHeight: 44).contentShape(Rectangle())

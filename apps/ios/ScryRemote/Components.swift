@@ -48,8 +48,8 @@ struct CircleButton: View {
       Image(systemName: symbol)
         .font(Typography.reply.weight(.medium))
         .frame(width: filled ? 46 : 44, height: filled ? 46 : 44)
-        .foregroundStyle(filled ? Palette.main : Palette.fg)
-        .background(filled ? AnyShapeStyle(Palette.accent) : AnyShapeStyle(Color.clear), in: Circle())
+        .foregroundStyle(filled ? Palette.onAccent : Palette.fg)
+        .background(filled ? AnyShapeStyle(Palette.accentFill) : AnyShapeStyle(Color.clear), in: Circle())
         .contentShape(Circle())
     }
     .buttonStyle(.plain)
@@ -128,7 +128,7 @@ struct EmptyState: View {
 
 struct StatusDot: View {
   let link: HostLink
-  var body: some View { Circle().fill(color).frame(width: 7, height: 7) }
+  var body: some View { Circle().fill(color).frame(width: 7, height: 7).accessibilityHidden(true) }
   private var color: Color {
     switch link {
     case .connected: return Palette.ok
@@ -210,7 +210,7 @@ struct SessionStatusStrip: View {
 
   var body: some View {
     HStack(spacing: 9) {
-      if status.tone == .running { RunningRing(color: color) }
+      if status.tone == .running { RunningRing(color: color).accessibilityHidden(true) }
       else if status.busy { ProgressView().controlSize(.mini).tint(color) }
       else { Image(systemName: symbol).font(Typography.meta.weight(.medium)) }
       Text(status.text).fixedSize(horizontal: false, vertical: true)

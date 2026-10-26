@@ -144,11 +144,11 @@ struct ArchivedSessionRowView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
       Text(session.label.isEmpty ? ConnectionCopy.noPreview : session.label)
-        .font(.system(size: 15.5)).foregroundStyle(Palette.ink).lineLimit(2)
+        .font(.system(size: 15.5)).foregroundStyle(Palette.fg).lineLimit(2)
       Text(ConnectionCopy.rowContext(host: nil,
                                      project: session.cwd.split(separator: "/").last.map(String.init) ?? session.cwd,
                                      provider: session.providerId))
-        .font(.system(size: 11.5)).foregroundStyle(Palette.muted).lineLimit(1)
+        .font(.system(size: 11.5)).foregroundStyle(Palette.dim).lineLimit(1)
       HStack(spacing: 16) {
         Button(ConnectionCopy.actionRestore, action: onRestore)
           .font(.system(size: 13, weight: .semibold)).frame(minHeight: 44)

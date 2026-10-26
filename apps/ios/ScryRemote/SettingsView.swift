@@ -16,17 +16,17 @@ struct SettingsView: View {
       List {
         Section(ConnectionCopy.connectionSection) {
           settingRow(Symbol.laptop, ConnectionCopy.pairedMac, model.statusText(),
-                     trailing: model.link.isConnected ? Palette.green : Palette.faint) {
+                     trailing: model.link.isConnected ? Palette.ok : Palette.dim2) {
             model.route = .pair
           }
         }
-        .listRowBackground(Palette.canvas)
+        .listRowBackground(Palette.panel2)
 
         Section {
           VStack(alignment: .leading, spacing: 4) {
             Label(ConnectionCopy.localHistoryCache, systemImage: "internaldrive")
               .font(.system(size: 14.5, weight: .medium))
-            Text(ConnectionCopy.localHistoryCacheSummary).font(.system(size: 11)).foregroundStyle(Palette.muted)
+            Text(ConnectionCopy.localHistoryCacheSummary).font(.system(size: 11)).foregroundStyle(Palette.dim)
           }
           .padding(.vertical, 5)
           Button(run.historyCacheClearing ? ConnectionCopy.clearingHistoryCache : ConnectionCopy.clearHistoryCache) {
@@ -41,14 +41,14 @@ struct SettingsView: View {
           }
           .disabled(run.historyCacheClearing).frame(minHeight: 44)
           if let cacheNotice {
-            Text(cacheNotice).font(.caption).foregroundStyle(Palette.muted)
+            Text(cacheNotice).font(.caption).foregroundStyle(Palette.dim)
           }
         } header: {
           Text(ConnectionCopy.localDataSection)
         } footer: {
           Text(ConnectionCopy.localHistoryCachePolicy)
         }
-        .listRowBackground(Palette.canvas)
+        .listRowBackground(Palette.panel2)
 
         Section {
           Button { showArchived = true } label: {
@@ -56,10 +56,10 @@ struct SettingsView: View {
               Image(systemName: Symbol.archive).font(.system(size: 17)).frame(width: 22)
               VStack(alignment: .leading, spacing: 3) {
                 Text(ConnectionCopy.archivedSessions).font(.system(size: 14.5, weight: .medium))
-                Text(ConnectionCopy.archivedSessionsDetail).font(.system(size: 11)).foregroundStyle(Palette.muted)
+                Text(ConnectionCopy.archivedSessionsDetail).font(.system(size: 11)).foregroundStyle(Palette.dim)
               }
               Spacer(minLength: 8)
-              Image(systemName: Symbol.chevron).font(.system(size: 11, weight: .semibold)).foregroundStyle(Palette.faint)
+              Image(systemName: Symbol.chevron).font(.system(size: 11, weight: .semibold)).foregroundStyle(Palette.dim2)
             }
             .padding(.vertical, 4).frame(minHeight: 52).contentShape(Rectangle())
           }
@@ -69,7 +69,7 @@ struct SettingsView: View {
         } footer: {
           Text(ConnectionCopy.archivedPolicy)
         }
-        .listRowBackground(Palette.canvas)
+        .listRowBackground(Palette.panel2)
 
         Section(ConnectionCopy.securitySection) {
           settingRow(Symbol.link, ConnectionCopy.repairPairing, ConnectionCopy.repairPairingDetail) {
@@ -77,7 +77,7 @@ struct SettingsView: View {
           }
           if let error = model.destructiveActionError {
             Label(error, systemImage: "exclamationmark.circle")
-              .font(.system(size: 12)).foregroundStyle(Palette.warnInk)
+              .font(.system(size: 12)).foregroundStyle(Palette.warn)
           }
           Button(role: .destructive) { confirmUnpair = true } label: {
             Text(ConnectionCopy.clearLocalPairing)
@@ -85,19 +85,19 @@ struct SettingsView: View {
           }
           .disabled(targets.hasPendingWork || targets.recoveryUnavailable || run.historyCacheClearing)
           if targets.recoveryUnavailable {
-            Text(ConnectionCopy.targetRecoveryUnavailable).font(.caption).foregroundStyle(Palette.muted)
+            Text(ConnectionCopy.targetRecoveryUnavailable).font(.caption).foregroundStyle(Palette.dim)
           } else if targets.hasPendingWork {
-            Text(ConnectionCopy.pendingBeforeUnpair).font(.caption).foregroundStyle(Palette.muted)
+            Text(ConnectionCopy.pendingBeforeUnpair).font(.caption).foregroundStyle(Palette.dim)
           }
         }
-        .listRowBackground(Palette.canvas)
+        .listRowBackground(Palette.panel2)
       }
       .listStyle(.insetGrouped)
       .scrollContentBackground(.hidden)
       .listSectionSpacing(20)
-      .tint(Palette.blue)
+      .tint(Palette.accent)
     }
-    .background(Palette.surface)
+    .background(Palette.main)
     .sheet(isPresented: $showArchived) { ArchivedSessionsView().environment(run) }
     .confirmationDialog(ConnectionCopy.clearPairingTitle, isPresented: $confirmUnpair, titleVisibility: .visible) {
       Button(ConnectionCopy.clearPairingAction, role: .destructive) { Task { await model.destructiveUnpair(runStore: run) } }
@@ -114,11 +114,11 @@ struct SettingsView: View {
         Image(systemName: symbol).font(.system(size: 17)).frame(width: 22)
         VStack(alignment: .leading, spacing: 3) {
           Text(title).font(.system(size: 14.5, weight: .medium))
-          Text(detail).font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(3)
+          Text(detail).font(.system(size: 11)).foregroundStyle(Palette.dim).lineLimit(3)
         }
         Spacer(minLength: 8)
         if let trailing { Circle().fill(trailing).frame(width: 7, height: 7) }
-        Image(systemName: Symbol.chevron).font(.system(size: 11, weight: .semibold)).foregroundStyle(Palette.faint)
+        Image(systemName: Symbol.chevron).font(.system(size: 11, weight: .semibold)).foregroundStyle(Palette.dim2)
       }
       .padding(.vertical, 4).frame(minHeight: 52).contentShape(Rectangle())
     }

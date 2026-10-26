@@ -77,11 +77,11 @@ struct AttachmentThumbnail: View {
 
   var body: some View {
     ZStack {
-      Palette.canvas
+      Palette.panel2
       if let image {
         Image(uiImage: image).resizable().scaledToFill()
       } else {
-        Image(systemName: Symbol.photo).foregroundStyle(Palette.muted)
+        Image(systemName: Symbol.photo).foregroundStyle(Palette.dim)
       }
     }
     .frame(width: side, height: side)
@@ -120,7 +120,7 @@ struct AttachmentImagePreview: View {
           .frame(maxWidth: .infinity, maxHeight: .infinity)
           .accessibilityLabel(item.name)
       } else {
-        Text("无法显示该图片").foregroundStyle(Palette.muted).frame(maxWidth: .infinity, maxHeight: .infinity)
+        Text("无法显示该图片").foregroundStyle(Palette.dim).frame(maxWidth: .infinity, maxHeight: .infinity)
       }
       Button { dismiss() } label: {
         Image(systemName: "xmark").font(.system(size: 15, weight: .semibold)).foregroundStyle(Palette.fg)

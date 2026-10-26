@@ -62,7 +62,7 @@ extension SessionTranscriptView {
       Button(ConversationCopy.loadHistory) {
         if let s = session { run.loadCompleteHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, agentProfileId: s.agentProfileId) }
       }
-      .buttonStyle(.borderedProminent)
+      .buttonStyle(.borderedProminent).tint(Palette.accentFill).foregroundStyle(Palette.onAccent)
       .disabled(run.historySyncing)
       .accessibilityHint(ConversationCopy.loadHistoryHint)
     }
@@ -109,7 +109,8 @@ extension SessionTranscriptView {
           run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true, agentProfileId: s.agentProfileId)
         }
       }
-      .buttonStyle(.borderedProminent).frame(maxWidth: .infinity)
+      .buttonStyle(.borderedProminent).tint(Palette.accentFill).foregroundStyle(Palette.onAccent)
+      .frame(maxWidth: .infinity)
       DisclosureGroup(ConversationCopy.errorDetails) { Text(reason).font(Typography.meta).textSelection(.enabled) }
         .font(Typography.meta).foregroundStyle(Palette.dim)
       ForEach(completedTurns.flatMap { ConversationTurn.completed($0).rows(id: $0.id) }) { $0 }

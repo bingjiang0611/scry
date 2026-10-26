@@ -93,7 +93,7 @@ struct ConversationChunk: View {
       .accessibilityValue(expanded ? ConversationCopy.expanded : ConversationCopy.collapsed)
       if expanded {
         if kind == "reasoning" {
-          ConversationMarkdownText(source: text, muted: true).padding(.bottom, 10).transition(.opacity)
+          ConversationMarkdownText(source: text, muted: true).padding(.bottom, 10).transition(Motion.fade)
         } else {
           VStack(alignment: .leading, spacing: 8) {
             Text(text).font(Typography.mono).foregroundStyle(Palette.fg).textSelection(.enabled)
@@ -104,7 +104,7 @@ struct ConversationChunk: View {
             }
           }
           .frame(maxWidth: .infinity, alignment: .leading)
-          .padding(.bottom, 12).transition(.opacity)
+          .padding(.bottom, 12).transition(Motion.fade)
         }
       }
     }
@@ -137,7 +137,7 @@ struct ConversationToolGroup: View {
         .padding(.horizontal, 10)
         .background(Palette.panel2, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.border3))
-        .transition(.opacity)
+        .transition(Motion.fade)
       }
     }.conversationDisclosure(expanded)
   }
@@ -154,7 +154,7 @@ private struct ConversationDisclosure: ViewModifier {
         view.opacity(reduceMotion ? opacity : 1)
       } keyframes: { _ in
         MoveKeyframe(0)
-        LinearKeyframe(1, duration: 0.12)
+        LinearKeyframe(1, duration: Motion.reducedDuration)
       }
   }
 }
@@ -233,12 +233,12 @@ struct ConversationTurn {
     case .provider:
       HStack(spacing: 7) {
         if running { RunningRing(size: 11, color: Palette.accent) }
-        else { Circle().fill(Palette.dim2).frame(width: 6, height: 6) }
+        else { Circle().fill(Palette.dim2).frame(width: 6, height: 6).accessibilityHidden(true) }
         Text(provider).font(Typography.meta).foregroundStyle(Palette.dim2)
       }
     case let .block(block):
       blockView(block, truncated: truncated).conversationFlowBlock()
-        .transition(archived ? .identity : Motion.transition(.streamIn, reduceMotion: reduceMotion)
+        .transition(archived ? Motion.none : Motion.transition(.streamIn, reduceMotion: reduceMotion)
           .animation(Motion.animation(.streamIn, reduceMotion: reduceMotion)))
     case let .outcome(note): note.conversationFlowBlock()
     case let .notice(text): Text(text).font(Typography.meta).foregroundStyle(Palette.dim).conversationFlowBlock()

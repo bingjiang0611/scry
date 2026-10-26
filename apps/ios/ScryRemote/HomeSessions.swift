@@ -98,7 +98,7 @@ struct HomeSessions: View {
         case .projects: projects
         }
       }
-      .transition(.opacity)
+      .transition(Motion.fade)
       .homeContentFade(trigger: tab, reduceMotion: reduceMotion)
       Text(ConnectionCopy.panelProvenance(targets.filterLabel,
         readAt: targets.lastFullRefresh?.formatted(date: .omitted, time: .shortened)))
@@ -143,7 +143,7 @@ struct HomeSessions: View {
             .overlay(alignment: .bottom) {
               if tab == item {
                 if reduceMotion {
-                  Rectangle().fill(Palette.fg).frame(height: 2).transition(.opacity)
+                  Rectangle().fill(Palette.fg).frame(height: 2).transition(Motion.fade)
                 } else {
                   Rectangle().fill(Palette.fg).frame(height: 2)
                     .matchedGeometryEffect(id: "home-tab-underline", in: tabUnderline)
@@ -244,7 +244,7 @@ struct HomeSessions: View {
       }
       if expanded {
         ForEach(project.sessions) { row in sessionRow(row, indent: 18) }
-          .transition(.opacity)
+          .transition(Motion.fade)
       }
     }
     .homeContentFade(trigger: expanded, reduceMotion: reduceMotion)
@@ -275,7 +275,7 @@ private extension View {
       content.opacity(opacity)
     } keyframes: { _ in
       MoveKeyframe(reduceMotion ? 0 : 1)
-      LinearKeyframe(1, duration: 0.12)
+      LinearKeyframe(1, duration: Motion.reducedDuration)
     }
   }
 }
