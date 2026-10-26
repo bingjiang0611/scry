@@ -44,3 +44,68 @@
 ### 状态
 
 H3 → 需修改（VE1）；M4（E2）→ 已核验；M2（E3）→ 需修改（VE2）；M3 → 放弃（已接受）。执行方做 VE1 和 VE2，在本报告末尾追加「VE 修改记录」，H3、M2 改回「待核验」。
+
+## VE 修改记录（执行方，2026-10-26）
+
+审查意见原文保留在上方，不重写。本节只记录 VE1、VE2 的实际修改、验证与限制。
+
+### 提交
+
+| 顺序 | 提交 | 内容 |
+|---|---|---|
+| 0 | `4ba8148e` | 纯拆分：callback 执行提取到 `commit-hook-process.ts`；原报告归档为 `E-initial.md`。18 个声明/注释不变（`/tmp/scry-VE-split-audit.log`）。 |
+| 1 | `d71c88a7` | VE1 红测：`src/cli/hook-http-outcome.test.ts`。 |
+| 2 | `44f4ed00` | VE1 修复。 |
+| 3 | `d837ed22` | VE2 红测：`commit-delivery.test.ts`。 |
+| 4 | `2524cf11` | VE2 补充红测：CLI 重放选择、每个退避间隔前 1 ms 不计数、旧 store 断言按新规格调整。 |
+| 5 | `7631f532` | VE2 修复 + 文档。 |
+
+拆分与修复分开提交。VE2 的 `commit-delivery-ledger.ts` 是新模块，不属于既有文件提取。
+
+### VE1
+
+- 改法：`workspace-hook-sources.ts` 在 `case "$rc:$code" in 7:*|0:4??)` 时清除 `SCRY_RECORDER_DAEMON_TRIED`，其余（超时、断连、5xx）保留「结果未知」标记。未改 daemon 生产逻辑，未改动 404/409/400 在 apply 之前返回的既有事实。
+- 红测：4 个 HTTP 4xx 用例，加一条真实 stale-protocol（协议头 1）→ 当前 CLI → daemon 全链路：事件被应用、open turn 的 prompt 正确、session inbox 为空。修复前 5 failed/1 passed（`/tmp/scry-VE1-before-final.log`），修复后 6 passed（`/tmp/scry-VE1-after.log`）。
+- 红测 fixture 修正（披露）：最初断言读的是 `userText` 和全局 inbox，在修复前也没有执行到；提交前改为 typed `RecorderOpenTurnState.prompt` 与 session 级 `recorderInboxEntries()`。修改的是夹具读取位置，不是断言语义。
+
+### VE2
+
+- 退避按墙钟时间，而不是调用次数：失败后间隔 1、5、15、60 分钟，持久化 `lastFailureAt`，得出 `nextRetryAt`；首次失败到第五次至少 81 分钟。未新增后台定时进程：到期由下一次 hook、`recover` 或显式 drain 触发。
+- 逐 sequence 记账：新增 `notifications/delivery-outcomes/<fpHash>/<20 位序号>.json`，状态为 `retry`/`dead`/`delivered`/`replay`。`processedThrough` 只表示遍历位置，不是成功证明；ACK 只跨连续的持久化成功凭据前进，遇到 retry 或 dead 停止。退避中的条目本轮跳过，后续记录继续投递，不做队头阻塞。
+- 迁移：检查点仍是 schemaVersion 1，新增 `queueVersion: 2`。旧的内联 `failure`、旧次数、旧死信保留并迁移；不伪造旧等待历史。v2 状态里再出现内联 `failure` 视为损坏。旧 `processed > ACK` 但没有任何死信证据时报 `commit notification state is missing dead-letter evidence`，不当作已投递。
+- 死信重放：`scry recorder notify-retry --sequence N` 或 `--all-dead`（二选一，`--sequence` 必须正整数）。顺序是 history → replay marker → 移出活动死信并 fsync 目录 → 正常 drain；崩溃后由 marker 续做，不重复投递。历史在 `notifications/dead-letter-history/<fpHash>/<hash>.json`，保留原始失败记录。重放前照常执行 enablement 与 trust 校验，校验失败返回 3 且不改动静止死信。
+- 冷启动 redelivery 不再绕过退避：已有 retry/dead 的最新记录不会被这条路径再次调用；未 ACK 的最新记录首次失败也进入 ledger。
+- doctor：`retrying sequence N: X failed attempts (reason); next retry <ISO>`，retry 为 warn、dead 为 fail，均为 degraded 5；状态读不出来时报 unavailable，不显示成 0。
+- 阈值 5 次、callback 10 秒熔断不变。fsync、trust/指纹规则、fail-open 观测路径均未改。
+
+### 验证
+
+| 检查 | 结果 |
+|---|---|
+| VE1 红测（`d71c88a7` 实现状态） | 5 failed / 1 passed |
+| VE1 修复后 focused | 6 passed |
+| VE2 红测（`d837ed22` 实现状态） | 12 failed / 2 passed；全量 12 failed / 3992 passed / 4 skipped |
+| VE2 补充红测（`2524cf11` 实现状态） | 3 个测试文件 18 failed / 11 passed；store-1 调整的 3 项在旧实现上也失败 |
+| VE2 修复后 focused（3 文件） | 29 passed |
+| store-1 调整的 3 项 | 旧实现 3 failed → 修复后 3 passed |
+| `npm run typecheck` / `npm run build:cli` | 通过 |
+| `npm run test:shell` | PASS setup-scry-workspace |
+| `npm run smoke:cli-package`（隔离 HOME/XDG/cache） | bin/init/hook/doctor/concurrentNotifications/legacyCursor 全 ok |
+| `npm run performance:measure -- --scenario source-control.diff` | 8 → 8，ratchet passed（本批未触该热路径，仅作回归确认） |
+| 构建 CLI 隔离探针（`/tmp/scry-VE-built-probe.mjs`） | 见下 |
+
+构建 CLI 探针用当前 `packages/turn-recorder-cli/dist`、隔离 workspace/HOME/XDG、可控制的墙钟（`--import` 注入 `Date.now`）、合成的 Pi 生命周期和本地 receiver：
+
+- 连续 5 次快速 drain 不增加失败次数（仍是 1 次调用），sequence 2、3 照常送达；
+- 只在 60 s / 300 s / 900 s / 3600 s 到期时各重试一次（每个间隔前 1 ms 不重试）；第五次失败后转为死信，`processedThrough: 3`、`ackedThrough: 0`、`notifyBacklog: 0`；
+- 死信后归档被拒（`undelivered-records`），重放前无法掩盖未投递；
+- `notify-retry --sequence 1` 送达 1 条、`pending: 0`，随后 `--all-dead` 重放 0 条，最终 `{ ackedThrough: 3, notifyBacklog: 0 }`；
+- history 保留原失败（attempts 5）；record 原始字节与每条通知的 SHA-256 一致；env 仍按轮快照且不出现在 record 正文；sidecar 0600，归档后不自动删除。
+
+### 首次失败与限制
+
+- 全量 `npm run test:unit`（本机，load average 155–190）：30 failed / 3976 passed / 4 skipped（`/tmp/scry-VE-final-unit.log`）。失败集中在 `source-control/service`、`git-readonly`、`check-staged-file-size`、`desktop-client`、`pi` 等真实 Git/TLS/子进程用例的 5–15 s 超时；`commit-environment` 两项是 `delivered.jsonl` 未生成。抽样重跑 `commit-environment`、`recorder`（Codex rollout、昂贵 Git 快照、大 Diff、drain budget）6 项全部通过（`/tmp/scry-VE-affected-recheck.log`），仍不把重跑当修复，也不提高超时或弱化无关断言。
+- 与 VE1 修复前的同类失败比，本次 32 条失败记录里 21 条精确同名出现过；其余 11 条是同类超时在不同文件的再现（含两条同名重复出现）。没有新增与通知投递相关的失败。
+- 未验证：真实 Provider 生命周期、外部 uploader U1–U4、真实死信运维流程；探针是合成事件加本地 receiver，不等价于真实验收。
+- 已知限制：成功凭据与 dead-letter-history 暂不 GC，长期会累积；`record-environments/` 旁路文件如 `storage-and-performance.md` 所述，需要维护者按 recordId 手动清理。
+- 不允许多个 CLI/daemon 新旧版本对同一 dataRoot 并发或降级写入，文档已写明。
