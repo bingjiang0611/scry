@@ -1,4 +1,6 @@
-# R6e 阅读区：修流式旧文本 + iOS 18 可见行观测
+# R6e 收尾：只修流式旧文本
+
+**用户 2026-10-26 决定收尾：本批只做第 1 部分，第 2 部分取消。** AX3 下 A / C 空白记为已知问题，见 [FINAL.md](FINAL.md)。
 
 分支 `design/ios-redesign`，基于 `cc2c8f4c`。授权范围同 R6。先读 [reports/R6d.md](reports/R6d.md) 末尾核验意见。
 
@@ -19,19 +21,9 @@
    负对照：拿掉令牌比较后，检查要失败。
 5. **真机。** `-uiMockMacRun` 或长流式 mock，观察 30 秒。每 5 秒截一次末尾：末尾文字必须在增长，并且和 mock 源一致。B 两档、A / C 默认字号保持通过。
 
-## 第 2 部分：iOS 18 可见行观测，然后决定是否纠正
+## 第 2 部分：取消
 
-批准执行方提出的方向，只在 `if #available(iOS 18, *)`：
-
-- **探针（DEBUG，只读）。** 在页面级 `LazyVStack` 加 `scrollTargetLayout()`，用 `onScrollTargetVisibilityChange(idType:threshold:)` 记录可见的行 id，和 `onScrollGeometryChange` 的读数并排。在 AX3 的 A、C 现场回答：空白时可见行集合是否为空？最后一个真实行的 id 是什么？空白在哪个事件之后出现？
-- **纠正**（只有探针证明「跟随中 + 可见行集合为空，或不含最后一行」就是失败签名时才做）：
-  - 在**这个事件**发生时，用 `proxy.scrollTo(最后一行 id, anchor: .bottom)` 纠正**一次**。
-  - 触发来自可见性回调本身，不是轮询，也不是定时。
-  - 同一次打开 / 同一次发送最多纠正一次，用一个计数器保证，并在报告里写明。
-  - 不用 `scrollPosition(id:)` 绑定（R6 挂死的路线）。
-  - `scrollTargetLayout` 加上后，iOS 18 下的 `ConversationScrollView` 行为要和 iOS 17 一样，iOS 17 不变。
-- **防挂死门槛。** 加了纠正就重跑 R6b 的 200 次「输入 → 收键盘 → 上滑 → 下滑」，出现一次无响应就回退纠正，只留第 1 部分。
-- **判定。** 探针不支持这个失败签名，就只写测量表，不加纠正，停。
+用户决定收尾，不做 iOS 18 可见行观测和纠正。不要改 `ConversationScrollView`。
 
 ## 不要做
 
@@ -40,6 +32,5 @@ R6 到 R6d 的禁止项全部有效（延时、重试、假高度、强制 `.id(
 ## 验收与报告
 
 - 第 1 部分：新检查及负对照、`markdown-blocks.py`、`tool-groups.py`、流式真机截图组（`r6e-stream-*`）。
-- 第 2 部分：探针表；加了纠正时，附 R6 验收一节的回归（默认字号与 AX3，减少动态效果重复 A–C）和 200 次门槛结果。
 - `apps/ios/docs/conversation.md` 按最终行为更新（流式尾行、令牌）。
-- 报告写 `reports/R6e.md`。A/B/C 全过才把 STATUS 的 R6 行改「已提交」。用 bingjiang0611 的 noreply 身份提交并 push。
+- 报告写 `reports/R6e.md`。STATUS 的 R6 行改「已提交（部分：AX3 A/C 已知问题）」。用 bingjiang0611 的 noreply 身份提交并 push。
