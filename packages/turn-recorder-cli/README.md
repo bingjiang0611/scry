@@ -20,7 +20,7 @@ scry init                # 自动检测 claude / codex / qoder / opencode
 接入后必须做两件事,CLI 无法代替:
 
 1. **重启 Provider**,否则新 hook 不会加载。
-2. **Codex 还要在项目里执行 `/hooks` 并信任项目 Hook。**
+2. **Codex 还要在项目里执行 `/hooks` 并信任项目 Hook。** 这一步是硬前提:没确认 trust 时 Codex 仍然会打印 `hook: UserPromptSubmit` / `hook: … Completed` 这类阶段行,但项目 hook 不会执行 —— 表现为没有任何 record、没有 `hook-skip.log`、`health.json` 计数也不变。新机器、新 clone、新 worktree 都要重新确认一次。非交互的 `codex exec` 需要显式加 `--dangerously-bypass-hook-trust`,否则同样不会执行 hook。
 
 然后跑一轮真实任务来验证 —— `init` 的自检只能证明配置和本地存储可用:
 

@@ -109,7 +109,7 @@ F-3（长路径）、F-4（多仓库覆盖，单仓库深目录对照 pass）、
 | `--sandbox danger-full-access` + bypass | 是 | 未新增 | 只有 `UserPromptSubmit` 到达，轮次同样卡在模型请求 |
 
 两条附带观察，未继续深挖：
-- bypass 那一轮落下的 record 里 `user.text`、`assistant.text` 为空，`termination.reason=provider_terminal`；`codex exec` 的 hook payload 是否与 TUI 不同，本轮没有结论。
+- ~~bypass 那一轮落下的 record 里 `user.text`、`assistant.text` 为空~~ —— **已撤回**：那是我读错了 JSON 路径（读了顶层 `user.text`，实际在 `user.value.text`）。逐字段复核见下节，record 里文本完整。
 - hook 被跳过时也没有 `logs/hook-skip.log`、health 计数也没有变化——因为 Scry 的 hook 根本没被调用，这不是 Scry fail open 丢记录。
 
 ### 步骤 3：`workspace-write` 挂住时挂的是谁
@@ -123,3 +123,32 @@ F-3（长路径）、F-4（多仓库覆盖，单仓库深目录对照 pass）、
 - 可考虑但本批未做：README 补一句「`codex exec` 需先建立 hook trust（TUI `/hooks`）或显式加 `--dangerously-bypass-hook-trust`，否则 Codex 会显示 hook 阶段完成但不执行」；若希望 doctor 提前告警，需要读 Codex 自己的 trust 配置，已超出当前 recorder 的观测边界。
 
 证据：`/tmp/scry-fa/evidence/codexobs-ab.log`（A/B 对照）、`/tmp/scry-fa/evidence/codexobs-prepare.log`（hooks.json 包装）、`/tmp/scry-fa/codexobs/{A-nobypass.out,B-bypass.out,exec-write.out,exec-full.out}`。
+
+## record 文本证据只读复核（执行方，2026-10-26，只读，不改代码）
+
+对象：Codex `--dangerously-bypass-hook-trust` 那一轮（`sequence=2`，`recordId=c2283652f4fb70deba6e1c56f5f50d8d`，workspace `/tmp/scry-fa/codexobs/ws`）。命令：`scry turns show 2 --workspace <ws>`（被测构建 `6e2012e7` 的 CLI 快照），随后直接读 `.scry/records/00000000000000000002-….json` 核对原始字段。
+
+| 字段 | status | quality | omissionReason | 文本 |
+|---|---|---|---|---|
+| `user` | `available` | `exact` | 字段不存在（未写入，不是空字符串） | `Reply with the single word ok` |
+| `assistant` | `available` | `exact` | 字段不存在（未写入，不是空字符串） | `ok` |
+
+原始字段（`source` 与摘要原样）：
+
+```json
+"user": {"status": "available", "quality": "exact",
+         "source": ["provider_transcript+lifecycle_hooks"],
+         "value": {"text": "Reply with the single word ok",
+                   "textHash": "sha256:dd85e9d6021986923088877c3e542ca639c9b43e6bb677c1b554b060bf2a2c3a"}}
+"assistant": {"status": "available", "quality": "exact",
+              "source": ["provider_transcript+lifecycle_hooks"],
+              "value": {"text": "ok",
+                        "textHash": "sha256:2689367b205c16ce32ed4200942b8b8b1e262dfc70d9bc9fbc77c49699a4f1df",
+                        "contentRefs": [{"storage": "recorder-content-v1",
+                                         "sha256": "2689367b205c16ce32ed4200942b8b8b1e262dfc70d9bc9fbc77c49699a4f1df",
+                                         "bytes": 2, "encoding": "utf8"}]}}
+```
+
+结论：两项都是 `available` 且文本非空，**没有出现「available 但空字符串」的问题**；`omissionReason` 在可用证据上根本不写入，不需要补 null 或空串。上一节把它记成「文本为空」是读错路径的误判，已在该处标注撤回，未改任何代码。
+
+证据：`/tmp/scry-fa/evidence/codex-record-2-show.json`（`turns show` 原样输出）。
