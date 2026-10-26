@@ -16,7 +16,7 @@ struct ChatView: View {
   @State private var showFiles = false
   @State private var showOverview = false
   @State private var latestReadRequest = 0
-  @State private var splitBlocks: [String: [Int: [ConversationMarkdownBlock]]] = [:]
+  @State private var splitPlans: [String: [Int: ConversationSplitPlan]] = [:]
   @State private var confirmStop = false
   private var projectCwd: String? { run.activeSessionIdentity?.cwd ?? run.chosen?.path }
   private var composer: Binding<AppModel.ComposerDraft> {
@@ -42,10 +42,11 @@ struct ChatView: View {
                          detail: ConversationCopy.startDetail)
             } else {
               ForEach(completedTurns.flatMap { row in
-                ConversationTurn.completed(row).withSplitBlocks(splitBlocks[row.id] ?? [:]).rows(id: row.id)
+                ConversationTurn.completed(row).withSplitPlans(splitPlans[row.id] ?? [:]).rows(id: row.id)
               }) { $0 }
               if run.prompt != nil {
-                ForEach(ConversationTurn.focused(run).withSplitBlocks(splitBlocks["focused"] ?? [:]).rows(id: "focused")) { $0 }
+                ForEach(ConversationTurn.focused(run).withSplitPlans(splitPlans["focused"] ?? [:])
+                  .withLastLineIDs([0: run.output.last?.id ?? -1]).rows(id: "focused")) { $0 }
               }
             }
       }
@@ -79,27 +80,31 @@ struct ChatView: View {
   }
 
   // Cheap identity for the background split task: turn/output counts, no text.
-  private var splitRevision: String { "\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)" }
+  private var splitRevision: String { "\(completedTurns.count)-\(run.output.count)-\(run.output.last?.id ?? -1)-\(run.lifecycle)" }
 
   private func refreshSplitBlocks() async {
     let turns: [(String, ConversationTurn)] =
       completedTurns.map { ($0.id, ConversationTurn.completed($0)) }
-      + (run.prompt != nil ? [("focused", ConversationTurn.focused(run))] : [])
-    var ready: [String: [Int: [ConversationMarkdownBlock]]] = [:]
+      + (run.prompt != nil ? [("focused", ConversationTurn.focused(run).withLastLineIDs([0: run.output.last?.id ?? -1]))] : [])
+    var plans: [String: [Int: ConversationSplitPlan]] = [:]
     for (id, turn) in turns {
-      var hit: [Int: [ConversationMarkdownBlock]] = [:]
+      var hit: [Int: ConversationSplitPlan] = [:]
       for candidate in turn.splitCandidates {
-        if let blocks = ConversationMarkdownSplitter.ready(turnID: id, candidate: candidate) { hit[candidate.index] = blocks }
+        if let blocks = ConversationMarkdownSplitter.ready(turnID: id, candidate: candidate), blocks.count > 1 {
+          hit[candidate.index] = ConversationSplitPlan(token: candidate.token, blocks: blocks,
+            sourceLength: candidate.text.utf16.count, tailStart: blocks[blocks.count - 1].start,
+            crlfFree: !candidate.text.contains("\r\n"))
+        }
       }
-      ready[id] = hit
+      plans[id] = hit
     }
-    splitBlocks = ready
+    splitPlans = plans
     for (id, turn) in turns {
-      for candidate in turn.splitCandidates where ready[id]?[candidate.index] == nil {
-        guard let blocks = await ConversationMarkdownSplitter.parse(turnID: id, candidate: candidate) else { continue }
+      for candidate in turn.splitCandidates where plans[id]?[candidate.index]?.token != candidate.token {
+        guard let parsed = await ConversationMarkdownSplitter.parse(turnID: id, candidate: candidate) else { continue }
         guard !Task.isCancelled else { return }
-        ready[id, default: [:]][candidate.index] = blocks
-        splitBlocks = ready
+        plans[id, default: [:]][candidate.index] = parsed
+        splitPlans = plans
       }
     }
   }

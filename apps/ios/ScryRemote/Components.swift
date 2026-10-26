@@ -257,3 +257,154 @@ struct LiveRunBadge: View {
       .font(Typography.meta.weight(.semibold)).foregroundStyle(color)
   }
 }
+
+struct ConversationMarkdownText: View {
+  let source: String
+  var muted = false
+  var parsedBlocks: [ConversationMarkdownBlock]? = nil
+
+  private var blocks: [ConversationMarkdownBlock] { parsedBlocks ?? ConversationMarkdownParser.parse(source) }
+
+  var body: some View {
+    // The outer conversation already virtualizes rows. Its tail needs a
+    // message's full height; a second lazy stack can leave a long live reply's
+    // tail viewport empty even after the outer scroll reaches its bottom.
+    VStack(alignment: .leading, spacing: 12) {
+      ForEach(blocks) { block in
+        blockView(block)
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  @ViewBuilder private func blockView(_ block: ConversationMarkdownBlock) -> some View {
+    switch block.kind {
+    case .paragraph:
+      ConversationMarkdownInline(source: block.text, muted: muted)
+    case let .heading(level):
+      ConversationMarkdownInline(source: block.text, muted: muted,
+                                 font: headingFont(level), weight: level <= 2 ? .bold : .semibold)
+        .padding(.top, level <= 2 ? 4 : 1)
+    case .unordered:
+      HStack(alignment: .firstTextBaseline, spacing: 9) {
+        Text("•").font(Typography.reply.weight(.bold)).foregroundStyle(Palette.accent)
+          .frame(width: 10, alignment: .center)
+        ConversationMarkdownInline(source: block.text, muted: muted)
+      }
+    case let .ordered(marker):
+      HStack(alignment: .firstTextBaseline, spacing: 9) {
+        Text(marker).font(Typography.reply.weight(.semibold)).foregroundStyle(Palette.accentText)
+          .frame(minWidth: 22, alignment: .trailing)
+        ConversationMarkdownInline(source: block.text, muted: muted)
+      }
+    case .quote:
+      HStack(alignment: .top, spacing: 10) {
+        RoundedRectangle(cornerRadius: 1.5).fill(Palette.accent.opacity(0.55)).frame(width: 3)
+        ConversationMarkdownInline(source: block.text, muted: true)
+      }
+      .padding(.vertical, 2)
+    case let .code(language):
+      VStack(alignment: .leading, spacing: 0) {
+        if let language {
+          Text(language.uppercased()).font(Typography.meta.weight(.semibold))
+            .foregroundStyle(Palette.dim).padding(.horizontal, 12).padding(.top, 9).padding(.bottom, 4)
+        }
+        ScrollView(.horizontal, showsIndicators: false) {
+          Text(verbatim: block.text)
+            .font(Typography.codeBlock)
+            .foregroundStyle(Palette.fg)
+            .textSelection(.enabled)
+            .padding(.horizontal, 12).padding(.vertical, language == nil ? 11 : 7)
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(Palette.bg, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+      .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.border3))
+    case let .table(table):
+      ConversationMarkdownTableView(table: table, muted: muted)
+    case .divider:
+      Rectangle().fill(Palette.border3).frame(height: 0.5).padding(.vertical, 3)
+    }
+  }
+
+  private func headingFont(_ level: Int) -> Font {
+    switch level {
+    case 1: return muted ? .headline : .title2
+    case 2: return muted ? .headline : .title3
+    case 3: return muted ? .callout : .headline
+    default: return muted ? .subheadline : Typography.reply
+    }
+  }
+}
+
+// The only per-turn status: an ending that was not a normal finish, or output
+// the host cut short. Progress belongs to the session status strip.
+struct TurnOutcomeNote: View {
+  let text: String
+  let failed: Bool
+
+  init?(lifecycle: RemoteRunStore.Lifecycle, hasOutput: Bool, truncated: Bool = false) {
+    var parts: [String] = []
+    switch lifecycle {
+    case .failed: parts.append(ConversationCopy.failed)
+    case .cancelled: parts.append(ConversationCopy.cancelled)
+    default: break
+    }
+    if !hasOutput, [.settled, .failed, .cancelled].contains(lifecycle) { parts.append(ConversationCopy.noOutput) }
+    if truncated { parts.append(ConversationCopy.truncated) }
+    guard !parts.isEmpty else { return nil }
+    text = parts.joined(separator: " · ")
+    failed = lifecycle == .failed
+  }
+
+  var body: some View {
+    Label(text, systemImage: "exclamationmark.circle")
+      .font(Typography.meta.weight(.medium))
+      .foregroundStyle(failed ? Palette.bad : Palette.warnText)
+      .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+      .accessibilityIdentifier("turn-outcome")
+  }
+}
+
+extension View {
+  func conversationFlowBlock() -> some View {
+    self.frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.leading, 20).padding(.top, 12)
+      .overlay(alignment: .leading) { Rectangle().fill(Palette.border3).frame(width: 1).offset(x: 3) }
+  }
+}
+
+struct TurnUserBubble: View {
+  let text: String
+  var attachments: [RemoteRunStore.SentAttachment] = []
+  var runId: String?
+  var usage: String?
+  var usagePending = false
+  @Environment(\.colorScheme) private var colorScheme
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      if !attachments.isEmpty { SentAttachmentList(attachments: attachments) }
+      Text(text).font(Typography.bubble).lineSpacing(3)
+    }
+    .foregroundStyle(Palette.fg)
+    .padding(.vertical, 10).padding(.horizontal, 14)
+    .background(Palette.panel2, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+      .strokeBorder(colorScheme == .light ? Palette.border3 : .clear))
+    .shadow(color: .black.opacity(colorScheme == .dark ? 0.30 : 0.06), radius: 2, y: 1)
+    .contextMenu {
+      #if canImport(UIKit)
+      Button { UIPasteboard.general.string = text } label: { Label(ConversationCopy.copy, systemImage: "doc.on.doc") }
+      #endif
+      Section(ConversationCopy.details) {
+        Text(ConversationCopy.usage(usage, pending: usagePending))
+        Text(ConversationCopy.runID(runId))
+      }
+    }
+    // The reader has 16pt content padding on each side. Keep the native
+    // container measurement instead of inventing an unspecified Layout width.
+    .containerRelativeFrame(.horizontal, alignment: .trailing) { width, _ in (width - 32) * 0.85 }
+    .frame(maxWidth: .infinity, alignment: .trailing)
+  }
+}

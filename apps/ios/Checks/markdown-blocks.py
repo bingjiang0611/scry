@@ -17,7 +17,7 @@ parser.add_argument('--source', type=Path, help='Frozen combined Components.swif
 args = parser.parse_args()
 source = (args.source or root / 'apps/ios/ScryRemote/ConversationMarkdown.swift').read_text()
 turns = (args.source or root / 'apps/ios/ScryRemote/ConversationTurns.swift').read_text()
-models = source[source.index('struct ConversationMarkdownTable:'):source.index('private struct ConversationMarkdownInline:')]
+models = source[source.index('struct ConversationMarkdownTable:'):source.index('struct ConversationMarkdownInline:')]
 projection = turns[turns.index('struct ConversationEntry:'):turns.index('struct ConversationChunk:')]
 calls = re.findall(r'(ConversationEntry\.group\((?:lines|run\.output), kind: \\.kind, text: \\.text\))', turns)
 assert len(calls) == 1

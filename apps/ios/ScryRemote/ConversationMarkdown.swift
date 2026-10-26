@@ -27,6 +27,10 @@ struct ConversationMarkdownBlock: Identifiable, Sendable {
   let id: Int
   let kind: Kind
   let text: String
+  /// UTF-16 offset of this block's first line in the parsed (CRLF-normalised)
+  /// source. The live reader uses it to render "everything from here to the
+  /// current end" as one tail row while a newer parse is still running.
+  var start: Int = 0
 }
 
 /// SwiftUI's single `Text(AttributedString(markdown:))` keeps inline emphasis,
@@ -83,10 +87,16 @@ enum ConversationMarkdownParser {
     var codeLines: [String] = []
     var codeFence: String?
     var codeLanguage: String?
+    // Running start offset for each source line, so every block can report where
+    // it begins without searching the text again.
+    var lineStarts: [Int] = []
+    var cursor = 0
+    for line in lines { lineStarts.append(cursor); cursor += line.utf16.count + 1 }
+    var blockStart = 0
 
     func append(_ kind: ConversationMarkdownBlock.Kind, _ text: String) {
       guard !text.isEmpty || { if case .divider = kind { return true }; return false }() else { return }
-      blocks.append(.init(id: blocks.count, kind: kind, text: text))
+      blocks.append(.init(id: blocks.count, kind: kind, text: text, start: blockStart))
     }
 
     var lineIndex = 0
@@ -106,6 +116,7 @@ enum ConversationMarkdownParser {
       }
 
       if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+        blockStart = lineStarts[min(lineIndex - 1, lineStarts.count - 1)]
         let fence = String(trimmed.prefix(3))
         codeFence = fence
         let language = trimmed.dropFirst(3).trimmingCharacters(in: .whitespaces)
@@ -113,6 +124,7 @@ enum ConversationMarkdownParser {
         continue
       }
       guard !trimmed.isEmpty else { continue }
+      blockStart = lineStarts[min(lineIndex - 1, lineStarts.count - 1)]
 
       if lineIndex < lines.count, !startsBlock(trimmed),
          let headers = tableCells(trimmed), !headers.isEmpty,
@@ -236,7 +248,7 @@ enum ConversationMarkdownParser {
   }
 }
 
-private struct ConversationMarkdownInline: View {
+struct ConversationMarkdownInline: View {
   let source: String
   var muted = false
   var font: Font = Typography.reply
@@ -263,7 +275,7 @@ private struct ConversationMarkdownInline: View {
   }
 }
 
-private struct ConversationMarkdownTableView: View {
+struct ConversationMarkdownTableView: View {
   let table: ConversationMarkdownTable
   let muted: Bool
   // Keep prose cells readable on a phone; wide tables scroll rather than
@@ -315,6 +327,7 @@ private struct ConversationMarkdownTableView: View {
 struct ConversationMarkdownSplitCandidate: Sendable {
   let index: Int
   let text: String
+  let token: String
 }
 
 enum ConversationMarkdownSplitter {
@@ -322,11 +335,11 @@ enum ConversationMarkdownSplitter {
 
   /// Entry indices that are prose long enough to be worth splitting. Touches
   /// text only to hand it to the parser; it never hashes or compares it.
-  static func candidates(entries: [(index: Int, kind: String, text: String)]) -> [ConversationMarkdownSplitCandidate] {
+  static func candidates(entries: [(index: Int, kind: String, text: String, token: String)]) -> [ConversationMarkdownSplitCandidate] {
     entries.compactMap { entry in
       guard !["reasoning", "tool", "tool_result", "truncated"].contains(entry.kind),
             entry.text.count > minimumCharacters else { return nil }
-      return ConversationMarkdownSplitCandidate(index: entry.index, text: entry.text)
+      return ConversationMarkdownSplitCandidate(index: entry.index, text: entry.text, token: entry.token)
     }
   }
 
@@ -341,92 +354,54 @@ enum ConversationMarkdownSplitter {
   }
 
   /// Parse outside the main actor and cache by identity + exact version.
-  static func parse(turnID: String, candidate: ConversationMarkdownSplitCandidate) async -> [ConversationMarkdownBlock]? {
-    if let ready = ready(turnID: turnID, candidate: candidate) { return ready }
-    let blocks = await ConversationMarkdownParser.parseForReading(candidate.text)
-    guard !Task.isCancelled else { return nil }
-    guard blocks.count > 1 else { return nil }
+  static func parse(turnID: String, candidate: ConversationMarkdownSplitCandidate) async -> ConversationSplitPlan? {
+    var blocks = ready(turnID: turnID, candidate: candidate)
+    if blocks == nil { blocks = await ConversationMarkdownParser.parseForReading(candidate.text) }
+    guard let blocks else { return nil }
+    guard !Task.isCancelled, blocks.count > 1 else { return nil }
     ConversationMarkdownParser.blockCache.store(blocks, forKey: cacheKey(turnID: turnID, index: candidate.index),
                                                version: candidate.text)
-    return blocks
+    return ConversationSplitPlan(token: candidate.token, blocks: blocks,
+                                 sourceLength: candidate.text.utf16.count,
+                                 tailStart: blocks[blocks.count - 1].start,
+                                 crlfFree: !candidate.text.contains("\r\n"))
   }
 }
 
-struct ConversationMarkdownText: View {
-  let source: String
-  var muted = false
-  var parsedBlocks: [ConversationMarkdownBlock]? = nil
+/// A parsed split plus the cheap facts the reader needs to decide, in O(1), what
+/// it may render while the text is still growing.
+struct ConversationSplitPlan: Sendable {
+  /// `OutputLine.id` of the entry's last line plus that line's UTF-16 length at
+  /// parse time (archived turns use `historyRevision` + entry index instead).
+  let token: String
+  let blocks: [ConversationMarkdownBlock]
+  /// UTF-16 length of the parsed source and of everything before the last block.
+  let sourceLength: Int
+  let tailStart: Int
+  /// Offsets are only comparable when the source had no CRLF, because the parser
+  /// normalises line endings before recording them.
+  let crlfFree: Bool
+}
 
-  private var blocks: [ConversationMarkdownBlock] { parsedBlocks ?? ConversationMarkdownParser.parse(source) }
+/// What one long-prose entry should render as right now.
+enum ConversationSplitRender {
+  case single
+  case blocks([ConversationMarkdownBlock])
+  /// Stable prefix blocks plus one tail row taken from the CURRENT text, so a
+  /// coalesced (append-only) chunk can never leave old text on screen.
+  case prefixTail(prefix: [ConversationMarkdownBlock], tailStart: Int)
+}
 
-  var body: some View {
-    // The outer conversation already virtualizes rows. Its tail needs a
-    // message's full height; a second lazy stack can leave a long live reply's
-    // tail viewport empty even after the outer scroll reaches its bottom.
-    VStack(alignment: .leading, spacing: 12) {
-      ForEach(blocks) { block in
-        blockView(block)
-      }
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
-  }
-
-  @ViewBuilder private func blockView(_ block: ConversationMarkdownBlock) -> some View {
-    switch block.kind {
-    case .paragraph:
-      ConversationMarkdownInline(source: block.text, muted: muted)
-    case let .heading(level):
-      ConversationMarkdownInline(source: block.text, muted: muted,
-                                 font: headingFont(level), weight: level <= 2 ? .bold : .semibold)
-        .padding(.top, level <= 2 ? 4 : 1)
-    case .unordered:
-      HStack(alignment: .firstTextBaseline, spacing: 9) {
-        Text("•").font(Typography.reply.weight(.bold)).foregroundStyle(Palette.accent)
-          .frame(width: 10, alignment: .center)
-        ConversationMarkdownInline(source: block.text, muted: muted)
-      }
-    case let .ordered(marker):
-      HStack(alignment: .firstTextBaseline, spacing: 9) {
-        Text(marker).font(Typography.reply.weight(.semibold)).foregroundStyle(Palette.accentText)
-          .frame(minWidth: 22, alignment: .trailing)
-        ConversationMarkdownInline(source: block.text, muted: muted)
-      }
-    case .quote:
-      HStack(alignment: .top, spacing: 10) {
-        RoundedRectangle(cornerRadius: 1.5).fill(Palette.accent.opacity(0.55)).frame(width: 3)
-        ConversationMarkdownInline(source: block.text, muted: true)
-      }
-      .padding(.vertical, 2)
-    case let .code(language):
-      VStack(alignment: .leading, spacing: 0) {
-        if let language {
-          Text(language.uppercased()).font(Typography.meta.weight(.semibold))
-            .foregroundStyle(Palette.dim).padding(.horizontal, 12).padding(.top, 9).padding(.bottom, 4)
-        }
-        ScrollView(.horizontal, showsIndicators: false) {
-          Text(verbatim: block.text)
-            .font(Typography.codeBlock)
-            .foregroundStyle(Palette.fg)
-            .textSelection(.enabled)
-            .padding(.horizontal, 12).padding(.vertical, language == nil ? 11 : 7)
-        }
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .background(Palette.bg, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-      .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.border3))
-    case let .table(table):
-      ConversationMarkdownTableView(table: table, muted: muted)
-    case .divider:
-      Rectangle().fill(Palette.border3).frame(height: 0.5).padding(.vertical, 3)
-    }
-  }
-
-  private func headingFont(_ level: Int) -> Font {
-    switch level {
-    case 1: return muted ? .headline : .title2
-    case 2: return muted ? .headline : .title3
-    case 3: return muted ? .callout : .headline
-    default: return muted ? .subheadline : Typography.reply
-    }
+extension ConversationSplitPlan {
+  /// O(1) token comparison and an O(tail) slice that always starts in the current
+  /// text. A token match means the parse is current and may render as blocks.
+  func render(source: String, token currentToken: String) -> ConversationSplitRender {
+    guard blocks.count > 1 else { return .single }
+    if token == currentToken { return .blocks(blocks) }
+    guard crlfFree else { return .single }
+    let current = source.utf16.count
+    guard current >= sourceLength else { return .single }
+    let prefix = Array(blocks.dropLast())
+    return .prefixTail(prefix: prefix, tailStart: tailStart)
   }
 }

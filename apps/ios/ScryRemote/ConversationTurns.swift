@@ -187,11 +187,17 @@ struct ConversationTurn {
   var archived = false
   var outcome: TurnOutcomeNote?
   var notice: String?
-  var splitBlocks: [Int: [ConversationMarkdownBlock]] = [:]
+  var splitPlans: [Int: ConversationSplitPlan] = [:]
+  /// Monotonic id of the entry's last source line, used to build cheap versions.
+  var lastLineIDs: [Int: Int] = [:]
 
   fileprivate enum Row: Identifiable {
-    enum ID: Hashable { case prompt, provider, block(Int), markdownBlock(Int, Int), outcome, notice, usage }
+    enum ID: Hashable { case prompt, provider, block(Int), markdownBlock(Int, Int), markdownTail(Int, Int), outcome, notice, usage }
     case prompt(String), provider, block(ConversationBlock), markdownBlock(Int, ConversationMarkdownBlock)
+    /// Last block of a still-growing entry: version, then the text from that
+    /// block's start to the current end. A new version per chunk keeps the row
+    /// single and growing instead of flipping back to one giant row.
+    case markdownTail(Int, String)
     case outcome(TurnOutcomeNote), notice(String), usage(String)
     var id: ID {
       switch self {
@@ -199,6 +205,7 @@ struct ConversationTurn {
       case .provider: return .provider
       case let .block(block): return .block(block.id)
       case let .markdownBlock(entry, block): return .markdownBlock(entry, block.id)
+      case let .markdownTail(entry, text): return .markdownTail(entry, text.utf16.count)
       case .outcome: return .outcome
       case .notice: return .notice
       case .usage: return .usage
@@ -215,11 +222,20 @@ struct ConversationTurn {
     // frame, so no scroll target landed on real content. Long prose is split by
     // `splitBlocks`, which the page fills in from a background parse; until that
     // result exists the entry keeps its original single row.
-    let split = splitBlocks
+    let plans = splitPlans
     for (entryIndex, block) in ConversationBlock.group(entries).enumerated() {
-      if let parts = split[entryIndex], parts.count > 1 {
+      let entry = block.entries[0]
+      let token = ConversationTurn.splitToken(lineID: lastLineIDs[entryIndex] ?? entry.id, text: entry.text)
+      switch plans[entryIndex]?.render(source: entry.text, token: token) {
+      case let .blocks(parts):
         for part in parts { rows.append(.markdownBlock(entryIndex, part)) }
-      } else {
+      case let .prefixTail(prefix, tailStart):
+        for part in prefix { rows.append(.markdownBlock(entryIndex, part)) }
+        // The tail always comes from the CURRENT text, so a coalesced chunk can
+        // never leave the previous reply on screen while a parse runs.
+        let tail = String(decoding: entry.text.utf16.dropFirst(tailStart), as: UTF16.self)
+        rows.append(.markdownTail(entryIndex, tail))
+      case .single, .none:
         rows.append(.block(block))
       }
     }
@@ -251,6 +267,8 @@ struct ConversationTurn {
         else { Circle().fill(Palette.dim2).frame(width: 6, height: 6).accessibilityHidden(true) }
         Text(provider).font(Typography.meta).foregroundStyle(Palette.dim2)
       }
+    case let .markdownTail(_, text):
+      ConversationMarkdownText(source: text).conversationFlowBlock()
     case let .markdownBlock(_, block):
       ConversationMarkdownText(source: "", parsedBlocks: [block]).conversationFlowBlock()
         .transition(archived ? Motion.none : Motion.transition(.streamIn, reduceMotion: reduceMotion)
@@ -281,13 +299,25 @@ struct ConversationTurn {
     ConversationBlock.group(entries).enumerated().compactMap { index, block in
       guard !block.isToolGroup else { return nil }
       let entry = block.entries[0]
-      return ConversationMarkdownSplitter.candidates(entries: [(index, entry.kind, entry.text)]).first
+      let token = ConversationTurn.splitToken(lineID: lastLineIDs[index] ?? entry.id, text: entry.text)
+      return ConversationMarkdownSplitter.candidates(entries: [(index, entry.kind, entry.text, token)]).first
     }
   }
 
-  func withSplitBlocks(_ blocks: [Int: [ConversationMarkdownBlock]]) -> Self {
+  /// O(1) version for one entry: the id of its last source line plus its length.
+  /// `coalesce` keeps the line index and only grows the text, so the length makes
+  /// every streamed chunk produce a new token.
+  static func splitToken(lineID: Int, text: String) -> String { "\(lineID)#\(text.utf16.count)" }
+
+  func withSplitPlans(_ plans: [Int: ConversationSplitPlan]) -> Self {
     var copy = self
-    copy.splitBlocks = blocks
+    copy.splitPlans = plans
+    return copy
+  }
+
+  func withLastLineIDs(_ ids: [Int: Int]) -> Self {
+    var copy = self
+    copy.lastLineIDs = ids
     return copy
   }
 
@@ -320,78 +350,6 @@ struct ConversationTurnRow<TurnID: Hashable>: View, Identifiable {
     turn.rowView(row, truncated: truncated, provider: provider, reduceMotion: reduceMotion)
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(.bottom, last ? 34 : 0)
-  }
-}
-
-private extension View {
-  func conversationFlowBlock() -> some View {
-    self.frame(maxWidth: .infinity, alignment: .leading)
-      .padding(.leading, 20).padding(.top, 12)
-      .overlay(alignment: .leading) { Rectangle().fill(Palette.border3).frame(width: 1).offset(x: 3) }
-  }
-}
-
-struct TurnUserBubble: View {
-  let text: String
-  var attachments: [RemoteRunStore.SentAttachment] = []
-  var runId: String?
-  var usage: String?
-  var usagePending = false
-  @Environment(\.colorScheme) private var colorScheme
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      if !attachments.isEmpty { SentAttachmentList(attachments: attachments) }
-      Text(text).font(Typography.bubble).lineSpacing(3)
-    }
-    .foregroundStyle(Palette.fg)
-    .padding(.vertical, 10).padding(.horizontal, 14)
-    .background(Palette.panel2, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-      .strokeBorder(colorScheme == .light ? Palette.border3 : .clear))
-    .shadow(color: .black.opacity(colorScheme == .dark ? 0.30 : 0.06), radius: 2, y: 1)
-    .contextMenu {
-      #if canImport(UIKit)
-      Button { UIPasteboard.general.string = text } label: { Label(ConversationCopy.copy, systemImage: "doc.on.doc") }
-      #endif
-      Section(ConversationCopy.details) {
-        Text(ConversationCopy.usage(usage, pending: usagePending))
-        Text(ConversationCopy.runID(runId))
-      }
-    }
-    // The reader has 16pt content padding on each side. Keep the native
-    // container measurement instead of inventing an unspecified Layout width.
-    .containerRelativeFrame(.horizontal, alignment: .trailing) { width, _ in (width - 32) * 0.85 }
-    .frame(maxWidth: .infinity, alignment: .trailing)
-  }
-}
-
-// The only per-turn status: an ending that was not a normal finish, or output
-// the host cut short. Progress belongs to the session status strip.
-struct TurnOutcomeNote: View {
-  let text: String
-  let failed: Bool
-
-  init?(lifecycle: RemoteRunStore.Lifecycle, hasOutput: Bool, truncated: Bool = false) {
-    var parts: [String] = []
-    switch lifecycle {
-    case .failed: parts.append(ConversationCopy.failed)
-    case .cancelled: parts.append(ConversationCopy.cancelled)
-    default: break
-    }
-    if !hasOutput, [.settled, .failed, .cancelled].contains(lifecycle) { parts.append(ConversationCopy.noOutput) }
-    if truncated { parts.append(ConversationCopy.truncated) }
-    guard !parts.isEmpty else { return nil }
-    text = parts.joined(separator: " · ")
-    failed = lifecycle == .failed
-  }
-
-  var body: some View {
-    Label(text, systemImage: "exclamationmark.circle")
-      .font(Typography.meta.weight(.medium))
-      .foregroundStyle(failed ? Palette.bad : Palette.warnText)
-      .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
-      .accessibilityIdentifier("turn-outcome")
   }
 }
 

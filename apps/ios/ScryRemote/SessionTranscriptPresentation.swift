@@ -66,7 +66,7 @@ struct HistoryRetryButton: View {
 }
 
 extension SessionTranscriptView {
-  @ViewBuilder func historyBody(split blocks: [String: [Int: [ConversationMarkdownBlock]]]) -> some View {
+  @ViewBuilder func historyBody(split blocks: [String: [Int: ConversationSplitPlan]]) -> some View {
     if run.activeSessionIdentity == sessionIdentity, run.historyCapacityLimit {
       HistoryRetryButton(title: ConversationCopy.loadHistory) {
         if let s = session { run.loadCompleteHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, agentProfileId: s.agentProfileId) }
@@ -96,15 +96,15 @@ extension SessionTranscriptView {
         // The archive has no resultSummary; do not synthesize a usage footer.
         ConversationTurn(prompt: turn.userText.isEmpty ? nil : turn.userText, runId: turn.runId,
           entries: ConversationEntry.group(turn.items, kind: \.kind, text: \.text), archived: true)
-          .withSplitBlocks(blocks["history-\(first + index)"] ?? [:])
+          .withSplitPlans(blocks["history-\(first + index)"] ?? [:])
           .rows(id: first + index)
       }) { $0 }
       ForEach(completedTurns.flatMap { row in
-        ConversationTurn.completed(row).withSplitBlocks(blocks[row.id] ?? [:]).rows(id: row.id)
+        ConversationTurn.completed(row).withSplitPlans(blocks[row.id] ?? [:]).rows(id: row.id)
       }) { $0 }
     case .empty:
       ForEach(completedTurns.flatMap { row in
-        ConversationTurn.completed(row).withSplitBlocks(blocks[row.id] ?? [:]).rows(id: row.id)
+        ConversationTurn.completed(row).withSplitPlans(blocks[row.id] ?? [:]).rows(id: row.id)
       }) { $0 }
       Text(ConnectionCopy.noReadableHistory)
         .font(Typography.meta).foregroundStyle(Palette.dim)
@@ -112,7 +112,7 @@ extension SessionTranscriptView {
     case .baseUnavailable:
       // The missing record is reported once, in the status strip.
       ForEach(completedTurns.flatMap { row in
-        ConversationTurn.completed(row).withSplitBlocks(blocks[row.id] ?? [:]).rows(id: row.id)
+        ConversationTurn.completed(row).withSplitPlans(blocks[row.id] ?? [:]).rows(id: row.id)
       }) { $0 }
     case .failed("history_unavailable") where detachedLive != nil:
       // A session this run is creating has no record until the run ends.
@@ -128,7 +128,7 @@ extension SessionTranscriptView {
       DisclosureGroup(ConversationCopy.errorDetails) { Text(reason).font(Typography.meta).textSelection(.enabled) }
         .font(Typography.meta).foregroundStyle(Palette.dim)
       ForEach(completedTurns.flatMap { row in
-        ConversationTurn.completed(row).withSplitBlocks(blocks[row.id] ?? [:]).rows(id: row.id)
+        ConversationTurn.completed(row).withSplitPlans(blocks[row.id] ?? [:]).rows(id: row.id)
       }) { $0 }
     }
   }

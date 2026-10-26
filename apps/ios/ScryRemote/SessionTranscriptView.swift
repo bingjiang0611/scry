@@ -12,7 +12,7 @@ struct SessionTranscriptView: View {
   @State var showHistoryDetails = false
   @State var olderReadRequest = 0
   @State private var latestReadRequest = 0
-  @State private var splitBlocks: [String: [Int: [ConversationMarkdownBlock]]] = [:]
+  @State private var splitPlans: [String: [Int: ConversationSplitPlan]] = [:]
   @State private var followingLatest = true
   @State private var showLiveQuestion = false
   @State private var stopTarget: StopTarget?
@@ -74,9 +74,9 @@ struct SessionTranscriptView: View {
         run.historyFollowingLatest = value
         followingLatest = value
       }) {
-        historyBody(split: splitBlocks)
+        historyBody(split: splitPlans)
         if hasLiveTurn && !run.liveTurnInHistory {
-          ForEach(ConversationTurn.focused(run).withSplitBlocks(splitBlocks["focused"] ?? [:]).rows(id: "focused")) { $0 }
+          ForEach(ConversationTurn.focused(run).withSplitPlans(splitPlans["focused"] ?? [:]).rows(id: "focused")) { $0 }
         }
         if let live = detachedLive { detachedTurn(live) }
         if let pending = backgroundSend {
@@ -162,7 +162,9 @@ struct SessionTranscriptView: View {
   }
 
   // Cheap identity for the background split task: revision counters only.
-  private var splitRevision: String { "\(historyReadyForDisplay)-\(run.historyRevision)-\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)-\(run.detachedOutput.count)" }
+  private var splitRevision: String {
+    "\(historyReadyForDisplay)-\(run.historyRevision)-\(completedTurns.count)-\(run.output.count)-\(run.output.last?.id ?? -1)-\(run.lifecycle)-\(run.detachedOutput.count)-\(run.detachedOutput.last?.id ?? -1)"
+  }
 
   private func refreshSplitBlocks() async {
     var turns: [(String, ConversationTurn)] = []
@@ -184,21 +186,25 @@ struct SessionTranscriptView: View {
         running: live.state == "running", usagePending: true,
         entries: ConversationEntry.group(run.detachedOutput, kind: \.kind, text: \.text), notice: ConversationCopy.liveCache)))
     }
-    var ready: [String: [Int: [ConversationMarkdownBlock]]] = [:]
+    var plans: [String: [Int: ConversationSplitPlan]] = [:]
     for (id, turn) in turns {
-      var hit: [Int: [ConversationMarkdownBlock]] = [:]
+      var hit: [Int: ConversationSplitPlan] = [:]
       for candidate in turn.splitCandidates {
-        if let blocks = ConversationMarkdownSplitter.ready(turnID: id, candidate: candidate) { hit[candidate.index] = blocks }
+        if let blocks = ConversationMarkdownSplitter.ready(turnID: id, candidate: candidate), blocks.count > 1 {
+          hit[candidate.index] = ConversationSplitPlan(token: candidate.token, blocks: blocks,
+            sourceLength: candidate.text.utf16.count, tailStart: blocks[blocks.count - 1].start,
+            crlfFree: !candidate.text.contains("\r\n"))
+        }
       }
-      ready[id] = hit
+      plans[id] = hit
     }
-    splitBlocks = ready
+    splitPlans = plans
     for (id, turn) in turns {
-      for candidate in turn.splitCandidates where ready[id]?[candidate.index] == nil {
-        guard let blocks = await ConversationMarkdownSplitter.parse(turnID: id, candidate: candidate) else { continue }
+      for candidate in turn.splitCandidates where plans[id]?[candidate.index]?.token != candidate.token {
+        guard let parsed = await ConversationMarkdownSplitter.parse(turnID: id, candidate: candidate) else { continue }
         guard !Task.isCancelled else { return }
-        ready[id, default: [:]][candidate.index] = blocks
-        splitBlocks = ready
+        plans[id, default: [:]][candidate.index] = parsed
+        splitPlans = plans
       }
     }
   }
@@ -332,7 +338,7 @@ struct SessionTranscriptView: View {
       running: live.state == "running", usagePending: true,
       entries: ConversationEntry.group(run.detachedOutput, kind: \.kind, text: \.text),
       notice: ConversationCopy.liveCache)
-    return ForEach(turn.withSplitBlocks(splitBlocks["\(live.runId)"] ?? [:]).rows(id: live.runId)) { $0 }
+    return ForEach(turn.withSplitPlans(splitPlans[live.runId] ?? [:]).rows(id: live.runId)) { $0 }
   }
 
   private var footer: some View {
