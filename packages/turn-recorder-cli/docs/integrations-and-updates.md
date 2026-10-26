@@ -6,7 +6,7 @@
 
 需要在 record 落盘后唤醒外部程序时,在 `scry.config.json` 声明 workspace 相对的 `entry` 与完整 `files` 清单。record 持久化且 runtime 清理后,recorder 以 stdin 发送 `schemaVersion: 2` 的 `record-committed` JSON。旧的 `workspace/provider/sessionId/recordId/sequence` 字段含义不变，新增 `recordPath`（相对 dataRoot，如 `records/00000000000000000001-<recordId>.json`）和 `sha256`（该文件原始字节的 64 位小写十六进制 SHA-256）。通知不含正文或环境值；自定义 dataDir 时也必须相对 dataRoot 解析路径，不能直接相对 workspace。drain 与显式 redelivery 都使用同一合同。
 
-**ACK 合同：hook exit 0 表示接收方已接管完整记录**，而不是只排入一份 recordId 通知任务。接收方须先读取并按 sha256 校验、原子持久化完整副本，再返回 0；失败返回非 0。recorder 只观察退出码，无法证明外部 uploader 遵守此合同。旧接收方必须升级支持 schema 2；部署方完成 uploader U1 以前，不可把既有 ACK 当作正文已接管或已上传。仅在回调 exit 0 后推进 durable ACK；失败或超时会在下次 hook/recovery 重试。
+**ACK 合同：hook exit 0 表示接收方已接管完整记录**，而不是只排入一份 recordId 通知任务。接收方须先读取并按 sha256 校验、原子持久化完整副本，再返回 0；失败返回非 0。recorder 只观察退出码，无法证明外部 uploader 遵守此合同。旧接收方必须升级支持 schema 2；部署方完成 uploader U1 以前，不可把既有 ACK 当作正文已接管或已上传。只有回调 exit 0 才能作为 ACK；连续 ACK 边界不会越过死信。失败或超时会在下次 hook/recovery 重试，达到下述上限后隔离。
 
 有效的仓库 commit hook bundle 默认自动授权，不显示确认提示；以下命令可查看、刷新或删除授权（`--yes` 为旧脚本兼容参数，不再是必需项）：
 
@@ -22,13 +22,23 @@ scry commit-hook revoke --workspace "$PWD"
 
 **daemon 在响应 Provider 之后才投递**,所以回调耗时不占 hook 预算。没有 daemon 时(`SCRY_RECORDER_TRANSPORT=direct` 或冷启动)只能同步投递,此时每个事件最多 8 条、预算 1.5s(单条仍以 10s 熔断),剩余保持 pending。实测回调 350ms/条、积压 6 条时:同步 1688ms/事件,移出后 500ms/事件。
 
-`notifyBacklog` 显示当前已激活 hook 身份的积压，不是所有身份的合计，也不是上传 outbox 的待发数。归档检查仍针对当前命令解析出的 hook 身份，不代表其他 host 身份已经接收；并存使用时，应分别确认各接收方已处理需要保留的记录后再归档。需要清空当前身份的通知积压:
+`notifyBacklog` 显示当前已激活 hook 身份尚待自动处理的通知数，排除已处理通知与死信；不是所有身份的合计，也不是上传 outbox 的待发数。归档检查仍针对当前命令解析出的 hook 身份，不代表其他 host 身份已经接收；并存使用时，应分别确认各接收方已处理需要保留的记录后再归档。需要清空当前身份的通知积压:
 
 ```bash
 scry recorder notify-drain --workspace "$PWD"
 ```
 
 投递语义是 **at-least-once**,去重键为 `(workspace, recordId)`。
+
+### 失败次数与 recorder 死信
+
+有序 drain 按 `(hook fingerprint, sequence)` 持久化失败次数。一次 drain 不会紧循环重试同一失败项；第 **5** 次失败后，先 fsync 死信元数据，再推进处理游标，继续后面的记录。hook 路径仍最多处理 8 项、预算 1.5s；死信也占一项，预算用尽由下一次 drain 继续。全局执行配置、trust 或锁失败不会消耗某条记录的次数。正文/环境旁路不可读和 callback 非 ACK 均可成为该条的失败原因。
+
+状态位于 `<dataRoot>/notifications/commit-hooks/<fingerprint-hash>.json`；死信位于 `notifications/dead-letters/<fingerprint-hash>/<sequence>-<recordId>.json`。死信只记录 sequence、recordId、次数、时间和受限错误分类，不复制正文、env 或 stderr。canonical record 和上传环境旁路仍留在原处，不因隔离而删除。状态损坏时显示 unavailable，不清零重试。
+
+`processedThrough` 包含已交付和已隔离项；`ackedThrough` 仍是保守的连续 ACK 边界。出现死信后，后续记录可以成功交付，但 ACK 前缀不会伪装成全部成功，普通归档仍会被未 ACK 前缀阻止。不要通过改 ACK 文件绕过此保护。`doctor` 的 `commitHook.delivery` 报出阻塞 sequence/次数；死信使其 fail，尚在重试则 warn，两者退出 5。总数按死信文件名统计，正文详情最多读取最新 20 条，不表示已检查所有历史死信。
+
+当前没有单条死信重放命令。应先修复原因；修复后的有效 hook bundle 若改变指纹，会按既有隔离规则重投全部仍保留记录，旧指纹死信保留作历史证据。仅外部条件恢复、指纹不变时不会自动重放死信。冷启动的“最新记录唤醒”不改变有序队列的 ACK/重试计数，也跳过已耗尽或已隔离的最新记录。稳定 `commitHook.id` 尚未引入，trust/内容指纹校验不变。
 
 ### 每轮上传环境
 

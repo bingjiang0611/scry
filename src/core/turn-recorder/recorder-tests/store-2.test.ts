@@ -128,7 +128,9 @@ export function registerSuite14(): void {
     await expect(drainCommitNotifications(dataRoot, env)).resolves.toEqual({ delivered: 0, pending: 1, truncated: false })
     expect(JSON.parse(await readFile(commitAckPath(root, 'migration'), 'utf8')).ackedThrough).toBe(1)
     expect(await readFile(legacyPath, 'utf8')).toBe(original)
-    await expect(commitNotificationStatus(dataRoot, env)).resolves.toEqual({ ackedThrough: 1, notifyBacklog: 1 })
+    await expect(commitNotificationStatus(dataRoot, env)).resolves.toMatchObject({
+      ackedThrough: 1, notifyBacklog: 1, failure: { sequence: 2, attempts: 1 }
+    })
   })
 
   it.each([

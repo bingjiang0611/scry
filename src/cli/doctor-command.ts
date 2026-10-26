@@ -1,11 +1,12 @@
 import { type ParsedArgs, workspaceOf, print } from './command-args.js'
 import { recorderEnablement, refreshRecorderPendingHealth, OPEN_TURN_EXPIRY_MS } from '../core/turn-recorder/recorder.js'
 import { readHookSkips, readUserHookSkips } from '../core/turn-recorder/hook-diagnostics.js'
-import { RECORDER_VERSION, readHealth, verifyStore, lastRecordVersion } from '../core/turn-recorder/store.js'
+import { RECORDER_VERSION, readHealth, verifyStore, lastRecordVersion, commitNotificationStatus } from '../core/turn-recorder/store.js'
 import { recorderStaleOpenTurns } from '../core/turn-recorder/runtime-state.js'
 import { providerHookScriptState } from './workspace-init.js'
 import { discoverRepositories } from '../core/turn-recorder/config.js'
 import { relative } from 'node:path'
+import { commitHookEnv, resolveCommitHookActivation } from '../core/turn-recorder/commit-hook-grant.js'
 
 
 /**
@@ -62,17 +63,41 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
     return missing ? 3 : 2
   }
   await refreshRecorderPendingHealth(enablement.dataRoot)
-  const [health, store, staleOpenTurns, recordingVersion, hookScript, discovery] = await Promise.all([
+  const [health, store, staleOpenTurns, recordingVersion, hookScript, discovery, activation] = await Promise.all([
     readHealth(enablement.dataRoot),
     verifyStore(enablement.dataRoot),
     recorderStaleOpenTurns(enablement.dataRoot, OPEN_TURN_EXPIRY_MS),
     lastRecordVersion(enablement.dataRoot),
     providerHookScriptState(enablement.workspaceRoot),
-    discoverRepositories(enablement.workspaceRoot, enablement.config, true)
+    discoverRepositories(enablement.workspaceRoot, enablement.config, true),
+    resolveCommitHookActivation(enablement.workspaceRoot, enablement.config)
   ])
+  let delivery: Awaited<ReturnType<typeof commitNotificationStatus>> | undefined
+  let deliveryError = activation.status === 'bundle-invalid' ? activation.detail : undefined
+  if (activation.status === 'trusted' || activation.status === 'host-provided') {
+    try { delivery = await commitNotificationStatus(enablement.dataRoot, commitHookEnv(activation, process.env)) } catch {
+      deliveryError = 'commit notification state unavailable; inspect notifications/commit-hooks and notifications/dead-letters'
+    }
+  }
+  const deadCount = delivery?.deadLetterCount ?? 0
+  const failure = delivery?.failure
+  const deliveryCheck: Check = {
+    id: 'commitHook.delivery',
+    status: deliveryError || deadCount > 0 ? 'fail' : failure ? 'warn' : 'pass',
+    detail: deliveryError ?? (deadCount > 0
+      ? `${deadCount} recorder dead letter(s); latest ${delivery!.deadLetters!.length}: ` +
+        delivery!.deadLetters!.map(item => `sequence ${item.sequence}: ${item.attempts} failed attempts (${item.reason})`).join('; ') +
+        (failure ? `; blocked sequence ${failure.sequence}: ${failure.attempts} failed attempts (${failure.reason})` : '')
+      : failure ? `blocked sequence ${failure.sequence}: ${failure.attempts} failed attempts (${failure.reason})`
+      : delivery ? `${delivery.notifyBacklog} notification(s) pending; no recorded delivery failure` : 'commit hook not configured'),
+    ...(deliveryError || deadCount > 0 || failure ? {
+      remediation: 'inspect the callback and sequence diagnostics; repair the cause before replay; dead letters are not ACKs and remain excluded from automatic retry'
+    } : {})
+  }
   // Stale open turns need investigation, not a fabricated interruption. Warn separately from
   // pendingCount (managed/closing/quarantined); elapsed time does not prove the Provider stopped.
-  const degraded = !!health.lastError || health.pendingCount > 0 || staleOpenTurns.length > 0 || hookSkips.recentCount > 0
+  const degraded = !!health.lastError || health.pendingCount > 0 || staleOpenTurns.length > 0 || hookSkips.recentCount > 0 ||
+    !!deliveryError || !!failure || deadCount > 0
   const checks: Check[] = [
     { id: 'recorder.enabled', status: 'pass', detail: 'workspace has a valid recorder config' },
     {
@@ -91,6 +116,7 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
       ...(hookSkips.count > 0 ? { remediation: 'inspect .scry/logs/hook-skip.log and repair the CLI/Node paths with `scry integrations repair --yes`' } : {})
     },
     userHookCheck,
+    deliveryCheck,
     {
       id: 'store.integrity',
       status: store.ok ? 'pass' : 'fail',
@@ -163,6 +189,7 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
      *  prompt/assistant/toolOutput does not remove tool inputs, file paths or diff patches. */
     capture: enablement.config.capture,
     hookScript,
+    commitNotifications: delivery,
     recorderVersions: { thisCli: RECORDER_VERSION, lastRecord: recordingVersion },
     health,
     store,

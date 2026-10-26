@@ -17,7 +17,7 @@ describe('scry doctor schema and exit codes', () => {
     const report = JSON.parse(stdout.text()) as Record<string, any>
     expect(report).toMatchObject({ schemaVersion: 1, status: 'healthy', healthy: true, enabled: true })
     expect(report.checks.map((check: any) => check.id)).toEqual([
-      'recorder.enabled', 'repositories.depth', 'hook.skips', 'hook.userBridgeSkips', 'store.integrity', 'turns.pending', 'hook.script', 'turns.stale', 'recorder.version', 'recorder.lastError'
+      'recorder.enabled', 'repositories.depth', 'hook.skips', 'hook.userBridgeSkips', 'commitHook.delivery', 'store.integrity', 'turns.pending', 'hook.script', 'turns.stale', 'recorder.version', 'recorder.lastError'
     ])
     expect(report.checks.every((check: any) => check.status === 'pass')).toBe(true)
     expect(report.recorderVersion).toBe(RECORDER_VERSION)

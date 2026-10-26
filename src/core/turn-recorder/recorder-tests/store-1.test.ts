@@ -1,4 +1,4 @@
-import { mkdir, writeFile, rm, readdir, readFile, access, appendFile } from 'node:fs/promises'
+import { mkdir, writeFile, rm, readdir, readFile, appendFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { it, expect } from 'vitest'
 import { handleRecorderHook, recoverRecorder } from '../recorder'
@@ -104,7 +104,10 @@ export function registerSuite13(): void {
 
     await expect(drainCommitNotifications(join(root, '.scry'), base))
       .resolves.toEqual({ delivered: 0, pending: 1, truncated: false })
-    await expect(access(commitAckPath(root))).rejects.toThrow()
+    // E3 persists failure metadata without acknowledging the failed sequence.
+    expect(JSON.parse(await readFile(commitAckPath(root), 'utf8'))).toMatchObject({
+      ackedThrough: 0, processedThrough: 0, failure: { sequence: 1, attempts: 1 }
+    })
     const hook = await commitHook(root)
     await expect(drainCommitNotifications(join(root, '.scry'), {
       ...base,
@@ -143,7 +146,7 @@ export function registerSuite13(): void {
     await expect(redeliverLatestCommitNotification(dataRoot, env))
       .resolves.toMatchObject({ delivered: false, reason: 'commit hook did not ACK' })
     await expect(commitNotificationStatus(dataRoot, env))
-      .resolves.toEqual({ ackedThrough: null, notifyBacklog: 1 })
+      .resolves.toMatchObject({ ackedThrough: 0, notifyBacklog: 1, failure: { sequence: 1, attempts: 1, ...expected } })
     const log = await readFile(join(dataRoot, 'logs', 'recorder.log'), 'utf8')
     const diagnostics = log.trim().split('\n').map(line => JSON.parse(line.split('; diagnostic=')[1]))
     expect(diagnostics).toHaveLength(2)
@@ -167,7 +170,9 @@ export function registerSuite13(): void {
     const log = await readFile(join(dataRoot, 'logs', 'recorder.log'), 'utf8')
     expect(JSON.parse(log.trim().split('; diagnostic=')[1]))
       .toMatchObject({ acknowledged: false, reason: 'timeout', signal: 'SIGTERM', recorderPid: process.pid })
-    await expect(access(commitAckPath(root))).rejects.toThrow()
+    expect(JSON.parse(await readFile(commitAckPath(root), 'utf8'))).toMatchObject({
+      ackedThrough: 0, processedThrough: 0, failure: { sequence: 1, attempts: 1, reason: 'timeout' }
+    })
   }, 20_000)
 
   it('通知身份不一致只使 ACK 不适用，不能解释同一身份下 callback 不 ACK', async () => {
@@ -208,7 +213,10 @@ export function registerSuite13(): void {
     expect(commitHookEnv(await activate(), env)).toEqual(restored)
     await expect(drainCommitNotifications(dataRoot, restored))
       .resolves.toEqual({ delivered: 0, pending: 1, truncated: false })
-    expect(await readFile(statePath, 'utf8')).toBe(saved)
+    const failedState = await readFile(statePath, 'utf8')
+    expect(JSON.parse(failedState)).toMatchObject({
+      ...JSON.parse(saved), failure: { sequence: 2, attempts: 1 }
+    })
 
     await appendFile(hook.path, '# changed bundle identity\n')
     const changed = commitHookEnv(await activate(), env)
@@ -216,7 +224,7 @@ export function registerSuite13(): void {
       .not.toBe(restored.SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT)
     await expect(commitNotificationStatus(dataRoot, changed))
       .resolves.toEqual({ ackedThrough: null, notifyBacklog: 2 })
-    expect(await readFile(statePath, 'utf8')).toBe(saved)
+    expect(await readFile(statePath, 'utf8')).toBe(failedState)
   })
 
   it('independent hook identities retain their own ACK across successful alternating deliveries', async () => {

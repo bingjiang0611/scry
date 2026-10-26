@@ -3,10 +3,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { handleRecorderHook, drainRecorderDelivery } from './recorder.js'
-import { commitNotificationStatus, drainCommitNotifications, listRecords, stableHash } from './store.js'
+import { commitNotificationStatus, drainCommitNotifications, redeliverLatestCommitNotification, listRecords, stableHash } from './store.js'
 import { resolveCommitHookActivation, commitHookEnv } from './commit-hook-grant.js'
 import * as io from './io.js'
 import { doctorCommand } from '../../cli/doctor-command.js'
+import { recordsCommand } from '../../cli/records-command.js'
 
 const roots: string[] = []
 afterEach(async () => {
@@ -29,7 +30,7 @@ async function fixture() {
 const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto')
 const n = JSON.parse(fs.readFileSync(0, 'utf8'))
 fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify(n.sequence) + '\\n')
-let bytes = fs.readFileSync(path.join(n.dataRoot, n.recordPath))
+let bytes = fs.readFileSync(path.join(${JSON.stringify(dataRoot)}, n.recordPath))
 if (JSON.parse(fs.readFileSync(${JSON.stringify(blocked)}, 'utf8')).includes(n.sequence)) bytes = Buffer.concat([bytes, Buffer.from('corruption')])
 if (crypto.createHash('sha256').update(bytes).digest('hex') !== n.sha256) process.exit(71)
 const target = path.join(${JSON.stringify(root)}, 'accepted-' + n.sequence + '.json')
@@ -69,7 +70,7 @@ describe('persistent commit notification failures', () => {
     const f = await fixture()
     await drainCommitNotifications(f.dataRoot, f.env)
     expect(await commitNotificationStatus(f.dataRoot, f.env)).toMatchObject({
-      failure: { sequence: 1, attempts: 1, reason: 'exit' }
+      failure: { sequence: 1, attempts: 1, reason: 'exit', exitCode: 71 }
     })
     expect(await doctor(f)).toMatchObject({ code: 5, check: { status: 'warn', detail: expect.stringMatching(/sequence 1.*1 failed/) } })
     for (let i = 1; i < 5; i++) await drainCommitNotifications(f.dataRoot, f.env)
@@ -79,6 +80,15 @@ describe('persistent commit notification failures', () => {
       deadLetters: [expect.objectContaining({ sequence: 1, attempts: 5, reason: 'exit' })]
     })
     expect(await doctor(f)).toMatchObject({ code: 5, check: { status: 'fail', detail: expect.stringMatching(/sequence 1.*5 failed/) } })
+    for (const [key, value] of Object.entries(f.env)) vi.stubEnv(key, value)
+    const archiveOutput: string[] = []
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(chunk => { archiveOutput.push(String(chunk)); return true })
+    try {
+      expect(await recordsCommand({ positionals: ['records', 'archive'], flags: new Map<string, string | true>([
+        ['workspace', f.root], ['before', '2099-01-01'], ['yes', true]
+      ]) })).toBe(5)
+      expect(JSON.parse(archiveOutput.join(''))).toMatchObject({ status: 'refused', reason: 'undelivered-records' })
+    } finally { stdout.mockRestore(); vi.unstubAllEnvs() }
     expect(await listRecords(f.dataRoot)).toHaveLength(3)
     for (const sequence of [2, 3]) {
       expect(JSON.parse(await readFile(join(f.root, `accepted-${sequence}.json`), 'utf8'))).toMatchObject({ sequence })
@@ -89,6 +99,31 @@ describe('persistent commit notification failures', () => {
     await drainCommitNotifications(f.dataRoot, other)
     expect(await commitNotificationStatus(f.dataRoot, other)).toMatchObject({ failure: { sequence: 1, attempts: 1 } })
     expect(await commitNotificationStatus(f.dataRoot, f.env)).toMatchObject({ deadLetterCount: 1, notifyBacklog: 0 })
+  }, 15_000)
+
+  it('starts an independent counter for the next failed sequence and reports both dead and blocked work', async () => {
+    const f = await fixture()
+    await writeFile(f.blocked, '[1,2]')
+    for (let i = 0; i < 5; i++) await drainCommitNotifications(f.dataRoot, f.env)
+    expect(await commitNotificationStatus(f.dataRoot, f.env)).toMatchObject({
+      ackedThrough: 0, processedThrough: 1, notifyBacklog: 2, deadLetterCount: 1,
+      failure: { sequence: 2, attempts: 1 }
+    })
+    expect(await doctor(f)).toMatchObject({ code: 5, check: {
+      detail: expect.stringMatching(/sequence 1: 5 failed.*sequence 2: 1 failed/)
+    } })
+  }, 15_000)
+
+  it('does not wake an exhausted latest record again on the cold-start redelivery path', async () => {
+    const f = await fixture()
+    await writeFile(f.blocked, '[3]')
+    for (let i = 0; i < 5; i++) await drainCommitNotifications(f.dataRoot, f.env)
+    const calls = await f.readCalls()
+    expect(calls).toEqual([1, 2, 3, 3, 3, 3, 3])
+    expect(await redeliverLatestCommitNotification(f.dataRoot, f.env)).toMatchObject({
+      delivered: false, sequence: 3, reason: 'recorder dead letter; automatic redelivery disabled'
+    })
+    expect(await f.readCalls()).toEqual(calls)
   }, 15_000)
 
   it('clears a failure on successful retry before the threshold', async () => {
@@ -135,11 +170,13 @@ describe('persistent commit notification failures', () => {
     expect(await f.readCalls()).toEqual([1, 1, 1, 1, 1, 2, 3])
   }, 15_000)
 
-  it('does not reset corrupt failure counters or execute a callback with unavailable state', async () => {
+  it.each(['counter', 'null', 'identity'])('does not reset corrupt %s state or execute a callback with unavailable state', async corruption => {
     const f = await fixture()
     await drainCommitNotifications(f.dataRoot, f.env)
     const state = JSON.parse(await readFile(f.statePath, 'utf8')) as Record<string, unknown>
-    await writeFile(f.statePath, JSON.stringify({ ...state, failure: { sequence: 1, recordId: f.records[0].recordId, attempts: 'invalid' } }))
+    const corrupt = corruption === 'null' ? null : corruption === 'identity' ? { ...state, hookFingerprint: 'wrong-identity' }
+      : { ...state, failure: { sequence: 1, recordId: f.records[0].recordId, attempts: 'invalid' } }
+    await writeFile(f.statePath, JSON.stringify(corrupt))
     await expect(drainCommitNotifications(f.dataRoot, f.env)).rejects.toThrow(/notification.*state/)
     expect(await f.readCalls()).toEqual([1])
     expect(await doctor(f)).toMatchObject({ code: 5, check: { status: 'fail', detail: expect.stringContaining('unavailable') } })
