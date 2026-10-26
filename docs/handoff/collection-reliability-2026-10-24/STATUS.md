@@ -22,3 +22,18 @@
 | M4 | ACK 只代表入队；归档后回源校验阻止发送 | E2 + U1/U2 | 已核验 | [E 报告](reports/E.md) | recorder E2：3 红测→通过，通知 v2 带 dataRoot 相对路径与原始字节 SHA-256；uploader U1/U2 按报告审阅（c230f652），真实整链路待验收，见 [uploader 审阅](reports/uploader-review.md) |
 | U3 | uploader 不可重试错误返回 0 | U3 | 阻塞 | [uploader 审阅](reports/uploader-review.md) | R1–R3 按报告已处理（c230f652，17/17 离线验收，未读代码）；夹具已更新（fdd20ba7）；用户 2026-10-25 确认服务端已去重，R2 接受；等待：全仓门禁基线失败另行处理、真实端到端验收、recorder E3 |
 | U4 | 显式关闭上传无痕迹 | U4 | 阻塞 | [uploader 审阅](reports/uploader-review.md) | 同 U3 |
+
+## 合入前汇总验收（2026-10-26，构建 `6e2012e7`）
+
+详见 [F 报告](reports/F.md)。F-3～F-8 在本机隔离环境通过；F-1、F-2 未全部通过。
+
+| # | 场景 | 状态 | 备注 |
+|---|---|---|---|
+| F-1 | Claude / Codex / OpenCode 各一轮 | 部分通过 | OpenCode 12 条 record、Pi 限流下仍 1 条；Claude 隔离 HOME 内 CLI 无输出被 SIGKILL；Codex 轮次完成但无 record；Qoder 阻塞于凭据 |
+| F-2 | Codex 子目录 / 子仓库 | 未通过 | 同 Codex：hook 打印 Completed，`.scry` 无写入，`health.json` 全 0；`--sandbox workspace-write` 下 UserPromptSubmit 后挂住 |
+| F-3 | 长路径 workspace | 通过 | socket 指针指向 95 字节真实 socket，1 条 record |
+| F-4 | 多仓库 root / `one/` / `a/b/c` | 通过 | discovery 列出请求目录，doctor warn 且含 `a/b/c`，单仓库深目录对照 pass |
+| F-5 | 每轮 env | 通过 | 未设置/`0`/`1` 三者逐轮隔离 |
+| F-6 | 通知 v2 | 通过 | 41 次投递 schemaVersion=2、sha256 一致、按 recordPath 读取 |
+| F-7 | uploader 短暂故障恢复 | 通过 | attempts=1、nextRetryAt=+60s、退避内不重调用、到期补投、ACK 前进 |
+| F-8 | kill daemon | 通过 | 下一轮落盘、daemon 自动拉起、inbox 0 |

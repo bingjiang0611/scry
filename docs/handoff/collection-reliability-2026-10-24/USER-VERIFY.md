@@ -38,4 +38,6 @@ node <分支 CLI>/dist/cli/scry.js init --providers codex,qoder,opencode
 | F-7 | uploader 短暂故障后恢复 | VE2 | 恢复后在退避时间到期时自动补投，不进死信；doctor 显示下次重试时间 |
 | F-8 | 机器重启或 kill daemon 之后继续使用 | VC1 | 下一轮正常落盘，daemon 自动拉起，inbox 不积压 |
 
+执行记录见 [F 报告](reports/F.md)：F-3～F-8 通过；F-1 只有 OpenCode 与 Pi 通过，Claude/Codex/Qoder 未通过或阻塞；F-2 的 Codex 场景未通过。
+
 部署提醒：hook 脚本在 C、D、E 都有改动，存量 workspace 需要 `scry integrations repair --yes`，然后 `scry recorder restart`，再重启 Provider；Codex 要在 `/hooks` 重新确认 trust。
