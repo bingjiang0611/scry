@@ -1,3 +1,4 @@
+import { captureUploadEnvironment } from './commit-environment.js'
 import { readdir, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
@@ -28,6 +29,7 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
   const arrivedAt = new Date().toISOString()
   input = {
     ...input,
+    uploadEnvironment: captureUploadEnvironment(input.env ?? process.env),
     payload: trustedManagedIdentityPayload(input.payload, input.managed, input.env ?? process.env)
   }
   const enablement = await resolveRecorderEnablement(input.workspace, input.env)

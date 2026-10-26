@@ -30,7 +30,8 @@ export async function beginOpenTurn(
   event: string,
   payload: Record<string, unknown>,
   managedByScry = false,
-  staleTerminalProtection = false
+  staleTerminalProtection = false,
+  uploadEnvironment?: import('./commit-environment.js').UploadEnvironment
 ): Promise<OpenTurnState> {
   const root = sessionRoot(enablement.dataRoot, provider, sessionId)
   const session = await nextSessionState(enablement.dataRoot, root, provider, sessionId)
@@ -72,6 +73,7 @@ export async function beginOpenTurn(
     ...(providerTurnId ? { providerTurnId } : {}),
     ...(managedByScry ? { managedByScry: true } : {}),
     ...(staleTerminalProtection ? { staleTerminalProtection: true } : {}),
+    uploadEnvironment,
     captures: []
   }
   // Publish the initial identity durably before acknowledging the start hook.

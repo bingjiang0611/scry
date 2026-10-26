@@ -17,6 +17,7 @@ export interface RecorderSessionState {
 }
 
 export interface RecorderOpenTurnState {
+  uploadEnvironment?: import('./commit-environment.js').UploadEnvironment
   toolContentPolicy?: import('./tool-content.js').ToolContentPolicy
   schemaVersion: 1
   provider: ProviderId

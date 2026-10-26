@@ -293,7 +293,7 @@ export async function finalizeOpenTurn(
     transcript: transcriptEvidence,
     ...evidence
   }
-  const committed = await commitRecord(enablement.dataRoot, draft)
+  const committed = await commitRecord(enablement.dataRoot, draft, open.uploadEnvironment)
   const session = await nextSessionState(enablement.dataRoot, root, open.provider, open.sessionId)
   const committedProviderTurnIds = open.providerTurnId
     ? [...new Set([...(session.committedProviderTurnIds ?? []), open.providerTurnId])].slice(-200)

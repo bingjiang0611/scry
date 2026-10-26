@@ -13,6 +13,7 @@ export interface RecorderHookInput {
   workspace: string
   payload: Record<string, unknown>
   env?: NodeJS.ProcessEnv
+  uploadEnvironment?: import('./commit-environment.js').UploadEnvironment
   managed?: boolean
   /** Persist an uncertain transport delivery for lifecycle-deduplicated recovery, without applying it. */
   queueOnly?: boolean
@@ -278,6 +279,7 @@ export interface QueuedHook {
   event: string
   payload: Record<string, unknown>
   managed?: boolean
+  uploadEnvironment?: import('./commit-environment.js').UploadEnvironment
   arrivedAt: string
 }
 

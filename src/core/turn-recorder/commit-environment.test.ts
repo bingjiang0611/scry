@@ -1,12 +1,14 @@
 import { spawn } from 'node:child_process'
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { providerHookSource } from '../../cli/workspace-hook-sources.js'
 import { listenRecorderDaemon, sendRecorderDaemonHook, type RecorderDaemonHandle } from './daemon.js'
 import { drainRecorderDelivery, handleRecorderHook, recoverRecorder } from './recorder.js'
-import { listRecords } from './store.js'
+import { listRecords, safeKey, stableHash } from './store.js'
+import { aggregateTurnEvidence } from './aggregate.js'
+import { commitManagedRecorderTurn, prepareManagedRecorderTurn } from './managed.js'
 
 const roots: string[] = []
 const daemons: RecorderDaemonHandle[] = []
@@ -48,11 +50,21 @@ it('shell fast path pins the starting session env, including absence, not the da
   daemons.push(await listenRecorderDaemon({ workspace: f.root, env: f.env }))
   const sessionEnv = { PATH: process.env.PATH, HOME: f.root }
   await shell(f.script, 'UserPromptSubmit', 'shell', sessionEnv)
+  const open = JSON.parse(await readFile(join(f.root, '.scry/runtime/pi', safeKey('shell'), 'open.json'), 'utf8'))
+  expect(open.uploadEnvironment).toEqual({})
   await shell(f.script, 'Stop', 'shell', { ...sessionEnv, SCRY_TURN_UPLOAD_ENABLED: '0' })
   await drainRecorderDelivery(f.root, f.env)
   expect(await f.delivered()).toEqual([{ sessionId: 'shell', enabled: null, url: null, installation: null }])
   const [record] = await listRecords(join(f.root, '.scry'))
   expect(JSON.stringify(record)).not.toContain('daemon-only-secret')
+  const sidecar = join(f.root, '.scry/record-environments', `${record.recordId}.json`)
+  expect(JSON.parse(await readFile(sidecar, 'utf8')).values).toEqual({})
+  expect((await stat(sidecar)).mode & 0o777).toBe(0o600)
+  const url = 'https://fixture.invalid/shell-secret?quote="\\\\"\n第二行'
+  await shell(f.script, 'UserPromptSubmit', 'shell-values', { ...sessionEnv, SCRY_TURN_UPLOAD_ENABLED: '1', TMCP_TRACE_URL: url })
+  await shell(f.script, 'Stop', 'shell-values', sessionEnv)
+  await drainRecorderDelivery(f.root, f.env)
+  expect((await f.delivered())[1]).toEqual({ sessionId: 'shell-values', enabled: '1', url, installation: null })
 }, 15_000)
 
 it('shell fast path honors session SCRY_RECORDER_ENABLED=0 without creating an open turn', async () => {
@@ -67,14 +79,37 @@ it('shell fast path honors session SCRY_RECORDER_ENABLED=0 without creating an o
 it('Node transport preserves upload values with quotes, Unicode and newlines outside the record body', async () => {
   const f = await fixture()
   daemons.push(await listenRecorderDaemon({ workspace: f.root, env: f.env }))
-  const url = 'https://fixture.invalid/秘密?token="private"\\line\r\nnext'
+  const url = 'https://fixture.invalid/秘密?token="fixture-upload-secret"\\line\r\nnext'
   for (const event of ['UserPromptSubmit', 'Stop']) await sendRecorderDaemonHook({ workspace: f.root, provider: 'pi', event,
     payload: { session_id: 'node', prompt: 'fixture', assistant_response: 'done' },
     env: event === 'UserPromptSubmit' ? { ...f.env, SCRY_TURN_UPLOAD_ENABLED: '1', TMCP_TRACE_URL: url, SCRY_INSTALLATION_ID: '' } : f.env })
   await drainRecorderDelivery(f.root, f.env)
   expect(await f.delivered()).toEqual([{ sessionId: 'node', enabled: '1', url, installation: '' }])
   const [record] = await listRecords(join(f.root, '.scry'))
-  expect(JSON.stringify(record)).not.toContain('private')
+  expect(JSON.stringify(record)).not.toContain('fixture-upload-secret')
+}, 15_000)
+
+it('managed canonical handoff retains the start snapshot across prepare and commit', async () => {
+  const f = await fixture()
+  await writeFile(join(f.root, 'scry.config.json'), JSON.stringify({ schemaVersion: 1, enabled: true, workspaceId: 'env-fixture',
+    capture: { prompt: true, assistant: true, toolOutput: 'summary', diff: true, hooks: true } }))
+  const timing = { startedAt: '2026-10-26T01:00:00.000Z', completedAt: '2026-10-26T01:00:10.000Z', durationMs: 10_000 }
+  await handleRecorderHook({ workspace: f.root, provider: 'codex', event: 'UserPromptSubmit', managed: true,
+    payload: { session_id: 'managed', turn_id: 'turn-1', prompt: 'fixture', timestamp: timing.startedAt },
+    env: { ...f.env, SCRY_TURN_UPLOAD_ENABLED: '1', TMCP_TRACE_URL: 'managed-secret' } })
+  const evidence = aggregateTurnEvidence({ userText: 'fixture', source: 'scry_provider_adapter', events: [
+    { id: 'assistant', ts: timing.completedAt, runId: 'run-1', kind: 'model', stage: 'text_delta', text: 'done' },
+    { id: 'result', ts: timing.completedAt, runId: 'run-1', kind: 'harness', stage: 'result', durationMs: timing.durationMs }
+  ] })
+  const input = { workspace: f.root, provider: 'codex' as const, sessionId: 'managed', runId: 'run-1', providerTurnId: 'turn-1',
+    userText: 'fixture', evidence, timing, status: 'completed' as const, archiveFingerprint: stableHash(evidence), env: f.env }
+  const prepared = await prepareManagedRecorderTurn(input)
+  expect(prepared.status).toBe('prepared')
+  if (prepared.status !== 'prepared') throw new Error('expected managed handoff')
+  await expect(commitManagedRecorderTurn({ ...input, recordId: prepared.recordId })).resolves.toMatchObject({ status: 'committed' })
+  await drainRecorderDelivery(f.root, f.env)
+  expect(await f.delivered()).toEqual([{ sessionId: 'managed', enabled: '1', url: 'managed-secret', installation: null }])
+  expect(JSON.stringify(await listRecords(join(f.root, '.scry')))).not.toContain('managed-secret')
 }, 15_000)
 
 it('durable inbox replay uses the queued start environment, not the recovery process environment', async () => {

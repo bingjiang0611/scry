@@ -28,6 +28,14 @@ scry recorder notify-drain --workspace "$PWD"
 
 投递语义是 **at-least-once**,去重键为 `(workspace, recordId)`。
 
+### 每轮上传环境
+
+开始事件把上传 allowlist 快照进 private `open.json`；inbox 重放和 managed 两阶段提交也保留这份快照。record 发布前，先原子写入并 fsync `<dataRoot>/record-environments/<recordId>.json`（0600）。快照包含 `SCRY_TURN_UPLOAD_ENABLED`、`SCRY_INSTALLATION_ID`、`SCRY_INSTALLATION_ID_FILE`、`RATE_NATIVE_ASYNC_QUEUE_DIR`、`TMCP_TRACE_URL`，以及当前 allowlist 的 `SCRY_UPLOAD_DEADLINE_SECONDS`、`SCRY_UPLOAD_LOCK_WAIT_SECONDS`、`SCRY_MANAGED_UPLOAD_WAIT_SECONDS`。未设置与空字符串分开保存；投递和显式重投都使用开始时的值，而不是 Stop/recovery/daemon 的值。
+
+这些值可能敏感，不进入 record 正文、record export 或 support bundle；旁路文件不加密，勿原样分享。旁路按 recordId 保留，当前不会随归档自动删除。升级前的 record/open turn 没有快照，无法重建原会话环境，继续采用旧的投递进程环境；不要将其解释成已验证的逐轮快照。执行路径、trust 指纹及非上传环境不从旁路恢复。
+
+daemon hook 协议升为 2。shell 仅用内建 `printf` 发送 NUL 分隔环境和原始 Provider JSON，不增加编码器进程；会话的 `SCRY_RECORDER_ENABLED=0` 也传到 daemon。旧协议被拒绝后走现有持久化 fallback，不会按 daemon 环境假装处理成功。升级后须 `scry integrations repair --yes` 更新脚本，并 `scry recorder restart` 重启该 workspace 的 daemon。
+
 ## managed 模式与更新
 
 Scry App 启动 Provider 时设置 `SCRY_RECORDER_MANAGED=1`:此时 lifecycle hook 只建立轮次身份,App 在 result、Hook 与 diff 全部收齐后两阶段提交 canonical evidence;managed turn 禁止回退到 rollout 近似重建。

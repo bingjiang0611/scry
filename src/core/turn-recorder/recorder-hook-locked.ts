@@ -105,7 +105,8 @@ export async function applyHookLocked(
       input.event,
       input.payload,
       input.managed === true,
-      protectNextStart
+      protectNextStart,
+      input.uploadEnvironment
     )
     if (!open.managedByScry) await storeLifecycleEvent(enablement, open, input.event, input.payload)
     return { status: 'started' as const }
@@ -243,6 +244,7 @@ export async function queueHook(
     sessionId,
     event: input.event,
     payload: input.payload,
+    uploadEnvironment: input.uploadEnvironment,
     ...(input.managed ? { managed: true } : {}),
     arrivedAt
   }
@@ -299,7 +301,8 @@ export async function replayQueuedHooks(
         event: queued.event,
         workspace: enablement.workspaceRoot,
         payload: queued.payload,
-        managed: queued.managed
+        managed: queued.managed,
+        uploadEnvironment: queued.uploadEnvironment
       }, queued.sessionId))
     } catch (error) {
       try {

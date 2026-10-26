@@ -1,3 +1,4 @@
+import { HOOK_ENV_KEYS } from '../core/turn-recorder/commit-environment.js'
 import { PROTOCOL_VERSION } from '../core/turn-recorder/daemon.js'
 import { object } from './workspace-files.js'
 
@@ -39,6 +40,9 @@ export const PROJECT_DIR_ENV: Record<Exclude<InitProvider, 'opencode'>, string> 
 }
 
 export function providerHookSource(): string {
+  const environment = HOOK_ENV_KEYS.map(key =>
+    `  if [ "\${${key}+x}" = x ]; then printf '%s\\0%s\\0' '${key}' "$${key}"; fi`
+  ).join('\n')
   return `#!/bin/sh
 set -u
 unset SCRY_RECORDER_DAEMON_TRIED
@@ -67,6 +71,10 @@ if [ "\${SCRY_RECORDER_MANAGED:-0}" = "1" ]; then
 fi
 # Read the payload once so the fallback can resend it: stdin cannot be replayed.
 payload="$(cat)" || skip payload_read_failed
+post_body() {
+${environment}
+  printf '\\0%s' "$payload"
+}
 # Posting straight to a running daemon skips a Node start per event, which dominates hook cost.
 # Anything other than HTTP 200 falls through to the CLI, so an old or wedged daemon cannot drop events.
 socket="\${SCRY_RECORDER_SOCKET:-$workspace/.scry/recorder-v1.sock}"
@@ -81,10 +89,10 @@ if [ "\${SCRY_RECORDER_TRANSPORT:-}" != "direct" ] && [ -S "$socket" ] && comman
     UserPromptSubmit|Stop) deadline=4 ;;
     *) deadline=1 ;;
   esac
-  code="$(printf '%s' "$payload" | curl -s -o /dev/null -w '%{http_code}' --max-time "$deadline" \
+  code="$(post_body | curl -s -o /dev/null -w '%{http_code}' --max-time "$deadline" \
     --unix-socket "$socket" -X POST \
     -H 'x-scry-protocol: ${PROTOCOL_VERSION}' -H "x-scry-provider: $1" -H "x-scry-event: $2" \
-    -H 'content-type: application/json' --data-binary @- http://localhost/v1/hook 2>/dev/null)"
+    -H 'content-type: application/octet-stream' --data-binary @- http://localhost/v1/hook 2>/dev/null)"
   rc=$?
   [ "$rc" = "0" ] && [ "$code" = "200" ] && exit 0
   if [ "$rc" = "7" ]; then
