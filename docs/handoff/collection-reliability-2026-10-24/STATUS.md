@@ -29,8 +29,8 @@
 
 | # | 场景 | 状态 | 备注 |
 |---|---|---|---|
-| F-1 | Claude / Codex / OpenCode 各一轮 | 部分通过 | OpenCode 12 条 record、Pi 限流下仍 1 条；Claude 隔离 HOME 内 CLI 无输出被 SIGKILL；Codex 轮次完成但无 record；Qoder 阻塞于凭据 |
-| F-2 | Codex 子目录 / 子仓库 | 未通过 | 同 Codex：hook 打印 Completed，`.scry` 无写入，`health.json` 全 0；`--sandbox workspace-write` 下 UserPromptSubmit 后挂住 |
+| F-1 | Claude / Codex / OpenCode 各一轮 | 部分通过 | OpenCode 12 条 record、Pi 限流下仍 1 条；**Codex 真机验收通过**（S1，先在 `/hooks` 确认 trust）；Claude：用户决定不验收，不计通过；Qoder 凭据已刷新待重跑 |
+| F-2 | Codex 子目录 / 子仓库 | 未通过 | 真机验收：子目录（`src/deep`）通过并落 2 条 record；子仓库 `one/` **完全没有加载 hook**（Codex 向上找 `.codex/hooks.json` 到 git root 停止），`[hooks.state]` 0 条、trace 未生成、`turns list` 空 |
 | F-3 | 长路径 workspace | 通过 | socket 指针指向 95 字节真实 socket，1 条 record |
 | F-4 | 多仓库 root / `one/` / `a/b/c` | 通过 | discovery 列出请求目录，doctor warn 且含 `a/b/c`，单仓库深目录对照 pass |
 | F-5 | 每轮 env | 通过 | 未设置/`0`/`1` 三者逐轮隔离 |
