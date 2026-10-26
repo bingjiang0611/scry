@@ -1,0 +1,487 @@
+{
+  "schema": 1,
+  "scope": "Independent integration; no original-branch merge, push, package or installation",
+  "inputs": {
+    "development": "e1b120cc3dc768de98118a5aa62e44116a3a4f8e",
+    "performance": "9d2d04c0d08c62b09481d57418ee801434562502",
+    "diagnostics": "39b1488c668f56b9bed1f5b41adcd01064b7f306",
+    "testedTree": "8d0a951b8c9973511991a78a4cf4d9235056225a",
+    "integration": "bda0c854dbedd335a51328b25e8be4862bf21615",
+    "integrationTree": "6ce4389c41eb9e434a26d2ac87bf56e74cd631e7",
+    "afterTestChanges": [
+      "docs/handoff/collection-reliability-2026-10-24/STATUS.md",
+      "docs/handoff/collection-reliability-2026-10-24/USER-VERIFY.md",
+      "docs/handoff/collection-reliability-2026-10-24/reports/E.md"
+    ]
+  },
+  "validation": {
+    "statuses": {
+      "focused": 0,
+      "unit": 0,
+      "typecheck": 0,
+      "build-cli": 0,
+      "renderer-ui": 0,
+      "performance": 0
+    },
+    "unit": {
+      "files": 359,
+      "total": 4093,
+      "passed": 4089,
+      "failed": 0,
+      "pending": 4,
+      "command": "npm run test:unit -- --maxWorkers=2 --no-file-parallelism --reporter=json --outputFile=<owned-log>/unit.json"
+    },
+    "ui": {
+      "command": "npm run test:renderer:ui",
+      "scope": "all 27 package commands in one chain, including real temporary App/Git/IPC fixtures",
+      "firstRunExit": 0,
+      "priorFailures": "Earlier integration overlay-focus and lifecycle-hit failures retained; root cause remains unknown, not claimed fixed"
+    }
+  },
+  "timings": {
+    "unitAndBuild": {
+      "label": "integration-r2-unit",
+      "wallMs": 759549,
+      "cores": 8,
+      "loadBefore": 3.8,
+      "loadAfter": 11.22,
+      "highLoad": true,
+      "exit": 0,
+      "source": "captured tool stdout; includes unit, typecheck and CLI build"
+    },
+    "ui": {
+      "label": "integration-r2-ui",
+      "command": [
+        "npm",
+        "run",
+        "test:renderer:ui"
+      ],
+      "exit": 0,
+      "signal": null,
+      "wallMs": 382028,
+      "cores": 8,
+      "loadBefore": 7.27,
+      "loadAfter": 2.88,
+      "highLoad": false
+    },
+    "performance": {
+      "label": "integration-r2-performance",
+      "command": [
+        "npm",
+        "run",
+        "performance:measure",
+        "--",
+        "--compare",
+        "e1b120cc",
+        "--out",
+        "/Users/test/scry-performance-climb-mac2.cO3N5W/logs/integration-r2/full-compare"
+      ],
+      "exit": 0,
+      "signal": null,
+      "wallMs": 86528,
+      "cores": 8,
+      "loadBefore": 2.3,
+      "loadAfter": 3.59,
+      "highLoad": false
+    }
+  },
+  "performance": {
+    "observed": 74,
+    "registered": 77,
+    "passed": true,
+    "worse": [
+      {
+        "key": "files.fixed-operations/io.readdir",
+        "layer": "io",
+        "unit": "count",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "value": 20,
+        "min": 20,
+        "runs": 5,
+        "spread": 0,
+        "result": "worse",
+        "baseline": 18,
+        "gateFailed": false
+      },
+      {
+        "key": "persistence.archive/ipc.bytes",
+        "layer": "ipc",
+        "unit": "bytes",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "value": 10558,
+        "min": 10558,
+        "runs": 5,
+        "spread": 0,
+        "result": "worse",
+        "baseline": 10536,
+        "gateFailed": false
+      },
+      {
+        "key": "recorder.content-cold/io.stat.calls",
+        "layer": "io",
+        "unit": "count",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "value": 44,
+        "min": 44,
+        "runs": 5,
+        "spread": 0,
+        "result": "worse",
+        "baseline": 36,
+        "gateFailed": false
+      }
+    ],
+    "missing": [
+      {
+        "key": "analytics.stats/cpu.instructions",
+        "layer": "main",
+        "unit": "instructions",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "result": "missing",
+        "gateFailed": false
+      },
+      {
+        "key": "history.page/cpu.instructions",
+        "layer": "main",
+        "unit": "instructions",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "result": "missing",
+        "gateFailed": false
+      },
+      {
+        "key": "remote.trace.preview/cpu.instructions",
+        "layer": "main",
+        "unit": "instructions",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "result": "missing",
+        "gateFailed": false
+      }
+    ],
+    "selectedComparisons": [
+      {
+        "key": "analytics.data-updated/sqlite.queries",
+        "layer": "io",
+        "unit": "count",
+        "workload": "span-results=240;tools=240;data-updates=5;analytics-active=0;invalidate-per-update=1",
+        "baseline": 130,
+        "candidate": 0,
+        "baselineRuns": [
+          130,
+          130,
+          130,
+          130,
+          130
+        ],
+        "candidateRuns": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "delta": -130,
+        "percent": -100,
+        "status": "measured"
+      },
+      {
+        "key": "files.fixed-operations/io.read.payload.bytes",
+        "layer": "io",
+        "unit": "bytes",
+        "workload": "fixed-local-temp-workloads",
+        "baseline": 1397920,
+        "candidate": 1397912,
+        "baselineRuns": [
+          1397902,
+          1397920,
+          1397877,
+          1397880,
+          1397916
+        ],
+        "candidateRuns": [
+          1397875,
+          1397873,
+          1397897,
+          1397912,
+          1397891
+        ],
+        "delta": -8,
+        "percent": -0.0005722788142382969,
+        "status": "measured"
+      },
+      {
+        "key": "recorder.content-cold/io.stat.calls",
+        "layer": "io",
+        "unit": "count",
+        "workload": "new-bodies=4;body-bytes=262144;authorities=1;initial-publication=included;sync=unchanged",
+        "baseline": 36,
+        "candidate": 44,
+        "baselineRuns": [
+          36,
+          36,
+          36,
+          36,
+          36
+        ],
+        "candidateRuns": [
+          44,
+          44,
+          44,
+          44,
+          44
+        ],
+        "delta": 8,
+        "percent": 22.22222222222222,
+        "status": "measured"
+      },
+      {
+        "key": "recorder.content-dual/io.directory.metadata.calls",
+        "layer": "io",
+        "unit": "count",
+        "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+        "baseline": 167,
+        "candidate": 85,
+        "baselineRuns": [
+          167,
+          167,
+          167,
+          167,
+          167
+        ],
+        "candidateRuns": [
+          85,
+          85,
+          85,
+          85,
+          85
+        ],
+        "delta": -82,
+        "percent": -49.101796407185624,
+        "status": "measured"
+      },
+      {
+        "key": "recorder.content-dual/io.sync.calls",
+        "layer": "io",
+        "unit": "count",
+        "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+        "baseline": 116,
+        "candidate": 88,
+        "baselineRuns": [
+          116,
+          116,
+          116,
+          116,
+          116
+        ],
+        "candidateRuns": [
+          88,
+          88,
+          88,
+          88,
+          88
+        ],
+        "delta": -28,
+        "percent": -24.137931034482758,
+        "status": "measured"
+      },
+      {
+        "key": "recorder.content-reuse/crypto.sha256.calls",
+        "layer": "io",
+        "unit": "count",
+        "workload": "durable-bodies=4;body-bytes=262144;reuse-passes=8;file-and-directory-sync=unchanged",
+        "baseline": 64,
+        "candidate": 32,
+        "baselineRuns": [
+          64,
+          64,
+          64,
+          64,
+          64
+        ],
+        "candidateRuns": [
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "delta": -32,
+        "percent": -50,
+        "status": "measured"
+      },
+      {
+        "key": "renderer.remote-tail/merge.prefix.reads",
+        "layer": "ui",
+        "unit": "count",
+        "workload": "structural-items=5000;live-tail=1;updates=20;indexed-delta=true",
+        "baseline": 100000,
+        "candidate": 100000,
+        "baselineRuns": [
+          100000,
+          100000,
+          100000,
+          100000,
+          100000
+        ],
+        "candidateRuns": [
+          100000,
+          100000,
+          100000,
+          100000,
+          100000
+        ],
+        "delta": 0,
+        "percent": 0,
+        "status": "measured"
+      },
+      {
+        "key": "renderer.remote-tail/projection.prefix.reads",
+        "layer": "ui",
+        "unit": "count",
+        "workload": "structural-items=5000;live-tail=1;updates=20;indexed-delta=true",
+        "baseline": 100020,
+        "candidate": 0,
+        "baselineRuns": [
+          100020,
+          100020,
+          100020,
+          100020,
+          100020
+        ],
+        "candidateRuns": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "delta": -100020,
+        "percent": -100,
+        "status": "measured"
+      }
+    ],
+    "positiveDeltas": [
+      {
+        "key": "recorder.content-cold/io.stat.calls",
+        "layer": "io",
+        "unit": "count",
+        "workload": "new-bodies=4;body-bytes=262144;authorities=1;initial-publication=included;sync=unchanged",
+        "baseline": 36,
+        "candidate": 44,
+        "baselineRuns": [
+          36,
+          36,
+          36,
+          36,
+          36
+        ],
+        "candidateRuns": [
+          44,
+          44,
+          44,
+          44,
+          44
+        ],
+        "delta": 8,
+        "percent": 22.22222222222222,
+        "status": "measured"
+      }
+    ],
+    "limits": "Only L1 verified this round. Payload bytes contain file-stamp variation. CPU missing is not zero. No baseline or tolerance changes."
+  },
+  "finalState": {
+    "capturedAt": "2026-10-26T12:06:42.407Z",
+    "machine": "mac2",
+    "node": "v24.18.0",
+    "electron": "42.10.1",
+    "platform": "darwin",
+    "arch": "arm64",
+    "cores": 8,
+    "load": [
+      2.25537109375,
+      2.3427734375,
+      3.37939453125
+    ],
+    "head": "bda0c854dbedd335a51328b25e8be4862bf21615",
+    "tree": "6ce4389c41eb9e434a26d2ac87bf56e74cd631e7",
+    "indexTree": "6ce4389c41eb9e434a26d2ac87bf56e74cd631e7",
+    "unstaged": "",
+    "status": "?? node_modules",
+    "files": {
+      "scripts/native-ui-pointer.mjs": "6e3b225eef183e68e524fd4831fb80ab025bcef9a324c4f06ccf883fb0e42c53",
+      "scripts/native-ui-pointer.test.mjs": "bfb328b4e4728696cf2220d852a55727e2b793b40d5d4f65055f3edb66908894",
+      "scripts/overlays-ui-checks.mjs": "fc438a581e34851f0517cc638f548dd61d68b2a9a5e0f8f8d8675b0068a7aa8b",
+      "package-lock.json": "625e9bc25c388af4925c02e5e59c34ea82cfb74afa115648464692a32ec93338"
+    },
+    "nativeBindingSha256": "8ebee14f1679ebbb7a1931fcd27695c270ce65f095a7dd176fc59d82016ccd9c",
+    "build": "76b16fc2f2e4628d738ba63c13bb89e31ed5483a6e09a9f2020ca6b63de156e7",
+    "ownedCwdMatches": []
+  },
+  "artifacts": [
+    {
+      "path": "unit.json",
+      "bytes": 1439319,
+      "sha256": "049b587e286186f61dfa22d583ab55db8714b93d1ce31581854fc5e291b33edc"
+    },
+    {
+      "path": "renderer-ui.log",
+      "bytes": 31532,
+      "sha256": "3887c725793c8a155c8880c20e882feef601baedbdf53af985559ade283e8ee1"
+    },
+    {
+      "path": "typecheck.log",
+      "bytes": 213,
+      "sha256": "d320985cece7690af04ef82c5f9ad5e44cbbc7d778234db4b1a6c6d603f5a70f"
+    },
+    {
+      "path": "build-cli.log",
+      "bytes": 185,
+      "sha256": "b53c0819e3767ceb7d10638435542ca2f71de77135099c0c791ddc3136fffa3c"
+    },
+    {
+      "path": "focused.log",
+      "bytes": 3023,
+      "sha256": "85a8d733eec18a85a68b8534841853f3893d21b3354f6a8fd34b4163fccb6baf"
+    },
+    {
+      "path": "performance.log",
+      "bytes": 13074,
+      "sha256": "2f3790d8abc035da81712bce3e01cb750911c33885b20bc636a42bb88fc61e3a"
+    },
+    {
+      "path": "full-compare/measure.json",
+      "bytes": 139787,
+      "sha256": "a072319de7478f96286350e60a3d7fde8c063a875a38139cdc16ed0f99a392e6"
+    },
+    {
+      "path": "full-compare/baseline.json",
+      "bytes": 34564,
+      "sha256": "a8d79db3cdc0b7e9563e5617267793749ef2801f12c62e2a3100f426de6db7ad"
+    },
+    {
+      "path": "full-compare/candidate.json",
+      "bytes": 34504,
+      "sha256": "fbad80012db85ecf1c582b01decb1968f248bd418a6ca0e982625e3002779937"
+    },
+    {
+      "path": "full-compare/comparison.json",
+      "bytes": 36665,
+      "sha256": "64612b766eb381391bfcdfa3ac0a64248161dfaddbbaaf695ba77a16dbaca03a"
+    },
+    {
+      "path": "final-state.json",
+      "bytes": 1088,
+      "sha256": "6411ef3f8980c1d09e14b713ce57e5cf034122a429e7501cc18215e2f97f487f"
+    }
+  ]
+}
