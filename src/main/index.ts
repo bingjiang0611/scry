@@ -37,6 +37,7 @@ import {
   type TraceArchiveTurn
 } from './transcript-archive'
 import { readPiNativeHistorySnapshot, reconcilePiNativeHistory, type PiNativeHistorySnapshot } from './pi-native-history'
+import { projectHistoryPageSnapshots, selectArchivePageTurns } from './session-history-page-projection'
 import {
   readCompleteArchiveForNativeReconciliation,
   hydrateSessionHistoryPage,
@@ -2095,10 +2096,12 @@ function pageWithHookCommands(
   page: SessionHistoryPage,
   hookConfig: ReturnType<typeof loadClaudeHookConfig> | null
 ): SessionHistoryPage {
-  if (!hookConfig) return page
+  // 只裁剪跨 IPC 的历史页投影（更早的累积会话快照），磁盘 archive 保留全部快照。
+  const projected = projectHistoryPageSnapshots(page)
+  if (!hookConfig) return projected
   return {
-    ...page,
-    turns: page.turns.map((turn) => ({
+    ...projected,
+    turns: projected.turns.map((turn) => ({
       ...turn,
       items: turn.items.map((event) => attachConfiguredHookCommands(event, hookConfig))
     }))
@@ -2349,7 +2352,14 @@ handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?
     let selectedArchive: TraceArchive | null = archived
     if (nativeSnapshot) {
       const selectedRunIds = unhydratedPage.turns.map((turn) => turn.runId!).filter((runId): runId is string => !!runId)
-      const selectedArchiveTurns = await readTraceArchiveTurnsAsync(archiveArgs, selectedRunIds, signal)
+      // The archive page already parsed these turn bodies (and persisted their tool content).
+      // Re-parse only run ids it does not cover; a Profile-scoped page can filter turns out,
+      // so that case keeps the authoritative full read.
+      const reusable = archiveProfile.agentProfileId === undefined ? archivePage?.archive ?? null : null
+      const { turns: coveredTurns, missingRunIds: uncoveredRunIds } = selectArchivePageTurns(reusable, selectedRunIds)
+      const selectedArchiveTurns = uncoveredRunIds.length === 0
+        ? coveredTurns
+        : [...coveredTurns, ...await readTraceArchiveTurnsAsync(archiveArgs, uncoveredRunIds, signal)]
       if (requestRevision !== loadSessionRevision) return null
       const selectedArchiveLoaded = mergeSessionTurns([], selectedArchiveTurns.length > 0 ? {
         version: 3,

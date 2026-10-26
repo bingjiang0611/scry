@@ -182,6 +182,15 @@
 
 **后续优先顺序**：本轮性能包已安装且运行身份已核对，接下来按当前新 build 采样；同场景两侧各≥30样本、≥2会话且核对环境/数据健康后再做L3，判断真实优先级，不为继续降次数删除身份、filter或revision校验。若继续优化Provider启动/扩展/模型目录，agent先补真实listCommands/runControls的端到端分段；真实账号/费用授权不足时不运行，不把离线结果当12秒根因。未推送、未正式发布；后续并行提交不自动算作已安装。保持trust、证据收敛与崩溃恢复合同；原生客户端不在本轮范围。
 
+## 历史会话打开（2026-10-26，真实大会话体积分析）
+
+- 现场：packaged build `79691ecc…`（0.2.225）自 2026-10-26 11:08 UTC 起的 13017 条记录；`ipc.agent:loadSession` n=169，p50 866 / p95 5145 / max 11180 ms。每次打开固定读 40 个 turn 文件（`archiveTurnFilesRead=40`），而 `archiveTotalTurns` 只有 78–91 —— 慢在单轮文件体积，不在轮次数。
+- 体积来源（真实会话 `rotom eval`，92 轮 / 789 MB，最新 40 轮文件 407 MB）：`items[].session_diff` 累积快照 182 MB + `turnEvidence.diff` 同一快照的第二份拷贝 187 MB + 工具事件 23 MB + 其他 10 MB。累积快照每轮重写同一份「会话开始 → 当前」清单与 patch，而 renderer 只读最新一份。
+- 已修：`page_hydration` 对同一批 40 个文件重复解析（0 次）；跨 IPC 历史页体积 158 MB → 24 MB。减少的是重复读盘与冗余传输，`main` 侧读盘总量不变。L2 因 `highLoad` 未成立，L3 未验证。
+- 剩余地板：一次打开仍需解析 302–407 MB，JSON.parse 无法跳过。要进毫秒级必须减小存储字节（累积快照每会话一份 + patch 走已有的内容寻址去重），并处理存量 5.2 GB 归档。
+- 覆盖缺口：`history.page` 现有 workload（4000 轮 × 1 个小事件，基线 11000 bytes / p95 20 ms）看不到 diff 快照体积，所以本次改动对该门禁不可见；需要按真实负载形状（含 diff 快照）另立 candidate，而不是改现有 workload。
+- 详见[实验记录](performance-experiments/20261026-history-open-redundancy.md)。
+
 ## 原始机会排名（2026-10-16，日常记录首次分析）
 
 来源：本机日常记录快照，两个 packaged build（0.2.192）：`d1464a62`（03:03–06:11 UTC，11181 条）与 `cafee00e`（06:11–08:11 UTC，14633 条）。成熟度：`single-session`，几乎全为 Pi，机器负载高且日志不记录负载。以下全部是**线索**，未经受控复现。
