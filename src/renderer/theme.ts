@@ -1,3 +1,5 @@
+import { browserStorage } from './browser-storage'
+
 export type AppTheme = 'dark' | 'light'
 
 export const THEME_STORAGE_KEY = 'scry.theme'
@@ -15,12 +17,7 @@ export function normalizeTheme(value: unknown): AppTheme {
 }
 
 export function browserThemeStorage(): Storage | undefined {
-  if (typeof window === 'undefined') return undefined
-  try {
-    return window.localStorage
-  } catch {
-    return undefined
-  }
+  return browserStorage()
 }
 
 export function readStoredTheme(storage: ThemeReader | undefined): AppTheme {

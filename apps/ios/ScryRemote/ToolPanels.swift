@@ -47,14 +47,14 @@ struct ToolPanelView: View {
               }
             }
           }
-          Text(ConnectionCopy.toolsNote).font(.system(size: 11)).foregroundStyle(Palette.faint)
+          Text(ConnectionCopy.toolsNote).font(.system(size: 11)).foregroundStyle(Palette.dim2)
         }
         .padding(.horizontal, 19).padding(.top, 10).padding(.bottom, 24)
       }
       .scrollIndicators(.hidden)
       .refreshable { await load() }
     }
-    .background(Palette.surface)
+    .background(Palette.main)
     .task(id: refreshKey) { await load() }
   }
 
@@ -85,10 +85,10 @@ struct ToolPanelView: View {
   private var provenance: some View {
     HStack(spacing: 8) {
       Text(ConnectionCopy.panelProvenance(panelHost, readAt: readStamp))
-        .font(.system(size: 11)).foregroundStyle(Palette.faint)
+        .font(.system(size: 11)).foregroundStyle(Palette.dim2)
       Spacer(minLength: 0)
       if let panel, isStale(panel) {
-        Text(ConnectionCopy.panelStale).font(.system(size: 10)).foregroundStyle(Palette.warnInk)
+        Text(ConnectionCopy.panelStale).font(.system(size: 10)).foregroundStyle(Palette.warnText)
       }
     }
   }
@@ -136,25 +136,25 @@ struct ToolPanelView: View {
   private func costHero(_ analytics: G0Transport.ToolPanelPayload.Analytics) -> some View {
     VStack(alignment: .leading, spacing: 4) {
       Text(ConnectionCopy.analyticsCost).font(.system(size: 11, weight: .bold)).tracking(0.6)
-        .foregroundStyle(Palette.muted)
+        .foregroundStyle(Palette.dim)
       HStack(alignment: .firstTextBaseline, spacing: 6) {
         if let cost = analytics.totals.costUsd {
           Text(Self.usd(cost)).font(.system(size: 30, weight: .semibold))
         } else {
-          Text(ConnectionCopy.unavailable).font(.system(size: 20, weight: .semibold)).foregroundStyle(Palette.muted)
+          Text(ConnectionCopy.unavailable).font(.system(size: 20, weight: .semibold)).foregroundStyle(Palette.dim)
         }
         if analytics.totals.costKnownRows < analytics.totals.turns {
           Text(ConnectionCopy.analyticsLowerBound).font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(Palette.warnInk).padding(.horizontal, 6).frame(minHeight: 18)
-            .background(Palette.warnBg, in: Capsule())
+            .foregroundStyle(Palette.warnText).padding(.horizontal, 6).frame(minHeight: 18)
+            .background(Palette.warn.opacity(0.12), in: Capsule())
         }
       }
-      Text(ConnectionCopy.analyticsCostNote).font(.system(size: 11)).foregroundStyle(Palette.faint)
+      Text(ConnectionCopy.analyticsCostNote).font(.system(size: 11)).foregroundStyle(Palette.dim2)
       Text("\(analytics.fromDay) – \(analytics.toDay) · \(analytics.totals.turns) 轮")
-        .font(.system(size: 11)).foregroundStyle(Palette.faint)
+        .font(.system(size: 11)).foregroundStyle(Palette.dim2)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(14).background(Palette.message, in: RoundedRectangle(cornerRadius: 12))
+    .padding(14).background(Palette.panel2, in: RoundedRectangle(cornerRadius: 12))
   }
 
   private func tokenGrid(_ totals: G0Transport.ToolPanelPayload.Totals) -> some View {
@@ -167,18 +167,18 @@ struct ToolPanelView: View {
     ]
     return VStack(alignment: .leading, spacing: 8) {
       Text(ConnectionCopy.analyticsTokenCoverage).font(.system(size: 11, weight: .bold)).tracking(0.6)
-        .foregroundStyle(Palette.muted)
+        .foregroundStyle(Palette.dim)
       ForEach(Array(values.enumerated()), id: \.offset) { _, item in
         HStack {
-          Text(item.0).font(.system(size: 13)).foregroundStyle(Palette.ink)
+          Text(item.0).font(.system(size: 13)).foregroundStyle(Palette.fg)
           Spacer()
           if let value = item.1 {
-            Text(compact(value)).font(.system(size: 13, weight: .medium)).foregroundStyle(Palette.ink)
+            Text(compact(value)).font(.system(size: 13, weight: .medium)).foregroundStyle(Palette.fg)
           } else {
-            Text(ConnectionCopy.unavailable).font(.system(size: 12)).foregroundStyle(Palette.faint)
+            Text(ConnectionCopy.unavailable).font(.system(size: 12)).foregroundStyle(Palette.dim2)
           }
           Text("\(totals.tokenKnownRows)/\(totals.turns)")
-            .font(.system(size: 10)).foregroundStyle(Palette.faint)
+            .font(.system(size: 10)).foregroundStyle(Palette.dim2)
             .lineLimit(1).minimumScaleFactor(0.8).frame(width: 64, alignment: .trailing)
         }
       }
@@ -189,14 +189,14 @@ struct ToolPanelView: View {
     if !analytics.byModel.isEmpty, let maxCost = analytics.byModel.compactMap(\.costUsd).max(), maxCost > 0 {
       VStack(alignment: .leading, spacing: 8) {
         Text(ConnectionCopy.analyticsBreakdown).font(.system(size: 11, weight: .bold)).tracking(0.6)
-          .foregroundStyle(Palette.muted)
+          .foregroundStyle(Palette.dim)
         ForEach(Array(analytics.byModel.enumerated()), id: \.offset) { _, row in
           HStack(spacing: 8) {
-            Text(modelLabel(row)).font(.system(size: 12)).foregroundStyle(Palette.ink).lineLimit(1)
+            Text(modelLabel(row)).font(.system(size: 12)).foregroundStyle(Palette.fg).lineLimit(1)
               .frame(width: 110, alignment: .leading)
             GeometryReader { geo in
               RoundedRectangle(cornerRadius: 3)
-                .fill(Palette.blue.opacity(0.7))
+                .fill(Palette.accent.opacity(0.7))
                 .frame(width: max(2, geo.size.width * ((row.costUsd ?? 0) / maxCost)))
             }.frame(height: 8)
             costText(row.costUsd)
@@ -210,14 +210,14 @@ struct ToolPanelView: View {
     if !analytics.byProvider.isEmpty {
       VStack(alignment: .leading, spacing: 6) {
         Text(ConnectionCopy.analyticsByProvider).font(.system(size: 11, weight: .bold)).tracking(0.6)
-          .foregroundStyle(Palette.muted)
+          .foregroundStyle(Palette.dim)
         ForEach(analytics.byProvider, id: \.provider) { row in
           HStack {
-            Text(ConnectionCopy.providerLabel(row.provider)).font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.ink)
+            Text(ConnectionCopy.providerLabel(row.provider)).font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.fg)
             Spacer()
-            Text("\(row.turns) 轮").font(.system(size: 11)).foregroundStyle(Palette.faint)
+            Text("\(row.turns) 轮").font(.system(size: 11)).foregroundStyle(Palette.dim2)
             Text(row.costUsd.map { String(format: "$%.2f", $0) } ?? ConnectionCopy.unavailable)
-              .font(.system(size: 12)).foregroundStyle(row.costUsd == nil ? Palette.faint : Palette.ink)
+              .font(.system(size: 12)).foregroundStyle(row.costUsd == nil ? Palette.dim2 : Palette.fg)
               .frame(width: 64, alignment: .trailing)
           }
         }
@@ -231,19 +231,19 @@ struct ToolPanelView: View {
       let maxValue = values.compactMap { $0 }.max() ?? 0
       VStack(alignment: .leading, spacing: 6) {
         Text(ConnectionCopy.analyticsDailyCost).font(.system(size: 11, weight: .bold)).tracking(0.6)
-          .foregroundStyle(Palette.muted)
+          .foregroundStyle(Palette.dim)
         if maxValue <= 0 {
-          Text(ConnectionCopy.unavailable).font(.system(size: 12)).foregroundStyle(Palette.faint)
+          Text(ConnectionCopy.unavailable).font(.system(size: 12)).foregroundStyle(Palette.dim2)
         } else {
           HStack(alignment: .bottom, spacing: 2) {
             ForEach(Array(analytics.byDay.enumerated()), id: \.offset) { _, day in
               RoundedRectangle(cornerRadius: 2)
-                .fill(day.costUsd == nil ? Palette.line : Palette.blue.opacity(0.7))
+                .fill(day.costUsd == nil ? Palette.border : Palette.accent.opacity(0.7))
                 .frame(height: max(2, 64 * ((day.costUsd ?? 0) / maxValue)))
             }
           }.frame(height: 64, alignment: .bottom)
           Text("\(analytics.byDay.first?.day ?? "") – \(analytics.byDay.last?.day ?? "")")
-            .font(.system(size: 10)).foregroundStyle(Palette.faint)
+            .font(.system(size: 10)).foregroundStyle(Palette.dim2)
         }
       }
     }
@@ -253,21 +253,21 @@ struct ToolPanelView: View {
     if !analytics.byModel.isEmpty {
       VStack(alignment: .leading, spacing: 6) {
         Text(ConnectionCopy.analyticsByModel).font(.system(size: 11, weight: .bold)).tracking(0.6)
-          .foregroundStyle(Palette.muted)
+          .foregroundStyle(Palette.dim)
         ForEach(Array(analytics.byModel.enumerated()), id: \.offset) { _, row in
           HStack(spacing: 6) {
-            Text(modelLabel(row)).font(.system(size: 12)).foregroundStyle(Palette.ink)
+            Text(modelLabel(row)).font(.system(size: 12)).foregroundStyle(Palette.fg)
               .lineLimit(1)
             if row.approximate == true {
-              Text(ConnectionCopy.analyticsApprox).font(.system(size: 10)).foregroundStyle(Palette.faint)
+              Text(ConnectionCopy.analyticsApprox).font(.system(size: 10)).foregroundStyle(Palette.dim2)
             }
             Spacer(minLength: 4)
-            Text("\(row.turns) 轮").font(.system(size: 10)).foregroundStyle(Palette.faint)
+            Text("\(row.turns) 轮").font(.system(size: 10)).foregroundStyle(Palette.dim2)
             costText(row.costUsd)
           }
         }
         if analytics.byModelTruncated {
-          Text(ConnectionCopy.rowsLimited(analytics.byModel.count)).font(.system(size: 10)).foregroundStyle(Palette.faint)
+          Text(ConnectionCopy.rowsLimited(analytics.byModel.count)).font(.system(size: 10)).foregroundStyle(Palette.dim2)
         }
       }
     }
@@ -285,24 +285,24 @@ struct ToolPanelView: View {
     if let llm = payload.llm {
       VStack(alignment: .leading, spacing: 6) {
         Text(ConnectionCopy.llmRunning).font(.system(size: 11, weight: .bold)).tracking(0.6)
-          .foregroundStyle(Palette.muted)
+          .foregroundStyle(Palette.dim)
         if llm.running.models.isEmpty {
-          Text(ConnectionCopy.unavailable).font(.system(size: 12)).foregroundStyle(Palette.faint)
+          Text(ConnectionCopy.unavailable).font(.system(size: 12)).foregroundStyle(Palette.dim2)
         } else {
           ForEach(llm.running.models, id: \.key) { group in
             HStack(spacing: 8) {
               VStack(alignment: .leading, spacing: 2) {
                 Text(group.model ?? ConnectionCopy.unavailable).font(.system(size: 13, weight: .medium))
-                  .foregroundStyle(Palette.ink).lineLimit(1)
-                Text(group.states.joined(separator: " · ")).font(.system(size: 10.5)).foregroundStyle(Palette.muted)
+                  .foregroundStyle(Palette.fg).lineLimit(1)
+                Text(group.states.joined(separator: " · ")).font(.system(size: 10.5)).foregroundStyle(Palette.dim)
               }
               Spacer(minLength: 4)
-              Text("\(group.sessions)").font(.system(size: 11)).foregroundStyle(Palette.faint)
+              Text("\(group.sessions)").font(.system(size: 11)).foregroundStyle(Palette.dim2)
               Text(group.tokensPerSecond.map { String(format: "%.1f tok/s", $0) } ?? ConnectionCopy.unavailable)
-                .font(.system(size: 11)).foregroundStyle(group.tokensPerSecond == nil ? Palette.faint : Palette.ink)
+                .font(.system(size: 11)).foregroundStyle(group.tokensPerSecond == nil ? Palette.dim2 : Palette.fg)
                 .frame(width: 88, alignment: .trailing)
               Text(group.firstTokenMs.map { String(format: "%.0f ms", $0) } ?? ConnectionCopy.unavailable)
-                .font(.system(size: 11)).foregroundStyle(group.firstTokenMs == nil ? Palette.faint : Palette.muted)
+                .font(.system(size: 11)).foregroundStyle(group.firstTokenMs == nil ? Palette.dim2 : Palette.dim)
                 .frame(width: 68, alignment: .trailing)
             }
           }
@@ -310,32 +310,32 @@ struct ToolPanelView: View {
       }
       VStack(alignment: .leading, spacing: 6) {
         Text(ConnectionCopy.llmHistory).font(.system(size: 11, weight: .bold)).tracking(0.6)
-          .foregroundStyle(Palette.muted)
+          .foregroundStyle(Palette.dim)
         if llm.history.rows.isEmpty {
-          Text(ConnectionCopy.llmEmpty).font(.system(size: 12)).foregroundStyle(Palette.faint)
+          Text(ConnectionCopy.llmEmpty).font(.system(size: 12)).foregroundStyle(Palette.dim2)
         } else {
           ForEach(Array(llm.history.rows.enumerated()), id: \.offset) { _, row in
             HStack(spacing: 6) {
               VStack(alignment: .leading, spacing: 2) {
-                Text(row.model).font(.system(size: 12.5)).foregroundStyle(Palette.ink).lineLimit(1)
+                Text(row.model).font(.system(size: 12.5)).foregroundStyle(Palette.fg).lineLimit(1)
                 Text("\(ConnectionCopy.providerLabel(row.providerId)) · \(shortTime(row.ts))")
-                  .font(.system(size: 10.5)).foregroundStyle(Palette.faint)
+                  .font(.system(size: 10.5)).foregroundStyle(Palette.dim2)
               }
               Spacer(minLength: 4)
               Text(row.speed.map { String(format: "%.1f tok/s", $0) } ?? ConnectionCopy.unavailable)
-                .font(.system(size: 11)).foregroundStyle(row.speed == nil ? Palette.faint : Palette.ink)
+                .font(.system(size: 11)).foregroundStyle(row.speed == nil ? Palette.dim2 : Palette.fg)
                 .frame(width: 88, alignment: .trailing)
               Text(row.firstTokenMs.map { String(format: "%.0f ms", $0) } ?? ConnectionCopy.unavailable)
-                .font(.system(size: 11)).foregroundStyle(row.firstTokenMs == nil ? Palette.faint : Palette.muted)
+                .font(.system(size: 11)).foregroundStyle(row.firstTokenMs == nil ? Palette.dim2 : Palette.dim)
                 .frame(width: 68, alignment: .trailing)
             }
           }
         }
         if llm.history.truncated {
-          Text(ConnectionCopy.rowsLimited(llm.history.cappedAt)).font(.system(size: 10)).foregroundStyle(Palette.faint)
+          Text(ConnectionCopy.rowsLimited(llm.history.cappedAt)).font(.system(size: 10)).foregroundStyle(Palette.dim2)
         }
         if llm.history.invalidLines > 0 {
-          Text("跳过 \(llm.history.invalidLines) 行无法解析的记录").font(.system(size: 10)).foregroundStyle(Palette.faint)
+          Text("跳过 \(llm.history.invalidLines) 行无法解析的记录").font(.system(size: 10)).foregroundStyle(Palette.dim2)
         }
       }
     } else {
@@ -357,7 +357,7 @@ struct ToolPanelView: View {
   private func costText(_ costUsd: Double?) -> some View {
     Text(costUsd.map(Self.usd) ?? ConnectionCopy.unavailable)
       .font(.system(size: 11))
-      .foregroundStyle(costUsd == nil ? Palette.faint : Palette.muted)
+      .foregroundStyle(costUsd == nil ? Palette.dim2 : Palette.dim)
       .lineLimit(1)
       .minimumScaleFactor(0.8)
       .frame(width: 84, alignment: .trailing)
@@ -386,133 +386,4 @@ struct ToolPanelView: View {
     return date.formatted(date: .omitted, time: .shortened)
   }
 
-  // MARK: - MCP
-
-  @ViewBuilder private func mcpBody(_ payload: G0Transport.ToolPanelPayload) -> some View {
-    if let mcp = payload.mcp {
-      VStack(alignment: .leading, spacing: 6) {
-        Text(ConnectionCopy.mcpLive).font(.system(size: 11, weight: .bold)).tracking(0.6)
-          .foregroundStyle(Palette.muted)
-        HStack(spacing: 8) {
-          Text(ConnectionCopy.providerLabel(mcp.providerId)).font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.ink)
-          Spacer()
-          if let runtime = mcp.runtime {
-            Text("\(runtime.count)").font(.system(size: 11)).foregroundStyle(Palette.faint)
-          } else {
-            Text(ConnectionCopy.unavailable).font(.system(size: 11)).foregroundStyle(Palette.faint)
-          }
-        }
-        if let runtime = mcp.runtime, !runtime.isEmpty {
-          ForEach(runtime, id: \.name) { entry in
-            HStack {
-              Text(entry.name).font(.system(size: 12.5)).foregroundStyle(Palette.ink).lineLimit(1)
-              Spacer(minLength: 6)
-              Text(entry.tools.map { "\($0) tools" } ?? "").font(.system(size: 10.5)).foregroundStyle(Palette.faint)
-              Text(entry.status).font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(entry.status == "connected" ? Palette.green : Palette.muted)
-            }
-          }
-        }
-      }
-      VStack(alignment: .leading, spacing: 6) {
-        Text(ConnectionCopy.mcpPolicy).font(.system(size: 11, weight: .bold)).tracking(0.6)
-          .foregroundStyle(Palette.muted)
-        if mcp.configured.isEmpty {
-          Text(ConnectionCopy.unavailable).font(.system(size: 12)).foregroundStyle(Palette.faint)
-        } else {
-          ForEach(mcp.configured, id: \.name) { entry in
-            HStack(spacing: 6) {
-              VStack(alignment: .leading, spacing: 2) {
-                Text(entry.name).font(.system(size: 12.5)).foregroundStyle(Palette.ink).lineLimit(1)
-                Text("\(entry.scope) · \(entry.transport)").font(.system(size: 10.5)).foregroundStyle(Palette.faint)
-              }
-              Spacer(minLength: 6)
-              Text(entry.enabled ? "启用" : "停用").font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(entry.enabled ? Palette.green : Palette.muted)
-            }
-          }
-        }
-      }
-      findings(mcp)
-      Text(ConnectionCopy.mcpScanNote).font(.system(size: 11)).foregroundStyle(Palette.faint)
-      Text(ConnectionCopy.mcpReadOnly).font(.system(size: 11)).foregroundStyle(Palette.faint)
-      if mcp.configuredTruncated || mcp.runtimeTruncated {
-        Text(ConnectionCopy.rowsLimited(mcp.configured.count)).font(.system(size: 10)).foregroundStyle(Palette.faint)
-      }
-    } else {
-      Notice(text: ConnectionCopy.unavailable, warning: true)
-    }
-  }
-
-  @ViewBuilder private func findings(_ mcp: G0Transport.ToolPanelPayload.Mcp) -> some View {
-    VStack(alignment: .leading, spacing: 8) {
-      Text(ConnectionCopy.mcpFindings).font(.system(size: 11, weight: .bold)).tracking(0.6)
-        .foregroundStyle(Palette.muted)
-      if let scan = mcp.scan {
-        if let summary = scan.summary {
-          HStack(spacing: 6) {
-            severityChip("critical", count: summary.critical)
-            severityChip("high", count: summary.high)
-            severityChip("medium", count: summary.medium)
-            severityChip("low", count: summary.low)
-            severityChip("info", count: summary.info)
-          }
-        }
-        if scan.findings.isEmpty {
-          Text(ConnectionCopy.mcpNoFindings).font(.system(size: 12)).foregroundStyle(Palette.faint)
-        } else {
-          ForEach(scan.findings, id: \.id) { finding in
-            VStack(alignment: .leading, spacing: 3) {
-              HStack(spacing: 6) {
-                Text(ConnectionCopy.mcpSeverity(finding.severity))
-                  .font(.system(size: 10, weight: .bold)).foregroundStyle(Palette.surface)
-                  .padding(.horizontal, 6).frame(minHeight: 18)
-                  .background(severityColor(finding.severity), in: Capsule())
-                Text(finding.title).font(.system(size: 12.5, weight: .medium)).foregroundStyle(Palette.ink)
-                  .lineLimit(2)
-                Spacer(minLength: 0)
-              }
-              Text("\(finding.ruleId) · \(ConnectionCopy.mcpDecision(finding.decision))")
-                .font(.system(size: 10.5)).foregroundStyle(Palette.muted)
-              if !finding.targets.isEmpty {
-                Text(finding.targets.joined(separator: " · ")).font(.system(size: 10.5))
-                  .foregroundStyle(Palette.faint).lineLimit(1)
-              }
-              if !finding.recommendation.isEmpty {
-                Text(finding.recommendation).font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(3)
-              }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 4)
-          }
-          if scan.findingsTruncated {
-            Text(ConnectionCopy.rowsLimited(scan.findings.count)).font(.system(size: 10)).foregroundStyle(Palette.faint)
-          }
-        }
-      } else {
-        Text(mcp.scanUnavailable ?? ConnectionCopy.mcpScanUnavailable)
-          .font(.system(size: 12)).foregroundStyle(Palette.faint)
-      }
-    }
-  }
-
-  private func severityChip(_ severity: String, count: Int) -> some View {
-    HStack(spacing: 3) {
-      Text(ConnectionCopy.mcpSeverity(severity)).font(.system(size: 10, weight: .semibold))
-        .foregroundStyle(count > 0 ? Palette.ink : Palette.faint)
-      Text("\(count)").font(.system(size: 10, weight: .bold))
-        .foregroundStyle(count > 0 ? severityColor(severity) : Palette.faint)
-    }
-    .padding(.horizontal, 6).frame(minHeight: 20)
-    .background(Palette.message, in: Capsule())
-  }
-
-  private func severityColor(_ severity: String) -> Color {
-    switch severity {
-    case "critical": return Palette.negative
-    case "high": return Palette.amber
-    case "medium": return Palette.warnInk
-    default: return Palette.muted
-    }
-  }
 }

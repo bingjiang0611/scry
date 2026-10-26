@@ -15,17 +15,33 @@ const entry = join(root, 'out/main/index.js')
 await access(entry)
 const temp = await mkdtemp(join(tmpdir(), 'scry-renderer-crash-'))
 
-async function exercise(window, dialog) {
+async function exercise(window, dialog, workspace) {
   const assert = require('node:assert/strict')
   const { app } = require('electron')
   const contents = window.webContents
   const rendererUrl = contents.getURL()
+  const workspaceName = workspace.split('/').pop()
   const withTimeout = (promise, label) => {
     let timer
     return Promise.race([
       promise,
       new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error(`Timed out: ${label}`)), 15_000) })
     ]).finally(() => clearTimeout(timer))
+  }
+  // 重载后首屏恢复是异步的（IPC + React 提交），只能等真实 DOM 条件成立，不用固定 sleep。
+  const waitFor = async (source, label) => {
+    const ok = await withTimeout(contents.executeJavaScript(`new Promise(resolve => {
+      const started = performance.now()
+      const check = () => {
+        let value = false
+        try { value = (${source})() } catch { value = false }
+        if (value) return resolve(true)
+        if (performance.now() - started > 10_000) return resolve(false)
+        requestAnimationFrame(check)
+      }
+      check()
+    })`), label)
+    assert.ok(ok, `${label} did not become true`)
   }
   // The browser process forwards feature overrides to children on their command line;
   // reading the live renderer argv proves the switch reached the process that crashed.
@@ -62,9 +78,29 @@ async function exercise(window, dialog) {
     return details
   }
 
+  // 崩溃前先建立一个“上一棵树停在哪里”的事实：侧栏在动态 tab，工作区已绑定。
+  // 这两项恰好是重载最容易丢的本地状态。
+  await withTimeout(contents.executeJavaScript(`(() => {
+    const tab = [...document.querySelectorAll('[role="tab"]')].find(node => node.id.endsWith('-activity'))
+    if (!tab) throw new Error('sidebar activity tab not found')
+    tab.click()
+    return true
+  })()`), 'click sidebar activity tab')
+  const activityTabSelected = `() => [...document.querySelectorAll('[role="tab"]')].some(node => node.id.endsWith('-activity') && node.getAttribute('aria-selected') === 'true')`
+  await waitFor(activityTabSelected, 'sidebar activity tab selected before crash')
+  await withTimeout(contents.executeJavaScript(`localStorage.setItem('scry.session-selection.v1', ${JSON.stringify(JSON.stringify({ cwd: workspace, sessionId: null, providerId: 'claude' }))})`), 'seed stored selection')
+
   const first = await crashAndAwaitReload('first')
   assert.notEqual(first.reason, 'clean-exit')
   assert.deepEqual(prompts, [], 'First crash must reload without prompting')
+
+  // 重载清空了整棵 React 树：tab、工作区和“刚刚重启过”都必须自己回来，
+  // 否则用户看到的就是“突然跳到项目 tab + 新建会话”。
+  await waitFor(activityTabSelected, 'sidebar tab restored after reload')
+  await waitFor(`() => document.body.innerText.includes(${JSON.stringify('界面进程刚刚意外重启')})`,
+    'restart notice after reload')
+  await waitFor(`() => document.body.innerText.includes(${JSON.stringify(workspaceName)})`,
+    'workspace restored after reload')
 
   await crashAndAwaitReload('second')
   assert.deepEqual(prompts, ['界面进程反复崩溃'], 'Crash within cooldown must ask before reloading')
@@ -73,6 +109,13 @@ async function exercise(window, dialog) {
 
 try {
   await mkdir(join(temp, 'home'))
+  const workspace = join(temp, 'restore-probe-workspace')
+  await mkdir(workspace)
+  // 恢复必须经过已有的工作目录授权校验：先把这个临时目录登记成已知项目，
+  // 否则 setCwd 会被 fail-closed 拒绝，测到的将是授权边界而不是恢复行为。
+  await mkdir(join(temp, 'userData'), { recursive: true })
+  await writeFile(join(temp, 'userData', 'recent-folders.json'), JSON.stringify([workspace]))
+  await writeFile(join(temp, 'userData', 'projects.json'), JSON.stringify([{ cwd: workspace, lastOpenedAt: Date.now() }]))
   await writeFile(join(temp, 'main.cjs'), `
     const { app, dialog } = require('electron')
     require(${JSON.stringify(join(root, 'scripts/hidden-electron-windows.cjs'))})(app)
@@ -80,7 +123,7 @@ try {
     app.once('browser-window-created', (_event, window) => {
       window.webContents.once('did-finish-load', async () => {
         try {
-          await (${exercise.toString()})(window, dialog)
+          await (${exercise.toString()})(window, dialog, ${JSON.stringify(workspace)})
           app.exit(0)
         } catch (error) { console.error(error); app.exit(1) }
       })
@@ -109,7 +152,7 @@ try {
       if (code !== 0 || !output.includes('SCRY_RENDERER_CRASH_RECOVERY_SMOKE=passed')) {
         reject(new Error(`Renderer crash fixture failed (${code ?? signal}):\n${output.slice(-8000)}`))
       } else {
-        console.log('Renderer crash recovery: AccessibilityBlockFlowIterator disabled in renderer; first crash reloads; repeat crash prompts before reload')
+        console.log('Renderer crash recovery: first crash reloads, sidebar tab/workspace/restart notice restore, repeat crash prompts before reload')
         resolve()
       }
     })

@@ -6,7 +6,8 @@
       "title": "启动、恢复",
       "owner": "startup-navigation",
       "operations": [
-        "app.startup"
+        "app.startup",
+        "ipc.app:rendererRestart"
       ],
       "sources": [
         "src/main/index.ts"

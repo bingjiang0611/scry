@@ -126,19 +126,19 @@ struct SessionActionToast: View {
 
   var body: some View {
     HStack(spacing: 12) {
-      Text(toast.text).font(.system(size: 13, weight: .semibold)).foregroundStyle(Palette.surface)
+      Text(toast.text).font(.system(size: 13, weight: .semibold)).foregroundStyle(Palette.main)
       if toast.undoable {
         Button(ConnectionCopy.undo, action: onUndo).font(.system(size: 13, weight: .semibold))
-          .foregroundStyle(Palette.surface).frame(minHeight: 44)
+          .foregroundStyle(Palette.main).frame(minHeight: 44)
       }
       Button(action: onDismiss) {
         Image(systemName: "xmark").font(.system(size: 12, weight: .semibold))
-          .foregroundStyle(Palette.surface.opacity(0.7)).frame(width: 34, height: 44)
+          .foregroundStyle(Palette.main.opacity(0.7)).frame(width: 34, height: 44)
       }
       .buttonStyle(.plain).accessibilityLabel(ConnectionCopy.cancel)
     }
     .padding(.horizontal, 16).padding(.vertical, 2)
-    .background(Palette.ink, in: Capsule())
+    .background(Palette.fg, in: Capsule())
     .padding(.bottom, 12)
   }
 }

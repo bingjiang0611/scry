@@ -50,21 +50,22 @@ content = content.replace(line, line + '\n        .onAppear { BatchFDevice.model
 app.write_text(content)
 
 # Count real production body evaluations, not synthetic dependency callbacks.
-for file, names in {
-    'ScryRemoteApp.swift': ['RootView'],
-    'ChatView.swift': ['ChatView'],
-    'Components.swift': ['FocusedTurnView', 'ConversationMarkdownText', 'ConversationMarkdownInline'],
-    'HomeView.swift': ['HomeView', 'SettingsView'],
-    'HomeComposer.swift': ['HomeComposer'],
-}.items():
-    path = source / file
+# Locate declarations so frozen revisions before and after UI file moves share
+# the same instrumentation, without assuming today's file layout in old commits.
+remaining = {'RootView', 'ChatView', 'FocusedTurnView', 'ConversationMarkdownText',
+             'ConversationMarkdownInline', 'HomeView', 'SettingsView', 'HomeComposer'}
+for path in sorted(source.glob('*.swift')):
     content = path.read_text()
+    names = sorted(name for name in remaining if 'struct ' + name + ': View' in content)
     for name in names:
         start = content.index('struct ' + name + ': View')
         body = content.index('  var body: some View {', start)
         position = body + len('  var body: some View {')
         content = content[:position] + '\n    let _ = BatchFDevice.count("' + name + '")' + content[position:]
-    path.write_text(content)
+    if names:
+        path.write_text(content)
+        remaining.difference_update(names)
+assert not remaining, f'Missing body instrumentation: {sorted(remaining)}'
 
 store = source / 'RemoteRunStore.swift'
 store.write_text(store.read_text() + '\n' + Path(__file__).with_suffix('.swift').read_text() +

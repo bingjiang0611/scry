@@ -20,7 +20,18 @@ struct ScryRemoteApp: App {
   }
   var body: some Scene {
     WindowGroup {
-      RootView().environmentObject(model).environment(model.targetCoordinator)
+      Group {
+        #if DEBUG
+        if let mode = SheetPreview.requestedMode {
+          SheetPreview(mode: mode)
+        } else {
+          RootView()
+        }
+        #else
+        RootView()
+        #endif
+      }
+      .environmentObject(model).environment(model.targetCoordinator)
     }
   }
 }
@@ -33,6 +44,7 @@ struct RootView: View {
 
   private var run: RemoteRunStore { model.route == .newSession ? targets.newTaskStore : targets.selectedStore }
   @Environment(\.scenePhase) private var scenePhase
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     Group {
@@ -59,16 +71,16 @@ struct RootView: View {
       }
     }
     .environment(run)
-    .foregroundStyle(Palette.ink)
-    .background(Palette.surface.ignoresSafeArea())
-    .tint(Palette.blue)
+    .foregroundStyle(Palette.fg)
+    .background(Palette.main.ignoresSafeArea())
+    .tint(Palette.accent)
     .safeAreaInset(edge: .top, spacing: 0) {
       // A screen that shows the focused run puts this in its status strip instead.
       if model.canShowWorkspace, !run.pendingQuestions.isEmpty, !model.showRunQuestion, !focusedRunOnScreen {
         Button { model.showRunQuestion = true } label: {
           Label(ConnectionCopy.focusedTaskNeedsDecision, systemImage: "hand.raised")
             .font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity, minHeight: 44)
-            .background(Palette.warnBg)
+            .background(Palette.warn.opacity(0.12))
         }
       } else if model.canShowWorkspace, let waiting = waitingElsewhere.first, let external = waiting.externalSessionId {
         // A run this screen is not showing waits for a decision (another
@@ -80,7 +92,7 @@ struct RootView: View {
         } label: {
           Label(ConnectionCopy.otherTasksNeedDecision(waitingElsewhere.count), systemImage: "hand.raised")
             .font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity, minHeight: 44)
-            .background(Palette.warnBg)
+            .background(Palette.warn.opacity(0.12))
         }
       }
     }
@@ -89,7 +101,9 @@ struct RootView: View {
     .onChange(of: run.focusedQuestionIdentity) { _, id in model.showRunQuestion = model.canShowWorkspace && id != nil }
     .sheet(isPresented: Binding(get: { model.canShowWorkspace && model.showRunQuestion }, set: { model.showRunQuestion = $0 })) {
       if model.canShowWorkspace, let request = run.pendingQuestions.first {
-        RemoteQuestionSheet(request: request, submitting: run.questionAnswering, error: run.questionError,
+        RemoteQuestionSheet(request: request, subtitle: SheetCopy.context(title: questionSessionTitle,
+          provider: (request.providerId ?? run.activeSessionIdentity?.providerId).map(ConnectionCopy.providerLabel)),
+          submitting: run.questionAnswering, error: run.questionError,
           onAnswer: { if model.canShowWorkspace { run.answerPendingQuestion(answers: $0) } },
           onCancel: { if model.canShowWorkspace { run.answerPendingQuestion(answers: [:], cancel: true) } })
           .id(run.questionIdentity(request))
@@ -107,7 +121,7 @@ struct RootView: View {
     // Route replacement can remove a focused TextField while the system is
     // resizing for its keyboard. An implicit animation of the entire root
     // loops SwiftUI layout on iOS 26.5; keep page replacement unanimated.
-    .animation(.easeInOut(duration: 0.2), value: model.canShowWorkspace)
+    .animation(reduceMotion ? nil : Motion.animation(.select, reduceMotion: false), value: model.canShowWorkspace)
     // The run channel is the honest source of reachability: reflect a real
     // successful/failed host exchange into the paired link status so the UI never
     // shows "offline" while sending actually works.
@@ -141,6 +155,12 @@ struct RootView: View {
       resumeRecoveredRun()
       if model.canShowWorkspace { targets.foregrounded() }
     }
+  }
+
+  private var questionSessionTitle: String? {
+    if let session = model.openedSession, session.identity == run.activeSessionIdentity { return session.label }
+    guard let identity = run.activeSessionIdentity else { return nil }
+    return run.completedTurns(for: identity, historyRendered: false).first?.prompt ?? run.prompt
   }
 
   // ChatView always shows the focused run; a transcript shows it when the run

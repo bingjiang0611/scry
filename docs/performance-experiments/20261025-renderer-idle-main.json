@@ -1,0 +1,281 @@
+{
+  "schema": 1,
+  "revision": "9bfad1ee",
+  "appBuild": "4453afda3babb0c9612ad0a95011aa8758f25ac21f99dcc1b3030e672155fef0",
+  "timing": {
+    "label": "renderer-idle-main-controls",
+    "command": [
+      "node",
+      "scripts/performance-renderer-idle.mjs"
+    ],
+    "exit": 0,
+    "signal": null,
+    "wallMs": 32717,
+    "cores": 10,
+    "loadBefore": 7.46,
+    "loadAfter": 7.3,
+    "highLoad": false
+  },
+  "result": {
+    "electron": "42.10.1",
+    "scope": "production Sidebar fixture, two running rows, hidden offscreen GPU rendering with readback; frame/observer overhead only: each condition ends before the 5s reporting interval, report callback is a no-op, no reporting IPC or journal I/O",
+    "samples": [
+      {
+        "monitor": true,
+        "sweep": true,
+        "elapsedMs": 3000.5074590000004,
+        "paints": 361,
+        "frameCallbacks": 359,
+        "processes": [
+          {
+            "type": "Browser",
+            "cpuMs": 298.86600000000004,
+            "oneCoreCpuPercent": 9.960515148981004
+          },
+          {
+            "type": "GPU",
+            "cpuMs": 403.30999999999995,
+            "oneCoreCpuPercent": 13.441393014714045
+          },
+          {
+            "type": "Tab",
+            "cpuMs": 213.24400000000003,
+            "oneCoreCpuPercent": 7.106931174604355
+          }
+        ],
+        "renderer": {
+          "TaskDuration": 0.08811,
+          "ScriptDuration": 0.004103000000000001,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0.016508,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 359
+        }
+      },
+      {
+        "monitor": false,
+        "sweep": true,
+        "elapsedMs": 3001.8747920000005,
+        "paints": 361,
+        "frameCallbacks": 0,
+        "processes": [
+          {
+            "type": "Browser",
+            "cpuMs": 300.71400000000006,
+            "oneCoreCpuPercent": 10.017539732216786
+          },
+          {
+            "type": "GPU",
+            "cpuMs": 399.9060000000001,
+            "oneCoreCpuPercent": 13.321874751930029
+          },
+          {
+            "type": "Tab",
+            "cpuMs": 206.15499999999992,
+            "oneCoreCpuPercent": 6.867541595985389
+          }
+        ],
+        "renderer": {
+          "TaskDuration": 0.080263,
+          "ScriptDuration": 0.0005530000000000005,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0.016522,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 361
+        }
+      },
+      {
+        "monitor": true,
+        "sweep": false,
+        "elapsedMs": 3003.3392910000002,
+        "paints": 360,
+        "frameCallbacks": 360,
+        "processes": [
+          {
+            "type": "Browser",
+            "cpuMs": 319.44900000000007,
+            "oneCoreCpuPercent": 10.636460587629294
+          },
+          {
+            "type": "GPU",
+            "cpuMs": 279.50000000000006,
+            "oneCoreCpuPercent": 9.306307843325186
+          },
+          {
+            "type": "Tab",
+            "cpuMs": 118.83299999999997,
+            "oneCoreCpuPercent": 3.95669581375979
+          }
+        ],
+        "renderer": {
+          "TaskDuration": 0.05546699999999999,
+          "ScriptDuration": 0.0043089999999999995,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0.012969000000000001,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 360
+        }
+      },
+      {
+        "monitor": false,
+        "sweep": false,
+        "elapsedMs": 3002.0099169999994,
+        "paints": 360,
+        "frameCallbacks": 0,
+        "processes": [
+          {
+            "type": "Browser",
+            "cpuMs": 308.73499999999996,
+            "oneCoreCpuPercent": 10.284276485952729
+          },
+          {
+            "type": "GPU",
+            "cpuMs": 262.45799999999986,
+            "oneCoreCpuPercent": 8.742742604337636
+          },
+          {
+            "type": "Tab",
+            "cpuMs": 56.01400000000001,
+            "oneCoreCpuPercent": 1.865883243183171
+          }
+        ],
+        "renderer": {
+          "TaskDuration": 0.007633999999999974,
+          "ScriptDuration": 0.00047900000000000026,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0.0011460000000000012,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 28
+        }
+      },
+      {
+        "monitor": false,
+        "sweep": false,
+        "elapsedMs": 3002.6300420000007,
+        "paints": 361,
+        "frameCallbacks": 0,
+        "processes": [
+          {
+            "type": "Browser",
+            "cpuMs": 287.5200000000002,
+            "oneCoreCpuPercent": 9.57560525200394
+          },
+          {
+            "type": "GPU",
+            "cpuMs": 264.07299999999975,
+            "oneCoreCpuPercent": 8.794723169561884
+          },
+          {
+            "type": "Tab",
+            "cpuMs": 59.21700000000008,
+            "oneCoreCpuPercent": 1.9721710357815723
+          }
+        ],
+        "renderer": {
+          "TaskDuration": 0.008164000000000005,
+          "ScriptDuration": 0.0005590000000000005,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0.0011719999999999994,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 28
+        }
+      },
+      {
+        "monitor": true,
+        "sweep": false,
+        "elapsedMs": 3002.2790840000016,
+        "paints": 360,
+        "frameCallbacks": 361,
+        "processes": [
+          {
+            "type": "Browser",
+            "cpuMs": 299.64699999999976,
+            "oneCoreCpuPercent": 9.980651085933477
+          },
+          {
+            "type": "GPU",
+            "cpuMs": 263.5230000000002,
+            "oneCoreCpuPercent": 8.777431831850315
+          },
+          {
+            "type": "Tab",
+            "cpuMs": 111.91700000000004,
+            "oneCoreCpuPercent": 3.727734726476214
+          }
+        ],
+        "renderer": {
+          "TaskDuration": 0.05224599999999996,
+          "ScriptDuration": 0.003908999999999999,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0.012302,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 361
+        }
+      },
+      {
+        "monitor": false,
+        "sweep": true,
+        "elapsedMs": 3002.293042000001,
+        "paints": 360,
+        "frameCallbacks": 0,
+        "processes": [
+          {
+            "type": "Browser",
+            "cpuMs": 297.89299999999974,
+            "oneCoreCpuPercent": 9.922182672799853
+          },
+          {
+            "type": "GPU",
+            "cpuMs": 410.355,
+            "oneCoreCpuPercent": 13.668052860244408
+          },
+          {
+            "type": "Tab",
+            "cpuMs": 212.62599999999998,
+            "oneCoreCpuPercent": 7.0821201336947945
+          }
+        ],
+        "renderer": {
+          "TaskDuration": 0.08304299999999998,
+          "ScriptDuration": 0.00047000000000000167,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0.016684000000000004,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 360
+        }
+      },
+      {
+        "monitor": true,
+        "sweep": true,
+        "elapsedMs": 3002.6667500000003,
+        "paints": 361,
+        "frameCallbacks": 360,
+        "processes": [
+          {
+            "type": "Browser",
+            "cpuMs": 325.5840000000001,
+            "oneCoreCpuPercent": 10.84316133317159
+          },
+          {
+            "type": "GPU",
+            "cpuMs": 413.72900000000004,
+            "oneCoreCpuPercent": 13.778718534116381
+          },
+          {
+            "type": "Tab",
+            "cpuMs": 216.36300000000008,
+            "oneCoreCpuPercent": 7.205694737852612
+          }
+        ],
+        "renderer": {
+          "TaskDuration": 0.09015600000000001,
+          "ScriptDuration": 0.0036640000000000006,
+          "LayoutDuration": 0,
+          "RecalcStyleDuration": 0.017488000000000004,
+          "LayoutCount": 0,
+          "RecalcStyleCount": 360
+        }
+      }
+    ]
+  }
+}

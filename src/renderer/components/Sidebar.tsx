@@ -24,6 +24,8 @@ import type { RemoteSessionRef } from '@shared/desktop-remote'
 import { SidebarRemoteProjects, useRemoteProjectGroups, type ActiveRemoteLocation } from './SidebarRemoteProjects'
 import { SidebarProjectMenu } from './SidebarProjectMenu'
 import { useTabIndicator } from '../hooks/useTabIndicator'
+import { browserStorage } from '../browser-storage'
+import { persistSidebarView, readStoredSidebarView, type SidebarView } from '../sidebar-view'
 
 const sessionKey = (cwd: string, session: SessionMeta): string =>
   `${cwd}:${session.providerId}:${session.agentProfileId ?? ''}:${session.sessionId}`
@@ -124,7 +126,12 @@ export const Sidebar = memo(function Sidebar({
     })
   }, [])
   const [q, setQ] = useState('')
-  const [view, setView] = useState<'projects' | 'activity'>('projects')
+  // 侧栏 tab 必须跨 renderer 重载保留：崩溃后主进程自动 reload 会重挂全部组件。
+  const [view, setViewState] = useState<SidebarView>(() => readStoredSidebarView(browserStorage()))
+  const setView = (next: SidebarView): void => {
+    persistSidebarView(next, browserStorage())
+    setViewState(next)
+  }
   const remoteGroups = useRemoteProjectGroups(q)
   const showRemote = Boolean(onPickRemoteSession && onNewRemoteProjectChat) && remoteGroups.length > 0
   const activity = useMemo(() => view === 'activity'

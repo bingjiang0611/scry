@@ -1,0 +1,384 @@
+{
+  "schema": 1,
+  "revision": "9bfad1ee",
+  "appBuild": "4453afda3babb0c9612ad0a95011aa8758f25ac21f99dcc1b3030e672155fef0",
+  "timing": {
+    "label": "trace-content-main-duplication",
+    "command": [
+      "node",
+      "scripts/performance-trace-content.mjs"
+    ],
+    "exit": 0,
+    "signal": null,
+    "wallMs": 1914,
+    "cores": 10,
+    "loadBefore": 7.3,
+    "loadAfter": 7.3,
+    "highLoad": false
+  },
+  "result": {
+    "scope": "real content persistence, synthetic string payload, single/dual root, fresh/existing blobs",
+    "samples": [
+      {
+        "bytes": 16384,
+        "copies": 1,
+        "existing": false,
+        "payloadHashes": 1,
+        "hashMs": 0.008791999999971267,
+        "elapsedMs": 49.968166,
+        "cpuMs": 7.136
+      },
+      {
+        "bytes": 16384,
+        "copies": 1,
+        "existing": true,
+        "payloadHashes": 2,
+        "hashMs": 0.01720799999998235,
+        "elapsedMs": 0.5123749999999916,
+        "cpuMs": 0.565
+      },
+      {
+        "bytes": 16384,
+        "copies": 1,
+        "existing": false,
+        "payloadHashes": 1,
+        "hashMs": 0.011751000000003842,
+        "elapsedMs": 38.411167000000006,
+        "cpuMs": 4.57
+      },
+      {
+        "bytes": 16384,
+        "copies": 1,
+        "existing": true,
+        "payloadHashes": 2,
+        "hashMs": 0.015291999999959671,
+        "elapsedMs": 0.34866700000000606,
+        "cpuMs": 0.416
+      },
+      {
+        "bytes": 16384,
+        "copies": 1,
+        "existing": false,
+        "payloadHashes": 1,
+        "hashMs": 0.007833000000005086,
+        "elapsedMs": 37.96149999999997,
+        "cpuMs": 4.048
+      },
+      {
+        "bytes": 16384,
+        "copies": 1,
+        "existing": true,
+        "payloadHashes": 2,
+        "hashMs": 0.019124999999917236,
+        "elapsedMs": 0.31983299999996007,
+        "cpuMs": 0.376
+      },
+      {
+        "bytes": 16384,
+        "copies": 1,
+        "existing": false,
+        "payloadHashes": 1,
+        "hashMs": 0.00741699999997536,
+        "elapsedMs": 37.06008400000002,
+        "cpuMs": 6.835
+      },
+      {
+        "bytes": 16384,
+        "copies": 1,
+        "existing": true,
+        "payloadHashes": 2,
+        "hashMs": 0.014999999999986358,
+        "elapsedMs": 0.33150000000000546,
+        "cpuMs": 0.449
+      },
+      {
+        "bytes": 16384,
+        "copies": 1,
+        "existing": false,
+        "payloadHashes": 1,
+        "hashMs": 0.0071259999999711,
+        "elapsedMs": 37.122416999999984,
+        "cpuMs": 3.592
+      },
+      {
+        "bytes": 16384,
+        "copies": 1,
+        "existing": true,
+        "payloadHashes": 2,
+        "hashMs": 0.01487600000001521,
+        "elapsedMs": 0.29266699999999446,
+        "cpuMs": 0.283
+      },
+      {
+        "bytes": 16384,
+        "copies": 2,
+        "existing": false,
+        "payloadHashes": 2,
+        "hashMs": 0.0161679999999933,
+        "elapsedMs": 68.178583,
+        "cpuMs": 7.183
+      },
+      {
+        "bytes": 16384,
+        "copies": 2,
+        "existing": true,
+        "payloadHashes": 4,
+        "hashMs": 0.03225099999997383,
+        "elapsedMs": 0.6914580000000115,
+        "cpuMs": 0.576
+      },
+      {
+        "bytes": 16384,
+        "copies": 2,
+        "existing": false,
+        "payloadHashes": 2,
+        "hashMs": 0.026290000000017244,
+        "elapsedMs": 75.04970800000001,
+        "cpuMs": 8.631
+      },
+      {
+        "bytes": 16384,
+        "copies": 2,
+        "existing": true,
+        "payloadHashes": 4,
+        "hashMs": 0.032709000000068045,
+        "elapsedMs": 0.7250420000000304,
+        "cpuMs": 0.563
+      },
+      {
+        "bytes": 16384,
+        "copies": 2,
+        "existing": false,
+        "payloadHashes": 2,
+        "hashMs": 0.016832999999962794,
+        "elapsedMs": 69.466541,
+        "cpuMs": 7.845
+      },
+      {
+        "bytes": 16384,
+        "copies": 2,
+        "existing": true,
+        "payloadHashes": 4,
+        "hashMs": 0.03137600000002294,
+        "elapsedMs": 0.8517080000000306,
+        "cpuMs": 0.552
+      },
+      {
+        "bytes": 16384,
+        "copies": 2,
+        "existing": false,
+        "payloadHashes": 2,
+        "hashMs": 0.01733200000001034,
+        "elapsedMs": 76.07387499999993,
+        "cpuMs": 9.336
+      },
+      {
+        "bytes": 16384,
+        "copies": 2,
+        "existing": true,
+        "payloadHashes": 4,
+        "hashMs": 0.03316499999993994,
+        "elapsedMs": 0.6165829999999914,
+        "cpuMs": 0.501
+      },
+      {
+        "bytes": 16384,
+        "copies": 2,
+        "existing": false,
+        "payloadHashes": 2,
+        "hashMs": 0.018707999999946878,
+        "elapsedMs": 73.44666699999993,
+        "cpuMs": 8.687
+      },
+      {
+        "bytes": 16384,
+        "copies": 2,
+        "existing": true,
+        "payloadHashes": 4,
+        "hashMs": 0.030623999999988882,
+        "elapsedMs": 0.6867499999999609,
+        "cpuMs": 0.546
+      },
+      {
+        "bytes": 1048576,
+        "copies": 1,
+        "existing": false,
+        "payloadHashes": 1,
+        "hashMs": 0.38904200000001765,
+        "elapsedMs": 42.60629199999994,
+        "cpuMs": 5.185
+      },
+      {
+        "bytes": 1048576,
+        "copies": 1,
+        "existing": true,
+        "payloadHashes": 2,
+        "hashMs": 0.8172930000000633,
+        "elapsedMs": 1.9337920000000395,
+        "cpuMs": 1.983
+      },
+      {
+        "bytes": 1048576,
+        "copies": 1,
+        "existing": false,
+        "payloadHashes": 1,
+        "hashMs": 0.4210419999999431,
+        "elapsedMs": 40.82879200000002,
+        "cpuMs": 5.263
+      },
+      {
+        "bytes": 1048576,
+        "copies": 1,
+        "existing": true,
+        "payloadHashes": 2,
+        "hashMs": 0.7815840000000662,
+        "elapsedMs": 5.61683400000004,
+        "cpuMs": 1.798
+      },
+      {
+        "bytes": 1048576,
+        "copies": 1,
+        "existing": false,
+        "payloadHashes": 1,
+        "hashMs": 0.3905419999999822,
+        "elapsedMs": 49.482417000000055,
+        "cpuMs": 4.638
+      },
+      {
+        "bytes": 1048576,
+        "copies": 1,
+        "existing": true,
+        "payloadHashes": 2,
+        "hashMs": 0.8125409999998965,
+        "elapsedMs": 1.9763329999999542,
+        "cpuMs": 2.122
+      },
+      {
+        "bytes": 1048576,
+        "copies": 1,
+        "existing": false,
+        "payloadHashes": 1,
+        "hashMs": 0.39666700000009314,
+        "elapsedMs": 45.50154199999997,
+        "cpuMs": 5.532
+      },
+      {
+        "bytes": 1048576,
+        "copies": 1,
+        "existing": true,
+        "payloadHashes": 2,
+        "hashMs": 0.7800419999999804,
+        "elapsedMs": 8.269167000000039,
+        "cpuMs": 1.668
+      },
+      {
+        "bytes": 1048576,
+        "copies": 1,
+        "existing": false,
+        "payloadHashes": 1,
+        "hashMs": 0.40625,
+        "elapsedMs": 68.09504200000003,
+        "cpuMs": 5.596
+      },
+      {
+        "bytes": 1048576,
+        "copies": 1,
+        "existing": true,
+        "payloadHashes": 2,
+        "hashMs": 0.7997499999999036,
+        "elapsedMs": 5.655250000000024,
+        "cpuMs": 1.883
+      },
+      {
+        "bytes": 1048576,
+        "copies": 2,
+        "existing": false,
+        "payloadHashes": 2,
+        "hashMs": 0.7819579999998041,
+        "elapsedMs": 74.0732089999999,
+        "cpuMs": 8.626
+      },
+      {
+        "bytes": 1048576,
+        "copies": 2,
+        "existing": true,
+        "payloadHashes": 4,
+        "hashMs": 1.5917489999999361,
+        "elapsedMs": 3.0469590000000153,
+        "cpuMs": 3.031
+      },
+      {
+        "bytes": 1048576,
+        "copies": 2,
+        "existing": false,
+        "payloadHashes": 2,
+        "hashMs": 0.8640000000000327,
+        "elapsedMs": 89.97562500000004,
+        "cpuMs": 9.699
+      },
+      {
+        "bytes": 1048576,
+        "copies": 2,
+        "existing": true,
+        "payloadHashes": 4,
+        "hashMs": 1.6464999999998327,
+        "elapsedMs": 3.4342079999998987,
+        "cpuMs": 3.42
+      },
+      {
+        "bytes": 1048576,
+        "copies": 2,
+        "existing": false,
+        "payloadHashes": 2,
+        "hashMs": 0.8491680000001907,
+        "elapsedMs": 73.73654199999987,
+        "cpuMs": 8.848
+      },
+      {
+        "bytes": 1048576,
+        "copies": 2,
+        "existing": true,
+        "payloadHashes": 4,
+        "hashMs": 1.608333000000357,
+        "elapsedMs": 3.598541999999952,
+        "cpuMs": 3.567
+      },
+      {
+        "bytes": 1048576,
+        "copies": 2,
+        "existing": false,
+        "payloadHashes": 2,
+        "hashMs": 0.8238329999999223,
+        "elapsedMs": 98.6679160000001,
+        "cpuMs": 10.013
+      },
+      {
+        "bytes": 1048576,
+        "copies": 2,
+        "existing": true,
+        "payloadHashes": 4,
+        "hashMs": 1.5606260000004113,
+        "elapsedMs": 6.923709000000144,
+        "cpuMs": 3.108
+      },
+      {
+        "bytes": 1048576,
+        "copies": 2,
+        "existing": false,
+        "payloadHashes": 2,
+        "hashMs": 0.7992090000000189,
+        "elapsedMs": 78.59608400000002,
+        "cpuMs": 9.366
+      },
+      {
+        "bytes": 1048576,
+        "copies": 2,
+        "existing": true,
+        "payloadHashes": 4,
+        "hashMs": 1.698126000000002,
+        "elapsedMs": 7.880290999999943,
+        "cpuMs": 3.296
+      }
+    ]
+  }
+}
