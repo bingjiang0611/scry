@@ -88,3 +88,38 @@ F-3（长路径）、F-4（多仓库覆盖，单仓库深目录对照 pass）、
 ### 分支里混入了性能工作（提醒用户）
 
 `c7388c3..234dabc` 之间有 35 个提交来自另一个性能会话：它从 `d822f84` 分出，经 `bda0c85` 合并进来，改动涉及 renderer、main、`scripts/performance-ratchet*`，以及 Recorder Core 的 `io.ts`、`content-store.ts`。F 的被测构建 `6e2012e` 已经包含这些改动。我只粗看了 recorder 部分：`mkdirDurable` 对已经存在的祖先目录仍然做 fsync；批量写入在所有祖先目录 fsync 之后才发布文件名；内容去重改为按字节比较，地址仍由 sha256 决定。持久性保证看起来没有被削弱，但**这些提交不在本交接的核验范围内**。合入 main 时，它们会和可靠性修复一起进去，是否合在一起合入由用户决定。
+
+## Codex 排查记录（执行方，2026-10-26，只观察、不改代码）
+
+按上节「Codex：需要排查」的四步执行。结论：**不是 sandbox 阻止写入，是 hook trust 没建立。** `codex exec` 在缺少持久化 hook trust 时不会执行项目 `.codex/hooks.json` 里的 hook，但仍会打印 `hook: UserPromptSubmit` / `hook: UserPromptSubmit Completed` 这类阶段行。所以「Completed」不能证明 hook 跑过，F-1/F-2 里「hook 显示完成却没有任何 `.scry` 写入」就是这样产生的。加 `--dangerously-bypass-hook-trust` 后，同一 workspace、同一份 hooks.json 立刻正常投递并落 record。
+
+### 步骤 1：hook 跟踪日志（写在 workspace 之外）
+
+- 把 5 个事件（`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`PostToolUseFailure`、`Stop`）的命令分别换成 `/bin/sh /tmp/scry-fa/codexobs/trace-hook.sh <event>`；原命令存到 `orig/<event>.sh` 原样执行。trace 同时写 `$TMPDIR/scry-codexobs-hook-trace.log` 和 `/tmp/scry-fa/codexobs/hook-trace.log`，记录时间、cwd、`CODEX_PROJECT_DIR`、退出码和执行后 `.scry` 目录快照。
+- 实测：hook 进程的 cwd 就是 workspace，`CODEX_PROJECT_DIR` **未设置**（Scry 的 hook 走 cwd 回退分支）；两个位置的 trace 都写得进去，`.scry` 也正常创建。即 **hook 进程不在 Codex 的 sandbox 内**，只读 sandbox 不会挡 `.scry` 或 skip 日志。
+
+### 步骤 2：四种启动方式的对照
+
+| 场景 | hook 是否真的执行 | record | 证据 |
+|---|---|---|---|
+| TUI 里 `/hooks` 确认 trust | 未能自动验证 | — | expect 驱动 TUI 只回显 `codex resume …`，没有执行一轮；`/hooks` 交互确认需要真人在场，本轮没有自动化。A 批次的人工 TUI 记录仍是这条路径的唯一证据 |
+| `codex exec` 默认 sandbox（未 bypass） | **否** | 1 → 1 | 4 行 `hook:` 全是阶段行，trace **0 行**；`[features] hooks = true` 与 `[projects."…"] trust_level = "trusted"` 都配上也不执行 |
+| `codex exec` 默认 sandbox + `--dangerously-bypass-hook-trust` | **是** | 1 → 2 | trace 5 行：`UserPromptSubmit` 15:17:46→:48、`Stop` 15:18:17→:18，退出码均为 0；轮次 exit 0，record `provider=codex`、`status=completed`、`diff=available`，`doctor` healthy |
+| `--sandbox workspace-write` + bypass | 是 | 未新增 | hook 1 秒内正常退出并写入 `.scry`；整轮卡在模型请求上 |
+| `--sandbox danger-full-access` + bypass | 是 | 未新增 | 只有 `UserPromptSubmit` 到达，轮次同样卡在模型请求 |
+
+两条附带观察，未继续深挖：
+- bypass 那一轮落下的 record 里 `user.text`、`assistant.text` 为空，`termination.reason=provider_terminal`；`codex exec` 的 hook payload 是否与 TUI 不同，本轮没有结论。
+- hook 被跳过时也没有 `logs/hook-skip.log`、health 计数也没有变化——因为 Scry 的 hook 根本没被调用，这不是 Scry fail open 丢记录。
+
+### 步骤 3：`workspace-write` 挂住时挂的是谁
+
+- 跑到 45 秒时 `ps -Ao pid,ppid,etime,stat,command` 快照：没有残留的 `trace-hook.sh`、`provider-hook.sh`、`scry.js` 或 recorder 进程；挂着的是 Codex 自己等模型响应，日志中有 `failed to refresh available models: request timed out`。
+- 结论：挂住的是 Codex 的模型请求（本机网络/限流），不是 hook。hook 的 15 秒超时因此从未触发——它在 1 秒内就返回了。
+
+### 步骤 4：recorder 侧要不要改（交给审查方决定）
+
+- 不为 sandbox 改 recorder：hook 不在 sandbox 内，写入不受影响。
+- 可考虑但本批未做：README 补一句「`codex exec` 需先建立 hook trust（TUI `/hooks`）或显式加 `--dangerously-bypass-hook-trust`，否则 Codex 会显示 hook 阶段完成但不执行」；若希望 doctor 提前告警，需要读 Codex 自己的 trust 配置，已超出当前 recorder 的观测边界。
+
+证据：`/tmp/scry-fa/evidence/codexobs-ab.log`（A/B 对照）、`/tmp/scry-fa/evidence/codexobs-prepare.log`（hooks.json 包装）、`/tmp/scry-fa/codexobs/{A-nobypass.out,B-bypass.out,exec-write.out,exec-full.out}`。
