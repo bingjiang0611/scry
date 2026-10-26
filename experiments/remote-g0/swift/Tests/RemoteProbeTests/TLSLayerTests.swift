@@ -31,12 +31,11 @@ final class TLSLayerTests: XCTestCase {
               var payload = channel.allocator.buffer(capacity: 13)
               payload.writeInteger(UInt16(1013))
               payload.writeString("no_host_leg")
-              // Half-close like the real relays' ws.close(): a full close here
-              // turns the device's in-flight ClientHello into a TCP RST, which
-              // can discard the unread close frame on the device and make the
-              // test race the kernel rather than the device's handling.
+              // Like the real relays' ws.close(), leave closing the TCP stream to
+              // the device. Closing it here can land while the device is still
+              // inside its HTTP upgrade, which then drops the buffered close frame
+              // before any consumer exists: that races the fixture, not the device.
               return channel.writeAndFlush(WebSocketFrame(fin: true, opcode: .connectionClose, data: payload))
-                .flatMap { channel.close(mode: .output) }
             })
           return channel.pipeline.configureHTTPServerPipeline(withServerUpgrade: (
             upgraders: [upgrader], completionHandler: { _ in }))

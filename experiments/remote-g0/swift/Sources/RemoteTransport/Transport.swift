@@ -73,11 +73,8 @@ final class TunnelCodec: ChannelDuplexHandler, @unchecked Sendable {
     return error
   }
 
-  func handlerAdded(context: ChannelHandlerContext) { print("G0DIAG codec added \(ObjectIdentifier(self)) active=\(context.channel.isActive)") }
-  func channelInactive(context: ChannelHandlerContext) { print("G0DIAG codec inactive \(ObjectIdentifier(self)) cause=\(String(describing: closeCause))"); context.fireChannelInactive() }
   func channelRead(context: ChannelHandlerContext, data: NIOAny) {
     let frame = unwrapInboundIn(data)
-    print("G0DIAG codec read \(ObjectIdentifier(self)) \(frame.opcode)")
     switch frame.opcode {
     case .binary:
       guard frame.fin, frame.maskKey == nil else {
@@ -125,7 +122,6 @@ final class TunnelCodec: ChannelDuplexHandler, @unchecked Sendable {
   // The frame decoder before this handler reports oversized frames as an
   // anonymous NIO error; name it so the device can say what the host must fix.
   func errorCaught(context: ChannelHandlerContext, error: Error) {
-    print("G0DIAG codec error \(ObjectIdentifier(self)) \(error)")
     if let wsError = error as? NIOWebSocketError, case .invalidFrameLength = wsError {
       context.fireErrorCaught(RelayTransportError.frameTooLarge)
     } else {
@@ -1455,7 +1451,6 @@ public enum G0Transport {
         } onCancel: { channel.close(promise: nil) }
       } catch {
         let failure = try await channel.eventLoop.submit { tunnel.retainingCloseCause(for: error) }.get()
-        print("G0DIAG oneshot \(ObjectIdentifier(tunnel)) error=\(error) -> \(failure)")
         try? await channel.close()
         throw RelayTransportError.identifyingHandshake(failure, layer: .host)
       }

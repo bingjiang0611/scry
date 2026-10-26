@@ -271,7 +271,6 @@ final class LaneConnection: Sendable {
         handler.ready.fail(error)
         return tunnel.retainingCloseCause(for: error)
       }.get()
-      print("G0DIAG lane \(ObjectIdentifier(tunnel)) error=\(error) -> \(failure) active=\(channel.isActive)")
       channel.close(promise: nil)
       throw RelayTransportError.identifyingHandshake(failure, layer: .host)
     }
