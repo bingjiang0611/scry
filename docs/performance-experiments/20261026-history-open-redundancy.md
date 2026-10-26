@@ -57,15 +57,16 @@ packaged build `79691ecc…`（0.2.225）在 2026-10-26 11:08–13:00 UTC 产生
 
 ## 独立验证
 
-验证分支从 main `92707298` 建立；该提交相对代码基线 `7a1c4a60` 只增加交付文档。Stage 1 在当前 main 的 bootstrap 拆分上重新接线，不直接套用旧 `index.ts` 冲突块。
+验证分支最初从 main `92707298` 建立；该提交相对代码基线 `7a1c4a60` 只增加交付文档。Stage 1 在 main 的 bootstrap 拆分上重新接线，不直接套用旧 `index.ts` 冲突块。验证期间 main 被并行任务推进到 `c67435c5`；该增量没有修改本轮四个历史加载文件，但增加了 renderer 重启/会话恢复等相邻路径。候选随后以 merge `a7b56150` 纳入该 main，并在此精确提交上重跑最终验证。
 
 ### 正确性与兼容性
 
 - 新增 7 个投影/复用测试：完整覆盖时 callback 不执行；缺轮时只读缺失 runId 并保持请求顺序；无可复用页时全部回退；只留最新 terminal/preview；同一轮同类事件保留 renderer 会选的最后一条；空快照仍权威；无累积快照时不添加或重排。
-- mac2 focused：3 文件、77 项通过，包括 archive 分页、冷索引和旧归档读取。
-- mac2 typecheck：Node 与 renderer 均通过。
-- mac2 全量 unit：380 文件通过、4 个既有 opt-in 文件跳过；4206 项通过、4 项既有跳过、0 失败。未改超时、断言或 skip。
-- mac2 production build 通过；隐藏 Electron `--dev-pi-history-only` 通过，覆盖 named Profile、mixed/unknown Profile、55 轮 archive-only 分页/重开、provenance 不变，且没有执行 Provider。
+- Stage 1 初始 focused：3 文件、77 项通过，包括 archive 分页、冷索引和旧归档读取。
+- 当前 main 集成 focused：5 文件、84 项通过，额外覆盖 renderer restart 与 session restore 相邻路径。
+- 当前 main 集成 typecheck：Node 与 renderer 均通过。
+- 当前 main 集成全量 unit：383 文件通过、4 个既有 opt-in 文件跳过；4217 项通过、4 项既有跳过、0 失败。未改超时、断言或 skip。
+- 当前 main 集成 production build 通过；隐藏 Electron `--dev-pi-history-only` 通过，覆盖 named Profile、mixed/unknown Profile、55 轮 archive-only 分页/重开、provenance 不变，且没有执行 Provider。
 
 本机第一次 focused 在系统高负载下，`transcript-archive` 的 5 秒冷索引用例超时；同一精确用例的 baseline 与候选单跑随后都通过。首次失败保留；低负载 mac2 完整 focused 与全量 unit 均通过，因此未提高超时或把本机首败删除。
 
@@ -130,7 +131,7 @@ AB/BA 各 3 次。在同一 71 MB fixture 上，基线执行“页读取 + 按 4
 
 ## 交付状态
 
-- 独立候选分支：`integration/history-content-validation-20261026`；Stage 1 代码提交 `ab753e73`。
-- main、`reliability/collection` 与已安装 0.2.226 未修改。
+- 独立候选分支：`integration/history-content-validation-20261026`；Stage 1 代码提交 `ab753e73`，当前 main 集成提交 `a7b56150`。
+- 本任务没有写 main、`reliability/collection` 或 `/Applications`。收尾时并行任务已分别把它们推进/变更为 main `c67435c5`、reliability `a9f7bf44`、已安装 App 0.2.221；这些不是本候选的交付状态。
 - 未安装、未 push、无 L3。
 - 结构化证据：[20261026-history-open-validation-evidence.json](20261026-history-open-validation-evidence.json)。

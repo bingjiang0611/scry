@@ -2,12 +2,14 @@
   "schema": 1,
   "scope": {
     "goal": "validate c4eb154f and f2ab79ab independently on current main abstractions",
-    "baseMain": "92707298d567c8205cb0718594b346189fec183b",
+    "initialBaseMain": "92707298d567c8205cb0718594b346189fec183b",
     "baseCode": "7a1c4a60ce1a850c1c7357c236f5f19dd36b5163",
+    "currentMain": "c67435c505b284d6e5a58eba85b4c4932df8964a",
     "stage1Source": "c4eb154f41fac5a9b6fec9111fead618861d557f",
     "stage2Source": "f2ab79ab33405db1ca3d27a6275e5697de8ac6b2",
     "candidateBranch": "integration/history-content-validation-20261026",
-    "candidateCommit": "ab753e731605eea2d35961c96442d7e593efcdce",
+    "stage1Commit": "ab753e731605eea2d35961c96442d7e593efcdce",
+    "currentMainIntegration": "a7b56150b470f32a95e86d785a50f91add5c5700",
     "testedCodeFiles": [
       {
         "path": "src/main/bootstrap/history-load.ts",
@@ -26,10 +28,17 @@
         "sha256": "2e81e8ba5222fb268011c16ce153732e3f780afe27ce9eec9af08192d3ee7d0a"
       }
     ],
-    "mainModified": false,
-    "reliabilityModified": false,
-    "installedAppModified": false,
-    "pushed": false
+    "writes": {
+      "main": false,
+      "reliability": false,
+      "installedApp": false,
+      "push": false
+    },
+    "observedParallelState": {
+      "main": "c67435c505b284d6e5a58eba85b4c4932df8964a",
+      "reliability": "a9f7bf449d4295ecfc8e1a12cf516cfdbcabb760",
+      "installedAppVersion": "0.2.221"
+    }
   },
   "stage1": {
     "decision": "accept in isolated candidate",
@@ -40,21 +49,39 @@
         "log": "focused-stage1.log",
         "preserved": true
       },
-      "mac2Focused": {
-        "files": 3,
-        "passed": 77,
-        "failed": 0
+      "initialMac2": {
+        "focused": {
+          "files": 3,
+          "passed": 77,
+          "failed": 0
+        },
+        "typecheck": "passed",
+        "fullUnit": {
+          "filesPassed": 380,
+          "filesSkipped": 4,
+          "testsPassed": 4206,
+          "testsSkipped": 4,
+          "failed": 0
+        }
       },
-      "typecheck": "passed",
-      "fullUnit": {
-        "filesPassed": 380,
-        "filesSkipped": 4,
-        "testsPassed": 4206,
-        "testsSkipped": 4,
-        "failed": 0
+      "currentMain": {
+        "commit": "a7b56150b470f32a95e86d785a50f91add5c5700",
+        "focused": {
+          "files": 5,
+          "passed": 84,
+          "failed": 0
+        },
+        "typecheck": "passed",
+        "fullUnit": {
+          "filesPassed": 383,
+          "filesSkipped": 4,
+          "testsPassed": 4217,
+          "testsSkipped": 4,
+          "failed": 0
+        }
       },
       "electronPiHistory": {
-        "result": "passed",
+        "result": "passed on current main integration",
         "coverage": [
           "named Profile native restore",
           "mixed/unknown Profile",
@@ -461,6 +488,31 @@
         "path": "mac2-logs/stage1-tested-tree.txt",
         "bytes": 41,
         "sha256": "c783b4dc1588d89366612df1e3bccc31b3bd59e9bb98180e643de3ff6cc40c1e"
+      },
+      {
+        "path": "mac2-logs/current-main-typecheck.log",
+        "bytes": 213,
+        "sha256": "66ce732c16de0d1384c730e150115f68f13e52c6d9df68f3c417b034075cbf49"
+      },
+      {
+        "path": "mac2-logs/current-main-focused.log",
+        "bytes": 975,
+        "sha256": "81f5cb846bedac79084e121bb48f7e335e09a1ed09e4f9ffa37409a3f8141fc0"
+      },
+      {
+        "path": "mac2-logs/current-main-unit.log",
+        "bytes": 4934,
+        "sha256": "cb3fad270d3d4e85a526ee6d348ef538f7ca84ec1194163d2ad12fa5dda79518"
+      },
+      {
+        "path": "mac2-logs/current-main-unit.json",
+        "bytes": 1496435,
+        "sha256": "56318d3524185752a10ddaad4a7a16c0ab237f4f9427c741011919c75368d384"
+      },
+      {
+        "path": "mac2-logs/current-main-pi-history-ui.log",
+        "bytes": 1472,
+        "sha256": "63e48b65f8f085ce388529dd01a327d28e6462d26994c82456c40cf45bd6370c"
       },
       {
         "path": "mac2-logs/baseline-a.log",
