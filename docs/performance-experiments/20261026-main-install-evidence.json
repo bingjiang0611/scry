@@ -1,0 +1,698 @@
+{
+  "schema": 1,
+  "authorization": {
+    "source": "6e2012e7fa68eee5414581b49dbeea63c90dbed0",
+    "mainBefore": "ab721af50079362b04e1c42b858873bea71e7933",
+    "explicitlyDeferred": "c4eb154f41fac5a9b6fec9111fead618861d557f",
+    "choice": "安装已验证版本",
+    "push": false,
+    "restartUserApp": false
+  },
+  "build": {
+    "sourceCommit": "7a1c4a60ce1a850c1c7357c236f5f19dd36b5163",
+    "sourceTree": "720efd31150a43468b8fc57f7de84df0d721e105",
+    "appVersion": "0.2.226",
+    "cliVersion": "0.2.51",
+    "buildId": "25eb32d09e460c642056f6061a799e1fd01744507d2b917f9b934b405812fda3"
+  },
+  "sourceLockfileSha256": "10edc3c42bad6edd0b0295824381ed2b0dbdfd05e0902c0b2a2d71a091ce69d0",
+  "unit": {
+    "command": "npm run test:unit -- --no-file-parallelism --reporter=json --outputFile=<owned-log>/unit-pack.json",
+    "success": true,
+    "files": 383,
+    "total": 4203,
+    "passed": 4199,
+    "failed": 0,
+    "skipped": 4,
+    "startTime": 1793022053505,
+    "endTime": 1793022904501.092,
+    "newSkips": 0
+  },
+  "focused": {
+    "files": 19,
+    "passed": 157
+  },
+  "typecheck": 0,
+  "shell": 0,
+  "fullUi": {
+    "command": "npm run test:renderer:ui",
+    "topLevelCommands": 28,
+    "timing": {
+      "label": "main-226-ui",
+      "command": [
+        "npm",
+        "run",
+        "test:renderer:ui"
+      ],
+      "exit": 0,
+      "signal": null,
+      "wallMs": 449815,
+      "cores": 8,
+      "loadBefore": 3.24,
+      "loadAfter": 8.32,
+      "highLoad": true
+    },
+    "completeChainExit": 0,
+    "scope": "temporary workspaces/userData; controlled Providers; includes new main workspace/diff behavior"
+  },
+  "negativeControls": {
+    "correctBusinessFailures": 5,
+    "initialIncorrectProviderScenario": "hosts",
+    "secondIncorrectFlag": "--opening-only",
+    "validProviderRevisionArgs": [
+      "--session-opening-only",
+      "--negative-provider-revision-control"
+    ],
+    "validProviderRevisionError": "Timed out: same-context metadata invalidates selected controls",
+    "initialIncorrectRunsNotCounted": true,
+    "productionFilesMutated": false
+  },
+  "performance": {
+    "registered": 77,
+    "observed": 74,
+    "passed": true,
+    "timing": {
+      "label": "main-226-performance",
+      "command": [
+        "npm",
+        "run",
+        "performance:measure",
+        "--",
+        "--compare",
+        "ab721af50079362b04e1c42b858873bea71e7933",
+        "--out",
+        "../logs/main-delivery-226/performance"
+      ],
+      "exit": 0,
+      "signal": null,
+      "wallMs": 120507,
+      "cores": 8,
+      "loadBefore": 17.87,
+      "loadAfter": 26.84,
+      "highLoad": true
+    },
+    "comparisons": [
+      {
+        "key": "analytics.data-updated/sqlite.queries",
+        "layer": "io",
+        "unit": "count",
+        "workload": "span-results=240;tools=240;data-updates=5;analytics-active=0;invalidate-per-update=1",
+        "baseline": 130,
+        "candidate": 0,
+        "baselineRuns": [
+          130,
+          130,
+          130,
+          130,
+          130
+        ],
+        "candidateRuns": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "delta": -130,
+        "percent": -100,
+        "status": "measured"
+      },
+      {
+        "key": "recorder.content-reuse/crypto.sha256.calls",
+        "layer": "io",
+        "unit": "count",
+        "workload": "durable-bodies=4;body-bytes=262144;reuse-passes=8;file-and-directory-sync=unchanged",
+        "baseline": 64,
+        "candidate": 32,
+        "baselineRuns": [
+          64,
+          64,
+          64,
+          64,
+          64
+        ],
+        "candidateRuns": [
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "delta": -32,
+        "percent": -50,
+        "status": "measured"
+      },
+      {
+        "key": "recorder.content-dual/io.directory.metadata.calls",
+        "layer": "io",
+        "unit": "count",
+        "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+        "baseline": 167,
+        "candidate": 85,
+        "baselineRuns": [
+          167,
+          167,
+          167,
+          167,
+          167
+        ],
+        "candidateRuns": [
+          85,
+          85,
+          85,
+          85,
+          85
+        ],
+        "delta": -82,
+        "percent": -49.101796407185624,
+        "status": "measured"
+      },
+      {
+        "key": "recorder.content-dual/io.sync.calls",
+        "layer": "io",
+        "unit": "count",
+        "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+        "baseline": 116,
+        "candidate": 88,
+        "baselineRuns": [
+          116,
+          116,
+          116,
+          116,
+          116
+        ],
+        "candidateRuns": [
+          88,
+          88,
+          88,
+          88,
+          88
+        ],
+        "delta": -28,
+        "percent": -24.137931034482758,
+        "status": "measured"
+      },
+      {
+        "key": "renderer.remote-tail/projection.prefix.reads",
+        "layer": "ui",
+        "unit": "count",
+        "workload": "structural-items=5000;live-tail=1;updates=20;indexed-delta=true",
+        "baseline": 100020,
+        "candidate": 0,
+        "baselineRuns": [
+          100020,
+          100020,
+          100020,
+          100020,
+          100020
+        ],
+        "candidateRuns": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "delta": -100020,
+        "percent": -100,
+        "status": "measured"
+      },
+      {
+        "key": "renderer.remote-tail/merge.prefix.reads",
+        "layer": "ui",
+        "unit": "count",
+        "workload": "structural-items=5000;live-tail=1;updates=20;indexed-delta=true",
+        "baseline": 100000,
+        "candidate": 100000,
+        "baselineRuns": [
+          100000,
+          100000,
+          100000,
+          100000,
+          100000
+        ],
+        "candidateRuns": [
+          100000,
+          100000,
+          100000,
+          100000,
+          100000
+        ],
+        "delta": 0,
+        "percent": 0,
+        "status": "measured"
+      },
+      {
+        "key": "recorder.content-cold/io.stat.calls",
+        "layer": "io",
+        "unit": "count",
+        "workload": "new-bodies=4;body-bytes=262144;authorities=1;initial-publication=included;sync=unchanged",
+        "baseline": 36,
+        "candidate": 44,
+        "baselineRuns": [
+          36,
+          36,
+          36,
+          36,
+          36
+        ],
+        "candidateRuns": [
+          44,
+          44,
+          44,
+          44,
+          44
+        ],
+        "delta": 8,
+        "percent": 22.22222222222222,
+        "status": "measured"
+      },
+      {
+        "key": "files.fixed-operations/io.read.payload.bytes",
+        "layer": "io",
+        "unit": "bytes",
+        "workload": "fixed-local-temp-workloads",
+        "baseline": 1397915,
+        "candidate": 1397922,
+        "baselineRuns": [
+          1397888,
+          1397881,
+          1397875,
+          1397886,
+          1397915
+        ],
+        "candidateRuns": [
+          1397922,
+          1397882,
+          1397919,
+          1397874,
+          1397870
+        ],
+        "delta": 7,
+        "percent": 0.0005007457534971726,
+        "status": "measured"
+      }
+    ],
+    "worse": [
+      {
+        "key": "files.fixed-operations/io.readdir",
+        "layer": "io",
+        "unit": "count",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "value": 20,
+        "min": 20,
+        "runs": 5,
+        "spread": 0,
+        "result": "worse",
+        "baseline": 18,
+        "gateFailed": false
+      },
+      {
+        "key": "persistence.archive/ipc.bytes",
+        "layer": "ipc",
+        "unit": "bytes",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "value": 10558,
+        "min": 10558,
+        "runs": 5,
+        "spread": 0,
+        "result": "worse",
+        "baseline": 10536,
+        "gateFailed": false
+      },
+      {
+        "key": "recorder.content-cold/io.stat.calls",
+        "layer": "io",
+        "unit": "count",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "value": 44,
+        "min": 44,
+        "runs": 5,
+        "spread": 0,
+        "result": "worse",
+        "baseline": 36,
+        "gateFailed": false
+      }
+    ],
+    "missing": [
+      {
+        "key": "analytics.stats/cpu.instructions",
+        "layer": "main",
+        "unit": "instructions",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "result": "missing",
+        "gateFailed": false
+      },
+      {
+        "key": "history.page/cpu.instructions",
+        "layer": "main",
+        "unit": "instructions",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "result": "missing",
+        "gateFailed": false
+      },
+      {
+        "key": "remote.trace.preview/cpu.instructions",
+        "layer": "main",
+        "unit": "instructions",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "result": "missing",
+        "gateFailed": false
+      }
+    ],
+    "baselinesChanged": false,
+    "newLatencyClaim": false,
+    "payloadDeltaExactCauseNotReconstructed": true
+  },
+  "preservation": {
+    "fixture": {
+      "modes": [
+        "",
+        "unknownReceiptOnly",
+        "negativeUnknownReceiptControl",
+        "visibilityPollingBaseline",
+        "visibilityPollingCheck",
+        "measureOpening",
+        "openingOnly",
+        "parityOnly",
+        "settingsOnly",
+        "composerHistoryOnly",
+        "lifecycleOnly",
+        "conversationNavigationOnly",
+        "structureOnly"
+      ],
+      "byteIdentical": true
+    },
+    "assertions": {
+      "mainCalls": 444,
+      "mergedCalls": 447,
+      "comparison": "expression multiset (duplicate occurrences retained)",
+      "mainOnly": [
+        {
+          "path": "scripts/desktop-remote-scenarios-default-C.mjs",
+          "line": 82,
+          "name": "check",
+          "code": "check(afterEdit.submitInputs.length === 3 && afterEdit.localStarts === 0, 'Address edit started a Provider')"
+        }
+      ],
+      "mergedOnly": [
+        {
+          "path": "scripts/desktop-remote-ui-smoke/exercise.mjs",
+          "line": 34,
+          "name": "wait",
+          "code": "wait('document.querySelector(\".sb-remote-proj .sb-host-tag\")?.textContent === \"Fixture desktop\"', 'remote project tagged with host in sidebar')"
+        },
+        {
+          "path": "scripts/desktop-remote-ui-smoke/exercise.mjs",
+          "line": 35,
+          "name": "wait",
+          "code": "wait('document.querySelector(\".location-button\") != null', 'machine + project picker in composer')"
+        },
+        {
+          "path": "scripts/desktop-remote-ui-smoke/host-settings.mjs",
+          "line": 68,
+          "name": "check",
+          "code": "check(afterEdit.submitInputs.length === submissionsBefore && afterEdit.localStarts === 0, 'Address edit started a Provider')"
+        },
+        {
+          "path": "scripts/desktop-remote-ui-smoke/sidebar-activity.mjs",
+          "line": 72,
+          "name": "wait",
+          "code": "wait('document.querySelector(\".chat-transcript\")?.textContent.includes(\"host ui continue\")', 'independent scenario starts from archived host run')"
+        }
+      ]
+    },
+    "handoff": [
+      {
+        "batch": "A",
+        "sha256": "5992afb461856f1b4bba1b9ed52400da6f86df9acfd5093aed8912976d973dab",
+        "reconstructedIdentically": true,
+        "parts": [
+          {
+            "name": "A-implementation.md",
+            "start": 1,
+            "end": 153,
+            "bytes": 11298,
+            "boundaryNewlines": 1
+          },
+          {
+            "name": "A-verification.md",
+            "start": 154,
+            "end": 325,
+            "bytes": 12978,
+            "boundaryNewlines": 1
+          },
+          {
+            "name": "A-v1.md",
+            "start": 326,
+            "end": 432,
+            "bytes": 10103,
+            "boundaryNewlines": 1
+          },
+          {
+            "name": "A-v3.md",
+            "start": 433,
+            "end": 483,
+            "bytes": 4438,
+            "boundaryNewlines": 1
+          },
+          {
+            "name": "A-provider-flow.md",
+            "start": 484,
+            "end": 548,
+            "bytes": 8858,
+            "boundaryNewlines": 1
+          },
+          {
+            "name": "A-provider-evidence.md",
+            "start": 549,
+            "end": 634,
+            "bytes": 14011,
+            "boundaryNewlines": 1
+          },
+          {
+            "name": "A-v3-review.md",
+            "start": 635,
+            "end": 663,
+            "bytes": 3605,
+            "boundaryNewlines": 0
+          }
+        ],
+        "reconstruction": "Concatenate files and restore recorded boundaryNewlines after each file"
+      },
+      {
+        "batch": "B",
+        "sha256": "2afbf211fdd084d99a46dea0aaa91b55e66ed313f8a50531417cf481d4e7fa42",
+        "reconstructedIdentically": true,
+        "parts": [
+          {
+            "name": "B-implementation.md",
+            "start": 1,
+            "end": 114,
+            "bytes": 8369,
+            "boundaryNewlines": 1
+          },
+          {
+            "name": "B-verification.md",
+            "start": 115,
+            "end": 238,
+            "bytes": 12238,
+            "boundaryNewlines": 1
+          },
+          {
+            "name": "B-vb1.md",
+            "start": 239,
+            "end": 335,
+            "bytes": 10010,
+            "boundaryNewlines": 0
+          }
+        ],
+        "reconstruction": "Concatenate files and restore recorded boundaryNewlines after each file"
+      },
+      {
+        "batch": "C",
+        "sha256": "8f18757222aefb16e5133447f7259379d86de0f0453e64e28bae8730d053cafe",
+        "reconstructedIdentically": true,
+        "parts": [
+          {
+            "name": "C-implementation.md",
+            "start": 1,
+            "end": 141,
+            "bytes": 11346,
+            "boundaryNewlines": 1
+          },
+          {
+            "name": "C-verification.md",
+            "start": 142,
+            "end": 308,
+            "bytes": 14925,
+            "boundaryNewlines": 1
+          },
+          {
+            "name": "C-vc1.md",
+            "start": 309,
+            "end": 416,
+            "bytes": 9863,
+            "boundaryNewlines": 0
+          }
+        ],
+        "reconstruction": "Concatenate files and restore recorded boundaryNewlines after each file"
+      }
+    ]
+  },
+  "packaging": {
+    "firstArtifactExit": 1,
+    "firstFailure": "Linked node_modules omitted required cross-spawn from packaged @opencode-ai/sdk; existing checker refused artifact",
+    "recovery": "Independent npm ci from unchanged lockfile; no allowScripts changes",
+    "finalArtifactExit": 0,
+    "sourceTreeUnchanged": true,
+    "packaged": {
+      "appPath": "/Users/baobingjiang/.local/state/scry-main-performance-install.It2NU2/source/dist/mac-arm64/Scry.app",
+      "bytes": 287347001,
+      "maxBytes": 346030080,
+      "sizeBreakdown": {
+        "frameworks": 240549417,
+        "asar": 25726969,
+        "unpacked": 19000528,
+        "privateCli": 814275
+      },
+      "preload": "cjs",
+      "qoderBundledCli": false,
+      "qoderSdk": true,
+      "runtimeDependencies": 311,
+      "nodePty": true,
+      "scryCliBundled": true,
+      "scryCliVersion": "0.2.51",
+      "historyExtensionHash": "c86db7857dddea255eda02931d32827e62babc7a4b440e74d5ac8b7f2d11e186"
+    },
+    "mode": "development; no Developer ID/notarization claim"
+  },
+  "installation": {
+    "target": "/Applications/Scry.app",
+    "state": {
+      "appVersion": "0.2.226",
+      "cliVersion": "0.2.51",
+      "userAppRestarted": false
+    },
+    "manifest": {
+      "operation": "verify",
+      "root": "/Applications/Scry.app",
+      "entries": 478,
+      "files": 369,
+      "bytes": 287347001,
+      "sha256": "f5581f7f96bbd3c4d158862786d0d995509f5613efc0c404ce54bb5ac025d864",
+      "matched": true
+    },
+    "zipSha256": "1dd204feb7a55fde60001f0c26f9217f4082df033acc6d47782b88c29a0ef0b9",
+    "backup": "/Applications/.Scry.app.backup",
+    "backupVersion": "0.2.225"
+  },
+  "logs": {
+    "local": "/Users/baobingjiang/.local/state/scry-main-performance-install.It2NU2",
+    "remote": "/Users/test/scry-performance-climb-mac2.cO3N5W/logs/main-delivery-226",
+    "files": [
+      {
+        "path": "remote-logs/unit-pack.json",
+        "bytes": 1485521,
+        "sha256": "d66938bb9dcf2f6ec10fcf87632cf1beaa6e8500e170eb27aad5351ffa73a4c2"
+      },
+      {
+        "path": "remote-logs/full-ui.log",
+        "bytes": 34211,
+        "sha256": "0aa9128dde96bf36ba0b319ab0be25980bcc46b5c328b2f41d3796adf282dbf2"
+      },
+      {
+        "path": "remote-logs/performance/measure.json",
+        "bytes": 139919,
+        "sha256": "075e8cf9edf8233240c2e6468c2c519172927d38f5de73b1bf3093ac0e8cf862"
+      },
+      {
+        "path": "remote-logs/typecheck-pack.log",
+        "bytes": 213,
+        "sha256": "66ce732c16de0d1384c730e150115f68f13e52c6d9df68f3c417b034075cbf49"
+      },
+      {
+        "path": "remote-logs/shell-pack.log",
+        "bytes": 96,
+        "sha256": "37dafb56e0d03324d9bbef55964df05a078b2bcc60bbe0576e2c204b7614f583"
+      },
+      {
+        "path": "remote-logs/artifact-pack.log",
+        "bytes": 5505,
+        "sha256": "06ce2037d29482c8ecc94e76715e13c3dc77c1ab4b893629c059765005f44598"
+      },
+      {
+        "path": "remote-logs/npm-ci.log",
+        "bytes": 2043,
+        "sha256": "4fb02fe3dc816d3010218a985d4f906a85bba4a1bbffca74a51856aab111ed05"
+      },
+      {
+        "path": "remote-logs/artifact-physical.log",
+        "bytes": 10364,
+        "sha256": "9b8811f120b3135b82b1356ffaad712ed78f2d2387766864599d0e45e25d24ff"
+      },
+      {
+        "path": "remote-logs/negative-results.json",
+        "bytes": 6330,
+        "sha256": "a9485b3bcec41ebec587408424bc2b3a7c4b019897dde1abed815c2344c0c98d"
+      },
+      {
+        "path": "remote-logs/negative-provider-revision-session-opening.log",
+        "bytes": 5275,
+        "sha256": "82db12a53d3c56db398c8131a1365913498054b75abaa75e94dec355d79d9096"
+      },
+      {
+        "path": "ui-assertion-differences.json",
+        "bytes": 1465,
+        "sha256": "bf4ffce12f5effb6e483eae9e53506b6467bc023255109a65ee28071600ccb3d"
+      },
+      {
+        "path": "fixture-preservation.json",
+        "bytes": 360,
+        "sha256": "6b1828f7c9c59af8bc04f5607ba448730671f2818ffd9139c99555353de03a1e"
+      },
+      {
+        "path": "handoff-preservation.json",
+        "bytes": 2705,
+        "sha256": "0a9f3fae71f240083d87af5904cd4dc9720f7b1793ad9372c660858cdf12af62"
+      },
+      {
+        "path": "app-manifest.json",
+        "bytes": 109472,
+        "sha256": "edf4d64248a92d1d58b2994e25089afe20006b2a4eba86861c644b871b160155"
+      },
+      {
+        "path": "local-packaged-check.json",
+        "bytes": 486,
+        "sha256": "2241bdfb0b8d546662a2b81863bb80091e07bd01130fb61dd528cc3a2cc548ad"
+      },
+      {
+        "path": "installed-artifact-verification.json",
+        "bytes": 190,
+        "sha256": "404b4a22594a5ab62683b6028cd24da4eaa5fa60d91548a86ce6816a503570b7"
+      },
+      {
+        "path": "install.log",
+        "bytes": 62,
+        "sha256": "dcb36380ba7fcf15bad7e42fff7abac81794851179a142f27bff47f6a51a562e"
+      },
+      {
+        "path": "installed-state.json",
+        "bytes": 85,
+        "sha256": "145bb97baff391422705582948d5d58fc347690d59aba40b36b8838174e07f86"
+      }
+    ]
+  }
+}
