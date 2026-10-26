@@ -4,12 +4,12 @@
     "goal": "validate c4eb154f and f2ab79ab independently on current main abstractions",
     "initialBaseMain": "92707298d567c8205cb0718594b346189fec183b",
     "baseCode": "7a1c4a60ce1a850c1c7357c236f5f19dd36b5163",
-    "currentMain": "c67435c505b284d6e5a58eba85b4c4932df8964a",
+    "currentMain": "9b4037a84d8a15858599bcfee541d070ecd80d34",
     "stage1Source": "c4eb154f41fac5a9b6fec9111fead618861d557f",
     "stage2Source": "f2ab79ab33405db1ca3d27a6275e5697de8ac6b2",
     "candidateBranch": "integration/history-content-validation-20261026",
     "stage1Commit": "ab753e731605eea2d35961c96442d7e593efcdce",
-    "currentMainIntegration": "a7b56150b470f32a95e86d785a50f91add5c5700",
+    "currentMainIntegration": "18102902698b645317800a5fc019ed4c5821c254",
     "testedCodeFiles": [
       {
         "path": "src/main/bootstrap/history-load.ts",
@@ -29,13 +29,13 @@
       }
     ],
     "writes": {
-      "main": false,
+      "main": true,
       "reliability": false,
       "installedApp": false,
       "push": false
     },
     "observedParallelState": {
-      "main": "c67435c505b284d6e5a58eba85b4c4932df8964a",
+      "mainBeforeDelivery": "9b4037a84d8a15858599bcfee541d070ecd80d34",
       "reliability": "a9f7bf449d4295ecfc8e1a12cf516cfdbcabb760",
       "installedAppVersion": "0.2.221"
     }
@@ -65,7 +65,7 @@
         }
       },
       "currentMain": {
-        "commit": "a7b56150b470f32a95e86d785a50f91add5c5700",
+        "commit": "18102902698b645317800a5fc019ed4c5821c254",
         "focused": {
           "files": 5,
           "passed": 84,
@@ -75,7 +75,7 @@
         "fullUnit": {
           "filesPassed": 383,
           "filesSkipped": 4,
-          "testsPassed": 4217,
+          "testsPassed": 4218,
           "testsSkipped": 4,
           "failed": 0
         }
@@ -285,6 +285,13 @@
       "note": "baseline cold variance; directional support only"
     }
   },
+  "delivery": {
+    "choice": "main only",
+    "mainFastForwardedTo": "18102902698b645317800a5fc019ed4c5821c254",
+    "installed": false,
+    "pushed": false,
+    "userAppRestarted": false
+  },
   "stage2": {
     "decision": "reject f2ab79ab current implementation",
     "correctnessControl": {
@@ -490,29 +497,29 @@
         "sha256": "c783b4dc1588d89366612df1e3bccc31b3bd59e9bb98180e643de3ff6cc40c1e"
       },
       {
-        "path": "mac2-logs/current-main-typecheck.log",
+        "path": "mac2-logs/current-main2-typecheck.log",
         "bytes": 213,
         "sha256": "66ce732c16de0d1384c730e150115f68f13e52c6d9df68f3c417b034075cbf49"
       },
       {
-        "path": "mac2-logs/current-main-focused.log",
-        "bytes": 975,
-        "sha256": "81f5cb846bedac79084e121bb48f7e335e09a1ed09e4f9ffa37409a3f8141fc0"
+        "path": "mac2-logs/current-main2-focused.log",
+        "bytes": 976,
+        "sha256": "e7c97dd4069c8760969be2f92156c9b7e097aaeb3c41ceddb607fdb7375b0bee"
       },
       {
-        "path": "mac2-logs/current-main-unit.log",
-        "bytes": 4934,
-        "sha256": "cb3fad270d3d4e85a526ee6d348ef538f7ca84ec1194163d2ad12fa5dda79518"
+        "path": "mac2-logs/current-main2-unit.log",
+        "bytes": 4936,
+        "sha256": "ae682f48e66b8cb2c711589e6ae9dfc004d4d56f4760ac578a1108b2324c1d58"
       },
       {
-        "path": "mac2-logs/current-main-unit.json",
-        "bytes": 1496435,
-        "sha256": "56318d3524185752a10ddaad4a7a16c0ab237f4f9427c741011919c75368d384"
+        "path": "mac2-logs/current-main2-unit.json",
+        "bytes": 1497332,
+        "sha256": "259296a48ad895fb75d011e40be97e0ea29b14811c94bd78d75fec11e6c7dab9"
       },
       {
-        "path": "mac2-logs/current-main-pi-history-ui.log",
+        "path": "mac2-logs/current-main2-pi-history-ui.log",
         "bytes": 1472,
-        "sha256": "63e48b65f8f085ce388529dd01a327d28e6462d26994c82456c40cf45bd6370c"
+        "sha256": "464a3e9afbcebf780e71add0e94c40bc092daec131ccef084efa08f9eeef3a69"
       },
       {
         "path": "mac2-logs/baseline-a.log",
