@@ -3,7 +3,7 @@ import { constants } from 'node:fs'
 import { open, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { isToolContentRef, type ToolContentRef } from '../../shared/tool-content.js'
-import { syncDirectory, writeFileAtomicExclusive } from './io.js'
+import { syncDirectory, writeFileAtomicExclusive, writeFileAtomicExclusiveCopies } from './io.js'
 
 function contentPath(dataRoot: string, sha256: string): string {
   return join(dataRoot, 'content', 'sha256', sha256.slice(0, 2), `${sha256}.bin`)
@@ -62,6 +62,42 @@ export async function writeRecorderContent(
   // Do not rewrite a temporary copy and fsync every ancestor for each history event on restart.
   await syncDirectory(dirname(path))
   return ref
+}
+
+/** Publish one payload to every authority before exposing its reference. */
+export async function writeRecorderContentCopies(
+  dataRoots: readonly [string, ...string[]],
+  content: string,
+  encoding: ToolContentRef['encoding']
+): Promise<ToolContentRef> {
+  if (dataRoots.length === 1) return writeRecorderContent(dataRoots[0], content, encoding)
+  const bytes = Buffer.from(content, 'utf8')
+  const sha256 = digest(bytes)
+  const paths = [...new Set(dataRoots.map(root => contentPath(root, sha256)))]
+  const missing: string[] = []
+  const verifyAndSync = async (path: string, existing: Buffer): Promise<void> => {
+    if (!existing.equals(bytes)) throw new Error(`recorder content collision or corruption: ${sha256}`)
+    await syncDirectory(dirname(path))
+  }
+  for (const path of paths) {
+    let existing: Buffer
+    try {
+      existing = await readFile(path)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      missing.push(path)
+      continue
+    }
+    await verifyAndSync(path, existing)
+  }
+  const outcomes = await writeFileAtomicExclusiveCopies(missing, bytes)
+  for (const [index, outcome] of outcomes.entries()) {
+    if (outcome === 'existing') {
+      // A competing publisher won after the initial read. EEXIST alone proves nothing.
+      await verifyAndSync(missing[index], await readFile(missing[index]))
+    }
+  }
+  return { storage: 'recorder-content-v1', sha256, bytes: bytes.length, encoding }
 }
 
 export async function readRecorderContent(dataRoot: string, ref: ToolContentRef): Promise<string> {
