@@ -3,14 +3,11 @@ import type { BillingGuardianState } from '@shared/billing'
 import type { ProviderContext } from '@shared/provider'
 import type { DbStats, UsageAnalytics, UsageAnalyticsRangeDays, UsageStats } from '@shared/trace'
 import { contextKey } from './integration-model'
+import { INTEGRATION_COPY } from '../constants/integration-copy'
 export function applyDataUpdatedEffects(effects: {
-  loadStats: () => void
-  loadBillingState: () => void
   loadAnalytics: () => void
   analyticsActive: boolean
 }): void {
-  effects.loadStats()
-  effects.loadBillingState()
   // Analytics is a comparatively expensive, optional SQLite projection. Keep it fresh once the
   // user has opened the surface, but do not query it during every chat-only application launch.
   if (effects.analyticsActive) effects.loadAnalytics()
@@ -50,7 +47,7 @@ export function useUsageInsights(providerContextRef: MutableRefObject<ProviderCo
     analyticsActiveRef.current = true
     const query = window.scry.usageAnalytics
     if (typeof query !== 'function') {
-      setAnalyticsError('分析接口不可用，请重启 Scry')
+      setAnalyticsError(INTEGRATION_COPY.analyticsUnavailable)
       return
     }
     // Serialize analytics refreshes. A burst of data-updated notifications while one query is
@@ -71,8 +68,8 @@ export function useUsageInsights(providerContextRef: MutableRefObject<ProviderCo
       .then((result) => {
         if (seq !== analyticsRequestSeq.current) return
         setAnalytics(result)
-        if (result.status === 'query_error') setAnalyticsError('SQLite 查询失败，请重试')
-        else if (result.status === 'unavailable') setAnalyticsError('SQLite 暂不可用')
+        if (result.status === 'query_error') setAnalyticsError(INTEGRATION_COPY.analyticsQueryError)
+        else if (result.status === 'unavailable') setAnalyticsError(INTEGRATION_COPY.sqliteUnavailable)
       })
       .catch((error) => {
         if (seq === analyticsRequestSeq.current) setAnalyticsError(error instanceof Error ? error.message : String(error))
@@ -125,9 +122,9 @@ export function useUsageInsights(providerContextRef: MutableRefObject<ProviderCo
   }, [])
   const refreshAfterDataUpdate = useCallback((): void => {
     applyDataUpdatedEffects({
-      loadStats, loadBillingState, loadAnalytics, analyticsActive: analyticsActiveRef.current
+      loadAnalytics, analyticsActive: analyticsActiveRef.current
     })
-  }, [loadAnalytics, loadBillingState, loadStats])
+  }, [loadAnalytics])
 
   return {
     usage, stats, analytics, analyticsRange, analyticsLoading, analyticsError,

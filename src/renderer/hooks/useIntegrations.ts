@@ -125,7 +125,7 @@ export function useIntegrations(
   const {
     usage, stats, analytics, analyticsRange, analyticsLoading, analyticsError,
     billingState, billingSyncing, billingFixtureLoading,
-    loadUsage, loadStats, loadAnalytics, setAnalyticsRange, loadBillingState,
+    loadUsage, loadStats, loadAnalytics, setAnalyticsRange,
     syncBillingAdmin, importBillingFixture, resetUsageContext, refreshAfterDataUpdate
   } = useUsageInsights(providerContextRef)
   const {
@@ -372,13 +372,9 @@ export function useIntegrations(
   }, [rescan])
 
   useEffect(() => {
-    const timers = [
-      window.setTimeout(loadUsage, 260),
-      window.setTimeout(loadStats, 900),
-      window.setTimeout(loadBillingState, 980)
-    ]
-    return () => timers.forEach((id) => window.clearTimeout(id))
-  }, [loadAnalytics, loadBillingState, loadStats, loadUsage])
+    const timer = window.setTimeout(loadUsage, 260)
+    return () => window.clearTimeout(timer)
+  }, [loadUsage])
 
   return {
     agents,

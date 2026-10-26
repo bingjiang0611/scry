@@ -1,6 +1,7 @@
-import { execFileSync } from 'node:child_process'
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { chmod, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { createServer } from 'node:net'
 import { join, resolve } from 'node:path'
 import { runInNewContext } from 'node:vm'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -20,6 +21,78 @@ async function gitWorkspace(): Promise<string> {
 }
 
 describe('scry init', () => {
+  it.each(['cli_path_missing', 'node_bin_dir_missing', 'cli_not_executable', 'managed_cli_invalid', 'cli_failed', 'managed_cli_failed'])(
+    'hook-skip %s is observable while the Provider still receives exit 0', async (reason) => {
+      const root = await gitWorkspace()
+      const cli = join(root, 'failing-cli')
+      await writeFile(cli, '#!/bin/sh\nexit 17\n')
+      await chmod(cli, 0o700)
+      await initWorkspace({ workspace: root, providers: 'codex', cliPath: cli })
+      if (reason === 'cli_path_missing') await rm(join(root, '.scry/cli-path'))
+      if (reason === 'node_bin_dir_missing') await rm(join(root, '.scry/node-bin-dir'))
+      if (reason === 'cli_not_executable') await writeFile(join(root, '.scry/cli-path'), `${root}/absent\n`)
+      const result = spawnSync('/bin/sh', [join(root, '.scry/provider-hook.sh'), 'codex', 'Stop'], {
+        input: '{"secret":"DO_NOT_LOG_PAYLOAD"}', encoding: 'utf8',
+        env: { ...process.env, SCRY_RECORDER_TRANSPORT: 'direct',
+          SCRY_RECORDER_MANAGED: reason.startsWith('managed_') ? '1' : '0',
+          SCRY_CLI_PATH: reason === 'managed_cli_invalid' ? join(root, 'absent') : cli }
+      })
+      expect(result.status).toBe(0)
+      const log = await readFile(join(root, '.scry/logs/hook-skip.log'), 'utf8')
+      expect(log).toMatch(new RegExp(`^\\d{4}-.*\\tcodex\\tStop\\t${reason}\\t`))
+      expect(log).not.toContain('DO_NOT_LOG_PAYLOAD')
+      if (reason.endsWith('_failed')) expect(log.trim().split('\t').at(-1)).toBe('17')
+    }
+  )
+
+  it('hook skip remains fail open without writing through a diagnostic symlink', async () => {
+    const root = await gitWorkspace()
+    await initWorkspace({ workspace: root, providers: 'codex', cliPath: process.execPath })
+    const outside = await gitWorkspace()
+    const log = join(outside, 'hook-skip.log')
+    await writeFile(log, 'KEEP\n')
+    await symlink(outside, join(root, '.scry/logs'), 'dir')
+    await rm(join(root, '.scry/cli-path'))
+    const result = spawnSync('/bin/sh', [join(root, '.scry/provider-hook.sh'), 'codex', 'Stop'], { input: '{}' })
+    expect(result.status).toBe(0)
+    expect(await readFile(log, 'utf8')).toBe('KEEP\n')
+  })
+
+  it('daemon fast path starts only the existing dirname, cat and curl commands', async () => {
+    const root = await gitWorkspace()
+    await initWorkspace({ workspace: root, providers: 'codex', cliPath: process.execPath })
+    const bin = join(root, 'bin')
+    await mkdir(bin)
+    const calls = join(root, 'calls')
+    for (const [name, body] of Object.entries({
+      dirname: 'exec /usr/bin/dirname "$@"', cat: 'exec /bin/cat "$@"', curl: "printf 200",
+      date: 'exit 99', mkdir: 'exit 99'
+    })) {
+      const path = join(bin, name)
+      await writeFile(path, `#!/bin/sh\nprintf '%s\\n' '${name}' >> "$CALLS"\n${body}\n`)
+      await chmod(path, 0o700)
+    }
+    await writeFile(join(root, '.scry/node-bin-dir'), `${bin}\n`)
+    await symlink('/bin/sh', join(bin, 'sh'))
+    const nested = join(root, 'src/deep')
+    await mkdir(nested, { recursive: true })
+    const settings = JSON.parse(await readFile(join(root, '.codex/hooks.json'), 'utf8'))
+    const command = settings.hooks.Stop[0].hooks[0].command as string
+    const socket = join(root, 'daemon.sock')
+    const server = createServer()
+    await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(socket, resolve) })
+    try {
+      const result = spawnSync('/bin/sh', ['-c', command], {
+        cwd: nested, input: '{}', encoding: 'utf8', env: { PATH: bin, CALLS: calls, SCRY_RECORDER_SOCKET: socket }
+      })
+      expect(result.status).toBe(0)
+      expect((await readFile(calls, 'utf8')).trim().split('\n')).toEqual(['dirname', 'cat', 'curl'])
+      await expect(readFile(join(root, '.scry/logs/hook-skip.log'))).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+    }
+  })
+
   it('幂等合并三种 JSON Hook 并安装 OpenCode 插件', async () => {
     const root = await gitWorkspace()
     await mkdir(join(root, '.claude'), { recursive: true })
@@ -116,6 +189,55 @@ describe('scry init', () => {
       expect(delivered.at(-1)?.usage_partial).toEqual(scenario.complete === false ? scenario.expected : undefined)
       expect(delivered.at(-1)?.usage_complete).toBe(scenario.complete)
     }
+  })
+
+  it('V1 OpenCode repeats idle only after new activity, while preserving the first unmatched idle', async () => {
+    const root = await gitWorkspace()
+    await initWorkspace({ workspace: root, providers: 'opencode', cliPath: process.execPath })
+    const source = (await readFile(join(root, '.opencode/plugins/scry-recorder.js'), 'utf8'))
+      .replace(/^import .*$/gm, '')
+      .replace("const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')", `const root = ${JSON.stringify(root)}`)
+      .replace('export const ScryRecorder', 'const ScryRecorder')
+      .replace('export default ScryRecorder', 'ScryRecorder()')
+    const delivered: Record<string, unknown>[] = []
+    let deliveryStatus = 0
+    const hooks = await runInNewContext(source, {
+      resolve, Buffer, TextDecoder, process,
+      spawnSync: (_hook: string, _args: string[], options: { input: string }) => {
+        delivered.push(JSON.parse(options.input))
+        return { status: deliveryStatus }
+      }
+    }) as Record<string, (input: unknown, output?: unknown) => Promise<void>>
+    const idle = (id: string) => hooks.event({ event: { type: 'session.idle', properties: { sessionID: id } } })
+    const stops = () => delivered.filter(payload => payload.hook_event_name === 'Stop')
+    await hooks['chat.message']({ sessionID: 'known', prompt: 'go' })
+    await idle('known')
+    await hooks.event({ event: { type: 'session.status', properties: { sessionID: 'known', status: { type: 'idle' } } } })
+    await idle('known')
+    expect.soft(stops()).toHaveLength(1)
+    await hooks['chat.message']({ sessionID: 'known', prompt: 'again' })
+    await idle('known')
+    expect.soft(stops()).toHaveLength(2)
+    await idle('unmatched')
+    await idle('unmatched')
+    expect.soft(stops()).toHaveLength(3)
+    expect(stops().at(-1)).toMatchObject({ session_id: 'unmatched', assistant_response: '' })
+    expect(stops().every(payload => !('timestamp' in payload))).toBe(true)
+    await hooks.event({ event: { type: 'session.status', properties: { sessionID: 'unmatched', status: { type: 'busy' } } } })
+    await idle('unmatched')
+    expect.soft(stops()).toHaveLength(4)
+    await hooks.event({ event: { type: 'session.status', properties: { sessionID: 'unmatched', status: { type: 'retry', attempt: 1, message: 'retry', next: 100 } } } })
+    await idle('unmatched')
+    expect.soft(stops()).toHaveLength(5)
+    // Keep suppression bounded: an evicted identity is unknown, not silently discarded.
+    for (let i = 0; i < 128; i++) await idle(`other-${i}`)
+    const before = stops().length
+    await idle('known')
+    expect(stops()).toHaveLength(before + 1)
+    deliveryStatus = 1
+    await idle('failed-dispatch')
+    await idle('failed-dispatch')
+    expect(stops()).toHaveLength(before + 3)
   })
 
   it.each(['none', 'summary'])('保留已有显式 %s 配置，不猜测用户意图', async (toolOutput) => {

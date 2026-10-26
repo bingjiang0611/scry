@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { fileURLToPath } from 'node:url'
 import { checkLedgerChange, checkRatchet, proposeTightening, validateLedger } from './performance-ratchet.mjs'
-import ledgerFile from './performance-ratchet.json'
+import { readLedger } from './performance-ledger.mjs'
+
+const ledgerFile = readLedger(fileURLToPath(new URL('./performance-ratchet.json', import.meta.url)))
 
 const gating = (ceiling: number, extra: Record<string, unknown> = {}) => ({
   scenario: 'history.page', metric: 'ipc.messages', layer: 'ipc', unit: 'count', workload: 'history-turns=4000;page=40',

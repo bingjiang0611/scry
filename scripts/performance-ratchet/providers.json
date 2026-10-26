@@ -1,0 +1,103 @@
+{
+  "schema": 1,
+  "metrics": {
+    "providers.discovery/metadata.controlReads": {
+      "scenario": "providers.discovery",
+      "metric": "metadata.controlReads",
+      "layer": "main",
+      "unit": "count",
+      "workload": "3available-contexts;open-picker-and-select-pi;2overlapping-selected-reads",
+      "source": "production ProviderDiscovery orchestration; adapter-entry callbacks, not CLI processes",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 0
+      }
+    },
+    "providers.discovery/selected.controlReads": {
+      "scenario": "providers.discovery",
+      "metric": "selected.controlReads",
+      "layer": "main",
+      "unit": "count",
+      "workload": "3available-contexts;open-picker-and-select-pi;2overlapping-selected-reads",
+      "source": "production ProviderDiscovery orchestration; adapter-entry callbacks, not CLI processes",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 1
+      }
+    },
+    "providers.discovery/legacy.controlReads": {
+      "scenario": "providers.discovery",
+      "metric": "legacy.controlReads",
+      "layer": "main",
+      "unit": "count",
+      "workload": "3available-contexts;open-picker-and-select-pi;2overlapping-selected-reads",
+      "source": "production ProviderDiscovery orchestration; adapter-entry callbacks, not CLI processes",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 3
+      }
+    },
+    "providers.pi-probe/subprocess.rpc": {
+      "scenario": "providers.pi-probe",
+      "metric": "subprocess.rpc",
+      "layer": "main",
+      "unit": "count",
+      "workload": "offline-readonly-rpc=1;queries=4;eof-idle-handle=1;probe=1",
+      "source": "production probe with shared offline RPC fixture; passive stdio/close observation and pass-through shutdown timer expiry counter",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 1
+      }
+    },
+    "providers.pi-probe/rpc.responses": {
+      "scenario": "providers.pi-probe",
+      "metric": "rpc.responses",
+      "layer": "main",
+      "unit": "count",
+      "workload": "offline-readonly-rpc=1;queries=4;eof-idle-handle=1;probe=1",
+      "source": "production probe with shared offline RPC fixture; passive stdio/close observation and pass-through shutdown timer expiry counter",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 4
+      }
+    },
+    "providers.pi-probe/shutdown.grace-expiries": {
+      "scenario": "providers.pi-probe",
+      "metric": "shutdown.grace-expiries",
+      "layer": "main",
+      "unit": "count",
+      "workload": "offline-readonly-rpc=1;queries=4;eof-idle-handle=1;probe=1",
+      "source": "production probe with shared offline RPC fixture; passive stdio/close observation and pass-through shutdown timer expiry counter",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 0
+      }
+    },
+    "providers.pi-environment/subprocess.node": {
+      "scenario": "providers.pi-environment",
+      "metric": "subprocess.node",
+      "layer": "main",
+      "unit": "count",
+      "workload": "native-node=1;environment-resolutions=5;cold-first=1",
+      "source": "pass-through subprocess and file-read counters around production Pi environment and mixed usage append/read",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 1
+      }
+    }
+  }
+}

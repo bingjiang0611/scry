@@ -4,7 +4,7 @@ import type { Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { listenRecorderDaemon, recorderDaemonStatus, recorderSocketPath, sendRecorderDaemonHook } from './daemon'
+import { listenRecorderDaemon, recorderDaemonStatus, sendRecorderDaemonHook } from './daemon'
 import { RECORDER_VERSION, listRecords } from './store'
 
 const roots: string[] = []
@@ -66,60 +66,6 @@ async function isolatedSocketDir(root: string): Promise<string> {
 }
 
 describe('turn recorder daemon', () => {
-  it('深路径 workspace 自动使用短 socket 路径', () => {
-    const workspace = join(tmpdir(), 'nested', 'x'.repeat(120))
-    const path = recorderSocketPath(workspace, { ...process.env, SCRY_RECORDER_SOCKET: '' })
-    expect(Buffer.byteLength(path)).toBeLessThanOrEqual(100)
-    expect(recorderSocketPath(workspace, { SCRY_RECORDER_SOCKET: '' })).toBe(path)
-    expect(recorderSocketPath(`${workspace}-other`, {})).not.toBe(path)
-  })
-
-  it('显式长路径和超长 TMPDIR 仍返回稳定、不同且有界的 endpoint', () => {
-    vi.stubEnv('TMPDIR', `/tmp/${'深'.repeat(80)}`)
-    const workspace = `/tmp/${'workspace'.repeat(20)}`
-    const env = { SCRY_RECORDER_SOCKET: `${workspace}/custom.sock` }
-    const path = recorderSocketPath(workspace, env)
-    expect(Buffer.byteLength(path)).toBeLessThanOrEqual(100)
-    expect(path.startsWith('/tmp/scry-')).toBe(true)
-    expect(recorderSocketPath(workspace, env)).toBe(path)
-    expect(recorderSocketPath(workspace, { SCRY_RECORDER_SOCKET: `${workspace}/other.sock` })).not.toBe(path)
-    expect(recorderSocketPath(workspace, { SCRY_RECORDER_SOCKET: '/tmp/short.sock' })).toBe('/tmp/short.sock')
-  })
-
-  it('显式超长 socket 可真实监听并连接', async () => {
-    const root = await workspace()
-    const requested = join(root, 'x'.repeat(120), 'recorder.sock')
-    const env = { SCRY_RECORDER_SOCKET: requested }
-    const daemon = await listenRecorderDaemon({ workspace: root, socketPath: requested, env })
-    try {
-      expect(Buffer.byteLength(daemon.socketPath)).toBeLessThanOrEqual(100)
-      await expect(recorderDaemonStatus(root, env)).resolves.toMatchObject({ running: true })
-    } finally {
-      await daemon.close()
-    }
-  })
-
-  it('通过 workspace socket 复用 recorder core 并提交完整轮次', async () => {
-    const root = await workspace()
-    const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
-    const daemon = await listenRecorderDaemon({ workspace: root, idleMs: 5_000, env })
-    try {
-      const base = { workspace: root, provider: 'claude' as const, env }
-      await sendRecorderDaemonHook({ ...base, event: 'UserPromptSubmit', payload: { session_id: 's1', prompt: 'hello' } })
-      await sendRecorderDaemonHook({ ...base, event: 'PreToolUse', payload: { session_id: 's1', tool_name: 'Read', tool_use_id: 't1', tool_input: { file_path: 'a.txt' } } })
-      await sendRecorderDaemonHook({ ...base, event: 'PostToolUse', payload: { session_id: 's1', tool_name: 'Read', tool_use_id: 't1', tool_response: 'ok' } })
-      await sendRecorderDaemonHook({ ...base, event: 'Stop', payload: { session_id: 's1', assistant_response: 'done' } })
-
-      const [record] = await listRecords(join(root, '.scry'))
-      expect(record).toMatchObject({ sessionId: 's1', provider: { id: 'claude' }, status: 'completed' })
-      expect(record.tools.value).toEqual([expect.objectContaining({ id: 't1', status: 'success' })])
-      await expect(recorderDaemonStatus(root, env)).resolves.toMatchObject({ running: true, protocol: '1', requestCount: 5, errorCount: 0 })
-    } finally {
-      await daemon.close()
-    }
-    await expect(recorderDaemonStatus(root, env)).resolves.toMatchObject({ running: false })
-  })
-
   it('socket 接受 direct Pi lifecycle', async () => {
     const root = await workspace()
     const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
@@ -142,6 +88,31 @@ describe('turn recorder daemon', () => {
     const daemon = await listenRecorderDaemon({ workspace: root, idleMs: 50, env })
     await daemon.closed
     await expect(recorderDaemonStatus(root, env)).resolves.toMatchObject({ running: false })
+  })
+
+  it.each(['sync', 'async'] as const)('logs %s background recovery failures without stopping the daemon', async (failure) => {
+    const root = await workspace()
+    const dir = await isolatedSocketDir(root)
+    const env = { SCRY_RECORDER_SOCKET: join(dir, 'recorder.sock') }
+    const timeouts = manualRecoveryTimeouts()
+    const daemon = await listenRecorderDaemon({
+      workspace: root, env, idleMs: 5_000,
+      scheduleRecoveryTimeout: timeouts.schedule,
+      recoveryProbe: () => {
+        const error = new Error(`injected ${failure} recovery failure`)
+        if (failure === 'sync') throw error
+        return Promise.reject(error)
+      }
+    })
+    try {
+      await sendRecorderDaemonHook({ workspace: root, provider: 'pi', event: 'UserPromptSubmit', env,
+        payload: { session_id: 'recovery-error', prompt: 'keep recovery eligible' } })
+      await expect(timeouts.fireNext()).resolves.toBeGreaterThan(0)
+      expect(await readFile(join(dir, 'logs', 'daemon.log'), 'utf8')).toContain(`injected ${failure} recovery failure`)
+      expect(await recorderDaemonStatus(root, env)).toMatchObject({ running: true })
+    } finally {
+      await daemon.close()
+    }
   })
 
   it('无 open turn 时不运行 recovery poll', async () => {

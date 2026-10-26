@@ -11,12 +11,16 @@ export async function readJson<T>(path: string): Promise<T | null> {
 }
 
 export async function writeJsonAtomic(path: string, value: unknown, options: { sync?: boolean } = {}): Promise<void> {
+  await writeTextAtomic(path, `${JSON.stringify(value)}\n`, options)
+}
+
+export async function writeTextAtomic(path: string, content: string, options: { sync?: boolean } = {}): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 })
   const temp = `${path}.${process.pid}.${randomUUID()}.tmp`
   let handle
   try {
     handle = await open(temp, 'wx', 0o600)
-    await handle.writeFile(`${JSON.stringify(value)}\n`)
+    await handle.writeFile(content)
     if (options.sync !== false) await handle.sync()
     await handle.close()
     handle = undefined
@@ -45,6 +49,23 @@ export async function syncDirectory(path: string): Promise<void> {
   }
 }
 
+async function ensureDirectory(path: string, mode: number): Promise<void> {
+  let isDirectory = false
+  try {
+    isDirectory = (await stat(path)).isDirectory()
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  if (!isDirectory) {
+    try {
+      await mkdir(path, { mode })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      if (!(await stat(path)).isDirectory()) throw error
+    }
+  }
+}
+
 /** Create each missing directory component and durably link it from its parent. */
 export async function mkdirDurable(path: string, mode = 0o700): Promise<void> {
   const absolute = resolve(path)
@@ -52,16 +73,10 @@ export async function mkdirDurable(path: string, mode = 0o700): Promise<void> {
   let current = root
   for (const part of relative(root, absolute).split(sep).filter(Boolean)) {
     const next = join(current, part)
-    try {
-      await mkdir(next, { mode })
-      await syncDirectory(current)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-      const info = await stat(next)
-      if (!info.isDirectory()) throw error
-      // A previous attempt may have created this entry but failed its parent fsync.
-      await syncDirectory(current)
-    }
+    // Most ancestors already exist; a concurrent creator must still produce a directory.
+    await ensureDirectory(next, mode)
+    // Even an existing entry may come from an attempt that failed its parent fsync.
+    await syncDirectory(current)
     current = next
   }
 }
@@ -70,17 +85,61 @@ export function exclusiveWriteTempPath(path: string, temporaryId: string): strin
   return `${path}.${temporaryId}.archive-tmp`
 }
 
+interface ExclusiveWriteOptions {
+  temporaryId?: string
+  onPublished?: () => Promise<void> | void
+  syncDirectory?: (path: string) => Promise<void>
+}
+
 /** Durable cross-filesystem copy primitive that never replaces an existing destination. */
 export async function writeFileAtomicExclusive(
   path: string,
   content: Buffer,
-  options: {
-    temporaryId?: string
-    onPublished?: () => Promise<void> | void
-    syncDirectory?: (path: string) => Promise<void>
-  } = {}
+  options: ExclusiveWriteOptions = {}
 ): Promise<void> {
   await mkdirDurable(dirname(path))
+  await publishPreparedFile(path, content, options)
+}
+
+/** Existing destinations are not success: the caller must verify their complete bytes. */
+export async function writeFileAtomicExclusiveCopies(
+  paths: readonly string[],
+  content: Buffer
+): Promise<Array<'published' | 'existing'>> {
+  const prepared = new Set<string>()
+  const parents = new Set<string>()
+  // Batch only directory preparation. No final content name is visible until ALL
+  // ancestor entries are durable, including entries left by a failed earlier attempt.
+  for (const path of paths) {
+    const directory = resolve(dirname(path))
+    const root = parse(directory).root
+    let current = root
+    for (const part of relative(root, directory).split(sep).filter(Boolean)) {
+      const next = join(current, part)
+      if (!prepared.has(next)) {
+        await ensureDirectory(next, 0o700)
+        prepared.add(next)
+      }
+      parents.add(current)
+      current = next
+    }
+  }
+  for (const parent of parents) await syncDirectory(parent)
+
+  const outcomes: Array<'published' | 'existing'> = []
+  for (const path of paths) {
+    try {
+      await publishPreparedFile(path, content, {})
+      outcomes.push('published')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      outcomes.push('existing')
+    }
+  }
+  return outcomes
+}
+
+async function publishPreparedFile(path: string, content: Buffer, options: ExclusiveWriteOptions): Promise<void> {
   const temp = exclusiveWriteTempPath(path, options.temporaryId ?? `${process.pid}.${randomUUID()}`)
   const sync = options.syncDirectory ?? syncDirectory
   let handle

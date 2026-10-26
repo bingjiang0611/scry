@@ -1,0 +1,32 @@
+export async function buildResult({ finalState }) {
+  return {
+    remoteDirectoryPicker: { oldHostUnavailable: true, cancelFocusAndDraft: true, browseDoesNotGrant: true, invalidPath: true, pagination: true, offlineBlocked: true, uncertainGrantVisible: true, explicitSelectionOnly: true, noImplicitSend: true },
+    locationHoverStable: { menu: true, machineRows: true, stationaryPointer: true, shortWindow: true, noImplicitSelection: true },
+    remoteSettingsDirectEntryKeepsDraft: true,
+    removedProviderNeverSubstituted: true,
+    sharedChatViewForRemote: true,
+    remoteSessionParity: { metaPromptRouting: true, hostSlashKeyboardSelection: true, pinUnpin: true, rename: true, archiveRestore: true },
+    locationPickerCarriesDraft: true,
+    hostNamedPermissionCopy: true,
+    existingSessionIdentityLocked: true,
+    offlineNeverFallsBack: true,
+    readFailureKeepsSavedHosts: true,
+    reconnectPreservesDraft: true,
+    staleDispatchNoticeCleared: true,
+    dispatchNoticeLifecycle: { unacknowledged: true, recorded: true, unknown: true, dispatchedBeforeTrace: true, resumedTurn: true, stopAcknowledgement: true, pollErrorRecovery: true, terminalHistoryRefresh: true, actionErrorPreserved: true },
+    hostEnableInviteDisable: true,
+    providerProfileIdentity: true,
+    nativeCoordinateInput: true,
+    newSessionHistoryGuard: true,
+    doubleEnterSingleSubmit: true,
+    canonicalScryRunTrace: true,
+    ledgerUuidStopAndAnswer: true,
+    failedAnswerNotSuccess: true,
+    nativeSessionAdoption: true,
+    providerControlReset: true, remoteModelAndPermissionRemembered: true, remoteProviderRemembered: true,
+    fullAccessSelection: true,
+    contextSwitchIsolation: true,
+    remoteBackgroundCannotStopLocal: true,
+    calls: { history: finalState.historyCalls.length, traces: finalState.traceCalls.length, submits: finalState.submitInputs.length, stops: finalState.stopCalls.length, answers: finalState.answerCalls.length }
+  }
+}

@@ -1,0 +1,163 @@
+{
+  "schema": 1,
+  "metrics": {
+    "source-control.service.diff-validated/subprocess.git": {
+      "scenario": "source-control.service.diff-validated",
+      "metric": "subprocess.git",
+      "layer": "main",
+      "unit": "count",
+      "workload": "tracked-files=5001;dirty-paths=4;remotes=1;diff-requests=1;staged=false;primed-ui-revision=true",
+      "source": "real SourceControlService.diff with before/after revision validation, authorized temporary Git, staged/unstaged separation and full index-byte assertion",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 18
+      }
+    },
+    "source-control.service.diff-validated/subprocess.total": {
+      "scenario": "source-control.service.diff-validated",
+      "metric": "subprocess.total",
+      "layer": "main",
+      "unit": "count",
+      "workload": "tracked-files=5001;dirty-paths=4;remotes=1;diff-requests=1;staged=false;primed-ui-revision=true",
+      "source": "real SourceControlService.diff with before/after revision validation, authorized temporary Git, staged/unstaged separation and full index-byte assertion",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 18
+      }
+    },
+    "source-control.service.diff-validated/revision.status-checks": {
+      "scenario": "source-control.service.diff-validated",
+      "metric": "revision.status-checks",
+      "layer": "main",
+      "unit": "count",
+      "workload": "tracked-files=5001;dirty-paths=4;remotes=1;diff-requests=1;staged=false;primed-ui-revision=true",
+      "source": "real SourceControlService.diff with before/after revision validation, authorized temporary Git, staged/unstaged separation and full index-byte assertion",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 2
+      }
+    },
+    "source-control.service.diff-validated/remote.queries": {
+      "scenario": "source-control.service.diff-validated",
+      "metric": "remote.queries",
+      "layer": "main",
+      "unit": "count",
+      "workload": "tracked-files=5001;dirty-paths=4;remotes=1;diff-requests=1;staged=false;primed-ui-revision=true",
+      "source": "real SourceControlService.diff with before/after revision validation, authorized temporary Git, staged/unstaged separation and full index-byte assertion",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 0
+      }
+    },
+    "source-control.terminal-pair/subprocess.git": {
+      "scenario": "source-control.terminal-pair",
+      "metric": "subprocess.git",
+      "layer": "main",
+      "unit": "count",
+      "workload": "tracked-files=5000;dirty-distinct-anchors=2;turn-paths=4;session-paths=2",
+      "source": "pass-through child_process counters around production terminal turn/session collection; real isolated Git, unchanged index and independent content assertions",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 17
+      }
+    },
+    "source-control.terminal-pair/snapshot.write-tree": {
+      "scenario": "source-control.terminal-pair",
+      "metric": "snapshot.write-tree",
+      "layer": "main",
+      "unit": "count",
+      "workload": "tracked-files=5000;dirty-distinct-anchors=2;turn-paths=4;session-paths=2",
+      "source": "pass-through child_process counters around production terminal turn/session collection; real isolated Git, unchanged index and independent content assertions",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 1
+      }
+    },
+    "source-control.terminal-pair/subprocess.total": {
+      "scenario": "source-control.terminal-pair",
+      "metric": "subprocess.total",
+      "layer": "main",
+      "unit": "count",
+      "workload": "tracked-files=5000;dirty-distinct-anchors=2;turn-paths=4;session-paths=2",
+      "source": "pass-through child_process counters around production terminal turn/session collection; real isolated Git, unchanged index and independent content assertions",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 17
+      }
+    },
+    "source-control.diff/subprocess.git": {
+      "scenario": "source-control.diff",
+      "metric": "subprocess.git",
+      "layer": "main",
+      "unit": "count",
+      "workload": "git-worktree=1;changed-files=1",
+      "source": "pass-through node:child_process execFile/spawn wrappers around production git paths",
+      "status": "gating",
+      "ceiling": 8,
+      "tolerance": 0,
+      "evidence": {
+        "stability": "macOS arm64 Node 22.22.1, 2026-10-16: identical count across 5 repeats per collect, a second full collect, performance:measure --compare (2+2 runs) and 2x17 correlation runs. Linux CI value not yet observed.",
+        "sensitivity": "duplicated readWorkspaceGitDiff raises the count (subprocesses.counters.test.ts)",
+        "correlation": "scripts/performance-correlation.test.ts, 2 runs x 15 samples on a loaded host: git subprocess lifetime union = 98.8%/98.9% (min 96.8%) of operation wall time, ~49-52 ms per subprocess; removing one subprocess removes roughly that much user-visible time."
+      }
+    },
+    "source-control.service.status-diff/subprocess.git": {
+      "scenario": "source-control.service.status-diff",
+      "metric": "subprocess.git",
+      "layer": "main",
+      "unit": "count",
+      "workload": "git-worktree=1;changed-files=1",
+      "source": "pass-through node:child_process execFile/spawn wrappers around production git paths",
+      "status": "gating",
+      "ceiling": 11,
+      "tolerance": 0,
+      "evidence": {
+        "stability": "macOS arm64 Node 22.22.1, 2026-10-16: identical count across 5 repeats per collect, a second full collect, performance:measure --compare (2+2 runs) and 2x17 correlation runs. Linux CI value not yet observed.",
+        "sensitivity": "one redundant ScGit.status refresh raises the count (subprocesses.counters.test.ts)",
+        "correlation": "scripts/performance-correlation.test.ts, 2 runs x 15 samples on a loaded host: git subprocess lifetime union = 98.7%/98.2% (min 98.1%) of operation wall time, ~29-50 ms per subprocess; removing one subprocess removes roughly that much user-visible time."
+      }
+    },
+    "source-control.diff/subprocess.total": {
+      "scenario": "source-control.diff",
+      "metric": "subprocess.total",
+      "layer": "main",
+      "unit": "count",
+      "workload": "git-worktree=1;changed-files=1",
+      "source": "pass-through node:child_process execFile/spawn wrappers around production git paths",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 8
+      }
+    },
+    "source-control.service.status-diff/subprocess.total": {
+      "scenario": "source-control.service.status-diff",
+      "metric": "subprocess.total",
+      "layer": "main",
+      "unit": "count",
+      "workload": "git-worktree=1;changed-files=1",
+      "source": "pass-through node:child_process execFile/spawn wrappers around production git paths",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 11
+      }
+    }
+  }
+}

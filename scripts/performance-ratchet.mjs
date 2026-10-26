@@ -1,6 +1,7 @@
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { readLedger } from './performance-ledger.mjs'
 
 // Work-counter ratchet. Counters measure how much work one fixed operation performs
 // (IPC messages, bytes, file reads, subprocesses, React commits, layouts, instructions).
@@ -22,6 +23,7 @@ export const counterPlatform = () => `${process.platform}-${process.arch}`
 function fail(message) { throw new Error(message) }
 
 export function validateLedger(ledger) {
+  if (ledger?.includes !== undefined) fail('Read modular ledgers with readLedger before validation')
   if (ledger?.schema !== 1 || !ledger.metrics || typeof ledger.metrics !== 'object') fail('Unsupported ratchet ledger schema')
   for (const [key, entry] of Object.entries(ledger.metrics)) {
     if (key !== metricKey(entry.scenario, entry.metric) || !text(entry.scenario) || !text(entry.metric)) fail(`Ledger key must be scenario/metric: ${key}`)
@@ -189,7 +191,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     if (command === 'check') {
       const [ledgerPath, observationsPath, output] = args
       if (!output) fail('Usage: performance-ratchet.mjs check <ledger.json> <observations.json> <report.md>')
-      const report = checkRatchet(readJson(ledgerPath), readJson(observationsPath))
+      const report = checkRatchet(readLedger(ledgerPath), readJson(observationsPath))
       const markdown = formatRatchet(report)
       writeFileSync(output, markdown)
       writeFileSync(`${output}.json`, JSON.stringify(report, null, 2))
@@ -199,13 +201,13 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     } else if (command === 'propose') {
       const [ledgerPath, observationsPath, output] = args
       if (!output) fail('Usage: performance-ratchet.mjs propose <ledger.json> <observations.json> <next-ledger.json>')
-      const proposal = proposeTightening(readJson(ledgerPath), readJson(observationsPath))
+      const proposal = proposeTightening(readLedger(ledgerPath), readJson(observationsPath))
       writeFileSync(output, `${JSON.stringify(proposal.ledger, null, 2)}\n`)
       console.log(JSON.stringify({ revision: proposal.revision, changes: proposal.changes }, null, 2))
     } else if (command === 'guard') {
       const [basePath, headPath] = args
       if (!headPath) fail('Usage: performance-ratchet.mjs guard <base-ledger.json> <head-ledger.json>')
-      const result = checkLedgerChange(readJson(basePath), readJson(headPath), { raiseApproved: process.env.SCRY_PERF_RAISE_APPROVED === '1' })
+      const result = checkLedgerChange(readLedger(basePath), readLedger(headPath), { raiseApproved: process.env.SCRY_PERF_RAISE_APPROVED === '1' })
       console.log(JSON.stringify(result, null, 2))
       if (!result.passed) process.exitCode = 1
     } else fail('Usage: performance-ratchet.mjs <check|propose|guard> ...')

@@ -12,9 +12,9 @@ function resetIo(): void {
   io.counts = { open: 0, read: 0, stat: 0, readdir: 0, readBytes: 0, write: 0, rename: 0 }
 }
 
-function addRead(value: unknown): void {
+// Returned strings are measured in UTF-8 representation bytes, not physical disk I/O.
+function addReadBytes(value: unknown): void {
   if (!io.active) return
-  io.counts.read++
   if (typeof value === 'string' || Buffer.isBuffer(value)) io.counts.readBytes += Buffer.byteLength(value)
 }
 
@@ -25,13 +25,14 @@ vi.mock('node:fs', async () => {
       if (io.active) {
         if (name === 'openSync') io.counts.open++
         if (name === 'readSync') io.counts.read++
-        if (name === 'readFileSync') addRead(args[0])
+        if (name === 'readFileSync') io.counts.read++
         if (name === 'readdirSync') io.counts.readdir++
         if (name === 'statSync' || name === 'lstatSync' || name === 'existsSync') io.counts.stat++
         if (name === 'writeFileSync' || name === 'appendFileSync') io.counts.write++
         if (name === 'renameSync') io.counts.rename++
       }
       const result = Reflect.apply(fn as (...args: never[]) => unknown, actual, args)
+      if (io.active && name === 'readFileSync') addReadBytes(result)
       if (io.active && name === 'readSync' && typeof result === 'number') io.counts.readBytes += result
       return result
     }) as typeof actual[K]
@@ -64,7 +65,7 @@ vi.mock('node:fs/promises', async () => {
         if (name === 'rename') io.counts.rename++
       }
       const result = await Reflect.apply(fn as (...args: never[]) => unknown, actual, args)
-      if (io.active && name === 'readFile') addRead(result)
+      if (io.active && name === 'readFile') addReadBytes(result)
       if (io.active && name === 'open' && result && typeof result === 'object') {
         const fileHandle = result
         const handle = fileHandle as Record<string, unknown>
@@ -74,10 +75,8 @@ vi.mock('node:fs/promises', async () => {
           handle[method] = async (...methodArgs: unknown[]) => {
             if (io.active && method === 'read') {
               io.counts.read++
-              const destination = methodArgs[0]
-              const readResult = await Reflect.apply(original, fileHandle, methodArgs)
-              if (readResult && typeof readResult === 'object' && 'bytesRead' in readResult) io.counts.readBytes += Number(readResult.bytesRead)
-              else if (Buffer.isBuffer(destination)) io.counts.readBytes += destination.byteLength
+              const readResult = await Reflect.apply(original, fileHandle, methodArgs) as { bytesRead: number }
+              io.counts.readBytes += readResult.bytesRead
               return readResult
             }
             if (io.active && method === 'stat') io.counts.stat++
@@ -144,14 +143,111 @@ async function measure(operation: () => unknown | Promise<unknown>): Promise<IoC
 function metrics(counts: IoCounts): Record<string, number> {
   return {
     'io.open': counts.open,
-    'io.read': counts.read,
+    'io.read.api.calls': counts.read,
     'io.stat': counts.stat,
     'io.readdir': counts.readdir,
-    'io.read.bytes': counts.readBytes,
+    'io.read.payload.bytes': counts.readBytes,
     'io.write': counts.write,
     'io.rename': counts.rename
   }
 }
+
+describe('file read meter accuracy', () => {
+  it.each([undefined, 'utf8'] as const)('counts synchronous returned payload once (%s)', async (encoding) => {
+    const { readFileSync, writeFileSync, rmSync } = await import('node:fs')
+    const fixture = await tempRoot()
+    const path = `${fixture.root}/a-long-filename-that-is-not-the-payload.txt`
+    const payload = Buffer.from('字节🙂')
+    try {
+      writeFileSync(path, payload)
+      const counts = await measure(() => {
+        const result = encoding ? readFileSync(path, encoding) : readFileSync(path)
+        expect(Buffer.from(result)).toEqual(payload)
+      })
+      expect(counts).toMatchObject({ read: 1, readBytes: payload.length })
+    } finally { rmSync(fixture.root, { recursive: true, force: true }) }
+  })
+
+  it.each([undefined, 'utf8'] as const)('counts asynchronous returned payload once (%s)', async (encoding) => {
+    const { readFile, writeFile, rm } = await import('node:fs/promises')
+    const fixture = await tempRoot()
+    const path = `${fixture.root}/payload.txt`
+    const payload = Buffer.from('字节🙂')
+    try {
+      await writeFile(path, payload)
+      const counts = await measure(async () => {
+        const result = encoding ? await readFile(path, encoding) : await readFile(path)
+        expect(Buffer.from(result)).toEqual(payload)
+      })
+      expect(counts).toMatchObject({ read: 1, readBytes: payload.length })
+    } finally { await rm(fixture.root, { recursive: true, force: true }) }
+  })
+
+  it('measures returned strings as UTF-8 payload, not encoded file size', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { readFile, writeFile, rm } = await import('node:fs/promises')
+    const fixture = await tempRoot()
+    const path = `${fixture.root}/encoded.bin`
+    try {
+      await writeFile(path, Buffer.from([0xff, 0]))
+      const counts = await measure(async () => {
+        expect(readFileSync(path, 'hex')).toBe('ff00')
+        expect(await readFile(path, 'hex')).toBe('ff00')
+      })
+      expect(counts).toMatchObject({ read: 2, readBytes: 8 })
+    } finally { await rm(fixture.root, { recursive: true, force: true }) }
+  })
+
+  it('counts failed calls but no payload', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { readFile, rm } = await import('node:fs/promises')
+    const fixture = await tempRoot()
+    try {
+      const counts = await measure(async () => {
+        expect(() => readFileSync(`${fixture.root}/missing`)).toThrow()
+        await expect(readFile(`${fixture.root}/missing`)).rejects.toMatchObject({ code: 'ENOENT' })
+      })
+      expect(counts).toMatchObject({ read: 2, readBytes: 0 })
+    } finally { await rm(fixture.root, { recursive: true, force: true }) }
+  })
+
+  it('counts actual partial reads and EOF, not destination capacity', async () => {
+    const { openSync, readSync, closeSync } = await import('node:fs')
+    const { open, writeFile, rm } = await import('node:fs/promises')
+    const fixture = await tempRoot()
+    const path = `${fixture.root}/partial.txt`
+    try {
+      await writeFile(path, 'abc')
+      const counts = await measure(async () => {
+        const buffer = Buffer.alloc(64)
+        const fd = openSync(path, 'r')
+        try {
+          expect(readSync(fd, buffer, 0, buffer.length, 0)).toBe(3)
+          expect(readSync(fd, buffer, 0, buffer.length, 3)).toBe(0)
+        } finally { closeSync(fd) }
+        const handle = await open(path, 'r')
+        try {
+          expect((await handle.read(buffer, 0, buffer.length, 0)).bytesRead).toBe(3)
+          expect((await handle.read(buffer, 0, buffer.length, 3)).bytesRead).toBe(0)
+        } finally { await handle.close() }
+      })
+      expect(counts).toMatchObject({ read: 4, readBytes: 6 })
+    } finally { await rm(fixture.root, { recursive: true, force: true }) }
+  })
+
+  it('adds exactly one call and its payload for an extra real read', async () => {
+    const { readFile, writeFile, rm } = await import('node:fs/promises')
+    const fixture = await tempRoot()
+    const path = `${fixture.root}/sensitivity.txt`
+    try {
+      await writeFile(path, 'extra')
+      const single = await measure(() => readFile(path))
+      const doubled = await measure(async () => { await readFile(path); await readFile(path) })
+      expect(doubled.read - single.read).toBe(1)
+      expect(doubled.readBytes - single.readBytes).toBe(5)
+    } finally { await rm(fixture.root, { recursive: true, force: true }) }
+  })
+})
 
 describe('fixed production file work counters', () => {
   let production: Awaited<ReturnType<typeof imports>>
@@ -234,7 +330,16 @@ describe('fixed production file work counters', () => {
     expect(samples).toHaveLength(defaultRepeats)
     const runs = await repeatCounters(defaultRepeats, async (index) => samples[index])
     const meta = { scenario: 'files.fixed-operations', layer: 'io' as const, workload, source: 'pass-through node:fs and node:fs/promises wrappers around production functions' }
-    writeCollector('files', Object.entries(runs).map(([metric, values]) => measured({ ...meta, metric, unit: metric === 'io.read.bytes' ? 'bytes' as const : 'count' as const }, values)))
+    writeCollector('files', Object.entries(runs).map(([metric, values]) => measured({
+      ...meta,
+      metric,
+      unit: metric === 'io.read.payload.bytes' ? 'bytes' as const : 'count' as const,
+      source: metric === 'io.read.api.calls'
+        ? 'attempts: readFileSync, readSync, promises.readFile and read on handles opened during measurement; errors count once'
+        : metric === 'io.read.payload.bytes'
+          ? 'returned payload: readFile buffers by length, strings as UTF-8, readSync/FileHandle.read by bytesRead; failures contribute zero'
+          : meta.source
+    }, values)))
   })
 
   it('is sensitive to duplicated production reads', async () => {

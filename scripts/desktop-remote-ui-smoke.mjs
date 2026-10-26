@@ -1,23 +1,38 @@
-import { mkdtemp } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { desktopRemoteFixtureHead } from './desktop-remote-fixture-head.mjs'
-import { desktopRemoteFixtureApi } from './desktop-remote-fixture-api.mjs'
-import { desktopRemoteFixtureComponents } from './desktop-remote-fixture-components.mjs'
+import { build } from 'vite'
+import { build as bundle } from 'esbuild'
+import { fixtureImports } from './desktop-remote-ui-smoke/fixture-imports.mjs'
+import { fixtureState } from './desktop-remote-ui-smoke/fixture-state.mjs'
+import { fixtureTransport } from './desktop-remote-ui-smoke/fixture-transport.mjs'
+import { fixtureShell } from './desktop-remote-ui-smoke/fixture-shell.mjs'
+import electron from 'electron'
 import { stopOwnedApp } from './owned-app-processes.mjs'
 import { nativeUiPointer } from './native-ui-pointer.mjs'
-import { runDesktopRemoteSmoke } from './desktop-remote-runner.mjs'
-import { runConversationNavigation, runUnknownReceipt, runStructure, runOpeningControls } from './desktop-remote-scenarios-a.mjs'
-import { runOpeningBench, runSettings, runPostSettings } from './desktop-remote-scenarios-b.mjs'
-import { runComposerHistory, runPostComposer } from './desktop-remote-scenarios-c.mjs'
-import { runLifecycle, runParity } from './desktop-remote-scenarios-d.mjs'
-import { runDefaultStageA } from './desktop-remote-scenarios-default-A.mjs'
-import { runDefaultStageB } from './desktop-remote-scenarios-default-B.mjs'
-import { runDefaultStageC } from './desktop-remote-scenarios-default-C.mjs'
+import { defaultScenarios, selectScenario } from './desktop-remote-ui-smoke/scenarios.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
-const temp = await mkdtemp(join(tmpdir(), 'scry-desktop-remote-ui-'))
+const scenario = selectScenario(process.argv.slice(2))
+if (scenario === null) {
+  // Each responsibility owns a fresh renderer/userData and the unchanged 55s budget.
+  // A failure stops the suite; it never advances by treating a timeout as success.
+  for (const name of defaultScenarios) {
+    console.log('DesktopRemote scenario: ' + name)
+    await new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [fileURLToPath(import.meta.url), ...process.argv.slice(2), '--scenario=' + name], { stdio: 'inherit' })
+      child.once('error', reject)
+      child.once('close', (code, signal) => {
+        if (code === 0) resolve()
+        else reject(new Error(`DesktopRemote ${name} failed (${code ?? signal})`))
+      })
+    })
+  }
+  process.exit(0)
+}
+const temp = await mkdtemp(join(tmpdir(), 'scry-desktop-remote-ui-' + scenario + '-'))
 const negativeControl = process.argv.includes('--negative-control')
 const negativeMachineControl = process.argv.includes('--negative-machine-control')
 const negativeAddressControl = process.argv.includes('--negative-address-control')
@@ -43,137 +58,155 @@ const visibilityPollingBaseline = process.argv.includes('--visibility-polling-ba
 const visibilityPollingCheck = process.argv.includes('--visibility-polling-check')
 const negativeVisibilityControl = process.argv.includes('--negative-visibility-control')
 const keepArtifacts = process.argv.includes('--keep')
+let cleanupUnknown = false
+let failed = false
 
 // This is a renderer-only contract fixture. The bridge records calls but never starts a
 // Provider, opens a socket, reads credentials, or calls the local run-control API.
-const fixtureContext = { root, unknownReceiptOnly, structureOnly, openingOnly, measureOpening, composerHistoryOnly, lifecycleOnly, conversationNavigationOnly, visibilityPollingCheck, visibilityPollingBaseline, negativeUnknownReceiptControl }
-const fixtureSource = desktopRemoteFixtureHead(fixtureContext) + desktopRemoteFixtureApi(fixtureContext) + desktopRemoteFixtureComponents(fixtureContext)
+const options = { scenario, structureOnly, parityOnly, settingsOnly, lifecycleOnly, openingOnly, measureOpening, composerHistoryOnly, conversationNavigationOnly, unknownReceiptOnly, negativeUnknownReceiptControl, visibilityPollingBaseline, visibilityPollingCheck }
+const fixtureSource = fixtureImports(root) + fixtureState(options) + fixtureTransport(options) + fixtureShell(options)
 
-async function exercise(contents, pointer, capture, options) {
-  const check = (condition, message) => { if (!condition) throw new Error(message) }
-  if (options.visibilityPollingBaseline) {
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    await contents.executeJavaScript('Object.defineProperty(document, "hidden", { configurable: true, get: () => true }); Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" }); document.dispatchEvent(new Event("visibilitychange"))')
-    const hidden = await contents.executeJavaScript('document.hidden')
-    const before = await contents.executeJavaScript('({ list: window.desktopRemoteFixture.listCalls, catalog: window.desktopRemoteFixture.catalogCalls, remoteStatus: window.desktopRemoteFixture.remoteStatusCalls, intents: window.desktopRemoteFixture.intentsCalls, runStatus: window.desktopRemoteFixture.runStatusCalls, trace: window.desktopRemoteFixture.traceCalls.length })')
-    await new Promise(resolve => setTimeout(resolve, 60_000))
-    const after = await contents.executeJavaScript('({ list: window.desktopRemoteFixture.listCalls, catalog: window.desktopRemoteFixture.catalogCalls, remoteStatus: window.desktopRemoteFixture.remoteStatusCalls, intents: window.desktopRemoteFixture.intentsCalls, runStatus: window.desktopRemoteFixture.runStatusCalls, trace: window.desktopRemoteFixture.traceCalls.length })')
-    return { durationSeconds: 60, hidden, before, after, delta: Object.fromEntries(Object.keys(after).map(key => [key, after[key] - before[key]])) }
-  }
-  const read = (expression) => contents.executeJavaScript(expression)
-  const wait = async (expression, label = expression) => {
-    const deadline = Date.now() + 7000
-    while (!await read(expression)) {
-      if (Date.now() > deadline) throw new Error(`Timed out: ${label}; DOM=${await read('JSON.stringify({ focus: document.activeElement?.tagName, selects: [...document.querySelectorAll("select")].map(node => ({value:node.value, options:[...node.options].map(option => ({text:option.text, value:option.value}))})), text: document.body.innerText.slice(-2000), events: window.desktopRemoteFixture.uiEvents })')}`)
-      await new Promise((resolve) => setTimeout(resolve, 20))
-    }
-  }
-  if (options.visibilityPollingCheck) {
-    const ready = 'document.querySelector(".hosts-state[data-state=connected]") && document.querySelector(".remote-pairing .remote-access-status.is-ready") && document.querySelector(".sb-running")'
-    const stale = '!document.querySelector(".hosts-state[data-state=connected]") && !document.querySelector(".remote-pairing .remote-access-status.is-ready") && !document.querySelector(".sb-running")'
-    const counters = () => read('({ list: window.desktopRemoteFixture.listCalls, catalog: window.desktopRemoteFixture.catalogCalls, status: window.desktopRemoteFixture.remoteStatusCalls })')
-    await wait(ready, 'initial confirmed live state')
-    await wait('document.querySelector(".runtime-composer button.send")?.disabled === false', 'initial send ready')
-    await read('window.setPollingVisibility = hidden => { Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden }); Object.defineProperty(document, "visibilityState", { configurable: true, get: () => hidden ? "hidden" : "visible" }); document.dispatchEvent(new Event("visibilitychange")) }; window.desktopRemoteFixture.holdVisibilityReads = true; window.setPollingVisibility(true); window.setPollingVisibility(false)')
-    await wait('window.visibilityWaiting().length === 3', 'resume status/catalog/connection reads held')
-    check(await read(stale), 'Resume must withdraw stale online/activity confirmation')
-    check(await read('document.body.innerText.includes("Old session")'), 'Retained catalog history must remain visible')
-    check(await read('document.querySelector(".runtime-composer button.send").disabled'), 'Send must wait for fresh live evidence')
-    const pending = await counters()
-    await read('void window.refreshFixtureConnections(); void window.refreshFixtureConnections(); void window.refreshFixtureCatalog(); void window.refreshFixtureCatalog()')
-    check(JSON.stringify(await counters()) === JSON.stringify(pending), 'Direct reads must join pending requests')
-    await read('window.desktopRemoteFixture.holdVisibilityReads = false; window.releaseVisibilityReads()')
-    await wait(ready, 'fresh successful state after resume')
-    await wait('document.querySelector(".runtime-composer button.send").disabled === false', 'send reenabled only after fresh poll')
-
-    // An older read may finish after show; it cannot re-confirm online state.
-    await read('window.desktopRemoteFixture.holdVisibilityReads = true; void window.refreshFixtureConnections(); void window.refreshFixtureCatalog()')
-    await wait('window.visibilityWaiting().length === 3', 'older reads held including pairing interval')
-    const older = await counters()
-    await read('window.setPollingVisibility(true); window.setPollingVisibility(false)')
-    check(await read(stale), 'Pending pre-hide reads must be marked stale')
-    check(JSON.stringify(await counters()) === JSON.stringify(older), 'Resume must not overlap an older request')
-    await read('window.releaseVisibilityReads()')
-    await wait('window.visibilityWaiting().length === 3', 'one queued post-show read per path')
-    const freshPending = await counters()
-    check(Object.keys(older).every(key => freshPending[key] === older[key] + 1), 'Resume must queue exactly one fresh follow-up')
-    check(await read(stale), 'Old completions must not re-confirm online/activity')
-    await read('window.desktopRemoteFixture.holdVisibilityReads = false; window.releaseVisibilityReads(true)')
-    await wait('document.body.innerText.includes("fixture visibility read failed")', 'refresh rejection surfaced')
-    check(await read(stale), 'Failed refresh must not claim online/activity')
-    check(await read('document.body.innerText.includes("Old session")'), 'Read rejection must preserve catalog history')
-    check(await read('window.desktopRemoteFixture.submitInputs.length === 0'), 'Visibility changes must not submit a prompt')
-    return { visibilityPolling: true, staleAuthority: true, deferredSingleFlight: true, rejectionRetainsHistory: true, counters: await counters() }
-  }
-  const pointFor = (selector, text, captureReceipt = false) => read(`(${pointer.toString()})(${JSON.stringify(selector)}, { text: ${JSON.stringify(text ?? '')}, timeoutMs: 7000, scroll: true, captureReceipt: ${captureReceipt} })`)
-  const send = (method, params) => contents.debugger.sendCommand(method, params)
-  const click = async (selector, text) => {
-    const point = await pointFor(selector, text, true)
-    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y })
-    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 })
-    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 })
-    await wait('window.__nativeUiPointerReceipt != null', 'native pointer receipt')
-    const receipt = await read('window.__nativeUiPointerReceipt')
-    check(receipt.trusted && receipt.targetMatched, `Native pointer missed ${selector}: ${JSON.stringify(receipt)}`)
-  }
-  const key = async (key, code = key, modifiers = 0) => {
-    const virtualKey = key === 'Enter' ? 13 : key === 'Escape' ? 27 : key === 'Backspace' ? 8 : key === 'ArrowDown' ? 40 : key === 'ArrowUp' ? 38 : key.length === 1 ? (key.charCodeAt(0) < 128 ? key.toUpperCase().charCodeAt(0) : 0) : undefined
-    const nativeVirtualKeyCode = process.platform === 'darwin'
-      ? { Enter: 36, Escape: 53, Backspace: 51, ArrowDown: 125, ArrowUp: 126, b: 11, f: 3 }[key]
-      : virtualKey
-    await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key, code, windowsVirtualKeyCode: virtualKey, nativeVirtualKeyCode, modifiers })
-    if (key.length === 1) await send('Input.dispatchKeyEvent', { type: 'char', key, text: key, unmodifiedText: key, windowsVirtualKeyCode: virtualKey, nativeVirtualKeyCode, modifiers })
-    await send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: virtualKey, nativeVirtualKeyCode, modifiers })
-  }
-  const insert = (text) => send('Input.insertText', { text })
-  const pasteImage = async () => read(`(async () => { const input = document.querySelector('textarea[aria-label="描述任务"]'); const canvas = document.createElement('canvas'); canvas.width = 2; canvas.height = 2; const png = await new Promise(resolve => canvas.toBlob(resolve, 'image/png')); const transfer = new DataTransfer(); transfer.items.add(new File([png], 'pasted.png', { type: 'image/png' })); input.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer })); return true })()`)
-  // Native forms submit on Enter's keypress/default action, not keydown alone.
-  const formEnter = async () => {
-    const event = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: process.platform === 'darwin' ? 36 : 13 }
-    await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...event })
-    await send('Input.dispatchKeyEvent', { type: 'char', text: '\r', unmodifiedText: '\r', ...event })
-    await send('Input.dispatchKeyEvent', { type: 'keyUp', ...event })
-  }
-
-  const fixture = () => read('window.desktopRemoteFixture')
-  const bodyText = () => read('document.body.textContent')
-
-  await wait('document.querySelector(".desktop-remote__host button")?.textContent.includes("启用")', 'disabled host enable action')
-  await click('.desktop-remote__host button')
-  await wait('document.querySelector(".desktop-remote__invite")?.textContent.includes("scry-desktop1:fixture")', 'enabled host invitation')
-  check((await fixture()).hostInviteCalls === 1, 'Host enable dispatched more than one invitation')
-  check(await read('document.querySelector(".hosts-add-modal").textContent.includes("新邀请会使旧的未完成邀请失效")'), 'Invitation lost invalidation consequence')
-  await click('button[aria-label="关闭 SSH 邀请"]')
-  await click('.desktop-remote__host button:last-child')
-  await wait('window.desktopRemoteFixture.hostDisableCalls === 1 && !document.querySelector(".desktop-remote__invite")', 'disable clears invitation')
-
-  // Full production App: the remote session uses the same ChatView as local sessions.
-  await click('[data-app-fixture]')
-  const remoteShown = 'document.querySelector(".execution-location.is-remote") != null'
-const sendDisabled = 'document.querySelector(".runtime-composer button.send").disabled'
-const composerValue = 'document.querySelector(\'textarea[aria-label="描述任务"]\').value'
-await wait('document.querySelector(".sb-remote-proj") != null', 'connected remote project')
-check(!(await read('document.querySelector(".sb-hosts")')), 'Legacy hosts navigation remains')
-
-  const scenarioContext = { contents, pointer, capture, options, check, read, wait, pointFor, send, click, key, insert, pasteImage, formEnter, fixture, bodyText, remoteShown, sendDisabled, composerValue }
-  let result = await runConversationNavigation(scenarioContext); if (result) return result
-  result = await runUnknownReceipt(scenarioContext); if (result) return result
-  result = await runStructure(scenarioContext); if (result) return result
-  result = await runOpeningControls(scenarioContext); if (result) return result
-  result = await runOpeningBench(scenarioContext); if (result) return result
-  result = await runSettings(scenarioContext); if (result) return result
-  Object.assign(scenarioContext, await runPostSettings(scenarioContext))
-  result = await runComposerHistory(scenarioContext); if (result) return result
-  result = await runPostComposer(scenarioContext); if (result) return result
-  result = await runLifecycle(scenarioContext); if (result) return result
-  result = await runParity(scenarioContext); if (result) return result
-  Object.assign(scenarioContext, await runDefaultStageA(scenarioContext))
-  Object.assign(scenarioContext, await runDefaultStageB(scenarioContext))
-  return runDefaultStageC(scenarioContext)
+try {
+  await Promise.all(['home', 'userData', 'sessionData'].map((name) => mkdir(join(temp, name), { recursive: true })))
+  await symlink(join(root, 'node_modules'), join(temp, 'node_modules'), 'dir')
+  await writeFile(join(temp, 'fixture.tsx'), fixtureSource)
+  await bundle({
+    entryPoints: [join(root, 'scripts/desktop-remote-ui-smoke/exercise.mjs')],
+    bundle: true, platform: 'node', format: 'cjs', outfile: join(temp, 'exercise.cjs')
+  })
+  await build({
+    configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
+    // Mutation control stays in this fixture's bundle; production files are untouched.
+    plugins: negativeControl || negativeMachineControl || negativeAddressControl || negativeHoverControl || negativeActivityControl || negativeWorkspaceControl || negativePromptControl || negativeSettingsControl || negativeSlashControl || negativeHistorySlashControl || negativeProviderRevisionControl || negativeVisibilityControl ? [{ name: 'remote-negative-control', enforce: 'pre', transform(source, id) {
+      if (negativeProviderRevisionControl && id.endsWith('/RemoteChatFoundation.tsx')) {
+        const dependency = ', provider?.metadataRevision'
+        if (!source.includes(dependency)) throw new Error('Provider metadata revision dependency not found')
+        return source.replace(dependency, '')
+      }
+      if (negativeHistorySlashControl && id.endsWith('/chat-view/Composer.tsx')) {
+        const guard = 'const slashOpen = slashRequested && !historyNavigation'
+        if (!source.includes(guard)) throw new Error('history slash guard not found')
+        return source.replace(guard, 'const slashOpen = slashRequested')
+      }
+      if (negativeSlashControl && id.endsWith('/chat-view/Composer.tsx')) {
+        const heading = 'SLASH_COMMAND_COPY.heading(remoteHost, slashLoading)'
+        if (!source.includes(heading)) throw new Error('slash source control not found')
+        return source.replace(heading, 'SLASH_COMMAND_COPY.heading(undefined, slashLoading)')
+      }
+      if (negativeSettingsControl && id.endsWith('/app-view.tsx')) {
+        const target = "setSettingsTab('remote')"
+        if (!source.includes(target)) throw new Error('remote settings control not found')
+        return source.replace(target, "setSettingsTab('appearance')")
+      }
+      if (negativePromptControl && id.endsWith('/app-view.tsx')) {
+        const target = 'const target = metaPromptTarget.current'
+        if (!source.includes(target)) throw new Error('meta prompt routing control not found')
+        return source.replace(target, 'const target = { view: "chat", draftKey }').replace('returnFromMetaPrompts()\n  }', 'changeView("chat")\n  }')
+      }
+      if (negativeWorkspaceControl && id.endsWith('/DesktopRemote.tsx')) {
+        const target = 'api.file(connectionId, context, path, offset, snapshot)'
+        if (!source.includes(target)) throw new Error('remote workspace control not found')
+        return source.replace(target, 'window.scry.workspaceReadPage({ cwd: context.cwd, path, offset, snapshot })')
+      }
+      if (negativeVisibilityControl && id.endsWith('/useVisibilityPolling.ts')) {
+        const invalidate = '    invalidate()'
+        if (!source.includes(invalidate)) throw new Error('Visibility negative control target missing')
+        return source.replace(invalidate, '')
+      }
+      if (negativeActivityControl && id.endsWith('/useRemoteCatalogs.ts')) {
+        const poll = 'then(() => {}), 3000, () => {'
+        if (!source.includes(poll)) throw new Error('activity polling control not found')
+        return source.replace(poll, poll.replace('3000', '86400000'))
+      }
+      if (negativeHoverControl && id.endsWith('/remote-location.css')) {
+        const height = 'height: min(360px, 40vh);'
+        if (!source.includes(height)) throw new Error('hover height control not found')
+        return source.replace(height, 'height: auto;')
+      }
+      if (negativeAddressControl && id.endsWith('/HostsView.tsx')) {
+        const save = 'await bridge().updateSsh(connection.id, ssh)'
+        if (!source.includes(save)) throw new Error('address negative control not found')
+        return source.replace(save, save + '; await bridge().connect(connection.id)')
+      }
+      if (negativeMachineControl && id.endsWith('/app-view.tsx')) {
+        const route = "if (view === 'remote' && remoteTarget) { openRemoteLocation(remoteTarget.connectionId, remoteTarget.cwd); return }"
+        if (!source.includes(route)) throw new Error('machine routing negative control not found')
+        return source.replace(route, '')
+      }
+      if (!negativeControl || !id.endsWith('/ChatTurnAssistantView.tsx')) return
+      const guard = "work={remote ? { ...backgroundWork, taskStop: 'unavailable' } : backgroundWork}"
+      if (!source.includes(guard)) throw new Error('negative control guard not found')
+      return source.replace(guard, 'work={backgroundWork}')
+    } }] : [],
+    resolve: { alias: { '@shared': join(root, 'src/shared') } }, define: { 'process.env.NODE_ENV': '"production"' },
+    build: { outDir: temp, emptyOutDir: false, copyPublicDir: false, minify: false,
+      lib: { entry: join(temp, 'fixture.tsx'), formats: ['iife'], name: 'DesktopRemoteFixture', fileName: () => 'fixture.js', cssFileName: 'fixture' } }
+  })
+  await writeFile(join(temp, 'index.html'), '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'; img-src data: blob:"><link rel="stylesheet" href="fixture.css"><div id="root"></div><script src="fixture.js"></script>')
+  await writeFile(join(temp, 'main.cjs'), `
+    const { app, BrowserWindow } = require('electron')
+    const { join } = require('node:path')
+    const root = ${JSON.stringify(temp)}
+    if (process.platform === 'darwin') app.setActivationPolicy('prohibited')
+    app.setPath('userData', join(root, 'userData'))
+    app.setPath('sessionData', join(root, 'sessionData'))
+    app.whenReady().then(async () => {
+      app.dock?.hide()
+      const win = new BrowserWindow({ show: false, width: 1200, height: 900, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } })
+      win.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))
+      win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+      win.webContents.on('console-message', (event) => { if (event.level === 'error') console.error('Renderer:', event.message) })
+      try {
+        await win.loadFile(join(root, 'index.html'))
+        win.webContents.debugger.attach('1.3')
+        const result = await require('./exercise.cjs').exercise(win.webContents, ${nativeUiPointer.toString()}, async name => {
+          await win.webContents.executeJavaScript('Promise.allSettled(document.getAnimations().filter(a => a.effect?.getComputedTiming().endTime < Infinity).map(a => a.finished)).then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))')
+          require('node:fs').writeFileSync(join(root, name + '.png'), (await win.webContents.capturePage()).toPNG())
+        }, { scenario: ${JSON.stringify(scenario)}, structureOnly: ${structureOnly}, parityOnly: ${parityOnly}, settingsOnly: ${settingsOnly}, lifecycleOnly: ${lifecycleOnly}, openingOnly: ${openingOnly}, measureOpening: ${measureOpening}, composerHistoryOnly: ${composerHistoryOnly}, conversationNavigationOnly: ${conversationNavigationOnly}, unknownReceiptOnly: ${unknownReceiptOnly}, negativeUnknownReceiptControl: ${negativeUnknownReceiptControl}, visibilityPollingBaseline: ${visibilityPollingBaseline}, visibilityPollingCheck: ${visibilityPollingCheck} })
+        // Native input and capture have finished. Release their debugger/window
+        // before exit instead of leaving the successful fixture alive on macOS.
+        win.webContents.debugger.detach()
+        win.destroy()
+        process.stdout.write('SCRY_DESKTOP_REMOTE_UI_RESULT=' + JSON.stringify(result) + '\\n', () => { console.log('SCRY_DESKTOP_REMOTE_UI_EXIT_REQUEST'); app.exit(0) })
+      } catch (error) { console.error(error); app.exit(1) }
+    }).catch(error => { console.error(error); app.exit(1) })
+  `)
+  await new Promise((resolve, reject) => {
+    const child = spawn(electron, [join(temp, 'main.cjs'), '--disable-gpu'], {
+      env: { PATH: process.env.PATH, TMPDIR: tmpdir(), HOME: join(temp, 'home'), SCRY_TEST_APP: '1' }, stdio: ['ignore', 'pipe', 'pipe']
+    })
+    let output = ''
+    const startedAt = performance.now()
+    const lifecycle = { resultAtMs: null, exitRequestAtMs: null, exitAtMs: null, closeAtMs: null }
+    let cleanupTimer
+    const timer = setTimeout(() => {
+      failed = true
+      const failure = new Error(`DesktopRemote UI timed out (pid=${child.pid}, fixture=${temp}, lifecycle=${JSON.stringify(lifecycle)}):\\n${output.slice(-8000)}`)
+      console.error(failure.message)
+      cleanupTimer = stopOwnedApp(child).then(() => reject(failure), (error) => { cleanupUnknown = true; reject(new Error(`DesktopRemote cleanup unknown; fixture preserved: ${temp}`, { cause: error })) })
+    // Includes three 3s background catalog transitions plus recorded/unknown/
+    // dispatched run polls. Per-condition deadlines stay unchanged at 7s.
+    }, visibilityPollingBaseline ? 75_000 : 55_000)
+    child.stdout.on('data', (chunk) => {
+      output += chunk.toString()
+      if (lifecycle.resultAtMs === null && output.includes('SCRY_DESKTOP_REMOTE_UI_RESULT=')) lifecycle.resultAtMs = Math.round(performance.now() - startedAt)
+      if (lifecycle.exitRequestAtMs === null && output.includes('SCRY_DESKTOP_REMOTE_UI_EXIT_REQUEST')) lifecycle.exitRequestAtMs = Math.round(performance.now() - startedAt)
+    })
+    child.stderr.on('data', (chunk) => { output += chunk.toString() })
+    child.once('exit', () => { lifecycle.exitAtMs = Math.round(performance.now() - startedAt) })
+    child.once('error', (error) => { clearTimeout(timer); failed = true; reject(error) })
+    child.once('close', (code, signal) => {
+      lifecycle.closeAtMs = Math.round(performance.now() - startedAt)
+      clearTimeout(timer)
+      if (cleanupTimer) return
+      const result = output.match(/^SCRY_DESKTOP_REMOTE_UI_RESULT=(.+)$/m)?.[1]
+      if (code !== 0 || !result) { failed = true; reject(new Error(`DesktopRemote UI smoke failed (${code ?? signal}); fixture=${temp}:\\n${output.slice(-8000)}`)) }
+      else { console.log(result); if (keepArtifacts) console.log('UI artifacts: ' + temp); resolve() }
+    })
+  })
+} catch (error) {
+  failed = true
+  throw error
+} finally {
+  if (!cleanupUnknown && !failed && !keepArtifacts) await rm(temp, { recursive: true, force: true })
 }
-const scenarioSource = [
-  runConversationNavigation, runUnknownReceipt, runStructure, runOpeningControls,
-  runOpeningBench, runSettings, runPostSettings, runComposerHistory, runPostComposer,
-  runLifecycle, runParity, runDefaultStageA, runDefaultStageB, runDefaultStageC
-].map(fn => fn.toString()).join('\n')
-await runDesktopRemoteSmoke({ root, temp, fixtureSource, exercise, scenarioSource, nativeUiPointer, stopOwnedApp, negativeControl, negativeMachineControl, negativeAddressControl, negativeHoverControl, negativeActivityControl, negativeWorkspaceControl, negativePromptControl, negativeSettingsControl, negativeSlashControl, negativeHistorySlashControl, negativeProviderRevisionControl, negativeVisibilityControl, negativeUnknownReceiptControl, unknownReceiptOnly, settingsOnly, parityOnly, composerHistoryOnly, lifecycleOnly, conversationNavigationOnly, openingOnly, structureOnly, measureOpening, visibilityPollingBaseline, visibilityPollingCheck, keepArtifacts })

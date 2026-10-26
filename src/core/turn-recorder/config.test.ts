@@ -21,12 +21,12 @@ describe('discoverRepositories', () => {
         await mkdir(join(path, '.git'), { recursive: true })
         await writeFile(join(path, '.git', 'HEAD'), 'ref: refs/heads/main\n')
       }
-      await expect(discoverRepositories(root, config)).resolves.toEqual([
+      await expect(discoverRepositories(root, config)).resolves.toEqual({ maxDepth: 2, depthLimitedDirectories: 0, repositories: [
         root,
         join(root, 'group', 'service-detail'),
         join(root, 'plugin-commerce-app'),
         join(root, 'service-platform')
-      ])
+      ] })
     } finally {
       await rm(root, { recursive: true, force: true })
     }

@@ -9,6 +9,7 @@
   "files": [
     "dist",
     "integrations",
+    "docs",
     "README.md"
   ],
   "engines": {

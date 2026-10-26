@@ -1,40 +1,28 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { applyHookEnvironment } from './commit-environment.js'
+import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { chmod, mkdir, rm, stat } from 'node:fs/promises'
-import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { tmpdir } from 'node:os'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
-import type { ProviderId } from '../../shared/provider.js'
-import { drainRecorderDelivery, handleRecorderHook, recoverRecorder, recorderEnablement } from './recorder.js'
-import { appendRotatingLog, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
+import { rm, mkdir, chmod } from 'node:fs/promises'
+import { type Server, createServer } from 'node:http'
+import { join, dirname } from 'node:path'
+import { type ProviderId } from '../../shared/provider.js'
+import { recorderEnablement, recoverRecorder, handleRecorderHook, drainRecorderDelivery } from './recorder.js'
+import { withDirectoryLock, readJson, appendRotatingLog, writeJsonAtomic, writeTextAtomic } from './io.js'
+import { hasSymlinkComponent } from './config.js'
 import { recorderHasOpenTurn } from './runtime-state.js'
 import { RECORDER_VERSION } from './store.js'
+import { type RecorderDaemonStatus, recorderDaemonStatus, daemonRequest, recorderSocketPath, PROTOCOL_VERSION, writeJson, header, readJsonBody } from './daemon-transport.js'
+import { ownerPath, type DaemonOwner, processAlive, stopOwner, legacyStartingPath, waitForOwner, removeOwnedMarker, waitForProcessExit, STOP_WAIT_MS, pathExists } from './daemon-owner.js'
+export { PROTOCOL_VERSION, type RecorderDaemonStatus, recorderSocketPath, recorderDaemonStatus, sendRecorderDaemonHook } from './daemon-transport.js'
 
-export const PROTOCOL_VERSION = '1'
 const DEFAULT_IDLE_MS = 30 * 60 * 1_000
 const MAX_IDLE_MS = 24 * 60 * 60 * 1_000
 const RECOVERY_POLL_MS = 1_000
 const MAX_RECOVERY_POLL_MS = 15_000
-const MAX_BODY_BYTES = 8 * 1024 * 1024
-const MAX_SOCKET_BYTES = 100
 const STARTING_TTL_MS = 30_000
-const STOP_WAIT_MS = 1_000
 const OWNER_WAIT_MS = 15_000
 const READY_WAIT_MS = 15_000
 const PROVIDERS = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi'])
 const OWNER_TOKEN_ENV = 'SCRY_RECORDER_OWNER_TOKEN'
-
-export interface RecorderDaemonStatus {
-  running: boolean
-  protocol: string
-  recorderVersion?: string
-  pid?: number
-  startedAt?: string
-  requestCount?: number
-  errorCount?: number
-  lastRequestAt?: string
-  socketPath: string
-}
 
 export interface RecorderDaemonHandle {
   socketPath: string
@@ -42,200 +30,10 @@ export interface RecorderDaemonHandle {
   close(): Promise<void>
 }
 
-interface DaemonRequestResult {
-  statusCode: number
-  body: Record<string, unknown>
-}
-
-interface DaemonOwner {
-  schemaVersion: 1
-  pid: number
-  instanceId: string
-  state: 'starting' | 'running'
-  createdAt: number
-  recorderVersion: string
-  socketPath: string
-}
-
 function positiveInt(value: string | undefined, fallback: number, min: number, max: number): number {
   if (!value || !/^\d+$/.test(value)) return fallback
   const parsed = Number(value)
   return Number.isSafeInteger(parsed) && parsed > 0 ? Math.max(min, Math.min(max, parsed)) : fallback
-}
-
-function processAlive(pid: number | undefined): boolean {
-  if (!pid || !Number.isInteger(pid) || pid <= 0) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM'
-  }
-}
-
-function ownerPath(socketPath: string): string {
-  return `${socketPath}.owner.json`
-}
-
-function legacyStartingPath(socketPath: string): string {
-  return join(dirname(socketPath), 'daemon-starting.json')
-}
-
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await stat(path)
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function waitForProcessExit(pid: number, deadlineMs: number): Promise<boolean> {
-  const deadline = Date.now() + deadlineMs
-  while (processAlive(pid) && Date.now() < deadline) {
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 25))
-  }
-  return !processAlive(pid)
-}
-
-async function waitForOwner(path: string, instanceId: string, deadlineMs: number): Promise<DaemonOwner | null> {
-  const deadline = Date.now() + deadlineMs
-  do {
-    const owner = await readJson<DaemonOwner>(path)
-    if (owner?.instanceId === instanceId && processAlive(owner.pid)) return owner
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 10))
-  } while (Date.now() < deadline)
-  return null
-}
-
-async function removeOwnedMarker(path: string, instanceId: string): Promise<void> {
-  const current = await readJson<DaemonOwner>(path)
-  if (current?.instanceId === instanceId) await rm(path, { force: true })
-}
-
-async function stopOwner(owner: DaemonOwner): Promise<void> {
-  if (!processAlive(owner.pid)) return
-  try { process.kill(owner.pid, 'SIGTERM') } catch { return }
-  if (await waitForProcessExit(owner.pid, STOP_WAIT_MS)) return
-  try { process.kill(owner.pid, 'SIGKILL') } catch { return }
-  await waitForProcessExit(owner.pid, STOP_WAIT_MS)
-}
-
-export function recorderSocketPath(workspace: string, env: NodeJS.ProcessEnv = process.env): string {
-  const configured = env.SCRY_RECORDER_SOCKET?.trim()
-  const socketPath = configured
-    ? (isAbsolute(configured) ? configured : resolve(workspace, configured))
-    : join(resolve(workspace), '.scry', 'recorder-v1.sock')
-  if (Buffer.byteLength(socketPath) <= MAX_SOCKET_BYTES) return socketPath
-  // Hash the requested endpoint, not just cwd: explicit endpoints in one workspace stay distinct.
-  // A long TMPDIR must not recreate the original sockaddr_un overflow.
-  const digest = createHash('sha256').update(`${resolve(workspace)}\0${socketPath}`).digest('hex').slice(0, 32)
-  const name = `scry-${process.getuid?.() ?? 'user'}-${digest}.sock`
-  const temporaryPath = join(tmpdir(), name)
-  return Buffer.byteLength(temporaryPath) <= MAX_SOCKET_BYTES ? temporaryPath : join('/tmp', name)
-}
-
-function writeJson(response: ServerResponse, statusCode: number, value: unknown): void {
-  const body = `${JSON.stringify(value)}\n`
-  response.writeHead(statusCode, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) })
-  response.end(body)
-}
-
-async function readJsonBody(request: IncomingMessage): Promise<Record<string, unknown>> {
-  const chunks: Buffer[] = []
-  let total = 0
-  for await (const chunk of request) {
-    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk))
-    total += bytes.length
-    if (total > MAX_BODY_BYTES) throw Object.assign(new Error('request body exceeds 8 MiB'), { statusCode: 413 })
-    chunks.push(bytes)
-  }
-  let value: unknown
-  try {
-    value = JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown
-  } catch {
-    throw Object.assign(new Error('hook payload must be valid JSON'), { statusCode: 400 })
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw Object.assign(new Error('hook payload must be a JSON object'), { statusCode: 400 })
-  }
-  return value as Record<string, unknown>
-}
-
-function header(request: IncomingMessage, name: string): string | undefined {
-  const value = request.headers[name]
-  return Array.isArray(value) ? value[0] : value
-}
-
-async function daemonRequest(
-  socketPath: string,
-  options: { method: 'GET' | 'POST'; path: string; headers?: Record<string, string>; body?: string; timeoutMs?: number }
-): Promise<DaemonRequestResult> {
-  return new Promise((resolvePromise, reject) => {
-    const request = httpRequest({
-      socketPath,
-      method: options.method,
-      path: options.path,
-      headers: {
-        ...(options.body ? { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(options.body)) } : {}),
-        ...options.headers
-      }
-    }, (response) => {
-      const chunks: Buffer[] = []
-      response.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk))))
-      response.on('end', () => {
-        const source = Buffer.concat(chunks).toString('utf8')
-        let body: Record<string, unknown> = {}
-        try {
-          body = source.trim() ? JSON.parse(source) as Record<string, unknown> : {}
-        } catch {
-          body = { error: source }
-        }
-        resolvePromise({ statusCode: response.statusCode ?? 500, body })
-      })
-    })
-    request.setTimeout(options.timeoutMs ?? 500, () => request.destroy(new Error('recorder daemon request timed out')))
-    request.on('error', reject)
-    if (options.body) request.write(options.body)
-    request.end()
-  })
-}
-
-export async function recorderDaemonStatus(workspace: string, env: NodeJS.ProcessEnv = process.env): Promise<RecorderDaemonStatus> {
-  const socketPath = recorderSocketPath(workspace, env)
-  try {
-    const response = await daemonRequest(socketPath, { method: 'GET', path: '/v1/status', timeoutMs: 500 })
-    if (response.statusCode !== 200 || response.body.protocol !== PROTOCOL_VERSION) return { running: false, protocol: PROTOCOL_VERSION, socketPath }
-    return { ...response.body, running: true, protocol: PROTOCOL_VERSION, socketPath } as RecorderDaemonStatus
-  } catch {
-    return { running: false, protocol: PROTOCOL_VERSION, socketPath }
-  }
-}
-
-export async function sendRecorderDaemonHook(args: {
-  workspace: string
-  provider: ProviderId
-  event: string
-  payload: Record<string, unknown>
-  timeoutMs?: number
-  env?: NodeJS.ProcessEnv
-}): Promise<Record<string, unknown>> {
-  const socketPath = recorderSocketPath(args.workspace, args.env)
-  const response = await daemonRequest(socketPath, {
-    method: 'POST',
-    path: '/v1/hook',
-    timeoutMs: args.timeoutMs ?? 5_000,
-    headers: {
-      'x-scry-protocol': PROTOCOL_VERSION,
-      'x-scry-provider': args.provider,
-      'x-scry-event': args.event
-    },
-    body: JSON.stringify(args.payload)
-  })
-  if (response.statusCode < 200 || response.statusCode >= 300 || response.body.ok !== true) {
-    throw new Error(`recorder daemon rejected hook (${response.statusCode}): ${String(response.body.error ?? 'missing ACK')}`)
-  }
-  return response.body
 }
 
 async function waitForDaemon(workspace: string, env: NodeJS.ProcessEnv, deadlineMs: number): Promise<RecorderDaemonStatus | null> {
@@ -401,9 +199,14 @@ export async function listenRecorderDaemon(args: {
 
   const runRecovery = (): Promise<{ recovered: number; pending: number }> => {
     if (recoveryInFlight) return recoveryInFlight
-    recoveryInFlight = Promise.resolve(args.recoveryProbe?.())
+    recoveryInFlight = Promise.resolve()
+      .then(() => args.recoveryProbe?.())
       .then(() => recoverRecorder(enablement.workspaceRoot, env))
-      .catch(() => ({ recovered: 0, pending: 0 }))
+      .catch(async (error) => {
+        const message = error instanceof Error ? error.message : String(error)
+        await appendRotatingLog(daemonLog, `${new Date().toISOString()} ERROR recovery: ${message}`).catch(() => undefined)
+        return { recovered: 0, pending: 0 }
+      })
       .finally(() => { recoveryInFlight = undefined })
     return recoveryInFlight
   }
@@ -529,9 +332,10 @@ export async function listenRecorderDaemon(args: {
         writeJson(response, 400, { ok: false, error: 'invalid provider or event' })
         return
       }
-      const payload = await readJsonBody(request)
+      const { payload, env: requestEnv } = await readJsonBody(request)
       const result = await handleRecorderHook({
-        provider, event, workspace: enablement.workspaceRoot, payload, env, deferDelivery: true
+        provider, event, workspace: enablement.workspaceRoot, payload,
+        env: applyHookEnvironment(env, requestEnv), deferDelivery: true
       })
       scheduleRecovery(true)
       writeJson(response, 200, { ok: true, status: result.status })
@@ -578,7 +382,14 @@ export async function listenRecorderDaemon(args: {
     })
     await chmod(socketPath, 0o600)
     await writeJsonAtomic(markerPath, { ...owner, state: 'running' }, { sync: false })
+    // The shell cannot hash a long endpoint without starting another process. Publish only
+    // after listen succeeds; a stale hint is harmless because the shell checks that it is a socket.
+    if (await hasSymlinkComponent(enablement.workspaceRoot, '.scry')) {
+      throw new Error('cannot publish recorder socket through a symlinked .scry directory')
+    }
+    await writeTextAtomic(join(enablement.workspaceRoot, '.scry', 'recorder-socket-path'), `${socketPath}\n`)
   } catch (error) {
+    if (server.listening) await close()
     await removeOwnedMarker(markerPath, instanceId)
     throw error
   }
