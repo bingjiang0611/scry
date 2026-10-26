@@ -14,6 +14,7 @@ struct ChatView: View {
   @EnvironmentObject var model: AppModel
   @Environment(RemoteRunStore.self) var run
   @State private var showFiles = false
+  @State private var showOverview = false
   @State private var latestReadRequest = 0
   @State private var confirmStop = false
   private var projectCwd: String? { run.activeSessionIdentity?.cwd ?? run.chosen?.path }
@@ -52,6 +53,7 @@ struct ChatView: View {
     .sheet(isPresented: $showFiles) {
       if let projectCwd { WorkspaceBrowserView(cwd: projectCwd).id(projectCwd) }
     }
+    .sheet(isPresented: $showOverview) { overview }
     .macLocalLinks(cwd: projectCwd)
     .confirmationDialog(ConversationCopy.stopTitle, isPresented: $confirmStop, titleVisibility: .visible) {
       Button(ConversationCopy.stop, role: .destructive) { run.stopRun() }
@@ -74,15 +76,26 @@ struct ChatView: View {
     RemoteHeader(title: completedTurns.first?.prompt ?? run.prompt ?? ConnectionCopy.session,
                  subtitle: sessionContext, providerId: run.activeSessionIdentity?.providerId ?? run.chosenProvider?.id, titleLineLimit: 2,
                  backAction: { model.goBack() }) {
-      MoreMenu {
-        Button { showFiles = true } label: {
-          Label(ConnectionCopy.projectFilesAndDiff, systemImage: Symbol.folder)
-        }.disabled(projectCwd == nil)
-        // Leaving keeps an unsent message sending and a run running on the Mac.
-        Button { if model.targetCoordinator.beginNewTask(scope: model.targetCoordinator.selectedScope) { model.route = .newSession } } label: { Label(ConversationCopy.newTask, systemImage: Symbol.compose) }
-        Button { model.route = .settings } label: { Label(ConversationCopy.settings, systemImage: Symbol.gear) }
+      HStack(spacing: 0) {
+        CircleButton(symbol: "sidebar.right", label: SheetCopy.overview) { showOverview = true }
+          .accessibilityIdentifier("session-overview")
+        MoreMenu {
+          Button { showFiles = true } label: {
+            Label(ConnectionCopy.projectFilesAndDiff, systemImage: Symbol.folder)
+          }.disabled(projectCwd == nil)
+          // Leaving keeps an unsent message sending and a run running on the Mac.
+          Button { if model.targetCoordinator.beginNewTask(scope: model.targetCoordinator.selectedScope) { model.route = .newSession } } label: { Label(ConversationCopy.newTask, systemImage: Symbol.compose) }
+          Button { model.route = .settings } label: { Label(ConversationCopy.settings, systemImage: Symbol.gear) }
+        }
       }
     }
+  }
+
+  private var overview: some View {
+    SessionOverviewSheet(externalSessionId: run.activeSessionIdentity?.externalSessionId ?? run.liveExternalSessionId,
+      provider: (run.activeSessionIdentity?.providerId ?? run.chosenProvider?.id).map(ConnectionCopy.providerLabel),
+      host: (run.targetScope ?? model.targetCoordinator.selectedScope).label, cwd: projectCwd,
+      turns: completedTurns.map(SessionOverviewTurn.completed) + (run.prompt != nil ? [.focused(run)] : []))
   }
 
   private var sessionContext: String {
@@ -151,135 +164,4 @@ struct ChatView: View {
     .background(Palette.main)
   }
 
-}
-
-struct RemoteQuestionSheet: View {
-  let request: G0Transport.RunQuestionRequest
-  let submitting: Bool
-  let error: String?
-  let onAnswer: ([String: String]) -> Void
-  let onCancel: () -> Void
-
-  @State private var answers: [String: String]
-  @State private var selections: [String: Set<String>]
-
-  init(request: G0Transport.RunQuestionRequest, submitting: Bool, error: String?,
-       onAnswer: @escaping ([String: String]) -> Void, onCancel: @escaping () -> Void) {
-    self.request = request
-    self.submitting = submitting
-    self.error = error
-    self.onAnswer = onAnswer
-    self.onCancel = onCancel
-    _answers = State(initialValue: [:])
-    _selections = State(initialValue: [:])
-  }
-
-  private var complete: Bool {
-    request.questions.allSatisfy { question in
-      if question.multiSelect { return !(selections[question.question] ?? []).isEmpty }
-      return !(answers[question.question] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-  }
-
-  private var resolvedAnswers: [String: String] {
-    var resolved = answers
-    for question in request.questions where question.multiSelect {
-      let selected = selections[question.question] ?? []
-      resolved[question.question] = question.options.map(\.label).filter(selected.contains).joined(separator: ", ")
-    }
-    return resolved
-  }
-
-  var body: some View {
-    NavigationStack {
-      ScrollView {
-        VStack(alignment: .leading, spacing: 20) {
-          Text(request.questionKind == "permission" ? "Provider 请求授权" : "Provider 需要输入")
-            .font(.headline)
-          ForEach(Array(request.questions.enumerated()), id: \.offset) { _, question in
-            VStack(alignment: .leading, spacing: 10) {
-              if !question.header.isEmpty && !question.question.contains(question.header) {
-                Text(question.header).font(.caption.weight(.semibold)).foregroundStyle(Palette.muted)
-              }
-              Text(question.question).font(.body.weight(.medium))
-              if question.inputMode != nil {
-                if question.inputMode == "multiline" {
-                  TextEditor(text: textBinding(question.question))
-                    .frame(minHeight: 120).padding(8)
-                    .background(Palette.canvas).clipShape(RoundedRectangle(cornerRadius: 10))
-                } else {
-                  TextField("请输入", text: textBinding(question.question))
-                    .textFieldStyle(.roundedBorder)
-                }
-              } else if question.multiSelect {
-                ForEach(question.options, id: \.label) { option in
-                  Button {
-                    var selected = selections[question.question] ?? []
-                    if selected.contains(option.label) { selected.remove(option.label) } else { selected.insert(option.label) }
-                    selections[question.question] = selected
-                  } label: {
-                    optionRow(option, selected: (selections[question.question] ?? []).contains(option.label),
-                              symbol: (selections[question.question] ?? []).contains(option.label) ? "checkmark.square.fill" : "square")
-                  }
-                  .buttonStyle(.plain)
-                }
-              } else {
-                // Every option visible at once, one tap to choose (as on the Mac).
-                ForEach(question.options, id: \.label) { option in
-                  Button { answers[question.question] = option.label } label: {
-                    optionRow(option, selected: answers[question.question] == option.label,
-                              symbol: answers[question.question] == option.label ? "largecircle.fill.circle" : "circle")
-                  }
-                  .buttonStyle(.plain)
-                  .accessibilityAddTraits(answers[question.question] == option.label ? .isSelected : [])
-                }
-              }
-            }
-          }
-          if let error { Text(error).font(.caption).foregroundStyle(Palette.negative) }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(20)
-      }
-      .navigationTitle("需要你的决定")
-      .toolbar {
-        ToolbarItem(placement: .cancellationAction) {
-          Button("取消请求", action: onCancel).disabled(submitting)
-        }
-        ToolbarItem(placement: .confirmationAction) {
-          Button(submitting ? "提交中…" : "提交") { onAnswer(resolvedAnswers) }
-            .disabled(submitting || !complete)
-        }
-      }
-    }
-  }
-
-  private func textBinding(_ key: String) -> Binding<String> {
-    Binding(get: { answers[key] ?? "" }, set: { answers[key] = $0 })
-  }
-
-  private func optionLabel(_ option: G0Transport.RunQuestionOption) -> some View {
-    VStack(alignment: .leading, spacing: 3) {
-      Text(option.label).foregroundStyle(Palette.ink)
-      if !option.description.isEmpty {
-        Text(option.description).font(.caption).foregroundStyle(Palette.muted)
-      }
-      if let preview = option.preview { Text(preview).font(.caption.monospaced()).foregroundStyle(Palette.muted) }
-    }
-  }
-
-  private func optionRow(_ option: G0Transport.RunQuestionOption, selected: Bool, symbol: String) -> some View {
-    HStack(alignment: .top, spacing: 12) {
-      Image(systemName: symbol).font(.system(size: 18))
-        .foregroundStyle(selected ? Palette.blue : Palette.muted).padding(.top, 1)
-      optionLabel(option)
-      Spacer(minLength: 0)
-    }
-    .padding(.horizontal, 14).padding(.vertical, 12)
-    .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-    .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-      .stroke(selected ? Palette.blue : Palette.line, lineWidth: selected ? 1.5 : 0.5))
-    .contentShape(Rectangle())
-  }
 }

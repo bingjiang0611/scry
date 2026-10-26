@@ -36,6 +36,7 @@ struct MessageComposer: View {
   var onRefreshSlashCommands: (() -> Void)?
   let onSend: () -> Void
 
+  @State private var showModelEffort = false
   @State private var showPhotos = false
   @State private var showFiles = false
   @State private var photoItems: [PhotosPickerItem] = []
@@ -43,6 +44,7 @@ struct MessageComposer: View {
   @State private var previewing: AttachmentPreviewItem?
   @FocusState private var inputFocused: Bool
   @Environment(\.colorScheme) private var colorScheme
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private let maxCount = DraftAttachment.maxCount
   private let maxEachBytes = DraftAttachment.maxEachBytes
@@ -240,32 +242,7 @@ struct MessageComposer: View {
   }
 
   private var modelEffortControl: some View {
-    Menu {
-      if !modelOptions.isEmpty || selectedModelId != nil {
-        Section(ConnectionCopy.model) {
-          Button { onModel?(nil) } label: {
-            Label(ConnectionCopy.automaticModel, systemImage: selectedModelId == nil ? Symbol.check : "wand.and.stars")
-          }
-          ForEach(modelOptions, id: \.selectionId) { option in
-            Button { onModel?(option.selectionId) } label: {
-              Label(option.label, systemImage: selectedModelId == option.selectionId ? Symbol.check : "cpu")
-            }
-          }
-        }
-      }
-      if !effortOptions.isEmpty || selectedEffort != nil {
-        Section(ConnectionCopy.reasoningEffort) {
-          Button { onEffort?(nil) } label: {
-            Label(ConnectionCopy.defaultEffort, systemImage: selectedEffort == nil ? Symbol.check : "brain")
-          }
-          ForEach(effortOptions, id: \.id) { option in
-            Button { onEffort?(option.id) } label: {
-              Label(option.label, systemImage: selectedEffort == option.id ? Symbol.check : "brain")
-            }
-          }
-        }
-      }
-    } label: {
+    Button { showModelEffort = true } label: {
       HStack(spacing: 4) {
         Text(modelLabel).lineLimit(1)
         if !effortOptions.isEmpty || selectedEffort != nil { Text(effortLabel).foregroundStyle(Palette.dim2) }
@@ -273,9 +250,17 @@ struct MessageComposer: View {
       }
       .font(Typography.meta).foregroundStyle(Palette.fg)
       .frame(minHeight: 44).contentShape(Rectangle())
+      .background(showModelEffort ? Palette.hover : .clear, in: RoundedRectangle(cornerRadius: 10))
+      .animation(Motion.animation(.select, reduceMotion: reduceMotion), value: showModelEffort)
     }
     .buttonStyle(.plain).disabled(disabled)
     .accessibilityLabel(ConnectionCopy.modelAndEffort(modelLabel, effortLabel))
+    .accessibilityIdentifier("model-effort-control")
+    .popover(isPresented: $showModelEffort) {
+      ModelEffortPopover(modelOptions: modelOptions, selectedModelId: selectedModelId,
+                         effortOptions: effortOptions, selectedEffort: selectedEffort,
+                         onModel: onModel, onEffort: onEffort)
+    }
   }
 
   private func controlCapsule(_ label: String, symbol: String) -> some View {

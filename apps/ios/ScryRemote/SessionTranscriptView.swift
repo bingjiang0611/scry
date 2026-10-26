@@ -8,6 +8,7 @@ struct SessionTranscriptView: View {
   @EnvironmentObject var model: AppModel
   @Environment(RemoteRunStore.self) var run
   @State private var showFiles = false
+  @State private var showOverview = false
   @State private var showHistoryDetails = false
   @State var olderReadRequest = 0
   @State private var latestReadRequest = 0
@@ -94,6 +95,7 @@ struct SessionTranscriptView: View {
       HistoryEvidenceDetails(status: historyStatus, lastChecked: run.historyFetchedAt,
                              refreshError: run.historyRefreshError, storageNotice: run.historyStorageNotice)
     }
+    .sheet(isPresented: $showOverview) { overview }
     .macLocalLinks(cwd: session?.cwd)
     .onChange(of: otherLiveQuestion?.questionId, initial: true) { _, id in showLiveQuestion = id != nil }
     .confirmationDialog("停止这次运行？",
@@ -110,7 +112,8 @@ struct SessionTranscriptView: View {
     }
     .sheet(isPresented: $showLiveQuestion) {
       if let live = otherLive, let request = otherLiveQuestion {
-        RemoteQuestionSheet(request: request, submitting: run.liveActionRunId == live.runId, error: run.liveActionError,
+        RemoteQuestionSheet(request: request, subtitle: SheetCopy.context(title: session?.label, provider: providerName),
+          submitting: run.liveActionRunId == live.runId, error: run.liveActionError,
           onAnswer: { run.answerLiveQuestion(live, request: request, answers: $0) },
           onCancel: { run.answerLiveQuestion(live, request: request, answers: [:], cancel: true) })
           .id(run.questionIdentity(request))
@@ -158,26 +161,30 @@ struct SessionTranscriptView: View {
     RemoteHeader(title: session?.label.isEmpty == false ? session!.label : ConnectionCopy.session,
                  subtitle: headerSubtitle, providerId: session?.providerId, titleLineLimit: 2,
                  backAction: { model.goBack() }) {
-      MoreMenu(label: ConnectionCopy.moreWithStatus(historyStatus)) {
-        Button { showFiles = true } label: {
-          Label(ConnectionCopy.projectFilesAndDiff, systemImage: Symbol.folder)
-        }.disabled(session == nil)
-        Section(ConnectionCopy.historyStatus) {
-          Button(ConnectionCopy.details) { showHistoryDetails = true }
-          Text(historyStatus)
-          if let date = run.historyFetchedAt { Text("上次核对 \(date.formatted(date: .abbreviated, time: .shortened))") }
-          if let reason = run.historyRefreshError { Text(reason) }
-          if let notice = run.historyStorageNotice { Text(notice) }
-        }
-        if let s = session {
-          Button { run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true, agentProfileId: s.agentProfileId) } label: {
-            Label(ConnectionCopy.historyRefresh, systemImage: "arrow.clockwise")
+      HStack(spacing: 0) {
+        CircleButton(symbol: "sidebar.right", label: SheetCopy.overview) { showOverview = true }
+          .accessibilityIdentifier("session-overview")
+        MoreMenu(label: ConnectionCopy.moreWithStatus(historyStatus)) {
+          Button { showFiles = true } label: {
+            Label(ConnectionCopy.projectFilesAndDiff, systemImage: Symbol.folder)
+          }.disabled(session == nil)
+          Section(ConnectionCopy.historyStatus) {
+            Button(ConnectionCopy.details) { showHistoryDetails = true }
+            Text(historyStatus)
+            if let date = run.historyFetchedAt { Text(SheetCopy.lastChecked(date)) }
+            if let reason = run.historyRefreshError { Text(reason) }
+            if let notice = run.historyStorageNotice { Text(notice) }
           }
+          if let s = session {
+            Button { run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true, agentProfileId: s.agentProfileId) } label: {
+              Label(ConnectionCopy.historyRefresh, systemImage: "arrow.clockwise")
+            }
+          }
+          if !readOnly {
+            Button { if model.targetCoordinator.beginNewTask(scope: model.targetCoordinator.selectedScope) { model.route = .newSession } } label: { Label(ConversationCopy.newTask, systemImage: Symbol.compose) }
+          }
+          Button { model.route = .settings } label: { Label(ConversationCopy.settings, systemImage: Symbol.gear) }
         }
-        if !readOnly {
-          Button { if model.targetCoordinator.beginNewTask(scope: model.targetCoordinator.selectedScope) { model.route = .newSession } } label: { Label("新任务", systemImage: Symbol.compose) }
-        }
-        Button { model.route = .settings } label: { Label("设置", systemImage: Symbol.gear) }
       }
     }
   }

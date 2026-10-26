@@ -173,7 +173,8 @@ final class ConversationUITests: XCTestCase {
     let model = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "模型 ")).firstMatch
     XCTAssertGreaterThanOrEqual(model.frame.height, 44)
     model.tap()
-    app.buttons["GPT-5.6"].tap()
+    app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "model-option-", "GPT-5.6")).firstMatch.tap()
+    app.otherElements["PopoverDismissRegion"].tap()
     XCTAssertTrue((input.value as? String)?.contains("Keep evidence visible") == true)
     capture("composer-model-selected")
   }
@@ -225,7 +226,7 @@ final class ConversationUITests: XCTestCase {
 
   func testQuestionStripReopensTheSheet() {
     launch("transcript", extra: ["-uiMockRunning", "-uiMockQuestion"])
-    let sheetTitle = app.staticTexts["需要你的决定"]
+    let sheetTitle = app.staticTexts["需要你决定"]
     XCTAssertTrue(sheetTitle.waitForExistence(timeout: 10))
     app.swipeDown(velocity: .fast)
     let strip = app.descendants(matching: .any)["session-runtime-status"]

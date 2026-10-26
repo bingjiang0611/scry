@@ -68,8 +68,10 @@ final class HomeUITests: XCTestCase {
     XCTAssertTrue(session.exists)
     XCTAssertTrue(session.label.contains("Codex"))
     session.tap()
-    XCTAssertTrue(app.buttons["项目文件与 Diff"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.buttons["session-overview"].waitForExistence(timeout: 10))
     XCTAssertTrue(app.descendants(matching: .any)["message-input"].exists)
+    app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "更多选项")).firstMatch.tap()
+    XCTAssertTrue(app.buttons["项目文件与 Diff"].waitForExistence(timeout: 5))
   }
 
   func testActivityOpensLiveSessionWithoutInventingCompletedSection() {
@@ -78,7 +80,9 @@ final class HomeUITests: XCTestCase {
     XCTAssertTrue(app.staticTexts["进行中"].exists)
     XCTAssertFalse(app.staticTexts["已完成"].exists)
     row("重构远程会话列表").tap()
-    XCTAssertTrue(app.buttons["项目文件与 Diff"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.buttons["session-overview"].waitForExistence(timeout: 10))
+    app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "更多选项")).firstMatch.tap()
+    XCTAssertTrue(app.buttons["项目文件与 Diff"].waitForExistence(timeout: 5))
   }
 
   func testNewTaskInProjectKeepsSelectedProjectAndClearsDraft() {
@@ -184,9 +188,198 @@ final class HomeUITests: XCTestCase {
     XCTAssertTrue(app.keyboards.firstMatch.exists)
     app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "重构远程会话列表")).firstMatch.tap()
     XCTAssertTrue(app.descendants(matching: .any)["message-input"].waitForExistence(timeout: 10))
+    app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "更多选项")).firstMatch.tap()
     app.buttons["项目文件与 Diff"].tap()
     XCTAssertTrue(app.buttons["完成"].waitForExistence(timeout: 10))
     capture("search-keyboard-navigation-responsive")
   }
 
+}
+
+// Sheet flows share the same isolated app fixture as the home entry points.
+final class SheetUITests: XCTestCase {
+  private var app: XCUIApplication!
+  override func setUp() {
+    super.setUp()
+    continueAfterFailure = false
+    app = XCUIApplication()
+  }
+  private func question(_ mode: String) {
+    app.launchArguments = ["-uiPreview", "-uiSheetFixture", mode]
+    app.launch()
+    XCTAssertTrue(app.buttons["question-submit"].waitForExistence(timeout: 10))
+  }
+  private func option(_ label: String) -> XCUIElement {
+    app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", label)).firstMatch
+  }
+  private func launch(_ route: String, extra: [String] = []) {
+    app.launchArguments = ["-uiPreview", "-connected", "-uiMockData", "-route", route] + extra
+    app.launch()
+    XCTAssertTrue(app.descendants(matching: .any)["message-input"].waitForExistence(timeout: 10))
+  }
+  private func openModel() {
+    app.buttons["model-effort-control"].tap()
+    XCTAssertTrue(app.staticTexts["用于下一轮"].waitForExistence(timeout: 5))
+  }
+
+  func testSingleQuestionCollectsOnlyTheSelectedLabel() {
+    question("single")
+    XCTAssertFalse(app.buttons["question-submit"].isEnabled)
+    option("补充测试").tap()
+    XCTAssertTrue(option("补充测试").isSelected)
+    XCTAssertTrue(app.buttons["question-submit"].isEnabled)
+    XCTAssertGreaterThanOrEqual(app.buttons["question-submit"].frame.height, 48)
+    XCTAssertEqual(app.textViews.count, 0)
+    app.buttons["question-submit"].tap()
+    XCTAssertTrue(app.staticTexts["fixture-result"].waitForExistence(timeout: 5))
+    XCTAssertEqual(app.staticTexts["fixture-result"].label, "{\"这次改动需要包含哪些工作？\":\"补充测试\"}")
+    XCTAssertEqual(app.staticTexts["fixture-counts"].label, "回答：1 · 取消：0")
+  }
+
+  func testMultipleQuestionPreservesOptionOrderAndDeselection() {
+    question("multi")
+    option("检查兼容性").tap()
+    option("补充测试").tap()
+    option("更新文档").tap()
+    option("更新文档").tap()
+    XCTAssertTrue(option("检查兼容性").isSelected)
+    XCTAssertFalse(option("更新文档").isSelected)
+    app.buttons["question-submit"].tap()
+    XCTAssertTrue(app.staticTexts["fixture-result"].waitForExistence(timeout: 5))
+    XCTAssertEqual(app.staticTexts["fixture-result"].label, "{\"这次改动需要包含哪些工作？\":\"补充测试, 检查兼容性\"}")
+  }
+
+  func testTextQuestionKeepsWhitespaceValidationAndActualText() {
+    question("text")
+    let input = app.textViews["question-input-0"]
+    XCTAssertTrue(input.exists)
+    input.tap(); input.typeText(" \n ")
+    XCTAssertFalse(app.buttons["question-submit"].isEnabled)
+    input.typeText("保留现有行为")
+    XCTAssertTrue(app.buttons["question-submit"].isEnabled)
+    app.buttons["question-submit"].tap()
+    XCTAssertTrue(app.staticTexts["fixture-result"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.staticTexts["fixture-result"].label.contains("保留现有行为"))
+    XCTAssertEqual(app.staticTexts["fixture-counts"].label, "回答：1 · 取消：0")
+  }
+
+  func testCloseOnlyFoldsWhileCancelInvokesTheCancelCallback() {
+    question("single")
+    app.buttons["sheet-close"].tap()
+    XCTAssertTrue(app.staticTexts["fixture-counts"].waitForExistence(timeout: 5))
+    XCTAssertEqual(app.staticTexts["fixture-counts"].label, "回答：0 · 取消：0")
+    app.buttons["fixture-reopen"].tap()
+    app.buttons["question-cancel"].tap()
+    XCTAssertTrue(app.staticTexts["fixture-counts"].waitForExistence(timeout: 5))
+    XCTAssertEqual(app.staticTexts["fixture-counts"].label, "回答：0 · 取消：1")
+  }
+
+  func testPermissionHasNoExtraFreeTextAndSubmitsTheRealChoice() {
+    question("permission")
+    XCTAssertTrue(app.staticTexts["Provider 请求授权"].exists)
+    XCTAssertEqual(app.textViews.count, 0)
+    XCTAssertEqual(app.textFields.count, 0)
+    option("允许这次").tap()
+    app.buttons["question-submit"].tap()
+    XCTAssertTrue(app.staticTexts["fixture-result"].waitForExistence(timeout: 5))
+    XCTAssertEqual(app.staticTexts["fixture-result"].label, "{\"允许在当前工作区执行本地检查吗？\":\"允许这次\"}")
+  }
+
+  func testSubmittingDisablesBothActionsButCanStillFold() {
+    question("submitting")
+    XCTAssertEqual(app.buttons["question-submit"].label, "提交中…")
+    XCTAssertFalse(app.buttons["question-submit"].isEnabled)
+    XCTAssertFalse(app.buttons["question-cancel"].isEnabled)
+    app.buttons["sheet-close"].tap()
+    XCTAssertTrue(app.staticTexts["fixture-counts"].waitForExistence(timeout: 5))
+    XCTAssertEqual(app.staticTexts["fixture-counts"].label, "回答：0 · 取消：0")
+  }
+
+  func testBothConversationRoutesOpenOverviewAndTheExistingFiles() {
+    for route in ["chat", "transcript"] {
+      launch(route, extra: ["-uiWorkspaceFixture"])
+      app.buttons["session-overview"].tap()
+      XCTAssertTrue(app.staticTexts["总览"].waitForExistence(timeout: 5))
+      XCTAssertTrue(app.staticTexts["上下文占用与累计用量：Mac 未提供"].exists)
+      XCTAssertFalse(app.staticTexts["累计 Token"].exists)
+      XCTAssertFalse(app.staticTexts["会话时长"].exists)
+      app.buttons["overview-files"].tap()
+      XCTAssertTrue(app.buttons["README.md"].waitForExistence(timeout: 10))
+      app.buttons["README.md"].tap()
+      let source = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "# Project fixture")).firstMatch
+      XCTAssertTrue(source.waitForExistence(timeout: 5))
+      XCTAssertTrue(source.label.contains("Read-only preview"))
+    }
+  }
+
+  func testOverviewCopiesTheActualSessionIDToTheSystemClipboard() {
+    launch("chat")
+    app.buttons["session-overview"].tap()
+    let id = app.staticTexts["overview-session-id"]
+    XCTAssertTrue(id.waitForExistence(timeout: 5))
+    let expected = id.label
+    XCTAssertNotEqual(expected, "未建立会话")
+    app.buttons["overview-copy-id"].tap()
+    XCTAssertEqual(app.buttons["overview-copy-id"].label, "已复制")
+    app.buttons["sheet-close"].tap()
+    let input = app.descendants(matching: .any)["message-input"].firstMatch
+    input.tap(); input.press(forDuration: 1)
+    let paste = app.descendants(matching: .any).matching(NSPredicate(
+      format: "(elementType == %d OR elementType == %d) AND (label == %@ OR label == %@)",
+      XCUIElement.ElementType.button.rawValue, XCUIElement.ElementType.menuItem.rawValue, "Paste", "粘贴")).firstMatch
+    XCTAssertTrue(paste.waitForExistence(timeout: 5))
+    paste.tap()
+    XCTAssertEqual(input.value as? String, expected)
+    input.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: expected.count))
+  }
+
+  func testPopoverSelectsModelEffortAndAutomaticWithoutReplacingTheDraft() {
+    launch("chat")
+    let input = app.descendants(matching: .any)["message-input"].firstMatch
+    input.tap(); input.typeText("Keep the draft")
+    app.buttons["收起键盘"].tap()
+    openModel()
+    let model = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "model-option-", "GPT-5.6")).firstMatch
+    XCTAssertTrue(model.waitForExistence(timeout: 5))
+    model.tap()
+    XCTAssertTrue(model.isSelected)
+    let high = app.buttons["effort-option-high"]
+    XCTAssertGreaterThanOrEqual(high.frame.width, 44)
+    XCTAssertGreaterThanOrEqual(high.frame.height, 44)
+    high.tap()
+    XCTAssertTrue(high.isSelected)
+    app.buttons["model-option-auto"].tap()
+    XCTAssertTrue(app.buttons["model-option-auto"].isSelected)
+    app.otherElements["PopoverDismissRegion"].tap()
+    XCTAssertTrue((input.value as? String)?.contains("Keep the draft") == true)
+  }
+
+  func testManyEffortsUseAScrollableListAndPassTheOriginalID() {
+    app.launchArguments = ["-uiPreview", "-uiSheetFixture", "effortsMany"]
+    app.launch()
+    XCTAssertTrue(app.descendants(matching: .any)["message-input"].waitForExistence(timeout: 10))
+    openModel()
+    XCTAssertFalse(app.otherElements["effort-segments"].exists)
+    let list = app.descendants(matching: .any)["effort-list"].firstMatch
+    XCTAssertTrue(list.exists)
+    list.swipeUp()
+    let last = app.buttons["effort-option-最大"]
+    XCTAssertTrue(last.isHittable)
+    XCTAssertGreaterThanOrEqual(last.frame.height, 44)
+    last.tap()
+    XCTAssertTrue(last.isSelected)
+    // The tall popover covers the dismissal region's center; use its exposed top-left area.
+    app.otherElements["PopoverDismissRegion"].coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.2)).tap()
+    XCTAssertEqual(app.staticTexts["fixture-effort"].label, "最大")
+  }
+
+  func testProviderWithoutEffortsDoesNotInventASegment() {
+    launch("home", extra: ["-uiRefreshFeedback"])
+    option("Agent：").tap()
+    option("Qoder").tap()
+    openModel()
+    XCTAssertTrue(option("Ultimate").exists)
+    XCTAssertFalse(app.staticTexts["推理强度"].exists)
+    XCTAssertFalse(app.buttons["effort-option-default"].exists)
+  }
 }
