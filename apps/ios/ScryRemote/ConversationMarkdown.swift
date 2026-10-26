@@ -38,6 +38,40 @@ enum ConversationMarkdownParser {
     parse(source)
   }
 
+  // Block-level rows ask for the same source on every layout pass. Parsing is
+  // linear in the reply length, so keep a small bounded cache keyed by the full
+  // source instead of re-parsing inside `body`.
+  private final class BlockCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String: [ConversationMarkdownBlock]] = [:]
+    private var order: [String] = []
+
+    func value(for key: String, compute: () -> [ConversationMarkdownBlock]) -> [ConversationMarkdownBlock] {
+      lock.lock()
+      if let hit = storage[key] { lock.unlock(); return hit }
+      lock.unlock()
+      let parsed = compute()
+      lock.lock()
+      defer { lock.unlock() }
+      if storage[key] == nil {
+        storage[key] = parsed
+        order.append(key)
+        while order.count > 32, let oldest = order.first {
+          order.removeFirst()
+          storage.removeValue(forKey: oldest)
+        }
+      }
+      return storage[key] ?? parsed
+    }
+  }
+
+  private static let cache = BlockCache()
+
+  static func cachedBlocks(_ source: String) -> [ConversationMarkdownBlock] {
+    guard source.count <= 200_000 else { return parse(source) }
+    return cache.value(for: source) { parse(source) }
+  }
+
   static func parse(_ source: String) -> [ConversationMarkdownBlock] {
     let lines = source.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
     var blocks: [ConversationMarkdownBlock] = []

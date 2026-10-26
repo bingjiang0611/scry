@@ -189,13 +189,15 @@ struct ConversationTurn {
   var notice: String?
 
   fileprivate enum Row: Identifiable {
-    enum ID: Hashable { case prompt, provider, block(Int), outcome, notice, usage }
-    case prompt(String), provider, block(ConversationBlock), outcome(TurnOutcomeNote), notice(String), usage(String)
+    enum ID: Hashable { case prompt, provider, block(Int), markdownBlock(Int, Int), outcome, notice, usage }
+    case prompt(String), provider, block(ConversationBlock), markdownBlock(Int, ConversationMarkdownBlock)
+    case outcome(TurnOutcomeNote), notice(String), usage(String)
     var id: ID {
       switch self {
       case .prompt: return .prompt
       case .provider: return .provider
       case let .block(block): return .block(block.id)
+      case let .markdownBlock(entry, block): return .markdownBlock(entry, block.id)
       case .outcome: return .outcome
       case .notice: return .notice
       case .usage: return .usage
@@ -207,7 +209,19 @@ struct ConversationTurn {
     var rows: [Row] = []
     if let prompt { rows.append(.prompt(prompt)) }
     rows.append(.provider)
-    rows += ConversationBlock.group(entries).map(Row.block)
+    // A long Markdown reply used to be one lazy row thousands of points tall.
+    // The lazy stack then estimated every other row from a single oversized
+    // frame, so no scroll target landed on real content. Split only the long
+    // prose entries; reasoning, tool groups and short replies keep one row.
+    for (entryIndex, block) in ConversationBlock.group(entries).enumerated() {
+      let entry = block.entries[0]
+      let parts = block.isToolGroup ? [] : ConversationTurn.markdownParts(entry.text, kind: entry.kind)
+      if parts.count > 1 {
+        for part in parts { rows.append(.markdownBlock(entryIndex, part)) }
+      } else {
+        rows.append(.block(block))
+      }
+    }
     if let outcome { rows.append(.outcome(outcome)) }
     if let notice { rows.append(.notice(notice)) }
     if !running, let resultSummary { rows.append(.usage(resultSummary)) }
@@ -236,6 +250,10 @@ struct ConversationTurn {
         else { Circle().fill(Palette.dim2).frame(width: 6, height: 6).accessibilityHidden(true) }
         Text(provider).font(Typography.meta).foregroundStyle(Palette.dim2)
       }
+    case let .markdownBlock(_, block):
+      ConversationMarkdownText(source: "", parsedBlocks: [block]).conversationFlowBlock()
+        .transition(archived ? Motion.none : Motion.transition(.streamIn, reduceMotion: reduceMotion)
+          .animation(Motion.animation(.streamIn, reduceMotion: reduceMotion)))
     case let .block(block):
       blockView(block, truncated: truncated).conversationFlowBlock()
         .transition(archived ? Motion.none : Motion.transition(.streamIn, reduceMotion: reduceMotion)
@@ -249,6 +267,20 @@ struct ConversationTurn {
           .frame(maxWidth: .infinity, alignment: .trailing)
       }.padding(.top, 12)
     }
+  }
+
+  // Entries that render through the Markdown reader. Everything else is an
+  // evidence row (reasoning/tool) or the truncation notice and stays unsplit.
+  static func isMarkdownKind(_ kind: String) -> Bool {
+    !["reasoning", "tool", "tool_result", "truncated"].contains(kind)
+  }
+
+  // Only long prose is worth splitting: a short reply already fits the viewport
+  // and splitting it would churn identities on every streamed chunk.
+  static func markdownParts(_ text: String, kind: String) -> [ConversationMarkdownBlock] {
+    guard isMarkdownKind(kind), text.count > 600 else { return [] }
+    let blocks = ConversationMarkdownParser.cachedBlocks(text)
+    return blocks.count > 1 ? blocks : []
   }
 
   @ViewBuilder private func blockView(_ block: ConversationBlock, truncated: Bool) -> some View {
