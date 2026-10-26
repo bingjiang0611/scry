@@ -12,7 +12,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 0
+        "darwin-arm64": 0,
+        "linux-x64": 0
       }
     },
     "providers.discovery/selected.controlReads": {
@@ -26,7 +27,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1
+        "darwin-arm64": 1,
+        "linux-x64": 1
       }
     },
     "providers.discovery/legacy.controlReads": {
@@ -40,7 +42,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 3
+        "darwin-arm64": 3,
+        "linux-x64": 3
       }
     },
     "source-control.service.diff-validated/subprocess.git": {
@@ -54,7 +57,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 18
+        "darwin-arm64": 18,
+        "linux-x64": 18
       }
     },
     "source-control.service.diff-validated/subprocess.total": {
@@ -68,7 +72,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 18
+        "darwin-arm64": 18,
+        "linux-x64": 18
       }
     },
     "source-control.service.diff-validated/revision.status-checks": {
@@ -82,7 +87,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 2
+        "darwin-arm64": 2,
+        "linux-x64": 2
       }
     },
     "source-control.service.diff-validated/remote.queries": {
@@ -96,7 +102,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 0
+        "darwin-arm64": 0,
+        "linux-x64": 0
       }
     },
     "source-control.terminal-pair/subprocess.git": {
@@ -110,7 +117,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 17
+        "darwin-arm64": 17,
+        "linux-x64": 13
       }
     },
     "source-control.terminal-pair/snapshot.write-tree": {
@@ -124,7 +132,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1
+        "darwin-arm64": 1,
+        "linux-x64": 1
       }
     },
     "source-control.terminal-pair/subprocess.total": {
@@ -138,7 +147,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 17
+        "darwin-arm64": 17,
+        "linux-x64": 13
       }
     },
     "providers.pi-probe/subprocess.rpc": {
@@ -152,7 +162,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1
+        "darwin-arm64": 1,
+        "linux-x64": 1
       }
     },
     "providers.pi-probe/rpc.responses": {
@@ -166,7 +177,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 4
+        "darwin-arm64": 4,
+        "linux-x64": 4
       }
     },
     "providers.pi-probe/shutdown.grace-expiries": {
@@ -180,7 +192,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 0
+        "darwin-arm64": 0,
+        "linux-x64": 0
       }
     },
     "providers.pi-environment/subprocess.node": {
@@ -194,7 +207,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1
+        "darwin-arm64": 1,
+        "linux-x64": 1
       }
     },
     "analytics.usage-mixed-append/io.read.calls": {
@@ -208,7 +222,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 0
+        "darwin-arm64": 0,
+        "linux-x64": 0
       }
     },
     "analytics.usage-mixed-append/io.read.bytes": {
@@ -222,7 +237,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 0
+        "darwin-arm64": 0,
+        "linux-x64": 0
       }
     },
     "files.fixed-operations/io.open": {
@@ -236,7 +252,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 6
+        "darwin-arm64": 6,
+        "linux-x64": 6
       }
     },
     "files.fixed-operations/io.read": {
@@ -250,7 +267,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 336
+        "darwin-arm64": 336,
+        "linux-x64": 417
       }
     },
     "files.fixed-operations/io.stat": {
@@ -264,7 +282,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1065
+        "darwin-arm64": 1065,
+        "linux-x64": 1038
       }
     },
     "files.fixed-operations/io.readdir": {
@@ -278,7 +297,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 18
+        "darwin-arm64": 18,
+        "linux-x64": 20
       }
     },
     "files.fixed-operations/io.read.bytes": {
@@ -292,7 +312,8 @@
       "ceiling": null,
       "tolerance": 4,
       "baselines": {
-        "darwin-arm64": 1183197
+        "darwin-arm64": 1183197,
+        "linux-x64": 1222612
       }
     },
     "files.fixed-operations/io.write": {
@@ -306,7 +327,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 4
+        "darwin-arm64": 4,
+        "linux-x64": 3
       }
     },
     "files.fixed-operations/io.rename": {
@@ -320,7 +342,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 3
+        "darwin-arm64": 3,
+        "linux-x64": 3
       }
     },
     "history.page/ipc.messages": {
@@ -334,7 +357,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1
+        "darwin-arm64": 1,
+        "linux-x64": 1
       }
     },
     "history.page/ipc.bytes": {
@@ -348,7 +372,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 10020
+        "darwin-arm64": 10020,
+        "linux-x64": 10020
       }
     },
     "history.page/json.stringify.calls": {
@@ -362,7 +387,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1
+        "darwin-arm64": 1,
+        "linux-x64": 1
       }
     },
     "persistence.archive/ipc.messages": {
@@ -376,7 +402,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1
+        "darwin-arm64": 1,
+        "linux-x64": 1
       }
     },
     "persistence.archive/ipc.bytes": {
@@ -390,7 +417,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 10536
+        "darwin-arm64": 10536,
+        "linux-x64": 10514
       }
     },
     "persistence.archive/json.parse.calls": {
@@ -404,7 +432,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 41
+        "darwin-arm64": 41,
+        "linux-x64": 41
       }
     },
     "terminal.delivery/ipc.messages": {
@@ -418,7 +447,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 2
+        "darwin-arm64": 2,
+        "linux-x64": 2
       }
     },
     "terminal.delivery/ipc.bytes": {
@@ -432,7 +462,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 30109
+        "darwin-arm64": 30109,
+        "linux-x64": 30109
       }
     },
     "remote.trace.preview/ipc.messages": {
@@ -446,7 +477,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1
+        "darwin-arm64": 1,
+        "linux-x64": 1
       }
     },
     "remote.trace.preview/ipc.bytes": {
@@ -460,7 +492,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 2778
+        "darwin-arm64": 2778,
+        "linux-x64": 2778
       }
     },
     "analytics.stats/json.stringify.calls": {
@@ -474,7 +507,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1
+        "darwin-arm64": 1,
+        "linux-x64": 1
       }
     },
     "analytics.sqlite/sqlite.prepare": {
@@ -562,7 +596,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 8
+        "darwin-arm64": 8,
+        "linux-x64": 8
       }
     },
     "source-control.service.status-diff/subprocess.total": {
@@ -576,7 +611,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 11
+        "darwin-arm64": 11,
+        "linux-x64": 11
       }
     },
     "trace.delivery/ipc.messages": {
@@ -590,7 +626,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 2
+        "darwin-arm64": 2,
+        "linux-x64": 2
       }
     },
     "trace.delivery/ipc.bytes": {
@@ -604,7 +641,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 165996
+        "darwin-arm64": 165996,
+        "linux-x64": 165996
       }
     },
     "history.page/cpu.instructions": {
