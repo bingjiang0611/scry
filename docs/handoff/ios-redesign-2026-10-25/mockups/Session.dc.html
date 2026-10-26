@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Scry iOS 会话</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}a:hover{color:inherit}
+.t-dark{--bg:#151515;--side:#181818;--main:#1c1c1c;--panel:#1c1c1c;--panel2:#232323;--panel3:#2b2b2b;--border:#333331;--border2:#454541;--border3:#292927;--fg:#f1f1ef;--dim:#b5b5af;--sub:#8d8d87;--accent:#5b9cff;--accent-soft:rgb(91 156 255 / 12%);--ok:#69cc93;--warn:#efb958;--bad:#f36c67;--claude:#d37ec8;--codex:#6aa8ff;--hover:rgb(255 255 255 / 6%);--muted-s:rgb(255 255 255 / 4%);--code:#151515;--bubble-shadow:0 1px 2px rgb(0 0 0 / 30%);--shadow:0 10px 30px rgb(0 0 0 / 28%),0 1px 2px rgb(0 0 0 / 20%)}
+.t-light{--bg:#f7f7f5;--side:#f7f7f5;--main:#ffffff;--panel:#ffffff;--panel2:#f6f6f3;--panel3:#eeeeeb;--border:#e4e4df;--border2:#d3d3cd;--border3:#eeeeea;--fg:#222220;--dim:#62625e;--sub:#62625e;--accent:#3f7ee8;--accent-soft:rgb(63 126 232 / 9%);--ok:#18794e;--warn:#94620b;--bad:#bf3f3a;--claude:#a15397;--codex:#3f72b7;--hover:rgb(34 34 32 / 5%);--muted-s:rgb(34 34 32 / 3.8%);--code:#f6f6f3;--bubble-shadow:0 1px 2px rgb(0 0 0 / 6%);--shadow:0 10px 30px rgb(0 0 0 / 8%),0 1px 2px rgb(0 0 0 / 6%)}
+.scr{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","SF Pro Text",system-ui,sans-serif;letter-spacing:-0.004em;-webkit-font-smoothing:antialiased}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.ibtn{width:44px;height:44px;display:inline-flex;align-items:center;justify-content:center;border:0;background:transparent;color:var(--fg);padding:0;border-radius:12px;cursor:pointer;flex:none}
+.ibtn:active{background:var(--hover)}
+.bubble{max-width:100%;padding:10px 14px;border-radius:18px;background:var(--panel2);box-shadow:var(--bubble-shadow);font-size:15.5px;line-height:1.55}
+.who{display:flex;align-items:center;gap:7px;min-height:26px;font-size:12px;font-weight:540;color:var(--sub)}
+.flow{position:relative;display:flex;flex-direction:column;gap:12px;padding-left:20px}
+.flow::before{content:"";position:absolute;left:3px;top:4px;bottom:4px;width:1px;background:var(--border3)}
+.drow{display:flex;align-items:center;gap:8px;min-height:36px;width:100%;border:0;background:transparent;color:var(--sub);font:500 13px/1 inherit;font-family:inherit;padding:0;cursor:pointer;text-align:left}
+.pill{display:inline-flex;align-items:center;height:20px;padding:0 7px;border:1px solid var(--border);border-radius:6px;background:var(--panel2);color:var(--dim);font-size:11.5px}
+.disc{display:grid;transition:grid-template-rows 240ms cubic-bezier(.32,.72,0,1),opacity 240ms cubic-bezier(.32,.72,0,1)}
+.chev{transition:transform 240ms cubic-bezier(.32,.72,0,1)}
+.text{font-size:16px;line-height:1.68;color:var(--fg)}
+.text code{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;font-size:13.5px;padding:1px 5px;border-radius:5px;background:var(--muted-s);border:1px solid var(--border3)}
+.spin{width:11px;height:11px;box-sizing:border-box;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin 900ms linear infinite;flex:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.arrive{animation:arrive 180ms cubic-bezier(.23,1,.32,1) backwards}
+@keyframes arrive{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.caret{display:inline-block;width:7px;height:16px;vertical-align:-3px;border-radius:2px;background:var(--sub);animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{opacity:0}}
+.ctl{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 9px;border:0;border-radius:9px;background:transparent;color:var(--dim);font:500 12.5px/1 inherit;font-family:inherit;cursor:pointer}
+@media (prefers-reduced-motion: reduce){.disc,.chev{transition-duration:120ms}.arrive{animation-duration:120ms;animation-name:fade}.caret{animation:none}@keyframes fade{from{opacity:0}}}
+</style>
+</helmet>
+<div class="scr {{themeClass}}" style="width: 390px; height: 844px; box-sizing: border-box; background: var(--main); color: var(--fg); display: flex; flex-direction: column; overflow: hidden">
+  <div style="height: 54px; flex: none"></div>
+
+  <div style="display: flex; align-items: center; gap: 2px; padding: 0 4px; min-height: 56px; flex: none; border-bottom: 1px solid var(--border3)">
+    <a href="Main.dc.html" class="ibtn" aria-label="返回">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg>
+    </a>
+    <div style="flex: 1; min-width: 0; padding: 6px 0">
+      <div style="font-size: 15.5px; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden">重构远程会话列表并统一信息层级</div>
+      <div style="display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 12px; color: var(--sub)">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="color: var(--codex)"><circle cx="17.4" cy="12" r="2.05"></circle><circle cx="14.7" cy="16.7" r="2.05"></circle><circle cx="9.3" cy="16.7" r="2.05"></circle><circle cx="6.6" cy="12" r="2.05"></circle><circle cx="9.3" cy="7.3" r="2.05"></circle><circle cx="14.7" cy="7.3" r="2.05"></circle></svg>
+        <span>scry · Codex</span>
+      </div>
+    </div>
+    <a href="Overview.dc.html" class="ibtn" aria-label="会话总览">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="3"></rect><path d="M14.5 4.5v15"></path></svg>
+    </a>
+    <button type="button" class="ibtn" aria-label="更多">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5.5" cy="12" r="1.6"></circle><circle cx="12" cy="12" r="1.6"></circle><circle cx="18.5" cy="12" r="1.6"></circle></svg>
+    </button>
+  </div>
+
+  <div style="flex: 1; overflow-y: auto; padding: 20px 16px 16px">
+    <div style="display: flex; justify-content: flex-end; padding-left: 15%">
+      <div class="bubble">首页的会话行重复显示项目名，帮我在项目分组里去掉，只在聚合多主机时显示主机名。</div>
+    </div>
+
+    <div style="margin-top: 18px">
+      <div class="who">
+        <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--sub)"></span>
+        <span>Codex</span><span style="opacity: .8">gpt-5.1-codex · 高</span>
+      </div>
+      <div class="flow" style="margin-top: 6px">
+        <div>
+          <button type="button" class="drow" onClick="{{toggleThink}}" aria-expanded="{{thinkOpen}}">
+            <svg class="chev" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="transform: rotate({{thinkRot}})"><path d="M9 5l7 7-7 7"></path></svg>
+            思考 · 6 秒
+          </button>
+          <div class="disc" style="grid-template-rows: {{thinkRows}}; opacity: {{thinkOpacity}}">
+            <div style="min-height: 0; overflow: hidden">
+              <p style="margin: 2px 0 6px; font-size: 14px; line-height: 1.65; color: var(--dim)">行已经嵌套在项目标题下，项目名只在置顶和搜索结果里有意义。先看 rowContext 的调用方，再决定是否加参数。</p>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <button type="button" class="drow" onClick="{{toggleTools}}" aria-expanded="{{toolsOpen}}">
+            <svg class="chev" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="transform: rotate({{toolsRot}})"><path d="M9 5l7 7-7 7"></path></svg>
+            <span>已运行 5 个工具</span>
+            <span class="pill">读取 3</span><span class="pill">编辑 2</span>
+            <span style="margin-left: auto; font-size: 12px">14 秒</span>
+          </button>
+          <div class="disc" style="grid-template-rows: {{toolsRows}}; opacity: {{toolsOpacity}}">
+            <div style="min-height: 0; overflow: hidden">
+              <div style="margin-top: 4px; padding: 4px 12px; border: 1px solid var(--border3); border-radius: 10px; background: var(--panel2)">
+                <sc-for list="{{tools}}" as="t" hint-placeholder-count="5">
+                  <div style="display: flex; align-items: center; gap: 8px; min-height: 34px; font-size: 13px">
+                    <span style="width: 34px; color: var(--sub); font-weight: 600">{{t.kind}}</span>
+                    <span class="mono" style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--dim)">{{t.path}}</span>
+                    <sc-if value="{{t.hasDiff}}" hint-placeholder-val="{{ false }}">
+                      <span class="mono" style="font-size: 12px; color: var(--ok)">{{t.add}}</span><span class="mono" style="font-size: 12px; color: var(--bad)">{{t.del}}</span>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="text">已在项目分组内移除重复的项目名。<code>rowContext</code> 现在只在 <code>aggregatesHosts</code> 为真时带上主机名；置顶和搜索结果仍显示完整上下文。</div>
+        <pre class="mono" style="margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--code); border: 1px solid var(--border3); font-size: 12.5px; line-height: 1.6; color: var(--dim); overflow-x: auto">ConnectionCopy.rowContext(
+  host: aggregatesHosts ? scope.label : nil,
+  project: showsProject ? name : nil)</pre>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border3); font-size: 12.5px; color: var(--sub)">
+        <button type="button" style="display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; margin-left: -10px; border: 0; border-radius: 8px; background: transparent; color: var(--dim); font: 500 12.5px/1 inherit; font-family: inherit; cursor: pointer">2 个文件 <span class="mono" style="color: var(--ok)">+16</span><span class="mono" style="color: var(--bad)">−9</span></button>
+        <span style="margin-left: auto">1.9k tokens · 42 秒</span>
+      </div>
+    </div>
+
+    <div style="display: flex; justify-content: flex-end; padding-left: 15%; margin-top: 34px">
+      <div class="bubble">顺便把 Provider 放到行尾，用短标签。</div>
+    </div>
+    <div style="margin-top: 18px">
+      <div class="who">
+        <span class="spin" style="color: var(--accent)" role="status" aria-label="正在运行"></span>
+        <span>Codex</span><span style="opacity: .8">gpt-5.1-codex · 高</span>
+      </div>
+      <div class="flow" style="margin-top: 6px">
+        <div class="drow arrive" style="cursor: default">
+          <span class="spin" style="color: var(--sub)"></span>
+          <span>编辑</span><span class="mono" style="font-size: 12.5px; color: var(--dim)">SessionRow.swift</span>
+        </div>
+        <div class="text arrive">把 Provider 改为行尾的短标签，项目分组和动态共用同一个<span class="caret" aria-hidden="true"></span></div>
+      </div>
+    </div>
+  </div>
+
+  <div style="flex: none; padding: 0 12px 30px; background: var(--main)">
+    <div role="status" style="display: flex; align-items: center; gap: 9px; min-height: 44px; padding: 0 4px 0 12px; margin-bottom: 8px; border-radius: 12px; background: var(--accent-soft); color: var(--accent); font-size: 13.5px; font-weight: 500">
+      <span class="spin"></span>
+      <span style="flex: 1">运行中 · 0:38</span>
+      <button type="button" style="min-width: 60px; height: 36px; border: 0; border-radius: 9px; background: transparent; color: var(--bad); font: 600 13.5px/1 inherit; font-family: inherit; cursor: pointer">停止</button>
+    </div>
+    <div style="border: 1px solid var(--border); border-radius: 20px; background: var(--panel); box-shadow: var(--shadow); padding: 0 10px 6px">
+      <textarea placeholder="运行结束后可发送，先写也行" aria-label="继续这段对话" rows="1" style="display: block; width: 100%; box-sizing: border-box; resize: none; border: 0; outline: 0; background: transparent; color: var(--fg); font: 16px/1.5 inherit; font-family: inherit; padding: 12px 4px 6px; height: 46px"></textarea>
+      <div style="display: flex; align-items: center; gap: 2px">
+        <button type="button" class="ibtn" aria-label="添加附件" style="width: 38px; height: 38px; color: var(--dim)"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
+        <button type="button" class="ctl">默认权限</button>
+        <div style="flex: 1"></div>
+        <button type="button" class="ctl"><span style="color: var(--fg)">gpt-5.1-codex</span><span>高</span></button>
+        <button type="button" aria-label="发送" disabled style="width: 34px; height: 34px; border-radius: 50%; border: 0; background: var(--panel3); color: var(--sub); display: inline-flex; align-items: center; justify-content: center; margin: 5px">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"></path></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { think: false, tools: false };
+  }
+  renderVals() {
+    const theme = this.props.theme ?? 'dark';
+    const t = this.state.think, o = this.state.tools;
+    return {
+      themeClass: theme === 'light' ? 't-light' : 't-dark',
+      thinkOpen: t ? 'true' : 'false', thinkRot: t ? '90deg' : '0deg', thinkRows: t ? '1fr' : '0fr', thinkOpacity: t ? '1' : '0',
+      toolsOpen: o ? 'true' : 'false', toolsRot: o ? '90deg' : '0deg', toolsRows: o ? '1fr' : '0fr', toolsOpacity: o ? '1' : '0',
+      toggleThink: () => this.setState({ think: !t }),
+      toggleTools: () => this.setState({ tools: !o }),
+      tools: [
+        { kind: '读取', path: 'apps/ios/ScryRemote/SessionRow.swift', hasDiff: false },
+        { kind: '读取', path: 'apps/ios/ScryRemote/HomeDrawer.swift', hasDiff: false },
+        { kind: '读取', path: 'apps/ios/ScryRemote/ConnectionCopy.swift', hasDiff: false },
+        { kind: '编辑', path: 'SessionRow.swift', hasDiff: true, add: '+12', del: '−7' },
+        { kind: '编辑', path: 'ConnectionCopy.swift', hasDiff: true, add: '+4', del: '−2' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Scry iOS 首页</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}a:hover{color:inherit}
+.t-dark{--bg:#151515;--side:#181818;--main:#1c1c1c;--panel:#1c1c1c;--panel2:#232323;--panel3:#2b2b2b;--border:#333331;--border2:#454541;--border3:#292927;--fg:#f1f1ef;--dim:#b5b5af;--sub:#8d8d87;--accent:#5b9cff;--accent-soft:rgb(91 156 255 / 12%);--ok:#69cc93;--warn:#efb958;--bad:#f36c67;--claude:#d37ec8;--codex:#6aa8ff;--hover:rgb(255 255 255 / 6%);--muted-s:rgb(255 255 255 / 4%);--shadow:0 10px 30px rgb(0 0 0 / 28%),0 1px 2px rgb(0 0 0 / 20%)}
+.t-light{--bg:#f7f7f5;--side:#f7f7f5;--main:#ffffff;--panel:#ffffff;--panel2:#f6f6f3;--panel3:#eeeeeb;--border:#e4e4df;--border2:#d3d3cd;--border3:#eeeeea;--fg:#222220;--dim:#62625e;--sub:#62625e;--accent:#3f7ee8;--accent-soft:rgb(63 126 232 / 9%);--ok:#18794e;--warn:#94620b;--bad:#bf3f3a;--claude:#a15397;--codex:#3f72b7;--hover:rgb(34 34 32 / 5%);--muted-s:rgb(34 34 32 / 3.8%);--shadow:0 10px 30px rgb(0 0 0 / 8%),0 1px 2px rgb(0 0 0 / 6%)}
+.scr{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","SF Pro Text",system-ui,sans-serif;letter-spacing:-0.004em;-webkit-font-smoothing:antialiased}
+.ibtn{width:44px;height:44px;display:inline-flex;align-items:center;justify-content:center;border:0;background:transparent;color:var(--fg);padding:0;border-radius:12px;cursor:pointer}
+.ibtn:active{background:var(--hover)}
+.tab{width:52px;height:40px;border:0;background:transparent;font:500 15px/1 inherit;font-family:inherit;cursor:pointer;padding:0;transition:color 160ms cubic-bezier(.23,1,.32,1)}
+.row{display:flex;align-items:center;gap:10px;min-height:46px;padding:0 10px;margin:0 -10px;border-radius:10px;transition:background-color 100ms linear}
+.row:active{background:var(--hover);transform:scale(.985)}
+.si{animation:row-in 220ms cubic-bezier(.23,1,.32,1) backwards;animation-delay:calc(min(var(--i,0),10) * 16ms)}
+@keyframes row-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.spin{width:12px;height:12px;box-sizing:border-box;border:2px solid var(--sub);border-top-color:transparent;border-radius:50%;animation:spin 900ms linear infinite;flex:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.chip{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 12px;border:0;border-radius:11px;background:var(--muted-s);color:var(--fg);font:500 13.5px/1 inherit;font-family:inherit;cursor:pointer;white-space:nowrap}
+.ctl{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 9px;border:0;border-radius:9px;background:transparent;color:var(--dim);font:500 12.5px/1 inherit;font-family:inherit;cursor:pointer}
+.disc{display:grid;transition:grid-template-rows 240ms cubic-bezier(.32,.72,0,1),opacity 240ms cubic-bezier(.32,.72,0,1)}
+.chev{transition:transform 240ms cubic-bezier(.32,.72,0,1)}
+@media (prefers-reduced-motion: reduce){.si{animation-duration:120ms;animation-name:fade}.disc,.chev{transition-duration:120ms}@keyframes fade{from{opacity:0}}}
+</style>
+</helmet>
+<div class="scr {{themeClass}}" style="width: 390px; height: 844px; box-sizing: border-box; background: var(--side); color: var(--fg); display: flex; flex-direction: column; overflow: hidden; position: relative">
+  <div style="height: 54px; flex: none"></div>
+
+  <div style="display: flex; align-items: center; gap: 4px; padding: 0 8px 0 12px; height: 48px; flex: none">
+    <button type="button" class="chip" style="height: 34px; border-radius: 999px; padding: 0 12px 0 11px; background: var(--panel2)" aria-label="切换主机">
+      <span style="width: 7px; height: 7px; border-radius: 50%; background: var(--ok)"></span>
+      <span style="font-weight: 600; font-size: 14px">bob 的 MacBook Pro</span>
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: var(--sub)"><path d="M7 9l5-5 5 5M7 15l5 5 5-5"></path></svg>
+    </button>
+    <div style="flex: 1"></div>
+    <button type="button" class="ibtn" aria-label="设置">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg>
+    </button>
+  </div>
+
+  <label style="display: flex; align-items: center; gap: 9px; margin: 6px 16px 0; height: 38px; padding: 0 12px; border-radius: 10px; background: var(--muted-s); border: 1px solid var(--border3); flex: none">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" style="color: var(--sub)"><circle cx="11" cy="11" r="6.5"></circle><path d="M16 16l4 4"></path></svg>
+    <input type="search" placeholder="搜索会话 / 项目…" aria-label="搜索会话或项目" style="flex: 1; border: 0; outline: 0; background: transparent; color: var(--fg); font: 15px/1 inherit; font-family: inherit; min-width: 0">
+  </label>
+
+  <div role="tablist" aria-label="侧栏视图" style="position: relative; display: flex; gap: 8px; margin: 8px 16px 0; flex: none; border-bottom: 1px solid var(--border3)">
+    <button type="button" role="tab" class="tab" aria-selected="{{projSel}}" onClick="{{showProjects}}" style="color: {{projColor}}">项目</button>
+    <button type="button" role="tab" class="tab" aria-selected="{{actSel}}" onClick="{{showActivity}}" style="color: {{actColor}}">动态</button>
+    <span aria-hidden="true" style="position: absolute; left: 0; bottom: -1px; width: 30px; height: 2px; border-radius: 2px; background: var(--fg); transform: translateX({{underlineX}}); transition: transform 220ms cubic-bezier(.32,.72,0,1)"></span>
+  </div>
+
+  <div style="flex: 1; overflow-y: auto; padding: 0 16px 16px">
+    <sc-if value="{{isActivity}}" hint-placeholder-val="{{ true }}">
+      <sc-for list="{{groups}}" as="g" hint-placeholder-count="3">
+        <div style="display: flex; align-items: center; gap: 10px; margin: 22px 0 6px">
+          <span style="font-size: 12.5px; font-weight: 600; color: {{g.labelColor}}">{{g.label}}</span>
+          <span style="flex: 1; height: 1px; background: {{g.ruleColor}}"></span>
+        </div>
+        <sc-for list="{{g.rows}}" as="r" hint-placeholder-count="2">
+          <a href="Session.dc.html" class="row si" style="--i: {{r.i}}; min-height: {{r.h}}">
+            <span style="width: 16px; height: 16px; flex: none; color: {{r.pcolor}}" aria-hidden="true">
+              <sc-if value="{{r.isClaude}}" hint-placeholder-val="{{ true }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3.6v5M12 15.4v5M3.6 12h5M15.4 12h5M6 6l3.6 3.6M14.4 14.4l3.6 3.6M18 6l-3.6 3.6M9.6 14.4L6 18"></path></svg></sc-if>
+              <sc-if value="{{r.isCodex}}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="17.4" cy="12" r="2.05"></circle><circle cx="14.7" cy="16.7" r="2.05"></circle><circle cx="9.3" cy="16.7" r="2.05"></circle><circle cx="6.6" cy="12" r="2.05"></circle><circle cx="9.3" cy="7.3" r="2.05"></circle><circle cx="14.7" cy="7.3" r="2.05"></circle></svg></sc-if>
+            </span>
+            <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; color: {{r.titleColor}}">{{r.title}}</span>
+            <sc-if value="{{r.running}}" hint-placeholder-val="{{ false }}"><span class="spin" role="status" aria-label="正在运行"></span></sc-if>
+            <sc-if value="{{r.waiting}}" hint-placeholder-val="{{ false }}">
+              <span style="display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 6px; background: rgb(239 185 88 / 12%); color: var(--warn); font-size: 12px; font-weight: 600; flex: none">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"></path></svg>待回答</span>
+            </sc-if>
+            <sc-if value="{{r.hasTime}}" hint-placeholder-val="{{ false }}"><span style="font-size: 12.5px; color: var(--sub); flex: none">{{r.time}}</span></sc-if>
+          </a>
+        </sc-for>
+      </sc-for>
+      <p style="margin: 18px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--sub)">动态只列需要回复、进行中和明确完成的任务；其他会话在「项目」里。</p>
+    </sc-if>
+
+    <sc-if value="{{isProjects}}" hint-placeholder-val="{{ false }}">
+      <div style="font-size: 12.5px; font-weight: 600; color: var(--sub); margin: 20px 0 4px">置顶</div>
+      <a href="Session.dc.html" class="row si" style="--i: 0">
+        <span style="width: 16px; height: 16px; flex: none; color: var(--claude)" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3.6v5M12 15.4v5M3.6 12h5M15.4 12h5M6 6l3.6 3.6M14.4 14.4l3.6 3.6M18 6l-3.6 3.6M9.6 14.4L6 18"></path></svg></span>
+        <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px">发布 0.2.221 前的回归清单</span>
+        <span style="font-size: 12px; color: var(--sub); flex: none; max-width: 70px; overflow: hidden; text-overflow: ellipsis">scry</span>
+        <span style="font-size: 12.5px; color: var(--sub); flex: none">2 天</span>
+      </a>
+
+      <div style="font-size: 12.5px; font-weight: 600; color: var(--sub); margin: 22px 0 4px">项目</div>
+      <sc-for list="{{projects}}" as="p" hint-placeholder-count="3">
+        <div style="display: flex; align-items: center; min-height: 44px">
+          <button type="button" onClick="{{p.toggle}}" aria-expanded="{{p.open}}" style="flex: 1; display: flex; align-items: center; gap: 8px; min-height: 44px; border: 0; background: transparent; color: var(--fg); padding: 0; font-family: inherit; cursor: pointer; text-align: left">
+            <svg class="chev" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: var(--sub); transform: rotate({{p.rot}})"><path d="M9 5l7 7-7 7"></path></svg>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true" style="color: var(--dim)"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"></path></svg>
+            <span style="font-size: 15px; font-weight: 600">{{p.name}}</span>
+            <span style="font-size: 12.5px; color: var(--sub)">{{p.count}}</span>
+          </button>
+          <button type="button" class="ibtn" aria-label="在 {{p.name}} 中新建会话" style="color: var(--dim)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+          </button>
+        </div>
+        <div class="disc" style="grid-template-rows: {{p.rows}}; opacity: {{p.opacity}}">
+          <div style="min-height: 0; overflow: hidden; padding-left: 18px">
+            <sc-for list="{{p.sessions}}" as="r" hint-placeholder-count="3">
+              <a href="Session.dc.html" class="row">
+                <span style="width: 16px; height: 16px; flex: none; color: {{r.pcolor}}" aria-hidden="true">
+                  <sc-if value="{{r.isClaude}}" hint-placeholder-val="{{ true }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3.6v5M12 15.4v5M3.6 12h5M15.4 12h5M6 6l3.6 3.6M14.4 14.4l3.6 3.6M18 6l-3.6 3.6M9.6 14.4L6 18"></path></svg></sc-if>
+                  <sc-if value="{{r.isCodex}}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="17.4" cy="12" r="2.05"></circle><circle cx="14.7" cy="16.7" r="2.05"></circle><circle cx="9.3" cy="16.7" r="2.05"></circle><circle cx="6.6" cy="12" r="2.05"></circle><circle cx="9.3" cy="7.3" r="2.05"></circle><circle cx="14.7" cy="7.3" r="2.05"></circle></svg></sc-if>
+                </span>
+                <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px">{{r.title}}</span>
+                <sc-if value="{{r.unread}}" hint-placeholder-val="{{ false }}"><span role="status" aria-label="有新结果，未查看" style="width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none"></span></sc-if>
+                <sc-if value="{{r.waiting}}" hint-placeholder-val="{{ false }}"><span style="font-size: 12px; font-weight: 600; color: var(--warn); flex: none">待回答</span></sc-if>
+                <sc-if value="{{r.running}}" hint-placeholder-val="{{ false }}"><span class="spin" role="status" aria-label="正在运行"></span></sc-if>
+                <sc-if value="{{r.hasTime}}" hint-placeholder-val="{{ true }}"><span style="font-size: 12.5px; color: var(--sub); flex: none">{{r.time}}</span></sc-if>
+              </a>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+
+      <div style="font-size: 12.5px; font-weight: 600; color: var(--sub); margin: 22px 0 4px">工具</div>
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+        <sc-for list="{{tools}}" as="t" hint-placeholder-count="4">
+          <button type="button" style="display: flex; align-items: center; gap: 9px; height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--border3); background: var(--muted-s); color: var(--fg); font: 500 14px/1 inherit; font-family: inherit; cursor: pointer; text-align: left">
+            <span style="width: 6px; height: 6px; border-radius: 2px; background: var(--sub)"></span>{{t}}
+          </button>
+        </sc-for>
+      </div>
+    </sc-if>
+  </div>
+
+  <div style="flex: none; padding: 8px 12px 30px; background: var(--side)">
+    <div style="border: 1px solid var(--border); border-radius: 20px; background: var(--panel); box-shadow: var(--shadow); padding: 0 10px 6px">
+      <div style="display: flex; gap: 6px; align-items: center; margin: 0 -10px; padding: 6px 10px; border-bottom: 1px solid var(--border3)">
+        <button type="button" class="chip" style="height: 34px">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true" style="color: var(--dim)"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"></path></svg>scry</button>
+        <button type="button" class="chip" style="height: 34px">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" style="color: var(--claude)"><path d="M12 3.6v5M12 15.4v5M3.6 12h5M15.4 12h5M6 6l3.6 3.6M14.4 14.4l3.6 3.6M18 6l-3.6 3.6M9.6 14.4L6 18"></path></svg>Claude Code</button>
+      </div>
+      <textarea placeholder="描述一个任务，在 Mac 上执行…" aria-label="新任务内容" rows="1" style="display: block; width: 100%; box-sizing: border-box; resize: none; border: 0; outline: 0; background: transparent; color: var(--fg); font: 16px/1.5 inherit; font-family: inherit; padding: 12px 4px 6px; height: 46px"></textarea>
+      <div style="display: flex; align-items: center; gap: 2px">
+        <button type="button" class="ibtn" aria-label="添加附件" style="width: 38px; height: 38px; color: var(--dim)"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
+        <button type="button" class="ctl">默认权限</button>
+        <div style="flex: 1"></div>
+        <button type="button" class="ctl"><span style="color: var(--fg)">Opus 4.5</span><span>高</span></button>
+        <button type="button" aria-label="发送" disabled style="width: 34px; height: 34px; border-radius: 50%; border: 0; background: var(--panel3); color: var(--sub); display: inline-flex; align-items: center; justify-content: center; margin: 5px">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"></path></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { tab: 'activity', open: { scry: true } };
+  }
+  renderVals() {
+    const theme = this.props.theme ?? 'dark';
+    const tab = this.state.tab;
+    const C = 'var(--claude)', X = 'var(--codex)';
+    let i = 0;
+    const row = (p, title, extra) => Object.assign({
+      i: i++, title, pcolor: p === 'c' ? C : X, isClaude: p === 'c', isCodex: p === 'x',
+      running: false, waiting: false, hasTime: false, time: '', titleColor: 'var(--fg)', h: '48px'
+    }, extra || {});
+    const groups = [
+      { label: '需要回复', labelColor: 'var(--fg)', ruleColor: 'var(--border2)', rows: [
+        row('c', '迁移 iOS 配对流程到新 relay', { waiting: true })
+      ]},
+      { label: '进行中', labelColor: 'var(--fg)', ruleColor: 'var(--border2)', rows: [
+        row('x', '重构远程会话列表并统一信息层级', { running: true }),
+        row('c', '给总览面板加上下文占用刻度', { running: true })
+      ]},
+      { label: '已完成', labelColor: 'var(--sub)', ruleColor: 'var(--border3)', rows: [
+        row('c', '修复侧栏动态的强调反转', { hasTime: true, time: '12 分钟', titleColor: 'var(--dim)', h: '44px' }),
+        row('x', '核对 0.2.221 安装归档哈希', { hasTime: true, time: '1 小时', titleColor: 'var(--dim)', h: '44px' }),
+        row('c', '整理 performance-climb 技能', { hasTime: true, time: '3 小时', titleColor: 'var(--dim)', h: '44px' }),
+        row('x', 'remote-g0 relay 冒烟测试', { hasTime: true, time: '昨天', titleColor: 'var(--dim)', h: '44px' }),
+        row('c', '把配对错误映射为可行动文案', { hasTime: true, time: '昨天', titleColor: 'var(--dim)', h: '44px' })
+      ]}
+    ];
+    const s = (p, title, extra) => Object.assign({ title, pcolor: p === 'c' ? C : X, isClaude: p === 'c', isCodex: p === 'x', unread: false, waiting: false, running: false, hasTime: true, time: '' }, extra || {});
+    const defs = [
+      { id: 'scry', name: 'scry', sessions: [
+        s('x', '重构远程会话列表并统一信息层级', { running: true, hasTime: false }),
+        s('c', '迁移 iOS 配对流程到新 relay', { waiting: true, hasTime: false }),
+        s('c', '修复侧栏动态的强调反转', { unread: true, time: '12 分钟' }),
+        s('x', '核对 0.2.221 安装归档哈希', { time: '1 小时' })
+      ]},
+      { id: 'site', name: 'scry-site', sessions: [
+        s('c', '首页文案改成中英双语', { time: '2 天' }),
+        s('x', '修复 Safari 导出按钮', { time: '5 天' })
+      ]},
+      { id: 'relay', name: 'relay-worker', sessions: [
+        s('c', '给 relay 加连接复用', { time: '1 周' })
+      ]}
+    ];
+    const projects = defs.map((d) => {
+      const open = !!this.state.open[d.id];
+      return Object.assign({}, d, {
+        count: String(d.sessions.length), open: open ? 'true' : 'false',
+        rows: open ? '1fr' : '0fr', opacity: open ? '1' : '0', rot: open ? '90deg' : '0deg',
+        toggle: () => this.setState({ open: Object.assign({}, this.state.open, { [d.id]: !open }) })
+      });
+    });
+    return {
+      themeClass: theme === 'light' ? 't-light' : 't-dark',
+      isActivity: tab === 'activity', isProjects: tab === 'projects',
+      actSel: tab === 'activity' ? 'true' : 'false', projSel: tab === 'projects' ? 'true' : 'false',
+      actColor: tab === 'activity' ? 'var(--fg)' : 'var(--sub)', projColor: tab === 'projects' ? 'var(--fg)' : 'var(--sub)',
+      underlineX: tab === 'activity' ? '71px' : '11px',
+      showActivity: () => this.setState({ tab: 'activity' }),
+      showProjects: () => this.setState({ tab: 'projects' }),
+      groups, projects,
+      tools: ['分析', 'LLM 性能', '技能', 'MCP']
+    };
+  }
+}
+</script>
+</body>
+</html>

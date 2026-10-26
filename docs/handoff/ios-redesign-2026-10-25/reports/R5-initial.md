@@ -1,0 +1,217 @@
+# R5 动效、可访问性与最终走查
+
+- 实现 commit：`e929334d81d17cfa8bad2b64695b12a1535e3290`
+- 基线：`288903e3`（R4 已核验）；分支：`design/ios-redesign`。
+- **已提交，未宣称全部验收通过。** 用户在得知 AX3 阅读区失败与 VoiceOver 核验限制后，明确选择「记录限制并提交」。保留失败截图，不通过修改滚动策略来掩盖问题。
+- 31 张截图均来自真实手机 Mock 场景；没有模拟器、真实 Provider 请求或主机业务写入。
+
+## 1. 实现
+
+| 项目 | 改动与边界 |
+| --- | --- |
+| 实心主按钮 | Theme 新增深浅色均为 `#2f6ad8` 的 `accentFill`、均为白色的 `onAccent`。问题提交、扫码配对、filled CircleButton、配对图标和两个历史重试按钮使用这对 token。非实心强调、描边、勾选和运行环不改为实心 token。 |
+| 旧别名 | 删除全部 17 个别名，生产 Swift 零旧别名引用。按照原有映射等值迁移，没有顺带改变旧页面布局。 |
+| 动效 | 剩余 opacity/identity transition 和 keyframe 120ms 统一通过 Motion。保留原 effect、触发条件及 Reduce Motion 分支。新增只读扫描，拒绝绕过 Motion 的 View 动画、裸 withAnimation 和数字 keyframe duration。 |
+| Dynamic Type | 不改 Typography 角色。Home 搜索/标题和 Composer chip 固定高度改为最小高度；Sheet 副标题在辅助字号允许换行。问题底部测量实际文本高度，辅助字号纵排，普通字号保留 1:1.4 比例；辅助字号强度使用可滚动列表，Composer 控件分两行。 |
+| 可访问性 | 装饰点和已有文字说明的状态条运行环隐藏；单独承担状态语义的首页/总览/轮次运行环保留「任务进行中」标签，避免隐藏真实状态。保留原中文图标标签和选中 traits。 |
+| 代码拆分 | 为正常通过单文件 20KB 门禁，把工作区预览移到 `Sheets/WorkspacePreview.swift`，MCP Sheet 内容移到 `Sheets/MCPPanel.swift`。复用已有 Xcode 同步目录，没有新增依赖或修改项目格式。 |
+
+别名映射：`ink→fg`、`muted→dim`、`faint→dim2`、`line→border`、`blue→accent`、`green/positive→ok`、`amber/warnInk→warn`、`surface→main`、`canvas/message/noticeBg→panel2`、`glass→panel`、`noticeInk→dim`、`warnBg→warn.opacity(0.12)`、`negative→bad`。
+
+### 不变的逻辑
+
+本地逐字/空白归一化对照检查证明：
+
+- `RemoteRunStore`、`AppModel`、`ExecutionTargetCoordinator`、`ConversationScrollView`、`ChatView`、`SessionTranscriptView`、`ConversationMarkdown`、`ScryRemoteApp` 与基线整文件相同。
+- Typography 实现、问题完整性判断/答案收集/文本绑定、Composer 权限 Menu、模型回调、发送 guard 与回调不变。
+- 工作区/MCP 拆分只有原代码搬移、等值颜色迁移，以及跨文件所需的两个工作区声明和 `mcpBody` 可见性调整。文件读取、sandbox、安全策略和状态逻辑未改。
+- 两个已有滚动问题没有修复；R5 发现的 AX3 问题也没有通过改 reader、增加重试/延时或重置身份来处理。
+
+## 2. 自动检查与构建
+
+环境：Xcode 26.6（17F113），真实 iPhone 13 / iOS 26.5.2，390×844pt；截图 780×1688px。
+
+| 检查 | 实际结果 | 证据 |
+| --- | --- | --- |
+| 最终 `build-for-testing` | 通用 iOS 目标通过，46 个 UI 测试编译成功 | `build-generic-final.log`；不是模拟器运行。 |
+| 真机指定目标构建 | 前期多个版本通过；最后一次 exit 70 | 最后设备已 unavailable，`build-delivery.log` 无可用目标。随后通用 iOS 编译通过，不冒充安装成功。 |
+| `new-task-readiness.py` | 7/7 | `new-task-readiness.log` |
+| `markdown-blocks.py` | 17/17 | `markdown-blocks.log` |
+| `theme-motion.py` | 52 个深浅色解析及原动效/字体检查通过 | `theme-motion-delivery.log`；只删除了已废除别名的两个旧断言，其他检查保留。 |
+| `home-sections.py` | 25/25 | `home-sections.log` |
+| `tool-groups.py` | 12/12 | `tool-groups.log` |
+| `sheet-contracts.py` | 22/22 | `sheet-contracts.log` |
+| 新 `visual-contracts.py` | 47 个 Swift 文件通过 | 零旧别名、Motion 调用检查、实际 token 对比度输出；最终 `visual-delivery.log`。 |
+| 动效负向对照 | 按预期 exit 1 | 临时 Swift 文件加入 `.animation(.easeInOut(duration: 0.2), value: changed)`，扫描明确拒绝；`negative-animation.log`。另有裸 withAnimation 正负对照。 |
+| `catalog-refresh.py` | 146 项，142 通过，4 既有失败 | 本次确实执行了断言，不沿用 R4 的 SIGKILL 结果。 |
+| 真机 `-selfTest` | 117 项，114 通过，3 既有失败 | `selftest-final.log`；版本时点见下。 |
+| `xcodebuild test` | runner 安装失败，业务用例执行 **0** | 免费签名 App 数量上限，exit 65，`ui-tests.xcresult`。未卸载其他 App，未删除/skip 断言。 |
+| 保留合同/搬移核对 | 通过 | `preservation.py` / `preservation.log`；另外确认七个仅迁移别名的文件完全等值。 |
+| 性能采集 | unavailable | `remote.loopback` 无匹配 counter collector，exit 1；没有速度改善或零耗时结论。 |
+| diff / 提交 hook | 通过 | `git diff --check` 和正常 20KB hook。新增搬移文件末尾空行在首次暂存检查中被发现，已修正。 |
+
+`catalog-refresh` 保留的四个失败：
+
+- `catalog.followUp.routingDoesNotResumeAnotherProfile`
+- `catalog.recovery.explicitModelChoice`
+- `catalog.model.explicitAutoIsRemembered`
+- `catalog.model.catalogRecoveryRestoresReadiness`
+
+`-selfTest` 保留后三项对应的 `run.recovery.explicitModelChoice`、`run.model.explicitAutoIsRemembered`、`run.model.catalogRecoveryRestoresReadiness`。没有为了本批变绿而修改模型偏好或恢复逻辑。
+
+扫描器是有明确范围的源码政策检查，不是完整 Swift AST 分析器。它检查当前 App 的动画调用、keyframe 和别名；真正的交互效果仍需真机证据。第一次实现误把 `Motion.animation` 工厂本身识别成 View modifier，已修正识别范围，并保留绕过工厂的负向对照。
+
+### 命令
+
+设备和签名值只放本机环境，不记录在报告中。
+
+```sh
+xcodebuild -project apps/ios/ScryRemote.xcodeproj -scheme ScryRemote \
+  -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' \
+  -derivedDataPath /tmp/scry-r2-device-build \
+  DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic \
+  PRODUCT_BUNDLE_IDENTIFIER=com.scry.remote.local build-for-testing
+
+# 设备在线时，本次也执行过同一构建的 -destination "id=$DEVICE" 版本。
+python3 apps/ios/Checks/new-task-readiness.py
+python3 apps/ios/Checks/catalog-refresh.py
+python3 apps/ios/Checks/markdown-blocks.py
+python3 apps/ios/Checks/theme-motion.py
+python3 apps/ios/Checks/home-sections.py
+python3 apps/ios/Checks/tool-groups.py
+python3 apps/ios/Checks/sheet-contracts.py
+python3 apps/ios/Checks/visual-contracts.py
+
+xcrun devicectl device process launch --device "$DEVICE" \
+  --terminate-existing --console com.scry.remote.local -- -selfTest
+
+xcodebuild test -project apps/ios/ScryRemote.xcodeproj -scheme ScryRemote \
+  -configuration Debug -sdk iphoneos -destination "id=$DEVICE" \
+  -derivedDataPath /tmp/scry-r2-device-build \
+  -resultBundlePath /tmp/scry-r5-validation/ui-tests.xcresult \
+  -only-testing:ScryRemoteUITests -allowProvisioningUpdates \
+  DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic \
+  PRODUCT_BUNDLE_IDENTIFIER=com.scry.remote.local
+
+npm run performance:measure -- --scenario remote.loopback \
+  --out /tmp/scry-r5-validation/performance
+```
+
+## 3. 对比度：实际 token 计算
+
+使用 WCAG sRGB 线性化及相对亮度公式，直接读取 `Theme.swift`，不是截图取样或估算。普通文字参考 4.5:1，大字/非文字参考 3:1。下面列出所有要求的组合；`*` 表示低于 4.5，没有低于 3 的基础组合。
+
+| 前景 | bg | sidebar | main | panel | panel2 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| dark.fg | 16.15 | 15.70 | 15.07 | 15.07 | 13.90 |
+| dark.dim | 8.86 | 8.62 | 8.27 | 8.27 | 7.63 |
+| dark.dim2 | 5.47 | 5.32 | 5.11 | 5.11 | 4.71 |
+| dark.accent | 6.65 | 6.46 | 6.20 | 6.20 | 5.72 |
+| dark.warn | 10.22 | 9.94 | 9.54 | 9.54 | 8.79 |
+| dark.bad | 6.22 | 6.05 | 5.80 | 5.80 | 5.35 |
+| dark.ok | 9.27 | 9.01 | 8.65 | 8.65 | 7.98 |
+| light.fg | 14.86 | 14.86 | 15.94 | 15.94 | 14.72 |
+| light.dim | 5.71 | 5.71 | 6.13 | 6.13 | 5.66 |
+| light.dim2 | 5.71 | 5.71 | 6.13 | 6.13 | 5.66 |
+| light.accent | 3.65* | 3.65* | 3.92* | 3.92* | 3.62* |
+| light.warn | 4.88 | 4.88 | 5.24 | 5.24 | 4.84 |
+| light.bad | 4.91 | 4.91 | 5.27 | 5.27 | 4.86 |
+| light.ok | 5.04 | 5.04 | 5.41 | 5.41 | 4.99 |
+
+| 组合 | 深色 | 浅色 | 结论 |
+| --- | ---: | ---: | --- |
+| onAccent / accentFill | 5.03 | 5.03 | 普通文字通过；本批实心按钮已改用这对 token。 |
+| warn /（warn 12% 叠在 panel2） | 6.79 | 4.14 | 浅色普通小字未达 4.5。 |
+
+**需设计核验决定的残留**：浅色 Markdown 链接等普通 accent 文字，以及问题/等待 badge 等 warn-on-warnSoft 小字，不宣称通过普通文字 AA。可以采用 `fg` 并以 underline/背景保留识别，但会改变 SPEC 当前指定的强调/警告前景语义；本批没有静默替换这些指定色，也没有擅自修改 token 数值。请核验方选择保留已知限制，或批准相应前景表现调整。实心主按钮的问题已通过新 token 解决，不再沿用旧白字 accent。
+
+## 4. 三档字号与浅色真机走查
+
+字号通过系统设置实际切换并读回：默认 `.large`（普通范围 50%）、最大非辅助 `.xxxLarge`（普通范围 100%）、`.accessibility3`（开启辅助字号后第 9/11 档，显示 82%）。最初一次拖动落在 73%（AX2），后来发现并重新设为 82%，相关 AX3 截图已全部替换，未把 AX2 当作 AX3 验收。
+
+| 页面 | 默认 / XXXLarge | AX3 |
+| --- | --- | --- |
+| 首页项目、动态 | 已走查；未见控件相互覆盖 | 已走查；单行会话标题按原合同省略，操作仍可见；动态空态换行。 |
+| 已完成会话 | 内容可见 | **未通过：初始阅读区空白。** |
+| 归档历史 | 内容可见 | **未通过：初始阅读区空白。** |
+| 运行中会话 | 内容、状态、Composer 可见 | 内容可见，状态与两行 Composer 可见。 |
+| Question | 选项与固定底部按钮可用 | 选项滚动，底部改纵排，无文字压缩到单行；选择态和提交按钮可见。 |
+| Overview medium/large | 已走查 | medium 需滚动才能读完信息，large 可见更多内容；没有伪造可用数据或增加上下文图。 |
+| 模型 Popover | 目录与分段强度可见 | 强度改列表；最后一项通过原生滚动定位、点击并读回「极高」，不是只检查首屏。 |
+| Composer | 原单行控件排列 | 两行真实控件，未改发送/权限/偏好语义。 |
+
+浅色默认字号完整走查了上述九个场景。截图保留当时真实的主机快照/读取时间未知提示，没有为了视觉效果隐藏证据状态。
+
+### AX3 阅读区对照与用户决定
+
+在干净 `288903e3` 基线、相同真机与 AX3 下另行编译安装对照：
+
+- 基线 Chat 同样出现初始空白；不能说是 R5 新引入的全部问题。
+- 基线 Transcript 可见尾部；R5 当前 Transcript 初始空白。**不能把这一项归为已证实的既有失败。** 可能存在布局交互，尚未定位。
+- 调整 Composer 为始终由真实控件组成的两行后，两条 AX3 初始阅读路径仍未通过；没有通过空 spacer、延时、重试或 reader 修改来制造通过。
+- 向用户报告以上区别后，用户明确选择「记录限制并提交」。因此保留空白截图，标记失败，交由后续单独授权的阅读布局调查处理。
+
+对照证据保留在本机 `baseline-*-ax3.png`、`current-ax3-compare.log`、`controls-ax3.log`。对照结束后已重新安装 R5 测试 App，没有把基线留作最终安装版本。
+
+## 5. Reduce Motion 与 VoiceOver
+
+| 项目 | 已验证范围 |
+| --- | --- |
+| 普通动效 | 默认设置下操作过 tab、项目展开、问题选择、模型/强度；原 Motion 预设单测保留。没有测量实际毫秒时序。 |
+| 减弱动态效果 | 系统开关读回为 1 后，操作首页 tab/展开、推理与工具展开、问题切换、Popover 与强度选择；动作完成，随后恢复为 0。 |
+| 位移/缩放分支 | rowIn、streamIn、disclosure、select、tab 的源码分支使用 R1 的 reduced opacity/120ms 路径；扫描及合同检查通过。 |
+| 流式新增块 | 本轮没有向真实 Provider 发请求来产生新流式块；streamIn 降级只有源码/合同证据，不宣称完成真实流式动画验收。 |
+| VoiceOver 标签 | 检查了实际 AX 树中的中文操作标签、选项选中 traits 及装饰隐藏代码。末次审查保留了独立运行环的状态标签，只隐藏已有相邻文字的装饰环。 |
+| VoiceOver 播报/顺序 | **未验证。** 真机已启用 VoiceOver，但 iCTRL 的连续右滑没有推进焦点，画面仍停在系统 grabber；没有可用播报证据，不能声称会读「已选」或顺序正确。随后关闭 VoiceOver。 |
+
+首次启用 VoiceOver 的系统通知提示选择了不允许，没有额外授权通知。末次状态标签修正发生在设备离线之后，只通过编译与源码核对，需人工 VoiceOver 重放。
+
+## 6. 截图与版本范围
+
+| 场景 | 默认浅色 | 默认深色 | XXXLarge 深色 | AX3 深色 |
+| --- | --- | --- | --- | --- |
+| 首页项目 | [图](R5/home-projects-light-default.png) | [图](R5/home-dark-default.png) | [图](R5/home-projects-dark-xxxlarge.png) | [图](R5/home-projects-dark-ax3.png) |
+| 首页动态 | [图](R5/home-activity-light-default.png) | — | [图](R5/home-activity-dark-xxxlarge.png) | [图](R5/home-activity-dark-ax3.png) |
+| 已完成 | [图](R5/completed-light-default.png) | [图](R5/completed-dark-default.png) | [图](R5/completed-dark-xxxlarge.png) | [未通过](R5/completed-dark-ax3.png) |
+| 历史 | [图](R5/history-light-default.png) | — | [图](R5/history-dark-xxxlarge.png) | [未通过](R5/history-dark-ax3.png) |
+| 运行中 | [图](R5/running-light-default.png) | — | [图](R5/running-dark-xxxlarge.png) | [图](R5/running-dark-ax3.png) |
+| Question | [图](R5/question-light-default.png) | [图](R5/question-dark-default.png) | [图](R5/question-dark-xxxlarge.png) | [图](R5/question-dark-ax3.png) |
+| Overview medium | [图](R5/overview-medium-light-default.png) | — | [图](R5/overview-medium-dark-xxxlarge.png) | [图](R5/overview-medium-dark-ax3.png) |
+| Overview large | [图](R5/overview-large-light-default.png) | — | [图](R5/overview-large-dark-xxxlarge.png) | [图](R5/overview-large-dark-ax3.png) |
+| 模型 | [图](R5/model-light-default.png) | — | [图](R5/model-dark-xxxlarge.png) | [图](R5/model-dark-ax3.png) |
+
+补充：[AX3 强度最后一项实际选择](R5/model-ax3-last-option.png)。共 31 张，已检查整组，没有私人通知或设置账户信息。
+
+版本界限必须保留：
+
+1. XXXLarge 九张及该档走查来自本批中间构建 `build-ax`，在最后 Composer 辅助字号两行重排之前；最后代码的 XXXLarge 路径没有再真机重放。
+2. 默认与 AX3 主要截图已在 `build-controls` 安装后重新拍摄，反映最终 Composer 排列及仍失败的阅读区。
+3. 随后只补了两个历史重试按钮的实心颜色、运行环可访问性隐藏范围及扫描器检查。设备已离线，末次修改未安装重拍；这些非截图场景修正只通过最终通用 iOS 编译/源码检查。不能用现有截图证明这些末次行为。
+4. `selftest-final` 在 `build-ax` 阶段执行；最后未重跑真机 selfTest。其结果是本批已执行结果，不冒充最终二进制的端到端验证。
+
+最终本机构建二进制 SHA-256：`4c9f8067df2601379fa0e2d2aab865cc1c2449bec33ea988b1e62501831f9bf8`。构建成功不代表已更新设备上的安装版本。
+
+## 7. 与设计稿的最终差异
+
+| 页面/能力 | 最终差异与依据 |
+| --- | --- |
+| 首页动态 | 只有真实需要回答/运行中两类；没有“已完成”段、未读点或由时间戳推断的完成状态。catalog `isActive` 只作历史提示。 |
+| 会话 who / reasoning | 只显示 Provider，不显示 Composer 选择推断出的逐轮模型；无推理秒数。 |
+| 工具组 | 只计真实相邻工具调用；截断标「至少 N」。不从工具文本推断类别、耗时或文件计数。 |
+| 轮次 footer | 仅已结束且确有 `resultSummary` 时原样展示。归档缺失则留空，不填 0、不从日志合计。 |
+| Markdown inline code | 保留 R3 核验确认的 SwiftUI 原生背景，不恢复自定义 TextKit 圆角实现。 |
+| 总览 | 无 context meter、累计 token/cost/duration 图表、每轮文件/diff、伪造时间线；数据不足明确「Mac 未提供」。无 reader 定位接口，因此轮次行只读。工作区文件入口明确相对 HEAD，而非本会话改动。 |
+| 问题 Sheet | 只显示请求字段；选择题不添加自由说明框。缺少会话标题时仅 Provider。关闭与取消仍是不同动作。 |
+| 模型/强度 | 只用主机目录真实选项。无 efforts 则无区域；超过五项或辅助字号用列表，不硬塞分段或猜测能力。 |
+| Dynamic Type | AX 字号允许分行、纵排和滚动，非固定像素复刻；AX3 阅读区存在已记录失败，不宣称完整适配。 |
+| 颜色与动效 | 实心按钮已按新增 token 修正；指定浅色 accent/warn-soft 小字仍有上述对比度决策项。原生 Sheet/Popover 容器保留系统行为，不用自制 overlay 伪造动效。 |
+
+以上数据差异来自 R2–R4 明确的数据边界，不是用视觉占位或估算代替主机能力。
+
+## 8. 交接与最终状态
+
+- 首轮设备签名网络验证阻挡由用户换网络后解除；没有修改 VPN、信任策略或卸载其他 App。最后设备再次不可用，末次只做通用 iOS 编译。
+- 两次整组截图脚本超时后先检查进程与当前界面；Popover 已打开，只补读取/截图，没有重复未知点击。基线首次构建超时发生在依赖编译，确认进程结束后续编成功。所有首轮失败保留在本机日志。
+- 已读回默认字号 50%、辅助字号关闭；已恢复浅色、Reduce Motion 关闭、VoiceOver 关闭。Automatic 原为关闭，未改变。测试 App 最后在线时仍有本批进程，之后设备离线，**未确认该进程已结束**；设备恢复连接后可关闭测试 App。不使用模糊进程终止。
+- 本机日志与原始核验数据：`/tmp/scry-r5-validation/`；当前构建：`/tmp/scry-r2-device-build/`；对照构建：`/tmp/scry-r5-baseline-build/`。不提交私人设备日志。
+- 下一步由设计 agent 核验本报告、颜色决策和截图；人工 VoiceOver 检查需由可操作真机的核验者执行。AX3 阅读布局问题需要另开明确授权的调查任务，尤其不能把 Transcript 差异当作已证实既有问题。当前任务按用户决定记录限制并提交，不扩大到滚动修复。

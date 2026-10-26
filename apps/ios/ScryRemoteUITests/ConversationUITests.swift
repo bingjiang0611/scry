@@ -27,41 +27,6 @@ final class ConversationUITests: XCTestCase {
     add(attachment)
   }
 
-  private func launchHome(extra: [String] = []) {
-    app.launchArguments = ["-uiPreview", "-connected", "-uiMockData", "-route", "home"] + extra
-    app.launch()
-    // Composer-first home: the drawer is the only session entry point.
-    XCTAssertTrue(app.buttons["打开会话列表"].waitForExistence(timeout: 10))
-    XCTAssertTrue(app.descendants(matching: .any)["message-input"].waitForExistence(timeout: 10))
-  }
-
-  private func openDrawer() {
-    app.buttons["打开会话列表"].firstMatch.tap()
-    XCTAssertTrue(app.textFields["搜索会话"].waitForExistence(timeout: 5))
-  }
-
-  func testDrawerRowCarriesProviderAndProjectOncePerRow() {
-    launchHome()
-    openDrawer()
-    let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "完成 iOS 工作目录选择器和附件发送")).firstMatch
-    XCTAssertTrue(row.waitForExistence(timeout: 5))
-    XCTAssertTrue(row.label.contains("CODEX"))
-    XCTAssertTrue(row.label.contains("scry"))
-    // Every drawer row names its own Provider/project, so a group header must not
-    // repeat it: the projects tab groups by project without a Provider header.
-    app.buttons["项目"].firstMatch.tap()
-    XCTAssertTrue(app.staticTexts["ios"].waitForExistence(timeout: 5))
-  }
-
-  func testDrawerToolsTabListsReadOnlyPanels() {
-    launchHome()
-    openDrawer()
-    app.buttons["工具"].firstMatch.tap()
-    for title in ["用量分析", "LLM 性能", "MCP 信任"] {
-      XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch.exists)
-    }
-  }
-
   func testPairingParseFailureIsActionableWithCollapsedTechnicalDetail() {
     app.launchArguments = ["-uiPreview", "-route", "pair", "-pairCode", "not-a-scry-code"]
     app.launch()
@@ -88,89 +53,6 @@ final class ConversationUITests: XCTestCase {
     XCTAssertTrue(app.staticTexts["安全"].exists)
     XCTAssertTrue(app.buttons["清除本机会话缓存"].exists)
     XCTAssertTrue(app.buttons["清除本机配对"].exists)
-  }
-
-  func testHomeManualRefreshShowsShortSuccessFeedback() {
-    launchHome(extra: ["-uiRefreshFeedback"])
-    XCTAssertTrue(app.buttons["刷新会话"].waitForExistence(timeout: 5))
-    app.buttons["刷新会话"].tap()
-    XCTAssertTrue(app.staticTexts["刷新成功"].waitForExistence(timeout: 5))
-    XCTAssertFalse(app.staticTexts["已连接 · 主机可达"].exists)
-    capture("home-manual-refresh-success")
-    let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.staticTexts["刷新成功"])
-    XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 5), .completed)
-  }
-
-  func testHomeRefreshFailureKeepsCacheActionableAndTechnicalDetailsCollapsed() {
-    launchHome(extra: ["-uiMockRefreshFailure"])
-    XCTAssertTrue(app.staticTexts["Mac1 · 会话列表刷新失败"].waitForExistence(timeout: 5))
-    // The failure already carries freshness; do not stack another status line.
-    XCTAssertFalse(app.staticTexts["尚未核对 · 下拉刷新"].exists)
-    XCTAssertEqual(app.staticTexts.matching(identifier: "Mac1 · 会话列表刷新失败").count, 1)
-    XCTAssertTrue(app.staticTexts["上次：运行中"].exists)
-    XCTAssertTrue(app.buttons["重试"].exists)
-    app.buttons["详情"].tap()
-    XCTAssertTrue(app.staticTexts["技术详情"].waitForExistence(timeout: 5))
-    XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "fixture transport failure")).firstMatch.exists)
-    app.buttons["技术详情"].tap()
-    XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "fixture transport failure")).firstMatch.waitForExistence(timeout: 5))
-    capture("home-refresh-failure-details")
-  }
-
-  func testRefreshDetailsSurviveBackgroundRecoveryWithoutChangingRequestMetadata() {
-    launchHome(extra: ["-uiMockRefreshFailure", "-uiResolveRefreshDetails"])
-    XCTAssertTrue(app.buttons["详情"].waitForExistence(timeout: 5))
-    let timestamp = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "上次完整刷新：")).firstMatch.label
-    XCTAssertFalse(timestamp.isEmpty)
-    app.buttons["详情"].tap()
-    // The identifier changes only after the real fixture refresh commits a new
-    // full-refresh timestamp. Do not use a sleep to race the disappearing body.
-    let updatedDone = app.buttons.matching(identifier: "catalog-refresh-details-updated")
-      .matching(NSPredicate(format: "label == %@", "完成")).firstMatch
-    XCTAssertTrue(updatedDone.waitForExistence(timeout: 5))
-    XCTAssertTrue(updatedDone.isHittable)
-    XCTAssertTrue(app.staticTexts[timestamp].exists)
-    XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "fixture transport failure")).firstMatch.exists)
-    app.buttons["技术详情"].tap()
-    XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "fixture transport failure")).firstMatch.waitForExistence(timeout: 5))
-    capture("home-details-after-background-recovery")
-    app.buttons["完成"].tap()
-    XCTAssertTrue(app.buttons["打开会话列表"].waitForExistence(timeout: 5))
-    XCTAssertFalse(app.staticTexts["Mac1 · 会话列表刷新失败"].exists)
-    XCTAssertFalse(app.staticTexts["刷新成功"].exists)
-  }
-
-  func testHomeFirstFailureHasOneActionableStateAndNoRawError() {
-    launchHome(extra: ["-uiMockFirstRefreshFailure"])
-    XCTAssertTrue(app.staticTexts["Mac1 · 会话列表刷新失败"].waitForExistence(timeout: 5))
-    XCTAssertEqual(app.staticTexts.matching(identifier: "Mac1 · 会话列表刷新失败").count, 1)
-    XCTAssertTrue(app.buttons["重试"].exists)
-    XCTAssertTrue(app.buttons["详情"].exists)
-    XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "fixture transport failure")).firstMatch.exists)
-    XCTAssertFalse(app.staticTexts["无法读取会话"].exists)
-  }
-
-  func testHomePartialRefreshFailureIsDistinct() {
-    launchHome(extra: ["-uiMockPartialRefreshFailure"])
-    XCTAssertTrue(app.staticTexts["Mac1 · 列表未完整更新"].waitForExistence(timeout: 5))
-    XCTAssertFalse(app.staticTexts["Mac1 · 会话列表刷新失败"].exists)
-    capture("home-partial-refresh-failure")
-  }
-
-  func testOpeningSearchResultWithKeyboardVisibleStaysResponsive() {
-    app.launchArguments = ["-uiPreview", "-connected", "-uiMockData", "-route", "home"]
-    app.launch()
-    XCTAssertTrue(app.buttons["打开会话列表"].waitForExistence(timeout: 10))
-    openDrawer()
-    let search = app.textFields["搜索会话"]
-    search.tap()
-    search.typeText("重构")
-    XCTAssertTrue(app.keyboards.firstMatch.exists)
-    app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "重构远程会话列表")).firstMatch.tap()
-    XCTAssertTrue(app.descendants(matching: .any)["message-input"].waitForExistence(timeout: 10))
-    app.buttons["项目文件与 Diff"].tap()
-    XCTAssertTrue(app.buttons["完成"].waitForExistence(timeout: 10))
-    capture("search-keyboard-navigation-responsive")
   }
 
   func testSettingsDoesNotOfferANoopPermissionButton() {
@@ -211,6 +93,8 @@ final class ConversationUITests: XCTestCase {
     let strip = app.descendants(matching: .any)["session-runtime-status"]
     XCTAssertTrue(strip.waitForExistence(timeout: 10))
     XCTAssertTrue(strip.staticTexts["运行中"].exists)
+    XCTAssertGreaterThanOrEqual(app.buttons["session-status-action"].frame.height, 44)
+    app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "更多选项")).firstMatch.tap()
     app.buttons["项目文件与 Diff"].tap()
     XCTAssertTrue(app.buttons["README.md"].waitForExistence(timeout: 10))
     app.buttons["README.md"].tap()
@@ -229,11 +113,25 @@ final class ConversationUITests: XCTestCase {
     XCTAssertTrue(app.staticTexts["-old"].exists)
     capture("workspace-diff")
     app.buttons["完成"].tap()
+    app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "更多选项")).firstMatch.tap()
     XCTAssertTrue(app.buttons["项目文件与 Diff"].exists)
   }
 
   func testToolAndReasoningDisclosure() {
     launch("transcript")
+    // R3 retains each tool's disclosure inside a new contiguous-call group.
+    let groups = app.buttons.matching(identifier: "tool-group-toggle")
+    XCTAssertTrue(groups.firstMatch.waitForExistence(timeout: 5))
+    XCTAssertGreaterThan(groups.count, 0)
+    let group = groups.element(boundBy: groups.count - 1)
+    for _ in 0..<6 {
+      if group.isHittable { break }
+      app.scrollViews["conversation-scroll"].swipeDown()
+    }
+    XCTAssertTrue(group.isHittable)
+    XCTAssertEqual(group.value as? String, "已折叠")
+    group.tap()
+    XCTAssertEqual(group.value as? String, "已展开")
     let tool = app.buttons.matching(identifier: "tool-detail-toggle").matching(NSPredicate(format: "label CONTAINS %@", "编辑 HomeView.swift")).firstMatch
     XCTAssertTrue(tool.waitForExistence(timeout: 5))
     XCTAssertEqual(tool.value as? String, "已折叠")
@@ -244,11 +142,19 @@ final class ConversationUITests: XCTestCase {
     tool.tap()
     XCTAssertEqual(tool.value as? String, "已折叠")
 
-    let reasoning = app.buttons["reasoning-toggle"].firstMatch
+    let reasonings = app.buttons.matching(identifier: "reasoning-toggle")
+    let reasoning = reasonings.element(boundBy: reasonings.count - 1)
+    for _ in 0..<6 {
+      if reasoning.isHittable { break }
+      app.scrollViews["conversation-scroll"].swipeDown()
+    }
+    XCTAssertTrue(reasoning.isHittable)
     reasoning.tap()
     XCTAssertEqual(reasoning.value as? String, "已展开")
     reasoning.tap()
     XCTAssertEqual(reasoning.value as? String, "已折叠")
+    group.tap()
+    XCTAssertEqual(group.value as? String, "已折叠")
   }
 
   func testKeyboardAndModelControlsPreserveDraft() {
@@ -267,7 +173,8 @@ final class ConversationUITests: XCTestCase {
     let model = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "模型 ")).firstMatch
     XCTAssertGreaterThanOrEqual(model.frame.height, 44)
     model.tap()
-    app.buttons["GPT-5.6"].tap()
+    app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "model-option-", "GPT-5.6")).firstMatch.tap()
+    app.otherElements["PopoverDismissRegion"].tap()
     XCTAssertTrue((input.value as? String)?.contains("Keep evidence visible") == true)
     capture("composer-model-selected")
   }
@@ -319,7 +226,7 @@ final class ConversationUITests: XCTestCase {
 
   func testQuestionStripReopensTheSheet() {
     launch("transcript", extra: ["-uiMockRunning", "-uiMockQuestion"])
-    let sheetTitle = app.staticTexts["需要你的决定"]
+    let sheetTitle = app.staticTexts["需要你决定"]
     XCTAssertTrue(sheetTitle.waitForExistence(timeout: 10))
     app.swipeDown(velocity: .fast)
     let strip = app.descendants(matching: .any)["session-runtime-status"]
@@ -426,6 +333,7 @@ final class ConversationUITests: XCTestCase {
       XCTAssertFalse(app.staticTexts["|---|:---:|---:|"].exists)
       XCTAssertTrue(app.staticTexts["表格之后的正文"].isHittable)
       let firstColumn = app.staticTexts["问题"].frame
+      // Inline code remains part of the SwiftUI Text, including its full cell label.
       let longCell = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "reload_tree.bg.scan")).firstMatch
       XCTAssertGreaterThan(longCell.frame.height, 40, "长单元格应换行而不是截断")
       capture("markdown-\(route)-left")

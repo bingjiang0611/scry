@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>iOS 设计规范</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.spec{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","SF Pro Text",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.h{margin:0 0 12px;font-size:15px;font-weight:600;color:#f1f1ef}
+.cap{font-size:11.5px;color:#8d8d87;font-weight:600}
+.r{display:grid;grid-template-columns:76px 1fr 1fr;align-items:center;gap:8px;min-height:30px;border-bottom:1px solid #292927;font-size:12.5px;color:#b5b5af}
+.sw{display:inline-flex;align-items:center;gap:6px}
+.dot{width:14px;height:14px;border-radius:4px;border:1px solid rgb(255 255 255 / 12%);flex:none}
+.t{display:grid;grid-template-columns:84px 1fr;gap:10px;align-items:baseline;padding:7px 0;border-bottom:1px solid #292927;font-size:12.5px;color:#b5b5af}
+.m{display:grid;grid-template-columns:110px 1fr;gap:10px;align-items:baseline;padding:7px 0;border-bottom:1px solid #292927;font-size:12.5px;color:#b5b5af}
+.ch{display:flex;gap:10px;font-size:13px;line-height:1.5;color:#b5b5af}
+.ch b{color:#f1f1ef;font-weight:600}
+</style>
+</helmet>
+<div class="spec" style="width: 1330px; height: 844px; box-sizing: border-box; padding: 36px 40px; background: #151515; color: #f1f1ef; display: flex; flex-direction: column; gap: 26px">
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px">
+    <section>
+      <h2 class="h">颜色：直接用 Mac 的 token</h2>
+      <div class="r cap"><span>语义</span><span>iOS 现在</span><span>改为（= Mac 深色）</span></div>
+      <sc-for list="{{colors}}" as="c" hint-placeholder-count="10">
+        <div class="r"><span>{{c.name}}</span>
+          <span class="sw"><span class="dot" style="background: {{c.old}}"></span><span class="mono" style="font-size: 11.5px; color: #8d8d87">{{c.old}}</span></span>
+          <span class="sw"><span class="dot" style="background: {{c.now}}"></span><span class="mono" style="font-size: 11.5px">{{c.now}}</span></span>
+        </div>
+      </sc-for>
+      <p style="margin: 10px 0 0; font-size: 12.5px; line-height: 1.5; color: #8d8d87">浅色主题同样取 Mac 浅色 token（#f7f7f5 / #ffffff / #3f7ee8 …），跟随系统切换。Provider 色沿用 Mac 两套。</p>
+    </section>
+
+    <section>
+      <h2 class="h">字号与形状</h2>
+      <div class="t cap"><span>用途</span><span>Mac → iOS（Dynamic Type）</span></div>
+      <div class="t"><span>回复正文</span><span>14.5 / 1.72 → <b style="color: #f1f1ef">16pt · callout</b>，行高 1.68</span></div>
+      <div class="t"><span>用户消息</span><span>14.5 → <b style="color: #f1f1ef">15.5pt</b>，18pt 圆角气泡</span></div>
+      <div class="t"><span>会话行</span><span>13.5 → <b style="color: #f1f1ef">15pt · subheadline</b>，单行</span></div>
+      <div class="t"><span>who / 工具行</span><span>11.5 → <b style="color: #f1f1ef">12–13pt · footnote</b></span></div>
+      <div class="t"><span>等宽</span><span>JetBrains Mono → <b style="color: #f1f1ef">SF Mono 12.5–13.5pt</b></span></div>
+      <div class="t"><span>最小字号</span><span>不低于 11pt；次要文字用 dim2，对比度 ≥ 4.5:1</span></div>
+      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 16px">
+        <div style="height: 54px; border-radius: 18px; background: #232323; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #b5b5af">气泡 18</div>
+        <div style="height: 54px; border-radius: 20px; border: 1px solid #333331; background: #1c1c1c; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #b5b5af">输入框 20</div>
+        <div style="height: 54px; border-radius: 12px; border: 1px solid #292927; background: #232323; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #b5b5af">卡片 12</div>
+        <div style="height: 54px; border-radius: 18px 18px 0 0; background: #232323; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #b5b5af">Sheet 18</div>
+        <div style="height: 54px; border-radius: 11px; background: rgb(255 255 255 / 4%); display: flex; align-items: center; justify-content: center; font-size: 12px; color: #b5b5af">Chip 11</div>
+        <div style="height: 54px; border-radius: 10px; border: 1px dashed #454541; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #b5b5af">触控 ≥ 44</div>
+      </div>
+    </section>
+
+    <section>
+      <h2 class="h">动效：和 Mac 同一套时长与曲线</h2>
+      <div class="m cap"><span>token</span><span>SwiftUI 对应</span></div>
+      <div class="m"><span class="mono" style="font-size: 11.5px">micro 100ms</span><span>按下反馈、颜色变化，.linear</span></div>
+      <div class="m"><span class="mono" style="font-size: 11.5px">fast 160ms</span><span>选中态、收起（exit 曲线）</span></div>
+      <div class="m"><span class="mono" style="font-size: 11.5px">base 220ms</span><span>标签下划线、列表入场</span></div>
+      <div class="m"><span class="mono" style="font-size: 11.5px">slow 300ms</span><span>Sheet 弹出、占用刻度填充</span></div>
+      <div class="m"><span class="mono" style="font-size: 11.5px">ease-out</span><span class="mono" style="font-size: 11.5px">.timingCurve(0.23, 1, 0.32, 1)</span></div>
+      <div class="m"><span class="mono" style="font-size: 11.5px">ease-struct</span><span class="mono" style="font-size: 11.5px">.timingCurve(0.32, 0.72, 0, 1)</span></div>
+      <div class="m"><span class="mono" style="font-size: 11.5px">ease-exit</span><span class="mono" style="font-size: 11.5px">.timingCurve(0.4, 0, 1, 1)</span></div>
+      <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; line-height: 1.5; color: #b5b5af">
+        <span>· 标签下划线滑动：220ms struct（matchedGeometryEffect）</span>
+        <span>· 折叠展开 240ms struct，收起 160ms exit</span>
+        <span>· 列表入场：上浮 4pt，每行错开 16ms，最多 10 行</span>
+        <span>· 流式输出：180ms 淡入上浮；运行环 900ms 线性旋转</span>
+        <span>· 减少动态效果：全部降级为 120ms 淡入淡出</span>
+      </div>
+    </section>
+  </div>
+
+  <section style="border-top: 1px solid #292927; padding-top: 22px">
+    <h2 class="h">相对现在 iOS 的主要变化</h2>
+    <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px 32px">
+      <div class="ch"><b>1</b><span><b>首页即 Mac 侧栏</b>：去掉抽屉，首页直接是「项目 / 动态」两个标签，和 Mac 侧栏同结构。</span></div>
+      <div class="ch"><b>2</b><span><b>动态三段</b>：需要回复 / 进行中 / 已完成，带通栏细线；已完成行更矮、更暗。</span></div>
+      <div class="ch"><b>3</b><span><b>会话正文同构</b>：18 圆角气泡、who 行、左侧时间线、可折叠的思考和工具组、本轮页脚。</span></div>
+      <div class="ch"><b>4</b><span><b>输入框同构</b>：20 圆角外壳，上方项目 / Provider，下方权限、模型 · 强度、圆形发送。</span></div>
+      <div class="ch"><b>5</b><span><b>新增总览</b>：头部按钮打开 Sheet，内容与 Mac 右侧总览一致（占用刻度、Token、轮次）。</span></div>
+      <div class="ch"><b>6</b><span><b>浅色主题</b>：现在只有固定深色，改为跟随系统，两套色都取自 Mac。</span></div>
+      <div class="ch"><b>7</b><span><b>保留 iOS 的好设计</b>：Composer 上方的单行运行状态条、44pt 触控、系统 Sheet 和长按菜单。</span></div>
+      <div class="ch"><b>8</b><span><b>动效</b>：把 PR #4 的时长和曲线搬到 SwiftUI，减少动态效果时同样降级。</span></div>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1330,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      colors: [
+        { name: '首页底色', old: '#121210', now: '#181818' },
+        { name: '正文底色', old: '#1C1C1A', now: '#1c1c1c' },
+        { name: '次级表面', old: '#252422', now: '#232323' },
+        { name: '边框', old: '#2B2B29', now: '#333331' },
+        { name: '主文字', old: '#E8E7E4', now: '#f1f1ef' },
+        { name: '次文字', old: '#A6A5A0', now: '#b5b5af' },
+        { name: '强调', old: '#86ACF4', now: '#5b9cff' },
+        { name: '成功', old: '#75C79A', now: '#69cc93' },
+        { name: '警告', old: '#D5AA72', now: '#efb958' },
+        { name: '失败', old: '#E68C90', now: '#f36c67' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

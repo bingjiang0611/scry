@@ -52,12 +52,12 @@ struct NewSessionView: View {
 
       if run.chosen == nil || run.chosenProvider == nil {
         Text(run.chosen == nil ? ConnectionCopy.chooseWorkspaceFirst : ConnectionCopy.chooseProviderToSend)
-          .font(.system(size: 13)).foregroundStyle(Palette.muted).padding(.horizontal, 20)
+          .font(.system(size: 13)).foregroundStyle(Palette.dim).padding(.horizontal, 20)
           .frame(maxWidth: .infinity, alignment: .leading)
       }
       if run.chosenProvider != nil, let notice = run.providerControlsNotice {
         HStack {
-          Text(notice).font(.system(size: 13)).foregroundStyle(Palette.muted)
+          Text(notice).font(.system(size: 13)).foregroundStyle(Palette.dim)
           if !run.providerControlsLoading {
             Button(run.controlsReady ? ConnectionCopy.refreshProviderControls : ConnectionCopy.retry) { run.retryProviderControls() }
           }
@@ -92,10 +92,10 @@ struct NewSessionView: View {
         }
       }
       .padding(.horizontal, 14).padding(.bottom, 4)
-      .background(Palette.surface)
-      .overlay(alignment: .top) { Rectangle().fill(Palette.line).frame(height: 0.5) }
+      .background(Palette.main)
+      .overlay(alignment: .top) { Rectangle().fill(Palette.border).frame(height: 0.5) }
     }
-    .background(Palette.surface)
+    .background(Palette.main)
     // A discovered target can become ready without changing its identity.
     .task(id: paired ? targets.newTaskScope.id : nil) { if paired { run.loadProjects(); run.loadProviders() } }
     .onAppear { controlsVisible = true }
@@ -136,22 +136,22 @@ struct NewSessionView: View {
                           connected: Bool? = nil, action: @escaping () -> Void = {}) -> some View {
     Button(action: action) {
       HStack(spacing: 13) {
-        Image(systemName: symbol).font(.system(size: 17)).foregroundStyle(Palette.muted).frame(width: 22)
+        Image(systemName: symbol).font(.system(size: 17)).foregroundStyle(Palette.dim).frame(width: 22)
         VStack(alignment: .leading, spacing: 2) {
-          Text(eyebrow).font(.system(size: 9, weight: .semibold)).tracking(0.8).foregroundStyle(Palette.muted)
-          Text(value).font(.system(size: 15, weight: .medium)).foregroundStyle(enabled || connected != nil ? Palette.ink : Palette.muted).lineLimit(2)
+          Text(eyebrow).font(.system(size: 9, weight: .semibold)).tracking(0.8).foregroundStyle(Palette.dim)
+          Text(value).font(.system(size: 15, weight: .medium)).foregroundStyle(enabled || connected != nil ? Palette.fg : Palette.dim).lineLimit(2)
         }
         Spacer()
         if let connected {
-          Circle().fill(connected ? Palette.green : Palette.faint).frame(width: 7, height: 7)
+          Circle().fill(connected ? Palette.ok : Palette.dim2).frame(width: 7, height: 7)
         } else if enabled {
-          Image(systemName: Symbol.chevron).font(.system(size: 12, weight: .semibold)).foregroundStyle(Palette.faint)
+          Image(systemName: Symbol.chevron).font(.system(size: 12, weight: .semibold)).foregroundStyle(Palette.dim2)
         }
       }
       .frame(minHeight: 59).contentShape(Rectangle())
     }
     .buttonStyle(.plain).disabled(!enabled)
-    .overlay(alignment: .bottom) { Rectangle().fill(Palette.line).frame(height: 1) }
+    .overlay(alignment: .bottom) { Rectangle().fill(Palette.border).frame(height: 1) }
   }
 }
 

@@ -31,7 +31,7 @@ for path in [
     module_maps.append(package / '.build/checkouts' / path)
 sources = ['RemoteRunStore', 'RemoteRunClient', 'RemoteHistoryCache', 'RemoteConnection',
            'RemoteKeychain', 'RemotePairingClient', 'PairingCode', 'AppModel', 'ConnectionCopy',
-           'ExecutionTargetCoordinator']
+           'ExecutionTargetCoordinator', 'ConversationCopy']
 with tempfile.TemporaryDirectory(prefix='scry-catalog-binary-') as temporary:
     executable = Path(temporary) / 'catalog-refresh-checks'
     command = ['xcrun', 'swiftc', '-D', 'DEBUG', '-swift-version', '5', '-parse-as-library',
@@ -41,17 +41,16 @@ with tempfile.TemporaryDirectory(prefix='scry-catalog-binary-') as temporary:
     for module_map in module_maps:
         assert module_map.is_file(), module_map
         command += ['-Xcc', '-fmodule-map-file=' + str(module_map)]
-    # Unrelated existing self-tests reference two view models from the large
-    # UIKit components file. Compile those exact declarations, not stand-ins.
-    components = (root / 'apps/ios/ScryRemote/Components.swift').read_text()
+    # Compile the exact turn/status declarations used by existing self-tests.
+    components = (root / 'apps/ios/ScryRemote/ConversationTurns.swift').read_text()
     view_models = Path(temporary) / 'ReferencedViewModels.swift'
     view_models.write_text('import SwiftUI\n' +
-        components[components.index('struct TurnOutcomeNote:'):components.index('// A turn this device already')] +
-        components[components.index('struct SessionStatusLine {'):components.index('struct SessionStatusStrip:')])
-    home = (root / 'apps/ios/ScryRemote/HomeView.swift').read_text()
+        components[components.index('struct TurnOutcomeNote:'):components.index('extension ConversationTurn {')] +
+        components[components.index('struct SessionStatusLine {'):])
+    home = (root / 'apps/ios/ScryRemote/CatalogRefreshFeedback.swift').read_text()
     details_snapshot = Path(temporary) / 'CatalogRefreshDetailsSnapshot.swift'
     details_snapshot.write_text('import Foundation\n' +
-        home[home.index('struct CatalogRefreshDetailsSnapshot:'):home.index('// One projection')])
+        home[home.index('struct CatalogRefreshDetailsSnapshot:'):home.index('struct CatalogRefreshBanner:')])
     command += [str(details_snapshot)]
     for source in sources:
         source_path = root / 'apps/ios/ScryRemote' / (source + '.swift')

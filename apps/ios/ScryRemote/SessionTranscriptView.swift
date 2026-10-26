@@ -1,75 +1,6 @@
 import SwiftUI
 import RemoteTransport
 
-// A session opened from the list: read-only replay of its past turns PLUS a live
-// composer to CONTINUE the conversation. A follow-up resumes the SAME Provider
-// session (RemoteRunStore.submitFollowUp with resume = the session id), so the
-// run keeps the prior context. It stays honest (CLAUDE.md 证据不能说谎): past
-// turns are the host's read of real archived content, the live turn shows only
-// streamed output (a possibly-incomplete cache) while its REAL lifecycle sits
-// in the status strip, and nothing is fabricated. File diffs still live on the Mac.
-// Full text stays inline. Parse archived Markdown off the UI actor; the
-// conversation virtualizes rows, while each visible reply exposes its full
-// height so tail positioning does not stop at a placeholder.
-private struct HistoryChunkView: View {
-  let kind: String
-  let text: String
-  var result: String?
-  @State private var blocks: [ConversationMarkdownBlock]?
-  @State private var parsedSource: String?
-
-  @ViewBuilder var body: some View {
-    switch kind {
-    case "reasoning", "tool", "tool_result", "truncated":
-      ConversationChunk(kind: kind, text: text, result: result)
-    default:
-      Group {
-        if let blocks, parsedSource == text {
-          ConversationMarkdownText(source: "", parsedBlocks: blocks)
-        } else { ProgressView() }
-      }
-      .task(id: text) {
-        let parsed = await ConversationMarkdownParser.parseForReading(text)
-        guard !Task.isCancelled else { return }
-        blocks = parsed
-        parsedSource = text
-      }
-    }
-  }
-}
-
-private struct HistoryTurnView: View {
-  let turn: G0Transport.RunHistoryTurn
-  var body: some View {
-    // The conversation owns the lazy layout. Nested lazy stacks estimate whole
-    // tall turns independently and can leave the tail viewport empty.
-    Group {
-      if !turn.userText.isEmpty { TurnUserBubble(text: turn.userText, runId: turn.runId) }
-      ForEach(ConversationEntry.group(turn.items, kind: \.kind, text: \.text)) { entry in
-        HistoryChunkView(kind: entry.kind, text: entry.text, result: entry.result)
-      }
-    }.frame(maxWidth: .infinity, alignment: .leading)
-  }
-}
-
-// Browsing another session must not reset an unresolved recovery task. Reuse
-// the history implementation and protected cache, but never restore its run.
-struct ReadOnlySessionTranscriptView: View {
-  @EnvironmentObject var model: AppModel
-  @State private var history: RemoteRunStore
-
-  init(owner: RemoteRunStore) {
-    _history = State(initialValue: RemoteRunStore(historyFor: owner))
-  }
-
-  var body: some View {
-    SessionTranscriptView(readOnly: true)
-      .environment(history)
-      .onChange(of: history.reachable) { if let ok = history.reachable { model.markReachable(ok) } }
-      .onChange(of: history.connectionObservation) { _, observation in model.markObservation(observation) }
-  }
-}
-
 struct SessionTranscriptView: View {
   @Environment(\.scenePhase) private var scenePhase
   @State private var controlsVisible = false
@@ -77,9 +8,11 @@ struct SessionTranscriptView: View {
   @EnvironmentObject var model: AppModel
   @Environment(RemoteRunStore.self) var run
   @State private var showFiles = false
-  @State private var showHistoryDetails = false
-  @State private var olderReadRequest = 0
+  @State private var showOverview = false
+  @State var showHistoryDetails = false
+  @State var olderReadRequest = 0
   @State private var latestReadRequest = 0
+  @State private var splitPlans: [String: [Int: ConversationSplitPlan]] = [:]
   @State private var followingLatest = true
   @State private var showLiveQuestion = false
   @State private var stopTarget: StopTarget?
@@ -91,13 +24,13 @@ struct SessionTranscriptView: View {
   private var draft: String { composer.wrappedValue.text }
   private var attachments: [DraftAttachment] { composer.wrappedValue.attachments }
 
-  private var session: OpenedSession? { model.openedSession }
+  var session: OpenedSession? { model.openedSession }
   private var hasLiveTurn: Bool { run.prompt != nil }
-  private var sessionIdentity: RemoteRunStore.SessionIdentity? {
+  var sessionIdentity: RemoteRunStore.SessionIdentity? {
     guard let s = session else { return nil }
     return s.identity
   }
-  private var completedTurns: [RemoteRunStore.CompletedLiveTurn] {
+  var completedTurns: [RemoteRunStore.CompletedLiveTurn] {
     guard let identity = sessionIdentity else { return [] }
     return run.completedTurns(for: identity)
   }
@@ -110,7 +43,7 @@ struct SessionTranscriptView: View {
   private var runBusy: Bool { run.isBusy || otherLive != nil || backgroundSend != nil }
   // Show the detached run's streamed output unless history already holds its
   // turn (a Provider transcript written live); never show both.
-  private var detachedLive: G0Transport.LiveRun? {
+  var detachedLive: G0Transport.LiveRun? {
     guard let live = otherLive, live.origin == "remote", run.detachedRunId == live.runId,
           run.activeSessionIdentity == sessionIdentity else { return nil }
     if run.detachedTurnInHistory { return nil }
@@ -124,7 +57,7 @@ struct SessionTranscriptView: View {
     guard run.activeSessionIdentity == sessionIdentity else { return false }
     switch run.history { case .idle, .loading: return false; default: return true }
   }
-  private var historyReadyForDisplay: Bool {
+  var historyReadyForDisplay: Bool {
     guard run.activeSessionIdentity == sessionIdentity else { return false }
     if case .loaded = run.history { return true }
     if case .partial = run.history { return true }
@@ -141,8 +74,10 @@ struct SessionTranscriptView: View {
         run.historyFollowingLatest = value
         followingLatest = value
       }) {
-        historyBody
-        if hasLiveTurn && !run.liveTurnInHistory { FocusedTurnView() }
+        historyBody(split: splitPlans)
+        if hasLiveTurn && !run.liveTurnInHistory {
+          ForEach(ConversationTurn.focused(run).withSplitPlans(splitPlans["focused"] ?? [:]).rows(id: "focused")) { $0 }
+        }
         if let live = detachedLive { detachedTurn(live) }
         if let pending = backgroundSend {
           TurnUserBubble(text: pending.routing.prompt,
@@ -151,10 +86,12 @@ struct SessionTranscriptView: View {
         }
       }
       .id(sessionIdentity)
+      .task(id: splitRevision) { await refreshSplitBlocks() }
       statusStrip
       if !readOnly { footer }
     }
-    .background(Palette.surface)
+    .background(Palette.main)
+    .environment(\.conversationProvider, providerName)
     .sheet(isPresented: $showFiles) {
       if let session { WorkspaceBrowserView(cwd: session.cwd).id(session.cwd) }
     }
@@ -162,6 +99,7 @@ struct SessionTranscriptView: View {
       HistoryEvidenceDetails(status: historyStatus, lastChecked: run.historyFetchedAt,
                              refreshError: run.historyRefreshError, storageNotice: run.historyStorageNotice)
     }
+    .sheet(isPresented: $showOverview) { overview }
     .macLocalLinks(cwd: session?.cwd)
     .onChange(of: otherLiveQuestion?.questionId, initial: true) { _, id in showLiveQuestion = id != nil }
     .confirmationDialog("停止这次运行？",
@@ -178,7 +116,8 @@ struct SessionTranscriptView: View {
     }
     .sheet(isPresented: $showLiveQuestion) {
       if let live = otherLive, let request = otherLiveQuestion {
-        RemoteQuestionSheet(request: request, submitting: run.liveActionRunId == live.runId, error: run.liveActionError,
+        RemoteQuestionSheet(request: request, subtitle: SheetCopy.context(title: session?.label, provider: providerName),
+          submitting: run.liveActionRunId == live.runId, error: run.liveActionError,
           onAnswer: { run.answerLiveQuestion(live, request: request, answers: $0) },
           onCancel: { run.answerLiveQuestion(live, request: request, answers: [:], cancel: true) })
           .id(run.questionIdentity(request))
@@ -222,121 +161,82 @@ struct SessionTranscriptView: View {
     }
   }
 
-  @ViewBuilder private var historyBody: some View {
-    if run.activeSessionIdentity == sessionIdentity, run.historyCapacityLimit {
-      Button("加载完整历史（完整字节传输）") {
-        if let s = session { run.loadCompleteHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, agentProfileId: s.agentProfileId) }
-      }
-      .buttonStyle(.borderedProminent)
-      .disabled(run.historySyncing)
-      .accessibilityHint("明确选择后下载完整历史；不会裁剪内容")
-    }
-    switch run.activeSessionIdentity == sessionIdentity ? run.history : .loading {
-    case .idle, .loading:
-      // The detached run's live turn is already real content; a skeleton
-      // above it would read as "nothing loaded yet".
-      if detachedLive == nil { transcriptLoadingState }
-    case let .partial(turns), let .loaded(turns):
-      if run.historyOlderBefore != nil {
-        Button(run.historySyncing ? "正在读取更早历史…" : "加载更早的完整历史") {
-          olderReadRequest += 1
-          if let s = session { run.loadOlderHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, agentProfileId: s.agentProfileId) }
-        }
-        .buttonStyle(.bordered)
-        .disabled(run.historySyncing)
-        .accessibilityHint("仅读取更早轮次，不会裁剪当前历史")
-      }
-      // Snapshot ordinals preserve existing view identity when older pages are
-      // prepended. They are presentation positions, not canonical turn IDs.
-      let first = run.historyPageOffset
-      ForEach(first..<(first + turns.count), id: \.self) { ordinal in
-        HistoryTurnView(turn: turns[ordinal - first])
-      }
-      ForEach(completedTurns) { turn in CompletedTurnView(turn: turn) }
-    case .empty:
-      ForEach(completedTurns) { turn in CompletedTurnView(turn: turn) }
-      Text(ConnectionCopy.noReadableHistory)
-        .font(.system(size: 13)).foregroundStyle(Palette.muted)
-        .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 20)
-    case .baseUnavailable:
-      // The missing record is reported once, in the status strip.
-      ForEach(completedTurns) { turn in CompletedTurnView(turn: turn) }
-    case .failed("history_unavailable") where detachedLive != nil:
-      // A session this run is creating has no record until the run ends.
-      EmptyView()
-    case let .failed(reason):
-      EmptyState(title: "暂时无法读取会话", detail: reason + "\n已输入的草稿会保留。", symbol: "exclamationmark.triangle")
-      Button("重新读取") {
-        if let s = session {
-          run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true, agentProfileId: s.agentProfileId)
-        }
-      }
-      .buttonStyle(.borderedProminent).frame(maxWidth: .infinity)
-      DisclosureGroup("错误详情") { Text(reason).font(.caption).textSelection(.enabled) }
-        .font(.caption).foregroundStyle(Palette.muted)
-      ForEach(completedTurns) { turn in CompletedTurnView(turn: turn) }
-    }
+  // Cheap identity for the background split task: revision counters only.
+  private var splitRevision: String {
+    "\(historyReadyForDisplay)-\(run.historyRevision)-\(completedTurns.count)-\(run.output.count)-\(run.output.last?.id ?? -1)-\(run.lifecycle)-\(run.detachedOutput.count)-\(run.detachedOutput.last?.id ?? -1)"
   }
 
-  private var transcriptLoadingState: some View {
-    VStack(alignment: .leading, spacing: 22) {
-      HStack(spacing: 12) {
-        ZStack {
-          Circle().fill(Palette.blue.opacity(0.08)).frame(width: 34, height: 34)
-          Circle().fill(Palette.line.opacity(0.5)).frame(width: 12, height: 12)
-        }
-        VStack(alignment: .leading, spacing: 3) {
-          RoundedRectangle(cornerRadius: 4).fill(Palette.line.opacity(0.6)).frame(width: 150, height: 12)
-          RoundedRectangle(cornerRadius: 4).fill(Palette.line.opacity(0.35)).frame(width: 105, height: 10)
-        }
+  private func refreshSplitBlocks() async {
+    var turns: [(String, ConversationTurn)] = []
+    switch run.history {
+    case let .partial(page), let .loaded(page):
+      let first = run.historyPageOffset
+      turns += page.enumerated().map { index, turn in
+        ("history-\(first + index)",
+         ConversationTurn(prompt: turn.userText.isEmpty ? nil : turn.userText, runId: turn.runId,
+                         entries: ConversationEntry.group(turn.items, kind: \.kind, text: \.text), archived: true))
       }
-      .padding(.vertical, 12).padding(.horizontal, 13)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .background(Palette.canvas.opacity(0.82), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-
-      VStack(alignment: .leading, spacing: 18) {
-        HStack {
-          Spacer(minLength: 72)
-          RoundedRectangle(cornerRadius: 17, style: .continuous)
-            .fill(Palette.canvas)
-            .frame(height: 58)
-        }
-        VStack(alignment: .leading, spacing: 10) {
-          RoundedRectangle(cornerRadius: 4).fill(Palette.line).frame(width: 174, height: 10)
-          RoundedRectangle(cornerRadius: 4).fill(Palette.line).frame(maxWidth: .infinity).frame(height: 10)
-          RoundedRectangle(cornerRadius: 4).fill(Palette.line).frame(width: 236, height: 10)
-        }
-      }
-      .accessibilityHidden(true)
-      .opacity(0.72)
+    default:
+      break
     }
-    .padding(.top, 8)
-    .frame(maxWidth: .infinity, alignment: .leading)
+    turns += completedTurns.map { ($0.id, ConversationTurn.completed($0)) }
+    if hasLiveTurn && !run.liveTurnInHistory { turns.append(("focused", ConversationTurn.focused(run))) }
+    if let live = detachedLive {
+      turns.append((live.runId, ConversationTurn(prompt: live.prompt.isEmpty ? nil : live.prompt, runId: live.runId,
+        running: live.state == "running", usagePending: true,
+        entries: ConversationEntry.group(run.detachedOutput, kind: \.kind, text: \.text), notice: ConversationCopy.liveCache)))
+    }
+    var plans: [String: [Int: ConversationSplitPlan]] = [:]
+    for (id, turn) in turns {
+      var hit: [Int: ConversationSplitPlan] = [:]
+      for candidate in turn.splitCandidates {
+        if let blocks = ConversationMarkdownSplitter.ready(turnID: id, candidate: candidate), blocks.count > 1 {
+          hit[candidate.index] = ConversationSplitPlan(token: candidate.token, blocks: blocks,
+            sourceLength: candidate.text.utf16.count, tailStart: blocks[blocks.count - 1].start,
+            crlfFree: !candidate.text.contains("\r\n"))
+        }
+      }
+      plans[id] = hit
+    }
+    splitPlans = plans
+    for (id, turn) in turns {
+      for candidate in turn.splitCandidates where plans[id]?[candidate.index]?.token != candidate.token {
+        guard let parsed = await ConversationMarkdownSplitter.parse(turnID: id, candidate: candidate) else { continue }
+        guard !Task.isCancelled else { return }
+        plans[id, default: [:]][candidate.index] = parsed
+        splitPlans = plans
+      }
+    }
   }
 
   private var header: some View {
     RemoteHeader(title: session?.label.isEmpty == false ? session!.label : ConnectionCopy.session,
-                 subtitle: headerSubtitle, link: model.link, titleLineLimit: 2,
+                 subtitle: headerSubtitle, providerId: session?.providerId, titleLineLimit: 2,
                  backAction: { model.goBack() }) {
-      Button { showFiles = true } label: {
-        Image(systemName: "folder").font(.system(size: 18)).frame(width: 44, height: 44)
-      }.accessibilityLabel(ConnectionCopy.projectFilesAndDiff).disabled(session == nil)
-      MoreMenu(label: ConnectionCopy.moreWithStatus(historyStatus)) {
-        Section(ConnectionCopy.historyStatus) {
-          Text(historyStatus)
-          if let date = run.historyFetchedAt { Text("上次核对 \(date.formatted(date: .abbreviated, time: .shortened))") }
-          if let reason = run.historyRefreshError { Text(reason) }
-          if let notice = run.historyStorageNotice { Text(notice) }
-        }
-        if let s = session {
-          Button { run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true, agentProfileId: s.agentProfileId) } label: {
-            Label(ConnectionCopy.historyRefresh, systemImage: "arrow.clockwise")
+      HStack(spacing: 0) {
+        CircleButton(symbol: "sidebar.right", label: SheetCopy.overview) { showOverview = true }
+          .accessibilityIdentifier("session-overview")
+        MoreMenu(label: ConnectionCopy.moreWithStatus(historyStatus)) {
+          Button { showFiles = true } label: {
+            Label(ConnectionCopy.projectFilesAndDiff, systemImage: Symbol.folder)
+          }.disabled(session == nil)
+          Section(ConnectionCopy.historyStatus) {
+            Button(ConnectionCopy.details) { showHistoryDetails = true }
+            Text(historyStatus)
+            if let date = run.historyFetchedAt { Text(SheetCopy.lastChecked(date)) }
+            if let reason = run.historyRefreshError { Text(reason) }
+            if let notice = run.historyStorageNotice { Text(notice) }
           }
+          if let s = session {
+            Button { run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true, agentProfileId: s.agentProfileId) } label: {
+              Label(ConnectionCopy.historyRefresh, systemImage: "arrow.clockwise")
+            }
+          }
+          if !readOnly {
+            Button { if model.targetCoordinator.beginNewTask(scope: model.targetCoordinator.selectedScope) { model.route = .newSession } } label: { Label(ConversationCopy.newTask, systemImage: Symbol.compose) }
+          }
+          Button { model.route = .settings } label: { Label(ConversationCopy.settings, systemImage: Symbol.gear) }
         }
-        if !readOnly {
-          Button { if model.targetCoordinator.beginNewTask(scope: model.targetCoordinator.selectedScope) { model.route = .newSession } } label: { Label("新任务", systemImage: Symbol.compose) }
-        }
-        Button { model.route = .settings } label: { Label("设置", systemImage: Symbol.gear) }
       }
     }
   }
@@ -349,7 +249,7 @@ struct SessionTranscriptView: View {
 
   private var headerSubtitle: String {
     // Identity only; every run state is in the status strip.
-    [projectName(session?.cwd), providerName].filter { !$0.isEmpty }.joined(separator: " · ")
+    ConversationCopy.context(project: projectName(session?.cwd), provider: providerName)
   }
 
   private var providerName: String {
@@ -418,33 +318,6 @@ struct SessionTranscriptView: View {
     return nil
   }
 
-  private var historyIssue: SessionStatusLine? {
-    guard run.activeSessionIdentity == sessionIdentity else { return nil }
-    // The exact reason stays in the header menu (历史状态); the paced
-    // refresh keeps retrying while this error stands (historyIsWatched).
-    let details = SessionStatusLine.Action(title: ConnectionCopy.details, perform: { showHistoryDetails = true })
-    if historyReadyForDisplay || run.history == .baseUnavailable, run.historyRefreshError != nil {
-      return .init(text: run.history == .baseUnavailable ? ConnectionCopy.historyUnavailable
-                                                          : ConnectionCopy.historySyncFailed,
-                   tone: .warning, busy: true, action: details)
-    }
-    if run.historyStorageNotice != nil {
-      return .init(text: ConnectionCopy.historyStorageLimited, tone: .warning, action: details)
-    }
-    if case .partial = run.history {
-      return .init(text: ConnectionCopy.historyPartial, tone: .warning, action: details)
-    }
-    if run.historyFromCache {
-      return .init(text: run.historySyncing ? ConnectionCopy.historyCheckingCache : ConnectionCopy.historyFromCache,
-                   busy: run.historySyncing, action: details)
-    }
-    guard run.history == .baseUnavailable else { return nil }
-    if run.historySyncing { return .init(text: ConnectionCopy.historyReading, busy: true) }
-    return .init(text: ConnectionCopy.historyEarlierUnavailable,
-                 action: .init(title: ConnectionCopy.retry, perform: {
-                   if let s = session { run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true, agentProfileId: s.agentProfileId) }
-                 }))
-  }
 
   private func reloadProviders() {
     guard let s = session else { return }
@@ -452,17 +325,6 @@ struct SessionTranscriptView: View {
     else { run.loadSessionProviderControls(providerId: s.providerId, agentProfileId: s.agentProfileId, cwd: s.cwd, force: true) }
   }
 
-  private var historyStatus: String {
-    if run.historyNativeUnavailable { return ConnectionCopy.historyNativeUnavailable }
-    if let source = run.historyPageSource, run.historyOlderBefore != nil {
-      return ConnectionCopy.historyRecentComplete(source)
-    }
-    if case .partial = run.history { return ConnectionCopy.historyPartial }
-    if run.historyFromCache { return ConnectionCopy.historyFromCache }
-    if run.historySyncing { return ConnectionCopy.historyReading }
-    if run.historyFetchedAt != nil { return ConnectionCopy.historyVerified }
-    return ConnectionCopy.historyStateUnavailable
-  }
 
   private func projectName(_ cwd: String?) -> String {
     guard let cwd else { return "" }
@@ -472,23 +334,20 @@ struct SessionTranscriptView: View {
   // A run in this session that this store is not driving. It streams until the
   // session record holds the turn (detachedLive), then history replaces it.
   private func detachedTurn(_ live: G0Transport.LiveRun) -> some View {
-    Group {
-      if !live.prompt.isEmpty { TurnUserBubble(text: live.prompt, runId: live.runId, usagePending: true) }
-      TurnOutputList(lines: run.detachedOutput)
-      // This cache can omit or truncate chunks; it is not the archive.
-      Text("实时输出可能不完整；运行结束后以会话记录为准。")
-        .font(.system(size: 12.5)).foregroundStyle(Palette.muted)
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
+    let turn = ConversationTurn(prompt: live.prompt.isEmpty ? nil : live.prompt, runId: live.runId,
+      running: live.state == "running", usagePending: true,
+      entries: ConversationEntry.group(run.detachedOutput, kind: \.kind, text: \.text),
+      notice: ConversationCopy.liveCache)
+    return ForEach(turn.withSplitPlans(splitPlans[live.runId] ?? [:]).rows(id: live.runId)) { $0 }
   }
 
   private var footer: some View {
     VStack(alignment: .leading, spacing: 5) {
       MessageComposer(text: composer.text, attachments: composer.attachments,
-                      placeholder: !run.hasConnection ? "连接后可输入" : runBusy ? "运行结束后可发送，先写也行" : "继续这段对话…",
+                      placeholder: !run.hasConnection ? ConversationCopy.connectedInput : runBusy ? ConversationCopy.busyInput : ConversationCopy.followUpInput,
                       disabled: !run.hasConnection,
                       sendDisabled: runBusy || !controlsMatch || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                      contextLabel: run.chosenProvider?.label ?? session?.providerId.uppercased(), contextLocked: true,
+                      contextLocked: true,
                       modelOptions: run.modelOptions, selectedModelId: run.chosenModelId,
                       modelSelectionIssue: run.modelSelectionIssue,
                       onModel: { run.chooseModel($0) },
@@ -514,44 +373,6 @@ struct SessionTranscriptView: View {
       }
     }
     .padding(.horizontal, 14).padding(.bottom, 4)
-    .background(Palette.surface)
-    .overlay(alignment: .top) { Rectangle().fill(Palette.line.opacity(0.7)).frame(height: 0.5) }
-  }
-}
-
-private struct HistoryEvidenceDetails: View {
-  let status: String
-  let lastChecked: Date?
-  let refreshError: String?
-  let storageNotice: String?
-  @Environment(\.dismiss) private var dismiss
-
-  var body: some View {
-    NavigationStack {
-      List {
-        Section(ConnectionCopy.historyStatus) {
-          Text(status)
-          Text(lastChecked.map(ConnectionCopy.historyLastCheckedText) ?? ConnectionCopy.historyNotChecked)
-            .font(.system(size: 13)).foregroundStyle(Palette.muted)
-        }
-        if let refreshError {
-          Section(ConnectionCopy.historySyncIssue) {
-            Text(refreshError).font(.system(size: 13)).textSelection(.enabled)
-          }
-        }
-        if let storageNotice {
-          Section(ConnectionCopy.historyStorageIssue) {
-            Text(storageNotice).font(.system(size: 13)).textSelection(.enabled)
-          }
-        }
-      }
-      .navigationTitle(ConnectionCopy.historyDetailsTitle)
-      .navigationBarTitleDisplayMode(.inline)
-      .toolbar {
-        ToolbarItem(placement: .confirmationAction) {
-          Button(ConnectionCopy.done) { dismiss() }
-        }
-      }
-    }
+    .background(Palette.main)
   }
 }

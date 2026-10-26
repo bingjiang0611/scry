@@ -25,20 +25,23 @@ struct HomeComposer: View {
   }
 
   var body: some View {
-    VStack(spacing: 8) {
-      contextRow
-      if let error = store.submitError {
-        Text(error).font(.system(size: 12)).foregroundStyle(Palette.warnInk)
-          .frame(maxWidth: .infinity, alignment: .leading)
-      }
-      MessageComposer(text: composer.text, attachments: composer.attachments,
-                      placeholder: paired ? ConnectionCopy.composerPlaceholder : ConnectionCopy.composerUnavailable,
-                      disabled: !paired, sendDisabled: !canSend,
-                      onSend: send)
-    }
-    .padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 6)
-    .background(Palette.surface)
-    .overlay(alignment: .top) { Rectangle().fill(Palette.line).frame(height: 0.5) }
+    MessageComposer(text: composer.text, attachments: composer.attachments,
+                    placeholder: paired ? ConnectionCopy.composerPlaceholder : ConnectionCopy.composerUnavailable,
+                    disabled: !paired, sendDisabled: !canSend,
+                    projectLabel: store.chosen?.label ?? ConnectionCopy.composerNeedsProject,
+                    onProject: { showProjects = true }, providerId: store.chosenProvider?.id,
+                    submissionError: store.submitError,
+                    hostLabel: targets.aggregatesHosts ? targets.newTaskScope.label : nil,
+                    contextLabel: store.chosenProvider?.label ?? ConnectionCopy.composerNeedsProvider,
+                    onContext: { showProviders = true },
+                    modelOptions: store.modelOptions, selectedModelId: store.chosenModelId,
+                    modelSelectionIssue: store.modelSelectionIssue, onModel: { store.chooseModel($0) },
+                    effortOptions: store.effortOptions, selectedEffort: store.chosenEffort,
+                    onEffort: { store.chooseEffort($0) },
+                    permissionOptions: store.chosenProvider?.permissions ?? [], selectedPermission: store.permissionMode,
+                    onPermission: { store.choosePermission($0) },
+                    onSend: send)
+    .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 6)
     .task(id: paired) {
       guard paired else { return }
       store.loadProjects()
@@ -50,35 +53,6 @@ struct HomeComposer: View {
     .sheet(isPresented: $showProviders) {
       ProviderPickerSheet { store.chooseProvider($0); showProviders = false }
     }
-  }
-
-  private var contextRow: some View {
-    HStack(spacing: 8) {
-      chip(symbol: Symbol.folder,
-           title: store.chosen?.label ?? ConnectionCopy.composerNeedsProject,
-           filled: store.chosen != nil, enabled: paired) { showProjects = true }
-      chip(symbol: Symbol.agent,
-           title: store.chosenProvider?.label ?? ConnectionCopy.composerNeedsProvider,
-           filled: store.chosenProvider != nil, enabled: paired) { showProviders = true }
-      Spacer(minLength: 0)
-      if targets.aggregatesHosts {
-        Text(targets.newTaskScope.label).font(.system(size: 11)).foregroundStyle(Palette.faint).lineLimit(1)
-      }
-    }
-  }
-
-  private func chip(symbol: String, title: String, filled: Bool, enabled: Bool,
-                    action: @escaping () -> Void) -> some View {
-    Button(action: action) {
-      HStack(spacing: 5) {
-        Image(systemName: symbol).font(.system(size: 11, weight: .medium))
-        Text(title).font(.system(size: 12, weight: .medium)).lineLimit(1)
-      }
-      .foregroundStyle(filled ? Palette.ink : Palette.muted)
-      .padding(.horizontal, 10).frame(minHeight: 30)
-      .background(Palette.message, in: Capsule())
-    }
-    .buttonStyle(.plain).disabled(!enabled)
   }
 
   private func send() {

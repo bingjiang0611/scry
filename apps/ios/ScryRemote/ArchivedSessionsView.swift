@@ -45,9 +45,9 @@ struct ArchivedSessionsView: View {
               ArchivedSessionRowView(session: session,
                                      onRestore: { actions.restore(session, run: run) },
                                      onDelete: { confirmDelete = session })
-                .overlay(alignment: .bottom) { Rectangle().fill(Palette.line).frame(height: 1) }
+                .overlay(alignment: .bottom) { Rectangle().fill(Palette.border).frame(height: 1) }
             }
-            Text(ConnectionCopy.archivedPolicy).font(.system(size: 11)).foregroundStyle(Palette.faint)
+            Text(ConnectionCopy.archivedPolicy).font(.system(size: 11)).foregroundStyle(Palette.dim2)
               .padding(.top, 12)
           }
         }
@@ -56,7 +56,7 @@ struct ArchivedSessionsView: View {
       .scrollIndicators(.hidden)
       .refreshable { _ = await run.refreshArchived() }
     }
-    .background(Palette.surface)
+    .background(Palette.main)
     .task { _ = await run.refreshArchived() }
     .confirmationDialog(ConnectionCopy.deleteConfirmTitle, isPresented: deletePresented, titleVisibility: .visible) {
       Button(ConnectionCopy.actionDelete, role: .destructive) {
@@ -91,7 +91,7 @@ struct ArchivedSessionsView: View {
   private var provenance: some View {
     Text(ConnectionCopy.panelProvenance(run.scopeLabel,
                                         readAt: run.archivedFetchedAt?.formatted(date: .omitted, time: .shortened)))
-      .font(.system(size: 11)).foregroundStyle(Palette.faint)
+      .font(.system(size: 11)).foregroundStyle(Palette.dim2)
       .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
   }
 }
