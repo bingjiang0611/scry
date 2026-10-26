@@ -190,7 +190,12 @@ async function readChunk(download: Download): Promise<{ bytes: Buffer; hasMore: 
 export class RemoteFileDownloads {
   #downloads = new Map<string, Download>()
   #openings = new Map<string, { peer: string; abort: AbortController }>()
-  constructor(private readonly workspace: WorkspaceAuthorizer, private readonly home = homedir()) {}
+  private readonly workspace: WorkspaceAuthorizer
+  private readonly home: string
+  constructor(workspace: WorkspaceAuthorizer, home = homedir()) {
+    this.workspace = workspace
+    this.home = home
+  }
 
   #drop(id: string, error?: Error): void {
     const download = this.#downloads.get(id)

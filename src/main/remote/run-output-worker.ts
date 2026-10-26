@@ -27,7 +27,10 @@ export class RunOutputWorkerStore implements RunOutputStore {
   private stopped?: Error
   private closing = false
 
-  private constructor(private readonly worker: WorkerLike) {
+  private readonly worker: WorkerLike
+
+  private constructor(worker: WorkerLike) {
+    this.worker = worker
     this.ready = new Promise((resolve, reject) => { this.readyResolve = resolve; this.readyReject = reject })
     worker.on('message', (message) => {
       if ('event' in message) this.readyResolve()

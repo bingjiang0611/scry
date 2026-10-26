@@ -1329,8 +1329,11 @@ const WORKSPACE_FILE_LIMIT = 1_000
 const WORKSPACE_UNTRACKED_BYTES = 16 * 1024 * 1024
 
 class WorkspaceReadUnavailable extends Error {
-  constructor(readonly reason: 'workspace_limit' | 'workspace_attributes' | 'workspace_file_type' | 'workspace_index' | 'workspace_submodule') {
+  readonly reason: 'workspace_limit' | 'workspace_attributes' | 'workspace_file_type' | 'workspace_index' | 'workspace_submodule'
+
+  constructor(reason: WorkspaceReadUnavailable['reason']) {
     super(reason)
+    this.reason = reason
   }
 }
 

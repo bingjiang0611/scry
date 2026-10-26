@@ -46,7 +46,10 @@ export class RemoteInteractionBroker {
   readonly #broker: UserQuestionBroker
   readonly #closed = new Map<string, ClosedAnswer>()
 
-  constructor(private readonly recordLifecycle: (runId: string, detail: string) => void) {
+  private readonly recordLifecycle: (runId: string, detail: string) => void
+
+  constructor(recordLifecycle: (runId: string, detail: string) => void) {
+    this.recordLifecycle = recordLifecycle
     this.#broker = new UserQuestionBroker((change) => {
       if (change.kind !== 'closed' || change.intervention.resolution === 'answered') return
       try {
