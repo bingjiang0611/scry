@@ -1791,7 +1791,10 @@ try {
   for (const campaign of turnRefsOnly ? ['refs'] : listsOnly ? ['structure', 'history', 'live', 'refs'] : ['all']) await new Promise((resolve, reject) => {
     // The fixture window is shown inactive and may sit behind the user's windows. Occluded windows stop
     // producing frames, which stalls requestAnimationFrame and frame-aligned mousemove; hide() still hides.
-    const child = spawn(electron, [join(temp, 'main.cjs'), '--disable-gpu', '--disable-backgrounding-occluded-windows', ...(listsOnly ? [`--scry-lists-campaign=${campaign}`] : [])], {
+    // Pin the OS motion preference: the macOS runner can report reduced motion,
+    // which silently disables every FLIP/sweep positive control. Checks that need
+    // reduced motion still emulate it explicitly over CDP.
+    const child = spawn(electron, [join(temp, 'main.cjs'), '--disable-gpu', '--disable-backgrounding-occluded-windows', '--force-prefers-no-reduced-motion', ...(listsOnly ? [`--scry-lists-campaign=${campaign}`] : [])], {
       env: { PATH: process.env.PATH, TMPDIR: tmpdir(), HOME: join(temp, 'home') }, stdio: ['ignore', 'pipe', 'pipe']
     })
     let output = ''
