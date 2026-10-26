@@ -62,3 +62,9 @@
 **F-2 结论**：Codex 在子目录启动通过；在子仓库启动时 hook 完全没加载（未通过），原因见上，属需要另行决定的产品缺口。
 
 证据：`/tmp/scry-fa/f12/{S1,S2,S3}/{hook-trace.log,prepare.log,doctor.json,turns.json,ws/.scry/records}`、`/tmp/scry-fa/evidence/f12-prepare.log`。
+
+## 核验意见（审阅方，2026-10-26）
+
+- S1/S2 证据链完整（hooks.state、trace、records、recover 0/0），F-1 Codex 与 F-2 子目录通过，认可。
+- S3 根因认可：`src/cli/workspace-hook-sources.ts` 只把 `.codex/hooks.json` 写在工作区根，Codex 在子仓库启动时以子仓库 git root 为项目根，读不到。这是静默缺口：无 record、无 skip log、doctor 仍 healthy，正好落在多仓库工作区这个主场景。
+- 修复方向交给用户决定。另外，Qoder（以及之后如需的 Claude、OpenCode）重跑时应加 S3 子仓库场景，确认它们是否有同样的缺口。
