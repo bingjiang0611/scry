@@ -1,6 +1,6 @@
 # R6c 阅读区：行粒度假设（先测量，不成立就停）
 
-**用户确认继续后才开始。** 分支 `design/ios-redesign`，基于 `84cb5556`。授权范围同 R6。先读 [reports/R6.md](reports/R6.md) 全文，尤其是末尾 R6b 的核验意见。
+**用户 2026-10-26 已确认继续。** 分支 `design/ios-redesign`，基于 `84cb5556`。授权范围同 R6。先读 [reports/R6.md](reports/R6.md) 全文，尤其是末尾 R6b 的核验意见。
 
 ## 假设
 
