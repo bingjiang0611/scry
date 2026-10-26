@@ -65,7 +65,7 @@ struct ConversationChunk: View {
     case "reasoning", "tool", "tool_result": evidenceDetail
     case "truncated":
       Label(text, systemImage: "exclamationmark.triangle")
-        .font(Typography.meta).foregroundStyle(Palette.warn)
+        .font(Typography.meta).foregroundStyle(Palette.warnText)
         .padding(.vertical, 8).padding(.horizontal, 10)
         .background(Palette.warn.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
     default: ConversationMarkdownText(source: text)
@@ -349,7 +349,7 @@ struct TurnOutcomeNote: View {
   var body: some View {
     Label(text, systemImage: "exclamationmark.circle")
       .font(Typography.meta.weight(.medium))
-      .foregroundStyle(failed ? Palette.bad : Palette.warn)
+      .foregroundStyle(failed ? Palette.bad : Palette.warnText)
       .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
       .accessibilityIdentifier("turn-outcome")
   }

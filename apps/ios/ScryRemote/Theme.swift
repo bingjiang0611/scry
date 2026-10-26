@@ -21,6 +21,8 @@ enum Palette {
   static let dim = adaptive(dark: 0xB5B5AF, light: 0x62625E)
   static let dim2 = adaptive(dark: 0x8D8D87, light: 0x62625E)
   static let accent = adaptive(dark: 0x5B9CFF, light: 0x3F7EE8)
+  static let accentText = adaptive(dark: 0x5B9CFF, light: 0x2C64CC)
+  static let warnText = adaptive(dark: 0xEFB958, light: 0x7F5409)
   static let accentFill = adaptive(dark: 0x2F6AD8, light: 0x2F6AD8)
   static let onAccent = adaptive(dark: 0xFFFFFF, light: 0xFFFFFF)
   static let accentSoft = adaptive(dark: 0x5B9CFF, light: 0x3F7EE8, darkAlpha: 0.12, lightAlpha: 0.09)

@@ -68,21 +68,32 @@ def main():
     source = (APP / 'Theme.swift').read_text()
     colors = {name: (rgb(int(dark, 16)), rgb(int(light, 16))) for name, dark, light in re.findall(
         r'static let (\w+) = adaptive\(dark: 0x([0-9A-Fa-f]+), light: 0x([0-9A-Fa-f]+)', source)}
-    backgrounds = ['bg', 'sidebar', 'main', 'panel', 'panel2']
+    backgrounds = ['bg', 'sidebar', 'main', 'panel', 'panel2', 'panel3']
     print('| mode / foreground | ' + ' | '.join(backgrounds) + ' |')
     print('|---|' + '---:|' * len(backgrounds))
     for mode, index in [('dark', 0), ('light', 1)]:
-        for foreground in ['fg', 'dim', 'dim2', 'accent', 'warn', 'bad', 'ok']:
+        for foreground in ['fg', 'dim', 'dim2', 'accent', 'warn', 'accentText', 'warnText', 'bad', 'ok']:
             values = []
             for background in backgrounds:
                 ratio = contrast(colors[foreground][index], colors[background][index])
+                if foreground in ('accentText', 'warnText'):
+                    assert ratio >= 4.5, f'{mode}.{foreground}/{background}: {ratio}'
                 values.append(f'{ratio:.2f}' + (' **<3**' if ratio < 3 else ' *<4.5*' if ratio < 4.5 else ''))
             print(f'| {mode}.{foreground} | ' + ' | '.join(values) + ' |')
         fill = contrast(colors['onAccent'][index], colors['accentFill'][index])
         assert fill >= 4.5, f'{mode}: onAccent/accentFill {fill}'
         warning_background = tuple(w * 0.12 + p * 0.88 for w, p in zip(colors['warn'][index], colors['panel2'][index]))
         warning = contrast(colors['warn'][index], warning_background)
-        print(f'{mode}: onAccent/accentFill={fill:.2f}; warn/(warn 12% over panel2)={warning:.2f}')
+        warning_text = contrast(colors['warnText'][index], warning_background)
+        soft = re.search(r'static let accentSoft = adaptive\(dark: 0x([0-9A-Fa-f]+), light: 0x([0-9A-Fa-f]+), darkAlpha: ([0-9.]+), lightAlpha: ([0-9.]+)', source)
+        soft_rgb = rgb(int(soft.group(index + 1), 16))
+        alpha = float(soft.group(index + 3))
+        accent_background = tuple(a * alpha + p * (1 - alpha) for a, p in zip(soft_rgb, colors['panel2'][index]))
+        accent_text = contrast(colors['accentText'][index], accent_background)
+        assert warning_text >= 4.5, f'{mode}.warnText/warnSoft: {warning_text}'
+        assert accent_text >= 4.5, f'{mode}.accentText/accentSoft: {accent_text}'
+        print(f'{mode}: onAccent/accentFill={fill:.2f}; warn/(warn 12% over panel2)={warning:.2f}; '
+              f'warnText/(warn 12% over panel2)={warning_text:.2f}; accentText/(accentSoft over panel2)={accent_text:.2f}')
     return 0
 
 

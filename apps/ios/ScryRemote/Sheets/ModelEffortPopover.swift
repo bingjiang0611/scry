@@ -84,13 +84,9 @@ struct ModelEffortPopover: View {
   private func modelRow(_ label: String, description: String?, isDefault: Bool, selected: Bool) -> some View {
     HStack(spacing: 8) {
       VStack(alignment: .leading, spacing: 4) {
-        HStack(spacing: 6) {
-          Text(label).font(Typography.rowTitle).foregroundStyle(Palette.fg)
-          if isDefault {
-            Text(SheetCopy.defaultModel).font(Typography.meta).foregroundStyle(Palette.dim2)
-              .padding(.horizontal, 5).padding(.vertical, 2)
-              .background(Palette.subtle, in: RoundedRectangle(cornerRadius: 6))
-          }
+        ViewThatFits(in: .horizontal) {
+          modelTitle(label, isDefault: isDefault, stacked: false)
+          modelTitle(label, isDefault: isDefault, stacked: true)
         }
         if let description, !description.isEmpty {
           Text(description).font(Typography.meta).foregroundStyle(Palette.dim2)
@@ -102,6 +98,19 @@ struct ModelEffortPopover: View {
     }
     .padding(.horizontal, 8).padding(.vertical, 6)
     .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading).contentShape(Rectangle())
+  }
+
+  private func modelTitle(_ label: String, isDefault: Bool, stacked: Bool) -> some View {
+    let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(spacing: 6))
+    return layout {
+      Text(label).font(Typography.rowTitle).foregroundStyle(Palette.fg)
+        .lineLimit(1).fixedSize(horizontal: !stacked, vertical: false)
+      if isDefault {
+        Text(SheetCopy.defaultModel).font(Typography.meta).foregroundStyle(Palette.dim2)
+          .padding(.horizontal, 5).padding(.vertical, 2)
+          .background(Palette.subtle, in: RoundedRectangle(cornerRadius: 6))
+      }
+    }
   }
 
   private func effortSegment(_ label: String, id: String?) -> some View {

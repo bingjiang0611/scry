@@ -56,13 +56,21 @@ struct ReadOnlySessionTranscriptView: View {
   }
 }
 
+struct HistoryRetryButton: View {
+  let title: String
+  let action: () -> Void
+  var body: some View {
+    Button(title, action: action)
+      .buttonStyle(.borderedProminent).tint(Palette.accentFill).foregroundStyle(Palette.onAccent)
+  }
+}
+
 extension SessionTranscriptView {
   @ViewBuilder var historyBody: some View {
     if run.activeSessionIdentity == sessionIdentity, run.historyCapacityLimit {
-      Button(ConversationCopy.loadHistory) {
+      HistoryRetryButton(title: ConversationCopy.loadHistory) {
         if let s = session { run.loadCompleteHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, agentProfileId: s.agentProfileId) }
       }
-      .buttonStyle(.borderedProminent).tint(Palette.accentFill).foregroundStyle(Palette.onAccent)
       .disabled(run.historySyncing)
       .accessibilityHint(ConversationCopy.loadHistoryHint)
     }
@@ -104,12 +112,11 @@ extension SessionTranscriptView {
       EmptyView()
     case let .failed(reason):
       EmptyState(title: ConversationCopy.failedHistory, detail: ConversationCopy.failedHistoryDetail(reason), symbol: "exclamationmark.triangle")
-      Button(ConversationCopy.retryHistory) {
+      HistoryRetryButton(title: ConversationCopy.retryHistory) {
         if let s = session {
           run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true, agentProfileId: s.agentProfileId)
         }
       }
-      .buttonStyle(.borderedProminent).tint(Palette.accentFill).foregroundStyle(Palette.onAccent)
       .frame(maxWidth: .infinity)
       DisclosureGroup(ConversationCopy.errorDetails) { Text(reason).font(Typography.meta).textSelection(.enabled) }
         .font(Typography.meta).foregroundStyle(Palette.dim)

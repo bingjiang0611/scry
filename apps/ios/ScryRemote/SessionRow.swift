@@ -47,7 +47,7 @@ struct SessionRowView: View {
     if let live = store.liveRun(providerId: session.providerId, cwd: session.cwd,
                                 externalSessionId: session.externalSessionId, agentProfileId: session.agentProfileId) {
       if store.openLiveQuestion(live) != nil {
-        Text(ConnectionCopy.homeWaiting).font(Typography.meta.weight(.semibold)).foregroundStyle(Palette.warn)
+        Text(ConnectionCopy.homeWaiting).font(Typography.meta.weight(.semibold)).foregroundStyle(Palette.warnText)
           .padding(.horizontal, 6).padding(.vertical, 3)
           .background(Palette.warn.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
       } else {

@@ -94,6 +94,7 @@ struct ProjectPickerSheet: View {
               HStack(spacing: 9) {
                 Image(systemName: "chevron.left").font(.system(size: 12, weight: .semibold))
                 Text(listing.parent?.label ?? ConnectionCopy.authorizedProjects).font(.system(size: 14, weight: .medium))
+                  .foregroundStyle(Palette.accentText)
                 Spacer()
               }
               .foregroundStyle(Palette.accent).frame(minHeight: 44).contentShape(Rectangle())

@@ -219,7 +219,7 @@ private struct ConversationMarkdownInline: View {
     Text(rendered).font(font.weight(weight))
       .foregroundStyle(muted ? Palette.dim : Palette.fg)
       .lineSpacing(Typography.replyLineSpacing).textSelection(.enabled)
-      .tint(Palette.accent).multilineTextAlignment(alignment)
+      .tint(Palette.accentText).multilineTextAlignment(alignment)
       .frame(maxWidth: .infinity, alignment: alignment == .trailing ? .trailing : alignment == .center ? .center : .leading)
   }
 }
@@ -305,7 +305,7 @@ struct ConversationMarkdownText: View {
       }
     case let .ordered(marker):
       HStack(alignment: .firstTextBaseline, spacing: 9) {
-        Text(marker).font(Typography.reply.weight(.semibold)).foregroundStyle(Palette.accent)
+        Text(marker).font(Typography.reply.weight(.semibold)).foregroundStyle(Palette.accentText)
           .frame(minWidth: 22, alignment: .trailing)
         ConversationMarkdownInline(source: block.text, muted: muted)
       }

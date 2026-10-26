@@ -83,7 +83,7 @@ struct MessageComposer: View {
       }
       VStack(alignment: .leading, spacing: 0) {
         if let submissionError {
-          Text(submissionError).font(Typography.meta).foregroundStyle(Palette.warn).padding(.top, 8)
+          Text(submissionError).font(Typography.meta).foregroundStyle(Palette.warnText).padding(.top, 8)
         }
         if slashToken != nil && !disabled { slashMenu.padding(.bottom, 8) }
         if !attachments.isEmpty {
@@ -167,7 +167,7 @@ struct MessageComposer: View {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
               Text("/\(command.name)")
                 .font(Typography.mono.weight(.semibold))
-                .foregroundStyle(Palette.accent)
+                .foregroundStyle(Palette.accentText)
               VStack(alignment: .leading, spacing: 2) {
                 if !command.description.isEmpty {
                   Text(command.description).font(Typography.meta).foregroundStyle(Palette.fg).lineLimit(2)

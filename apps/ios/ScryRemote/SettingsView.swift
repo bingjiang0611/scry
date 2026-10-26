@@ -77,7 +77,7 @@ struct SettingsView: View {
           }
           if let error = model.destructiveActionError {
             Label(error, systemImage: "exclamationmark.circle")
-              .font(.system(size: 12)).foregroundStyle(Palette.warn)
+              .font(.system(size: 12)).foregroundStyle(Palette.warnText)
           }
           Button(role: .destructive) { confirmUnpair = true } label: {
             Text(ConnectionCopy.clearLocalPairing)

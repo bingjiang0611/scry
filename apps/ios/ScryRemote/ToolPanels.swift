@@ -88,7 +88,7 @@ struct ToolPanelView: View {
         .font(.system(size: 11)).foregroundStyle(Palette.dim2)
       Spacer(minLength: 0)
       if let panel, isStale(panel) {
-        Text(ConnectionCopy.panelStale).font(.system(size: 10)).foregroundStyle(Palette.warn)
+        Text(ConnectionCopy.panelStale).font(.system(size: 10)).foregroundStyle(Palette.warnText)
       }
     }
   }
@@ -145,7 +145,7 @@ struct ToolPanelView: View {
         }
         if analytics.totals.costKnownRows < analytics.totals.turns {
           Text(ConnectionCopy.analyticsLowerBound).font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(Palette.warn).padding(.horizontal, 6).frame(minHeight: 18)
+            .foregroundStyle(Palette.warnText).padding(.horizontal, 6).frame(minHeight: 18)
             .background(Palette.warn.opacity(0.12), in: Capsule())
         }
       }

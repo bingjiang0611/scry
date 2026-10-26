@@ -23,7 +23,7 @@ struct CatalogRefreshBanner: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 7) {
       HStack(alignment: .top, spacing: 8) {
-        Image(systemName: "exclamationmark.circle").font(Typography.rowTitle.weight(.medium)).padding(.top, 1)
+        Image(systemName: "exclamationmark.circle").font(Typography.rowTitle.weight(.medium)).foregroundStyle(Palette.warn).padding(.top, 1)
         VStack(alignment: .leading, spacing: 3) {
           Text(title).font(Typography.groupLabel)
           Text(ConnectionCopy.lastFullRefresh(lastFullRefresh)).font(Typography.meta)
@@ -37,7 +37,7 @@ struct CatalogRefreshBanner: View {
           .frame(minWidth: 44, minHeight: 44)
       }
     }
-    .foregroundStyle(Palette.warn).padding(12)
+    .foregroundStyle(Palette.warnText).padding(12)
     .background(Palette.panel2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     .padding(.horizontal, 16).padding(.vertical, 8)
   }

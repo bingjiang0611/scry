@@ -117,17 +117,16 @@ extension ToolPanelView {
       Text(ConnectionCopy.mcpSeverity(severity)).font(.system(size: 10, weight: .semibold))
         .foregroundStyle(count > 0 ? Palette.fg : Palette.dim2)
       Text("\(count)").font(.system(size: 10, weight: .bold))
-        .foregroundStyle(count > 0 ? severityColor(severity) : Palette.dim2)
+        .foregroundStyle(count > 0 ? severityColor(severity, forText: true) : Palette.dim2)
     }
     .padding(.horizontal, 6).frame(minHeight: 20)
     .background(Palette.panel2, in: Capsule())
   }
 
-  private func severityColor(_ severity: String) -> Color {
+  private func severityColor(_ severity: String, forText: Bool = false) -> Color {
     switch severity {
     case "critical": return Palette.bad
-    case "high": return Palette.warn
-    case "medium": return Palette.warn
+    case "high", "medium": return forText ? Palette.warnText : Palette.warn
     default: return Palette.dim
     }
   }

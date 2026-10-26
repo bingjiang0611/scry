@@ -5,7 +5,7 @@ import RemoteTransport
 // Isolated UI fixture: the production sheet and its real answer collector are
 // exercised without sending an answer/cancellation to a paired host.
 struct SheetPreview: View {
-  enum Mode: String { case single, multi, text, permission, submitting, error, effortsMany }
+  enum Mode: String { case single, multi, text, permission, submitting, error, effortsMany, historyCapacity, historyRetry }
   static var requestedMode: Mode? {
     let arguments = ProcessInfo.processInfo.arguments
     guard arguments.contains("-uiPreview"), let index = arguments.firstIndex(of: "-uiSheetFixture"),
@@ -20,7 +20,15 @@ struct SheetPreview: View {
   @State private var result = Copy.ready
 
   var body: some View {
-    if mode == .effortsMany { ModelEffortPreview() } else { questionBody }
+    if mode == .effortsMany { ModelEffortPreview() }
+    else if mode == .historyCapacity || mode == .historyRetry {
+      VStack(spacing: 24) {
+        Text(Copy.historyTitle).font(Typography.sheetTitle)
+        HistoryRetryButton(title: mode == .historyCapacity ? ConversationCopy.loadHistory : ConversationCopy.retryHistory, action: {})
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .foregroundStyle(Palette.fg).background(Palette.main)
+    } else { questionBody }
   }
 
   private var questionBody: some View {
@@ -74,6 +82,7 @@ struct SheetPreview: View {
 
   private enum Copy {
     static let title = "问题 Sheet 检查（Mock）"
+    static let historyTitle = "历史按钮外观检查（Mock）"
     static let session = "核对界面改动"
     static let ready = "尚未调用回调"
     static let cancelled = "取消回调已调用"

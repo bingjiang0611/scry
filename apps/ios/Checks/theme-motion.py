@@ -11,7 +11,8 @@ spec = (root / 'docs/handoff/ios-redesign-2026-10-25/SPEC.md').read_text()
 colors = {name: (int(dark, 16), int(light, 16)) for name, dark, light in
           re.findall(r'\| `(\w+)` \| `#([0-9a-f]{6})` \| `#([0-9a-f]{6})`', spec)}
 assert len(colors) == 21
-colors.update(accentFill=(0x2f6ad8, 0x2f6ad8), onAccent=(0xffffff, 0xffffff))
+colors.update(accentFill=(0x2f6ad8, 0x2f6ad8), onAccent=(0xffffff, 0xffffff),
+              accentText=(0x5b9cff, 0x2c64cc), warnText=(0xefb958, 0x7f5409))
 checks = []
 for name, values in colors.items():
     for mode, value in zip(('dark', 'light'), values):
@@ -74,7 +75,7 @@ import AppKit
     precondition(Typography.mono == .system(.footnote, design: .monospaced))
     precondition(Typography.codeBlock == .system(.caption, design: .monospaced))
     precondition(Typography.sheetTitle == .headline)
-    print("PASS 52 color resolutions, provider mapping, 8 motion presets/reduced motion, row delay bounds, 9 font roles")
+    print("PASS 56 color resolutions, provider mapping, 8 motion presets/reduced motion, row delay bounds, 9 font roles")
   }
 }
 '''

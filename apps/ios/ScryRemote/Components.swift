@@ -102,7 +102,8 @@ struct Notice: View {
     HStack(alignment: .top, spacing: 8) {
       Image(systemName: warning ? "exclamationmark.circle" : "info.circle")
         .font(Typography.meta.weight(.medium)).padding(.top, 1)
-      Text(text).font(Typography.meta).frame(maxWidth: .infinity, alignment: .leading)
+      Text(text).font(Typography.meta).foregroundStyle(warning ? Palette.warnText : Palette.dim)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
     .foregroundStyle(warning ? Palette.warn : Palette.dim)
     .padding(.vertical, 10).padding(.horizontal, 12)
@@ -200,6 +201,13 @@ struct SessionStatusStrip: View {
     case .warning: return Palette.warn
     }
   }
+  private var textColor: Color {
+    switch status.tone {
+    case .neutral: return Palette.dim
+    case .running: return Palette.accentText
+    case .attention, .warning: return Palette.warnText
+    }
+  }
   private var symbol: String {
     switch status.tone {
     case .attention: return "hand.raised"
@@ -213,7 +221,7 @@ struct SessionStatusStrip: View {
       if status.tone == .running { RunningRing(color: color).accessibilityHidden(true) }
       else if status.busy { ProgressView().controlSize(.mini).tint(color) }
       else { Image(systemName: symbol).font(Typography.meta.weight(.medium)) }
-      Text(status.text).fixedSize(horizontal: false, vertical: true)
+      Text(status.text).foregroundStyle(textColor).fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
       if let action = status.action {
         Button(action: action.perform) {
@@ -221,7 +229,7 @@ struct SessionStatusStrip: View {
             .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(action.destructive ? Palette.bad : color)
+        .foregroundStyle(action.destructive ? Palette.bad : textColor)
         .disabled(action.disabled)
         .accessibilityIdentifier("session-status-action")
       }
@@ -244,7 +252,7 @@ struct LiveRunBadge: View {
   let live: G0Transport.LiveRun
   let waiting: Bool
   var body: some View {
-    let color = live.state == "stopping" ? Palette.dim : waiting ? Palette.warn : Palette.accent
+    let color = live.state == "stopping" ? Palette.dim : waiting ? Palette.warnText : Palette.accentText
     Text(ConversationCopy.liveState(mac: live.origin == "mac", stopping: live.state == "stopping", waiting: waiting))
       .font(Typography.meta.weight(.semibold)).foregroundStyle(color)
   }

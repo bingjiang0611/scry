@@ -49,7 +49,7 @@ struct RemoteQuestionSheet: View {
       ScrollView {
         VStack(alignment: .leading, spacing: 20) {
           Text(request.questionKind == "permission" ? SheetCopy.permission : SheetCopy.input)
-            .font(Typography.meta.weight(.medium)).foregroundStyle(Palette.warn)
+            .font(Typography.meta.weight(.medium)).foregroundStyle(Palette.warnText)
             .padding(.horizontal, 8).padding(.vertical, 5)
             .background(Palette.warn.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
           ForEach(Array(request.questions.enumerated()), id: \.offset) { index, question in
