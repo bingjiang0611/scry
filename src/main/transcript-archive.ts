@@ -1869,6 +1869,15 @@ export async function findTraceArchiveTurnMatches(args: {
 
 type TraceArchiveUpsertInput = Parameters<typeof upsertTraceArchiveTurn>[0]
 
+// Archive pages order turns by `ts`; ties fall back to the hashed file key, which
+// is stable but not chronological. Two turns archived within one millisecond would
+// then page out of order, so locally assigned stamps are strictly increasing.
+let lastTraceArchiveTs = 0
+function nextTraceArchiveTs(): number {
+  lastTraceArchiveTs = Math.max(Date.now(), lastTraceArchiveTs + 1)
+  return lastTraceArchiveTs
+}
+
 function prepareArchiveUpdate(
   args: TraceArchiveUpsertInput,
   providerId: ProviderId,
@@ -1921,7 +1930,7 @@ export function upsertTraceArchiveTurn(args: {
     // capture 层已经按总字节数截断 patch；保留它才能让重启/切换后的 Review
     // 与实时会话一致，避免“有 +/- 统计但历史无 diff”的假降级。
     items: args.turn.items,
-    ts: args.turn.ts ?? Date.now()
+    ts: args.turn.ts ?? nextTraceArchiveTs()
   }
   const fp = traceArchiveTurnPath(args.userDataDir, args.cwd, args.sessionId, providerId, turn)
   const existing = inspectArchiveFile(args.userDataDir, fp, args.cwd, args.sessionId, providerId)
@@ -1974,7 +1983,7 @@ export async function upsertTraceArchiveTurnAsync(args: {
     ...args.turn,
     attachments,
     items: args.turn.items,
-    ts: args.turn.ts ?? Date.now()
+    ts: args.turn.ts ?? nextTraceArchiveTs()
   }
   const fp = traceArchiveTurnPath(args.userDataDir, args.cwd, args.sessionId, providerId, turn)
   const existing = await inspectArchiveFileAsync(args.userDataDir, fp, args.cwd, args.sessionId, providerId)

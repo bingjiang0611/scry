@@ -425,6 +425,21 @@ describe('transcript archive mirror', () => {
     await expect(readTraceArchivePageAsync(args, { limit: 2 })).resolves.toMatchObject({ sourceComplete: false, totalTurns: 1, archive: { turns: [{ runId: 'two' }] } })
   })
 
+  it('keeps archive order for turns archived within the same millisecond', async () => {
+    const root = tempRoot()
+    const userDataDir = join(root, 'userData')
+    const args = { cwd: '/repo/same-ms', sessionId: 'same-ms', providerId: 'codex' as const, userDataDir }
+    // run-2 hashes before run-1, so a tied ts would page them in reverse.
+    const now = vi.spyOn(Date, 'now').mockReturnValue(Date.now())
+    try {
+      for (const runId of ['run-0', 'run-1', 'run-2']) expect(upsertTraceArchiveTurn({ ...args, turn: { runId, userText: runId, items: [], done: true } })).toBe(true)
+    } finally {
+      now.mockRestore()
+    }
+    const page = await readTraceArchivePageAsync(args, { limit: 3 })
+    expect(page.archive?.turns.map(turn => turn.runId)).toEqual(['run-0', 'run-1', 'run-2'])
+  })
+
   it('rejects strict indexed reads when a canonical segment outside the page is corrupt', async () => {
     const root = tempRoot()
     const userDataDir = join(root, 'userData')
