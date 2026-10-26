@@ -3,6 +3,8 @@ import type { ProviderId } from '@shared/provider'
 import type { useIntegrations } from './hooks/useIntegrations'
 import type { SessionComposerDraft, SessionPromptQueues } from './app-model'
 import { sessionComposerDraftKey, migrateSessionComposerDraft, migrateSessionPromptQueue, applyTurnDoneEffects } from './app-model'
+import { persistSessionSelection, sessionSelectionAfterTurnDone } from './session-restore'
+import { browserStorage } from './browser-storage'
 import { recordedSessionModel } from './hooks/useIntegrations'
 import { updateQueuedPromptByMessageId } from './steer'
 import { latestSteerCapability, latestSteerEvidenceForTurns, type QueuedSteerState } from './steer'
@@ -50,6 +52,8 @@ export function useAppSessionRuntime(context: AppSessionRuntimeContext) {
         refreshAfterTurn: integrations.refreshAfterTurn,
         loadProjects
       })
+      const selection = sessionSelectionAfterTurnDone(event, previousSessionId, draftOwner)
+      if (selection) persistSessionSelection(selection, browserStorage())
     },
     onError: (event) => {
       markRunFinished(event.runId)
