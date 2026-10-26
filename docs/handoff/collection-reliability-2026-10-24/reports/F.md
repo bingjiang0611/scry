@@ -60,3 +60,31 @@
 ## 现场清理
 
 结束后停止全部探针进程（`/tmp/scry-fa` 下的 `scry recorder serve`、Codex app-server daemon 等），删除复制到临时 HOME 的 `.codex/auth.json`、`.claude.json`；保留日志与 receiver 证据目录供审查方复核。
+
+## 核验意见（审查方，2026-10-26）
+
+**结论：F-3 到 F-8 通过，接受；F-1 和 F-2 还不能下结论，其中 Codex「hook 显示 Completed 但没有任何 `.scry` 写入」需要专门排查，排查之前不建议合入。**
+
+### 接受的部分
+
+F-3（长路径）、F-4（多仓库覆盖，单仓库深目录对照 pass）、F-5（每轮 env）、F-6（通知 v2 与 receiver 接管，41 次 sha256 全部一致）、F-7（退避后补投，无死信）、F-8（`kill -9` 后 daemon 自动拉起，inbox 为 0）都与核验时的合同一致。被测构建固定成快照，避免并行会话重建 dist，做法正确。
+
+### Codex：需要排查（阻塞合入）
+
+`codex exec` 打印出 `UserPromptSubmit / Stop ... Completed`，但 workspace 里没有 `records/`、`runtime/`，也没有 `logs/hook-skip.log`，health 计数全是 0。这正是本次工作要消除的「静默丢失」。批次 A 手验时，Codex 0.164.0 用真实 TUI 并在 `/hooks` 确认 trust 后能正常落盘，所以差别可能在 `exec` 模式、sandbox 或配置加载上。最值得怀疑的是 `codex exec` 默认的只读 sandbox：如果 hook 进程也在 sandbox 里，写 `.scry` 和写 skip 日志都会失败，而 hook 是 fail open，于是什么都不留。`--sandbox workspace-write` 时整轮挂住 240 秒也需要解释，因为 hook 自身有 15 秒超时。
+
+排查步骤（只观察，不改代码）：
+
+1. 用 C-U2 的包装脚本记录 hook 的 cwd、`CODEX_PROJECT_DIR`、退出码和 stderr，但日志写到 workspace **之外**（例如 `$RUN/hook-trace.log`），这样才能区分「hook 没跑」和「hook 跑了但写不进去」。
+2. 依次在 TUI（`/hooks` 确认 trust）、`codex exec` 默认 sandbox、`--sandbox workspace-write`、`--sandbox danger-full-access` 下各跑一轮，记录 record 数和 trace。
+3. 在 workspace-write 挂住时，用 `ps` 看挂住的是哪个进程（hook shell、curl、scry CLI 还是 Codex 本身），以及它在等什么。
+4. 结论写进本报告：若确认是 sandbox 阻止 hook 写入，再由审查方决定 recorder 侧要不要改（例如把 skip 记录写到 sandbox 允许的位置，或者 doctor 能检测出来），并在 README 里说明 Codex 的 sandbox 要求。
+
+### Claude、Qoder
+
+- Claude：在临时 HOME 里 `claude -p` 两次都没有输出、被超时杀掉，没有产生轮次，因此不能用来判断 Scry。建议用户在日常登录状态下，于一个临时 workspace 里跑一轮。
+- Qoder：凭据失效，需要用户刷新登录后重跑。
+
+### 分支里混入了性能工作（提醒用户）
+
+`c7388c3..234dabc` 之间有 35 个提交来自另一个性能会话：它从 `d822f84` 分出，经 `bda0c85` 合并进来，改动涉及 renderer、main、`scripts/performance-ratchet*`，以及 Recorder Core 的 `io.ts`、`content-store.ts`。F 的被测构建 `6e2012e` 已经包含这些改动。我只粗看了 recorder 部分：`mkdirDurable` 对已经存在的祖先目录仍然做 fsync；批量写入在所有祖先目录 fsync 之后才发布文件名；内容去重改为按字节比较，地址仍由 sha256 决定。持久性保证看起来没有被削弱，但**这些提交不在本交接的核验范围内**。合入 main 时，它们会和可靠性修复一起进去，是否合在一起合入由用户决定。
