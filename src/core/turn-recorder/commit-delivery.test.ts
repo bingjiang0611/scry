@@ -1,0 +1,167 @@
+import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { handleRecorderHook, drainRecorderDelivery } from './recorder.js'
+import { commitNotificationStatus, drainCommitNotifications, listRecords, stableHash } from './store.js'
+import { resolveCommitHookActivation, commitHookEnv } from './commit-hook-grant.js'
+import * as io from './io.js'
+import { doctorCommand } from '../../cli/doctor-command.js'
+
+const roots: string[] = []
+afterEach(async () => {
+  vi.restoreAllMocks()
+  vi.unstubAllEnvs()
+  await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
+})
+
+async function fixture() {
+  const root = await mkdtemp(join(tmpdir(), 'scry-delivery-'))
+  roots.push(root)
+  const dataRoot = join(root, '.scry')
+  const config = { schemaVersion: 1, enabled: true, workspaceId: 'delivery-fixture',
+    capture: { prompt: true, assistant: true, diff: false, toolOutput: 'summary', hooks: true } }
+  await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
+  const hook = join(root, 'receiver.cjs')
+  const calls = join(root, 'calls.jsonl'), blocked = join(root, 'blocked.json')
+  await writeFile(blocked, '[1]')
+  await writeFile(hook, `#!${process.execPath}
+const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto')
+const n = JSON.parse(fs.readFileSync(0, 'utf8'))
+fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify(n.sequence) + '\\n')
+let bytes = fs.readFileSync(path.join(n.dataRoot, n.recordPath))
+if (JSON.parse(fs.readFileSync(${JSON.stringify(blocked)}, 'utf8')).includes(n.sequence)) bytes = Buffer.concat([bytes, Buffer.from('corruption')])
+if (crypto.createHash('sha256').update(bytes).digest('hex') !== n.sha256) process.exit(71)
+const target = path.join(${JSON.stringify(root)}, 'accepted-' + n.sequence + '.json')
+fs.writeFileSync(target, bytes, { mode: 0o600 })
+const fd = fs.openSync(target, 'r'); fs.fsyncSync(fd); fs.closeSync(fd)
+`)
+  await chmod(hook, 0o700)
+  const env = { HOME: root, XDG_STATE_HOME: join(root, 'state'), SCRY_GRANT_DIR: join(root, 'grants'),
+    SCRY_RECORDER_COMMIT_HOOK: hook, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'delivery-fixture-v1' }
+  for (let i = 1; i <= 3; i++) {
+    for (const event of ['UserPromptSubmit', 'Stop']) {
+      await handleRecorderHook({ workspace: root, provider: 'pi', event, deferDelivery: true,
+        payload: { session_id: 'session', turn_id: `turn-${i}`, prompt: 'fixture', assistant_response: 'done' } }, env)
+    }
+  }
+  const records = (await listRecords(dataRoot)).sort((a, b) => a.sequence - b.sequence)
+  expect(records).toHaveLength(3)
+  const statePath = join(dataRoot, 'notifications', 'commit-hooks', `${stableHash(env.SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT)}.json`)
+  const readCalls = async () => (await readFile(calls, 'utf8')).trim().split('\n').map(Number)
+  return { root, dataRoot, config, hook, env, blocked, records, statePath, readCalls }
+}
+
+async function doctor(f: Awaited<ReturnType<typeof fixture>>) {
+  for (const [key, value] of Object.entries(f.env)) vi.stubEnv(key, value)
+  const chunks: string[] = []
+  const output = vi.spyOn(process.stdout, 'write').mockImplementation(chunk => { chunks.push(String(chunk)); return true })
+  try {
+    const code = await doctorCommand({ positionals: [], flags: new Map([['workspace', f.root]]) })
+    const report = JSON.parse(chunks.join('')) as { checks: { id: string; status: string; detail: string }[] }
+    return { code, check: report.checks.find(check => check.id === 'commitHook.delivery') }
+  } finally { output.mockRestore(); vi.unstubAllEnvs() }
+}
+
+// Five failed attempts is the bounded delivery policy; ACK must not advance over a dead letter.
+describe('persistent commit notification failures', () => {
+  it('reports the failed sequence, dead-letters at five, and delivers later records without claiming a contiguous ACK', async () => {
+    const f = await fixture()
+    await drainCommitNotifications(f.dataRoot, f.env)
+    expect(await commitNotificationStatus(f.dataRoot, f.env)).toMatchObject({
+      failure: { sequence: 1, attempts: 1, reason: 'exit' }
+    })
+    expect(await doctor(f)).toMatchObject({ code: 5, check: { status: 'warn', detail: expect.stringMatching(/sequence 1.*1 failed/) } })
+    for (let i = 1; i < 5; i++) await drainCommitNotifications(f.dataRoot, f.env)
+    expect(await f.readCalls()).toEqual([1, 1, 1, 1, 1, 2, 3])
+    expect(await commitNotificationStatus(f.dataRoot, f.env)).toMatchObject({
+      ackedThrough: 0, processedThrough: 3, notifyBacklog: 0, deadLetterCount: 1,
+      deadLetters: [expect.objectContaining({ sequence: 1, attempts: 5, reason: 'exit' })]
+    })
+    expect(await doctor(f)).toMatchObject({ code: 5, check: { status: 'fail', detail: expect.stringMatching(/sequence 1.*5 failed/) } })
+    expect(await listRecords(f.dataRoot)).toHaveLength(3)
+    for (const sequence of [2, 3]) {
+      expect(JSON.parse(await readFile(join(f.root, `accepted-${sequence}.json`), 'utf8'))).toMatchObject({ sequence })
+    }
+    await drainCommitNotifications(f.dataRoot, f.env)
+    expect(await f.readCalls()).toEqual([1, 1, 1, 1, 1, 2, 3])
+    const other = { ...f.env, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'independent-hook' }
+    await drainCommitNotifications(f.dataRoot, other)
+    expect(await commitNotificationStatus(f.dataRoot, other)).toMatchObject({ failure: { sequence: 1, attempts: 1 } })
+    expect(await commitNotificationStatus(f.dataRoot, f.env)).toMatchObject({ deadLetterCount: 1, notifyBacklog: 0 })
+  }, 15_000)
+
+  it('clears a failure on successful retry before the threshold', async () => {
+    const f = await fixture()
+    await drainCommitNotifications(f.dataRoot, f.env)
+    await drainCommitNotifications(f.dataRoot, f.env)
+    expect(await commitNotificationStatus(f.dataRoot, f.env)).toMatchObject({ failure: { sequence: 1, attempts: 2 } })
+    await writeFile(f.blocked, '[]')
+    expect(await drainCommitNotifications(f.dataRoot, f.env)).toMatchObject({ delivered: 3, pending: 0 })
+    expect(await commitNotificationStatus(f.dataRoot, f.env)).toEqual({ ackedThrough: 3, notifyBacklog: 0 })
+    expect(await doctor(f)).toMatchObject({ code: 0, check: { status: 'pass' } })
+  }, 15_000)
+
+  it('retains a known failed sequence when its canonical source disappears, then progresses', async () => {
+    const f = await fixture()
+    await drainCommitNotifications(f.dataRoot, f.env)
+    const filename = (await readdir(join(f.dataRoot, 'records'))).find(name => name.includes(f.records[0].recordId))!
+    await rm(join(f.dataRoot, 'records', filename))
+    for (let i = 1; i < 5; i++) await drainCommitNotifications(f.dataRoot, f.env)
+    expect(await f.readCalls()).toEqual([1, 2, 3])
+    expect(await commitNotificationStatus(f.dataRoot, f.env)).toMatchObject({
+      processedThrough: 3, notifyBacklog: 0, deadLetterCount: 1,
+      deadLetters: [expect.objectContaining({ sequence: 1, attempts: 5, reason: 'record_unavailable' })]
+    })
+  }, 15_000)
+
+  it('recovers after durable dead-letter publication but before cursor advancement without a sixth callback', async () => {
+    const f = await fixture()
+    for (let i = 0; i < 4; i++) await drainCommitNotifications(f.dataRoot, f.env)
+    const original = io.writeJsonAtomic
+    let injected = false
+    const writer = vi.spyOn(io, 'writeJsonAtomic').mockImplementation(async (path, value, options) => {
+      const state = value as { processedThrough?: number }
+      if (path === f.statePath && state.processedThrough === 1) { injected = true; throw new Error('fixture cursor publication failure') }
+      return original(path, value, options)
+    })
+    await drainCommitNotifications(f.dataRoot, f.env)
+    writer.mockRestore()
+    expect(injected).toBe(true)
+    expect(JSON.parse(await readFile(f.statePath, 'utf8'))).toMatchObject({ failure: { sequence: 1, attempts: 5 } })
+    await drainCommitNotifications(f.dataRoot, f.env, { maxRecords: 1 })
+    expect(await f.readCalls()).toEqual([1, 1, 1, 1, 1])
+    await drainCommitNotifications(f.dataRoot, f.env)
+    expect(await f.readCalls()).toEqual([1, 1, 1, 1, 1, 2, 3])
+  }, 15_000)
+
+  it('does not reset corrupt failure counters or execute a callback with unavailable state', async () => {
+    const f = await fixture()
+    await drainCommitNotifications(f.dataRoot, f.env)
+    const state = JSON.parse(await readFile(f.statePath, 'utf8')) as Record<string, unknown>
+    await writeFile(f.statePath, JSON.stringify({ ...state, failure: { sequence: 1, recordId: f.records[0].recordId, attempts: 'invalid' } }))
+    await expect(drainCommitNotifications(f.dataRoot, f.env)).rejects.toThrow(/notification.*state/)
+    expect(await f.readCalls()).toEqual([1])
+    expect(await doctor(f)).toMatchObject({ code: 5, check: { status: 'fail', detail: expect.stringContaining('unavailable') } })
+  }, 15_000)
+
+  it('does not count global trust rejection as a failed record or execute the rejected hook', async () => {
+    const f = await fixture()
+    const config = { ...f.config, commitHook: { entry: 'receiver.cjs', files: ['receiver.cjs'] } }
+    await writeFile(join(f.root, 'scry.config.json'), JSON.stringify(config))
+    const baseEnv = { HOME: f.root, SCRY_GRANT_DIR: join(f.root, 'grants') }
+    // Load the validated config through the public recorder path before inspecting its state.
+    await drainRecorderDelivery(f.root, baseEnv)
+    const { recorderEnablement } = await import('./recorder.js')
+    const enabled = await recorderEnablement(f.root, baseEnv)
+    if (!enabled.enabled) throw new Error('fixture not enabled')
+    const activation = await resolveCommitHookActivation(f.root, enabled.config, baseEnv)
+    const activeEnv = commitHookEnv(activation, baseEnv)
+    const before = await commitNotificationStatus(f.dataRoot, activeEnv)
+    expect(before).toMatchObject({ failure: { sequence: 1, attempts: 1 } })
+    await writeFile(join(f.root, 'scry.config.json'), JSON.stringify({ ...config, commitHook: { entry: '../outside.cjs', files: ['../outside.cjs'] } }))
+    for (let i = 0; i < 5; i++) await drainRecorderDelivery(f.root, baseEnv)
+    expect(await f.readCalls()).toEqual([1])
+    expect(await commitNotificationStatus(f.dataRoot, activeEnv)).toEqual(before)
+  }, 15_000)
+})
