@@ -63,3 +63,40 @@ export function persistSessionSelection(
     // 存储不可用时只失去自动恢复能力，不阻断会话切换。
   }
 }
+
+// 一轮真实回合结束后，“上一棵树停在哪里”就是这个会话本身。
+// 只有用户显式点选会话时才落盘的话，由本轮新建的会话永远不会被记住，
+// 崩溃重载后就只剩工作区加空转写（看起来像又回到新建会话）。
+export function sessionSelectionAfterTurnDone(
+  event: {
+    runId?: string
+    sessionId?: string
+    externalSessionId?: string
+    providerId?: string
+    agentProfileId?: string
+  },
+  previousSessionId: string | null,
+  owner: { cwd: string | null; providerId: ProviderId; agentProfileId?: string } | undefined
+): {
+  cwd: string
+  sessionId: string
+  providerId: ProviderId
+  externalSessionId?: string
+  agentProfileId?: string
+} | null {
+  if (!event.sessionId || !owner?.cwd) return null
+  // 用户在一轮进行中切到别的会话时，这一轮的完成不能再改写“停在哪里”。
+  const ownsView = previousSessionId == null ||
+    previousSessionId === event.runId ||
+    previousSessionId === event.sessionId ||
+    previousSessionId === event.externalSessionId
+  if (!ownsView) return null
+  const providerId = PROVIDER_IDS.find((candidate) => candidate === event.providerId) ?? owner.providerId
+  return {
+    cwd: owner.cwd,
+    sessionId: event.sessionId,
+    providerId,
+    externalSessionId: event.externalSessionId,
+    agentProfileId: event.agentProfileId ?? owner.agentProfileId
+  }
+}

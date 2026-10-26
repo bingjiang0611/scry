@@ -1,4 +1,5 @@
 import * as shared from './shared'
+import { sessionSelectionAfterTurnDone } from '../../session-restore'
 const { describe, it, expect, vi, activeRunForSession, sessionEvidenceGapAfterLoad, applySessionCapturedEffects, applyTurnDoneEffects, restoreActiveSessionSelection, restoreFocusedRunSelection } = shared
 type ActiveRun = shared.ActiveRun
 type AgentQuestionRequest = shared.AgentQuestionRequest
@@ -44,6 +45,30 @@ describe('App turnDone 集成契约：session 完成后刷新派生状态', () =
     expect(activeRunForSession(run, '/repo/a', 'catalog-session', 'pi', 'pi:other')).toBeNull()
     expect(activeRunForSession({ ...run, done: true }, '/repo/a', 'catalog-session', 'pi', 'pi:default')).toBeNull()
     expect(activeRunForSession({ ...run, cwd: undefined }, '', 'catalog-session', 'pi', 'pi:default')).toMatchObject({ runId: 'run-1' })
+  })
+
+  it('把一轮真实回合记成恢复点，但不在用户已切走的会话上覆盖', () => {
+    const owner = { cwd: '/repo/a', providerId: 'qoder' as const, agentProfileId: undefined }
+    const event = { runId: 'run-1', sessionId: 'catalog-1', externalSessionId: 'native-1' }
+    // 本轮由当前视图发起（起始会话还停留在空态或同名 run/catalog/native 别名）时才记录。
+    for (const previous of [null, 'run-1', 'catalog-1', 'native-1']) {
+      expect(sessionSelectionAfterTurnDone(event, previous, owner)).toEqual({
+        cwd: '/repo/a',
+        sessionId: 'catalog-1',
+        providerId: 'qoder',
+        externalSessionId: 'native-1',
+        agentProfileId: undefined
+      })
+    }
+    // 缺少会话或工作区没有可记录的恢复点；切到别的会话则不得改写。
+    expect(sessionSelectionAfterTurnDone({ runId: 'run-1' }, null, owner)).toBeNull()
+    expect(sessionSelectionAfterTurnDone(event, null, { ...owner, cwd: null })).toBeNull()
+    expect(sessionSelectionAfterTurnDone(event, 'other-session', owner)).toBeNull()
+    // 事件里的 provider/profile 优先于发起时的选择，未知 provider 回落到 owner。
+    expect(sessionSelectionAfterTurnDone({ ...event, providerId: 'pi', agentProfileId: 'pi:default' }, null, owner))
+      .toMatchObject({ providerId: 'pi', agentProfileId: 'pi:default' })
+    expect(sessionSelectionAfterTurnDone({ ...event, providerId: 'legacy_unknown' }, null, owner))
+      .toMatchObject({ providerId: 'qoder' })
   })
 
   it('恢复 live run 时先加载同一 session 的已停止历史轮次', async () => {

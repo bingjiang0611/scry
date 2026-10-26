@@ -15,6 +15,7 @@
   - 使用 `scripts/hidden-electron-windows.cjs` 在创建窗口前安装检查：拦截显示/原生焦点调用并失败退出，不先弹窗再隐藏。完整 App 的 `node scripts/external-links-smoke.mjs` 检查启动各路径全程隐藏、后台动画帧及原生坐标输入。
   - 保留 Chromium 原生输入与页面内焦点检查，不用 `win.focus()`。后台测试不等于前台 OS 焦点/Dock 验收，确需此类验收时先征得用户同意。LLM 面板原生隐藏/恢复刷新验收保留在 `node scripts/session-capability-ui-smoke.mjs --performance-only --native-visibility`，仅获准弹窗后运行；默认测试明确报告该项 `not-run`，不冒充原生可见性验收通过。
   - Dock attention 专项运行 `node scripts/electron-security-smoke.mjs --dev-question-only --foreground`。未传 `--foreground` 时在启动 App 前拒绝执行，不删减焦点/角标断言。
+  - 崩溃重载后的会话级恢复（真实 Provider 一轮 + `forcefullyCrashRenderer`）用 `npm run smoke:session-restore`。它跑真实轮次、消耗 Provider 额度，因此不进默认门禁；默认 `smoke:electron` 只覆盖夹具级恢复（侧栏 tab、工作区、重启提示）。
 - 当前仓库没有 ESLint/Prettier 命令，不要发明不存在的门禁或做大范围无关格式化。
 
 迭代时运行最小相关检查：
