@@ -95,3 +95,20 @@ DEBUG 只读探针（`Sheets/ScrollProbe.swift`，已删除、未提交）：窗
 - STATUS 的 R6 行保持「需修改」：A/C 在 AX3 未通过。
 - 代码保留后台拆行（有实测收益，且 B 两档保持通过）；`ConversationScrollView.swift` 与 R6c 相同，未改定位策略。
 - 下一步（需设计方决定）：若要继续，应先证明「LazyVStack 的估算高度与实际实体化行的差」是否可用公开 API 观测（例如 `scrollTargetLayout` + `onScrollTargetVisibilityChange`，只在 iOS 18+ 使用），否则只能接受当前限制或改回更保守的行粒度。
+
+## 核验意见（核验方，2026-10-26，R6d `6e12e3b5` / `cc2c8f4c`）
+
+结论：**需修改**。第 1 部分有一个正确性问题必须先修；第 2 部分的提议批准，见 [R6e.md](../R6e.md)。
+
+确认的部分：
+
+- 解析已移出主线程。缓存的双重上限（条数 / 字数）、版本按完整原文校验、取消后不发布，都已核对。
+- README 搬移单独提交、README 降到 19923 字节；`SessionTranscriptView` 拆分是为了过门禁，接受。
+- 第 2 部分的测量很有价值：C 在 AX3 下 offset 在合法范围内，排除了「越界」假设。剩下的现象是：估算的内容高度里包含了没实例化的行，视口落在估算区，那里没有真实行。
+
+**必须修的问题：流式回复会显示旧文本。**
+
+- `RemoteRunStore.coalesce` 把连续的 `output` 分块拼进**最后一行**：`output.count` 不变，只换 `id`（新 seq）和 `text`。
+- `ChatView.splitRevision` 只看 `output.count`，所以流式追加文字时后台任务不会重跑。
+- `ConversationTurn.rows(id:)` 用 `split[entryIndex]` 时没有核对版本。结果是一条已经拆过的长回复，在流式期间会**一直显示拆分那一刻的旧内容**，新流入的文字看不到，直到出现新的分块类型或 lifecycle 变化。这违反「证据不能说谎」。报告里的「流式 30 秒行数稳定 55」恰好可能就是这个现象。
+- `SessionTranscriptView` 的 live / detached 输出同样要查。
