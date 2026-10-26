@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import type { TraceEvent } from '../shared/trace'
 import { isToolContentRef, type RecorderContentPageRequest } from '../shared/tool-content'
 import { persistToolEventContent } from '../core/turn-recorder/tool-content'
-import { readRecorderContentPage, writeRecorderContent } from '../core/turn-recorder/content-store'
+import { readRecorderContentPage, writeRecorderContentCopies } from '../core/turn-recorder/content-store'
 
 export const APP_TRACE_CONTENT_SOURCE = 'scry_app_trace'
 export const TRACE_TOOL_CONTENT_POLICY = {
@@ -29,10 +29,10 @@ export async function persistTraceToolEvents(
   for (const event of events) {
     bounded.push(...await persistToolEventContent([event], TRACE_TOOL_CONTENT_POLICY, APP_TRACE_CONTENT_SOURCE,
       async (content, encoding) => {
-        const ref = await writeRecorderContent(contentRoot(userDataDir, cwd), content, encoding)
-        // A managed record must own its body too; its offline CLI cannot depend on App userData.
-        if (recorderRoot) await writeRecorderContent(recorderRoot, content, encoding)
-        return ref
+        const appRoot = contentRoot(userDataDir, cwd)
+        // One event remains the batch boundary. Both authorities must be durable before
+        // the live queue can publish its reference; the offline CLI cannot depend on App data.
+        return writeRecorderContentCopies(recorderRoot ? [appRoot, recorderRoot] : [appRoot], content, encoding)
       }))
   }
   return bounded

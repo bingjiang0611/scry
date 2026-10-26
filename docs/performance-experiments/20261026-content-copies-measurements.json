@@ -1,0 +1,476 @@
+{
+  "schema": 1,
+  "measurementCommit": "1fae1e62682e341245dea25182ad100188574caf",
+  "productionCommit": "129f1bf3",
+  "counters": {
+    "content-copies-before": {
+      "recorder.content-cold/crypto.sha256.calls": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "recorder.content-cold/io.read.calls": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "recorder.content-cold/io.mkdir.calls": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ],
+      "recorder.content-cold/io.stat.calls": [
+        44,
+        44,
+        44,
+        44,
+        44
+      ],
+      "recorder.content-cold/io.directory.metadata.calls": [
+        52,
+        52,
+        52,
+        52,
+        52
+      ],
+      "recorder.content-cold/io.open.calls": [
+        56,
+        56,
+        56,
+        56,
+        56
+      ],
+      "recorder.content-cold/io.sync.calls": [
+        56,
+        56,
+        56,
+        56,
+        56
+      ],
+      "recorder.content-cold/io.write.calls": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "recorder.content-cold/io.link.calls": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "recorder.content-cold/io.rm.calls": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "recorder.content-dual/crypto.sha256.calls": [
+        12,
+        12,
+        12,
+        12,
+        12
+      ],
+      "recorder.content-dual/io.read.calls": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ],
+      "recorder.content-dual/io.mkdir.calls": [
+        17,
+        17,
+        17,
+        17,
+        17
+      ],
+      "recorder.content-dual/io.stat.calls": [
+        92,
+        92,
+        92,
+        92,
+        92
+      ],
+      "recorder.content-dual/io.directory.metadata.calls": [
+        109,
+        109,
+        109,
+        109,
+        109
+      ],
+      "recorder.content-dual/io.open.calls": [
+        116,
+        116,
+        116,
+        116,
+        116
+      ],
+      "recorder.content-dual/io.sync.calls": [
+        116,
+        116,
+        116,
+        116,
+        116
+      ],
+      "recorder.content-dual/io.write.calls": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ],
+      "recorder.content-dual/io.link.calls": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ],
+      "recorder.content-dual/io.rm.calls": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ]
+    },
+    "validation": {
+      "recorder.content-cold/crypto.sha256.calls": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "recorder.content-cold/io.read.calls": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "recorder.content-cold/io.mkdir.calls": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ],
+      "recorder.content-cold/io.stat.calls": [
+        44,
+        44,
+        44,
+        44,
+        44
+      ],
+      "recorder.content-cold/io.directory.metadata.calls": [
+        52,
+        52,
+        52,
+        52,
+        52
+      ],
+      "recorder.content-cold/io.open.calls": [
+        56,
+        56,
+        56,
+        56,
+        56
+      ],
+      "recorder.content-cold/io.sync.calls": [
+        56,
+        56,
+        56,
+        56,
+        56
+      ],
+      "recorder.content-cold/io.write.calls": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "recorder.content-cold/io.link.calls": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "recorder.content-cold/io.rm.calls": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "recorder.content-dual/crypto.sha256.calls": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ],
+      "recorder.content-dual/io.read.calls": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ],
+      "recorder.content-dual/io.mkdir.calls": [
+        17,
+        17,
+        17,
+        17,
+        17
+      ],
+      "recorder.content-dual/io.stat.calls": [
+        68,
+        68,
+        68,
+        68,
+        68
+      ],
+      "recorder.content-dual/io.directory.metadata.calls": [
+        85,
+        85,
+        85,
+        85,
+        85
+      ],
+      "recorder.content-dual/io.open.calls": [
+        88,
+        88,
+        88,
+        88,
+        88
+      ],
+      "recorder.content-dual/io.sync.calls": [
+        88,
+        88,
+        88,
+        88,
+        88
+      ],
+      "recorder.content-dual/io.write.calls": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ],
+      "recorder.content-dual/io.link.calls": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ],
+      "recorder.content-dual/io.rm.calls": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ]
+    }
+  },
+  "timing": [
+    {
+      "name": "initial-high-load",
+      "lock": {
+        "label": "mac2-content-copies-paired",
+        "command": [
+          "bash",
+          "/Users/test/scry-performance-climb-mac2.cO3N5W/transfers/content-copies/paired-copies.sh"
+        ],
+        "exit": 0,
+        "signal": null,
+        "wallMs": 10500,
+        "cores": 8,
+        "loadBefore": 4.58,
+        "loadAfter": 8.11,
+        "highLoad": true
+      },
+      "before": {
+        "recorder.content-cold": {
+          "workload": "new-bodies=4;body-bytes=262144;authorities=1;initial-publication=included;sync=unchanged",
+          "durationMs": [
+            112.93733399999999,
+            121.62687500000004,
+            133.90754099999998,
+            140.143458,
+            147.76962500000002
+          ]
+        },
+        "recorder.content-dual": {
+          "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+          "durationMs": [
+            283.42483300000004,
+            296.0847920000001,
+            303.5730000000001,
+            537.0461250000001,
+            476.674125
+          ]
+        }
+      },
+      "after": {
+        "recorder.content-cold": {
+          "workload": "new-bodies=4;body-bytes=262144;authorities=1;initial-publication=included;sync=unchanged",
+          "durationMs": [
+            108.062667,
+            116.12408300000004,
+            136.692792,
+            168.49091699999997,
+            170.114917
+          ]
+        },
+        "recorder.content-dual": {
+          "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+          "durationMs": [
+            296.5491250000001,
+            281.5337499999998,
+            234.32604200000014,
+            314.6461250000002,
+            431.19858299999987
+          ]
+        }
+      }
+    },
+    {
+      "name": "AB-low-load",
+      "lock": {
+        "label": "mac2-content-copies-low-load",
+        "command": [
+          "bash",
+          "/Users/test/scry-performance-climb-mac2.cO3N5W/transfers/content-copies/paired-copies-low-load.sh"
+        ],
+        "exit": 0,
+        "signal": null,
+        "wallMs": 9482,
+        "cores": 8,
+        "loadBefore": 1.96,
+        "loadAfter": 2.2,
+        "highLoad": false
+      },
+      "before": {
+        "recorder.content-cold": {
+          "workload": "new-bodies=4;body-bytes=262144;authorities=1;initial-publication=included;sync=unchanged",
+          "durationMs": [
+            113.34375,
+            177.99458300000003,
+            124.06295799999998,
+            160.1996660000001,
+            141.91158399999995
+          ]
+        },
+        "recorder.content-dual": {
+          "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+          "durationMs": [
+            257.4219999999999,
+            295.8405,
+            302.35687499999995,
+            273.3993330000003,
+            284.56445900000017
+          ]
+        }
+      },
+      "after": {
+        "recorder.content-cold": {
+          "workload": "new-bodies=4;body-bytes=262144;authorities=1;initial-publication=included;sync=unchanged",
+          "durationMs": [
+            100.00691599999999,
+            102.85666600000002,
+            116.50383299999993,
+            132.667417,
+            167.38712499999997
+          ]
+        },
+        "recorder.content-dual": {
+          "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+          "durationMs": [
+            234.466584,
+            215.21000000000004,
+            244.1339999999998,
+            199.059209,
+            177.38941599999976
+          ]
+        }
+      }
+    },
+    {
+      "name": "BA-low-load",
+      "lock": {
+        "label": "mac2-content-copies-reverse",
+        "command": [
+          "bash",
+          "/Users/test/scry-performance-climb-mac2.cO3N5W/transfers/content-copies/paired-copies-reverse.sh"
+        ],
+        "exit": 0,
+        "signal": null,
+        "wallMs": 8670,
+        "cores": 8,
+        "loadBefore": 2.84,
+        "loadAfter": 3.27,
+        "highLoad": false
+      },
+      "before": {
+        "recorder.content-cold": {
+          "workload": "new-bodies=4;body-bytes=262144;authorities=1;initial-publication=included;sync=unchanged",
+          "durationMs": [
+            96.06883299999998,
+            90.5265,
+            101.10316600000004,
+            110.89495899999997,
+            114.18650000000002
+          ]
+        },
+        "recorder.content-dual": {
+          "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+          "durationMs": [
+            234.051334,
+            250.55516699999998,
+            231.41658399999983,
+            228.26133299999992,
+            244.40712500000018
+          ]
+        }
+      },
+      "after": {
+        "recorder.content-cold": {
+          "workload": "new-bodies=4;body-bytes=262144;authorities=1;initial-publication=included;sync=unchanged",
+          "durationMs": [
+            100.04470800000001,
+            88.20008299999995,
+            118.10383300000001,
+            165.64366600000005,
+            134.69041600000003
+          ]
+        },
+        "recorder.content-dual": {
+          "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+          "durationMs": [
+            180.9789159999999,
+            158.13237500000014,
+            164.75775,
+            167.60979199999997,
+            169.39337499999988
+          ]
+        }
+      }
+    }
+  ]
+}

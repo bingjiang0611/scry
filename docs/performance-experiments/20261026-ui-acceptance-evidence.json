@@ -1,0 +1,392 @@
+{
+  "schemaVersion": 1,
+  "implementation": "b9ff9cc271619e1b76da0c05f2ccf2e5b4aa4b75",
+  "validation": "976331dc79570df0aa3559d6c4ddf887dc943458",
+  "prerequisite": "5bb630e1",
+  "kind": "UI test organization; no production/performance metric changes",
+  "machine": {
+    "hashes": {
+      "scripts/desktop-remote-ui-smoke.mjs": "de08502bcb93ca6682e4b998a4de58d0b7ea01db2f4aebd80a0f2bc5d038e592",
+      "scripts/desktop-remote-ui-smoke.test.ts": "ee2d41b3f26ead59084cacc71fd765f1fcb8d255397834c3a4fdb0387677ee5a",
+      "scripts/desktop-remote-ui-smoke/composer-history.mjs": "643dd12ac3c48021ebcf148767a93479e64ba020e938adbb670ab390d1a39860",
+      "scripts/desktop-remote-ui-smoke/directory-selection.mjs": "45e14aa5bad9a827e3467feac9f3c35df6b7a57f8e67d1278df0c7e2f60f1aad",
+      "scripts/desktop-remote-ui-smoke/dispatch.mjs": "fe586f24d67c070523013647f895b396f062d510315af0accf14e411575dd6b4",
+      "scripts/desktop-remote-ui-smoke/exercise.mjs": "0f51a0ccfa6bfabb6180bc79161b5a0d68cbda59382d73ed0e407ab0a61565b8",
+      "scripts/desktop-remote-ui-smoke/fixture-imports.mjs": "f12de0b760d1bc530e44405551360c433dcac7934fb0f90f6c4005f83798fecf",
+      "scripts/desktop-remote-ui-smoke/fixture-shell.mjs": "fd82cf3e20872de609cc2f6b6b7c041311a5f0a9ded71822aa8e2402c7086bb6",
+      "scripts/desktop-remote-ui-smoke/fixture-state.mjs": "4e5264c08f1e98f3e9861093f2ac308b1dc6ec0000816ff9d87edabbf2a6a2fd",
+      "scripts/desktop-remote-ui-smoke/fixture-transport.mjs": "c89a1cabe29de6d33ef2712b4a1816112dc7000f328e2173193589d7d1213b78",
+      "scripts/desktop-remote-ui-smoke/host-settings.mjs": "e045a04b3581d425ef389f06c9b6176afa4421f10f7869a9aaa0fa9ec1c6bb95",
+      "scripts/desktop-remote-ui-smoke/initial-controls.mjs": "a8908b35961b4e0f18fde674b17eb0278766c731a82b0efaf9e424098925d302",
+      "scripts/desktop-remote-ui-smoke/lifecycle.mjs": "57db5c1c13f7b633b0372db395775ba0a0439eff9388b56fd47014a9da9609b1",
+      "scripts/desktop-remote-ui-smoke/native-driver.mjs": "e031c83abd9b0b649aab7443fb74bb99fcb3166f8270779951736bbb37c533e8",
+      "scripts/desktop-remote-ui-smoke/opening-controls.mjs": "6691f157e0578e310966e15b91fea0a1108214c82d70412ca1c9cc70950a8abf",
+      "scripts/desktop-remote-ui-smoke/opening-measurement.mjs": "8c3e7791ecc54d5924cb884e1bb9b32bc4f0795f285ab1ebad9ff5ebc148f539",
+      "scripts/desktop-remote-ui-smoke/parity.mjs": "36a0303f732c15d6fa78030ef2b390ec08bc03c93567df386af4fb555c02587f",
+      "scripts/desktop-remote-ui-smoke/result.mjs": "a706d2a4995c1b2e5568d31d4158edf6c94da1fbb3a441fc8bc3d65ffe3ea163",
+      "scripts/desktop-remote-ui-smoke/routing.mjs": "62476765cb7f8366c41fa966a17370c6df1202f93fc67f8c85260dd0496b1d2e",
+      "scripts/desktop-remote-ui-smoke/scenarios.mjs": "2cb64194ac582fd37cc12a0c716de8d785fe65e5d3598253b8188c9016208e91",
+      "scripts/desktop-remote-ui-smoke/session-routing.mjs": "a27f80ec4fdb76f023310a9feb9ac3c4582b5bf418a28a054bd0b8abcb8c6ec0",
+      "scripts/desktop-remote-ui-smoke/settings.mjs": "2cce1802d422edc81f71e80d7dd11de478c4ac82b3648ebe83fcfdf50c9b836b",
+      "scripts/desktop-remote-ui-smoke/sidebar-activity.mjs": "cbe35fd6ae36adccce22e4dd5e3c9eaacafaf680de2a1036594e275a798bcf6e",
+      "scripts/desktop-remote-ui-smoke/structure.mjs": "747ecc9ec84e77d04aff70ebea31c629d710561718b363548fe889fe1ab821be",
+      "scripts/desktop-remote-ui-smoke/unknown-receipt.mjs": "ec2c53d0ec838c437e8172ac57c08fedbb253f22592401a6dc65fd0ce2eeb9a8",
+      "scripts/desktop-remote-ui-smoke/visibility-baseline.mjs": "6a9267ed55b752034246ad6649bf03b06dbce6861ad765a44519e0666f7a65e5",
+      "scripts/desktop-remote-ui-smoke/visibility-check.mjs": "873e1368f812238662581d9df41b81e890aa1c0162a7d3af073e71f05e1e4c8e",
+      "scripts/desktop-remote-ui-smoke/workbench.mjs": "9a2b6f70dab164a10362f1895e46e94bef0a430b80e114ac89f85748c3a64aed"
+    },
+    "node": "v24.18.0",
+    "electron": "42.10.1",
+    "platform": "darwin",
+    "arch": "arm64",
+    "load": [
+      4.14990234375,
+      10.73291015625,
+      13.154296875
+    ],
+    "build": "d42af910ace0c33cfdcc96a6f9392c23780416e4f5e587e393554eee0285a6a2",
+    "nativeSha256": "8ebee14f1679ebbb7a1931fcd27695c270ce65f095a7dd176fc59d82016ccd9c"
+  },
+  "preservation": {
+    "originalCheckCalls": 191,
+    "originalWaitCalls": 255,
+    "currentCheckCalls": 191,
+    "currentWaitCalls": 256,
+    "addedWait": "wait('document.querySelector(\".chat-transcript\")?.textContent.includes(\"host ui continue\")', 'independent scenario starts from archived host run')",
+    "changedAssertion": "Address edit started a Provider: compare scenario-local submissionsBefore instead of previous scenario's3 submissions",
+    "passed": true
+  },
+  "fixtureGeneratedText": {
+    "configurations": 11,
+    "byteIdentical": true
+  },
+  "fullUi": {
+    "firstAttempt": {
+      "label": "mac2-ui-maintenance-full",
+      "command": [
+        "npm",
+        "run",
+        "test:renderer:ui"
+      ],
+      "exit": 1,
+      "signal": null,
+      "wallMs": 109373,
+      "cores": 8,
+      "loadBefore": 14.65,
+      "loadAfter": 23.12,
+      "highLoad": true
+    },
+    "final": {
+      "label": "mac2-ui-maintenance-full-final",
+      "command": [
+        "npm",
+        "run",
+        "test:renderer:ui"
+      ],
+      "exit": 0,
+      "signal": null,
+      "wallMs": 559692,
+      "cores": 8,
+      "loadBefore": 7.8,
+      "loadAfter": 25.99,
+      "highLoad": true
+    },
+    "packageCommands": 27,
+    "defaultScenarios": [
+      "activity",
+      "workbench",
+      "runtime",
+      "hosts"
+    ]
+  },
+  "unit": {
+    "firstAttempt": {
+      "files": 344,
+      "tests": 4012,
+      "passed": 4007,
+      "failed": 1,
+      "skipped": 4,
+      "success": false
+    },
+    "firstTiming": {
+      "label": "mac2-ui-maintenance-unit",
+      "command": [
+        "npm",
+        "run",
+        "test:unit",
+        "--",
+        "--reporter=json",
+        "--outputFile=../logs/ui-maintenance/unit.json"
+      ],
+      "exit": 1,
+      "signal": null,
+      "wallMs": 517404,
+      "cores": 8,
+      "loadBefore": 12.53,
+      "loadAfter": 39.46,
+      "highLoad": true
+    },
+    "final": {
+      "files": 344,
+      "tests": 4012,
+      "passed": 4008,
+      "failed": 0,
+      "skipped": 4,
+      "success": true
+    },
+    "finalTiming": {
+      "label": "mac2-ui-unit-two-workers",
+      "command": [
+        "npm",
+        "run",
+        "test:unit",
+        "--",
+        "--maxWorkers=2",
+        "--no-file-parallelism",
+        "--reporter=json",
+        "--outputFile=../logs/ui-maintenance/unit-two-workers.json"
+      ],
+      "exit": 0,
+      "signal": null,
+      "wallMs": 790969,
+      "cores": 8,
+      "loadBefore": 4.36,
+      "loadAfter": 26.31,
+      "highLoad": true
+    },
+    "scheduling": "--maxWorkers=2 --no-file-parallelism; files serial, unchanged test timeouts"
+  },
+  "focused": {
+    "files": 2,
+    "passed": 28,
+    "typecheck": "passed"
+  },
+  "mutations": [
+    {
+      "name": "visibility-positive",
+      "args": [
+        "--visibility-polling-check"
+      ],
+      "status": 0,
+      "signal": null,
+      "expectedStatus": 0,
+      "expectedText": "\"visibilityPolling\":true",
+      "matched": true,
+      "finalLog": "visibility-positive.log",
+      "finalExpectedText": "\"visibilityPolling\":true",
+      "finalStatus": 0,
+      "finalMatched": true,
+      "note": "Original expected check fired"
+    },
+    {
+      "name": "negative-background",
+      "args": [
+        "--scenario=runtime",
+        "--negative-control"
+      ],
+      "status": 1,
+      "signal": null,
+      "expectedStatus": 1,
+      "expectedText": "Remote background task exposed a task-stop control",
+      "matched": true,
+      "finalLog": "negative-background.log",
+      "finalExpectedText": "Remote background task exposed a task-stop control",
+      "finalStatus": 1,
+      "finalMatched": true,
+      "note": "Original expected check fired"
+    },
+    {
+      "name": "negative-machine",
+      "args": [
+        "--scenario=runtime",
+        "--negative-machine-control"
+      ],
+      "status": 1,
+      "signal": null,
+      "expectedStatus": 1,
+      "expectedText": "New conversation left the remote machine",
+      "matched": false,
+      "finalLog": "negative-machine.log",
+      "finalExpectedText": "New remote draft queried history before a session existed",
+      "finalStatus": 1,
+      "finalMatched": true,
+      "note": "Earlier relevant history/native-hit guard fired; original text mismatch retained"
+    },
+    {
+      "name": "negative-address",
+      "args": [
+        "--scenario=hosts",
+        "--negative-address-control"
+      ],
+      "status": 1,
+      "signal": null,
+      "expectedStatus": 1,
+      "expectedText": "Address edit automatically reconnected",
+      "matched": true,
+      "finalLog": "negative-address.log",
+      "finalExpectedText": "Address edit automatically reconnected",
+      "finalStatus": 1,
+      "finalMatched": true,
+      "note": "Original expected check fired"
+    },
+    {
+      "name": "negative-hover",
+      "args": [
+        "--scenario=runtime",
+        "--negative-hover-control"
+      ],
+      "status": 1,
+      "signal": null,
+      "expectedStatus": 1,
+      "expectedText": "Hover moved the execution menu or machine rows",
+      "matched": false,
+      "finalLog": "negative-hover.log",
+      "finalExpectedText": "Native pointer missed [data-machine-id=\"local\"]",
+      "finalStatus": 1,
+      "finalMatched": true,
+      "note": "Earlier relevant history/native-hit guard fired; original text mismatch retained"
+    },
+    {
+      "name": "negative-activity",
+      "args": [
+        "--scenario=activity",
+        "--negative-activity-control"
+      ],
+      "status": 1,
+      "signal": null,
+      "expectedStatus": 1,
+      "expectedText": "background remote session shows a running spinner",
+      "matched": true,
+      "finalLog": "negative-activity.log",
+      "finalExpectedText": "background remote session shows a running spinner",
+      "finalStatus": 1,
+      "finalMatched": true,
+      "note": "Original expected check fired"
+    },
+    {
+      "name": "negative-workspace",
+      "args": [
+        "--scenario=workbench",
+        "--negative-workspace-control"
+      ],
+      "status": 1,
+      "signal": null,
+      "expectedStatus": 1,
+      "expectedText": "remote file preview",
+      "matched": true,
+      "finalLog": "negative-workspace.log",
+      "finalExpectedText": "remote file preview",
+      "finalStatus": 1,
+      "finalMatched": true,
+      "note": "Original expected check fired"
+    },
+    {
+      "name": "negative-prompt",
+      "args": [
+        "--scenario=runtime",
+        "--negative-prompt-control"
+      ],
+      "status": 1,
+      "signal": null,
+      "expectedStatus": 1,
+      "expectedText": "meta prompt returns to remote session, not local",
+      "matched": true,
+      "finalLog": "negative-prompt.log",
+      "finalExpectedText": "meta prompt returns to remote session, not local",
+      "finalStatus": 1,
+      "finalMatched": true,
+      "note": "Original expected check fired"
+    },
+    {
+      "name": "negative-settings",
+      "args": [
+        "--remote-settings-only",
+        "--negative-settings-control"
+      ],
+      "status": 1,
+      "signal": null,
+      "expectedStatus": 1,
+      "expectedText": "manage hosts opens remote settings directly",
+      "matched": true,
+      "finalLog": "negative-settings.log",
+      "finalExpectedText": "manage hosts opens remote settings directly",
+      "finalStatus": 1,
+      "finalMatched": true,
+      "note": "Original expected check fired"
+    },
+    {
+      "name": "negative-slash",
+      "args": [
+        "--session-parity-only",
+        "--negative-slash-control"
+      ],
+      "status": 1,
+      "signal": null,
+      "expectedStatus": 1,
+      "expectedText": "Remote command heading did not identify its host",
+      "matched": false,
+      "finalLog": "negative-slash-current-target.log",
+      "finalExpectedText": "Remote command heading did not identify its host",
+      "finalStatus": 1,
+      "finalMatched": true,
+      "note": "Updated stale mutation target from ChatView.tsx to chat-view/Composer.tsx"
+    },
+    {
+      "name": "negative-history-slash",
+      "args": [
+        "--composer-history-only",
+        "--negative-history-slash-control"
+      ],
+      "status": 1,
+      "signal": null,
+      "expectedStatus": 1,
+      "expectedText": "History recall opened slash completion instead of history navigation",
+      "matched": false,
+      "finalLog": "negative-history-slash-current-target.log",
+      "finalExpectedText": "History recall opened slash completion instead of history navigation",
+      "finalStatus": 1,
+      "finalMatched": true,
+      "note": "Updated stale mutation target from ChatView.tsx to chat-view/Composer.tsx"
+    },
+    {
+      "name": "negative-provider-revision",
+      "args": [
+        "--session-opening-only",
+        "--negative-provider-revision-control"
+      ],
+      "status": 1,
+      "signal": null,
+      "expectedStatus": 1,
+      "expectedText": "same-context metadata invalidates selected controls",
+      "matched": true,
+      "finalLog": "negative-provider-revision.log",
+      "finalExpectedText": "same-context metadata invalidates selected controls",
+      "finalStatus": 1,
+      "finalMatched": true,
+      "note": "Original expected check fired"
+    },
+    {
+      "name": "negative-visibility",
+      "args": [
+        "--visibility-polling-check",
+        "--negative-visibility-control"
+      ],
+      "status": 1,
+      "signal": null,
+      "expectedStatus": 1,
+      "expectedText": "Resume must withdraw stale online/activity confirmation",
+      "matched": true,
+      "finalLog": "negative-visibility.log",
+      "finalExpectedText": "Resume must withdraw stale online/activity confirmation",
+      "finalStatus": 1,
+      "finalMatched": true,
+      "note": "Original expected check fired"
+    }
+  ],
+  "delivery": {
+    "mainMerge": false,
+    "push": false,
+    "install": false,
+    "paidProvider": false
+  }
+}

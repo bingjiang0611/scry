@@ -1,0 +1,656 @@
+{
+  "schema": 1,
+  "date": "2026-10-25",
+  "scope": "fixed synthetic publication on mac2; not daily App latency or L3",
+  "source": {
+    "baseline": "389cedf3b4bb939048a1c83b02ef987c50757822",
+    "candidate": "16941f1f2335db077ba0d89282f4dfe88b1d48e3",
+    "testedUnitSnapshot": "0aa591f + io-candidate.patch + io-directory.test.ts",
+    "validatedCombination": "dd5abea15ab06b6d7645a9b16ea4bcf94156cb34",
+    "ioBefore": "60e53976c736c8729dbaa46919dbb76ec8d16c24a389276ddcd8759316fb44d1",
+    "ioAfter": "4c0939c5777e8bb345ea7c03337a688f1c34b48c47312023050bd5036b8cfc01",
+    "directoryTest": "4b6b71ccee4c9c3544765d3b4f2c844ba1acf27944e7526f98fad797f6c8ca34",
+    "collector": "c375e3010da8312de2860393cd49b2abd77479acc99cb25f45a5bf923c73f596",
+    "patch": "c4d4964dd669e0a7aea9501597d8f6d651df0eb17ac732b504c783dba817b463",
+    "lockfile": "625e9bc25c388af4925c02e5e59c34ea82cfb74afa115648464692a32ec93338"
+  },
+  "machine": {
+    "alias": "mac2",
+    "arch": "arm64",
+    "kernel": "25.3.0",
+    "node": "v24.18.0",
+    "cores": 8,
+    "electron": "42.10.1",
+    "appVersion": "0.2.221",
+    "build": "f8835e1fb896c15a002f15b4fc12fd748ca81c1cd48f87e5e9dee9a2b0c9f51c",
+    "nativeBindingSha256": "8ebee14f1679ebbb7a1931fcd27695c270ce65f095a7dd176fc59d82016ccd9c"
+  },
+  "counters": [
+    {
+      "key": "recorder.content-cold/crypto.sha256.calls",
+      "before": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "after": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ]
+    },
+    {
+      "key": "recorder.content-cold/io.read.calls",
+      "before": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "after": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ]
+    },
+    {
+      "key": "recorder.content-cold/io.mkdir.calls",
+      "before": [
+        44,
+        44,
+        44,
+        44,
+        44
+      ],
+      "after": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ]
+    },
+    {
+      "key": "recorder.content-cold/io.stat.calls",
+      "before": [
+        36,
+        36,
+        36,
+        36,
+        36
+      ],
+      "after": [
+        44,
+        44,
+        44,
+        44,
+        44
+      ]
+    },
+    {
+      "key": "recorder.content-cold/io.directory.metadata.calls",
+      "before": [
+        80,
+        80,
+        80,
+        80,
+        80
+      ],
+      "after": [
+        52,
+        52,
+        52,
+        52,
+        52
+      ]
+    },
+    {
+      "key": "recorder.content-cold/io.open.calls",
+      "before": [
+        56,
+        56,
+        56,
+        56,
+        56
+      ],
+      "after": [
+        56,
+        56,
+        56,
+        56,
+        56
+      ]
+    },
+    {
+      "key": "recorder.content-cold/io.sync.calls",
+      "before": [
+        56,
+        56,
+        56,
+        56,
+        56
+      ],
+      "after": [
+        56,
+        56,
+        56,
+        56,
+        56
+      ]
+    },
+    {
+      "key": "recorder.content-cold/io.write.calls",
+      "before": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "after": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ]
+    },
+    {
+      "key": "recorder.content-cold/io.link.calls",
+      "before": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "after": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ]
+    },
+    {
+      "key": "recorder.content-cold/io.rm.calls",
+      "before": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "after": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ]
+    },
+    {
+      "key": "recorder.content-dual/crypto.sha256.calls",
+      "before": [
+        12,
+        12,
+        12,
+        12,
+        12
+      ],
+      "after": [
+        12,
+        12,
+        12,
+        12,
+        12
+      ]
+    },
+    {
+      "key": "recorder.content-dual/io.read.calls",
+      "before": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ],
+      "after": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ]
+    },
+    {
+      "key": "recorder.content-dual/io.mkdir.calls",
+      "before": [
+        92,
+        92,
+        92,
+        92,
+        92
+      ],
+      "after": [
+        17,
+        17,
+        17,
+        17,
+        17
+      ]
+    },
+    {
+      "key": "recorder.content-dual/io.stat.calls",
+      "before": [
+        75,
+        75,
+        75,
+        75,
+        75
+      ],
+      "after": [
+        92,
+        92,
+        92,
+        92,
+        92
+      ]
+    },
+    {
+      "key": "recorder.content-dual/io.directory.metadata.calls",
+      "before": [
+        167,
+        167,
+        167,
+        167,
+        167
+      ],
+      "after": [
+        109,
+        109,
+        109,
+        109,
+        109
+      ]
+    },
+    {
+      "key": "recorder.content-dual/io.open.calls",
+      "before": [
+        116,
+        116,
+        116,
+        116,
+        116
+      ],
+      "after": [
+        116,
+        116,
+        116,
+        116,
+        116
+      ]
+    },
+    {
+      "key": "recorder.content-dual/io.sync.calls",
+      "before": [
+        116,
+        116,
+        116,
+        116,
+        116
+      ],
+      "after": [
+        116,
+        116,
+        116,
+        116,
+        116
+      ]
+    },
+    {
+      "key": "recorder.content-dual/io.write.calls",
+      "before": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ],
+      "after": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ]
+    },
+    {
+      "key": "recorder.content-dual/io.link.calls",
+      "before": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ],
+      "after": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ]
+    },
+    {
+      "key": "recorder.content-dual/io.rm.calls",
+      "before": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ],
+      "after": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ]
+    }
+  ],
+  "initialTiming": {
+    "recorder.content-cold": {
+      "workload": "new-bodies=4;body-bytes=262144;authorities=1;initial-publication=included;sync=unchanged",
+      "durationMs": [
+        142.204584,
+        340.096333,
+        183.722083,
+        211.76591700000006,
+        145.29874999999993
+      ]
+    },
+    "recorder.content-dual": {
+      "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+      "durationMs": [
+        340.61529199999995,
+        318.784584,
+        286.3767079999998,
+        286.28025000000025,
+        293.7924159999998
+      ]
+    }
+  },
+  "paired": {
+    "before": {
+      "recorder.content-cold": {
+        "workload": "new-bodies=4;body-bytes=262144;authorities=1;initial-publication=included;sync=unchanged",
+        "durationMs": [
+          132.57183400000002,
+          126.96395899999999,
+          277.54799999999994,
+          233.67275000000006,
+          154.85354200000006
+        ]
+      },
+      "recorder.content-dual": {
+        "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+        "durationMs": [
+          276.56487500000003,
+          292.67041700000004,
+          311.63362499999994,
+          290.61345800000026,
+          319.89175000000023
+        ]
+      }
+    },
+    "after": {
+      "recorder.content-cold": {
+        "workload": "new-bodies=4;body-bytes=262144;authorities=1;initial-publication=included;sync=unchanged",
+        "durationMs": [
+          108.035834,
+          117.32495899999998,
+          141.335666,
+          226.46524999999997,
+          151.57283400000006
+        ]
+      },
+      "recorder.content-dual": {
+        "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+        "durationMs": [
+          263.15649999999994,
+          280.7367079999999,
+          295.665833,
+          289.9469170000002,
+          300.1612500000001
+        ]
+      }
+    },
+    "lock": {
+      "label": "mac2-publication-paired",
+      "command": [
+        "bash",
+        "../paired-publication.sh"
+      ],
+      "exit": 0,
+      "signal": null,
+      "wallMs": 10210,
+      "cores": 8,
+      "loadBefore": 2.01,
+      "loadAfter": 2.01,
+      "highLoad": false
+    },
+    "interpretation": "overlapping samples; no stable latency improvement established"
+  },
+  "coreProfile": {
+    "file": "20261025-directory-publication-profile.json",
+    "scope": "instrumented compiled Core publication only; excludes App trace projection and cwd hashing",
+    "limitation": "instrumented compiled Core only, no before/after comparison; excludes App projection and cwd hashing"
+  },
+  "validation": {
+    "unit": {
+      "passed": 3985,
+      "failed": 0,
+      "pending": 4,
+      "files": 341,
+      "lock": {
+        "label": "mac2-publication-unit",
+        "command": [
+          "npm",
+          "run",
+          "test:unit",
+          "--",
+          "--reporter=json",
+          "--outputFile=/Users/test/scry-performance-climb-mac2.cO3N5W/logs/publication/unit.json"
+        ],
+        "exit": 0,
+        "signal": null,
+        "wallMs": 312810,
+        "cores": 8,
+        "loadBefore": 1.87,
+        "loadAfter": 12.97,
+        "highLoad": true
+      }
+    },
+    "typecheck": 0,
+    "buildCli": 0,
+    "appBuildAndProductionIpc": 0,
+    "compiledNoAddons": {
+      "distribution": "packages/turn-recorder-cli/dist/core/turn-recorder/io.js",
+      "noAddons": true,
+      "existingDirectoryMkdirCalls": 0,
+      "completePublication": true,
+      "immutableTarget": true,
+      "nonDirectoryRejected": true
+    },
+    "performance": {
+      "passed": true,
+      "observed": 72,
+      "registered": 75,
+      "worse": [],
+      "missing": [],
+      "controls": [
+        {
+          "key": "files.fixed-operations/io.read",
+          "layer": "io",
+          "unit": "count",
+          "workload": "fixed-local-temp-workloads",
+          "baseline": 417,
+          "candidate": 417,
+          "baselineRuns": [
+            417,
+            417,
+            417,
+            417,
+            417
+          ],
+          "candidateRuns": [
+            417,
+            417,
+            417,
+            417,
+            417
+          ],
+          "delta": 0,
+          "percent": 0,
+          "status": "measured"
+        },
+        {
+          "key": "files.fixed-operations/io.read.bytes",
+          "layer": "io",
+          "unit": "bytes",
+          "workload": "fixed-local-temp-workloads",
+          "baseline": 1227194,
+          "candidate": 1227198,
+          "baselineRuns": [
+            1227178,
+            1227156,
+            1227192,
+            1227194,
+            1227149
+          ],
+          "candidateRuns": [
+            1227198,
+            1227193,
+            1227179,
+            1227161,
+            1227178
+          ],
+          "delta": 4,
+          "percent": 0.0003259468348117739,
+          "status": "measured"
+        },
+        {
+          "key": "files.fixed-operations/io.readdir",
+          "layer": "io",
+          "unit": "count",
+          "workload": "fixed-local-temp-workloads",
+          "baseline": 20,
+          "candidate": 20,
+          "baselineRuns": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "candidateRuns": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "delta": 0,
+          "percent": 0,
+          "status": "measured"
+        },
+        {
+          "key": "persistence.archive/ipc.bytes",
+          "layer": "ipc",
+          "unit": "bytes",
+          "workload": "archive-turns=120;page=40",
+          "baseline": 10558,
+          "candidate": 10558,
+          "baselineRuns": [
+            10558,
+            10558,
+            10558,
+            10558,
+            10558
+          ],
+          "candidateRuns": [
+            10558,
+            10558,
+            10558,
+            10558,
+            10558
+          ],
+          "delta": 0,
+          "percent": 0,
+          "status": "measured"
+        }
+      ]
+    },
+    "fullRendererUi": "not rerun: no UI change; prior baseline-shared 55-second DesktopRemote fixture timeout remains",
+    "finalLedgerGuard": {
+      "passed": true,
+      "violations": []
+    },
+    "finalRatchetPassed": true,
+    "tightening": [
+      {
+        "key": "recorder.content-cold/io.mkdir.calls",
+        "platform": "darwin-arm64",
+        "baseline": {
+          "from": 44,
+          "to": 8
+        }
+      },
+      {
+        "key": "recorder.content-cold/io.directory.metadata.calls",
+        "platform": "darwin-arm64",
+        "baseline": {
+          "from": 80,
+          "to": 52
+        }
+      },
+      {
+        "key": "recorder.content-dual/io.mkdir.calls",
+        "platform": "darwin-arm64",
+        "baseline": {
+          "from": 92,
+          "to": 17
+        }
+      },
+      {
+        "key": "recorder.content-dual/io.directory.metadata.calls",
+        "platform": "darwin-arm64",
+        "baseline": {
+          "from": 167,
+          "to": 109
+        }
+      }
+    ]
+  },
+  "delivery": {
+    "mergedIntoOriginalWorkspace": false,
+    "pushed": false,
+    "packaged": false,
+    "installed": false,
+    "processCwdScan": {
+      "status": 0,
+      "stderr": "",
+      "scope": "processes whose cwd is under the experiment root; not escaped descendants",
+      "owned": []
+    }
+  }
+}

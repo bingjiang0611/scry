@@ -1,0 +1,67 @@
+export async function runOpeningControls({ driver, options }) {
+  const { read, wait, check, click, insert, key, fixture, sendDisabled } = driver
+  // Selected controls are demand-loaded. A delayed response for a previous
+  // session Provider must not publish after the user switches context.
+  await read('window.desktopRemoteFixture.holdProviderControls = true')
+  await click('[data-remote-session="other-native"]')
+  await wait('window.desktopRemoteFixture.providerControlsCalls.some(call => call.context.providerId === "qoder")', 'selected Beta controls request')
+  await click('[data-remote-session="old-native"]')
+  await wait('window.desktopRemoteFixture.providerControlsCalls.some(call => call.context.providerId === "claude")', 'selected Alpha controls request after switch')
+  await read('window.desktopRemoteFixture.providerControlWaiters.shift()()')
+  await wait('window.desktopRemoteFixture.providerControlsCalls.at(-1)?.context.providerId === "claude"', 'selected Alpha context after switch')
+  check(!await read('document.querySelector(".chat")?.textContent.includes("Beta Default")'), 'Stale Provider controls were published')
+  await read('window.desktopRemoteFixture.holdProviderControls = false; window.desktopRemoteFixture.providerControlWaiters.splice(0).forEach(resolve => resolve())')
+  await wait('document.querySelector(".model-effort-model")?.textContent === "claude / Alpha Default"', 'selected controls settle after stale switch')
+  await read('window.desktopRemoteFixture.providerControlsFailure = "unavailable"')
+  await click('[data-remote-session="other-native"]')
+  await wait('document.querySelector(".composer-notice")?.textContent.includes("未能读取所选 Provider")', 'unavailable controls are visible')
+  await click('textarea[aria-label="描述任务"]'); await insert('control-load-check')
+  check(await read(sendDisabled), 'Unavailable controls enabled send')
+  await read('window.desktopRemoteFixture.providerControlsFailure = null')
+  await click('.composer-notice button')
+  await wait('!document.querySelector(".runtime-composer button.send").disabled', 'explicit controls retry restores send')
+  await read('document.querySelector(\'textarea[aria-label="描述任务"]\').select()'); await key('Backspace')
+  const beforeLegacy = (await fixture()).providerControlsCalls.length
+  await read('window.desktopRemoteFixture.legacyProviderHost = true')
+  await wait('document.querySelector(".composer-notice")?.textContent.includes("旧版主机能力快照")', 'negotiated legacy snapshot is labelled')
+  await click('textarea[aria-label="描述任务"]'); await insert('legacy-control-check')
+  await wait('!document.querySelector(".runtime-composer button.send").disabled', 'legacy host preserves its existing send contract')
+  check((await fixture()).providerControlsCalls.length === beforeLegacy, 'Legacy host received a selected-controls query')
+  await read('document.querySelector(\'textarea[aria-label="描述任务"]\').select()'); await key('Backspace')
+  await read('window.desktopRemoteFixture.legacyProviderHost = false')
+  await wait('window.desktopRemoteFixture.providerControlsCalls.length > ' + beforeLegacy, 'new-host selected lookup resumes after negotiation')
+  await wait('document.querySelector(".model-effort-model")?.textContent === "qoder / Beta Default"', 'new-host controls restored')
+  if (options.openingOnly) {
+  check(!await read('document.querySelector(".composer-notice")'), 'Successful controls still show the host-read banner')
+  const beforeMetadataRefresh = (await fixture()).providerControlsCalls.length
+  await read('window.desktopRemoteFixture.providerControlsObservedAt += 1000; window.desktopRemoteFixture.providerMetadataRevision += 1')
+  await wait('window.desktopRemoteFixture.providerControlsCalls.length > ' + beforeMetadataRefresh, 'same-context metadata invalidates selected controls')
+  await wait('document.querySelector(".model-effort-model")?.textContent === "qoder / Beta Default" && !document.querySelector(".composer-notice")', 'selected controls refresh without the removed banner')
+  check(await read('document.querySelector(".model-effort-model")?.textContent === "qoder / Beta Default"'), 'Refresh silently changed selected model')
+  await click('textarea[aria-label="描述任务"]'); await insert('same-context-observation')
+  await wait('!document.querySelector(".runtime-composer button.send").disabled', 'known selected snapshot can send')
+  await read('window.desktopRemoteFixture.providerControlsFailure = "throw"; window.dispatchEvent(new Event("focus"))')
+  await wait('document.querySelector(".composer-notice")?.textContent.includes("未能读取所选 Provider")', 'failed reread discards old successful catalog')
+  check(await read(sendDisabled), 'Failed reread silently reused old controls')
+  await read('window.desktopRemoteFixture.providerControlsFailure = null')
+  await click('.composer-notice button')
+  await wait('!document.querySelector(".runtime-composer button.send").disabled', 'same-context retry restores valid choices')
+  await read('document.querySelector(\'textarea[aria-label="描述任务"]\').select()'); await key('Backspace')
+  const beforeFocus = (await fixture()).providerControlsCalls.length
+  check(await read('document.visibilityState === "visible"'), 'Focus control requires unchanged visible state')
+  await read('window.dispatchEvent(new Event("focus"))')
+  await wait('window.desktopRemoteFixture.providerControlsCalls.length > ' + beforeFocus, 'visible window focus rereads selected controls')
+  await wait('!document.querySelector(".composer-notice")', 'focused controls settle without the removed banner')
+  const beforeHidden = (await fixture()).providerControlsCalls.length
+  const catalogBeforeHidden = (await fixture()).catalogCalls
+  await read('Object.defineProperty(document, "hidden", { configurable: true, get: () => true }); Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" }); document.dispatchEvent(new Event("visibilitychange")); window.desktopRemoteFixture.providerMetadataRevision += 1')
+  await wait('document.hidden && document.visibilityState === "hidden"', 'consistent hidden document state')
+  check((await fixture()).catalogCalls === catalogBeforeHidden, 'Hidden composer polled metadata')
+  check((await fixture()).providerControlsCalls.length === beforeHidden, 'Hidden composer initialized a Provider')
+  await read('delete document.hidden; delete document.visibilityState; document.dispatchEvent(new Event("visibilitychange"))')
+  await wait('window.desktopRemoteFixture.catalogCalls > ' + catalogBeforeHidden, 'visible composer catches up metadata')
+  await wait('window.desktopRemoteFixture.providerControlsCalls.length > ' + beforeHidden, 'visible composer reobserves its selected controls')
+  }
+  await click('.sb-new')
+  await wait('document.querySelector(".location-button") != null', 'new remote draft after stale switch')
+  }

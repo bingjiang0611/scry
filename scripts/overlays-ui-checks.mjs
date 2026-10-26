@@ -109,7 +109,14 @@ export async function exerciseOverlays(contents) {
   await wait(`${css('.surface-menu')}?.dataset.state === 'exit'`)
   check(await read(`${css('.surface-menu')}.getAnimations().some(animation => animation.effect.getTiming().duration === 100)`), 'Surface menu exit is not 100ms')
   await wait(`${css('.surface-menu')} == null`)
-  check(await read(`document.activeElement === ${css(plus)}`), 'Surface menu did not restore its trigger')
+  const surfaceFocus = await read(`(() => {
+    const target = ${css(plus)}, active = document.activeElement
+    if (active === target) return { restored: true }
+    const describe = node => node ? { tag: node.tagName, id: node.id, class: node.getAttribute('class')?.slice(0, 160) } : null
+    return { restored: false, target: describe(target), active: describe(active), focused: document.hasFocus(),
+      inert: describe(target?.closest('[inert]')), surfaces: document.querySelectorAll('[data-session-surface-current="true"]').length }
+  })()`)
+  check(surfaceFocus.restored, 'Surface menu did not restore its trigger; snapshot=' + JSON.stringify(surfaceFocus))
 
   // Static baseline, then open the SAME production components beneath a real
   // page transform. Read layout offsets so their own 6px entrance isn't a false failure.

@@ -1,0 +1,371 @@
+{
+  "schema": 1,
+  "kind": "measurement correction, not production optimization",
+  "approval": {
+    "decision": "修复并替换 (Recommended)",
+    "scope": "retire the two inaccurate candidate definitions and register new definitions/baselines; all other gates unchanged; no merge/push/install",
+    "record": "explicit user answer in this session, 2026-10-26"
+  },
+  "source": {
+    "base": "f54c077bdc8be149dafa18d93ddf7d2c6f961e84",
+    "validatedBase": "1dd69260b1df0427576a1efff057ad49b07e5735-dirty",
+    "scripts/performance-counters/files.counters.test.ts": "20e333f2be1ce16a5f26d31e382a068e001c238bf1febf660a2f634e3414a83a",
+    "scripts/performance-ratchet/data-flow.json": "27d2fba2d7b38cdd4707daeeefc52af99100801b06219ae7dbea9a94e01619ae"
+  },
+  "retiredMetrics": {
+    "files.fixed-operations/io.read": {
+      "scenario": "files.fixed-operations",
+      "metric": "io.read",
+      "layer": "io",
+      "unit": "count",
+      "workload": "fixed-local-temp-workloads",
+      "source": "pass-through node:fs and node:fs/promises wrappers around production functions",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 336
+      }
+    },
+    "files.fixed-operations/io.read.bytes": {
+      "scenario": "files.fixed-operations",
+      "metric": "io.read.bytes",
+      "layer": "io",
+      "unit": "bytes",
+      "workload": "fixed-local-temp-workloads",
+      "source": "pass-through node:fs and node:fs/promises wrappers around production functions",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 4,
+      "baselines": {
+        "darwin-arm64": 1183197
+      }
+    }
+  },
+  "registration": [
+    {
+      "key": "files.fixed-operations/io.read.api.calls",
+      "platform": "darwin-arm64",
+      "baseline": {
+        "from": null,
+        "to": 214
+      }
+    },
+    {
+      "key": "files.fixed-operations/io.read.payload.bytes",
+      "platform": "darwin-arm64",
+      "baseline": {
+        "from": null,
+        "to": 1397923
+      }
+    }
+  ],
+  "initialObservations": [
+    {
+      "scenario": "files.fixed-operations",
+      "layer": "io",
+      "workload": "fixed-local-temp-workloads",
+      "source": "pass-through node:fs and node:fs/promises wrappers around production functions",
+      "metric": "io.open",
+      "unit": "count",
+      "availability": "measured",
+      "runs": [
+        6,
+        6,
+        6,
+        6,
+        6
+      ]
+    },
+    {
+      "scenario": "files.fixed-operations",
+      "layer": "io",
+      "workload": "fixed-local-temp-workloads",
+      "source": "attempts: readFileSync, readSync, promises.readFile and read on handles opened during measurement; errors count once",
+      "metric": "io.read.api.calls",
+      "unit": "count",
+      "availability": "measured",
+      "runs": [
+        214,
+        214,
+        214,
+        214,
+        214
+      ]
+    },
+    {
+      "scenario": "files.fixed-operations",
+      "layer": "io",
+      "workload": "fixed-local-temp-workloads",
+      "source": "pass-through node:fs and node:fs/promises wrappers around production functions",
+      "metric": "io.stat",
+      "unit": "count",
+      "availability": "measured",
+      "runs": [
+        1038,
+        1038,
+        1038,
+        1038,
+        1038
+      ]
+    },
+    {
+      "scenario": "files.fixed-operations",
+      "layer": "io",
+      "workload": "fixed-local-temp-workloads",
+      "source": "pass-through node:fs and node:fs/promises wrappers around production functions",
+      "metric": "io.readdir",
+      "unit": "count",
+      "availability": "measured",
+      "runs": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ]
+    },
+    {
+      "scenario": "files.fixed-operations",
+      "layer": "io",
+      "workload": "fixed-local-temp-workloads",
+      "source": "returned payload: readFile buffers by length, strings as UTF-8, readSync/FileHandle.read by bytesRead; failures contribute zero",
+      "metric": "io.read.payload.bytes",
+      "unit": "bytes",
+      "availability": "measured",
+      "runs": [
+        1397876,
+        1397911,
+        1397898,
+        1397868,
+        1397923
+      ]
+    },
+    {
+      "scenario": "files.fixed-operations",
+      "layer": "io",
+      "workload": "fixed-local-temp-workloads",
+      "source": "pass-through node:fs and node:fs/promises wrappers around production functions",
+      "metric": "io.write",
+      "unit": "count",
+      "availability": "measured",
+      "runs": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ]
+    },
+    {
+      "scenario": "files.fixed-operations",
+      "layer": "io",
+      "workload": "fixed-local-temp-workloads",
+      "source": "pass-through node:fs and node:fs/promises wrappers around production functions",
+      "metric": "io.rename",
+      "unit": "count",
+      "availability": "measured",
+      "runs": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ]
+    }
+  ],
+  "fullRunNewReadObservations": [
+    {
+      "scenario": "files.fixed-operations",
+      "layer": "io",
+      "workload": "fixed-local-temp-workloads",
+      "source": "attempts: readFileSync, readSync, promises.readFile and read on handles opened during measurement; errors count once",
+      "metric": "io.read.api.calls",
+      "unit": "count",
+      "availability": "measured",
+      "runs": [
+        214,
+        214,
+        214,
+        214,
+        214
+      ]
+    },
+    {
+      "scenario": "files.fixed-operations",
+      "layer": "io",
+      "workload": "fixed-local-temp-workloads",
+      "source": "returned payload: readFile buffers by length, strings as UTF-8, readSync/FileHandle.read by bytesRead; failures contribute zero",
+      "metric": "io.read.payload.bytes",
+      "unit": "bytes",
+      "availability": "measured",
+      "runs": [
+        1397910,
+        1397911,
+        1397895,
+        1397900,
+        1397916
+      ]
+    }
+  ],
+  "verification": {
+    "oldMeterNegativeControl": {
+      "passed": 1,
+      "failedAsExpected": 6,
+      "filteredOriginalWorkloadTests": 6,
+      "log": "negative-old-meter.log"
+    },
+    "correctedFocused": {
+      "files": 4,
+      "passed": 36,
+      "log": "focused-with-ledger.log"
+    },
+    "fixedWorkloadSourceUnchanged": true,
+    "typecheck": "passed locally and on mac2",
+    "fullUnit": {
+      "success": true,
+      "total": 4035,
+      "passed": 4031,
+      "failed": 0,
+      "pending": 4,
+      "files": 346,
+      "timing": {
+        "label": "mac2-read-meter-unit",
+        "command": [
+          "npm",
+          "run",
+          "test:unit",
+          "--",
+          "--maxWorkers=2",
+          "--no-file-parallelism",
+          "--reporter=json",
+          "--outputFile",
+          "/Users/test/scry-performance-climb-mac2.cO3N5W/logs/read-meter/unit.json"
+        ],
+        "exit": 0,
+        "signal": null,
+        "wallMs": 622706,
+        "cores": 8,
+        "loadBefore": 2.66,
+        "loadAfter": 8.09,
+        "highLoad": true
+      }
+    },
+    "fullPerformance": {
+      "registered": 77,
+      "observed": 74,
+      "passed": true,
+      "worse": [
+        {
+          "key": "files.fixed-operations/io.readdir",
+          "layer": "io",
+          "unit": "count",
+          "status": "candidate",
+          "ceiling": null,
+          "tolerance": 0,
+          "value": 20,
+          "min": 20,
+          "runs": 5,
+          "spread": 0,
+          "result": "worse",
+          "baseline": 18,
+          "gateFailed": false
+        },
+        {
+          "key": "persistence.archive/ipc.bytes",
+          "layer": "ipc",
+          "unit": "bytes",
+          "status": "candidate",
+          "ceiling": null,
+          "tolerance": 0,
+          "value": 10558,
+          "min": 10558,
+          "runs": 5,
+          "spread": 0,
+          "result": "worse",
+          "baseline": 10536,
+          "gateFailed": false
+        },
+        {
+          "key": "recorder.content-cold/io.stat.calls",
+          "layer": "io",
+          "unit": "count",
+          "status": "candidate",
+          "ceiling": null,
+          "tolerance": 0,
+          "value": 44,
+          "min": 44,
+          "runs": 5,
+          "spread": 0,
+          "result": "worse",
+          "baseline": 36,
+          "gateFailed": false
+        }
+      ],
+      "missing": [
+        {
+          "key": "analytics.stats/cpu.instructions",
+          "layer": "main",
+          "unit": "instructions",
+          "status": "candidate",
+          "ceiling": null,
+          "tolerance": 0,
+          "result": "missing",
+          "gateFailed": false
+        },
+        {
+          "key": "history.page/cpu.instructions",
+          "layer": "main",
+          "unit": "instructions",
+          "status": "candidate",
+          "ceiling": null,
+          "tolerance": 0,
+          "result": "missing",
+          "gateFailed": false
+        },
+        {
+          "key": "remote.trace.preview/cpu.instructions",
+          "layer": "main",
+          "unit": "instructions",
+          "status": "candidate",
+          "ceiling": null,
+          "tolerance": 0,
+          "result": "missing",
+          "gateFailed": false
+        }
+      ],
+      "timing": {
+        "label": "mac2-read-meter-measure",
+        "command": [
+          "npm",
+          "run",
+          "performance:measure",
+          "--",
+          "--out",
+          "/Users/test/scry-performance-climb-mac2.cO3N5W/logs/read-meter/full-measure"
+        ],
+        "exit": 0,
+        "signal": null,
+        "wallMs": 44286,
+        "cores": 8,
+        "loadBefore": 6.73,
+        "loadAfter": 7.05,
+        "highLoad": false
+      }
+    },
+    "ledgerGuard": {
+      "passed": true,
+      "violations": []
+    },
+    "otherMetricsDeepEqual": 75
+  },
+  "limits": [
+    "read API attempts, not OS syscall or disk counts",
+    "string payload is UTF-8 representation, not original encoded file size",
+    "only listed APIs are instrumented; FileHandle.read is tracked for handles opened during measurement",
+    "payload samples vary; zero tolerance retained, candidate only, no normalization or promotion",
+    "unit success is the isolated combination including existing CLI fix5bb630e1, not bare performance branch",
+    "no new App build/UI/release or L2 speed claim; production source unchanged"
+  ],
+  "artifacts": "/private/tmp/scry-performance-climb-20261025.yjlnNW/results/mac2-read-meter-20261026"
+}

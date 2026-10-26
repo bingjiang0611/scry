@@ -171,6 +171,8 @@
       "sources": [
         "src/main/trace-output.ts",
         "src/renderer/format.ts",
+        "src/renderer/remote-trace.ts",
+        "src/renderer/turn-stream-projection.ts",
         "src/renderer/chat-scroll.ts",
         "src/renderer/performance.bench.tsx"
       ],
@@ -178,7 +180,7 @@
         "trace.delivery",
         "renderer.batch"
       ],
-      "gap": "JSON 字节不是 Electron wire bytes；计算基准不是浏览器 paint。补流式输出时原生输入与滚动。"
+      "gap": "JSON 字节不是 Electron wire bytes；计算基准不是浏览器 paint。远程尾部投影另有 renderer.remote-tail 工作量计数，不作为此处的 L2 benchmark。补流式输出时原生输入与滚动。"
     },
     {
       "id": "controls",

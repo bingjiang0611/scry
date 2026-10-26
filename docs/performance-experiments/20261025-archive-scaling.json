@@ -1,0 +1,358 @@
+{
+  "sourceCommit": "360314f1bdfb09106f0957058bc48635d73e9f20",
+  "dirty": "",
+  "node": "v24.18.0",
+  "platform": "darwin",
+  "arch": "arm64",
+  "scriptSha256": "d0b374ed94405e29f24261926eb8248d02059a82926d863232456781d2893d4b",
+  "workload": "turns=40,400,4000;visible=40;text-bytes=256;warm-repeats=5;real-upsert",
+  "inputs": {
+    "src/core/turn-recorder/aggregate.ts": "e95ac3942e4ec3b7c00332690e866bba6dadb8582fe613d392ad969aa8665275",
+    "src/core/turn-recorder/config.ts": "ea61daff251245bf7be2543ac0dc9dbbdf73515394ab1823e6b1ef0d38990ae7",
+    "src/core/turn-recorder/content-policy.ts": "4478d99ac18a9d67043a90f7bd93070ab60953a93bc5c1914edb225c79080f98",
+    "src/core/turn-recorder/git.ts": "4fd33f9c9108126ab15450d69085f1264e1af4f495c5d8fad8a232d4d4b9c03b",
+    "src/core/turn-recorder/tool-content.ts": "f8f3a79a1faaef06754a76e4622c5b2a93bedb75126786589f6009c3bec49428",
+    "src/main/attachment-store.ts": "9fd0296651e467144e1724b807cf764ef2f8a683d52e1aee145b26550d49cd5c",
+    "src/main/transcript-archive.ts": "4a40c89c3044f765c0f55b6205e54fd3942a2233510f0abdcb8d8c3316507c40",
+    "src/shared/credit-usage.ts": "6b0e56e4eb2416cb4f4f8ff8cdce6a17fd894f801311be073e3c0afbb60b7273",
+    "src/shared/logical-calls.ts": "d6199a166a07a5f6d3037a1d437f4243658300263c978eb3abe07df5492ff2f3",
+    "src/shared/model-timing.ts": "698f15da5b7bedc78be3a7e1f539ec07334f06a703b759da492891c60ebafe57",
+    "src/shared/provider.ts": "5b1e406a31fcabdd4da10a8dd3cc0786283eda2922b72949f625d06023d78311",
+    "src/shared/result-timing.ts": "da3c09050b265f517a6d23bcf8dab8f816a96d280954b1a5e570b55166a94837",
+    "src/shared/runtime.ts": "dbeb787c34cf91501257cf7f2f248f62be4cdf96874f1c4e14d12c31ba260df2",
+    "src/shared/tool-content.ts": "4106c3a1d10bdeb0e2144d97982a6aad51e68f2ff95491b4e8a2ae1afb5b3db0",
+    "src/shared/trace.ts": "f3d3fe199db0c5fab53828bc95b7cb40840c03d6a3826977ec2ad0b38b8e42df",
+    "src/shared/turn-record.ts": "5a28d5e389db7e65811b75c4a4df53be7e4af9ed78672ae21b02fe18b1d1a046"
+  },
+  "samples": [
+    {
+      "turns": 40,
+      "phase": "first-access",
+      "repeat": 0,
+      "calls": {
+        "fs.lstatSync": 226,
+        "fsp.lstat": 165,
+        "fsp.readdir": 2,
+        "fsp.readFile": 80,
+        "json.parse": 80,
+        "fsp.open": 1
+      },
+      "canonicalLstats": 120,
+      "readBytes": 40072,
+      "durationMs": 17.201209000000006,
+      "readMode": "indexed",
+      "turnFilesRead": 40
+    },
+    {
+      "turns": 40,
+      "phase": "warm",
+      "repeat": 0,
+      "calls": {
+        "fs.lstatSync": 207,
+        "fsp.lstat": 122,
+        "fsp.readFile": 41,
+        "json.parse": 41,
+        "fsp.readdir": 1
+      },
+      "canonicalLstats": 120,
+      "readBytes": 40383,
+      "durationMs": 9.856624999999951,
+      "readMode": "indexed",
+      "turnFilesRead": 40
+    },
+    {
+      "turns": 40,
+      "phase": "warm",
+      "repeat": 1,
+      "calls": {
+        "fs.lstatSync": 207,
+        "fsp.lstat": 122,
+        "fsp.readdir": 1,
+        "fsp.readFile": 40,
+        "json.parse": 40
+      },
+      "canonicalLstats": 120,
+      "readBytes": 26510,
+      "durationMs": 8.748499999999979,
+      "readMode": "indexed",
+      "turnFilesRead": 40
+    },
+    {
+      "turns": 40,
+      "phase": "warm",
+      "repeat": 2,
+      "calls": {
+        "fs.lstatSync": 207,
+        "fsp.lstat": 122,
+        "fsp.readdir": 1,
+        "fsp.readFile": 40,
+        "json.parse": 40
+      },
+      "canonicalLstats": 120,
+      "readBytes": 26510,
+      "durationMs": 9.174832999999978,
+      "readMode": "indexed",
+      "turnFilesRead": 40
+    },
+    {
+      "turns": 40,
+      "phase": "warm",
+      "repeat": 3,
+      "calls": {
+        "fs.lstatSync": 207,
+        "fsp.lstat": 122,
+        "fsp.readdir": 1,
+        "fsp.readFile": 40,
+        "json.parse": 40
+      },
+      "canonicalLstats": 120,
+      "readBytes": 26510,
+      "durationMs": 9.38770900000003,
+      "readMode": "indexed",
+      "turnFilesRead": 40
+    },
+    {
+      "turns": 40,
+      "phase": "warm",
+      "repeat": 4,
+      "calls": {
+        "fs.lstatSync": 207,
+        "fsp.lstat": 122,
+        "fsp.readdir": 1,
+        "fsp.readFile": 40,
+        "json.parse": 40
+      },
+      "canonicalLstats": 120,
+      "readBytes": 26510,
+      "durationMs": 8.69154199999997,
+      "readMode": "indexed",
+      "turnFilesRead": 40
+    },
+    {
+      "turns": 400,
+      "phase": "first-access",
+      "repeat": 0,
+      "calls": {
+        "fs.lstatSync": 226,
+        "fsp.lstat": 885,
+        "fsp.readdir": 2,
+        "fsp.readFile": 440,
+        "json.parse": 440,
+        "fsp.open": 1
+      },
+      "canonicalLstats": 480,
+      "readBytes": 162675,
+      "durationMs": 66.86245800000006,
+      "readMode": "indexed",
+      "turnFilesRead": 40
+    },
+    {
+      "turns": 400,
+      "phase": "warm",
+      "repeat": 0,
+      "calls": {
+        "fs.lstatSync": 207,
+        "fsp.lstat": 482,
+        "fsp.readFile": 41,
+        "json.parse": 41,
+        "fsp.readdir": 1
+      },
+      "canonicalLstats": 480,
+      "readBytes": 162985,
+      "durationMs": 11.093834000000015,
+      "readMode": "indexed",
+      "turnFilesRead": 40
+    },
+    {
+      "turns": 400,
+      "phase": "warm",
+      "repeat": 1,
+      "calls": {
+        "fs.lstatSync": 207,
+        "fsp.lstat": 482,
+        "fsp.readdir": 1,
+        "fsp.readFile": 40,
+        "json.parse": 40
+      },
+      "canonicalLstats": 480,
+      "readBytes": 26600,
+      "durationMs": 10.24070800000004,
+      "readMode": "indexed",
+      "turnFilesRead": 40
+    },
+    {
+      "turns": 400,
+      "phase": "warm",
+      "repeat": 2,
+      "calls": {
+        "fs.lstatSync": 207,
+        "fsp.lstat": 482,
+        "fsp.readdir": 1,
+        "fsp.readFile": 40,
+        "json.parse": 40
+      },
+      "canonicalLstats": 480,
+      "readBytes": 26600,
+      "durationMs": 11.276374999999916,
+      "readMode": "indexed",
+      "turnFilesRead": 40
+    },
+    {
+      "turns": 400,
+      "phase": "warm",
+      "repeat": 3,
+      "calls": {
+        "fs.lstatSync": 207,
+        "fsp.lstat": 482,
+        "fsp.readdir": 1,
+        "fsp.readFile": 40,
+        "json.parse": 40
+      },
+      "canonicalLstats": 480,
+      "readBytes": 26600,
+      "durationMs": 10.777083000000061,
+      "readMode": "indexed",
+      "turnFilesRead": 40
+    },
+    {
+      "turns": 400,
+      "phase": "warm",
+      "repeat": 4,
+      "calls": {
+        "fs.lstatSync": 207,
+        "fsp.lstat": 482,
+        "fsp.readdir": 1,
+        "fsp.readFile": 40,
+        "json.parse": 40
+      },
+      "canonicalLstats": 480,
+      "readBytes": 26600,
+      "durationMs": 10.938457999999969,
+      "readMode": "indexed",
+      "turnFilesRead": 40
+    },
+    {
+      "turns": 4000,
+      "phase": "first-access",
+      "repeat": 0,
+      "calls": {
+        "fs.lstatSync": 226,
+        "fsp.lstat": 8085,
+        "fsp.readdir": 2,
+        "fsp.readFile": 4040,
+        "json.parse": 4040,
+        "fsp.open": 1
+      },
+      "canonicalLstats": 4080,
+      "readBytes": 1391297,
+      "durationMs": 482.12433299999975,
+      "readMode": "indexed",
+      "turnFilesRead": 40
+    },
+    {
+      "turns": 4000,
+      "phase": "warm",
+      "repeat": 0,
+      "calls": {
+        "fs.lstatSync": 207,
+        "fsp.lstat": 4082,
+        "fsp.readFile": 41,
+        "json.parse": 41,
+        "fsp.readdir": 1
+      },
+      "canonicalLstats": 4080,
+      "readBytes": 1391610,
+      "durationMs": 44.13408299999992,
+      "readMode": "indexed",
+      "turnFilesRead": 40
+    },
+    {
+      "turns": 4000,
+      "phase": "warm",
+      "repeat": 1,
+      "calls": {
+        "fs.lstatSync": 207,
+        "fsp.lstat": 4082,
+        "fsp.readdir": 1,
+        "fsp.readFile": 40,
+        "json.parse": 40
+      },
+      "canonicalLstats": 4080,
+      "readBytes": 26680,
+      "durationMs": 39.60383300000012,
+      "readMode": "indexed",
+      "turnFilesRead": 40
+    },
+    {
+      "turns": 4000,
+      "phase": "warm",
+      "repeat": 2,
+      "calls": {
+        "fs.lstatSync": 207,
+        "fsp.lstat": 4082,
+        "fsp.readdir": 1,
+        "fsp.readFile": 40,
+        "json.parse": 40
+      },
+      "canonicalLstats": 4080,
+      "readBytes": 26680,
+      "durationMs": 38.39274999999998,
+      "readMode": "indexed",
+      "turnFilesRead": 40
+    },
+    {
+      "turns": 4000,
+      "phase": "warm",
+      "repeat": 3,
+      "calls": {
+        "fs.lstatSync": 207,
+        "fsp.lstat": 4082,
+        "fsp.readdir": 1,
+        "fsp.readFile": 40,
+        "json.parse": 40
+      },
+      "canonicalLstats": 4080,
+      "readBytes": 26680,
+      "durationMs": 34.33470800000032,
+      "readMode": "indexed",
+      "turnFilesRead": 40
+    },
+    {
+      "turns": 4000,
+      "phase": "warm",
+      "repeat": 4,
+      "calls": {
+        "fs.lstatSync": 207,
+        "fsp.lstat": 4082,
+        "fsp.readdir": 1,
+        "fsp.readFile": 40,
+        "json.parse": 40
+      },
+      "canonicalLstats": 4080,
+      "readBytes": 26680,
+      "durationMs": 36.195041999999376,
+      "readMode": "indexed",
+      "turnFilesRead": 40
+    }
+  ],
+  "sensitivity": [
+    {
+      "turns": 40,
+      "extraLstat": 1,
+      "extraParse": 1,
+      "passed": true
+    },
+    {
+      "turns": 400,
+      "extraLstat": 1,
+      "extraParse": 1,
+      "passed": true
+    },
+    {
+      "turns": 4000,
+      "extraLstat": 1,
+      "extraParse": 1,
+      "passed": true
+    }
+  ]
+}

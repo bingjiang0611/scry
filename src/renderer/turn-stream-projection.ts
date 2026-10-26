@@ -1,4 +1,4 @@
-import type { TraceEvent } from '@shared/trace'
+import type { TraceEvent } from '../shared/trace'
 
 /**
  * 流式文本片段：Claude/Qoder/Pi 用 text_delta；旧版 Codex 曾把每个增量误标成 text。
@@ -10,8 +10,8 @@ export function isStreamTextFragment(event: TraceEvent): boolean {
   return event.stage === 'text' && (event.providerId === 'codex' || event.runtimeProvider === 'codex_cli')
 }
 
-// applyTraceBatch knows exactly which immutable prefix it preserved. WeakRef avoids
-// retaining every earlier array through a chain of update provenance.
+// Local batches and checked remote deltas know which immutable prefix they preserved.
+// WeakRef avoids retaining earlier arrays through a chain of update provenance.
 const traceItemsChanges = new WeakMap<readonly TraceEvent[], {
   previous: WeakRef<readonly TraceEvent[]>
   firstChanged: number

@@ -1,5 +1,6 @@
 import type { DesktopRemoteTraceRead, DesktopTraceCursor } from '../shared/desktop-remote'
 import type { ActiveRun } from '../shared/trace'
+import { recordTraceItemsChange } from './turn-stream-projection'
 
 // The remote run shown by RemoteChat plus the host revision it was built from.
 // `cursor` is absent for older hosts (full snapshots only).
@@ -41,8 +42,14 @@ export function mergeRemoteTrace(previous: RemoteTraceView | null, read: Desktop
   for (let index = Math.min(prior.run.items.length, count); index < count; index++) if (!covered.has(index)) return { kind: 'gap' }
   let items = prior.run.items
   if (read.changes.length > 0 || count !== items.length) {
+    let firstChanged = Math.min(items.length, count)
     items = items.slice(0, count)
-    for (const change of read.changes) items[change.index] = change.item
+    for (const change of read.changes) {
+      items[change.index] = change.item
+      firstChanged = Math.min(firstChanged, change.index)
+    }
+    // The checked base and complete delta preserve every earlier item reference.
+    recordTraceItemsChange(items, prior.run.items, firstChanged)
   }
   const incoming = read.run.attachments
   // An unchanged image count yields no attachments, or a fresh empty list when there are none.
