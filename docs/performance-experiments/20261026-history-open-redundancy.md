@@ -94,8 +94,11 @@ node .agents/skills/scry-performance-climb/scripts/timing-run.mjs history-load-b
 | 页面 stringify | 837–1393 ms | 95–302 ms |
 
 - 因为 `highLoad: true`，**不宣称毫秒级改善**（L2 未成立）。需要在低负载机器（30.7.226.226）重跑同一负载的两侧才作结论。
-- 期间全量 unit 首轮有 11 项失败（`commit-delivery`、`commit-environment` 等，均在极端负载下超时），
-  单独重跑这两个文件 21 项全通过；属负载造成的既有不稳定，不是本次改动引入。
+- 期间全量 unit（`npx vitest run`，load average 17–175）：首轮 4097 项里 20 个文件 32 项失败，
+  逐个重跑 19/20 文件 252 项通过，剩 1 项 `commit-environment` 单跑 5 项通过；重构后最终一轮
+  4092 通过 / 2 项 `scripts/check-staged-file-size.test.ts` 5 s 超时，该文件连跑 3 次均 10 项通过。
+  这些都是本机高负载下真实 git/子进程用例的既有超时类不稳定，路径未被本次改动触及；
+  没有提高超时、跳过或用重跑抹掉首轮失败。
 
 ### L3
 
