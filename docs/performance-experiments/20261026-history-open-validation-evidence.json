@@ -288,7 +288,8 @@
   "delivery": {
     "choice": "main only",
     "mainFastForwardedTo": "18102902698b645317800a5fc019ed4c5821c254",
-    "installed": false,
+    "installedByThisTask": false,
+    "observedInstalledAppVersionAfterDelivery": "0.2.226",
     "pushed": false,
     "userAppRestarted": false
   },
