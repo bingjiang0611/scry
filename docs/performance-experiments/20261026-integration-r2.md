@@ -2,7 +2,7 @@
 
 ## 结论与边界
 
-已提交的 recorder 重试修复与性能分支组合后，本轮全量 unit、完整 UI 命令链、类型检查、CLI 构建和性能门禁通过。独立集成提交为 `bda0c854`。**没有合入原开发分支、push、打包或安装。**
+已提交的 recorder 重试修复与性能分支组合后，本轮全量 unit、完整 UI 命令链、类型检查、CLI 构建和性能门禁通过。独立集成提交为 `bda0c854`。验证完成后，用户批准“仅合入开发分支”，已快进到含交付文档的 `586bbaeb`。**没有push、打包或安装。**
 
 这是新组合版本的验证，不是抹去[上一轮失败](20261026-integration-check.md)：两项 UI 首次失败的根因仍未知。本轮加入失败证据，不宣称修好了 UI 偶发问题，也不据一次通过承诺后续 CI 稳定。
 
@@ -79,6 +79,6 @@ mac2：Apple M1 8核，darwin-arm64，Node24.18.0，Electron42.10.1。依赖锁 
 
 本机证据目录：`~/.local/state/scry-performance-resume-20261026.3YkqtM/results/`，当前日志在 `remote/`，旧失败完整拷贝在 `previous-integration/`。mac2仍保留 `scry-performance-climb-mac2.cO3N5W/logs/integration-r2/` 和旧 `logs/integration/`。记录包含原始unit/UI日志、退出码、性能两侧观测、比较、ratchet、源码及build SHA。末次 scoped cwd扫描没有本任务目录下的存活进程；不据此声称所有逃逸后代均已证明关闭。临时 fixture、依赖和工作树保留用于复盘。
 
-- 已提交诊断与独立集成。没有修改原 `reliability/collection` 分支或工作区；不把独立 merge 当作正式合入。
+- 用户后续明确批准“仅合入开发分支”。先确认原工作区干净、分支为`reliability/collection`、目标为后代，再执行`git merge --ff-only`：`c7388c38`→`586bbaeb`。合入后完整tree `6d94b0f0148c64b4963ba706302e89812bbc7267`与独立分支相同；没有复制WIP或重新生成生产代码。本次补记只改交付文档。
 - 旧两项 UI 偶发问题仍由agent负责：若正常验收再次失败，先读取本次新增快照定位，不调超时或重跑到绿。
-- **下一步需要用户决定**：是否把已验证独立分支快进合入原开发分支。安装和push不包含在该动作内，需要明确授权。
+- 安装、push和重启App均未获本次授权，也未执行。若要验证日常收益，下一步需用户另行批准安装，再采集L3；不能把源码合入当作运行实例已经更新。
