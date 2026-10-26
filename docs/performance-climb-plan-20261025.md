@@ -38,7 +38,7 @@
 | 0 身份与计划 | agent：隔离cwd、依赖、源码与结果目录，核对既有实验 | 无他人WIP混入，测量与生产分别提交 | 已完成；计划`7787c78a`，测量`cd40ee06`，结构`138b4217`/`3afb730f` |
 | 1 删除无消费者计算 | agent：迁移上述统计刷新collector和最小生产变更 | 旧实现负对照；5轮L1；受锁L2；可见analytics刷新仍有效；UI/全量unit/type/build检查 | L1/L2已补证；组合unit/type/build/IPC通过；2026-10-26完整UI门禁已一次通过 |
 | 2 证据写入窄切片 | agent：测量content突发、重复body、双authority写入、directory/file sync | 不改格式；目录批次需授权；各文件及公开返回点耐久性不减 | `34a6371f`、`16941f1f`之后，授权实验`129f1bf3`合并单事件双权威的目录准备；L1及两种次序受控L2成立，未跨事件缓冲 |
-| 2a 测量口径维护 | agent修正与复测；维护者决定旧candidate替换策略 | 真实API次数/返回字节；直接反例；不擅自退役指标或放宽门槛 | 发现files旧计数器的Promise读双计及同步读字节错误；已诊断，待替换策略决定 |
+| 2a 测量口径维护 | 用户已批准替换两项错误candidate；agent修正复测 | API尝试次数/返回payload字节；旧定义保留；其他75项不动 | 已完成；旧实现6个负对照失败，新回归通过，mac2全量4031通过/4原有skip；不是产品提速 |
 | 3 查询与归档索引 | agent：固定40/400/4000轮与大账本；外部修改/删除/repair验证 | 先移除重复查询，再决定增量projection和专用执行进程；derived可重建、canonical不变 | 已测40/400/4000轮：正文已并行且限40；全成员指纹校验随N增长。无生产改动，见本轮诊断 |
 | 4 Provider运行层 | agent + 上游维护者：完整刷新合同与隔离reload夹具 | 配置/模型/auth/extension/executable变化正确失效；再验证热目录收益、冷启动与驻留成本 | 原刷新边界阻塞，禁止重复旧假设 |
 | 5 客户端增量 | agent：在写入点产生event revision，真正窗口化投影 | 固定大负载O(变化/可见)，重连、tombstone、选择、读屏、anchor不回归 | 首个窄切片`67952e75`：远程delta复用变更前缀；数组复制仍O(N)。独立夹具维护`b9ff9cc2`已关闭完整UI阻塞 |
@@ -111,6 +111,16 @@ L2前后两侧均highLoad=true，本轮按持续高负载收尾，不开展第�
 - 测量`1fae1e62`、生产`129f1bf3`分离。组合`1dd69260`含原CLI修复，unit4023通过/4既有跳过；类型、CLI构建、当前App生产IPC通过。两处SIGKILL恢复及错误注入通过，不当成断电模拟。
 - 只收紧5个本轮candidate；全量门禁通过但仍有5个worse、3个CPU missing。追查相邻+6字节后发现两项旧files计数器口径有误，不能继续当成真实次数/字节；新publication计数器不受影响。
 - 下一步应优先修测量口径并决定旧candidate替换，不继续基于错误数字优化。未动原开发工作区，无push/安装/L3。
+
+## 文件读取口径修正（2026-10-26）
+
+详见[维护记录](performance-experiments/20261026-read-meter.md)和[批准/原始证据](performance-experiments/20261026-read-meter-evidence.json)。
+
+- 用户明确选择“修复并替换”：退役两项错误files candidate，新建`io.read.api.calls`与`io.read.payload.bytes`，旧定义及历史保留。其他75项逐项不变，无门禁放宽。
+- 修复Promise双计、同步读把文件名当内容字节；实际返回内容及partial/EOF独立回归通过，旧实现6个直接反例失败。固定业务负载与断言逐字未改。
+- mac2初始5轮调用次数均214；返回payload基线1397923字节，样本跨度55字节。该量不是物理磁盘读量；仍为零容差candidate，未归一化或升门禁。
+- focused36通过，类型通过；完整验证组合4031通过/4原有skip。全量门禁通过，仍有3个历史candidate worse及3项CPU missing；不把计数更正冒充优化。
+- 本轮仅测量与台账代码，不重建或安装App。下一步由用户选择基于当前已提交开发HEAD进行独立集成，还是等并行CLI/recorder WIP落定；不覆盖用户未提交改动。
 
 ## 单实验流程
 

@@ -127,18 +127,18 @@
         "darwin-arm64": 6
       }
     },
-    "files.fixed-operations/io.read": {
+    "files.fixed-operations/io.read.api.calls": {
       "scenario": "files.fixed-operations",
-      "metric": "io.read",
+      "metric": "io.read.api.calls",
       "layer": "io",
       "unit": "count",
       "workload": "fixed-local-temp-workloads",
-      "source": "pass-through node:fs and node:fs/promises wrappers around production functions",
+      "source": "attempts: readFileSync, readSync, promises.readFile and read on handles opened during measurement; errors count once",
       "status": "candidate",
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 336
+        "darwin-arm64": 214
       }
     },
     "files.fixed-operations/io.stat": {
@@ -169,18 +169,18 @@
         "darwin-arm64": 18
       }
     },
-    "files.fixed-operations/io.read.bytes": {
+    "files.fixed-operations/io.read.payload.bytes": {
       "scenario": "files.fixed-operations",
-      "metric": "io.read.bytes",
+      "metric": "io.read.payload.bytes",
       "layer": "io",
       "unit": "bytes",
       "workload": "fixed-local-temp-workloads",
-      "source": "pass-through node:fs and node:fs/promises wrappers around production functions",
+      "source": "returned payload: readFile buffers by length, strings as UTF-8, readSync/FileHandle.read by bytesRead; failures contribute zero",
       "status": "candidate",
       "ceiling": null,
-      "tolerance": 4,
+      "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1183197
+        "darwin-arm64": 1397923
       }
     },
     "files.fixed-operations/io.write": {
