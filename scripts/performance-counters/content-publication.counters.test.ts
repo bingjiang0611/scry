@@ -7,11 +7,13 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { TraceEvent } from '../../src/shared/trace'
 import type { ToolContentRef } from '../../src/shared/tool-content'
 import { defaultRepeats, measured, repeatCounters, writeCollector } from '../performance-counters.mjs'
+import { assertPublicationBarriers, type PublicationOperation } from './publication-barriers'
 
 const meter = vi.hoisted(() => ({
   active: false,
   counts: { hashes: 0, reads: 0, mkdirs: 0, stats: 0, opens: 0, syncs: 0, writes: 0, links: 0, removes: 0 },
-  syncOrder: [] as Array<{ kind: 'directory' | 'file'; path: string }>
+  syncOrder: [] as Array<{ kind: 'directory' | 'file'; path: string }>,
+  operations: [] as PublicationOperation[]
 }))
 
 vi.mock('node:crypto', async () => {
@@ -30,35 +32,40 @@ vi.mock('node:fs/promises', async () => {
       if (meter.active) meter.counts.reads++
       return actual.readFile(...args)
     },
-    mkdir: (...args: Parameters<typeof actual.mkdir>) => {
+    mkdir: async (...args: Parameters<typeof actual.mkdir>) => {
       if (meter.active) meter.counts.mkdirs++
-      return actual.mkdir(...args)
+      const result = await actual.mkdir(...args)
+      if (meter.active) meter.operations.push({ kind: 'mkdir', path: String(args[0]) })
+      return result
     },
     stat: (...args: Parameters<typeof actual.stat>) => {
       if (meter.active) meter.counts.stats++
       return actual.stat(...args)
     },
-    link: (...args: Parameters<typeof actual.link>) => {
+    link: async (...args: Parameters<typeof actual.link>) => {
       if (meter.active) meter.counts.links++
-      return actual.link(...args)
+      await actual.link(...args)
+      if (meter.active) meter.operations.push({ kind: 'link', path: String(args[1]), from: String(args[0]) })
     },
-    rm: (...args: Parameters<typeof actual.rm>) => {
+    rm: async (...args: Parameters<typeof actual.rm>) => {
       if (meter.active) meter.counts.removes++
-      return actual.rm(...args)
+      await actual.rm(...args)
+      if (meter.active) meter.operations.push({ kind: 'rm', path: String(args[0]) })
     },
     open: async (...args: Parameters<typeof actual.open>) => {
       if (meter.active) meter.counts.opens++
       const handle = await actual.open(...args)
       const sync = handle.sync.bind(handle)
       const write = handle.writeFile.bind(handle)
-      handle.sync = () => {
+      handle.sync = async () => {
         if (meter.active) {
           meter.counts.syncs++
           meter.syncOrder.push(args[1] === 'r'
             ? { kind: 'directory', path: String(args[0]) }
             : { kind: 'file', path: dirname(String(args[0])) })
         }
-        return sync()
+        await sync()
+        if (meter.active) meter.operations.push({ kind: args[1] === 'r' ? 'directory-sync' : 'file-sync', path: String(args[0]) })
       }
       handle.writeFile = (...args: Parameters<typeof handle.writeFile>) => {
         if (meter.active) meter.counts.writes++
@@ -78,10 +85,12 @@ const timing: Record<string, { workload: string; durationMs: number[] }> = Objec
 }]))
 let writeContent: typeof import('../../src/core/turn-recorder/content-store').writeRecorderContent
 let persistTrace: typeof import('../../src/main/trace-tool-content').persistTraceToolEvents
+let control: { operations: PublicationOperation[]; paths: string[] }
 
 function reset(): void {
   meter.counts = { hashes: 0, reads: 0, mkdirs: 0, stats: 0, opens: 0, syncs: 0, writes: 0, links: 0, removes: 0 }
   meter.syncOrder = []
+  meter.operations = []
 }
 
 function counters(): Record<string, number> {
@@ -113,7 +122,7 @@ async function verifyBody(root: string, ref: ToolContentRef, body: string): Prom
   expect(bytes.toString('utf8')).toBe(body)
   expect(bytes.length).toBe(ref.bytes)
   expect(createHash('sha256').update(bytes).digest('hex')).toBe(ref.sha256)
-  return dirname(path)
+  return path
 }
 
 describe('cold and dual-authority durable publication', () => {
@@ -152,16 +161,20 @@ describe('cold and dual-authority durable publication', () => {
         }
         // The existing trace contract bounds each event, not the aggregate of four events.
         for (const event of boundedEvents) expect(Buffer.byteLength(JSON.stringify(event))).toBeLessThan(32 * 1024)
-        const expectedSyncs: typeof meter.syncOrder = []
+        const paths: string[] = []
         for (const [index, ref] of refs.entries()) {
           if (scenario.endsWith('dual')) {
             const appRoot = join(userData, 'trace-content-v1', createHash('sha256').update(cwd).digest('hex'))
-            expectedSyncs.push(...publicationSyncs(await verifyBody(appRoot, ref, bodies[index])))
+            paths.push(await verifyBody(appRoot, ref, bodies[index]))
           }
-          expectedSyncs.push(...publicationSyncs(await verifyBody(recorder, ref, bodies[index])))
+          paths.push(await verifyBody(recorder, ref, bodies[index]))
         }
         expect(refs).toHaveLength(4)
-        expect(meter.syncOrder).toEqual(expectedSyncs)
+        // The user authorized coalescing directory preparation, not weaker publication.
+        // Keep the single-root control exact; both paths must obey every durability edge.
+        if (scenario.endsWith('cold')) expect(meter.syncOrder).toEqual(paths.flatMap(path => publicationSyncs(dirname(path))))
+        assertPublicationBarriers(meter.operations, paths)
+        control = { operations: meter.operations.slice(), paths }
         const publications = scenario.endsWith('dual') ? 8 : 4
         expect(counters()).toMatchObject({ 'io.write.calls': publications, 'io.link.calls': publications, 'io.rm.calls': publications })
         samples[scenario].push(counters())
@@ -171,6 +184,21 @@ describe('cold and dual-authority durable publication', () => {
       }
     })
   }
+
+  it.each(['file-sync', 'prepare', 'publish', 'cleanup'] as const)('rejects a missing %s barrier in the observed operation trace', (barrier) => {
+    const { operations, paths } = control
+    const link = operations.findIndex(op => op.kind === 'link')
+    const temporary = operations[link].from
+    const removed = operations.findIndex(op => op.kind === 'rm' && op.path === temporary)
+    const directory = dirname(paths[0])
+    const broken = operations.filter((op, index) => {
+      if (barrier === 'file-sync') return !(op.kind === 'file-sync' && op.path === temporary)
+      if (barrier === 'prepare') return !(op.kind === 'directory-sync' && op.path === dirname(directory) && index < link)
+      if (barrier === 'publish') return !(op.kind === 'directory-sync' && op.path === directory && index > link && index < removed)
+      return !(op.kind === 'directory-sync' && op.path === directory && index > removed)
+    })
+    expect(() => assertPublicationBarriers(broken, paths)).toThrow(/must/)
+  })
 
   it('detects additional real directory metadata and sync work', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-publication-sensitivity-'))
