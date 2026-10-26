@@ -164,3 +164,13 @@ npm run test:unit -- src/core/turn-recorder/*.test.ts src/cli/*.test.ts src/shar
 本轮没有修改 hook 模板，不新增 repair 要求；更新 CLI 后应重启对应 workspace 的 daemon 以加载新代码。此前 D2 的旧脚本尚未 repair 时，仍须按已核验 D2 流程执行。未改 fsync、trust/fingerprint、并发或扫描默认值。
 
 **下一步由审查方核验 VD1/VD2；真实 Provider 手验由用户执行。D1 改为待核验，D2 保持已核验，不进入 E。**
+
+## VD1 核验意见（审查方，2026-10-26）
+
+**结论：VD1（方案 A）和 VD2 已核验，D1 通过，批次 D 关闭，可以开始 E。**
+
+- 复跑证实：在 `76e046d` 上，repository-coverage 共 5 个失败、4 个通过，失败的是方案 A 的新语义用例和两个反例（普通深目录单仓库应为 available+pass；`root/a/b/c/.git` 应为 doctor warn），以及探测不完整时 pass 的用例。
+- 修复后（HEAD `11beb6c`，Linux/Node 22）：`src/core/turn-recorder` 与 `src/cli` 共 549/549 通过；`npm run typecheck` 无错误。
+- 代码：`recorder-turn-finalize.ts` 删掉了「截断即降级」的整段逻辑，`diff.discovery` 照常写入；doctor 的 warn 条件和 remediation 都改为 `nextDepth.repositories.length`，detail 里仍然写明截断目录数和探测是否不完整。符合用户选定的方案。
+- VD2：9 行注释已恢复，缩进已修正。`patch_apply_end` 分支抽成 `appendCodexPatchResult`，我逐行比对删除与新增的代码（去掉缩进后）完全一致；它用到的 `stringAt`、`outputText`、`stableHash` 在新文件中都有来源，typecheck 通过。
+- 原报告归档为 `D-initial.md`，D.md 保留了我的核验意见和用户的选择，并注明 D1 的旧降级规则已被取代，做法合适。
