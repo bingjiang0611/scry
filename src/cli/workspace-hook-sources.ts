@@ -95,13 +95,14 @@ if [ "\${SCRY_RECORDER_TRANSPORT:-}" != "direct" ] && [ -S "$socket" ] && comman
     -H 'content-type: application/octet-stream' --data-binary @- http://localhost/v1/hook 2>/dev/null)"
   rc=$?
   [ "$rc" = "0" ] && [ "$code" = "200" ] && exit 0
-  if [ "$rc" = "7" ]; then
-    # Connection failed before delivery: let the CLI apply and restart a stale daemon.
-    unset SCRY_RECORDER_DAEMON_TRIED
-  else
-    # Timeout, broken response or HTTP rejection may follow delivery; preserve for replay.
-    export SCRY_RECORDER_DAEMON_TRIED=1
-  fi
+  case "$rc:$code" in
+    7:*|0:4??)
+      # Connection failed or the daemon rejected before apply: let the CLI retry normally.
+      unset SCRY_RECORDER_DAEMON_TRIED ;;
+    *)
+      # Timeout, broken response or server failure may follow delivery; preserve for replay.
+      export SCRY_RECORDER_DAEMON_TRIED=1 ;;
+  esac
 fi
 [ -x "$scry_bin" ] || skip cli_not_executable
 printf '%s' "$payload" | "$scry_bin" recorder hook --provider "$provider" --event "$event" --workspace "$workspace" --stdin --quiet
