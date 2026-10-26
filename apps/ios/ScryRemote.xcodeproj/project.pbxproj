@@ -8,8 +8,6 @@
     30000000000000000000100E = { isa = PBXBuildFile; fileRef = 10000000000000000000100E; };
     10000000000000000000100F = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTranscriptPresentation.swift; sourceTree = "<group>"; };
     30000000000000000000100F = { isa = PBXBuildFile; fileRef = 10000000000000000000100F; };
-    10000000000000000000100D = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeUITests.swift; sourceTree = "<group>"; };
-    30000000000000000000100D = { isa = PBXBuildFile; fileRef = 10000000000000000000100D; };
     10000000000000000000100C = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeCopy.swift; sourceTree = "<group>"; };
     30000000000000000000100C = { isa = PBXBuildFile; fileRef = 10000000000000000000100C; };
     100000000000000000001005 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationScrollView.swift; sourceTree = "<group>"; };
@@ -52,17 +50,16 @@
     100000000000000000000019 = { isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
     10000000000000000000000B = { isa = PBXFileReference; explicitFileType = wrapper.application; path = ScryRemote.app; sourceTree = BUILT_PRODUCTS_DIR; };
     200000000000000000000001 = { isa = PBXGroup; children = (200000000000000000000002, 200000000000000000000004, 200000000000000000000005); sourceTree = "<group>"; };
-    200000000000000000000005 = { isa = PBXGroup; children = (100000000000000000000021, 10000000000000000000100D); path = ScryRemoteUITests; sourceTree = "<group>"; };
-    100000000000000000000021 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationUITests.swift; sourceTree = "<group>"; };
+    200000000000000000000005 = { isa = PBXFileSystemSynchronizedRootGroup; path = ScryRemoteUITests; sourceTree = "<group>"; };
     100000000000000000000022 = { isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = ScryRemoteUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-    300000000000000000000021 = { isa = PBXBuildFile; fileRef = 100000000000000000000021; };
     400000000000000000000002 = {
       isa = PBXNativeTarget; buildConfigurationList = 700000000000000000000003;
       buildPhases = (500000000000000000000004, 500000000000000000000005);
+      fileSystemSynchronizedGroups = (200000000000000000000005);
       buildRules = (); dependencies = (900000000000000000000002); name = ScryRemoteUITests; productName = ScryRemoteUITests;
       productReference = 100000000000000000000022; productType = "com.apple.product-type.bundle.ui-testing";
     };
-    500000000000000000000004 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (300000000000000000000021, 30000000000000000000100D); runOnlyForDeploymentPostprocessing = 0; };
+    500000000000000000000004 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
     500000000000000000000005 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
     600000000000000000000005 = { isa = XCBuildConfiguration; name = Debug; buildSettings = { PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = com.scry.remote.uitests; GENERATE_INFOPLIST_FILE = YES; TEST_TARGET_NAME = ScryRemote; TARGETED_DEVICE_FAMILY = 1; CODE_SIGN_STYLE = Automatic; }; };
     600000000000000000000006 = { isa = XCBuildConfiguration; name = Release; buildSettings = { PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = com.scry.remote.uitests; GENERATE_INFOPLIST_FILE = YES; TEST_TARGET_NAME = ScryRemote; TARGETED_DEVICE_FAMILY = 1; CODE_SIGN_STYLE = Automatic; }; };
