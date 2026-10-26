@@ -1,0 +1,35 @@
+export async function runSettings({ driver, options }) {
+  const { read, wait, check, click, key, insert, capture, fixture, composerValue } = driver
+  await click('textarea[aria-label="描述任务"]'); await insert('settings keeps this draft')
+  await click('.location-button'); await click('.location-menu .mitem', '管理远程访问')
+  await wait('document.querySelector(".settings-tab.active")?.textContent.includes("远程访问") && document.querySelector(".remote-connections-settings") != null', 'manage hosts opens remote settings directly')
+  check(await read(`${composerValue} === 'settings keeps this draft'`), 'Opening settings replaced the current draft')
+  check(await read('document.activeElement === document.querySelector(".settings-tab.active")'), 'Direct settings entry did not focus the remote tab')
+  if (options.settingsOnly) {
+    await wait('document.querySelector(".remote-access-inbound").textContent.includes("Fixture iPhone")', 'phone grant in focused settings')
+    await capture('remote-settings-focused')
+    await click('.remote-access-header button')
+    await wait('document.querySelector(".hosts-add-modal") != null', 'nested add-host dialog')
+    await key('Tab')
+    check(await read('document.querySelector(".hosts-add-modal").contains(document.activeElement)'), 'Nested dialog lost keyboard focus')
+    await key('Escape')
+    await wait('!document.querySelector(".hosts-add-modal") && document.querySelector(".settings-modal") != null', 'Escape closes only the nested dialog')
+    check(await read('document.activeElement === document.querySelector(".remote-access-header button")'), 'Nested dialog did not restore action focus')
+    await click('.remote-access-card:not(.desktop-remote__host) button')
+    await wait('document.querySelector(".remote-pairing__qr canvas") != null', 'phone code opens a nested dialog')
+    check(await read('document.querySelector(".hosts-add-modal").textContent.includes("2 分钟内有效") && document.querySelector(".hosts-add-modal").textContent.includes("核对连接设备上的公钥指纹")'), 'Phone pairing lost expiry or fingerprint guidance')
+    await key('Escape')
+    check(await read('document.querySelector(".settings-modal") != null && document.querySelector(".hosts-add-modal")?.closest(".modal-overlay").dataset.state === "exit"'), 'Closing phone code retired the parent or skipped its exit')
+    await wait('document.querySelector(".settings-modal") != null && !document.querySelector(".hosts-add-modal")', 'Closing phone code removes only the nested dialog after exit')
+    await read('window.desktopRemoteFixture.phoneStatusFailure = true')
+    await wait('document.querySelector(".remote-access-inbound").textContent.includes("状态未知") && document.querySelector(".remote-access-inbound").textContent.includes("fixture phone status unavailable")', 'unread phone status stays unknown')
+    check(!(await read('document.querySelector(".remote-device-section")')), 'Failed phone read claimed no devices or kept current grants')
+    await read('window.desktopRemoteFixture.phoneStatusFailure = false; window.desktopRemoteFixture.relayConfigured = false')
+    await wait('document.querySelector(".remote-access-inbound").textContent.includes("中继休眠") && document.querySelector(".remote-device-section") != null', 'dormant phone relay with preserved grants')
+    await read('window.desktopRemoteFixture.phoneEnabled = false')
+    await wait('document.querySelector(".remote-access-card:not(.desktop-remote__host)").textContent.includes("未启用") && !document.querySelector(".remote-access-card:not(.desktop-remote__host) button")', 'disabled phone access has no pairing action')
+    await read('window.desktopRemoteFixture.phoneEnabled = true; window.desktopRemoteFixture.relayConfigured = true')
+    await wait('document.querySelector(".remote-access-card:not(.desktop-remote__host)").textContent.includes("中继已配置")', 'phone status recovers')
+    return { remoteSettingsInteractions: { directEntryKeepsDraft: true, nestedDialogKeyboard: true, phoneExpiryAndFingerprint: true, phoneUnknownDormantDisabled: true }, nativeCoordinateInput: true }
+  }
+}
