@@ -109,3 +109,19 @@ H3 → 需修改（VE1）；M4（E2）→ 已核验；M2（E3）→ 需修改（
 - 未验证：真实 Provider 生命周期、外部 uploader U1–U4、真实死信运维流程；探针是合成事件加本地 receiver，不等价于真实验收。
 - 已知限制：成功凭据与 dead-letter-history 暂不 GC，长期会累积；`record-environments/` 旁路文件如 `storage-and-performance.md` 所述，需要维护者按 recordId 手动清理。
 - 不允许多个 CLI/daemon 新旧版本对同一 dataRoot 并发或降级写入，文档已写明。
+
+## VE 核验意见（审查方，2026-10-26）
+
+**结论：VE1 和 VE2 已核验，E1、E3 通过，批次 E 关闭。recorder 侧的 A–E 全部完成核验。**
+
+- 复跑证实：`d71c88a` 上 hook-http-outcome 有 5 个失败、1 个通过；`2524cf1` 上 commit-delivery、scry-integrations、recorder 合计 24 个失败、153 个通过。修复前都失败，与报告方向一致。
+- HEAD `e1b120c`（Linux/Node 22）全量：7 个失败、4001 个通过、5 个跳过。7 个失败与此前的环境失败完全一致，没有新增。`npm run typecheck` 无错误。执行方在 macOS 上看到的 30 个失败，发生在 load average 155–190 的情况下，这里没有复现；建议在空闲机器上再跑一次全量，作为合入前的最后确认。
+- 我原样复测了上一轮的两个探针（临时，已删除）：
+  - 协议不匹配：脚本发送协议 1、daemon 是协议 2 时，交给 CLI 的标记为空，CLI 会正常重试，不再只入队。
+  - 短暂故障：receiver 对 sequence 1 失败，连续 drain 5 次，之后 receiver 恢复，再 drain 3 次。sequence 2 和 3 已送达；sequence 1 只记了 1 次失败，`nextRetryAt` 是 60 秒后，`deadLetterCount: 0`。把时钟拨到 61 秒后再 drain，sequence 1 送达，`ackedThrough: 3`。
+- 代码：
+  - shell 用 `case "$rc:$code"`：`7:*` 和 `0:4??` 视为确定没有送达，其他情况仍是结果未知。
+  - 退避间隔为 `[60s, 300s, 900s, 3600s]`（`commit-delivery-ledger.ts:8`），第 5 次失败才进入死信。
+  - `notify-retry --sequence N | --all-dead` 先经过 `resolveCommitHookActivation`，trust 不通过就不执行，不伪造 ACK。
+  - 前置拆分 `4ba8148` 用 AST 比对，18 个声明全部不变。这一轮拆分、红测、修复分开提交了。
+- 已知未做（报告如实写明，接受）：成功凭据和死信历史暂时不 GC；`record-environments/` 需要按 recordId 手动清理。
