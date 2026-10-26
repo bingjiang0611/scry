@@ -10,7 +10,6 @@
   <key>CFBundleShortVersionString</key><string>0.1.15</string>
   <key>CFBundleVersion</key><string>25</string>
   <key>LSRequiresIPhoneOS</key><true/>
-  <key>UIUserInterfaceStyle</key><string>Dark</string>
   <key>UILaunchScreen</key><dict/>
   <key>UIApplicationSceneManifest</key><dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
   <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string></array>

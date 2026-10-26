@@ -20,8 +20,8 @@ struct SelectionSheet<Content: View>: View {
           ToolbarItem(placement: .primaryAction) { Button(ConnectionCopy.refresh, action: onRefresh) }
         }
         .safeAreaInset(edge: .top) {
-          Text(subtitle).font(.system(size: 11)).foregroundStyle(Palette.muted)
-            .frame(maxWidth: .infinity).padding(.vertical, 8).background(Palette.noticeBg)
+          Text(subtitle).font(.system(size: 11)).foregroundStyle(Palette.dim)
+            .frame(maxWidth: .infinity).padding(.vertical, 8).background(Palette.panel2)
         }
     }
     .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
@@ -36,19 +36,19 @@ struct FolderBrowseRow: View {
   var body: some View {
     Button(action: onOpen) {
       HStack(spacing: 12) {
-        Image(systemName: Symbol.folder).font(.system(size: 16)).foregroundStyle(Palette.muted).frame(width: 22)
+        Image(systemName: Symbol.folder).font(.system(size: 16)).foregroundStyle(Palette.dim).frame(width: 22)
         VStack(alignment: .leading, spacing: 3) {
-          Text(ref.label).font(.system(size: 16, weight: .medium)).foregroundStyle(Palette.ink).lineLimit(2)
-          Text(ref.path).font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(2)
+          Text(ref.label).font(.system(size: 16, weight: .medium)).foregroundStyle(Palette.fg).lineLimit(2)
+          Text(ref.path).font(.system(size: 11)).foregroundStyle(Palette.dim).lineLimit(2)
         }
         Spacer()
-        if selected { Image(systemName: Symbol.check).font(.system(size: 14, weight: .semibold)).foregroundStyle(Palette.blue) }
-        Image(systemName: Symbol.chevron).font(.system(size: 12, weight: .semibold)).foregroundStyle(Palette.faint)
+        if selected { Image(systemName: Symbol.check).font(.system(size: 14, weight: .semibold)).foregroundStyle(Palette.accent) }
+        Image(systemName: Symbol.chevron).font(.system(size: 12, weight: .semibold)).foregroundStyle(Palette.dim2)
       }
       .frame(minHeight: 58).contentShape(Rectangle())
     }
     .buttonStyle(.plain)
-    .overlay(alignment: .bottom) { Rectangle().fill(Palette.line).frame(height: 1) }
+    .overlay(alignment: .bottom) { Rectangle().fill(Palette.border).frame(height: 1) }
   }
 }
 
@@ -61,16 +61,16 @@ struct SelectionRow: View {
     Button(action: action) {
       HStack(spacing: 12) {
         VStack(alignment: .leading, spacing: 3) {
-          Text(title).font(.system(size: 16, weight: .medium)).foregroundStyle(Palette.ink)
-          Text(detail).font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(2)
+          Text(title).font(.system(size: 16, weight: .medium)).foregroundStyle(Palette.fg)
+          Text(detail).font(.system(size: 11)).foregroundStyle(Palette.dim).lineLimit(2)
         }
         Spacer()
-        if selected { Image(systemName: Symbol.check).font(.system(size: 15, weight: .semibold)).foregroundStyle(Palette.blue) }
+        if selected { Image(systemName: Symbol.check).font(.system(size: 15, weight: .semibold)).foregroundStyle(Palette.accent) }
       }
       .frame(minHeight: 56).contentShape(Rectangle())
     }
     .buttonStyle(.plain)
-    .overlay(alignment: .bottom) { Rectangle().fill(Palette.line).frame(height: 1) }
+    .overlay(alignment: .bottom) { Rectangle().fill(Palette.border).frame(height: 1) }
   }
 }
 
@@ -94,33 +94,34 @@ struct ProjectPickerSheet: View {
               HStack(spacing: 9) {
                 Image(systemName: "chevron.left").font(.system(size: 12, weight: .semibold))
                 Text(listing.parent?.label ?? ConnectionCopy.authorizedProjects).font(.system(size: 14, weight: .medium))
+                  .foregroundStyle(Palette.accentText)
                 Spacer()
               }
-              .foregroundStyle(Palette.blue).frame(minHeight: 44).contentShape(Rectangle())
+              .foregroundStyle(Palette.accent).frame(minHeight: 44).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 4) {
-              Text(current.label).font(.system(size: 19, weight: .semibold)).foregroundStyle(Palette.ink)
-              Text(current.path).font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(3)
+              Text(current.label).font(.system(size: 19, weight: .semibold)).foregroundStyle(Palette.fg)
+              Text(current.path).font(.system(size: 11)).foregroundStyle(Palette.dim).lineLimit(3)
               Button {
                 onChoose(current)
                 dismiss()
               } label: {
                 Text(ConnectionCopy.chooseThisFolder).font(.system(size: 15, weight: .medium))
-                  .foregroundStyle(Palette.ink).frame(maxWidth: .infinity, minHeight: 44)
-                  .background(Palette.surface, in: RoundedRectangle(cornerRadius: 6))
-                  .overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.line))
+                  .foregroundStyle(Palette.fg).frame(maxWidth: .infinity, minHeight: 44)
+                  .background(Palette.main, in: RoundedRectangle(cornerRadius: 6))
+                  .overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.border))
                   .contentShape(Rectangle())
               }
               .buttonStyle(.plain).padding(.top, 8)
             }
             .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 12)
 
-            Text(ConnectionCopy.subfolders).font(.system(size: 11, weight: .semibold)).foregroundStyle(Palette.muted)
+            Text(ConnectionCopy.subfolders).font(.system(size: 11, weight: .semibold)).foregroundStyle(Palette.dim)
               .padding(.top, 8).padding(.bottom, 4)
             if listing.directories.isEmpty {
-              Text(ConnectionCopy.noSubfolders).font(.system(size: 14)).foregroundStyle(Palette.muted).padding(.vertical, 18)
+              Text(ConnectionCopy.noSubfolders).font(.system(size: 14)).foregroundStyle(Palette.dim).padding(.vertical, 18)
             } else {
               ForEach(listing.directories, id: \.path) { ref in
                 FolderBrowseRow(ref: ref, selected: run.chosen?.path == ref.path) { run.loadDirectories(path: ref.path) }

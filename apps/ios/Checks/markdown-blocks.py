@@ -13,14 +13,15 @@ import tempfile
 
 root = Path(__file__).resolve().parents[3]
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--source', type=Path, default=root / 'apps/ios/ScryRemote/Components.swift')
+parser.add_argument('--source', type=Path, help='Frozen combined Components.swift fixture for a negative control')
 args = parser.parse_args()
-source = args.source.read_text()
-models = source[source.index('struct ConversationMarkdownTable:'):source.index('private struct ConversationMarkdownInline:')]
-projection = source[source.index('struct ConversationEntry:'):source.index('struct ConversationChunk:')]
-calls = re.findall(r'ForEach\((ConversationEntry\.group\(lines,.*\))\) \{ entry in', source)
+source = (args.source or root / 'apps/ios/ScryRemote/ConversationMarkdown.swift').read_text()
+turns = (args.source or root / 'apps/ios/ScryRemote/ConversationTurns.swift').read_text()
+models = source[source.index('struct ConversationMarkdownTable:'):source.index('struct ConversationMarkdownInline:')]
+projection = turns[turns.index('struct ConversationEntry:'):turns.index('struct ConversationChunk:')]
+calls = re.findall(r'(ConversationEntry\.group\((?:lines|run\.output), kind: \\.kind, text: \\.text\))', turns)
 assert len(calls) == 1
-call = 'func grouped(_ lines: [FixtureLine]) -> [ConversationEntry] { ' + calls[0] + ' }'
+call = 'func grouped(_ lines: [FixtureLine]) -> [ConversationEntry] { ' + calls[0].replace('run.output', 'lines') + ' }'
 fixture = Path(__file__).with_suffix('.swift').read_text()
 with tempfile.TemporaryDirectory(prefix='scry-markdown-blocks-') as temporary:
     directory = Path(temporary)

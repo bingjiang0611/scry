@@ -1,0 +1,165 @@
+# R6 会话阅读区定位：调查记录（未修复，未完成）
+
+基线 `8fcd1f03`。本批只做调查；**没有可提交的修复**，因此 STATUS 保持「待执行」，不标「已提交」。本文按 R6 要求先记录根因证据，再记录被验证否定的两条修复路线，以及卡点。
+
+生产代码最终**零改动**：`ConversationScrollView.swift` 已恢复到基线；本批进入仓库的只有本文与三个回归用例（含编译所需的工程登记）。
+
+## 1. 三个问题的实测证据
+
+真机 iPhone 13 / iOS 26.5.2，Mock 数据，无真实 Provider。默认字号为系统七档的 50%；AX3 用系统十二档的 82%，两者都读回设置里的 Slider 值。AX3 对照还额外用启动参数 `UIPreferredContentSizeCategoryName=UICTContentSizeCategoryAccessibilityXL` 复算，得到与系统 AX3 完全相同的 388.333pt 阅读区高度。
+
+初始诊断只读观察底层 `UIScrollView` 的 contentSize / contentOffset / bounds（KVO）。后来确认这些打印本身在滚动热路径上会产生大量输出，属于诊断负担，已全部移除，未进入任何构建。
+
+| # | 复现 | 观察到的最终几何 | 结论 |
+| --- | --- | --- | --- |
+| A | Chat `-uiMockLongOutput`：上翻 → 输入 → 发送 | 草稿清空、正文空白；contentSize 17344、offset 16911.667、viewport 260 | 发送被接受、follow 请求已发出，但视口落在没有行的位置 |
+| B | `-route transcript -uiMockFirstScreen`，AX3 | contentSize 237078、offset 175494.333、viewport 388.333；「完整内容末尾」y≈52348，远在视口外 | 首屏停在正文中间，未到末尾 |
+| C | AX3 已完成 Chat / Transcript | Chat：size 1863、offset 1464、viewport 388.333；Transcript：size 3342、offset 2943.333、viewport 388.333 | 两者都空白；正文行在视口下方（Chat 表格 y=785.333） |
+
+B 在默认字号本轮未复现（尾标题可见，size 43678、offset 43105.333、viewport 562）。这不代表 B 已修复：它在 AX3 稳定失败，回归用例因此覆盖两档。
+
+### 根因
+
+三条路径的共同点不是“没有滚动”，而是**滚动目标不存在时仍按高度去定位**：
+
+- 旧实现把 LazyVStack 的 `onGeometryChange` 测量高度当成已提交的真实内容高度，每次高度变化再排队一次 `scrollTo("bottom")`。
+- 高度是估算值：行尚未实例化时 contentSize 会先报一个小数（Chat 2027 → 3347 → 4994 → 3755 → 4029 → 3342），随后真实行撑开。排队滚动按旧估算执行，之后行撑开就没有任何东西把视口拉回真实尾行。
+- 末尾 1pt 标记只有在真实滚动到它附近时才存在。它没有布局时，`ConversationBottom` preference 报 `infinity`，旧实现据此完全不会纠正；它存在但很远时（B：52348），旧实现的条件（`bottom <= viewport + 30`）也不会纠正。
+- C 的 Transcript 是 R5 引入的回归：单变量对照（R4 `288903e3` 仅替换 R5 Composer）复现空白，视口从 399 降到 388.333。更矮的视口让估算偏差跨过了一整屏。这是触发条件，不是根因；`ConversationScrollView.swift` 在 `288903e3` 与基线字节完全相同，已用 `git show` 对比证明。
+
+即：**following 意图、估算高度、真实行布局三者脱节**。框架内部的 lazy 布局算法不可直接观测，本报告只把责任归到可定位的应用层策略：以高度触发的滚动 + 依赖未布局标记的纠正。
+
+## 2. 被否定的两条修复路线
+
+### 路线一：只删除高度触发的排队滚动
+
+去掉 `onGeometryChange` 与 `onAppear` 的排队 `scrollTo`，保留其余逻辑。C Chat 仍空白（size 1863、offset 1474.667、preference 从 377 → infinity）；A 仍空白（草稿清空、正文空白、无 DEBUG 回复）。结论：排队滚动是放大因素，不是初始错位的充分原因。
+
+### 路线二：`scrollPosition(id:anchor:)` + `scrollTargetLayout()`
+
+用 iOS 17 原生身份定位替换高度推算，并把两个页面的行 ID 统一为同一 `AnyHashable` 类型。效果与代价：
+
+- 好的一面：AX3 下 Chat 与 Transcript **都能看到末尾**（Chat 出现正文与用量行，Transcript 出现尾标题），截图曾显示内容正确。
+- 不可接受的一面：**交互会挂死 App**。复现两次——键盘弹出后输入草稿、以及上滑手势期间，App 停止响应；`page_source` 与截图同时失败，只有通过 `devicectl` 终止进程才恢复。删除全部诊断打印后重测仍可挂死（`type` 15s+ 无响应、截图失败）。
+- 会挂死的控件不能进入交付，即使它修好了 C。该路线已整体回退。
+
+回退后重新安装并复测：上滑正常、「回到最新」出现、输入草稿正常、发送被接受（草稿清空），但 A 的正文仍空白——即回到原始缺陷，且没有引入挂死。
+
+## 3. 卡点
+
+在“禁止延时、重试、假高度、强制重建、LazyVStack→VStack”的约束内，尚未找到同时满足以下三点的定位方式：
+
+1. 首屏（B）能落到真实尾行，而不是估算末尾；
+2. 键盘改变视口、发送后新增内容（A）时不落在空行；
+3. 交互过程不进入布局/滚动反馈循环。
+
+路线二说明原生身份定位可以满足 1 和 2，但当前组合会破坏 3。要安全使用它，需要解决定位与手势、键盘、内容增长的相互触发，这部分我还没有可靠方案，也没有证据支持某个具体做法；继续盲试只会再产生一次会挂死的构建。
+
+因此按 R6 的约定：**找不到可靠根因修复的问题不修，写明卡在这里。** 未改任何生产文件。
+
+## 4. 已交付的部分
+
+- `apps/ios/ScryRemoteUITests/ReaderPositionUITests.swift`：A、B、C 三个用例。断言末条消息存在、可命中、与阅读区视口相交且在水平范围内，而不是只断言页面存在；B 覆盖默认与 AX3 两档；C 校验 AX3 启动参数确实生效（输入框高度）以免静默用默认字号代测。
+- `ScryRemote.xcodeproj`：把 UITests 目录改为 Xcode 原生同步组（与既有 Sheets 目录同一做法），新增用例不需要手工登记，工程文件 19295B，仍低于 20KB 门禁。
+- 编译验证：`build-for-testing` 成功，49 个 UI 用例编译通过（`ReaderPositionUITests` 3 个）。**未运行**：免费签名名额上限（iCTRL runner / Etch / Scry 三个 App 已占满），`test-without-building` 在 runner 安装处失败 exit 65，业务用例执行数为 0。
+
+修复前失败证据用的是真机同场景重放（上表几何与截图），不是 XCTest 断言结果；两者不能互相替代，这里分开写明。
+
+## 5. 未验证与下一步
+
+- 未执行完整回归、Reduce Motion 回归、性能测量；`ConversationScrollView` 属用户路径，一旦有真实修复必须补 `npm run performance:measure`，跑不出来按 unavailable 记录。
+- 未提交截图：唯一“看起来修好”的 AX3 截图来自会挂死的构建，不能当作修复证据发布，已删除。
+- 建议下一步在干净分支上单独做定位实验：只保留 `scrollPosition` 身份定位，**不**在拖拽时把目标置 nil，也不在 revision/viewport 变化时重复赋值，先证明“输入 + 键盘 + 上滑”两百次操作不挂死，再谈 A/B。若仍会挂死，则应把该方案判定为不可用，转而评估“打开时一次性定位、之后完全由用户控制”的产品取舍——这需要设计方决定，不是实现方可以自行降级的。
+- 设备侧：本次 iOS 多次提示 Unable to Verify App（开发者信任需联网验证），由用户处理后继续；未改动网络、安全设置或卸载其他 App。调查用临时构建与日志留在 `/tmp/scry-r6-validation/`，未提交。
+
+本文为调查记录，不表示 R6 完成或通过核验。
+
+## 核验意见（核验方，2026-10-26，`2aa3e07c`）
+
+结论：**调查接受，R6 未完成，转 R6b**。STATUS 记「需修改」。
+
+接受的部分：
+
+- **根因归纳成立。** 跟随意图、估算高度、真实行布局三者脱节；应用层的两个错误是「按估算高度触发 `scrollTo`」和「依赖可能没布局的 1pt 标记做纠正」。C-Transcript 由 R5 两行 Composer 让视口变矮触发，这个对照做得好，结论接受。
+- **两条路线否定得有据。** 路线二挂死后整体回退、不交付，这是对的。
+- **三个用例与 UITests 同步组。** pbxproj 改动只是把两个旧文件登记换成同步组，接受。用例只编译未运行，照实记录即可。
+
+下一步按 [R6b.md](../R6b.md)：换用 iOS 18 的「边缘定位 + 系统锚点」，不再自己按高度或 ID 推算。
+
+## R6b：iOS 18 边缘锚点方案（第 0 步通过，第 2 步未通过，实现已回退）
+
+按 [R6b.md](../R6b.md) 实施，base `2aa3e07c`。结论先说：**防挂死门槛通过；A/B/C 三项仍全部失败**。因此没有把该实现留在生产代码里，`ConversationScrollView.swift` 已恢复原状，本批只提交本节与失败证据截图。
+
+### 1. 第 0 步：防挂死门槛（通过）
+
+结构先按 R6b 落地（iOS 18 分支用 `ScrollPosition(edge:)` + `defaultScrollAnchor(_:for:)` + `onScrollGeometryChange` / `onScrollPhaseChange`，iOS 17 保留旧实现），再在真机跑防挂死循环：
+
+- 方式：`-uiMockLongOutput` 启动，脚本循环「点输入框 → 输入 → 点收起键盘 → 上滑 220pt → 下滑 220pt」，每轮结束用一次 `max_depth=2` 的页面读取做存活探针（探针本身要能被 UI 队列回答，阻塞即暴露）。
+- 次数与时长：**200 次**，约 16 分钟，单轮 4.9–12.4 秒。
+- 结果：**零次无响应**，探针耗时稳定在 0.86–2.23 秒，无一次超时、无一次需要复位或杀进程。
+- 对比：R6 的 `scrollPosition(id:)` 方案在同一台机、同样输入动作下两次挂死（输入期间、上滑期间），本轮 200 次未复现。**这一条是本批唯一确证的正向结果**：R6b 要求的单向数据流消除了挂死。
+
+写入点清单（R6b 要求列出）：
+
+| 写入 | 位置 | 触发 |
+| --- | --- | --- |
+| `position.scrollTo(edge: .bottom)` | `followLatest()` | 「回到最新」按钮；`followLatestRequest`（发送被接受） |
+| `following = true` | 同上 | 同上 |
+| `following = false` | `onChange(of: stopFollowingRequest)` | 加载更早历史，只改 following，不写 position |
+| `following` / `browsingOlder` | `onScrollPhaseChange` | 仅用户手势：`.interacting` / `.decelerating` 离开底部时停，`.idle` 后回到底部时恢复 |
+| `atBottom` | `onScrollGeometryChange` | 只读几何推出的布尔值，不写 position |
+
+### 2. 第 2 步：回归（未通过）
+
+真机 iPhone 13 / iOS 26.5.2，Mock 数据，无真实 Provider。AX3 用启动参数 `UIPreferredContentSizeCategoryName=UICTContentSizeCategoryAccessibilityXL`，该参数产生的视口高度与系统 AX3 实测一致（388.333pt），系统字号本身保持默认 50%。
+
+| 项 | 结果 | 证据 |
+| --- | --- | --- |
+| A 长回复发送后 | **失败**：草稿清空（发送被接受），正文仍空白，回复不可见 | `reports/R6/r6b-a-after-send-blank.png` |
+| B 长历史首屏（AX3） | **失败**：阅读区空白，「完整内容末尾」不在无障碍树中 | `reports/R6/r6b-b-ax3-blank.png` |
+| C AX3 已完成 Chat | **失败**：阅读区空白，用量行不在树中；等待 20 秒后仍空白 | `reports/R6/r6b-c-chat-ax3-blank.png` |
+| 第 0 步防挂死 | 通过 | `/tmp/scry-r6-validation/step0-stress.log`（未提交） |
+
+默认字号下 A 的初始落底是好的（`实时回复末尾` y=560.5，视口 103–665），失败发生在**发送之后**；B、C 在 AX3 稳定失败。
+
+### 3. 为什么没修好（实测）
+
+分两步加临时打印（每次读完即删，未进入提交）才看清：
+
+- `.initialOffset` 的底部锚点仍是在**内容还只有估算高度时解析**的。`-uiMockLongOutput` 的内容在 15 秒内从 438 → 7484 → 5612 → 6235 → 11029 反复变化；`.sizeChanges` 的 `.bottom` 锚点在 `following=true` 时把视口一路钉在「当时的底部」，因此 A 发送后新增内容时，视口停在旧底部与新内容之间，看到空行。B、C 的 AX3 则是首屏就没有落到真实尾行。
+- 「上翻是否停止跟随」在内容增长期间不可靠：`.interacting` 触发时几何还没更新，`atBottom` 仍是上一帧的 `true`，于是不置 `following=false`；`.idle` 时内容又刚被 `.sizeChanges` 锚点钉回底部，于是又回到「在底部」。实测一次上滑后 offset 5674 → 5673（等于 content 6235 − 562），也就是被钉回底部，`回到最新` 按钮因此不出现。
+
+即：边缘锚点把「贴底」交给系统后，系统贴的是**估算内容**的底部，偏差由系统在布局时修正，但修正后不会再触发一次定位；这与 R6 记录的根因是同一个问题换了执行者，不是新机制能绕过的。R6b 假设「lazy 行的估算误差由系统在布局时修正，应用层不再参与」，实测不成立。
+
+### 4. 处置
+
+- `ConversationScrollView.swift` 已回退到 `2aa3e07c` 的内容（生产代码零改动）。理由是：它没修好任何一项验收，却把默认路径换成新实现，收益为零、风险非零。
+- `apps/ios/README.md` 的「Conversation positioning and freshness」**未修改**：那里描述的是实际行为，代码没变就不该改文案，否则文案会开始说谎。这一点与 R6b 的任务清单不一致，按「证据不能说谎」优先，并在核验时说明。
+- STATUS 的 R6 行保持「需修改」，未改「已提交」：本批没有可核验的实现。
+- 本批提交内容：本节 + 三张失败截图。
+
+### 5. 未验证
+
+- C 的历史页与运行中页、减少动态效果下的 A–C、流式新增不抢位置、分组锚点 ≤2pt、加载更早历史后的位置保持：在 A/B/C 未通过时没有继续，全部未验证。
+- `ReaderPositionUITests` 仍只编译未运行（免费签名名额上限，runner 安装失败 exit 65，执行 0 个用例）。
+- `npm run performance:measure` 未跑：改动已回退，没有需要测量的生产改动；此前 `remote.loopback` 一直无可用的计数器采集。
+
+### 6. 下一步（需要决定）
+
+已被实测否定的：按高度 `scrollTo`、`scrollPosition(id:)`（会挂死）、`defaultScrollAnchor(for:)` 边缘锚点（不落真实尾行）。
+
+尚未验证、但方向不同的两条：
+
+1. **打开时一次性定位、之后完全由用户控制**：首屏用一次性定位（可接受挂死风险更低的一次性 `scrollTo` 后立刻停止参与），之后不再自动跟随。这改变了 R5/R6 的跟随语义，属产品取舍，需设计方决定。
+2. 定位后用**真实行身份**做一次校正（不是按高度），即回到 R6 的 `scrollPosition(id:)`，但只写一次、且不让几何回调参与，先单独验证 200 次交互不挂死再谈定位。这条路线和 R6b 的挂死证据直接冲突，需要重新单独开批验证。
+
+在两者之间选一个之前，不建议继续在 `ConversationScrollView` 上叠加方案。
+
+## 核验意见（核验方，2026-10-26，R6b `84cb5556`）
+
+结论：**R6b 结论接受，实现回退正确**。R6 继续记「需修改」。
+
+- 防挂死 200 次、写入点清单、失败截图都核对过，证据完整。代码没改所以不改 README 也是对的；R6b 清单里那一条按「证据不能说谎」作废。
+- 已否定三条路线：按高度 `scrollTo`、`scrollPosition(id:)`、边缘锚点。它们有一个共同点：都在改「怎么滚」，没有碰「被滚的东西」。
+
+核验方补充的线索：`ConversationTurn.rows(id:)` 里，一个 `output` 条目就是一行，整条 Markdown 回复（`ConversationMarkdownText` 里的 `VStack` + `ForEach(blocks)`）都在这一行里。长回复因此是**一个几千到几万 pt 高的 lazy 行**，B 的末尾标记在 y≈52348 也说明了这一点。另外 `ConversationMarkdownText.blocks` 每次 body 求值都会重新 `parse(source)`。一个巨大的行会让 LazyVStack 对其他行的估算严重失真，这和 R6b 实测的 438 → 11029 来回跳的现象吻合。**但这只是假设**：C（内容约 1863）不一定由它解释。下一批先测量再动手，见 [R6c.md](../R6c.md)。是否继续由用户决定。

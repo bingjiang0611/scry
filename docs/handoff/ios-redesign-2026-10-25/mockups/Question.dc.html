@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>需要你决定</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.t-dark{--main:#1c1c1c;--panel:#1c1c1c;--panel2:#232323;--panel3:#2b2b2b;--border:#333331;--border2:#454541;--border3:#292927;--fg:#f1f1ef;--dim:#b5b5af;--sub:#8d8d87;--accent:#5b9cff;--accent-soft:rgb(91 156 255 / 12%);--warn:#efb958;--muted-s:rgb(255 255 255 / 4%)}
+.scr{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","SF Pro Text",system-ui,sans-serif;letter-spacing:-0.004em;-webkit-font-smoothing:antialiased}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.opt{display:flex;align-items:flex-start;gap:12px;width:100%;min-height:52px;padding:12px 14px;box-sizing:border-box;border-radius:12px;font-family:inherit;text-align:left;cursor:pointer;transition:border-color 160ms cubic-bezier(.23,1,.32,1),background-color 160ms cubic-bezier(.23,1,.32,1)}
+.sheet{animation:sheet-in 300ms cubic-bezier(.32,.72,0,1) backwards}
+@keyframes sheet-in{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion: reduce){.sheet{animation:fade 120ms linear backwards}@keyframes fade{from{opacity:0}}}
+</style>
+</helmet>
+<div class="scr t-dark" style="width: 390px; height: 844px; box-sizing: border-box; background: var(--main); color: var(--fg); position: relative; overflow: hidden">
+  <div aria-hidden="true" style="position: absolute; inset: 0; padding: 120px 16px 0; display: flex; flex-direction: column; gap: 14px; opacity: .5">
+    <div style="align-self: flex-end; width: 220px; height: 44px; border-radius: 18px; background: var(--panel2)"></div>
+    <div style="width: 120px; height: 10px; border-radius: 4px; background: var(--panel3)"></div>
+    <div style="width: 300px; height: 10px; border-radius: 4px; background: var(--panel3)"></div>
+    <div style="width: 260px; height: 10px; border-radius: 4px; background: var(--panel3)"></div>
+  </div>
+  <div aria-hidden="true" style="position: absolute; inset: 0; background: rgb(0 0 0 / 55%)"></div>
+
+  <div class="sheet" role="dialog" aria-label="需要你决定" style="position: absolute; left: 0; right: 0; bottom: 0; top: 96px; background: var(--panel2); border-radius: 18px 18px 0 0; border-top: 1px solid var(--border); display: flex; flex-direction: column">
+    <div style="display: flex; justify-content: center; padding-top: 8px"><span style="width: 36px; height: 5px; border-radius: 3px; background: var(--border2)"></span></div>
+    <div style="display: flex; align-items: center; min-height: 60px; padding: 0 8px 0 20px; border-bottom: 1px solid var(--border3)">
+      <div style="flex: 1">
+        <div style="font-size: 17px; font-weight: 600">需要你决定</div>
+        <div style="font-size: 12.5px; color: var(--sub); margin-top: 2px">迁移 iOS 配对流程到新 relay · Claude Code</div>
+      </div>
+      <button type="button" aria-label="关闭" style="width: 44px; height: 44px; border: 0; background: transparent; color: var(--dim); cursor: pointer; display: inline-flex; align-items: center; justify-content: center">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+      </button>
+    </div>
+
+    <div style="flex: 1; overflow-y: auto; padding: 18px 20px">
+      <span style="display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: 6px; background: rgb(239 185 88 / 12%); color: var(--warn); font-size: 12px; font-weight: 600">Provider 需要输入</span>
+      <p style="margin: 14px 0 16px; font-size: 16px; line-height: 1.55; font-weight: 500">旧的 relay 还有 3 台设备在线。迁移时怎么处理它们？</p>
+      <div style="display: flex; flex-direction: column; gap: 8px">
+        <sc-for list="{{options}}" as="o" hint-placeholder-count="3">
+          <button type="button" class="opt" onClick="{{o.pick}}" aria-pressed="{{o.pressed}}" style="border: {{o.border}}; background: {{o.bg}}; color: var(--fg)">
+            <span style="width: 20px; height: 20px; flex: none; margin-top: 1px; box-sizing: border-box; border-radius: 50%; border: {{o.ring}}; display: inline-flex; align-items: center; justify-content: center">
+              <span style="width: 10px; height: 10px; border-radius: 50%; background: var(--accent); transform: scale({{o.dot}}); transition: transform 160ms cubic-bezier(.23,1,.32,1)"></span>
+            </span>
+            <span style="flex: 1; min-width: 0">
+              <span style="display: block; font-size: 15px; font-weight: 500">{{o.label}}</span>
+              <span style="display: block; margin-top: 3px; font-size: 13px; line-height: 1.45; color: var(--sub)">{{o.desc}}</span>
+            </span>
+          </button>
+        </sc-for>
+      </div>
+      <label style="display: block; margin-top: 16px; font-size: 12.5px; color: var(--sub)">或者直接告诉 Agent
+        <textarea rows="2" placeholder="补充说明（可选）" style="display: block; width: 100%; margin-top: 6px; box-sizing: border-box; resize: none; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--main); color: var(--fg); font: 15px/1.5 inherit; font-family: inherit; outline: 0"></textarea>
+      </label>
+    </div>
+
+    <div style="display: flex; gap: 10px; padding: 12px 20px 34px; border-top: 1px solid var(--border3)">
+      <button type="button" style="flex: 1; height: 48px; border-radius: 14px; border: 1px solid var(--border2); background: var(--panel); color: var(--fg); font: 600 15px/1 inherit; font-family: inherit; cursor: pointer">取消请求</button>
+      <button type="button" style="flex: 1.4; height: 48px; border-radius: 14px; border: 0; background: var(--accent); color: #fff; font: 600 15px/1 inherit; font-family: inherit; cursor: pointer">提交</button>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { picked: 1 }; }
+  renderVals() {
+    const defs = [
+      ['保持双写一周', '新旧 relay 同时接收，确认无误后再下线旧的。'],
+      ['通知设备重新配对', '旧设备收到提示，扫码后切到新 relay。'],
+      ['立即切换', '旧 relay 马上停止，未迁移的设备会离线。']
+    ];
+    const options = defs.map((d, i) => {
+      const on = this.state.picked === i;
+      return {
+        label: d[0], desc: d[1], pressed: on ? 'true' : 'false',
+        border: on ? '1.5px solid var(--accent)' : '1px solid var(--border)',
+        bg: on ? 'var(--accent-soft)' : 'var(--main)',
+        ring: on ? '2px solid var(--accent)' : '1.5px solid var(--border2)',
+        dot: on ? '1' : '0',
+        pick: () => this.setState({ picked: i })
+      };
+    });
+    return { options };
+  }
+}
+</script>
+</body>
+</html>
