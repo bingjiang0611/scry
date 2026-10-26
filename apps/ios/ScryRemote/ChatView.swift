@@ -16,6 +16,7 @@ struct ChatView: View {
   @State private var showFiles = false
   @State private var showOverview = false
   @State private var latestReadRequest = 0
+  @State private var splitBlocks: [String: [Int: [ConversationMarkdownBlock]]] = [:]
   @State private var confirmStop = false
   private var projectCwd: String? { run.activeSessionIdentity?.cwd ?? run.chosen?.path }
   private var composer: Binding<AppModel.ComposerDraft> {
@@ -40,8 +41,12 @@ struct ChatView: View {
               EmptyState(title: ConversationCopy.startTitle,
                          detail: ConversationCopy.startDetail)
             } else {
-              ForEach(completedTurns.flatMap { ConversationTurn.completed($0).rows(id: $0.id) }) { $0 }
-              if run.prompt != nil { ForEach(ConversationTurn.focused(run).rows(id: "focused")) { $0 } }
+              ForEach(completedTurns.flatMap { row in
+                ConversationTurn.completed(row).withSplitBlocks(splitBlocks[row.id] ?? [:]).rows(id: row.id)
+              }) { $0 }
+              if run.prompt != nil {
+                ForEach(ConversationTurn.focused(run).withSplitBlocks(splitBlocks["focused"] ?? [:]).rows(id: "focused")) { $0 }
+              }
             }
       }
       .id(run.activeSessionIdentity)
@@ -60,6 +65,7 @@ struct ChatView: View {
     } message: {
       Text(ConversationCopy.stopDetail)
     }
+    .task(id: splitRevision) { await refreshSplitBlocks() }
     .onAppear { controlsVisible = true; run.loadActiveContext() }
     .onDisappear { controlsVisible = false }
     .onChange(of: scenePhase) { _, phase in
@@ -70,6 +76,32 @@ struct ChatView: View {
       if draft.isEmpty, ProcessInfo.processInfo.arguments.contains("-uiMockSlash") { composer.wrappedValue.text = "/" }
     }
 #endif
+  }
+
+  // Cheap identity for the background split task: turn/output counts, no text.
+  private var splitRevision: String { "\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)" }
+
+  private func refreshSplitBlocks() async {
+    let turns: [(String, ConversationTurn)] =
+      completedTurns.map { ($0.id, ConversationTurn.completed($0)) }
+      + (run.prompt != nil ? [("focused", ConversationTurn.focused(run))] : [])
+    var ready: [String: [Int: [ConversationMarkdownBlock]]] = [:]
+    for (id, turn) in turns {
+      var hit: [Int: [ConversationMarkdownBlock]] = [:]
+      for candidate in turn.splitCandidates {
+        if let blocks = ConversationMarkdownSplitter.ready(turnID: id, candidate: candidate) { hit[candidate.index] = blocks }
+      }
+      ready[id] = hit
+    }
+    splitBlocks = ready
+    for (id, turn) in turns {
+      for candidate in turn.splitCandidates where ready[id]?[candidate.index] == nil {
+        guard let blocks = await ConversationMarkdownSplitter.parse(turnID: id, candidate: candidate) else { continue }
+        guard !Task.isCancelled else { return }
+        ready[id, default: [:]][candidate.index] = blocks
+        splitBlocks = ready
+      }
+    }
   }
 
   private var header: some View {

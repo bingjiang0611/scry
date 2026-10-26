@@ -9,9 +9,10 @@ struct SessionTranscriptView: View {
   @Environment(RemoteRunStore.self) var run
   @State private var showFiles = false
   @State private var showOverview = false
-  @State private var showHistoryDetails = false
+  @State var showHistoryDetails = false
   @State var olderReadRequest = 0
   @State private var latestReadRequest = 0
+  @State private var splitBlocks: [String: [Int: [ConversationMarkdownBlock]]] = [:]
   @State private var followingLatest = true
   @State private var showLiveQuestion = false
   @State private var stopTarget: StopTarget?
@@ -56,7 +57,7 @@ struct SessionTranscriptView: View {
     guard run.activeSessionIdentity == sessionIdentity else { return false }
     switch run.history { case .idle, .loading: return false; default: return true }
   }
-  private var historyReadyForDisplay: Bool {
+  var historyReadyForDisplay: Bool {
     guard run.activeSessionIdentity == sessionIdentity else { return false }
     if case .loaded = run.history { return true }
     if case .partial = run.history { return true }
@@ -73,8 +74,10 @@ struct SessionTranscriptView: View {
         run.historyFollowingLatest = value
         followingLatest = value
       }) {
-        historyBody
-        if hasLiveTurn && !run.liveTurnInHistory { ForEach(ConversationTurn.focused(run).rows(id: "focused")) { $0 } }
+        historyBody(split: splitBlocks)
+        if hasLiveTurn && !run.liveTurnInHistory {
+          ForEach(ConversationTurn.focused(run).withSplitBlocks(splitBlocks["focused"] ?? [:]).rows(id: "focused")) { $0 }
+        }
         if let live = detachedLive { detachedTurn(live) }
         if let pending = backgroundSend {
           TurnUserBubble(text: pending.routing.prompt,
@@ -83,6 +86,7 @@ struct SessionTranscriptView: View {
         }
       }
       .id(sessionIdentity)
+      .task(id: splitRevision) { await refreshSplitBlocks() }
       statusStrip
       if !readOnly { footer }
     }
@@ -153,6 +157,48 @@ struct SessionTranscriptView: View {
         if run.historyIsWatched(sessionIdentity) { continue }
         await run.refreshHistory(providerId: s.providerId, cwd: s.cwd,
                                  externalSessionId: s.externalSessionId, agentProfileId: s.agentProfileId)
+      }
+    }
+  }
+
+  // Cheap identity for the background split task: revision counters only.
+  private var splitRevision: String { "\(historyReadyForDisplay)-\(run.historyRevision)-\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)-\(run.detachedOutput.count)" }
+
+  private func refreshSplitBlocks() async {
+    var turns: [(String, ConversationTurn)] = []
+    switch run.history {
+    case let .partial(page), let .loaded(page):
+      let first = run.historyPageOffset
+      turns += page.enumerated().map { index, turn in
+        ("history-\(first + index)",
+         ConversationTurn(prompt: turn.userText.isEmpty ? nil : turn.userText, runId: turn.runId,
+                         entries: ConversationEntry.group(turn.items, kind: \.kind, text: \.text), archived: true))
+      }
+    default:
+      break
+    }
+    turns += completedTurns.map { ($0.id, ConversationTurn.completed($0)) }
+    if hasLiveTurn && !run.liveTurnInHistory { turns.append(("focused", ConversationTurn.focused(run))) }
+    if let live = detachedLive {
+      turns.append((live.runId, ConversationTurn(prompt: live.prompt.isEmpty ? nil : live.prompt, runId: live.runId,
+        running: live.state == "running", usagePending: true,
+        entries: ConversationEntry.group(run.detachedOutput, kind: \.kind, text: \.text), notice: ConversationCopy.liveCache)))
+    }
+    var ready: [String: [Int: [ConversationMarkdownBlock]]] = [:]
+    for (id, turn) in turns {
+      var hit: [Int: [ConversationMarkdownBlock]] = [:]
+      for candidate in turn.splitCandidates {
+        if let blocks = ConversationMarkdownSplitter.ready(turnID: id, candidate: candidate) { hit[candidate.index] = blocks }
+      }
+      ready[id] = hit
+    }
+    splitBlocks = ready
+    for (id, turn) in turns {
+      for candidate in turn.splitCandidates where ready[id]?[candidate.index] == nil {
+        guard let blocks = await ConversationMarkdownSplitter.parse(turnID: id, candidate: candidate) else { continue }
+        guard !Task.isCancelled else { return }
+        ready[id, default: [:]][candidate.index] = blocks
+        splitBlocks = ready
       }
     }
   }
@@ -266,33 +312,6 @@ struct SessionTranscriptView: View {
     return nil
   }
 
-  private var historyIssue: SessionStatusLine? {
-    guard run.activeSessionIdentity == sessionIdentity else { return nil }
-    // The exact reason stays in the header menu (历史状态); the paced
-    // refresh keeps retrying while this error stands (historyIsWatched).
-    let details = SessionStatusLine.Action(title: ConnectionCopy.details, perform: { showHistoryDetails = true })
-    if historyReadyForDisplay || run.history == .baseUnavailable, run.historyRefreshError != nil {
-      return .init(text: run.history == .baseUnavailable ? ConnectionCopy.historyUnavailable
-                                                          : ConnectionCopy.historySyncFailed,
-                   tone: .warning, busy: true, action: details)
-    }
-    if run.historyStorageNotice != nil {
-      return .init(text: ConnectionCopy.historyStorageLimited, tone: .warning, action: details)
-    }
-    if case .partial = run.history {
-      return .init(text: ConnectionCopy.historyPartial, tone: .warning, action: details)
-    }
-    if run.historyFromCache {
-      return .init(text: run.historySyncing ? ConnectionCopy.historyCheckingCache : ConnectionCopy.historyFromCache,
-                   busy: run.historySyncing, action: details)
-    }
-    guard run.history == .baseUnavailable else { return nil }
-    if run.historySyncing { return .init(text: ConnectionCopy.historyReading, busy: true) }
-    return .init(text: ConnectionCopy.historyEarlierUnavailable,
-                 action: .init(title: ConnectionCopy.retry, perform: {
-                   if let s = session { run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true, agentProfileId: s.agentProfileId) }
-                 }))
-  }
 
   private func reloadProviders() {
     guard let s = session else { return }
@@ -300,17 +319,6 @@ struct SessionTranscriptView: View {
     else { run.loadSessionProviderControls(providerId: s.providerId, agentProfileId: s.agentProfileId, cwd: s.cwd, force: true) }
   }
 
-  private var historyStatus: String {
-    if run.historyNativeUnavailable { return ConnectionCopy.historyNativeUnavailable }
-    if let source = run.historyPageSource, run.historyOlderBefore != nil {
-      return ConnectionCopy.historyRecentComplete(source)
-    }
-    if case .partial = run.history { return ConnectionCopy.historyPartial }
-    if run.historyFromCache { return ConnectionCopy.historyFromCache }
-    if run.historySyncing { return ConnectionCopy.historyReading }
-    if run.historyFetchedAt != nil { return ConnectionCopy.historyVerified }
-    return ConnectionCopy.historyStateUnavailable
-  }
 
   private func projectName(_ cwd: String?) -> String {
     guard let cwd else { return "" }
@@ -324,7 +332,7 @@ struct SessionTranscriptView: View {
       running: live.state == "running", usagePending: true,
       entries: ConversationEntry.group(run.detachedOutput, kind: \.kind, text: \.text),
       notice: ConversationCopy.liveCache)
-    return ForEach(turn.rows(id: live.runId)) { $0 }
+    return ForEach(turn.withSplitBlocks(splitBlocks["\(live.runId)"] ?? [:]).rows(id: live.runId)) { $0 }
   }
 
   private var footer: some View {

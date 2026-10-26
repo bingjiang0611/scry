@@ -187,6 +187,7 @@ struct ConversationTurn {
   var archived = false
   var outcome: TurnOutcomeNote?
   var notice: String?
+  var splitBlocks: [Int: [ConversationMarkdownBlock]] = [:]
 
   fileprivate enum Row: Identifiable {
     enum ID: Hashable { case prompt, provider, block(Int), markdownBlock(Int, Int), outcome, notice, usage }
@@ -211,12 +212,12 @@ struct ConversationTurn {
     rows.append(.provider)
     // A long Markdown reply used to be one lazy row thousands of points tall.
     // The lazy stack then estimated every other row from a single oversized
-    // frame, so no scroll target landed on real content. Split only the long
-    // prose entries; reasoning, tool groups and short replies keep one row.
+    // frame, so no scroll target landed on real content. Long prose is split by
+    // `splitBlocks`, which the page fills in from a background parse; until that
+    // result exists the entry keeps its original single row.
+    let split = splitBlocks
     for (entryIndex, block) in ConversationBlock.group(entries).enumerated() {
-      let entry = block.entries[0]
-      let parts = block.isToolGroup ? [] : ConversationTurn.markdownParts(entry.text, kind: entry.kind)
-      if parts.count > 1 {
+      if let parts = split[entryIndex], parts.count > 1 {
         for part in parts { rows.append(.markdownBlock(entryIndex, part)) }
       } else {
         rows.append(.block(block))
@@ -275,12 +276,19 @@ struct ConversationTurn {
     !["reasoning", "tool", "tool_result", "truncated"].contains(kind)
   }
 
-  // Only long prose is worth splitting: a short reply already fits the viewport
-  // and splitting it would churn identities on every streamed chunk.
-  static func markdownParts(_ text: String, kind: String) -> [ConversationMarkdownBlock] {
-    guard isMarkdownKind(kind), text.count > 600 else { return [] }
-    let blocks = ConversationMarkdownParser.cachedBlocks(text)
-    return blocks.count > 1 ? blocks : []
+  /// Prose entries the page may split, in entry order.
+  var splitCandidates: [ConversationMarkdownSplitCandidate] {
+    ConversationBlock.group(entries).enumerated().compactMap { index, block in
+      guard !block.isToolGroup else { return nil }
+      let entry = block.entries[0]
+      return ConversationMarkdownSplitter.candidates(entries: [(index, entry.kind, entry.text)]).first
+    }
+  }
+
+  func withSplitBlocks(_ blocks: [Int: [ConversationMarkdownBlock]]) -> Self {
+    var copy = self
+    copy.splitBlocks = blocks
+    return copy
   }
 
   @ViewBuilder private func blockView(_ block: ConversationBlock, truncated: Bool) -> some View {

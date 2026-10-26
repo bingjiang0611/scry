@@ -38,39 +38,44 @@ enum ConversationMarkdownParser {
     parse(source)
   }
 
-  // Block-level rows ask for the same source on every layout pass. Parsing is
-  // linear in the reply length, so keep a small bounded cache keyed by the full
-  // source instead of re-parsing inside `body`.
-  private final class BlockCache: @unchecked Sendable {
+  // Splitting runs in a background task, never while a body evaluates. The cache
+  // is keyed by entry identity and versioned by the exact source, so a hit can
+  // only ever return blocks parsed from that same text. Bounds are dual: at most
+  // 64 entries and 2,000,000 characters of retained source (≈4 MB of UTF-16),
+  // dropped oldest-first. Long transcripts therefore cannot pin memory, and a
+  // streaming entry replaces its own slot instead of growing the cache.
+  final class BlockCache: @unchecked Sendable {
+    struct Entry { let version: String; let blocks: [ConversationMarkdownBlock] }
     private let lock = NSLock()
-    private var storage: [String: [ConversationMarkdownBlock]] = [:]
+    private var storage: [String: Entry] = [:]
     private var order: [String] = []
+    private var characters = 0
+    static let maxEntries = 64
+    static let maxCharacters = 2_000_000
 
-    func value(for key: String, compute: () -> [ConversationMarkdownBlock]) -> [ConversationMarkdownBlock] {
-      lock.lock()
-      if let hit = storage[key] { lock.unlock(); return hit }
-      lock.unlock()
-      let parsed = compute()
-      lock.lock()
-      defer { lock.unlock() }
-      if storage[key] == nil {
-        storage[key] = parsed
-        order.append(key)
-        while order.count > 32, let oldest = order.first {
-          order.removeFirst()
-          storage.removeValue(forKey: oldest)
-        }
+    func blocks(forKey key: String, version: String) -> [ConversationMarkdownBlock]? {
+      lock.lock(); defer { lock.unlock() }
+      guard let hit = storage[key], hit.version == version else { return nil }
+      return hit.blocks
+    }
+
+    func store(_ blocks: [ConversationMarkdownBlock], forKey key: String, version: String) {
+      lock.lock(); defer { lock.unlock() }
+      if let old = storage[key] {
+        characters -= old.version.count
+        order.removeAll { $0 == key }
       }
-      return storage[key] ?? parsed
+      storage[key] = Entry(version: version, blocks: blocks)
+      order.append(key)
+      characters += version.count
+      while order.count > Self.maxEntries || characters > Self.maxCharacters, let oldest = order.first {
+        order.removeFirst()
+        if let dropped = storage.removeValue(forKey: oldest) { characters -= dropped.version.count }
+      }
     }
   }
 
-  private static let cache = BlockCache()
-
-  static func cachedBlocks(_ source: String) -> [ConversationMarkdownBlock] {
-    guard source.count <= 200_000 else { return parse(source) }
-    return cache.value(for: source) { parse(source) }
-  }
+  static let blockCache = BlockCache()
 
   static func parse(_ source: String) -> [ConversationMarkdownBlock] {
     let lines = source.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
@@ -301,6 +306,49 @@ private struct ConversationMarkdownTableView: View {
     case .center: return .center
     case .right: return .trailing
     }
+  }
+}
+
+// Splitting long prose into block rows: candidates are selected here, parsing
+// happens in a background task, and the reader body only ever looks up an
+// already-parsed dictionary by entry index.
+struct ConversationMarkdownSplitCandidate: Sendable {
+  let index: Int
+  let text: String
+}
+
+enum ConversationMarkdownSplitter {
+  static let minimumCharacters = 600
+
+  /// Entry indices that are prose long enough to be worth splitting. Touches
+  /// text only to hand it to the parser; it never hashes or compares it.
+  static func candidates(entries: [(index: Int, kind: String, text: String)]) -> [ConversationMarkdownSplitCandidate] {
+    entries.compactMap { entry in
+      guard !["reasoning", "tool", "tool_result", "truncated"].contains(entry.kind),
+            entry.text.count > minimumCharacters else { return nil }
+      return ConversationMarkdownSplitCandidate(index: entry.index, text: entry.text)
+    }
+  }
+
+  static func cacheKey(turnID: String, index: Int) -> String { "\(turnID)#\(index)" }
+
+  /// Blocks already parsed from exactly this text.
+  static func ready(turnID: String, candidate: ConversationMarkdownSplitCandidate) -> [ConversationMarkdownBlock]? {
+    guard let blocks = ConversationMarkdownParser.blockCache.blocks(forKey: cacheKey(turnID: turnID, index: candidate.index),
+                                                                   version: candidate.text),
+          blocks.count > 1 else { return nil }
+    return blocks
+  }
+
+  /// Parse outside the main actor and cache by identity + exact version.
+  static func parse(turnID: String, candidate: ConversationMarkdownSplitCandidate) async -> [ConversationMarkdownBlock]? {
+    if let ready = ready(turnID: turnID, candidate: candidate) { return ready }
+    let blocks = await ConversationMarkdownParser.parseForReading(candidate.text)
+    guard !Task.isCancelled else { return nil }
+    guard blocks.count > 1 else { return nil }
+    ConversationMarkdownParser.blockCache.store(blocks, forKey: cacheKey(turnID: turnID, index: candidate.index),
+                                               version: candidate.text)
+    return blocks
   }
 }
 

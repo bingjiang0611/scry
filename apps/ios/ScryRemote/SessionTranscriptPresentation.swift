@@ -66,7 +66,7 @@ struct HistoryRetryButton: View {
 }
 
 extension SessionTranscriptView {
-  @ViewBuilder var historyBody: some View {
+  @ViewBuilder func historyBody(split blocks: [String: [Int: [ConversationMarkdownBlock]]]) -> some View {
     if run.activeSessionIdentity == sessionIdentity, run.historyCapacityLimit {
       HistoryRetryButton(title: ConversationCopy.loadHistory) {
         if let s = session { run.loadCompleteHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, agentProfileId: s.agentProfileId) }
@@ -96,17 +96,24 @@ extension SessionTranscriptView {
         // The archive has no resultSummary; do not synthesize a usage footer.
         ConversationTurn(prompt: turn.userText.isEmpty ? nil : turn.userText, runId: turn.runId,
           entries: ConversationEntry.group(turn.items, kind: \.kind, text: \.text), archived: true)
+          .withSplitBlocks(blocks["history-\(first + index)"] ?? [:])
           .rows(id: first + index)
       }) { $0 }
-      ForEach(completedTurns.flatMap { ConversationTurn.completed($0).rows(id: $0.id) }) { $0 }
+      ForEach(completedTurns.flatMap { row in
+        ConversationTurn.completed(row).withSplitBlocks(blocks[row.id] ?? [:]).rows(id: row.id)
+      }) { $0 }
     case .empty:
-      ForEach(completedTurns.flatMap { ConversationTurn.completed($0).rows(id: $0.id) }) { $0 }
+      ForEach(completedTurns.flatMap { row in
+        ConversationTurn.completed(row).withSplitBlocks(blocks[row.id] ?? [:]).rows(id: row.id)
+      }) { $0 }
       Text(ConnectionCopy.noReadableHistory)
         .font(Typography.meta).foregroundStyle(Palette.dim)
         .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 20)
     case .baseUnavailable:
       // The missing record is reported once, in the status strip.
-      ForEach(completedTurns.flatMap { ConversationTurn.completed($0).rows(id: $0.id) }) { $0 }
+      ForEach(completedTurns.flatMap { row in
+        ConversationTurn.completed(row).withSplitBlocks(blocks[row.id] ?? [:]).rows(id: row.id)
+      }) { $0 }
     case .failed("history_unavailable") where detachedLive != nil:
       // A session this run is creating has no record until the run ends.
       EmptyView()
@@ -120,7 +127,9 @@ extension SessionTranscriptView {
       .frame(maxWidth: .infinity)
       DisclosureGroup(ConversationCopy.errorDetails) { Text(reason).font(Typography.meta).textSelection(.enabled) }
         .font(Typography.meta).foregroundStyle(Palette.dim)
-      ForEach(completedTurns.flatMap { ConversationTurn.completed($0).rows(id: $0.id) }) { $0 }
+      ForEach(completedTurns.flatMap { row in
+        ConversationTurn.completed(row).withSplitBlocks(blocks[row.id] ?? [:]).rows(id: row.id)
+      }) { $0 }
     }
   }
 
@@ -196,5 +205,47 @@ struct HistoryEvidenceDetails: View {
         }
       }
     }
+  }
+}
+
+extension SessionTranscriptView {
+  var historyIssue: SessionStatusLine? {
+    guard run.activeSessionIdentity == sessionIdentity else { return nil }
+    // The exact reason stays in the header menu (历史状态); the paced
+    // refresh keeps retrying while this error stands (historyIsWatched).
+    let details = SessionStatusLine.Action(title: ConnectionCopy.details, perform: { showHistoryDetails = true })
+    if historyReadyForDisplay || run.history == .baseUnavailable, run.historyRefreshError != nil {
+      return .init(text: run.history == .baseUnavailable ? ConnectionCopy.historyUnavailable
+                                                          : ConnectionCopy.historySyncFailed,
+                   tone: .warning, busy: true, action: details)
+    }
+    if run.historyStorageNotice != nil {
+      return .init(text: ConnectionCopy.historyStorageLimited, tone: .warning, action: details)
+    }
+    if case .partial = run.history {
+      return .init(text: ConnectionCopy.historyPartial, tone: .warning, action: details)
+    }
+    if run.historyFromCache {
+      return .init(text: run.historySyncing ? ConnectionCopy.historyCheckingCache : ConnectionCopy.historyFromCache,
+                   busy: run.historySyncing, action: details)
+    }
+    guard run.history == .baseUnavailable else { return nil }
+    if run.historySyncing { return .init(text: ConnectionCopy.historyReading, busy: true) }
+    return .init(text: ConnectionCopy.historyEarlierUnavailable,
+                 action: .init(title: ConnectionCopy.retry, perform: {
+                   if let s = session { run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true, agentProfileId: s.agentProfileId) }
+                 }))
+  }
+
+  var historyStatus: String {
+    if run.historyNativeUnavailable { return ConnectionCopy.historyNativeUnavailable }
+    if let source = run.historyPageSource, run.historyOlderBefore != nil {
+      return ConnectionCopy.historyRecentComplete(source)
+    }
+    if case .partial = run.history { return ConnectionCopy.historyPartial }
+    if run.historyFromCache { return ConnectionCopy.historyFromCache }
+    if run.historySyncing { return ConnectionCopy.historyReading }
+    if run.historyFetchedAt != nil { return ConnectionCopy.historyVerified }
+    return ConnectionCopy.historyStateUnavailable
   }
 }
