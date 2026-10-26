@@ -15,6 +15,7 @@ import { readTraceArchiveAsync, readTraceArchiveMetadataAsync, readTraceArchiveP
 import { readCachedTranscript } from '../transcript-parser'
 import { readPiNativeHistorySnapshot, reconcilePiNativeHistory } from '../pi-native-history'
 import { readCompleteArchiveForNativeReconciliation, mergeSessionTurns, hydrateSessionHistoryPage, sessionHistoryPage, readSessionHistoryAfterCompletedRuns, sessionArchiveIsPageable } from '../session-history'
+import { readSelectedArchivePageTurns } from '../session-history-page-projection'
 import { persistTraceToolEvents } from '../trace-tool-content'
 import { sessionLoadMatchesRun } from '../session-diff'
 import { appSessionCanResume } from '../app-store'
@@ -298,7 +299,11 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
       let selectedArchive: TraceArchive | null = archived
       if (nativeSnapshot) {
         const selectedRunIds = unhydratedPage.turns.map((turn) => turn.runId!).filter((runId): runId is string => !!runId)
-        const selectedArchiveTurns = await readTraceArchiveTurnsAsync(archiveArgs, selectedRunIds, signal)
+        const selectedArchiveTurns = await readSelectedArchivePageTurns(
+          archiveProfile.agentProfileId === undefined ? archivePage?.archive ?? null : null,
+          selectedRunIds,
+          (missing) => readTraceArchiveTurnsAsync(archiveArgs, missing, signal)
+        )
         if (requestRevision !== getLoadSessionRevision()) return null
         const selectedArchiveLoaded = mergeSessionTurns([], selectedArchiveTurns.length > 0 ? {
           version: 3,

@@ -1,6 +1,7 @@
 import type { ProviderContext } from '../../shared/provider'
 import { historyCopy } from '../../shared/constants/copy'
 import { attachConfiguredHookCommands, loadClaudeHookConfig } from '../hook-config'
+import { projectHistoryPageSnapshots } from '../session-history-page-projection'
 import type { SessionHistoryPage } from '../session-history'
 import { registerLoadSessionHandler, type LoadSessionDependencies } from './history-load'
 import { registerOlderHistoryHandler, type SessionHistoryCache } from './history-older'
@@ -10,10 +11,13 @@ function pageWithHookCommands(
   page: SessionHistoryPage,
   hookConfig: ReturnType<typeof loadClaudeHookConfig> | null
 ): SessionHistoryPage {
-  if (!hookConfig) return page
+  // Only trim superseded cumulative session snapshots from the page crossing IPC.
+  // The archive and the main-side history cache keep the complete evidence.
+  const projected = projectHistoryPageSnapshots(page)
+  if (!hookConfig) return projected
   return {
-    ...page,
-    turns: page.turns.map((turn) => ({
+    ...projected,
+    turns: projected.turns.map((turn) => ({
       ...turn,
       items: turn.items.map((event) => attachConfiguredHookCommands(event, hookConfig))
     }))
