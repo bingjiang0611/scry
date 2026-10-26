@@ -37,6 +37,8 @@
 
 注意：浅色 `accent` 在白底约 4.0:1，作文字时只用于 ≥15pt semibold，或改用填充 / 下划线表达。
 
+**2026-10-26 核验后补充**：`accent` 作按钮填充时配白字不够对比（深色 2.75:1、浅色 3.92:1）。实心主按钮改用 `accentFill` = `#2f6ad8`（深浅相同，配白字 5.0:1；深色下与 `panel2` 底 3.1:1，满足非文字 3:1），文字用 `onAccent` = `#ffffff`。`accent` 仍用于描边、勾、运行环、选中态等非填充场景。
+
 ## 2. 字体（全部用语义 text style，响应 Dynamic Type）
 
 | 角色 | Mac | iOS |
@@ -122,7 +124,7 @@
 
 ### 5.3 Sheet
 
-- **需要你决定**（RemoteQuestionSheet）：`panel2` 底，顶部抓手；头部 60pt「需要你决定」+ 会话名 · Provider + 关闭；类型徽标（「Provider 请求授权 / 需要输入」，`warn`）；问题 `.callout` medium；选项为 12 圆角卡片，选中 1.5pt `accent` 边 + `accentSoft` 底 + 实心圆点（160ms）；底部两个 48pt 按钮「取消请求」（次按钮）/「提交」（`accent` 填充，圆角 14）。多选、文本输入的逻辑不变。
+- **需要你决定**（RemoteQuestionSheet）：`panel2` 底，顶部抓手；头部 60pt「需要你决定」+ 会话名 · Provider + 关闭；类型徽标（「Provider 请求授权 / 需要输入」，`warn`）；问题 `.callout` medium；选项为 12 圆角卡片，选中 1.5pt `accent` 边 + `accentSoft` 底 + 实心圆点（160ms）；底部两个 48pt 按钮「取消请求」（次按钮）/「提交」（`accentFill` 填充、`onAccent` 字，圆角 14）。多选、文本输入的逻辑不变。
 - **会话总览**（新增，对应 Mac OverviewPanel）：上下文占用横向刻度（8pt 轨道，≥50% `warn`、≥80% `bad`，其余 `accent`）+「已用 / 窗口」；判词行（7pt 状态点 + 文字）；Token 总量（大号 `accent`）+ 费用 | 时长两格；会话信息（ID 可复制、Provider、模型、工作目录）；「轮次 / 文件 / 时间线」标签。**每一项都只显示主机真实提供的数据**，iOS 目前很可能拿不到上下文占用和累计 Token：拿不到的整块显示「Mac 未提供」，不要隐藏到让人以为是 0，也不要估算。
 - **模型 · 推理强度**：从 Composer 的模型按钮弹出的浮层（`panel2` 底、圆角 16、`border` 边、浮层阴影，220ms ease-out 从右下缩放 0.96→1）。上半是模型列表（名称 + 一句说明，选中打勾），下半是推理强度分段控件（滑块 220ms struct）。选项来自现有 `modelOptions` / `effortOptions`，选择逻辑和缺失时阻止发送的规则不变。
 
