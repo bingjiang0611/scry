@@ -107,10 +107,13 @@ try {
     assert.equal(submit.status, 'recorded', JSON.stringify(submit))
     assert.ok(/^[0-9a-f-]{36}$/.test(submit.runId), JSON.stringify(submit))
 
-    // 3. Retry is idempotent on intentId (same host-assigned runId, no new run).
-    const retry = await call(host.port, id, 'g1-device.pem', 'device.key', { op: 'submit', intentId, detail: 'again' })
-    assert.equal(retry.status, 'duplicate')
+    // 3. Retry is idempotent on intentId (same host-assigned runId, no new run);
+    //    reusing the intentId with a different payload is a conflict, not a replay.
+    const retry = await call(host.port, id, 'g1-device.pem', 'device.key', { op: 'submit', intentId, detail: 'ship it' })
+    assert.equal(retry.status, 'duplicate', JSON.stringify(retry))
     assert.equal(retry.runId, submit.runId)
+    const conflict = await call(host.port, id, 'g1-device.pem', 'device.key', { op: 'submit', intentId, detail: 'again' })
+    assert.equal(conflict.error, 'intent_payload_conflict', JSON.stringify(conflict))
 
     // 4. The trusted host executor drives lifecycle; the device only reads it.
     ledger.markDispatched(submit.runId)

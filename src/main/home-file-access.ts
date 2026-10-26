@@ -26,7 +26,11 @@ function homeRelativeParts(path: string): string[] {
 export class HomeFileAccess {
   private readonly fileReferences = new Map<string, string>()
 
-  constructor(private readonly homeDir: string) {}
+  private readonly homeDir: string
+
+  constructor(homeDir: string) {
+    this.homeDir = homeDir
+  }
 
   isReadOnlyTarget(cwd: string): boolean {
     return cwd === '~' || cwd.startsWith('scry-file:')

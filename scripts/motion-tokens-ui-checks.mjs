@@ -55,15 +55,21 @@ export async function exerciseMotionTokens(contents) {
     await checkNoTransform(selector, selector)
   }
 
-  await read('window.motionFixture.reorder()')
-  await wait(`document.querySelector('[data-motion-key="motion-session"]').dataset.activityGroup === 'attention'`)
-  const normal = await read(`document.querySelector('.sb-activity').getAnimations({ subtree: true })
-    .filter(animation => animation.effect?.target?.hasAttribute('data-motion-key'))
-    .map(animation => ({ duration: animation.effect.getTiming().duration, frames: animation.effect.getKeyframes() }))`)
-  check(normal.some(animation => animation.duration === 300 && animation.frames.some(frame => frame.transform != null)), 'normal reorder did not produce the 300ms FLIP positive control')
-
   await contents.debugger.attach('1.3')
   try {
+    // Exercise both motion modes explicitly rather than inheriting the runner's
+    // OS preference; a runner that reports reduced motion skips every FLIP.
+    await contents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }]
+    })
+    await wait("!matchMedia('(prefers-reduced-motion: reduce)').matches")
+    await read('window.motionFixture.reorder()')
+    await wait(`document.querySelector('[data-motion-key="motion-session"]').dataset.activityGroup === 'attention'`)
+    const normal = await read(`document.querySelector('.sb-activity').getAnimations({ subtree: true })
+      .filter(animation => animation.effect?.target?.hasAttribute('data-motion-key'))
+      .map(animation => ({ duration: animation.effect.getTiming().duration, frames: animation.effect.getKeyframes() }))`)
+    check(normal.some(animation => animation.duration === 300 && animation.frames.some(frame => frame.transform != null)), 'normal reorder did not produce the 300ms FLIP positive control')
+
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia', {
       features: [{ name: 'prefers-reduced-motion', value: 'reduce' }]
     })

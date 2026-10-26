@@ -62,7 +62,12 @@ export function attachmentCapability(): DesktopAttachmentCapability {
 
 export class DesktopAttachmentStore {
   #serial: Promise<unknown> = Promise.resolve()
-  constructor(readonly root: string, private readonly intentState: (peer: string, id: string) => RunLifecycle | undefined = () => undefined) {}
+  readonly root: string
+  private readonly intentState: (peer: string, id: string) => RunLifecycle | undefined
+  constructor(root: string, intentState: (peer: string, id: string) => RunLifecycle | undefined = () => undefined) {
+    this.root = root
+    this.intentState = intentState
+  }
   #locked<T>(operation: () => Promise<T>): Promise<T> {
     const next = this.#serial.then(operation)
     this.#serial = next.catch(() => {})

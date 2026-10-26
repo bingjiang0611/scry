@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -511,6 +511,14 @@ describe('MCP execution trust', () => {
   it('canonicalizes the executable and rejects execution-shaping env', () => {
     const { root, homeDir, cwd } = fixture()
     try {
+      // Own PATH entry whose `echo` is a symlink: runner images differ in whether
+      // /usr/bin/echo is itself a link, so the system binary can't pin the result.
+      const bin = join(root, 'bin')
+      mkdirSync(bin)
+      const real = join(bin, 'real-echo')
+      writeFileSync(real, '#!/bin/sh\n')
+      chmodSync(real, 0o755)
+      symlinkSync(real, join(bin, 'echo'))
       writeFileSync(join(cwd, '.mcp.json'), JSON.stringify({
         mcpServers: {
           tracker: {
@@ -519,8 +527,8 @@ describe('MCP execution trust', () => {
           }
         }
       }))
-      const snapshot = buildMcpExecutionSnapshot({ cwd, homeDir, env: { PATH: '/bin:/usr/bin' } })
-      expect(snapshot.targets[0].config.command).toMatch(/^\/(usr\/)?bin\/echo$/)
+      const snapshot = buildMcpExecutionSnapshot({ cwd, homeDir, env: { PATH: bin } })
+      expect(snapshot.targets[0].config.command).toBe(realpathSync(real))
       expect(snapshot.targets[0].executableIdentity).toContain(':')
       expect(snapshot.errors).toContainEqual(expect.stringContaining('NODE_OPTIONS'))
       const summary = mcpExecutionAuthorizationTargetLine(snapshot.targets[0])
