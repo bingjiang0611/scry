@@ -14,7 +14,7 @@ export const TRACE_TOOL_CONTENT_POLICY = {
 
 // The main process supplies a catalog-authorized canonical cwd, never a renderer path.
 // Separate roots keep even a known digest from granting access to another workspace.
-function contentRoot(userDataDir: string, cwd: string): string {
+export function appTraceContentRoot(userDataDir: string, cwd: string): string {
   return join(userDataDir, 'trace-content-v1', createHash('sha256').update(cwd).digest('hex'))
 }
 
@@ -29,7 +29,7 @@ export async function persistTraceToolEvents(
   for (const event of events) {
     bounded.push(...await persistToolEventContent([event], TRACE_TOOL_CONTENT_POLICY, APP_TRACE_CONTENT_SOURCE,
       async (content, encoding) => {
-        const appRoot = contentRoot(userDataDir, cwd)
+        const appRoot = appTraceContentRoot(userDataDir, cwd)
         // One event remains the batch boundary. Both authorities must be durable before
         // the live queue can publish its reference; the offline CLI cannot depend on App data.
         return writeRecorderContentCopies(recorderRoot ? [appRoot, recorderRoot] : [appRoot], content, encoding)
@@ -44,5 +44,5 @@ export async function readAppTraceContentPage(userDataDir: string, cwd: string, 
   if (request.source !== 'app-trace' || !isToolContentRef(request.ref)) throw new Error('invalid_trace_content_ref')
   const limit = request.limit ?? 64 * 1024
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 64 * 1024) throw new Error('invalid_trace_content_limit')
-  return readRecorderContentPage(contentRoot(userDataDir, cwd), request.ref, { offset: request.offset, limit })
+  return readRecorderContentPage(appTraceContentRoot(userDataDir, cwd), request.ref, { offset: request.offset, limit })
 }

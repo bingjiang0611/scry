@@ -16,6 +16,7 @@ import {
 import { copyFile, lstat, open as openFile, readFile, readdir, rename, unlink } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { protectToolContent, workspaceToolContentPolicy } from '../core/turn-recorder/content-policy.js'
+import { externalizeTraceDiffPatches, hydrateNewestSessionSnapshots } from './trace-diff-content'
 import type { ToolContentPolicy } from '../core/turn-recorder/tool-content.js'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
@@ -1643,6 +1644,18 @@ export async function readTraceArchivePageAsync(
   request: TraceArchivePageRequest = {},
   signal?: AbortSignal
 ): Promise<TraceArchivePage> {
+  const page = await readTraceArchivePageBodyAsync(args, request, signal)
+  // Only the newest session snapshot of the page crosses IPC, so only that one is read back
+  // from the content store; older cumulative snapshots stay references on disk.
+  if (page.archive) await hydrateNewestSessionSnapshots(args.userDataDir, args.cwd, page.archive.turns)
+  return page
+}
+
+async function readTraceArchivePageBodyAsync(
+  args: { cwd: string; sessionId: string; userDataDir: string; providerId: ProviderId },
+  request: TraceArchivePageRequest,
+  signal?: AbortSignal
+): Promise<TraceArchivePage> {
   signal?.throwIfAborted()
   const strictStorage = Object.hasOwn(request, 'agentProfileId') || request.requireComplete === true
   const current = await inspectArchiveFileAsync(
@@ -1976,6 +1989,9 @@ export async function upsertTraceArchiveTurnAsync(args: {
     items: args.turn.items,
     ts: args.turn.ts ?? Date.now()
   }
+  // 累积会话快照与 canonical evidence 的 patch 正文写入内容库，turn 文件只留引用；
+  // 页面读取时把最新一条 session 快照取回，渲染层看到的仍是 inline patch。
+  turn = (await externalizeTraceDiffPatches(args.userDataDir, args.cwd, turn)).turn
   const fp = traceArchiveTurnPath(args.userDataDir, args.cwd, args.sessionId, providerId, turn)
   const existing = await inspectArchiveFileAsync(args.userDataDir, fp, args.cwd, args.sessionId, providerId)
   const archive = prepareArchiveUpdate(args, providerId, turn, existing, fp)
