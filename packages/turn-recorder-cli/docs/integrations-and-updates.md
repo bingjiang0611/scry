@@ -32,13 +32,24 @@ scry recorder notify-drain --workspace "$PWD"
 
 ### 失败次数与 recorder 死信
 
-有序 drain 按 `(hook fingerprint, sequence)` 持久化失败次数。一次 drain 不会紧循环重试同一失败项；第 **5** 次失败后，先 fsync 死信元数据，再推进处理游标，继续后面的记录。hook 路径仍最多处理 8 项、预算 1.5s；死信也占一项，预算用尽由下一次 drain 继续。全局执行配置、trust 或锁失败不会消耗某条记录的次数。正文/环境旁路不可读和 callback 非 ACK 均可成为该条的失败原因。
+drain 按 `(hook fingerprint, sequence)` 持久化次数和最后失败时间。连续失败后的等待间隔为 **1、5、15、60 分钟**；首次失败后的四次重试合计至少 81 分钟，第 **5** 次失败才隔离。重复快速 drain 不增加次数。等待期间跳过该项、继续后续记录，不忙等、不额外启动定时进程。到期时间是最早允许时间，不承诺准点执行；由下一次 hook/recover/notify-drain 触发。hook 路径仍最多调用 8 次、预算 1.5s；每次 callback 的 10 秒熔断不变。全局执行配置、trust 或锁失败不计入单条次数；正文/环境旁路不可读及 callback 非 ACK 按该条计数。
 
-状态位于 `<dataRoot>/notifications/commit-hooks/<fingerprint-hash>.json`；死信位于 `notifications/dead-letters/<fingerprint-hash>/<sequence>-<recordId>.json`。死信只记录 sequence、recordId、次数、时间和受限错误分类，不复制正文、env 或 stderr。canonical record 和上传环境旁路仍留在原处，不因隔离而删除。状态损坏时显示 unavailable，不清零重试。
+检查点位于 `<dataRoot>/notifications/commit-hooks/<fingerprint-hash>.json`。逐 sequence 的失败、重放请求和缺口之后的成功凭据在 `notifications/delivery-outcomes/<fingerprint-hash>/`；死信在 `notifications/dead-letters/<fingerprint-hash>/<sequence>-<recordId>.json`。元数据不复制正文、env 或 stderr。canonical record 与上传环境旁路不因隔离而删除。计数/凭据损坏时 unavailable，不清零、不把缺失的成功凭据当作 ACK。
 
-`processedThrough` 包含已交付和已隔离项；`ackedThrough` 仍是保守的连续 ACK 边界。出现死信后，后续记录可以成功交付，但 ACK 前缀不会伪装成全部成功，普通归档仍会被未 ACK 前缀阻止。`notify-drain` 退出 0 只表示自动队列已清空；有死信时 `doctor` 仍退出 5，不能据此声称全部成功。不要通过改 ACK 文件绕过此保护。`doctor` 的 `commitHook.delivery` 报出阻塞 sequence/次数；死信使其 fail，尚在重试则 warn，两者退出 5。总数按死信文件名统计，正文详情最多读取最新 20 条，不表示已检查所有历史死信。
+`processedThrough` 是已遍历位置，包含退避和死信，**不是 ACK**。`ackedThrough` 只沿连续成功证据前进；重试项或死信之前的 ACK 缺口会阻止普通归档。后续成功保留独立凭据，前面的重放成功后才能补齐 ACK。`notifyBacklog` 包含退避项、不含死信。`notify-drain` 有待重试项时退出 3；退出 0 仅表示自动队列为空，不能证明没有死信。`doctor` 报出次数和 `nextRetryAt`：退避 warn、死信 fail、证据不可读 fail，均退出 5。重试详情最多显示最前 20 项、死信详情最多显示最新 20 项；内部遍历逐条读取，不将全部正文放进诊断输出。
 
-当前没有单条死信重放命令。应先修复原因；修复后的有效 hook bundle 若改变指纹，会按既有隔离规则重投全部仍保留记录，旧指纹死信保留作历史证据。仅外部条件恢复、指纹不变时不会自动重放死信。冷启动的“最新记录唤醒”不改变有序队列的 ACK/重试计数，也跳过已耗尽或已隔离的最新记录。稳定 `commitHook.id` 尚未引入，trust/内容指纹校验不变。
+修复原因后，明确选择单条或全部当前身份的死信：
+
+```bash
+scry recorder notify-retry --sequence 42 --workspace "$PWD"
+scry recorder notify-retry --all-dead --workspace "$PWD"
+```
+
+命令先验证配置与 trust，再将原死信诊断保存到 `notifications/dead-letter-history/<fingerprint-hash>/`，持久化重放请求后移出当前死信、清零计数并正常 drain。原始 record 与原会话环境仍复用。中断后，已持久化的单条请求由 drain 恢复；尚未持久化的条目仍是死信，需查看状态再明确选择，不猜测整批是否完成。若再次失败，从第 1 次和 1 分钟间隔重新开始；没有真实成功就不推进 ACK。指定的 sequence 必须是当前身份的活动死信。`--all-dead` 无活动死信时不制造重放；命令也可处理其他已到期的普通积压，但不会提前执行仍在退避的项。不要编辑 ACK 或删除队列元数据来绕过保护。
+
+冷启动的“最新记录唤醒”跳过已有重试/死信；尚未 ACK 的最新记录首次失败也进入同一退避状态。已经 ACK 的唤醒不倒退 ACK，不能代替外部 uploader 的 outbox 重试。指纹变化仍是独立身份：新身份按既有规则重投全部仍保留记录，旧身份的死信不被悄悄清除；`notify-retry` 不跨身份操作。稳定 `commitHook.id` 未引入，trust/内容指纹校验不变。
+
+旧 E 检查点在投递锁内迁移，已有次数和死信保留，不伪造历史等待间隔。旧的 5 次失败/死信需用上述命令显式重放。升级时重启对应 workspace 的 daemon；不要让旧 CLI/daemon 与新队列格式并发运行或降级写入。`delivery-outcomes` 的成功凭据和死信历史目前不会自动回收；有大量历史缺口时目录扫描会增加，需评估增量索引/分段回收，而不是删除未 ACK 的证据。
 
 ### 每轮上传环境
 
@@ -46,7 +57,7 @@ scry recorder notify-drain --workspace "$PWD"
 
 这些值可能敏感，不进入 record 正文、record export 或 support bundle；旁路文件不加密，勿原样分享。旁路按 recordId 保留，当前不会随归档自动删除。升级前的 record/open turn 没有快照，无法重建原会话环境，继续采用旧的投递进程环境；不要将其解释成已验证的逐轮快照。执行路径、trust 指纹及非上传环境不从旁路恢复。
 
-daemon hook 协议升为 2。shell 仅用内建 `printf` 发送 NUL 分隔环境和原始 Provider JSON，不增加编码器进程；会话的 `SCRY_RECORDER_ENABLED=0` 也传到 daemon。旧协议被拒绝后走现有持久化 fallback，不会按 daemon 环境假装处理成功。升级后须 `scry integrations repair --yes` 更新脚本，并 `scry recorder restart` 重启该 workspace 的 daemon。
+daemon hook 协议升为 2。shell 仅用内建 `printf` 发送 NUL 分隔环境和原始 Provider JSON，不增加编码器进程；会话的 `SCRY_RECORDER_ENABLED=0` 也传到 daemon。curl rc=0 且 HTTP 4xx 表示 apply 前拒绝，清除内部尝试标记，让 CLI 用自己的协议重试或直写；连接失败同样处理。超时、断连或 5xx 保留结果未知标记，走持久化 fallback，不假定未送达。升级后须 `scry integrations repair --yes` 更新脚本，并 `scry recorder restart` 重启该 workspace 的 daemon。
 
 ## managed 模式与更新
 

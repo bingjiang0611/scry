@@ -21,8 +21,9 @@ export interface CommitHookState {
   schemaVersion: 1
   hookFingerprint: string
   ackedThrough: number
-  /** Includes dead letters, unlike the conservative contiguous ACK prefix. */
+  /** Visited prefix; queueVersion 2 also includes deferred retries. Never an ACK. */
   processedThrough?: number
+  queueVersion?: 2
   failure?: CommitNotificationFailure
 }
 
@@ -35,11 +36,11 @@ export function commitHookStatePath(dataRoot: string, fingerprint: string): stri
   return join(dataRoot, 'notifications', 'commit-hooks', `${stableHash(fingerprint)}.json`)
 }
 
-function recordName(failure: CommitNotificationFailure): string {
+export function recordName(failure: Pick<CommitNotificationFailure, 'sequence' | 'recordId'>): string {
   return `${String(failure.sequence).padStart(20, '0')}-${failure.recordId}.json`
 }
 
-function validFailure(value: unknown): value is CommitNotificationFailure {
+export function validFailure(value: unknown): value is CommitNotificationFailure {
   if (!value || typeof value !== 'object') return false
   const failure = value as CommitNotificationFailure
   if (typeof failure.recordId !== 'string' || !Number.isSafeInteger(failure.sequence)) return false
@@ -53,7 +54,7 @@ function validFailure(value: unknown): value is CommitNotificationFailure {
     (failure.errorCode === undefined || typeof failure.errorCode === 'string')
 }
 
-async function readNotificationObject<T>(path: string): Promise<T | null> {
+export async function readNotificationObject<T>(path: string): Promise<T | null> {
   let source: string
   try { source = await readFile(path, 'utf8') } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
@@ -84,13 +85,19 @@ export async function readCommitHookAck(dataRoot: string, fingerprint: string) {
   if (isolated) {
     const progress = isolated.processedThrough ?? isolated.ackedThrough
     if (isolatedAck === null || !Number.isSafeInteger(progress) || progress < isolatedAck ||
+      (isolated.queueVersion !== undefined && isolated.queueVersion !== 2) ||
+      (isolated.queueVersion === 2 && isolated.failure !== undefined) ||
       (isolated.failure !== undefined && (!validFailure(isolated.failure) || isolated.failure.sequence <= progress))) {
       throw new Error('invalid commit notification state')
     }
     processedThrough = Math.max(processedThrough, progress)
     if (isolated.failure && isolated.failure.sequence > processedThrough) failure = isolated.failure
   }
-  return { ackedThrough, isolatedAck, processedThrough, failure }
+  if (isolated?.queueVersion !== 2 && processedThrough > (ackedThrough ?? 0) &&
+    (await readDeadLetters(dataRoot, fingerprint)).deadLetterCount === 0) {
+    throw new Error('commit notification state is missing dead-letter evidence')
+  }
+  return { ackedThrough, isolatedAck, processedThrough, failure, queueVersion: isolated?.queueVersion }
 }
 
 export async function pendingCommitFiles(dataRoot: string, state: { processedThrough: number; failure?: CommitNotificationFailure }) {
@@ -104,7 +111,7 @@ export async function pendingCommitFiles(dataRoot: string, state: { processedThr
   return pending
 }
 
-function deadLetterDirectory(dataRoot: string, fingerprint: string): string {
+export function deadLetterDirectory(dataRoot: string, fingerprint: string): string {
   return join(dataRoot, 'notifications', 'dead-letters', stableHash(fingerprint))
 }
 

@@ -55,7 +55,7 @@ i=0; until scry status >/dev/null 2>&1; do i=$((i+1)); [ "$i" -ge 30 ] && break;
 | `scry records archive --before 30d` | 归档旧记录（见[容量与归档](docs/storage-and-performance.md#容量与归档)） |
 | `scry records maintain [--apply]` | 检查 quota/retention，安全回收孤立正文与压缩轮转日志 |
 | `scry support-bundle create` | 脱敏排障包 |
-| `scry recorder status\|stop\|restart\|recover\|notify-drain` | daemon 与恢复 |
+| `scry recorder status\|stop\|restart\|recover\|notify-drain\|notify-retry` | daemon 与恢复 |
 | `scry integrations diff\|repair\|uninstall` | 托管 hook 的漂移检查与修复 |
 | `scry upgrade [--check]` | 升级 CLI |
 
@@ -63,9 +63,20 @@ i=0; until scry status >/dev/null 2>&1; do i=$((i+1)); [ "$i" -ge 30 ] && break;
 
 `status` 的三个阶段不可互相代替:`configured` 只证明配置写入,`hookSeen` 证明 hook 真的到达 recorder,`recordSeen` 才证明轮次已提交。`trusted` 永远是 `unknown` —— Codex 需要交互式确认,其余 Provider 不向 CLI 暴露信任状态;写 `n/a` 等于声称"不需要信任"。
 
-`openTurnsPending`(未收敛的 open turn)与 `notifyBacklog`(commit hook 未 ACK 数)是两个不同指标,不要混用。
+`openTurnsPending`（未收敛的 open turn）与 `notifyBacklog`（当前 hook 身份的自动待投递数，含退避项、不含死信）是两个不同指标，不要混用。
 
 Agent、skill 与提示词不应主动调用这些命令。
+
+### 重放 recorder 死信
+
+失败后分别等待 1、5、15、60 分钟，下一次 drain 到期才重试；第 5 次失败后隔离。退避期间后续记录仍投递，ACK 不跨过缺口。先看 `scry doctor` 的 sequence、次数和 `nextRetryAt`，修复原因后显式重放：
+
+```bash
+scry recorder notify-retry --sequence 42 --workspace "$PWD"
+scry recorder notify-retry --all-dead --workspace "$PWD"
+```
+
+重放保留死信历史、重置该项计数并走正常 trust 校验；投递仍待重试时退出 3，真实成功后才允许连续 ACK 前进。两个选择参数必须且只能提供一个。完整语义与升级限制见[投递与死信](docs/integrations-and-updates.md#失败次数与-recorder-死信)。
 
 ## 采集什么
 

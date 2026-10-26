@@ -8,7 +8,7 @@ import { withDirectoryLock, writeJsonAtomic, mkdirDurable, syncDirectory, readJs
 import { recordFiles, readRecordFile, invalidateRecordIndex, addContentRefs } from './store-index.js'
 import { archiveJournal, readArchiveState, archivePathsOverlap } from './store-archive.js'
 export { recordStoreIndexStats, resetRecordStoreIndex, stableHash, safeKey, findRecordById, recordStoreStamp, readRecordFile, type RecordContentItem, recordContentItems, recordContentItem } from './store-index.js'
-export { type RecordCommittedNotification, type CommitNotificationStatus, commitNotificationStatus, HOOK_DRAIN_MAX_RECORDS, HOOK_DRAIN_BUDGET_MS, type DrainOptions, type DrainResult, drainCommitNotifications, redeliverLatestCommitNotification } from './store-notifications.js'
+export { type RecordCommittedNotification, type CommitNotificationStatus, commitNotificationStatus, HOOK_DRAIN_MAX_RECORDS, HOOK_DRAIN_BUDGET_MS, type DrainOptions, type DrainResult, drainCommitNotifications, retryCommitNotifications, redeliverLatestCommitNotification } from './store-notifications.js'
 export { type ArchiveState, readArchiveState, type ArchiveOptions, archiveRecords } from './store-archive.js'
 
 

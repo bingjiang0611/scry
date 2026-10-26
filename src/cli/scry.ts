@@ -17,7 +17,7 @@ export { parseArgs } from './command-args.js'
 
 function helpText(): string {
   return `Scry CLI\n\nUsage:\n  scry init [--providers claude,codex,qoder,opencode]\n  scry status [--workspace <root>]\n  scry commit-hook status|trust|revoke [--yes]\n  scry records archive --before <30d|ISO> [--out <dir>] [--yes]
-  scry records maintain [--apply]\n  scry recorder hook|recover|notify-drain|start|serve|status|stop|restart [options]\n  scry turns list|show|timeline|summary|export|content|verify [options]\n  scry doctor [--workspace <root>]\n  scry support-bundle create [--out <path>]\n  scry integrations install-pi|status-pi|diff|repair|uninstall [--yes]\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
+  scry records maintain [--apply]\n  scry recorder hook|recover|notify-drain|start|serve|status|stop|restart [options]\n  scry recorder notify-retry (--sequence N | --all-dead) [--workspace <root>]\n  scry turns list|show|timeline|summary|export|content|verify [options]\n  scry doctor [--workspace <root>]\n  scry support-bundle create [--out <path>]\n  scry integrations install-pi|status-pi|diff|repair|uninstall [--yes]\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --help, -h           Show help\n  --version            Show version\n`
 }
 
 /**

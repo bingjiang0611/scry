@@ -76,28 +76,30 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
   let deliveryError = activation.status === 'bundle-invalid' ? activation.detail : undefined
   if (activation.status === 'trusted' || activation.status === 'host-provided') {
     try { delivery = await commitNotificationStatus(enablement.dataRoot, commitHookEnv(activation, process.env)) } catch {
-      deliveryError = 'commit notification state unavailable; inspect notifications/commit-hooks and notifications/dead-letters'
+      deliveryError = 'commit notification state unavailable; inspect notifications/commit-hooks, notifications/delivery-outcomes and notifications/dead-letters'
     }
   }
   const deadCount = delivery?.deadLetterCount ?? 0
   const failure = delivery?.failure
+  const retry = delivery?.retries?.[0] ?? failure
+  const retryDetail = retry ? `retrying sequence ${retry.sequence}: ${retry.attempts} failed attempts${retry.reason ? ` (${retry.reason})` : ''}; next retry ${retry.nextRetryAt ?? 'quarantine recovery pending'}` : undefined
   const deliveryCheck: Check = {
     id: 'commitHook.delivery',
-    status: deliveryError || deadCount > 0 ? 'fail' : failure ? 'warn' : 'pass',
+    status: deliveryError || deadCount > 0 ? 'fail' : retry ? 'warn' : 'pass',
     detail: deliveryError ?? (deadCount > 0
       ? `${deadCount} recorder dead letter(s); latest ${delivery!.deadLetters!.length}: ` +
         delivery!.deadLetters!.map(item => `sequence ${item.sequence}: ${item.attempts} failed attempts (${item.reason})`).join('; ') +
-        (failure ? `; blocked sequence ${failure.sequence}: ${failure.attempts} failed attempts (${failure.reason})` : '')
-      : failure ? `blocked sequence ${failure.sequence}: ${failure.attempts} failed attempts (${failure.reason})`
+        (retryDetail ? `; ${retryDetail}` : '')
+      : retryDetail ? retryDetail
       : delivery ? `${delivery.notifyBacklog} notification(s) pending; no recorded delivery failure` : 'commit hook not configured'),
-    ...(deliveryError || deadCount > 0 || failure ? {
-      remediation: 'inspect the callback and sequence diagnostics; repair the cause before replay; dead letters are not ACKs and remain excluded from automatic retry'
+    ...(deliveryError || deadCount > 0 || retry ? {
+      remediation: 'inspect the callback and sequence diagnostics; repair the cause before `scry recorder notify-retry --sequence N` or `--all-dead`; dead letters are not ACKs'
     } : {})
   }
   // Stale open turns need investigation, not a fabricated interruption. Warn separately from
   // pendingCount (managed/closing/quarantined); elapsed time does not prove the Provider stopped.
   const degraded = !!health.lastError || health.pendingCount > 0 || staleOpenTurns.length > 0 || hookSkips.recentCount > 0 ||
-    !!deliveryError || !!failure || deadCount > 0
+    !!deliveryError || !!retry || deadCount > 0
   const checks: Check[] = [
     { id: 'recorder.enabled', status: 'pass', detail: 'workspace has a valid recorder config' },
     {

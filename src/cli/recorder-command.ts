@@ -1,7 +1,7 @@
-import { type ParsedArgs, workspaceOf, readStdin, flag, providerOf, print } from './command-args.js'
+import { type ParsedArgs, workspaceOf, readStdin, flag, intFlag, providerOf, print } from './command-args.js'
 import { sendRecorderDaemonHook, startRecorderDaemon, serveRecorderDaemon, recorderDaemonStatus, stopRecorderDaemon } from '../core/turn-recorder/daemon.js'
 import { handleRecorderHook, recorderEnablement, recoverRecorder, refreshRecorderPendingHealth } from '../core/turn-recorder/recorder.js'
-import { recordError, drainCommitNotifications, RECORDER_VERSION, readHealth, commitNotificationStatus } from '../core/turn-recorder/store.js'
+import { recordError, drainCommitNotifications, retryCommitNotifications, RECORDER_VERSION, readHealth, commitNotificationStatus } from '../core/turn-recorder/store.js'
 import { resolveCommitHookActivation, commitHookEnv, revokeCommitHookGrant, inspectCommitHookBundle, writeCommitHookGrant } from '../core/turn-recorder/commit-hook-grant.js'
 import { runIdleAutoUpdate } from './update.js'
 import { readHookSkips } from '../core/turn-recorder/hook-diagnostics.js'
@@ -68,24 +68,28 @@ export async function recorderCommand(args: ParsedArgs): Promise<number> {
     print(await recoverRecorder(workspaceOf(args)))
     return 0
   }
-  if (action === 'notify-drain') {
-    // Unbounded on purpose: the hook path drains within a budget, this flushes the rest.
+  if (action === 'notify-drain' || action === 'notify-retry') {
+    const sequence = intFlag(args, 'sequence')
+    if (action === 'notify-retry' && (args.positionals.length !== 2 || (sequence !== undefined) === args.flags.has('all-dead') || sequence === 0)) {
+      throw new Error('notify-retry requires exactly one of --sequence N (positive integer) or --all-dead')
+    }
+    // Unbounded attempts, but deferred retries still respect their persisted due time.
     const workspace = workspaceOf(args)
     const enablement = await recorderEnablement(workspace)
     if (!enablement.enabled) {
-      print({ action: 'notify-drain', workspace, status: 'disabled', reason: enablement.reason })
+      print({ action, workspace, status: 'disabled', reason: enablement.reason })
       return 2
     }
     const activation = await resolveCommitHookActivation(workspace, enablement.config)
     if (activation.status !== 'trusted' && activation.status !== 'host-provided') {
-      print({ action: 'notify-drain', workspace, status: 'not-activated', activation })
+      print({ action, workspace, status: 'not-activated', activation })
       return activation.status === 'not-configured' ? 0 : 3
     }
-    const result = await drainCommitNotifications(
-      enablement.dataRoot,
-      commitHookEnv(activation, process.env)
-    )
-    print({ action: 'notify-drain', workspace, activation: activation.status, ...result })
+    const env = commitHookEnv(activation, process.env)
+    const result = action === 'notify-retry'
+      ? await retryCommitNotifications(enablement.dataRoot, env, sequence)
+      : await drainCommitNotifications(enablement.dataRoot, env)
+    print({ action, workspace, activation: activation.status, ...result })
     return result.pending > 0 ? 3 : 0
   }
   if (action === 'serve') {
@@ -122,7 +126,7 @@ export async function recorderCommand(args: ParsedArgs): Promise<number> {
     if (!args.flags.has('quiet')) print(result)
     return 0
   }
-  throw new Error('usage: scry recorder hook|recover|start|serve|status|stop|restart ...')
+  throw new Error('usage: scry recorder hook|recover|notify-drain|notify-retry|start|serve|status|stop|restart ...')
 }
 
 /**

@@ -4,9 +4,12 @@ import { type CommitHookResult, configuredCommitHook, configuredCommitHookFinger
 import { readFile } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import { type AgentTurnRecord } from '../../shared/turn-record.js'
-import { appendRotatingLog, withDirectoryLock, writeJsonAtomic } from './io.js'
+import { appendRotatingLog, withDirectoryLock } from './io.js'
 import { recordFiles, parseRecordFile } from './store-index.js'
-import { COMMIT_NOTIFICATION_MAX_FAILURES, type CommitHookState, type CommitNotificationFailure, commitHookStatePath, readCommitHookAck, pendingCommitFiles, publishDeadLetter, readDeadLetter, readDeadLetters } from './commit-delivery-state.js'
+import { readArchiveState } from './store-archive.js'
+import { COMMIT_NOTIFICATION_MAX_FAILURES, type CommitNotificationFailure, recordName, readCommitHookAck, pendingCommitFiles, publishDeadLetter, readDeadLetter, readDeadLetters } from './commit-delivery-state.js'
+
+import { type RetryDiagnostic, advanceAck, finishReplay, ledgerStatus, loadDeliveryState, nextRetryAt, outcomes, readOutcome, requeueDeadLetters, saveOutcome, saveProgress } from './commit-delivery-ledger.js'
 
 export interface RecordCommittedNotification {
   schemaVersion: 2
@@ -44,7 +47,9 @@ export interface CommitNotificationStatus {
   ackedThrough: number | null
   notifyBacklog: number
   processedThrough?: number
-  failure?: CommitNotificationFailure
+  failure?: CommitNotificationFailure & { nextRetryAt?: string }
+  retryCount?: number
+  retries?: RetryDiagnostic[]
   deadLetterCount?: number
   /** Latest twenty diagnostics; deadLetterCount can be larger. */
   deadLetters?: CommitNotificationFailure[]
@@ -55,22 +60,21 @@ export interface CommitNotificationStatus {
  * when no state file matches the current hook fingerprint, so callers can distinguish
  * "nothing acknowledged yet" from "acknowledged through sequence 0".
  */
-export async function commitNotificationStatus(
-  dataRoot: string,
-  env: NodeJS.ProcessEnv = process.env
-): Promise<CommitNotificationStatus> {
+export async function commitNotificationStatus(dataRoot: string, env: NodeJS.ProcessEnv = process.env): Promise<CommitNotificationStatus> {
   const fingerprint = configuredCommitHookFingerprint(env)
   const state = await readCommitHookAck(dataRoot, fingerprint)
+  const ledger = await ledgerStatus(dataRoot, fingerprint, state)
+  if (state.queueVersion === 2 || ledger.outcomeCount) {
+    const { outcomeCount: _count, ...detail } = ledger
+    const hasGap = state.processedThrough > (state.ackedThrough ?? 0) || detail.retryCount > 0 || detail.deadLetterCount > 0
+    return { ackedThrough: state.ackedThrough, notifyBacklog: detail.notifyBacklog,
+      ...(hasGap ? { processedThrough: state.processedThrough, ...detail } : {}) }
+  }
   const [pending, dead] = await Promise.all([pendingCommitFiles(dataRoot, state), readDeadLetters(dataRoot, fingerprint)])
-  if (state.processedThrough > (state.ackedThrough ?? 0) && dead.deadLetterCount === 0) {
-    throw new Error('commit notification state is missing dead-letter evidence')
-  }
-  return {
-    ackedThrough: state.ackedThrough,
-    notifyBacklog: pending.length,
-    ...(state.failure ? { failure: state.failure } : {}),
-    ...(dead.deadLetterCount ? { processedThrough: state.processedThrough, ...dead } : {})
-  }
+  if (state.processedThrough > (state.ackedThrough ?? 0) && dead.deadLetterCount === 0) throw new Error('commit notification state is missing dead-letter evidence')
+  return { ackedThrough: state.ackedThrough, notifyBacklog: pending.length,
+    ...(state.failure ? { failure: { ...state.failure, nextRetryAt: nextRetryAt(state.failure) } } : {}),
+    ...(dead.deadLetterCount ? { processedThrough: state.processedThrough, ...dead } : {}) }
 }
 
 /**
@@ -100,88 +104,126 @@ export async function drainCommitNotifications(
   env: NodeJS.ProcessEnv = process.env,
   options: DrainOptions = {}
 ): Promise<DrainResult> {
-  let hook: string | null
   const fingerprint = configuredCommitHookFingerprint(env)
-  const pendingCount = async () => (await pendingCommitFiles(dataRoot, await readCommitHookAck(dataRoot, fingerprint))).length
+  const pendingCount = async () => (await commitNotificationStatus(dataRoot, env)).notifyBacklog
+  let delivered = 0
   try {
-    hook = await configuredCommitHook(env)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    await appendRotatingLog(join(dataRoot, 'logs', 'recorder.log'), `${new Date().toISOString()} ERROR commit notification: ${message}`).catch(() => undefined)
-    return { delivered: 0, pending: await pendingCount(), truncated: false }
-  }
-  if (!hook) return { delivered: 0, pending: 0, truncated: false }
-  try {
+    const hook = await configuredCommitHook(env)
+    if (!hook) return { delivered: 0, pending: 0, truncated: false }
     return await withDirectoryLock(join(dataRoot, 'locks', 'commit-notification.lock'), async () => {
-      const checkpoint = await readCommitHookAck(dataRoot, fingerprint)
-      const statePath = commitHookStatePath(dataRoot, fingerprint)
-      const state: CommitHookState = {
-        schemaVersion: 1, hookFingerprint: fingerprint, ackedThrough: checkpoint.ackedThrough ?? 0,
-        processedThrough: checkpoint.processedThrough, failure: checkpoint.failure
+      const state = await loadDeliveryState(dataRoot, fingerprint)
+      let savedAck = state.ackedThrough
+      let savedProgress = state.processedThrough
+      const persistProgress = async () => {
+        if (state.ackedThrough === savedAck && state.processedThrough === savedProgress) return
+        await saveProgress(dataRoot, state)
+        savedAck = state.ackedThrough
+        savedProgress = state.processedThrough
       }
-      if (checkpoint.ackedThrough !== null && checkpoint.ackedThrough !== checkpoint.isolatedAck) {
-        // Persist even with no backlog, before another identity replaces the legacy file.
-        await writeJsonAtomic(statePath, state)
-      }
-      const pending = await pendingCommitFiles(dataRoot, checkpoint)
+      const archiveFloor = (await readArchiveState(dataRoot))?.archivedThrough ?? 0
+      await advanceAck(dataRoot, state, archiveFloor)
+      const initialProgress = state.processedThrough ?? state.ackedThrough
+      const fresh = (await recordFiles(dataRoot)).filter(file => file.sequence > initialProgress)
       const now = options.now ?? Date.now
       const deadline = options.budgetMs != null ? now() + options.budgetMs : null
-      let delivered = 0
-      let processed = 0
+      let attempted = 0
       let truncated = false
-      for (const file of pending) {
-        if ((options.maxRecords != null && processed >= options.maxRecords) ||
-          (deadline != null && processed > 0 && now() >= deadline)) {
+      let firstUnresolved = Number.POSITIVE_INFINITY
+      let highestVisited = initialProgress
+      const overBudget = () => (options.maxRecords != null && attempted >= options.maxRecords) ||
+        (deadline != null && attempted > 0 && now() >= deadline)
+
+      const processFile = async (candidate: { sequence: number; recordId: string }, freshFile: boolean): Promise<void> => {
+        const file = { sequence: candidate.sequence, recordId: candidate.recordId }
+        let outcome = await readOutcome(dataRoot, fingerprint, file.sequence)
+        if (outcome && outcome.recordId !== file.recordId) throw new Error('delivery outcome does not match record identity')
+        if (outcome?.status === 'retry' && outcome.failure.attempts === COMMIT_NOTIFICATION_MAX_FAILURES) {
+          if (!await readDeadLetter(dataRoot, fingerprint, recordName(file))) await publishDeadLetter(dataRoot, fingerprint, outcome.failure)
+          outcome = { ...file, status: 'dead', failure: outcome.failure }
+          await saveOutcome(dataRoot, fingerprint, outcome)
+        }
+        const retryAt = outcome?.status === 'retry' ? nextRetryAt(outcome.failure) : undefined
+        const deferred = retryAt !== undefined && Date.now() < Date.parse(retryAt)
+        if (outcome?.status !== 'delivered' && outcome?.status !== 'dead' && !deferred) {
+          await finishReplay(dataRoot, fingerprint, outcome ?? { ...file, status: 'delivered' })
+          const result = await attemptCommitNotification(hook, dataRoot, recordName(file), env)
+          attempted++
+          if (result.acknowledged) {
+            delivered++
+            outcome = { ...file, status: 'delivered' }
+            // A normal contiguous success needs only its durable ACK. Across a gap,
+            // retain a positive receipt so missing metadata can never masquerade as success.
+            if (!freshFile || state.ackedThrough < (state.processedThrough ?? 0) || file.sequence >= firstUnresolved) {
+              await saveOutcome(dataRoot, fingerprint, outcome)
+            }
+          } else {
+            const { acknowledged: _ack, ...diagnostic } = result
+            const failure: CommitNotificationFailure = { ...file, attempts: (outcome?.status === 'retry' ? outcome.failure.attempts : 0) + 1,
+              lastFailureAt: new Date(Date.now()).toISOString(), ...diagnostic }
+            outcome = { ...file, status: 'retry', failure }
+            await saveOutcome(dataRoot, fingerprint, outcome)
+            await appendRotatingLog(join(dataRoot, 'logs', 'recorder.log'),
+              `${failure.lastFailureAt} ERROR commit notification: sequence ${file.sequence}; diagnostic=${JSON.stringify({ acknowledged: false, ...failure, recorderPid: process.pid })}`
+            ).catch(() => undefined)
+            if (failure.attempts === COMMIT_NOTIFICATION_MAX_FAILURES) {
+              await publishDeadLetter(dataRoot, fingerprint, failure)
+              outcome = { ...file, status: 'dead', failure }
+              await saveOutcome(dataRoot, fingerprint, outcome)
+            }
+          }
+        }
+        if (outcome?.status !== 'delivered') firstUnresolved = Math.min(firstUnresolved, file.sequence)
+        highestVisited = Math.max(highestVisited, file.sequence)
+        if (freshFile) {
+          if (outcome?.status === 'delivered' && state.ackedThrough === state.processedThrough && file.sequence < firstUnresolved) {
+            state.ackedThrough = file.sequence
+          }
+          state.processedThrough = file.sequence
+          await persistProgress()
+        }
+      }
+
+      // Streaming retry metadata keeps memory bounded. Deferred entries consume no
+      // attempt budget; they cannot prevent later fresh records from being delivered.
+      for await (const outcome of outcomes(dataRoot, fingerprint, state.ackedThrough)) {
+        if (outcome.status === 'delivered') continue
+        if (outcome.status === 'dead') {
+          firstUnresolved = Math.min(firstUnresolved, outcome.sequence)
+          continue
+        }
+        if (overBudget()) {
           truncated = true
           break
         }
-        if (state.failure && (state.failure.sequence !== file.sequence || state.failure.recordId !== file.recordId)) {
-          throw new Error('commit notification state does not match pending head')
-        }
-        // A durable fifth failure is sufficient to finish quarantine after a crash.
-        // Never invoke this poison record a sixth time merely because cursor publication failed.
-        if (!state.failure || state.failure.attempts < COMMIT_NOTIFICATION_MAX_FAILURES) {
-          const result = await attemptCommitNotification(hook, dataRoot, file.name, env)
-          if (!result.acknowledged) {
-            // Classify failure without retaining callback stderr, argv, paths or error messages.
-            const { acknowledged: _acknowledged, ...diagnostic } = result
-            state.failure = {
-              sequence: file.sequence, recordId: file.recordId,
-              attempts: (state.failure?.attempts ?? 0) + 1,
-              lastFailureAt: new Date().toISOString(), ...diagnostic
-            }
-            // Persist the attempt before the dead letter, and the dead letter before progress.
-            await writeJsonAtomic(statePath, state)
-            await appendRotatingLog(join(dataRoot, 'logs', 'recorder.log'),
-              `${state.failure.lastFailureAt} ERROR commit notification: sequence ${file.sequence}; diagnostic=${JSON.stringify({ acknowledged: false, ...state.failure, recorderPid: process.pid })}`
-            ).catch(() => undefined)
-            if (state.failure.attempts < COMMIT_NOTIFICATION_MAX_FAILURES) {
-              return { delivered, pending: pending.length - processed, truncated: false }
-            }
-          } else {
-            // A later success cannot turn a dead predecessor into an ACK.
-            if (state.ackedThrough === state.processedThrough) state.ackedThrough = file.sequence
-            state.processedThrough = file.sequence
-            delete state.failure
-            await writeJsonAtomic(statePath, state)
-            delivered++
-            processed++
-            continue
-          }
-        }
-        await publishDeadLetter(dataRoot, fingerprint, state.failure)
-        state.processedThrough = file.sequence
-        delete state.failure
-        await writeJsonAtomic(statePath, state)
-        processed++
+        await processFile(outcome, false)
       }
-      return { delivered, pending: pending.length - processed, truncated }
+      if (!truncated) for (const file of fresh) {
+        if (overBudget()) {
+          truncated = true
+          break
+        }
+        await processFile(file, true)
+      }
+      if (!truncated) state.processedThrough = Math.max(state.processedThrough ?? 0, highestVisited)
+      await advanceAck(dataRoot, state, archiveFloor)
+      await persistProgress()
+      return { delivered, pending: await pendingCount(), truncated }
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     await appendRotatingLog(join(dataRoot, 'logs', 'recorder.log'), `${new Date().toISOString()} ERROR commit notification: ${message}`).catch(() => undefined)
-    return { delivered: 0, pending: await pendingCount(), truncated: false }
+    return { delivered, pending: await pendingCount(), truncated: false }
   }
+}
+
+export async function retryCommitNotifications(dataRoot: string, env: NodeJS.ProcessEnv, sequence?: number): Promise<{ requeued: number } & DrainResult> {
+  if (!await configuredCommitHook(env)) throw new Error('no activated commit hook')
+  const fingerprint = configuredCommitHookFingerprint(env)
+  const requeued = await withDirectoryLock(join(dataRoot, 'locks', 'commit-notification.lock'), async () => {
+    await loadDeliveryState(dataRoot, fingerprint)
+    return requeueDeadLetters(dataRoot, fingerprint, sequence)
+  })
+  return { requeued, ...await drainCommitNotifications(dataRoot, env) }
 }
 
 async function attemptCommitNotification(
@@ -219,26 +261,30 @@ export async function redeliverLatestCommitNotification(
       const latest = (await recordFiles(dataRoot)).at(-1)
       if (!latest) return { delivered: false, reason: 'no committed record' }
       const fingerprint = configuredCommitHookFingerprint(env)
-      const checkpoint = await readCommitHookAck(dataRoot, fingerprint)
-      const exhausted = checkpoint.failure?.sequence === latest.sequence &&
-        checkpoint.failure.attempts === COMMIT_NOTIFICATION_MAX_FAILURES
-      if (exhausted || await readDeadLetter(dataRoot, fingerprint, latest.name)) {
+      const checkpoint = await loadDeliveryState(dataRoot, fingerprint)
+      const outcome = await readOutcome(dataRoot, fingerprint, latest.sequence)
+      if (outcome && outcome.status !== 'delivered') {
         return { delivered: false, recordId: latest.recordId, sequence: latest.sequence,
-          reason: 'recorder dead letter; automatic redelivery disabled' }
+          reason: outcome.status === 'dead' || (outcome.status === 'retry' && outcome.failure.attempts === COMMIT_NOTIFICATION_MAX_FAILURES)
+            ? 'recorder dead letter; automatic redelivery disabled' : 'scheduled retry; use normal notification drain' }
       }
-      const record = await commitNotification(dataRoot, latest.name)
-      const result = await invokeCommitHook(hook, record, await recordUploadEnvironment(dataRoot, record.recordId, env))
+      const result = await attemptCommitNotification(hook, dataRoot, latest.name, env)
       const delivered = result.acknowledged
       if (!delivered) {
-        await appendRotatingLog(
-          join(dataRoot, 'logs', 'recorder.log'),
-          `${new Date().toISOString()} ERROR latest commit redelivery: commit hook did not ACK sequence ${record.sequence}; diagnostic=${JSON.stringify({ ...result, recorderPid: process.pid })}`
+        if (latest.sequence > checkpoint.ackedThrough) {
+          const { acknowledged: _ack, ...diagnostic } = result
+          const failure: CommitNotificationFailure = { sequence: latest.sequence, recordId: latest.recordId, attempts: 1,
+            lastFailureAt: new Date(Date.now()).toISOString(), ...diagnostic }
+          await saveOutcome(dataRoot, fingerprint, { sequence: latest.sequence, recordId: latest.recordId, status: 'retry', failure })
+        }
+        await appendRotatingLog(join(dataRoot, 'logs', 'recorder.log'),
+          `${new Date().toISOString()} ERROR latest commit redelivery: commit hook did not ACK sequence ${latest.sequence}; diagnostic=${JSON.stringify({ ...result, recorderPid: process.pid })}`
         ).catch(() => undefined)
       }
       return {
         delivered,
-        recordId: record.recordId,
-        sequence: record.sequence,
+        recordId: latest.recordId,
+        sequence: latest.sequence,
         ...(!delivered ? { reason: 'commit hook did not ACK' } : {})
       }
     })

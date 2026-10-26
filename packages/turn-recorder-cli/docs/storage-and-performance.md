@@ -94,4 +94,6 @@ scry records archive --before 30d --yes --workspace "$PWD"    # 执行
 
 在 uploader 完成“ACK 前接管完整正文”（U1）以前，归档前必须人工确认 uploader outbox 已覆盖待归档记录；只有通知任务或 recordId 入队不够。即使已有 outbox 副本，旧 uploader 若仍回源校验，归档也可能阻止上传，应先完成其 U2 校验改造或确认上传完成。recorder 的 ACK 不是远端上传成功证明。
 
+归档目前不会自动清理 `record-environments/<recordId>.json`，其中可能有上传 URL 等敏感值。确认对应记录已完成投递、无需重放且已有必要备份后，维护者应按 recordId 手动清理；不要把这些旁路文件加入公开归档或排障材料。通知重试/死信与成功凭据也不随 record 归档自动删除，不要删除仍阻塞 ACK 的证据。
+
 同一 recorder 进程内的 `turns list`、状态与投递 drain 会复用由 records 目录 stamp 校验的可丢弃索引；正式记录与 `archive-state.json` 仍是唯一事实源，`turns verify` 始终绕过索引全量校验。
