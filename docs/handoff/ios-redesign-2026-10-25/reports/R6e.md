@@ -77,3 +77,12 @@ if ProcessInfo.processInfo.arguments.contains("-uiMockStreamGrowth") {
 
 - STATUS 的 R6 行改为「已提交（部分：AX3 A/C 已知问题）」。
 - 生产代码只改阅读区的拆分/版本令牌与视图文件归属；`ConversationScrollView.swift` 未改。
+
+## 核验意见（核验方，2026-10-26，`96993ca4`）
+
+结论：**通过（部分）**。R6 记「已核验（部分）」：B 两档、A / C 默认字号通过；AX3 A / C 按用户决定记为已知问题。
+
+- **修法正确。** `render(source:token:)` 的判断只用 O(1) 的令牌比较和长度比较，尾行永远从**当前**文本切出，append-only 的流式不可能把旧文本留在屏幕上；前缀块 id 不变。两个页面的 `splitRevision` 都带上了最后一行 id。`split-versioning.py` 编译的是生产函数，负对照会失败，接受。
+- **真机证据的范围要写清。** 流式夹具 40 段合计约 320 字，没有换行，达不到 600 字的拆分门槛，也只有一个块。所以这组截图证明的是「流式末尾在增长」，**没有覆盖拆分后的前缀 + 尾行路径**。这条路径目前只有离线检查证明。记入 FINAL 的未验证项，不再返工。
+- **尾行的 id 随长度变化**（`markdownTail(entry, utf16.count)`），每个分块都会重建尾行视图。尾行很短，影响小，记为可优化点。
+- **夹具不提交。** 不为了一个 DEBUG 夹具拆 282KB 的 `RemoteRunStore`，那超出 UI 改版范围。报告里留的补丁足够复现。
