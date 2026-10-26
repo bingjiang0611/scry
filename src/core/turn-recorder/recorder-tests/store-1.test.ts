@@ -1,6 +1,6 @@
 import { mkdir, writeFile, rm, readdir, readFile, appendFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { it, expect } from 'vitest'
+import { it, expect, vi } from 'vitest'
 import { handleRecorderHook, recoverRecorder } from '../recorder'
 import { listRecords, readHealth, safeKey, resetRecordStoreIndex, recordStoreIndexStats, drainCommitNotifications, redeliverLatestCommitNotification, commitNotificationStatus } from '../store'
 import { resolveCommitHookActivation, commitHookEnv } from '../commit-hook-grant'
@@ -104,15 +104,17 @@ export function registerSuite13(): void {
 
     await expect(drainCommitNotifications(join(root, '.scry'), base))
       .resolves.toEqual({ delivered: 0, pending: 1, truncated: false })
-    // E3 persists failure metadata without acknowledging the failed sequence.
-    expect(JSON.parse(await readFile(commitAckPath(root), 'utf8'))).toMatchObject({
-      ackedThrough: 0, processedThrough: 0, failure: { sequence: 1, attempts: 1 }
-    })
+    // VE2 stores per-sequence failures separately; visited progress is not an ACK.
+    expect(JSON.parse(await readFile(commitAckPath(root), 'utf8'))).toMatchObject({ ackedThrough: 0, processedThrough: 1, queueVersion: 2 })
+    const pending = await commitNotificationStatus(join(root, '.scry'), base)
+    expect(pending).toMatchObject({ failure: { sequence: 1, attempts: 1, nextRetryAt: expect.any(String) } })
     const hook = await commitHook(root)
-    await expect(drainCommitNotifications(join(root, '.scry'), {
-      ...base,
-      SCRY_RECORDER_COMMIT_HOOK: hook.path
-    })).resolves.toEqual({ delivered: 1, pending: 0, truncated: false })
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse(pending.failure!.nextRetryAt!))
+    try {
+      await expect(drainCommitNotifications(join(root, '.scry'), {
+        ...base, SCRY_RECORDER_COMMIT_HOOK: hook.path
+      })).resolves.toEqual({ delivered: 1, pending: 0, truncated: false })
+    } finally { clock.mockRestore() }
     await expect(readFile(commitAckPath(root), 'utf8'))
       .resolves.toContain('"ackedThrough":1')
   })
@@ -144,12 +146,13 @@ export function registerSuite13(): void {
     await expect(drainCommitNotifications(dataRoot, env))
       .resolves.toEqual({ delivered: 0, pending: 1, truncated: false })
     await expect(redeliverLatestCommitNotification(dataRoot, env))
-      .resolves.toMatchObject({ delivered: false, reason: 'commit hook did not ACK' })
+      .resolves.toMatchObject({ delivered: false, reason: 'scheduled retry; use normal notification drain' })
     await expect(commitNotificationStatus(dataRoot, env))
       .resolves.toMatchObject({ ackedThrough: 0, notifyBacklog: 1, failure: { sequence: 1, attempts: 1, ...expected } })
     const log = await readFile(join(dataRoot, 'logs', 'recorder.log'), 'utf8')
     const diagnostics = log.trim().split('\n').map(line => JSON.parse(line.split('; diagnostic=')[1]))
-    expect(diagnostics).toHaveLength(2)
+    // The cold-start path must not create a second failure during backoff.
+    expect(diagnostics).toHaveLength(1)
     for (const diagnostic of diagnostics) {
       expect(diagnostic).toMatchObject({ acknowledged: false, recorderPid: process.pid, ...expected })
     }
@@ -170,8 +173,9 @@ export function registerSuite13(): void {
     const log = await readFile(join(dataRoot, 'logs', 'recorder.log'), 'utf8')
     expect(JSON.parse(log.trim().split('; diagnostic=')[1]))
       .toMatchObject({ acknowledged: false, reason: 'timeout', signal: 'SIGTERM', recorderPid: process.pid })
-    expect(JSON.parse(await readFile(commitAckPath(root), 'utf8'))).toMatchObject({
-      ackedThrough: 0, processedThrough: 0, failure: { sequence: 1, attempts: 1, reason: 'timeout' }
+    expect(JSON.parse(await readFile(commitAckPath(root), 'utf8'))).toMatchObject({ ackedThrough: 0, processedThrough: 1 })
+    expect(await commitNotificationStatus(dataRoot, { SCRY_RECORDER_COMMIT_HOOK: hook.path })).toMatchObject({
+      failure: { sequence: 1, attempts: 1, reason: 'timeout', nextRetryAt: expect.any(String) }
     })
   }, 20_000)
 
@@ -214,9 +218,8 @@ export function registerSuite13(): void {
     await expect(drainCommitNotifications(dataRoot, restored))
       .resolves.toEqual({ delivered: 0, pending: 1, truncated: false })
     const failedState = await readFile(statePath, 'utf8')
-    expect(JSON.parse(failedState)).toMatchObject({
-      ...JSON.parse(saved), failure: { sequence: 2, attempts: 1 }
-    })
+    expect(JSON.parse(failedState)).toMatchObject({ ...JSON.parse(saved), processedThrough: 2 })
+    expect(await commitNotificationStatus(dataRoot, restored)).toMatchObject({ failure: { sequence: 2, attempts: 1 } })
 
     await appendFile(hook.path, '# changed bundle identity\n')
     const changed = commitHookEnv(await activate(), env)

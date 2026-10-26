@@ -71,7 +71,13 @@ const backoffs = [60_000, 300_000, 900_000, 3_600_000]
 async function exhaust(f: Awaited<ReturnType<typeof fixture>>, maxRecords?: number) {
   await drainCommitNotifications(f.dataRoot, f.env, { maxRecords })
   for (const delay of backoffs) {
-    f.advance(delay)
+    if (maxRecords === undefined) {
+      const before = await commitNotificationStatus(f.dataRoot, f.env)
+      f.advance(delay - 1)
+      await drainCommitNotifications(f.dataRoot, f.env)
+      expect(await commitNotificationStatus(f.dataRoot, f.env)).toEqual(before)
+      f.advance(1)
+    } else f.advance(delay)
     await drainCommitNotifications(f.dataRoot, f.env, { maxRecords })
   }
 }
@@ -284,9 +290,42 @@ describe('persistent commit notification failures', () => {
     await exhaust(f)
     const before = await commitNotificationStatus(f.dataRoot, f.env)
     const calls = await f.readCalls()
-    await writeFile(join(f.root, 'scry.config.json'), JSON.stringify({ ...f.config, commitHook: { entry: '../outside.cjs', files: ['../outside.cjs'] } }))
+    await writeFile(join(f.root, 'scry.config.json'), JSON.stringify({ ...f.config, commitHook: { entry: 'missing.cjs', files: ['missing.cjs'] } }))
     expect(await retry(f, new Map([['all-dead', true]]), { ...f.env, SCRY_RECORDER_COMMIT_HOOK: undefined, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: undefined })).toBe(3)
     expect(await f.readCalls()).toEqual(calls)
     expect(await commitNotificationStatus(f.dataRoot, f.env)).toEqual(before)
+  }, 15_000)
+
+  it('persists a first cold-start failure and rejects corrupt per-sequence counters without another callback', async () => {
+    const f = await fixture()
+    await writeFile(f.blocked, '[3]')
+    expect(await redeliverLatestCommitNotification(f.dataRoot, f.env)).toMatchObject({ delivered: false })
+    await redeliverLatestCommitNotification(f.dataRoot, f.env)
+    expect(await f.readCalls()).toEqual([3])
+    expect(await commitNotificationStatus(f.dataRoot, f.env)).toMatchObject({ failure: { sequence: 3, attempts: 1 } })
+    const path = join(f.dataRoot, 'notifications/delivery-outcomes', stableHash(f.env.SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT), '00000000000000000003.json')
+    const saved = JSON.parse(await readFile(path, 'utf8'))
+    saved.failure.attempts = 999
+    await writeFile(path, JSON.stringify(saved))
+    await expect(drainCommitNotifications(f.dataRoot, f.env)).rejects.toThrow('invalid delivery')
+    expect(await f.readCalls()).toEqual([3])
+  }, 15_000)
+
+  it('finishes a durably requested replay after a crash without losing history or replaying twice', async () => {
+    const f = await fixture()
+    await exhaust(f)
+    await writeFile(f.blocked, '[]')
+    const original = io.writeJsonAtomic
+    const writer = vi.spyOn(io, 'writeJsonAtomic').mockImplementation(async (path, value, options) => {
+      await original(path, value, options)
+      if ((value as { status?: string }).status === 'replay') throw new Error('fixture after replay publication')
+    })
+    await expect(retry(f, new Map([['sequence', '1']]))).rejects.toThrow('fixture after replay publication')
+    writer.mockRestore()
+    expect(await drainCommitNotifications(f.dataRoot, f.env)).toMatchObject({ delivered: 1, pending: 0 })
+    expect(await commitNotificationStatus(f.dataRoot, f.env)).toEqual({ ackedThrough: 3, notifyBacklog: 0 })
+    const calls = await f.readCalls()
+    await drainCommitNotifications(f.dataRoot, f.env)
+    expect(await f.readCalls()).toEqual(calls)
   }, 15_000)
 })

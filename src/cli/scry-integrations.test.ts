@@ -92,6 +92,45 @@ describe('scry recorder notify-drain', () => {
   })
 })
 
+describe('scry recorder notify-retry', () => {
+  async function trustedHook(root: string): Promise<void> {
+    const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8')) as Record<string, unknown>
+    config.commitHook = { entry: 'uploader.sh', files: ['uploader.sh'] }
+    await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
+    await writeFile(join(root, 'uploader.sh'), '#!/bin/sh\nexit 0\n')
+    await chmod(join(root, 'uploader.sh'), 0o700)
+    process.env.SCRY_GRANT_DIR = join(root, 'grants')
+  }
+
+  it('rejects replay without exactly one explicit selection', async () => {
+    const root = await workspace()
+    await expect(runScryCli(['recorder', 'notify-retry', '--workspace', root])).rejects.toThrow('notify-retry requires exactly one of --sequence N')
+    await expect(runScryCli(['recorder', 'notify-retry', '--sequence', '1', '--all-dead', '--workspace', root])).rejects.toThrow('notify-retry requires exactly one')
+    await expect(runScryCli(['recorder', 'notify-retry', '--sequence', '0', '--workspace', root])).rejects.toThrow('notify-retry requires exactly one')
+  })
+
+  it('queues nothing when a trusted hook has no dead letter', async () => {
+    const root = await workspace()
+    await trustedHook(root)
+    try {
+      const stdout = captureStdout()
+      await expect(runScryCli(['recorder', 'notify-retry', '--all-dead', '--workspace', root])).resolves.toBe(0)
+      expect(JSON.parse(stdout.text())).toMatchObject({ action: 'notify-retry', activation: 'trusted', requeued: 0, delivered: 0, pending: 0 })
+    } finally {
+      delete process.env.SCRY_GRANT_DIR
+    }
+  })
+
+  it('reports disabled before reading or replaying dead letters', async () => {
+    const root = await workspace()
+    const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8')) as Record<string, unknown>
+    await writeFile(join(root, 'scry.config.json'), JSON.stringify({ ...config, enabled: false }))
+    const stdout = captureStdout()
+    await expect(runScryCli(['recorder', 'notify-retry', '--all-dead', '--workspace', root])).resolves.toBe(2)
+    expect(JSON.parse(stdout.text())).toMatchObject({ status: 'disabled' })
+  })
+})
+
 describe('scry integrations diff/uninstall', () => {
   const managed = "SCRY_HANDLER_ID=turn-recorder-v1 sh -c 'exec ./.scry/provider-hook.sh claude Stop'"
   const foreign = 'echo user-hook'
