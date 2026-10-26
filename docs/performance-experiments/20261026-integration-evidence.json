@@ -1,0 +1,588 @@
+{
+  "schema": 1,
+  "status": "blocked; merge not committed",
+  "permission": "user selected independent integration validation; preserve WIP, no original-branch modification/install/push",
+  "inputs": {
+    "development": "d837ed229126a58c9385348eefa241545595c0b4",
+    "performance": "2a7a167cac57ec4fd7e7009155019b5e02dc7f76",
+    "mergeBase": "d822f840d1525a4938e3c9085a8b38e2056feb42",
+    "mergedTree": "7dec28cd2284a88e9ebb40ee03012073db23b4f9",
+    "patchSha256": "5bc7aadb988dcc50bb6f71ad2eb9175131655edbcffbab96fcc7fe5c3a0863e3",
+    "overlappingChangedPaths": [],
+    "stagedFiles": 92
+  },
+  "machine": {
+    "at": "2026-10-26T10:52:14.893Z",
+    "node": "v24.18.0",
+    "electron": "42.10.1",
+    "platform": "darwin",
+    "arch": "arm64",
+    "load": [
+      4.630859375,
+      4.1201171875,
+      3.85205078125
+    ],
+    "appVersion": "0.2.221",
+    "build": "d5031cd03be4b8d58551ad642e3fdf9e5ace508230a6494e69f9b31a44e7858d",
+    "indexTree": "7dec28cd2284a88e9ebb40ee03012073db23b4f9",
+    "unstaged": "",
+    "nativeSha256": "8ebee14f1679ebbb7a1931fcd27695c270ce65f095a7dd176fc59d82016ccd9c",
+    "ownedCwdMatches": []
+  },
+  "unit": {
+    "passed": 4070,
+    "failed": 12,
+    "pending": 4,
+    "total": 4086,
+    "files": 359,
+    "timing": {
+      "label": "mac2-integration-unit",
+      "command": [
+        "npm",
+        "run",
+        "test:unit",
+        "--",
+        "--maxWorkers=2",
+        "--no-file-parallelism",
+        "--reporter=json",
+        "--outputFile",
+        "/Users/test/scry-performance-climb-mac2.cO3N5W/logs/integration/unit.json"
+      ],
+      "exit": 1,
+      "signal": null,
+      "wallMs": 676912,
+      "cores": 8,
+      "loadBefore": 4.73,
+      "loadAfter": 5.21,
+      "highLoad": false
+    },
+    "failureNames": [
+      "persistent commit notification failures reports the failed sequence, dead-letters at five, and delivers later records without claiming a contiguous ACK",
+      "persistent commit notification failures starts an independent counter for the next failed sequence and reports both dead and blocked work",
+      "persistent commit notification failures clears a failure on successful retry before the threshold",
+      "persistent commit notification failures recovers after durable dead-letter publication without a sixth callback",
+      "persistent commit notification failures does not reset corrupt counter state or execute a callback with unavailable state",
+      "persistent commit notification failures does not reset corrupt null state or execute a callback with unavailable state",
+      "persistent commit notification failures does not reset corrupt identity state or execute a callback with unavailable state",
+      "persistent commit notification failures does not count global trust rejection as a failed record or execute the rejected hook",
+      "persistent commit notification failures rapid drains and cold-start wakeups respect the retry time while later records continue",
+      "persistent commit notification failures does not bypass a pending latest retry through automatic cold-start redelivery",
+      "persistent commit notification failures explicit sequence and all-dead replay preserve history, reset attempts and close ACK holes",
+      "persistent commit notification failures rejects replay before changing dead letters when repository trust validation fails"
+    ],
+    "baselineAndFullMessagesIdenticalAfterRootNormalization": true,
+    "normalizedFailureSha256": "551b9fdb111320a9195744e59970edb913c4bf2dab9656768e800a63c75db190"
+  },
+  "checks": {
+    "typecheck": 0,
+    "buildCli": 0
+  },
+  "ui": {
+    "firstPassCount": 25,
+    "totalPhases": 27,
+    "phases": [
+      {
+        "index": 0,
+        "status": 0,
+        "evidence": "renderer-ui.log chained command reached phase7"
+      },
+      {
+        "index": 1,
+        "status": 0,
+        "evidence": "renderer-ui.log chained command reached phase7"
+      },
+      {
+        "index": 2,
+        "status": 0,
+        "evidence": "renderer-ui.log chained command reached phase7"
+      },
+      {
+        "index": 3,
+        "status": 0,
+        "evidence": "renderer-ui.log chained command reached phase7"
+      },
+      {
+        "index": 4,
+        "status": 0,
+        "evidence": "renderer-ui.log chained command reached phase7"
+      },
+      {
+        "index": 5,
+        "status": 0,
+        "evidence": "renderer-ui.log chained command reached phase7"
+      },
+      {
+        "index": 6,
+        "status": 0,
+        "evidence": "renderer-ui.log chained command reached phase7"
+      },
+      {
+        "index": 7,
+        "status": 1
+      },
+      {
+        "index": 8,
+        "command": "node scripts/session-capability-ui-smoke.mjs --lists-only",
+        "status": 0,
+        "signal": null
+      },
+      {
+        "index": 9,
+        "command": "node scripts/session-capability-ui-smoke.mjs --loading-only",
+        "status": 0,
+        "signal": null
+      },
+      {
+        "index": 10,
+        "command": "node scripts/session-capability-ui-smoke.mjs --turn-refs-only",
+        "status": 0,
+        "signal": null
+      },
+      {
+        "index": 11,
+        "command": "node scripts/session-capability-ui-smoke.mjs --sidebar-activity-only",
+        "status": 0,
+        "signal": null
+      },
+      {
+        "index": 12,
+        "command": "node scripts/model-picker-ui-smoke.mjs",
+        "status": 0,
+        "signal": null
+      },
+      {
+        "index": 13,
+        "command": "node scripts/analytics-credits-ui-smoke.mjs",
+        "status": 0,
+        "signal": null
+      },
+      {
+        "index": 14,
+        "command": "node scripts/chat-preview-ui-smoke.mjs",
+        "status": 0,
+        "signal": null
+      },
+      {
+        "index": 15,
+        "command": "node scripts/session-performance-ui-smoke.mjs",
+        "status": 0,
+        "signal": null
+      },
+      {
+        "index": 16,
+        "command": "npm run test:background-ui",
+        "status": 0,
+        "signal": null
+      },
+      {
+        "index": 17,
+        "command": "npm run test:steer-ui",
+        "status": 0,
+        "signal": null
+      },
+      {
+        "index": 18,
+        "command": "npm run test:remote-queue-ui",
+        "status": 0,
+        "signal": null
+      },
+      {
+        "index": 19,
+        "command": "node scripts/desktop-remote-ui-smoke.mjs",
+        "status": 0,
+        "signal": null
+      },
+      {
+        "index": 20,
+        "command": "node scripts/desktop-remote-ui-smoke.mjs --session-parity-only",
+        "status": 0,
+        "signal": null
+      },
+      {
+        "index": 21,
+        "command": "node scripts/desktop-remote-ui-smoke.mjs --composer-history-only",
+        "status": 0,
+        "signal": null
+      },
+      {
+        "index": 22,
+        "command": "node scripts/desktop-remote-ui-smoke.mjs --remote-settings-only",
+        "status": 0,
+        "signal": null
+      },
+      {
+        "index": 23,
+        "command": "node scripts/desktop-remote-ui-smoke.mjs --session-lifecycle-only",
+        "status": 1,
+        "signal": null
+      },
+      {
+        "index": 24,
+        "command": "npm run test:source-control:ui",
+        "status": 0,
+        "signal": null
+      },
+      {
+        "index": 25,
+        "command": "npm run test:conversation:ipc",
+        "status": 0,
+        "signal": null
+      },
+      {
+        "index": 26,
+        "command": "node scripts/electron-security-smoke.mjs --dev-pi-history-only",
+        "status": 0,
+        "signal": null
+      }
+    ],
+    "failed": [
+      {
+        "index": 7,
+        "error": "Surface menu did not restore its trigger",
+        "baselineFocusedExit": 0,
+        "candidateDiagnosticExit": 0,
+        "attribution": "unknown; initial failure retained; diagnostic stdout detail was not forwarded by outer runner"
+      },
+      {
+        "index": 23,
+        "error": "Pointer geometry did not settle: .modal-foot button [删除 Scry 副本]",
+        "baselineFocusedExit": 0,
+        "candidateFocusedExit": 0,
+        "attribution": "unknown; initial failure retained"
+      }
+    ],
+    "wholeChainPassed": false,
+    "firstTiming": {
+      "label": "mac2-integration-ui",
+      "command": [
+        "npm",
+        "run",
+        "test:renderer:ui"
+      ],
+      "exit": 1,
+      "signal": null,
+      "wallMs": 90995,
+      "cores": 8,
+      "loadBefore": 2,
+      "loadAfter": 3.11,
+      "highLoad": false
+    },
+    "remainingTiming": {
+      "label": "mac2-integration-ui-tail",
+      "command": [
+        "node",
+        "/Users/test/scry-performance-climb-mac2.cO3N5W/logs/integration/remaining-ui.mjs"
+      ],
+      "exit": 1,
+      "signal": null,
+      "wallMs": 227120,
+      "cores": 8,
+      "loadBefore": 2.88,
+      "loadAfter": 2.6,
+      "highLoad": false
+    },
+    "lastTiming": {
+      "label": "mac2-integration-ipc-tail",
+      "command": [
+        "node",
+        "--input-type=module"
+      ],
+      "exit": 0,
+      "signal": null,
+      "wallMs": 72398,
+      "cores": 8,
+      "loadBefore": 4.98,
+      "loadAfter": 4.79,
+      "highLoad": false
+    }
+  },
+  "performance": {
+    "passed": true,
+    "registered": 77,
+    "observed": 74,
+    "selectedComparisons": [
+      {
+        "key": "analytics.data-updated/sqlite.queries",
+        "layer": "io",
+        "unit": "count",
+        "workload": "span-results=240;tools=240;data-updates=5;analytics-active=0;invalidate-per-update=1",
+        "baseline": 130,
+        "candidate": 0,
+        "baselineRuns": [
+          130,
+          130,
+          130,
+          130,
+          130
+        ],
+        "candidateRuns": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "delta": -130,
+        "percent": -100,
+        "status": "measured"
+      },
+      {
+        "key": "recorder.content-dual/io.directory.metadata.calls",
+        "layer": "io",
+        "unit": "count",
+        "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+        "baseline": 167,
+        "candidate": 85,
+        "baselineRuns": [
+          167,
+          167,
+          167,
+          167,
+          167
+        ],
+        "candidateRuns": [
+          85,
+          85,
+          85,
+          85,
+          85
+        ],
+        "delta": -82,
+        "percent": -49.101796407185624,
+        "status": "measured"
+      },
+      {
+        "key": "recorder.content-dual/io.sync.calls",
+        "layer": "io",
+        "unit": "count",
+        "workload": "new-bodies=4;body-bytes=262144;authorities=2;initial-publication=included;sync=unchanged",
+        "baseline": 116,
+        "candidate": 88,
+        "baselineRuns": [
+          116,
+          116,
+          116,
+          116,
+          116
+        ],
+        "candidateRuns": [
+          88,
+          88,
+          88,
+          88,
+          88
+        ],
+        "delta": -28,
+        "percent": -24.137931034482758,
+        "status": "measured"
+      },
+      {
+        "key": "recorder.content-reuse/crypto.sha256.calls",
+        "layer": "io",
+        "unit": "count",
+        "workload": "durable-bodies=4;body-bytes=262144;reuse-passes=8;file-and-directory-sync=unchanged",
+        "baseline": 64,
+        "candidate": 32,
+        "baselineRuns": [
+          64,
+          64,
+          64,
+          64,
+          64
+        ],
+        "candidateRuns": [
+          32,
+          32,
+          32,
+          32,
+          32
+        ],
+        "delta": -32,
+        "percent": -50,
+        "status": "measured"
+      },
+      {
+        "key": "renderer.remote-tail/merge.prefix.reads",
+        "layer": "ui",
+        "unit": "count",
+        "workload": "structural-items=5000;live-tail=1;updates=20;indexed-delta=true",
+        "baseline": 100000,
+        "candidate": 100000,
+        "baselineRuns": [
+          100000,
+          100000,
+          100000,
+          100000,
+          100000
+        ],
+        "candidateRuns": [
+          100000,
+          100000,
+          100000,
+          100000,
+          100000
+        ],
+        "delta": 0,
+        "percent": 0,
+        "status": "measured"
+      },
+      {
+        "key": "renderer.remote-tail/projection.prefix.reads",
+        "layer": "ui",
+        "unit": "count",
+        "workload": "structural-items=5000;live-tail=1;updates=20;indexed-delta=true",
+        "baseline": 100020,
+        "candidate": 0,
+        "baselineRuns": [
+          100020,
+          100020,
+          100020,
+          100020,
+          100020
+        ],
+        "candidateRuns": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "delta": -100020,
+        "percent": -100,
+        "status": "measured"
+      }
+    ],
+    "increases": [
+      {
+        "key": "recorder.content-cold/io.stat.calls",
+        "layer": "io",
+        "unit": "count",
+        "workload": "new-bodies=4;body-bytes=262144;authorities=1;initial-publication=included;sync=unchanged",
+        "baseline": 36,
+        "candidate": 44,
+        "baselineRuns": [
+          36,
+          36,
+          36,
+          36,
+          36
+        ],
+        "candidateRuns": [
+          44,
+          44,
+          44,
+          44,
+          44
+        ],
+        "delta": 8,
+        "percent": 22.22222222222222,
+        "status": "measured"
+      }
+    ],
+    "worse": [
+      {
+        "key": "files.fixed-operations/io.readdir",
+        "layer": "io",
+        "unit": "count",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "value": 20,
+        "min": 20,
+        "runs": 5,
+        "spread": 0,
+        "result": "worse",
+        "baseline": 18,
+        "gateFailed": false
+      },
+      {
+        "key": "persistence.archive/ipc.bytes",
+        "layer": "ipc",
+        "unit": "bytes",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "value": 10558,
+        "min": 10558,
+        "runs": 5,
+        "spread": 0,
+        "result": "worse",
+        "baseline": 10536,
+        "gateFailed": false
+      },
+      {
+        "key": "recorder.content-cold/io.stat.calls",
+        "layer": "io",
+        "unit": "count",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "value": 44,
+        "min": 44,
+        "runs": 5,
+        "spread": 0,
+        "result": "worse",
+        "baseline": 36,
+        "gateFailed": false
+      }
+    ],
+    "missing": [
+      {
+        "key": "analytics.stats/cpu.instructions",
+        "layer": "main",
+        "unit": "instructions",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "result": "missing",
+        "gateFailed": false
+      },
+      {
+        "key": "history.page/cpu.instructions",
+        "layer": "main",
+        "unit": "instructions",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "result": "missing",
+        "gateFailed": false
+      },
+      {
+        "key": "remote.trace.preview/cpu.instructions",
+        "layer": "main",
+        "unit": "instructions",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "result": "missing",
+        "gateFailed": false
+      }
+    ],
+    "timing": {
+      "label": "mac2-integration-measure",
+      "command": [
+        "npm",
+        "run",
+        "performance:measure",
+        "--",
+        "--compare",
+        "d837ed229126a58c9385348eefa241545595c0b4",
+        "--out",
+        "/Users/test/scry-performance-climb-mac2.cO3N5W/logs/integration/full-compare"
+      ],
+      "exit": 0,
+      "signal": null,
+      "wallMs": 90783,
+      "cores": 8,
+      "loadBefore": 3.11,
+      "loadAfter": 4.55,
+      "highLoad": false
+    },
+    "note": "Both display revisions end in d837ed22-dirty because the baseline receives the frozen harness. Use frozen input commit and candidate tree/patch, not display revision alone."
+  },
+  "artifacts": "/private/tmp/scry-performance-climb-20261025.yjlnNW/results/mac2-integration-20261026",
+  "next": {
+    "notificationOwner": "current CLI/recorder task: commit its implementation; do not copy or alter its WIP without approval",
+    "uiOwner": "this agent: preserve first failures and instrument focus/geometry at the failure point on next integration verification; do not raise timeouts or call focused controls a full gate"
+  }
+}
