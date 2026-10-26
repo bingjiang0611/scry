@@ -6,6 +6,7 @@ import { shouldShowEditContextMenu, shouldShowImageContextMenu, editContextMenuT
 import type { TerminalOutputBridge } from '../terminal-output'
 import type { TraceOutputBridge } from '../trace-output'
 import type { DockBadgeState } from '../dock-badge'
+import type { RendererRestartLog } from './renderer-restart'
 
 export interface WindowBootstrapDependencies {
   __dirname: string
@@ -19,12 +20,13 @@ export interface WindowBootstrapDependencies {
   dockBadge: DockBadgeState
   isShuttingDown: () => boolean
   rendererAutoReloadCooldownMs: number
+  rendererRestart: RendererRestartLog
 }
 
 export function createWindow(deps: WindowBootstrapDependencies): void {
   const {
     __dirname, rendererEntryUrl, useDevelopmentRenderer, isOwnedTestApp, getWindow, setWindow,
-    terminalOutput, traceOutput, dockBadge, isShuttingDown, rendererAutoReloadCooldownMs
+    terminalOutput, traceOutput, dockBadge, isShuttingDown, rendererAutoReloadCooldownMs, rendererRestart
   } = deps
   setWindow(new BrowserWindow({
     width: 1280,
@@ -72,6 +74,7 @@ export function createWindow(deps: WindowBootstrapDependencies): void {
     const now = Date.now()
     if (now - lastRendererAutoReloadAt >= rendererAutoReloadCooldownMs) {
       lastRendererAutoReloadAt = now
+      rendererRestart.record(details.reason, details.exitCode)
       createdWindow.webContents.reload()
       return
     }
@@ -86,6 +89,7 @@ export function createWindow(deps: WindowBootstrapDependencies): void {
       if (createdWindow.isDestroyed()) return
       if (response === 0) {
         lastRendererAutoReloadAt = Date.now()
+        rendererRestart.record(details.reason, details.exitCode)
         createdWindow.webContents.reload()
       } else {
         createdWindow.close()

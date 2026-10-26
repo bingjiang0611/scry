@@ -41,6 +41,7 @@ import { registerAgentRuntimeHandlers } from './bootstrap/agent-runtime-ipc'
 import { createTraceRuntime } from './bootstrap/trace-runtime'
 import { deleteConversationHistory } from './conversation-history'
 import { createWindow as createBootstrapWindow } from './bootstrap/window'
+import { createRendererRestartLog } from './bootstrap/renderer-restart'
 import { ensureMcpExecutionAuthorized, authorizedMcpExecution } from './bootstrap/trust'
 import { registerWorkspaceHandlers } from './bootstrap/workspace'
 import { registerAppAgentHandlers } from './bootstrap/app-agent'
@@ -108,6 +109,8 @@ function setCurrentCwd(dir: string | undefined): void {
 // 已移除——app 只列自己起过的会话（见 app-sessions），不采集 terminal 裸跑的 claude。
 
 const rendererAutoReloadCooldownMs = 60_000
+// 崩溃重载会丢掉整棵 UI 树；把原因留给重载后的 renderer 读一次，避免界面假装“继续”。
+const rendererRestart = createRendererRestartLog()
 
 const createWindow = (): void => createBootstrapWindow({
   __dirname,
@@ -120,7 +123,8 @@ const createWindow = (): void => createBootstrapWindow({
   traceOutput,
   dockBadge,
   isShuttingDown: () => isShuttingDown,
-  rendererAutoReloadCooldownMs
+  rendererAutoReloadCooldownMs,
+  rendererRestart
 })
 
 function assertTrustedIpcEvent(event: IpcMainInvokeEvent): void {
@@ -141,6 +145,9 @@ registerAppAgentHandlers({
   invalidateSessionHistoryLoad, rememberProject, setCurrentCwd,
   resolveKnownProjectDirectory, getCurrentCwd: () => currentCwd
 })
+
+// one-shot：重载后的新 renderer 读一次即消费，正常启动不会继续报警。
+handleTrusted('app:rendererRestart', () => rendererRestart.take())
 
 async function openLocalPath(path: string): Promise<void> {
   const error = await shell.openPath(path)

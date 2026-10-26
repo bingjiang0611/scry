@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { AppShell } from './app-shell'
 import { useAppComposer } from './app-composer'
 import { useAppRuntimeEffects } from './app-runtime'
@@ -7,14 +7,8 @@ import { useAppQueueActions } from './app-queue-actions'
 import { createAppChatProps } from './app-chat-props'
 import { useAppSlashCommands } from './hooks/useAppSlashCommands'
 import { createSessionActions } from './app-session-actions'
-import type { RemoteTarget } from './app-types'
 import { useChatNavigation } from './hooks/useChatNavigation'
-import { RemotePromptQueueStore } from './remote-prompt-queue'
-import { remoteDraftKey } from './components/RemoteChat'
-import { useDesktopConnections } from './hooks/useDesktopConnections'
-import { useSessionRightSurfaces } from './hooks/useSessionRightSurfaces'
-import { useConnectedCatalogLoader, useViewedRemoteSession } from './hooks/useRemoteCatalogs'
-import type { RightSurfaceAction } from './right-surface'
+import { useRemoteWorkbench } from './hooks/useRemoteWorkbench'
 import type { SessionRef } from './env'
 import type { SettingsTab } from './components/Modals'
 import { useResizablePane } from './hooks/useResizablePane'
@@ -26,7 +20,6 @@ import { useAppSessionRuntime } from './app-session-runtime'
 import { useAppDraftPersistence } from './app-draft-persistence'
 import { useDiffReviewSelection } from './hooks/useDiffReviewSelection'
 import { useConversationWorkspace } from './hooks/useConversationWorkspace'
-import { animatePaneChange } from './pane-motion'
 const SIDEBAR_MIN = 190
 const SIDEBAR_MAX = 260
 const PANEL_MIN = 360
@@ -74,34 +67,11 @@ export function useAppInteraction(context: AppInteractionContext) {
   const [settingsTab, setSettingsTab] = useState<SettingsTab | null>(null)
   const [archiveUndo, setArchiveUndo] = useState<{ ref: SessionRef; preview: string } | null>(null)
   useConversationWorkspace(view, logicalConversation, cwd, setConversationError, setComposerError)
-  const [remoteTarget, setRemoteTarget] = useState<RemoteTarget | null>(null)
-  const [remoteQueueStore] = useState(() => new RemotePromptQueueStore())
-  // Native session id adopted after the first run; keeps sidebar and workbench ownership aligned.
-  const [remoteAdoptedSession, setRemoteAdoptedSession] = useState<string | undefined>()
-  useViewedRemoteSession(view === 'remote' ? remoteTarget?.connectionId : undefined, view === 'remote' ? remoteTarget?.session : undefined)
-  const remoteSurfaceKey = remoteTarget
-    ? remoteDraftKey(remoteTarget.connectionId, remoteTarget.cwd, remoteAdoptedSession)
-    : 'remote:none'
-  const remoteSurfaces = useSessionRightSurfaces(remoteSurfaceKey, remoteTarget?.cwd ?? null, 'scry.remote-session-right-surfaces.v1')
-  const remoteSurface = remoteSurfaces.current.state
-  const [remoteWorkspaceDirty, setRemoteWorkspaceDirty] = useState(false)
-  const [remoteSurfaceTarget, setRemoteSurfaceTarget] = useState<HTMLDivElement | null>(null)
-  const remotePanelVisible = view === 'remote' && remoteSurface.visible && !surfacePane.collapsed
-  const dispatchRemoteSurface = (action: RightSurfaceAction): void => {
-    const commit = (): void => {
-      if (action.type === 'open' || action.type === 'show') surfacePane.restore()
-      remoteSurfaces.dispatch(action)
-    }
-    if (action.type === 'activate') commit()
-    else animatePaneChange(commit)
-  }
-  const desktopConnections = useDesktopConnections()
-  useConnectedCatalogLoader(desktopConnections.connections, desktopConnections.error, desktopConnections.refreshing)
-  useEffect(() => {
-    if (desktopConnections.refreshing) return
-    const connected = new Set(desktopConnections.error ? [] : desktopConnections.connections.filter(connection => connection.state === 'connected').map(connection => connection.id))
-    remoteQueueStore.pauseDisconnected(connected)
-  }, [desktopConnections.connections, desktopConnections.error, desktopConnections.refreshing, remoteQueueStore])
+  const {
+    remoteTarget, setRemoteTarget, remoteQueueStore, remoteAdoptedSession, setRemoteAdoptedSession,
+    remoteSurfaces, remoteSurface, remoteSurfaceKey, remoteWorkspaceDirty, setRemoteWorkspaceDirty,
+    remoteSurfaceTarget, setRemoteSurfaceTarget, remotePanelVisible, dispatchRemoteSurface, desktopConnections
+  } = useRemoteWorkbench({ view, surfacePane })
   const scrollRef = useRef<HTMLDivElement>(null)
   const chatNavigation = useChatNavigation(scrollRef, view === 'chat' || view === 'conversation', session.turns.length,
     view === 'conversation' ? logicalConversation?.id : selectedProviderSessionId)
@@ -165,12 +135,15 @@ export function useAppInteraction(context: AppInteractionContext) {
   const clearDraftAttachments = useAppDraftPersistence({ draftStore, setComposerError, archiveUndo, setArchiveUndo, setDraftAttachments })
 
 
+  // 崩溃重载后的会话恢复必须复用 canonical pickSession（它会重读会话与运行证据），而它由下面的
+  // session actions 提供；effect 在渲染后执行，此处 ref 已赋值。
+  const restoreStoredSelectionRef = useRef<(() => Promise<void>) | null>(null)
   useAppRuntimeEffects({
     workspace, activeRunHydrated, setActiveRunHydrated, sessionSelectionSeqRef, draftStartPendingRef, localRunIdsRef,
     localStartsRef, localDraftOwnersRef, terminalRunIdsRef, requestChatBottom, markRunStarted, setComposerError,
     setSessionLoading, session, selectAgentRef, setSessionCacheVisible, setCwd, selectSessionId, setView,
     activeSessionIdRef, cwdRef, draftContextRef, migrateRightSurface, integrations, setSessionDrafts, setSessionPromptQueues,
-    loadProjects, setRunningRunIds, setWaitingQuestionRunIds
+    loadProjects, setRunningRunIds, setWaitingQuestionRunIds, restoreStoredSelection: restoreStoredSelectionRef
   })
 
   const composer = useAppComposer({
@@ -193,7 +166,7 @@ export function useAppInteraction(context: AppInteractionContext) {
   const {
     pickRecent, unbindProject, newConversation, newConversationInProject,
     toggleProjectPin, renameProject, removeProject, pickSession, openWorkspaceRun, forkConversationTurn,
-    togglePinSession, renameSession, archiveSession, undoArchive
+    togglePinSession, renameSession, archiveSession, undoArchive, restoreLastSelection
   } = createSessionActions({
     workspace, session, integrations, setSessionLoading, sessionSelectionSeqRef,
     resetPromptQueueControl, shouldStickToBottomRef, selectSessionId, setView, taRef,
@@ -202,6 +175,7 @@ export function useAppInteraction(context: AppInteractionContext) {
     setSessionCacheVisible, requestChatBottom, selectedProviderSessionId, clearSessionPromptQueue,
     queueKeyRef, setArchiveUndo, archiveUndo, refreshProviderCatalogs
   })
+  restoreStoredSelectionRef.current = restoreLastSelection
 
   const appView = useAppView({
     openWorkspaceRun,

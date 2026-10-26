@@ -19,6 +19,7 @@ import type {
 } from '../shared/trace'
 import type { BillingFixtureImportResult, BillingGuardianState, BillingSyncResult } from '../shared/billing'
 import type { RendererPerformanceSample } from '../shared/performance'
+import type { RendererRestartRecord } from '../shared/renderer-restart'
 import type { LlmPerformanceHistory, LlmPerformanceSummary } from '../shared/llm-performance'
 import type {
   AgentForkSessionRequest,
@@ -150,6 +151,7 @@ const api = {
   setTheme: (theme: 'dark' | 'light'): Promise<true> => ipcRenderer.invoke('app:setTheme', theme),
   copyText: (text: string): Promise<true> => ipcRenderer.invoke('app:copyText', text),
   performanceDiagnosticsEnabled: (): Promise<boolean> => ipcRenderer.invoke('app:performanceDiagnosticsEnabled'),
+  rendererRestart: (): Promise<RendererRestartRecord | null> => ipcRenderer.invoke('app:rendererRestart'),
   reportRendererPerformance: (sample: RendererPerformanceSample): Promise<boolean> =>
     ipcRenderer.invoke('app:reportRendererPerformance', sample),
   detectFast: (): Promise<DetectedAgent[]> => ipcRenderer.invoke('agent:detectFast'),

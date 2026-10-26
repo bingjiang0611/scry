@@ -36,6 +36,8 @@ export interface AppRuntimeContext {
   loadProjects: () => void | Promise<void>
   setRunningRunIds: Dispatch<SetStateAction<ReadonlySet<string>>>
   setWaitingQuestionRunIds: Dispatch<SetStateAction<ReadonlySet<string>>>
+  /** 崩溃重载后回到用户离开时的会话；由 session actions 注入，仍走 canonical pickSession 读取。 */
+  restoreStoredSelection: MutableRefObject<(() => Promise<void>) | null>
   setComposerErrorText?: (message: string) => void
 }
 
@@ -44,7 +46,7 @@ export function useAppRuntimeEffects(context: AppRuntimeContext): void {
     localStartsRef, localDraftOwnersRef, terminalRunIdsRef, requestChatBottom, markRunStarted, setComposerError,
     setSessionLoading, session, selectAgentRef, setSessionCacheVisible, setCwd, selectSessionId, setView, activeSessionIdRef,
     draftContextRef, cwdRef, migrateRightSurface, integrations, setSessionDrafts, setSessionPromptQueues, loadProjects,
-    setRunningRunIds, setWaitingQuestionRunIds } = context
+    setRunningRunIds, setWaitingQuestionRunIds, restoreStoredSelection } = context
 
   useEffect(() => {
     let cancelled = false
@@ -158,10 +160,23 @@ export function useAppRuntimeEffects(context: AppRuntimeContext): void {
       .catch((error) => {
         if (!cancelled) setComposerError(`无法恢复运行列表：${error instanceof Error ? error.message : String(error)}`)
       })
+    // 崩溃后主进程会静默重载 renderer：新的 React 树不知道上一棵树停在哪里，所以既恢复选中会话，
+    // 也把重启事实告知用户。两者都在首屏恢复链里完成，避开“看起来一切如常”的错误暗示。
+    const reportRendererRestart = async (): Promise<void> => {
+      const restart = await window.scry.rendererRestart?.()
+      if (!restart || cancelled) return
+      // 不覆盖已经存在的错误：重启本身不能遮住真正失败的恢复。
+      setComposerError((current) => current ?? `界面进程刚刚意外重启（原因：${restart.reason}，退出码 ${restart.exitCode}）。界面状态是重新建立的，重启前正在运行的一轮需要你确认实际结果。`)
+    }
     window.scry
       .activeRun()
-      .then((run) => {
-        if (!canRestoreInitialSelection() || !run || run.done) return
+      .then(async (run) => {
+        if (!canRestoreInitialSelection()) return
+        if (!run || run.done) {
+          // 没有仍在跑的轮次可接管时，才用上一棵树记录的选中会话兜底。
+          await restoreStoredSelection.current?.()
+          return
+        }
         selectSessionId(run.externalSessionId ?? run.sessionId ?? run.runId)
         loadProjects()
         if (run.providerId) selectAgentRef.current(run.agentProfileId ?? run.providerId)
@@ -171,8 +186,9 @@ export function useAppRuntimeEffects(context: AppRuntimeContext): void {
         }
       })
       .catch((error) => {
-        if (canRestoreInitialSelection()) setComposerError(`无法恢复当前运行：${error instanceof Error ? error.message : String(error)}`)
+        if (canRestoreInitialSelection()) setComposerError(`无法恢复上次的运行或会话：${error instanceof Error ? error.message : String(error)}`)
       })
+      .then(reportRendererRestart)
       .finally(() => {
         if (!cancelled) setActiveRunHydrated(true)
       })

@@ -1,4 +1,5 @@
 import * as shared from './shared'
+import { SIDEBAR_VIEW_STORAGE_KEY } from '../../sidebar-view'
 const { describe, it, expect, renderToStaticMarkup, sessionAttentionKey, Sidebar } = shared
 
 describe('Sidebar 项目分组', () => {
@@ -359,5 +360,25 @@ describe('Sidebar 项目分组', () => {
     expect(html).toContain('class="sb-undo"')
     expect(html).toContain('已存档「会话一」')
     expect(html).toContain('撤销')
+  })
+
+  it('侧栏 tab 从持久化值恢复：renderer 重载后不会自己跳回项目', () => {
+    const store = new Map([[SIDEBAR_VIEW_STORAGE_KEY, 'activity']])
+    const globalScope = globalThis as { window?: unknown }
+    const previous = globalScope.window
+    globalScope.window = {
+      localStorage: {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, value)
+      }
+    }
+    try {
+      const html = renderToStaticMarkup(
+        <Sidebar projects={[]} activeCwd={null} onNewChat={() => {}} onPick={() => {}} onTogglePin={() => {}} onArchive={() => {}} />
+      )
+      expect(html).toContain('aria-labelledby="sidebar-view-activity"')
+    } finally {
+      globalScope.window = previous
+    }
   })
 })

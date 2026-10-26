@@ -32,6 +32,7 @@ const invokeChannels = {
   setTheme: 'app:setTheme',
   copyText: 'app:copyText',
   performanceDiagnosticsEnabled: 'app:performanceDiagnosticsEnabled',
+  rendererRestart: 'app:rendererRestart',
   reportRendererPerformance: 'app:reportRendererPerformance',
   detectFast: 'agent:detectFast',
   detect: 'agent:detect',

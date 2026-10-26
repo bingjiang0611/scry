@@ -1,5 +1,7 @@
 import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'react'
 import { runStructuralTransition } from './structural-motion'
+import { browserStorage } from './browser-storage'
+import { persistSessionSelection, readStoredSessionSelection } from './session-restore'
 import { workspaceRunSession } from './workspace-drafts'
 import type { ProviderContext, ProviderId, SessionProviderId } from '@shared/provider'
 import type { ProjectMeta, SessionMeta, SessionRef } from './env'
@@ -53,6 +55,25 @@ export function createSessionActions({
   refreshProviderCatalogs: () => Promise<void>
 }) {
   const { cwd, setCwd, loadProjects, refreshRecent } = workspace
+  // 只记录“用户停在哪里”这一事实；会话内容、运行证据与权限仍需 pickSession 重新读取。
+  const rememberSelection = (next: {
+    cwd: string | null
+    sessionId: string | null
+    providerId: ProviderId
+    externalSessionId?: string
+    agentProfileId?: string
+  }): void => {
+    const target = next.cwd
+    persistSessionSelection(target
+      ? { cwd: target, sessionId: next.sessionId, providerId: next.providerId, externalSessionId: next.externalSessionId, agentProfileId: next.agentProfileId }
+      : null, browserStorage())
+  }
+  const rememberWorkspaceOnly = (dir: string | null): void => rememberSelection({
+    cwd: dir,
+    sessionId: null,
+    providerId: integrations.selectedProviderId,
+    agentProfileId: integrations.providerContext.agentProfileId
+  })
   const pickRecent = async (dir: string): Promise<void> => {
     if (dir === cwd) return
     setSessionLoading(false)
@@ -68,6 +89,7 @@ export function createSessionActions({
     shouldStickToBottomRef.current = true
     selectSessionId(null)
     setView('chat')
+    rememberWorkspaceOnly(dir)
   }
 
   const unbindProject = async (): Promise<void> => {
@@ -85,6 +107,7 @@ export function createSessionActions({
     shouldStickToBottomRef.current = true
     selectSessionId(null)
     setView('chat')
+    persistSessionSelection(null, browserStorage())
     window.setTimeout(() => taRef.current?.focus(), 0)
   }
 
@@ -108,6 +131,8 @@ export function createSessionActions({
       })
       session.clearTurns()
       setView('chat')
+      // 新建会话空态也要能被恢复：否则重载后会丢回“未选项目”。
+      rememberWorkspaceOnly(cwd)
     })
     try {
       await window.scry.focusRun(null)
@@ -199,6 +224,7 @@ export function createSessionActions({
     selectSessionId(sessionId)
     setCwd(projectCwd || null)
     integrations.setSelectedId(agentProfileId ?? providerId)
+    rememberSelection({ cwd: projectCwd || null, sessionId, providerId, externalSessionId, agentProfileId })
     try {
       // Sidebar activity is a display cache, not proof that no live run exists.
       const activeRunsRequest = window.scry.activeRuns()
@@ -314,6 +340,17 @@ export function createSessionActions({
     )
   }
 
+  // 崩溃重载后的兜底恢复：没有仍在跑的轮次时，回到上一棵树停下的位置。
+  const restoreLastSelection = async (): Promise<void> => {
+    const stored = readStoredSessionSelection(browserStorage())
+    if (!stored) return
+    if (!stored.sessionId) {
+      await pickRecent(stored.cwd)
+      return
+    }
+    await pickSession(stored.cwd, stored.sessionId, stored.providerId, stored.externalSessionId, undefined, stored.agentProfileId)
+  }
+
   const sessionRefOf = (cwd: string, session: SessionMeta): SessionRef => ({
     providerId: session.providerId,
     agentProfileId: session.agentProfileId,
@@ -367,6 +404,6 @@ export function createSessionActions({
   return {
     pickRecent, unbindProject, newConversation, newConversationInProject,
     toggleProjectPin, renameProject, removeProject, pickSession, openWorkspaceRun, forkConversationTurn,
-    togglePinSession, renameSession, archiveSession, undoArchive
+    togglePinSession, renameSession, archiveSession, undoArchive, restoreLastSelection
   }
 }

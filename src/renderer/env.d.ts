@@ -32,6 +32,7 @@ type OptionalBridgeMethod =
   | 'rendererReady'
   | 'setTheme'
   | 'performanceDiagnosticsEnabled'
+  | 'rendererRestart'
   | 'reportRendererPerformance'
   | 'detectFast'
   | 'catalogHealth'
