@@ -1,0 +1,426 @@
+{
+  "schema": 1,
+  "authorization": "User explicitly selected directory-fsync batching; public durability and two authorities retained; no format migration, merge into development branch, push or install.",
+  "source": {
+    "measurement": "1fae1e62682e341245dea25182ad100188574caf",
+    "production": "129f1bf3",
+    "validation": "1dd69260b1df0427576a1efff057ad49b07e5735",
+    "unitSnapshot": "9fece7ac7c5ecc9931e25361c717c4e4bb2777ed plus byte-verified production/test patch",
+    "validationPrerequisite": "5bb630e1 CLI fixes; not part of performance implementation",
+    "runtime": {
+      "capturedAt": "2026-10-26T08:04:31.099Z",
+      "head": "1dd69260b1df0427576a1efff057ad49b07e5735",
+      "status": "?? node_modules",
+      "node": "v24.18.0",
+      "electron": "42.10.1",
+      "platform": "darwin",
+      "arch": "arm64",
+      "os": "25.3.0",
+      "cores": 8,
+      "load": [
+        2.07958984375,
+        2.56005859375,
+        3.07568359375
+      ],
+      "version": "0.2.221",
+      "build": "750348006ae8f1a91b8ad9ef347941946b0162526c0ad80659926147f2c62aae",
+      "files": {
+        "src/core/turn-recorder/io.ts": "770d668f9daaeda56c6ad3f326c369fcabe6d27255dd5bdad47a36e43407c3ea",
+        "src/core/turn-recorder/content-store.ts": "3acd9a290e0ecce7d4b0c3ad96333e9f66601dccac7bb8d5b4bf6a80ced94626",
+        "src/core/turn-recorder/content-copies-crash.test.ts": "c58ab5951dc5c26a6b28568bcdd891f63a87b5a0ffc8f169beb907cfa18d1a79",
+        "src/main/trace-tool-content.ts": "9d2362929aa24dcb4818a0dbd176466af720c2b8f69a50dfc78653941c741ad4",
+        "src/main/trace-tool-content-copies.test.ts": "ff06485c76e04cf6dc18c4d4511e41dddbe751ba96d0bdc36a5e8d978eef8369",
+        "scripts/performance-counters/content-publication.counters.test.ts": "7c69a0e4ec5986df34bdabd9ba3494930aa4bd0435a3f38a322b439b165ebdf3",
+        "scripts/performance-counters/publication-barriers.ts": "2d30e98bf5193df0053a5a0f4783470d5c37a3a58e308b50f7395c6fc439d5f4",
+        "scripts/performance-ratchet/content-publication.json": "1bf0e597613f702cbd6e497a2e513d91409d1a937b68648a0ac459024f949afb",
+        "package-lock.json": "625e9bc25c388af4925c02e5e59c34ea82cfb74afa115648464692a32ec93338"
+      },
+      "native": "8ebee14f1679ebbb7a1931fcd27695c270ce65f095a7dd176fc59d82016ccd9c"
+    }
+  },
+  "boundaries": {
+    "batch": "one payload, App + recorder roots; no cross-event buffering",
+    "files": "data fsync, exclusive link, directory fsync, temporary unlink, directory fsync retained for each copy",
+    "directory": "unique parent directories synced after preparation and before any final content link",
+    "returns": "both authorities complete before ref or persisted UI enrichment",
+    "format": "recorder-content-v1 unchanged",
+    "cache": "none across calls",
+    "workloadLabel": "Legacy sync=unchanged string does not prove an unchanged call count; this experiment explicitly coalesces parent calls and checks durability dependencies."
+  },
+  "verification": {
+    "unit": {
+      "status": 0,
+      "files": 346,
+      "passed": 4023,
+      "failed": 0,
+      "skipped": 4,
+      "lock": {
+        "label": "mac2-copies-unit",
+        "command": [
+          "npm",
+          "run",
+          "test:unit",
+          "--",
+          "--maxWorkers=2",
+          "--no-file-parallelism",
+          "--reporter=json",
+          "--outputFile",
+          "/Users/test/scry-performance-climb-mac2.cO3N5W/logs/content-copies/unit.json"
+        ],
+        "exit": 0,
+        "signal": null,
+        "wallMs": 619350,
+        "cores": 8,
+        "loadBefore": 2.04,
+        "loadAfter": 3.27,
+        "highLoad": false
+      },
+      "fileParallelism": false,
+      "maxWorkers": 2
+    },
+    "typecheck": 0,
+    "buildCli": 0,
+    "productionConversationIpcWithBuild": 0,
+    "compiledNoAddonsCore": 0,
+    "focusedCrashAndCopies": {
+      "status": 0,
+      "passed": 11
+    },
+    "ledgerAfterTightening": {
+      "status": 0,
+      "passed": 22
+    },
+    "controls": {
+      "legacySequentialCopies": "fails common-parent sync assertion (2 vs 1)",
+      "missingCleanupSync": "fails persisted-before-second-cleanup-barrier assertion",
+      "fsFailures": "prepare, file-data, publication and cleanup failures reject or withhold persisted enrichment",
+      "crashes": "SIGKILL after each of 2 final links; no returned marker; fresh --no-addons process recovers both complete copies; not power-loss simulation"
+    },
+    "firstFailure": {
+      "localCrashTests": 2,
+      "timeoutMs": 5000,
+      "loadObservedAfterFailure": 205.58,
+      "cause": "not conclusively established; original diagnostics lacked phase detail",
+      "followup": "Added registered-child timeout cleanup and phase reporting; same 5s limits passed on mac2. No matching publisher processes observed after local failure."
+    }
+  },
+  "ratchet": {
+    "passed": true,
+    "registered": 77,
+    "observations": 74,
+    "worse": [
+      {
+        "key": "files.fixed-operations/io.read",
+        "layer": "io",
+        "unit": "count",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "value": 417,
+        "min": 417,
+        "runs": 5,
+        "spread": 0,
+        "result": "worse",
+        "baseline": 336,
+        "gateFailed": false
+      },
+      {
+        "key": "files.fixed-operations/io.readdir",
+        "layer": "io",
+        "unit": "count",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "value": 20,
+        "min": 20,
+        "runs": 5,
+        "spread": 0,
+        "result": "worse",
+        "baseline": 18,
+        "gateFailed": false
+      },
+      {
+        "key": "files.fixed-operations/io.read.bytes",
+        "layer": "io",
+        "unit": "bytes",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 4,
+        "value": 1227187,
+        "min": 1227158,
+        "runs": 5,
+        "spread": 29,
+        "result": "worse",
+        "baseline": 1183197,
+        "gateFailed": false
+      },
+      {
+        "key": "persistence.archive/ipc.bytes",
+        "layer": "ipc",
+        "unit": "bytes",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "value": 10558,
+        "min": 10558,
+        "runs": 5,
+        "spread": 0,
+        "result": "worse",
+        "baseline": 10536,
+        "gateFailed": false
+      },
+      {
+        "key": "recorder.content-cold/io.stat.calls",
+        "layer": "io",
+        "unit": "count",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "value": 44,
+        "min": 44,
+        "runs": 5,
+        "spread": 0,
+        "result": "worse",
+        "baseline": 36,
+        "gateFailed": false
+      }
+    ],
+    "missing": [
+      {
+        "key": "analytics.stats/cpu.instructions",
+        "layer": "main",
+        "unit": "instructions",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "result": "missing",
+        "gateFailed": false
+      },
+      {
+        "key": "history.page/cpu.instructions",
+        "layer": "main",
+        "unit": "instructions",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "result": "missing",
+        "gateFailed": false
+      },
+      {
+        "key": "remote.trace.preview/cpu.instructions",
+        "layer": "main",
+        "unit": "instructions",
+        "status": "candidate",
+        "ceiling": null,
+        "tolerance": 0,
+        "result": "missing",
+        "gateFailed": false
+      }
+    ],
+    "proposal": [
+      {
+        "key": "recorder.content-dual/crypto.sha256.calls",
+        "platform": "darwin-arm64",
+        "baseline": {
+          "from": 12,
+          "to": 8
+        }
+      },
+      {
+        "key": "recorder.content-dual/io.stat.calls",
+        "platform": "darwin-arm64",
+        "baseline": {
+          "from": 75,
+          "to": 68
+        }
+      },
+      {
+        "key": "recorder.content-dual/io.directory.metadata.calls",
+        "platform": "darwin-arm64",
+        "baseline": {
+          "from": 109,
+          "to": 85
+        }
+      },
+      {
+        "key": "recorder.content-dual/io.open.calls",
+        "platform": "darwin-arm64",
+        "baseline": {
+          "from": 116,
+          "to": 88
+        }
+      },
+      {
+        "key": "recorder.content-dual/io.sync.calls",
+        "platform": "darwin-arm64",
+        "baseline": {
+          "from": 116,
+          "to": 88
+        }
+      }
+    ],
+    "fullCounterLock": {
+      "label": "mac2-copies-full-counters",
+      "command": [
+        "npm",
+        "run",
+        "performance:measure",
+        "--",
+        "--out",
+        "/Users/test/scry-performance-climb-mac2.cO3N5W/logs/content-copies/full-measure"
+      ],
+      "exit": 0,
+      "signal": null,
+      "wallMs": 43948,
+      "cores": 8,
+      "loadBefore": 2.5,
+      "loadAfter": 6.29,
+      "highLoad": false
+    }
+  },
+  "adjacentControls": {
+    "files": {
+      "legacyRead": [
+        417,
+        417
+      ],
+      "readdir": [
+        20,
+        20
+      ],
+      "legacyBytes": [
+        1227201,
+        1227207
+      ],
+      "deltaBytes": 6,
+      "existingTolerance": 4,
+      "interpretation": "Delta exceeds tolerance; additional diagnostic shows volatile filesystem stamp byte variation. Legacy read metrics also contain pre-existing counter bugs and are not accepted as exact API counts/bytes."
+    },
+    "archiveIpcBytes": [
+      10558,
+      10558
+    ],
+    "byteDiagnostic": {
+      "baseline": [
+        {
+          "reported": 1227186,
+          "normalized": 1216660,
+          "parsedReadBytes": 1226452,
+          "volatileBytes": 10526,
+          "syncReadFileCalls": 7,
+          "promiseReadFileCalls": 203,
+          "metadataFileCount": 122
+        },
+        {
+          "reported": 1227198,
+          "normalized": 1216660,
+          "parsedReadBytes": 1226464,
+          "volatileBytes": 10538,
+          "syncReadFileCalls": 7,
+          "promiseReadFileCalls": 203,
+          "metadataFileCount": 122
+        },
+        {
+          "reported": 1227166,
+          "normalized": 1216660,
+          "parsedReadBytes": 1226432,
+          "volatileBytes": 10506,
+          "syncReadFileCalls": 7,
+          "promiseReadFileCalls": 203,
+          "metadataFileCount": 122
+        },
+        {
+          "reported": 1227167,
+          "normalized": 1216660,
+          "parsedReadBytes": 1226433,
+          "volatileBytes": 10507,
+          "syncReadFileCalls": 7,
+          "promiseReadFileCalls": 203,
+          "metadataFileCount": 122
+        },
+        {
+          "reported": 1227171,
+          "normalized": 1216660,
+          "parsedReadBytes": 1226437,
+          "volatileBytes": 10511,
+          "syncReadFileCalls": 7,
+          "promiseReadFileCalls": 203,
+          "metadataFileCount": 122
+        }
+      ],
+      "candidate": [
+        {
+          "reported": 1227191,
+          "normalized": 1216660,
+          "parsedReadBytes": 1226457,
+          "volatileBytes": 10531,
+          "syncReadFileCalls": 7,
+          "promiseReadFileCalls": 203,
+          "metadataFileCount": 122
+        },
+        {
+          "reported": 1227162,
+          "normalized": 1216660,
+          "parsedReadBytes": 1226428,
+          "volatileBytes": 10502,
+          "syncReadFileCalls": 7,
+          "promiseReadFileCalls": 203,
+          "metadataFileCount": 122
+        },
+        {
+          "reported": 1227206,
+          "normalized": 1216660,
+          "parsedReadBytes": 1226472,
+          "volatileBytes": 10546,
+          "syncReadFileCalls": 7,
+          "promiseReadFileCalls": 203,
+          "metadataFileCount": 122
+        },
+        {
+          "reported": 1227174,
+          "normalized": 1216660,
+          "parsedReadBytes": 1226440,
+          "volatileBytes": 10514,
+          "syncReadFileCalls": 7,
+          "promiseReadFileCalls": 203,
+          "metadataFileCount": 122
+        },
+        {
+          "reported": 1227195,
+          "normalized": 1216660,
+          "parsedReadBytes": 1226461,
+          "volatileBytes": 10535,
+          "syncReadFileCalls": 7,
+          "promiseReadFileCalls": 203,
+          "metadataFileCount": 122
+        }
+      ]
+    },
+    "diagnosticScope": "Private copy of collector; raw reads observed without changing workload. Normalized removes serialized volatile numeric fields from legacy reported bytes, not a corrected byte metric.",
+    "meterDefects": [
+      "Successful promises.readFile increments read count at call and again on return.",
+      "readFileSync adds filename bytes rather than returned content bytes."
+    ],
+    "candidatePolicy": "Neither legacy metric nor its tolerance/baseline changed here. Replacing these candidate definitions/baselines needs an explicit maintenance decision."
+  },
+  "processes": {
+    "scope": "cwd under owned experiment root only",
+    "exit": 0,
+    "matches": []
+  },
+  "limits": [
+    "M1 macOS Node24 only this round; no Node20/22/Linux release checks.",
+    "No real Provider execution, package/install or L3.",
+    "Full renderer UI not rerun: no renderer change; current build production IPC/unified UI was run.",
+    "Controlled roots share six directory components; real savings depend on common ancestors.",
+    "First of three timing rounds invalid due to high load; both opposite-order low-load pairs retained without removing samples."
+  ],
+  "artifacts": {
+    "local": "../results/mac2-content-copies-20261026/",
+    "remote": "/Users/test/scry-performance-climb-mac2.cO3N5W/logs/content-copies"
+  },
+  "measurements": {
+    "path": "20261026-content-copies-measurements.json",
+    "sha256": "e1c1ae3e158fdf7c9336f80322008ac6f075ab3164bcc8598d4546e6076f6091"
+  }
+}
