@@ -1,10 +1,11 @@
 import { recordUploadEnvironment, UPLOAD_ENV_KEYS } from './commit-environment.js'
 import { spawn } from 'node:child_process'
-import { stat } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { readFile, stat } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import { type AgentTurnRecord } from '../../shared/turn-record.js'
 import { readJson, appendRotatingLog, withDirectoryLock, writeJsonAtomic } from './io.js'
-import { stableHash, recordFiles, readRecordFile } from './store-index.js'
+import { stableHash, recordFiles, parseRecordFile } from './store-index.js'
 
 const COMMIT_HOOK_TIMEOUT_MS = 10_000
 const COMMIT_HOOK_KILL_GRACE_MS = 1_000
@@ -21,7 +22,9 @@ const COMMIT_HOOK_ENV_KEYS = [
 ] as const
 
 export interface RecordCommittedNotification {
-  schemaVersion: 1
+  schemaVersion: 2
+  recordPath: string
+  sha256: string
   event: 'record-committed'
   workspace: string
   provider: AgentTurnRecord['provider']['id']
@@ -36,9 +39,17 @@ interface CommitHookState {
   ackedThrough: number
 }
 
-function commitNotification(record: AgentTurnRecord): RecordCommittedNotification {
+async function commitNotification(dataRoot: string, filename: string): Promise<RecordCommittedNotification> {
+  const recordPath = `records/${filename}`
+  const path = join(dataRoot, recordPath)
+  const bytes = await readFile(path)
+  const record = parseRecordFile(path, bytes.toString('utf8'))
+  if (!isAbsolute(record.workspace.root)) throw new Error(`record workspace root is not absolute: ${record.recordId}`)
+  // Hash the canonical bytes, not the normalized legacy read view or re-serialized JSON.
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    recordPath,
+    sha256: createHash('sha256').update(bytes).digest('hex'),
     event: 'record-committed',
     workspace: record.workspace.root,
     provider: record.provider.id,
@@ -241,9 +252,8 @@ export async function drainCommitNotifications(
           truncated = true
           break
         }
-        const record = await readRecordFile(join(dataRoot, 'records', file.name))
-        if (!isAbsolute(record.workspace.root)) throw new Error(`record workspace root is not absolute: ${record.recordId}`)
-        const result = await invokeCommitHook(hook, commitNotification(record), await recordUploadEnvironment(dataRoot, record.recordId, env))
+        const record = await commitNotification(dataRoot, file.name)
+        const result = await invokeCommitHook(hook, record, await recordUploadEnvironment(dataRoot, record.recordId, env))
         if (!result.acknowledged) {
           // Classify failure without retaining callback stderr, argv, paths or error messages.
           await appendRotatingLog(
@@ -287,9 +297,8 @@ export async function redeliverLatestCommitNotification(
     return await withDirectoryLock(join(dataRoot, 'locks', 'commit-notification.lock'), async () => {
       const latest = (await recordFiles(dataRoot)).at(-1)
       if (!latest) return { delivered: false, reason: 'no committed record' }
-      const record = await readRecordFile(join(dataRoot, 'records', latest.name))
-      if (!isAbsolute(record.workspace.root)) throw new Error(`record workspace root is not absolute: ${record.recordId}`)
-      const result = await invokeCommitHook(hook, commitNotification(record), await recordUploadEnvironment(dataRoot, record.recordId, env))
+      const record = await commitNotification(dataRoot, latest.name)
+      const result = await invokeCommitHook(hook, record, await recordUploadEnvironment(dataRoot, record.recordId, env))
       const delivered = result.acknowledged
       if (!delivered) {
         await appendRotatingLog(

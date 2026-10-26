@@ -92,4 +92,6 @@ scry records archive --before 30d --yes --workspace "$PWD"    # 执行
 
 归档把**连续前缀**搬到 `.scry/archive/<cutoff>/`(可用 `--out` 指定),写出带 sha256 的 `manifest.json`,并把 floor 记进 `archive-state.json`。`--out` 不得与 live `.scry/records/` 重叠；归档和新 record 的序号分配使用同一把锁，避免并发复用序号。跨文件系统复制通过 `.scry/archive-journal.json` 先记账、同步目标文件后再删除 source；中断后用同一个 `--out` 重试会校验 hash 并继续，journal 未收敛前禁止分配新序号。首次执行时 archive target 必须为空，避免覆盖旧 manifest。只有被 floor 解释的空洞才被接受,新轮次从 `floor + 1` 继续编号。配置了 commit hook 时,归档拒绝搬走未 ACK 的记录(退出 5),提示先 `notify-drain`;确实要放弃投递才用 `--force`。
 
+在 uploader 完成“ACK 前接管完整正文”（U1）以前，归档前必须人工确认 uploader outbox 已覆盖待归档记录；只有通知任务或 recordId 入队不够。即使已有 outbox 副本，旧 uploader 若仍回源校验，归档也可能阻止上传，应先完成其 U2 校验改造或确认上传完成。recorder 的 ACK 不是远端上传成功证明。
+
 同一 recorder 进程内的 `turns list`、状态与投递 drain 会复用由 records 目录 stamp 校验的可丢弃索引；正式记录与 `archive-state.json` 仍是唯一事实源，`turns verify` 始终绕过索引全量校验。

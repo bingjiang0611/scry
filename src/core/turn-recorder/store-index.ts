@@ -202,7 +202,11 @@ function legacyModelTimingReadView(raw: unknown): unknown {
 }
 
 export async function readRecordFile(path: string): Promise<AgentTurnRecord> {
-  const raw = JSON.parse(await readFile(path, 'utf8')) as unknown
+  return parseRecordFile(path, await readFile(path, 'utf8'))
+}
+
+export function parseRecordFile(path: string, source: string): AgentTurnRecord {
+  const raw = JSON.parse(source) as unknown
   const validation = validateAgentTurnRecord(legacyModelTimingReadView(legacyModelSegmentsReadView(raw)))
   if (!validation.ok) {
     const detail = validation.issues.slice(0, 4).map((issue) => `${issue.path}: ${issue.message}`).join('; ')

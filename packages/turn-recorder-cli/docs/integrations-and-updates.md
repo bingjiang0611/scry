@@ -4,7 +4,9 @@
 
 ## commit hook:唤醒外部 uploader
 
-需要在 record 落盘后唤醒外部程序时,在 `scry.config.json` 声明 workspace 相对的 `entry` 与完整 `files` 清单。record 持久化且 runtime 清理后,recorder 以 stdin 发送只含 `workspace/provider/sessionId/recordId/sequence` 的 JSON,**仅在回调 exit 0 后**推进 durable ACK;失败或超时会在下次 hook/recovery 重试。
+需要在 record 落盘后唤醒外部程序时,在 `scry.config.json` 声明 workspace 相对的 `entry` 与完整 `files` 清单。record 持久化且 runtime 清理后,recorder 以 stdin 发送 `schemaVersion: 2` 的 `record-committed` JSON。旧的 `workspace/provider/sessionId/recordId/sequence` 字段含义不变，新增 `recordPath`（相对 dataRoot，如 `records/00000000000000000001-<recordId>.json`）和 `sha256`（该文件原始字节的 64 位小写十六进制 SHA-256）。通知不含正文或环境值；自定义 dataDir 时也必须相对 dataRoot 解析路径，不能直接相对 workspace。drain 与显式 redelivery 都使用同一合同。
+
+**ACK 合同：hook exit 0 表示接收方已接管完整记录**，而不是只排入一份 recordId 通知任务。接收方须先读取并按 sha256 校验、原子持久化完整副本，再返回 0；失败返回非 0。recorder 只观察退出码，无法证明外部 uploader 遵守此合同。旧接收方必须升级支持 schema 2；部署方完成 uploader U1 以前，不可把既有 ACK 当作正文已接管或已上传。仅在回调 exit 0 后推进 durable ACK；失败或超时会在下次 hook/recovery 重试。
 
 有效的仓库 commit hook bundle 默认自动授权，不显示确认提示；以下命令可查看、刷新或删除授权（`--yes` 为旧脚本兼容参数，不再是必需项）：
 
