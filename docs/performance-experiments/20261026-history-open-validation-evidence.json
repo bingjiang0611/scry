@@ -1,0 +1,547 @@
+{
+  "schema": 1,
+  "scope": {
+    "goal": "validate c4eb154f and f2ab79ab independently on current main abstractions",
+    "baseMain": "92707298d567c8205cb0718594b346189fec183b",
+    "baseCode": "7a1c4a60ce1a850c1c7357c236f5f19dd36b5163",
+    "stage1Source": "c4eb154f41fac5a9b6fec9111fead618861d557f",
+    "stage2Source": "f2ab79ab33405db1ca3d27a6275e5697de8ac6b2",
+    "candidateBranch": "integration/history-content-validation-20261026",
+    "candidateCommit": "ab753e731605eea2d35961c96442d7e593efcdce",
+    "testedCodeFiles": [
+      {
+        "path": "src/main/bootstrap/history-load.ts",
+        "sha256": "9645661dbfff792256ceb3f187dd1a3db5877685364cdc7886cd855c4ac938b6"
+      },
+      {
+        "path": "src/main/bootstrap/history-runtime.ts",
+        "sha256": "5bd5f58e57c2cc0058c2efe507ffedf2ef19b8df8b45ea7659a5c6f87dbd1b4b"
+      },
+      {
+        "path": "src/main/session-history-page-projection.ts",
+        "sha256": "d3eb871001c8bb85915a770d13f7f5849143e99239a5b1f0bda9eb25f92764d9"
+      },
+      {
+        "path": "src/main/session-history-page-projection.test.ts",
+        "sha256": "2e81e8ba5222fb268011c16ce153732e3f780afe27ce9eec9af08192d3ee7d0a"
+      }
+    ],
+    "mainModified": false,
+    "reliabilityModified": false,
+    "installedAppModified": false,
+    "pushed": false
+  },
+  "stage1": {
+    "decision": "accept in isolated candidate",
+    "integration": "bootstrap/history-load and history-runtime; profile-filtered pages retain authoritative reads",
+    "tests": {
+      "localFirstRun": {
+        "result": "1 load-sensitive 5s cold-index timeout; 74 passed",
+        "log": "focused-stage1.log",
+        "preserved": true
+      },
+      "mac2Focused": {
+        "files": 3,
+        "passed": 77,
+        "failed": 0
+      },
+      "typecheck": "passed",
+      "fullUnit": {
+        "filesPassed": 380,
+        "filesSkipped": 4,
+        "testsPassed": 4206,
+        "testsSkipped": 4,
+        "failed": 0
+      },
+      "electronPiHistory": {
+        "result": "passed",
+        "coverage": [
+          "named Profile native restore",
+          "mixed/unknown Profile",
+          "55-turn archive-only pagination and reopen",
+          "unchanged provenance",
+          "no Provider execution"
+        ]
+      }
+    },
+    "fixedWorkload": {
+      "turns": 40,
+      "sessionFilesPerTurn": 8,
+      "sessionPatchBytesPerFile": 98304,
+      "uniqueSessionStates": true,
+      "baseline": {
+        "archive": {
+          "bytes": 71481891,
+          "files": 40
+        },
+        "page": {
+          "returnedTurns": 40,
+          "sessionSnapshots": 40,
+          "ipcBytes": 71476172,
+          "inlinePatchBytes": 39326400,
+          "previewBytes": 0,
+          "contentRefs": 0,
+          "newestPatchBytes": 786528,
+          "newestPatchSha256": "1b161b2f357be193eabc6bcb1242fee40b3a9bf2d1d003b57d40a770b417d291"
+        }
+      },
+      "candidate": {
+        "archive": {
+          "bytes": 71481891,
+          "files": 40
+        },
+        "page": {
+          "returnedTurns": 40,
+          "sessionSnapshots": 1,
+          "ipcBytes": 40511486,
+          "inlinePatchBytes": 8651808,
+          "previewBytes": 0,
+          "contentRefs": 0,
+          "newestPatchBytes": 786528,
+          "newestPatchSha256": "1b161b2f357be193eabc6bcb1242fee40b3a9bf2d1d003b57d40a770b417d291"
+        }
+      },
+      "newestSnapshotEqual": true
+    },
+    "reparseL2": {
+      "orderAB": {
+        "baseline": {
+          "p50": 265.373125,
+          "p95": 265.604375,
+          "readMissingCalls": 0,
+          "selectedTurns": 40,
+          "selectedHash": "4e598e8b6e0dcabee3e3bbc0ecfa8970950d6cebba14ae214f97c796e68195ac",
+          "timing": {
+            "wallMs": 1600,
+            "cores": 8,
+            "loadBefore": 3.37,
+            "loadAfter": 3.37,
+            "highLoad": false
+          }
+        },
+        "reuse": {
+          "p50": 115.193041,
+          "p95": 121.94404199999997,
+          "readMissingCalls": 0,
+          "selectedTurns": 40,
+          "selectedHash": "4e598e8b6e0dcabee3e3bbc0ecfa8970950d6cebba14ae214f97c796e68195ac",
+          "timing": {
+            "wallMs": 1159,
+            "cores": 8,
+            "loadBefore": 3.37,
+            "loadAfter": 3.26,
+            "highLoad": false
+          }
+        }
+      },
+      "orderBA": {
+        "reuse": {
+          "p50": 117.77445799999992,
+          "p95": 121.90841699999999,
+          "readMissingCalls": 0,
+          "selectedTurns": 40,
+          "selectedHash": "4e598e8b6e0dcabee3e3bbc0ecfa8970950d6cebba14ae214f97c796e68195ac",
+          "timing": {
+            "wallMs": 1147,
+            "cores": 8,
+            "loadBefore": 3.26,
+            "loadAfter": 3.26,
+            "highLoad": false
+          }
+        },
+        "baseline": {
+          "p50": 249.0769170000001,
+          "p95": 259.88695900000005,
+          "readMissingCalls": 0,
+          "selectedTurns": 40,
+          "selectedHash": "4e598e8b6e0dcabee3e3bbc0ecfa8970950d6cebba14ae214f97c796e68195ac",
+          "timing": {
+            "wallMs": 1599,
+            "cores": 8,
+            "loadBefore": 3.26,
+            "loadAfter": 3.26,
+            "highLoad": false
+          }
+        }
+      },
+      "scope": "function workload, not whole-App latency"
+    },
+    "pageReadL2": {
+      "baseline": [
+        {
+          "p50": 356.146334,
+          "p95": 438.48233300000004,
+          "page": {
+            "returnedTurns": 40,
+            "sessionSnapshots": 40,
+            "ipcBytes": 71476172,
+            "inlinePatchBytes": 39326400,
+            "previewBytes": 0,
+            "contentRefs": 0,
+            "newestPatchBytes": 786528,
+            "newestPatchSha256": "1b161b2f357be193eabc6bcb1242fee40b3a9bf2d1d003b57d40a770b417d291"
+          },
+          "timing": {
+            "wallMs": 2065,
+            "cores": 8,
+            "loadBefore": 4.37,
+            "loadAfter": 4.37,
+            "highLoad": false
+          }
+        },
+        {
+          "p50": 198.61520899999994,
+          "p95": 235.585958,
+          "page": {
+            "returnedTurns": 40,
+            "sessionSnapshots": 40,
+            "ipcBytes": 71476172,
+            "inlinePatchBytes": 39326400,
+            "previewBytes": 0,
+            "contentRefs": 0,
+            "newestPatchBytes": 786528,
+            "newestPatchSha256": "1b161b2f357be193eabc6bcb1242fee40b3a9bf2d1d003b57d40a770b417d291"
+          },
+          "timing": {
+            "wallMs": 1491,
+            "cores": 8,
+            "loadBefore": 4.26,
+            "loadAfter": 4.26,
+            "highLoad": false
+          }
+        }
+      ],
+      "candidate": [
+        {
+          "p50": 189.12954100000002,
+          "p95": 195.57524999999993,
+          "page": {
+            "returnedTurns": 40,
+            "sessionSnapshots": 1,
+            "ipcBytes": 40511486,
+            "inlinePatchBytes": 8651808,
+            "previewBytes": 0,
+            "contentRefs": 0,
+            "newestPatchBytes": 786528,
+            "newestPatchSha256": "1b161b2f357be193eabc6bcb1242fee40b3a9bf2d1d003b57d40a770b417d291"
+          },
+          "timing": {
+            "wallMs": 1429,
+            "cores": 8,
+            "loadBefore": 4.37,
+            "loadAfter": 4.37,
+            "highLoad": false
+          }
+        },
+        {
+          "p50": 184.95795799999996,
+          "p95": 195.624417,
+          "page": {
+            "returnedTurns": 40,
+            "sessionSnapshots": 1,
+            "ipcBytes": 40511486,
+            "inlinePatchBytes": 8651808,
+            "previewBytes": 0,
+            "contentRefs": 0,
+            "newestPatchBytes": 786528,
+            "newestPatchSha256": "1b161b2f357be193eabc6bcb1242fee40b3a9bf2d1d003b57d40a770b417d291"
+          },
+          "timing": {
+            "wallMs": 1424,
+            "cores": 8,
+            "loadBefore": 4.26,
+            "loadAfter": 4.26,
+            "highLoad": false
+          }
+        }
+      ],
+      "note": "baseline cold variance; directional support only"
+    }
+  },
+  "stage2": {
+    "decision": "reject f2ab79ab current implementation",
+    "correctnessControl": {
+      "tests": 10,
+      "failed": 4,
+      "failures": [
+        "preview marked complete instead of truncated",
+        "archive preparation mutates caller turn",
+        "missing content blob rejects whole page instead of preserving partial ref",
+        "full and selected archive readers do not hydrate newest visible snapshot"
+      ]
+    },
+    "fixedWorkload": {
+      "baseline": [
+        {
+          "writeMs": 200.139167,
+          "writeP50": 4.700707999999963,
+          "writeP95": 6.040875000000028,
+          "archiveStorage": {
+            "bytes": 71481891,
+            "files": 40
+          },
+          "contentStorage": {
+            "bytes": 0,
+            "files": 0
+          },
+          "page": {
+            "returnedTurns": 40,
+            "sessionSnapshots": 40,
+            "ipcBytes": 71476172,
+            "inlinePatchBytes": 39326400,
+            "previewBytes": 0,
+            "contentRefs": 0,
+            "newestPatchBytes": 786528,
+            "newestPatchSha256": "1b161b2f357be193eabc6bcb1242fee40b3a9bf2d1d003b57d40a770b417d291"
+          },
+          "timing": {
+            "wallMs": 1280,
+            "cores": 8,
+            "loadBefore": 5.06,
+            "loadAfter": 4.89,
+            "highLoad": false
+          }
+        },
+        {
+          "writeMs": 223.656292,
+          "writeP50": 5.090750000000071,
+          "writeP95": 11.554833999999914,
+          "archiveStorage": {
+            "bytes": 71481891,
+            "files": 40
+          },
+          "contentStorage": {
+            "bytes": 0,
+            "files": 0
+          },
+          "page": {
+            "returnedTurns": 40,
+            "sessionSnapshots": 40,
+            "ipcBytes": 71476172,
+            "inlinePatchBytes": 39326400,
+            "previewBytes": 0,
+            "contentRefs": 0,
+            "newestPatchBytes": 786528,
+            "newestPatchSha256": "1b161b2f357be193eabc6bcb1242fee40b3a9bf2d1d003b57d40a770b417d291"
+          },
+          "timing": {
+            "wallMs": 1400,
+            "cores": 8,
+            "loadBefore": 5.13,
+            "loadAfter": 5.13,
+            "highLoad": false
+          }
+        }
+      ],
+      "candidate": [
+        {
+          "writeMs": 13456.573792,
+          "writeP50": 329.152333,
+          "writeP95": 434.65066599999955,
+          "archiveStorage": {
+            "bytes": 9591651,
+            "files": 40
+          },
+          "contentStorage": {
+            "bytes": 31461120,
+            "files": 320
+          },
+          "page": {
+            "returnedTurns": 40,
+            "sessionSnapshots": 1,
+            "ipcBytes": 9585566,
+            "inlinePatchBytes": 8651808,
+            "previewBytes": 16384,
+            "contentRefs": 8,
+            "newestPatchBytes": 786528,
+            "newestPatchSha256": "1b161b2f357be193eabc6bcb1242fee40b3a9bf2d1d003b57d40a770b417d291"
+          },
+          "timing": {
+            "wallMs": 14453,
+            "cores": 8,
+            "loadBefore": 4.89,
+            "loadAfter": 4.53,
+            "highLoad": false
+          }
+        },
+        {
+          "writeMs": 12462.478083,
+          "writeP50": 303.505000000001,
+          "writeP95": 496.54854199999954,
+          "archiveStorage": {
+            "bytes": 9591651,
+            "files": 40
+          },
+          "contentStorage": {
+            "bytes": 31461120,
+            "files": 320
+          },
+          "page": {
+            "returnedTurns": 40,
+            "sessionSnapshots": 1,
+            "ipcBytes": 9585566,
+            "inlinePatchBytes": 8651808,
+            "previewBytes": 16384,
+            "contentRefs": 8,
+            "newestPatchBytes": 786528,
+            "newestPatchSha256": "1b161b2f357be193eabc6bcb1242fee40b3a9bf2d1d003b57d40a770b417d291"
+          },
+          "timing": {
+            "wallMs": 13456,
+            "cores": 8,
+            "loadBefore": 4.53,
+            "loadAfter": 5.23,
+            "highLoad": false
+          }
+        }
+      ],
+      "extraDurableContentFiles": 320,
+      "totalStorageBytes": {
+        "baseline": 71481891,
+        "candidate": 41052771
+      },
+      "read": {
+        "p50": 41.774625000000015,
+        "p95": 44.17266699999999,
+        "page": {
+          "returnedTurns": 40,
+          "sessionSnapshots": 1,
+          "ipcBytes": 9585566,
+          "inlinePatchBytes": 8651808,
+          "previewBytes": 16384,
+          "contentRefs": 8,
+          "newestPatchBytes": 786528,
+          "newestPatchSha256": "1b161b2f357be193eabc6bcb1242fee40b3a9bf2d1d003b57d40a770b417d291"
+        },
+        "timing": {
+          "wallMs": 936,
+          "cores": 8,
+          "loadBefore": 4.26,
+          "loadAfter": 4.16,
+          "highLoad": false
+        }
+      }
+    },
+    "limits": [
+      "read reduction does not compensate for correctness failures",
+      "low-load write wall is about 10-11x baseline",
+      "snapshot-level bundled/compressed format would be a separately authorized storage migration"
+    ]
+  },
+  "logs": {
+    "localRoot": "/Users/baobingjiang/.local/state/scry-history-content-validation-20261026.h0PV3n",
+    "remoteRoot": "/Users/test/scry-performance-climb-mac2.cO3N5W/logs/history-content-validation-20261026",
+    "files": [
+      {
+        "path": "mac2-logs/stage1-typecheck-final.log",
+        "bytes": 213,
+        "sha256": "66ce732c16de0d1384c730e150115f68f13e52c6d9df68f3c417b034075cbf49"
+      },
+      {
+        "path": "mac2-logs/stage1-focused-final2.log",
+        "bytes": 767,
+        "sha256": "bdf7ff37a7cdfabc9b8d76570f9bd905727f701f0bcc4f727f6632e6a657c995"
+      },
+      {
+        "path": "mac2-logs/stage1-unit-final.log",
+        "bytes": 4934,
+        "sha256": "a3423d33fee9f5f4dbc41ddab7d5ec53384eeb30d46c90bac285b1e0c7543132"
+      },
+      {
+        "path": "mac2-logs/stage1-unit-final.json",
+        "bytes": 1489582,
+        "sha256": "76130e67f69d02c3b6a36184f3189bc9b78041b40045b06312f6f66e0ee455ab"
+      },
+      {
+        "path": "mac2-logs/stage1-pi-history-ui-final.log",
+        "bytes": 1472,
+        "sha256": "9592dd20b2aac87d3c2210e52720de2dcbed5e5f3fd56022096fefc25fe9fe5c"
+      },
+      {
+        "path": "mac2-logs/stage1-tested-tree.txt",
+        "bytes": 41,
+        "sha256": "c783b4dc1588d89366612df1e3bccc31b3bd59e9bb98180e643de3ff6cc40c1e"
+      },
+      {
+        "path": "mac2-logs/baseline-a.log",
+        "bytes": 1998,
+        "sha256": "77605e4e242ef27e6ee32f0300be45ce1e2a00f4ff2ceaf096409af4db0bd96c"
+      },
+      {
+        "path": "mac2-logs/baseline-z.log",
+        "bytes": 2021,
+        "sha256": "3c42d13a988cd0a540e497d06977a0affab9f3f42faedc50d966c67f7f2f15d8"
+      },
+      {
+        "path": "mac2-logs/f2-a.log",
+        "bytes": 1984,
+        "sha256": "4027cee3a1c8df68cd41f177f35fd04de754a9606b3f43bf15bd636a4d4062a0"
+      },
+      {
+        "path": "mac2-logs/f2-z.log",
+        "bytes": 2012,
+        "sha256": "97b71d7155fd4fa69c446c9c005b17e07af6ddb6bc2893eb299db2987f0ef94a"
+      },
+      {
+        "path": "mac2-logs/stage1-prepare-l1.json",
+        "bytes": 1404,
+        "sha256": "ac4ba54e8271cbe105afbab36a80011086954f4641d0c6776e5f0e8a890abdb0"
+      },
+      {
+        "path": "mac2-logs/read-baseline-a.log",
+        "bytes": 965,
+        "sha256": "e2f29bcea0a3aee7282cf3fc37a6f3651169550b177effab2b4a3dc80cd30273"
+      },
+      {
+        "path": "mac2-logs/read-baseline-z.log",
+        "bytes": 965,
+        "sha256": "4e2d83660ee48f41938c83e53cf61d9daeb6342d76d283468cb37343c8032a7d"
+      },
+      {
+        "path": "mac2-logs/read-stage1-a.log",
+        "bytes": 971,
+        "sha256": "9f1f2f90032134c53d368b8598826fe2536153d38919de8e8e0da9a2a0fe8f9f"
+      },
+      {
+        "path": "mac2-logs/read-stage1-z.log",
+        "bytes": 963,
+        "sha256": "55c48007c83942ef1b43b688858d8c6e63f0aea525ac3d7e2d7db4195a6b1591"
+      },
+      {
+        "path": "mac2-logs/read-f2.log",
+        "bytes": 977,
+        "sha256": "3db9cbd8a8d9df0337e03ca049bcd976ada77e3c3b2de0787e9e3cdd8de6b57e"
+      },
+      {
+        "path": "mac2-logs/reparse-baseline-a.log",
+        "bytes": 807,
+        "sha256": "d0acde92f6afb5c28706eb054ae62db001e01c1e83921dc853b68528f062e1f0"
+      },
+      {
+        "path": "mac2-logs/reparse-baseline-z.log",
+        "bytes": 829,
+        "sha256": "be4adfd4395e832ddd172d23b6506ebaaeade4a43808926856806415e497e200"
+      },
+      {
+        "path": "mac2-logs/reparse-reuse-a.log",
+        "bytes": 816,
+        "sha256": "c2e3cc1ad519e9a6247dfff10eb46efbd3771b18f4230b063d05a25621657a70"
+      },
+      {
+        "path": "mac2-logs/reparse-reuse-z.log",
+        "bytes": 832,
+        "sha256": "cdccd7fa0d7081e1cbad7e4799cab72aa650e17227d86b2f32d5891f32ad2c7d"
+      },
+      {
+        "path": "focused-stage1.log",
+        "bytes": 6460,
+        "sha256": "075643f8651193545401e19b814c96b95720ee219596ed04ade4ea700d083b63"
+      },
+      {
+        "path": "control-new-tests.log",
+        "bytes": 148533,
+        "sha256": "4a8678157ff963ae80143e6e3ae9ba4f5034dc41ea9160c65b2ebc8c39492d89"
+      }
+    ]
+  }
+}
