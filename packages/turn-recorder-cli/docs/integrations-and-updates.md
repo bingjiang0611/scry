@@ -36,7 +36,7 @@ scry recorder notify-drain --workspace "$PWD"
 
 状态位于 `<dataRoot>/notifications/commit-hooks/<fingerprint-hash>.json`；死信位于 `notifications/dead-letters/<fingerprint-hash>/<sequence>-<recordId>.json`。死信只记录 sequence、recordId、次数、时间和受限错误分类，不复制正文、env 或 stderr。canonical record 和上传环境旁路仍留在原处，不因隔离而删除。状态损坏时显示 unavailable，不清零重试。
 
-`processedThrough` 包含已交付和已隔离项；`ackedThrough` 仍是保守的连续 ACK 边界。出现死信后，后续记录可以成功交付，但 ACK 前缀不会伪装成全部成功，普通归档仍会被未 ACK 前缀阻止。不要通过改 ACK 文件绕过此保护。`doctor` 的 `commitHook.delivery` 报出阻塞 sequence/次数；死信使其 fail，尚在重试则 warn，两者退出 5。总数按死信文件名统计，正文详情最多读取最新 20 条，不表示已检查所有历史死信。
+`processedThrough` 包含已交付和已隔离项；`ackedThrough` 仍是保守的连续 ACK 边界。出现死信后，后续记录可以成功交付，但 ACK 前缀不会伪装成全部成功，普通归档仍会被未 ACK 前缀阻止。`notify-drain` 退出 0 只表示自动队列已清空；有死信时 `doctor` 仍退出 5，不能据此声称全部成功。不要通过改 ACK 文件绕过此保护。`doctor` 的 `commitHook.delivery` 报出阻塞 sequence/次数；死信使其 fail，尚在重试则 warn，两者退出 5。总数按死信文件名统计，正文详情最多读取最新 20 条，不表示已检查所有历史死信。
 
 当前没有单条死信重放命令。应先修复原因；修复后的有效 hook bundle 若改变指纹，会按既有隔离规则重投全部仍保留记录，旧指纹死信保留作历史证据。仅外部条件恢复、指纹不变时不会自动重放死信。冷启动的“最新记录唤醒”不改变有序队列的 ACK/重试计数，也跳过已耗尽或已隔离的最新记录。稳定 `commitHook.id` 尚未引入，trust/内容指纹校验不变。
 

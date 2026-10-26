@@ -16,9 +16,9 @@
 | M6 | 子目录启动找不到 hook 脚本 | C3 | 已核验 | [C 报告](reports/C.md) | 红测 9→通过（fixture 范围）；需 repair 并重启 Provider；待用户按 C-U2 实测，另需在多仓库工作区的子仓库内启动一次 |
 | D1 | 发现深度之外的子仓库静默缺席 | D1 | 已核验 | [D 报告](reports/D.md) | 用户选方案 A：record 只记 discovery 元数据不降级，doctor 仅在下一层看到 .git 时 warn；VD1 5 失败→通过；VD2 注释已恢复，抽取逐行一致 |
 | D2 | 每轮仓库清单与快照状态可见性 | D2 | 已核验 | [D 报告](reports/D.md) | 红测 10→通过；同毫秒多仓库快照不再合并，requestedRoot/repoRoot 分离；用户级 bridge_not_found 独立告警；入口无条件 unset 标记；需 repair + restart |
-| H3 | daemon env 串会话（显式 UPLOAD_ENABLED=0 时会误 ACK） | E1 | 未开始 | | 用户 2026-10-25 已确认 uploader 语义，见 E.md |
-| M2 | commit hook 队头阻塞无死信 | E3 | 未开始 | | 2026-10-25 重新升为必做：新 uploader 在哈希不符、路径不符、源文件缺失时持续返回非 0，recorder 会永久停在该 sequence（`store.ts:515-521`），见 E.md |
-| M3 | ACK 身份绑定 bundle 内容指纹 | E3 | 未开始 | | 降为低优先级（只带来重复校验），可放弃 |
-| M4 | ACK 只代表入队；归档后回源校验阻止发送 | E2 + U1/U2 | 未开始 | | recorder 侧 E2 未开始；uploader 侧 U1/U2 已在 `reliability/uploader` 本地完成（53928688），只按报告审阅，见 [uploader 审阅](reports/uploader-review.md) |
+| H3 | daemon env 串会话（显式 UPLOAD_ENABLED=0 时会误 ACK） | E1 | 待核验 | [E 报告](reports/E.md) | `fdecff37` 4 红测→`a8200796`；开始环境随 open/inbox/managed 与 private sidecar 持久化，shell 内建封装不新增编码进程；正文无 env |
+| M2 | commit hook 队头阻塞无死信 | E3 | 待核验 | [E 报告](reports/E.md) | `46c158e7` 6 红测→`bd39cbfe`；第 5 次失败死信并续投，doctor 报 sequence/次数；ACK 不跨死信，普通归档仍拒绝；最终全量 3994 通过/4 skip |
+| M3 | ACK 身份绑定 bundle 内容指纹 | E3 | 放弃（附证据） | [E 报告](reports/E.md) | 本批不引入稳定 id：只有重复校验开销；ACK/失败/死信迁移成本不属必做缺口。保留指纹隔离和 fail-closed trust；实际测得主要瓶颈后再单独评估 |
+| M4 | ACK 只代表入队；归档后回源校验阻止发送 | E2 + U1/U2 | 待核验 | [E 报告](reports/E.md) | recorder E2：`d63ca896` 3 红测→`5210078f`，通知 v2 带 dataRoot 相对路径及原始字节 SHA；uploader U1/U2 本地实现（53928688）仍只按报告审阅，真实整链路待验收，见 [uploader 审阅](reports/uploader-review.md) |
 | U3 | uploader 不可重试错误返回 0 | U3 | 阻塞 | [uploader 审阅](reports/uploader-review.md) | R1–R3 按报告已处理（c230f652，17/17 离线验收，未读代码）；夹具已更新（fdd20ba7）；用户 2026-10-25 确认服务端已去重，R2 接受；等待：全仓门禁基线失败另行处理、真实端到端验收、recorder E3 |
 | U4 | 显式关闭上传无痕迹 | U4 | 阻塞 | [uploader 审阅](reports/uploader-review.md) | 同 U3 |
