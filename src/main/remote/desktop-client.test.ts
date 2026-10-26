@@ -902,6 +902,8 @@ describe('DesktopRemoteClient over real host TLS', () => {
     const rememberDirectory = vi.fn()
     const imageBytes = Buffer.alloc(600 * 1024)
     Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(imageBytes)
+    // Compare these bytes with Buffer#equals: a deep toEqual walks 600 KiB element by
+    // element and alone took ~2-3s per assertion, timing the test out.
     let receivedImage: string | undefined
     let liveRun: ActiveRun | null = null
     let hostUiRuns: MacRunView[] = []
@@ -1037,21 +1039,21 @@ describe('DesktopRemoteClient over real host TLS', () => {
       const intent = await client.resolveIntent(pending.connection.id, unknownIntent.intentId)
       expect(intent.status).toBe('recorded')
       await binding.controller.idle()
-      expect(Buffer.from(receivedImage ?? '', 'base64')).toEqual(imageBytes)
+      expect(Buffer.from(receivedImage ?? '', 'base64').equals(imageBytes)).toBe(true)
       expect(wire.filter(request => (request as { op?: string }).op === 'attachmentChunk')).toHaveLength(3)
       const submitted = wire.find(request => (request as { op?: string }).op === 'submit') as { detail: string }
       expect(submitted.detail.length).toBeLessThan(2048)
       expect(JSON.parse(submitted.detail).attachments[0].dataBase64).toBe('')
       const imageContext = { cwd: '/workspace', providerId: 'claude', externalSessionId: 'session-real' }
       const trace = await client.trace(pending.connection.id, imageContext, 'run-real-1')
-      expect(Buffer.from(trace!.attachments![0].dataBase64, 'base64')).toEqual(imageBytes)
+      expect(Buffer.from(trace!.attachments![0].dataBase64, 'base64').equals(imageBytes)).toBe(true)
       const imageReads = () => wire.filter(request => (request as { query?: { kind?: string } }).query?.kind === 'image').length
       const initialImageReads = imageReads()
       await client.trace(pending.connection.id, imageContext, 'run-real-1', 1)
       expect(imageReads()).toBe(initialImageReads)
       liveRun = null
       const imageHistory = await client.history(pending.connection.id, imageContext)
-      expect(Buffer.from(imageHistory.turns[0].attachments![0].dataBase64, 'base64')).toEqual(imageBytes)
+      expect(Buffer.from(imageHistory.turns[0].attachments![0].dataBase64, 'base64').equals(imageBytes)).toBe(true)
       const expectedState = captureFailure ? 'failed' : 'settled'
       await expect(client.runStatus(pending.connection.id, intent.runId!)).resolves.toMatchObject({ state: expectedState, scryRunId: 'run-real-1', externalSessionId: 'session-real' })
       await expect(client.runStatus(pending.connection.id, intent.runId!)).resolves.toMatchObject({ state: expectedState, scryRunId: 'run-real-1', externalSessionId: 'session-real' })
