@@ -106,3 +106,36 @@ exit=1
 1. 计划好的 L2 证据仍缺，只能宣称 L1（1 次启动服务 2 次读取）。
 2. 如果运行中的 App 用的也是这个 executable，Pi 路径现在会直接失败——需要用户确认
    这是否是当前讨论的 dev build，以及是否需要换回可用的构建再测。
+
+## L2（已测，rotom 自带的 pi）
+
+上一节的阻塞在换用 rotom 的 pi 后绕过：`runtime/pi/node_modules/@earendil-works/pi-coding-agent`
+（`1.4.0-rotom.2`，`dist/bundle/cli.js`）在 `--mode rpc` 下正常应答。
+
+测法：`timing-run.mjs` 加锁串行，7 轮，每轮先冷启动（spawn → 四条响应都齐），
+再在同一个进程上重发同样四条（模拟复用），单位毫秒。
+
+| 轮次 | 冷启动→四条读完 | 复用（同一进程）四条读完 |
+|---|---:|---:|
+| 1-7（排序后） | 335, 381, 424, 439, 453, 534, 554 | 2, 2, 2, 2, 2, 2, 3 |
+| 中位数 | **439** | **2** |
+
+约 220×。结论：目录读取的成本几乎全在进程启动；复用后单次读取落到毫秒级，
+与「把工作移到不计数的地方」无关——四条 RPC 每次仍然真的发送（计数里
+`rpc.responses=8`，两次读取共八条）。
+
+限制：`SCRY_TIMING_RUN` 报 `highLoad: true`（loadBefore/After 23.8），绝对毫秒只作方向性证据；
+版本不同也不可与日常记录里的 1996 ms（打包 App + 另一个 build）直接对比。
+
+## dev build 为什么不能用（排查记录）
+
+`~/.local/bin/pi`（1.2.0）→ `IdeaProjects/vibecoding/pi/.../dist/bundle/cli.js`，在 `--mode rpc`
+下 exit=1，stderr：`Error: Variable reference not found: okhsl(295 50% 67%)`。
+
+- `getThemesDir()` 在 `packages/coding-agent/src` 存在时优先读 **src** 的主题 JSON；
+- `src/.../theme/dark.json`（Oct 15）含 33 处 `okhsl(...)`；
+- 而 `dist/bundle`（Sep 10 构建）里 `okhsl` 出现 0 次，`resolveVarRefs` 只放行 `#` 开头，
+  源码里那条 `/^ok(lch|hsl)\(/i` 放行还没进 dist；
+- 于是主题初始化抛错，兜底加载同一批文件也失败，进程退出。
+
+修法是重建该 dist（`npm run build` 会带上 `copy-assets`）。本仓库不做这件事，也不依赖它。
