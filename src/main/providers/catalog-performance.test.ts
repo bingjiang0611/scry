@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { setPerformanceRecordingSink, type PerformanceSample } from '../performance-timing'
 import type { PiAgentProfile } from '../pi-agent-profiles'
 import { createPiAdapter } from './pi'
-import { disposePiCatalog } from './pi-catalog'
 import { withProbeFixture } from './pi-rpc.fixture'
 import { ProviderRegistry } from './registry'
 
@@ -109,10 +108,10 @@ describe('content-free catalog performance', () => {
       const probe = samples.find(s => s.name === 'pi.catalog.probe')!
       expect(probe.outcome).toBe('error')
       expect(probe.checkpoints.map(p => p.stage)).toContain('first_response')
-      expect(probe.checkpoints.map(p => p.stage)).toEqual(['environment_ready', 'spawned', 'first_response'])
+      // A failed read is never parked: the child is closed before the probe settles.
+      expect(probe.checkpoints.at(-1)?.stage).toBe('closed')
       expect(samples.find(s => s.name === 'provider.catalog.run_controls')?.outcome).toBe('unavailable')
       const pid = Number(readFileSync(join(cwd, 'pid'), 'utf8'))
-      await disposePiCatalog()
       expect(() => process.kill(pid, 0)).toThrowError(expect.objectContaining({ code: 'ESRCH' }))
       assertPrivate(['fixture probe failed', profile.id, profile.executable, cwd])
     })

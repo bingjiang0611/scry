@@ -126,11 +126,16 @@ async function withPiRpc<T>(
       }
     })
   }
+  let completed = false
   try {
-    return await operation(rpc)
+    const result = await operation(rpc)
+    completed = true
+    return result
   } finally {
-    // A failed or closing process is not reusable, so it takes the existing close path.
-    if (warmKey !== undefined && rpc.reusable()) {
+    // Only a read that actually succeeded is worth keeping warm. A failed read (RPC error, timeout,
+    // early exit) closes its child immediately, so the next attempt starts from a clean process
+    // instead of reusing one whose RPC surface just failed.
+    if (warmKey !== undefined && completed && rpc.reusable()) {
       const entry: WarmCatalogProcess = { rpc, env, off }
       entry.idle = setTimeout(() => { void closeWarmCatalogProcess(warmKey, entry) }, PI_CATALOG_IDLE_MS)
       entry.idle.unref()

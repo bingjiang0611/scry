@@ -67,3 +67,21 @@
   需要在低负载下用 `timing-run.mjs` 加锁测。
 - 整机全量 unit、renderer UI、真实 App 重放。
 - 空闲 TTL 到期关闭只在受控夹具里覆盖，未在长时间运行的 App 里观察。
+
+## 失败读取不常驻（全量测试后补的一句）
+
+第一版实现是「只要进程还能用就停放」，全量 unit 暴露出 `pi-lifecycle.test.ts` 的
+「releases a failed flight so a later probe can recover」被破坏：RPC 命令失败后进程本身
+健康，于是被停放并复用，下一次读取又撞上同一个失败面。
+
+现在只有**读取成功**才停放；抛出异常（RPC 错误、超时、提前退出）的进程立即关闭，
+下一次读取从干净进程开始。相应地：
+
+- `pi-lifecycle.test.ts`：并发读取仍共享一次启动；后续读取复用同一个活进程（不再新起第二个），
+  `adapter.dispose()` 后断言子进程 `ESRCH`；忽略 TERM 的顽固进程改为「停放期间仍被持有，
+  dispose 时仍走 TERM→SIGKILL」。
+- `catalog-performance.test.ts` 的失败用例恢复原断言：失败探测的最后一个阶段是 `closed`，
+  进程在探测 settle 前就已退出。
+
+「失败飞行释放」这条原有合同因此没有放宽，只是把「释放」的触发点从「每次读完」精确定义为
+「读完成功 → 停放；读完失败 → 立即关闭」。
