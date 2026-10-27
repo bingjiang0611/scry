@@ -400,6 +400,48 @@
       "status": "candidate",
       "ceiling": null,
       "tolerance": 0
+    },
+    "history.diff-page/ipc.bytes": {
+      "scenario": "history.diff-page",
+      "metric": "ipc.bytes",
+      "layer": "ipc",
+      "unit": "bytes",
+      "workload": "diff-turns=4;page=4;files=12;patch=1800",
+      "source": "production implementation with counted main-side JSON IPC boundary wrapper; UTF-8 JSON bytes, not structured-clone wire bytes; App path uses the async archive writer",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 38756
+      }
+    },
+    "history.diff-page/ipc.messages": {
+      "scenario": "history.diff-page",
+      "metric": "ipc.messages",
+      "layer": "ipc",
+      "unit": "count",
+      "workload": "diff-turns=4;page=4;files=12;patch=1800",
+      "source": "production implementation with counted main-side JSON IPC boundary wrapper; UTF-8 JSON bytes, not structured-clone wire bytes; App path uses the async archive writer",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 1
+      }
+    },
+    "history.diff-page/json.parse.calls": {
+      "scenario": "history.diff-page",
+      "metric": "json.parse.calls",
+      "layer": "main",
+      "unit": "count",
+      "workload": "diff-turns=4;page=4;files=12;patch=1800",
+      "source": "production implementation with counted main-side JSON IPC boundary wrapper; UTF-8 JSON bytes, not structured-clone wire bytes; App path uses the async archive writer",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 5
+      }
     }
   }
 }
