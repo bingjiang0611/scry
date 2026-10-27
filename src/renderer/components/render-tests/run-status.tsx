@@ -28,6 +28,19 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
     expect(html).toContain('停止')
   })
 
+  it('待回答时状态条说明本轮在等你的选择，而不是继续运行', () => {
+    const pendingQuestions: shared.AgentQuestionRequest[] = [
+      { runId: runningTurn.runId, questionId: 'q-1', questions: [{ question: '推送本轮调查分支？', header: '调查交付', multiSelect: false, options: [{ label: '推送供审查', description: 'A' }] }] },
+      { runId: runningTurn.runId, questionId: 'q-2', questions: [{ question: '保留在本地？', header: '交付', multiSelect: false, options: [{ label: '仅保留本地', description: 'B' }] }] }
+    ]
+    const html = renderWelcome({ turns: [runningTurn], busy: true, pendingQuestions })
+    expect(html).toContain('需回答 2 个问题')
+    expect(html).toContain('本轮在等你的选择，回答后继续')
+    expect(html).not.toContain('可继续输入，新消息将加入队列')
+    // The stop control keeps its real scope; the status does not fake completion.
+    expect(html).toContain('停止本轮')
+  })
+
   it('Provider 结束后仍保持 busy 与排队，只展示记录收口而非生成或完成', () => {
     const closing: Turn = {
       ...runningTurn,
