@@ -54,6 +54,15 @@ export function initializeAppEnvironment(__dirname: string, getWindow: () => Bro
   const disabledChromiumFeatures = app.commandLine.getSwitchValue('disable-features')
   app.commandLine.appendSwitch('disable-features',
     [disabledChromiumFeatures, 'AccessibilityBlockFlowIterator'].filter(Boolean).join(','))
+  // 上一条把崩溃从 AXBlockFlowIterator 的 CHECK(SIGTRAP) 挤到了相邻的 AbstractInlineTextBox 路径，
+  // 该路径仍会崩：AXObject::Serialize → SerializeInlineTextBox → SerializeLineAttributes →
+  // AXInlineTextBox::NeighboringOnLine(+0xf8) 对一个 layout object 为空的文本 FragmentItem 解引用（SIGSEGV）。
+  // 32 份 .ips 签名一致（Chromium 148.0.7778.280 / Electron 42.10.1）。
+  // 上游只在未发布的 Chromium main 里把该函数改回 AXBlockFlowIterator 实现；148/150/152/156 仍是崩溃版本，
+  // 所以升级 Electron 不能解决。AXInlineTextBox 只在 AXMode.kInlineTextBoxes 下创建，
+  // 关掉 renderer 无障碍后不再构建/序列化 AX 树，崩溃路径不存在。
+  // 代价：VoiceOver 等辅助技术读不到 Scry 界面；等 Electron 带上游重构后删除这里并复核。
+  app.commandLine.appendSwitch('disable-renderer-accessibility')
   // Isolated automation stays hidden: showInactive still displays a native window.
   if (isOwnedTestApp && process.platform === 'darwin') app.setActivationPolicy('prohibited')
   const primaryInstance = isOwnedTestApp || app.requestSingleInstanceLock()

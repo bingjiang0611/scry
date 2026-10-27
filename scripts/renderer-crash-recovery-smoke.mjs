@@ -50,6 +50,12 @@ async function exercise(window, dialog, workspace) {
   const disabled = rendererArgs.match(/--disable-features=(\S+)/)?.[1]?.split(',') ?? []
   assert.ok(disabled.includes('AccessibilityBlockFlowIterator'),
     `Renderer must run without AccessibilityBlockFlowIterator: ${rendererArgs}`)
+  // AXInlineTextBox::NeighboringOnLine 只在序列化无障碍树时执行，所以 renderer 无障碍必须整体关闭
+  // （见 app-lifecycle 里两条开关的崩溃证据）。Chromium 不把这个开关转发到 renderer 命令行，
+  // app 侧也没有“AX 已关闭”的可观测信号（CDP Accessibility.enable 会强行打开 AX，不能当探针），
+  // 因此这里只断言主进程在 Chromium 读取开关前已把它放到命令行上。
+  assert.equal(app.commandLine.hasSwitch('disable-renderer-accessibility'), true,
+    'main must disable renderer accessibility before Chromium reads switches')
   assert.ok(app.commandLine.getSwitchValue('disable-features').split(',').includes('AccessibilityBlockFlowIterator'))
 
   const prompts = []
