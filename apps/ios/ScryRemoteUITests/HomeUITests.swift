@@ -9,7 +9,8 @@ final class HomeUITests: XCTestCase {
     app = XCUIApplication()
   }
   private func launchHome(extra: [String] = []) {
-    app.launchArguments = ["-uiPreview", "-connected", "-uiMockData", "-route", "home"] + extra
+    // The list is a collapsed drawer now, so the home-entry fixtures open it.
+    app.launchArguments = ["-uiPreview", "-connected", "-uiMockData", "-route", "home", "-drawerOpen"] + extra
     app.launch()
     XCTAssertTrue(app.textFields["home-search"].waitForExistence(timeout: 10))
     XCTAssertTrue(app.descendants(matching: .any)["message-input"].waitForExistence(timeout: 10))
@@ -26,8 +27,24 @@ final class HomeUITests: XCTestCase {
     add(attachment)
   }
 
+  // L1: launch is a new session; the session list is a collapsed drawer, and
+  // the drawer's new-session entry focuses the composer it already shows.
+  func testLaunchShowsNewSessionWithCollapsedDrawerAndFocusesComposer() {
+    app.launchArguments = ["-uiPreview", "-connected", "-uiMockData", "-route", "home"]
+    app.launch()
+    XCTAssertTrue(app.descendants(matching: .any)["message-input"].waitForExistence(timeout: 10))
+    XCTAssertFalse(app.textFields["home-search"].exists)
+    app.buttons["sidebar-toggle"].tap()
+    XCTAssertTrue(app.textFields["home-search"].waitForExistence(timeout: 5))
+    app.buttons["drawer-new-session"].tap()
+    XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+    XCTAssertFalse(app.textFields["home-search"].exists)
+    XCTAssertTrue(app.descendants(matching: .any)["message-input"].isHittable)
+    capture("launch-new-session-focused")
+  }
+
   func testUnpairedConnectActionIsVisibleWithoutScrollingPastTools() {
-    app.launchArguments = ["-uiPreview", "-route", "home"]
+    app.launchArguments = ["-uiPreview", "-route", "home", "-drawerOpen"]
     app.launch()
     let connect = app.buttons["连接 Mac"].firstMatch
     XCTAssertTrue(connect.waitForExistence(timeout: 10))
@@ -53,6 +70,8 @@ final class HomeUITests: XCTestCase {
     XCTAssertTrue(row("重构远程会话列表").exists)
     app.buttons["设置"].firstMatch.tap()
     app.buttons["返回"].firstMatch.tap()
+    // Settings returns to the new-session page with the drawer collapsed by design.
+    app.buttons["sidebar-toggle"].tap()
     XCTAssertTrue(app.buttons["home-tab-projects"].isSelected)
   }
 
@@ -88,9 +107,13 @@ final class HomeUITests: XCTestCase {
   func testNewTaskInProjectKeepsSelectedProjectAndClearsDraft() {
     launchHome()
     tab("projects")
+    // The composer sits on the new-session page, behind the collapsed drawer.
+    app.buttons["sidebar-close"].tap()
     let input = app.descendants(matching: .any)["message-input"].firstMatch
     input.tap(); input.typeText("temporary draft")
     app.buttons["收起键盘"].tap()
+    app.buttons["sidebar-toggle"].tap()
+    tab("projects")
     let newTask = app.buttons["在 scry 中新建任务"]
     XCTAssertTrue(newTask.waitForExistence(timeout: 5))
     newTask.tap()
@@ -178,7 +201,7 @@ final class HomeUITests: XCTestCase {
   }
 
   func testOpeningSearchResultWithKeyboardVisibleStaysResponsive() {
-    app.launchArguments = ["-uiPreview", "-connected", "-uiMockData", "-route", "home"]
+    app.launchArguments = ["-uiPreview", "-connected", "-uiMockData", "-route", "home", "-drawerOpen"]
     app.launch()
     XCTAssertTrue(app.buttons["home-tab-projects"].waitForExistence(timeout: 10))
     tab("projects")

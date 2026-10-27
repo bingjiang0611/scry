@@ -100,10 +100,7 @@ struct HomeSessions: View {
       }
       .transition(Motion.fade)
       .homeContentFade(trigger: tab, reduceMotion: reduceMotion)
-      Text(ConnectionCopy.panelProvenance(targets.filterLabel,
-        readAt: targets.lastFullRefresh?.formatted(date: .omitted, time: .shortened)))
-        .font(Typography.meta).foregroundStyle(Palette.dim2)
-        .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 16)
+      // Freshness lives once, in the drawer's footer, next to the settings entry.
     }
     .padding(.horizontal, 16).padding(.bottom, 16)
     .onAppear {

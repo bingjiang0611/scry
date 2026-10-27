@@ -22,7 +22,7 @@
     10000000000000000000000C = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRow.swift; sourceTree = "<group>"; };
     10000000000000000000000D = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionActions.swift; sourceTree = "<group>"; };
     10000000000000000000000E = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeSessions.swift; sourceTree = "<group>"; };
-    10000000000000000000000F = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeComposer.swift; sourceTree = "<group>"; };
+    10000000000000000000000F = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewSessionComposer.swift; sourceTree = "<group>"; };
     10000000000000000000001D = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchivedSessionsView.swift; sourceTree = "<group>"; };
     10000000000000000000001E = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolPanels.swift; sourceTree = "<group>"; };
     100000000000000000000001 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScryRemoteApp.swift; sourceTree = "<group>"; };
@@ -30,8 +30,8 @@
     100000000000000000000003 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
     100000000000000000000004 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
     100000000000000000000005 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceBrowserView.swift; sourceTree = "<group>"; };
-    100000000000000000000006 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
-    100000000000000000000007 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewSessionView.swift; sourceTree = "<group>"; };
+    100000000000000000000006 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarDrawer.swift; sourceTree = "<group>"; };
+    100000000000000000000007 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceShell.swift; sourceTree = "<group>"; };
     100000000000000000000008 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
     100000000000000000000009 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairView.swift; sourceTree = "<group>"; };
     10000000000000000000000A = { isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };

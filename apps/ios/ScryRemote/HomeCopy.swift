@@ -16,6 +16,9 @@ extension ConnectionCopy {
   }
 
   static let tabActivity = "动态"
+  static let openSidebar = "展开侧栏"
+  static let closeSidebar = "收起侧栏"
+  static let newSessionHint = "描述任务，Mac 上的 Agent 会在所选项目里执行"
   static let homeNeedsReply = "需要回复"
   static let sectionRunning = "进行中"
   static let homeWaiting = "待回答"

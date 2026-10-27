@@ -34,6 +34,9 @@ struct MessageComposer: View {
   var slashCommandsLoading = false
   var slashCommandsReason: String?
   var onRefreshSlashCommands: (() -> Void)?
+  // Non-nil asks for the keyboard. The new-session page passes a ticket, so a
+  // repeat "new session" request focuses again instead of being a silent no-op.
+  var focusTicket: Int?
   let onSend: () -> Void
 
   @State private var showModelEffort = false
@@ -141,6 +144,8 @@ struct MessageComposer: View {
       guard !items.isEmpty else { return }
       Task { await importPhotos(items); photoItems = [] }
     }
+    .onAppear { if focusTicket != nil { inputFocused = true } }
+    .onChange(of: focusTicket) { _, ticket in if ticket != nil { inputFocused = true } }
     .fullScreenCover(item: $previewing) { AttachmentImagePreview(item: $0) }
   }
 

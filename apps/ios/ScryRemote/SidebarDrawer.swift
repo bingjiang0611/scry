@@ -3,7 +3,13 @@ import RemoteTransport
 
 // One projection for local and forwarded rows: all navigation keeps the row's
 // immutable scope, including when two hosts expose identical session ids.
-struct HomeView: View {
+// This is the session list that left-drawer opens: the former home screen minus
+// its composer, which now lives on the new-session page behind the drawer.
+struct SidebarDrawer: View {
+  let onCollapse: () -> Void
+  let onNewSession: (ExecutionTargetScope, String?) -> Void
+  let onOpenSettings: () -> Void
+
   @EnvironmentObject var model: AppModel
   @Environment(RemoteRunStore.self) var run
   @Environment(ExecutionTargetCoordinator.self) var targets
@@ -44,7 +50,9 @@ struct HomeView: View {
       do { try await Task.sleep(for: .milliseconds(2_600)) } catch { return }
       refreshToastVisible = false
     }
-    .onDisappear { refreshToastVisible = false; targets.setHomeVisible(false) }
+    // The shell owns `targets.setHomeVisible(_:)`: the list counts as visible
+    // only while the drawer is open, and the shell outlives one collapse.
+    .onDisappear { refreshToastVisible = false }
     .sheet(item: $refreshDetails) { details in
       CatalogRefreshDetails(failure: details.failure, lastFullRefresh: details.lastFullRefresh,
                             address: details.address, paired: details.paired, issues: details.issues)
@@ -79,20 +87,14 @@ struct HomeView: View {
     } message: {
       Text(actions.failure ?? "")
     }
-    .task {
-      targets.setHomeVisible(true)
-      if run.hasConnection {
-        await targets.refreshHome()
-        targets.newTaskStore.loadProjects()
-        targets.newTaskStore.loadProviders()
-        if !targets.homeSessions.isEmpty { await targets.localStore.refreshArchived() }
-      }
-    }
+    // Loading the catalog on arrival belongs to the shell so the first drawer
+    // open already has rows; this view never fetches on its own schedule.
   }
 
   private var mainColumn: some View {
     VStack(spacing: 0) {
       header
+      newSessionRow
       searchField
       ScrollView {
         VStack(spacing: 0) {
@@ -107,8 +109,9 @@ struct HomeView: View {
           }
           if !run.hasConnection { notPairedEmpty }
           HomeSessions(expandedProjects: $expandedProjects, touching: touchingSessions,
-                       onOpen: open, onNewTask: newTask, onRowAction: handle,
-                       onOpenTool: { model.route = .toolPanel($0) })
+                       onOpen: open, onNewTask: onNewSession,
+                       onRowAction: handle,
+                       onOpenTool: { onCollapse(); model.route = .toolPanel($0) })
           if run.hasConnection && targets.homeSessions.isEmpty && refreshing {
             ProgressView(ConnectionCopy.readingSessions).frame(maxWidth: .infinity).padding(.top, 32)
           }
@@ -118,8 +121,41 @@ struct HomeView: View {
       .refreshable { await showManualRefresh() }
       // Observe the scroll surface itself; a child DragGesture steals its pan.
       .simultaneousGesture(DragGesture(minimumDistance: 0).updating($touchingSessions) { _, value, _ in value = true })
-      HomeComposer()
+      footer
     }
+  }
+
+  // The drawer's own entry point for a new session: the shell owns the context
+  // reset, the collapse and the keyboard so all three entries behave alike.
+  private var newSessionRow: some View {
+    Button { onNewSession(targets.newTaskScope, nil) } label: {
+      HStack(spacing: 10) {
+        Image(systemName: Symbol.compose).font(.system(size: 19))
+        Text(ConnectionCopy.newSession).font(Typography.rowTitle.weight(.semibold)).lineLimit(1)
+        Spacer(minLength: 0)
+      }
+      .foregroundStyle(Palette.fg).padding(.horizontal, 12).frame(minHeight: 44)
+      .background(Palette.main, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+      .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.border))
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityIdentifier("drawer-new-session")
+    .padding(.horizontal, 12).padding(.top, 4)
+  }
+
+  // Freshness stays where the list is: the provenance line moved here from the
+  // list footer, so it appears once, next to the settings entry.
+  private var footer: some View {
+    HStack(spacing: 4) {
+      Text(ConnectionCopy.panelProvenance(targets.filterLabel,
+        readAt: targets.lastFullRefresh?.formatted(date: .omitted, time: .shortened)))
+        .font(Typography.meta).foregroundStyle(Palette.dim2).lineLimit(1)
+      Spacer(minLength: 0)
+      PlainIcon(symbol: Symbol.gear, label: ConnectionCopy.settings) { onOpenSettings() }
+    }
+    .padding(.leading, 16).padding(.trailing, 6)
+    .overlay(alignment: .top) { Rectangle().fill(Palette.border).frame(height: 1) }
   }
 
   private var searchField: some View {
@@ -160,7 +196,13 @@ struct HomeView: View {
       }
       .accessibilityLabel(ConnectionCopy.filterHosts)
       Spacer(minLength: 4)
-      PlainIcon(symbol: Symbol.gear, label: ConnectionCopy.settings) { model.route = .settings }
+      Button { onCollapse() } label: {
+        Image(systemName: Symbol.sidebar).font(.system(size: 22))
+          .foregroundStyle(Palette.fg).frame(width: 44, height: 44).contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel(ConnectionCopy.closeSidebar)
+      .accessibilityIdentifier("sidebar-close")
     }
     .padding(.horizontal, 16).frame(minHeight: 48)
   }
@@ -181,12 +223,6 @@ struct HomeView: View {
     .frame(minHeight: 44).contentShape(Rectangle())
   }
 
-  private func newTask(_ scope: ExecutionTargetScope, _ cwd: String?) {
-    guard targets.beginNewTask(scope: scope) else { return }
-    if let cwd { targets.newTaskStore.chooseProject(.init(path: cwd, label: projectName(cwd))) }
-    model.composerDraft(for: .newTask(scope)).wrappedValue = .init()
-  }
-
   private var renamePresented: Binding<Bool> {
     Binding(get: { actions.renameTarget != nil }, set: { if !$0 { actions.renameTarget = nil } })
   }
@@ -202,6 +238,8 @@ struct HomeView: View {
 
   private func open(_ row: ExecutionTargetCoordinator.HomeSession) {
     guard let external = row.session.externalSessionId, !external.isEmpty else { return }
+    // The session opens behind the drawer, so the list must not stay on top of it.
+    onCollapse()
     targets.select(row.scope)
     model.open(OpenedSession(providerId: row.session.providerId, agentProfileId: row.session.agentProfileId,
       cwd: row.session.cwd, externalSessionId: external, label: row.session.label,

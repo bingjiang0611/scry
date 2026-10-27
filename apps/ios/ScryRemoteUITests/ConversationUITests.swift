@@ -16,7 +16,7 @@ final class ConversationUITests: XCTestCase {
       (mock ? ["-uiMockData"] : []) + extra
     app.launch()
     XCTAssertTrue(app.descendants(matching: .any)["message-input"].waitForExistence(timeout: 15))
-    if route == "new" { XCTAssertTrue(app.staticTexts["新任务"].exists) }
+    if route == "new" { XCTAssertTrue(app.staticTexts["新建会话"].exists) }
     if route == "transcript" { XCTAssertTrue(app.staticTexts["重构远程会话列表并统一信息层级"].exists) }
   }
 
