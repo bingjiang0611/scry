@@ -5,6 +5,13 @@ import type { SessionHistoryPageRequest } from '../session-history'
 import { readTraceArchiveAsync, readTraceArchivePageAsync } from '../transcript-archive'
 import { sessionArchiveIsPageable, readSessionHistoryAfterCompletedRuns } from '../session-history'
 
+/**
+ * Turns read for a session load that does not ask for a size. Each archived turn costs one file
+ * read plus a JSON parse of roughly a megabyte (measured on a 111-turn real archive: 40 turns
+ * ≈ 363 ms, 10 turns ≈ 100 ms), so the first paint stays small and older turns page on demand.
+ */
+export const DEFAULT_LOAD_SESSION_TURNS = 10
+
 export interface SessionArchiveRead {
   archivePage: TraceArchivePage | null
   archived: TraceArchive | null
@@ -33,7 +40,8 @@ export async function readSessionArchive(input: {
   const paged = sessionArchiveIsPageable(input.providerId, input.transcriptPath)
   try {
     const [archivePage, archived] = await readSessionHistoryAfterCompletedRuns(input.runs, input.signal, async () => {
-      const page = paged ? await readTraceArchivePageAsync(args, { ...profile, limit: input.request?.limit }, input.signal) : null
+      const limit = input.request?.limit ?? DEFAULT_LOAD_SESSION_TURNS
+      const page = paged ? await readTraceArchivePageAsync(args, { ...profile, limit }, input.signal) : null
       const archive = page?.archive ?? (paged ? null : await readTraceArchiveAsync(args, input.signal))
       return [page, archive] as const
     })
