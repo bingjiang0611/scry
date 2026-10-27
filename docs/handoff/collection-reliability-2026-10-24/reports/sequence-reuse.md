@@ -190,3 +190,11 @@ Tests  5 failed | 153 passed (158)
 - doctor 的 `error` 状态与既有 `degraded` 相比改变了对外状态值；退出码不变（5），但依赖 `status` 字符串的脚本需要知道这一点。
 - 空洞只表示「该号没有 record 文件」，不表示投递成功；`store.integrity` 仍会因 record 空洞报 gap，这是有意的（删除不应被 ACK 掩盖）。
 - 没有真实 uploader 参与本轮验证。
+
+## VF2 核验意见（审阅方，2026-10-27）
+
+- **VF2 认可**。审阅方的原探针在 `40e1891` 上通过：seq1 退避到期后投递成功，ACK 越过空洞 2 到达 3，`absentRanges [[2,2]]`；之后的 seq4 正常投递，ackedThrough 为 4。`recorder.test.ts` 和 `scry-doctor.test.ts` 共 165/165 通过。方案区分了「没有 record 的空洞」和「有 record 但 outcome 丢失」，前者留证越过、后者保持 fail closed；status 只读不写；drain 的 catch 不再二次抛错。这些都符合要求。
+- 不阻塞，但建议发版前顺手处理的两点：
+  1. `recordAbsent` 只和最后一个保留的区间比较去重（`sequence <= last[1]`）。样本已截断时，如果在写完 absent 账本、保存进度之前崩溃，重放会把同一个号再计一次，`count` 偏大。改成和 `previous.absentThrough` 比较即可。
+  2. 「有 record 但 outcome 丢失」的 fail closed 发生在 drain 开头的 `advanceAck`（`store-notifications.ts:132`）。它一旦触发，后续所有 record 都不再投递，而且没有恢复命令，只能手工改状态。服务端按 recordId 去重，所以可以提供一个显式的重投入口（比如让 `notify-retry --sequence N` 也接受这种情况），doctor 的 error 信息里要写明是哪个号以及对应的命令。
+- 说明：contiguous 快速路径越过空洞时不写 absent 账本，所以 `absentCount` 统计的不是全部空洞。records 里还在的中间空洞由 `store.integrity` 的 gap 检查负责。文档里不要把 `absentCount` 写成全部空洞数。
