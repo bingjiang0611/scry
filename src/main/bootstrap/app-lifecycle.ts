@@ -47,22 +47,18 @@ export function initializeAppEnvironment(__dirname: string, getWindow: () => Bro
   )
   const useDevelopmentRenderer = rendererEntryUrl !== packagedRendererEntryUrl
   const isOwnedTestApp = process.env.SCRY_TEST_APP === '1'
-  // Chromium 148 (Electron 42) 在辅助功能客户端接入后会走 AXBlockFlowIterator 计算行内邻居，
-  // ax_block_flow_iterator.cc:169 的 CHECK_DEREF(box_fragment->Items()) 会把 renderer 直接打死（SIGTRAP），
-  // 窗口只剩背景色。关闭该特性让 Blink 回到 AbstractInlineTextBox 路径，绕开崩溃点。
-  // 升级 Electron 时复核：上游修复该 CHECK 或移除此特性开关后应删除这里。
-  const disabledChromiumFeatures = app.commandLine.getSwitchValue('disable-features')
-  app.commandLine.appendSwitch('disable-features',
-    [disabledChromiumFeatures, 'AccessibilityBlockFlowIterator'].filter(Boolean).join(','))
-  // 上一条把崩溃从 AXBlockFlowIterator 的 CHECK(SIGTRAP) 挤到了相邻的 AbstractInlineTextBox 路径，
-  // 该路径仍会崩：AXObject::Serialize → SerializeInlineTextBox → SerializeLineAttributes →
-  // AXInlineTextBox::NeighboringOnLine(+0xf8) 对一个 layout object 为空的文本 FragmentItem 解引用（SIGSEGV）。
-  // 32 份 .ips 签名一致（Chromium 148.0.7778.280 / Electron 42.10.1）。
-  // 上游只在未发布的 Chromium main 里把该函数改回 AXBlockFlowIterator 实现；148/150/152/156 仍是崩溃版本，
-  // 所以升级 Electron 不能解决。AXInlineTextBox 只在 AXMode.kInlineTextBoxes 下创建，
-  // 关掉 renderer 无障碍后不再构建/序列化 AX 树，崩溃路径不存在。
-  // 代价：VoiceOver 等辅助技术读不到 Scry 界面；等 Electron 带上游重构后删除这里并复核。
-  app.commandLine.appendSwitch('disable-renderer-accessibility')
+  if (process.platform === 'darwin') {
+    // Electron 42 / Chromium 148 的两条 inline-text-box 邻居计算路径都已有原生崩溃证据。
+    // disable-renderer-accessibility 只挡平台自动激活；macOS AXManualAccessibility / VoiceOver
+    // 的 ScopedAccessibilityMode 仍可重新开启 inlineTextBoxes。过滤这类平台 mode，改由 App
+    // 提供保留文本、控件和屏幕阅读器语义的 mode，不构建有问题的逐字符布局节点。
+    // 限制：逐字符几何/文本标记能力不可用；这不是关闭整个无障碍树。DevTools 显式 AX mode
+    // 不属于平台激活，不能用它验证此保护。Electron 修复两条路径后，以原生 AX 回归验证再移除。
+    app.commandLine.appendSwitch('disable-platform-accessibility-integration')
+    app.once('ready', () => {
+      app.setAccessibilitySupportFeatures(['nativeAPIs', 'webContents', 'extendedProperties', 'html', 'screenReader'])
+    })
+  }
   // Isolated automation stays hidden: showInactive still displays a native window.
   if (isOwnedTestApp && process.platform === 'darwin') app.setActivationPolicy('prohibited')
   const primaryInstance = isOwnedTestApp || app.requestSingleInstanceLock()

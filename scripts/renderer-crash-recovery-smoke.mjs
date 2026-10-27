@@ -1,4 +1,5 @@
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
+import { promisify } from 'node:util'
 import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -7,15 +8,18 @@ import electron from 'electron'
 import { stopOwnedApp } from './owned-app-processes.mjs'
 
 // Run after `npm run build`. Uses the real main/preload/renderer with isolated data.
-// Proves (1) the crashing Chromium a11y feature is disabled in the renderer process itself,
-// (2) a crashed renderer is reloaded instead of leaving a blank window, and
-// (3) a second crash inside the cooldown asks the user instead of reload-looping.
+// Checks effective macOS AX features, crash recovery and repeated-crash prompting.
+// --native-accessibility also activates AX through macOS and reads the native tree;
+// it requires Xcode command-line tools and Accessibility permission for the runner.
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const entry = join(root, 'out/main/index.js')
 await access(entry)
+const nativeAccessibility = process.argv.includes('--native-accessibility')
+if (nativeAccessibility && process.platform !== 'darwin') throw new Error('Native AX check requires macOS')
 const temp = await mkdtemp(join(tmpdir(), 'scry-renderer-crash-'))
+const nativeHelper = nativeAccessibility ? join(temp, 'enable-macos-accessibility') : null
 
-async function exercise(window, dialog, workspace) {
+async function exercise(window, dialog, workspace, nativeHelper) {
   const assert = require('node:assert/strict')
   const { app } = require('electron')
   const contents = window.webContents
@@ -28,35 +32,43 @@ async function exercise(window, dialog, workspace) {
       new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error(`Timed out: ${label}`)), 15_000) })
     ]).finally(() => clearTimeout(timer))
   }
-  // 重载后首屏恢复是异步的（IPC + React 提交），只能等真实 DOM 条件成立，不用固定 sleep。
+  // Native AX can leave this non-activating fixture occluded after renderer replacement.
+  // Observe actual DOM changes: RAF may stop even when the restart notice is already rendered.
   const waitFor = async (source, label) => {
     const ok = await withTimeout(contents.executeJavaScript(`new Promise(resolve => {
-      const started = performance.now()
+      let timer
+      const finish = value => { observer.disconnect(); clearTimeout(timer); resolve(value) }
       const check = () => {
         let value = false
         try { value = (${source})() } catch { value = false }
-        if (value) return resolve(true)
-        if (performance.now() - started > 10_000) return resolve(false)
-        requestAnimationFrame(check)
+        if (value) finish(true)
       }
+      const observer = new MutationObserver(check)
+      observer.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true })
+      timer = setTimeout(() => finish(false), 10_000)
       check()
     })`), label)
     assert.ok(ok, `${label} did not become true`)
   }
-  // The browser process forwards feature overrides to children on their command line;
-  // reading the live renderer argv proves the switch reached the process that crashed.
-  const rendererArgs = require('node:child_process').execFileSync(
-    'ps', ['-o', 'command=', '-p', String(contents.getOSProcessId())], { encoding: 'utf8' })
-  const disabled = rendererArgs.match(/--disable-features=(\S+)/)?.[1]?.split(',') ?? []
-  assert.ok(disabled.includes('AccessibilityBlockFlowIterator'),
-    `Renderer must run without AccessibilityBlockFlowIterator: ${rendererArgs}`)
-  // AXInlineTextBox::NeighboringOnLine 只在序列化无障碍树时执行，所以 renderer 无障碍必须整体关闭
-  // （见 app-lifecycle 里两条开关的崩溃证据）。Chromium 不把这个开关转发到 renderer 命令行，
-  // app 侧也没有“AX 已关闭”的可观测信号（CDP Accessibility.enable 会强行打开 AX，不能当探针），
-  // 因此这里只断言主进程在 Chromium 读取开关前已把它放到命令行上。
-  assert.equal(app.commandLine.hasSwitch('disable-renderer-accessibility'), true,
-    'main must disable renderer accessibility before Chromium reads switches')
-  assert.ok(app.commandLine.getSwitchValue('disable-features').split(',').includes('AccessibilityBlockFlowIterator'))
+  const checkAccessibility = async () => {
+    if (process.platform !== 'darwin') return
+    if (nativeHelper) {
+      await waitFor(`() => Boolean(document.querySelector('textarea'))`, 'composer before native AX read')
+      window.showInactive()
+      const { stdout } = await require('node:util').promisify(require('node:child_process').execFile)(nativeHelper, [String(process.pid), '描述任务'])
+      console.log(stdout.trim())
+      // ElectronApplication::enableScreenReaderCompleteModeAfterDelay schedules native AX
+      // activation after a two-second debounce. Checking immediately only proves dispatch.
+      await new Promise(resolve => setTimeout(resolve, 2100))
+    }
+    const features = app.getAccessibilitySupportFeatures()
+    for (const feature of ['nativeAPIs', 'webContents', 'extendedProperties', 'html', 'screenReader']) {
+      assert.ok(features.includes(feature), `Accessible text/controls must remain enabled: ${feature}`)
+    }
+    assert.equal(features.includes('inlineTextBoxes'), false,
+      `Native AX activation must not restore the crashing inlineTextBoxes mode: ${features}`)
+  }
+  await checkAccessibility()
 
   const prompts = []
   dialog.showMessageBox = async (...args) => {
@@ -74,13 +86,7 @@ async function exercise(window, dialog, workspace) {
     assert.equal(contents.isCrashed(), false)
     assert.equal(contents.getURL(), rendererUrl)
     // A live React root, not just the window background colour.
-    const rootChildren = await withTimeout(contents.executeJavaScript(`new Promise(resolve => {
-      const check = () => document.getElementById('root')?.childElementCount
-        ? resolve(document.getElementById('root').childElementCount)
-        : requestAnimationFrame(check)
-      check()
-    })`), `${label} React mount`)
-    assert.ok(rootChildren > 0)
+    await waitFor(`() => document.getElementById('root')?.childElementCount > 0`, `${label} React mount`)
     return details
   }
 
@@ -107,6 +113,7 @@ async function exercise(window, dialog, workspace) {
     'restart notice after reload')
   await waitFor(`() => document.body.innerText.includes(${JSON.stringify(workspaceName)})`,
     'workspace restored after reload')
+  await checkAccessibility()
 
   await crashAndAwaitReload('second')
   assert.deepEqual(prompts, ['界面进程反复崩溃'], 'Crash within cooldown must ask before reloading')
@@ -114,6 +121,9 @@ async function exercise(window, dialog, workspace) {
 }
 
 try {
+  if (nativeHelper) {
+    await promisify(execFile)('xcrun', ['swiftc', join(root, 'scripts/fixtures/enable-macos-accessibility.swift'), '-o', nativeHelper])
+  }
   await mkdir(join(temp, 'home'))
   const workspace = join(temp, 'restore-probe-workspace')
   await mkdir(workspace)
@@ -124,14 +134,18 @@ try {
   await writeFile(join(temp, 'userData', 'projects.json'), JSON.stringify([{ cwd: workspace, lastOpenedAt: Date.now() }]))
   await writeFile(join(temp, 'main.cjs'), `
     const { app, dialog } = require('electron')
-    require(${JSON.stringify(join(root, 'scripts/hidden-electron-windows.cjs'))})(app)
+    if (!${nativeAccessibility}) require(${JSON.stringify(join(root, 'scripts/hidden-electron-windows.cjs'))})(app)
     app.setPath('userData', ${JSON.stringify(join(temp, 'userData'))})
     app.once('browser-window-created', (_event, window) => {
       window.webContents.once('did-finish-load', async () => {
         try {
-          await (${exercise.toString()})(window, dialog, ${JSON.stringify(workspace)})
+          await (${exercise.toString()})(window, dialog, ${JSON.stringify(workspace)}, ${JSON.stringify(nativeHelper)})
           app.exit(0)
-        } catch (error) { console.error(error); app.exit(1) }
+        } catch (error) {
+          console.error(error)
+          console.error(await window.webContents.executeJavaScript('JSON.stringify({ visibility: document.visibilityState, body: document.body.innerText.slice(-3000) })'))
+          app.exit(1)
+        }
       })
     })
     import(${JSON.stringify(pathToFileURL(entry).href)}).catch(error => { console.error(error); app.exit(1) })
@@ -158,7 +172,7 @@ try {
       if (code !== 0 || !output.includes('SCRY_RENDERER_CRASH_RECOVERY_SMOKE=passed')) {
         reject(new Error(`Renderer crash fixture failed (${code ?? signal}):\n${output.slice(-8000)}`))
       } else {
-        console.log('Renderer crash recovery: first crash reloads, sidebar tab/workspace/restart notice restore, repeat crash prompts before reload')
+        console.log(`Renderer crash recovery: effective AX mode checked${nativeAccessibility ? ', native activation/tree checked before and after reload' : ''}; sidebar/workspace/restart notice restore; repeat crash prompts`)
         resolve()
       }
     })
