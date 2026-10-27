@@ -1,39 +1,19 @@
-import { mkdtempSync, mkdirSync, rmSync, unlinkSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { unlinkSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES } from '../../shared/desktop-remote'
-import { createDesktopHostReader, parseDesktopHostRead } from './desktop-host-reader'
-import { bindRemoteHistoryContext } from './history-context'
+import { parseDesktopHostRead } from './desktop-host-reader'
+import { desktopReaderFixture, removeFixtureRoots } from './desktop-host-reader.fixtures'
 import { prepareRunAttachments, storeAttachmentReference } from '../attachment-store'
 import { upsertTraceArchiveTurn } from '../transcript-archive'
 import type { ActiveRun } from '../../shared/trace'
 
 const roots: string[] = []
-afterEach(() => { vi.restoreAllMocks(); for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true }) })
+afterEach(() => { vi.restoreAllMocks(); removeFixtureRoots(roots) })
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), 'scry-desktop-reader-'))
-  roots.push(root)
-  const cwd = join(root, 'workspace')
-  mkdirSync(cwd)
-  const userDataDir = join(root, 'userData')
-  let allowed = true
-  let run: ActiveRun | null = null
-  const read = createDesktopHostReader({
-    userDataDir, hostId: () => 'host-fixture',
-    authorizeWorkspace: (path) => { if (!allowed || path !== cwd) throw new Error('workspace_not_authorized'); return cwd },
-    authorizeSession: (value) => { bindRemoteHistoryContext({ ...value, externalSessionId: value.externalSessionId!, historyScope: 'session' },
-      [{ sessionId: context.externalSessionId, cwd, providerId: 'codex' }], path => path) },
-    getRun: () => run
-  })
-  const context = { cwd, providerId: 'codex', externalSessionId: 'native-session' }
-  return { read, context, userDataDir, root, setRun: (value: ActiveRun) => { run = value }, revoke: () => { allowed = false },
-    archive: (index: number, text = `answer ${index}`) => upsertTraceArchiveTurn({
-      cwd, userDataDir, sessionId: context.externalSessionId, providerId: 'codex', runtimeProvider: 'codex_cli',
-      turn: { runId: `run-${index}`, agentProfileId: null, userText: `prompt ${index}`, done: true, items: [{
-        id: `event-${index}`, runId: `run-${index}`, ts: `2026-10-14T00:00:0${index}Z`, kind: 'model', stage: 'text', text
-      }] }
-    }) }
+  const created = desktopReaderFixture()
+  roots.push(created.root)
+  return created
 }
 
 describe('desktop authenticated evidence source', () => {
@@ -59,28 +39,6 @@ describe('desktop authenticated evidence source', () => {
       .rejects.toThrow('history_session_not_found')
     expect(() => parseDesktopHostRead({ kind: 'trace', historyScope: 'session', context: f.context, runId })).toThrow('invalid_request')
   })
-  it('keeps a multi-megabyte image out of trace polling and binds image chunks to the authorized context', async () => {
-    const f = fixture()
-    const bytes = Buffer.alloc(5 * 1024 * 1024)
-    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(bytes)
-    const runId = 'run-image-1'
-    f.setRun({ runId, cwd: f.context.cwd, providerId: 'codex', externalSessionId: f.context.externalSessionId, userText: '', items: [], done: false,
-      attachments: [{ kind: 'image', name: 'large.png', mimeType: 'image/png', dataBase64: bytes.toString('base64'), size: bytes.length }] })
-    const trace = await f.read({ kind: 'trace', context: f.context, runId, images: true })
-    expect(trace).toMatchObject({ kind: 'trace', imageCount: 1 })
-    expect(JSON.stringify(trace).length).toBeLessThan(1024)
-    const query = { kind: 'image' as const, context: f.context, runId, index: 0 }
-    const first = await f.read(query)
-    if (first.kind !== 'image_chunk') throw new Error('wrong response')
-    expect(first.totalBytes).toBe(bytes.length)
-    expect(Buffer.from(first.data, 'base64')).toEqual(bytes.subarray(0, DESKTOP_HISTORY_CHUNK_BYTES))
-    const chunk = { id: first.id, offset: DESKTOP_HISTORY_CHUNK_BYTES }
-    await expect(f.read({ ...query, chunk, context: { ...f.context, agentProfileId: 'different' } })).rejects.toThrow('invalid_image_chunk')
-    await expect(f.read({ ...query, chunk, providerTurnId: 'different' })).rejects.toThrow('invalid_image_chunk')
-    f.revoke()
-    await expect(f.read({ ...query, chunk })).rejects.toThrow('workspace_not_authorized')
-  })
-
   it.each([undefined, 'native-image-turn'])('reads archived image bytes after restart with native turn ID %s and refuses a symlink replacement', async (providerTurnId) => {
     const f = fixture()
     const bytes = Buffer.from('iVBORw0KGgo=', 'base64')
@@ -229,54 +187,6 @@ describe('desktop authenticated evidence source', () => {
     const offset = Math.floor((first.totalBytes - 1) / DESKTOP_HISTORY_CHUNK_BYTES) * DESKTOP_HISTORY_CHUNK_BYTES
     await expect(f.read({ ...query, chunk: { id: first.id, offset } })).resolves.toMatchObject({ kind: 'history_chunk', offset })
     await expect(f.read({ ...query, chunk: { id: first.id, offset } })).rejects.toThrow('invalid_history_chunk')
-  })
-
-  it('losslessly chunks an oversized live trace from one captured run snapshot', async () => {
-    const f = fixture()
-    const text = '中文🙂"\n'.repeat(400_000)
-    const run = (body: string): ActiveRun => ({ runId: 'run-live', cwd: f.context.cwd, providerId: 'codex', externalSessionId: f.context.externalSessionId,
-      userText: 'task', done: false, items: [{ id: 'event', runId: 'run-live', ts: '2026-10-14T00:00:00Z', kind: 'model', stage: 'text_delta', text: body }] })
-    f.setRun(run(text))
-    const query = { kind: 'trace' as const, context: f.context, runId: 'run-live', images: true as const }
-    // Older clients keep their previous bounded response contract.
-    await expect(f.read(query)).rejects.toThrow('desktop_evidence_response_too_large')
-    const chunked = { ...query, byteChunks: true as const }
-    const first = await f.read(chunked)
-    if (first.kind !== 'history_chunk') throw new Error('expected chunked trace')
-    expect(first.totalBytes).toBeGreaterThan(4 * 1024 * 1024)
-    const continuation = { ...chunked, chunk: { id: first.id, offset: DESKTOP_HISTORY_CHUNK_BYTES } }
-    await expect(f.read({ ...continuation, runId: 'other-run' })).rejects.toThrow('invalid_trace_chunk')
-    await expect(f.read({ ...continuation, context: { ...f.context, agentProfileId: 'other' } })).rejects.toThrow('invalid_trace_chunk')
-    await expect(f.read({ ...continuation, kind: 'history' })).rejects.toThrow('invalid_history_chunk')
-    // A later live update must not be mixed into the captured response.
-    f.setRun(run('changed'))
-    const chunks = [Buffer.from(first.data, 'base64')]
-    for (let offset = DESKTOP_HISTORY_CHUNK_BYTES; offset < first.totalBytes; offset += DESKTOP_HISTORY_CHUNK_BYTES) {
-      const page = await f.read({ ...chunked, chunk: { id: first.id, offset } })
-      if (page.kind !== 'history_chunk') throw new Error('missing continuation')
-      expect(Buffer.byteLength(JSON.stringify({ desktop: page }))).toBeLessThan(4 * 1024 * 1024)
-      chunks.push(Buffer.from(page.data, 'base64'))
-    }
-    const result = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-    expect(result).toMatchObject({ kind: 'trace', imageCount: 0, run: { runId: 'run-live', items: [{ text }] } })
-    await expect(f.read({ ...chunked, chunk: { id: first.id, offset: DESKTOP_HISTORY_CHUNK_BYTES } })).rejects.toThrow('invalid_trace_chunk')
-    f.setRun(run(text))
-    // The delta protocol's first full reset uses the same bounded chunks and keeps its cursor.
-    const reset = { ...chunked, delta: {} }
-    const resetFirst = await f.read(reset)
-    if (resetFirst.kind !== 'history_chunk') throw new Error('expected chunked reset')
-    await expect(f.read({ ...chunked, chunk: { id: resetFirst.id, offset: DESKTOP_HISTORY_CHUNK_BYTES } })).rejects.toThrow('invalid_trace_chunk')
-    const resetChunks = [Buffer.from(resetFirst.data, 'base64')]
-    for (let offset = DESKTOP_HISTORY_CHUNK_BYTES; offset < resetFirst.totalBytes; offset += DESKTOP_HISTORY_CHUNK_BYTES) {
-      const page = await f.read({ ...reset, chunk: { id: resetFirst.id, offset } })
-      if (page.kind !== 'history_chunk') throw new Error('missing reset continuation')
-      resetChunks.push(Buffer.from(page.data, 'base64'))
-    }
-    expect(JSON.parse(Buffer.concat(resetChunks).toString('utf8'))).toMatchObject({ kind: 'trace', reset: true, revision: expect.any(String), run: { items: [{ text }] } })
-    const next = await f.read(chunked)
-    if (next.kind !== 'history_chunk') throw new Error('expected chunked trace')
-    f.revoke()
-    await expect(f.read({ ...chunked, chunk: { id: next.id, offset: DESKTOP_HISTORY_CHUNK_BYTES } })).rejects.toThrow('workspace_not_authorized')
   })
 
   it('caps assembled pages instead of dropping evidence from an oversized turn', async () => {

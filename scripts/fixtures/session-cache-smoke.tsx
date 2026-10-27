@@ -66,7 +66,7 @@ Object.defineProperty(window, 'scry', { value: {
   detectFast: async () => [agent], detect: async () => [agent],
   listSkills: async () => ({ state: 'unavailable', data: null }),
   mcpSnapshot: async () => ({ state: 'unavailable', data: null }),
-  usageStats: async () => null, stats: async () => null,
+  usageStats: async () => null, usageAnalytics: async () => null, stats: async () => null,
   setCwd: async (cwd: string) => cwd, focusRun: async () => true, newSession: async () => true,
   runControls: async (context: ProviderContext) => ({ ...context, mode: 'read', state: 'ready', data: {
     models: [{ model: { id: 'fixture-model' }, label: 'Fixture model', efforts: [] }],
@@ -112,6 +112,7 @@ for (const [id, action] of Object.entries({
       bufferedBytes: 0, inFlightBytes: 0, resyncRequired: true })); update()
   },
   'reject-a': () => { const index = pending.findIndex(item => item.sessionId === 'cache-a'); pending.splice(index, 1)[0].reject(new Error('fixture source unavailable')); update() },
+  'reject-b': () => { const index = pending.findIndex(item => item.sessionId === 'cache-b'); pending.splice(index, 1)[0].reject(new Error('fixture target unavailable')); update() },
   'invalidate-cache': invalidateCache
 })) {
   const button = document.createElement('button')

@@ -13,6 +13,13 @@ export async function runSidebarActivity({ driver, options }) {
     await wait('document.querySelector(".sb-remote-proj .sb-sess.running .sb-running") != null', 'background remote session shows a running spinner')
     check(JSON.stringify(await projectOrder()) === JSON.stringify(['Pinned local', 'Project A', 'Recent local', 'Older local', 'Project B']), 'Remote activity did not move its project up while preserving local pins')
     check(await read('getComputedStyle(document.querySelector(".sb-remote-proj .sb-running")).animationName === "sb-running-spin"'), 'Remote activity did not reuse the local spinner animation')
+    // A run blocked on a question is active but not progressing: the row must say so
+    // and stop spinning, otherwise the status contradicts the open question panel.
+    await read('window.desktopRemoteFixture.sessionPendingQuestions = 2')
+    await wait('document.querySelector(".sb-remote-proj .sb-sess.waiting .sb-running")?.getAttribute("aria-label") === "需回答 2 个问题"', 'remote session blocked on questions shows the waiting-answer status')
+    check(await read('getComputedStyle(document.querySelector(".sb-remote-proj .sb-running")).animationName === "none"'), 'Blocked remote run kept spinning')
+    await read('window.desktopRemoteFixture.sessionPendingQuestions = 0')
+    await wait('document.querySelector(".sb-remote-proj .sb-sess.waiting") == null', 'Answered remote run stayed in the waiting state')
     await capture('remote-sidebar-running')
     await click('.sb-view-tabs [role=tab]', '动态')
     await wait('document.querySelector(".sb-activity [data-remote-session=old-native]") != null', 'live remote session appears in activity tab')

@@ -21,6 +21,7 @@ export function fixtureTransport(options) {
     return structuredClone({ ...catalog,
       projects: catalog.projects.map(project => ({ ...project, label: project.label + (state.catalogRevision ? ' v2' : '') })),
       sessions: catalog.sessions.map(session => session.externalSessionId === 'old-native' ? { ...session, isActive: state.sessionActive, ts: state.sessionTs,
+        ...(state.sessionPendingQuestions > 0 ? { pendingQuestions: state.sessionPendingQuestions } : {}),
         ...(state.sessionLastRunId ? { lastRunId: state.sessionLastRunId, lastRunOutcome: state.sessionLastRunOutcome } : {}) } : session),
       providers: (state.hideProvider ? [beta] : catalog.providers).map(provider => state.legacyProviderHost ? provider
         : ({ id: provider.id, label: provider.label, available: provider.available, observedAt: state.providerMetadataObservedAt, metadataRevision: state.providerMetadataRevision, ...(provider.forkSession === true ? { forkSession: true } : {}), ...(provider.agentProfileId ? { agentProfileId: provider.agentProfileId } : {}) })),

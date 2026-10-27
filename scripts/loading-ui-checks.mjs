@@ -39,34 +39,27 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
   const arm = async () => read(`(() => {
     window.__loadingObserver?.disconnect(); cancelAnimationFrame(window.__loadingFrame)
     const old = document.querySelector('.transcript-turn')
+    const selected = document.querySelector('.sb-sess[aria-current=true]')
     const initialY = old?.getBoundingClientRect().top
-    const state = window.__loadingState = { since:performance.now(), first:null, seen:false, busy:false, draft:false, badControls:false, retained:true, fade:null, hidden:false, shifted:false, replacement:false, reducedStatic:true, reducedVisible:true }
+    const state = window.__loadingState = { since:performance.now(), seen:false, pending:false, badControls:false, identityStable:true, visible:true, shifted:false, replacement:false }
     const scan = () => {
       const record = window.loadingFixture.records.filter(r=>r.kind==='session' && r.start>=state.since).at(-1)
       const transcript = document.querySelector('.chat-transcript')
       const busy = transcript?.getAttribute('aria-busy')==='true'
       const indicator = document.querySelector('.chat-session-evidence-gap[data-status=loading]')
-      if(record && indicator) {
-        state.seen=true; state.first ??= performance.now()-record.start
-        state.role=indicator.getAttribute('role'); state.text=indicator.textContent
-        const bar=indicator.querySelector('.loading-status-bar')
-        state.barHeight=bar.getBoundingClientRect().height
-        if(matchMedia('(prefers-reduced-motion: reduce)').matches) {
-          const style=getComputedStyle(bar,'::after')
-          state.reducedStatic &&= style.animationName==='none' && style.transform==='none'
-          if(performance.now()-record.start>290 && busy) state.reducedVisible &&= getComputedStyle(indicator).opacity==='1' && bar.getBoundingClientRect().width>0 && !!indicator.textContent.trim()
-        }
-      }
-      if(record && busy) {
-        state.busy=true
-        state.draft ||= document.querySelector('.runtime-composer textarea').value.length>0
-        state.badControls ||= !document.querySelector('button.send').disabled || [...document.querySelectorAll('.turn-branch-btn')].some(n=>!n.disabled && !n.closest('[inert]'))
-        const previous=transcript.querySelector('[data-loading-previous=true]')
-        state.retained &&= !!previous?.inert && previous.getAttribute('aria-hidden')==='true' && previous.contains(old)
+      if(record && indicator) state.seen=true
+      if(record && !record.end) {
+        state.pending=true
+        state.identityStable &&= document.querySelector('.sb-sess[aria-current=true]')===selected
         state.shifted ||= Math.abs(old.getBoundingClientRect().top-initialY)>1
-        const fade=previous?.getAnimations().find(a=>a.id==='scry-loading-previous')
-        if(fade) state.fade={duration:fade.effect.getTiming().duration,frames:fade.effect.getKeyframes(),live:fade.effect.target===previous}
-        if(record && performance.now()-record.start>290) state.hidden ||= getComputedStyle(previous).opacity==='0'
+        state.visible &&= old.isConnected && old.getBoundingClientRect().height>0 &&
+          [old, old.parentElement, transcript].every(element => {
+            const style=getComputedStyle(element)
+            return Number(style.opacity)>0 && style.display!=='none' && style.visibility==='visible'
+          })
+      }
+      if(record?.end && busy) {
+        state.badControls ||= !document.querySelector('button.send').disabled || [...document.querySelectorAll('.turn-branch-btn')].some(n=>!n.disabled)
       }
       state.replacement ||= document.getAnimations().some(a=>a.id==='scry-structure' && a.effect.getTiming().duration===180 && a.effect.getKeyframes().every(frame=>!('transform' in frame)))
     }
@@ -90,26 +83,27 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
     await settle()
     await read(`window.loadingFixture.invalidateCache(); window.loadingFixture.configure(${delay},${fail})`)
     await arm(); await select(id)
-    if (delay === 400 && screenshotPrefix) {
-      await wait("(() => {const status=document.querySelector('.chat-session-evidence-gap[data-status=loading]'); return status && Number(getComputedStyle(status).opacity)>0.9})()")
+    if (delay === 1000) await select(id)
+    if (delay === 1000 && screenshotPrefix) {
+      await wait("window.__loadingState.pending && performance.now()-window.__loadingState.since>800")
       const reducedMode = await read("matchMedia('(prefers-reduced-motion: reduce)').matches")
       await screenshot(fail ? 'failure-loading' : reducedMode ? 'reduced-loading' : 'slow-loading')
     }
-    if (fail) await wait("document.querySelector('.chat-session-evidence-gap[data-status=error]')?.textContent.includes('fixture source unavailable')")
+    if (fail) await wait("document.querySelector('.composer-status.is-error')?.textContent.includes('fixture source unavailable')")
     else await ready(id)
     const result = await report()
-    check(result.busy && result.draft && !result.badControls, `send/fork authority was delayed: ${JSON.stringify(result)}`)
-    check(result.retained && !result.shifted, `previous live DOM was removed or shifted: ${JSON.stringify(result)}`)
+    check(result.pending && !result.badControls, `read was not observed or target controls lacked authority: ${JSON.stringify(result)}`)
+    check(result.identityStable && !result.shifted && result.visible, `selection/content changed before the target was ready: ${JSON.stringify(result)}`)
+    check(await read(`window.loadingFixture.records.filter(r=>r.kind==='session' && r.start>=window.__loadingState.since).length===1`), 'opening an uncached session read history twice')
     check(!await read("!!document.querySelector('.chat-session-evidence-gap[data-status=loading]')"), 'loading bar survived completion/error')
     return result
   }
   const fast = await measured('cache-b', 60)
-  check(!fast.seen && !fast.fade && fast.replacement, `60ms flashed a loader, faded old DOM or lost 180ms replacement: ${JSON.stringify(fast)}`)
-  const slow = await measured('cache-a', 400)
-  check(slow.first>=110 && slow.first<=190 && slow.role==='status' && slow.text.includes('正在加载会话历史') && slow.barHeight===2, `400ms loading onset/semantics invalid: ${JSON.stringify(slow)}`)
-  check(slow.fade?.duration===120 && slow.fade.live && slow.hidden && slow.fade.frames.every(frame=>!('transform' in frame)), `old transcript did not fade on live DOM for 120ms: ${JSON.stringify(slow)}`)
-  const failed = await measured('cache-b', 400, true)
-  check(failed.seen, 'long failed read never showed honest loading')
+  check(!fast.seen && fast.replacement, `60ms flashed a loader or lost 180ms replacement: ${JSON.stringify(fast)}`)
+  const slow = await measured('cache-a', 1000)
+  check(!slow.seen, `slow session read mounted a loading banner: ${JSON.stringify(slow)}`)
+  const failed = await measured('cache-b', 1000, true)
+  check(!failed.seen, 'failed read flashed a loading banner')
   await screenshot('failure')
   contents.debugger.attach('1.3')
   let reduced
@@ -118,8 +112,8 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
     await wait("matchMedia('(prefers-reduced-motion: reduce)').matches")
     // Restore real content first; then measure a slow switch from a populated timeline.
     await read('window.loadingFixture.configure(60)'); await select('cache-b'); await ready('cache-b')
-    reduced = await measured('cache-a', 400)
-    check(reduced.seen && reduced.reducedStatic && reduced.reducedVisible && reduced.hidden, `reduced progress blinked, moved or lost its text: ${JSON.stringify(reduced)}`)
+    reduced = await measured('cache-a', 1000)
+    check(!reduced.seen && reduced.visible, `reduced motion showed a loading banner or blanked the transcript: ${JSON.stringify(reduced)}`)
     await screenshot('reduced-ready')
   } finally {
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[]}); contents.debugger.detach()
@@ -193,6 +187,6 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
   }
   const counts = await read("JSON.parse(document.querySelector('#cache-state').textContent)")
   check(counts.starts===0 && counts.forks===0, 'fixture launched a Provider or fork')
-  return { fast60NoLoading: true, slow400FirstMs: slow.first, oldLiveDomFade120: true, authorityImmediate: true,
-    failureNoResidual: true, reducedStaticProgress: true, otherSurfaces: surfaces, inventoryFailures, noProviderOrFork: true }
+  return { fast60NoLoading: true, slow1000NoLoading: true, selectionAndContentAtomic: true, authorityImmediate: true,
+    failureNoResidual: true, reducedMotionNoLoading: true, otherSurfaces: surfaces, inventoryFailures, noProviderOrFork: true }
 }

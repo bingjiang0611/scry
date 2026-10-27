@@ -11,6 +11,7 @@ export interface AppRuntimeContext {
   activeRunHydrated: boolean
   setActiveRunHydrated: Dispatch<SetStateAction<boolean>>
   sessionSelectionSeqRef: MutableRefObject<number>
+  sessionNavigationSeqRef: MutableRefObject<number>
   draftStartPendingRef: MutableRefObject<boolean>
   localRunIdsRef: MutableRefObject<Set<string>>
   localStartsRef: MutableRefObject<Map<string, string>>
@@ -42,7 +43,7 @@ export interface AppRuntimeContext {
 }
 
 export function useAppRuntimeEffects(context: AppRuntimeContext): void {
-  const { workspace, activeRunHydrated, setActiveRunHydrated, sessionSelectionSeqRef, draftStartPendingRef, localRunIdsRef,
+  const { workspace, activeRunHydrated, setActiveRunHydrated, sessionSelectionSeqRef, sessionNavigationSeqRef, draftStartPendingRef, localRunIdsRef,
     localStartsRef, localDraftOwnersRef, terminalRunIdsRef, requestChatBottom, markRunStarted, setComposerError,
     setSessionLoading, session, selectAgentRef, setSessionCacheVisible, setCwd, selectSessionId, setView, activeSessionIdRef,
     draftContextRef, cwdRef, migrateRightSurface, integrations, setSessionDrafts, setSessionPromptQueues, loadProjects,
@@ -51,8 +52,9 @@ export function useAppRuntimeEffects(context: AppRuntimeContext): void {
   useEffect(() => {
     let cancelled = false
     const initialSelectionSeq = sessionSelectionSeqRef.current
+    const initialNavigationSeq = sessionNavigationSeqRef.current
     const canRestoreInitialSelection = (): boolean =>
-      !cancelled && initialSelectionSeq === sessionSelectionSeqRef.current
+      !cancelled && initialSelectionSeq === sessionSelectionSeqRef.current && initialNavigationSeq === sessionNavigationSeqRef.current
     const offFocusedRun =
       typeof window.scry.onFocusedRun === 'function'
         ? window.scry.onFocusedRun((run) => {

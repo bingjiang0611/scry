@@ -6,7 +6,7 @@ import { ComposerInput } from './ComposerInput'
 import { ComposerControls } from './ComposerControls'
 import { providerHasEnded, runStopStatus } from '../../run-stop-status'
 import { latestBackgroundWork } from '@shared/background-work'
-import { backgroundWorkStatus } from '../../background-work-status'
+import { backgroundWorkStatus, pendingQuestionStatus } from '../../background-work-status'
 import { SLASH_COMMAND_COPY } from '../../constants/copy'
 import { workspaceCopy } from '../../constants/workspace-copy'
 import { filterSlashCommands, composerPromptHistory } from './composer-utils'
@@ -102,8 +102,12 @@ export function Composer({
     inFlightTurn != null && providerHasEnded(inFlightTurn.items)
   )
   const busyTurn = busy ? inFlightTurn : undefined
-  const backgroundStatus = stopStatus.tone === 'running' && busyTurn && pendingQuestions.length === 0
-    ? backgroundWorkStatus(latestBackgroundWork(busyTurn.items)) : undefined
+  // Only the in-flight turn's own questions block it; another run's question is
+  // shown in its own turn, not attributed to this status bar.
+  const busyQuestionCount = busyTurn ? pendingQuestions.filter((question) => question.runId === busyTurn.runId).length : 0
+  const backgroundStatus = stopStatus.tone === 'running'
+    ? pendingQuestionStatus(busyQuestionCount) ?? (busyTurn ? backgroundWorkStatus(latestBackgroundWork(busyTurn.items)) : undefined)
+    : undefined
   const runStartedAt = busyTurn?.items[0]?.ts != null ? Date.parse(busyTurn.items[0].ts) : Number.NaN
 
   useEffect(() => {

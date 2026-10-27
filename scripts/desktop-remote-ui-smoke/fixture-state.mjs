@@ -11,7 +11,7 @@ export function fixtureState(options) {
   resolveIntentCalls: [], resolveFailure: null, holdSubmit: false, runState: 'dispatched', exposeTrace: true, runStatusFailure: false, autoResetOnSubmit: false, holdRunStatus: false,
   connected: true, hostEnabled: false, hostInviteCalls: 0, hostDisableCalls: 0,
   localNewSessions: 0, localStarts: 0, listFailure: false, hideProvider: false, catalogRevision: 0,
-  catalogFailure: false, sessionActive: false, sessionTs: 1700000000000, sessionLastRunId: null, sessionLastRunOutcome: null, hostRunArchived: false, liveRunCalls: 0,
+  catalogFailure: false, sessionActive: false, sessionPendingQuestions: 0, sessionTs: 1700000000000, sessionLastRunId: null, sessionLastRunOutcome: null, hostRunArchived: false, liveRunCalls: 0,
   updateSshCalls: [], connectCalls: 0, updateFailure: false, holdAddressUpdate: false,
   directoryReads: [], directorySelectCalls: [], directoryGrants: [], oldDirectoryHost: false, selectDirectoryFailure: false, holdDirectorySelection: false,
   phoneEnabled: true, relayConfigured: true, phoneStatusFailure: false, phonePairingCalls: 0,

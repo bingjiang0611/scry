@@ -110,15 +110,22 @@ function protectedToolEvent(event: TraceEvent, content: ToolContent, result: boo
 
 export function sanitizeToolEvents(events: TraceEvent[], policy: ToolContentPolicy, source: string): TraceEvent[] {
   if (!isFullToolContentPolicy(policy)) return events
+  // The turn budget is declared on the policy, so a whole turn must be bounded,
+  // not just each field: a long run can otherwise retain thousands of 8 KiB
+  // bodies and overflow a single evidence payload. Later bodies keep their
+  // metadata (including any durable reference) and report turn_budget honestly.
+  let remaining = policy.toolContentTurnBytes ?? 128 * 1024
   return events.map((event) => {
     if (!['tool', 'skill', 'agent'].includes(event.kind)) return event
     const result = event.stage === 'tool_result'
     const existing = result ? event.outputContent : event.inputContent
     const raw = result ? event.output ?? event.text : event.input
     // Persisted envelopes keep their provenance and byte bounds across replay.
-    const content = existing ? sanitizeCapturedContent(existing, policy.toolContentFieldBytes) : captureToolContent(raw, {
+    const captured = existing ? sanitizeCapturedContent(existing, policy.toolContentFieldBytes) : captureToolContent(raw, {
       source, maxBytes: policy.toolContentFieldBytes, ...sourceState(event, !result)
     })
+    const content = limitToolContent(captured, Math.max(0, remaining), 'turn_budget')
+    remaining -= content.savedBytes
     return protectedToolEvent(event, content, result)
   })
 }

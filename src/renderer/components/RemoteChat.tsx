@@ -2,6 +2,7 @@ import { type ReactNode, type RefObject } from 'react'
 import type { RightSurfaceAction, RightSurfaceState } from '../right-surface'
 import type { RemoteProviderRef, RemoteSessionRef } from '@shared/desktop-remote'
 import type { ComposerDraftStore } from '../composer-drafts'
+import type { PreparedRemoteHistory } from '../app-types'
 import { RemotePromptQueueStore } from '../remote-prompt-queue'
 import './desktop-remote.css'
 import './remote-location.css'
@@ -23,6 +24,7 @@ export interface RemoteChatProps {
   connectionId: string
   cwd: string
   session?: RemoteSessionRef
+  preparedHistory?: PreparedRemoteHistory
   draftStore: ComposerDraftStore
   queueStore: RemotePromptQueueStore
   onDraftInput: (key: string, value: string) => void
@@ -44,6 +46,7 @@ export function RemoteChat({
   connectionId,
   cwd,
   session,
+  preparedHistory,
   draftStore,
   queueStore,
   onDraftInput,
@@ -53,7 +56,7 @@ export function RemoteChat({
   onSessionAdopted,
   surface
 }: RemoteChatProps) {
-  const foundationState = useRemoteChatFoundation({ connectionId, cwd, session, draftStore, queueStore, surface })
+  const foundationState = useRemoteChatFoundation({ connectionId, cwd, session, preparedHistory, draftStore, queueStore, surface })
   const controlsState = useRemoteChatControls(foundationState, { connectionId, cwd, draftStore, queueStore, onSessionAdopted })
   const { controlProvider } = controlsState
   const presentationState = useRemoteChatPresentation(foundationState, controlProvider, { scrollRef, cwd, queueStore })

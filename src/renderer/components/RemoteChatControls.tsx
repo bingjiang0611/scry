@@ -21,7 +21,7 @@ import { errorText, intentMatches, keepIfEqual, POLL_MS, QUIET_POLL_MAX_MS, remo
 export type ControlsState = ReturnType<typeof useRemoteChatControls>
 
 export function useRemoteChatControls(foundation: FoundationState, { connectionId, cwd, draftStore, queueStore, onSessionAdopted }: Pick<RemoteChatProps, 'connectionId' | 'cwd' | 'draftStore' | 'queueStore' | 'onSessionAdopted'>) {
-  const { api, connected, catalog, catalogReady, providerSelection, sessionId, setSessionId, setControls, selectedProvider, selectedProviderContextKey, initializedControlsContext, setTurns, setHistoryEvidence, setHistoryLoading, historyRevision, setHistoryRevision, traceViewRef, showTrace, pollIntervalMs, applyPollInterval, setPollInterval, lastPollKey, setRunStatus, setForeignRun, foreignRunRef, setIntents, setPollError, setPollFresh, setHistoryError, generation, provider, providerId, context, presentedHistoryContext, controlContextKey, contextKey, sessionActive, traceDelta, pollSequence, pollInFlight, pollRef, adoptingSession, adoptedIntent, queueKey } = foundation
+  const { api, connected, catalog, catalogReady, providerSelection, sessionId, setSessionId, setControls, selectedProvider, selectedProviderContextKey, initializedControlsContext, setTurns, setHistoryEvidence, setHistoryLoading, historyRevision, setHistoryRevision, traceViewRef, showTrace, pollIntervalMs, applyPollInterval, setPollInterval, lastPollKey, setRunStatus, setForeignRun, foreignRunRef, setIntents, setPollError, setPollFresh, setHistoryError, generation, provider, providerId, context, presentedHistoryContext, preparedHistoryContext, controlContextKey, contextKey, sessionActive, traceDelta, pollSequence, pollInFlight, pollRef, adoptingSession, adoptedIntent, queueKey } = foundation
   const controlProvider = catalog?.providerDiscovery !== 2 ? provider
     : selectedProvider && selectedProviderContextKey === controlContextKey && desktopProviderKey(selectedProvider) === providerSelection ? selectedProvider : undefined
   // Initialize once per execution context. Refresh validates rather than silently
@@ -43,6 +43,11 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
       setHistoryLoading(false)
       return
     }
+    if (preparedHistoryContext.current !== undefined) {
+      const preparedContext = preparedHistoryContext.current
+      preparedHistoryContext.current = undefined
+      if (preparedContext === contextKey) return
+    }
     const sequence = ++generation.current
     setHistoryError(null)
     setHistoryLoading(true)
@@ -59,7 +64,7 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
     }).catch((reason) => { if (sequence === generation.current) setHistoryError(errorText(reason)) })
       .finally(() => { if (sequence === generation.current) setHistoryLoading(false) })
     return () => { generation.current += 1 }
-  }, [api, catalogReady, connectionId, connected, context, historyRevision, providerId, sessionId])
+  }, [api, catalogReady, connectionId, connected, context, contextKey, historyRevision, providerId, sessionId])
 
   useEffect(() => {
     if (!connected || !catalogReady) return

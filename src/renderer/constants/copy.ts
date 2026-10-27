@@ -175,6 +175,7 @@ export const SIDEBAR_ACTIVITY_COPY = {
 } as const
 
 export const REMOTE_ACCESS_COPY = {
+  discardWorkspaceChanges: '当前远程文件有未保存修改。放弃修改并继续吗？',
   title: '远程访问',
   settingsTab: '远程访问',
   outboundTitle: '连接其他主机',
@@ -291,6 +292,8 @@ export const ARCHIVED_SESSIONS_COPY = {
 
 export const REMOTE_SESSION_COPY = {
   unreadResult: '有新结果，未查看',
+  runningLabel: '正在运行',
+  waitingAnswerLabel: (count: number) => count > 1 ? `需回答 ${count} 个问题` : '需回答',
   archivedTitle: '远程已存档会话',
   archivedDescription: '恢复会话会将其放回远程项目。删除仅移除对应主机上的 Scry 副本。',
   restore: '取消存档',
@@ -376,13 +379,9 @@ export const QUEUE_COPY = {
 } as const
 
 export const LOADING_COPY = {
+  sessionOpenFailed: (detail: string) => `无法打开对话：${detail}`,
   skillsUnavailable: '未取得 Skill 清单，可点刷新重试',
   mcpUnavailable: '未取得 MCP 配置，可点刷新重试',
-  session: '正在加载会话历史',
-  cache: '正在更新最近会话缓存',
-  cacheDetail: '先展示上次读取的最近一页；核对完成前不能发送或分叉。',
-  localArchive: '正在读取本机归档，请稍候。',
-  remoteArchive: (host: string) => `正在读取 ${host} 的归档，请稍候。`,
   skills: '正在读取 Skill…',
   skillsSourceEmpty: '当前来源没有 Skill',
   skillsEmpty: (scope: string) => `未发现${scope}`,

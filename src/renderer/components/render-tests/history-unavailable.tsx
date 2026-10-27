@@ -32,7 +32,7 @@ describe('选中的历史会话读不到证据时不假装成新会话', () => {
     expect(html).not.toContain('新会话 · 本机证据')
   })
 
-  it('正在加载选中的历史时立即标 busy，延迟提示且不展示空归档或上一次错误', () => {
+  it('正在加载选中的历史时只标 busy，不展示加载提示、空归档或上一次错误', () => {
     const html = renderWelcome({
       cwd: '/tmp/project',
       hasSelectedSession: true,

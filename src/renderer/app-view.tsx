@@ -2,7 +2,6 @@ import type { AppViewContext } from './app-view-types'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { TurnDiffSnapshot } from '@shared/trace'
 import type { ConversationSummary } from '@shared/conversation-api'
-import type { RemoteSessionRef } from '@shared/desktop-remote'
 import type { AppView, AppStyle } from './app-types'
 import type { ExecutionLocation } from './components/LocationPicker'
 import type { RightSurfaceAction } from './right-surface'
@@ -11,12 +10,14 @@ import { composerDraftKey } from './composer-drafts'
 import { usePinnedSummaryVisibility } from './components/PinnedSummary'
 import { LocationPicker } from './components/LocationPicker'
 import { remoteDraftKey } from './components/RemoteChat'
+import { REMOTE_ACCESS_COPY } from './constants/copy'
 import { sessionComposerDraftKey, migrateSessionComposerDraft, updateSessionComposerDraft, hasSessionOverviewContext, latestSessionRuntimeProvider } from './app-model'
 import { runtimeProviderForAgentId } from '@shared/runtime'
 import { applyTheme, browserThemeStorage, persistTheme, type AppTheme } from './theme'
 import { adoptConversationWithReadback, conversationTarget } from './conversation-handoff'
 import { useDiffInspector, useNarrowDiffLayout } from './hooks/useDiffInspector'
 import { useWorkspaceSelection } from './hooks/useWorkspaceSelection'
+import { useRemoteSessionSelection } from './hooks/useRemoteSessionSelection'
 import { WorkspaceContext } from './components/WorkspacePicker'
 import type { DiffReviewSelection } from './hooks/useDiffReviewSelection'
 import { runStructuralTransition } from './structural-motion'
@@ -26,12 +27,12 @@ export function useAppView(context: AppViewContext) {
   const { setTheme, setShowSkills, setShowMcp, setShowLlmPerformance, refreshProviderCatalogs,
     view, viewRef, setView, cwd, setCwd, activeSessionId, selectSessionId, session, integrations, sessionLoading, composerSubmitting,
     switchingAgentRef, setSwitchingAgent, setComposerError, draftAttachments, queuedPrompts, draftKey, draftStore, setInput,
-    releaseDraft, selectedProviderSessionId, sessionSelectionSeqRef, activeSessionIdRef, cwdRef, setSessionDrafts, migrateRightSurface,
+    releaseDraft, selectedProviderSessionId, sessionSelectionSeqRef, sessionNavigationSeqRef, activeSessionIdRef, cwdRef, setSessionDrafts, migrateRightSurface,
     loadProjects, recent, chooseFolder, removeRecentFolder, confirmWorkspaceTransition, logicalConversation, conversationProjection,
     sessionEvidenceGap, setConversationError, setConversationAgent, setLogicalConversation, remoteWorkspaceDirty, setRemoteWorkspaceDirty,
-    remoteTarget, setRemoteTarget, setRemoteAdoptedSession, sidebarPane, surfacePane, rightSurfaces, rightSurface,
+    remoteTarget, sidebarPane, surfacePane, rightSurfaces, rightSurface,
     hasSurfaceContext, terminalOpen, remoteSurface, remotePanelVisible, remoteSurfaceKey, currentSurface, dispatchRightSurface,
-    setTurnDiffSelection, setWorkspaceDirty, setSettingsTab, newConversation, unbindProject, pickRecent, setSessionLoading,
+    setTurnDiffSelection, setWorkspaceDirty, setSettingsTab, newConversation, unbindProject, pickRecent,
     turnDiffSelection, taRef, setSlashHidden, workspaceRefreshKey } = context
 
   const openLlmPerformance = (): void => {
@@ -118,8 +119,9 @@ export function useAppView(context: AppViewContext) {
     })
   }
   const changeView = (next: AppView): boolean => {
-    if (view === 'remote' && next !== 'remote' && remoteWorkspaceDirty && !window.confirm('当前远程文件有未保存修改。放弃修改并继续吗？')) return false
+    if (view === 'remote' && next !== 'remote' && remoteWorkspaceDirty && !window.confirm(REMOTE_ACCESS_COPY.discardWorkspaceChanges)) return false
     setRemoteWorkspaceDirty(false)
+    if (next !== view) sessionNavigationSeqRef.current += 1
     cancelPaneMotion()
     runStructuralTransition('page', () => setView(next))
     if (next === 'analytics') integrations.loadAnalytics()
@@ -199,18 +201,7 @@ export function useAppView(context: AppViewContext) {
     setSessionDrafts((current) => updateSessionComposerDraft(current, key, (draft) => ({ ...draft, input: value }), releaseDraft))
   }
   const draftText = (key: string): string => draftStore.getSnapshot().get(key)?.input ?? ''
-  const openRemoteLocation = (connectionId: string, remoteCwd: string, remoteSession?: RemoteSessionRef): void => {
-    if (view === 'remote' && remoteWorkspaceDirty && !window.confirm('当前远程文件有未保存修改。放弃修改并继续吗？')) return
-    setRemoteWorkspaceDirty(false)
-    // Fence pending local history/new-session reads before changing execution location.
-    // The local session keeps running in the background; it is not migrated.
-    sessionSelectionSeqRef.current += 1
-    setSessionLoading(false)
-    closeOverlays()
-    setRemoteTarget((current) => ({ connectionId, cwd: remoteCwd, session: remoteSession, generation: (current?.generation ?? 0) + 1 }))
-    setRemoteAdoptedSession(remoteSession?.externalSessionId)
-    changeView('remote')
-  }
+  const openRemoteLocation = useRemoteSessionSelection(context, closeOverlays)
   // Switching the location of an unsent new draft carries its text along; an
   // existing session never reaches here because its location picker is locked.
   const pickRemoteLocation = (connectionId: string, remoteCwd: string): void => {

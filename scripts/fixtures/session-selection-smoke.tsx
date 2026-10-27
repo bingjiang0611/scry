@@ -43,6 +43,7 @@ const listeners = new Set<(run: ActiveRun) => void>()
 let cwd: string | null = '/fixture/old'
 let activeReads = 0
 let historyReads = 0
+const historyOperations: string[] = []
 let cancelledLoads = 0
 let newSessions = 0
 let starts = 0
@@ -52,7 +53,7 @@ const noopSubscribe = () => () => {}
 const status = document.createElement('output')
 status.id = 'selection-state'
 const update = () => {
-  status.textContent = JSON.stringify({ cwd, activeReads, activeListReads, adoptedRuns, historyReads, cancelledLoads, newSessions, starts, snapshots: pendingSnapshots.length })
+  status.textContent = JSON.stringify({ cwd, activeReads, activeListReads, adoptedRuns, historyReads, historyOperations, cancelledLoads, newSessions, starts, snapshots: pendingSnapshots.length })
 }
 const bridge = {
   workspaceSelection: unavailableWorkspaceSelection,
@@ -95,10 +96,17 @@ const bridge = {
     return cwd
   },
   loadSession: (context: ProviderContext) => {
+    if (pendingHistory) {
+      cancelledLoads += 1
+      pendingHistory.reject(new Error('history superseded'))
+      pendingHistory = null
+    }
     historyReads += 1
+    historyOperations.push(`read:${context.externalSessionId}`)
     update()
     return new Promise((resolve, reject) => {
       pendingHistory = { cwd: context.cwd ?? '', reject, resolve: () => {
+        historyOperations.push(`resolve:${context.externalSessionId}`)
         cwd = context.cwd ?? null
         resolve(scenario === 'stale-live' && context.externalSessionId === 'new-session' ? null : {
           turns: [{ runId: `${context.externalSessionId}-history`, userText: `History for ${context.externalSessionId}`, items: [], done: true }], offset: 0, totalTurns: 1, hasOlder: false, completeness: 'complete'

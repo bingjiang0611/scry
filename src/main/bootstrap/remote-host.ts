@@ -226,9 +226,10 @@ export async function startRemoteHostIfEnabled(runtime: RemoteHostRuntime): Prom
           if (!s.cwd) continue
           let canonical: string
           try { canonical = runtime.resolveCanonicalRemoteProjectDirectory(s.cwd, roots) } catch { continue }
-          const isActive = activeRuns.some((run) =>
+          const activeRun = activeRuns.find((run) =>
             run.providerId === s.providerId && run.cwd === canonical &&
             (run.runId === s.runId || Boolean(s.externalSessionId && run.externalSessionId === s.externalSessionId)))
+          const isActive = activeRun !== undefined
           out.push({
             sessionId: s.sessionId,
             ...(s.externalSessionId ? { externalSessionId: s.externalSessionId } : {}),
@@ -240,6 +241,7 @@ export async function startRemoteHostIfEnabled(runtime: RemoteHostRuntime): Prom
             ...(s.pinnedAt ? { pinnedAt: s.pinnedAt } : {}),
             ...(s.archivedAt ? { archivedAt: s.archivedAt } : {}),
             ...(isActive ? { isActive: true } : {}),
+            ...(activeRun?.pendingQuestions?.length ? { pendingQuestions: activeRun.pendingQuestions.length } : {}),
             ...(s.lastRunOutcome ? { lastRunOutcome: s.lastRunOutcome, ...(s.runId ? { lastRunId: s.runId } : {}) } : {})
           })
         }

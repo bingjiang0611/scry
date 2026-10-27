@@ -73,6 +73,8 @@ export interface RemoteSessionRef {
   pinnedAt?: number
   archivedAt?: number
   isActive?: boolean
+  /** Host-observed questions this run is blocked on. Absence is unknown, not zero. */
+  pendingQuestions?: number
   /** Host-persisted terminal evidence. Absence is unknown, not success. */
   lastRunId?: string
   lastRunOutcome?: import('./turn-record').AgentTurnRecord['status']

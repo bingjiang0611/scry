@@ -8,6 +8,7 @@ export interface DockBadgeAttentionState {
 
 export class DockBadgeState {
   private readonly unreadSessionKeys = new Set<string>()
+  private readonly remoteSessionKeys = new Set<string>()
   private viewedSessionKey: string | null = null
   private revision = 0
 
@@ -59,15 +60,29 @@ export class DockBadgeState {
     this.remove(sessionKey)
   }
 
+  /**
+   * Remote sessions run on a paired host, so their attention is counted here but
+   * owned by the remote classifier: this call replaces the whole remote set and the
+   * caller removes a session once the user opens it.
+   */
+  setRemote(sessionKeys: readonly string[]): void {
+    const next = new Set(sessionKeys)
+    if (next.size === this.remoteSessionKeys.size && [...next].every((key) => this.remoteSessionKeys.has(key))) return
+    this.remoteSessionKeys.clear()
+    for (const key of next) this.remoteSessionKeys.add(key)
+    this.publish()
+  }
+
   // Unread state is process-local; the OS may still display a previous launch's badge.
   sync(): void {
     this.setCount(this.count)
   }
 
   get count(): number {
-    return this.unreadSessionKeys.size
+    return this.unreadSessionKeys.size + this.remoteSessionKeys.size
   }
 
+  // Local keys only: the renderer owns the remote set and reads it per connection.
   snapshot(): SessionAttentionSnapshot {
     return {
       revision: this.revision,

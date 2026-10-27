@@ -40,6 +40,7 @@ export interface AppViewContext {
   releaseDraft: (draft: SessionComposerDraft) => void
   selectedProviderSessionId: string | null
   sessionSelectionSeqRef: MutableRefObject<number>
+  sessionNavigationSeqRef: MutableRefObject<number>
   activeSessionIdRef: MutableRefObject<string | null>
   cwdRef: MutableRefObject<string | null>
   setSessionDrafts: (update: (drafts: ReadonlyMap<string, SessionComposerDraft>) => ReadonlyMap<string, SessionComposerDraft>) => void

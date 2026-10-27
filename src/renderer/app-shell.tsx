@@ -151,5 +151,5 @@ export function AppShell(props: AppShellProps) {
 
 function RemoteView({ target, connections, showPanel, onTogglePanel, ...chat }: { target: RemoteTarget; connections: ReturnType<typeof useDesktopConnections>; showPanel: boolean; onTogglePanel: () => void } & Omit<ComponentProps<typeof RemoteChat>, 'connectionId' | 'cwd' | 'session'>) {
   const connection = connections.connections.find((item) => item.id === target.connectionId)
-  return <><ViewChrome cwd={target.cwd} showSummary={false} showPanel={showPanel} onTogglePanel={onTogglePanel} machine={{ label: connection?.label ?? '远程主机不可用', remote: true, state: connection ? hostState(connection, connections.error, connections.refreshing) : 'unknown' }} /><div className="main-content"><RemoteChat key={target.generation} connectionId={target.connectionId} cwd={target.cwd} session={target.session} {...chat} /></div></>
+  return <><ViewChrome cwd={target.cwd} showSummary={false} showPanel={showPanel} onTogglePanel={onTogglePanel} machine={{ label: connection?.label ?? '远程主机不可用', remote: true, state: connection ? hostState(connection, connections.error, connections.refreshing) : 'unknown' }} /><div className="main-content"><RemoteChat key={target.generation} connectionId={target.connectionId} cwd={target.cwd} session={target.session} preparedHistory={target.preparedHistory} {...chat} /></div></>
 }

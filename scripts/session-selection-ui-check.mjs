@@ -15,10 +15,15 @@ export async function exerciseSessionSelection(contents, scenario) {
       const rect = node.getBoundingClientRect();
       const x = Math.round(rect.left + rect.width / 2), y = Math.round(rect.top + rect.height / 2);
       if (!node.contains(document.elementFromPoint(x, y))) throw new Error('Selection control obscured');
+      window.__selectionClickReceived = false;
+      document.addEventListener('click', event => {
+        window.__selectionClickReceived = event.isTrusted && node.contains(event.target);
+      }, { once: true, capture: true });
       return { x, y };
     })()`)
     contents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
     contents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
+    await wait('window.__selectionClickReceived === true')
   }
   const state = `JSON.parse(document.querySelector('#selection-state').textContent)`
   await wait(`${state}.snapshots === 2`)
@@ -50,6 +55,7 @@ export async function exerciseSessionSelection(contents, scenario) {
       await click(input)
       await wait(`document.activeElement === document.querySelector(${JSON.stringify(input)})`)
       contents.selectAll()
+      await wait(`(() => { const el = document.querySelector(${JSON.stringify(input)}); return el.selectionStart === 0 && el.selectionEnd === el.value.length })()`)
       if (value) await contents.insertText(value)
       else {
         contents.sendInputEvent({ type: 'keyDown', keyCode: 'Backspace' })
@@ -114,10 +120,10 @@ export async function exerciseSessionSelection(contents, scenario) {
   if (scenario === 'repeat-pending') {
     await click('.sb-sess[data-provider="pi"]')
     await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
-    if (await read(`${state}.historyReads !== 1 || document.querySelector('.chat-transcript')?.getAttribute('aria-busy') !== 'true'`)) {
-      throw new Error('Repeated pending selection restarted history or cleared its loading state')
+    if (await read(`${state}.historyReads !== 1 || !document.querySelector('.sb-sess.running[aria-current="true"]') || !document.querySelector('.chat-transcript')?.textContent.includes('Old running conversation')`)) {
+      throw new Error('Repeated pending selection restarted history or changed the retained selection')
     }
-    await wait(`document.querySelector('[data-status="loading"]')?.textContent.includes('正在加载会话历史')`)
+    if (await read(`!!document.querySelector('[data-status="loading"]')`)) throw new Error('Pending selection displayed a loading banner')
     if (await read(`document.body.innerText.includes('这条会话暂时没有可显示的轮次')`)) throw new Error('Pending history was reported as empty')
   }
   if (scenario !== 'late-startup') await click('#resolve-snapshots')
@@ -125,15 +131,17 @@ export async function exerciseSessionSelection(contents, scenario) {
     await wait(`${state}.snapshots === 0`)
     // Let both bootstrap promises and React effects settle while history is still pending.
     await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
-    if (await read(`${state}.cancelledLoads !== 0 || ${state}.cwd !== '/fixture/new'`)) {
+    if (await read(`${state}.cancelledLoads !== 0 || ${state}.cwd !== '/fixture/old'`)) {
       throw new Error(`${scenario}: late bootstrap cancelled the pending history: ${JSON.stringify(await read(state))}`)
     }
   }
-  const expectedCancellations = scenario === 'rapid-switch' ? 2 : 0
+  const expectedCancellations = scenario === 'rapid-switch' ? 1 : 0
   if (scenario === 'rapid-switch') {
     await click('.sb-sess[data-provider="claude"]')
     await wait(`${state}.historyReads === 2`)
     await click('.sb-sess[data-provider="pi"]')
+    if (await read(`${state}.historyReads !== 2`)) throw new Error('Cold target aborted the retained authority refresh')
+    await click('#resolve-history')
     await wait(`${state}.historyReads === 3`)
   }
   await click('#resolve-history')
@@ -147,13 +155,13 @@ export async function exerciseSessionSelection(contents, scenario) {
   if (scenario !== 'focused-event' && await read(`document.querySelector('.run-status') != null`)) {
     throw new Error(`${scenario}: stale startup run leaked into history`)
   }
-  if (result.cancelledLoads !== expectedCancellations || result.cwd !== '/fixture/new' || result.activeReads !== baseline) {
+  if (result.historyReads !== (scenario === 'rapid-switch' ? 3 : 1) || result.cancelledLoads !== expectedCancellations || result.cwd !== '/fixture/new' || result.activeReads !== baseline) {
     throw new Error(`${scenario}: stale startup recovery disturbed selection: ${JSON.stringify(result)}`)
   }
   if (await read(`document.body.innerText.includes('workspace changed')`)) throw new Error(`${scenario}: workspace error visible`)
   // Switch back to the running session, including within the same Provider/profile.
   await click('.sb-sess.running')
-  await wait(`${state}.historyReads === ${expectedCancellations + 2}`)
+  await wait(`${state}.historyReads === ${result.historyReads + 1}`)
   await click('#resolve-history')
   await wait(`document.body.innerText.includes('History for old-session')`)
   if (await read(`${state}.activeReads`) !== baseline) throw new Error(`${scenario}: reverse switch restarted bootstrap`)

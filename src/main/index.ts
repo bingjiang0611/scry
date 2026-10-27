@@ -27,6 +27,7 @@ import { providerOperationKey } from './provider-operation-gate'
 import { CommandReceipts } from './command-receipts'
 import { RemoteHostService } from './remote/remote-host-service'
 import { registerDesktopClientIpc } from './remote/desktop-client-ipc'
+import { createRemoteAttentionTracker } from './remote/remote-attention'
 import type { DesktopRemoteForkSessionRequest } from '../shared/desktop-remote'
 import {
   canonicalExistingDirectory
@@ -330,7 +331,8 @@ const remoteConnections = createRemoteConnections({
   withProviderOperation, remoteProjectRoots, hasRemoteHost: () => remoteHostService !== null
 })
 const { requireDesktopRemoteClient, remoteProviderDiscovery, refreshRemoteProviderSnapshot } = remoteConnections
-registerDesktopClientIpc(handleTrusted, requireDesktopRemoteClient)
+registerDesktopClientIpc(handleTrusted, requireDesktopRemoteClient,
+  createRemoteAttentionTracker((keys) => dockBadge.setRemote(keys)))
 let remoteProviderRefresh: ReturnType<typeof setInterval> | undefined
 
 function invalidateRemoteProviderMetadata(providerId: ProviderId): void {
