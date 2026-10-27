@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import type { TraceEvent } from '@shared/trace'
 
 const WINDOW_THRESHOLD = 96
-const VISIBLE_ITEMS = 64
+const VISIBLE_ITEMS = 16
 
 export function useCompletedTurnFlow(
   items: TraceEvent[],

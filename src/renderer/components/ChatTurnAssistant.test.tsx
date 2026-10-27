@@ -21,7 +21,7 @@ const render = (value: Turn, selectedId: string | null = null) => renderToStatic
 describe('large completed turn flow window', () => {
   it('renders the recent evidence first with an explicit earlier-activity control', () => {
     const html = render(turn)
-    expect(html).toContain(TURN_FLOW_COPY.showEarlier(37))
+    expect(html).toContain(TURN_FLOW_COPY.showEarlier(85))
     expect(html).not.toContain('earliest archived evidence')
     expect(html).toContain('latest archived evidence')
   })
@@ -29,12 +29,12 @@ describe('large completed turn flow window', () => {
   it('reveals the full flow when an earlier event is selected', () => {
     const html = render(turn, 'text-0')
     expect(html).toContain('earliest archived evidence')
-    expect(html).not.toContain(TURN_FLOW_COPY.showEarlier(37))
+    expect(html).not.toContain(TURN_FLOW_COPY.showEarlier(85))
   })
 
   it('never windows an active turn', () => {
     const html = render({ ...turn, done: false })
     expect(html).toContain('earliest archived evidence')
-    expect(html).not.toContain(TURN_FLOW_COPY.showEarlier(37))
+    expect(html).not.toContain(TURN_FLOW_COPY.showEarlier(85))
   })
 })
