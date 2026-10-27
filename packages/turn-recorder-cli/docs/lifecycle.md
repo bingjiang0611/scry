@@ -2,6 +2,14 @@
 
 [返回 CLI README](../README.md)
 
+## 0.2.52 sequence 水位、投递空洞与丢失结果恢复
+
+- sequence 分配改为持久化已发号水位：提交锁内先 durable 写入再写 record，删除最新 record 或删光 records 后不再复用号。`doctor` 新增 `records.sequence`，水位高于现存最大号时报 warn。
+- 号上完全没有 record（崩溃跳过或被删）时 ACK 可以越过，但先写有上限的区间证据 `delivery-outcomes/<指纹>/absent-sequences.json`（合并区间、最多 32 段、`count` 精确、`truncated` 标记）。`doctor` 列出这些号。
+- record 还在但投递结果丢失时保持 fail closed：drain 返回 `pending: null`（未知，不是 0），不再让 catch 二次抛出把后续投递全部卡死。
+- `scry recorder notify-retry --sequence N` 除活动死信外，也接受「有 record、无 outcome」的号并重新投递；`doctor` 写出该 sequence 与这条命令。接收方按 `recordId` 去重是前提，自动 drain 仍 fail closed。
+- shell hook 对确定未送达（调用失败或 HTTP 4xx）清除 `SCRY_RECORDER_DAEMON_TRIED`，下次会重试；其他不确定响应保留原行为。
+
 ## 0.2.51 CLI 重复工作消除与 Pi 终态修复
 
 - 完整 Git discovery 确认零候选时复用既有快照；相同 tree 不再重复 diff，不减少仓库检查范围。

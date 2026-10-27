@@ -9,7 +9,7 @@ Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,�
 ## 安装与接入
 
 ```bash
-npm install -g scry-turn-recorder@0.2.51
+npm install -g scry-turn-recorder@0.2.52
 
 cd /path/to/project      # 必须是 Git 仓库根目录
 scry init                # 自动检测 claude / codex / qoder / opencode
