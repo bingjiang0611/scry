@@ -90,7 +90,8 @@ export async function recorderCommand(args: ParsedArgs): Promise<number> {
       ? await retryCommitNotifications(enablement.dataRoot, env, sequence)
       : await drainCommitNotifications(enablement.dataRoot, env)
     print({ action, workspace, activation: activation.status, ...result })
-    return result.pending > 0 ? 3 : 0
+    // An unknown backlog (delivery state unreadable) is pending work, not success.
+    return result.pending === null || result.pending > 0 ? 3 : 0
   }
   if (action === 'serve') {
     await serveRecorderDaemon({

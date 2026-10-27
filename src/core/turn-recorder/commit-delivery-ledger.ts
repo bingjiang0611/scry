@@ -31,6 +31,75 @@ function historyPath(dataRoot: string, fingerprint: string, key: string) {
   return join(dataRoot, 'notifications', 'dead-letter-history', stableHash(fingerprint), `${key}.json`)
 }
 
+/**
+ * Bounded evidence for sequence numbers the ACK crossed without any record file.
+ *
+ * A number can be absent for two reasons, and both leave nothing to deliver: a commit reserved it
+ * and crashed before writing the record, or the record file was deleted outside
+ * `scry turns archive`. The ACK may cross such a number — otherwise every later delivery stalls —
+ * but the crossing must stay visible, so it is recorded here instead of being inferred as success.
+ * Ranges are merged (a large hole costs one entry) and the kept sample is capped; `count` stays
+ * exact so a truncated sample never implies there were only `ranges.length` holes.
+ */
+export interface AbsentSequences {
+  schemaVersion: 1
+  hookFingerprint: string
+  /** Highest crossed sequence; the ledger is append-only and monotonic. */
+  absentThrough: number
+  count: number
+  ranges: Array<[number, number]>
+  truncated: boolean
+}
+
+const ABSENT_RANGE_LIMIT = 32
+
+function absentPath(dataRoot: string, fingerprint: string) {
+  return join(directory(dataRoot, fingerprint), 'absent-sequences.json')
+}
+
+export async function readAbsentSequences(dataRoot: string, fingerprint: string): Promise<AbsentSequences | null> {
+  const raw = await readNotificationObject<AbsentSequences>(absentPath(dataRoot, fingerprint))
+  if (!raw) return null
+  if (raw.schemaVersion !== 1 || raw.hookFingerprint !== fingerprint || !Number.isSafeInteger(raw.absentThrough) ||
+    !Number.isSafeInteger(raw.count) || raw.count < 0 || raw.count > raw.absentThrough || typeof raw.truncated !== 'boolean' ||
+    !Array.isArray(raw.ranges) || raw.ranges.length > ABSENT_RANGE_LIMIT) {
+    throw new Error('invalid absent-sequence ledger')
+  }
+  let previous = 0
+  let spanned = 0
+  for (const range of raw.ranges) {
+    if (!Array.isArray(range) || range.length !== 2) throw new Error('invalid absent-sequence ledger')
+    const [from, to] = range
+    if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from > to || from <= previous || to > raw.absentThrough) {
+      throw new Error('invalid absent-sequence ledger')
+    }
+    previous = to
+    spanned += to - from + 1
+  }
+  if (spanned > raw.count) throw new Error('invalid absent-sequence ledger')
+  return raw
+}
+
+/** Durable, monotonic, range-compacted record of one crossed hole. */
+async function recordAbsent(dataRoot: string, fingerprint: string, sequence: number): Promise<void> {
+  const previous = await readAbsentSequences(dataRoot, fingerprint)
+  const ranges = previous ? previous.ranges.map(([from, to]) => [from, to] as [number, number]) : []
+  const last = ranges.at(-1)
+  if (last && sequence <= last[1]) return
+  if (last && last[1] === sequence - 1) last[1] = sequence
+  else ranges.push([sequence, sequence])
+  const truncated = (previous?.truncated ?? false) || ranges.length > ABSENT_RANGE_LIMIT
+  const ledger: AbsentSequences = {
+    schemaVersion: 1,
+    hookFingerprint: fingerprint,
+    absentThrough: sequence,
+    count: (previous?.count ?? 0) + 1,
+    ranges: ranges.slice(0, ABSENT_RANGE_LIMIT),
+    truncated
+  }
+  await writeJsonAtomic(absentPath(dataRoot, fingerprint), ledger)
+}
+
 export async function readOutcome(dataRoot: string, fingerprint: string, sequence: number): Promise<DeliveryOutcome | null> {
   const raw = await readNotificationObject<DeliveryOutcome & { schemaVersion: number; hookFingerprint: string }>(outcomePath(dataRoot, fingerprint, sequence))
   if (!raw) return null
@@ -116,14 +185,40 @@ export async function loadDeliveryState(dataRoot: string, fingerprint: string): 
   return state
 }
 
-/** ACK can only cross positively persisted success receipts, not an absent retry file. */
-export async function advanceAck(dataRoot: string, state: CommitHookState, floor: number): Promise<void> {
+/**
+ * The store is readable, but the ACK cannot prove a sequence whose record file still exists.
+ * This is the one delivery failure a drain may report softly: retrying cannot help, and letting
+ * it escape as a thrown promise made every later drain and status query fail.
+ */
+export class UnresolvedDeliveryPrefixError extends Error {
+  constructor() {
+    super('missing delivery outcome in visited prefix')
+    this.name = 'UnresolvedDeliveryPrefixError'
+  }
+}
+
+async function walkAck(dataRoot: string, state: CommitHookState, floor: number, persistHoles: boolean): Promise<void> {
+  let live: Set<number> | undefined
   for (let sequence = Math.max(state.ackedThrough, floor) + 1; sequence <= (state.processedThrough ?? state.ackedThrough); sequence++) {
     const outcome = await readOutcome(dataRoot, state.hookFingerprint, sequence)
-    if (!outcome) throw new Error('missing delivery outcome in visited prefix')
-    if (outcome.status !== 'delivered') break
+    if (outcome) {
+      if (outcome.status !== 'delivered') break
+      state.ackedThrough = sequence
+      continue
+    }
+    // No receipt. A sequence that still has a record file lost its delivery result and must stay
+    // fail closed; only a sequence with no record at all is a hole with nothing left to deliver.
+    live ??= new Set((await recordFiles(dataRoot, { bypassIndex: true })).map(file => file.sequence))
+    if (live.has(sequence)) throw new UnresolvedDeliveryPrefixError()
+    if (persistHoles) await recordAbsent(dataRoot, state.hookFingerprint, sequence)
     state.ackedThrough = sequence
   }
+}
+
+/** ACK can only cross positively persisted success receipts; an absent sequence may also be
+ * crossed, but the drain records that absence as durable evidence before the ACK moves. */
+export async function advanceAck(dataRoot: string, state: CommitHookState, floor: number): Promise<void> {
+  await walkAck(dataRoot, state, floor, true)
 }
 
 export async function finishReplay(dataRoot: string, fingerprint: string, outcome: DeliveryOutcome): Promise<void> {
@@ -203,8 +298,9 @@ export async function ledgerStatus(dataRoot: string, fingerprint: string, state:
   // Verify the unexplained prefix lazily, stopping at the first known unresolved sequence.
   if (state.queueVersion === 2 && state.processedThrough > (state.ackedThrough ?? 0)) {
     const probe: CommitHookState = { schemaVersion: 1, hookFingerprint: fingerprint, ackedThrough: state.ackedThrough ?? 0, processedThrough: state.processedThrough }
-    await advanceAck(dataRoot, probe, (await readArchiveState(dataRoot))?.archivedThrough ?? 0)
+    // Read-only: status may cross a hole to explain the prefix, but only a drain persists that.
+    await walkAck(dataRoot, probe, (await readArchiveState(dataRoot))?.archivedThrough ?? 0, false)
   }
   return { notifyBacklog: fresh.length - knownBeyondProgress + retryCount,
-    outcomeCount, retryCount, retries, failure, deadLetterCount, deadLetters: dead }
+    outcomeCount, retryCount, retries, failure, deadLetterCount, deadLetters: dead, absent: await readAbsentSequences(dataRoot, fingerprint) }
 }

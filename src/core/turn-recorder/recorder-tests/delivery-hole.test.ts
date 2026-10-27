@@ -123,26 +123,32 @@ if (JSON.parse(fs.readFileSync(${JSON.stringify(reject)}, 'utf8')).includes(noti
     const result = await drainCommitNotifications(f.dataRoot, f.env)
     // Drained, but the unknown backlog is reported as unknown instead of a fabricated count.
     expect(result).toMatchObject({ truncated: false, pending: null })
-    await expect(commitNotificationStatus(f.dataRoot, f.env)).resolves.toMatchObject({ ackedThrough: 1 })
+    // The ACK never crosses a sequence whose record is still there: fail closed, loudly.
+    await expect(commitNotificationStatus(f.dataRoot, f.env)).rejects.toThrow('missing delivery outcome in visited prefix')
+    const checkpoint = JSON.parse(await readFile(join(f.dataRoot, 'notifications', 'commit-hooks', `${stableHash(fingerprint)}.json`), 'utf8')) as { ackedThrough: number }
+    expect(checkpoint.ackedThrough).toBe(1)
     // Nothing was marked absent: a record with a lost result is not a hole.
     expect(await absentEvidence(f.dataRoot)).toBeNull()
   })
 
-  it('does not rethrow the delivery-state error from the drain catch', async () => {
+  it('keeps corrupt delivery evidence a loud rejection instead of reporting an unknown backlog', async () => {
     const f = await fixture()
     await completeTurn(f.root, 'turn-1')
     await drainCommitNotifications(f.dataRoot, f.env)
     await completeTurn(f.root, 'turn-2')
-    // A damaged receipt on an undelivered sequence makes both the drain walk and the status query throw.
+    // A damaged receipt is not a hole: nothing proves the record was handed over.
     await mkdir(outcomesDir(f.dataRoot), { recursive: true })
     await writeFile(join(outcomesDir(f.dataRoot), pad(2)), JSON.stringify({ schemaVersion: 1, hookFingerprint: fingerprint, sequence: 2, recordId: 'a'.repeat(32), status: 'bogus' }))
+    await expect(drainCommitNotifications(f.dataRoot, f.env)).rejects.toThrow('invalid delivery outcome')
 
-    await expect(commitNotificationStatus(f.dataRoot, f.env)).rejects.toThrow()
-    const result = await drainCommitNotifications(f.dataRoot, f.env)
-    expect(result).toMatchObject({ delivered: 0, truncated: false, pending: null })
+    for (const [key, value] of Object.entries(f.env)) vi.stubEnv(key, value)
+    const broken = await doctor(f.root)
+    expect(broken.code).toBe(5)
+    expect(broken.report.status).toBe('error')
+    expect(broken.report.checks.find(check => check.id === 'commitHook.delivery')?.status).toBe('fail')
   })
 
-  it('doctor shows absent sequences and reports an error when the delivery state is unreadable', async () => {
+  it('doctor shows the absent sequences the ACK crossed', async () => {
     const f = await fixture()
     await completeTurn(f.root, 'turn-1')
     await f.rejectSequences([1])
@@ -162,12 +168,6 @@ if (JSON.parse(fs.readFileSync(${JSON.stringify(reject)}, 'utf8')).includes(noti
     expect(delivery?.detail).toMatch(/2/)
     expect(healthy.report.commitNotifications).toMatchObject({ absentCount: 1, absentRanges: [[2, 2]] })
 
-    // A damaged receipt must surface as an error, never as healthy.
-    await writeFile(join(outcomesDir(f.dataRoot), pad(4)), JSON.stringify({ schemaVersion: 1, hookFingerprint: fingerprint, sequence: 4, recordId: 'b'.repeat(32), status: 'bogus' }))
-    const broken = await doctor(f.root)
-    expect(broken.code).toBe(5)
-    expect(broken.report.status).toBe('error')
-    expect(broken.report.checks.find(check => check.id === 'commitHook.delivery')?.status).toBe('fail')
   })
 }
 

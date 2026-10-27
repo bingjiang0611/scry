@@ -36,7 +36,7 @@ drain 按 `(hook fingerprint, sequence)` 持久化次数和最后失败时间。
 
 检查点位于 `<dataRoot>/notifications/commit-hooks/<fingerprint-hash>.json`。逐 sequence 的失败、重放请求和缺口之后的成功凭据在 `notifications/delivery-outcomes/<fingerprint-hash>/`；死信在 `notifications/dead-letters/<fingerprint-hash>/<sequence>-<recordId>.json`。元数据不复制正文、env 或 stderr。canonical record 与上传环境旁路不因隔离而删除。计数/凭据损坏时 unavailable，不清零、不把缺失的成功凭据当作 ACK。
 
-`processedThrough` 是已遍历位置，包含退避和死信，**不是 ACK**。`ackedThrough` 只沿连续成功证据前进；重试项或死信之前的 ACK 缺口会阻止普通归档。后续成功保留独立凭据，前面的重放成功后才能补齐 ACK。`notifyBacklog` 包含退避项、不含死信。`notify-drain` 有待重试项时退出 3；退出 0 仅表示自动队列为空，不能证明没有死信。`doctor` 报出次数和 `nextRetryAt`：退避 warn、死信 fail、证据不可读 fail，均退出 5。重试详情最多显示最前 20 项、死信详情最多显示最新 20 项；内部遍历逐条读取，不将全部正文放进诊断输出。
+某号完全没有 record（提交只保留了号码就崩溃，或记录文件在 `scry turns archive` 之外被删除）时没有可投递内容，ACK 可以越过它，但 drain 会先在 `notifications/delivery-outcomes/<fingerprint-hash>/absent-sequences.json` 写入证据：合并区间、最多保留 32 段，`count` 始终精确，采样被截断时 `truncated` 为 true；因此大缺口不会逐号写文件。区间只记录「这个号没有记录文件」，不表示投递成功；`doctor` 会列出数量和区间。反过来，**record 还在但投递结果丢失时不越过**：这种状态 fail closed，drain 返回 `pending: null`（未知，不是 0）并在日志报错，需人工核对证据。`processedThrough` 是已遍历位置，包含退避和死信，**不是 ACK**。`ackedThrough` 只沿连续成功证据前进；重试项或死信之前的 ACK 缺口会阻止普通归档。后续成功保留独立凭据，前面的重放成功后才能补齐 ACK。`notifyBacklog` 包含退避项、不含死信。`notify-drain` 有待重试项时退出 3；退出 0 仅表示自动队列为空，不能证明没有死信。`doctor` 报出次数和 `nextRetryAt`：退避 warn、死信 fail、证据不可读 fail，均退出 5。重试详情最多显示最前 20 项、死信详情最多显示最新 20 项；内部遍历逐条读取，不将全部正文放进诊断输出。
 
 修复原因后，明确选择单条或全部当前身份的死信：
 

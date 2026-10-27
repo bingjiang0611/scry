@@ -84,6 +84,9 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
   const failure = delivery?.failure
   const retry = delivery?.retries?.[0] ?? failure
   const retryDetail = retry ? `retrying sequence ${retry.sequence}: ${retry.attempts} failed attempts${retry.reason ? ` (${retry.reason})` : ''}; next retry ${retry.nextRetryAt ?? 'quarantine recovery pending'}` : undefined
+  const absent = delivery?.absentCount ? `; ${delivery.absentCount} absent sequence(s) acknowledged with no record file: ` +
+    delivery.absentRanges!.map(([from, to]) => from === to ? `${from}` : `${from}-${to}`).join(', ') +
+    (delivery.absentTruncated ? ' (range sample truncated)' : '') : ''
   const deliveryCheck: Check = {
     id: 'commitHook.delivery',
     status: deliveryError || deadCount > 0 ? 'fail' : retry ? 'warn' : 'pass',
@@ -92,7 +95,7 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
         delivery!.deadLetters!.map(item => `sequence ${item.sequence}: ${item.attempts} failed attempts (${item.reason})`).join('; ') +
         (retryDetail ? `; ${retryDetail}` : '')
       : retryDetail ? retryDetail
-      : delivery ? `${delivery.notifyBacklog} notification(s) pending; no recorded delivery failure` : 'commit hook not configured'),
+      : delivery ? `${delivery.notifyBacklog} notification(s) pending; no recorded delivery failure${absent}` : 'commit hook not configured'),
     ...(deliveryError || deadCount > 0 || retry ? {
       remediation: 'inspect the callback and sequence diagnostics; repair the cause before `scry recorder notify-retry --sequence N` or `--all-dead`; dead letters are not ACKs'
     } : {})
@@ -206,7 +209,9 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
   ]
   print({
     schemaVersion: 1,
-    status: !store.ok ? 'corrupt' : hookSkips.recentCount > 0 ? 'error' : degraded ? 'degraded' : 'healthy',
+    // An unreadable delivery/activation state is an error: the recorder cannot tell whether
+    // records were handed over, so this must never read as merely degraded or healthy.
+    status: !store.ok ? 'corrupt' : hookSkips.recentCount > 0 || !!deliveryError ? 'error' : degraded ? 'degraded' : 'healthy',
     hookSkips,
     userHookSkips,
     healthy: store.ok && !degraded,
