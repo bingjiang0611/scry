@@ -11,7 +11,7 @@ import { RotomRpcPool } from './pi-rpc'
 import type { PiProbe, PiRunState } from './pi-types'
 import { runPiAgent } from './pi-run'
 import { record } from './pi-shared'
-import { piRpcArgs, withPiRpc, probePiAgent, commandCatalog, skillCatalog, piModelContextWindows, piHistoryNeedsModelCatalog, enrichPiHistory, runControlCatalog } from './pi-catalog'
+import { piRpcArgs, withPiRpc, probePiAgent, disposePiCatalog, commandCatalog, skillCatalog, piModelContextWindows, piHistoryNeedsModelCatalog, enrichPiHistory, runControlCatalog } from './pi-catalog'
 
 
 export function createPiAdapter(options: {
@@ -170,10 +170,12 @@ export function createPiAdapter(options: {
         getRecordingFailure: () => state.recordingFailure
       }
     },
-    invalidateContext(context) {
+    async invalidateContext(context) {
+      await disposePiCatalog()
       return rotomPool.invalidate(context)
     },
-    dispose() {
+    async dispose() {
+      await disposePiCatalog()
       return rotomPool.dispose()
     },
     sessionEvidence: {
