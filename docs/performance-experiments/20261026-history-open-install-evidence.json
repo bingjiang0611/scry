@@ -1,0 +1,300 @@
+{
+  "schema": 1,
+  "source": {
+    "commit": "9cbd73ff9cec6c4e52dc5dc2c09f813b88a15d12",
+    "tree": "531e9dd56088391976c5ba1602b95364f296f521",
+    "buildId": "b251f32389930f388231f010006166c4d64d2ec623c8ae20bf6bb813e03d9cf6",
+    "appVersion": "0.2.226",
+    "cliVersion": "0.2.51",
+    "priorValidation": "20261026-history-open-validation-evidence.json",
+    "priorCurrentMainUnit": {
+      "passed": 4218,
+      "skipped": 4,
+      "failed": 0
+    },
+    "priorPiHistoryElectron": "passed"
+  },
+  "build": {
+    "host": "mac2 Apple Silicon; Node 24.18.0; Electron 42.10.1",
+    "packCommand": "npm run pack:artifact",
+    "packCommandExit": "unknown",
+    "statusCaptureFailure": "zsh rejected assignment to its read-only status variable after npm returned",
+    "observedCompletedStages": [
+      "> scry@0.2.226 build",
+      "> scry@0.2.226 build:cli",
+      "packaging       platform=darwin arch=arm64 electron=42.10.1",
+      "> scry@0.2.226 check:packaged-app",
+      "> scry@0.2.226 smoke:electron",
+      "Background startup: no display or native focus",
+      "Renderer crash recovery:",
+      "\"historyRestart\"",
+      "\"fileLinks\"",
+      "\"supportedScenarios\""
+    ],
+    "developmentOnly": true,
+    "signedAndNotarized": false,
+    "remoteCheck": {
+      "appPath": "/Users/test/scry-performance-climb-mac2.cO3N5W/history-install-main/dist/mac-arm64/Scry.app",
+      "bytes": 287354997,
+      "maxBytes": 346030080,
+      "sizeBreakdown": {
+        "frameworks": 240549417,
+        "asar": 25734965,
+        "unpacked": 19000528,
+        "privateCli": 814275
+      },
+      "preload": "cjs",
+      "qoderBundledCli": false,
+      "qoderSdk": true,
+      "runtimeDependencies": 311,
+      "nodePty": true,
+      "scryCliBundled": true,
+      "scryCliVersion": "0.2.51",
+      "historyExtensionHash": "c86db7857dddea255eda02931d32827e62babc7a4b440e74d5ac8b7f2d11e186"
+    },
+    "artifactManifest": {
+      "operation": "create",
+      "root": "dist/mac-arm64/Scry.app",
+      "entries": 478,
+      "files": 369,
+      "bytes": 287354997,
+      "sha256": "758a7caa711a93f1bb3080acf94b9a79053dcb00c00d73898ddc6c4ff1807c10",
+      "matched": false
+    },
+    "archiveSha256": "7cc8d9ec902cfa26c221586c58b74e31cdee24bed8085daee3bf85b7d4468246  /Users/test/scry-performance-climb-mac2.cO3N5W/logs/history-install-20261026/Scry-0.2.226-history.zip"
+  },
+  "transfer": {
+    "localManifest": {
+      "operation": "verify",
+      "root": "/Users/baobingjiang/.local/state/scry-history-install-20261026.IubVGb/source/dist/mac-arm64/Scry.app",
+      "entries": 478,
+      "files": 369,
+      "bytes": 287354997,
+      "sha256": "758a7caa711a93f1bb3080acf94b9a79053dcb00c00d73898ddc6c4ff1807c10",
+      "matched": true
+    },
+    "localCheck": {
+      "appPath": "/Users/baobingjiang/.local/state/scry-history-install-20261026.IubVGb/source/dist/mac-arm64/Scry.app",
+      "bytes": 287354997,
+      "maxBytes": 346030080,
+      "sizeBreakdown": {
+        "frameworks": 240549417,
+        "asar": 25734965,
+        "unpacked": 19000528,
+        "privateCli": 814275
+      },
+      "preload": "cjs",
+      "qoderBundledCli": false,
+      "qoderSdk": true,
+      "runtimeDependencies": 311,
+      "nodePty": true,
+      "scryCliBundled": true,
+      "scryCliVersion": "0.2.51",
+      "historyExtensionHash": "c86db7857dddea255eda02931d32827e62babc7a4b440e74d5ac8b7f2d11e186"
+    },
+    "archiveSha256Verified": true
+  },
+  "installation": {
+    "target": "/Applications/Scry.app",
+    "before": {
+      "version": "0.2.221",
+      "cliVersion": "0.2.51",
+      "buildId": "c20f8ef4d7f1e238491676c5c6b451f4863ce682ca4b8f1d7c31fa6a47391b6c"
+    },
+    "after": {
+      "version": "0.2.226",
+      "cliVersion": "0.2.51",
+      "buildId": "b251f32389930f388231f010006166c4d64d2ec623c8ae20bf6bb813e03d9cf6"
+    },
+    "backup": {
+      "version": "0.2.221",
+      "cliVersion": "0.2.51",
+      "buildId": "c20f8ef4d7f1e238491676c5c6b451f4863ce682ca4b8f1d7c31fa6a47391b6c"
+    },
+    "manifest": {
+      "operation": "verify",
+      "root": "/Applications/Scry.app",
+      "entries": 478,
+      "files": 369,
+      "bytes": 287354997,
+      "sha256": "758a7caa711a93f1bb3080acf94b9a79053dcb00c00d73898ddc6c4ff1807c10",
+      "matched": true
+    },
+    "installerOutput": "/Applications/Scry.app\nbackup: /Applications/.Scry.app.backup",
+    "installedByThisTask": true,
+    "userProcess": {
+      "pid": 59065,
+      "stillRunning": true,
+      "details": "59065 Mon Oct 26 19:27:18 2026     /Applications/Scry.app/Contents/MacOS/Scry"
+    },
+    "userProcessRestarted": false
+  },
+  "acceptance": {
+    "mode": "installed packaged app with isolated temporary userData/workspaces and fixture Provider only",
+    "result": "passed",
+    "installedSmoke": {
+      "appPath": "/Applications/Scry.app",
+      "rendererUrl": "file:///Applications/Scry.app/Contents/Resources/app.asar/out/renderer/index.html",
+      "preloadKeys": 120,
+      "fixtureDiscovery": [
+        [
+          "codex"
+        ],
+        [
+          "codex"
+        ],
+        [
+          "codex"
+        ]
+      ],
+      "toolContent": {
+        "boundedHistory": true,
+        "fullTail": true,
+        "foreignContentDenied": true
+      },
+      "terminal": true,
+      "rendererReloadTerminal": {
+        "active": true,
+        "epochAdvanced": true,
+        "replayed": true,
+        "staleOwnerFenced": true
+      },
+      "recording": {
+        "disabledWhileRunning": true,
+        "state": "complete",
+        "captured": true,
+        "replayed": true,
+        "readonly": true,
+        "noSpawn": true,
+        "deleted": true
+      },
+      "historyReload": {
+        "sameSession": true,
+        "firstLatest": true,
+        "reopenedLatest": true,
+        "latestPrompt": "latest second-turn history",
+        "bothTurns": true
+      },
+      "historyRestart": {
+        "found": true,
+        "replayed": true,
+        "readonly": true,
+        "modalAccessible": true,
+        "modalVisible": true,
+        "noSpawn": true,
+        "oldWriteRejected": true,
+        "foreignHidden": true,
+        "foreignReadRejected": true,
+        "mode": "owned-app-crash"
+      },
+      "surfaces": {
+        "unboundButton": true,
+        "unboundInitiallyHidden": true,
+        "unboundOpened": true,
+        "unboundTerminal": true,
+        "unboundTerminalRunning": true,
+        "unboundHidden": true,
+        "unboundTerminalRetained": true,
+        "scopedSelection": true,
+        "panel": true,
+        "terminal": true,
+        "agents": true,
+        "agentsActive": true,
+        "terminalHiddenButMounted": true,
+        "maximized": true,
+        "restored": true,
+        "hidden": true,
+        "reopened": true
+      },
+      "modal": {
+        "opened": true,
+        "labelled": true,
+        "focusedInside": true,
+        "closed": true,
+        "restored": true
+      },
+      "subframeIpc": "not_exposed",
+      "popupDenied": true,
+      "navigationDenied": true
+    },
+    "realProviderExecuted": false,
+    "foregroundUserAppUsed": false,
+    "ownedProcessesRemaining": 0
+  },
+  "limits": [
+    "installed smoke covers packaged history reload/restart, trust boundaries, terminal, recording and renderer crash; the 40-turn large-diff shape remains covered by the prior fixed workload and Pi history fixture",
+    "the user process remains the pre-install process and must be restarted by the user to load the new build",
+    "no L3 daily-use sample and no real paid Provider acceptance"
+  ],
+  "logs": {
+    "root": "/Users/baobingjiang/.local/state/scry-history-install-20261026.IubVGb",
+    "remote": "/Users/test/scry-performance-climb-mac2.cO3N5W/logs/history-install-20261026",
+    "files": [
+      {
+        "path": "pack-artifact.log",
+        "bytes": 10353,
+        "sha256": "3c7d33c99d4d2e3d394270873a4109511f4d813356855d4a434a3bcbd3401af7"
+      },
+      {
+        "path": "postpack-check.json",
+        "bytes": 477,
+        "sha256": "b6f048ec8258eb402f8dec493c6ab18de9c9f6e0477528a5afffffc46500d26e"
+      },
+      {
+        "path": "app-manifest.json",
+        "bytes": 109472,
+        "sha256": "58a4959a002b2102c34ddb1cfe50cd8797b37917bf3cbb729483976558c3aa49"
+      },
+      {
+        "path": "app-manifest-summary.json",
+        "bytes": 192,
+        "sha256": "469ffe45b656c3c09150a815c60a323e0da97f48ee029f2cceff1efe3eb6bd02"
+      },
+      {
+        "path": "archive-sha256.txt",
+        "bytes": 168,
+        "sha256": "1062cb38d95baad7ea5230c69124d7306996dd380a9c8111ce78520dee4d073b"
+      },
+      {
+        "path": "build-identity.json",
+        "bytes": 404,
+        "sha256": "af0c27a0ddf17d291564fcb059aaf4af66f171d978c06abb233ce973e7187a6c"
+      },
+      {
+        "path": "local-artifact-verification.json",
+        "bytes": 268,
+        "sha256": "592e07629bcde6dcd7677b470dc787d08bcf30b5cb731299cec8a48bab1a2fa6"
+      },
+      {
+        "path": "local-packaged-check.json",
+        "bytes": 486,
+        "sha256": "2c22e3fb857e633978d3f6a31f70c85596da154bbf009ad1c59eaf4ecfc96803"
+      },
+      {
+        "path": "install.log",
+        "bytes": 62,
+        "sha256": "dcb36380ba7fcf15bad7e42fff7abac81794851179a142f27bff47f6a51a562e"
+      },
+      {
+        "path": "installed-manifest-verification.json",
+        "bytes": 190,
+        "sha256": "b4292ebde7bddd31b8e420adb4129412ebc5e4f723aaef1defbec99d842b92fc"
+      },
+      {
+        "path": "installed-app-smoke.log",
+        "bytes": 1570,
+        "sha256": "bd4d76018aaf0b06e9796db36e4f094782b8f109e5aef86532cd64b476a6feac"
+      },
+      {
+        "path": "preinstall-state.json",
+        "bytes": 2510,
+        "sha256": "9f6623a49503a0020503d3c79603546830b51116ad19ef382a4ba28cb35f8717"
+      },
+      {
+        "path": "postinstall-state.json",
+        "bytes": 2837,
+        "sha256": "d8ca0b55824af65b1afbeab85edbd4b30750f1052ccb760ddb007843d1c742c8"
+      }
+    ]
+  }
+}

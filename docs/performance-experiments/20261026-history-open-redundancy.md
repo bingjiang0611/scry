@@ -132,7 +132,7 @@ AB/BA 各 3 次。在同一 71 MB fixture 上，基线执行“页读取 + 按 4
 ## 交付状态
 
 - 独立候选分支：`integration/history-content-validation-20261026`；Stage 1 代码提交 `ab753e73`，最终 main 集成提交 `18102902`。
-- 用户在独立验收后选择“仅合入 main”；main 已从 `9b4037a8` 快进到 `18102902`，没有覆盖并行 WIP。
-- 本任务没有写 `reliability/collection` 或 `/Applications`。reliability 为 `a9f7bf44`；安装版在验证期间被并行任务改为 0.2.221，交付后检查又为 0.2.226，均不是本任务安装。
-- 本任务未安装、未 push、未重启用户实例、无 L3。
-- 结构化证据：[20261026-history-open-validation-evidence.json](20261026-history-open-validation-evidence.json)。
+- 用户在独立验收后先选择“仅合入 main”；main 从 `9b4037a8` 快进到代码集成 `18102902`，后续交付记录到 `9cbd73ff`，没有覆盖并行 WIP。
+- 用户随后明确批准安装并验收。build `b251f323…` 已安装到 `/Applications/Scry.app`，见[安装与验收记录](20261026-history-open-install.md)。
+- 本任务没有写 `reliability/collection`；未 push、未重启用户实例、无 L3。
+- 结构化证据：[独立验证](20261026-history-open-validation-evidence.json)、[安装验收](20261026-history-open-install-evidence.json)。
