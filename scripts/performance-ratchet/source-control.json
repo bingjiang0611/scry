@@ -12,7 +12,7 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 18
+        "darwin-arm64": 16
       }
     },
     "source-control.service.diff-validated/subprocess.total": {
@@ -26,7 +26,7 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 18
+        "darwin-arm64": 16
       }
     },
     "source-control.service.diff-validated/revision.status-checks": {
@@ -68,7 +68,7 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 17
+        "darwin-arm64": 13
       }
     },
     "source-control.terminal-pair/snapshot.write-tree": {
@@ -96,7 +96,7 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 17
+        "darwin-arm64": 13
       }
     },
     "source-control.diff/subprocess.git": {
@@ -123,7 +123,7 @@
       "workload": "git-worktree=1;changed-files=1",
       "source": "pass-through node:child_process execFile/spawn wrappers around production git paths",
       "status": "gating",
-      "ceiling": 11,
+      "ceiling": 10,
       "tolerance": 0,
       "evidence": {
         "stability": "macOS arm64 Node 22.22.1, 2026-10-16: identical count across 5 repeats per collect, a second full collect, performance:measure --compare (2+2 runs) and 2x17 correlation runs. Linux CI value not yet observed.",
@@ -156,7 +156,7 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 11
+        "darwin-arm64": 10
       }
     }
   }

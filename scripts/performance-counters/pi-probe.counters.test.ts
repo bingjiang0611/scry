@@ -94,10 +94,10 @@ describe('Pi capability probe work and phases', () => {
         })
         return counters
       })
-      writeCollector('pi-probe', [
-        measured({ scenario: 'providers.pi-probe', metric: 'subprocess.rpc', layer: 'main', unit: 'count', workload, source }, runs.processes),
-        measured({ scenario: 'providers.pi-probe', metric: 'rpc.responses', layer: 'main', unit: 'count', workload, source }, runs.requests),
-        measured({ scenario: 'providers.pi-probe', metric: 'shutdown.grace-expiries', layer: 'main', unit: 'count', workload, source }, runs.expiries)
+      writeCollector('pi-probe-parked', [
+        measured({ scenario: 'providers.pi-probe-parked', metric: 'subprocess.rpc', layer: 'main', unit: 'count', workload, source }, runs.processes),
+        measured({ scenario: 'providers.pi-probe-parked', metric: 'rpc.responses', layer: 'main', unit: 'count', workload, source }, runs.requests),
+        measured({ scenario: 'providers.pi-probe-parked', metric: 'shutdown.grace-expiries', layer: 'main', unit: 'count', workload, source }, runs.expiries)
       ])
       if (process.env.SCRY_PI_PROBE_TIMINGS) writeFileSync(process.env.SCRY_PI_PROBE_TIMINGS, JSON.stringify({ workload, samples }, null, 2))
     } finally { meter.active = false; timer.mockRestore() }
