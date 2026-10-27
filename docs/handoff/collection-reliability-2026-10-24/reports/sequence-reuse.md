@@ -99,3 +99,11 @@ max(现存最大号, archivedThrough, 各指纹检查点的 ackedThrough 与 pro
 ## 现场
 
 `/tmp` 下的临时 workspace、worktree 与构建产物已清理；`git worktree list` 无遗留条目。未安装 CLI/App，未推送 main，未发布。
+
+## 核验意见（审阅方，2026-10-27）
+
+- **VF1 认可**。在 `3b21e70` 的独立 worktree 上重演红测，删除最新 record、删光 records、老工作区三个场景都失败（另一个是 doctor 用例，没有被 `-t` 过滤选中）；在 `1eaede0` 上跑 `recorder.test.ts` 和 `scry-doctor.test.ts`，160/160 通过。水位的设计没问题：先在 commit 锁内 durable 写入、再写 record；被拒绝的 draft 不占号；水位文件损坏时 fail closed；老工作区只在第一次用投递检查点初始化。
+- **VF2（新，探针已确认）**：VF1 明确接受「崩溃可能跳过一个号」，但投递侧还不能容忍号上的空洞。`advanceAck`（`commit-delivery-ledger.ts:120-126`）按数字逐个遍历，遇到没有 outcome 的号就抛出 `missing delivery outcome in visited prefix`。只有在有更早的号处于重试中时（ackedThrough < processedThrough）才会遍历到空洞；而 contiguous 快速路径会直接跳过空洞，所以平时不出问题。
+  - 探针步骤：seq1 hook 失败进入重试 → 水位写到 2，模拟 reserve 之后、写 record 之前崩溃 → seq3 投递成功 → 退避到期后 seq1 成功。结果 drain 抛错，drain 自己的 catch 里调用 `pendingCount` 又抛一次，错误漏出了 drain；之后每一次 drain 和 `commitNotificationStatus` 都抛同样的错，新 record 全部不再投递。
+  - 在 archive 之外删除中间的 record（前面有号还在重试时）也走同一条路径，这是已有问题。
+  - 探针文件：`/tmp/claude-0/-home-claude-scry/49e2dd49-143e-50a8-937e-f07e7c11568a/scratchpad/probe-gap.test.ts`（审阅方环境，已从仓库删除）。

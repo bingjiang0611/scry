@@ -20,9 +20,10 @@
 | M2 | commit hook 队头阻塞无死信 | E3 | 已核验 | [E 报告](reports/E.md) | 退避 1/5/15/60 分钟后才死信，退避期间续投后续记录，ACK 不越过缺口；`notify-retry` 显式重放经 trust 校验；短暂故障探针复测通过 |
 | M3 | ACK 身份绑定 bundle 内容指纹 | E3 | 放弃（附证据） | [E 报告](reports/E.md) | 本批不引入稳定 id：只有重复校验开销；ACK/失败/死信迁移成本不属必做缺口。保留指纹隔离和 fail-closed trust；实际测得主要瓶颈后再单独评估；审查方接受 |
 | M4 | ACK 只代表入队；归档后回源校验阻止发送 | E2 + U1/U2 | 已核验 | [E 报告](reports/E.md) | recorder E2：3 红测→通过，通知 v2 带 dataRoot 相对路径与原始字节 SHA-256；uploader U1/U2 按报告审阅（c230f652），真实整链路待验收，见 [uploader 审阅](reports/uploader-review.md) |
-| U3 | uploader 不可重试错误返回 0 | U3 | 阻塞 | [uploader 审阅](reports/uploader-review.md) | R1–R3 按报告已处理（c230f652，17/17 离线验收，未读代码）；夹具已更新（fdd20ba7）；用户 2026-10-25 确认服务端已去重，R2 接受；等待：全仓门禁基线失败另行处理、真实端到端 E1–E8 已于 2026-10-27 在 uploader `5afca05c` 跑完：7 项通过，E3 部分通过；新发现 recorder 缺陷 VF1（sequence 复用），待修 |
+| U3 | uploader 不可重试错误返回 0 | U3 | 阻塞 | [uploader 审阅](reports/uploader-review.md) | R1–R3 按报告已处理（c230f652，17/17 离线验收，未读代码）；夹具已更新（fdd20ba7）；用户 2026-10-25 确认服务端已去重，R2 接受；等待：全仓门禁基线失败另行处理、真实端到端 E1–E8 已于 2026-10-27 在 uploader `5afca05c` 跑完：7 项通过，E3 部分通过；新发现 recorder 缺陷 VF1（sequence 复用），已修并核验；U3/U4 真实端到端审阅通过 |
 | U4 | 显式关闭上传无痕迹 | U4 | 阻塞 | [uploader 审阅](reports/uploader-review.md) | 同 U3 |
-| VF1 | 删 record 后 sequence 复用，新记录永不投递 | VF1 | 待核验 | [sequence 报告](reports/sequence-reuse.md) | 红测 4 失败→通过（`5839fcdc` 上重演 4 failed / 148 passed）；分配改为持久化已发号水位，提交锁内先 durable 写入再写 record，老工作区按 `max(现存最大号, archivedThrough, ackedThrough, processedThrough)` 一次性初始化；doctor 新增 `records.sequence`，水位高于现存最大号时报 warn 并 degraded；`scry turns verify` 输出形状不变；真实 uploader 与断电注入未验证 |
+| VF1 | 删 record 后 sequence 复用，新记录永不投递 | VF1 | 已核验 | [sequence 报告](reports/sequence-reuse.md) | 红测 4 失败→通过（`5839fcdc` 上重演 4 failed / 148 passed）；分配改为持久化已发号水位，提交锁内先 durable 写入再写 record，老工作区按 `max(现存最大号, archivedThrough, ackedThrough, processedThrough)` 一次性初始化；doctor 新增 `records.sequence`，水位高于现存最大号时报 warn 并 degraded；`scry turns verify` 输出形状不变；真实 uploader 与断电注入未验证；审阅方 worktree 重演红测失败，`1eaede0` 上 160/160 通过 |
+| VF2 | 号上有空洞且前面有号在重试时，投递卡死 | VF2 | 待修 | [sequence 报告](reports/sequence-reuse.md) | 审阅方探针确认：`advanceAck` 遇到没有 outcome 的号就抛错，之后每次 drain 和 status 都抛同样的错，新 record 不再投递。VF1 允许崩溃跳号，删中间 record 也会触发 |
 
 ## 合入前汇总验收（2026-10-26，构建 `6e2012e7`）
 
