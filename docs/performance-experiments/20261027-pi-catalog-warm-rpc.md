@@ -85,3 +85,24 @@
 
 「失败飞行释放」这条原有合同因此没有放宽，只是把「释放」的触发点从「每次读完」精确定义为
 「读完成功 → 停放；读完失败 → 立即关闭」。
+
+## L2 尝试（受阻，2026-10-27 5:15）
+
+尝试用真实 CLI 测「冷启动 vs 复用」，受阻：
+
+```
+$ pi --version            # /Users/baobingjiang/.local/bin/pi
+1.2.0                     # 包装脚本 exec IdeaProjects/vibecoding/pi/.../dist/bundle/cli.js
+$ (echo '{"type":"get_state","id":"a"}'; sleep 3) | pi --mode rpc --no-session --offline
+Warning: No models match pattern "qoder/ultimate" ...   # 三行警告后没有任何 response 帧
+exit=1
+```
+
+本机只有这一个 `pi`（无 npm 全局安装），是 dev build。它在 `--mode rpc` 下直接退出 1，
+连一个 response 都发不出来，因此无法测真实冷启动毫秒，也无法用真实 CLI 复现 2 秒探测。
+
+这不是本次改动引入的（改动没有碰 CLI 启动参数），但对结论有两点影响：
+
+1. 计划好的 L2 证据仍缺，只能宣称 L1（1 次启动服务 2 次读取）。
+2. 如果运行中的 App 用的也是这个 executable，Pi 路径现在会直接失败——需要用户确认
+   这是否是当前讨论的 dev build，以及是否需要换回可用的构建再测。
