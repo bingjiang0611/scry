@@ -11,15 +11,16 @@ import type { TraceArchive } from '../transcript-archive'
 import type { PiNativeHistorySnapshot } from '../pi-native-history'
 import type { SessionHistoryCache } from './history-older'
 import { PerformanceTrace as PerformanceTraceImpl } from '../performance-timing'
-import { readTraceArchiveAsync, readTraceArchiveMetadataAsync, readTraceArchivePageAsync, readTraceArchiveTurnsAsync } from '../transcript-archive'
+import { readTraceArchiveAsync, readTraceArchiveMetadataAsync, readTraceArchiveTurnsAsync } from '../transcript-archive'
 import { readCachedTranscript } from '../transcript-parser'
 import { readPiNativeHistorySnapshot, reconcilePiNativeHistory } from '../pi-native-history'
-import { readCompleteArchiveForNativeReconciliation, mergeSessionTurns, hydrateSessionHistoryPage, sessionHistoryPage, readSessionHistoryAfterCompletedRuns, sessionArchiveIsPageable } from '../session-history'
+import { readCompleteArchiveForNativeReconciliation, mergeSessionTurns, hydrateSessionHistoryPage, sessionHistoryPage, sessionArchiveIsPageable } from '../session-history'
 import { readSelectedArchivePageTurns } from '../session-history-page-projection'
 import { persistTraceToolEvents } from '../trace-tool-content'
 import { sessionLoadMatchesRun } from '../session-diff'
 import { appSessionCanResume } from '../app-store'
 import { historyCopy } from '../../shared/constants/copy'
+import { readSessionArchive } from './history-archive'
 import { loadClaudeHookConfig, loadCodexHookConfig } from '../hook-config'
 import { resolveTranscriptPath } from '../transcript-archive'
 
@@ -104,35 +105,31 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
       perf.mark('catalog', { matches: catalogMatches.length })
       const cwd = catalogSession.cwd ? resolveKnownProjectDirectory(catalogSession.cwd) : ''
       if (requestedCwd !== undefined && requestedCwd !== cwd) throw new Error('会话工作目录与 catalog 不一致')
-      const archiveArgs = { cwd, sessionId: payload.externalSessionId, providerId: payload.providerId, userDataDir }
-      const archiveProfile = payload.providerId !== 'pi' && typeof payload.agentProfileId === 'string'
-        ? { agentProfileId: payload.agentProfileId }
-        : {}
       const fp =
         payload.providerId === 'claude' && cwd
           ? resolveTranscriptPath({ cwd, sessionId: payload.externalSessionId, userDataDir })
           : null
+      const archiveArgs = { cwd, sessionId: payload.externalSessionId, providerId: payload.providerId, userDataDir }
+      const archiveProfile = payload.providerId !== 'pi' && typeof payload.agentProfileId === 'string'
+        ? { agentProfileId: payload.agentProfileId }
+        : {}
       const archivePaged = sessionArchiveIsPageable(payload.providerId, fp)
-      let archivePage: Awaited<ReturnType<typeof readTraceArchivePageAsync>> | null
-      let archived: TraceArchive | null
       const matchingRuns = getRuns().unsettledStates()
         .filter((run) => sessionLoadMatchesRun(run, {
           providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd,
           externalSessionId: payload.externalSessionId
         }))
         .map((run) => ({ done: run.done, settled: getRuns().get(run.runId)!.control.settled }))
-      try {
-        [archivePage, archived] = await readSessionHistoryAfterCompletedRuns(matchingRuns, signal, async () => {
-          const page = archivePaged
-            ? await readTraceArchivePageAsync(archiveArgs, { ...archiveProfile, limit: request?.limit }, signal)
-            : null
-          const archive = page?.archive ?? (archivePaged ? null : await readTraceArchiveAsync(archiveArgs, signal))
-          return [page, archive] as const
-        })
-      } catch (error) {
-        signal.throwIfAborted()
-        throw error
-      }
+      const { archivePage, archived } = await readSessionArchive({
+        userDataDir, cwd, sessionId: payload.externalSessionId, providerId: payload.providerId,
+        agentProfileId: payload.agentProfileId, request, transcriptPath: fp, runs: matchingRuns, signal
+      })
+      // Split the read from the per-turn content persistence: both used to land in one `archive`
+      // checkpoint, so a slow load could not say whether the archive read or its writes cost the time.
+      perf.mark('archive_read', {
+        archiveTurns: archived?.turns.length ?? 0,
+        archiveTurnFilesRead: archivePage?.turnFilesRead ?? archived?.turns.length ?? 0
+      })
       if (archived) {
         for (const turn of archived.turns) {
           turn.items = await persistTraceToolEvents(userDataDir, cwd, turn.items)
