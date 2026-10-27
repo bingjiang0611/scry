@@ -3,6 +3,7 @@ import { recorderEnablement, refreshRecorderPendingHealth, OPEN_TURN_EXPIRY_MS }
 import { readHookSkips, readUserHookSkips } from '../core/turn-recorder/hook-diagnostics.js'
 import { RECORDER_VERSION, readHealth, verifyStore, lastRecordVersion, commitNotificationStatus } from '../core/turn-recorder/store.js'
 import { readSequenceWatermark } from '../core/turn-recorder/sequence-watermark.js'
+import { UnresolvedDeliveryPrefixError } from '../core/turn-recorder/commit-delivery-ledger.js'
 import { recorderStaleOpenTurns } from '../core/turn-recorder/runtime-state.js'
 import { providerHookScriptState } from './workspace-init.js'
 import { discoverRepositories } from '../core/turn-recorder/config.js'
@@ -76,8 +77,12 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
   let delivery: Awaited<ReturnType<typeof commitNotificationStatus>> | undefined
   let deliveryError = activation.status === 'bundle-invalid' ? activation.detail : undefined
   if (activation.status === 'trusted' || activation.status === 'host-provided') {
-    try { delivery = await commitNotificationStatus(enablement.dataRoot, commitHookEnv(activation, process.env)) } catch {
-      deliveryError = 'commit notification state unavailable; inspect notifications/commit-hooks, notifications/delivery-outcomes and notifications/dead-letters'
+    try { delivery = await commitNotificationStatus(enablement.dataRoot, commitHookEnv(activation, process.env)) } catch (error) {
+      // A lost delivery outcome is recoverable on request, so name the blocked sequence and the
+      // exact command instead of a generic "unavailable".
+      deliveryError = error instanceof UnresolvedDeliveryPrefixError
+        ? `sequence ${error.sequence} has a record file but no delivery outcome, so the ACK cannot advance; run \`scry recorder notify-retry --sequence ${error.sequence}\` to re-deliver it (the receiver dedupes by recordId)`
+        : 'commit notification state unavailable; inspect notifications/commit-hooks, notifications/delivery-outcomes and notifications/dead-letters'
     }
   }
   const deadCount = delivery?.deadLetterCount ?? 0

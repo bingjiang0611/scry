@@ -9,7 +9,7 @@ import { recordFiles, parseRecordFile } from './store-index.js'
 import { readArchiveState } from './store-archive.js'
 import { COMMIT_NOTIFICATION_MAX_FAILURES, type CommitNotificationFailure, recordName, readCommitHookAck, pendingCommitFiles, publishDeadLetter, readDeadLetter, readDeadLetters } from './commit-delivery-state.js'
 
-import { type RetryDiagnostic, UnresolvedDeliveryPrefixError, advanceAck, finishReplay, ledgerStatus, loadDeliveryState, nextRetryAt, outcomes, readOutcome, requeueDeadLetters, saveOutcome, saveProgress } from './commit-delivery-ledger.js'
+import { type RetryDiagnostic, UnresolvedDeliveryPrefixError, advanceAck, finishReplay, ledgerStatus, loadDeliveryState, nextRetryAt, outcomes, readOutcome, requeueDeadLetters, requeueLostOutcome, saveOutcome, saveProgress } from './commit-delivery-ledger.js'
 
 export interface RecordCommittedNotification {
   schemaVersion: 2
@@ -244,7 +244,13 @@ export async function retryCommitNotifications(dataRoot: string, env: NodeJS.Pro
   const fingerprint = configuredCommitHookFingerprint(env)
   const requeued = await withDirectoryLock(join(dataRoot, 'locks', 'commit-notification.lock'), async () => {
     await loadDeliveryState(dataRoot, fingerprint)
-    return requeueDeadLetters(dataRoot, fingerprint, sequence)
+    if (sequence === undefined) return requeueDeadLetters(dataRoot, fingerprint)
+    const dead = await requeueDeadLetters(dataRoot, fingerprint, sequence)
+    if (dead > 0) return dead
+    // Not quarantined, but a record may still exist whose delivery outcome was lost. Only this
+    // explicit, operator-named sequence may be re-delivered; automatic drain stays fail closed.
+    if (await requeueLostOutcome(dataRoot, fingerprint, sequence)) return 1
+    throw new Error(`sequence ${sequence} is neither an active dead letter nor a record whose delivery outcome is missing`)
   })
   return { requeued, ...await drainCommitNotifications(dataRoot, env) }
 }

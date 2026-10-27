@@ -78,7 +78,7 @@ scry recorder notify-retry --sequence 42 --workspace "$PWD"
 scry recorder notify-retry --all-dead --workspace "$PWD"
 ```
 
-重放保留死信历史、重置该项计数并走正常 trust 校验；投递仍待重试时退出 3，真实成功后才允许连续 ACK 前进。两个选择参数必须且只能提供一个。完整语义与升级限制见[投递与死信](docs/integrations-and-updates.md#失败次数与-recorder-死信)。
+重放保留死信历史、重置该项计数并走正常 trust 校验；投递仍待重试时退出 3，真实成功后才允许连续 ACK 前进。两个选择参数必须且只能提供一个。`--sequence N` 也接受「record 还在、但投递结果丢失」的号：这种状态自动 drain 会 fail closed，`doctor` 会写出该 sequence 并指明这条命令；重放后 record 会被重新投递（接收方按 `recordId` 去重）。完整语义与升级限制见[投递与死信](docs/integrations-and-updates.md#失败次数与-recorder-死信)。
 
 完全没有 record 的号（崩溃只保留了号码，或记录文件在 archive 之外被删除）不会阻塞后续投递：ACK 可以越过，但会留下有上限的区间证据 `absent-sequences.json`，`doctor` 显示数量与区间。record 还在但投递结果丢失时不越过，此时 drain 以 `pending: null` 表示积压未知而不是 0。
 

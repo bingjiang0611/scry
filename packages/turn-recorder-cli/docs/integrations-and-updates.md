@@ -45,7 +45,7 @@ scry recorder notify-retry --sequence 42 --workspace "$PWD"
 scry recorder notify-retry --all-dead --workspace "$PWD"
 ```
 
-命令先验证配置与 trust，再将原死信诊断保存到 `notifications/dead-letter-history/<fingerprint-hash>/`，持久化重放请求后移出当前死信、清零计数并正常 drain。原始 record 与原会话环境仍复用。中断后，已持久化的单条请求由 drain 恢复；尚未持久化的条目仍是死信，需查看状态再明确选择，不猜测整批是否完成。若再次失败，从第 1 次和 1 分钟间隔重新开始；没有真实成功就不推进 ACK。指定的 sequence 必须是当前身份的活动死信。`--all-dead` 无活动死信时不制造重放；命令也可处理其他已到期的普通积压，但不会提前执行仍在退避的项。不要编辑 ACK 或删除队列元数据来绕过保护。
+命令先验证配置与 trust，再将原死信诊断保存到 `notifications/dead-letter-history/<fingerprint-hash>/`，持久化重放请求后移出当前死信、清零计数并正常 drain。`--sequence N` 还接受另一种可恢复状态：该号的 record 文件仍在，但 `delivery-outcomes/<fingerprint-hash>/` 里的投递结果丢失（例如被手工删除）。此时自动 drain 与 ACK 都 fail closed，`doctor` 的 `commitHook.delivery` 会报 `status: error` 并写出 `sequence N` 与具体命令。显式重放只为该号写入一条 `status: replay`、无死信历史的请求，下一次 drain 重新投递它（接收方按 `recordId` 去重）；成功后 ACK 才能继续前进。既不是活动死信、也没有丢失结果的号会被拒绝。原始 record 与原会话环境仍复用。中断后，已持久化的单条请求由 drain 恢复；尚未持久化的条目仍是死信，需查看状态再明确选择，不猜测整批是否完成。若再次失败，从第 1 次和 1 分钟间隔重新开始；没有真实成功就不推进 ACK。指定的 sequence 必须是当前身份的活动死信。`--all-dead` 无活动死信时不制造重放；命令也可处理其他已到期的普通积压，但不会提前执行仍在退避的项。不要编辑 ACK 或删除队列元数据来绕过保护。
 
 冷启动的“最新记录唤醒”跳过已有重试/死信；尚未 ACK 的最新记录首次失败也进入同一退避状态。已经 ACK 的唤醒不倒退 ACK，不能代替外部 uploader 的 outbox 重试。指纹变化仍是独立身份：新身份按既有规则重投全部仍保留记录，旧身份的死信不被悄悄清除；`notify-retry` 不跨身份操作。稳定 `commitHook.id` 未引入，trust/内容指纹校验不变。
 

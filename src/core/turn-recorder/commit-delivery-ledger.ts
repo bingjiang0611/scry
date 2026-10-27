@@ -13,7 +13,7 @@ export type DeliveryOutcome = Identity & (
   { status: 'retry'; failure: CommitNotificationFailure } |
   { status: 'dead'; failure: CommitNotificationFailure } |
   { status: 'delivered' } |
-  { status: 'replay'; historyKey: string; requestedAt: string }
+  { status: 'replay'; historyKey?: string; requestedAt: string }
 )
 
 export function nextRetryAt(failure: CommitNotificationFailure): string | undefined {
@@ -84,8 +84,10 @@ export async function readAbsentSequences(dataRoot: string, fingerprint: string)
 async function recordAbsent(dataRoot: string, fingerprint: string, sequence: number): Promise<void> {
   const previous = await readAbsentSequences(dataRoot, fingerprint)
   const ranges = previous ? previous.ranges.map(([from, to]) => [from, to] as [number, number]) : []
+  // Dedupe against the ledger floor, not the last kept range: when the sample is full the newest
+  // range is trimmed away, and counting it again would inflate `count`.
+  if (sequence <= (previous?.absentThrough ?? 0)) return
   const last = ranges.at(-1)
-  if (last && sequence <= last[1]) return
   if (last && last[1] === sequence - 1) last[1] = sequence
   else ranges.push([sequence, sequence])
   const truncated = (previous?.truncated ?? false) || ranges.length > ABSENT_RANGE_LIMIT
@@ -111,10 +113,15 @@ export async function readOutcome(dataRoot: string, fingerprint: string, sequenc
     throw new Error('invalid delivery failure outcome')
   }
   if (raw.status === 'replay') {
-    if (typeof raw.historyKey !== 'string' || !/^[a-f0-9]{64}$/.test(raw.historyKey) || typeof raw.requestedAt !== 'string' || !Number.isFinite(Date.parse(raw.requestedAt))) throw new Error('invalid replay outcome')
-    const history = await readNotificationObject<CommitNotificationFailure>(historyPath(dataRoot, fingerprint, raw.historyKey))
-    if (!validFailure(history) || history.attempts !== COMMIT_NOTIFICATION_MAX_FAILURES || history.sequence !== sequence || history.recordId !== raw.recordId || stableHash(history) !== raw.historyKey) {
-      throw new Error('missing or invalid replay history')
+    if (typeof raw.requestedAt !== 'string' || !Number.isFinite(Date.parse(raw.requestedAt))) throw new Error('invalid replay outcome')
+    // A dead-letter replay carries the quarantine history it must release; a lost-outcome replay
+    // has no quarantine to release, so it carries no key.
+    if (raw.historyKey !== undefined) {
+      if (typeof raw.historyKey !== 'string' || !/^[a-f0-9]{64}$/.test(raw.historyKey)) throw new Error('invalid replay outcome')
+      const history = await readNotificationObject<CommitNotificationFailure>(historyPath(dataRoot, fingerprint, raw.historyKey))
+      if (!validFailure(history) || history.attempts !== COMMIT_NOTIFICATION_MAX_FAILURES || history.sequence !== sequence || history.recordId !== raw.recordId || stableHash(history) !== raw.historyKey) {
+        throw new Error('missing or invalid replay history')
+      }
     }
   }
   const { schemaVersion: _schema, hookFingerprint: _fingerprint, ...outcome } = raw
@@ -191,7 +198,7 @@ export async function loadDeliveryState(dataRoot: string, fingerprint: string): 
  * it escape as a thrown promise made every later drain and status query fail.
  */
 export class UnresolvedDeliveryPrefixError extends Error {
-  constructor() {
+  constructor(readonly sequence: number) {
     super('missing delivery outcome in visited prefix')
     this.name = 'UnresolvedDeliveryPrefixError'
   }
@@ -209,7 +216,7 @@ async function walkAck(dataRoot: string, state: CommitHookState, floor: number, 
     // No receipt. A sequence that still has a record file lost its delivery result and must stay
     // fail closed; only a sequence with no record at all is a hole with nothing left to deliver.
     live ??= new Set((await recordFiles(dataRoot, { bypassIndex: true })).map(file => file.sequence))
-    if (live.has(sequence)) throw new UnresolvedDeliveryPrefixError()
+    if (live.has(sequence)) throw new UnresolvedDeliveryPrefixError(sequence)
     if (persistHoles) await recordAbsent(dataRoot, state.hookFingerprint, sequence)
     state.ackedThrough = sequence
   }
@@ -222,7 +229,7 @@ export async function advanceAck(dataRoot: string, state: CommitHookState, floor
 }
 
 export async function finishReplay(dataRoot: string, fingerprint: string, outcome: DeliveryOutcome): Promise<void> {
-  if (outcome.status !== 'replay') return
+  if (outcome.status !== 'replay' || outcome.historyKey === undefined) return
   const name = recordName(outcome)
   const dead = await readDeadLetter(dataRoot, fingerprint, name)
   if (!dead) return
@@ -244,8 +251,22 @@ export async function requeueDeadLetters(dataRoot: string, fingerprint: string, 
     await finishReplay(dataRoot, fingerprint, replay)
     requeued++
   }
-  if (sequence !== undefined && requeued === 0) throw new Error(`sequence ${sequence} is not an active dead letter`)
   return requeued
+}
+
+/**
+ * Explicit replay of a record whose delivery outcome was lost.
+ *
+ * Only the operator can authorize this: nothing in the store proves whether the record was
+ * already handed over. The record and its identity are intact, so the receiver dedupes by
+ * `recordId`; re-delivery is therefore safe once asked for, and the ACK may advance afterwards.
+ */
+export async function requeueLostOutcome(dataRoot: string, fingerprint: string, sequence: number): Promise<boolean> {
+  const file = (await recordFiles(dataRoot, { bypassIndex: true })).find(candidate => candidate.sequence === sequence)
+  if (!file) return false
+  if (await readOutcome(dataRoot, fingerprint, sequence)) throw new Error(`sequence ${sequence} already has a delivery outcome`)
+  await saveOutcome(dataRoot, fingerprint, { sequence, recordId: file.recordId, status: 'replay', requestedAt: new Date(Date.now()).toISOString() })
+  return true
 }
 
 export interface RetryDiagnostic extends Identity {
