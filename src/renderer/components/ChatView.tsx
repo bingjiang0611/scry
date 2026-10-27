@@ -5,6 +5,8 @@ import { Composer } from './chat-view/Composer'
 import type { ChatViewProps, SessionChatViewProps } from './chat-view/types'
 import { Icon } from './primitives/Icon'
 import { WorkspaceFileLinkProvider } from './MarkdownImpl'
+import { DelayedLoadingStatus } from './LoadingStatus'
+import { LOADING_COPY } from '../constants/copy'
 
 const NO_PENDING_QUESTIONS: AgentQuestionRequest[] = []
 const NO_TURNS: ChatViewProps['turns'] = []
@@ -89,6 +91,9 @@ export function ChatView(props: ChatViewProps) {
                 {remote ? <span>时间线已加载最近 <b>{turns.length}</b> 轮·更早轮次仍在 {remoteHost} 的归档中，未丢弃</span> : <span>时间线已加载最近 <b>{historyWindow.totalTurns - historyWindow.offset}</b> / {historyWindow.totalTurns} 轮·更早轮次仍在本机归档中，未丢弃</span>}
                 <button type="button" className="history-window-more" onClick={() => onLoadOlderTurns?.()} disabled={historyOlderLoading || !onLoadOlderTurns}>{historyOlderLoading ? '加载中…' : '加载更早轮次'}</button>
               </div>
+            )}
+            {sessionLoading && !sessionCacheVisible && (
+              <DelayedLoadingStatus loading title={LOADING_COPY.sessionHistory} detail={LOADING_COPY.sessionHistoryDetail} />
             )}
             <div className="chat-transcript-content">
               <ChatTranscriptTurns turns={displayedTurns} selectedId={selectedId} focusedTurnRunId={focusedTurnRunId} onTurnRef={onTurnRef} onSelect={onSelect} onOpenDiff={onOpenDiff} forkableRunIds={forkableRunIds} onForkTurn={!sessionLoading && !busy && queuedPrompts.length === 0 && pendingQuestions.length === 0 ? onForkTurn : undefined} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote}

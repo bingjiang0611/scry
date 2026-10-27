@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { AppShell } from './app-shell'
 import { useAppComposer } from './app-composer'
 import { useAppRuntimeEffects } from './app-runtime'
@@ -6,7 +6,7 @@ import { useAppView } from './app-view'
 import { useAppQueueActions } from './app-queue-actions'
 import { createAppChatProps } from './app-chat-props'
 import { useAppSlashCommands } from './hooks/useAppSlashCommands'
-import { createSessionActions, type PendingSessionSelection } from './app-session-actions'
+import { createSessionActions } from './app-session-actions'
 import { useChatNavigation } from './hooks/useChatNavigation'
 import { useRemoteWorkbench } from './hooks/useRemoteWorkbench'
 import type { SessionRef } from './env'
@@ -164,13 +164,12 @@ export function useAppInteraction(context: AppInteractionContext) {
   // 选一个工作目录 = 只重新绑定，停在新会话空态。
   // 曾经的行为是该目录有历史会话就直接打开最近那条（pickSession(sessions[0])），
   // 结果“换项目”变成“被扔进一个旧对话”，绑定后的工作目录也没机会看清。
-  const pendingSessionSelection = useRef<PendingSessionSelection | null>(null)
   const {
     pickRecent, unbindProject, newConversation, newConversationInProject,
     toggleProjectPin, renameProject, removeProject, pickSession, openWorkspaceRun, forkConversationTurn,
     togglePinSession, renameSession, archiveSession, undoArchive, restoreLastSelection
   } = createSessionActions({
-    workspace, session, integrations, setSessionLoading, sessionSelectionSeqRef, sessionNavigationSeqRef, pendingSessionSelection,
+    workspace, session, integrations, setSessionLoading, sessionSelectionSeqRef, sessionNavigationSeqRef,
     resetPromptQueueControl, shouldStickToBottomRef, selectSessionId, setView, taRef,
     draftContextRef, setSessionEvidenceGap, setSessionPromptQueues, setComposerError,
     confirmWorkspaceTransition, cwdRef, activeSessionIdRef, sessionLoading, sessionSnapshots,
@@ -178,15 +177,6 @@ export function useAppInteraction(context: AppInteractionContext) {
     queueKeyRef, setArchiveUndo, archiveUndo, refreshProviderCatalogs
   })
   restoreStoredSelectionRef.current = restoreLastSelection
-  useEffect(() => {
-    const pending = pendingSessionSelection.current
-    if (sessionLoading || !pending?.deferred) return
-    pendingSessionSelection.current = null
-    if (pending.sequence === sessionSelectionSeqRef.current && pending.navigationSequence === sessionNavigationSeqRef.current) {
-      void pickSession(...pending.args)
-    }
-  }, [sessionLoading, pickSession, sessionSelectionSeqRef])
-
   const appView = useAppView({
     openWorkspaceRun, sessionNavigationSeqRef,
     theme, setTheme, setShowSkills, setShowMcp, setShowLlmPerformance, refreshProviderCatalogs,

@@ -5,7 +5,7 @@ import { LOADING_COPY } from './constants/copy'
 import { persistSessionSelection, readStoredSessionSelection } from './session-restore'
 import { workspaceRunSession } from './workspace-drafts'
 import type { ProviderContext, ProviderId, SessionProviderId } from '@shared/provider'
-import type { ProjectMeta, SessionHistoryPage, SessionMeta, SessionRef } from './env'
+import type { ProjectMeta, SessionMeta, SessionRef } from './env'
 import type { Turn } from './format'
 import type { AppView } from './app-types'
 import type { useWorkspaceState } from './hooks/useWorkspaceState'
@@ -19,16 +19,8 @@ import {
   type SessionEvidenceGap, type SessionPromptQueues
 } from './app-model'
 
-export type PendingSessionSelection = {
-  sequence: number
-  navigationSequence: number
-  key: string
-  args: [cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, knownRunId?: string, agentProfileId?: string]
-  deferred: boolean
-}
-
 export function createSessionActions({
-  workspace, session, integrations, setSessionLoading, sessionSelectionSeqRef, sessionNavigationSeqRef, pendingSessionSelection,
+  workspace, session, integrations, setSessionLoading, sessionSelectionSeqRef, sessionNavigationSeqRef,
   resetPromptQueueControl, shouldStickToBottomRef, selectSessionId, setView, taRef,
   draftContextRef, setSessionEvidenceGap, setSessionPromptQueues, setComposerError,
   confirmWorkspaceTransition, cwdRef, activeSessionIdRef, sessionLoading, sessionSnapshots,
@@ -41,7 +33,6 @@ export function createSessionActions({
   setSessionLoading: Dispatch<SetStateAction<boolean>>
   sessionSelectionSeqRef: MutableRefObject<number>
   sessionNavigationSeqRef: MutableRefObject<number>
-  pendingSessionSelection: MutableRefObject<PendingSessionSelection | null>
   resetPromptQueueControl: () => void
   shouldStickToBottomRef: MutableRefObject<boolean>
   selectSessionId: (id: string | null) => void
@@ -201,45 +192,17 @@ export function createSessionActions({
         agentProfileId
       }
     )
-    // A cold selection is not published until its first history page is ready.
-    const selectionKey = JSON.stringify([projectCwd, sessionId, providerId, externalSessionId, knownRunId, agentProfileId])
-    const pending = pendingSessionSelection.current
-    if (pending?.sequence === sessionSelectionSeqRef.current && pending.navigationSequence === sessionNavigationSeqRef.current && pending.key === selectionKey) return
-    pendingSessionSelection.current = null
     sessionNavigationSeqRef.current += 1
     if (!switchingSession && sessionLoading) return
     setComposerError(null)
     const historyContext: ProviderContext = { providerId, agentProfileId, cwd: projectCwd, externalSessionId }
     const cacheRevision = sessionSnapshots.revision
     const cachedPage = switchingSession ? sessionSnapshots.get(historyContext) : undefined
-    // Keep the current selection intact until the target has content. Only a
-    // snapshot belonging to the target may be shown before its authority refresh.
-    let preparedPage: SessionHistoryPage | null | undefined
-    if (switchingSession && !cachedPage && externalSessionId) {
-      const request: PendingSessionSelection = {
-        sequence: sessionSelectionSeqRef.current, navigationSequence: sessionNavigationSeqRef.current,
-        key: selectionKey, args: [projectCwd, sessionId, providerId, externalSessionId, knownRunId, agentProfileId],
-        deferred: sessionLoading
-      }
-      pendingSessionSelection.current = request
-      // Main supersedes earlier history reads. Let the retained session finish
-      // its authority refresh before starting a cold read for another session.
-      if (request.deferred) return
-      const pendingIsCurrent = (): boolean => pendingSessionSelection.current === request &&
-        request.sequence === sessionSelectionSeqRef.current && request.navigationSequence === sessionNavigationSeqRef.current
-      try {
-        preparedPage = await window.scry.loadSession(historyContext)
-        if (!pendingIsCurrent()) return
-      } catch (error) {
-        if (pendingIsCurrent()) setComposerError(LOADING_COPY.sessionOpenFailed(error instanceof Error ? error.message : String(error)))
-        return
-      } finally {
-        if (pendingSessionSelection.current === request) pendingSessionSelection.current = null
-      }
-    }
+    // Publish the target shell immediately. Its history remains unavailable until
+    // the authoritative page arrives; never keep the old session under the new selection.
     const seq = ++sessionSelectionSeqRef.current
     const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
-    const presentationPage = cachedPage ?? preparedPage
+    const presentationPage = cachedPage
     setSessionEvidenceGap(null)
     setSessionLoading(true)
     setSessionCacheVisible(Boolean(presentationPage?.turns.length) || (!switchingSession && session.turns.length > 0))
@@ -275,7 +238,7 @@ export function createSessionActions({
           {
             prepareRunFocus: session.prepareRunFocus,
             adoptActiveRun: (targetRunId) => window.scry.adoptActiveRun(targetRunId),
-            loadSession: (context) => preparedPage === undefined ? window.scry.loadSession(context) : Promise.resolve(preparedPage),
+            loadSession: (context) => window.scry.loadSession(context),
             replaceWithParsedSession: session.replaceWithParsedSession,
             onHistoryLoaded: (page, activeRun) => {
               if (!isCurrent()) return
@@ -298,7 +261,7 @@ export function createSessionActions({
         return
       }
       const [loadedPage] = await Promise.all([
-        preparedPage === undefined ? window.scry.loadSession(historyContext) : preparedPage,
+        window.scry.loadSession(historyContext),
         focusRequest
       ])
       if (!isCurrent()) return

@@ -117,13 +117,15 @@ export async function exerciseSessionSelection(contents, scenario) {
   if (scenario === 'focused-event') await click('#focus-pi')
   else await click('.sb-sess[data-provider="pi"]:not(.running)')
   await wait(`${state}.historyReads === 1`)
+  await wait(`document.querySelector('.sb-sess[data-provider="pi"]')?.getAttribute('aria-current') === 'true' &&
+    document.querySelector('.chat-transcript')?.getAttribute('aria-busy') === 'true' &&
+    !document.querySelector('.chat-transcript')?.textContent.includes('Old running conversation')`)
   if (scenario === 'repeat-pending') {
     await click('.sb-sess[data-provider="pi"]')
     await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
-    if (await read(`${state}.historyReads !== 1 || !document.querySelector('.sb-sess.running[aria-current="true"]') || !document.querySelector('.chat-transcript')?.textContent.includes('Old running conversation')`)) {
-      throw new Error('Repeated pending selection restarted history or changed the retained selection')
+    if (await read(`${state}.historyReads !== 1 || document.querySelector('.sb-sess[data-provider="pi"]')?.getAttribute('aria-current') !== 'true' || document.querySelector('.chat-transcript')?.textContent.includes('Old running conversation')`)) {
+      throw new Error('Repeated pending selection restarted history or replaced the target shell')
     }
-    if (await read(`!!document.querySelector('[data-status="loading"]')`)) throw new Error('Pending selection displayed a loading banner')
     if (await read(`document.body.innerText.includes('这条会话暂时没有可显示的轮次')`)) throw new Error('Pending history was reported as empty')
   }
   if (scenario !== 'late-startup') await click('#resolve-snapshots')
@@ -131,17 +133,15 @@ export async function exerciseSessionSelection(contents, scenario) {
     await wait(`${state}.snapshots === 0`)
     // Let both bootstrap promises and React effects settle while history is still pending.
     await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
-    if (await read(`${state}.cancelledLoads !== 0 || ${state}.cwd !== '/fixture/old'`)) {
-      throw new Error(`${scenario}: late bootstrap cancelled the pending history: ${JSON.stringify(await read(state))}`)
+    if (await read(`${state}.cancelledLoads !== 0 || ${state}.cwd !== '/fixture/new'`)) {
+      throw new Error(`${scenario}: late bootstrap displaced or cancelled the selected target: ${JSON.stringify(await read(state))}`)
     }
   }
-  const expectedCancellations = scenario === 'rapid-switch' ? 1 : 0
+  const expectedCancellations = scenario === 'rapid-switch' ? 2 : 0
   if (scenario === 'rapid-switch') {
     await click('.sb-sess[data-provider="claude"]')
     await wait(`${state}.historyReads === 2`)
     await click('.sb-sess[data-provider="pi"]')
-    if (await read(`${state}.historyReads !== 2`)) throw new Error('Cold target aborted the retained authority refresh')
-    await click('#resolve-history')
     await wait(`${state}.historyReads === 3`)
   }
   await click('#resolve-history')
