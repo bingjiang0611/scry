@@ -80,7 +80,9 @@
 
 本轮四条已到明确局部停止点：目标壳选择约一帧内发布；重复 recency 写为 0；diff hydration 的 16 路优于 8/32；巨型 Turn 固定渲染低于一帧。继续降低真实冷打开仍可能需要页面缓存、worker 或 diff 按需 IPC。这些属于更大的协议/缓存改造，本轮没有用未经验证的缓存或延后证据加载替代当前合同。
 
-没有 L3 结论。需要安装新 build 后，在相同大会话上收集至少 30 个样本、2 个日常 journal session，并核对环境与数据健康，才能判断 2.7–3.1 秒长尾的真实下降幅度。
+没有 L3 结论。当前源码 build `e993deef965d8e0db0adc6100ed02b88b032194946fe9ae5a7000bbe2fc84109` 已通过 packaged checks、Electron security smokes 并安装到 `/Applications/Scry.app`。用户当前运行实例未被停止；需重启后在相同大会话上收集至少 30 个样本、2 个日常 journal session，并核对环境与数据健康，才能判断 2.7–3.1 秒长尾的真实下降幅度。
+
+首次 `install:mac:dev` 在 packaged CLI `--version` 检查处收到 SIGKILL。签名验证通过；kernel 记录为无法应用 provenance sandbox。清除新产物的扩展属性后，同一签名字节重新通过 `check:packaged-app`、全部 `smoke:electron` 和原子安装。此环境问题没有改产品代码，也不计作性能改善。
 
 ## 产物
 
