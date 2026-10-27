@@ -16,6 +16,24 @@
   width: 1px;
   background: var(--border);
 }
+.turn-flow-reveal {
+  align-self: flex-start;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--dim2);
+  background: var(--panel);
+  font: 11px/1.4 var(--font-mono);
+  cursor: pointer;
+}
+.turn-flow-reveal:hover {
+  color: var(--fg);
+  border-color: var(--border2);
+}
+.turn-flow-reveal:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .tool-group { position: relative; }
 .tool-group-row {
   display: flex;

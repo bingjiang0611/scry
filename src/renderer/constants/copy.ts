@@ -6,6 +6,11 @@ export const PI_PICKER_COPY = {
   removeLabel: (name: string) => `移除 Pi Profile：${name}`
 } as const
 
+export const TURN_FLOW_COPY = {
+  showEarlier: (count: number) => `显示更早的 ${count} 条活动`,
+  showEarlierLabel: (count: number) => `显示本轮更早的 ${count} 条活动`
+} as const
+
 export const TURN_DIFF_REVIEW_COPY = {
   turnTitle: '本轮改动',
   sessionTitle: '本会话净改动',
