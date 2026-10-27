@@ -39,8 +39,7 @@ export async function planWorkspace(
   if (!current) throw new Error('当前工作区不在 Git worktree 清单中')
   const requireSourceReady = (): void => {
     if (!source.head) throw new Error('仓库尚无 HEAD；可以聊天，但不能创建或切换工作区')
-    const blocker = source.writeBlocker ?? source.actionBlockers.prepareWorkspace
-    if (blocker) throw new Error(blocker)
+    if (source.writeBlocker) throw new Error(source.writeBlocker)
   }
   const fromTree = (tree: WorkspaceWorktreeChoice, cwd = tree.path): WorkspacePlan => {
     requireUsableWorktree(tree)

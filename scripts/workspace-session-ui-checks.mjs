@@ -9,6 +9,7 @@ import { exerciseDiffWorkbench, contextFixture } from './diff-workbench-ui.mjs'
 import { assertPickerAnchored, assertNewWorktreeDefaults, assertCompactMenus } from './workspace-session-ui-picker.mjs'
 import { wait, sendWorkspacePrompt } from './workspace-session-ui-run.mjs'
 import { selectDiffScope, exerciseTurnMenu } from './diff-inspector-ui.mjs'
+import { assertHooksIdle, installHookTraps } from './workspace-session-ui-hooks.mjs'
 
 const json = JSON.stringify
 /** Production App + preload + native Git, with the existing isolated, non-network Provider fixture. */
@@ -153,6 +154,7 @@ export async function exerciseWorkspaceSessions(context) {
     const sourceDirt = readFileSync(join(workspace, 'remote-first.txt'))
     const sourceIndex = readFileSync(join(workspace, '.git/index'))
     const sourceMtime = statSync(join(workspace, '.git/index')).mtimeMs
+    const hookMarkers = installHookTraps(workspace, temp)
     await openPicker()
     await key('Escape', 'Escape', 27)
     await click('[data-workspace-menu="workspace"]')
@@ -175,6 +177,7 @@ export async function exerciseWorkspaceSessions(context) {
     assert.ok(target.startsWith(join(realpathSync(userDataDir), 'worktrees') + '/'), target)
     assert.equal(git(target, 'branch', '--show-current'), generatedBranch)
     assert.equal(existsSync(join(target, 'moved-after-selection.txt')), false, 'new worktree never copies uncommitted files')
+    assertHooksIdle(hookMarkers)
     rmSync(join(workspace, 'moved-after-selection.txt'))
     assert.deepEqual(readFileSync(join(workspace, 'remote-first.txt')), sourceDirt)
     assert.deepEqual(readFileSync(join(workspace, '.git/index')), sourceIndex)

@@ -170,13 +170,13 @@ describe('source control real temporary Git', { timeout: 15_000 }, () => {
     await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('does not block a selected local commit for an unused post-checkout hook', async () => {
+  it('does not report post-checkout as a blocker because workspace preparation disables hooks', async () => {
     const marker = join(temp, 'checkout-hook-executed')
     await writeFile(join(cwd, '.git/hooks/post-checkout'), `#!/bin/sh\ntouch '${marker}'\n`)
     await chmod(join(cwd, '.git/hooks/post-checkout'), 0o755)
     await writeFile(join(cwd, 'selected.txt'), 'selected\n')
     const state = await snapshot()
-    expect(state.actionBlockers).toEqual({ prepareWorkspace: expect.stringContaining('post-checkout') })
+    expect(state.actionBlockers).toEqual({})
     const result = await service.mutate({
       action: 'commit', repositoryId: state.id, expectedRevision: state.revision,
       paths: ['selected.txt'], message: 'no checkout performed', operationId: randomUUID()
@@ -195,8 +195,8 @@ describe('source control real temporary Git', { timeout: 15_000 }, () => {
       const state = await snapshot()
       expect(Object.keys(state.actionBlockers).sort()).toEqual(
         name === 'post-index-change'
-          ? ['commit', 'prepareWorkspace', 'stage', 'unstage']
-          : ['commit', 'fetch', 'prepareWorkspace', 'push']
+          ? ['commit', 'stage', 'unstage']
+          : ['commit', 'fetch', 'push']
       )
       await rm(path)
     }

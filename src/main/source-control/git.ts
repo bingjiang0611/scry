@@ -16,17 +16,16 @@ export const readConfig = [
   'maintenance.auto=false'
 ]
 export const readOnly = ['-c', 'core.hooksPath=/dev/null']
-// Match the native commands below: no checkout/merge/rebase/am/receive or amend,
-// and automatic maintenance is disabled. Unused hooks do not block unrelated operations.
+// Workspace preparation always forces core.hooksPath=/dev/null. Only map hooks for
+// Source Control writes that intentionally preserve Git's native hook behavior.
 const hookActions = new Map<string, readonly ScGitAction[]>([
   ['pre-commit', ['commit']],
   ['prepare-commit-msg', ['commit']],
   ['commit-msg', ['commit']],
   ['post-commit', ['commit']],
   ['pre-push', ['push']],
-  ['post-index-change', ['stage', 'unstage', 'commit', 'prepareWorkspace']],
-  ['post-checkout', ['prepareWorkspace']],
-  ['reference-transaction', ['commit', 'fetch', 'push', 'prepareWorkspace']]
+  ['post-index-change', ['stage', 'unstage', 'commit']],
+  ['reference-transaction', ['commit', 'fetch', 'push']]
 ])
 
 export interface GitIdentity {

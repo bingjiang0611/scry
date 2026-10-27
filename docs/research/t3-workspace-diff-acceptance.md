@@ -12,7 +12,7 @@
 | B：选择器 | 本地与已缓存 remote refs、真实 worktree 清单、搜索、分页、占用/锁定/失效状态。composer 下方细条的左右入口分别向上展开轻量菜单；点选即保存，不使用模态表单或应用按钮。已有 worktree 分支只读。新分支自动命名 `scry/<短 UUID>`，新建选项 tooltip 说明不复制未提交文件。最近成功准备并登记的 worktree 根据同 commonDir 的已有操作账本置顶，不用文件 mtime 猜测。 |
 | B：草稿 | 复用现有有界草稿存储，按 cwd/provider/profile/session 隔离；选择不改 Git。损坏选择保留文本但阻止发送。发送按钮明确切换、创建或复用；准备期间保留真实输入并禁止重复发送。ACK 只消费匹配操作及已提交输入，保留期间新输入和其他草稿。 |
 | C：真实首次发送 | 保留 legacy `App → useAgentSession.send → agent:start`。复用 SourceControlService commonDir 队列和 journal，保留预约直到授权、trust、baseline 收敛及同步 runs.register。登记前不启动 Provider，不制造 renderer 串行 IPC 的空窗。 |
-| C：目标与权限 | 宿主控制新路径 `userData/worktrees/<repo-id>/<operation-id>`；原生 ref 校验；已检出分支复用对应 worktree。切脏分支拒绝；目标 tree 的 filter/submodule、native checkout hooks 先检查。实际 cwd/commonDir/HEAD/分支再读回，经原项目 authority 和既有 trust/fingerprint 链绑定。 |
+| C：目标与权限 | 宿主控制新路径 `userData/worktrees/<repo-id>/<operation-id>`；原生 ref 校验；已检出分支复用对应 worktree。切脏分支拒绝；目标 tree 的 filter/submodule 先检查；创建或切换工作区固定使用 `core.hooksPath=/dev/null`，不执行也不因原生 checkout hooks 拒绝。实际 cwd/commonDir/HEAD/分支再读回，经原项目 authority 和既有 trust/fingerprint 链绑定。 |
 | C：故障与恢复 | `planned → git_requested → prepared → start_requested → registered`，请求哈希和命令收据约束重放。未知 Git/启动结果只读核查，不自动重试。已建 worktree 不因 Provider 失败被删除。晚到 ACK 按精确 run catalog alias 恢复，不能抓同目录最新会话。 |
 | D：验收 | 真实临时 Git、生产 trusted IPC wrapper、隔离完整 Electron App、canonical recorder records、负向控制、全量 unit/shell、CLI、打包和性能计数。Provider 为已有离线 smoke adapter，不是付费真实服务。 |
 

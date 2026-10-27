@@ -126,7 +126,7 @@ describe('atomic workspace first-send preparation with real Git', { timeout: 15_
     expect(await readFile(join(cwd, 'base.txt'), 'utf8')).toBe('source working\n')
   })
 
-  it('reuses an already checked-out branch, rejects dirty switches, and never runs native checkout hooks', async () => {
+  it('reuses an already checked-out branch, rejects dirty switches, and creates worktrees without native hooks', async () => {
     const existing = join(root, 'already checked out')
     git('worktree', 'add', '-b', 'existing', existing)
     const input = request(await selection('current'))
@@ -143,14 +143,17 @@ describe('atomic workspace first-send preparation with real Git', { timeout: 15_
     } }
     await expect(service.startWorkspace(dirty, start)).rejects.toThrow('未提交改动')
     expect(git('symbolic-ref', 'HEAD')).toBe('refs/heads/main')
-    const marker = join(root, 'hook-ran')
-    const hook = join(cwd, '.git/hooks/post-checkout')
-    await writeFile(hook, `#!/bin/sh\ntouch '${marker}'\n`)
-    await chmod(hook, 0o755)
-    const blocked = request(await selection('newWorktree', 'blocked'))
-    await expect(service.startWorkspace(blocked, start)).rejects.toThrow('post-checkout')
-    await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
-    expect(providerCalls).toHaveLength(1)
+    const markers = ['post-checkout', 'post-index-change', 'reference-transaction'].map(name => ({
+      hook: join(cwd, '.git/hooks', name), marker: join(root, `${name}-ran`)
+    }))
+    for (const { hook, marker } of markers) {
+      await writeFile(hook, `#!/bin/sh\ntouch '${marker}'\n`)
+      await chmod(hook, 0o755)
+    }
+    const created = request(await selection('newWorktree', 'hooks-disabled'))
+    expect((await service.startWorkspace(created, start)).workspace?.branchRef).toBe('refs/heads/hooks-disabled')
+    for (const { marker } of markers) await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(providerCalls).toHaveLength(2)
   })
 
   it('holds the existing commonDir gate through delayed trust/baseline work and synchronous registration', async () => {

@@ -11,7 +11,7 @@
 - `GithubPullRequestPanel`：手动读取账户与 PR，创建 PR、文件 patch、已有评论、行评论草稿、批量 review 与手动 merge。main 重验账户、head/base；review 绑定 `commit_id`，merge 绑定 `sha`。
 - Agent 与 Git 写操作按 canonical common-dir 双向互斥。关联 worktree 共用 unknown 阻断；记录 intent 后失联不自动重试。只读核查与人工解除阻断分开，解除不把 unknown 改成成功。
 - commit/review 草稿持久化并串行写入；草稿与 HEAD 绑定。提交后的草稿清理失败不会被伪装成远端操作失败。
-- 原生 hook、命中的 clean/process filter、签名程序与仓库控制的传输执行扩展均不继承 recorder 自动授权。filter 检查在 `git status` 前；含 gitlink 的仓库拒绝递归读取，以免隐式执行子模块配置。
+- Source Control 的 commit/push 等写入仍不让原生 hook、命中的 clean/process filter、签名程序与仓库控制的传输执行扩展继承 recorder 自动授权。工作区创建/切换固定使用 `core.hooksPath=/dev/null`，不执行也不因原生 checkout hooks 拒绝。filter 检查在 `git status` 前；含 gitlink 的仓库拒绝递归读取，以免隐式执行子模块配置。
 - renderer 无任意命令或 token。preload 保持 sandbox CJS；IPC 继续通过生产 sender/frame/origin wrapper。Git 传输身份不冒充 GitHub API 账户。
 
 ## T3 风格工作流优化（0.2.189）
@@ -20,7 +20,7 @@
 
 - 文件勾选不执行 `git add`。提交弹窗显示完整范围及说明，确认后只暂存候选文件；已有部分暂存不重新整文件暂存。相邻的整文件覆盖、取消暂存与 push 仍分别确认。
 - main 在同一登记操作内验证完整候选范围、原有 index 与暂存后的额外路径变化；阶段失败保留现场为 unknown，不自动回滚、重复提交或 push。
-- hook/签名阻碍按原生命令的实际触发关系返回。`pre-push` 只限制 push，commit hooks 只限制 commit，index 与 ref transaction hooks 各自限制对应操作；未使用的 checkout/merge/rebase hooks 不阻碍提交。不新增原生扩展授权或执行能力，自动 maintenance 保持关闭。
+- hook/签名阻碍按原生命令的实际触发关系返回。`pre-push` 只限制 push，commit hooks 只限制 commit，index 与 ref transaction hooks 各自限制对应 Source Control 操作；工作区创建/切换显式禁用所有原生 hooks，因此不被这些 hooks 阻断。未使用的 checkout/merge/rebase hooks 不阻碍提交。不新增原生扩展授权或执行能力，自动 maintenance 保持关闭。
 - 唯一 GitHub remote 自动带入仓库，支持本仓库的 `ssh://git@ssh.github.com:443/...`；多个仓库不猜目标。显式读取后才尝试打开唯一匹配当前仓库/分支的 PR，同仓库同分支不能创建 PR。
 - 窄面板在文件/差异之间切换；最大化时并列显示。弹窗 Escape 与返回文件列表恢复原生焦点。
 

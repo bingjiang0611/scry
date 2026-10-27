@@ -162,7 +162,7 @@ flowchart TD
 | 脏目录与分支占用 | 不 stash/reset/force；占用分支导向已有 worktree；主目录改动保留。 |
 | 同仓库 active run、Git 写入与发送竞争 | commonDir 门禁生效；运行登记与准备交接无空窗；未知操作不重放。 |
 | renderer 伪造路径、repo ID、worktree ID、revision、iframe sender | 生产 handleTrusted wrapper 拒绝，特权 listener/子进程未运行。 |
-| checkout hook/filter、符号链接、目标替换、旧授权 | 未经目标 trust/identity 校验不能执行；不能凭 repo grant 写任意目录。 |
+| checkout hook/filter、符号链接、目标替换、旧授权 | 工作区准备固定禁用原生 Git hooks；filter 未经目标 trust/identity 校验不能执行；不能凭 repo grant 写任意目录。 |
 | 创建后崩溃/Provider 启动失败/响应丢失 | 草稿保留；只读核查唯一结果；无重复 worktree；用户目录不被清理。 |
 | 现有 Provider 恢复、fork、后台会话、Source Control stage/commit | 原合同不回归。实验 Provider 明确能力差异。 |
 
