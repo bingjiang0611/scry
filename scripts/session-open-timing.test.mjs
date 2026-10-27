@@ -41,6 +41,8 @@ describe('native session-open clock', () => {
     const result = await pending
     expect(result.clickAt).toBe(event.timeStamp)
     expect(result.readyAt).toBeGreaterThanOrEqual(result.clickAt)
+    expect(result.selectedAt).toBeLessThanOrEqual(result.readyAt)
+    expect(result.selectionMs).toBeLessThanOrEqual(result.nativeOpenMs)
     expect(result.nativeOpenMs).toBe(result.readyAt - result.clickAt)
     expect(result.trustedClick).toBe(false) // Synthetic test input must not masquerade as native.
     expect(frames.size).toBe(0)
@@ -67,6 +69,29 @@ describe('native session-open clock', () => {
     expect(result.nativeOpenMs).toBe(40)
     expect(result.handlerDelayMs).toBe(20)
     expect(result.readyAt).toBe(220)
+  })
+
+  it('records a stable selected shell before final readiness', async () => {
+    let now = 100
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    const button = new EventTarget()
+    let ready = false
+    const event = new Event('click')
+    Object.defineProperty(event, 'timeStamp', { value: 100 })
+    const pending = measureNativeSessionOpen(button, () => ready, () => true)
+    button.dispatchEvent(event)
+    now = 110
+    advanceFrame()
+    now = 120
+    advanceFrame()
+    ready = true
+    now = 130
+    advanceFrame()
+    now = 140
+    advanceFrame()
+    const result = await pending
+    expect(result.selectionMs).toBe(20)
+    expect(result.nativeOpenMs).toBe(40)
   })
 
   it('resets stability when readiness is lost, rather than accumulating two ready frames', async () => {
