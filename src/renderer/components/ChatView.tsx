@@ -1,8 +1,4 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react'
-import { LOADING_COPY } from '../constants/copy'
-import { useDelayedFlag } from '../hooks/useDelayedFlag'
-import { MOTION, prefersReducedMotion } from '../motion'
-import { LoadingStatus } from './LoadingStatus'
 import type { AgentQuestionRequest } from '@shared/runtime'
 import { ChatTranscriptTurns } from './chat-view/transcript'
 import { Composer } from './chat-view/Composer'
@@ -54,30 +50,8 @@ export function ChatView(props: ChatViewProps) {
   } = props
   const remote = remoteHost != null
   const workspaceName = cwd?.split('/').filter(Boolean).at(-1) ?? null
-  // 一次历史页装载常态只有几百毫秒，150 ms 的装饰延迟会让加载条在每次切会话时闪一下；
-  // 真慢的装载（冷归档、远端）仍会显示，状态语义不变。
-  const delayedSessionLoading = useDelayedFlag(sessionLoading, 600)
-  const previousPresentation = useRef({ scope: composerScopeKey, turns })
-  const retainPrevious = sessionLoading && hasSelectedSession && !sessionCacheVisible && previousPresentation.current.scope !== composerScopeKey
-  const transcriptContent = useRef<HTMLDivElement>(null)
-  useBrowserLayoutEffect(() => {
-    if (!sessionLoading || sessionCacheVisible) previousPresentation.current = { scope: composerScopeKey, turns }
-  }, [sessionLoading, sessionCacheVisible, composerScopeKey, turns])
-  // Revoking this session's cache clears it immediately; only another scope can linger.
-  const displayedTurns = !sessionLoading || sessionCacheVisible ? turns : retainPrevious ? previousPresentation.current.turns : NO_TURNS
-  useBrowserLayoutEffect(() => {
-    const element = transcriptContent.current
-    if (!element) return
-    // Retained DOM is presentation, not selected-session authority or navigation.
-    element.inert = retainPrevious
-    if (!retainPrevious || !delayedSessionLoading) { element.style.opacity = ''; return }
-    element.style.opacity = '0'
-    const animation = element.animate([{ opacity: 1 }, { opacity: 0 }], {
-      id: 'scry-loading-previous', duration: 120, easing: prefersReducedMotion() ? 'linear' : MOTION.easeExit
-    })
-    animation.onfinish = () => animation.cancel()
-    return () => { animation.cancel(); element.style.opacity = '' }
-  }, [retainPrevious, delayedSessionLoading])
+  // Only the selected session's turns or its own display cache may be rendered.
+  const displayedTurns = !sessionLoading || sessionCacheVisible ? turns : NO_TURNS
   const ownerReady = !sessionLoading && !sessionCacheVisible
   const liveRunId = ownerReady && busy ? turns.find(turn => !turn.done && !turn.error)?.runId ?? null : null
   const lastLive = useRef<{ scope: string | undefined; runId: string | null }>({ scope: composerScopeKey, runId: null })
@@ -91,11 +65,6 @@ export function ChatView(props: ChatViewProps) {
     <>
       <WorkspaceFileLinkProvider workspaces={workspaceRoots} onOpen={onOpenFile}>
         <div className="body chat-body" data-screen-label="对话 · 真实 Turn transcript">
-          {delayedSessionLoading && hasSelectedSession && (
-            <LoadingStatus className="chat-session-evidence-gap"
-              title={sessionCacheVisible ? LOADING_COPY.cache : LOADING_COPY.session}
-              detail={sessionCacheVisible ? LOADING_COPY.cacheDetail : remote ? LOADING_COPY.remoteArchive(remoteHost) : LOADING_COPY.localArchive} />
-          )}
           <div className="chat chat-transcript" ref={scrollRef} aria-label="执行时间线" aria-busy={sessionLoading}>
             {turns.length === 0 && !sessionLoading && sessionEvidenceGap && (
               <div className="chat-session-evidence-gap" role="status" data-status={sessionEvidenceGap.status}>
@@ -121,8 +90,8 @@ export function ChatView(props: ChatViewProps) {
                 <button type="button" className="history-window-more" onClick={() => onLoadOlderTurns?.()} disabled={historyOlderLoading || !onLoadOlderTurns}>{historyOlderLoading ? '加载中…' : '加载更早轮次'}</button>
               </div>
             )}
-            <div ref={transcriptContent} className="chat-transcript-content" data-loading-previous={retainPrevious || undefined} aria-hidden={retainPrevious || undefined}>
-              <ChatTranscriptTurns turns={displayedTurns} selectedId={selectedId} focusedTurnRunId={focusedTurnRunId} onTurnRef={retainPrevious ? undefined : onTurnRef} onSelect={onSelect} onOpenDiff={onOpenDiff} forkableRunIds={forkableRunIds} onForkTurn={!sessionLoading && !busy && queuedPrompts.length === 0 && pendingQuestions.length === 0 ? onForkTurn : undefined} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote}
+            <div className="chat-transcript-content">
+              <ChatTranscriptTurns turns={displayedTurns} selectedId={selectedId} focusedTurnRunId={focusedTurnRunId} onTurnRef={onTurnRef} onSelect={onSelect} onOpenDiff={onOpenDiff} forkableRunIds={forkableRunIds} onForkTurn={!sessionLoading && !busy && queuedPrompts.length === 0 && pendingQuestions.length === 0 ? onForkTurn : undefined} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote}
                 liveRunId={liveRunId} completedLiveRunId={completedLiveRunId} liveArrivalResetKey={liveArrivalResetKey} />
             </div>
           </div>

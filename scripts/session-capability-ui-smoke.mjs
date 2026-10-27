@@ -220,7 +220,7 @@ try {
         const sessionTerminals = []
         for (const scenario of ${JSON.stringify(overviewOnly || selectionOnly || piCommandsOnly || modelsOnly || piPermissionOnly ? [] : ['restored', 'pending'])}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-terminal.html'))}, { query: { scenario } })
-          sessionTerminals.push(await (${fixtureSources.exerciseSessionTerminals})(win.webContents, scenario))
+          sessionTerminals.push(await (${fixtureSources.exerciseSessionTerminals})(win.webContents, scenario, ${JSON.stringify(specialSources.pointer)}))
         }
         finish({ ...result, ...piCommands, selection, piPermissions, sessionModels, sessionTerminals })
       } catch (error) {

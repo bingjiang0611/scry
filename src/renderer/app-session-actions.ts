@@ -1,10 +1,11 @@
 import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'react'
 import { runStructuralTransition } from './structural-motion'
 import { browserStorage } from './browser-storage'
+import { LOADING_COPY } from './constants/copy'
 import { persistSessionSelection, readStoredSessionSelection } from './session-restore'
 import { workspaceRunSession } from './workspace-drafts'
 import type { ProviderContext, ProviderId, SessionProviderId } from '@shared/provider'
-import type { ProjectMeta, SessionMeta, SessionRef } from './env'
+import type { ProjectMeta, SessionHistoryPage, SessionMeta, SessionRef } from './env'
 import type { Turn } from './format'
 import type { AppView } from './app-types'
 import type { useWorkspaceState } from './hooks/useWorkspaceState'
@@ -18,8 +19,16 @@ import {
   type SessionEvidenceGap, type SessionPromptQueues
 } from './app-model'
 
+export type PendingSessionSelection = {
+  sequence: number
+  navigationSequence: number
+  key: string
+  args: [cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, knownRunId?: string, agentProfileId?: string]
+  deferred: boolean
+}
+
 export function createSessionActions({
-  workspace, session, integrations, setSessionLoading, sessionSelectionSeqRef,
+  workspace, session, integrations, setSessionLoading, sessionSelectionSeqRef, sessionNavigationSeqRef, pendingSessionSelection,
   resetPromptQueueControl, shouldStickToBottomRef, selectSessionId, setView, taRef,
   draftContextRef, setSessionEvidenceGap, setSessionPromptQueues, setComposerError,
   confirmWorkspaceTransition, cwdRef, activeSessionIdRef, sessionLoading, sessionSnapshots,
@@ -31,6 +40,8 @@ export function createSessionActions({
   integrations: ReturnType<typeof useIntegrations>
   setSessionLoading: Dispatch<SetStateAction<boolean>>
   sessionSelectionSeqRef: MutableRefObject<number>
+  sessionNavigationSeqRef: MutableRefObject<number>
+  pendingSessionSelection: MutableRefObject<PendingSessionSelection | null>
   resetPromptQueueControl: () => void
   shouldStickToBottomRef: MutableRefObject<boolean>
   selectSessionId: (id: string | null) => void
@@ -56,24 +67,12 @@ export function createSessionActions({
 }) {
   const { cwd, setCwd, loadProjects, refreshRecent } = workspace
   // 只记录“用户停在哪里”这一事实；会话内容、运行证据与权限仍需 pickSession 重新读取。
-  const rememberSelection = (next: {
-    cwd: string | null
-    sessionId: string | null
-    providerId: ProviderId
-    externalSessionId?: string
-    agentProfileId?: string
-  }): void => {
-    const target = next.cwd
-    persistSessionSelection(target
-      ? { cwd: target, sessionId: next.sessionId, providerId: next.providerId, externalSessionId: next.externalSessionId, agentProfileId: next.agentProfileId }
-      : null, browserStorage())
-  }
-  const rememberWorkspaceOnly = (dir: string | null): void => rememberSelection({
+  const rememberWorkspaceOnly = (dir: string | null): void => persistSessionSelection(dir ? {
     cwd: dir,
     sessionId: null,
     providerId: integrations.selectedProviderId,
     agentProfileId: integrations.providerContext.agentProfileId
-  })
+  } : null, browserStorage())
   const pickRecent = async (dir: string): Promise<void> => {
     if (dir === cwd) return
     setSessionLoading(false)
@@ -202,21 +201,51 @@ export function createSessionActions({
         agentProfileId
       }
     )
-    // Re-selecting an in-flight history must not invalidate its response or restart the main read.
-    // The catalog row is selected before its body arrives; that is not a completed selection.
+    // A cold selection is not published until its first history page is ready.
+    const selectionKey = JSON.stringify([projectCwd, sessionId, providerId, externalSessionId, knownRunId, agentProfileId])
+    const pending = pendingSessionSelection.current
+    if (pending?.sequence === sessionSelectionSeqRef.current && pending.navigationSequence === sessionNavigationSeqRef.current && pending.key === selectionKey) return
+    pendingSessionSelection.current = null
+    sessionNavigationSeqRef.current += 1
     if (!switchingSession && sessionLoading) return
-    const seq = ++sessionSelectionSeqRef.current
-    const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
     setComposerError(null)
-    setSessionEvidenceGap(null)
     const historyContext: ProviderContext = { providerId, agentProfileId, cwd: projectCwd, externalSessionId }
     const cacheRevision = sessionSnapshots.revision
     const cachedPage = switchingSession ? sessionSnapshots.get(historyContext) : undefined
-    setSessionLoading(switchingSession || session.turns.length === 0)
-    setSessionCacheVisible(Boolean(cachedPage?.turns.length))
+    // Keep the current selection intact until the target has content. Only a
+    // snapshot belonging to the target may be shown before its authority refresh.
+    let preparedPage: SessionHistoryPage | null | undefined
+    if (switchingSession && !cachedPage && externalSessionId) {
+      const request: PendingSessionSelection = {
+        sequence: sessionSelectionSeqRef.current, navigationSequence: sessionNavigationSeqRef.current,
+        key: selectionKey, args: [projectCwd, sessionId, providerId, externalSessionId, knownRunId, agentProfileId],
+        deferred: sessionLoading
+      }
+      pendingSessionSelection.current = request
+      // Main supersedes earlier history reads. Let the retained session finish
+      // its authority refresh before starting a cold read for another session.
+      if (request.deferred) return
+      const pendingIsCurrent = (): boolean => pendingSessionSelection.current === request &&
+        request.sequence === sessionSelectionSeqRef.current && request.navigationSequence === sessionNavigationSeqRef.current
+      try {
+        preparedPage = await window.scry.loadSession(historyContext)
+        if (!pendingIsCurrent()) return
+      } catch (error) {
+        if (pendingIsCurrent()) setComposerError(LOADING_COPY.sessionOpenFailed(error instanceof Error ? error.message : String(error)))
+        return
+      } finally {
+        if (pendingSessionSelection.current === request) pendingSessionSelection.current = null
+      }
+    }
+    const seq = ++sessionSelectionSeqRef.current
+    const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
+    const presentationPage = cachedPage ?? preparedPage
+    setSessionEvidenceGap(null)
+    setSessionLoading(true)
+    setSessionCacheVisible(Boolean(presentationPage?.turns.length) || (!switchingSession && session.turns.length > 0))
     setView('chat')
     if (switchingSession) {
-      if (cachedPage) session.replaceWithParsedSession(sessionId, cachedPage.turns, { activeRun: null, page: cachedPage, source: 'cache' })
+      if (presentationPage) session.replaceWithParsedSession(sessionId, presentationPage.turns, { activeRun: null, page: presentationPage, source: 'cache' })
       else session.clearTurns()
     }
     resetPromptQueueControl()
@@ -224,7 +253,7 @@ export function createSessionActions({
     selectSessionId(sessionId)
     setCwd(projectCwd || null)
     integrations.setSelectedId(agentProfileId ?? providerId)
-    rememberSelection({ cwd: projectCwd || null, sessionId, providerId, externalSessionId, agentProfileId })
+    persistSessionSelection(projectCwd ? { cwd: projectCwd, sessionId, providerId, externalSessionId, agentProfileId } : null, browserStorage())
     try {
       // Sidebar activity is a display cache, not proof that no live run exists.
       const activeRunsRequest = window.scry.activeRuns()
@@ -246,7 +275,7 @@ export function createSessionActions({
           {
             prepareRunFocus: session.prepareRunFocus,
             adoptActiveRun: (targetRunId) => window.scry.adoptActiveRun(targetRunId),
-            loadSession: (context) => window.scry.loadSession(context),
+            loadSession: (context) => preparedPage === undefined ? window.scry.loadSession(context) : Promise.resolve(preparedPage),
             replaceWithParsedSession: session.replaceWithParsedSession,
             onHistoryLoaded: (page, activeRun) => {
               if (!isCurrent()) return
@@ -269,7 +298,7 @@ export function createSessionActions({
         return
       }
       const [loadedPage] = await Promise.all([
-        window.scry.loadSession(historyContext),
+        preparedPage === undefined ? window.scry.loadSession(historyContext) : preparedPage,
         focusRequest
       ])
       if (!isCurrent()) return
@@ -293,11 +322,14 @@ export function createSessionActions({
         })
         sessionSnapshots.delete(historyContext)
         setSessionCacheVisible(false)
-        if (cachedPage) session.clearTurns()
-        setComposerError(`无法打开对话：${error instanceof Error ? error.message : String(error)}`)
+        if (presentationPage) session.clearTurns()
+        setComposerError(LOADING_COPY.sessionOpenFailed(error instanceof Error ? error.message : String(error)))
       }
     } finally {
-      if (isCurrent()) setSessionLoading(false)
+      if (isCurrent()) {
+        setSessionCacheVisible(false)
+        setSessionLoading(false)
+      }
     }
   }
 

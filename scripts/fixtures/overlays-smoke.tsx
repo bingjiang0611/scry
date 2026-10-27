@@ -1,4 +1,5 @@
-import './session-cache-smoke'
+import { page } from './session-cache-smoke'
+import type { ProviderContext } from '../../src/shared/provider'
 import { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { summarizeRunningLlmSessions } from '../../src/shared/llm-performance'
@@ -11,6 +12,7 @@ import { SessionRenameMenu, type SessionMenuTarget } from '../../src/renderer/co
 document.documentElement.dataset.platform = 'macos'
 document.getElementById('cache-state')!.parentElement!.hidden = true
 Object.assign(window.scry, {
+  loadSession: async (context: ProviderContext) => page(context.externalSessionId!),
   listArchivedSessions: async () => [],
   llmPerformanceSummary: async () => summarizeRunningLlmSessions([]),
   llmPerformanceHistory: async () => ({ rows: [], invalidLines: 0, truncated: false })

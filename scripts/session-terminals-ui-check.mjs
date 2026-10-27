@@ -1,4 +1,4 @@
-export async function exerciseSessionTerminals(contents, scenario) {
+export async function exerciseSessionTerminals(contents, scenario, pointerSource) {
   const read = (expression) => contents.executeJavaScript(expression)
   const wait = async (expression) => {
     const deadline = Date.now() + 5000
@@ -9,17 +9,15 @@ export async function exerciseSessionTerminals(contents, scenario) {
   }
   const click = async (selector) => {
     await wait(`[...document.querySelectorAll(${JSON.stringify(selector)})].some(node => node.getBoundingClientRect().width > 0)`)
-    const point = await read(`(() => {
+    await read(`(() => {
+      document.querySelector('[data-terminal-fixture-target]')?.removeAttribute('data-terminal-fixture-target');
       const node = [...document.querySelectorAll(${JSON.stringify(selector)})].find(node => node.getBoundingClientRect().width > 0);
-      if (!node) throw new Error('Missing terminal control ' + ${JSON.stringify(selector)});
-      node.scrollIntoView({ block: 'center' });
-      const rect = node.getBoundingClientRect();
-      const x = Math.round(rect.left + rect.width / 2), y = Math.round(rect.top + rect.height / 2);
-      if (!node.contains(document.elementFromPoint(x, y))) throw new Error('Terminal control obscured: ' + ${JSON.stringify(selector)} + ' by ' + document.elementFromPoint(x, y)?.outerHTML);
-      return { x, y };
+      node.setAttribute('data-terminal-fixture-target', 'true');
     })()`)
+    const point = await read(`(${pointerSource})('[data-terminal-fixture-target]', { timeoutMs: 5000, scroll: true, captureReceipt: true })`)
     contents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
     contents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
+    await wait('window.__nativeUiPointerReceipt?.trusted && window.__nativeUiPointerReceipt.targetMatched')
   }
   const clickTerminalSurface = async () => {
     await wait(`document.querySelector('.surface-menu') != null`)

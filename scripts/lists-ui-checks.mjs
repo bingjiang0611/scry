@@ -62,14 +62,13 @@ export async function exerciseLists(contents, win, screenshotPrefix = '', pointe
     await wait("window.listFixture.turnRefs.size===1")
     const runId = await read("[...window.listFixture.turnRefs.keys()][0]")
     await read("window.__referenceNode=[...window.listFixture.turnRefs.values()][0]; window.listFixture.referenceScope('shared-fork', true)")
-    await wait("document.querySelector('[data-loading-previous=true]')?.inert===true")
-    check(await read("window.__referenceNode.isConnected && window.listFixture.turnRefs.size===0 && window.listFixture.refEvents.at(-1).attached===false"), 'retained transcript remained registered for turn navigation')
-    await wait("document.querySelector('.chat-body > .loading-status')")
-    check(await read("window.listFixture.turnRefs.size===0"), 'fading transcript re-registered its old turn reference')
+    await wait("!document.querySelector('[data-run-id]')")
+    check(await read("!window.__referenceNode.isConnected && window.listFixture.turnRefs.size===0 && window.listFixture.refEvents.at(-1).attached===false"), 'another session remained visible or registered for turn navigation')
+    check(await read("!document.querySelector('.chat-body > .loading-status')"), 'pending target mounted a session loading banner')
     await read("window.listFixture.referenceScope('shared-fork', false)")
     await wait(`window.listFixture.turnRefs.has(${JSON.stringify(runId)})`)
     check(await read(`window.listFixture.turnRefs.get(${JSON.stringify(runId)})===document.querySelector('[data-run-id]') && !document.querySelector('[data-loading-previous=true]') && window.listFixture.refEvents.at(-1).attached===true`), 'ready fork with a shared runId did not register its current turn')
-    return { retainedTurnRefsRetired: true, readySharedRunIdRegistered: true }
+    return { foreignTurnRefsRemoved: true, readySharedRunIdRegistered: true }
   }
   if (campaign === 'structure') return exerciseStructure({ read, check, wait, click, settle, arm, captured, screenshot, contents })
   if (campaign === 'history') {
