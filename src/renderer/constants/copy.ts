@@ -291,6 +291,8 @@ export const ARCHIVED_SESSIONS_COPY = {
 
 export const REMOTE_SESSION_COPY = {
   unreadResult: '有新结果，未查看',
+  runningLabel: '正在运行',
+  waitingAnswerLabel: (count: number) => count > 1 ? `需回答 ${count} 个问题` : '需回答',
   archivedTitle: '远程已存档会话',
   archivedDescription: '恢复会话会将其放回远程项目。删除仅移除对应主机上的 Scry 副本。',
   restore: '取消存档',

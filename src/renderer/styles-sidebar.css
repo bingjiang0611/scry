@@ -226,6 +226,12 @@ body.pane-resizing * {
 @keyframes sb-running-spin {
   to { transform: rotate(360deg); }
 }
+/* A run blocked on a question is not making progress; a spinner would misreport it. */
+.sb-sess.waiting .sb-running {
+  border-color: var(--accent);
+  border-top-color: var(--accent);
+  animation: none;
+}
 .ctx-overlay {
   position: fixed;
   inset: 0;

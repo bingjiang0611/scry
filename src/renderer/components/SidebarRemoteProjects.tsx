@@ -164,12 +164,14 @@ export function SidebarRemoteProjects({
                   const selected = active?.connectionId === group.connection.id && active.cwd === group.cwd && active.externalSessionId === session.externalSessionId
                   const provider = providerIdForAgentId(session.providerId)
                   const running = group.state === 'connected' && session.isActive === true
+                  // A blocked run is still active; the host reports how many questions it waits on.
+                  const waitingAnswer = running ? session.pendingQuestions ?? 0 : 0
                   const unread = catalogs.get(group.connection.id)?.unreadSessionKeys?.has(remoteSessionAttentionKey(group.connection.id, session))
                   return (
                     <div className="sb-sess-row" key={session.sessionId}>
                       <button
                         type="button"
-                        className={['sb-sess', selected && 'active', running && 'running', unread && 'unread'].filter(Boolean).join(' ')}
+                        className={['sb-sess', selected && 'active', running && 'running', waitingAnswer > 0 && 'waiting', unread && 'unread'].filter(Boolean).join(' ')}
                         data-provider={session.providerId}
                         data-remote-session={session.externalSessionId}
                         aria-current={selected ? 'true' : undefined}
@@ -187,7 +189,9 @@ export function SidebarRemoteProjects({
                           {Boolean(session.pinnedAt) && <Icon name="pin" />}
                           <span className="sb-sesstime">{relTime(session.ts)}</span>
                         </span>
-                        {running && <span className="sb-running" role="status" aria-label="正在运行" title="正在运行" />}
+                        {running && <span className="sb-running" role="status"
+                          aria-label={waitingAnswer > 0 ? copy.waitingAnswerLabel(waitingAnswer) : copy.runningLabel}
+                          title={waitingAnswer > 0 ? copy.waitingAnswerLabel(waitingAnswer) : copy.runningLabel} />}
                         {unread && <span className="sb-unread" role="status" aria-label={copy.unreadResult} title={copy.unreadResult} />}
                       </button>
                       <span className="sb-sess-acts" title={!group.canManage ? copy.upgrade(group.connection.label) : undefined}>
