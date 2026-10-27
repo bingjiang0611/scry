@@ -111,3 +111,8 @@ max(现存最大号, archivedThrough, 各指纹检查点的 ackedThrough 与 pro
 ## VF2（已拆出）
 
 VF2 的空洞处理、丢失结果恢复与两次跟进记录已按职责拆到 [VF2 投递空洞报告](delivery-holes.md)，原文未删改。
+
+## VF2 跟进核验（审阅方，2026-10-27）
+
+- **认可**。在 `70804df` 的独立 worktree 上重演红测，2 个失败（absent 去重、丢失 outcome 后重投）。在 `af40ba3` 上跑 recorder、doctor 和 recorder-command 测试，167/167 通过，`npm run typecheck` 通过。replay 不带 historyKey 只会多投递一次，不会把未投递的记录当作成功，因为服务端按 recordId 去重，放宽这条校验可以接受。
+- 小问题（审阅方探针确认，不阻塞）：对已经 ACK 的号执行 `notify-retry --sequence N`，会返回 `requeued: 1`，但什么也不会投递。`outcomes()` 只遍历大于 ackedThrough 的号，所以写入的 replay 只会作为孤儿文件留下。命令的输出和实际效果不一致。建议 `requeueLostOutcome` 拒绝 `sequence <= max(ackedThrough, archivedThrough)`，并说明该号已经确认送达。
