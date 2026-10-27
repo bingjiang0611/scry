@@ -122,12 +122,29 @@
     },
     "installerOutput": "/Applications/Scry.app\nbackup: /Applications/.Scry.app.backup",
     "installedByThisTask": true,
-    "userProcess": {
+    "userProcessAtInstall": {
       "pid": 59065,
       "stillRunning": true,
       "details": "59065 Mon Oct 26 19:27:18 2026     /Applications/Scry.app/Contents/MacOS/Scry"
     },
-    "userProcessRestarted": false
+    "userProcessRestartedDuringInstallation": false,
+    "postInstallRestart": {
+      "authorized": true,
+      "oldProcess": {
+        "pid": 59065,
+        "start": "Mon Oct 26 19:27:18 2026",
+        "exited": true
+      },
+      "newProcess": {
+        "pid": 81926,
+        "details": "81926 Mon Oct 26 19:42:52 2026     /Applications/Scry.app/Contents/MacOS/Scry",
+        "onlyMainProcess": true
+      },
+      "installed": {
+        "version": "0.2.226",
+        "build": "b251f32389930f388231f010006166c4d64d2ec623c8ae20bf6bb813e03d9cf6"
+      }
+    }
   },
   "acceptance": {
     "mode": "installed packaged app with isolated temporary userData/workspaces and fixture Provider only",
@@ -218,13 +235,69 @@
       "navigationDenied": true
     },
     "realProviderExecuted": false,
-    "foregroundUserAppUsed": false,
-    "ownedProcessesRemaining": 0
+    "foregroundUserAppUsed": true,
+    "ownedProcessesRemaining": 0,
+    "postRestart": {
+      "result": "passed",
+      "ui": {
+        "windowObserved": true,
+        "title": "Scry",
+        "restoredSessionVisible": true,
+        "blankOrCrashObserved": false,
+        "screenshotPersisted": false
+      },
+      "journal": {
+        "source": "/Users/baobingjiang/Library/Application Support/Scry/performance/performance-0.jsonl",
+        "session": "24cb8b65-eb25-4826-aa81-61e147f4c4e6",
+        "version": "0.2.226",
+        "build": "b251f32389930f388231f010006166c4d64d2ec623c8ae20bf6bb813e03d9cf6",
+        "mode": "packaged",
+        "records": 333,
+        "traceSamples": 310,
+        "nonCompleted": 0,
+        "first": "2026-10-27T02:42:58.855Z",
+        "last": "2026-10-27T02:44:23.864Z",
+        "selected": {
+          "app.startup": {
+            "count": 1,
+            "minMs": 8132.3,
+            "maxMs": 8132.3,
+            "outcomes": {
+              "completed": 1
+            }
+          },
+          "session_history.load": {
+            "count": 10,
+            "minMs": 88.9,
+            "maxMs": 2766,
+            "outcomes": {
+              "completed": 10
+            }
+          },
+          "ipc.agent:loadSession": {
+            "count": 10,
+            "minMs": 88.9,
+            "maxMs": 2766.1,
+            "outcomes": {
+              "completed": 10
+            }
+          },
+          "ipc.app:rendererRestart": {
+            "count": 1,
+            "minMs": 0,
+            "maxMs": 0,
+            "outcomes": {
+              "completed": 1
+            }
+          }
+        }
+      }
+    }
   },
   "limits": [
     "installed smoke covers packaged history reload/restart, trust boundaries, terminal, recording and renderer crash; the 40-turn large-diff shape remains covered by the prior fixed workload and Pi history fixture",
-    "the user process remains the pre-install process and must be restarted by the user to load the new build",
-    "no L3 daily-use sample and no real paid Provider acceptance"
+    "post-install user process was restarted only after explicit authorization and now reports the installed build",
+    "one restarted packaged-App session is a short acceptance, not L3; no real paid Provider acceptance"
   ],
   "logs": {
     "root": "/Users/baobingjiang/.local/state/scry-history-install-20261026.IubVGb",
@@ -294,6 +367,11 @@
         "path": "postinstall-state.json",
         "bytes": 2837,
         "sha256": "d8ca0b55824af65b1afbeab85edbd4b30750f1052ccb760ddb007843d1c742c8"
+      },
+      {
+        "path": "restart-acceptance.json",
+        "bytes": 1862,
+        "sha256": "b3f62e9c80ff71357b8ccc7b265a0aa8a5f9b799d18c18c71b0841e036b9897e"
       }
     ]
   }

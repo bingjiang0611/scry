@@ -64,12 +64,22 @@
 
 ## 当前运行实例
 
-安装前用户实例 PID 59065 正在运行旧磁盘版本。安装后同一 PID 和启动时间仍存在，证明本任务没有退出或重启用户实例。磁盘 App 已更新，但该进程仍需用户自行重启，才会加载 build `b251f323…`。
+安装时保留了用户实例 PID 59065。用户随后明确授权重启；Graceful quit 与重新打开已经完成，新主进程为 PID 81926，启动时间为 2026-10-26 19:42:52。
+
+重启后的真实 packaged journal 直接报告：
+
+- App 0.2.226 / build `b251f323…` / packaged mode；
+- 新 journal session `24cb8b65-eb25-4826-aa81-61e147f4c4e6`；
+- 310 个 trace sample 全部 `completed`，没有非完成结果；
+- `session_history.load` 与 `ipc.agent:loadSession` 各 10 次完成，范围 88.9–2766 ms；
+- `app.startup` 本次为 8132.3 ms。
+
+系统 UI 观察确认 Scry 窗口已恢复现有会话，没有空白页或崩溃。该窗口包含用户内容，因此没有持久化截图。上述数字只是一次真实重启后的短验收；启动时间和历史长尾不能作为 L3 结论。
 
 ## 限制与状态
 
-- 已安装并完成独立 packaged smoke。
-- 未 push，未重启用户实例。
-- 没有真实 Provider 验收，也没有 L3 日常样本。
+- 已安装，并完成独立 packaged smoke 与重启后的真实实例短验收。
+- 未 push；用户实例已按明确授权重启并加载新 build。
+- 没有真实 Provider 验收，也没有达到 L3 所需的多会话日常样本。
 - 打包与验收日志保存在 `/Users/baobingjiang/.local/state/scry-history-install-20261026.IubVGb`。
 - 结构化证据：[20261026-history-open-install-evidence.json](20261026-history-open-install-evidence.json)。
