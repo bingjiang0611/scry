@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -229,10 +229,53 @@ describe('atomic workspace first-send preparation with real Git', { timeout: 15_
     expect(git('worktree', 'list', '--porcelain').match(/^worktree /gm)).toHaveLength(2)
   })
 
-  it('rejects stale selections, busy targets and revoked source authority before Provider dispatch', async () => {
-    const stale = request(await selection('newWorktree'))
+  it('creates the new worktree from the base commit that is current now and starts the Provider after the selection moved', async () => {
+    const input = request(await selection('newWorktree', 'follow/topic'))
+    // 选择之后源工作区又出现改动与新提交：新建 worktree 不碰这个 checkout，不能因此拒绝发送。
+    await writeFile(join(cwd, 'late.txt'), 'late\n')
+    await writeFile(join(cwd, 'second.txt'), 'second\n')
+    git('add', 'second.txt')
+    git('commit', '-m', 'second')
+    const baseHead = git('rev-parse', 'HEAD')
+    const result = await service.startWorkspace(input, start)
+    const parent = join(await realpath(userData), 'worktrees')
+    const [repository] = await readdir(parent)
+    expect(result.workspace?.cwd).toBe(join(parent, repository, input.workspace.operationId))
+    expect(result.workspace?.branchRef).toBe('refs/heads/follow/topic')
+    expect(result.workspace?.head).toBe(baseHead)
+    expect(await readFile(join(result.workspace!.cwd, 'second.txt'), 'utf8')).toBe('second\n')
+    expect(providerCalls).toEqual([result.workspace!.cwd])
+    expect(git('worktree', 'list', '--porcelain').match(/^worktree /gm)).toHaveLength(2)
+  })
+
+  it('reuses an existing worktree and starts the Provider without matching the source snapshot', async () => {
+    const created = await service.startWorkspace(request(await selection('newWorktree', 'reuse/topic')), start)
+    const target = created.workspace!
+    running = []
+    const inventory = await service.workspaceChoices({ cwd, kind: 'worktrees' })
+    if (inventory.status !== 'available' || inventory.data.page.kind !== 'worktrees') throw new Error('Expected worktrees')
+    const tree = inventory.data.page.items.find(item => item.path === target.cwd)
+    if (!tree) throw new Error('Expected the created worktree')
+    const reuse: WorkspaceStartSelection = {
+      operationId: randomUUID(),
+      intent: { repositoryId: inventory.data.repositoryId, expectedRevision: inventory.data.revision,
+        kind: 'existingWorktree', worktreeId: tree.id }
+    }
+    await writeFile(join(cwd, 'after-pick.txt'), 'changed\n')
+    const result = await service.startWorkspace(request(reuse), start)
+    expect(result.workspace?.cwd).toBe(target.cwd)
+    expect(providerCalls).toEqual([target.cwd, target.cwd])
+  })
+
+  it('rejects a stale branch switch, busy targets and revoked source authority before Provider dispatch', async () => {
+    git('branch', 'switch-target')
+    const stale = request(await selection('current'))
+    stale.workspace.intent = { ...stale.workspace.intent, kind: 'current', branch: {
+      name: 'refs/heads/switch-target', head: git('rev-parse', 'switch-target'), kind: 'local'
+    } }
     await writeFile(join(cwd, 'new.txt'), 'changed\n')
     await expect(service.startWorkspace(stale, start)).rejects.toThrow('仓库已变化')
+    expect(git('symbolic-ref', 'HEAD')).toBe('refs/heads/main')
     const busy = request(await selection('current'))
     running = [cwd]
     await expect(service.startWorkspace(busy, start)).rejects.toThrow('占用')

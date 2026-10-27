@@ -167,10 +167,15 @@ export async function exerciseWorkspaceSessions(context) {
     await apply()
     assert.equal(git(workspace, 'branch', '--list', generatedBranch), '', 'selection must not create a branch')
     assert.equal(await evaluate(`document.querySelector('.send')?.getAttribute('aria-label')`), '创建 worktree 并发送')
+    // 选择目标之后源 checkout 又出现外部改动（其他会话写文件）：新建 worktree 不碰它，
+    // 这条路径只能重新校验基准提交本身，不能要求选择时的 revision 仍然成立。
+    writeFileSync(join(workspace, 'moved-after-selection.txt'), 'external edit\n')
     const created = await send('desktop remote write one', true)
     const target = created.run.cwd
     assert.ok(target.startsWith(join(realpathSync(userDataDir), 'worktrees') + '/'), target)
     assert.equal(git(target, 'branch', '--show-current'), generatedBranch)
+    assert.equal(existsSync(join(target, 'moved-after-selection.txt')), false, 'new worktree never copies uncommitted files')
+    rmSync(join(workspace, 'moved-after-selection.txt'))
     assert.deepEqual(readFileSync(join(workspace, 'remote-first.txt')), sourceDirt)
     assert.deepEqual(readFileSync(join(workspace, '.git/index')), sourceIndex)
     assert.equal(statSync(join(workspace, '.git/index')).mtimeMs, sourceMtime)

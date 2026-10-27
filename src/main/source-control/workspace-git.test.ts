@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { ScGit } from './git'
 import { ScProcess } from './process'
-import { assertWorkspaceCheckoutSafe, createWorkspaceWorktree, switchWorkspaceBranch, verifyWorkspaceRef } from './workspace-git'
+import { assertWorkspaceCheckoutSafe, createWorkspaceWorktree, resolveWorkspaceRef, switchWorkspaceBranch, verifyWorkspaceRef } from './workspace-git'
 
 let root: string
 let cwd: string
@@ -70,6 +70,24 @@ it('detects target-only executable attributes with a private index before materi
   await expect(stat(marker)).rejects.toMatchObject({ code: 'ENOENT' })
   expect(await readFile(join(cwd, '.git/index'))).toEqual(index)
   await expect(stat(join(cwd, '.gitattributes'))).rejects.toMatchObject({ code: 'ENOENT' })
+})
+
+it('resolves a frozen ref name to the commit it points at now instead of a revision expression', async () => {
+  const identity = await git.identity(cwd)
+  const head = native('rev-parse', 'HEAD')
+  // 新建 worktree 的语义是“按这个分支现在的提交创建”，所以冻结的 head 只是当时读到的值。
+  await expect(resolveWorkspaceRef(git, identity, {
+    name: 'refs/heads/main', head: '0'.repeat(40), kind: 'local'
+  })).resolves.toBe(head)
+  await expect(resolveWorkspaceRef(git, identity, {
+    name: 'refs/heads/main~1', head, kind: 'local'
+  })).rejects.toThrow()
+  await expect(resolveWorkspaceRef(git, identity, {
+    name: 'refs/heads/missing', head, kind: 'local'
+  })).rejects.toThrow()
+  await expect(resolveWorkspaceRef(git, identity, {
+    name: 'refs/remotes/main', head, kind: 'remote'
+  })).rejects.toThrow()
 })
 
 it('rejects changed refs, revision expressions, remote switches and submodule checkouts', async () => {

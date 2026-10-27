@@ -5,7 +5,7 @@ import type { WorkspaceStartSelection, PreparedWorkspace, WorkspaceWorktreeChoic
 import type { GitIdentity, ScGit } from './git'
 import type { WorkspacePlan } from './workspace-journal'
 import { readWorktreeChoices, validateWorkspaceBranch, worktreeChoiceId } from './workspace-choices'
-import { assertWorkspaceCheckoutSafe, verifyWorkspaceRef } from './workspace-git'
+import { assertWorkspaceCheckoutSafe, resolveWorkspaceRef, verifyWorkspaceRef } from './workspace-git'
 
 function requireUsableWorktree(tree: WorkspaceWorktreeChoice): void {
   if (tree.bare || tree.locked !== null || tree.prunable !== null)
@@ -34,45 +34,55 @@ export async function planWorkspace(
 ): Promise<WorkspacePlan> {
   const { intent, operationId } = selection
   const source = await git.revisionSnapshot(identity)
-  if (source.revision !== intent.expectedRevision) throw new Error('仓库已变化，请刷新工作区选择后再发送')
   const worktrees = await readWorktreeChoices(git, identity)
   const current = worktrees.find(tree => tree.current)
   if (!current) throw new Error('当前工作区不在 Git worktree 清单中')
+  const requireSourceReady = (): void => {
+    if (!source.head) throw new Error('仓库尚无 HEAD；可以聊天，但不能创建或切换工作区')
+    const blocker = source.writeBlocker ?? source.actionBlockers.prepareWorkspace
+    if (blocker) throw new Error(blocker)
+  }
   const fromTree = (tree: WorkspaceWorktreeChoice, cwd = tree.path): WorkspacePlan => {
     requireUsableWorktree(tree)
     return { cwd, head: tree.head, branchRef: tree.branchRef, worktreeId: tree.id, write: 'none' }
   }
+  // Reusing a checkout writes nothing; verifyWorkspacePlan re-reads its identity afterwards.
   if (intent.kind === 'existingWorktree') {
     const tree = worktrees.find(tree => tree.id === intent.worktreeId)
     if (!tree) throw new Error('所选 worktree 已不存在，请重新选择')
     return fromTree(tree)
   }
   if (intent.kind === 'current' && !intent.branch) return fromTree(current, sourceCwd)
-  const ref = intent.kind === 'newWorktree' ? intent.base : intent.branch!
-  await verifyWorkspaceRef(git, identity, ref)
-  if (intent.kind === 'current') {
-    if (ref.kind !== 'local') throw new Error('远端跟踪分支只能用作新 worktree 的起点')
-    const checkedOut = worktrees.filter(tree => tree.branchRef === ref.name)
-    if (checkedOut.length > 1) throw new Error('此分支有多个 checkout，请明确选择已有 worktree')
-    if (checkedOut.length) {
-      if (checkedOut[0].head !== ref.head) throw new Error('分支 checkout 已变化，请重新读取')
-      return fromTree(checkedOut[0], checkedOut[0].current ? sourceCwd : checkedOut[0].path)
-    }
-    if (source.files.length) throw new Error('当前工作区有未提交改动；不能切换分支，不会 stash、reset 或搬移文件')
-    requireUsableWorktree(current)
-  }
-  if (!source.head) throw new Error('仓库尚无 HEAD；可以聊天，但不能创建或切换工作区')
-  const blocker = source.writeBlocker ?? source.actionBlockers.prepareWorkspace
-  if (blocker) throw new Error(blocker)
-  await assertWorkspaceCheckoutSafe(git, identity, ref.head)
   if (intent.kind === 'newWorktree') {
+    // Creating a worktree only adds a branch and a directory; it never rewrites the source
+    // checkout. Guard what this write can get wrong (the base commit resolves, the new name
+    // is free, the target tree has no executable filters) instead of the source snapshot,
+    // which unrelated edits, staged work or commits elsewhere invalidate.
+    const head = await resolveWorkspaceRef(git, identity, intent.base)
+    requireSourceReady()
+    await assertWorkspaceCheckoutSafe(git, identity, head)
     await validateWorkspaceBranch(git, identity, intent.newBranch)
     const branchRef = `refs/heads/${intent.newBranch}`
     if ((await git.run(identity.root, ['for-each-ref', '--count=1', '--format=%(refname)', branchRef])).trim())
       throw new Error('新分支名已存在；请选择已有分支或使用另一个名称')
     const cwd = await unusedWorktreePath(userData, identity, operationId)
-    return { cwd, head: ref.head, branchRef, worktreeId: worktreeChoiceId(identity.commonDir, cwd), write: 'create' }
+    return { cwd, head, branchRef, worktreeId: worktreeChoiceId(identity.commonDir, cwd), write: 'create' }
   }
+  const ref = intent.branch!
+  await verifyWorkspaceRef(git, identity, ref)
+  if (ref.kind !== 'local') throw new Error('远端跟踪分支只能用作新 worktree 的起点')
+  const checkedOut = worktrees.filter(tree => tree.branchRef === ref.name)
+  if (checkedOut.length > 1) throw new Error('此分支有多个 checkout，请明确选择已有 worktree')
+  if (checkedOut.length) {
+    if (checkedOut[0].head !== ref.head) throw new Error('分支 checkout 已变化，请重新读取')
+    return fromTree(checkedOut[0], checkedOut[0].current ? sourceCwd : checkedOut[0].path)
+  }
+  // Switching rewrites the caller's own checkout, so the reviewed source snapshot must hold.
+  if (source.revision !== intent.expectedRevision) throw new Error('仓库已变化，请刷新工作区选择后再发送')
+  if (source.files.length) throw new Error('当前工作区有未提交改动；不能切换分支，不会 stash、reset 或搬移文件')
+  requireUsableWorktree(current)
+  requireSourceReady()
+  await assertWorkspaceCheckoutSafe(git, identity, ref.head)
   // Keep a selected subproject's scope instead of silently starting at its parent.
   const scope = relative(identity.root, sourceCwd)
   if (scope && (isAbsolute(scope) || scope === '..' || scope.startsWith(`..${sep}`) ||
@@ -92,8 +102,9 @@ export async function verifyWorkspaceIntent(
     matches = plan.write === 'none' && plan.worktreeId === intent.worktreeId
   } else if (intent.kind === 'newWorktree') {
     const parent = join(await realpath(userData), 'worktrees', createHash('sha256').update(source.commonDir).digest('hex'))
+    // plan.head is the base commit this creation actually used; verifyWorkspacePlan re-reads it.
     matches = plan.write === 'create' && plan.cwd === join(parent, selection.operationId) &&
-      plan.head === intent.base.head && plan.branchRef === `refs/heads/${intent.newBranch}` &&
+      plan.branchRef === `refs/heads/${intent.newBranch}` &&
       plan.worktreeId === worktreeChoiceId(source.commonDir, plan.cwd)
   } else if (intent.branch) {
     matches = plan.write !== 'create' && plan.branchRef === intent.branch.name && plan.head === intent.branch.head &&

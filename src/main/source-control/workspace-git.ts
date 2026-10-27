@@ -5,13 +5,20 @@ import type { WorkspaceBranchRef } from '../../shared/workspace-selection'
 import { readConfig, readOnly, type GitIdentity, type ScGit } from './git'
 
 /** Refs from the picker are frozen names + object identities, not revision expressions. */
-export async function verifyWorkspaceRef(git: ScGit, identity: GitIdentity, ref: WorkspaceBranchRef): Promise<void> {
+export async function resolveWorkspaceRef(git: ScGit, identity: GitIdentity, ref: WorkspaceBranchRef): Promise<string> {
   const prefix = ref.kind === 'local' ? 'refs/heads/' : 'refs/remotes/'
-  if (!ref.name.startsWith(prefix) || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(ref.head))
-    throw new Error('无效的起始分支')
+  if (!ref.name.startsWith(prefix)) throw new Error('无效的起始分支')
   await git.run(identity.root, ['check-ref-format', ref.name])
   const actual = (await git.run(identity.root, ['rev-parse', '--verify', `${ref.name}^{commit}`])).trim()
-  if (actual !== ref.head) throw new Error('所选分支已变化，请重新读取并确认起点')
+  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(actual)) throw new Error('所选分支指向的对象不是提交')
+  return actual
+}
+
+/** Switches and checkouts reuse the frozen identity; the ref must still be the reviewed commit. */
+export async function verifyWorkspaceRef(git: ScGit, identity: GitIdentity, ref: WorkspaceBranchRef): Promise<void> {
+  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(ref.head)) throw new Error('无效的起始分支')
+  if (await resolveWorkspaceRef(git, identity, ref) !== ref.head)
+    throw new Error('所选分支已变化，请重新读取并确认起点')
 }
 
 /**
