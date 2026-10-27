@@ -98,6 +98,48 @@
       "baselines": {
         "darwin-arm64": 1
       }
+    },
+    "providers.pi-probe-parked/subprocess.rpc": {
+      "scenario": "providers.pi-probe-parked",
+      "metric": "subprocess.rpc",
+      "layer": "main",
+      "unit": "count",
+      "workload": "offline-readonly-rpc=1;probes=2;queries=8;eof-idle-handle=1;parked-process=1",
+      "source": "production probe with shared offline RPC fixture; passive stdio/close observation and pass-through shutdown timer expiry counter",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 1
+      }
+    },
+    "providers.pi-probe-parked/rpc.responses": {
+      "scenario": "providers.pi-probe-parked",
+      "metric": "rpc.responses",
+      "layer": "main",
+      "unit": "count",
+      "workload": "offline-readonly-rpc=1;probes=2;queries=8;eof-idle-handle=1;parked-process=1",
+      "source": "production probe with shared offline RPC fixture; passive stdio/close observation and pass-through shutdown timer expiry counter",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 8
+      }
+    },
+    "providers.pi-probe-parked/shutdown.grace-expiries": {
+      "scenario": "providers.pi-probe-parked",
+      "metric": "shutdown.grace-expiries",
+      "layer": "main",
+      "unit": "count",
+      "workload": "offline-readonly-rpc=1;probes=2;queries=8;eof-idle-handle=1;parked-process=1",
+      "source": "production probe with shared offline RPC fixture; passive stdio/close observation and pass-through shutdown timer expiry counter",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 0
+      }
     }
   }
 }

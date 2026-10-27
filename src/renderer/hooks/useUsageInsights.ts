@@ -19,6 +19,7 @@ export function useUsageInsights(providerContextRef: MutableRefObject<ProviderCo
   const [analytics, setAnalytics] = useState<UsageAnalytics | null>(null)
   const [analyticsRange, setAnalyticsRangeState] = useState<UsageAnalyticsRangeDays>(30)
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
+  const [analyticsCreditsLoading, setAnalyticsCreditsLoading] = useState(false)
   const [analyticsError, setAnalyticsError] = useState<string | null>(null)
   const [billingState, setBillingState] = useState<BillingGuardianState | null>(null)
   const [billingSyncing, setBillingSyncing] = useState(false)
@@ -41,6 +42,23 @@ export function useUsageInsights(providerContextRef: MutableRefObject<ProviderCo
 
   const loadStats = useCallback((): void => {
     window.scry.stats().then(setStats)
+  }, [])
+
+  const loadAnalyticsCredits = useCallback((ledger: UsageAnalytics, rangeDays: UsageAnalyticsRangeDays, seq: number): void => {
+    const query = window.scry.usageCredits
+    // 账本快照已经可以显示；Credit 投影需要读原生 transcript，慢得多，只用于后续刷新，
+    // 失败或跨域时保留账本快照，不把缺失的 Credit 伪造成已知值。
+    if (typeof query !== 'function') return
+    setAnalyticsCreditsLoading(true)
+    void query(rangeDays)
+      .then((enriched) => {
+        if (seq !== analyticsRequestSeq.current) return
+        if (enriched.status === 'ready' && enriched.rangeDays === ledger.rangeDays) setAnalytics(enriched)
+      })
+      .catch(() => { })
+      .finally(() => {
+        if (seq === analyticsRequestSeq.current) setAnalyticsCreditsLoading(false)
+      })
   }, [])
 
   const loadAnalytics = useCallback((rangeDays = analyticsRangeRef.current): void => {
@@ -70,6 +88,7 @@ export function useUsageInsights(providerContextRef: MutableRefObject<ProviderCo
         setAnalytics(result)
         if (result.status === 'query_error') setAnalyticsError(INTEGRATION_COPY.analyticsQueryError)
         else if (result.status === 'unavailable') setAnalyticsError(INTEGRATION_COPY.sqliteUnavailable)
+        else loadAnalyticsCredits(result, rangeDays, seq)
       })
       .catch((error) => {
         if (seq === analyticsRequestSeq.current) setAnalyticsError(error instanceof Error ? error.message : String(error))
@@ -88,6 +107,7 @@ export function useUsageInsights(providerContextRef: MutableRefObject<ProviderCo
     analyticsRangeRef.current = rangeDays
     setAnalyticsRangeState(rangeDays)
     setAnalytics(null)
+    setAnalyticsCreditsLoading(false)
     loadAnalytics(rangeDays)
   }, [loadAnalytics])
 
@@ -127,7 +147,7 @@ export function useUsageInsights(providerContextRef: MutableRefObject<ProviderCo
   }, [loadAnalytics])
 
   return {
-    usage, stats, analytics, analyticsRange, analyticsLoading, analyticsError,
+    usage, stats, analytics, analyticsRange, analyticsLoading, analyticsCreditsLoading, analyticsError,
     billingState, billingSyncing, billingFixtureLoading,
     loadUsage, loadStats, loadAnalytics, setAnalyticsRange, loadBillingState,
     syncBillingAdmin, importBillingFixture, resetUsageContext, refreshAfterDataUpdate

@@ -89,6 +89,7 @@ const invokeChannels = {
   usageStats: 'agent:usageStats',
   stats: 'agent:stats',
   usageAnalytics: 'agent:usageAnalytics',
+  usageCredits: 'agent:usageCredits',
   llmPerformanceHistory: 'agent:llmPerformanceHistory',
   llmPerformanceSummary: 'agent:llmPerformanceSummary',
   billingState: 'agent:billingState',

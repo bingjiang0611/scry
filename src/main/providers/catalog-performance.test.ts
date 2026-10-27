@@ -8,7 +8,10 @@ import { withProbeFixture } from './pi-rpc.fixture'
 import { ProviderRegistry } from './registry'
 
 const samples: PerformanceSample[] = []
-const probeStages = ['environment_ready', 'spawned', 'first_response', 'responses_received', 'closed']
+// A started probe reports its own spawn and exit; a reused probe process reports only the reads it
+// performed on an already-running child, so no spawn/exit stage belongs to that later operation.
+const coldProbeStages = ['environment_ready', 'spawned', 'first_response', 'responses_received']
+const reusedProbeStages = ['environment_ready', 'first_response', 'responses_received']
 
 function record(): void {
   samples.length = 0
@@ -62,15 +65,19 @@ describe('content-free catalog performance', () => {
       }
       const probes = samples.filter(s => s.name === 'pi.catalog.probe')
       expect(probes).toHaveLength(1)
-      expect(probes[0].checkpoints.map(p => p.stage)).toEqual(probeStages)
+      expect(probes[0].checkpoints.map(p => p.stage)).toEqual(coldProbeStages)
       expect(probes[0].checkpoints.find(p => p.stage === 'responses_received')?.counters).toEqual({ rpcResponses: 4 })
       expect(samples.every(s => s.outcome === 'completed')).toBe(true)
       const pid = Number(readFileSync(join(cwd, 'pid'), 'utf8'))
-      expect(() => process.kill(pid, 0)).toThrowError(expect.objectContaining({ code: 'ESRCH' }))
+      expect(() => process.kill(pid, 0)).not.toThrow()
       assertPrivate([profile.id, profile.executable, cwd, 'fixture-menu'])
+      // The parked process answers the next catalog read without a second spawn.
       await registry.listCommands(context)
-      expect(starts()).toHaveLength(2)
+      expect(starts()).toHaveLength(1)
       expect(samples.filter(s => s.name === 'pi.catalog.probe')).toHaveLength(2)
+      expect(samples.filter(s => s.name === 'pi.catalog.probe')[1].checkpoints.map(p => p.stage)).toEqual(reusedProbeStages)
+      await adapter.dispose?.()
+      expect(() => process.kill(pid, 0)).toThrowError(expect.objectContaining({ code: 'ESRCH' }))
     })
   })
 
@@ -91,17 +98,21 @@ describe('content-free catalog performance', () => {
     })
   })
 
-  it('observes real RPC error responses and exit while preserving unavailable capability semantics', async () => {
+  it('observes real RPC error responses and a bounded exit while keeping unavailable capability semantics', async () => {
     record()
     await withProbeFixture(async (profile, cwd) => {
       writeFileSync(join(cwd, 'fail-probe'), '')
-      const registry = new ProviderRegistry([createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })])
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const registry = new ProviderRegistry([adapter])
       expect((await registry.runControls({ providerId: 'pi', agentProfileId: profile.id, cwd })).state).toBe('unknown')
       const probe = samples.find(s => s.name === 'pi.catalog.probe')!
       expect(probe.outcome).toBe('error')
       expect(probe.checkpoints.map(p => p.stage)).toContain('first_response')
+      // A failed read is never parked: the child is closed before the probe settles.
       expect(probe.checkpoints.at(-1)?.stage).toBe('closed')
       expect(samples.find(s => s.name === 'provider.catalog.run_controls')?.outcome).toBe('unavailable')
+      const pid = Number(readFileSync(join(cwd, 'pid'), 'utf8'))
+      expect(() => process.kill(pid, 0)).toThrowError(expect.objectContaining({ code: 'ESRCH' }))
       assertPrivate(['fixture probe failed', profile.id, profile.executable, cwd])
     })
   })

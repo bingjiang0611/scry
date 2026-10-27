@@ -57,10 +57,16 @@ export function creditEvidence(row: UsageAnalyticsAggregate): string {
   return `${copy.creditAmount(evidence.credits)}；${source} · 已知下界；${evidence.matchedTurns}/${evidence.totalTurns} 轮已关联，${evidence.knownRequests} 个请求有计量，${evidence.missingRequests} 个请求缺失；按 Scry 轮次日期归集，仅主会话请求，不含未关联或子代理用量；${evidence.omissionReason ? `${evidence.omissionReason}；` : ''}${QODER_USD_BASIS}（${QODER_PRICING_URL}）`
 }
 
-export function displayCostEvidence(row: UsageAnalyticsAggregate, provider?: BillingProvider): string {
+export function displayCostEvidence(
+  row: UsageAnalyticsAggregate,
+  provider?: BillingProvider,
+  creditsPending = false
+): string {
   const cost = costEvidence(row)
-  if (provider === 'qoder') return `${cost}；${creditEvidence(row) || 'Credit 不可用；无法换算美元'}`
-  return provider == null && row.qoderCredits ? `${cost}；${creditEvidence(row)}` : cost
+  // Credit 投影在账本之后单独读取；未完成前不能把「还没算」显示成「不可用」。
+  const credit = creditEvidence(row) || (creditsPending ? copy.creditsPending : 'Credit 不可用；无法换算美元')
+  if (provider === 'qoder') return `${cost}；${credit}`
+  return provider == null && (row.qoderCredits || creditsPending) ? `${cost}；${credit}` : cost
 }
 
 export function formatChartCost(value: number | null): string {

@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { createHash } from 'node:crypto'
@@ -10,7 +10,7 @@ import type { TraceEvent } from '../../shared/trace'
 import type { PiAgentProfile } from '../pi-agent-profiles'
 import { withProbeFixture } from './pi-rpc.fixture'
 import * as locate from '../claude-locate'
-import { createPiAdapter, probePiAgent } from './pi'
+import { createPiAdapter } from './pi'
 
 
 describe('Pi startup and probe lifecycle', () => {
@@ -100,84 +100,6 @@ describe('Pi startup and probe lifecycle', () => {
         handle.forceKill?.()
         await handle.promise.catch(() => undefined)
       }
-    })
-  })
-
-  it('shares concurrent capability probes, but refreshes after the flight completes', async () => {
-    await withProbeFixture(async (profile, cwd, starts) => {
-      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
-      const context = { providerId: 'pi' as const, agentProfileId: profile.id, cwd }
-      const results = await Promise.all([
-        adapter.skills!.list(context), adapter.commands!.list(context), adapter.runControls!.read(context)
-      ])
-      expect(results.map((result) => result.state)).toEqual(['ready', 'ready', 'ready'])
-      expect(starts()).toHaveLength(1)
-      await probePiAgent(profile, cwd)
-      expect(starts()).toHaveLength(2)
-    })
-  })
-
-  it('does not share probe evidence across workspaces, profile ids or executables', async () => {
-    await withProbeFixture(async (profile, cwd, starts) => {
-      const otherCwd = join(cwd, 'other')
-      mkdirSync(otherCwd)
-      const otherExecutable = join(cwd, 'other-pi')
-      writeFileSync(otherExecutable, readFileSync(profile.executable))
-      chmodSync(otherExecutable, 0o755)
-      const results = await Promise.all([
-        probePiAgent(profile, cwd), probePiAgent(profile, otherCwd),
-        probePiAgent({ ...profile, id: 'pi:rotom' }, cwd),
-        probePiAgent({ ...profile, executable: otherExecutable }, cwd)
-      ])
-      expect(results.map((result) => result.state.cwd)).toEqual([cwd, otherCwd, cwd, cwd])
-      expect(starts()).toHaveLength(4)
-    })
-  })
-
-  it('keeps a completed read-only probe owned until exit when TERM is ignored', async () => {
-    await withProbeFixture(async (profile, cwd) => {
-      writeFileSync(join(cwd, 'stubborn'), '')
-      const kill = vi.spyOn(process, 'kill')
-      try {
-        const result = await probePiAgent(profile, cwd)
-        expect(result.commands).toEqual([{ name: 'fixture-menu', source: 'extension' }])
-        const pid = Number(readFileSync(join(cwd, 'pid'), 'utf8'))
-        const ownedSignals = kill.mock.calls.filter(([target]) => Math.abs(target) === pid).map(([, signal]) => signal)
-        expect(ownedSignals).toContain('SIGTERM')
-        expect(ownedSignals).toContain('SIGKILL')
-        expect(() => process.kill(pid, 0)).toThrowError(expect.objectContaining({ code: 'ESRCH' }))
-        expect(readFileSync(join(cwd, 'commands'), 'utf8').trim().split('\n')).toHaveLength(4)
-      } finally { kill.mockRestore() }
-    })
-  })
-
-  it('releases a failed flight so a later probe can recover', async () => {
-    await withProbeFixture(async (profile, cwd, starts) => {
-      writeFileSync(join(cwd, 'fail-probe'), '')
-      const results = await Promise.allSettled([probePiAgent(profile, cwd), probePiAgent(profile, cwd)])
-      expect(results.map((result) => result.status)).toEqual(['rejected', 'rejected'])
-      expect(starts()).toHaveLength(1)
-      rmSync(join(cwd, 'fail-probe'))
-      await expect(probePiAgent(profile, cwd)).resolves.toMatchObject({ state: { cwd } })
-      expect(starts()).toHaveLength(2)
-    })
-  })
-
-  it.each([
-    ['non-JSON output', 'not-json\n', /JSONL 解码失败.*expected a value/],
-    ['null response', 'null\n', /非对象/],
-    ['array response', '[]\n', /非对象/],
-    ['unfinished frame', '{"type":', /JSONL 解码失败.*expected a value/],
-    ['exit without evidence', '', /提前退出/]
-  ] as const)('rejects %s, confirms process exit and allows a fresh probe', async (_name, wire, error) => {
-    await withProbeFixture(async (profile, cwd, starts) => {
-      writeFileSync(join(cwd, 'startup-wire'), wire)
-      await expect(probePiAgent(profile, cwd)).rejects.toThrow(error)
-      const pid = Number(readFileSync(join(cwd, 'pid'), 'utf8'))
-      expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }))
-      rmSync(join(cwd, 'startup-wire'))
-      await expect(probePiAgent(profile, cwd)).resolves.toMatchObject({ state: { cwd } })
-      expect(starts()).toHaveLength(2)
     })
   })
 

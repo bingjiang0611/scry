@@ -11,6 +11,7 @@ import type { PiProbe } from './pi-types'
 import { PerformanceTrace, performanceRecordingEnabled } from '../performance-timing'
 import { homedir } from 'node:os'
 import { dirname } from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 import { contextUsageEvidence } from '../../shared/trace'
 import { effortOption } from './run-controls'
 import { questionFromExtension } from './pi-events'
@@ -63,28 +64,86 @@ function piRpcArgs(options: { noSession?: boolean; session?: string; offline?: b
   ]
 }
 
+// A cold `pi --mode rpc` start (Node plus the Pi bootstrap) costs seconds on this machine, while the
+// capability reads on a live process cost milliseconds. Park the finished probe process per
+// profile+workspace so the next refresh reads through it instead of paying another spawn. Nothing is
+// answered from a settled snapshot: every call still sends the same four queries to the live process,
+// so changed models, extensions and project trust are still observed.
+const PI_CATALOG_IDLE_MS = 60_000
+
+interface WarmCatalogProcess {
+  rpc: PiRpcProcess
+  env: NodeJS.ProcessEnv
+  off: () => void
+  idle?: NodeJS.Timeout
+}
+
+const warmCatalogProcesses = new Map<string, WarmCatalogProcess>()
+
+async function closeWarmCatalogProcess(key: string, entry: WarmCatalogProcess): Promise<void> {
+  warmCatalogProcesses.delete(key)
+  if (entry.idle) clearTimeout(entry.idle)
+  entry.off()
+  await entry.rpc.close()
+}
+
+/** Close parked probe processes and await their exit. Adapter dispose/context invalidation calls this. */
+export async function disposePiCatalog(): Promise<void> {
+  const entries = [...warmCatalogProcesses]
+  warmCatalogProcesses.clear()
+  await Promise.all(entries.map(async ([key, entry]) => closeWarmCatalogProcess(key, entry)))
+}
+
 async function withPiRpc<T>(
   profile: PiAgentProfile,
   cwd: string | undefined,
   args: string[],
   operation: (rpc: PiRpcProcess) => Promise<T>,
-  catalogTrace?: PerformanceTrace
+  catalogTrace?: PerformanceTrace,
+  warmKey?: string
 ): Promise<T> {
   const env = await piRpcEnvironment(profile)
   catalogTrace?.mark('environment_ready')
-  const rpc = PiRpcProcess.start(profile, args, env, cwd, PI_RPC_MAX_FRAME_BYTES, catalogTrace)
-  const off = rpc.onEvent((event) => {
-    // Catalog/session operations have no interactive owner. Decline startup dialogs;
-    // never select a setup action or approve a permission merely to obtain metadata.
-    if (event.type === 'extension_ui_request' && questionFromExtension('pi-noninteractive', event)) {
-      rpc.notify({ type: 'extension_ui_response', id: event.id, cancelled: true })
-    }
-  })
+  const parked = warmKey === undefined ? undefined : warmCatalogProcesses.get(warmKey)
+  let rpc: PiRpcProcess
+  let off: () => void
+  if (parked && parked.rpc.reusable() && isDeepStrictEqual(parked.env, env)) {
+    if (parked.idle) clearTimeout(parked.idle)
+    parked.idle = undefined
+    rpc = parked.rpc
+    off = parked.off
+    rpc.attachCatalogTrace(catalogTrace)
+  } else {
+    // A parked process that cannot be reused (failed, closing, different environment) is dropped
+    // before a replacement starts, so a broken child never lingers behind a working one.
+    if (parked) await closeWarmCatalogProcess(warmKey!, parked)
+    rpc = PiRpcProcess.start(profile, args, env, cwd, PI_RPC_MAX_FRAME_BYTES, catalogTrace)
+    off = rpc.onEvent((event) => {
+      // Catalog/session operations have no interactive owner. Decline startup dialogs;
+      // never select a setup action or approve a permission merely to obtain metadata.
+      if (event.type === 'extension_ui_request' && questionFromExtension('pi-noninteractive', event)) {
+        rpc.notify({ type: 'extension_ui_response', id: event.id, cancelled: true })
+      }
+    })
+  }
+  let completed = false
   try {
-    return await operation(rpc)
+    const result = await operation(rpc)
+    completed = true
+    return result
   } finally {
-    off()
-    await rpc.close()
+    // Only a read that actually succeeded is worth keeping warm. A failed read (RPC error, timeout,
+    // early exit) closes its child immediately, so the next attempt starts from a clean process
+    // instead of reusing one whose RPC surface just failed.
+    if (warmKey !== undefined && completed && rpc.reusable()) {
+      const entry: WarmCatalogProcess = { rpc, env, off }
+      entry.idle = setTimeout(() => { void closeWarmCatalogProcess(warmKey, entry) }, PI_CATALOG_IDLE_MS)
+      entry.idle.unref()
+      warmCatalogProcesses.set(warmKey, entry)
+    } else {
+      off()
+      await rpc.close()
+    }
   }
 }
 
@@ -116,12 +175,8 @@ export function probePiAgent(profile: PiAgentProfile, cwd?: string): Promise<PiP
         : [],
       commands: Array.isArray(commandRows) ? commandRows.map(record) : []
     }
-    // This offline/no-session process has finished all four reads, with no session writer to
-    // drain. Request TERM now instead of waiting for EOF grace; withPiRpc still confirms exit.
-    // Run/fork RPCs keep their existing graceful-close path and evidence convergence.
-    rpc.terminate()
     return snapshot
-  }, trace).then(snapshot => {
+  }, trace, key).then(snapshot => {
     trace?.finish()
     return snapshot
   }, (error: unknown) => {

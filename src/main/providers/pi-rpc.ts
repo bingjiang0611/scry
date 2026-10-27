@@ -33,18 +33,20 @@ export class PiRpcProcess {
   private closing = false
   private closed = false
   private catalogResponses = 0
+  private catalogTrace?: PerformanceTrace
   private readonly exited: Promise<void>
 
   private constructor(
     readonly child: ChildProcessWithoutNullStreams,
     readonly profile: PiAgentProfile,
     private readonly maxFrameBytes = PI_RPC_MAX_FRAME_BYTES,
-    private readonly catalogTrace?: PerformanceTrace
+    catalogTrace?: PerformanceTrace
   ) {
+    this.catalogTrace = catalogTrace
     if (catalogTrace) child.once('spawn', () => catalogTrace.mark('spawned'))
     this.exited = new Promise((resolve) => child.once('close', () => {
       this.closed = true
-      catalogTrace?.mark('closed')
+      this.catalogTrace?.mark('closed')
       resolve()
     }))
     child.stdin.on('error', (error) => this.fail(error))
@@ -198,6 +200,13 @@ export class PiRpcProcess {
     } catch {
       try { this.child.kill('SIGKILL') } catch { /* already gone */ }
     }
+  }
+
+  // A reused process attributes each new operation to that operation's own trace, so a parked
+  // process reports its reads instead of crediting the trace of the call that started it.
+  attachCatalogTrace(trace: PerformanceTrace | undefined): void {
+    this.catalogTrace = trace
+    this.catalogResponses = 0
   }
 
   reusable(): boolean {

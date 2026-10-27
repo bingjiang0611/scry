@@ -141,6 +141,25 @@ describe('AnalyticsView Qoder Credits', () => {
     expect(JSON.stringify(data)).toBe(before)
   })
 
+  it('先显示账本快照时把 Credit 标为正在计算，而不是不可用', () => {
+    const data: UsageAnalytics = {
+      status: 'ready', rangeDays: 7, fromDay: '2026-09-09', toDay: '2026-09-09', observedAt: 1,
+      days: ['2026-09-09'], totals: aggregate,
+      byProvider: [{ ...aggregate, provider: 'qoder', model: null }],
+      byModel: [], byDay: [], dailyByProvider: []
+    }
+    const pending = renderToStaticMarkup(<AnalyticsView analytics={data} rangeDays={7} loading={false} creditsPending
+      error={null} onRangeChange={() => {}} onRefresh={() => {}} />)
+    expect(pending).toContain('正在计算 Credit')
+    expect(pending).not.toContain('Credit 不可用')
+    // 未完成的投影仍然不显示任何 Credit 数量，也不把成本当成已知。
+    expect(pending).not.toContain('Credits<')
+    expect(pending).toMatch(/<strong title="[^"]*">—<\/strong>/)
+    // 同一条目在 Credit 确定后改回精确证据；不可用不能再写成“正在计算”。
+    expect(render(null)).toContain('Credit 不可用')
+    expect(render(null)).not.toContain('正在计算 Credit')
+  })
+
   it('distinguishes unknown, measured zero and tiny positive credits', () => {
     expect(render(null)).toContain('Credit 不可用')
     expect(render(null)).not.toContain('>0 Credits<')

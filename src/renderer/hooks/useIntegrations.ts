@@ -21,6 +21,7 @@ import {
   fallbackRunControlCatalog, readRunControlCatalogCache, readRunControlPreferences,
   writeRunControlCatalogCache, writeRunControlPreferences, PROVIDER_IDS
 } from './integration-model'
+import { lastKnownRunControlCatalog, resolveRunControlDisplay } from './run-control-display'
 import {
   reconcileSelectedAgentId, requestRunControlsForSelectedProvider,
   shouldResetRunControlCatalog
@@ -123,7 +124,7 @@ export function useIntegrations(
   const currentRunControls = { ...runControls, model: sessionModel.model, effort: sessionModel.effort }
   const providerContextRef = useRef(providerContext)
   const {
-    usage, stats, analytics, analyticsRange, analyticsLoading, analyticsError,
+    usage, stats, analytics, analyticsRange, analyticsLoading, analyticsCreditsLoading, analyticsError,
     billingState, billingSyncing, billingFixtureLoading,
     loadUsage, loadStats, loadAnalytics, setAnalyticsRange,
     syncBillingAdmin, importBillingFixture, resetUsageContext, refreshAfterDataUpdate
@@ -206,25 +207,16 @@ export function useIntegrations(
     setSelectedId(agentId)
     if (!shouldResetRunControlCatalog(selectedId, agentId)) return
     const stored = runControlsByProvider.current.get(providerId) ?? { permissionMode: 'default' as const }
-    const cached = runControlCatalogByContext.current.get(contextKey({
+    const display = resolveRunControlDisplay(runControlCatalogByContext.current, {
       providerId,
       ...(providerId === 'pi' ? { agentProfileId: agentId } : {}),
       cwd: cwdRef.current ?? undefined
-    }))
-    if (cached?.data) {
-      const next = resolveRunControlSelection(cached.data, stored)
-      runControlsByProvider.current.set(providerId, next)
-      setRunControlCapability(cached)
-      setRunControlCatalog(cached.data)
-      setRunControls(next)
-      setRunControlsLoading(false)
-      return
-    }
-    const loadingCatalog = fallbackRunControlCatalog('default')
-    setRunControlCapability(null)
-    setRunControlCatalog(loadingCatalog)
-    setRunControls(resolveRunControlSelection(loadingCatalog, stored))
-    setRunControlsLoading(true)
+    }, stored)
+    if (display.persistSelection) runControlsByProvider.current.set(providerId, display.controls)
+    setRunControlCapability(display.capability)
+    setRunControlCatalog(display.catalog)
+    setRunControls(display.controls)
+    setRunControlsLoading(display.loading)
   }, [selectedId])
 
   useEffect(() => {
@@ -251,20 +243,13 @@ export function useIntegrations(
     const stored = runControlsByProvider.current.get(selectedProviderId) ?? { permissionMode: 'default' as const }
     const fn = window.scry.runControls
     const cached = runControlCatalogByContext.current.get(key)
-    if (cached?.data) {
-      const next = resolveRunControlSelection(cached.data, stored)
-      runControlsByProvider.current.set(selectedProviderId, next)
-      setRunControlCapability(cached)
-      setRunControlCatalog(cached.data)
-      setRunControls(next)
-      setRunControlsLoading(false)
-    } else {
-      const loadingCatalog = fallbackRunControlCatalog('default')
-      setRunControlCapability(null)
-      setRunControlCatalog(loadingCatalog)
-      setRunControls(resolveRunControlSelection(loadingCatalog, stored))
-      setRunControlsLoading(true)
-    }
+    const known = cached?.data ? cached : lastKnownRunControlCatalog(runControlCatalogByContext.current, context)
+    const display = resolveRunControlDisplay(runControlCatalogByContext.current, context, stored)
+    if (display.persistSelection) runControlsByProvider.current.set(selectedProviderId, display.controls)
+    setRunControlCapability(display.capability)
+    setRunControlCatalog(display.catalog)
+    setRunControls(display.controls)
+    setRunControlsLoading(display.loading)
     if (typeof fn !== 'function') {
       const fallback = fallbackRunControlCatalog('default')
       const next = resolveRunControlSelection(fallback, stored)
@@ -286,8 +271,8 @@ export function useIntegrations(
           seq !== runControlRequestSeq.current ||
           contextKey(context) !== contextKey(providerContextRef.current)
         ) return
-        if (shouldKeepCachedRunControlCatalog(cached?.data ?? undefined, result)) {
-          setRunControlCapability(retainCachedRunControlCatalog(cached!, result))
+        if (shouldKeepCachedRunControlCatalog(known?.data ?? undefined, result)) {
+          setRunControlCapability(retainCachedRunControlCatalog(known!, result))
           return
         }
         const catalog = result.data ?? fallbackRunControlCatalog('default')
@@ -299,7 +284,7 @@ export function useIntegrations(
       })
       .catch(() => {
         if (seq !== runControlRequestSeq.current) return
-        if (cached?.data) return
+        if (known?.data) return
         const fallback = fallbackRunControlCatalog('default')
         const next = resolveRunControlSelection(fallback, stored)
         runControlsByProvider.current.set(selectedProviderId, next)
@@ -411,6 +396,7 @@ export function useIntegrations(
     analytics,
     analyticsRange,
     analyticsLoading,
+    analyticsCreditsLoading,
     analyticsError,
     billingState,
     billingSyncing,
@@ -457,6 +443,7 @@ export {
   providerCompatibilityNotice, reconcileSelectedAgentId, requestRunControlsForSelectedProvider,
   runControlSendBlockedReason, shouldResetRunControlCatalog
 } from './integration-model'
+export { lastKnownRunControlCatalog, resolveRunControlDisplay } from './run-control-display'
 export { applyDataUpdatedEffects } from './useUsageInsights'
 export { mergeMcpLiveSnapshot, mcpAuthVerificationError, reconcileMcpAuthStatus } from './useProviderCapabilities'
 export { parseSessionModels, recordedSessionModel } from './useSessionModels'
