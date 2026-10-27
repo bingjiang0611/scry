@@ -12,9 +12,6 @@ import { readRecorderContent, writeRecorderContent } from '../core/turn-recorder
 import { APP_TRACE_CONTENT_SOURCE, appTraceContentRoot } from './trace-tool-content'
 import type { TraceArchiveTurn } from './transcript-archive'
 
-// 小 diff 的引用收益不抵一次额外读盘，保持 inline。
-const REFERENCE_THRESHOLD_BYTES = 4 * 1024
-const PREVIEW_BYTES = 2 * 1024
 
 function isSessionSnapshotStage(stage: string): boolean {
   return stage === SESSION_DIFF_STAGE || stage === SESSION_DIFF_PREVIEW_STAGE
@@ -25,30 +22,41 @@ interface PatchBearingSnapshot {
   files: DiffFile[]
 }
 
-function needsReference(file: DiffFile): boolean {
+function needsReference(file: DiffFile, thresholdBytes: number): boolean {
   return typeof file.patch === 'string' &&
-    file.patch.length >= REFERENCE_THRESHOLD_BYTES &&
+    file.patch.length >= thresholdBytes &&
     !file.patchContent?.contentRef
+}
+
+// 这些快照的正文没有任何内联展示路径：终态快照只在页面最新一条被按引用读回，
+// evidence 从不进入渲染页。留 2 KB 预览等于把同一份快照在每轮再存一遍。
+function needsPreviewDrop(file: DiffFile): boolean {
+  return Boolean(file.patchContent?.contentRef && file.patchContent.content)
 }
 
 async function externalizeSnapshot(
   root: string,
-  snapshot: PatchBearingSnapshot | undefined
+  snapshot: PatchBearingSnapshot | undefined,
+  thresholdBytes: number
 ): Promise<boolean> {
   if (!snapshot || !Array.isArray(snapshot.files)) return false
   let changed = false
   // 逐个 publish：内容库按 sha256 去重，同一个 patch 在后面的轮次里只多做一次校验，不重复落盘。
   for (const file of snapshot.files) {
-    if (!needsReference(file)) continue
+    // 已经转过引用的旧文件也走一次：清掉此前写下的内联预览，重复执行是幂等的。
+    if (needsPreviewDrop(file)) {
+      file.patchContent = { ...file.patchContent!, content: '', savedBytes: 0 }
+      changed = true
+      continue
+    }
+    if (!needsReference(file, thresholdBytes)) continue
     const patch = file.patch!
     const ref = await writeRecorderContent(root, patch, 'utf8')
-    const preview = patch.slice(0, PREVIEW_BYTES)
-    // savedBytes 是 inline 预览的字节数（ToolContent 合同），完整正文只在 contentRef 里。
     const patchContent: ToolContent = {
-      content: preview,
+      content: '',
       contentRef: ref,
       encoding: 'utf8',
-      savedBytes: Buffer.byteLength(preview, 'utf8'),
+      savedBytes: 0,
       source: APP_TRACE_CONTENT_SOURCE,
       sourceCompleteness: 'complete',
       redaction: 'not_run',
@@ -75,14 +83,15 @@ export async function externalizeTraceDiffPatches(
   let changed = false
   for (const item of turn.items) {
     if (isSessionSnapshotStage(item.stage)) {
-      changed = await externalizeSnapshot(root, item.turnDiff) || changed
+      // 这些快照不进渲染页，不必为小 patch 保留 inline。
+      changed = await externalizeSnapshot(root, item.turnDiff, 1) || changed
     }
   }
   // Canonical evidence 从不进入渲染页，两份快照都可以只留引用。
   const evidenceDiffs = turn.turnEvidence?.diff.value
   if (Array.isArray(evidenceDiffs)) {
     for (const snapshot of evidenceDiffs) {
-      changed = await externalizeSnapshot(root, snapshot) || changed
+      changed = await externalizeSnapshot(root, snapshot, 1) || changed
     }
   }
   return { turn, changed }

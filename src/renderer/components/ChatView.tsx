@@ -54,7 +54,9 @@ export function ChatView(props: ChatViewProps) {
   } = props
   const remote = remoteHost != null
   const workspaceName = cwd?.split('/').filter(Boolean).at(-1) ?? null
-  const delayedSessionLoading = useDelayedFlag(sessionLoading)
+  // 一次历史页装载常态只有几百毫秒，150 ms 的装饰延迟会让加载条在每次切会话时闪一下；
+  // 真慢的装载（冷归档、远端）仍会显示，状态语义不变。
+  const delayedSessionLoading = useDelayedFlag(sessionLoading, 600)
   const previousPresentation = useRef({ scope: composerScopeKey, turns })
   const retainPrevious = sessionLoading && hasSelectedSession && !sessionCacheVisible && previousPresentation.current.scope !== composerScopeKey
   const transcriptContent = useRef<HTMLDivElement>(null)

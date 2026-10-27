@@ -86,11 +86,10 @@ describe('cumulative diff patch bodies move to the content store', () => {
       expect(file.patch).toBeUndefined()
       expect(isToolContent(file.patchContent)).toBe(true)
       expect(file.patchContent!.contentRef!.storage).toBe('recorder-content-v1')
-      expect(Buffer.byteLength(file.patchContent!.content!, 'utf8')).toBeLessThanOrEqual(2048)
       expect(file.patchContent!.storage).toBe('complete')
     }
     // The bytes really left the turn file and are readable from the store by reference.
-    expect(JSON.stringify(slim.items[0]).length).toBeLessThan(before / 5)
+    expect(JSON.stringify(slim.items[0]).length).toBeLessThan(before / 20)
     await hydrateNewestSessionSnapshots(userDataDir, cwd, [slim])
     expect(filesOf(slim).map((file) => file.patch)).toEqual(expected)
   })
@@ -102,7 +101,24 @@ describe('cumulative diff patch bodies move to the content store', () => {
     expect(perTurn.turnDiff!.files.every((file) => typeof file.patch === 'string' && !file.patchContent)).toBe(true)
   })
 
-  it('leaves small patches inline and is idempotent', async () => {
+  it('drops previews left by an earlier reference pass', async () => {
+    const once = await externalizeTraceDiffPatches(userDataDir, cwd, turn('run-preview', 'preview'))
+    // Simulate a file written by the previous version: reference plus a 2 KB inline preview.
+    for (const file of filesOf(once.turn)) {
+      file.patchContent = { ...file.patchContent!, content: 'x'.repeat(2048), savedBytes: 2048 }
+    }
+    expect(once.changed).toBe(true)
+    const again = await externalizeTraceDiffPatches(userDataDir, cwd, once.turn)
+    expect(again.changed).toBe(true)
+    for (const file of filesOf(again.turn)) {
+      expect(file.patchContent!.content).toBe('')
+      expect(file.patchContent!.savedBytes).toBe(0)
+      expect(file.patchContent!.contentRef!.sha256).toMatch(/^[a-f0-9]{64}$/)
+    }
+    expect((await externalizeTraceDiffPatches(userDataDir, cwd, again.turn)).changed).toBe(false)
+  })
+
+  it('references small session patches too, but keeps small per-turn patches inline', async () => {
     const small: TraceArchiveTurn = {
       runId: 'run-2',
       userText: 'request small',
@@ -111,17 +127,21 @@ describe('cumulative diff patch bodies move to the content store', () => {
       items: [{
         ...diffItem('run-2', SESSION_DIFF_STAGE, 'small'),
         turnDiff: { ...snapshot('session', 'small'), files: [{ path: '/workspace/large/a.ts', added: 1, deleted: 0, patch: '@@ -1 +1 @@\n+x\n', patchStatus: 'captured' }] }
+      }, {
+        ...diffItem('run-2', TURN_DIFF_STAGE, 'small'),
+        turnDiff: { ...snapshot('turn', 'small'), files: [{ path: '/workspace/large/a.ts', added: 1, deleted: 0, patch: '@@ -1 +1 @@\n+y\n', patchStatus: 'captured' }] }
       }]
     }
     const first = await externalizeTraceDiffPatches(userDataDir, cwd, small)
-    expect(first.changed).toBe(false)
-    expect(filesOf(small)[0].patch).toBe('@@ -1 +1 @@\n+x\n')
-
-    const once = await externalizeTraceDiffPatches(userDataDir, cwd, turn('run-3', 'again'))
-    const refs = filesOf(once.turn).map((file) => file.patchContent!.contentRef!.sha256)
-    const twice = await externalizeTraceDiffPatches(userDataDir, cwd, once.turn)
-    expect(twice.changed).toBe(false)
-    expect(filesOf(twice.turn).map((file) => file.patchContent!.contentRef!.sha256)).toEqual(refs)
+    // 几百个小 patch 相加仍是几十 MB：会话快照一律走引用；单轮 diff 会展示，小 patch 保持 inline。
+    expect(first.changed).toBe(true)
+    const sessionFile = filesOf(small)[0]
+    expect(sessionFile.patch).toBeUndefined()
+    expect(sessionFile.patchContent!.contentRef).toBeTruthy()
+    const perTurn = small.items[1].turnDiff!.files[0]
+    expect(perTurn.patch).toBe('@@ -1 +1 @@\n+y\n')
+    expect(perTurn.patchContent).toBeUndefined()
+    expect((await externalizeTraceDiffPatches(userDataDir, cwd, small)).changed).toBe(false)
   })
 
   it('externalizes the duplicated canonical evidence snapshots too', async () => {
