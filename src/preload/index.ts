@@ -12,6 +12,7 @@ import type { RecorderContentPage, RecorderContentPageRequest } from '../shared/
 import type {
   ActiveRun,
   DbStats,
+  TraceEvent,
   WorkspaceDiffResult,
   UsageAnalytics,
   UsageAnalyticsRangeDays,
@@ -258,6 +259,9 @@ const api = {
     ipcRenderer.invoke('agent:loadSession', context, request),
   loadSessionOlder: (context: ProviderContext, request: SessionHistoryPageRequest): Promise<SessionHistoryPage | null> =>
     ipcRenderer.invoke('agent:loadSessionOlder', context, request),
+  // 只补一轮的终态证据（result / session_diff）：总览的用量、成本只认这份证据。
+  turnTerminalEvidence: (context: ProviderContext, runId: string): Promise<TraceEvent[]> =>
+    ipcRenderer.invoke('agent:turnTerminalEvidence', context, runId),
   deleteSession: (context: Omit<ProviderContext, 'providerId'> & { providerId: SessionProviderId }): Promise<DeleteSessionResult> =>
     ipcRenderer.invoke('agent:deleteSession', context),
   renameSession: (context: SessionRef, title: string): Promise<boolean> =>

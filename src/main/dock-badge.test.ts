@@ -225,4 +225,21 @@ describe('DockBadgeState', () => {
     expect(badge.count).toBe(0)
     expect(setCount).not.toHaveBeenCalled()
   })
+
+  it('问题关闭后释放该会话的未读 badge，仍有待答问题则保留', () => {
+    const setCount = vi.fn()
+    const badge = new DockBadgeState(setCount)
+    badge.markAttention('session-a', {
+      windowFocused: false,
+      sessionViewed: false,
+      needsAttention: true
+    })
+
+    badge.releaseQuestionAttention('session-a', 1)
+    expect(badge.count).toBe(1)
+
+    badge.releaseQuestionAttention('session-a', 0)
+    expect(badge.count).toBe(0)
+    expect(setCount.mock.calls).toEqual([[1], [0]])
+  })
 })

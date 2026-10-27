@@ -5,6 +5,7 @@ import { projectHistoryPageSnapshots } from '../session-history-page-projection'
 import type { SessionHistoryPage } from '../session-history'
 import { registerLoadSessionHandler, type LoadSessionDependencies } from './history-load'
 import { registerOlderHistoryHandler, type SessionHistoryCache } from './history-older'
+import { registerTurnTerminalEvidenceHandler } from './turn-terminal-evidence'
 
 // Hook 命令附写只对当前页的事件做，而不是对整个会话的全部事件做。
 function pageWithHookCommands(
@@ -76,6 +77,12 @@ export function createHistoryRuntime() {
       handleTrusted: deps.handleTrusted,
       resolveKnownProjectDirectory: deps.resolveKnownProjectDirectory,
       providerRegistry: deps.providerRegistry
+    })
+    registerTurnTerminalEvidenceHandler({
+      handleTrusted: deps.handleTrusted,
+      appSessionStore: deps.appSessionStore,
+      resolveKnownProjectDirectory: deps.resolveKnownProjectDirectory,
+      userDataDir: deps.userDataDir
     })
   }
   return { register, invalidateSessionHistoryLoad }

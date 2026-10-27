@@ -7,10 +7,12 @@ import type { ParsedTurn, TraceBatchReceipt } from '../env'
 import type { Turn } from '../format'
 import {
   acknowledgeTraceResync,
+  appendMissingTraceItems,
   applyStopState,
   clearSessionTurns,
   clearStopState,
   currentVisibleRunId,
+  hasTerminalResult,
   mergeActiveRun,
   mergeRecoveredRun,
   prependOlderSessionTurns,
@@ -23,6 +25,7 @@ import {
   sessionBusy,
   sessionHistoryWindowOf,
   sessionTurnsWithActiveRun,
+  terminalEvidenceOf,
   traceLiveHealthOf,
   TRACE_LIVE_HEALTHY,
   type AgentSessionCallbacks,
@@ -63,6 +66,28 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   const flushTimeoutId = useRef<number | null>(null)
   const callbacksRef = useRef(callbacks)
   const pendingStartSequenceRef = useRef(0)
+  // 事件回调需要读到当前轮次，而不是闭包里那一帧的旧值。
+  const turnsRef = useRef<Turn[]>([])
+  turnsRef.current = turns
+
+  // 终态 result 是总览用量/成本的唯一来源。main 的焦点可能已经随会话切换移走，导致它没有送到
+  // renderer；归档里有完整证据，就在终态到达时补一次，避免永久停在「等待 result」。
+  const backfillTerminalEvidence = useCallback((runId: string): void => {
+    const turn = turnsRef.current.find((candidate) => candidate.runId === runId)
+    if (!turn || hasTerminalResult(turn)) return
+    const { providerId, cwd, externalSessionId } = turn
+    if (!providerId || !cwd || !externalSessionId) return
+    if (typeof window.scry.turnTerminalEvidence !== 'function') return
+    void window.scry.turnTerminalEvidence({
+      providerId,
+      ...(turn.agentProfileId ? { agentProfileId: turn.agentProfileId } : {}),
+      cwd,
+      externalSessionId
+    }, runId).then((evidence) => {
+      const terminal = terminalEvidenceOf(evidence)
+      if (terminal.length > 0) setTurns((prev) => appendMissingTraceItems(prev, runId, terminal))
+    }).catch(() => undefined)
+  }, [])
 
   callbacksRef.current = callbacks
 
@@ -270,12 +295,16 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
       }
       if (clearedRuns.current.has(runId)) return
       if (focusedRunIdRef.current == null) focusedRunIdRef.current = runId
-      if (focusedRunIdRef.current !== runId) return
+      // 终态是权威事实：main 的焦点可能已经随会话切换移走，只要这一轮还显示在 turns 里就必须
+      // 落地，否则面板会永远停在「运行中」；只有真正聚焦的 run 才动全局 running。
+      const focused = focusedRunIdRef.current === runId
+      if (!focused && !turnsRef.current.some((turn) => turn.runId === runId)) return
       setTurns((prev) => replayRunLifecycleDeltas(prev, [delta]))
       setPendingQuestions((prev) => removePendingQuestion(prev, delta.event))
       // 终态到达才能摘掉停止进度提示；它之前的每个阶段都只是请求而不是证据。
       setStopStates((prev) => clearStopState(prev, runId))
-      setRunning(false)
+      if (focused) setRunning(false)
+      backfillTerminalEvidence(runId)
     }
 
     const offTrace = window.scry.onTrace((events, receipt) => {

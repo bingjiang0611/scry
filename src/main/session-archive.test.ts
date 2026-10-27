@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ActiveRun } from '../shared/trace'
+import { sessionAttentionKey } from '../shared/session-attention'
 import { createAppSessionStore } from './app-store'
 import { archiveSessionAndStop } from './session-archive'
 
@@ -60,5 +61,22 @@ describe('archive stops exact session and fences later starts', () => {
     expect(store.isArchived(ref)).toBe(false)
     expect(stop).toHaveBeenCalledOnce()
     expect(store.listProjects()).toHaveLength(1)
+  })
+
+  it('释放已存档会话的未读角标，存档失败时不释放', () => {
+    const { store, ref, run } = fixture()
+    const releaseAttention = vi.fn()
+    const expectedKey = sessionAttentionKey({
+      providerId: ref.providerId,
+      agentProfileId: ref.agentProfileId,
+      cwd: ref.cwd,
+      sessionId: ref.externalSessionId
+    })
+
+    expect(archiveSessionAndStop(store, { ...ref, externalSessionId: 'missing' }, [run], vi.fn(), releaseAttention)).toBe(false)
+    expect(releaseAttention).not.toHaveBeenCalled()
+
+    expect(archiveSessionAndStop(store, ref, [run], vi.fn(), releaseAttention)).toBe(true)
+    expect(releaseAttention.mock.calls).toEqual([[expectedKey]])
   })
 })

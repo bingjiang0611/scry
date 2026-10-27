@@ -51,6 +51,14 @@ export class DockBadgeState {
     this.clear(sessionKey)
   }
 
+  // 问题关闭（已答/取消）后该会话不再等待回答，未读角标随之失效：已存档/已切的会话没有入口
+  // 再触发 view，如果不在这里释放，角标会永久停在 1。代价是同会话其他新结果的未读会被一并
+  // 清掉；这是维护者明确接受的取舍，换来不会留下一个永远消不掉的假未读。
+  releaseQuestionAttention(sessionKey: string | null, remainingPending: number): void {
+    if (!sessionKey || remainingPending > 0) return
+    this.remove(sessionKey)
+  }
+
   // Unread state is process-local; the OS may still display a previous launch's badge.
   sync(): void {
     this.setCount(this.count)

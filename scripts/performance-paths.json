@@ -123,6 +123,7 @@
         "session_history.load_older",
         "ipc.agent:loadSession",
         "ipc.agent:loadSessionOlder",
+        "ipc.agent:turnTerminalEvidence",
         "ipc.conversation:read",
         "ipc.conversation:readItem"
       ],

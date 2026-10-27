@@ -101,6 +101,7 @@ const invokeChannels = {
   recorderContentPage: 'agent:recorderContentPage',
   loadSession: 'agent:loadSession',
   loadSessionOlder: 'agent:loadSessionOlder',
+  turnTerminalEvidence: 'agent:turnTerminalEvidence',
   deleteSession: 'agent:deleteSession',
   renameSession: 'agent:renameSession',
   setSessionPinned: 'agent:setSessionPinned',

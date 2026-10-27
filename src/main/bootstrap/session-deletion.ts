@@ -266,7 +266,7 @@ export function registerSessionDeletionHandlers(deps: SessionDeletionDependencie
     const ref = sessionRefFromRequest(p)
     if (!ref || typeof archived !== 'boolean') throw new Error('无效的存档请求')
     return changeLegacySessionMetadata(ref, () => archived
-      ? archiveSessionAndStop(appSessionStore(), ref, getRuns().activeStates(), requestRunStop)
+      ? archiveSessionAndStop(appSessionStore(), ref, getRuns().activeStates(), requestRunStop, (key) => dockBadge.remove(key))
       : appSessionStore().setArchived(ref, false))
   })
 

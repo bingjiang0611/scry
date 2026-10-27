@@ -1,4 +1,5 @@
 export {
+  appendMissingTraceItems,
   applyStopState,
   beginOptimisticTurn,
   buildAgentStartRequest,
@@ -7,6 +8,7 @@ export {
   confirmOptimisticTurn,
   currentVisibleRunId,
   discardOptimisticTurn,
+  hasTerminalResult,
   markTurnDone,
   markTurnError,
   mergeActiveRun,
@@ -21,6 +23,7 @@ export {
   sessionBusy,
   sessionHistoryWindowOf,
   sessionTurnsWithActiveRun,
+  terminalEvidenceOf,
   traceLiveHealthOf,
   TRACE_LIVE_HEALTHY,
   turnBlocksInput,

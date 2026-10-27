@@ -103,6 +103,28 @@ export const replayRunLifecycleDeltas = (prev: Turn[], deltas: RunLifecycleDelta
     prev
   )
 
+/** 总览的用量/成本只认终态 result；它缺失时补进归档里的终态证据，按 id 去重，不覆盖 live 证据。 */
+export const terminalEvidenceOf = (items: readonly TraceEvent[]): TraceEvent[] =>
+  items.filter((item) => item.kind === 'harness' && (item.stage === 'result' || item.stage === 'session_diff'))
+
+export const hasTerminalResult = (turn: Turn): boolean =>
+  turn.items.some((item) => item.kind === 'harness' && item.stage === 'result')
+
+export const appendMissingTraceItems = (prev: Turn[], runId: string, events: readonly TraceEvent[]): Turn[] => {
+  if (events.length === 0) return prev
+  let changed = false
+  const next = prev.map((turn) => {
+    if (turn.runId !== runId) return turn
+    const known = new Set(turn.items.map((item) => item.id))
+    const missing = events.filter((event) => !known.has(event.id))
+    if (missing.length === 0) return turn
+    changed = true
+    return { ...turn, items: [...turn.items, ...missing] }
+  })
+  // 没有新证据时保持原引用，不制造无谓的重新渲染。
+  return changed ? next : prev
+}
+
 export const currentVisibleRunId = (turns: Turn[]): string | null =>
   [...turns].reverse().find((turn) => !turn.pendingStart && !turn.done && !turn.error)?.runId ?? null
 

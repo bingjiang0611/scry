@@ -78,6 +78,8 @@ export function createTraceRuntime({
         appendCoalescedTrace(run.items, event)
         if (runs.isFocused(runId)) queueTrace(event)
       }
+      // 问题已经结束（已答/取消）：这个会话不再等用户，未读角标不能继续挂着。
+      dockBadge.releaseQuestionAttention(activeRunSessionKey(run), run.pendingQuestions?.length ?? 0)
     }
     getWindow()?.webContents.send('agent:questionAttention', {
       runId,

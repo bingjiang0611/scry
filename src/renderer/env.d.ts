@@ -43,6 +43,7 @@ type OptionalBridgeMethod =
   | 'onDataUpdated'
   | 'onStopState'
   | 'loadSessionOlder'
+  | 'turnTerminalEvidence'
   | 'onTraceHealth'
   | 'traceAck'
   | 'traceResynchronized'
