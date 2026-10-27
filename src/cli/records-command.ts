@@ -215,7 +215,9 @@ export async function turnsCommand(args: ParsedArgs): Promise<number> {
       if (!identity.taskLink.coverage.complete) advisories.push(`task link incomplete: ${JSON.stringify(identity.taskLink.statusCounts)}`)
     }
     if (health && health.pendingCount > 0) advisories.push(`open turns pending recovery: ${health.pendingCount}`)
-    print({ ...result, openTurnsPending: health?.pendingCount ?? null, identity, advisories })
+    // `maxSequence` is internal allocation evidence for doctor; keep this frozen CLI shape unchanged.
+    const { maxSequence: _maxSequence, ...visible } = result
+    print({ ...visible, openTurnsPending: health?.pendingCount ?? null, identity, advisories })
     return result.ok ? 0 : 4
   }
   throw new Error('usage: scry turns list|show|timeline|summary [sessionId|--all]|export|export-bundle|content|verify ...')

@@ -53,6 +53,8 @@ i=0; until scry status >/dev/null 2>&1; do i=$((i+1)); [ "$i" -ge 30 ] && break;
 | `scry turns content <记录> <正文路径...> --offset 0 --limit 65536` | 按字节分页读取 tool/model/diff/transcript 正文 |
 | `scry turns verify` | 序号连续性与记录完整性 |
 | `scry records archive --before 30d` | 归档旧记录（见[容量与归档](docs/storage-and-performance.md#容量与归档)） |
+
+记录文件不要手动删除或移走：序号是上传去重键，也是投递游标。删除后新轮次仍从已发号的下一号继续（`.scry/sequence-watermark.json`），`doctor` 的 `records.sequence` 会 warn 说明被删的记录永远不会再投递；移出旧记录只走 `scry records archive`。
 | `scry records maintain [--apply]` | 检查 quota/retention，安全回收孤立正文与压缩轮转日志 |
 | `scry support-bundle create` | 脱敏排障包 |
 | `scry recorder status\|stop\|restart\|recover\|notify-drain\|notify-retry` | daemon 与恢复 |

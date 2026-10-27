@@ -2,6 +2,7 @@ import { type ParsedArgs, workspaceOf, print } from './command-args.js'
 import { recorderEnablement, refreshRecorderPendingHealth, OPEN_TURN_EXPIRY_MS } from '../core/turn-recorder/recorder.js'
 import { readHookSkips, readUserHookSkips } from '../core/turn-recorder/hook-diagnostics.js'
 import { RECORDER_VERSION, readHealth, verifyStore, lastRecordVersion, commitNotificationStatus } from '../core/turn-recorder/store.js'
+import { readSequenceWatermark } from '../core/turn-recorder/sequence-watermark.js'
 import { recorderStaleOpenTurns } from '../core/turn-recorder/runtime-state.js'
 import { providerHookScriptState } from './workspace-init.js'
 import { discoverRepositories } from '../core/turn-recorder/config.js'
@@ -96,10 +97,22 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
       remediation: 'inspect the callback and sequence diagnostics; repair the cause before `scry recorder notify-retry --sequence N` or `--all-dead`; dead letters are not ACKs'
     } : {})
   }
+  // The issued watermark proves which sequence numbers were handed out; the live store cannot. A
+  // difference means record files were deleted (or moved) without `scry turns archive`.
+  let issuedWatermark: number | null = null
+  let sequenceError: string | undefined
+  try {
+    issuedWatermark = (await readSequenceWatermark(enablement.dataRoot))?.lastIssued ?? null
+  } catch (error) {
+    sequenceError = error instanceof Error ? error.message : String(error)
+  }
+  const acknowledged = Number.isSafeInteger(delivery?.ackedThrough) ? delivery?.ackedThrough ?? 0 : 0
+  const issuedSequence = Math.max(issuedWatermark ?? 0, acknowledged)
+  const recordsDeletedOutsideArchive = !sequenceError && issuedSequence > Math.max(store.maxSequence, store.archivedThrough)
   // Stale open turns need investigation, not a fabricated interruption. Warn separately from
   // pendingCount (managed/closing/quarantined); elapsed time does not prove the Provider stopped.
   const degraded = !!health.lastError || health.pendingCount > 0 || staleOpenTurns.length > 0 || hookSkips.recentCount > 0 ||
-    !!deliveryError || !!retry || deadCount > 0
+    !!deliveryError || !!retry || deadCount > 0 || !!sequenceError || recordsDeletedOutsideArchive
   const checks: Check[] = [
     { id: 'recorder.enabled', status: 'pass', detail: 'workspace has a valid recorder config' },
     {
@@ -124,6 +137,21 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
       status: store.ok ? 'pass' : 'fail',
       detail: store.ok ? `${store.records} records, sequence contiguous` : store.errors.join('; '),
       ...(store.ok ? {} : { remediation: 'do not delete individual record files; run `scry turns verify` for detail' })
+    },
+    {
+      // Deleting the newest record leaves no gap for `store.integrity` (contiguity is only checked
+      // between the archive floor and the live maximum). Only the issued watermark can prove that a
+      // record is missing, so this warns instead of reporting healthy.
+      id: 'records.sequence',
+      status: sequenceError ? 'fail' : recordsDeletedOutsideArchive ? 'warn' : 'pass',
+      detail: sequenceError ?? (recordsDeletedOutsideArchive
+        ? `issued sequence ${issuedSequence} is above live records (max ${store.maxSequence}) and archivedThrough ${store.archivedThrough}: records were deleted outside \`scry turns archive\`, or a commit was interrupted after reserving its number`
+        : `issued through sequence ${issuedSequence}; live records reach ${store.maxSequence}`),
+      ...(sequenceError
+        ? { remediation: 'inspect .scry/sequence-watermark.json; never hand-edit or delete it — sequence allocation and delivery ordering depend on it' }
+        : recordsDeletedOutsideArchive
+          ? { remediation: 'restore the deleted record files from a backup or `scry turns export` and re-run doctor; new turns keep allocating above the issued sequence, but deleted turns are never redelivered, and `scry turns archive` is the only supported way to move records out. A reserved-only number can also come from an interrupted commit that wrote no record — confirm with `scry turns list` before assuming data loss' }
+          : {})
     },
     {
       id: 'turns.pending',

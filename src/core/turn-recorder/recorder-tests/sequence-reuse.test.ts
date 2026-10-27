@@ -88,6 +88,25 @@ export function registerSuite21(): void {
     await expect(deliveredSequences(hook.capture)).resolves.toEqual([4])
   })
 
+  it('doctor warns when only the issued watermark is ahead, e.g. after a commit interrupted before the record write', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'turn-1')
+    const dataRoot = join(root, '.scry')
+    await writeFile(join(dataRoot, 'sequence-watermark.json'), JSON.stringify({ schemaVersion: 1, lastIssued: 2 }))
+    const chunks: string[] = []
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(chunk => { chunks.push(String(chunk)); return true })
+    try {
+      await expect(doctorCommand({ positionals: [], flags: new Map([['workspace', root]]) })).resolves.toBe(5)
+    } finally {
+      output.mockRestore()
+    }
+    const report = JSON.parse(chunks.join('')) as { status: string; checks: { id: string; status: string; detail: string }[] }
+    const check = report.checks.find(item => item.id === 'records.sequence')
+    expect(check).toMatchObject({ status: 'warn' })
+    expect(check?.detail).toContain('interrupted')
+    expect(report.status).toBe('degraded')
+  })
+
   it('doctor warns about records deleted outside archive instead of reporting healthy', async () => {
     const f = await ackedFixture(3)
     await rm(join(f.dataRoot, 'records', await recordNameOf(f.dataRoot, 3)), { force: true })
