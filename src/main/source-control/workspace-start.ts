@@ -160,7 +160,9 @@ export async function startWorkspace(
       if (admissionCalled) throw new Error('工作区预留只能登记一个 run')
       admissionCalled = true
       await verifyWorkspacePlan(deps.git, identity, journal.plan, selection.operationId)
-      if (await deps.busy((await deps.git.identity(target.cwd)).root)) throw new Error('登记前目标工作区已被占用')
+      // 上一行的 verifyWorkspacePlan 已经证明 realpath(plan.cwd) === target.root，所以这里直接用
+      // target.cwd 判定占用，不再为一个 root 字符串多解析一次仓库身份。
+      if (await deps.busy(target.cwd)) throw new Error('登记前目标工作区已被占用')
       journal.launch = { commandId: request.commandId, requestHash: launchHash, runId }
       journal.phase = 'start_requested'
       record!.operation.status = 'running'

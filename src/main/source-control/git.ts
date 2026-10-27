@@ -221,10 +221,19 @@ export class ScGit {
   private async assertSafeWorktreeRead(root: string): Promise<void> {
     // Even status may invoke clean/process filters while comparing index and worktree.
     // Enumerate names and attributes first; these commands do not run content filters.
-    const index = await this.run(root, ['ls-files', '--stage', '-z'])
-    if (/(?:^|\0)160000 /.test(index))
+    // One listing yields both the staged rows (submodule modes) and the tracked/untracked names,
+    // so this path starts one git process fewer for every status read.
+    const listing = await this.run(root, ['ls-files', '--stage', '-z', '--others', '--exclude-standard'])
+    if (/(?:^|\0)160000 /.test(listing))
       throw new Error('仓库包含子模块；第一版不递归读取或修改子模块，避免执行未授权的子仓配置')
-    const names = await this.run(root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard'])
+    const names = listing ? listing.split('\0').map((row) => {
+      if (!row) return ''
+      const separator = row.indexOf('\t')
+      // Staged rows are `mode SP hash SP stage TAB path`; untracked rows are a bare path.
+      // Any stage 0-3 counts: unmerged entries still belong to the checked name set.
+      return /^[0-7]{6} [0-9a-f]+ [0-3]$/.test(row.slice(0, separator < 0 ? undefined : separator))
+        ? row.slice(separator + 1) : row
+    }).join('\0') : ''
     if (!names) return
     const attributes = await this.process.run(
       'git',
@@ -253,10 +262,13 @@ export class ScGit {
   }
 
   private async readStatus(identity: GitIdentity) {
+    // This re-resolves the identity as a trust check; the resolved identity is also the one the
+    // rest of the read uses, so a symlinked path cannot be verified under one identity and read
+    // under another.
     const fresh = await this.identity(identity.root)
     if (fresh.id !== identity.id) throw new Error('仓库身份已改变，请重新打开源代码管理')
-    await this.assertSafeWorktreeRead(identity.root)
-    const output = await this.run(identity.root, [
+    await this.assertSafeWorktreeRead(fresh.root)
+    const output = await this.run(fresh.root, [
       'status',
       '--porcelain=v2',
       '-z',
@@ -266,13 +278,12 @@ export class ScGit {
     const state = parseGitStatus(output)
     if (state.files.length > 1000)
       throw new Error('工作区超过 1,000 个变更文件；不提供不完整的可写快照，请在终端缩小范围')
-    const config = await this.config(identity.root)
-    return { state, output, config }
+    const config = await this.config(fresh.root)
+    return { identity: fresh, state, output, config }
   }
 
   private async revisionState(
-    identity: GitIdentity,
-    { state, output, config }: Awaited<ReturnType<ScGit['readStatus']>>
+    { identity, state, output, config }: Awaited<ReturnType<ScGit['readStatus']>>
   ): Promise<Omit<ScRepository, 'remotes'>> {
     const actionBlockers = await this.actionBlockers(identity, config)
     const writeBlocker = state.files.some((file) => file.conflict)
@@ -294,24 +305,25 @@ export class ScGit {
 
   /** Same revision material as status; remotes are a display projection, not hash input. */
   async revisionSnapshot(identity: GitIdentity): Promise<Omit<ScRepository, 'remotes'>> {
-    return this.revisionState(identity, await this.readStatus(identity))
+    return this.revisionState(await this.readStatus(identity))
   }
 
   async status(identity: GitIdentity): Promise<ScRepository> {
     const observed = await this.readStatus(identity)
-    const remoteNames = (await this.run(identity.root, ['remote'])).trim().split('\n').filter(Boolean)
+    const root = observed.identity.root
+    const remoteNames = (await this.run(root, ['remote'])).trim().split('\n').filter(Boolean)
     const remotes: ScRepository['remotes'] = []
     for (const name of remoteNames) {
-      const values = (await this.run(identity.root, ['remote', 'get-url', '--push', '--all', '--', name]))
+      const values = (await this.run(root, ['remote', 'get-url', '--push', '--all', '--', name]))
         .trimEnd()
         .split('\n')
-      const fetchUrls = (await this.run(identity.root, ['remote', 'get-url', '--all', '--', name]))
+      const fetchUrls = (await this.run(root, ['remote', 'get-url', '--all', '--', name]))
         .trimEnd()
         .split('\n')
       const redact = (value: string): string => value.replace(/(https?:\/\/)[^\s/@]+@/g, '$1[redacted]@')
       remotes.push({ name, pushUrls: values.map(redact), fetchUrls: fetchUrls.map(redact) })
     }
-    const snapshot = await this.revisionState(identity, observed)
+    const snapshot = await this.revisionState(observed)
     return { ...snapshot, remotes }
   }
 

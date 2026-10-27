@@ -38,3 +38,36 @@
 - L2：未测。单样本毫秒在 load 24 下噪声大于收益（改前 3157 ms、改后 3709 ms），不能作为结论；需要在 `timing-run.mjs` 锁内做多次重复。
 - L3：待部署后日常记录对比。
 - 剩余机会（未做，按代价排序）：`git.identity` 在一次 prepare 里仍被调用 9 次、`readStatus` 里每次都重读身份与 `ls-files` 探测、3 次 `status`；这些可以合并成一次身份读取 + 一次状态快照，预计还能再减 30 个子进程。
+
+## 第二轮：同一份证据只解析一次
+
+第一轮把一个 prepare 的 git 子进程从 98 降到 77（夹具计数）。剩下的重复在「同一条信息被
+不同调用点各自重算」：
+
+1. **`readStatus` 用自己刚验证的身份继续读**（`src/main/source-control/git.ts`）。
+   原来它先 `identity()` 重验一次，之后却拿**旧的** identity 去跑 status、读 config、读 index。
+   现在把验证后的身份作为这次读取的身份继续使用，`revisionState` 也只接受这份 observed 结果。
+   这一条不减少进程数，改的是「用哪份身份读」——验证过的路径和实际读取的路径不能是两份。
+2. **`assertSafeWorktreeRead` 一次列举代替两次**。原来先 `ls-files --stage -z` 判子模块，
+   再 `ls-files -z --cached --others` 取名字，两次都要起 git。合并为
+   `ls-files --stage -z --others --exclude-standard`：staged 行（`mode hash stage<TAB>path`）
+   判 `160000` 子模块，其余取路径；任何 stage 0-3 都算，未合并条目照旧进入名字集。
+   每个 status 读少起一个 git 进程。fail closed 行为不变：filter driver 仍拒绝。
+3. **登记前不再为一个 root 字符串重解析身份**（`src/main/source-control/workspace-start.ts`）。
+   上一行的 `verifyWorkspacePlan` 已经证明 `realpath(plan.cwd) === target.root`，
+   紧接着的占用判定直接用 `target.cwd`。最后一道重验（verifyWorkspacePlan + 同步授权校验）
+   一行不少，只是不再重复解析身份。没有引入任何跨调用的身份缓存——那不是这里该做的事。
+
+## 验证（第二轮）
+
+- `npx tsc -p tsconfig.node.json --noEmit`：通过。
+- `npx vitest run src/main/source-control/`：8 个文件 75/75 通过，含
+  “fails closed for executable hooks and filters without running them”（覆盖合并后的
+  filter 判定）与 “fails closed for ... submodules” 相关用例。
+- 全量 `npm run test:unit`：见本轮提交说明中的结果。
+
+## 未验证（第二轮）
+
+- 子进程计数没有重测：本仓库 `process.ts` 会在清洗后的 PATH 上解析绝对可执行文件，
+  外部 PATH 包装脚本无法注入计数，所以只有代码级与用例级证据，不给数字。
+- 毫秒未测（机器 load 16-45）。
