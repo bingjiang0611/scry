@@ -78,6 +78,35 @@ describe('full raw tool content', () => {
     expect(sanitizeToolEvents(source, { toolOutput: 'full-redacted' }, 'replay')[1].outputContent).toEqual(historical)
   })
 
+  it('bounds a whole turn, not only each field, and keeps later provenance', () => {
+    const body = 'x'.repeat(8 * 1024)
+    const raw = Array.from({ length: 64 }, (_, index) => [
+      { id: `in-${index}`, runId: 'r', ts: '2026-01-01T00:00:00Z', kind: 'tool' as const, stage: `tool:Bash`, tool: 'Bash', toolUseId: `t-${index}`, input: { command: 'echo hello' } },
+      { id: `out-${index}`, runId: 'r', ts: '2026-01-01T00:00:01Z', kind: 'tool' as const, stage: 'tool_result', toolUseId: `t-${index}`, output: body }
+    ]).flat()
+    const bounded = sanitizeToolEvents(raw, { toolOutput: 'full', toolContentFieldBytes: 8 * 1024, toolContentTurnBytes: 16 * 1024 }, 'fixture')
+    const saved = bounded.reduce((total, event) => total + (event.outputContent?.savedBytes ?? 0) + (event.inputContent?.savedBytes ?? 0), 0)
+    expect(saved).toBeLessThanOrEqual(16 * 1024)
+    // Early calls keep their complete body; an exhausted turn budget omits the rest
+    // with explicit provenance instead of silently dropping it.
+    expect(bounded[1].outputContent).toMatchObject({ content: body, storage: 'complete' })
+    expect(bounded.at(-1)!.outputContent).toMatchObject({ storage: 'omitted', reasons: expect.arrayContaining(['turn_budget']) })
+    expect(isToolContent(bounded.at(-1)!.outputContent)).toBe(true)
+  })
+
+  it('keeps a durable reference when the turn budget cuts a captured body', () => {
+    const contentRef = { storage: 'recorder-content-v1' as const, sha256: 'a'.repeat(64), bytes: 4096, encoding: 'utf8' as const }
+    const raw = Array.from({ length: 4 }, (_, index) => {
+      const event = events('正文'.repeat(2048))[1]
+      event.id = `out-${index}`
+      event.toolUseId = `t-${index}`
+      event.outputContent = { ...captureToolContent('正文'.repeat(2048), { source: 'fixture' }), contentRef }
+      return event
+    })
+    const bounded = sanitizeToolEvents(raw, { toolOutput: 'full', toolContentFieldBytes: 8 * 1024, toolContentTurnBytes: 8 * 1024 }, 'fixture')
+    expect(bounded.at(-1)!.outputContent).toMatchObject({ contentRef, storage: 'omitted', reasons: expect.arrayContaining(['turn_budget']) })
+  })
+
   it('cuts UTF-8 safely and labels JSON fragments', () => {
     const text = captureToolContent('中😀文', { source: 'fixture', maxBytes: 5 })
     expect(text).toMatchObject({ content: '中', savedBytes: 3, storage: 'truncated', reasons: ['field_budget'] })
