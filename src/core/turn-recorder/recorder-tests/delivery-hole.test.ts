@@ -2,6 +2,8 @@ import { chmod, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { doctorCommand } from '../../../cli/doctor-command.js'
+import { recorderCommand } from '../../../cli/recorder-command.js'
+import { advanceAck } from '../commit-delivery-ledger'
 import { commitNotificationStatus, drainCommitNotifications, stableHash } from '../store'
 import { completeTurn, workspace } from './fixture.test'
 
@@ -47,6 +49,17 @@ if (JSON.parse(fs.readFileSync(${JSON.stringify(reject)}, 'utf8')).includes(noti
       advance: (milliseconds: number) => { clock += milliseconds },
       rejectSequences: async (sequences: number[]) => { await writeFile(reject, JSON.stringify(sequences)) },
       callSequences: async () => (await readFile(calls, 'utf8')).trim().split('\n').map(Number)
+    }
+  }
+
+  async function notifyRetry(f: Awaited<ReturnType<typeof fixture>>, flags: Array<[string, string]>): Promise<number> {
+    for (const [key, value] of Object.entries(f.env)) vi.stubEnv(key, value)
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    try {
+      return await recorderCommand({ positionals: ['recorder', 'notify-retry'], flags: new Map([['workspace', f.root], ...flags]) })
+    } finally {
+      output.mockRestore()
+      vi.unstubAllEnvs()
     }
   }
 
@@ -146,6 +159,49 @@ if (JSON.parse(fs.readFileSync(${JSON.stringify(reject)}, 'utf8')).includes(noti
     expect(broken.code).toBe(5)
     expect(broken.report.status).toBe('error')
     expect(broken.report.checks.find(check => check.id === 'commitHook.delivery')?.status).toBe('fail')
+  })
+
+  it('counts a repeated absent sequence once even when the kept ranges are truncated', async () => {
+    const f = await fixture()
+    // A full sample: 32 ranges survive while holes 33..39 were already counted and trimmed away.
+    const ranges = Array.from({ length: 32 }, (_, index) => [index + 1, index + 1] as [number, number])
+    await mkdir(outcomesDir(f.dataRoot), { recursive: true })
+    await writeFile(absentPath(f.dataRoot), JSON.stringify({
+      schemaVersion: 1, hookFingerprint: fingerprint, absentThrough: 39, count: 39, ranges, truncated: true
+    }))
+
+    // Sequence 40 is the next hole; re-walking it must not be counted twice just because its
+    // range fell outside the kept sample.
+    for (let index = 0; index < 2; index++) {
+      await advanceAck(f.dataRoot, { schemaVersion: 1, hookFingerprint: fingerprint, ackedThrough: 39, processedThrough: 40 }, 0)
+    }
+
+    expect(await absentEvidence(f.dataRoot)).toMatchObject({ absentThrough: 40, count: 40, truncated: true })
+    expect((await absentEvidence(f.dataRoot))?.ranges).toHaveLength(32)
+  })
+
+  it('recovers a lost delivery outcome through an explicit notify-retry of that sequence', async () => {
+    const f = await fixture()
+    for (const name of ['turn-1', 'turn-2']) await completeTurn(f.root, name)
+    await f.rejectSequences([1])
+    await drainCommitNotifications(f.dataRoot, f.env)
+    // The receipt for a still-existing record is lost: the ACK can no longer prove sequence 1.
+    await rm(join(outcomesDir(f.dataRoot), pad(1)), { force: true })
+    await f.rejectSequences([])
+    await expect(commitNotificationStatus(f.dataRoot, f.env)).rejects.toThrow('missing delivery outcome in visited prefix')
+    for (const [key, value] of Object.entries(f.env)) vi.stubEnv(key, value)
+    const stuck = await doctor(f.root)
+    const delivery = stuck.report.checks.find(check => check.id === 'commitHook.delivery')
+    expect(delivery).toMatchObject({ status: 'fail' })
+    expect(delivery?.detail).toMatch(/sequence 1/)
+    expect(delivery?.detail).toMatch(/notify-retry --sequence 1/)
+
+    // The operator names the sequence explicitly; the record is intact and the receiver dedupes it.
+    await expect(notifyRetry(f, [['sequence', '1']])).resolves.toBe(0)
+    await expect(commitNotificationStatus(f.dataRoot, f.env)).resolves.toMatchObject({ ackedThrough: 2 })
+    await completeTurn(f.root, 'turn-3')
+    await expect(drainCommitNotifications(f.dataRoot, f.env)).resolves.toMatchObject({ delivered: 1 })
+    await expect(commitNotificationStatus(f.dataRoot, f.env)).resolves.toMatchObject({ ackedThrough: 3 })
   })
 
   it('doctor shows the absent sequences the ACK crossed', async () => {
