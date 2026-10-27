@@ -41,15 +41,21 @@ export async function assertWorkspaceCheckoutSafe(git: ScGit, identity: GitIdent
     const attributes = await git.process.run('git', [
       ...readConfig, ...readOnly, 'check-attr', '--cached', '-z', '--stdin', 'filter'
     ], identity.root, { gitIndexFile, input: names + '\0' })
+    const fields = attributes.split('\0')
+    const drivers = new Set<string>()
+    for (let index = 2; index < fields.length; index += 3) {
+      const driver = fields[index]
+      if (driver === 'unspecified' || driver === 'unset' || driver === 'set') continue
+      drivers.add(driver)
+    }
+    // 没有 filter driver 时不必再读整份 config：多一次 git 进程启动就多几百毫秒。
+    if (drivers.size === 0) return
     const config = new Map((await git.run(identity.root, ['config', '--null', '--list', '--includes']))
       .split('\0').filter(Boolean).map(row => {
         const separator = row.indexOf('\n')
         return separator < 0 ? [row, 'true'] : [row.slice(0, separator), row.slice(separator + 1)]
       }))
-    const fields = attributes.split('\0')
-    for (let index = 2; index < fields.length; index += 3) {
-      const driver = fields[index]
-      if (driver === 'unspecified' || driver === 'unset' || driver === 'set') continue
+    for (const driver of drivers) {
       if (['clean', 'smudge', 'process'].some(kind => config.get(`filter.${driver}.${kind}`)) ||
         /^(?:true|yes|on|1)$/i.test(config.get(`filter.${driver}.required`) ?? ''))
         throw new Error(`目标分支需要原生 filter ${driver}；不会在准备工作区时执行该程序，请在终端处理`)

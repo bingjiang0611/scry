@@ -126,6 +126,7 @@ export async function startWorkspace(
   let registered = false
   let registrationDispatched = false
   let admissionCalled = false
+  let preparedThisCall: PreparedWorkspace | undefined
   try {
     const targetIdentity = journal.plan.write === 'create' && journal.phase === 'planned'
       ? undefined : await deps.git.identity(journal.plan.cwd)
@@ -145,12 +146,15 @@ export async function startWorkspace(
           })
         }
       }
-      journal.prepared = await verifyWorkspacePlan(deps.git, identity, journal.plan, selection.operationId)
+      preparedThisCall = await verifyWorkspacePlan(deps.git, identity, journal.plan, selection.operationId)
+      journal.prepared = preparedThisCall
       journal.phase = 'prepared'
       record.operation.message = '工作区已确认；正在重验 authority、trust 与基线，Provider 尚未启动'
       await save(deps.store, record)
     }
-    const target = await verifyWorkspacePlan(deps.git, identity, journal.plan, selection.operationId)
+    // 刚刚在本调用内验证过的结果直接复用：中间只有日志写入与 Provider 启动，没有 Git 写入；
+    // 登记前仍会在 admit 里重验一次，所以并没有放宽最后一道检查。
+    const target = preparedThisCall ?? await verifyWorkspacePlan(deps.git, identity, journal.plan, selection.operationId)
     const runId = `run-workspace-${randomUUID()}`
     const result = await start(target, runId, async register => {
       if (admissionCalled) throw new Error('工作区预留只能登记一个 run')
