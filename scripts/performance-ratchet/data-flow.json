@@ -442,6 +442,48 @@
       "baselines": {
         "darwin-arm64": 5
       }
+    },
+    "workspace.remember-consecutive/io.write.calls": {
+      "scenario": "workspace.remember-consecutive",
+      "metric": "io.write.calls",
+      "layer": "main",
+      "unit": "count",
+      "workload": "same-canonical-project=2",
+      "source": "pass-through node:fs counters around production createWorkspaceRuntime.rememberProject",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 0
+      }
+    },
+    "workspace.remember-consecutive/io.rename.calls": {
+      "scenario": "workspace.remember-consecutive",
+      "metric": "io.rename.calls",
+      "layer": "main",
+      "unit": "count",
+      "workload": "same-canonical-project=2",
+      "source": "pass-through node:fs counters around production createWorkspaceRuntime.rememberProject",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 0
+      }
+    },
+    "renderer.giant-completed-turn/rendered.flow-items": {
+      "scenario": "renderer.giant-completed-turn",
+      "metric": "rendered.flow-items",
+      "layer": "ui",
+      "unit": "count",
+      "workload": "model-text-events=217;completed=true;selection=none",
+      "source": "production AssistantTurn server markup; counted rendered model-text blocks",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 16
+      }
     }
   }
 }
