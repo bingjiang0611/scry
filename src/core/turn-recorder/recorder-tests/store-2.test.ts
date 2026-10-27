@@ -234,6 +234,6 @@ export function registerSuite14(): void {
     await writeFile(join(root, '.scry', 'records', 'rename-before-crash.tmp'), '{"partial":true}')
     await completeTurn(root, 'b')
     expect((await listRecords(join(root, '.scry'))).map((record) => record.sequence)).toEqual([1, 2])
-    await expect(verifyStore(join(root, '.scry'))).resolves.toEqual({ ok: true, records: 2, errors: [], archivedThrough: 0 })
+    await expect(verifyStore(join(root, '.scry'))).resolves.toEqual({ ok: true, records: 2, errors: [], archivedThrough: 0, maxSequence: 2 })
   })
 }

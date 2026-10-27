@@ -7,12 +7,13 @@ import { copyRecorderContent } from './content-store.js'
 import { withDirectoryLock, writeJsonAtomic, mkdirDurable, syncDirectory, readJson, appendRotatingLog } from './io.js'
 import { recordFiles, readRecordFile, invalidateRecordIndex, addContentRefs } from './store-index.js'
 import { archiveJournal, readArchiveState, archivePathsOverlap } from './store-archive.js'
+import { nextSequence, reserveSequence } from './sequence-watermark.js'
 export { recordStoreIndexStats, resetRecordStoreIndex, stableHash, safeKey, findRecordById, recordStoreStamp, readRecordFile, type RecordContentItem, recordContentItems, recordContentItem } from './store-index.js'
 export { type RecordCommittedNotification, type CommitNotificationStatus, commitNotificationStatus, HOOK_DRAIN_MAX_RECORDS, HOOK_DRAIN_BUDGET_MS, type DrainOptions, type DrainResult, drainCommitNotifications, retryCommitNotifications, redeliverLatestCommitNotification } from './store-notifications.js'
 export { type ArchiveState, readArchiveState, type ArchiveOptions, archiveRecords } from './store-archive.js'
 
 
-export const RECORDER_VERSION = '0.2.51'
+export const RECORDER_VERSION = '0.2.52'
 
 export interface RecorderHealth {
   schemaVersion: 1
@@ -49,18 +50,21 @@ export async function commitRecord(
     if (duplicate) {
       return { status: 'duplicate' as const, record: await readRecordFile(join(dataRoot, 'records', duplicate.name)) }
     }
-    // The allocator must clear the archive floor, otherwise archiving every live record would
-    // restart numbering at 1 and collide with sequences that were already issued. Duplicate
-    // detection only scans live records: archiving is therefore restricted to finalized turns
-    // (and, when a commit hook exists, acknowledged ones), which cannot be re-committed.
+    // The allocator must clear every floor that proves a sequence was already issued: the durable
+    // watermark (record files deleted by hand), the archive floor (records moved out on purpose) and
+    // the live maximum (records restored from an older backup). Duplicate detection only scans live
+    // records: archiving is therefore restricted to finalized turns (and, when a commit hook exists,
+    // acknowledged ones), which cannot be re-committed.
     const archivedThrough = (await readArchiveState(dataRoot))?.archivedThrough ?? 0
-    const sequence = Math.max(files.at(-1)?.sequence ?? 0, archivedThrough) + 1
+    const sequence = await nextSequence(dataRoot, { liveMax: files.at(-1)?.sequence ?? 0, archivedThrough })
     const record: AgentTurnRecord = { ...draft, sequence }
     const validation = validateAgentTurnRecord(record)
     if (!validation.ok) {
       const detail = validation.issues.slice(0, 4).map((issue) => `${issue.path}: ${issue.message}`).join('; ')
       throw new Error(`refusing to commit invalid turn record: ${detail}`)
     }
+    // Reserve the number durably before the record exists: a crash may skip a sequence, never reuse one.
+    await reserveSequence(dataRoot, sequence)
     const filename = `${String(sequence).padStart(20, '0')}-${record.recordId}.json`
     // Publish the private snapshot first: a visible record must never race ahead of its env.
     if (uploadEnvironment !== undefined) await persistUploadEnvironment(dataRoot, record.recordId, uploadEnvironment)
@@ -170,7 +174,7 @@ export async function lastRecordVersion(dataRoot: string): Promise<string | null
 export async function verifyStore(
   dataRoot: string,
   onRecord?: (record: AgentTurnRecord) => void
-): Promise<{ ok: boolean; records: number; errors: string[]; archivedThrough: number }> {
+): Promise<{ ok: boolean; records: number; errors: string[]; archivedThrough: number; maxSequence: number }> {
   // Integrity verification always bypasses disposable projections and scans canonical filenames.
   const files = await recordFiles(dataRoot, { bypassIndex: true })
   const errors: string[] = []
@@ -206,7 +210,7 @@ export async function verifyStore(
     // Consumer errors must propagate, not be misreported as corrupt canonical records.
     onRecord?.(record)
   }
-  return { ok: errors.length === 0, records: files.length, errors, archivedThrough }
+  return { ok: errors.length === 0, records: files.length, errors, archivedThrough, maxSequence: files.at(-1)?.sequence ?? 0 }
 }
 
 const EMPTY_HEALTH: RecorderHealth = {

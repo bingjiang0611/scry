@@ -38,4 +38,8 @@ node <分支 CLI>/dist/cli/scry.js init --providers codex,qoder,opencode
 | F-7 | uploader 短暂故障后恢复 | VE2 | 恢复后在退避时间到期时自动补投，不进死信；doctor 显示下次重试时间 |
 | F-8 | 机器重启或 kill daemon 之后继续使用 | VC1 | 下一轮正常落盘，daemon 自动拉起，inbox 不积压 |
 
+执行记录见 [F 报告](reports/F.md)：F-3～F-8 通过；F-1 只有 OpenCode 与 Pi 通过，Claude/Codex/Qoder 未通过或阻塞；F-2 的 Codex 场景未通过。
+
 部署提醒：hook 脚本在 C、D、E 都有改动，存量 workspace 需要 `scry integrations repair --yes`，然后 `scry recorder restart`，再重启 Provider；Codex 要在 `/hooks` 重新确认 trust。
+
+Codex 的 trust 是硬前提，不是可选步骤：没在 `/hooks` 确认项目 hook trust（`codex exec` 场景则需显式 `--dangerously-bypass-hook-trust`）时，Codex 仍会打印 `hook: UserPromptSubmit / Completed` 之类的阶段行，但项目 hook 完全不执行，结果是**没有任何 record、没有 `hook-skip.log`、health 计数也不变**，看起来像「跑完了什么都没记」。新机器、新 clone、新 worktree 都要重新确认一次；排查细节见 [F-codex 报告](reports/F-codex.md)。
