@@ -14,10 +14,12 @@ import { piContinuationKey } from './pi-runtime'
 import { piModelContextWindows } from './pi-catalog'
 import { PiRpcCommandError, PiRecorderError, type PiRpcProcess, piEvent } from './pi-rpc'
 import { piEntryBaseline, waitForPiUserEntryId } from './pi-entry-proof'
+import type { PiRunDiagnosticPhase } from './pi-run-diagnostics'
 import { proveExplicitPiSkill, piExtensionCommand } from './pi-catalog'
 import type { UsageAggregate } from './pi-usage'
 
 export interface PiRunSuccessContext {
+  diagnose: (phase: PiRunDiagnosticPhase) => void
   profile: PiAgentProfile
   request: ProviderRunRequest
   state: PiRunState
@@ -45,7 +47,9 @@ export interface PiRunSuccessContext {
 export async function runPiAgentSuccess(ctx: PiRunSuccessContext): Promise<ProviderRunResult> {
     // Capability probes remain bounded; an explicitly started run stays cancellable while
     // large native history/extensions load, rather than being killed by a startup clock.
+    ctx.diagnose('initial_state')
     const initialState = record((await ctx.rpc.send({ type: 'get_state' }, null)).data)
+    ctx.diagnose('setup')
     if (typeof initialState.sessionId === 'string' && initialState.sessionId) {
       ctx.state.sessionId = initialState.sessionId
       ctx.state.sessionFile = typeof initialState.sessionFile === 'string' ? initialState.sessionFile : undefined
@@ -167,7 +171,9 @@ export async function runPiAgentSuccess(ctx: PiRunSuccessContext): Promise<Provi
       ctx.history.attempting(outgoingPrompt)
       promptDispatched = true
       // Accepted execution stays owned until Pi acknowledges it or the user stops this process.
+      ctx.diagnose('prompt_response')
       await ctx.rpc.send({ type: 'prompt', message: outgoingPrompt, ...(images.length > 0 ? { images } : {}) }, null)
+      ctx.diagnose('user_entry')
     } catch (error) {
       const identity = ctx.request.managedRecorderIdentity
       if (
@@ -256,10 +262,12 @@ export async function runPiAgentSuccess(ctx: PiRunSuccessContext): Promise<Provi
     publishPersistedPiSession(ctx.request, ctx.state)
     // Pi workflows can intentionally run for hours. Do not impose a wall-clock or inactivity
     // deadline here: transport/process failures reject rpcFailure, and users retain stop controls.
+    ctx.diagnose('agent_settlement')
     await Promise.race([ctx.settled, ctx.rpcFailure])
     // Startup supplies the native ID/path; persistence is checked independently. Asking Pi
     // for one more state snapshot after abort only delays the queued next turn and can hit
     // an avoidable timeout while the launcher is shutting down.
+    ctx.diagnose('final_state')
     let finalState = initialState
     if (!ctx.state.stopped) {
       try {

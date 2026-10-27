@@ -9,12 +9,14 @@ import { PerformanceTrace, performanceRecordingEnabled } from '../performance-ti
 import { piContinuationKey, piRpcEnvironment, PI_RPC_STARTUP_TIMEOUT_MS } from './pi-runtime'
 import { RotomRpcPool } from './pi-rpc'
 import type { PiProbe, PiRunState } from './pi-types'
+import type { PiRunDiagnostics } from './pi-run-diagnostics'
 import { runPiAgent } from './pi-run'
 import { record } from './pi-shared'
 import { piRpcArgs, withPiRpc, probePiAgent, commandCatalog, skillCatalog, piModelContextWindows, piHistoryNeedsModelCatalog, enrichPiHistory, runControlCatalog } from './pi-catalog'
 
 
 export function createPiAdapter(options: {
+  diagnostics?: PiRunDiagnostics
   listProfiles: () => Promise<PiAgentProfile[]>
   resolveProfile: (id: string) => Promise<PiAgentProfile | undefined>
   /** Fixed App resource, not a profile/repository/renderer input. */
@@ -130,7 +132,8 @@ export function createPiAdapter(options: {
       }
     },
     run(request: ProviderRunRequest): ProviderRunHandle {
-      const state: PiRunState = { stopped: false }
+      const state: PiRunState = { stopped: false, diagnostics: options.diagnostics }
+      options.diagnostics?.record(request.runId, 'profile_lookup', { stopRequested: false })
       const history = new HistoricalInput(request.expectedContinuationKey
         ? { ...request, trackInputReceipt: true }
         : request)
@@ -147,7 +150,15 @@ export function createPiAdapter(options: {
           publishPersistedPiSession(request, state)
         }
         return { ...result, externalSessionId: state.persistedSessionId }
-      })()
+      })().then(result => {
+        options.diagnostics?.record(request.runId, 'provider_returned', {
+          providerStatus: result.status, stopRequested: state.stopped
+        })
+        return result
+      }, error => {
+        options.diagnostics?.record(request.runId, 'provider_rejected', { stopRequested: state.stopped })
+        throw error
+      })
       return {
         promise,
         interrupt: () => {
@@ -173,8 +184,9 @@ export function createPiAdapter(options: {
     invalidateContext(context) {
       return rotomPool.invalidate(context)
     },
-    dispose() {
-      return rotomPool.dispose()
+    async dispose() {
+      await rotomPool.dispose()
+      await options.diagnostics?.flush()
     },
     sessionEvidence: {
       async enrich(context, turns) {

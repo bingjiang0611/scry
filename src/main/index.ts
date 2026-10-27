@@ -97,7 +97,7 @@ const {
   getProviderRegistry: () => providerRegistry
 })
 const { piProfileStore, detectInstalledAgents, storedPiProfilesNotDetected, listPiProfiles, resolvePiProfile } = createPiProfileRuntime({ userDataDir: app.getPath('userData') })
-const { providerCompatibility, providerRegistry, smokeProviderEnabled, smokeDetectedAgents } = createProviderRuntime({ homeDir, listPiProfiles, resolvePiProfile })
+const { providerCompatibility, providerRegistry, piRunDiagnostics, smokeProviderEnabled, smokeDetectedAgents } = createProviderRuntime({ homeDir, listPiProfiles, resolvePiProfile })
 
 function setCurrentCwd(dir: string | undefined): void {
   // Selection is not process ownership. Existing shells retain their spawn cwd;
@@ -272,7 +272,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     start: startAppRun
   })
   return startRun(payload, options, {
-    providerRegistry, appSessionStore, resolveRemoteProjectDirectory, resolveKnownProjectDirectory,
+    providerRegistry, piRunDiagnostics, appSessionStore, resolveRemoteProjectDirectory, resolveKnownProjectDirectory,
     providerOperationGate, providerContextKey, providerSessionKey, contextAdmission,
     resetSessionContext, sessionRevisionByContext, sessionByContext, sessionAliasesByContext,
     runs, deletingSessions, conversationStore, assertLegacyConversationWriteAllowed,

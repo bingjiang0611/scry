@@ -17,6 +17,7 @@ import { attachPiEventHandlers } from './pi-run-events'
 import { runPiAgentSuccess } from './pi-run-success'
 import { piRpcArgs } from './pi-catalog'
 import type { UsageAggregate } from './pi-usage'
+import type { PiRunDiagnosticPhase } from './pi-run-diagnostics'
 
 export async function runPiAgent(
   profile: PiAgentProfile,
@@ -36,6 +37,7 @@ export async function runPiAgent(
     })
   }
   if (state.stopped) return { stopped: true, status: 'interrupted' }
+  state.diagnostics?.record(request.runId, 'environment')
   const baseEnv = shellEnv()
   const launchShellEnvError = shellEnvError()
   const env = await piRpcEnvironment(profile, baseEnv)
@@ -61,6 +63,7 @@ export async function runPiAgent(
   }
   // A startup extension cannot refresh its authority for another run. Never pool it.
   const mayReuse = isRotomLauncher(profile) && !request.historyReader
+  state.diagnostics?.record(request.runId, 'pool_lookup')
   const pooledRpc = mayReuse ? await rotomPool?.take(profile, request.cwd, request.resume, env, continuationKey) : undefined
   if (state.stopped) {
     await pooledRpc?.close()
@@ -119,8 +122,21 @@ export async function runPiAgent(
   void rpcFailure.catch(() => undefined)
   const offFailure = rpc.onFailure((error) => rpcFailureReject?.(error))
   const background = new PiBackgroundWork()
+  let diagnosticPhase: PiRunDiagnosticPhase = 'initial_state'
+  let lastNativeLifecycle: 'agent_start' | 'agent_end' | 'agent_settled' | undefined
+  let lastNativeLifecycleAt: string | undefined
+  const diagnose = (phase = diagnosticPhase): void => {
+    diagnosticPhase = phase
+    state.diagnostics?.record(request.runId, phase, {
+      rpcPid: rpc.child.pid, agentStarted, agentEnded, agentSettled, nativeIdle,
+      backgroundPending: background.pending, stopRequested: state.stopped,
+      lastNativeLifecycle, lastNativeLifecycleAt
+    })
+  }
   const emitBackground = (work: ReturnType<PiBackgroundWork['observe']>): void => {
-    if (work) request.emit(piEvent(request.runId, {
+    if (!work) return
+    diagnose()
+    request.emit(piEvent(request.runId, {
       kind: 'harness', stage: 'runtime:background_work', backgroundWork: work,
       runtimeMetadata: { source: 'pi_subagents_async_status_v1' }
     }))
@@ -179,6 +195,14 @@ export async function runPiAgent(
     toolStarts
   }
   const off = attachPiEventHandlers(eventContext)
+  // Observe after canonical handlers so the snapshot includes their effective state.
+  const offDiagnostic = rpc.onEvent(event => {
+    if (event.type === 'agent_start' || event.type === 'agent_end' || event.type === 'agent_settled') {
+      lastNativeLifecycle = event.type
+      lastNativeLifecycleAt = new Date().toISOString()
+      diagnose()
+    }
+  })
   const uncertainSteer = (message: string): AgentSteerResult => {
     state.steerAdmissionUncertain = true
     return { status: 'unknown', message }
@@ -255,6 +279,7 @@ export async function runPiAgent(
       request,
       state,
       rpc,
+      diagnose,
       usage,
       get launchShellEnvError() { return launchShellEnvError },
       get agentSettled() { return agentSettled },
@@ -302,6 +327,8 @@ export async function runPiAgent(
         : '检查该轮 Pi Provider 结果、launcher 与 stderr 后重试'
     })
   } finally {
+    diagnose('rpc_cleanup')
+    offDiagnostic()
     off()
     offFailure()
     emitBackground(background.end())

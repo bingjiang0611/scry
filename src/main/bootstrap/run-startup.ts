@@ -7,6 +7,7 @@ import type { BackgroundTaskStopResult } from '../../shared/background-work'
 import type { ProviderRunHandle } from '../providers/types'
 import type { GitTurnDiffCapture } from '../git'
 import type { ProviderRegistry } from '../providers/registry'
+import type { PiRunDiagnostics } from '../providers/pi-run-diagnostics'
 import type { ConversationStore, NativeSessionScope } from '../conversation-store'
 import type { ManagedConversationStart } from '../conversation-service'
 import type { PreparedAttachment } from '../attachment-store'
@@ -34,6 +35,7 @@ export interface RunControl {
   cleanupProvisional: () => void; finalizeTurnDiff: () => Promise<void>; cancelTurnDiff: () => Promise<void>; settled: Promise<void>
 }
 export type RunStartupDeps = {
+  piRunDiagnostics: PiRunDiagnostics
   options: AppRunStartOptions; providerId: ProviderId; runtimeProvider: RuntimeProvider; providerRegistry: ProviderRegistry
   adapter: ReturnType<ProviderRegistry['get']>; request: NormalizedAgentStartRequest; runtimePrompt: string
   managedConversation?: ManagedConversationStart; runId: string; cwd: string | undefined; agentProfileId?: string; resume?: string
@@ -70,6 +72,7 @@ export async function startRunProviderAndRegister(deps: RunStartupDeps) {
     providerId,
     runtimeProvider,
     providerRegistry,
+    piRunDiagnostics,
     adapter,
     request,
     runtimePrompt,
@@ -143,7 +146,7 @@ export async function startRunProviderAndRegister(deps: RunStartupDeps) {
   if (options.stopSignal && !options.stopSignal.aborted) options.stopSignal.addEventListener('abort', requestRemoteStop)
   let observedProviderStartedAt: string | undefined
   const runProvider = createRunProvider({
-    providerId, runtimeProvider, providerRegistry, adapter, request, runtimePrompt, managedConversation, runId, cwd, agentProfileId, resume, attachments, codexHookTrust, openCodePluginTrust, managedRecorderEnabled, managedInputTextHash, displayPrompt, eventLog, handle, steering, interrupted: () => interrupted, requestStop, stopLatch, stopSignal: options.stopSignal, requestUserInput: async (request, signal) => isRemoteRun && options.requestUserInput ? options.requestUserInput(request, signal) : userQuestionBroker.request(request, signal), publishSessionId, emit, runState, ingestion, firstTracePerf, firstTextPerf, mainEventId, userQuestionBroker, isRemoteRun, permissionModeOverride: options.permissionModeOverride, mcpExecutionSnapshot, conversationStore: conversationStore(), catalogCwd, assertLegacyConversationWriteAllowed: (scope) => assertLegacyConversationWriteAllowed(scope as NativeSessionScope), authorizeMcpExecution: (snapshot) => authorizedMcpExecution(snapshot as McpExecutionSnapshot | null), publishQuestionOpened, publishQuestionClosed, setProviderStartedAt: (value) => { observedProviderStartedAt = value }
+    providerId, runtimeProvider, providerRegistry, piRunDiagnostics, adapter, request, runtimePrompt, managedConversation, runId, cwd, agentProfileId, resume, attachments, codexHookTrust, openCodePluginTrust, managedRecorderEnabled, managedInputTextHash, displayPrompt, eventLog, handle, steering, interrupted: () => interrupted, requestStop, stopLatch, stopSignal: options.stopSignal, requestUserInput: async (request, signal) => isRemoteRun && options.requestUserInput ? options.requestUserInput(request, signal) : userQuestionBroker.request(request, signal), publishSessionId, emit, runState, ingestion, firstTracePerf, firstTextPerf, mainEventId, userQuestionBroker, isRemoteRun, permissionModeOverride: options.permissionModeOverride, mcpExecutionSnapshot, conversationStore: conversationStore(), catalogCwd, assertLegacyConversationWriteAllowed: (scope) => assertLegacyConversationWriteAllowed(scope as NativeSessionScope), authorizeMcpExecution: (snapshot) => authorizedMcpExecution(snapshot as McpExecutionSnapshot | null), publishQuestionOpened, publishQuestionClosed, setProviderStartedAt: (value) => { observedProviderStartedAt = value }
   })
 
   let resolveSettled: (() => void) | undefined
@@ -182,6 +185,7 @@ export async function startRunProviderAndRegister(deps: RunStartupDeps) {
     cancelTurnDiff,
     settled
   }
+  if (providerId === 'pi') piRunDiagnostics.record(runId, 'main_registration')
   try {
     if (isRemoteRun) {
       remoteRunIds.add(runId)
@@ -196,6 +200,7 @@ export async function startRunProviderAndRegister(deps: RunStartupDeps) {
       await Promise.all([turnDiffCapture, sessionBaselineReady])
       await options.workspaceAdmission.admit(register)
     } else await sourceControl.admitRun(cwd, register)
+    if (providerId === 'pi') piRunDiagnostics.record(runId, 'main_registered')
   } catch (error) {
     if (isRemoteRun) {
       remoteRunIds.delete(runId)

@@ -4,6 +4,7 @@ import type { ActiveRun, TraceEvent } from '../../shared/trace'
 import type { ProviderId } from '../../shared/provider'
 import type { ProviderRunHandle } from '../providers/types'
 import type { ProviderRegistry } from '../providers/registry'
+import type { PiRunDiagnostics } from '../providers/pi-run-diagnostics'
 import type { ProviderOperationGate } from '../provider-operation-gate'
 import type { ContextAdmission } from '../context-admission'
 import type { ConversationStore, NativeSessionScope } from '../conversation-store'
@@ -34,6 +35,7 @@ import type { RunControl } from './run-control'
 
 type RunHost = {
   providerRegistry: ProviderRegistry
+  piRunDiagnostics: PiRunDiagnostics
   isShuttingDown: () => boolean
   getCurrentCwd: () => string | undefined
   getWindow: () => BrowserWindow | null
@@ -130,6 +132,7 @@ export async function startRun(
         displayPrompt, runtimePrompt, runState, persistRunData, cleanupProvisional, notifyDiffChangeRef,
         ingestion, emit, persistLlmPerformance, turnDiffCapture, patchExcludeBasenames,
         sessionBaselineReady, sessionBaselineOrigin, sessionBaselineCapture, releaseSessionBaseline } = liveRunState
+      if (providerId === 'pi') host.piRunDiagnostics.record(runId, 'main_preparing', { mainDone: false, mainSettled: false })
       const diffPreviewer = new RunDiffPreviewer({
         runId,
         turnCapture: cwd ? turnDiffCapture : null,
@@ -199,6 +202,7 @@ export async function startRun(
         providerId,
         runtimeProvider,
         providerRegistry,
+        piRunDiagnostics: host.piRunDiagnostics,
         adapter,
         request,
         runtimePrompt,
@@ -353,6 +357,7 @@ export async function startRun(
         })
         .finally(async () => {
           try {
+            if (providerId === 'pi') host.piRunDiagnostics.record(runId, 'main_settlement', { mainDone: runState.done })
             await settleManagedConversation(runTerminalState.terminalStatus ?? (runtimeStartup.getInterrupted() ? 'interrupted' : 'failed'))
             options.stopSignal?.removeEventListener('abort', requestRemoteStop)
             runState.providerSettled = true
@@ -363,6 +368,7 @@ export async function startRun(
             runs.remove(runId)
             releaseSessionBaseline?.()
             resolveSettled?.()
+            if (providerId === 'pi') host.piRunDiagnostics.record(runId, 'main_settled', { mainDone: runState.done, mainSettled: true })
             void eventLog?.close()
           } finally {
             if (isRemoteRun) {

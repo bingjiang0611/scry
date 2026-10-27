@@ -1,6 +1,7 @@
 import type { AgentSteerInput, AgentSteerResult } from '../../shared/runtime'
 import type { JsonRecord } from './pi-shared'
 import type { PiRpcProcess } from './pi-rpc'
+import type { PiRunDiagnostics } from './pi-run-diagnostics'
 
 export interface PiProbe {
   state: JsonRecord
@@ -17,6 +18,7 @@ export interface PiEntrySnapshot {
 
 export interface PiRunState {
   stopped: boolean
+  diagnostics?: PiRunDiagnostics
   sessionId?: string
   sessionFile?: string
   persistedSessionId?: string

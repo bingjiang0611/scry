@@ -5,6 +5,7 @@ import { chmodSync, mkdtempSync, statSync, watch } from 'node:fs'
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { sanitizeMcpAuthError } from '../providers/mcp-auth-security'
 import { connect as tlsConnect, type ConnectionOptions, type TLSSocket } from 'node:tls'
 import {
   BasicConstraintsExtension,
@@ -167,11 +168,15 @@ async function removePrivateDirectory(directory: string): Promise<void> {
   await fs.rm(directory, { recursive: true, force: true })
 }
 
-async function waitForTunnelReady(child: ChildProcess, directory: string, pairPath: string, runPath: string): Promise<void> {
+async function waitForTunnelReady(child: ChildProcess, directory: string, pairPath: string, runPath: string, stderr: () => string): Promise<void> {
+  const failure = (reason: string): Error => {
+    const diagnostic = sanitizeMcpAuthError(stderr()).trim()
+    return new Error(diagnostic ? `${reason}: ${diagnostic}` : reason)
+  }
   await new Promise<void>((resolve, reject) => {
     let spawned = false
     let settled = false
-    const timer = setTimeout(() => finish(new Error('ssh_tunnel_ready_timeout')), MAX_TUNNEL_READY_MS)
+    const timer = setTimeout(() => finish(failure('ssh_tunnel_ready_timeout')), MAX_TUNNEL_READY_MS)
     const directoryWatcher = watch(directory, { persistent: false }, () => check())
     const finish = (error?: Error): void => {
       if (settled) return
@@ -180,7 +185,7 @@ async function waitForTunnelReady(child: ChildProcess, directory: string, pairPa
       directoryWatcher.close()
       child.off('spawn', onSpawn)
       child.off('error', onError)
-      child.off('exit', onExit)
+      child.off('close', onClose)
       if (error) reject(error)
       else resolve()
     }
@@ -189,10 +194,11 @@ async function waitForTunnelReady(child: ChildProcess, directory: string, pairPa
     }
     const onSpawn = (): void => { spawned = true; check() }
     const onError = (error: Error): void => finish(error)
-    const onExit = (code: number | null, signal: NodeJS.Signals | null): void => finish(new Error(`ssh_tunnel_exited:${code ?? signal ?? 'unknown'}`))
+    // close follows stderr EOF; exit can precede the last diagnostic chunk.
+    const onClose = (code: number | null, signal: NodeJS.Signals | null): void => finish(failure(`ssh_tunnel_exited:${code ?? signal ?? 'unknown'}`))
     child.once('spawn', onSpawn)
     child.once('error', onError)
-    child.once('exit', onExit)
+    child.once('close', onClose)
     check()
   })
 }
@@ -206,11 +212,18 @@ export async function openDesktopSshTunnel(options: DesktopSshTunnelOptions): Pr
   let child: ChildProcess | undefined
   let closed = false
   try {
-    child = spawn(SSH_PATH, sshArguments(validated, pairPath, runPath), { stdio: ['ignore', 'ignore', 'ignore'] })
+    child = spawn(SSH_PATH, sshArguments(validated, pairPath, runPath), { stdio: ['ignore', 'ignore', 'pipe'] })
+    let stderr = ''
+    child.stderr!.setEncoding('utf8')
+    child.stderr!.on('data', (chunk: string) => {
+      // Drain continuously, including after readiness, without retaining banners
+      // or diagnostics beyond this bounded tail. Never persist raw SSH stderr.
+      stderr = `${stderr}${chunk}`.slice(-8_192)
+    })
     // An error listener is required even after readiness: a failed owned child
     // must not become an uncaught EventEmitter error before close() is called.
     child.on('error', () => {})
-    await waitForTunnelReady(child, directory, pairPath, runPath)
+    await waitForTunnelReady(child, directory, pairPath, runPath, () => stderr)
     const close = async (): Promise<void> => {
       if (closed) return
       closed = true

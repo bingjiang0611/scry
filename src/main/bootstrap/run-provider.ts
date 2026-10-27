@@ -10,6 +10,7 @@ import type { ManagedConversationStart } from '../conversation-service'
 import type { ConversationStore, NativeSessionScope } from '../conversation-store'
 import type { McpExecutionSnapshot } from '../mcp-execution-trust'
 import type { ProviderRegistry } from '../providers/registry'
+import type { PiRunDiagnostics } from '../providers/pi-run-diagnostics'
 import type { RunSteering } from '../run-steering'
 import type { UserQuestionBroker } from '../user-question'
 import type { LiveTraceIngestion } from '../live-trace-ingestion'
@@ -19,6 +20,7 @@ export interface RunProviderBootstrapDependencies {
   providerId: ProviderId
   runtimeProvider: RuntimeProvider
   providerRegistry: ProviderRegistry
+  piRunDiagnostics: PiRunDiagnostics
   adapter: { historicalContext?: boolean }
   request: AgentStartRequest
   runtimePrompt: string
@@ -66,6 +68,7 @@ export function createRunProvider(deps: RunProviderBootstrapDependencies): () =>
     providerId,
     runtimeProvider,
     providerRegistry,
+    piRunDiagnostics,
     adapter,
     request,
     runtimePrompt,
@@ -229,6 +232,7 @@ export function createRunProvider(deps: RunProviderBootstrapDependencies): () =>
     let result: Awaited<ProviderRunHandle['promise']>
     try {
       try { result = await handle.current!.promise } finally {
+        if (providerId === 'pi') piRunDiagnostics.record(runId, 'main_finalization')
         steering.close()
         await steering.idle()
       }

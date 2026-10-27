@@ -5,9 +5,11 @@ import { ProviderCompatibilityStore } from '../provider-compatibility-manifest'
 import { createBuiltInProviderAdapters } from '../providers'
 import { createSmokeProviderAdapter } from '../providers/smoke'
 import type { PiAgentProfile } from '../pi-agent-profiles'
+import { PiRunDiagnostics } from '../providers/pi-run-diagnostics'
 
 export function createProviderRuntime(deps: { homeDir: string; listPiProfiles: () => Promise<PiAgentProfile[]>; resolvePiProfile: (id: string) => Promise<PiAgentProfile | undefined> }) {
   const { homeDir, listPiProfiles, resolvePiProfile } = deps
+  const piRunDiagnostics = new PiRunDiagnostics(join(app.getPath('userData'), 'pi-run-diagnostics.json'))
   const smokeProviderEnabled = process.env.SCRY_ELECTRON_SMOKE_PROVIDER === '1' &&
     process.env.ELECTRON_ENABLE_LOGGING === '1' &&
     process.argv.some((arg) => arg.startsWith('--remote-debugging-port='))
@@ -22,7 +24,7 @@ export function createProviderRuntime(deps: { homeDir: string; listPiProfiles: (
     join(app.getPath('userData'), 'provider-auth', 'opencode'),
     join(app.getPath('userData'), 'provider-state', 'opencode-v1'),
     {
-      listProfiles: listPiProfiles, resolveProfile: resolvePiProfile,
+      listProfiles: listPiProfiles, resolveProfile: resolvePiProfile, diagnostics: piRunDiagnostics,
       historyExtensionPath: join(app.isPackaged ? process.resourcesPath : join(app.getAppPath(), 'resources'), 'scry-history', 'pi-history-reader.mjs')
     }
   )
@@ -46,5 +48,5 @@ export function createProviderRuntime(deps: { homeDir: string; listPiProfiles: (
     }
   )
 
-  return { builtInProviderAdapters, providerCompatibility, providerRegistry, smokeProviderEnabled, smokeDetectedAgents }
+  return { builtInProviderAdapters, providerCompatibility, providerRegistry, piRunDiagnostics, smokeProviderEnabled, smokeDetectedAgents }
 }

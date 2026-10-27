@@ -4,6 +4,7 @@ import { createCodexAdapter } from './codex'
 import { createQoderAdapter } from './qoder'
 import { createOpenCodeAdapter } from './opencode'
 import { createPiAdapter } from './pi'
+import type { PiRunDiagnostics } from './pi-run-diagnostics'
 import type { PiAgentProfile } from '../pi-agent-profiles'
 
 export function createBuiltInProviderAdapters(
@@ -15,6 +16,7 @@ export function createBuiltInProviderAdapters(
     listProfiles: () => Promise<PiAgentProfile[]>
     resolveProfile: (id: string) => Promise<PiAgentProfile | undefined>
     historyExtensionPath?: string
+    diagnostics?: PiRunDiagnostics
   }
 ): ProviderAdapter[] {
   return [

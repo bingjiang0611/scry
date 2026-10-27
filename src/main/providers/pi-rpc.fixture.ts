@@ -48,6 +48,10 @@ const send = (value) => process.stdout.write(JSON.stringify(value) + '\\n')
 require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
   const command = JSON.parse(line)
   fs.appendFileSync(process.cwd() + '/commands', command.type + '\\n')
+  if (fs.existsSync(process.cwd() + '/hold-' + command.type)) {
+    send({ type: 'extension_ui_request', method: 'setStatus', statusKey: 'checkpoint', text: 'held RPC checkpoint' })
+    return
+  }
   const fail = fs.existsSync(process.cwd() + '/fail-probe')
   const data = {
     get_state: {

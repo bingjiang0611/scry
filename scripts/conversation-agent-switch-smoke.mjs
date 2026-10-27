@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 const json = JSON.stringify
 
@@ -63,6 +64,22 @@ export async function exercisePiAgentSwitch({ cdp, evaluate, fixture, click, wai
   assert.equal(calls[3].resume, calls[1].sessionId)
   assert.equal(calls[4].resume, calls[2].sessionId, 'managed Pi context survives A→B→A')
   assert.equal(calls[4].agentProfileId, profile)
+  const diagnosticPath = join(fixture.userData, 'pi-run-diagnostics.json')
+  const piRunIds = calls.filter(call => call.providerId === 'pi').map(call => call.runId)
+  const diagnostics = await wait(() => {
+    if (!existsSync(diagnosticPath)) return false
+    const snapshot = JSON.parse(readFileSync(diagnosticPath, 'utf8'))
+    return piRunIds.every(runId => snapshot.runs.some(run =>
+      run.runId === runId && run.phase === 'main_settled' && run.mainDone && run.mainSettled)) && snapshot
+  }, 'Pi diagnostic snapshots follow production main settlement')
+  assert.equal(diagnostics.coverage, 'partial')
+  for (const runId of piRunIds) {
+    const phases = diagnostics.runs.find(run => run.runId === runId).history.map(entry => entry.phase)
+    assert.ok(phases.includes('main_finalization'))
+    assert.ok(phases.includes('main_settlement'))
+  }
+  assert.ok(!JSON.stringify(diagnostics).includes('desktop remote pi source'))
+  assert.ok(!JSON.stringify(diagnostics).includes(fixture.workspace))
   assert.deepEqual(ledger(fixture, id).turns[4].importedItems.map(item => item.runId), [page.turns[3].runId, page.turns[3].runId])
   return { id, profile, calls: calls.length, runIds: page.turns.map(turn => turn.runId) }
 }

@@ -1,5 +1,6 @@
 import 'reflect-metadata'
 import { EventEmitter } from 'node:events'
+import { PassThrough } from 'node:stream'
 import { createHash, randomUUID } from 'node:crypto'
 import { createServer as createNetServer, type Server as NetServer } from 'node:net'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
@@ -15,6 +16,7 @@ import { ensureHostIdentity, type HostIdentity } from './host-identity'
 import { desktopTlsRequest, generateDesktopDeviceIdentity, openDesktopSshTunnel } from './desktop-transport'
 
 type FakeChild = EventEmitter & {
+  stderr: PassThrough
   exitCode: number | null
   signalCode: NodeJS.Signals | null
   kill: (signal?: NodeJS.Signals) => boolean
@@ -127,11 +129,13 @@ describe('desktop transport', () => {
     let child: FakeChild | undefined
     let socketServers: NetServer[] = []
     spawnMock.mockImplementation((_program: string, args: string[]) => {
-      child = Object.assign(new EventEmitter(), { exitCode: null, signalCode: null }) as FakeChild
+      child = Object.assign(new EventEmitter(), { exitCode: null, signalCode: null, stderr: new PassThrough() }) as FakeChild
       child.kill = () => {
         child!.signalCode = 'SIGTERM'
         for (const server of socketServers) server.close()
+        child!.stderr.end()
         child!.emit('exit', null, 'SIGTERM')
+        child!.emit('close', null, 'SIGTERM')
         return true
       }
       const forwards = args.reduce<string[]>((all, value, index) => value === '-L' ? [...all, args[index + 1]] : all, [])
@@ -145,6 +149,7 @@ describe('desktop transport', () => {
     })
     const tunnel = await openDesktopSshTunnel({ username: 'alice', hostname: 'host.example', port: 22, pairPort: 41001, runPort: 41002 })
     expect(spawnMock).toHaveBeenCalledTimes(1)
+    expect(spawnMock.mock.calls[0][2]).toEqual({ stdio: ['ignore', 'ignore', 'pipe'] })
     const [program, args] = spawnMock.mock.calls[0] as [string, string[]]
     expect(program).toBe('/usr/bin/ssh')
     expect(args).toEqual(expect.arrayContaining(['-F', '/dev/null', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ForwardAgent=no', '-o', 'ControlMaster=no', '-o', 'ExitOnForwardFailure=yes', '-p', '22', '-N', '-T']))
@@ -155,6 +160,35 @@ describe('desktop transport', () => {
     child!.kill()
     expect(tunnel.alive).toBe(false)
     await tunnel.close()
+    expect(existsSync(directory)).toBe(false)
+  })
+
+  it.each([
+    ['ssh: connect to host host.example port 22: No route to host\n', 'No route to host'],
+    ['x'.repeat(100_000) + '\nTOKEN=private-token\nAuthorization: Bearer private-bearer\nPermission denied (publickey).\n', 'Permission denied']
+  ])('reports bounded, redacted stderr arriving after SSH exit', async (stderr, reason) => {
+    let directory = ''
+    spawnMock.mockImplementation((_program: string, args: string[]) => {
+      const pairPath = args[args.indexOf('-L') + 1].split(':127.0.0.1:')[0]
+      directory = join(pairPath, '..')
+      const child = Object.assign(new EventEmitter(), {
+        exitCode: null as number | null, signalCode: null, stderr: new PassThrough(), kill: vi.fn()
+      })
+      queueMicrotask(() => {
+        child.exitCode = 255
+        child.emit('exit', 255, null)
+        child.stderr.end(stderr)
+        child.emit('close', 255, null)
+      })
+      return child
+    })
+    const error = await openDesktopSshTunnel({ username: 'alice', hostname: 'host.example', port: 22, pairPort: 41001, runPort: 41002 })
+      .then(() => { throw new Error('unexpected tunnel success') }, (error: unknown) => error as Error)
+    expect(error.message).toContain('ssh_tunnel_exited:255')
+    expect(error.message).toContain(reason)
+    expect(error.message).not.toContain('private-token')
+    expect(error.message).not.toContain('private-bearer')
+    expect(error.message.length).toBeLessThanOrEqual(2_024)
     expect(existsSync(directory)).toBe(false)
   })
 })
