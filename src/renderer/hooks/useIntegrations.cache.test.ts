@@ -3,7 +3,9 @@ import type { CapabilityEnvelope } from '@shared/provider'
 import type { AgentRunControlCatalog } from '@shared/runtime'
 import {
   isAuthoritativeRunControlCatalog,
+  lastKnownRunControlCatalog,
   parseRunControlCatalogCache,
+  resolveRunControlDisplay,
   retainCachedRunControlCatalog,
   runControlSendBlockedReason,
   serializeRunControlCatalogCache,
@@ -115,6 +117,88 @@ describe('模型目录跨进程缓存', () => {
       false,
       { model: { id: 'ultimate' }, permissionMode: 'default' }
     )).toBeNull()
+  })
+
+  it('切换会话时不把 Pi 的发送界面退回占位权限', () => {
+    const piCatalog: AgentRunControlCatalog = {
+      models: [{ model: { id: 'claude-sonnet-4', providerId: 'anthropic' }, label: 'Sonnet', efforts: [] }],
+      permissions: [{ id: 'full_access', label: '本机完全访问', description: 'Pi 没有内置沙箱' }]
+    }
+    const catalogFor = (cwd: string, observedAt: number, agentProfileId = 'pi:default') => ({
+      providerId: 'pi' as const,
+      agentProfileId,
+      cwd,
+      mode: 'read' as const,
+      state: 'ready' as const,
+      data: piCatalog,
+      observedAt
+    })
+    const catalogs = new Map([
+      ['pi\u0000pi:default\u0000/older', catalogFor('/older', now - 9_000)],
+      ['pi\u0000pi:default\u0000/repo', catalogFor('/repo', now - 1_000)],
+      ['pi\u0000pi:0123456789abcdef\u0000/repo', catalogFor('/repo', now, 'pi:0123456789abcdef')]
+    ])
+
+    const seeded = lastKnownRunControlCatalog(catalogs, {
+      providerId: 'pi', agentProfileId: 'pi:default', cwd: '/another-session'
+    })
+
+    // 目录内容与 cwd 无关时才复用；来源时间与正在复核仍然显式存在。
+    expect(seeded?.state).toBe('unknown')
+    expect(seeded?.cwd).toBe('/repo')
+    expect(seeded?.data).toBe(piCatalog)
+    expect(seeded?.reason).toContain('最后已知模型目录')
+    expect(runControlSendBlockedReason('pi', seeded!, false, { permissionMode: 'full_access' })).toBeNull()
+    // 没有最后已知目录时仍然 fail closed，不用占位权限抢发。
+    expect(runControlSendBlockedReason('pi', null, true, { permissionMode: 'full_access' })).toBe(
+      '运行权限能力尚未确认，暂不能发送'
+    )
+    expect(lastKnownRunControlCatalog(catalogs, {
+      providerId: 'pi', agentProfileId: 'pi:missing', cwd: '/repo'
+    })).toBeUndefined()
+    // 目录可能按 cwd 返回模型（例如 OpenCode 按 directory 请求），不在跨目录范围内复用。
+    expect(lastKnownRunControlCatalog(new Map([
+      ['opencode\u0000\u0000/repo', { ...catalogFor('/repo', now), providerId: 'opencode' as const }]
+    ]), { providerId: 'opencode', cwd: '/other' })).toBeUndefined()
+  })
+
+  it('切换会话时直接显示最后已知权限与模型，且不以占位选择覆盖已保存偏好', () => {
+    const piCatalog: AgentRunControlCatalog = {
+      models: [{ model: { id: 'claude-sonnet-4' }, label: 'Sonnet', efforts: [{ id: 'high', label: 'High' }] }],
+      permissions: [{ id: 'full_access', label: '本机完全访问', description: 'Pi 没有内置沙箱' }]
+    }
+    const catalogs = new Map<string, CapabilityEnvelope<AgentRunControlCatalog>>([
+      ['pi\u0000pi:default\u0000/repo', {
+        providerId: 'pi', agentProfileId: 'pi:default', cwd: '/repo', mode: 'read',
+        state: 'ready', data: piCatalog, observedAt: now - 1_000
+      }]
+    ])
+    const stored = { model: { id: 'claude-sonnet-4' }, effort: 'high', permissionMode: 'full_access' as const }
+
+    const switched = resolveRunControlDisplay(catalogs, {
+      providerId: 'pi', agentProfileId: 'pi:default', cwd: '/other-session'
+    }, stored)
+    expect(switched.capability?.state).toBe('unknown')
+    expect(switched.controls).toEqual(stored)
+    expect(switched.loading).toBe(false)
+    expect(switched.persistSelection).toBe(false)
+    expect(runControlSendBlockedReason('pi', switched.capability, switched.loading, switched.controls)).toBeNull()
+
+    const sameContext = resolveRunControlDisplay(catalogs, {
+      providerId: 'pi', agentProfileId: 'pi:default', cwd: '/repo'
+    }, stored)
+    expect(sameContext.capability?.state).toBe('ready')
+    expect(sameContext.persistSelection).toBe(true)
+
+    // 从没读过目录时仍然用占位目录并阻断发送，不猜测 Provider 能力。
+    const cold = resolveRunControlDisplay(new Map(), { providerId: 'pi', agentProfileId: 'pi:default', cwd: '/repo' }, stored)
+    expect(cold.capability).toBeNull()
+    expect(cold.loading).toBe(true)
+    // 从未读过目录时只能显示占位目录；此时仍 fail closed，不猜测 Provider 能力。
+    expect(cold.controls.permissionMode).toBe('default')
+    expect(runControlSendBlockedReason('pi', cold.capability, cold.loading, cold.controls)).toBe(
+      '运行权限能力尚未确认，暂不能发送'
+    )
   })
 
   it('非权威刷新结果不覆盖已知目录，权威结果才替换', () => {

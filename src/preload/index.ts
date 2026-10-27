@@ -240,6 +240,8 @@ const api = {
   stats: (): Promise<DbStats> => ipcRenderer.invoke('agent:stats'),
   usageAnalytics: (rangeDays: UsageAnalyticsRangeDays): Promise<UsageAnalytics> =>
     ipcRenderer.invoke('agent:usageAnalytics', rangeDays),
+  usageCredits: (rangeDays: UsageAnalyticsRangeDays): Promise<UsageAnalytics> =>
+    ipcRenderer.invoke('agent:usageCredits', rangeDays),
   llmPerformanceHistory: (): Promise<LlmPerformanceHistory> =>
     ipcRenderer.invoke('agent:llmPerformanceHistory'),
   llmPerformanceSummary: (): Promise<LlmPerformanceSummary> =>

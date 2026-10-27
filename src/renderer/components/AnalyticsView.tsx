@@ -10,13 +10,14 @@ export interface AnalyticsViewProps {
   analytics: UsageAnalytics | null
   rangeDays: UsageAnalyticsRangeDays
   loading: boolean
+  creditsPending?: boolean
   error: string | null
   onRangeChange: (rangeDays: UsageAnalyticsRangeDays) => void
   onRefresh: () => void
   onBack?: () => void
 }
 
-export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeChange, onRefresh, onBack }: AnalyticsViewProps) {
+export function AnalyticsView({ analytics, rangeDays, loading, creditsPending = false, error, onRangeChange, onRefresh, onBack }: AnalyticsViewProps) {
   const [chartMetric, setChartMetric] = useState<ChartMetric>('cost')
   const [breakdownMode, setBreakdownMode] = useState<BreakdownMode>('model')
   const breakdownMotion = useFirstReadyList(Boolean(analytics?.status === 'ready'))
@@ -43,7 +44,7 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
   const qoderOnly = providers.length > 0 && providers.every((row) => row.provider === 'qoder')
   const chartProviders = providers.filter((row) => metricValue(row, chartMetric) != null)
   const rows = breakdownMode === 'model' ? modelBreakdownRows(analytics) : analytics.byDay.filter((row) => row.costUsd != null).reverse()
-  const totalEvidence = copy.totalEvidence(displayCostEvidence(totals), totals.turns)
+  const totalEvidence = copy.totalEvidence(displayCostEvidence(totals, undefined, creditsPending), totals.turns)
   const metrics = [
     { label: copy.processedTokens, value: formatAggregateTokens(totals), evidence: tokenEvidence(totals) },
     { label: copy.cacheRead, value: formatKnownTokens(totals.cacheReadTokens), evidence: copy.tokenCoverage(totals.cacheReadKnownRows, totals.usageRows) },
@@ -138,7 +139,7 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
                     <ProviderMark provider={row.provider} />
                     <b>{providerLabel(row.provider)}</b>
                     <span className="usage-provider-share">{formatShare(row.costUsd, totals.costUsd)}</span>
-                    <strong title={copy.providerEvidence(displayCostEvidence(row, row.provider), formatAggregateTokens(row), tokenEvidence(row))}>{formatCost(row.costUsd)}</strong>
+                    <strong title={copy.providerEvidence(displayCostEvidence(row, row.provider, creditsPending), formatAggregateTokens(row), tokenEvidence(row))}>{formatCost(row.costUsd)}</strong>
                   </div>
                 </div>
               ))}
@@ -187,7 +188,7 @@ export function AnalyticsView({ analytics, rangeDays, loading, error, onRangeCha
                           <b title={label}>{label}</b>
                         </span>
                       </th>
-                      <td title={displayCostEvidence(row, rowProvider)} className={isApproximateCost(row) ? 'is-approximate' : undefined}>{formatCost(row.costUsd)}</td>
+                      <td title={displayCostEvidence(row, rowProvider, creditsPending)} className={isApproximateCost(row) ? 'is-approximate' : undefined}>{formatCost(row.costUsd)}</td>
                       <td>{totals.costUsd != null && totals.costUsd > 0 ? formatShare(row.costUsd, totals.costUsd) : null}</td>
                       <td title={tokenEvidence(row)} className={!tokenComplete(row) && row.usageRows > 0 ? 'is-lower-bound' : undefined}>{tokensOf(row) != null ? formatAggregateTokens(row) : null}</td>
                     </tr>

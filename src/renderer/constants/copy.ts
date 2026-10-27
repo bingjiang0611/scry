@@ -46,6 +46,7 @@ export const ANALYTICS_COPY = {
   periodDisplay: (from: string, to: string) => `${from} – ${to}`,
   refresh: '刷新分析数据',
   loading: '正在读取本机用量账本…',
+  creditsPending: '正在计算 Credit；当前只显示用量账本记录',
   unavailable: '用量分析暂不可用',
   databaseUnavailable: 'SQLite 尚未初始化，Scry 其他功能不受影响。',
   retry: '重试',

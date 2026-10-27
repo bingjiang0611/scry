@@ -2,7 +2,7 @@ import { app, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import type { ActiveRun, UsageAnalyticsRangeDays } from '../../shared/trace'
 import type { AgentQuestionResponse, AgentStartRequest, AgentStartResult } from '../../shared/runtime'
 import { summarizeRunningLlmSessions } from '../../shared/llm-performance'
-import { billingStateQuery, importBillingFixture, statsQuery, syncBillingAdmin, usageAnalyticsWithCreditsQuery } from '../db'
+import { billingStateQuery, importBillingFixture, statsQuery, syncBillingAdmin, usageAnalyticsQuery, usageAnalyticsWithCreditsQuery } from '../db'
 import { warmShellEnv } from '../claude-locate'
 import { readLlmPerformanceHistory } from '../llm-performance-history'
 import { stopObservedBackgroundTask } from '../background-task-control'
@@ -96,10 +96,14 @@ export function registerAgentRuntimeHandlers({
   handleTrusted('agent:llmPerformanceHistory', () => readLlmPerformanceHistory(app.getPath('userData')))
   handleTrusted('agent:llmPerformanceSummary', () => summarizeRunningLlmSessions(runs.activeStates()))
 
-  handleTrusted('agent:usageAnalytics', (_event, rangeDays: unknown) => {
+  // 两段返回：SQLite 账本先回到页面（毫秒级），Credit 投影需要读原生 transcript，
+  // 单次可达数秒，由 renderer 后取后刷新，不阻塞首屏。
+  const usageRange = (rangeDays: unknown): UsageAnalyticsRangeDays => {
     if (rangeDays !== 7 && rangeDays !== 30 && rangeDays !== 90) throw new Error('分析时间范围无效')
-    return usageAnalyticsWithCreditsQuery(rangeDays as UsageAnalyticsRangeDays)
-  })
+    return rangeDays
+  }
+  handleTrusted('agent:usageAnalytics', (_event, rangeDays: unknown) => usageAnalyticsQuery(usageRange(rangeDays)))
+  handleTrusted('agent:usageCredits', (_event, rangeDays: unknown) => usageAnalyticsWithCreditsQuery(usageRange(rangeDays)))
   handleTrusted('agent:billingState', async () => {
     await warmShellEnv()
     return billingStateQuery()

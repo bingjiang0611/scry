@@ -293,6 +293,7 @@
         "ipc.agent:stats",
         "ipc.agent:usageStats",
         "ipc.agent:usageAnalytics",
+        "ipc.agent:usageCredits",
         "ipc.agent:billingState",
         "ipc.agent:importBillingFixture",
         "ipc.agent:syncBillingAdmin",
