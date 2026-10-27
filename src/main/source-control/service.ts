@@ -15,7 +15,7 @@ import type {
 } from '../../shared/source-control'
 import { githubRepositoryFromUrl } from '../../shared/source-control'
 import type { WorkspaceChoices, WorkspaceChoicesRequest, WorkspaceStartStatus } from '../../shared/workspace-selection'
-import { inspectWorkspaceStart, startWorkspace, type StartPreparedWorkspace, type WorkspaceStartDependencies, type WorkspaceStartRequest } from './workspace-start'
+import { inspectWorkspaceStart, startWorkspace, type StartPreparedWorkspace, type WorkspaceBusyScope, type WorkspaceStartDependencies, type WorkspaceStartRequest } from './workspace-start'
 import { readWorkspaceChoices, validateWorkspaceBranch } from './workspace-choices'
 import { ScGit, isNotRepository, type GitIdentity } from './git'
 import { ScGithub, type GithubSession } from './github'
@@ -62,12 +62,15 @@ export class SourceControlService {
     return identity
   }
 
-  private async busy(commonDir: string, root?: string): Promise<boolean> {
+  private async busy(commonDir: string, scope: WorkspaceBusyScope): Promise<boolean> {
     for (const cwd of this.options.unsettledDirectories()) {
-      if (!cwd) return true // Provider-specific default cwd is not a proved repository identity.
+      // A Provider-specific default cwd is not a proved repository identity, so it stays
+      // conservative for every scope, including a create that touches no checkout.
+      if (!cwd) return true
       try {
         const active = await this.git.identity(cwd)
-        if (active.commonDir === commonDir && (!root || active.root === root)) return true
+        if (active.commonDir !== commonDir) continue
+        if (scope.kind === 'repository' || (scope.kind === 'root' && active.root === scope.root)) return true
       } catch (error) {
         if (!isNotRepository(error)) throw error
       }
@@ -136,7 +139,7 @@ export class SourceControlService {
         snapshot.writeBlocker ??
         (unknown
           ? '有尚未核查的操作，请先查看操作记录'
-          : (await this.busy(identity.commonDir))
+          : (await this.busy(identity.commonDir, { kind: 'repository' }))
             ? '同一仓库的 Agent 尚未完全结束；允许查看，暂不执行 Git 写入'
             : null)
       return { status: 'available', data: snapshot }
@@ -192,7 +195,7 @@ export class SourceControlService {
   private workspaceDependencies(identity: GitIdentity): WorkspaceStartDependencies {
     return {
       git: this.git, store: this.store, userData: this.options.userData,
-      busy: root => this.busy(identity.commonDir, root),
+      busy: scope => this.busy(identity.commonDir, scope),
       authorize: cwd => {
         if (this.closed) throw new Error('应用正在退出')
         return this.options.authorizeDirectory(cwd)
@@ -308,7 +311,7 @@ export class SourceControlService {
       }
       const blocker = (await this.store.unresolved(identity.commonDir))
         ? '此仓库或关联 worktree 有结果未知的操作；先在原工作区核查，不重放写入'
-        : (await this.busy(identity.commonDir))
+        : (await this.busy(identity.commonDir, { kind: 'repository' }))
           ? '同仓库 Agent 尚未完全结束，不能同时修改 Git/PR 状态'
           : null
       const record: StoredOperation = {

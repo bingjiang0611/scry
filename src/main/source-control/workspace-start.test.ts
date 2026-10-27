@@ -267,6 +267,50 @@ describe('atomic workspace first-send preparation with real Git', { timeout: 15_
     expect(providerCalls).toEqual([target.cwd, target.cwd])
   })
 
+  it('creates and starts a worktree while other runs in the same repository are still settling', async () => {
+    const runningElsewhere = join(root, 'settling worktree')
+    git('worktree', 'add', '-b', 'settling', runningElsewhere)
+    running = [cwd, runningElsewhere]
+    const input = request(await selection('newWorktree', 'parallel/topic'))
+    const result = await service.startWorkspace(input, start)
+    expect(result.workspace?.cwd).toContain(join(userData, 'worktrees'))
+    expect(providerCalls).toEqual([result.workspace!.cwd])
+    // 同一个仓库里未收口的 run 仍会挡住复用它自己的 worktree。
+    const inventory = await service.workspaceChoices({ cwd, kind: 'worktrees' })
+    if (inventory.status !== 'available' || inventory.data.page.kind !== 'worktrees') throw new Error('Expected worktrees')
+    const busyTree = inventory.data.page.items.find(item => item.path === runningElsewhere)
+    if (!busyTree) throw new Error('Expected the settling worktree')
+    const reuse: WorkspaceStartSelection = {
+      operationId: randomUUID(),
+      intent: { repositoryId: inventory.data.repositoryId, expectedRevision: inventory.data.revision,
+        kind: 'existingWorktree', worktreeId: busyTree.id }
+    }
+    running = [runningElsewhere]
+    await expect(service.startWorkspace(request(reuse), start)).rejects.toThrow('占用')
+  })
+
+  it('still holds a create when a run cwd cannot be resolved to a repository', async () => {
+    running = ['']
+    const input = request(await selection('newWorktree', 'unknown/topic'))
+    await expect(service.startWorkspace(input, start)).rejects.toThrow('占用')
+    expect(providerCalls).toHaveLength(0)
+    expect(git('worktree', 'list', '--porcelain').match(/^worktree /gm)).toHaveLength(1)
+  })
+
+  it('switches the source checkout while a run in another worktree is settling', async () => {
+    const other = join(root, 'other worktree')
+    git('worktree', 'add', '-b', 'other', other)
+    git('branch', 'switch-target')
+    const input = request(await selection('current'))
+    input.workspace.intent = { ...input.workspace.intent, kind: 'current', branch: {
+      name: 'refs/heads/switch-target', head: git('rev-parse', 'switch-target'), kind: 'local'
+    } }
+    running = [other]
+    const result = await service.startWorkspace(input, start)
+    expect(result.workspace?.cwd).toBe(cwd)
+    expect(git('symbolic-ref', 'HEAD')).toBe('refs/heads/switch-target')
+  })
+
   it('rejects a stale branch switch, busy targets and revoked source authority before Provider dispatch', async () => {
     git('branch', 'switch-target')
     const stale = request(await selection('current'))

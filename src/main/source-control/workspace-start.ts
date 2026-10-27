@@ -21,11 +21,21 @@ export type StartPreparedWorkspace = (
   admit: (register: () => void) => Promise<void>
 ) => Promise<AgentStartResult>
 
+/**
+ * How far an unsettled run reaches into a planned write. A run whose cwd cannot be
+ * resolved to a repository blocks every scope, because it cannot be proved unrelated.
+ * `repository` matches the source-control panel's own mutations; `root` is one worktree.
+ */
+export type WorkspaceBusyScope =
+  | { kind: 'repository' }
+  | { kind: 'unknownCwd' }
+  | { kind: 'root'; root: string }
+
 export interface WorkspaceStartDependencies {
   git: ScGit
   store: ScStore
   userData: string
-  busy: (root?: string) => Promise<boolean>
+  busy: (scope: WorkspaceBusyScope) => Promise<boolean>
   authorize: (cwd: string) => string
   registeredRun: (runId: string, cwd: string) => boolean
 }
@@ -127,9 +137,14 @@ export async function startWorkspace(
   let registrationDispatched = false
   let admissionCalled = false
   try {
-    const targetIdentity = journal.plan.write === 'create' && journal.phase === 'planned'
-      ? undefined : await deps.git.identity(journal.plan.cwd)
-    if (await deps.busy(journal.phase === 'planned' && journal.plan.write !== 'none' ? undefined : targetIdentity?.root))
+    const createAtPlanned = journal.phase === 'planned' && journal.plan.write === 'create'
+    const targetIdentity = createAtPlanned ? undefined : await deps.git.identity(journal.plan.cwd)
+    // Wait only for runs this write can actually collide with. A create adds a branch and a
+    // directory and rewrites no existing checkout, so runs in other worktrees must not hold it
+    // back; Scry still serializes its own Git writes through the commonDir reservation. A switch
+    // rewrites the checkout it planned for, and a reuse must not double-drive the worktree it
+    // starts in.
+    if (await deps.busy(createAtPlanned ? { kind: 'unknownCwd' } : { kind: 'root', root: targetIdentity!.root }))
       throw new Error('目标工作区或同一仓库的 Git 写入仍被运行/收口占用；草稿已保留')
     if (journal.phase === 'planned') {
       if (journal.plan.write !== 'none') {
@@ -156,7 +171,8 @@ export async function startWorkspace(
       if (admissionCalled) throw new Error('工作区预留只能登记一个 run')
       admissionCalled = true
       await verifyWorkspacePlan(deps.git, identity, journal.plan, selection.operationId)
-      if (await deps.busy((await deps.git.identity(target.cwd)).root)) throw new Error('登记前目标工作区已被占用')
+      const admitRoot = (await deps.git.identity(target.cwd)).root
+      if (await deps.busy({ kind: 'root', root: admitRoot })) throw new Error('登记前目标工作区已被占用')
       journal.launch = { commandId: request.commandId, requestHash: launchHash, runId }
       journal.phase = 'start_requested'
       record!.operation.status = 'running'
