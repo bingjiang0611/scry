@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RemoteSessionRef } from '@shared/desktop-remote'
-import { reconcileRemoteSessionAttention as reconcile, remoteSessionAttentionKey as key } from './remote-session-attention'
+import { reconcileRemoteSessionAttention as reconcile, remoteSessionAttentionKey as key } from '@shared/remote-session-attention'
 
 const active: RemoteSessionRef = { sessionId: 's', externalSessionId: 'native', cwd: '/project', providerId: 'pi', label: 'Session', ts: 1, isActive: true }
 const completed: RemoteSessionRef = { ...active, isActive: false, lastRunId: 'run-1', lastRunOutcome: 'completed' }

@@ -1,6 +1,13 @@
-import type { RemoteSessionRef } from '@shared/desktop-remote'
+import type { RemoteSessionRef } from './desktop-remote'
 
-export function remoteSessionAttentionKey(connectionId: string, session: Pick<RemoteSessionRef, 'providerId' | 'agentProfileId' | 'cwd' | 'externalSessionId'>): string {
+export interface RemoteSessionIdentity {
+  providerId: string
+  agentProfileId?: string
+  cwd: string
+  externalSessionId?: string
+}
+
+export function remoteSessionAttentionKey(connectionId: string, session: RemoteSessionIdentity): string {
   return JSON.stringify([connectionId, session.providerId, session.agentProfileId ?? '', session.cwd, session.externalSessionId])
 }
 

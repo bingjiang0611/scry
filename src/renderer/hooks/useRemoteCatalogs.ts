@@ -1,6 +1,6 @@
 import { useEffect, useSyncExternalStore } from 'react'
 import type { DesktopRemoteCatalog, DesktopRemoteConnection, RemoteSessionRef } from '@shared/desktop-remote'
-import { reconcileRemoteSessionAttention, remoteSessionAttentionKey } from '../remote-session-attention'
+import { reconcileRemoteSessionAttention, remoteSessionAttentionKey } from '@shared/remote-session-attention'
 import { useVisibilityPolling } from './useVisibilityPolling'
 
 // One host catalog per saved connection, shared by the sidebar, location picker,

@@ -225,4 +225,25 @@ describe('DockBadgeState', () => {
     expect(badge.count).toBe(0)
     expect(setCount).not.toHaveBeenCalled()
   })
+
+  it('远程会话未读与会话内未读共同决定角标，并可在打开后清除', () => {
+    const counts: number[] = []
+    const badge = new DockBadgeState((count) => { counts.push(count) })
+
+    badge.markAttention('local-session', { windowFocused: false, sessionViewed: false, needsAttention: true })
+    badge.setRemote(['["conn","pi","","/repo","s1"]'])
+    expect(badge.count).toBe(2)
+    expect(counts.at(-1)).toBe(2)
+    // Remote keys never leak into the local renderer snapshot.
+    expect(badge.snapshot().unreadSessionKeys).toEqual(['local-session'])
+
+    // Repeating the same remote set must not re-publish or re-notify.
+    const published = counts.length
+    badge.setRemote(['["conn","pi","","/repo","s1"]'])
+    expect(counts.length).toBe(published)
+
+    badge.setRemote([])
+    expect(badge.count).toBe(1)
+    expect(counts.at(-1)).toBe(1)
+  })
 })
