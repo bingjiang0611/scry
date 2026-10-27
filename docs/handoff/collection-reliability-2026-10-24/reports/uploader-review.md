@@ -55,3 +55,15 @@ uploader 代码 `c230f652`，报告 `50b6889d`，17/17 离线验收通过，9 �
 用户授权后，执行方更新了夹具：失败验收在 `170379d7`，夹具修复在 `fdd20ba7`，报告在 `b164ca50`，19/19 定向验收通过。callback 夹具补齐了配置和完整正文，验证正文接管之后才入队，并保留了「缺正文必须返回非 0」的反例。全量 runtime/sync 门禁剩下的失败都是基线就有的（旧脱敏断言、`ASSIGN_RE` 等），不算本次回归，需要另外处理。仍待：服务端按 recordId 去重的确认、真实端到端验收、recorder E3。
 
 用户 2026-10-25 确认服务端已按 recordId 去重，R2 依赖 `duplicated` 的做法接受。升级时每台机器会重发一次保留的记录，这是一次性的代价。
+
+## 真实端到端 E1（2026-10-27，uploader 提交 `35888386`，按截图摘要）
+
+E1 未通过，缺陷在 uploader hook：`scry-record-committed.py:40-42` 把 `CLAUDE_PROJECT_DIR` 当成必需。recorder 调 commit hook 时只透传白名单里已经存在的环境变量（`src/core/turn-recorder/commit-hook-process.ts:10-21`），自己不补；daemon、recover、notify-retry 这些路径下本来就没有这个变量。所以缺陷对所有 Provider 都成立，不只是 Codex。recorder 的退避、死信和 doctor warn 表现符合 E3 的语义。手工补上变量后，四处 sha256 一致，服务端返回 inserted；但真实链路没有拿到 ACK，ackedThrough 仍为 0。
+
+审阅意见：选执行方方案 1，并再收紧一步。工作区只从通知体的 `workspace` 字段取，按配置解析 dataRoot，校验 recordPath 包含关系和 sha256；`workspace` 缺失或不合法时返回非 0，不回落到 cwd（hook 的 cwd 继承自 daemon，不一定是工作区）。修复后从头原生重跑 E1–E8，并在旧的 e1 工作区用 `notify-retry --all-dead` 验证服务端返回 duplicated。另外要查旧版 uploader 是否有同样的依赖：如果有，旧版在拿不到变量时也可能大多返回 0，记录就静默丢了。
+
+## 修复后 E1–E8（2026-10-27，uploader `5afca05c`，按截图摘要）
+
+红测 `b2c21fbf`（9 例，`env -i` 只给 HOME 和 PATH）在旧实现上失败；修复 `68d7875d` 让 hook 只从通知体的 `workspace` 取工作区，之后 9/9 通过，离线回归 19/19 通过。E1–E8 在新工作区原生跑，没有人工补环境变量：7 项通过；E3 部分通过（第 5 次失败进死信的真机链路没等，这一段 recorder 侧 VE2 已经用单测和探针证明，审阅方同意按部分通过收口）。旧的 e1 工作区重放后服务端返回 duplicated，ackedThrough 从 0 前进到 1。U3/U4 的真实端到端审阅通过。
+
+审阅意见：E5 暴露了 recorder 的 sequence 复用问题，记为 **VF1**，在本仓库修复。`commitRecord` 的分配下限只取现存最大号和 archivedThrough（`store.ts:56-57`），不考虑投递进度。在 archive 之外删除最新的 record 后，新 record 会复用已经投递过的 sequence，而 drain 只处理 `sequence > processedThrough` 的 record（`store-notifications.ts:126`），结果是静默不上传，或者撞上旧 outcome 抛出 identity 不匹配错误、卡住后续投递。修复要求：引入持久化的已发号高水位，doctor 增加 warn，先写红测。

@@ -9,7 +9,7 @@ import { recordFiles, parseRecordFile } from './store-index.js'
 import { readArchiveState } from './store-archive.js'
 import { COMMIT_NOTIFICATION_MAX_FAILURES, type CommitNotificationFailure, recordName, readCommitHookAck, pendingCommitFiles, publishDeadLetter, readDeadLetter, readDeadLetters } from './commit-delivery-state.js'
 
-import { type RetryDiagnostic, advanceAck, finishReplay, ledgerStatus, loadDeliveryState, nextRetryAt, outcomes, readOutcome, requeueDeadLetters, saveOutcome, saveProgress } from './commit-delivery-ledger.js'
+import { type RetryDiagnostic, UnresolvedDeliveryPrefixError, advanceAck, finishReplay, ledgerStatus, loadDeliveryState, nextRetryAt, outcomes, readOutcome, requeueDeadLetters, requeueLostOutcome, saveOutcome, saveProgress } from './commit-delivery-ledger.js'
 
 export interface RecordCommittedNotification {
   schemaVersion: 2
@@ -53,6 +53,12 @@ export interface CommitNotificationStatus {
   deadLetterCount?: number
   /** Latest twenty diagnostics; deadLetterCount can be larger. */
   deadLetters?: CommitNotificationFailure[]
+  /** Sequence numbers the ACK crossed without any record file (deleted, or reserved then crashed). */
+  absentCount?: number
+  /** First kept ranges, oldest first; a large hole costs one range. Capped, so not exhaustive. */
+  absentRanges?: Array<[number, number]>
+  /** True when the sample dropped ranges; `absentCount` remains exact. */
+  absentTruncated?: boolean
 }
 
 /**
@@ -65,10 +71,11 @@ export async function commitNotificationStatus(dataRoot: string, env: NodeJS.Pro
   const state = await readCommitHookAck(dataRoot, fingerprint)
   const ledger = await ledgerStatus(dataRoot, fingerprint, state)
   if (state.queueVersion === 2 || ledger.outcomeCount) {
-    const { outcomeCount: _count, ...detail } = ledger
+    const { outcomeCount: _count, absent, ...detail } = ledger
     const hasGap = state.processedThrough > (state.ackedThrough ?? 0) || detail.retryCount > 0 || detail.deadLetterCount > 0
     return { ackedThrough: state.ackedThrough, notifyBacklog: detail.notifyBacklog,
-      ...(hasGap ? { processedThrough: state.processedThrough, ...detail } : {}) }
+      ...(hasGap ? { processedThrough: state.processedThrough, ...detail } : {}),
+      ...(absent ? { absentCount: absent.count, absentRanges: absent.ranges, absentTruncated: absent.truncated } : {}) }
   }
   const [pending, dead] = await Promise.all([pendingCommitFiles(dataRoot, state), readDeadLetters(dataRoot, fingerprint)])
   if (state.processedThrough > (state.ackedThrough ?? 0) && dead.deadLetterCount === 0) throw new Error('commit notification state is missing dead-letter evidence')
@@ -95,7 +102,8 @@ export interface DrainOptions {
 
 export interface DrainResult {
   delivered: number
-  pending: number
+  /** `null` when the delivery state itself is unreadable: the backlog is unknown, not zero. */
+  pending: number | null
   truncated: boolean
 }
 
@@ -205,14 +213,29 @@ export async function drainCommitNotifications(
         await processFile(file, true)
       }
       if (!truncated) state.processedThrough = Math.max(state.processedThrough ?? 0, highestVisited)
-      await advanceAck(dataRoot, state, archiveFloor)
+      try {
+        await advanceAck(dataRoot, state, archiveFloor)
+      } catch (error) {
+        // Keep the ACK prefix that positive receipts already prove before reporting the sequence
+        // that stayed unresolved; discarding it would re-walk proven work on every later drain.
+        await persistProgress()
+        throw error
+      }
       await persistProgress()
       return { delivered, pending: await pendingCount(), truncated }
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     await appendRotatingLog(join(dataRoot, 'logs', 'recorder.log'), `${new Date().toISOString()} ERROR commit notification: ${message}`).catch(() => undefined)
-    return { delivered, pending: await pendingCount(), truncated: false }
+    let pending: number | null = null
+    try { pending = await pendingCount() } catch {
+      // The status query failed too. Re-throwing from this catch is what used to poison every later
+      // drain, so a prefix the recorder cannot yet prove returns with an unknown backlog instead.
+      // Corrupt checkpoints or receipts are not that case: they stay a loud failure.
+      if (!(error instanceof UnresolvedDeliveryPrefixError)) throw error
+      pending = null
+    }
+    return { delivered, pending, truncated: false }
   }
 }
 
@@ -221,7 +244,13 @@ export async function retryCommitNotifications(dataRoot: string, env: NodeJS.Pro
   const fingerprint = configuredCommitHookFingerprint(env)
   const requeued = await withDirectoryLock(join(dataRoot, 'locks', 'commit-notification.lock'), async () => {
     await loadDeliveryState(dataRoot, fingerprint)
-    return requeueDeadLetters(dataRoot, fingerprint, sequence)
+    if (sequence === undefined) return requeueDeadLetters(dataRoot, fingerprint)
+    const dead = await requeueDeadLetters(dataRoot, fingerprint, sequence)
+    if (dead > 0) return dead
+    // Not quarantined, but a record may still exist whose delivery outcome was lost. Only this
+    // explicit, operator-named sequence may be re-delivered; automatic drain stays fail closed.
+    if (await requeueLostOutcome(dataRoot, fingerprint, sequence)) return 1
+    throw new Error(`sequence ${sequence} is neither an active dead letter nor a record whose delivery outcome is missing`)
   })
   return { requeued, ...await drainCommitNotifications(dataRoot, env) }
 }

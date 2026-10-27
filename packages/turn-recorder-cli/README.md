@@ -20,7 +20,7 @@ scry init                # 自动检测 claude / codex / qoder / opencode
 接入后必须做两件事,CLI 无法代替:
 
 1. **重启 Provider**,否则新 hook 不会加载。
-2. **Codex 还要在项目里执行 `/hooks` 并信任项目 Hook。**
+2. **Codex 还要在项目里执行 `/hooks` 并信任项目 Hook。** 这一步是硬前提:没确认 trust 时 Codex 仍然会打印 `hook: UserPromptSubmit` / `hook: … Completed` 这类阶段行,但项目 hook 不会执行 —— 表现为没有任何 record、没有 `hook-skip.log`、`health.json` 计数也不变。新机器、新 clone、新 worktree 都要重新确认一次。非交互的 `codex exec` 需要显式加 `--dangerously-bypass-hook-trust`,否则同样不会执行 hook。
 
 然后跑一轮真实任务来验证 —— `init` 的自检只能证明配置和本地存储可用:
 
@@ -53,6 +53,8 @@ i=0; until scry status >/dev/null 2>&1; do i=$((i+1)); [ "$i" -ge 30 ] && break;
 | `scry turns content <记录> <正文路径...> --offset 0 --limit 65536` | 按字节分页读取 tool/model/diff/transcript 正文 |
 | `scry turns verify` | 序号连续性与记录完整性 |
 | `scry records archive --before 30d` | 归档旧记录（见[容量与归档](docs/storage-and-performance.md#容量与归档)） |
+
+记录文件不要手动删除或移走：序号是上传去重键，也是投递游标。删除后新轮次仍从已发号的下一号继续（`.scry/sequence-watermark.json`），`doctor` 的 `records.sequence` 会 warn 说明被删的记录永远不会再投递；移出旧记录只走 `scry records archive`。
 | `scry records maintain [--apply]` | 检查 quota/retention，安全回收孤立正文与压缩轮转日志 |
 | `scry support-bundle create` | 脱敏排障包 |
 | `scry recorder status\|stop\|restart\|recover\|notify-drain\|notify-retry` | daemon 与恢复 |
@@ -76,7 +78,9 @@ scry recorder notify-retry --sequence 42 --workspace "$PWD"
 scry recorder notify-retry --all-dead --workspace "$PWD"
 ```
 
-重放保留死信历史、重置该项计数并走正常 trust 校验；投递仍待重试时退出 3，真实成功后才允许连续 ACK 前进。两个选择参数必须且只能提供一个。完整语义与升级限制见[投递与死信](docs/integrations-and-updates.md#失败次数与-recorder-死信)。
+重放保留死信历史、重置该项计数并走正常 trust 校验；投递仍待重试时退出 3，真实成功后才允许连续 ACK 前进。两个选择参数必须且只能提供一个。`--sequence N` 也接受「record 还在、但投递结果丢失」的号：这种状态自动 drain 会 fail closed，`doctor` 会写出该 sequence 并指明这条命令；重放后 record 会被重新投递（接收方按 `recordId` 去重）。完整语义与升级限制见[投递与死信](docs/integrations-and-updates.md#失败次数与-recorder-死信)。
+
+完全没有 record 的号（崩溃只保留了号码，或记录文件在 archive 之外被删除）不会阻塞后续投递：ACK 可以越过，但会留下有上限的区间证据 `absent-sequences.json`，`doctor` 显示数量与区间。record 还在但投递结果丢失时不越过，此时 drain 以 `pending: null` 表示积压未知而不是 0。
 
 ## 采集什么
 

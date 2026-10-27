@@ -20,5 +20,27 @@
 | M2 | commit hook 队头阻塞无死信 | E3 | 已核验 | [E 报告](reports/E.md) | 退避 1/5/15/60 分钟后才死信，退避期间续投后续记录，ACK 不越过缺口；`notify-retry` 显式重放经 trust 校验；短暂故障探针复测通过 |
 | M3 | ACK 身份绑定 bundle 内容指纹 | E3 | 放弃（附证据） | [E 报告](reports/E.md) | 本批不引入稳定 id：只有重复校验开销；ACK/失败/死信迁移成本不属必做缺口。保留指纹隔离和 fail-closed trust；实际测得主要瓶颈后再单独评估；审查方接受 |
 | M4 | ACK 只代表入队；归档后回源校验阻止发送 | E2 + U1/U2 | 已核验 | [E 报告](reports/E.md) | recorder E2：3 红测→通过，通知 v2 带 dataRoot 相对路径与原始字节 SHA-256；uploader U1/U2 按报告审阅（c230f652），真实整链路待验收，见 [uploader 审阅](reports/uploader-review.md) |
-| U3 | uploader 不可重试错误返回 0 | U3 | 阻塞 | [uploader 审阅](reports/uploader-review.md) | R1–R3 按报告已处理（c230f652，17/17 离线验收，未读代码）；夹具已更新（fdd20ba7）；用户 2026-10-25 确认服务端已去重，R2 接受；等待：全仓门禁基线失败另行处理、真实端到端验收、recorder E3 |
+| U3 | uploader 不可重试错误返回 0 | U3 | 阻塞 | [uploader 审阅](reports/uploader-review.md) | R1–R3 按报告已处理（c230f652，17/17 离线验收，未读代码）；夹具已更新（fdd20ba7）；用户 2026-10-25 确认服务端已去重，R2 接受；等待：全仓门禁基线失败另行处理、真实端到端 E1–E8 已于 2026-10-27 在 uploader `5afca05c` 跑完：7 项通过，E3 部分通过；新发现 recorder 缺陷 VF1（sequence 复用），已修并核验；U3/U4 真实端到端审阅通过 |
 | U4 | 显式关闭上传无痕迹 | U4 | 阻塞 | [uploader 审阅](reports/uploader-review.md) | 同 U3 |
+| VF1 | 删 record 后 sequence 复用，新记录永不投递 | VF1 | 已核验 | [sequence 报告](reports/sequence-reuse.md) | 红测 4 失败→通过（`5839fcdc` 上重演 4 failed / 148 passed）；分配改为持久化已发号水位，提交锁内先 durable 写入再写 record，老工作区按 `max(现存最大号, archivedThrough, ackedThrough, processedThrough)` 一次性初始化；doctor 新增 `records.sequence`，水位高于现存最大号时报 warn 并 degraded；`scry turns verify` 输出形状不变；真实 uploader 与断电注入未验证；审阅方 worktree 重演红测失败，`1eaede0` 上 160/160 通过 |
+| VF2 | 号上有空洞且前面有号在重试时，投递卡死 | VF2 | 已核验 | [VF2 报告](reports/delivery-holes.md) | 审阅方探针确认：`advanceAck` 遇到没有 outcome 的号就抛错，之后每次 drain 和 status 都抛同样的错，新 record 不再投递；红测 5 项→通过（修复前源码重演 5 failed / 153 passed）；ACK 可越过「没有 record 文件」的空洞，但先写有上限的区间证据 `absent-sequences.json`（合并区间、最多 32 段、`count` 精确、`truncated` 标记）；「record 还在但投递结果丢失」仍 fail closed；drain 的 catch 不再二次抛出同一错误，积压未知报 `pending: null`；doctor 列出空洞，投递状态不可读时报 `status: error`；真实 uploader、32+ 段空洞与并发只读 walk 未验证；修复 `7da0fc0` 审阅方探针复跑通过，165/165；两个非阻塞建议（absent 去重、丢 outcome 的恢复入口）见报告；跟进 `c9a3fd3` 已核验（167/167，typecheck 通过），遗留一个小问题：对已 ACK 的号 notify-retry 时会误报 requeued |
+| VF2b | 空洞计数重复；「record 还在、投递结果丢失」无恢复入口 | VF2 | 待核验 | [VF2 报告](reports/delivery-holes.md) | 红测 `673f7370`（2 项）→ 修复 `410231d5`（修复前源码重演 2 failed / 158 passed）：`recordAbsent` 改与账本水位 `absentThrough` 去重，`ranges` 截断后同一号只计一次；`notify-retry --sequence N` 也接受「有 record、无 outcome」的号并重新投递（接收方按 `recordId` 去重），`doctor` 写出该 sequence 与这条命令，自动 drain 仍 fail closed；构建 CLI 探针验证 ACK 由 4→5→6；真实 uploader 去重语义未验证 |
+
+## 合入前汇总验收（2026-10-26，构建 `6e2012e7`）
+
+详见 [F 报告](reports/F.md)。F-3～F-8 在本机隔离环境通过；F-1、F-2 未全部通过。
+
+| # | 场景 | 状态 | 备注 |
+|---|---|---|---|
+| F-1 | Claude / Codex / OpenCode 各一轮 | 部分通过 | OpenCode 12 条 record、Pi 限流下仍 1 条；**Codex 真机验收通过**（S1，先在 `/hooks` 确认 trust）；Claude：用户决定不验收，不计通过；Qoder 凭据已刷新待重跑 |
+| F-2 | Codex 子目录 / 子仓库 | 子目录通过；子仓库为已知缺口（用户 2026-10-26 决定本次不修） | 真机验收：子目录（`src/deep`）通过并落 2 条 record；子仓库 `one/` **完全没有加载 hook**（Codex 向上找 `.codex/hooks.json` 到 git root 停止），`[hooks.state]` 0 条、trace 未生成、`turns list` 空 |
+| F-3 | 长路径 workspace | 通过 | socket 指针指向 95 字节真实 socket，1 条 record |
+| F-4 | 多仓库 root / `one/` / `a/b/c` | 通过 | discovery 列出请求目录，doctor warn 且含 `a/b/c`，单仓库深目录对照 pass |
+| F-5 | 每轮 env | 通过 | 未设置/`0`/`1` 三者逐轮隔离 |
+| F-6 | 通知 v2 | 通过 | 41 次投递 schemaVersion=2、sha256 一致、按 recordPath 读取 |
+| F-7 | uploader 短暂故障恢复 | 通过 | attempts=1、nextRetryAt=+60s、退避内不重调用、到期补投、ACK 前进 |
+| F-8 | kill daemon | 通过 | 下一轮落盘、daemon 自动拉起、inbox 0 |
+
+### 已知缺口（本次不修，用户 2026-10-26 决定）
+
+- **在多仓库工作区里从子仓库启动 Codex 时，不采集**：Scry 只在工作区根写 `.codex/hooks.json`，而 Codex 向上找项目配置时到子仓库的 git root 就停止，所以 hook 完全不加载。整轮没有 record，也不写 skip log，doctor 仍显示 healthy。规避办法：从工作区根启动 Codex。其他 Provider 是否有同样问题还没验证，Qoder 重跑时应加子仓库场景。候选修法见 [F-codex 报告](reports/F-codex.md)：在每个子仓库写一份指向工作区桥接脚本的 hook，或用用户级 hook。
