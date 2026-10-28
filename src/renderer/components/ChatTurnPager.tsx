@@ -22,12 +22,12 @@ import type { ContentRef, RecorderContentPage } from '@shared/tool-content'
 
 
 
-const CONTENT_PAGE_BYTES = 64 * 1024
+export const CONTENT_PAGE_BYTES = 64 * 1024
 const CONTENT_PAGE_CACHE = 8
 
 type DisplayContentPage = RecorderContentPage & { text: string }
 
-function bytesFromBase64(value: string): Uint8Array {
+export function bytesFromBase64(value: string): Uint8Array {
   const binary = atob(value)
   return Uint8Array.from(binary, (character) => character.charCodeAt(0))
 }

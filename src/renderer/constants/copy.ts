@@ -164,6 +164,18 @@ export const OVERVIEW_COST_COPY = {
   coverage: (known: number, total: number) => `${known}/${total} 轮上报了成本`
 } as const
 
+export const OVERVIEW_TOOL_ERROR_COPY = {
+  heading: '调用证据',
+  openInChat: '定位到对话',
+  input: '输入',
+  output: '输出',
+  message: '报错信息',
+  notReported: 'Provider 未上报',
+  noDetail: '工具未返回错误详情',
+  /** 正文超出内联预算，只留存档引用；不能说成 Provider 未上报。 */
+  archived: (bytes: number) => `完整输出已存档 · ${bytes.toLocaleString()} bytes`
+} as const
+
 export const SESSION_DRAFT_LABEL = '草稿'
 
 export { SIDEBAR_SESSION_COPY, SIDEBAR_PROJECT_COPY } from './sidebar-copy'
@@ -181,103 +193,7 @@ export const SIDEBAR_ACTIVITY_COPY = {
   overflow: (count: number) => `另有 ${count} 条，请搜索定位`
 } as const
 
-export const REMOTE_ACCESS_COPY = {
-  discardWorkspaceChanges: '当前远程文件有未保存修改。放弃修改并继续吗？',
-  title: '远程访问',
-  settingsTab: '远程访问',
-  outboundTitle: '连接其他主机',
-  inboundTitle: '允许访问本机',
-  addHost: '添加主机',
-  displayName: '显示名称',
-  invitationString: '邀请字符串',
-  pair: '配对',
-  deviceFingerprint: '设备指纹',
-  awaitingHostApproval: '请在远端确认此设备，再完成配对。',
-  devicePaired: '设备已配对。',
-  retry: '重试',
-  loadingHosts: '正在读取主机…',
-  noHosts: '没有主机',
-  noHostsHint: '在远端生成 SSH 邀请后添加。',
-  status: {
-    connected: '已连接',
-    disconnected: '未连接',
-    pairing: '待批准',
-    unknown: '状态未知'
-  },
-  connectionReadError: (detail: string) => `无法确认连接状态：${detail}`,
-  connect: '连接',
-  disconnect: '断开',
-  finishPairing: '完成配对',
-  hostDetails: (expanded: boolean, label: string) => `${expanded ? '收起' : '展开'} ${label}`,
-  hostFingerprint: '主机指纹',
-  editAddress: '编辑地址',
-  projects: '项目',
-  cachedProjects: '以下是上次读取的项目；连接后才能新建会话。',
-  connectForProjects: '连接后可查看项目。',
-  projectReadError: (detail: string) => `无法读取项目：${detail}`,
-  loadingProjects: '正在读取项目…',
-  loadingProviderControls: '正在读取所选 Provider 设置…',
-  providerControlsChanged: '所选模型、推理强度或权限已变化；请重新选择',
-  legacyProviderControls: '旧版主机能力快照；发送时由主机重验',
-  providerControlsUnavailable: (host: string) => `${host} 未能读取所选 Provider 设置；暂时无法发送`,
-  retryProviderControls: '重试读取 Provider 设置',
-  unknownReceiptNotice: (sourcePath: string, detail?: string) => `提交回执未知。来源项目/路径：${sourcePath}。核对并解除阻塞只会放弃未收到的提交，不会停止已收到的任务，也不会重发；解除前不会发送新提示词或自动出队。${detail ? ` ${detail}` : ''}`,
-  unknownReceiptSendBlocked: '连接中仍有提交回执未知；请先核对并解除阻塞。草稿会保留，不会发送或自动出队。',
-  unknownReceiptResolve: '核对并解除阻塞',
-  unknownReceiptResolving: '正在核对并解除阻塞…',
-  unknownReceiptFailure: (detail: string) => `解除未知提交失败：${detail}`,
-  unknownReceiptUpgrade: (host: string) => `远端 ${host} 版本过旧，暂不支持解除未知提交。请更新并重启远端 Scry 后再试。`,
-  noProjects: '没有项目。',
-  newSession: '新建会话',
-  removeHost: '移除主机',
-  removeHostEffect: '只移除本机连接，不撤销远端授权。',
-  closeAddHost: '关闭添加主机',
-  closeEditAddress: '关闭编辑连接地址',
-  editAddressEffect: '保存后会断开。请手动重连；远端任务不会停止。',
-  hostname: '主机名 / IP',
-  sshUsername: 'SSH 用户名',
-  sshPort: 'SSH 端口',
-  cancel: '取消',
-  saving: '正在保存…',
-  saveAddress: '保存地址',
-  saveFailed: (detail: string) => `保存失败：${detail}`,
-  manage: '管理远程访问…',
-  desktop: '桌面',
-  phone: '手机',
-  enabled: '已启用',
-  disabled: '未启用',
-  relayOnline: '中继已配置',
-  relayDormant: '中继休眠',
-  relayDormantEffect: '中继休眠，暂时无法接入。',
-  generateSshInvite: '生成 SSH 邀请',
-  sshInvite: 'SSH 邀请',
-  copyInvite: '复制邀请',
-  closeInvite: '关闭 SSH 邀请',
-  pairPhone: '配对手机',
-  closePairing: '关闭配对码',
-  close: '关闭',
-  enableAndGenerateSshInvite: '启用并生成邀请',
-  disableDesktopAccess: '关闭',
-  sshInviteEffect: '短时有效，仅发送给预期设备。新邀请会使旧的未完成邀请失效。',
-  loadingDesktopStatus: '正在读取桌面访问状态…',
-  generatePairingCode: '生成配对码',
-  pairingQr: '配对二维码',
-  qrFailed: '二维码生成失败，请使用文本码。',
-  pairingFingerprintEffect: '配对必须在被访问的主机上批准。请核对连接设备上的公钥指纹。',
-  scanQr: '使用 Scry 手机 App 扫码。2 分钟内有效。',
-  showTextCode: '无法扫描？查看文本码',
-  relayUnavailableSecret: '中继休眠，手机暂时无法接入。一次性口令 2 分钟内有效。',
-  pendingDevices: '等待确认',
-  pendingFingerprint: (fingerprint: string) => `确认连接设备显示相同指纹：${fingerprint}…`,
-  confirm: '确认',
-  authorizedDevices: '已授权设备',
-  noAuthorizedDevices: '暂无已授权设备。',
-  revoke: '吊销授权',
-  unnamedDevice: '未命名设备',
-  awaitingFingerprint: '等待确认指纹',
-  deviceConnecting: '设备连接中…',
-  paired: '已配对'
-} as const
+export { REMOTE_ACCESS_COPY, REMOTE_ATTACHMENTS_COPY, REMOTE_SESSION_COPY } from './remote-copy'
 
 export const SLASH_COMMAND_COPY = {
   heading: (host: string | undefined, loading: boolean) => {
@@ -295,37 +211,6 @@ export const ARCHIVED_SESSIONS_COPY = {
   localTitle: '本机已存档会话',
   deleteAllLocal: '删除全部本机会话',
   localEmpty: '没有本机已存档会话'
-} as const
-
-export const REMOTE_SESSION_COPY = {
-  unreadResult: '有新结果，未查看',
-  runningLabel: '正在运行',
-  waitingAnswerLabel: (count: number) => count > 1 ? `需回答 ${count} 个问题` : '需回答',
-  archivedTitle: '远程已存档会话',
-  archivedDescription: '恢复会话会将其放回远程项目。删除仅移除对应主机上的 Scry 副本。',
-  restore: '取消存档',
-  deleteUnsupported: '此历史会话缺少可用的 Provider 身份，无法删除。',
-  restoreLabel: (label: string) => `取消存档：${label}`,
-  archiveLabel: (label: string) => `存档会话：${label}`,
-  archiveHint: '存档并停止运行，取消排队消息',
-  manageUnavailable: (host: string) => `请连接 ${host} 并确认远端 Scry 支持此操作。`,
-  updateUnconfirmed: '远端未确认会话更新，请刷新后核对。',
-  upgrade: (host: string) => `请更新并重启 ${host} 上的 Scry，以启用会话操作。`,
-  delete: '删除 Scry 副本',
-  deleting: '正在删除…',
-  cancel: '取消',
-  deleteTitle: (host: string) => `删除 ${host} 上的会话`,
-  deleteWarning: (label: string) => `将永久删除「${label}」的 Scry 会话副本、附件和用量数据。工作区 .scry 记录与 Provider 原始数据保留。此操作不可撤销。`,
-  deleteFailed: (detail: string) => `未能完整删除远端会话：${detail}`,
-  operationUnknown: '远端操作结果未确认。请刷新会话列表核对，不要直接重复操作。',
-  forkBoundaryMissing: '当前轮次缺少可验证的 Provider 会话边界。',
-  forkUnsupported: '此远端或 Provider 不支持创建分支，请更新远端 Scry 后确认能力。'
-} as const
-
-export const REMOTE_ATTACHMENTS_COPY = {
-  unsupported: '这台远端 Scry 不支持当前图片附件传输。请更新远端 Scry 后重试；图片草稿仍会保留。',
-  tooLarge: '图片附件超过这台远端 Scry 的传输限制。请缩小图片或更新远端 Scry；图片草稿仍会保留。',
-  tooMany: '图片附件数量超过这台远端 Scry 的传输限制。请移除部分图片或更新远端 Scry。'
 } as const
 
 export const QUESTIONNAIRE_COPY = {
