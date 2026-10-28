@@ -1,12 +1,14 @@
 # Scry 无界面引擎：恢复、迁移与验收
 
-**状态：设计提案，尚未实现。** 本文属于[完整方案总览](../headless-execution-engine-design.md)，遵守总览中的源码基线、交付范围和权威边界。
+**状态：条件性架构附录，尚未实现，不是 P0/P1 的验收前置清单。** 本文属于[完整方案总览](../headless-execution-engine-design.md)；当前交付按 [首个切片](first-slice.md)，后续需求成立才选择本篇对应部分。
 
 第 11–15 节：故障处理、退出/升级/回滚、实施阶段、性能与正确性验收、风险和决策。 章节编号跨文档保持一致；文中的 § 引用可按总览导航定位。
 
 导航：[运行时与协议](runtime-and-protocol.md) · [数据与客户端](data-and-consumers.md) · [恢复与验收](recovery-and-validation.md)。
 
-## 11. 崩溃恢复、退出、升级与回滚
+## 11. 条件性恢复、退出、升级与回滚
+
+本节保留原提案的安全边界，适用于未来确实引入对应收据、journal、worker 或独立宿主时。特别是 cleanup-only、发现文件和重新连接策略针对独立 daemon，不能假定 `utilityProcess` 在父进程退出后仍存活；父子宿主需单独验证其死亡/恢复合同。P0/P1 沿用现有生命周期。
 
 ### 11.1 故障矩阵
 
@@ -18,7 +20,7 @@
 | live 事件已显示、raw 未 durable | 重建 durable 前缀，明确尾部缺口/partial | 把旧 live cursor 当完整归档 |
 | mutation durable、DB commit 前 | 幂等重放投影 | 再执行 Provider |
 | DB commit 后、ACK 前 | 查与业务数据同事务提交的水位/摘要，旧 revision 不覆盖新结果 | 双计 span/usage 或投影倒退 |
-| 任一 canonical 根写入失败 | 保留 intent/outbox，沿原有恢复合同继续 | 另一根成功就发布“完整” |
+| 任一必需 canonical 根写入失败 | 按 recording mode 保留 intent/outbox，沿原有恢复合同继续 | 另一根成功就发布“完整”，或 disabled 等待不存在的产物 |
 | engine 崩溃但 Provider 可能存活 | 验证进程身份和原生状态；支持时恢复观察，否则 unknown | 仅根据 PID 杀进程或启动第二个 writer |
 | worker 超时/失联 | 确认旧 worker 退出/事务状态后恢复 | 超时即创建第二个 SQLite writer |
 | 网络/renderer 窗口断开 | 保留 engine 状态，重新认证并 reset/续读 | 断开即自动完成或重放写入 |
@@ -46,28 +48,23 @@ broker 已退出但 engine 尚未确认清理完成时，允许存在只清理�
 - 若出现不可逆 schema 变化，必须在对应迁移方案中提供备份、恢复验证和兼容矩阵；不能把切换开关当作回滚方案。
 - 更改一次只改变一个权威写入者；shadow 只能计算并比较，不发送 Provider 输入、不提交 recorder、不双写用户 DB。
 
-## 12. 实施阶段与模块映射
+## 12. 按证据选择后续阶段，不串行执行全部路线
 
-每阶段使用独立临时 workspace/userData 验收。数据采集/collector 与优化实现分开提交。以下是实施顺序，不是已执行清单。
+文件范围、粗估人日和止损条件统一放在[总览 §0.1](../headless-execution-engine-design.md)，避免维护两张互相漂移的计划表。当前建议只包含 P0＋P1；raw 队列可附带观测，不自动启用新上限行为。
 
-| 阶段 | 交付 | 主要落点 | 退出条件 |
-| --- | --- | --- | --- |
-| P0 基线与合同 | 固定并发/长历史/大输出工作量；资源归因；故障矩阵 | performance scripts、既有 recorder/transport fixtures | 能区分旧实现与故意破坏保护；测量 scope 完整 |
-| P1 mutation seam | event-ID 索引、dirty revision、增量远程投影；仍在原进程 | run-live-state、live-trace、desktop-trace-delta | 等价事件顺序/正文/用量；静默读不 hash 全文 |
-| P2 有界持久化 | raw 队列预算、spool、journal、水位、恢复与删除 barrier | live-trace-ingestion、managed commit、session deletion 接缝 | 慢盘/大输出/磁盘满不伪造成功；禁用 recorder 可回收；删除不重生 |
-| P3 SQLite worker | 全部 DB API 异步化、单连接所有者、旧 outbox 导入、原子水位 | db、run-completion、billing 查询调用者 | DB 等价；崩溃无双计/倒退；耐久屏障与总传输成本已验证 |
-| P4 纯 engine 边界 | 抽出 userData/window/dock/question broker 依赖；typed 本机协议 | run-execution、shutdown、remote host factory | 仍单 writer；真实 wrapper 拒绝测试通过 |
-| P5 私有宿主与准入 | 签名 Node runtime、ownership/认证、全局预算、断连恢复 | 打包 allowlist、新 engine launcher、remote dispatcher | 冷启动/总内存/升级/停止均有证据；默认退出不变 |
-| P6 有界消费与查询 | resident history、Overview 增量、cold surface 卸载、目录/历史 worker | renderer store/panels、history-load、workspace-files | 原生选择/焦点/终端不退化；内存随预算收敛 |
-| P7 发布与日常复验 | 受控推广、明确 build 映射、L3 对照 | 原实验记录与现有发布流程 | 同场景至少 30 样本、至少 2 会话；无回滚阻碍 |
+- P1 只有 L1 改善、没有超过预登记噪声的 L2 目标改善：停止扩大，记录无端到端收益证据。不得以“已经做了 P1”推进 P2/P3。
+- 持久化积压＋写放大预算成立：再讨论 P2 日志/落盘；DB 阻塞/成本成立：再讨论 P3。两个问题不互相充当依据。
+- 隔离需求明确但退出语义不变：先比较 worker/utilityProcess。桌面退出后继续执行获批，才讨论独立宿主；私有 Node 不是必选。
+- Renderer/历史驻留或目录扫描是瓶颈时，可单独选择 P6 假设，不先支付 P4/P5 的成本。
+- P7 针对已通过的单个切片发布复验，不以完成全部远期架构为前提。
 
-首个实施切片是 P0＋P1：固定 mutation replay 负载，先证明变更版本可以消除重复查找/编码，同时保持同一权威输出。P2/P3 是紧随其后的完整数据平面切片；不要在 P1 尚不等价时并行重写存储格式。
-
-并发开发按不相交模块分 lane，但同一 cwd 一个写者。任何 lane 不得单独调整 recorder 权威、IPC 授权或 Provider lifecycle。
+采用独立临时 workspace/userData 验收；collector 与优化分开提交。同一 cwd 一个写者，任何并行任务不独立改变 recorder 权威、IPC 授权或 Provider lifecycle。
 
 ## 13. 验证与性能实验
 
-### 13.1 固定工作量
+### 13.1 后续阶段的候选工作量
+
+P0/P1 使用[首个切片 B](first-slice.md) 的 4/16 并发、1k/10k/50k 事件及冻结交互。下表只用于后续某阶段获批后的压力扩展，不要求当前先跑所有大规模负载。
 
 | 场景 | 规模轴 | 关键输出 |
 | --- | --- | --- |
@@ -94,9 +91,9 @@ broker 已退出但 engine 尚未确认清理完成时，允许存在只清理�
 - 同一实验记录源码 commit、dirty 身份、完整 build、机器负载、workload、首次失败、部署状态。高负载毫秒不用于宣称收益。
 - 新遥测只记录数字、阶段、版本与匿名操作身份，不记录 prompt、正文、用户路径、凭据。采集内容/保留策略变更先审批。
 
-### 13.3 正确性与负对照
+### 13.3 后续边界的正确性与负对照
 
-至少覆盖：
+以下按真正改动的边界选取；P1 必需项和最小负对照见首个切片 C，不为尚未实现的 engine 搭测试脚手架：
 
 1. 重复/乱序 enrichment、text replacement、跨页锚点与未知 usage：完整重算 oracle 与增量结果相同。
 2. 相同 requestId 不同输入拒绝；丢接受 ACK 不重发；旧 clientEpoch 不执行。
@@ -132,10 +129,10 @@ node .agents/skills/scry-performance-climb/scripts/timing-run.mjs <标签> -- <�
 
 | 风险 | 取舍/限制 | 升级或停止条件 |
 | --- | --- | --- |
-| 多一个 Node 宿主增加基础内存/体积 | 先模块化和 worker，再提取进程 | 总足迹/冷启动不改善且隔离收益不足时停止进程提取，保留数据结构优化 |
+| 多一个宿主增加基础内存/体积 | 现有布局优先，需要隔离才比较 worker/utilityProcess | 无明确需求或总足迹/响应收益不足则不提取；私有 Node 另行批准 |
 | journal 与 canonical 双写增加 I/O | 只承担恢复必需变更，group commit 不提前 ACK | 固定负载总写入/终态延迟恶化时重新设计，不弱化 fsync 合同 |
-| Provider 不支持背压 | 限新准入＋spool＋明确失败 | 无法证明 bounded 处理超大消息时不宣称硬内存上限 |
-| Rust 跨语言增加维护成本 | v1 使用 Node；仅对测得热点做等价原型 | 同 workload 无独立 L2 收益或 ABI/恢复复杂度过高时不引入 Rust |
+| Provider 不支持背压 | 当前先观测；新准入策略与 spool 各自验证 | 未解决控制消息阻塞/磁盘容量时不执行硬截断、不宣称硬内存上限 |
+| Rust 跨语言增加维护成本 | 当前保留既有 TS/Electron；仅对测得热点做等价原型 | 同 workload 无独立 L2 收益或 ABI/恢复复杂度过高时不引入 Rust |
 | 外部可变源无法低成本证明未变 | 初期保留验证，移出交互路径 | 需要弱化权限/证据检查才变快则否决 |
 | UI 淘汰破坏用户状态 | 固定交互中内容，独立保存执行与编辑状态 | 原生选择、草稿、终端或统计完整性回归则不启用淘汰 |
 | engine 升级与退出语义变化 | 默认沿用现状，不常驻 | 明确关闭/审批/恢复 UX 与产物验证未完成则不启用后台持续执行 |
@@ -143,7 +140,7 @@ node .agents/skills/scry-performance-climb/scripts/timing-run.mjs <标签> -- <�
 
 ## 15. 决策与后续交付
 
-本提案已确定技术主线与安全默认值，不把核心协议选择留给实施者临时猜测。下一步由维护者决定是否批准 **P0＋P1 实施**；批准设计文档提交/推送不等于批准真实账号探针、安装常驻服务、新增遥测或正式门禁。
+本次修订明确了 **P0＋P1 的工作项、oracle 与止损线**，并撤回私有 Node、新 framing 和 journal 的默认选型。它们不是留给实施者随意决定，而是尚未满足进入条件。维护者批准当前文档修订，不等于已批准 P0/P1 代码实施、后续架构、真实账号探针、安装常驻服务、新增日常遥测或正式门禁。
 
 后续必须单独确认的策略变化：
 

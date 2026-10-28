@@ -1,47 +1,56 @@
 # Scry 无界面引擎：运行时、协议与 Provider 治理
 
-**状态：设计提案，尚未实现。** 本文属于[完整方案总览](../headless-execution-engine-design.md)，遵守总览中的源码基线、交付范围和权威边界。
+**状态：条件性架构附录，尚未实现，当前 P0/P1 不引入新宿主或协议。** 本文属于[完整方案总览](../headless-execution-engine-design.md)；先读 [首个切片](first-slice.md)。本篇仅在测量或明确产品需求触发后重新评估。
 
-第 4–6、10 节：私有宿主、本机认证、收据与状态机、事件流控、Provider 和资源调度。 章节编号跨文档保持一致；文中的 § 引用可按总览导航定位。
+第 4–6、10 节：宿主选择与既有 daemon 对齐、未来收据/事件流控、Provider 和资源治理。章节编号保留用于追溯评审，不表示这些组件全部需要实现。
 
 导航：[运行时与协议](runtime-and-protocol.md) · [数据与客户端](data-and-consumers.md) · [恢复与验收](recovery-and-validation.md)。
 
 ## 4. 进程、启动、认证与版本
 
-### 4.1 分阶段宿主
+### 4.1 以需求选择宿主，不预订私有 Node
 
-1. 先在现有 App 内提取纯 engine 模块与 worker，不改变退出方式。
-2. 协议和恢复通过后，引入 App 私有 Node 24 engine 进程。Node 版本、来源校验和许可证进入构建 manifest；新增运行时体积属于必须测量的成本。
-3. 使用包内固定绝对路径启动，不搜索 shell PATH，不继承危险 Node/Electron 注入变量，不允许仓库指定 engine executable。
-4. engine 的 Node ABI 依赖与 Electron 的原生模块分开构建、打包和校验。当前 SQLite 原生模块不能直接假定可在两个运行时复用。
-5. recorder CLI 继续独立支持其既有 Node 20/22/24 合同；engine 的 runtime 选型不能成为 recorder core 的依赖。
+| 已验证需求 | 首选评估路径 | 进入前的验证 |
+| --- | --- | --- |
+| 仅消除重复计算/编码 | 保持现有进程 | P0/P1；不要为增量索引先创建进程边界 |
+| 已证明主线程 CPU/同步数据库阻塞 | 复用现有 Node worker 模式 | 队列、clone、总内存、数据库所有权；worker 不自动解决 native crash 隔离 |
+| 需要进程级隔离，默认退出语义不变 | 优先 `utilityProcess` 原型 | app ready、native addon、消息/退出/崩溃、签名与打包实测 |
+| 明确批准退出桌面后继续执行，且上述方式不足 | 再比较现有 recorder 宿主经验与独立 engine 可执行文件 | 无客户端审批、ownership、恢复、升级、签名/公证和总成本 |
 
-v1 不使用 `utilityProcess` 的存活特性来宣称独立 daemon，也不靠开启 Electron fuse 获得另一个 Node 入口。此选择仅针对新 engine；不改变现有私有 recorder CLI 的 RunAsNode 启动合同。提取后新增进程必须计入启动、安装体积和总内存。
+`utilityProcess` 复用 Electron 分发的 runtime/Helper，通常无需第二套 Node 发行版；不等于原生模块加载与 hardened runtime 已自动验证，也不等于独立 daemon。使用其父子消息能力时无需先开 UDS 服务；renderer 仍经过 typed preload 和可信 broker。
 
-### 4.2 本机通信与发现
+私有 Node 24 从必选项改为远期候选。若最终选用，需估算新增压缩/安装字节、启动与常驻 RSS、Node 来源/许可证、签名公证、JIT/library-validation entitlement、`better-sqlite3` 第二套 ABI/native package 与更新成本。不能只写“有 manifest”就认为成本已覆盖。
 
-- macOS/Linux v1 使用 Unix domain socket；Windows named pipe 属于后续分发面，未验证前明确 unavailable，不自动回退 localhost TCP。
-- endpoint 位于 engine 创建的短路径私有 runtime 目录（`mkdtemp`、目录 0700、socket/能力文件 0600）。发现文件位于对应 userData 的 engine runtime 子目录。
-- 启动和连接验证 canonical userData、目录/文件 owner、非符号链接、进程身份、build、协议版本和 engine epoch；路径过长或验证失败拒绝启动，不猜测其他 endpoint。
-- 首次启动通过继承的私有 pipe 传递 bootstrap 能力；重连所需能力保存在该用户私有 runtime 文件，不放在 argv、日志、renderer 或远程响应中。
-- broker 与 engine 相互完成 nonce/能力校验。engine 只接受声明并授权的角色与操作集合；build 字符串是兼容性证据，不单独当作身份认证。
-- 同 UID 对手不在既有保证范围内；文件权限和 token 不得被描述为隔离同用户恶意程序的安全沙箱。
+仍使用受校验的包内绝对路径、环境清洗，不允许仓库指定 engine executable。独立 recorder 保持原有 Node 20/22/24 和私有 CLI RunAsNode 合同；新 engine 的选择不扩展 core 依赖或放宽 Electron fuse。
 
-### 4.3 单写者与 epoch
+### 4.2 与既有 recorder daemon 对齐
 
-每个 canonical userData 同时只能有一个执行所有者，旧 main 执行模式也必须遵守同一所有权入口。
+[daemon.ts](../../../src/core/turn-recorder/daemon.ts)、[daemon-transport.ts](../../../src/core/turn-recorder/daemon-transport.ts)、[daemon-owner.ts](../../../src/core/turn-recorder/daemon-owner.ts) 已实现 HTTP-over-UDS、协议版本 `2`、8 MiB request body 上限、owner marker、detached 启动及默认 30 分钟 idle。这些应纳入复用评估，原方案的遗漏已修正。
 
-- 原子创建 ownership claim 后才启动 writer；claim 记录 OS 进程身份、启动身份、engine epoch、协议/数据版本。
-- 发现旧 claim 时先验证存活身份。能连接则复用；确认原 writer 已退出才允许恢复。身份未知或权限不足时拒绝第二个 writer，不能仅凭 heartbeat 超时夺锁。
-- lease 存在但 socket 暂不可达，不表示 engine 已退出。
-- 所有 job、连接和控制响应带 engine epoch。旧 epoch 的晚到响应不得改变新 engine 状态。
-- 主动升级先停止新准入，完成或明确终止已有工作，确认资源收敛与 writer 退出，再交接。未知状态下不启动替代 writer。
+| 能力 | 复用决定 | 为什么不能直接照搬 |
+| --- | --- | --- |
+| JSON/HTTP-over-UDS、路径长度处理、请求上限 | 独立宿主成立时优先评估共用纯 Node helper | recorder 是 workspace hook/control 请求；engine 还需 actor/scope、credit、订阅和多客户端撤权；版本 header 不等于认证 |
+| owner marker、启动锁、等待退出 | 复用已验证测试与身份/退出证据模式 | recorder 以 workspace 为范围，engine 以 userData/活动 Provider 为范围；两者不能共享 marker 或互相停止 |
+| `stopOwner` 与旧 marker 处理 | **不直接复用停止策略** | start 路径在条件满足时终止旧 owner；helper 按 PID 发信号，不能据此宣称具备 engine 的未知 owner fencing |
+| idle/detached | 仅作经验来源 | recorder 的 idle 更新与 hook 生命周期不适用于审批等待、共享 transport 和用户后台任务 |
 
-### 4.4 协议兼容
+若确需抽取公共 transport，保持 Electron/SQLite/Provider-free，分别验证 App 与独立 CLI，不能为“统一”扩大 recorder 权限或更改其协议。复用不足时记录具体差异再决定新实现，而非现在预建第二套 IPC 框架。
 
-v1 使用长度前缀 UTF-8 JSON frame，复用已有领域类型；不先引入二进制 codec、共享内存或 MessagePort 技术栈。
+### 4.3 独立宿主才需要的发现与所有权
 
-握手交换 `protocolVersion`、`engineBuild`、`schemaVersion`、`engineEpoch`、受支持能力及 frame/credit 上限。只支持明确协商成功的版本；没有旧协议旁路。升级兼容窗口在每个发布版本声明，不能用任意 fallback 隐藏不兼容。
+以下仅约束未来独立 daemon；当前切片与父子 `utilityProcess` 原型不创建 endpoint discovery、重连 token 或全局 writer 框架。
+
+- macOS 首先验证私有 UDS；其他 OS 按实际分发面验证，不为本方案扩展平台支持。路径权限、owner、符号链接、canonical userData 与进程身份都要检查；不能回退为任意 localhost 接口。
+- 单一执行所有者在启动前获得原子 claim，记录进程启动身份和 epoch。socket 不通/heartbeat 超时不证明旧 writer 已退出；身份未知时阻塞新 writer，不沿用旧 recorder 的自动停止策略。
+- 认证 bootstrap 能力不进入 argv、renderer 或日志；actor/scope 由可信 broker/网关绑定。build/version 是兼容性证据，不单独充当身份认证。
+- job 和控制响应带 epoch；旧响应不能推进新状态。升级先停止准入并确认 writer 退出，不以 forceKill 请求作为退出证明。
+- 同 UID 恶意并发者仍不在原有保证范围；连接能力与文件权限不能被描述为 sandbox。
+
+### 4.4 协议选型与兼容
+
+不再预定“长度前缀 JSON frame”。父子宿主优先使用已有消息通道；独立宿主优先评估 HTTP-over-UDS 的纯 transport 复用，并单独验证订阅/credit 与大内容分块。二进制 codec、共享内存和新 framing 只有固定 workload 证明必要时才进入。
+
+未来握手须明确 protocol/build/schema/epoch、能力与容量；不兼容时拒绝写入，不用任意 fallback 掩盖。§5–6 描述领域语义，不绑定某一 transport，也不要求 P1 修改现有远程协议。
 
 ## 5. 控制面：请求、收据与状态机
 
@@ -135,13 +144,13 @@ UI 可以先显示 bounded live 信息，但不能把它标成已归档的权威
 
 ### 6.4 初始容量候选
 
-以下是用于首轮压力实验的候选，不是现有产品上限，也不是已批准的性能门禁。任何正式限制先验证真实合法输入，保留现有 API 允许的输入能力。
+以下仅是后续协议/持久化实验的候选，不属于 P0/P1 的产品限制。当前 raw 队列部分只做字节/等待观测与压力报告，见 [首个切片 D](first-slice.md)。正式限制先验证合法输入和溢出行为，保留现有 API 允许的能力。
 
 | 对象 | 初始候选 | 触发后的处理 |
 | --- | --- | --- |
 | 数据 frame | 目标 256 KiB，最大 1 MiB | 大正文走内容引用/分块；不截断合法事件 |
 | 每消费者未确认数据 | 4 MiB | 停止向该消费者增加在途数据；慢客户端 reset 不影响权威记录 |
-| 全局待持久化 raw 队列 | 32 MiB、单 run 软预算 8 MiB | 暂停新准入，启动 spool/adapter 支持的背压；不能直接丢 raw |
+| 全局待持久化 raw 队列 | 32 MiB、单 run 8 MiB 的候选压力线 | 当前只观测/报告；限制新准入需另行验收，spool/背压尚未实现，不丢 raw |
 | query worker 并行 job | 首轮最多 2 个 | 有界排队、可取消纯查询；控制请求不进入这条队列 |
 | DB 投影 job | 按引用计数与实际借用字节双预算 | durable outbox 留存；不无限结构化克隆全文到 worker |
 

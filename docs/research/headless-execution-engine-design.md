@@ -1,6 +1,6 @@
 # Scry 无界面执行与证据引擎：完整技术方案
 
-- 状态：**设计提案，尚未实现；本文不表示迁移、后台常驻、协议或性能门禁已获实施批准。**
+- 状态：**评审后收敛版，尚未实现；本次授权仅修订文档。建议下一实施切片为 P0＋P1，其余阶段均待证据与单独批准，不默认继续。**
 - 日期：2026-10-28。
 - 方案来源：多会话并发性能调查中的方案二。
 - 源码基线：`66c2f38fddbc687e1a72eccc7bfe391de2971498`。
@@ -9,14 +9,15 @@
 
 ## 阅读导航
 
-本技术方案按职责拆分为四篇，组成一个完整设计；不是四个独立实施选项。章节编号跨文档连续，状态均为**尚未实现**。
+先读本篇和首个切片，其余三篇为条件性架构附录。旧章节编号保留以便追溯评审，**不代表 P0–P7 已成为默认执行路线**。
 
 | 文档 | 范围 |
 | --- | --- |
-| 本篇总览 | 第 0–3 节：决策、目标、现状与所有权 |
-| [运行时与协议](headless-execution-engine/runtime-and-protocol.md) | 第 4–6、10 节：启动认证、控制/数据协议、Provider 与资源治理 |
-| [数据与客户端](headless-execution-engine/data-and-consumers.md) | 第 7–9 节：日志、内容、删除、数据库、历史与客户端 |
-| [恢复与验收](headless-execution-engine/recovery-and-validation.md) | 第 11–15 节：故障、退出、回滚、阶段、验证和决策 |
+| 本篇总览 | 当前决策、现状、阶段规模与进入条件；第 3 节为条件性远期架构 |
+| [P0＋P1 首个切片](headless-execution-engine/first-slice.md) | 当前建议：归因实验、mutation 清单、内部类型草图、oracle 与止损线 |
+| [附录：运行时与协议](headless-execution-engine/runtime-and-protocol.md) | 第 4–6、10 节：宿主选择条件、现有 daemon 复用与未来控制/数据协议 |
+| [附录：数据与客户端](headless-execution-engine/data-and-consumers.md) | 第 7–9 节：仅在需要时启用的 journal、耐久性、DB、历史与客户端设计 |
+| [附录：恢复与验收](headless-execution-engine/recovery-and-validation.md) | 第 11–15 节：条件性恢复/退出/回滚与后续验收，不是自动续做清单 |
 
 ## 0. 执行摘要与设计决策
 
@@ -24,18 +25,35 @@
 
 > 一次变更只识别一次；同一版本的展示投影只生成一次；正文按需读取；队列有上限；执行与界面生命周期分离；证据是否完整始终可验证。
 
-本方案的明确选择：
+评审后的明确选择：
 
-1. 保留 Electron renderer 和现有 Provider adapter。第一阶段不换 UI，不实现自有 Agent runtime。
-2. 先在现有进程布局中建立变更版本、预算和纯业务边界，再提取无界面 engine。避免同时重写存储、协议、运行时和界面。
-3. 数据库先迁到单所有者 Node worker。最终 engine 使用受签名/完整性校验的私有 Node 24 运行时，不依赖用户 PATH 的 `node`，不启用 Electron RunAsNode 降级入口。
-4. 本机采用受认证的 Unix domain socket；renderer 仍只使用 typed preload。现有远程入口作为受验证的网关，不把本机 socket 暴露为任意远程命令接口。
-5. 建立 App 自有、分段的 mutation journal。它服务于恢复与投影，不取代 `.scry/records`、Provider 原始 transcript 或其他不同权威性的事实源。
-6. Provider 输入采用持久化收据与未知结果语义，不承诺外部副作用 exactly-once。崩溃后不自动重发可能已被接受的 prompt、steer 或审批。
-7. 默认保持现有退出语义。正式的“退出桌面后继续执行”作为后续独立启用项；v1 不安装登录启动项，不默认后台常驻。
-8. 不设置未经验证的性能收益承诺。性能预算首先是候选；修改采集内容、正式门禁或退出策略前，按仓库约定取得维护者批准。
+1. **先测 P0，再做 P1 的单假设实验。** 保留现有进程、退出、存储、Provider 和远程 wire contract；不引入 `src/engine`、新协议或新 runtime 脚手架。
+2. P0 分清 Provider/main/IPC/renderer/持久化成本。P1 针对已知全量 hash 与 mutation 识别路径，保留全量 oracle；L1 下降不是扩大重构的充分理由。
+3. P2 可先纳入 raw 队列字节/等待观测。超过候选预算只报告压力；限制新准入需独立行为验收，不能截断活动 Provider 输出或谎称硬内存上限。
+4. journal/spool 只有在积压证据、恢复需求和写放大估算成立后才考虑。P3 必须先完成 DB 同步调用面盘点。两者都不是 P1 的默认下一步。
+5. 若确认需要进程隔离但退出语义不变，优先验证现有 worker 与 `utilityProcess`；后者不等于独立 daemon。私有 Node 运行时仅在“桌面退出后仍执行”的需求获批且现有宿主不足时重新评估。
+6. 先盘点 recorder daemon 的 HTTP-over-UDS、owner 与生命周期合同。不能直接复制其旧 owner 终止策略，也不预定另起长度前缀 JSON 协议。
+7. 保留既有输入收据、unknown、不静默重发及 recorder 独立性。对 Node/macOS 的耐久性按实际 libuv 路径、回退和文件系统说明，不把未做断电实验的结果写成保证。
+8. 不改变日常采集字段、正式性能门禁、审批或退出策略。新增采集先限于隔离 fixture；需要修改产品策略时单独取得批准。
 
-## 1. 目标、非目标与完成定义
+### 0.1 每阶段改什么、估多大、何时停止
+
+规模为一名熟悉代码的工程师的粗估人日，含 focused 验证，不含真实账号/设备等待；不是工期承诺。P0 后更新估算。后续行只用于评估投入，不构成实施授权。
+
+| 阶段 | 文件/调用面 | 预估规模 | 进入与止损条件 |
+| --- | --- | --- | --- |
+| P0 | performance fixtures/collector；run-live-state、trace-output、useAgentSession 的只读阶段观测 | 3–5 人日，约 3–6 个测量文件 | 冻结 workload 与噪声；无稳定归因或负载不可信则补测，不进入相应架构改造 |
+| P1 | live-trace、run-live-state、run-execution、run-diff、trace-runtime、run-outcome、remote trace revisions 及生产写者 | 5–10 人日，约 10–15 个实现/测试文件；完整清单见首个切片 | oracle 等价＋同 workload L2 改善；三轮单假设实验仍仅 L1 下降则停止扩大，记录未证明端到端收益 |
+| P2 观测 | live-trace-ingestion 与 fixture 字节/等待计数 | 1–2 人日，约 2–3 个文件 | 观测本身增加编码/内存则修正计量方式；不是丢弃阈值或全局调度器 |
+| P2 持久化 | ingestion、managed commit、outbox、session deletion 与新增 journal/spool | 10–20 人日，需二次设计 | 先证明真实积压、限定故障目标并量化写放大；证据不足不做 |
+| P3 | db.ts、8 个直接调用模块、transitive deletion/analytics 与 outbox 测试 | 8–15 人日；先做调用/时序清单 | DB 主线程阻塞或资源成本成立才评估；只搬进程而总成本/交互不改善则停止 |
+| P4/P5 | run-execution、lifecycle、remote host、宿主和打包边界 | 待 P0 与宿主原型后估算，不报价整个重构 | 有明确隔离或独立存活需求；默认布局已满足目标则不提取宿主 |
+| P6 | Overview、历史 store、冷面板、目录/历史查询 | 每个独立假设 3–8 人日，不打包全部实现 | 对应 renderer/内存/查询证据成立才进入；不以 P1 完成自动触发 |
+| P7 | 对已接受切片做发布、生效映射与 L3 | 按切片计，不等待所有阶段 | 候选有 L2 与正确性证据才发布；采样不足只报告不足 |
+
+评审处置：接受范围收敛、daemon 遗漏、私有 Node 成本、P1/DB 调用清单和写放大意见；修正“Node 不能触发 F_FULLFSYNC”与“队列硬上限收益确定”的判断。细节分别见附录 §7.2、首个切片。
+
+## 1. 用户目标与条件性架构完成定义
 
 ### 1.1 用户目标
 
@@ -86,7 +104,7 @@
 
 不重复立项：双根内容准备已在 [content-store](../../src/core/turn-recorder/content-store.ts) 复用编码/摘要；managed intent 已有小型阶段 sidecar；Codex/OpenCode 已复用 native server；Pi 已有 catalog 和精确 session 的不同复用路径。相关实验见 [性能机会日志](../performance-opportunities.md) 和 [内容副本实验](../performance-experiments/20261026-content-copies.md)。
 
-## 3. 目标架构与所有权
+## 3. 条件性远期架构与所有权
 
 ```mermaid
 flowchart TB
@@ -105,7 +123,7 @@ flowchart TB
   E -->|投影增量 / 页 / 明确状态| B
 ```
 
-图为目标设计，不是当前部署状态。engine 和受信任网关仍以本机用户权限工作；renderer 不因此获得该权限。
+图为未来需求成立时的逻辑设计，不是当前部署状态，也不要求每个框成为独立进程。journal/spool、DB worker 和新宿主各有独立进入条件；P0/P1 不创建这些组件。engine 和受信任网关仍以本机用户权限工作；renderer 不因此获得该权限。
 
 ### 3.1 唯一所有者
 
@@ -122,7 +140,7 @@ flowchart TB
 
 `app-store` 中混合前后端字段先由现有单一写者提供 facade，再按字段迁移。禁止让旧 main 与新 engine 同时写同一个 store、DB 或 managed commit journal。
 
-### 3.2 代码结构（拟新增，不表示文件已经存在）
+### 3.2 远期代码位置（仅供评估；当前切片不创建）
 
 - `src/engine/`：不导入 Electron；run/control、journal、projection、budget、host lifecycle。
 - `src/shared/engine-protocol.ts`：版本化请求/响应/事件合同及运行时校验。

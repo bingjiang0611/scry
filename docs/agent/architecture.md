@@ -51,7 +51,7 @@ React renderer
 
 ## 架构演进提案
 
-- [无界面执行与证据引擎技术方案](../research/headless-execution-engine-design.md)：方案二的进程边界、版本化事件流、资源预算、恢复、迁移与验收设计。**尚未实现，不替代上面的当前架构或现有权限/证据合同。**
+- [无界面执行与证据引擎技术方案](../research/headless-execution-engine-design.md)：评审后收敛为 P0 归因＋P1 增量 trace 的首个切片；独立宿主、journal 与完整引擎作为条件性附录。**尚未实现，不默认执行后续阶段，不替代当前架构或现有权限/证据合同。**
 
 ## 代码地图
 

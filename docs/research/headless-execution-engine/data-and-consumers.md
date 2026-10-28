@@ -1,6 +1,6 @@
 # Scry 无界面引擎：证据数据平面与客户端
 
-**状态：设计提案，尚未实现。** 本文属于[完整方案总览](../headless-execution-engine-design.md)，遵守总览中的源码基线、交付范围和权威边界。
+**状态：条件性架构附录，尚未实现；P0/P1 不创建 journal/spool 或迁移 DB。** 本文属于[完整方案总览](../headless-execution-engine-design.md)。先执行 [首个切片](first-slice.md) 的观测与止损；本篇只在对应瓶颈/恢复需求成立后评估。
 
 第 7–9 节：journal/spool、清理与删除、数据库 worker、历史查询、renderer 与远程消费。 章节编号跨文档保持一致；文中的 § 引用可按总览导航定位。
 
@@ -8,7 +8,26 @@
 
 ## 7. App journal、内容与证据提交
 
-### 7.1 存储布局（拟新增）
+### 7.0 进入条件与写放大预算
+
+先证明真实 raw 积压及恢复缺口，再考虑 journal/spool。只需要显式变更版本不意味着需要持久化 mutation log；低成本的索引和通知不依赖本节。
+
+以固定输入总字节 `B` 和固定最终 canonical 证据为口径，分别记录基线/候选的下列量。不能把不同职责的副本一律当浪费，也不能简单声称恒定写入 `6 × B`：
+
+| 写入面 | 需估算/实测的量 | 何时会发生 |
+| --- | --- | --- |
+| 新 journal | metadata、内联正文、checkpoint、分段头与同步次数 | 仅候选启用；明确是否与 spool 重复保存 raw |
+| 新 spool | 正文、临时文件与迁移/复制字节 | 仅大内容或慢盘压力路径；必须统计最终转存成本 |
+| App archive/content | serialised bytes、已有 blob 校验读取、同步 | 当前已有基线，不冒充新优化 |
+| `.scry` records/content | recorder mode 下实际写入与独立校验 | disabled 记不适用；不删除副本来制造收益 |
+| DB/WAL/checkpoint | 数据页/WAL/检查点写入、事务与排队 | 同时计入 DB worker 和最终 checkpoint |
+| outbox | 失败时写入、重放读取及清理 | 必须测正常与故障两种负载 |
+
+`W = W_journal + W_spool + W_app + W_recorder + W_db + W_outbox`；报告 `W/B` 和候选相对基线的增量、峰值磁盘占用、hash/编码字节及同步延迟。这里 W 是可观测进程文件写入，不冒充 SSD 物理写放大。尚未测得的格填 unavailable，不虚构节省比例。
+
+若固定 workload 的总 CPU/写入/终态延迟变差，先解释新增恢复工作是否确有需求；无相应需求则不建 journal。group commit 降低同步次数也必须计入等待和崩溃窗口，不能提前发 durable ACK。
+
+### 7.1 存储布局（条件性拟新增）
 
 ```text
 userData/
@@ -25,7 +44,17 @@ workspace/.scry/records/  保持既有 canonical 一轮一文件
 
 运行时 ID 不能直接来自任意客户端路径。所有路径在 engine 内从已校验身份生成；不提供按任意绝对路径读取 spool/journal 的接口。
 
-### 7.2 写入与同步顺序
+### 7.2 耐久性口径与写入顺序
+
+本方案不承诺跨文件系统/硬件的绝对断电安全。需要区分：进程崩溃可恢复、文件/目录提交顺序、OS/设备 flush 语义，以及实际电源故障验证。
+
+评审中的“Node 不暴露 F_FULLFSYNC，因此只能调用普通 fsync”并不准确。已核对 Node `v24.18.0` 的 [FSync 入口](https://github.com/nodejs/node/blob/v24.18.0/src/node_file.cc#L1569-L1588) 和该版本所带 [libuv 实现](https://github.com/nodejs/node/blob/v24.18.0/deps/uv/src/unix/fs.c#L170-L190)：macOS 优先调用 `F_FULLFSYNC`，失败后尝试 `F_BARRIERFSYNC`，再回退 `fsync`。这是固定版本源码证据，不是当前安装 App、所有 Node 版本或实际磁盘耐久性的实测。
+
+Node API 成功不说明采用了哪一级回退，也不证明设备正确履行 flush。未来实验记录实际 Electron/Node/libuv、文件系统/设备和屏障延迟；正式默认承诺限定为**经验证的进程崩溃恢复与可说明的存储同步顺序，电源/OS 崩溃保护依赖平台，未做故障验证则明确未验证**。需要更强承诺时再决定平台验证/实现，不因误读 Node 源码立刻增加 native addon。
+
+SQLite 使用独立 native 同步路径，不能继承 Node 文件同步结论。P3 要读取实际 `journal_mode`、`synchronous`、`fullfsync`、`checkpoint_fullfsync`，结合 [SQLite fullfsync 合同](https://www.sqlite.org/pragma.html#pragma_fullfsync) 和 WAL/checkpoint 行为实测；不在此预先打开选项或估计延迟提升倍数。
+
+以下写入与回收规则均受上述口径限制：
 
 - mutation log 采用带版本、长度、校验和的分段记录；长度先校验再分配，尾部半条记录不当作完整事实。
 - 大内容先写临时 spool，验证内容摘要并达到必要文件/目录同步，再写指向它的 durable mutation。正文引用不能领先于对应内容的耐久性。
@@ -52,7 +81,7 @@ workspace/.scry/records/  保持既有 canonical 一轮一文件
 - 必需内容引用已独立可读；没有 queued/reserved、未确定操作或未完成删除事务依赖该记录。
 - DB 已原子提交对应投影与水位；或另有满足本方案文件及目录同步屏障的、完整可恢复的投影输入。不能删除最后一份恢复来源。
 
-当前 [DB outbox](../../../src/main/db.ts) 对临时文件同步后 rename，但没有父目录同步，且没有输入 revision。它提供既有恢复机制，**不直接满足本方案机器崩溃口径下的回收前提**。P2/P3 必须补齐所需耐久/版本合同，或保留新 journal 中的完整输入；在此之前不能仅凭旧 outbox 存在就删除 journal。
+当前 [DB outbox](../../../src/main/db.ts) 对临时文件同步后 rename，但没有父目录同步，且没有输入 revision。它提供既有恢复机制，**不直接满足本方案新增文件/目录提交顺序与版本合同下的回收前提**。若后续实施 P2/P3，必须补齐这些屏障，或保留新 journal 中的完整输入；在此之前不能仅凭旧 outbox 存在就删除 journal。父目录同步也不自动升级为绝对断电保证。
 
 慢客户端不能无限阻止 journal 清理；超出保留窗口后使用 canonical snapshot reset。未收敛、未知或损坏记录单独保护。磁盘预算到达后暂停新工作并显示清理需求，不删除它们。
 
@@ -73,7 +102,22 @@ journal 不承担无限保留每个 UI 中间版本的职责；清理前验证�
 
 ### 8.1 SQLite worker
 
-先迁移连接所有权与 API，再优化 SQL；不同时改业务表结构、定价/用量算法和线程布局。用于幂等的最小投影元数据表是新增版本化 schema，需独立迁移测试与回滚兼容记录，不能声称 DB schema 完全不变。
+仅在 P0 证明 DB 阻塞/资源成本后进入。先盘点同步语义并迁移连接所有权，再优化 SQL；不同时改业务表结构、定价/用量算法和线程布局。用于幂等的最小投影元数据表是新增版本化 schema，需独立迁移测试与回滚兼容记录，不能声称 DB schema 完全不变。
+
+基线 `db.ts` 的 8 个生产直接调用模块如下；这是起始面，不含所有类型传播和间接调用，不能按“改一个 recordTurn”估算：
+
+| 模块 | 当前依赖 | 异步化前要证明 |
+| --- | --- | --- |
+| [bootstrap/run-live-state.ts](../../../src/main/bootstrap/run-live-state.ts) | 同步 `recordTurn` 布尔结果后发 dataUpdated | 通知不领先于真正提交；终态与退出路径正确等待 |
+| [bootstrap/agent-runtime-ipc.ts](../../../src/main/bootstrap/agent-runtime-ipc.ts) | stats/usage/billing/fixture 与 syncBillingAdmin | IPC 返回、错误/unavailable、读写互斥和权限 wrapper 不退化 |
+| [bootstrap/conversation.ts](../../../src/main/bootstrap/conversation.ts) | `resolveSessionRunIds` 及同步函数类型 | 归属/删除计算不因 await 释放错误的 admission |
+| [bootstrap/session-deletion.ts](../../../src/main/bootstrap/session-deletion.ts) | run IDs、outbox rows、deleteSessionData | recovery/delete 栅栏与 partial failure 顺序保持 |
+| [bootstrap/remote-host.ts](../../../src/main/bootstrap/remote-host.ts) | usageAnalyticsWithCreditsQuery | 远程取消/超时与数据水位不混淆 |
+| [index.ts](../../../src/main/index.ts) | resolveSessionRunIds 依赖注入 | 调用合同一致，不遗留旧同步旁路 |
+| [bootstrap/startup-recovery.ts](../../../src/main/bootstrap/startup-recovery.ts) | replayDatabaseTurnOutbox | 完成重放/冲突判断前不提前开放依赖路径 |
+| [bootstrap/app-lifecycle.ts](../../../src/main/bootstrap/app-lifecycle.ts) | initDb、setBillingEnvProvider | 启动 ready、降级与间接终态写入/退出 deadline 的先后关系 |
+
+`statsQuery`、`usageAnalyticsQuery`、`billingStateQuery`、outbox 管理及删除也在迁移面。退出路径是否依赖同步完成要沿 lifecycle → run settlement → persistRunData 验证，不能凭 import 统计断言已全部覆盖。
 
 - 所有写、查询、迁移和 outbox replay 由同一个 worker 完成。main 不保留同步查询作为 fallback。
 - job 使用 run/revision/来源引用；必须 clone 全文时计入传输与峰值，不拿 worker 隐藏成本。
