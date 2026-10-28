@@ -8,7 +8,9 @@ export const PI_PICKER_COPY = {
 
 export const TURN_FLOW_COPY = {
   showEarlier: (count: number) => `显示更早的 ${count} 条活动`,
-  showEarlierLabel: (count: number) => `显示本轮更早的 ${count} 条活动`
+  showEarlierLabel: (count: number) => `显示本轮更早的 ${count} 条活动`,
+  showFullResponse: (count: number) => `显示完整回复（还有 ${count} 个字符）`,
+  showFullResponseLabel: (count: number) => `显示本轮完整模型回复；当前隐藏 ${count} 个字符`
 } as const
 
 export const TURN_DIFF_REVIEW_COPY = {

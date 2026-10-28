@@ -12,7 +12,7 @@ export interface AppSidebarActionsContext {
   view: AppView
   remoteTarget: RemoteTarget | null
   remoteAdoptedSession?: string
-  pickSession: (...args: [string, string, import('@shared/provider').SessionProviderId, string?, string?, string?]) => Promise<void>
+  pickSession: (...args: [string, string, import('@shared/provider').SessionProviderId, string?, string?, string?, string?, string?]) => Promise<void>
   togglePinSession: (...args: Parameters<ReturnType<typeof import('./app-session-actions').createSessionActions>['togglePinSession']>) => Promise<void>
   archiveSession: (...args: Parameters<ReturnType<typeof import('./app-session-actions').createSessionActions>['archiveSession']>) => Promise<void>
   renameSession: (...args: Parameters<ReturnType<typeof import('./app-session-actions').createSessionActions>['renameSession']>) => Promise<void>

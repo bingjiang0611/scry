@@ -42,6 +42,9 @@ struct RootView: View {
   @EnvironmentObject var model: AppModel
   @Environment(ExecutionTargetCoordinator.self) var targets
 
+  // `.home` keeps the selected store so the waiting-decision banner, its sheet,
+  // reachability write-back and resumeRecoveredRun keep the pre-L1 source. The
+  // new-session page injects `targets.newTaskStore` for itself.
   private var run: RemoteRunStore { model.route == .newSession ? targets.newTaskStore : targets.selectedStore }
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -52,8 +55,9 @@ struct RootView: View {
         PairView()
       } else {
         switch model.route {
-        case .home: HomeView().environment(targets.localStore)
-        case .newSession: NewSessionView()
+        // One page: launch lands on a new session with the list in a collapsed
+        // drawer; `.newSession` only adds the keyboard focus.
+        case .home, .newSession: WorkspaceShell(focusComposer: model.route == .newSession)
         case .chat: ChatView()
         case .pair: PairView()
         case .transcript:
@@ -112,7 +116,9 @@ struct RootView: View {
     .simultaneousGesture(
       DragGesture(minimumDistance: 18)
         .onEnded { value in
-          guard model.canGoBack, value.startLocation.x <= 24 else { return }
+          // `.home`/`.newSession` are the drawer's own page: WorkspaceShell turns
+          // an edge swipe into the drawer instead of navigating back.
+          guard model.canGoBack, model.route != .newSession, value.startLocation.x <= 24 else { return }
           let horizontal = value.translation.width
           let vertical = abs(value.translation.height)
           if horizontal > 72 && horizontal > vertical * 1.35 { model.goBack() }

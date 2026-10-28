@@ -14,8 +14,9 @@ describe('ChatView 隐藏常驻来源说明', () => {
   })
 
   it('缓存首帧保留内容且立即锁定操作，加载文案由原生计时检查覆盖', () => {
-    const html = renderWelcome({ turns, input: '缓存待核对的草稿', sessionLoading: true, sessionCacheVisible: true, hasSelectedSession: true })
-    expect(html).toContain('aria-busy="true"')
+    const html = renderWelcome({ turns, input: '缓存待核对的草稿', sessionLoading: false, sessionCacheVisible: true, hasSelectedSession: true })
+    expect(html).toContain('aria-busy="false"')
+    expect(html).toContain('data-history-source="preview"')
     expect(html).toMatch(/class="send"[^>]*disabled=""/)
     expect(html).toContain('transcript-turn')
     expect(html).not.toContain('data-status="loading"')

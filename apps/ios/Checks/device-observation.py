@@ -53,7 +53,8 @@ app.write_text(content)
 # Locate declarations so frozen revisions before and after UI file moves share
 # the same instrumentation, without assuming today's file layout in old commits.
 remaining = {'RootView', 'ChatView', 'FocusedTurnView', 'ConversationMarkdownText',
-             'ConversationMarkdownInline', 'HomeView', 'SettingsView', 'HomeComposer'}
+             'ConversationMarkdownInline', 'WorkspaceShell', 'SidebarDrawer', 'SettingsView',
+             'NewSessionComposer'}
 for path in sorted(source.glob('*.swift')):
     content = path.read_text()
     names = sorted(name for name in remaining if 'struct ' + name + ': View' in content)

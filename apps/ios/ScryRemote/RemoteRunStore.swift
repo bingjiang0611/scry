@@ -4449,13 +4449,13 @@ final class RemoteRunStore {
       G0Transport.RunSessionRef(sessionId: "mock-pinned-2", externalSessionId: "qoder-pinned-2", providerId: "qoder", cwd: roots[1].path,
         label: "排查支付页偶发白屏与恢复流程", ts: now - 36 * 60_000, pinnedAt: now - 120_000),
       G0Transport.RunSessionRef(sessionId: "mock-scry-1", externalSessionId: "codex-scry-1", providerId: "codex", cwd: roots[0].path,
-        label: "完成 iOS 工作目录选择器和附件发送", ts: now - 2 * 3_600_000),
+        label: "完成 iOS 工作目录选择器和附件发送", ts: now - 2 * 3_600_000, lastRunOutcome: "completed"),
       G0Transport.RunSessionRef(sessionId: "mock-scry-2", externalSessionId: "qoder-scry-2", providerId: "qoder", cwd: roots[0].path,
-        label: "修复手机续聊在 Mac 端不可见的问题", ts: now - 5 * 3_600_000),
+        label: "修复手机续聊在 Mac 端不可见的问题", ts: now - 5 * 3_600_000, lastRunOutcome: "completed"),
       G0Transport.RunSessionRef(sessionId: "mock-scry-running", providerId: "codex", cwd: roots[0].path,
         label: "正在分析大规模测试失败…", ts: now - 4 * 60_000),
       G0Transport.RunSessionRef(sessionId: "mock-rate-1", externalSessionId: "codex-rate-1", providerId: "codex", cwd: roots[1].path,
-        label: "优化首页滚动性能并补充回归测试", ts: now - 24 * 3_600_000),
+        label: "优化首页滚动性能并补充回归测试", ts: now - 24 * 3_600_000, lastRunOutcome: "interrupted"),
       G0Transport.RunSessionRef(sessionId: "mock-atlas-1", externalSessionId: "opencode-atlas-1", providerId: "opencode", cwd: roots[2].path,
         label: "实现登录错误态与离线重试体验", ts: now - 3 * 86_400_000)
     ])

@@ -32,6 +32,8 @@ enum Symbol {
   static let gaugeSpeed = "speedometer"
   static let plug = "powerplug"
   static let hand = "hand.raised"
+  static let sidebar = "sidebar.left"
+  static let bubble = "bubble.left"
 }
 
 // MARK: - Core controls

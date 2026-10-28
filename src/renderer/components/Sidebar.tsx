@@ -87,7 +87,7 @@ export const Sidebar = memo(function Sidebar({
   backgroundWorkByRun?: Readonly<Record<string, BackgroundWork>>
   version?: string
   onNewChat: () => void
-  onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string) => void
+  onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string, previewText?: string, previewRunId?: string) => void
   onTogglePin: (cwd: string, session: SessionMeta) => void
   onArchive: (cwd: string, session: SessionMeta) => void
   onRenameSession?: (cwd: string, session: SessionMeta, title: string) => Promise<void>

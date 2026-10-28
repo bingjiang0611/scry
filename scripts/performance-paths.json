@@ -122,6 +122,7 @@
       "operations": [
         "session_history.load",
         "session_history.load_older",
+        "session_history.remember_project",
         "ipc.agent:loadSession",
         "ipc.agent:loadSessionOlder",
         "ipc.agent:turnTerminalEvidence",
@@ -130,13 +131,24 @@
       ],
       "sources": [
         "src/main/session-history.ts",
+        "src/main/bootstrap/history-load.ts",
+        "src/main/bootstrap/history-project-recency.ts",
         "src/main/bootstrap/workspace-runtime.ts",
         "src/main/trace-diff-content.ts",
         "src/renderer/app-session-actions.ts",
+        "src/renderer/session-preview.ts",
+        "src/renderer/completed-turn-flow.ts",
+        "src/renderer/components/ChatTurnAssistant.tsx",
+        "src/renderer/components/CompletedModelText.tsx",
+        "src/renderer/components/ChatView.tsx",
+        "src/renderer/components/chat-view/Composer.tsx",
         "src/renderer/app-session-runtime.ts",
         "src/renderer/app-runtime.ts",
         "scripts/session-open-bench.mjs",
-        "scripts/session-open-timing.mjs"
+        "scripts/session-open-timing.mjs",
+        "scripts/workflow-session-open-bench.mjs",
+        "scripts/giant-turn-ui-smoke.mjs",
+        "scripts/fixtures/giant-turn-smoke.tsx"
       ],
       "benchmarks": [
         "history.page"

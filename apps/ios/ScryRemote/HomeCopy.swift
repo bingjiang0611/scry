@@ -16,8 +16,14 @@ extension ConnectionCopy {
   }
 
   static let tabActivity = "动态"
+  static let openSidebar = "展开侧栏"
+  static let closeSidebar = "收起侧栏"
+  static let newSessionHint = "描述任务，Mac 上的 Agent 会在所选项目里执行"
   static let homeNeedsReply = "需要回复"
   static let sectionRunning = "进行中"
+  // Only the host's persisted last-turn outcome fills this section, so it is
+  // absent — never empty-but-claimed — on a host that cannot prove an ending.
+  static let sectionCompleted = "已完成"
   static let homeWaiting = "待回答"
   static let activityEmpty = "暂无需要回复或进行中的任务，其他会话在「项目」里"
   static func activityOverflow(_ count: Int) -> String { "另有 \(count) 条，请搜索定位" }

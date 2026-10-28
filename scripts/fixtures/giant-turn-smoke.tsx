@@ -10,7 +10,11 @@ const items: TraceEvent[] = Array.from({ length: 101 }, (_, index) => ({
   ts: '2026-01-01T00:00:00.000Z',
   kind: 'model',
   stage: 'text',
-  text: index === 0 ? 'earliest giant turn evidence' : index === 100 ? 'latest giant turn evidence' : `middle ${index}`
+  text: index === 0
+    ? 'earliest giant turn evidence'
+    : index === 100
+      ? `latest giant turn evidence\n${'x'.repeat(40_000)}\ncomplete giant response tail`
+      : `middle ${index}`
 }))
 const turn: Turn = { runId: 'giant-turn-smoke', userText: 'giant turn smoke', done: true, items }
 
