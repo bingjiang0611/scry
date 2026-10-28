@@ -11,7 +11,7 @@ import type { TraceArchive } from '../transcript-archive'
 import type { PiNativeHistorySnapshot } from '../pi-native-history'
 import type { SessionHistoryCache } from './history-older'
 import { PerformanceTrace as PerformanceTraceImpl } from '../performance-timing'
-import { readTraceArchiveAsync, readTraceArchiveMetadataAsync, readTraceArchiveTurnsAsync } from '../transcript-archive'
+import { readTraceArchiveAsync, readTraceArchiveMetadataAsync, readTraceArchiveTurnsAsync, resolveTranscriptPath } from '../transcript-archive'
 import { readCachedTranscript } from '../transcript-parser'
 import { readPiNativeHistorySnapshot, reconcilePiNativeHistory } from '../pi-native-history'
 import { readCompleteArchiveForNativeReconciliation, mergeSessionTurns, hydrateSessionHistoryPage, sessionHistoryPage, sessionArchiveIsPageable } from '../session-history'
@@ -22,7 +22,7 @@ import { appSessionCanResume } from '../app-store'
 import { historyCopy } from '../../shared/constants/copy'
 import { readSessionArchive } from './history-archive'
 import { loadClaudeHookConfig, loadCodexHookConfig } from '../hook-config'
-import { resolveTranscriptPath } from '../transcript-archive'
+import { rememberSessionProjectAfterLoad } from './history-project-recency'
 
 export interface LoadSessionDependencies {
   handleTrusted: <TArgs extends unknown[], TResult>(channel: string, listener: (event: IpcMainInvokeEvent, ...args: TArgs) => TResult) => void
@@ -239,8 +239,6 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
       if (appSessionCanResume(catalogSession)) sessionByContext.set(key, payload.externalSessionId)
       else sessionByContext.delete(key)
       perf.mark('selection')
-      if (cwd) rememberProject(cwd)
-      perf.mark('project_remember')
       const historyContext = { userDataDir }
       const mergedHistory = nativeTurns ?? mergeSessionTurns(turns, archived, historyContext, { hydrateAttachments: false })
       perf.mark('merge_turns', { mergedTurns: mergedHistory.length })
@@ -387,6 +385,7 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
       perf.mark('page_hydration', { returnedTurns: page.turns.length })
       const result = pageWithHookCommands(page, hookConfig)
       perf.finish({ totalTurns: page.totalTurns, returnedTurns: result.turns.length })
+      if (cwd) rememberSessionProjectAfterLoad(payload.providerId, cwd, rememberProject)
       return result
     } catch (error) {
       perf.finish(undefined, signal.aborted ? 'cancelled' : 'error')

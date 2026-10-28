@@ -67,7 +67,7 @@ export function ChatView(props: ChatViewProps) {
     <>
       <WorkspaceFileLinkProvider workspaces={workspaceRoots} onOpen={onOpenFile}>
         <div className="body chat-body" data-screen-label="对话 · 真实 Turn transcript">
-          <div className="chat chat-transcript" ref={scrollRef} aria-label="执行时间线" aria-busy={sessionLoading}>
+          <div className="chat chat-transcript" ref={scrollRef} aria-label="执行时间线" aria-busy={sessionLoading && !sessionCacheVisible} data-history-source={sessionCacheVisible ? 'preview' : 'authoritative'}>
             {turns.length === 0 && !sessionLoading && sessionEvidenceGap && (
               <div className="chat-session-evidence-gap" role="status" data-status={sessionEvidenceGap.status}>
                 <b>{sessionEvidenceGap.status === 'error' ? '会话历史加载失败' : sessionEvidenceGap.status === 'unavailable' ? (remote ? `这条会话没有可读的 ${remoteHost} 证据` : '这条会话没有可读的本机证据') : '这条会话的归档里没有轮次'}</b>
@@ -92,7 +92,7 @@ export function ChatView(props: ChatViewProps) {
                 <button type="button" className="history-window-more" onClick={() => onLoadOlderTurns?.()} disabled={historyOlderLoading || !onLoadOlderTurns}>{historyOlderLoading ? '加载中…' : '加载更早轮次'}</button>
               </div>
             )}
-            {sessionLoading && !sessionCacheVisible && (
+            {(sessionLoading || sessionCacheVisible) && (
               <DelayedLoadingStatus loading title={LOADING_COPY.sessionHistory} detail={LOADING_COPY.sessionHistoryDetail} />
             )}
             <div className="chat-transcript-content">

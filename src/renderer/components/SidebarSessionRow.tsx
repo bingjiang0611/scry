@@ -42,7 +42,7 @@ export const SessionRow = memo(function SessionRow({
   unread: boolean
   backgroundWork?: BackgroundWork
   draftStore?: ComposerDraftStore
-  onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string) => void
+  onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string, previewText?: string, previewRunId?: string) => void
   onTogglePin: (cwd: string, session: SessionMeta) => void
   onArchive: (cwd: string, session: SessionMeta) => void
   onMenu?: (event: ReactMouseEvent<HTMLButtonElement>, cwd: string, session: SessionMeta) => void
@@ -67,7 +67,9 @@ export const SessionRow = memo(function SessionRow({
             session.providerId,
             session.externalSessionId,
             running ? session.runId : undefined,
-            session.agentProfileId
+            session.agentProfileId,
+            session.preview,
+            session.runId
           )
         }}
       >

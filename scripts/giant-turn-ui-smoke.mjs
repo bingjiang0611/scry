@@ -57,12 +57,13 @@ app.whenReady().then(async () => {
   await wait(\`document.body.innerText.includes('latest giant turn evidence')\`)
   const before = await read(\`({
     earliest: document.body.innerText.includes('earliest giant turn evidence'),
-    button: document.querySelector('.turn-flow-reveal')?.textContent,
+    completeTail: document.body.innerText.includes('complete giant response tail'),
+    buttons: Array.from(document.querySelectorAll('.turn-flow-reveal')).map(node => node.textContent),
     rendered: document.querySelectorAll('.model-text.md').length
   })\`)
   const point = await read(\`(() => {
-    const node = document.querySelector('.turn-flow-reveal')
-    if (!node) throw new Error('Missing reveal button')
+    const node = Array.from(document.querySelectorAll('.turn-flow-reveal')).find(candidate => candidate.textContent.includes('显示完整回复'))
+    if (!node) throw new Error('Missing full-response reveal button')
     node.scrollIntoView({ block: 'center' })
     const rect = node.getBoundingClientRect()
     const x = Math.round(rect.left + rect.width / 2), y = Math.round(rect.top + rect.height / 2)
@@ -71,10 +72,11 @@ app.whenReady().then(async () => {
   })()\`)
   win.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
   win.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
-  await wait(\`document.body.innerText.includes('earliest giant turn evidence')\`)
+  await wait(\`document.body.innerText.includes('earliest giant turn evidence') && document.body.innerText.includes('complete giant response tail')\`)
   const after = await read(\`({
     earliest: document.body.innerText.includes('earliest giant turn evidence'),
-    button: Boolean(document.querySelector('.turn-flow-reveal')),
+    completeTail: document.body.innerText.includes('complete giant response tail'),
+    buttons: document.querySelectorAll('.turn-flow-reveal').length,
     rendered: document.querySelectorAll('.model-text.md').length
   })\`)
   process.stdout.write('SCRY_GIANT_TURN_UI=' + JSON.stringify({ before, after }) + '\\n', () => app.exit(0))
@@ -91,7 +93,9 @@ app.whenReady().then(async () => {
   const encoded = output.match(/^SCRY_GIANT_TURN_UI=(.+)$/m)?.[1]
   if (!encoded) throw new Error(`Giant turn UI result missing:\n${output.slice(-8000)}`)
   const result = JSON.parse(encoded)
-  if (result.before.earliest || result.before.rendered !== 16 || result.after.button || !result.after.earliest || result.after.rendered !== 101) {
+  if (result.before.earliest || result.before.completeTail || result.before.buttons.length !== 2 ||
+      result.before.rendered !== 16 || result.after.buttons !== 0 || !result.after.earliest ||
+      !result.after.completeTail || result.after.rendered !== 101) {
     throw new Error(`Unexpected giant turn UI state: ${JSON.stringify(result)}`)
   }
   console.log(JSON.stringify(result, null, 2))
