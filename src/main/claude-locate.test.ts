@@ -493,6 +493,25 @@ printf '%s\n' '${RECORDER_VERSION}'
     }, 'claude')).toEqual({ PATH: '/usr/bin' })
   })
 
+  it('removes foreign provider session identity from child environments', () => {
+    const input = {
+      PATH: '/usr/bin',
+      CLAUDE_SESSION_ID: 'claude-session',
+      CODEX_THREAD_ID: 'codex-thread',
+      QODER_SESSION_ID: 'qoder-session',
+      OPENCODE_SESSION_ID: 'opencode-session',
+      PI_SESSION_ID: 'pi-session'
+    }
+    expect(sanitizeProviderEnv(input, 'qoder')).toEqual({
+      PATH: '/usr/bin',
+      QODER_SESSION_ID: 'qoder-session'
+    })
+    expect(sanitizeProviderEnv(input, 'pi')).toEqual({
+      PATH: '/usr/bin',
+      PI_SESSION_ID: 'pi-session'
+    })
+  })
+
   it('keeps billing-only admin credentials out of provider children', () => {
     expect(sanitizeProviderEnv({
       PATH: '/usr/bin:/bin',

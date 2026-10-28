@@ -1,300 +1,38 @@
 // 扫 PATH 检测本机已安装的 agent CLI（claude code / codex / cursor / …），
 // 供 app 的 CLI 选择器（参考 open-design 的 Local CLI 下拉）。
 
-import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { existsSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { delimiter, join, posix, win32 } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { RECORDER_VERSION } from '../core/turn-recorder/store.js'
 import type { ProviderHealth, ProviderId } from '../shared/provider.js'
+import {
+  execFileOutcome,
+  execFileText,
+  nvmBins,
+  resolveCommandOnPath,
+  shellEnv,
+  shellPath,
+  shellPathAsync,
+  versionProbePath
+} from './cli-environment.js'
+import { sanitizeProviderEnv } from './provider-env.js'
+
+export {
+  execFileOutcome,
+  execFileText,
+  mergeLoginShellEnv,
+  resolveCommandOnPath,
+  shellEnv,
+  shellEnvError,
+  warmShellEnv
+} from './cli-environment.js'
+export { sanitizeNestedAgentEnv, sanitizeProviderEnv } from './provider-env.js'
 
 export const CODEX_APP_BIN = '/Applications/ChatGPT.app/Contents/Resources/codex'
 
-// GUI app 从 Finder/Dock 启动走 launchd，PATH 极简（/usr/bin:/bin），不 source 用户的 .zshrc，
-// nvm/cargo 等版本管理器装的工具全找不到（macOS 经典坑）。正解：spawn 用户的「登录+交互」shell
-// 捞它的真实 PATH——nvm 在 .zshrc 里、只有交互 shell 才 source，这样 app 解析 claude 和用户终端
-// 完全一致（优先用户日常那个版本）。sentinel 包裹，过滤 shell 启动打印的 banner 等杂项。缓存一次。
-let shellPathCache: string | null = null
 const verifiedRecorderCliVersions = new Set<string>()
-function shellPath(): string {
-  if (shellPathCache === null) void warmShellEnv()
-  return shellPathCache ?? ''
-}
-
-export interface ExecFileOutcome {
-  stdout: string
-  exitCode: number | null
-  signal: NodeJS.Signals | null
-  timedOut: boolean
-  error?: string
-}
-
-export function execFileOutcome(
-  file: string,
-  args: string[],
-  opts: { env?: NodeJS.ProcessEnv; timeout?: number } = {}
-): Promise<ExecFileOutcome> {
-  return new Promise((resolve) => {
-    let settled = false
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let stdout = ''
-    const finish = (outcome: ExecFileOutcome): void => {
-      if (settled) return
-      settled = true
-      if (timer) clearTimeout(timer)
-      resolve(outcome)
-    }
-    let child: ReturnType<typeof spawn>
-    try {
-      child = spawn(file, args, {
-        env: opts.env,
-        detached: process.platform !== 'win32',
-        stdio: ['ignore', 'pipe', 'ignore']
-      })
-    } catch (error) {
-      finish({ stdout: '', exitCode: null, signal: null, timedOut: false, error: String((error as Error).message) })
-      return
-    }
-    child.stdout?.setEncoding('utf8')
-    child.stdout?.on('data', (chunk: string) => {
-      stdout = `${stdout}${chunk}`.slice(-64 * 1024)
-    })
-    child.once('error', (error) => finish({
-      stdout,
-      exitCode: null,
-      signal: null,
-      timedOut: false,
-      error: String(error.message)
-    }))
-    child.once('close', (code, signal) => finish({ stdout, exitCode: code, signal, timedOut: false }))
-    timer = setTimeout(() => {
-      finish({ stdout, exitCode: null, signal: 'SIGKILL', timedOut: true })
-      try {
-        if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGKILL')
-        else child.kill('SIGKILL')
-      } catch {
-        child.kill('SIGKILL')
-      }
-    }, opts.timeout ?? 1500)
-  })
-}
-
-export async function execFileText(
-  file: string,
-  args: string[],
-  opts: { env?: NodeJS.ProcessEnv; timeout?: number } = {}
-): Promise<string> {
-  const outcome = await execFileOutcome(file, args, opts)
-  return outcome.exitCode === 0 ? outcome.stdout : ''
-}
-
-async function shellPathAsync(): Promise<string> {
-  if (shellPathCache !== null) return shellPathCache
-  const env = await warmShellEnv()
-  shellPathCache = env.PATH ?? ''
-  return shellPathCache
-}
-
-// Finder/launchd 的 PATH 很短；只从登录 shell 补齐 CLI、桌面会话、代理和 Provider 自身变量。
-// 不能把用户 shell 里的任意 secret 全量注入每一家 Provider 子进程。进程原本继承的环境保持不变。
-let shellEnvCache: Record<string, string> | null = null
-let shellEnvPromise: Promise<Record<string, string>> | null = null
-let shellEnvFailure: string | undefined
-
-export function shellEnvError(): string | undefined {
-  return shellEnvFailure
-}
-
-// nvm initialization can take >5s on a healthy login shell. Keep acquisition bounded;
-// after 15s report degradation and retry only on the next explicit send, not UI polling.
-const SHELL_ENV_TIMEOUT_MS = 15_000
-
-const LOGIN_SHELL_ENV_NAMES = new Set([
-  'PATH', 'SHELL', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TERM', 'COLORTERM',
-  'DBUS_SESSION_BUS_ADDRESS', 'DISPLAY', 'SSH_AUTH_SOCK', 'WAYLAND_DISPLAY',
-  'HOMEBREW_PREFIX', 'HOMEBREW_CELLAR', 'HOMEBREW_REPOSITORY',
-  'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_RUNTIME_DIR', 'XDG_CURRENT_DESKTOP',
-  'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
-  'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy',
-  'NODE_USE_ENV_PROXY',
-  'SSL_CERT_FILE', 'SSL_CERT_DIR', 'NODE_EXTRA_CA_CERTS',
-  'NPM_CONFIG_PREFIX', 'npm_config_prefix', 'PNPM_HOME',
-  'CODEX_HOME'
-])
-const LOGIN_SHELL_ENV_PREFIXES = [
-  'SCRY_', 'ANTHROPIC_', 'OPENAI_', 'CLAUDE_', 'CODEX_', 'QODER_', 'OPENCODE_',
-  'AWS_', 'AZURE_', 'GOOGLE_', 'GCP_'
-]
-
-function loginShellEnvAllowed(name: string): boolean {
-  return LOGIN_SHELL_ENV_NAMES.has(name) || LOGIN_SHELL_ENV_PREFIXES.some((prefix) => name.startsWith(prefix))
-}
-
-export function mergeLoginShellEnv(
-  inherited: Record<string, string>,
-  captured: Record<string, string>
-): Record<string, string> {
-  const out = { ...inherited }
-  const hasInheritedCodexHome = Object.prototype.hasOwnProperty.call(inherited, 'CODEX_HOME')
-  for (const [name, value] of Object.entries(captured)) {
-    if (loginShellEnvAllowed(name) && (name !== 'CODEX_HOME' || !hasInheritedCodexHome)) out[name] = value
-  }
-  return sanitizeNestedAgentEnv(out)
-}
-
-function fallbackShellEnv(): Record<string, string> {
-  return sanitizeNestedAgentEnv({
-    ...(process.env as Record<string, string>),
-    PATH: versionProbePath()
-  })
-}
-
-export function warmShellEnv(options: { retryFailed?: boolean } = {}): Promise<Record<string, string>> {
-  if (shellEnvPromise) return shellEnvPromise
-  if (shellEnvCache && !(options.retryFailed && shellEnvFailure)) return Promise.resolve(shellEnvCache)
-  const shell = process.env.SHELL || '/bin/zsh'
-  shellEnvPromise = execFileOutcome(shell, ['-lic', 'echo __AS_ENV_S__; env; echo __AS_ENV_E__'], { timeout: SHELL_ENV_TIMEOUT_MS }).then((outcome) => {
-    const out = fallbackShellEnv()
-    const captured: Record<string, string> = {}
-    const raw = outcome.stdout
-    const s = raw.indexOf('__AS_ENV_S__')
-    const e = raw.indexOf('__AS_ENV_E__')
-    const capturedLoginEnv = outcome.exitCode === 0 && s >= 0 && e > s
-    if (!capturedLoginEnv) {
-      const reason = outcome.timedOut ? `超时（${SHELL_ENV_TIMEOUT_MS / 1_000}s）`
-        : outcome.error ? '无法启动'
-          : outcome.signal ? `被信号 ${outcome.signal} 终止`
-            : outcome.exitCode !== 0 ? `退出码 ${outcome.exitCode}`
-              : '未返回完整环境标记'
-      shellEnvFailure = `登录 shell 环境采集失败：${reason}；当前使用继承环境，代理和 PATH 可能缺失（尚不能确认是本次网络错误的原因）。请检查 shell 启动脚本，修复后重新发送将重试采集`
-      // Discovery/polling keeps the fallback cached; only an explicit send retries failure.
-      // Never log stdout/stderr: startup scripts and env output may contain credentials.
-      console.warn(`[scry] ${shellEnvFailure}`)
-    }
-    if (capturedLoginEnv) {
-      shellEnvFailure = undefined
-      for (const line of raw.slice(s + '__AS_ENV_S__'.length, e).split('\n')) {
-        const i = line.indexOf('=')
-        if (i > 0) captured[line.slice(0, i)] = line.slice(i + 1)
-      }
-    }
-    shellEnvCache = mergeLoginShellEnv(out, captured)
-    shellPathCache = capturedLoginEnv ? captured.PATH ?? '' : ''
-    shellEnvPromise = null
-    return shellEnvCache
-  })
-  return shellEnvPromise
-}
-
-export function sanitizeNestedAgentEnv(input: Record<string, string>): Record<string, string> {
-  const out: Record<string, string> = { ...input }
-  for (const k of Object.keys(out)) {
-    if (
-      k === 'CLAUDECODE' ||
-      k === 'AI_AGENT' ||
-      k === 'CLAUDE_EFFORT' ||
-      k === 'SCRY_CODEX_SOURCE_HOME' ||
-      k === 'CODEX_CI' ||
-      k === 'CODEX_THREAD_ID' ||
-      k.startsWith('CLAUDE_CODE_') ||
-      k.startsWith('CODEX_INTERNAL_')
-    ) {
-      delete out[k]
-    }
-  }
-  return out
-}
-
-const PROVIDER_FORBIDDEN_ENV = new Set([
-  'OPENAI_ADMIN_API_KEY',
-  'ANTHROPIC_ADMIN_API_KEY',
-  'QODER_ADMIN_API_KEY',
-  'QODER_ORGANIZATION_ID',
-  'QODER_MEMBER_ID',
-  'SCRY_RECORDER_COMMIT_HOOK',
-  'SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT'
-])
-
-export function sanitizeProviderEnv(input: Record<string, string>, providerId?: ProviderId): Record<string, string> {
-  const out = sanitizeNestedAgentEnv(input)
-  const explicitlyAllowed = new Set(
-    input.SCRY_PROVIDER_ENV_ALLOW?.split(',')
-      .map((value) => value.trim())
-      .filter((value) => providerId != null && value.startsWith(`${providerId}:`))
-      .map((value) => value.slice(value.indexOf(':') + 1))
-      .filter(Boolean) ?? []
-  )
-  delete out.SCRY_PROVIDER_ENV_ALLOW
-  const forbiddenPrefixes = ['AWS_', 'AZURE_', 'GOOGLE_', 'GCP_']
-  const providerPrefixes: Partial<Record<ProviderId, string[]>> = {
-    claude: ['OPENAI_', 'CODEX_', 'QODER_', 'OPENCODE_'],
-    codex: ['ANTHROPIC_', 'CLAUDE_', 'QODER_', 'OPENCODE_'],
-    qoder: ['ANTHROPIC_', 'CLAUDE_', 'OPENAI_', 'CODEX_', 'OPENCODE_'],
-    opencode: ['ANTHROPIC_', 'CLAUDE_', 'OPENAI_', 'CODEX_', 'QODER_'],
-    pi: ['ANTHROPIC_', 'CLAUDE_', 'OPENAI_', 'CODEX_', 'QODER_', 'OPENCODE_']
-  }
-  for (const key of Object.keys(out)) {
-    if (PROVIDER_FORBIDDEN_ENV.has(key) ||
-      (!explicitlyAllowed.has(key) && forbiddenPrefixes.some((prefix) => key.startsWith(prefix))) ||
-      (!explicitlyAllowed.has(key) && (providerId ? providerPrefixes[providerId] ?? [] : []).some((prefix) => key.startsWith(prefix)))) {
-      delete out[key]
-    }
-  }
-  return out
-}
-
-export function shellEnv(): Record<string, string> {
-  if (shellEnvCache) return shellEnvCache
-  void warmShellEnv()
-  return fallbackShellEnv()
-}
-
-// nvm 各版本 bin（shell 捞 PATH 失败时兜底）。claude 常 symlink 在这里；版本号动态，glob 所有版本。
-function nvmBins(): string[] {
-  try {
-    const root = `${homedir()}/.nvm/versions/node`
-    return readdirSync(root).map((v) => `${root}/${v}/bin`)
-  } catch {
-    return []
-  }
-}
-
-function runnableFile(path: string, platform: NodeJS.Platform): boolean {
-  try {
-    const file = statSync(path)
-    return file.isFile() && (platform === 'win32' || (file.mode & 0o111) !== 0)
-  } catch {
-    return false
-  }
-}
-
-export function resolveCommandOnPath(
-  command: string,
-  pathValue: string,
-  options: {
-    platform?: NodeJS.Platform
-    pathExt?: string
-    isRunnable?: (path: string) => boolean
-  } = {}
-): string | undefined {
-  const platform = options.platform ?? process.platform
-  const pathApi = platform === 'win32' ? win32 : posix
-  const extensions =
-    platform === 'win32' && !pathApi.extname(command)
-      ? (options.pathExt ?? process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
-      : ['']
-  const names = platform === 'win32' ? [command, ...extensions.map((extension) => `${command}${extension}`)] : [command]
-  const isRunnable = options.isRunnable ?? ((path: string) => runnableFile(path, platform))
-  for (const rawDir of pathValue.split(pathApi.delimiter)) {
-    const dir = rawDir.replace(/^"(.*)"$/, '$1')
-    if (!dir || !pathApi.isAbsolute(dir)) continue
-    for (const name of names) {
-      const path = pathApi.join(dir, name)
-      if (isRunnable(path)) return path
-    }
-  }
-  return undefined
-}
 
 function executableOnProcessPath(bin: string): string | undefined {
   return resolveCommandOnPath(bin, process.env.PATH ?? '')
@@ -342,23 +80,6 @@ function enrichedPath(): string {
 async function enrichedPathAsync(): Promise<string> {
   const extra = ['/usr/local/bin', '/opt/homebrew/bin', ...nvmBins(), `${homedir()}/.local/bin`, `${homedir()}/.opencode/bin`]
   return [await shellPathAsync(), process.env.PATH ?? '', ...extra].filter(Boolean).join(':')
-}
-
-function versionProbePath(): string {
-  // version 探测拿到的是绝对 executable；这里只需保证 npm shim 的 node 可解析，不能再为 --version
-  // 启动昂贵的登录 shell。非标准安装仍由完整 PATH fallback 负责发现。
-  return [
-    process.env.PATH ?? '',
-    ...nvmBins(),
-    `${homedir()}/.local/bin`,
-    `${homedir()}/.opencode/bin`,
-    '/opt/homebrew/bin',
-    '/usr/local/bin',
-    '/usr/bin',
-    '/bin'
-  ]
-    .filter(Boolean)
-    .join(':')
 }
 
 function which(bin: string): string {
@@ -659,7 +380,7 @@ export function runtimeCliEnv(
   const runtimeBase = base ?? shellEnv()
   const originalPath = base
     ? runtimeBase.PATH ?? process.env.PATH ?? ''
-    : shellPathCache || process.env.PATH || ''
+    : shellPath() || process.env.PATH || ''
   const bundledCliPath = packagedRecorderCliPath()
   const scryCliPath = resolveRecorderCliPath(
     runtimeBase,
