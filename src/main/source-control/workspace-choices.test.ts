@@ -86,6 +86,13 @@ describe('read-only workspace selection with real temporary Git', () => {
     expect((await choices({ query: '*' })).page.items).toEqual([])
   })
 
+  it('reuses the selected repository identity when its own run is unsettled', async () => {
+    running = [cwd]
+    const identity = vi.spyOn(service.git, 'identity')
+    await expect(choices()).resolves.toMatchObject({ commonDirBusy: true })
+    expect(identity).toHaveBeenCalledTimes(2)
+  })
+
   it('paginates bounded refs, searches beyond the first 1,000 and rejects stale page cursors', async () => {
     const head = git('rev-parse', 'HEAD')
     const commands = Array.from({ length: 1_050 }, (_, index) =>
