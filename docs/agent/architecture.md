@@ -49,6 +49,10 @@ React renderer
 - 旧 Pi 手机会话缺少归档时，Mac 可只读恢复默认 `~/.pi/agent/sessions` 下经会话 ID/cwd 校验的 v3 原生记录；按 parent ancestry 读取当前分支。与后续 Scry 归档只按 Provider 原生 turn ID 关联，不按提示词去重。无法关联的归档轮次单独保留并提示可能重叠，不隐藏失败请求，原件不变。
 - 原生恢复不启动 Provider，不补造用量、审批、文件变更、图片或终态，不写 `.scry`。当前只支持默认目录及不超过 64 MiB 的文件，恢复时先读完整当前分支并关联归档，再分页展示；自定义目录需先增加 profile 到根目录的明确绑定，大文件或读取耗时明显时需改为流式读取/原生 ID 索引。`--dev-pi-history-only` Electron fixture 覆盖实际点击、分页和续聊后重新打开。
 
+## 架构演进提案
+
+- [无界面执行与证据引擎技术方案](../research/headless-execution-engine-design.md)：方案二的进程边界、版本化事件流、资源预算、恢复、迁移与验收设计。**尚未实现，不替代上面的当前架构或现有权限/证据合同。**
+
 ## 代码地图
 
 - `src/main/index.ts`：Electron composition root、IPC 与生命周期热点；优先提取 focused module，不继续堆叠无关 policy。
