@@ -198,7 +198,9 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
     expect(html).toContain('2/3 轮可计算')
   })
 
-  it('Qoder 会话的第三栏显示 Credit，不把它冒充美元成本', () => {
+  it.each([
+    [2.5, '2.50'], [11.656226972685717, '11.66'], [1, '1.00'], [0, '0.00']
+  ] as const)('Qoder Credit 保留两位小数，不把它冒充美元成本：%s', (amount, formatted) => {
     const html = renderToStaticMarkup(
       <OverviewPanel
         turns={[{
@@ -217,7 +219,7 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
                 status: 'partial',
                 quality: 'exact',
                 source: ['qoder_sdk'],
-                value: { provider: 'qoder', unit: 'credits', scope: 'main', amount: 2.5, knownRequests: 1, missingRequests: 0 },
+                value: { provider: 'qoder', unit: 'credits', scope: 'main', amount, knownRequests: 1, missingRequests: 0 },
                 omissionReason: 'Only observed main-session requests are covered.'
               }
             })
@@ -231,7 +233,7 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
       />
     )
 
-    expect(html).toContain('<span>Credit</span><strong>≥2.5</strong>')
+    expect(html).toContain(`<span>Credit</span><strong>≥${formatted}</strong>`)
     expect(html).not.toContain('<span>成本</span><strong>$9.00</strong>')
   })
 

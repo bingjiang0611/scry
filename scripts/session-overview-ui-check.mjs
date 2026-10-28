@@ -111,8 +111,8 @@ export async function exerciseOverviewDensity(contents, screenshotPath) {
     await waitForMetric('缓存命中率 · 累计75.0%')
     await contents.executeJavaScript(`document.querySelector('#usage-finish').click(); true`)
     await waitForMetric('缓存命中率60.0%')
-    await waitForMetric('Credit≥2.5')
-    results.push({ liveCache: ['50.0%', '75.0%'], finalCache: '60.0%', credits: '≥2.5' })
+    await waitForMetric('Credit≥2.50')
+    results.push({ liveCache: ['50.0%', '75.0%'], finalCache: '60.0%', credits: '≥2.50' })
     return results
   } finally { await contents.removeInsertedCSS(css) }
 }
