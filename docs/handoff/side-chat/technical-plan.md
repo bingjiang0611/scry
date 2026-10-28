@@ -109,6 +109,8 @@ createSideChat(source, boundary, prefixFingerprint, manifestFingerprint, command
 
 扩展已有 `RightSurfaceState` 的页签标识为工具 ID 或 Conversation 实例 ID；保留工具定义注册表，不为侧聊另建通用插件框架。
 
+入口放在 `RightSurfacePanel.tsx` 的「打开一个 Surface」选择器与现有 `+` 菜单，文案均为「侧边会话」。选择器保留六个工具，在上方增加横向侧聊入口；不新增主聊标题栏的直接创建按钮。点击 `+` 只选工具，点击侧聊入口才走 preview/create，成功后按 child ID 打开新页签。工具按 kind 去重，侧聊允许多个实例；关闭最后一个页签返回选择器，历史列表按具体 child ID 恢复，不创建副本。
+
 ```ts
 type RightSurfaceTab =
   | { type: 'tool'; kind: RightSurfaceKind }
@@ -153,7 +155,7 @@ type RightSurfaceTab =
 - **生命周期**：关闭运行中页签不中止；切换父会话/Provider 后保留正确 draft/审批；重启不自动续发；父删除不破坏子快照。
 - **预算与安全**：伪造 child ownership、source ref、path、revision、reader token；生产 IPC wrapper 拒绝且特权 listener 未执行；新 Provider trust gate 不退化。
 - **证据**：两个 run 重叠修改工作区，UI 与持久记录不标独占归因；快照历史 usage 不双计；未收敛不得提前保存成功。
-- **交互**：键盘页签/焦点恢复/中文 IME、长标题、40+历史侧聊、滚动不互相抢焦点、400 px 右栏、窄窗、浅深主题。
+- **交互**：Surface 卡片与 `+` 菜单均可创建侧聊；仅打开菜单不创建；原六个工具入口保留且按 kind 去重；历史列表恢复同一 child。覆盖键盘页签/焦点恢复/中文 IME、长标题、40+历史侧聊、独立滚动、400 px 右栏、窄窗和浅深主题。
 
 负向对照：保留旧 workspace-wide admission 时，双会话启动测试必须失败；故意把 child resume 改为 parent session 时，身份/响应隔离测试必须失败；故意只保存来源 archive 路径时，删父保子测试必须失败。测试不能只断言 UI 出现两个面板。
 
