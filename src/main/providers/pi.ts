@@ -12,7 +12,7 @@ import type { PiProbe, PiRunState } from './pi-types'
 import type { PiRunDiagnostics } from './pi-run-diagnostics'
 import { runPiAgent } from './pi-run'
 import { record } from './pi-shared'
-import { piRpcArgs, withPiRpc, probePiAgent, disposePiCatalog, commandCatalog, skillCatalog, piModelContextWindows, piHistoryNeedsModelCatalog, enrichPiHistory, runControlCatalog } from './pi-catalog'
+import { piRpcArgs, withPiRpc, probePiAgent, disposePiCatalog, invalidatePiCatalog, commandCatalog, skillCatalog, piModelContextWindows, piHistoryNeedsModelCatalog, enrichPiHistory, runControlCatalog } from './pi-catalog'
 
 
 export function createPiAdapter(options: {
@@ -182,7 +182,7 @@ export function createPiAdapter(options: {
       }
     },
     async invalidateContext(context) {
-      await disposePiCatalog()
+      await invalidatePiCatalog(context)
       return rotomPool.invalidate(context)
     },
     async dispose() {

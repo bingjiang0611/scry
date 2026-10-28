@@ -152,7 +152,7 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 3
+        "darwin-arm64": 2
       }
     }
   }
