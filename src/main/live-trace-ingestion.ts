@@ -2,9 +2,13 @@ import type { TraceEvent } from '../shared/trace'
 import { PerformanceTrace } from './performance-timing'
 
 /** Live FIFO and durable evidence have different latency requirements, but share event identity. */
+const PERSISTENCE_LANES = 8
+
 export class LiveTraceIngestion {
   private live: Promise<void> = Promise.resolve()
   private persistence: Promise<void> = Promise.resolve()
+  private readonly persistenceLanes = Array.from({ length: PERSISTENCE_LANES }, () => Promise.resolve())
+  private nextPersistenceLane = 0
 
   constructor(private readonly options: {
     provider: string
@@ -23,15 +27,23 @@ export class LiveTraceIngestion {
     this.publish(bounded)
     if (raw.kind !== 'tool' && raw.kind !== 'skill' && raw.kind !== 'agent') return
     const timing = new PerformanceTrace('agent.trace_content', { provider: this.options.provider })
-    this.persistence = this.persistence.then(async () => {
+    const lane = this.nextPersistenceLane++ % this.persistenceLanes.length
+    const persisted = this.persistenceLanes[lane].then(async () => {
       timing.mark('queue_drained')
+      const event = await this.options.persist(raw)
+      timing.mark('content_persisted')
+      return event
+    })
+    // Keep at most eight durable writes active. The commit chain below still publishes enrichment
+    // and failures in Provider event order, so parallel storage cannot reorder canonical evidence.
+    this.persistenceLanes[lane] = persisted.then(() => undefined, () => undefined)
+    this.persistence = this.persistence.then(async () => {
       try {
-        const persisted = await this.options.persist(raw)
-        timing.mark('content_persisted')
-        this.options.onPersisted(persisted)
+        const event = await persisted
+        this.options.onPersisted(event)
         // This is an enrichment of the same event id, never a new logical tool call.
         // Queue it after the original live projection, including when persistence resolves fast.
-        this.publish(persisted)
+        this.publish(event)
         timing.finish({ persisted: 1 })
       } catch (error) {
         // Raw evidence remains owned by runState; the live projection makes no durable claim.

@@ -496,7 +496,7 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 8
+        "darwin-arm64": 1
       }
     }
   }
