@@ -484,6 +484,20 @@
       "baselines": {
         "darwin-arm64": 16
       }
+    },
+    "persistence.trace-ingestion-burst/persistence.rounds": {
+      "scenario": "persistence.trace-ingestion-burst",
+      "metric": "persistence.rounds",
+      "layer": "main",
+      "unit": "count",
+      "workload": "tool-events=8;blocked-persistence=1;ordered-enrichment=1",
+      "source": "production LiveTraceIngestion scheduler with a fixed blocked persistence boundary",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 8
+      }
     }
   }
 }
