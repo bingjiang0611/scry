@@ -9,7 +9,7 @@ import { WORKFLOW_OUTPUT_COPY as workflowOutputCopy } from '../shared/constants/
 import type { WorkflowService } from './workflow-service'
 import { validateWorkflowRoleBinding } from './workflow-program'
 import { workflowRecoveryCopy, taskSubmissionCopy } from '../shared/constants/copy'
-import { validateWorkflowRetryTarget } from './workflow-retry'
+import { validateWorkflowRestartTarget, validateWorkflowRetryTarget } from './workflow-retry'
 import { validateWorkflowRevisionDraft, validateWorkflowRevisionTarget } from './workflow-revision-draft'
 import { validateWorkflowStopTarget } from './workflow-stop'
 import { parseWorkflowTaskReference } from './task-submission-record'
@@ -19,7 +19,7 @@ import type { createDesktopTemplateEditCandidateApplication } from './desktop-te
 import { idPattern } from './conversation-record'
 import { templateReference } from './workflow-template-identity'
 
-type Service = Pick<WorkflowService, 'sizeGuideline' | 'setSizeGuideline' | 'planCommand' | 'preview' | 'findPreview' | 'approve' | 'start' | 'resume' | 'retry' | 'prepareRevision' | 'revisePrepared' | 'stop' | 'stopNode' | 'snapshot' | 'inspectFrame' | 'inspectExecution' | 'inspectOutput' | 'list' | 'cancelPlanning'>
+type Service = Pick<WorkflowService, 'sizeGuideline' | 'setSizeGuideline' | 'planCommand' | 'preview' | 'findPreview' | 'approve' | 'start' | 'resume' | 'retry' | 'restartStalled' | 'prepareRevision' | 'revisePrepared' | 'stop' | 'stopNode' | 'snapshot' | 'inspectFrame' | 'inspectExecution' | 'inspectOutput' | 'list' | 'cancelPlanning'>
 const identity = (value: unknown): string => {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,96}$/.test(value)) throw new Error('工作流身份无效')
   return value
@@ -29,7 +29,7 @@ function executionInspection(value: unknown): WorkflowExecutionInspectionRequest
   const input = value as Record<string, unknown>
   if (Object.keys(input).some(key => !['workflowId', 'programRevision', 'kind', 'nodeId', 'offset'].includes(key)) ||
     typeof input.programRevision !== 'string' || !/^[a-f0-9]{64}$/.test(input.programRevision) ||
-    !['attempts', 'systems'].includes(input.kind as string) ||
+    !['attempts', 'systems', 'classifiers'].includes(input.kind as string) ||
     input.nodeId !== undefined && (typeof input.nodeId !== 'string' || !/^[A-Za-z0-9_-]{1,96}$/.test(input.nodeId)) ||
     input.offset !== undefined && (!Number.isSafeInteger(input.offset) || (input.offset as number) < 0 || (input.offset as number) > WORKFLOW_EXECUTION_INSPECTION_MAX_OFFSET || (input.offset as number) % WORKFLOW_EXECUTION_INSPECTION_PAGE_SIZE !== 0)) throw new Error(workflowInspectionCopy.invalidRequest)
   return { workflowId: identity(input.workflowId), programRevision: input.programRevision, kind: input.kind as WorkflowExecutionInspectionRequest['kind'],
@@ -166,6 +166,18 @@ export function registerWorkflowIpc({ register, service, capturedTasks, template
     const preview = await service.preview(accepted.workflowId)
     resolveWorkspace(preview.workspace)
     return service.retry(accepted.workflowId, accepted, target, commandId)
+  })
+  register('workflow:restartStalled', async (workflowId, payload) => {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error(workflowRecoveryCopy.fingerprint)
+    const value = payload as Record<string, unknown>
+    if (Object.keys(value).length !== 5 || Object.keys(value).some(key => !['workflowId', 'programRevision', 'approvedAt', 'target', 'commandId'].includes(key))) throw new Error(workflowRecoveryCopy.fingerprint)
+    const accepted = approval(value)
+    if (identity(workflowId) !== accepted.workflowId) throw new Error(workflowRecoveryCopy.fingerprint)
+    const commandId = identity(value.commandId)
+    const target = validateWorkflowRestartTarget(value.target)
+    const preview = await service.preview(accepted.workflowId)
+    resolveWorkspace(preview.workspace)
+    return service.restartStalled(accepted.workflowId, accepted, target, commandId)
   })
   register('workflow:prepareRevision', async payload => {
     const draft = validateWorkflowRevisionDraft(payload)

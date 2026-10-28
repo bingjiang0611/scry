@@ -22,7 +22,9 @@ export class WorkflowLiveObservationTracker {
   readonly epoch = randomUUID()
   private readonly tools = new Set<string>()
   private readonly permissions = new Set<string>()
-  private readonly sources = new Set<'pi_native' | 'claude_native' | 'main_permission'>()
+  private readonly businessQuestions = new Set<string>()
+  private readonly quotas = new Set<string>()
+  private readonly sources = new Set<'pi_native' | 'claude_native' | 'main_permission' | 'main_question' | 'main_quota'>()
   private observedAt: number
   private modelProgressCount = 0
   private lastGenuineProgressAt: number | undefined
@@ -38,6 +40,8 @@ export class WorkflowLiveObservationTracker {
     if (this.closed) return false
     if (observation.source === 'pi_native' && this.identity.providerId !== 'pi') return false
     if (observation.source === 'claude_native' && (this.identity.providerId !== 'claude' || (observation.kind !== 'model_progress' && observation.kind !== 'tool_activity' && observation.kind !== 'tool_returned'))) return false
+    if (observation.source === 'main_question' && (observation.kind !== 'business_question_started' && observation.kind !== 'business_question_ended')) return false
+    if (observation.source === 'main_quota' && (observation.kind !== 'quota_started' && observation.kind !== 'quota_ended')) return false
     const at = this.now()
     switch (observation.kind) {
       case 'tool_activity':
@@ -77,6 +81,28 @@ export class WorkflowLiveObservationTracker {
         if (!this.permissions.delete(observation.permissionId)) return false
         this.lastActivityStatus = 'unknown'
         break
+      case 'business_question_started':
+        if (observation.source !== 'main_question' || !observation.questionId || this.businessQuestions.has(observation.questionId)) return false
+        if (observation.questionId.length > WORKFLOW_LIVE_MAX_ID_LENGTH || this.businessQuestions.size >= WORKFLOW_LIVE_MAX_IDS) return this.markTruncated(observation.source, at)
+        this.businessQuestions.add(observation.questionId)
+        this.lastActivityStatus = 'business_question'
+        break
+      case 'business_question_ended':
+        if (observation.source !== 'main_question' || observation.questionId.length > WORKFLOW_LIVE_MAX_ID_LENGTH) return this.markTruncated(observation.source, at)
+        if (!this.businessQuestions.delete(observation.questionId)) return false
+        this.lastActivityStatus = 'unknown'
+        break
+      case 'quota_started':
+        if (observation.source !== 'main_quota' || !observation.quotaId || this.quotas.has(observation.quotaId)) return false
+        if (observation.quotaId.length > WORKFLOW_LIVE_MAX_ID_LENGTH || this.quotas.size >= WORKFLOW_LIVE_MAX_IDS) return this.markTruncated(observation.source, at)
+        this.quotas.add(observation.quotaId)
+        this.lastActivityStatus = 'quota_wait'
+        break
+      case 'quota_ended':
+        if (observation.source !== 'main_quota' || observation.quotaId.length > WORKFLOW_LIVE_MAX_ID_LENGTH) return this.markTruncated(observation.source, at)
+        if (!this.quotas.delete(observation.quotaId)) return false
+        this.lastActivityStatus = 'unknown'
+        break
       case 'model_progress':
         if (this.modelProgressCount === MAX_PROGRESS_COUNT) this.truncated = true
         else this.modelProgressCount++
@@ -100,20 +126,29 @@ export class WorkflowLiveObservationTracker {
   close(): void { this.closed = true }
 
   snapshot(): WorkflowLiveAttempt {
-    const status: WorkflowLiveStatus = this.permissions.size > 0
-      ? 'permission_wait'
-      : this.tools.size > 0
-        ? 'tool_wait'
-        : this.truncated ? 'unknown' : this.lastActivityStatus
+    const status: WorkflowLiveStatus = this.businessQuestions.size > 0
+      ? 'business_question'
+      : this.permissions.size > 0
+        ? 'permission_wait'
+        : this.quotas.size > 0
+          ? 'quota_wait'
+          : this.tools.size > 0
+            ? 'tool_wait'
+            : this.truncated ? 'unknown' : this.lastActivityStatus
     return {
       ...this.identity,
       epoch: this.epoch,
       source: [...this.sources],
       status,
       trackedToolCount: this.tools.size,
+      trackedPermissionCount: this.permissions.size,
+      trackedBusinessQuestionCount: this.businessQuestions.size,
+      trackedQuotaCount: this.quotas.size,
       truncated: this.truncated,
       activeToolIds: [...this.tools],
       activePermissionIds: [...this.permissions],
+      activeBusinessQuestionIds: [...this.businessQuestions],
+      activeQuotaIds: [...this.quotas],
       modelProgressCount: this.modelProgressCount,
       observedAt: this.observedAt,
       ...(this.lastGenuineProgressAt === undefined ? {} : { lastGenuineProgressAt: this.lastGenuineProgressAt })
@@ -125,13 +160,17 @@ export function workflowLiveDiagnostics(
   attempts: readonly WorkflowLiveAttempt[],
   context: Pick<WorkflowLiveDiagnostics, 'epoch' | 'revision' | 'observedAt'>
 ): WorkflowLiveDiagnostics {
-  const status: WorkflowLiveStatus = attempts.some(attempt => attempt.status === 'permission_wait')
-    ? 'permission_wait'
-    : attempts.some(attempt => attempt.status === 'tool_wait')
-      ? 'tool_wait'
-      : attempts.some(attempt => attempt.status === 'unknown')
-        ? 'unknown'
-        : attempts.some(attempt => attempt.status === 'model_progress') ? 'model_progress' : 'unavailable'
+  const status: WorkflowLiveStatus = attempts.some(attempt => attempt.status === 'business_question')
+    ? 'business_question'
+    : attempts.some(attempt => attempt.status === 'permission_wait')
+      ? 'permission_wait'
+      : attempts.some(attempt => attempt.status === 'quota_wait')
+        ? 'quota_wait'
+        : attempts.some(attempt => attempt.status === 'tool_wait')
+          ? 'tool_wait'
+          : attempts.some(attempt => attempt.status === 'unknown')
+            ? 'unknown'
+            : attempts.some(attempt => attempt.status === 'model_progress') ? 'model_progress' : 'unavailable'
   return {
     ...context,
     status,

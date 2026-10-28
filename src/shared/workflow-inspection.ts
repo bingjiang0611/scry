@@ -2,12 +2,15 @@ import type { AgentModelRef } from './runtime'
 import type { ProviderId } from './provider'
 import type { WorkflowAttemptState, WorkflowRole } from './workflow'
 import type { WorkflowValueReference } from './workflow'
-import { WORKFLOW_MAX_SYSTEM_STEPS, type WorkflowSystemKind, type WorkflowSystemOutcome } from './workflow-system'
+import { type WorkflowSystemKind, type WorkflowSystemOutcome } from './workflow-system'
+import type { WorkflowClassifierIntent, WorkflowClassifierOutcome } from './workflow-classifier'
 
 export const WORKFLOW_EXECUTION_INSPECTION_PAGE_SIZE = 32
-export const WORKFLOW_EXECUTION_INSPECTION_MAX_OFFSET = Math.floor(WORKFLOW_MAX_SYSTEM_STEPS / WORKFLOW_EXECUTION_INSPECTION_PAGE_SIZE) * WORKFLOW_EXECUTION_INSPECTION_PAGE_SIZE
+// Offset is cursor pagination, not a renderer work budget. Main still rejects
+// unsafe integers; the canonical ledger determines whether another page exists.
+export const WORKFLOW_EXECUTION_INSPECTION_MAX_OFFSET = Number.MAX_SAFE_INTEGER - (Number.MAX_SAFE_INTEGER % WORKFLOW_EXECUTION_INSPECTION_PAGE_SIZE)
 
-export type WorkflowExecutionInspectionKind = 'attempts' | 'systems'
+export type WorkflowExecutionInspectionKind = 'attempts' | 'systems' | 'classifiers'
 export type WorkflowExecutionInspectionRequest = Readonly<{
   workflowId: string
   programRevision: string
@@ -82,8 +85,17 @@ export type WorkflowSystemInspectionRecord = Readonly<{
   intent: WorkflowExecutionInspectionIntent<WorkflowSystemInspectionIntent>
   outcome: WorkflowExecutionInspectionOutcome<WorkflowSystemInspectionOutcome>
 }>
+export type WorkflowClassifierInspectionIntent = Readonly<Omit<Pick<WorkflowClassifierIntent, 'classifierId' | 'nodeId' | 'programRevision' | 'criteria' | 'model' | 'kind' | 'frame'>, 'frame'> & { frame: WorkflowExecutionInspectionFrame; createdAt: number }>
+export type WorkflowClassifierInspectionOutcome = Readonly<Pick<WorkflowClassifierOutcome, 'state' | 'settled' | 'value' | 'confidence' | 'probability' | 'reason'> & { error?: string; errorTruncated?: boolean }>
+export type WorkflowClassifierInspectionRecord = Readonly<{
+  classifierId: string
+  stepId: string
+  taskId: string
+  intent: WorkflowExecutionInspectionIntent<WorkflowClassifierInspectionIntent>
+  outcome: WorkflowExecutionInspectionOutcome<WorkflowClassifierInspectionOutcome>
+}>
 
-export type WorkflowExecutionInspectionRecord = WorkflowAttemptInspectionRecord | WorkflowSystemInspectionRecord
+export type WorkflowExecutionInspectionRecord = WorkflowAttemptInspectionRecord | WorkflowSystemInspectionRecord | WorkflowClassifierInspectionRecord
 export type WorkflowExecutionInspection =
   | Readonly<{
     state: 'unavailable'

@@ -12,7 +12,7 @@ import { workflowExpressionCopy, workflowFrameCopy, workflowRecoveryCopy } from 
 import { workflowExpressionReferences } from './workflow-expressions'
 
 import { workflowFrameId, workflowSequenceProgress } from './workflow-frames'
-import { workflowPendingRetry, workflowRetryBoundary } from './workflow-retry'
+import { workflowPendingRestart, workflowPendingRetry, workflowRetryBoundary } from './workflow-retry'
 import type { WorkflowExecutionOwnership, WorkflowStore, WorkflowStoreRecord } from './workflow-store'
 
 export type WorkflowControlScope = {
@@ -47,7 +47,7 @@ export class WorkflowControl extends WorkflowControlRecovery {
     let framed = false
     while (pending.length) {
       const block = pending.pop()!
-      if (block.kind === 'replica' || block.kind === 'combine' || block.kind === 'check' || block.kind === 'verification' || block.kind === 'bind' || block.kind === 'branch' || block.kind === 'map' || block.kind === 'collect' || block.kind === 'loop' || (block.kind === 'return' && block.ref.path !== undefined) || (block.kind === 'call' && (block.replica || block.inputRefs?.some(ref => ref.path !== undefined)))) framed = true
+      if (block.kind === 'replica' || block.kind === 'combine' || block.kind === 'check' || block.kind === 'verification' || block.kind === 'classifier' || block.kind === 'bind' || block.kind === 'branch' || block.kind === 'map' || block.kind === 'collect' || block.kind === 'loop' || (block.kind === 'return' && block.ref.path !== undefined) || (block.kind === 'call' && (block.replica || block.inputRefs?.some(ref => ref.path !== undefined)))) framed = true
       pending.push(...workflowChildBlocks(block))
     }
     this.framed = framed || execution !== undefined
@@ -94,7 +94,7 @@ export class WorkflowControl extends WorkflowControlRecovery {
     if (!this.framed) return undefined
     const names = block.kind === 'loop' ? [...new Set([...Object.values(block.initial), ...Object.values(block.invariants)].flatMap(workflowExpressionReferences))] : block.kind === 'map' || block.kind === 'collect' ? workflowExpressionReferences(block.items) : block.kind === 'bind' ? workflowExpressionReferences(block.value) : block.kind === 'branch' ? workflowExpressionReferences(block.when)
       : block.kind === 'verification' ? [...Object.values(block.required).flatMap(entry => workflowExpressionReferences(entry.result)), ...(block.baseline ? workflowExpressionReferences(block.baseline) : [])]
-      : block.kind === 'check' ? workflowExpressionReferences(block.replica) : block.kind === 'combine' ? [...workflowExpressionReferences(block.base), ...workflowExpressionReferences(block.candidates)] : block.kind === 'replica' ? block.source ? workflowExpressionReferences(block.source) : [] : block.kind === 'call' ? [...(block.inputRefs ?? []).map(ref => ref.nodeId), ...(block.replica ? workflowExpressionReferences(block.replica) : [])] : block.kind === 'return' ? [block.ref.nodeId] : []
+      : block.kind === 'check' ? workflowExpressionReferences(block.replica) : block.kind === 'combine' ? [...workflowExpressionReferences(block.base), ...workflowExpressionReferences(block.candidates)] : block.kind === 'replica' ? block.source ? workflowExpressionReferences(block.source) : [] : block.kind === 'call' || block.kind === 'classifier' ? [...(block.inputRefs ?? []).map(ref => ref.nodeId), ...(block.kind === 'call' && block.replica ? workflowExpressionReferences(block.replica) : [])] : block.kind === 'return' ? [block.ref.nodeId] : []
     const inputKey = digest({ revision: this.preview.programRevision, nodeId: block.blockId, scope: scope.path,
       sources: names.map(name => [name, scope.bindings.get(name)?.state, scope.bindings.get(name)?.derivedFrom]) })
     const frameId = workflowFrameId(block.blockId, scope.path, this.execution?.generationId)
@@ -151,7 +151,7 @@ export class WorkflowControl extends WorkflowControlRecovery {
         await this.store.loadValue(this.preview.workflowId, origin.resultRef)
         reference = origin.resultRef
       } else {
-        if (origin?.resultRef && (block.kind === 'call' || block.kind === 'check' || block.kind === 'replica' || block.kind === 'combine' || block.kind === 'verification')) throw new Error(workflowRecoveryCopy.frame)
+        if (origin?.resultRef && (block.kind === 'call' || block.kind === 'classifier' || block.kind === 'check' || block.kind === 'replica' || block.kind === 'combine' || block.kind === 'verification')) throw new Error(workflowRecoveryCopy.frame)
       }
       if (!reference && this.execution && phase === 'completed' && (block.kind === 'replica' || block.kind === 'combine' || block.kind === 'check' || block.kind === 'verification')) {
         const record = this.execution.record, taskId = this.preview.workflowId + ':' + workflowFrameId(block.blockId, scope.path) + ':' + block.blockId
@@ -216,7 +216,7 @@ export class WorkflowControl extends WorkflowControlRecovery {
   recoveredOutcome(block: WorkflowBlock, scope: WorkflowControlScope, frame: WorkflowControlFrame | undefined): WorkflowAttemptOutcome | undefined {
     if (!this.execution?.previous.length) return undefined
     const taskId = this.preview.workflowId + ':' + workflowFrameId(block.blockId, scope.path) + ':' + block.blockId
-    if (workflowPendingRetry(this.execution.record, taskId)) return undefined
+    if (workflowPendingRetry(this.execution.record, taskId) || workflowPendingRestart(this.execution.record, taskId)) return undefined
     const reuse = this.execution.record.revisions?.at(-1)?.reuse.find(entry => entry.nodeId === block.blockId)
     const intent = [...this.execution.record.intents].reverse().find(value => value.taskId === taskId)
     const outcome = [...this.execution.record.outcomes].reverse().find(value => value.taskId === taskId) ?? (reuse ? this.execution.record.outcomes.find(value => value.attemptId === reuse.attemptId) : undefined)

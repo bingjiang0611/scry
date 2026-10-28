@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { capabilityReady, type ProviderDescriptor, type ProviderId } from '../shared/provider'
 import { runtimeProviderForProviderId, type AgentRunControlCatalog } from '../shared/runtime'
 import { workflowBindingControls, workflowCapabilityFingerprint } from './workflow-capability'
-import { validateWorkflowRoleBinding } from './workflow-program'
+import { capabilityForRole, validateWorkflowRoleBinding } from './workflow-program'
 
 const execution = { independentRun: true, terminalOutput: true, scopedStop: true, scopeSettlement: true }
 const catalog: AgentRunControlCatalog = { models: [
@@ -45,6 +45,29 @@ describe('workflow fresh-run admission (contract fixtures, no real Provider prob
     expect(workflowCapabilityFingerprint({ ...context, agentProfileId: 'pi:other' }, descriptor('pi'), catalog, execution)).not.toBe(original)
     expect(workflowCapabilityFingerprint(context, { ...descriptor('pi'), version: 'fixture-2' }, catalog, execution)).not.toBe(original)
     expect(workflowCapabilityFingerprint(context, descriptor('pi'), { ...catalog, models: catalog.models.slice(1) }, execution)).not.toBe(original)
+  })
+  it('exposes unsupported authoring and wait evidence without promoting it to support', () => {
+    const context = { providerId: 'pi' as const, cwd: '/fixture' }
+    const result = workflowBindingControls({ role: 'orchestrator', providerId: 'pi' }, context, descriptor('pi'), capabilityReady(context, 'read', catalog), execution, true)
+    expect(result.structuredCandidateAuthoring).toBe('unavailable')
+    expect(result.hostToolsDisabled).toBe('unavailable')
+    expect(result.businessQuestion).toBe('unknown')
+    expect(result.waitStates).toEqual({ model: 'unavailable', tool: 'unavailable', quota: 'unavailable' })
+  })
+  it('does not admit an orchestrator when authoring evidence is unknown', () => {
+    const result = capabilityForRole({ role: 'orchestrator', providerId: 'claude' }, {
+      descriptor: descriptor('claude'), adapterRegistered: true, hasIndependentRun: true, canObserveOutput: true, canConfirmStop: true
+    })
+    expect(result.structuredCandidateAuthoring).toBe('unknown')
+    expect(result.hostToolsDisabled).toBe('unknown')
+    expect(result.state).toBe('unknown')
+  })
+  it('changes frozen identity when authoring or observation inputs change', () => {
+    const context = { providerId: 'claude' as const, cwd: '/fixture' }
+    const authoring = { source: 'claude_sdk_success_result' as const, hostTools: 'disabled' as const, permissionBoundary: 'default_only' as const, businessQuestions: 'blocked' as const }
+    const first = workflowCapabilityFingerprint(context, descriptor('claude'), catalog, execution, authoring)
+    expect(workflowCapabilityFingerprint(context, descriptor('claude'), catalog, { ...execution, observation: { modelProgress: true, tools: true, quotaWait: false } }, authoring)).not.toBe(first)
+    expect(workflowCapabilityFingerprint(context, descriptor('claude'), catalog, execution, { ...authoring, businessQuestions: 'blocked' })).toBe(first)
   })
   it('accepts Pi vendor identity distinct from Scry Provider ID, but never ignores a nonconfigured profile', () => {
     expect(validateWorkflowRoleBinding({ role: 'worker', providerId: 'pi', agentProfileId: 'pi:default', requestedModel: catalog.models[0].model }).requestedModel).toEqual(catalog.models[0].model)

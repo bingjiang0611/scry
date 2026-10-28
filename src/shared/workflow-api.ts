@@ -76,6 +76,7 @@ export type WorkflowResumeResult =
 
 /** Exact observed failure and durable state version; never an effect receipt. */
 export type WorkflowRetryTarget = { taskId: string; attemptId: string; expectedRevision: number }
+export type WorkflowRestartTarget = { taskId: string; attemptId: string; expectedRevision: number }
 
 export type WorkflowRevisionTarget = { expectedRevision: number }
 
@@ -131,6 +132,7 @@ export interface WorkflowApi {
   resume(workflowId: string, approval: WorkflowApproval, commandId: string): Promise<WorkflowResumeResult>
   /** Explicit same-revision retry, currently only proven pre-Provider failures in static programs. */
   retry(workflowId: string, approval: WorkflowApproval, target: WorkflowRetryTarget, commandId: string): Promise<WorkflowProgress>
+  restartStalled(workflowId: string, approval: WorkflowApproval, target: WorkflowRestartTarget, commandId: string): Promise<WorkflowProgress>
   /** Compile and freeze a candidate without running its program or changing the root. */
   prepareRevision(draft: WorkflowRevisionDraft): Promise<WorkflowPlanPreview>
   /** Explicit approval of a main-prepared candidate; command redelivery never redispatches. */

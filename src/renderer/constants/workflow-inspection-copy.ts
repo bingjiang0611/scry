@@ -9,12 +9,14 @@ export const WORKFLOW_INSPECTION_COPY = {
   noReinjection: '只读视图不会向原会话发送消息，也不会伪造新的 turn。',
   graphLoading: '正在读取实例关系…',
   graphUnavailable: '实例关系不可用；不会根据缺失记录补造轮次或连线。',
-  graphBounded: '仅显示前 256 条实例；其余记录可在执行记录分页查看。',
+  graphBounded: '每类仅显示第一页实例；其余记录可在执行记录分页查看。',
   graphFramesBounded: '部分控制帧关系未读取；缺失连线保持未知。',
   codeNode: '代码块',
   turnNode: '轮次',
   candidateNode: '候选',
   evidenceNode: '证据',
+  controlNode: '控制',
+  classifierNode: '分类器',
   instance: '实例',
   parent: '父帧',
   branch: '分支',
@@ -68,6 +70,6 @@ export const WORKFLOW_INSPECTION_COPY = {
   sourceChanged: '程序已变化，请重新读取。',
   structurePage: (start: number, end: number, total: number) => `程序块 ${start}–${end} / ${total}`,
   historyPage: (start: number, end: number, total: number) => `记录 ${start}–${end} / ${total}`,
-  kinds: { sequence: '顺序', parallel: '并行', call: 'Agent 调用', return: '返回', bind: '绑定', branch: '分支', map: '映射', collect: '收集', loop: '循环', replica: '副本', combine: '组合', check: '检查', verification: '验证' },
-  states: { intent_persisted: '派发意图已记录', dispatched: '已派发', running: '进行中', completed: '已报告完成', failed: '失败', blocked: '受阻', stopped: '已停止', unknown: '未知' }
+  kinds: { sequence: '顺序', parallel: '并行', call: 'Agent 调用', return: '返回', bind: '绑定', branch: '分支', map: '映射', collect: '收集', loop: '循环', replica: '副本', combine: '组合', check: '检查', verification: '验证', classifier: '分类器' },
+  states: { intent_persisted: '派发意图已记录', dispatched: '已派发', running: '进行中', completed: '已报告完成', failed: '失败', blocked: '受阻', stopped: '已停止', unknown: '未知', unavailable: '未提供' }
 } as const

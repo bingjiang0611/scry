@@ -5,7 +5,7 @@ import { workflowControlCopy, workflowFrameCopy, workflowRecoveryCopy } from '..
 import { withDirectoryLock } from '../core/turn-recorder/io'
 import { nextWorkflowFrame, validateWorkflowFrame, validateWorkflowValueReference } from './workflow-frames'
 
-import { validateWorkflowOwnership, validateWorkflowClaim, workflowEpochMatches, workflowRecordFingerprint } from './workflow-recovery'
+import { validateWorkflowOwnership, validateWorkflowClaim, validateWorkflowClassifierLedgerCanonical, workflowEpochMatches, workflowRecordFingerprint } from './workflow-recovery'
 import { collectionEntries, validateCollectionReference } from './workflow-collections'
 import type { WorkflowAttemptOutcome, WorkflowCollectionEntry, WorkflowCollectionReference, WorkflowControlFrame, WorkflowEvaluation, WorkflowValueReference } from '../shared/workflow'
 import { workflowProgressSnapshot } from '../shared/workflow'
@@ -299,6 +299,7 @@ export class FileWorkflowStore implements WorkflowStore {
     // Historical observations are not live authority, including files written
     // by an older or interrupted producer that accidentally persisted the field.
     delete record.progress.live
+    await validateWorkflowClassifierLedgerCanonical(record, this, false)
     return record
   }
   async listPage(cursor?: string, limit = 64): Promise<WorkflowStorePage> {

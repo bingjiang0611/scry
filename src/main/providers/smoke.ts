@@ -72,8 +72,8 @@ export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' | 'pi'
   return {
     forkSession,
     // Explicit synthetic workflow fixture only; never a real Provider capability.
-    ...(workflowFixture ? { workflowExecution: { independentRun: true, terminalOutput: true, scopedStop: true, scopeSettlement: true } as const } : {}),
-    ...(authoringFixture ? { workflowAuthoring: { source: 'scry_fixture_success_result' as const } } : {}),
+    ...(workflowFixture ? { workflowExecution: { independentRun: true, terminalOutput: true, scopedStop: true, scopeSettlement: true, permissionQuestion: true } as const } : {}),
+    ...(authoringFixture ? { workflowAuthoring: { source: 'scry_fixture_success_result' as const, hostTools: 'disabled' as const, permissionBoundary: 'default_only' as const, businessQuestions: 'blocked' as const } } : {}),
     id: providerId,
     runtimeProvider: runtimeProviderForProviderId(providerId),
     historicalContext: true,

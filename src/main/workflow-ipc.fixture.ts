@@ -18,6 +18,7 @@ export function fixture(actualService?: Parameters<typeof registerWorkflowIpc>[0
     findPreview: vi.fn(async (): Promise<{ workflowId: string; workspace: string } | undefined> => ({ workflowId: 'workflow-test', workspace: '/authorized' })),
     resume: vi.fn(async () => ({ state: 'nothing_to_resume', progress: null })),
     retry: vi.fn(async () => null),
+    restartStalled: vi.fn(async () => null),
     prepareRevision: vi.fn(async () => null),
     revisePrepared: vi.fn(async () => null),
     planCommand: vi.fn(async () => null),

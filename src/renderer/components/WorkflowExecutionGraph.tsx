@@ -3,20 +3,17 @@ import type { WorkflowPlanPreview } from '@shared/workflow'
 import type { WorkflowExecutionInspectionRecord } from '@shared/workflow-inspection'
 import type { WorkflowFrameInspection } from '@shared/workflow-api'
 import type { WorkflowOutputSelection } from '@shared/workflow-output-inspection'
+import type { WorkflowUsage } from '@shared/workflow-usage'
 import { WORKFLOW_INSPECTION_COPY as copy } from '../constants/workflow-inspection-copy'
 import { workflowProgramStructure, type WorkflowStructureNode } from '../workflow-program-structure'
 
-const MAX_PAGES = 8
-const MAX_FRAMES = 128
-const PAGE_SIZE = 32
-
 type AvailableFrame = Extract<WorkflowFrameInspection, { state: 'available' }>
-type Read = { state: 'loading' } | { state: 'error'; message: string } | { state: 'ready'; records: WorkflowExecutionInspectionRecord[]; frames: Map<string, AvailableFrame>; bounded: boolean; framesBounded: boolean }
+type Read = { state: 'loading' } | { state: 'error'; message: string } | { state: 'ready'; records: WorkflowExecutionInspectionRecord[]; frames: Map<string, AvailableFrame>; truncated: boolean; framesTruncated: boolean }
 export type WorkflowGraphItem = Readonly<{
   kind: 'instance'
   id: string
   nodeId?: string
-  category: 'turn' | 'candidate' | 'evidence'
+  category: 'turn' | 'candidate' | 'evidence' | 'control' | 'classifier'
   state: string
   settled?: boolean
   frameId?: string
@@ -24,12 +21,13 @@ export type WorkflowGraphItem = Readonly<{
   branch?: string
   retryOf?: string
   retryCommand?: string
-  usage: 'unavailable'
+  usage: 'unavailable' | WorkflowUsage
 }>
 
 function category(record: WorkflowExecutionInspectionRecord): WorkflowGraphItem['category'] {
   if ('attemptId' in record) return 'turn'
-  const kind = record.intent.state === 'available' ? record.intent.value.kind : undefined
+  if ('classifierId' in record) return 'classifier'
+  const kind = record.intent.state === 'available' ? String(record.intent.value.kind) : undefined
   return kind === 'prepare_replica' || kind === 'combine' ? 'candidate' : 'evidence'
 }
 function nodeId(record: WorkflowExecutionInspectionRecord): string | undefined {
@@ -41,41 +39,37 @@ function recordState(record: WorkflowExecutionInspectionRecord): { state: string
   if (record.outcome.state === 'available') return { state: record.outcome.value.state, settled: record.outcome.value.settled }
   return { state: copy.missingOutcome }
 }
-export function workflowGraphItems(records: readonly WorkflowExecutionInspectionRecord[], frames: ReadonlyMap<string, AvailableFrame>): WorkflowGraphItem[] {
-  return records.map(record => {
+export function workflowGraphItems(records: readonly WorkflowExecutionInspectionRecord[], frames: ReadonlyMap<string, AvailableFrame>, usage: ReadonlyMap<string, WorkflowUsage> = new Map()): WorkflowGraphItem[] {
+  // Control-only frames are not a graph source: Main does not provide a
+  // bounded list operation for them. Effect rows may reference their own
+  // canonical frame, which is the only frame claim retained here.
+  return [...records.map(record => {
     const intent = record.intent.state === 'available' ? record.intent.value : undefined
     const attemptIntent = 'attemptId' in record && record.intent.state === 'available' ? record.intent.value : undefined
     const id = 'attemptId' in record ? record.attemptId : record.stepId
     const frameId = intent?.frame.state === 'available' ? intent.frame.frameId : undefined
     const frame = frameId ? frames.get(frameId) : undefined
     const result = recordState(record)
-    return { kind: 'instance', id, ...(nodeId(record) ? { nodeId: nodeId(record) } : {}), category: category(record), ...result,
+    return { kind: 'instance' as const, id, ...(nodeId(record) ? { nodeId: nodeId(record) } : {}), category: category(record), ...result,
       ...(frameId ? { frameId } : {}), ...(frame?.frame.parentage.state === 'available' ? { parentFrameId: frame.frame.parentage.frameId } : {}),
       ...(frame?.frame.arm ? { branch: frame.frame.arm } : {}),
       ...(attemptIntent?.previousAttemptId ? { retryOf: attemptIntent.previousAttemptId } : {}),
-      ...(attemptIntent?.retryCommandId ? { retryCommand: attemptIntent.retryCommandId } : {}), usage: 'unavailable' }
-  })
+      ...(attemptIntent?.retryCommandId ? { retryCommand: attemptIntent.retryCommandId } : {}), usage: usage.get(id) ?? 'unavailable' as const }
+  })]
 }
 
-async function readPages(workflowId: string, programRevision: string, kind: 'attempts' | 'systems'): Promise<{ records: WorkflowExecutionInspectionRecord[]; bounded: boolean }> {
-  const records: WorkflowExecutionInspectionRecord[] = []
-  let offset = 0
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const response = await window.scry.workflow.inspectExecution({ workflowId, programRevision, kind, offset })
-    if (response.state !== 'available') throw new Error(response.reason === 'source_changed' ? copy.sourceChanged : copy.sourceMissing)
-    records.push(...response.records)
-    if (response.nextOffset === undefined) return { records, bounded: false }
-    offset = response.nextOffset
-  }
-  return { records, bounded: true }
+async function readPage(workflowId: string, programRevision: string, kind: 'attempts' | 'systems' | 'classifiers') {
+  const response = await window.scry.workflow.inspectExecution({ workflowId, programRevision, kind, offset: 0 })
+  if (response.state !== 'available') throw new Error(response.reason === 'source_changed' ? copy.sourceChanged : copy.sourceMissing)
+  return response
 }
 
 function GraphInstance({ item, onFrame, onOutput }: { item: WorkflowGraphItem; onFrame: (id: string) => void; onOutput: (selection: WorkflowOutputSelection) => void }) {
   return <li className="workflow-graph-instance" data-workflow-graph-instance={item.id}>
-    <div className="workflow-graph-instance-title"><span>{copy[item.category === 'turn' ? 'turnNode' : item.category === 'candidate' ? 'candidateNode' : 'evidenceNode']}</span><code>{item.id}</code></div>
+    <div className="workflow-graph-instance-title"><span>{copy[item.category === 'turn' ? 'turnNode' : item.category === 'candidate' ? 'candidateNode' : item.category === 'control' ? 'controlNode' : item.category === 'classifier' ? 'classifierNode' : 'evidenceNode']}</span><code>{item.id}</code></div>
     <div className="workflow-graph-instance-meta"><span>{item.state}</span>{item.settled !== undefined && <span>{item.settled ? copy.settled : copy.unsettled}</span>}
       {item.branch && <span>{copy.branch}: {item.branch}</span>}
-      {item.usage === 'unavailable' && <span>{copy.usageUnavailable}</span>}</div>
+      {(item.usage === 'unavailable' || item.usage.provenance === 'unavailable') && <span>{copy.usageUnavailable}</span>}</div>
     <div className="workflow-graph-instance-actions">
       {item.frameId ? <button type="button" data-workflow-graph-frame={item.frameId} onClick={() => onFrame(item.frameId!)}>{copy.frame}</button> : <span>{copy.missingFrame}</span>}
       {item.category === 'turn' && <button type="button" data-workflow-graph-output={item.id} onClick={() => onOutput({ kind: 'attempt', attemptId: item.id })}>{copy.output}</button>}
@@ -97,14 +91,17 @@ export function WorkflowExecutionGraph({ workflowId, preview, onFrame, onOutput 
   const [read, setRead] = useState<Read>({ state: 'loading' })
   useEffect(() => {
     let current = true
-    void Promise.all([readPages(workflowId, preview.programRevision, 'attempts'), readPages(workflowId, preview.programRevision, 'systems')]).then(([attempts, systems]) => {
-      const records = [...attempts.records, ...systems.records].slice(0, MAX_PAGES * PAGE_SIZE)
-      const frameIds = [...new Set(records.flatMap(record => record.intent.state === 'available' && record.intent.value.frame.state === 'available' ? [record.intent.value.frame.frameId] : []))]
+    void Promise.all([readPage(workflowId, preview.programRevision, 'attempts'), readPage(workflowId, preview.programRevision, 'systems'), readPage(workflowId, preview.programRevision, 'classifiers')]).then(async pages => {
+      const records = pages.flatMap(page => page.records)
+      const allFrameIds = [...new Set(records.flatMap(record => record.intent.state === 'available' && record.intent.value.frame.state === 'available' ? [record.intent.value.frame.frameId] : []))]
+      const frameIds = allFrameIds.slice(0, 64)
       const frames = new Map<string, AvailableFrame>()
-      return Promise.all(frameIds.slice(0, MAX_FRAMES).map(async id => [id, await window.scry.workflow.inspectFrame(workflowId, id)] as const)).then(results => {
+      for (let index = 0; index < frameIds.length; index += 8) {
+        const batch = frameIds.slice(index, index + 8)
+        const results = await Promise.all(batch.map(async id => [id, await window.scry.workflow.inspectFrame(workflowId, id)] as const))
         for (const [id, frame] of results) if (frame.state === 'available') frames.set(id, frame)
-        if (current) setRead({ state: 'ready', records, frames, bounded: attempts.bounded || systems.bounded, framesBounded: frameIds.length > MAX_FRAMES })
-      })
+      }
+      if (current) setRead({ state: 'ready', records, frames, truncated: pages.some(page => page.nextOffset !== undefined), framesTruncated: allFrameIds.length > frameIds.length })
     }).catch(error => { if (current) setRead({ state: 'error', message: error instanceof Error ? error.message : String(error) }) })
     return () => { current = false }
   }, [workflowId, preview.programRevision])
@@ -116,9 +113,9 @@ export function WorkflowExecutionGraph({ workflowId, preview, onFrame, onOutput 
   const nodes = workflowProgramStructure(preview.program.body)
   return <section className="workflow-execution-graph" aria-label={copy.graph}>
     <h3>{copy.graph}</h3><p>{copy.graphSource}</p><p role="status">{copy.noReinjection}</p>
-    {read.bounded && <p role="status">{copy.graphBounded}</p>}
-    {read.framesBounded && <p role="status">{copy.graphFramesBounded}</p>}
     {!items.length && <p role="status">{copy.graphUnavailable}</p>}
+    {read.truncated && <p role="status">{copy.graphBounded}</p>}
+    {read.framesTruncated && <p role="status">{copy.graphFramesBounded}</p>}
     <ol className="workflow-graph-code-list">{nodes.map(node => <CodeNode key={node.block.blockId} node={node} instances={byNode.get(node.block.blockId) ?? []} onFrame={onFrame} onOutput={onOutput} />)}</ol>
   </section>
 }

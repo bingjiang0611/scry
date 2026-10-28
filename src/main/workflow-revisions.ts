@@ -95,7 +95,7 @@ function validateWorkflowRevisionReuse(record: WorkflowStoreRecord, revision: Wo
   const reused = new Set(revision.reuse.map(entry => entry.nodeId))
   const dependenciesReused = (id: string): boolean => {
     const node = next.nodes.get(id)
-    if (!node || node.block.kind === 'replica' || node.block.kind === 'check' || node.block.kind === 'verification' || (node.block.kind === 'call' && node.block.replica)) return false
+    if (!node || node.block.kind === 'replica' || node.block.kind === 'check' || node.block.kind === 'verification' || node.block.kind === 'classifier' || (node.block.kind === 'call' && node.block.replica)) return false
     return (node.block.kind !== 'call' || reused.has(id)) && node.dependencies.every(dependenciesReused)
   }
   for (const entry of revision.reuse) {
@@ -121,7 +121,7 @@ export function governingWorkflowPreview(record: WorkflowStoreRecord, kind: 'int
 export function workflowStaticRevisionNodes(preview: WorkflowPlanPreview) {
   const nodes = new Map<string, { block: WorkflowBlock; path: string[]; dependencies: string[] }>()
   const visit = (block: WorkflowBlock, path: string[]) => {
-    if (!['sequence', 'parallel', 'bind', 'call', 'return', 'replica', 'combine', 'check', 'verification'].includes(block.kind)) throw new Error(copy.unsupported)
+    if (!['sequence', 'parallel', 'bind', 'call', 'return', 'replica', 'combine', 'check', 'verification', 'classifier'].includes(block.kind)) throw new Error(copy.unsupported)
     const children = workflowChildBlocks(block)
     const dependencies = block.kind === 'call' ? [...(block.inputRefs ?? []).map(ref => ref.nodeId), ...(block.replica ? workflowExpressionReferences(block.replica) : [])]
       : block.kind === 'bind' ? workflowExpressionReferences(block.value) : block.kind === 'return' ? [block.ref.nodeId]
@@ -129,6 +129,7 @@ export function workflowStaticRevisionNodes(preview: WorkflowPlanPreview) {
       : block.kind === 'combine' ? [...workflowExpressionReferences(block.base), ...workflowExpressionReferences(block.candidates)]
       : block.kind === 'check' ? workflowExpressionReferences(block.replica)
       : block.kind === 'verification' ? [...Object.values(block.required).flatMap(entry => workflowExpressionReferences(entry.result)), ...(block.baseline ? workflowExpressionReferences(block.baseline) : [])]
+      : block.kind === 'classifier' ? (block.inputRefs ?? []).map(ref => ref.nodeId)
       : children.map(child => child.blockId)
     nodes.set(block.blockId, { block, path, dependencies })
     for (const child of children) visit(child, block.kind === 'parallel' ? [...path, 'parallel:' + child.blockId] : path)

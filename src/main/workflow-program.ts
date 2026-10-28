@@ -31,6 +31,11 @@ export interface WorkflowCapabilityInput {
   hasIndependentRun: boolean
   canObserveOutput: boolean
   canConfirmStop: boolean
+  structuredCandidateAuthoring?: WorkflowCapabilityState
+  hostToolsDisabled?: WorkflowCapabilityState
+  permissionQuestion?: WorkflowCapabilityState
+  businessQuestion?: WorkflowCapabilityState
+  waitStates?: WorkflowRoleCapability['waitStates']
 }
 
 export function workflowPlanningPrompt(roles: readonly WorkflowRoleBinding[], goal: string, sizeGuideline: WorkflowSizeGuideline = 'medium'): string {
@@ -151,21 +156,30 @@ export function validateWorkflowProgram(input: unknown): WorkflowProgram {
 
 export function capabilityForRole(binding: WorkflowRoleBinding, input: WorkflowCapabilityInput): WorkflowRoleCapability {
   const descriptorState = providerCapabilityState(input.descriptor)
+  const authoring = input.structuredCandidateAuthoring ?? 'unknown'
+  const hostToolsDisabled = input.hostToolsDisabled ?? 'unknown'
+  const permissionQuestion = input.permissionQuestion ?? 'unknown'
+  const businessQuestion = input.businessQuestion ?? 'unknown'
   const states: WorkflowCapabilityState[] = [
     descriptorState,
     input.adapterRegistered && input.hasIndependentRun ? 'available' : 'unavailable',
     input.canObserveOutput ? 'available' : 'unavailable',
-    input.canConfirmStop ? 'available' : 'unavailable'
+    input.canConfirmStop ? 'available' : 'unavailable',
+    ...(binding.role === 'orchestrator' ? [authoring, hostToolsDisabled] : [])
   ]
   const state = states.includes('unavailable') ? 'unavailable' : states.includes('unknown') ? 'unknown' : 'available'
   const reason = state === 'available' ? undefined : !input.adapterRegistered ? 'Provider 未注册 adapter' :
     !input.hasIndependentRun ? 'Provider 不支持独立新会话' : !input.canObserveOutput ? 'Provider 未提供终态与最终输出观测' :
-      !input.canConfirmStop ? 'Provider 未提供可确认的停止收敛' : 'Provider 准入状态未知'
+      !input.canConfirmStop ? 'Provider 未提供可确认的停止收敛' : binding.role === 'orchestrator' && authoring === 'unavailable' ? 'Provider 未声明结构化候选编排能力' :
+        binding.role === 'orchestrator' && hostToolsDisabled === 'unavailable' ? '编排候选未证明禁用宿主工具' : 'Provider 准入状态未知'
   return {
     role: binding.role, providerId: binding.providerId, ...(binding.agentProfileId ? { agentProfileId: binding.agentProfileId } : {}),
     ...(binding.requestedModel ? { requestedModel: binding.requestedModel } : {}),
     actualModelStatus: 'unknown', runtimeProvider: input.descriptor?.runtimeProvider,
-    startIndependentSession: states[1], observeTerminalOutput: states[2], confirmStopConvergence: states[3], state, ...(reason ? { reason } : {})
+    startIndependentSession: states[1], observeTerminalOutput: states[2], confirmStopConvergence: states[3],
+    structuredCandidateAuthoring: authoring, hostToolsDisabled, permissionQuestion, businessQuestion,
+    waitStates: input.waitStates ?? { model: 'unknown', tool: 'unknown', quota: 'unknown' },
+    state, ...(reason ? { reason } : {})
   }
 }
 

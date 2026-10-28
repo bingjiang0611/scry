@@ -1,6 +1,7 @@
 import { validateWorkflowProtectedPaths } from './workflow-verification-surface'
 import { WORKFLOW_MAX_REQUIRED_CHECKS } from '../shared/workflow-verification'
 import { WORKFLOW_MAX_BATCH, type WorkflowBlock, type WorkflowOutputRef, type WorkflowParallelFailurePolicy } from '../shared/workflow'
+import type { WorkflowClassifierKind } from '../shared/workflow-classifier'
 import { workflowCollectionCopy, workflowFrameCopy, workflowValueCopy } from '../shared/constants/copy'
 import { validateWorkflowCheck, validateWorkflowFrozenCheck } from './workflow-check'
 import { validateWorkflowValueSchema } from './workflow-values'
@@ -31,6 +32,40 @@ export function validateBlock(value: unknown, seen: Set<string>, depth: number, 
   seen.add(input.blockId)
   count.value += 1
   if (count.value > MAX_BLOCKS) throw new Error(`程序块数量不能超过 ${MAX_BLOCKS}`)
+  if (input.kind === 'classifier') {
+    rejectUnknownFields(input, ['kind', 'blockId', 'classifierId', 'classifier', 'prompt', 'criteria', 'model', 'threshold', 'choices', 'score', 'inputRefs'])
+    assertId(input.classifierId, '分类器 ID')
+    if (!['bool', 'choice', 'score'].includes(input.classifier as string)) throw new Error('分类器类型无效')
+    assertText(input.prompt, '分类器提示', MAX_PROMPT_LENGTH)
+    assertText(input.criteria, '分类器判据', MAX_PROMPT_LENGTH)
+    if (input.model !== undefined) assertText(input.model, '分类器模型', 512)
+    const threshold = input.threshold === undefined ? undefined : (() => {
+      if (!input.threshold || typeof input.threshold !== 'object' || Array.isArray(input.threshold)) throw new Error('分类器阈值无效')
+      const value = input.threshold as Record<string, unknown>
+      rejectUnknownFields(value, ['min', 'max'])
+      for (const key of ['min', 'max']) if (value[key] !== undefined && (typeof value[key] !== 'number' || !Number.isFinite(value[key]) || value[key] < 0 || value[key] > 1)) throw new Error('分类器阈值无效')
+      const min = typeof value.min === 'number' ? value.min : undefined
+      const max = typeof value.max === 'number' ? value.max : undefined
+      if (min !== undefined && max !== undefined && min > max) throw new Error('分类器阈值无效')
+      return { ...(min === undefined ? {} : { min }), ...(max === undefined ? {} : { max }) }
+    })()
+    const choices = input.choices === undefined ? undefined : (() => {
+      if (input.classifier !== 'choice' || !Array.isArray(input.choices) || input.choices.length < 2 || input.choices.length > 256 || !input.choices.every(value => typeof value === 'string' && value.length > 0 && value.length <= 256)) throw new Error('分类器选项无效')
+      return [...new Set(input.choices)]
+    })()
+    const score = input.score === undefined ? undefined : (() => {
+      if (input.classifier !== 'score' || !input.score || typeof input.score !== 'object' || Array.isArray(input.score)) throw new Error('分类器分数范围无效')
+      const value = input.score as Record<string, unknown>
+      if (typeof value.min !== 'number' || typeof value.max !== 'number' || !Number.isFinite(value.min) || !Number.isFinite(value.max) || value.min > value.max) throw new Error('分类器分数范围无效')
+      return { min: value.min, max: value.max }
+    })()
+    if (input.classifier === 'choice' && !choices || input.classifier === 'score' && !score || input.classifier === 'bool' && (choices || score)) throw new Error('分类器合同无效')
+    const inputRefs = input.inputRefs === undefined ? undefined : validateRefs(input.inputRefs, '分类器输入')
+    count.textBytes += Buffer.byteLength(JSON.stringify({ prompt: input.prompt, criteria: input.criteria, model: input.model, threshold, choices, score, inputRefs }))
+    if (count.textBytes > MAX_PROGRAM_TEXT) throw new Error(workflowValueCopy.programLimit)
+    return { kind: 'classifier', blockId: input.blockId, classifierId: input.classifierId, classifier: input.classifier as WorkflowClassifierKind,
+      prompt: input.prompt, criteria: input.criteria, ...(input.model === undefined ? {} : { model: input.model }), ...(threshold ? { threshold } : {}), ...(choices ? { choices } : {}), ...(score ? { score } : {}), ...(inputRefs ? { inputRefs } : {}) }
+  }
   if (input.kind === 'call') {
     rejectUnknownFields(input, ['kind', 'blockId', 'role', 'prompt', 'inputRefs', 'outputSchema', 'replica'])
     validateRole(input.role)

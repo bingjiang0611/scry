@@ -11,6 +11,7 @@ import type { WorkflowTaskReference } from '../shared/workflow-api'
 import type { WorkflowStore } from './workflow-store'
 import type { ProviderStructuredOutput } from './providers/types'
 import type { WorkflowTemplateStore } from './workflow-template-store'
+import type { WorkflowClassifierAdapter } from '../shared/workflow-classifier'
 
 export interface WorkflowPlanRequest {
   command: string
@@ -22,6 +23,12 @@ export interface WorkflowPlanRequest {
   capturedTask?: { reference: WorkflowTaskReference; inputSha256: string; sizeGuideline: WorkflowSizeSnapshot; authoringContinuationKey?: string }
   beforeProviderDispatch?: () => Promise<void>
 }
+export type WorkflowRestartEvidence =
+  | { state: 'settled'; attemptId: string; taskId: string; reason: 'stalled' | 'reply_lost' }
+  | { state: 'unavailable' | 'unknown' | 'unsettled'; attemptId: string; taskId: string; reason: string }
+
+export type WorkflowRestartEvidenceProvider = (request: { workflowId: string; taskId: string; attemptId: string; programRevision: string }) => Promise<WorkflowRestartEvidence>
+
 export interface WorkflowPlanProvider {
   (request: { workflowId: string; role: WorkflowRoleBinding; roles: WorkflowRoleBinding[]; goal: string; workspace: string; sizeGuideline: WorkflowSizeSnapshot; signal: AbortSignal; beforeProviderDispatch?: () => Promise<void>; expectedContinuationKey?: string; route?: true; routingMode?: WorkflowRoutingMode }): Promise<{ output: string; outputSource?: ProviderStructuredOutput['source']; actualModel?: string; archiveRef?: string }>
 }
@@ -30,12 +37,14 @@ export interface WorkflowServiceOptions {
   templates?: WorkflowTemplateStore
   systems?: WorkflowSystemHost
   providerRegistered: (providerId: ProviderId) => boolean
-  runControls: (role: WorkflowRoleBinding, workspace: string) => Promise<{ descriptor: ProviderDescriptor; model: boolean; stop: boolean; identity: string; independentRun: boolean; terminalOutput: boolean }>
+  runControls: (role: WorkflowRoleBinding, workspace: string) => Promise<{ descriptor: ProviderDescriptor; model: boolean; stop: boolean; identity: string; independentRun: boolean; terminalOutput: boolean; structuredCandidateAuthoring?: import('../shared/workflow').WorkflowCapabilityState; hostToolsDisabled?: import('../shared/workflow').WorkflowCapabilityState; permissionQuestion?: import('../shared/workflow').WorkflowCapabilityState; businessQuestion?: import('../shared/workflow').WorkflowCapabilityState; waitStates?: import('../shared/workflow').WorkflowRoleCapability['waitStates'] }>
   plan: WorkflowPlanProvider
   execute: (request: { workflowId: string; taskId: string; attemptId: string; role: WorkflowRoleBinding; prompt: string; workspace: string; replicaRun?: WorkflowReplicaRun; onObservation?: (observation: WorkflowLiveObservation) => void }) => WorkflowProviderExecution
+  restartEvidence?: WorkflowRestartEvidenceProvider
   slots?: WorkflowSlots
   loadConcurrency?: () => Promise<number | undefined>
   onProgress?: (progress: WorkflowProgress) => void
+  classifierAdapter?: WorkflowClassifierAdapter
 }
 export interface Receipt<T> { fingerprint: string; promise: Promise<T>; settled: boolean }
 export type WorkflowShutdownPreparation =

@@ -28,7 +28,8 @@ async function fixture(count = 2, store: WorkflowStore = new MemoryWorkflowStore
   const runControls = vi.fn<WorkflowServiceOptions['runControls']>(async () => ({
     descriptor: { id: 'codex', label: 'fixture', runtimeProvider: 'codex_cli', transport: 'fixture', available: true,
       capabilities: { skills: 'none', mcp: 'none', commands: 'none', account: 'none' }, health: { state: 'ready', transport: 'fixture' } },
-    model: true, stop: true, identity: 'fixture-runtime', independentRun: true, terminalOutput: true
+    model: true, stop: true, identity: 'fixture-runtime', independentRun: true, terminalOutput: true,
+    structuredCandidateAuthoring: 'available', hostToolsDisabled: 'available', permissionQuestion: 'available', businessQuestion: 'unavailable'
   }))
   const service = new WorkflowService({ store, slots: new WorkflowSlots(2), providerRegistered: () => true, plan, execute, runControls })
   services.push(service)
@@ -58,7 +59,7 @@ describe('canonical execution inspection', () => {
     if (second.state !== 'available') throw new Error('missing second page')
     expect(second.records).toHaveLength(3)
     expect(second.nextOffset).toBeUndefined()
-    const ids = [...first.records, ...second.records].map(row => 'attemptId' in row ? row.attemptId : row.stepId)
+    const ids = [...first.records, ...second.records].map(row => 'attemptId' in row ? row.attemptId : 'classifierId' in row ? row.classifierId : row.stepId)
     expect(new Set(ids).size).toBe(35)
     expect(JSON.stringify([first, second])).not.toContain(canary)
     expect(await f.store.load(f.query.workflowId)).toEqual(before)

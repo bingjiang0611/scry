@@ -4,14 +4,14 @@ import { workflowShutdownCopy, workflowRecoveryCopy, workflowTemplateCopy } from
 
 import { workflowSystemCopy } from '../shared/constants/copy'
 import { validateWorkflowSystemLedger } from './workflow-system-ledger'
+import { validateWorkflowClassifierLedger, validateWorkflowClassifierLedgerCanonical } from './workflow-recovery'
 import type { WorkflowFrameInspection, WorkflowResumeResult } from '../shared/workflow-api'
 import type { WorkflowExecutionInspection, WorkflowExecutionInspectionRequest } from '../shared/workflow-inspection'
 import type { WorkflowOutputInspection, WorkflowOutputInspectionRequest } from '../shared/workflow-output-inspection'
 
-import type { ProviderDescriptor } from '../shared/provider'
 import type { WorkflowAttemptOutcome, WorkflowPlanPreview, WorkflowProgress, WorkflowRoleBinding, WorkflowProgram } from '../shared/workflow'
 import { workflowProgressSnapshot, workflowChildBlocks } from '../shared/workflow'
-import { capabilityForRole, workflowSystemSourceBody, validateWorkflowProgram, validateWorkflowRoleBinding, workflowRevision } from './workflow-program'
+import { workflowSystemSourceBody, validateWorkflowProgram, validateWorkflowRoleBinding, workflowRevision } from './workflow-program'
 import { WorkflowRunner, WorkflowSlots } from './workflow-runner'
 
 import type { WorkflowPlanningIntent, WorkflowStoreRecord } from './workflow-store'
@@ -24,17 +24,16 @@ import { projectWorkflowFrameLinks } from './workflow-progress'
 import type { WorkflowRouteResult } from '../shared/workflow-route'
 import { projectWorkflowExecution } from './workflow-execution-inspection'
 import { inspectWorkflowOutput } from './workflow-output-inspection'
+import { resolveWorkflowCapability } from './workflow-capability-resolution'
 
 export const planningId = (commandId: string) => `workflow-${createHash('sha256').update(commandId).digest('hex')}`
 
-/** One App-owned service. Provider execution stays in the canonical App chain. */
 export class WorkflowServiceFoundation {
   protected readonly runner: WorkflowRunner
   protected readonly options: WorkflowServiceOptions & { slots: WorkflowSlots }
   protected readonly ready: Promise<void>
   protected initializationError: unknown
   protected readonly plans = new Map<string, Receipt<WorkflowPlanPreview>>()
-  /** Routing decisions are cached separately: they are not plan previews. */
   protected readonly routes = new Map<string, Receipt<WorkflowRouteResult>>()
   protected readonly starts = new Map<string, Receipt<WorkflowProgress>>()
   protected readonly resumes = new Map<string, Receipt<WorkflowResumeResult>>()
@@ -58,8 +57,8 @@ export class WorkflowServiceFoundation {
       execute: request => options.execute({ workflowId: request.workflowId, taskId: request.taskId, attemptId: request.attemptId, role: request.role, prompt: request.prompt, workspace: request.cwd, replicaRun: request.replicaRun, onObservation: request.onObservation }),
       onLifecycle: () => this.notifyLifecycle(),
       beforeDispatch: async (role, workspace) => { await this.capability(role, workspace, true) },
+      classifierAdapter: options.classifierAdapter,
       onProgress: progress => options.onProgress?.(this.progressSnapshot(progress)) })
-    // A corrupt journal disables workflows, not the whole desktop application.
     this.ready = this.initialize().catch(error => { this.initializationError = error })
   }
   protected planningSettled(intent: WorkflowPlanningIntent): boolean {
@@ -69,8 +68,6 @@ export class WorkflowServiceFoundation {
   }
 
   protected progressSnapshot(progress: WorkflowProgress, requests?: WorkflowStoreRecord['stopRequests'], record?: WorkflowStoreRecord): WorkflowProgress {
-    // Dispatch/outcomes are durable per-root facts. Slots belong to the current
-    // shared kernel, not the historical counter stored with one root's update.
     const slots = this.options.slots
     const snapshot = workflowProgressSnapshot({ ...progress, slots: { limit: slots.limit, inUse: slots.active, queued: slots.queued } })
     return projectWorkflowStopIntents(projectWorkflowFrameLinks(snapshot, record), requests)
@@ -103,25 +100,12 @@ export class WorkflowServiceFoundation {
     this.planningWrites.set(intent.workflowId, write)
     try { await write } finally { if (this.planningWrites.get(intent.workflowId) === write) this.planningWrites.delete(intent.workflowId) }
   }
-  protected async capability(role: WorkflowRoleBinding, workspace: string, required = false) {
-    let descriptor: ProviderDescriptor | undefined
-    let controls = { model: false, stop: false, identity: '', independentRun: false, terminalOutput: false }
-    try {
-      const snapshot = await this.options.runControls(role, workspace)
-      descriptor = snapshot.descriptor
-      controls = snapshot
-    } catch { /* refusal, never a replacement Provider */ }
-    const capability = capabilityForRole(role, { descriptor, adapterRegistered: this.options.providerRegistered(role.providerId),
-      hasIndependentRun: controls.model && controls.independentRun && Boolean(controls.identity), canObserveOutput: controls.terminalOutput, canConfirmStop: controls.stop })
-    if (required && (!role.runtimeIdentity || role.runtimeIdentity !== controls.identity)) throw new Error('Provider 入口或模型/权限目录已变化，必须重新规划并确认')
-    if (required && capability.state !== 'available') throw new Error(`${role.role}: ${capability.reason ?? '能力不可用'}`)
-    return { ...capability, runtimeIdentity: controls.identity }
+  protected capability(role: WorkflowRoleBinding, workspace: string, required = false) {
+    return resolveWorkflowCapability(this.options, role, workspace, required)
   }
   protected async initialize(): Promise<void> {
     const concurrency = await this.options.loadConcurrency?.()
     if (concurrency !== undefined) this.options.slots.configure(concurrency)
-    // Iterate bounded pages. No complete transcript/output bodies or unbounded
-    // historical receipt cache is retained in memory on startup.
     let cursor: string | undefined
     do {
       const page = await this.options.store.listPage(cursor, 64)
@@ -152,10 +136,18 @@ export class WorkflowServiceFoundation {
   }
   protected async recover(record: WorkflowStoreRecord): Promise<void> {
     validateWorkflowSystemLedger(record)
+    const classifierKnown = new Set((record.classifierOutcomes ?? []).map(outcome => outcome.classifierId))
+    for (const intent of record.classifierIntents ?? []) if (!classifierKnown.has(intent.classifierId)) {
+      ;(record.classifierOutcomes ??= []).push({ classifierId: intent.classifierId, state: 'unknown', settled: false, provenance: 'unavailable', reason: '应用重启后分类器作用域未收敛' })
+    }
     const systemKnown = new Set((record.systemOutcomes ?? []).map(outcome => outcome.stepId))
     for (const intent of record.systemIntents ?? []) if (!systemKnown.has(intent.stepId)) {
       ;(record.systemOutcomes ??= []).push({ stepId: intent.stepId, taskId: intent.taskId, state: 'unknown', settled: false, startedAt: intent.createdAt, finishedAt: Date.now(), error: workflowSystemCopy.unknown })
     }
+    validateWorkflowClassifierLedger(record)
+    await validateWorkflowClassifierLedgerCanonical(record, this.options.store)
+    const pendingClassifiers = (record.classifierOutcomes ?? []).filter(outcome => !outcome.settled)
+    for (const _ of pendingClassifiers) this.options.slots.reserveUnknown()
     const pendingSystems = (record.systemOutcomes ?? []).filter(outcome => !outcome.settled)
     for (const _ of pendingSystems) this.options.slots.reserveUnknown()
     if (record.systemIntents?.length) record.progress.systemSteps = record.systemIntents.slice(-64).map(intent => {
@@ -171,7 +163,7 @@ export class WorkflowServiceFoundation {
     }
     const pending = record.outcomes.filter(outcome => !outcome.settled)
     for (const _ of pending) this.options.slots.reserveUnknown()
-    if (pending.length || pendingSystems.length) {
+    if (pending.length || pendingSystems.length || pendingClassifiers.length) {
       record.progress.state = 'unknown'
       record.progress.revision = (record.progress.revision ?? 0) + 1
       record.progress.finalReportStatus = 'unavailable'
@@ -231,8 +223,6 @@ export class WorkflowServiceFoundation {
     return result
   }
   async inspectFrame(preview: WorkflowPlanPreview, frameId: string): Promise<WorkflowFrameInspection> {
-    // Reuse the canonical preview already authorized by IPC. Renderer input
-    // never supplies this context, and the same governing root is not read twice.
     const workflowId = preview.workflowId
     await this.ensureReady()
     const observedAt = Date.now()
@@ -270,9 +260,6 @@ export class WorkflowServiceFoundation {
   protected stopReceipt(commandId: string, fingerprint: string, action: () => Promise<boolean>): Promise<boolean> {
     const promise = this.receipt(this.stops, commandId, fingerprint, action)
     return promise.catch(error => {
-      // A rejected cache entry is not an accepted stop receipt. On explicit
-      // redelivery the Runner checks its canonical journal before any signal;
-      // an unknown publication must never become a fresh stop operation.
       if (this.stops.get(commandId)?.promise === promise) this.stops.delete(commandId)
       throw error
     })
@@ -284,8 +271,6 @@ export class WorkflowServiceFoundation {
       if (prior.fingerprint !== fingerprint) return Promise.reject(new Error('工作流 commandId 已用于另一请求'))
       return prior.promise
     }
-    // Evict completed cache entries only. Durable receipt lookup in action is
-    // still authoritative after eviction/restart. Pending pressure is explicit.
     for (const [id, entry] of cache) if (cache.size >= 256 && entry.settled) cache.delete(id)
     if (cache.size >= 256) return Promise.reject(new Error('待处理的工作流命令已满，请等待在途请求收敛'))
     const entry: Receipt<T> = { fingerprint, settled: false, promise: Promise.resolve().then(action) }

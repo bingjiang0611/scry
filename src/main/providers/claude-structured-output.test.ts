@@ -48,7 +48,7 @@ describe('Claude canonical result projection', () => {
   it('passes the private purpose through the actual adapter and restricted option builder without native execution', async () => {
     runner.mockReturnValue({ promise: Promise.resolve({ status: 'completed' }), interrupt: vi.fn(), getSessionId: vi.fn() })
     const adapter = createClaudeAdapter('/offline/home')
-    expect(adapter.workflowAuthoring).toEqual({ source: 'claude_sdk_success_result' })
+    expect(adapter.workflowAuthoring).toEqual({ source: 'claude_sdk_success_result', hostTools: 'disabled', permissionBoundary: 'default_only', businessQuestions: 'blocked' })
     await adapter.run({ ...request(), purpose: 'workflow_authoring' }).promise
     expect(skills).not.toHaveBeenCalled()
     const opts = runner.mock.calls[0][3] as RunOpts

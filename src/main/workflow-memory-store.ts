@@ -5,7 +5,7 @@ import { workflowFrameCopy, workflowRecoveryCopy } from '../shared/constants/cop
 
 import { nextWorkflowFrame, validateWorkflowValueReference } from './workflow-frames'
 
-import { validateWorkflowOwnership, validateWorkflowClaim, workflowEpochMatches, workflowRecordFingerprint } from './workflow-recovery'
+import { validateWorkflowOwnership, validateWorkflowClaim, validateWorkflowClassifierLedgerCanonical, workflowEpochMatches, workflowRecordFingerprint } from './workflow-recovery'
 import { collectionEntries, validateCollectionReference } from './workflow-collections'
 import type { WorkflowAttemptOutcome, WorkflowCollectionEntry, WorkflowCollectionReference, WorkflowControlFrame, WorkflowEvaluation, WorkflowValueReference } from '../shared/workflow'
 
@@ -128,7 +128,13 @@ export class MemoryWorkflowStore implements WorkflowStore {
   }
   async loadPlanningIntent(id: string): Promise<WorkflowPlanningIntent | undefined> { const value = this.planning.get(id); return value && structuredClone(value) }
   async *planningIntents(): AsyncIterable<WorkflowPlanningIntent> { for (const intent of this.planning.values()) yield structuredClone(intent) }
-  async load(id: string): Promise<WorkflowStoreRecord | undefined> { const value = this.records.get(id); return value && structuredClone(value) }
+  async load(id: string): Promise<WorkflowStoreRecord | undefined> {
+    const value = this.records.get(id)
+    if (!value) return undefined
+    const record = structuredClone(value)
+    await validateWorkflowClassifierLedgerCanonical(record, this, false)
+    return record
+  }
   async listPage(cursor?: string, limit = 64): Promise<WorkflowStorePage> {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 256) throw new Error('工作流历史页大小无效')
     const ids = [...this.records.keys()].sort().filter(id => !cursor || id > cursor)

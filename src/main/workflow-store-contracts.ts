@@ -2,6 +2,7 @@ import type { WorkflowAttemptOutcome, WorkflowCollectionEntry, WorkflowCollectio
 import type { WorkflowSizeGuideline, WorkflowSizeSnapshot } from '../shared/workflow-size'
 import type { WorkflowRetryTarget, WorkflowStopTarget } from '../shared/workflow-api'
 import type { WorkflowSystemIntent, WorkflowSystemOutcome } from '../shared/workflow-system'
+import type { WorkflowClassifierIntent, WorkflowClassifierOutcome } from '../shared/workflow-classifier'
 import type { WorkflowReplicaReference } from '../shared/workflow-replica'
 import type { WorkflowGoverningRevision } from './workflow-revisions'
 import type { WorkflowAgentInputs } from './workflow-agent-inputs'
@@ -17,6 +18,7 @@ export interface WorkflowIntent {
   callFrameId?: string
   previousAttemptId?: string
   retryCommandId?: string
+  restartCommandId?: string
   replica?: WorkflowReplicaReference
   role: string
   providerId: string
@@ -27,7 +29,7 @@ export type WorkflowExecutionOwnership = {
   version: 2
   epoch: string
   owner: { pid: number; instanceId: string; state: 'active' | 'closed' }
-  segments: Array<{ id: string; generationId?: string; commandId?: string; createdAt: number; mode: 'start' | 'continue' | 'retry' | 'revision'; retry?: WorkflowRetryTarget; expectedRevision?: number }>
+  segments: Array<{ id: string; generationId?: string; commandId?: string; createdAt: number; mode: 'start' | 'continue' | 'retry' | 'restart' | 'revision'; retry?: WorkflowRetryTarget; restart?: { taskId: string; attemptId: string; expectedRevision: number; reason: 'stalled' | 'reply_lost' }; expectedRevision?: number }>
 }
 
 export interface WorkflowStoreRecord {
@@ -46,6 +48,8 @@ export interface WorkflowStoreRecord {
   outcomes: WorkflowAttemptOutcome[]
   systemIntents?: WorkflowSystemIntent[]
   systemOutcomes?: WorkflowSystemOutcome[]
+  classifierIntents?: WorkflowClassifierIntent[]
+  classifierOutcomes?: WorkflowClassifierOutcome[]
 }
 export interface WorkflowPlanningIntent {
   workflowId: string

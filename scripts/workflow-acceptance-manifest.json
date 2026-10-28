@@ -1,0 +1,201 @@
+{
+  "schemaVersion": 3,
+  "name": "scry-workflow-offline-acceptance",
+  "source": [
+    "src/shared/workflow-classifier.ts",
+    "src/shared/workflow.ts",
+    "src/main/workflow-classifier.ts",
+    "src/main/workflow-runner-kernel.ts",
+    "src/main/workflow-runner-stop.ts",
+    "src/main/workflow-recovery.ts",
+    "src/main/workflow-service-foundation.ts",
+    "src/main/workflow-capability-resolution.ts",
+    "src/main/workflow-classifier-recovery.test.ts",
+    "src/main/workflow-template-builtins.ts",
+    "src/main/workflow-template-registry.ts",
+    "src/main/workflow-source-application.ts",
+    "src/main/workflow-source-application.test.ts",
+    "src/main/workflow-execution-inspection.ts",
+    "src/main/workflow-graph.ts",
+    "src/main/workflow-graph.test.ts",
+    "src/main/workflow-template-builtins-quality.test.ts",
+    "src/main/workflow-restart-ipc.test.ts",
+    "src/renderer/components/WorkflowExecutionGraph.tsx",
+    "scripts/workflow-offline-acceptance.mjs"
+  ],
+  "git": {
+    "head": "e06e898ee9b245c1b073d2b41f9d1c968fc4df1d",
+    "branch": "feat/workflow-m0"
+  },
+  "sourceHashes": {
+    "src/shared/workflow-classifier.ts": "7747787d2365d9cdc412a4c92330e2aff2c600288058a0896d37951fdf32d40b",
+    "src/shared/workflow.ts": "4ec98c7615a0a6b0459aef5d07ced244918083f8c946b10f57f454d0b87e0854",
+    "src/main/workflow-classifier.ts": "6dc2b2fd0706f36ebba7d6e625d99ce59caa086a743d2c2298a44dc750ea0e50",
+    "src/main/workflow-runner-kernel.ts": "1110563d4ca6c146861a734fe4bbcbd031d54cbed2ad98654091161e81f17199",
+    "src/main/workflow-runner-stop.ts": "d16ecb84647dd3fb4c894f0f7a0bd8cb61891faffe0f8c4dfa562dfff08d8ee3",
+    "src/main/workflow-recovery.ts": "b07be3739b79fea8b60ec96d7f7f73492f3583ddf48d0dc953450c82a40fe80e",
+    "src/main/workflow-service-foundation.ts": "3c961993a29652d07be0d4bd693a94b8efc035de42f5b0ba8453d166a23b0153",
+    "src/main/workflow-capability-resolution.ts": "dde3bf67c6a509e6aa047e0095812c39a4022cce5139df1d143761c799860dae",
+    "src/main/workflow-classifier-recovery.test.ts": "b21d82329677bfbd0eb59cc94c4884527d3a3721dd6537f7759207c868e603d5",
+    "src/main/workflow-template-builtins.ts": "e0df4a21bcd4e3859798a6f3552250b48f78505535da7e35a828a31de57576ea",
+    "src/main/workflow-template-registry.ts": "a07ce6fcddbc3f9b7dcba88424eb5e68e08bd07b036cf8584acf02cfaa3ae435",
+    "src/main/workflow-source-application.ts": "8112e150f2f9c7d2a74d2324f0cfcfe20f2704186d14a361540da75c02be6d23",
+    "src/main/workflow-source-application.test.ts": "2fad054dc4f5287e07811bbfeeec3cefe5e5e78dd8764e14a569adf32308da61",
+    "src/main/workflow-execution-inspection.ts": "ebbcb7fde4aaf7513a8bbda1e9897772ee64ac984f5e6cbee5968d23fad0c8fc",
+    "src/main/workflow-graph.ts": "5d7df4d78da0c75854faa988182fcb955bc198af8b8b1eaee2eeef544cb969bc",
+    "src/main/workflow-graph.test.ts": "e9bdcda0970ca8f1bc4352c0d7295db126c96c851d20ac79a4c5ad72bdd587d5",
+    "src/main/workflow-template-builtins-quality.test.ts": "a345de0a3c566de0c10c2f9f1e0f434b51d2411d7a80459a3254659db768228c",
+    "src/main/workflow-restart-ipc.test.ts": "b2233a46fb812e37708b8e3e952550d8aeecf62ee878d3a4cda8d80b71d35099",
+    "src/renderer/components/WorkflowExecutionGraph.tsx": "7c82c670071e566db81080fe2fcc404521135c9350d9b5b5ab8d796303ba4cc0",
+    "scripts/workflow-offline-acceptance.mjs": "cde3dcfce5223180c45f1d23b166fd1b12abd2288bb52f0f5d75c70561cc94a6"
+  },
+  "commands": [
+    {
+      "id": "unit",
+      "command": "npm",
+      "args": [
+        "run",
+        "test:unit",
+        "--",
+        "src/shared/workflow-classifier.test.ts",
+        "src/main/workflow-classifier.test.ts",
+        "src/main/workflow-classifier-recovery.test.ts",
+        "src/main/workflow-program.test.ts",
+        "src/main/workflow-runner.test.ts",
+        "src/main/workflow-execution-inspection.test.ts",
+        "src/main/workflow-template-builtins-quality.test.ts",
+        "src/main/workflow-template-registry.test.ts",
+        "src/main/workflow-source-application.test.ts",
+        "src/main/workflow-graph.test.ts",
+        "src/main/workflow-restart-ipc.test.ts",
+        "src/renderer/components/WorkflowExecutionGraph.context.test.tsx"
+      ]
+    },
+    {
+      "id": "classifier-no-fabrication",
+      "command": "npm",
+      "args": [
+        "run",
+        "test:unit",
+        "--",
+        "src/shared/workflow-classifier.test.ts",
+        "-t",
+        "requires completed outcomes",
+        "--reporter=verbose"
+      ]
+    },
+    {
+      "id": "source-drift-rejection",
+      "command": "npm",
+      "args": [
+        "run",
+        "test:unit",
+        "--",
+        "src/main/workflow-source-application.test.ts",
+        "-t",
+        "rejects drift",
+        "--reporter=verbose"
+      ]
+    },
+    {
+      "id": "unknown-no-replay",
+      "command": "npm",
+      "args": [
+        "run",
+        "test:unit",
+        "--",
+        "src/main/workflow-source-application.test.ts",
+        "-t",
+        "does not replay",
+        "--reporter=verbose"
+      ]
+    },
+    {
+      "id": "restart-ledger-no-replay",
+      "command": "npm",
+      "args": [
+        "run",
+        "test:unit",
+        "--",
+        "src/main/workflow-restart-contract.test.ts",
+        "-t",
+        "selects the latest unconsumed restart",
+        "--reporter=verbose"
+      ]
+    },
+    {
+      "id": "security",
+      "command": "node",
+      "args": [
+        "scripts/electron-security-smoke.mjs",
+        "--dev-files-only"
+      ]
+    },
+    {
+      "id": "typecheck-node",
+      "command": "npm",
+      "args": [
+        "run",
+        "typecheck:node"
+      ]
+    },
+    {
+      "id": "typecheck-web",
+      "command": "npm",
+      "args": [
+        "run",
+        "typecheck:web"
+      ]
+    },
+    {
+      "id": "build",
+      "command": "npm",
+      "args": [
+        "run",
+        "build"
+      ]
+    }
+  ],
+  "isolation": {
+    "temporaryWorkspace": true,
+    "temporaryHome": true,
+    "temporaryUserData": true,
+    "realProvider": false,
+    "realJev": false,
+    "businessWorkspace": false
+  },
+  "negativeControls": [
+    {
+      "id": "classifier-no-fabrication",
+      "commandId": "classifier-no-fabrication",
+      "evidence": "dedicated classifier contract test rejects completed outcomes without confidence/probability",
+      "testEvidenceToken": "requires completed outcomes to carry a typed value, confidence and required probability"
+    },
+    {
+      "id": "source-drift-rejection",
+      "commandId": "source-drift-rejection",
+      "evidence": "dedicated source application test rejects changed base before mutation",
+      "testEvidenceToken": "rejects drift before mutation and never invokes apply"
+    },
+    {
+      "id": "unknown-no-replay",
+      "commandId": "unknown-no-replay",
+      "evidence": "dedicated source application test proves durable unknown does not invoke apply twice",
+      "testEvidenceToken": "persists unknown and does not replay after an application error"
+    },
+    {
+      "id": "restart-ledger-no-replay",
+      "commandId": "restart-ledger-no-replay",
+      "evidence": "dedicated restart ledger test selects only the latest unconsumed durable restart",
+      "testEvidenceToken": "selects the latest unconsumed restart, not the first pending segment"
+    }
+  ],
+  "unverified": [
+    "real Provider behavior",
+    "Jev quality",
+    "billing/cost attribution",
+    "research quality",
+    "business workspace application",
+    "production stalled-restart evidence"
+  ]
+}

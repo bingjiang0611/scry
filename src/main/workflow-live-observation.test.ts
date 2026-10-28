@@ -128,6 +128,21 @@ describe('WorkflowLiveObservationTracker', () => {
     expect(tracker.snapshot().status).toBe('unknown')
   })
 
+  it('keeps tools, permissions, business questions and quota in separate bounded sets with deterministic precedence', () => {
+    const tracker = new WorkflowLiveObservationTracker(identity('attempt-separated'))
+    observe(tracker,
+      { source: 'pi_native', kind: 'tool_started', toolCallId: 'same-id' },
+      { source: 'main_permission', kind: 'permission_started', permissionId: 'same-id' },
+      { source: 'main_question', kind: 'business_question_started', questionId: 'same-id' },
+      { source: 'main_quota', kind: 'quota_started', quotaId: 'same-id' })
+    expect(tracker.snapshot()).toMatchObject({ status: 'business_question', trackedToolCount: 1, trackedPermissionCount: 1, trackedBusinessQuestionCount: 1, trackedQuotaCount: 1,
+      activeToolIds: ['same-id'], activePermissionIds: ['same-id'], activeBusinessQuestionIds: ['same-id'], activeQuotaIds: ['same-id'] })
+    tracker.observe({ source: 'main_question', kind: 'business_question_ended', questionId: 'same-id' })
+    expect(tracker.snapshot().status).toBe('permission_wait')
+    tracker.observe({ source: 'main_permission', kind: 'permission_ended', permissionId: 'same-id' })
+    expect(tracker.snapshot().status).toBe('quota_wait')
+  })
+
   it('counts only genuine native deltas and reports unsupported automatic stall detection', () => {
     const tracker = new WorkflowLiveObservationTracker(identity('attempt-progress'))
     expect(tracker.snapshot().status).toBe('unavailable')

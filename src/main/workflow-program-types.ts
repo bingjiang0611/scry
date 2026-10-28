@@ -111,6 +111,14 @@ export function validateReferenceDominance(body: WorkflowBlock, inputs: Readonly
       }))
       return bind(scope, block.blockId, { type: 'union', variants })
     }
+    if (block.kind === 'classifier') {
+      const valueSchema: WorkflowValueSchema = block.classifier === 'bool' ? { type: 'boolean' }
+        : block.classifier === 'score' ? { type: 'number' } : { type: 'string' }
+      const resultSchema: WorkflowValueSchema = { type: 'object', properties: {
+        kind: { type: 'enum', values: ['classifier_result'] }, value: valueSchema, confidence: { type: 'number' }
+      }, required: ['kind', 'value', 'confidence'] }
+      return bind(scope, block.blockId, resultSchema)
+    }
     if (block.kind === 'return') {
       if (block !== body.blocks.at(-1)) throw new Error('return 只能位于根 sequence 的末尾')
       returnCount++

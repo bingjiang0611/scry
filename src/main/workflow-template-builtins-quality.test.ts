@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { WorkflowTemplateStore } from './workflow-template-store'
 import { adversarialReviewTemplateId, builtinTemplateIds, multiAngleTemplateId } from './workflow-template-builtins'
+import { workflowChildBlocks } from '../shared/workflow'
 // The grammar admits exactly these roles; a template cannot invent a new one.
 const WORKFLOW_ROLES = ['orchestrator', 'worker', 'reviewer', 'summarizer']
 
@@ -15,8 +16,8 @@ async function store() {
   roots.push(user)
   return new WorkflowTemplateStore(user, () => { throw new Error('builtin data must not authorize a project directory') })
 }
-type Block = { kind: string; blockId: string; role?: string; blocks?: Block[]; inputRefs?: Array<{ nodeId: string }>; ref?: { nodeId: string } }
-const walk = (block: Block): Block[] => [block, ...(block.blocks ?? []).flatMap(walk)]
+type Block = { kind: string; blockId: string; role?: string; blocks?: Block[]; inputRefs?: Array<{ nodeId: string }>; ref?: { nodeId: string }; outputSchema?: unknown }
+const walk = (block: Block): Block[] => [block, ...workflowChildBlocks(block as never).flatMap(child => walk(child as Block))]
 
 describe('quality builtin templates', () => {
   it('publishes adversarial review and multi-angle programs as valid frozen data', async () => {
@@ -65,6 +66,7 @@ describe('quality builtin templates', () => {
     const adjudicate = blocks.find(block => block.blockId === 'adjudicate')!
     expect(adjudicate.role).toBe('summarizer')
     expect(adjudicate.inputRefs?.map(ref => ref.nodeId)).toEqual(['goal', 'candidate', 'counterexamples', 'evidence'])
+    expect(adjudicate.outputSchema).toEqual({ type: 'object', properties: { refutation: { type: 'string' }, feedback: { type: 'string' } }, required: ['refutation', 'feedback'] })
     expect(blocks.find(block => block.blockId === 'finish')?.ref).toEqual({ nodeId: 'adjudicate' })
   })
 
@@ -76,6 +78,7 @@ describe('quality builtin templates', () => {
     expect(drafts?.blocks?.map(block => block.blockId)).toEqual(['minimalDraft', 'resilienceDraft', 'behaviourDraft'])
     const arbitrate = blocks.find(block => block.blockId === 'arbitrate')!
     for (const draft of drafts!.blocks!) expect(arbitrate.inputRefs?.map(ref => ref.nodeId)).toContain(draft.blockId)
-    expect(blocks.find(block => block.blockId === 'finish')?.ref).toEqual({ nodeId: 'improve' })
+    expect(blocks.find(block => block.blockId === 'finish')?.ref).toEqual({ nodeId: 'constraintGate' })
+    expect(blocks.find(block => block.blockId === 'constraintGate')?.kind).toBe('branch')
   })
 })

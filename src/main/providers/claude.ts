@@ -182,8 +182,8 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
   return {
     id: 'claude',
     runtimeProvider: 'claude_sdk',
-    workflowExecution: { independentRun: true, terminalOutput: true, scopedStop: true, scopeSettlement: true },
-    workflowAuthoring: { source: 'claude_sdk_success_result' },
+    workflowExecution: { independentRun: true, terminalOutput: true, scopedStop: true, scopeSettlement: true, permissionQuestion: true },
+    workflowAuthoring: { source: 'claude_sdk_success_result', hostTools: 'disabled', permissionBoundary: 'default_only', businessQuestions: 'blocked' },
     historicalContext: true,
     historyReader: true,
     continuationKey: (context) => {
@@ -236,7 +236,6 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
       async fork(request) {
         if (request.expectedContinuationKey) {
           const env = claudeRuntimeEnv()
-          // SDK session helpers use the host environment, unlike query's explicit env.
           if (env.CLAUDE_CONFIG_DIR !== process.env.CLAUDE_CONFIG_DIR || (env.HOME ?? homedir()) !== (process.env.HOME ?? homedir())) {
             throw new Error('Claude SDK 分支目录与运行时配置不一致，不能证明原生分支归属')
           }

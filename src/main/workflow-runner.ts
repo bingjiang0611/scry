@@ -2,10 +2,11 @@ export * from './workflow-runner-contracts'
 export { WorkflowSlots } from './workflow-slots'
 import { workflowProgressSnapshot } from '../shared/workflow'
 import type { WorkflowApproval, WorkflowPlanPreview, WorkflowProgress } from '../shared/workflow'
-import type { WorkflowResumeResult, WorkflowRetryTarget } from '../shared/workflow-api'
+import type { WorkflowResumeResult, WorkflowRestartTarget, WorkflowRetryTarget } from '../shared/workflow-api'
 import { workflowRecoveryCopy, workflowRetryCopy } from '../shared/constants/copy'
 import { assertWorkflowApproval } from './workflow-runner-contracts'
-import { assertWorkflowRetryTarget, validateWorkflowRetryTarget } from './workflow-retry'
+import { assertWorkflowRetryTarget, validateWorkflowRestartTarget, validateWorkflowRetryTarget } from './workflow-retry'
+import { assertWorkflowRecovery } from './workflow-recovery'
 import { WorkflowRunnerKernel } from './workflow-runner-kernel'
 import { assertWorkflowRevisionChange, type WorkflowRevisionTarget } from './workflow-revisions'
 import { prepareWorkflowRevisionReuse } from './workflow-revision-reuse'
@@ -54,6 +55,25 @@ export class WorkflowRunner extends WorkflowRunnerKernel {
     if (this.active.has(preview.workflowId)) throw new Error(workflowRevisionCopy.stale)
     beforeClaim?.()
     return this.run(preview, approval, { record, commandId, revision: { target, reuse } })
+  }
+  async restartStalled(preview: WorkflowPlanPreview, approval: WorkflowApproval, target: WorkflowRestartTarget, commandId: string, reason: 'stalled' | 'reply_lost' = 'stalled'): Promise<WorkflowProgress> {
+    target = validateWorkflowRestartTarget(target)
+    if (approval.workflowId !== preview.workflowId || approval.programRevision !== preview.programRevision) throw new Error(workflowRecoveryCopy.fingerprint)
+    const record = await this.store.load(preview.workflowId)
+    if (!record?.execution) throw new Error(workflowRecoveryCopy.legacy)
+    const accepted = record.execution.segments.find(segment => segment.commandId === commandId)
+    if (accepted) {
+      if (accepted.mode !== 'restart' || JSON.stringify({ taskId: accepted.restart?.taskId, attemptId: accepted.restart?.attemptId, expectedRevision: accepted.restart?.expectedRevision }) !== JSON.stringify(target)) throw new Error(workflowRetryCopy.command)
+      return workflowProgressSnapshot(record.progress)
+    }
+    assertWorkflowRecovery(record, this.instanceId, target.attemptId)
+    const outcome = record.outcomes.find(value => value.attemptId === target.attemptId)
+    const intent = record.intents.find(value => value.attemptId === target.attemptId)
+    if (!outcome || !intent || intent.taskId !== target.taskId || !outcome.settled || outcome.state !== 'unknown' || record.progress.revision !== target.expectedRevision) throw new Error(workflowRecoveryCopy.unknown)
+    if (record.execution.segments.filter(segment => segment.mode === 'restart' && segment.restart?.taskId === target.taskId).length >= 5) throw new Error('工作流停滞重启次数已达上限')
+    if (record.execution.segments.length >= 256) throw new Error(workflowRecoveryCopy.limit)
+    if (record.execution.segments.some(segment => segment.mode === 'restart' && segment.restart?.attemptId === target.attemptId)) throw new Error('工作流停滞重启已登记')
+    return this.run(preview, approval, { record, commandId, restart: { taskId: target.taskId, attemptId: target.attemptId, expectedRevision: target.expectedRevision, reason } })
   }
   async retry(preview: WorkflowPlanPreview, approval: WorkflowApproval, target: WorkflowRetryTarget, commandId: string): Promise<WorkflowProgress> {
     target = validateWorkflowRetryTarget(target)

@@ -3,6 +3,7 @@ import type { WorkflowApproval, WorkflowPlanPreview, WorkflowLiveObservation, Wo
 import type { WorkflowReplicaRun, WorkflowSystemHost } from './workflow-system-host'
 import type { WorkflowStore, WorkflowStoreRecord } from './workflow-store'
 import type { WorkflowTargetStopState } from './workflow-stop'
+import type { WorkflowClassifierAdapter } from '../shared/workflow-classifier'
 import type { WorkflowSlots } from './workflow-slots'
 
 export interface WorkflowProviderExecutionRequest {
@@ -79,6 +80,7 @@ export interface WorkflowRunnerOptions {
   onProgress?: (progress: WorkflowProgress) => void
   onLifecycle?: () => void
   beforeDispatch?: (role: WorkflowRoleBinding, workspace: string) => Promise<void>
+  classifierAdapter?: WorkflowClassifierAdapter
 }
 
 

@@ -11,16 +11,18 @@ type Read = { offset: number; sequence: number } & (
 function ExecutionRecord({ record, onFrame, onOutput }: { record: WorkflowExecutionInspectionRecord; onFrame: (id: string) => void; onOutput: (selection: WorkflowOutputSelection) => void }) {
   const intent = record.intent.state === 'available' ? record.intent.value : undefined
   const outcome = record.outcome.state === 'available' ? record.outcome.value : undefined
-  const node = intent?.nodeId ?? ('attemptId' in record && record.outcome.state === 'available' ? record.outcome.value.nodeId : copy.unavailable)
-  const id = 'attemptId' in record ? record.attemptId : record.stepId
+  const isAttempt = 'attemptId' in record, isClassifier = 'classifierId' in record, isSystem = !isAttempt && !isClassifier
+  const node = intent?.nodeId ?? (isAttempt && record.outcome.state === 'available' ? record.outcome.value.nodeId : copy.unavailable)
+  const id = isAttempt ? record.attemptId : isClassifier ? record.classifierId : record.stepId
   const lifecycleLabel = outcome ? copy.states[outcome.state] : copy.missingOutcome
-  const systemReturned = 'stepId' in record && outcome?.state === 'completed'
+  const systemReturned = isSystem && outcome?.state === 'completed'
   const fields: [string, string][] = [[copy.record, id]]
   if (intent) fields.push([copy.revision, intent.programRevision], [copy.createdAt, new Date(intent.createdAt).toLocaleString()])
-  if ('stepId' in record) {
+  if (isSystem) {
     if (record.intent.state === 'available') fields.push([copy.kind, copy.systemKinds[record.intent.value.kind]])
     if (record.outcome.state === 'available') fields.push([copy.startedAt, new Date(record.outcome.value.startedAt).toLocaleString()], [copy.finishedAt, new Date(record.outcome.value.finishedAt).toLocaleString()])
   }
+  if (isClassifier && intent) fields.push([copy.kind, copy.kinds.classifier])
   if ('attemptId' in record) {
     if (record.intent.state === 'available') {
       const admitted = record.intent.value
@@ -49,14 +51,15 @@ function ExecutionRecord({ record, onFrame, onOutput }: { record: WorkflowExecut
         ? <button type="button" data-workflow-inspection-frame={intent.frame.frameId} onClick={() => { if (intent.frame.state === 'available') onFrame(intent.frame.frameId) }}>{copy.frame}</button>
         : <span>{copy.missingFrame}</span>}
       {!intent && <span>{copy.missingIntent}</span>}
-      {outcome && ('attemptId' in record
+      {outcome && (isAttempt
         ? <button type="button" data-workflow-inspection-output="attempt" onClick={() => onOutput({ kind: 'attempt', attemptId: record.attemptId })}>{copy.output}</button>
-        : <><button type="button" data-workflow-inspection-output="result" onClick={() => onOutput({ kind: 'system', stepId: record.stepId, field: 'result' })}>{copy.result}</button>
+        : isSystem ? <><button type="button" data-workflow-inspection-output="result" onClick={() => onOutput({ kind: 'system', stepId: record.stepId, field: 'result' })}>{copy.result}</button>
           <button type="button" data-workflow-inspection-output="stdout" onClick={() => onOutput({ kind: 'system', stepId: record.stepId, field: 'stdout' })}>{copy.stdout}</button>
-          <button type="button" data-workflow-inspection-output="stderr" onClick={() => onOutput({ kind: 'system', stepId: record.stepId, field: 'stderr' })}>{copy.stderr}</button></>)}
+          <button type="button" data-workflow-inspection-output="stderr" onClick={() => onOutput({ kind: 'system', stepId: record.stepId, field: 'stderr' })}>{copy.stderr}</button></> : null)}
       <details><summary>{copy.details}</summary><dl>{fields.map(([label, value]) => <div key={label}><dt>{label}</dt><dd><code>{value}</code></dd></div>)}</dl>
-        {outcome?.error !== undefined && <p className="workflow-history-error">{outcome.error}</p>}
-        {outcome?.errorTruncated && <p>{copy.errorTruncated}</p>}
+        {outcome && 'error' in outcome && outcome.error !== undefined && <p className="workflow-history-error">{outcome.error}</p>}
+        {outcome && 'reason' in outcome && outcome.reason !== undefined && <p className="workflow-history-error">{outcome.reason}</p>}
+        {outcome && 'errorTruncated' in outcome && outcome.errorTruncated && <p>{copy.errorTruncated}</p>}
       </details>
     </div>
   </li>
@@ -87,7 +90,7 @@ export function WorkflowExecutionHistory({ workflowId, programRevision, nodeId, 
     {page && <>
       <p data-workflow-inspection-page>{copy.historyPage(page.total === 0 ? 0 : page.offset + 1, page.offset + page.records.length, page.total)}</p>
       <time dateTime={new Date(page.observedAt).toISOString()}>{new Date(page.observedAt).toLocaleString()}</time>
-      {page.records.length ? <ol>{page.records.map(record => <ExecutionRecord key={'attemptId' in record ? record.attemptId : record.stepId} record={record} onFrame={onFrame} onOutput={onOutput} />)}</ol> : <p role="status">{copy.empty}</p>}
+      {page.records.length ? <ol>{page.records.map(record => <ExecutionRecord key={'attemptId' in record ? record.attemptId : 'classifierId' in record ? record.classifierId : record.stepId} record={record} onFrame={onFrame} onOutput={onOutput} />)}</ol> : <p role="status">{copy.empty}</p>}
     </>}
     <footer>
       <button type="button" data-workflow-inspection-page-action="previous" disabled={current.state === 'loading' || request.offset === 0} onClick={() => move(Math.max(0, request.offset - WORKFLOW_EXECUTION_INSPECTION_PAGE_SIZE))}>{copy.previous}</button>

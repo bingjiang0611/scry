@@ -231,7 +231,12 @@ export interface ProviderAdapter {
   readonly id: ProviderId
   readonly runtimeProvider: RuntimeProvider
   /** Declared structured-result/disabled-host-tools SDK configuration, not a native probe. */
-  readonly workflowAuthoring?: { source: ProviderStructuredOutput['source'] }
+  readonly workflowAuthoring?: {
+    source: ProviderStructuredOutput['source']
+    hostTools?: 'disabled'
+    permissionBoundary?: 'default_only'
+    businessQuestions?: 'blocked'
+  }
   /** Explicit fresh-run driver contract, NOT native Workflow support or a paid
    * account/model probe. Missing declarations are unavailable to Scry workflows.
    * Settlement covers the registered call, not escaped processes or shared servers. */
@@ -240,6 +245,14 @@ export interface ProviderAdapter {
     terminalOutput: boolean
     scopedStop: boolean
     scopeSettlement: boolean
+    /** Explicit declaration that main can surface a permission question. */
+    permissionQuestion?: boolean
+    /** Optional observation contracts. Missing evidence stays unavailable. */
+    observation?: {
+      modelProgress: boolean
+      tools: boolean
+      quotaWait: boolean
+    }
   }
   /**
    * Stable identity of the actual transport/auth home used by run(). The key is

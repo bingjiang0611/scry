@@ -23,7 +23,7 @@ export async function prepareWorkflowRevisionReuse(store: WorkflowStore, record:
     const node = next.nodes.get(nodeId)!
     checked.set(nodeId, false)
     if (old.fingerprints.get(nodeId) !== next.fingerprints.get(nodeId)) return false
-    if (node.block.kind === 'replica' || node.block.kind === 'check' || node.block.kind === 'verification' || (node.block.kind === 'call' && node.block.replica)) return false
+    if (node.block.kind === 'replica' || node.block.kind === 'check' || node.block.kind === 'verification' || node.block.kind === 'classifier' || (node.block.kind === 'call' && node.block.replica)) return false
     for (const dependency of node.dependencies) if (!await check(dependency)) return false
     if (node.block.kind !== 'call') { checked.set(nodeId, true); return true }
     const previousNode = old.nodes.get(nodeId)!

@@ -3,6 +3,7 @@ import { workflowSequenceProgress } from './workflow-frames'
 
 import { WORKFLOW_MAX_VALUE_BYTES, type WorkflowCollectionField, type WorkflowValue } from '../shared/workflow'
 import type { WorkflowAttemptOutcome, WorkflowBlock, WorkflowControlFrame, WorkflowEvaluation, WorkflowFrameReference } from '../shared/workflow'
+import type { WorkflowClassifierOutcome } from '../shared/workflow-classifier'
 import { workflowCollectionCopy, workflowValueCopy, workflowFrameCopy as copy } from '../shared/constants/copy'
 import { workflowCollectionFields, workflowExpressionReferences, workflowField } from './workflow-expressions'
 import { WorkflowControl, type WorkflowControlScope } from './workflow-control'
@@ -33,7 +34,8 @@ export class WorkflowInterpreter {
   constructor(private readonly control: WorkflowControl, private readonly state: WorkflowInterpreterState,
     private readonly call: (block: Extract<WorkflowBlock, { kind: 'call' }>, scope: WorkflowControlScope, frame?: WorkflowControlFrame) => Promise<{ outcome: WorkflowAttemptOutcome; value: WorkflowEvaluation }>, private readonly parallelism: () => number,
     private readonly system: (block: Extract<WorkflowBlock, { kind: 'replica' | 'combine' | 'check' | 'verification' }>, scope: WorkflowControlScope, frame?: WorkflowControlFrame) => Promise<{ value: WorkflowEvaluation; phase: WorkflowControlFrame['phase'] }>,
-    private readonly onParallelFailure: (failure: WorkflowParallelFailure) => Promise<boolean>) {}
+    private readonly onParallelFailure: (failure: WorkflowParallelFailure) => Promise<boolean>,
+    private readonly classifier?: (block: Extract<WorkflowBlock, { kind: 'classifier' }>, scope: WorkflowControlScope, frame: WorkflowControlFrame) => Promise<{ outcome: WorkflowClassifierOutcome; value: WorkflowEvaluation; setResultRef: (reference: import('../shared/workflow').WorkflowValueReference) => Promise<void> }>) {}
 
   private phase(outcomes: WorkflowAttemptOutcome[], scope: WorkflowControlScope): WorkflowControlFrame['phase'] {
     return workflowExecutionPhase(outcomes, this.state.stopped, scope.blockedReason)
@@ -146,6 +148,20 @@ export class WorkflowInterpreter {
           const { outcome, value } = await this.call(current, top.scope, frame)
           stack.pop()
           returned = await this.finish(current, top.scope, frame, value, this.phase([outcome], top.scope), [outcome])
+          break
+        }
+        case 'classifier': {
+          if (!frame || !this.classifier) {
+            stack.pop()
+            returned = await this.finish(current, top.scope, frame, unavailable('classifier unavailable'), 'blocked')
+            break
+          }
+          const { outcome, value, setResultRef } = await this.classifier(current, top.scope, frame)
+          stack.pop()
+          const phase: WorkflowControlFrame['phase'] = outcome.state === 'completed' && outcome.settled ? 'completed'
+            : outcome.state === 'failed' ? 'failed' : outcome.state === 'blocked' || outcome.state === 'unavailable' ? 'blocked' : 'unknown'
+          returned = await this.finish(current, top.scope, frame, value, phase, [])
+          if (outcome.state === 'completed' && returned.reference) await setResultRef(returned.reference.resultRef)
           break
         }
         case 'replica': case 'combine': case 'check': case 'verification': {

@@ -1,14 +1,16 @@
 import { sameWorkflowPlanningSize, validateWorkflowPlanningSize } from '../shared/workflow-size'
 import { workflowSizeCopy } from '../shared/constants/copy'
 import { createHash } from 'node:crypto'
-import type { WorkflowStoreRecord } from './workflow-store'
+import type { WorkflowStore, WorkflowStoreRecord } from './workflow-store'
 import { WORKFLOW_MAX_ATTEMPTS, workflowChildBlocks, type WorkflowBlock, type WorkflowPlanPreview } from '../shared/workflow'
 import { workflowRecoveryCopy as copy } from '../shared/constants/copy'
 import { validateWorkflowProgram, workflowRevision } from './workflow-program'
 import { validateWorkflowReplicaReference } from './workflow-replica'
 import { assertWorkflowSystemsSettled } from './workflow-system-ledger'
 import { validateWorkflowRevisions, governingWorkflowPreview, assertWorkflowRevisionChange } from './workflow-revisions'
-import { assertWorkflowRetryTarget, validateWorkflowAttemptChains, validateWorkflowRetryTarget } from './workflow-retry'
+import { assertWorkflowRetryTarget, validateWorkflowAttemptChains, validateWorkflowRestartTarget, validateWorkflowRetryTarget } from './workflow-retry'
+import { validateWorkflowClassifierOutcome } from '../shared/workflow-classifier'
+import { validateWorkflowValueReference } from './workflow-frames'
 
 const id = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,96}$/.test(value)
 export const workflowRecordFingerprint = (value: WorkflowStoreRecord | undefined): string | undefined => value === undefined ? undefined : createHash('sha256').update(JSON.stringify(value)).digest('hex')
@@ -34,20 +36,95 @@ export function validateWorkflowOwnership(record: WorkflowStoreRecord): void {
   if (!execution) return
   if (execution.version !== 2 || !id(execution.epoch) || !execution.owner || !Number.isSafeInteger(execution.owner.pid) || execution.owner.pid < 1 || !id(execution.owner.instanceId) || !['active', 'closed'].includes(execution.owner.state) || !Array.isArray(execution.segments) || !execution.segments.length || execution.segments.length > 256) throw new Error(copy.ledger)
   for (const [index, segment] of execution.segments.entries()) {
-    if (!segment || !id(segment.id) || !Number.isFinite(segment.createdAt) || (index === 0 ? segment.mode !== 'start' || segment.generationId !== undefined || segment.commandId !== undefined : !['continue', 'retry', 'revision'].includes(segment.mode) || segment.generationId !== segment.id || !id(segment.commandId))) throw new Error(copy.ledger)
+    if (!segment || !id(segment.id) || !Number.isFinite(segment.createdAt) || (index === 0 ? segment.mode !== 'start' || segment.generationId !== undefined || segment.commandId !== undefined : !['continue', 'retry', 'restart', 'revision'].includes(segment.mode) || segment.generationId !== segment.id || !id(segment.commandId))) throw new Error(copy.ledger)
     if (segment.mode === 'revision' ? !Number.isSafeInteger(segment.expectedRevision) || segment.expectedRevision! < 1 : segment.expectedRevision !== undefined) throw new Error(copy.ledger)
     if (segment.mode === 'retry') validateWorkflowRetryTarget(segment.retry)
-    else if (segment.retry !== undefined) throw new Error(copy.ledger)
+    else if (segment.mode === 'restart') {
+      if (!segment.restart || !['stalled', 'reply_lost'].includes(segment.restart.reason) || !Number.isSafeInteger(segment.restart.expectedRevision) || segment.restart.expectedRevision < 1) throw new Error(copy.ledger)
+      validateWorkflowRestartTarget({ taskId: segment.restart.taskId, attemptId: segment.restart.attemptId, expectedRevision: segment.restart.expectedRevision })
+    } else if (segment.retry !== undefined || segment.restart !== undefined) throw new Error(copy.ledger)
   }
   const commands = execution.segments.slice(1).map(segment => segment.commandId)
   if (new Set(commands).size !== commands.length) throw new Error(copy.ledger)
   if (execution.segments.at(-1)!.id !== execution.epoch || new Set(execution.segments.map(segment => segment.id)).size !== execution.segments.length) throw new Error(copy.ledger)
 }
 
+export function validateWorkflowClassifierLedger(record: WorkflowStoreRecord): void {
+  const intents = record.classifierIntents ?? [], outcomes = record.classifierOutcomes ?? []
+  const blocks = new Map<string, Extract<WorkflowBlock, { kind: 'classifier' }>>()
+  const pending = [record.preview.program.body]
+  while (pending.length) {
+    const block = pending.pop()!
+    if (block.kind === 'classifier') blocks.set(block.blockId, block)
+    pending.push(...workflowChildBlocks(block))
+  }
+  if (new Set(intents.map(intent => intent.classifierId)).size !== intents.length || new Set(outcomes.map(outcome => outcome.classifierId)).size !== outcomes.length) throw new Error(copy.ledger)
+  const byId = new Map(intents.map(intent => [intent.classifierId, intent]))
+  for (const intent of intents) {
+    const block = blocks.get(intent.nodeId)
+    if (!block || intent.classifierId.length > 512 || intent.workflowId !== record.preview.workflowId || intent.programRevision !== record.preview.programRevision || intent.frame.frameId.length > 96 || intent.frame.resultRef.workflowId !== record.preview.workflowId || intent.inputRefs.length !== intent.inputs.length) throw new Error(copy.ledger)
+    validateWorkflowValueReference(intent.frame.resultRef, record.preview.workflowId)
+    for (const [index, input] of intent.inputs.entries()) {
+      const ref = intent.inputRefs[index]
+      if (!ref || input.nodeId !== ref.nodeId || JSON.stringify(input.path) !== JSON.stringify(ref.path ?? [])) throw new Error(copy.ledger)
+      validateWorkflowValueReference(input.valueRef, record.preview.workflowId)
+      if (!input.value || typeof input.value !== 'object' || !Array.isArray(input.value.derivedFrom)) throw new Error(copy.ledger)
+    }
+  }
+  for (const outcome of outcomes) {
+    const intent = byId.get(outcome.classifierId)
+    if (!intent) throw new Error(copy.ledger)
+    validateWorkflowClassifierOutcome(intent, outcome)
+    if (outcome.resultRef) validateWorkflowValueReference(outcome.resultRef, record.preview.workflowId)
+  }
+  if (intents.some(intent => !outcomes.some(outcome => outcome.classifierId === intent.classifierId))) throw new Error(copy.ledger)
+}
+
+/** Validate the immutable classifier artifacts, not only the root ledger JSON. */
+export async function validateWorkflowClassifierLedgerCanonical(record: WorkflowStoreRecord, store: WorkflowStore, requireCompletedResultRef = true): Promise<void> {
+  validateWorkflowClassifierLedger(record)
+  const blocks = new Map<string, Extract<WorkflowBlock, { kind: 'classifier' }>>()
+  const pending = [record.preview.program.body]
+  while (pending.length) {
+    const block = pending.pop()!
+    if (block.kind === 'classifier') blocks.set(block.blockId, block)
+    pending.push(...workflowChildBlocks(block))
+  }
+  for (const intent of record.classifierIntents ?? []) {
+    const block = blocks.get(intent.nodeId)
+    if (!block || intent.prompt !== block.prompt || intent.criteria !== block.criteria || intent.kind !== block.classifier || JSON.stringify(intent.threshold) !== JSON.stringify(block.threshold) ||
+      JSON.stringify(intent.choices) !== JSON.stringify(block.choices) || JSON.stringify(intent.score) !== JSON.stringify(block.score) || JSON.stringify(intent.inputRefs) !== JSON.stringify(block.inputRefs ?? [])) throw new Error(copy.ledger)
+    const frame = await store.loadFrame(record.preview.workflowId, intent.frame.frameId)
+    if (!frame || frame.workflowId !== record.preview.workflowId || frame.programRevision !== record.preview.programRevision || frame.nodeId !== intent.nodeId || frame.frameId !== intent.frame.frameId || frame.revision < intent.frame.revision) throw new Error(copy.ledger)
+    const checkpoint = await store.loadValue(record.preview.workflowId, intent.frame.resultRef)
+    const expectedInputs = intent.inputs.map(input => ({ nodeId: input.nodeId, path: [...input.path], valueRef: input.valueRef, value: input.value }))
+    if (JSON.stringify(checkpoint) !== JSON.stringify({ state: 'known', value: { kind: 'classifier_intent', classifierId: intent.classifierId, inputs: expectedInputs }, derivedFrom: intent.inputs.map(input => `value:${input.valueRef.key}:${input.valueRef.hash}`) })) throw new Error(copy.ledger)
+    for (const input of intent.inputs) {
+      const canonical = await store.loadValue(record.preview.workflowId, input.valueRef)
+      if (JSON.stringify(canonical) !== JSON.stringify(input.value)) throw new Error(copy.ledger)
+    }
+    const outcome = (record.classifierOutcomes ?? []).find(value => value.classifierId === intent.classifierId)
+    if (outcome?.state === 'completed') {
+      if (!outcome.resultRef || !frame.resultRef || JSON.stringify(outcome.resultRef) !== JSON.stringify(frame.resultRef)) {
+        if (requireCompletedResultRef) throw new Error(copy.ledger)
+        continue
+      }
+      const result = await store.loadValue(record.preview.workflowId, outcome.resultRef)
+      const resultValue = result.state === 'known' && result.value && typeof result.value === 'object' && !Array.isArray(result.value) ? result.value as Record<string, unknown> : undefined
+      if (!resultValue || resultValue.kind !== 'classifier_result' ||
+        JSON.stringify(resultValue.value) !== JSON.stringify(outcome.value) || resultValue.confidence !== outcome.confidence || JSON.stringify(resultValue.probability) !== JSON.stringify(outcome.probability) ||
+        JSON.stringify(result.derivedFrom) !== JSON.stringify([`classifier:${intent.classifierId}`])) throw new Error(copy.ledger)
+    } else if (outcome?.resultRef) {
+      await store.loadValue(record.preview.workflowId, outcome.resultRef)
+    }
+  }
+}
+
 /** Admission evidence, not a retry policy. A settled unknown result is still
  * unknown business state and is never replayed. PID reuse fails closed (alive). */
-export function assertWorkflowRecovery(record: WorkflowStoreRecord, instanceId: string): void {
+export function assertWorkflowRecovery(record: WorkflowStoreRecord, instanceId: string, allowSettledUnknownAttempt?: string): void {
   validateWorkflowOwnership(record)
+  validateWorkflowClassifierLedger(record)
   if (!record.execution) throw new Error(copy.legacy)
   const { programRevision, ...program } = validateWorkflowProgram(record.preview.program)
   if (programRevision !== workflowRevision(program) || programRevision !== record.preview.programRevision || record.preview.workflowId !== program.workflowId || record.preview.workspace !== program.workspace) throw new Error(copy.fingerprint)
@@ -74,18 +151,19 @@ export function assertWorkflowRecovery(record: WorkflowStoreRecord, instanceId: 
     if (!role || outcome.role !== role.role || outcome.providerId !== role.providerId || JSON.stringify(outcome.requestedModel) !== JSON.stringify(role.requestedModel) || task.length !== 3 || task[0] !== program.workflowId || !/^[a-f0-9]{64}$/.test(task[1]) || task[2] !== outcome.nodeId) throw new Error(copy.ledger)
     if (!record.intents.some(intent => intent.attemptId === outcome.attemptId) && (outcome.state === 'completed' || outcome.runId || outcome.archiveRef || outcome.outputRef || outcome.output !== undefined)) throw new Error(copy.ledger)
   }
+  const restartedAttempts = new Set((record.execution?.segments ?? []).filter(segment => segment.mode === 'restart' && segment.restart?.reason !== undefined).map(segment => segment.restart?.attemptId).filter((value): value is string => Boolean(value)))
   for (const [index, intent] of record.intents.entries()) {
     if ((intent.frameId !== undefined && !id(intent.frameId)) || (intent.callFrameId !== undefined && !id(intent.callFrameId))) throw new Error(copy.ledger)
     const governing = governingWorkflowPreview(record, 'intent', index)
     const outcome = record.outcomes.find(value => value.attemptId === intent.attemptId)
-    if (!outcome || !outcome.settled || outcome.state === 'unknown') throw new Error(copy.unknown)
+    if (!outcome || !outcome.settled || (outcome.state === 'unknown' && !restartedAttempts.has(outcome.attemptId) && outcome.attemptId !== allowSettledUnknownAttempt)) throw new Error(copy.unknown)
     if (intent.replica) {
       validateWorkflowReplicaReference(intent.replica, program.workflowId)
       if (!callsFor(governing).get(outcome.nodeId)?.replica || !replicas.has(JSON.stringify(intent.replica))) throw new Error(copy.ledger)
     }
     if (intent.workflowId !== program.workflowId || intent.programRevision !== governing.programRevision || outcome.taskId !== intent.taskId || outcome.role !== intent.role || outcome.providerId !== intent.providerId) throw new Error(copy.ledger)
   }
-  if (record.outcomes.some(outcome => !outcome.settled || outcome.state === 'unknown')) throw new Error(copy.unknown)
+  if (record.outcomes.some(outcome => !outcome.settled || (outcome.state === 'unknown' && !restartedAttempts.has(outcome.attemptId) && outcome.attemptId !== allowSettledUnknownAttempt))) throw new Error(copy.unknown)
   const owner = record.execution.owner
   if (owner.state === 'active' && owner.instanceId !== instanceId) {
     try { process.kill(owner.pid, 0) } catch (error) {
@@ -105,7 +183,8 @@ export function validateWorkflowClaim(current: WorkflowStoreRecord | undefined, 
     if (current && (current.executionStarted !== undefined || current.intents.length || current.outcomes.length)) throw new Error(copy.legacy)
     return
   }
-  assertWorkflowRecovery(current, next.execution.owner.instanceId)
+  const nextSegment = next.execution.segments.at(-1)
+  assertWorkflowRecovery(current, next.execution.owner.instanceId, nextSegment?.mode === 'restart' ? nextSegment.restart?.attemptId : undefined)
   const segments = next.execution.segments
   const revision = segments.at(-1)?.mode === 'revision'
   if (revision) {
@@ -122,6 +201,7 @@ export function validateWorkflowClaim(current: WorkflowStoreRecord | undefined, 
     (!revision && JSON.stringify(next.preview.program) !== JSON.stringify(current.preview.program)) ||
     next.progress.dispatchAttempts !== current.progress.dispatchAttempts ||
     JSON.stringify(next.intents) !== JSON.stringify(current.intents) || JSON.stringify(next.outcomes) !== JSON.stringify(current.outcomes) ||
+    JSON.stringify(next.classifierIntents) !== JSON.stringify(current.classifierIntents) || JSON.stringify(next.classifierOutcomes) !== JSON.stringify(current.classifierOutcomes) ||
     JSON.stringify(next.agentInputs) !== JSON.stringify(current.agentInputs) ||
     JSON.stringify(next.systemIntents) !== JSON.stringify(current.systemIntents) || JSON.stringify(next.systemOutcomes) !== JSON.stringify(current.systemOutcomes)) throw new Error(copy.ledger)
 }
@@ -134,5 +214,5 @@ export function workflowEpochMatches(current: WorkflowStoreRecord | undefined, n
     const following = next.agentInputs?.[attemptId]
     if (JSON.stringify(inputs.before) !== JSON.stringify(following?.before) || (inputs.after !== undefined && JSON.stringify(inputs.after) !== JSON.stringify(following?.after))) throw new Error(copy.fingerprint)
   }
-  if (current?.execution && ((current.revisions !== next.revisions && JSON.stringify(current.revisions) !== JSON.stringify(next.revisions)) || (current.preview.program !== next.preview.program && JSON.stringify(current.preview.program) !== JSON.stringify(next.preview.program)))) throw new Error(copy.fingerprint)
+  if (current?.execution && ((current.revisions !== next.revisions && JSON.stringify(current.revisions) !== JSON.stringify(next.revisions)) || (current.preview.program !== next.preview.program && JSON.stringify(current.preview.program) !== JSON.stringify(next.preview.program)) )) throw new Error(copy.fingerprint)
 }

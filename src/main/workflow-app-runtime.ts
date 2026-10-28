@@ -18,6 +18,7 @@ import { workflowBindingControls } from './workflow-capability'
 import { WorkflowTemplateStore } from './workflow-template-store'
 import { WorkflowSlots, WorkflowScopeError, WorkflowDispatch } from './workflow-runner'
 import type { ProviderRegistry } from './providers/registry'
+import type { WorkflowClassifierAdapter } from '../shared/workflow-classifier'
 
 export interface AppWorkflowRuntimeDependencies {
   userData: string
@@ -29,6 +30,8 @@ export interface AppWorkflowRuntimeDependencies {
   requestRunStopAgain: (runId: string) => boolean
   resolveTemplateProjectDirectory: (cwd: string) => string | Promise<string>
   onProgress: (progress: WorkflowProgress) => void
+  /** Main-owned classifier bridge. Omitted in production until a reviewed adapter exists. */
+  classifierAdapter?: WorkflowClassifierAdapter
 }
 
 export function createAppWorkflowRuntime(deps: AppWorkflowRuntimeDependencies) {
@@ -77,7 +80,7 @@ export function createAppWorkflowRuntime(deps: AppWorkflowRuntimeDependencies) {
     const grant = replica ? await workflowSystems.assertRun(replica, workspace) : undefined
     if (grant && await deps.resolveTemplateProjectDirectory(grant.sourceWorkspace) !== grant.sourceWorkspace) throw new Error(workflowSystemCopy.authority)
     const identityContext = grant ? { ...context, cwd: grant.sourceWorkspace } : context
-    return workflowBindingControls(role, identityContext, entry, controls, adapter.workflowExecution, !deps.providerRegistry.isDisabled(role.providerId))
+    return workflowBindingControls(role, identityContext, entry, controls, adapter.workflowExecution, !deps.providerRegistry.isDisabled(role.providerId), adapter.workflowAuthoring)
   }
 
   const workflowStore = new FileWorkflowStore(deps.userData)
@@ -173,7 +176,8 @@ export function createAppWorkflowRuntime(deps: AppWorkflowRuntimeDependencies) {
         return startedRunId ? deps.requestRunStopAgain(startedRunId) : true
       } }
     },
-    onProgress: deps.onProgress
+    onProgress: deps.onProgress,
+    classifierAdapter: deps.classifierAdapter
   })
 
   return { workflowService, workflowStore, workflowTemplates, workflowSystems, workflowRunControls, runAuthoring }

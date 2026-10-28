@@ -39,6 +39,8 @@
     "test:workflow:ui": "node scripts/workflow-ui-smoke.mjs && npm run test:workflow:app && npm run test:workflow:routing-app",
     "test:workflow:app": "npm run build && node scripts/workflow-node-stop-app-smoke.mjs",
     "test:workflow:routing-app": "npm run build && node scripts/workflow-mode-app-smoke.mjs",
+    "test:workflow:offline": "node scripts/workflow-offline-acceptance.mjs",
+    "report:workflow:acceptance": "node scripts/workflow-acceptance-report.mjs",
     "test:steer-ui": "node scripts/steer-ui-smoke.mjs",
     "test:desktop-remote": "npm run build && npm run build:cli && node scripts/desktop-remote-ui-smoke.mjs --session-opening-only && node scripts/desktop-remote-host-smoke.mjs --dev && node scripts/desktop-remote-ui-smoke.mjs && node scripts/desktop-remote-ui-smoke.mjs --session-parity-only && node scripts/desktop-remote-ui-smoke.mjs --composer-history-only && node scripts/desktop-remote-ui-smoke.mjs --remote-settings-only",
     "test:shell": "sh scripts/setup-scry-workspace.test.sh",

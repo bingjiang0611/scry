@@ -3,6 +3,7 @@ import type { WorkflowExecutionInspection, WorkflowExecutionInspectionRequest, W
 import type { WorkflowSystemOutcome } from '../shared/workflow-system'
 import type { WorkflowIntent, WorkflowStoreRecord } from './workflow-store'
 import type { WorkflowSystemIntent } from '../shared/workflow-system'
+import type { WorkflowClassifierIntent, WorkflowClassifierOutcome } from '../shared/workflow-classifier'
 import { WORKFLOW_EXECUTION_INSPECTION_PAGE_SIZE } from '../shared/workflow-inspection'
 
 import { workflowIntentFrameId } from './workflow-progress'
@@ -54,6 +55,12 @@ function attemptOutcome(outcome: WorkflowAttemptOutcome): WorkflowAttemptInspect
 function systemIntent(intent: WorkflowSystemIntent): WorkflowSystemInspectionIntent {
   return { nodeId: intent.nodeId, programRevision: intent.programRevision, createdAt: intent.createdAt, kind: intent.kind, frame: frame(intent.frameId) }
 }
+function classifierIntent(intent: WorkflowClassifierIntent): import('../shared/workflow-inspection').WorkflowClassifierInspectionIntent {
+  return { classifierId: intent.classifierId, nodeId: intent.nodeId, programRevision: intent.programRevision, criteria: intent.criteria, ...(intent.model ? { model: intent.model } : {}), kind: intent.kind, frame: frame(intent.frame.frameId), createdAt: intent.createdAt }
+}
+function classifierOutcome(outcome: WorkflowClassifierOutcome): import('../shared/workflow-inspection').WorkflowClassifierInspectionOutcome {
+  return { state: outcome.state, settled: outcome.settled, ...(outcome.value === undefined ? {} : { value: outcome.value }), ...(outcome.confidence === undefined ? {} : { confidence: outcome.confidence }), ...(outcome.probability === undefined ? {} : { probability: outcome.probability }), ...(outcome.reason === undefined ? {} : { reason: outcome.reason.slice(0, ERROR_LIMIT) }) }
+}
 function systemOutcome(outcome: WorkflowSystemOutcome): WorkflowSystemInspectionOutcome {
   return { stepId: outcome.stepId, taskId: outcome.taskId, state: outcome.state, settled: outcome.settled, startedAt: outcome.startedAt, finishedAt: outcome.finishedAt,
     ...(outcome.resultRef ? { resultRef: outcome.resultRef } : {}), ...errorProjection(outcome.error) }
@@ -81,6 +88,16 @@ function attempts(record: WorkflowStoreRecord, nodeId: string | undefined, offse
   }))
 }
 
+function classifiers(record: WorkflowStoreRecord, nodeId: string | undefined, offset: number) {
+  const rows = new Map<string, { intent?: WorkflowClassifierIntent; outcome?: WorkflowClassifierOutcome }>()
+  for (const intent of record.classifierIntents ?? []) rows.set(intent.classifierId, { intent })
+  for (const outcome of record.classifierOutcomes ?? []) rows.set(outcome.classifierId, { ...rows.get(outcome.classifierId), outcome })
+  const matching = [...rows.values()].filter(row => nodeId === undefined || row.intent?.nodeId === nodeId)
+  return page(matching, offset, row => ({ classifierId: row.intent?.classifierId ?? row.outcome!.classifierId,
+    stepId: row.intent?.classifierId ?? row.outcome!.classifierId, taskId: row.intent?.nodeId ?? row.outcome!.classifierId,
+    intent: intentState(row.intent && classifierIntent(row.intent), 'missing_intent'), outcome: outcomeState(row.outcome && classifierOutcome(row.outcome), 'missing_outcome') }))
+}
+
 function systems(record: WorkflowStoreRecord, nodeId: string | undefined, offset: number) {
   const rows = new Map<string, { taskId: string; intent?: WorkflowSystemIntent; outcome?: WorkflowSystemOutcome }>()
   for (const intent of record.systemIntents ?? []) rows.set(intent.stepId, { taskId: intent.taskId, intent })
@@ -99,7 +116,7 @@ function systems(record: WorkflowStoreRecord, nodeId: string | undefined, offset
 
 export function projectWorkflowExecution(record: WorkflowStoreRecord, request: WorkflowExecutionInspectionRequest, observedAt: number): WorkflowExecutionInspection {
   const offset = request.offset ?? 0
-  const selected = request.kind === 'attempts' ? attempts(record, request.nodeId, offset) : systems(record, request.nodeId, offset)
+  const selected = request.kind === 'attempts' ? attempts(record, request.nodeId, offset) : request.kind === 'systems' ? systems(record, request.nodeId, offset) : classifiers(record, request.nodeId, offset)
   return {
     state: 'available', source: 'canonical_ledger', observedAt, workflowId: record.preview.workflowId,
     programRevision: record.preview.programRevision, kind: request.kind, offset, ...selected

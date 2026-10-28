@@ -5,6 +5,7 @@ import type { WorkflowTemplateInstance } from './workflow-template.js'
 import type { WorkflowCheckRequest, WorkflowFrozenCheck } from './workflow-check'
 import type { WorkflowReplicaReference } from './workflow-replica'
 import type { WorkflowSystemProgress } from './workflow-system'
+import type { WorkflowClassifierBlock } from './workflow-classifier'
 
 export const WORKFLOW_SCHEMA_VERSION = 1 as const
 export const WORKFLOW_MAX_BATCH = 4096
@@ -54,6 +55,16 @@ export interface WorkflowRoleCapability {
   startIndependentSession: WorkflowCapabilityState
   observeTerminalOutput: WorkflowCapabilityState
   confirmStopConvergence: WorkflowCapabilityState
+  /** Structured candidate authoring is separate from execution admission. */
+  structuredCandidateAuthoring?: WorkflowCapabilityState
+  hostToolsDisabled?: WorkflowCapabilityState
+  permissionQuestion?: WorkflowCapabilityState
+  businessQuestion?: WorkflowCapabilityState
+  waitStates?: {
+    model: WorkflowCapabilityState
+    tool: WorkflowCapabilityState
+    quota: WorkflowCapabilityState
+  }
   state: WorkflowCapabilityState
   reason?: string
 }
@@ -281,11 +292,11 @@ export interface WorkflowVerificationBlock {
   baseline?: WorkflowExpression
 }
 
-export type WorkflowBlock = WorkflowVerificationBlock | WorkflowSequenceBlock | WorkflowParallelBlock | WorkflowCallBlock | WorkflowReturnBlock | WorkflowBindBlock | WorkflowBranchBlock | WorkflowMapBlock | WorkflowCollectBlock | WorkflowLoopBlock | WorkflowReplicaBlock | WorkflowCombineBlock | WorkflowCheckBlock
+export type WorkflowBlock = WorkflowVerificationBlock | WorkflowSequenceBlock | WorkflowParallelBlock | WorkflowCallBlock | WorkflowReturnBlock | WorkflowBindBlock | WorkflowBranchBlock | WorkflowMapBlock | WorkflowCollectBlock | WorkflowLoopBlock | WorkflowReplicaBlock | WorkflowCombineBlock | WorkflowCheckBlock | WorkflowClassifierBlock
 
 export function workflowChildBlocks(block: WorkflowBlock): WorkflowBlock[] {
   switch (block.kind) {
-    case 'call': case 'return': case 'bind': case 'collect': case 'replica': case 'combine': case 'check': case 'verification': return []
+    case 'call': case 'return': case 'bind': case 'collect': case 'replica': case 'combine': case 'check': case 'verification': case 'classifier': return []
     case 'map': case 'loop': return [block.body]
     case 'branch': return [block.then, block.else, ...(block.unknown === 'blocked' ? [] : [block.unknown])]
     case 'sequence': case 'parallel': return block.blocks
@@ -362,8 +373,11 @@ export type WorkflowLiveObservation =
   | { source: 'claude_native'; kind: 'tool_returned'; toolCallId: string }
   | { source: 'main_permission'; kind: 'permission_started'; permissionId: string }
   | { source: 'main_permission'; kind: 'permission_ended'; permissionId: string }
+  | { source: 'main_question'; kind: 'business_question_started'; questionId: string }
+  | { source: 'main_question'; kind: 'business_question_ended'; questionId: string }
+  | { source: 'main_quota'; kind: 'quota_started' | 'quota_ended'; quotaId: string }
 
-export type WorkflowLiveStatus = 'unavailable' | 'unknown' | 'model_progress' | 'tool_wait' | 'permission_wait'
+export type WorkflowLiveStatus = 'unavailable' | 'unknown' | 'model_progress' | 'tool_wait' | 'permission_wait' | 'business_question' | 'quota_wait'
 
 export interface WorkflowLiveAttempt {
   taskId: string
@@ -371,13 +385,18 @@ export interface WorkflowLiveAttempt {
   runId: string
   providerId: ProviderId
   epoch: string
-  source: Array<'pi_native' | 'claude_native' | 'main_permission'>
+  source: Array<'pi_native' | 'claude_native' | 'main_permission' | 'main_question' | 'main_quota'>
   status: WorkflowLiveStatus
-  /** Count of tracked IDs, not proof that the Provider has no other active tools. */
+  /** Counts of tracked IDs, not proof that the Provider has no other active resources. */
   trackedToolCount: number
+  trackedPermissionCount: number
+  trackedBusinessQuestionCount: number
+  trackedQuotaCount: number
   truncated: boolean
   activeToolIds: string[]
   activePermissionIds: string[]
+  activeBusinessQuestionIds: string[]
+  activeQuotaIds: string[]
   modelProgressCount: number
   observedAt: number
   lastGenuineProgressAt?: number
@@ -402,6 +421,8 @@ export function workflowLiveDiagnosticsSnapshot(diagnostics: WorkflowLiveDiagnos
       ...attempt,
       activeToolIds: attempt.activeToolIds.slice(0, WORKFLOW_LIVE_MAX_IDS),
       activePermissionIds: attempt.activePermissionIds.slice(0, WORKFLOW_LIVE_MAX_IDS),
+      activeBusinessQuestionIds: attempt.activeBusinessQuestionIds.slice(0, WORKFLOW_LIVE_MAX_IDS),
+      activeQuotaIds: attempt.activeQuotaIds.slice(0, WORKFLOW_LIVE_MAX_IDS),
       source: [...attempt.source]
     }))
   }

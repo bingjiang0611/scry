@@ -37,6 +37,10 @@ The App fixture deliberately returns `scry_fixture_success_result`, never SDK pr
 - This checkpoint's Main artifact: `de3e908819c7e0b049b4d4a790ba88d4304dc9a8db9b9d5ad140564d12a1d4e4`; preload: `b7f29dbcf075eaf71edf6adb6ab015cf122d1bb8408bb040f6077b147629eadb`. See `workflow-authoring-pinned-app-identities.json` for scope. The deliberate negative binary was copied before rebuilding and is not the current output.
 - Registered cleanup helper return is not proof about escaped descendants or remote effects. Timing metadata is not a speed or load-causation claim.
 
+## M2/M3 offline contract update
+
+The preview now carries explicit structured-candidate, host-tool, permission-question, business-question and model/tool/quota observation states. Missing adapter declarations remain unavailable or unknown; they are not promoted to support. Runtime fingerprints include the authoring and observation inputs. A main-owned, opt-in settled-scope evidence callback can authorize at most five stalled-attempt restart generations without resetting the frozen program or root budget; explicit retry remains separate. These are offline contract tests only and do not validate a real Provider, account or quota service.
+
 ## Still open
 
 Main-owned generic Workflow/template task association, manual/auto policy with live fee/data authorization, one combined route-and-plan call, production native command execution, authoring-availability UI and remaining M3–M6 work are not completed here. Prior SystemStep/recovery/TAP/unified-suite deadline failures remain unresolved; they were not retried or declared unrelated. Real SDK enforcement remains unverified and Claude CLI execution stays excluded.
