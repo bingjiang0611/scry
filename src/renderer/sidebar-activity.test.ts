@@ -91,6 +91,15 @@ describe('sidebar activity projection', () => {
     expect(sidebarActivity(source, empty, empty, '', [], empty)[0].group).toBe('completed')
   })
 
+  it('looks up grouped worktree unread state by the session directory, not the project root', () => {
+    const session = { ...projects[0].sessions[0], cwd: '/work/store-worktree', lastRunOutcome: undefined }
+    const source = [{ ...projects[0], conversations: [], sessions: [session] }]
+    const unread = new Set([sessionAttentionKey({ providerId: session.providerId, cwd: session.cwd, sessionId: session.sessionId })])
+    expect(sidebarActivity(source, empty, empty, '', [], unread)).toMatchObject([{ group: 'updates' }])
+    const rootUnread = new Set([sessionAttentionKey({ providerId: session.providerId, cwd: source[0].cwd, sessionId: session.sessionId })])
+    expect(sidebarActivity(source, empty, empty, '', [], rootUnread)).toEqual([])
+  })
+
   it('preserves catalog reordering without changing task identities', () => {
     const before = sidebarActivity(projects, empty, empty, '')
     const reordered = sidebarActivity([{ ...projects[0], sessions: [...projects[0].sessions].reverse() }], empty, empty, '')
@@ -148,9 +157,9 @@ describe('sidebar activity projection', () => {
   it('separates native identities across profiles, providers and workspaces', () => {
     const source = projects[0].sessions[0]
     const rows = sidebarActivity([
-      { ...projects[0], conversations: [], sessions: [source, { ...source, providerId: 'pi' }, { ...source, agentProfileId: 'work' }] },
+      { ...projects[0], conversations: [], sessions: [source, { ...source, providerId: 'pi' }, { ...source, agentProfileId: 'work' }, { ...source, cwd: '/work/store-worktree' }] },
       { ...projects[0], cwd: '/different', conversations: [], sessions: [source] }
     ], empty, empty, '')
-    expect(new Set(rows.map((row) => row.key)).size).toBe(4)
+    expect(new Set(rows.map((row) => row.key)).size).toBe(5)
   })
 })

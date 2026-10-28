@@ -46,12 +46,13 @@ export function sidebarActivity(
     }
     for (const session of project.sessions) {
       if (session.archivedAt || !matches(session.preview)) continue
+      const cwd = session.cwd ?? project.cwd
       // The same unread evidence powers the project-list blue dot. It proves a new
       // result needs review, not success: older catalogs can lack an outcome.
       const unread = unreadSessionKeys.has(sessionAttentionKey({ providerId: session.providerId,
-        agentProfileId: session.agentProfileId, cwd: project.cwd, sessionId: session.externalSessionId ?? session.sessionId }))
+        agentProfileId: session.agentProfileId, cwd, sessionId: session.externalSessionId ?? session.sessionId }))
       const status = group(session.runId, session.lastRunOutcome) ?? (unread ? 'updates' : undefined)
-      if (status) entries.push({ key: `session:${JSON.stringify([project.cwd, session.providerId, session.agentProfileId, session.sessionId])}`,
+      if (status) entries.push({ key: `session:${JSON.stringify([cwd, session.providerId, session.agentProfileId, session.sessionId])}`,
         kind: 'session', project, session, group: status })
     }
   }

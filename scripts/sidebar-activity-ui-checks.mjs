@@ -61,6 +61,7 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
   check(await read(`Array.from(document.querySelectorAll('[data-activity-group="completed"] .sb-sesstext')).every(title => title.getAnimations().length === 0 && getComputedStyle(title).webkitTextFillColor !== 'rgba(0, 0, 0, 0)')`), 'Completed titles inherited the working sweep')
   await click(row)
   await wait(`document.querySelector('#activity-selection').textContent === 'webhook' && document.activeElement === document.querySelector(${JSON.stringify(row)})`)
+  check(await read(`document.querySelector('#activity-selection-cwd').textContent === '/fixture/storefront-worktree' && document.querySelector(${JSON.stringify(row)}).getAttribute('aria-current') === 'true'`), 'Activity click must select the session worktree, not its project root')
   await read('window.activityFixture.setLongTitle(true)')
   await wait(`document.querySelector(${JSON.stringify(row)}).textContent.includes('/design-loop ios')`)
   check(await read(`(() => { const title = document.querySelector(${JSON.stringify(row)}).querySelector('.sb-sesstext'); return title.scrollWidth > title.clientWidth && getComputedStyle(title).textOverflow === 'ellipsis'; })()`), 'Long running title does not truncate')
