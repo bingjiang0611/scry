@@ -170,7 +170,7 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 3
+        "darwin-arm64": 2
       }
     },
     "source-control.workspace-choices-current-run/git.run.calls": {
@@ -184,7 +184,7 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 10
+        "darwin-arm64": 9
       }
     }
   }

@@ -165,6 +165,10 @@ export class SourceControlService {
           continue
         }
         try {
+          if (cwd === directory || cwd === identity.root) {
+            busyRoots.add(identity.root)
+            continue
+          }
           const active = await this.git.identity(cwd)
           if (active.commonDir === identity.commonDir) busyRoots.add(active.root)
         } catch (error) {
