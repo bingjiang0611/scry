@@ -468,12 +468,24 @@ public enum G0Transport {
     // Host-recorded archive time. Only archived catalog reads carry it; nil means
     // "not archived" in the active catalog, never "unknown".
     public let archivedAt: Double?
+    // The host's PERSISTED outcome of this session's latest turn (see
+    // `TurnOutcome`). Only the Mac's turn record can prove an ending, so a host
+    // that has none — never ran a turn, older host, unfinished run — sends
+    // nothing. Absence is unknown, never success, and it outlives app restarts.
+    public let lastRunOutcome: String?
+    // Wire vocabulary of `lastRunOutcome`, the same four values the Mac accepts
+    // (`isRemoteSessionOutcome` in src/shared/desktop-remote.ts).
+    public enum TurnOutcome: String, Sendable, Equatable {
+      case completed, failed, cancelled, interrupted
+    }
+    public var turnOutcome: TurnOutcome? { lastRunOutcome.flatMap(TurnOutcome.init(rawValue:)) }
     public init(sessionId: String, externalSessionId: String? = nil, providerId: String, agentProfileId: String? = nil,
                 cwd: String, label: String, ts: Double, pinnedAt: Double? = nil, isActive: Bool? = nil,
-                archivedAt: Double? = nil) {
+                archivedAt: Double? = nil, lastRunOutcome: String? = nil) {
       self.sessionId = sessionId; self.externalSessionId = externalSessionId; self.providerId = providerId
       self.agentProfileId = agentProfileId; self.cwd = cwd; self.label = label; self.ts = ts; self.pinnedAt = pinnedAt
       self.isActive = isActive; self.archivedAt = archivedAt
+      self.lastRunOutcome = lastRunOutcome
     }
   }
   public struct RunSessionPage: Sendable, Equatable, Codable {

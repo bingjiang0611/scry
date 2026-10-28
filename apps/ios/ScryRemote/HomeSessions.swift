@@ -7,11 +7,13 @@ enum HomeTab: String, CaseIterable, Identifiable {
   var label: String { self == .projects ? ConnectionCopy.tabProjects : ConnectionCopy.tabActivity }
 }
 
-// Read-only projection. Only live evidence can put a session in Activity; neither
-// the catalog's isActive flag nor a timestamp is evidence of a current/outcome state.
+// Read-only projection. Only evidence can put a session in Activity: a live run
+// for the two live sections, and the host's own persisted last-turn outcome for
+// Completed. Neither the catalog's isActive flag nor a timestamp is evidence of
+// a current/outcome state.
 struct HomeSessionCatalog: Equatable {
   typealias Row = ExecutionTargetCoordinator.HomeSession
-  enum Activity { case waiting, running }
+  enum Activity { case waiting, running, completed }
   struct Project: Identifiable, Equatable {
     let scope: ExecutionTargetScope
     let cwd: String
@@ -21,6 +23,7 @@ struct HomeSessionCatalog: Equatable {
   let rows: [Row]
   let waiting: [Row]
   let running: [Row]
+  let completed: [Row]
   let pinned: [Row]
   let projects: [Project]
 
@@ -32,15 +35,18 @@ struct HomeSessionCatalog: Equatable {
     }
     var waiting: [Row] = []
     var running: [Row] = []
+    var completed: [Row] = []
     for row in self.rows {
       switch activity(row) {
       case .waiting: waiting.append(row)
       case .running: running.append(row)
+      case .completed: completed.append(row)
       case nil: break
       }
     }
     self.waiting = waiting
     self.running = running
+    self.completed = completed
     pinned = self.rows.filter { $0.session.pinnedAt != nil }
       .sorted { ($0.session.pinnedAt ?? 0) > ($1.session.pinnedAt ?? 0) }
     var order: [String] = []
@@ -81,9 +87,13 @@ struct HomeSessions: View {
   private var candidate: HomeSessionCatalog {
     HomeSessionCatalog(rows: targets.homeSessions, query: model.query) { row in
       let store = targets.store(for: row.scope)
-      guard let live = store.liveRun(providerId: row.session.providerId, cwd: row.session.cwd,
-        externalSessionId: row.session.externalSessionId, agentProfileId: row.session.agentProfileId) else { return nil }
-      return store.openLiveQuestion(live) != nil ? .waiting : .running
+      // A live run outranks any earlier ending: the same session must not sit in
+      // 进行中 and 已完成 at once.
+      if let live = store.liveRun(providerId: row.session.providerId, cwd: row.session.cwd,
+        externalSessionId: row.session.externalSessionId, agentProfileId: row.session.agentProfileId) {
+        return store.openLiveQuestion(live) != nil ? .waiting : .running
+      }
+      return row.session.turnOutcome == .completed ? .completed : nil
     }
   }
   private var catalog: HomeSessionCatalog { displayed ?? candidate }
@@ -158,23 +168,29 @@ struct HomeSessions: View {
 
   private var activity: some View {
     LazyVStack(alignment: .leading, spacing: 0) {
-      if catalog.waiting.isEmpty && catalog.running.isEmpty {
+      if catalog.waiting.isEmpty && catalog.running.isEmpty && catalog.completed.isEmpty {
         Text(ConnectionCopy.activityEmpty).font(Typography.rowTitle).foregroundStyle(Palette.dim)
           .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 24)
       }
       activitySection(ConnectionCopy.homeNeedsReply, rows: catalog.waiting)
       activitySection(ConnectionCopy.sectionRunning, rows: catalog.running)
+      // Ended tasks keep their place here instead of vanishing from 动态; the
+      // section only exists because the host persisted the turn's outcome.
+      activitySection(ConnectionCopy.sectionCompleted, rows: catalog.completed, completed: true)
     }
     .animation(reduceMotion ? nil : Motion.animation(.tab, reduceMotion: false), value: catalog.waiting.map(\.id))
     .animation(reduceMotion ? nil : Motion.animation(.tab, reduceMotion: false), value: catalog.running.map(\.id))
-    .homeContentFade(trigger: catalog.waiting.map(\.id) + catalog.running.map(\.id), reduceMotion: reduceMotion)
+    .animation(reduceMotion ? nil : Motion.animation(.tab, reduceMotion: false), value: catalog.completed.map(\.id))
+    .homeContentFade(trigger: catalog.waiting.map(\.id) + catalog.running.map(\.id) + catalog.completed.map(\.id),
+                     reduceMotion: reduceMotion)
   }
 
-  @ViewBuilder private func activitySection(_ title: String, rows: [HomeSessionCatalog.Row]) -> some View {
+  @ViewBuilder private func activitySection(_ title: String, rows: [HomeSessionCatalog.Row], completed: Bool = false) -> some View {
     if !rows.isEmpty {
-      section(title)
+      // SPEC 4: 已完成 keeps a quieter label/hairline than the two live sections.
+      section(title, directory: completed)
       ForEach(Array(rows.prefix(40).enumerated()), id: \.element.id) { index, row in
-        sessionRow(row, index: index, activity: true)
+        sessionRow(row, index: index, activity: !completed, completed: completed)
           .matchedGeometryEffect(id: row.id, in: activityRows, properties: reduceMotion ? [] : .position)
       }
       if rows.count > 40 {
@@ -246,8 +262,8 @@ struct HomeSessions: View {
   }
 
   private func sessionRow(_ row: HomeSessionCatalog.Row, index: Int = 0, activity: Bool = false,
-                          pinned: Bool = false, indent: CGFloat = 0) -> some View {
-    SessionRowView(row: row, activityOnly: activity, showsProject: pinned,
+                          completed: Bool = false, pinned: Bool = false, indent: CGFloat = 0) -> some View {
+    SessionRowView(row: row, activityOnly: activity, completed: completed, showsProject: pinned,
                    onOpen: { onOpen(row) }, onAction: { onRowAction(row, $0) }, indent: indent)
       .listRowEntrance(index: index, enabled: !initialEntranceFinished && index < 10 && !seenRows.contains(row.id))
       .onAppear { seenRows.insert(row.id) }

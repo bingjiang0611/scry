@@ -48,11 +48,14 @@ func check(_ value: Bool, _ name: String) {
 }
 let rows = [row("wait", pin: 2), row("run"), row("old-active", active: true),
             row("ended", ts: 999999), row("pin", pin: 4), row("forwarded", host: "host-b")]
-let evidence: [String: HomeSessionCatalog.Activity] = ["wait": .waiting, "run": .running]
+let evidence: [String: HomeSessionCatalog.Activity] = ["wait": .waiting, "run": .running, "ended": .completed]
 let catalog = HomeSessionCatalog(rows: rows, query: "", activity: { evidence[$0.id] })
 check(catalog.waiting.map(\.id) == ["wait"], "only live question in needs-reply")
 check(catalog.running.map(\.id) == ["run"], "no historical active or timestamp inference")
+check(catalog.completed.map(\.id) == ["ended"], "only the host-persisted outcome lands in completed")
 check(Set(catalog.waiting.map(\.id)).isDisjoint(with: catalog.running.map(\.id)), "waiting is not repeated in running")
+check(Set(catalog.completed.map(\.id)).isDisjoint(with: catalog.waiting.map(\.id) + catalog.running.map(\.id)),
+      "a live run outranks an earlier ending, so no row is in two activity sections")
 check(catalog.pinned.map(\.id) == ["pin", "wait"], "pinned newest first, including waiting")
 check(catalog.projects.count == 2, "same cwd on two hosts remains two projects")
 check(Set(catalog.projects.map(\.id)).count == 2, "project identity includes scope")
@@ -60,15 +63,19 @@ let projectIDs = catalog.projects.flatMap { $0.sessions.map(\.id) }
 check(Set(projectIDs).isDisjoint(with: catalog.pinned.map(\.id)), "pinned rows are not duplicated under projects")
 check(projectIDs.contains("old-active") && projectIDs.contains("ended"), "historical rows remain accessible in projects")
 check(catalog.defaultTab == .activity, "live evidence defaults to activity")
-let quiet = HomeSessionCatalog(rows: rows, query: "", activity: { _ in nil })
-check(quiet.defaultTab == .projects && quiet.waiting.isEmpty && quiet.running.isEmpty, "no live evidence defaults to projects")
+let quiet = HomeSessionCatalog(rows: rows, query: "", activity: { $0.id == "ended" ? .completed : nil })
+check(quiet.defaultTab == .projects && quiet.waiting.isEmpty && quiet.running.isEmpty, "no live evidence defaults to projects, even with completions")
+check(quiet.completed.map(\.id) == ["ended"], "completions alone fill only their own section")
 let searchRows = [row("title", label: "Needle"), row("cwd", cwd: "/NEEDLE"),
                   row("provider", provider: "needle"), row("host", host: "needle"), row("miss")]
 let search = HomeSessionCatalog(rows: searchRows, query: "  NEEDLE \n", activity: { _ in .running })
 check(search.rows.map(\.id) == ["title", "cwd", "provider", "host"], "search title/cwd/provider/host case-insensitively")
 check(search.running.map(\.id) == search.rows.map(\.id), "search filters activity too")
+let searchCompleted = HomeSessionCatalog(rows: searchRows, query: "NEEDLE", activity: { _ in .completed })
+check(searchCompleted.completed.map(\.id) == searchCompleted.rows.map(\.id), "search filters the completed section too")
 let large = HomeSessionCatalog(rows: (0..<45).map { row("\($0)") }, query: "", activity: { _ in .waiting })
 check(large.waiting.count == 45, "projection retains overflow for explicit UI count")
+check(ConnectionCopy.sectionCompleted == "已完成", "completed section title comes from the copy module")
 // Expected values follow Mac relTime: choose the unit before rounding.
 // In particular, 23.6 hours stays 24h, and 6.9 days stays 7d.
 let now = 1_800_000_000_000.0
@@ -84,6 +91,18 @@ for (seconds, expected) in timeCases {
 }
 print("\(count) R2 projection/time checks passed")
 '''
+
+# The live-run priority lives in the view's `candidate`, outside the extracted
+# projection, so assert its source order directly: a session with a live run must
+# be classified before its persisted ending is consulted, otherwise the same
+# session would sit in 进行中 and 已完成 at once.
+candidate = source[source.index('private var candidate: HomeSessionCatalog {')
+                  :source.index('private var catalog: HomeSessionCatalog { displayed')]
+live_probe = candidate.index('store.liveRun(')
+ending_probe = candidate.index('turnOutcome == .completed')
+assert live_probe < ending_probe, 'candidate must consult liveRun before the persisted outcome'
+assert candidate.count('turnOutcome == .completed') == 1, 'completion is decided in exactly one place'
+assert '.waiting : .running' in candidate[live_probe:ending_probe], 'a live run still splits into waiting/running'
 with tempfile.TemporaryDirectory(prefix='scry-home-sections-') as tmp:
     tmp = Path(tmp)
     main = tmp / 'main.swift'

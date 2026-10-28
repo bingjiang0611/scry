@@ -6,6 +6,9 @@ import RemoteTransport
 struct SessionRowView: View {
   let row: ExecutionTargetCoordinator.HomeSession
   var activityOnly = false
+  // A finished turn reported by the host, not a live or merely inactive session.
+  // SPEC 4 gives it a dimmer title and the 44pt row height of a historical entry.
+  var completed = false
   var showsProject = false
   let onOpen: () -> Void
   let onAction: (SessionRowAction) -> Void
@@ -24,7 +27,7 @@ struct SessionRowView: View {
           .foregroundStyle(Palette.provider(session.providerId))
           .frame(width: 16, height: 16).accessibilityLabel(ConnectionCopy.providerLabel(session.providerId))
         Text(session.label.isEmpty ? ConnectionCopy.noPreview : session.label)
-          .font(Typography.rowTitle).foregroundStyle(openable ? Palette.fg : Palette.dim)
+          .font(Typography.rowTitle).foregroundStyle(openable && !completed ? Palette.fg : Palette.dim)
           .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
         stateBadge
         if showsProject {
@@ -32,7 +35,7 @@ struct SessionRowView: View {
             .lineLimit(1).frame(width: 70, alignment: .trailing)
         }
       }
-      .padding(.leading, indent).frame(minHeight: 48)
+      .padding(.leading, indent).frame(minHeight: completed ? 44 : 48)
       .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
     }
     .buttonStyle(HomeRowButtonStyle())

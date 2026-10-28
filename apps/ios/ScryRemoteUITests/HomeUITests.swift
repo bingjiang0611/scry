@@ -70,7 +70,6 @@ final class HomeUITests: XCTestCase {
     launchHome(extra: ["-uiMockMacRun"])
     tab("activity")
     XCTAssertTrue(row("重构远程会话列表").exists)
-    XCTAssertFalse(app.staticTexts["已完成"].exists)
     let search = app.textFields["home-search"]
     search.tap(); search.typeText("支付")
     XCTAssertTrue(app.buttons["home-tab-activity"].isSelected)
@@ -106,11 +105,22 @@ final class HomeUITests: XCTestCase {
     XCTAssertTrue(app.buttons["项目文件与 Diff"].waitForExistence(timeout: 5))
   }
 
-  func testActivityOpensLiveSessionWithoutInventingCompletedSection() {
+  // The 已完成 section exists only because the Mac persisted the end of the last
+  // turn (`lastRunOutcome`). A session whose recorded ending was interrupted must
+  // not land there, and a live run still outranks any earlier ending.
+  func testActivityCompletedSectionUsesHostOutcome() {
+    launchHome()
+    tab("activity")
+    XCTAssertTrue(app.staticTexts["已完成"].exists)
+    XCTAssertTrue(row("完成 iOS 工作目录选择器").exists)
+    XCTAssertTrue(row("修复手机续聊").exists)
+    XCTAssertFalse(row("优化首页滚动性能").exists)
+  }
+
+  func testActivityOpensLiveSession() {
     launchHome(extra: ["-uiMockMacRun"])
     tab("activity")
     XCTAssertTrue(app.staticTexts["进行中"].exists)
-    XCTAssertFalse(app.staticTexts["已完成"].exists)
     row("重构远程会话列表").tap()
     XCTAssertTrue(app.buttons["session-overview"].waitForExistence(timeout: 10))
     app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "更多选项")).firstMatch.tap()
