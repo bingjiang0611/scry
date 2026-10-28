@@ -1,84 +1,21 @@
-import {
-  closeSync,
-  existsSync,
-  fsyncSync,
-  lstatSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  readdirSync,
-  readSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync
-} from 'node:fs'
-import { basename, dirname, join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { closeSync, openSync, readSync } from 'node:fs'
+import { basename, join } from 'node:path'
 import type { CatalogHealth, ProviderId, SessionProviderId } from '../shared/provider'
 import type { RuntimeProvider } from '../shared/runtime'
 import type { AgentTurnRecord } from '../shared/turn-record'
 import { normalizeSessionTitle } from '../shared/session-title'
-
-export interface AppSession {
-  sessionId: string
-  runId?: string
-  lastRunOutcome?: AgentTurnRecord['status']
-  externalSessionId?: string
-  providerId?: SessionProviderId
-  agentProfileId?: string
-  runtimeProvider?: RuntimeProvider
-  cwd: string
-  preview: string
-  /** User-authored local label; record() may update preview, never this field. */
-  title?: string
-  ts: number
-  pinnedAt?: number
-  archivedAt?: number
-}
-
-export interface SessionMeta {
-  sessionId: string
-  runId?: string
-  lastRunOutcome?: AgentTurnRecord['status']
-  externalSessionId?: string
-  pending?: boolean
-  providerId: SessionProviderId
-  agentProfileId?: string
-  runtimeProvider?: RuntimeProvider
-  mtime: number
-  preview: string
-  count: number
-  pinnedAt?: number
-  archivedAt?: number
-}
-
-export interface ProjectMeta {
-  cwd: string
-  name: string
-  mtime: number
-  sessions: SessionMeta[]
-  pinnedAt?: number
-}
-
-export interface ProjectRecord {
-  cwd: string
-  name?: string
-  lastOpenedAt: number
-  pinnedAt?: number
-  removedAt?: number
-}
-
-/** 定位单条 catalog 会话：Provider + profile + 工作目录 + Provider 侧会话 id。 */
-export interface AppSessionRef {
-  providerId: SessionProviderId
-  agentProfileId?: string
-  cwd: string
-  externalSessionId: string
-}
-
-export function appSessionCanResume(session: Pick<AppSession, 'runId' | 'externalSessionId'>): boolean {
-  return !(session.runId && session.externalSessionId === session.runId)
-}
+import type { AppSession, AppSessionRef, ProjectMeta, ProjectRecord, SessionMeta } from './app-store-types'
+export { appSessionCanResume } from './app-store-types'
+export type { AppSession, AppSessionRef, ProjectMeta, ProjectRecord, SessionMeta } from './app-store-types'
+import {
+  cachedCatalogReader,
+  catalogFileKey,
+  cleanupAtomicTemps,
+  parsedJson,
+  readJsonRecoverable,
+  writeAtomic,
+  writeJsonRecoverable
+} from './recoverable-json-store'
 
 export function readHead(fp: string, bytes = 65536): string {
   try {
@@ -92,83 +29,6 @@ export function readHead(fp: string, bytes = 65536): string {
   }
 }
 
-type JsonValidator<T> = (value: unknown) => value is T
-
-function cleanupAtomicTemps(file: string): void {
-  const dir = dirname(file)
-  const base = basename(file).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  let entries: string[]
-  try { entries = readdirSync(dir) } catch { return }
-  const pattern = new RegExp(`^${base}(?:\\.tmp|\\.\\d+\\.[0-9a-f-]{36}\\.tmp)$`)
-  for (const name of entries) {
-    if (!pattern.test(name)) continue
-    const path = join(dir, name)
-    try {
-      const stat = lstatSync(path)
-      if (stat.isFile() && !stat.isSymbolicLink()) unlinkSync(path)
-    } catch {
-      // Another cleanup/write may have won the race.
-    }
-  }
-}
-
-function parsedJson<T>(file: string, isValid: JsonValidator<T>): { status: 'missing' | 'valid' | 'invalid'; value?: T; error?: string } {
-  try {
-    if (!existsSync(file)) return { status: 'missing' }
-    const value: unknown = JSON.parse(readFileSync(file, 'utf8'))
-    return isValid(value)
-      ? { status: 'valid', value }
-      : { status: 'invalid', error: 'JSON schema mismatch' }
-  } catch (error) {
-    return { status: 'invalid', error: error instanceof Error ? error.message : String(error) }
-  }
-}
-
-function readJsonRecoverable<T>(file: string, fallback: T, isValid: JsonValidator<T>): { value: T; health: CatalogHealth } {
-  const primary = parsedJson<T>(file, isValid)
-  if (primary.status === 'valid') return { value: primary.value as T, health: { status: 'ready', source: 'primary' } }
-  const backup = parsedJson<T>(`${file}.bak`, isValid)
-  if (backup.status === 'valid') {
-    return {
-      value: backup.value as T,
-      health: {
-        status: 'degraded',
-        source: 'backup',
-        reason: primary.status === 'missing' ? '主索引缺失，已使用备份' : `主索引损坏，已使用备份：${primary.error}`
-      }
-    }
-  }
-  if (primary.status === 'missing' && backup.status === 'missing') {
-    return { value: fallback, health: { status: 'ready', source: 'empty' } }
-  }
-  const reason = `主索引与备份均不可用：${primary.error ?? primary.status}；${backup.error ?? backup.status}`
-  throw Object.assign(new Error(reason), { catalogHealth: { status: 'unavailable', source: 'empty', reason } satisfies CatalogHealth })
-}
-
-function writeAtomic(file: string, value: unknown): void {
-  mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
-  const temp = `${file}.${process.pid}.${randomUUID()}.tmp`
-  let fd: number | undefined
-  try {
-    fd = openSync(temp, 'wx', 0o600)
-    writeFileSync(fd, JSON.stringify(value))
-    fsyncSync(fd)
-    closeSync(fd)
-    fd = undefined
-    renameSync(temp, file)
-    try {
-      const dirFd = openSync(dirname(file), 'r')
-      try { fsyncSync(dirFd) } finally { closeSync(dirFd) }
-    } catch {
-      // Some filesystems reject directory fsync after the atomic rename.
-    }
-  } catch (error) {
-    if (fd !== undefined) closeSync(fd)
-    try { unlinkSync(temp) } catch { /* temp may already be renamed */ }
-    throw error
-  }
-}
-
 export function cleanupAppStoreAtomicTemps(userDataDir: string): void {
   for (const name of [
     'recent-folders.json', 'recent-folders.json.bak',
@@ -178,12 +38,6 @@ export function cleanupAppStoreAtomicTemps(userDataDir: string): void {
   ]) {
     cleanupAtomicTemps(join(userDataDir, name))
   }
-}
-
-function writeJsonRecoverable<T>(file: string, value: T, isValid: JsonValidator<T>, previous?: T): void {
-  const primary = previous === undefined ? parsedJson<T>(file, isValid) : { status: 'valid' as const, value: previous }
-  if (primary.status === 'valid') writeAtomic(`${file}.bak`, primary.value)
-  writeAtomic(file, value)
 }
 
 const SESSION_PROVIDERS = new Set<SessionProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi', 'legacy_unknown'])
@@ -206,6 +60,7 @@ function isAppSessionArray(value: unknown): value is AppSession[] {
       .some((id) => typeof id === 'string' && id.length > 0)
     return identities.every((id) => id == null || typeof id === 'string') && hasIdentity &&
       typeof session.cwd === 'string' &&
+      (session.projectCwd == null || typeof session.projectCwd === 'string') &&
       typeof session.preview === 'string' &&
       (session.title == null || typeof session.title === 'string') &&
       typeof session.ts === 'number' && Number.isFinite(session.ts) &&
@@ -216,35 +71,6 @@ function isAppSessionArray(value: unknown): value is AppSession[] {
       (session.pinnedAt == null || (typeof session.pinnedAt === 'number' && Number.isFinite(session.pinnedAt))) &&
       (session.archivedAt == null || (typeof session.archivedAt === 'number' && Number.isFinite(session.archivedAt)))
   })
-}
-
-function catalogFileKey(file: string): string {
-  try {
-    const stat = lstatSync(file)
-    return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'missing'
-    throw error
-  }
-}
-
-function cachedCatalogReader<T>(file: string, fallback: T, isValid: JsonValidator<T>) {
-  let cached: { key: string; value: T } | undefined
-  return (): { value: T; health: CatalogHealth } => {
-    let key: string
-    try { key = catalogFileKey(file) } catch {
-      // Cache metadata cannot override the catalog's existing recovery policy.
-      cached = undefined
-      return readJsonRecoverable(file, structuredClone(fallback), isValid)
-    }
-    if (cached?.key === key) {
-      return { value: structuredClone(cached.value), health: { status: 'ready', source: 'primary' } }
-    }
-    const read = readJsonRecoverable(file, structuredClone(fallback), isValid)
-    // Backup recovery must keep observing external repairs to either file.
-    cached = read.health.source === 'primary' ? { key, value: structuredClone(read.value) } : undefined
-    return read
-  }
 }
 
 export function createRecentFoldersStore(userDataDir: string) {
@@ -417,6 +243,7 @@ export function createAppSessionStore(userDataDir: string) {
     runtimeProvider: RuntimeProvider
     runId: string
     cwd: string
+    projectCwd?: string
     prompt: string
   }): void => {
     if (!args.runId) return
@@ -429,8 +256,10 @@ export function createAppSessionStore(userDataDir: string) {
         session.agentProfileId === args.agentProfileId &&
         session.cwd === args.cwd
     )
-    if (ex) ex.ts = now
-    else
+    if (ex) {
+      ex.ts = now
+      if (args.projectCwd) ex.projectCwd = args.projectCwd
+    } else
       list.push({
         sessionId: args.runId,
         runId: args.runId,
@@ -438,6 +267,7 @@ export function createAppSessionStore(userDataDir: string) {
         agentProfileId: args.agentProfileId,
         runtimeProvider: args.runtimeProvider,
         cwd: args.cwd,
+        ...(args.projectCwd ? { projectCwd: args.projectCwd } : {}),
         preview: args.prompt.slice(0, 80),
         ts: now
       })
@@ -452,6 +282,7 @@ export function createAppSessionStore(userDataDir: string) {
     lastRunOutcome?: AgentTurnRecord['status']
     externalSessionId: string
     cwd: string
+    projectCwd?: string
     prompt: string
   }): void => {
     if (!args.externalSessionId) return
@@ -480,6 +311,7 @@ export function createAppSessionStore(userDataDir: string) {
       ex.runId = args.runId ?? ex.runId
       ex.runtimeProvider = args.runtimeProvider
       ex.agentProfileId = args.agentProfileId
+      if (args.projectCwd) ex.projectCwd = args.projectCwd
       // Keep the first input as the default title; later turns only refresh activity.
       ex.ts = now
     }
@@ -493,6 +325,7 @@ export function createAppSessionStore(userDataDir: string) {
         agentProfileId: args.agentProfileId,
         runtimeProvider: args.runtimeProvider,
         cwd: args.cwd,
+        ...(args.projectCwd ? { projectCwd: args.projectCwd } : {}),
         preview: args.prompt.slice(0, 80),
         ts: now
       })
@@ -511,6 +344,7 @@ export function createAppSessionStore(userDataDir: string) {
     // SessionMeta.preview is the catalog display label, not transcript evidence.
     preview: session.title ?? session.preview,
     count: 1,
+    ...(session.projectCwd && session.projectCwd !== session.cwd ? { cwd: session.cwd } : {}),
     ...(session.pinnedAt ? { pinnedAt: session.pinnedAt } : {}),
     ...(session.archivedAt ? { archivedAt: session.archivedAt } : {})
   })
@@ -526,8 +360,9 @@ export function createAppSessionStore(userDataDir: string) {
   const groupByCwd = (sessions: AppSession[], sortKey: (session: AppSession) => number): ProjectMeta[] => {
     const byCwd = new Map<string, AppSession[]>()
     for (const s of sessions) {
-      if (!byCwd.has(s.cwd)) byCwd.set(s.cwd, [])
-      byCwd.get(s.cwd)!.push(s)
+      const projectCwd = s.projectCwd ?? s.cwd
+      if (!byCwd.has(projectCwd)) byCwd.set(projectCwd, [])
+      byCwd.get(projectCwd)!.push(s)
     }
     return [...byCwd.entries()]
       .map(([cwd, group]) => {

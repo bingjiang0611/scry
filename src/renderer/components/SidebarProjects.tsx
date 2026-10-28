@@ -38,7 +38,7 @@ export function SidebarProjects({
     const pinned = projects
       .flatMap((project) => project.sessions
         .filter((session) => session.pinnedAt && matches(session))
-        .map((session) => ({ session, cwd: project.cwd, name: project.name })))
+        .map((session) => ({ session, cwd: session.cwd ?? project.cwd, name: project.name })))
       .sort((a, b) => (b.session.pinnedAt ?? 0) - (a.session.pinnedAt ?? 0))
     const pinnedRows = [
       ...pinned.map(row => ({ kind: 'native' as const, ...row, pinnedAt: row.session.pinnedAt ?? 0 })),
@@ -135,7 +135,7 @@ export function SidebarProjects({
           <Disclosure open={open}>{() => (
             <SessionMotionList revision={`${p.cwd}:${p.conversations.map(conversation => conversation.id).join(',')}:${p.sessions.map(session => session.sessionId).join(',')}`}>
               {p.conversations.sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0)).map(renderConversation)}
-              {p.sessions.map((session) => renderSession(p.cwd, session, p.name, false, `${p.cwd}:${session.sessionId}`))}
+              {p.sessions.map((session) => renderSession(session.cwd ?? p.cwd, session, p.name, false, `${p.cwd}:${session.sessionId}`))}
               {p.sessions.length === 0 && p.conversations.length === 0 && (
                 <div className="sb-project-empty">{emptyLabel}</div>
               )}

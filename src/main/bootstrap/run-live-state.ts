@@ -227,6 +227,7 @@ export async function createLiveRunState(deps: {
         runId,
         externalSessionId: resume,
         cwd: catalogCwd,
+        ...(options.projectCwd ? { projectCwd: options.projectCwd } : {}),
         prompt: displayPrompt
       })
     } else {
@@ -238,6 +239,7 @@ export async function createLiveRunState(deps: {
         runtimeProvider,
         runId,
         cwd: catalogCwd,
+        ...(options.projectCwd ? { projectCwd: options.projectCwd } : {}),
         prompt: displayPrompt
       })
     }

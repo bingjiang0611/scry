@@ -268,7 +268,7 @@ function startAppRun(payload: AgentStartRequest, options?: AppRunStartOptions & 
 function startAppRun(payload: AgentStartRequest, options?: AppRunStartOptions): Promise<AgentStartResult | RemoteRunCompletion>
 async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptions = {}): Promise<AgentStartResult | RemoteRunCompletion> {
   if (payload?.workspace !== undefined) return startWorkspaceRun(payload, options, {
-    sourceControl, providerRegistry, resolveKnownProjectDirectory, rememberProject,
+    sourceControl, providerRegistry, resolveKnownProjectDirectory,
     getCurrentCwd: () => currentCwd, getStartupManagedRecovery: () => startupManagedRecovery,
     start: startAppRun
   })

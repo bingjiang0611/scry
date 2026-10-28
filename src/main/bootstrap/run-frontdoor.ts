@@ -13,6 +13,8 @@ import { providerOperationKey } from '../provider-operation-gate'
 export interface AppRunStartOptions {
   /** Host-only reservation; never accepted from renderer payloads. */
   workspaceAdmission?: { cwd: string; admit: (register: () => void) => Promise<void> }
+  /** Sidebar project root for a run prepared in a separate worktree. */
+  projectCwd?: string
   origin?: 'local' | 'remote'
   runId?: string
   stopSignal?: AbortSignal
@@ -58,7 +60,11 @@ export function prepareRunFrontdoor(payload: AgentStartRequest, options: AppRunS
   // broken shell; the next send may recover without restarting Scry.
   const shellEnvReady = warmShellEnv({ retryFailed: true })
   const cwd = request.cwd
-    ? (isRemoteRun ? deps.resolveRemoteProjectDirectory(request.cwd) : deps.resolveKnownProjectDirectory(request.cwd))
+    ? (isRemoteRun
+      ? deps.resolveRemoteProjectDirectory(request.cwd)
+      : options.workspaceAdmission
+        ? canonicalExistingDirectory(request.cwd)
+        : deps.resolveKnownProjectDirectory(request.cwd))
     : deps.currentCwd
   if (options.workspaceAdmission && (isRemoteRun || cwd !== options.workspaceAdmission.cwd))
     throw new Error('工作区预留与真实启动目录不一致')

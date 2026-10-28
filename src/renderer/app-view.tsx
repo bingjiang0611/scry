@@ -28,7 +28,7 @@ export function useAppView(context: AppViewContext) {
     view, viewRef, setView, cwd, setCwd, activeSessionId, selectSessionId, session, integrations, sessionLoading, composerSubmitting,
     switchingAgentRef, setSwitchingAgent, setComposerError, draftAttachments, queuedPrompts, draftKey, draftStore, setInput,
     releaseDraft, selectedProviderSessionId, sessionSelectionSeqRef, sessionNavigationSeqRef, activeSessionIdRef, cwdRef, setSessionDrafts, migrateRightSurface,
-    loadProjects, recent, chooseFolder, removeRecentFolder, confirmWorkspaceTransition, logicalConversation, conversationProjection,
+    loadProjects, projects, recent, chooseFolder, removeRecentFolder, confirmWorkspaceTransition, logicalConversation, conversationProjection,
     sessionEvidenceGap, setConversationError, setConversationAgent, setLogicalConversation, remoteWorkspaceDirty, setRemoteWorkspaceDirty,
     remoteTarget, sidebarPane, surfacePane, rightSurfaces, rightSurface,
     hasSurfaceContext, terminalOpen, remoteSurface, remotePanelVisible, remoteSurfaceKey, currentSurface, dispatchRightSurface,
@@ -84,7 +84,10 @@ export function useAppView(context: AppViewContext) {
     active: view === 'chat' || view === 'conversation',
     busy: sessionLoading || composerSubmitting || session.busy
   })
-  const workspaceContext = <WorkspaceContext controller={workspaceSelection} cwd={workspaceCwd}
+  const sessionUsesWorktree = view === 'chat' && activeSessionId != null && projects.some(project =>
+    project.sessions.some(candidate => candidate.cwd === workspaceCwd && candidate.cwd !== project.cwd &&
+      [candidate.sessionId, candidate.externalSessionId, candidate.runId].includes(activeSessionId)))
+  const workspaceContext = <WorkspaceContext controller={workspaceSelection} cwd={workspaceCwd} isWorktree={sessionUsesWorktree}
     onOpenRun={(target, runId) => {
       void context.openWorkspaceRun(target, runId).catch(error => setComposerError(String(error)))
     }} />

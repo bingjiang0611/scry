@@ -16,6 +16,7 @@ export const workspaceCopy = {
   newBranchTarget: (branch: string) => `新分支：${branch}。`,
   readonly: '已绑定会话，工作区不可切换',
   current: '当前工作区',
+  worktree: 'worktree',
   currentBadge: '当前',
   worktreeBadge: 'worktree',
   remoteBadge: '远端',

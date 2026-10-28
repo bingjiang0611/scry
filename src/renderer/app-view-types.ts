@@ -46,6 +46,7 @@ export interface AppViewContext {
   setSessionDrafts: (update: (drafts: ReadonlyMap<string, SessionComposerDraft>) => ReadonlyMap<string, SessionComposerDraft>) => void
   migrateRightSurface: (from: string, to: string) => void
   loadProjects: () => void | Promise<void>
+  projects: ReturnType<typeof useWorkspaceState>['projects']
   recent: ReturnType<typeof useWorkspaceState>['recent']
   chooseFolder: ReturnType<typeof useWorkspaceState>['chooseFolder']
   removeRecentFolder: ReturnType<typeof useWorkspaceState>['removeRecentFolder']

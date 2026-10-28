@@ -48,6 +48,8 @@ export interface WorkspaceChoices {
   writeBlocker: string | null
   commonDirBusy: boolean
   observedAt: number
+  /** Preferred new-worktree base when origin/main is already available locally. */
+  defaultBase?: WorkspaceBranchRef
   selectedWorktree?: WorkspaceWorktreeChoice
   page:
     | { kind: 'branches'; items: WorkspaceBranchChoice[] }

@@ -221,7 +221,7 @@ export function ArchivedChatsPanel({
                       title="永久删除"
                       aria-label={`永久删除：${session.preview || '(无预览)'}`}
                       disabled={busy}
-                      onClick={() => void deleteOne(project.cwd, session)}
+                      onClick={() => void deleteOne(session.cwd ?? project.cwd, session)}
                     >
                       <Icon name="trash" />
                     </button>
@@ -229,7 +229,7 @@ export function ArchivedChatsPanel({
                       type="button"
                       className="arch-unarch"
                       disabled={busy}
-                      onClick={() => void unarchive(project.cwd, session)}
+                      onClick={() => void unarchive(session.cwd ?? project.cwd, session)}
                     >
                       取消存档
                     </button>

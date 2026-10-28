@@ -30,7 +30,7 @@ export function useAppInteraction(context: AppInteractionContext) {
   const { state } = context
   const { theme, setTheme, composerError, setComposerError, composerSubmitting, setComposerSubmitting, sessionLoading, setSessionLoading,
     sessionCacheVisible, setSessionCacheVisible, sessionSnapshots, sessionEvidenceGap, setSessionEvidenceGap, draftStartPendingRef,
-    activeRunHydrated, setActiveRunHydrated, workspace, cwd, setCwd, recent, activeSessionId, loadProjects, chooseFolder,
+    activeRunHydrated, setActiveRunHydrated, workspace, cwd, setCwd, recent, projects, activeSessionId, loadProjects, chooseFolder,
     removeRecentFolder, workspaceRoots, setRunningRunIds, setWaitingQuestionRunIds, terminalRunIdsRef, localRunIdsRef, localStartsRef, localDraftOwnersRef, markRunStarted,
     markRunFinished, cwdRef, activeSessionIdRef, selectSessionId, showSkills, setShowSkills, showMcp, setShowMcp, showLlmPerformance,
     setShowLlmPerformance, view, setView, logicalConversation, setLogicalConversation, setConversationError, setConversationAgent,
@@ -183,7 +183,7 @@ export function useAppInteraction(context: AppInteractionContext) {
     view, setView, cwd, setCwd, activeSessionId, selectSessionId, session, integrations, sessionLoading, composerSubmitting,
     switchingAgentRef, setSwitchingAgent, setComposerError, draftAttachments, queuedPrompts, draftKey, draftStore, setInput,
     releaseDraft, selectedProviderSessionId, sessionSelectionSeqRef, activeSessionIdRef, cwdRef, setSessionDrafts, migrateRightSurface,
-    loadProjects, recent, chooseFolder, removeRecentFolder, confirmWorkspaceTransition, logicalConversation, setConversationError, setConversationAgent, setLogicalConversation,
+    loadProjects, projects, recent, chooseFolder, removeRecentFolder, confirmWorkspaceTransition, logicalConversation, setConversationError, setConversationAgent, setLogicalConversation,
     remoteWorkspaceDirty, setRemoteWorkspaceDirty, remoteTarget, setRemoteTarget, setRemoteAdoptedSession,
     remoteSurfaces, remoteSurfaceKey, remotePanelVisible, remoteSurface, rightSurface, hasSurfaceContext, terminalOpen, surfacePane,
     sidebarPane, rightSurfaces, currentSurface, dispatchRightSurface, setTurnDiffSelection, setWorkspaceDirty, turnDiffSelection, taRef, setSlashHidden,

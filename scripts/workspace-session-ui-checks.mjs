@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { nativeUiPointer } from './native-ui-pointer.mjs'
 import { exerciseWorkspaceDiffBounds } from './workspace-session-ui-stress.mjs'
-import { exerciseDiffWorkbench, contextFixture } from './diff-workbench-ui.mjs'
+import { exerciseDiffWorkbench } from './diff-workbench-ui.mjs'
+import { prepareWorkspaceSessionFixture } from './workspace-session-ui-fixture.mjs'
 import { assertPickerAnchored, assertNewWorktreeDefaults, assertCompactMenus } from './workspace-session-ui-picker.mjs'
 import { wait, sendWorkspacePrompt } from './workspace-session-ui-run.mjs'
 import { selectDiffScope, exerciseTurnMenu } from './diff-inspector-ui.mjs'
@@ -81,22 +82,7 @@ export async function exerciseWorkspaceSessions(context) {
   try {
     await cdp.send('Debugger.enable')
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false })
-    if (!existsSync(join(workspace, '.git'))) git(workspace, 'init', '-b', 'main')
-    writeFileSync(join(workspace, '.gitignore'), '.scry/\n')
-    writeFileSync(join(workspace, 'scry.config.json'), json({ schemaVersion: 1, workspaceId: 'workspace-ui-fixture' }))
-    writeFileSync(join(workspace, 'workspace-baseline.txt'), 'baseline\n')
-    writeFileSync(join(workspace, 'workbench-context.ts'), contextFixture())
-    git(workspace, 'add', '--all')
-    git(workspace, 'commit', '--allow-empty', '-m', 'workspace selection fixture')
-    git(workspace, 'branch', '-M', 'main')
-    git(workspace, 'branch', 'workspace-feature')
-    const head = git(workspace, 'rev-parse', 'HEAD')
-    execFileSync('git', ['-c', 'core.hooksPath=/dev/null', 'update-ref', '--stdin'], {
-      cwd: workspace, input: Array.from({ length: 150 }, (_, i) => `create refs/heads/fixture/ref-${String(i).padStart(3, '0')} ${head}\n`).join('')
-    })
-    const existing = join(temp, 'existing worktree with spaces')
-    git(workspace, 'worktree', 'add', '-b', 'existing-feature', existing, 'main')
-    const existingCanonical = realpathSync(existing)
+    const existingCanonical = prepareWorkspaceSessionFixture({ workspace, temp, git })
     await newDraft(workspace)
 
     // Saving/cancelling a choice is read-only, including the real index's mtime.
@@ -163,10 +149,10 @@ export async function exerciseWorkspaceSessions(context) {
     await click('.workspace-mode-choice', '新建 worktree')
     await apply()
     const generatedBranch = await assertNewWorktreeDefaults(evaluate)
+    assert.ok(await evaluate(`document.querySelector('[data-workspace-menu="refs"]')?.textContent.includes('origin/main')`), 'new worktrees default to origin/main')
     await openPicker()
     await screenshot('picker-dark')
-    await selectBranch('main')
-    await apply()
+    await key('Escape', 'Escape', 27)
     assert.equal(git(workspace, 'branch', '--list', generatedBranch), '', 'selection must not create a branch')
     assert.equal(await evaluate(`document.querySelector('.send')?.getAttribute('aria-label')`), '创建 worktree 并发送')
     // 选择目标之后源 checkout 又出现外部改动（其他会话写文件）：新建 worktree 不碰它，
@@ -176,6 +162,9 @@ export async function exerciseWorkspaceSessions(context) {
     const target = created.run.cwd
     assert.ok(target.startsWith(join(realpathSync(userDataDir), 'worktrees') + '/'), target)
     assert.equal(git(target, 'branch', '--show-current'), generatedBranch)
+    await wait(() => evaluate(`document.querySelector('[data-workspace-menu="workspace"]')?.textContent.includes('worktree')`), 'bound session identifies its worktree')
+    await wait(() => evaluate(`document.querySelector('[data-project-path=${JSON.stringify(canonicalWorkspace)}]')?.closest('.sb-proj')?.textContent.includes('desktop remote write one') === true`), 'worktree session stays under source project')
+    assert.equal(await evaluate(`Boolean(document.querySelector('[data-project-path=${JSON.stringify(target)}]'))`), false, 'worktree storage id is not a project group')
     assert.equal(existsSync(join(target, 'moved-after-selection.txt')), false, 'new worktree never copies uncommitted files')
     assertHooksIdle(hookMarkers)
     rmSync(join(workspace, 'moved-after-selection.txt'))

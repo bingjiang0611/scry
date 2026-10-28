@@ -61,7 +61,7 @@ export function createSessionCatalog({
         // catalogs remain unchanged and retain their native evidence.
         sessions: project.sessions.filter((session) => {
           const nativeId = session.externalSessionId ?? session.sessionId
-          const alias = `${session.providerId}\0${session.agentProfileId ?? ''}\0${project.cwd}\0${nativeId}`
+          const alias = `${session.providerId}\0${session.agentProfileId ?? ''}\0${session.cwd ?? project.cwd}\0${nativeId}`
           return !ownedNativeAliases.has(alias)
         }),
         conversations
