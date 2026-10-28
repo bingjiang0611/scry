@@ -30,7 +30,7 @@ vi.mock('node:fs/promises', async importOriginal => {
 
 const runControls: WorkflowServiceOptions['runControls'] = async role => ({ descriptor: { id: role.providerId, label: role.providerId, runtimeProvider: 'claude_sdk', transport: 'counter', available: true,
   capabilities: { skills: 'none', mcp: 'none', commands: 'none', account: 'none' }, health: { state: 'ready', transport: 'counter' } },
-identity: 'native-counter', model: true, stop: true, independentRun: true, terminalOutput: true })
+identity: 'native-counter', model: true, stop: true, independentRun: true, terminalOutput: true, structuredCandidateAuthoring: 'available', hostToolsDisabled: 'available' })
 
 // This per-result counter is not a substitute for the unchanged eight-step,
 // two-revision legacy acceptance test or its five-second deadline.
