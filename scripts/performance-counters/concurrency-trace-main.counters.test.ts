@@ -134,8 +134,13 @@ function baselineView(k: number): {
   return { view: merged.view, run, runtime, revisions }
 }
 
-const CASES = [10_000, 50_000]
-const samples = new Map<number, ProbeSample[]>(CASES.map((k) => [k, []]))
+// The quoted scenario names are the collector selector contract: the standard tool finds a collector by the
+// quoted scenario string in its source, so these stay string literals instead of template interpolation.
+const CASES: Array<{ k: number, scenario: string }> = [
+  { k: 10_000, scenario: 'trace.main-10k' },
+  { k: 50_000, scenario: 'trace.main-50k' }
+]
+const samples = new Map<number, ProbeSample[]>(CASES.map(({ k }) => [k, []]))
 
 describe('concurrency trace single-run main projection work counters', () => {
   registerProbeControl()
@@ -194,8 +199,8 @@ describe('concurrency trace single-run main projection work counters', () => {
     expect(() => assertMatchesOracle(staleView.run, baseline.run, 'missing patch')).toThrow(/independent literal-policy oracle/)
   })
 
-  it.each(CASES.flatMap((k) => Array.from({ length: defaultRepeats }, (_, index) => ({ k, index: index + 1 }))))(
-    'counts one complete run at $k items (repeat $index)',
+  it.each(CASES.flatMap(({ k, scenario }) => Array.from({ length: defaultRepeats }, (_, index) => ({ k, scenario, index: index + 1 }))))(
+    'counts one complete run at $scenario (repeat $index)',
     ({ k }) => {
       const sample = runSingleComponent(k)
       const collected = samples.get(k)
@@ -204,11 +209,11 @@ describe('concurrency trace single-run main projection work counters', () => {
     }
   )
 
-  it.each(CASES)('aggregates the %i-item samples as unregistered candidates', (k) => {
+  it.each(CASES)('aggregates the $scenario samples as unregistered candidates', ({ k, scenario }) => {
     const collected = samples.get(k) ?? []
     expect(collected).toHaveLength(defaultRepeats)
     writeCollector(`concurrency-trace-main-${k / 1000}k`, buildObservations({
-      scenario: `trace.main-${k / 1000}k`,
+      scenario,
       workload: `trace-main-single-run;items=${k};stages=7;observes=7;merges=7;literal-policy-oracle=true`,
       // Stated limits: one run, host-side only, and no native or non-crypto hashing is observed.
       source: 'real boundedLiveRun + createTraceRevisions().observe + JSON round trip + mergeRemoteTrace on one run; counts node:crypto createHash calls, bytes accepted by Hash.update and JSON.stringify UTF-8 output bytes by phase; not a client, 16-task, Provider, TLS or full-App measurement, and native digest internals, subprocesses and other hash APIs are not counted'

@@ -33,6 +33,12 @@
 - 这三个 case 里 writer 侧四 primitive 全为 0；这不等于 writer CPU 为 0，只是该窗口内没有经过被观测的 JS primitive。
 - r4 的其它阶段另有 14 次 hash；证书随机性导致少量 byte 差异，照实保留，未做抹平。
 
+### 标准 scenario 选择器补验
+
+`c0bc5c02` 后发现：main 场景名用模板插值，标准工具按源码字面量发现 collector，导致 `trace.main-10k/50k` 选择器返回空。新增 selector 断言在旧声明下真实失败；改为字面 scenario 对象后，工具测试 5/5、main collector 15/15 与完整 typecheck 通过，计量窗口/工作负载未变。
+
+实际运行 `npm run performance:measure -- --scenario trace.main-10k --out /tmp/scry-p0-trace-scenario-selector.VO1G4M`：同文件两场景均采样，最终 `candidate.json` 只含 10k 的 16 指标 × 5 样本，reader hash 仍为 69998。工具输出 `Ratchet: passed` **不表示这些未注册指标已晋级门禁**。
+
 ## 3. reader 变体 pilot
 
 `/tmp/scry-p0-reader-pilot.ESaPrI/{manifest,analysis}.json`：源码 `c7cf4b665f1c2edad00f3541902bc3035b038fc2`（clean），bundle 与前篇矩阵相同；10k items / 1 peer；limit 固定序 `4,16,16,4,4,16,16,4,4,16`，每格 5 次。
