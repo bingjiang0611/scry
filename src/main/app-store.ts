@@ -7,6 +7,8 @@ import { normalizeSessionTitle } from '../shared/session-title'
 import type { AppSession, AppSessionRef, ProjectMeta, ProjectRecord, SessionMeta } from './app-store-types'
 export { appSessionCanResume } from './app-store-types'
 export type { AppSession, AppSessionRef, ProjectMeta, ProjectRecord, SessionMeta } from './app-store-types'
+// 项目存储已拆到独立模块；保留 app-store 的既有导出面，调用方不必为一处拆分连锁改动。
+export { createProjectStore, isManagedWorktreePath } from './project-store'
 import {
   cachedCatalogReader,
   catalogFileKey,
@@ -97,74 +99,6 @@ export function createRecentFoldersStore(userDataDir: string) {
     return next
   }
   return { load, push, remove }
-}
-
-function isProjectRecordArray(value: unknown): value is ProjectRecord[] {
-  return Array.isArray(value) && value.every((item) => {
-    if (!item || typeof item !== 'object') return false
-    const project = item as Partial<ProjectRecord>
-    return typeof project.cwd === 'string' && project.cwd.length > 0 && project.cwd.length <= 4_096 &&
-      (project.name == null || (typeof project.name === 'string' && project.name.length > 0 && project.name.length <= 120)) &&
-      typeof project.lastOpenedAt === 'number' && Number.isFinite(project.lastOpenedAt) &&
-      (project.pinnedAt == null || (typeof project.pinnedAt === 'number' && Number.isFinite(project.pinnedAt))) &&
-      (project.removedAt == null || (typeof project.removedAt === 'number' && Number.isFinite(project.removedAt)))
-  })
-}
-
-export function createProjectStore(userDataDir: string) {
-  const file = join(userDataDir, 'projects.json')
-  const read = cachedCatalogReader<ProjectRecord[]>(file, [], isProjectRecordArray)
-  const load = (): ProjectRecord[] => read().value
-  const save = (projects: ProjectRecord[]): void => writeJsonRecoverable(file, projects, isProjectRecordArray)
-  const seed = (observed: Array<{ cwd: string; lastOpenedAt: number }>): void => {
-    const projects = load()
-    const known = new Set(projects.map((project) => project.cwd))
-    const additions = observed.filter((project) => {
-      if (!project.cwd || known.has(project.cwd)) return false
-      known.add(project.cwd)
-      return true
-    })
-    if (additions.length === 0) return
-    save([...projects, ...additions])
-  }
-  const remember = (cwd: string): void => {
-    const projects = load()
-    const current = projects.find((project) => project.cwd === cwd)
-    const now = Date.now()
-    if (current) {
-      current.lastOpenedAt = now
-      delete current.removedAt
-    } else projects.push({ cwd, lastOpenedAt: now })
-    save(projects)
-  }
-  const setPinned = (cwd: string, pinned: boolean): boolean => {
-    const projects = load()
-    const current = projects.find((project) => project.cwd === cwd && !project.removedAt)
-    if (!current) return false
-    if (pinned) current.pinnedAt = Date.now()
-    else delete current.pinnedAt
-    save(projects)
-    return true
-  }
-  const rename = (cwd: string, name: string): boolean => {
-    const projects = load()
-    const current = projects.find((project) => project.cwd === cwd && !project.removedAt)
-    if (!current) return false
-    current.name = name
-    save(projects)
-    return true
-  }
-  const remove = (cwd: string): void => {
-    const projects = load()
-    const current = projects.find((project) => project.cwd === cwd)
-    const now = Date.now()
-    if (current) {
-      current.removedAt = now
-      delete current.pinnedAt
-    } else projects.push({ cwd, lastOpenedAt: now, removedAt: now })
-    save(projects)
-  }
-  return { load, seed, remember, setPinned, rename, remove }
 }
 
 export function mergeProjectMetas(records: ProjectRecord[], sessionProjects: ProjectMeta[]): ProjectMeta[] {
