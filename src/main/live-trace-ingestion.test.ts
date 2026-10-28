@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { TraceEvent } from '../shared/trace'
 import { sanitizeToolEvents } from '../core/turn-recorder/tool-content'
 import { LiveTraceIngestion } from './live-trace-ingestion'
+import { setPerformanceRecordingSink, type PerformanceSample } from './performance-timing'
 import { persistTraceToolEvents, readAppTraceContentPage, TRACE_TOOL_CONTENT_POLICY } from './trace-tool-content'
 
 const tool: TraceEvent = {
@@ -56,6 +57,27 @@ describe('live trace ingestion', () => {
       await queue.idle()
       await rm(root, { recursive: true, force: true })
     }
+  })
+
+  it('separates queue wait from durable content service time', async () => {
+    const samples: PerformanceSample[] = []
+    setPerformanceRecordingSink((sample) => { samples.push(sample) })
+    const queue = new LiveTraceIngestion({
+      provider: 'pi',
+      publish: () => undefined,
+      persist: async (event) => event,
+      onPersisted: () => undefined,
+      onError: (error) => { throw error }
+    })
+    try {
+      queue.enqueue(tool, bounded)
+      await queue.idle()
+    } finally {
+      setPerformanceRecordingSink(null)
+    }
+    expect(samples).toHaveLength(1)
+    expect(samples[0].checkpoints.map((checkpoint) => checkpoint.stage))
+      .toEqual(['queue_drained', 'content_persisted'])
   })
 
   it('keeps raw evidence and live ordering on disk failure and still drains later tool writes', async () => {

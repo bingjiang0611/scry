@@ -27,6 +27,7 @@ export class LiveTraceIngestion {
       timing.mark('queue_drained')
       try {
         const persisted = await this.options.persist(raw)
+        timing.mark('content_persisted')
         this.options.onPersisted(persisted)
         // This is an enrichment of the same event id, never a new logical tool call.
         // Queue it after the original live projection, including when persistence resolves fast.
