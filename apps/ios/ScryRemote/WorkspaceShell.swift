@@ -16,7 +16,6 @@ struct WorkspaceShell: View {
   let focusComposer: Bool
 
   @EnvironmentObject private var model: AppModel
-  @Environment(RemoteRunStore.self) private var run
   @Environment(ExecutionTargetCoordinator.self) private var targets
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var drawerOpen: Bool
@@ -36,6 +35,9 @@ struct WorkspaceShell: View {
     #endif
   }
 
+  // The page always shows the new-task run, independent of what the root injected
+  // for `.home` (that stays the selected store for the waiting-decision banner).
+  private var run: RemoteRunStore { targets.newTaskStore }
   private var paired: Bool {
     run.hasConnection && (targets.newTaskScope.isLocal || run.executionTargetAvailable)
   }
@@ -78,7 +80,15 @@ struct WorkspaceShell: View {
       centerpiece
       NewSessionComposer(focusTicket: focusComposer ? focusTicket : nil)
     }
+    .environment(run)
+    // An open drawer is the only surface to read or touch: the page behind it
+    // must not stay in the VoiceOver order.
+    .accessibilityHidden(drawerOpen)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
+    // Without a hit test shape, the drag below only starts on the page's text and
+    // controls: the empty middle of the page would ignore a left-edge swipe and
+    // the drawer could not be opened from there (found on-device in L1b).
+    .contentShape(Rectangle())
     // Edge swipe opens the drawer instead of navigating back: this page is the
     // root the drawer belongs to. Thresholds are the ones the root gesture used.
     .simultaneousGesture(
@@ -103,7 +113,7 @@ struct WorkspaceShell: View {
       Spacer(minLength: 4)
       hostChip
       Spacer(minLength: 4)
-      Button { startNewSession() } label: {
+      Button { startNewSession(scope: targets.newTaskScope) } label: {
         Image(systemName: Symbol.compose).font(.system(size: 21))
           .foregroundStyle(Palette.fg).frame(width: 44, height: 44).contentShape(Rectangle())
       }
@@ -235,14 +245,17 @@ struct WorkspaceShell: View {
     drawerOpen = open
   }
 
-  // The three new-session entries (drawer row, drawer project row, page button)
-  // do the same thing: reset the new-task context, close the drawer, land on the
-  // composer with the keyboard. A refused detach changes nothing, as before.
-  private func startNewSession(scope: ExecutionTargetScope? = nil, cwd: String? = nil) {
-    let started = scope.map { targets.beginNewTask(scope: $0) } ?? targets.beginNewTask()
-    guard started else { return }
+  // Every new-session entry names its target scope, so this never has to repeat
+  // `beginNewTask`'s scope heuristic. Same scope means the user is already on the
+  // page they asked for: keep the chosen project/Provider and the draft, and only
+  // let a running task go in the background. A different scope resets that
+  // scope's composer context (drafts are stored per scope, so the other scope's
+  // own draft is what appears — the user's text is never thrown away).
+  private func startNewSession(scope: ExecutionTargetScope, cwd: String? = nil) {
+    if scope == targets.newTaskScope {
+      guard targets.newTaskStore.detachFocusedRun() else { return }
+    } else if !targets.beginNewTask(scope: scope) { return }
     if let cwd { targets.newTaskStore.chooseProject(.init(path: cwd, label: projectName(cwd))) }
-    model.composerDraft(for: .newTask(targets.newTaskScope)).wrappedValue = .init()
     setDrawer(false)
     focusTicket += 1
     model.route = .newSession

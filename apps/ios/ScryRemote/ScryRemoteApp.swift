@@ -42,11 +42,10 @@ struct RootView: View {
   @EnvironmentObject var model: AppModel
   @Environment(ExecutionTargetCoordinator.self) var targets
 
-  // `.home` is the new-session page as well, so it needs the new-task store the
-  // composer routes to. The drawer still reads `targets.localStore` explicitly.
-  private var run: RemoteRunStore {
-    model.route == .newSession || model.route == .home ? targets.newTaskStore : targets.selectedStore
-  }
+  // `.home` keeps the selected store so the waiting-decision banner, its sheet,
+  // reachability write-back and resumeRecoveredRun keep the pre-L1 source. The
+  // new-session page injects `targets.newTaskStore` for itself.
+  private var run: RemoteRunStore { model.route == .newSession ? targets.newTaskStore : targets.selectedStore }
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 

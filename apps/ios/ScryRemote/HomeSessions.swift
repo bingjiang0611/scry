@@ -197,10 +197,8 @@ struct HomeSessions: View {
         Text(ConnectionCopy.noRecent).font(Typography.rowTitle).foregroundStyle(Palette.dim).padding(.vertical, 16)
       }
       ForEach(catalog.projects) { project in projectSection(project) }
-      Button { onNewTask(targets.newTaskScope, nil) } label: {
-        Label(ConnectionCopy.newSession, systemImage: Symbol.compose).font(Typography.rowTitle)
-          .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-      }.buttonStyle(HomeRowButtonStyle()).foregroundStyle(Palette.fg)
+      // No "new session" row here: the drawer header already has one, and each
+      // project keeps its own `+` (which carries that project's cwd).
       section(ConnectionCopy.tabTools)
       LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
         ForEach(ToolKind.allCases) { kind in ToolRowView(kind: kind) { onOpenTool(kind) } }
