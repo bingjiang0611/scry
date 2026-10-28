@@ -85,7 +85,7 @@ wrapper 必须带 `<label> -- <command>`；单格参数只有 `--limit 4|16`、`
 
 | 开放项 | 备注 |
 | --- | --- |
-| pilot 噪声／MDE／重复次数与顺序预注册 | 预注册后才允许 L2 结论 |
-| 必要的 native／50k 计量、实际 hash 工作计数 | 补齐后才冻结 collector |
-| collector 冻结与提交 | 工具单独提交；本篇不代表已提交、已安装或已推送 |
+| pilot 噪声／MDE／重复次数与顺序预注册 | 预注册后才允许 L2 结论；已采 reader 变体的低负载样本见[计数与试点篇](./20261028-concurrency-trace-counts-pilot.md) |
+| 必要的 native／50k 计量、实际 hash 工作计数 | 实际 hash/JSON 计数工具已实现，48 条 observations 采自 R4 与 10k/50k（[计数与试点篇](./20261028-concurrency-trace-counts-pilot.md)）；50k 仍无毫秒 |
+| collector 冻结与提交 | 工具单独提交；本篇不代表已提交、已安装或已推送。冻结前的剩余条件见[计数与试点篇](./20261028-concurrency-trace-counts-pilot.md) |
 | P1 | 未开始，另 commit |

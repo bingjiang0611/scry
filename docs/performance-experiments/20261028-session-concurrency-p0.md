@@ -76,11 +76,11 @@ native 采集第二批（**同一 harness hash**）：`/tmp/scry-p0-fixed16-fina
 | 开放项 | owner | 备注 |
 | --- | --- | --- |
 | remote readers 0/1/4 | 父会话 | in-main trace 工具已实现并采 12 格（[续篇](./20261028-concurrency-trace-readers.md)）；本阶段的 remote fixture 仍待冻结 |
-| 1k/10k/50k 负载、eviction/reset | 父会话 | 1k/10k × readers 0/1/4 已采；50k 耗时、实际 hash 计数仍未测；容量、旧 cursor 与逻辑时钟 sweep 有组件回归，reset 只在受控串行序下观测（[续篇](./20261028-concurrency-trace-readers.md)） |
+| 1k/10k/50k 负载、eviction/reset | 父会话 | 1k/10k × readers 0/1/4 已采；50k 耗时仍未测，实际 hash 计数已由 counts-only 工具采到（[计数与试点篇](./20261028-concurrency-trace-counts-pilot.md)）；容量、旧 cursor 与逻辑时钟 sweep 有组件回归，reset 只在受控串行序下观测（[续篇](./20261028-concurrency-trace-readers.md)） |
 | 噪声、MDE、重复次数与顺序预注册 | 父会话 | 预注册后才允许 L2 结论 |
-| 低负载匹配 baseline、collector 整体冻结 | 父会话 | 续篇每格各有一次 `highLoad=false` 样本，尚非稳定匹配基线或 L2 改善；冻结还需预注册噪声/MDE（[续篇](./20261028-concurrency-trace-readers.md)） |
+| 低负载匹配 baseline、collector 整体冻结 | 父会话 | 续篇每格各有一次 `highLoad=false` 样本，尚非稳定匹配基线或 L2 改善；冻结还需预注册噪声/MDE（[续篇](./20261028-concurrency-trace-readers.md)、[计数与试点篇](./20261028-concurrency-trace-counts-pilot.md)） |
 | 环境负载 | 父会话检查，必要时请用户安排空闲窗口 | native 旧样本为高负载，后续 remote 样本为低负载；逐次核对，不擅自结束用户进程 |
-| collector 提交 | 父会话 | 测量工具单独提交；不与 P1 优化混在同一提交，实际 hash 以 Git 历史为准 |
+| collector 提交 | 父会话 | 工具分阶段独立提交，不与 P1 优化混在同一提交，提交号以 Git 历史为准；整体冻结未完成（[计数与试点篇](./20261028-concurrency-trace-counts-pilot.md)） |
 
 ## 7. 复现
 
