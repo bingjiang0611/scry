@@ -1,6 +1,8 @@
+import { sameWorkflowPlanningSize, validateWorkflowPlanningSize } from '../shared/workflow-size'
+import { workflowSizeCopy } from '../shared/constants/copy'
 import { createHash } from 'node:crypto'
 import type { WorkflowStoreRecord } from './workflow-store'
-import { WORKFLOW_MAX_ATTEMPTS, workflowChildBlocks, type WorkflowBlock } from '../shared/workflow'
+import { WORKFLOW_MAX_ATTEMPTS, workflowChildBlocks, type WorkflowBlock, type WorkflowPlanPreview } from '../shared/workflow'
 import { workflowRecoveryCopy as copy } from '../shared/constants/copy'
 import { validateWorkflowProgram, workflowRevision } from './workflow-program'
 import { validateWorkflowReplicaReference } from './workflow-replica'
@@ -11,9 +13,24 @@ import { assertWorkflowRetryTarget, validateWorkflowAttemptChains, validateWorkf
 const id = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,96}$/.test(value)
 export const workflowRecordFingerprint = (value: WorkflowStoreRecord | undefined): string | undefined => value === undefined ? undefined : createHash('sha256').update(JSON.stringify(value)).digest('hex')
 
+/** A revision/continuation inherits main's original snapshot, not today's settings. */
+export function workflowContinuationPreview(preview: WorkflowPlanPreview, original: WorkflowPlanPreview): WorkflowPlanPreview {
+  if (preview.planningSize !== undefined && !sameWorkflowPlanningSize(original.planningSize, preview.planningSize)) throw new Error(workflowSizeCopy.immutable)
+  return original.planningSize ? { ...preview, planningSize: original.planningSize } : preview
+}
+
 export function validateWorkflowOwnership(record: WorkflowStoreRecord): void {
+  if (record.planningRequestHash !== undefined && (typeof record.planningRequestHash !== 'string' || !/^[a-f0-9]{64}$/.test(record.planningRequestHash))) throw new Error(copy.fingerprint)
   const execution = record.execution
+  if (record.preview.planningSize !== undefined) validateWorkflowPlanningSize(record.preview.planningSize)
+  if (record.progress.planningSize !== undefined) {
+    validateWorkflowPlanningSize(record.progress.planningSize)
+    if (!sameWorkflowPlanningSize(record.preview.planningSize, record.progress.planningSize)) throw new Error(workflowSizeCopy.invalidSnapshot)
+  }
   validateWorkflowRevisions(record)
+  for (const revision of record.revisions ?? []) if (!sameWorkflowPlanningSize(record.preview.planningSize, revision.preview.planningSize)) throw new Error(workflowSizeCopy.immutable)
+  for (const intent of record.intents) if ((intent.frameId !== undefined && !id(intent.frameId)) || (intent.callFrameId !== undefined && !id(intent.callFrameId))) throw new Error(copy.ledger)
+  for (const intent of record.systemIntents ?? []) if (intent.frameId !== undefined && !id(intent.frameId)) throw new Error(copy.ledger)
   if (!execution) return
   if (execution.version !== 2 || !id(execution.epoch) || !execution.owner || !Number.isSafeInteger(execution.owner.pid) || execution.owner.pid < 1 || !id(execution.owner.instanceId) || !['active', 'closed'].includes(execution.owner.state) || !Array.isArray(execution.segments) || !execution.segments.length || execution.segments.length > 256) throw new Error(copy.ledger)
   for (const [index, segment] of execution.segments.entries()) {
@@ -58,6 +75,7 @@ export function assertWorkflowRecovery(record: WorkflowStoreRecord, instanceId: 
     if (!record.intents.some(intent => intent.attemptId === outcome.attemptId) && (outcome.state === 'completed' || outcome.runId || outcome.archiveRef || outcome.outputRef || outcome.output !== undefined)) throw new Error(copy.ledger)
   }
   for (const [index, intent] of record.intents.entries()) {
+    if ((intent.frameId !== undefined && !id(intent.frameId)) || (intent.callFrameId !== undefined && !id(intent.callFrameId))) throw new Error(copy.ledger)
     const governing = governingWorkflowPreview(record, 'intent', index)
     const outcome = record.outcomes.find(value => value.attemptId === intent.attemptId)
     if (!outcome || !outcome.settled || outcome.state === 'unknown') throw new Error(copy.unknown)
@@ -80,6 +98,8 @@ export function assertWorkflowRecovery(record: WorkflowStoreRecord, instanceId: 
 
 export function validateWorkflowClaim(current: WorkflowStoreRecord | undefined, next: WorkflowStoreRecord): void {
   validateWorkflowOwnership(next)
+  if (current && current.planningRequestHash !== next.planningRequestHash) throw new Error(copy.fingerprint)
+  if (current && !sameWorkflowPlanningSize(current.preview.planningSize, next.preview.planningSize)) throw new Error(workflowSizeCopy.immutable)
   if (!next.execution || next.execution.owner.state !== 'active') throw new Error(copy.ledger)
   if (!current?.execution) {
     if (current && (current.executionStarted !== undefined || current.intents.length || current.outcomes.length)) throw new Error(copy.legacy)
@@ -107,7 +127,9 @@ export function validateWorkflowClaim(current: WorkflowStoreRecord | undefined, 
 }
 
 export function workflowEpochMatches(current: WorkflowStoreRecord | undefined, next: WorkflowStoreRecord): void {
+  if (current && current.planningRequestHash !== next.planningRequestHash) throw new Error(copy.fingerprint)
   if (current?.execution?.epoch !== next.execution?.epoch) throw new Error(copy.stale)
+  if (current && !sameWorkflowPlanningSize(current.preview.planningSize, next.preview.planningSize)) throw new Error(workflowSizeCopy.immutable)
   for (const [attemptId, inputs] of Object.entries(current?.agentInputs ?? {})) {
     const following = next.agentInputs?.[attemptId]
     if (JSON.stringify(inputs.before) !== JSON.stringify(following?.before) || (inputs.after !== undefined && JSON.stringify(inputs.after) !== JSON.stringify(following?.after))) throw new Error(copy.fingerprint)

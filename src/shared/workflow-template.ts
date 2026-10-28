@@ -1,6 +1,7 @@
 import type { WorkflowSequenceBlock, WorkflowRoleBinding, WorkflowValue, WorkflowValueSchema } from './workflow'
 
 export const WORKFLOW_TEMPLATE_MAX_BYTES = 4 * 1024 * 1024
+export const templateIdPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/
 
 export type WorkflowTemplateScope = { kind: 'builtin' } | { kind: 'personal' } | { kind: 'project'; workspace: string }
 export type WorkflowTemplateRef = {
@@ -53,6 +54,47 @@ export type WorkflowTemplateSnapshot = {
   ref: WorkflowTemplateRef
   source: string
 } & ({ state: 'valid'; definition: WorkflowTemplateDefinition } | { state: 'invalid'; error: string })
+
+/** Edit intent is not template instantiation, publication or a model-call grant. */
+export interface WorkflowTemplateEditContext {
+  instruction: string
+  snapshot?: WorkflowTemplateSnapshot
+}
+
+export type WorkflowTemplateEditAuthor = Pick<WorkflowRoleBinding, 'providerId' | 'agentProfileId' | 'requestedModel'>
+
+export type WorkflowTemplateEditCandidateInspection = Readonly<{
+  attemptId: string
+  taskRevision: number
+  sourceRef: WorkflowTemplateRef
+  author: WorkflowTemplateEditAuthor
+  requestedAt: number
+  disclosure: {
+    sourceBytes: number
+    sends: readonly ['instruction', 'template_source', 'authoring_contract']
+    excludes: readonly ['conversation_history', 'attachments', 'workspace_files', 'credentials']
+    estimatedCost: { state: 'unavailable'; reason: string }
+  }
+  state:
+    | { kind: 'dispatch_intent'; runId: string }
+    | { kind: 'unknown'; runId: string; reason: string; archiveRef?: string }
+    | { kind: 'candidate'; runId: string; archiveRef: string; outputSource: string; actualModel?: string; candidateHash: string; summary: string; source: string; validation: { state: 'valid' } | { state: 'invalid'; error: string } }
+}>
+export type WorkflowTemplateEditCandidateAttemptSummary = Omit<WorkflowTemplateEditCandidateInspection, 'state'> & { state:
+  | Extract<WorkflowTemplateEditCandidateInspection['state'], { kind: 'dispatch_intent' | 'unknown' }>
+  | Omit<Extract<WorkflowTemplateEditCandidateInspection['state'], { kind: 'candidate' }>, 'source'> }
+
+export type WorkflowTemplateEditCandidateApplication =
+  | { state: 'applied'; verification: 'write' | 'reconciled_draft'; draft: WorkflowTemplateDraft }
+  | { state: 'unknown'; reason: string }
+export type WorkflowTemplateEditApplicationSummary = Readonly<{
+  commandId: string
+  attemptId: string
+  destination: 'personal' | 'project'
+  requestedAt: number
+  state: { kind: 'intent' } | { kind: 'unknown'; reason: string } |
+    { kind: 'applied'; draftId: string; draftRevision: number; candidateHash: string }
+}>
 
 export interface WorkflowTemplateDraft {
   draftId: string

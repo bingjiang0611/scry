@@ -55,6 +55,9 @@ export type ProviderInputReceipt = { contextHash: string | null } & (
     }
 )
 
+/** Immutable result JSON, not transcript text. The fixture source is test-only, never SDK evidence. */
+export type ProviderStructuredOutput = Readonly<{ source: 'claude_sdk_success_result' | 'scry_fixture_success_result'; json: string }>
+
 export interface ProviderRunResult {
   externalSessionId?: string
   providerTurnId?: string
@@ -62,6 +65,7 @@ export interface ProviderRunResult {
   stopped?: boolean
   status?: 'completed' | 'failed' | 'cancelled' | 'interrupted'
   recordingFailure?: { message: string }
+  structuredOutput?: ProviderStructuredOutput
   mcp?: McpSnapshot
 }
 
@@ -114,6 +118,10 @@ export interface McpAuthInteraction {
 
 export interface ProviderRunRequest {
   runId: string
+  /** Private Main purpose; not accepted from renderer start payloads. */
+  purpose?: 'workflow_authoring'
+  /** Private Main-selected structured-output schema for the authoring purpose. */
+  authoringSchema?: Readonly<Record<string, unknown>>
   /** Original input for native command / Skill dispatch, without historical context. */
   prompt: string
   historicalContext?: ProviderHistoricalContext
@@ -222,6 +230,8 @@ export interface SessionEvidenceFacet {
 export interface ProviderAdapter {
   readonly id: ProviderId
   readonly runtimeProvider: RuntimeProvider
+  /** Declared structured-result/disabled-host-tools SDK configuration, not a native probe. */
+  readonly workflowAuthoring?: { source: ProviderStructuredOutput['source'] }
   /** Explicit fresh-run driver contract, NOT native Workflow support or a paid
    * account/model probe. Missing declarations are unavailable to Scry workflows.
    * Settlement covers the registered call, not escaped processes or shared servers. */

@@ -4,6 +4,8 @@ import type { McpLiveStatus } from './trace.js'
 
 export type ProviderId = 'claude' | 'codex' | 'qoder' | 'opencode' | 'pi'
 export type SessionProviderId = ProviderId | 'legacy_unknown'
+const PROVIDER_ID_SET: ReadonlySet<string> = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi'])
+export const isProviderId = (value: unknown): value is ProviderId => typeof value === 'string' && PROVIDER_ID_SET.has(value)
 export type ProviderCapability = 'skills' | 'mcp' | 'commands' | 'account'
 export type CapabilityMode = 'manage' | 'read' | 'none'
 export type CapabilityState = 'ready' | 'degraded' | 'unknown' | 'unsupported'

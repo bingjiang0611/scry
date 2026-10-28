@@ -3,6 +3,10 @@ import { createHash, randomUUID } from 'node:crypto'
 import { accessSync, chmodSync, constants, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
+import { exerciseDesktopTasks, verifyDesktopTaskColdEvidence } from './desktop-task-app-checks.mjs'
+import { exerciseWorkflowAuthoring, exerciseWorkflowPlanningReceipt, verifyWorkflowAuthoringCold } from './workflow-authoring-app-checks.mjs'
+import { exerciseWorkflowTaskObservation } from './workflow-task-observation-app-checks.mjs'
+import { exerciseWorkflowTemplateTask, verifyWorkflowTemplateTaskCold } from './workflow-template-task-app-checks.mjs'
 
 const hash = value => createHash('sha256').update(value).digest('hex')
 const json = path => JSON.parse(readFileSync(path, 'utf8'))
@@ -94,11 +98,16 @@ async function verifyCompletedControl(evaluate, fixture, runId) {
     'test Provider must actually write the isolated workspace file')
 }
 
-export async function exerciseOwnershipRecoveryFailure(evaluate, fixture, { completedRunId, providerCalls }) {
+export async function exerciseOwnershipRecoveryFailure(evaluate, fixture, { completedRunId, providerCalls, desktopTasks, workflowAuthoring, workflowTemplateTask }) {
   const before = readFileSync(fixture.callsFile, 'utf8')
   assert.deepEqual(before.trim().split('\n').map(JSON.parse), providerCalls,
     'restart must not replay the completed input')
   await verifyCompletedControl(evaluate, fixture, completedRunId)
+  const desktopTaskCold = desktopTasks ? verifyDesktopTaskColdEvidence(desktopTasks) : undefined
+  const authoringCold = workflowAuthoring ? verifyWorkflowAuthoringCold(workflowAuthoring) : undefined
+  const planningReceipt = workflowAuthoring ? await exerciseWorkflowPlanningReceipt(evaluate, fixture, workflowAuthoring) : undefined
+  const taskObservation = workflowAuthoring ? await exerciseWorkflowTaskObservation(evaluate, fixture, workflowAuthoring) : undefined
+  const templateTaskCold = workflowTemplateTask ? await verifyWorkflowTemplateTaskCold(evaluate, fixture, workflowTemplateTask) : undefined
   await evaluate(`window.scry.setCwd(${JSON.stringify(fixture.otherCwd)})`)
   const result = await evaluate(`(async () => {
     try { return { value: await window.scry.start(${JSON.stringify({ providerId: 'codex', cwd: fixture.otherCwd,
@@ -110,7 +119,9 @@ export async function exerciseOwnershipRecoveryFailure(evaluate, fixture, { comp
   assert.equal(json(fixture.orphanPath).turns[0].delivery.status, 'pending', 'failed publication must not claim unknown was persisted')
   assert.equal(json(fixture.orphanPath).revision, 1, 'failed publication must retain the original revision')
   return { freshStartRejected: true, providerCallsUnchanged: true, failedPublicationRetained: true,
-    completedTurnReloadedAfterRestart: true }
+    completedTurnReloadedAfterRestart: true, ...(desktopTaskCold ? { desktopTaskCold } : {}),
+    ...(authoringCold ? { authoringCold } : {}), ...(planningReceipt ? { planningReceipt } : {}),
+    ...(taskObservation ? { taskObservation } : {}), ...(templateTaskCold ? { templateTaskCold } : {}) }
 }
 
 export async function exerciseConversationOwnership(evaluate, fixture) {
@@ -180,7 +191,15 @@ export async function exerciseConversationOwnership(evaluate, fixture) {
   assert.equal(await evaluate('window.scry.focusedRunSnapshot()'), null, 'positive run must settle before fixture shutdown')
   await verifyCompletedControl(evaluate, fixture, started.runId)
   assert.deepEqual(evidence(), originalEvidence, 'positive controls changed another conversation source')
+  const desktopTasks = process.env.SCRY_ELECTRON_SMOKE_TASK_FENCE === '1'
+    ? await exerciseDesktopTasks(evaluate, fixture) : undefined
+  const workflowAuthoring = process.env.SCRY_ELECTRON_SMOKE_AUTHORING === '1'
+    ? await exerciseWorkflowAuthoring(evaluate, fixture) : undefined
+  const workflowTemplateTask = process.env.SCRY_ELECTRON_SMOKE_TEMPLATE === '1'
+    ? await exerciseWorkflowTemplateTask(evaluate, fixture) : undefined
   return { test: 'conversation ownership production IPC', blocked, providerCalls: calls(),
+    ...(desktopTasks ? { desktopTasks } : {}), ...(workflowAuthoring ? { workflowAuthoring } : {}),
+    ...(workflowTemplateTask ? { workflowTemplateTask } : {}),
     completedRunId: started.runId, completedArchiveAndWorkspaceWriteVerified: true,
     positiveControls: ['unowned fork', 'unowned deletion', 'unowned resume'],
     orphanRecovery: 'pending -> unknown, revision 1 -> 2', ownedEvidenceUnchanged: true }

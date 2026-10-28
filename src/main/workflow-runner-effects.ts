@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { WORKFLOW_MAX_ATTEMPTS, WORKFLOW_MAX_OUTPUT_LENGTH, type WorkflowControlFrame, type WorkflowAttemptOutcome, type WorkflowBlock, type WorkflowEvaluation, type WorkflowLiveObservation, type WorkflowPlanPreview, type WorkflowProgress, type WorkflowRoleBinding, type WorkflowValue } from '../shared/workflow'
-import { workflowFrameCopy, workflowSystemCopy } from '../shared/constants/copy'
+import { workflowControlCopy, workflowFrameCopy, workflowSystemCopy } from '../shared/constants/copy'
 import { WorkflowScopeError, type WorkflowProviderExecution, type WorkflowRunnerOptions } from './workflow-runner-contracts'
 import type { WorkflowSlots } from './workflow-slots'
 import type { WorkflowControl, WorkflowControlScope } from './workflow-control'
 import type { WorkflowStoreRecord } from './workflow-store'
+import type { WorkflowStopTarget } from '../shared/workflow-api'
 import { workflowFrameId } from './workflow-frames'
 import { decodeWorkflowOutput, workflowStructuredOutputPrompt } from './workflow-values'
 import { workflowField } from './workflow-expressions'
@@ -16,6 +17,9 @@ type EffectsOptions = Omit<WorkflowRunnerOptions, 'slots' | 'now' | 'onProgress'
   persist: (record: WorkflowStoreRecord, progress: WorkflowProgress) => Promise<void>
   publish: (progress: WorkflowProgress) => void
   finishSettledRoot: (workflowId: string) => void
+  targetStopRequested: (workflowId: string, target: WorkflowStopTarget) => boolean
+  registerTargetStop: (workflowId: string, target: WorkflowStopTarget, stop: () => boolean) => void
+  releaseTargetStop: (workflowId: string, target: WorkflowStopTarget, stop: () => boolean) => void
   track: (record: WorkflowStoreRecord, preview: WorkflowPlanPreview, role: WorkflowRoleBinding, taskId: string, attemptId: string) => {
     observe: (observation: WorkflowLiveObservation) => void
     releaseLive: () => void
@@ -38,7 +42,7 @@ export class WorkflowRunnerEffects {
   }
 
   async dispatch(preview: WorkflowPlanPreview, block: Extract<WorkflowBlock, { kind: 'call' }>, record: WorkflowStoreRecord, controller: { stopped: boolean }, activeStops: Set<() => boolean>, scope: WorkflowControlScope, control: WorkflowControl, frame?: WorkflowControlFrame): Promise<WorkflowAttemptOutcome> {
-    if (controller.stopped) return this.outcome(preview, block, 'stopped', { settled: true, error: '工作流已停止' })
+    if (controller.stopped || scope.admission?.isStopped()) return this.outcome(preview, block, 'stopped', { settled: true, error: '工作流已停止' })
     const role = preview.program.roles.find((candidate) => candidate.role === block.role)
     if (!role) throw new Error(`程序引用了未配置角色：${block.role}`)
     const taskId = scope.path.length ? `${preview.workflowId}:${workflowFrameId(block.blockId, scope.path)}:${block.blockId}` : `${preview.workflowId}:${block.blockId}`
@@ -46,7 +50,7 @@ export class WorkflowRunnerEffects {
     const queued = await this.options.slots.enqueue({
       ownerId: preview.workflowId, block, resolve: () => undefined as never, reject: () => undefined as never,
       resolveTask: async () => {
-        if (controller.stopped) {
+        if (controller.stopped || scope.admission?.isStopped()) {
           const outcome = this.outcome(preview, block, 'stopped', { attemptId, taskId, settled: true, error: '工作流已停止' })
           await this.commitOutcome(record, outcome)
           return { outcome }
@@ -62,14 +66,14 @@ export class WorkflowRunnerEffects {
           await this.commitOutcome(record, outcome)
           return { outcome }
         }
-        const replicaInput = block.replica ? await control.evaluate(block.replica, scope, block.blockId, () => controller.stopped) : undefined
+        const replicaInput = block.replica ? await control.evaluate(block.replica, scope, block.blockId, () => controller.stopped || Boolean(scope.admission?.isStopped())) : undefined
         if (block.replica && !this.options.systems) {
           const outcome = this.outcome(preview, block, 'blocked', { attemptId, taskId, settled: true, error: workflowSystemCopy.unavailable })
           await this.commitOutcome(record, outcome)
           return { outcome }
         }
-        if (!controller.stopped) {
-          try { await this.reserveDispatch(preview, block, role, taskId, attemptId, record, controller, replicaInput, frame) } catch (error) {
+        if (!controller.stopped && !scope.admission?.isStopped()) {
+          try { await this.reserveDispatch(preview, block, role, taskId, attemptId, record, controller, scope.admission, replicaInput, frame) } catch (error) {
             // No executor has been called. Persist that fact before releasing capacity;
             // persistence failure still propagates and retains the uncertain reservation.
             const outcome = this.outcome(preview, block, 'failed', { attemptId, taskId, settled: true, error: String(error) })
@@ -77,8 +81,8 @@ export class WorkflowRunnerEffects {
             return { outcome }
           }
         }
-        if (controller.stopped) {
-          const outcome = this.outcome(preview, block, 'stopped', { attemptId, taskId, settled: true })
+        if (controller.stopped || scope.admission?.isStopped() || this.options.targetStopRequested(preview.workflowId, { kind: 'attempt', id: attemptId })) {
+          const outcome = this.outcome(preview, block, 'stopped', { attemptId, taskId, settled: true, error: controller.stopped || scope.admission?.isStopped() ? undefined : workflowControlCopy.nodeStopped })
           await this.commitOutcome(record, outcome)
           return { outcome }
         }
@@ -90,8 +94,8 @@ export class WorkflowRunnerEffects {
           await this.options.persist(record, record.progress)
         }
         // An observation can race stop; it never authorizes a new dispatch.
-        if (controller.stopped) {
-          const outcome = this.outcome(preview, block, 'stopped', { attemptId, taskId, settled: true })
+        if (controller.stopped || scope.admission?.isStopped() || this.options.targetStopRequested(preview.workflowId, { kind: 'attempt', id: attemptId })) {
+          const outcome = this.outcome(preview, block, 'stopped', { attemptId, taskId, settled: true, error: controller.stopped || scope.admission?.isStopped() ? undefined : workflowControlCopy.nodeStopped })
           await this.commitOutcome(record, outcome)
           return { outcome }
         }
@@ -114,7 +118,10 @@ export class WorkflowRunnerEffects {
         // observations even when the subsequent outcome write cannot finish.
         if (execution.settled) void execution.settled.then(releaseLive, error => console.warn('[workflow] live settlement unavailable', error))
         const stop = (): boolean => execution.stop()
+        const target = { kind: 'attempt' as const, id: attemptId }
         activeStops.add(stop)
+        scope.admission?.addTarget(target)
+        this.options.registerTargetStop(preview.workflowId, target, stop)
         if (controller.stopped) stop()
         let result: Awaited<WorkflowProviderExecution['result']> | undefined
         try { result = await execution.result } catch (error) {
@@ -125,17 +132,19 @@ export class WorkflowRunnerEffects {
           })
           if (notAttempted) releaseLive()
           await this.commitOutcome(record, outcome)
-          if (notAttempted) { activeStops.delete(stop); return { outcome } }
+          if (notAttempted) { activeStops.delete(stop); scope.admission?.removeTarget(target); this.options.releaseTargetStop(preview.workflowId, target, stop); return { outcome } }
           const hold = execution.settled ?? new Promise<void>(() => {})
           return { outcome, hold: hold.then(async () => {
             outcome.settled = true
             activeStops.delete(stop)
+            scope.admission?.removeTarget(target)
+            this.options.releaseTargetStop(preview.workflowId, target, stop)
             releaseLive()
             await this.options.persist(record, record.progress)
             this.options.finishSettledRoot(preview.workflowId)
           }) }
         } finally {
-          if (result?.settled) { activeStops.delete(stop); releaseLive() }
+          if (result?.settled) { activeStops.delete(stop); scope.admission?.removeTarget(target); this.options.releaseTargetStop(preview.workflowId, target, stop); releaseLive() }
         }
         let outputError: string | undefined
         let decoded: WorkflowValue | undefined
@@ -159,6 +168,8 @@ export class WorkflowRunnerEffects {
         return { outcome, hold: hold.then(async () => {
           outcome.settled = true
           activeStops.delete(stop)
+          scope.admission?.removeTarget(target)
+          this.options.releaseTargetStop(preview.workflowId, target, stop)
           releaseLive()
           await this.observeAfter(record, attemptId)
           await this.options.persist(record, record.progress)
@@ -205,13 +216,13 @@ export class WorkflowRunnerEffects {
   }
 
   private async reserveDispatch(preview: WorkflowPlanPreview, block: Extract<WorkflowBlock, { kind: 'call' }>, role: WorkflowRoleBinding,
-    taskId: string, attemptId: string, record: WorkflowStoreRecord, controller: { stopped: boolean }, replicaInput?: WorkflowEvaluation, frame?: WorkflowControlFrame): Promise<void> {
+    taskId: string, attemptId: string, record: WorkflowStoreRecord, controller: { stopped: boolean }, admission: WorkflowControlScope['admission'], replicaInput?: WorkflowEvaluation, frame?: WorkflowControlFrame): Promise<void> {
     await this.reserve(async () => {
-      if (controller.stopped) return
+      if (controller.stopped || admission?.isStopped()) return
       if (record.progress.dispatchAttempts >= WORKFLOW_MAX_ATTEMPTS) throw new Error(`已达到根执行 ${WORKFLOW_MAX_ATTEMPTS} 次 Agent 派发上限`)
       const retry = workflowRetryAdmission(record, taskId)
       record.progress.dispatchAttempts += 1
-      record.intents.push({ workflowId: preview.workflowId, programRevision: preview.programRevision, taskId, attemptId, ...retry, ...(frame?.callInputRef ? { callFrameId: frame.frameId } : {}),
+      record.intents.push({ workflowId: preview.workflowId, programRevision: preview.programRevision, taskId, attemptId, ...retry, ...(frame ? { frameId: frame.frameId, ...(frame.callInputRef ? { callFrameId: frame.frameId } : {}) } : {}),
         ...(replicaInput?.state === 'known' && replicaInput.replica ? { replica: replicaInput.replica } : {}),
         role: role.role, providerId: role.providerId, ...(role.requestedModel ? { requestedModel: role.requestedModel.id } : {}), createdAt: this.options.now() })
       record.progress.attempts.push(this.outcome(preview, block, 'intent_persisted', { taskId, attemptId, settled: false }))

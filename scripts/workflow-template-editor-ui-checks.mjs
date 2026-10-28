@@ -4,6 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { nativeUiPointer } from './native-ui-pointer.mjs'
 import { exerciseWorkflowRevisionEditor } from './workflow-revision-ui-checks.mjs'
+import { exerciseCheckFixDraft } from './workflow-check-fix-ui-checks.mjs'
 
 const json = JSON.stringify
 const hash = text => createHash('sha256').update(text).digest('hex')
@@ -80,6 +81,7 @@ export async function exerciseWorkflowTemplateEditor(cdp, evaluate, fixture, scr
   }
   await button('工作流模板', '.workflow-entry-actions')
   await wait(() => evaluate(`Boolean(document.querySelector('.workflow-workbench')?.contains(document.activeElement))`), 'editor focus containment')
+  const checkFixDraft = await exerciseCheckFixDraft({ evaluate, click, button, replace, source, wait, capture, fixture })
   await chooseScope('builtin')
   await click('.workflow-template-catalog li button')
   await wait(() => evaluate(`document.querySelector('.workflow-template-source')?.readOnly === true`), 'builtin source readonly')
@@ -172,5 +174,5 @@ export async function exerciseWorkflowTemplateEditor(cdp, evaluate, fixture, scr
   await button('关闭')
   const revisionEditor = await exerciseWorkflowRevisionEditor(cdp, evaluate, fixture, { click, replace, key, capture, wait })
   assert.equal(await readFile(fixture.inputsFile, 'utf8'), callsBefore)
-  return { revisionEditor, test: 'production template editor native input', fixedBuiltinReadOnly: true, saveAsNewIdentity: true, invalidDraftRetained: true, invalidDraftReopened: true, responsiveDesktopViewport: true, fullSourceReview: true, sourceAndStructureSameCandidate: true, exactPublishedBytes: true, explicitApprovalAfterPreparation: true, deletionAndReviewedRestore: true, providerInvocations: 0, templateId: edited.templateId, revisionHash: hash(finalSource) }
+  return { checkFixDraft, revisionEditor, test: 'production template editor native input', fixedBuiltinReadOnly: true, saveAsNewIdentity: true, invalidDraftRetained: true, invalidDraftReopened: true, responsiveDesktopViewport: true, fullSourceReview: true, sourceAndStructureSameCandidate: true, exactPublishedBytes: true, explicitApprovalAfterPreparation: true, deletionAndReviewedRestore: true, providerInvocations: 0, templateId: edited.templateId, revisionHash: hash(finalSource) }
 }

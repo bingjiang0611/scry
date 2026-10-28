@@ -1,7 +1,4 @@
-import { homedir, tmpdir } from 'node:os'
-import { execFile } from 'node:child_process'
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { homedir } from 'node:os'
 import {
   forkSession,
   getSessionMessages,
@@ -13,11 +10,10 @@ import {
 } from '@anthropic-ai/claude-agent-sdk'
 import { getClaudeVersion, runAgent } from '../agent-runner'
 import { extractUserText } from '../normalize'
-import { resolveClaudeBin, runtimeCliEnv } from '../claude-locate'
+import { resolveClaudeBin } from '../claude-locate'
 import { claudeContinuationKey } from './continuation-identity'
 import { completedTranscriptTurnBoundary } from './session-fork-boundary'
 import {
-  authorizedMcpRuntimeEnv,
   authorizedMcpServers,
   isRemoteMcpConfig,
   listMcp,
@@ -28,18 +24,22 @@ import {
   capabilityReady,
   capabilityUnknown,
   capabilityUnavailable,
-  type McpAuthResult,
   type McpMeta,
   type McpSnapshot,
   type ProviderContext
 } from '../../shared/provider'
 import type { AgentRunControlCatalog } from '../../shared/runtime'
 import type { McpLiveStatus } from '../../shared/trace'
-import type { AuthorizedMcpExecution, ProviderAdapter, ProviderRunRequest } from './types'
+import type { AuthorizedMcpExecution, ProviderAdapter } from './types'
 import { HistoricalInput } from './historical-input'
 import { HISTORY_READER_SERVER, historyReaderEnvironment } from '../conversation-history-reader'
+import { workflowAuthoringSchema } from '../workflow-authoring'
 import { effortOption, permissionOptions } from './run-controls'
 import { sanitizeMcpAuthError } from './mcp-auth-security'
+import { runClaudeMcpLogin, type ClaudeMcpLogin } from './claude-mcp-auth'
+import { claudeRuntimeEnv, claudeRuntimeEnvForExecution, heldPrompt, settingSourcesFromEnv } from './claude-runtime'
+
+export { claudeMcpLoginArgs, runClaudeMcpLogin } from './claude-mcp-auth'
 
 interface CachedControls {
   data: AgentRunControlCatalog
@@ -48,129 +48,7 @@ interface CachedControls {
 }
 
 const CONTROL_TTL_MS = 30_000
-const MCP_LOGIN_TIMEOUT_MS = 180_000
 const MCP_STATUS_TIMEOUT_MS = 15_000
-
-type ClaudeMcpLogin = (
-  executable: string,
-  serverName: string,
-  config: Record<string, unknown>,
-  cwd: string,
-  env: NodeJS.ProcessEnv
-) => Promise<McpAuthResult>
-
-export function claudeMcpLoginArgs(serverName: string, configPath: string): string[] {
-  if (!serverName || /[\u0000-\u001f\u007f]/.test(serverName)) {
-    throw new Error('Claude MCP 名称包含无效字符')
-  }
-  return ['--mcp-config', configPath, '--strict-mcp-config', 'mcp', 'login', '--', serverName]
-}
-
-function executeClaudeMcpLogin(
-  executable: string,
-  args: string[],
-  cwd: string,
-  env: NodeJS.ProcessEnv
-): Promise<McpAuthResult> {
-  return new Promise((resolve) => {
-    execFile(
-      executable,
-      args,
-      { cwd, env, shell: false, timeout: MCP_LOGIN_TIMEOUT_MS, maxBuffer: 64 * 1024 },
-      (error) => resolve(error
-        ? { ok: false, status: 'failed', error: error.killed ? '等待 Claude MCP 浏览器认证超时' : sanitizeMcpAuthError(error) }
-        : { ok: true, status: 'authenticated' })
-    )
-  })
-}
-
-export const runClaudeMcpLogin: ClaudeMcpLogin = async (executable, serverName, config, cwd, env) => {
-  let authDirectory: string | undefined
-  let result: McpAuthResult
-  let cleanupError: unknown
-  try {
-    // Validate before writing a credential-bearing config to disk.
-    claudeMcpLoginArgs(serverName, '')
-    authDirectory = await mkdtemp(join(tmpdir(), 'scry-claude-mcp-auth-'))
-    await chmod(authDirectory, 0o700)
-    const configPath = join(authDirectory, 'mcp.json')
-    await writeFile(
-      configPath,
-      JSON.stringify({ mcpServers: { [serverName]: config } }),
-      { encoding: 'utf8', mode: 0o600, flag: 'wx' }
-    )
-    result = await executeClaudeMcpLogin(
-      executable,
-      claudeMcpLoginArgs(serverName, configPath),
-      cwd,
-      env
-    )
-  } catch (error) {
-    result = { ok: false, status: 'failed', error: sanitizeMcpAuthError(error) }
-  } finally {
-    if (authDirectory) {
-      try {
-        await rm(authDirectory, { recursive: true, force: true })
-      } catch (error) {
-        cleanupError = error
-      }
-    }
-  }
-  if (cleanupError) {
-    return { ok: false, status: 'failed', error: `Claude MCP 临时认证配置清理失败：${sanitizeMcpAuthError(cleanupError)}` }
-  }
-  return result
-}
-
-function claudeRuntimeEnv(
-  managedRecorder = false,
-  managedIdentity?: ProviderRunRequest['managedRecorderIdentity']
-): Record<string, string> {
-  return {
-    ...(managedRecorder
-      ? runtimeCliEnv(undefined, { managedRecorder: true, providerId: 'claude' })
-      : runtimeCliEnv(undefined, { providerId: 'claude' })),
-    ...(managedRecorder && managedIdentity ? {
-      SCRY_MANAGED_RUN_ID: managedIdentity.runId,
-      SCRY_MANAGED_PROMPT_HASH: managedIdentity.promptHash
-    } : {}),
-    CLAUDE_CODE_MCP_ALLOWLIST_ENV: '1'
-  }
-}
-
-function claudeRuntimeEnvForExecution(
-  execution: Parameters<ProviderAdapter['run']>[0]['mcpExecution'],
-  managedRecorder = false,
-  managedIdentity?: ProviderRunRequest['managedRecorderIdentity']
-): Record<string, string> {
-  const env = claudeRuntimeEnv(managedRecorder, managedIdentity)
-  const remoteEnabled = execution?.targets.some((target) => target.enabled && isRemoteMcpConfig(target.config))
-  return execution && remoteEnabled ? authorizedMcpRuntimeEnv(env, execution.env) : env
-}
-
-function heldPrompt(): { stream: AsyncIterable<never>; release: () => void } {
-  let release = (): void => {}
-  const wait = new Promise<void>((resolve) => {
-    release = resolve
-  })
-  return {
-    stream: (async function* (): AsyncIterable<never> {
-      await wait
-    })(),
-    release
-  }
-}
-
-function settingSourcesFromEnv(): Array<'user' | 'project' | 'local'> | undefined {
-  const configured = process.env.SCRY_CLAUDE_SETTING_SOURCES?.trim()
-  if (!configured) return undefined
-  const allowed = new Set(['user', 'project', 'local'])
-  const sources = configured
-    .split(',')
-    .map((source) => source.trim())
-    .filter((source): source is 'user' | 'project' | 'local' => allowed.has(source))
-  return sources.length ? [...new Set(sources)] : undefined
-}
 
 function authenticationTargets(configured: McpMeta[]): string[] {
   const nameCounts = new Map<string, number>()
@@ -305,6 +183,7 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
     id: 'claude',
     runtimeProvider: 'claude_sdk',
     workflowExecution: { independentRun: true, terminalOutput: true, scopedStop: true, scopeSettlement: true },
+    workflowAuthoring: { source: 'claude_sdk_success_result' },
     historicalContext: true,
     historyReader: true,
     continuationKey: (context) => {
@@ -431,7 +310,8 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
         {
           resume: request.resume,
           cwd: request.mcpExecution?.cwd ?? request.cwd,
-          skills: computeEnabledSkills(request.cwd, env.HOME ?? homeDir),
+          ...(request.purpose ? { authoringSchema: request.authoringSchema ?? workflowAuthoringSchema } : {}),
+          skills: request.purpose ? [] : computeEnabledSkills(request.cwd, env.HOME ?? homeDir),
           claudePath,
           env: request.historyReader ? historyReaderEnvironment(env) : env,
           settingSources,
@@ -461,6 +341,7 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
             providerTurnId: result.providerTurnId,
             stopped: result.stopped,
             status: result.status,
+            ...(result.structuredOutput ? { structuredOutput: result.structuredOutput } : {}),
             mcp: result.mcpStatus ? { configured: listMcp(request.cwd, homeDir), runtime: result.mcpStatus } : undefined
           }
         }),

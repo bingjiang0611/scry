@@ -2,7 +2,7 @@ import { mkdtemp, writeFile, readFile, rm, chmod, mkdir, symlink } from 'node:fs
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { executeWorkflowCheck, freezeWorkflowCheck, validateWorkflowCheck, workflowCheckDiagnostics, type WorkflowCheckExecution } from './workflow-check'
+import { executeWorkflowCheck, freezeWorkflowCheck, validateWorkflowCheck, validateWorkflowFrozenCheck, workflowCheckDiagnostics, type WorkflowCheckExecution } from './workflow-check'
 
 const roots: string[] = [], executions: WorkflowCheckExecution[] = []
 afterEach(async () => {
@@ -103,5 +103,68 @@ describe('main-owned frozen argv check execution (local processes only)', () => 
     expect(workflowCheckDiagnostics('typescript', 'src/a.ts(2,3): error TS2322: bad value\n', '', false)).toEqual({ state: 'available', source: 'derived', items: [{ file: 'src/a.ts', line: 2, column: 3, code: 'TS2322', message: 'bad value' }] })
     expect(workflowCheckDiagnostics('typescript', 'npm says passed', '', false).state).toBe('unavailable')
     expect(workflowCheckDiagnostics('typescript', '', '', true).state).toBe('unavailable')
+  })
+  it('runs explicit native Node test files and keeps runner counts as incomplete scope evidence', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-node-test-'))
+    roots.push(root)
+    const files = ['pass.test.cjs', 'skip.test.cjs', 'todo.test.cjs', 'fail.test.cjs']
+    await Promise.all(files.map((name, index) => writeFile(join(root, name), index === 0 ? "const { test } = require('node:test'); test('pass', () => {})\n" : index === 1 ? "const { test } = require('node:test'); test('skip', { skip: true }, () => {})\n" : index === 2 ? "const { test } = require('node:test'); test('todo', { todo: true }, () => {})\n" : "const { test } = require('node:test'); test('fail', () => { throw new Error('fail') })\n")))
+    // Approved for this new four-file fixture only; the outer 5 s deadline stays unchanged.
+    const env = { PATH: '/usr/bin:/bin', HOME: root }, frozen = await freezeWorkflowCheck({ parser: 'node_test', argv: [process.execPath, '--test', '--test-reporter=tap', ...files], cwd: '.', timeoutMs: 4000 }, root, env)
+    expect(frozen.testFiles).toHaveLength(4)
+    const execution = executeWorkflowCheck(frozen, env)
+    executions.push(execution)
+    expect(await execution.result).toMatchObject({ state: 'failed', settled: true, tests: { state: 'available', source: 'node_test_tap', counts: { total: 4, suites: 0, passed: 1, failed: 1, skipped: 1, todo: 1, cancelled: 0 } } })
+  })
+  it('rejects Node test flags and changed frozen test files before execution', async () => {
+    const f = await fixture('')
+    await expect(freezeWorkflowCheck({ parser: 'node_test', argv: [process.execPath, '--test', '--test-reporter=tap', '--test-name-pattern=x'], cwd: '.', timeoutMs: 2000 }, f.root, f.env)).rejects.toThrow()
+    const testFile = join(f.root, 'one.test.cjs')
+    await writeFile(testFile, "require('node:test').test('one', () => {})\n")
+    const frozen = await freezeWorkflowCheck({ parser: 'node_test', argv: [process.execPath, '--test', '--test-reporter=tap', 'one.test.cjs'], cwd: '.', timeoutMs: 2000 }, f.root, f.env)
+    await writeFile(testFile, "require('node:test').test('changed', () => {})\n")
+    expect(await executeWorkflowCheck(frozen, f.env).result).toMatchObject({ state: 'rejected', settled: true })
+  })
+  it.each(['skip', 'todo'])('does not certify a zero-exit Node report containing %s', async kind => {
+    const f = await fixture('')
+    await writeFile(join(f.root, 'partial.test.cjs'), `require('node:test').test('partial', { ${kind}: true }, () => {})\n`)
+    const frozen = await freezeWorkflowCheck({ parser: 'node_test', argv: [process.execPath, '--test', '--test-reporter=tap', 'partial.test.cjs'], cwd: '.', timeoutMs: 2000 }, f.root, f.env)
+    const execution = executeWorkflowCheck(frozen, f.env)
+    executions.push(execution)
+    expect(await execution.result).toMatchObject({ state: 'incomplete', exitCode: 0, settled: true, tests: { state: 'available', counts: { total: 1, [kind === 'skip' ? 'skipped' : 'todo']: 1 } } })
+  })
+  it.each(['', 'process.exit(0)'])('does not mistake a passed file unit for discovered or executed test bodies %#', async source => {
+    const f = await fixture('')
+    await writeFile(join(f.root, 'empty.test.cjs'), source)
+    const frozen = await freezeWorkflowCheck({ parser: 'node_test', argv: [process.execPath, '--test', '--test-reporter=tap', 'empty.test.cjs'], cwd: '.', timeoutMs: 2000 }, f.root, f.env)
+    const execution = executeWorkflowCheck(frozen, f.env)
+    executions.push(execution)
+    expect(await execution.result).toMatchObject({ state: 'passed', exitCode: 0, tests: { state: 'available', counts: { total: 1, passed: 1 }, discovery: { state: 'unavailable' }, execution: { state: 'unavailable' }, coverage: { state: 'unavailable' } } })
+  })
+  it('does not pass a truncated zero-exit Node report', async () => {
+    const f = await fixture('')
+    await writeFile(join(f.root, 'large.test.cjs'), "require('node:test').test('output', () => process.stdout.write('x'.repeat(2 * 1024 * 1024)))\n")
+    const frozen = await freezeWorkflowCheck({ parser: 'node_test', argv: [process.execPath, '--test', '--test-reporter=tap', 'large.test.cjs'], cwd: '.', timeoutMs: 2000 }, f.root, f.env)
+    const execution = executeWorkflowCheck(frozen, f.env)
+    executions.push(execution)
+    expect(await execution.result).toMatchObject({ state: 'failed', exitCode: 0, truncated: true, settled: true, tests: { state: 'unavailable' } })
+  })
+  it('freezes only explicit unique canonical test files, never flags, directories, globs or escaping aliases', async () => {
+    const f = await fixture(''), outside = await mkdtemp(join(tmpdir(), 'scry-node-test-outside-'))
+    roots.push(outside)
+    await writeFile(join(f.root, 'one.test.cjs'), "require('node:test').test('one', () => {})\n")
+    await writeFile(join(outside, 'escape.test.cjs'), '')
+    await symlink(join(outside, 'escape.test.cjs'), join(f.root, 'escape.test.cjs'))
+    await writeFile(join(f.root, '{a,b}.test.cjs'), '')
+    await symlink(join(f.root, '{a,b}.test.cjs'), join(f.root, 'literal-alias.test.cjs'))
+    const request = { parser: 'node_test', argv: [process.execPath, '--test', '--test-reporter=tap', 'one.test.cjs'], cwd: '.', timeoutMs: 2000 }
+    for (const files of [['--require=x'], ['*.test.cjs'], ['{a,b}.test.cjs'], ['.'], ['escape.test.cjs'], ['literal-alias.test.cjs'], ['one.test.cjs', './one.test.cjs']]) {
+      await expect(freezeWorkflowCheck({ ...request, argv: [...request.argv.slice(0, 3), ...files] }, f.root, f.env)).rejects.toThrow()
+    }
+    const frozen = await freezeWorkflowCheck(request, f.root, f.env)
+    expect(validateWorkflowFrozenCheck(frozen)).toEqual(frozen)
+    expect(() => validateWorkflowFrozenCheck({ ...frozen, testFiles: [] })).toThrow()
+    expect(() => validateWorkflowFrozenCheck({ ...frozen, entrypoint: frozen.testFiles![0] })).toThrow()
+    expect(() => validateWorkflowFrozenCheck({ ...f.frozen, testFiles: frozen.testFiles })).toThrow()
   })
 })

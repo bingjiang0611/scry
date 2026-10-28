@@ -1,15 +1,22 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps } from 'react'
-import type { ActiveRun } from '@shared/trace'
-import type { ConversationForkRequest, ConversationMetadataChange, ConversationPage, ConversationSendRequest, ConversationSummary } from '@shared/conversation-api'
-import { attachmentsAfterSuccessfulSubmit, composerDraftKey, inputAttachments, type ComposerDraftStore } from '../composer-drafts'
-import { CONVERSATION_COPY, WORKFLOW_COPY } from '../constants/copy'
-import { parseWorkflowRunCommand, type WorkflowRoleBinding } from '@shared/workflow'
-import { providerIdForAgentId } from '@shared/runtime'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps } from 'react'
+import { useConversationReadback } from '../hooks/useConversationReadback'
+import { useConversationSubmission } from '../hooks/useConversationSubmission'
+import { ConversationCommandPicker } from './ConversationCommandPicker'
+import { ConversationWorkflowTasks } from './ConversationWorkflowTasks'
+import { useConversationWorkflowLaunch } from '../hooks/useConversationWorkflowLaunch'
+import { CONVERSATION_COMMAND_COPY as commandCopy } from '../constants/conversation-command-copy'
+import { SCRY_WORKFLOW_COMMAND_ID } from '@shared/task-command'
+import type { ConversationForkRequest, ConversationMetadataChange, ConversationSummary } from '@shared/conversation-api'
+import { composerDraftKey, type ComposerDraftStore } from '../composer-drafts'
+import { CONVERSATION_COPY } from '../constants/copy'
+import type { WorkflowRoleBinding } from '@shared/workflow'
 import { chatBottomStickinessAfterScroll, observeChatBottomLayout, scrollChatToBottomIfNeeded } from '../chat-scroll'
-import { conversationTarget, prepareConversationSend } from '../conversation-handoff'
+import { conversationTarget } from '../conversation-handoff'
 import type { Turn } from '../format'
 import { SessionChatView } from './ChatView'
 import { ConversationDeleteDialog } from './ConversationDeleteDialog'
+import { WorkflowModeChoice } from './WorkflowModeChoice'
+import { WorkflowMessageChoice } from './WorkflowMessageChoice'
 import { SessionRenameDialog } from './SessionRename'
 import '../conversation.css'
 
@@ -17,7 +24,7 @@ const message = (error: unknown): string => error instanceof Error ? error.messa
 export interface ConversationProjection { conversationId: string; turns: Turn[]; busy: boolean }
 
 /** Same chat/composer, separate durable ownership from each native session. */
-export function ConversationView({ conversation, draftStore, chatProps, initialAgentId, onChanged, onProjection, onOpenConversation, onWorkflow }: {
+export function ConversationView({ conversation, draftStore, chatProps, initialAgentId, onChanged, onProjection, onOpenConversation }: {
   conversation: ConversationSummary
   draftStore: ComposerDraftStore
   chatProps: ComponentProps<typeof SessionChatView>
@@ -30,86 +37,35 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
   const draftKey = composerDraftKey({ providerId: 'conversation', cwd: conversation.cwd, sessionId: conversation.id })
   const drafts = useSyncExternalStore(draftStore.subscribe, draftStore.getSnapshot)
   const input = drafts.get(draftKey)?.input ?? ''
-  const [page, setPage] = useState<ConversationPage>()
-  const [before, setBefore] = useState<number>()
-  const [reload, setReload] = useState(0)
   const [latestRequest, setLatestRequest] = useState(0)
-  const [live, setLive] = useState<ActiveRun>()
-  const [attempt, setAttempt] = useState<{ request: ConversationSendRequest; attachments: Array<{ id: string; previewUrl: string }> }>()
   const [forkAttempt, setForkAttempt] = useState<ConversationForkRequest>()
-  const [attemptReadback, setAttemptReadback] = useState(false)
-  const [error, setError] = useState<string>()
-  const [notice, setNotice] = useState<string>()
-  const [working, setWorking] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [managing, setManaging] = useState(false)
   const managementPending = useRef(false)
   const followLatest = useRef(true)
   const openingLatest = useRef(true)
-  const busyRef = useRef(false)
   const refreshButton = useRef<HTMLButtonElement>(null)
-  const initialized = useRef(false)
-  const refreshGeneration = useRef(0)
-  const lastRevision = useRef<number>()
-  const mounted = useRef(true)
-  const changedRef = useRef(onChanged)
-  changedRef.current = onChanged
-  const selectAgentRef = useRef(chatProps.onSelectAgent)
-  selectAgentRef.current = chatProps.onSelectAgent
   const historyRef = chatProps.scrollRef
-
-  const refresh = useCallback(async (): Promise<ConversationPage | undefined> => {
-    const generation = ++refreshGeneration.current
-    const next = await window.scry.conversations.read(conversation.id, before)
-    const run = next.summary.activeRunId
-      ? (await window.scry.activeRuns()).find(candidate => candidate.runId === next.summary.activeRunId)
-      : undefined
-    if (!mounted.current || generation !== refreshGeneration.current) return
-    setPage(next)
-    setLive(run)
-    if (lastRevision.current !== next.summary.revision) {
-      lastRevision.current = next.summary.revision
-      changedRef.current()
-    }
-    if (!initialized.current) {
-      initialized.current = true
-      const binding = next.bindings.find(binding => binding.id === next.turns.at(-1)?.bindingId)
-      const agentId = initialAgentId ?? (binding && (binding.agentProfileId ?? binding.providerId))
-      if (agentId) selectAgentRef.current(agentId)
-    }
-    return next
-  }, [conversation.id, before, initialAgentId])
-
+  const getTarget = () => conversationTarget(chatProps.selectedAgentId, chatProps.runControls)
+  const workflowLaunch = useConversationWorkflowLaunch({
+    conversationId: conversation.id, cwd: conversation.cwd, agents: chatProps.agents, getTarget,
+    onStarted: () => { notifyChanged(); void refresh().catch(error => setError(message(error))) },
+    onError: error => setError(error), focusComposer: () => chatProps.textareaRef.current?.focus()
+  })
+  const { attempt, setAttempt, attemptReadback, error, setError, notice, setNotice, working, setWorking, busyRef,
+    selectedCommandId, setSelectedCommandId, workflowOverride, setWorkflowOverride, sourceRequest, send } = useConversationSubmission({
+    conversationId: conversation.id, draftStore, draftKey,
+    readiness: () => ({ revision: page?.summary.revision, blocked: Boolean(forkAttempt || blockedReason ||
+      (selectedCommandId !== SCRY_WORKFLOW_COMMAND_ID && chatProps.sendBlockedReason)) }),
+    getTarget, isMounted: () => mounted.current, refresh: () => refresh(), onChanged: () => notifyChanged(), showLatest: () => showLatest(),
+    onControl: workflowLaunch.onControl
+  })
+  const { page, setPage, before, setBefore, live, mounted, refresh, setReload, notifyChanged } = useConversationReadback({
+    conversationId: conversation.id, initialAgentId, onChanged,
+    onSelectAgent: chatProps.onSelectAgent, onError: setError
+  })
   const activeRunId = page?.summary.activeRunId
-  useEffect(() => {
-    mounted.current = true
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let disposed = false
-    const update = async (): Promise<void> => {
-      try {
-        if (activeRunId) {
-          const active = (await window.scry.activeRuns()).find(run => run.runId === activeRunId)
-          if (disposed) return
-          setLive(active)
-          if (!active) await refresh()
-        } else await refresh()
-      } catch (error) { if (!disposed) setError(message(error)); return }
-      if (!disposed && activeRunId && !document.hidden) timer = setTimeout(() => { void update() }, 1000)
-    }
-    const resume = (): void => { if (!document.hidden) { clearTimeout(timer); void update() } }
-    void update()
-    const off = window.scry.onDataUpdated?.(event => {
-      if (event?.kind === 'conversation_changed' && event.conversationId === conversation.id) {
-        void refresh().catch(error => { if (!disposed) setError(message(error)) })
-      }
-    })
-    document.addEventListener('visibilitychange', resume)
-    return () => {
-      disposed = true; mounted.current = false; ++refreshGeneration.current
-      clearTimeout(timer); off?.(); document.removeEventListener('visibilitychange', resume)
-    }
-  }, [refresh, activeRunId, reload, conversation.id])
 
   useEffect(() => {
     const history = historyRef.current
@@ -153,70 +109,12 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
     setManaging(true)
     try {
       await window.scry.conversations.update(conversation.id, page.summary.revision, change)
-      changedRef.current()
+      notifyChanged()
       await refresh()
     } finally { managementPending.current = false; setManaging(false) }
   }
   const blockedReason = !page ? '正在读取对话…' : page.summary.blockedReason ??
     (page.summary.archivedAt ? '对话已存档；恢复后可继续发送' : null)
-  const send = async (original?: typeof attempt): Promise<void> => {
-    const draft = draftStore.getSnapshot().get(draftKey)
-    const prompt = draft?.input ?? ''
-    const attachments = draft?.attachments ?? []
-    if (!original && parseWorkflowRunCommand(prompt)) {
-      try {
-        if (chatProps.slashCmds.some(command => command.name.replace(/^\//, '') === 'scry-workflow')) throw new Error(WORKFLOW_COPY.commandConflict)
-        if (attachments.length) throw new Error(WORKFLOW_COPY.attachmentsUnsupported)
-        const providerId = providerIdForAgentId(chatProps.selectedAgentId)
-        if (!onWorkflow || !providerId) throw new Error(WORKFLOW_COPY.unavailable)
-        onWorkflow(prompt, conversation.cwd, { role: 'orchestrator', providerId,
-          ...(providerId === 'pi' ? { agentProfileId: chatProps.selectedAgentId } : {}),
-          requestedModel: chatProps.runControls?.model, permissionMode: chatProps.runControls?.permissionMode })
-      } catch (error) { setError(message(error)) }
-      return
-    }
-    const submitted = original?.attachments ?? attachments.map(({ id, previewUrl }) => ({ id, previewUrl }))
-    if (busyRef.current || forkAttempt || (!original && (blockedReason || attempt || (!prompt.trim() && !attachments.length) || chatProps.sendBlockedReason))) return
-    busyRef.current = true
-    setWorking(true)
-    setError(undefined)
-    let request = original?.request
-    try {
-      request ??= await prepareConversationSend(window.scry.conversations, conversation.id,
-        conversationTarget(chatProps.selectedAgentId, chatProps.runControls), prompt, crypto.randomUUID(), inputAttachments(attachments))
-      if (!mounted.current) return
-      setAttempt({ request, attachments: submitted })
-      setAttemptReadback(false)
-      const result = await window.scry.conversations.send(request)
-      const sentPrompt = request.prompt
-      const submittedIds = new Set(submitted.map(attachment => attachment.id))
-      draftStore.update(current => {
-        const draft = current.get(draftKey)
-        if (!draft) return current
-        const remaining = { input: draft.input === sentPrompt ? '' : draft.input,
-          attachments: attachmentsAfterSuccessfulSubmit(draft.attachments, submittedIds) }
-        const next = new Map(current)
-        if (remaining.input || remaining.attachments.length) next.set(draftKey, remaining)
-        else next.delete(draftKey)
-        return next
-      })
-      for (const attachment of submitted) if (attachment.previewUrl.startsWith('blob:')) URL.revokeObjectURL(attachment.previewUrl)
-      if (!mounted.current) return
-      setAttempt(undefined)
-      showLatest()
-      setNotice(result.disposition === 'duplicate' ? '已找到原发送记录，没有再次发送。' : undefined)
-      changedRef.current()
-      await refresh().catch(error => { if (mounted.current) setError(`请求已登记，但读取状态失败：${message(error)}`) })
-    } catch (error) {
-      if (mounted.current) {
-        setError(message(error))
-        if (request) {
-          setNotice('发送结果尚未确认。草稿已保留，不会自动重发。')
-          try { setAttemptReadback(Boolean(await refresh())) } catch (readError) { setError(`${message(error)}；读取状态失败：${message(readError)}`) }
-        }
-      }
-    } finally { busyRef.current = false; if (mounted.current) setWorking(false) }
-  }
   const forkableRunIds = useMemo(() => new Set((page?.turns ?? []).filter(turn =>
     turn.delivery.status === 'accepted' && page?.bindings.some(binding => binding.id === turn.bindingId && binding.nativeSessionId && !binding.retiredReason))
     .map(turn => turn.runId)), [page])
@@ -240,7 +138,7 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
     setError(undefined)
     try {
       const result = await window.scry.conversations.fork(request)
-      changedRef.current()
+      notifyChanged()
       if (!mounted.current) return
       setForkAttempt(undefined)
       onOpenConversation(result)
@@ -255,7 +153,14 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
 
   return <main className="unified-conversation conversation-chat" aria-label="对话" data-conversation-id={conversation.id}>
     <div className="conversation-toolbar">
+      <ConversationWorkflowTasks conversationId={conversation.id} onConfigure={workflowLaunch.openCapturedTask} onPreview={workflowLaunch.onPreview} />
       <strong className="conversation-title" title={conversation.cwd}>{page?.summary.title ?? conversation.title}</strong>
+      <ConversationCommandPicker conversationId={conversation.id}
+        scopeKey={JSON.stringify([chatProps.selectedAgentId, chatProps.runControls])} input={input}
+        disabled={working || Boolean(attempt || forkAttempt)} sourceRequest={sourceRequest} getTarget={getTarget}
+        onSelect={setSelectedCommandId} onInput={setInput} onFocusComposer={() => chatProps.textareaRef.current?.focus()} />
+      <WorkflowMessageChoice value={workflowOverride} onChange={setWorkflowOverride}
+        disabled={!page || working || Boolean(attempt || forkAttempt || blockedReason || activeRunId || selectedCommandId)} />
       <button ref={refreshButton} className="btn" onClick={() => { setError(undefined); setReload(value => value + 1) }}>刷新状态</button>
       <details className="conversation-options"><summary>对话选项</summary><div className="unified-management">
         <button className="btn" aria-label="重命名统一对话" disabled={!page || managing || working || Boolean(page?.summary.deletion)} onClick={() => setRenaming(true)}>重命名</button>
@@ -265,6 +170,8 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
         <p>{limitation}</p>
         <p>从轮次创建原生分支不发送消息，也不回退文件。共享历史仅供查看；再次从这些轮次分支，请回到源对话。</p>
         {inherited && <p>旧原生会话未记录可验证的接续身份。迁入保留已捕获的文字，不证明恢复了旧原生上下文。</p>}
+        <WorkflowModeChoice summary={page?.summary} disabled={!page || managing || Boolean(page?.summary.deletion)}
+          onChange={updateMetadata} />
       </div></details>
     </div>
     {(page?.nextBeforeOrdinal !== undefined || before !== undefined) && <nav className="unified-pagination" aria-label="历史分页">
@@ -293,7 +200,7 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
       agentLocked={!page || working || Boolean(attempt || forkAttempt || blockedReason || activeRunId)} hasSelectedSession
       onInput={setInput} onSend={() => { void send() }} submitting={working} sessionLoading={!page} sessionCacheVisible={false} sessionEvidenceGap={null}
       busy={Boolean(activeRunId)} queueWhileBusy={false}
-      sendBlockedReason={blockedReason ?? (forkAttempt ? '请先核对原分支请求' : attempt ? '请先核对原发送状态' : chatProps.sendBlockedReason)} composerError={error ?? null}
+      sendBlockedReason={blockedReason ?? (forkAttempt ? '请先核对原分支请求' : attempt ? '请先核对原发送状态' : selectedCommandId === SCRY_WORKFLOW_COMMAND_ID ? undefined : chatProps.sendBlockedReason)} composerError={error ?? null}
       composerNotice={blockedReason && !activeRunId ? { text: blockedReason, tone: 'blocked' } : notice ? { text: notice, tone: 'blocked' } : firstHandoff ? { text: '旧 Agent 的接续身份无法验证。文字历史已保留，将在新上下文继续。', tone: 'blocked' } : null}
       draftAttachments={drafts.get(draftKey)?.attachments ?? []} queuedPrompts={[]} steerCapability={null} onSteerQueuedPrompt={undefined}
       slashOpen={false} slashCmds={[]} slashLoading={false} historyWindow={null} onLoadOlderTurns={undefined}
@@ -308,10 +215,11 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
     {forkAttempt && <div className="conversation-recovery" role="status"><button className="btn" disabled={working} onClick={() => { void fork(undefined, forkAttempt) }}>核对 / 继续原分支</button></div>}
     {attempt && <div className="conversation-recovery" role="status">
       <button className="btn" disabled={working} onClick={() => { void send(attempt) }}>核对 / 继续原发送</button>
-      {attemptReadback && !page?.summary.blockedReason && <button className="btn" disabled={working} onClick={() => { setAttempt(undefined); setError(undefined); setNotice('已解除界面锁定。再次发送是新请求，可能重复执行；请先核对聊天记录。') }}>保留草稿，解除锁定</button>}
+      {attemptReadback && !page?.summary.blockedReason && <button className="btn" disabled={working} onClick={() => { setAttempt(undefined); setError(undefined); setNotice(commandCopy.clearLock) }}>保留草稿，解除锁定</button>}
     </div>}
+    {workflowLaunch.dialogs}
     {renaming && page && <SessionRenameDialog title={page.summary.title} onClose={() => setRenaming(false)} onSave={title => updateMetadata({ kind: 'rename', title })} />}
-    {deleting && page && <ConversationDeleteDialog id={conversation.id} onChanged={() => { changedRef.current(); void refresh().catch(error => setError(message(error))) }} onClose={attempted => {
+    {deleting && page && <ConversationDeleteDialog id={conversation.id} onChanged={() => { notifyChanged(); void refresh().catch(error => setError(message(error))) }} onClose={attempted => {
       setDeleting(false)
       if (attempted) requestAnimationFrame(() => refreshButton.current?.focus())
     }} />}

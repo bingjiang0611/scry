@@ -7,11 +7,17 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { validateObservations } from './performance-ratchet.mjs'
 import { composerModes, nativeCounterMetrics } from './native-composer-probe.mjs'
+import { catalogueFiles } from './performance-catalogue.mjs'
 export { composerModes, nativeCounterMetrics }
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 export const nativeWorkloads = { markdown: [40, 32], short: [20, 1], 'short-heavy': [20, 32], paged: [120, 2] }
-export const nativeHarnessFiles = ['scripts/performance-native.mjs', 'scripts/session-open-bench.mjs', 'scripts/session-open-timing.mjs', 'scripts/native-composer-probe.mjs', 'src/main/providers/smoke.ts', 'scripts/owned-app-processes.mjs', 'scripts/hidden-electron-windows.cjs', 'scripts/performance-report.mjs', 'scripts/performance-paths.json']
+export const nativeHarnessFiles = [
+  'scripts/performance-native.mjs', 'scripts/session-open-bench.mjs', 'scripts/session-open-timing.mjs',
+  'scripts/native-composer-probe.mjs', 'src/main/providers/smoke.ts', 'scripts/owned-app-processes.mjs',
+  'scripts/hidden-electron-windows.cjs', 'scripts/performance-report.mjs', 'scripts/performance-catalogue.mjs',
+  ...catalogueFiles
+]
 const composerMetrics = mode => ['sendToTerminalMs', 'sendToSettledVisibleMs',
   ...(mode !== 'stop-immediate' ? ['sendToOutputReceiptMs', 'sendToFirstVisibleMs', 'sendToVisibleReadyMs'] : []),
   ...(mode !== 'complete' ? ['stopToTerminalMs', 'stopToSettledVisibleMs'] : [])]

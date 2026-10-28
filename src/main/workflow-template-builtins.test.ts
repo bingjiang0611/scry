@@ -23,7 +23,9 @@ describe('distributed readonly data through the same template store', () => {
     expect(first.ref.revisionHash).toBe(createHash('sha256').update(first.source).digest('hex'))
     expect((await a.store.history(scope, candidateReviewTemplateId)).revisions).toEqual([first.ref])
     expect(await b.store.revision(first.ref)).toEqual(first)
-    expect((await a.store.list(scope, candidateReviewTemplateId)).templateIds).toEqual([])
+    // A cursor at the last id has nothing after it; earlier cursors still page.
+    expect((await a.store.list(scope, builtinTemplateIds.at(-1)!)).templateIds).toEqual([])
+    expect((await a.store.list(scope, builtinTemplateIds[0])).templateIds).toEqual(builtinTemplateIds.slice(1))
     expect(await a.store.read(scope, randomUUID())).toBeNull()
     expect(a.authorize).not.toHaveBeenCalled(); expect(b.authorize).not.toHaveBeenCalled()
   })

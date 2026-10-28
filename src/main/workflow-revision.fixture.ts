@@ -45,9 +45,23 @@ export async function fixture(file = false, withHost = true, serial = false, pro
     calls.push({ node, prompt: request.prompt })
     return { result: Promise.resolve({ runId: randomUUID(), status: 'completed', settled: true, actualModel: 'fixture-model', output: request.prompt + '-output' }), stop: () => true }
   })
-  const makeService = (identity = 'fixture-runtime') => new WorkflowService({ store, systems: host, slots: new WorkflowSlots(serial ? 1 : 2), providerRegistered: () => true,
-    runControls: async role => ({ descriptor: descriptor(role.providerId), identity, model: true, stop: true, independentRun: true, terminalOutput: true }),
-    plan: async () => ({ output: JSON.stringify({ body: programBody }) }), execute })
+  const services: WorkflowService[] = [], pending = new Set<Promise<unknown>>()
+  const track = <T>(work: Promise<T>): Promise<T> => {
+    const tracked = work.finally(() => pending.delete(tracked))
+    pending.add(tracked)
+    return tracked
+  }
+  const makeService = (identity = 'fixture-runtime') => {
+    const controller = new WorkflowService({ store, systems: host, slots: new WorkflowSlots(serial ? 1 : 2), providerRegistered: () => true,
+      runControls: async role => ({ descriptor: descriptor(role.providerId), identity, model: true, stop: true, independentRun: true, terminalOutput: true }),
+      plan: async () => ({ output: JSON.stringify({ body: programBody }) }), execute })
+    services.push(controller)
+    const start = controller.start.bind(controller), revise = controller.revise.bind(controller), resume = controller.resume.bind(controller)
+    controller.start = (...args) => track(start(...args))
+    controller.revise = (...args) => track(revise(...args))
+    controller.resume = (...args) => track(resume(...args))
+    return controller
+  }
   const service = makeService()
   const preview = await service.planCommand({ workspace, commandId: 'plan-' + randomUUID(), command: '/scry-workflow run inspect',
     orchestrator: { role: 'orchestrator', providerId: 'codex' }, roles: [{ role: 'worker', providerId: 'codex', requestedModel: { providerId: 'openai', id: 'fixture-model' } }] })
@@ -55,6 +69,13 @@ export async function fixture(file = false, withHost = true, serial = false, pro
   const start = () => service.start(preview.workflowId, approval(preview))
   const record = async () => (await store.load(preview.workflowId))!
   const revise = async (next: WorkflowPlanPreview, commandId = 'revise', controller = service) => controller.revise(next, approval(next), { expectedRevision: (await record()).progress.revision! }, commandId)
-  const cleanup = async () => { service.close(); await rm(directory, { recursive: true, force: true }) }
+  const cleanup = async () => {
+    // close() only fences admission. Timed-out test bodies can still be writing
+    // checkpoints, including through a replacement service from makeService().
+    await Promise.all(services.map(controller => controller.prepareForShutdown()))
+    await Promise.allSettled([...pending])
+    services.forEach(controller => controller.close())
+    await rm(directory, { recursive: true, force: true })
+  }
   return { directory, workspace, userData, store, host, service, makeService, preview, calls, execute, record, start, revise, cleanup }
 }

@@ -1,6 +1,6 @@
 import { dirname, join } from 'node:path'
-import { writeFile } from 'node:fs/promises'
-import { appendFileSync } from 'node:fs'
+import { readFile, rename, writeFile } from 'node:fs/promises'
+import { appendFileSync, watch } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import type { ProviderAdapter } from './types'
@@ -15,6 +15,50 @@ export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' | 'pi'
   // privileged adapter. This adapter itself requires the existing explicit smoke gate.
   const workflowFixture = process.env.SCRY_ELECTRON_SMOKE_WORKFLOW === '1'
   const callsFile = process.env.SCRY_ELECTRON_SMOKE_CALLS
+  const taskFenceProbe = process.env.SCRY_ELECTRON_SMOKE_TASK_FENCE === '1' && Boolean(callsFile)
+  const authoringFixture = workflowFixture && taskFenceProbe && process.env.SCRY_ELECTRON_SMOKE_AUTHORING === '1'
+  async function waitTaskDispatchGate(cwd?: string): Promise<string | undefined> {
+    const root = dirname(callsFile!)
+    const path = join(root, 'task-dispatch-gate.json')
+    let gate: { hold: boolean; cwd: string; conversationId: string; commandId: string; workflowTaskId?: string; identity?: string }
+    try { gate = JSON.parse(await readFile(path, 'utf8')) } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+      throw error
+    }
+    if (gate.cwd !== cwd) return
+    if (!gate.hold) return gate.identity
+    if (!/^[a-f0-9-]{36}$/.test(gate.conversationId)) throw new Error('invalid synthetic task gate conversation')
+    if (gate.workflowTaskId) {
+      if (!/^submission-[a-f0-9]{64}$/.test(gate.workflowTaskId)) throw new Error('invalid synthetic workflow task gate')
+      const task = JSON.parse(await readFile(join(root, 'conversation-submissions-v1', gate.conversationId, `${gate.workflowTaskId}.json`), 'utf8'))
+      if (task.state.kind !== 'dispatch_intent') return gate.identity
+    } else {
+      const conversation = JSON.parse(await readFile(join(root, 'conversations', `${gate.conversationId}.json`), 'utf8')) as {
+        turns: Array<{ commandId?: string; delivery?: { status: string } }>
+      }
+      if (!conversation.turns.some(turn => turn.commandId === gate.commandId && turn.delivery?.status === 'pending')) return
+    }
+    // Subscribe before publishing the marker. The parent fixture changes the
+    // durable task fence, then releases this event-driven native-key query.
+    let release!: () => void
+    let fail!: (error: unknown) => void
+    const released = new Promise<void>((resolve, reject) => { release = resolve; fail = reject })
+    const changes = watch(root, (_event, filename) => {
+      if (filename !== 'task-dispatch-gate.json') return
+      void readFile(path, 'utf8').then(text => {
+        if (!(JSON.parse(text) as { hold: boolean }).hold) release()
+      }).catch(fail)
+    })
+    changes.on('error', fail)
+    try {
+      await Promise.all([
+        writeFile(join(root, 'task-dispatch-gate-entered.json.probe'), JSON.stringify({ commandId: gate.commandId }))
+          .then(() => rename(join(root, 'task-dispatch-gate-entered.json.probe'), join(root, 'task-dispatch-gate-entered.json'))),
+        released
+      ])
+    } finally { changes.close() }
+    return (JSON.parse(await readFile(path, 'utf8')) as { identity?: string }).identity
+  }
   const recordCall = (operation: string, identity: string): void => {
     if (callsFile) appendFileSync(callsFile, `${JSON.stringify({ operation, identity })}\n`)
   }
@@ -29,10 +73,15 @@ export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' | 'pi'
     forkSession,
     // Explicit synthetic workflow fixture only; never a real Provider capability.
     ...(workflowFixture ? { workflowExecution: { independentRun: true, terminalOutput: true, scopedStop: true, scopeSettlement: true } as const } : {}),
+    ...(authoringFixture ? { workflowAuthoring: { source: 'scry_fixture_success_result' as const } } : {}),
     id: providerId,
     runtimeProvider: runtimeProviderForProviderId(providerId),
     historicalContext: true,
-    continuationKey: context => `${providerId}:${context.agentProfileId ?? 'default'}:smoke:${process.env.SCRY_ELECTRON_SMOKE_IDENTITY?.trim() || 'default'}`,
+    continuationKey: context => {
+      const key = `${providerId}:${context.agentProfileId ?? 'default'}:smoke:${process.env.SCRY_ELECTRON_SMOKE_IDENTITY?.trim() || 'default'}`
+      // No new await, IO or timing change for the existing fixture workloads.
+      return taskFenceProbe ? waitTaskDispatchGate(context.cwd).then(identity => identity ? `${key}:${identity}` : key) : key
+    },
     describe: async () => ({
       id: providerId,
       label: `${providerId} Smoke Fixture`,
@@ -47,9 +96,13 @@ export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' | 'pi'
       const history = new HistoricalInput(request)
       const outgoingPrompt = history.text(request.prompt)
       const sessionId = request.resume ?? `smoke-session-${request.runId}`
-      const inputsFile = process.env.SCRY_ELECTRON_SMOKE_INPUTS
+      const inputsFile = process.env.SCRY_ELECTRON_SMOKE_INPUTS ??
+        (taskFenceProbe ? join(dirname(callsFile!), 'desktop-task-provider-inputs.jsonl') : undefined)
       if (inputsFile) appendFileSync(inputsFile, `${JSON.stringify({ providerId, agentProfileId: request.agentProfileId, runId: request.runId, prompt: request.prompt,
         resume: request.resume ?? null, sessionId, historicalContext: request.historicalContext ?? null, outgoingPrompt,
+        ...(request.purpose ? { purpose: request.purpose, managedRecorder: request.managedRecorder,
+          historyReaderEnabled: Boolean(request.historyReader), permissionMode: request.permissionMode,
+          expectedContinuationKey: request.expectedContinuationKey } : {}),
         ...(request.attachments.length ? { attachments: request.attachments.map(attachment => ({ kind: attachment.kind, name: attachment.name,
           path: attachment.path, mimeType: attachment.mimeType, contentHash: createHash('sha256').update(Buffer.from(attachment.dataBase64, 'base64')).digest('hex') })) } : {}) })}\n`)
       let stopped = false
@@ -65,6 +118,19 @@ export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' | 'pi'
           history.attempting(outgoingPrompt)
           if (providerId === 'codex' && request.prompt !== 'conversation unknown input') history.accepted(sessionId, 'codex_turn_start_response', `${request.runId}:provider-turn`)
           if (providerId === 'pi') history.accepted(sessionId, 'pi_persisted_session_entry', `${request.runId}:provider-turn`)
+        }
+        if (request.purpose === 'workflow_authoring') {
+          if (!authoringFixture) throw new Error('Synthetic authoring was not enabled')
+          if (request.managedRecorder || request.resume || request.historyReader || request.historicalContext || request.attachments.length) {
+            throw new Error('Synthetic authoring received recorder/history/attachment authority')
+          }
+          const json = await readFile(join(dirname(callsFile!), 'workflow-authoring-candidate.json'), 'utf8')
+          request.emit({ id: `${request.runId}:shadow`, runId: request.runId, ts: new Date().toISOString(),
+            kind: 'model', stage: 'text', text: 'SHADOW_ASSISTANT_TEXT_MUST_NOT_BE_A_PROGRAM' })
+          request.emit({ id: `${request.runId}:result`, runId: request.runId, ts: new Date().toISOString(),
+            kind: 'harness', stage: 'result', text: 'synthetic structured authoring completed' })
+          return { externalSessionId: sessionId, providerTurnId: `${request.runId}:provider-turn`, status: 'completed' as const,
+            structuredOutput: Object.freeze({ source: 'scry_fixture_success_result' as const, json }) }
         }
         if (request.managedRecorder && request.cwd) {
           await handleRecorderHook({ provider: providerId, event: 'UserPromptSubmit', workspace: request.cwd, managed: true,

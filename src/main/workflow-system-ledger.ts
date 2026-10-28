@@ -5,6 +5,7 @@ import { WORKFLOW_MAX_SYSTEM_STEPS, type WorkflowInputSnapshot, type WorkflowInp
 import { workflowSystemCopy as copy } from '../shared/constants/copy'
 import { validateWorkflowValueReference } from './workflow-frames'
 import { WORKFLOW_REPLICA_MAX_CONTENT, WORKFLOW_REPLICA_MAX_ENTRIES, WORKFLOW_REPLICA_MAX_MANIFEST, validateWorkflowReplicaReference } from './workflow-replica'
+import type { WorkflowCombineSummary, WorkflowSystemIntent } from '../shared/workflow-system'
 import type { WorkflowStoreRecord } from './workflow-store'
 import { governingWorkflowSystemPreview } from './workflow-revision-boundaries'
 import type { WorkflowReplicaReference } from '../shared/workflow-replica'
@@ -42,19 +43,25 @@ export function validateWorkflowSystemLedger(record: WorkflowStoreRecord): Reado
   const prepared = new Map<string, WorkflowMaterializedInput>()
   for (const outcome of outcomes) {
     const intent = admitted.get(outcome.stepId)
-    if (intent?.kind === 'prepare_replica' && outcome.state === 'completed' && outcome.settled && outcome.replica && outcome.resultRef) prepared.set(JSON.stringify(outcome.replica), {
+    if ((intent?.kind === 'prepare_replica' || intent?.kind === 'combine') && outcome.state === 'completed' && outcome.settled && outcome.replica && outcome.resultRef) prepared.set(JSON.stringify(outcome.replica), {
       source: 'main_ledger', preparationStepId: intent.stepId, materialized: outcome.replica, ...(intent.replica ? { candidate: intent.replica } : {})
     })
   }
   for (const [index, intent] of intents.entries()) {
     const governing = governingWorkflowSystemPreview(record, 'intent', index), node = nodesFor(governing).get(intent.nodeId), task = intent.taskId.split(':')
-    if (!/^[A-Za-z0-9_-]{1,96}$/.test(intent.stepId) || !Number.isSafeInteger(intent.createdAt) || task.length !== 3 || task[0] !== governing.workflowId || !/^[a-f0-9]{64}$/.test(task[1]) || task[2] !== intent.nodeId ||
-      intent.programRevision !== governing.programRevision || (intent.kind !== 'prepare_replica' && intent.kind !== 'check' && intent.kind !== 'verification') || node?.kind !== (intent.kind === 'prepare_replica' ? 'replica' : intent.kind)) throw new Error(copy.intent)
+    if (!/^[A-Za-z0-9_-]{1,96}$/.test(intent.stepId) || (intent.frameId !== undefined && (typeof intent.frameId !== 'string' || !/^[A-Za-z0-9_-]{1,96}$/.test(intent.frameId))) || !Number.isSafeInteger(intent.createdAt) || task.length !== 3 || task[0] !== governing.workflowId || !/^[a-f0-9]{64}$/.test(task[1]) || task[2] !== intent.nodeId ||
+      intent.programRevision !== governing.programRevision || (intent.kind !== 'prepare_replica' && intent.kind !== 'combine' && intent.kind !== 'check' && intent.kind !== 'verification') || node?.kind !== (intent.kind === 'prepare_replica' ? 'replica' : intent.kind)) throw new Error(copy.intent)
     if (node?.kind === 'verification') {
       validateWorkflowVerificationInputs(intent.verificationInputs, node)
       if (intent.replica || intent.inputSnapshot || intent.inputMaterialization) throw new Error(copy.intent)
     } else if (intent.verificationInputs !== undefined) throw new Error(copy.intent)
     if (intent.replica) validateWorkflowReplicaReference(intent.replica, record.preview.workflowId)
+    if (intent.combineInputs) {
+      if (intent.kind !== 'combine') throw new Error(copy.intent)
+      validateWorkflowReplicaReference(intent.combineInputs.base, record.preview.workflowId)
+      if (!intent.combineInputs.candidates.length || intent.combineInputs.candidates.length > WORKFLOW_MAX_BATCH || new Set(intent.combineInputs.candidates.map(candidate => candidate.replicaId)).size !== intent.combineInputs.candidates.length) throw new Error(copy.intent)
+      for (const candidate of intent.combineInputs.candidates) validateWorkflowReplicaReference(candidate, record.preview.workflowId)
+    } else if (intent.kind === 'combine') throw new Error(copy.intent)
     if (intent.inputSnapshot) {
       if (intent.kind !== 'check' || !intent.replica) throw new Error(copy.intent)
       validateWorkflowInputSnapshot(intent.inputSnapshot, record.preview.workflowId, intent.stepId, 'before')
@@ -73,10 +80,19 @@ export function validateWorkflowSystemLedger(record: WorkflowStoreRecord): Reado
     if (outcome.state === 'completed' && (!outcome.settled || !outcome.resultRef)) throw new Error(copy.intent)
     if (outcome.replica) {
       validateWorkflowReplicaReference(outcome.replica, record.preview.workflowId)
-      if (intent.kind === 'prepare_replica' ? outcome.replica.replicaId !== intent.stepId : JSON.stringify(intent.replica) !== JSON.stringify(outcome.replica)) throw new Error(copy.intent)
+      if (intent.kind === 'prepare_replica' ? outcome.replica.replicaId !== intent.stepId
+        : intent.kind === 'check' ? JSON.stringify(intent.replica) !== JSON.stringify(outcome.replica)
+          : intent.kind !== 'combine') throw new Error(copy.intent)
     }
-    if (intent.kind === 'verification' && (outcome.replica || outcome.check)) throw new Error(copy.intent)
-    if (outcome.state === 'completed' && intent.kind !== 'verification' && (!outcome.replica || (intent.kind === 'check' && !outcome.check))) throw new Error(copy.intent)
+    if (intent.kind === 'verification' && (outcome.replica || outcome.check || outcome.combine)) throw new Error(copy.intent)
+    if (outcome.combine && intent.kind !== 'combine') throw new Error(copy.intent)
+    if (intent.kind === 'combine' && outcome.check) throw new Error(copy.intent)
+    if (outcome.state === 'completed' && intent.kind !== 'verification' && intent.kind !== 'combine' && (!outcome.replica || (intent.kind === 'check' && !outcome.check))) throw new Error(copy.intent)
+    if (outcome.state === 'completed' && intent.kind === 'combine') {
+      if (!outcome.combine || !matchesWorkflowCombine(outcome.combine) || !outcome.resultRef || !matchesCombineIntent(outcome.combine, intent)) throw new Error(copy.intent)
+      if (outcome.combine.state === 'combined' && (!outcome.replica || outcome.replica.replicaId !== intent.stepId || JSON.stringify(outcome.combine.integration) !== JSON.stringify(outcome.replica))) throw new Error(copy.intent)
+      if (outcome.combine.state === 'conflict' && outcome.replica) throw new Error(copy.intent)
+    }
     if (outcome.state === 'completed' && node?.kind === 'replica' && ((node.source !== undefined) !== Boolean(intent.replica) ||
       (intent.replica && (intent.replica.replicaId === outcome.replica!.replicaId || !prepared.has(JSON.stringify(intent.replica)))))) throw new Error(copy.intent)
     if (outcome.check) {
@@ -109,6 +125,22 @@ export function workflowInputMaterialization(prepared: ReadonlyMap<string, Workf
   if (!origin) throw new Error(copy.intent)
   return replica.inputHash === before.inputHash ? { ...origin, state: 'available' }
     : { ...origin, state: 'unavailable', reason: copy.materializationChanged }
+}
+
+function matchesCombineIntent(value: WorkflowCombineSummary, intent: WorkflowSystemIntent): boolean {
+  if (intent.kind !== 'combine' || !intent.combineInputs || value.baseInputHash !== intent.combineInputs.base.inputHash ||
+    value.candidateCount !== intent.combineInputs.candidates.length || value.changedPathCount < value.conflicts.length) return false
+  const admitted = new Set(intent.combineInputs.candidates.map(candidate => candidate.replicaId))
+  const paths = value.conflicts.map(conflict => conflict.path)
+  if (paths.some((path, index) => index > 0 && paths[index - 1].localeCompare(path) >= 0)) return false
+  return value.conflicts.every(conflict => conflict.candidateReplicaIds.every((replicaId, index, ids) => admitted.has(replicaId) && (index === 0 || ids[index - 1].localeCompare(replicaId) < 0)))
+}
+
+function matchesWorkflowCombine(value: WorkflowCombineSummary): boolean {
+  if (!value || !['combined', 'conflict'].includes(value.state) || !/^[a-f0-9]{64}$/.test(value.baseInputHash) || !Number.isSafeInteger(value.candidateCount) || value.candidateCount < 1 || value.candidateCount > WORKFLOW_MAX_BATCH || !Number.isSafeInteger(value.changedPathCount) || value.changedPathCount < 0 || !Array.isArray(value.conflicts) || value.conflicts.length > WORKFLOW_MAX_BATCH) return false
+  if (value.state === 'combined' && (!value.integration || value.conflicts.length)) return false
+  if (value.state === 'conflict' && value.integration !== null) return false
+  return value.conflicts.every(conflict => typeof conflict.path === 'string' && conflict.path.length > 0 && Array.isArray(conflict.candidateReplicaIds) && conflict.candidateReplicaIds.length > 1 && conflict.candidateReplicaIds.every(id => typeof id === 'string'))
 }
 
 export function assertWorkflowSystemsSettled(record: WorkflowStoreRecord): void {

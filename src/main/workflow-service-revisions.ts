@@ -33,7 +33,8 @@ export class WorkflowServiceRevisions extends WorkflowServicePlanning {
     const prepared = await this.prepareSystems({ ...compiled, body: workflowSystemSourceBody(compiled.body) })
     const { programRevision: _revision, ...source } = prepared
     const program = { ...source, programRevision: workflowRevision(source) }
-    const preview = makePlanPreview(program, capabilities, roles.find(role => role.role === 'orchestrator')!)
+    const preview = { ...makePlanPreview(program, capabilities, roles.find(role => role.role === 'orchestrator')!),
+      ...(record.preview.planningSize ? { planningSize: record.preview.planningSize } : {}) }
     assertWorkflowRevisionChange(record, preview, target)
     this.assertAdmissionGeneration(generation)
     // Candidates are memory-only and bounded. Eviction/restart requires another

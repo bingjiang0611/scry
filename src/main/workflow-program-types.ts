@@ -1,6 +1,6 @@
 import { workflowVerificationValueSchema } from '../shared/workflow-verification'
 import { WORKFLOW_MAX_BATCH, workflowChildBlocks, type WorkflowBlock, type WorkflowOutputRef, type WorkflowValueSchema } from '../shared/workflow'
-import { workflowCheckValueSchema, workflowReplicaValueSchema } from '../shared/workflow-system'
+import { workflowCheckValueSchema, workflowCombineValueSchema, workflowReplicaValueSchema } from '../shared/workflow-system'
 import { workflowCollectionCopy, workflowExpressionCopy, workflowFrameCopy, workflowLoopCopy, workflowValueCopy } from '../shared/constants/copy'
 import { workflowSchemaAssignable } from './workflow-values'
 import { workflowLoopOutcomeSchema } from './workflow-loops'
@@ -45,8 +45,19 @@ export function validateReferenceDominance(body: WorkflowBlock, inputs: Readonly
     }
     if (block.kind === 'replica' || block.kind === 'check') {
       const expression = block.kind === 'replica' ? block.source : block.replica
-      if (expression && !workflowSchemaAssignable(inferWorkflowExpression(expression, scope), workflowReplicaValueSchema)) throw new Error(workflowValueCopy.bindingContract)
+      if (expression) {
+        const actual = inferWorkflowExpression(expression, scope)
+        const nullableReplica = actual.type === 'union' && actual.variants.some(variant => workflowSchemaAssignable(variant, workflowReplicaValueSchema))
+        if (!workflowSchemaAssignable(actual, workflowReplicaValueSchema) && !(block.kind === 'check' && nullableReplica)) throw new Error(workflowValueCopy.bindingContract)
+      }
       return bind(scope, block.blockId, block.kind === 'replica' ? workflowReplicaValueSchema : workflowCheckValueSchema)
+    }
+    if (block.kind === 'combine') {
+      if (!workflowSchemaAssignable(inferWorkflowExpression(block.base, scope), workflowReplicaValueSchema)) throw new Error(workflowValueCopy.bindingContract)
+      const candidates = inferWorkflowExpression(block.candidates, scope)
+      if ((candidates.type !== 'array' && candidates.type !== 'collection') ||
+        !workflowSchemaAssignable(candidates.items, workflowReplicaValueSchema) && !workflowSchemaAssignable(candidates.items, collectionItemSchema(workflowReplicaValueSchema))) throw new Error(workflowValueCopy.bindingContract)
+      return bind(scope, block.blockId, workflowCombineValueSchema)
     }
     if (block.kind === 'bind') {
       const actual = inferWorkflowExpression(block.value, scope)

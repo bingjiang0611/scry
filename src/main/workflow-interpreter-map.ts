@@ -41,7 +41,7 @@ export async function runWorkflowMap(control: WorkflowControl, state: WorkflowIn
     const outcomes: WorkflowAttemptOutcome[] = [], authorities = workflowArrayAuthorities(source)
     let partial = false, critical = false
     const run = async (index: number): Promise<WorkflowExecutionResult> => {
-      const child = control.child(scope, labels[index])
+      const child = control.child(scope, labels[index], frame)
       const input = collection ? await control.entryValue(collection[index]) : workflowField(source.value, [String(index)], source.derivedFrom, { collectionFields: authorities.get(String(index)) })
       if (input.state !== 'known') throw new Error(workflowCollectionCopy.invalid)
       child.callContexts!.push({ kind: 'map', frameId: frame.frameId, blockId: block.blockId, key: keys[index], collection: !!collection,

@@ -1,17 +1,19 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { shellEnv } from './claude-locate'
-import type { WorkflowCheckRequest, WorkflowCheckResult, WorkflowFrozenCheck } from '../shared/workflow-check'
+import type { WorkflowCheckRequest, WorkflowCheckResult, WorkflowFrozenCheck, WorkflowTestEvidence } from '../shared/workflow-check'
 import { workflowCheckCopy as copy } from '../shared/constants/copy'
 import { assertWorkflowCheckUnchanged, cleanWorkflowCheckEnvironment as cleanEnvironment } from './workflow-check-command'
 import { workflowCheckProcessIdentity as identity, workflowCheckGroupEmpty as groupEmpty } from './workflow-check-process'
+import { nodeTestReportState, parseNodeTestTap } from './workflow-node-test-tap'
 
 export { bindWorkflowCheck, freezeWorkflowCheck, validateWorkflowCheck, validateWorkflowFrozenCheck } from './workflow-check-command'
 
 const OUTPUT_BYTES = 1024 * 1024
+const unavailableTests = (reason: string): WorkflowTestEvidence => ({ state: 'unavailable', reason })
 
 export function workflowCheckDiagnostics(parser: WorkflowCheckRequest['parser'], stdout: string, stderr: string, truncated: boolean, exitCode?: number | null): WorkflowCheckResult['diagnostics'] {
   if (truncated) return { state: 'unavailable', reason: copy.truncated }
-  if (parser === 'exit_code') return { state: 'unavailable', reason: copy.noParser }
+  if (parser === 'exit_code' || parser === 'node_test') return { state: 'unavailable', reason: parser === 'node_test' ? copy.testReport : copy.noParser }
   const lines = (stdout + '\n' + stderr).split('\n'), items: Array<{ file: string; line: number; column: number; code: string; message: string }> = []
   const pattern = /^(.+)\((\d+),(\d+)\): error (TS\d+): (.+)$/
   for (const line of lines) {
@@ -48,7 +50,7 @@ export function executeWorkflowCheck(check: WorkflowFrozenCheck, environment = s
   }
   const result = (async (): Promise<WorkflowCheckResult> => {
     const startedAt = Date.now(), env = cleanEnvironment(environment)
-    const base = { startedAt, finishedAt: startedAt, exitCode: null, signal: null, settled: true, stdout: '', stderr: '', truncated: false, evidence: 'exact' as const, diagnostics: { state: 'unavailable' as const, reason: copy.noParser } }
+    const base = { startedAt, finishedAt: startedAt, exitCode: null, signal: null, settled: true, stdout: '', stderr: '', truncated: false, evidence: 'exact' as const, diagnostics: { state: 'unavailable' as const, reason: copy.noParser }, ...(check.parser === 'node_test' ? { tests: unavailableTests(copy.testReport) } : {}) }
     try {
       if (process.platform === 'win32') throw new Error(copy.platform)
       await assertWorkflowCheckUnchanged(check, env)
@@ -63,7 +65,7 @@ export function executeWorkflowCheck(check: WorkflowFrozenCheck, environment = s
         if (published) return
         published = true
         clearTimeout(timer)
-        resolveResult({ ...base, state: 'unknown', settled: false, finishedAt: Date.now(), stdout: stdout.toString('utf8'), stderr: stderr.toString('utf8'), truncated: true, diagnostics: { state: 'unavailable', reason: copy.scope }, error })
+        resolveResult({ ...base, state: 'unknown', settled: false, finishedAt: Date.now(), stdout: stdout.toString('utf8'), stderr: stderr.toString('utf8'), truncated: true, diagnostics: { state: 'unavailable', reason: copy.scope }, ...(check.parser === 'node_test' ? { tests: unavailableTests(copy.scope) } : {}), error })
       }
       requestStop = (): void => { void stop().then(async signalled => {
         if (!signalled && identityReady) {
@@ -94,10 +96,11 @@ export function executeWorkflowCheck(check: WorkflowFrozenCheck, environment = s
         if (published) return
         published = true
         const diagnostics = workflowCheckDiagnostics(check.parser, output, errors, truncated, child!.exitCode)
+        const tests = check.parser === 'node_test' ? parseNodeTestTap(output, truncated) : undefined
         const diagnosticFailure = diagnostics.state === 'available' && diagnostics.items.length > 0
-        const state = !closed ? 'unknown' : spawnError ? 'failed' : timedOut ? 'timed_out' : cancelled ? 'cancelled' : child!.exitCode === 0 && !truncated && !diagnosticFailure ? 'passed' : 'failed'
+        const state = !closed ? 'unknown' : spawnError ? 'failed' : timedOut ? 'timed_out' : cancelled ? 'cancelled' : child!.exitCode !== 0 || truncated || diagnosticFailure ? 'failed' : tests ? nodeTestReportState(tests) : 'passed'
         resolveResult({ ...base, state, finishedAt: Date.now(), exitCode: child!.exitCode, signal: child!.signalCode, settled: closed, stdout: output, stderr: errors, truncated,
-          diagnostics,
+          diagnostics, ...(tests ? { tests } : {}),
           ...(!closed || spawnError || timedOut || cancelled || stopError ? { error: !closed ? copy.scope : spawnError ? String(spawnError) : stopError ?? (timedOut ? copy.timedOut : copy.stopped) } : {}) })
       })().catch(error => resolveResult({ ...base, state: 'unknown', settled: false, finishedAt: Date.now(), error: String(error) })) })
     })

@@ -105,8 +105,8 @@ export async function verifyWorkflowInputMaterialization(store: WorkflowStore, r
   const origin = record.systemOutcomes?.find(outcome => outcome.stepId === materialization.preparationStepId)
   if (!origin?.resultRef) throw new Error(copy.intent)
   const value = await store.loadValue(record.preview.workflowId, origin.resultRef)
-  if (value.state !== 'known' || JSON.stringify(value.replica) !== JSON.stringify(materialization.materialized) ||
-    JSON.stringify(value.value) !== JSON.stringify(materialization.materialized)) throw new Error(copy.intent)
+  const combined = value.state === 'known' && value.value && typeof value.value === 'object' && !Array.isArray(value.value) && 'integration' in value.value ? (value.value as Record<string, unknown>).integration : undefined
+  if (value.state !== 'known' || (JSON.stringify(value.replica) !== JSON.stringify(materialization.materialized) && JSON.stringify(combined) !== JSON.stringify(materialization.materialized))) throw new Error(copy.intent)
 }
 
 export function workflowCheckInputValue(inputs: WorkflowCheckInputs, items: WorkflowInputChange[]): WorkflowValue {

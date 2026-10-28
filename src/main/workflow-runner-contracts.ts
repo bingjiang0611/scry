@@ -1,7 +1,8 @@
 import type { AgentPermissionMode } from '../shared/runtime'
 import type { WorkflowApproval, WorkflowPlanPreview, WorkflowLiveObservation, WorkflowProgress, WorkflowRoleBinding } from '../shared/workflow'
 import type { WorkflowReplicaRun, WorkflowSystemHost } from './workflow-system-host'
-import type { WorkflowStore } from './workflow-store'
+import type { WorkflowStore, WorkflowStoreRecord } from './workflow-store'
+import type { WorkflowTargetStopState } from './workflow-stop'
 import type { WorkflowSlots } from './workflow-slots'
 
 export interface WorkflowProviderExecutionRequest {
@@ -55,6 +56,19 @@ export class WorkflowDispatch {
 }
 
 export type WorkflowProviderExecutor = (request: WorkflowProviderExecutionRequest) => WorkflowProviderExecution
+
+/** One live generation; business completion does not prove physical closure. */
+export type WorkflowRootExecutionState = WorkflowTargetStopState & {
+  record: WorkflowStoreRecord
+  progress: WorkflowProgress
+  initialized: Promise<boolean>
+  liveEpoch: string
+  liveRevision: number
+  finished: boolean
+  activeStops: Set<() => boolean>
+  halt: () => void
+  stop: () => void
+}
 
 export interface WorkflowRunnerOptions {
   store: WorkflowStore

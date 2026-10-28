@@ -49,14 +49,21 @@ describe('actual workflow filesystem', () => {
   })
 
   it.each(['identity', 'duplicate', 'limit'] as const)('fails closed for corrupt stop receipts: %s', async kind => {
-    const { store } = await fixture()
+    const { path, store } = await fixture()
     const value = record('stop-corrupt')
+    await store.save(value)
+    const file = join(path, 'workflows', 'stop-corrupt.json')
+    const stored = JSON.parse(await readFile(file, 'utf8'))
     value.stopRequests = kind === 'limit'
       ? Array.from({ length: WORKFLOW_MAX_STOP_REQUESTS + 1 }, (_, index) => ({ commandId: `stop-${index}`, requestedAt: 1 }))
       : kind === 'duplicate' ? [{ commandId: 'same', requestedAt: 1 }, { commandId: 'same', requestedAt: 2 }]
         : [{ commandId: '../invalid', requestedAt: 1 }]
-    await store.save(value)
-    await expect(store.load('stop-corrupt')).rejects.toThrow('停止收据合同无效')
+    await expect(store.save(value)).rejects.toThrow('停止收据合同无效')
+    // Exercise the independent cold-read boundary even though writes now reject it.
+    const bytes = JSON.stringify({ ...stored, stopRequests: value.stopRequests })
+    await writeFile(file, bytes)
+    await expect(new FileWorkflowStore(path).load('stop-corrupt')).rejects.toThrow('停止收据合同无效')
+    expect(await readFile(file, 'utf8')).toBe(bytes)
   })
 
   it('commits the immutable planning body before its small durable receipt', async () => {

@@ -1,6 +1,6 @@
 import { workflowChildBlocks, type WorkflowBlock, type WorkflowEvaluation, type WorkflowPlanPreview, type WorkflowProgram, type WorkflowValue } from '../shared/workflow'
 import type { WorkflowFrozenCheck } from '../shared/workflow-check'
-import type { WorkflowCheckInputs, WorkflowCheckSummary, WorkflowInputChange, WorkflowInputSnapshot, WorkflowInputMaterialization, WorkflowSystemOutcome } from '../shared/workflow-system'
+import type { WorkflowCheckInputs, WorkflowCheckSummary, WorkflowInputChange, WorkflowInputSnapshot, WorkflowInputMaterialization, WorkflowSystemOutcome, WorkflowCombineInputs } from '../shared/workflow-system'
 import { workflowSystemCopy as copy } from '../shared/constants/copy'
 import type { WorkflowStore } from './workflow-store'
 import { WorkflowVerification } from './workflow-verification'
@@ -21,8 +21,8 @@ export interface WorkflowReplicaRun {
   readonly reference: WorkflowReplicaReference
 }
 
-type SystemBlock = Extract<WorkflowBlock, { kind: 'replica' | 'check' | 'verification' }>
-export type WorkflowSystemExecutionResult = Pick<WorkflowSystemOutcome, 'state' | 'settled' | 'replica' | 'check' | 'error'> & { value: WorkflowEvaluation }
+type SystemBlock = Extract<WorkflowBlock, { kind: 'replica' | 'combine' | 'check' | 'verification' }>
+export type WorkflowSystemExecutionResult = Pick<WorkflowSystemOutcome, 'state' | 'settled' | 'replica' | 'check' | 'combine' | 'error'> & { value: WorkflowEvaluation }
 export type WorkflowSystemExecution = { result: Promise<WorkflowSystemExecutionResult>; settled: Promise<void>; stop: () => boolean }
 
 /** Closed main effect adapter under the canonical Runner, not an interpreter,
@@ -119,11 +119,18 @@ export class WorkflowSystemHost {
     const settled = new Promise<void>(resolveScope => { close = resolveScope })
     const result = (async (): Promise<WorkflowSystemExecutionResult> => {
       try {
-        if (block.kind === 'replica') {
+            if (block.kind === 'replica') {
           const source = block.source === undefined ? preview.workspace : this.target(input, preview.workflowId)
           const replica = await this.replicas.prepare(preview.workflowId, stepId, source, abort.signal)
           const value: WorkflowValue = { workflowId: replica.workflowId, replicaId: replica.replicaId, inputHash: replica.inputHash }
           return { state: 'completed', settled: true, replica, value: { state: 'known', value, replica, derivedFrom: ['system:' + stepId] } }
+        }
+        if (block.kind === 'combine') {
+          const combine = this.combineInputs(input, preview.workflowId)
+          const result = await this.replicas.combine(preview.workflowId, combine.base, combine.candidates, stepId, abort.signal)
+          const value: WorkflowValue = { ...result.summary }
+          return { state: 'completed', settled: true, ...(result.replica ? { replica: result.replica } : {}), combine: result.summary,
+            value: { state: 'known', value, derivedFrom: ['system:' + stepId] } }
         }
         if (block.kind === 'verification') {
           const record = await this.store.load(preview.workflowId)
@@ -175,7 +182,7 @@ export class WorkflowSystemHost {
           : observed.diagnostics
         const { stdout: _stdout, stderr: _stderr, diagnostics: _diagnostics, ...metadata } = observed
         const check: WorkflowCheckSummary = { ...metadata, stdoutRef, stderrRef, diagnostics, inputs }
-        const value: WorkflowValue = { stepId, passed: observed.state === 'passed', state: observed.state, exitCode: observed.exitCode, settled: observed.settled, truncated: observed.truncated, diagnosticCount: diagnostics.state === 'available' ? diagnostics.count : null, diagnostics: observed.diagnostics, inputs: workflowCheckInputValue(inputs, items) }
+        const value: WorkflowValue = { stepId, passed: observed.state === 'passed', state: observed.state, exitCode: observed.exitCode, settled: observed.settled, truncated: observed.truncated, diagnosticCount: diagnostics.state === 'available' ? diagnostics.count : null, diagnostics: observed.diagnostics, ...(observed.tests ? { tests: observed.tests } : {}), inputs: workflowCheckInputValue(inputs, items) }
         const phase = observed.state === 'unknown' ? 'unknown' : observed.state === 'rejected' ? 'blocked' : observed.state === 'cancelled' ? 'stopped' : 'completed'
         return { state: phase, settled: observed.settled, replica: reference, check, value: phase === 'unknown' || phase === 'blocked'
           ? { state: 'unknown', reason: observed.error ?? copy.unknown, derivedFrom: ['system:' + stepId] }
@@ -191,10 +198,28 @@ export class WorkflowSystemHost {
     return { result, settled, stop: () => { abort.abort(); native?.stop(); return true } }
   }
 
+  combineInputs(input: WorkflowEvaluation | undefined, workflowId: string): WorkflowCombineInputs {
+    if (input?.state !== 'known' || !input.value || typeof input.value !== 'object' || Array.isArray(input.value)) throw new Error(copy.authority)
+    const value = input.value as Record<string, unknown>, base = value.base, candidates = value.candidates
+    validateWorkflowReplicaReference(base, workflowId)
+    if (!Array.isArray(candidates) || !candidates.length || candidates.length > 4096) throw new Error(copy.authority)
+    const refs = candidates.map(candidate => {
+      const wrapped = candidate && typeof candidate === 'object' && !Array.isArray(candidate) && Object.hasOwn(candidate, 'value')
+      if (wrapped && ((candidate as Record<string, unknown>).state !== 'completed' || (candidate as Record<string, unknown>).settled !== true)) throw new Error(copy.authority)
+      const reference = wrapped ? (candidate as Record<string, unknown>).value : candidate
+      validateWorkflowReplicaReference(reference, workflowId)
+      return reference
+    })
+    return { base, candidates: refs }
+  }
+
+  replicaInput(input: WorkflowEvaluation | undefined, workflowId: string): WorkflowReplicaReference { return this.target(input, workflowId) }
+
   private target(input: WorkflowEvaluation | undefined, workflowId: string) {
-    if (input?.state !== 'known' || !input.replica) throw new Error(copy.authority)
-    validateWorkflowReplicaReference(input.replica, workflowId)
-    if (JSON.stringify(input.value) !== JSON.stringify(input.replica)) throw new Error(copy.authority)
-    return input.replica
+    if (input?.state !== 'known') throw new Error(copy.authority)
+    const candidate = input.replica ?? (input.value && typeof input.value === 'object' && !Array.isArray(input.value) ? input.value : undefined)
+    validateWorkflowReplicaReference(candidate, workflowId)
+    if (JSON.stringify(input.value) !== JSON.stringify(candidate)) throw new Error(copy.authority)
+    return candidate
   }
 }

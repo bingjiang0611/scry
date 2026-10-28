@@ -89,6 +89,21 @@ describe('finite Workflow expressions', () => {
     expect(inferWorkflowExpression({ kind: 'count', value: source }, new Map([['value', variants]]))).toEqual({ type: 'number' })
   })
 
+  it('projects ordinary arrays in order, preserves nested authority and retains unknown results', () => {
+    const nested: WorkflowEvaluation = { state: 'known', value: [{ id: 'a' }], derivedFrom: ['nested'], collectionFields: [{ path: ['nested'], collection: { reference: { workflowId: 'w', key: 'nested', hash: 'h' }, count: 1, sealed: true } }] }
+    const expression: WorkflowExpression = { kind: 'project', items: { kind: 'literal', value: [{ value: 2 }, { value: 0 }, { value: false }] }, item: 'row', value: field('row', 'value') }
+    expect(run(expression)).toMatchObject({ state: 'known', value: [2, 0, false] })
+    const nestedResult = run({ kind: 'project', items: { kind: 'literal', value: [{ nested: [] }] }, item: 'row', value: { kind: 'ref', name: 'nested' } }, [['nested', nested]])
+    expect(nestedResult).toMatchObject({ state: 'known', collectionFields: [{ path: ['0', 'nested'], collection: { count: 1 } }] })
+    expect(run({ kind: 'project', items: { kind: 'literal', value: [{ missing: true }] }, item: 'row', value: field('row', 'absent') })).toMatchObject({ state: 'unknown' })
+  })
+
+  it('rejects project binding collisions and expanded batches before evaluation', () => {
+    expect(() => run({ kind: 'project', items: { kind: 'literal', value: [1] }, item: 'row', value: { kind: 'ref', name: 'row' } }, [['row', known(1)]])).toThrow('已存在')
+    expect(() => validateWorkflowExpression({ kind: 'project', items: { kind: 'literal', value: Array(4097).fill(0) }, item: 'row', value: { kind: 'ref', name: 'row' } })).toThrow('上限')
+    expect(() => run({ kind: 'project', items: { kind: 'literal', value: ['x'.repeat(WORKFLOW_MAX_VALUE_BYTES - 2)] }, item: 'row', value: { kind: 'ref', name: 'row' } })).toThrow('上限')
+  })
+
   it('checks reference dominance, operand types and local binding shadowing', () => {
     const boolean: WorkflowValueSchema = { type: 'boolean' }
     expect(() => inferWorkflowExpression({ kind: 'ref', name: 'future' }, new Map())).toThrow('future')

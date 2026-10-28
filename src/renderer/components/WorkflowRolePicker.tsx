@@ -23,12 +23,29 @@ function readRoleControls(context: ProviderContext) {
   return result
 }
 
+export function WorkflowProviderSelect({ role, agents, selected = '', onChange }: {
+  role: WorkflowRole
+  agents: DetectedAgent[]
+  selected?: string
+  onChange: (binding: WorkflowRoleBinding) => void
+}) {
+  return <label>{copy.provider}<select value={selected} onChange={event => {
+    const agent = agents.find(candidate => candidate.id === event.target.value)
+    const providerId = agent && providerIdForAgentId(agent.id)
+    if (!agent || !providerId) return
+    onChange({ role, providerId, ...(providerId === 'pi' ? { agentProfileId: agent.id } : {}), permissionMode: 'default' })
+  }}>
+    {!selected && <option value="" disabled>{agents.length ? copy.chooseProvider : copy.emptyAgents}</option>}
+    {agents.map(agent => <option key={agent.id} value={agent.id} disabled={Boolean(agent.unavailableReason) || !providerIdForAgentId(agent.id)}>{agent.name}</option>)}
+  </select></label>
+}
 
-export function WorkflowRolePicker({ binding, agents, cwd, disabled, onChange, onReady }: {
+export function WorkflowRolePicker({ binding, agents, cwd, disabled, lockDefaultPermission = false, onChange, onReady }: {
   binding: WorkflowRoleBinding
   agents: DetectedAgent[]
   cwd: string
   disabled: boolean
+  lockDefaultPermission?: boolean
   onChange: (binding: WorkflowRoleBinding) => void
   onReady: (role: WorkflowRole, ready: boolean) => void
 }) {
@@ -56,21 +73,14 @@ export function WorkflowRolePicker({ binding, agents, cwd, disabled, onChange, o
     (binding.providerId !== 'pi' || agent.id === binding.agentProfileId))?.id ?? ''
   const modelAvailable = Boolean(catalog && (binding.requestedModel
     ? catalog.models.some(option => modelKey(option.model) === modelKey(binding.requestedModel!)) : catalog.models.length > 0))
-  const permissionAvailable = Boolean(catalog?.permissions.some(option => option.id === (binding.permissionMode ?? 'default')))
+  const permissionMode = lockDefaultPermission ? 'default' : binding.permissionMode ?? 'default'
+  const permissionAvailable = Boolean(catalog?.permissions.some(option => option.id === permissionMode))
   const valid = Boolean(selected && modelAvailable && permissionAvailable)
   useEffect(() => { readyRef.current(binding.role, valid) }, [binding.role, binding.providerId, binding.agentProfileId,
-    binding.requestedModel?.id, binding.requestedModel?.providerId, binding.permissionMode, valid])
+    binding.requestedModel?.id, binding.requestedModel?.providerId, permissionMode, valid])
   return <fieldset className="workflow-role" data-workflow-role={binding.role} disabled={disabled}>
     <legend>{copy.roles[binding.role]}</legend>
-    <label>{copy.provider}<select value={selected} onChange={event => {
-      const agent = agents.find(candidate => candidate.id === event.target.value)
-      const providerId = agent && providerIdForAgentId(agent.id)
-      if (!agent || !providerId) return
-      onChange({ role: binding.role, providerId, ...(providerId === 'pi' ? { agentProfileId: agent.id } : {}), permissionMode: 'default' })
-    }}>
-      {!selected && <option value="" disabled>{copy.emptyAgents}</option>}
-      {agents.map(agent => <option key={agent.id} value={agent.id} disabled={Boolean(agent.unavailableReason) || !providerIdForAgentId(agent.id)}>{agent.name}</option>)}
-    </select></label>
+    <WorkflowProviderSelect role={binding.role} agents={agents} selected={selected} onChange={onChange} />
     <label>{copy.model}<select disabled={!catalog} value={binding.requestedModel ? modelKey(binding.requestedModel) : ''} onChange={event => {
       const model = catalog?.models.find(option => modelKey(option.model) === event.target.value)?.model
       onChange({ ...binding, requestedModel: model })
@@ -79,14 +89,14 @@ export function WorkflowRolePicker({ binding, agents, cwd, disabled, onChange, o
       <option value="">{catalog ? copy.providerDefault : copy.loading}</option>
       {catalog?.models.map(option => <option key={modelKey(option.model)} value={modelKey(option.model)}>{option.label}</option>)}
     </select></label>
-    <label>{copy.permission}<select disabled={!catalog} value={binding.permissionMode ?? 'default'} onChange={event => {
-      const permissionMode = catalog?.permissions.find(option => option.id === event.target.value)?.id
-      if (permissionMode) onChange({ ...binding, permissionMode })
+    {!lockDefaultPermission && <label>{copy.permission}<select disabled={!catalog} value={permissionMode} onChange={event => {
+      const nextPermission = catalog?.permissions.find(option => option.id === event.target.value)?.id
+      if (nextPermission) onChange({ ...binding, permissionMode: nextPermission })
     }}>
-      {!permissionAvailable && <option value={binding.permissionMode ?? 'default'} disabled>{catalog ? copy.selectedPermissionUnavailable : copy.loading}</option>}
+      {!permissionAvailable && <option value={permissionMode} disabled>{catalog ? copy.selectedPermissionUnavailable : copy.loading}</option>}
       {catalog?.permissions.map(option => <option key={option.id} value={option.id} title={option.description}>{option.label}</option>)}
-    </select></label>
-    {catalog && <p>{catalog.permissions.find(option => option.id === (binding.permissionMode ?? 'default'))?.description}</p>}
+    </select></label>}
+    {catalog && <p>{catalog.permissions.find(option => option.id === permissionMode)?.description}</p>}
     {error && <p role="alert">{error}</p>}
   </fieldset>
 }

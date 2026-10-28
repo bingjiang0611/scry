@@ -100,6 +100,8 @@ const api = {
     read: (id: string, beforeOrdinal?: number): ReturnType<ConversationApi['read']> => ipcRenderer.invoke('conversation:read', id, beforeOrdinal),
     readItem: (id: string, ref: Parameters<ConversationApi['readItem']>[1]): ReturnType<ConversationApi['readItem']> => ipcRenderer.invoke('conversation:readItem', id, ref),
     preview: (id: string, request: Parameters<ConversationApi['preview']>[1]): ReturnType<ConversationApi['preview']> => ipcRenderer.invoke('conversation:preview', id, request),
+    commands: (id: string, request?: Parameters<ConversationApi['commands']>[1]): ReturnType<ConversationApi['commands']> => ipcRenderer.invoke('conversation:commands', id, request),
+    submit: (request: Parameters<ConversationApi['submit']>[0]): ReturnType<ConversationApi['submit']> => ipcRenderer.invoke('conversation:submit', request),
     send: (request: Parameters<ConversationApi['send']>[0]): ReturnType<ConversationApi['send']> => ipcRenderer.invoke('conversation:send', request)
   } satisfies ConversationApi,
   workspaceList: (request: WorkspaceListRequest): Promise<WorkspaceListResult> => ipcRenderer.invoke('workspace:list', request),

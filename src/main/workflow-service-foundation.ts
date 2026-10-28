@@ -4,7 +4,9 @@ import { workflowShutdownCopy, workflowRecoveryCopy, workflowTemplateCopy } from
 
 import { workflowSystemCopy } from '../shared/constants/copy'
 import { validateWorkflowSystemLedger } from './workflow-system-ledger'
-import type { WorkflowResumeResult } from '../shared/workflow-api'
+import type { WorkflowFrameInspection, WorkflowResumeResult } from '../shared/workflow-api'
+import type { WorkflowExecutionInspection, WorkflowExecutionInspectionRequest } from '../shared/workflow-inspection'
+import type { WorkflowOutputInspection, WorkflowOutputInspectionRequest } from '../shared/workflow-output-inspection'
 
 import type { ProviderDescriptor } from '../shared/provider'
 import type { WorkflowAttemptOutcome, WorkflowPlanPreview, WorkflowProgress, WorkflowRoleBinding, WorkflowProgram } from '../shared/workflow'
@@ -17,7 +19,13 @@ import type { WorkflowPlanningIntent, WorkflowStoreRecord } from './workflow-sto
 import { frozenTemplateParameters, templateBody, templateRoles } from './workflow-template-instance'
 
 import type { WorkflowServiceOptions, WorkflowShutdownPreparation, Receipt, ShutdownPreparationToken } from './workflow-service-contracts'
-const planningId = (commandId: string) => `workflow-${createHash('sha256').update(commandId).digest('hex')}`
+import { projectWorkflowStopIntents } from './workflow-stop'
+import { projectWorkflowFrameLinks } from './workflow-progress'
+import type { WorkflowRouteResult } from '../shared/workflow-route'
+import { projectWorkflowExecution } from './workflow-execution-inspection'
+import { inspectWorkflowOutput } from './workflow-output-inspection'
+
+export const planningId = (commandId: string) => `workflow-${createHash('sha256').update(commandId).digest('hex')}`
 
 /** One App-owned service. Provider execution stays in the canonical App chain. */
 export class WorkflowServiceFoundation {
@@ -26,6 +34,8 @@ export class WorkflowServiceFoundation {
   protected readonly ready: Promise<void>
   protected initializationError: unknown
   protected readonly plans = new Map<string, Receipt<WorkflowPlanPreview>>()
+  /** Routing decisions are cached separately: they are not plan previews. */
+  protected readonly routes = new Map<string, Receipt<WorkflowRouteResult>>()
   protected readonly starts = new Map<string, Receipt<WorkflowProgress>>()
   protected readonly resumes = new Map<string, Receipt<WorkflowResumeResult>>()
   protected readonly retries = new Map<string, Receipt<WorkflowProgress>>()
@@ -58,11 +68,12 @@ export class WorkflowServiceFoundation {
     return false
   }
 
-  protected progressSnapshot(progress: WorkflowProgress): WorkflowProgress {
+  protected progressSnapshot(progress: WorkflowProgress, requests?: WorkflowStoreRecord['stopRequests'], record?: WorkflowStoreRecord): WorkflowProgress {
     // Dispatch/outcomes are durable per-root facts. Slots belong to the current
     // shared kernel, not the historical counter stored with one root's update.
     const slots = this.options.slots
-    return workflowProgressSnapshot({ ...progress, slots: { limit: slots.limit, inUse: slots.active, queued: slots.queued } })
+    const snapshot = workflowProgressSnapshot({ ...progress, slots: { limit: slots.limit, inUse: slots.active, queued: slots.queued } })
+    return projectWorkflowStopIntents(projectWorkflowFrameLinks(snapshot, record), requests)
   }
   protected async ensureReady(): Promise<void> {
     await this.ready
@@ -176,7 +187,7 @@ export class WorkflowServiceFoundation {
   protected async prepareSystems(program: WorkflowProgram): Promise<WorkflowProgram> {
     const pending = [program.body]
     let required = false
-    while (pending.length) { const block = pending.pop()!; required ||= block.kind === 'replica' || block.kind === 'check'; pending.push(...workflowChildBlocks(block)) }
+    while (pending.length) { const block = pending.pop()!; required ||= block.kind === 'replica' || block.kind === 'combine' || block.kind === 'check'; pending.push(...workflowChildBlocks(block)) }
     if (!required) return program
     if (!this.options.systems) throw new Error(workflowSystemCopy.unavailable)
     return validateWorkflowProgram(await this.options.systems.prepare(program))
@@ -195,6 +206,54 @@ export class WorkflowServiceFoundation {
       if (JSON.stringify(validateWorkflowRoleBinding(preview.orchestrator, 0, true)) !== JSON.stringify(program.roles.find(role => role.role === 'orchestrator'))) throw new Error(workflowTemplateCopy.frozen)
     }
   }
+  async inspectExecution(request: WorkflowExecutionInspectionRequest, authorizeWorkspace: (workspace: string) => unknown): Promise<WorkflowExecutionInspection> {
+    await this.ensureReady()
+    const observedAt = Date.now()
+    const record = await this.options.store.load(request.workflowId)
+    if (!record) return { state: 'unavailable', source: 'canonical_ledger', observedAt, reason: 'root_missing' }
+    if (record.preview.workflowId !== request.workflowId) throw new Error(workflowRecoveryCopy.ledger)
+    await authorizeWorkspace(record.preview.workspace)
+    await this.assertFrozen(record.preview)
+    if (record.preview.programRevision !== request.programRevision) return { state: 'unavailable', source: 'canonical_ledger', observedAt, reason: 'source_changed' }
+    return projectWorkflowExecution(record, request, observedAt)
+  }
+  async inspectOutput(request: WorkflowOutputInspectionRequest, authorizeWorkspace: (workspace: string) => unknown): Promise<WorkflowOutputInspection> {
+    await this.ensureReady()
+    const observedAt = Date.now()
+    const record = await this.options.store.load(request.workflowId)
+    if (!record) return { state: 'unavailable', source: 'canonical_output', observedAt, reason: 'root_missing' }
+    if (record.preview.workflowId !== request.workflowId) throw new Error(workflowRecoveryCopy.ledger)
+    await authorizeWorkspace(record.preview.workspace)
+    await this.assertFrozen(record.preview)
+    if (record.preview.programRevision !== request.programRevision) return { state: 'unavailable', source: 'canonical_output', observedAt, reason: 'source_changed' }
+    const result = await inspectWorkflowOutput(this.options.store, record, request, observedAt)
+    await authorizeWorkspace(record.preview.workspace)
+    return result
+  }
+  async inspectFrame(preview: WorkflowPlanPreview, frameId: string): Promise<WorkflowFrameInspection> {
+    // Reuse the canonical preview already authorized by IPC. Renderer input
+    // never supplies this context, and the same governing root is not read twice.
+    const workflowId = preview.workflowId
+    await this.ensureReady()
+    const observedAt = Date.now()
+    const frame = await this.options.store.loadFrame(workflowId, frameId)
+    if (!frame) return { state: 'unavailable', source: 'canonical_frame', observedAt, reason: 'frame_missing' }
+    const { parentFrameId, frameId: id, nodeId, programRevision, executionEpoch, generationId, origin, phase, revision, cursor, arm } = frame
+    return {
+      state: 'available', source: 'canonical_frame', observedAt,
+      frame: {
+        frameId: id, nodeId, programRevision, phase, revision,
+        ...(executionEpoch ? { executionEpoch } : {}),
+        ...(generationId ? { generationId } : {}),
+        ...(origin ? { originFrameId: origin.frameId } : {}),
+        ...(cursor === undefined ? {} : { cursor }),
+        ...(arm ? { arm } : {}),
+        parentage: parentFrameId === null ? { state: 'root' }
+          : parentFrameId === undefined ? { state: 'unavailable', reason: 'legacy_parentage' }
+            : { state: 'available', frameId: parentFrameId }
+      }
+    }
+  }
   protected async loadPreview(id: string): Promise<WorkflowPlanPreview> {
     const preview = await this.findPreview(id)
     if (!preview) throw new Error('计划记录缺失，不会自动重跑')
@@ -208,6 +267,17 @@ export class WorkflowServiceFoundation {
     await this.assertFrozen(record.preview)
     return record.preview
   }
+  protected stopReceipt(commandId: string, fingerprint: string, action: () => Promise<boolean>): Promise<boolean> {
+    const promise = this.receipt(this.stops, commandId, fingerprint, action)
+    return promise.catch(error => {
+      // A rejected cache entry is not an accepted stop receipt. On explicit
+      // redelivery the Runner checks its canonical journal before any signal;
+      // an unknown publication must never become a fresh stop operation.
+      if (this.stops.get(commandId)?.promise === promise) this.stops.delete(commandId)
+      throw error
+    })
+  }
+
   protected receipt<T>(cache: Map<string, Receipt<T>>, commandId: string, fingerprint: string, action: () => Promise<T>): Promise<T> {
     const prior = cache.get(commandId)
     if (prior) {

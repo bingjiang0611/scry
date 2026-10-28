@@ -91,9 +91,40 @@ describe('streaming controlled collection expressions', () => {
     }
   })
 
-  it.each(['group', 'partition'] as const)('does not consume an unsealed source or publish a partial %s after stop', async kind => {
+  it('projects controlled rows once, preserves keys and nested provenance across a cold read', async () => {
+    const f = await fixture([{ score: 2 }, { score: 0 }, { score: false }])
+    const result = await f.run({ kind: 'project', items: ref, item: 'candidate', value: select('candidate', ['value', 'score']) })
+    expect(result).toMatchObject({ state: 'known', collection: { count: 3, sealed: true } })
+    if (result.state !== 'known') throw new Error('missing projected collection')
+    expect(await f.control.entries(result)).toMatchObject([
+      { key: 'item-0', index: 0, state: 'completed', settled: true },
+      { key: 'item-1', index: 1, state: 'completed', settled: true },
+      { key: 'item-2', index: 2, state: 'completed', settled: true }
+    ])
+    const saved = await f.control.saveCollectionValue(result), coldStore = new FileWorkflowStore(f.root), cold = new WorkflowControl(coldStore, f.preview), retained = await coldStore.loadValue(f.preview.workflowId, saved)
+    expect(retained).toEqual(result)
+    if (retained.state !== 'known') throw new Error('missing cold projected collection')
+    const rows = await cold.entries(retained), values = await Promise.all(rows.map(async entry => (await cold.entryValue(entry)).value))
+    expect(values).toEqual([{ key: 'item-0', index: 0, state: 'completed', settled: true, value: 2 }, { key: 'item-1', index: 1, state: 'completed', settled: true, value: 0 }, { key: 'item-2', index: 2, state: 'completed', settled: true, value: false }])
+  })
+
+  it('retains failed/stopped evidence without evaluating their values', async () => {
+    const f = await fixture([]), source = await f.control.collection({ frameId: 'evidence' }, [
+      { key: 'failed', index: 0, state: 'failed', settled: true, error: 'kept failure' },
+      { key: 'stopped', index: 1, state: 'stopped', settled: true, error: 'kept stop' }
+    ], true)
+    f.control.bind(f.control.root, 'failedRows', source)
+    const result = await f.control.evaluate({ kind: 'project', items: { kind: 'ref', name: 'failedRows' }, item: 'candidate', value: { kind: 'ref', name: 'candidate' } }, f.control.root, 'evidence-project', () => false)
+    if (result.state !== 'known') throw new Error('missing retained collection')
+    expect(await f.control.entries(result)).toMatchObject([
+      { key: 'failed', state: 'failed', settled: true, error: 'kept failure' },
+      { key: 'stopped', state: 'stopped', settled: true, error: 'kept stop' }
+    ])
+  })
+
+  it.each(['group', 'partition', 'project'] as const)('does not consume an unsealed source or publish a partial %s after stop', async kind => {
     const f = await fixture([0, false, true])
-    const expression: WorkflowExpression = kind === 'group' ? { kind, items: ref, key: ['state'] } : { kind, items: ref, item: 'candidate', when: literal(true) }
+    const expression: WorkflowExpression = kind === 'group' ? { kind, items: ref, key: ['state'] } : kind === 'partition' ? { kind, items: ref, item: 'candidate', when: literal(true) } : { kind, items: ref, item: 'candidate', value: select('candidate', ['value']) }
     const unsealed = await f.control.collection({ frameId: 'pending' }, [{ key: 'unknown', index: 0, state: 'unknown', settled: false }], false)
     const scope = { path: f.control.root.path, bindings: new Map([['input', unsealed]]) }
     const loads = vi.spyOn(f.store, 'loadValue')

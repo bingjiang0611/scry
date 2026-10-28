@@ -14,6 +14,8 @@ export type WorkflowReplicaReceipt = WorkflowReplicaReference & {
   manifestEntries: number
   manifestBytes: number
   contentBytes: number
+  /** Main-issued durable ancestry for replicas prepared from another replica. */
+  base?: WorkflowReplicaReference
 }
 
 export type WorkflowReplicaManifestEntry = {

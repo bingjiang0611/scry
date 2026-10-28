@@ -1,0 +1,83 @@
+import assert from 'node:assert/strict'
+import { writeFile } from 'node:fs/promises'
+import { checkWorkflowOutputInspection } from './workflow-output-ui-checks.mjs'
+
+export async function checkWorkflowExecutionInspection({ read, wait, click, win }) {
+  const before = await read('JSON.stringify(window.workflowFixture.counters)')
+  const key = code => { for (const type of ['keyDown', 'keyUp']) win.webContents.sendInputEvent({ type, keyCode: code }) }
+  win.setSize(1280, 960)
+  await wait('innerWidth === 1280')
+  await read('window.workflowFixture.installInspection()')
+  await wait('document.querySelector("[data-workflow-id=inspection-ui] summary")')
+  await click('[data-workflow-id=inspection-ui] summary')
+  await click('[data-workflow-inspection-open=inspection-ui]')
+  await wait('document.querySelectorAll("[data-workflow-program-node]").length === 32')
+  assert.equal(await read('document.querySelector("[data-workflow-inspection-source]").dataset.workflowInspectionSource'), 'a'.repeat(64))
+  assert.equal(await read('document.querySelector("[data-workflow-program-node=call_0]").dataset.workflowProgramParent'), 'inspection_root')
+  await click('[data-workflow-program-page=next]')
+  await wait('document.querySelector("[data-workflow-program-node=call_34]")')
+  assert.equal(await read('document.querySelectorAll("[data-workflow-program-node]").length'), 5)
+  await click('[data-workflow-program-node=call_34]')
+  assert.equal(await read('document.querySelector(".workflow-program-code textarea").readOnly'), true)
+  assert.deepEqual(await read('JSON.parse(document.querySelector(".workflow-program-code textarea").value)'), {
+    kind: 'call', blockId: 'call_34', role: 'worker', prompt: 'Fixture source 34'
+  })
+  await click('[data-workflow-inspection-action=node-history]')
+  await wait('document.querySelectorAll("[data-workflow-inspection-record]").length === 1')
+  assert.equal(await read('window.workflowFixture.inspectionQueries().at(-1).nodeId'), 'call_34')
+  await click('[data-workflow-inspection-action=all-nodes]')
+  await wait('document.querySelectorAll("[data-workflow-inspection-record]").length === 32')
+  assert.equal(await read('document.querySelector("[data-workflow-inspection-record=attempt_0]").textContent.includes("尚无已记录结果")'), true)
+  assert.equal(await read('document.querySelector("[data-workflow-inspection-record=attempt_1]").textContent.includes("作用域未确认收敛")'), true)
+  await click('[data-workflow-inspection-page-action=next]')
+  await wait('document.querySelectorAll("[data-workflow-inspection-record]").length === 3')
+  assert.equal(await read('window.workflowFixture.inspectionQueries().at(-1).offset'), 32)
+  await click('[data-workflow-inspection-page-action=previous]')
+  await wait('document.querySelectorAll("[data-workflow-inspection-record]").length === 32')
+  await click('[data-workflow-inspection-frame=frame_0]')
+  await wait('document.querySelector(".workflow-frame-inspector") && document.querySelector("[data-workflow-frame=frame_0]")')
+  key('Escape')
+  await wait('!document.querySelector(".workflow-frame-inspector") && document.querySelector(".workflow-execution-inspector") && document.activeElement.dataset.workflowInspectionFrame === "frame_0"')
+  assert.equal(await read('document.activeElement.dataset.workflowInspectionFrame'), 'frame_0')
+  // A changed source is not silently relabelled; the original intent revision survives re-read.
+  await read('window.workflowFixture.changeInspectionSource()')
+  await click('[data-workflow-inspection-page-action=refresh]')
+  await wait('document.querySelector(".workflow-execution-history").textContent.includes("程序已变化")')
+  assert.equal(await read('document.querySelectorAll("[data-workflow-inspection-record]").length'), 0)
+  await click('[data-workflow-inspection-action=reload]')
+  await wait('document.querySelector("[data-workflow-inspection-source]")?.dataset.workflowInspectionSource === "' + 'b'.repeat(64) + '" && document.querySelectorAll("[data-workflow-inspection-record]").length === 32')
+  await click('[data-workflow-inspection-kind=systems]')
+  await wait('document.querySelector(".workflow-execution-history").textContent.includes("此范围尚无")')
+  await click('[data-workflow-inspection-tab=program]')
+  win.setSize(430, 900)
+  await wait('innerWidth === 430')
+  await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+  assert.equal(await read('(() => { const e=document.querySelector(".workflow-execution-inspector"); const r=e.getBoundingClientRect(); return r.left>=0 && r.right<=innerWidth && e.scrollWidth<=e.clientWidth+1 })()'), true)
+  assert.equal(await read('getComputedStyle(document.querySelector(".workflow-program-and-code")).gridTemplateColumns.split(" ").length'), 1)
+  const contrast = await read(`(() => {
+    const root = document.querySelector('.workflow-execution-inspector')
+    const values = color => color.match(/[\\d.]+/g).map(Number)
+    const luminance = rgb => rgb.slice(0, 3).map(v => v / 255).map(v => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4).reduce((sum, v, i) => sum + v * [.2126, .7152, .0722][i], 0)
+    const background = luminance(values(getComputedStyle(root).backgroundColor))
+    const ratios = ['h2', '.workflow-inspection-revision', '.workflow-program-code textarea'].map(selector => {
+      const foreground = luminance(values(getComputedStyle(root.querySelector(selector)).color))
+      return (Math.max(foreground, background) + .05) / (Math.min(foreground, background) + .05)
+    })
+    return { ratios, padding: parseFloat(getComputedStyle(root).paddingLeft) }
+  })()`)
+  assert.ok(contrast.ratios.every(ratio => ratio >= 4.5), JSON.stringify(contrast))
+  assert.ok(contrast.padding >= 16)
+  await read('document.querySelector("[data-workflow-inspection-action=node-history]").focus()')
+  key('Tab')
+  await wait('document.activeElement.dataset.workflowInspectionAction === "close"')
+  for (const type of ['keyDown', 'keyUp']) win.webContents.sendInputEvent({ type, keyCode: 'Tab', modifiers: ['shift'] })
+  await wait('document.activeElement.dataset.workflowInspectionAction === "node-history"')
+  await writeFile('/tmp/scry-workflow-execution-ui-narrow.png', (await win.webContents.capturePage()).toPNG())
+  key('Escape')
+  await wait('!document.querySelector(".workflow-execution-inspector") && document.activeElement.dataset.workflowInspectionOpen === "inspection-ui"')
+  assert.equal(await read('document.activeElement.dataset.workflowInspectionOpen'), 'inspection-ui')
+  assert.equal(await read('JSON.stringify(window.workflowFixture.counters)'), before)
+  const output = await checkWorkflowOutputInspection({ read, wait, click, win })
+  return { output, structureAndCodeSameSource: true, boundedStructure: true, historyBeyond32: true, exactNodeFilter: true,
+    unknownPreserved: true, nestedEscapeAndFocus: true, sourceChangedRefused: true, narrowLayout: true, contrast, tabContainment: true, noMutations: true }
+}

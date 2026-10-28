@@ -5,18 +5,25 @@ import type { WorkflowLiveObservation, WorkflowProgress, WorkflowRoleBinding } f
 
 import type { WorkflowSlots, WorkflowProviderExecution } from './workflow-runner'
 
+import type { WorkflowSizeSnapshot } from '../shared/workflow-size'
+import type { WorkflowRoutingMode } from '../shared/workflow-mode'
+import type { WorkflowTaskReference } from '../shared/workflow-api'
 import type { WorkflowStore } from './workflow-store'
+import type { ProviderStructuredOutput } from './providers/types'
 import type { WorkflowTemplateStore } from './workflow-template-store'
 
 export interface WorkflowPlanRequest {
   command: string
   commandId?: string
+  routingMode?: WorkflowRoutingMode
   workspace: string
   orchestrator: WorkflowRoleBinding
   roles: WorkflowRoleBinding[]
+  capturedTask?: { reference: WorkflowTaskReference; inputSha256: string; sizeGuideline: WorkflowSizeSnapshot; authoringContinuationKey?: string }
+  beforeProviderDispatch?: () => Promise<void>
 }
 export interface WorkflowPlanProvider {
-  (request: { workflowId: string; role: WorkflowRoleBinding; roles: WorkflowRoleBinding[]; goal: string; workspace: string; signal: AbortSignal }): Promise<{ output: string; actualModel?: string; archiveRef?: string }>
+  (request: { workflowId: string; role: WorkflowRoleBinding; roles: WorkflowRoleBinding[]; goal: string; workspace: string; sizeGuideline: WorkflowSizeSnapshot; signal: AbortSignal; beforeProviderDispatch?: () => Promise<void>; expectedContinuationKey?: string; route?: true; routingMode?: WorkflowRoutingMode }): Promise<{ output: string; outputSource?: ProviderStructuredOutput['source']; actualModel?: string; archiveRef?: string }>
 }
 export interface WorkflowServiceOptions {
   store: WorkflowStore

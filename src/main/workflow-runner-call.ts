@@ -17,7 +17,7 @@ export async function runWorkflowCall(effects: WorkflowRunnerEffects, store: Wor
   const staticReuse = record.revisions?.at(-1)?.reuse.some(entry => entry.nodeId === block.blockId)
   let recovered = frame?.callReuse ? await control.selectedCall(frame) : control.recoveredOutcome(block, scope, frame)
   const dynamicSelection = frame?.callInputRef && (record.revisions?.length ?? 0) > 1 && (!recovered || frame.callReuse)
-  if (!controller.stopped && (staticReuse || dynamicSelection)) {
+  if (!controller.stopped && !scope.admission?.isStopped() && (staticReuse || dynamicSelection)) {
     const role = preview.program.roles.find(candidate => candidate.role === block.role)!
     await effects.options.beforeDispatch?.(role, preview.workspace)
   }
@@ -26,12 +26,12 @@ export async function runWorkflowCall(effects: WorkflowRunnerEffects, store: Wor
     if (frame.callReuse) {
       const current = await effects.options.systems?.observeAgentInputs(preview.workflowId, randomUUID(), preview.workspace, 'before')
       if (!await reusableWorkflowAgentInputs(store, preview.workflowId, frame.callReuse.attemptId, record.agentInputs?.[frame.callReuse.attemptId], current)) throw new Error(workflowRevisionCopy.sourceChanged)
-    } else if (!controller.stopped) {
+    } else if (!controller.stopped && !scope.admission?.isStopped()) {
       recovered = await control.selectCall(frame, async () => effects.options.systems?.observeAgentInputs(preview.workflowId, randomUUID(), preview.workspace, 'before'))
     }
   }
   if (recovered && block.replica) {
-    const input = await control.evaluate(block.replica, scope, block.blockId, () => controller.stopped)
+    const input = await control.evaluate(block.replica, scope, block.blockId, () => controller.stopped || Boolean(scope.admission?.isStopped()))
     const intent = record.intents.find(value => value.attemptId === recovered.attemptId)
     if (JSON.stringify(intent?.replica) !== JSON.stringify(input.state === 'known' ? input.replica : undefined)) throw new Error(workflowRecoveryCopy.frame)
   }

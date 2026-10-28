@@ -1,6 +1,6 @@
 import { validateWorkflowProtectedPaths } from './workflow-verification-surface'
 import { WORKFLOW_MAX_REQUIRED_CHECKS } from '../shared/workflow-verification'
-import { WORKFLOW_MAX_BATCH, type WorkflowBlock, type WorkflowOutputRef } from '../shared/workflow'
+import { WORKFLOW_MAX_BATCH, type WorkflowBlock, type WorkflowOutputRef, type WorkflowParallelFailurePolicy } from '../shared/workflow'
 import { workflowCollectionCopy, workflowFrameCopy, workflowValueCopy } from '../shared/constants/copy'
 import { validateWorkflowCheck, validateWorkflowFrozenCheck } from './workflow-check'
 import { validateWorkflowValueSchema } from './workflow-values'
@@ -62,6 +62,13 @@ export function validateBlock(value: unknown, seen: Set<string>, depth: number, 
     if (count.textBytes > MAX_PROGRAM_TEXT) throw new Error(workflowValueCopy.programLimit)
     return { kind: 'verification', blockId: input.blockId, required, ...(baseline ? { baseline } : {}), ...(protectedPaths ? { protectedPaths } : {}) }
   }
+  if (input.kind === 'combine') {
+    rejectUnknownFields(input, ['kind', 'blockId', 'base', 'candidates'])
+    const base = validateWorkflowExpression(input.base), candidates = validateWorkflowExpression(input.candidates)
+    count.textBytes += Buffer.byteLength(JSON.stringify({ base, candidates }))
+    if (count.textBytes > MAX_PROGRAM_TEXT) throw new Error(workflowValueCopy.programLimit)
+    return { kind: 'combine', blockId: input.blockId, base, candidates }
+  }
   if (input.kind === 'replica' || input.kind === 'check') {
     rejectUnknownFields(input, input.kind === 'replica' ? ['kind', 'blockId', 'source'] : ['kind', 'blockId', 'replica', 'check', 'authorization'])
     const expression = input.kind === 'replica' ? input.source === undefined ? undefined : validateWorkflowExpression(input.source) : validateWorkflowExpression(input.replica)
@@ -119,14 +126,13 @@ export function validateBlock(value: unknown, seen: Set<string>, depth: number, 
     return { kind: 'return', blockId: input.blockId, ref }
   }
   if (input.kind === 'sequence' || input.kind === 'parallel') {
-    rejectUnknownFields(input, ['kind', 'blockId', 'blocks'])
+    rejectUnknownFields(input, input.kind === 'parallel' ? ['kind', 'blockId', 'blocks', 'failurePolicy'] : ['kind', 'blockId', 'blocks'])
     if (!Array.isArray(input.blocks) || input.blocks.length === 0) throw new Error(`${input.kind} 必须包含程序块`)
     if (input.blocks.length > WORKFLOW_MAX_BATCH) throw new Error(`批次不能超过 ${WORKFLOW_MAX_BATCH}`)
-    return {
-      kind: input.kind,
-      blockId: input.blockId,
-      blocks: input.blocks.map((child) => validateBlock(child, seen, depth + 1, count))
-    }
+    if (input.kind === 'parallel' && input.failurePolicy !== undefined && input.failurePolicy !== 'all_settled' && input.failurePolicy !== 'fail_fast') throw new Error(workflowFrameCopy.invalid)
+    const blocks = input.blocks.map((child) => validateBlock(child, seen, depth + 1, count))
+    if (input.kind === 'parallel') return { kind: 'parallel', blockId: input.blockId, blocks, ...(input.failurePolicy === undefined ? {} : { failurePolicy: input.failurePolicy as WorkflowParallelFailurePolicy }) }
+    return { kind: 'sequence', blockId: input.blockId, blocks }
   }
   throw new Error(workflowFrameCopy.unsupportedBlock)
 }

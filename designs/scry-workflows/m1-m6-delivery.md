@@ -8,8 +8,19 @@
 - [解释器、集合、loop、继续与显式重试](delivery-recovery.md)
 - [同根修订与静态/动态历史结果复用子集](same-root-revisions-status.md)
 - [生产修订预览、显式确认与冷启动重复命令子集](revision-entry-status.md)
+- [单节点停止与 Node 测试报告的有界证据](node-control-evidence-status.md)
+- [并行 fail_fast、自动停止来源与有界验收](parallel-failure-status.md)
+- [结构父级、只读控制记录与当前验证缺口](frame-inspection-status.md)
+- [App runtime 领域拆分与入口前置工作](app-runtime-decomposition-status.md)
+- [Session history IPC 与显式 App-owned 状态](session-history-extraction-status.md)
+- [Claude SDK 配置来源转发与运行职责拆分](claude-settings-source-status.md)
+- [Conversation 请求解码与派发协议拆分](conversation-service-extraction-status.md)
+- [受限规划参数、canonical SDK 结果与未通过的 Native/App 验证](authoring-result-status.md)
+- [迁出 IPC/trace 的目录扫描与既有计数验证](catalogue-scan-status.md)
 
 以下保留总合同、里程碑验收表与全局缺口。分文件不表示这些里程碑已完成。
+
+- [规模偏好、冻结规划快照与仍未关闭的回归](size-guideline-status.md)
 
 ## 交付合同
 
@@ -73,6 +84,6 @@
 - 初始审计基线：当时 `src/shared/workflow.ts` 只有 sequence/parallel/call/return，编译器拒绝其他指令。该句不是当前实现状态；后续 bind/branch/map/collect/loop 与模板数据发布进展见上文，准确语法见 [program-ir.md](program-ir.md)。M2–M4 整项仍未完成。
 - 当前 M1 基础原生离线证据：`~/.local/state/rotom/verification-evidence/scry-managed-crash-yrbngh7d/`，但不覆盖完整App/SQLite/WorkflowProgram，更不是M6。
 - 首个实际缺陷：`WorkflowRunner.runBlock` 的 sequence fail-fast 漏掉 blocked，根虽最终显示 blocked，后继仍可能执行。已先新增回归并观察旧实现失败；改为仅 completed 且 settled 的子块可继续。10文件109项focused、Node/web types、App build通过；负对照与green日志在 `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-m1-m6-gates.dcg8Lz/`。上述日志另有只读持久副本 `~/.local/state/rotom/verification-evidence/workflow-m1-sequence-m6jzgze1/`。当前App重放/性能覆盖仍待核对，不算M1完成。`performance-paths.json`把workflow IPC归到providers/catalog，但没有workflow-runner专用counter，不拿目录基准冒充调度门测量。
-- 生产owner/observer审计：`index.ts` 的workflow executor仍调用唯一startAppRun；原生终态在最终录制处理后经onTerminal交回，startup与每次dispatch前核对冻结runtimeIdentity。`WorkflowService`恢复历史unknown只保留容量不重发。现有UI smoke是API fixture，不将它当完整生产App证明；该验收继续保留到完整功能交付。
+- 生产owner/observer审计：`index.ts` 的workflow executor仍调用唯一startAppRun；原生终态在最终录制处理后经onTerminal交回，startup与每次dispatch前核对冻结runtimeIdentity。`WorkflowService`恢复历史unknown只保留容量不重发。原有 UI smoke 是 API fixture，不能当完整生产 App 证明；后续已补单节点停止与 Node TAP 的隔离生产 App 子集，见上文有界证据。真实账号、完整 owner/observer 矩阵和完整功能验收仍保留。
 - 实施并行关系：先提交M1已证实的缺陷修复，不等待所有App场景才开始M2/M3；所有M1验收项保留，最终逐项统一核对，不把读码审计当作运行证明。
 - 下一执行顺序：收口 M1 生产 owner/observer/recording 与控制合同；落地 M2 编译器/模板及 M3 解释器；然后 M4 质量/检查/写入、M5真实交互、M6授权真实矩阵。任何阶段仍有未满足项都不调用目标完成。

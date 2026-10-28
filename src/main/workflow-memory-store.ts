@@ -11,8 +11,21 @@ import type { WorkflowAttemptOutcome, WorkflowCollectionEntry, WorkflowCollectio
 
 import type { WorkflowFrameValueCheckpoint, WorkflowStore, WorkflowStoreRecord, WorkflowStorePage, WorkflowPlanningIntent } from './workflow-store-contracts'
 import { fileSafe, MAX_RECORD_BYTES, frameName, valueName, collectionName, validateEvaluation, validateCollectionArtifacts } from './workflow-store-artifacts'
+import { workflowSizeCopy } from '../shared/constants/copy'
+import { isWorkflowSizeGuideline, type WorkflowSizeGuideline, type WorkflowSizeSnapshot } from '../shared/workflow-size'
+import { resolveWorkflowSize, validatePlanningSize } from './workflow-size-guideline'
+import { validateWorkflowStopRequests } from './workflow-stop'
 
 export class MemoryWorkflowStore implements WorkflowStore {
+  private preferences?: Record<string, unknown>
+  async sizeGuideline(): Promise<WorkflowSizeSnapshot> {
+    return resolveWorkflowSize(undefined, this.preferences && JSON.stringify(this.preferences)).snapshot
+  }
+  async setSizeGuideline(value: WorkflowSizeGuideline | null): Promise<WorkflowSizeSnapshot> {
+    if (value !== null && !isWorkflowSizeGuideline(value)) throw new Error(workflowSizeCopy.invalidValue)
+    this.preferences = value === null ? {} : { workflowSizeGuideline: value }
+    return this.sizeGuideline()
+  }
   private readonly records = new Map<string, WorkflowStoreRecord>()
   private readonly planning = new Map<string, WorkflowPlanningIntent>()
   private readonly frames = new Map<string, WorkflowControlFrame>()
@@ -83,6 +96,7 @@ export class MemoryWorkflowStore implements WorkflowStore {
     return stored?.output
   }
   async create(record: WorkflowStoreRecord): Promise<boolean> {
+    validateWorkflowStopRequests(record)
     if (this.records.has(record.preview.workflowId)) return false
     validateWorkflowOwnership(record)
     const snapshot = this.snapshot(record)
@@ -90,6 +104,7 @@ export class MemoryWorkflowStore implements WorkflowStore {
     return true
   }
   async save(record: WorkflowStoreRecord): Promise<void> {
+    validateWorkflowStopRequests(record)
     workflowEpochMatches(this.records.get(record.preview.workflowId), record)
     validateWorkflowOwnership(record)
     const snapshot = this.snapshot(record)
@@ -107,7 +122,10 @@ export class MemoryWorkflowStore implements WorkflowStore {
     delete snapshot.progress.live
     return snapshot
   }
-  async savePlanningIntent(intent: WorkflowPlanningIntent): Promise<void> { this.planning.set(intent.workflowId, structuredClone(intent)) }
+  async savePlanningIntent(intent: WorkflowPlanningIntent): Promise<void> {
+    validatePlanningSize(intent, this.planning.get(intent.workflowId))
+    this.planning.set(intent.workflowId, structuredClone(intent))
+  }
   async loadPlanningIntent(id: string): Promise<WorkflowPlanningIntent | undefined> { const value = this.planning.get(id); return value && structuredClone(value) }
   async *planningIntents(): AsyncIterable<WorkflowPlanningIntent> { for (const intent of this.planning.values()) yield structuredClone(intent) }
   async load(id: string): Promise<WorkflowStoreRecord | undefined> { const value = this.records.get(id); return value && structuredClone(value) }

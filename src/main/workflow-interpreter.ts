@@ -7,11 +7,13 @@ import { workflowCollectionCopy, workflowValueCopy, workflowFrameCopy as copy } 
 import { workflowCollectionFields, workflowExpressionReferences, workflowField } from './workflow-expressions'
 import { WorkflowControl, type WorkflowControlScope } from './workflow-control'
 import { WorkflowLoopExecution } from './workflow-loop-execution'
-import { retainPhase, unavailable, workflowExecutionPhase } from './workflow-interpreter-results'
+import { retainPhase, unavailable, workflowCompletionPhase, workflowExecutionPhase } from './workflow-interpreter-results'
 import { matchesWorkflowValue } from './workflow-values'
+import { WorkflowAdmissionFence, type WorkflowParallelFailure } from './workflow-parallel-policy'
 
 export type WorkflowInterpreterState = {
   stopped: boolean
+  error?: string
   returnNode?: string
   returnPath?: string[]
   returnValue?: WorkflowEvaluation
@@ -20,7 +22,7 @@ type Result = { outcomes: WorkflowAttemptOutcome[]; value: WorkflowEvaluation; p
 export type { Result as WorkflowExecutionResult }
 type Base = { scope: WorkflowControlScope; frame?: WorkflowControlFrame }
 type Activation =
-  | { stage: 'enter'; block: WorkflowBlock; scope: WorkflowControlScope }
+  | { stage: 'enter'; block: WorkflowBlock; scope: WorkflowControlScope; parentFrameId?: string | null }
   | (Base & { stage: 'sequence'; block: Extract<WorkflowBlock, { kind: 'sequence' }>; cursor: number; outcomes: WorkflowAttemptOutcome[]; value: WorkflowEvaluation; partial: boolean; terminal?: WorkflowControlFrame['phase']; critical: boolean })
   | (Base & { stage: 'branch'; block: Extract<WorkflowBlock, { kind: 'branch' }>; arm: 'then' | 'else' | 'unknown'; decision: WorkflowEvaluation; childScope: WorkflowControlScope })
 
@@ -30,7 +32,8 @@ type Activation =
 export class WorkflowInterpreter {
   constructor(private readonly control: WorkflowControl, private readonly state: WorkflowInterpreterState,
     private readonly call: (block: Extract<WorkflowBlock, { kind: 'call' }>, scope: WorkflowControlScope, frame?: WorkflowControlFrame) => Promise<{ outcome: WorkflowAttemptOutcome; value: WorkflowEvaluation }>, private readonly parallelism: () => number,
-    private readonly system: (block: Extract<WorkflowBlock, { kind: 'replica' | 'check' | 'verification' }>, scope: WorkflowControlScope, frame?: WorkflowControlFrame) => Promise<{ value: WorkflowEvaluation; phase: WorkflowControlFrame['phase'] }>) {}
+    private readonly system: (block: Extract<WorkflowBlock, { kind: 'replica' | 'combine' | 'check' | 'verification' }>, scope: WorkflowControlScope, frame?: WorkflowControlFrame) => Promise<{ value: WorkflowEvaluation; phase: WorkflowControlFrame['phase'] }>,
+    private readonly onParallelFailure: (failure: WorkflowParallelFailure) => Promise<boolean>) {}
 
   private phase(outcomes: WorkflowAttemptOutcome[], scope: WorkflowControlScope): WorkflowControlFrame['phase'] {
     return workflowExecutionPhase(outcomes, this.state.stopped, scope.blockedReason)
@@ -44,7 +47,7 @@ export class WorkflowInterpreter {
 
   private finishSequence(top: Extract<Activation, { stage: 'sequence' }>): Promise<Result> {
     const base = this.phase(top.outcomes, top.scope)
-    const phase = base === 'completed' ? top.terminal ?? base : base
+    const phase = workflowCompletionPhase(base, top.terminal)
     const partial = top.partial && !top.critical && phase === 'blocked'
     return this.finish(top.block, top.scope, top.frame, top.value, phase, top.outcomes, partial)
   }
@@ -87,7 +90,11 @@ export class WorkflowInterpreter {
         if (top.cursor === top.block.blocks.length || this.state.stopped) {
           stack.pop()
           returned = await this.finishSequence(top)
-        } else stack.push({ stage: 'enter', block: top.block.blocks[top.cursor], scope: top.scope })
+        } else {
+          // Lazy provenance maps and blocked state belong to the same lexical
+          // object. Carry structural ancestry on the activation, not a scope copy.
+          stack.push({ stage: 'enter', block: top.block.blocks[top.cursor], scope: top.scope, ...(top.frame ? { parentFrameId: top.frame.frameId } : {}) })
+        }
         continue
       }
       if (top.stage === 'branch') {
@@ -104,7 +111,7 @@ export class WorkflowInterpreter {
         }
         stack.pop()
         const base = this.phase(returned.outcomes, top.scope)
-        const phase = base === 'completed' ? returned.phase : base
+        const phase = workflowCompletionPhase(base, returned.phase)
         const partial = phase === 'blocked' && returned.reportPartial === true
         returned = await this.finish(top.block, top.scope, top.frame, value, phase, returned.outcomes, partial)
         continue
@@ -115,7 +122,7 @@ export class WorkflowInterpreter {
         continue
       }
       const current = top.block
-      const frame = await this.control.enter(current, top.scope)
+      const frame = await this.control.enter(current, top.scope, true, top.parentFrameId)
       switch (current.kind) {
         case 'return': {
           this.state.returnNode = current.ref.nodeId
@@ -141,7 +148,7 @@ export class WorkflowInterpreter {
           returned = await this.finish(current, top.scope, frame, value, this.phase([outcome], top.scope), [outcome])
           break
         }
-        case 'replica': case 'check': case 'verification': {
+        case 'replica': case 'combine': case 'check': case 'verification': {
           const result = await this.system(current, top.scope, frame)
           if (result.phase === 'blocked' && result.value.state === 'unknown') top.scope.blockedReason = result.value.reason
           stack.pop()
@@ -158,7 +165,7 @@ export class WorkflowInterpreter {
           const label = (name: string) => current.blockId + ':' + name + ':' + selectedFrame.decisionRef!.hash
           for (const skipped of ['then', 'else', 'unknown'] as const) {
             const child = current[skipped]
-            if (skipped !== arm && child !== 'blocked') await this.control.skip(child, this.control.child(top.scope, label(skipped)))
+            if (skipped !== arm && child !== 'blocked') await this.control.skip(child, this.control.child(top.scope, label(skipped), selectedFrame))
           }
           const selected = current[arm]
           if (selected === 'blocked') {
@@ -166,7 +173,7 @@ export class WorkflowInterpreter {
             stack.pop()
             returned = await this.finish(current, top.scope, selectedFrame, decision, 'blocked')
           } else {
-            const childScope = this.control.child(top.scope, label(arm))
+            const childScope = this.control.child(top.scope, label(arm), selectedFrame)
             childScope.callContexts!.push({ kind: 'branch', frameId: selectedFrame.frameId, blockId: current.blockId, arm, decisionRef: selectedFrame.decisionRef! })
             stack[stack.length - 1] = { stage: 'branch', block: current, scope: top.scope, frame: selectedFrame, arm, decision, childScope }
             stack.push({ stage: 'enter', block: selected, scope: childScope })
@@ -222,22 +229,47 @@ export class WorkflowInterpreter {
   }
 
   private async fork(block: Extract<WorkflowBlock, { kind: 'parallel' }>, scope: WorkflowControlScope, frame: WorkflowControlFrame | undefined): Promise<Result> {
-    const scopes = block.blocks.map(child => this.control.child(scope, 'parallel:' + child.blockId))
+    if (block.failurePolicy === 'fail_fast' && !frame) throw new Error(copy.invalid)
+    const admission = new WorkflowAdmissionFence(scope.admission)
+    const requestPolicy = async (index: number, phase: WorkflowControlFrame['phase']): Promise<boolean> => {
+      admission.stop()
+      return this.onParallelFailure({ policy: 'fail_fast', admission,
+        trigger: { frameId: frame!.frameId, nodeId: block.blocks[index].blockId, phase } })
+    }
+    const scopes = block.blocks.map(child => {
+      const childScope = this.control.child(scope, 'parallel:' + child.blockId, frame)
+      childScope.admission = admission
+      return childScope
+    })
     const pending = block.blocks.map((child, index) => this.run(child, scopes[index])
-      .then(value => ({ value } as const)).catch((error: unknown) => ({ error } as const)))
+      .then(value => ({ index, value } as const)).catch((error: unknown) => ({ index, error } as const)))
     const unresolved = new Set(pending)
     const outcomes: WorkflowAttemptOutcome[] = []
-    let partial = false, critical = false
+    let partial = false, critical = false, policyRequested = false
     let terminal: WorkflowControlFrame['phase'] = 'completed'
     while (unresolved.size) {
       const next = await Promise.race([...unresolved].map(promise => promise.then(result => ({ result, source: promise }))))
       unresolved.delete(next.source)
-      if ('error' in next.result) { await Promise.allSettled([...unresolved]); throw next.result.error }
+      if ('error' in next.result) {
+        if (block.failurePolicy === 'fail_fast') {
+          const reason = next.result.error instanceof Error ? next.result.error.message : String(next.result.error)
+          this.state.error ??= reason
+          if (!policyRequested) await requestPolicy(next.result.index, 'unknown')
+          return this.finish(block, scope, frame, unavailable(reason), 'unknown', outcomes)
+        }
+        await Promise.allSettled([...unresolved])
+        throw next.result.error
+      }
       outcomes.push(...next.result.value.outcomes)
       if (next.result.value.phase !== 'completed') terminal = retainPhase(terminal, next.result.value.phase)
       partial ||= next.result.value.reportPartial === true
-      critical ||= next.result.value.phase !== 'completed' && !next.result.value.reportPartial
-      if (next.result.value.phase === 'unknown') return this.finish(block, scope, frame, unavailable(), 'unknown', outcomes)
+      const childCritical = next.result.value.phase !== 'completed' && !next.result.value.reportPartial
+      critical ||= childCritical
+      if (block.failurePolicy === 'fail_fast' && childCritical && !policyRequested) {
+        policyRequested = true
+        if (!await requestPolicy(next.result.index, next.result.value.phase)) return this.finish(block, scope, frame, unavailable(), 'unknown', outcomes)
+      }
+      if (next.result.value.phase === 'unknown' && block.failurePolicy !== 'fail_fast') return this.finish(block, scope, frame, unavailable(), 'unknown', outcomes)
     }
     this.control.join(scope, scopes)
     const values = block.blocks.map(child => scope.bindings.get(child.blockId) ?? unavailable())
@@ -247,7 +279,7 @@ export class WorkflowInterpreter {
       derivedFrom: [...new Set(values.flatMap(item => item.derivedFrom))], ...(fields.length ? { collectionFields: fields } : {})
     } : unavailable()
     const base = this.phase(outcomes, scope)
-    const phase = base === 'completed' ? terminal : base
+    const phase = workflowCompletionPhase(base, terminal)
     const reportPartial = partial && !critical && phase === 'blocked'
     return this.finish(block, scope, frame, value, phase, outcomes, reportPartial)
   }

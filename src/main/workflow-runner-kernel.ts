@@ -1,18 +1,23 @@
 import { runWorkflowCall } from './workflow-runner-call'
-import { type WorkflowRunnerOptions } from './workflow-runner-contracts'
+import type { WorkflowRunnerOptions, WorkflowRootExecutionState } from './workflow-runner-contracts'
 import { WorkflowSlots } from './workflow-slots'
 import { WorkflowRunnerEffects } from './workflow-runner-effects'
 import { runWorkflowSystem } from './workflow-runner-system'
 import { randomUUID } from 'node:crypto'
 import { workflowControlCopy, workflowRecoveryCopy } from '../shared/constants/copy'
-import type { WorkflowApproval, WorkflowPlanPreview, WorkflowProgress, WorkflowRoleBinding } from '../shared/workflow'
+import type { WorkflowApproval, WorkflowPlanPreview, WorkflowProgress, WorkflowRoleBinding, WorkflowStopProvenance } from '../shared/workflow'
+import type { WorkflowParallelFailure } from './workflow-parallel-policy'
 import { WORKFLOW_MAX_STOP_REQUESTS, workflowProgressSnapshot } from '../shared/workflow'
 
 import { WorkflowControl } from './workflow-control'
 import { WorkflowInterpreter, type WorkflowInterpreterState } from './workflow-interpreter'
-import { assertWorkflowRecovery, workflowRecordFingerprint } from './workflow-recovery'
-import type { WorkflowRetryTarget } from '../shared/workflow-api'
+import { workflowRootState } from './workflow-interpreter-results'
+import { assertWorkflowRecovery, workflowRecordFingerprint, workflowContinuationPreview } from './workflow-recovery'
+import type { WorkflowRetryTarget, WorkflowStopTarget } from '../shared/workflow-api'
 
+import { fenceWorkflowTargetStop, projectWorkflowStopIntents, registerWorkflowTargetStop, releaseWorkflowTargetStop, sameWorkflowStopProvenance, sameWorkflowStopTarget, validateWorkflowStopRequests, workflowStopTargetKey } from './workflow-stop'
+import { recordWorkflowParallelFailure } from './workflow-parallel-stop'
+import { initialWorkflowProgress, projectWorkflowFrameLinks } from './workflow-progress'
 import type { WorkflowStore, WorkflowStoreRecord } from './workflow-store'
 
 import type { WorkflowRevisionReuse, WorkflowRevisionTarget } from './workflow-revisions'
@@ -29,17 +34,7 @@ export class WorkflowRunnerKernel {
   protected readonly onLifecycle?: () => void
   protected readonly approvals = new Map<string, WorkflowApproval>()
   protected readonly instanceId = randomUUID()
-  protected readonly active = new Map<string, {
-    record: WorkflowStoreRecord
-    progress: WorkflowProgress
-    initialized: Promise<boolean>
-    liveEpoch: string
-    liveRevision: number
-    finished: boolean
-    activeStops: Set<() => boolean>
-    halt: () => void
-    stop: () => void
-  }>()
+  protected readonly active = new Map<string, WorkflowRootExecutionState>()
   protected readonly liveAttempts = new Map<string, Map<string, WorkflowLiveObservationTracker>>()
   protected readonly livePublishTimers = new Map<string, ReturnType<typeof setTimeout>>()
   protected persistTail = Promise.resolve()
@@ -53,7 +48,10 @@ export class WorkflowRunnerKernel {
     this.onLifecycle = options.onLifecycle
     this.effects = new WorkflowRunnerEffects({ ...options, slots: this.slots, now: this.now,
       persist: (record, progress) => this.persist(record, progress), publish: progress => this.publish(progress),
-      finishSettledRoot: id => this.finishSettledRoot(id), track: (...args) => this.track(...args) })
+      finishSettledRoot: id => this.finishSettledRoot(id), track: (...args) => this.track(...args),
+      targetStopRequested: (id, target) => this.active.get(id)?.targetLatches.has(workflowStopTargetKey(target)) ?? false,
+      registerTargetStop: (id, target, stop) => registerWorkflowTargetStop(this.active.get(id), target, stop),
+      releaseTargetStop: (id, target, stop) => releaseWorkflowTargetStop(this.active.get(id), target, stop) })
   }
 
   assertRecovery(record: WorkflowStoreRecord): void {
@@ -67,12 +65,9 @@ export class WorkflowRunnerKernel {
     }
     if (preview.state !== 'ready') throw new Error('计划能力不可用，不能执行')
     if (this.active.has(preview.workflowId)) throw new Error('工作流已经在运行')
-    const progress: WorkflowProgress = {
-      workflowId: preview.workflowId, programRevision: preview.programRevision, workspace: preview.workspace,
-      goal: preview.userGoal, state: 'queued', attempts: continuation ? [...continuation.record.outcomes] : [], dispatchAttempts: continuation?.record.progress.dispatchAttempts ?? 0,
-      ...(continuation?.record.progress.systemSteps ? { systemSteps: structuredClone(continuation.record.progress.systemSteps) } : {}),
-      slots: { limit: this.slots.limit, inUse: this.slots.active, queued: this.slots.queued }, updatedAt: this.now()
-    }
+    if (continuation) preview = workflowContinuationPreview(preview, continuation.record.preview)
+    const progress = initialWorkflowProgress(preview,
+      { limit: this.slots.limit, inUse: this.slots.active, queued: this.slots.queued }, this.now(), continuation?.record)
     const epoch = randomUUID()
     const previous = continuation?.record.execution?.segments ?? []
     const generationId = continuation ? epoch : undefined
@@ -92,13 +87,15 @@ export class WorkflowRunnerKernel {
     }
     const controller: WorkflowInterpreterState = { stopped: false }
     const activeStops = new Set<() => boolean>()
+    const targetStops = new Map<string, Set<() => boolean>>()
+    const targetLatches = new Map<string, boolean>()
     let initialized!: (accepted: boolean) => void
     const initialization = new Promise<boolean>(resolve => { initialized = resolve })
     const halt = () => {
       controller.stopped = true
       this.slots.cancelQueued(preview.workflowId)
     }
-    this.active.set(preview.workflowId, { record, progress, initialized: initialization, liveEpoch: randomUUID(), liveRevision: 0, finished: false, activeStops, halt, stop: () => {
+    this.active.set(preview.workflowId, { record, progress, initialized: initialization, liveEpoch: randomUUID(), liveRevision: 0, finished: false, activeStops, targetStops, targetLatches, halt, stop: () => {
       halt()
       for (const stop of activeStops) stop()
     } })
@@ -109,6 +106,7 @@ export class WorkflowRunnerKernel {
         throw new Error('工作流已有持久化执行记录，不能重新派发')
       }
       if (existing?.receipt) record.receipt = existing.receipt
+      if (existing?.planningRequestHash !== undefined) record.planningRequestHash = existing.planningRequestHash
       progress.revision = (existing?.progress.revision ?? 0) + 1
       await this.store.claim(record, workflowRecordFingerprint(continuation?.record ?? existing))
       initialized(true)
@@ -125,13 +123,15 @@ export class WorkflowRunnerKernel {
       const control = new WorkflowControl(this.store, preview, { record, previous, generationId }, this.systems?.verification)
       const interpreter = new WorkflowInterpreter(control, controller,
         (block, scope, frame) => runWorkflowCall(this.effects, this.store, preview, control, record, controller, activeStops, block, scope, frame),
-        () => this.slots.limit, (block, scope, frame) => runWorkflowSystem(this.effects, preview, block, scope, frame, control, record, controller, activeStops))
+        () => this.slots.limit, (block, scope, frame) => runWorkflowSystem(this.effects, preview, block, scope, frame, control, record, controller, activeStops),
+        failure => this.handleParallelFailure(preview.workflowId, failure))
       const { outcomes, phase: controlPhase } = await interpreter.run(preview.program.body, control.root)
-      progress.state = controlPhase === 'unknown' || outcomes.some(outcome => outcome.state === 'unknown' || !outcome.settled) ? 'unknown' : (controlPhase === 'blocked' || control.root.blockedReason || outcomes.some(outcome => outcome.state === 'blocked')) ? 'blocked' : controller.stopped || controlPhase === 'stopped' ? 'stopped' : controlPhase === 'failed' || outcomes.some(outcome => outcome.state === 'failed') ? 'failed' : 'completed'
+      progress.state = workflowRootState(controlPhase, outcomes, controller.stopped, control.root.blockedReason)
       const legacyReport = !control.framed && controller.returnPath === undefined && controller.returnNode !== undefined ? outcomes.find(outcome =>
         outcome.nodeId === controller.returnNode && outcome.state === 'completed' && outcome.settled)?.output : undefined
       const report = legacyReport ?? (controller.returnValue?.state === 'known' ? (typeof controller.returnValue.value === 'string' ? controller.returnValue.value : JSON.stringify(controller.returnValue.value)) : undefined)
       if (control.root.blockedReason) progress.error = control.root.blockedReason
+      if (controller.error !== undefined) progress.error ??= controller.error
       if (progress.state === 'completed' && report === undefined) {
         progress.state = 'failed'
         progress.error = '工作流根 return 未产生可验证报告'
@@ -200,33 +200,61 @@ export class WorkflowRunnerKernel {
 
   /** Service coalesces concurrent delivery by commandId before entering this method.
    * A recovered intent is observational: never replay a signal whose dispatch is unknown. */
-  async requestStop(workflowId: string, commandId: string, canSignal?: () => boolean): Promise<boolean> {
+  async requestStop(workflowId: string, commandId: string, canSignal?: () => boolean, target?: WorkflowStopTarget, provenance?: WorkflowStopProvenance): Promise<boolean> {
     const entry = this.active.get(workflowId)
     const record = entry?.record ?? await this.store.load(workflowId)
-    if (record?.stopRequests?.some(request => request.commandId === commandId)) {
-      // A failed save leaves an in-memory candidate. Cache eviction must not
-      // turn it into an ACK or replay a possibly dispatched control command.
+    if (!record) return false
+    validateWorkflowStopRequests(record)
+    const prior = record.stopRequests?.find(request => request.commandId === commandId)
+    if (prior) {
+      const same = sameWorkflowStopTarget(prior.target, target) && sameWorkflowStopProvenance(prior.provenance, provenance)
+      if (!same) throw new Error(workflowControlCopy.invalidStopReceipt)
       const durable = entry ? await this.store.load(workflowId) : record
-      if (!durable?.stopRequests?.some(request => request.commandId === commandId)) throw new Error(workflowControlCopy.unconfirmedStopReceipt)
+      if (!durable?.stopRequests?.some(request => request.commandId === commandId && sameWorkflowStopTarget(request.target, target) && sameWorkflowStopProvenance(request.provenance, provenance))) throw new Error(workflowControlCopy.unconfirmedStopReceipt)
       return true
     }
     if (!entry) return false
-    // Fence admission synchronously, including dispatches awaiting capability/storage.
-    // A failed journal write must not allow the next Agent to start or emit a signal.
-    entry.halt()
-    // Do not let a stop write race the initial prior-execution check and make
-    // this start reject its own newly persisted execution record.
-    if (!await entry.initialized) return false
+    if (target) {
+      const exists = target.kind === 'attempt' ? record.intents.some(intent => intent.workflowId === workflowId && intent.attemptId === target.id) : (record.systemIntents ?? []).some(intent => intent.stepId === target.id)
+      const settled = target.kind === 'attempt' ? record.outcomes.find(outcome => outcome.attemptId === target.id)?.settled : (record.systemOutcomes ?? []).find(outcome => outcome.stepId === target.id)?.settled
+      if (!exists || settled === true) return false
+      fenceWorkflowTargetStop(entry, target)
+    } else entry.halt()
+    if (!await entry.initialized) {
+      if (target) entry.targetLatches.delete(workflowStopTargetKey(target))
+      return false
+    }
     if ((entry.record.stopRequests?.length ?? 0) >= WORKFLOW_MAX_STOP_REQUESTS) throw new Error(workflowControlCopy.stopLimit)
     const requestedAt = this.now()
-    entry.progress.stopRequestedAt ??= requestedAt
+    if (!target) entry.progress.stopRequestedAt ??= requestedAt
     const requests = entry.record.stopRequests ??= []
-    requests.push({ commandId, requestedAt })
+    requests.push({ commandId, requestedAt, ...(target ? { target } : {}), ...(provenance ? { provenance } : {}) })
+    // Retain an unconfirmed candidate and admission fence if publication fails.
+    // Only a matching durable receipt can acknowledge its redelivery; never
+    // roll an unknown write back in memory and turn it into a fresh signal.
     await this.persist(entry.record, entry.progress)
     if (canSignal && !canSignal()) return true
-    entry.stop()
-    // true acknowledges the persisted intent, not Provider acceptance or termination.
+    if (target) {
+      const key = workflowStopTargetKey(target)
+      entry.targetLatches.set(key, true)
+      for (const stop of entry.targetStops.get(key) ?? []) stop()
+    } else entry.stop()
     return true
+  }
+
+  private async handleParallelFailure(workflowId: string, failure: WorkflowParallelFailure): Promise<boolean> {
+    const entry = this.active.get(workflowId)
+    if (!entry) return false
+    const epoch = entry.record.execution?.epoch
+    try {
+      return await recordWorkflowParallelFailure({ owner: entry, failure, store: this.store, now: this.now,
+        persist: () => this.persist(entry.record, entry.progress),
+        canSignal: () => this.active.get(workflowId) === entry && entry.record.execution?.epoch === epoch })
+    } catch (error) {
+      entry.progress.error = workflowControlCopy.parallelStopUnconfirmed(error instanceof Error ? error.message : String(error))
+      this.publish(entry.progress)
+      return false
+    }
   }
 
   snapshot(workflowId: string): WorkflowProgress | undefined {
@@ -272,8 +300,8 @@ export class WorkflowRunnerKernel {
   }
 
   protected liveSnapshot(progress: WorkflowProgress): WorkflowProgress {
-    const snapshot = workflowProgressSnapshot(progress)
     const owner = this.active.get(progress.workflowId)
+    const snapshot = projectWorkflowStopIntents(projectWorkflowFrameLinks(workflowProgressSnapshot(progress), owner?.record), owner?.record.stopRequests)
     if (owner) snapshot.live = workflowLiveDiagnostics(
       [...(this.liveAttempts.get(progress.workflowId)?.values() ?? [])].map(tracker => tracker.snapshot()),
       { epoch: owner.liveEpoch, revision: owner.liveRevision, observedAt: this.now() })

@@ -3,6 +3,7 @@ import type { WorkflowBlock, WorkflowControlFrame, WorkflowEvaluation, WorkflowP
 import { WORKFLOW_MAX_SYSTEM_STEPS, type WorkflowSystemOutcome, type WorkflowSystemProgress } from '../shared/workflow-system'
 import { workflowSystemCopy } from '../shared/constants/copy'
 import type { WorkflowControl, WorkflowControlScope } from './workflow-control'
+import type { WorkflowStopTarget } from '../shared/workflow-api'
 import type { WorkflowInterpreterState } from './workflow-interpreter'
 import type { WorkflowStoreRecord } from './workflow-store'
 import type { WorkflowRunnerEffects } from './workflow-runner-effects'
@@ -10,8 +11,9 @@ import { workflowFrameId } from './workflow-frames'
 import type { WorkflowVerificationInputs } from '../shared/workflow-verification'
 import { evaluateWorkflowVerification } from './workflow-verification-inputs'
 import { verifyWorkflowCheckInputs, verifyWorkflowInputMaterialization } from './workflow-input-snapshot'
+import type { WorkflowCombineBlock } from '../shared/workflow'
 
-export async function runWorkflowSystem(effects: WorkflowRunnerEffects, preview: WorkflowPlanPreview, block: Extract<WorkflowBlock, { kind: 'replica' | 'check' | 'verification' }>, scope: WorkflowControlScope,
+export async function runWorkflowSystem(effects: WorkflowRunnerEffects, preview: WorkflowPlanPreview, block: Extract<WorkflowBlock, { kind: 'replica' | 'combine' | 'check' | 'verification' }>, scope: WorkflowControlScope,
     frame: WorkflowControlFrame | undefined, control: WorkflowControl, record: WorkflowStoreRecord, controller: WorkflowInterpreterState, activeStops: Set<() => boolean>): Promise<{ value: WorkflowEvaluation; phase: WorkflowControlFrame['phase'] }> {
     const recovered = control.recoveredSystem(block, scope, frame)
     if (recovered) {
@@ -37,35 +39,48 @@ export async function runWorkflowSystem(effects: WorkflowRunnerEffects, preview:
     }
     const unavailable = (reason: string, phase: WorkflowControlFrame['phase'] = 'blocked') => ({ value: { state: 'unknown' as const, reason, derivedFrom: [] }, phase })
     if (!effects.options.systems) return unavailable(workflowSystemCopy.unavailable)
-    if (controller.stopped) return unavailable(workflowSystemCopy.stopped, 'stopped')
+    if (controller.stopped || scope.admission?.isStopped()) return unavailable(workflowSystemCopy.stopped, 'stopped')
     const expression = block.kind === 'replica' ? block.source : block.kind === 'check' ? block.replica : undefined
-    const input = block.kind === 'verification' ? await evaluateWorkflowVerification(control, block, scope, () => controller.stopped)
-      : expression ? await control.evaluate(expression, scope, block.blockId, () => controller.stopped) : undefined
+    const input = block.kind === 'verification' ? await evaluateWorkflowVerification(control, block, scope, () => controller.stopped || Boolean(scope.admission?.isStopped()))
+      : block.kind === 'combine' ? await evaluateCombineInput(control, block, scope, () => controller.stopped || Boolean(scope.admission?.isStopped()))
+      : expression ? await control.evaluate(expression, scope, block.blockId, () => controller.stopped || Boolean(scope.admission?.isStopped())) : undefined
     if (input?.state === 'unknown') return unavailable(input.reason)
     const host = effects.options.systems
+    const combineInputs = block.kind === 'combine' && input?.state === 'known' ? host.combineInputs(input, preview.workflowId) : undefined
+    const inputReplica = block.kind === 'check' && input?.state === 'known' ? host.replicaInput(input, preview.workflowId) : input?.state === 'known' ? input.replica : undefined
     let held: Promise<void> | undefined
     try {
       const result = await effects.options.slots.withSlot(async () => {
-        if (controller.stopped) return unavailable(workflowSystemCopy.stopped, 'stopped')
+        if (controller.stopped || scope.admission?.isStopped()) return unavailable(workflowSystemCopy.stopped, 'stopped')
         const stepId = randomUUID(), taskId = preview.workflowId + ':' + workflowFrameId(block.blockId, scope.path) + ':' + block.blockId
         const admitted = await effects.reserve(async () => {
-          if (controller.stopped) return false
+          if (controller.stopped || scope.admission?.isStopped()) return false
           const intents = record.systemIntents ??= []
           if (intents.length >= WORKFLOW_MAX_SYSTEM_STEPS) throw new Error(workflowSystemCopy.limit)
           if (intents.some(intent => intent.taskId === taskId)) throw new Error(workflowSystemCopy.intent)
           const kind = block.kind === 'replica' ? 'prepare_replica' : block.kind
-          intents.push({ stepId, taskId, nodeId: block.blockId, kind, programRevision: preview.programRevision, createdAt: effects.options.now(), ...(input?.state === 'known' && input.replica ? { replica: input.replica } : {}), ...(block.kind === 'verification' && input?.state === 'known' ? { verificationInputs: input.value as WorkflowVerificationInputs } : {}) })
+          intents.push({ stepId, taskId, nodeId: block.blockId, ...(frame ? { frameId: frame.frameId } : {}), kind, programRevision: preview.programRevision, createdAt: effects.options.now(), ...(combineInputs ? { combineInputs } : {}), ...(inputReplica ? { replica: inputReplica } : {}), ...(block.kind === 'verification' && input?.state === 'known' ? { verificationInputs: input.value as WorkflowVerificationInputs } : {}) })
           const visible: WorkflowSystemProgress = { stepId, nodeId: block.blockId, kind, state: 'running', settled: false, startedAt: effects.options.now() }
           record.progress.systemSteps = [...(record.progress.systemSteps ?? []), visible].slice(-64)
           await effects.options.persist(record, record.progress)
           return true
         })
         if (!admitted) return unavailable(workflowSystemCopy.stopped, 'stopped')
+        const target: WorkflowStopTarget = { kind: 'system', id: stepId }
+        if (scope.admission?.isStopped() || effects.options.targetStopRequested(preview.workflowId, target)) {
+          const outcome: WorkflowSystemOutcome = { stepId, taskId, state: 'stopped', settled: true, startedAt: effects.options.now(), finishedAt: effects.options.now(), error: workflowSystemCopy.nodeStopped }
+          ;(record.systemOutcomes ??= []).push(outcome)
+          if (record.progress.systemSteps?.find(value => value.stepId === stepId)) Object.assign(record.progress.systemSteps.find(value => value.stepId === stepId)!, { state: 'stopped', settled: true, finishedAt: outcome.finishedAt, error: outcome.error })
+          await effects.options.persist(record, record.progress)
+          return unavailable(workflowSystemCopy.nodeStopped, 'stopped')
+        }
         const execution = host.execute(preview, block, stepId, input, async (inputSnapshot, inputMaterialization) => {
           Object.assign(record.systemIntents!.find(intent => intent.stepId === stepId)!, { inputSnapshot, inputMaterialization })
           await effects.options.persist(record, record.progress)
         })
         activeStops.add(execution.stop)
+        scope.admission?.addTarget(target)
+        effects.options.registerTargetStop(preview.workflowId, target, execution.stop)
         if (controller.stopped) execution.stop()
         let recorded!: () => void
         const receiptReady = new Promise<void>(resolve => { recorded = resolve })
@@ -83,13 +98,15 @@ export async function runWorkflowSystem(effects: WorkflowRunnerEffects, preview:
             await effects.options.persist(record, record.progress)
           }
           activeStops.delete(execution.stop)
+          scope.admission?.removeTarget(target)
+          effects.options.releaseTargetStop(preview.workflowId, target, execution.stop)
           effects.options.finishSettledRoot(preview.workflowId)
         }).catch(error => { record.progress.error = String(error); effects.options.publish(record.progress); throw error })
         try {
           const observed = await execution.result
           const resultRef = await effects.options.store.saveValue(preview.workflowId, stepId, observed.value)
           outcome = { stepId, taskId, state: observed.state, settled: observed.settled, resultRef, startedAt, finishedAt: effects.options.now(),
-            ...(observed.replica ? { replica: observed.replica } : {}), ...(observed.check ? { check: observed.check } : {}), ...(observed.error ? { error: observed.error.slice(0, 4096) } : {}) }
+            ...(observed.replica ? { replica: observed.replica } : {}), ...(observed.check ? { check: observed.check } : {}), ...(observed.combine ? { combine: observed.combine } : {}), ...(observed.error ? { error: observed.error.slice(0, 4096) } : {}) }
           ;(record.systemOutcomes ??= []).push(outcome)
           if (progress) Object.assign(progress, { state: outcome.state, settled: outcome.settled, finishedAt: outcome.finishedAt, ...(outcome.replica ? { replica: outcome.replica } : {}), ...(outcome.check ? { result: outcome.check } : {}), ...(outcome.error ? { error: outcome.error } : {}) })
           await effects.options.persist(record, record.progress)
@@ -99,7 +116,16 @@ export async function runWorkflowSystem(effects: WorkflowRunnerEffects, preview:
       }, preview.workflowId, () => held)
       return { value: result.value, phase: result.phase }
     } catch (error) {
-      if (controller.stopped && !(record.systemIntents ?? []).some(intent => intent.taskId === preview.workflowId + ':' + workflowFrameId(block.blockId, scope.path) + ':' + block.blockId)) return unavailable(workflowSystemCopy.stopped, 'stopped')
+      if ((controller.stopped || scope.admission?.isStopped()) && !(record.systemIntents ?? []).some(intent => intent.taskId === preview.workflowId + ':' + workflowFrameId(block.blockId, scope.path) + ':' + block.blockId)) return unavailable(workflowSystemCopy.stopped, 'stopped')
       throw error
     }
+}
+
+async function evaluateCombineInput(control: WorkflowControl, block: WorkflowCombineBlock, scope: WorkflowControlScope, stopped: () => boolean): Promise<WorkflowEvaluation> {
+  const base = await control.evaluate(block.base, scope, block.blockId, stopped)
+  if (base.state === 'unknown') return base
+  const candidates = await control.evaluate(block.candidates, scope, block.blockId, stopped)
+  if (candidates.state === 'unknown') return candidates
+  if (!Array.isArray(candidates.value)) return { state: 'unknown', reason: workflowSystemCopy.intent, derivedFrom: candidates.derivedFrom }
+  return { state: 'known', value: { base: base.value, candidates: candidates.value }, derivedFrom: [...new Set([...base.derivedFrom, ...candidates.derivedFrom])] }
 }

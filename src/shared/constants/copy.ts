@@ -33,6 +33,8 @@ export const workflowControlCopy = {
   stopLimit: '工作流停止命令已达上限；请检查未收敛作用域，不会重发或清空收据',
   invalidStopReceipt: '工作流停止收据合同无效',
   unconfirmedStopReceipt: '停止请求尚未确认持久化，不会重发；修复存储后请再次停止',
+  parallelStopUnconfirmed: (message: string) => `并行策略停止未确认：${message}`,
+  nodeStopped: '节点已停止',
   invalidPlanningStopReceipt: '工作流规划停止收据合同无效'
 }
 
@@ -90,6 +92,9 @@ export const workflowTemplateCopy = {
     reviewer: '独立复核给定候选及原始目标和资料。寻找反例，区分支持、反驳与无法验证的意见。保留异议与证据引用，不把模型意见当作系统检查或写入授权。'
   },
   sourceChanged: '模板来源或修订已变化，请刷新并重新确认',
+  ambiguousScope: '模板 ID 在多个来源存在；请指定 builtin:、personal: 或 project:',
+  parameterJson: '模板参数必须是符合合同的 JSON 对象',
+  preparationCancelled: '模板实例准备已取消',
   instanceCommand: '模板实例化 commandId 已用于另一请求',
   historyMissing: '此修订没有保留的源码，无法恢复',
   deleteCommand: '删除 commandId 已用于另一请求',
@@ -137,7 +142,8 @@ export const workflowSystemCopy = {
   unknown: '系统步骤的结果或作用域未知，不会重新执行',
   authority: '检查目标不是主进程签发的工作副本引用',
   limit: '工作流系统步骤已达到根上限',
-  stopped: '系统步骤已取消，未开始的工作不会派发'
+  stopped: '系统步骤已取消，未开始的工作不会派发',
+  nodeStopped: '系统节点已停止，未开始的步骤不会派发'
 }
 
 export const workflowReplicaCopy = {
@@ -162,7 +168,11 @@ export const workflowCheckCopy = {
   scope: '检查进程组尚未证明收敛，保留作用域与容量',
   stopped: '检查已取消',
   timedOut: '检查达到计划中冻结的超时',
-  parser: '输出不是完整可识别的 TypeScript 诊断；不能用于无进展比较'
+  parser: '输出不是完整可识别的 TypeScript 诊断；不能用于无进展比较',
+  testReport: '输出不是完整可识别的 Node TAP 测试报告；不能据此判断测试结果',
+  testDiscovery: 'Node TAP 计数不等于独立发现的测试总数',
+  testExecution: 'Node TAP 计数不能证明测试体实际执行',
+  testCoverage: 'Node TAP 计数不提供代码覆盖率证据'
 }
 
 export const workflowRetryCopy = {
@@ -182,6 +192,7 @@ export const workflowRecoveryCopy = {
   owner: '原控制器仍在运行或身份无法证明已关闭，未接管执行',
   stale: '执行控制段已变化，旧控制器不能覆盖或继续派发',
   ledger: '工作流恢复账本、预算或身份不一致',
+  planningMissing: '规划回执缺失，已有工作流不会重新规划',
   fingerprint: '冻结程序已变化，不能按原运行恢复',
   limit: '工作流恢复控制段已达 256 次上限',
   frame: '恢复所需的输入或控制帧证据缺失或不一致',
@@ -245,6 +256,57 @@ export const workflowShutdownCopy = {
   planningStopIdentityConflict: (id: string) => `工作流规划停止身份冲突：${id}`,
   detail: (ids: readonly string[]) => ids.length ? `未收敛工作流：${ids.join('、')}` : '未收敛工作流状态未知'
 }
+
+export { workflowAuthoringCopy } from './workflow-authoring-copy'
+
+export const workflowSizeCopy = {
+  invalidValue: '工作流规模建议无效',
+  invalidFile: (name: string) => `工作流规模配置无效：${name}`,
+  oversized: '工作流规模配置超过 64 KiB 读取上限',
+  unowned: '工作流规模配置不是 App 目录内的普通文件',
+  overridden: '规模建议由 settings.json 覆盖，不能修改或重置偏好',
+  invalidSnapshot: '工作流规模快照已损坏',
+  immutable: '不能改写已有规划的规模快照或覆盖说明'
+} as const
+
+export const taskSubmissionCopy = {
+  invalid: '任务提交记录无效，不能自动重发',
+  missing: '任务提交记录缺失，不能自动重发',
+  tooLarge: '任务提交元数据超过 16 MiB',
+  changedInput: '同一任务命令不能更改原始输入或目标',
+  staleConversation: '对话已变化，请重新预览后建立新任务',
+  staleTask: '任务提交状态已变化',
+  branchConflict: '该任务已选择派发路径，不能重复或改走其他路径',
+  wrongOwner: '任务派发身份已变化，不能沿用旧回调',
+  interrupted: '任务在上次应用运行中中断，未自动重发',
+  unknown: '任务派发结果尚未确认，不能自动重发',
+  contextChanged: '任务的工作区或 Provider 配置已变化，未派发',
+  receiptMissing: '缺少对应的持久化对话收据，不能确认任务关联',
+  recordingFailed: '任务派发失败，且未能记录后续状态；不会自动重发',
+  emptyInput: '对话请求不能为空',
+  unsupportedSlash: '统一对话仅支持普通文本，不支持 slash 命令',
+  conversationMissing: '找不到对话，不会自动创建空历史',
+  conversationDeleting: '统一对话正在删除或已删除，不能发送',
+  conversationArchived: '对话已存档，请先恢复',
+  conversationChanged: '对话已变化，请重新预览',
+  historicalUnsupported: (providerId: string) => `${providerId} 尚未提供可验证的历史输入交接`,
+  continuationChanged: 'Provider 接续身份已变化，请重新预览',
+  freshConfirmation: '创建新的原生上下文需要明确确认',
+  selectionChanged: '待交接历史与确认的预览不一致，请重新预览'
+} as const
+
+export const taskCommandCopy = {
+  description: 'Scry 工作流与设置',
+  argumentHint: 'list | size | run | direct | mode | research | template | edit',
+  invalid: '命令参数无效',
+  unknown: '当前命令目录中没有此命令',
+  chooseSource: '命令来源无法唯一确定，请从命令列表选择来源与 ID',
+  stale: '命令来源或目录已变化，请重新选择',
+  unavailable: 'Provider 命令目录不完整；请明确选择命令来源',
+  oversized: 'Provider 命令目录超过有界读取限制，当前不可用',
+  controlContext: '此命令不接收附件和历史交接，请移除后重试',
+  actionUnavailable: '此来源的命令派发尚不可用，未调用模型或改走普通发送'
+} as const
 
 export const workspaceDiffCopy = {
   invalidDirectory: '无效的工作目录',

@@ -104,6 +104,9 @@ export interface Conversation {
   title?: string
   pinnedAt?: number
   archivedAt?: number
+  /** Absent means `off`: no fabricated default is written for older records. */
+  workflowMode?: import('./workflow-mode').WorkflowConversationMode
+  workflowRoutingConsent?: import('./workflow-mode').WorkflowRoutingConsent
   /** Fingerprint of the explicitly confirmed legacy capture; original binding stays retired. */
   adoptionFingerprint?: string
   /** Durable write fence; completed tombstones retain IDs/hashes, never historical bodies. */

@@ -1,15 +1,19 @@
-import type { WorkflowAttemptOutcome, WorkflowCollectionEntry, WorkflowCollectionReference, WorkflowControlFrame, WorkflowEvaluation, WorkflowPlanPreview, WorkflowProgress, WorkflowValueReference } from '../shared/workflow'
-import type { WorkflowRetryTarget } from '../shared/workflow-api'
+import type { WorkflowAttemptOutcome, WorkflowCollectionEntry, WorkflowCollectionReference, WorkflowControlFrame, WorkflowEvaluation, WorkflowPlanPreview, WorkflowProgress, WorkflowStopProvenance, WorkflowValueReference } from '../shared/workflow'
+import type { WorkflowSizeGuideline, WorkflowSizeSnapshot } from '../shared/workflow-size'
+import type { WorkflowRetryTarget, WorkflowStopTarget } from '../shared/workflow-api'
 import type { WorkflowSystemIntent, WorkflowSystemOutcome } from '../shared/workflow-system'
 import type { WorkflowReplicaReference } from '../shared/workflow-replica'
 import type { WorkflowGoverningRevision } from './workflow-revisions'
 import type { WorkflowAgentInputs } from './workflow-agent-inputs'
+import type { ProviderStructuredOutput } from './providers/types'
 
 export interface WorkflowIntent {
   workflowId: string
   programRevision: string
   taskId: string
   attemptId: string
+  /** Canonical frame at admission; missing on legacy intents. */
+  frameId?: string
   callFrameId?: string
   previousAttemptId?: string
   retryCommandId?: string
@@ -27,13 +31,15 @@ export type WorkflowExecutionOwnership = {
 }
 
 export interface WorkflowStoreRecord {
+  /** Written atomically with the admitted root; correlation evidence, not execution approval. */
+  planningRequestHash?: string
   preview: WorkflowPlanPreview
   revisions?: WorkflowGoverningRevision[]
   agentInputs?: Record<string, WorkflowAgentInputs>
   executionStarted?: number
   execution?: WorkflowExecutionOwnership
   /** Durable user intents only. Presence never proves a native signal or settlement. */
-  stopRequests?: Array<{ commandId: string; requestedAt: number }>
+  stopRequests?: Array<{ commandId: string; requestedAt: number; target?: WorkflowStopTarget; provenance?: WorkflowStopProvenance }>
   receipt?: { commandId: string; fingerprint: string; status: 'accepted' | 'completed' | 'failed' | 'unknown' }
   progress: WorkflowProgress
   intents: WorkflowIntent[]
@@ -43,6 +49,8 @@ export interface WorkflowStoreRecord {
 }
 export interface WorkflowPlanningIntent {
   workflowId: string
+  readonly sizeGuideline?: WorkflowSizeSnapshot
+  sizeOverrideReason?: string
   commandId?: string
   command?: string
   fingerprint?: string
@@ -59,7 +67,13 @@ export interface WorkflowPlanningIntent {
   /** Durable shutdown/cancel intent. It does not prove planner settlement. */
   stopCommandId?: string
   stopRequestedAt?: number
-  result?: { output?: string; outputRef?: string; actualModel?: string; archiveRef?: string }
+  result?: { output?: string; outputRef?: string; outputSource?: ProviderStructuredOutput['source']; actualModel?: string; archiveRef?: string }
+  /** Durable routing decision for an ordinary message. Absent means the intent
+   *  was an explicit single-workflow planning call, not a routed one. */
+  route?: 'direct' | 'clarification' | 'workflow' | 'template_edit'
+  routeTarget?: import('../shared/workflow-route').WorkflowTemplateEditTarget
+  /** The exact question shown to the user for a `clarification` decision. */
+  routeQuestion?: string
   error?: string
 }
 export interface WorkflowStorePage { records: WorkflowStoreRecord[]; nextCursor?: string }
@@ -69,6 +83,8 @@ export type WorkflowFrameValueCheckpoint = {
   evaluation: WorkflowEvaluation
 }
 export interface WorkflowStore {
+  sizeGuideline(): Promise<WorkflowSizeSnapshot>
+  setSizeGuideline(value: WorkflowSizeGuideline | null): Promise<WorkflowSizeSnapshot>
   create(record: WorkflowStoreRecord): Promise<boolean>
   save(record: WorkflowStoreRecord): Promise<void>
   claim(record: WorkflowStoreRecord, expectedFingerprint: string | undefined): Promise<void>

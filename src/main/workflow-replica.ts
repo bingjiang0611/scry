@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto'
 import { createReadStream, constants } from 'node:fs'
-import { chmod, copyFile, lstat, mkdir, open, opendir, readFile, readlink, realpath, rm, stat, symlink } from 'node:fs/promises'
+import { chmod, copyFile, lstat, mkdir, mkdtemp, open, opendir, readFile, readlink, realpath, rm, stat, symlink } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { mkdirDurable, syncDirectory, writeJsonAtomic } from '../core/turn-recorder/io'
 import type { WorkflowReplicaManifestEntry, WorkflowReplicaReceipt, WorkflowReplicaReference } from '../shared/workflow-replica'
+import type { WorkflowCombineSummary } from '../shared/workflow-system'
+import { WORKFLOW_MAX_BATCH } from '../shared/workflow'
 import { workflowReplicaCopy as copy } from '../shared/constants/copy'
 
 // Bounded file snapshots, not an unbounded filesystem/archive service. Inputs
@@ -110,7 +112,7 @@ export class WorkflowReplicas {
     if (typeof source !== 'string') {
       validateWorkflowReplicaReference(source, workflowId)
       const lease = await this.acquire(source, false, signal)
-      try { return await this.materialize(workflowId, replicaId, lease.directory, signal) } finally { lease.release() }
+      try { return await this.materialize(workflowId, replicaId, lease.directory, signal, source) } finally { lease.release() }
     }
     const sourceRoot = await realpath(source)
     await mkdirDurable(this.base)
@@ -118,10 +120,10 @@ export class WorkflowReplicas {
     return this.materialize(workflowId, replicaId, sourceRoot, signal)
   }
 
-  private async materialize(workflowId: string, replicaId: string, sourceRoot: string, signal?: AbortSignal): Promise<WorkflowReplicaReference> {
+  private async materialize(workflowId: string, replicaId: string, sourceRoot: string, signal?: AbortSignal, base?: WorkflowReplicaReference, receiptSourceRoot = sourceRoot): Promise<WorkflowReplicaReference> {
     const stopped = () => signal?.aborted ?? false
-    const base = await this.assertBase(), paths = this.paths({ workflowId, replicaId })
-    if (!(await stat(sourceRoot)).isDirectory() || inside(sourceRoot, base)) throw new Error(copy.source)
+    const registryBase = await this.assertBase(), paths = this.paths({ workflowId, replicaId })
+    if (!(await stat(sourceRoot)).isDirectory() || inside(sourceRoot, registryBase)) throw new Error(copy.source)
     const manifest = await snapshotWorkflowInputs(sourceRoot, stopped), text = JSON.stringify(manifest), inputHash = digest(text)
     await mkdirDurable(dirname(paths.directory))
     if (await realpath(dirname(paths.directory)) !== dirname(paths.directory)) throw new Error(copy.source)
@@ -129,7 +131,7 @@ export class WorkflowReplicas {
     await mkdir(paths.directory, { mode: 0o700 })
     await syncDirectory(dirname(paths.directory))
     const info = await lstat(paths.directory)
-    const receipt: WorkflowReplicaReceipt = { version: 1, state: 'preparing', workflowId, replicaId, inputHash, sourceRoot, directory: paths.directory,
+    const receipt: WorkflowReplicaReceipt = { version: 1, state: 'preparing', workflowId, replicaId, inputHash, sourceRoot: receiptSourceRoot, directory: paths.directory, ...(base ? { base } : {}),
       identity: { device: info.dev, inode: info.ino }, createdAt: Date.now(), manifestEntries: manifest.length, manifestBytes: Buffer.byteLength(text), contentBytes: manifest.reduce((total, entry) => total + entry.bytes, 0) }
     await writeJsonAtomic(paths.manifest, manifest)
     await writeJsonAtomic(paths.receipt, receipt)
@@ -156,6 +158,64 @@ export class WorkflowReplicas {
     await syncDirectory(paths.directory)
     await writeJsonAtomic(paths.receipt, { ...receipt, state: 'ready' })
     return { workflowId, replicaId, inputHash }
+  }
+
+  async combine(workflowId: string, base: WorkflowReplicaReference, candidates: WorkflowReplicaReference[], replicaId: string, signal?: AbortSignal): Promise<{ summary: WorkflowCombineSummary; replica?: WorkflowReplicaReference }> {
+    validateWorkflowReplicaReference(base, workflowId)
+    if (!candidates.length || candidates.length > WORKFLOW_MAX_BATCH) throw new Error(copy.limit)
+    const ordered = [...candidates].sort((a, b) => a.replicaId < b.replicaId ? -1 : a.replicaId > b.replicaId ? 1 : 0)
+    if (new Set(ordered.map(value => value.replicaId)).size !== ordered.length) throw new Error(copy.identity)
+    const leases: Array<Awaited<ReturnType<WorkflowReplicas['acquire']>>> = []
+    const staging: string[] = []
+    try {
+      const baseLease = await this.acquire(base, false, signal); leases.push(baseLease)
+      const baseManifest = await snapshotWorkflowInputManifest(baseLease.directory, () => signal?.aborted ?? false)
+      const baseEntries = new Map(baseManifest.entries.map(entry => [entry.path, entry]))
+      const changes = new Map<string, { entry?: WorkflowReplicaManifestEntry; candidate: string }[]>()
+      for (const candidate of ordered) {
+        validateWorkflowReplicaReference(candidate, workflowId)
+        const lease = await this.acquire(candidate, false, signal); leases.push(lease)
+        const receipt = await this.resolve(candidate)
+        if (!receipt.base || JSON.stringify(receipt.base) !== JSON.stringify(base)) throw new Error(copy.identity)
+        const manifest = await snapshotWorkflowInputManifest(lease.directory, () => signal?.aborted ?? false)
+        const entries = new Map(manifest.entries.map(entry => [entry.path, entry]))
+        for (const path of [...new Set([...baseEntries.keys(), ...entries.keys()])].sort()) {
+          const before = baseEntries.get(path), after = entries.get(path)
+          if (JSON.stringify(before) === JSON.stringify(after)) continue
+          const rows = changes.get(path) ?? []
+          rows.push({ entry: after, candidate: candidate.replicaId }); changes.set(path, rows)
+        }
+      }
+      const conflicts = [...changes.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).flatMap(([path, rows]) => {
+        const distinct = new Map(rows.map(row => [JSON.stringify(row.entry), row]))
+        return distinct.size > 1 ? [{ path, candidateReplicaIds: rows.map(row => row.candidate).sort() }] : []
+      })
+      const changedPathCount = changes.size
+      const baseInputHash = base.inputHash
+      if (conflicts.length) return { summary: { state: 'conflict', integration: null, baseInputHash, candidateCount: ordered.length, changedPathCount, conflicts } }
+      const integrationSource = await mkdtemp(join(dirname(baseLease.directory), '.combine-'))
+      staging.push(integrationSource)
+      const baseCopy = await snapshotWorkflowInputManifest(baseLease.directory, () => signal?.aborted ?? false)
+      for (const entry of baseCopy.entries) await this.copyEntry(baseLease.directory, integrationSource, entry)
+      for (const [path, rows] of [...changes.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
+        const entry = rows[0].entry, target = join(integrationSource, path)
+        await rm(target, { recursive: true, force: true })
+        if (entry) await this.copyEntry((await this.resolve(ordered.find(candidate => candidate.replicaId === rows[0].candidate)!)).directory, integrationSource, entry)
+      }
+      const integration = await this.materialize(workflowId, replicaId, integrationSource, signal, base, baseLease.directory)
+      return { summary: { state: 'combined', integration, baseInputHash, candidateCount: ordered.length, changedPathCount, conflicts: [] }, replica: integration }
+    } finally {
+      for (const path of staging) await rm(path, { recursive: true, force: true })
+      for (const lease of leases.reverse()) lease.release()
+    }
+  }
+
+  private async copyEntry(sourceRoot: string, targetRoot: string, entry: WorkflowReplicaManifestEntry): Promise<void> {
+    const target = join(targetRoot, entry.path)
+    if (entry.kind === 'directory') { await mkdir(target, { recursive: true, mode: entry.mode }); return }
+    await mkdir(dirname(target), { recursive: true })
+    if (entry.kind === 'symlink') await symlink(entry.target!, target)
+    else { await copyFile(join(sourceRoot, entry.path), target, constants.COPYFILE_FICLONE); await chmod(target, entry.mode) }
   }
 
   async resolve(reference: WorkflowReplicaReference, allowIncomplete = false): Promise<WorkflowReplicaReceipt> {

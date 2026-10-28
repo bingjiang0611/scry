@@ -2,6 +2,7 @@ import type { Conversation, ConversationBinding, ConversationDeletionResult, Con
 import type { LoadedSessionTurn } from './session-history'
 import type { AgentStartRequest } from './runtime'
 import type { ProviderId } from './provider'
+import type { TaskCommandCatalog } from './task-command'
 
 export interface ConversationSummary {
   id: string
@@ -16,6 +17,9 @@ export interface ConversationSummary {
   /** Latest dispatched turn only; imported history has no inferred outcome. */
   lastRunOutcome?: import('./turn-record').AgentTurnRecord['status']
   fork?: Pick<NonNullable<Conversation['fork']>, 'sourceConversationId' | 'sourceRunId' | 'bindingId' | 'status' | 'reason'>
+  /** Absent means the workflow mode was never set; it is not `off` by omission. */
+  workflowMode?: import('./workflow-mode').WorkflowConversationMode
+  workflowRoutingConsent?: import('./workflow-mode').WorkflowRoutingConsent
   blockedReason?: string
 }
 
@@ -71,10 +75,42 @@ export interface ConversationSendRequest extends ConversationTargetRequest {
   confirmFresh: boolean
 }
 
+/** Source selectors are requests, not origin or execution authority. Controls
+ * need no native session; ordinary messages supply the existing send context. */
+export interface ConversationSubmissionRequest {
+  conversationId: string
+  expectedRevision: number
+  commandId: string
+  prompt: string
+  selectedCommandId?: string
+  message?: Partial<Omit<ConversationSendRequest, 'conversationId' | 'expectedRevision' | 'commandId' | 'prompt'>> & {
+    workflowOverride?: import('./workflow-mode').WorkflowMessageOverride
+  }
+}
+
+export type ConversationSubmissionResult =
+  | { kind: 'needs_native_context' }
+  | { kind: 'needs_command_source'; catalog: TaskCommandCatalog }
+  | { kind: 'rejected'; error: string }
+  | { kind: 'direct'; runId: string; disposition: 'created' | 'duplicate' }
+  | { kind: 'control'; commandId: string; action: 'open_workflows' }
+  | { kind: 'control'; commandId: string; action: 'open_workflow_planner'; command: string; workspace: string; submission: import('./workflow-api').WorkflowCapturedTask }
+  | { kind: 'control'; commandId: string; action: 'open_workflow_template'; command: string; workspace: string; submission: import('./workflow-api').WorkflowCapturedTemplateTask }
+  | { kind: 'control'; commandId: string; action: 'size_updated'; snapshot: import('./workflow-size').WorkflowSizeSnapshot }
+  | { kind: 'control'; commandId: string; action: 'mode_updated'; mode: import('./workflow-mode').WorkflowConversationMode }
+  /** A routed message that produced a draft: the user still has to approve the
+   *  exact programRevision before any execution. */
+  | { kind: 'control'; commandId: string; action: 'edit_workflow_template'; workspace: string;
+      submission: import('./workflow-api').WorkflowCapturedTemplateEditTask; edit: import('./workflow-template').WorkflowTemplateEditContext }
+  | { kind: 'control'; commandId: string; action: 'open_workflow_routed'; command: string; preview: import('./workflow').WorkflowPlanPreview }
+
 export type ConversationMetadataChange =
   | { kind: 'rename'; title: string }
   | { kind: 'pin'; pinned: boolean }
   | { kind: 'archive'; archived: boolean }
+  /** Conversation-scoped workflow mode. Main decides availability; the renderer
+   * cannot assert that routing consent already exists. */
+  | { kind: 'workflow_mode'; mode: import('./workflow-mode').WorkflowConversationMode }
 
 export interface ConversationLegacySource {
   providerId: 'claude' | 'codex' | 'pi'
@@ -121,5 +157,7 @@ export interface ConversationApi {
   read(id: string, beforeOrdinal?: number): Promise<ConversationPage>
   readItem(id: string, ref: ConversationItemRef): Promise<string>
   preview(id: string, target: ConversationTargetRequest): Promise<ConversationPreview>
+  commands(id: string, target?: ConversationTargetRequest): Promise<TaskCommandCatalog>
+  submit(request: ConversationSubmissionRequest): Promise<ConversationSubmissionResult>
   send(request: ConversationSendRequest): Promise<{ runId: string; disposition: 'created' | 'duplicate' }>
 }

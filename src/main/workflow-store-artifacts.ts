@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto'
 
 import { workflowFrameCopy } from '../shared/constants/copy'
+import { workflowTemplateEditCopy } from '../shared/constants/workflow-template-edit-copy'
+import { parseWorkflowTemplateEditTarget } from '../shared/workflow-route'
 
 import { assertWorkflowValue, workflowField } from './workflow-expressions'
 
@@ -9,7 +11,17 @@ import type { WorkflowEvaluation, WorkflowValueReference } from '../shared/workf
 import { WORKFLOW_MAX_BATCH, WORKFLOW_MAX_VALUE_DEPTH } from '../shared/workflow'
 import { validateWorkflowReplicaReference } from './workflow-replica'
 
-import type { WorkflowStore } from './workflow-store-contracts'
+import type { WorkflowPlanningIntent, WorkflowStore } from './workflow-store-contracts'
+
+export function validatePlanningRoute(intent: WorkflowPlanningIntent): void {
+  if (intent.route !== undefined && intent.route !== 'direct' && intent.route !== 'clarification' && intent.route !== 'workflow' && intent.route !== 'template_edit') throw new Error(workflowTemplateEditCopy.damagedRoute)
+  if (intent.routeQuestion !== undefined && (intent.route !== 'clarification' || typeof intent.routeQuestion !== 'string' || intent.routeQuestion.length === 0 || intent.routeQuestion.length > 2000)) throw new Error(workflowTemplateEditCopy.damagedQuestion)
+  if (intent.routeTarget !== undefined) {
+    if (intent.route !== 'template_edit') throw new Error(workflowTemplateEditCopy.damagedTarget)
+    intent.routeTarget = parseWorkflowTemplateEditTarget(intent.routeTarget)
+  }
+}
+
 export const fileSafe = (id: string): string => {
   if (!/^[A-Za-z0-9_-]{1,96}$/.test(id)) throw new Error('工作流记录身份无效')
   return id

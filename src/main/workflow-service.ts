@@ -1,9 +1,12 @@
 import { createHash } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
-import { workflowShutdownCopy, workflowRecoveryCopy } from '../shared/constants/copy'
+import type { WorkflowSizeSnapshot } from '../shared/workflow-size'
+import { isWorkflowSizeGuideline } from '../shared/workflow-size'
+import { workflowShutdownCopy, workflowRecoveryCopy, workflowSizeCopy } from '../shared/constants/copy'
 
-import type { WorkflowResumeResult, WorkflowRetryTarget } from '../shared/workflow-api'
+import type { WorkflowResumeResult, WorkflowRetryTarget, WorkflowStopTarget } from '../shared/workflow-api'
 import { assertWorkflowRetryTarget, validateWorkflowRetryTarget } from './workflow-retry'
+import { validateWorkflowStopTarget } from './workflow-stop'
 
 import type { WorkflowApproval, WorkflowPlanPreview, WorkflowProgress, WorkflowProgressPage } from '../shared/workflow'
 
@@ -19,6 +22,15 @@ const shutdownCommandId = (workflowId: string) => `shutdown-${createHash('sha256
 const terminalProgressStates = new Set(['completed', 'failed', 'blocked', 'stopped'])
 
 export class WorkflowService extends WorkflowServiceRevisions {
+  sizeGuideline(): Promise<WorkflowSizeSnapshot> { return this.options.store.sizeGuideline() }
+  async setSizeGuideline(value: unknown): Promise<WorkflowSizeSnapshot> {
+    if (value !== null && !isWorkflowSizeGuideline(value)) throw new Error(workflowSizeCopy.invalidValue)
+    const generation = this.admissionGeneration
+    this.assertAdmissionGeneration(generation)
+    const snapshot = await this.options.store.setSizeGuideline(value)
+    this.assertAdmissionGeneration(generation)
+    return snapshot
+  }
   private recordSettled(record: WorkflowStoreRecord): boolean {
     const settledAttempts = new Set(record.outcomes.filter(outcome => outcome.settled).map(outcome => outcome.attemptId))
     const outcomeStateSettled = terminalProgressStates.has(record.progress.state) || record.progress.state === 'unknown'
@@ -220,7 +232,7 @@ export class WorkflowService extends WorkflowServiceRevisions {
       const record = (await this.options.store.load(id))!
       this.assertAdmissionGeneration(generation)
       if (record.receipt) {
-        if (record.receipt.commandId === commandId && record.receipt.fingerprint === fingerprint) return this.progressSnapshot(record.progress)
+        if (record.receipt.commandId === commandId && record.receipt.fingerprint === fingerprint) return this.progressSnapshot(record.progress, record.stopRequests, record)
         throw new Error('工作流已有启动收据，不允许重新派发')
       }
       await Promise.all(preview.program.roles.map(role => this.capability(role, preview.workspace, true)))
@@ -252,7 +264,7 @@ export class WorkflowService extends WorkflowServiceRevisions {
       }
       this.assertAdmissionGeneration(generation)
       const result = await this.runner.resume(preview, approval, commandId)
-      return result.progress ? { ...result, progress: this.progressSnapshot(result.progress) } : result
+      return result.progress ? { ...result, progress: this.progressSnapshot(result.progress, undefined, record) } : result
     })
   }
   async retry(id: string, approval: WorkflowApproval, target: WorkflowRetryTarget, commandId: string): Promise<WorkflowProgress> {
@@ -273,13 +285,22 @@ export class WorkflowService extends WorkflowServiceRevisions {
         await Promise.all(record.preview.program.roles.map(role => this.capability(role, record.preview.workspace, true)))
       }
       this.assertAdmissionGeneration(generation)
-      return this.progressSnapshot(await this.runner.retry(record.preview, approval, target, commandId))
+      return this.progressSnapshot(await this.runner.retry(record.preview, approval, target, commandId), undefined, record)
     })
   }
   async preview(id: string): Promise<WorkflowPlanPreview> { await this.ensureReady(); return this.loadPreview(id) }
   async stop(id: string, commandId: string): Promise<boolean> {
     await this.ensureReady()
-    return this.receipt(this.stops, commandId, id, () => this.runner.requestStop(id, commandId))
+    return this.stopReceipt(commandId, JSON.stringify({ workflowId: id, mode: 'root' }), () => this.runner.requestStop(id, commandId))
+  }
+  async stopNode(id: string, target: WorkflowStopTarget, commandId: string): Promise<boolean> {
+    const generation = this.admissionGeneration
+    const normalized = validateWorkflowStopTarget(target)
+    await this.ensureReady()
+    const preview = await this.loadPreview(id)
+    const fingerprint = JSON.stringify({ workflowId: id, mode: 'node', target: normalized })
+    return this.stopReceipt(commandId, fingerprint, () =>
+      this.runner.requestStop(preview.workflowId, commandId, () => generation === this.admissionGeneration && !this.closed, normalized))
   }
   cancelPlanning(commandId: string): boolean {
     if (this.cancelled.size >= 256) this.cancelled.delete(this.cancelled.values().next().value!)
@@ -296,14 +317,19 @@ export class WorkflowService extends WorkflowServiceRevisions {
   }
   async snapshot(id: string): Promise<WorkflowProgress | undefined> {
     await this.ensureReady()
-    const progress = this.runner.snapshot(id) ?? (await this.options.store.load(id))?.progress
-    return progress && this.progressSnapshot(progress)
+    const live = this.runner.snapshot(id)
+    if (live) return this.progressSnapshot(live)
+    const record = await this.options.store.load(id)
+    return record && this.progressSnapshot(record.progress, record.stopRequests, record)
   }
   async list(workspace: string, cursor?: string): Promise<WorkflowProgressPage> {
     await this.ensureReady()
     const page = await this.options.store.listPage(cursor, 20)
     return { records: page.records.filter(record => record.preview.workspace === workspace)
-      .map(record => this.progressSnapshot(this.runner.snapshot(record.preview.workflowId) ?? record.progress)),
+      .map(record => {
+        const live = this.runner.snapshot(record.preview.workflowId)
+        return this.progressSnapshot(live ?? record.progress, live ? undefined : record.stopRequests, record)
+      }),
       nextCursor: page.nextCursor, unresolvedPlanning: this.unresolvedPlanning }
   }
 }

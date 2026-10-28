@@ -2,26 +2,37 @@
 // 支持多轮对话（resume）+ 工作目录（cwd）+ 中断（interrupt）+ subagent 内部明细（tail transcript 一层）。
 
 import { HISTORY_READER_SERVER, HISTORY_READER_TOOL, type HistoryReaderConnection } from './conversation-history-reader'
-import { query, type HookInput, type PermissionUpdate, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
-import { open } from 'node:fs/promises'
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import { type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { type TraceEvent, type McpLiveStatus } from '../shared/trace'
-import type { WorkflowLiveObservation } from '../shared/workflow'
+import { WORKFLOW_MAX_VALUE_BYTES, type WorkflowLiveObservation } from '../shared/workflow'
+import { workflowAuthoringCopy } from '../shared/constants/copy'
+import type { ProviderStructuredOutput } from './providers/types'
 import {
-  agentPermissionDecision,
-  agentPermissionQuestion,
-  exactSessionPermissionDescription,
-  exactSessionPermissionSuggestions,
-  normalizeAgentQuestionRequest,
-  sanitizeApprovalWarning,
   type AgentInputAttachment,
   type AgentPermissionMode,
   type AgentQuestionRequest,
   type AgentQuestionResponse
 } from '../shared/runtime'
-import { extractUserText, type NormalizeCtx, normalizeSdkMessage } from './normalize'
+import { type NormalizeCtx, normalizeSdkMessage } from './normalize'
 import { sanitizeMcpAuthError } from './providers/mcp-auth-security'
 import { captureProcessIdentity, signalProcessTreeWithIdentity, type ProcessIdentity } from './process-diagnostics'
+import { createAgentOptions } from './agent-runner-options'
+import {
+  hookString,
+  isSyntheticPromptHook,
+  nativeProviderTurnId,
+  providerTurnIdFromTranscript,
+  transcriptBaseline,
+  type TranscriptBaseline
+} from './agent-runner-transcript'
+export { claudeTranscriptProviderTurnId } from './agent-runner-transcript'
+
+import {
+  nativeClaudeToolActivity,
+  nativeClaudeToolReturnMessage,
+  nativeClaudeWorkflowObservation
+} from './agent-runner-observation'
 
 let counter = 0
 const newId = (): string => `ev-${Date.now().toString(36)}-${(counter++).toString(36)}`
@@ -44,6 +55,8 @@ export interface RunOpts {
   // 显式传给 spawn 的 claude 的环境：补全 launchd 极简环境缺的 PATH/会话变量，否则读不到 Keychain 登录态。
   env?: Record<string, string>
   settingSources?: Array<'user' | 'project' | 'local'>
+  /** Main-owned structured authoring query; never a renderer permission switch. */
+  authoringSchema?: Record<string, unknown>
   onSessionId?: (sessionId: string) => void
   historyReader?: HistoryReaderConnection
   /** Called immediately before releasing input to the SDK. */
@@ -68,175 +81,12 @@ export interface RunHandle {
     stopped?: boolean
     status?: 'completed' | 'failed' | 'interrupted'
     mcpStatus?: McpLiveStatus[]
+    structuredOutput?: ProviderStructuredOutput
   }>
   interrupt: () => void
   forceKill: () => void
   getSessionId: () => string | undefined
   getProviderTurnId?: () => string | undefined
-}
-
-function hookString(input: Record<string, unknown>, ...keys: string[]): string | undefined {
-  for (const key of keys) {
-    const value = input[key]
-    if (typeof value === 'string' && value.trim()) return value.trim()
-  }
-  return undefined
-}
-
-function isSyntheticPromptHook(input: Record<string, unknown>): boolean {
-  const origin = input.origin
-  const originKind = origin && typeof origin === 'object' && !Array.isArray(origin)
-    ? hookString(origin as Record<string, unknown>, 'kind')
-    : undefined
-  const prompt = hookString(input, 'prompt')
-  return originKind === 'task-notification' || prompt?.trimStart().startsWith('<task-notification>') === true
-}
-
-function nativeClaudeWorkflowObservation(message: Record<string, unknown>): WorkflowLiveObservation | undefined {
-  if (message.type !== 'stream_event' || message.parent_tool_use_id !== null) return undefined
-  const event = message.event
-  if (!event || typeof event !== 'object' || Array.isArray(event)) return undefined
-  const eventRecord = event as Record<string, unknown>
-  if (eventRecord.type !== 'content_block_delta') return undefined
-  const delta = eventRecord.delta
-  if (!delta || typeof delta !== 'object' || Array.isArray(delta)) return undefined
-  const deltaRecord = delta as Record<string, unknown>
-  if (deltaRecord.type === 'text_delta' && typeof deltaRecord.text === 'string' && deltaRecord.text.length > 0) {
-    return { source: 'claude_native', kind: 'model_progress', channel: 'text' }
-  }
-  if (deltaRecord.type === 'thinking_delta' && typeof deltaRecord.thinking === 'string' && deltaRecord.thinking.length > 0) {
-    return { source: 'claude_native', kind: 'model_progress', channel: 'thinking' }
-  }
-  return undefined
-}
-
-function nativeClaudeToolActivity(
-  message: Record<string, unknown>,
-  sessionId: string | undefined,
-  ctx: NormalizeCtx
-): WorkflowLiveObservation | undefined {
-  if (message.type !== 'tool_progress' || message.parent_tool_use_id !== null || message.isReplay === true || typeof sessionId !== 'string') return undefined
-  if (typeof message.session_id !== 'string' || message.session_id !== sessionId) return undefined
-  const toolUseId = message.tool_use_id
-  if (typeof toolUseId !== 'string' || !toolUseId) return undefined
-  const started = ctx.toolUseById?.get(toolUseId)
-  if (!started || started.parentToolUseId !== null) return undefined
-  return { source: 'claude_native', kind: 'tool_activity', toolCallId: toolUseId }
-}
-
-function nativeClaudeToolReturnMessage(message: Record<string, unknown>, sessionId: string | undefined): boolean {
-  if (message.type !== 'user' || message.parent_tool_use_id !== null || message.isReplay === true) return false
-  // SDK user messages may omit session_id. This fresh query and an already
-  // observed call ID scope the return; a present foreign session never does.
-  return message.session_id === undefined || (typeof message.session_id === 'string' && message.session_id === sessionId)
-}
-
-function nativeProviderTurnId(input: Record<string, unknown>): string | undefined {
-  // Claude Code exposes this identity at runtime before the SDK HookInput type catches up.
-  // The transcript persists this identity as promptId, so prefer prompt-shaped
-  // fields when a runtime payload happens to expose both prompt and turn ids.
-  return hookString(input, 'prompt_id', 'promptId', 'prompt_event_id', 'promptEventId', 'turn_id', 'turnId')
-}
-
-const CLAUDE_TRANSCRIPT_IDENTITY_REWIND_BYTES = 256 * 1024
-const CLAUDE_TRANSCRIPT_IDENTITY_SCAN_BYTES = 2 * 1024 * 1024
-
-function transcriptPromptCandidates(text: string): string[] {
-  const command = /<command-name>\s*(\/[^<\s]+)\s*<\/command-name>[\s\S]*?<command-args>\s*([\s\S]*?)\s*<\/command-args>/i.exec(text)
-  return [
-    text,
-    ...(command ? [`${command[1]}${command[2].trim() ? ` ${command[2].trim()}` : ''}`] : [])
-  ]
-}
-
-export function claudeTranscriptProviderTurnId(
-  content: string,
-  prompt: string,
-  sessionId?: string
-): string | undefined {
-  const matches = new Set<string>()
-  for (const line of content.split('\n')) {
-    if (!line.trim()) continue
-    let entry: Record<string, unknown>
-    try { entry = JSON.parse(line) as Record<string, unknown> } catch { continue }
-    if (entry.type !== 'user') continue
-    if (sessionId && hookString(entry, 'sessionId', 'session_id') !== sessionId) continue
-    const text = extractUserText((entry.message as Record<string, unknown> | undefined)?.content)
-    if (isSyntheticPromptHook({ ...entry, prompt: text })) continue
-    if (!transcriptPromptCandidates(text).includes(prompt)) continue
-    const identity = nativeProviderTurnId(entry)
-    if (identity) matches.add(identity)
-  }
-  return matches.size === 1 ? [...matches][0] : undefined
-}
-
-interface TranscriptBaseline {
-  size: number
-  dev: number | null
-  ino: number | null
-  absent: boolean
-}
-
-async function transcriptBaseline(path: string): Promise<TranscriptBaseline | undefined> {
-  try {
-    const handle = await open(path, 'r')
-    try {
-      const stat = await handle.stat()
-      return { size: stat.size, dev: stat.dev, ino: stat.ino, absent: false }
-    } finally {
-      await handle.close()
-    }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
-      return { size: 0, dev: null, ino: null, absent: true }
-    }
-    // A transient open/stat failure is not proof of an empty transcript. Starting
-    // from zero here could bind an older identical prompt after the file recovers.
-    return undefined
-  }
-}
-
-async function providerTurnIdFromTranscript(
-  path: string,
-  prompt: string,
-  sessionId: string | undefined,
-  baseline: TranscriptBaseline
-): Promise<string | undefined> {
-  try {
-    const handle = await open(path, 'r')
-    try {
-      const stat = await handle.stat()
-      if (!baseline.absent && (stat.dev !== baseline.dev || stat.ino !== baseline.ino)) return undefined
-      if (stat.size < baseline.size) return undefined
-      const size = stat.size
-      const hookOffset = baseline.size
-      const readStart = Math.max(0, hookOffset - CLAUDE_TRANSCRIPT_IDENTITY_REWIND_BYTES)
-      const length = Math.min(size - readStart, CLAUDE_TRANSCRIPT_IDENTITY_SCAN_BYTES)
-      if (length <= 0) return undefined
-      const buffer = Buffer.allocUnsafe(length)
-      const { bytesRead } = await handle.read(buffer, 0, length, readStart)
-      const bytes = buffer.subarray(0, bytesRead)
-      const lines: string[] = []
-      let lineStart = 0
-      if (readStart > 0) {
-        const firstNewline = bytes.indexOf(0x0a)
-        if (firstNewline < 0) return undefined
-        lineStart = firstNewline + 1
-      }
-      for (;;) {
-        const newline = bytes.indexOf(0x0a, lineStart)
-        if (newline < 0) break
-        const absoluteEnd = readStart + newline + 1
-        if (absoluteEnd > hookOffset) lines.push(bytes.subarray(lineStart, newline).toString('utf8'))
-        lineStart = newline + 1
-      }
-      return claudeTranscriptProviderTurnId(lines.join('\n'), prompt, sessionId)
-    } finally {
-      await handle.close()
-    }
-  } catch {
-    return undefined
-  }
 }
 
 function sdkPrompt(prompt: string, attachments: AgentInputAttachment[], beforeInput?: () => Promise<boolean>): string | AsyncIterable<SDKUserMessage> {
@@ -294,155 +144,29 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
   }
 
   const permissionMode = opts.permissionMode ?? 'default'
-  const options: Record<string, unknown> = {
-    // C1：开 partial messages，让模型文本逐 token 流式到达（否则只在整条 assistant message 完成时整块出现）。
-    includePartialMessages: true,
-    // P1（RFC §7/§8.2）：开 forwardSubagentText → subagent 的 text/thinking 也作为带 parent_tool_use_id
-    // 的 message 上主流（probe 实测 subagent msg 的 parent_tool_use_id = 父 Agent tool_use_id），
-    // Execution Graph 据此挂父。默认 false 只发 tool_use/tool_result。
-    // 二选一防双采（RFC NIT-1）：开了 forward 就不再装 SubagentStop tail（否则 subagent 内容主流 + tail 各采一遍）。
-    forwardSubagentText: true,
-    // Hook 可观测：让 SDK 把 hook_started/progress/response 放进 message stream，normalize 后进右栏面板。
-    includeHookEvents: true,
-    // SDK 默认丢弃 child stderr。只在异常终态打印最近 2KB，且复用现有凭据脱敏规则。
-    stderr: (data: string) => {
+  const options = createAgentOptions(opts, {
+    runId,
+    permissionMode,
+    onStderr: (data) => {
       stderrDiagnostic = sanitizeMcpAuthError(`${stderrDiagnostic}${data}`)
-    }
-  }
-  if (opts.captureProviderTurnId) {
-    options.hooks = {
-      UserPromptSubmit: [{
-        hooks: [async (input: HookInput) => {
-          const payload = input as unknown as Record<string, unknown>
-          captureSessionId(hookString(payload, 'session_id', 'sessionId'))
-          if (!providerTurnId && !isSyntheticPromptHook(payload)) {
-            providerTurnId = nativeProviderTurnId(payload)
-            const path = hookString(payload, 'transcript_path', 'transcriptPath')
-            if (path && path !== transcriptPath) {
-              transcriptPath = path
-              frozenTranscriptBaseline = await transcriptBaseline(path)
-            }
-          }
-          return { continue: true }
-        }]
-      }]
-    }
-  }
-  if (permissionMode === 'full_access') {
-    options.permissionMode = 'bypassPermissions'
-    options.allowDangerouslySkipPermissions = true
-    options.extraArgs = { 'dangerously-skip-permissions': null }
-  } else if (permissionMode === 'auto_review') {
-    options.permissionMode = 'auto'
-  } else if (permissionMode === 'auto_accept_edits') {
-    // Claude Agent SDK 的原生档位：文件编辑直接放行，其余工具仍走 canUseTool 审批。
-    options.permissionMode = 'acceptEdits'
-  }
-  if (opts.model) options.model = opts.model
-  if (opts.effort) options.effort = opts.effort
-  if (opts.resume) options.resume = opts.resume
-  if (opts.cwd) options.cwd = opts.cwd
-  // 指向本机已装的 claude 原生二进制（选 B：不内嵌 SDK 自带的 216MB 二进制）。
-  if (opts.claudePath) options.pathToClaudeCodeExecutable = opts.claudePath
-  // 显式传完整登录环境，修 launchd 启动的打包 app spawn claude 时 "Not logged in"。
-  if (opts.env) options.env = opts.env
-  if (opts.settingSources?.length) options.settingSources = opts.settingSources
-  options.spawnClaudeCodeProcess = (spawnOptions: {
-    command: string
-    args: string[]
-    cwd?: string
-    env: NodeJS.ProcessEnv
-    signal: AbortSignal
-  }) => {
-    const child = spawn(spawnOptions.command, spawnOptions.args, {
-      cwd: spawnOptions.cwd,
-      env: spawnOptions.env,
-      detached: process.platform !== 'win32',
-      signal: spawnOptions.signal,
-      stdio: ['pipe', 'pipe', 'pipe']
-    })
-    spawnedChild = child
-    // 进程还活着时采集身份，强杀前用它核对，避免 PID/PGID 复用时误杀其他进程组。
-    spawnedIdentity = captureProcessIdentity(child.pid)
-    return child
-  }
-  options.strictMcpConfig = true
-  options.mcpServers = opts.mcpServers ?? {}
-  if (opts.requestUserInput) {
-    options.canUseTool = async (
-      toolName: string,
-      input: Record<string, unknown>,
-      permission: {
-        signal: AbortSignal
-        toolUseID: string
-        agentID?: string
-        suggestions?: PermissionUpdate[]
-        title?: string
-        description?: string
-        /** SDK 给出的触发原因（例如 ask 规则、路径越界、可疑内容）。 */
-        decisionReason?: string
-        /** 触发这次审批的路径，例如 Bash 想访问允许目录之外的文件。 */
-        blockedPath?: string
-      }
-    ) => {
-      if (toolName === 'AskUserQuestion') {
-        const request = normalizeAgentQuestionRequest(
-          runId,
-          permission.toolUseID,
-          input,
-          permission.agentID,
-          'claude:AskUserQuestion'
-        )
-        if (!request) return { behavior: 'deny' as const, message: 'Scry 收到的提问格式无效', interrupt: false }
-        const response = await opts.requestUserInput!(request, permission.signal)
-        if (response.behavior === 'cancelled') {
-          return { behavior: 'deny' as const, message: '用户取消了提问', interrupt: false, decisionClassification: 'user_reject' as const }
-        }
-        return {
-          behavior: 'allow' as const,
-          updatedInput: { ...input, answers: response.answers },
-          decisionClassification: 'user_temporary' as const
+    },
+    onUserPromptSubmit: async (payload) => {
+      captureSessionId(hookString(payload, 'session_id', 'sessionId'))
+      if (!providerTurnId && !isSyntheticPromptHook(payload)) {
+        providerTurnId = nativeProviderTurnId(payload)
+        const path = hookString(payload, 'transcript_path', 'transcriptPath')
+        if (path && path !== transcriptPath) {
+          transcriptPath = path
+          frozenTranscriptBaseline = await transcriptBaseline(path)
         }
       }
-      if (permissionMode === 'full_access') return { behavior: 'allow' as const }
-      const detail = permission.description ?? JSON.stringify(input).slice(0, 1_200)
-      const sessionSuggestions = exactSessionPermissionSuggestions(permission.suggestions)
-      const sessionDescription = exactSessionPermissionDescription(sessionSuggestions)
-      // Provider 说明了为什么要问就原样（脱敏后）转述；没说明就不编造风险理由。
-      const warning = [
-        sanitizeApprovalWarning(permission.decisionReason),
-        permission.blockedPath ? sanitizeApprovalWarning(`越界路径：${permission.blockedPath}`, 200) : undefined
-      ].filter(Boolean).join('；') || undefined
-      const request = agentPermissionQuestion(
-        runId,
-        permission.toolUseID,
-        permission.title ?? '权限请求',
-        `允许 ${toolName} 执行这项操作吗？`,
-        detail,
-        sessionDescription !== undefined,
-        `claude:permission:${toolName}`,
-        sessionDescription,
-        warning
-      )
-      const response = await opts.requestUserInput!(request, permission.signal)
-      const decision = agentPermissionDecision(request, response)
-      if (decision === 'reject') {
-        return { behavior: 'deny' as const, message: '用户拒绝了操作', interrupt: false, decisionClassification: 'user_reject' as const }
-      }
-      const applySessionSuggestions = decision === 'session' && sessionDescription !== undefined
-      return {
-        behavior: 'allow' as const,
-        ...(applySessionSuggestions
-          ? { updatedPermissions: sessionSuggestions }
-          : {}),
-        decisionClassification: applySessionSuggestions ? 'user_permanent' as const : 'user_temporary' as const
-      }
+    },
+    onSpawnedProcess: (child) => {
+      spawnedChild = child
+      // Register the owned handle before sampling its identity, as in the original lifecycle.
+      spawnedIdentity = captureProcessIdentity(child.pid)
     }
-  }
-  // C4：Skill 软屏蔽 —— 只影响 app 驱动的会话，不动用户终端的 claude
-  // C4：skill 软屏蔽 → 改用 SDK 的 skills allowlist（硬过滤：未列入的隐藏+拒调用）。
-  // 软指令实测压不住「列出全部 skill」，故弃用 appendSystemPrompt 改 allowlist。
-  if (opts.skills?.length) options.skills = opts.skills
+  })
 
   let releaseInput: ((allowed: boolean) => void) | undefined
   let inputAdmitted = false
@@ -488,6 +212,7 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
     let runErr: unknown
     let providerStatus: 'completed' | 'failed' = 'completed'
     let sawTerminalResult = false
+    let structuredOutput: ProviderStructuredOutput | undefined
     let streamedAssistantText = ''
     try {
       if (opts.historyReader) {
@@ -515,6 +240,7 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
           session_id?: string
           mcp_servers?: unknown
           claude_code_version?: string
+          structured_output?: unknown
         }
         if (m.type === 'system' && m.subtype === 'init') {
           captureSessionId(m.session_id)
@@ -537,6 +263,14 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
         }
         if (m.type === 'result' && (m.subtype !== 'success' || (msg as { is_error?: boolean }).is_error === true)) {
           providerStatus = 'failed'
+        }
+        if (opts.authoringSchema && m.type === 'result' && providerStatus === 'completed') {
+          // Serialize once: later SDK mutation cannot change the canonical candidate.
+          const json = JSON.stringify(m.structured_output)
+          if (json !== undefined) {
+            if (Buffer.byteLength(json) > WORKFLOW_MAX_VALUE_BYTES) throw new Error(workflowAuthoringCopy.outputTooLarge)
+            structuredOutput = { source: 'claude_sdk_success_result', json }
+          }
         }
         opts.recordNative?.(m.type ?? 'unknown', msg)
         const rawMessage = msg as unknown as Record<string, unknown>
@@ -588,7 +322,8 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
       providerTurnId,
       stopped,
       status: stopped ? ('interrupted' as const) : providerStatus,
-      mcpStatus
+      mcpStatus,
+      ...(!stopped && providerStatus === 'completed' && structuredOutput ? { structuredOutput } : {})
     }
   })()
 

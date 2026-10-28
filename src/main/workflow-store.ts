@@ -8,10 +8,13 @@ import { nextWorkflowFrame, validateWorkflowFrame, validateWorkflowValueReferenc
 import { validateWorkflowOwnership, validateWorkflowClaim, workflowEpochMatches, workflowRecordFingerprint } from './workflow-recovery'
 import { collectionEntries, validateCollectionReference } from './workflow-collections'
 import type { WorkflowAttemptOutcome, WorkflowCollectionEntry, WorkflowCollectionReference, WorkflowControlFrame, WorkflowEvaluation, WorkflowValueReference } from '../shared/workflow'
-import { WORKFLOW_MAX_STOP_REQUESTS, workflowProgressSnapshot } from '../shared/workflow'
+import { workflowProgressSnapshot } from '../shared/workflow'
 
 import type { WorkflowFrameValueCheckpoint, WorkflowStore, WorkflowStoreRecord, WorkflowStorePage, WorkflowPlanningIntent } from './workflow-store-contracts'
-import { fileSafe, absent, MAX_RECORD_BYTES, frameName, valueName, collectionName, validateEvaluation, validateCollectionArtifacts } from './workflow-store-artifacts'
+import type { WorkflowSizeGuideline, WorkflowSizeSnapshot } from '../shared/workflow-size'
+import { readWorkflowSize, updateWorkflowSize, validatePlanningSize } from './workflow-size-guideline'
+import { validateWorkflowStopRequests } from './workflow-stop'
+import { fileSafe, absent, MAX_RECORD_BYTES, frameName, valueName, collectionName, validateEvaluation, validateCollectionArtifacts, validatePlanningRoute } from './workflow-store-artifacts'
 export * from './workflow-store-contracts'
 export { MemoryWorkflowStore } from './workflow-memory-store'
 
@@ -138,6 +141,11 @@ export class FileWorkflowStore implements WorkflowStore {
     })
   }
 
+  async sizeGuideline(): Promise<WorkflowSizeSnapshot> { return (await readWorkflowSize(this.directory)).snapshot }
+  async setSizeGuideline(value: WorkflowSizeGuideline | null): Promise<WorkflowSizeSnapshot> {
+    return updateWorkflowSize(this.directory, value, text => this.atomicText('preferences.json', text))
+  }
+
   async readConcurrency(): Promise<number | undefined> {
     const value = await this.readJson('settings.json')
     if (value === undefined) return undefined
@@ -186,6 +194,7 @@ export class FileWorkflowStore implements WorkflowStore {
     return data.output
   }
   private async writeRecord(record: WorkflowStoreRecord): Promise<void> {
+    validateWorkflowStopRequests(record)
     const id = fileSafe(record.preview.workflowId)
     const snapshot = structuredClone(record)
     for (const outcome of snapshot.outcomes) {
@@ -222,25 +231,30 @@ export class FileWorkflowStore implements WorkflowStore {
 
   async savePlanningIntent(intent: WorkflowPlanningIntent): Promise<void> {
     const snapshot = structuredClone(intent)
-    if (snapshot.result?.output !== undefined) {
-      const text = snapshot.result.output
-      const name = `${fileSafe(intent.workflowId)}.${createHash('sha256').update(text).digest('hex')}.plan.txt`
-      await this.atomicText(name, text)
-      delete snapshot.result.output
-      snapshot.result.outputRef = name
-    }
-    // The artifact is already durable even if the following metadata write fails.
-    // A failure receipt can preserve its reference without rewriting its body.
-    if (snapshot.result) intent.result = snapshot.result
-    await this.atomic(`${fileSafe(intent.workflowId)}.planning.json`, snapshot)
+    const id = fileSafe(intent.workflowId)
+    await withDirectoryLock(join(this.directory, 'locks', id + '.planning.json.lock'), async () => {
+      validatePlanningSize(snapshot, await this.loadPlanningIntent(id))
+      if (snapshot.result?.output !== undefined) {
+        const text = snapshot.result.output
+        const name = `${id}.${createHash('sha256').update(text).digest('hex')}.plan.txt`
+        await this.atomicText(name, text)
+        delete snapshot.result.output
+        snapshot.result.outputRef = name
+      }
+      // The artifact precedes metadata; a failure receipt retains its reference.
+      if (snapshot.result) intent.result = snapshot.result
+      await this.atomic(`${id}.planning.json`, snapshot)
+    }, { requireDeadOwner: true })
   }
   async loadPlanningIntent(id: string): Promise<WorkflowPlanningIntent | undefined> {
     const value = await this.readJson(`${fileSafe(id)}.planning.json`)
     if (value === undefined) return undefined
     if (!value || typeof value !== 'object' || (value as WorkflowPlanningIntent).workflowId !== id) throw new Error('工作流规划记录已损坏')
     const intent = value as WorkflowPlanningIntent
+    validatePlanningSize(intent)
     if ((intent.stopCommandId !== undefined && (typeof intent.stopCommandId !== 'string' || !/^[A-Za-z0-9_-]{1,96}$/.test(intent.stopCommandId))) ||
       (intent.stopRequestedAt !== undefined && (typeof intent.stopRequestedAt !== 'number' || !Number.isFinite(intent.stopRequestedAt) || intent.stopRequestedAt < 0))) throw new Error(workflowControlCopy.invalidPlanningStopReceipt)
+    validatePlanningRoute(intent)
     return intent
   }
   async *planningIntents(): AsyncIterable<WorkflowPlanningIntent> {
@@ -277,9 +291,7 @@ export class FileWorkflowStore implements WorkflowStore {
     }
     validateWorkflowOwnership(record)
     if (record.preview?.workflowId !== id || record.progress?.workflowId !== id || !Array.isArray(record.intents) || !Array.isArray(record.outcomes)) throw new Error('工作流记录合同无效')
-    if (record.stopRequests !== undefined && (!Array.isArray(record.stopRequests) || record.stopRequests.length > WORKFLOW_MAX_STOP_REQUESTS || record.stopRequests.some(request =>
-      !request || typeof request.commandId !== 'string' || !/^[A-Za-z0-9_-]{1,96}$/.test(request.commandId) || !Number.isFinite(request.requestedAt) || request.requestedAt < 0) ||
-      new Set(record.stopRequests.map(request => request.commandId)).size !== record.stopRequests.length)) throw new Error(workflowControlCopy.invalidStopReceipt)
+    validateWorkflowStopRequests(record)
     // Only a fully validated root can establish these existing content addresses.
     // Every load still reads and hashes them. A subsequent root publication retains
     // its own file flush, atomic rename and directory sync before acknowledgement.

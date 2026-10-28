@@ -139,6 +139,28 @@ describe('logical conversation migration and metadata', () => {
     await expect(store.begin(conversation.id, input(conversation.revision))).resolves.toMatchObject({ disposition: 'created' })
   })
 
+  it('stores workflow mode per conversation with a main-built routing grant', async () => {
+    const conversation = await store.create(source.cwd)
+    // Absent means off; no fabricated default is written by create.
+    expect(conversation.workflowMode).toBeUndefined()
+    const manual = await store.updateMetadata(conversation.id, conversation.revision, { kind: 'workflow_mode', mode: 'manual' })
+    expect(manual).toMatchObject({ workflowMode: 'manual', revision: conversation.revision + 1 })
+    await expect(store.updateMetadata(manual.id, conversation.revision, { kind: 'workflow_mode', mode: 'off' })).rejects.toThrow('对话已变化')
+    expect(await new ConversationStore(userData).read(manual.id)).toMatchObject({ workflowMode: 'manual' })
+    expect(manual.workflowRoutingConsent).toMatchObject({ acknowledgesExtraCall: true, scope: expect.stringContaining('额外') })
+    // Main writes the disclosure itself; the caller only asks for the mode.
+    const auto = await store.updateMetadata(manual.id, manual.revision, { kind: 'workflow_mode', mode: 'auto' })
+    expect(auto.workflowMode).toBe('auto')
+    expect(auto.workflowRoutingConsent).toMatchObject({ acknowledgesExtraCall: true, scope: expect.stringContaining('额外') })
+    expect(auto.workflowRoutingConsent?.grantedAt).toBeGreaterThan(0)
+    expect(await new ConversationStore(userData).read(auto.id)).toMatchObject({ workflowMode: 'auto',
+      workflowRoutingConsent: { acknowledgesExtraCall: true } })
+    const off = await store.updateMetadata(auto.id, auto.revision, { kind: 'workflow_mode', mode: 'off' })
+    expect(off).toMatchObject({ workflowMode: 'off', revision: auto.revision + 1 })
+    // The grant is evidence of what was disclosed; switching off does not erase it.
+    expect(off.workflowRoutingConsent).toEqual(auto.workflowRoutingConsent)
+  })
+
   it('cannot archive pending or unknown delivery, while renaming preserves that barrier', async () => {
     const conversation = await store.create(source.cwd)
     const begun = await store.begin(conversation.id, input(0))

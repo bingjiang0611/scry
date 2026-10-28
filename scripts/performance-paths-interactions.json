@@ -1,0 +1,382 @@
+[
+  {
+    "id": "navigation",
+    "title": "项目与会话导航、管理",
+    "owner": "startup-navigation",
+    "operations": [
+      "ipc.agent:chooseFolder",
+      "ipc.agent:listProjects",
+      "ipc.agent:recentFolders",
+      "ipc.agent:removeProject",
+      "ipc.agent:removeRecentFolder",
+      "ipc.agent:renameProject",
+      "ipc.agent:revealProject",
+      "ipc.agent:setProjectPinned",
+      "ipc.agent:setCwd",
+      "ipc.agent:listSessions",
+      "ipc.agent:listArchivedSessions",
+      "ipc.agent:deleteArchivedSessions",
+      "ipc.agent:deleteSession",
+      "ipc.agent:forkSession",
+      "ipc.agent:newSession",
+      "ipc.agent:renameSession",
+      "ipc.agent:setSessionArchived",
+      "ipc.agent:setSessionPinned",
+      "ipc.agent:unreadSessions",
+      "ipc.agent:catalogHealth",
+      "ipc.conversation:create",
+      "ipc.conversation:list",
+      "ipc.conversation:previewAdoption",
+      "ipc.conversation:adopt",
+      "ipc.conversation:fork",
+      "ipc.conversation:update",
+      "ipc.conversation:previewDeletion",
+      "ipc.conversation:delete"
+    ],
+    "sources": [
+      "src/renderer/App.tsx",
+      "src/main/index.ts",
+      "src/main/run-ipc.ts",
+      "src/main/session-catalog-ipc.ts",
+      "src/main/session-deletion-ipc.ts",
+      "src/main/session-fork-ipc.ts",
+      "src/main/conversation-app-ipc.ts",
+      "src/main/conversation-app-runtime.ts"
+    ],
+    "benchmarks": [
+      "navigation.catalog"
+    ],
+    "gap": "handler settle 可能包含用户目录选择等待，不能当纯计算；已测 500 条 catalog 读回及原生会话快速切换，未覆盖所有项目管理动作的屏幕就绪。"
+  },
+  {
+    "id": "history",
+    "title": "打开历史、分页、缓存恢复",
+    "owner": "history-storage",
+    "operations": [
+      "session_history.load",
+      "session_history.load_older",
+      "ipc.agent:loadSession",
+      "ipc.agent:loadSessionOlder",
+      "ipc.conversation:read",
+      "ipc.conversation:readItem"
+    ],
+    "sources": [
+      "src/main/session-history.ts",
+      "src/main/session-history-ipc.ts",
+      "src/main/session-history-older-ipc.ts",
+      "src/main/conversation-app-ipc.ts",
+      "src/main/conversation-app-runtime.ts",
+      "scripts/session-open-bench.mjs",
+      "scripts/session-open-timing.mjs"
+    ],
+    "benchmarks": [
+      "history.page"
+    ],
+    "gap": "固定分页基准和已有 native session-open；真实 Provider 格式、OS 冷缓存及各设备尚需独立验证。"
+  },
+  {
+    "id": "compose",
+    "title": "输入、草稿、附件",
+    "owner": "compose-live-control",
+    "operations": [
+      "ipc.agent:clipboardImage"
+    ],
+    "sources": [
+      "src/renderer/composer-drafts.ts",
+      "src/renderer/App.tsx"
+    ],
+    "benchmarks": [
+      "compose.drafts"
+    ],
+    "gap": "已测 32×4KiB 草稿序列化和真实 Chromium 输入到两帧；日常日志仍无逐次按键关联，OS 剪贴板、附件及重启草稿恢复需独立验收。"
+  },
+  {
+    "id": "send",
+    "title": "发送准备与首个 Provider 输出",
+    "owner": "compose-live-control",
+    "operations": [
+      "ipc.agent:start",
+      "ipc.conversation:preview",
+      "ipc.conversation:commands",
+      "ipc.conversation:submit",
+      "conversation.command_catalog",
+      "ipc.conversation:send",
+      "ipc.workflow:requestTemplateEditCandidate",
+      "ipc.workflow:applyTemplateEditCandidate",
+      "agent.start",
+      "agent.first_provider_trace",
+      "agent.first_text"
+    ],
+    "sources": [
+      "src/main/index.ts",
+      "src/main/run-ipc.ts",
+      "src/main/app-run-recording-recovery.ts",
+      "src/main/app-run-start.ts",
+      "src/main/app-run-edit-last-turn.ts",
+      "src/main/app-run-diff.ts",
+      "src/main/app-run-session-publication.ts",
+      "src/shared/constants/app-run-edit-last-turn-copy.ts",
+      "src/main/providers/claude.ts",
+      "src/main/providers/claude-runtime.ts",
+      "src/main/providers/claude-mcp-auth.ts",
+      "src/main/providers/types.ts",
+      "src/main/agent-runner.ts",
+      "src/main/agent-runner-options.ts",
+      "src/main/agent-runner-transcript.ts",
+      "src/main/agent-runner-observation.ts",
+      "src/main/conversation-app-ipc.ts",
+      "src/main/conversation-app-runtime.ts",
+      "src/main/llm-performance.ts",
+      "src/main/conversation-service.ts",
+      "src/main/conversation-request.ts",
+      "src/main/conversation-send.ts",
+      "src/main/desktop-task-entry.ts",
+      "src/main/desktop-workflow-task-entry.ts",
+      "src/main/desktop-template-task-entry.ts",
+      "src/main/desktop-template-edit-task-entry.ts",
+      "src/main/desktop-template-edit-authoring.ts",
+      "src/main/desktop-template-edit-candidate-application.ts",
+      "src/main/workflow-template-edit-candidate-store.ts",
+      "src/main/workflow-template-edit-application-store.ts",
+      "src/main/workflow-app-runtime.ts",
+      "src/main/workflow-authoring.ts",
+      "src/main/desktop-conversation-submission.ts",
+      "src/main/task-submission-record.ts",
+      "src/main/task-command.ts",
+      "src/main/conversation-task-store.ts",
+      "src/main/conversation-store.ts",
+      "src/main/conversation-store-foundation.ts",
+      "src/main/conversation-record.ts",
+      "src/main/conversation-adoption.ts",
+      "src/main/conversation-deletion.ts",
+      "src/renderer/components/ConversationDeleteDialog.tsx",
+      "src/renderer/components/ConversationAdoptionDialog.tsx",
+      "src/renderer/components/ConversationView.tsx",
+      "src/renderer/hooks/useConversationReadback.ts",
+      "src/renderer/hooks/useConversationSubmission.ts",
+      "src/renderer/hooks/useConversationWorkflowLaunch.tsx",
+      "src/renderer/components/WorkflowTemplateWorkbench.tsx",
+      "src/renderer/components/WorkflowTemplateEditCandidatePanel.tsx",
+      "src/renderer/components/WorkflowTemplateHistoryPanel.tsx",
+      "src/renderer/components/WorkflowTemplateDeleteConfirmation.tsx",
+      "src/renderer/components/WorkflowTemplateEditInstruction.tsx",
+      "src/shared/workflow-api.ts",
+      "src/shared/workflow-template.ts",
+      "src/preload/workflow-api.ts",
+      "src/renderer/components/ConversationCommandPicker.tsx",
+      "src/renderer/components/ConversationWorkflowTasks.tsx",
+      "src/renderer/components/WorkflowLaunchDialog.tsx"
+    ],
+    "benchmarks": [
+      "send.codex-fixture"
+    ],
+    "gap": "日常日志的首段文本仍是 main 收到，不是 UI 可见。独立 native 夹具已测可信 Send 按钮到真实正文视口命中和两帧就绪；不产出文本的早停 run 单列 unavailable/cancelled，不伪造可见时间。外部 Provider 等待与本机阶段分开分析，仍需独立验收。统一对话已有功能 smoke，尚无独立的长会话/并发性能基准。"
+  },
+  {
+    "id": "stream",
+    "title": "流式对话、Markdown、滚动与传输",
+    "owner": "compose-live-control",
+    "operations": [
+      "ipc.agent:traceAck",
+      "ipc.agent:traceResynchronized"
+    ],
+    "sources": [
+      "src/main/run-ipc.ts",
+      "src/main/trace-output.ts",
+      "src/renderer/format.ts",
+      "src/renderer/chat-scroll.ts",
+      "src/renderer/performance.bench.tsx"
+    ],
+    "benchmarks": [
+      "trace.delivery",
+      "renderer.batch"
+    ],
+    "gap": "JSON 字节不是 Electron wire bytes；计算基准不是浏览器 paint。补流式输出时原生输入与滚动。"
+  },
+  {
+    "id": "controls",
+    "title": "停止、steer、审批、后台会话与并发",
+    "owner": "compose-live-control",
+    "operations": [
+      "ipc.agent:stop",
+      "ipc.agent:steer",
+      "ipc.agent:stopBackgroundTask",
+      "ipc.agent:answerQuestion",
+      "ipc.agent:activeRun",
+      "ipc.agent:activeRuns",
+      "ipc.agent:adoptActiveRun",
+      "ipc.agent:focusRun",
+      "ipc.agent:focusedRunSnapshot"
+    ],
+    "sources": [
+      "src/main/index.ts",
+      "src/main/run-ipc.ts",
+      "src/main/app-run-diff.ts",
+      "src/main/app-run-session-publication.ts",
+      "src/main/agent-runner.ts",
+      "src/main/agent-runner-options.ts",
+      "src/main/workflow-parallel-policy.ts",
+      "src/main/workflow-parallel-stop.ts",
+      "src/main/workflow-stop.ts",
+      "scripts/background-work-ui-smoke.mjs",
+      "scripts/steer-ui-smoke.mjs"
+    ],
+    "benchmarks": [
+      "controls.stop-lifecycle"
+    ],
+    "gap": "已测受控 Provider 中断与真实 App 的 Stop 按钮到终态、两帧空闲界面；覆盖 native turn ID 前及正文可见后停止，并独立核对退出后的归档。真实 Provider、强杀、steer、审批、并发争用和焦点切换不由该固定场景证明。"
+  },
+  {
+    "id": "persistence",
+    "title": "终态收口、证据存储",
+    "owner": "history-storage",
+    "operations": [
+      "agent.terminal_finalize",
+      "agent.trace_content"
+    ],
+    "sources": [
+      "src/main/live-trace-ingestion.ts",
+      "src/main/app-turn-archive.ts",
+      "src/main/app-run-diff.ts",
+      "src/main/app-run-session-publication.ts",
+      "src/main/index.ts",
+      "src/main/conversation-app-ipc.ts",
+      "src/main/conversation-app-runtime.ts",
+      "src/main/transcript-archive.bench.ts"
+    ],
+    "benchmarks": [
+      "persistence.archive"
+    ],
+    "gap": "已测真实 archive 更新/读取，原生夹具要求终态、SQLite ready，并在进程退出后独立核对 turn 文件。Managed recorder 两阶段收敛、错误和崩溃恢复仍需专项验收。"
+  },
+  {
+    "id": "evidence",
+    "title": "工具详情、文件足迹、Overview",
+    "owner": "analytics-capabilities",
+    "operations": [
+      "ipc.agent:recorderContentPage"
+    ],
+    "sources": [
+      "src/main/trace-tool-content.ts",
+      "src/main/recorder-content-ipc.ts",
+      "src/renderer/App.tsx"
+    ],
+    "benchmarks": [
+      "evidence.projection"
+    ],
+    "gap": "工具正文读取 handler 可测；缺展开到可读、图片和大证据页渲染。"
+  },
+  {
+    "id": "analytics",
+    "title": "用量、费用、性能与诊断面板",
+    "owner": "analytics-capabilities",
+    "operations": [
+      "ipc.agent:stats",
+      "ipc.agent:usageStats",
+      "ipc.agent:usageAnalytics",
+      "ipc.agent:billingState",
+      "ipc.agent:importBillingFixture",
+      "ipc.agent:syncBillingAdmin",
+      "ipc.agent:llmPerformanceHistory",
+      "ipc.agent:llmPerformanceSummary"
+    ],
+    "sources": [
+      "src/main/index.ts",
+      "src/main/analytics-ipc.ts",
+      "scripts/analytics-credits-ui-smoke.mjs"
+    ],
+    "benchmarks": [
+      "analytics.stats"
+    ],
+    "gap": "查询 settle 可测；缺固定大账本与面板就绪基准，外部账单同步不可混为本机开销。"
+  },
+  {
+    "id": "workspace",
+    "title": "文件浏览、预览、写入和外部打开",
+    "owner": "workspace-source-control",
+    "operations": [
+      "ipc.workspace:"
+    ],
+    "sources": [
+      "src/main/index.ts"
+    ],
+    "benchmarks": [
+      "workspace.files"
+    ],
+    "gap": "已测 122 项目录、1MiB 文件与实际内容变更写回；保存到屏幕可见、外部应用是否打开不在 handler/文件基准证据范围内。"
+  },
+  {
+    "id": "source-control",
+    "title": "Git、diff、PR 与 review",
+    "owner": "workspace-source-control",
+    "operations": [
+      "ipc.sourceControl:",
+      "ipc.agent:gitDiff"
+    ],
+    "sources": [
+      "src/main/source-control/ipc.ts",
+      "src/main/git.ts",
+      "src/main/app-run-diff.ts",
+      "src/main/app-run-session-publication.ts",
+      "scripts/git-turn-diff-bench.mjs"
+    ],
+    "benchmarks": [
+      "source-control.diff"
+    ],
+    "gap": "已测临时 Git 仓库真实 diff；日常 read/mutate handler 尚未细分所有操作。远程 push、PR、review 及网络授权另验。"
+  },
+  {
+    "id": "terminal",
+    "title": "终端输入输出、恢复与历史",
+    "owner": "terminal",
+    "operations": [
+      "ipc.terminal:"
+    ],
+    "sources": [
+      "src/main/terminal-output.ts",
+      "src/main/index.ts"
+    ],
+    "benchmarks": [
+      "terminal.delivery"
+    ],
+    "gap": "handler 与固定输出合批可测；不是 PTY 输入到屏幕回显，补真实本地进程及原生渲染基准。"
+  },
+  {
+    "id": "remote",
+    "title": "远程桌面、手机、配对和重连",
+    "owner": "remote-device",
+    "operations": [
+      "ipc.desktopRemote:",
+      "ipc.remote:"
+    ],
+    "sources": [
+      "src/main/remote/desktop-client-ipc.ts",
+      "src/main/remote/remote-host-service.ts",
+      "apps/ios/ScryRemote"
+    ],
+    "benchmarks": [
+      "remote.loopback"
+    ],
+    "gap": "桌面发起的 handler 可测；手机直连请求、网络各跳与设备绘制尚未计时，必须 iCTRL 真机验收，不用模拟器替代。"
+  },
+  {
+    "id": "resources-shell",
+    "title": "全局交互、设置、长时资源与退出",
+    "owner": "startup-navigation",
+    "operations": [
+      "ipc.app:setTheme",
+      "ipc.app:copyText",
+      "renderer.resources",
+      "app.resources"
+    ],
+    "sources": [
+      "src/renderer/performance-monitor.ts",
+      "src/main/performance-resource-monitor.ts",
+      "scripts/performance-soak.mjs"
+    ],
+    "benchmarks": [
+      "resources-shell.process"
+    ],
+    "gap": "全局可见窗口帧/长任务与资源采样不能归因到某次操作；退出只保证有界尽力刷新，崩溃前最多丢未刷新窗口。"
+  }
+]

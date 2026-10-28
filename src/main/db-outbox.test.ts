@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -12,6 +12,7 @@ vi.mock('electron', () => ({
 }))
 
 import { deleteTurnOutboxSessionRows, recordTurn, replayDatabaseTurnOutbox, turnOutboxSessionRunIds } from './db'
+import { TRACE_TOOL_CONTENT_POLICY } from './trace-tool-content'
 
 let root = ''
 beforeEach(() => {
@@ -21,6 +22,25 @@ beforeEach(() => {
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
 describe('database turn outbox', () => {
+  it('retains the explicit App authoring policy in the outbox without bypassing ordinary invalid-workspace rejection', () => {
+    writeFileSync(join(root, 'scry.config.json'), 'null')
+    const args = { runId: 'authoring-policy', cwd: root, userText: 'produce a candidate', items: [] }
+    const dir = join(root, 'db-turn-outbox')
+    expect(recordTurn(args)).toBe(false)
+    expect(existsSync(dir)).toBe(false)
+    // false still means SQLite is unavailable; only the durable outbox is proved.
+    expect(recordTurn({ ...args, toolContentPolicy: TRACE_TOOL_CONTENT_POLICY })).toBe(false)
+    const files = readdirSync(dir)
+    expect(files).toHaveLength(1)
+    const file = join(dir, files[0])
+    const saved = readFileSync(file, 'utf8')
+    expect(JSON.parse(saved).toolContentPolicy).toEqual(TRACE_TOOL_CONTENT_POLICY)
+    expect(recordTurn({ ...args, toolContentPolicy: TRACE_TOOL_CONTENT_POLICY })).toBe(false)
+    expect(readFileSync(file, 'utf8')).toBe(saved)
+    expect(recordTurn({ ...args, runId: 'ordinary-policy' })).toBe(false)
+    expect(readdirSync(dir)).toHaveLength(1)
+  })
+
   it('legacy full-redacted selects raw output before the SQLite failure outbox and pins budgets', () => {
     writeFileSync(join(root, 'scry.config.json'), JSON.stringify({ schemaVersion: 1, workspaceId: 'safe', capture: { toolOutput: 'full-redacted' } }))
     const args = {

@@ -6,6 +6,7 @@ import type { WorkflowReplicaReference } from '../shared/workflow-replica'
 import type { WorkflowStore, WorkflowStoreRecord } from './workflow-store'
 import type { WorkflowSystemIntent, WorkflowSystemOutcome } from '../shared/workflow-system'
 import { validateWorkflowSystemLedger } from './workflow-system-ledger'
+import { verifyWorkflowCheckValue } from './workflow-check-evidence'
 import { WorkflowProtectedSurface } from './workflow-verification-surface'
 import { verifyWorkflowCheckInputs, verifyWorkflowInputMaterialization, type WorkflowInputSnapshotObserver } from './workflow-input-snapshot'
 import { matchesWorkflowValue } from './workflow-values'
@@ -24,11 +25,11 @@ export class WorkflowVerification {
     const value = await this.store.loadValue(record.preview.workflowId, outcome.resultRef)
     if (value.state !== 'known') return undefined
     const check = outcome.check, materialization = check.inputs?.materialization
-    const raw = value.value
-    if (!raw || Array.isArray(raw) || typeof raw !== 'object' || raw.passed !== (check.state === 'passed') || raw.state !== check.state || raw.exitCode !== check.exitCode || raw.settled !== check.settled || raw.truncated !== check.truncated) throw new Error(copy.contract)
+    const raw = await verifyWorkflowCheckValue(this.store, record.preview.workflowId, intent.stepId, check, node.authorization, value.value)
     await verifyWorkflowCheckInputs(this.store, record.preview.workflowId, intent.stepId, intent.inputSnapshot, check.inputs, observe)
     await verifyWorkflowInputMaterialization(this.store, record, materialization)
-    await this.store.loadValue(record.preview.workflowId, check.stdoutRef)
+    // Node stdout was already loaded to validate its runner-reported counts.
+    if (node.authorization.parser !== 'node_test') await this.store.loadValue(record.preview.workflowId, check.stdoutRef)
     await this.store.loadValue(record.preview.workflowId, check.stderrRef)
     if (materialization && (!raw.inputs || Array.isArray(raw.inputs) || typeof raw.inputs !== 'object' || JSON.stringify(raw.inputs.materialization) !== JSON.stringify(materialization))) throw new Error(copy.contract)
     if (!check.settled || check.truncated || (check.state !== 'passed' && check.state !== 'failed') || materialization?.state !== 'available' || !check.inputs || check.inputs.changes.state !== 'available') return undefined

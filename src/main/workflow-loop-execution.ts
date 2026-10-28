@@ -25,7 +25,7 @@ export class WorkflowLoopExecution {
     return result
   }
   private scope(values: Record<string, WorkflowEvaluation>, invariants: Record<string, WorkflowEvaluation>, iteration: number, label: string): WorkflowControlScope {
-    const scope = this.control.child(this.parent, label)
+    const scope = this.control.child(this.parent, label, this.frame)
     for (const [name, value] of [...Object.entries(invariants), ...Object.entries(values)]) this.control.bind(scope, name, value)
     scope.legacyInputs ||= iteration > 0 && !this.frame.loop?.semanticStateRef
     if (iteration > 0 && this.frame.loop?.semanticStateRef && this.frame.loop.invariantSemanticRef) scope.callContexts!.push({ kind: 'loop', frameId: this.frame.frameId, blockId: this.block.blockId, iteration,
@@ -65,7 +65,7 @@ export class WorkflowLoopExecution {
     const restored = await this.control.restoreLoop(this.frame)
     if (restored && (Object.keys(restored.invariants).sort().join() !== Object.keys(this.block.invariants).sort().join() || Object.keys(restored.checkpoint.initialStateRefs).sort().join() !== Object.keys(this.schemas).sort().join())) throw new Error(copy.checkpoint)
     const invariants = restored?.invariants ?? await this.evaluate(this.block.invariants, this.parent)
-    const initialScope = this.control.child(this.parent, this.block.blockId + ':initial')
+    const initialScope = this.control.child(this.parent, this.block.blockId + ':initial', this.frame)
     for (const [name, value] of Object.entries(invariants)) this.control.bind(initialScope, name, value)
     let values = restored?.values ?? await this.evaluate(this.block.initial, initialScope)
     const initialStateRefs = restored?.checkpoint.initialStateRefs ?? await this.control.saveBindings(values)

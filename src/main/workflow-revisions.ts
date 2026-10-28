@@ -121,11 +121,12 @@ export function governingWorkflowPreview(record: WorkflowStoreRecord, kind: 'int
 export function workflowStaticRevisionNodes(preview: WorkflowPlanPreview) {
   const nodes = new Map<string, { block: WorkflowBlock; path: string[]; dependencies: string[] }>()
   const visit = (block: WorkflowBlock, path: string[]) => {
-    if (!['sequence', 'parallel', 'bind', 'call', 'return', 'replica', 'check', 'verification'].includes(block.kind)) throw new Error(copy.unsupported)
+    if (!['sequence', 'parallel', 'bind', 'call', 'return', 'replica', 'combine', 'check', 'verification'].includes(block.kind)) throw new Error(copy.unsupported)
     const children = workflowChildBlocks(block)
     const dependencies = block.kind === 'call' ? [...(block.inputRefs ?? []).map(ref => ref.nodeId), ...(block.replica ? workflowExpressionReferences(block.replica) : [])]
       : block.kind === 'bind' ? workflowExpressionReferences(block.value) : block.kind === 'return' ? [block.ref.nodeId]
       : block.kind === 'replica' ? (block.source ? workflowExpressionReferences(block.source) : [])
+      : block.kind === 'combine' ? [...workflowExpressionReferences(block.base), ...workflowExpressionReferences(block.candidates)]
       : block.kind === 'check' ? workflowExpressionReferences(block.replica)
       : block.kind === 'verification' ? [...Object.values(block.required).flatMap(entry => workflowExpressionReferences(entry.result)), ...(block.baseline ? workflowExpressionReferences(block.baseline) : [])]
       : children.map(child => child.blockId)

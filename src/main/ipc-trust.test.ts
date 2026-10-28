@@ -39,7 +39,7 @@ describe('trusted main IPC registration', () => {
     expect(() => handler(event)).toThrow(error)
     expect(samples[2].outcome).toBe('error')
   })
-  it.each(['workspace:list', 'workspace:resolveFile', 'agent:llmPerformanceSummary', 'agent:llmPerformanceHistory', 'agent:steer', 'app:copyText'])('rejects wrong sender, subframe, and origin before %s runs', async (channel) => {
+  it.each(['workspace:list', 'workspace:resolveFile', 'agent:llmPerformanceSummary', 'agent:llmPerformanceHistory', 'agent:steer', 'app:copyText', 'conversation:commands', 'conversation:submit', 'agent:start', 'agent:answerQuestion', 'agent:recorderContentPage', 'agent:deleteSession', 'agent:deleteArchivedSessions'])('rejects wrong sender, subframe, and origin before %s runs', async (channel) => {
     let registered: Handler | undefined
     const ipcMain = {
       handle: (_channel: string, listener: Handler) => { registered = listener }

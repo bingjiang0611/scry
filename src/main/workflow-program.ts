@@ -17,6 +17,7 @@ import type {
   WorkflowSequenceBlock
 } from '../shared/workflow'
 import { WORKFLOW_MAX_ATTEMPTS, WORKFLOW_SCHEMA_VERSION, providerCapabilityState, workflowChildBlocks } from '../shared/workflow'
+import { workflowSizePlanningAdvice, type WorkflowSizeGuideline } from '../shared/workflow-size'
 import { templateInstance } from './workflow-template-identity'
 import { workflowCollectionCopy, workflowExpressionCopy } from '../shared/constants/copy'
 import { normalizeAgentStartRequest, type AgentRunControlCatalog, type AgentStartRequest } from '../shared/runtime'
@@ -32,7 +33,7 @@ export interface WorkflowCapabilityInput {
   canConfirmStop: boolean
 }
 
-export function workflowPlanningPrompt(roles: readonly WorkflowRoleBinding[], goal: string): string {
+export function workflowPlanningPrompt(roles: readonly WorkflowRoleBinding[], goal: string, sizeGuideline: WorkflowSizeGuideline = 'medium'): string {
   // Keep a typed, validator-tested example for every M0 node, including the
   // container field that models otherwise commonly guess as `children`.
   const example: WorkflowBlock = { kind: 'sequence', blockId: 'root', blocks: [
@@ -46,9 +47,10 @@ export function workflowPlanningPrompt(roles: readonly WorkflowRoleBinding[], go
   return [
     'A verification is {kind:"verification",blockId,required:{key:{check:existingCheckBlockId,result:expression},...},baseline?:expression,protectedPaths?:string[]}. Every required key names an actual check block; results/baseline select same-root main stepId handles, never self-reported pass/fail. Main verifies immutable input versions and command identities. protectedPaths freezes 1-256 non-overlapping relative file/directory paths; main compares complete before/after manifests to the baseline (or first required check), not model claims. This is declared input preservation, not test coverage. Comparison reports check/diagnostic deltas; progress remains unavailable without coverage evidence. It launches no checks or Provider calls itself.',
     "Only author the plan. Do not perform the user's task, edit files, run checks, launch agents or invoke native Workflow tools while planning.",
-    'You are the selected Scry workflow orchestrator. Produce only one JSON object with schemaVersion 1 and body. Allowed nodes are sequence, parallel, call, bind, branch, map, collect, loop, and exactly one final return. Every node must include kind and a unique blockId.',
+    'You are the selected Scry workflow orchestrator. Produce only one JSON object with schemaVersion 1 and body. Allowed nodes are sequence, parallel, call, bind, branch, map, collect, loop, replica, combine, check, and exactly one final return. Every node must include kind and a unique blockId.',
     'A sequence is {kind:"sequence",blockId,blocks:[...]}. A parallel is {kind:"parallel",blockId,blocks:[...]}. Both containers use blocks, never children.',
     'A call is {kind:"call",blockId,role,prompt,inputRefs?,outputSchema?}; role must be one of the configured roles. inputRefs reference an earlier committed binding by {nodeId,path?:[field,...]}; path means JSON fields, not a filesystem path. Never reference a parallel sibling or future node.',
+    'A replica is {kind:"replica",blockId,source?:replicaExpression}; it creates a main-owned lease-protected copy. A combine is {kind:"combine",blockId,base:replicaExpression,candidates:collectionExpression}; every candidate must descend from the same durable base, and main compares complete manifests/bytes in stable order. It returns typed combined or conflict evidence and never applies to the source workspace. A check may consume a successful combine.integration; failed, rejected, timed-out or unknown checks are not applicable evidence.',
     'A bind is {kind:"bind",blockId,value:expression}; it binds its immutable result under blockId. A branch is {kind:"branch",blockId,when:expression,then:block,else:block,unknown:block|"blocked"}. when must be boolean; missing evidence is unknown, never false. Exactly one arm runs; private arm bindings do not escape. The branch binds {arm:"then"|"else"|"unknown",value:chosenOutput}.',
     'A map is {kind:"map",blockId,items:expression,item:localName,key:[field,...],maxItems:0..4096,body:block}. It evaluates a real collection dynamically; do not unroll it. Validate the complete input bound and unique scalar keys before dispatch. maxItems is a visible whole-batch refusal boundary, never truncation. Worst-case calls are maxItems times body calls. Source collection references must retain key:["key"]. A collect is {kind:"collect",blockId,items:expression}; it reads a sealed host collection into bounded outcome rows with key/index/state/settled/value?/error?, retaining failed slots. Explicit collect is required to consume a known settled failed map summary; unknown never advances.',
     'A loop is {kind:"loop",blockId,initial:{name:expression,...},stateSchema:{name:schema|"inferred",...},invariants:{name:expression,...},iteration?:localName,best?:stateName,outcome:outputName,maxIterations:1..1000,body:block,until:booleanExpression,carry:{name:expression,...},result:expression,progress:"bounded_only"|{baseline:expression,key:expression,improved:booleanExpression},policy:{error:"fail_closed",unknown:"block",stop:"cancel",logicalExit:"report_partial"}}. initial and carry must have identical state keys. Nonempty invariants bind once; state is immutable inside each round. result reads only committed state/invariants, not private body bindings. Native/contract errors or unknown do not create another iteration. Logical exhaustion/no-progress/oscillation permit the approved partial report but never make the root successful. best names a preserved state reference, not independent quality proof. Compare actual diagnosis/rubric content, never per-round artifact IDs. Loop calls are maxIterations times body calls; budgets never reset.',
@@ -57,6 +59,7 @@ export function workflowPlanningPrompt(roles: readonly WorkflowRoleBinding[], go
     'The final root return is {kind:"return",blockId,ref:{nodeId:"...",path?:[field,...]}} and must reference one committed binding. No JavaScript, eval, imports, shell execution, unbounded loops, or unsupported fields. Use literal prompts only; pass prior evidence through inputRefs. Bound data are at most 4 MiB UTF-8 JSON, depth 64 and 4096 collection members; expressions are at most depth 16 and 256 nodes.',
     `Never exceed ${WORKFLOW_MAX_ATTEMPTS} Agent calls. The following example illustrates grammar only; do not copy its tasks or role choices instead of planning the user's goal.`,
     `Grammar example: ${JSON.stringify({ schemaVersion: WORKFLOW_SCHEMA_VERSION, body: example })}`,
+    ...workflowSizePlanningAdvice(sizeGuideline),
     `Configured roles: ${JSON.stringify(roles.map(({ role, providerId, agentProfileId, requestedModel, permissionMode }) => ({ role, providerId, agentProfileId, requestedModel, permissionMode })))}`,
     `Goal:\n${goal}`
   ].join('\n')

@@ -28,7 +28,7 @@ export class WorkflowControlValues {
       ...(value?.state === 'known' ? { value: value.value } : {}), ...(error ? { error } : {})
     }, ...(fields.length ? { collectionFields: fields } : {}), derivedFrom: reference ? [`value:${reference.key}:${reference.hash}`] : [] }
   }
-  async saveCollectionValue(value: Extract<WorkflowEvaluation, { state: 'known' }>): Promise<WorkflowValueReference> {
+  async saveCollectionValue(value: WorkflowEvaluation): Promise<WorkflowValueReference> {
     return this.store.saveValue(this.preview.workflowId, 'collection_member', value)
   }
   async evaluate(expression: WorkflowExpression, scope: WorkflowControlScope, label: string, stopped: () => boolean): Promise<WorkflowEvaluation> {

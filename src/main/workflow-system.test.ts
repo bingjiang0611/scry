@@ -7,8 +7,69 @@ import * as checks from './workflow-check'
 import { templateExtractionSource } from './workflow-template-extraction'
 import { validateWorkflowTemplate } from './workflow-template-definition'
 import { roots, CutParentStore, fixture } from './workflow-system.fixture'
+import { validateWorkflowSystemLedger } from './workflow-system-ledger'
+import type { WorkflowBlock } from '../shared/workflow'
+
+const combineCheckBody: WorkflowBlock = { kind: 'sequence', blockId: 'root', blocks: [
+  { kind: 'replica', blockId: 'base' },
+  { kind: 'map', blockId: 'candidate_map', items: { kind: 'literal', value: [{ key: 'left' }, { key: 'right' }] }, item: 'candidate_item', key: ['key'], maxItems: 2,
+    body: { kind: 'replica', blockId: 'candidate', source: { kind: 'ref', name: 'base' } } },
+  { kind: 'collect', blockId: 'candidates', items: { kind: 'ref', name: 'candidate_map' } },
+  { kind: 'combine', blockId: 'combined', base: { kind: 'ref', name: 'base' }, candidates: { kind: 'ref', name: 'candidates' } },
+  { kind: 'check', blockId: 'integration_check', replica: { kind: 'field', source: { kind: 'ref', name: 'combined' }, path: ['integration'] },
+    check: { argv: [process.execPath, 'check.cjs'], cwd: '.', timeoutMs: 2000, parser: 'exit_code' } },
+  { kind: 'return', blockId: 'report', ref: { nodeId: 'integration_check', path: ['passed'] } }
+] }
 
 describe('SystemSteps under canonical Service/Runner/Interpreter', () => {
+  it('persists combine through the canonical ledger and runs the integration check without changing the source', async () => {
+    const f = await fixture(), combined = f.create(f.store, combineCheckBody)
+    const preview = await combined.service.planCommand({ command: '/scry-workflow run combine check', workspace: f.source,
+      orchestrator: { role: 'orchestrator', providerId: 'claude' }, roles: [] })
+    const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 2 }
+    await combined.service.approve(approval)
+    const progress = await combined.service.start(preview.workflowId, approval), record = (await f.store.load(preview.workflowId))!
+    expect(progress).toMatchObject({ state: 'completed', finalReport: 'true', dispatchAttempts: 0 })
+    expect(() => validateWorkflowSystemLedger(record)).not.toThrow()
+    expect(record.systemIntents?.map(intent => intent.kind)).toEqual(['prepare_replica', 'prepare_replica', 'prepare_replica', 'combine', 'check'])
+    const combination = record.systemOutcomes?.find(outcome => outcome.combine)?.combine
+    expect(combination).toMatchObject({ state: 'combined', candidateCount: 2, changedPathCount: 0, conflicts: [], integration: { replicaId: expect.any(String) } })
+    const forged = structuredClone(record), forgedCombination = forged.systemOutcomes?.find(outcome => outcome.combine)?.combine
+    if (!forgedCombination) throw new Error('missing combination outcome')
+    Object.assign(forgedCombination, { baseInputHash: 'a'.repeat(64) })
+    expect(() => validateWorkflowSystemLedger(forged)).toThrow()
+    await expect(readFile(join(f.source, 'native-count'))).rejects.toMatchObject({ code: 'ENOENT' })
+    const cold = f.create()
+    expect(await cold.service.snapshot(preview.workflowId)).toMatchObject({ state: 'completed', finalReport: 'true' })
+    if (combination?.state !== 'combined') throw new Error('missing integration replica')
+    await expect(cold.host.replicas.resolve(combination.integration)).resolves.toMatchObject(combination.integration)
+  })
+  it('retains a failed integration check after successful combination', async () => {
+    const f = await fixture(17), combined = f.create(f.store, combineCheckBody)
+    const preview = await combined.service.planCommand({ command: '/scry-workflow run combine failed check', workspace: f.source,
+      orchestrator: { role: 'orchestrator', providerId: 'claude' }, roles: [] })
+    const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 4 }
+    await combined.service.approve(approval)
+    expect(await combined.service.start(preview.workflowId, approval)).toMatchObject({ state: 'completed', finalReport: 'false', dispatchAttempts: 0 })
+    const outcomes = (await f.store.load(preview.workflowId))!.systemOutcomes!
+    expect(outcomes.find(outcome => outcome.combine)).toMatchObject({ state: 'completed', combine: { state: 'combined' } })
+    expect(outcomes.at(-1)).toMatchObject({ state: 'completed', check: { state: 'failed', exitCode: 17 } })
+  })
+  it('does not upgrade an unknown integration check into an applicable combined result', async () => {
+    const f = await fixture(), combined = f.create(f.store, combineCheckBody), original = combined.host.execute.bind(combined.host)
+    vi.spyOn(combined.host, 'execute').mockImplementation((preview, block, stepId, input, beforeCheck) => block.kind === 'check'
+      ? { result: Promise.resolve({ state: 'unknown', settled: true, value: { state: 'unknown', reason: 'lost integration check result', derivedFrom: ['system:' + stepId] } }),
+          settled: Promise.resolve(), stop: () => true }
+      : original(preview, block, stepId, input, beforeCheck))
+    const preview = await combined.service.planCommand({ command: '/scry-workflow run combine unknown check', workspace: f.source,
+      orchestrator: { role: 'orchestrator', providerId: 'claude' }, roles: [] })
+    const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 3 }
+    await combined.service.approve(approval)
+    expect(await combined.service.start(preview.workflowId, approval)).toMatchObject({ state: 'unknown' })
+    const record = (await f.store.load(preview.workflowId))!
+    expect(record.systemOutcomes?.find(outcome => outcome.combine)).toMatchObject({ state: 'completed', combine: { state: 'combined' } })
+    expect(record.systemOutcomes?.at(-1)).toMatchObject({ state: 'unknown', settled: true })
+  })
   it('prepares an owned current-input copy, runs frozen main check in it, and spends zero Agent attempts', async () => {
     const f = await fixture()
     const progress = await f.service.start(f.preview.workflowId, f.approval)
@@ -17,6 +78,13 @@ describe('SystemSteps under canonical Service/Runner/Interpreter', () => {
     const record = (await f.store.load(f.preview.workflowId))!
     expect(record.systemIntents?.map(value => value.kind)).toEqual(['prepare_replica', 'check'])
     expect(record.systemOutcomes?.map(value => [value.state, value.settled])).toEqual([['completed', true], ['completed', true]])
+    const intent = record.systemIntents!.find(value => value.kind === 'check')!
+    expect(typeof intent.frameId).toBe('string')
+    const metadata = await f.service.inspectFrame(f.preview, intent.frameId!)
+    expect(metadata).toMatchObject({ state: 'available', frame: { nodeId: intent.nodeId, parentage: { state: 'available' } } })
+    const corrupt = structuredClone(record)
+    Object.assign(corrupt.systemIntents!.find(value => value.stepId === intent.stepId)!, { frameId: 7 })
+    expect(() => validateWorkflowSystemLedger(corrupt)).toThrow()
     const replica = record.systemOutcomes![0].replica!, copy = await f.host.replicas.resolve(replica)
     expect(await readFile(join(copy.directory, 'native-count'), 'utf8')).toBe('1')
     await expect(readFile(join(f.source, 'native-count'))).rejects.toMatchObject({ code: 'ENOENT' })

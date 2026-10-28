@@ -1,6 +1,6 @@
 import type { WorkflowEvaluation, WorkflowValueReference, WorkflowBlock } from '../shared/workflow'
 import { workflowRevisionCopy as copy } from '../shared/constants/workflow-revision-copy'
-import { workflowCheckValueSchema, workflowReplicaValueSchema } from '../shared/workflow-system'
+import { workflowCheckValueSchema, workflowCombineValueSchema, workflowReplicaValueSchema } from '../shared/workflow-system'
 import { workflowVerificationValueSchema } from '../shared/workflow-verification'
 import { workflowChildBlocks } from '../shared/workflow'
 import { matchesWorkflowValue } from './workflow-values'
@@ -9,6 +9,7 @@ import { validateWorkflowSystemLedger } from './workflow-system-ledger'
 import type { WorkflowVerification } from './workflow-verification'
 import type { WorkflowStore, WorkflowStoreRecord } from './workflow-store'
 import { validateWorkflowValueReference } from './workflow-frames'
+import { verifyWorkflowCheckValue } from './workflow-check-evidence'
 
 export type WorkflowProvenanceContext = { record?: WorkflowStoreRecord; verification?: WorkflowVerification }
 
@@ -50,9 +51,16 @@ export async function workflowOpaqueProvenance(store: WorkflowStore, workflowId:
         if (JSON.stringify(canonical) !== JSON.stringify(value) || canonical.state !== 'known' || !canonical.derivedFrom.includes('system:' + stepId)) throw new Error(copy.invalid)
         const preview = governingWorkflowSystemPreview(record, 'intent', index), pendingNodes: WorkflowBlock[] = [preview.program.body], nodes = new Map<string, WorkflowBlock>()
         while (pendingNodes.length) { const node = pendingNodes.pop()!; nodes.set(node.blockId, node); pendingNodes.push(...workflowChildBlocks(node)) }
-        const node = nodes.get(intent.nodeId), schema = intent.kind === 'prepare_replica' ? workflowReplicaValueSchema : intent.kind === 'check' ? workflowCheckValueSchema : workflowVerificationValueSchema
-        if ((intent.kind === 'prepare_replica' && node?.kind !== 'replica') || (intent.kind === 'check' && node?.kind !== 'check') || (intent.kind === 'verification' && node?.kind !== 'verification') || !matchesWorkflowValue(canonical.value, schema)) throw new Error(copy.invalid)
+        const node = nodes.get(intent.nodeId), schema = intent.kind === 'prepare_replica' ? workflowReplicaValueSchema : intent.kind === 'combine' ? workflowCombineValueSchema : intent.kind === 'check' ? workflowCheckValueSchema : workflowVerificationValueSchema
+        if ((intent.kind === 'prepare_replica' && node?.kind !== 'replica') || (intent.kind === 'combine' && node?.kind !== 'combine') || (intent.kind === 'check' && node?.kind !== 'check') || (intent.kind === 'verification' && node?.kind !== 'verification') || !matchesWorkflowValue(canonical.value, schema)) throw new Error(copy.invalid)
         if (intent.kind === 'prepare_replica' && (JSON.stringify(canonical.replica) !== JSON.stringify(outcome.replica) || JSON.stringify(canonical.value) !== JSON.stringify(outcome.replica))) throw new Error(copy.invalid)
+        if (intent.kind === 'combine') {
+          if (!outcome.combine || JSON.stringify(canonical.value) !== JSON.stringify(outcome.combine) || (outcome.combine.state === 'combined' && JSON.stringify(outcome.combine.integration) !== JSON.stringify(outcome.replica)) || (outcome.combine.state === 'conflict' && outcome.replica)) throw new Error(copy.invalid)
+        }
+        if (intent.kind === 'check' && node?.kind === 'check') {
+          if (!outcome.check || !node.authorization) throw new Error(copy.invalid)
+          await verifyWorkflowCheckValue(store, workflowId, stepId, outcome.check, node.authorization, canonical.value)
+        }
         if (intent.kind === 'verification' && node?.kind === 'verification') {
           if (!context.verification || JSON.stringify(await context.verification.execute(record, node, stepId)) !== JSON.stringify(canonical.value)) throw new Error(copy.invalid)
         }

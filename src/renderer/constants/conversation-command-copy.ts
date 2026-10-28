@@ -1,0 +1,21 @@
+export const CONVERSATION_COMMAND_COPY = {
+  commands: '命令来源',
+  selected: '本次输入的命令来源',
+  search: '筛选命令',
+  native: '读取当前 Agent 命令',
+  loading: '正在读取命令…',
+  noMatches: '没有匹配的命令',
+  scry: 'Scry',
+  provider: 'Agent / Skill',
+  unknown: '当前 Agent 的命令尚未完整读取；请选择明确来源。',
+  ambiguous: '同名命令无法区分，暂不可选',
+  quote: '作为引用文本',
+  shown: (visible: number, total: number) => `显示 ${visible} / ${total} 项；可继续筛选`,
+  duplicate: '已找到原发送记录，没有再次发送。',
+  unknownResult: '发送结果尚未确认。草稿已保留，不会自动重发。',
+  readFailed: (error: string) => `请求已登记，但读取状态失败：${error}`,
+  readAlsoFailed: (error: string, readError: string) => `${error}；读取状态失败：${readError}`,
+  sizeUpdated: (size: string) => `规模建议已更新：${size}`,
+  clearLock: '已解除界面锁定。再次发送是新请求，可能重复执行；请先核对聊天记录。',
+  invalidNegotiation: '宿主尚未确认发送所需的原生上下文；草稿已保留。'
+} as const

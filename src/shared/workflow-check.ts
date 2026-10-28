@@ -2,14 +2,29 @@ export type WorkflowCheckRequest = {
   argv: string[]
   cwd: string
   timeoutMs: number
-  parser: 'exit_code' | 'typescript'
+  parser: 'exit_code' | 'typescript' | 'node_test'
 }
+
+export type WorkflowTestCounts = {
+  total: number
+  suites: number
+  passed: number
+  failed: number
+  cancelled: number
+  skipped: number
+  todo: number
+}
+
+export type WorkflowTestEvidence =
+  | { state: 'unavailable'; reason: string }
+  | { state: 'available'; source: 'node_test_tap'; counts: WorkflowTestCounts; discovery: { state: 'unavailable'; reason: string }; execution: { state: 'unavailable'; reason: string }; coverage: { state: 'unavailable'; reason: string } }
 
 /** Main resolves and fingerprints these fields before plan approval. */
 export type WorkflowFrozenCheck = WorkflowCheckRequest & {
   executable: string
   executableHash: string
   entrypoint?: { path: string; hash: string }
+  testFiles?: Array<{ path: string; hash: string }>
   interpreters: Array<{ path: string; hash: string }>
   launch: { executable: string; args: string[] }
   replicaRoot: string
@@ -30,7 +45,7 @@ export type WorkflowCheckDiagnostic = {
 }
 
 export type WorkflowCheckResult = {
-  state: 'passed' | 'failed' | 'timed_out' | 'cancelled' | 'unknown' | 'rejected'
+  state: 'passed' | 'failed' | 'timed_out' | 'cancelled' | 'unknown' | 'rejected' | 'incomplete'
   startedAt: number
   /** Main result observation time; not proof that every native scope exited. */
   finishedAt: number
@@ -43,5 +58,7 @@ export type WorkflowCheckResult = {
   truncated: boolean
   evidence: 'exact'
   diagnostics: { state: 'available'; source: 'derived'; items: WorkflowCheckDiagnostic[] } | { state: 'unavailable'; reason: string }
+  /** TAP counts are runner-report facts, not independent discovery or body execution evidence. */
+  tests?: WorkflowTestEvidence
   error?: string
 }

@@ -1,4 +1,4 @@
-import { WORKFLOW_MAX_BATCH, type WorkflowValueReference, type WorkflowValueSchema } from './workflow'
+import { WORKFLOW_MAX_BATCH, type WorkflowStopProvenance, type WorkflowValueReference, type WorkflowValueSchema } from './workflow'
 import type { WorkflowVerificationInputs } from './workflow-verification'
 import type { WorkflowCheckResult } from './workflow-check'
 import type { WorkflowReplicaReference } from './workflow-replica'
@@ -10,9 +10,30 @@ const inputSnapshotSchema: WorkflowValueSchema = { type: 'object', properties: {
   inputHash: { type: 'string' }, entryCount: { type: 'number' }, contentBytes: { type: 'number' }, manifestBytes: { type: 'number' }, startedAt: { type: 'number' }, finishedAt: { type: 'number' }
 }, required: ['inputHash', 'entryCount', 'contentBytes', 'manifestBytes', 'startedAt', 'finishedAt'] }
 
+const workflowTestEvidenceSchema: WorkflowValueSchema = { type: 'union', variants: [
+  { type: 'object', properties: { state: { type: 'enum', values: ['unavailable'] }, reason: { type: 'string' } }, required: ['state', 'reason'] },
+  { type: 'object', properties: {
+    state: { type: 'enum', values: ['available'] }, source: { type: 'enum', values: ['node_test_tap'] }, counts: { type: 'object', properties: {
+      total: { type: 'number' }, suites: { type: 'number' }, passed: { type: 'number' }, failed: { type: 'number' }, cancelled: { type: 'number' }, skipped: { type: 'number' }, todo: { type: 'number' }
+    }, required: ['total', 'suites', 'passed', 'failed', 'cancelled', 'skipped', 'todo'] },
+    discovery: { type: 'object', properties: { state: { type: 'enum', values: ['unavailable'] }, reason: { type: 'string' } }, required: ['state', 'reason'] },
+    execution: { type: 'object', properties: { state: { type: 'enum', values: ['unavailable'] }, reason: { type: 'string' } }, required: ['state', 'reason'] },
+    coverage: { type: 'object', properties: { state: { type: 'enum', values: ['unavailable'] }, reason: { type: 'string' } }, required: ['state', 'reason'] }
+  }, required: ['state', 'source', 'counts', 'discovery', 'execution', 'coverage'] }
+] }
+
+const workflowCombineConflictSchema: WorkflowValueSchema = { type: 'object', properties: {
+  path: { type: 'string' }, candidateReplicaIds: { type: 'array', maxItems: WORKFLOW_MAX_BATCH, items: { type: 'string' } }
+}, required: ['path', 'candidateReplicaIds'] }
+export const workflowCombineValueSchema: WorkflowValueSchema = { type: 'object', properties: {
+  state: { type: 'enum', values: ['combined', 'conflict'] }, integration: { type: 'union', variants: [workflowReplicaValueSchema, { type: 'null' }] },
+  baseInputHash: { type: 'string' }, candidateCount: { type: 'number' }, changedPathCount: { type: 'number' },
+  conflicts: { type: 'array', maxItems: WORKFLOW_MAX_BATCH, items: workflowCombineConflictSchema }
+}, required: ['state', 'integration', 'baseInputHash', 'candidateCount', 'changedPathCount', 'conflicts'] }
+
 export const workflowCheckValueSchema: WorkflowValueSchema = { type: 'object', properties: {
   stepId: { type: 'string' }, passed: { type: 'boolean' }, state: { type: 'string' }, exitCode: { type: 'union', variants: [{ type: 'number' }, { type: 'null' }] },
-  settled: { type: 'boolean' }, truncated: { type: 'boolean' }, diagnosticCount: { type: 'union', variants: [{ type: 'number' }, { type: 'null' }] },
+  settled: { type: 'boolean' }, truncated: { type: 'boolean' }, diagnosticCount: { type: 'union', variants: [{ type: 'number' }, { type: 'null' }] }, tests: workflowTestEvidenceSchema,
   // Optional for already committed checks: missing evidence remains unknown,
   // never a fabricated empty diagnostic list or a reason to rerun the process.
   diagnostics: { type: 'object', properties: {
@@ -74,10 +95,17 @@ export type WorkflowCheckSummary = Omit<WorkflowCheckResult, 'stdout' | 'stderr'
   stderrRef: WorkflowValueReference
   diagnostics: { state: 'available'; source: 'derived'; count: number; reference: WorkflowValueReference } | { state: 'unavailable'; reason: string }
 }
-export type WorkflowSystemKind = 'prepare_replica' | 'check' | 'verification'
+export type WorkflowCombineConflict = { path: string; candidateReplicaIds: string[] }
+export type WorkflowCombineSummary =
+  | { state: 'combined'; integration: WorkflowReplicaReference; baseInputHash: string; candidateCount: number; changedPathCount: number; conflicts: [] }
+  | { state: 'conflict'; integration: null; baseInputHash: string; candidateCount: number; changedPathCount: number; conflicts: WorkflowCombineConflict[] }
+export type WorkflowCombineInputs = { base: WorkflowReplicaReference; candidates: WorkflowReplicaReference[] }
+export type WorkflowSystemKind = 'prepare_replica' | 'combine' | 'check' | 'verification'
 export type WorkflowSystemIntent = {
   stepId: string
   taskId: string
+  /** Canonical frame known at admission; absent on legacy intents. */
+  frameId?: string
   nodeId: string
   programRevision: string
   kind: WorkflowSystemKind
@@ -86,6 +114,7 @@ export type WorkflowSystemIntent = {
   verificationInputs?: WorkflowVerificationInputs
   inputMaterialization?: WorkflowInputMaterialization
   replica?: WorkflowReplicaReference
+  combineInputs?: WorkflowCombineInputs
 }
 export type WorkflowSystemOutcome = {
   stepId: string
@@ -98,11 +127,14 @@ export type WorkflowSystemOutcome = {
   resultRef?: WorkflowValueReference
   replica?: WorkflowReplicaReference
   check?: WorkflowCheckSummary
+  combine?: WorkflowCombineSummary
   error?: string
 }
 export type WorkflowSystemProgress = {
   stepId: string
   nodeId: string
+  /** Display-only link projected from the canonical system intent. */
+  frameId?: string
   kind: WorkflowSystemKind
   state: 'queued' | 'running' | WorkflowSystemOutcome['state']
   settled: boolean
@@ -111,4 +143,5 @@ export type WorkflowSystemProgress = {
   replica?: WorkflowReplicaReference
   result?: WorkflowSystemOutcome['check']
   error?: string
+  stopRequested?: { commandId: string; requestedAt: number; provenance?: WorkflowStopProvenance }
 }

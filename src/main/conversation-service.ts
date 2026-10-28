@@ -1,15 +1,13 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import type { LoadedSessionTurn } from './session-history'
-import { historicalInputBytes, historicalInputPrefix } from './providers/historical-input'
-import { createConversationHistoryReader, type HistoryReaderConnection } from './conversation-history-reader'
-import { providerAttachmentPrompt, type PreparedAttachment } from './attachment-store'
+import type { HistoryReaderConnection } from './conversation-history-reader'
+import type { PreparedAttachment } from './attachment-store'
 import type { ProviderHistoricalContext, ProviderInputReceipt } from './providers/types'
 import type {
   ConversationArchiveRef,
   ConversationBinding,
   Conversation,
   ConversationContinuation,
-  ConversationDelivery,
   ConversationItemRef,
   ConversationTarget
 } from '../shared/conversation'
@@ -19,78 +17,21 @@ import type {
   ConversationForkRequest,
   ConversationPage,
   ConversationPreview,
-  ConversationSendRequest,
   ConversationSummary,
+  ConversationSendRequest,
   ConversationTargetRequest
 } from '../shared/conversation-api'
-import { boundedControlValue, isAgentPermissionMode, isCommandId, normalizeAgentAttachments, type AgentStartRequest } from '../shared/runtime'
+import { isWorkflowConversationMode } from '../shared/workflow-mode'
+import { WORKFLOW_MODE_COPY } from '../shared/constants/workflow-mode-copy'
+import { isAgentPermissionMode, isCommandId, type AgentStartRequest } from '../shared/runtime'
 import type { ProviderId } from '../shared/provider'
 import { ConversationStore, assertConversationItems } from './conversation-store'
-import { handoffBudget } from './conversation-handoff-budget'
+import { parseConversationTarget, requestObject } from './conversation-request'
+import { assertConversationForSend, assertConversationSendRevision, confirmedConversationContinuation, sendConversation } from './conversation-send'
+
+export { parseConversationSend, parseConversationTarget } from './conversation-request'
 
 const hash = (value: string): string => createHash('sha256').update(value, 'utf8').digest('hex')
-const targetFields = ['providerId', 'agentProfileId', 'model', 'effort', 'permissionMode']
-
-function requestObject(value: unknown, fields: readonly string[]): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((key) => !fields.includes(key))) {
-    throw new Error('统一对话请求格式或字段不受支持；仅支持普通文本和主进程派生的历史引用')
-  }
-  return value as Record<string, unknown>
-}
-
-function optionalControl(value: unknown): string | undefined {
-  if (value === undefined) return undefined
-  const control = boundedControlValue(value)
-  if (!control) throw new Error('统一对话模型或 effort 参数无效')
-  return control
-}
-
-function parseTarget(value: Record<string, unknown>): ConversationTargetRequest {
-  if (value.providerId !== 'claude' && value.providerId !== 'codex' && value.providerId !== 'pi') throw new Error('统一对话 Provider 不受支持')
-  if (value.providerId === 'pi') {
-    if (typeof value.agentProfileId !== 'string' || !/^pi:[a-f0-9]{16}$/.test(value.agentProfileId)) {
-      throw new Error('统一对话 Pi 必须选择已登记的 Agent Profile')
-    }
-  } else if (value.agentProfileId !== undefined) throw new Error('统一对话仅支持 Pi 命名 Profile；Claude/Codex 仅支持默认配置')
-  if (value.permissionMode !== undefined && !isAgentPermissionMode(value.permissionMode)) throw new Error('统一对话权限模式无效')
-  let model: ConversationTargetRequest['model']
-  if (value.model !== undefined) {
-    const candidate = requestObject(value.model, ['id', 'providerId'])
-    const id = optionalControl(candidate.id)
-    if (!id) throw new Error('统一对话模型 ID 无效')
-    model = { id, ...(candidate.providerId !== undefined ? { providerId: optionalControl(candidate.providerId) } : {}) }
-  }
-  return {
-    providerId: value.providerId,
-    ...(typeof value.agentProfileId === 'string' ? { agentProfileId: value.agentProfileId } : {}),
-    model, effort: optionalControl(value.effort), permissionMode: value.permissionMode
-  }
-}
-
-export function parseConversationTarget(input: unknown): ConversationTargetRequest {
-  return parseTarget(requestObject(input, targetFields))
-}
-
-function parseSend(input: unknown): ConversationSendRequest {
-  const value = requestObject(input, [...targetFields, 'conversationId', 'expectedRevision', 'expectedContinuationKey', 'commandId', 'prompt', 'attachments', 'selectedItems', 'confirmFresh'])
-  const target = parseTarget(value)
-  if (typeof value.conversationId !== 'string' || !value.conversationId ||
-    !Number.isSafeInteger(value.expectedRevision) || Number(value.expectedRevision) < 0 ||
-    typeof value.expectedContinuationKey !== 'string' || !value.expectedContinuationKey ||
-    typeof value.commandId !== 'string' || !isCommandId(value.commandId) ||
-    typeof value.prompt !== 'string' || typeof value.confirmFresh !== 'boolean') throw new Error('统一对话发送参数无效')
-  if (value.attachments !== undefined && !Array.isArray(value.attachments)) throw new Error('对话附件格式无效')
-  const attachments = normalizeAgentAttachments(value.attachments).map(({ path: _path, ...attachment }) => attachment)
-  if (Array.isArray(value.attachments) && attachments.length !== value.attachments.length) throw new Error('对话附件无效，输入未投递')
-  assertConversationItems(value.selectedItems)
-  const selectedItems = value.selectedItems.map((item) => {
-    requestObject(item, ['runId', 'itemId', 'contentHash'])
-    return { runId: item.runId, itemId: item.itemId, contentHash: item.contentHash }
-  })
-  return { ...target, conversationId: value.conversationId, expectedRevision: Number(value.expectedRevision),
-    expectedContinuationKey: value.expectedContinuationKey, commandId: value.commandId,
-    prompt: value.prompt, attachments, selectedItems, confirmFresh: value.confirmFresh }
-}
 
 export interface ConversationTerminal {
   status: 'completed' | 'failed' | 'cancelled' | 'interrupted'
@@ -115,6 +56,8 @@ export interface ManagedConversationStart {
   /** Exact request fingerprint persisted in the durable command intent. */
   payloadHash: string
   onProviderDispatchAttempt?: () => void
+  /** Main-owned task snapshot revalidation; runs before the dispatch marker. */
+  beforeProviderDispatch?: (runId: string) => Promise<void>
   onTerminal: (terminal: ConversationTerminal) => Promise<void>
 }
 
@@ -144,45 +87,14 @@ function summary(conversation: Conversation, activeRunIds: ReadonlySet<string>):
     title: conversation.title ?? `对话 ${conversation.id.slice(0, 8)}`,
     ...(conversation.pinnedAt ? { pinnedAt: conversation.pinnedAt } : {}),
     ...(conversation.archivedAt ? { archivedAt: conversation.archivedAt } : {}),
+    ...(conversation.workflowMode ? { workflowMode: conversation.workflowMode } : {}),
+    ...(conversation.workflowRoutingConsent ? { workflowRoutingConsent: structuredClone(conversation.workflowRoutingConsent) } : {}),
     revision: conversation.revision,
     turnCount: conversation.turns.length,
     ...(lastRunOutcome ? { lastRunOutcome } : {}),
     ...(activeRunIds.has(pending?.runId ?? '') ? { activeRunId: pending?.runId } : {}),
     ...(pending ? { blockedReason: pending.delivery.status === 'unknown' ? pending.delivery.reason : activeRunIds.has(pending.runId) ? '当前轮仍在投递' : '投递结果尚未确认，且没有可关联的运行；请重启核查' } : {})
   }
-}
-
-function targetRequest(request: ConversationTargetRequest, continuationKey: string): ConversationTarget {
-  return {
-    providerId: request.providerId,
-    ...(request.agentProfileId ? { agentProfileId: request.agentProfileId } : {}),
-    continuationKey
-  }
-}
-
-function payloadHash(input: {
-  prompt: string
-  attachments?: ConversationSendRequest['attachments']
-  target: ConversationTarget
-  cwd: string
-  resumeSessionId: string | null
-  model: ConversationSendRequest['model']
-  effort: ConversationSendRequest['effort']
-  permissionMode: ConversationSendRequest['permissionMode']
-  selectedItems: ConversationItemRef[]
-}): string {
-  return hash(JSON.stringify({
-    scope: 'plain-text-local-managed-v1',
-    prompt: input.prompt,
-    ...(input.attachments?.length ? { attachments: input.attachments.map(attachment => ({ ...attachment, dataBase64: hash(attachment.dataBase64) })) } : {}),
-    target: input.target,
-    cwd: input.cwd,
-    resumeSessionId: input.resumeSessionId,
-    model: input.model,
-    effort: input.effort,
-    permissionMode: input.permissionMode,
-    selectedItems: input.selectedItems
-  }))
 }
 
 function missingDetails(conversation: Conversation, continuation: ConversationContinuation): ConversationPreview['missingItems'] {
@@ -210,7 +122,11 @@ export class ConversationService {
       cwd,
       ...(request.agentProfileId ? { agentProfileId: request.agentProfileId } : {})
     })
-    return targetRequest(request, continuationKey)
+    return {
+      providerId: request.providerId,
+      ...(request.agentProfileId ? { agentProfileId: request.agentProfileId } : {}),
+      continuationKey
+    }
   }
 
   async create(cwd: string): Promise<ConversationSummary> {
@@ -311,7 +227,7 @@ export class ConversationService {
 
   async update(id: string, expectedRevision: number, input: unknown): Promise<ConversationSummary> {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new Error('对话 revision 无效')
-    const value = requestObject(input, ['kind', 'title', 'pinned', 'archived'])
+    const value = requestObject(input, ['kind', 'title', 'pinned', 'archived', 'mode'])
     let change: ConversationMetadataChange
     if (value.kind === 'rename') {
       requestObject(value, ['kind', 'title'])
@@ -323,6 +239,10 @@ export class ConversationService {
     } else if (value.kind === 'archive' && typeof value.archived === 'boolean') {
       requestObject(value, ['kind', 'archived'])
       change = { kind: 'archive', archived: value.archived }
+    } else if (value.kind === 'workflow_mode') {
+      requestObject(value, ['kind', 'mode'])
+      if (!isWorkflowConversationMode(value.mode)) throw new Error(WORKFLOW_MODE_COPY.invalid)
+      change = { kind: 'workflow_mode', mode: value.mode }
     } else throw new Error('对话管理操作无效')
     return summary(await this.deps.store.updateMetadata(id, expectedRevision, change), this.active)
   }
@@ -342,7 +262,7 @@ export class ConversationService {
   }
 
   async preview(id: string, input: unknown): Promise<ConversationPreview> {
-    const request = parseTarget(requestObject(input, targetFields))
+    const request = parseConversationTarget(input)
     const conversation = await this.deps.store.read(id)
     if (!conversation) throw new Error('找不到对话，不会自动创建空历史')
     if (conversation.archivedAt) throw new Error('对话已存档，请先恢复')
@@ -358,186 +278,24 @@ export class ConversationService {
     }
   }
 
-  async send(input: unknown): Promise<{ runId: string; disposition: 'created' | 'duplicate' }> {
-    const request = parseSend(input)
-    const prompt = request.prompt
-    if (!prompt.trim() && !request.attachments?.length) throw new Error('对话请求不能为空')
-    if (/^\s*\//.test(prompt)) throw new Error('统一对话仅支持普通文本，不支持 slash 命令')
+  /** Read-only direct-entry preflight. Invalid fresh/history acknowledgements
+   * must not publish a dispatch intent that would prevent explicit correction. */
+  async prepareSubmission(request: ConversationSendRequest) {
     const conversation = await this.deps.store.read(request.conversationId)
-    if (!conversation) throw new Error('找不到对话，不会自动创建空历史')
-    if (conversation.deletion) throw new Error('统一对话正在删除或已删除，不能发送')
-    // Resolve an existing command from its immutable binding before checking
-    // current continuation state. A pending/unknown retry must return its
-    // original attempt, not be blocked by the current plan.
-    const existing = await this.deps.store.findDispatch(request.conversationId, request.commandId)
-    if (existing) {
-      const binding = conversation.bindings.find((candidate) => candidate.id === existing.bindingId)
-      if (!binding) throw new Error('重复命令引用了未知原生绑定')
-      if (request.providerId !== binding.providerId || request.agentProfileId !== (binding.agentProfileId ?? undefined) ||
-        request.expectedContinuationKey !== binding.continuationKey) {
-        throw new Error('同一命令 ID 不能替换请求内容或目标')
-      }
-      const duplicateTarget: ConversationTarget = {
-        providerId: binding.providerId,
-        ...(binding.agentProfileId ? { agentProfileId: binding.agentProfileId } : {}),
-        continuationKey: binding.continuationKey
-      }
-      const duplicatePayloadHash = payloadHash({
-        prompt, attachments: request.attachments, target: duplicateTarget, cwd: conversation.cwd,
-        resumeSessionId: existing.resumeSessionId,
-        model: request.model, effort: request.effort,
-        permissionMode: request.permissionMode, selectedItems: existing.importedItems
-      })
-      const duplicateRunId = randomUUID()
-      const duplicate = await this.deps.store.begin(request.conversationId, {
-        expectedRevision: request.expectedRevision,
-        commandId: request.commandId,
-        runId: duplicateRunId,
-        target: duplicateTarget,
-        payloadHash: duplicatePayloadHash,
-        items: [],
-        // A retry reuses the exact immutable selection published by the first attempt.
-        selectedItems: existing.importedItems
-      })
-      if (duplicate.disposition === 'duplicate') return { runId: duplicate.turn.runId, disposition: 'duplicate' }
-      throw new Error('重复命令状态发生变化，请重新预览')
-    }
-    if (conversation.archivedAt) throw new Error('对话已存档，请先恢复')
-    if (conversation.revision !== request.expectedRevision) throw new Error('对话已变化，请重新预览')
-    if (!this.deps.supportsHistoricalInput(request.providerId)) throw new Error(`${request.providerId} 尚未提供可验证的历史输入交接`)
+    assertConversationForSend(conversation)
+    assertConversationSendRevision(conversation, request, this.deps.supportsHistoricalInput)
     const target = await this.target(conversation.cwd, request)
-    if (target.continuationKey !== request.expectedContinuationKey) throw new Error('Provider 接续身份已变化，请重新预览')
-    const continuation = planConversationContinuation(conversation, target)
-    if (continuation.kind === 'blocked') throw new Error(continuation.reason)
-    if (continuation.kind === 'fresh' && !request.confirmFresh) throw new Error('创建新的原生上下文需要明确确认')
-    if (JSON.stringify(request.selectedItems.map(conversationItemKey)) !== JSON.stringify(continuation.missingItems.map(conversationItemKey))) {
-      throw new Error('待交接历史与确认的预览不一致，请重新预览')
-    }
-    const prepared = await this.deps.store.prepareHandoff(conversation, continuation.missingItems,
-      { userText: prompt, attachments: request.attachments ?? [] },
-      this.deps.supportsHistoryReader?.(request.providerId) === true,
-      continuation.kind === 'resume' ? { bindingId: continuation.bindingId, model: request.model } : undefined)
-    const selectedItems = prepared.selectedItems
-    const runId = randomUUID()
-    const payload = payloadHash({
-      prompt, attachments: request.attachments, target, cwd: conversation.cwd,
-      resumeSessionId: continuation.kind === 'resume' ? continuation.nativeSessionId : null,
-      model: request.model, effort: request.effort,
-      permissionMode: request.permissionMode, selectedItems
-    })
-    const begun = await this.deps.store.begin(request.conversationId, {
-      expectedRevision: request.expectedRevision,
-      commandId: request.commandId,
-      runId,
-      target,
-      payloadHash: payload,
-      items: [],
-      selectedItems,
-      preparedHistory: prepared.history
-    })
-    if (begun.disposition === 'duplicate') return { runId: begun.turn.runId, disposition: 'duplicate' }
-    const context = await this.deps.store.history(request.conversationId, runId)
-    const requestHash = hash(JSON.stringify({
-      scope: 'plain-text-local-managed-v1', payloadHash: payload,
-      historyHash: context?.contentHash ?? null
-    }))
-    this.active.add(runId)
-    let dispatched = false
-    let inputTextHash = hash(context ? historicalInputPrefix(context) + prompt : prompt)
-    let reader: Awaited<ReturnType<typeof createConversationHistoryReader>> | undefined
-    let inputPrepared = false
-    const settle = async (terminal: ConversationTerminal): Promise<void> => {
-      if (terminal.receipt?.status === 'accepted' && terminal.archive) {
-        if (terminal.receipt.contextHash !== (context?.contentHash ?? null)) throw new Error('Provider 回执的历史 hash 不匹配')
-        if (terminal.receipt.textHash !== inputTextHash) throw new Error('Provider 回执的输入正文 hash 不匹配')
-        if (begun.turn.resumeSessionId && terminal.receipt.nativeSessionId !== begun.turn.resumeSessionId) {
-          throw new Error('Provider 回执的原生 session 与冻结目标不一致')
-        }
-        const delivery: ConversationDelivery = {
-          status: 'accepted',
-          nativeSessionId: terminal.receipt.nativeSessionId,
-          outcome: terminal.status,
-          nativeItems: terminal.finalItems
-        }
-        await this.deps.store.settle(request.conversationId, runId, delivery, terminal.finalItems, terminal.archive)
-        return
-      }
-      const notSent = terminal.receipt?.status === 'not_sent' || (!terminal.receipt && !dispatched)
-      const delivery: ConversationDelivery = notSent
-        ? { status: 'not_sent', reason: terminal.receipt?.status === 'not_sent' ? terminal.receipt.reason : '在调用 Provider 前已停止，输入未投递' }
-        : { status: 'unknown', reason: terminal.receipt?.status === 'unknown'
-          ? terminal.receipt.reason
-          : 'Provider 终态缺少可归属的接收回执或权威归档；不会自动重发' }
-      await this.deps.store.settle(request.conversationId, runId, delivery, [], terminal.archive)
-    }
-    try {
-      if (prepared.readerItems.length) reader = await createConversationHistoryReader(prepared.readerItems)
-      const started = await this.deps.startAppRun({
-        prompt,
-        attachments: request.attachments,
-        cwd: conversation.cwd,
-        providerId: request.providerId,
-        agentProfileId: request.agentProfileId,
-        expectedExternalSessionId: begun.turn.resumeSessionId,
-        model: request.model,
-        effort: request.effort,
-        permissionMode: request.permissionMode
-      }, { managedConversation: {
-        conversationId: request.conversationId,
-        runId,
-        target,
-        resumeSessionId: begun.turn.resumeSessionId,
-        ...(context ? { historicalContext: context } : {}),
-        historyReader: reader?.connection,
-        historyBudget: { contextUsage: prepared.budget.contextUsage, modelContextWindow: prepared.budget.modelContextWindow },
-        prepareInput: attachments => {
-          const preparedPrompt = providerAttachmentPrompt(request.providerId, prompt, attachments)
-          if (context && historicalInputBytes(context.text) > handoffBudget({ ...prepared.budget, userText: preparedPrompt })) {
-            throw new Error('最终输入（含附件提示与历史包装）超出交接预算，输入未投递')
-          }
-          inputTextHash = hash(context ? historicalInputPrefix(context) + preparedPrompt : preparedPrompt)
-          inputPrepared = true
-          return { prompt: preparedPrompt, inputTextHash }
-        },
-        requestHash,
-        inputTextHash,
-        payloadHash: payload,
-        onProviderDispatchAttempt: () => {
-          if (request.attachments?.length && !inputPrepared) throw new Error('当前附件尚未准备，输入未投递')
-          dispatched = true
-        },
-        onTerminal: async (terminal) => {
-          try {
-            await settle(terminal)
-          } catch (error) {
-            // Receipt/archive mismatches are evidence gaps, not a reason to
-            // leave the durable attempt pending or make it retryable.
-            try {
-              await this.deps.store.settle(request.conversationId, runId, {
-                status: 'unknown', reason: `统一对话终态证据不完整：${String((error as Error).message ?? error)}`
-              }, [], terminal.archive)
-            } catch (settlementError) {
-              console.error('[scry] failed to record unknown managed outcome:', settlementError)
-            }
-            throw error
-          } finally { this.active.delete(runId); await reader?.close() }
-        }
-      }})
-      if (started.runId !== runId) throw new Error('统一对话 runner 返回了不同的 runId')
-      return { runId: started.runId, disposition: 'created' }
-    } catch (error) {
-      try {
-        await settle({
-          status: 'failed',
-          finalItems: [],
-          receipt: dispatched ? { contextHash: context?.contentHash ?? null, status: 'unknown', textHash: hash(prompt), reason: String((error as Error).message ?? error) } :
-            { contextHash: context?.contentHash ?? null, status: 'not_sent', reason: String((error as Error).message ?? error) }
-        })
-      } finally {
-        this.active.delete(runId)
-        await reader?.close()
-      }
-      throw error
-    }
+    confirmedConversationContinuation(conversation, request, target)
+    return { conversation, target }
+  }
+
+  async send(input: unknown, beforeProviderDispatch?: (runId: string) => Promise<void>): Promise<{ runId: string; disposition: 'created' | 'duplicate' }> {
+    return sendConversation(input, {
+      store: this.deps.store,
+      supportsHistoricalInput: this.deps.supportsHistoricalInput,
+      supportsHistoryReader: this.deps.supportsHistoryReader,
+      startAppRun: this.deps.startAppRun,
+      resolveTarget: (cwd, request) => this.target(cwd, request)
+    }, this.active, beforeProviderDispatch)
   }
 }

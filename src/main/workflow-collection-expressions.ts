@@ -19,6 +19,33 @@ export async function evaluateWorkflowCollection(control: WorkflowControlValues,
   if (!source.collection.sealed) return unavailable(workflowCollectionCopy.unsealed)
   const entries = await control.entries(source)
   const fields: WorkflowCollectionField[] = []
+  if (expression.kind === 'project') {
+    if (request.bindings.has(expression.item)) throw new Error(workflowExpressionCopy.binding(expression.item))
+    const projected: WorkflowCollectionEntry[] = []
+    const sources = new Set(source.derivedFrom)
+    for (const entry of entries) {
+      if (stopped()) return unavailable(workflowCollectionCopy.stopped)
+      // Non-success rows are evidence, not values to transform. Retain their
+      // exact state/reference/error rather than fabricating a completed row.
+      if (entry.state !== 'completed' || !entry.settled) {
+        projected.push({ ...entry, index: projected.length })
+        continue
+      }
+      const member = await control.entryValue(entry)
+      if (member.value === null || typeof member.value !== 'object' || Array.isArray(member.value) || !Object.hasOwn(member.value, 'value')) {
+        projected.push({ ...entry, index: projected.length })
+        continue
+      }
+      const bindings = new Map(request.bindings).set(expression.item, member)
+      const result = await control.evaluate(expression.value, { path: scopePath, bindings }, identity + ':value:' + entry.index, stopped)
+      for (const source of result.derivedFrom) if (source !== expression.item) sources.add(source)
+      const valueRef = await control.saveCollectionValue(result)
+      const { reference: _reference, valueRef: _priorValueRef, ...row } = entry
+      projected.push({ ...row, index: projected.length, valueRef })
+    }
+    const collection = await control.collection({ frameId: identity }, projected, source.collection.sealed)
+    return { ...collection, derivedFrom: [...sources, ...collection.derivedFrom] }
+  }
   if (expression.kind === 'group' || expression.kind === 'unique') {
     const groups = new Map<string, { key: WorkflowScalar; members: WorkflowCollectionEntry[]; derivedFrom: number[] }>()
     let keyBytes = 0

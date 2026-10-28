@@ -1,4 +1,5 @@
 import type { WorkflowCallContext } from '../shared/workflow-call'
+import type { WorkflowAdmissionFence } from './workflow-parallel-policy'
 import { WorkflowCallReuse } from './workflow-call-reuse'
 import type { WorkflowVerification } from './workflow-verification'
 import type { WorkflowProvenanceContext } from './workflow-opaque-provenance'
@@ -16,6 +17,9 @@ import type { WorkflowExecutionOwnership, WorkflowStore, WorkflowStoreRecord } f
 
 export type WorkflowControlScope = {
   path: string[]
+  /** Structural frame context for the next block in this scope. */
+  parentFrameId?: string | null
+  admission?: WorkflowAdmissionFence
   bindings: Map<string, WorkflowEvaluation>
   blockedReason?: string
   legacyInputs?: boolean
@@ -43,14 +47,24 @@ export class WorkflowControl extends WorkflowControlRecovery {
     let framed = false
     while (pending.length) {
       const block = pending.pop()!
-      if (block.kind === 'replica' || block.kind === 'check' || block.kind === 'verification' || block.kind === 'bind' || block.kind === 'branch' || block.kind === 'map' || block.kind === 'collect' || block.kind === 'loop' || (block.kind === 'return' && block.ref.path !== undefined) || (block.kind === 'call' && (block.replica || block.inputRefs?.some(ref => ref.path !== undefined)))) framed = true
+      if (block.kind === 'replica' || block.kind === 'combine' || block.kind === 'check' || block.kind === 'verification' || block.kind === 'bind' || block.kind === 'branch' || block.kind === 'map' || block.kind === 'collect' || block.kind === 'loop' || (block.kind === 'return' && block.ref.path !== undefined) || (block.kind === 'call' && (block.replica || block.inputRefs?.some(ref => ref.path !== undefined)))) framed = true
       pending.push(...workflowChildBlocks(block))
     }
     this.framed = framed || execution !== undefined
-    this.root = { path: this.framed ? ['revision:' + preview.programRevision] : [], bindings: new Map(), callContexts: [], semanticBindings: new Map(), semanticFields: new Map() }
+    this.root = { path: this.framed ? ['revision:' + preview.programRevision] : [], parentFrameId: this.framed ? null : undefined, bindings: new Map(), callContexts: [], semanticBindings: new Map(), semanticFields: new Map() }
   }
-  child(parent: WorkflowControlScope, label: string): WorkflowControlScope {
-    return { path: this.framed ? [...parent.path, label] : parent.path, bindings: new Map(parent.bindings), legacyInputs: parent.legacyInputs, semanticChildren: new Map(parent.semanticChildren), callContexts: [...(parent.callContexts ?? [])], semanticDefinitions: new Map(parent.semanticDefinitions), semanticBindings: new Map(parent.semanticBindings), semanticFields: new Map(parent.semanticFields) }
+  /** Dynamic child scopes receive isolated binding maps. */
+  child(parent: WorkflowControlScope, label: string, parentFrame?: WorkflowControlFrame): WorkflowControlScope {
+    const parentFrameId = parentFrame?.frameId ?? parent.parentFrameId
+    return {
+      path: this.framed ? [...parent.path, label] : parent.path,
+      ...(parentFrameId === undefined ? {} : { parentFrameId }),
+      ...(parent.admission ? { admission: parent.admission } : {}),
+      bindings: new Map(parent.bindings), legacyInputs: parent.legacyInputs,
+      semanticChildren: new Map(parent.semanticChildren), callContexts: [...(parent.callContexts ?? [])],
+      semanticDefinitions: new Map(parent.semanticDefinitions), semanticBindings: new Map(parent.semanticBindings),
+      semanticFields: new Map(parent.semanticFields)
+    }
   }
   bind(scope: WorkflowControlScope, name: string, value: WorkflowEvaluation, semantic?: string): void {
     if (scope.bindings.has(name)) throw new Error(workflowExpressionCopy.binding(name))
@@ -76,11 +90,11 @@ export class WorkflowControl extends WorkflowControlRecovery {
       if (fields) (parent.semanticFields ??= new Map()).set(name, fields)
     }
   }
-  async enter(block: WorkflowBlock, scope: WorkflowControlScope, captureCall = true): Promise<WorkflowControlFrame | undefined> {
+  async enter(block: WorkflowBlock, scope: WorkflowControlScope, captureCall = true, parentFrameId = scope.parentFrameId): Promise<WorkflowControlFrame | undefined> {
     if (!this.framed) return undefined
     const names = block.kind === 'loop' ? [...new Set([...Object.values(block.initial), ...Object.values(block.invariants)].flatMap(workflowExpressionReferences))] : block.kind === 'map' || block.kind === 'collect' ? workflowExpressionReferences(block.items) : block.kind === 'bind' ? workflowExpressionReferences(block.value) : block.kind === 'branch' ? workflowExpressionReferences(block.when)
       : block.kind === 'verification' ? [...Object.values(block.required).flatMap(entry => workflowExpressionReferences(entry.result)), ...(block.baseline ? workflowExpressionReferences(block.baseline) : [])]
-      : block.kind === 'check' ? workflowExpressionReferences(block.replica) : block.kind === 'replica' ? block.source ? workflowExpressionReferences(block.source) : [] : block.kind === 'call' ? [...(block.inputRefs ?? []).map(ref => ref.nodeId), ...(block.replica ? workflowExpressionReferences(block.replica) : [])] : block.kind === 'return' ? [block.ref.nodeId] : []
+      : block.kind === 'check' ? workflowExpressionReferences(block.replica) : block.kind === 'combine' ? [...workflowExpressionReferences(block.base), ...workflowExpressionReferences(block.candidates)] : block.kind === 'replica' ? block.source ? workflowExpressionReferences(block.source) : [] : block.kind === 'call' ? [...(block.inputRefs ?? []).map(ref => ref.nodeId), ...(block.replica ? workflowExpressionReferences(block.replica) : [])] : block.kind === 'return' ? [block.ref.nodeId] : []
     const inputKey = digest({ revision: this.preview.programRevision, nodeId: block.blockId, scope: scope.path,
       sources: names.map(name => [name, scope.bindings.get(name)?.state, scope.bindings.get(name)?.derivedFrom]) })
     const frameId = workflowFrameId(block.blockId, scope.path, this.execution?.generationId)
@@ -106,7 +120,7 @@ export class WorkflowControl extends WorkflowControlRecovery {
     }
     const origin = origins[0]
     const input: Omit<WorkflowControlFrame, 'revision'> = { schemaVersion: 1, workflowId: this.preview.workflowId, programRevision: this.preview.programRevision,
-      frameId, nodeId: block.blockId, scopePath: scope.path, inputKey, phase: 'entered',
+      frameId, nodeId: block.blockId, scopePath: scope.path, ...(parentFrameId === undefined ? {} : { parentFrameId }), inputKey, phase: 'entered',
       ...(this.execution ? { executionEpoch: this.execution.record.execution!.epoch } : {}), ...(this.execution?.generationId ? { generationId: this.execution.generationId } : {}),
       ...(origin ? { origin: { frameId: origin.frameId, revision: origin.revision } } : {}) }
     if (captureCall && !scope.legacyInputs && block.kind === 'call' && !block.replica) {
@@ -137,9 +151,9 @@ export class WorkflowControl extends WorkflowControlRecovery {
         await this.store.loadValue(this.preview.workflowId, origin.resultRef)
         reference = origin.resultRef
       } else {
-        if (origin?.resultRef && (block.kind === 'call' || block.kind === 'check' || block.kind === 'replica' || block.kind === 'verification')) throw new Error(workflowRecoveryCopy.frame)
+        if (origin?.resultRef && (block.kind === 'call' || block.kind === 'check' || block.kind === 'replica' || block.kind === 'combine' || block.kind === 'verification')) throw new Error(workflowRecoveryCopy.frame)
       }
-      if (!reference && this.execution && phase === 'completed' && (block.kind === 'replica' || block.kind === 'check' || block.kind === 'verification')) {
+      if (!reference && this.execution && phase === 'completed' && (block.kind === 'replica' || block.kind === 'combine' || block.kind === 'check' || block.kind === 'verification')) {
         const record = this.execution.record, taskId = this.preview.workflowId + ':' + workflowFrameId(block.blockId, scope.path) + ':' + block.blockId
         const intent = record.systemIntents?.findLast(item => item.taskId === taskId && item.programRevision === frame.programRevision)
         const outcome = record.systemOutcomes?.find(item => item.stepId === intent?.stepId)

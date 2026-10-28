@@ -1,3 +1,4 @@
+import type { WorkflowPlanningSize } from './workflow-size'
 import type { ProviderId, ProviderDescriptor } from './provider.js'
 import type { AgentModelRef, AgentPermissionMode, RuntimeProvider } from './runtime.js'
 import type { WorkflowTemplateInstance } from './workflow-template.js'
@@ -23,6 +24,12 @@ export const WORKFLOW_MAX_SLOTS = 256
 
 export type WorkflowRole = 'orchestrator' | 'worker' | 'reviewer' | 'summarizer'
 export type WorkflowCapabilityState = 'available' | 'unavailable' | 'unknown'
+export type WorkflowParallelFailurePolicy = 'all_settled' | 'fail_fast'
+export type WorkflowStopProvenance = {
+  source: 'auto'
+  policy: 'fail_fast'
+  trigger: { nodeId: string; phase: WorkflowControlFrame['phase']; frameId: string }
+}
 
 export interface WorkflowRoleBinding {
   role: WorkflowRole
@@ -82,6 +89,7 @@ export type WorkflowExpression =
   | { kind: 'unique'; items: WorkflowExpression; key: string[] }
   | { kind: 'filter'; items: WorkflowExpression; item: string; when: WorkflowExpression }
   | { kind: 'partition'; items: WorkflowExpression; item: string; when: WorkflowExpression }
+  | { kind: 'project'; items: WorkflowExpression; item: string; value: WorkflowExpression }
 
 /** Host-only read authority for a controlled collection nested in ordinary JSON.
  * Paths never originate from literal/model descriptors. Durable stores validate
@@ -147,6 +155,8 @@ export interface WorkflowControlFrame {
   frameId: string
   nodeId: string
   scopePath: string[]
+  /** Structural ancestry is explicit. Missing is legacy unknown; null is a recorded root. */
+  parentFrameId?: string | null
   inputKey: string
   executionEpoch?: string
   generationId?: string
@@ -219,6 +229,12 @@ export interface WorkflowReplicaBlock {
   blockId: string
   source?: WorkflowExpression
 }
+export interface WorkflowCombineBlock {
+  kind: 'combine'
+  blockId: string
+  base: WorkflowExpression
+  candidates: WorkflowExpression
+}
 export interface WorkflowCheckBlock {
   kind: 'check'
   blockId: string
@@ -248,6 +264,7 @@ export interface WorkflowParallelBlock {
   kind: 'parallel'
   blockId: string
   blocks: WorkflowBlock[]
+  failurePolicy?: WorkflowParallelFailurePolicy
 }
 
 export interface WorkflowReturnBlock {
@@ -264,11 +281,11 @@ export interface WorkflowVerificationBlock {
   baseline?: WorkflowExpression
 }
 
-export type WorkflowBlock = WorkflowVerificationBlock | WorkflowSequenceBlock | WorkflowParallelBlock | WorkflowCallBlock | WorkflowReturnBlock | WorkflowBindBlock | WorkflowBranchBlock | WorkflowMapBlock | WorkflowCollectBlock | WorkflowLoopBlock | WorkflowReplicaBlock | WorkflowCheckBlock
+export type WorkflowBlock = WorkflowVerificationBlock | WorkflowSequenceBlock | WorkflowParallelBlock | WorkflowCallBlock | WorkflowReturnBlock | WorkflowBindBlock | WorkflowBranchBlock | WorkflowMapBlock | WorkflowCollectBlock | WorkflowLoopBlock | WorkflowReplicaBlock | WorkflowCombineBlock | WorkflowCheckBlock
 
 export function workflowChildBlocks(block: WorkflowBlock): WorkflowBlock[] {
   switch (block.kind) {
-    case 'call': case 'return': case 'bind': case 'collect': case 'replica': case 'check': case 'verification': return []
+    case 'call': case 'return': case 'bind': case 'collect': case 'replica': case 'combine': case 'check': case 'verification': return []
     case 'map': case 'loop': return [block.body]
     case 'branch': return [block.then, block.else, ...(block.unknown === 'blocked' ? [] : [block.unknown])]
     case 'sequence': case 'parallel': return block.blocks
@@ -287,6 +304,7 @@ export function workflowExpressionReferences(expression: WorkflowExpression): st
       case 'not': case 'count': visit(value.value, local); return
       case 'group': case 'unique': visit(value.items, local); return
       case 'filter': case 'partition': visit(value.items, local); visit(value.when, new Set(local).add(value.item)); return
+      case 'project': visit(value.items, local); visit(value.value, new Set(local).add(value.item)); return
     }
   }
   visit(expression, new Set())
@@ -306,6 +324,7 @@ export interface WorkflowProgram {
 }
 
 export interface WorkflowPlanPreview {
+  readonly planningSize?: WorkflowPlanningSize
   workflowId: string
   programRevision: string
   userGoal: string
@@ -408,13 +427,21 @@ export interface WorkflowAttemptOutcome {
   settled: boolean
 }
 
+/** Stop intent is a view over the control ledger, not an Agent result. */
+export type WorkflowAttemptProgress = WorkflowAttemptOutcome & {
+  /** Display-only link to the canonical frame admission intent. */
+  frameId?: string
+  stopRequested?: { commandId: string; requestedAt: number; provenance?: WorkflowStopProvenance }
+}
+
 export interface WorkflowProgress {
+  readonly planningSize?: WorkflowPlanningSize
   workflowId: string
   programRevision: string
   workspace: string
   goal: string
   state: WorkflowExecutionState
-  attempts: WorkflowAttemptOutcome[]
+  attempts: WorkflowAttemptProgress[]
   outcomeCount?: number
   dispatchAttempts: number
   systemSteps?: WorkflowSystemProgress[]
@@ -435,7 +462,7 @@ export function workflowProgressSnapshot(progress: WorkflowProgress): WorkflowPr
   const attempts = progress.attempts.slice(-32).map(({ output: _output, ...attempt }) => attempt)
   return {
     ...progress,
-    outcomeCount: progress.attempts.length,
+    outcomeCount: Math.max(progress.outcomeCount ?? 0, progress.attempts.length),
     attempts,
     ...(progress.live ? { live: workflowLiveDiagnosticsSnapshot(progress.live) } : {})
   }

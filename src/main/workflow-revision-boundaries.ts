@@ -40,7 +40,7 @@ export function workflowPreviewHasSystemEffects(preview: WorkflowPlanPreview): b
   const pending: WorkflowBlock[] = [preview.program.body]
   while (pending.length) {
     const block = pending.pop()!
-    if (block.kind === 'replica' || block.kind === 'check' || block.kind === 'verification' || (block.kind === 'call' && block.replica)) return true
+    if (block.kind === 'replica' || block.kind === 'combine' || block.kind === 'check' || block.kind === 'verification' || (block.kind === 'call' && block.replica)) return true
     pending.push(...workflowChildBlocks(block))
   }
   return false

@@ -1,0 +1,32 @@
+export const workflowTaskCopy = {
+  tooManyEntries: '此会话的任务目录超过 8192 项检查上限。记录未删除；需要分页目录索引后才能继续浏览。',
+  title: '会话工作流任务',
+  open: '查看会话工作流任务',
+  refresh: '刷新',
+  more: '下一页',
+  loading: '正在读取任务记录…',
+  empty: '此页没有工作流任务。',
+  openTask: '查看任务',
+  close: '关闭',
+  configure: '配置此任务',
+  edit: '打开模板编辑',
+  editMissing: '模板编辑任务缺少已记录的编辑上下文。',
+  originalSubmission: '原始提交',
+  readFailed: (reason: string) => `读取失败：${reason}。先前记录仅供查看。`,
+  source: '来源：本会话提交记录。状态为读取时的记录，不代表当前运行结果。',
+  recordedAt: (time: string) => `读取时间：${time}`,
+  identifier: (id: string) => `任务 ${id.slice(-8)}`,
+  phases: { captured: '已记录，尚未派发', dispatch_intent: '已登记派发意图', associated: '已关联工作流', unknown: '派发结果未知' },
+  operations: { workflow_run: '工作流规划', workflow_template: '固定模板', template_edit: '模板编辑' },
+  blocked: {
+    interrupted: '原任务属于此前的 App 实例，不会自动重发。',
+    unknown: '尚无可验证的已收敛方案。此读取不会重发规划。',
+    invalid_size: '提交时的规模设置不可用。修改设置不会改写此任务。',
+    archived: '此会话已归档，不能为原任务启动新的规划。',
+    context_changed: '提交时的工作区已变化，不能为原任务启动新的规划。',
+    source_unavailable: '已记录的模板修订不可用；不会改用当前版本。'
+  },
+  viewPlan: '查看已有方案',
+  observedPlan: '这是已有工作流的只读方案；不会重新规划。',
+  workflowState: (state: string) => `工作流记录状态：${state}`
+} as const
