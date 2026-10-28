@@ -13,6 +13,9 @@ export function createWorkspaceRuntime(deps: { appUserDataDir: string; loadSessi
   const projectStore = () => projectStoreInstance ??= createProjectStore(deps.appUserDataDir)
   const rememberProject = (cwd: string): void => {
     const canonical = canonicalExistingDirectory(cwd)
+    const alreadyCurrent = recentStore().load()[0] === canonical &&
+      projectStore().load().some(project => project.cwd === canonical && !project.removedAt)
+    if (alreadyCurrent) return
     recentStore().push(canonical)
     projectStore().remember(canonical)
   }

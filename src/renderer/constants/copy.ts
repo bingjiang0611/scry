@@ -6,6 +6,11 @@ export const PI_PICKER_COPY = {
   removeLabel: (name: string) => `移除 Pi Profile：${name}`
 } as const
 
+export const TURN_FLOW_COPY = {
+  showEarlier: (count: number) => `显示更早的 ${count} 条活动`,
+  showEarlierLabel: (count: number) => `显示本轮更早的 ${count} 条活动`
+} as const
+
 export const TURN_DIFF_REVIEW_COPY = {
   turnTitle: '本轮改动',
   sessionTitle: '本会话净改动',
@@ -380,6 +385,8 @@ export const QUEUE_COPY = {
 
 export const LOADING_COPY = {
   sessionOpenFailed: (detail: string) => `无法打开对话：${detail}`,
+  sessionHistory: '正在读取会话历史…',
+  sessionHistoryDetail: '会话已切换；内容将在本机证据读取完成后显示。',
   skillsUnavailable: '未取得 Skill 清单，可点刷新重试',
   mcpUnavailable: '未取得 MCP 配置，可点刷新重试',
   skills: '正在读取 Skill…',

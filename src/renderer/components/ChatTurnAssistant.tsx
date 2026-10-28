@@ -3,6 +3,8 @@ import { memo, useCallback, useMemo, useRef, useState, type ReactNode } from 're
 
 import { latestBackgroundWork } from '@shared/background-work'
 import { backgroundWorkStatus } from '../background-work-status'
+import { useCompletedTurnFlow } from '../completed-turn-flow'
+import { TURN_FLOW_COPY } from '../constants/copy'
 import { providerHasEnded } from '../run-stop-status'
 
 
@@ -29,6 +31,7 @@ import { ToolItem } from './ChatTurnToolItem'
 import { aggregateTurnHookPhases } from './ChatTurnHookData'
 
 import { AssistantTurnView } from './ChatTurnAssistantView'
+
 function AssistantTurnImpl({
   turn,
   selectedId,
@@ -56,6 +59,7 @@ function AssistantTurnImpl({
 }) {
   const [forking, setForking] = useState(false)
   const [forkError, setForkError] = useState<string | null>(null)
+  const [flowExpanded, setFlowExpanded] = useState(false)
   // 长轮次流式期把「还在增长的尾部文本」与结构化事件分开：只有结构真的变了才重算
   // 下面这些 O(全部事件) 的投影，纯 token 增量只更新一个字符串。
   const projectionCache = useRef<TurnStreamProjectionCache>()
@@ -83,6 +87,11 @@ function AssistantTurnImpl({
     () => coalesceAdjacentThinking(logicalCallEventsForTurn(items)),
     [items]
   )
+  const { items: flowItems, hiddenCount: hiddenFlowItemCount } = useCompletedTurnFlow(visibleItems, {
+    completed: turn.done || Boolean(turn.error),
+    expanded: flowExpanded,
+    selectedId
+  })
   const hookSummary = useMemo(() => aggregateHooks(items), [items])
   const hookPhases = useMemo(() => aggregateTurnHookPhases(hookSummary), [hookSummary])
   const liveStructuralKeys = useMemo(() => {
@@ -226,6 +235,19 @@ function AssistantTurnImpl({
   // 尾部还在增长的顶层流式文本不进这里：它单独渲染，所以纯 token 增量不会重建整条时间线。
   const turnFlowBody = useMemo(() => {
       const out: ReactNode[] = []
+      if (hiddenFlowItemCount > 0) {
+        out.push(
+          <button
+            type="button"
+            className="turn-flow-reveal"
+            key="earlier-turn-flow"
+            onClick={() => setFlowExpanded(true)}
+            aria-label={TURN_FLOW_COPY.showEarlierLabel(hiddenFlowItemCount)}
+          >
+            {TURN_FLOW_COPY.showEarlier(hiddenFlowItemCount)}
+          </button>
+        )
+      }
       let live = ''
       let liveKey = ''
       const flushLive = (streaming = false): void => {
@@ -266,7 +288,7 @@ function AssistantTurnImpl({
           </ToolGroup>
         )
       }
-      for (const ev of visibleItems) {
+      for (const ev of flowItems) {
         if (ev.kind === 'human' && ev.stage === 'steer' && ev.steer) {
           if (latestSteerEvents.get(ev.steer.messageId)?.id === ev.id) {
             flushLive()
@@ -374,7 +396,8 @@ function AssistantTurnImpl({
     childrenByParent,
     interventions,
     interventionsByQuestionId,
-    visibleItems,
+    flowItems,
+    hiddenFlowItemCount,
     knownToolUseIds,
     maxDur,
     onAnswerQuestion,

@@ -98,12 +98,18 @@ export async function externalizeTraceDiffPatches(
 }
 
 /** 取回一条快照的 patch 正文；引用缺失或损坏时保留引用本身，不伪造空白 patch。 */
+const PATCH_HYDRATION_CONCURRENCY = 16
+
 async function hydrateSnapshot(root: string, snapshot: PatchBearingSnapshot | undefined): Promise<void> {
   if (!snapshot || !Array.isArray(snapshot.files)) return
-  for (const file of snapshot.files) {
+  const pending = snapshot.files.flatMap(file => {
     const ref = file.patchContent?.contentRef
-    if (file.patch !== undefined || !ref) continue
-    file.patch = await readRecorderContent(root, ref)
+    return file.patch === undefined && ref ? [{ file, ref }] : []
+  })
+  for (let index = 0; index < pending.length; index += PATCH_HYDRATION_CONCURRENCY) {
+    await Promise.all(pending.slice(index, index + PATCH_HYDRATION_CONCURRENCY).map(async ({ file, ref }) => {
+      file.patch = await readRecorderContent(root, ref)
+    }))
   }
 }
 

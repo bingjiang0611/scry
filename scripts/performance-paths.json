@@ -107,6 +107,7 @@
         "src/renderer/app-shell.tsx",
         "src/renderer/components/SidebarProjects.tsx",
         "src/renderer/components/SidebarSessionRow.tsx",
+        "src/main/bootstrap/workspace-runtime.ts",
         "src/main/index.ts"
       ],
       "benchmarks": [
@@ -129,6 +130,8 @@
       ],
       "sources": [
         "src/main/session-history.ts",
+        "src/main/bootstrap/workspace-runtime.ts",
+        "src/main/trace-diff-content.ts",
         "src/renderer/app-session-actions.ts",
         "src/renderer/app-session-runtime.ts",
         "src/renderer/app-runtime.ts",
@@ -214,6 +217,7 @@
         "src/renderer/components/ChatTurn.tsx",
         "src/renderer/components/ChatTurnAssistant.tsx",
         "src/renderer/components/ChatTurnAssistantView.tsx",
+        "src/renderer/completed-turn-flow.ts",
         "src/renderer/components/ChatTurnTools.tsx",
         "src/renderer/components/chat-view/transcript.tsx",
         "scripts/renderer-transcript-profile.mjs",
