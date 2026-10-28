@@ -4,7 +4,7 @@
 
 ## 1. 结论与主要风险
 
-**扩展已有 Conversation + 右侧工作面板，不建立第二套 Agent runtime。** 侧聊是带来源关系和冻结消息快照的持久 Conversation；消息快照不是现有原生 `fork`。
+**侧聊复用 Conversation + 右侧工作面板，主聊不接管、不迁移。** 只读主聊已完成消息，保存独立侧聊与快照；不是原生 `fork`。主聊当前轮继续运行，不以其结束作为创建前置条件。
 
 这不是纯 UI 功能。工作主要集中在：
 
@@ -23,7 +23,7 @@
 | 右侧已有按 scope 保存的状态、宽度与终端保留逻辑 | `src/renderer/hooks/useSessionRightSurfaces.ts`、`app-shell.tsx` | 扩展现有状态，不另建平行面板系统 |
 | `ConversationView` 自己读历史/预览/发送，但接收 App 的 `chatProps`，并向外投射当前会话 | `src/renderer/components/ConversationView.tsx`、`ConversationViewBody.tsx`、`app-chat-props.ts` | 不能直接复制渲染两个实例；必须拆分会话级输入与全局展示依赖 |
 | 统一对话已有 revision、commandId、continuationKey、分页 read、unknown 语义 | `src/shared/conversation-api.ts`、`src/main/conversation-service.ts` | 复用发送与恢复合同；快照创建也要幂等 |
-| `parseTarget` 当前仅接受 Claude / Codex / Pi；legacy adoption 类型也仅三者 | `src/main/conversation-service.ts`、`src/shared/conversation-api.ts` | Qoder / OpenCode 是首版必须补齐的接入，不是改下拉框 |
+| `parseTarget` 当前仅接受 Claude / Codex / Pi；legacy adoption 类型也仅三者 | `src/main/conversation-service.ts`、`src/shared/conversation-api.ts` | 补齐 Qoder / OpenCode 子对话 target/历史输入；来源只读，不要求扩展 adoption |
 | Claude / Codex / Pi 声明 historicalContext；前两者有 historyReader，Pi 随扩展路径启用 | `src/main/providers/{claude,codex,pi}.ts` | 能否省略并检索历史要按当前 runtime 能力判断 |
 | Qoder / OpenCode 尚未声明上述历史输入能力 | `src/main/providers/{qoder,opencode}.ts` | 新增真实输入转换与合同测试；没有检索器时必须完整带入或明确拒绝超预算 |
 | 已有 native fork 复制来源前缀，并保存独立 fork receipt | `src/main/conversation-store.ts`、`conversation-service.ts`、`bootstrap/run-fork.ts` | 可复用持久化模式，不复用其「原生上下文已分支」语义 |
@@ -35,53 +35,21 @@
 
 这些是针对相关函数/小节的阅读，不是全仓库审计。
 
-## 3. 数据模型：在 Conversation 上增加 sideChat
+## 3. 数据模型与只读来源
 
-下列为拟议合同，命名以实现时复用既有类型为准：
+在子 Conversation 上增加 `sideChat: SideChatOrigin`，不改变父会话的管理方式。来源使用 `SideChatSource` 判别联合，既支持 Conversation ID，也支持已验证的 Provider/profile/canonical cwd/nativeSessionId；不再强制要求 parentConversationId 或父 Conversation revision。
 
-```ts
-type SideChatOrigin = {
-  parentConversationId: string
-  parentTitleAtCapture: string
-  snapshot: {
-    sourceRevision: number
-    throughOrdinal: number
-    throughRunId: string
-    capturedAt: number
-    manifest: ContentRef // 复用内容寻址引用；正文/清单由子对话持有
-  }
-}
-
-// Conversation 新增可选 sideChat: SideChatOrigin
-// 不复用 fork 字段：fork 表示 Provider 已确认的原生分支。
-```
-
-快照 manifest 至少包含：有序消息 ref、角色、原始 run/binding/provider、正文 hash、源 item ref、完整/缺失状态、包含/排除数量和明确的内容类型范围。正文由已有内容存储封存，子对话拥有引用与保留责任；不能仅引用会随父会话删除的 archive 路径。
-
-区别两类证据：
-
-- **snapshot**：创建时冻结的消息事实，全量保存到子对话有界内容存储。
-- **delivery coverage**：某次向 Provider 实际内联哪些消息、哪些可通过 reader 检索、哪些没有送达。复用现有 handoff/coverage 合同，不在首轮 UI 中假装 snapshot 全部已进入模型。
-
-继承消息是只读背景，不生成新的 runId、不重复计费/usage、不算侧聊执行轮次。通过历史输入合同交付；新的 Provider sessionId 必须不同于父会话绑定。来源快照不会因为切模型、重新打开、主聊后续完成而重新捕获。
-
-列表继续以 Conversation 为事实源：摘要增加 `sideChat` 来源与状态；查询支持按 parentConversationId 分页。父会话侧栏只取摘要计数，不为每个子侧聊加载 transcript。默认每页 40 项，沿用会话历史分页尺度；具体阈值由现有负载测量复核。
-
-### 旧 Provider 会话
-
-首版把既有 legacy 会话通过现有 adoption 流程获得稳定 Conversation 身份：已有统一对话无额外步骤；旧会话第一次使用侧聊时显示现有接管预览/确认，不静默夺取原生 session 的写权限。扩展 Qoder / OpenCode 的 adoption、continuation identity 和归档读取合同，覆盖空会话、缺归档、原生分支变化。
-
-运行中的 legacy 会话不能在 ownership 尚未安全转移时强行接管。首次接管需要等待其收口；这是一次性迁移限制，UI 必须解释。接管完成后的主聊运行中创建侧聊必须可用。若评审要求历史 legacy 运行中也零等待，应追加稳定源身份映射设计，而不是绕过 ownership 检查。
+完整字段、来源身份、冻结正文与删除保留责任见 [侧聊来源与消息快照合同](./snapshot-source.md)。该合同同时约束页签 scope、来源分页、snapshot 与实际 delivery coverage 的区别，以及运行中 legacy 主聊的验收。不调用 adoption，也不放宽已有 ownership 写保护。
 
 ## 4. 快照创建与首次发送
 
 扩展现有 typed `ConversationApi`，不开放任意路径/命令 IPC：
 
 ```text
-previewSideChat(parentId, requestedBoundary?)
-  -> 已完成边界、sourceRevision、manifestFingerprint、覆盖预览、可用目标
+previewSideChat(source: SideChatSource, requestedBoundary?)
+  -> 已验证来源、已完成边界、prefixFingerprint、manifestFingerprint、覆盖预览、可用目标
 
-createSideChat(parentId, boundary, manifestFingerprint, commandId)
+createSideChat(source, boundary, prefixFingerprint, manifestFingerprint, commandId)
   -> 持久 child summary（created 或同意图 duplicate）
 
 现有 read / preview / send / update / delete
@@ -92,12 +60,12 @@ createSideChat(parentId, boundary, manifestFingerprint, commandId)
 
 ### 创建事务
 
-1. main 验证 sender/frame/origin、项目授权、父 Conversation 可读、请求 schema、父子关系。来源内容始终是数据，不是授权。
-2. main 选最近一个 **Provider 已完成、且归档与 managed 证据已收敛** 的成功轮次。主聊正在运行时选择它之前的稳定前缀；不停止主聊、不等待当前轮完成。首版不以失败/中断轮作为默认快照边界。
+1. main 验证 sender/frame/origin、项目授权、请求 schema、来源可读性与父子关系。按 SideChatSource 分别解析 Conversation 或原生 session；不要求创建父 Conversation。来源内容始终是数据，不是授权。
+2. main 选最近一个 **Provider 已完成、且归档与适用 recorder 证据已提交** 的成功轮次。两种主聊来源都只读稳定前缀，不迁移、不停止、不等待当前轮完成；不把要求整份归档收敛的 adoption 预览当成快照读取。首版不以失败/中断轮作为默认边界。
 3. 从权威正文提取用户/助手消息；并非只读当前分页窗口。复用完整读取校验与限额：目前源读取预算 16 MiB、正文预算 4 MiB、2000 轮、单个 handoff artifact 256 KiB。它们是不同层的上限，不能把 4 MiB 塞进单个 256 KiB artifact；用现有内容存储持有正文与有界 manifest/页面，超限明确拒绝，不放宽已有上限。
 4. 保存不可变 manifest / 内容引用，再以原子写提交 child + sideChat 来源 + 创建 receipt。只有两者完整可读才发布 child。孤立的未发布内容由现有内容保留/回收机制处理，不自行引入后台扫描器。
 5. 幂等键为 commandId + intent hash。同 commandId、不同来源或边界拒绝；重复请求返回原 child。IPC 回执丢失先按 commandId 只读核对，不创建第二个 child。
-6. 主聊从 revision 8 增到 9 不应导致既定第 8 轮快照无法创建。对 **冻结前缀 fingerprint** 重验，而非要求最新 revision 一直相等；父会话删除、来源前缀变更或权限撤回必须拒绝。
+6. 主聊继续追加轮次不应导致既定第 8 轮快照无法创建。两种来源都重验 **冻结前缀 fingerprint**，不要求父 Conversation revision；来源删除、前缀变更或权限撤回必须拒绝。
 7. 无已完成边界、正文缺失或预算不足：返回可解释失败，不自动建空侧聊。缩小范围必须让用户确认新的覆盖预览，不能复用旧 fingerprint。
 
 ### 首次发送与后续轮次
@@ -149,9 +117,9 @@ type RightSurfaceTab =
 
 - 稳定 ID 持久化，renderer 只存布局与活动页签，不存第二份会话正文。
 - 旧保存状态迁移：固定 kind 转 tool tab；非法/已删除 child 丢弃并回到邻近有效页签，不创建幽灵会话。
-- scope 使用父 Conversation ID，不能按 cwd 合并两个不同主会话；已有工作区/终端 scope 迁移逻辑保留。
+- scope 使用第 3 节的稳定来源身份；原生主聊无需父 Conversation ID。不能按 cwd 合并不同主会话；已有工作区/终端 scope 迁移逻辑保留。
 - 一次最多恢复 8 个打开页签，更多侧聊走分页历史入口。持久会话不受此展示上限删除。只挂载活动侧聊正文；父主聊仍挂载。已有终端 retain 逻辑不受影响。
-- 从 `ConversationView` 拆出确有复用需求的会话级 props / controller：target、draft、history window、run、send/stop/approval、selected turn 都属于 conversationId。不要把整个 App store 复制两份。
+- 从 `ConversationView` 拆出确有复用需求的会话级 props / controller：子侧聊的 target、draft、history window、run、send/stop/approval、selected turn 按 conversationId 隔离。主聊保留原 controller，不为共用组件迁移主聊，也不复制整个 App store。
 - `onProjection` 不让侧聊覆盖主聊的全局投影。文件引用应送到明确选定的 composer；右侧工具页签固定指向主聊的纵览/diff，侧聊证据在自身 turn 中查看并标标题。避免切到工具页签时悄悄换上下文。
 - 活动 child 的少量 trace 订阅按帧合并；不活跃 child 只消费摘要/待处理状态，不把所有 transcript 常驻 DOM。卸载正文不停止运行，草稿在现有 ComposerDraftStore 中按 child id 留存。
 - 当前运行只由主进程登记；render busy 不能来自「本工作区是否有任意 run」。关闭/切换只是视图动作，停止是独立操作。
@@ -170,18 +138,18 @@ type RightSurfaceTab =
 
 | 阶段 | 交付 | 门槛 |
 | --- | --- | --- |
-| A 快照与持久化 | sideChat 合同、冻结正文、幂等创建、父子生命周期 | 主聊继续追加仍不改变快照；删除父会话后 child 正文仍在；创建回执丢失不重复 |
-| B 五 Provider 历史输入 | Qoder / OpenCode target/adoption/input 接入，五者 coverage | 本地 adapter contract 验证真实入参而非 capability 布尔值；完整输入/预算拒绝都覆盖 |
+| A 快照与持久化 | 双来源只读合同、冻结正文、幂等创建、父子生命周期 | legacy 主聊运行中无需 adoption 即可创建；追加不改变快照；删父保子；丢回执不重复 |
+| B 五 Provider 历史输入 | Qoder / OpenCode target/input 与来源读取，五者 coverage | 验证真实输入而非 capability 布尔值；不扩展父 adoption；完整输入/预算拒绝都覆盖 |
 | C 并行执行边界 | 精确 admission、transport/session 隔离、单 run 控制、证据范围 | 两个真实本地测试进程交错事件仍不串线，同 session 并发拒绝；杀/停一个不影响另一个 |
 | D 双聊天与页签 | 右侧多实例、scope 恢复、独立草稿、审批/错误/窄屏 | 当前构建的独立 Electron test 实例中重放双输入框与真实坐标交互 |
 | E 集成与交付 | 五 Provider 验收记录、性能测量、打包安装 | 不用模拟 Provider 的通过记录代替真实 Provider 验收；明确成本/账号授权后再跑真实探针 |
 
 ### 必须留下的最小回归集
 
-- **快照稳定**：第 8 轮作为边界，第 9 轮运行中创建；第 9 轮后来完成、父正文分页/切换后，child 的 hash/消息集合不变。
+- **快照稳定与免迁移**：对 Conversation/原生 session 两种来源，第 9 轮运行中立即冻结前 8 轮；追加、分页/切换后 hash 不变。断言未调用 adoption、未创建父 Conversation，父 session/ownership/resume/控制归属不变；来源 alias、以后独立 adoption 后仍可找回侧聊。
 - **完整性**：消息在未加载的历史页中仍被纳入；附件、推理、工具状态不伪装已复制；缺正文/超限不产生看似完整的空会话。
 - **幂等**：同创建/发送 commandId 回执丢失；只读恢复到同 child/run；intent 改变拒绝。
-- **隔离**：同 Provider、同 cwd，父与两个 child 各自 session；交错响应、审批、停止、失败、完成、hook/record 不串线；原生 session alias 冲突仍拒绝。
+- **隔离**：同 Provider、同 cwd，legacy 或 managed 父与两个 managed child 各自 session；交错响应、审批、停止、失败、完成、hook/record 不串线；原生 session alias 冲突仍拒绝。
 - **生命周期**：关闭运行中页签不中止；切换父会话/Provider 后保留正确 draft/审批；重启不自动续发；父删除不破坏子快照。
 - **预算与安全**：伪造 child ownership、source ref、path、revision、reader token；生产 IPC wrapper 拒绝且特权 listener 未执行；新 Provider trust gate 不退化。
 - **证据**：两个 run 重叠修改工作区，UI 与持久记录不标独占归因；快照历史 usage 不双计；未收敛不得提前保存成功。
