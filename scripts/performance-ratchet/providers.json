@@ -140,6 +140,20 @@
       "baselines": {
         "darwin-arm64": 0
       }
+    },
+    "providers.pi-probe-isolated-invalidation/subprocess.rpc": {
+      "scenario": "providers.pi-probe-isolated-invalidation",
+      "metric": "subprocess.rpc",
+      "layer": "main",
+      "unit": "count",
+      "workload": "workspaces=2;probes=3;invalidate-workspace-a=1;revisit-workspace-b=1",
+      "source": "production Pi adapter invalidation and catalog probe lifecycle with real offline RPC children",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 3
+      }
     }
   }
 }
