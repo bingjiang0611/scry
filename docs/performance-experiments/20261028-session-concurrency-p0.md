@@ -25,7 +25,7 @@
 - 无真实 Provider（离线 smoke adapter 在进程内），因此没有 Provider 子进程 CPU、没有 TLS、没有真实网络成本。
 - 无 React commit 延迟：没有可信的 per-batch commit 信号，`rendererCommit` 保持 unavailable，也不拿 useAgentSession ACK 或 DOM mutation 冒充。
 - 无 GC 测量：不强制 GC，也不采集 GC 事件，GC 后驻留标 unavailable；`forced:false` 不等于观测到自然 GC。
-- remote readers（0/1/4）尚未实现，lane 记 unavailable（`not yet implemented in this concurrency harness`），未宣布"不存在"。
+- remote readers（0/1/4）在本阶段 native 窗口 harness 里尚未实现，lane 记 unavailable（`not yet implemented in this concurrency harness`），未宣布"不存在"。后续：in-main trace 工具已实现并采到 0/1/4，见 [in-main trace 与 remote readers 阶段记录](./20261028-concurrency-trace-readers.md)；该结论只针对本阶段 harness。
 - 隐藏窗口 + `--disable-gpu`：报告的 GPU 进程 CPU 只是该配置下的进程 CPU，不等于硬件 GPU 利用率，也不等于日常硬件加速 App 的成本；没有阶段证据把它的来源归给任何具体 renderer 或 CDP 负载。
 - **性能结论**：全部数据在高负载机器上取得（见第 3 节），只能作为**功能证据**，不构成 L2 改善，也不构成 P1 收益。
 
@@ -75,11 +75,11 @@ native 采集第二批（**同一 harness hash**）：`/tmp/scry-p0-fixed16-fina
 
 | 开放项 | owner | 备注 |
 | --- | --- | --- |
-| remote readers 0/1/4 | 父会话 | 现有 remote fixture 可冻结；本阶段未实现 |
-| 1k/10k/50k 负载、eviction/reset | 父会话 | 与 0/1/4 一起构成后续负载矩阵 |
+| remote readers 0/1/4 | 父会话 | in-main trace 工具已实现并采 12 格（[续篇](./20261028-concurrency-trace-readers.md)）；本阶段的 remote fixture 仍待冻结 |
+| 1k/10k/50k 负载、eviction/reset | 父会话 | 1k/10k × readers 0/1/4 已采；50k 耗时、实际 hash 计数仍未测；容量、旧 cursor 与逻辑时钟 sweep 有组件回归，reset 只在受控串行序下观测（[续篇](./20261028-concurrency-trace-readers.md)） |
 | 噪声、MDE、重复次数与顺序预注册 | 父会话 | 预注册后才允许 L2 结论 |
-| 低负载匹配 baseline、collector 整体冻结 | 父会话 | 之后才进入 P1 |
-| 环境降载 | 用户或空闲机器 | 不擅自结束用户进程 |
+| 低负载匹配 baseline、collector 整体冻结 | 父会话 | 续篇每格各有一次 `highLoad=false` 样本，尚非稳定匹配基线或 L2 改善；冻结还需预注册噪声/MDE（[续篇](./20261028-concurrency-trace-readers.md)） |
+| 环境负载 | 父会话检查，必要时请用户安排空闲窗口 | native 旧样本为高负载，后续 remote 样本为低负载；逐次核对，不擅自结束用户进程 |
 | collector 提交 | 父会话 | 测量工具单独提交；不与 P1 优化混在同一提交，实际 hash 以 Git 历史为准 |
 
 ## 7. 复现
