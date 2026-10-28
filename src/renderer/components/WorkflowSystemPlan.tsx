@@ -1,19 +1,13 @@
 import { useMemo, useState } from 'react'
-import type { WorkflowBlock, WorkflowPlanPreview } from '@shared/workflow'
-import { workflowChildBlocks } from '@shared/workflow'
+import type { WorkflowPlanPreview } from '@shared/workflow'
+import { workflowProgramStructure } from '../workflow-program-structure'
 import { WORKFLOW_COPY as copy } from '../constants/copy'
 
 export function WorkflowSystemPlan({ preview }: { preview: WorkflowPlanPreview }) {
   const [page, setPage] = useState(0)
-  const steps = useMemo(() => {
-    const pending = [preview.program.body], result: Extract<WorkflowBlock, { kind: 'replica' | 'combine' | 'check' | 'call' }>[] = []
-    while (pending.length) {
-      const block = pending.pop()!
-      if (block.kind === 'replica' || block.kind === 'combine' || block.kind === 'check' || (block.kind === 'call' && block.replica)) result.push(block)
-      pending.push(...workflowChildBlocks(block).reverse())
-    }
-    return result
-  }, [preview])
+  const steps = useMemo(() => workflowProgramStructure(preview.program.body).flatMap(({ block }) =>
+    block.kind === 'replica' || block.kind === 'combine' || block.kind === 'check' || (block.kind === 'call' && block.replica) ? [block] : []
+  ), [preview])
   if (!steps.length) return null
   const pages = Math.ceil(steps.length / 16)
   return <section className="workflow-system-plan" aria-label={copy.systemPlan}>

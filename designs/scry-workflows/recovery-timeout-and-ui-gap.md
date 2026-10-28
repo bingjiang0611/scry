@@ -2,6 +2,8 @@
 
 日期：2026-10-28。产品源码：`0e6b667101c15325737450312bfe4be62f046bee`。
 
+> 后续进展：[v4 工作台独立验收与交付](v4-workspace-delivery.md)。生产工作台、代码联动和连线图已落地，完整 renderer/packaged smoke 通过；原 5 秒 unit 门禁尚未收敛。下文保留当时版本的调查和 UI 缺口，不代表后续源码仍没有工作台。
+
 ## 结论
 
 1. 已定位的 recovery 失败是**多次真实 Node/controller 启动及执行累加，耗尽单用例 5 秒预算**，不是 controller 完成后 IPC 一直不关闭。不能因此把真实崩溃恢复测试换成 mock、删掉阶段或扩大 timeout。

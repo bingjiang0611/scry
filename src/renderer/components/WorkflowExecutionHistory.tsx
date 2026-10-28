@@ -8,7 +8,7 @@ type Read = { offset: number; sequence: number } & (
   { state: 'loading' } | { state: 'error'; message: string } | { state: 'ready'; page: WorkflowExecutionInspection }
 )
 
-function ExecutionRecord({ record, onFrame, onOutput }: { record: WorkflowExecutionInspectionRecord; onFrame: (id: string) => void; onOutput: (selection: WorkflowOutputSelection) => void }) {
+function ExecutionRecord({ record, programRevision, onFrame, onOutput }: { record: WorkflowExecutionInspectionRecord; programRevision: string; onFrame: (id: string) => void; onOutput: (selection: WorkflowOutputSelection) => void }) {
   const intent = record.intent.state === 'available' ? record.intent.value : undefined
   const outcome = record.outcome.state === 'available' ? record.outcome.value : undefined
   const isAttempt = 'attemptId' in record, isClassifier = 'classifierId' in record, isSystem = !isAttempt && !isClassifier
@@ -46,6 +46,12 @@ function ExecutionRecord({ record, onFrame, onOutput }: { record: WorkflowExecut
       <span>{systemReturned ? copy.systemReturned : lifecycleLabel}</span>
       <span>{outcome ? outcome.settled ? copy.settled : copy.unsettled : copy.unavailable}</span>
     </div>
+    {intent && intent.programRevision !== programRevision && <p role="status">{copy.otherRevision}<code>{intent.programRevision}</code></p>}
+    {isClassifier && record.outcome.state === 'available' && <dl className="workflow-classifier-result" data-workflow-classifier-result={record.classifierId}>
+      <div><dt>{copy.classifierResult}</dt><dd>{record.outcome.value.value === undefined ? copy.unavailable : String(record.outcome.value.value)}</dd></div>
+      <div><dt>{copy.confidence}</dt><dd>{record.outcome.value.confidence === undefined ? copy.unavailable : String(record.outcome.value.confidence)}</dd></div>
+      <div><dt>{copy.probability}</dt><dd>{record.outcome.value.probability === undefined ? copy.unavailable : <pre>{JSON.stringify(record.outcome.value.probability, null, 2)}</pre>}</dd></div>
+    </dl>}
     <div className="workflow-history-actions">
       {intent?.frame.state === 'available'
         ? <button type="button" data-workflow-inspection-frame={intent.frame.frameId} onClick={() => { if (intent.frame.state === 'available') onFrame(intent.frame.frameId) }}>{copy.frame}</button>
@@ -90,7 +96,7 @@ export function WorkflowExecutionHistory({ workflowId, programRevision, nodeId, 
     {page && <>
       <p data-workflow-inspection-page>{copy.historyPage(page.total === 0 ? 0 : page.offset + 1, page.offset + page.records.length, page.total)}</p>
       <time dateTime={new Date(page.observedAt).toISOString()}>{new Date(page.observedAt).toLocaleString()}</time>
-      {page.records.length ? <ol>{page.records.map(record => <ExecutionRecord key={'attemptId' in record ? record.attemptId : 'classifierId' in record ? record.classifierId : record.stepId} record={record} onFrame={onFrame} onOutput={onOutput} />)}</ol> : <p role="status">{copy.empty}</p>}
+      {page.records.length ? <ol>{page.records.map(record => <ExecutionRecord key={'attemptId' in record ? record.attemptId : 'classifierId' in record ? record.classifierId : record.stepId} record={record} programRevision={programRevision} onFrame={onFrame} onOutput={onOutput} />)}</ol> : <p role="status">{copy.empty}</p>}
     </>}
     <footer>
       <button type="button" data-workflow-inspection-page-action="previous" disabled={current.state === 'loading' || request.offset === 0} onClick={() => move(Math.max(0, request.offset - WORKFLOW_EXECUTION_INSPECTION_PAGE_SIZE))}>{copy.previous}</button>

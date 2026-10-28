@@ -69,10 +69,9 @@ export interface RemoteHostLifecycleDeps {
 }
 
 export function createRemoteHostLifecycle(deps: RemoteHostLifecycleDeps) {
-  let remoteHostService = deps.getRemoteHost()
   const { getUserData, isShuttingDown, providerRegistry, listPiProfiles, remoteProjectRoots, knownProjectDirectories, resolveRemoteProjectDirectory, sourceControl, openLocalPath, rememberProject, providerOperationGate, remoteStartReceipts, startAppRun, requestRunStop, appSessionStore, sessionRefFromRequest, changeLegacySessionMetadata, archiveSessionAndStop, runs, remoteRunIds, userQuestionBroker, withProviderOperation, providerContextKey, boundedLiveRun } = deps
   const requireRemoteHost = (): RemoteHostService => {
-    const host = deps.getRemoteHost() ?? remoteHostService
+    const host = deps.getRemoteHost()
     if (!host) throw new Error('远程访问未启用')
     return host
   }
@@ -116,7 +115,7 @@ const remoteProviderSnapshotRefresh = createCachedAsyncLoader(loadRemoteProvider
 const refreshRemoteProviderSnapshot = (): Promise<void> => remoteProviderSnapshotRefresh.load()
 
 async function startRemoteHostIfEnabled(): Promise<void> {
-  if (remoteHostService || !remoteHostEnabled(process.env.SCRY_REMOTE_HOST, app.isPackaged)) return
+  if (deps.getRemoteHost() || !remoteHostEnabled(process.env.SCRY_REMOTE_HOST, app.isPackaged)) return
   try {
     const stateDirectory = join(getUserData(), 'remote')
     const relay = await resolveRemoteRelay(stateDirectory)
@@ -132,7 +131,7 @@ async function startRemoteHostIfEnabled(): Promise<void> {
     const remotePermissionMode = configuredRemotePermissionMode()
     if (remotePermissionRaw && !remotePermissionMode) console.warn(`[scry] ignoring invalid SCRY_REMOTE_PERMISSION_MODE=${remotePermissionRaw}`)
     else if (remotePermissionMode) console.warn(`[scry] remote runs use owner-set permissionMode=${remotePermissionMode}`)
-    remoteHostService = await RemoteHostService.create({
+    const remoteHostService = await RemoteHostService.create({
       stateDirectory,
       desktopWorkbench: createDesktopWorkbench({
         directory: join(getUserData(), 'desktop-terminal-recordings'),
@@ -378,14 +377,15 @@ async function startRemoteHostIfEnabled(): Promise<void> {
         return history
       }
     })
+    deps.setRemoteHost(remoteHostService)
     await remoteHostService.start()
     console.warn(`[scry] remote host subsystem started (${relay.createTransport ? 'relay transport configured' : 'dormant: no relay transport configured'})`)
   } catch (error) {
     console.warn('[scry] remote host subsystem failed to start:', error)
-    try { await remoteHostService?.dispose() } catch (cleanupError) {
+    try { await deps.getRemoteHost()?.dispose() } catch (cleanupError) {
       console.warn('[scry] failed remote host cleanup:', cleanupError)
     }
-    remoteHostService = null
+    deps.setRemoteHost(null)
   }
 }
 

@@ -1,5 +1,7 @@
-import { spawn } from 'node:child_process'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { execFile, spawn } from 'node:child_process'
+import { promisify } from 'node:util'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { Script } from 'node:vm'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -7,6 +9,7 @@ import { build } from 'vite'
 import electron from 'electron'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
+await promisify(execFile)(process.execPath, [join(root, 'node_modules/typescript/bin/tsc'), '--noEmit', '-p', join(root, 'scripts/fixtures/tsconfig.workflow.json')], { cwd: root })
 const temp = await mkdtemp(join(tmpdir(), 'scry-workflow-ui-'))
 try {
   await mkdir(join(temp, 'home'))
@@ -15,8 +18,9 @@ try {
     build: { outDir: join(temp, 'renderer'), emptyOutDir: true, copyPublicDir: false, minify: false,
       lib: { entry: join(root, 'scripts/fixtures/workflow-smoke.tsx'), formats: ['iife'], name: 'WorkflowFixture', fileName: () => 'fixture.js', cssFileName: 'fixture' } } })
   await writeFile(join(temp, 'renderer', 'entry.html'), `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'none'"><link rel="stylesheet" href="fixture.css"><div id="root"></div><script src="fixture.js"></script>`)
-  const main = join(temp, 'main.cjs')
-  await writeFile(main, `
+  for (const workspaceOnly of process.argv.includes('--workspace-only') ? [true] : [false, true]) {
+    const main = join(temp, workspaceOnly ? 'workspace.cjs' : 'main.cjs')
+    await writeFile(main, `
     const { app, BrowserWindow } = require('electron')
     const assert = require('node:assert/strict')
     const { writeFile } = require('node:fs/promises')
@@ -39,31 +43,18 @@ try {
       }
       try {
         await win.loadFile(${JSON.stringify(join(temp, 'renderer', 'entry.html'))})
+        if (${workspaceOnly}) {
+          const { checkWorkflowWorkspace } = await import(${JSON.stringify(new URL('./workflow-workspace-ui-checks.mjs', import.meta.url).href)})
+          console.log('SCRY_WORKFLOW_UI_RESULT=' + JSON.stringify(await checkWorkflowWorkspace({ read, wait, click, win })))
+          app.exit(0)
+          return
+        }
         await wait('document.querySelector("[data-workflow-action=plan]") && !document.querySelector("[data-workflow-action=plan]").disabled')
         assert.equal(await read('window.workflowFixture.counters.catalogs'), 1, 'four identical role reads must coalesce')
         const { checkWorkflowSizePreference } = await import(${JSON.stringify(new URL('./workflow-size-ui-checks.mjs', import.meta.url).href)})
         await checkWorkflowSizePreference({ read, wait, click, win })
-        // Native Chromium key input, not DOM value assignment or programmatic click.
-        await read('document.querySelector("[data-workflow-role=orchestrator] select").focus()')
-        choose('p')
-        await wait('document.querySelector("[data-workflow-role=orchestrator] select").value === "pi:fixture"')
-        await wait('document.querySelectorAll("[data-workflow-role=orchestrator] select")[2].options.length === 2')
-        assert.equal(await read('document.querySelector("[data-workflow-action=plan]").disabled'), true)
-        await read('document.querySelectorAll("[data-workflow-role=orchestrator] select")[2].focus()')
-        choose('e')
-        await wait('document.querySelectorAll("[data-workflow-role=orchestrator] select")[2].value === "full_access"')
-        await read('document.querySelectorAll("[data-workflow-role=orchestrator] select")[1].focus()')
-        choose('e')
-        await wait('!document.querySelector("[data-workflow-action=plan]").disabled')
-        await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
-        await writeFile('/tmp/scry-workflow-m0-ui-config-wide.png', (await win.webContents.capturePage()).toPNG())
-        win.setSize(430, 900)
-        await wait('innerWidth === 430')
-        await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
-        assert.equal(await read('Array.from(document.querySelectorAll(".workflow-role")).every(e=>e.getBoundingClientRect().right <= innerWidth)'), true)
-        await writeFile('/tmp/scry-workflow-m0-ui-config-narrow.png', (await win.webContents.capturePage()).toPNG())
-        win.setSize(1280, 960)
-        await wait('innerWidth === 1280')
+        const { checkWorkflowRoleConfiguration } = await import(${JSON.stringify(new URL('./workflow-role-ui-checks.mjs', import.meta.url).href)})
+        await checkWorkflowRoleConfiguration({ read, wait, win, choose })
         await click('[data-workflow-action=plan]')
         await wait('window.workflowFixture.counters.plans === 1 && document.querySelector("#native-permission")')
         const selected = await read('JSON.parse(document.body.dataset.workflowRequest)')
@@ -195,12 +186,13 @@ try {
         app.exit(0)
       } catch(error) {
         console.error(error)
-        console.error(await read('JSON.stringify({keys:window.workflowFixture?.keys,counters:window.workflowFixture?.counters,active:document.activeElement?.outerHTML?.slice(0,500),values:Array.from(document.querySelectorAll("[data-workflow-role=orchestrator] select")).map(e=>e.value)})'))
+        console.error(await read('JSON.stringify({keys:window.workflowFixture?.keys,counters:window.workflowFixture?.counters,active:document.activeElement?.outerHTML?.slice(0,500),workspace:{tabs:[...document.querySelectorAll("[data-workflow-workspace-tab]")].map(e=>[e.dataset.workflowWorkspaceTab,e.getAttribute("aria-selected")]),selected:[...document.querySelectorAll("[data-workflow-workspace-selected]")].map(e=>e.textContent),flow:[...document.querySelectorAll("[data-workflow-flow-node]")].slice(0,5).map(e=>[e.dataset.workflowFlowNode,e.dataset.state]),records:[...document.querySelectorAll("[data-workflow-inspection-record]")].map(e=>e.dataset.workflowInspectionRecord),alerts:[...document.querySelectorAll("[role=alert]")].map(e=>e.textContent)},values:Array.from(document.querySelectorAll("[data-workflow-role=orchestrator] select")).map(e=>e.value)})'))
         app.exit(1)
       }
     })
-  `)
-  await new Promise((resolve, reject) => {
+    `)
+    new Script(await readFile(main, 'utf8'), { filename: main })
+    await new Promise((resolve, reject) => {
     const child = spawn(electron, [main, '--disable-gpu'], { env: { PATH: process.env.PATH, TMPDIR: tmpdir(), HOME: join(temp, 'home') }, stdio: ['ignore', 'pipe', 'pipe'] })
     let output = ''
     const timer = setTimeout(() => child.kill('SIGTERM'), 30_000)
@@ -214,4 +206,5 @@ try {
       else reject(new Error('Workflow UI smoke failed (' + code + '): ' + output))
     })
   })
+  }
 } finally { await rm(temp, { recursive: true, force: true }) }

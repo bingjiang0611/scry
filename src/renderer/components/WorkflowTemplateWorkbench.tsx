@@ -1,11 +1,11 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { forwardRef, useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import type { WorkflowPlanPreview, WorkflowRole, WorkflowRoleBinding } from '@shared/workflow'
 import { providerIdForAgentId } from '@shared/runtime'
 import type { WorkflowTemplateEditContext, WorkflowTemplateDefinition, WorkflowTemplateDraft, WorkflowTemplateExtraction, WorkflowTemplateRef, WorkflowTemplateScope, WorkflowTemplateSnapshot, WorkflowTemplateSource } from '@shared/workflow-template'
 import type { DetectedAgent } from '../env'
 import { WORKFLOW_TEMPLATE_COPY as copy } from '../constants/copy'
 import { templateSourceDifference, templateStructure } from '../workflow-template-review'
-import { WorkflowRolePicker } from './WorkflowRolePicker'
+import { WorkflowTemplateBindingForm } from './WorkflowTemplateBindingForm'
 import { WorkflowTemplateEditCandidatePanel, type WorkflowTemplateEditCandidateTask } from './WorkflowTemplateEditCandidatePanel'
 import { WorkflowTemplateHistoryPanel } from './WorkflowTemplateHistoryPanel'
 import { WorkflowTemplateDeleteConfirmation } from './WorkflowTemplateDeleteConfirmation'
@@ -15,19 +15,26 @@ import { WorkflowTemplatePublicationReview } from './WorkflowTemplatePublication
 import { WorkflowTemplateExtractForm, type TemplateExtractionChoices } from './WorkflowTemplateExtractForm'
 import { workflowCheckFixTemplate } from '@shared/workflow-check-fix'
 import { ModalFrame } from './Modals'
+import { WorkflowTemplateSourceEditor } from './WorkflowTemplateSourceEditor'
 import './workflow.css'
 
 type ScopeKind = WorkflowTemplateScope['kind']
 type Editor = { snapshot: WorkflowTemplateSnapshot | null; current: WorkflowTemplateSnapshot | null; draft: WorkflowTemplateDraft | null; text: string; baseline: string | null }
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 
-export function WorkflowTemplateWorkbench({ cwd, agents, orchestrator, sourcePreview, initialEdit, editTask, onPrepared, onClose }: {
+export interface WorkflowTemplateWorkbenchHandle {
+  requestLeave: (next: () => void) => 'blocked' | 'pending' | 'left'
+}
+
+export const WorkflowTemplateWorkbench = forwardRef<WorkflowTemplateWorkbenchHandle, {
   cwd: string; agents: DetectedAgent[]
   orchestrator?: WorkflowRoleBinding; initialEdit?: WorkflowTemplateEditContext
   editTask?: WorkflowTemplateEditCandidateTask
   sourcePreview?: WorkflowPlanPreview
+  embedded?: boolean
+  onBusyChange?: (busy: boolean) => void
   onPrepared: (preview: WorkflowPlanPreview) => void; onClose: () => void
-}) {
+}>(function WorkflowTemplateWorkbench({ cwd, agents, orchestrator, sourcePreview, initialEdit, editTask, embedded = false, onBusyChange, onPrepared, onClose }, ref) {
   const titleId = useId(), api = window.scry.workflow.templates
   const [destination, setDestination] = useState<'personal' | 'project'>('personal')
   const [catalogKind, setCatalogKind] = useState<ScopeKind>('personal'), [showDrafts, setShowDrafts] = useState(false)
@@ -38,6 +45,10 @@ export function WorkflowTemplateWorkbench({ cwd, agents, orchestrator, sourcePre
   const [error, setError] = useState<string | null>(null), [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false), busyRef = useRef(false), epoch = useRef(0)
   const [leaving, setLeaving] = useState(false), [deleting, setDeleting] = useState(false)
+  const leaveAction = useRef(onClose)
+  const leaveHeading = useRef<HTMLHeadingElement>(null)
+  useEffect(() => { if (leaving) leaveHeading.current?.focus() }, [leaving])
+  useEffect(() => { onBusyChange?.(busy) }, [busy, onBusyChange])
   const [history, setHistory] = useState<WorkflowTemplateRef[] | null>(null), [historyCursor, setHistoryCursor] = useState<string>()
   const [reviewed, setReviewed] = useState(false), [shareReviewed, setShareReviewed] = useState(false)
   const [extracting, setExtracting] = useState(Boolean(sourcePreview))
@@ -96,7 +107,16 @@ export function WorkflowTemplateWorkbench({ cwd, agents, orchestrator, sourcePre
     const { draft, text } = editor
     void action(() => api.saveDraft({ scope: draft.scope, source: text, draftId: draft.draftId, expectedDraftRevision: draft.draftRevision, ...(draft.base ? { base: draft.base } : {}) }), next => { acceptDraft(next); then?.() })
   }
-  const close = () => { if (!busyRef.current) { if (dirty) setLeaving(true); else onClose() } }
+  const requestLeave = (next: () => void): 'blocked' | 'pending' | 'left' => {
+    if (busyRef.current) return 'blocked'
+    leaveAction.current = next
+    if (dirty) { setLeaving(true); return 'pending' }
+    next()
+    return 'left'
+  }
+  useImperativeHandle(ref, () => ({ requestLeave }))
+  const close = () => { requestLeave(onClose) }
+  const finishLeave = () => { setLeaving(false); leaveAction.current() }
   const beginBinding = () => {
     if (!definition || !editor || dirty) return
     const selectedAgent = agents.find(agent => !agent.unavailableReason && providerIdForAgentId(agent.id))
@@ -155,21 +175,21 @@ export function WorkflowTemplateWorkbench({ cwd, agents, orchestrator, sourcePre
     if (!ref) return
     void action(() => api.history(ref.scope, ref.templateId, next), page => { setHistory(page.revisions); setHistoryCursor(page.nextCursor) })
   }
-  return <ModalFrame labelledBy={titleId} className="workflow-workbench" onClose={close}>
+  const content = <>
     <header className="workflow-workbench-header"><h2 id={titleId}>{copy.title}</h2><button type="button" disabled={busy} onClick={close}>{copy.close}</button></header>
     {initialEdit && <WorkflowTemplateEditInstruction edit={initialEdit} hasEditor={Boolean(editor)} />}
     <p>{copy.workspace}: <code>{cwd}</code></p>
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
-    {leaving && <section className="workflow-workbench-confirm" aria-label={copy.leave}><h3>{copy.leave}</h3>
-      <button type="button" disabled={busy} onClick={() => keep(onClose)}>{copy.keepAndClose}</button>
-      <button type="button" disabled={busy} onClick={onClose}>{copy.discardAndClose}</button><button type="button" onClick={() => setLeaving(false)}>{copy.stay}</button>
+    {leaving && <section className="workflow-workbench-confirm" aria-label={copy.leave}><h3 ref={leaveHeading} tabIndex={-1}>{copy.leave}</h3>
+      <button type="button" disabled={busy} onClick={() => keep(finishLeave)}>{copy.keepAndClose}</button>
+      <button type="button" disabled={busy} onClick={() => { setEditor(null); setHistory(null); setStage('edit'); finishLeave() }}>{copy.discardAndClose}</button><button type="button" onClick={() => setLeaving(false)}>{copy.stay}</button>
     </section>}
     {extracting && sourcePreview ? <WorkflowTemplateExtractForm preview={sourcePreview} busy={busy} onExtract={extract} /> : !editor ? <WorkflowTemplateCatalog cwd={cwd} busy={busy} kind={catalogKind} onKind={setCatalogKind} showDrafts={showDrafts} onShowDrafts={setShowDrafts} onOpen={open} onOpenDraft={openDraft}
       onNew={source => void action(() => api.saveDraft({ scope: scope(destination), source }), draft => acceptDraft(draft, ''))}
       onCheckFix={check => void action(() => api.saveDraft({ scope: scope('project'), source: JSON.stringify(workflowCheckFixTemplate(check), null, 2) }), draft => acceptDraft(draft, ''))}
       onBatchMigration={source => void action(() => api.saveDraft({ scope: scope('project'), source }), draft => acceptDraft(draft, ''))} /> : <>
       <div className="workflow-actions">
-        <button type="button" disabled={busy} onClick={() => { if (dirty) { setLeaving(true); return } setEditor(null); setHistory(null); setStage('edit'); setNotice(null) }}>{copy.browse}</button>
+        <button type="button" disabled={busy} onClick={() => requestLeave(() => { setEditor(null); setHistory(null); setStage('edit'); setNotice(null) })}>{copy.browse}</button>
         {editor.draft && <code>{copy.sourceIdentity(copy.scopes[editor.draft.scope.kind], editor.draft.templateId)}</code>}
         {editor.snapshot && <><code>{copy.sourceIdentity(copy.scopes[editor.snapshot.ref.scope.kind], editor.snapshot.ref.templateId)}</code><button type="button" disabled={busy} onClick={() => readHistory()}>{copy.history}</button></>}
       </div>
@@ -182,11 +202,8 @@ export function WorkflowTemplateWorkbench({ cwd, agents, orchestrator, sourcePre
       {initialEdit && editTask && !editor.draft && <WorkflowTemplateEditCandidatePanel task={editTask} snapshot={initialEdit.snapshot ?? editor.snapshot ?? undefined} current={editor.snapshot} agents={agents} cwd={cwd} orchestrator={orchestrator} disabled={busy}
         onDraft={draft => acceptDraft(draft, initialEdit.snapshot?.source ?? '')} />}
       {stage === 'edit' && <>
-        <div className="workflow-template-editor-grid"><label>{copy.source}<textarea className="workflow-template-source" aria-label={copy.source} value={editor.text} readOnly={!editable} disabled={busy} spellCheck={false} onChange={event => { setEditor(current => current ? { ...current, text: event.target.value } : current); setReviewed(false); setShareReviewed(false) }} /></label>
-          <section aria-label={copy.structure}><h3>{copy.structure}</h3>{definition ? <><p>{copy.sourceValid}</p><p>{copy.nodesPage(structurePage, structure.length)}</p><ol className="workflow-template-structure">{structure.slice(structurePage, structurePage + 128).map(row => <li key={row.id} style={{ paddingInlineStart: `${row.depth * 12}px` }}><code>{copy.node(row.id, row.kind)}</code>{row.inputs.length > 0 && <span>{copy.inputs}: {row.inputs.join(', ')}</span>}</li>)}</ol>
-            {structurePage > 0 && <button type="button" onClick={() => setStructurePage(value => value - 128)}>{copy.previous}</button>}
-            {structure.length > structurePage + 128 && <button type="button" onClick={() => setStructurePage(value => value + 128)}>{copy.more}</button>}</> : <p>{dirty ? copy.dirty : copy.sourceInvalid}</p>}</section>
-        </div>
+        <WorkflowTemplateSourceEditor text={editor.text} editable={editable} busy={busy} valid={Boolean(definition)} dirty={dirty} structure={structure} page={structurePage} onPage={setStructurePage}
+          onChange={text => { setEditor(current => current ? { ...current, text } : current); setReviewed(false); setShareReviewed(false) }} />
         {editor.draft?.validation.state === 'invalid' && <p role="alert">{editor.draft.validation.error}</p>}
         <div className="workflow-actions">
           {!editor.draft && editor.snapshot && editor.snapshot.ref.scope.kind !== 'builtin' && <button type="button" disabled={busy} onClick={() => void action(() => api.restoreDraft({ ref: editor.snapshot!.ref, base: editor.current?.ref ?? null }), draft => acceptDraft(draft))}>{editor.current?.ref.revisionHash === editor.snapshot.ref.revisionHash ? copy.edit : copy.restore}</button>}
@@ -200,13 +217,12 @@ export function WorkflowTemplateWorkbench({ cwd, agents, orchestrator, sourcePre
       {stage === 'review' && difference && editor.baseline !== null && <WorkflowTemplatePublicationReview
         difference={difference} baseline={editor.baseline} source={editor.text} project={editor.draft?.scope.kind === 'project'}
         reviewed={reviewed} shareReviewed={shareReviewed} busy={busy} onReviewed={setReviewed} onShareReviewed={setShareReviewed} onEdit={() => setStage('edit')} onPublish={publish} />}
-      {stage === 'bind' && <section className="workflow-template-bind"><h3>{copy.bind}</h3>
-        <label>{copy.goal}<input disabled={busy} value={goal} onChange={event => setGoal(event.target.value)} maxLength={16000} /></label>
-        <label>{copy.parameters}<textarea disabled={busy} aria-label={copy.parameters} value={parameterText} onChange={event => setParameterText(event.target.value)} spellCheck={false} /></label>
-        {bindings.map(binding => <WorkflowRolePicker key={binding.role} binding={binding} agents={agents} cwd={cwd} disabled={busy} onChange={next => setBindings(current => current.map(item => item.role === next.role ? next : item))} onReady={(role, value) => setReady(current => ({ ...current, [role]: value }))} />)}
-        <div className="workflow-actions"><button type="button" disabled={busy} onClick={() => setStage('edit')}>{copy.edit}</button><button type="button" disabled={busy || !goal.trim() || bindings.some(role => !ready[role.role])} onClick={prepare}>{copy.prepare}</button></div>
-      </section>}
+      {stage === 'bind' && <WorkflowTemplateBindingForm cwd={cwd} agents={agents} busy={busy} goal={goal} parameters={parameterText} bindings={bindings} ready={ready}
+        onGoal={setGoal} onParameters={setParameterText} onEdit={() => setStage('edit')} onPrepare={prepare}
+        onBinding={next => setBindings(current => current.map(item => item.role === next.role ? next : item))} onReady={(role, value) => setReady(current => ({ ...current, [role]: value }))} />}
       {deleting && editor.current && <WorkflowTemplateDeleteConfirmation snapshot={editor.current} busy={busy} onDelete={deleteCurrent} onCancel={() => setDeleting(false)} />}
     </>}
-  </ModalFrame>
-}
+  </>
+  return embedded ? <section className="workflow-workbench workflow-template-embedded" aria-labelledby={titleId}>{content}</section>
+    : <ModalFrame labelledBy={titleId} className="workflow-workbench" onClose={close}>{content}</ModalFrame>
+})

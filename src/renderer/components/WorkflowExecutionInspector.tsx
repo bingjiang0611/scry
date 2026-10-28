@@ -3,7 +3,7 @@ import type { WorkflowPlanPreview } from '@shared/workflow'
 import type { WorkflowExecutionInspectionKind } from '@shared/workflow-inspection'
 import type { WorkflowOutputSelection } from '@shared/workflow-output-inspection'
 import { WORKFLOW_INSPECTION_COPY as copy } from '../constants/workflow-inspection-copy'
-import { workflowProgramStructure } from '../workflow-program-structure'
+import { workflowProgramStructure, workflowInspectionKind } from '../workflow-program-structure'
 import { ModalFrame } from './Modals'
 import { WorkflowExecutionHistory } from './WorkflowExecutionHistory'
 import { WorkflowExecutionGraph } from './WorkflowExecutionGraph'
@@ -77,7 +77,7 @@ export function WorkflowExecutionInspector({ workflowId, onClose }: { workflowId
             <textarea id={`${titleId}-code`} readOnly spellCheck={false} value={JSON.stringify(source.nodes[selected].block, null, 2)} />
             <button type="button" data-workflow-inspection-action="node-history" onClick={() => {
               const block = source.nodes[selected].block
-              setKind(block.kind === 'replica' || block.kind === 'check' || block.kind === 'verification' ? 'systems' : 'attempts')
+              setKind(workflowInspectionKind(block))
               history(block.blockId)
             }}>{copy.inspectNode}</button>
           </section>
@@ -87,6 +87,7 @@ export function WorkflowExecutionInspector({ workflowId, onClose }: { workflowId
         <div className="workflow-inspection-kinds">
           <button type="button" data-workflow-inspection-kind="attempts" aria-pressed={kind === 'attempts'} onClick={() => setKind('attempts')}>{copy.attempts}</button>
           <button type="button" data-workflow-inspection-kind="systems" aria-pressed={kind === 'systems'} onClick={() => setKind('systems')}>{copy.systems}</button>
+          <button type="button" data-workflow-inspection-kind="classifiers" aria-pressed={kind === 'classifiers'} onClick={() => setKind('classifiers')}>{copy.classifiers}</button>
         </div>
         <WorkflowExecutionHistory key={`${source.preview.programRevision}:${nodeId ?? ''}:${kind}`} workflowId={workflowId}
           programRevision={source.preview.programRevision} nodeId={nodeId} kind={kind} onFrame={setFrameId} onOutput={setOutput} onReloadSource={reload} />

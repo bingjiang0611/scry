@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { emptyWorkflowBridge } from './empty-workflow-bridge'
 import { workflowInspectionFixture } from './workflow-inspection-fixture'
 import { workflowOutputFixture } from './workflow-output-fixture'
+import { workflowWorkspaceFixture } from './workflow-workspace-fixture'
 import type { WorkflowApi, WorkflowStopTarget } from '../../src/shared/workflow-api'
 import { WORKFLOW_COPY as copy } from '../../src/renderer/constants/copy'
 import type { WorkflowSizeSnapshot } from '../../src/shared/workflow-size'
@@ -13,7 +14,7 @@ import '../../src/renderer/styles.css'
 import '../../src/renderer/codex-alignment.css'
 
 // Isolated UI contract fixture. No Provider, account, native session, or real userData.
-const counters = { plans: 0, approvals: 0, starts: 0, stops: 0, nodeStops: 0, nodeRecorded: 0, catalogs: 0, permissionClicks: 0 }
+const counters = { plans: 0, approvals: 0, starts: 0, stops: 0, nodeStops: 0, nodeRecorded: 0, catalogs: 0, permissionClicks: 0, templateWrites: 0 }
 let notify = () => {}
 const keys: string[] = []
 const stopCommands: string[] = []
@@ -25,14 +26,24 @@ let finishPlan: (() => void) | undefined
 let finishApproval: (() => void) | undefined
 let inspection: ReturnType<typeof workflowInspectionFixture> | undefined
 let outputInspection: ReturnType<typeof workflowOutputFixture> | undefined
+let workspaceInspection: ReturnType<typeof workflowWorkspaceFixture> | undefined
 let preview: WorkflowPlanPreview
 let progress: WorkflowProgress | undefined
 let sizeSnapshot: WorkflowSizeSnapshot = { value: 'medium', source: 'default', fingerprint: '0'.repeat(64) }
 const agents = [{ id: 'codex', name: 'Codex fixture' }, { id: 'pi:fixture', name: 'Pi profile fixture' }] as DetectedAgent[]
 const request: WorkflowLaunchRequest = { id: 'ui-fixture-command', command: '/scry-workflow run Inspect fixture', cwd: '/fixture',
   orchestrator: { role: 'orchestrator', providerId: 'codex', permissionMode: 'default' } }
+const templateWrite = async () => { counters.templateWrites++; throw new Error('Read-only fixture refused template write') }
 const api: WorkflowApi = {
   ...emptyWorkflowBridge,
+  templates: { ...emptyWorkflowBridge.templates,
+    saveDraft: templateWrite, publish: templateWrite, restoreDraft: templateWrite, delete: templateWrite,
+    drafts: async () => ({ drafts: workspaceInspection ? [structuredClone(workspaceInspection.draftSummary)] : [] }),
+    draft: async id => {
+      if (!workspaceInspection || id !== workspaceInspection.templateDraft.draftId) throw new Error('Fixture draft missing')
+      return structuredClone(workspaceInspection.templateDraft)
+    }
+  },
   sizeGuideline: async () => structuredClone(sizeSnapshot),
   setSizeGuideline: async value => {
     sizeSnapshot = { value: value ?? 'medium', source: value === null ? 'default' : 'preference', fingerprint: '0'.repeat(64) }
@@ -54,9 +65,9 @@ const api: WorkflowApi = {
     notify()
     return new Promise(resolve => { finishPlan = () => resolve(preview) })
   },
-  preview: async () => inspection?.preview() ?? preview,
-  inspectExecution: input => inspection ? inspection.inspectExecution(input) : emptyWorkflowBridge.inspectExecution(input),
-  inspectFrame: (id, frameId) => inspection ? inspection.inspectFrame(id, frameId) : emptyWorkflowBridge.inspectFrame(id, frameId),
+  preview: async id => workspaceInspection?.preview(id) ?? inspection?.preview() ?? preview,
+  inspectExecution: input => workspaceInspection ? workspaceInspection.inspectExecution(input) : inspection ? inspection.inspectExecution(input) : emptyWorkflowBridge.inspectExecution(input),
+  inspectFrame: (id, frameId) => workspaceInspection ? workspaceInspection.inspectFrame(id, frameId) : inspection ? inspection.inspectFrame(id, frameId) : emptyWorkflowBridge.inspectFrame(id, frameId),
   inspectOutput: input => outputInspection ? outputInspection.inspectOutput(input) : emptyWorkflowBridge.inspectOutput(input),
   approve: async approval => {
     if (approval.programRevision !== preview.programRevision) throw new Error('Wrong immutable revision')
@@ -113,9 +124,9 @@ const api: WorkflowApi = {
     return true
   },
   snapshot: async () => progress ?? null,
-  list: async () => ({ records: progress ? [progress] : [], unresolvedPlanning: 0 }),
+  list: async cwd => ({ records: progress && progress.workspace === cwd ? [structuredClone(progress)] : [], unresolvedPlanning: 0 }),
   cancelPlanning: async () => true,
-  onProgress: () => () => {}
+  onProgress: listener => workspaceInspection ? workspaceInspection.onProgress(listener) : () => {}
 }
 Object.defineProperty(window, 'scry', { configurable: true, value: { workflow: api,
   runControls: async (context: { providerId: string }) => {
@@ -129,8 +140,13 @@ Object.defineProperty(window, 'scry', { configurable: true, value: { workflow: a
   }
 } })
 Object.assign(window, { workflowFixture: { counters, keys, stopCommands, nodeCommands,
-  installInspection: () => { outputInspection = undefined; inspection = workflowInspectionFixture(); progress = inspection.progress; document.dispatchEvent(new Event('fixture-remount')) },
-  installOutputInspection: () => { outputInspection = workflowOutputFixture(); inspection = outputInspection; progress = inspection.progress; document.dispatchEvent(new Event('fixture-remount')) },
+  installInspection: () => { workspaceInspection = undefined; outputInspection = undefined; inspection = workflowInspectionFixture(); progress = inspection.progress; document.dispatchEvent(new Event('fixture-remount')) },
+  installWorkspace: () => { workspaceInspection = workflowWorkspaceFixture(); outputInspection = undefined; inspection = undefined; progress = workspaceInspection.progress; document.dispatchEvent(new Event('fixture-remount')) },
+  workspaceQueries: () => workspaceInspection?.queries,
+  workspaceFrameQueries: () => workspaceInspection?.frameQueries,
+  changeWorkspaceSource: () => workspaceInspection?.changeSource(),
+  changeWorkspaceProject: () => document.dispatchEvent(new Event('fixture-project-change')),
+  installOutputInspection: () => { workspaceInspection = undefined; outputInspection = workflowOutputFixture(); inspection = outputInspection; progress = inspection.progress; document.dispatchEvent(new Event('fixture-remount')) },
   outputQueries: () => outputInspection?.outputQueries,
   failOutput: () => outputInspection?.failOutput(),
   changeOutput: () => outputInspection?.changeOutput(),
@@ -155,11 +171,18 @@ function Fixture() {
   const [renderVersion, version] = useState(0)
   const [launch, setLaunch] = useState<WorkflowLaunchRequest | null>(request)
   const [key, setKey] = useState(0)
+  const [cwd, setCwd] = useState('/fixture')
+  useEffect(() => {
+    const change = () => setCwd('/fixture-next')
+    document.addEventListener('fixture-project-change', change)
+    return () => document.removeEventListener('fixture-project-change', change)
+  }, [])
+  useEffect(() => { document.body.dataset.fixtureCwd = cwd }, [cwd])
   notify = () => version(value => value + 1)
   useEffect(() => { document.body.dataset.workflowFixtureRender = String(renderVersion) }, [renderVersion])
   // Remount against the same fake main-side records, not a new request.
   useEffect(() => {
-    const remount = () => setKey(value => value + 1)
+    const remount = () => { if (workspaceInspection) setLaunch(null); setKey(value => value + 1) }
     document.addEventListener('fixture-remount', remount)
     return () => document.removeEventListener('fixture-remount', remount)
   }, [])
@@ -169,7 +192,7 @@ function Fixture() {
     {counters.plans > 0 && !counters.permissionClicks && <section role="dialog" aria-modal="true" id="native-permission">
       <button id="allow-native-permission" onClick={() => { counters.permissionClicks++; notify() }}>Native permission fixture</button>
     </section>}
-    <WorkflowProgressPanel key={key} request={launch} cwd="/fixture" agents={agents} onDismiss={() => setLaunch(null)} />
+    <WorkflowProgressPanel key={key} request={launch} cwd={cwd} agents={agents} onDismiss={() => setLaunch(null)} />
   </main>
 }
 

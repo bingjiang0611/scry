@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { WorkflowRecordedSize } from './WorkflowSizePreference'
+import { WorkflowWorkspace, type WorkflowWorkspaceTab } from './WorkflowWorkspace'
+import { WORKFLOW_WORKSPACE_COPY as workspaceCopy } from '../constants/workflow-workspace-copy'
 import { WorkflowLaunchDialog, workflowLaunchRequest as launchPreview, type WorkflowLaunchRequest } from './WorkflowLaunchDialog'
 export type { WorkflowLaunchRequest } from './WorkflowLaunchDialog'
 import { WorkflowNodeStopButton } from './WorkflowNodeStopButton'
@@ -39,6 +41,7 @@ export function WorkflowProgressPanel({ request, agents, cwd, onDismiss, onNew }
   onNew?: () => void
 }) {
   const [restored, setRestored] = useState<WorkflowLaunchRequest | null>(null)
+  const [workspace, setWorkspace] = useState<{ cwd: string; initialId?: string; initialTab?: WorkflowWorkspaceTab } | null>(null)
   const [workbench, setWorkbench] = useState<{ id: string; cwd: string; preview?: WorkflowPlanPreview } | null>(null)
   const [revising, setRevising] = useState<string | null>(null)
   const [inspecting, setInspecting] = useState<{ workflowId: string; frameId: string; programRevision: string } | null>(null)
@@ -78,21 +81,36 @@ export function WorkflowProgressPanel({ request, agents, cwd, onDismiss, onNew }
     loadHistory()
     return () => { historyEpoch.current++; previewEpoch.current++ }
   }, [cwd])
-  const read = (id: string) => { void window.scry.workflow.snapshot(id).then(progress => {
+  const read = (id: string) => window.scry.workflow.snapshot(id).then(progress => {
     if (progress) observe(progress)
     else setError(copy.missingSnapshot)
-  }).catch(error => setError(copy.snapshotError(message(error)))) }
+  }).catch(error => setError(copy.snapshotError(message(error))))
+  const stopWorkflow = async (progress: WorkflowProgress) => {
+    try {
+      const accepted = await window.scry.workflow.stop(progress.workflowId, crypto.randomUUID())
+      if (!accepted) setError(copy.stopUnavailable)
+      await read(progress.workflowId)
+    } catch (error) { setError(message(error)) }
+  }
   const inspectButton = (workflowId: string, programRevision: string, nodeId: string, frameId?: string) => frameId && <button type="button" className="workflow-frame-open"
     data-workflow-frame-open={frameId} aria-label={frameCopy.openNode(nodeId)} onClick={() => {
       previewEpoch.current++
       setInspecting({ workflowId, frameId, programRevision })
     }}>{frameCopy.open}</button>
   return <>
+    {workspace && <WorkflowWorkspace {...workspace} scopeChanged={cwd !== workspace.cwd} agents={agents} progresses={progresses.filter(progress => progress.workspace === workspace.cwd)} loading={loadingHistory}
+      hasMore={Boolean(nextCursor)} error={error} unresolvedPlanning={unresolvedPlanning} onMore={() => loadHistory(nextCursor)} onRead={read} onStop={stopWorkflow}
+      onClose={() => setWorkspace(null)} onNew={onNew ? () => { setWorkspace(null); onNew() } : undefined}
+      onReview={preview => { setWorkspace(null); setRestored(launchPreview(preview)) }}
+      onRevise={id => { setWorkspace(null); setRevising(id) }}
+      onExtract={preview => { setWorkspace(null); setWorkbench({ id: crypto.randomUUID(), cwd: preview.workspace, preview }) }}
+      onPrepared={preview => { setWorkspace(null); onDismiss(); setRestored(launchPreview(preview)) }} />}
     {executionId && <WorkflowExecutionInspector key={executionId} workflowId={executionId} onClose={() => setExecutionId(undefined)} />}
     {inspecting && <WorkflowFrameInspector key={inspecting.workflowId + ':' + inspecting.frameId} {...inspecting} onClose={() => setInspecting(null)} />}
     {cwd && <div className="workflow-entry-actions">
-      <button className="workflow-entry" type="button" onClick={() => setWorkbench({ id: crypto.randomUUID(), cwd })}>{templateCopy.title}</button>
-      {onNew && <button className="workflow-entry" type="button" onClick={onNew} title={copy.commandHint}>{copy.title}</button>}
+      <button className="workflow-entry" type="button" onClick={() => setWorkspace({ cwd, initialTab: 'templates' })}>{templateCopy.title}</button>
+      <button className="workflow-entry" type="button" data-workflow-workspace-open onClick={() => setWorkspace({ cwd })}>{copy.title}</button>
+      {onNew && <button className="workflow-entry" type="button" onClick={onNew} title={copy.commandHint}>{workspaceCopy.newWorkflow}</button>}
     </div>}
     {revising && <WorkflowRevisionEditor key={revising} workflowId={revising} onClose={() => setRevising(null)} onStarted={observe} />}
     {activeRequest && !workbench && !revising && <WorkflowLaunchDialog key={activeRequest.id} request={activeRequest} agents={agents}
@@ -152,12 +170,7 @@ export function WorkflowProgressPanel({ request, agents, cwd, onDismiss, onNew }
         {progress.error && <p role="alert">{progress.error}</p>}
         {progress.finalReportStatus === 'available' && <><h4>{copy.observedResult}</h4><pre>{progress.finalReport}</pre></>}
         {progress.finalReportStatus === 'unavailable' && <p>{copy.finalReportUnavailable}</p>}
-        {['queued', 'running', 'unknown'].includes(progress.state) && <button type="button" onClick={() => {
-          void window.scry.workflow.stop(progress.workflowId, crypto.randomUUID()).then(accepted => {
-            if (!accepted) setError(copy.stopUnavailable)
-            read(progress.workflowId)
-          }).catch(error => setError(message(error)))
-        }}>{progress.state === 'unknown' || progress.stopRequestedAt !== undefined ? copy.stopAgain : copy.stop}</button>}
+        {['queued', 'running', 'unknown'].includes(progress.state) && <button type="button" onClick={() => void stopWorkflow(progress)}>{progress.state === 'unknown' || progress.stopRequestedAt !== undefined ? copy.stopAgain : copy.stop}</button>}
       </details>)}
     </section>}
   </>

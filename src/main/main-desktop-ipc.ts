@@ -55,7 +55,9 @@ export function createMainDesktopRemoteState(userDataDir: () => string): MainDes
       decrypt: value => requireDesktopSecureStorage().decryptString(value)
     }),
     disposeRemote: async () => {
-      await Promise.all([remoteHostService?.dispose(), desktopRemoteClient?.dispose()])
+      const host = remoteHostService
+      remoteHostService = null
+      await Promise.all([host?.dispose(), desktopRemoteClient?.dispose()])
     }
   }
   return mutable

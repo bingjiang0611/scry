@@ -7,6 +7,7 @@ import { SCRY_WORKFLOW_COMMAND_ID } from '../shared/task-command'
 import { capabilityUnavailable, type CapabilityEnvelope, type ProviderCommand, type ProviderContext } from '../shared/provider'
 import { taskSubmissionCopy as copy } from '../shared/constants/copy'
 import { CommandReceipts } from './command-receipts'
+import { assertConversationForSend } from './conversation-send'
 import type { ConversationStore } from './conversation-store'
 import type { ConversationService, ConversationServiceDeps } from './conversation-service'
 import { assertPlainConversationInput, parseConversationSend, parseConversationTarget } from './conversation-request'
@@ -255,6 +256,9 @@ export function createDesktopTaskEntry(deps: {
       // Register before the first await: a slower metadata read must not let
       // a later replay replace the first request's fresh-context acknowledgement.
       const receipt = await receipts.submit(receiptKey, () => execute(request, prepared))
+      // A cached response is not current conversation authority. Recheck the
+      // durable deletion/archive fence without replaying the cached dispatch.
+      if (receipt.status === 'duplicate') assertConversationForSend(await deps.store().read(request.conversationId))
       return { ...receipt.result, disposition: receipt.status === 'duplicate' ? 'duplicate' : receipt.result.disposition }
     }
   }

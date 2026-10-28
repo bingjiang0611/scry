@@ -26,7 +26,7 @@ export function workflowInspectionFixture() {
   const inspectExecution: WorkflowApi['inspectExecution'] = async request => {
     queries.push(structuredClone(request))
     if (request.programRevision !== revision) return { state: 'unavailable', source: 'canonical_ledger', observedAt: 1, reason: 'source_changed' }
-    const matching = request.kind === 'systems' ? [] : records.filter(row => !request.nodeId || row.intent.state === 'available' && row.intent.value.nodeId === request.nodeId)
+    const matching = request.kind !== 'attempts' ? [] : records.filter(row => !request.nodeId || row.intent.state === 'available' && row.intent.value.nodeId === request.nodeId)
     const offset = request.offset ?? 0
     return { state: 'available', source: 'canonical_ledger', observedAt: 1, workflowId: 'inspection-ui', programRevision: revision, kind: request.kind, offset,
       total: matching.length, records: matching.slice(offset, offset + 32), ...(offset + 32 < matching.length ? { nextOffset: offset + 32 } : {}) }
