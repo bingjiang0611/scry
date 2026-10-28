@@ -3,7 +3,7 @@
 Two targets live here:
 
 - **ScryRemoteG0** (`com.scry.remote.g0`) — isolated native SwiftUI transport/Keychain verification app. **Not** the product; it cannot start Providers, write files or operate terminals.
-- **ScryRemote** (`com.scry.remote`) — the product SwiftUI app (`ScryRemote.xcodeproj`), implementing the selected **v5 · Codex Refined** direction: sign-in, live pairing, flat session catalog, transcript continuation, new task, project/Provider pickers, attachment composer and settings. iOS 17+.
+- **ScryRemote** (`com.scry.remote`) — the product SwiftUI app (`ScryRemote.xcodeproj`), implementing the selected **v5 · Codex Refined** direction: sign-in, live pairing, launch straight into a new session with the session list in a collapsed left drawer, transcript continuation, project/Provider pickers, attachment composer and settings. iOS 17+.
 
 The current desktop host implementation is under `src/main/remote/`; this README is the maintained product and verification guide. It does not claim public deployment or complete Provider acceptance.
 

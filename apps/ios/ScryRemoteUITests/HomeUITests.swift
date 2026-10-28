@@ -9,12 +9,17 @@ final class HomeUITests: XCTestCase {
     app = XCUIApplication()
   }
   private func launchHome(extra: [String] = []) {
-    app.launchArguments = ["-uiPreview", "-connected", "-uiMockData", "-route", "home"] + extra
+    // The list is a collapsed drawer now, so the home-entry fixtures open it.
+    // While it is open the page behind it is hidden from accessibility, so a
+    // fixture cannot also assert the composer here; collapse it first.
+    app.launchArguments = ["-uiPreview", "-connected", "-uiMockData", "-route", "home", "-drawerOpen"] + extra
     app.launch()
     XCTAssertTrue(app.textFields["home-search"].waitForExistence(timeout: 10))
-    XCTAssertTrue(app.descendants(matching: .any)["message-input"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.buttons["sidebar-close"].exists)
     XCTAssertFalse(app.buttons["打开会话列表"].exists)
   }
+  private func closeDrawer() { app.buttons["sidebar-close"].tap() }
+  private func openDrawer() { app.buttons["sidebar-toggle"].tap() }
   private func tab(_ name: String) { app.buttons["home-tab-\(name)"].tap() }
   private func row(_ title: String) -> XCUIElement {
     app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
@@ -26,8 +31,33 @@ final class HomeUITests: XCTestCase {
     add(attachment)
   }
 
+  // L1b: launch is a new session with a collapsed drawer; the drawer's
+  // new-session entry focuses the composer without discarding what was typed.
+  // While the drawer is up it is the only touchable surface.
+  func testLaunchShowsNewSessionWithCollapsedDrawerAndFocusesComposer() {
+    app.launchArguments = ["-uiPreview", "-connected", "-uiMockData", "-route", "home"]
+    app.launch()
+    let input = app.descendants(matching: .any)["message-input"].firstMatch
+    XCTAssertTrue(input.waitForExistence(timeout: 10))
+    XCTAssertFalse(app.keyboards.firstMatch.exists)
+    XCTAssertFalse(app.textFields["home-search"].exists)
+    input.tap(); input.typeText("keep this draft")
+    app.buttons["收起键盘"].tap()
+    openDrawer()
+    XCTAssertTrue(app.textFields["home-search"].waitForExistence(timeout: 5))
+    // The drawer is the only surface the user can touch; the page behind it is
+    // accessibility-hidden, so this must not be reachable while it is up.
+    XCTAssertFalse(input.isHittable)
+    app.buttons["drawer-new-session"].tap()
+    XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+    XCTAssertFalse(app.textFields["home-search"].exists)
+    XCTAssertTrue(input.isHittable)
+    XCTAssertEqual(input.value as? String, "keep this draft")
+    capture("launch-new-session-focused")
+  }
+
   func testUnpairedConnectActionIsVisibleWithoutScrollingPastTools() {
-    app.launchArguments = ["-uiPreview", "-route", "home"]
+    app.launchArguments = ["-uiPreview", "-route", "home", "-drawerOpen"]
     app.launch()
     let connect = app.buttons["连接 Mac"].firstMatch
     XCTAssertTrue(connect.waitForExistence(timeout: 10))
@@ -53,6 +83,8 @@ final class HomeUITests: XCTestCase {
     XCTAssertTrue(row("重构远程会话列表").exists)
     app.buttons["设置"].firstMatch.tap()
     app.buttons["返回"].firstMatch.tap()
+    // Settings returns to the new-session page with the drawer collapsed by design.
+    openDrawer()
     XCTAssertTrue(app.buttons["home-tab-projects"].isSelected)
   }
 
@@ -85,16 +117,22 @@ final class HomeUITests: XCTestCase {
     XCTAssertTrue(app.buttons["项目文件与 Diff"].waitForExistence(timeout: 5))
   }
 
-  func testNewTaskInProjectKeepsSelectedProjectAndClearsDraft() {
+  // L1b: the same-scope new-session entry keeps the composer context and the
+  // draft; only the project changes. (L1 cleared both, which lost user input.)
+  func testNewTaskInProjectKeepsSelectedProjectAndDraft() {
     launchHome()
     tab("projects")
+    // The composer sits on the new-session page, behind the collapsed drawer.
+    closeDrawer()
     let input = app.descendants(matching: .any)["message-input"].firstMatch
     input.tap(); input.typeText("temporary draft")
     app.buttons["收起键盘"].tap()
+    openDrawer()
+    tab("projects")
     let newTask = app.buttons["在 scry 中新建任务"]
     XCTAssertTrue(newTask.waitForExistence(timeout: 5))
     newTask.tap()
-    XCTAssertFalse((input.value as? String ?? "").contains("temporary draft"))
+    XCTAssertTrue((input.value as? String ?? "").contains("temporary draft"))
     XCTAssertTrue(app.buttons["scry"].exists)
   }
 
@@ -178,7 +216,7 @@ final class HomeUITests: XCTestCase {
   }
 
   func testOpeningSearchResultWithKeyboardVisibleStaysResponsive() {
-    app.launchArguments = ["-uiPreview", "-connected", "-uiMockData", "-route", "home"]
+    app.launchArguments = ["-uiPreview", "-connected", "-uiMockData", "-route", "home", "-drawerOpen"]
     app.launch()
     XCTAssertTrue(app.buttons["home-tab-projects"].waitForExistence(timeout: 10))
     tab("projects")

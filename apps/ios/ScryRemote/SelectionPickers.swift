@@ -173,3 +173,8 @@ struct ProviderPickerSheet: View {
     }
   }
 }
+
+extension G0Transport.RunProviderRef {
+  // Multiple profiles share a provider ID; SwiftUI row identity must not.
+  var selectionId: String { id + "\u{1f}" + (agentProfileId ?? "") }
+}

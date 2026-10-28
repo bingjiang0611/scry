@@ -5,7 +5,7 @@ import re
 import subprocess
 import tempfile
 
-view = Path(__file__).resolve().parents[1] / 'ScryRemote/NewSessionView.swift'
+view = Path(__file__).resolve().parents[1] / 'ScryRemote/NewSessionComposer.swift'
 source = view.read_text()
 match = re.search(
     r'\.task\(id: (.+?)\) \{ if paired \{ run\.loadProjects\(\); run\.loadProviders\(\) \} \}',
