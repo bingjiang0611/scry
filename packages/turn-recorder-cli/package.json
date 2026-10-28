@@ -1,6 +1,6 @@
 {
   "name": "@ali/scry-turn-recorder",
-  "version": "0.2.49",
+  "version": "0.2.52",
   "description": "Provider-neutral local top-level turn recorder for AI coding agents",
   "type": "module",
   "bin": {
@@ -9,7 +9,8 @@
   "files": [
     "dist",
     "integrations",
-    "README.md"
+    "README.md",
+    "docs"
   ],
   "engines": {
     "node": ">=20"
