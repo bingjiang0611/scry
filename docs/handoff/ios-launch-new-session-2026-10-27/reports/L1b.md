@@ -56,7 +56,7 @@
 
 ## 3. 真机走查（iPhone 13 / iOS 26.5.2，iCTRL）
 
-构建：`-sdk iphoneos`，`DEVELOPMENT_TEAM=7USHN8Q8JL`，`PRODUCT_BUNDLE_IDENTIFIER=com.scry.remote.local`（与用户已装的 `com.scry.remote` 分开，避免覆盖），启动参数 `-uiPreview -connected -uiMockData -route home`，只出现 mock 数据。
+构建：`-sdk iphoneos`，`DEVELOPMENT_TEAM=<个人团队 ID>`，`PRODUCT_BUNDLE_IDENTIFIER=com.scry.remote.local`（与用户已装的 `com.scry.remote` 分开，避免覆盖），启动参数 `-uiPreview -connected -uiMockData -route home`，只出现 mock 数据。
 
 | 步骤 | 结果 | 证据 |
 |---|---|---|
@@ -96,3 +96,12 @@
 - `page` 的 `.accessibilityHidden(drawerOpen)` 无自动化断言：真机 UI 测试受免费名额限制，iCTRL 快照不反映该标记。若将来跑 UI 测试发现 XCUITest 仍能看到 `message-input`，需要换成 `.accessibilityAddTraits(.isModal)` 一类机制，这一点写在这里备查。
 - 多主机分支（不同 scope 的 `beginNewTask(scope:)` 路径）未在真机验证：mock 只有一个主机。该路径与 L1 相同，唯一差别是不再清草稿。
 - 真机走查期间的设备改动：`com.scry.remote.local`（本分支 Debug）已安装；iCTRL Runner 因免费描述文件到期重新签名并覆盖安装（新描述文件到 2026-11-04，资源与 entitlements 校验未变）；期间打开过的「减少动态效果」和「旁白」都已复原关闭。
+
+## 核验意见（2026-10-28，核验方）
+
+结论：**已核验**。
+
+- 四项修改都按 L1b 做了，代码看过：`RootView.run` 恢复原样，新建会话页自己用 `targets.newTaskStore`；同一 scope 下只 `detachFocusedRun()`，不重置、不清草稿；`page` 对 VoiceOver 隐藏；列表里重复的新建行已删。
+- 1.5 节空白区右滑打不开抽屉，是走查发现的真问题，`contentShape` 的修法是最小改动，接受。
+- 第 7、8 步记成部分验证、UI 测试没跑起来，这些都如实写了，放进 FINAL.md 的已知问题。
+- 报告里的个人开发团队 ID 已改成占位（核验方改的）。
