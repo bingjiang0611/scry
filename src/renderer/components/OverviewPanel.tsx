@@ -5,7 +5,7 @@ import type { TraceEvent, DbStats, WorkspaceDiffResult } from '@shared/trace'
 import type { RuntimeProvider } from '@shared/runtime'
 import { fmtTok } from '../format'
 import type { Turn } from '../format'
-import { OVERVIEW_COST_COPY, OVERVIEW_SESSION_COPY } from '../constants/copy'
+import { OVERVIEW_CACHE_COPY, OVERVIEW_COST_COPY, OVERVIEW_SESSION_COPY } from '../constants/copy'
 import { Icon } from './primitives/Icon'
 import { OverviewSessionPanel } from './OverviewSessionPanel'
 import { OverviewTurnCalls } from './OverviewTurnCalls'
@@ -120,6 +120,7 @@ function OverviewPanelBody({
     results,
     cost,
     cacheHit,
+    cacheHitCumulative,
     isQoder,
     qoderCredits,
     qoderCreditKnown,
@@ -200,10 +201,10 @@ function OverviewPanelBody({
             <div
               className={`overview-metric ${cacheHit.rate == null ? 'unsupported' : ''}`}
               title={cacheHit.rate == null
-                ? '没有完整的输入与缓存 Token 证据，无法计算命中率'
-                : `缓存读取 Token ÷ 可缓存输入 Token；${cacheHit.knownResults}/${results.length} 轮可计算`}
+                ? OVERVIEW_CACHE_COPY.unavailable
+                : OVERVIEW_CACHE_COPY.coverage(cacheHit.knownResults, turns.length, cacheHitCumulative)}
             >
-              <span>缓存命中率{cacheHit.missingResults > 0 ? ' · 部分' : ''}</span>
+              <span>{OVERVIEW_CACHE_COPY.label(cacheHitCumulative, cacheHit.missingResults > 0)}</span>
               <strong>{cacheHit.rate == null ? '—' : `${cacheHit.rate.toFixed(1)}%`}</strong>
             </div>
             <div

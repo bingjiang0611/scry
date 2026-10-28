@@ -158,6 +158,13 @@ export const WORKSPACE_EDITOR_COPY = {
   save: '保存 ⌘S'
 } as const
 
+export const OVERVIEW_CACHE_COPY = {
+  label: (cumulative: boolean, partial: boolean) => `缓存命中率${cumulative ? ' · 累计' : ''}${partial ? ' · 部分' : ''}`,
+  unavailable: '没有完整的输入与缓存 Token 证据，无法计算命中率',
+  coverage: (known: number, total: number, cumulative: boolean) =>
+    `缓存读取 Token ÷ 可缓存输入 Token；${known}/${total} 轮可计算${cumulative ? '；包含未结束轮次已上报请求的累计值，非最终值' : ''}`
+} as const
+
 export const OVERVIEW_COST_COPY = {
   label: '成本',
   unavailable: '当前 Provider 未上报成本',

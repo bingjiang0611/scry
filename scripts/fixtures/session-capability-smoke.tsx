@@ -60,6 +60,12 @@ const contextSample: TraceEvent = {
   modelUsage: [{ model: 'ultimate', upstreamProvider: 'qoder', contextWindow: 272000 }]
 }
 
+const usageSample: TraceEvent = {
+  id: 'usage-1', runId: 'context-live', ts: contextSample.ts, kind: 'harness', stage: 'usage_snapshot',
+  tokensIn: 100, cacheReadTokens: 100, cacheCreationTokens: 0
+}
+const usageFixtureCopy = { finish: '接收最终用量与 Credit' }
+
 function Fixture() {
   const [turns, setTurns] = useState<Turn[]>([qoderSkillSessionFixture()])
   const [selection, setSelection] = useState('none')
@@ -84,10 +90,11 @@ function Fixture() {
       ]
     }])}>Hook 明细</button>
     <button id="context-start" onClick={() => setTurns([{
-      runId: 'context-live', userText: 'context probe', done: false, items: [contextSample]
+      runId: 'context-live', userText: 'context probe', done: false, items: [contextSample, usageSample]
     }])}>开始上下文采样</button>
     <button id="context-update" onClick={() => setTurns((current) => current.map((turn) => ({
-      ...turn, items: [...turn.items, { ...contextSample, id: 'context-2', contextTokens: 201600 }]
+      ...turn, items: [...turn.items, { ...contextSample, id: 'context-2', contextTokens: 201600 },
+        { ...usageSample, id: 'usage-2', cacheReadTokens: 300 }]
     })))}>收到下一请求用量</button>
     <button id="context-compact" onClick={() => setTurns((current) => current.map((turn) => ({
       ...turn, items: [...turn.items, {
@@ -98,6 +105,15 @@ function Fixture() {
     <button id="context-after" onClick={() => setTurns((current) => current.map((turn) => ({
       ...turn, items: [...turn.items, { ...contextSample, id: 'context-3', contextTokens: 20000 }]
     })))}>收到压缩后用量</button>
+    <button id="usage-finish" onClick={() => setTurns((current) => current.map((turn) => ({
+      ...turn, done: true, items: [...turn.items,
+        { ...usageSample, id: 'usage-final', stage: 'result', tokensIn: 200, cacheReadTokens: 300, upstreamProvider: 'qoder' },
+        { id: 'credit-final', runId: turn.runId, ts: usageSample.ts, kind: 'harness', stage: 'credit_usage',
+          creditUsage: { status: 'partial', quality: 'exact', source: ['pi_qoder_credit_observation'],
+            value: { provider: 'qoder', unit: 'credits', scope: 'main', amount: 2.5, knownRequests: 1, missingRequests: 0 },
+            omissionReason: 'Only observed main-session requests are covered.' } }
+      ]
+    })))}>{usageFixtureCopy.finish}</button>
     <button id="empty" onClick={() => setTurns([])}>新会话</button>
     <button id="pending" onClick={() => setTurns([qoderSkillSessionFixture('pending-run', 'pending')])}>读取中</button>
     <button id="success" onClick={() => setTurns([qoderSkillSessionFixture('pending-run', 'success')])}>收到成功结果</button>

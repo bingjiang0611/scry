@@ -1,10 +1,12 @@
 import { lstat, realpath as realpathAsync } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import type { ProviderRunRequest, ProviderRunResult } from './types'
 import type { PiAgentProfile } from '../pi-agent-profiles'
 import type { TraceEvent } from '../../shared/trace'
 import { type AgentSteerResult } from '../../shared/runtime'
 import { billingProviderForUpstream } from '../../shared/billing'
 import { AgentRuntimeError } from '../run-outcome'
+import { readPiCreditUsage } from '../pi-credit-projection'
 import { shellEnv, shellEnvError } from '../claude-locate'
 import { HistoricalInput } from './historical-input'
 import { PiBackgroundWork } from './pi-background-work'
@@ -81,6 +83,7 @@ export async function runPiAgent(
     reasoning: 0,
     cost: 0,
     allCostKnown: true,
+    allCacheUsageKnown: true,
     byModel: new Map()
   }
   const modelContextWindows = new Map<string, number>()
@@ -251,7 +254,8 @@ export async function runPiAgent(
     request.emit(piEvent(request.runId, {
       kind: 'harness', stage: 'result',
       tokensIn: usage.input, tokensOut: usage.output,
-      cacheReadTokens: usage.cacheRead, cacheCreationTokens: usage.cacheWrite,
+      cacheReadTokens: usage.allCacheUsageKnown ? usage.cacheRead : undefined,
+      cacheCreationTokens: usage.allCacheUsageKnown ? usage.cacheWrite : undefined,
       reasoningTokens: usage.reasoning,
       contextTokens: usage.lastContextTokens, contextModel: usage.lastContextModel,
       contextProvider: usage.lastContextProvider,
@@ -327,6 +331,20 @@ export async function runPiAgent(
         : '检查该轮 Pi Provider 结果、launcher 与 stderr 后重试'
     })
   } finally {
+    // Finish the observed Credit snapshot before main persists this run, including stop/failure.
+    // No per-message full transcript reads and no additional RPC entry snapshots.
+    if (state.persistedSessionId && state.providerTurnId && [...usage.byModel.values()].some((row) => row.upstreamProvider === 'qoder')) {
+      const credits = await readPiCreditUsage({
+        cwd: request.cwd || homedir(), sessionId: state.persistedSessionId, sessionFile: state.sessionFile,
+        turns: [{ runId: request.runId, providerTurnId: state.providerTurnId }]
+      })
+      const creditUsage = credits.get(request.runId)
+      // Do not create a billing row when no native request was observed. The
+      // existing missing-evidence state stays unavailable, never a zero charge.
+      if (creditUsage?.value?.amount != null || (creditUsage?.value?.missingRequests ?? 0) > 0) {
+        request.emit(piEvent(request.runId, { kind: 'harness', stage: 'credit_usage', creditUsage }))
+      }
+    }
     diagnose('rpc_cleanup')
     offDiagnostic()
     off()

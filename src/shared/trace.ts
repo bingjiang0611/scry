@@ -173,6 +173,7 @@ export interface TraceEvent {
   costSource?: CostSource
   costConfidence?: CostConfidence
   costUnit?: CostUnit
+  // usage_snapshot is run-cumulative live evidence: replace snapshots, never add them to result usage.
   tokensIn?: number // result：从 modelUsage 聚合（顶层 usage 会少算，见 probe）
   tokensOut?: number
   cacheReadTokens?: number

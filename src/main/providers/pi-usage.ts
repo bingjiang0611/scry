@@ -10,6 +10,7 @@ interface UsageAggregate {
   reasoning: number
   cost: number
   allCostKnown: boolean
+  allCacheUsageKnown: boolean
   byModel: Map<string, ModelUsageRow>
   lastContextTokens?: number
   lastContextModel?: string
@@ -67,6 +68,7 @@ function addAssistantUsage(
   aggregate.output += output ?? 0
   aggregate.cacheRead += cacheRead ?? 0
   aggregate.cacheWrite += cacheWrite ?? 0
+  aggregate.allCacheUsageKnown &&= input != null && cacheRead != null && cacheWrite != null
   aggregate.reasoning += reasoning ?? 0
   const contextEvidence = (input ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0)
   // Pi normalizes input/cacheRead/cacheWrite into disjoint counts, including for OpenAI/Codex.

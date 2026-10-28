@@ -97,16 +97,58 @@ export async function exerciseNativeHistory(smokeContext) {
       providerId: 'pi', runtimeProvider: 'pi_rpc', cwd: canonicalWorkspace, sessionId: nativeSessionId,
       turns: [{ runId: 'scry-continuation', providerTurnId: 'continued-user-39', userText: 'continued prompt 39',
         done: true, status: 'completed', ts: Date.now(), items: [{ id: 'canonical', runId: 'scry-continuation',
-          kind: 'model', stage: 'text', text: 'continued reply 39', ts: '2026-10-13T05:00:01Z' }] }]
+          kind: 'model', stage: 'text', text: 'continued reply 39', ts: '2026-10-13T05:00:01Z' },
+        { id: 'canonical-result', runId: 'scry-continuation', kind: 'harness', stage: 'result', upstreamProvider: 'qoder',
+          tokensIn: 100, cacheReadTokens: 300, cacheCreationTokens: 0, ts: '2026-10-13T05:00:01Z' }] }]
     }))
     const reopened = await evaluate(`window.scry.loadSession(${JSON.stringify(context)}, { limit: 3 })`)
     assert.equal(reopened.totalTurns, 41)
     assert.equal(reopened.turns.length, 3)
     assert.equal(reopened.turns.at(-1).runId, 'scry-continuation')
+    const creditOf = turn => turn.items.filter(item => item.stage === 'credit_usage').at(-1)?.creditUsage
+    // Keep the existing >64 MiB workload intact: metering is explicitly unavailable beyond its budget.
+    assert.equal(creditOf(reopened.turns.at(-1)).status, 'unavailable')
+    assert.match(creditOf(reopened.turns.at(-1)).omissionReason, /byte budget/)
     assert.ok(!reopened.turns.some(turn => turn.errorHint?.includes('Pi 原生历史未能核对')))
     const oldest = await evaluate(`window.scry.loadSessionOlder(${JSON.stringify(context)}, { before: 1, limit: 1 })`)
     assert.equal(oldest.turns.length, 1)
     assert.equal(oldest.turns[0].userText, '手机发起的真实格式消息')
+    // Separate small session: never shrink the existing >64 MiB history workload for metering.
+    const creditSessionId = '11111111-1111-4111-8111-111111111111'
+    const creditContext = { ...context, externalSessionId: creditSessionId }
+    const creditNativePath = nativePath.replace(`2026-10-13_${nativeSessionId}`, `2026-10-13_${creditSessionId}`)
+    writeFileSync(creditNativePath, [
+      { type: 'session', version: 3, id: creditSessionId, cwd: canonicalWorkspace },
+      { type: 'message', id: 'credit-user', parentId: null, message: { role: 'user', content: 'credit history' } },
+      { type: 'custom', id: 'credit-observation', parentId: 'credit-user', customType: 'qoder-credit-observation-v1',
+        data: { version: 1, sessionId: creditSessionId, modelId: 'dfmodel', requestId: 'request-1', status: 'reported',
+          outcome: 'complete', billable: true, credits: 2.5 } },
+      { type: 'message', id: 'credit-reply', parentId: 'credit-observation', message: { role: 'assistant', provider: 'qoder', content: [{ type: 'text', text: 'credit reply' }] } }
+    ].map(entry => JSON.stringify(entry)).join('\n') + '\n')
+    const creditArchiveDir = join(userDataDir, 'trace-archive-turns-v1', 'pi', `cwd-${hash(canonicalWorkspace)}`, `sid-${hash(creditSessionId)}`)
+    mkdirSync(creditArchiveDir, { recursive: true })
+    writeFileSync(join(creditArchiveDir, `turn-${hash('provider\0credit-user')}.json`), JSON.stringify({
+      version: 3, providerId: 'pi', runtimeProvider: 'pi_rpc', cwd: canonicalWorkspace, sessionId: creditSessionId,
+      turns: [{ runId: 'credit-run', providerTurnId: 'credit-user', userText: 'credit history', done: true, status: 'completed', ts: Date.now(),
+        items: [{ id: 'credit-result', runId: 'credit-run', kind: 'harness', stage: 'result', upstreamProvider: 'qoder', ts: new Date().toISOString() }] }]
+    }))
+    const creditCatalog = JSON.parse(readFileSync(join(userDataDir, 'app-sessions.json'), 'utf8'))
+    creditCatalog.push({ sessionId: creditSessionId, externalSessionId: creditSessionId, runId: 'credit-run', providerId: 'pi',
+      agentProfileId: 'pi:rotom', runtimeProvider: 'pi_rpc', cwd: canonicalWorkspace, preview: 'credit history', ts: Date.now() })
+    writeFileSync(join(userDataDir, 'app-sessions.json'), JSON.stringify(creditCatalog))
+    const creditHistory = await evaluate(`window.scry.loadSession(${JSON.stringify(creditContext)}, { limit: 1 })`)
+    assert.equal(creditOf(creditHistory.turns[0]).value.amount, 2.5, JSON.stringify(creditOf(creditHistory.turns[0])))
+    assert.deepEqual(creditOf(creditHistory.turns[0]).source, ['pi_qoder_credit_observation'])
+    const creditOlder = await evaluate(`window.scry.loadSessionOlder(${JSON.stringify(creditContext)}, { before: 1, limit: 1 })`)
+    assert.equal(creditOf(creditOlder.turns[0]).value.amount, 2.5)
+    assert.equal(creditOlder.turns[0].items.filter(item => item.stage === 'credit_usage').length, 1)
+    const creditTurnPath = join(creditArchiveDir, `turn-${hash('provider\0credit-user')}.json`)
+    const creditArchive = JSON.parse(readFileSync(creditTurnPath, 'utf8'))
+    creditArchive.turns[0].items.push(creditHistory.turns[0].items.find(item => item.stage === 'credit_usage'))
+    writeFileSync(creditTurnPath, JSON.stringify(creditArchive))
+    const terminalCredit = await evaluate(`window.scry.turnTerminalEvidence(${JSON.stringify(creditContext)}, 'credit-run')`)
+    assert.deepEqual(terminalCredit.map(item => item.stage), ['result', 'credit_usage'])
+    assert.equal(terminalCredit.at(-1).creditUsage.value.amount, 2.5)
     const archivePath = join(archiveDir, `sid-${hash(nativeSessionId)}.json`)
     const mixedArchive = JSON.parse(readFileSync(archivePath, 'utf8'))
     const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a46kAAAAASUVORK5CYII='

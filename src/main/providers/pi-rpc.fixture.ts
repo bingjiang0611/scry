@@ -58,7 +58,8 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
       cwd: process.cwd(), sessionId: 'fixture-session', sessionFile,
       isStreaming: false, isCompacting: false, pendingMessageCount: 0
     },
-    get_entries: { entries, leafId: entries.at(-1)?.id ?? null },
+    get_entries: { entries: command.since ? entries.slice(entries.findIndex(entry => entry.id === command.since) + 1) : entries,
+      leafId: entries.at(-1)?.id ?? null },
     get_available_models: { models: [] },
     get_available_thinking_levels: { levels: ['off'] },
     get_commands: { commands: [{ name: 'fixture-menu', source: 'extension' }] }
@@ -69,9 +70,32 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
       message: { role: 'user', content: command.message }
     })
     fs.writeFileSync(sessionFile, [
-      { type: 'session', id: 'fixture-session' }, ...entries
+      { type: 'session', version: 3, id: 'fixture-session', cwd: process.cwd() }, ...entries
     ].map((entry) => JSON.stringify(entry)).join('\\n') + '\\n')
     send({ type: 'agent_start' })
+    if (command.message.startsWith('usage:')) {
+      const scenario = command.message.slice('usage:'.length)
+      for (let index = 0; index < 2; index++) {
+        if (scenario !== 'missing-credit') entries.push({ type: 'custom', id: 'credit-' + entries.length, parentId: entries.at(-1).id,
+          customType: 'qoder-credit-observation-v1', data: { version: 1, sessionId: 'fixture-session', requestId: 'request-' + entries.length,
+            modelId: 'dfmodel', status: 'reported', outcome: 'complete', credits: 2.5, billable: true } })
+        const message = { role: 'assistant', provider: 'qoder', model: 'dfmodel', content: [],
+          stopReason: scenario === 'failed' ? 'error' : 'stop', ...(scenario === 'failed' ? { errorMessage: 'fixture failure' } : {}),
+          usage: { input: index === 0 ? 100 : 0, output: 4,
+            ...(scenario === 'missing-cache' && index === 1 ? {} : { cacheRead: index === 0 ? 100 : 200, cacheWrite: 0 }) } }
+        entries.push({ type: 'message', id: 'assistant-' + entries.length, parentId: entries.at(-1).id, message })
+        send({ type: 'message_start', message: { role: 'assistant' } })
+        send({ type: 'message_end', message })
+      }
+      fs.writeFileSync(sessionFile, [{ type: 'session', version: 3, id: 'fixture-session', cwd: process.cwd() }, ...entries]
+        .map(entry => JSON.stringify(entry)).join('\\n') + '\\n')
+      send({ type: 'response', id: command.id, command: command.type, success: true })
+      if (scenario !== 'stop') {
+        send({ type: 'agent_end', willRetry: false })
+        send({ type: 'agent_settled' })
+      }
+      return
+    }
     if (command.message === 'stop-after-persist') {
       send({ type: 'extension_ui_request', id: 'persisted', method: 'setStatus', statusKey: 'persisted', text: 'Persisted' })
       return

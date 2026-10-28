@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { TraceEvent } from '@shared/trace'
 import type { Turn } from '../format'
+import { needsTerminalEvidence } from './useAgentSession-helpers'
+import { creditUsageEvidence } from '@shared/credit-usage'
 import { appendMissingTraceItems, hasTerminalResult, replayRunLifecycleDeltas, terminalEvidenceOf } from './useAgentSession'
 
 const ev = (id: string, runId = 'r1'): TraceEvent => ({
@@ -33,6 +35,20 @@ describe('terminal evidence backfill', () => {
     expect(hasTerminalResult(patched[0])).toBe(true)
     // 已有 result 时不再改动，避免覆盖 live 证据
     expect(appendMissingTraceItems(patched, 'r1', [resultEvent('result-1')])).toBe(patched)
+  })
+
+  it('已有 result 但漏收 Credit 时仍补齐，累计缓存快照不作为终态', () => {
+    const turn: Turn = { runId: 'r1', userText: 'prompt', done: true,
+      items: [{ ...resultEvent('result'), upstreamProvider: 'qoder' }] }
+    expect(hasTerminalResult(turn)).toBe(true)
+    expect(needsTerminalEvidence(turn)).toBe(true)
+    const credit: TraceEvent = { ...resultEvent('credit'), stage: 'credit_usage',
+      creditUsage: creditUsageEvidence([{ id: 'request', runId: 'r1', credits: 2.5 }], 'pi_qoder_credit_observation') }
+    const terminal = terminalEvidenceOf([credit, { ...resultEvent('live'), stage: 'usage_snapshot' }])
+    expect(terminal).toEqual([credit])
+    const patched = appendMissingTraceItems([turn], 'r1', terminal)
+    expect(needsTerminalEvidence(patched[0])).toBe(false)
+    expect(appendMissingTraceItems(patched, 'r1', terminal)).toBe(patched)
   })
 
   it('只认终态 result/session_diff，不把中间事件当作用量证据', () => {

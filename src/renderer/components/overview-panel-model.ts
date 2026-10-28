@@ -50,7 +50,23 @@ export function useOverviewPanelModel({
     }
   }
   const cost = sumObserved((e) => e.costUsd)
-  const cacheHit = useMemo(() => cacheHitEvidence(results), [results])
+  const { cacheHit, cacheHitCumulative } = useMemo(() => {
+    let cumulative = false
+    const samples = turns.flatMap((turn) => {
+      // Even an unavailable terminal result supersedes a live snapshot.
+      const result = resultOf(turn)
+      if (result) return [result]
+      const snapshot = [...turn.items].reverse().find((event) => event.stage === 'usage_snapshot' && !event.agentId)
+      if (!snapshot) return []
+      cumulative = true
+      return [snapshot]
+    })
+    const evidence = cacheHitEvidence(samples)
+    return {
+      cacheHit: { ...evidence, missingResults: turns.length - evidence.knownResults },
+      cacheHitCumulative: cumulative
+    }
+  }, [turns])
   const isQoder = runtimeProvider === 'qoder_cli' || all.some((event) =>
     event.providerId === 'qoder' ||
     event.runtimeProvider === 'qoder_cli' ||
@@ -250,6 +266,7 @@ export function useOverviewPanelModel({
     results,
     cost,
     cacheHit,
+    cacheHitCumulative,
     isQoder,
     qoderCredits,
     qoderCreditKnown,

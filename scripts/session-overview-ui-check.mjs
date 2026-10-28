@@ -99,6 +99,20 @@ export async function exerciseOverviewDensity(contents, screenshotPath) {
       if (Date.now() > countDeadline) throw new Error('Confirmed compaction did not update the numeric count')
       await contents.executeJavaScript('new Promise(resolve => requestAnimationFrame(resolve))')
     }
+    const waitForMetric = async (expected) => {
+      const deadline = Date.now() + 5000
+      while (!await contents.executeJavaScript(`Array.from(document.querySelectorAll('.overview-metric')).some(node => node.textContent === ${JSON.stringify(expected)})`)) {
+        if (Date.now() > deadline) throw new Error('Overview usage metric missing: ' + expected)
+        await contents.executeJavaScript('new Promise(resolve => requestAnimationFrame(resolve))')
+      }
+    }
+    await waitForMetric('缓存命中率 · 累计50.0%')
+    await contents.executeJavaScript(`document.querySelector('#context-update').click(); true`)
+    await waitForMetric('缓存命中率 · 累计75.0%')
+    await contents.executeJavaScript(`document.querySelector('#usage-finish').click(); true`)
+    await waitForMetric('缓存命中率60.0%')
+    await waitForMetric('Credit≥2.5')
+    results.push({ liveCache: ['50.0%', '75.0%'], finalCache: '60.0%', credits: '≥2.5' })
     return results
   } finally { await contents.removeInsertedCSS(css) }
 }

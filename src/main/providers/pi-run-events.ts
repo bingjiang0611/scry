@@ -154,6 +154,13 @@ export function attachPiEventHandlers(ctx: PiEventHandlerContext): () => void {
           }]
         }))
       }
+      // Run-cumulative snapshots replace each other; only the terminal result is billable usage.
+      ctx.request.emit(piEvent(ctx.request.runId, {
+        kind: 'harness', stage: 'usage_snapshot', messageId,
+        tokensIn: ctx.usage.input,
+        cacheReadTokens: ctx.usage.allCacheUsageKnown ? ctx.usage.cacheRead : undefined,
+        cacheCreationTokens: ctx.usage.allCacheUsageKnown ? ctx.usage.cacheWrite : undefined
+      }))
       ctx.assistantToolCallIds = new Set(
         (Array.isArray(message.content) ? message.content.map(record) : [])
           .filter((block) => block.type === 'toolCall' && typeof block.id === 'string')

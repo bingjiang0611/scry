@@ -105,10 +105,14 @@ export const replayRunLifecycleDeltas = (prev: Turn[], deltas: RunLifecycleDelta
 
 /** 总览的用量/成本只认终态 result；它缺失时补进归档里的终态证据，按 id 去重，不覆盖 live 证据。 */
 export const terminalEvidenceOf = (items: readonly TraceEvent[]): TraceEvent[] =>
-  items.filter((item) => item.kind === 'harness' && (item.stage === 'result' || item.stage === 'session_diff'))
+  items.filter((item) => item.kind === 'harness' && (item.stage === 'result' || item.stage === 'session_diff' || item.stage === 'credit_usage'))
 
 export const hasTerminalResult = (turn: Turn): boolean =>
   turn.items.some((item) => item.kind === 'harness' && item.stage === 'result')
+
+export const needsTerminalEvidence = (turn: Turn): boolean =>
+  !hasTerminalResult(turn) || (turn.items.some((item) => item.upstreamProvider === 'qoder' || item.contextProvider === 'qoder' ||
+    item.modelUsage?.some((row) => row.upstreamProvider === 'qoder')) && !turn.items.some((item) => item.creditUsage))
 
 export const appendMissingTraceItems = (prev: Turn[], runId: string, events: readonly TraceEvent[]): Turn[] => {
   if (events.length === 0) return prev
