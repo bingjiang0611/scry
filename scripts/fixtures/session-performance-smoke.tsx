@@ -81,6 +81,7 @@ function Fixture() {
       <button id="jump-event" onClick={() => jump('tool-10')}>Jump to event</button>
       <button id="follow" onClick={() => { navigation.cancel(); followLatest.current = true; scrollChatToBottomIfNeeded(scrollRef.current, true) }}>Follow latest</button>
       <button id="clear-selection" onClick={() => { setSelectedId(null); navigation.cancel() }}>Clear selection</button>
+      <button id="short-history" onClick={() => { setHeavy(false); setHistoryLimit(4) }}>Short 4</button>
       <button id="short-heavy" onClick={() => setHeavy(true)}>Heavy 20</button>
       <button id="reset-history" onClick={() => { setHeavy(false); setHistoryLimit(40) }}>Reset history</button>
     </header>

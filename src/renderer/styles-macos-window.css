@@ -84,11 +84,9 @@
   }
 }
 
-/* Keep long histories in the accessibility/layout tree without eagerly painting every turn. */
-.transcript-turn {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 600px;
-}
+/* Do not add content-visibility to interactive transcript turns. Chromium 148 can
+   crash during mouse hit testing if a queued click reaches a newly locked subtree.
+   ChatTranscriptTurns already bounds long histories by mounting only nearby turns. */
 
 /* Chromium does not consistently throttle compositor animations in minimized Electron windows. */
 :root[data-page-visibility='hidden'] *,
