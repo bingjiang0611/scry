@@ -70,6 +70,7 @@ export const ANALYTICS_COPY = {
   noCostChart: '该时间范围没有可绘制的成本数据。',
   noTokenChart: '该时间范围没有可绘制的 Token 数据。',
   noDailyRecord: '当日无记录',
+  approximateCost: (value: string) => `≈${value}`,
   creditAmount: (value: number | null) => {
     if (value == null) return 'Credit 不可用'
     if (value > 0 && value < 0.01) return '<0.01 Credits'
