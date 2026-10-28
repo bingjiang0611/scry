@@ -24,6 +24,8 @@ import { normalizeAgentStartRequest, type AgentRunControlCatalog, type AgentStar
 
 export { workflowSystemSourceBody } from '../shared/workflow-source'
 
+export type WorkflowCapabilityRequirement = 'execution' | 'authoring'
+
 export interface WorkflowCapabilityInput {
   descriptor?: ProviderDescriptor
   runControls?: AgentRunControlCatalog
@@ -31,6 +33,7 @@ export interface WorkflowCapabilityInput {
   hasIndependentRun: boolean
   canObserveOutput: boolean
   canConfirmStop: boolean
+  requirement: WorkflowCapabilityRequirement
   structuredCandidateAuthoring?: WorkflowCapabilityState
   hostToolsDisabled?: WorkflowCapabilityState
   permissionQuestion?: WorkflowCapabilityState
@@ -160,18 +163,19 @@ export function capabilityForRole(binding: WorkflowRoleBinding, input: WorkflowC
   const hostToolsDisabled = input.hostToolsDisabled ?? 'unknown'
   const permissionQuestion = input.permissionQuestion ?? 'unknown'
   const businessQuestion = input.businessQuestion ?? 'unknown'
+  const requiresAuthoring = input.requirement === 'authoring'
   const states: WorkflowCapabilityState[] = [
     descriptorState,
     input.adapterRegistered && input.hasIndependentRun ? 'available' : 'unavailable',
     input.canObserveOutput ? 'available' : 'unavailable',
     input.canConfirmStop ? 'available' : 'unavailable',
-    ...(binding.role === 'orchestrator' ? [authoring, hostToolsDisabled] : [])
+    ...(binding.role === 'orchestrator' && requiresAuthoring ? [authoring, hostToolsDisabled] : [])
   ]
   const state = states.includes('unavailable') ? 'unavailable' : states.includes('unknown') ? 'unknown' : 'available'
   const reason = state === 'available' ? undefined : !input.adapterRegistered ? 'Provider 未注册 adapter' :
     !input.hasIndependentRun ? 'Provider 不支持独立新会话' : !input.canObserveOutput ? 'Provider 未提供终态与最终输出观测' :
-      !input.canConfirmStop ? 'Provider 未提供可确认的停止收敛' : binding.role === 'orchestrator' && authoring === 'unavailable' ? 'Provider 未声明结构化候选编排能力' :
-        binding.role === 'orchestrator' && hostToolsDisabled === 'unavailable' ? '编排候选未证明禁用宿主工具' : 'Provider 准入状态未知'
+      !input.canConfirmStop ? 'Provider 未提供可确认的停止收敛' : requiresAuthoring && binding.role === 'orchestrator' && authoring === 'unavailable' ? 'Provider 未声明结构化候选编排能力' :
+        requiresAuthoring && binding.role === 'orchestrator' && hostToolsDisabled === 'unavailable' ? '编排候选未证明禁用宿主工具' : 'Provider 准入状态未知'
   return {
     role: binding.role, providerId: binding.providerId, ...(binding.agentProfileId ? { agentProfileId: binding.agentProfileId } : {}),
     ...(binding.requestedModel ? { requestedModel: binding.requestedModel } : {}),

@@ -44,7 +44,7 @@ export function fixture(store: WorkflowStore = new MemoryWorkflowStore(), slots 
     return { result: value.result.promise, settled: value.settled.promise, stop: value.stop }
   })
   const service = new WorkflowService({ store, slots, providerRegistered: id => id === 'pi' || id === 'codex', plan, execute,
-    runControls: async binding => ({ descriptor: descriptor(binding.providerId), model: true, stop: true, identity: 'fixture', independentRun: true, terminalOutput: true }) })
+    runControls: async binding => ({ descriptor: descriptor(binding.providerId), model: true, stop: true, identity: 'fixture', independentRun: true, terminalOutput: true, structuredCandidateAuthoring: 'available' as const, hostToolsDisabled: 'available' as const }) })
   return { service, store, slots, plan, execute, executions, entered, starts,
     settleExecutionsForCleanup: (): void => {
       finishing = true

@@ -78,7 +78,7 @@ export function executeWorkflowClassifier(intent: WorkflowClassifierIntent, adap
   const settled = new Promise<void>(resolve => { close = resolve })
   const outcome = Promise.resolve().then(async () => {
     if (controller.signal.aborted) return { classifierId: intent.classifierId, state: 'unknown', settled: true, provenance: 'unavailable', reason: 'classifier stopped' } satisfies WorkflowClassifierOutcome
-    const raw = await adapter(intent)
+    const raw = await adapter(intent, controller.signal)
     return applyWorkflowClassifierThreshold(intent, validateWorkflowClassifierOutcome(intent, normalizeWorkflowClassifierOutcome(intent, raw)))
   }).catch(error => ({ classifierId: intent.classifierId, state: 'unknown', settled: false, provenance: 'unavailable', reason: String(error) } satisfies WorkflowClassifierOutcome)).finally(close)
   return { intent, outcome, settled, stop: () => { controller.abort(); return true }, setResultRef: async () => undefined }

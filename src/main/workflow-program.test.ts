@@ -96,6 +96,7 @@ describe('WorkflowProgram M0 contract', () => {
       hasIndependentRun: true,
       canObserveOutput: true,
       canConfirmStop: false,
+      requirement: 'execution',
       descriptor: { id: 'codex', label: 'Codex', runtimeProvider: 'codex_cli', transport: 'fixture', available: true,
         capabilities: { skills: 'none', mcp: 'none', commands: 'none', account: 'none' }, health: { state: 'ready', transport: 'fixture' } }
     })

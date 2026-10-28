@@ -11,7 +11,7 @@ import type { WorkflowOutputInspection, WorkflowOutputInspectionRequest } from '
 
 import type { WorkflowAttemptOutcome, WorkflowPlanPreview, WorkflowProgress, WorkflowRoleBinding, WorkflowProgram } from '../shared/workflow'
 import { workflowProgressSnapshot, workflowChildBlocks } from '../shared/workflow'
-import { workflowSystemSourceBody, validateWorkflowProgram, validateWorkflowRoleBinding, workflowRevision } from './workflow-program'
+import { workflowSystemSourceBody, validateWorkflowProgram, validateWorkflowRoleBinding, workflowRevision, type WorkflowCapabilityRequirement } from './workflow-program'
 import { WorkflowRunner, WorkflowSlots } from './workflow-runner'
 
 import type { WorkflowPlanningIntent, WorkflowStoreRecord } from './workflow-store'
@@ -56,7 +56,7 @@ export class WorkflowServiceFoundation {
     this.runner = new WorkflowRunner({ store: options.store, slots: this.options.slots, systems: options.systems,
       execute: request => options.execute({ workflowId: request.workflowId, taskId: request.taskId, attemptId: request.attemptId, role: request.role, prompt: request.prompt, workspace: request.cwd, replicaRun: request.replicaRun, onObservation: request.onObservation }),
       onLifecycle: () => this.notifyLifecycle(),
-      beforeDispatch: async (role, workspace) => { await this.capability(role, workspace, true) },
+      beforeDispatch: async (role, workspace) => { await this.capability(role, workspace, true, 'execution') },
       classifierAdapter: options.classifierAdapter,
       onProgress: progress => options.onProgress?.(this.progressSnapshot(progress)) })
     this.ready = this.initialize().catch(error => { this.initializationError = error })
@@ -100,8 +100,8 @@ export class WorkflowServiceFoundation {
     this.planningWrites.set(intent.workflowId, write)
     try { await write } finally { if (this.planningWrites.get(intent.workflowId) === write) this.planningWrites.delete(intent.workflowId) }
   }
-  protected capability(role: WorkflowRoleBinding, workspace: string, required = false) {
-    return resolveWorkflowCapability(this.options, role, workspace, required)
+  protected capability(role: WorkflowRoleBinding, workspace: string, required: boolean, requirement: WorkflowCapabilityRequirement) {
+    return resolveWorkflowCapability(this.options, role, workspace, required, requirement)
   }
   protected async initialize(): Promise<void> {
     const concurrency = await this.options.loadConcurrency?.()

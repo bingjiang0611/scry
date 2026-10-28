@@ -44,7 +44,7 @@ export async function runNativeRevision(root: string, mode: 'native-revision-cra
     plan: async () => ({ output: JSON.stringify({ body: initial }) }),
     runControls: async () => ({ descriptor: { id: 'claude', label: 'local CLI fixture', runtimeProvider: 'claude_sdk', transport: 'fixture', available: true,
       capabilities: { skills: 'none', mcp: 'none', commands: 'none', account: 'none' }, health: { state: 'ready', transport: 'fixture' } },
-      identity: 'fixture', model: true, stop: true, independentRun: true, terminalOutput: true }) })
+      identity: 'fixture', model: true, stop: true, independentRun: true, terminalOutput: true, structuredCandidateAuthoring: 'available', hostToolsDisabled: 'available' }) })
   registerCleanup(async () => (await service.prepareForShutdown()).state === 'ready')
   try {
     if (mode === 'native-revision-resume') {

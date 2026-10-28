@@ -51,7 +51,7 @@ export async function workflowTaskFixture(roots: string[]) {
     return cwd
   }, join(directory, 'template-locks'))
   const makeService = (store = workflows) => new WorkflowService({ store, templates, slots: new WorkflowSlots(2), plan, execute, providerRegistered: () => true,
-    runControls: async () => ({ descriptor, model: true, stop: true, identity: 'synthetic', independentRun: true, terminalOutput: true }) })
+    runControls: async () => ({ descriptor, model: true, stop: true, identity: 'synthetic', independentRun: true, terminalOutput: true, structuredCandidateAuthoring: 'available' as const, hostToolsDisabled: 'available' as const }) })
   const service = makeService()
   await service.snapshot('workflow-not-created')
   const controller = (ownerEpoch: string = intake.ownerEpoch, store = conversations, workflowStore = workflows, actualService = service) => createDesktopWorkflowTaskEntry({

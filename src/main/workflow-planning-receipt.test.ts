@@ -24,7 +24,7 @@ function fixture(store: WorkflowStore) {
   const execute = vi.fn<WorkflowServiceOptions['execute']>()
   const slots = new WorkflowSlots(2)
   const service = new WorkflowService({ store, slots, plan, execute, providerRegistered: () => true,
-    runControls: async () => ({ descriptor, model: true, stop: true, identity: 'fixture', independentRun: true, terminalOutput: true }) })
+    runControls: async () => ({ descriptor, model: true, stop: true, identity: 'fixture', independentRun: true, terminalOutput: true, structuredCandidateAuthoring: 'available' as const, hostToolsDisabled: 'available' as const }) })
   return { service, plan, execute, slots }
 }
 

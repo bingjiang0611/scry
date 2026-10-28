@@ -56,7 +56,7 @@ describe('workflow fresh-run admission (contract fixtures, no real Provider prob
   })
   it('does not admit an orchestrator when authoring evidence is unknown', () => {
     const result = capabilityForRole({ role: 'orchestrator', providerId: 'claude' }, {
-      descriptor: descriptor('claude'), adapterRegistered: true, hasIndependentRun: true, canObserveOutput: true, canConfirmStop: true
+      descriptor: descriptor('claude'), adapterRegistered: true, hasIndependentRun: true, canObserveOutput: true, canConfirmStop: true, requirement: 'authoring'
     })
     expect(result.structuredCandidateAuthoring).toBe('unknown')
     expect(result.hostToolsDisabled).toBe('unknown')

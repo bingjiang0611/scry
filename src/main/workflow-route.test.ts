@@ -23,7 +23,7 @@ function fixture(store: WorkflowStore = new MemoryWorkflowStore(), reply = JSON.
   const plan = vi.fn<(request: { route?: true; goal: string }) => Promise<{ output: string }>>(async () => ({ output: reply }))
   const service = new WorkflowService({ store, slots: new WorkflowSlots(2), providerRegistered: () => true,
     runControls: async input => ({ descriptor: descriptor(input.providerId), model: true, stop: true, identity: 'fixture-runtime',
-      independentRun: true, terminalOutput: true }), plan,
+      independentRun: true, terminalOutput: true, structuredCandidateAuthoring: 'available' as const, hostToolsDisabled: 'available' as const }), plan,
     execute: () => ({ result: Promise.resolve({ runId: 'fixture', status: 'completed' as const, settled: true }), stop: () => true }) } satisfies WorkflowServiceOptions)
   return { service, plan, store }
 }

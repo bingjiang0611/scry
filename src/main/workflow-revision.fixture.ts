@@ -53,7 +53,7 @@ export async function fixture(file = false, withHost = true, serial = false, pro
   }
   const makeService = (identity = 'fixture-runtime') => {
     const controller = new WorkflowService({ store, systems: host, slots: new WorkflowSlots(serial ? 1 : 2), providerRegistered: () => true,
-      runControls: async role => ({ descriptor: descriptor(role.providerId), identity, model: true, stop: true, independentRun: true, terminalOutput: true }),
+      runControls: async role => ({ descriptor: descriptor(role.providerId), identity, model: true, stop: true, independentRun: true, terminalOutput: true, structuredCandidateAuthoring: 'available' as const, hostToolsDisabled: 'available' as const }),
       plan: async () => ({ output: JSON.stringify({ body: programBody }) }), execute })
     services.push(controller)
     const start = controller.start.bind(controller), revise = controller.revise.bind(controller), resume = controller.resume.bind(controller)

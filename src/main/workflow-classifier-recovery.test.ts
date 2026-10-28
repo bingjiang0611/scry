@@ -1,9 +1,13 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { MemoryWorkflowStore } from './workflow-store'
+import { FileWorkflowStore, MemoryWorkflowStore } from './workflow-store'
+import type { WorkflowStore } from './workflow-store'
 import { WorkflowService } from './workflow-service'
 import type { WorkflowServiceOptions } from './workflow-service-contracts'
 import { validateWorkflowClassifierLedgerCanonical } from './workflow-recovery'
-import type { WorkflowClassifierAdapter } from '../shared/workflow-classifier'
+import type { WorkflowClassifierAdapter, WorkflowClassifierOutcome } from '../shared/workflow-classifier'
 import type { ProviderDescriptor } from '../shared/provider'
 
 const descriptor: ProviderDescriptor = { id: 'claude', label: 'Claude', runtimeProvider: 'claude_sdk', transport: 'fixture', available: true,
@@ -14,7 +18,7 @@ const body = { kind: 'sequence' as const, blockId: 'root', blocks: [
   { kind: 'return' as const, blockId: 'finish', ref: { nodeId: 'decision' } }
 ] }
 
-function fixture(store = new MemoryWorkflowStore(), classifierAdapter?: WorkflowClassifierAdapter) {
+function fixture(store: WorkflowStore = new MemoryWorkflowStore(), classifierAdapter?: WorkflowClassifierAdapter) {
   const plan = vi.fn(async () => ({ output: JSON.stringify({ body }) }))
   const execute = vi.fn<WorkflowServiceOptions['execute']>(() => ({ result: Promise.resolve({ runId: 'unused', status: 'completed' as const, settled: true }), stop: () => true }))
   const service = new WorkflowService({ store, plan, execute, classifierAdapter, providerRegistered: () => true,
@@ -63,5 +67,50 @@ describe('classifier canonical runner and service recovery', () => {
     const blocked = await start(low)
     expect(blocked.progress.state).toBe('blocked')
     expect((await low.store.load(blocked.preview.workflowId))?.classifierOutcomes?.[0]).toMatchObject({ state: 'blocked', settled: true, reason: expect.stringContaining('threshold') })
+  })
+
+  it('durably separates a paused FileStore intent from cold recovery and commits its result artifact', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-classifier-file-'))
+    let release!: (outcome: WorkflowClassifierOutcome) => void
+    let entered!: () => void
+    const dispatched = new Promise<void>(resolve => { entered = resolve })
+    let pending: Promise<unknown> | undefined
+    const adapter: WorkflowClassifierAdapter = vi.fn((intent, signal) => new Promise<WorkflowClassifierOutcome>(resolve => {
+      const stopped = () => resolve({ classifierId: intent.classifierId, state: 'unknown', settled: true, provenance: 'unavailable', reason: 'test stopped' })
+      signal.addEventListener('abort', stopped, { once: true })
+      release = outcome => { signal.removeEventListener('abort', stopped); resolve(outcome) }
+      entered()
+    }))
+    const store = new FileWorkflowStore(root)
+    try {
+      const first = fixture(store, adapter)
+      const preview = await first.service.planCommand({ commandId: 'file-classifier-plan', command: '/scry-workflow run classifier file', workspace: '/fixture', orchestrator: { role: 'orchestrator', providerId: 'claude' }, roles: [] })
+      const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }
+      await first.service.approve(approval)
+      pending = first.service.start(preview.workflowId, approval)
+      await dispatched
+      const durable = await new FileWorkflowStore(root).load(preview.workflowId)
+      expect(durable?.classifierIntents).toHaveLength(1)
+      expect(durable?.classifierOutcomes).toBeUndefined()
+      const pendingRecord = (await store.load(preview.workflowId))!
+      pendingRecord.execution!.owner.pid = 999999
+      await store.save(pendingRecord)
+
+      const coldAdapter = vi.fn<WorkflowClassifierAdapter>()
+      const cold = fixture(new FileWorkflowStore(root), coldAdapter)
+      await expect(cold.service.start(preview.workflowId, approval)).rejects.toThrow()
+      expect(coldAdapter).not.toHaveBeenCalled()
+
+      const intent = durable!.classifierIntents![0]
+      release({ classifierId: intent.classifierId, state: 'completed', settled: true, value: true, confidence: 0.95, probability: { true: 0.95, false: 0.05 }, provenance: 'provider' })
+      await expect(pending).resolves.toMatchObject({ state: 'completed' })
+      const committed = (await store.load(preview.workflowId))!
+      expect(committed.classifierOutcomes?.[0]).toMatchObject({ state: 'completed', resultRef: { key: expect.any(String), hash: expect.any(String) } })
+      await expect(store.loadValue(preview.workflowId, committed.classifierOutcomes![0].resultRef!)).resolves.toMatchObject({ state: 'known', value: { kind: 'classifier_result', value: true } })
+    } finally {
+      if (release) release({ classifierId: 'cleanup', state: 'unknown', settled: true, provenance: 'unavailable', reason: 'cleanup' })
+      if (pending) await pending.catch(() => undefined)
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })

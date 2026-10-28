@@ -520,6 +520,8 @@ printf '%s\n' '${RECORDER_VERSION}'
       QODER_ADMIN_API_KEY: 'qoder-admin',
       QODER_ORGANIZATION_ID: 'org-1',
       QODER_MEMBER_ID: 'member-1',
+      TYPESAFE_API_KEY: 'jev-key',
+      SCRY_PROVIDER_ENV_ALLOW: 'claude:TYPESAFE_API_KEY',
       SCRY_RECORDER_COMMIT_HOOK: '/tmp/untrusted-hook',
       SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'untrusted',
       OPENAI_API_KEY: 'provider-key',

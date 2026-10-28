@@ -1,6 +1,6 @@
 import type { ProviderDescriptor } from '../shared/provider'
 import type { WorkflowCapabilityState, WorkflowRoleBinding } from '../shared/workflow'
-import { capabilityForRole } from './workflow-program'
+import { capabilityForRole, type WorkflowCapabilityRequirement } from './workflow-program'
 import type { WorkflowServiceOptions } from './workflow-service-contracts'
 
 type Controls = {
@@ -19,19 +19,17 @@ type Controls = {
 const unknownControls = (): Controls => ({ model: false, stop: false, identity: '', independentRun: false, terminalOutput: false,
   structuredCandidateAuthoring: 'unknown', hostToolsDisabled: 'unknown', permissionQuestion: 'unknown', businessQuestion: 'unknown', waitStates: { model: 'unknown', tool: 'unknown', quota: 'unknown' } })
 
-export async function resolveWorkflowCapability(options: WorkflowServiceOptions, role: WorkflowRoleBinding, workspace: string, required: boolean) {
+export async function resolveWorkflowCapability(options: WorkflowServiceOptions, role: WorkflowRoleBinding, workspace: string,
+  required: boolean, requirement: WorkflowCapabilityRequirement) {
   let descriptor: ProviderDescriptor | undefined
   let controls = unknownControls()
   try {
     const snapshot = await options.runControls(role, workspace)
     descriptor = snapshot.descriptor
-    // Older test/third-party seams predate the two orchestrator admission
-    // fields. They do not make a positive claim; current provider adapters
-    // declare these fields explicitly and are evaluated as usual.
-    controls = { ...snapshot, structuredCandidateAuthoring: snapshot.structuredCandidateAuthoring ?? 'available', hostToolsDisabled: snapshot.hostToolsDisabled ?? 'available',
+    controls = { ...snapshot, structuredCandidateAuthoring: snapshot.structuredCandidateAuthoring ?? 'unknown', hostToolsDisabled: snapshot.hostToolsDisabled ?? 'unknown',
       permissionQuestion: snapshot.permissionQuestion ?? 'unknown', businessQuestion: snapshot.businessQuestion ?? 'unknown', waitStates: snapshot.waitStates ?? { model: 'unknown', tool: 'unknown', quota: 'unknown' } }
   } catch { /* refusal, never a replacement Provider */ }
-  const capability = capabilityForRole(role, { descriptor, adapterRegistered: options.providerRegistered(role.providerId),
+  const capability = capabilityForRole(role, { descriptor, adapterRegistered: options.providerRegistered(role.providerId), requirement,
     hasIndependentRun: controls.model && controls.independentRun && Boolean(controls.identity), canObserveOutput: controls.terminalOutput, canConfirmStop: controls.stop,
     structuredCandidateAuthoring: controls.structuredCandidateAuthoring, hostToolsDisabled: controls.hostToolsDisabled, permissionQuestion: controls.permissionQuestion,
     businessQuestion: controls.businessQuestion, waitStates: controls.waitStates })

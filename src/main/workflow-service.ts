@@ -40,7 +40,7 @@ export class WorkflowService extends WorkflowServiceShutdown {
         if (record.receipt.commandId === commandId && record.receipt.fingerprint === fingerprint) return this.progressSnapshot(record.progress, record.stopRequests, record)
         throw new Error('工作流已有启动收据，不允许重新派发')
       }
-      await Promise.all(preview.program.roles.map(role => this.capability(role, preview.workspace, true)))
+      await Promise.all(preview.program.roles.map(role => this.capability(role, preview.workspace, true, 'execution')))
       this.assertAdmissionGeneration(generation)
       if (commandId) {
         record.receipt = { commandId, fingerprint, status: 'accepted' }
@@ -65,7 +65,7 @@ export class WorkflowService extends WorkflowServiceShutdown {
       if (approval.programRevision !== preview.programRevision) throw new Error(workflowRecoveryCopy.fingerprint)
       if (record.progress.state !== 'completed' && !record.execution?.segments.some(segment => segment.commandId === commandId)) {
         this.runner.assertRecovery(record)
-        await Promise.all(preview.program.roles.map(role => this.capability(role, preview.workspace, true)))
+        await Promise.all(preview.program.roles.map(role => this.capability(role, preview.workspace, true, 'execution')))
       }
       this.assertAdmissionGeneration(generation)
       const result = await this.runner.resume(preview, approval, commandId)
@@ -92,7 +92,7 @@ export class WorkflowService extends WorkflowServiceShutdown {
       if ((record.execution?.segments.length ?? 0) >= 256) throw new Error(workflowRecoveryCopy.limit)
       const evidence = await this.options.restartEvidence?.({ workflowId: id, taskId: target.taskId, attemptId: target.attemptId, programRevision: approval.programRevision })
       if (!evidence || evidence.state !== 'settled' || evidence.attemptId !== target.attemptId || evidence.taskId !== target.taskId) throw new Error('停滞重启证据不可用')
-      await Promise.all(record.preview.program.roles.map(role => this.capability(role, record.preview.workspace, true)))
+      await Promise.all(record.preview.program.roles.map(role => this.capability(role, record.preview.workspace, true, 'execution')))
       this.assertAdmissionGeneration(generation)
       return this.progressSnapshot(await this.runner.restartStalled(record.preview, approval, target, commandId, evidence.reason), undefined, record)
     })
@@ -112,7 +112,7 @@ export class WorkflowService extends WorkflowServiceShutdown {
       if (!record.execution?.segments.some(segment => segment.commandId === commandId)) {
         this.runner.assertRecovery(record)
         assertWorkflowRetryTarget(record, target)
-        await Promise.all(record.preview.program.roles.map(role => this.capability(role, record.preview.workspace, true)))
+        await Promise.all(record.preview.program.roles.map(role => this.capability(role, record.preview.workspace, true, 'execution')))
       }
       this.assertAdmissionGeneration(generation)
       return this.progressSnapshot(await this.runner.retry(record.preview, approval, target, commandId), undefined, record)

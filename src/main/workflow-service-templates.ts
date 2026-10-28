@@ -90,7 +90,7 @@ export class WorkflowServiceTemplates extends WorkflowServiceFoundation {
           await captured.beforePrepare()
           this.assertAdmissionGeneration(generation)
         }
-        const capabilities = await Promise.all(bindings.map(role => this.capability(role, request.cwd)))
+        const capabilities = await Promise.all(bindings.map(role => this.capability(role, request.cwd, false, 'execution')))
         this.assertAdmissionGeneration(generation)
         trace.mark('bindings_resolved')
         if (captured?.beforePrepare) {

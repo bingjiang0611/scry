@@ -49,7 +49,7 @@ export function validateWorkflowOwnership(record: WorkflowStoreRecord): void {
   if (execution.segments.at(-1)!.id !== execution.epoch || new Set(execution.segments.map(segment => segment.id)).size !== execution.segments.length) throw new Error(copy.ledger)
 }
 
-export function validateWorkflowClassifierLedger(record: WorkflowStoreRecord): void {
+export function validateWorkflowClassifierLedger(record: WorkflowStoreRecord, requireOutcomes = false): void {
   const intents = record.classifierIntents ?? [], outcomes = record.classifierOutcomes ?? []
   const blocks = new Map<string, Extract<WorkflowBlock, { kind: 'classifier' }>>()
   const pending = [record.preview.program.body]
@@ -77,7 +77,7 @@ export function validateWorkflowClassifierLedger(record: WorkflowStoreRecord): v
     validateWorkflowClassifierOutcome(intent, outcome)
     if (outcome.resultRef) validateWorkflowValueReference(outcome.resultRef, record.preview.workflowId)
   }
-  if (intents.some(intent => !outcomes.some(outcome => outcome.classifierId === intent.classifierId))) throw new Error(copy.ledger)
+  if (requireOutcomes && intents.some(intent => !outcomes.some(outcome => outcome.classifierId === intent.classifierId))) throw new Error(copy.ledger)
 }
 
 /** Validate the immutable classifier artifacts, not only the root ledger JSON. */
@@ -124,7 +124,7 @@ export async function validateWorkflowClassifierLedgerCanonical(record: Workflow
  * unknown business state and is never replayed. PID reuse fails closed (alive). */
 export function assertWorkflowRecovery(record: WorkflowStoreRecord, instanceId: string, allowSettledUnknownAttempt?: string): void {
   validateWorkflowOwnership(record)
-  validateWorkflowClassifierLedger(record)
+  validateWorkflowClassifierLedger(record, true)
   if (!record.execution) throw new Error(copy.legacy)
   const { programRevision, ...program } = validateWorkflowProgram(record.preview.program)
   if (programRevision !== workflowRevision(program) || programRevision !== record.preview.programRevision || record.preview.workflowId !== program.workflowId || record.preview.workspace !== program.workspace) throw new Error(copy.fingerprint)

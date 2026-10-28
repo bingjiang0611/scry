@@ -148,7 +148,7 @@ export class WorkflowServicePlanning extends WorkflowServiceTemplates {
     this.assertAdmissionGeneration(generation)
     let roles = [request.orchestrator, ...request.roles]
     if (roles.length > 4 || new Set(roles.map(role => role.role)).size !== roles.length) throw new Error('工作流角色重复或超过四个')
-    const capabilities = await Promise.all(roles.map(role => this.capability(role, request.workspace)))
+    const capabilities = await Promise.all(roles.map(role => this.capability(role, request.workspace, false, 'authoring')))
     if (capabilities[0].state !== 'available') throw new Error(`编排角色不可用：${capabilities[0].reason}`)
     roles = roles.map((role, index) => ({ ...role, runtimeIdentity: capabilities[index].runtimeIdentity }))
     this.assertAdmissionGeneration(generation)

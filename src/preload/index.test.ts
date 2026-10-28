@@ -190,7 +190,7 @@ describe('preload IPC boundary', () => {
   })
 
   it('exposes only fixed conversation operations with their scoped arguments', async () => {
-    expect(Object.keys(api.conversations).sort()).toEqual(['adopt', 'create', 'delete', 'fork', 'list', 'preview', 'previewAdoption', 'previewDeletion', 'read', 'readItem', 'send', 'update'])
+    expect(Object.keys(api.conversations).sort()).toEqual(['adopt', 'commands', 'create', 'delete', 'fork', 'list', 'preview', 'previewAdoption', 'previewDeletion', 'read', 'readItem', 'send', 'submit', 'update'])
     await api.conversations.create('/workspace')
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:create', '/workspace')
     const fork = { conversationId: 'conversation-id', expectedRevision: 2, sourceRunId: 'run-1', commandId: 'fork-1' }
@@ -209,6 +209,11 @@ describe('preload IPC boundary', () => {
       expectedContinuationKey: 'frozen-identity', commandId: 'command-id', prompt: 'hello', selectedItems: [], confirmFresh: true }
     await api.conversations.send(request)
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:send', request)
+    await api.conversations.commands('conversation-id', { providerId: 'codex' })
+    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:commands', 'conversation-id', { providerId: 'codex' })
+    const submission = { conversationId: 'conversation-id', expectedRevision: 0, commandId: 'submission-id', prompt: '/scry-workflow list' }
+    await api.conversations.submit(submission)
+    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:submit', submission)
     const source = { providerId: 'claude' as const, cwd: '/workspace', externalSessionId: 'source-session' }
     await api.conversations.previewAdoption(source)
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:previewAdoption', source)
@@ -223,7 +228,7 @@ describe('preload IPC boundary', () => {
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:previewDeletion', 'conversation-id')
     await api.conversations.delete('conversation-id', 'fingerprint')
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:delete', 'conversation-id', 'fingerprint')
-    expect(electron.invoke).toHaveBeenCalledTimes(13)
+    expect(electron.invoke).toHaveBeenCalledTimes(15)
   })
 
   it('exposes only fixed source-control business operations and forwards one typed request', async () => {

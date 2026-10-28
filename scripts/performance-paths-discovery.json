@@ -40,6 +40,7 @@
       "ipc.workflow:start",
       "ipc.workflow:resume",
       "ipc.workflow:retry",
+      "ipc.workflow:restartStalled",
       "ipc.workflow:prepareRevision",
       "ipc.workflow:revise",
       "ipc.workflow:stop",

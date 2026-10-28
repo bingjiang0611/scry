@@ -20,7 +20,7 @@ function fixture(store: WorkflowStore = new MemoryWorkflowStore()) {
     result: Promise.resolve({ runId: 'unused', status: 'completed', output: 'unused', settled: true }), stop: () => true
   }))
   const service = new WorkflowService({ store, slots: new WorkflowSlots(1), providerRegistered: () => true,
-    runControls: async value => ({ descriptor: descriptor(value.providerId), model: true, stop: true, identity: 'fixture', independentRun: true, terminalOutput: true }),
+    runControls: async value => ({ descriptor: descriptor(value.providerId), model: true, stop: true, identity: 'fixture', independentRun: true, terminalOutput: true, structuredCandidateAuthoring: 'available' as const, hostToolsDisabled: 'available' as const }),
     plan: vi.fn<WorkflowServiceOptions['plan']>(async () => ({ output: JSON.stringify({ body: { kind: 'sequence', blockId: 'root', blocks: [{ kind: 'call', blockId: 'worker_call', role: 'worker', prompt: 'offline' }, { kind: 'return', blockId: 'report', ref: { nodeId: 'worker_call' } }] } }) })), execute })
   return { service, store, execute }
 }

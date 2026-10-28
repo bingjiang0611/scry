@@ -62,7 +62,7 @@ export type WorkflowClassifierOutcome = Readonly<{
   resultRef?: WorkflowValueReference
 }>
 
-export type WorkflowClassifierAdapter = (intent: WorkflowClassifierIntent) => Promise<WorkflowClassifierOutcome>
+export type WorkflowClassifierAdapter = (intent: WorkflowClassifierIntent, signal?: AbortSignal) => Promise<WorkflowClassifierOutcome>
 
 export function unavailableWorkflowClassifierOutcome(intent: WorkflowClassifierIntent): WorkflowClassifierOutcome {
   return { classifierId: intent.classifierId, state: 'unavailable', settled: true, provenance: 'unavailable', reason: 'no production classifier adapter is registered' }

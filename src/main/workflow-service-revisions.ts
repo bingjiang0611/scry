@@ -23,7 +23,7 @@ export class WorkflowServiceRevisions extends WorkflowServicePlanning {
     this.runner.assertRecovery(record)
     const target = { expectedRevision: draft.expectedRevision }
     if (target.expectedRevision !== record.progress.revision) throw new Error(copy.stale)
-    const capabilities = await Promise.all(draft.roles.map(role => this.capability(role, record.preview.workspace)))
+    const capabilities = await Promise.all(draft.roles.map(role => this.capability(role, record.preview.workspace, false, 'execution')))
     const roles = draft.roles.map((role, index) => ({ ...role, runtimeIdentity: capabilities[index].runtimeIdentity }))
     // A body edit is a new governing program, not a mutation/publication of its
     // source template. The original frozen template remains in revision history.
@@ -81,7 +81,7 @@ export class WorkflowServiceRevisions extends WorkflowServicePlanning {
       if (!record.execution?.segments.some(segment => segment.commandId === commandId)) {
         this.runner.assertRecovery(record)
         assertWorkflowRevisionChange(record, preview, target)
-        await Promise.all(preview.program.roles.map(role => this.capability(role, preview.workspace, true)))
+        await Promise.all(preview.program.roles.map(role => this.capability(role, preview.workspace, true, 'execution')))
         this.assertAdmissionGeneration(generation)
         this.runner.approve(preview, approval)
       }

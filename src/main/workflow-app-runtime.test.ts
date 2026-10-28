@@ -25,7 +25,7 @@ describe('production App workflow planning bridge with an offline terminal fixtu
     const home = await mkdtemp(join(tmpdir(), 'scry-size-bridge-'))
     homes.push(home)
     // Explicit mock declaration, not a Codex native-authoring capability claim.
-    const adapter = { ...createSmokeProviderAdapter('codex'), workflowAuthoring: { source: 'claude_sdk_success_result' as const } }
+    const adapter = { ...createSmokeProviderAdapter('codex'), workflowAuthoring: { source: 'claude_sdk_success_result' as const, hostTools: 'disabled' as const } }
     const nativeRun = vi.spyOn(adapter, 'run').mockImplementation(() => { throw new Error('No actual Provider execution in bridge test') })
     const registry = new ProviderRegistry([adapter])
     const goal = 'Inspect exactly 20 reviewers. Preserve this original request.'
@@ -79,13 +79,14 @@ describe('production App workflow planning bridge with an offline terminal fixtu
     expect(stop).not.toHaveBeenCalled()
   })
 
-  it.each(['undeclared', 'text_only', 'no_archive', 'no_result', 'launch_unknown', 'wrong_source', 'failed'] as const)(
+  it.each(['undeclared', 'no_host_tool_proof', 'text_only', 'no_archive', 'no_result', 'launch_unknown', 'wrong_source', 'failed'] as const)(
     'does not admit or execute a candidate from %s evidence', async mode => {
       vi.stubEnv('SCRY_ELECTRON_SMOKE_WORKFLOW', '1')
       const home = await mkdtemp(join(tmpdir(), 'scry-authoring-evidence-'))
       homes.push(home)
       const adapter = { ...createSmokeProviderAdapter('codex'),
-        ...(mode === 'undeclared' ? {} : { workflowAuthoring: { source: 'claude_sdk_success_result' as const } }) }
+        ...(mode === 'undeclared' ? {} : { workflowAuthoring: { source: 'claude_sdk_success_result' as const,
+          ...(mode === 'no_host_tool_proof' ? {} : { hostTools: 'disabled' as const }) } }) }
       const nativeRun = vi.spyOn(adapter, 'run').mockImplementation(() => { throw new Error('No native calls in this boundary test') })
       const output = JSON.stringify({ schemaVersion: 1, body: { kind: 'sequence', blockId: 'root', blocks: [
         { kind: 'call', blockId: 'work', role: 'worker', prompt: 'work' },
@@ -119,18 +120,25 @@ describe('production App workflow planning bridge with an offline terminal fixtu
       const binding = { providerId: 'codex' as const, requestedModel: { id: 'workflow-fixture' }, permissionMode: 'default' as const }
       await expect(service.planCommand({ command: '/scry-workflow run Test canonical evidence', commandId: 'boundary-' + mode,
         workspace: home, orchestrator: { ...binding, role: 'orchestrator' }, roles: [{ ...binding, role: 'worker' }] }))
-        .rejects.toThrow(mode === 'undeclared' ? workflowAuthoringCopy.unavailable : mode === 'launch_unknown' ? 'fixture-start-return-unknown'
+        .rejects.toThrow(mode === 'undeclared' ? 'Provider 未声明结构化候选编排能力'
+          : mode === 'no_host_tool_proof' ? '编排候选未证明禁用宿主工具' : mode === 'launch_unknown' ? 'fixture-start-return-unknown'
           : mode === 'failed' ? workflowAuthoringCopy.providerIncomplete('failed') : workflowAuthoringCopy.missingCandidate)
-      expect(startAppRun).toHaveBeenCalledTimes(mode === 'undeclared' ? 0 : 1)
+      const rejectedAtAdmission = mode === 'undeclared' || mode === 'no_host_tool_proof'
+      expect(startAppRun).toHaveBeenCalledTimes(rejectedAtAdmission ? 0 : 1)
       const store = new FileWorkflowStore(join(home, 'userData'))
       const intents = []
       for await (const intent of store.planningIntents()) intents.push(intent)
-      expect(intents).toHaveLength(1)
-      expect(intents[0]).toMatchObject({ status: mode === 'launch_unknown' ? 'unknown' : 'failed', scopeSettled: mode !== 'launch_unknown' })
-      expect(intents[0].result?.output).toBeUndefined()
-      expect(intents[0].result?.outputSource).toBeUndefined()
-      if (plannedId) expect(await service.snapshot(plannedId)).toBeUndefined()
-      else expect(intents[0].providerDispatch).toBe('not_attempted')
+      if (rejectedAtAdmission) {
+        // Capability refusal happens before reserving a planning receipt or dispatching a Provider.
+        expect(intents).toHaveLength(0)
+      } else {
+        expect(intents).toHaveLength(1)
+        expect(intents[0]).toMatchObject({ status: mode === 'launch_unknown' ? 'unknown' : 'failed', scopeSettled: mode !== 'launch_unknown' })
+        expect(intents[0].result?.output).toBeUndefined()
+        expect(intents[0].result?.outputSource).toBeUndefined()
+        if (plannedId) expect(await service.snapshot(plannedId)).toBeUndefined()
+        else expect(intents[0].providerDispatch).toBe('not_attempted')
+      }
       expect(nativeRun).not.toHaveBeenCalled()
       expect(stop).not.toHaveBeenCalled()
     })
