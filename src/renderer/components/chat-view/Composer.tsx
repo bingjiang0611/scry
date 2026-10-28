@@ -17,7 +17,7 @@ export function Composer({
   hasSelectedSession = false,
   runControls, runControlCatalog, runControlsLoading = false, runControlsReason = null, input, composerScopeKey,
   sendBlockedReason = null, composerError = null, detectionIssue = null, detectionRetrying = false, onRetryDetection,
-  submitting = false, sessionLoading = false, sessionEvidenceGap = null, busy,
+  submitting = false, sessionLoading = false, sessionCacheVisible = false, sessionEvidenceGap = null, busy,
   queueWhileBusy = true, draftAttachments, queuedPrompts, steerCapability = null, steerEvidenceByMessageId = new Map(),
   steerInFlightMessageIds = new Set(), onSteerQueuedPrompt, editingQueuedId = null, movedQueuedId = null,
   onEditQueuedPrompt, onCancelQueuedPromptEdit, slashOpen: slashRequested, slashLoading, slashCmds, slashReason = null,
@@ -28,11 +28,12 @@ export function Composer({
   onRescan, unavailableAgentIds, agentScopeLabel, renderLocationPicker, remoteHost, composerNotice = null, workspaceContext, workspaceSendLabel
 }: Omit<ChatViewProps, 'selectedId' | 'scrollRef' | 'onSelect' | 'onOpenDiff' | 'onForkTurn' | 'forkableRunIds' | 'onOpenFile' | 'onAnswerQuestion' | 'focusedTurnRunId' | 'scrollNavigation' | 'onTurnRef' | 'historyWindow'>) {
   const remote = remoteHost != null
+  const sessionOwnerLoading = sessionLoading || sessionCacheVisible
   const resettingNewConversation = sessionLoading && !hasSelectedSession
   // New conversation clears the visible session synchronously, while main may still be
   // invalidating Provider context. Do not make the project picker wait for that background
   // work; historical-session loading remains hidden because it already has a session id.
-  const showWorkdirPicker = !cwd || (turns.length === 0 && (!agentLocked || resettingNewConversation) && !busy && !submitting && (!sessionLoading || resettingNewConversation) && !sessionEvidenceGap)
+  const showWorkdirPicker = !cwd || (turns.length === 0 && (!agentLocked || resettingNewConversation) && !busy && !submitting && (!sessionOwnerLoading || resettingNewConversation) && !sessionEvidenceGap)
   const slashMatches = filterSlashCommands(input, slashCmds)
   const slashMenuRef = useRef<HTMLDivElement>(null)
   const [composerMenu, setComposerMenu] = useState<'workdir' | 'agent' | 'modelEffort' | null>(null)
@@ -178,7 +179,7 @@ export function Composer({
           onRemoveDraftAttachment={onRemoveDraftAttachment} onRetryDetection={onRetryDetection}
           detectionRetrying={detectionRetrying} showWorkdirPicker={showWorkdirPicker}
           sendBlockedReason={sendBlockedReason} composerError={composerError}
-          detectionIssue={detectionIssue} sessionLoading={sessionLoading}
+          detectionIssue={detectionIssue} sessionLoading={sessionOwnerLoading}
           stopStatus={stopStatus} backgroundStatus={backgroundStatus}
           runStartedAt={runStartedAt} editingQueuedIndex={editingQueuedIndex}
           resetPromptHistory={resetPromptHistory} onSend={onSend} slashOpen={slashOpen}
@@ -195,7 +196,7 @@ export function Composer({
           onPermissionMode={onPermissionMode} composerMenu={composerMenu} setComposerMenu={setComposerMenu}
           modelValue={modelValue} modelOptions={modelOptions} effortOptions={effortOptions}
           permissionOptions={permissionOptions} loading={runControlsLoading}
-          composerStatus={composerStatus} submitting={submitting} sessionLoading={sessionLoading}
+          composerStatus={composerStatus} submitting={submitting} sessionLoading={sessionOwnerLoading}
           input={input} draftAttachments={draftAttachments} sendBlockedReason={sendBlockedReason}
           sendActionLabel={sendActionLabel} queueing={queueing} resetPromptHistory={resetPromptHistory}
           onSend={onSend} runControlCatalog={runControlCatalog}

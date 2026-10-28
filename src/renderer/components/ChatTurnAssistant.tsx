@@ -31,6 +31,7 @@ import { ToolItem } from './ChatTurnToolItem'
 import { aggregateTurnHookPhases } from './ChatTurnHookData'
 
 import { AssistantTurnView } from './ChatTurnAssistantView'
+import { CompletedModelText } from './CompletedModelText'
 
 function AssistantTurnImpl({
   turn,
@@ -327,9 +328,13 @@ function AssistantTurnImpl({
           if (ev.text) {
             flushTools()
             out.push(
-              <div className="model-text md" key={ev.id}>
-                <Markdown>{ev.text}</Markdown>
-              </div>
+              <CompletedModelText
+                key={ev.id}
+                text={ev.text}
+                completed={turn.done || Boolean(turn.error)}
+                expanded={flowExpanded}
+                onExpand={() => setFlowExpanded(true)}
+              />
             )
           }
           continue
@@ -396,6 +401,7 @@ function AssistantTurnImpl({
     childrenByParent,
     interventions,
     interventionsByQuestionId,
+    flowExpanded,
     flowItems,
     hiddenFlowItemCount,
     knownToolUseIds,

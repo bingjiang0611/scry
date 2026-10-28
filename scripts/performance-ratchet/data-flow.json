@@ -484,6 +484,20 @@
       "baselines": {
         "darwin-arm64": 16
       }
+    },
+    "renderer.large-completed-text/rendered.text-characters": {
+      "scenario": "renderer.large-completed-text",
+      "metric": "rendered.text-characters",
+      "layer": "ui",
+      "unit": "count",
+      "workload": "model-text-characters=40000;completed=true;expanded=false",
+      "source": "production completedModelText projection; counted characters before Markdown rendering",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 8000
+      }
     }
   }
 }

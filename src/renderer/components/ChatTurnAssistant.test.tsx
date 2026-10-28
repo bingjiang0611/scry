@@ -37,4 +37,17 @@ describe('large completed turn flow window', () => {
     expect(html).toContain('earliest archived evidence')
     expect(html).not.toContain(TURN_FLOW_COPY.showEarlier(85))
   })
+
+  it('bounds a large completed model response behind an explicit reveal control', () => {
+    const text = `${'visible '.repeat(1_000)}HIDDEN_TAIL${' hidden'.repeat(4_000)}`
+    const html = render({
+      runId: 'large-text',
+      userText: 'large text',
+      done: true,
+      items: [{ id: 'large-text-event', runId: 'large-text', ts: '2026-01-01T00:00:00.000Z', kind: 'model', stage: 'text', text }]
+    })
+    expect(html).toContain('visible')
+    expect(html).not.toContain('HIDDEN_TAIL')
+    expect(html).toContain('显示完整回复')
+  })
 })

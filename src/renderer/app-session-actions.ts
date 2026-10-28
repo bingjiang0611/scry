@@ -13,6 +13,7 @@ import type { useAgentSession } from './hooks/useAgentSession'
 import type { useIntegrations } from './hooks/useIntegrations'
 import type { SessionHistorySnapshotCache } from './session-history-cache'
 import { sessionMatchesSelection, sessionSelectionChanged } from './session-selection'
+import { sessionPreviewPage } from './session-preview'
 import {
   activeRunForSession, applyNewConversationEffects, applySessionArchiveEffects, restoreActiveSessionSelection,
   buildForkSessionRequest, sessionEvidenceGapAfterLoad, sessionComposerDraftKey,
@@ -173,7 +174,9 @@ export function createSessionActions({
     providerId: SessionProviderId,
     externalSessionId?: string,
     knownRunId?: string,
-    agentProfileId?: string
+    agentProfileId?: string,
+    previewText?: string,
+    previewRunId?: string
   ): Promise<void> => {
     if (providerId === 'legacy_unknown') return
     const switchingSession = sessionSelectionChanged(
@@ -202,7 +205,7 @@ export function createSessionActions({
     // the authoritative page arrives; never keep the old session under the new selection.
     const seq = ++sessionSelectionSeqRef.current
     const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
-    const presentationPage = cachedPage
+    const presentationPage = cachedPage ?? (switchingSession ? sessionPreviewPage(sessionId, previewText, previewRunId) : undefined)
     setSessionEvidenceGap(null)
     setSessionLoading(true)
     setSessionCacheVisible(Boolean(presentationPage?.turns.length) || (!switchingSession && session.turns.length > 0))

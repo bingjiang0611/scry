@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import electron from 'electron'
 import { connectCdp, freePort, waitForTarget } from './electron-security-cdp.mjs'
 import { measureNativeSessionOpen } from './session-open-timing.mjs'
-import { stopOwnedApp } from './owned-app-processes.mjs'
+import { inspectOwnedApp, stopOwnedApp } from './owned-app-processes.mjs'
 
 const root = new URL('..', import.meta.url).pathname.replace(/\/$/, '')
 const userData = process.env.SCRY_WORKFLOW_USER_DATA
@@ -27,6 +27,19 @@ let child
 let cdp
 let output = ''
 const capture = chunk => { output += chunk.toString() }
+const waitForProviderExit = async () => {
+  const deadline = Date.now() + 20_000
+  while (Date.now() < deadline) {
+    const state = inspectOwnedApp(child)
+    const providerAlive = state.state === 'observed' && state.processes.some(process => {
+      const executable = process.command.trim().split(/\s+/, 1)[0]
+      return executable === 'pi' || executable.endsWith('/pi')
+    })
+    if (!providerAlive) return
+    await new Promise(resolve => setTimeout(resolve, 50))
+  }
+  throw new Error(`Pi history reader did not exit: ${JSON.stringify(inspectOwnedApp(child))}`)
+}
 try {
   const port = await freePort()
   child = spawn(electron, [bootstrap, `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`, '--disable-gpu', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--no-first-run'], {
@@ -103,11 +116,26 @@ try {
     return {
       ...timing,
       firstTurnMs: window.__workflowFirstTurnMs,
-      renderedTurns: document.querySelectorAll('.transcript-turn').length,
-      transcriptBytes: document.querySelector('.chat-transcript')?.textContent.length ?? 0,
+      renderedTurnsAtReady: document.querySelectorAll('.transcript-turn').length,
+      transcriptBytesAtReady: document.querySelector('.chat-transcript')?.textContent.length ?? 0,
       errors: document.querySelector('.composer-error')?.textContent ?? null
     }
   })()`)
+  await wait(`document.querySelector('.chat-transcript')?.getAttribute('data-history-source') === 'authoritative'`, 60_000)
+  result.authorityMs = await evaluate('performance.now() - window.__workflowClickAt')
+  result.renderedTurnsAfterAuthority = await evaluate("document.querySelectorAll('.transcript-turn').length")
+  result.transcriptBytesAfterAuthority = await evaluate("document.querySelector('.chat-transcript')?.textContent.length ?? 0")
+  const fullResponse = `Array.from(document.querySelectorAll('button.turn-flow-reveal')).find(element => element.textContent.includes('显示完整回复'))`
+  result.fullResponseControl = await evaluate(`${fullResponse} != null`)
+  if (result.fullResponseControl) {
+    const beforeExpand = result.transcriptBytesAfterAuthority
+    await click(fullResponse)
+    await wait(`${fullResponse} == null && (document.querySelector('.chat-transcript')?.textContent.length ?? 0) > ${beforeExpand}`, 60_000)
+    result.transcriptBytesAfterExpand = await evaluate("document.querySelector('.chat-transcript')?.textContent.length ?? 0")
+  }
+  await waitForProviderExit()
+  assert.ok(result.nativeOpenMs < 100, `workflow session shell exceeded 100ms: ${result.nativeOpenMs}`)
+  assert.ok(result.firstTurnMs < 100, `workflow session first turn exceeded 100ms: ${result.firstTurnMs}`)
   console.log(JSON.stringify(result, null, 2))
 } catch (error) {
   console.error(output.slice(-8000))
