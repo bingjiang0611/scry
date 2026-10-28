@@ -42,6 +42,19 @@ export async function exerciseOverlays(contents) {
     closeTimes.push({ selector, path, ms, nativeAnimationEnd: await read('window.overlayExitEndAt != null') })
   }
   await wait(`document.querySelectorAll('button.sb-sess').length === 2 && window.overlayFixture != null`)
+  await click(css('#probe-project-menu'))
+  await wait(`${css('.sb-project-menu')} != null`)
+  const projectMenu = await read(`(() => {
+    const menu = document.querySelector('.sb-project-menu')
+    const action = menu.querySelector('button')
+    const label = document.createRange()
+    label.selectNodeContents(action)
+    const text = label.getBoundingClientRect(), box = action.getBoundingClientRect()
+    return { label: action.textContent.trim(), contained: menu.scrollWidth <= menu.clientWidth && text.left >= box.left && text.right <= box.right }
+  })()`)
+  check(projectMenu.label === '新建会话' && projectMenu.contained, 'Long project name overflowed new-chat menu action: ' + JSON.stringify(projectMenu))
+  await click(css('.sb-project-menu button'))
+  await wait(`${css('#overlay-probe-host')}.dataset.newChatCwd === '/fixture/long-project' && !${css('.sb-project-menu')}`)
   for (const theme of ['light', 'dark']) {
     await click(css('.sb-settings'))
     await wait(`${modalIn('.settings-modal')}?.effect.getTiming().duration === 260`)
