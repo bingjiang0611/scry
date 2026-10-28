@@ -7,6 +7,10 @@ import { OVERVIEW_TOOL_ERROR_COPY } from '../constants/copy'
 import { CONTENT_PAGE_BYTES, RecorderContentPager, bytesFromBase64 } from './ChatTurnPager'
 import { Icon } from './primitives/Icon'
 
+// 归档正文按 sha256 内容寻址且不可变，按引用缓存摘要不会读到过期内容。
+const ARCHIVED_MESSAGE_CACHE_ENTRIES = 128
+const archivedMessageCache = new Map<string, string>()
+
 export interface OverviewToolError {
   event: TraceEvent
   result: TraceEvent
@@ -144,7 +148,8 @@ export function TurnToolErrorDetails({
   )
 }
 
-// 只有展开时才读存档正文：收起状态不发起 IPC，也不把“正文未内联”说成 Provider 未上报。
+// 正文超出内联预算时只剩归档引用。报错摘要必须来自真实正文，所以卡片出现时就按引用读一页；
+// 结果按内容哈希缓存（归档正文不可变），重复渲染/重挂载不再重复 IO。
 function ToolErrorCard({
   error,
   onOpen,
@@ -154,14 +159,15 @@ function ToolErrorCard({
   onOpen: (error: OverviewToolError) => void
   remote: boolean
 }): ReactNode {
-  const [expanded, setExpanded] = useState(false)
-  const [archivedMessage, setArchivedMessage] = useState<string>()
   const outputRef = error.outputContent?.contentRef
   const outputSource = error.outputContent?.source
   const needsArchivedMessage = error.output == null && outputRef != null && !remote
+  const [archivedMessage, setArchivedMessage] = useState<string | undefined>(
+    () => (outputRef ? archivedMessageCache.get(outputRef.sha256) : undefined)
+  )
 
   useEffect(() => {
-    if (!expanded || !needsArchivedMessage || archivedMessage != null || !outputRef) return
+    if (!needsArchivedMessage || archivedMessage != null || !outputRef) return
     let cancelled = false
     void (async () => {
       try {
@@ -172,18 +178,24 @@ function ToolErrorCard({
           ...(outputSource === 'scry_app_trace' ? { source: 'app-trace' as const } : {})
         })
         // 跨页正文无法可靠解析成一条错误摘要，保留诚实的存档提示。
-        if (cancelled || page.hasMore) return
-        setArchivedMessage(errorMessageFromOutput(new TextDecoder().decode(bytesFromBase64(page.dataBase64)), error.outputContent))
+        if (page.hasMore) return
+        const resolved = errorMessageFromOutput(new TextDecoder().decode(bytesFromBase64(page.dataBase64)), error.outputContent)
+        if (archivedMessageCache.size >= ARCHIVED_MESSAGE_CACHE_ENTRIES) {
+          const oldest = archivedMessageCache.keys().next().value
+          if (oldest != null) archivedMessageCache.delete(oldest)
+        }
+        archivedMessageCache.set(outputRef.sha256, resolved)
+        if (!cancelled) setArchivedMessage(resolved)
       } catch {
-        // 观测附加路径：读不到就保留存档提示，不阻断展开和正文分页。
+        // 观测附加路径：读不到就保留存档提示，不阻断正文分页。
       }
     })()
     return () => { cancelled = true }
-  }, [archivedMessage, error.outputContent, expanded, needsArchivedMessage, outputRef, outputSource])
+  }, [archivedMessage, error.outputContent, needsArchivedMessage, outputRef, outputSource])
 
   const message = archivedMessage ?? error.message
   return (
-    <details className="turn-tool-error" onToggle={(event) => setExpanded(event.currentTarget.open)}>
+    <details className="turn-tool-error">
       <summary title={message}>
         <strong><Icon name="x" />{error.tool}</strong>
         <span>{message}</span>
