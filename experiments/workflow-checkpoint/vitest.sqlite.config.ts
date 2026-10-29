@@ -7,10 +7,10 @@ import { viteAdapter } from './adapter'
 const here = dirname(fileURLToPath(import.meta.url))
 const directory = process.env.SCRY_CHECKPOINT_BUILD
 if (!directory) throw new Error('SCRY_CHECKPOINT_BUILD is required')
-const manifest = JSON.parse(readFileSync(resolve(directory, 'manifest.json'), 'utf8')) as { generatedPath: string; workerPath: string }
+const manifest = JSON.parse(readFileSync(resolve(directory, 'manifest.json'), 'utf8')) as { generatedPath: string; workerPath: string; runtimePath?: string }
 export default {
   ...baseline,
-  plugins: [viteAdapter({ repository: resolve(here, '../..'), generated: manifest.generatedPath, worker: manifest.workerPath, runtime: resolve(here, 'runtime.ts') })],
+  plugins: [viteAdapter({ repository: resolve(here, '../..'), generated: manifest.generatedPath, worker: manifest.workerPath, runtime: manifest.runtimePath ?? resolve(here, 'runtime.ts') })],
   define: { SCRY_WORKFLOW_SQLITE_WORKER: JSON.stringify(manifest.workerPath) },
   test: {
     ...baseline.test,
