@@ -224,7 +224,7 @@
       "benchmarks": [
         "send.codex-fixture"
       ],
-      "gap": "日常日志的首段文本仍是 main 收到，不是 UI 可见。独立 native 夹具已测可信 Send 按钮到真实正文视口命中和两帧就绪；不产出文本的早停 run 单列 unavailable/cancelled，不伪造可见时间。外部 Provider 等待与本机阶段分开分析，仍需独立验收。统一对话已有功能 smoke，尚无独立的长会话/并发性能基准。"
+      "gap": "日常日志的首段文本仍是 main 收到，不是 UI 可见。独立 native 夹具已测可信 Send 按钮到真实正文视口命中和两帧就绪；不产出文本的早停 run 单列 unavailable/cancelled，不伪造可见时间。外部 Provider 等待与本机阶段分开分析，仍需独立验收。统一对话已有功能 smoke；scripts/concurrent-performance.mjs 已有 N=1/3/5 独立工作区的离线并发实验，尚未接入固定基准或门禁。长会话仍缺独立性能基准。"
     },
     {
       "id": "stream",
@@ -288,7 +288,7 @@
       "benchmarks": [
         "controls.stop-lifecycle"
       ],
-      "gap": "已测受控 Provider 中断与真实 App 的 Stop 按钮到终态、两帧空闲界面；覆盖 native turn ID 前及正文可见后停止，并独立核对退出后的归档。真实 Provider、强杀、steer、审批、并发争用和焦点切换不由该固定场景证明。"
+      "gap": "已测受控 Provider 中断与真实 App 的 Stop 按钮到终态、两帧空闲界面；覆盖 native turn ID 前及正文可见后停止，并独立核对退出后的归档。scripts/concurrent-performance.mjs 另测离线并发争用，但未覆盖中断或焦点切换。真实 Provider、强杀、steer、审批、并发中断和焦点切换不由该固定场景证明。"
     },
     {
       "id": "persistence",

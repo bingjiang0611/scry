@@ -1,0 +1,72 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
+
+const sum = values => values.reduce((total, value) => total + value, 0)
+const mib = value => value / 1024 / 1024
+
+export function summarizeConcurrent(report) {
+  assert.equal(report.schema, 1)
+  assert.equal(report.hooks.length, report.count * 42)
+  assert.equal(report.canonicalRecords, report.count)
+  const { startedAt, settledAt, main } = report
+  const samples = main.samples.filter(sample => sample.at >= startedAt && sample.at <= settledAt)
+  assert.ok(samples.length >= 2, 'Not enough overlapping resource samples')
+  const before = main.samples.filter(sample => sample.at <= startedAt).at(-1)
+  const after = main.samples.find(sample => sample.at >= settledAt)
+  assert.ok(before && after, 'Resource samples must bracket the measured operation')
+  // The runner waits at least three seconds before requesting shutdown. Never use will-quit samples.
+  const idleAfter = main.samples.filter(sample => sample.at >= settledAt + 2000 && sample.at <= settledAt + 2800).at(-1)
+  assert.ok(idleAfter, 'Missing pre-shutdown idle memory sample')
+  const elapsedMs = settledAt - startedAt
+  const resourceWindowMs = after.at - before.at
+  const counters = Object.fromEntries(Object.keys(after.counters).map(key => [key, after.counters[key] - before.counters[key]]))
+  const processCpuMs = type => {
+    const byPid = new Map()
+    for (const sample of [before, ...samples, after]) {
+      for (const process of sample.processes.filter(p => p.type === type)) {
+        const usage = process.cpu.cumulativeCPUUsage
+        if (typeof usage !== 'number') continue
+        const entry = byPid.get(process.pid) ?? { first: usage, last: usage }
+        entry.last = usage
+        byPid.set(process.pid, entry)
+      }
+    }
+    assert.ok(byPid.size, `No ${type} CPU samples`)
+    return sum([...byPid.values()].map(entry => entry.last - entry.first)) * 1000
+  }
+  const peakWorkingSet = type => {
+    const values = samples.flatMap(sample => sample.processes.filter(p => p.type === type)
+      .map(p => p.memory?.workingSetSize).filter(value => typeof value === 'number'))
+    return values.length ? Math.max(...values) / 1024 : null
+  }
+  const memory = sample => ({ mainRssMiB: mib(sample.rss), rendererWorkingSetMiB: sample.processes.filter(p => p.type === 'Tab')
+    .map(p => p.memory?.workingSetSize / 1024) })
+  const calls = main.ipc.filter(call => call.at >= startedAt && call.at <= settledAt)
+  const hookCpuMs = sum(report.hooks.map(hook => (hook.cpu.user + hook.cpu.system) / 1000))
+  return {
+    count: report.count, elapsedMs, resourceWindowMs, samples: samples.length, animatedTitles: report.result?.ui?.animatedTitles,
+    mainCpuMs: processCpuMs('Browser'), rendererCpuMs: processCpuMs('Tab'), gpuCpuMs: processCpuMs('GPU'),
+    hookCpuMs, hookCpuMsPerStart: hookCpuMs / report.hooks.length,
+    measuredCpuMs: processCpuMs('Browser') + processCpuMs('Tab') + processCpuMs('GPU') + hookCpuMs,
+    mainCpuOneCorePct: processCpuMs('Browser') / resourceWindowMs * 100,
+    peakMainRssMiB: mib(Math.max(...samples.map(sample => sample.rss))),
+    peakRendererWorkingSetMiB: peakWorkingSet('Tab'),
+    peakHookRssMiB: Math.max(...report.hooks.map(hook => hook.usage.maxRSS)) / 1024,
+    idleBefore: memory(before), idleAfter: memory(idleAfter), idleAfterAt: idleAfter.at,
+    maxIntervalEventLoopP95Ms: Math.max(...samples.map(sample => sample.eventLoopP95Ms)),
+    maxEventLoopDelayMs: Math.max(...samples.map(sample => sample.eventLoopMaxMs)),
+    counters, hookFsync: sum(report.hooks.map(hook => hook.counters.fsync)),
+    hookGit: sum(report.hooks.map(hook => hook.counters.git)),
+    activeRuns: { calls: calls.length, jsonBytes: sum(calls.map(call => call.jsonBytes)),
+      maxConcurrent: Math.max(0, ...calls.map(call => call.runs)), handlerAndProbeMs: sum(calls.map(call => call.ms)) },
+    rendererMetrics: report.rendererMetrics, trace: report.trace?.complete ? report.trace : { status: 'unavailable', reason: 'Trace completion was not acknowledged' },
+    canonicalRecords: report.canonicalRecords, archiveVerified: report.archiveVerified,
+    highLoad: Math.max(report.initialLoad[0], report.finalLoad[0]) > report.cores,
+    temp: report.temp, harnessHash: report.harnessHash
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  console.log(JSON.stringify(process.argv.slice(2).map(path => summarizeConcurrent(JSON.parse(readFileSync(path, 'utf8')))), null, 2))
+}
