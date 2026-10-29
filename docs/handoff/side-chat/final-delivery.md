@@ -1,6 +1,6 @@
 # 侧边会话最终交付（App 0.2.231 / 私有 CLI 0.2.53）
 
-状态：功能实现完成、全量门禁通过。（2026-10-29 08:38:40）本轮构建**已安装并通过校验**（App `0.2.231` / 私有 CLI `0.2.53`，`app.asar` `5711c059…`），但 **08:44:55 被另一份构建替换**，因此**当前 `/Applications/Scry.app` 不保证包含本功能，也未经本轮校验**；详见下面“交付后复核”一节。当前磁盘上的替换产物未被本轮验证。未 push、未 `npm publish`、未安装全局 CLI；本轮没有重新安装、回滚或重启任何 App。
+状态：功能实现完成、全量门禁通过，本功能的构建**当前安装在 `/Applications/Scry.app` 并通过校验**（2026-10-29 08:57:49，用户批准的恢复重装）：App `0.2.231`、bundle id `com.scry.app`、私有 CLI `0.2.53`、`Contents/Resources/app.asar` SHA-256 `5711c0599fcb925fc33a48077ccfb8770eb1d6a25310849b8a74019e73a2ae1c`，与构建产物 `dist/mac-arm64/Scry.app` 相同。时间线：08:38:40 首次安装 → 08:44:55 被另一份 worktree 构建替换 → 08:57:49 重装恢复；前两次的实测事实保留在“交付后复核”。未 push、未 `npm publish`、未安装全局 CLI、未升版本；未启动、退出或重启任何 App 实例。
 
 ## 分发身份
 
@@ -8,14 +8,14 @@
 - 本文件之前的两个提交：`1a5340c7`（证据表述校订，纯文档）、`18326f4c`（版本）。
 - **安装产物的构建提交是 `18326f4c`**（工作区干净，`dist/`、`out/` 均为 gitignore 产物）。
 - App `0.2.231`，bundle id `com.scry.app`；私有 CLI `0.2.53`（`RECORDER_VERSION` 与 CLI 包版本由 `version.test.ts` 锁定）。
-- 本轮安装（08:38:40）时的 `Contents/Resources/app.asar` SHA-256 `5711c0599fcb925fc33a48077ccfb8770eb1d6a25310849b8a74019e73a2ae1c`，与本次构建产物 `dist/mac-arm64/Scry.app/Contents/Resources/app.asar` 相同。**这个文件已不在 `/Applications/Scry.app`**，而是位于 `/Applications/.Scry.app.backup`；当前安装已被 08:44:55 的另一份构建替换，见下节。
+- `Contents/Resources/app.asar` SHA-256 `5711c0599fcb925fc33a48077ccfb8770eb1d6a25310849b8a74019e73a2ae1c`，与本次构建产物 `dist/mac-arm64/Scry.app/Contents/Resources/app.asar` 相同；08:57:49 重装后这个文件就在 `/Applications/Scry.app` 里（08:44:55 曾被另一份构建替换，见下节）。
 - 签名：Apple Development `baobingjiang@icloud.com (8Y6KR78CP7)`，`TeamIdentifier=7USHN8Q8JL`。**未公证**：`install:mac:dev` 是开发安装路径（`verifyReleaseBundle` 仅在 `--require-release` 下执行），不是签名/公证正式发布。
 
 版本决策：CLI 升 `0.2.53` 不是形式动作——`normalizeTurnDiffSnapshot` 现在保留 `workspaceOverlap`，属于内置 CLI 对外可见的运行合同；App 只升一次 `0.2.231`。根 README 的两行 npm 安装示例与 CLI README 的安装行已同步到 `0.2.53`（此前分别停留在 `0.2.51`、`0.2.52`）。
 
-## 交付后复核：当前 `/Applications` 已不是本轮构建
+## 交付后复核：安装被替换，以及用户批准的重装恢复
 
-交付后再次检查发现磁盘状态被外部改变。只记录实测事实，不推断其他会话的意图：
+交付后再次检查发现磁盘状态被外部改变；随后用户明确批准把本功能的已验证产物装回 `/Applications`。只记录实测事实，不推断其他会话的意图：
 
 | 时间（2026-10-29） | 实测事实 |
 |---|---|
@@ -23,14 +23,17 @@
 | 08:43:03 | 交付文档提交 `81f2b822`（上面那组值当时仍成立） |
 | 08:44:55 | `/Applications/Scry.app` 被另一份构建替换：App 仍为 `0.2.231`、`com.scry.app`，但 `app.asar` 为 `e50300589afaccc8121cd9bb7aad27eb0bb9246d255200304a4a13b11582edd8`，内置 CLI 为 `0.2.52` |
 | 复核时 | `e5030058…` 与并行 worktree `…/909f5f8b-f156-4d0e-8c61-c95102bc1a55/dist/mac-arm64/Scry.app` 的 `app.asar` 哈希相同（只做只读哈希对比） |
+| 08:57:40（重装前复核） | `/Applications/Scry.app` 仍是 `e5030058…`、CLI `0.2.52`；`/Applications/.Scry.app.backup` 是 `5711c059…`、CLI `0.2.53`；`dist/mac-arm64/Scry.app/Contents/Resources/app.asar` 仍是 `5711c059…`；`/Applications` 下无 `.scry-install.lock`、无 journal、无 staging 残留 |
+| 08:57:49（用户批准重装） | 在仓库根用 Node `22.22.1` 执行既有原子安装器 `node scripts/install-macos.mjs`（使用既有 `dist/` 产物，非手工复制），退出码 0，输出 `/Applications/Scry.app` 与 `backup: /Applications/.Scry.app.backup` |
+| 08:57:54（重装后复核） | `/Applications/Scry.app`：App `0.2.231`、`com.scry.app`、`app.asar` `5711c059…`（等于 `dist/`）、内置 CLI `0.2.53`；`codesign --verify --deep --strict` → `valid on disk` / `satisfies its Designated Requirement`；`/Applications/.Scry.app.backup` 变为被替换出的 `e5030058…`（CLI `0.2.52`）；无 lock/journal/staging 残留 |
 
-备份与仍可取得的本轮产物：
+备份与仍可取得的产物：
 
-- `/Applications/.Scry.app.backup` 现在是**本轮构建**（`5711c059…`、CLI `0.2.53`，`app.asar` 时间 `08:38:40`）。本轮安装时移入该目录的 `0.2.230` bundle 已被下一次安装覆盖，已不在 `/Applications` 备份集里。
-- 6 个更早的 `preserved` 备份目录未被删除（`0.2.182` ×2、`0.2.186`、`0.2.190`、`0.2.191`、`0.2.196`）。
-- 本轮构建产物仍在 worktree `…/ef59bc16-f36d-4742-8e96-e8bf919c3a70/dist/mac-arm64/Scry.app`（`app.asar` `5711c059…`，gitignore 产物）。
+- `/Applications/.Scry.app.backup` 现在是**被替换出去的那份**（`e5030058…`、CLI `0.2.52`，目录时间 `08:44:55`）。这是既有安装器的固定轮转：重装时先删除旧备份目录，再把当时的 `/Applications/Scry.app` 移入。因此 08:38 那份本功能产物已不在备份集里，它的权威位置现在是 `/Applications/Scry.app` 本身与 `dist/mac-arm64/Scry.app`。本轮按用户要求**没有**手工搬动备份目录。
+- 6 个更早的 `preserved` 备份目录未被删除或改写（`0.2.182` ×2、`0.2.186`、`0.2.190`、`0.2.191`、`0.2.196`；重装前后只比 metadata：mtime/uid/gid 全部相同）。
+- 本功能构建产物仍在 worktree `…/ef59bc16-f36d-4742-8e96-e8bf919c3a70/dist/mac-arm64/Scry.app`（`app.asar` `5711c059…`，gitignore 产物），重装未改变它。
 
-结论与边界：本文档里的功能证据来自冻结源码（`72ec35cc`）的隔离隐藏实例，不受这次替换影响；但**当前 `/Applications/Scry.app` 不能当作本功能的已验收安装**。本阶段被限定为纯文档修正，因此没有重新安装、没有从备份回滚、没有合并其它 worktree、也没有停止其它会话的进程；集成与安装处置由父会话决定。
+结论与边界：本文档的功能证据来自冻结源码（`72ec35cc`）的隔离隐藏实例，与安装轮转无关；当前 `/Applications/Scry.app` 的字节内容已等于本功能的已验证产物。这次重装只替换 `/Applications/Scry.app` 这一个 App bundle，没有合并其它 worktree 的代码、没有改动它们的 WIP、没有停止其它会话的进程。
 
 ## 本轮功能覆盖
 
@@ -94,11 +97,13 @@ Node 20 的取得方式：官方 `https://nodejs.org/dist/v20.20.2/node-v20.20.2
 
 ## 安装、备份与未做的发布动作
 
-- 安装前复核：`/Applications/Scry.app` 仍为 `0.2.230`、`app.asar` `05c088c9…`，与开工时一致，未被并行安装覆盖。
-- 安装后复核（当时）：`CFBundleShortVersionString=0.2.231`、`CFBundleIdentifier=com.scry.app`、私有 CLI `Contents/Resources/bin/scry --version` → `0.2.53`（安装器自身在 `validateBundle` 里也校验了这一项）、`app.asar` SHA-256 等于构建产物。这个状态在 08:44:55 被外部替换，见上面“交付后复核”。
-- 备份（当时）：本轮安装器把上一份 bundle（`0.2.230`）移到 `/Applications/.Scry.app.backup`。该目录现在保存的是本轮构建，见“交付后复核”；6 个更早的 `preserved` 备份未被删除。
+- 安装前复核（08:38 那次）：`/Applications/Scry.app` 仍为 `0.2.230`、`app.asar` `05c088c9…`，与开工时一致，未被并行安装覆盖。
+- 安装后复核（08:38 那次）：`CFBundleShortVersionString=0.2.231`、`CFBundleIdentifier=com.scry.app`、私有 CLI `Contents/Resources/bin/scry --version` → `0.2.53`（安装器自身在 `validateBundle` 里也校验了这一项）、`app.asar` SHA-256 等于构建产物。这个状态在 08:44:55 被外部替换，见上面“交付后复核”。
+- 重装（08:57:49）：没有重建、没有重跑门禁、没有升版本——安装的仍是 08:38 那份通过全量门禁的产物。安装器自身的校验在这次重装里同样执行：staged 副本与安装后目标都检查 `Contents/MacOS/Scry` 可执行、`Contents/Resources/app.asar` 存在、内置 CLI 版本等于 `0.2.53`、bundle id 与 App 版本匹配。
+- 备份：安装器把被替换的 bundle 轮转到 `/Applications/.Scry.app.backup`（当前为 `e5030058…`），删除的是它自己上一轮的备份目录；6 个更早的 `preserved` 备份未被删除。日志在 `$TMPDIR/scry-sidechat-reinstall/`（`prestate.txt`、`install-macos.log`、`poststate.txt`、`prestate-entries.json`、`poststate-entries.json`）。
 - 未做：没有 push、没有 `npm publish`、没有安装/升级全局 `scry` CLI、没有用真实付费 Provider 账号、没有读写系统剪贴板、没有前台窗口弹窗（全部为隐藏隔离 fixture）。
-- 日常实例：用户当前运行的 App 进程可能是旧构建的内存镜像；重启后加载的是当时磁盘上的构建（现在是 08:44:55 那份，不是本轮构建）。本轮没有启动、退出或重启任何 App。
+- 日常实例：用户当前运行的 App 进程（pid `44207`，2026-10-28 启动）仍是旧构建的内存镜像；重启后加载的是当时磁盘上的构建（现在是 08:57:49 重装的这一份）。本轮没有启动、退出或重启任何 App。
+- 未来冲突没有被阻止：安装器只用 `/Applications/.scry-install.lock` 保证**同一时刻**只有一个安装器在跑（stale lock 通过 hard-link tombstone 回收）。它不持有“这份产物必须留在 `/Applications`”的保留权——另一个 worktree 之后再次执行安装，仍会把这一个 App bundle 替换掉，正如 08:44:55 发生过的那样。要避免，需要在多个会话之间序列化安装并约定最后一次安装由谁负责，这不是本仓库安装器能提供的保证。
 
 ## 版本-源码对应
 

@@ -1,6 +1,6 @@
 # 侧边会话 · 设计稿
 
-状态：本文件保留为**历史设计提案**（当时未实现 App 功能）。功能已经实现、通过发布前门禁并完成开发版安装，当前版本、证据、门禁与实际限制见 **[final-delivery.md](./final-delivery.md)**（App `0.2.231` / 私有 CLI `0.2.53`，已安装）与 [release-verification.md](./release-verification.md)（安装前门禁轮）。下面各节的布局、文案与默认行为仍是设计基线，不是实现状态声明。
+状态：本文件保留为**历史设计提案**（当时未实现 App 功能）。功能已经实现、通过发布前门禁并已安装，当前 `/Applications/Scry.app` 就是这份已验证产物（08:57:49 用户批准重装恢复；App `0.2.231` / 私有 CLI `0.2.53` / `app.asar` `5711c059…`）。当前版本、证据、门禁、安装轮转与实际限制见 **[final-delivery.md](./final-delivery.md)** 与 [release-verification.md](./release-verification.md)（安装前门禁轮）。下面各节的布局、文案与默认行为仍是设计基线，不是实现状态声明。
 
 - [交互设计稿](./index.html)：独立 HTML 示例，不连接 Provider，不修改项目文件，不保存真实会话。
 - [技术方案](./technical-plan.md)：现有调用链、数据合同、并行边界、实施顺序与验收。
