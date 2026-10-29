@@ -157,8 +157,10 @@ export class WorkflowServiceFoundation {
     const known = new Set(record.outcomes.map(outcome => outcome.attemptId))
     let recoveredAttempt = false
     for (const intent of record.intents.filter(intent => !known.has(intent.attemptId))) {
+      const binding = record.preview.program.roles.find(role => role.role === intent.role)
       const outcome: WorkflowAttemptOutcome = { attemptId: intent.attemptId, taskId: intent.taskId, nodeId: intent.taskId.split(':').pop() ?? intent.taskId,
         role: intent.role as WorkflowAttemptOutcome['role'], providerId: intent.providerId as WorkflowAttemptOutcome['providerId'],
+        ...(binding?.requestedModel ? { requestedModel: binding.requestedModel } : {}),
         actualModelStatus: 'unknown', state: 'unknown', settled: false, error: '应用重启后作用域未收敛；不会自动重发' }
       record.outcomes.push(outcome)
       recoveredAttempt = true

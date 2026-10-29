@@ -95,6 +95,9 @@ export class WorkflowService extends WorkflowServiceShutdown {
         evidence.runId !== `workflow-${target.attemptId}` || evidence.source !== 'app_run_terminal' || !Number.isSafeInteger(evidence.settledAt) || evidence.settledAt <= 0) throw new Error('停滞重启证据不可用')
       await Promise.all(record.preview.program.roles.map(role => this.capability(role, record.preview.workspace, true, 'execution')))
       this.assertAdmissionGeneration(generation)
+      // The approval object is revalidated against the cold-loaded frozen
+      // preview before restoring the runner-local approval cache.
+      this.runner.approve(record.preview, approval)
       return this.progressSnapshot(await this.runner.restartStalled(record.preview, approval, target, commandId, evidence.reason), undefined, record)
     })
   }

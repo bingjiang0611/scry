@@ -21,7 +21,7 @@ import type { ProviderRegistry } from './providers/registry'
 import type { WorkflowClassifierAdapter } from '../shared/workflow-classifier'
 import { workflowUsageFromProviderResults } from '../shared/workflow-usage'
 import { WorkflowSourceApplicationService } from './workflow-source-application-service'
-import { WorkflowRunSettlementStore } from './workflow-run-settlement-store'
+import { WorkflowRunSettlementStore, type WorkflowRunSettlement } from './workflow-run-settlement-store'
 
 export interface AppWorkflowRuntimeDependencies {
   userData: string
@@ -35,6 +35,8 @@ export interface AppWorkflowRuntimeDependencies {
   onProgress: (progress: WorkflowProgress) => void
   /** Main-owned classifier bridge. Omitted in production until a reviewed adapter exists. */
   classifierAdapter?: WorkflowClassifierAdapter
+  /** Internal lifecycle observation used by process-level recovery tests. */
+  onRunSettlementPersisted?: (settlement: WorkflowRunSettlement) => void | Promise<void>
 }
 
 export function createAppWorkflowRuntime(deps: AppWorkflowRuntimeDependencies) {
@@ -160,12 +162,16 @@ export function createAppWorkflowRuntime(deps: AppWorkflowRuntimeDependencies) {
         onWorkflowObservation: onObservation,
         onProviderDispatchAttempt: dispatch.onProviderDispatchAttempt,
         onTerminal: async (terminal: WorkflowTerminalResult) => {
+          const settlement: WorkflowRunSettlement = { schemaVersion: 1, workflowId, taskId, attemptId, runId, status: terminal.status,
+            settledAt: Date.now(), source: 'app_run_terminal' }
+          let persisted = false
           try {
-            await workflowRunSettlements.save({ schemaVersion: 1, workflowId, taskId, attemptId, runId, status: terminal.status,
-              settledAt: Date.now(), source: 'app_run_terminal' })
+            await workflowRunSettlements.save(settlement)
+            persisted = true
           } catch (error) {
             console.warn('[workflow] failed to persist App run settlement:', runId, error)
           }
+          if (persisted) await deps.onRunSettlementPersisted?.(settlement)
           const observed = workflowOutput(terminal.items)
           const hasTerminalEvidence = terminal.items.some((item) => item.kind === 'harness' && item.stage === 'result')
           resolve?.({ runId, status: terminal.status === 'blocked' ? 'blocked' : terminal.status === 'completed' && hasTerminalEvidence ? 'completed' : terminal.status === 'interrupted' ? 'stopped' : terminal.status === 'failed' ? 'failed' : 'unknown',
