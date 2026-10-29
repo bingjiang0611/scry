@@ -9,13 +9,22 @@ export async function exerciseLlmPerformanceSetup(contents, win, screenshot, nat
     }
   }
   const pointOf = async (selector, fraction = 0.5) => read(`(() => {
-    const node = document.querySelector(${JSON.stringify(selector)});
-    if (!node) throw new Error('Missing performance control: ' + ${JSON.stringify(selector)});
-    node.scrollIntoView({ block: 'center' });
-    const rect = node.getBoundingClientRect();
-    const x = Math.round(rect.left + rect.width * ${fraction}), y = Math.round(rect.top + rect.height / 2);
-    if (!node.contains(document.elementFromPoint(x, y))) throw new Error('Performance control obscured: ' + ${JSON.stringify(selector)});
-    return { x, y };
+    const nodes = [...document.querySelectorAll(${JSON.stringify(selector)})];
+    if (!nodes.length) throw new Error('Missing performance control: ' + ${JSON.stringify(selector)});
+    // Interval hit bands are 24 units wide, so a dense chart paints the next band over the
+    // previous band's center: the topmost band at an x receives the pointer. Every match is
+    // a real interactive interval, so measure them all and take the first whose own center
+    // is really hit. The guard below still fails the run when none is reachable.
+    const attempts = [];
+    for (const node of nodes) {
+      node.scrollIntoView({ block: 'center' });
+      const rect = node.getBoundingClientRect();
+      const x = Math.round(rect.left + rect.width * ${fraction}), y = Math.round(rect.top + rect.height / 2);
+      const hit = document.elementFromPoint(x, y);
+      if (node.contains(hit)) return { x, y };
+      attempts.push({ x, y, rect: rect.toJSON(), hit: hit?.outerHTML.slice(0, 300) });
+    }
+    throw new Error('Performance control obscured: ' + ${JSON.stringify(selector)} + '; geometry=' + JSON.stringify({ matched: nodes.length, first: attempts[0], last: attempts[attempts.length - 1], viewport: [innerWidth, innerHeight] }));
   })()`)
   const click = async selector => {
     const point = await pointOf(selector)
