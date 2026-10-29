@@ -79,6 +79,7 @@ D3 之后还有两处集成前源码修正（未重跑 App UI 与全量 `npm tes
 上一节的“未升版本、未打包安装、未 push”已被后续轮次接管：App 升到 `0.2.231`、私有 CLI 升到 `0.2.53`，
 在升版后的树上重跑了 `check:cli-release`（Node 20/22/24）、`npm run test:renderer:ui`、`npm test`，
 并用既有 `install:mac:dev` 原子安装到 `/Applications/Scry.app`（`app.asar` SHA-256 `5711c059…` 与构建产物相同）。
+该安装已在 08:44:55 被另一份构建替换（当前 `/Applications` 不保证包含本功能），逐项时间、哈希与备份位置见 final-delivery.md 的“交付后复核”一节。
 仍未 push、未 `npm publish`、未安装全局 CLI；日常实例需要用户重启才会加载新版本。
 当前版本、证据、门禁计数、首次失败与未验证项集中在 **[final-delivery.md](./final-delivery.md)**；
 安装前的门禁轮记录与本轮证据表述校订在 [release-verification.md](release-verification.md)。

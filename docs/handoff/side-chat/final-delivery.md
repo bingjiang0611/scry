@@ -1,7 +1,6 @@
 # 侧边会话最终交付（App 0.2.231 / 私有 CLI 0.2.53）
 
-状态：功能实现完成、全量门禁通过、开发版已原子安装到 `/Applications/Scry.app`。
-未 push、未 `npm publish`、未安装全局 CLI、未重启用户日常实例。
+状态：功能实现完成、全量门禁通过。（2026-10-29 08:38:40）本轮构建**已安装并通过校验**（App `0.2.231` / 私有 CLI `0.2.53`，`app.asar` `5711c059…`），但 **08:44:55 被另一份构建替换**，因此**当前 `/Applications/Scry.app` 不保证包含本功能，也未经本轮校验**；详见下面“交付后复核”一节。当前磁盘上的替换产物未被本轮验证。未 push、未 `npm publish`、未安装全局 CLI；本轮没有重新安装、回滚或重启任何 App。
 
 ## 分发身份
 
@@ -9,10 +8,29 @@
 - 本文件之前的两个提交：`1a5340c7`（证据表述校订，纯文档）、`18326f4c`（版本）。
 - **安装产物的构建提交是 `18326f4c`**（工作区干净，`dist/`、`out/` 均为 gitignore 产物）。
 - App `0.2.231`，bundle id `com.scry.app`；私有 CLI `0.2.53`（`RECORDER_VERSION` 与 CLI 包版本由 `version.test.ts` 锁定）。
-- 已安装 `Contents/Resources/app.asar` SHA-256 `5711c0599fcb925fc33a48077ccfb8770eb1d6a25310849b8a74019e73a2ae1c`，与本次构建产物 `dist/mac-arm64/Scry.app/Contents/Resources/app.asar` 相同。
+- 本轮安装（08:38:40）时的 `Contents/Resources/app.asar` SHA-256 `5711c0599fcb925fc33a48077ccfb8770eb1d6a25310849b8a74019e73a2ae1c`，与本次构建产物 `dist/mac-arm64/Scry.app/Contents/Resources/app.asar` 相同。**这个文件已不在 `/Applications/Scry.app`**，而是位于 `/Applications/.Scry.app.backup`；当前安装已被 08:44:55 的另一份构建替换，见下节。
 - 签名：Apple Development `baobingjiang@icloud.com (8Y6KR78CP7)`，`TeamIdentifier=7USHN8Q8JL`。**未公证**：`install:mac:dev` 是开发安装路径（`verifyReleaseBundle` 仅在 `--require-release` 下执行），不是签名/公证正式发布。
 
 版本决策：CLI 升 `0.2.53` 不是形式动作——`normalizeTurnDiffSnapshot` 现在保留 `workspaceOverlap`，属于内置 CLI 对外可见的运行合同；App 只升一次 `0.2.231`。根 README 的两行 npm 安装示例与 CLI README 的安装行已同步到 `0.2.53`（此前分别停留在 `0.2.51`、`0.2.52`）。
+
+## 交付后复核：当前 `/Applications` 已不是本轮构建
+
+交付后再次检查发现磁盘状态被外部改变。只记录实测事实，不推断其他会话的意图：
+
+| 时间（2026-10-29） | 实测事实 |
+|---|---|
+| 08:38:40 | 本轮 `install:mac:dev` 安装完成：App `0.2.231`、bundle id `com.scry.app`、`app.asar` `5711c0599fcb925fc33a48077ccfb8770eb1d6a25310849b8a74019e73a2ae1c`、私有 CLI `Contents/Resources/bin/scry --version` → `0.2.53`（父会话当时也独立复核过这一组值） |
+| 08:43:03 | 交付文档提交 `81f2b822`（上面那组值当时仍成立） |
+| 08:44:55 | `/Applications/Scry.app` 被另一份构建替换：App 仍为 `0.2.231`、`com.scry.app`，但 `app.asar` 为 `e50300589afaccc8121cd9bb7aad27eb0bb9246d255200304a4a13b11582edd8`，内置 CLI 为 `0.2.52` |
+| 复核时 | `e5030058…` 与并行 worktree `…/909f5f8b-f156-4d0e-8c61-c95102bc1a55/dist/mac-arm64/Scry.app` 的 `app.asar` 哈希相同（只做只读哈希对比） |
+
+备份与仍可取得的本轮产物：
+
+- `/Applications/.Scry.app.backup` 现在是**本轮构建**（`5711c059…`、CLI `0.2.53`，`app.asar` 时间 `08:38:40`）。本轮安装时移入该目录的 `0.2.230` bundle 已被下一次安装覆盖，已不在 `/Applications` 备份集里。
+- 6 个更早的 `preserved` 备份目录未被删除（`0.2.182` ×2、`0.2.186`、`0.2.190`、`0.2.191`、`0.2.196`）。
+- 本轮构建产物仍在 worktree `…/ef59bc16-f36d-4742-8e96-e8bf919c3a70/dist/mac-arm64/Scry.app`（`app.asar` `5711c059…`，gitignore 产物）。
+
+结论与边界：本文档里的功能证据来自冻结源码（`72ec35cc`）的隔离隐藏实例，不受这次替换影响；但**当前 `/Applications/Scry.app` 不能当作本功能的已验收安装**。本阶段被限定为纯文档修正，因此没有重新安装、没有从备份回滚、没有合并其它 worktree、也没有停止其它会话的进程；集成与安装处置由父会话决定。
 
 ## 本轮功能覆盖
 
@@ -77,10 +95,10 @@ Node 20 的取得方式：官方 `https://nodejs.org/dist/v20.20.2/node-v20.20.2
 ## 安装、备份与未做的发布动作
 
 - 安装前复核：`/Applications/Scry.app` 仍为 `0.2.230`、`app.asar` `05c088c9…`，与开工时一致，未被并行安装覆盖。
-- 安装后复核：`CFBundleShortVersionString=0.2.231`、`CFBundleIdentifier=com.scry.app`、私有 CLI `Contents/Resources/bin/scry --version` → `0.2.53`（安装器自身在 `validateBundle` 里也校验了这一项）、`app.asar` SHA-256 等于构建产物。
-- 备份：既有安装器把上一份 bundle 移到 `/Applications/.Scry.app.backup`（现为 `0.2.230`）；6 个更早的 `preserved` 备份目录未被删除。
+- 安装后复核（当时）：`CFBundleShortVersionString=0.2.231`、`CFBundleIdentifier=com.scry.app`、私有 CLI `Contents/Resources/bin/scry --version` → `0.2.53`（安装器自身在 `validateBundle` 里也校验了这一项）、`app.asar` SHA-256 等于构建产物。这个状态在 08:44:55 被外部替换，见上面“交付后复核”。
+- 备份（当时）：本轮安装器把上一份 bundle（`0.2.230`）移到 `/Applications/.Scry.app.backup`。该目录现在保存的是本轮构建，见“交付后复核”；6 个更早的 `preserved` 备份未被删除。
 - 未做：没有 push、没有 `npm publish`、没有安装/升级全局 `scry` CLI、没有用真实付费 Provider 账号、没有读写系统剪贴板、没有前台窗口弹窗（全部为隐藏隔离 fixture）。
-- 日常实例：用户当前运行的 App 进程可能是旧构建的内存镜像；**重启后**才会加载 `0.2.231`。本轮没有启动、退出或重启它。
+- 日常实例：用户当前运行的 App 进程可能是旧构建的内存镜像；重启后加载的是当时磁盘上的构建（现在是 08:44:55 那份，不是本轮构建）。本轮没有启动、退出或重启任何 App。
 
 ## 版本-源码对应
 
