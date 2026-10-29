@@ -164,6 +164,20 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  check:
+    name: Performance Check
+    if: ${{ always() }}
+    needs: [compare, native]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require performance measurements to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$RESULTS" | jq -e 'length > 0 and all(.[]; .result == "success")' > /dev/null
+
   comment:
     # Fork PRs retain a read-only summary/artifact. Never run PR code with a write token.
     if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository

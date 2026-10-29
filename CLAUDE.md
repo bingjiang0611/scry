@@ -75,6 +75,7 @@ Claude 是主要路径；Codex、Qoder、OpenCode、Pi 仍是实验性路径。�
 | 术语、架构、代码定位或首次安装 | [架构与地图](docs/agent/architecture.md) |
 | 修改对应领域/边界 | [检查清单](docs/agent/change-checklists.md)，只展开受影响领域 |
 | 普通代码、UI、跨边界或发布验证 | [验证与交付](docs/agent/verification.md)，按下述范围选择小节 |
+| PR、贡献分诊、评审与合并门禁 | [贡献指南](CONTRIBUTING.md)、[PR 工作流](docs/agent/pr-workflow.md)；分诊使用 `contribution-triage` skill |
 | 性能分析、优化、指标/门禁维护 | [持续性能闭环](docs/performance-loop.md)、`scry-performance-climb` skill |
 | 内网 registry、内网需求单、本地内部资料 | `.claude/company-context.local.md`（已 gitignore，缺失时按公开默认配置工作） |
 
@@ -124,7 +125,7 @@ Claude 是主要路径；Codex、Qoder、OpenCode、Pi 仍是实验性路径。�
 - 允许继续修复本次授权范围内的安全本地失败并重跑受影响检查；既有失败单列，不顺手扩大改动。外部结果未知、授权不足或需要用户决定时停止对应动作并交接。
 - **App 产物改动才默认构建安装**：本次改动影响桌面 App 运行代码或打包产物，且通过对应验证后，默认执行 `npm run install:mac:dev`，通过现有流程构建、打包并安装到 `/Applications/Scry.app`，无需再次询问；不绕过打包与安装校验。仅独立 CLI、iOS 或其他非 App 产物改动，按对应分发面验证，不顺带安装桌面 App。纯文档遵循上条豁免；用户明确要求不构建或不安装时遵循请求。
 - **使用独立 test 实例验证**：修改代码后需要验证 App 行为时，启动基于当前代码、使用独立 `userData` 和临时工作区的 test 实例，不要求用户重启当前 App，也不停止或干扰用户正在使用的实例。安装后的日常实例仍由用户自行重启加载新版本，但不作为验收前置条件；不把安装成功或 test 实例验证通过当作用户当前运行版本已更新。构建或安装失败时如实报告，不宣称已安装。
-- 检查 diff，默认只提交本次相关改动，不 push；已有 WIP 不混入。报告改动与实际检查；仅在涉及产物或验收时补充构建、安装、待用户重启状态及未验证项。纯文档不要求重启 App，不用 L1/L2 冒充 L3。
+- 常规交付使用任务分支与 PR，不直接推送 main。检查 diff，默认只提交本次相关改动，不 push、不创建远端 PR，除非明确获授权；已有 WIP 和无关未推送提交不混入。报告改动与实际检查；仅在涉及产物或验收时补充构建、安装、待用户重启状态及未验证项。纯文档不要求重启 App，不用 L1/L2 冒充 L3。
 
 ## 提交身份
 
