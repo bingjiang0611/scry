@@ -5,6 +5,7 @@
 - P0 **仍未完成、未冻结**：本篇记录 R1–R5 的 in-main trace 测量工具与 12 格功能采集，不改变上一阶段 native 窗口 fixture 的口径（见 [native 阶段记录](./20261028-session-concurrency-p0.md)）。
 - P1 **未开始**：本篇没有产生任何生产优化。此次只有测量工具，单独提交（提交号以 Git 历史为准）；不安装、不推送。
 - 阶段记录不是验收门禁；门禁与 ratchet 仍以[性能闭环](../performance-loop.md)为准。
+- **R6 入口**：其后的真实 App live lane（真实构建 App → loopback TLS → 受限 IPC → 生产 `RemoteChat`）已作为独立工具验收，只有一次功能采集、没有毫秒结论：[R6 live lane](./20261028-concurrency-trace-live.md)。
 
 ## 1. 这个 fixture 是什么
 

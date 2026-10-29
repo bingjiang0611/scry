@@ -78,7 +78,7 @@
 
 - native 内部 crypto、子进程、其它 hash API、字节拷贝：不观测。
 - 计数为 0 只说明该窗口内没有经过被观测的 JS primitive。
-- 真实 App 的 remote/transport 接线未跑：main-only 组件不能冒充完整用户路径。
+- 本篇的组件 scope 不含真实 App 的 remote/transport 接线；后续 R6 覆盖了受限回环链路（[R6 live lane](./20261028-concurrency-trace-live.md)），但它仍不是完整日常 App／WAN／paint，也不是 L2 改善。main-only 组件仍不能冒充完整用户路径。
 - 50k 的计时仍未测（只有 50k 的计数）。
 - 不宣称 L2 改善；GPU 进程 CPU ≠ 硬件 GPU。
 
@@ -87,7 +87,7 @@
 | 开放项 | 备注 |
 | --- | --- |
 | 基于 pilot 预注册 MDE／重复次数／顺序 | 预注册后才允许 L2 结论 |
-| 核对“完整用户路径 L2”缺的真实 App remote/transport 接线 | 不能把 main-only 组件当作真实用户路径 |
+| 核对“完整用户路径 L2”缺的真实 App remote/transport 接线 | R6 的受限回环链路已接上真实 App remote/transport（[见 R6](./20261028-concurrency-trace-live.md)），但仍不是完整日常/WAN/paint 或 L2；L2 仍需噪声与 MDE 预注册，main-only 组件不能当真实用户路径 |
 | 必要的 50k 计时 | 只有计数，没有毫秒 |
 | 不可观测项维持明确 | 不把缺失证据显示成 0 或绿 |
 | 冻结 collector、然后 P1 | 全部补齐后再冻结；measurement 与 P1 分开提交 |
