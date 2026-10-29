@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { summarizeConcurrent } from './concurrent-performance-summary.mjs'
+import { summarizeConcurrent, summarizeHookTrees } from './concurrent-performance-summary.mjs'
 
 describe('concurrent performance measurement', () => {
   it('counts real fsync and git calls, with a zero-work negative control', () => {
@@ -67,6 +67,15 @@ describe('concurrent performance measurement', () => {
     report.hooks.pop()
     expect(() => summarizeConcurrent(report)).toThrow()
     expect(() => summarizeConcurrent({ ...report, hooks: [], workload: { expectedHookStartsPerSession: 0 } })).toThrow('expectation')
+  })
+
+  it('accounts for whole Hook trees without double-counting Node CPU and rejects incomplete timing receipts', () => {
+    const entry = { code: 0, stderr: 'CLI diagnostics\nreal 0.42\nuser 0.12\nsys 0.03\n' }
+    expect(summarizeHookTrees([entry, entry])).toEqual({ status: 'measured', count: 2, cpuMs: 300, maxRoundingErrorMs: 20 })
+    expect(() => summarizeHookTrees([{ ...entry, code: 1 }])).toThrow('failed')
+    expect(() => summarizeHookTrees([{ ...entry, stderr: 'real 0.42\n' }])).toThrow('receipt')
+    const missingTree = { ...fixture(), main: { ...fixture().main, hookTrees: [entry] } }
+    expect(() => summarizeConcurrent(missingTree)).toThrow('Every shell Hook')
   })
 
   it('rejects missing Hook receipts and unbracketed measurement windows', () => {

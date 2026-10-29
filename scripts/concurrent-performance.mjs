@@ -10,6 +10,7 @@ import electron from 'electron'
 import { stopOwnedApp } from './owned-app-processes.mjs'
 import { nativeUiPointer } from './native-ui-pointer.mjs'
 import { connectConcurrentApp } from './concurrent-performance-cdp.mjs'
+import { summarizeHookTrees } from './concurrent-performance-summary.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const count = Number(process.argv[2] ?? 1)
@@ -32,7 +33,7 @@ const output = []
 const hash = value => createHash('sha256').update(value).digest('hex')
 const files = ['scripts/concurrent-performance.mjs', 'scripts/concurrent-performance-probe.cjs',
   'scripts/concurrent-performance.config.ts', 'scripts/fixtures/concurrent-performance-provider.ts', 'scripts/native-ui-pointer.mjs',
-  'scripts/concurrent-performance-cdp.mjs']
+  'scripts/concurrent-performance-cdp.mjs', 'scripts/concurrent-performance-summary.mjs']
 const harnessHash = hash(files.map(path => readFileSync(join(root, path))).join('\0'))
 const artifactHash = () => hash(['out', 'packages/turn-recorder-cli/dist'].flatMap(dir =>
   readdirSync(join(root, dir), { recursive: true, withFileTypes: true }).filter(entry => entry.isFile()).map(entry =>
@@ -198,6 +199,8 @@ try {
   const main = probes.find(p => p.role === 'main')
   assert.ok(main, 'Missing main probe shutdown receipt')
   assert.ok(main.ipc.some(call => call.at >= startedAt && call.at <= settledAt && call.runs === count), 'The logical view must observe all concurrent runs')
+  assert.equal(main.hookTrees.length, count * 42, 'Every shell Hook needs a process-tree receipt')
+  summarizeHookTrees(main.hookTrees)
   const hooks = probes.filter(p => p.role === 'hook')
   assert.equal(hooks.length, count * expectedHookStartsPerSession, 'Missing or extra Hook CLI receipts')
   assert.ok(hooks.every(p => p.argv.includes('--managed')), 'Hooks must use managed CLI')

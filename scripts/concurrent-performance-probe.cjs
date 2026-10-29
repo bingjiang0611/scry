@@ -8,6 +8,7 @@ const { basename } = require('node:path')
 const role = process.env.SCRY_CONCURRENT_ROLE || 'main'
 const counters = { fsync: 0, git: 0, children: 0, activeRunsCalls: 0, activeRunsJsonBytes: 0 }
 const ipc = []
+const hookTrees = []
 const open = fs.promises.open
 fs.promises.open = async function (...args) {
   const handle = await open.apply(this, args)
@@ -28,7 +29,17 @@ const spawn = ChildProcess.prototype.spawn
 ChildProcess.prototype.spawn = function (options) {
   counters.children++
   if (basename(options.file) === 'git') counters.git++
-  return spawn.call(this, options)
+  const timedHook = role === 'main' && options.file === '/bin/sh' && options.args[1]?.endsWith('/.scry/provider-hook.sh')
+  const argv = options.args
+  if (timedHook) options = { ...options, file: '/usr/bin/time', args: ['/usr/bin/time', '-p', ...argv],
+    envPairs: [...options.envPairs.filter(value => !value.startsWith('LC_ALL=')), 'LC_ALL=C'] }
+  const result = spawn.call(this, options)
+  if (timedHook) {
+    let stderr = ''
+    this.stderr.on('data', chunk => { stderr += String(chunk) })
+    this.once('close', code => hookTrees.push({ argv, code, stderr }))
+  }
+  return result
 }
 for (const method of ['spawnSync', 'execFileSync']) {
   const original = childProcess[method]
@@ -75,7 +86,7 @@ const flush = () => {
   delay.disable()
   fs.appendFileSync(process.env.SCRY_CONCURRENT_LOG, JSON.stringify({ role, pid: process.pid, at: Date.now(),
     argv: process.argv.slice(2), cpu: process.cpuUsage(), usage: process.resourceUsage(), uptimeSeconds: process.uptime(),
-    counters, samples, ipc }) + '\n')
+    counters, samples, ipc, hookTrees }) + '\n')
 }
 process.on('exit', flush)
 module.exports = { counters, flush }

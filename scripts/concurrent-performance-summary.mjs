@@ -5,6 +5,19 @@ import { pathToFileURL } from 'node:url'
 const sum = values => values.reduce((total, value) => total + value, 0)
 const mib = value => value / 1024 / 1024
 
+// POSIX time includes the shell and its waited-for descendants, including native cat.
+// Keep this separate from Node-only receipts; adding both would double-count the CLI.
+export function summarizeHookTrees(entries) {
+  let cpuMs = 0
+  for (const entry of entries) {
+    assert.equal(entry.code, 0, 'Hook process tree failed')
+    const match = entry.stderr.match(/(?:^|\n)real\s+(\d+(?:\.\d+)?)\nuser\s+(\d+(?:\.\d+)?)\nsys\s+(\d+(?:\.\d+)?)\s*$/)
+    assert.ok(match, 'Missing complete POSIX time receipt')
+    cpuMs += (Number(match[2]) + Number(match[3])) * 1000
+  }
+  return { status: 'measured', count: entries.length, cpuMs, maxRoundingErrorMs: entries.length * 10 }
+}
+
 export function summarizeConcurrent(report) {
   assert.equal(report.schema, 1)
   const expectedHookStartsPerSession = report.workload?.expectedHookStartsPerSession ?? 42
@@ -12,6 +25,7 @@ export function summarizeConcurrent(report) {
   assert.equal(report.hooks.length, report.count * expectedHookStartsPerSession)
   assert.equal(report.canonicalRecords, report.count)
   const { startedAt, settledAt, main } = report
+  if (main.hookTrees) assert.equal(main.hookTrees.length, report.count * 42, 'Every shell Hook needs a process-tree receipt')
   const samples = main.samples.filter(sample => sample.at >= startedAt && sample.at <= settledAt)
   assert.ok(samples.length >= 2, 'Not enough overlapping resource samples')
   const before = main.samples.filter(sample => sample.at <= startedAt).at(-1)
@@ -50,6 +64,7 @@ export function summarizeConcurrent(report) {
     count: report.count, elapsedMs, resourceWindowMs, samples: samples.length, animatedTitles: report.result?.ui?.animatedTitles,
     mainCpuMs: processCpuMs('Browser'), rendererCpuMs: processCpuMs('Tab'), gpuCpuMs: processCpuMs('GPU'),
     hookCpuMs, hookCpuMsPerStart: hookCpuMs / report.hooks.length,
+    hookTree: main.hookTrees ? summarizeHookTrees(main.hookTrees) : { status: 'unavailable', reason: 'Whole Hook-tree accounting was not collected' },
     measuredCpuMs: processCpuMs('Browser') + processCpuMs('Tab') + processCpuMs('GPU') + hookCpuMs,
     mainCpuOneCorePct: processCpuMs('Browser') / resourceWindowMs * 100,
     peakMainRssMiB: mib(Math.max(...samples.map(sample => sample.rss))),
