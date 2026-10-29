@@ -2,6 +2,8 @@
 
 日期：2026-10-28。分支：`feat/workflow-m0`。本轮起点：`bf1a829e3b25f07390f67cedecd0a2f267bf0545`。
 
+后续调查：[5 秒门禁、计数隔离与未交付实验](timeout-followup.md)。完整门禁仍失败，不覆盖本报告中的首次失败。
+
 ## 结论
 
 v4 已从静态设计接入生产 Renderer/Main：Run、Plan、Manage、Templates 共用一个工作台，代码、结构图与 canonical 证据联动。不是新写的演示页面，也没有另建 scheduler。
