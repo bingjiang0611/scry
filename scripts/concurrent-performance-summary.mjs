@@ -15,7 +15,9 @@ export function summarizeHookTrees(entries) {
     assert.ok(match, 'Missing complete POSIX time receipt')
     cpuMs += (Number(match[2]) + Number(match[3])) * 1000
   }
-  return { status: 'measured', count: entries.length, cpuMs, maxRoundingErrorMs: entries.length * 10 }
+  // Darwin time -p truncates user and sys independently to centiseconds.
+  // Each field can lose <10 ms, so a tree can undercount CPU by <20 ms.
+  return { status: 'measured', count: entries.length, cpuMs, maxRoundingErrorMs: entries.length * 20 }
 }
 
 export function summarizeConcurrent(report) {

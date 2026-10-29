@@ -71,11 +71,19 @@ describe('concurrent performance measurement', () => {
 
   it('accounts for whole Hook trees without double-counting Node CPU and rejects incomplete timing receipts', () => {
     const entry = { code: 0, stderr: 'CLI diagnostics\nreal 0.42\nuser 0.12\nsys 0.03\n' }
-    expect(summarizeHookTrees([entry, entry])).toEqual({ status: 'measured', count: 2, cpuMs: 300, maxRoundingErrorMs: 20 })
+    expect(summarizeHookTrees([entry, entry])).toEqual({ status: 'measured', count: 2, cpuMs: 300, maxRoundingErrorMs: 40 })
     expect(() => summarizeHookTrees([{ ...entry, code: 1 }])).toThrow('failed')
     expect(() => summarizeHookTrees([{ ...entry, stderr: 'real 0.42\n' }])).toThrow('receipt')
     const missingTree = { ...fixture(), main: { ...fixture().main, hookTrees: [entry] } }
     expect(() => summarizeConcurrent(missingTree)).toThrow('Every shell Hook')
+  })
+
+  it('bounds the independent user and sys centisecond truncation in Darwin time receipts', () => {
+    const result = summarizeHookTrees([{ code: 0, stderr: 'real 0.02\nuser 0.00\nsys 0.00\n' }])
+    const lossPerFieldMs = 9999 / 1000
+    expect(result.cpuMs).toBe(0)
+    expect(result.maxRoundingErrorMs).toBeGreaterThan(2 * lossPerFieldMs)
+    expect(result.maxRoundingErrorMs).toBe(20)
   })
 
   it('rejects missing Hook receipts and unbracketed measurement windows', () => {
