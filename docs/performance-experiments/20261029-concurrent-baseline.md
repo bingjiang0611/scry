@@ -91,8 +91,10 @@ main/Hook fsync 计数在三次重复中均完全相同；git 子进程数分别
 提交检查按文件完整大小拒绝了原始大样本 JSON、驱动及既有的大机会日志。未跳过 Hook：样本按并发数分组，通信代码按职责提取；撤回机会日志的重复条目，实验结论仍保存在本报告及路径地图。
 
 - 本地已验证：旧测量源码指纹保持一致、通信函数正文逐字节等价、3 个 cohort 共 9 样本及原始数据 SHA-256 一致、全部 JS 语法检查。提取后的 CDP 模块另用离线 stub 运行，消息路由、Paint/Layout 汇总、等待明确 trace completion、关闭时拒绝未完成请求四项通过。
-- 追加的 N=1/3/5 真 App 验证已在远端启动（控制任务 PID `80895`），但取回时 SSH `30.7.226.226:22` 连续两次连接超时。完成状态、进程收敛和后续 unit 结果为 **unknown**；未重派任务，也不将前一驱动的 9 次结果当作这一版的端到端结果。
-- 交接：用户恢复 mac2 的 SSH 后，由 Agent 只读取 `/private/tmp/scry-concurrent-b7f1b43f.ZcWCQl/modular-verification.exit`、`modular-tests.exit` 及对应日志，并核对登记进程；先确认原任务，不重跑未知结果。
+- 原追加任务 PID `80895` 在 SSH 断开时状态未知。恢复后先取回原日志：`modular-verification.exit` 为 **75**，被另一项计时任务 `workflow-timeout-policy-full` 拦下，实际未启动 App，unit 未执行。原控制进程已退出；没有重放结果未知的任务。
+- 确认原任务没有启动 App、计时锁已释放后，仅补跑当前拆分版本的 N=1/3/5 各一次：**3/3 通过**。代码指纹与上述当前驱动一致，App/CLI 产物指纹与原基准一致；trace 完整收口，9 条 canonical records 和归档均在退出后通过检查，实际 Hook CLI 共 378 次。此组只验证拆分后的入口，不合并到原来的九次基准，也不用于宣称提速。
+- 补验计时锁标签 `concurrent-modular-recovery`：104345 ms，起止 load 2.11/4.46，`highLoad: false`。随后同一组 focused unit 为 **4 文件、26 测试通过**。日志见远端保留目录内 `modular-recovery-verification.log`、`modular-recovery-tests.log`，两者退出码均为 0。
+- 每个 App 均由既有 ownership helper 确认登记进程退出（每实例登记 5 个）；再次检查 main PID `87160`、`87870`、`89733` 和控制 PID `87143` 均已不存在，计时锁已释放。远端日常仓库仍为干净的 `205521e9`，未停止或修改日常 App。追加验证的 unknown 已解除。
 
 ## 解释与下一步
 
@@ -125,5 +127,6 @@ node scripts/concurrent-performance-summary.mjs <result.json> ...
 
 - 远端保留目录：`/private/tmp/scry-concurrent-b7f1b43f.ZcWCQl`，约 987 MiB，含隔离源码/依赖、日志与 `raw-results`；现有 App 与仓库未改动。各次临时 workspace/userData 位置在原始 result 中。
 - 本地证据：`/tmp/scry-concurrent-results.ta3gUg/results.tgz`，含最终逐次资源数据、App 日志、检查结果及关键预检失败日志。同目录另存 `final-metadata-checks.log`（拆分前最终 26 测试）、`payload-verification.log`（退出后完整内容核对）和 `measured-harness.tgz`（实际测量代码）。
-- 证据包 SHA-256：`993b46daac9ca617147ee970c462303986aec54c269bc0ff42f73efba58aedb7`。
+- 原基准证据包 SHA-256：`993b46daac9ca617147ee970c462303986aec54c269bc0ff42f73efba58aedb7`。
+- SSH 恢复后的补验证据：同一本地目录内 `modular-recovery.tgz`、`modular-recovery-summary.json`，包含三个场景的原始结果、App 日志、26 测试日志及原任务被锁拦下的记录；远端保留目录有同名副本。补验证据包 SHA-256：`d6f1b0cfcec74a426b045261fb91f1a8c6ca42fc0f0655944354b414000b811d`。
 - 原始数据均为本次生成的离线内容；不包含真实用户会话。无需重启日常 App；没有安装新版本。
