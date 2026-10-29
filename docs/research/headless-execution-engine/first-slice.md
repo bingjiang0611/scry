@@ -1,6 +1,6 @@
 # 首个切片：先归因，再验证增量 trace
 
-**状态：P0 已正式冻结（baseline 冻结，不是改善结论）；P1 已实现 P1a＋P1b，两者均通过 focused／typecheck／build／L1 与真实功能检查点（R6／50k／corrupt-body；只作功能证据），完整预注册 A/B 尚未执行。** 测量工具、pilot、比较预注册与最终副本回放都已完成，副本内容、身份与验收见[P0 冻结篇](../../performance-experiments/20261028-concurrency-trace-p0-freeze.md) §5；预注册阈值与顺序未变（§4）。当前检查点见 [P1a 篇](../../performance-experiments/20261029-concurrency-trace-p1a.md) 与 [P1b 篇](../../performance-experiments/20261029-concurrency-trace-p1b.md)；完整候选（P1a＋P1b）的 32 + 16 采样尚未开始。用户已授权 P0＋P1；P2 及以后仍需单独批准。阶段记录与已实现能力见[会话并发 P0 归因](../../performance-experiments/20261028-session-concurrency-p0.md)。源码基线、权威边界与阶段估算见[总览](../headless-execution-engine-design.md)。本篇是当前执行入口，三篇架构附录不是本切片的依赖。
+**状态：P0 已正式冻结（baseline 冻结，不是改善结论）；P1 已实现 P1a＋P1b，均通过 focused／typecheck／build／L1 与真实功能检查点，完整预注册 A/B 第一轮已执行（候选 `517e4f6d`）：50k 与 R6 limit4 host CPU／两 limit visit wall 达门槛，16 并发 host CPU 未达 15%，按预注册停止扩大。** 测量工具、pilot、比较预注册与最终副本回放都已完成，副本内容、身份与验收见[P0 冻结篇](../../performance-experiments/20261028-concurrency-trace-p0-freeze.md) §5；预注册阈值与顺序未变（§4）。当前检查点见 [P1a 篇](../../performance-experiments/20261029-concurrency-trace-p1a.md) 与 [P1b 篇](../../performance-experiments/20261029-concurrency-trace-p1b.md)，结果见 [P1 结果篇](../../performance-experiments/20261029-concurrency-trace-p1-results.md)；完整候选（P1a＋P1b）的 32 + 16 采样已完成。用户已授权 P0＋P1；P2 及以后仍需单独批准。阶段记录与已实现能力见[会话并发 P0 归因](../../performance-experiments/20261028-session-concurrency-p0.md)。源码基线、权威边界与阶段估算见[总览](../headless-execution-engine-design.md)。本篇是当前执行入口，三篇架构附录不是本切片的依赖。
 
 ## A. 范围与交付物
 

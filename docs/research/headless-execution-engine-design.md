@@ -1,6 +1,6 @@
 # Scry 无界面执行与证据引擎：完整技术方案
 
-- 状态：**用户已授权实施 P0＋P1。P0 已正式冻结（baseline 冻结，不是改善结论）；P1 已实现 P1a（有界投影缓存）＋P1b（投影 stamp 增量 hash），两者均通过功能与 L1 验证（focused／typecheck／build／真实 App＋50k＋负控＋counter），**完整预注册 A/B 尚未执行、不声称 CPU／wall 改善**；P2–P7 与三篇架构附录仍需各自证据与单独批准，不默认继续。** 冻结副本、身份与验收见[P0 冻结篇](../performance-experiments/20261028-concurrency-trace-p0-freeze.md) §5；检查点见 [P1a 篇](../performance-experiments/20261029-concurrency-trace-p1a.md) 与 [P1b 篇](../performance-experiments/20261029-concurrency-trace-p1b.md)；阶段记录见[会话并发 P0 归因](../performance-experiments/20261028-session-concurrency-p0.md)。
+- 状态：**用户已授权实施 P0＋P1。P0 已正式冻结（baseline 冻结，不是改善结论）；P1 已实现 P1a（有界投影缓存）＋P1b（投影 stamp 增量 hash），均已通过功能与 L1 验证，完整预注册 A/B 第一轮已执行（候选 `517e4f6d`）：main50k 与 R6 limit4 host CPU／两 limit visit wall 达门槛，16 并发 host CPU 未达 15%，按预注册停止扩大；结论按 scope 分别成立，不整体宣称改善；P2–P7 与三篇架构附录仍需各自证据与单独批准，不默认继续。** 冻结副本、身份与验收见[P0 冻结篇](../performance-experiments/20261028-concurrency-trace-p0-freeze.md) §5；检查点见 [P1a 篇](../performance-experiments/20261029-concurrency-trace-p1a.md) 与 [P1b 篇](../performance-experiments/20261029-concurrency-trace-p1b.md)，**A/B 结果见 [P1 结果篇](../performance-experiments/20261029-concurrency-trace-p1-results.md)**；阶段记录见[会话并发 P0 归因](../performance-experiments/20261028-session-concurrency-p0.md)。
 - 日期：2026-10-28。
 - 方案来源：多会话并发性能调查中的方案二。
 - 源码基线：`66c2f38fddbc687e1a72eccc7bfe391de2971498`。

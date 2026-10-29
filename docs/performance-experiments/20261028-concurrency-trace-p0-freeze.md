@@ -8,7 +8,7 @@
 
 本篇不声称任何改善，也不声称已具备稳定噪声匹配或 L3 证据；P1 的第一批 A/B 尚未开始。
 
-**后续记录（2026-10-29）**：P1 已在实施。第一步 P1a（有界 live 投影缓存）已实现，并通过 focused 59/59（10 files）、完整 typecheck、`npm run build`、`git diff --check` 与 L1 计数；真实 App／50k 功能随后在锁释放后完成检查点（[P1a 篇](./20261029-concurrency-trace-p1a.md) §5），P1b 也已实现并通过功能与 L1 验证（[P1b 篇](./20261029-concurrency-trace-p1b.md)）；完整预注册 A/B **仍未执行**。本篇冻结当时的"P1 尚未开始"保留为历史口径，冻结副本与预注册（§3／§4）未改动。
+**后续记录（2026-10-29）**：P1 已在实施。第一步 P1a（有界 live 投影缓存）已实现，并通过 focused 59/59（10 files）、完整 typecheck、`npm run build`、`git diff --check` 与 L1 计数；真实 App／50k 功能随后在锁释放后完成检查点（[P1a 篇](./20261029-concurrency-trace-p1a.md) §5），P1b 也已实现并通过功能与 L1 验证（[P1b 篇](./20261029-concurrency-trace-p1b.md)）。完整预注册 A/B 第一轮随后执行完毕（候选 `517e4f6d`），结果按 scope 分别判定，见[结果篇](./20261029-concurrency-trace-p1-results.md)。本篇冻结当时的"P1 尚未开始"保留为历史口径，冻结副本与预注册（§3／§4，含本节阈值与顺序）未改动。
 
 ## 1. 已完成的部分（只链接，不复制历史）
 
@@ -143,7 +143,7 @@ R6 harness 身份由 `48160a…`（旧 pilot）变为 `228aeb8f…`，原因只�
 
 ## 6. P1 下一步
 
-**后续记录（2026-10-29）**：P1a 已实现并验证 focused／typecheck／build／L1（[P1a 篇](./20261029-concurrency-trace-p1a.md)）；本节的采样仍未开始；P1a＋P1b 已实现并通过功能与 L1 验证（[P1b 篇](./20261029-concurrency-trace-p1b.md)），但没有执行 32 + 16 预注册 A/B。
+**后续记录（2026-10-29）**：P1a 已实现并验证 focused／typecheck／build／L1（[P1a 篇](./20261029-concurrency-trace-p1a.md)）；本节的采样已按原文执行一轮（候选 `517e4f6d`；limit4 6 对／limit16 7 对／main50k 8 对，48/48 检查通过，`highLoad` 整对排除后未补采），结果见[结果篇](./20261029-concurrency-trace-p1-results.md)；16 并发 host CPU 未达 15%，按本节停止扩大。
 
 （冻结时的原文，保留）P1 **尚未开始**。开始后按 §4.2 执行：R6 每个候选用 `(4 ABBA),(16 BAAB),(16 ABBA),(4 BAAB)` 重复两次的 32 cell（每个 limit 8 对），50k 用 `ABBA,BAAB,ABBA,BAAB` 的 8 对／16 samples；全部在 `timing-run.mjs` 锁内串行，每 cell 全新私有目录，并记录实际 bundle／launcher／源码身份。
 

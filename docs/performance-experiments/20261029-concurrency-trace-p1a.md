@@ -2,9 +2,9 @@
 
 ## 状态
 
-**P1a 代码与真实功能检查点均已验证；完整预注册 A/B 未验证。P1b 已实现并通过功能与 L1 验证，见 [P1b 篇](./20261029-concurrency-trace-p1b.md)。**
+**P1a 代码与真实功能检查点均已验证；P1b 亦已实现并验证（[P1b 篇](./20261029-concurrency-trace-p1b.md)）。预注册 A/B 已执行，按 scope 分别判定，见[结果篇](./20261029-concurrency-trace-p1-results.md)。**
 
-- 这是 P1 的**第一个检查点**，不是性能验收。完整候选（P1a+P1b）之后才按 [P0 冻结篇](./20261028-concurrency-trace-p0-freeze.md) §4.2 做 32 + 16 预注册采样。
+- 这是 P1 的**第一个检查点**，不是性能验收；32 + 16 采样已在完整候选上执行，结果见[结果篇](./20261029-concurrency-trace-p1-results.md)。
 - P0 frozen 副本 `/tmp/scry-p0-accepted-baseline.zYksRe/` 未变，预注册 §3／§4 一字未改。
 - 未安装、未推送。检查点代码提交 `445fa62ce33c60f3787428a0e6123db3f4f024db`。
 
@@ -63,7 +63,7 @@
 | writer／other | 不变 | 不变 | — |
 | hash calls／bytes | 349 998／115 847 868 | 同左 | 不变 |
 
-边界：此处量到的减少是**重复投影里工具 input 的编码**（同一批 tool 事件每次读取都重新 capture 并 JSON 序列化）以及相应 total 计数；hash 仍全量，所以不能叫整体 CPU 下降，也不能说"更快"。本场景无 `worse` 项。（P1b 增量 hash 不在此列。）
+边界：此处量到的减少是**重复投影里工具 input 的编码**（同一批 tool 事件每次读取都重新 capture 并 JSON 序列化）以及相应 total 计数；hash 仍全量，所以不能叫整体 CPU 下降，也不能说"更快"。本场景无 `worse` 项。
 
 ## 5. 真实功能检查点（锁自然释放后完成）
 
@@ -87,5 +87,5 @@
 
 1. 父会话提交本检查点（提交号后补）。
 2. ~~锁空闲后重跑真实 App／50k 功能与 `corrupt-body` 控制~~ → 已在 §5 完成（功能证据，非 A/B）。
-3. P1b（为 delta 提供 hash hint）已实现，功能与 L1 已验证（[P1b 篇](./20261029-concurrency-trace-p1b.md)）；`MAX_*` 与旧 cursor／reset 合同保持不变。
-4. P1a+P1b 合体成候选后，才按预注册 §4.2 做 32 + 16 采样；功能／oracle／身份／cleanup 出错立即停止；`highLoad` 按 §4.3 只排除该配对、不补采，未达 MDE 不报改善。
+3. P1b（hash hint）已实现并验证；`MAX_*` 与旧 cursor／reset 合同不变。预注册 A/B 见[结果篇](./20261029-concurrency-trace-p1-results.md)。
+4. P1a+P1b 候选已按预注册 §4.2 完成 32 + 16 采样，见结果篇；`highLoad` 按 §4.3 只排除该配对，未改阈值、未补采，未达 MDE 不报改善。
