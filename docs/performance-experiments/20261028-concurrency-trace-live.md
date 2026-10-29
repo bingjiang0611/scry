@@ -3,7 +3,7 @@
 ## 状态
 
 - **只有 R6 测量工具已验收**：本篇记录 18 个测试文件 / 108 项、完整 `typecheck`、`git diff --check` 通过的采集工具，不改变 R1–R5 的 in-main 口径（见 [readers 篇](./20261028-concurrency-trace-readers.md)）。
-- **P0 未冻结**：50k Electron 耗时与噪声／MDE 预注册都还没做；每格只采一次功能样本，只有描述性毫秒／CPU 样本，**没有**毫秒结论。P1 未开始。
+- **P0 未冻结**：50k Electron 耗时与噪声／MDE 预注册都还没做；每格只采一次功能样本，只有描述性毫秒／CPU 样本，**没有**毫秒结论。P1 未开始。**后续记录**：50k 组件计时与 reader=1 的 noise pilot 已完成、比较预注册已定（[main-only 50k 篇](./20261028-concurrency-trace-main-50k.md)、[P0 冻结与比较预注册](./20261028-concurrency-trace-p0-freeze.md)）；本篇每格仍是一次功能样本，P0 仍待父会话保存并回放最终 baseline 副本后正式冻结，P1 仍未开始。
 - 没有速度提升 claim。未安装、未推送。阶段记录不是门禁，门禁仍以[性能闭环](../performance-loop.md)为准。
 - 本篇先以 `631e07ea`（40 files）落在本地提交；**提交之后**才运行完整单测：`env -u P0_PROBE -u P1_PROBE -u BILLING_ADMIN_REAL npm run test:unit` → 429 files pass + 4 skip，4565 tests pass + 4 skip，411.58 s；4 个 skip 是 `performance-correlation`、`billing-admin-real`、`p0-integration`、`p1-integration` 各自的默认显式门控。
 
@@ -46,7 +46,7 @@
 
 合计 96 个任务、160 visits、1120 次 round reply；每 visit 7 个完整视图；renderer scope 的 main CPU 全部 unavailable、launcher Node 的 main CPU measured；6 个 cell 全部 `owned stopped / close 0`。`--peers 0` 不启动 client，所以两格没有 client 清理证据。
 
-全部 6 个 case 的 `highLoad=false`，但每格只有**一次功能样本**：这是功能与描述性证据，**不是**稳定 timing，也不是噪声估计。
+全部 6 个 case 的 `highLoad=false`，但每格只有**一次功能样本**：这是功能与描述性证据，**不是**稳定 timing，也不是噪声估计。**后续记录**：reader=1、limit 4/16 各 n=5 的 noise pilot 已采且无排除，数字见 [P0 冻结与比较预注册](./20261028-concurrency-trace-p0-freeze.md) §3。
 
 ## 5. 身份
 
@@ -111,6 +111,6 @@ npm run typecheck && git diff --check
 ## 10. 不声称
 
 - 不是日常 App 的运行时审计；失败注入只做了 `--fail-after-round` 一种。
-- 有描述性的毫秒与 CPU 样本，但没有稳定噪声估计、没有对照 L2，50k 也未测，因此**不能**说更快或更稳。
+- 有描述性的毫秒与 CPU 样本，但没有稳定噪声估计、没有对照 L2，50k 也未测，因此**不能**说更快或更稳。**后续记录**：噪声 pilot 与 50k 组件计时已有（[P0 冻结与比较预注册](./20261028-concurrency-trace-p0-freeze.md)、[main-only 50k 篇](./20261028-concurrency-trace-main-50k.md)），但本篇仍无对照 L2，仍不能说更快。
 - 不声称覆盖全部后代进程的清理：只证明登记过的进程 stopped 且 `close 0`。
 - 未安装、未推送；P0 冻结与 P1 都不在本篇范围。

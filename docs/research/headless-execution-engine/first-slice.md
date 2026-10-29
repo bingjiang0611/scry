@@ -1,6 +1,6 @@
 # 首个切片：先归因，再验证增量 trace
 
-**状态：P0 实施中（测量工具阶段，未完成、未冻结）；P1 未开始。** 用户已授权 P0＋P1；P2 及以后仍需单独批准。阶段记录与已实现能力见[会话并发 P0 归因](../../performance-experiments/20261028-session-concurrency-p0.md)。源码基线、权威边界与阶段估算见[总览](../headless-execution-engine-design.md)。本篇是当前执行入口，三篇架构附录不是本切片的依赖。
+**状态：P0 实施中（测量工具阶段，未完成、未冻结）；P1 未开始。** 比较预注册已定（[P0 冻结与比较预注册](../../performance-experiments/20261028-concurrency-trace-p0-freeze.md)），但 P0 仍待父会话保存并回放最终 baseline 副本后才正式冻结，P1 仍未开始。用户已授权 P0＋P1；P2 及以后仍需单独批准。阶段记录与已实现能力见[会话并发 P0 归因](../../performance-experiments/20261028-session-concurrency-p0.md)。源码基线、权威边界与阶段估算见[总览](../headless-execution-engine-design.md)。本篇是当前执行入口，三篇架构附录不是本切片的依赖。
 
 ## A. 范围与交付物
 

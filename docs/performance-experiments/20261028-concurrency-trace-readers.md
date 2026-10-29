@@ -18,7 +18,7 @@
 ## 2. 50k 与未测部分
 
 - 每 run 50k 的 main projection/revision 内容与容量/边界已有单测；真实 client 上限仍是 `MAX_ITEMS=10_000`，50k 没有伪装成"聚合成小任务"。
-- 仍未测：50k 的 Electron 耗时、完整 App 远程混合路径、实际 hash 工作计数。
+- 本篇写时仍未测：50k 的 Electron 耗时、完整 App 远程混合路径、实际 hash 工作计数。**后续记录**：hash 计数（[计数与试点篇](./20261028-concurrency-trace-counts-pilot.md)）与 50k 组件计时（[main-only 50k 篇](./20261028-concurrency-trace-main-50k.md)）已补；完整 App 远程混合路径仍不是日常路径证据。
 - `projectionInputItems` 只是输入规模，不是工作量或耗时证明。
 
 ## 3. 证据与身份
@@ -86,7 +86,7 @@ wrapper 必须带 `<label> -- <command>`；单格参数只有 `--limit 4|16`、`
 
 | 开放项 | 备注 |
 | --- | --- |
-| pilot 噪声／MDE／重复次数与顺序预注册 | 预注册后才允许 L2 结论；已采 reader 变体的低负载样本见[计数与试点篇](./20261028-concurrency-trace-counts-pilot.md) |
-| 必要的 native／50k 计量、实际 hash 工作计数 | 实际 hash/JSON 计数工具已实现，48 条 observations 采自 R4 与 10k/50k（[计数与试点篇](./20261028-concurrency-trace-counts-pilot.md)）；50k 仍无毫秒 |
+| pilot 噪声／MDE／重复次数与顺序预注册 | 预注册后才允许 L2 结论；已采 reader 变体的低负载样本见[计数与试点篇](./20261028-concurrency-trace-counts-pilot.md)；**后续记录**：预注册已定，见 [P0 冻结与比较预注册](./20261028-concurrency-trace-p0-freeze.md) §4 |
+| 必要的 native／50k 计量、实际 hash 工作计数 | 实际 hash/JSON 计数工具已实现，48 条 observations 采自 R4 与 10k/50k（[计数与试点篇](./20261028-concurrency-trace-counts-pilot.md)）；50k 当时无毫秒，**后续记录**见 [main-only 50k 篇](./20261028-concurrency-trace-main-50k.md) |
 | collector 冻结与提交 | 工具单独提交；本篇不代表已提交、已安装或已推送。冻结前的剩余条件见[计数与试点篇](./20261028-concurrency-trace-counts-pilot.md) |
 | P1 | 未开始，另 commit |

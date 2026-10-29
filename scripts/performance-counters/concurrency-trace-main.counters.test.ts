@@ -1,13 +1,11 @@
-import { isDeepStrictEqual } from 'node:util'
 import { describe, expect, it } from 'vitest'
-import { createTraceRuntime } from '../../src/main/bootstrap/trace-runtime'
-import { sanitizeToolEvents } from '../../src/core/turn-recorder/tool-content'
-import { DockBadgeState } from '../../src/main/dock-badge'
-import { createTraceRevisions, type TraceDeltaAnswer } from '../../src/main/remote/desktop-trace-delta'
+import { createTraceRevisions } from '../../src/main/remote/desktop-trace-delta'
 import { mergeRemoteTrace, type RemoteTraceView } from '../../src/renderer/remote-trace'
-import type { DesktopRemoteTraceRead, DesktopTraceCursor } from '../../src/shared/desktop-remote'
 import type { ActiveRun } from '../../src/shared/trace'
 import { applyWorkloadStep, createWorkloadRun, WORKLOAD_STEPS } from '../fixtures/concurrency-trace-workload'
+import {
+  assertMatchesOracle, createBoundedRuntime, runMainTrialSample, stageItemCounts, transmit
+} from '../fixtures/concurrency-trace-main-trial'
 import {
   buildObservations, defaultRepeats, registerProbeControl, startProbe, totalsMatchPhases, writeCollector,
   type ProbePhase, type ProbeSample
@@ -16,95 +14,35 @@ import {
 // Single-run main projection/revision component cases at 10k and 50k items. DesktopRemoteClient caps one read
 // at 10000 items, so the 50k case is a host-side projection/revision claim and never a client or capability
 // claim: no client, no wire transport, no App, no TLS, no Provider and no 16-task cell.
-const LIVE_POLICY = { toolOutput: 'full' as const, toolContentFieldBytes: 8 * 1024, toolContentTurnBytes: 128 * 1024 }
-
-const projection = (value: unknown): unknown => {
-  const encoded = JSON.stringify(value)
-  if (encoded === undefined) throw new Error('projection input must be JSON-serializable')
-  return JSON.parse(encoded)
-}
-// The peer never holds the host's live objects: one JSON round trip before merge, as in R3.
-const transmit = (envelope: DesktopRemoteTraceRead): DesktopRemoteTraceRead => projection(envelope) as DesktopRemoteTraceRead
+// The single-run sample, its stage contract and its literal-policy oracle live in
+// ../fixtures/concurrency-trace-main-trial so the 50k Electron timing entry replays the same work.
 
 let eventSeq = 0
-const boundedRuntime = () => createTraceRuntime({
-  getWindow: () => null,
-  rendererCanReceive: () => false,
-  activeRunSessionKey: () => null,
-  dockBadge: new DockBadgeState(() => {}),
-  mainEventId: (prefix, runId) => `${prefix}:${runId}:${++eventSeq}`
-})
-
-// Fixed workload counts after each write stage: replace-stream folds a three-item stream into one (-2), the
-// append step adds those two items back, and the remaining steps keep the count. Asserted per stage so a
-// shortened or shifted workload cannot pass as a measurement.
-const stageItemCounts = (k: number): readonly number[] => [k, k, k - 2, k, k, k, k]
-
-// Independent oracle: the RAW run bounded by a local literal policy, never the projection under test and
-// never the fixture's own runtime constant. Complete JSON, so bodies, order, metadata and the content budget
-// are all compared.
-const oracleRun = (run: ActiveRun): unknown => projection({
-  ...run,
-  items: sanitizeToolEvents(run.items, LIVE_POLICY, 'live_renderer')
-})
-
-function assertMatchesOracle(delivered: ActiveRun, raw: ActiveRun, label: string): void {
-  if (!isDeepStrictEqual(delivered, oracleRun(raw))) {
-    throw new Error(`delivered run differs from the independent literal-policy oracle after ${label}`)
-  }
-}
+const boundedRuntime = () => createBoundedRuntime({ nextEventId: (prefix, runId) => `${prefix}:${runId}:${++eventSeq}` })
 
 /** One complete single-run sample: 7 write stages, 7 bounded projections, 7 revision reads, 7 merges. */
 function runSingleComponent(k: number): ProbeSample {
   let current: ProbePhase = 'other'
   const probe = startProbe(() => current)
   try {
-    const runtime = boundedRuntime()
-    const revisions = createTraceRevisions()
-    const run = createWorkloadRun({ runId: `run-main-${k}`, k })
-    const expectedCounts = stageItemCounts(k)
-    if (expectedCounts.length !== WORKLOAD_STEPS.length) throw new Error('the stage count contract does not cover every workload step')
-    let view: RemoteTraceView | null = null
-    let cursor: DesktopTraceCursor | undefined
-    // The bounded projection belongs to the reader side of the cell, like the reader in the R4 lane.
-    const readBounded = (): { bounded: ActiveRun, answer: TraceDeltaAnswer } => {
-      const previous: ProbePhase = current
-      current = 'reader'
-      try {
-        const bounded = runtime.boundedLiveRun(run)
-        return { bounded, answer: revisions.observe(run.runId, bounded.items, cursor) }
-      } finally {
-        current = previous
+    // The shared sample names five phases; this collector keeps its original three buckets by mapping
+    // serialize/merge/oracle onto `other`, so the recorded counts stay comparable with the accepted numbers.
+    const facts = runMainTrialSample({
+      k,
+      runId: `run-main-${k}`,
+      observe: (phase, _step, operation) => {
+        const previous = current
+        current = phase === 'writer' || phase === 'reader' ? phase : 'other'
+        try {
+          return operation()
+        } finally {
+          current = previous
+        }
       }
-    }
-    for (const [index, step] of WORKLOAD_STEPS.entries()) {
-      const previous: ProbePhase = current
-      current = 'writer'
-      try {
-        applyWorkloadStep(run, step, k)
-      } finally {
-        current = previous
-      }
-      const { bounded, answer } = readBounded()
-      const { items: boundedItems, ...meta } = bounded
-      const read = answer.reset
-        ? transmit({ kind: 'snapshot', run: bounded, cursor: { revision: answer.revision, count: boundedItems.length } })
-        : transmit({
-            kind: 'delta', run: meta, base: cursor!.revision,
-            cursor: { revision: answer.revision, count: answer.count },
-            changes: answer.changes.map((changeIndex) => ({ index: changeIndex, item: boundedItems[changeIndex] }))
-          })
-      const merged = mergeRemoteTrace(view, read)
-      if (merged.kind !== 'applied' || !merged.view) throw new Error(`read did not apply after ${step}`)
-      view = merged.view
-      cursor = merged.view.cursor
-      expect(merged.view.run.items).toHaveLength(expectedCounts[index])
-      assertMatchesOracle(merged.view.run, run, step)
-      if (merged.view.cursor?.count !== merged.view.run.items.length) {
-        throw new Error(`cursor count disagrees with the delivered items after ${step}`)
-      }
-    }
-    expect(view?.run.items).toHaveLength(expectedCounts[expectedCounts.length - 1])
+    })
+    expect(facts.observes).toBe(WORKLOAD_STEPS.length)
+    expect(facts.merges).toBe(WORKLOAD_STEPS.length)
+    expect(facts.steps.map((step) => step.itemCount)).toEqual(stageItemCounts(k))
     const sample = probe.read()
     expect(totalsMatchPhases(sample)).toBe(true)
     return sample
