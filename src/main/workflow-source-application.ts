@@ -102,7 +102,9 @@ export class WorkflowSourceApplicationController {
       if (finalCheck !== 'passed') return this.finish({ ...intent, state: 'partial', changedPaths: applied.changedPaths, reason: `post-application check ${finalCheck}; rollback was not verified` })
       const afterCheck = await this.dependencies.sourceState(request.workspace)
       if (afterCheck.hash !== intent.candidateHash || afterCheck.trustFingerprint !== intent.trustFingerprint) return this.finish({ ...intent, state: 'partial', changedPaths: applied.changedPaths, reason: 'post-application check changed the admitted source state; rollback was not verified' })
-      return this.finish({ ...intent, state: 'applied', changedPaths: applied.changedPaths })
+      const receipt = { ...intent, state: 'applied' as const, changedPaths: applied.changedPaths }
+      delete receipt.reason
+      return this.finish(receipt)
     } catch (error) {
       return this.finish({ ...intent, state: 'unknown', reason: String(error) })
     }

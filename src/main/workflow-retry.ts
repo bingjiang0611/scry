@@ -25,7 +25,9 @@ function replayEligible(outcome: WorkflowAttemptOutcome | undefined): boolean {
 
 export function workflowRetryBoundary(record: WorkflowStoreRecord, taskId: string): number {
   const segments = record.execution?.segments ?? []
-  for (let index = segments.length - 1; index >= 0; index--) if (segments[index].retry?.taskId === taskId) return index
+  for (let index = segments.length - 1; index >= 0; index--) {
+    if (segments[index].retry?.taskId === taskId || segments[index].restart?.taskId === taskId) return index
+  }
   return 0
 }
 

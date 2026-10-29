@@ -20,6 +20,25 @@ describe('workflow fresh-run admission (contract fixtures, no real Provider prob
     expect(result.model && result.stop && result.independentRun && result.terminalOutput).toBe(true)
     expect(result.identity).toMatch(/^[a-f0-9]{64}$/)
   })
+  it('uses the Pi native default without inventing a model catalog', () => {
+    const context = { providerId: 'pi' as const, cwd: '/fixture' }
+    const emptyCatalog = { ...catalog, models: [] }
+    expect(workflowBindingControls({ role: 'worker', providerId: 'pi' }, context, descriptor('pi'),
+      capabilityReady(context, 'read', emptyCatalog), execution, true).model).toBe(true)
+    expect(workflowBindingControls({ role: 'worker', providerId: 'pi', requestedModel: { id: 'missing' } }, context,
+      descriptor('pi'), capabilityReady(context, 'read', emptyCatalog), execution, true).model).toBe(false)
+    const opencodeContext = { providerId: 'opencode' as const, cwd: '/fixture' }
+    expect(workflowBindingControls({ role: 'worker', providerId: 'opencode' }, opencodeContext, descriptor('opencode'),
+      capabilityReady(opencodeContext, 'read', emptyCatalog), execution, true).model).toBe(false)
+  })
+  it('uses a successful controls read as current ready health evidence', () => {
+    const context = { providerId: 'qoder' as const, cwd: '/fixture' }
+    const unknown = { ...descriptor('qoder'), health: { state: 'unknown' as const, transport: 'fixture' } }
+    const result = workflowBindingControls({ role: 'worker', providerId: 'qoder' }, context, unknown,
+      capabilityReady(context, 'read', catalog), execution, true)
+    expect(result.descriptor.health?.state).toBe('ready')
+    expect(result.model && result.independentRun && result.terminalOutput && result.stop).toBe(true)
+  })
   it('registration, an available descriptor and a matching model do not invent execution features', () => {
     const context = { providerId: 'pi' as const, cwd: '/fixture' }
     const result = workflowBindingControls({ role: 'worker', providerId: 'pi' }, context, descriptor('pi'), capabilityReady(context, 'read', catalog), undefined, true)
@@ -56,12 +75,20 @@ describe('workflow fresh-run admission (contract fixtures, no real Provider prob
   })
   it('does not admit an orchestrator when authoring evidence is unknown', () => {
     const result = capabilityForRole({ role: 'orchestrator', providerId: 'claude' }, {
-      descriptor: descriptor('claude'), adapterRegistered: true, hasIndependentRun: true, canObserveOutput: true, canConfirmStop: true, requirement: 'authoring'
+      descriptor: descriptor('claude'), adapterRegistered: true, modelAdmission: true, hasIndependentRun: true, canObserveOutput: true, canConfirmStop: true, requirement: 'authoring'
     })
     expect(result.structuredCandidateAuthoring).toBe('unknown')
     expect(result.hostToolsDisabled).toBe('unknown')
     expect(result.state).toBe('unknown')
   })
+  it('reports model or permission admission separately from independent-session support', () => {
+    const result = capabilityForRole({ role: 'worker', providerId: 'pi' }, {
+      descriptor: descriptor('pi'), adapterRegistered: true, modelAdmission: false, hasIndependentRun: true,
+      canObserveOutput: true, canConfirmStop: true, requirement: 'execution'
+    })
+    expect(result).toMatchObject({ state: 'unavailable', startIndependentSession: 'available', reason: '所选模型或权限模式不可用' })
+  })
+
   it('changes frozen identity when authoring or observation inputs change', () => {
     const context = { providerId: 'claude' as const, cwd: '/fixture' }
     const authoring = { source: 'claude_sdk_success_result' as const, hostTools: 'disabled' as const, permissionBoundary: 'default_only' as const, businessQuestions: 'blocked' as const }

@@ -67,7 +67,9 @@ describe('source workspace application controller', () => {
     const first = controller.apply(request), duplicate = controller.apply(request)
     await expect(controller.apply({ ...request, candidateHash: 'other' })).rejects.toThrow('operationId')
     release()
-    expect(await duplicate).toEqual(await first)
+    const receipt = await first
+    expect(await duplicate).toEqual(receipt)
+    expect(receipt).not.toHaveProperty('reason')
     expect(apply).toHaveBeenCalledOnce()
   })
 

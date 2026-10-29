@@ -93,6 +93,7 @@ describe('WorkflowProgram M0 contract', () => {
   it('reports unavailable capability instead of silently selecting another provider', () => {
     const capability = capabilityForRole(role, {
       adapterRegistered: true,
+      modelAdmission: true,
       hasIndependentRun: true,
       canObserveOutput: true,
       canConfirmStop: false,

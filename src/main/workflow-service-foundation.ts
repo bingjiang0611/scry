@@ -155,15 +155,32 @@ export class WorkflowServiceFoundation {
       return { stepId: intent.stepId, nodeId: intent.nodeId, kind: intent.kind, state: outcome?.state ?? 'unknown', settled: outcome?.settled ?? false, startedAt: intent.createdAt, ...(outcome ? { finishedAt: outcome.finishedAt, ...(outcome.check ? { result: outcome.check } : {}), ...(outcome.replica ? { replica: outcome.replica } : {}), ...(outcome.error ? { error: outcome.error } : {}) } : {}) }
     })
     const known = new Set(record.outcomes.map(outcome => outcome.attemptId))
+    let recoveredAttempt = false
     for (const intent of record.intents.filter(intent => !known.has(intent.attemptId))) {
       const outcome: WorkflowAttemptOutcome = { attemptId: intent.attemptId, taskId: intent.taskId, nodeId: intent.taskId.split(':').pop() ?? intent.taskId,
         role: intent.role as WorkflowAttemptOutcome['role'], providerId: intent.providerId as WorkflowAttemptOutcome['providerId'],
-        actualModelStatus: 'unknown', state: 'unknown', settled: false, error: '应用重启后作用域未收敛；M0 不自动重发' }
+        actualModelStatus: 'unknown', state: 'unknown', settled: false, error: '应用重启后作用域未收敛；不会自动重发' }
       record.outcomes.push(outcome)
+      recoveredAttempt = true
+    }
+    if (this.options.restartEvidence) for (const outcome of record.outcomes.filter(value => !value.settled && value.state === 'unknown')) {
+      const intent = record.intents.find(value => value.attemptId === outcome.attemptId)
+      if (!intent) continue
+      try {
+        const evidence = await this.options.restartEvidence({ workflowId: record.preview.workflowId, taskId: intent.taskId, attemptId: intent.attemptId, programRevision: intent.programRevision })
+        if (evidence.state === 'settled' && evidence.attemptId === intent.attemptId && evidence.taskId === intent.taskId &&
+          evidence.runId === `workflow-${intent.attemptId}` && evidence.source === 'app_run_terminal' && Number.isSafeInteger(evidence.settledAt) && evidence.settledAt > 0) {
+          outcome.settled = true
+          outcome.error = 'App 终态收敛回执已证明旧 attempt 关闭；业务结果仍未知，不会自动重发'
+          recoveredAttempt = true
+        }
+      } catch {
+        // Evidence failure is fail-closed: retain the unknown reservation.
+      }
     }
     const pending = record.outcomes.filter(outcome => !outcome.settled)
     for (const _ of pending) this.options.slots.reserveUnknown()
-    if (pending.length || pendingSystems.length || pendingClassifiers.length) {
+    if (recoveredAttempt || pending.length || pendingSystems.length || pendingClassifiers.length) {
       record.progress.state = 'unknown'
       record.progress.revision = (record.progress.revision ?? 0) + 1
       record.progress.finalReportStatus = 'unavailable'

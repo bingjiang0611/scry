@@ -91,7 +91,8 @@ export class WorkflowService extends WorkflowServiceShutdown {
       }
       if ((record.execution?.segments.length ?? 0) >= 256) throw new Error(workflowRecoveryCopy.limit)
       const evidence = await this.options.restartEvidence?.({ workflowId: id, taskId: target.taskId, attemptId: target.attemptId, programRevision: approval.programRevision })
-      if (!evidence || evidence.state !== 'settled' || evidence.attemptId !== target.attemptId || evidence.taskId !== target.taskId) throw new Error('停滞重启证据不可用')
+      if (!evidence || evidence.state !== 'settled' || evidence.attemptId !== target.attemptId || evidence.taskId !== target.taskId ||
+        evidence.runId !== `workflow-${target.attemptId}` || evidence.source !== 'app_run_terminal' || !Number.isSafeInteger(evidence.settledAt) || evidence.settledAt <= 0) throw new Error('停滞重启证据不可用')
       await Promise.all(record.preview.program.roles.map(role => this.capability(role, record.preview.workspace, true, 'execution')))
       this.assertAdmissionGeneration(generation)
       return this.progressSnapshot(await this.runner.restartStalled(record.preview, approval, target, commandId, evidence.reason), undefined, record)

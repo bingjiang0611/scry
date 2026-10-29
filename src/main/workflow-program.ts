@@ -30,6 +30,7 @@ export interface WorkflowCapabilityInput {
   descriptor?: ProviderDescriptor
   runControls?: AgentRunControlCatalog
   adapterRegistered: boolean
+  modelAdmission: boolean
   hasIndependentRun: boolean
   canObserveOutput: boolean
   canConfirmStop: boolean
@@ -166,6 +167,7 @@ export function capabilityForRole(binding: WorkflowRoleBinding, input: WorkflowC
   const requiresAuthoring = input.requirement === 'authoring'
   const states: WorkflowCapabilityState[] = [
     descriptorState,
+    input.modelAdmission ? 'available' : 'unavailable',
     input.adapterRegistered && input.hasIndependentRun ? 'available' : 'unavailable',
     input.canObserveOutput ? 'available' : 'unavailable',
     input.canConfirmStop ? 'available' : 'unavailable',
@@ -173,14 +175,14 @@ export function capabilityForRole(binding: WorkflowRoleBinding, input: WorkflowC
   ]
   const state = states.includes('unavailable') ? 'unavailable' : states.includes('unknown') ? 'unknown' : 'available'
   const reason = state === 'available' ? undefined : !input.adapterRegistered ? 'Provider 未注册 adapter' :
-    !input.hasIndependentRun ? 'Provider 不支持独立新会话' : !input.canObserveOutput ? 'Provider 未提供终态与最终输出观测' :
+    !input.modelAdmission ? '所选模型或权限模式不可用' : !input.hasIndependentRun ? 'Provider 不支持独立新会话' : !input.canObserveOutput ? 'Provider 未提供终态与最终输出观测' :
       !input.canConfirmStop ? 'Provider 未提供可确认的停止收敛' : requiresAuthoring && binding.role === 'orchestrator' && authoring === 'unavailable' ? 'Provider 未声明结构化候选编排能力' :
         requiresAuthoring && binding.role === 'orchestrator' && hostToolsDisabled === 'unavailable' ? '编排候选未证明禁用宿主工具' : 'Provider 准入状态未知'
   return {
     role: binding.role, providerId: binding.providerId, ...(binding.agentProfileId ? { agentProfileId: binding.agentProfileId } : {}),
     ...(binding.requestedModel ? { requestedModel: binding.requestedModel } : {}),
     actualModelStatus: 'unknown', runtimeProvider: input.descriptor?.runtimeProvider,
-    startIndependentSession: states[1], observeTerminalOutput: states[2], confirmStopConvergence: states[3],
+    startIndependentSession: states[2], observeTerminalOutput: states[3], confirmStopConvergence: states[4],
     structuredCandidateAuthoring: authoring, hostToolsDisabled, permissionQuestion, businessQuestion,
     waitStates: input.waitStates ?? { model: 'unknown', tool: 'unknown', quota: 'unknown' },
     state, ...(reason ? { reason } : {})

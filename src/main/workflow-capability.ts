@@ -17,15 +17,20 @@ export function workflowBindingControls(role: WorkflowRoleBinding, context: Prov
     return { descriptor, model: false, stop: false, identity: '', independentRun: false, terminalOutput: false, ...unavailable }
   }
   const catalog = envelope.data
+  // A successful native control read is stronger current health evidence than
+  // an adapter descriptor that has not yet observed its first normal run.
+  const readyDescriptor = descriptor.health?.state === 'unknown'
+    ? { ...descriptor, health: { ...descriptor.health, state: 'ready' as const } }
+    : descriptor
   const requested = role.requestedModel
   const model = requested
     ? catalog.models.some(option => option.model.id === requested.id && (!requested.providerId || option.model.providerId === requested.providerId))
-    : catalog.models.length > 0
+    : catalog.models.length > 0 || context.providerId === 'pi'
   const permission = catalog.permissions.some(option => option.id === (role.permissionMode ?? 'default'))
   const observation = execution?.observation
-  return { descriptor, model: model && permission, stop: execution?.scopedStop === true && execution.scopeSettlement,
+  return { descriptor: readyDescriptor, model: model && permission, stop: execution?.scopedStop === true && execution.scopeSettlement,
     independentRun: execution?.independentRun === true, terminalOutput: execution?.terminalOutput === true,
-    identity: workflowCapabilityFingerprint(context, descriptor, catalog, execution, authoring),
+    identity: workflowCapabilityFingerprint(context, readyDescriptor, catalog, execution, authoring),
     structuredCandidateAuthoring: authoring ? 'available' as const : 'unavailable' as const,
     hostToolsDisabled: authoring?.hostTools === 'disabled' ? 'available' as const : 'unavailable' as const,
     permissionQuestion: execution?.permissionQuestion === true ? 'available' as const : execution?.permissionQuestion === false ? 'unavailable' as const : 'unknown' as const,

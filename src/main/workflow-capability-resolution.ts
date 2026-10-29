@@ -30,7 +30,7 @@ export async function resolveWorkflowCapability(options: WorkflowServiceOptions,
       permissionQuestion: snapshot.permissionQuestion ?? 'unknown', businessQuestion: snapshot.businessQuestion ?? 'unknown', waitStates: snapshot.waitStates ?? { model: 'unknown', tool: 'unknown', quota: 'unknown' } }
   } catch { /* refusal, never a replacement Provider */ }
   const capability = capabilityForRole(role, { descriptor, adapterRegistered: options.providerRegistered(role.providerId), requirement,
-    hasIndependentRun: controls.model && controls.independentRun && Boolean(controls.identity), canObserveOutput: controls.terminalOutput, canConfirmStop: controls.stop,
+    modelAdmission: controls.model, hasIndependentRun: controls.independentRun && Boolean(controls.identity), canObserveOutput: controls.terminalOutput, canConfirmStop: controls.stop,
     structuredCandidateAuthoring: controls.structuredCandidateAuthoring, hostToolsDisabled: controls.hostToolsDisabled, permissionQuestion: controls.permissionQuestion,
     businessQuestion: controls.businessQuestion, waitStates: controls.waitStates })
   if (required && (!role.runtimeIdentity || role.runtimeIdentity !== controls.identity)) throw new Error('Provider 入口或模型/权限目录已变化，必须重新规划并确认')

@@ -10,6 +10,7 @@ import type { ProviderStructuredOutput } from './providers/types'
 import { FileWorkflowStore } from './workflow-store'
 import type { AppRunStartOptions } from './app-run-start'
 import { createAppWorkflowRuntime } from './workflow-app-runtime'
+import { WorkflowRunSettlementStore } from './workflow-run-settlement-store'
 import { ProviderRegistry } from './providers/registry'
 import { createSmokeProviderAdapter } from './providers/smoke'
 
@@ -121,6 +122,11 @@ describe('production App workflow planning bridge with an offline terminal fixtu
     expect((await service.start(preview.workflowId, approval, 'usage-start')).state).toBe('completed')
     const record = await workflowStore.load(preview.workflowId)
     expect(record?.outcomes[0]).toMatchObject({ actualModel: 'observed-model', usage: { provenance: 'exact', source: 'provider_result', inputTokens: 12, outputTokens: 3, cost: 0.25, costUnit: 'usd' } })
+    const attempt = record?.outcomes[0]
+    expect(await new WorkflowRunSettlementStore(join(home, 'userData')).load(attempt!.attemptId)).toMatchObject({
+      workflowId: preview.workflowId, taskId: attempt!.taskId, attemptId: attempt!.attemptId, runId: `workflow-${attempt!.attemptId}`,
+      status: 'completed', source: 'app_run_terminal'
+    })
     const inspection = await service.inspectExecution({ workflowId: preview.workflowId, programRevision: preview.programRevision, kind: 'attempts', offset: 0 }, () => {})
     expect(inspection).toMatchObject({ state: 'available', records: [{ outcome: { state: 'available', value: { usage: { provenance: 'exact', source: 'provider_result', cost: 0.25 } } } }] })
   })

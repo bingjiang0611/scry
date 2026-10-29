@@ -21,6 +21,7 @@ import type { ProviderRegistry } from './providers/registry'
 import type { WorkflowClassifierAdapter } from '../shared/workflow-classifier'
 import { workflowUsageFromProviderResults } from '../shared/workflow-usage'
 import { WorkflowSourceApplicationService } from './workflow-source-application-service'
+import { WorkflowRunSettlementStore } from './workflow-run-settlement-store'
 
 export interface AppWorkflowRuntimeDependencies {
   userData: string
@@ -90,6 +91,7 @@ export function createAppWorkflowRuntime(deps: AppWorkflowRuntimeDependencies) {
   const workflowSlots = new WorkflowSlots()
   const workflowSystems = new WorkflowSystemHost(join(deps.userData, 'workflow-replicas'), workflowStore)
   const workflowSourceApplications = new WorkflowSourceApplicationService({ userData: deps.userData, store: workflowStore, systems: workflowSystems, resolveWorkspace: deps.resolveTemplateProjectDirectory })
+  const workflowRunSettlements = new WorkflowRunSettlementStore(deps.userData)
   type AuthoringResult = Awaited<ReturnType<WorkflowPlanProvider>>
   const runAuthoring = async (input: {
     runId: string
@@ -143,7 +145,7 @@ export function createAppWorkflowRuntime(deps: AppWorkflowRuntimeDependencies) {
         ? workflowRoutingPrompt(JSON.stringify(roles.map(binding => binding.role)), goal, workflowPlanningPrompt(roles, goal, sizeGuideline.value), routingMode)
         : workflowPlanningPrompt(roles, goal, sizeGuideline.value)
     }),
-    execute: ({ attemptId, role, prompt, workspace, replicaRun, onObservation }) => {
+    execute: ({ workflowId, taskId, attemptId, role, prompt, workspace, replicaRun, onObservation }) => {
       const runId = `workflow-${attemptId}`
       const dispatch = new WorkflowDispatch()
       let startedRunId: string | undefined
@@ -157,7 +159,13 @@ export function createAppWorkflowRuntime(deps: AppWorkflowRuntimeDependencies) {
         workflowReplica: replicaRun,
         onWorkflowObservation: onObservation,
         onProviderDispatchAttempt: dispatch.onProviderDispatchAttempt,
-        onTerminal: (terminal: WorkflowTerminalResult) => {
+        onTerminal: async (terminal: WorkflowTerminalResult) => {
+          try {
+            await workflowRunSettlements.save({ schemaVersion: 1, workflowId, taskId, attemptId, runId, status: terminal.status,
+              settledAt: Date.now(), source: 'app_run_terminal' })
+          } catch (error) {
+            console.warn('[workflow] failed to persist App run settlement:', runId, error)
+          }
           const observed = workflowOutput(terminal.items)
           const hasTerminalEvidence = terminal.items.some((item) => item.kind === 'harness' && item.stage === 'result')
           resolve?.({ runId, status: terminal.status === 'blocked' ? 'blocked' : terminal.status === 'completed' && hasTerminalEvidence ? 'completed' : terminal.status === 'interrupted' ? 'stopped' : terminal.status === 'failed' ? 'failed' : 'unknown',
@@ -178,6 +186,19 @@ export function createAppWorkflowRuntime(deps: AppWorkflowRuntimeDependencies) {
         }
         return startedRunId ? deps.requestRunStopAgain(startedRunId) : true
       } }
+    },
+    restartEvidence: async request => {
+      try {
+        const settlement = await workflowRunSettlements.load(request.attemptId)
+        if (!settlement) return { state: 'unavailable', attemptId: request.attemptId, taskId: request.taskId, reason: 'App 终态收敛回执不存在' }
+        if (settlement.workflowId !== request.workflowId || settlement.taskId !== request.taskId || settlement.runId !== `workflow-${request.attemptId}`) {
+          return { state: 'unknown', attemptId: request.attemptId, taskId: request.taskId, reason: 'App 终态收敛回执身份不匹配' }
+        }
+        return { state: 'settled', attemptId: request.attemptId, taskId: request.taskId, runId: settlement.runId, settledAt: settlement.settledAt,
+          source: settlement.source, reason: 'reply_lost' }
+      } catch (error) {
+        return { state: 'unavailable', attemptId: request.attemptId, taskId: request.taskId, reason: `App 终态收敛回执不可读：${String((error as Error).message)}` }
+      }
     },
     onProgress: deps.onProgress,
     classifierAdapter: deps.classifierAdapter

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { WorkflowAttemptOutcome } from '../shared/workflow'
 import type { WorkflowStoreRecord } from './workflow-store'
-import { validateWorkflowAttemptChains, validateWorkflowRestartTarget, workflowPendingRestart, workflowUnknownSuperseded } from './workflow-retry'
+import { validateWorkflowAttemptChains, validateWorkflowRestartTarget, workflowPendingRestart, workflowRetryBoundary, workflowUnknownSuperseded } from './workflow-retry'
 
 const taskId = 'workflow-1:' + 'a'.repeat(64) + ':node'
 const outcome = (attemptId: string, state: WorkflowAttemptOutcome['state'] = 'unknown'): WorkflowAttemptOutcome => ({
@@ -31,6 +31,12 @@ describe('workflow restart/retry ledger contracts', () => {
     expect(workflowPendingRestart(base, taskId)?.commandId).toBe('command-2')
     base.intents.push(intent('attempt-2', { previousAttemptId: 'attempt-1', restartCommandId: 'command-1' }))
     expect(workflowPendingRestart(base, taskId)?.commandId).toBe('command-2')
+  })
+
+  it('starts control-frame recovery at the latest restart generation', () => {
+    const first = { id: 'restart-1', generationId: 'restart-1', commandId: 'command-1', mode: 'restart' as const, createdAt: 2, restart: { taskId, attemptId: 'attempt-1', expectedRevision: 1, reason: 'stalled' as const } }
+    const second = { id: 'restart-2', generationId: 'restart-2', commandId: 'command-2', mode: 'restart' as const, createdAt: 3, restart: { taskId, attemptId: 'attempt-2', expectedRevision: 2, reason: 'reply_lost' as const } }
+    expect(workflowRetryBoundary(record([intent('attempt-1')], [outcome('attempt-1')], [first, second]), taskId)).toBe(2)
   })
 
   it('requires exactly one successor link, forbids first-intent links, and accepts only settled unknown restart targets', () => {

@@ -70,6 +70,34 @@ describe('workflow service receipts, capabilities and recovery', () => {
     expect(f.slots.active).toBe(1)
     expect(await f.store.load('missing-history')).toBeUndefined()
   })
+  it('reconciles a cold unknown attempt only from an exact App terminal receipt before manual restart', async () => {
+    const first = fixture(new MemoryWorkflowStore(), { execute: () => ({ result: Promise.resolve({ runId: 'unknown-native', status: 'unknown', settled: false }), stop: () => true }) })
+    const preview = await first.service.planCommand(request)
+    const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }
+    await first.service.approve(approval)
+    expect((await first.service.start(preview.workflowId, approval)).state).toBe('unknown')
+    const before = (await first.store.load(preview.workflowId))!, outcome = before.outcomes[0]!
+    expect(outcome.settled).toBe(false)
+    before.execution!.owner = { pid: 999_999, instanceId: 'closed-owner', state: 'active' }
+    await first.store.save(before)
+
+    const restartEvidence = vi.fn<NonNullable<WorkflowServiceOptions['restartEvidence']>>(async input => ({ state: 'settled', attemptId: input.attemptId,
+      taskId: input.taskId, runId: `workflow-${input.attemptId}`, settledAt: 2, source: 'app_run_terminal', reason: 'reply_lost' }))
+    const cold = fixture(first.store, { restartEvidence })
+    const recovered = (await cold.service.snapshot(preview.workflowId))!
+    const recoveredOutcome = (await first.store.load(preview.workflowId))!.outcomes.find(value => value.attemptId === outcome.attemptId)!
+    expect(recoveredOutcome).toMatchObject({ state: 'unknown', settled: true, error: expect.stringContaining('业务结果仍未知') })
+    expect(cold.slots.reserved).toBe(0)
+
+    await cold.service.approve(approval)
+    const result = await cold.service.restartStalled(preview.workflowId, approval, {
+      taskId: outcome.taskId, attemptId: outcome.attemptId, expectedRevision: recovered.revision!
+    }, 'restart-from-terminal-receipt')
+    expect(result.state).toBe('completed')
+    expect(cold.execute).toHaveBeenCalledOnce()
+    expect(restartEvidence).toHaveBeenCalledTimes(2)
+  })
+
   it('continues through the same Service/Runner chain and deduplicates concurrent and cold resume receipts', async () => {
     const store = new ParentCheckpointStore(), first = fixture(store)
     const preview = await first.service.planCommand(request), approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }

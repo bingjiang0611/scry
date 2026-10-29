@@ -24,7 +24,7 @@ export interface WorkflowPlanRequest {
   beforeProviderDispatch?: () => Promise<void>
 }
 export type WorkflowRestartEvidence =
-  | { state: 'settled'; attemptId: string; taskId: string; reason: 'stalled' | 'reply_lost' }
+  | { state: 'settled'; attemptId: string; taskId: string; runId: string; settledAt: number; source: 'app_run_terminal'; reason: 'stalled' | 'reply_lost' }
   | { state: 'unavailable' | 'unknown' | 'unsettled'; attemptId: string; taskId: string; reason: string }
 
 export type WorkflowRestartEvidenceProvider = (request: { workflowId: string; taskId: string; attemptId: string; programRevision: string }) => Promise<WorkflowRestartEvidence>
