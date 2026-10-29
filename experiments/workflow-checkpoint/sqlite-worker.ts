@@ -17,6 +17,7 @@ if (pragma('user_version') !== 1 || pragma('journal_mode') !== 'wal' || pragma('
 const get = db.prepare('SELECT body, hash FROM metadata WHERE name=?')
 const put = db.prepare('INSERT INTO metadata VALUES (?, ?, ?) ON CONFLICT(name) DO UPDATE SET body=excluded.body, hash=excluded.hash')
 const list = db.prepare('SELECT name FROM metadata WHERE name>? ORDER BY name LIMIT 64')
+const counters = { transactions: 0, mutations: 0, gets: 0, lists: 0, bodyBytes: 0 }
 let active = false, closed = false, fault: 'before_commit' | 'lost_commit_reply' | 'hold_commit' | undefined
 let release: (() => void) | undefined
 const digest = (text: string) => createHash('sha256').update(text).digest('hex')
@@ -24,7 +25,7 @@ function bytes(path: string) {
   try { return statSync(path).size } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0; throw error }
 }
 function stats(): Stats {
-  return { dbBytes: bytes(path), walBytes: bytes(path + '-wal'), journalMode: String(pragma('journal_mode')),
+  return { ...counters, dbBytes: bytes(path), walBytes: bytes(path + '-wal'), journalMode: String(pragma('journal_mode')),
     synchronous: Number(pragma('synchronous')), fullfsync: Number(pragma('fullfsync')), checkpointFullfsync: Number(pragma('checkpoint_fullfsync')),
     sqliteVersion: String(db.prepare('SELECT sqlite_version() version').get()!.version) }
 }
@@ -40,6 +41,7 @@ async function handle(request: Request): Promise<void> {
         db.exec('BEGIN IMMEDIATE'); active = true; break
       case 'get': {
         if (!metadataName(request.name)) throw new Error('invalid metadata name')
+        counters.gets++
         const row = get.get(request.name)
         if (row) {
           if (typeof row.body !== 'string' || typeof row.hash !== 'string' || Buffer.byteLength(row.body) > MAX_BYTES || digest(row.body) !== row.hash) throw new Error('checkpoint metadata hash mismatch')
@@ -49,9 +51,9 @@ async function handle(request: Request): Promise<void> {
       }
       case 'put':
         if (!active || !metadataName(request.name) || typeof request.text !== 'string' || Buffer.byteLength(request.text) > MAX_BYTES) throw new Error('invalid checkpoint mutation')
-        put.run(request.name, request.text, digest(request.text)); break
+        put.run(request.name, request.text, digest(request.text)); counters.mutations++; counters.bodyBytes += Buffer.byteLength(request.text); break
       case 'list':
-        value = list.all(request.after).map(row => String(row.name)); break
+        counters.lists++; value = list.all(request.after).map(row => String(row.name)); break
       case 'commit': {
         if (!active) throw new Error('commit without transaction')
         const current = fault; fault = undefined
@@ -62,7 +64,7 @@ async function handle(request: Request): Promise<void> {
           await gate
         }
         unknown = true
-        db.exec('COMMIT'); active = false
+        db.exec('COMMIT'); active = false; counters.transactions++
         // Exit the actual Worker after COMMIT and before any response. The
         // client must infer unknown from transport loss, not a fake error reply.
         if (current === 'lost_commit_reply') process.exit(74)

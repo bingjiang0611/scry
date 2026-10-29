@@ -8,7 +8,8 @@ export type Operation =
   | { op: 'fault'; fault: 'before_commit' | 'lost_commit_reply' | 'hold_commit' }
 export type Request = Operation & { id: number }
 export type Stats = {
-  dbBytes: number; walBytes: number
+  transactions: number; mutations: number; gets: number; lists: number
+  bodyBytes: number; dbBytes: number; walBytes: number
   journalMode: string; synchronous: number; fullfsync: number; checkpointFullfsync: number; sqliteVersion: string
 }
 export type Response = { id: number } & (
