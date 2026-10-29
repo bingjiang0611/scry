@@ -2,7 +2,9 @@
 
 ## 结论与交付范围
 
-只增加测量，未做生产优化、改视觉、安装 App、推送或调用真实 Provider。L1 工作量与 L2 离线受控资源/耗时已有数据；没有优化前后对照，不宣称提速，L3 未验证。
+本记录的初始阶段只增加测量，未做生产优化、改视觉、安装 App、推送或调用真实 Provider。L1 工作量与 L2 离线受控资源/耗时已有数据；初始阶段没有优化前后对照，不宣称提速，L3 未验证。
+
+后续 managed Claude 工具 Hook 优化、修正后的 CPU 精度、最新 Side Chat 基线 A/B 与 0.2.232 交付状态，统一见 [Hook 优化收口](20261029-managed-hook-skip.md)。历史基线数据保留，不与后续样本混算。
 
 5 会话下，Hook CLI 累计 CPU 中位数 31.6 秒，约占已统计 CPU 的 66%。统计范围是 Browser、Tab、GPU 和 Hook Node 进程，不含真实 Provider/MCP、git、shell 内部及其他独立 utility/worker 进程 CPU；同一进程内的线程 CPU 仍归属该进程。因此它是**当前测到的最大单项机会**，不是整台机器 CPU 的完整归因。
 
