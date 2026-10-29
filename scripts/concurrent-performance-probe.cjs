@@ -53,6 +53,8 @@ syncBuiltinESMExports()
 const delay = monitorEventLoopDelay({ resolution: 10 })
 delay.enable()
 const samples = []
+const scopedTrace = []
+let scopedTraceTruncated = false
 let timer
 let hooks
 if (role === 'main') {
@@ -67,6 +69,14 @@ if (role === 'main') {
       counters.activeRunsCalls++
       counters.activeRunsJsonBytes += bytes
       ipc.push({ at, channel, runs: result.length, jsonBytes: bytes, ms: performance.now() - before })
+    }
+    // Observe the real scoped protocol; never add legacy polling to the workload.
+    if (channel === 'runTraces:subscribe' || channel === 'runTraces:ack') {
+      const entry = channel === 'runTraces:subscribe'
+        ? { at, kind: 'subscribe', status: result.status, subscriptionId: result.subscriptionId, runId: result.run?.runId }
+        : { at, kind: 'ack', subscriptionId: args[1].subscriptionId, accepted: result, bytes: args[1].receipt.bytes }
+      if (scopedTrace.length < 10000) scopedTrace.push(entry)
+      else scopedTraceTruncated = true
     }
     return result
   })
@@ -86,7 +96,7 @@ const flush = () => {
   delay.disable()
   fs.appendFileSync(process.env.SCRY_CONCURRENT_LOG, JSON.stringify({ role, pid: process.pid, at: Date.now(),
     argv: process.argv.slice(2), cpu: process.cpuUsage(), usage: process.resourceUsage(), uptimeSeconds: process.uptime(),
-    counters, samples, ipc, hookTrees }) + '\n')
+    counters, samples, ipc, hookTrees, ...(role === 'main' ? { scopedTrace, scopedTraceTruncated } : {}) }) + '\n')
 }
 process.on('exit', flush)
 module.exports = { counters, flush }

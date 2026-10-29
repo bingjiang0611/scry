@@ -10,7 +10,7 @@ import electron from 'electron'
 import { stopOwnedApp } from './owned-app-processes.mjs'
 import { nativeUiPointer } from './native-ui-pointer.mjs'
 import { connectConcurrentApp } from './concurrent-performance-cdp.mjs'
-import { summarizeHookTrees } from './concurrent-performance-summary.mjs'
+import { summarizeHookTrees, assertScopedDelivery } from './concurrent-performance-summary.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const count = Number(process.argv[2] ?? 1)
@@ -198,7 +198,7 @@ try {
   const probes = readFileSync(probeLog, 'utf8').trim().split('\n').map(line => JSON.parse(line))
   const main = probes.find(p => p.role === 'main')
   assert.ok(main, 'Missing main probe shutdown receipt')
-  assert.ok(main.ipc.some(call => call.at >= startedAt && call.at <= settledAt && call.runs === count), 'The logical view must observe all concurrent runs')
+  assertScopedDelivery(main, result.runs[0].runId, startedAt, settledAt)
   assert.equal(main.hookTrees.length, count * 42, 'Every shell Hook needs a process-tree receipt')
   summarizeHookTrees(main.hookTrees)
   const hooks = probes.filter(p => p.role === 'hook')

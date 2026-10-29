@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { summarizeConcurrent, summarizeHookTrees } from './concurrent-performance-summary.mjs'
+import { summarizeConcurrent, summarizeHookTrees, assertScopedDelivery } from './concurrent-performance-summary.mjs'
 
 describe('concurrent performance measurement', () => {
   it('counts real fsync and git calls, with a zero-work negative control', () => {
@@ -84,6 +84,39 @@ describe('concurrent performance measurement', () => {
     expect(result.cpuMs).toBe(0)
     expect(result.maxRoundingErrorMs).toBeGreaterThan(2 * lossPerFieldMs)
     expect(result.maxRoundingErrorMs).toBe(20)
+  })
+
+  it('requires a selected-run snapshot and an accepted post-commit receipt, not legacy polling', () => {
+    const main = { scopedTraceTruncated: false, ipc: [], scopedTrace: [
+      { at: 1100, kind: 'subscribe', status: 'subscribed', subscriptionId: 'sub-1', runId: 'run-1' },
+      { at: 1200, kind: 'ack', subscriptionId: 'sub-1', accepted: true, bytes: 64 }
+    ] }
+    expect(() => assertScopedDelivery(main, 'run-1', 1000, 2000)).not.toThrow()
+    expect(() => assertScopedDelivery(main, 'other-run', 1000, 2000)).toThrow('snapshot')
+    expect(() => assertScopedDelivery(main, 'run-1', 1300, 2000)).toThrow('snapshot')
+    expect(() => assertScopedDelivery({ ...main, scopedTraceTruncated: true }, 'run-1', 1000, 2000)).toThrow('bound')
+    for (const ack of [
+      { ...main.scopedTrace[1], accepted: false },
+      { ...main.scopedTrace[1], subscriptionId: 'foreign-sub' },
+      { ...main.scopedTrace[1], bytes: 0 },
+      { ...main.scopedTrace[1], at: 2100 }
+    ]) {
+      expect(() => assertScopedDelivery({ ...main, scopedTrace: [main.scopedTrace[0], ack] }, 'run-1', 1000, 2000)).toThrow('receipt')
+    }
+  })
+
+  it('keeps uncollected scoped delivery unavailable and separates accepted payload bytes from JSON bytes', () => {
+    expect(summarizeConcurrent(fixture()).scopedTrace.status).toBe('unavailable')
+    const report = fixture()
+    report.main.scopedTraceTruncated = false
+    report.main.scopedTrace = [
+      { at: 1100, kind: 'subscribe', status: 'subscribed' },
+      { at: 1200, kind: 'ack', accepted: true, bytes: 64 },
+      { at: 1300, kind: 'ack', accepted: false, bytes: 128 },
+      { at: 2500, kind: 'ack', accepted: true, bytes: 256 }
+    ]
+    expect(summarizeConcurrent(report).scopedTrace).toEqual({ status: 'measured', subscriptions: 1,
+      acceptedBatches: 1, acceptedPayloadBytes: 64, truncated: false })
   })
 
   it('rejects missing Hook receipts and unbracketed measurement windows', () => {

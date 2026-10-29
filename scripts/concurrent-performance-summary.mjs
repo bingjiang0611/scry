@@ -20,6 +20,19 @@ export function summarizeHookTrees(entries) {
   return { status: 'measured', count: entries.length, cpuMs, maxRoundingErrorMs: entries.length * 20 }
 }
 
+// The current renderer consumes one selected run's scoped stream. A successful
+// ACK proves that the production router accepted a post-commit batch receipt.
+export function assertScopedDelivery(main, runId, startedAt, settledAt) {
+  assert.ok(Array.isArray(main.scopedTrace), 'Scoped delivery was not collected')
+  assert.equal(main.scopedTraceTruncated, false, 'Scoped delivery log exceeded its bound')
+  const rows = main.scopedTrace.filter(row => row.at >= startedAt && row.at <= settledAt)
+  const subscriptions = rows.filter(row => row.kind === 'subscribe' && row.status === 'subscribed' && row.runId === runId)
+  assert.ok(subscriptions.length, 'Selected run needs a successful scoped snapshot')
+  assert.ok(rows.some(row => row.kind === 'ack' && row.accepted === true && row.bytes > 0 &&
+    subscriptions.some(subscription => subscription.subscriptionId === row.subscriptionId)),
+  'Selected run needs an accepted post-commit batch receipt')
+}
+
 export function summarizeConcurrent(report) {
   assert.equal(report.schema, 1)
   const expectedHookStartsPerSession = report.workload?.expectedHookStartsPerSession ?? 42
@@ -79,6 +92,12 @@ export function summarizeConcurrent(report) {
     hookGit: sum(report.hooks.map(hook => hook.counters.git)),
     activeRuns: { calls: calls.length, jsonBytes: sum(calls.map(call => call.jsonBytes)),
       maxConcurrent: Math.max(0, ...calls.map(call => call.runs)), handlerAndProbeMs: sum(calls.map(call => call.ms)) },
+    scopedTrace: main.scopedTrace ? { status: 'measured',
+      subscriptions: main.scopedTrace.filter(row => row.at >= startedAt && row.at <= settledAt && row.kind === 'subscribe' && row.status === 'subscribed').length,
+      acceptedBatches: main.scopedTrace.filter(row => row.at >= startedAt && row.at <= settledAt && row.kind === 'ack' && row.accepted === true).length,
+      acceptedPayloadBytes: sum(main.scopedTrace.filter(row => row.at >= startedAt && row.at <= settledAt && row.kind === 'ack' && row.accepted === true).map(row => row.bytes)),
+      truncated: main.scopedTraceTruncated
+    } : { status: 'unavailable', reason: 'Scoped delivery was not collected' },
     rendererMetrics: report.rendererMetrics, trace: report.trace?.complete ? report.trace : { status: 'unavailable', reason: 'Trace completion was not acknowledged' },
     canonicalRecords: report.canonicalRecords, archiveVerified: report.archiveVerified,
     highLoad: Math.max(report.initialLoad[0], report.finalLoad[0]) > report.cores,
