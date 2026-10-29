@@ -1,4 +1,6 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { withDirectoryLock } from '../../src/core/turn-recorder/io'
 import { afterEach, expect, it } from 'vitest'
 import { FileWorkflowStore } from '../../src/main/workflow-store'
 import { snapshotFilesystem } from './io-meter-setup'
@@ -32,4 +34,16 @@ it('counts real writes from overlapping independent FileStore lifetimes', async 
   expect(after.flushedWritesSucceeded).toBe(before.flushedWritesSucceeded + 2)
   expect(after.renameSucceeded).toBe(before.renameSucceeded + 2)
   expect(after.explicitSyncSucceeded).toBe(before.explicitSyncSucceeded + 2)
+})
+it('includes the real sibling initialization lock but excludes unrelated workspace files', async () => {
+  await fixture()
+  const root = roots.at(-1)!, before = snapshotFilesystem()
+  await withDirectoryLock(join(root, 'workflows.prototype-init.lock'), async () => {})
+  await writeFile(join(root, 'unrelated.txt'), 'not checkpoint storage', { flush: true })
+  const after = snapshotFilesystem()
+  expect(after.lockDirectoriesCreated).toBe(1)
+  expect(after.handleWriteCalls).toBe(1)
+  expect(after.handleWrittenBytes).toBeGreaterThan(0)
+  expect(after.explicitSyncSucceeded).toBeGreaterThan(before.explicitSyncSucceeded)
+  expect(after.flushedWritesSucceeded).toBe(before.flushedWritesSucceeded)
 })

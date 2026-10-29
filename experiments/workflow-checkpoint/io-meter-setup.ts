@@ -23,7 +23,8 @@ const io = vi.hoisted(() => {
     capture(path: string) {
       const key = normalize(path)
       for (const [directory, meter] of scopes) {
-        if (key === dirname(directory) || key === directory || key.startsWith(directory + '/')) return meter
+        const initializationLock = directory + '.prototype-init.lock'
+        if (key === dirname(directory) || key === directory || key.startsWith(directory + '/') || key === initializationLock || key.startsWith(initializationLock + '/')) return meter
       }
       return undefined
     },
