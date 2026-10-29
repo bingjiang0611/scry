@@ -6,7 +6,9 @@
 
 `feat/workflow-m0` 的 [SQLite/Worker 原型](performance-experiments/20261029-workflow-sqlite-checkpoint.md)：同 Node 24 ABI 的原五例，文件版 3 超时、候选 5/5 通过；65 项聚焦检查通过。L2 仅为低负载受控 fixture，L1 只证明元数据文件发布转为 SQL 提交，原生 fsync/设备字节 unavailable，不称为总 IO 下降。初次扩大合同 13 失败及 1 未处理拒绝使 P1 未通过。随后获授权的[双后端合同](performance-experiments/20261029-workflow-checkpoint-contracts.md)已收口旧物理路径失败并修复实验值缓存：SQL 93 项通过，meter 另 3 项通过；File 曾 58 通过，最终高负载复验 56 通过、2 项原 5000ms 超时。epoch 及[真正合并 A/B 回滚负对照](performance-experiments/20261029-workflow-checkpoint-boundaries.md)均已补。该轮 SQL 为 92 passed / 1 原 5000ms timeout，File 10 项进程合同为 8/10，两次细化诊断各 9/10，均高负载。后续 [mac2 低负载复验](performance-experiments/20261029-workflow-checkpoint-mac2.md)已通过 File 共享 58/58、SQL 全部 93/93；扩大 File 的 revision 仍 18/19，stable-map 单例也触发原 5000ms 超时，不能全部归因机器负载。首轮隔离 HOME 在 OS 临时树内导致的探针失败已保留，校正环境后未改断言。仍不能确定唯一系统根因，不计算未完成 File 样本的等负载降幅；不调 ratchet、不升级门禁、不接生产。该轮未做 Electron/完整 unit/迁移/L3。与下方已安装主线 build 分开记录。
 
-最新 [File 减冗余](performance-experiments/20261029-workflow-file-checkpoint-followup.md)已提交 `42cd5539`：不删 flush/sync，去掉成功 rename 后的临时名清理、并行准备但保持 value-before-frame、直接释放 owner-only 锁。File 96/96、SQL 93/93；终稿完整 unit **4526/1/4**，stable-map 仍在原 5000ms 超时，不能关单或称稳定 L2/L3。App/CLI 编译与真实临时 tarball smoke 通过，未安装、未接生产 SQL。七类负对照九项预期失败均有效；新单例计数保留 270 flush、388 显式 sync。固定 native-value writes 各五次仍为 1，但指标 unregistered，不冒充注册门禁。下一阶段需维护者确认隔离生产化范围，不继续堆文件微优化。
+[File 减冗余阶段](performance-experiments/20261029-workflow-file-checkpoint-followup.md)已提交 `42cd5539`：不删 flush/sync，去掉成功 rename 后的临时名清理、并行准备但保持 value-before-frame、直接释放 owner-only 锁。File 96/96、SQL 93/93；终稿完整 unit **4526/1/4**，stable-map 仍在原 5000ms 超时，不能关单或称稳定 L2/L3。App/CLI 编译与真实临时 tarball smoke 通过，未安装、未接生产 SQL。七类负对照九项预期失败均有效；新单例计数保留 270 flush、388 显式 sync。固定 native-value writes 各五次仍为 1，但指标 unregistered，不冒充注册门禁。下一阶段需维护者确认隔离生产化范围，不继续堆文件微优化。
+
+随后维护者明确选择[仅 stable-map 单例 30 秒](performance-experiments/20261029-workflow-stable-map-timeout-contract.md)，`24d3343b`；AST 证明正文不变，目标约 5.58 秒通过。但 mac2 全量 4526/1/4、本机高负载 4525/2/4，仍有其他 5 秒超时。仅验收预算改变，不是生产提速或 performance ratchet 放宽；不自行改其余用例。
 
 ## 最新爬坡进展（2026-10-17）
 
