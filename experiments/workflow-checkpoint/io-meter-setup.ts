@@ -47,7 +47,7 @@ vi.mock('node:fs/promises', async importOriginal => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
   const operations = actual as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>
   const wrapped: Record<string, unknown> = { ...actual }
-  for (const name of ['mkdir', 'rm', 'readdir', 'opendir', 'access', 'realpath', 'stat', 'lstat', 'rename', 'writeFile', 'readFile']) {
+  for (const name of ['mkdir', 'rm', 'readdir', 'opendir', 'access', 'realpath', 'stat', 'lstat', 'rename', 'writeFile', 'readFile', 'unlink', 'rmdir']) {
     wrapped[name] = async (...args: unknown[]) => {
       const meter = io.capture(String(args[0]))
       io.add(meter, name + 'Calls')
