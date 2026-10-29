@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { createHash } from 'node:crypto'
 import { openSync, closeSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { DB_NAME, MAX_BYTES, metadataName, type Request, type Response, type Stats } from './protocol'
+import { DB_NAME, MAX_BYTES, metadataName, type Operation, type Request, type Response, type Stats } from './protocol'
 
 const port = parentPort!
 const data = workerData as { directory: string; create: boolean }
@@ -18,7 +18,7 @@ const get = db.prepare('SELECT body, hash FROM metadata WHERE name=?')
 const put = db.prepare('INSERT INTO metadata VALUES (?, ?, ?) ON CONFLICT(name) DO UPDATE SET body=excluded.body, hash=excluded.hash')
 const list = db.prepare('SELECT name FROM metadata WHERE name>? ORDER BY name LIMIT 64')
 const counters = { transactions: 0, mutations: 0, gets: 0, lists: 0, bodyBytes: 0 }
-let active = false, closed = false, fault: 'before_commit' | 'lost_commit_reply' | 'hold_commit' | undefined
+let active = false, closed = false, fault: Extract<Operation, { op: 'fault' }>['fault'] | undefined
 let release: (() => void) | undefined
 const digest = (text: string) => createHash('sha256').update(text).digest('hex')
 function bytes(path: string) {
@@ -58,13 +58,21 @@ async function handle(request: Request): Promise<void> {
         if (!active) throw new Error('commit without transaction')
         const current = fault; fault = undefined
         if (current === 'before_commit') throw new Error('injected before COMMIT')
-        if (current === 'hold_commit') {
+        if (current === 'constraint_commit' || current === 'hold_constraint_commit') db.exec('INSERT INTO checkpoint_fault_child VALUES (1)')
+        if (current === 'hold_commit' || current === 'hold_constraint_commit') {
           const gate = new Promise<void>(resolve => { release = resolve })
           port.postMessage({ held: true })
           await gate
         }
         unknown = true
-        db.exec('COMMIT'); active = false; counters.transactions++
+        try { db.exec('COMMIT') }
+        catch (error) {
+          // SQLite's live transaction state proves this COMMIT did not publish.
+          // Otherwise keep the outcome unknown; transport loss is still fenced.
+          if (db.isTransaction) unknown = false
+          throw error
+        }
+        active = false; counters.transactions++
         // Exit the actual Worker after COMMIT and before any response. The
         // client must infer unknown from transport loss, not a fake error reply.
         if (current === 'lost_commit_reply') process.exit(74)
@@ -74,7 +82,13 @@ async function handle(request: Request): Promise<void> {
       case 'rollback':
         if (active) db.exec('ROLLBACK')
         active = false; break
-      case 'fault': fault = request.fault; break
+      case 'fault':
+        if (request.fault === 'constraint_commit' || request.fault === 'hold_constraint_commit') {
+          // Private, connection-local tables provoke a real deferred constraint
+          // failure in SQLite COMMIT, not a synthetic error/acknowledgement.
+          db.exec('PRAGMA foreign_keys=ON; CREATE TEMP TABLE IF NOT EXISTS checkpoint_fault_parent (id INTEGER PRIMARY KEY); CREATE TEMP TABLE IF NOT EXISTS checkpoint_fault_child (id INTEGER REFERENCES checkpoint_fault_parent(id) DEFERRABLE INITIALLY DEFERRED)')
+        }
+        fault = request.fault; break
       case 'release':
         if (!release) throw new Error('no held COMMIT')
         release(); release = undefined; break

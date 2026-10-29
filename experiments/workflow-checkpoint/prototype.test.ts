@@ -58,6 +58,30 @@ describe('isolated transactional metadata prototype', () => {
     expect((await readdir(f.directory)).filter(name => name.endsWith('.value.json'))).toHaveLength(1)
   })
 
+  it.each(['constraint_commit', 'hold_constraint_commit'] as const)('rolls back a real SQLite COMMIT rejection without fencing a known rollback: %s', async fault => {
+    const f = await setup(), before = await f.storage.worker.request({ op: 'stats' }) as Stats
+    await f.storage.fault(fault)
+    const held = fault === 'hold_constraint_commit' ? f.storage.worker.waitHeld() : undefined
+    const pending = f.store.saveFrameWithValue({ ...f.initial, phase: 'completed' }, 1,
+      { field: 'resultRef', key: 'rejected', evaluation: known('orphan') })
+    const rejected = expect(pending).rejects.toMatchObject({ unknown: false, message: expect.stringContaining('FOREIGN KEY constraint failed') })
+    if (held) { await held; await f.storage.worker.request({ op: 'release' }) }
+    await rejected
+    expect(await f.store.loadFrame('prototype-flow', 'node')).toMatchObject({ phase: 'entered', revision: 1 })
+    expect((await f.storage.worker.request({ op: 'stats' }) as Stats).transactions).toBe(before.transactions)
+    const artifact = (await readdir(f.directory)).find(name => name.endsWith('.value.json'))!
+    await rm(join(f.directory, artifact))
+    const restored = await f.store.saveValue('prototype-flow', 'rejected', known('orphan'))
+    expect(await f.store.loadValue('prototype-flow', restored)).toEqual(known('orphan'))
+    // A distinct entered-frame update remains writable after known rollback;
+    // this does not replay the rejected checkpoint or any unknown outcome.
+    await f.store.saveFrame({ ...f.initial, reason: 'known rollback observed' }, 1)
+    await closeUnder(f.root)
+    const cold = (await new FileWorkflowStore(f.root).loadFrame('prototype-flow', 'node'))!
+    expect(cold).toMatchObject({ phase: 'entered', revision: 2, reason: 'known rollback observed' })
+    expect(cold.resultRef).toBeUndefined()
+  })
+
   it('fences an unknown COMMIT reply and cold-reads the committed fact without retrying the write', async () => {
     const f = await setup()
     await f.storage.fault('lost_commit_reply')

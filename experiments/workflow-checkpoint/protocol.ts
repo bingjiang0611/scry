@@ -5,7 +5,7 @@ export type Operation =
   | { op: 'get'; name: string }
   | { op: 'put'; name: string; text: string }
   | { op: 'list'; after: string }
-  | { op: 'fault'; fault: 'before_commit' | 'lost_commit_reply' | 'hold_commit' }
+  | { op: 'fault'; fault: 'before_commit' | 'lost_commit_reply' | 'hold_commit' | 'constraint_commit' | 'hold_constraint_commit' }
 export type Request = Operation & { id: number }
 export type Stats = {
   transactions: number; mutations: number; gets: number; lists: number
