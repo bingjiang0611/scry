@@ -19,13 +19,19 @@ describe('concurrent performance measurement', () => {
             await file.writeFile('real payload'); await file.sync(); await file.close();
             const directory = await open(${JSON.stringify(temp)}, 'r'); await directory.sync(); await directory.close();
             require('node:child_process').execFileSync('git', ['--version']);
+            require('node:child_process').spawnSync('git', { cwd: ${JSON.stringify(temp)}, stdio: 'ignore' });
           })().catch(error => { console.error(error); process.exitCode = 1; });
         `], { env: { ...process.env, SCRY_CONCURRENT_ROLE: 'hook', SCRY_CONCURRENT_LOG: log } })
         return JSON.parse(readFileSync(log, 'utf8'))
       }
       expect(run(false).counters).toMatchObject({ fsync: 0, git: 0, children: 0 })
       const measured = run(true)
-      expect(measured.counters).toMatchObject({ fsync: 2, git: 1, children: 1 })
+      expect(measured.counters).toMatchObject({ fsync: 2, git: 2, children: 2 })
+      expect(measured.gitCalls).toEqual([
+        { at: expect.any(Number), argv: ['git', '--version'] },
+        { at: expect.any(Number), argv: ['git'], cwd: temp }
+      ])
+      expect(measured.gitCallsTruncated).toBe(false)
       expect(measured.usage.maxRSS).toBeGreaterThan(0)
       expect(measured.cpu.user + measured.cpu.system).toBeGreaterThan(0)
     } finally { rmSync(temp, { recursive: true, force: true }) }

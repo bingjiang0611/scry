@@ -9,6 +9,12 @@ const role = process.env.SCRY_CONCURRENT_ROLE || 'main'
 const counters = { fsync: 0, git: 0, children: 0, activeRunsCalls: 0, activeRunsJsonBytes: 0 }
 const ipc = []
 const hookTrees = []
+const gitCalls = []
+let gitCallsTruncated = false
+const recordGit = (argv, cwd) => {
+  if (gitCalls.length < 10000) gitCalls.push({ at: Date.now(), argv, cwd })
+  else gitCallsTruncated = true
+}
 const open = fs.promises.open
 fs.promises.open = async function (...args) {
   const handle = await open.apply(this, args)
@@ -28,7 +34,10 @@ for (const method of ['fsync', 'fsyncSync', 'fdatasync', 'fdatasyncSync']) {
 const spawn = ChildProcess.prototype.spawn
 ChildProcess.prototype.spawn = function (options) {
   counters.children++
-  if (basename(options.file) === 'git') counters.git++
+  if (basename(options.file) === 'git') {
+    counters.git++
+    recordGit(options.args, options.cwd)
+  }
   const timedHook = role === 'main' && options.file === '/bin/sh' && options.args[1]?.endsWith('/.scry/provider-hook.sh')
   const argv = options.args
   if (timedHook) options = { ...options, file: '/usr/bin/time', args: ['/usr/bin/time', '-p', ...argv],
@@ -45,7 +54,11 @@ for (const method of ['spawnSync', 'execFileSync']) {
   const original = childProcess[method]
   childProcess[method] = function (file, ...args) {
     counters.children++
-    if (basename(file) === 'git') counters.git++
+    if (basename(file) === 'git') {
+      counters.git++
+      const hasArgv = Array.isArray(args[0])
+      recordGit([file, ...(hasArgv ? args[0] : [])], (hasArgv ? args[1] : args[0])?.cwd)
+    }
     return original.call(this, file, ...args)
   }
 }
@@ -96,7 +109,7 @@ const flush = () => {
   delay.disable()
   fs.appendFileSync(process.env.SCRY_CONCURRENT_LOG, JSON.stringify({ role, pid: process.pid, at: Date.now(),
     argv: process.argv.slice(2), cpu: process.cpuUsage(), usage: process.resourceUsage(), uptimeSeconds: process.uptime(),
-    counters, samples, ipc, hookTrees, ...(role === 'main' ? { scopedTrace, scopedTraceTruncated } : {}) }) + '\n')
+    counters, samples, ipc, hookTrees, gitCalls, gitCallsTruncated, ...(role === 'main' ? { scopedTrace, scopedTraceTruncated } : {}) }) + '\n')
 }
 process.on('exit', flush)
 module.exports = { counters, flush }
