@@ -66,3 +66,10 @@ D2 之后的 UI 工序是 D3：未决发送原文/图片可在只读回执里查
 D3 之后还有两处集成前源码修正（未重跑 App UI 与全量 `npm test`）：来源匹配不再对每个子会话遍历全部 owner
 （改为只解析被请求的那一侧，并留有“未读无关 owner”的计数负控）；孤儿行的行页码表每次更新只保留当前页面的组。
 两项均记录在 [d3-ui-polish.md](d3-ui-polish.md) 末节。
+
+## 发布前门禁（最新，D3 之后）
+
+源码冻结候选。集成分支 `cf25a103` 上新增 `107a9208`（终端 capability 断言改读 durable 工作台命名空间）与
+`72ec35cc`（虚拟化历史锚定与精确视图恢复各自保留）；完整 `npm run test:renderer:ui`、`npm run check:cli-release`、
+`performance:measure --compare beac4da8…` 均通过。首次失败、重跑结论、性能 worse 的逐项判定、证据与产物路径见
+[release-verification.md](release-verification.md)。仍未升版本、未打包安装、未 push；下一个执行者先读该文件。
