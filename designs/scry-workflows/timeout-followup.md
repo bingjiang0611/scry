@@ -8,7 +8,11 @@
 
 本轮未改 timeout、既有断言、固定 workload、重复次数、Provider 阶段或持久化保证。没有真实 Provider/Jev 请求，没有启动 App、打包、安装或 push。v4 工作台既有验收见 [交付报告](v4-workspace-delivery.md)，本轮不重做或扩称该验收。
 
-## 后续隔离评估（2026-10-29 UTC）
+## 最新授权合同收口（2026-10-29 UTC）
+
+双后端测试结构已建立，SQL 原 13 项物理路径失败与未处理拒绝不再出现；共享 58 项、revision 19 项和原型 16 项合计 93 通过，IO meter 另 3 项通过。发现并修复实验 Store 的 COMMIT 前值缓存污染。File 曾 58 通过，最终高负载复验 56 通过、两项未改动的进程恢复用例仍触及原 5000ms；不能宣称稳定全绿。生产运行源码、默认配置和负载未切换；本页原门禁结果不被覆盖。详见[合同收口报告](../../docs/performance-experiments/20261029-workflow-checkpoint-contracts.md)。
+
+## 后续隔离评估（2026-10-29 UTC，历史快照）
 
 维护者另行授权的 SQLite/Worker 临时原型已评估。最终同负载文件版 3 项原超时、候选 5/5 通过；65 项聚焦检查通过。扩大合同仍为 37 passed / 13 failed，并有 1 个未处理拒绝，不能推广。生产 `src/` 未变化，本页记录的完整生产门禁未被替换或刷绿。实现、负对照、ABI/原生 IO 限制与持久证据见 [隔离原型报告](../../docs/performance-experiments/20261029-workflow-sqlite-checkpoint.md)。
 

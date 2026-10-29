@@ -2,7 +2,7 @@
 
 **Experimental Node 24.18.0 / macOS prototype only. Not the App backend. Do not run it against real userData, migrate data, or wire these resolver aliases into production.** No new dependency is installed. `node:sqlite` is not evidence for the Electron/better-sqlite3 distribution.
 
-Outcome: [evaluation report](../../docs/performance-experiments/20261029-workflow-sqlite-checkpoint.md). The original five revision cases pass here, but the expanded FileStore-specific contract run fails 13 tests. Full equivalence and production rollout are **not approved**.
+History: [initial evaluation](../../docs/performance-experiments/20261029-workflow-sqlite-checkpoint.md). The authorized [dual-backend follow-up](../../docs/performance-experiments/20261029-workflow-checkpoint-contracts.md) resolves the 13 old physical-path failures and exposes/fixes a real pre-COMMIT value-cache bug. SQL functional checks pass 93 tests, with IO meter's 3 tests run separately. File first passed 58, then had 2 unchanged 5000ms process-recovery timeouts under high load. Stable full equivalence and production rollout are **not approved**.
 
 ## Prepare once, in a new temporary directory
 
@@ -53,7 +53,38 @@ SCRY_CHECKPOINT_RESULT="$trial/prototype.json" \
 
 This checks actual local IO, COMMIT-before-ACK, transport loss after a real Worker exit, cold reads, queue closure, namespace containment, separate processes/connections and counter sensitivity. No paid Provider/Jev is used. The esbuild adapter also closes owned storage in the existing real controller fixture, so completion cannot leave a ref-counted Worker pinning that process.
 
-For existing IO-fault/source contract suites, use `vitest.contracts.config.ts`. It omits the eager Store method meter so each suite can register its own fs mocks. It does **not** adapt away the old file-path assertions: the expanded source suites currently fail on SQL and must not be reported green. They pass on the original backend with the default project config.
+## Shared File / SQL contracts
+
+For IO-fault/source suites, use `vitest.contracts.config.ts`. It omits eager meters and lets each suite register its fs probes before Runtime loads. **Do not run `io-meter.test.ts` in this configuration:** its counters require the standard experimental config above.
+
+The same 58 semantic cases run on both backends. File's physical flush/rename/sync assertions remain in `src/main/workflow-storage-probe.fixture.ts`; the SQL test driver uses an independent canonical database reader, actual held COMMIT and real deferred-constraint COMMIT rejection. The latter is not a device/ENOSPC fault. Semantic-corruption input updates SQL bytes and their envelope hash deliberately; independent hash-corruption negative controls still test that separate boundary. The held sequence test inspects canonical storage independently rather than waiting on the writer's deliberately serialized read queue.
+
+```bash
+contracts=(
+  src/main/workflow-frame-store.test.ts
+  src/main/workflow-native-checkpoint.test.ts
+  src/main/workflow-node-stop-journal.test.ts
+  src/main/workflow-recovery-process.test.ts
+  src/main/workflow-recovery.test.ts
+  src/main/workflow-restart-contract.test.ts
+  src/main/workflow-sequence-checkpoint.test.ts
+  src/main/workflow-store-checkpoint.test.ts
+  src/main/workflow-store-governing.test.ts
+  src/main/workflow-store.test.ts
+  src/main/workflow-system-recovery-process.test.ts
+)
+node .agents/skills/scry-performance-climb/scripts/timing-run.mjs checkpoint-file-contracts -- \
+  npm run test:unit -- "${contracts[@]}" --maxWorkers=1 --no-file-parallelism \
+  --reporter=default --reporter=json --outputFile="$trial/file-contracts.json" \
+  > "$trial/file-contracts.log" 2>&1
+SCRY_CHECKPOINT_RESULT="$trial/sql-contracts.json" \
+  node .agents/skills/scry-performance-climb/scripts/timing-run.mjs checkpoint-sql-contracts -- \
+  npm run test:unit -- --config experiments/workflow-checkpoint/vitest.contracts.config.ts \
+  "${contracts[@]}" --maxWorkers=1 --no-file-parallelism \
+  > "$trial/sql-contracts.log" 2>&1
+```
+
+Preserve each exit status even when a preceding command fails. To reproduce the 93-case SQL batch, append the three revision files from the fixed comparison **without `-t`**, plus `experiments/workflow-checkpoint/prototype.test.ts`. Run the IO meter's three cases separately with `vitest.sqlite.config.ts`. Do not aggregate duplicate prototype runs as additional distinct coverage.
 
 Typecheck and syntax checks:
 
@@ -69,7 +100,7 @@ The default project test config still excludes `experiments/`; these experimenta
 
 ## Deliberately broken negative controls
 
-Only derived files under the prepared build are changed. Modes are finite: `metadata-hash` (default), `result-hash`, `early-ack`, `frame-cas`. Every manifest marks the derivative as ineligible for adoption.
+Only derived files under the prepared build are changed. Modes are finite: `metadata-hash` (default), `result-hash`, `early-ack`, `frame-cas`, `epoch`, `value-cache`. Every manifest marks the derivative as ineligible for adoption.
 
 ```sh
 node experiments/workflow-checkpoint/negative-control.mjs \
@@ -81,6 +112,6 @@ SCRY_CHECKPOINT_RESULT="$trial/negative-result-hash.json" \
   src/main/workflow-frame-store.test.ts -t 'verifies immutable content and workflow containment'
 ```
 
-Expected: **one assertion failure**, not just an arbitrary nonzero exit. A preparation/import error or zero collected tests is not a valid negative control. Other selectors and actual outcomes are recorded in the report and archived logs.
+Expected: **one assertion failure**, not just an arbitrary nonzero exit. A preparation/import error or zero collected tests is not a valid negative control. Other selectors and actual outcomes are recorded in the follow-up report and archived logs. `epoch` targets `workflow-recovery.test.ts -t 'reuses a durable completed child'`; `value-cache` targets `prototype.test.ts -t 'rolls back a real SQLite COMMIT'` and must fail both cases. A genuine merged-A/B rollback negative control is still missing; the strengthened positive boundary check does not replace it.
 
 Keep logs/builds until their hashes are archived. Only clean up owned test resources. The prototype rejects existing legacy metadata and a missing marked database instead of creating an empty history. There is no migration, fallback, automatic retry, or production lifecycle integration.

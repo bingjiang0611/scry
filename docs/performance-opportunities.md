@@ -4,7 +4,7 @@
 
 ## Workflow 支线隔离评估（2026-10-29；未部署）
 
-`feat/workflow-m0` 的 [SQLite/Worker 原型](performance-experiments/20261029-workflow-sqlite-checkpoint.md)：同 Node 24 ABI 的原五例，文件版 3 超时、候选 5/5 通过；65 项聚焦检查通过。L2 仅为低负载受控 fixture，L1 只证明元数据文件发布转为 SQL 提交，原生 fsync/设备字节 unavailable，不称为总 IO 下降。扩大合同 13 失败及 1 未处理拒绝使 P1 未通过；不调 ratchet、不升级门禁、不接生产。下一步需决定是否修改现有测试结构以建立共享 File/SQL 合同；Electron、完整 unit、迁移和 L3 均未完成。与下方已安装主线 build 分开记录。
+`feat/workflow-m0` 的 [SQLite/Worker 原型](performance-experiments/20261029-workflow-sqlite-checkpoint.md)：同 Node 24 ABI 的原五例，文件版 3 超时、候选 5/5 通过；65 项聚焦检查通过。L2 仅为低负载受控 fixture，L1 只证明元数据文件发布转为 SQL 提交，原生 fsync/设备字节 unavailable，不称为总 IO 下降。初次扩大合同 13 失败及 1 未处理拒绝使 P1 未通过。随后获授权的[双后端合同](performance-experiments/20261029-workflow-checkpoint-contracts.md)已收口旧物理路径失败并修复实验值缓存：SQL 93 项通过，meter 另 3 项通过；File 曾 58 通过，最终高负载复验 56 通过、2 项原 5000ms 超时。epoch 负对照已补，真正合并 A/B 的回滚负对照仍缺。本轮均为高负载，不新增加速结论；不调 ratchet、不升级门禁、不接生产。Electron、完整 unit、迁移和 L3 均未完成。与下方已安装主线 build 分开记录。
 
 ## 最新爬坡进展（2026-10-17）
 
