@@ -1,5 +1,7 @@
 # Workflow File / SQLite 双后端合同收口
 
+后续：[真实 A/B 回滚与恢复阶段调查](20261029-workflow-checkpoint-boundaries.md)已补真合并负对照。最新 SQL 为 92/93，File 仍有原 5000ms 超时；下文保留本轮历史结果，不代表最新门禁绿色。
+
 日期：2026-10-29 UTC。范围：维护者授权改造测试结构、建立双后端合同；**不接入生产、不迁移真实数据**。前轮记录：[SQLite 原型评估](20261029-workflow-sqlite-checkpoint.md)。
 
 ## 结论

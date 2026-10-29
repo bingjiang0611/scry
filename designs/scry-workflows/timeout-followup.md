@@ -4,6 +4,8 @@
 
 ## 当前结论
 
+最新：[真实 A/B 回滚与恢复阶段调查](../../docs/performance-experiments/20261029-workflow-checkpoint-boundaries.md)。A/B 负对照已补，最新 SQL 92/93；File 仍超时。已增加有界启动/持久化诊断，尚缺低负载窗口；不是生产修复或推广批准。
+
 已修复性能测试的共享计数串扰，本地提交 `2adc9d9647560bfd160e0dd5c0f9149d41be8d76`。**没有修复生产 Workflow 的 5000ms 超时，完整门禁仍红灯。** 不把计数器修复称为运行速度改善。
 
 本轮未改 timeout、既有断言、固定 workload、重复次数、Provider 阶段或持久化保证。没有真实 Provider/Jev 请求，没有启动 App、打包、安装或 push。v4 工作台既有验收见 [交付报告](v4-workspace-delivery.md)，本轮不重做或扩称该验收。
