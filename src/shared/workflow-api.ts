@@ -147,5 +147,7 @@ export interface WorkflowApi {
   inspectFrame(workflowId: string, frameId: string): Promise<WorkflowFrameInspection>
   inspectExecution(request: WorkflowExecutionInspectionRequest): Promise<WorkflowExecutionInspection>
   inspectOutput(request: WorkflowOutputInspectionRequest): Promise<WorkflowOutputInspection>
+  sourceApplications(workflowId: string, programRevision: string): Promise<import('./workflow-source-application').WorkflowSourceApplicationCatalog>
+  applySourceApplication(command: import('./workflow-source-application').WorkflowSourceApplicationCommand): Promise<import('./workflow-source-application').WorkflowSourceApplicationReceipt>
   onProgress(callback: (progress: WorkflowProgress) => void): () => void
 }

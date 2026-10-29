@@ -65,6 +65,16 @@ describe('workflow revision preload operations', () => {
     expect(electron.invoke).toHaveBeenCalledExactlyOnceWith('workflow:prepareTemplateTask', request)
   })
 
+  it('forwards source application identities without adding workspace authority', async () => {
+    await workflowApi.sourceApplications('workflow-test', 'a'.repeat(64))
+    expect(electron.invoke).toHaveBeenLastCalledWith('workflow:sourceApplications', 'workflow-test', 'a'.repeat(64))
+    const command = { operationId: '00000000-0000-4000-8000-000000000001', target: { workflowId: 'workflow-test', programRevision: 'a'.repeat(64), workflowRevision: 1, stepId: 'step', nodeId: 'check' },
+      expected: { baseHash: 'b'.repeat(64), candidateHash: 'c'.repeat(64), trustFingerprint: 'd'.repeat(64) }, confirmation: { acknowledgesSourceMutation: true as const, acknowledgesNoAutomaticRollback: true as const } }
+    await workflowApi.applySourceApplication(command)
+    expect(electron.invoke).toHaveBeenLastCalledWith('workflow:applySourceApplication', command)
+    expect(electron.invoke).toHaveBeenCalledTimes(2)
+  })
+
   it('forwards only source to preparation and only candidate identity/approval to execution', async () => {
     const draft: WorkflowRevisionDraft = { workflowId: 'workflow-test', expectedRevision: 7, userGoal: 'Inspect',
       roles: [{ role: 'orchestrator', providerId: 'codex' }], body: { kind: 'sequence', blockId: 'root', blocks: [

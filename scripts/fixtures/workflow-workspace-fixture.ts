@@ -9,7 +9,8 @@ export function workflowWorkspaceFixture() {
   const base = workflowInspectionFixture()
   const revision = base.preview().programRevision
   const listeners = new Set<(progress: WorkflowProgress) => void>()
-  const frameQueries: string[] = []
+  const frameQueries: string[] = [], applicationCommands: Parameters<WorkflowApi['applySourceApplication']>[0][] = []
+  const applicationReceipts: Awaited<ReturnType<WorkflowApi['applySourceApplication']>>[] = []
   const templateDraft: WorkflowTemplateDraft = {
     draftId: '00000000-0000-4000-8000-000000000011', draftRevision: 1, domainId: 'a'.repeat(64),
     templateId: '00000000-0000-4000-8000-000000000012', scope: { kind: 'personal' }, base: null,
@@ -53,8 +54,21 @@ export function workflowWorkspaceFixture() {
     if (index < 0) return base.inspectFrame(id, frameId)
     return { state: 'available', source: 'canonical_frame', observedAt: 1, frame: { frameId, nodeId: blocks[index].blockId, programRevision: revision, phase: index === 2 ? 'unknown' : 'completed', revision: 1, parentage: { state: 'root' } } }
   }
+  const sourceReview = { workflowId: progress.workflowId, programRevision: revision, workflowRevision: progress.revision ?? 0, stepId: 'fixture-source-step', nodeId: 'fixture-source-check',
+    baseHash: '1'.repeat(64), candidateHash: '2'.repeat(64), trustFingerprint: '3'.repeat(64), changedPaths: ['src/feature.ts', 'src/feature.test.ts'], check: 'recorded_passed' as const }
+  const sourceApplications: WorkflowApi['sourceApplications'] = async () => ({ workflowId: progress.workflowId, programRevision: revision, workflowRevision: progress.revision ?? 0,
+    reviewedAt: Date.now(), items: applicationReceipts.some(receipt => receipt.state === 'applied') ? [] : [sourceReview], receipts: structuredClone(applicationReceipts) })
+  const applySourceApplication: WorkflowApi['applySourceApplication'] = async command => {
+    applicationCommands.push(structuredClone(command))
+    const rejected = applicationReceipts.length === 0
+    const receipt = { operationId: command.operationId, target: command.target, requestFingerprint: '4'.repeat(64), admissionFingerprint: '5'.repeat(64), state: rejected ? 'rejected' as const : 'applied' as const,
+      requestedAt: Date.now(), baseHash: command.expected.baseHash, candidateHash: command.expected.candidateHash, trustFingerprint: command.expected.trustFingerprint,
+      ...(rejected ? { reason: 'fixture source drift' } : { changedPaths: [...sourceReview.changedPaths] }) }
+    applicationReceipts.push(receipt)
+    return structuredClone(receipt)
+  }
   const onProgress: WorkflowApi['onProgress'] = listener => { listeners.add(listener); return () => { listeners.delete(listener) } }
-  return { preview, progress, inspectExecution, inspectFrame, onProgress, queries: base.queries, frameQueries, templateDraft, draftSummary,
+  return { preview, progress, inspectExecution, inspectFrame, sourceApplications, applySourceApplication, onProgress, queries: base.queries, frameQueries, applicationCommands, templateDraft, draftSummary,
     changeSource: () => {
       base.changeSource()
       progress.programRevision = base.preview().programRevision

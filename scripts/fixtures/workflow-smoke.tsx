@@ -69,6 +69,8 @@ const api: WorkflowApi = {
   inspectExecution: input => workspaceInspection ? workspaceInspection.inspectExecution(input) : inspection ? inspection.inspectExecution(input) : emptyWorkflowBridge.inspectExecution(input),
   inspectFrame: (id, frameId) => workspaceInspection ? workspaceInspection.inspectFrame(id, frameId) : inspection ? inspection.inspectFrame(id, frameId) : emptyWorkflowBridge.inspectFrame(id, frameId),
   inspectOutput: input => outputInspection ? outputInspection.inspectOutput(input) : emptyWorkflowBridge.inspectOutput(input),
+  sourceApplications: (workflowId, programRevision) => workspaceInspection ? workspaceInspection.sourceApplications(workflowId, programRevision) : emptyWorkflowBridge.sourceApplications(workflowId, programRevision),
+  applySourceApplication: command => workspaceInspection ? workspaceInspection.applySourceApplication(command) : emptyWorkflowBridge.applySourceApplication(command),
   approve: async approval => {
     if (approval.programRevision !== preview.programRevision) throw new Error('Wrong immutable revision')
     counters.approvals++; notify()
@@ -144,6 +146,7 @@ Object.assign(window, { workflowFixture: { counters, keys, stopCommands, nodeCom
   installWorkspace: () => { workspaceInspection = workflowWorkspaceFixture(); outputInspection = undefined; inspection = undefined; progress = workspaceInspection.progress; document.dispatchEvent(new Event('fixture-remount')) },
   workspaceQueries: () => workspaceInspection?.queries,
   workspaceFrameQueries: () => workspaceInspection?.frameQueries,
+  sourceApplicationCommands: () => workspaceInspection?.applicationCommands,
   changeWorkspaceSource: () => workspaceInspection?.changeSource(),
   changeWorkspaceProject: () => document.dispatchEvent(new Event('fixture-project-change')),
   installOutputInspection: () => { workspaceInspection = undefined; outputInspection = workflowOutputFixture(); inspection = outputInspection; progress = inspection.progress; document.dispatchEvent(new Event('fixture-remount')) },

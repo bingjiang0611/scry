@@ -36,6 +36,7 @@ export function fixture(actualService?: Parameters<typeof registerWorkflowIpc>[0
   const capturedTasks = { prepareTemplate: vi.fn(async () => null), plan: vi.fn(async () => null), cancel: vi.fn(async () => true), list: vi.fn(async () => ({ items: [] })), inspect: vi.fn(async () => null) }
   const templateEditAuthoring = { request: vi.fn(async () => null) }
   const templateEditApplication = { apply: vi.fn(async () => null) }
+  const sourceApplications = { catalog: vi.fn(async () => ({ workflowId: 'workflow-test', programRevision: 'a'.repeat(64), workflowRevision: 0, reviewedAt: 1, items: [], receipts: [] })), apply: vi.fn(async () => null) }
   const resolveWorkspace = vi.fn((cwd: string) => { if (cwd !== '/authorized') throw new Error('unauthorized'); return cwd })
   registerWorkflowIpc({
     register: (channel, listener) => registerTrustedIpcHandler({ handle: (id, handler) => { handlers.set(id, handler) } }, channel, () => win, frame.url,
@@ -43,8 +44,9 @@ export function fixture(actualService?: Parameters<typeof registerWorkflowIpc>[0
     capturedTasks: capturedTasks as unknown as Parameters<typeof registerWorkflowIpc>[0]['capturedTasks'],
     templateEditAuthoring: templateEditAuthoring as unknown as Parameters<typeof registerWorkflowIpc>[0]['templateEditAuthoring'],
     templateEditApplication: templateEditApplication as unknown as Parameters<typeof registerWorkflowIpc>[0]['templateEditApplication'],
+    sourceApplications: sourceApplications as unknown as Parameters<typeof registerWorkflowIpc>[0]['sourceApplications'],
     service: actualService ?? (service as unknown as Parameters<typeof registerWorkflowIpc>[0]['service']), resolveWorkspace,
     assertCurrentWorkspace: cwd => { if (cwd !== '/authorized') throw new Error('stale workspace') }
   })
-  return { handlers, event, frame, sender, service, capturedTasks, templateEditAuthoring, templateEditApplication, resolveWorkspace }
+  return { handlers, event, frame, sender, service, capturedTasks, templateEditAuthoring, templateEditApplication, sourceApplications, resolveWorkspace }
 }

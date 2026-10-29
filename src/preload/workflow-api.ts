@@ -42,6 +42,8 @@ export const workflowApi = {
   inspectFrame: (workflowId: string, frameId: string): ReturnType<WorkflowApi['inspectFrame']> => ipcRenderer.invoke('workflow:inspectFrame', workflowId, frameId),
   inspectExecution: (request: Parameters<WorkflowApi['inspectExecution']>[0]): ReturnType<WorkflowApi['inspectExecution']> => ipcRenderer.invoke('workflow:inspectExecution', request),
   inspectOutput: (request: Parameters<WorkflowApi['inspectOutput']>[0]): ReturnType<WorkflowApi['inspectOutput']> => ipcRenderer.invoke('workflow:inspectOutput', request),
+  sourceApplications: (...args: Parameters<WorkflowApi['sourceApplications']>): ReturnType<WorkflowApi['sourceApplications']> => ipcRenderer.invoke('workflow:sourceApplications', ...args),
+  applySourceApplication: (command: Parameters<WorkflowApi['applySourceApplication']>[0]): ReturnType<WorkflowApi['applySourceApplication']> => ipcRenderer.invoke('workflow:applySourceApplication', command),
   onProgress: (cb: Parameters<WorkflowApi['onProgress']>[0]): ReturnType<WorkflowApi['onProgress']> => {
     const listener = (_event: Electron.IpcRendererEvent, progress: Parameters<WorkflowApi['onProgress']>[0] extends (value: infer T) => void ? T : never): void => cb(progress)
     ipcRenderer.on('workflow:progress', listener)

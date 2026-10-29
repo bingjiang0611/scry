@@ -8,6 +8,7 @@ import { ModalFrame } from './Modals'
 import { WorkflowRunSurface } from './WorkflowRunSurface'
 import { WorkflowWorkspacePlan } from './WorkflowWorkspacePlan'
 import { WorkflowTemplateWorkbench, type WorkflowTemplateWorkbenchHandle } from './WorkflowTemplateWorkbench'
+import { WorkflowSourceApplicationPanel } from './WorkflowSourceApplicationPanel'
 import './workflow-workspace.css'
 import './workflow-inspection.css'
 
@@ -110,6 +111,8 @@ export function WorkflowWorkspace({ cwd, scopeChanged, agents, progresses, initi
               <td><button type="button" onClick={() => select(progress.workflowId)}>{copy.inspect}</button>{canStop(progress) && stopButton(progress)}</td>
             </tr>)}</tbody></table></div>
           {!records.length && <p role="status">{loading ? copy.loading : copy.noWorkflows}</p>}
+          {active && current.state === 'ready' && <WorkflowSourceApplicationPanel key={`${active.workflowId}:${current.preview.programRevision}`} workflowId={active.workflowId}
+            programRevision={current.preview.programRevision} onApplied={() => void refresh()} />}
         </section> : !active ? <div className="workflow-workspace-empty"><p role="status">{loading ? copy.loading : view === 'plan' ? copy.emptyPlan : copy.noWorkflows}</p></div>
           : current.state === 'loading' ? <p role="status">{copy.loading}</p> : current.state === 'error' ? <div><p role="alert">{current.message}</p><button type="button" onClick={() => void refresh()}>{copy.refresh}</button></div>
           : view === 'plan' ? <WorkflowWorkspacePlan preview={current.preview} progress={active} onReview={() => guard(() => onReview(current.preview))} onExtract={() => guard(() => onExtract(current.preview))} onRevise={() => guard(() => onRevise(active.workflowId))} />

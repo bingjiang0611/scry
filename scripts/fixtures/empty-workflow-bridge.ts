@@ -29,6 +29,8 @@ export const emptyWorkflowBridge: WorkflowApi = {
   snapshot: async () => null,
   inspectExecution: async () => ({ state: 'unavailable', source: 'canonical_ledger', observedAt: Date.now(), reason: 'root_missing' as const }),
   inspectOutput: async () => ({ state: 'unavailable', source: 'canonical_output', observedAt: Date.now(), reason: 'root_missing' as const }),
+  sourceApplications: unavailable,
+  applySourceApplication: unavailable,
   inspectFrame: async () => ({ state: 'unavailable', source: 'canonical_frame', observedAt: Date.now(), reason: 'root_missing' as const }),
   list: async () => ({ records: [], unresolvedPlanning: 0 }),
   onProgress: () => () => {}

@@ -18,6 +18,8 @@ import type { createDesktopTemplateEditAuthoring } from './desktop-template-edit
 import type { createDesktopTemplateEditCandidateApplication } from './desktop-template-edit-candidate-application'
 import { idPattern } from './conversation-record'
 import { templateReference } from './workflow-template-identity'
+import type { WorkflowSourceApplicationService } from './workflow-source-application-service'
+import { registerWorkflowSourceApplicationIpc } from './workflow-source-application-ipc'
 
 type Service = Pick<WorkflowService, 'sizeGuideline' | 'setSizeGuideline' | 'planCommand' | 'preview' | 'findPreview' | 'approve' | 'start' | 'resume' | 'retry' | 'restartStalled' | 'prepareRevision' | 'revisePrepared' | 'stop' | 'stopNode' | 'snapshot' | 'inspectFrame' | 'inspectExecution' | 'inspectOutput' | 'list' | 'cancelPlanning'>
 const identity = (value: unknown): string => {
@@ -61,12 +63,13 @@ function approval(value: unknown): WorkflowApproval {
 }
 
 /** register must be the production trusted sender/frame/origin wrapper. */
-export function registerWorkflowIpc({ register, service, capturedTasks, templateEditAuthoring, templateEditApplication, resolveWorkspace, assertCurrentWorkspace }: {
+export function registerWorkflowIpc({ register, service, capturedTasks, templateEditAuthoring, templateEditApplication, sourceApplications, resolveWorkspace, assertCurrentWorkspace }: {
   register: (channel: string, listener: (...args: unknown[]) => unknown) => void
   service: Service
   capturedTasks: ReturnType<typeof createDesktopWorkflowTaskEntry>
   templateEditAuthoring: ReturnType<typeof createDesktopTemplateEditAuthoring>
   templateEditApplication: ReturnType<typeof createDesktopTemplateEditCandidateApplication>
+  sourceApplications: Pick<WorkflowSourceApplicationService, 'catalog' | 'apply'>
   resolveWorkspace: (cwd: string) => string
   assertCurrentWorkspace: (cwd: string) => void
 }): void {
@@ -217,6 +220,7 @@ export function registerWorkflowIpc({ register, service, capturedTasks, template
   })
   register('workflow:inspectExecution', request => service.inspectExecution(executionInspection(request), resolveWorkspace))
   register('workflow:inspectOutput', request => service.inspectOutput(outputInspection(request), resolveWorkspace))
+  registerWorkflowSourceApplicationIpc(register, sourceApplications)
   register('workflow:list', (cwd, cursor) => {
     if (typeof cwd !== 'string' || cwd.length > 4096 || (cursor !== undefined && (typeof cursor !== 'string' || cursor.length > 101))) throw new Error('工作流列表请求无效')
     return service.list(resolveWorkspace(cwd), cursor as string | undefined)

@@ -1,7 +1,7 @@
 import type { WorkflowControlFrame } from '../shared/workflow'
 import type { WorkflowExecutionInspectionRecord } from '../shared/workflow-inspection'
 import type { WorkflowClassifierOutcome } from '../shared/workflow-classifier'
-import type { WorkflowSourceApplicationReceipt } from './workflow-source-application'
+import type { WorkflowSourceApplicationReceipt } from '../shared/workflow-source-application'
 
 export type WorkflowGraphNode = Readonly<{
   id: string

@@ -20,6 +20,7 @@ import { WorkflowSlots, WorkflowScopeError, WorkflowDispatch } from './workflow-
 import type { ProviderRegistry } from './providers/registry'
 import type { WorkflowClassifierAdapter } from '../shared/workflow-classifier'
 import { workflowUsageFromProviderResults } from '../shared/workflow-usage'
+import { WorkflowSourceApplicationService } from './workflow-source-application-service'
 
 export interface AppWorkflowRuntimeDependencies {
   userData: string
@@ -88,6 +89,7 @@ export function createAppWorkflowRuntime(deps: AppWorkflowRuntimeDependencies) {
   const workflowTemplates = new WorkflowTemplateStore(deps.userData, deps.resolveTemplateProjectDirectory)
   const workflowSlots = new WorkflowSlots()
   const workflowSystems = new WorkflowSystemHost(join(deps.userData, 'workflow-replicas'), workflowStore)
+  const workflowSourceApplications = new WorkflowSourceApplicationService({ userData: deps.userData, store: workflowStore, systems: workflowSystems, resolveWorkspace: deps.resolveTemplateProjectDirectory })
   type AuthoringResult = Awaited<ReturnType<WorkflowPlanProvider>>
   const runAuthoring = async (input: {
     runId: string
@@ -181,5 +183,5 @@ export function createAppWorkflowRuntime(deps: AppWorkflowRuntimeDependencies) {
     classifierAdapter: deps.classifierAdapter
   })
 
-  return { workflowService, workflowStore, workflowTemplates, workflowSystems, workflowRunControls, runAuthoring }
+  return { workflowService, workflowStore, workflowTemplates, workflowSystems, workflowSourceApplications, workflowRunControls, runAuthoring }
 }

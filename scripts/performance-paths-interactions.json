@@ -311,13 +311,17 @@
     "owner": "workspace-source-control",
     "operations": [
       "ipc.sourceControl:",
-      "ipc.agent:gitDiff"
+      "ipc.agent:gitDiff",
+      "ipc.workflow:sourceApplications",
+      "ipc.workflow:applySourceApplication"
     ],
     "sources": [
       "src/main/source-control/ipc.ts",
       "src/main/git.ts",
       "src/main/app-run-diff.ts",
       "src/main/app-run-session-publication.ts",
+      "src/main/workflow-source-application-service.ts",
+      "src/main/source-control/apply-workflow-candidate.ts",
       "scripts/git-turn-diff-bench.mjs"
     ],
     "benchmarks": [

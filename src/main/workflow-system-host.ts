@@ -40,6 +40,8 @@ export class WorkflowSystemHost {
     })
   }
 
+  checkEnvironment(): Record<string, string> { return this.environment() }
+
   observeAgentInputs(workflowId: string, attemptId: string, workspace: string, phase: 'before' | 'after') {
     return observeWorkflowAgentInputs(this.store, workflowId, attemptId, workspace, phase, this.environment)
   }

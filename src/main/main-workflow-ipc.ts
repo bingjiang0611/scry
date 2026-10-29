@@ -134,7 +134,7 @@ export function registerMainWorkflowIpc(deps: MainWorkflowIpcDeps): MainWorkflow
     onProgress: progress => deps.sendProgress(progress),
     classifierAdapter: createTypeSafeWorkflowClassifierAdapter(process.env.TYPESAFE_API_KEY)
   })
-  const { workflowService, workflowStore, workflowTemplates, workflowRunControls, runAuthoring } = workflowRuntime
+  const { workflowService, workflowStore, workflowTemplates, workflowSourceApplications, workflowRunControls, runAuthoring } = workflowRuntime
   const resolveWorkflowAuthoringContinuationKey = (context: ProviderContext) => {
     if (!deps.providerRegistry.get(context.providerId).workflowAuthoring) throw new Error(workflowAuthoringCopy.unavailable)
     return deps.withProviderOperation(context.providerId, () => deps.providerContinuationKey(context), context.agentProfileId)
@@ -177,6 +177,7 @@ export function registerMainWorkflowIpc(deps: MainWorkflowIpcDeps): MainWorkflow
     capturedTasks: desktopWorkflowTasks,
     templateEditAuthoring: desktopTemplateEditAuthoring,
     templateEditApplication: desktopTemplateEditApplication,
+    sourceApplications: workflowSourceApplications,
     register: registerWorkflow,
     service: workflowService,
     resolveWorkspace: deps.resolveKnownProjectDirectory,
