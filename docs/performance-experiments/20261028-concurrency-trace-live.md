@@ -4,7 +4,8 @@
 
 - **只有 R6 测量工具已验收**：本篇记录 18 个测试文件 / 108 项、完整 `typecheck`、`git diff --check` 通过的采集工具，不改变 R1–R5 的 in-main 口径（见 [readers 篇](./20261028-concurrency-trace-readers.md)）。
 - **P0 未冻结**：50k Electron 耗时与噪声／MDE 预注册都还没做；每格只采一次功能样本，只有描述性毫秒／CPU 样本，**没有**毫秒结论。P1 未开始。
-- 没有速度提升 claim。未安装、未推送；提交号以 Git 历史为准。阶段记录不是门禁，门禁仍以[性能闭环](../performance-loop.md)为准。
+- 没有速度提升 claim。未安装、未推送。阶段记录不是门禁，门禁仍以[性能闭环](../performance-loop.md)为准。
+- 本篇先以 `631e07ea`（40 files）落在本地提交；**提交之后**才运行完整单测：`env -u P0_PROBE -u P1_PROBE -u BILLING_ADMIN_REAL npm run test:unit` → 429 files pass + 4 skip，4565 tests pass + 4 skip，411.58 s；4 个 skip 是 `performance-correlation`、`billing-admin-real`、`p0-integration`、`p1-integration` 各自的默认显式门控。
 
 ## 1. 这条 lane 是什么
 
