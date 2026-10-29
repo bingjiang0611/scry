@@ -78,4 +78,4 @@
 
 只读 scout run `ceff780f-23e4-49bd-a608-00bcf43c059a` 已结束；process-terminal 和 registered-resource closure observed，active capacity 0。其建议不是测试证据，本报告只采用主会话复核和实跑结果。
 
-未解决项负责人：主会话。下一步建议先形成 transactional root/frame checkpoint 设计与等价验收清单，再决定是否实现。这涉及持久化边界，不应凭“减少 fsync 数”直接修改。必须保留 artifact-before-authority、durable acknowledgement、跨实例 CAS、冷进程恢复、canonical tamper refusal 和 unknown/no-replay。设计不是已验证修复；尚无足以承诺通过全部 5 秒门禁的方案。需维护者确认扩大到该设计范围，或另行授权一轮有上限的窄实验。M1–M6、跨 Provider/计费/生产接管与业务应用仍未完成。
+未解决项负责人：主会话。下一步建议先形成 transactional root/frame checkpoint 设计与等价验收清单，再决定是否实现。这涉及持久化边界，不应凭“减少 fsync 数”直接修改。必须保留 artifact-before-authority、durable acknowledgement、跨实例 CAS、冷进程恢复、canonical tamper refusal 和 unknown/no-replay。设计不是已验证修复；尚无足以承诺通过全部 5 秒门禁的方案。后续维护者已选择“先做设计”，设计交付见 [事务式检查点评估](transactional-checkpoint-design.md)；仅授权设计，没有实施存储改造。隔离原型需另行批准。M1–M6、跨 Provider/计费/生产接管与业务应用仍未完成。
