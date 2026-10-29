@@ -55,6 +55,10 @@ export function applyViewRestore({ restore, conversationId, before, page, elemen
     clear()
     const bounds = element.getBoundingClientRect()
     element.scrollTop += anchor.getBoundingClientRect().top - bounds.top - restore.position.anchorOffset
+    // The reader is inside this turn on purpose, part-way above the edge. Its own growth
+    // must not be compensated, or the reader leaves the turn this restore just anchored;
+    // transcript.tsx consumes this marker on the row's next measurement.
+    anchor.dataset.restoreAnchor = 'true'
     return true
   }
   const target = restore.position.anchorOrdinal === undefined ? undefined

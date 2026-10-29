@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Turn } from '../../format'
+import { transcriptGrowthAboveEdge } from '../../chat-scroll'
 import { AssistantTurn, UserMessage } from '../ChatTurn'
 import type { ChatViewProps } from './types'
 
@@ -99,13 +100,14 @@ const TranscriptTurn = memo(function TranscriptTurn({
     const measure = () => {
       const rect = element.getBoundingClientRect()
       const scroller = element.closest<HTMLElement>('.chat-transcript')
-      // Only a row that is entirely behind the top edge may be compensated when it grows:
-      // its growth happened above the reader. A row that straddles that edge is where the
-      // reader is looking, and its placeholder height is not evidence about the reader — an
-      // exact scroll restore places a turn part-way above the edge on purpose.
-      const anchorEdge = firstMeasurement ? rect.top + rect.height : rect.top + height.current
-      if (windowed && scroller && anchorEdge < scroller.getBoundingClientRect().top) {
-        scroller.scrollTop += rect.height - height.current
+      // `applyViewRestore` marks the turn it positioned. The row may materialize a frame
+      // later, so the marker survives the restore call and is consumed here.
+      const restoreAnchor = element.dataset.restoreAnchor === 'true'
+      if (restoreAnchor) delete element.dataset.restoreAnchor
+      if (windowed && scroller) {
+        const growth = transcriptGrowthAboveEdge({ top: rect.top, height: rect.height, previousHeight: height.current,
+          firstMeasurement, restoreAnchor, edge: scroller.getBoundingClientRect().top })
+        if (growth !== 0) scroller.scrollTop += growth
       }
       height.current = rect.height
       firstMeasurement = false

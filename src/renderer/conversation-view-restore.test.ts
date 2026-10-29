@@ -12,21 +12,30 @@ function pageOf(count: number, before: number | undefined, nextBeforeOrdinal?: n
   } as unknown as ConversationPage
 }
 
+interface FakeAnchor {
+  dataset: Record<string, string>
+  getBoundingClientRect: () => { top: number }
+}
+
 /** A scroll container whose querySelector only answers for the turns it holds. */
 function elementWith(anchorRunId: string | null) {
   const scrollTop = { value: 0 }
+  const anchor: FakeAnchor | undefined = anchorRunId
+    ? { dataset: {}, getBoundingClientRect: () => ({ top: 340 }) }
+    : undefined
   const element = {
     scrollTop: 0,
     scrollHeight: 2000,
+    anchor,
     getBoundingClientRect: () => ({ top: 100 }),
     querySelector: (selector: string) => anchorRunId && selector.includes(anchorRunId)
-      ? { getBoundingClientRect: () => ({ top: 340 }) }
+      ? anchor
       : null,
   }
   return Object.defineProperty(element, 'scrollTop', {
     get: () => scrollTop.value,
     set: (next: number) => { scrollTop.value = next },
-  }) as unknown as HTMLElement
+  }) as unknown as HTMLElement & { anchor?: FakeAnchor }
 }
 
 function pending(position: PendingViewRestore['position']): PendingViewRestore {
@@ -68,6 +77,8 @@ describe('applyViewRestore', () => {
       requestBefore: noop, follow: noop, clear: noop })).toBe(true)
     // 340 - 100 - 40 moves the anchor to the remembered distance below the top edge.
     expect(element.scrollTop).toBe(200)
+    // The transcript must not compensate this turn's own growth (transcript.tsx).
+    expect(element.anchor?.dataset.restoreAnchor).toBe('true')
   })
 
   it('reads exactly one older page for a remembered ordinal', () => {
