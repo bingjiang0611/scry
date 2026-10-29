@@ -2,8 +2,8 @@
 
 ## 状态
 
-- P0 **实施中**，交付物是**测量工具**，不是优化，也未冻结：[首个切片](../research/headless-execution-engine/first-slice.md) 的 P0 归因表已可生产，但缺项与开放项见下文第 6 节。**后续记录**：比较预注册已定（[P0 冻结与比较预注册](./20261028-concurrency-trace-p0-freeze.md)），但 P0 仍待父会话保存并回放最终 baseline 副本后正式冻结，P1 未开始。
-- P1 **未开始**。上述采集时没有产生任何优化 commit、安装或推送；测量工具随后单独提交，不与 P1 优化混在同一提交。
+- 本篇记录的是 P0 的**测量工具**阶段（不是优化）：[首个切片](../research/headless-execution-engine/first-slice.md) 的 P0 归因表已可生产，采集当时的缺项见下文第 6 节。**后续记录**：R6 与 50k 的 pilot、比较预注册与最终副本回放都已完成，**P0 已正式冻结**（baseline 冻结，不是改善结论；[P0 冻结篇](./20261028-concurrency-trace-p0-freeze.md) §5）；P1 未开始。
+- P1 **未开始**（P0 冻结后仍未开始）。上述采集时没有产生任何优化 commit、安装或推送；测量工具随后单独提交，不与 P1 优化混在同一提交。
 - 本篇是阶段记录，不是验收门禁；性能门禁与 ratchet 仍以[性能闭环](../performance-loop.md)为准。
 
 ## 1. 这阶段做了什么
@@ -75,12 +75,12 @@ native 采集第二批（**同一 harness hash**）：`/tmp/scry-p0-fixed16-fina
 
 | 开放项 | owner | 备注 |
 | --- | --- | --- |
-| remote readers 0/1/4 | 父会话 | in-main trace 工具已实现并采 12 格（[续篇](./20261028-concurrency-trace-readers.md)）；本阶段的 remote fixture 仍待冻结 |
+| remote readers 0/1/4 | 父会话 | in-main trace 工具已实现并采 12 格（[续篇](./20261028-concurrency-trace-readers.md)）；本阶段的 remote fixture 当时仍待冻结。**后续记录**：R6 真实 App 受限回环 fixture 已验收并随 P0 一起冻结（[R6 篇](./20261028-concurrency-trace-live.md)、[P0 冻结篇](./20261028-concurrency-trace-p0-freeze.md) §5） |
 | 1k/10k/50k 负载、eviction/reset | 父会话 | 1k/10k × readers 0/1/4 已采；50k 耗时当时未测（**后续记录**：[main-only 50k 篇](./20261028-concurrency-trace-main-50k.md)），实际 hash 计数已由 counts-only 工具采到（[计数与试点篇](./20261028-concurrency-trace-counts-pilot.md)）；容量、旧 cursor 与逻辑时钟 sweep 有组件回归，reset 只在受控串行序下观测（[续篇](./20261028-concurrency-trace-readers.md)） |
-| 噪声、MDE、重复次数与顺序预注册 | 父会话 | 预注册后才允许 L2 结论；**后续记录**：内容已定（[P0 冻结与比较预注册](./20261028-concurrency-trace-p0-freeze.md) §4），P0 尚未正式冻结 |
-| 低负载匹配 baseline、collector 整体冻结 | 父会话 | 续篇每格各有一次 `highLoad=false` 样本，尚非稳定匹配基线或 L2 改善；冻结还需预注册噪声/MDE（[续篇](./20261028-concurrency-trace-readers.md)、[计数与试点篇](./20261028-concurrency-trace-counts-pilot.md)）；**后续记录**：预注册已定（[P0 冻结与比较预注册](./20261028-concurrency-trace-p0-freeze.md)），待父会话保存并回放最终 baseline 副本 |
+| 噪声、MDE、重复次数与顺序预注册 | 父会话 | 预注册后才允许 L2 结论；**后续记录**：内容已定且 P0 已正式冻结（[P0 冻结篇](./20261028-concurrency-trace-p0-freeze.md) §4–§5），阈值与顺序未改 |
+| 低负载匹配 baseline、collector 整体冻结 | 父会话 | 续篇每格各有一次 `highLoad=false` 样本，尚非稳定匹配基线或 L2 改善；冻结还需预注册噪声/MDE（[续篇](./20261028-concurrency-trace-readers.md)、[计数与试点篇](./20261028-concurrency-trace-counts-pilot.md)）；**后续记录**：预注册已定（[P0 冻结篇](./20261028-concurrency-trace-p0-freeze.md) §4），最终副本 `/tmp/scry-p0-accepted-baseline.zYksRe/` 已保存并回放通过，P0 已正式冻结（§5） |
 | 环境负载 | 父会话检查，必要时请用户安排空闲窗口 | native 旧样本为高负载，后续 remote 样本为低负载；逐次核对，不擅自结束用户进程 |
-| collector 提交 | 父会话 | 工具分阶段独立提交，不与 P1 优化混在同一提交，提交号以 Git 历史为准；整体冻结未完成（[计数与试点篇](./20261028-concurrency-trace-counts-pilot.md)） |
+| collector 提交 | 父会话 | 工具分阶段独立提交，不与 P1 优化混在同一提交，提交号以 Git 历史为准；整体冻结已完成（[冻结验收](./20261028-concurrency-trace-p0-freeze.md) §5） |
 
 ## 7. 复现
 

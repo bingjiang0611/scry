@@ -1,6 +1,6 @@
 # Scry 无界面执行与证据引擎：完整技术方案
 
-- 状态：**用户已授权实施 P0＋P1。P0 实施中（仅测量工具阶段，未完成、未冻结）；P1 未开始；P2–P7 与三篇架构附录仍需各自证据与单独批准，不默认继续。** 阶段记录见[会话并发 P0 归因](../performance-experiments/20261028-session-concurrency-p0.md)。
+- 状态：**用户已授权实施 P0＋P1。P0 已正式冻结（baseline 冻结，不是改善结论）；P1 未开始；P2–P7 与三篇架构附录仍需各自证据与单独批准，不默认继续。** 冻结副本、身份与验收见[P0 冻结篇](../performance-experiments/20261028-concurrency-trace-p0-freeze.md) §5；阶段记录见[会话并发 P0 归因](../performance-experiments/20261028-session-concurrency-p0.md)。
 - 日期：2026-10-28。
 - 方案来源：多会话并发性能调查中的方案二。
 - 源码基线：`66c2f38fddbc687e1a72eccc7bfe391de2971498`。

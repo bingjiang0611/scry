@@ -2,10 +2,10 @@
 
 ## 状态
 
-- P0 **仍未完成、未冻结**：本篇记录 R1–R5 的 in-main trace 测量工具与 12 格功能采集，不改变上一阶段 native 窗口 fixture 的口径（见 [native 阶段记录](./20261028-session-concurrency-p0.md)）。
-- P1 **未开始**：本篇没有产生任何生产优化。此次只有测量工具，单独提交（提交号以 Git 历史为准）；不安装、不推送。
+- 本篇记录 R1–R5 的 in-main trace 测量工具与 12 格功能采集，不改变上一阶段 native 窗口 fixture 的口径（见 [native 阶段记录](./20261028-session-concurrency-p0.md)）。**后续记录**：R6 与 50k 的 pilot／预注册已完成，P0 已正式冻结（baseline 冻结，不是改善结论；[P0 冻结篇](./20261028-concurrency-trace-p0-freeze.md) §5）；本篇的组件口径与 12 格功能结果不变。
+- P1 **未开始**：本篇没有产生任何生产优化（P0 冻结后仍未开始）。此次只有测量工具，单独提交（提交号以 Git 历史为准）；不安装、不推送。
 - 阶段记录不是验收门禁；门禁与 ratchet 仍以[性能闭环](../performance-loop.md)为准。
-- **R6 入口**：其后的真实 App live lane（真实构建 App → loopback TLS → 受限 IPC → 生产 `RemoteChat`）已作为独立工具验收，只有一次功能采集、没有毫秒结论：[R6 live lane](./20261028-concurrency-trace-live.md)。
+- **R6 入口**：其后的真实 App live lane（真实构建 App → loopback TLS → 受限 IPC → 生产 `RemoteChat`）已作为独立工具验收；功能矩阵与后续噪声 pilot 已完成，尚无改善结论：[R6 live lane](./20261028-concurrency-trace-live.md)。
 
 ## 1. 这个 fixture 是什么
 
@@ -88,5 +88,5 @@ wrapper 必须带 `<label> -- <command>`；单格参数只有 `--limit 4|16`、`
 | --- | --- |
 | pilot 噪声／MDE／重复次数与顺序预注册 | 预注册后才允许 L2 结论；已采 reader 变体的低负载样本见[计数与试点篇](./20261028-concurrency-trace-counts-pilot.md)；**后续记录**：预注册已定，见 [P0 冻结与比较预注册](./20261028-concurrency-trace-p0-freeze.md) §4 |
 | 必要的 native／50k 计量、实际 hash 工作计数 | 实际 hash/JSON 计数工具已实现，48 条 observations 采自 R4 与 10k/50k（[计数与试点篇](./20261028-concurrency-trace-counts-pilot.md)）；50k 当时无毫秒，**后续记录**见 [main-only 50k 篇](./20261028-concurrency-trace-main-50k.md) |
-| collector 冻结与提交 | 工具单独提交；本篇不代表已提交、已安装或已推送。冻结前的剩余条件见[计数与试点篇](./20261028-concurrency-trace-counts-pilot.md) |
-| P1 | 未开始，另 commit |
+| collector 冻结与提交 | 工具已单独提交并随 P0 冻结，见[冻结验收](./20261028-concurrency-trace-p0-freeze.md) §5；未安装、未推送 |
+| P1 | 未开始，另 commit（P0 已冻结，见 [P0 冻结篇](./20261028-concurrency-trace-p0-freeze.md)） |

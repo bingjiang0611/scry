@@ -2,9 +2,11 @@
 
 ## 状态
 
-**比较预注册已定；P0 待父保存并回放最终 baseline 副本后正式冻结，P1 未开始。**
+**P0 已正式冻结（这是 baseline 冻结，不是改善结论）；P1 尚未开始。**
 
-也就是说：预注册内容从本篇起算数，candidate 实现尚未开始；P0 的"冻结"要等父会话把最终 baseline 副本保存下来并回放成功之后才成立。本篇不声称 baseline 副本已经保存。
+冻结的含义只有一条：最终 baseline 副本已保存并回放通过，candidate 实现尚未开始。预注册（§4）的 endpoint、MDE、块顺序、排除与停止规则从本篇起算数，**阈值与顺序一律不变**。副本内容、身份、验收与历史首败见 §5。
+
+本篇不声称任何改善，也不声称已具备稳定噪声匹配或 L3 证据；P1 的第一批 A/B 尚未开始。
 
 ## 1. 已完成的部分（只链接，不复制历史）
 
@@ -89,14 +91,61 @@ R6（limit 4 与 limit 16 各 8 对，A = 冻结 baseline，B = candidate）：
 - 最多 3 轮候选；失败的候选保留记录。未达门槛就停止扩大；保留或撤回都要写明理由。
 - 不启动 P2 架构、不自动升 gate、不自动安装、不 push。
 
-## 5. 下一步（父会话）
+## 5. 冻结落定（父会话已完成）
 
-1. 保存最终 baseline 副本（artifact + launcher/helper 身份 + 5 次 pilot 报告与负控）并做一次回放验证。
-2. 回放成功后才把 P0 标为正式冻结；本篇状态行随之更新。
-3. 之后才开始 P1 的候选实现与上述 32 + 16 采样。
+### 5.1 保留的最终 baseline 副本
 
-## 6. 不声称
+`/tmp/scry-p0-accepted-baseline.zYksRe/`（保留，不写入）：
 
-- 不声称已冻结、不声称已保存 baseline 副本、不声称已有改善。
+- `source.tar`、`repo/`（Git archive `7eac041d`）、`repo/out`：冻结源码与已构建 App 产物
+- `liveOut/`、`main50k/`：两个 lane 的构建输出
+- `evidence/{r6Pilot,main50kPilot}/`：两个 pilot 的全部报告与负控
+- `manifest.json`：`status = "saved and replay verified"`
+- `replay-r6/report.json`、`replay-main50k/report.json`：最终回放报告
+
+`source.tar` 的 sha256 是 `a124fc08b96651bd0610b6cd0c19ad405e7bcab7922695abe83f8cddbf038302`。
+
+**副本边界**：`node_modules` 是指向原安装的链接，fixtures 只读使用。这**不是** OS 隔离，也**不是**依赖私有副本；后续 A/B 必须核对实际 runtime（Electron／Node／V8／Chrome／平台）一致，不能把"同一目录"当成"同一环境"。
+
+### 5.2 身份
+
+| 对象 | 身份 |
+| --- | --- |
+| 冻结源码 | `7eac041d`（`git archive`） |
+| R6 harness | `228aeb8f…` |
+| App `out` | `59c241bb…` |
+| `liveOut` | `540bb0c0…` |
+| main50k bundle | `c8eed5c2…` / 63496 B |
+| runtime | Electron 42.10.1、Node 24.18.1、V8 14.8.178.38-electron.0、Chrome 148.0.7778.280、darwin arm64 |
+
+R6 harness 身份由 `48160a…`（旧 pilot）变为 `228aeb8f…`，原因只有一个：计时与 cleanup 之后修正 summary 的 seed 字段读取（`7eac041d`）。旧 pilot 记录保留，不改写。
+
+### 5.3 冻结验收（原始 oracle + 身份 + cleanup）
+
+父验收脚本 `/tmp/scry-p0-freeze-verify.GVpXcO/check.mjs` 通过：
+
+- R6（limit 16、peers 1）：16 个正常回答、16 个真实 archives、112 rounds／112 full-view checks，每 view 1000 seed，`summary.seedsChecked = expectedSeeds = 16000`；host 登记 6 个、client 登记 3 个进程全部 stopped 且 close0。
+- 50k：35 phases、7 observe + 7 merge、oracle 全过、stage counts 固定；登记 3 个进程 stopped 且 close0；报告带 `reportedAt`，无旧 `startedAt`。
+- 所有 before／after 身份稳定。
+
+### 5.4 回放与噪声的边界
+
+两次最终回放都是 `highLoad=true`（19.53→25.66、25.66→25.44）。它们只作**功能与可重放性**证据：不进噪声 pilot、不参与任何改善比较，也不补采替代。§3 的噪声数字仍来自无排除的 reader=1 n=5 pilot。
+
+### 5.5 首败 chronology（保留失败记录，不掩盖）
+
+1. 第一副本 `/tmp/scry-p0-frozen-baseline.9RJciY`：R6 真回放通过，但 main50k 的 alias CLI 静默 `exit 0` 且无 report。根因是入口判定用路径字符串比较，`/tmp` 与 `/private/tmp` 别名不等 → 模块被当成库导入。
+2. 对照 `/tmp/scry-p0-main50k-cli-control.iDMPd7`：同脚本、同 `--invalid` 参数下，alias 入口 exit 0 空输出，canonical 入口 exit 1 并明确拒绝 `unknown flag`——bug 可判别。`6c363cc3` 改为按真实文件身份（`realpathSync`）判定；存在文件的 realpath 失败保留原始错误，不再静默当成"不是 CLI"。24 tests／3 files 加完整 typecheck 通过。
+3. 第二副本 `/tmp/scry-p0-frozen-final.4IkgoQ`：raw R6 与 50k 的功能／身份／cleanup 全部通过，但父校验脚本真实报 `0 !== 16000`：summary 读了从未存在的 `visit.oracle.seedCount`，而原始 112 个 full-view oracle 实际全过。`7eac041d` 改为读权威的 `oracle.views[0].seedCount`，每 completed visit 只计一次（不把 7 个 view 相加），不改 schema、工作量与计时；29 tests 通过。
+4. 因此：旧 matrix／pilot 报告的该 summary 字段错误，需要该字段时只信原始 `oracle.views`；旧毫秒窗口未受影响，§3 的噪声阈值继续有效。
+
+## 6. P1 下一步
+
+P1 **尚未开始**。开始后按 §4.2 执行：R6 每个候选用 `(4 ABBA),(16 BAAB),(16 ABBA),(4 BAAB)` 重复两次的 32 cell（每个 limit 8 对），50k 用 `ABBA,BAAB,ABBA,BAAB` 的 8 对／16 samples；全部在 `timing-run.mjs` 锁内串行，每 cell 全新私有目录，并记录实际 bundle／launcher／源码身份。
+
+## 7. 不声称
+
+- 不声称已有改善：P0 冻结的是 baseline，P1 还没有任何候选结果。
+- 不把冻结当成稳定匹配：C1 quiet n=2 仍不稳定，真实日常 App／WAN／paint／L3 仍未验证，内存只有 before／after 有界样本。
 - 不把 R6 当日常 App 路径，不把 50k 当 client／UI 路径。
 - 不把计数当 CPU，不把无证据项写成 0，不把 unknown cleanup 当正常 stop。

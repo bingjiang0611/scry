@@ -3,7 +3,7 @@
 前两篇：[P0 主篇](./20261028-session-concurrency-p0.md)（native 工具与 12 格）、[remote readers 续篇](./20261028-concurrency-trace-readers.md)（readers 0/1/4 与 launcher）。
 本篇只记录：实际 hash/JSON 工作计数工具、reader 变体的低负载 pilot、原生 12 次 pilot 结果，以及仍未测的项。
 
-**状态**：P0 **未冻结**，P1 **未开始**，未安装 App、未推送。focused 168/168 联跑通过；最后补齐原生错误与漏 patch 控制后，23 项相关测试、完整 typecheck 与真实 collector CLI 再次通过。测量工具单独提交，提交号以 Git 历史为准。
+**状态**：P0 **已正式冻结**（baseline 冻结，不是改善结论；副本与验收见 [P0 冻结篇](./20261028-concurrency-trace-p0-freeze.md) §5），P1 **未开始**，未安装 App、未推送。focused 168/168 联跑通过；最后补齐原生错误与漏 patch 控制后，23 项相关测试、完整 typecheck 与真实 collector CLI 再次通过。测量工具单独提交，提交号以 Git 历史为准。
 
 ## 1. 计数工具范围（counts-only）
 
@@ -87,7 +87,7 @@
 | 开放项 | 备注 |
 | --- | --- |
 | 基于 pilot 预注册 MDE／重复次数／顺序 | 预注册后才允许 L2 结论；**后续记录**：已定，见 [P0 冻结与比较预注册](./20261028-concurrency-trace-p0-freeze.md) §4 |
-| 核对“完整用户路径 L2”缺的真实 App remote/transport 接线 | R6 的受限回环链路已接上真实 App remote/transport（[见 R6](./20261028-concurrency-trace-live.md)），但仍不是完整日常/WAN/paint 或 L2；L2 仍需噪声与 MDE 预注册，main-only 组件不能当真实用户路径；**后续记录**：预注册已定（[P0 冻结与比较预注册](./20261028-concurrency-trace-p0-freeze.md)），但 P0 尚未正式冻结 |
+| 核对“完整用户路径 L2”缺的真实 App remote/transport 接线 | R6 的受限回环链路已接上真实 App remote/transport（[见 R6](./20261028-concurrency-trace-live.md)），只能支持该受控 scope 的 L2，不代表完整日常/WAN/paint；改善结论仍须预注册 A/B 比较，main-only 组件不能当真实用户路径；**后续记录**：预注册已定、P0 已正式冻结（[P0 冻结篇](./20261028-concurrency-trace-p0-freeze.md)） |
 | 必要的 50k 计时 | 本篇写时只有计数；**后续记录**：毫秒已由 [main-only 50k 篇](./20261028-concurrency-trace-main-50k.md) 采到，仍非改善结论 |
 | 不可观测项维持明确 | 不把缺失证据显示成 0 或绿 |
-| 冻结 collector、然后 P1 | 全部补齐后再冻结；measurement 与 P1 分开提交 |
+| 冻结 collector、然后 P1 | P0 已冻结（[副本与验收](./20261028-concurrency-trace-p0-freeze.md) §5）；measurement 已独立提交，P1 另提交 |

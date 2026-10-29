@@ -3,7 +3,8 @@
 ## 状态
 
 - **只有 R6 测量工具已验收**：本篇记录 18 个测试文件 / 108 项、完整 `typecheck`、`git diff --check` 通过的采集工具，不改变 R1–R5 的 in-main 口径（见 [readers 篇](./20261028-concurrency-trace-readers.md)）。
-- **P0 未冻结**：50k Electron 耗时与噪声／MDE 预注册都还没做；每格只采一次功能样本，只有描述性毫秒／CPU 样本，**没有**毫秒结论。P1 未开始。**后续记录**：50k 组件计时与 reader=1 的 noise pilot 已完成、比较预注册已定（[main-only 50k 篇](./20261028-concurrency-trace-main-50k.md)、[P0 冻结与比较预注册](./20261028-concurrency-trace-p0-freeze.md)）；本篇每格仍是一次功能样本，P0 仍待父会话保存并回放最终 baseline 副本后正式冻结，P1 仍未开始。
+- **本篇采集当时 P0 未冻结**：50k Electron 耗时与噪声／MDE 预注册当时都还没做；每格只采一次功能样本，只有描述性毫秒／CPU 样本，**没有**毫秒结论。**后续记录（已落定）**：50k 组件计时与 reader=1 的 noise pilot 已完成、比较预注册已定（[main-only 50k 篇](./20261028-concurrency-trace-main-50k.md)、[P0 冻结篇](./20261028-concurrency-trace-p0-freeze.md)）；P0 已正式冻结（baseline 冻结，不是改善结论），最终副本、身份与父验收见[P0 冻结篇](./20261028-concurrency-trace-p0-freeze.md) §5；本篇每格仍是一次功能样本，P1 仍未开始。
+- 最终冻结之前修了两处缺陷，不改变计时窗口：main50k launcher 的 alias 入口判定按真实文件身份比较（`6c363cc3`，此前 `/tmp`→`/private/tmp` 别名会静默 exit 0 且无 report）；summary 的 seed 计数改读权威的 `oracle.views[0].seedCount`（`7eac041d`）。因此**旧 raw／matrix 报告的 `summary.seedsChecked` 字段有误（曾为 0）**：涉及该字段时只信每个 completed visit 的 7 个原始 `oracle.views`（每 view 1000 seed），不要引用旧 summary 值。旧毫秒窗口与噪声阈值不变。
 - 没有速度提升 claim。未安装、未推送。阶段记录不是门禁，门禁仍以[性能闭环](../performance-loop.md)为准。
 - 本篇先以 `631e07ea`（40 files）落在本地提交；**提交之后**才运行完整单测：`env -u P0_PROBE -u P1_PROBE -u BILLING_ADMIN_REAL npm run test:unit` → 429 files pass + 4 skip，4565 tests pass + 4 skip，411.58 s；4 个 skip 是 `performance-correlation`、`billing-admin-real`、`p0-integration`、`p1-integration` 各自的默认显式门控。
 

@@ -3,7 +3,8 @@
 ## 状态
 
 - **只是主进程组件测量**：一次固定 50k 单 run 的 main 侧 projection／revision 工作。不是 client 50k、不是 UI、不是完整 App、不是日常路径，也不含 TLS／renderer／Provider。
-- 主进程组件的 pilot 与比较预注册见 [P0 冻结与比较预注册](./20261028-concurrency-trace-p0-freeze.md)。**P0 尚未正式冻结**（最终 baseline 副本由父会话保存并回放后生效），P1 未开始。
+- **P0 已正式冻结**（baseline 冻结，不是改善结论）：最终副本 `/tmp/scry-p0-accepted-baseline.zYksRe/` 已保存并回放通过。副本内容、身份、验收与历史首败见 [P0 冻结篇](./20261028-concurrency-trace-p0-freeze.md) §5。P1 未开始。
+- 最终冻结之前修了两处入口／证据缺陷，不改变计时窗口：launcher 的 alias 入口判定（`6c363cc3`，改为真实文件身份比较，否则 `/tmp`→`/private/tmp` 别名会静默 exit 0 且无 report）；live lane summary 的 seed 计数（`7eac041d`，改读 `oracle.views[0].seedCount`）。本 lane 的毫秒／CPU 样本与负控不受影响，冻结身份的 bundle 仍为 `c8eed5c2…` / 63496 B。
 - 没有优化 claim：本 lane 的 baseline 与 candidate 还没有任何候选实现；下面所有毫秒／CPU 都是**描述性**样本加一次 pilot 噪声估计，不是改善结论。
 - `DesktopRemoteClient` 的 `MAX_ITEMS=10_000` 上限未放宽，也没有把 50k 伪装成聚合成小任务：50k 在这里是 **host 侧** projection／revision 的 scale case。
 
@@ -114,4 +115,4 @@ node .agents/skills/scry-performance-climb/scripts/timing-run.mjs main50k-negati
 - 不把缺失证据写成 0；没有毫秒或 CPU 证据就写 `unavailable` 加原因。
 - 本 lane 是 main 侧组件，可作为该 scope 的受控 L2 计时来源；但当前只有 baseline、没有 candidate，因此不宣称任何改善，也不冒充 L3／日常 App／WAN／paint。
 - 不宣称内存改善（只有 before／after 有界样本），也不宣称优化。
-- 不宣称最终 baseline 副本已保存（父会话随后保存并回放）。P1 未开始。
+- 不宣称最终副本等同于 OS 隔离环境：`node_modules` 是链接、fixtures 只读使用，后续 A/B 仍需核对 runtime 一致（见[P0 冻结篇](./20261028-concurrency-trace-p0-freeze.md) §5.1）。P1 未开始。
