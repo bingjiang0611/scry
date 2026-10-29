@@ -25,6 +25,29 @@ describe('Pi capability probe lifecycle', () => {
     })
   })
 
+  it('invalidates one workspace without restarting an unrelated warm probe', async () => {
+    await withProbeFixture(async (profile, cwd, starts) => {
+      const otherCwd = join(cwd, 'other')
+      mkdirSync(otherCwd)
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const context = { providerId: 'pi' as const, agentProfileId: profile.id, cwd }
+      await probePiAgent(profile, cwd)
+      await probePiAgent(profile, otherCwd)
+      const firstPid = Number(readFileSync(join(cwd, 'pid'), 'utf8'))
+      const otherPid = Number(readFileSync(join(otherCwd, 'pid'), 'utf8'))
+
+      await adapter.invalidateContext?.(context)
+
+      expect(() => process.kill(firstPid, 0)).toThrowError(expect.objectContaining({ code: 'ESRCH' }))
+      expect(() => process.kill(otherPid, 0)).not.toThrow()
+      await expect(probePiAgent(profile, otherCwd)).resolves.toMatchObject({ state: { cwd: otherCwd } })
+      expect(starts()).toEqual([cwd, otherCwd])
+      await expect(probePiAgent(profile, cwd)).resolves.toMatchObject({ state: { cwd } })
+      expect(starts()).toEqual([cwd, otherCwd, cwd])
+      await adapter.dispose?.()
+    })
+  })
+
   it('does not share probe evidence across workspaces, profile ids or executables', async () => {
     await withProbeFixture(async (profile, cwd, starts) => {
       const otherCwd = join(cwd, 'other')

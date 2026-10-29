@@ -1,15 +1,18 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { nativeUiPointer } from './native-ui-pointer.mjs'
 import { exerciseWorkspaceDiffBounds } from './workspace-session-ui-stress.mjs'
-import { exerciseDiffWorkbench, contextFixture } from './diff-workbench-ui.mjs'
+import { exerciseDiffWorkbench } from './diff-workbench-ui.mjs'
+import { prepareWorkspaceSessionFixture } from './workspace-session-ui-fixture.mjs'
 import { assertPickerAnchored, assertNewWorktreeDefaults, assertCompactMenus } from './workspace-session-ui-picker.mjs'
 import { wait, sendWorkspacePrompt } from './workspace-session-ui-run.mjs'
 import { selectDiffScope, exerciseTurnMenu } from './diff-inspector-ui.mjs'
 import { assertHooksIdle, installHookTraps } from './workspace-session-ui-hooks.mjs'
+import { providerInputs, recorderRecord } from './workspace-session-ui-evidence.mjs'
+import { openWorktreeSession } from './workspace-session-ui-open.mjs'
 
 const json = JSON.stringify
 /** Production App + preload + native Git, with the existing isolated, non-network Provider fixture. */
@@ -19,8 +22,7 @@ export async function exerciseWorkspaceSessions(context) {
   const git = (cwd, ...args) => execFileSync('git', ['-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null',
     '-c', 'user.name=bingjiang0611', '-c', 'user.email=307659028+bingjiang0611@users.noreply.github.com', ...args],
   { cwd, encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }).trim()
-  const inputs = () => existsSync(conversationInputs)
-    ? readFileSync(conversationInputs, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse).filter(item => item.operation !== 'steer') : []
+  const inputs = () => providerInputs(conversationInputs)
   const click = async (selector, text = '') => {
     const point = await evaluate(`(${nativeUiPointer.toString()})(${json(selector)}, ${json({ text, timeoutMs: 5000, scroll: true, captureReceipt: true })})`)
     await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point })
@@ -68,35 +70,13 @@ export async function exerciseWorkspaceSessions(context) {
   }
   const send = (prompt, pause = false, expectedReply) =>
     sendWorkspacePrompt({ inputs, type, click, cdp, evaluate, record }, prompt, pause, expectedReply)
-  const record = async (cwd, runId) => wait(() => {
-    const dir = join(cwd, '.scry', 'records')
-    if (!existsSync(dir)) return null
-    for (const name of readdirSync(dir).filter(name => name.endsWith('.json'))) {
-      const value = JSON.parse(readFileSync(join(dir, name), 'utf8'))
-      if (json(value).includes(runId)) return value
-    }
-    return null
-  }, 'canonical recorder record in the prepared target')
+  const record = recorderRecord
+  const openWorktree = cwd => openWorktreeSession({ cwd, evaluate, click, wait })
 
   try {
     await cdp.send('Debugger.enable')
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false })
-    if (!existsSync(join(workspace, '.git'))) git(workspace, 'init', '-b', 'main')
-    writeFileSync(join(workspace, '.gitignore'), '.scry/\n')
-    writeFileSync(join(workspace, 'scry.config.json'), json({ schemaVersion: 1, workspaceId: 'workspace-ui-fixture' }))
-    writeFileSync(join(workspace, 'workspace-baseline.txt'), 'baseline\n')
-    writeFileSync(join(workspace, 'workbench-context.ts'), contextFixture())
-    git(workspace, 'add', '--all')
-    git(workspace, 'commit', '--allow-empty', '-m', 'workspace selection fixture')
-    git(workspace, 'branch', '-M', 'main')
-    git(workspace, 'branch', 'workspace-feature')
-    const head = git(workspace, 'rev-parse', 'HEAD')
-    execFileSync('git', ['-c', 'core.hooksPath=/dev/null', 'update-ref', '--stdin'], {
-      cwd: workspace, input: Array.from({ length: 150 }, (_, i) => `create refs/heads/fixture/ref-${String(i).padStart(3, '0')} ${head}\n`).join('')
-    })
-    const existing = join(temp, 'existing worktree with spaces')
-    git(workspace, 'worktree', 'add', '-b', 'existing-feature', existing, 'main')
-    const existingCanonical = realpathSync(existing)
+    const existingCanonical = prepareWorkspaceSessionFixture({ workspace, temp, git })
     await newDraft(workspace)
 
     // Saving/cancelling a choice is read-only, including the real index's mtime.
@@ -163,10 +143,10 @@ export async function exerciseWorkspaceSessions(context) {
     await click('.workspace-mode-choice', '新建 worktree')
     await apply()
     const generatedBranch = await assertNewWorktreeDefaults(evaluate)
+    assert.ok(await evaluate(`document.querySelector('[data-workspace-menu="refs"]')?.textContent.includes('origin/main')`), 'new worktrees default to origin/main')
     await openPicker()
     await screenshot('picker-dark')
-    await selectBranch('main')
-    await apply()
+    await key('Escape', 'Escape', 27)
     assert.equal(git(workspace, 'branch', '--list', generatedBranch), '', 'selection must not create a branch')
     assert.equal(await evaluate(`document.querySelector('.send')?.getAttribute('aria-label')`), '创建 worktree 并发送')
     // 选择目标之后源 checkout 又出现外部改动（其他会话写文件）：新建 worktree 不碰它，
@@ -176,6 +156,9 @@ export async function exerciseWorkspaceSessions(context) {
     const target = created.run.cwd
     assert.ok(target.startsWith(join(realpathSync(userDataDir), 'worktrees') + '/'), target)
     assert.equal(git(target, 'branch', '--show-current'), generatedBranch)
+    await wait(() => evaluate(`document.querySelector('[data-workspace-menu="workspace"]')?.textContent.includes('worktree')`), 'bound session identifies its worktree')
+    await wait(() => evaluate(`document.querySelector('[data-project-path=${JSON.stringify(canonicalWorkspace)}]')?.closest('.sb-proj')?.textContent.includes('desktop remote write one') === true`), 'worktree session stays under source project')
+    assert.equal(await evaluate(`Boolean(document.querySelector('[data-project-path=${JSON.stringify(target)}]'))`), false, 'worktree storage id is not a project group')
     assert.equal(existsSync(join(target, 'moved-after-selection.txt')), false, 'new worktree never copies uncommitted files')
     assertHooksIdle(hookMarkers)
     rmSync(join(workspace, 'moved-after-selection.txt'))
@@ -255,7 +238,7 @@ export async function exerciseWorkspaceSessions(context) {
     assert.equal(failedRecord.status, 'failed')
     assert.equal(git(failed.run.cwd, 'branch', '--show-current'), failedBranch)
     assert.ok(existsSync(failed.run.cwd), 'Provider failure must not delete the prepared worktree')
-    await exerciseWorkspaceDiffBounds({ target, newDraft, click, evaluate, key, wait, screenshot, cdp })
+    await exerciseWorkspaceDiffBounds({ target, openWorkspace: openWorktree, click, evaluate, key, wait, screenshot, cdp })
     assert.equal(inputs().length, 5, 'three workspace paths, one follow-up and one explicit failure; pressure and reload never launch a Provider')
     writeFileSync(join(evidence, 'result.json'), json({ current, created, second, reused, failed, firstRecord, secondRecord, reusedRecord, failedRecord }))
     console.log(json({ test: 'production workspace first-send and scoped diff UI', current: current.run.cwd,

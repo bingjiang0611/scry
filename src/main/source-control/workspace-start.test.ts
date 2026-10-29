@@ -80,6 +80,16 @@ afterEach(async () => {
 })
 
 describe('atomic workspace first-send preparation with real Git', { timeout: 15_000 }, () => {
+  it('prefers the already-fetched origin/main ref as the new-worktree base', async () => {
+    git('update-ref', 'refs/remotes/origin/main', 'HEAD')
+    const result = await choices()
+    expect(result.defaultBase).toEqual({
+      name: 'refs/remotes/origin/main',
+      head: git('rev-parse', 'HEAD'),
+      kind: 'remote'
+    })
+  })
+
   it('starts current cwd once and binds a replay to the same message without exposing prompt bodies in the journal', async () => {
     await writeFile(join(cwd, 'base.txt'), 'source dirty\n')
     const input = request(await selection('current'), 'private message marker')

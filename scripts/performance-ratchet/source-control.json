@@ -158,6 +158,34 @@
       "baselines": {
         "darwin-arm64": 10
       }
+    },
+    "source-control.workspace-choices-current-run/identity.calls": {
+      "scenario": "source-control.workspace-choices-current-run",
+      "metric": "identity.calls",
+      "layer": "main",
+      "unit": "count",
+      "workload": "repository=1;unsettled-current-cwd=1;kind=branches;refs=1",
+      "source": "production SourceControlService.workspaceChoices with a real temporary Git repository and pass-through Git method counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 2
+      }
+    },
+    "source-control.workspace-choices-current-run/git.run.calls": {
+      "scenario": "source-control.workspace-choices-current-run",
+      "metric": "git.run.calls",
+      "layer": "main",
+      "unit": "count",
+      "workload": "repository=1;unsettled-current-cwd=1;kind=branches;refs=1",
+      "source": "production SourceControlService.workspaceChoices with a real temporary Git repository and pass-through Git method counters",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 9
+      }
     }
   }
 }

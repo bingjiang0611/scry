@@ -153,6 +153,7 @@ export function useWorkspaceSelection({ cwd, draftKey, draftStore, editable, act
   const chooseNewWorktree = async (base?: WorkspaceBranchRef): Promise<void> => {
     if (!choices?.head) return
     const selectedBase = base ?? (intent?.kind === 'current' ? intent.branch : intent?.kind === 'newWorktree' ? intent.base : undefined)
+      ?? choices.defaultBase
       ?? (choices.branch ? { kind: 'local' as const, name: `refs/heads/${choices.branch}`, head: choices.head } : undefined)
     if (!selectedBase) { setError({ key, message: copy.chooseBase }); return }
     await apply({ repositoryId: choices.repositoryId, expectedRevision: choices.revision, kind: 'newWorktree', base: selectedBase,

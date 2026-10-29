@@ -15,6 +15,7 @@ import {
 import type { ProviderCompatibilityAdvisory } from '../../shared/provider-compatibility'
 import type { AgentRunControlCatalog } from '../../shared/runtime'
 import type { ParsedTurn } from '../normalize'
+import { enrichPiHistoryCredits } from '../pi-credit-projection'
 import type {
   AuthorizedMcpExecution,
   McpAuthInteraction,
@@ -91,8 +92,13 @@ export class ProviderRegistry {
     })
   }
 
-  enrichSession(context: ProviderContext, turns: ParsedTurn[]): Promise<ParsedTurn[]> {
-    if (this.disabledProviders.has(context.providerId)) return Promise.resolve(turns)
+  async enrichSession(context: ProviderContext, turns: ParsedTurn[]): Promise<ParsedTurn[]> {
+    // Offline evidence remains readable when execution is disabled. This runs after
+    // native/archive reconciliation; it never launches or probes a Provider.
+    if (context.providerId === 'pi' && context.cwd && context.externalSessionId) {
+      turns = await enrichPiHistoryCredits(turns, { cwd: context.cwd, sessionId: context.externalSessionId })
+    }
+    if (this.disabledProviders.has(context.providerId)) return turns
     return this.get(context.providerId).sessionEvidence?.enrich(context, turns) ?? Promise.resolve(turns)
   }
 

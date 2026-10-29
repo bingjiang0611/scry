@@ -37,6 +37,10 @@ describe('idle renderer paint budget', () => {
     expect(declaration(styles, '@keyframes sb-running-spin')).toContain('transform: rotate(360deg)')
   })
 
+  it('does not display-lock interactive transcript turns', () => {
+    expect(styles).not.toMatch(/[^{}]*\.transcript-turn[^{}]*\{[^}]*content-visibility:/s)
+  })
+
   it('pauses incidental animations when the Electron page is hidden', () => {
     expect(styles).toContain(":root[data-page-visibility='hidden'] *")
     expect(styles).toContain('animation-play-state: paused !important')

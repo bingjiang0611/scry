@@ -88,8 +88,8 @@ export function ImageLightbox({ attachment, onClose }: { attachment: AgentInputA
       image.removeEventListener('load', resize)
     }
   }, [])
-  // Transcript turns use content-visibility containment: fixed overlays must escape
-  // their clipping/stacking context without disabling long-history rendering optimizations.
+  // Transcript turns are virtualized: fixed overlays must escape their clipping and
+  // stacking contexts without coupling the lightbox lifetime to an offscreen turn.
   return createPortal(
     <ModalFrame labelledBy={titleId} initialFocusRef={closeRef} className="image-lightbox" onClose={onClose}>
       <h2 id={titleId} className="visually-hidden">{attachment.name}</h2>

@@ -22,7 +22,7 @@ import { recordTurn } from '../db'
 import { prepareRunAttachments, providerAttachmentPrompt } from '../attachment-store'
 import { sanitizeToolEvents } from '../../core/turn-recorder/tool-content'
 import { attachConfiguredHookCommands } from '../hook-config'
-import { appendCoalescedTrace } from '../live-trace'
+import { appendCoalescedTrace, replaceTraceById } from '../live-trace'
 import { loadClaudeHookConfig, loadCodexHookConfig } from '../hook-config'
 import { isManagedRecorderProvider } from '../../core/turn-recorder/managed'
 import { resolveRecorderEnablement } from '../../core/turn-recorder/config'
@@ -169,10 +169,8 @@ export async function createLiveRunState(deps: {
       const [persisted] = await persistTraceToolEvents(app.getPath('userData'), catalogCwd, [event], ingestionRecorderRoot)
       return persisted
     },
-    onPersisted: (event) => {
-      const index = runState.items.findIndex((item) => item.id === event.id)
-      if (index >= 0) runState.items[index] = event
-    },
+    // Same-id enrichment only; the helper records the write so the live projection refetches.
+    onPersisted: (event) => { replaceTraceById(runState.items, event) },
     onError: (error) => console.warn('[scry] trace content persistence failed; retaining raw evidence:', error)
   })
   // 结构化 write/edit 的 start → tool_result 关联器：预览只跟着「已落盘」的结果走。
@@ -227,6 +225,7 @@ export async function createLiveRunState(deps: {
         runId,
         externalSessionId: resume,
         cwd: catalogCwd,
+        ...(options.projectCwd ? { projectCwd: options.projectCwd } : {}),
         prompt: displayPrompt
       })
     } else {
@@ -238,6 +237,7 @@ export async function createLiveRunState(deps: {
         runtimeProvider,
         runId,
         cwd: catalogCwd,
+        ...(options.projectCwd ? { projectCwd: options.projectCwd } : {}),
         prompt: displayPrompt
       })
     }

@@ -1,8 +1,8 @@
 import type { BrowserWindow } from 'electron'
 import type { ActiveRun, TraceEvent } from '../../shared/trace'
 import type { AgentQuestionRequest, AgentIntervention } from '../../shared/runtime'
-import { appendCoalescedTrace } from '../live-trace'
-import { sanitizeToolEvents } from '../../core/turn-recorder/tool-content'
+import { appendCoalescedTrace, consumeTraceMutations, stampProjection, traceMutationState, type TraceMutationState } from '../live-trace'
+import { sanitizeToolEvent, sanitizeToolEvents, toolContentTurnBudget } from '../../core/turn-recorder/tool-content'
 import { UserQuestionBroker, type UserQuestionChange } from '../user-question'
 import { RunRegistry } from '../run-registry'
 import { RunStopLifecycle } from '../run-stop-lifecycle'
@@ -11,6 +11,16 @@ import { RunTraceRouter } from '../run-trace-router'
 import { RUN_TRACE_CHANNEL } from '../../shared/run-traces'
 import type { DockBadgeState } from '../dock-badge'
 import type { RunControl } from './run-control'
+
+interface ProjectionCacheEntry {
+  state: TraceMutationState
+  /** Opaque token for this entry's projection generation; survives rebuilds, not eviction. */
+  generation: object
+  items: TraceEvent[]
+  /** Turn budget left after each projected item, so a rebuild can resume at any index. */
+  remaining: number[]
+  seenRevision: number
+}
 
 export function createTraceRuntime({
   getWindow, rendererCanReceive, activeRunSessionKey, dockBadge, mainEventId
@@ -155,8 +165,88 @@ export function createTraceRuntime({
     toolContentTurnBytes: 128 * 1024
   }
 
+  // Bounded-live projection cache: one projected item list per live run plus the turn budget
+  // left after each item, so a read rebuilds only the suffix a recorded write can still affect.
+  // Metadata is never cached; it is read from the run on every call.
+  //
+  // Bounds are the cache's own: eight runs and 50_000 projected items in total, evicted LRU. A
+  // run past 50_000 items is projected per read and keeps nothing, so one huge run cannot pin
+  // the others. These numbers are not the remote delta bounds in remote/desktop-trace-delta.ts
+  // (MAX_RUNS, MAX_REVISIONS, MAX_TRACKED_CHANGES), which this code does not touch.
+  //
+  // Invalidation basis: the writers mark the earliest dirty index on the raw array
+  // (main/live-trace.ts) and the array identity is the generation. The policy and source are
+  // fixed privates, so changing them is a code change that must drop the whole cache.
+  const MAX_CACHED_RUNS = 8
+  const MAX_CACHED_ITEMS = 50_000
+  const PROJECTION_SOURCE = 'live_renderer'
+  const projections = new Map<string, ProjectionCacheEntry>()
+  let projectedItems = 0
+  function forgetBoundedRun(runId: string): void {
+    const entry = projections.get(runId)
+    if (!entry) return
+    projectedItems -= entry.items.length
+    projections.delete(runId)
+  }
+  function projectRun(run: ActiveRun): TraceEvent[] {
+    const state = traceMutationState(run.items)
+    // No writer ever recorded anything on this array, so nothing is known about it and nothing
+    // may be cached: project it in full through the unchanged array path.
+    // A run past the cache bound is treated the same way, and its state is neither created nor
+    // consumed, so a huge run cannot pin or pollute the cache either.
+    if (!state || run.items.length > MAX_CACHED_ITEMS) {
+      forgetBoundedRun(run.runId)
+      return sanitizeToolEvents(run.items, LIVE_TOOL_CONTENT_POLICY, PROJECTION_SOURCE)
+    }
+    // A different array is a different generation: its indices and its content both restart.
+    if (projections.get(run.runId)?.state !== state) forgetBoundedRun(run.runId)
+    const cached = projections.get(run.runId)
+    // Nothing was written and nothing is pending: reuse the cached projection itself, only
+    // touching its LRU position. Metadata is spread fresh by the caller.
+    if (cached && cached.seenRevision === state.revision && cached.items.length === run.items.length) {
+      projections.delete(run.runId)
+      projections.set(run.runId, cached)
+      return cached.items
+    }
+    // Another reader may already have consumed the dirty range this entry still owes; then only
+    // a full rebuild is honest. Otherwise resume at the earliest recorded write.
+    const from = !cached ? 0
+      : cached.seenRevision >= state.baseRevision ? Math.min(state.dirtyFrom, run.items.length) : 0
+    const generation = cached?.generation ?? {}
+    const items = cached ? cached.items.slice(0, from) : []
+    const remaining = cached ? cached.remaining.slice(0, from) : []
+    let budget = from === 0 ? toolContentTurnBudget(LIVE_TOOL_CONTENT_POLICY) : cached!.remaining[from - 1]
+    for (let index = from; index < run.items.length; index++) {
+      const step = sanitizeToolEvent(run.items[index], LIVE_TOOL_CONTENT_POLICY, PROJECTION_SOURCE, budget)
+      // Non-tool events come back as the raw object, and the cache owns its projection: keep a
+      // top-level snapshot so a later in-place correction cannot rewrite what a reader has.
+      items.push(step.event === run.items[index] ? { ...step.event } : step.event)
+      remaining.push(step.remaining)
+      budget = step.remaining
+    }
+    // Snapshot the numbers before consuming: they describe the array just built, and the stamp
+    // must not alias the mutable mutation state afterwards.
+    stampProjection(items, {
+      generation,
+      revision: state.revision,
+      baseRevision: cached?.seenRevision ?? null,
+      dirtyFrom: from
+    })
+    consumeTraceMutations(run.items)
+    projectedItems -= cached?.items.length ?? 0
+    projections.delete(run.runId)
+    projections.set(run.runId, { state, generation, items, remaining, seenRevision: state.revision })
+    projectedItems += items.length
+    while (projections.size > MAX_CACHED_RUNS || projectedItems > MAX_CACHED_ITEMS) {
+      const oldest = projections.keys().next().value
+      if (oldest === undefined) break
+      forgetBoundedRun(oldest)
+    }
+    return items
+  }
+
   function boundedLiveRun(run: ActiveRun): ActiveRun {
-    return { ...run, items: sanitizeToolEvents(run.items, LIVE_TOOL_CONTENT_POLICY, 'live_renderer') }
+    return { ...run, items: projectRun(run) }
   }
 
   function requestRunStop(runId: string): boolean {
@@ -180,7 +270,7 @@ export function createTraceRuntime({
 
   return {
     runs, runStopLifecycle, publishQuestionOpened, publishQuestionClosed,
-    userQuestionBroker, traceOutput, flushTraceSend, queueTrace, publishTrace, boundedLiveRun,
+    userQuestionBroker, traceOutput, flushTraceSend, queueTrace, publishTrace, boundedLiveRun, forgetBoundedRun,
     requestRunStop, LIVE_TOOL_CONTENT_POLICY, runTraces
   }
 }

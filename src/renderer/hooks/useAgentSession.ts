@@ -12,7 +12,7 @@ import {
   clearSessionTurns,
   clearStopState,
   currentVisibleRunId,
-  hasTerminalResult,
+  needsTerminalEvidence,
   mergeActiveRun,
   mergeRecoveredRun,
   prependOlderSessionTurns,
@@ -70,11 +70,10 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   const turnsRef = useRef<Turn[]>([])
   turnsRef.current = turns
 
-  // 终态 result 是总览用量/成本的唯一来源。main 的焦点可能已经随会话切换移走，导致它没有送到
-  // renderer；归档里有完整证据，就在终态到达时补一次，避免永久停在「等待 result」。
+  // 会话切换可能漏收 result 或 Credit；终态到达时从归档补齐，不覆盖已有 live 证据。
   const backfillTerminalEvidence = useCallback((runId: string): void => {
     const turn = turnsRef.current.find((candidate) => candidate.runId === runId)
-    if (!turn || hasTerminalResult(turn)) return
+    if (!turn || !needsTerminalEvidence(turn)) return
     const { providerId, cwd, externalSessionId } = turn
     if (!providerId || !cwd || !externalSessionId) return
     if (typeof window.scry.turnTerminalEvidence !== 'function') return

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type {
-  WorkspaceBranchChoice, WorkspaceChoices, WorkspaceChoicesRequest, WorkspaceWorktreeChoice
+  WorkspaceBranchChoice, WorkspaceBranchRef, WorkspaceChoices, WorkspaceChoicesRequest, WorkspaceWorktreeChoice
 } from '../../shared/workspace-selection'
 import type { GitIdentity, ScGit } from './git'
 
@@ -38,6 +38,15 @@ export function parseWorktreeChoices(raw: string, identity: GitIdentity): Worksp
 
 export async function readWorktreeChoices(git: ScGit, identity: GitIdentity): Promise<WorkspaceWorktreeChoice[]> {
   return parseWorktreeChoices(await git.run(identity.root, ['worktree', 'list', '--porcelain', '-z']), identity)
+}
+
+async function readDefaultBase(git: ScGit, identity: GitIdentity): Promise<WorkspaceBranchRef | undefined> {
+  const raw = (await git.run(identity.root, [
+    'for-each-ref', '--count=1', '--format=%(refname)%00%(objectname)', 'refs/remotes/origin/main'
+  ])).trim()
+  if (!raw) return undefined
+  const [name, head] = raw.split('\0')
+  return name && head ? { name, head, kind: 'remote' } : undefined
 }
 
 export async function validateWorkspaceBranch(git: ScGit, identity: GitIdentity, name: string): Promise<void> {
@@ -83,7 +92,10 @@ export async function readWorkspaceChoices(
   request: WorkspaceChoicesRequest,
   activity: { commonDirBusy: boolean; busyRoots: ReadonlySet<string>; unknownCwd: boolean; recentWorktrees?: string[] }
 ): Promise<WorkspaceChoices> {
-  const worktrees = await readWorktreeChoices(git, identity)
+  const [worktrees, defaultBase] = await Promise.all([
+    readWorktreeChoices(git, identity),
+    readDefaultBase(git, identity)
+  ])
   const recent = new Map((activity.recentWorktrees ?? []).map((id, index) => [id, index]))
   worktrees.sort((a, b) => (recent.get(a.id) ?? recent.size) - (recent.get(b.id) ?? recent.size))
   for (const tree of worktrees) tree.busy = activity.unknownCwd || activity.busyRoots.has(tree.path)
@@ -106,6 +118,7 @@ export async function readWorkspaceChoices(
     branch: snapshot.branch, head: snapshot.head, dirty: snapshot.files.length > 0,
     writeBlocker: snapshot.writeBlocker, commonDirBusy: activity.commonDirBusy,
     observedAt: Date.now(),
+    ...(defaultBase ? { defaultBase } : {}),
     ...(request.selectedWorktreeId ? { selectedWorktree: worktrees.find(tree => tree.id === request.selectedWorktreeId) } : {}),
     page: request.kind === 'branches'
       ? { kind: 'branches', items: pageItems as WorkspaceBranchChoice[] }

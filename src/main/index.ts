@@ -260,7 +260,7 @@ const traceRuntime = createTraceRuntime({
 })
 const {
   runs, runStopLifecycle, publishQuestionOpened, publishQuestionClosed,
-  userQuestionBroker, traceOutput, flushTraceSend, boundedLiveRun,
+  userQuestionBroker, traceOutput, flushTraceSend, boundedLiveRun, forgetBoundedRun,
   LIVE_TOOL_CONTENT_POLICY, publishTrace, runTraces
 } = traceRuntime
 const llmNetworkConfiguration = new LlmNetworkConfigurationCache()
@@ -270,7 +270,7 @@ function startAppRun(payload: AgentStartRequest, options?: AppRunStartOptions & 
 function startAppRun(payload: AgentStartRequest, options?: AppRunStartOptions): Promise<AgentStartResult | RemoteRunCompletion>
 async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptions = {}): Promise<AgentStartResult | RemoteRunCompletion> {
   if (payload?.workspace !== undefined) return startWorkspaceRun(payload, options, {
-    sourceControl, providerRegistry, resolveKnownProjectDirectory, rememberProject,
+    sourceControl, providerRegistry, resolveKnownProjectDirectory,
     getCurrentCwd: () => currentCwd, getStartupManagedRecovery: () => startupManagedRecovery,
     start: startAppRun
   })
@@ -283,7 +283,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     rendererCanReceive, mainEventId, LIVE_TOOL_CONTENT_POLICY, recordingRecoveryHint, sessionBaselineKey,
     dockBadge, userQuestionBroker, publishQuestionOpened, publishQuestionClosed, requestRunStop,
     bumpSessionRevision, sourceControl, remoteRunIds, remoteRunLedgerIds, boundedLiveRun,
-    mirrorSessionTranscript, flushTraceSend, runStopLifecycle, runTraces,
+    forgetBoundedRun, mirrorSessionTranscript, flushTraceSend, runStopLifecycle, runTraces,
     isShuttingDown: () => isShuttingDown,
     getCurrentCwd: () => currentCwd,
     getWindow: () => win,

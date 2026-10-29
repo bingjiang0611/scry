@@ -193,7 +193,7 @@ export function RemoteChatView(props: RemoteChatViewProps) {
             overview: sessionId && historyEvidence?.status === 'unavailable' && displayTurns.length === 0
               ? <div className="surface-unavailable"><b>会话证据不可用</b><span>{historyEvidence.reason ?? `${host} 未提供这条会话的归档`}</span></div>
               : <OverviewPanel
-                  turns={displayTurns} sessionId={sessionId} selected={selected}
+                  turns={displayTurns} sessionId={sessionId} selected={selected} remote
                   runtimeProvider={runtimeProviderForAgentId(providerId)} usage={null} stats={null}
                   busy={pollFresh && runActive} onSelect={setSelected} onOpenTurn={openTurnInChat}
                 />,

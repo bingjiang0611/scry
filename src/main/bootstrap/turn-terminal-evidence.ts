@@ -11,7 +11,7 @@ export interface TurnTerminalEvidenceDependencies {
 }
 
 /**
- * 终态证据的窄查询：只读一轮归档里的终态（result / session_diff）。
+ * 终态证据的窄查询：只读一轮归档里的终态（result / session_diff / credit_usage）。
  *
  * 总览的输入+输出、缓存命中率、成本只认终态 result；main 的焦点随会话切换移走后，终态 trace
  * 不再投递，渲染进程就会永久停在「等待 result」。这条路径刻意不碰任何会话切换副作用
@@ -38,6 +38,6 @@ export function registerTurnTerminalEvidenceHandler(deps: TurnTerminalEvidenceDe
     )
     return turns
       .flatMap((turn) => turn.runId === runId ? turn.items : [])
-      .filter((item) => item.kind === 'harness' && (item.stage === 'result' || item.stage === 'session_diff'))
+      .filter((item) => item.kind === 'harness' && (item.stage === 'result' || item.stage === 'session_diff' || item.stage === 'credit_usage'))
   })
 }

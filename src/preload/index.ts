@@ -96,6 +96,8 @@ export interface SessionMeta {
   mtime: number
   preview: string
   count: number
+  /** Execution cwd when grouped beneath a different project root. */
+  cwd?: string
   pinnedAt?: number
   archivedAt?: number
 }

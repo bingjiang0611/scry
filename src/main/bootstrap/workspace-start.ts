@@ -11,7 +11,6 @@ export async function startWorkspaceRun(payload: AgentStartRequest, options: App
   getCurrentCwd: () => string | undefined
   getStartupManagedRecovery: () => Promise<void>
   resolveKnownProjectDirectory: (cwd: string) => string
-  rememberProject: (cwd: string) => void
   start: (request: AgentStartRequest, options: AppRunStartOptions & { origin?: 'local' }) => Promise<AgentStartResult>
 }): Promise<AgentStartResult> {
   if (options.origin === 'remote' || options.managedConversation || options.workspaceAdmission)
@@ -33,13 +32,10 @@ export async function startWorkspaceRun(payload: AgentStartRequest, options: App
       ...request, cwd, workspace: request.workspace, commandId: request.commandId
     }, async (workspace, runId, admit) => {
       timing.mark('git_prepared')
-      // Use exactly the picker authority. Its existing synchronous store is shared
-      // with local/paired owners; a separate async writer could lose concurrent grants.
-      deps.rememberProject(workspace.cwd)
-      deps.resolveKnownProjectDirectory(workspace.cwd)
       timing.mark('target_authorized')
       return deps.start({ ...request, cwd: workspace.cwd, workspace: undefined }, {
-        ...options, origin: 'local', runId, workspaceAdmission: { cwd: workspace.cwd, admit }
+        ...options, origin: 'local', runId, projectCwd: cwd,
+        workspaceAdmission: { cwd: workspace.cwd, admit }
       })
     })
     timing.mark('run_registered')

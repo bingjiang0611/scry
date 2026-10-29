@@ -77,6 +77,7 @@ type RunHost = {
   remoteRunIds: Set<string>
   remoteRunLedgerIds: Map<string, string>
   boundedLiveRun: (run: ActiveRun) => ActiveRun
+  forgetBoundedRun: (runId: string) => void
   mirrorSessionTranscript: (providerId: ProviderId, cwd: string | undefined, sessionId: string | undefined) => Promise<void>
   flushTraceSend: () => void
   runStopLifecycle: RunStopLifecycle
@@ -98,7 +99,7 @@ export async function startRun(
     sessionDiffBaselines, publishTrace, rendererCanReceive, mainEventId, LIVE_TOOL_CONTENT_POLICY,
     recordingRecoveryHint, sessionBaselineKey, dockBadge, userQuestionBroker,
     publishQuestionOpened, publishQuestionClosed, requestRunStop, bumpSessionRevision,
-    sourceControl, remoteRunIds, remoteRunLedgerIds, boundedLiveRun, mirrorSessionTranscript,
+    sourceControl, remoteRunIds, remoteRunLedgerIds, boundedLiveRun, forgetBoundedRun, mirrorSessionTranscript,
     flushTraceSend, runStopLifecycle, runTraces
   } = host
   const frontdoor = prepareRunFrontdoor(payload, options, {
@@ -371,6 +372,7 @@ export async function startRun(
             // 收口：先终态 flush + terminal，再离开登记，这样终态 diff 与 resync 仍可读。
             runTraces.settle(runId)
             runs.remove(runId)
+            forgetBoundedRun(runId)
             releaseSessionBaseline?.()
             resolveSettled?.()
             if (providerId === 'pi') host.piRunDiagnostics.record(runId, 'main_settled', { mainDone: runState.done, mainSettled: true })

@@ -291,7 +291,7 @@ export const Sidebar = memo(function Sidebar({
               draftStore={draftStore} layout="activity" active={activeRemote} collapsed={collapsed} onToggle={toggle}
               onPickSession={onPickRemoteSession!} onNewProjectChat={onNewRemoteProjectChat!}
               onArchiveSession={onArchiveRemoteSession} onArchivedSession={onArchivedRemoteSession} />
-            : renderSession(entry.project.cwd, entry.session, entry.project.name)}
+            : renderSession(entry.session.cwd ?? entry.project.cwd, entry.session, entry.project.name)}
           />
         </> : <>
           <SidebarProjects projects={projects} q={q} remoteGroups={remoteGroups} showRemote={showRemote}

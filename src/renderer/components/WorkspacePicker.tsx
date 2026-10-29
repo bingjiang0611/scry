@@ -152,9 +152,10 @@ function WorkspacePicker({ controller, anchor, id }: {
   </div>, document.body)
 }
 
-export function WorkspaceContext({ controller, cwd, onOpenRun }: {
+export function WorkspaceContext({ controller, cwd, isWorktree = false, onOpenRun }: {
   controller: WorkspaceSelectionController
   cwd: string | null
+  isWorktree?: boolean
   onOpenRun: (cwd: string, runId: string) => void
 }) {
   const workspaceAnchor = useRef<HTMLButtonElement>(null)
@@ -163,6 +164,7 @@ export function WorkspaceContext({ controller, cwd, onOpenRun }: {
   const { selection, metadata, operation, busy, editable } = controller
   const intent = selection && !('invalid' in selection) ? selection.intent : undefined
   const mode = intent?.kind ?? 'current'
+  const modeLabel = !editable && mode === 'current' && isWorktree ? copy.worktree : copy[mode]
   const branch = intent?.kind === 'newWorktree' ? copy.baseRef(branchLabel(intent.base.name))
     : intent?.kind === 'current' && intent.branch ? branchLabel(intent.branch.name)
       : intent?.kind === 'existingWorktree' ? metadata?.selectedWorktree?.branchRef
@@ -180,7 +182,7 @@ export function WorkspaceContext({ controller, cwd, onOpenRun }: {
         onClick={() => toggle('workspace')} aria-haspopup="menu" aria-expanded={controller.open && controller.editor.menu === 'workspace'} aria-controls={id}
         title={!editable ? copy.readonly : intent?.kind === 'newWorktree' ? copy.newBranchTarget(intent.newBranch) : target ? copy.target(target) : copy.noProject}
         aria-label={copy.change}>
-        <Icon name={editable ? mode === 'current' ? 'folder' : 'branch' : 'lock'} /><span>{copy[mode]}</span>{editable && <Icon name="chevronDown" />}
+        <Icon name={editable ? mode === 'current' ? 'folder' : 'branch' : 'lock'} /><span>{modeLabel}</span>{editable && <Icon name="chevronDown" />}
       </button>
       <button ref={refsAnchor} type="button" data-workspace-menu="refs" disabled={!controller.canChange || !cwd || mode === 'existingWorktree'}
         onClick={() => toggle('refs')} aria-haspopup="menu" aria-expanded={controller.open && controller.editor.menu === 'refs'} aria-controls={id}

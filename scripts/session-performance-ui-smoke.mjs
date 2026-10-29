@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { build } from 'vite'
 import electron from 'electron'
 import { nativeUiPointer } from './native-ui-pointer.mjs'
+import { exerciseTranscriptDisplayLock } from './session-display-lock-checks.mjs'
 import { exerciseSidebarPerformance } from './session-performance-sidebar-checks.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -47,6 +48,7 @@ async function exercise(webContents, pointer) {
   const initialPageMounted = await read(`document.querySelectorAll('.transcript-turn:not([data-virtualized])').length`)
   const viewport = await read(`(() => { const element = document.querySelector('.chat-transcript'); return { width: element.clientWidth, height: element.clientHeight }; })()`)
   if (viewport.width < 600 || viewport.height < 500) throw new Error(`Invalid transcript viewport: ${JSON.stringify(viewport)}`)
+  const shortHistoryDisplayUnlocked = await exerciseTranscriptDisplayLock({ read, wait, click })
   await click('#short-heavy')
   await wait(`document.querySelectorAll('[data-run-id]').length === 20 && document.querySelectorAll('[data-virtualized]').length > 10`)
   await read(`document.querySelector('.chat-transcript').scrollTop = 0`)
@@ -165,7 +167,7 @@ async function exercise(webContents, pointer) {
   const mountedAtEnd = await read(`document.querySelectorAll('.transcript-turn:not([data-virtualized])').length`)
   if (mountedAtEnd >= 40) throw new Error(`Scroll/focus retained ${mountedAtEnd} mounted turns`)
   return { ...sidebar,
-    viewport, initialPageMounted, shortHeavyMounted, shortHeavyHistoryRecovered: true,
+    viewport, initialPageMounted, shortHistoryDisplayUnlocked, shortHeavyMounted, shortHeavyHistoryRecovered: true,
     historyPages: 3, loadedTurns: 120, mountedAtTop, mountedAtEnd,
     viewportAnchorPreserved: true, selectedEvidenceRetained: true, promptNavigationAligned: true, repeatedTurnNavigation: true, eventNavigationCentered: true, explicitBottomFollowCancelsNavigation: true, shellHeightPreserved: true,
     keyboardFocusRestoresContent: true, blurredContentReleased: true, batchedFocusReleased: true, nativeSelectionPreserved: true, expandedToolStatePreserved: true, imagePreviewPreserved: true, boundedPlaceholderLabel: true }
@@ -210,6 +212,7 @@ try {
       try {
         await win.loadFile(${JSON.stringify(join(temp, 'index.html'))});
         win.webContents.focus();
+        const exerciseTranscriptDisplayLock = ${exerciseTranscriptDisplayLock.toString()};
         const exerciseSidebarPerformance = ${exerciseSidebarPerformance.toString()};
         const result = await (${exercise.toString()})(win.webContents, ${nativeUiPointer.toString()});
         console.log('SCRY_SESSION_PERFORMANCE=' + JSON.stringify(result));

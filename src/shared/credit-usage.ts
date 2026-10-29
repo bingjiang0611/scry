@@ -1,6 +1,6 @@
 import type { Evidence } from './turn-record.js'
 
-export type CreditUsageSource = 'qoder_sdk' | 'qoder_native_transcript'
+export type CreditUsageSource = 'qoder_sdk' | 'qoder_native_transcript' | 'pi_qoder_credit_observation'
 
 export interface CreditUsage {
   provider: 'qoder'
@@ -24,7 +24,7 @@ export function isCreditUsageEvidence(value: unknown): value is CreditUsageEvide
   const raw = value as CreditUsageEvidence
   const usage = raw.value
   if (!usage || usage.provider !== 'qoder' || usage.unit !== 'credits' || usage.scope !== 'main') return false
-  if (!Array.isArray(raw.source) || !raw.source.length || !raw.source.every((source) => source === 'qoder_sdk' || source === 'qoder_native_transcript')) return false
+  if (!Array.isArray(raw.source) || !raw.source.length || !raw.source.every((source) => source === 'qoder_sdk' || source === 'qoder_native_transcript' || source === 'pi_qoder_credit_observation')) return false
   if (!Number.isSafeInteger(usage.knownRequests) || usage.knownRequests < 0 || !Number.isSafeInteger(usage.missingRequests) || usage.missingRequests < 0) return false
   if (typeof raw.omissionReason !== 'string' || !raw.omissionReason) return false
   if (usage.knownRequests === 0) return raw.status === 'unavailable' && raw.quality === 'unavailable' && usage.amount === undefined

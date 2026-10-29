@@ -3,7 +3,7 @@ import { PI_RPC_STARTUP_TIMEOUT_MS, PI_RPC_MAX_FRAME_BYTES, piRpcEnvironment } f
 import { PiRpcProcess, piEvent } from './pi-rpc'
 import type { PiAgentProfile } from '../pi-agent-profiles'
 import type { ParsedTurn } from '../normalize'
-import type { ProviderCommand, SkillMeta } from '../../shared/provider'
+import type { ProviderCommand, ProviderContext, SkillMeta } from '../../shared/provider'
 import type { AgentRunControlCatalog } from '../../shared/runtime'
 import type { TraceEvent } from '../../shared/trace'
 import type { ProviderRunRequest } from './types'
@@ -65,32 +65,60 @@ function piRpcArgs(options: { noSession?: boolean; session?: string; offline?: b
 }
 
 // A cold `pi --mode rpc` start (Node plus the Pi bootstrap) costs seconds on this machine, while the
-// capability reads on a live process cost milliseconds. Park the finished probe process per
-// profile+workspace so the next refresh reads through it instead of paying another spawn. Nothing is
-// answered from a settled snapshot: every call still sends the same four queries to the live process,
-// so changed models, extensions and project trust are still observed.
+// capability reads on a live process cost milliseconds. Park a bounded working set per
+// profile+workspace for 60 seconds. Explicit context invalidation closes only the matching child,
+// while every read still sends the same four live queries. Nothing is answered from a settled
+// snapshot, and the existing idle expiry still bounds how long startup-loaded Pi resources live.
 const PI_CATALOG_IDLE_MS = 60_000
+const PI_CATALOG_WARM_PROCESS_LIMIT = 8
 
 interface WarmCatalogProcess {
   rpc: PiRpcProcess
   env: NodeJS.ProcessEnv
   off: () => void
+  profileId: string
+  cwd: string
   idle?: NodeJS.Timeout
 }
 
 const warmCatalogProcesses = new Map<string, WarmCatalogProcess>()
 
 async function closeWarmCatalogProcess(key: string, entry: WarmCatalogProcess): Promise<void> {
-  warmCatalogProcesses.delete(key)
+  if (warmCatalogProcesses.get(key) === entry) warmCatalogProcesses.delete(key)
   if (entry.idle) clearTimeout(entry.idle)
   entry.off()
   await entry.rpc.close()
 }
 
-/** Close parked probe processes and await their exit. Adapter dispose/context invalidation calls this. */
+function parkWarmCatalogProcess(key: string, entry: WarmCatalogProcess): void {
+  entry.idle = setTimeout(() => { void closeWarmCatalogProcess(key, entry) }, PI_CATALOG_IDLE_MS)
+  entry.idle.unref()
+  warmCatalogProcesses.delete(key)
+  warmCatalogProcesses.set(key, entry)
+  while (warmCatalogProcesses.size > PI_CATALOG_WARM_PROCESS_LIMIT) {
+    const oldest = warmCatalogProcesses.entries().next().value as [string, WarmCatalogProcess] | undefined
+    if (!oldest) return
+    warmCatalogProcesses.delete(oldest[0])
+    void closeWarmCatalogProcess(oldest[0], oldest[1]).catch((error: unknown) => {
+      console.warn('[scry] failed to close evicted Pi catalog process:', error)
+    })
+  }
+}
+
+/** Close parked probe processes and await their exit. Adapter disposal calls this. */
 export async function disposePiCatalog(): Promise<void> {
   const entries = [...warmCatalogProcesses]
   warmCatalogProcesses.clear()
+  await Promise.all(entries.map(async ([key, entry]) => closeWarmCatalogProcess(key, entry)))
+}
+
+/** Invalidate only the matching catalog generation; unrelated workspaces remain warm. */
+export async function invalidatePiCatalog(context: ProviderContext): Promise<void> {
+  if (!context.cwd) return disposePiCatalog()
+  const entries = [...warmCatalogProcesses].filter(([, entry]) =>
+    entry.cwd === context.cwd &&
+    (!context.agentProfileId || entry.profileId === context.agentProfileId)
+  )
   await Promise.all(entries.map(async ([key, entry]) => closeWarmCatalogProcess(key, entry)))
 }
 
@@ -108,6 +136,7 @@ async function withPiRpc<T>(
   let rpc: PiRpcProcess
   let off: () => void
   if (parked && parked.rpc.reusable() && isDeepStrictEqual(parked.env, env)) {
+    warmCatalogProcesses.delete(warmKey!)
     if (parked.idle) clearTimeout(parked.idle)
     parked.idle = undefined
     rpc = parked.rpc
@@ -136,10 +165,13 @@ async function withPiRpc<T>(
     // early exit) closes its child immediately, so the next attempt starts from a clean process
     // instead of reusing one whose RPC surface just failed.
     if (warmKey !== undefined && completed && rpc.reusable()) {
-      const entry: WarmCatalogProcess = { rpc, env, off }
-      entry.idle = setTimeout(() => { void closeWarmCatalogProcess(warmKey, entry) }, PI_CATALOG_IDLE_MS)
-      entry.idle.unref()
-      warmCatalogProcesses.set(warmKey, entry)
+      parkWarmCatalogProcess(warmKey, {
+        rpc,
+        env,
+        off,
+        profileId: profile.id,
+        cwd: cwd ?? ''
+      })
     } else {
       off()
       await rpc.close()

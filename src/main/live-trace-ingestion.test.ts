@@ -1,10 +1,12 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { setImmediate } from 'node:timers/promises'
 import { describe, expect, it, vi } from 'vitest'
 import type { TraceEvent } from '../shared/trace'
 import { sanitizeToolEvents } from '../core/turn-recorder/tool-content'
 import { LiveTraceIngestion } from './live-trace-ingestion'
+import { setPerformanceRecordingSink, type PerformanceSample } from './performance-timing'
 import { persistTraceToolEvents, readAppTraceContentPage, TRACE_TOOL_CONTENT_POLICY } from './trace-tool-content'
 
 const tool: TraceEvent = {
@@ -56,6 +58,64 @@ describe('live trace ingestion', () => {
       await queue.idle()
       await rm(root, { recursive: true, force: true })
     }
+  })
+
+  it('separates queue wait from durable content service time', async () => {
+    const samples: PerformanceSample[] = []
+    setPerformanceRecordingSink((sample) => { samples.push(sample) })
+    const queue = new LiveTraceIngestion({
+      provider: 'pi',
+      publish: () => undefined,
+      persist: async (event) => event,
+      onPersisted: () => undefined,
+      onError: (error) => { throw error }
+    })
+    try {
+      queue.enqueue(tool, bounded)
+      await queue.idle()
+    } finally {
+      setPerformanceRecordingSink(null)
+    }
+    expect(samples).toHaveLength(1)
+    expect(samples[0].checkpoints.map((checkpoint) => checkpoint.stage))
+      .toEqual(['queue_drained', 'content_persisted'])
+  })
+
+  it('persists eight events concurrently but publishes enrichment in Provider order', async () => {
+    const started: string[] = []
+    const persisted: string[] = []
+    const releases = new Map<string, () => void>()
+    const queue = new LiveTraceIngestion({
+      provider: 'pi',
+      publish: () => undefined,
+      persist: (event) => new Promise<TraceEvent>((resolve) => {
+        started.push(event.id)
+        releases.set(event.id, () => resolve(event))
+      }),
+      onPersisted: (event) => { persisted.push(event.id) },
+      onError: (error) => { throw error }
+    })
+    const events = Array.from({ length: 9 }, (_, index) => ({
+      ...tool,
+      id: `tool-${index}`,
+      toolUseId: `call-${index}`
+    }))
+    for (const event of events) queue.enqueue(event, event)
+    await setImmediate()
+    expect(started).toEqual(Array.from({ length: 8 }, (_, index) => `tool-${index}`))
+
+    for (let index = 1; index < 8; index++) releases.get(`tool-${index}`)!()
+    await setImmediate()
+    expect(persisted).toEqual([])
+    expect(started).not.toContain('tool-8')
+
+    releases.get('tool-0')!()
+    await setImmediate()
+    expect(started).toEqual(Array.from({ length: 9 }, (_, index) => `tool-${index}`))
+    expect(persisted).toEqual(Array.from({ length: 8 }, (_, index) => `tool-${index}`))
+    releases.get('tool-8')!()
+    await queue.idle()
+    expect(persisted).toEqual(events.map((event) => event.id))
   })
 
   it('keeps raw evidence and live ordering on disk failure and still drains later tool writes', async () => {

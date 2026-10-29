@@ -10,6 +10,8 @@ import '../../src/renderer/codex-alignment.css'
 function Fixture() {
   const [phase, setPhase] = useState<'working' | 'attention' | 'completed' | 'unknown' | 'failed'>('working')
   const [active, setActive] = useState<string | null>(null)
+  const [activeCwd, setActiveCwd] = useState('/fixture/storefront')
+  const [actionCwd, setActionCwd] = useState('')
   const [unread, setUnread] = useState(false)
   const [archived, setArchived] = useState(false)
   const [pinned, setPinned] = useState(false)
@@ -20,7 +22,7 @@ function Fixture() {
   const now = Date.now()
   const source: SessionMeta[] = [
     { sessionId: 'layout', providerId: 'claude', preview: '修复商品列表布局', runId: 'run-layout', mtime: now, count: 1 },
-    { sessionId: 'webhook', providerId: 'pi', preview: longTitle ? '/design-loop ios上没法看到mac2上的会话与进行中的任务状态' : 'Retry failed webhook delivery', runId: 'run-webhook', mtime: now - 60_000, count: 2, pinnedAt: pinned ? 1 : undefined, lastRunOutcome: phase === 'completed' ? 'completed' : phase === 'failed' ? 'failed' : undefined },
+    { sessionId: 'webhook', providerId: 'pi', cwd: '/fixture/storefront-worktree', preview: longTitle ? '/design-loop ios上没法看到mac2上的会话与进行中的任务状态' : 'Retry failed webhook delivery', runId: 'run-webhook', mtime: now - 60_000, count: 2, pinnedAt: pinned ? 1 : undefined, lastRunOutcome: phase === 'completed' ? 'completed' : phase === 'failed' ? 'failed' : undefined },
     { sessionId: 'tokens', providerId: 'codex', preview: '添加深色模式颜色变量', mtime: now - 300_000, count: 3, lastRunOutcome: 'completed' },
     { sessionId: 'unverified', providerId: 'qoder', preview: '未核实的历史', mtime: now - 400_000, count: 1 }
   ]
@@ -34,14 +36,16 @@ function Fixture() {
   }, [])
   return <div className="app" style={{ gridTemplateColumns: '280px 1px 1fr' }}>
     {mounted && <Sidebar id="activity-sidebar" projects={[{ cwd: '/fixture/storefront', name: 'storefront', mtime: 3, sessions }]}
-      activeCwd="/fixture/storefront" activeSessionId={active} activeProviderId={active === 'webhook' ? 'pi' : 'claude'}
+      activeCwd={activeCwd} activeSessionId={active} activeProviderId={active === 'webhook' ? 'pi' : 'claude'}
       runningRunIds={new Set(['run-layout', ...(['working', 'attention'].includes(phase) ? ['run-webhook'] : [])])}
       waitingQuestionRunIds={new Set(phase === 'attention' ? ['run-webhook'] : [])}
-      unreadSessionKeys={new Set(unread ? [sessionAttentionKey({ providerId: 'pi', cwd: '/fixture/storefront', sessionId: 'webhook' })] : [])}
-      onNewChat={() => setActive(null)} onPick={(_cwd, id) => { setActive(id); if (id === 'webhook') setUnread(false) }}
-      onTogglePin={() => setPinned((value) => !value)} onArchive={() => setArchived(true)} />}
+      unreadSessionKeys={new Set(unread ? [sessionAttentionKey({ providerId: 'pi', cwd: '/fixture/storefront-worktree', sessionId: 'webhook' })] : [])}
+      onNewChat={() => setActive(null)} onPick={(cwd, id) => { setActiveCwd(cwd); setActive(id); if (id === 'webhook') setUnread(false) }}
+      onTogglePin={(cwd) => { setActionCwd(cwd); setPinned((value) => !value) }} onArchive={(cwd) => { setActionCwd(cwd); setArchived(true) }} />}
     <div /><main style={{ padding: 40 }}><h1>会话动态</h1><p>隔离交互夹具 · 无真实 Provider</p>
       <output id="activity-selection">{active ?? 'none'}</output>
+      <output id="activity-selection-cwd">{activeCwd}</output>
+      <output id="activity-action-cwd">{actionCwd}</output>
       <output id="activity-pinned">{String(pinned)}</output>
     </main>
   </div>
