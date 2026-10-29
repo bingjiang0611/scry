@@ -18,10 +18,11 @@
 
 侧边会话（side chat）在现有会话旁并行运行，主会话不被替换：
 
-- 主会话保持原 Provider 原生 session 与轮次；切换主会话 Provider 后，子会话记录、标签与运行仍可访问。
+- 主会话保持原 Provider 原生 session 与轮次；用户显式选择后，父会话的原生 session 被纳入一个 logical conversation（adoption），绑定仍是同一个原生 session（实测 codex `smoke-session-run-mvtoau68-0`），子会话记录、3 个标签与正在运行的 run 都不变。
+  这条证据只覆盖**显式 adoption** 这一条路径；没有测过“把主会话换成另一个 Provider 的普通会话”那种更宽的含义，因此不据此宣称 Provider 切换的通用结论。
 - 子会话自己的 Provider 运行、工具调用、文件写入与标签页（`right-surface-storage` durable 命名空间）独立。
 - 来源快照只读：冻结来源的 prefix 指纹固定，来源被删除后仍可读，不自动重放、不自动重发。
-- 历史与滚动：200 个子会话分页（每页 40）与 130 轮长 transcript 的精确位置恢复。
+- 历史与滚动：200 个种子子会话的历史分页（实际 6 页，计数 `[40,40,40,40,40,1]`，共 201 条）与 130 轮长 transcript 的精确位置恢复。
 - 未发送草稿：Unicode 文本 + 图片保留；未知回执进入“待核对”状态，禁止隐式重发。
 - 两个修复：`107a9208`（workbench 命名空间断言改读 durable v2）；`72ec35cc`（`chat-scroll.ts` 新增 `transcriptGrowthAboveEdge`，普通行仍补偿，唯一豁免刚被精确恢复定位的锚点行）。
 
@@ -35,12 +36,13 @@ fixture 证据：`$TMPDIR/scry-app-driver-MyCVxV/verification.json`（08:05）�
 | Provider 覆盖 | 10 条真实 fixture 回执 = 5 Provider × 2 轮：`codex`、`claude`、`qoder`、`opencode`、`pi:0123456789abcdef` |
 | 主会话不变 / 子会话独立 | `isolation.childShowsOwnFile=true`、`parentShowsChildFile=false`、`childWorkspacePicker=false` |
 | 冻结来源 | `frozenSource.throughRunId=run-mvtoau68-0`、`prefixFingerprint=d39b8853…`，来源删除后仍可读 |
-| 子会话历史 | `seededChildren=200`、`共 201 个侧边会话`、13 页 × 每页 40 的分页读取 |
+| 子会话历史 | `seededChildren=200`、`historyTotal=共 201 个侧边会话`、`history.pages` 计数为 `[40,40,40,40,40,1]`（6 页，合计 201） |
 | 长 transcript 滚动 | `scroll.seeded=130`、恢复后 `anchorOffset=-80`（切换后仍 -80）、`turns=40` |
 | 精确标签 + 纵览重启 | `restart.tabs` 恰为 3 个登记 id、`composerValue="side chat unsent 草稿文字"`、`workbench.openIds=["overview"]` |
 | 未发送草稿 + 未知回执 | `drafts.draft={value:"side chat unsent 草稿文字",images:1}`、`receipt.state="unresolved"`、`newerDraft.resend=false` |
-| 只读回执查看器 | `orphanReader.snapshot.rows=26`（= 期望消息数）、`complete`、Escape 后焦点与草稿复原 |
-| 主会话 Provider 切换 | `adoption.tabs` 3 个不变，子会话 `childTurns` 保留 |
+| 来源快照查看器（只读） | `orphanReader.snapshot`：`rows=26` 等于 `expectedMessages=26`、`state=complete`、`olderDisabled/newerDisabled=true`、`reads=1`；Escape 后焦点回到「查看来源快照」、草稿 `孤儿草稿草稿` 复原 |
+| 待核对回执查看器（pending 回执） | `drafts.content`：精确原文 `side chat pending 待核对原文🙂🀄️ *原样显示*`、`image=side-chat-pending.png`、`imageReady=true`、`lightbox=side-chat-pending.png`、`focusReturned=true`；配套 `drafts.receipt.state="unresolved"`、`sendDisabled=true`、`drafts.newerDraft.state="unresolved"`、`newerDraft.resend=false` |
+| 父会话显式 adoption | 同一步只发生 1 次 `conversation:previewAdoption` 与 1 次 `conversation:adopt`；`adoption.binding={providerId:"codex",nativeSessionId:"smoke-session-run-mvtoau68-0"}` 与 `parentNativeSession` 相同；`tabs` 与 `active` 前后不变；子会话 `childTurns` 保留、`runId` 继续、`bodies=1`、子会话订阅 ≤2 |
 
 当前界面截图：[`side-chat-0.2.231-restored.png`](side-chat-0.2.231-restored.png)，SHA-256 `cbdd24dc6858548a216283e074e9a4492606d9d60103f1fae19bb6c43e771250`。
 它来自本轮 08:05 的 `electron-security-smoke.mjs --dev-side-chat-only` 采集（源文件 `$TMPDIR/scry-app-driver-Cq6qHy/side-chat-restored.png`），画面是侧边会话在重启后恢复到主会话旁的状态：来源快照按钮、关闭侧聊、未发送草稿与图片。**不是** `d3-ui-polish.md` 时期的设计稿截图。
@@ -55,6 +57,8 @@ fixture 证据：`$TMPDIR/scry-app-driver-MyCVxV/verification.json`（08:05）�
 | 完整 renderer UI 矩阵 | `npm run test:renderer:ui` | 退出码 0，完整既有矩阵（含 Credits、side-chat、conversation IPC、source-control、workspace、pi-native-history） |
 | 单元 + shell | `npm test` | 500 文件（496 通过 + 4 跳过）；5036 用例（5032 通过 + 4 跳过） |
 | 打包与安装 | `npm run install:mac:dev` | `typecheck` + `npm test` + `build` + `build:cli` + electron-builder + `check:packaged-app` + `smoke:electron` + 原子安装，退出码 0 |
+
+`npm test` 相对合入前的对照（计数由父会话按原始 `9a130` 输出核准）：合入前 495 通过 + 4 跳过 = 499 文件、5028 通过 + 4 跳过 = 5032 用例；本轮 496 通过 + 4 跳过 = 500 文件、5032 通过 + 4 跳过 = 5036 用例。差值恰好是 **1 个文件 / 4 个用例**，即新增的 `src/renderer/chat-scroll.test.ts`（4 个用例）；没有无法归因的文件数差额。
 
 Node 20 的取得方式：官方 `https://nodejs.org/dist/v20.20.2/node-v20.20.2-darwin-arm64.tar.gz`，与官方 `SHASUMS256.txt` 的 `466e05f3477c20dfb723054dfebffe55bc74660ee77f612166fca121dacb65b6` 一致，只解包到 `$TMPDIR/scry-release-gates-0jw8gcKN/final/`；未改 nvm default/全局、未新增项目依赖。
 
@@ -81,7 +85,17 @@ Node 20 的取得方式：官方 `https://nodejs.org/dist/v20.20.2/node-v20.20.2
 ## 版本-源码对应
 
 - 安装产物构建自 `18326f4c`（`0.2.231` / `0.2.53`，代码与 `72ec35cc` 相同，只多版本常量与 README 安装示例）。
-- 本文件与截图所在的最终文档 HEAD 相对 `18326f4c` 只增加文档（本文件 + 截图），**源码逐字节相同**。因此“已安装构建”与“最终 HEAD 的代码面”一致，差异仅文档。
+- 本文件所在的最终文档 HEAD 相对 `18326f4c` 只改文档，runtime 与打包产物的输入保持相同：`git diff --name-status 18326f4c..HEAD -- src scripts packages electron-builder.yml package.json package-lock.json tsconfig.node.json tsconfig.web.json tsconfig.cli.json tsconfig.recorder.json` 为空。因此“已安装构建”与“最终 HEAD 的代码面”一致。
+- 相对 `18326f4c` 的文档改动（全部为 `.md`，截图已在 `81f2b822` 加入）：`docs/handoff/side-chat/final-delivery.md`（本文件）、`docs/handoff/side-chat/README.md`、`docs/handoff/side-chat/continuation-checkpoint.md`、`docs/handoff/side-chat/release-verification.md`。
+
+## 过程记录：上一阶段的流程偏差
+
+如实记录，不改写历史：上一阶段（本交付之前）的执行者对自己**新建且未推送**的同一份文档提交做了两次 `--amend`：`a2fdcebe` → `55341ef6` → `8588264a`（内容均为 `docs/handoff/side-chat/release-verification.md`）。
+
+- 影响范围：只有那一个本轮新建的文档提交；功能提交 `fcd40cf4`、测试修复 `107a9208`、渲染修复 `72ec35cc`、合并 `cf25a103` 与用户既有提交都没有被改写。
+- 全程没有 push，因此不存在“远端一个已被改写的分支被覆盖”的问题；本地分支未推送。
+- 其后的版本提交 `18326f4c`、交付文档 `81f2b822` 与本轮修正提交都是**新提交**，没有 `amend`/`rebase`/`reset`/`stash`。
+- 本节只作记录，不用重写或重建历史去“修复”它。
 
 ## 相关文档
 

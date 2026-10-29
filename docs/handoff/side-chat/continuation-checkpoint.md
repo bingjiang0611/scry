@@ -1,6 +1,6 @@
 # 侧边会话续作检查点
 
-状态：未完成、未安装、未提交。2026-10-28 续作轮更新。此文件不代替最终验收报告。
+状态（最新）：侧边会话已实现、发布前门禁通过并完成开发版安装（App `0.2.231` / 私有 CLI `0.2.53`），见 **[final-delivery.md](./final-delivery.md)**。下面各节是历次续作轮的当时状态（最早一条写于 2026-10-28），保留作为过程记录，不再代表当前进度。此文件不代替最终验收报告。
 
 ## 执行者与阻碍现状
 
@@ -73,3 +73,12 @@ D3 之后还有两处集成前源码修正（未重跑 App UI 与全量 `npm tes
 `72ec35cc`（虚拟化历史锚定与精确视图恢复各自保留）；完整 `npm run test:renderer:ui`、`npm run check:cli-release`、
 `performance:measure --compare beac4da8…` 均通过。首次失败、重跑结论、性能 worse 的逐项判定、证据与产物路径见
 [release-verification.md](release-verification.md)。仍未升版本、未打包安装、未 push；下一个执行者先读该文件。
+
+## 最终交付（最新，发布前门禁之后）
+
+上一节的“未升版本、未打包安装、未 push”已被后续轮次接管：App 升到 `0.2.231`、私有 CLI 升到 `0.2.53`，
+在升版后的树上重跑了 `check:cli-release`（Node 20/22/24）、`npm run test:renderer:ui`、`npm test`，
+并用既有 `install:mac:dev` 原子安装到 `/Applications/Scry.app`（`app.asar` SHA-256 `5711c059…` 与构建产物相同）。
+仍未 push、未 `npm publish`、未安装全局 CLI；日常实例需要用户重启才会加载新版本。
+当前版本、证据、门禁计数、首次失败与未验证项集中在 **[final-delivery.md](./final-delivery.md)**；
+安装前的门禁轮记录与本轮证据表述校订在 [release-verification.md](release-verification.md)。

@@ -1,8 +1,8 @@
 # 侧边会话发布前门禁验证（本轮）
 
-状态：源码冻结候选。本轮只做门禁与必要修复；**未**升版本、未打包安装、未 push。日常实例仍是旧构建 `0.2.230`。
+状态：**历史轮次（安装前，PRE-INSTALL）**。本轮只做门禁与必要修复；当时**未**升版本、未打包安装、未 push，日常实例仍是旧构建 `0.2.230`。此文件下面的门禁结果、首次失败台账与性能数据是那一轮的原始记录，**未改写**；后续版本提升、全量门禁与安装结果见 **[final-delivery.md](final-delivery.md)**，续作状态见 [continuation-checkpoint.md](continuation-checkpoint.md)。
 
-> 证据表述已按后续校订：未知原因一律标 `UNKNOWN`，不再用未取得的观测支撑因果判断。当前版本、安装结果与最终门禁见 [final-delivery.md](final-delivery.md)。
+> 证据表述已按后续校订：未知原因一律标 `UNKNOWN`，不再用未取得的观测支撑因果判断。
 
 ## 身份
 
@@ -110,3 +110,5 @@ git diff --name-only cf25a103..HEAD -- scripts/performance-counters scripts/perf
 ## 下一步（交回父会话）
 
 源码冻结候选已成立，本轮不再有剩余门禁。按父会话决定，版本与安装阶段应把私有 CLI 一起升到 `0.2.53`（`normalizeTurnDiffSnapshot` 现在保留 `workspaceOverlap`，属于私有 CLI 运行合同变化），App 升到 `0.2.231`，但不 `npm publish`。
+
+（后续已按此执行：版本 `0.2.231` / `0.2.53`、升版后全量门禁与 `install:mac:dev` 安装结果、首次失败与未验证项见 [final-delivery.md](final-delivery.md)。）
