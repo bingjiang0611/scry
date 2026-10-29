@@ -16,10 +16,10 @@ function replace(oldText, newText) {
   generated = generated.replace(oldText, newText)
 }
 replace("import { withDirectoryLock } from '../core/turn-recorder/io'", `import { metadataTransaction as withDirectoryLock, metadataRead, metadataPut, metadataName, noteDeferredArtifact, prototypeDirectory as opendir } from '${here}/runtime'`)
-replace('mkdir, open, opendir, rename, rm, writeFile', 'mkdir, open, rename, rm, writeFile')
+replace('import { open, opendir }', 'import { open }')
 replace('  private async readText(name: string): Promise<string | undefined> {', '  private async readText(name: string): Promise<string | undefined> {\n    if (metadataName(name)) return metadataRead(this.directory, name)')
-replace("    if (Buffer.byteLength(text) > MAX_RECORD_BYTES) throw new Error('工作流记录超过 8 MiB 写入上限')", "    if (Buffer.byteLength(text) > MAX_RECORD_BYTES) throw new Error('工作流记录超过 8 MiB 写入上限')\n    if (metadataName(name)) return metadataPut(this.directory, name, text)")
-replace('        await rename(temporary, target)', '        await rename(temporary, target)\n        if (options?.deferDirectorySync) noteDeferredArtifact(this.directory)')
+replace("    if (Buffer.byteLength(text) > MAX_RECORD_BYTES) throw new Error('工作流记录超过 8 MiB 写入上限')", "    if (Buffer.byteLength(text) > MAX_RECORD_BYTES) throw new Error('工作流记录超过 8 MiB 写入上限')\n    if (metadataName(name)) { await options?.beforePublish; return metadataPut(this.directory, name, text) }")
+replace('publishWorkflowText(this.directory, name, text, options)', 'publishWorkflowText(this.directory, name, text, options).then(() => { if (options?.deferDirectorySync) noteDeferredArtifact(this.directory) })')
 // metadataPut only stages SQL; the value cache must wait for the surrounding
 // transaction acknowledgement, including a COMMIT that can genuinely reject.
 replace('    return this.withFrameLock(frame, expectedRevision, async (name, next) => {', '    const saved = await this.withFrameLock(frame, expectedRevision, async (name, next) => {')

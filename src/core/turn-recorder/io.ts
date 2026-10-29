@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { link, mkdir, open, readFile, readdir, rename, rm, stat, utimes, writeFile } from 'node:fs/promises'
+import { link, mkdir, open, readFile, readdir, rename, rm, rmdir, stat, unlink, utimes, writeFile } from 'node:fs/promises'
 import { dirname, join, parse, relative, resolve, sep } from 'node:path'
 
 export async function readJson<T>(path: string): Promise<T | null> {
@@ -298,7 +298,12 @@ export async function withDirectoryLock<T>(
   } finally {
     clearInterval(heartbeat)
     const current = await readJson<LockOwner>(ownerPath)
-    if (current?.token === owner.token) await rm(lockDir, { recursive: true, force: true })
+    if (current?.token === owner.token) {
+      // Live locks contain only owner.json. Do not recursively walk or erase
+      // unexpected contents; an ownership change still prevents any release.
+      await unlink(ownerPath)
+      await rmdir(lockDir)
+    }
   }
 }
 

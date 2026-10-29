@@ -1,6 +1,7 @@
-import { mkdir, open, opendir, rename, rm, writeFile } from 'node:fs/promises'
-import { createHash, randomUUID } from 'node:crypto'
+import { open, opendir } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
+import { publishWorkflowText } from './workflow-store-publication'
 import { workflowControlCopy, workflowFrameCopy, workflowRecoveryCopy } from '../shared/constants/copy'
 import { withDirectoryLock } from '../core/turn-recorder/io'
 import { nextWorkflowFrame, validateWorkflowFrame, validateWorkflowValueReference } from './workflow-frames'
@@ -40,24 +41,12 @@ export class FileWorkflowStore implements WorkflowStore {
 
   private atomic(name: string, value: unknown): Promise<void> { return this.atomicText(name, JSON.stringify(value)) }
 
-  private async atomicText(name: string, text: string, options?: { deferDirectorySync?: boolean }): Promise<void> {
+  private async atomicText(name: string, text: string, options?: Parameters<typeof publishWorkflowText>[3]): Promise<void> {
     if (Buffer.byteLength(text) > MAX_RECORD_BYTES) throw new Error('工作流记录超过 8 MiB 写入上限')
     // Serialize per canonical target, and capture bytes before yielding. Later
     // snapshots cannot be overwritten by an earlier, slower rename.
     const prior = this.writes.get(name) ?? Promise.resolve()
-    const write = prior.catch(() => undefined).then(async () => {
-      await mkdir(this.directory, { recursive: true })
-      const target = join(this.directory, name)
-      const temporary = join(this.directory, `.workflow-${randomUUID()}.tmp`)
-      try {
-        await writeFile(temporary, text, { encoding: 'utf8', mode: 0o600, flush: true })
-        await rename(temporary, target)
-        if (!options?.deferDirectorySync) {
-          const directory = await open(this.directory, 'r')
-          try { await directory.sync() } finally { await directory.close() }
-        }
-      } finally { await rm(temporary, { force: true }) }
-    })
+    const write = prior.catch(() => undefined).then(() => publishWorkflowText(this.directory, name, text, options))
     this.writes.set(name, write)
     try { await write } finally { if (this.writes.get(name) === write) this.writes.delete(name) }
   }
@@ -135,8 +124,12 @@ export class FileWorkflowStore implements WorkflowStore {
     const value = this.valueCheckpoint(input.workflowId, checkpoint.key, checkpoint.evaluation)
     const frame = { ...input, [checkpoint.field]: value.reference } as Omit<WorkflowControlFrame, 'revision'>
     return this.withFrameLock(frame, expectedRevision, async (name, next) => {
-      if (!this.outputs.has(value.name)) await this.atomicText(value.name, value.text, { deferDirectorySync: true })
-      await this.atomic(name, next)
+      // Both temp files may flush concurrently; the frame rename still waits for
+      // the value publication. Drain both writers before releasing the CAS lock.
+      const valueWrite = this.outputs.has(value.name) ? Promise.resolve() : this.atomicText(value.name, value.text, { deferDirectorySync: true })
+      const frameWrite = this.atomicText(name, JSON.stringify(next), { beforePublish: valueWrite })
+      const outcomes = await Promise.allSettled([valueWrite, frameWrite])
+      for (const outcome of outcomes) if (outcome.status === 'rejected') throw outcome.reason
       this.rememberOutput(value.name)
     })
   }
