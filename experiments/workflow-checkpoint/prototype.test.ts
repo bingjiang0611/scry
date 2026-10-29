@@ -87,6 +87,7 @@ describe('isolated transactional metadata prototype', () => {
       const old = JSON.parse(await inspector.request({ op: 'get', name: 'prototype-flow.node.frame.json' }) as string) as WorkflowControlFrame
       expect(old).toMatchObject({ phase: 'entered', revision: 1 })
       expect(old.resultRef).toBeUndefined()
+      expect(acknowledged).toBe(false)
     } finally {
       await f.storage.worker.request({ op: 'release' })
       await pending

@@ -1,23 +1,40 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
-import { resolve, dirname, join, isAbsolute, relative } from 'node:path'
+import { readFile, writeFile, mkdir, realpath } from 'node:fs/promises'
+import { resolve, dirname, basename, join, isAbsolute, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { build } from 'esbuild'
 
-const original = resolve(process.argv[2]), output = resolve(process.argv[3])
+const original = await realpath(process.argv[2])
+const requested = resolve(process.argv[3]), output = join(await realpath(dirname(requested)), basename(requested))
+const mode = process.argv[4] ?? 'metadata-hash'
 const escape = relative(original, output)
 if (!escape || escape.startsWith('..') || isAbsolute(escape)) throw new Error('negative control must be a new child of the prepared build')
 const here = dirname(fileURLToPath(import.meta.url))
 const manifest = JSON.parse(await readFile(join(original, 'manifest.json'), 'utf8'))
-const code = await readFile(join(here, 'sqlite-worker.ts'), 'utf8')
-const anchor = ' || digest(row.body) !== row.hash'
-if (code.split(anchor).length !== 2) throw new Error('negative-control hash guard anchor changed')
+const digest = bytes => createHash('sha256').update(bytes).digest('hex')
+function replace(code, anchor, replacement) {
+  if (code.split(anchor).length !== 2) throw new Error('negative-control anchor changed: ' + anchor)
+  return code.replace(anchor, replacement)
+}
+let worker = await readFile(join(here, 'sqlite-worker.ts'), 'utf8')
+let generated = await readFile(manifest.generatedPath, 'utf8')
+if (mode === 'metadata-hash') worker = replace(worker, ' || digest(row.body) !== row.hash', '')
+else if (mode === 'early-ack') {
+  worker = replace(worker, '          port.postMessage({ held: true })',
+    '          port.postMessage({ id: request.id, ok: true })\n          port.postMessage({ held: true })')
+  worker = replace(worker, '        unknown = false\n        break', "        unknown = false\n        if (current === 'hold_commit') return // Already sent the intentionally premature response.\n        break")
+} else if (mode === 'result-hash') {
+  generated = replace(generated, "    if (createHash('sha256').update(text).digest('hex') !== reference.hash) throw new Error(workflowFrameCopy.digest)\n", '')
+} else if (mode === 'frame-cas') {
+  generated = replace(generated, 'const next = nextWorkflowFrame(await this.loadFrame(input.workflowId, input.frameId), input, expectedRevision)',
+    'const next = { ...input, revision: expectedRevision + 1 }')
+} else throw new Error('unknown negative control')
 await mkdir(output)
-const workerPath = join(output, 'sqlite-worker.cjs')
-await build({ stdin: { contents: code.replace(anchor, ''),
-  resolveDir: here, sourcefile: 'negative-sqlite-worker.ts', loader: 'ts' }, outfile: workerPath,
-  bundle: true, platform: 'node', format: 'cjs', logLevel: 'silent' })
-const worker = await readFile(workerPath)
-await writeFile(join(output, 'manifest.json'), JSON.stringify({ ...manifest, workerPath,
-  workerHash: createHash('sha256').update(worker).digest('hex'), negativeControl: 'metadata hash guard removed; never eligible for adoption' }, null, 2) + '\n')
-console.log(JSON.stringify({ output, negativeControl: 'metadata-hash' }))
+const workerPath = join(output, 'sqlite-worker.cjs'), generatedPath = join(output, 'workflow-store.ts')
+await build({ stdin: { contents: worker, resolveDir: here, sourcefile: 'negative-sqlite-worker.ts', loader: 'ts' },
+  outfile: workerPath, bundle: true, platform: 'node', format: 'cjs', logLevel: 'silent' })
+await writeFile(generatedPath, generated)
+await writeFile(join(output, 'manifest.json'), JSON.stringify({ ...manifest, workerPath, generatedPath,
+  generatedHash: digest(generated), workerHash: digest(await readFile(workerPath)),
+  negativeControl: mode + '; deliberately broken; never eligible for adoption' }, null, 2) + '\n')
+console.log(JSON.stringify({ output, negativeControl: mode }))
