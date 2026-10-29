@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { performance as nodePerformance } from 'node:perf_hooks'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { WorkflowControlFrame } from '../../src/shared/workflow'
@@ -19,6 +20,26 @@ function trace(event: string, detail: Record<string, string | number | null | un
   process.stderr.write(JSON.stringify({ ...payload, ms: Math.round(performance.now() - traceStarted) }) + '\n')
 }
 trace('controller_boot')
+const profileEnabled = process.env.SCRY_WORKFLOW_RECOVERY_PROFILE === '1'
+const persistence = {
+  record: { calls: 0, completed: 0, rejected: 0, ms: 0 },
+  frame: { calls: 0, completed: 0, rejected: 0, ms: 0 },
+  frameValue: { calls: 0, completed: 0, rejected: 0, ms: 0 }
+}
+function measured<T>(kind: keyof typeof persistence, run: () => Promise<T>): Promise<T> {
+  if (!profileEnabled) return run()
+  const sample = persistence[kind], started = performance.now()
+  sample.calls++
+  return run().then(value => { sample.completed++; return value }, (error: unknown) => { sample.rejected++; throw error })
+    .finally(() => { sample.ms += performance.now() - started })
+}
+if (profileEnabled) process.on('exit', () => {
+  // Inclusive Store method time, not exclusive fsync or device IO. Keep this
+  // fixed-size receipt separate from the bounded lifecycle trace.
+  process.stderr.write(JSON.stringify({ event: 'persistence_profile', ms: performance.now() - traceStarted, persistence,
+    node: { timeOrigin: nodePerformance.timeOrigin, bootstrapCompleteMs: nodePerformance.nodeTiming.bootstrapComplete, entryMs: traceStarted }
+  }) + '\n')
+})
 const children = new Set<Promise<unknown>>()
 let cleanup: (() => Promise<boolean>) | undefined
 process.on('message', message => {
@@ -35,7 +56,7 @@ process.on('message', message => {
 class Store extends FileWorkflowStore {
   override async save(record: WorkflowStoreRecord) {
     trace('record_persistence_begin', { state: record.progress.state })
-    await super.save(record)
+    await measured('record', () => super.save(record))
     trace('record_persistence_end', { state: record.progress.state })
     if (mode === 'intent' && record.intents.length && !record.outcomes.length) process.exit(74)
   }
@@ -46,7 +67,7 @@ class Store extends FileWorkflowStore {
       process.send!({ type: 'checkpoint', pid: process.pid })
       await new Promise<void>(resolve => process.once('message', message => { if (message === 'continue') resolve() }))
     }
-    const result = await super.saveFrame(frame, revision)
+    const result = await measured('frame', () => super.saveFrame(frame, revision))
     trace('frame_persistence_end', { node: frame.nodeId, phase: frame.phase, cursor: frame.cursor })
     if (mode === 'reenter' && frame.nodeId === 'first' && frame.phase === 'entered') process.exit(77)
     if (mode === 'loop' && frame.loop?.stage === 'ready' && frame.loop.iteration === 2) process.exit(76)
@@ -58,7 +79,7 @@ class Store extends FileWorkflowStore {
       trace('native_parent_checkpoint_exit')
       process.exit(73)
     }
-    return super.saveFrameWithValue(frame, revision, checkpoint)
+    return measured('frameValue', () => super.saveFrameWithValue(frame, revision, checkpoint))
   }
 }
 // A real local child process, deliberately not a Provider account or SDK. Its

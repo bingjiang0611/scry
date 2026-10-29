@@ -7,17 +7,20 @@ import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 // Typecheck the executable child without running its top-level entry in Vitest.
 import type {} from '../../scripts/fixtures/workflow-recovery-process'
-import { afterAll, afterEach, expect } from 'vitest'
+import { afterAll, afterEach, beforeEach, expect } from 'vitest'
 import type { WorkflowBlock, WorkflowExpression } from '../shared/workflow'
 import { FileWorkflowStore } from './workflow-store'
 import { makePlanPreview, validateWorkflowProgram, workflowRevision } from './workflow-program'
 
 type ParentPhase = { event: string; ms: number; pid?: number; code?: number | null; signal?: string | null; exitCode?: number | null; signalCode?: string | null; streams?: string[] }
-type ProcessRun = { root: string; mode: string; started: number; child: ChildProcess; closed: Promise<{ code: number | null; signal: string | null }>; phases: ParentPhase[]; stderr: () => string }
+type ProcessRun = { root: string; mode: string; started: number; engineWaitMs: number; child: ChildProcess; closed: Promise<{ code: number | null; signal: string | null }>; phases: ParentPhase[]; stderr: () => string }
 export const roots: string[] = []
 const children: ProcessRun[] = []
 const diagnosticTextLimit = 16 * 1024
 const diagnosticPhaseLimit = 128
+const profileEnabled = process.env.SCRY_WORKFLOW_RECOVERY_PROFILE === '1'
+let testStarted = 0
+beforeEach(() => { if (profileEnabled) testStarted = performance.now() })
 function bounded(text: string) { return text.length > diagnosticTextLimit ? text.slice(0, diagnosticTextLimit) + '\n[truncated]' : text }
 function fixturePhases(stderr: string) {
   return stderr.split('\n').flatMap(line => {
@@ -39,6 +42,7 @@ function engine() {
 afterEach(async context => {
   const runs = children.splice(0), finishedRoots = roots.splice(0)
   const failed = context.task.result?.state === 'fail'
+  const bodyWallMs = performance.now() - testStarted
   for (const run of runs) run.phases.push({ event: failed ? 'failure_cleanup_start' : 'cleanup_start', ms: Math.round(performance.now() - run.started), exitCode: run.child.exitCode, signalCode: run.child.signalCode })
   const saveDiagnostics = async (stage: 'before_cleanup' | 'closed') => {
     await Promise.all(finishedRoots.map(async root => {
@@ -62,6 +66,12 @@ afterEach(async context => {
     await run.closed
     run.phases.push({ event: 'parent_cleanup_close', ms: Math.round(performance.now() - run.started), exitCode: run.child.exitCode, signalCode: run.child.signalCode })
   }
+  if (profileEnabled) console.log('WORKFLOW_RECOVERY_PROFILE', JSON.stringify({
+    name: context.task.name, failed, bodyWallMs,
+    processes: runs.map(run => ({ mode: run.mode, spawnRequestEpochMs: performance.timeOrigin + run.started, engineWaitMs: run.engineWaitMs,
+      parentPhases: run.phases.slice(0, diagnosticPhaseLimit), fixturePhases: fixturePhases(run.stderr()),
+      closed: run.child.exitCode !== null || run.child.signalCode !== null }))
+  }))
   if (failed) {
     await saveDiagnostics('closed')
     console.warn('Retained failed process fixture:', finishedRoots)
@@ -88,7 +98,9 @@ export async function setup(blocks = sequence) {
   return { root, preview, store: new FileWorkflowStore(root) }
 }
 export async function launch(root: string, mode: string) {
+  const engineStarted = performance.now()
   const { path } = await engine()
+  const engineWaitMs = performance.now() - engineStarted
   const sandbox = process.platform === 'darwin'
   if (sandbox) await access('/usr/bin/sandbox-exec')
   // User-approved test-only exception: macOS cannot exec its setuid ps in a
@@ -100,7 +112,7 @@ export async function launch(root: string, mode: string) {
   // timed-out body must not admit another controller after that snapshot.
   if (!roots.includes(root)) throw new Error('process fixture root admission is closed')
   const started = performance.now(), phases: ParentPhase[] = [], phase = (event: string, detail: Omit<ParentPhase, 'event' | 'ms'> = {}) => phases.push({ event, ms: Math.round(performance.now() - started), ...detail })
-  const child = spawn(sandbox ? '/usr/bin/sandbox-exec' : process.execPath, sandbox ? ['-p', profile, process.execPath, path, root, mode] : [path, root, mode], { env: { HOME: root, TMPDIR: root, PATH: '/usr/bin:/bin', SCRY_WORKFLOW_RECOVERY_TRACE: '1' }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] })
+  const child = spawn(sandbox ? '/usr/bin/sandbox-exec' : process.execPath, sandbox ? ['-p', profile, process.execPath, path, root, mode] : [path, root, mode], { env: { HOME: root, TMPDIR: root, PATH: '/usr/bin:/bin', SCRY_WORKFLOW_RECOVERY_TRACE: '1', SCRY_WORKFLOW_RECOVERY_PROFILE: profileEnabled ? '1' : undefined }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] })
   phase('parent_spawn_returned', { pid: child.pid })
   child.once('spawn', () => phase('parent_spawned', { pid: child.pid }))
   let stderr = ''
@@ -111,7 +123,7 @@ export async function launch(root: string, mode: string) {
   child.once('disconnect', () => phase('parent_ipc_disconnect'))
   child.once('exit', (code, signal) => phase('parent_exit', { code, signal, exitCode: child.exitCode, signalCode: child.signalCode }))
   const closed = new Promise<{ code: number | null; signal: string | null }>((resolve, reject) => { child.once('error', reject); child.once('close', (code, signal) => { phase('parent_close', { code, signal, exitCode: child.exitCode, signalCode: child.signalCode }); resolve({ code, signal }) }) })
-  children.push({ root, mode, started, child, closed, phases, stderr: () => stderr })
+  children.push({ root, mode, started, engineWaitMs, child, closed, phases, stderr: () => stderr })
   const checkpoint = mode === 'live' ? new Promise<void>((resolve, reject) => {
     child.once('message', message => (message as { type?: string }).type === 'checkpoint' ? resolve() : reject(new Error('unexpected checkpoint')))
     child.once('exit', code => reject(new Error('early exit: ' + code + ': ' + stderr)))
