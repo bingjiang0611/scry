@@ -258,7 +258,7 @@ const traceRuntime = createTraceRuntime({
 })
 const {
   runs, runStopLifecycle, publishQuestionOpened, publishQuestionClosed,
-  userQuestionBroker, traceOutput, flushTraceSend, queueTrace, boundedLiveRun,
+  userQuestionBroker, traceOutput, flushTraceSend, queueTrace, boundedLiveRun, forgetBoundedRun,
   LIVE_TOOL_CONTENT_POLICY
 } = traceRuntime
 const llmNetworkConfiguration = new LlmNetworkConfigurationCache()
@@ -281,7 +281,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     rendererCanReceive, mainEventId, LIVE_TOOL_CONTENT_POLICY, recordingRecoveryHint, sessionBaselineKey,
     dockBadge, userQuestionBroker, publishQuestionOpened, publishQuestionClosed, requestRunStop,
     bumpSessionRevision, sourceControl, remoteRunIds, remoteRunLedgerIds, boundedLiveRun,
-    mirrorSessionTranscript, flushTraceSend, runStopLifecycle,
+    forgetBoundedRun, mirrorSessionTranscript, flushTraceSend, runStopLifecycle,
     isShuttingDown: () => isShuttingDown,
     getCurrentCwd: () => currentCwd,
     getWindow: () => win,

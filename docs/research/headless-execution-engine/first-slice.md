@@ -1,6 +1,6 @@
 # 首个切片：先归因，再验证增量 trace
 
-**状态：P0 已正式冻结（baseline 冻结，不是改善结论）；P1 未开始。** 测量工具、pilot、比较预注册与最终副本回放都已完成，副本内容、身份与验收见[P0 冻结篇](../../performance-experiments/20261028-concurrency-trace-p0-freeze.md) §5；预注册阈值与顺序未变（§4）。P1 的候选实现与 32 + 16 采样尚未开始。用户已授权 P0＋P1；P2 及以后仍需单独批准。阶段记录与已实现能力见[会话并发 P0 归因](../../performance-experiments/20261028-session-concurrency-p0.md)。源码基线、权威边界与阶段估算见[总览](../headless-execution-engine-design.md)。本篇是当前执行入口，三篇架构附录不是本切片的依赖。
+**状态：P0 已正式冻结（baseline 冻结，不是改善结论）；P1 实施中——P1a 已实现并通过 focused／typecheck／build／L1，真实 App／50k 功能与完整 A/B 未验证，P1b 尚未实施。** 测量工具、pilot、比较预注册与最终副本回放都已完成，副本内容、身份与验收见[P0 冻结篇](../../performance-experiments/20261028-concurrency-trace-p0-freeze.md) §5；预注册阈值与顺序未变（§4）。当前检查点见 [P1a 篇](../../performance-experiments/20261029-concurrency-trace-p1a.md)；完整候选（P1a＋P1b）的 32 + 16 采样尚未开始。用户已授权 P0＋P1；P2 及以后仍需单独批准。阶段记录与已实现能力见[会话并发 P0 归因](../../performance-experiments/20261028-session-concurrency-p0.md)。源码基线、权威边界与阶段估算见[总览](../headless-execution-engine-design.md)。本篇是当前执行入口，三篇架构附录不是本切片的依赖。
 
 ## A. 范围与交付物
 
