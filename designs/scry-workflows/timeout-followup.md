@@ -4,7 +4,7 @@
 
 ## 当前结论
 
-最新：[mac2 低负载复验](../../docs/performance-experiments/20261029-workflow-checkpoint-mac2.md)。A/B 负对照已补；低负载机器上 File 共享 58/58、SQL 全部 93/93，但 File 扩大批次 76/77，stable-map 单例仍触发原 5000ms 超时。低负载窗口不再是复验阻碍；不能把全部失败归因负载，仍不是生产修复或推广批准。
+最新：[File 减冗余与终稿全量结果](../../docs/performance-experiments/20261029-workflow-file-checkpoint-followup.md)。File 生产源码已有减冗余改动，聚焦 96/96、SQL 93/93；但完整 unit 仍为 **4526 passed / 1 timeout / 4 skipped**，stable-map 未关闭。未接入生产 SQL、安装或推广。下文保留此前计数隔离与候选调查记录，不把局部通过当作完整修复。
 
 已修复性能测试的共享计数串扰，本地提交 `2adc9d9647560bfd160e0dd5c0f9149d41be8d76`。**没有修复生产 Workflow 的 5000ms 超时，完整门禁仍红灯。** 不把计数器修复称为运行速度改善。
 

@@ -2,7 +2,7 @@
 
 原设计提交时的状态：**仅设计，未实现、未迁移、未验证性能。** 维护者本轮授权到设计，不等于授权替换生产持久化。基于 `bea90c44500b35ce16265a56ea014b03f5267da7`，2026-10-28 本地时间。当前失败与证据见 [timeout-followup.md](timeout-followup.md)。
 
-后续状态（2026-10-29 UTC）：维护者另行授权后已执行临时 namespace 的 Node SQLite/Worker 原型与同负载评估；原五例在候选内通过，但扩大合同未通过，未接入生产。实际实现、ABI 偏差、失败与下一决定见 [隔离原型报告](../../docs/performance-experiments/20261029-workflow-sqlite-checkpoint.md)。随后获授权的[双后端合同收口](../../docs/performance-experiments/20261029-workflow-checkpoint-contracts.md)已修复实验值缓存并曾通过 93 项；后续[阶段调查](../../docs/performance-experiments/20261029-workflow-checkpoint-boundaries.md)已补 A/B 真回滚。该轮 SQL 92/93，File 恢复仍超时，均高负载；随后 [mac2 复验](../../docs/performance-experiments/20261029-workflow-checkpoint-mac2.md)在低负载通过 File 共享 58/58、SQL 93/93，但扩大 File 仍 76/77，stable-map 单例也超时；不推广。下文保留原设计决策，不把设计承诺当作验证结果。
+后续状态（2026-10-29 UTC）：维护者另行授权后已执行临时 namespace 的 Node SQLite/Worker 原型与同负载评估；原五例在候选内通过，但扩大合同未通过，未接入生产。实际实现、ABI 偏差、失败与下一决定见 [隔离原型报告](../../docs/performance-experiments/20261029-workflow-sqlite-checkpoint.md)。随后获授权的[双后端合同收口](../../docs/performance-experiments/20261029-workflow-checkpoint-contracts.md)已修复实验值缓存并曾通过 93 项；后续[阶段调查](../../docs/performance-experiments/20261029-workflow-checkpoint-boundaries.md)已补 A/B 真回滚。该轮 SQL 92/93，File 恢复仍超时，均高负载；随后 [mac2 复验](../../docs/performance-experiments/20261029-workflow-checkpoint-mac2.md)在低负载通过 File 共享 58/58、SQL 93/93，但扩大 File 仍 76/77，stable-map 单例也超时；不推广。最新 [File 减冗余](../../docs/performance-experiments/20261029-workflow-file-checkpoint-followup.md)后完整 unit 4526/1/4，未关单。下文保留原设计决策，不把设计承诺当作验证结果。
 
 ## 1. 结论与范围
 
@@ -16,10 +16,10 @@
 
 | 位置 | 当前行为 | 对设计的约束 |
 | --- | --- | --- |
-| `src/main/workflow-store.ts:43–63` | 每个目标串行；temp 文件 flush，rename，目录 sync 后返回 | 承诺成功必须有 durable acknowledgement，不能提前返回 |
-| 同文件 `122–141` | frame 目录锁内读取并执行 `nextWorkflowFrame`；value/frame 两文件 flush，共用最后的目录屏障 | CAS 不只是数字；已有合并能力不能被新方案退化 |
-| 同文件 `158–182` | create/claim/save 在 root 锁内读取，核对 fingerprint/epoch/ownership | DB 排他锁不能代替旧 controller 退出证明 |
-| 同文件 `196–229`、`272–303` | governing/output 独立 artifact；root 引用；每次 load 重读 governing hash | 索引、DB 行和温缓存不能掩盖 canonical bytes 损坏 |
+| `src/main/workflow-store-publication.ts`、Store `44–54` | 逐目标串行；temp flush、rename、目录 sync；不再 rm 已消耗的临时名 | 承诺成功必须有 durable acknowledgement，不能提前返回 |
+| Store `111–135` | 锁内 CAS；两文件并行 flush，value rename 先于 frame，共用目录屏障 | CAS 不只是数字；已有合并能力不能被新方案退化 |
+| Store `151–175` | create/claim/save 在 root 锁内读取，核对 fingerprint/epoch/ownership | DB 排他锁不能代替旧 controller 退出证明 |
+| Store `189–223`、`265–296` | governing/output 独立 artifact；root 引用；每次 load 重读 governing hash | 索引、DB 行和温缓存不能掩盖 canonical bytes 损坏 |
 | `workflow-store-contracts.ts:83–109` | 既有异步 Store API；frame/value checkpoint 只支持 resultRef/sourceRef | 不先为假想调用者扩充通用 transaction DSL |
 | `workflow-runner-system.ts:55–80,103–114` | admission、输入冻结、实际结果分别提交 | 不能为合并 I/O 把真实执行移到 admission 之前 |
 | `workflow-control.ts:156–173` | 原生结果已经持久化；终态 frame 使用其精确 resultRef | 保留事实与控制推进的独立失败边界 |

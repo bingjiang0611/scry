@@ -2,6 +2,8 @@
 
 ## 按领域查看交付证据
 
+- [File 减冗余与终稿全量 4526/1/4：stable-map 仍未关闭](../../docs/performance-experiments/20261029-workflow-file-checkpoint-followup.md)
+
 - [v4 生产工作台、独立冷读验收与仍失败的完整 unit 门禁](v4-workspace-delivery.md)
 
 - [工作副本、Agent/check、诊断与输入观察](delivery-system-steps.md)
