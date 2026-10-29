@@ -8,6 +8,10 @@
 
 本轮未改 timeout、既有断言、固定 workload、重复次数、Provider 阶段或持久化保证。没有真实 Provider/Jev 请求，没有启动 App、打包、安装或 push。v4 工作台既有验收见 [交付报告](v4-workspace-delivery.md)，本轮不重做或扩称该验收。
 
+## 后续隔离评估（2026-10-29 UTC）
+
+维护者另行授权的 SQLite/Worker 临时原型已评估。最终同负载文件版 3 项原超时、候选 5/5 通过；65 项聚焦检查通过。扩大合同仍为 37 passed / 13 failed，并有 1 个未处理拒绝，不能推广。生产 `src/` 未变化，本页记录的完整生产门禁未被替换或刷绿。实现、负对照、ABI/原生 IO 限制与持久证据见 [隔离原型报告](../../docs/performance-experiments/20261029-workflow-sqlite-checkpoint.md)。
+
 ## 已交付：按工作区隔离 native write 计数
 
 文件：`scripts/performance-counters/workflow-native.counters.test.ts`。

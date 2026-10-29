@@ -2,6 +2,10 @@
 
 由 `.agents/skills/scry-performance-climb` 维护。记录当前机会排名、大胆想法和覆盖缺口；实验（含失败）各自一个文件放在 `performance-experiments/`。数据结论必须注明来源与成熟度。排名超过 14 天或跨过一次发布需重新分析。
 
+## Workflow 支线隔离评估（2026-10-29；未部署）
+
+`feat/workflow-m0` 的 [SQLite/Worker 原型](performance-experiments/20261029-workflow-sqlite-checkpoint.md)：同 Node 24 ABI 的原五例，文件版 3 超时、候选 5/5 通过；65 项聚焦检查通过。L2 仅为低负载受控 fixture，L1 只证明元数据文件发布转为 SQL 提交，原生 fsync/设备字节 unavailable，不称为总 IO 下降。扩大合同 13 失败及 1 未处理拒绝使 P1 未通过；不调 ratchet、不升级门禁、不接生产。下一步需决定是否修改现有测试结构以建立共享 File/SQL 合同；Electron、完整 unit、迁移和 L3 均未完成。与下方已安装主线 build 分开记录。
+
 ## 最新爬坡进展（2026-10-17）
 
 用户选择方案一（常驻执行服务）与方案二（增量证据引擎）；已完成五个有独立计数与受控毫秒证据的前置优化，不代表两套架构已经交付。
