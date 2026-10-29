@@ -11,7 +11,7 @@
 //
 //   node scripts/concurrency-trace-main-50k.mjs --artifact <dir> --work <fresh dir> [--negative-control corrupt-body]
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { lifecycleVerdict, ownedChild } from './fixtures/concurrency-trace-live-lifecycle.mjs'
@@ -21,7 +21,7 @@ import {
 import { readReport } from './fixtures/concurrency-trace-main-cell-report.mjs'
 import { createOutputCapture, watchChildClose } from './session-concurrency-electron.mjs'
 
-const launcherPath = fileURLToPath(import.meta.url)
+const launcherUrl = fileURLToPath(import.meta.url)
 const CONFIG_ENV = 'SCRY_CONCURRENCY_TRACE_MAIN_50K_CONFIG'
 const NOTIFICATION_TYPE = 'concurrency-trace-main-50k'
 // Work deadline for one cell, reused from the R5 bench: never a retry, never extended after a miss.
@@ -215,6 +215,19 @@ export async function runCell({ artifactDir, work, negativeControl = null, elect
   return payload
 }
 
+/**
+ * True only when this file was started as the CLI. `import.meta.url` is already canonical, while argv[1] can be
+ * a symlink or an aliased prefix (`/tmp` -> `/private/tmp`), so the two are compared as real file identities
+ * rather than as strings. A library import has no argv[1], or argv[1] is `-` (stdin) or another program, and
+ * `existsSync` already covers those shapes. A realpath failure on a file that does exist is not swallowed: an
+ * entry point that cannot be identified must surface its error instead of silently importing and exiting 0.
+ */
+function launchedAsCli() {
+  const invoked = process.argv[1]
+  if (!invoked || !existsSync(invoked)) return false
+  return realpathSync(invoked) === realpathSync(launcherUrl)
+}
+
 function parseArgs(argv) {
   const options = { artifactDir: null, work: null, negativeControl: null }
   for (let index = 0; index < argv.length; index += 2) {
@@ -232,7 +245,7 @@ function parseArgs(argv) {
   return options
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === launcherPath) {
+if (launchedAsCli()) {
   try {
     const options = parseArgs(process.argv.slice(2))
     const result = await runCell(options)
