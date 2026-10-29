@@ -2,6 +2,8 @@
 
 状态：源码冻结候选。本轮只做门禁与必要修复；**未**升版本、未打包安装、未 push。日常实例仍是旧构建 `0.2.230`。
 
+> 证据表述已按后续校订：未知原因一律标 `UNKNOWN`，不再用未取得的观测支撑因果判断。当前版本、安装结果与最终门禁见 [final-delivery.md](final-delivery.md)。
+
 ## 身份
 
 - 集成分支 HEAD：`cf25a103`（merge：`fcd40cf4` 功能 + `beac4da8` main）。本轮在其上新增两个修复提交：
@@ -35,10 +37,11 @@ git diff --name-only cf25a103..HEAD -- scripts/performance-counters scripts/perf
 ## 首次失败台账（全部保留，含重跑结论）
 
 1. **`desktop-remote-ui-smoke.mjs --session-opening-only`（首次运行）**
-   `Error: Timed out: late history layout remains at bottom`（`<logs>/renderer-ui.log`）。
-   该断言依赖隐藏窗口里的 rAF 重钉底；同一分支随后 4 次重跑全绿（`opening-only-run2.log`、`renderer-ui-run2/4.log`）。
-   该断言走 `RemoteChatPresentation`/`chat-scroll` 的钉底函数，本轮提交没有改这些函数（新增的 `transcriptGrowthAboveEdge` 只被行测量使用）。
-   判定：隐藏窗口在并发负载下的偶发，未当作通过抹掉；保留记录。
+   `Error: Timed out: late history layout remains at bottom`（`<logs>/renderer-ui.log`，退出码 1，含完整 DOM 快照）。
+   后续：同一命令重跑通过（`opening-only-run2.log`），同一代码的完整矩阵重跑也通过（`renderer-ui-run2/4.log`、`renderer-ui-final.log`）。
+   **原因 UNKNOWN**：本轮没有采集隐藏窗口的帧回调与可见性状态，所以不能把这次超时归因于“隐藏窗口 rAF 重钉底”或“并发负载”。
+   只有一条代码事实：该断言路径上的钉底函数本轮未改动（新增的 `transcriptGrowthAboveEdge` 只被行测量使用），因此不支持“新规则直接改坏该断言”。
+   复发时的下一条诊断：保留失败 fixture 的 `exercise.cjs` 与 DOM 快照，并同时采集该窗口的 rAF 调用计数与 `visibilityState`，用它区分“帧回调被节流”与“钉底计算错误”。不把这次失败当作已通过抹掉。
 
 2. **`session-capability-ui-smoke.mjs` 默认（第 2 次运行）— 真实集成缺陷**
    `Terminal restored: timed out: JSON.parse(sessionStorage.getItem('scry.session-right-surfaces.v1')).some(…'native-one')`（`<logs>/renderer-ui-run2.log`、隔离复现 `terminals-only-run1.log`）。
@@ -56,8 +59,14 @@ git diff --name-only cf25a103..HEAD -- scripts/performance-counters scripts/perf
    证明“恢复锚点行自身的增长不得补偿”是必需行为，不能简单回退 main 规则。
 
 5. **同一步骤的 `Error: CDP WebSocket 已关闭`（`<logs>/side-chat-ui-afterfix.log`，06:33）**
-   判定证据：无 Electron 崩溃报告（`~/Library/Logs/DiagnosticReports` 无该时刻条目）；应用 stderr 只有 fixture 的 `session diff baseline not ready`；失败是传输被关闭而不是断言失败；同时刻机器 load average `22.98`（15 分钟均值，07:01 采样），`$TMPDIR` 内其他会话的隐藏 App fixture 目录（`scry-workflow-*`、`scry-source-control-ui-*`）与 vitest 进程同时在跑；`owned-app-processes.mjs` 只按登记的 pid 身份发信号，不会按名字杀别人的 App，因此排除跨会话误杀。
-   结论：环境性传输中断；同一 `scroll` 步骤随后两次通过（`side-chat-ui-run3.log` 07:04、`side-chat-ui-final.log` 07:20，后者是最终代码）。不宣称“已通过”覆盖首次中断。
+   已知事实（只列有证据的部分）：
+   - 失败形态是 CDP 传输被关闭（`electron-security-cdp.mjs` 的 `socket.onclose` → `rejectPending`），不是断言不成立；
+   - `~/Library/Logs/DiagnosticReports` 在该时刻没有 Electron 崩溃报告（现存最近报告为 `node-2026-10-29-070712.ips`，与 06:33 无关）；
+   - 捕获到的 App stderr 只有 fixture 噪声 `session diff baseline not ready`，没有崩溃栈；
+   - 同一 `scroll` 步骤随后通过（`side-chat-ui-run3.log` 07:04、`side-chat-ui-final.log` 07:20，后者是最终代码），完整矩阵最终也通过（`renderer-ui-final.log`）。
+   **原因 UNKNOWN**：本轮没有证据把这次关闭归因于环境负载，也没有证据排除外部进程对本轮 App 的任意终止。`owned-app-processes.mjs` 只按登记的 pid 身份发信号，这只能说明“本轮没杀别人的 App”，不能说明“没有别的东西杀掉本轮的 App”。
+   另需更正：`load average 22.98` 是 **07:01** 采样的 15 分钟均值，比 06:33 的失败晚约 28 分钟，**不是同一分钟**的观测，不能当作当时负载的证据。
+   复发时的下一条诊断：失败瞬间记录 fixture App pid 是否仍存活、该时段的进程信号/退出日志与 renderer 崩溃事件，用它区分“进程被杀”与“传输层断开”。不宣称“已通过”覆盖首次中断。
 
 （台账附注，非产品错误：上一轮曾用 `node --test` 跑一个 Vitest 的 CDP 测试文件，已改用 `npm run test:unit -- <file>`，3 项通过。）
 
@@ -79,15 +88,17 @@ git diff --name-only cf25a103..HEAD -- scripts/performance-counters scripts/perf
 
 | 指标 | beac4da8 | 72ec35cc | 判定 |
 |---|---:|---:|---|
-| `files.fixed-operations/io.read.payload.bytes` | 1398144 | 1398153 | +9 B / 1.4 MB，两侧自身重复跨度 32 B 与 41 B，delta 小于同侧跨度 → 抖动，非新工作 |
-| `trace.r4-cell/other.stringify-bytes` | 101122699 | 101122703 | +4 B / 101 MB，同侧跨度 28 B → 抖动 |
-| `trace.r4-cell/total.stringify-bytes` | 156159839 | 156159843 | +4 B / 156 MB，同侧跨度 28 B → 抖动 |
+| `files.fixed-operations/io.read.payload.bytes` | 1398144 | 1398153 | +9 B / 1.4 MB，两侧自身重复跨度 32 B 与 41 B；delta 小于同侧跨度，**提示**是抖动，不是因果证明 |
+| `trace.r4-cell/other.stringify-bytes` | 101122699 | 101122703 | +4 B / 101 MB，同侧跨度 28 B，同上只是提示 |
+| `trace.r4-cell/total.stringify-bytes` | 156159839 | 156159843 | +4 B / 156 MB，同侧跨度 28 B，同上只是提示 |
 
-`better` 2 项（`hash-update-bytes` −2、`total.hash-update-bytes` −2）同样落在同侧跨度内，不作改善结论。
+`better` 2 项（`hash-update-bytes` −2、`total.hash-update-bytes` −2）同样落在同侧跨度内，因此不宣称“变快”，也不宣称哈希更新被优化。
 
-台账（`scripts/performance-ratchet.json` 记录的旧基线）另标出 5 项 candidate `worse`，全部与本功能无关：其中 4 项与 `beac4da8` 完全一致（`io.readdir 20→20`、`persistence.archive/ipc.bytes 10558→10558`、`recorder.content-cold/io.stat.calls 44→44`、`workspace-choices-current-run/git.run.calls 10→10`，五次重复值相同），是 main 相对更早基线的既有漂移；第 5 项即上表第一行的字节抖动。按既有规则不改基线、不加 raise。
+“落在同侧重复跨度内”只能说明噪声量级不小于差值，不能证明差异的来源；本轮没有做重复对照实验去归因那几字节。
 
-限制：这是固定工作负载的 CPU/IO/IPC 计数，不代表用户毫秒体验；未做 L2/L3 宣称；未运行需要 `timing-run` 锁的毫秒基准；未分析用户日常性能日志（无上传）。机器在本轮多数时间处于高负载（load 11–60，其他会话并发跑 Electron fixture），计数不受影响，但毫秒基准本轮不采信。
+台账（`scripts/performance-ratchet.json` 记录的旧基线）另标出 5 项 candidate `worse`：其中 4 项与 `beac4da8` 的实测值**完全相同**（`io.readdir 20→20`、`persistence.archive/ipc.bytes 10558→10558`、`recorder.content-cold/io.stat.calls 44→44`、`workspace-choices-current-run/git.run.calls 10→10`，五次重复值一致），因此这些是 main 相对更早基线的既有漂移，不是本功能引入；第 5 项即上表第一行的字节差异。按既有规则不改基线、不加 raise、不改 workload。
+
+限制：这是固定工作负载的 CPU/IO/IPC 计数，不代表用户毫秒体验；未做 L2/L3 宣称；未运行需要 `timing-run` 锁的毫秒基准；未分析用户日常性能日志（无上传）。机器在本轮多数时间处于高负载（其他会话并发跑 Electron fixture），**因此不能宣称这些计数整体免疫环境**：只有上表逐项比较过同侧重复跨度的那些差值有条件说是噪声量级，其余指标没有做环境对照。
 
 ## 未验证 / 不宣称
 
