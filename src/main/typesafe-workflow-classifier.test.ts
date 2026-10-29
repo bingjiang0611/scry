@@ -35,9 +35,20 @@ describe('TypeSafe workflow classifier HTTP contract', () => {
       response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify({ model: 'jev-fixture', answers: { classifier: answer }, usage: { input_tokens: 1, output_tokens: 1 } }))
     })
     const adapter = createTypeSafeWorkflowClassifierAdapter('fixture-key', { apiUrl: url })
-    await expect(adapter(base('bool'))).resolves.toMatchObject({ state: 'completed', value: true, confidence: 0.75, probability: { true: 0.75, false: 0.25 }, source: 'typesafe:jev-fixture' })
+    await expect(adapter(base('bool'))).resolves.toMatchObject({ state: 'completed', value: true, confidence: 0.75, probability: { true: 0.75, false: 0.25 }, source: 'typesafe:jev-fixture',
+      usage: { provenance: 'partial', source: 'classifier_result', inputTokens: 1, outputTokens: 1, reason: expect.stringContaining('cost') } })
     await expect(adapter(base('choice', { choices: ['yes', 'no'] }))).resolves.toMatchObject({ state: 'completed', value: 'yes', confidence: 0.8, probability: { yes: 0.8, no: 0.2 } })
     await expect(adapter(base('score', { criteria: '["low","medium","high"]', score: { min: 0, max: 2 } }))).resolves.toMatchObject({ state: 'completed', value: 1.5, confidence: 0.6 })
+  })
+
+  it('retains classifier usage when the returned answer is invalid', async () => {
+    const url = await localResponse((_body, _request, response) => {
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ model: 'jev-fixture', answers: { classifier: { type: 'noul', noul: 2 } }, usage: { input_tokens: 7, output_tokens: 2 } }))
+    })
+    await expect(createTypeSafeWorkflowClassifierAdapter('fixture-key', { apiUrl: url })(base('bool'))).resolves.toMatchObject({
+      state: 'unknown', settled: false, usage: { provenance: 'partial', source: 'classifier_result', inputTokens: 7, outputTokens: 2 }
+    })
   })
 
   it('reports HTTP rejection as failed without fabricating an answer', async () => {

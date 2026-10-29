@@ -1,3 +1,5 @@
+import type { WorkflowUsage } from '@shared/workflow-usage'
+
 export const WORKFLOW_INSPECTION_COPY = {
   open: '程序与记录',
   title: '程序与执行记录',
@@ -23,7 +25,16 @@ export const WORKFLOW_INSPECTION_COPY = {
   parent: '父帧',
   branch: '分支',
   retryOf: '重试前次',
+  usage: '用量与费用',
   usageUnavailable: '用量：未提供',
+  usageSummary: (usage: WorkflowUsage) => {
+    const provenance = { exact: '用量：精确', partial: '用量：部分', estimated: '用量：估算', unavailable: '用量：未提供' }[usage.provenance]
+    if (usage.provenance === 'unavailable') return provenance
+    const fields = [usage.inputTokens === undefined ? '输入未提供' : `输入 ${usage.inputTokens.toLocaleString()}`,
+      usage.outputTokens === undefined ? '输出未提供' : `输出 ${usage.outputTokens.toLocaleString()}`,
+      usage.cost === undefined ? '费用未提供' : `费用 ${usage.cost}${usage.costUnit ? ` ${usage.costUnit}` : ''}`]
+    return `${provenance} · ${fields.join(' · ')}`
+  },
   noInstances: '此代码块尚无已记录实例。',
   source: '来源：冻结程序；结构关系不代表执行状态。',
   ledger: '来源：持久化执行账本',

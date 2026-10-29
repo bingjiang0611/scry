@@ -23,6 +23,7 @@ function ExecutionRecord({ record, programRevision, onFrame, onOutput }: { recor
     if (record.outcome.state === 'available') fields.push([copy.startedAt, new Date(record.outcome.value.startedAt).toLocaleString()], [copy.finishedAt, new Date(record.outcome.value.finishedAt).toLocaleString()])
   }
   if (isClassifier && intent) fields.push([copy.kind, copy.kinds.classifier])
+  if (isAttempt && record.outcome.state === 'available') fields.push([copy.usage, record.outcome.value.usage ? copy.usageSummary(record.outcome.value.usage) : copy.usageUnavailable])
   if ('attemptId' in record) {
     if (record.intent.state === 'available') {
       const admitted = record.intent.value
@@ -51,6 +52,7 @@ function ExecutionRecord({ record, programRevision, onFrame, onOutput }: { recor
       <div><dt>{copy.classifierResult}</dt><dd>{record.outcome.value.value === undefined ? copy.unavailable : String(record.outcome.value.value)}</dd></div>
       <div><dt>{copy.confidence}</dt><dd>{record.outcome.value.confidence === undefined ? copy.unavailable : String(record.outcome.value.confidence)}</dd></div>
       <div><dt>{copy.probability}</dt><dd>{record.outcome.value.probability === undefined ? copy.unavailable : <pre>{JSON.stringify(record.outcome.value.probability, null, 2)}</pre>}</dd></div>
+      <div><dt>{copy.usage}</dt><dd>{record.outcome.value.usage ? copy.usageSummary(record.outcome.value.usage) : copy.usageUnavailable}</dd></div>
     </dl>}
     <div className="workflow-history-actions">
       {intent?.frame.state === 'available'

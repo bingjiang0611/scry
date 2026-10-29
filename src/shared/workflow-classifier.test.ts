@@ -12,9 +12,11 @@ describe('workflow classifier seam', () => {
     expect(() => validateWorkflowClassifierOutcome(intent, { classifierId: intent.classifierId, state: 'completed', settled: true, provenance: 'provider', value: 'a' })).toThrow('confidence')
     expect(() => validateWorkflowClassifierOutcome(intent, { classifierId: intent.classifierId, state: 'completed', settled: true, provenance: 'provider', value: 'a', confidence: 0.8 })).toThrow('probability')
   })
-  it('preserves valid provider probability and rejects invalid choices', () => {
-    const outcome = normalizeWorkflowClassifierOutcome(intent, { state: 'completed', settled: true, value: 'a', probability: { a: 0.8, b: 0.2 }, confidence: 0.8, provenance: 'provider' })
+  it('preserves valid provider probability, drops invalid usage, and rejects invalid choices', () => {
+    const outcome = normalizeWorkflowClassifierOutcome(intent, { state: 'completed', settled: true, value: 'a', probability: { a: 0.8, b: 0.2 }, confidence: 0.8, provenance: 'provider',
+      usage: { provenance: 'exact', source: 'none', cost: 1 } })
     expect(validateWorkflowClassifierOutcome(intent, outcome)).toMatchObject({ value: 'a', probability: { a: 0.8, b: 0.2 }, confidence: 0.8 })
+    expect(outcome.usage).toBeUndefined()
     expect(() => validateWorkflowClassifierOutcome(intent, { ...outcome, value: 'c' })).toThrow()
   })
 })

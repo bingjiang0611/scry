@@ -6,6 +6,7 @@ import type { WorkflowCheckRequest, WorkflowFrozenCheck } from './workflow-check
 import type { WorkflowReplicaReference } from './workflow-replica'
 import type { WorkflowSystemProgress } from './workflow-system'
 import type { WorkflowClassifierBlock } from './workflow-classifier'
+import type { WorkflowUsage } from './workflow-usage'
 
 export const WORKFLOW_SCHEMA_VERSION = 1 as const
 export const WORKFLOW_MAX_BATCH = 4096
@@ -443,6 +444,7 @@ export interface WorkflowAttemptOutcome {
   error?: string
   runId?: string
   archiveRef?: string
+  usage?: WorkflowUsage
   /** Canonical start failed before entering Provider.run; absent on legacy/uncertain attempts. */
   providerDispatch?: 'not_attempted'
   settled: boolean

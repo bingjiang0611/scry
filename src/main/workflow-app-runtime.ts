@@ -19,6 +19,7 @@ import { WorkflowTemplateStore } from './workflow-template-store'
 import { WorkflowSlots, WorkflowScopeError, WorkflowDispatch } from './workflow-runner'
 import type { ProviderRegistry } from './providers/registry'
 import type { WorkflowClassifierAdapter } from '../shared/workflow-classifier'
+import { workflowUsageFromProviderResults } from '../shared/workflow-usage'
 
 export interface AppWorkflowRuntimeDependencies {
   userData: string
@@ -35,11 +36,11 @@ export interface AppWorkflowRuntimeDependencies {
 }
 
 export function createAppWorkflowRuntime(deps: AppWorkflowRuntimeDependencies) {
-  function workflowOutput(items: TraceEvent[]): { output?: string; actualModel?: string } {
+  function workflowOutput(items: TraceEvent[]): { output?: string; actualModel?: string; usage: ReturnType<typeof workflowUsageFromProviderResults> } {
     const output = flattenTraceItems(items).filter((chunk) => chunk.kind === 'output').map((chunk) => chunk.text).join('')
     const result = [...items].reverse().find((item) => item.kind === 'harness' && item.stage === 'result')
     const actualModel = result?.modelUsage?.length === 1 ? result.modelUsage[0].model : undefined
-    return { ...(output ? { output } : {}), ...(actualModel ? { actualModel } : {}) }
+    return { ...(output ? { output } : {}), ...(actualModel ? { actualModel } : {}), usage: workflowUsageFromProviderResults(items) }
   }
 
   function workflowStartRequest(role: WorkflowRoleBinding, prompt: string, cwd: string): AgentStartRequest {

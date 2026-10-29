@@ -37,6 +37,7 @@ export function workflowGraphItems(records: readonly WorkflowExecutionInspection
     const frameId = intent?.frame.state === 'available' ? intent.frame.frameId : undefined
     const frame = frameId ? frames.get(frameId) : undefined
     const outcome = record.outcome.state === 'available' ? record.outcome.value : undefined
+    const recordedUsage = outcome && 'usage' in outcome ? outcome.usage : undefined
     return {
       kind: 'instance', id, ...(nodeId ? { nodeId } : {}), category: category(record),
       state: outcome?.state ?? copy.missingOutcome, ...(outcome ? { settled: outcome.settled } : {}),
@@ -45,7 +46,7 @@ export function workflowGraphItems(records: readonly WorkflowExecutionInspection
       ...(frame?.frame.arm ? { branch: frame.frame.arm } : {}),
       ...(attempt?.previousAttemptId ? { retryOf: attempt.previousAttemptId } : {}),
       ...(attempt?.retryCommandId ? { retryCommand: attempt.retryCommandId } : {}),
-      usage: usage.get(id) ?? 'unavailable'
+      usage: usage.get(id) ?? recordedUsage ?? 'unavailable'
     }
   })
 }

@@ -7,8 +7,10 @@ const intent: WorkflowClassifierIntent = { classifierId: 'c', workflowId: 'w', p
 describe('runner classifier slot seam', () => {
   it('blocks a completed result below the frozen confidence threshold', async () => {
     const thresholdIntent = { ...intent, threshold: { min: 0.8 } }
-    const run = enqueueWorkflowClassifier(new WorkflowSlots(1), thresholdIntent, async () => ({ classifierId: 'c', state: 'completed', settled: true, value: 7, confidence: 0.4, provenance: 'provider' }))
-    await expect(run.outcome).resolves.toMatchObject({ state: 'blocked', settled: true, reason: expect.stringContaining('threshold') })
+    const run = enqueueWorkflowClassifier(new WorkflowSlots(1), thresholdIntent, async () => ({ classifierId: 'c', state: 'completed', settled: true, value: 7, confidence: 0.4, provenance: 'provider',
+      usage: { provenance: 'partial', source: 'classifier_result', inputTokens: 2, outputTokens: 1, reason: 'cost unavailable' } }))
+    await expect(run.outcome).resolves.toMatchObject({ state: 'blocked', settled: true, reason: expect.stringContaining('threshold'),
+      usage: { source: 'classifier_result', inputTokens: 2, outputTokens: 1 } })
   })
   it('uses the shared slot queue and preserves a provider score', async () => {
     const run = enqueueWorkflowClassifier(new WorkflowSlots(1), intent, async () => ({ classifierId: 'c', state: 'completed', settled: true, value: 7, confidence: 0.9, provenance: 'provider' }))

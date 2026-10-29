@@ -11,7 +11,8 @@ import { WorkflowExecutionGraph, workflowGraphItems } from './WorkflowExecutionG
 const attempt: WorkflowExecutionInspectionRecord = {
   attemptId: 'attempt-2', taskId: 'workflow:worker',
   intent: { state: 'available', value: { nodeId: 'worker', programRevision: 'revision', createdAt: 1, role: 'worker', providerId: 'pi', previousAttemptId: 'attempt-1', retryCommandId: 'retry-1', frame: { state: 'available', frameId: 'frame-2' } } },
-  outcome: { state: 'available', value: { nodeId: 'worker', role: 'worker', providerId: 'pi', actualModelStatus: 'unknown', state: 'completed', settled: true } }
+  outcome: { state: 'available', value: { nodeId: 'worker', role: 'worker', providerId: 'pi', actualModelStatus: 'unknown', state: 'completed', settled: true,
+    usage: { provenance: 'partial', source: 'provider_result', inputTokens: 12, outputTokens: 3, reason: 'cost unavailable' } } }
 }
 const frame: Extract<WorkflowFrameInspection, { state: 'available' }> = {
   state: 'available', source: 'canonical_frame', observedAt: 1,
@@ -26,9 +27,14 @@ const preview: WorkflowPlanPreview = {
 }
 
 describe('same-source workflow execution graph', () => {
-  it('projects retry, branch and unavailable usage without inventing output evidence', () => {
+  it('projects retry, branch and persisted usage without inventing output evidence', () => {
     const [item] = workflowGraphItems([attempt], new Map([['frame-2', frame]]))
-    expect(item).toMatchObject({ category: 'turn', nodeId: 'worker', retryOf: 'attempt-1', retryCommand: 'retry-1', branch: 'then', usage: 'unavailable' })
+    expect(item).toMatchObject({ category: 'turn', nodeId: 'worker', retryOf: 'attempt-1', retryCommand: 'retry-1', branch: 'then',
+      usage: { provenance: 'partial', source: 'provider_result', inputTokens: 12, outputTokens: 3 } })
+    expect(copy.usageSummary(item.usage === 'unavailable' ? { provenance: 'unavailable', source: 'none' } : item.usage))
+      .toBe('用量：部分 · 输入 12 · 输出 3 · 费用未提供')
+    const [missing] = workflowGraphItems([{ ...attempt, outcome: { state: 'unavailable', reason: 'missing_outcome' } }], new Map())
+    expect(missing.usage).toBe('unavailable')
   })
 
   it('starts as a read-only bounded view and does not expose reinjection controls', () => {

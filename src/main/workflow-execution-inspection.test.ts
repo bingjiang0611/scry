@@ -23,7 +23,8 @@ async function fixture(count = 2, store: WorkflowStore = new MemoryWorkflowStore
     { kind: 'return', blockId: 'finish', ref: { nodeId: `call_${count - 1}` } }
   ] } }) }))
   const execute = vi.fn<WorkflowServiceOptions['execute']>(({ attemptId }) => ({ result: Promise.resolve({
-    runId: `run-${attemptId}`, status: 'completed', settled: true, output: canary, actualModel: 'observed-model'
+    runId: `run-${attemptId}`, status: 'completed', settled: true, output: canary, actualModel: 'observed-model',
+    usage: { provenance: 'partial', source: 'provider_result', inputTokens: 12, outputTokens: 3, reason: 'cost unavailable' }
   }), stop: () => true }))
   const runControls = vi.fn<WorkflowServiceOptions['runControls']>(async () => ({
     descriptor: { id: 'codex', label: 'fixture', runtimeProvider: 'codex_cli', transport: 'fixture', available: true,
@@ -81,15 +82,17 @@ describe('canonical execution inspection', () => {
     expect(page.records[0]).toMatchObject({ intent: { state: 'available', value: {
       programRevision: 'a'.repeat(64), previousAttemptId: 'previous-attempt', retryCommandId: 'retry-command',
       frame: { state: 'available', frameId: record.intents[0].frameId }
-    } }, outcome: { state: 'available', value: { state: 'completed', settled: false, actualModel: 'observed-model', actualModelStatus: 'observed', errorTruncated: true } } })
+    } }, outcome: { state: 'available', value: { state: 'completed', settled: false, actualModel: 'observed-model', actualModelStatus: 'observed', errorTruncated: true,
+      usage: { provenance: 'partial', source: 'provider_result', inputTokens: 12, outputTokens: 3 } } } })
     const row = page.records[0]
     if ('attemptId' in row && row.outcome.state === 'available') expect(row.outcome.value.error).toHaveLength(4096)
-    expect(JSON.stringify(page)).not.toMatch(/"(output|outputRef|tokens|cost)":/)
+    expect(JSON.stringify(page)).not.toMatch(/"(output|outputRef)":/)
   })
 
   it('retains intent-only and legacy outcome-only records without fabricating a result or frame', async () => {
     const f = await fixture()
     const record = (await f.store.load(f.query.workflowId))!
+    delete record.outcomes[1].usage
     record.outcomes = record.outcomes.slice(1)
     record.intents = record.intents.slice(0, 1)
     await f.store.save(record)
@@ -97,8 +100,22 @@ describe('canonical execution inspection', () => {
     if (page.state !== 'available') throw new Error('missing page')
     expect(page.total).toBe(2)
     expect(page.records[0]).toMatchObject({ intent: { state: 'available' }, outcome: { state: 'unavailable', reason: 'missing_outcome' } })
-    expect(page.records[1]).toMatchObject({ intent: { state: 'unavailable', reason: 'missing_intent' }, outcome: { state: 'available' } })
+    expect(page.records[1]).toMatchObject({ intent: { state: 'unavailable', reason: 'missing_intent' }, outcome: { state: 'available', value: {
+      usage: { provenance: 'unavailable', source: 'none', reason: 'Usage evidence was not recorded' }
+    } } })
     expect((await f.service.inspectExecution({ ...f.query, nodeId: 'call_1' }, () => {}))).toMatchObject({ state: 'available', total: 1 })
+  })
+
+  it('does not project malformed persisted usage as authoritative evidence', async () => {
+    const f = await fixture()
+    const record = (await f.store.load(f.query.workflowId))!
+    record.outcomes[0].usage = { provenance: 'exact', source: 'none', cost: 1 } as typeof record.outcomes[0]['usage']
+    await f.store.save(record)
+    const page = await f.service.inspectExecution(f.query, () => {})
+    if (page.state !== 'available') throw new Error('missing page')
+    expect(page.records[0]).toMatchObject({ outcome: { state: 'available', value: {
+      usage: { provenance: 'unavailable', source: 'none', reason: 'Recorded usage evidence is invalid' }
+    } } })
   })
 
   it('preserves system outcomes without inventing a legacy node/kind and excludes check payloads', async () => {

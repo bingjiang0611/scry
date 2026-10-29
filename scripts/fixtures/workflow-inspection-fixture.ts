@@ -21,7 +21,8 @@ export function workflowInspectionFixture() {
     intent: { state: 'available', value: { nodeId: `call_${index}`, programRevision: 'a'.repeat(64), createdAt: 1, role: 'worker', providerId: 'codex',
       frame: { state: 'available', frameId: `frame_${index}` } } },
     outcome: index === 0 ? { state: 'unavailable', reason: 'missing_outcome' } : { state: 'available', value: { nodeId: `call_${index}`, role: 'worker', providerId: 'codex',
-      actualModelStatus: 'unknown', state: index === 1 ? 'unknown' : 'completed', settled: index !== 1 } }
+      actualModelStatus: 'unknown', state: index === 1 ? 'unknown' : 'completed', settled: index !== 1,
+      ...(index === 34 ? { usage: { provenance: 'exact' as const, source: 'provider_result' as const, inputTokens: 12, outputTokens: 3, cost: 0.25, costUnit: 'usd' } } : {}) } }
   }))
   const inspectExecution: WorkflowApi['inspectExecution'] = async request => {
     queries.push(structuredClone(request))

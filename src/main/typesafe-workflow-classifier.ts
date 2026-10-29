@@ -1,4 +1,5 @@
 import type { WorkflowClassifierAdapter, WorkflowClassifierIntent, WorkflowClassifierOutcome, WorkflowClassifierProbability } from '../shared/workflow-classifier'
+import { workflowUsageFromClassifier, type WorkflowUsage } from '../shared/workflow-usage'
 
 const DEFAULT_API_URL = 'https://api.typesafe.ai/v1/systemone'
 const DEFAULT_MODEL = 'jev-latest'
@@ -62,26 +63,26 @@ function unavailable(intent: WorkflowClassifierIntent, reason: string): Workflow
   return { classifierId: intent.classifierId, state: 'unavailable', settled: true, provenance: 'unavailable', reason }
 }
 
-function unknown(intent: WorkflowClassifierIntent, reason: string): WorkflowClassifierOutcome {
-  return { classifierId: intent.classifierId, state: 'unknown', settled: false, provenance: 'unavailable', reason }
+function unknown(intent: WorkflowClassifierIntent, reason: string, usage?: WorkflowUsage): WorkflowClassifierOutcome {
+  return { classifierId: intent.classifierId, state: 'unknown', settled: false, provenance: 'unavailable', reason, ...(usage ? { usage } : {}) }
 }
 
-function completed(intent: WorkflowClassifierIntent, answer: JsonRecord, model: string): WorkflowClassifierOutcome {
+function completed(intent: WorkflowClassifierIntent, answer: JsonRecord, model: string, usage: WorkflowUsage): WorkflowClassifierOutcome {
   const source = `typesafe:${model}`
   if (intent.kind === 'bool') {
-    if (answer.type !== 'noul' || !number(answer.noul) || answer.noul < 0 || answer.noul > 1) return unknown(intent, 'TypeSafe returned an invalid bool answer')
+    if (answer.type !== 'noul' || !number(answer.noul) || answer.noul < 0 || answer.noul > 1) return unknown(intent, 'TypeSafe returned an invalid bool answer', usage)
     const probability = { true: answer.noul, false: 1 - answer.noul }
-    return { classifierId: intent.classifierId, state: 'completed', settled: true, value: answer.noul >= 0.5, probability, confidence: Math.max(answer.noul, 1 - answer.noul), provenance: 'provider', source }
+    return { classifierId: intent.classifierId, state: 'completed', settled: true, value: answer.noul >= 0.5, probability, confidence: Math.max(answer.noul, 1 - answer.noul), provenance: 'provider', source, usage }
   }
   if (intent.kind === 'choice') {
     const probability = probabilityMap(answer.probabilities)
-    if (answer.type !== 'choice' || typeof answer.choice !== 'string' || !intent.choices?.includes(answer.choice) || !number(answer.confidence) || answer.confidence < 0 || answer.confidence > 1 || !probability || Object.keys(probability).some(choice => !intent.choices?.includes(choice))) return unknown(intent, 'TypeSafe returned an invalid choice answer')
-    return { classifierId: intent.classifierId, state: 'completed', settled: true, value: answer.choice, probability, confidence: answer.confidence, provenance: 'provider', source }
+    if (answer.type !== 'choice' || typeof answer.choice !== 'string' || !intent.choices?.includes(answer.choice) || !number(answer.confidence) || answer.confidence < 0 || answer.confidence > 1 || !probability || Object.keys(probability).some(choice => !intent.choices?.includes(choice))) return unknown(intent, 'TypeSafe returned an invalid choice answer', usage)
+    return { classifierId: intent.classifierId, state: 'completed', settled: true, value: answer.choice, probability, confidence: answer.confidence, provenance: 'provider', source, usage }
   }
   const probability = probabilityMap(answer.probabilities)
   const legend = record(answer.legend)
-  if (answer.type !== 'score' || !number(answer.score) || !intent.score || answer.score < intent.score.min || answer.score > intent.score.max || !number(answer.confidence) || answer.confidence < 0 || answer.confidence > 1 || !probability || !legend || Object.keys(legend).length !== intent.score.max - intent.score.min + 1) return unknown(intent, 'TypeSafe returned an invalid score answer')
-  return { classifierId: intent.classifierId, state: 'completed', settled: true, value: answer.score, probability, confidence: answer.confidence, provenance: 'provider', source }
+  if (answer.type !== 'score' || !number(answer.score) || !intent.score || answer.score < intent.score.min || answer.score > intent.score.max || !number(answer.confidence) || answer.confidence < 0 || answer.confidence > 1 || !probability || !legend || Object.keys(legend).length !== intent.score.max - intent.score.min + 1) return unknown(intent, 'TypeSafe returned an invalid score answer', usage)
+  return { classifierId: intent.classifierId, state: 'completed', settled: true, value: answer.score, probability, confidence: answer.confidence, provenance: 'provider', source, usage }
 }
 
 export function createTypeSafeWorkflowClassifierAdapter(apiKey: string | undefined, options: TypeSafeWorkflowClassifierOptions = {}): WorkflowClassifierAdapter {
@@ -114,7 +115,10 @@ export function createTypeSafeWorkflowClassifierAdapter(apiKey: string | undefin
       const model = body && typeof body.model === 'string' ? body.model : undefined
       const answers = body ? record(body.answers) : undefined
       const answer = answers ? record(answers.classifier) : undefined
-      return model && answers && usageValid && answer ? completed(intent, answer, model) : unknown(intent, 'TypeSafe response omitted model, answers, usage, or answer')
+      const workflowUsage = usageValid ? workflowUsageFromClassifier(usage.input_tokens as number, usage.output_tokens as number) : undefined
+      return model && answers && workflowUsage && answer
+        ? completed(intent, answer, model, workflowUsage)
+        : unknown(intent, 'TypeSafe response omitted model, answers, usage, or answer', workflowUsage)
     } catch (error) {
       return unknown(intent, controller.signal.aborted ? (signal?.aborted ? 'classifier stopped' : 'TypeSafe request timed out') : `TypeSafe request error: ${String(error)}`)
     } finally {

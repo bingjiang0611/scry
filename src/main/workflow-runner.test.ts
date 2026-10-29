@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { MemoryWorkflowStore } from './workflow-store'
 import { WorkflowRunner, WorkflowSlots, type WorkflowProviderExecutionRequest } from './workflow-runner'
 import type { WorkflowPlanPreview } from '../shared/workflow'
+import type { WorkflowUsage } from '../shared/workflow-usage'
 import { workflowFixtureApproval as approvalFor } from './workflow-runner.fixture'
 
 const preview: WorkflowPlanPreview = {
@@ -71,6 +72,21 @@ describe('WorkflowRunner M0 scheduler', () => {
     expect(starts).toEqual(['codex', 'qoder'])
     expect(result.attempts).toHaveLength(2)
     expect((await store.load(preview.workflowId))?.intents).toHaveLength(2)
+  })
+
+  it('does not persist a contradictory Provider usage envelope as evidence', async () => {
+    const store = new MemoryWorkflowStore()
+    const runner = new WorkflowRunner({ store, execute: request => ({
+      result: Promise.resolve({ runId: request.attemptId, status: 'completed' as const, settled: true,
+        usage: { provenance: 'exact', source: 'none', cost: 1 } as WorkflowUsage }), stop: () => true
+    }) })
+    const approval = approvalFor(preview)
+    runner.approve(preview, approval)
+    await runner.start(preview, approval)
+    expect((await store.load(preview.workflowId))?.outcomes.map(outcome => outcome.usage)).toEqual([
+      { provenance: 'unavailable', source: 'none', reason: 'Invalid workflow usage evidence' },
+      { provenance: 'unavailable', source: 'none', reason: 'Invalid workflow usage evidence' }
+    ])
   })
 
   it('does not advance a sequence or publish a final report after a blocked call', async () => {

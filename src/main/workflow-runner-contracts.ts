@@ -5,6 +5,7 @@ import type { WorkflowStore, WorkflowStoreRecord } from './workflow-store'
 import type { WorkflowTargetStopState } from './workflow-stop'
 import type { WorkflowClassifierAdapter } from '../shared/workflow-classifier'
 import type { WorkflowSlots } from './workflow-slots'
+import type { WorkflowUsage } from '../shared/workflow-usage'
 
 export interface WorkflowProviderExecutionRequest {
   workflowId: string
@@ -24,6 +25,7 @@ export interface WorkflowProviderExecutionResult {
   output?: string
   actualModel?: string
   archiveRef?: string
+  usage?: WorkflowUsage
   settled: boolean
   error?: string
 }

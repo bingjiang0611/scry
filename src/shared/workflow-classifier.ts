@@ -1,4 +1,5 @@
 import type { WorkflowEvaluation, WorkflowFrameReference, WorkflowOutputRef, WorkflowValueReference } from './workflow'
+import { normalizeWorkflowUsage, type WorkflowUsage } from './workflow-usage'
 
 export type WorkflowClassifierKind = 'bool' | 'choice' | 'score'
 
@@ -59,6 +60,7 @@ export type WorkflowClassifierOutcome = Readonly<{
   provenance: 'provider' | 'recorded' | 'unavailable'
   source?: string
   reason?: string
+  usage?: WorkflowUsage
   resultRef?: WorkflowValueReference
 }>
 
@@ -81,12 +83,14 @@ export function normalizeWorkflowClassifierOutcome(intent: WorkflowClassifierInt
   if (!['completed', 'failed', 'blocked', 'unknown', 'unavailable'].includes(state as string)) return unavailableWorkflowClassifierOutcome(intent)
   const probability = input.probability === undefined ? undefined : validProbabilityMap(input.probability) ? input.probability : undefined
   const confidence = typeof input.confidence === 'number' && Number.isFinite(input.confidence) && input.confidence >= 0 && input.confidence <= 1 ? input.confidence : undefined
+  const usage = normalizeWorkflowUsage(input.usage)
   const outcome: WorkflowClassifierOutcome = {
     classifierId: intent.classifierId, state: state as WorkflowClassifierOutcome['state'], settled: input.settled === true,
     provenance: input.provenance === 'provider' || input.provenance === 'recorded' ? input.provenance : 'unavailable',
     ...(typeof input.value === 'boolean' || typeof input.value === 'string' || typeof input.value === 'number' ? { value: input.value } : {}),
     ...(probability ? { probability } : {}), ...(confidence === undefined ? {} : { confidence }),
     ...(typeof input.source === 'string' ? { source: input.source } : {}), ...(typeof input.reason === 'string' ? { reason: input.reason } : {}),
+    ...(usage ? { usage } : {}),
     ...(input.resultRef && typeof input.resultRef === 'object' && !Array.isArray(input.resultRef) ? { resultRef: input.resultRef as WorkflowValueReference } : {})
   }
   return outcome
@@ -97,6 +101,7 @@ export function applyWorkflowClassifierThreshold(intent: WorkflowClassifierInten
   if (outcome.state !== 'completed' || outcome.confidence === undefined || !threshold) return outcome
   if ((threshold.min !== undefined && outcome.confidence < threshold.min) || (threshold.max !== undefined && outcome.confidence > threshold.max)) {
     return { classifierId: intent.classifierId, state: 'blocked', settled: true, provenance: outcome.provenance, confidence: outcome.confidence,
+      ...(outcome.source ? { source: outcome.source } : {}), ...(outcome.usage ? { usage: outcome.usage } : {}),
       reason: 'classifier confidence is outside the frozen threshold' }
   }
   return outcome

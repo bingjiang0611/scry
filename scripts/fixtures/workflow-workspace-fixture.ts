@@ -28,7 +28,8 @@ export function workflowWorkspaceFixture() {
   const progress: WorkflowProgress = { ...base.progress, goal: 'Workspace UI fixture', state: 'blocked' }
   const rows: WorkflowClassifierInspectionRecord[] = blocks.map((block, index) => ({ classifierId: `classifier_record_${index}`, stepId: `classifier_record_${index}`, taskId: block.blockId,
     intent: { state: 'available', value: { classifierId: `classifier_record_${index}`, nodeId: block.blockId, programRevision: revision, criteria: 'Fixture only', kind: index === 1 ? 'score' : 'bool', frame: { state: 'available', frameId: `classifier_frame_${index}` }, createdAt: 1 } },
-    outcome: { state: 'available', value: index === 0 ? { state: 'completed', settled: true, value: false, confidence: 0.98, probability: { true: 0.02, false: 0.98 } }
+    outcome: { state: 'available', value: index === 0 ? { state: 'completed', settled: true, value: false, confidence: 0.98, probability: { true: 0.02, false: 0.98 },
+      usage: { provenance: 'partial', source: 'classifier_result', inputTokens: 8, outputTokens: 1, reason: 'Classifier response omitted authoritative cost evidence' } }
       : index === 1 ? { state: 'completed', settled: true, value: 0, confidence: 0 }
         : { state: 'unknown', settled: false } }
   }))

@@ -10,6 +10,7 @@ import { workflowFrameId } from './workflow-frames'
 import { decodeWorkflowOutput, workflowStructuredOutputPrompt } from './workflow-values'
 import { workflowField } from './workflow-expressions'
 import { workflowRetryAdmission } from './workflow-retry'
+import { normalizeWorkflowUsage } from '../shared/workflow-usage'
 
 type EffectsOptions = Omit<WorkflowRunnerOptions, 'slots' | 'now' | 'onProgress' | 'onLifecycle'> & {
   slots: WorkflowSlots
@@ -155,7 +156,7 @@ export class WorkflowRunnerEffects {
         }
         const outcome = this.outcome(preview, block, outputError ? 'failed' : result.status, {
           attemptId, taskId, runId: result.runId, output: result.output, actualModel: result.actualModel,
-          archiveRef: result.archiveRef, settled: result.settled, error: outputError ?? result.error, providerId: role.providerId
+          archiveRef: result.archiveRef, usage: result.usage, settled: result.settled, error: outputError ?? result.error, providerId: role.providerId
         })
         if (result.settled) await this.observeAfter(record, attemptId)
         await this.commitOutcome(record, outcome)
@@ -233,12 +234,14 @@ export class WorkflowRunnerEffects {
   private outcome(preview: WorkflowPlanPreview, block: Extract<WorkflowBlock, { kind: 'call' }>, state: WorkflowAttemptOutcome['state'], patch: Partial<WorkflowAttemptOutcome>): WorkflowAttemptOutcome {
     const role = preview.program.roles.find((candidate) => candidate.role === block.role)!
     const output = typeof patch.output === 'string' && patch.output.length <= WORKFLOW_MAX_OUTPUT_LENGTH ? patch.output : undefined
+    const usage = patch.usage === undefined ? undefined : normalizeWorkflowUsage(patch.usage) ?? { provenance: 'unavailable' as const, source: 'none' as const, reason: 'Invalid workflow usage evidence' }
     return { attemptId: patch.attemptId ?? randomUUID(), taskId: patch.taskId ?? `${preview.workflowId}:${block.blockId}`, nodeId: block.blockId,
       role: block.role, providerId: patch.providerId ?? role.providerId, ...(role.requestedModel ? { requestedModel: role.requestedModel } : {}),
       actualModelStatus: patch.actualModel ? 'observed' : 'unknown', state, settled: patch.settled ?? false,
       ...(patch.providerDispatch ? { providerDispatch: patch.providerDispatch } : {}),
       ...(output ? { output } : {}), ...(patch.error ? { error: patch.error.slice(0, 4096) } : {}), ...(patch.runId ? { runId: patch.runId } : {}),
-      ...(patch.archiveRef ? { archiveRef: patch.archiveRef } : {}), ...(patch.actualModel ? { actualModel: patch.actualModel } : {}) }
+      ...(patch.archiveRef ? { archiveRef: patch.archiveRef } : {}), ...(patch.actualModel ? { actualModel: patch.actualModel } : {}),
+      ...(usage ? { usage } : {}) }
   }
 
 }

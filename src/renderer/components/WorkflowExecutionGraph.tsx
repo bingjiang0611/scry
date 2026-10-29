@@ -15,7 +15,7 @@ function GraphInstance({ item, onFrame, onOutput }: { item: WorkflowGraphItem; o
     <div className="workflow-graph-instance-title"><span>{copy[item.category === 'turn' ? 'turnNode' : item.category === 'candidate' ? 'candidateNode' : item.category === 'control' ? 'controlNode' : item.category === 'classifier' ? 'classifierNode' : 'evidenceNode']}</span><code>{item.id}</code></div>
     <div className="workflow-graph-instance-meta"><span>{copy.states[item.state as keyof typeof copy.states] ?? item.state}</span>{item.settled !== undefined && <span>{item.settled ? copy.settled : copy.unsettled}</span>}
       {item.branch && <span>{copy.branch}: {item.branch}</span>}
-      {(item.usage === 'unavailable' || item.usage.provenance === 'unavailable') && <span>{copy.usageUnavailable}</span>}</div>
+      <span title={item.usage === 'unavailable' ? undefined : item.usage.reason}>{item.usage === 'unavailable' ? copy.usageUnavailable : copy.usageSummary(item.usage)}</span></div>
     <div className="workflow-graph-instance-actions">
       {item.frameId ? <button type="button" data-workflow-graph-frame={item.frameId} onClick={() => onFrame(item.frameId!)}>{copy.frame}</button> : <span>{copy.missingFrame}</span>}
       {item.category === 'turn' && <button type="button" data-workflow-graph-output={item.id} onClick={() => onOutput({ kind: 'attempt', attemptId: item.id })}>{copy.output}</button>}

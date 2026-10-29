@@ -4,6 +4,7 @@ import type { WorkflowAttemptState, WorkflowRole } from './workflow'
 import type { WorkflowValueReference } from './workflow'
 import { type WorkflowSystemKind, type WorkflowSystemOutcome } from './workflow-system'
 import type { WorkflowClassifierIntent, WorkflowClassifierOutcome } from './workflow-classifier'
+import type { WorkflowUsage } from './workflow-usage'
 
 export const WORKFLOW_EXECUTION_INSPECTION_PAGE_SIZE = 32
 // Offset is cursor pagination, not a renderer work budget. Main still rejects
@@ -53,6 +54,7 @@ export type WorkflowAttemptInspectionOutcome = Readonly<{
   runId?: string
   error?: string
   errorTruncated?: boolean
+  usage?: WorkflowUsage
 }>
 export type WorkflowAttemptInspectionRecord = Readonly<{
   attemptId: string
@@ -86,7 +88,7 @@ export type WorkflowSystemInspectionRecord = Readonly<{
   outcome: WorkflowExecutionInspectionOutcome<WorkflowSystemInspectionOutcome>
 }>
 export type WorkflowClassifierInspectionIntent = Readonly<Omit<Pick<WorkflowClassifierIntent, 'classifierId' | 'nodeId' | 'programRevision' | 'criteria' | 'model' | 'kind' | 'frame'>, 'frame'> & { frame: WorkflowExecutionInspectionFrame; createdAt: number }>
-export type WorkflowClassifierInspectionOutcome = Readonly<Pick<WorkflowClassifierOutcome, 'state' | 'settled' | 'value' | 'confidence' | 'probability' | 'reason'> & { error?: string; errorTruncated?: boolean }>
+export type WorkflowClassifierInspectionOutcome = Readonly<Pick<WorkflowClassifierOutcome, 'state' | 'settled' | 'value' | 'confidence' | 'probability' | 'reason' | 'usage'> & { error?: string; errorTruncated?: boolean }>
 export type WorkflowClassifierInspectionRecord = Readonly<{
   classifierId: string
   stepId: string

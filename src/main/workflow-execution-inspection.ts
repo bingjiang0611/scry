@@ -5,6 +5,7 @@ import type { WorkflowIntent, WorkflowStoreRecord } from './workflow-store'
 import type { WorkflowSystemIntent } from '../shared/workflow-system'
 import type { WorkflowClassifierIntent, WorkflowClassifierOutcome } from '../shared/workflow-classifier'
 import { WORKFLOW_EXECUTION_INSPECTION_PAGE_SIZE } from '../shared/workflow-inspection'
+import { normalizeWorkflowUsage, type WorkflowUsage } from '../shared/workflow-usage'
 
 import { workflowIntentFrameId } from './workflow-progress'
 
@@ -30,6 +31,9 @@ function intentState<T>(value: T | undefined, reason: 'missing_intent'): { state
 function outcomeState<T>(value: T | undefined, reason: 'missing_outcome'): { state: 'available'; value: T } | { state: 'unavailable'; reason: 'missing_outcome' } {
   return value === undefined ? { state: 'unavailable', reason } : { state: 'available', value }
 }
+function inspectedUsage(value: unknown): WorkflowUsage {
+  return normalizeWorkflowUsage(value) ?? { provenance: 'unavailable', source: 'none', reason: value === undefined ? 'Usage evidence was not recorded' : 'Recorded usage evidence is invalid' }
+}
 
 function attemptIntent(intent: WorkflowIntent): WorkflowAttemptInspectionIntent {
   return {
@@ -47,7 +51,7 @@ function attemptOutcome(outcome: WorkflowAttemptOutcome): WorkflowAttemptInspect
     nodeId: outcome.nodeId, role: outcome.role, providerId: outcome.providerId,
     ...(outcome.requestedModel !== undefined ? { requestedModel: outcome.requestedModel } : {}),
     ...(outcome.actualModel !== undefined ? { actualModel: outcome.actualModel } : {}),
-    actualModelStatus: outcome.actualModelStatus, state: outcome.state, settled: outcome.settled,
+    actualModelStatus: outcome.actualModelStatus, state: outcome.state, settled: outcome.settled, usage: inspectedUsage(outcome.usage),
     ...(outcome.runId !== undefined ? { runId: outcome.runId } : {}), ...errorProjection(outcome.error)
   }
 }
@@ -59,7 +63,7 @@ function classifierIntent(intent: WorkflowClassifierIntent): import('../shared/w
   return { classifierId: intent.classifierId, nodeId: intent.nodeId, programRevision: intent.programRevision, criteria: intent.criteria, ...(intent.model ? { model: intent.model } : {}), kind: intent.kind, frame: frame(intent.frame.frameId), createdAt: intent.createdAt }
 }
 function classifierOutcome(outcome: WorkflowClassifierOutcome): import('../shared/workflow-inspection').WorkflowClassifierInspectionOutcome {
-  return { state: outcome.state, settled: outcome.settled, ...(outcome.value === undefined ? {} : { value: outcome.value }), ...(outcome.confidence === undefined ? {} : { confidence: outcome.confidence }), ...(outcome.probability === undefined ? {} : { probability: outcome.probability }), ...(outcome.reason === undefined ? {} : { reason: outcome.reason.slice(0, ERROR_LIMIT) }) }
+  return { state: outcome.state, settled: outcome.settled, usage: inspectedUsage(outcome.usage), ...(outcome.value === undefined ? {} : { value: outcome.value }), ...(outcome.confidence === undefined ? {} : { confidence: outcome.confidence }), ...(outcome.probability === undefined ? {} : { probability: outcome.probability }), ...(outcome.reason === undefined ? {} : { reason: outcome.reason.slice(0, ERROR_LIMIT) }) }
 }
 function systemOutcome(outcome: WorkflowSystemOutcome): WorkflowSystemInspectionOutcome {
   return { stepId: outcome.stepId, taskId: outcome.taskId, state: outcome.state, settled: outcome.settled, startedAt: outcome.startedAt, finishedAt: outcome.finishedAt,

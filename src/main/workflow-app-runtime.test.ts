@@ -79,6 +79,52 @@ describe('production App workflow planning bridge with an offline terminal fixtu
     expect(stop).not.toHaveBeenCalled()
   })
 
+  it('persists canonical Provider usage through the production runtime and inspection ledger', async () => {
+    vi.stubEnv('SCRY_ELECTRON_SMOKE_WORKFLOW', '1')
+    const home = await mkdtemp(join(tmpdir(), 'scry-workflow-usage-'))
+    homes.push(home)
+    const adapter = { ...createSmokeProviderAdapter('codex'), workflowAuthoring: { source: 'claude_sdk_success_result' as const, hostTools: 'disabled' as const } }
+    const startAppRun = vi.fn(async (_request: AgentStartRequest, options?: AppRunStartOptions) => {
+      if (!options?.runId || !options.onTerminal) throw new Error('Missing production workflow callbacks')
+      options.onProviderDispatchAttempt?.()
+      const base = { runId: options.runId, ts: new Date().toISOString() }
+      if (options.purpose === 'workflow_authoring') {
+        const output = JSON.stringify({ schemaVersion: 1, roles: [], body: { kind: 'sequence', blockId: 'root', blocks: [
+          { kind: 'call', blockId: 'work', role: 'worker', prompt: 'work' },
+          { kind: 'return', blockId: 'finish', ref: { nodeId: 'work' } }
+        ] } })
+        await options.onTerminal({ runId: options.runId, status: 'completed', settled: true,
+          items: [{ ...base, id: 'authoring-result', kind: 'harness', stage: 'result' }], archiveRef: 'archive:' + options.runId,
+          structuredOutput: { source: 'claude_sdk_success_result', json: output } })
+      } else {
+        await options.onTerminal({ runId: options.runId, status: 'completed', settled: true, archiveRef: 'archive:' + options.runId,
+          items: [
+            { ...base, id: 'answer', kind: 'model', stage: 'text', text: 'completed work' },
+            { ...base, id: 'execution-result', kind: 'harness', stage: 'result', modelUsage: [{ model: 'observed-model', inputTokens: 12, outputTokens: 3,
+              costUsd: 0.25, costUnit: 'usd', costConfidence: 'provider_reported', costSource: 'provider_reported' }] }
+          ] })
+      }
+      return { runId: options.runId }
+    })
+    const stop = vi.fn(() => true)
+    const { workflowService: service, workflowStore } = createAppWorkflowRuntime({
+      userData: join(home, 'userData'), providerRegistry: new ProviderRegistry([adapter]),
+      providerContextKey: (provider, cwd, profile) => JSON.stringify([provider, cwd, profile]),
+      withProviderOperation: async (_provider, operation) => await operation(), startAppRun,
+      requestRunStop: stop, requestRunStopAgain: stop, resolveTemplateProjectDirectory: cwd => cwd, onProgress: () => {}
+    })
+    const binding = { providerId: 'codex' as const, requestedModel: { id: 'workflow-fixture' }, permissionMode: 'default' as const }
+    const preview = await service.planCommand({ command: '/scry-workflow run preserve usage', commandId: 'usage-plan', workspace: home,
+      orchestrator: { ...binding, role: 'orchestrator' }, roles: [{ ...binding, role: 'worker' }] })
+    const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }
+    await service.approve(approval)
+    expect((await service.start(preview.workflowId, approval, 'usage-start')).state).toBe('completed')
+    const record = await workflowStore.load(preview.workflowId)
+    expect(record?.outcomes[0]).toMatchObject({ actualModel: 'observed-model', usage: { provenance: 'exact', source: 'provider_result', inputTokens: 12, outputTokens: 3, cost: 0.25, costUnit: 'usd' } })
+    const inspection = await service.inspectExecution({ workflowId: preview.workflowId, programRevision: preview.programRevision, kind: 'attempts', offset: 0 }, () => {})
+    expect(inspection).toMatchObject({ state: 'available', records: [{ outcome: { state: 'available', value: { usage: { provenance: 'exact', source: 'provider_result', cost: 0.25 } } } }] })
+  })
+
   it.each(['undeclared', 'no_host_tool_proof', 'text_only', 'no_archive', 'no_result', 'launch_unknown', 'wrong_source', 'failed'] as const)(
     'does not admit or execute a candidate from %s evidence', async mode => {
       vi.stubEnv('SCRY_ELECTRON_SMOKE_WORKFLOW', '1')
