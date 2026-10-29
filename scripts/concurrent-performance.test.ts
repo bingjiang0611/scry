@@ -59,6 +59,16 @@ describe('concurrent performance measurement', () => {
     expect(result.highLoad).toBe(false)
   })
 
+  it('requires an explicit lifecycle-only expectation and still rejects missing receipts', () => {
+    const report = { ...fixture(), workload: { expectedHookStartsPerSession: 2 } }
+    report.hooks = report.hooks.slice(0, 2)
+    expect(summarizeConcurrent(report).hookCpuMs).toBe(4)
+    expect(() => summarizeConcurrent({ ...report, workload: undefined })).toThrow()
+    report.hooks.pop()
+    expect(() => summarizeConcurrent(report)).toThrow()
+    expect(() => summarizeConcurrent({ ...report, hooks: [], workload: { expectedHookStartsPerSession: 0 } })).toThrow('expectation')
+  })
+
   it('rejects missing Hook receipts and unbracketed measurement windows', () => {
     const missingHook = fixture()
     missingHook.hooks.pop()

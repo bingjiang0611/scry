@@ -14,6 +14,8 @@ import { connectConcurrentApp } from './concurrent-performance-cdp.mjs'
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const count = Number(process.argv[2] ?? 1)
 assert.ok([1, 3, 5].includes(count), 'Expected N=1/3/5')
+const expectedHookStartsPerSession = Number(process.argv[3] ?? 42)
+assert.ok([2, 42].includes(expectedHookStartsPerSession), 'Expected 2 lifecycle-only or 42 full CLI receipts/session')
 const temp = mkdtempSync(join(tmpdir(), `scry-concurrent-n${count}-`))
 const home = join(temp, 'home')
 const userData = join(temp, 'userData')
@@ -197,8 +199,17 @@ try {
   assert.ok(main, 'Missing main probe shutdown receipt')
   assert.ok(main.ipc.some(call => call.at >= startedAt && call.at <= settledAt && call.runs === count), 'The logical view must observe all concurrent runs')
   const hooks = probes.filter(p => p.role === 'hook')
-  assert.equal(hooks.length, count * 42, 'All lifecycle and tool Hooks must actually start the CLI')
+  assert.equal(hooks.length, count * expectedHookStartsPerSession, 'Missing or extra Hook CLI receipts')
   assert.ok(hooks.every(p => p.argv.includes('--managed')), 'Hooks must use managed CLI')
+  for (const cwd of workspaces) {
+    const delivered = hooks.filter(p => p.argv[p.argv.indexOf('--workspace') + 1] === cwd)
+    const events = delivered.map(p => p.argv[p.argv.indexOf('--event') + 1])
+    assert.equal(events.filter(event => event === 'UserPromptSubmit').length, 1, 'Each run needs its actual start Hook')
+    assert.equal(events.filter(event => event === 'Stop').length, 1, 'Each run needs its actual terminal Hook')
+    for (const event of ['PreToolUse', 'PostToolUse']) {
+      assert.equal(events.filter(value => value === event).length, expectedHookStartsPerSession === 42 ? 20 : 0)
+    }
+  }
   for (const cwd of workspaces) {
     const skips = join(cwd, '.scry/logs/hook-skip.log')
     try { assert.equal(readFileSync(skips, 'utf8').trim(), '', 'Hook shell silently failed') } catch(error) { if(error.code!=='ENOENT') throw error }
@@ -234,7 +245,7 @@ try {
   const a=metrics(beforeMetrics), b=metrics(afterMetrics)
   const report={schema:1,count,harnessHash,artifactSha256,lockfileSha256:hash(readFileSync(join(root,'package-lock.json'))),platform:`${process.platform}/${process.arch}`,sourceRevision:process.env.SCRY_MEASURE_REVISION??'unknown',temp,cwd,workspaces,initialLoad,finalLoad:loadavg(),cores:cpus().length,
     node:process.version,electron:JSON.parse(readFileSync(join(root,'node_modules/electron/package.json'))).version,
-    idleBeforeAt,startedAt,terminalAt,settledAt,finishedAt:Date.now(),workload:{toolsPerSession:20,deltasPerSession:400,hookStarts:hooks.length,sharedRepository:false,sidebar:'activity',activation:'settled-native-pointer'},
+    idleBeforeAt,startedAt,terminalAt,settledAt,finishedAt:Date.now(),workload:{toolsPerSession:20,deltasPerSession:400,hookStarts:hooks.length,expectedHookStartsPerSession,sharedRepository:false,sidebar:'activity',activation:'settled-native-pointer'},
     result,cleanup,canonicalRecords:records.length,archiveVerified:true,trace:paintTrace,
     rendererMetrics:Object.fromEntries(['TaskDuration','ScriptDuration','LayoutDuration','RecalcStyleDuration','LayoutCount','RecalcStyleCount'].map(k=>[k,b[k]-a[k]])),
     main,hooks,

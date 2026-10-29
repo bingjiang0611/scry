@@ -7,7 +7,9 @@ const mib = value => value / 1024 / 1024
 
 export function summarizeConcurrent(report) {
   assert.equal(report.schema, 1)
-  assert.equal(report.hooks.length, report.count * 42)
+  const expectedHookStartsPerSession = report.workload?.expectedHookStartsPerSession ?? 42
+  assert.ok([2, 42].includes(expectedHookStartsPerSession), 'Unsupported Hook receipt expectation')
+  assert.equal(report.hooks.length, report.count * expectedHookStartsPerSession)
   assert.equal(report.canonicalRecords, report.count)
   const { startedAt, settledAt, main } = report
   const samples = main.samples.filter(sample => sample.at >= startedAt && sample.at <= settledAt)
