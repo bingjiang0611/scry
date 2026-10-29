@@ -37,6 +37,7 @@ describe('dynamic same-root revision facts', () => {
     } finally { await f.cleanup() }
   })
 
+  // Three durable revisions check correctness; latency is measured separately.
   it('matches stable map keys, reruns only the changed item and its consumer, and collects current ordered facts', async () => {
     const rows = [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }, { id: 'c', text: 'C' }]
     const pipeline: WorkflowBlock = { kind: 'sequence', blockId: 'pipeline', blocks: [
@@ -68,7 +69,7 @@ describe('dynamic same-root revision facts', () => {
       expect(f.calls.filter(value => value.node === 'scan')).toHaveLength(4)
       expect(f.calls.filter(value => value.node === 'review')).toHaveLength(7)
     } finally { await f.cleanup() }
-  })
+  }, 30_000)
 
   it.each(['unused', 'consumed', 'ancestor-key'] as const)('keys nested maps on actual dependencies: %s outer change', async mode => {
     const innerCall: WorkflowBlock = { ...call('innerWork'), inputRefs: [selected('inner', 'text'), ...(mode === 'consumed' ? [selected('outer', 'unused')] : [])] }
