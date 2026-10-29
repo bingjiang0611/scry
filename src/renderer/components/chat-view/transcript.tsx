@@ -99,7 +99,11 @@ const TranscriptTurn = memo(function TranscriptTurn({
     const measure = () => {
       const rect = element.getBoundingClientRect()
       const scroller = element.closest<HTMLElement>('.chat-transcript')
-      const anchorEdge = firstMeasurement ? rect.top : rect.top + height.current
+      // Only a row that is entirely behind the top edge may be compensated when it grows:
+      // its growth happened above the reader. A row that straddles that edge is where the
+      // reader is looking, and its placeholder height is not evidence about the reader — an
+      // exact scroll restore places a turn part-way above the edge on purpose.
+      const anchorEdge = firstMeasurement ? rect.top + rect.height : rect.top + height.current
       if (windowed && scroller && anchorEdge < scroller.getBoundingClientRect().top) {
         scroller.scrollTop += rect.height - height.current
       }
@@ -164,7 +168,7 @@ const TranscriptTurn = memo(function TranscriptTurn({
 
   return <div
     className={`turn transcript-turn ${selected ? 'is-selected' : ''} ${focused ? 'turn-jump-target' : ''}`}
-    data-run-id={turn.runId} data-selected={selected || undefined} data-virtualized={!mounted || undefined}
+    data-run-id={turn.runId} data-turn-ordinal={turn.ordinal} data-selected={selected || undefined} data-virtualized={!mounted || undefined}
     ref={setShell} role="article"
     aria-label={!mounted ? `第 ${index + 1} / ${total} 轮：${labelPreview}` : undefined}
     tabIndex={windowed ? 0 : undefined} onFocusCapture={() => setVisible(true)}

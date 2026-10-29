@@ -153,4 +153,28 @@ describe('sidebar activity projection', () => {
     ], empty, empty, '')
     expect(new Set(rows.map((row) => row.key)).size).toBe(4)
   })
+
+  it('keeps a background child run visible without flattening it into a root row', () => {
+    const parent = '主会话：重构侧边栏'
+    const withChild: ProjectMeta[] = [{
+      ...projects[0], sessions: [],
+      conversations: [
+        { id: 'parent', cwd: '/work/store', title: parent, revision: 1, turnCount: 3 },
+        {
+          id: 'child', cwd: '/work/store', title: '侧聊：查一下这段 diff', revision: 1, turnCount: 1, activeRunId: 'child-run',
+          sideChat: {
+            source: { kind: 'conversation', conversationId: 'parent' }, parentTitleAtCapture: parent,
+            initialTarget: { providerId: 'claude', permissionMode: 'default' },
+            throughOrdinal: 2, throughRunId: 'parent-run', capturedAt: 1,
+            prefixFingerprint: 'a'.repeat(64), messageCount: 3
+          }
+        }
+      ]
+    }]
+    const rows = sidebarActivity(withChild, new Set(['child-run']), empty, '')
+    expect(rows.map((row) => [row.kind, row.group, row.kind === 'conversation' ? row.sideChatParent : null]))
+      .toEqual([['conversation', 'working', parent]])
+    // The child keeps its own identity instead of borrowing the parent row.
+    expect(rows[0].kind === 'conversation' && rows[0].conversation.id).toBe('child')
+  })
 })

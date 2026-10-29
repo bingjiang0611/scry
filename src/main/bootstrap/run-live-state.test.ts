@@ -38,7 +38,7 @@ describe('live run identity', () => {
       sessionDiffBaselines: new SessionDiffBaselineRegistry(),
       appSessionStore: () => sessions,
       recordingBlockedSessions: new Map(), getWindow: () => null,
-      runs: { isViewed: () => false }, queueTrace: () => { }, rendererCanReceive: () => false,
+      publishTrace: () => { }, rendererCanReceive: () => false,
       mainEventId: (prefix, id) => `${prefix}-${id}`,
       LIVE_TOOL_CONTENT_POLICY: { toolOutput: 'full', toolContentFieldBytes: 8192, toolContentTurnBytes: 131072 },
       recordingRecoveryHint: '', userDataDir, scopedSessionKey: (id) => id,

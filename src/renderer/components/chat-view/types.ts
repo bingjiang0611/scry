@@ -45,6 +45,12 @@ export interface ChatViewProps {
   sessionLoading?: boolean
   sessionCacheVisible?: boolean
   sessionEvidenceGap?: { status: 'unavailable' | 'empty' | 'error'; detail: string } | null
+  /**
+   * What an empty but selected conversation is. A side chat is a new conversation with a
+   * frozen source, so the generic "waiting for the host to archive" text would be wrong.
+   * `status` is the evidence hook: an unresolved first send is not `new-side-chat`.
+   */
+  emptyState?: { title: string; detail: string; status?: 'new-side-chat' | 'pending-first-send' } | null
   busy: boolean
   queueWhileBusy?: boolean
   draftAttachments: DraftAttachment[]
@@ -93,6 +99,11 @@ export interface ChatViewProps {
   onRemoveDraftAttachment: (id: string) => void
   onRemoveQueuedPrompt: (messageId: string) => void
   onSelectAgent: (agentId: string) => void
+  /**
+   * The user opened one run-control picker. Surfaces that have not read this Provider's
+   * capability data yet read it here, so options exist without a mount-time probe.
+   */
+  onOpenRunControls?: (menu: RunControlMenu) => void
   onAddPiAgent?: () => void
   onRemovePiAgent?: (id: string) => void
   onRunModel: (model: AgentModelRef | undefined) => void
@@ -107,6 +118,9 @@ export interface ChatViewProps {
   remoteHost?: string
   composerNotice?: { text: string; tone: 'blocked' | 'error' | 'info'; action?: { label: string; onClick: () => void; disabled?: boolean } } | null
 }
+
+/** Which runtime control the user just opened; a capability read may be needed. */
+export type RunControlMenu = 'agent' | 'modelEffort' | 'permission'
 
 export type SessionChatViewProps = Omit<ChatViewProps, 'input'> & {
   draftStore: ComposerDraftStore

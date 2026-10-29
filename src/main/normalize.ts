@@ -1,422 +1,26 @@
 // 把 Claude Agent SDK 的 message stream（和 subagent transcript 行）归一化成统一 TraceEvent。
 // 纯函数、不依赖 electron/SDK 运行时 —— 便于 vitest 单测（见 normalize.test.ts）。
 
-import {
-  type TraceEvent,
-  type TraceKind,
-  type ModelUsageRow,
-  classifyTool,
-  parseMcp,
-  mcpPayloadFailed,
-  fileOpOf
-} from '../shared/trace.js'
+import type { ModelUsageRow, TraceEvent } from '../shared/trace.js'
 import { classifyRunTermination } from '../shared/runtime.js'
 import { claudeTranscriptUsageKey } from '../shared/usage-dedupe.js'
-import { classifyDanger } from './danger.js'
+import { mcpPayloadFailed } from '../shared/trace.js'
+import {
+  base,
+  contextTokensFromUsage,
+  injectedSkillName,
+  normalizeBlocks,
+  skillInjectionEvent,
+  type Block,
+  type NormalizeCtx,
+  stringValue,
+  transcriptUsageResult
+} from './normalize-core.js'
+import { normalizeHookAttachment, normalizeHookMessage } from './normalize-hooks.js'
 
-export interface NormalizeCtx {
-  runId: string
-  agentId?: string // 解析 subagent transcript 时带上
-  cwd?: string // P3 审计：判跨项目写需要会话 cwd
-  newId: () => string
-  now: () => string
-  latestContextTokens?: number // 最近一次 assistant usage 的完整 prompt；result.usage 可能是累计值，不能当当前上下文
-  latestContextModel?: string // contextTokens 的模型身份；多模型 usage 不能按 modelUsage 顺序猜窗口
-  contextTokensFromUsage?: (usage: unknown) => number // Provider-specific cache 口径；缺省为 Anthropic 分项相加
-  lastSkillName?: string // Skill 注入与原生 Skill 调用去重；路径引用不参与
-  toolUseById?: Map<string, TraceEvent> // SDK tool_result 不重复携带工具身份时，用对应 tool_use 补全
-  agentToolUseIds?: Set<string> // task_* 只回指已观测的 Agent tool_use，不把其他后台任务混进来
-  agentTaskToolUseById?: Map<string, string> // 仅保留由 Agent tool_use 建立的 task_id 别名
-  streamMessageIds?: Map<string, string>
-}
-
-// Anthropic content block（assistant message.content[] 里的元素）
-interface Block {
-  type: string
-  text?: string
-  thinking?: string
-  id?: string
-  name?: string
-  input?: Record<string, unknown>
-}
-
-type BasePartial = Omit<Partial<TraceEvent>, 'id' | 'ts' | 'runId' | 'agentId'> & {
-  kind: TraceKind
-  stage: string
-}
-
-function base(ctx: NormalizeCtx, partial: BasePartial): TraceEvent {
-  return { id: ctx.newId(), ts: ctx.now(), runId: ctx.runId, agentId: ctx.agentId, ...partial }
-}
-
-function contextTokensFromUsage(usage: unknown): number {
-  const u = (usage as Record<string, number> | undefined) ?? {}
-  return (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0)
-}
-
-function usageNumber(usage: unknown, key: string): number | undefined {
-  const value = (usage as Record<string, unknown> | undefined)?.[key]
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function cacheCreationSplit(usage: unknown): { cacheCreation5mTokens?: number; cacheCreation1hTokens?: number } {
-  const cache = (usage as Record<string, unknown> | undefined)?.cache_creation as Record<string, unknown> | undefined
-  const fiveMin = cache?.ephemeral_5m_input_tokens
-  const oneHour = cache?.ephemeral_1h_input_tokens
-  return {
-    cacheCreation5mTokens: typeof fiveMin === 'number' && Number.isFinite(fiveMin) ? fiveMin : undefined,
-    cacheCreation1hTokens: typeof oneHour === 'number' && Number.isFinite(oneHour) ? oneHour : undefined
-  }
-}
-
-function injectedSkillName(text: string): string | undefined {
-  const m = text.match(/^Base directory for this skill:\s*(.+?)\s*$/m)
-  if (!m) return undefined
-  return cleanSkillPart(m[1].split('/').filter(Boolean).pop())
-}
-
-function cleanSkillPart(part: string | undefined): string | undefined {
-  const s = part?.trim().replace(/[),;]+$/g, '')
-  if (!s || s === '.' || s === '..') return undefined
-  return s
-}
-
-function skillInjectionEvent(ctx: NormalizeCtx, name: string, input: Record<string, unknown>, messageId?: string): TraceEvent[] {
-  const skill = cleanSkillPart(name)
-  if (!skill) return []
-  const key = skill.toLowerCase()
-  if (ctx.lastSkillName === key) return []
-  ctx.lastSkillName = key
-  return [
-    base(ctx, {
-      kind: 'skill',
-      stage: `skill:${skill}`,
-      tool: 'Skill',
-      name: skill,
-      input,
-      messageId
-    })
-  ]
-}
-
-function transcriptUsageResult(msg: Record<string, unknown> | undefined, ctx: NormalizeCtx): TraceEvent | null {
-  const usage = msg?.usage
-  if (!usage || typeof usage !== 'object') return null
-  const model = typeof msg?.model === 'string' ? msg.model : 'unknown'
-  const inputTokens = usageNumber(usage, 'input_tokens') ?? 0
-  const outputTokens = usageNumber(usage, 'output_tokens') ?? 0
-  const cacheReadTokens = usageNumber(usage, 'cache_read_input_tokens') ?? 0
-  const cacheCreationTokens = usageNumber(usage, 'cache_creation_input_tokens') ?? 0
-  if (inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens === 0) return null
-  const split = cacheCreationSplit(usage)
-  const modelRow: ModelUsageRow = {
-    model,
-    inputTokens,
-    outputTokens,
-    cacheReadTokens,
-    cacheCreationTokens,
-    ...split
-  }
-  return base(ctx, {
-    kind: 'harness',
-    stage: 'result',
-    text: 'transcript assistant usage',
-    tokensIn: inputTokens,
-    tokensOut: outputTokens,
-    cacheReadTokens,
-    cacheCreationTokens,
-    ...split,
-    contextTokens: contextTokensFromUsage(usage) || undefined,
-    contextModel: model,
-    contextUsageSource: 'provider_transcript',
-    contextUsageQuality: 'exact',
-    modelUsage: [modelRow]
-  })
-}
-
-function stringValue(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined
-}
-
-function agentTaskToolUseId(
-  message: Record<string, unknown>,
-  ctx: NormalizeCtx
-): { toolUseId: string; taskId?: string } | undefined {
-  const direct = stringValue(message.tool_use_id ?? message.toolUseId)
-  const taskId = stringValue(message.task_id ?? message.taskId)
-  let toolUseId: string | undefined
-  if (direct) {
-    if (!ctx.agentToolUseIds?.has(direct)) return undefined
-    toolUseId = direct
-  } else if (taskId) {
-    toolUseId = ctx.agentTaskToolUseById?.get(taskId)
-  }
-  if (!toolUseId) return undefined
-  if (taskId) (ctx.agentTaskToolUseById ??= new Map()).set(taskId, toolUseId)
-  return { toolUseId, ...(taskId ? { taskId } : {}) }
-}
-
-export function normalizeAgentTaskStatus(value: unknown): 'completed' | 'failed' | 'stopped' | undefined {
-  const status = stringValue(value)
-  if (status === 'completed') return 'completed'
-  if (status === 'failed' || status === 'error') return 'failed'
-  if (status && ['stopped', 'cancelled', 'canceled', 'interrupted', 'killed'].includes(status)) return 'stopped'
-  return undefined
-}
-
-function normalizeAgentTaskMessage(
-  message: Record<string, unknown>,
-  ctx: NormalizeCtx,
-  subtype: 'task_started' | 'task_progress' | 'task_notification'
-): TraceEvent[] {
-  const identity = agentTaskToolUseId(message, ctx)
-  if (!identity) return []
-  const source = `provider_${subtype}`
-  if (subtype === 'task_notification') {
-    const providerStatus = stringValue(message.status)
-    const status = normalizeAgentTaskStatus(providerStatus)
-    if (!status) return []
-    const summary = stringValue(message.summary)
-    return [base(ctx, {
-      kind: 'tool',
-      stage: 'tool_result',
-      tool: 'Agent',
-      toolUseId: identity.toolUseId,
-      text: summary,
-      output: summary,
-      isError: status === 'failed',
-      runtimeMetadata: {
-        source,
-        agentStatus: status,
-        ...(providerStatus !== status ? { providerAgentStatus: providerStatus } : {}),
-        ...(identity.taskId ? { taskId: identity.taskId } : {})
-      }
-    })]
-  }
-
-  const description = stringValue(message.description)
-  const summary = stringValue(message.summary)
-  const lastToolName = stringValue(message.last_tool_name ?? message.lastToolName)
-  const subagentType = stringValue(message.subagent_type ?? message.subagentType)
-  return [base(ctx, {
-    kind: 'harness',
-    stage: 'agent_activity',
-    tool: 'Agent',
-    toolUseId: identity.toolUseId,
-    input: {
-      activity: subtype,
-      ...(identity.taskId ? { taskId: identity.taskId } : {}),
-      ...(description ? { description } : {}),
-      ...(summary ? { summary } : {}),
-      ...(lastToolName ? { lastToolName } : {}),
-      ...(subagentType ? { subagentType } : {})
-    },
-    runtimeMetadata: {
-      source,
-      agentStatus: 'running',
-      ...(identity.taskId ? { taskId: identity.taskId } : {})
-    }
-  })]
-}
-
-function normalizeHookMessage(m: Record<string, unknown>, ctx: NormalizeCtx): TraceEvent[] {
-  const subtype = typeof m.subtype === 'string' ? m.subtype : ''
-  if (subtype === 'task_started' || subtype === 'task_progress' || subtype === 'task_notification') {
-    return normalizeAgentTaskMessage(m, ctx, subtype)
-  }
-  if (subtype === 'compact_boundary') {
-    const rawMetadata = m.compact_metadata ?? m.compactMetadata
-    const metadata = rawMetadata && typeof rawMetadata === 'object'
-      ? rawMetadata as Record<string, unknown>
-      : {}
-    const number = (snake: string, camel: string): number | undefined => {
-      const value = metadata[snake] ?? metadata[camel]
-      return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
-    }
-    const trigger: 'auto' | 'manual' | undefined =
-      metadata.trigger === 'auto' ? 'auto' : metadata.trigger === 'manual' ? 'manual' : undefined
-    const preTokens = number('pre_tokens', 'preTokens')
-    const postTokens = number('post_tokens', 'postTokens')
-    const durationMs = number('duration_ms', 'durationMs')
-    const compaction = {
-      ...(trigger ? { trigger } : {}),
-      ...(preTokens != null ? { preTokens } : {}),
-      ...(postTokens != null ? { postTokens } : {}),
-      ...(typeof m.uuid === 'string' ? { providerEventId: m.uuid } : {})
-    }
-    return [base(ctx, {
-      kind: 'harness',
-      stage: 'context_compaction',
-      durationMs,
-      compaction,
-      input: compaction,
-      runtimeMetadata: { source: 'provider_compact_boundary' }
-    })]
-  }
-  if ((subtype === 'local_command_output' || subtype === 'informational') && typeof m.content === 'string') {
-    return [base(ctx, {
-      kind: 'model',
-      stage: 'text',
-      text: m.content,
-      runtimeMetadata: { source: 'provider_local_command', subtype }
-    })]
-  }
-  if (subtype !== 'hook_started' && subtype !== 'hook_progress' && subtype !== 'hook_response') return []
-  const hookName = typeof m.hook_name === 'string' ? m.hook_name : 'hook'
-  const hookEvent = typeof m.hook_event === 'string' ? m.hook_event : 'Hook'
-  const output = typeof m.output === 'string' ? m.output : undefined
-  const stdout = typeof m.stdout === 'string' ? m.stdout : undefined
-  const stderr = typeof m.stderr === 'string' ? m.stderr : undefined
-  const command = typeof m.command === 'string' ? m.command : undefined
-  const outcome = typeof m.outcome === 'string' ? m.outcome : subtype === 'hook_started' ? 'started' : 'progress'
-  const exitCode = typeof m.exit_code === 'number' ? m.exit_code : undefined
-  const durationMs = typeof m.duration_ms === 'number' && Number.isFinite(m.duration_ms) && m.duration_ms >= 0
-    ? m.duration_ms
-    : undefined
-  return [
-    base(ctx, {
-      kind: 'hook',
-      stage: subtype,
-      tool: hookName,
-      name: hookEvent,
-      hookId: typeof m.hook_id === 'string' ? m.hook_id : undefined,
-      hookName,
-      hookEvent,
-      hookCommand: command,
-      hookOutcome: outcome,
-      hookExitCode: exitCode,
-      durationMs,
-      text: output || stdout || stderr,
-      output,
-      input: {
-        hookId: m.hook_id,
-        hookName,
-        hookEvent,
-        command,
-        outcome,
-        exitCode,
-        sessionId: m.session_id,
-        stdout,
-        stderr
-      },
-      isError: outcome !== 'cancelled' && (outcome === 'error' || (exitCode != null && exitCode !== 0))
-    })
-  ]
-}
-
-function textFromAttachmentContent(content: unknown): string | undefined {
-  if (typeof content === 'string') return content
-  if (Array.isArray(content)) return content.map((x) => String(x)).join('\n\n')
-  return undefined
-}
-
-function normalizeHookAttachment(m: Record<string, unknown>, ctx: NormalizeCtx): TraceEvent[] {
-  const a = m.attachment as Record<string, unknown> | undefined
-  if (!a || typeof a !== 'object') return []
-  const type = typeof a.type === 'string' ? a.type : ''
-  if (
-    type !== 'hook_success' &&
-    type !== 'hook_additional_context' &&
-    type !== 'hook_cancelled' &&
-    type !== 'async_hook_response'
-  ) return []
-  const hookName = typeof a.hookName === 'string' ? a.hookName : 'hook'
-  const hookEvent = typeof a.hookEvent === 'string' ? a.hookEvent : hookName.split(':')[0] || 'Hook'
-  const exitCode = typeof a.exitCode === 'number' ? a.exitCode : undefined
-  const stdout = typeof a.stdout === 'string' ? a.stdout : undefined
-  const stderr = typeof a.stderr === 'string' ? a.stderr : undefined
-  const command = typeof a.command === 'string' ? a.command : undefined
-  const timedOut = typeof a.timedOut === 'boolean' ? a.timedOut : undefined
-  const timeoutMs = typeof a.timeoutMs === 'number' ? a.timeoutMs : undefined
-  const content = textFromAttachmentContent(a.content)
-  const response = a.response && typeof a.response === 'object' ? a.response : undefined
-  const outcome =
-    type === 'hook_additional_context'
-      ? 'progress'
-      : type === 'hook_cancelled'
-        ? 'cancelled'
-        : exitCode != null && exitCode !== 0
-          ? 'error'
-          : 'success'
-  const output = content || stdout || stderr || (type === 'hook_cancelled' ? 'hook cancelled' : undefined)
-  return [
-    base(ctx, {
-      kind: 'hook',
-      stage: type === 'hook_additional_context' ? 'hook_progress' : 'hook_response',
-      tool: hookName,
-      name: hookEvent,
-      hookId: typeof a.toolUseID === 'string' ? a.toolUseID : undefined,
-      hookName,
-      hookEvent,
-      hookCommand: command,
-      hookOutcome: outcome,
-      hookExitCode: exitCode,
-      text: output,
-      output,
-      durationMs: typeof a.durationMs === 'number' ? a.durationMs : undefined,
-      input: {
-        hookId: a.toolUseID,
-        hookName,
-        hookEvent,
-        outcome,
-        exitCode,
-        command,
-        durationMs: a.durationMs,
-        timedOut,
-        timeoutMs,
-        stdout,
-        stderr,
-        content,
-        response
-      },
-      isError: outcome !== 'cancelled' && (outcome === 'error' || (exitCode != null && exitCode !== 0))
-    })
-  ]
-}
-
-// 一组 content block → TraceEvent[]（SDK 与 transcript 共用）。messageId = 该批 block 所属
-// assistant message.id（llm_request 级，§7 两级；transcript 行无则不传）。
-export function normalizeBlocks(
-  blocks: Block[],
-  parentToolUseId: string | null,
-  ctx: NormalizeCtx,
-  messageId?: string
-): TraceEvent[] {
-  const out: TraceEvent[] = []
-  for (const b of blocks) {
-    if (b.type === 'text' && b.text) {
-      out.push(base(ctx, { kind: 'model', stage: 'text', text: b.text, parentToolUseId, messageId }))
-    } else if (b.type === 'thinking' && b.thinking) {
-      out.push(base(ctx, { kind: 'model', stage: 'thinking', thinking: b.thinking, parentToolUseId, messageId }))
-    } else if (b.type === 'tool_use' && b.name) {
-      // 路径读取与命令参数不证明 Skill 执行；只接受 Provider 明确声明的 Skill 调用。
-      const cls = classifyTool(b.name, b.input)
-      if (cls.kind === 'skill') ctx.lastSkillName = cls.name.toLowerCase()
-      const mcp = parseMcp(b.name, b.input)
-      const fo = fileOpOf(b.name, b.input)
-      const danger = classifyDanger(b.name, b.input, ctx.cwd) // P3 审计：标记危险调用（不阻塞）
-      const event = base(ctx, {
-          kind: cls.kind,
-          stage: `${cls.kind}:${cls.name}`,
-          tool: b.name,
-          name: cls.name,
-          toolUseId: b.id,
-          parentToolUseId,
-          messageId,
-          input: b.input,
-          ...mcp,
-          ...fo,
-          ...(danger ? { danger } : {})
-        })
-      if (b.id) {
-        (ctx.toolUseById ??= new Map()).set(b.id, event)
-        if (cls.kind === 'agent') (ctx.agentToolUseIds ??= new Set()).add(b.id)
-      }
-      out.push(event)
-    }
-  }
-  return out
-}
+// The hook/agent-task context shape is shared with agent-runner, so it stays
+// visible from here even though the primitives live in their own module.
+export type { NormalizeCtx } from './normalize-core.js'
 
 // SDK message → TraceEvent[]
 export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent[] {
@@ -645,6 +249,8 @@ export function extractUserText(content: unknown): string {
 export interface ParsedTurn {
   userText: string
   providerTurnId?: string
+  /** `stop_reason` of the last assistant message, verbatim; absent when the log never reported one. */
+  stopReason?: string
   items: TraceEvent[]
 }
 
@@ -786,6 +392,9 @@ export function appendTranscriptToTurns(content: string, ctx: NormalizeCtx, stat
       } else if (o.type === 'assistant' && cur && !suppressMetaAssistant) {
         const msg = o.message as Record<string, unknown> | undefined
         cur.items.push(...normalizeSdkMessage(o, lineCtx))
+        // The marker is copied verbatim; deciding what proves completion belongs to
+        // the consumers that read native history, not to this parser.
+        if (typeof msg?.stop_reason === 'string') cur.stopReason = msg.stop_reason
         const usageResult = transcriptUsageResult(msg, lineCtx)
         if (usageResult) {
           const usageKey = claudeTranscriptUsageKey({

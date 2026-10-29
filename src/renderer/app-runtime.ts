@@ -37,6 +37,8 @@ export interface AppRuntimeContext {
   loadProjects: () => void | Promise<void>
   setRunningRunIds: Dispatch<SetStateAction<ReadonlySet<string>>>
   setWaitingQuestionRunIds: Dispatch<SetStateAction<ReadonlySet<string>>>
+  /** Kind of the pending question of a run, so a clarification is never shown as an approval. */
+  setQuestionKindsByRun: Dispatch<SetStateAction<ReadonlyMap<string, import('@shared/runtime').AgentQuestionKind>>>
   /** 崩溃重载后回到用户离开时的会话；由 session actions 注入，仍走 canonical pickSession 读取。 */
   restoreStoredSelection: MutableRefObject<(() => Promise<void>) | null>
   setComposerErrorText?: (message: string) => void
@@ -47,7 +49,7 @@ export function useAppRuntimeEffects(context: AppRuntimeContext): void {
     localStartsRef, localDraftOwnersRef, terminalRunIdsRef, requestChatBottom, markRunStarted, setComposerError,
     setSessionLoading, session, selectAgentRef, setSessionCacheVisible, setCwd, selectSessionId, setView, activeSessionIdRef,
     draftContextRef, cwdRef, migrateRightSurface, integrations, setSessionDrafts, setSessionPromptQueues, loadProjects,
-    setRunningRunIds, setWaitingQuestionRunIds, restoreStoredSelection } = context
+    setRunningRunIds, setWaitingQuestionRunIds, setQuestionKindsByRun, restoreStoredSelection } = context
 
   useEffect(() => {
     let cancelled = false
@@ -126,17 +128,36 @@ export function useAppRuntimeEffects(context: AppRuntimeContext): void {
         ? window.scry.onRemoteSessionRecorded(() => { loadProjects() })
         : () => { }
     const questionAttentionOverrides = new Map<string, boolean>()
+    /** Kind reported by a live attention event; applied after the startup answer. */
+    const questionKindOverrides = new Map<string, import('@shared/runtime').AgentQuestionKind>()
     const offQuestionAttention =
       typeof window.scry.onQuestionAttention === 'function'
-        ? window.scry.onQuestionAttention(({ runId, pendingCount }) => {
+        ? window.scry.onQuestionAttention(({ runId, pendingCount, permissionCount, inputCount }) => {
           const waiting = pendingCount > 0
           questionAttentionOverrides.set(runId, waiting)
+          // A count is only trusted when the host sent it; an older host reports none and
+          // the kind then stays unknown instead of being guessed.
+          if (!waiting) questionKindOverrides.delete(runId)
+          else if (typeof permissionCount === 'number' && typeof inputCount === 'number') {
+            questionKindOverrides.set(runId, permissionCount > 0 ? 'permission' : 'clarification')
+          }
           setWaitingQuestionRunIds((prev) => {
             if (prev.has(runId) === waiting) return prev
             const next = new Set(prev)
             if (waiting) next.add(runId)
             else next.delete(runId)
             return next
+          })
+          setQuestionKindsByRun((prev) => {
+            const next = questionKindOverrides.get(runId)
+            if (!next) {
+              if (!prev.has(runId)) return prev
+              const copy = new Map(prev)
+              copy.delete(runId)
+              return copy
+            }
+            if (prev.get(runId) === next) return prev
+            return new Map(prev).set(runId, next)
           })
         })
         : () => { }
@@ -158,6 +179,25 @@ export function useAppRuntimeEffects(context: AppRuntimeContext): void {
           else waitingRuns.delete(runId)
         }
         setWaitingQuestionRunIds(waitingRuns)
+        // The attention set alone cannot distinguish a permission prompt from a
+        // clarification, so the kind of the actual request is kept beside it. The startup
+        // answer is fenced against live events that arrived while it was in flight: a live
+        // kind wins, and a run the live event already cleared stays cleared.
+        setQuestionKindsByRun((previous) => {
+          const next = new Map<string, import('@shared/runtime').AgentQuestionKind>()
+          for (const run of runs) {
+            const request = run.done ? undefined : run.pendingQuestions?.[0]
+            if (!request) continue
+            if (questionAttentionOverrides.get(run.runId) === false) continue
+            next.set(run.runId, questionKindOverrides.get(run.runId) ?? request.questionKind ?? 'clarification')
+          }
+          for (const [runId, kind] of questionKindOverrides) {
+            if (questionAttentionOverrides.get(runId) === false) continue
+            next.set(runId, kind)
+          }
+          if (next.size === previous.size && [...next].every(([runId, kind]) => previous.get(runId) === kind)) return previous
+          return next
+        })
       })
       .catch((error) => {
         if (!cancelled) setComposerError(`无法恢复运行列表：${error instanceof Error ? error.message : String(error)}`)

@@ -339,10 +339,6 @@ export const QUESTIONNAIRE_COPY = {
   submit: '提交并继续'
 } as const
 
-export const CONVERSATION_COPY = {
-  handoffScope: '缺失文字按预算补齐，其余可检索。只发送当前图片，不重放历史图片。原生命令和 Steer 暂不支持。'
-} as const
-
 // 排队消息块的全部用户可见文案。Steer 的状态文案与证据语义绑定：
 // pending/unknown 不是「稍后再试」，而是「已经交出去，不能撤销」。
 export const QUEUE_COPY = {

@@ -18,6 +18,7 @@ import type { TerminalOutputBridge } from '../terminal-output'
 import type { TerminalManager } from '../terminal-manager'
 import type { RunRegistry } from '../run-registry'
 import type { RunStopLifecycle } from '../run-stop-lifecycle'
+import type { RunTraceRouter } from '../run-trace-router'
 import type { UserQuestionBroker } from '../user-question'
 import type { SessionDiffBaselineRegistry } from '../session-diff'
 import type { ConversationStore } from '../conversation-store'
@@ -82,7 +83,7 @@ export function registerAppLifecycle({
   remoteHostRuntime, requireDesktopRemoteClient, setStartupManagedRecovery, conversationStore,
   beginShutdown, getRemoteHostService, getDesktopRemoteClient, terminalOutput,
   getTerminalManagerInstance, runStopLifecycle, sessionDiffBaselines, userQuestionBroker,
-  mirrorSessionTranscript, providerRegistry, sourceControl
+  mirrorSessionTranscript, providerRegistry, sourceControl, runTraces
 }: {
   primaryInstance: boolean
   useDevelopmentRenderer: boolean
@@ -100,6 +101,7 @@ export function registerAppLifecycle({
   terminalOutput: TerminalOutputBridge
   getTerminalManagerInstance: () => TerminalManager | undefined
   runStopLifecycle: RunStopLifecycle
+  runTraces: RunTraceRouter
   sessionDiffBaselines: SessionDiffBaselineRegistry
   userQuestionBroker: UserQuestionBroker
   mirrorSessionTranscript: (providerId: ProviderId, cwd: string | undefined, sessionId: string | undefined) => Promise<void>
@@ -169,6 +171,8 @@ export function registerAppLifecycle({
     }) ?? Promise.resolve()
     runStopLifecycle.close()
     traceOutput.close()
+    // scoped 流与 legacy 桥一同关闭：订阅、额度与定时器都不留到下一个进程。
+    runTraces.close()
     performanceResourceMonitor?.stop()
     performanceResourceMonitor = null
     sessionDiffBaselines.disposeAll()

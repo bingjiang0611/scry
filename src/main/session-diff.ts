@@ -16,6 +16,8 @@ import {
   type GitTurnDiffCapture,
   type GitTurnDiffFinishOptions
 } from './git.js'
+import { WorkspaceOverlapTracker } from './workspace-overlap.js'
+import type { WorkspaceOverlapEvidence } from '../shared/turn-diff.js'
 
 export interface SessionDiffBaseline {
   /** 创建时的 contextRevision；切换 / adopt 后不符即失效。 */
@@ -24,6 +26,8 @@ export interface SessionDiffBaseline {
   sessionId: string
   origin: TurnDiffBaselineOrigin
   capture: Promise<GitTurnDiffCapture>
+  /** 净 diff 观测窗口起点。 */
+  observedAt: number
 }
 
 export interface EnsureSessionBaselineInput {
@@ -74,7 +78,9 @@ export class SessionDiffBaselineRegistry {
 
   constructor(
     private readonly begin: (cwd: string) => Promise<GitTurnDiffCapture> = beginGitTurnDiff,
-    private readonly cancel: (capture: GitTurnDiffCapture) => Promise<void> = cancelGitTurnDiff
+    private readonly cancel: (capture: GitTurnDiffCapture) => Promise<void> = cancelGitTurnDiff,
+    /** 并行工作区观测，与基线同生命周期，不另建全局扫描。 */
+    readonly workspace: WorkspaceOverlapTracker = new WorkspaceOverlapTracker()
   ) {}
 
   ensure(input: EnsureSessionBaselineInput): SessionDiffBaseline {
@@ -91,7 +97,8 @@ export class SessionDiffBaselineRegistry {
       sessionId: input.sessionId ?? '',
       // 带着 resume id 进来却没有可复用基线，说明会话首轮前的基线不在本进程里，只能重锚。
       origin: input.sessionId ? 'resumed' : 'session_start',
-      capture: input.initialCapture ?? this.begin(input.cwd)
+      capture: input.initialCapture ?? this.begin(input.cwd),
+      observedAt: this.workspace.now()
     }
     this.entries.set(input.key, entry)
     return entry
@@ -135,6 +142,14 @@ export class SessionDiffBaselineRegistry {
     }
   }
 
+  /** 并行工作区观测：本轮窗口从本轮基线开始；会话净 diff 可回溯到 Entry.observedAt。 */
+  observeRunWorkspace(runId: string, cwd: string): void { this.workspace.start(runId, cwd) }
+  releaseRunWorkspace(runId: string): void { this.workspace.close(runId) }
+  /** undefined = 本轮未被观测：调用方保持 unknown，不得当成独占归因。 */
+  workspaceOverlap(runId: string, from?: number): WorkspaceOverlapEvidence | undefined {
+    return this.workspace.evidence(runId, from)
+  }
+
   discard(key: string): void {
     const entry = this.entries.get(key)
     if (!entry) return
@@ -144,6 +159,7 @@ export class SessionDiffBaselineRegistry {
 
   disposeAll(): void {
     for (const key of [...this.entries.keys()]) this.discard(key)
+    this.workspace.disposeAll()
   }
 
   private usable(entry: SessionDiffBaseline, revision: number, sessionId?: string): boolean {

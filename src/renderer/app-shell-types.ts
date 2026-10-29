@@ -27,6 +27,8 @@ export interface AppShellProps {
   summaryVisible: boolean
   summaryPersistent: boolean
   draftStore: ReturnType<typeof import('./composer-drafts').createComposerDraftStore>
+  /** Stable draft/run/native scope key of the parent session; side chats follow it. */
+  draftKey: string
   chatProps: ComponentProps<typeof SessionChatView>
   sidebarActions: Record<string, unknown>
   projects: ReturnType<typeof useWorkspaceState>['projects']
@@ -92,6 +94,8 @@ export interface AppShellProps {
   workspace: ReturnType<typeof useWorkspaceState>
   runningRunIds: ReadonlySet<string>
   waitingQuestionRunIds: ReadonlySet<string>
+  /** Pending question kind per run; a clarification is not an approval request. */
+  questionKindsByRun: ReadonlyMap<string, import('@shared/runtime').AgentQuestionKind>
   unreadSessionKeys: ReadonlySet<string>
   backgroundWorkByRun: ReturnType<typeof import('./hooks/useBackgroundWork').useBackgroundWork>
   catalogHealth: ReturnType<typeof useWorkspaceState>['catalogHealth']

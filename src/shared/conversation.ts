@@ -1,4 +1,5 @@
 import type { DeleteSessionResult, ProviderId } from './provider'
+import type { AgentStartRequest } from './runtime'
 import type { AgentTurnRecord } from './turn-record'
 import type { ContentRef } from './tool-content'
 
@@ -30,6 +31,61 @@ export interface ConversationItemRef {
   runId: string
   itemId: string
   contentHash: string
+}
+
+/** Default label of a side chat whose own title is still unset; never the source title. */
+export const SIDE_CHAT_DEFAULT_TITLE = '侧边会话'
+
+/**
+ * A side chat reads a source conversation or a verified native session prefix.
+ * Neither kind transfers ownership, resume identity or native control of the source.
+ */
+export type SideChatSource =
+  | { kind: 'conversation'; conversationId: string }
+  | { kind: 'native-session'; providerId: ProviderId; agentProfileId?: string; cwd: string; nativeSessionId: string }
+
+/** Bounded provenance for one frozen source message; bodies live in the sealed snapshot content. */
+export interface SideChatSnapshotItem {
+  ref: ConversationItemRef
+  /** Source turn ordinal at capture time, not an ordinal in this child conversation. */
+  sourceOrdinal: number
+  providerId: ProviderId
+  role: 'user' | 'assistant'
+}
+
+/** Immutable, child-owned record of the frozen source prefix. */
+export interface SideChatSnapshot {
+  id: string
+  prefixFingerprint: string
+  throughOrdinal: number
+  throughRunId: string
+  capturedAt: number
+  /** Complete text sealed under this child's own content root; never a source archive path. */
+  content: ContentRef
+  /** Ordered metadata cross-checked against the sealed bodies on every read. */
+  items: SideChatSnapshotItem[]
+}
+
+/**
+ * Requested first runtime choice for a new side chat, copied from the user's
+ * current controls. It is an intent, not evidence of the source session's own
+ * model, account or permission; send revalidates everything against the live
+ * runtime.
+ */
+export type SideChatInitialTarget = Pick<AgentStartRequest, 'model' | 'effort' | 'permissionMode'> & {
+  providerId: ProviderId
+  agentProfileId?: string
+}
+
+export interface SideChatOrigin {
+  source: SideChatSource
+  parentTitleAtCapture: string
+  /** Survives restart so the source's provenance still seeds the composer. */
+  initialTarget: SideChatInitialTarget
+  snapshot: SideChatSnapshot
+  /** Creation receipt: one local command may publish at most one child. */
+  commandId: string
+  intentHash: string
 }
 
 export type ConversationDelivery =
@@ -102,6 +158,8 @@ export interface Conversation {
   cwd: string
   revision: number
   title?: string
+  /** Present when this conversation is a side chat of a read-only source. */
+  sideChat?: SideChatOrigin
   pinnedAt?: number
   archivedAt?: number
   /** Fingerprint of the explicitly confirmed legacy capture; original binding stays retired. */
@@ -120,6 +178,27 @@ export type ConversationContinuation =
 
 export const conversationItemKey = (item: ConversationItemRef): string =>
   JSON.stringify([item.runId, item.itemId, item.contentHash])
+
+/** Snapshot refs are namespaced so they can never be mistaken for a child run id. */
+export const sideChatSnapshotRunId = (snapshotId: string, index: number): string =>
+  `side-chat:${snapshotId}:${index}`
+
+/**
+ * Ordered context of one conversation: frozen snapshot items first, then its own
+ * real turns. Snapshot items are context, not execution, so they never gain a run
+ * id, usage row or turn ordinal in the child.
+ */
+export function conversationContextItems(conversation: Pick<Conversation, 'turns' | 'sideChat'>): ConversationItemRef[] {
+  return [
+    ...(conversation.sideChat?.snapshot.items.map(item => item.ref) ?? []),
+    ...conversation.turns.flatMap(turn => turn.items)
+  ]
+}
+
+/** Only items of this child's own snapshot; a source ref is never readable here. */
+export function sideChatSnapshotItems(conversation: Pick<Conversation, 'sideChat'>): SideChatSnapshotItem[] {
+  return conversation.sideChat?.snapshot.items ?? []
+}
 
 export function sameConversationTarget(a: ConversationTarget, b: ConversationTarget): boolean {
   return a.providerId === b.providerId && a.agentProfileId === b.agentProfileId &&
@@ -157,7 +236,7 @@ export function planConversationContinuation(
     candidate.nativeSessionId !== undefined && candidate.retiredReason === undefined &&
     sameConversationTarget(candidate, target))
   const covered = new Set(binding ? conversationCoverage(conversation, binding.id).map(conversationItemKey) : [])
-  const missingItems = conversation.turns.flatMap((turn) => turn.items)
+  const missingItems = conversationContextItems(conversation)
     .filter((item) => !covered.has(conversationItemKey(item)))
   return binding?.nativeSessionId !== undefined
     ? { kind: 'resume', bindingId: binding.id, nativeSessionId: binding.nativeSessionId, missingItems }

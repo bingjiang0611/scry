@@ -109,7 +109,7 @@
 | 检查 | 结果与边界 |
 | --- | --- |
 | `node --check` | 对 `prototype.js` 与 `prototype-copy.js` 通过；Node 24，本地独立设计稿 |
-| `node --test docs/handoff/side-chat/prototype.test.mjs` | 12/12 通过，0 skip；保留原 8 个状态检查，新增默认七入口、`+` 仅打开菜单、工具去重/侧聊多实例、关闭最后页签回到选择器；不是浏览器布局测试 |
+| `node --test docs/handoff/side-chat/prototype.check.mjs` | 12/12 通过，0 skip；保留原 8 个状态检查，新增默认七入口、`+` 仅打开菜单、工具去重/侧聊多实例、关闭最后页签回到选择器；不是浏览器布局测试 |
 | Chrome Relay 实际交互 | 在新版中分别点击 Surface 卡片和 `+` 菜单创建侧聊；仅打开菜单未增加数量；窄窗切换浅色并输入，readback 确认输入非空 |
 | 视觉检查 | 1512 × 708 CSS viewport 的深色双列入口和 820 px 原型浅色窄窗。首轮低高度布局下末排工具需滚动、空态有重复提示；改为紧凑卡片并删去重复提示后，重新打开复核七个入口与完整输入区可见 |
 | 文档/资源 | 本地 Markdown 链接与 HTML 引用资产存在；文案集中在 `prototype-copy.js`，不引入运行依赖 |

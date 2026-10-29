@@ -11,7 +11,13 @@ export type ActivityEntry = {
   group: ActivityGroup
 } & (
   | { kind: 'session'; project: ProjectMeta; session: SessionMeta }
-  | { kind: 'conversation'; project: ProjectMeta; conversation: ConversationSummary }
+  | {
+    kind: 'conversation'
+    project: ProjectMeta
+    conversation: ConversationSummary
+    /** Set for a side-chat child: its own run is real activity, but not a root row. */
+    sideChatParent?: string
+  }
   | { kind: 'remote'; project: RemoteProjectGroup; session: RemoteSessionRef }
 )
 
@@ -42,7 +48,13 @@ export function sidebarActivity(
       const status = conversation.activeRunId
         ? waitingQuestionRunIds.has(conversation.activeRunId) ? 'attention' : 'working'
         : group(undefined, conversation.lastRunOutcome)
-      if (status) entries.push({ key: `conversation:${conversation.id}`, kind: 'conversation', project, conversation, group: status })
+      if (!status) continue
+      // A child's own run is background activity of its parent, so it is listed here with
+      // that parent named instead of being flattened into the root conversation list.
+      entries.push({
+        key: `conversation:${conversation.id}`, kind: 'conversation', project, conversation, group: status,
+        ...(conversation.sideChat ? { sideChatParent: conversation.sideChat.parentTitleAtCapture } : {})
+      })
     }
     for (const session of project.sessions) {
       if (session.archivedAt || !matches(session.preview)) continue

@@ -97,9 +97,19 @@
         "ipc.conversation:fork",
         "ipc.conversation:update",
         "ipc.conversation:previewDeletion",
-        "ipc.conversation:delete"
+        "ipc.conversation:delete",
+        "ipc.conversation:previewSideChat",
+        "ipc.conversation:createSideChat",
+        "ipc.conversation:listSideChats",
+        "ipc.conversation:findSideChatCommand"
       ],
       "sources": [
+        "src/main/conversation-side-chat.ts",
+        "src/main/conversation-side-chat-source.ts",
+        "src/main/conversation-side-chat-coverage.ts",
+        "src/main/conversation-side-chat-schema.ts",
+        "src/main/conversation-history-text.ts",
+        "src/main/bootstrap/side-chat-source.ts",
         "src/renderer/App.tsx",
         "src/renderer/app-state.ts",
         "src/renderer/app-interaction.tsx",
@@ -127,10 +137,13 @@
         "ipc.agent:loadSessionOlder",
         "ipc.agent:turnTerminalEvidence",
         "ipc.conversation:read",
-        "ipc.conversation:readItem"
+        "ipc.conversation:readItem",
+        "ipc.conversation:readSideChatSnapshot"
       ],
       "sources": [
         "src/main/session-history.ts",
+        "src/main/conversation-read.ts",
+        "src/main/conversation-turn-history.ts",
         "src/main/bootstrap/history-load.ts",
         "src/main/bootstrap/history-project-recency.ts",
         "src/main/bootstrap/workspace-runtime.ts",
@@ -192,6 +205,7 @@
         "src/main/bootstrap/workspace-start.ts",
         "src/main/bootstrap/run-frontdoor.ts",
         "src/main/bootstrap/run-admission.ts",
+        "src/main/workspace-overlap.ts",
         "src/main/bootstrap/run-startup.ts",
         "src/main/bootstrap/run-execution.ts",
         "src/main/source-control/workspace-start.ts",
@@ -218,11 +232,19 @@
       "owner": "compose-live-control",
       "operations": [
         "ipc.agent:traceAck",
-        "ipc.agent:traceResynchronized"
+        "ipc.agent:traceResynchronized",
+        "ipc.runTraces:"
       ],
       "sources": [
         "src/main/trace-output.ts",
+        "src/main/run-trace-router.ts",
+        "src/main/bootstrap/run-trace-ipc.ts",
+        "src/preload/run-traces.ts",
+        "src/renderer/run-trace-stream.ts",
+        "src/renderer/run-trace-stream-session.ts",
+        "src/renderer/hooks/useRunTraceStream.ts",
         "src/renderer/format.ts",
+        "src/renderer/trace-batch.ts",
         "src/renderer/remote-trace.ts",
         "src/renderer/turn-stream-projection.ts",
         "src/renderer/chat-scroll.ts",

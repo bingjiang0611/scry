@@ -34,6 +34,7 @@ export function ChatView(props: ChatViewProps) {
     sessionLoading = false,
     sessionCacheVisible = false,
     sessionEvidenceGap = null,
+    emptyState = null,
     busy,
     queuedPrompts,
     pendingQuestions = NO_PENDING_QUESTIONS,
@@ -76,10 +77,15 @@ export function ChatView(props: ChatViewProps) {
               </div>
             )}
             {turns.length === 0 && !sessionLoading && !sessionEvidenceGap && hasSelectedSession && (
-              <div className="chat-session-evidence-gap" role="status" data-status="empty">
-                <b>这条会话暂时没有可显示的轮次</b>
-                <span>{remote ? `会话已选中；正在等待 ${remoteHost} 的归档或运行事件，不会将它当作新会话。` : '会话已选中；正在等待本机归档或运行事件，不会将它当作新会话。'}</span>
-              </div>
+              emptyState
+                ? <div className="chat-session-evidence-gap" role="status" data-status={emptyState.status ?? 'new-side-chat'}>
+                  <b>{emptyState.title}</b>
+                  <span>{emptyState.detail}</span>
+                </div>
+                : <div className="chat-session-evidence-gap" role="status" data-status="empty">
+                  <b>这条会话暂时没有可显示的轮次</b>
+                  <span>{remote ? `会话已选中；正在等待 ${remoteHost} 的归档或运行事件，不会将它当作新会话。` : '会话已选中；正在等待本机归档或运行事件，不会将它当作新会话。'}</span>
+                </div>
             )}
             {turns.length === 0 && !sessionLoading && !sessionEvidenceGap && !hasSelectedSession && (
               <div className={`unbound-empty welcome-field ${cwd ? 'bound' : ''}`}>

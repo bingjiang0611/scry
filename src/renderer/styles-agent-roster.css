@@ -250,16 +250,21 @@
   }
 }
 
+/* Legacy narrow-window overlay. It must not stack on top of the measured
+   `.narrow-single-column` policy in side-chat.css: that policy owns every shell that is too
+   narrow for the chat plus the workbench, and the two rules disagree about whether the
+   panel is a floating overlay or the one real column. This block keeps its original
+   behaviour only where the measured policy does not claim the window. */
 @media (max-width: 1180px) {
-  .app.right-panel-surface:not(.right-panel-hidden):not(.right-panel-maximized) {
+  .app.right-panel-surface:not(.narrow-single-column):not(.right-panel-hidden):not(.right-panel-maximized) {
     grid-template-columns: var(--sidebar-w) var(--pane-resizer-w) minmax(0, 1fr);
   }
 
-  .app.right-panel-surface:not(.right-panel-hidden):not(.right-panel-maximized) > .panel-resizer {
+  .app.right-panel-surface:not(.narrow-single-column):not(.right-panel-hidden):not(.right-panel-maximized) > .panel-resizer {
     display: none;
   }
 
-  .app.right-panel-surface:not(.right-panel-hidden):not(.right-panel-maximized) > .right-panel-slot {
+  .app.right-panel-surface:not(.narrow-single-column):not(.right-panel-hidden):not(.right-panel-maximized) > .right-panel-slot {
     position: fixed;
     top: 0;
     right: 0;

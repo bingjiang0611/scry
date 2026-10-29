@@ -1,4 +1,6 @@
-import { normalizeAgentTaskStatus, normalizeSdkMessage, type NormalizeCtx } from '../normalize'
+import { normalizeSdkMessage } from '../normalize'
+import { normalizeAgentTaskStatus } from '../normalize-hooks'
+import type { NormalizeCtx } from '../normalize-core'
 import type { TraceEvent } from '../../shared/trace'
 import type { BackgroundTask } from '../../shared/background-work'
 
