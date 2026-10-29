@@ -5,14 +5,20 @@ import { FileWorkflowStore } from '../../src/main/workflow-store'
 // Scope by FileStore directory, not a shared active flag. A timed-out old store
 // keeps its old meter; it cannot turn off or contaminate a subsequent workload.
 const io = vi.hoisted(() => {
-  type Meter = Record<string, number>
+  type Meter = { counts: Record<string, number>; inclusiveMs: Record<string, number> }
   const owners = new WeakMap<object, Meter>(), scopes = new Map<string, Meter>()
-  let current: Meter = {}
+  let current: Meter = { counts: {}, inclusiveMs: {} }
   // These aliases were observed on this macOS host. No extra IO enters timing.
   const normalize = (path: string) => path.replace(/^\/private(?=\/(?:tmp|var)\/)/, '')
   return {
-    reset() { current = {} },
-    snapshot() { return { ...current } },
+    reset() { current = { counts: {}, inclusiveMs: {} } },
+    snapshot() { return { ...current.counts } },
+    times() { return { ...current.inclusiveMs } },
+    async timed<T>(meter: Meter | undefined, name: string, action: () => Promise<T>): Promise<T> {
+      const started = performance.now()
+      try { return await action() }
+      finally { if (meter) meter.inclusiveMs[name] = (meter.inclusiveMs[name] ?? 0) + performance.now() - started }
+    },
     register(owner: object, directory: string) {
       let meter = owners.get(owner)
       if (!meter) { meter = current; owners.set(owner, meter) }
@@ -28,7 +34,7 @@ const io = vi.hoisted(() => {
       }
       return undefined
     },
-    add(meter: Meter | undefined, key: string, amount = 1) { if (meter) meter[key] = (meter[key] ?? 0) + amount },
+    add(meter: Meter | undefined, key: string, amount = 1) { if (meter) meter.counts[key] = (meter.counts[key] ?? 0) + amount },
     bytes(value: unknown): number {
       if (typeof value === 'string') return Buffer.byteLength(value)
       if (ArrayBuffer.isView(value)) return value.byteLength
@@ -41,11 +47,11 @@ vi.mock('node:fs/promises', async importOriginal => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
   const operations = actual as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>
   const wrapped: Record<string, unknown> = { ...actual }
-  for (const name of ['mkdir', 'rm', 'readdir', 'opendir', 'access', 'realpath', 'stat', 'lstat', 'rename', 'writeFile']) {
+  for (const name of ['mkdir', 'rm', 'readdir', 'opendir', 'access', 'realpath', 'stat', 'lstat', 'rename', 'writeFile', 'readFile']) {
     wrapped[name] = async (...args: unknown[]) => {
       const meter = io.capture(String(args[0]))
       io.add(meter, name + 'Calls')
-      const result = await operations[name](...args)
+      const result = await io.timed(meter, name, () => operations[name](...args))
       io.add(meter, name + 'Succeeded')
       if (name === 'mkdir' && String(args[0]).endsWith('.lock')) io.add(meter, 'lockDirectoriesCreated')
       if (name === 'rename') {
@@ -65,13 +71,17 @@ vi.mock('node:fs/promises', async importOriginal => {
   wrapped.open = async (...args: Parameters<typeof actual.open>) => {
     const path = String(args[0]), meter = io.capture(path)
     io.add(meter, 'openCalls')
-    const handle = await actual.open(...args)
+    const handle = await io.timed(meter, 'open', () => actual.open(...args))
     io.add(meter, 'openSucceeded')
     const sync = handle.sync.bind(handle), write = handle.writeFile.bind(handle)
-    handle.sync = async () => { io.add(meter, 'explicitSyncCalls'); await sync(); io.add(meter, 'explicitSyncSucceeded') }
+    handle.sync = async () => { io.add(meter, 'explicitSyncCalls'); await io.timed(meter, 'handle.sync', sync); io.add(meter, 'explicitSyncSucceeded') }
+    for (const name of ['stat', 'readFile', 'close'] as const) {
+      const original = handle[name].bind(handle) as (...data: unknown[]) => Promise<unknown>
+      Object.defineProperty(handle, name, { value: (...data: unknown[]) => io.timed(meter, 'handle.' + name, () => original(...data)), configurable: true })
+    }
     handle.writeFile = async (...data: Parameters<typeof handle.writeFile>) => {
       io.add(meter, 'handleWriteCalls')
-      await write(...data)
+      await io.timed(meter, 'handle.writeFile', () => write(...data))
       io.add(meter, 'handleWrittenBytes', io.bytes(data[0]))
     }
     return handle
@@ -90,5 +100,5 @@ for (const name of Object.getOwnPropertyNames(prototype)) {
 }
 beforeEach(() => io.reset())
 afterEach(context => console.log('CHECKPOINT_JS_IO', JSON.stringify({ name: context.task.name, state: context.task.result?.state,
-  counts: io.snapshot(), scope: 'matched in-process FileStore fsPromises and returned FileHandles; native SQLite/subprocess IO unavailable; not physical device bytes or total OS fsync', incompleteIfFailed: true })))
+  counts: io.snapshot(), inclusiveMs: io.times(), scope: 'matched in-process FileStore fsPromises and returned FileHandles; native SQLite/subprocess IO unavailable; not physical device bytes or total OS fsync', incompleteIfFailed: true })))
 export const snapshotFilesystem = () => io.snapshot()
