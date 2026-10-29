@@ -1,5 +1,7 @@
 # Workflow：真实 A/B 回滚负对照与 File 恢复阶段调查
 
+后续：[mac2 低负载复验](20261029-workflow-checkpoint-mac2.md)已通过 File 共享 58 项与 SQL 全部 93 项；File 扩大批次仍 76/77，stable-map 单例低负载也超时。下文保留本轮历史结果；低负载机器不再是复验阻碍，但生产超时仍未修复。
+
 日期：2026-10-29 UTC。范围：维护者继续授权的两个事项；仅合成数据和临时 namespace，不接生产、不迁移、不放宽 5000ms。前轮：[双后端合同](20261029-workflow-checkpoint-contracts.md)。
 
 ## 结论

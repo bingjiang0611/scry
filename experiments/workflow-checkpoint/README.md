@@ -2,11 +2,11 @@
 
 **Experimental Node 24.18.0 / macOS prototype only. Not the App backend. Do not run it against real userData, migrate data, or wire these resolver aliases into production.** No new dependency is installed. `node:sqlite` is not evidence for the Electron/better-sqlite3 distribution.
 
-History: [initial evaluation](../../docs/performance-experiments/20261029-workflow-sqlite-checkpoint.md). The authorized [dual-backend follow-up](../../docs/performance-experiments/20261029-workflow-checkpoint-contracts.md) resolves the 13 old physical-path failures and exposes/fixes a real pre-COMMIT value-cache bug. That round passed 93 SQL tests and 3 separate IO meter tests; File first passed 58, then had 2 unchanged 5000ms process-recovery timeouts under high load. The [next boundary investigation](../../docs/performance-experiments/20261029-workflow-checkpoint-boundaries.md) proves an actual merged-A/B rollback loses native facts. Its latest SQL batch is 92 passed / 1 timeout, and File recovery still times out. Stable full equivalence and production rollout are **not approved**.
+History: [initial evaluation](../../docs/performance-experiments/20261029-workflow-sqlite-checkpoint.md). The authorized [dual-backend follow-up](../../docs/performance-experiments/20261029-workflow-checkpoint-contracts.md) resolves the 13 old physical-path failures and exposes/fixes a real pre-COMMIT value-cache bug. That round passed 93 SQL tests and 3 separate IO meter tests; File first passed 58, then had 2 unchanged 5000ms process-recovery timeouts under high load. The [next boundary investigation](../../docs/performance-experiments/20261029-workflow-checkpoint-boundaries.md) proves an actual merged-A/B rollback loses native facts. That round's SQL batch was 92 passed / 1 timeout, with File recovery timeouts. The subsequent [mac2 low-load verification](../../docs/performance-experiments/20261029-workflow-checkpoint-mac2.md) passes all 58 shared File contracts and all 93 SQL tests; expanded File is still 76/77, including a low-load stable-map timeout reproduced in isolation. Stable full equivalence and production rollout are **not approved**.
 
 ## Prepare once, in a new temporary directory
 
-Run from the repository root with the installed project dependencies:
+Run from the repository root with the installed project dependencies. If isolating `HOME`, create a new owned HOME outside `/tmp` and native macOS temporary prefixes, while keeping `TMPDIR` in the owned trial. Otherwise the HOME-refusal probe points at an already-authorized temporary namespace and cannot test rejection. Never use real userData for these tests.
 
 ```sh
 node --version # verified: v24.18.0

@@ -4,7 +4,7 @@
 
 ## 当前结论
 
-最新：[真实 A/B 回滚与恢复阶段调查](../../docs/performance-experiments/20261029-workflow-checkpoint-boundaries.md)。A/B 负对照已补，最新 SQL 92/93；File 仍超时。已增加有界启动/持久化诊断，尚缺低负载窗口；不是生产修复或推广批准。
+最新：[mac2 低负载复验](../../docs/performance-experiments/20261029-workflow-checkpoint-mac2.md)。A/B 负对照已补；低负载机器上 File 共享 58/58、SQL 全部 93/93，但 File 扩大批次 76/77，stable-map 单例仍触发原 5000ms 超时。低负载窗口不再是复验阻碍；不能把全部失败归因负载，仍不是生产修复或推广批准。
 
 已修复性能测试的共享计数串扰，本地提交 `2adc9d9647560bfd160e0dd5c0f9149d41be8d76`。**没有修复生产 Workflow 的 5000ms 超时，完整门禁仍红灯。** 不把计数器修复称为运行速度改善。
 

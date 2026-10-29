@@ -2,7 +2,7 @@
 
 原设计提交时的状态：**仅设计，未实现、未迁移、未验证性能。** 维护者本轮授权到设计，不等于授权替换生产持久化。基于 `bea90c44500b35ce16265a56ea014b03f5267da7`，2026-10-28 本地时间。当前失败与证据见 [timeout-followup.md](timeout-followup.md)。
 
-后续状态（2026-10-29 UTC）：维护者另行授权后已执行临时 namespace 的 Node SQLite/Worker 原型与同负载评估；原五例在候选内通过，但扩大合同未通过，未接入生产。实际实现、ABI 偏差、失败与下一决定见 [隔离原型报告](../../docs/performance-experiments/20261029-workflow-sqlite-checkpoint.md)。随后获授权的[双后端合同收口](../../docs/performance-experiments/20261029-workflow-checkpoint-contracts.md)已修复实验值缓存并曾通过 93 项；后续[阶段调查](../../docs/performance-experiments/20261029-workflow-checkpoint-boundaries.md)已补 A/B 真回滚。最新 SQL 92/93，File 恢复仍超时，均高负载；不推广。下文保留原设计决策，不把设计承诺当作验证结果。
+后续状态（2026-10-29 UTC）：维护者另行授权后已执行临时 namespace 的 Node SQLite/Worker 原型与同负载评估；原五例在候选内通过，但扩大合同未通过，未接入生产。实际实现、ABI 偏差、失败与下一决定见 [隔离原型报告](../../docs/performance-experiments/20261029-workflow-sqlite-checkpoint.md)。随后获授权的[双后端合同收口](../../docs/performance-experiments/20261029-workflow-checkpoint-contracts.md)已修复实验值缓存并曾通过 93 项；后续[阶段调查](../../docs/performance-experiments/20261029-workflow-checkpoint-boundaries.md)已补 A/B 真回滚。该轮 SQL 92/93，File 恢复仍超时，均高负载；随后 [mac2 复验](../../docs/performance-experiments/20261029-workflow-checkpoint-mac2.md)在低负载通过 File 共享 58/58、SQL 93/93，但扩大 File 仍 76/77，stable-map 单例也超时；不推广。下文保留原设计决策，不把设计承诺当作验证结果。
 
 ## 1. 结论与范围
 
