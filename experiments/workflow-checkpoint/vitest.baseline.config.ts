@@ -5,7 +5,8 @@ export default {
   ...base,
   test: {
     ...base.test,
-    setupFiles: [fileURLToPath(new URL('./measure-setup.ts', import.meta.url))],
+    exclude: base.test!.exclude!.filter(pattern => pattern !== '**/experiments/**'),
+    setupFiles: ['io-meter-setup.ts', 'measure-setup.ts'].map(name => fileURLToPath(new URL(name, import.meta.url))),
     reporters: ['default', 'json'],
     outputFile: process.env.SCRY_CHECKPOINT_RESULT
   }
