@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
-import { join, sep } from 'node:path'
+import { dirname, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { defaultRepeats, measured, repeatCounters, writeCollector } from '../performance-counters.mjs'
 import { FileWorkflowStore, MemoryWorkflowStore } from '../../src/main/workflow-store'
@@ -12,12 +12,13 @@ import { makePlanPreview, validateWorkflowProgram, workflowRevision } from '../.
 import { WorkflowSystemHost } from '../../src/main/workflow-system-host'
 import { WorkflowSlots } from '../../src/main/workflow-slots'
 
-const meter = vi.hoisted(() => ({ directory: '', active: false, nativeWrites: 0 }))
+const meters = vi.hoisted(() => new Map<string, { nativeWrites: number }>())
 vi.mock('node:fs/promises', async importOriginal => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
   return { ...actual, writeFile: async (...args: Parameters<typeof actual.writeFile>) => {
+    const meter = meters.get(dirname(String(args[0])))
     const result = await actual.writeFile(...args)
-    if (meter.active && String(args[0]).startsWith(meter.directory + sep)) {
+    if (meter) {
       const value: unknown = JSON.parse(String(args[1]))
       if (value && typeof value === 'object' && 'state' in value && value.state === 'known' && 'derivedFrom' in value && Array.isArray(value.derivedFrom) && value.derivedFrom.some(source => typeof source === 'string' && source.startsWith('system:'))) {
         expect(args[2]).toMatchObject({ flush: true })
@@ -46,9 +47,8 @@ async function workload(extraWrite = false) {
       { kind: 'replica', blockId: 'candidate' }, { kind: 'return', blockId: 'finish', ref: { nodeId: 'candidate' } }
     ] } }) }), execute })
   const started = performance.now()
-  meter.directory = join(data, 'workflows')
-  meter.nativeWrites = 0
-  meter.active = true
+  const meter = { nativeWrites: 0 }
+  meters.set(join(data, 'workflows'), meter)
   try {
     const preview = await service.planCommand({ workspace: source, command: '/scry-workflow run native checkpoint', orchestrator: { role: 'orchestrator', providerId: 'claude' }, roles: [] })
     const approval = { workflowId: preview.workflowId, programRevision: preview.programRevision, approvedAt: 1 }
@@ -66,7 +66,7 @@ async function workload(extraWrite = false) {
     if (extraWrite) await store.saveValue(preview.workflowId, 'extra-native-copy', value)
     return { writes: meter.nativeWrites, durationMs: performance.now() - started }
   } finally {
-    meter.active = false
+    meters.delete(join(data, 'workflows'))
     service.close()
     await rm(directory, { recursive: true, force: true })
   }
@@ -179,6 +179,12 @@ describe('native result fixed workload', () => {
   it('observes one deliberately added real durable value write', async () => {
     const ordinary = await workload(), redundant = await workload(true)
     expect(redundant.writes).toBe(ordinary.writes + 1)
+  })
+
+  it('isolates flushed value counts when workload lifetimes overlap', async () => {
+    const [ordinary, redundant] = await Promise.all([workload(), workload(true)])
+    expect(ordinary.writes).toBe(1)
+    expect(redundant.writes).toBe(2)
   })
 
   it('counts unused admission observations without replacing the full disk-backed revision workload', async () => {
