@@ -23,7 +23,9 @@ export function summarize(report, plan) {
     roundsRead: visits.reduce((total, visit) => total + (visit.rounds?.length ?? 0), 0),
     roundsReadNote: ROUNDS_READ_NOTE,
     expectedRounds: plan.peers * TASK_COUNT * plan.rounds,
-    seedsChecked: completed.reduce((total, visit) => total + (visit.oracle?.seedCount ?? 0), 0),
+    // A completed visit keeps one oracle view per round and those views share the seed prefix, so the
+    // first view's seedCount is the visit's seed count; adding all seven would report 7x the seeds.
+    seedsChecked: completed.reduce((total, visit) => total + visit.oracle.views[0].seedCount, 0),
     expectedSeeds: SEED_COUNT * plan.peers * TASK_COUNT,
     archivedRuns: report.waves.reduce((total, wave) => total + (wave.archive?.runs.filter((run) => run.ok).length ?? 0), 0),
     archiveRoots: report.waves.map((wave) => wave.archive?.roots ?? null),
