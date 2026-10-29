@@ -8,6 +8,7 @@ function mapped(source: string, importer: string | undefined, paths: Paths): str
   if (!importer || !source.startsWith('.')) return undefined
   const target = resolve(dirname(importer.split('?')[0]), source).replace(/\.(ts|js)$/, '')
   if (target === resolve(paths.repository, 'src/main/workflow-store')) return paths.generated
+  if (target === resolve(paths.repository, 'src/main/workflow-storage-probe.fixture')) return resolve(paths.repository, 'experiments/workflow-checkpoint/storage-test-probe.ts')
   if (importer.split('?')[0] === paths.generated) return resolve(paths.repository, 'src/main', source)
   return undefined
 }

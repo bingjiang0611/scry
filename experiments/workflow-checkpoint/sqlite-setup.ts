@@ -1,5 +1,4 @@
 import { afterEach, vi } from 'vitest'
-import { closeAll, storageReport } from './runtime'
 
 vi.mock('esbuild', async importOriginal => {
   const actual = await importOriginal<typeof import('esbuild')>()
@@ -16,6 +15,8 @@ vi.mock('esbuild', async importOriginal => {
   }) }
 })
 afterEach(async context => {
+  // Let contract suites register their fs fault probes before Runtime/io loads.
+  const { closeAll, storageReport } = await import('./runtime')
   await closeAll()
   console.log('CHECKPOINT_SQLITE', JSON.stringify({ name: context.task.name, ...storageReport() }))
 })

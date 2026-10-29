@@ -28,6 +28,13 @@ else if (mode === 'early-ack') {
 } else if (mode === 'frame-cas') {
   generated = replace(generated, 'const next = nextWorkflowFrame(await this.loadFrame(input.workflowId, input.frameId), input, expectedRevision)',
     'const next = { ...input, revision: expectedRevision + 1 }')
+} else if (mode === 'epoch') {
+  generated = replace(generated, '      workflowEpochMatches(await this.load(id), record)\n', '')
+} else if (mode === 'value-cache') {
+  generated = replace(generated, '    const saved = await this.withFrameLock(frame, expectedRevision, async (name, next) => {',
+    '    return this.withFrameLock(frame, expectedRevision, async (name, next) => {')
+  generated = replace(generated, '    })\n    this.rememberOutput(value.name)\n    return saved\n  }',
+    '      this.rememberOutput(value.name)\n    })\n  }')
 } else throw new Error('unknown negative control')
 await mkdir(output)
 const workerPath = join(output, 'sqlite-worker.cjs'), generatedPath = join(output, 'workflow-store.ts')
@@ -35,6 +42,6 @@ await build({ stdin: { contents: worker, resolveDir: here, sourcefile: 'negative
   outfile: workerPath, bundle: true, platform: 'node', format: 'cjs', logLevel: 'silent' })
 await writeFile(generatedPath, generated)
 await writeFile(join(output, 'manifest.json'), JSON.stringify({ ...manifest, workerPath, generatedPath,
-  generatedHash: digest(generated), workerHash: digest(await readFile(workerPath)),
+  generatedHash: digest(generated), generatedBytes: Buffer.byteLength(generated), workerHash: digest(await readFile(workerPath)),
   negativeControl: mode + '; deliberately broken; never eligible for adoption' }, null, 2) + '\n')
 console.log(JSON.stringify({ output, negativeControl: mode }))

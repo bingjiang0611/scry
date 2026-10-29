@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { FileWorkflowStore } from './workflow-store'
+import { storageProbe } from './workflow-storage-probe.fixture'
 import type { WorkflowStoreRecord } from './workflow-store'
 import { WORKFLOW_MAX_STOP_REQUESTS } from '../shared/workflow'
 
@@ -19,7 +20,7 @@ function record(id: string): WorkflowStoreRecord {
   return { preview: { workflowId: id, programRevision: 'rev', userGoal: 'goal', workspace: '/fixture', orchestrator: role, program, plannedCalls: 1, roles: [], state: 'ready', unavailableReasons: [], observedAt: 1 },
     progress: { workflowId: id, programRevision: 'rev', workspace: '/fixture', goal: 'goal', state: 'queued', attempts: [], dispatchAttempts: 0, slots: { limit: 1, inUse: 0, queued: 0 }, updatedAt: 1 }, intents: [], outcomes: [] }
 }
-describe('actual workflow filesystem', () => {
+describe('durable workflow storage contract', () => {
   it('rejects coerced planning stop identities and timestamps without rewriting the journal', async () => {
     const { path, store } = await fixture()
     const intent = { workflowId: 'stop-plan', role: 'orchestrator' as const, providerId: 'pi' as const,
@@ -29,9 +30,9 @@ describe('actual workflow filesystem', () => {
     const file = join(path, 'workflows', 'stop-plan.planning.json')
     for (const invalid of [{ stopCommandId: null }, { stopCommandId: 17 }, { stopRequestedAt: '1' }]) {
       const bytes = JSON.stringify({ ...intent, ...invalid })
-      await writeFile(file, bytes)
+      await storageProbe.replaceMetadata(file, bytes)
       await expect(store.loadPlanningIntent('stop-plan')).rejects.toThrow('工作流规划停止收据合同无效')
-      expect(await readFile(file, 'utf8')).toBe(bytes)
+      expect(await storageProbe.readMetadata(file)).toBe(bytes)
     }
   })
 
@@ -42,9 +43,9 @@ describe('actual workflow filesystem', () => {
       automaticStall: 'unsupported', attempts: [], attemptCount: 0, truncated: false }
     await store.save(value)
     const file = join(path, 'workflows', 'live.json')
-    expect(JSON.parse(await readFile(file, 'utf8')).progress.live).toBeUndefined()
+    expect(JSON.parse(await storageProbe.readMetadata(file)).progress.live).toBeUndefined()
     // A prior producer must not be able to revive a previous process's epoch.
-    await writeFile(file, JSON.stringify(value))
+    await storageProbe.replaceMetadata(file, JSON.stringify(value))
     expect((await new FileWorkflowStore(path).load('live'))?.progress.live).toBeUndefined()
   })
 
@@ -53,7 +54,7 @@ describe('actual workflow filesystem', () => {
     const value = record('stop-corrupt')
     await store.save(value)
     const file = join(path, 'workflows', 'stop-corrupt.json')
-    const stored = JSON.parse(await readFile(file, 'utf8'))
+    const stored = JSON.parse(await storageProbe.readMetadata(file))
     value.stopRequests = kind === 'limit'
       ? Array.from({ length: WORKFLOW_MAX_STOP_REQUESTS + 1 }, (_, index) => ({ commandId: `stop-${index}`, requestedAt: 1 }))
       : kind === 'duplicate' ? [{ commandId: 'same', requestedAt: 1 }, { commandId: 'same', requestedAt: 2 }]
@@ -61,9 +62,9 @@ describe('actual workflow filesystem', () => {
     await expect(store.save(value)).rejects.toThrow('停止收据合同无效')
     // Exercise the independent cold-read boundary even though writes now reject it.
     const bytes = JSON.stringify({ ...stored, stopRequests: value.stopRequests })
-    await writeFile(file, bytes)
+    await storageProbe.replaceMetadata(file, bytes)
     await expect(new FileWorkflowStore(path).load('stop-corrupt')).rejects.toThrow('停止收据合同无效')
-    expect(await readFile(file, 'utf8')).toBe(bytes)
+    expect(await storageProbe.readMetadata(file)).toBe(bytes)
   })
 
   it('commits the immutable planning body before its small durable receipt', async () => {
@@ -75,7 +76,7 @@ describe('actual workflow filesystem', () => {
     expect(intent?.result?.output).toBeUndefined()
     expect(intent?.result?.archiveRef).toBe('fixture/archive')
     expect(await readFile(join(path, 'workflows', intent!.result!.outputRef!), 'utf8')).toBe('PRIVATE_PLANNING_BODY')
-    expect(await readFile(join(path, 'workflows', 'plan.planning.json'), 'utf8')).not.toContain('PRIVATE_PLANNING_BODY')
+    expect(await storageProbe.readMetadata(join(path, 'workflows', 'plan.planning.json'))).not.toContain('PRIVATE_PLANNING_BODY')
   })
   it('resolves live and reopened output bodies through the same durable content address', async () => {
     const { path, store } = await fixture()
@@ -140,7 +141,7 @@ describe('actual workflow filesystem', () => {
   it('reports corrupt stored content as unavailable, not as an absent run', async () => {
     const { path, store } = await fixture()
     await mkdir(join(path, 'workflows'))
-    await writeFile(join(path, 'workflows', 'bad.json'), 'null')
+    await storageProbe.replaceMetadata(join(path, 'workflows', 'bad.json'), 'null')
     await expect(store.load('bad')).rejects.toThrow()
   })
 })

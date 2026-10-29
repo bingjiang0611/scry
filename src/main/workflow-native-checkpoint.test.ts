@@ -1,7 +1,9 @@
 import { mkdtemp, realpath } from 'node:fs/promises'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { WorkflowBlock } from '../shared/workflow'
-import { FileWorkflowStore } from './workflow-store'
+import { FileWorkflowStore, type WorkflowStoreRecord } from './workflow-store'
+import { storageProbe } from './workflow-storage-probe.fixture'
 import { workflowFrameId } from './workflow-frames'
 import { fixture, roots } from './workflow-system.fixture'
 
@@ -38,10 +40,20 @@ describe('canonical native result frame checkpoint', () => {
 
   it('retains the committed native fact but does not advance when the real frame CAS rejects publication', async () => {
     const f = await setup(true), save = f.store.saveFrame.bind(f.store)
-    const publication = vi.spyOn(f.store, 'saveFrame').mockImplementation((frame, revision) => save(frame,
-      frame.nodeId === 'candidate' && frame.phase === 'completed' ? revision - 1 : revision))
+    let committedBeforeFrame = false
+    const publication = vi.spyOn(f.store, 'saveFrame').mockImplementation(async (frame, revision) => {
+      if (frame.nodeId === 'candidate' && frame.phase === 'completed') {
+        // A must already be visible to an independent canonical reader before
+        // attempting B, not reconstructed by failure handling after B rejects.
+        const record = JSON.parse(await storageProbe.readMetadata(join(f.directory, 'workflows', f.preview.workflowId + '.json'))) as WorkflowStoreRecord
+        committedBeforeFrame = record.systemOutcomes?.length === 1 && record.systemOutcomes[0].state === 'completed' && record.systemOutcomes[0].settled === true
+        return save(frame, revision - 1)
+      }
+      return save(frame, revision)
+    })
     try {
       await expect(f.service.start(f.preview.workflowId, f.approval)).rejects.toThrow()
+      expect(committedBeforeFrame).toBe(true)
       expect(f.execute).not.toHaveBeenCalled()
       const cold = new FileWorkflowStore(f.directory), record = (await cold.load(f.preview.workflowId))!
       expect(record.progress.state).toBe('failed')

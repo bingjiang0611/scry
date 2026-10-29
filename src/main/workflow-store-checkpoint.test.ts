@@ -8,8 +8,10 @@ vi.mock('node:fs/promises', async importOriginal => {
   return { ...actual, open: vi.fn(actual.open), rename: vi.fn(actual.rename), writeFile: vi.fn(actual.writeFile) }
 })
 
-import { open, rename, writeFile } from 'node:fs/promises'
+import { open, rename } from 'node:fs/promises'
 import { FileWorkflowStore } from './workflow-store'
+import { frameName } from './workflow-store-artifacts'
+import { storageProbe } from './workflow-storage-probe.fixture'
 import type { WorkflowControlFrame, WorkflowEvaluation, WorkflowValue } from '../shared/workflow'
 
 const roots: string[] = []
@@ -38,7 +40,7 @@ describe('native workflow frame/value checkpoints', () => {
     expect((await readdir(join(root, 'workflows'))).filter(name => name.endsWith('.value.json'))).toEqual(before)
   })
 
-  it('rejects value rename, frame rename, and final directory sync failures without reporting success', async () => {
+  it('rejects value rename, metadata publication, and artifact directory sync failures without reporting success', async () => {
     const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
     const valueFailure = await fixture()
     await valueFailure.store.saveFrame(frame(), 0)
@@ -47,8 +49,8 @@ describe('native workflow frame/value checkpoints', () => {
 
     const frameFailure = await fixture()
     await frameFailure.store.saveFrame(frame(), 0)
-    vi.mocked(rename).mockImplementationOnce(actual.rename).mockImplementationOnce(async () => { throw new Error('frame rename failed') })
-    await expect(frameFailure.store.saveFrameWithValue({ ...frame(), phase: 'completed' }, 1, { field: 'resultRef', key: 'result', evaluation: known('frame') })).rejects.toThrow('frame rename failed')
+    await storageProbe.failMetadataOnce(join(frameFailure.root, 'workflows', frameName('checkpoint-flow', 'node')))
+    await expect(frameFailure.store.saveFrameWithValue({ ...frame(), phase: 'completed' }, 1, { field: 'resultRef', key: 'result', evaluation: known('frame') })).rejects.toThrow(storageProbe.metadataFailure)
 
     const orphan = (await readdir(join(frameFailure.root, 'workflows'))).find(name => name.endsWith('.value.json'))!
     await rm(join(frameFailure.root, 'workflows', orphan))
@@ -57,9 +59,10 @@ describe('native workflow frame/value checkpoints', () => {
 
     const syncFailure = await fixture()
     await syncFailure.store.saveFrame(frame(), 0)
+    const physicalDirectory = await actual.realpath(join(syncFailure.root, 'workflows'))
     vi.mocked(open).mockImplementation(async (...args) => {
       const handle = await actual.open(...args)
-      if (String(args[0]) === join(syncFailure.root, 'workflows')) handle.sync = async () => { throw new Error('directory sync failed') }
+      if ([physicalDirectory, join(syncFailure.root, 'workflows')].includes(String(args[0]))) handle.sync = async () => { throw new Error('directory sync failed') }
       return handle
     })
     try {
@@ -67,39 +70,27 @@ describe('native workflow frame/value checkpoints', () => {
     } finally { vi.mocked(open).mockReset().mockImplementation(actual.open) }
   })
 
-  it('flushes both files and waits for one directory barrier after both renames before acknowledging', async () => {
+  it('flushes artifacts and waits for the real metadata durability barrier before acknowledging', async () => {
     const { store, root } = await fixture()
     await store.saveFrame(frame(), 0)
-    const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
-    let release!: () => void, reached!: () => void
-    const gate = new Promise<void>(resolve => { release = resolve })
-    const started = new Promise<void>(resolve => { reached = resolve })
-    let syncs = 0, acknowledged = false
-    vi.mocked(writeFile).mockClear()
-    vi.mocked(rename).mockClear()
-    vi.mocked(open).mockImplementation(async (...args) => {
-      const handle = await actual.open(...args)
-      if (String(args[0]) === join(root, 'workflows')) {
-        const sync = handle.sync.bind(handle)
-        handle.sync = async () => { syncs++; reached(); await gate; await sync() }
-      }
-      return handle
-    })
+    const gate = await storageProbe.holdPublication(join(root, 'workflows', frameName('checkpoint-flow', 'node')), 'checkpoint')
+    let acknowledged = false
     const checkpoint = store.saveFrameWithValue({ ...frame(), phase: 'completed' }, 1, { field: 'resultRef', key: 'result', evaluation: known('durable') }).then(value => { acknowledged = true; return value })
+    void checkpoint.catch(() => {})
     try {
-      await started
+      await gate.reached
       expect(acknowledged).toBe(false)
-      const writes = vi.mocked(writeFile).mock.calls.filter(([path]) => String(path).endsWith('.tmp'))
-      expect(writes).toHaveLength(2)
-      for (const [, , options] of writes) expect(options).toMatchObject({ flush: true, mode: 0o600 })
-      expect(vi.mocked(rename)).toHaveBeenCalledTimes(2)
-      expect(syncs).toBe(1)
-    } finally {
-      release()
+      await gate.expectHeld()
+      expect(acknowledged).toBe(false)
+      await gate.release()
       await checkpoint
-      vi.mocked(open).mockReset().mockImplementation(actual.open)
+      await gate.expectSettled()
+    } finally {
+      await gate.release()
+      await checkpoint.catch(() => {})
+      gate.restore()
     }
-    expect(syncs).toBe(1)
+    expect(acknowledged).toBe(true)
     expect(await store.loadValue('checkpoint-flow', (await store.loadFrame('checkpoint-flow', 'node'))!.resultRef!)).toEqual(known('durable'))
   })
 })

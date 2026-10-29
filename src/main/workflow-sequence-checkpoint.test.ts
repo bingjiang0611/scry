@@ -1,17 +1,18 @@
-import { mkdtemp, open, realpath } from 'node:fs/promises'
+import { mkdtemp, realpath } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { WorkflowBlock, WorkflowProgress } from '../shared/workflow'
 import { FileWorkflowStore } from './workflow-store'
 import { workflowFrameId } from './workflow-frames'
+import { frameName } from './workflow-store-artifacts'
+import { storageProbe, type PublicationGate } from './workflow-storage-probe.fixture'
 import { fixture, roots } from './workflow-system.fixture'
 
 vi.mock('node:fs/promises', async importOriginal => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
-  return { ...actual, open: vi.fn(actual.open) }
+  return { ...actual, open: vi.fn(actual.open), rename: vi.fn(actual.rename), writeFile: vi.fn(actual.writeFile) }
 })
-const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
 
 async function setup() {
   const directory = await realpath(await mkdtemp('/tmp/scry-sequence-checkpoint-'))
@@ -80,51 +81,45 @@ describe('terminal sequence child checkpoint', () => {
     } finally { fault.mockRestore() }
   })
 
-  it.each([false, true])('does not acknowledge the terminal parent before its real directory barrier: fail=%s', async fail => {
+  it.each([false, true])('does not acknowledge the terminal parent before its real durability barrier: fail=%s', async fail => {
     const f = await setup(), save = f.store.saveFrameWithValue.bind(f.store)
-    let gate = false, reached!: () => void, release!: () => void
-    const barrier = new Promise<void>(resolve => { reached = resolve }), held = new Promise<void>(resolve => { release = resolve })
-    const publication = vi.spyOn(f.store, 'saveFrameWithValue').mockImplementation((frame, revision, checkpoint) => {
-      if (frame.nodeId === 'nested' && frame.phase === 'completed') gate = true
-      return save(frame, revision, checkpoint)
-    })
-    vi.mocked(open).mockImplementation(async (...args) => {
-      const handle = await actual.open(...args)
-      if (gate && String(args[0]) === join(f.directory, 'workflows') && args[1] === 'r') {
-        gate = false
-        const sync = handle.sync.bind(handle)
-        handle.sync = async () => {
-          reached()
-          await held
-          if (fail) throw new Error('fixture terminal sequence directory sync failure')
-          await sync()
-        }
+    let gate: PublicationGate | undefined, prepared!: (gate: PublicationGate) => void
+    const barrier = new Promise<PublicationGate>(resolve => { prepared = resolve })
+    const publication = vi.spyOn(f.store, 'saveFrameWithValue').mockImplementation(async (frame, revision, checkpoint) => {
+      if (frame.nodeId === 'nested' && frame.phase === 'completed') {
+        gate = await storageProbe.holdPublication(join(f.directory, 'workflows', frameName(f.preview.workflowId, frame.frameId)), 'sequence', fail)
+        prepared(gate)
       }
-      return handle
+      return save(frame, revision, checkpoint)
     })
     let running: Promise<WorkflowProgress> | undefined
     try {
       let acknowledged = false
       running = f.service.start(f.preview.workflowId, f.approval)
       const result = running.then(progress => { acknowledged = true; return { state: 'resolved' as const, progress } }, error => ({ state: 'rejected' as const, error: error as unknown }))
-      await barrier
+      const terminalGate = await barrier
+      await terminalGate.reached
+      expect(acknowledged).toBe(false)
+      await terminalGate.expectHeld()
       expect(acknowledged).toBe(false)
       expect(f.execute).toHaveBeenCalledTimes(1)
       const cold = new FileWorkflowStore(f.directory)
-      expect((await cold.load(f.preview.workflowId))!.progress.state).not.toBe('completed')
-      release()
+      // Inspect canonical storage independently while the writer is held;
+      // the SQL writer deliberately serializes its own queued read requests.
+      expect(JSON.parse(await storageProbe.readMetadata(join(f.directory, 'workflows', f.preview.workflowId + '.json'))).progress.state).not.toBe('completed')
+      await terminalGate.release()
       const outcome = await result
       if (fail) {
-        expect(outcome).toMatchObject({ state: 'rejected', error: { message: 'fixture terminal sequence directory sync failure' } })
+        expect(outcome).toMatchObject({ state: 'rejected', error: { message: storageProbe.publicationFailure('sequence') } })
         expect(acknowledged).toBe(false)
         expect((await cold.load(f.preview.workflowId))!.progress.state).toBe('failed')
       } else expect(outcome).toMatchObject({ state: 'resolved', progress: { state: 'completed', dispatchAttempts: 1 } })
       expect(f.execute).toHaveBeenCalledTimes(1)
     } finally {
-      release()
+      await gate?.release()
       if (running) await Promise.allSettled([running])
       publication.mockRestore()
-      vi.mocked(open).mockReset().mockImplementation(actual.open)
+      gate?.restore()
     }
   })
 })
