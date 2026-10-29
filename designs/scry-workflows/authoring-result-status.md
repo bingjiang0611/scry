@@ -1,6 +1,13 @@
 # 受限规划参数与 canonical SDK 结果：有界实施记录
 
-状态：**代码及本地合同检查通过；真实 Native SDK 规划未验收，M2 未完成。** 本文续接 [ConversationService 拆分](conversation-service-extraction-status.md) 与 [Claude settings 来源](claude-settings-source-status.md)，不替代总台账或此前冻结证据。
+状态：**本文冻结的 Claude 离线检查仍未通过；后续已由 Qoder 生产路径取得真实受限规划证据，但不改写本记录中的原失败。** 本文续接 [ConversationService 拆分](conversation-service-extraction-status.md) 与 [Claude settings 来源](claude-settings-source-status.md)，不替代总台账或此前冻结证据。
+
+## 2026-10-29 后续：Qoder 生产路径
+
+- Provider registry 现在为 Qoder 声明 `workflowAuthoring`，来源为成功 `result` 消息中的 JSON object。普通 Qoder run 不变。
+- authoring query 使用默认权限、全新非持久 session、`tools: []`、拒绝任意工具调用的 `canUseTool`、空 skills/settings/MCP，并拒绝 resume、历史和附件。Main 仍执行 WorkflowProgram/schema 校验；普通助手文本和无法解析的 JSON 不提升为候选。
+- 当前隔离 App 使用 Qoder `auto` 真实生成一 call + return 程序。预览为 ready，显式批准后 worker 实际模型为 `auto`，终态 completed，最终输出 `SCRY_M6_QODER_AUTHORING_OK`。可读汇总为 `~/.local/state/rotom/verification-evidence/scry-m6-native-default-20261029-093728/m6-current-authoring-typesafe-summary.json`。
+- 该证据关闭“只有 Claude 声明、当前机器不可执行”的 Provider 缺口；不把本文原 Claude 离线超时改写成成功，也不证明所有 Provider 具备同等能力。
 
 ## 当前实现
 

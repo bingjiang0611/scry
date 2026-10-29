@@ -61,9 +61,18 @@ describe('TypeSafe workflow classifier HTTP contract', () => {
     await expect(adapter(base('bool'))).resolves.toMatchObject({ state: 'unknown', settled: false })
   })
 
-  it('is unavailable without an explicit API key and does not call fetch', async () => {
+  it('resolves a deferred credential and remains unavailable when none exists', async () => {
+    const url = await localResponse((_body, request, response) => {
+      expect(request.headers.authorization).toBe('Bearer resolved-key')
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ model: 'jev-fixture', answers: { classifier: { type: 'noul', noul: 0.75 } }, usage: { input_tokens: 1, output_tokens: 1 } }))
+    })
+    await expect(createTypeSafeWorkflowClassifierAdapter(undefined, { apiUrl: url, resolveApiKey: async () => 'resolved-key' })(base('bool')))
+      .resolves.toMatchObject({ state: 'completed', value: true })
+
     let called = false
-    const adapter = createTypeSafeWorkflowClassifierAdapter(undefined, { fetch: async () => { called = true; throw new Error('must not call') } })
+    const adapter = createTypeSafeWorkflowClassifierAdapter(undefined, { resolveApiKey: async () => undefined,
+      fetch: async () => { called = true; throw new Error('must not call') } })
     await expect(adapter(base('bool'))).resolves.toMatchObject({ state: 'unavailable', settled: true, reason: 'TYPESAFE_API_KEY is not configured' })
     expect(called).toBe(false)
   })

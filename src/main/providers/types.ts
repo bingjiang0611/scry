@@ -56,7 +56,7 @@ export type ProviderInputReceipt = { contextHash: string | null } & (
 )
 
 /** Immutable result JSON, not transcript text. The fixture source is test-only, never SDK evidence. */
-export type ProviderStructuredOutput = Readonly<{ source: 'claude_sdk_success_result' | 'scry_fixture_success_result'; json: string }>
+export type ProviderStructuredOutput = Readonly<{ source: 'claude_sdk_success_result' | 'qoder_cli_success_result' | 'scry_fixture_success_result'; json: string }>
 
 export interface ProviderRunResult {
   externalSessionId?: string

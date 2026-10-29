@@ -12,6 +12,7 @@ export type TypeSafeWorkflowClassifierOptions = Readonly<{
   apiUrl?: string
   timeoutMs?: number
   fetch?: FetchLike
+  resolveApiKey?: () => Promise<string | undefined>
 }>
 
 function record(value: unknown): JsonRecord | undefined {
@@ -86,11 +87,15 @@ function completed(intent: WorkflowClassifierIntent, answer: JsonRecord, model: 
 }
 
 export function createTypeSafeWorkflowClassifierAdapter(apiKey: string | undefined, options: TypeSafeWorkflowClassifierOptions = {}): WorkflowClassifierAdapter {
-  if (!apiKey) return async intent => unavailable(intent, 'TYPESAFE_API_KEY is not configured')
   const apiUrl = options.apiUrl ?? DEFAULT_API_URL
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const fetchImpl = options.fetch ?? fetch
   return async (intent, signal) => {
+    let resolvedApiKey = apiKey
+    try { resolvedApiKey ??= await options.resolveApiKey?.() } catch (error) {
+      return unavailable(intent, `TypeSafe credential unavailable: ${String((error as Error).message)}`)
+    }
+    if (!resolvedApiKey) return unavailable(intent, 'TYPESAFE_API_KEY is not configured')
     const question = questionFor(intent)
     if (!question) return unavailable(intent, 'TypeSafe cannot represent this classifier rubric')
     if (intent.inputs.some(input => input.value.state !== 'known')) return unknown(intent, 'classifier input is unavailable')
@@ -102,7 +107,7 @@ export function createTypeSafeWorkflowClassifierAdapter(apiKey: string | undefin
     try {
       const response = await fetchImpl(apiUrl, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${resolvedApiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: intent.model ?? DEFAULT_MODEL, state: stateFor(intent), questions: { classifier: question } }),
         signal: controller.signal
       })

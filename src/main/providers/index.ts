@@ -2,6 +2,7 @@ import type { ProviderAdapter } from './types'
 import { createClaudeAdapter } from './claude'
 import { createCodexAdapter } from './codex'
 import { createQoderAdapter } from './qoder'
+import { withQoderWorkflowAuthoring } from './qoder-workflow-authoring'
 import { createOpenCodeAdapter } from './opencode'
 import { createPiAdapter } from './pi'
 import type { PiAgentProfile } from '../pi-agent-profiles'
@@ -20,7 +21,7 @@ export function createBuiltInProviderAdapters(
   return [
     createClaudeAdapter(homeDir),
     createCodexAdapter(codexHomeDir, homeDir),
-    createQoderAdapter(homeDir),
+    withQoderWorkflowAuthoring(createQoderAdapter(homeDir)),
     createOpenCodeAdapter(homeDir, openCodeMcpAuthDirectory, openCodeSessionStateDirectory),
     ...(piProfiles ? [createPiAdapter(piProfiles)] : [])
   ]

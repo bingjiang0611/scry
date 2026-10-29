@@ -8,6 +8,7 @@ import type { RemoteHostService } from './remote/remote-host-service'
 import { CommandReceipts } from './command-receipts'
 import { createAppWorkflowRuntime } from './workflow-app-runtime'
 import { createTypeSafeWorkflowClassifierAdapter } from './typesafe-workflow-classifier'
+import { createTypeSafeApiKeyResolver } from './typesafe-api-key'
 import { WorkflowTemplateEditCandidateStore } from './workflow-template-edit-candidate-store'
 import { createDesktopTemplateEditAuthoring } from './desktop-template-edit-authoring'
 import { WorkflowTemplateEditApplicationStore } from './workflow-template-edit-application-store'
@@ -132,7 +133,9 @@ export function registerMainWorkflowIpc(deps: MainWorkflowIpcDeps): MainWorkflow
     requestRunStopAgain: deps.requestRunStopAgain,
     resolveTemplateProjectDirectory: deps.resolveTemplateProjectDirectory,
     onProgress: progress => deps.sendProgress(progress),
-    classifierAdapter: createTypeSafeWorkflowClassifierAdapter(process.env.TYPESAFE_API_KEY)
+    classifierAdapter: createTypeSafeWorkflowClassifierAdapter(process.env.TYPESAFE_API_KEY, {
+      resolveApiKey: createTypeSafeApiKeyResolver()
+    })
   })
   const { workflowService, workflowStore, workflowTemplates, workflowSourceApplications, workflowRunControls, runAuthoring } = workflowRuntime
   const resolveWorkflowAuthoringContinuationKey = (context: ProviderContext) => {
