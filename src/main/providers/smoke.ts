@@ -93,6 +93,21 @@ export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' | 'pi'
             questions: [{ header: 'Performance fixture', question: 'Keep this isolated run open?', options: [], multiSelect: false }]
           }, questionAbort.signal)
         }
+        if (request.prompt === 'concurrency trace live') {
+          // Offline trace-volume fixture: the whole seed burst is emitted synchronously, before any
+          // user interaction, so a run's event order never depends on timing.
+          if (!request.requestUserInput) throw new Error('Concurrency trace fixture requires requestUserInput')
+          for (let index = 1; index <= 1000; index++) {
+            const label = String(index).padStart(4, '0')
+            request.emit({ id: `${request.runId}:concurrency-trace:${label}`, runId: request.runId, ts: new Date().toISOString(),
+              kind: 'harness', stage: 'runtime:progress', text: `concurrency trace seed ${label}` })
+          }
+          request.emit({ id: `${request.runId}:concurrency-trace-ready`, runId: request.runId, ts: new Date().toISOString(),
+            kind: 'model', stage: 'text', text: 'concurrency trace ready' })
+          await request.requestUserInput({ runId: request.runId, questionId: `${request.runId}:concurrency-trace`, providerId,
+            questions: [{ header: 'Concurrency trace', question: 'Continue the concurrency trace fixture?', options: [], multiSelect: false }]
+          }, questionAbort.signal)
+        }
         if (request.prompt === 'dock badge question smoke') {
           if (!request.requestUserInput) throw new Error('Question smoke requires requestUserInput')
           for (const step of [1, 2]) {
