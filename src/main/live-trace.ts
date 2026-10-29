@@ -53,6 +53,32 @@ export function consumeTraceMutations(items: readonly TraceEvent[]): void {
 }
 
 /**
+ * Evidence attached to a projected array this process built, so the revision store can reuse the
+ * hashes of the part that provably did not change. It holds numbers plus one opaque token: no raw
+ * or projected arrays, no run ids, and it is never an IPC field a renderer or peer could forge.
+ */
+export interface ProjectionStamp {
+  /** Opaque per cache entry: equal only while the same projection generation produced both. */
+  readonly generation: object
+  /** Raw mutation revision this projection was built from. */
+  readonly revision: number
+  /** Revision the previous projection of this generation was built from; null if unknown. */
+  readonly baseRevision: number | null
+  /** First index that was actually re-projected. */
+  readonly dirtyFrom: number
+}
+
+const projectionStamps = new WeakMap<readonly TraceEvent[], ProjectionStamp>()
+
+export function stampProjection(items: readonly TraceEvent[], stamp: ProjectionStamp): void {
+  projectionStamps.set(items, stamp)
+}
+
+export function projectionStamp(items: readonly TraceEvent[]): ProjectionStamp | undefined {
+  return projectionStamps.get(items)
+}
+
+/**
  * 按 id 原地替换或追加。运行中 Diff 预览用固定 id 反复发布，必须替换而不是堆积
  * （renderer 的 applyTraceBatch 对同 id 事件同样是原地替换，两侧语义一致）。
  */

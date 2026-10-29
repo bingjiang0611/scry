@@ -1,7 +1,7 @@
 import type { BrowserWindow } from 'electron'
 import type { ActiveRun, TraceEvent } from '../../shared/trace'
 import type { AgentQuestionRequest, AgentIntervention } from '../../shared/runtime'
-import { appendCoalescedTrace, consumeTraceMutations, traceMutationState, type TraceMutationState } from '../live-trace'
+import { appendCoalescedTrace, consumeTraceMutations, stampProjection, traceMutationState, type TraceMutationState } from '../live-trace'
 import { sanitizeToolEvent, sanitizeToolEvents, toolContentTurnBudget } from '../../core/turn-recorder/tool-content'
 import { UserQuestionBroker, type UserQuestionChange } from '../user-question'
 import { RunRegistry } from '../run-registry'
@@ -12,6 +12,8 @@ import type { RunControl } from './run-control'
 
 interface ProjectionCacheEntry {
   state: TraceMutationState
+  /** Opaque token for this entry's projection generation; survives rebuilds, not eviction. */
+  generation: object
   items: TraceEvent[]
   /** Turn budget left after each projected item, so a rebuild can resume at any index. */
   remaining: number[]
@@ -177,6 +179,7 @@ export function createTraceRuntime({
     // a full rebuild is honest. Otherwise resume at the earliest recorded write.
     const from = !cached ? 0
       : cached.seenRevision >= state.baseRevision ? Math.min(state.dirtyFrom, run.items.length) : 0
+    const generation = cached?.generation ?? {}
     const items = cached ? cached.items.slice(0, from) : []
     const remaining = cached ? cached.remaining.slice(0, from) : []
     let budget = from === 0 ? toolContentTurnBudget(LIVE_TOOL_CONTENT_POLICY) : cached!.remaining[from - 1]
@@ -188,10 +191,18 @@ export function createTraceRuntime({
       remaining.push(step.remaining)
       budget = step.remaining
     }
+    // Snapshot the numbers before consuming: they describe the array just built, and the stamp
+    // must not alias the mutable mutation state afterwards.
+    stampProjection(items, {
+      generation,
+      revision: state.revision,
+      baseRevision: cached?.seenRevision ?? null,
+      dirtyFrom: from
+    })
     consumeTraceMutations(run.items)
     projectedItems -= cached?.items.length ?? 0
     projections.delete(run.runId)
-    projections.set(run.runId, { state, items, remaining, seenRevision: state.revision })
+    projections.set(run.runId, { state, generation, items, remaining, seenRevision: state.revision })
     projectedItems += items.length
     while (projections.size > MAX_CACHED_RUNS || projectedItems > MAX_CACHED_ITEMS) {
       const oldest = projections.keys().next().value

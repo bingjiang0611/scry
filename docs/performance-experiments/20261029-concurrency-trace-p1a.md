@@ -2,11 +2,11 @@
 
 ## 状态
 
-**P1a 代码、focused／typecheck／build／L1 已验证；真实 App／50k 功能与完整 P1 A/B 未验证，P1b 尚未实施。**
+**P1a 代码与真实功能检查点均已验证；完整预注册 A/B 未验证。P1b 已实现并通过功能与 L1 验证，见 [P1b 篇](./20261029-concurrency-trace-p1b.md)。**
 
-- 这是 P1 的**第一个检查点**，不是性能验收。完整候选（P1a+P1b）之后才按 [P0 冻结篇](./20261028-concurrency-trace-p0-freeze.md) §4.2 的 32 + 16 预注册采样做 A/B 比较。
+- 这是 P1 的**第一个检查点**，不是性能验收。完整候选（P1a+P1b）之后才按 [P0 冻结篇](./20261028-concurrency-trace-p0-freeze.md) §4.2 做 32 + 16 预注册采样。
 - P0 frozen 副本 `/tmp/scry-p0-accepted-baseline.zYksRe/` 未变，预注册 §3／§4 一字未改。
-- 未安装、未推送；本篇的提交号等父会话提交后另补。
+- 未安装、未推送。检查点代码提交 `445fa62ce33c60f3787428a0e6123db3f4f024db`。
 
 ## 1. 做了什么
 
@@ -63,19 +63,29 @@
 | writer／other | 不变 | 不变 | — |
 | hash calls／bytes | 349 998／115 847 868 | 同左 | 不变 |
 
-边界：此处量到的减少是**重复投影里工具 input 的编码**（同一批 tool 事件每次读取都重新 capture 并 JSON 序列化）以及相应 total 计数；hash 仍全量，所以不能叫整体 CPU 下降，也不能说"更快"。本场景无 `worse` 项。
+边界：此处量到的减少是**重复投影里工具 input 的编码**（同一批 tool 事件每次读取都重新 capture 并 JSON 序列化）以及相应 total 计数；hash 仍全量，所以不能叫整体 CPU 下降，也不能说"更快"。本场景无 `worse` 项。（P1b 增量 hash 不在此列。）
 
-## 5. 未验证与阻塞
+## 5. 真实功能检查点（锁自然释放后完成）
 
-- **真实 App 与 50k 功能未跑**：artifact 已构建 `/tmp/scry-p1a-main50k-build.i1ciZv`（bundle SHA `c58a7c2451687b34096b101c6eee1e0f6ab278fbbb0045d4453bde564ca9429d` / 66 673 B），但两次尝试都在 pre-dispatch 阶段被共享 timing 锁挡住、exit 75：
+锁释放后，父会话用同一 artifact 完成了真实功能检查点，结果 `/tmp/scry-p1a-checkpoint-functional.GNExdI/acceptance.json`：
+
+- R6 `limit 16 / peers 1`：16 个正常回答、16 个真实 archives、112 rounds ＋ 完整 oracle，seeds 16 000；host 4 个、client 3 个登记进程 stopped 且 close0。
+- main50k：35 phases、完整 oracle，3 个登记进程 stopped 且 close0。
+- `corrupt-body` 负控：exit 1，确实由 oracle 拒绝并保留原始错误；3 个登记进程 stopped 且 close0。
+- 身份稳定：App `out` 为 `ada10eebbd8e8cbdc467be2ce354b2b0f4eed57895df43ba89f1ae7ac9ca8337`，`liveOut` `540bb0c0…`，50k bundle 仍 `c58a7c2451687b34096b101c6eee1e0f6ab278fbbb0045d4453bde564ca9429d` / 66 673 B。
+- 三次运行都是 `highLoad=true`（17.17→17、17→16.52、16.52→16.52），因此**只作功能证据**：不是 A/B 样本，不补采、不替代，也不能用来说明更快。
+
+## 5b. 未验证与阻塞（历史，保留两次 pre-dispatch）
+
+- **第一次尝试时真实 App 与 50k 功能未跑**：artifact 已构建 `/tmp/scry-p1a-main50k-build.i1ciZv`（bundle SHA `c58a7c2451687b34096b101c6eee1e0f6ab278fbbb0045d4453bde564ca9429d` / 66 673 B），但两次尝试都在 pre-dispatch 阶段被共享 timing 锁挡住、exit 75：
   - `/tmp/scry-p1a-functional.BX0nEZ/r6/driver.log`：`checkpoint-matched-final-sqlite`（pid 63017）
   - 确认 owner 退出、锁释放后一次重试 `/tmp/scry-p1a-functional-after-lock.jyp7Z5/r6/driver.log`：`checkpoint-final-independent-contracts`（pid 63813）
   - 两次都只有 `driver.log`，没有 App 子进程；50k 与 `corrupt-body` 命令都没到达。未抢锁、未杀他人进程、未补样本。
-- 因此：无 R6／50k 真实回放，无 P1 A/B，无 L2／L3 结论；内存只有 before／after 有界样本口径，paint／WAN 未测。
+- 因此当时：无 R6／50k 真实回放，无 P1 A/B，无 L2／L3 结论；内存只有 before／after 有界样本口径，paint／WAN 未测。后来的真实功能检查点见 §5，但**完整 A/B 仍未开始**。
 
 ## 6. 下一步
 
 1. 父会话提交本检查点（提交号后补）。
-2. 锁空闲后重跑真实 App／50k 功能与 `corrupt-body` 控制。
-3. 实施 P1b（为 delta 提供 hash hint），保持现有 `MAX_*` 与旧 cursor／reset 合同不变。
+2. ~~锁空闲后重跑真实 App／50k 功能与 `corrupt-body` 控制~~ → 已在 §5 完成（功能证据，非 A/B）。
+3. P1b（为 delta 提供 hash hint）已实现，功能与 L1 已验证（[P1b 篇](./20261029-concurrency-trace-p1b.md)）；`MAX_*` 与旧 cursor／reset 合同保持不变。
 4. P1a+P1b 合体成候选后，才按预注册 §4.2 做 32 + 16 采样；功能／oracle／身份／cleanup 出错立即停止；`highLoad` 按 §4.3 只排除该配对、不补采，未达 MDE 不报改善。
