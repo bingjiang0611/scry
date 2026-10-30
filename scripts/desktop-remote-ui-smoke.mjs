@@ -172,7 +172,7 @@ try {
     }).catch(error => { console.error(error); app.exit(1) })
   `)
   await new Promise((resolve, reject) => {
-    const child = spawn(electron, [join(temp, 'main.cjs'), '--disable-gpu'], {
+    const child = spawn(electron, [join(temp, 'main.cjs'), '--disable-gpu', ...(scenario === 'activity' ? ['--force-prefers-reduced-motion'] : [])], {
       env: { PATH: process.env.PATH, TMPDIR: tmpdir(), HOME: join(temp, 'home'), SCRY_TEST_APP: '1' }, stdio: ['ignore', 'pipe', 'pipe']
     })
     let output = ''
