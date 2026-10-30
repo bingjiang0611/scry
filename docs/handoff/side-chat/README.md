@@ -1,6 +1,6 @@
 # 侧边会话 · 设计稿
 
-状态：本文件保留为**历史设计提案**（当时未实现 App 功能）。功能已经实现、通过发布门禁并已安装，当前 `/Applications/Scry.app` 就是这份已验证产物（App `0.2.235` / 私有 CLI `0.2.53` / `app.asar` `74fcedb9…`）。当前版本、证据、门禁、首次失败、安装轮转与实际限制见 **[large-history-delivery.md](./large-history-delivery.md)**；大历史实现与逐项验证分别见 [large-history-fix.md](./large-history-fix.md) 与 [large-history-verification.md](./large-history-verification.md)。更早一轮 `0.2.231` 的记录（[final-delivery.md](./final-delivery.md)、[release-verification.md](./release-verification.md)）是历史，不是当前证明。下面各节的布局、文案与默认行为仍是设计基线，不是实现状态声明。
+状态：本文件保留为**历史设计提案**（当时未实现 App 功能）。功能已经实现、通过发布门禁并已安装，当前 `/Applications/Scry.app` 就是这份已验证产物（App `0.2.235` / 私有 CLI `0.2.53` / `app.asar` `74fcedb9…`），这些提交父级已快进到 `main`（未 push）。CLI 的 Node 20/22/24 三分位 smoke 都实际跑过。当前版本、证据、门禁、首次失败、安装轮转与实际限制见 **[large-history-delivery.md](./large-history-delivery.md)**；大历史实现与逐项验证分别见 [large-history-fix.md](./large-history-fix.md) 与 [large-history-verification.md](./large-history-verification.md)。更早一轮 `0.2.231` 的记录（[final-delivery.md](./final-delivery.md)、[release-verification.md](./release-verification.md)）是历史，不是当前证明。下面各节的布局、文案与默认行为仍是设计基线，不是实现状态声明。
 
 - [交互设计稿](./index.html)：独立 HTML 示例，不连接 Provider，不修改项目文件，不保存真实会话。
 - [技术方案](./technical-plan.md)：现有调用链、数据合同、并行边界、实施顺序与验收。
