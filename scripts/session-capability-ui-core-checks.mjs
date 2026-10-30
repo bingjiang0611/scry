@@ -11,7 +11,7 @@ export async function exerciseSessionCapabilityCore() {
     const observer = new MutationObserver(changed)
     const timer = setTimeout(() => {
       observer.disconnect(); document.removeEventListener('focusin', changed, true)
-      reject(new Error(`DOM condition timed out: ${predicate.toString()}; active=${document.activeElement?.outerHTML.slice(0, 300)}; hasFocus=${document.hasFocus()}; satisfied=${predicate()}`))
+      reject(new Error(`DOM condition timed out: ${predicate.toString()}; active=${document.activeElement?.outerHTML.slice(0, 300)}; hasFocus=${document.hasFocus()}`))
     }, 5000)
     document.addEventListener('focusin', changed, true)
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true })

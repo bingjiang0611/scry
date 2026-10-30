@@ -174,6 +174,14 @@ async function runScript(script: string, bindings: Record<string, unknown>) {
 }
 
 describe('ported label workflows', () => {
+  it('limits vouch write permissions to the label job', () => {
+    const vouch = workflow('pr-vouch.yml')
+    const readOnly = { contents: 'read', 'pull-requests': 'read' }
+    expect(vouch.permissions).toEqual(readOnly)
+    expect(vouch.jobs['collect-targets'].permissions ?? vouch.permissions).toEqual(readOnly)
+    expect(vouch.jobs.label.permissions).toEqual({ contents: 'read', issues: 'write', 'pull-requests': 'write' })
+  })
+
   it('trusted write jobs never checkout PR head or run project code; size bootstrap is reachable', () => {
     for (const file of ['pr-size.yml', 'pr-vouch.yml']) {
       const config = workflow(file)

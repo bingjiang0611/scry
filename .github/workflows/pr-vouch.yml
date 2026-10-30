@@ -15,8 +15,7 @@ on:
 
 permissions:
   contents: read
-  issues: write
-  pull-requests: write
+  pull-requests: read
 
 jobs:
   collect-targets:
@@ -65,6 +64,10 @@ jobs:
 
   label:
     name: Label PR ${{ matrix.target.number }}
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
     needs: collect-targets
     if: ${{ needs.collect-targets.outputs.targets != '[]' }}
     runs-on: ubuntu-24.04

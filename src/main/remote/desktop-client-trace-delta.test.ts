@@ -58,8 +58,23 @@ describe('DesktopRemoteClient trace delta negotiation', () => {
     await client.connect(id)
     const item = (index: number, text = `t${index}`): TraceEvent => ({ id: `event-${index}`, runId, ts: '2026-10-23T00:00:00Z', kind: 'model' as const, stage: 'text', text })
     const context: DesktopRemoteContext = { cwd, providerId: 'claude', externalSessionId: 'native' }
-    return { client, id, run, runId, context, item, queries, traceQueries: () => queries.filter((query) => query.kind === 'trace'), dispose: () => rm(directory, { recursive: true, force: true }) }
+    return { client, id, run, runId, context, item, queries,
+      traceQueries: () => queries.filter((query) => query.kind === 'trace'),
+      dispose: async () => {
+        await client.dispose()
+        await rm(directory, { recursive: true, force: true })
+      }
+    }
   }
+
+  it('fixture cleanup disposes its connected client', async () => {
+    const f = await deltaSetup()
+    const dispose = vi.spyOn(f.client, 'dispose')
+    try {
+      await f.dispose()
+      expect(dispose).toHaveBeenCalledOnce()
+    } finally { await f.client.dispose() }
+  })
 
   it('new client and new host exchange only changed items and reproduce the host run', async () => {
     const f = await deltaSetup()

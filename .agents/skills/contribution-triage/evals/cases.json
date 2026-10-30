@@ -42,6 +42,11 @@
       "expected": "retrieve the changed base evidence or trusted policy and reassess before any write; unchanged head A does not make the old assessment current"
     },
     {
+      "id": "partial-repeated-evidence",
+      "submission": "A comment, screenshot and attachment repeat one CI run. Only a partial log was retrieved; its final result is inaccessible. A performance artifact labels its measurements estimated, but the contributor calls them exact and says three independent checks passed.",
+      "expected": "incomplete for the inaccessible required result; preserve partial/estimated status and original sources, count the repeated CI run once, and name the evidence needed before eligibility can be established"
+    },
+    {
       "id": "ambiguous-write",
       "submission": "An authorized, unprotected ineligible PR has a closure explanation. The close request times out; the tool cannot tell if it executed.",
       "expected": "read current PR state before any retry; if closed, report confirmed closure without replay; if unavailable, report incomplete with owner/action"
