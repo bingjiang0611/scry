@@ -15,7 +15,8 @@
 | Linux 密钥环 `basic_text` 拒绝 | 已实施 | `unsafeCredentialStorageReason` + 单测；未在真实密钥环状态验证 |
 | 快捷键提示跟随平台 | 已实施 | renderer `platform.ts`；`保存 ⌘S`/`⌘↵` 改为平台值 |
 | Linux CI 打包门禁 | 已实施，未跑过 | `.github/workflows/ci.yml` 的 `packaged-linux` job 尚未在 Linux runner 实际执行 |
-| Linux 运行、pacman 安装、Wayland、中文输入、真实密钥环、真实 Provider | 未验证 | 无 Linux 主机，本地无可用容器运行时 |
+| Linux 真实运行、原生模块、pacman 包生成 | 已在本地 Linux 容器验证 | 见 [本地验证记录](linux-omarchy-local-verification.md) |
+| Wayland、中文输入、真实密钥环、真实 Provider | 未验证 | 需目标机 |
 
 ## 1. 目标与范围
 
@@ -235,4 +236,4 @@ App 与独立 CLI 保持现有分别版本化策略；Linux 与 macOS App 不另
 - [Electron 42.10.1 safeStorage 合同](https://github.com/electron/electron/blob/v42.10.1/docs/api/safe-storage.md)：Linux `basic_text` 使用固定明文口令，不能当成安全 secret store。
 - [Omarchy 上游](https://github.com/omacom/omarchy)：前期核查的默认分支为 `quattro`；包清单、UWSM/mise、Fcitx 与 keyring 配置只作为集成线索，不代表用户安装版本。
 
-本文依据源码检查和上游资料编写。已执行：macOS 打包与产物检查、在 macOS 上交叉构建 Linux 解包目录并核对布局/locale、启动器与运行时适配的 focused 测试。未执行：Linux 上的真实运行、pacman 安装、Wayland/Hyprland 交互、中文输入、真实密钥环与真实 Provider 请求。实施前重新核对 lockfile 中的 Electron 版本与目标系统；外部主分支资料不作为固定版本验收证据。
+本地 Linux 容器验证结果见 [本地验证记录](linux-omarchy-local-verification.md)。仍未验证：Wayland/Hyprland 交互、中文输入、真实密钥环与真实 Provider 请求，这些只能在目标机确认。

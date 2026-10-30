@@ -293,7 +293,7 @@ async function main() {
   const restart = await exerciseRestart({ ...context(), terminalSmoke: terminalCore.terminalSmoke, cdp, child })
   const { surfaceSmoke } = surfaces
   const { lifecycleSmoke, historyReloadSmoke } = providerHistory
-  const { windowChrome, collapsedChrome, transportPicker, modal, subframeIpc } = windowBoundary
+  const { windowChrome, collapsedChrome, transportPicker, modal, subframeIpc, chrome } = windowBoundary
   const { terminalSmoke, reloadAdoption, activeAfterReload } = terminalCore
   const { recordingSmoke } = recording
   const { historyRestart } = restart
@@ -316,6 +316,7 @@ async function main() {
     historyReload: historyReloadSmoke,
     historyRestart: { ...historyRestart, mode: 'owned-app-crash' },
     surfaces: surfaceSmoke,
+    chrome,
     modal,
     subframeIpc,
     popupDenied: true,

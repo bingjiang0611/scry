@@ -75,17 +75,22 @@ export async function exerciseWindowBoundary(smokeContext) {
       lightBackgrounds
     }
   })()`)
-  assert.equal(windowChrome.platform, 'macos')
-  assert.deepEqual(
-    [windowChrome.brand?.top, windowChrome.topbar?.top],
-    [0, 0],
-    'macOS primary app columns must extend to the top window edge'
-  )
-  assert.deepEqual(
-    [windowChrome.surfaceSlot?.top, windowChrome.surfaceTopbar?.top],
-    [0, 0],
-    'on-demand Surface must join the integrated titlebar at the window edge'
-  )
+  // 这组断言验证 macOS 的集成标题栏：隐藏标题栏、红绿灯安全区与 -webkit-app-region。
+  // Linux 由窗口管理器提供边框，没有这些结构；这里不臆造等价断言，跳过并在目标机人工验收。
+  const integratedTitlebar = process.platform === 'darwin'
+  assert.equal(windowChrome.platform, integratedTitlebar ? 'macos' : 'linux')
+  if (integratedTitlebar) {
+    assert.deepEqual(
+      [windowChrome.brand?.top, windowChrome.topbar?.top],
+      [0, 0],
+      'macOS primary app columns must extend to the top window edge'
+    )
+    assert.deepEqual(
+      [windowChrome.surfaceSlot?.top, windowChrome.surfaceTopbar?.top],
+      [0, 0],
+      'on-demand Surface must join the integrated titlebar at the window edge'
+    )
+  }
   assert.deepEqual(
     [windowChrome.surfaceSlot?.position, windowChrome.surfaceSlot?.borderRadius],
     ['static', '0px'],
@@ -97,22 +102,24 @@ export async function exerciseWindowBoundary(smokeContext) {
     0,
     'docked Surface lost its right-edge alignment'
   )
-  assert.deepEqual(
-    [windowChrome.brand?.height, windowChrome.topbar?.height, windowChrome.surfaceTopbar?.height],
-    [52, 52, 52],
-    'macOS app chrome must share the 52px integrated titlebar height'
-  )
-  assert.equal(windowChrome.brand?.paddingLeft, '80px', 'sidebar chrome must reserve the traffic-light safe area')
-  assert.deepEqual(
-    [windowChrome.brand?.drag, windowChrome.topbar?.drag, windowChrome.surfaceTopbar?.drag],
-    ['drag', 'drag', 'drag'],
-    'integrated titlebars must remain draggable'
-  )
-  assert.deepEqual(
-    [windowChrome.topbarActionDrag, windowChrome.surfaceActionDrag],
-    ['no-drag', 'no-drag'],
-    'titlebar actions must remain interactive'
-  )
+  if (integratedTitlebar) {
+    assert.deepEqual(
+      [windowChrome.brand?.height, windowChrome.topbar?.height, windowChrome.surfaceTopbar?.height],
+      [52, 52, 52],
+      'macOS app chrome must share the 52px integrated titlebar height'
+    )
+    assert.equal(windowChrome.brand?.paddingLeft, '80px', 'sidebar chrome must reserve the traffic-light safe area')
+    assert.deepEqual(
+      [windowChrome.brand?.drag, windowChrome.topbar?.drag, windowChrome.surfaceTopbar?.drag],
+      ['drag', 'drag', 'drag'],
+      'integrated titlebars must remain draggable'
+    )
+    assert.deepEqual(
+      [windowChrome.topbarActionDrag, windowChrome.surfaceActionDrag],
+      ['no-drag', 'no-drag'],
+      'titlebar actions must remain interactive'
+    )
+  }
   assert.equal(windowChrome.brand?.background, 'rgba(0, 0, 0, 0)')
   assert.equal(windowChrome.topbar?.background, windowChrome.main?.background)
   assert.equal(windowChrome.surfaceTopbar?.background, 'rgba(0, 0, 0, 0)')
@@ -160,13 +167,20 @@ export async function exerciseWindowBoundary(smokeContext) {
         paddingLeft: topbar ? getComputedStyle(topbar).paddingLeft : null,
         tabsScrollLeft: topbar?.querySelector('.surface-tabs')?.scrollLeft,
         surfaceLeft: document.querySelector('.right-panel-slot')?.getBoundingClientRect().left ?? -1,
-        actionLeft: topbar?.querySelector('button')?.getBoundingClientRect().left ?? -1
+        actionLeft: topbar?.querySelector('button')?.getBoundingClientRect().left ?? -1,
+        gridColumns: getComputedStyle(document.querySelector('.app')).gridTemplateColumns,
+        mainDisplay: getComputedStyle(document.querySelector('.main-area')).display
       }
       initialSurfaceChrome ??= surfaceChromeState
-      // A committed class does not prove that the scroll/layout geometry has settled.
-      return surfaceChromeState.surfaceLeft >= 0 && surfaceChromeState.surfaceLeft < 16 && surfaceChromeState.actionLeft >= 80
+      // macOS 用铺满左侧 + 避开红绿灯作为"已最大化"证据；Linux 窗口由窗口管理器加框，
+      // 这里只确认状态位已提交，像素几何作为证据另外上报。
+      if (document.documentElement.dataset.platform === 'macos') {
+        return surfaceChromeState.surfaceLeft >= 0 && surfaceChromeState.surfaceLeft < 16 && surfaceChromeState.actionLeft >= 80
+      }
+      return document.querySelector('.app')?.classList.contains('right-panel-maximized') === true
     })
-    const surfaceLeft = Math.round(document.querySelector('.right-panel-slot')?.getBoundingClientRect().left ?? -1)
+    // 保持未取整：maximized 判据是"距左边缘小于 16px"，round(15.5)=16 会制造假的 1px 失败。
+    const surfaceLeft = document.querySelector('.right-panel-slot')?.getBoundingClientRect().left ?? -1
     const surfaceActionLeft = Math.round(document.querySelector('[data-session-surface-current="true"] .surface-topbar button')?.getBoundingClientRect().left ?? -1)
 
     document.querySelector('[data-session-surface-current="true"] button[aria-label="恢复右侧工作区"]')?.click()
@@ -194,19 +208,21 @@ export async function exerciseWindowBoundary(smokeContext) {
   })()`)
   assert.equal(collapsedChrome.collapsed, true)
   assert.ok(collapsedChrome.mainLeft < 16, `collapsed sidebar did not release its layout width: ${JSON.stringify(collapsedChrome)}`)
-  assert.ok(collapsedChrome.mainActionLeft >= 80, `collapsed main chrome overlaps traffic lights: ${JSON.stringify(collapsedChrome)}`)
   assert.equal(collapsedChrome.analytics, true, `Analytics transition failed: ${JSON.stringify(collapsedChrome)}`)
-  assert.deepEqual(
-    [collapsedChrome.auxTop, collapsedChrome.auxHeight, collapsedChrome.auxDrag],
-    [0, 52, 'drag'],
-    `auxiliary view is missing integrated window chrome: ${JSON.stringify(collapsedChrome)}`
-  )
-  assert.ok(collapsedChrome.analyticsTop >= 52, `Analytics overlaps traffic lights: ${JSON.stringify(collapsedChrome)}`)
   assert.equal(collapsedChrome.chatRestored, true)
   assert.equal(collapsedChrome.maximized, true, `maximized Surface chrome did not reach the traffic-light safe area: ${JSON.stringify(collapsedChrome)}`)
-  assert.ok(collapsedChrome.surfaceLeft < 16, `maximized Surface did not move into the collapsed sidebar track: ${JSON.stringify(collapsedChrome)}`)
-  assert.ok(collapsedChrome.surfaceActionLeft >= 80, `collapsed Surface chrome overlaps traffic lights: ${JSON.stringify(collapsedChrome)}`)
   assert.equal(collapsedChrome.restored, true)
+  if (integratedTitlebar) {
+    assert.ok(collapsedChrome.surfaceLeft < 16, `maximized Surface did not move into the collapsed sidebar track: ${JSON.stringify(collapsedChrome)}`)
+    assert.ok(collapsedChrome.mainActionLeft >= 80, `collapsed main chrome overlaps traffic lights: ${JSON.stringify(collapsedChrome)}`)
+    assert.deepEqual(
+      [collapsedChrome.auxTop, collapsedChrome.auxHeight, collapsedChrome.auxDrag],
+      [0, 52, 'drag'],
+      `auxiliary view is missing integrated window chrome: ${JSON.stringify(collapsedChrome)}`
+    )
+    assert.ok(collapsedChrome.analyticsTop >= 52, `Analytics overlaps traffic lights: ${JSON.stringify(collapsedChrome)}`)
+    assert.ok(collapsedChrome.surfaceActionLeft >= 80, `collapsed Surface chrome overlaps traffic lights: ${JSON.stringify(collapsedChrome)}`)
+  }
 
   const transportPicker = await evaluate(`(async () => {
     const deadline = Date.now() + 2_000
@@ -305,5 +321,11 @@ export async function exerciseWindowBoundary(smokeContext) {
   })()`)
   assert.notEqual(subframeIpc, 'allowed', 'an untrusted subframe reached privileged IPC')
 
-  return { windowChrome, collapsedChrome, transportPicker, modal, subframeIpc }
+  // Linux 的窗口由窗口管理器提供边框。这里只暴露实测几何，不替它编一套断言：
+  // 最大化状态位与可恢复性已在上面验证，铺满左侧的像素结果留给目标机验收。
+  const chrome = integratedTitlebar
+    ? { platform: windowChrome.platform }
+    : { platform: windowChrome.platform, maximizedSurfaceLeft: Math.round(collapsedChrome.surfaceLeft), viewportWidth: windowChrome.viewportWidth }
+
+  return { windowChrome, collapsedChrome, transportPicker, modal, subframeIpc, chrome }
 }
