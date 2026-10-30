@@ -67,8 +67,9 @@
 9. 期间 `conversation:readSideChatSnapshot` 的 IPC 次数 ≥ 翻过的页数——对话框走的就是
    产线读取入口，不是另一条捷径。
 
-本次实测：`dialogPages 181`、`walkedMs 20300`、`lastCursor 4008:4194051`、
-`dialogReads 184`。截图：`large-history-snapshot-first-page`、
+本次实测（两次独立运行）：`dialogPages 181`、`walkedMs 18960 / 20664`、
+`lastCursor 4008:4194051`、`dialogReads 184`、`lastSourceOrdinal 2005`、
+`continuedRows 81`；末页截图里“下一页”已变灰、“上一页”可用。截图：`large-history-snapshot-first-page`、
 `large-history-snapshot-huge-message-page`、`large-history-snapshot-last-page`，与本次
 `artifactHashes` 一起保存。
 
