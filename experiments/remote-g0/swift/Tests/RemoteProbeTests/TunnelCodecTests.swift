@@ -51,16 +51,34 @@ final class TunnelCodecTests: XCTestCase {
     payload.writeInteger(UInt16(1013))
     payload.writeString("no_host_leg")
     _ = try channel.writeInbound(WebSocketFrame(fin: true, opcode: .connectionClose, data: payload))
-    let recovered = codec.retainingCloseCause(for: ProbeError.disconnected)
-    guard case let RelayTransportError.closed(code, reason) = recovered else {
-      return XCTFail("A late consumer lost the original relay close: \(recovered)")
+    // Pipeline destruction is queued on the event loop after the close event.
+    channel.embeddedEventLoop.run()
+    let teardownError: Error
+    do {
+      try channel.pipeline.syncOperations.addHandler(ErrorRecorder())
+      return XCTFail("Installing a handler after teardown unexpectedly succeeded")
+    } catch {
+      teardownError = error
+      guard case ChannelError.ioOnClosedChannel = error else {
+        return XCTFail("Expected ioOnClosedChannel after teardown, got \(error)")
+      }
     }
-    XCTAssertEqual(code, 1013)
-    XCTAssertEqual(reason, "no_host_leg")
+    for failure in [ProbeError.disconnected, teardownError] {
+      let recovered = codec.retainingCloseCause(for: failure)
+      guard case let RelayTransportError.closed(code, reason) = recovered else {
+        return XCTFail("A late consumer lost the original relay close: \(recovered)")
+      }
+      XCTAssertEqual(code, 1013)
+      XCTAssertEqual(reason, "no_host_leg")
+    }
     let rejected = NIOSSLError.handshakeFailed(.sslError([]))
     XCTAssertEqual(codec.retainingCloseCause(for: rejected) as? NIOSSLError, rejected)
     guard case ProbeError.invalidFrame = codec.retainingCloseCause(for: ProbeError.invalidFrame) else {
       return XCTFail("An unrelated failure was replaced by the relay close")
+    }
+    let noCauseCodec = TunnelCodec()
+    guard case ChannelError.ioOnClosedChannel = noCauseCodec.retainingCloseCause(for: teardownError) else {
+      return XCTFail("An ioOnClosedChannel without a relay close cause was replaced")
     }
   }
 
