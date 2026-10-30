@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { sideChatSnapshotRefs } from './conversation-side-chat-snapshot'
 import { conversationCoverage, conversationItemKey, planConversationContinuation, sameConversationTarget,
+  splitOmittedItems,
   sideChatSnapshotIndexOf, sideChatSnapshotMessageCount,
   SIDE_CHAT_DEFAULT_TITLE,
   type Conversation, type ConversationDelivery, type ConversationItemRef, type ConversationArchiveRef,
@@ -113,9 +114,12 @@ export async function beginConversationTurn(
     // Publish the exact body first. Failure leaves no dispatch intent and cannot start a Provider.
     const importedItems = request.selectedItems
     const selected = new Set(importedItems.map(conversationItemKey))
-    const omittedItems = plan.missingItems.filter((item) => !selected.has(conversationItemKey(item)))
-    const history = request.preparedHistory ?? (importedItems.length || omittedItems.length
-      ? await prepareConversationHistory(ledger.userData, conversation, importedItems, omittedItems)
+    // A frozen snapshot contributes compact ranges instead of one record reference per
+    // omitted message, so a large child's conversation record stays small.
+    const omitted = splitOmittedItems(conversation,
+      plan.missingItems.filter((item) => !selected.has(conversationItemKey(item))))
+    const history = request.preparedHistory ?? (importedItems.length || plan.missingItems.length
+      ? await prepareConversationHistory(ledger.userData, conversation, importedItems, omitted.items, omitted.ranges)
       : undefined)
     const bindingId = plan.kind === 'resume' ? plan.bindingId : randomUUID()
     if (plan.kind === 'fresh') conversation.bindings.push({ ...request.target, id: bindingId })
@@ -126,7 +130,8 @@ export async function beginConversationTurn(
       importedItems,
       historyPolicy: 'retrievable-v1',
       ...(history ? { history } : {}),
-      omittedItems,
+      omittedItems: omitted.items,
+      ...(omitted.ranges.length ? { omittedRanges: omitted.ranges } : {}),
       delivery: { status: 'pending' }
     }
     conversation.turns.push(turn)
@@ -201,7 +206,7 @@ export async function findConversationDispatch(
 export interface PreparedConversationHandoff {
   selectedItems: ConversationItemRef[]
   history?: import('../shared/tool-content').ContentRef
-  readerItems: import('./conversation-history-reader').HistoryReaderItem[]
+  reader?: import('./conversation-history-reader').HistoryReaderSource
   budget: HandoffBudgetInput
 }
 

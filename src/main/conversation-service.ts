@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { historicalInputBytes, historicalInputPrefix } from './providers/historical-input'
-import { createConversationHistoryReader } from './conversation-history-reader'
+import { openConversationHistoryReader } from './conversation-history-reader'
 import { providerAttachmentPrompt } from './attachment-store'
 import type {
   ConversationContinuation,
@@ -259,7 +259,7 @@ export class ConversationService {
     this.active.add(runId)
     let dispatched = false
     let inputTextHash = hash(context ? historicalInputPrefix(context) + prompt : prompt)
-    let reader: Awaited<ReturnType<typeof createConversationHistoryReader>> | undefined
+    let reader: Awaited<ReturnType<typeof openConversationHistoryReader>> | undefined
     let inputPrepared = false
     const settle = async (terminal: ConversationTerminal): Promise<void> => {
       if (terminal.receipt?.status === 'accepted' && terminal.archive) {
@@ -286,7 +286,7 @@ export class ConversationService {
       await this.deps.store.settle(request.conversationId, runId, delivery, [], terminal.archive)
     }
     try {
-      if (prepared.readerItems.length) reader = await createConversationHistoryReader(prepared.readerItems)
+      if (prepared.reader) reader = await openConversationHistoryReader(prepared.reader)
       const started = await this.deps.startAppRun({
         prompt,
         attachments: request.attachments,

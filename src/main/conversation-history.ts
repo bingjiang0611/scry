@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto'
 import { readRecorderContentPage, writeRecorderContent } from '../core/turn-recorder/content-store'
 import { isToolContentRef, type ContentRef } from '../shared/tool-content'
 import {
-  conversationItemKey, sideChatSnapshotIndexOf, type Conversation, type ConversationItemRef, type DispatchedConversationTurn
+  conversationItemKey, omittedItemCount, sideChatSnapshotIndexOf, splitOmittedItems, type Conversation, type ConversationItemRef,
+  type DispatchedConversationTurn, type OmittedItemRange
 } from '../shared/conversation'
 import { historicalInputBytes, historicalInputPrefix } from './providers/historical-input'
 import type { ProviderHistoricalContext } from './providers/types'
@@ -10,9 +11,15 @@ import { handoffBudget, handoffCoverage, selectHistory, type HandoffBudgetInput 
 import { conversationHistoryRoot, type HistoryMessage } from './conversation-history-content'
 import { readConversationHistoryMessages } from './conversation-history-source'
 import { MAX_CONVERSATION_HISTORY_ARTIFACT_BYTES } from './conversation-history-limits'
-import { belongsToSideChatSnapshot, readSideChatSnapshotItem } from './conversation-side-chat-snapshot'
+import { belongsToSideChatSnapshot, readSideChatSnapshotItem, readSideChatSnapshotMessageAt } from './conversation-side-chat-snapshot'
+import { readSideChatManifestItems } from './conversation-side-chat-manifest'
+import { sideChatHistoryReaderSource } from './conversation-side-chat-reader'
+import { memoryHistoryReaderSource, type HistoryReaderSource } from './conversation-history-reader'
 
 const hash = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex')
+
+/** Quote, wrapper and escape overhead of one empty message on the wire; a lower bound. */
+const MIN_HANDOFF_ENVELOPE_BYTES = 350
 
 export { MAX_CONVERSATION_HISTORY_ARTIFACT_BYTES } from './conversation-history-limits'
 export { deleteConversationHistory, type HistoryMessage } from './conversation-history-content'
@@ -30,6 +37,8 @@ interface HistoryArtifact {
   cwd: string
   messages: HistoryMessage[]
   omittedItemIds?: string[]
+  /** Absent in v1 and in v2 artifacts sealed before snapshot ranges existed. */
+  omittedRanges?: OmittedItemRange[]
   omittedItemsHash?: string
   coverage?: string
   context: ProviderHistoricalContext
@@ -47,7 +56,17 @@ function contextFor(messages: readonly HistoryMessage[], coverage?: string, requ
   return { text, contentHash: hash(text), ...(requiresReader ? { requiresReader: true as const } : {}) }
 }
 
-/** One bounded source read supplies selection, the sealed body, and the run's reader snapshot. */
+/** Selection, the sealed body, and the run's reader source. Omission is explicit. */
+export interface PreparedHandoff {
+  selectedItems: ConversationItemRef[]
+  history?: ContentRef
+  /** Every omitted item, in context order; the turn stores it in a compact ledger. */
+  omitted?: ConversationItemRef[]
+  reader?: HistoryReaderSource
+  budget: HandoffBudgetInput
+}
+
+/** One bounded source read supplies selection, the sealed body, and the run's reader source. */
 export async function prepareConversationHandoff(
   userData: string,
   conversation: Conversation,
@@ -55,8 +74,11 @@ export async function prepareConversationHandoff(
   input: HandoffBudgetInput,
   allowOmission: boolean,
   nativeTarget?: NativeHandoffTarget
-): Promise<{ selectedItems: ConversationItemRef[]; history?: ContentRef; readerItems: import('./conversation-history-reader').HistoryReaderItem[]; budget: HandoffBudgetInput }> {
-  if (!missingItems.length) return { selectedItems: [], readerItems: [], budget: input }
+): Promise<PreparedHandoff> {
+  if (!missingItems.length) return { selectedItems: [], budget: input }
+  if (isManifestChild(conversation, missingItems)) {
+    return selectSideChatHistory(userData, conversation, missingItems, input, allowOmission)
+  }
   const { messages, contextUsage } = await readConversationHistoryMessages(userData, conversation, missingItems, nativeTarget)
   const budget = { ...input, ...(contextUsage ? { contextUsage } : {}) }
   const selection = selectHistory({
@@ -68,12 +90,134 @@ export async function prepareConversationHandoff(
   })
   if (selection.omitted.length && !allowOmission) throw new Error('目标 Provider 未提供已验证的历史检索工具，不能省略历史')
   const omitted = selection.omitted.map(message => message.ref)
+  const { items, ranges } = splitOmittedItems(conversation, omitted)
   return {
     budget,
     selectedItems: selection.messages.map(message => message.ref),
-    history: await sealHistory(userData, conversation, selection.messages, omitted),
-    readerItems: selection.omitted.map(({ ref, text, role: _role, ...source }) => ({ ref, text, source }))
+    omitted,
+    history: await sealHistory(userData, conversation, selection.messages, items, ranges),
+    ...(selection.omitted.length ? {
+      reader: memoryHistoryReaderSource(selection.omitted.map(({ ref, text, role: _role, ...source }) => ({ ref, text, source })))
+    } : {})
   }
+}
+
+
+const omittedLedger = (items: readonly ConversationItemRef[], ranges: readonly OmittedItemRange[]): unknown =>
+  ranges.length ? { items: items.map(conversationItemKey), ranges } : items.map(conversationItemKey)
+
+/** Only a format 4 child pages its frozen prefix from a manifest; a v3 artifact stays in memory. */
+function isManifestChild(conversation: Pick<Conversation, 'sideChat'>, missingItems: readonly ConversationItemRef[]): boolean {
+  const snapshot = conversation.sideChat?.snapshot
+  return snapshot?.format === 4 && missingItems.some(item => sideChatSnapshotIndexOf(snapshot, item) >= 0)
+}
+
+/** One candidate whose body is read only when the exact selection can still fit it. */
+interface FrozenCandidate {
+  index: number
+  role: 'user' | 'assistant'
+  /** Exact stored size; the escaped wire form is never smaller, so it bounds the cost. */
+  bytes: number
+  message?: HistoryMessage
+}
+
+/**
+ * Select a frozen manifest child's history from metadata, then read only what fits.
+ *
+ * A big child omits thousands of messages and holds hundreds of MiB of text. Reading
+ * every body just to decide would reintroduce the ceiling the manifest removed, so the
+ * index supplies a lower bound per candidate, a body is read only while that bound still
+ * fits, and the priority stays last user, last assistant, first user, then newest first.
+ */
+async function selectSideChatHistory(
+  userData: string,
+  conversation: Conversation,
+  missingItems: ConversationItemRef[],
+  input: HandoffBudgetInput,
+  allowOmission: boolean
+): Promise<PreparedHandoff> {
+  const snapshot = conversation.sideChat?.snapshot
+  if (snapshot?.format !== 4) throw new Error('侧聊快照不是可按下标读取的清单格式')
+  const root = conversationHistoryRoot(userData, conversation)
+  const positions: number[] = []
+  const others: ConversationItemRef[] = []
+  for (const item of missingItems) {
+    const index = sideChatSnapshotIndexOf(snapshot, item)
+    if (index < 0) others.push(item)
+    else positions.push(index)
+  }
+  const { messages: rest, contextUsage } = others.length
+    ? await readConversationHistoryMessages(userData, conversation, others) : { messages: [] as HistoryMessage[] }
+  const budget = { ...input, ...(contextUsage ? { contextUsage } : {}) }
+  const frozen: FrozenCandidate[] = []
+  for (let start = 0; start < positions.length;) {
+    // Consecutive positions share index leaves; one read covers the run.
+    let end = start + 1
+    while (end < positions.length && positions[end] === positions[end - 1] + 1) end++
+    const items = await readSideChatManifestItems(root, snapshot, positions[start], end - start)
+    for (const item of items) frozen.push({ index: sideChatSnapshotIndexOf(snapshot, item.ref), role: item.role, bytes: item.bytes })
+    start = end
+  }
+  const total = frozen.length + rest.length
+  const roleAt = (position: number): 'user' | 'assistant' =>
+    position < frozen.length ? frozen[position].role : rest[position - frozen.length].role
+  const lastOf = (role: 'user' | 'assistant'): number => {
+    for (let position = total - 1; position >= 0; position--) if (roleAt(position) === role) return position
+    return -1
+  }
+  const firstOf = (role: 'user' | 'assistant'): number => {
+    for (let position = 0; position < total; position++) if (roleAt(position) === role) return position
+    return -1
+  }
+  const messageAt = async (position: number): Promise<HistoryMessage> => {
+    if (position >= frozen.length) return rest[position - frozen.length]
+    const candidate = frozen[position]
+    if (!candidate.message) candidate.message = await readSideChatSnapshotMessageAt(userData, conversation, candidate.index)
+    return candidate.message
+  }
+  const cost = async (chosen: readonly number[]): Promise<number> => {
+    const messages: HistoryMessage[] = []
+    for (const position of chosen) messages.push(await messageAt(position))
+    return historicalInputBytes(historyTextFor(messages, handoffCoverage({
+      conversationId: conversation.id, selected: chosen.length, omitted: total - chosen.length
+    })))
+  }
+  const chosen: number[] = []
+  const tryAdd = async (position: number): Promise<void> => {
+    if (position < 0 || chosen.includes(position)) return
+    // The escaped envelope alone exceeds any budget this candidate could still fit.
+    if (position < frozen.length && frozen[position].bytes + MIN_HANDOFF_ENVELOPE_BYTES > handoffBudget(budget)) return
+    const ordered = [...chosen, position].sort((left, right) => left - right)
+    if (await cost(ordered) <= handoffBudget(budget)) chosen.splice(0, chosen.length, ...ordered)
+  }
+  await tryAdd(lastOf('user'))
+  await tryAdd(lastOf('assistant'))
+  await tryAdd(firstOf('user'))
+  for (let position = total - 1; position >= 0; position--) await tryAdd(position)
+  if (await cost(chosen) > handoffBudget(budget)) throw new Error('当前输入及历史检索说明超出交接预算，输入未投递')
+  const selected: HistoryMessage[] = []
+  const omitted: ConversationItemRef[] = []
+  for (let position = 0; position < total; position++) {
+    const message = await messageAt(position)
+    if (chosen.includes(position)) selected.push(message)
+    else omitted.push(message.ref)
+  }
+  if (omitted.length && !allowOmission) throw new Error('目标 Provider 未提供已验证的历史检索工具，不能省略历史')
+  const { items, ranges } = splitOmittedItems(conversation, omitted)
+  const reader = !omitted.length ? undefined
+    : others.length ? memoryHistoryReaderSource(omitted.map(ref => ({ ref, text: '' })))
+    : sideChatHistoryReaderSource(root, snapshot, ranges.flatMap(range => rangeIndexes(range)))
+  return {
+    budget,
+    selectedItems: selected.map(message => message.ref),
+    omitted,
+    history: await sealHistory(userData, conversation, selected, items, ranges),
+    ...(reader ? { reader } : {})
+  }
+}
+
+function rangeIndexes(range: OmittedItemRange): number[] {
+  return Array.from({ length: range.to - range.from + 1 }, (_unused, offset) => range.from + offset)
 }
 
 /** Read-only preflight before converting a native conversation's ownership. */
@@ -97,20 +241,31 @@ export async function prepareConversationHistory(
   userData: string,
   conversation: Conversation,
   selectedItems: ConversationItemRef[],
-  omittedItems: ConversationItemRef[] = []
+  omittedItems: ConversationItemRef[] = [],
+  omittedRanges: OmittedItemRange[] = []
 ): Promise<ContentRef> {
   const { messages } = await readConversationHistoryMessages(userData, conversation, selectedItems)
-  return sealHistory(userData, conversation, messages, omittedItems)
+  return sealHistory(userData, conversation, messages, omittedItems, omittedRanges)
 }
 
-async function sealHistory(userData: string, conversation: Conversation, messages: HistoryMessage[], omittedItems: ConversationItemRef[]): Promise<ContentRef> {
-  const coverage = handoffCoverage({ conversationId: conversation.id, selected: messages.length, omitted: omittedItems.length })
-  const context = contextFor(messages, coverage, omittedItems.length > 0)
+async function sealHistory(
+  userData: string,
+  conversation: Conversation,
+  messages: HistoryMessage[],
+  omittedItems: ConversationItemRef[],
+  omittedRanges: OmittedItemRange[] = []
+): Promise<ContentRef> {
+  const omitted = omittedItemCount({ omittedItems, omittedRanges })
+  const coverage = handoffCoverage({ conversationId: conversation.id, selected: messages.length, omitted })
+  const context = contextFor(messages, coverage, omitted > 0)
   const artifact: HistoryArtifact = {
     version: 2, conversationId: conversation.id, cwd: conversation.cwd, messages,
     // The ledger retains the exact IDs. Hash the ordered set here instead of
     // repeating an unbounded omission manifest in the model's bootstrap input.
-    omittedItemsHash: hash(JSON.stringify(omittedItems.map(conversationItemKey))),
+    // Ranges seal the exact positions instead of one reference per frozen message;
+    // an empty range list keeps the original key-list form readable.
+    omittedItemsHash: hash(JSON.stringify(omittedLedger(omittedItems, omittedRanges))),
+    ...(omittedRanges.length ? { omittedRanges } : {}),
     coverage, context, prefix: historicalInputPrefix(context)
   }
   const serialized = JSON.stringify(artifact)
@@ -135,7 +290,7 @@ export async function loadConversationHistory(
   conversation: Conversation,
   turn: DispatchedConversationTurn
 ): Promise<ProviderHistoricalContext | undefined> {
-  if (!turn.importedItems.length && !(turn.historyPolicy === 'retrievable-v1' && turn.omittedItems.length)) {
+  if (!turn.importedItems.length && !(turn.historyPolicy === 'retrievable-v1' && omittedItemCount(turn))) {
     if (turn.history) throw new Error('空交接不应关联正文 artifact')
     return undefined
   }
@@ -177,14 +332,17 @@ export async function loadConversationHistory(
       role: message.role, status: message.status, delivery: message.delivery, text: message.text })
   }
   const omittedItemIds = turn.omittedItems.map(conversationItemKey)
+  const omittedRanges = turn.omittedRanges ?? []
+  const omitted = omittedItemCount(turn)
   const expectedCoverage = value.version === 1
     ? value.coverage === undefined ? undefined : legacyCoverage(conversation.id, messages, omittedItemIds)
-    : handoffCoverage({ conversationId: conversation.id, selected: messages.length, omitted: omittedItemIds.length })
+    : handoffCoverage({ conversationId: conversation.id, selected: messages.length, omitted })
   const omissionsMatch = value.version === 1
     ? JSON.stringify(value.omittedItemIds ?? []) === JSON.stringify(omittedItemIds)
-    : value.omittedItemsHash === hash(JSON.stringify(omittedItemIds))
+    : value.omittedItemsHash === hash(JSON.stringify(omittedLedger(turn.omittedItems, omittedRanges))) &&
+      JSON.stringify(value.omittedRanges ?? []) === JSON.stringify(omittedRanges)
   if (!omissionsMatch || value.coverage !== expectedCoverage) throw new Error('交接 artifact 遗漏项引用不匹配')
-  const context = contextFor(messages, value.coverage, omittedItemIds.length > 0)
+  const context = contextFor(messages, value.coverage, omitted > 0)
   if (value.context?.text !== context.text || value.context.contentHash !== context.contentHash ||
     (value.version === 2 && value.context.requiresReader !== context.requiresReader) ||
     value.prefix !== historicalInputPrefix(context)) {

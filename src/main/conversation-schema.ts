@@ -6,12 +6,13 @@ import { isToolContentRef } from '../shared/tool-content'
 export type { NativeSessionScope } from './conversation-ownership'
 export { checkNativeOwners, nativeOwnerKey } from './conversation-ownership'
 import {
-  conversationItemKey, sideChatSnapshotIndexOf,
+  conversationItemKey, omittedItemCount, sideChatSnapshotIndexOf,
   type Conversation,
   type ConversationBinding,
   type ConversationItemRef,
   type ConversationTarget,
   type ConversationTurn,
+  type OmittedItemRange,
   type SideChatOrigin
 } from '../shared/conversation'
 import { MAX_CONVERSATION_HISTORY_ARTIFACT_BYTES } from './conversation-history-limits'
@@ -159,13 +160,19 @@ export function decodeConversation(value: unknown): Conversation {
       items(turn.importedItems)
       items(turn.omittedItems)
       requireValue(turn.historyPolicy === undefined || turn.historyPolicy === 'retrievable-v1', '未知历史交接策略')
-      requireValue(turn.importedItems.length > 0 || (turn.historyPolicy === 'retrievable-v1' && turn.omittedItems.length > 0)
+      const omittedRanges = omittedRangesOf(turn.omittedRanges, snapshot)
+      requireValue(turn.importedItems.length > 0 || (turn.historyPolicy === 'retrievable-v1' && omittedItemCount({ omittedItems: turn.omittedItems, omittedRanges }) > 0)
         ? isToolContentRef(turn.history) && turn.history.encoding === 'json' && turn.history.bytes <= MAX_CONVERSATION_HISTORY_ARTIFACT_BYTES
         : turn.history === undefined, '交接 intent 缺少正文 artifact 或关联了多余正文')
       requireValue(subset(turn.importedItems, priorItems, isPrior) && subset(turn.omittedItems, priorItems, isPrior),
         '交接引用了不存在或未来的内容')
       const imported = new Set(turn.importedItems.map(item => JSON.stringify([item.runId, item.itemId, item.contentHash])))
       requireValue(turn.omittedItems.every((item) => !imported.has(JSON.stringify([item.runId, item.itemId, item.contentHash]))), '内容同时被标记为导入和省略')
+      // An omitted position and an imported position of the same snapshot may not overlap;
+      // the reason above still names both, since the range is only a compact index form.
+      requireValue(turn.importedItems.every(item => omittedRanges.every(range =>
+        !isSnapshotRef(item) || positionOf(snapshot, item) < range.from || positionOf(snapshot, item) > range.to)),
+        '内容同时被标记为导入和省略')
       const delivery = object(turn.delivery)
       if (delivery.status === 'accepted') {
         requireValue(text(delivery.nativeSessionId) && delivery.nativeSessionId === binding.nativeSessionId, '接收证据与原生会话不一致')
@@ -198,6 +205,35 @@ export function decodeConversation(value: unknown): Conversation {
     requireValue(fork.status === 'pending' || fork.status === 'accepted' || text(fork.reason), '分支未收敛缺少说明')
   }
   return structuredClone(data) as unknown as Conversation
+}
+
+/**
+ * Compact omission ranges, validated as inclusive frozen-snapshot positions.
+ *
+ * A large child omits thousands of messages; the ranges must stay ordered, disjoint and
+ * inside the child's own snapshot, so an omission ledger can never name foreign history.
+ */
+function omittedRangesOf(value: unknown, snapshot: SideChatOrigin['snapshot'] | undefined): OmittedItemRange[] {
+  if (value === undefined) return []
+  requireValue(Array.isArray(value) && snapshot !== undefined && snapshot.format === 4, '遗漏区间必须属于清单格式的侧聊快照')
+  const count = snapshot?.format === 4 ? snapshot.messageCount : 0
+  const ranges: OmittedItemRange[] = []
+  let previous = -1
+  for (const raw of value) {
+    const range = object(raw)
+    requireValue(Object.keys(range).every(key => key === 'snapshotId' || key === 'from' || key === 'to') &&
+      range.snapshotId === snapshot!.id && Number.isSafeInteger(range.from) && Number.isSafeInteger(range.to) &&
+      Number(range.from) >= 0 && Number(range.from) <= Number(range.to) && Number(range.to) < count,
+      '遗漏区间无效')
+    requireValue(Number(range.from) > previous, '遗漏区间必须有序且不重叠')
+    previous = Number(range.to)
+    ranges.push({ snapshotId: snapshot!.id, from: Number(range.from), to: Number(range.to) })
+  }
+  return ranges
+}
+
+function positionOf(snapshot: SideChatOrigin['snapshot'] | undefined, ref: ConversationItemRef): number {
+  return snapshot === undefined ? -1 : sideChatSnapshotIndexOf(snapshot, ref)
 }
 
 export interface ConversationIntentInput {

@@ -144,12 +144,25 @@ export interface DispatchedConversationTurn extends ConversationTurnBase {
   resumeSessionId: string | null
   /** Exact selection, not a high-watermark pretending that omitted items were delivered. */
   importedItems: ConversationItemRef[]
+  /** Omitted items that are not a contiguous frozen snapshot range. */
   omittedItems: ConversationItemRef[]
+  /**
+   * Omitted frozen snapshot positions, inclusive. A large child omits thousands of
+   * items; recording the ranges keeps the conversation record small instead of
+   * repeating one reference per message, and the manifest still holds the exact items.
+   */
+  omittedRanges?: OmittedItemRange[]
   /** New dispatches require a bootstrap artifact even when every item is omitted. */
   historyPolicy?: 'retrievable-v1'
   /** Immutable body published before this intent. */
   history?: ContentRef
   delivery: ConversationDelivery
+}
+
+export interface OmittedItemRange {
+  snapshotId: string
+  from: number
+  to: number
 }
 
 export type ConversationTurn = ImportedConversationTurn | DispatchedConversationTurn
@@ -196,6 +209,42 @@ export type ConversationContinuation =
   | { kind: 'blocked'; runId?: string; reason: string }
   | { kind: 'fresh'; missingItems: ConversationItemRef[] }
   | { kind: 'resume'; bindingId: string; nativeSessionId: string; missingItems: ConversationItemRef[] }
+
+/** Total omitted items, without expanding a snapshot range into one entry per message. */
+export function omittedItemCount(turn: Pick<DispatchedConversationTurn, 'omittedItems' | 'omittedRanges'>): number {
+  const ranged = (turn.omittedRanges ?? []).reduce((sum, range) => sum + (range.to - range.from + 1), 0)
+  return turn.omittedItems.length + ranged
+}
+
+/**
+ * Split one omission list into compact snapshot ranges and explicit references.
+ *
+ * Snapshot positions become inclusive ranges: a contiguous frozen prefix stays a
+ * constant-size ledger, while anything else keeps its exact reference.
+ */
+export function splitOmittedItems(
+  conversation: Pick<Conversation, 'sideChat'>,
+  omitted: readonly ConversationItemRef[]
+): { items: ConversationItemRef[]; ranges: OmittedItemRange[] } {
+  const snapshot = conversation.sideChat?.snapshot
+  const positions: number[] = []
+  const items: ConversationItemRef[] = []
+  for (const item of omitted) {
+    const index = snapshot ? sideChatSnapshotIndexOf(snapshot, item) : -1
+    if (index < 0) items.push(item)
+    else positions.push(index)
+  }
+  positions.sort((left, right) => left - right)
+  const ranges: OmittedItemRange[] = []
+  if (snapshot) {
+    for (const index of positions) {
+      const last = ranges.at(-1)
+      if (last && last.snapshotId === snapshot.id && last.to === index - 1) last.to = index
+      else ranges.push({ snapshotId: snapshot.id, from: index, to: index })
+    }
+  }
+  return { items, ranges }
+}
 
 export const conversationItemKey = (item: ConversationItemRef): string =>
   JSON.stringify([item.runId, item.itemId, item.contentHash])

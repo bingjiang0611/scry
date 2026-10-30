@@ -131,6 +131,19 @@ export async function readSideChatSnapshotItem(
   return { ref: { ...item.ref }, sourceOrdinal: item.sourceOrdinal, providerId: item.providerId as SideChatSnapshotItem['providerId'], role: item.role }
 }
 
+/** One frozen message by position, read and hash-verified without loading its siblings. */
+export async function readSideChatSnapshotMessageAt(
+  userData: string,
+  conversation: SideChatSnapshotOwner,
+  index: number
+): Promise<HistoryMessage> {
+  const v4 = descriptor(conversation)
+  const root = conversationHistoryRoot(userData, conversation)
+  if (!v4) return (await loadSideChatSnapshotMessages(userData, conversation))[index]
+  const item = await readSideChatManifestItem(root, v4, index)
+  return messageOf(root, v4, item, index)
+}
+
 function indexOfRef(conversation: SideChatSnapshotOwner, ref: ConversationItemRef): number {
   return sideChatSnapshotIndexOf(origin(conversation).snapshot, ref)
 }
@@ -143,11 +156,7 @@ export async function readSideChatSnapshotMessage(
 ): Promise<HistoryMessage> {
   const index = indexOfRef(conversation, ref)
   if (index < 0) throw new Error('正文引用不属于当前侧聊快照')
-  const v4 = descriptor(conversation)
-  const root = conversationHistoryRoot(userData, conversation)
-  const message = v4
-    ? await messageOf(root, v4, await readSideChatManifestItem(root, v4, index), index)
-    : (await loadSideChatSnapshotMessages(userData, conversation))[index]
+  const message = await readSideChatSnapshotMessageAt(userData, conversation, index)
   if (conversationItemKey(message.ref) !== conversationItemKey(ref)) throw new Error('侧聊快照正文引用不匹配')
   return message
 }

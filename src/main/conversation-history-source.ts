@@ -10,7 +10,7 @@ import {
   MAX_CONVERSATION_HISTORY_SOURCE_BYTES,
   MAX_CONVERSATION_HISTORY_TURNS
 } from './conversation-history-limits'
-import { belongsToSideChatSnapshot, loadSideChatSnapshotMessages } from './conversation-side-chat-snapshot'
+import { belongsToSideChatSnapshot, readSideChatSnapshotMessage } from './conversation-side-chat-snapshot'
 import type { NativeHandoffTarget } from './conversation-history'
 import { chargeText, historyReadBudget, turnAssistantText, turnMessageProjection } from './conversation-history-text'
 
@@ -164,14 +164,11 @@ export async function readConversationHistoryMessages(
     else groups.set(ref.runId, [ref])
   }
   const budget = historyReadBudget()
-  let snapshot: Map<string, HistoryMessage> | undefined
   const snapshotMessage = async (ref: ConversationItemRef): Promise<HistoryMessage | undefined> => {
-    if (!conversation.sideChat) return undefined
-    snapshot ??= new Map((await loadSideChatSnapshotMessages(userData, conversation))
-      .map(message => [conversationItemKey(message.ref), message]))
-    const message = snapshot.get(conversationItemKey(ref))
-    if (!message && belongsToSideChatSnapshot(conversation, ref)) throw new Error('侧聊快照缺少该冻结消息，请重新创建侧聊')
-    return message
+    if (!conversation.sideChat || !belongsToSideChatSnapshot(conversation, ref)) return undefined
+    // Per-ref reads touch only the manifest leaves and body parts of this message, so
+    // asking for one frozen item never loads the rest of a large child history.
+    return readSideChatSnapshotMessage(userData, conversation, ref)
   }
   const messages: HistoryMessage[] = []
   for (const [runId, selected] of groups) {
