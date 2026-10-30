@@ -179,7 +179,6 @@ export async function exerciseLists(contents, win, screenshotPrefix = '', pointe
   await read('window.listFixture.appendTool()')
   check((await captured()).length===1, 'session identity baseline suppressed the next genuine arrival')
   await settle()
-  contents.debugger.attach('1.3')
   try {
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]})
     await wait("matchMedia('(prefers-reduced-motion: reduce)').matches")
@@ -217,8 +216,9 @@ export async function exerciseLists(contents, win, screenshotPrefix = '', pointe
     const reducedLongExit = await captured()
     check(reducedLongExit.every(a=>a.duration===120) && opacityOnly(reducedLongExit), `reduced long output did not exit in 120ms: ${JSON.stringify(reducedLongExit)}`)
   } finally {
-    await contents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[]})
-    contents.debugger.detach()
+    await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [
+      { name: 'prefers-reduced-motion', value: 'no-preference' }, { name: 'forced-colors', value: 'none' }
+    ] })
     await read('window.__listObserver?.disconnect()')
   }
   return { appendedToolOnly180: true, hookRows180AndLifecycleDoesNotReplay: true, tokensDoNotReplay: true, liveMetrics180: true, cacheNoEntry: true, loadingAndSessionIdentityNoEntry: true, reducedOpacityOnly: true, reducedLongEnterAndExit120: true }

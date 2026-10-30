@@ -21,6 +21,7 @@ const listsOnly = turnRefsOnly || process.argv.includes('--lists-only')
 const loadingOnly = process.argv.includes('--loading-only')
 const sidebarActivityOnly = process.argv.includes('--sidebar-activity-only')
 const offscreen = overlaysOnly || listsOnly || loadingOnly
+const reducedAmbientFixture = motionTokensOnly || sidebarActivityOnly || listsOnly || loadingOnly || structureOnly || overlaysOnly
 const selectionOnly = process.argv.includes('--selection-only')
 const piCommandsOnly = process.argv.includes('--pi-commands-only')
 const piPermissionOnly = process.argv.includes('--pi-permission-only')
@@ -90,31 +91,18 @@ try {
       try {
         let result = {}, piCommands = {}
         const special = await (${specialSources.runner})({
-          flags: { loading: ${loadingOnly}, lists: ${listsOnly}, overlays: ${overlaysOnly}, paneBench: ${paneBenchOnly}, motion: ${fixtures.includes('motion-tokens')}, motionOnly: ${motionTokensOnly} },
+          flags: { loading: ${loadingOnly}, lists: ${listsOnly}, overlays: ${overlaysOnly}, structure: ${structureOnly}, sidebar: ${fixtures.includes('sidebar-activity')}, sidebarOnly: ${sidebarActivityOnly}, paneBench: ${paneBenchOnly}, motion: ${fixtures.includes('motion-tokens')}, motionOnly: ${motionTokensOnly} },
           win, sources: ${JSON.stringify(specialSources)},
-          paths: ${JSON.stringify({ loading: join(temp, 'loading.html'), lists: join(temp, 'lists.html'), overlays: join(temp, 'overlays.html'), paneBench: join(temp, 'structure-pane-bench.html'), motion: join(temp, 'motion-tokens.html') })},
-          screenshots: ${JSON.stringify({ loading: process.env.SCRY_LOADING_UI_SCREENSHOT ?? '', lists: process.env.SCRY_LISTS_UI_SCREENSHOT ?? '' })},
+          paths: ${JSON.stringify({ loading: join(temp, 'loading.html'), lists: join(temp, 'lists.html'), overlays: join(temp, 'overlays.html'), structure: join(temp, 'session-cache.html'), sidebar: join(temp, 'sidebar-activity.html'), paneBench: join(temp, 'structure-pane-bench.html'), motion: join(temp, 'motion-tokens.html') })},
+          screenshots: ${JSON.stringify({ loading: process.env.SCRY_LOADING_UI_SCREENSHOT ?? '', lists: process.env.SCRY_LISTS_UI_SCREENSHOT ?? '', sidebar: process.env.SCRY_SIDEBAR_ACTIVITY_SCREENSHOT ?? '' })},
           campaign: process.argv.find(argument => argument.startsWith('--scry-lists-campaign='))?.split('=')[1],
           logRendererError, setDiagnostic: contents => { diagnosticContents = contents }
         })
         Object.assign(result, special.result)
         if (special.done) { finish(result); return }
-        if (${fixtures.includes('sidebar-activity')}) {
-          win.setSize(1100, 760)
-          await win.loadFile(${JSON.stringify(join(temp, 'sidebar-activity.html'))})
-          const exerciseSidebarActivityContinuation = ${fixtureSources.exerciseSidebarActivityContinuation}
-          result.sidebarActivity = await (${fixtureSources.exerciseSidebarActivity})(win.webContents, ${JSON.stringify(process.env.SCRY_SIDEBAR_ACTIVITY_SCREENSHOT ?? '')})
-          await win.loadFile(${JSON.stringify(join(temp, 'sidebar-activity.html'))})
-          result.sidebarUnreadResults = await (${fixtureSources.exerciseSidebarUnreadResults})(win.webContents)
-          if (${sidebarActivityOnly}) { finish(result); return }
-        }
         if (${fixtures.includes('session-cache')}) {
           win.setSize(1200, 900)
           await win.loadFile(${JSON.stringify(join(temp, 'session-cache.html'))})
-          if (${structureOnly}) {
-            result.structure = await (${specialSources.structure})(win.webContents)
-            finish(result); return
-          }
           result.sessionCache = await (${fixtureSources.exerciseSessionCache})(win.webContents)
           if (${cacheOnly}) { finish(result); return }
         }
@@ -236,7 +224,7 @@ try {
   `)
   const campaignResults = []
   for (const campaign of turnRefsOnly ? ['refs'] : listsOnly ? ['structure', 'history', 'live', 'refs'] : ['all']) await new Promise((resolve, reject) => {
-    const child = spawn(electron, [join(temp, 'main.cjs'), '--disable-gpu', '--disable-backgrounding-occluded-windows', ...(motionTokensOnly ? ['--force-prefers-reduced-motion'] : []), ...(listsOnly ? [`--scry-lists-campaign=${campaign}`] : [])], {
+    const child = spawn(electron, [join(temp, 'main.cjs'), '--disable-gpu', '--disable-backgrounding-occluded-windows', ...(reducedAmbientFixture ? ['--force-prefers-reduced-motion'] : []), ...(listsOnly ? [`--scry-lists-campaign=${campaign}`] : [])], {
       env: { PATH: process.env.PATH, TMPDIR: tmpdir(), HOME: join(temp, 'home') }, stdio: ['ignore', 'pipe', 'pipe']
     })
     let output = ''

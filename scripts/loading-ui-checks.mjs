@@ -106,7 +106,6 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
   const failed = await measured('cache-b', 1000, true)
   check(failed.seen, 'failed slow read hid its pending authority indicator')
   await screenshot('failure')
-  contents.debugger.attach('1.3')
   let reduced
   try {
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]})
@@ -117,7 +116,9 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
     check(reduced.seen && reduced.visible, `reduced motion hid the pending status or blanked the target preview: ${JSON.stringify(reduced)}`)
     await screenshot('reduced-ready')
   } finally {
-    await contents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[]}); contents.debugger.detach()
+    await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [
+      { name: 'prefers-reduced-motion', value: 'no-preference' }, { name: 'forced-colors', value: 'none' }
+    ] })
   }
   // Other read surfaces use the same primitive; controls/evidence stay synchronous.
   const surfaces = []

@@ -97,7 +97,6 @@ export async function exerciseStructure(contents) {
   await wait(`${body('cache-b')} && ${entries}.length === 0`)
   check(await read(`${entryCount} === 1`), 'New conversation did not reset the presented session identity')
 
-  contents.debugger.attach('1.3')
   try {
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
     await click(`document.querySelector('.sb-nav .sb-navitem')`)
@@ -106,8 +105,9 @@ export async function exerciseStructure(contents) {
     await wait(`${entries}.length === 0`)
     check(await read(`document.querySelector('.usage-page') != null && window.nativeCaptureCalls === 0`), 'Latest navigation failed or used native capture')
   } finally {
-    await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] })
-    contents.debugger.detach()
+    await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [
+      { name: 'prefers-reduced-motion', value: 'no-preference' }, { name: 'forced-colors', value: 'none' }
+    ] })
   }
   return { page240: true, belowChromeIncludesComposer: true, firstClickAndInputDuringEntry: true,
     coldSelectionShowsTargetPreview: true, session180NoTranslation: true, rapidCancellation: true, staleHistoryRejected: true,
