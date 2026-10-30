@@ -246,6 +246,23 @@ export function splitOmittedItems(
   return { items, ranges }
 }
 
+/**
+ * Omitted positions as compact ranges.
+ *
+ * A frozen child can omit thousands of messages, so the ledger stores contiguous
+ * snapshot ranges instead of one reference per message. Positions must be ascending and
+ * unique; the caller derives them from the manifest, not from a materialized ref list.
+ */
+export function sideChatOmittedRanges(snapshot: SideChatSnapshot, positions: readonly number[]): OmittedItemRange[] {
+  const ranges: OmittedItemRange[] = []
+  for (const index of positions) {
+    const last = ranges.at(-1)
+    if (last && last.snapshotId === snapshot.id && last.to === index - 1) last.to = index
+    else ranges.push({ snapshotId: snapshot.id, from: index, to: index })
+  }
+  return ranges
+}
+
 export const conversationItemKey = (item: ConversationItemRef): string =>
   JSON.stringify([item.runId, item.itemId, item.contentHash])
 

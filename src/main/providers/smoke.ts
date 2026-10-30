@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url'
 import type { ProviderAdapter } from './types'
 import { runtimeProviderForProviderId, type AgentSteerInput } from '../../shared/runtime'
 import { HistoricalInput } from './historical-input'
+import { smokeHistoryReaderFacet, smokeReaderRead } from './smoke-history-reader'
 import { handleRecorderHook } from '../../core/turn-recorder/recorder'
 
 /** Providers the packaged fixture can impersonate. Order is irrelevant; the gate is not. */
@@ -28,6 +29,7 @@ export function createSmokeProviderAdapter(providerId: SmokeFixtureProviderId = 
   } : undefined
   return {
     forkSession,
+    ...smokeHistoryReaderFacet,
     id: providerId,
     runtimeProvider: runtimeProviderForProviderId(providerId),
     historicalContext: true,
@@ -45,6 +47,7 @@ export function createSmokeProviderAdapter(providerId: SmokeFixtureProviderId = 
       recordCall('run', request.runId)
       const history = new HistoricalInput(request)
       const outgoingPrompt = history.text(request.prompt)
+      const readerRead = smokeReaderRead(request)
       const sessionId = request.resume ?? `smoke-session-${request.runId}`
       const inputsFile = process.env.SCRY_ELECTRON_SMOKE_INPUTS
       if (inputsFile) appendFileSync(inputsFile, `${JSON.stringify({ providerId, agentProfileId: request.agentProfileId, cwd: request.cwd, runId: request.runId, prompt: request.prompt,
@@ -57,6 +60,8 @@ export function createSmokeProviderAdapter(providerId: SmokeFixtureProviderId = 
       const questionAbort = new AbortController()
       const promise = Promise.resolve().then(async () => {
         const startedAt = Date.now()
+        // The retrieval runs before the provider claims acceptance of the input.
+        await readerRead
         if (!deferredNativeTurn) request.onExternalSessionId?.(sessionId)
         if (inputsFile) request.emit({ id: `${request.runId}:steer-capability`, runId: request.runId, ts: new Date().toISOString(),
           kind: 'harness', stage: 'runtime:steer_capability', steerCapability: { status: 'available', attachments: false } })
@@ -207,7 +212,7 @@ export function createSmokeProviderAdapter(providerId: SmokeFixtureProviderId = 
             request.emit({ id: `${request.runId}:side-chat-text`, runId: request.runId, ts: new Date().toISOString(),
               kind: 'model', stage: 'text_delta', messageId, text: `${providerId} holding ${token}` })
             // A controlled hold waits for the real interrupt instead of a timing-dependent sleep.
-            if (!stopped) await new Promise<void>(resolve => questionAbort.signal.addEventListener('abort', () => resolve(), { once: true }))
+                  if (!stopped) await new Promise<void>(resolve => questionAbort.signal.addEventListener('abort', () => resolve(), { once: true }))
           } else {
             request.emit({ id: `${request.runId}:side-chat-text`, runId: request.runId, ts: new Date().toISOString(),
               kind: 'model', stage: 'text_delta', messageId, text: `${providerId} side chat reply: ${argument}` })

@@ -7,7 +7,7 @@ import {
   writeClaudeTranscript
 } from './conversation-side-chat.fixture'
 import { readPiNativeHistory } from './pi-native-history'
-import { sideChatSnapshotRefs } from './conversation-side-chat-snapshot'
+import { INLINE_CANDIDATE_ITEMS, sideChatSnapshotRefs } from './conversation-side-chat-snapshot'
 import type { ConversationSideChatRequest } from '../shared/conversation-api'
 
 const cleanups: Array<() => Promise<void>> = []
@@ -202,6 +202,13 @@ describe('native side-chat completion evidence', () => {
     expect(snapshot.messageCount).toBe(4200)
     // The durable child record stays a descriptor, not one reference per message.
     expect(JSON.stringify(record).length).toBeLessThan(20_000)
+    // The plan carries only the inline window: a 4200-message child must not be
+    // enumerated into the preview, the send request or the IPC payload.
+    const plan = await claude.current.service.preview(child.id, { providerId: 'claude' })
+    if (plan.continuation.kind === 'blocked') throw new Error(plan.continuation.reason)
+    expect(plan.continuation.missingItems.length).toBeGreaterThan(0)
+    expect(plan.continuation.missingItems.length).toBeLessThanOrEqual(INLINE_CANDIDATE_ITEMS)
+    expect(plan.missingItems.length).toBe(plan.continuation.missingItems.length)
     const refs = await sideChatSnapshotRefs(claude.current.userData, record)
     expect(refs.length).toBe(4200)
     for (const [index, expected] of [[0, '问题 0'], [2099, '回答 1049'], [4199, '回答 2099']] as const) {

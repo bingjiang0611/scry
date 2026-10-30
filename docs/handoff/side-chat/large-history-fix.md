@@ -45,16 +45,39 @@
 
 完整门禁结果见本文件末尾“门禁”一节（每次合入前重跑并更新）。
 
+## 打包 App 级验收（真实 IPC，不是服务单测）
+
+`node scripts/electron-security-smoke.mjs --dev-side-chat-large-history-only`：在临时 userData 里用生产 `ConversationStore` + 归档路径写入 **2005 轮 / 4010 条消息 / 22.4 MB 归档 / 单条 4.26 MB 可见正文**的父会话（`scripts/side-chat-large-history-seed.ts`，种子脚本自身断言四个超限），再让打包 App 通过真实 IPC 走完整链路。该模式启动的 smoke Provider 声明 `historyReader: true` 并**真的**经 loopback MCP 读遗漏正文（`smoke-history-reader.ts`）。
+
+实测（`/tmp/lh-final2.log`）：`messageCount=4010`、`archiveBytes=22361185`、`hugeMessageBytes=4259859`、`planItems=400`、`providerReads=3`（早/中/末三条完整正文，逐条与子会话冻结正文等长）、`viewerRows=4010`（翻完所有 `nextCursor`，438 ms）、父会话删除后仍 `readsAfterDelete=4010`。
+
+同一 fixture 在**无 reader** 的 App（`--dev-side-chat-only` 的 `large history refusal` 步骤）里是独立负向用例：预览给出 `历史检索工具` 能力拒绝（文案里没有 `16 MiB|4 MiB|读取预算`），`createSideChat` 失败、`listSideChats` 为空、父会话未被改动。
+
 ## 仍然真实存在的上限（审计结论，不是隐藏 bug）
 
 - **共享交接读取仍有预算**：`conversation-history-source.ts:readConversationHistoryMessages` 对“把一份非侧聊父会话直接当历史交接”的 archive 读取仍是 `MAX_CONVERSATION_HISTORY_SOURCE_BYTES = 16 MiB`、`MAX_CONVERSATION_HISTORY_TURNS = 2000`、`MAX_CONVERSATION_HISTORY_TEXT_BYTES = 4 MiB`。这是**所有对话共用**的交接/Adoption 路径，不是侧聊新链路；侧聊的预览、创建、首次发送与后续发送都不再走它。因此本修复不宣称“整个 App 无上限”。
-- **交接选择把缺失项物化成 ref 数组**：`sideChatSnapshotRefs` 读全部清单元数据，O(消息数) 瞬时内存（4200 条约 0.5 MB），不持久化、不进 IPC。它只是计划输入。
+- **计划只带内联窗口，不是全量 ref**：`sideChatPlanRefs` 对格式 4 子会话只返回最新、且单条字节仍可能内联的 ≤400 条（`sideChatInlineCandidates`，预算 `MAX_HANDOFF_BYTES`）；preview/plan/IPC 因此不随冻结消息数增长（App 实测 4010 条冻结消息，`plan.missingItems = 400`）。位置、遗漏区间与累计计数一律由清单描述符推导（`sideChatContextPositions`），旧条数记账只在 v3 记录上保留。
 - **封存常驻内存是“单条消息”**：`streamTurns` 把一条正文封进 `TextSpool`（256 KiB 常驻 + 私有临时文件）再写清单，所以一条 195 MB 的**可见**正文峰值仍约为该条消息（不是前缀）。工具 payload 不走这条路径。
-- **原生 transcript 投影按条取字符串**：`conversation-side-chat-raw.ts` 的消息文本来自已解析的 transcript JSON 行，一条消息一个字符串。
+- **原生 JSONL 仍按整行 `JSON.parse`（未修）**：`normalize.ts:appendTranscriptToTurns` 对每行做 `JSON.parse`，`transcript-file-cache.ts` 保留整份 `ParsedTurn[]`。原生 transcript 里若出现单行 195 MB 的工具结果，这一行会被整体解析；Scry 自己的归档分片走的是流式投影（上面第 1 条），不受影响。这是本分支**明确未完成**的一项，见“父级 review 待办”。
 - **`transcript-archive.ts`（97 KB，受 20 KB 提交钩子约束不可改）**：`resolveTranscriptPath`/`inspectTranscriptIdentity` 仍是同步整文件 identity 读取，且对“贴尾残行”的 transcript 判定 invalid。因此 >16 MiB 的**已收敛**原生会话已可冻结，但“正在写且尾部破损”的实时会话仍可能被 identity 判据拒绝。
 - **相邻 UI 上限**：`MAX_SIDE_CHAT_TABS = 8`（`right-surface.ts`）、`side-chat-preferences.ts` `MAX_ENTRIES = 64`、`listSideChats` ≤100/页、查看器 40 项/256 KiB 单页、`MAX_CONVERSATION_HISTORY_ARTIFACT_BYTES = 256 KiB`。它们是界面/单页上限，不是历史读取上限。
 - **Provider 能力边界**：只有 `historyReader: true` 的 Provider（claude/codex/pi）能在首次发送时按需检索遗漏正文；qoder/opencode 如实拒绝而不是假装支持。Pi 没有 MCP 状态 API，本修复不探测、不推断。
 
+## 父级 review 待办（本分支未完成）
+
+- **原生 JSONL 大行流式选择字段**：`normalize.ts` / `transcript-file-cache.ts` 仍整行解析、整份 `ParsedTurn[]` 常驻。需要按字段投影（类似 `trace-archive-projection.ts`）才能让单行 195 MB 的工具结果不进内存。未做，不做假声明；Scry 归档分片路径已经流式化。
+- **`conversation-history-source.ts` 的共享交接读取预算**：仍是 16 MiB / 4 MiB / 2000 轮，只作用于“把非侧聊父会话直接当历史交接”的 archive 路径（adoption 与既有普通对话）。侧聊新链路不经过它。
+
 ## 门禁
 
-见提交信息与父级验收报告；每次合入前重跑：`npm run typecheck`、`npm test`、`npm run build`、`npm run test:side-chat:ui`、`npm run test:conversation:ipc`、`npm run test:renderer:ui`、`npm run check:cli-release`、`npm run performance:measure -- --compare d824c609`（毫秒结论需 `timing-run` 锁；不测就只报计数）。
+本轮实测（Node 22.22.1，worktree 内）：
+
+- `npm run typecheck`（node + web）：通过（`TYPECHECK_EXIT=0`）。
+- `npm test`：`503 passed | 4 skipped`，`5069 passed | 4 skipped`（`NPM_TEST_EXIT=0`，`/tmp/full-test-new2.log`）。
+- `npm run build`：通过。
+- `node scripts/electron-security-smoke.mjs --dev-side-chat-large-history-only`：`LH_EXIT=0`（正向大历史，见上）。
+- `node scripts/electron-security-smoke.mjs --dev-side-chat-only`：`SC_EXIT=0`（含无 reader 负向用例、既有多 Provider/重启/草稿/adoption 步骤）。首轮曾在 `orphan reader` 步骤失败（`the child could not select an agent of its own: {hostAgent:"codex", chipAgent:"codex"}`），同一代码重跑为 0；按纪律如实记录为 fixture 时序抖动，未跳过该步骤。
+- `npm run test:renderer:ui`：`RENDERER_UI_EXIT=0`。
+- `npm run performance:measure -- --compare 6f2c6d2f`：`PERF_EXIT=0`，`Ratchet: passed`；135 项全部 `measured`，仅 3 项按字节的正向抖动（`io.read.payload.bytes` +17 B / 1.4 MB；`hash-update-bytes` +4 B），基线侧同样逐轮抖动，未测毫秒，故只报计数。
+
+每次合入前重跑同一组命令；毫秒结论需 `timing-run` 锁，本轮没有毫秒结论。

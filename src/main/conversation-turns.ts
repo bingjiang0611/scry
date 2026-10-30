@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import { sideChatSnapshotRefs } from './conversation-side-chat-snapshot'
+import { sideChatContextPositions, sideChatPlanRefs } from './conversation-side-chat-snapshot'
 import { conversationCoverage, conversationItemKey, planConversationContinuation, sameConversationTarget,
-  splitOmittedItems,
+  splitOmittedItems, sideChatOmittedRanges,
   sideChatSnapshotIndexOf, sideChatSnapshotMessageCount,
   SIDE_CHAT_DEFAULT_TITLE,
   type Conversation, type ConversationDelivery, type ConversationItemRef, type ConversationArchiveRef,
@@ -46,18 +46,25 @@ export type BeginConversationTurnResult = {
 function assertSideChatContextIntact(
   conversation: Conversation,
   bindingId: string | undefined,
-  missing: ConversationItemRef[]
+  missing: ConversationItemRef[],
+  positions?: { covered: readonly number[]; omitted: readonly number[] }
 ): void {
   if (!conversation.sideChat) return
   const snapshot = conversation.sideChat.snapshot
   const coveredRefs = bindingId === undefined ? [] : conversationCoverage(conversation, bindingId)
   if (snapshot.format === 4) {
     // Format 4 has no enumerable item list in the record, so the same invariant is
-    // checked by position: every frozen index must be covered or explicitly missing.
+    // checked by position: covered, inline and omitted positions must partition the
+    // snapshot exactly once, without a gap or an overlap.
+    requireValue(positions !== undefined, '侧聊冻结快照缺少位置校验，输入未投递')
     const seen = new Set<number>()
-    for (const ref of [...coveredRefs, ...missing]) {
-      const index = sideChatSnapshotIndexOf(snapshot, ref)
-      if (index >= 0) seen.add(index)
+    // The child's own run items are not frozen positions: only refs this snapshot owns
+    // take part in the partition, and every one of them must sit inside the manifest.
+    const selected = missing.map(ref => sideChatSnapshotIndexOf(snapshot, ref)).filter(index => index >= 0)
+    for (const index of [...positions.covered, ...positions.omitted, ...selected]) {
+      requireValue(index < sideChatSnapshotMessageCount(snapshot), '侧聊冻结快照上下文缺失，输入未投递')
+      requireValue(!seen.has(index), '侧聊冻结快照上下文重复，输入未投递')
+      seen.add(index)
     }
     requireValue(seen.size === sideChatSnapshotMessageCount(snapshot), '侧聊冻结快照上下文缺失，输入未投递')
     return
@@ -101,30 +108,55 @@ export async function beginConversationTurn(
     requireValue(!conversation.archivedAt, '对话已存档，请先恢复')
     requireValue(conversation.revision === request.expectedRevision, '对话已变化，请重新预览')
     const plan = planConversationContinuation(conversation, request.target,
-      conversation.sideChat ? await sideChatSnapshotRefs(ledger.userData, conversation) : undefined)
+      conversation.sideChat ? await sideChatPlanRefs(ledger.userData, conversation) : undefined)
     if (plan.kind === 'blocked') throw new Error(plan.reason)
-    assertSideChatContextIntact(conversation, plan.kind === 'resume' ? plan.bindingId : undefined, plan.missingItems)
-    const order = new Map(plan.missingItems.map((item, index) => [conversationItemKey(item), index]))
+    const bindingId = plan.kind === 'resume' ? plan.bindingId : undefined
+    const snapshot = conversation.sideChat?.snapshot
+    // A v4 child's positions come from its manifest, not from an enumerated ref list: the
+    // plan only carries the inline window, so covered and omitted positions are derived.
+    const positions = snapshot?.format === 4 ? sideChatContextPositions(conversation, bindingId) : undefined
+    const selectedPositions = snapshot === undefined ? [] : request.selectedItems
+      .map(ref => sideChatSnapshotIndexOf(snapshot, ref)).filter(index => index >= 0)
+    const omittedPositions = positions?.missing.filter(index => !selectedPositions.includes(index))
+    // For a v4 child the partition is checked by position; the inline selection is the
+    // only ref list that may overlap the omitted ranges, and it is the request's own.
+    assertSideChatContextIntact(conversation, bindingId,
+      snapshot?.format === 4 ? request.selectedItems : plan.missingItems,
+      positions === undefined || omittedPositions === undefined ? undefined : { covered: positions.covered, omitted: omittedPositions })
+    // A v4 child's selection is ordered by manifest position: the inline set may reach
+    // past the plan's candidate window, and the encoded index is its own authority.
+    const order = snapshot?.format === 4 ? undefined
+      : new Map(plan.missingItems.map((item, index) => [conversationItemKey(item), index]))
     let previous = -1
     for (const item of request.selectedItems) {
-      const position = order.get(conversationItemKey(item))
-      requireValue(position !== undefined && position > previous, '交接选择不属于当前缺失历史，或顺序已变化')
+      const frozen = order === undefined && snapshot !== undefined ? sideChatSnapshotIndexOf(snapshot, item) : undefined
+      // The child's own run items travel beside the snapshot and hold no frozen position.
+      if (frozen !== undefined && frozen < 0) continue
+      const position = order === undefined ? frozen : order.get(conversationItemKey(item))
+      requireValue(position !== undefined && position >= 0 && position > previous,
+        '交接选择不属于当前缺失历史，或顺序已变化')
       previous = position
     }
     // Publish the exact body first. Failure leaves no dispatch intent and cannot start a Provider.
     const importedItems = request.selectedItems
     const selected = new Set(importedItems.map(conversationItemKey))
     // A frozen snapshot contributes compact ranges instead of one record reference per
-    // omitted message, so a large child's conversation record stays small.
-    const omitted = splitOmittedItems(conversation,
-      plan.missingItems.filter((item) => !selected.has(conversationItemKey(item))))
-    const history = request.preparedHistory ?? (importedItems.length || plan.missingItems.length
+    // omitted message, so a large child's conversation record stays small. A v4 child's
+    // ranges cover the whole manifest outside the covered and inline positions.
+    const omitted = snapshot?.format === 4 && omittedPositions !== undefined
+      ? { items: [] as ConversationItemRef[], ranges: sideChatOmittedRanges(snapshot, omittedPositions) }
+      : splitOmittedItems(conversation,
+        plan.missingItems.filter((item) => !selected.has(conversationItemKey(item))))
+    // A sealed artifact exists exactly when something is handed off: inline items or an
+    // omission ledger. A body too large to inline is an omission, so it still seals one.
+    const handoff = importedItems.length > 0 || omitted.items.length > 0 || omitted.ranges.length > 0
+    const history = request.preparedHistory ?? (handoff
       ? await prepareConversationHistory(ledger.userData, conversation, importedItems, omitted.items, omitted.ranges)
       : undefined)
-    const bindingId = plan.kind === 'resume' ? plan.bindingId : randomUUID()
-    if (plan.kind === 'fresh') conversation.bindings.push({ ...request.target, id: bindingId })
+    const boundId = bindingId ?? randomUUID()
+    if (plan.kind === 'fresh') conversation.bindings.push({ ...request.target, id: boundId })
     const turn: DispatchedConversationTurn = {
-      origin: 'dispatch', ordinal: conversation.turns.length + 1, runId: request.runId, bindingId,
+      origin: 'dispatch', ordinal: conversation.turns.length + 1, runId: request.runId, bindingId: boundId,
       items: request.items, commandId: request.commandId, intentHash,
       resumeSessionId: plan.kind === 'resume' ? plan.nativeSessionId : null,
       importedItems,

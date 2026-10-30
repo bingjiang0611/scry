@@ -32,6 +32,7 @@ import { lostReplyPath, writeConversationFaultEntry, writeIpcCountEntry } from '
 
 const structureOnly = process.argv[2] === '--dev-structure-only'
 const sideChatOnly = process.argv[2] === '--dev-side-chat-only'
+const largeHistoryOnly = process.argv[2] === '--dev-side-chat-large-history-only'
 const sourceControlOnly = process.argv[2] === '--dev-source-control-only'
 const conversationOwnershipOnly = process.argv[2] === '--dev-conversation-ownership-only'
 const unifiedConversationOnly = process.argv[2] === '--dev-unified-conversation-only'
@@ -51,7 +52,7 @@ if (devQuestionOnly && !foreground) {
 }
 const devFilesOnly = process.argv[2] === '--dev-files-only'
 const filesOnly = devFilesOnly || process.argv[2] === '--files-only'
-const devApp = sideChatOnly || structureOnly || unifiedConversationOnly || conversationOwnershipOnly || sourceControlOnly || devMetaPromptsOnly || nativeHistoryOnly || process.argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
+const devApp = sideChatOnly || largeHistoryOnly || structureOnly || unifiedConversationOnly || conversationOwnershipOnly || sourceControlOnly || devMetaPromptsOnly || nativeHistoryOnly || process.argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
 const packagedAppArgument = ['--files-only', '--performance-only', '--file-history-only'].includes(process.argv[2]) ? undefined : process.argv[2]
 const appPath = resolve(devApp ? 'node_modules/electron/dist/Electron.app' : packagedAppArgument || join('dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'Scry.app'))
 const executable = join(appPath, 'Contents', 'MacOS', devApp ? 'Electron' : 'Scry')
@@ -182,11 +183,12 @@ async function main() {
   const structureEntry = join(temp, 'structure-main.mjs')
   const structureIpc = join(temp, 'structure-ipc-counts.json')
   if (structureOnly) writeIpcCountEntry(structureEntry, structureIpc)
-  const sideChatMode = sideChatOnly && prepareSideChatMode({ temp, entryPath: structureEntry, workspace: canonicalWorkspace,
-    userDataDir, inputsPath: conversationInputs, callsPath: conversationCalls, identity: smokeIdentity })
+  const sideChatMode = (sideChatOnly || largeHistoryOnly) && await prepareSideChatMode({ temp, entryPath: structureEntry,
+    workspace: canonicalWorkspace, userDataDir, inputsPath: conversationInputs, callsPath: conversationCalls,
+    identity: smokeIdentity, largeHistory: largeHistoryOnly })
   const launchApp = () => {
     child = spawn(executable, [
-      ...(devApp ? [devQuestionOnly ? questionEntry : devFilesOnly ? filesEntry : unifiedConversationOnly ? conversationEntry : (structureOnly || sideChatOnly) ? structureEntry : resolve('.')] : []),
+      ...(devApp ? [devQuestionOnly ? questionEntry : devFilesOnly ? filesEntry : unifiedConversationOnly ? conversationEntry : (structureOnly || sideChatOnly || largeHistoryOnly) ? structureEntry : resolve('.')] : []),
       `--remote-debugging-port=${port}`,
       `--user-data-dir=${userDataDir}`,
       '--disable-gpu',
@@ -206,7 +208,7 @@ async function main() {
         ...(unifiedConversationOnly ? { SCRY_ELECTRON_SMOKE_CONVERSATIONS: '1', SCRY_ELECTRON_SMOKE_INPUTS: conversationInputs, SCRY_ELECTRON_SMOKE_CALLS: conversationCalls, SCRY_ELECTRON_SMOKE_IDENTITY: smokeIdentity } : {}),
         ...(sideChatMode ? sideChatMode.env : {}),
         // Only explicit smoke adapters may run. Never discover/start real Provider services.
-        SCRY_DISABLED_PROVIDERS: unifiedConversationOnly ? 'qoder,opencode' : sideChatOnly ? '' : 'claude,qoder,opencode,pi',
+        SCRY_DISABLED_PROVIDERS: unifiedConversationOnly ? 'qoder,opencode' : (sideChatOnly || largeHistoryOnly) ? '' : 'claude,qoder,opencode,pi',
         SCRY_REMOTE_HOST: '0'
       },
       stdio: ['ignore', 'pipe', 'pipe']
@@ -233,7 +235,7 @@ async function main() {
     console.log(JSON.stringify(result))
     return
   }
-  if (sideChatOnly) return sideChatMode.run({ cdp, evaluate, check, lifecycle: { port, launch: launchApp, child: () => child, stop: stopOwnedApp, waitTarget: waitForTarget, connect: connectCdp } })
+  if (sideChatOnly || largeHistoryOnly) return sideChatMode.run({ cdp, evaluate, check, lifecycle: { port, launch: launchApp, child: () => child, stop: stopOwnedApp, waitTarget: waitForTarget, connect: connectCdp } })
   if (ownershipFixture) return exerciseOwnership(context())
   if (sourceControlOnly) {
     const result = await exerciseSourceControlApp(cdp, evaluate, { workspace: canonicalWorkspace, remote: realpathSync(secondWorkspace), home })
@@ -306,16 +308,19 @@ async function main() {
   }))
 }
 
+let failed = false
 try {
   await main()
 } catch (error) {
+  failed = true
   // Keep the primary assertion and App logs visible even if cleanup independently fails.
   console.error('[scry] smoke failure:', error, stderr.slice(-8000))
   throw error
 } finally {
-  // A failed cleanup throws before deleting the fixture, preserving evidence for diagnosis.
   await stopOwnedApp(child)
-  try {
+  // A failed run keeps its fixture as evidence; only clean runs delete it.
+  if (failed) console.warn(`[scry] smoke fixture kept for diagnosis: ${temp}`)
+  else try {
     rmSync(temp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
   } catch (error) {
     console.warn(`[scry] smoke temp cleanup failed: ${error.message}`)

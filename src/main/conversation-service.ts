@@ -25,7 +25,7 @@ import { forkConversation } from './conversation-fork'
 import { createSideChat, findSideChatCommand, listSideChats, previewSideChat } from './conversation-side-chat'
 import { readConversationPage } from './conversation-read'
 import {
-  belongsToSideChatSnapshot, readSideChatSnapshotBodyPage, readSideChatSnapshotMessage, sideChatSnapshotRefs
+  belongsToSideChatSnapshot, readSideChatSnapshotBodyPage, readSideChatSnapshotMessage, sideChatPlanRefs
 } from './conversation-side-chat-snapshot'
 
 const hash = (value: string): string => createHash('sha256').update(value, 'utf8').digest('hex')
@@ -132,7 +132,7 @@ export class ConversationService {
     if (conversation.archivedAt) throw new Error('对话已存档，请先恢复')
     const target = await this.target(conversation.cwd, request)
     const continuation: ConversationContinuation = planConversationContinuation(conversation, target,
-      conversation.sideChat ? await sideChatSnapshotRefs(this.deps.store.userData, conversation) : undefined)
+      conversation.sideChat ? await sideChatPlanRefs(this.deps.store.userData, conversation) : undefined)
     if (continuation.kind === 'blocked') throw new Error(continuation.reason)
     return {
       conversationId: id,
@@ -221,7 +221,7 @@ export class ConversationService {
     const target = await this.target(conversation.cwd, request)
     if (target.continuationKey !== request.expectedContinuationKey) throw new Error('Provider 接续身份已变化，请重新预览')
     const continuation = planConversationContinuation(conversation, target,
-      conversation.sideChat ? await sideChatSnapshotRefs(this.deps.store.userData, conversation) : undefined)
+      conversation.sideChat ? await sideChatPlanRefs(this.deps.store.userData, conversation) : undefined)
     if (continuation.kind === 'blocked') throw new Error(continuation.reason)
     if (continuation.kind === 'fresh' && !request.confirmFresh) throw new Error('创建新的原生上下文需要明确确认')
     if (JSON.stringify(request.selectedItems.map(conversationItemKey)) !== JSON.stringify(continuation.missingItems.map(conversationItemKey))) {

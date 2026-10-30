@@ -7,12 +7,13 @@ import {
 import { readRecorderContentPage } from '../core/turn-recorder/content-store'
 import { isToolContentRef } from '../shared/tool-content'
 import {
-  conversationItemKey, sideChatSnapshotIndexOf, sideChatSnapshotRunId,
+  conversationCoverage, conversationItemKey, sideChatSnapshotIndexOf, sideChatSnapshotRunId,
   type Conversation, type ConversationItemRef, type SideChatSnapshotArtifact, type SideChatSnapshotItem
 } from '../shared/conversation'
 import type { SideChatSnapshotBodyItem, SideChatSnapshotBodyPage } from '../shared/conversation-api'
 import { MAX_SIDE_CHAT_SNAPSHOT_BYTES } from './conversation-schema'
 import { conversationHistoryRoot, type HistoryMessage } from './conversation-history-content'
+import { MAX_HANDOFF_BYTES } from './conversation-handoff-budget'
 
 const hash = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex')
 /** The recorder content pager caps one read at 256 KiB; bodies are read in bounded pages. */
@@ -181,6 +182,87 @@ export async function sideChatSnapshotRefs(
     for (const item of page) refs.push({ ...item.ref })
   }
   return refs
+}
+
+/**
+ * The newest frozen refs that could still travel inline.
+ *
+ * A v4 child can hold thousands of messages, and only a small newest window can ever fit
+ * the handoff's inline byte budget. Planning therefore reads manifest metadata from the
+ * newest end until that budget or a hard item cap is reached, so neither a plan nor the
+ * IPC payload carries one reference per frozen message. Everything older stays owned by
+ * the sealed manifest and is reachable through the Provider's history reader.
+ */
+export async function sideChatInlineCandidates(
+  userData: string,
+  conversation: SideChatSnapshotOwner,
+  budgetBytes: number
+): Promise<ConversationItemRef[]> {
+  const v4 = descriptor(conversation)
+  if (!v4) return (artifactOf(conversation)?.items ?? []).map(item => ({ ...item.ref }))
+  const root = conversationHistoryRoot(userData, conversation)
+  const newest: ConversationItemRef[] = []
+  let bytes = 0
+  for (let to = v4.messageCount; to > 0 && bytes < budgetBytes && newest.length < INLINE_CANDIDATE_ITEMS;) {
+    const from = Math.max(0, to - 32)
+    const page = await readSideChatManifestItems(root, v4, from, to - from)
+    for (let index = page.length - 1; index >= 0; index -= 1) {
+      const item = page[index]
+      // A body past the whole inline budget can never be inline; the reader serves it.
+      if (bytes + item.bytes > budgetBytes) continue
+      bytes += item.bytes
+      newest.push({ ...item.ref })
+      if (bytes >= budgetBytes || newest.length >= INLINE_CANDIDATE_ITEMS) break
+    }
+    to = from
+  }
+  return newest.reverse()
+}
+
+/** Hard cap on inline candidates, independent of how small the bodies are. */
+export const INLINE_CANDIDATE_ITEMS = 400
+
+/**
+ * The reference list a plan may carry for this child.
+ *
+ * A legacy snapshot is small enough to hand over whole; a v4 child contributes only the
+ * newest inline window, because every other frozen message can only travel through the
+ * history reader and would otherwise be enumerated into the plan and the IPC payload.
+ */
+export async function sideChatPlanRefs(
+  userData: string,
+  conversation: SideChatSnapshotOwner
+): Promise<ConversationItemRef[]> {
+  if (!descriptor(conversation)) return sideChatSnapshotRefs(userData, conversation)
+  return sideChatInlineCandidates(userData, conversation, MAX_HANDOFF_BYTES)
+}
+
+/**
+ * Covered and missing frozen positions for one binding.
+ *
+ * The manifest, not the conversation record, is the ordered authority for a v4 child, so
+ * both planning and sealing ask this one function which positions this run still owes the
+ * Provider. Covered positions stay excluded; every other position is either inline or
+ * omitted, and the two sets are exactly complementary.
+ */
+export function sideChatContextPositions(
+  conversation: Pick<Conversation, 'sideChat' | 'turns' | 'fork'>,
+  bindingId: string | undefined
+): { covered: number[]; missing: number[] } {
+  const snapshot = conversation.sideChat?.snapshot
+  if (snapshot?.format !== 4) return { covered: [], missing: [] }
+  const covered: number[] = []
+  if (bindingId !== undefined) {
+    for (const ref of conversationCoverage(conversation, bindingId)) {
+      const index = sideChatSnapshotIndexOf(snapshot, ref)
+      if (index >= 0) covered.push(index)
+    }
+  }
+  covered.sort((left, right) => left - right)
+  const delivered = new Set(covered)
+  const missing: number[] = []
+  for (let index = 0; index < snapshot.messageCount; index += 1) if (!delivered.has(index)) missing.push(index)
+  return { covered, missing }
 }
 
 /** One viewer page: at most 40 messages and 256 KiB of real UTF-8 body per read. */

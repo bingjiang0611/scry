@@ -11,7 +11,7 @@ import { handoffBudget, handoffCoverage, selectHistory, type HandoffBudgetInput 
 import { conversationHistoryRoot, type HistoryMessage } from './conversation-history-content'
 import { readConversationHistoryMessages } from './conversation-history-source'
 import { MAX_CONVERSATION_HISTORY_ARTIFACT_BYTES } from './conversation-history-limits'
-import { belongsToSideChatSnapshot, readSideChatSnapshotItem, readSideChatSnapshotMessageAt } from './conversation-side-chat-snapshot'
+import { belongsToSideChatSnapshot, readSideChatSnapshotItem, readSideChatSnapshotMessageAt, sideChatContextPositions } from './conversation-side-chat-snapshot'
 import { readSideChatManifestItems } from './conversation-side-chat-manifest'
 import { sideChatHistoryReaderSource } from './conversation-side-chat-reader'
 import { memoryHistoryReaderSource, type HistoryReaderSource } from './conversation-history-reader'
@@ -75,10 +75,12 @@ export async function prepareConversationHandoff(
   allowOmission: boolean,
   nativeTarget?: NativeHandoffTarget
 ): Promise<PreparedHandoff> {
-  if (!missingItems.length) return { selectedItems: [], budget: input }
-  if (isManifestChild(conversation, missingItems)) {
-    return selectSideChatHistory(userData, conversation, missingItems, input, allowOmission)
+  // A manifest child's context lives in the snapshot, so its selection is derived from
+  // the descriptor even when no inline candidate is offered.
+  if (conversation.sideChat?.snapshot.format === 4) {
+    return selectSideChatHistory(userData, conversation, missingItems, input, allowOmission, nativeTarget?.bindingId)
   }
+  if (!missingItems.length) return { selectedItems: [], budget: input }
   const { messages, contextUsage } = await readConversationHistoryMessages(userData, conversation, missingItems, nativeTarget)
   const budget = { ...input, ...(contextUsage ? { contextUsage } : {}) }
   const selection = selectHistory({
@@ -106,12 +108,6 @@ export async function prepareConversationHandoff(
 const omittedLedger = (items: readonly ConversationItemRef[], ranges: readonly OmittedItemRange[]): unknown =>
   ranges.length ? { items: items.map(conversationItemKey), ranges } : items.map(conversationItemKey)
 
-/** Only a format 4 child pages its frozen prefix from a manifest; a v3 artifact stays in memory. */
-function isManifestChild(conversation: Pick<Conversation, 'sideChat'>, missingItems: readonly ConversationItemRef[]): boolean {
-  const snapshot = conversation.sideChat?.snapshot
-  return snapshot?.format === 4 && missingItems.some(item => sideChatSnapshotIndexOf(snapshot, item) >= 0)
-}
-
 /** One candidate whose body is read only when the exact selection can still fit it. */
 interface FrozenCandidate {
   index: number
@@ -134,18 +130,19 @@ async function selectSideChatHistory(
   conversation: Conversation,
   missingItems: ConversationItemRef[],
   input: HandoffBudgetInput,
-  allowOmission: boolean
+  allowOmission: boolean,
+  bindingId: string | undefined
 ): Promise<PreparedHandoff> {
   const snapshot = conversation.sideChat?.snapshot
   if (snapshot?.format !== 4) throw new Error('侧聊快照不是可按下标读取的清单格式')
   const root = conversationHistoryRoot(userData, conversation)
-  const positions: number[] = []
-  const others: ConversationItemRef[] = []
-  for (const item of missingItems) {
-    const index = sideChatSnapshotIndexOf(snapshot, item)
-    if (index < 0) others.push(item)
-    else positions.push(index)
-  }
+  // A bounded inline plan cannot shrink the ledger: the ranges cover the manifest.
+  const positions = sideChatContextPositions(conversation, bindingId).missing
+  // The child's own turns are not frozen positions; they still travel as ordinary refs.
+  const others = missingItems.filter(item => sideChatSnapshotIndexOf(snapshot, item) < 0)
+  // Nothing left to hand off: a resumed binding already carries the whole snapshot, and
+  // a sealed artifact that claims otherwise would contradict the turn's own ledger.
+  if (!positions.length && !others.length) return { selectedItems: [], budget: input }
   const { messages: rest, contextUsage } = others.length
     ? await readConversationHistoryMessages(userData, conversation, others) : { messages: [] as HistoryMessage[] }
   const budget = { ...input, ...(contextUsage ? { contextUsage } : {}) }
