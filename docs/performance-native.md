@@ -68,3 +68,11 @@ Native 比较器同时检查身份、环境、工作量、完整样本、真实�
 同仓 PR 的独立 job 更新评论；写 token 的 job 不检出或执行 PR 代码。fork PR 只提供只读 Actions summary/artifact。评论同时汇总 Node/native 两个 job 的实际状态及报告；测量失败或缺失时明确没有有效比较。让它成为必需合并检查还需要仓库 branch protection 配置；提交本地文件不会自动改变远端设置。
 
 本地比较也必须隔离两个源码目录、使用同一 harness/config/Node 和各自 lockfile；不能拿历史文档中的其他硬件或不同 fixture 数字当 baseline。可以用临时 detached worktree，但不要在同机并发跑耗时基准。
+
+### 失败归因证据
+
+Native 输出保留 `artifactFiles` 的逐文件 SHA-256；`lifecycleTraces` 保留现有 stdout 中的启动、start/stop IPC 和 Agent trace。`localRecording.diagnostics` 另保留隔离 App journal 中已有的启动、start IPC、主进程/renderer 资源和 health 丢失记录。两路 trace 可能重复，不能相加；journal 的队列可能丢记录，必须结合 health 判断，不能假称完整。
+
+新增诊断只在测量完成并退出 App 后导出既有记录；不改变日常采集内容、频率、格式、保留策略或预算。空记录或关闭记录表示该证据不可用，不表示耗时或资源占用为零。
+
+2026-10-30 的 [CI 41045559281](https://github.com/bingjiang0611/scry/actions/runs/41045559281) 有 29 个相关计时行超出比较门槛；其中 paged 首次 complete 的 start receipt 为 428ms、terminal 为 688ms。与上一轮相比，同一 baseline 产物的 short-heavy startup 也从约 1064ms 变为 3843ms。这证明存在明显波动，但没有证明宿主争用、GC 或排除 App 瓶颈；不能把下一次绿灯当作本次问题已修复。新增的是归因证据，不是性能修复，门禁算法与固定负载不变。

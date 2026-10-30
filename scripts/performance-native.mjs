@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { cpus, release } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -22,6 +22,28 @@ const finite = value => typeof value === 'number' && Number.isFinite(value) && v
 const integerCounter = value => Number.isSafeInteger(value) && value >= 0
 const assertCounters = (counters, label) => {
   assert.ok(counters && nativeCounterMetrics.every(metric => integerCounter(counters[metric])), `missing ${label} work counters`)
+}
+
+export function nativeBuildArtifacts(projectRoot) {
+  const artifactDir = join(projectRoot, 'out')
+  const digest = createHash('sha256')
+  const files = []
+  for (const path of readdirSync(artifactDir, { recursive: true }).sort()) {
+    if (!statSync(join(artifactDir, path)).isFile()) continue
+    const sha256 = createHash('sha256').update(readFileSync(join(artifactDir, path))).digest('hex')
+    files.push({ path, sha256 })
+    digest.update(`${path}\0${sha256}\n`)
+  }
+  return { sha256: digest.digest('hex'), files }
+}
+
+// Retain existing isolated-App observations after measurement; do not add sampling
+// or use diagnostics to override a failed budget.
+export function nativeDiagnosticRecords(records) {
+  return records.filter(({ observation }) => {
+    if (['resource', 'renderer', 'health'].includes(observation.kind)) return true
+    return observation.kind === 'trace' && ['app.startup', 'ipc.agent:start'].includes(observation.sample.name)
+  })
 }
 
 export function exportNativeCounters(report) {

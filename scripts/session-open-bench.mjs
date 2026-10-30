@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -11,7 +11,7 @@ import { connect, freePort, startupProbe, writeSessionFixture } from './session-
 import { measureHistory } from './session-open-history.mjs'
 import { nativeCounterMetrics, probeNativeComposer } from './native-composer-probe.mjs'
 import { readRecords } from './performance-report.mjs'
-import { nativeHarnessFiles, nativeWorkloads } from './performance-native.mjs'
+import { nativeBuildArtifacts, nativeDiagnosticRecords, nativeHarnessFiles, nativeWorkloads } from './performance-native.mjs'
 
 // Production main/preload/renderer, offline fixture data, native Chromium input.
 // Measures local history plus button/render/settlement acceptance, not real Provider latency.
@@ -43,17 +43,8 @@ function capture(chunk) {
 
 const percentile = (values, quantile) => [...values].sort((a, b) => a - b)[Math.ceil(values.length * quantile) - 1]
 
-function builtArtifactHash() {
-  const artifactDir = join(root, 'out')
-  const digest = createHash('sha256')
-  for (const path of readdirSync(artifactDir, { recursive: true }).sort()) {
-    if (statSync(join(artifactDir, path)).isFile()) digest.update(`${path}\0${hash(readFileSync(join(artifactDir, path)))}\n`)
-  }
-  return digest.digest('hex')
-}
-
 try {
-  const artifactSha256 = builtArtifactHash()
+  const { sha256: artifactSha256, files: artifactFiles } = nativeBuildArtifacts(root)
   const { userData, home, cwd, sessions, bootstrap } = writeSessionFixture(root, temp, turnCount, sections)
   const port = await freePort()
   const launchStarted = performance.now()
@@ -257,12 +248,13 @@ try {
     assert.ok(records.some(record => record.observation.kind === 'trace' && record.observation.sample.name === 'ipc.agent:loadSession'), 'real App writes trusted-handler observations')
     assert.ok(records.some(record => record.observation.kind === 'trace' && record.observation.sample.name === 'session_history.load' && record.observation.sample.outcome === 'error'), 'rejected history must not disappear from its named trace')
     assert.ok(records.some(record => record.observation.kind === 'health'), 'normal shutdown flushes recording health')
-    localRecording = { records: records.length, builds: [...new Set(records.map(record => record.build))], rejectedHistoryRecorded: true }
+    localRecording = { records: records.length, builds: [...new Set(records.map(record => record.build))], rejectedHistoryRecorded: true,
+      diagnostics: nativeDiagnosticRecords(records) }
   }
   const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
-  assert.equal(builtArtifactHash(), artifactSha256, 'build artifacts changed during measurement')
+  assert.equal(nativeBuildArtifacts(root).sha256, artifactSha256, 'build artifacts changed during measurement')
   assert.equal(benchmarkCodeHash(), benchmarkSha256, 'benchmark changed during measurement')
-  console.log(JSON.stringify({ measurementVersion: 7, startupDriverReadyMs, nativeInput, composerSamples, lifecycleSamples, sqliteStats, artifactSha256, benchmarkSha256, scenario, turnCount, sections, warmups: 2, iterations, firstOpens,
+  console.log(JSON.stringify({ measurementVersion: 7, startupDriverReadyMs, nativeInput, composerSamples, lifecycleSamples, sqliteStats, artifactSha256, artifactFiles, benchmarkSha256, scenario, turnCount, sections, warmups: 2, iterations, firstOpens,
     counterSensitivity: { baseline: sensitivityBase, extra: sensitivityExtra, mutationControl, passed: sensitivityRaised },
     version: packageJson.version ?? null, platform: `${process.platform}/${process.arch}`, node: process.version,
     electron: JSON.parse(readFileSync(join(root, 'node_modules/electron/package.json'), 'utf8')).version,
@@ -275,7 +267,7 @@ try {
       'pagination preserves total', 'rapid selection isolates history', 'draft retained across selections'],
     // Existing main-process traces distinguish finalization work from renderer receipt delays.
     // Preserve them on successful runs too; failed comparisons previously lost this evidence.
-    lifecycleTraces: traces.filter(sample => sample.name.startsWith('agent.') || sample.name === 'ipc.agent:stop'),
+    lifecycleTraces: traces.filter(sample => sample.name.startsWith('agent.') || ['app.startup', 'ipc.agent:start', 'ipc.agent:stop'].includes(sample.name)),
     cleanup, localRecording }, null, 2))
 } catch (error) {
   // Preserve the original failure before cleanup; a cleanup error must not erase it.

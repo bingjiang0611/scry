@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { compareNative, composerModes, exportNativeCounters, nativeCounterMetrics, nativeInitialPageTurns, nativeWorkloads, validateNative } from './performance-native.mjs'
+import { createHash } from 'node:crypto'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { compareNative, composerModes, exportNativeCounters, nativeBuildArtifacts, nativeCounterMetrics, nativeDiagnosticRecords, nativeInitialPageTurns, nativeWorkloads, validateNative } from './performance-native.mjs'
 import { DEFAULT_LOAD_SESSION_TURNS } from '../src/main/bootstrap/history-archive'
 
 const workCounters = (value: number) => Object.fromEntries(nativeCounterMetrics.map(metric => [metric, value]))
@@ -26,6 +30,43 @@ function report() {
     }]))
   }
 }
+
+describe('native diagnostic evidence', () => {
+  it('retains per-file hashes without changing the existing aggregate fingerprint', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'scry-native-artifacts-'))
+    const hash = (value: string) => createHash('sha256').update(value).digest('hex')
+    try {
+      mkdirSync(join(directory, 'out', 'main'), { recursive: true })
+      mkdirSync(join(directory, 'out', 'renderer'), { recursive: true })
+      writeFileSync(join(directory, 'out', 'main', 'index.js'), 'main')
+      writeFileSync(join(directory, 'out', 'renderer', 'index.html'), 'renderer')
+      const files = [
+        { path: 'main/index.js', sha256: hash('main') },
+        { path: 'renderer/index.html', sha256: hash('renderer') }
+      ]
+      const artifact = nativeBuildArtifacts(directory)
+      expect(artifact.files).toEqual(files)
+      expect(artifact.sha256).toBe(hash(files.map(file => `${file.path}\0${file.sha256}\n`).join('')))
+      writeFileSync(join(directory, 'out', 'main', 'index.js'), 'changed main')
+      const changed = nativeBuildArtifacts(directory)
+      expect(changed.sha256).not.toBe(artifact.sha256)
+      expect(changed.files[0].sha256).not.toBe(files[0].sha256)
+      expect(changed.files[1]).toEqual(files[1])
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('preserves startup, start IPC, resources and loss evidence without inventing absent observations', () => {
+    const records = ['resource', 'renderer', 'app.startup', 'ipc.agent:start', 'ipc.agent:loadSession', 'health'].map(kind => ({
+      build: 'fixture-build', session: 'fixture-session',
+      observation: kind.includes('.') ? { kind: 'trace', sample: { name: kind } }
+        : kind === 'health' ? { kind, sample: { droppedRecords: 5, closed: true } } : { kind }
+    }))
+    expect(nativeDiagnosticRecords(records)).toEqual([...records.slice(0, 4), records.at(-1)])
+    expect(nativeDiagnosticRecords([])).toEqual([])
+  })
+})
 
 describe('native performance evidence gate', () => {
   it('matches the current initial-page contract without shrinking workloads or accepting lost history', () => {
