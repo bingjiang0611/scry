@@ -42,15 +42,20 @@ export function SidebarProjects({
       .sort((a, b) => (b.session.pinnedAt ?? 0) - (a.session.pinnedAt ?? 0))
     const pinnedRows = [
       ...pinned.map(row => ({ kind: 'native' as const, ...row, pinnedAt: row.session.pinnedAt ?? 0 })),
+      // A side-chat child is shown under its parent row and in its own group, never as a
+      // root conversation: the root list stays the list of sources.
       ...projects.flatMap(project => (project.conversations ?? []).filter(conversation => conversation.pinnedAt && !conversation.archivedAt &&
+        !conversation.sideChat &&
         (!ql || conversation.title.toLowerCase().includes(ql) || project.cwd.toLowerCase().includes(ql)))
         .map(conversation => ({ kind: 'conversation' as const, conversation, pinnedAt: conversation.pinnedAt ?? 0 })))
     ].sort((a, b) => b.pinnedAt - a.pinnedAt)
     const filtered = projects
       .map((project) => ({
         ...project,
-        totalSessions: project.sessions.length + (project.conversations?.filter(conversation => !conversation.archivedAt).length ?? 0),
-        conversations: (project.conversations ?? []).filter((conversation) => !conversation.pinnedAt && !conversation.archivedAt && (!ql || conversation.title.toLowerCase().includes(ql) || project.cwd.toLowerCase().includes(ql))),
+        totalSessions: project.sessions.length + (project.conversations?.filter(conversation => !conversation.archivedAt &&
+          !conversation.sideChat).length ?? 0),
+        conversations: (project.conversations ?? []).filter((conversation) => !conversation.pinnedAt && !conversation.archivedAt &&
+          !conversation.sideChat && (!ql || conversation.title.toLowerCase().includes(ql) || project.cwd.toLowerCase().includes(ql))),
         projectMatch: !ql || project.name.toLowerCase().includes(ql) || project.cwd.toLowerCase().includes(ql),
         sessions: project.sessions.filter((session) => !session.pinnedAt && matches(session))
       }))

@@ -83,7 +83,15 @@ export async function exerciseLists(contents, win, screenshotPrefix = '', pointe
       window.__historyFrame = requestAnimationFrame(sample)
     })()`)
     await click('#list-history')
-    await wait("document.querySelector('.si-head') && document.querySelector('.thinking')")
+    // Bounded completed-turn flow: a completed turn only mounts its tail (completed-turn-flow
+    // windows above 96 items), so the earlier reasoning lives behind the real reveal control
+    // (ChatTurnAssistant .turn-flow-reveal -> setFlowExpanded). The user skill head is outside
+    // that flow, so only the reasoning has to be absent before the reveal.
+    await wait("document.querySelector('.turn-flow-reveal') != null && document.querySelector('.si-head') != null")
+    check(await read("!document.querySelector('.thinking')"), 'earlier reasoning mounted before the historical flow was revealed')
+    await click('.turn-flow-reveal')
+    await wait("document.querySelector('.turn-flow-reveal') == null && document.querySelector('.thinking') != null")
+    check(await read(`[...document.querySelectorAll('.thinking, .si-head')].every(node => node.getBoundingClientRect().height > 0)`), 'revealed historical items have no layout box')
     await arm("node.classList.contains('motion-disclosure') && !!node.querySelector('.si-body')")
     await click('.si-head')
     check((await captured()).some(a=>a.duration===240 && a.frames.some(frame=>'gridTemplateRows' in frame)), 'short skill did not use the 240ms grid entrance')

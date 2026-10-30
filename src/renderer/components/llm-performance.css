@@ -19,7 +19,6 @@
 .llm-perf-body { min-height: 0; overflow: auto; padding: 26px 32px 24px; }
 .llm-perf-body h3 { margin: 0; font-size: 16px; font-weight: 600; }
 .llm-perf-section-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 22px; }
-.llm-perf-notices { display: flex; flex-wrap: wrap; gap: 12px 20px; }
 .llm-perf-help { position: relative; color: var(--dim); font-size: 12px; font-weight: 400; }
 .llm-perf-help > summary { display: inline-flex; align-items: center; gap: 7px; min-height: 24px; cursor: pointer; list-style: none; border-radius: 4px; }
 .llm-perf-help > summary::-webkit-details-marker { display: none; }
@@ -79,7 +78,6 @@
   .llm-perf-mhead, .llm-perf-mrow, .llm-perf-scale { grid-template-columns: 210px minmax(140px, 1fr) 78px 100px; gap: 18px; }
   .llm-perf-mname { gap: 7px; }
   .llm-perf-detail-head { flex-wrap: wrap; }
-  .llm-perf-notices { display: block; width: 100%; }
   .llm-perf-help > p { position: static; width: auto; max-width: 100%; }
   .llm-perf-chart-meta { gap: 16px; align-items: flex-start; }
   .llm-perf-chart-meta .llm-perf-help { max-width: calc(100% - 70px); }

@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "host": "mac2",
+  "sourceRevision": "b7f1b43f",
+  "node": "v24.18.0",
+  "electron": "42.10.1",
+  "platform": "darwin/arm64",
+  "cores": 8,
+  "memoryGiB": 16,
+  "harnessHash": "2c5b48ee6a38b30b46c495a8bc6bbae9ce01d2edd03ee5efc1a90922eabd09db",
+  "deliveredHarness": {
+    "hash": "4d8927e7168ccb9a086f4feec29ee6c2c0a29d3d27ccd74a2d2731c07ada840e",
+    "change": "CDP function extracted verbatim after measurement to satisfy the repository file-size gate",
+    "equivalenceCheck": "passed",
+    "nativeVerification": "passed: N=1/3/5, 9 canonical records, 26 focused tests, cleanup confirmed; original attempt exited 75 before App start",
+    "nativeVerificationEvidenceSha256": "d6f1b0cfcec74a426b045261fb91f1a8c6ca42fc0f0655944354b414000b811d"
+  },
+  "artifactSha256": "1953ef2997938eb382d828ea438ebc1eb5b44d97b28b0c37edc92fcf681d558e",
+  "lockfileSha256": "1ad471b93ab4b1c767c15783af6ba2126fd844b2469607739539826d0f0cfb20",
+  "workload": {
+    "toolsPerSession": 20,
+    "deltasPerSession": 400,
+    "hookStartsPerSession": 42,
+    "sharedRepository": false,
+    "sidebar": "activity",
+    "activation": "settled-native-pointer"
+  },
+  "timingRun": {
+    "label": "concurrent-baseline-pointer-3x135",
+    "command": [
+      "/bin/sh",
+      "/private/tmp/scry-concurrent-b7f1b43f.ZcWCQl/run-baseline.sh",
+      "workload"
+    ],
+    "exit": 0,
+    "signal": null,
+    "wallMs": 329469,
+    "cores": 8,
+    "loadBefore": 2.85,
+    "loadAfter": 3.53,
+    "highLoad": false
+  },
+  "limitations": [
+    "Isolated hidden window with GPU enabled and backgroundThrottling=false; not visible-window or visual-equivalence acceptance.",
+    "CPU/memory of real Provider/MCP excluded by offline adapter.",
+    "fsync/git counts cover instrumented main and Hook Node processes, not workers or shell internals.",
+    "activeRuns bytes are JSON size, not Electron wire bytes; observer serializes each actual response once.",
+    "No forced GC; post-run memory is not proof of a leak."
+  ],
+  "cpuScope": "Browser + Tab + GPU + Hook Node processes; excludes git, shell internals and other separate utility/worker processes. In-process thread CPU belongs to its OS process.",
+  "sampleWindow": "CPU uses 250ms samples bracketing the operation; post-run memory uses a pre-shutdown 2.0–2.8 second idle sample.",
+  "cohorts": [
+    {
+      "count": 1,
+      "file": "20261029-concurrent-baseline.n1.json"
+    },
+    {
+      "count": 3,
+      "file": "20261029-concurrent-baseline.n3.json"
+    },
+    {
+      "count": 5,
+      "file": "20261029-concurrent-baseline.n5.json"
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
 import { aggregateTurnEvidence } from '../../core/turn-recorder/aggregate'
 import { createPiAdapter } from './pi'
@@ -10,10 +10,16 @@ describe('Pi metering delivery', () => {
       await withProbeFixture(async (profile, cwd) => {
         const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
         const events: TraceEvent[] = []
+        let resolveSnapshots!: () => void
+        const snapshotsReady = new Promise<void>(resolve => { resolveSnapshots = resolve })
         const handle = adapter.run({ runId: 'metering', prompt: `usage:${scenario}`, cwd, agentProfileId: profile.id,
-          attachments: [], permissionMode: 'full_access', emit: (event) => events.push(event) })
+          attachments: [], permissionMode: 'full_access', emit: (event) => {
+            events.push(event)
+            if (event.stage === 'usage_snapshot' && events.filter(event => event.stage === 'usage_snapshot').length === 2) resolveSnapshots()
+          } })
         if (scenario === 'stop') {
-          await vi.waitFor(() => expect(events.filter((event) => event.stage === 'usage_snapshot')).toHaveLength(2))
+          // Wait for evidence, not a separate 1s startup deadline that can tear down a live child.
+          await snapshotsReady
           handle.interrupt()
         }
         if (scenario === 'failed') await expect(handle.promise).rejects.toThrow('fixture failure')

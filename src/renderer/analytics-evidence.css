@@ -498,13 +498,6 @@
   font-weight: 520;
   font-variant-numeric: tabular-nums;
 }
-.usage-chart-tooltip small {
-  grid-column: 2 / -1;
-  color: var(--dim2);
-  font-size: 11px;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
 .usage-visually-hidden {
   position: absolute;
   width: 1px;

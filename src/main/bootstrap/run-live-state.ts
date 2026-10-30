@@ -22,7 +22,7 @@ import { recordTurn } from '../db'
 import { prepareRunAttachments, providerAttachmentPrompt } from '../attachment-store'
 import { sanitizeToolEvents } from '../../core/turn-recorder/tool-content'
 import { attachConfiguredHookCommands } from '../hook-config'
-import { appendCoalescedTrace } from '../live-trace'
+import { appendCoalescedTrace, replaceTraceById } from '../live-trace'
 import { loadClaudeHookConfig, loadCodexHookConfig } from '../hook-config'
 import { isManagedRecorderProvider } from '../../core/turn-recorder/managed'
 import { resolveRecorderEnablement } from '../../core/turn-recorder/config'
@@ -31,7 +31,6 @@ import type { createAppSessionStore } from '../app-store'
 import type { AppRunStartOptions } from './run-frontdoor'
 import { createLlmPerformanceRecorder } from './run-metrics'
 
-type LiveRuns = { isViewed: (runId: string) => boolean }
 export type LiveRunState = {
   runId: string
   diffContextKey: string
@@ -67,13 +66,13 @@ export async function createLiveRunState(deps: {
   homeDir: string; createRunId: (managed: ManagedConversationStart | undefined, options: AppRunStartOptions) => string
   llmNetworkConfiguration: { read: () => Promise<LlmNetworkConfiguration | undefined> }; sessionDiffBaselines: SessionDiffBaselineRegistry
   appSessionStore: () => ReturnType<typeof createAppSessionStore>; recordingBlockedSessions: Map<string, string>
-  getWindow: () => BrowserWindow | null; runs: LiveRuns; queueTrace: (event: TraceEvent) => void; rendererCanReceive: () => boolean
+  getWindow: () => BrowserWindow | null; publishTrace: (event: TraceEvent) => void; rendererCanReceive: () => boolean
   mainEventId: (prefix: string, runId: string) => string; LIVE_TOOL_CONTENT_POLICY: Parameters<typeof sanitizeToolEvents>[1]
   recordingRecoveryHint: string; userDataDir: string; scopedSessionKey: (id: string) => string
   isRemoteRun: boolean; editSourceSessionId?: string; deleteRunAttachments: (userDataDir: string, runId: string) => void
   sessionBaselineKey: (context: string, sessionId: string) => string
 }) {
-  const { options, providerId, runtimeProvider, request, managedConversation, cwd, catalogCwd, resume, contextKey, agentProfileId, managedRecorderEnabled, managedRecorderEnablement, homeDir, createRunId, llmNetworkConfiguration, sessionDiffBaselines, appSessionStore, getWindow, runs, queueTrace, rendererCanReceive, mainEventId, LIVE_TOOL_CONTENT_POLICY, isRemoteRun, editSourceSessionId, deleteRunAttachments, sessionBaselineKey } = deps
+  const { options, providerId, runtimeProvider, request, managedConversation, cwd, catalogCwd, resume, contextKey, agentProfileId, managedRecorderEnabled, managedRecorderEnablement, homeDir, createRunId, llmNetworkConfiguration, sessionDiffBaselines, appSessionStore, getWindow, publishTrace, rendererCanReceive, mainEventId, LIVE_TOOL_CONTENT_POLICY, isRemoteRun, editSourceSessionId, deleteRunAttachments, sessionBaselineKey } = deps
   const runId = createRunId(managedConversation, options)
   if (managedConversation) {
     if (options.runId !== undefined && options.runId !== managedConversation.runId) {
@@ -164,15 +163,14 @@ export async function createLiveRunState(deps: {
     ? ingestionEnablement.dataRoot : undefined
   const ingestion = new LiveTraceIngestion({
     provider: providerId,
-    publish: (event) => { if (runs.isViewed(runId)) queueTrace(event) },
+    // 谁在看这个 run 由 publishTrace 决定：legacy 焦点通道 + 该 run 自己的 scoped 流。
+    publish: (event) => publishTrace(event),
     persist: async (event) => {
       const [persisted] = await persistTraceToolEvents(app.getPath('userData'), catalogCwd, [event], ingestionRecorderRoot)
       return persisted
     },
-    onPersisted: (event) => {
-      const index = runState.items.findIndex((item) => item.id === event.id)
-      if (index >= 0) runState.items[index] = event
-    },
+    // Same-id enrichment only; the helper records the write so the live projection refetches.
+    onPersisted: (event) => { replaceTraceById(runState.items, event) },
     onError: (error) => console.warn('[scry] trace content persistence failed; retaining raw evidence:', error)
   })
   // 结构化 write/edit 的 start → tool_result 关联器：预览只跟着「已落盘」的结果走。
@@ -281,6 +279,12 @@ export async function createLiveRunState(deps: {
   }
   // Git 快照与非 managed Provider 的 recorder 配置读取彼此独立；并行启动，避免把
   // 两段本地预检串到 Provider 启动前。managed 路径直接复用上面已验证的配置快照。
+  // 并行工作区观测也在这里开始：窗口起点必须是本轮 diff 基线，而不是模型文字开始/结束。
+  let releaseSessionBaseline: (() => void) | undefined
+  if (cwd) {
+    sessionDiffBaselines.observeRunWorkspace(runId, cwd)
+    releaseSessionBaseline = () => sessionDiffBaselines.releaseRunWorkspace(runId)
+  }
   const initialDiffCapture = cwd ? beginGitTurnDiff(cwd) : Promise.resolve(unavailableCapture())
   let turnDiffCapture = initialDiffCapture
   let patchExcludeBasenames: string[] = []
@@ -298,7 +302,6 @@ export async function createLiveRunState(deps: {
   let sessionBaselineReady: Promise<unknown> = Promise.resolve()
   let sessionBaselineOrigin: TurnDiffBaselineOrigin | undefined
   let sessionBaselineCapture: Promise<GitTurnDiffCapture> | null = null
-  let releaseSessionBaseline: (() => void) | undefined
   if (cwd && contextKey) {
     const baseline = sessionDiffBaselines.ensure({
       key: diffContextKey,
@@ -307,7 +310,12 @@ export async function createLiveRunState(deps: {
       ...(resume ? { sessionId: resume } : {}),
       initialCapture: initialDiffCapture
     })
-    releaseSessionBaseline = sessionDiffBaselines.retain(baseline)
+    const releaseBaseline = sessionDiffBaselines.retain(baseline)
+    // run 收口（包括注册失败与取消）都从这条路径释放观测，不把 run 永远当成「还在写」。
+    releaseSessionBaseline = () => {
+      sessionDiffBaselines.releaseRunWorkspace(runId)
+      releaseBaseline()
+    }
     sessionBaselineOrigin = baseline.origin
     sessionBaselineCapture = baseline.capture
     sessionBaselineReady = baseline.capture.catch(() => undefined)

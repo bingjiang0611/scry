@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { appendFileSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { exerciseActivityHistory } from './electron-security-activity-history.mjs'
 
 export async function exerciseNativeHistory(smokeContext) {
   const { evaluate, cdp, canonicalWorkspace, home, userDataDir, nativeHistoryPerformanceOnly, nativeSessionId } = smokeContext
@@ -30,6 +31,7 @@ export async function exerciseNativeHistory(smokeContext) {
     assert.ok(text.includes('Pi 原生会话记录'))
     assert.ok(!text.includes('abandoned branch must not appear'))
     assert.deepEqual(await evaluate('window.scry.activeRuns()'), [])
+    if (!nativeHistoryPerformanceOnly) await exerciseActivityHistory(smokeContext)
     // Continue/reopen after one canonical archived turn is added. The original
     // native-only prefix must survive, and a requested page limit must be real.
     const nativePath = join(home, '.pi', 'agent', 'sessions', `--${canonicalWorkspace.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`, `2026-10-13_${nativeSessionId}.jsonl`)

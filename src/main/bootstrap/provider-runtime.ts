@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { parseDisabledProviders, ProviderRegistry } from '../providers/registry'
 import { ProviderCompatibilityStore } from '../provider-compatibility-manifest'
 import { createBuiltInProviderAdapters } from '../providers'
-import { createSmokeProviderAdapter } from '../providers/smoke'
+import { createSmokeProviderAdapter, type SmokeFixtureProviderId } from '../providers/smoke'
 import type { PiAgentProfile } from '../pi-agent-profiles'
 import { PiRunDiagnostics } from '../providers/pi-run-diagnostics'
 
@@ -13,7 +13,12 @@ export function createProviderRuntime(deps: { homeDir: string; listPiProfiles: (
   const smokeProviderEnabled = process.env.SCRY_ELECTRON_SMOKE_PROVIDER === '1' &&
     process.env.ELECTRON_ENABLE_LOGGING === '1' &&
     process.argv.some((arg) => arg.startsWith('--remote-debugging-port='))
-  const smokeProviderIds: Array<'claude' | 'codex' | 'pi'> = process.env.SCRY_ELECTRON_SMOKE_CONVERSATIONS === '1' ? ['codex', 'claude', 'pi'] : ['codex']
+  // Two explicit fixture sets: the historical conversation set stays Claude/Codex/Pi, and
+  // the side-chat set covers every shipped target so one acceptance run can drive all five.
+  // Nothing here changes the default: without the gate the list is Codex only.
+  const smokeProviderIds: SmokeFixtureProviderId[] = process.env.SCRY_ELECTRON_SMOKE_SIDE_CHAT === '1'
+    ? ['claude', 'codex', 'qoder', 'opencode', 'pi']
+    : process.env.SCRY_ELECTRON_SMOKE_CONVERSATIONS === '1' ? ['codex', 'claude', 'pi'] : ['codex']
   const smokeDetectedAgents = smokeProviderIds.map(id => ({
     id: id === 'pi' ? 'pi:0123456789abcdef' : id,
     name: id === 'pi' ? 'Pi · Rotom Smoke Fixture' : `${id} Smoke Fixture`, bin: id, path: process.execPath

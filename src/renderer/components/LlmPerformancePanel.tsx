@@ -79,7 +79,6 @@ export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose:
   const current = groups.find(group => group.model === selected) ??
     [...groups].sort((a, b) => Math.max(b.speed.length, b.firstToken.length) - Math.max(a.speed.length, a.firstToken.length))[0]
   const currentSamples = current?.[metric] ?? []
-  const provisional = groups.some(group => group.speedSummary?.provisional || group.waitSummary?.provisional)
   const oldestKept = history?.truncated && history.rows.length ? Date.parse(history.rows.at(-1)!.ts) : undefined
   if (!open) return null
   return (
@@ -96,10 +95,6 @@ export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose:
         <section className="llm-perf-comparison" aria-labelledby={`${titleId}-comparison`}>
           <div className="llm-perf-section-head">
             <h3 id={`${titleId}-comparison`}>{copy.comparison}</h3>
-            <div className="llm-perf-notices">
-              {!historyError && history && provisional && <MetricHelp label={copy.provisional} text={copy.provisionalHelp} />}
-              <MetricHelp label={copy.explanation} text={copy.distributionHelp} />
-            </div>
           </div>
           {historyError ? <p className="llm-perf-alert" role="alert">{copy.historyError(historyError)}</p>
             : !history ? <div className="llm-perf-empty">{copy.reading}</div>
