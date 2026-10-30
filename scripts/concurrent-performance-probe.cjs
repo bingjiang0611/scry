@@ -15,8 +15,17 @@ let fileCallsTruncated = false
 // API attempts, not successful writes or kernel/SQLite/Git-child syscalls. Never record contents.
 const recordFileCall = (operation, method, path, fd, flags) => {
   if (fileCalls.length >= 20000) { fileCallsTruncated = true; return }
-  fileCalls.push({ at: Date.now(), operation, method, path: typeof path === 'string' ? path : null,
-    fd: typeof fd === 'number' ? fd : null, flags: typeof flags === 'string' || typeof flags === 'number' ? flags : null })
+  const call = { at: Date.now(), operation, method, path: typeof path === 'string' ? path : null,
+    fd: typeof fd === 'number' ? fd : null, flags: typeof flags === 'string' || typeof flags === 'number' ? flags : null }
+  fileCalls.push(call)
+  return call
+}
+const finishRead = (call, error, content) => {
+  if (!call) return
+  call.endedAt = Date.now()
+  call.outcome = error ? 'error' : 'read'
+  if (error) call.errorCode = error.code ?? null
+  else if (Buffer.isBuffer(content)) call.returnedBytes = content.length
 }
 let gitCallsTruncated = false
 const recordGit = (argv, cwd) => {
@@ -48,8 +57,24 @@ for (const [target, prefix] of [[fs, 'fs'], [fs.promises, 'fs.promises']]) {
   for (const method of target === fs ? ['readFile', 'readFileSync'] : ['readFile']) {
     const original = target[method]
     target[method] = function (...args) {
-      recordFileCall('readFile', `${prefix}.${method}`, args[0], args[0])
-      return original.apply(this, args)
+      const call = recordFileCall('readFile', `${prefix}.${method}`, args[0], args[0])
+      try {
+        if (target === fs && method === 'readFile') {
+          const callback = args.at(-1)
+          if (typeof callback === 'function') args[args.length - 1] = function (error, content) {
+            finishRead(call, error, content)
+            return callback.apply(this, arguments)
+          }
+          return original.apply(this, args)
+        }
+        const result = original.apply(this, args)
+        if (method === 'readFileSync') finishRead(call, null, result)
+        else result.then(content => finishRead(call, null, content), error => finishRead(call, error))
+        return result
+      } catch (error) {
+        finishRead(call, error)
+        throw error
+      }
     }
   }
 }

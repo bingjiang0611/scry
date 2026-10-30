@@ -10,6 +10,9 @@ type FileCall = {
   path: string | null
   fd: number | null
   flags: string | number | null
+  outcome?: 'read' | 'error'
+  errorCode?: string | null
+  returnedBytes?: number
 }
 
 type ProbeReport = {
@@ -69,6 +72,29 @@ it('records Node file API attempts without changing native values, errors or Fil
   expect(reads).toHaveLength(4)
   expect(reads.some(call => call.path?.endsWith('/data.txt.missing'))).toBe(true)
   expect(reads.some(call => call.path === null && typeof call.fd === 'number')).toBe(true)
+})
+
+it('distinguishes successful payload reads from missing-file attempts for every native read API', () => {
+  const report = runProbe(`
+    assert.equal(fs.readFileSync(data).toString(), 'payload')
+    assert.throws(() => fs.readFileSync(data + '.missing'), { code: 'ENOENT' })
+    assert.equal((await fs.promises.readFile(data)).toString(), 'payload')
+    await assert.rejects(fs.promises.readFile(data + '.missing'), { code: 'ENOENT' })
+    await new Promise((resolve, reject) => fs.readFile(data, (error, value) => {
+      if (error) return reject(error)
+      assert.equal(value.toString(), 'payload')
+      resolve()
+    }))
+    await new Promise(resolve => fs.readFile(data + '.missing', error => {
+      assert.equal(error.code, 'ENOENT')
+      resolve()
+    }))
+  `)
+  const reads = report.fileCalls.filter(call => call.operation === 'readFile')
+  expect(reads).toHaveLength(6)
+  expect(reads.filter(call => call.outcome === 'read')).toHaveLength(3)
+  expect(reads.filter(call => call.outcome === 'read').map(call => call.returnedBytes)).toEqual([7, 7, 7])
+  expect(reads.filter(call => call.outcome === 'error').map(call => call.errorCode)).toEqual(['ENOENT', 'ENOENT', 'ENOENT'])
 })
 
 it('keeps counters complete and marks bounded metadata as truncated', () => {
