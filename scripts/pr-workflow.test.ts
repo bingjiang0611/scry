@@ -81,7 +81,10 @@ describe('required PR checks', () => {
     expect(remote.jobs.check.needs).toEqual(['changes', 'transport'])
     expect(remote.jobs.transport.if).toBe("${{ needs.changes.outputs.required == 'true' }}")
     expect(remote.jobs.transport.steps.some(step => step.run === 'npm --prefix experiments/remote-g0 run smoke:g1')).toBe(true)
-    const remotePackage = JSON.parse(readFileSync(join(root, 'experiments/remote-g0/package.json'), 'utf8')) as { scripts: Record<string, string> }
+    const remotePackage = JSON.parse(readFileSync(join(root, 'experiments/remote-g0/package.json'), 'utf8')) as { scripts: Record<string, string>; engines: { node: string } }
+    expect(remotePackage.engines.node).toBe('^22.7.0 || ^24.0.0')
+    const remoteLock = JSON.parse(readFileSync(join(root, 'experiments/remote-g0/package-lock.json'), 'utf8')) as { packages: Record<string, { engines?: { node: string } }> }
+    expect(remoteLock.packages[''].engines?.node).toBe(remotePackage.engines.node)
     expect(remotePackage.scripts['smoke:g1']).toContain('node --experimental-transform-types --import ./ts-relative-resolve.mjs g1-smoke.mjs')
     const results = (required: string, changes: string, transport: string) => ({
       changes: { result: changes, outputs: { required } }, transport: { result: transport }
@@ -175,6 +178,9 @@ describe('ported label workflows', () => {
         }
       }
     }
+    const vouch = workflow('pr-vouch.yml')
+    expect(vouch.on.pull_request_target).toMatchObject({ branches: ['main'] })
+    expect(source(vouch.jobs.label, 'Check PR author trust').uses).toBe('mitchellh/vouch/action/check-user@d66fa29a64600490892131ad87597c30c91fcac4')
     const size = workflow('pr-size.yml')
     expect(size.on.pull_request_target).toHaveProperty('types', expect.arrayContaining(['edited']))
     expect(size.on).toHaveProperty('workflow_dispatch')

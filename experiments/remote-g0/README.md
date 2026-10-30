@@ -13,7 +13,7 @@ Local implementation evidence for the current iOS remote product and host bounda
 
 ## Run (from repository root)
 
-Requires macOS, Xcode/Swift 6.2+, Node 22+, OpenSSL 3. Dependency versions are locked. iOS 17 is a **probe deployment target**, not a finalized public product minimum.
+Requires macOS, Xcode/Swift 6.2+, Node 22.7+ (22.x) or Node 24.x, OpenSSL 3. G1 uses `--experimental-transform-types`; this probe does not claim support for other Node majors. Dependency versions are locked. iOS 17 is a **probe deployment target**, not a finalized public product minimum.
 
 ```sh
 npm --prefix experiments/remote-g0 ci --ignore-scripts

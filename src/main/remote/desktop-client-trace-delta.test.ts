@@ -8,7 +8,8 @@ import { generateDesktopDeviceIdentity } from './desktop-transport'
 import { DesktopRemoteClient } from './desktop-client'
 import { createDesktopHostReader, parseDesktopHostRead } from './desktop-host-reader'
 import { mergeRemoteTrace } from '../../renderer/remote-trace'
-import type { ActiveRun } from '../../shared/trace'
+import type { ActiveRun, TraceEvent } from '../../shared/trace'
+import type { DesktopRemoteContext } from '../../shared/desktop-remote'
 import { decrypt, encrypt, ssh } from './desktop-client-fixtures'
 
 describe('DesktopRemoteClient trace delta negotiation', () => {
@@ -55,8 +56,8 @@ describe('DesktopRemoteClient trace delta negotiation', () => {
     const id = pending.connection.id
     await client.finishPairing(id)
     await client.connect(id)
-    const item = (index: number, text = `t${index}`) => ({ id: `event-${index}`, runId, ts: '2026-10-23T00:00:00Z', kind: 'model' as const, stage: 'text', text })
-    const context = { cwd, providerId: 'claude', externalSessionId: 'native' }
+    const item = (index: number, text = `t${index}`): TraceEvent => ({ id: `event-${index}`, runId, ts: '2026-10-23T00:00:00Z', kind: 'model' as const, stage: 'text', text })
+    const context: DesktopRemoteContext = { cwd, providerId: 'claude', externalSessionId: 'native' }
     return { client, id, run, runId, context, item, queries, traceQueries: () => queries.filter((query) => query.kind === 'trace'), dispose: () => rm(directory, { recursive: true, force: true }) }
   }
 

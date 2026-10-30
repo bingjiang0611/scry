@@ -37,6 +37,11 @@
       "expected": "reassess head B and approval before any write; do not reuse head A's eligibility or label B on that basis"
     },
     {
+      "id": "base-or-policy-changed",
+      "submission": "A PR was assessed at head A, base M and trusted main policy P. Before an authorized label or closure write, head A is unchanged but the base or trusted main policy SHA has changed. The new evidence and approval requirements have not been assessed.",
+      "expected": "retrieve the changed base evidence or trusted policy and reassess before any write; unchanged head A does not make the old assessment current"
+    },
+    {
       "id": "ambiguous-write",
       "submission": "An authorized, unprotected ineligible PR has a closure explanation. The close request times out; the tool cannot tell if it executed.",
       "expected": "read current PR state before any retry; if closed, report confirmed closure without replay; if unavailable, report incomplete with owner/action"
