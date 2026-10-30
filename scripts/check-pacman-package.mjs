@@ -39,10 +39,10 @@ function readArchive() {
   const entries = run(['-tf']).split('\n').filter(Boolean)
   const pkgInfo = extract('.PKGINFO')
   const install = entries.includes('.INSTALL') ? extract('.INSTALL') : null
-  return { entries, pkgInfo, install }
+  return { entries, pkgInfo, install, extract }
 }
 
-function metadata(text) {
+function parsePkgInfo(text) {
   return Object.fromEntries(
     text
       .split('\n')
@@ -62,8 +62,8 @@ function dependsOf(text) {
 }
 
 const { entries, pkgInfo, install } = archive
-const meta = metadata(pkgInfo)
-const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
+const meta = parsePkgInfo(pkgInfo)
+const metadata = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const depends = dependsOf(pkgInfo)
 
 // electron-builder 把 Linux 描述拼成 "${synopsis}\n ${description}" 传给 fpm；
@@ -71,16 +71,29 @@ const depends = dependsOf(pkgInfo)
 assert.ok(meta.pkgdesc, `pkgdesc is empty; pacman would show Description: None\n${pkgInfo.slice(0, 400)}`)
 assert.ok(!meta.pkgdesc.includes('\n'), `pkgdesc must be a single line: ${JSON.stringify(meta.pkgdesc)}`)
 assert.equal(meta.pkgname, 'scry')
-assert.equal(meta.pkgver, `${version}-1`)
+assert.equal(meta.pkgver, `${metadata.version}-1`)
 assert.ok(meta.arch, 'pkginfo has no arch')
 assert.ok(depends.length > 0, 'pkginfo declares no runtime dependency')
 for (const name of ['gtk3', 'nss', 'libnotify', 'libxtst', 'libxss', 'xdg-utils', 'at-spi2-core', 'libsecret']) {
   assert.ok(depends.includes(name), `pkginfo is missing the ${name} runtime dependency`)
 }
 
-for (const path of ['opt/Scry/scry', 'opt/Scry/resources/bin/scry', 'usr/share/applications/scry.desktop', '.MTREE', '.INSTALL']) {
+// Electron 把 package.json 的 desktopName 用作 Wayland app_id / WM_CLASS。
+// 桌面环境按 StartupWMClass 关联运行中的窗口，所以三者必须是同一个值：
+// .desktop 文件名、StartupWMClass、desktopName（去掉 .desktop 后缀）。
+assert.ok(metadata.desktopName, 'package.json has no desktopName; Electron would fall back to a different app_id')
+const desktopName = metadata.desktopName.replace(/\.desktop$/, '')
+const desktopPath = `usr/share/applications/${desktopName}.desktop`
+
+for (const path of ['opt/Scry/scry', 'opt/Scry/resources/bin/scry', desktopPath, '.MTREE', '.INSTALL']) {
   assert.ok(entries.includes(path), `package is missing ${path}`)
 }
+
+const desktopEntry = archive.extract(desktopPath)
+const desktopField = (key) => desktopEntry.split('\n').find((line) => line.startsWith(`${key}=`))?.slice(key.length + 1)
+assert.equal(desktopField('StartupWMClass'), desktopName, `StartupWMClass must match desktopName: ${desktopEntry}`)
+assert.equal(desktopField('Exec'), '/opt/Scry/scry %U', `desktop entry must launch the packaged binary: ${desktopEntry}`)
+assert.ok(desktopField('Name'), 'desktop entry has no Name')
 
 // chrome-sandbox 权限与 /usr/bin 链接由 install 脚本负责；语法错误会让安装直接失败。
 assert.ok(install, 'package has no install script')

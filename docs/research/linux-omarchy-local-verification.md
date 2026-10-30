@@ -73,12 +73,26 @@
 
 验证：Linux 与 macOS 都不再按平台分支，"最大化后工作区铺到侧栏折叠位置"作为共享断言执行，两边通过。这条同时说明：在 Xvfb 里跑任何依赖入场动画结束的断言都不可靠。
 
+### 3. `desktopName` / `StartupWMClass` 关联（已修，Wayland `app_id` 已实测）
+
+electron-builder 警告未设置 `desktopName`。查上游实现：`.desktop` 的 `StartupWMClass` 取 `package.json` 的 `desktopName`，缺省回退到 `productName`（这里是 `Scry`）；`syncDesktopName: true` 让 `.desktop` 文件名也用同一个值。
+
+实测方式：容器内用 `sway`（wlroots headless 后端）起真实 Wayland 合成器，`--ozone-platform=wayland` 启动打包 App，再用 `swaymsg -t get_tree` 读窗口的 `app_id`。
+
+| 配置 | `.desktop` 的 `StartupWMClass` | 实测 Wayland `app_id` |
+| --- | --- | --- |
+| 无 `desktopName`、无 `syncDesktopName` | `Scry` | `scry` |
+| `desktopName: scry.desktop` + `syncDesktopName: true` | `scry` | `scry` |
+
+结论：Electron 42 的 `app_id` 一直是 `scry`（来自可执行文件名），真正不一致的是 `StartupWMClass=Scry` 的大小写。改成同值后三者一致（文件名、`StartupWMClass`、`app_id`）。X11 侧 `WM_CLASS` 两种配置完全相同（`xprop` 实测 `("scry" "scry")`），所以这个改动只影响关联键，不改变窗口行为。
+
+`check:pacman-package` 现在会校验 `desktopName`、`.desktop` 文件名、`StartupWMClass` 三者一致；去掉 `desktopName` 重打包会让它失败。
+
 ## 仍未解决
 
-1. **`desktopName` / `syncDesktopName`**：electron-builder 警告未设置 `desktopName`，Windows/Wayland 的 `app_id` 与 `.desktop` 入口可能对不上，任务栏/启动器图标关联可能失效。需要在真实 Wayland 会话说一次才能判定是否必须修，未改。
-2. **Wayland、输入法、分数缩放、真实密钥环、pacman 真实安装、真实 Provider**：本轮完全未覆盖，只有在 Omarchy 上才能验证。
-3. **`scripts/desktop-remote-host-smoke.mjs`** 仍按 macOS 布局取可执行文件，且该文件已超过仓库 2 万字节提交预算，未改动；因此 `npm run pack:artifact` 的 GUI smoke 部分在 Linux 上不能整套跑通。
-4. 包体积：Linux 解包后 330.3 MB（预算 346.0 MB），只剩约 15 MB 余量，接近上限。
+1. **Hyprland 上的窗口关联、输入法、分数缩放、真实密钥环、pacman 真实安装、真实 Provider**：本轮只在 headless wlroots 上验过 `app_id`，Hyprland 与输入法、缩放必须上目标机验证。
+2. **`scripts/desktop-remote-host-smoke.mjs`** 仍按 macOS 布局取可执行文件，且该文件已超过仓库 2 万字节提交预算，未改动；因此 `npm run pack:artifact` 的 GUI smoke 部分在 Linux 上不能整套跑通。
+3. 包体积：Linux 解包后 330.3 MB（预算 346.0 MB），只剩约 15 MB 余量，接近上限。
 
 ## 复现方式
 
@@ -95,6 +109,18 @@ npm run build && npm run build:cli
 node scripts/run-electron-builder.mjs && npm run check:packaged-app
 SCRY_RELEASE_BUILD=1 node scripts/run-electron-builder.mjs
 xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24' node scripts/electron-security-smoke.mjs
+node scripts/check-pacman-package.mjs
+```
+
+测 Wayland `app_id`（不需要桌面会话语义，只要一个合成器）：
+
+```bash
+apt-get install -y sway xwayland jq
+export XDG_RUNTIME_DIR=/tmp/xdg && mkdir -p $XDG_RUNTIME_DIR && chmod 700 $XDG_RUNTIME_DIR
+WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman sway -c /dev/null &
+export SWAYSOCK=$(ls $XDG_RUNTIME_DIR/sway-ipc.*.sock | head -1) WAYLAND_DISPLAY=wayland-1
+./dist/linux-arm64-unpacked/scry --ozone-platform=wayland --user-data-dir=/tmp/scry-wl &
+swaymsg -t get_tree | jq -c '.. | objects | select(.app_id? and .app_id != null) | {app_id, name}'
 ```
 
 容器需要 `chmod 4755` + root 所属的 `chrome-sandbox`（与 CI 相同做法），并允许非特权 user namespace（`sysctl kernel.apparmor_restrict_unprivileged_userns=0`），否则 Chromium 会拒绝启动。这不代表产品层面放宽 sandbox。

@@ -69,6 +69,10 @@ linux:
   # Omarchy/Arch 用 pacman 包装分发；`--dir` 仍产出 linux-unpacked 供本机 smoke 与产物检查。
   target:
     - pacman
+  # Electron 用 package.json 的 desktopName 作为 app_id / WM_CLASS。
+  # 打开同步后 .desktop 文件名与 StartupWMClass 都用同一个值，桌面环境才能把
+  # 运行中的窗口和启动器条目关联起来（否则会显示成无图标的独立窗口）。
+  syncDesktopName: true
   # fpm 需要带邮箱的 maintainer（package.json 的 author 只有名字），使用公开的 GitHub 身份。
   maintainer: bingjiang0611 <307659028+bingjiang0611@users.noreply.github.com>
   # electronLanguages 按 locale 文件名精确匹配。Linux 上是 Chromium 的 <lang>-<REGION>.pak，

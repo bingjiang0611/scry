@@ -9,7 +9,7 @@
 | --- | --- | --- |
 | 私有 recorder 启动器支持两种布局 | 已实施 | 启动器测试覆盖 macOS/Linux 布局、软链接、含空格参数、缺可执行文件失败 |
 | 产物布局、打包检查、smoke/soak 共用一套路径 | 已实施，一个例外 | 新 `scripts/packaged-app-layout.mjs` 供打包检查、security smoke、performance soak 共用；`scripts/desktop-remote-host-smoke.mjs` 已在文件体积预算上限之上，本次未改动，仍按 macOS 布局 |
-| electron-builder Linux 配置 | 已实施 | 在 macOS 上交叉构建 `dist/linux-arm64-unpacked`，布局与 locale 裁剪已验证 |
+| electron-builder Linux 配置 | 已实施 | 交叉构建出 `dist/linux-arm64-unpacked`；`desktopName` 让 `StartupWMClass`、`.desktop` 名与 Wayland `app_id` 同值 |
 | Linux locale 裁剪 | 已实施 | 配置为 `en-US/zh-CN/zh-TW` 时剩下三个 pak；去掉覆盖后 `locales/` 为空（反向对照） |
 | 平台默认 shell | 已实施 | 启动时 `ensureShellEnv()` 补 SHELL（不覆盖用户值），终端与 `defaultShellPath` 同源；Linux 不再回退 zsh |
 | Linux 密钥环 `basic_text` 拒绝 | 已实施 | `unsafeCredentialStorageReason` + 单测；未在真实密钥环状态验证 |
