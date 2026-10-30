@@ -1,15 +1,14 @@
 import { createHash } from 'node:crypto'
 import {
   readSideChatItemBodyPage, readSideChatManifestItem, readSideChatManifestItems, readSideChatMessagePage,
-  SideChatSnapshotWriter, assertSideChatSnapshotDescriptor,
+  assertSideChatSnapshotDescriptor,
   type SideChatManifestItem, type SideChatSnapshotDescriptor
 } from './conversation-side-chat-manifest'
 import { readRecorderContentPage } from '../core/turn-recorder/content-store'
 import { isToolContentRef } from '../shared/tool-content'
 import {
   conversationItemKey, sideChatSnapshotIndexOf, sideChatSnapshotRunId,
-  type Conversation, type ConversationItemRef, type SideChatSnapshot, type SideChatSnapshotArtifact,
-  type SideChatSnapshotItem, type SideChatSnapshotManifest
+  type Conversation, type ConversationItemRef, type SideChatSnapshotArtifact, type SideChatSnapshotItem
 } from '../shared/conversation'
 import type { SideChatSnapshotBodyItem, SideChatSnapshotBodyPage } from '../shared/conversation-api'
 import { MAX_SIDE_CHAT_SNAPSHOT_BYTES } from './conversation-schema'
@@ -38,9 +37,6 @@ interface SealedSnapshotArtifact {
 
 export type SideChatSnapshotOwner = Pick<Conversation, 'id' | 'cwd' | 'sideChat'>
 /** Identity fields known before the body is sealed; the child id already exists. */
-export type SideChatSnapshotIdentity = Pick<SideChatSnapshot, 'id' | 'throughOrdinal' | 'throughRunId' | 'prefixFingerprint' | 'capturedAt'>
-/** Fields a format 3 measurement needs; the seal time is not part of the artifact. */
-export type SideChatSnapshotMeasureIdentity = Omit<SideChatSnapshotIdentity, 'capturedAt'>
 
 function origin(conversation: SideChatSnapshotOwner) {
   if (!conversation.sideChat) throw new Error('该对话没有冻结的侧聊快照')
@@ -73,72 +69,6 @@ function assertMessage(item: SideChatSnapshotItem, message: HistoryMessage): voi
     typeof message.text !== 'string' || hash(message.text) !== item.ref.contentHash) {
     throw new Error('侧聊快照正文与冻结元数据不一致')
   }
-}
-
-/**
- * The single byte authority for a sealed format 3 snapshot. Preview measures the exact
- * artifact an id of identical length will produce, so its budget and the seal agree.
- */
-export function sideChatSnapshotBytes(
-  conversation: Pick<Conversation, 'id' | 'cwd'>,
-  snapshot: SideChatSnapshotMeasureIdentity,
-  messages: readonly HistoryMessage[]
-): number {
-  return Buffer.byteLength(serialized(conversation, snapshot, messages), 'utf8')
-}
-
-function serialized(conversation: Pick<Conversation, 'id' | 'cwd'>, snapshot: SideChatSnapshotMeasureIdentity, messages: readonly HistoryMessage[]): string {
-  const artifact: SealedSnapshotArtifact = {
-    version: 3,
-    kind: 'side-chat-snapshot',
-    conversationId: conversation.id,
-    cwd: conversation.cwd,
-    snapshotId: snapshot.id,
-    throughOrdinal: snapshot.throughOrdinal,
-    throughRunId: snapshot.throughRunId,
-    prefixFingerprint: snapshot.prefixFingerprint,
-    messages: messages.map(message => ({ ...message }))
-  }
-  return JSON.stringify(artifact)
-}
-
-/**
- * Seals the complete frozen text before the child record is published.
- *
- * Format 4 writes the item index and every message body as content-addressed manifests,
- * so the record keeps a descriptor and neither item count nor body size has to fit a
- * single artifact. Bodies are streamed part by part and hashed as they are written.
- */
-export async function sealSideChatSnapshot(
-  userData: string,
-  conversation: Pick<Conversation, 'id' | 'cwd'>,
-  snapshot: SideChatSnapshotIdentity,
-  items: readonly SideChatSnapshotItem[],
-  messages: readonly HistoryMessage[]
-): Promise<SideChatSnapshotManifest> {
-  if (messages.length !== items.length) throw new Error('侧聊快照消息数量与清单不一致')
-  for (const [index, item] of items.entries()) assertMessage(item, messages[index])
-  const writer = new SideChatSnapshotWriter({
-    dataRoot: conversationHistoryRoot(userData, conversation),
-    identity: {
-      id: snapshot.id, prefixFingerprint: snapshot.prefixFingerprint, throughOrdinal: snapshot.throughOrdinal,
-      throughRunId: snapshot.throughRunId, capturedAt: snapshot.capturedAt
-    }
-  })
-  for (const [index, item] of items.entries()) {
-    const message = messages[index]
-    await writer.appendMessage({
-      ref: { runId: message.ref.runId, itemId: message.ref.itemId, contentHash: message.ref.contentHash },
-      sourceOrdinal: item.sourceOrdinal,
-      providerId: message.providerId,
-      role: message.role,
-      status: message.status,
-      delivery: message.delivery,
-      ...(message.nativeSessionId !== undefined ? { nativeSessionId: message.nativeSessionId } : {}),
-      ...(message.providerTurnId !== undefined ? { providerTurnId: message.providerTurnId } : {})
-    }, message.text)
-  }
-  return writer.seal()
 }
 
 /** Reopens the child-owned body; it never falls back to a source archive. */

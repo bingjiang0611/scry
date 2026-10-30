@@ -1,26 +1,20 @@
 import { createHash } from 'node:crypto'
-import type { HistoryMessage } from './conversation-history-content'
-import { historyReadBudget, turnMessageProjection } from './conversation-history-text'
 import { readCapturedTurnMessages } from './conversation-history-source'
 import { iterateTraceArchiveCapture, traceArchiveCaptureInfo, TraceArchiveCaptureError } from './transcript-archive-capture'
 import { requireValue } from './conversation-schema'
 import type { ConversationTurn, SideChatSource } from '../shared/conversation'
-import type { SideChatServiceDeps, SideChatNativeSource, SideChatNativeTurn } from './conversation-service-deps'
+import type { SideChatServiceDeps, SideChatNativeSource } from './conversation-service-deps'
 import { normalizeSessionTitle, SESSION_TITLE_MAX_LENGTH } from '../shared/session-title'
 import type { ProviderId } from '../shared/provider'
 import { HistoryReadBudgetExceeded } from './conversation-history-text'
 import { SideChatBudgetRefusal } from './conversation-side-chat-refusal'
+import { streamTurns, type StreamedMessage } from './conversation-side-chat-stream'
+import { completedProjections, projectedMessages, stopReasonProvesCompletion } from './conversation-side-chat-raw'
+import { measureSink, type CaptureItem, type CaptureMessageMeta, type CaptureSink } from './conversation-side-chat-capture'
 
 const hash = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex')
 
-export interface CaptureEntry {
-  sourceRunId: string
-  role: 'user' | 'assistant'
-  sourceOrdinal: number
-  providerId: ProviderId
-  contentHash: string
-  message: HistoryMessage
-}
+export type { CaptureItem, CaptureSink } from './conversation-side-chat-capture'
 
 /** The user-visible freeze boundary; creation re-verifies this exact turn. */
 export interface RequestedBoundary {
@@ -28,6 +22,13 @@ export interface RequestedBoundary {
   runId?: string
 }
 
+/**
+ * One captured prefix, described by exact per-message facts instead of message bodies.
+ *
+ * A frozen history may hold thousands of messages and hundreds of MiB of text; carrying
+ * the bodies here is exactly the ceiling this path removes. Preview keeps these facts and
+ * creation streams the same messages into the sealed manifest.
+ */
 export interface CapturedPrefix {
   source: SideChatSource
   cwd: string
@@ -36,7 +37,7 @@ export interface CapturedPrefix {
   throughRunId: string
   /** Proven source Provider/profile, never guessed from a display name. */
   sourceTarget: { providerId: ProviderId; agentProfileId?: string }
-  entries: CaptureEntry[]
+  items: CaptureItem[]
   prefixFingerprint: string
   manifestFingerprint: string
   bodyBytes: number
@@ -54,34 +55,70 @@ export function captureTitle(value: string | undefined, fallback: string): strin
   return normalizeSessionTitle(cleaned.slice(0, SESSION_TITLE_MAX_LENGTH) || fallback)
 }
 
-export function entriesFor(messages: readonly HistoryMessage[]): CaptureEntry[] {
-  return messages.map((message) => ({
-    sourceRunId: message.ref.runId,
-    role: message.role,
-    sourceOrdinal: message.ordinal,
-    providerId: message.providerId as ProviderId,
-    contentHash: message.ref.contentHash,
-    message: { ...message, delivery: 'snapshot' }
-  }))
-}
-
 /**
  * Fingerprints cover the selected messages only. File mtime, a mutable trailing
  * turn or the source's full archive length never participate, so appending to the
  * source cannot change an already-previewed prefix.
  */
-export function fingerprints(source: SideChatSource, through: { ordinal: number; runId: string }, entries: CaptureEntry[]): {
+export function fingerprints(source: SideChatSource, through: { ordinal: number; runId: string }, items: readonly CaptureItem[]): {
   prefixFingerprint: string
   manifestFingerprint: string
 } {
   return {
     prefixFingerprint: hash(JSON.stringify({
       source: sourceIdentity(source), throughOrdinal: through.ordinal, throughRunId: through.runId,
-      items: entries.map(entry => [entry.sourceRunId, entry.role, entry.contentHash, entry.sourceOrdinal, entry.providerId])
+      items: items.map(item => [item.sourceRunId, item.role, item.contentHash, item.sourceOrdinal, item.providerId])
     })),
-    manifestFingerprint: hash(JSON.stringify(entries.map(entry =>
-      [entry.sourceOrdinal, entry.providerId, entry.role, entry.contentHash])))
+    manifestFingerprint: hash(JSON.stringify(items.map(item =>
+      [item.sourceOrdinal, item.providerId, item.role, item.contentHash])))
   }
+}
+
+/** One message of a source whose text is already in memory, typed as a stream. */
+function memoryMessage(text: string, contentHash: string, role: 'user' | 'assistant'): StreamedMessage {
+  return { role, contentHash, bytes: Buffer.byteLength(text, 'utf8'), text: (async function* () { yield text })() }
+}
+
+/** Records the first characters of a title candidate without holding the whole message. */
+class TitleTap {
+  private text = ''
+  private done = false
+
+  /** Only the first user prompt names the child; later text is not a title candidate. */
+  take(message: StreamedMessage): StreamedMessage {
+    if (this.done || message.role !== 'user') return message
+    const tap = this
+    const limit = SESSION_TITLE_MAX_LENGTH * 4
+    tap.done = true
+    return {
+      ...message,
+      text: (async function* (): AsyncGenerator<string> {
+        for await (const chunk of message.text) {
+          if (tap.text.length < limit) tap.text += chunk.slice(0, limit - tap.text.length)
+          yield chunk
+        }
+      })()
+    }
+  }
+
+  get value(): string | undefined {
+    return this.text.length > 0 ? this.text : undefined
+  }
+}
+
+/**
+ * Feeds one source message to the sink, keeping only the title candidate.
+ *
+ * The message is consumed exactly once: preview measures it, creation writes it, and the
+ * title tap rides the same pass instead of asking for the body again.
+ */
+async function consume(
+  sink: CaptureSink,
+  message: StreamedMessage,
+  meta: CaptureMessageMeta,
+  title: TitleTap
+): Promise<CaptureItem> {
+  return sink.append(title.take(message), meta)
 }
 
 function capturableTurn(turn: ConversationTurn): boolean {
@@ -116,7 +153,8 @@ function prefixEnd(prefix: readonly ConversationTurn[], boundary: RequestedBound
 async function captureConversationPrefix(
   deps: SideChatServiceDeps,
   conversationId: string,
-  boundary: RequestedBoundary | undefined
+  boundary: RequestedBoundary | undefined,
+  sink: CaptureSink
 ): Promise<CapturedPrefix> {
   const conversation = await deps.store.read(conversationId)
   if (!conversation) throw new Error('侧聊来源对话不存在或已删除；不会自动创建空快照')
@@ -138,7 +176,17 @@ async function captureConversationPrefix(
     throw error
   })
   requireValue(messages.length > 0, '来源快照正文不完整，不能创建侧聊')
-  const entries = entriesFor(messages)
+  const items: CaptureItem[] = []
+  // A conversation source names the child after the source conversation, not its text.
+  const untitled = new TitleTap()
+  for (const message of messages) {
+    items.push(await consume(sink, memoryMessage(message.text, message.ref.contentHash, message.role), {
+      role: message.role, sourceRunId: message.ref.runId, sourceOrdinal: message.ordinal,
+      providerId: message.providerId as ProviderId, status: message.status, delivery: 'snapshot',
+      ...(message.nativeSessionId === undefined ? {} : { nativeSessionId: message.nativeSessionId }),
+      ...(message.providerTurnId === undefined ? {} : { providerTurnId: message.providerTurnId })
+    }, untitled))
+  }
   return {
     source: { kind: 'conversation', conversationId },
     cwd: conversation.cwd,
@@ -146,87 +194,11 @@ async function captureConversationPrefix(
     throughOrdinal: through.ordinal,
     throughRunId: through.runId,
     sourceTarget: { providerId: binding.providerId, ...(binding.agentProfileId ? { agentProfileId: binding.agentProfileId } : {}) },
-    entries,
-    ...fingerprints({ kind: 'conversation', conversationId }, { ordinal: through.ordinal, runId: through.runId }, entries),
-    bodyBytes: bodyBytes(entries),
+    items,
+    ...fingerprints({ kind: 'conversation', conversationId }, { ordinal: through.ordinal, runId: through.runId }, items),
+    bodyBytes: items.reduce((bytes, item) => bytes + item.bytes, 0),
     smallestThroughOrdinal: conversation.turns.findIndex(boundaryTurn) + 1
   }
-}
-
-function bodyBytes(entries: readonly CaptureEntry[]): number {
-  return entries.reduce((bytes, entry) => bytes + Buffer.byteLength(entry.message.text, 'utf8'), 0)
-}
-
-interface ProjectedTurn {
-  ordinal: number
-  runId: string
-  providerTurnId?: string
-  status: string
-  /**
-   * Proven finished turn: the recorder terminal for a Scry archive, the Provider's
-   * own terminal marker for a raw transcript. Visible text never settles a turn.
-   */
-  settled: boolean
-  messages: Array<{ role: 'user' | 'assistant'; text: string; steerMessageId?: string }>
-}
-
-/** Native turns never gain an App archive, a parent binding or a recorder run here. */
-function projectedMessages(
-  userData: string,
-  cwd: string,
-  turns: readonly SideChatNativeTurn[],
-  evidenceOf: (turn: SideChatNativeTurn) => { status: string; settled: boolean }
-): Promise<ProjectedTurn[]> {
-  const budget = historyReadBudget()
-  return turns.reduce(async (previous, turn, index) => {
-    const projected = await previous
-    const messages = await turnMessageProjection(userData, { cwd }, turn, budget)
-    return [...projected, { ordinal: index + 1, runId: turn.runId, ...(turn.providerTurnId ? { providerTurnId: turn.providerTurnId } : {}),
-      ...evidenceOf(turn), messages }]
-  }, Promise.resolve<ProjectedTurn[]>([]))
-}
-
-/**
- * The stable prefix ends at the last settled turn; nothing after it is frozen.
- * An unsettled turn inside the prefix is not a tail Scry can drop, so the source
- * is refused instead of freezing output whose completion is unknown.
- */
-function completedProjections(turns: readonly ProjectedTurn[]): ProjectedTurn[] {
-  const last = turns.findLastIndex(turn => turn.settled)
-  if (last < 0) return []
-  const prefix = turns.slice(0, last + 1)
-  if (prefix.some(turn => !turn.settled)) {
-    throw new Error('原生会话前缀包含没有终止证据的轮次，不能创建侧聊')
-  }
-  return prefix
-}
-
-/**
- * The only markers that prove a Provider finished a turn: Claude writes
- * `message.stop_reason`, Pi writes `message.stopReason`. `tool_use` / `toolUse`
- * means the turn is still producing, and a missing marker proves nothing.
- */
-const completedStopReasons: Partial<Record<ProviderId, string>> = { claude: 'end_turn', pi: 'stop' }
-
-function stopReasonProvesCompletion(providerId: ProviderId, turn: SideChatNativeTurn): boolean {
-  const expected = completedStopReasons[providerId]
-  return expected !== undefined && turn.stopReason === expected
-}
-
-function nativeEntries(source: Extract<SideChatSource, { kind: 'native-session' }>, turns: readonly ProjectedTurn[], status: string): CaptureEntry[] {
-  const messages: HistoryMessage[] = []
-  for (const turn of turns) {
-    let assistant = 0
-    for (const message of turn.messages) {
-      const ref = message.role === 'user'
-        ? { runId: turn.runId, itemId: message.steerMessageId === undefined ? 'user' : `steer:${message.steerMessageId}`, contentHash: hash(message.text) }
-        : { runId: turn.runId, itemId: `assistant:${assistant++}`, contentHash: hash(message.text) }
-      messages.push({ ref, providerId: source.providerId, nativeSessionId: source.nativeSessionId,
-        ...(turn.providerTurnId ? { providerTurnId: turn.providerTurnId } : {}), ordinal: turn.ordinal,
-        role: message.role, status, delivery: 'imported', text: message.text })
-    }
-  }
-  return entriesFor(messages)
 }
 
 /**
@@ -243,6 +215,51 @@ async function assertSourceNotOwnedBySideChat(
   if (owning) throw new Error(`该原生会话属于侧聊 ${owning.id}；不支持嵌套侧聊`)
 }
 
+/** Feeds the settled archive prefix straight from the bounded projection. */
+async function captureArchivePrefix(
+  deps: SideChatServiceDeps,
+  source: Extract<SideChatSource, { kind: 'native-session' }>,
+  captureArgs: { userDataDir: string; cwd: string; providerId: ProviderId; sessionId: string },
+  info: Awaited<ReturnType<typeof traceArchiveCaptureInfo>>,
+  boundary: RequestedBoundary | undefined,
+  sink: CaptureSink
+): Promise<{ items: CaptureItem[]; title?: string; through?: { ordinal: number; runId: string } }> {
+  const items: CaptureItem[] = []
+  const title = new TitleTap()
+  let through: { ordinal: number; runId: string } | undefined
+  let closed = false
+  // Segments are read one file at a time, so the archive-wide ordinal is counted here.
+  let ordinal = 0
+  for await (const turn of streamTurns(deps.store.userData, source.cwd, iterateTraceArchiveCapture(captureArgs, info))) {
+    ordinal += 1
+    if (boundary !== undefined && ordinal > boundary.ordinal) break
+    if (closed) {
+      if (turn.settled) throw new Error('原生会话前缀包含没有终止证据的轮次，不能创建侧聊')
+      continue
+    }
+    if (!turn.settled) {
+      // A trailing unsettled turn is a tail Scry drops. One inside a requested
+      // boundary, or before a later settled turn, is an unproven prefix.
+      if (boundary !== undefined) throw new Error('原生会话前缀包含没有终止证据的轮次，不能创建侧聊')
+      closed = true
+      continue
+    }
+    if (boundary?.runId !== undefined && ordinal === boundary.ordinal && turn.runId !== boundary.runId) {
+      throw new Error('原生会话快照边界已变化，请重新预览；本次未创建侧聊')
+    }
+    for (const message of turn.messages) {
+      items.push(await consume(sink, message, {
+        role: message.role, sourceRunId: turn.runId, sourceOrdinal: ordinal,
+        providerId: source.providerId, status: turn.status, delivery: 'snapshot',
+        nativeSessionId: source.nativeSessionId,
+        ...(turn.providerTurnId === undefined ? {} : { providerTurnId: turn.providerTurnId })
+      }, title))
+    }
+    through = { ordinal, runId: turn.runId }
+  }
+  return { items, ...(title.value === undefined ? {} : { title: title.value }), ...(through === undefined ? {} : { through }) }
+}
+
 /**
  * Native-session sources reuse the shipped native readers (Scry archive first, then
  * the Provider's own bounded transcript reader). Ownership, resume identity and
@@ -251,7 +268,8 @@ async function assertSourceNotOwnedBySideChat(
 async function captureNativePrefix(
   deps: SideChatServiceDeps,
   source: Extract<SideChatSource, { kind: 'native-session' }>,
-  boundary: RequestedBoundary | undefined
+  boundary: RequestedBoundary | undefined,
+  sink: CaptureSink
 ): Promise<CapturedPrefix> {
   const native: SideChatNativeSource = { providerId: source.providerId, ...(source.agentProfileId ? { agentProfileId: source.agentProfileId } : {}),
     cwd: source.cwd, nativeSessionId: source.nativeSessionId }
@@ -269,20 +287,14 @@ async function captureNativePrefix(
     if (error instanceof TraceArchiveCaptureError) return undefined
     throw error
   })
-  let sources: ProjectedTurn[]
-  let status = 'completed'
+  let items: CaptureItem[]
+  let title: string | undefined
+  let through: { ordinal: number; runId: string } | undefined
   if (archiveInfo && archiveInfo.totalTurns !== 0) {
-    const archived: SideChatNativeTurn[] = []
-    const settled = new Map<string, boolean>()
-    const statuses = new Map<string, string>()
-    for await (const turn of iterateTraceArchiveCapture(captureArgs, archiveInfo)) {
-      archived.push({ runId: turn.runId, ...(turn.providerTurnId ? { providerTurnId: turn.providerTurnId } : {}),
-        userText: turn.userText, items: turn.events })
-      statuses.set(turn.runId, turn.status ?? 'completed')
-      settled.set(turn.runId, turn.done && (turn.status ?? 'completed') === 'completed')
-    }
-    sources = completedProjections(await projectedMessages(deps.store.userData, source.cwd, archived,
-      turn => ({ status: statuses.get(turn.runId) ?? 'completed', settled: settled.get(turn.runId) === true })))
+    const archived = await captureArchivePrefix(deps, source, captureArgs, archiveInfo, boundary, sink)
+    items = archived.items
+    title = archived.title
+    through = archived.through
   } else {
     const read = deps.sideChatSource?.readNativeTurns
     const turns = read ? await read(native) : null
@@ -292,30 +304,45 @@ async function captureNativePrefix(
     // A raw transcript carries no recorder terminal: only the Provider's own
     // marker settles a turn. A trailing turn that still shows text therefore
     // stays out of the prefix, whether or not Scry is running it right now.
-    status = 'unavailable'
-    sources = completedProjections(await projectedMessages(deps.store.userData, source.cwd, turns,
+    const status = 'unavailable'
+    const selected = completedProjections(await projectedMessages(deps.store.userData, source.cwd, turns,
       turn => ({ status, settled: stopReasonProvesCompletion(source.providerId, turn) })))
+    if (selected.length === 0) throw new Error('该原生会话没有已完成轮次；不会创建空快照')
+    const last = boundary === undefined ? selected.length - 1 : boundary.ordinal - 1
+    const end = selected[last]
+    if (!end) throw new Error('该原生会话没有已完成轮次；不会创建空快照')
+    if (boundary?.runId !== undefined && end.runId !== boundary.runId) {
+      throw new Error('原生会话快照边界已变化，请重新预览；本次未创建侧聊')
+    }
+    const tap = new TitleTap()
+    const collected: CaptureItem[] = []
+    for (const turn of selected.slice(0, last + 1)) {
+      for (const message of turn.messages) {
+        const contentHash = hash(message.text)
+        collected.push(await consume(sink, memoryMessage(message.text, contentHash, message.role), {
+          role: message.role, sourceRunId: turn.runId,
+          sourceOrdinal: turn.ordinal,
+          providerId: source.providerId, status, delivery: 'snapshot',
+          nativeSessionId: source.nativeSessionId,
+          ...(turn.providerTurnId === undefined ? {} : { providerTurnId: turn.providerTurnId })
+        }, tap))
+      }
+    }
+    items = collected
+    title = tap.value
+    through = { ordinal: end.ordinal, runId: end.runId }
   }
-  if (!sources.length) throw new Error('该原生会话没有已完成轮次；不会创建空快照')
-  const completed = boundary === undefined ? sources.length - 1 : boundary.ordinal - 1
-  if (completed < 0) throw new Error('该原生会话没有已完成轮次；不会创建空快照')
-  const through = sources[completed]
-  if (!through) throw new Error('原生会话快照边界已不存在，请重新预览')
-  if (boundary?.runId !== undefined && through.runId !== boundary.runId) {
-    throw new Error('原生会话快照边界已变化，请重新预览；本次未创建侧聊')
-  }
-  const entries = nativeEntries(source, sources.slice(0, completed + 1), status)
-  requireValue(entries.length > 0, '来源快照正文不完整，不能创建侧聊')
+  if (items.length === 0 || through === undefined) throw new Error('该原生会话没有已完成轮次；不会创建空快照')
   return {
     source,
     cwd: source.cwd,
-    title: captureTitle(entries.find(entry => entry.role === 'user')?.message.text, `原生会话 ${source.nativeSessionId.slice(0, 8)}`),
+    title: captureTitle(title, `原生会话 ${source.nativeSessionId.slice(0, 8)}`),
     throughOrdinal: through.ordinal,
     throughRunId: through.runId,
     sourceTarget: { providerId: source.providerId, ...(source.agentProfileId ? { agentProfileId: source.agentProfileId } : {}) },
-    entries,
-    ...fingerprints(source, { ordinal: through.ordinal, runId: through.runId }, entries),
-    bodyBytes: bodyBytes(entries),
+    items,
+    ...fingerprints(source, through, items),
+    bodyBytes: items.reduce((bytes, item) => bytes + item.bytes, 0),
     smallestThroughOrdinal: 1
   }
 }
@@ -327,6 +354,17 @@ async function captureNativePrefix(
  * choice the user may take, and offering it must not require the expensive read that
  * just failed.
  */
+/**
+ * The workspace a child of this source will live in, resolved before any capture so the
+ * sealed body can be written under the child's own content root.
+ */
+export async function sourceWorkspaceCwd(deps: SideChatServiceDeps, source: SideChatSource): Promise<string> {
+  if (source.kind === 'native-session') return source.cwd
+  const conversation = await deps.store.read(source.conversationId)
+  if (!conversation) throw new Error('侧聊来源对话不存在或已删除；不会自动创建空快照')
+  return conversation.cwd
+}
+
 export async function smallestFreezableOrdinal(deps: SideChatServiceDeps, source: SideChatSource): Promise<number> {
   if (source.kind === 'native-session') return 1
   const conversation = await deps.store.read(source.conversationId)
@@ -334,12 +372,19 @@ export async function smallestFreezableOrdinal(deps: SideChatServiceDeps, source
   return conversation.turns.findIndex(boundaryTurn) + 1
 }
 
-export function captureSideChatPrefix(
+/**
+ * Captures the stable prefix of one source.
+ *
+ * The sink is the only place a message body goes: preview passes a measuring sink and
+ * keeps nothing, creation passes the sealed snapshot writer. Neither reads the whole
+ * history into memory, so a large source is a matter of time, not of a refusal.
+ */
+export async function captureSideChatPrefix(
   deps: SideChatServiceDeps,
   source: SideChatSource,
-  boundary?: RequestedBoundary
+  boundary?: RequestedBoundary,
+  sink: CaptureSink = measureSink()
 ): Promise<CapturedPrefix> {
-  return source.kind === 'conversation'
-    ? captureConversationPrefix(deps, source.conversationId, boundary)
-    : captureNativePrefix(deps, source, boundary)
+  if (source.kind === 'conversation') return captureConversationPrefix(deps, source.conversationId, boundary, sink)
+  return captureNativePrefix(deps, source, boundary, sink)
 }

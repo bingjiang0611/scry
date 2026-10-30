@@ -2,7 +2,56 @@ import { open, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { iterateArchiveTurnProjections, type ArchiveReadEvidence } from './trace-archive-projection'
+import { iterateArchiveEntries, type ArchiveEntry, type ArchiveReadEvidence } from './trace-archive-projection'
+
+/** Assembles the streamed entries of one file into the turns the assertions speak about. */
+async function collect(entries: AsyncIterable<ArchiveEntry>): Promise<Array<{
+  runId: string; done: boolean; status?: string; userText: string;
+  events: Array<{ kind: 'text'; text: string; stage: string } | { kind: 'steer'; status: string; prompt: string; messageId?: string }>;
+  breaks: number
+}>> {
+  const turns: Array<ReturnType<typeof emptyTurn>> = []
+  let current: ReturnType<typeof emptyTurn> | undefined
+  let open: { event: number; text: string } | undefined
+  const flush = (): void => {
+    if (current && open) current.events.push({ kind: 'text', text: open.text, stage: 'text' })
+    open = undefined
+  }
+  const emptyTurn = (): { runId: string; done: boolean; status?: string; userText: string;
+    events: Array<{ kind: 'text'; text: string; stage: string } | { kind: 'steer'; status: string; prompt: string; messageId?: string }>;
+    breaks: number } => ({ runId: '', done: false, userText: '', events: [], breaks: 0 })
+  for await (const entry of entries) {
+    if (!current) current = emptyTurn()
+    if (entry.type === 'turn') {
+      flush()
+      current = { ...current, runId: entry.runId, done: entry.done, ...(entry.status ? { status: entry.status } : {}) }
+      turns.push(current)
+      current = undefined
+      continue
+    }
+    if (entry.type === 'user') {
+      current.userText += entry.chunk
+      continue
+    }
+    if (entry.type === 'break') {
+      flush()
+      current.breaks += 1
+      continue
+    }
+    if (entry.type === 'steer') {
+      flush()
+      const steer = current.events.at(-1)
+      if (steer?.kind === 'steer') steer.prompt += entry.chunk
+      else current.events.push({ kind: 'steer', status: entry.status, prompt: entry.chunk })
+      continue
+    }
+    if (entry.type === 'body') continue
+    if (open?.event !== entry.event) flush()
+    open = { event: entry.event, text: (open?.text ?? '') + entry.chunk }
+  }
+  flush()
+  return turns
+}
 
 const cwd = '/tmp/workspace'
 const sessionId = 'session-1'
@@ -31,10 +80,11 @@ async function read(content: string, expectation: { providerId?: string; enforce
   try {
     const info = await handle.stat()
     const turns = []
-    for await (const turn of iterateArchiveTurnProjections(handle, info.size, {
+    const streamed = iterateArchiveEntries(handle, info.size, {
       cwd, sessionId, turnCount: 'single', providerId: expectation.providerId ?? 'claude',
       ...(expectation.enforceRun === false ? {} : { runId })
-    }, evidence)) turns.push(turn)
+    }, evidence)
+    turns.push(...await collect(streamed))
     expect(evidence.bytesRead).toBe(info.size)
     expect(evidence.digest).toMatch(/^[a-f0-9]{64}$/)
     expect(turns).toHaveLength(1)
@@ -60,8 +110,9 @@ describe('readArchiveTurnProjection', () => {
     expect(turn.userText).toBe('question')
     expect(turn.done).toBe(true)
     expect(turn.status).toBe('completed')
-    expect(turn.events.map((item: { id: string }) => item.id)).toEqual(['e2', 'e3'])
-    expect(turn.events[1].steer?.prompt).toBe('steer prompt')
+    expect(turn.events.map(item => item.kind)).toEqual(['text', 'steer'])
+    expect(turn.events[0]).toMatchObject({ kind: 'text', text: 'visible answer' })
+    expect(turn.events[1]).toMatchObject({ kind: 'steer', prompt: 'steer prompt', status: 'accepted' })
   })
 
   it('never selects an event from text inside an unrelated payload', async () => {
@@ -71,14 +122,14 @@ describe('readArchiveTurnProjection', () => {
       event({ id: 'tool', kind: 'tool', stage: 'tool:Bash', outputContent: { storage: 'inline', content: decoy } }),
       event({ id: 'real', text: 'real answer' })
     ]))
-    expect(turn.events.map((item: { id: string }) => item.id)).toEqual(['real'])
+    expect(turn.events).toEqual([{ kind: 'text', text: 'real answer', stage: 'text' }])
   })
 
   it('keeps Unicode and long values exact across tokenizer chunk boundaries', async () => {
     const text = `${'a'.repeat(300_000)}🙂汉字\ud83d\ude00${'b'.repeat(300_000)}`
     const turn = await read(archive([event({ text })]))
     expect(turn.events).toHaveLength(1)
-    expect(turn.events[0].text).toBe(text)
+    expect(turn.events[0]).toMatchObject({ kind: 'text', text })
   })
 
   it('fails closed on truncated, re-identified and re-run files', async () => {

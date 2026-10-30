@@ -72,10 +72,32 @@ async function rewriteBody(dir: string, runId: string, content: string): Promise
 
 const args = (dir: string) => ({ userDataDir: dir, cwd, sessionId, providerId: 'claude' as const })
 
+/** Assembles the streamed entries into whole turns for assertions about one turn's text. */
 async function collect(dir: string) {
   const info = await traceArchiveCaptureInfo(args(dir))
-  const turns = []
-  for await (const turn of iterateTraceArchiveCapture(args(dir), info)) turns.push(turn)
+  const turns: Array<{ runId: string; userText: string; events: Array<{ text: string }> }> = []
+  let current: (typeof turns)[number] | undefined
+  let openEvent: number | undefined
+  for await (const entry of iterateTraceArchiveCapture(args(dir), info)) {
+    if (entry.type === 'turn') {
+      turns.push({ runId: entry.runId, userText: current?.userText ?? '', events: current?.events ?? [] })
+      current = undefined
+      openEvent = undefined
+      continue
+    }
+    if (entry.type === 'user') {
+      current ??= { runId: '', userText: '', events: [] }
+      current.userText += entry.chunk
+      continue
+    }
+    if (entry.type !== 'text') continue
+    if (openEvent !== entry.event) {
+      current ??= { runId: '', userText: '', events: [] }
+      current.events.push({ text: '' })
+      openEvent = entry.event
+    }
+    current!.events.at(-1)!.text += entry.chunk
+  }
   return { info, turns }
 }
 
@@ -155,9 +177,10 @@ describe('trace archive capture', () => {
     expect(info.totalTurns).toBe(2100)
     let count = 0
     let last = ''
-    for await (const turn of iterateTraceArchiveCapture(args(dir), info)) {
+    for await (const entry of iterateTraceArchiveCapture(args(dir), info)) {
+      if (entry.type !== 'turn') continue
       count += 1
-      last = turn.runId
+      last = entry.runId
     }
     expect(count).toBe(2100)
     expect(last).toBe('run-2099')

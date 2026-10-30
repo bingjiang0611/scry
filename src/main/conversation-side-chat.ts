@@ -6,16 +6,16 @@ import {
   sideChatSnapshotMessageCount, type Conversation, type SideChatInitialTarget, type SideChatOrigin, type SideChatSource
 } from '../shared/conversation'
 import { conversationIdPattern, requireValue } from './conversation-schema'
-import { sealSideChatSnapshot } from './conversation-side-chat-snapshot'
+import { SideChatSnapshotWriter } from './conversation-side-chat-manifest'
+import { conversationHistoryRoot } from './conversation-history-content'
+import { sealSink } from './conversation-side-chat-capture'
 import { deleteConversationHistory } from './conversation-history-content'
 import type { SideChatServiceDeps } from './conversation-service-deps'
 import {
-  captureSideChatPrefix, smallestFreezableOrdinal, type CaptureEntry, type CapturedPrefix
+  captureSideChatPrefix, smallestFreezableOrdinal, sourceWorkspaceCwd, type CapturedPrefix
 } from './conversation-side-chat-source'
 import { isSideChatBudgetRefusal } from './conversation-side-chat-refusal'
-import {
-  deliveryBlockedReason, measureSnapshot, PREVIEW_CONVERSATION_ID, PREVIEW_SNAPSHOT_ID, sideChatCoverage, snapshotItems
-} from './conversation-side-chat-coverage'
+import { deliveryBlockedReason, sideChatCoverage } from './conversation-side-chat-coverage'
 import type {
   ConversationSideChatRequest, ConversationSummary, SideChatCommandReceipt, SideChatList, SideChatPreview, SideChatSnapshotPage
 } from '../shared/conversation-api'
@@ -37,38 +37,28 @@ function readerAvailable(deps: SideChatServiceDeps, target: SideChatInitialTarge
   return deps.supportsHistoryReader?.(target.providerId) === true
 }
 
-function manifest(snapshotId: string, entries: readonly CaptureEntry[]) {
-  const items = snapshotItems(snapshotId, entries)
-  const messages = entries.map((entry, index) => ({ ...entry.message, ref: items[index].ref }))
-  return { items, messages }
-}
-
-/** Snapshot size and coverage share one measurement path for preview and creation. */
+/**
+ * Snapshot size and coverage share one measurement path for preview and creation.
+ *
+ * Format 4 keeps the item index and every body in content-addressed manifests, so a
+ * large source no longer refuses creation. `bodyBytes` is the frozen text size, and it
+ * decides only whether a reader is required, never whether the snapshot may exist.
+ */
 function measure(
   deps: SideChatServiceDeps,
   conversationId: string,
   captured: CapturedPrefix,
-  target: SideChatInitialTarget,
-  snapshotId: string
-): { items: ReturnType<typeof manifest>['items']; messages: ReturnType<typeof manifest>['messages']
-  readerAvailable: boolean; coverage: ReturnType<typeof sideChatCoverage> } {
-  const { items, messages } = manifest(snapshotId, captured.entries)
-  // Format 4 keeps the frozen item list and every body in content-addressed manifests,
-  // so a large source no longer refuses creation. This byte count describes the inline
-  // handoff cost only; it decides whether a reader is required, never whether the
-  // snapshot may exist.
-  const bytes = measureSnapshot({
-    conversationId, cwd: captured.cwd, snapshotId, throughOrdinal: captured.throughOrdinal,
-    throughRunId: captured.throughRunId, prefixFingerprint: captured.prefixFingerprint, messages
-  })
+  target: SideChatInitialTarget
+): { readerAvailable: boolean; coverage: ReturnType<typeof sideChatCoverage> } {
   const reader = readerAvailable(deps, target)
   return {
-    items, messages, readerAvailable: reader,
-    coverage: sideChatCoverage({ conversationId, messages, readerAvailable: reader, snapshotBytes: bytes })
+    readerAvailable: reader,
+    coverage: sideChatCoverage({
+      conversationId, items: captured.items, readerAvailable: reader, snapshotBytes: captured.bodyBytes
+    })
   }
 }
 
-/** Read-only preview. Nothing is persisted and no Provider is contacted. */
 /** Projects one captured prefix into the preview shape; no persistence, no Provider call. */
 function previewOf(
   deps: SideChatServiceDeps,
@@ -87,7 +77,7 @@ function previewOf(
     throughRunId: captured.throughRunId,
     prefixFingerprint: captured.prefixFingerprint,
     manifestFingerprint: captured.manifestFingerprint,
-    messageCount: captured.entries.length,
+    messageCount: captured.items.length,
     bodyBytes: captured.bodyBytes,
     target,
     coverage: measured.coverage,
@@ -96,7 +86,6 @@ function previewOf(
   }
 }
 
-/** Read-only preview. Nothing is persisted and no Provider is contacted. */
 export async function previewSideChat(
   deps: SideChatServiceDeps,
   input: unknown,
@@ -108,7 +97,8 @@ export async function previewSideChat(
     const captured = await captureSideChatPrefix(deps, source,
       ordinal === undefined ? undefined : { ordinal })
     const target = initialTargetFor(captured, options.initialTarget)
-    return previewOf(deps, captured, measure(deps, PREVIEW_CONVERSATION_ID, captured, target, PREVIEW_SNAPSHOT_ID), target)
+    return previewOf(deps, captured, measure(deps, captured.source.kind === 'conversation'
+      ? captured.source.conversationId : captured.source.nativeSessionId, captured, target), target)
   }
   try {
     return await readAt(options.completedThroughOrdinal)
@@ -162,34 +152,46 @@ export async function createSideChat(
     requireValue(receipt.sideChat?.intentHash === intentHash, '同一侧聊创建命令不能替换内容或来源')
     return conversationSummary(receipt, active)
   }
-  const captured = await captureSideChatPrefix(deps, request.source,
-    { ordinal: request.expectedThroughOrdinal, runId: request.expectedThroughRunId })
-  if (captured.throughOrdinal !== request.expectedThroughOrdinal ||
-    captured.prefixFingerprint !== request.expectedPrefixFingerprint ||
-    captured.manifestFingerprint !== request.expectedManifestFingerprint) {
-    throw new Error('来源快照范围已变化，请重新预览；本次未创建侧聊')
-  }
-  const target = initialTargetFor(captured, request.initialTarget)
   const id = randomUUID()
   requireValue(conversationIdPattern.test(id), '侧聊 ID 无效')
   const snapshotId = randomUUID()
-  const measured = measure(deps, id, captured, target, snapshotId)
+  const capturedAt = Date.now()
+  // The sealed body lives under the child's own content root, so the writer has to
+  // exist before the source is read. Its identity uses the requested range: a source
+  // that changed under us is refused below, and the orphaned body is discarded.
+  const cwd = await sourceWorkspaceCwd(deps, request.source)
+  const writer = new SideChatSnapshotWriter({
+    dataRoot: conversationHistoryRoot(deps.store.userData, { id, cwd }),
+    identity: {
+      id: snapshotId, prefixFingerprint: request.expectedPrefixFingerprint,
+      throughOrdinal: request.expectedThroughOrdinal, throughRunId: request.expectedThroughRunId, capturedAt
+    }
+  })
+  const captured = await captureSideChatPrefix(deps, request.source,
+    { ordinal: request.expectedThroughOrdinal, runId: request.expectedThroughRunId }, sealSink(writer, snapshotId))
+  if (captured.cwd !== cwd || captured.throughOrdinal !== request.expectedThroughOrdinal ||
+    captured.prefixFingerprint !== request.expectedPrefixFingerprint ||
+    captured.manifestFingerprint !== request.expectedManifestFingerprint) {
+    await discardUnpublishedContent(deps, id, cwd)
+    throw new Error('来源快照范围已变化，请重新预览；本次未创建侧聊')
+  }
+  const target = initialTargetFor(captured, request.initialTarget)
+  const measured = measure(deps, id, captured, target)
   const blocked = deliveryBlockedReason({
     supportsHistoricalInput: deps.supportsHistoricalInput(target.providerId),
     readerAvailable: measured.readerAvailable, target, coverage: measured.coverage
   })
   // Refuse before publishing: a child whose first send provably cannot carry its
   // own frozen context would be an empty session that only looks complete.
-  requireValue(blocked === undefined, blocked ?? '')
-  const { items, messages } = measured
-  const snapshot = {
-    id: snapshotId,
-    prefixFingerprint: captured.prefixFingerprint,
-    throughOrdinal: captured.throughOrdinal,
-    throughRunId: captured.throughRunId,
-    capturedAt: Date.now()
+  if (blocked !== undefined) {
+    await discardUnpublishedContent(deps, id, cwd)
+    requireValue(blocked === undefined, blocked)
   }
-  const sealed = await sealSideChatSnapshot(deps.store.userData, { id, cwd: captured.cwd }, snapshot, items, messages)
+  const sealed = await writer.seal()
+  if (sealed.messageCount !== captured.items.length || sealed.bodyBytes !== captured.bodyBytes) {
+    await discardUnpublishedContent(deps, id, cwd)
+    throw new Error('侧聊快照正文与来源事实不一致，本次未创建侧聊')
+  }
   const origin: SideChatOrigin = {
     source: captured.source,
     parentTitleAtCapture: captured.title,
@@ -199,11 +201,11 @@ export async function createSideChat(
     intentHash
   }
   try {
-    const published = await deps.store.createSideChat({ id, cwd: captured.cwd, origin })
+    const published = await deps.store.createSideChat({ id, cwd, origin })
     if (!published.created) {
       // A concurrent identical command already published its child; this body is orphaned.
       requireValue(published.conversation.sideChat?.intentHash === intentHash, '同一侧聊创建命令不能替换内容或来源')
-      await discardUnpublishedContent(deps, id, captured.cwd)
+      await discardUnpublishedContent(deps, id, cwd)
     }
     return conversationSummary(published.conversation, active)
   } catch (error) {
@@ -217,7 +219,7 @@ export async function createSideChat(
       throw error
     }
     if (persisted?.sideChat?.commandId === request.commandId) return conversationSummary(persisted, active)
-    if (!persisted) await discardUnpublishedContent(deps, id, captured.cwd)
+    if (!persisted) await discardUnpublishedContent(deps, id, cwd)
     throw error
   }
 }

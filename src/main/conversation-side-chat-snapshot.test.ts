@@ -4,9 +4,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { sideChatSnapshotRunId, type SideChatSnapshotItem } from '../shared/conversation'
-import type { HistoryMessage } from './conversation-history-content'
+import { conversationHistoryRoot, type HistoryMessage } from './conversation-history-content'
+import { SideChatSnapshotWriter } from './conversation-side-chat-manifest'
+import { sealSink } from './conversation-side-chat-capture'
 import {
-  loadSideChatSnapshotMessages, readSideChatSnapshotItem, sealSideChatSnapshot, sideChatSnapshotRefs
+  loadSideChatSnapshotMessages, readSideChatSnapshotItem, sideChatSnapshotRefs
 } from './conversation-side-chat-snapshot'
 import type { SideChatSnapshotManifest } from '../shared/conversation'
 
@@ -37,11 +39,26 @@ function frozenItems(): { items: SideChatSnapshotItem[]; messages: HistoryMessag
 
 beforeAll(async () => {
   userData = await mkdtemp(join(tmpdir(), 'scry-snapshot-'))
-  const { items, messages } = frozenItems()
-  sealed = await sealSideChatSnapshot(userData, conversation, {
-    id: snapshotId, prefixFingerprint: sha('prefix'), throughOrdinal: COUNT / 2, throughRunId: 'run-last',
-    capturedAt: 1
-  }, items, messages)
+  const { messages } = frozenItems()
+  // Sealed through the same streaming writer creation uses, one message at a time.
+  const writer = new SideChatSnapshotWriter({
+    dataRoot: conversationHistoryRoot(userData, conversation),
+    identity: {
+      id: snapshotId, prefixFingerprint: sha('prefix'), throughOrdinal: COUNT / 2, throughRunId: 'run-last',
+      capturedAt: 1
+    }
+  })
+  const sink = sealSink(writer, snapshotId)
+  for (const message of messages) {
+    await sink.append({
+      role: message.role, contentHash: message.ref.contentHash, bytes: Buffer.byteLength(message.text, 'utf8'),
+      text: (async function* () { yield message.text })()
+    }, {
+      role: message.role, sourceRunId: message.ref.runId, sourceOrdinal: message.ordinal,
+      providerId: 'claude', status: message.status, delivery: 'snapshot'
+    })
+  }
+  sealed = await writer.seal()
   // 4200 items and a message far beyond the old 4 MiB artifact budget need durable
   // content writes (one leaf per 32 items), which is the measured cost here.
 }, 120_000)

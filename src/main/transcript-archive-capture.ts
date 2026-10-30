@@ -6,10 +6,10 @@ import {
   readTraceArchiveMetadataAsync, traceArchivePath, traceArchiveTurnPath, type TraceArchiveTurn
 } from './transcript-archive'
 import {
-  iterateArchiveTurnProjections, type ArchiveReadEvidence, type ArchiveTurnProjection
+  iterateArchiveEntries, type ArchiveReadEvidence, type ArchiveTurnExpectation
 } from './trace-archive-projection'
 
-export type { ArchiveTurnProjection } from './trace-archive-projection'
+export type { ArchiveEntry } from './trace-archive-projection'
 
 export interface TraceArchiveCaptureArgs {
   userDataDir: string
@@ -145,7 +145,7 @@ function assertProfile(expected: string | undefined, actual: string | null | und
   }
 }
 
-function expectationFor(args: TraceArchiveCaptureArgs, meta: SegmentMeta | undefined): Parameters<typeof iterateArchiveTurnProjections>[2] {
+function expectationFor(args: TraceArchiveCaptureArgs, meta: SegmentMeta | undefined): ArchiveTurnExpectation {
   return {
     cwd: args.cwd, sessionId: args.sessionId, providerId: args.providerId,
     turnCount: 'single',
@@ -164,7 +164,7 @@ function expectationFor(args: TraceArchiveCaptureArgs, meta: SegmentMeta | undef
 export async function* iterateTraceArchiveCapture(
   args: TraceArchiveCaptureArgs,
   info: TraceArchiveCaptureInfo
-): AsyncGenerator<ArchiveTurnProjection> {
+): AsyncGenerator<import('./trace-archive-projection').ArchiveEntry> {
   if (info.totalTurns === 0) return
   const root = await canonicalRoot(args.userDataDir)
   if (info.readMode === 'monolithic') {
@@ -172,7 +172,7 @@ export async function* iterateTraceArchiveCapture(
     const opened = await openOwnedFile(root, path)
     try {
       const evidence: ArchiveReadEvidence = { bytesRead: 0, digest: '' }
-      for await (const turn of iterateArchiveTurnProjections(opened.handle, opened.size, {
+      for await (const turn of iterateArchiveEntries(opened.handle, opened.size, {
         cwd: args.cwd, sessionId: args.sessionId, providerId: args.providerId, turnCount: 'many'
       }, evidence)) yield turn
       await assertUnchanged(opened.handle, opened.identity)
@@ -192,10 +192,12 @@ export async function* iterateTraceArchiveCapture(
       const opened = await openOwnedFile(root, path)
       try {
         const evidence: ArchiveReadEvidence = { bytesRead: 0, digest: '' }
-        for await (const turn of iterateArchiveTurnProjections(
+        for await (const turn of iterateArchiveEntries(
           opened.handle, opened.size, expectationFor(args, segment), evidence
         )) {
-          if (turn.runId !== segment.runId) throw new TraceArchiveCaptureError('来源归档分片与索引不一致')
+          if (turn.type === 'turn' && turn.runId !== segment.runId) {
+            throw new TraceArchiveCaptureError('来源归档分片与索引不一致')
+          }
           yield turn
         }
         await assertUnchanged(opened.handle, opened.identity)
@@ -231,9 +233,10 @@ async function rebuildIndex(root: string, args: TraceArchiveCaptureArgs): Promis
     try {
       const evidence: ArchiveReadEvidence = { bytesRead: 0, digest: '' }
       let meta: SegmentMeta | undefined
-      for await (const turn of iterateArchiveTurnProjections(opened.handle, opened.size, {
+      for await (const turn of iterateArchiveEntries(opened.handle, opened.size, {
         cwd: args.cwd, sessionId: args.sessionId, providerId: args.providerId, turnCount: 'single'
       }, evidence, { metadataOnly: true })) {
+        if (turn.type !== 'turn') continue
         meta = {
           file: '', runId: turn.runId, ts: turn.ts,
           ...(turn.providerTurnId !== undefined ? { providerTurnId: turn.providerTurnId } : {})

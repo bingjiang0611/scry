@@ -2,56 +2,59 @@ import { createHash } from 'node:crypto'
 import { Transform } from 'node:stream'
 import type { FileHandle } from 'node:fs/promises'
 import { parser, type Token } from 'stream-json/parser.js'
-import type { TraceEvent } from '../shared/trace'
-import { providerIdForRuntime, type RuntimeProvider } from '../shared/runtime'
+import { TextSpool } from './text-spool'
+import {
+  BODY_KEYS, REF_KEYS, assertArchiveIdentity, assertProvider, factsOf, keepText, parseScalar, primitiveValue
+} from './trace-archive-fields'
 
 /**
  * Selective, bounded-memory projection of an archived session file.
  *
  * One archived turn can be hundreds of MiB because it stores every tool diff, hook
- * payload and preview verbatim. Side-chat capture only needs visible text and steer
- * evidence, so this reader walks the file as a JSON token stream and never keeps a
- * value it will not use. Selection is decided by the structural key path, never by
- * text inside a payload, so a tool result whose body contains `"stage":"text"`
- * cannot select itself.
+ * payload and preview verbatim. Side-chat capture needs only visible text and steer
+ * evidence, so this reader walks the file as a JSON token stream and never materializes
+ * a value it will not use.
  *
- * This is a real JSON parse: malformed, truncated or re-identified files fail
- * closed instead of producing a partial snapshot.
+ * Text is streamed, not accumulated: a visible body is spooled (memory up to a bound,
+ * then a private temporary file) and emitted as bounded chunks, so a 200 MiB body never
+ * becomes one string. Selection is decided by the structural key path and by the event's
+ * own `kind`/`stage`, never by text inside a payload, so a tool result whose body contains
+ * `"stage":"text"` cannot select itself.
+ *
+ * This is a real JSON parse: malformed, truncated or re-identified files fail closed
+ * instead of producing a partial snapshot.
  */
-export interface ArchiveTurnProjection {
-  runId: string
-  providerTurnId?: string
-  ts: number
-  done: boolean
-  status?: string
-  userText: string
-  events: TraceEvent[]
+
+/** Provenance of one stored visible body, projected field by field. */
+export interface ArchiveBodyFacts {
+  source?: string
+  encoding?: string
+  sourceCompleteness?: string
+  redaction?: string
+  storage?: string
+  contentRef?: { storage?: string; sha256?: string; bytes?: number; encoding?: string }
 }
 
-/** Event fields capture reads; every other event field is skipped, not materialized. */
-const EVENT_KEYS = new Set([
-  'id', 'kind', 'stage', 'runId', 'messageId', 'agentId', 'parentToolUseId', 'ts',
-  'text', 'modelContent', 'steer', 'runtimeMetadata', 'providerId', 'runtimeProvider'
-])
-/** Turn-level scalars; `items` is walked event by event. */
-const TURN_KEYS = new Set(['runId', 'providerTurnId', 'userText', 'ts', 'done', 'status'])
-const ROOT_KEYS = new Set(['version', 'cwd', 'sessionId', 'externalSessionId', 'providerId', 'runtimeProvider'])
-
-type Role = 'root' | 'turns' | 'turn' | 'items' | 'event' | 'ignored'
-
-interface BuilderFrame {
-  kind: 'object' | 'array'
-  value: Record<string, unknown> | unknown[]
-  key: string | null
-}
-
-interface Builder {
-  stack: BuilderFrame[]
-  skipDepth: number
-  skipPrimitive: boolean
-  skipNextValue: boolean
-  pending: { kind: 'string' | 'number'; parts: string[] } | undefined
-}
+export type ArchiveEntry =
+  /** Turn header, emitted after its chunks: the body fixes run identity first. */
+  | { type: 'turn'; turn: number; runId: string; providerTurnId?: string; ts: number; done: boolean; status?: string }
+  | { type: 'user'; turn: number; chunk: string }
+  | {
+      type: 'text'
+      turn: number
+      /** Monotonic event number inside the file; chunks of one event share it. */
+      event: number
+      stage: string
+      messageId?: string
+      codexItemId?: string
+      replacesStreamedText?: boolean
+      chunk: string
+    }
+  /** The event carries a `modelContent` envelope; inline chunks above are its body. */
+  | { type: 'body'; turn: number; event: number; body: ArchiveBodyFacts }
+  | { type: 'steer'; turn: number; event: number; status: string; messageId?: string; chunk: string }
+  /** An event that is not a visible body: it ends any preceding assistant text group. */
+  | { type: 'break'; turn: number; event: number }
 
 export interface ArchiveTurnExpectation {
   cwd: string
@@ -70,66 +73,56 @@ export interface ArchiveReadEvidence {
   digest: string
 }
 
-function roleOf(parent: Role | undefined, key: string | null, token: Token): Role {
-  if (!parent) return 'root'
-  if (parent === 'root' && key === 'turns' && token.name === 'startArray') return 'turns'
-  if (parent === 'turns' && token.name === 'startObject') return 'turn'
-  if (parent === 'turn' && key === 'items' && token.name === 'startArray') return 'items'
-  if (parent === 'items' && token.name === 'startObject') return 'event'
-  return 'ignored'
-}
-
-function isPrimitiveStart(token: Token): boolean {
-  return token.name === 'startString' || token.name === 'startNumber' ||
-    token.name === 'trueValue' || token.name === 'falseValue' || token.name === 'nullValue' ||
-    token.name === 'stringValue' || token.name === 'numberValue'
-}
-
-function primitiveValue(token: Token): unknown {
-  if (token.name === 'trueValue') return true
-  if (token.name === 'falseValue') return false
-  if (token.name === 'nullValue') return null
-  if (token.name === 'stringValue' || token.name === 'numberValue') return token.value
-  return undefined
-}
-
-/** Only visible assistant text and steer evidence are projected into the snapshot. */
-function keepEvent(event: TraceEvent): boolean {
-  if (event.stage === 'steer') return true
-  return event.kind === 'model' && (event.stage === 'text' || event.stage === 'text_delta') &&
-    event.agentId == null && event.parentToolUseId == null
-}
-
-function assertProvider(expectation: ArchiveTurnExpectation, raw: { providerId?: unknown; runtimeProvider?: unknown }): void {
-  if (raw.providerId !== undefined && raw.providerId !== expectation.providerId) {
-    throw new Error('trace archive belongs to another Provider')
-  }
-  if (raw.runtimeProvider !== undefined &&
-    providerIdForRuntime(raw.runtimeProvider as RuntimeProvider) !== expectation.providerId) {
-    throw new Error('trace archive runtime belongs to another Provider')
-  }
-}
-
 export interface ProjectionOptions {
-  /** Only the turn metadata is needed; event bodies are skipped entirely. */
+  /** Only the turn header is needed; bodies are skipped entirely. */
   metadataOnly?: boolean
 }
 
+/** Turn-level scalars; every other root/turn field is skipped. */
+const TURN_KEYS = new Set(['runId', 'providerTurnId', 'ts', 'done', 'status', 'providerId', 'runtimeProvider'])
+const ROOT_KEYS = new Set(['version', 'cwd', 'sessionId', 'externalSessionId', 'providerId', 'runtimeProvider'])
+/** Event scalars that decide whether the event is visible at all. */
+const EVENT_KEYS = new Set([
+  'id', 'kind', 'stage', 'runId', 'messageId', 'agentId', 'parentToolUseId', 'ts', 'providerId', 'runtimeProvider'
+])
+const STEER_KEYS = new Set(['status', 'messageId'])
+const RUNTIME_KEYS = new Set(['replacesStreamedText', 'codexItemId'])
+
+type Role = 'root' | 'turns' | 'turn' | 'items' | 'event' | 'steer' | 'runtime' | 'content' | 'contentRef' | 'ignored'
+type SpoolTarget = 'user' | 'text' | 'steer'
+
+function roleOf(parent: Role | undefined, key: string | null, token: Token): Role {
+  if (!parent) return 'root'
+  const child = token.name === 'startObject' || token.name === 'startArray'
+  if (parent === 'root' && key === 'turns' && child) return 'turns'
+  if (parent === 'turns' && token.name === 'startObject') return 'turn'
+  if (parent === 'turn' && key === 'items' && child) return 'items'
+  if (parent === 'items' && token.name === 'startObject') return 'event'
+  if (parent === 'event' && key === 'steer' && token.name === 'startObject') return 'steer'
+  if (parent === 'event' && key === 'runtimeMetadata' && token.name === 'startObject') return 'runtime'
+  if (parent === 'event' && key === 'modelContent' && token.name === 'startObject') return 'content'
+  if (parent === 'content' && key === 'contentRef' && token.name === 'startObject') return 'contentRef'
+  return 'ignored'
+}
+
+interface Frame {
+  role: Role
+  key: string | null
+}
+
 /**
- * Project every turn of one archive file, in file order.
+ * Project every turn of one archive file, as ordered entries.
  *
  * `evidence` is filled with the digest of exactly the bytes that were parsed, so a
  * caller that re-reads the same file can prove both passes saw identical content.
- * The read is bounded by the largest single value the projection keeps, not by the
- * file size.
  */
-export async function* iterateArchiveTurnProjections(
+export async function* iterateArchiveEntries(
   handle: FileHandle,
   size: number,
   expectation: ArchiveTurnExpectation,
   evidence: ArchiveReadEvidence,
   options: ProjectionOptions = {}
-): AsyncGenerator<ArchiveTurnProjection> {
+): AsyncGenerator<ArchiveEntry> {
   const hash = createHash('sha256')
   const tap = new Transform({
     transform(chunk: Buffer, _encoding, callback) {
@@ -139,39 +132,104 @@ export async function* iterateArchiveTurnProjections(
   })
   const source = handle.createReadStream({ start: 0, end: size - 1, autoClose: false })
     .pipe(tap).pipe(parser.asStream({ packStrings: false, packNumbers: false }))
+
   const rootValues = new Map<string, unknown>()
   let turnValues = new Map<string, unknown>()
-  let events: TraceEvent[] = []
-  const roles: Role[] = []
-  const keys: (string | null)[] = []
+  let eventMeta = new Map<string, unknown>()
+  let steerMeta = new Map<string, unknown>()
+  let bodyFields = new Map<string, unknown>()
+  let refFields = new Map<string, unknown>()
+  let hasBody = false
+  const frames: Frame[] = []
   let depth = 0
   let turnDepth = -1
   let scalar: { target: Map<string, unknown>; key: string } | undefined
   let pending: { kind: 'string' | 'number'; parts: string[] } | undefined
-  let builder: Builder | undefined
+  let skipDepth = 0
+  let skipPrimitive = false
+  /** Key characters arrive as string chunks before their `keyValue` token. */
+  let inKey = false
+  const spool = new TextSpool()
+  let spoolTarget: SpoolTarget | undefined
+  /** The key whose value is being spooled; every other key takes the scalar path. */
+  let spoolKey: string | undefined
   let rootClosed = false
-  let turnCount = 0
-
-  const finishEvent = (value: unknown): void => {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('trace archive event is not an object')
-    const event = value as TraceEvent
-    if (typeof event.stage !== 'string') throw new Error('trace archive event has no stage')
-    if (event.kind !== undefined && typeof event.kind !== 'string') throw new Error('trace archive event kind is invalid')
-    if (event.runId !== turnValues.get('runId')) throw new Error('trace archive event belongs to another run')
-    assertProvider(expectation, { providerId: event.providerId, runtimeProvider: event.runtimeProvider })
-    if (keepEvent(event)) events.push(event)
-  }
+  let turns = 0
+  let eventNumber = 0
+  let userTextSeen = false
 
   const finishScalar = (): void => {
     if (!scalar) return
-    const raw = pending?.parts.join('') ?? ''
-    scalar.target.set(scalar.key, parseScalar(raw, pending?.kind))
+    scalar.target.set(scalar.key, parseScalar(pending?.parts.join('') ?? '', pending?.kind))
     scalar = undefined
     pending = undefined
   }
 
-  const finishTurn = (): ArchiveTurnProjection => {
-    turnCount += 1
+  /** Emits the spooled body of the value that just ended, then frees its storage. */
+  const spoolingNow = (): boolean => spoolTarget !== undefined && frames.at(-1)?.key === spoolKey
+
+  const flush = async function* (): AsyncGenerator<ArchiveEntry> {
+    const target = spoolTarget
+    spoolTarget = undefined
+    spoolKey = undefined
+    if (target === undefined) return
+    try {
+      if (target === 'user') {
+        for await (const chunk of spool.read()) yield { type: 'user', turn: turns, chunk }
+        return
+      }
+      if (target === 'steer') {
+        const status = steerMeta.get('status')
+        const messageId = steerMeta.get('messageId')
+        for await (const chunk of spool.read()) {
+          yield {
+            type: 'steer', turn: turns, event: eventNumber,
+            status: typeof status === 'string' ? status : 'unknown',
+            ...(typeof messageId === 'string' ? { messageId } : {}), chunk
+          }
+        }
+        return
+      }
+      if (!keepText(eventMeta)) return
+      for await (const chunk of spool.read()) {
+        yield {
+          type: 'text', turn: turns, event: eventNumber, stage: String(eventMeta.get('stage') ?? ''),
+          ...(typeof eventMeta.get('messageId') === 'string' ? { messageId: eventMeta.get('messageId') as string } : {}),
+          ...(typeof eventMeta.get('codexItemId') === 'string' ? { codexItemId: eventMeta.get('codexItemId') as string } : {}),
+          ...(eventMeta.get('replacesStreamedText') === true ? { replacesStreamedText: true } : {}),
+          chunk
+        }
+      }
+    } finally {
+      await spool.discard()
+    }
+  }
+
+  /** One event ended: its text, its body provenance, or the break it makes in text runs. */
+  const closeEvent = async function* (): AsyncGenerator<ArchiveEntry> {
+    finishScalar()
+    for await (const entry of flush()) yield entry
+    const visible = keepText(eventMeta)
+    assertProvider(expectation, {
+      providerId: eventMeta.get('providerId'), runtimeProvider: eventMeta.get('runtimeProvider')
+    })
+    const runId = eventMeta.get('runId')
+    if (runId !== undefined && runId !== turnValues.get('runId')) {
+      throw new Error('trace archive event belongs to another run')
+    }
+    const kind = eventMeta.get('kind')
+    if (kind !== undefined && typeof kind !== 'string') throw new Error('trace archive event kind is invalid')
+    const stage = eventMeta.get('stage')
+    if (stage !== undefined && typeof stage !== 'string') throw new Error('trace archive event stage is invalid')
+    if (!visible) {
+      yield { type: 'break', turn: turns, event: eventNumber }
+      return
+    }
+    if (!hasBody) return
+    yield { type: 'body', turn: turns, event: eventNumber, body: factsOf(new Map([...bodyFields, ['contentRef', refFields]])) }
+  }
+
+  const finishTurn = (): ArchiveEntry => {
     assertProvider(expectation, {
       providerId: turnValues.get('providerId'), runtimeProvider: turnValues.get('runtimeProvider')
     })
@@ -191,191 +249,161 @@ export async function* iterateArchiveTurnProjections(
     if (typeof done !== 'boolean') throw new Error('trace archive turn has no completion evidence')
     const status = turnValues.get('status')
     if (status !== undefined && typeof status !== 'string') throw new Error('trace archive turn status is invalid')
-    const userText = turnValues.get('userText')
-    if (typeof userText !== 'string') throw new Error('trace archive turn has no user text')
-    const projection: ArchiveTurnProjection = {
-      runId, ...(providerTurnId !== undefined ? { providerTurnId } : {}), ts, done,
-      ...(status !== undefined ? { status } : {}), userText, events
-    }
+    if (!userTextSeen) throw new Error('trace archive turn has no user text')
     turnValues = new Map()
-    events = []
-    return projection
+    userTextSeen = false
+    return {
+      type: 'turn', turn: turns, runId, ...(providerTurnId !== undefined ? { providerTurnId } : {}), ts, done,
+      ...(status !== undefined ? { status } : {})
+    }
   }
 
   try {
     for await (const token of source as AsyncIterable<Token>) {
-      if (builder) {
-        const finished = applyBuilderToken(builder, token)
-        if (finished !== undefined) {
-          builder = undefined
-          finishEvent(finished)
-        }
+      if (skipPrimitive) {
+        if (token.name === 'endString' || token.name === 'endNumber') skipPrimitive = false
+        continue
+      }
+      if (skipDepth > 0) {
+        if (token.name === 'startObject' || token.name === 'startArray') skipDepth += 1
+        else if (token.name === 'endObject' || token.name === 'endArray') skipDepth -= 1
+        continue
+      }
+      if (token.name === 'startKey') {
+        inKey = true
+        continue
+      }
+      if (token.name === 'endKey') {
+        inKey = false
         continue
       }
       if (token.name === 'keyValue') {
         finishScalar()
-        if (depth === 0) throw new Error('trace archive key outside an object')
-        keys[depth - 1] = token.value
-        const role = roles[depth - 1]
-        if ((role === 'root' && ROOT_KEYS.has(token.value)) || (role === 'turn' && TURN_KEYS.has(token.value))) {
-          scalar = { target: role === 'root' ? rootValues : turnValues, key: token.value }
-        }
-        continue
-      }
-      if (isPrimitiveStart(token)) {
-        if (scalar) {
-          if (token.name === 'startString') pending = { kind: 'string', parts: [] }
-          else if (token.name === 'startNumber') pending = { kind: 'number', parts: [] }
-          else {
-            scalar.target.set(scalar.key, primitiveValue(token))
-            scalar = undefined
-            pending = undefined
+        const frame = frames.at(-1)
+        if (!frame) throw new Error('trace archive key outside an object')
+        const key = token.value as string
+        frame.key = key
+        const role = frame.role
+        const skip = options.metadataOnly
+        if (role === 'root' && ROOT_KEYS.has(key)) scalar = { target: rootValues, key }
+        else if (role === 'turn' && key === 'userText') {
+          userTextSeen = true
+          if (!skip) {
+            spoolTarget = 'user'
+            spoolKey = key
           }
+        } else if (role === 'turn' && TURN_KEYS.has(key)) scalar = { target: turnValues, key }
+        else if (role === 'event' && key === 'text' && !skip) {
+          if (!hasBody) {
+            spoolTarget = 'text'
+            spoolKey = key
+          }
+        } else if (role === 'event' && key === 'modelContent') hasBody = true
+        else if (role === 'event' && EVENT_KEYS.has(key)) scalar = { target: eventMeta, key }
+        else if (role === 'steer' && key === 'prompt' && !skip) {
+          spoolTarget = 'steer'
+          spoolKey = key
         }
+        else if (role === 'steer' && STEER_KEYS.has(key)) scalar = { target: steerMeta, key }
+        else if (role === 'runtime' && RUNTIME_KEYS.has(key)) scalar = { target: eventMeta, key }
+        else if (role === 'content' && key === 'content' && !skip) {
+          spoolTarget = 'text'
+          spoolKey = key
+        }
+        else if (role === 'content' && BODY_KEYS.has(key)) scalar = { target: bodyFields, key }
+        else if (role === 'contentRef' && REF_KEYS.has(key)) scalar = { target: refFields, key }
         continue
       }
-      if (token.name === 'stringChunk' || token.name === 'numberChunk') {
+      if (token.name === 'stringChunk') {
+        if (inKey) continue
+        if (spoolingNow()) await spool.push(token.value as string)
+        else if (pending) pending.parts.push(token.value as string)
+        continue
+      }
+      if (token.name === 'numberChunk') {
         if (pending) pending.parts.push(token.value as string)
+        continue
+      }
+      if (token.name === 'startString' || token.name === 'startNumber') {
+        if (spoolingNow()) continue
+        if (scalar) pending = { kind: token.name === 'startString' ? 'string' : 'number', parts: [] }
+        else skipPrimitive = true
         continue
       }
       if (token.name === 'endString' || token.name === 'endNumber') {
         if (pending) finishScalar()
-        continue
-      }
-      if (token.name === 'startObject' || token.name === 'startArray') {
-        const role = roleOf(roles[depth - 1], keys[depth - 1] ?? null, token)
-        if (role === 'event' && !options.metadataOnly) {
-          if (roles.length !== 4) throw new Error('trace archive items are not under a turn')
-          builder = { stack: [], skipDepth: 0, skipPrimitive: false, skipNextValue: false, pending: undefined }
-          const root = applyBuilderToken(builder, token)
-          if (root !== undefined) throw new Error('trace archive event is not an object')
-          continue
-        }
-        roles.push(role)
-        keys.push(null)
-        depth += 1
-        if (role === 'turn') {
-          turnDepth = depth - 1
-          turnValues = new Map()
-          events = []
-        }
-        if (role === 'turns') turnCount = 0
+        // User text is unconditional, so it can be emitted as soon as its string ends.
+        if (spoolingNow() && spoolTarget === 'user') for await (const entry of flush()) yield entry
         continue
       }
       if (token.name === 'endObject' || token.name === 'endArray') {
-        if (depth === 0) throw new Error('trace archive JSON closes outside a value')
+        const frame = frames.pop()
+        if (!frame) throw new Error('trace archive JSON closes outside a value')
         depth -= 1
-        roles.pop()
-        keys.pop()
-        if (depth === turnDepth) yield finishTurn()
-        if (depth === 0) rootClosed = true
+        if (frame.role === 'steer') {
+          finishScalar()
+          for await (const entry of flush()) yield entry
+        } else if (frame.role === 'event') {
+          for await (const entry of closeEvent()) yield entry
+        } else if (frame.role === 'turn') {
+          finishScalar()
+          if (spoolingNow() && spoolTarget === 'user') for await (const entry of flush()) yield entry
+          if (depth !== turnDepth) throw new Error('trace archive turn nesting is invalid')
+          yield finishTurn()
+        } else if (frame.role === 'root') rootClosed = true
         continue
+      }
+      if (token.name !== 'startObject' && token.name !== 'startArray') {
+        if (scalar) {
+          scalar.target.set(scalar.key, primitiveValue(token))
+          scalar = undefined
+        }
+        continue
+      }
+      scalar = undefined
+      pending = undefined
+      const parentRole = frames.at(-1)?.role
+      const role = roleOf(parentRole, frames.at(-1)?.key ?? null, token)
+      if (role === 'ignored') {
+        skipDepth = 1
+        continue
+      }
+      // A stored body or a steer prompt supersedes inline text for this event.
+      if ((role === 'content' || role === 'steer') && spoolTarget === 'text') {
+        spoolTarget = undefined
+        spoolKey = undefined
+        await spool.discard()
+      }
+      frames.push({ role, key: null })
+      depth += 1
+      if (role === 'turn') {
+        turns += 1
+        turnDepth = depth - 1
+        turnValues = new Map()
+        eventMeta = new Map()
+        steerMeta = new Map()
+        userTextSeen = false
+      }
+      if (role === 'event') {
+        eventNumber += 1
+        eventMeta = new Map()
+        steerMeta = new Map()
+        bodyFields = new Map()
+        refFields = new Map()
+        hasBody = false
       }
     }
   } catch (error) {
-    // A tokenizer error is a real parse failure, not a reason to emit a partial turn.
     if (error instanceof Error && error.message.startsWith('trace archive')) throw error
     throw new Error(`trace archive JSON is corrupt or truncated: ${error instanceof Error ? error.message : String(error)}`)
+  } finally {
+    await spool.discard()
   }
   if (!rootClosed) throw new Error('trace archive JSON is truncated')
-  if (builder) throw new Error('trace archive JSON is truncated inside an event')
   assertArchiveIdentity(rootValues, expectation)
-  if (expectation.turnCount === 'single' && turnCount !== 1) {
+  if (expectation.turnCount === 'single' && turns !== 1) {
     throw new Error('trace archive segment must contain exactly one turn')
   }
   evidence.bytesRead = size
   evidence.digest = hash.digest('hex')
-}
-
-function parseScalar(raw: string, kind: 'string' | 'number' | undefined): unknown {
-  if (kind === 'string') return raw
-  if (kind === 'number') return raw === '' ? undefined : Number(raw)
-  return JSON.parse(raw) as unknown
-}
-
-function assertArchiveIdentity(rootValues: Map<string, unknown>, expectation: ArchiveTurnExpectation): void {
-  if (rootValues.get('version') !== 3) throw new Error('trace archive schema is invalid')
-  if (rootValues.get('cwd') !== expectation.cwd) throw new Error('trace archive belongs to another workspace')
-  const sessionId = rootValues.get('sessionId')
-  const external = rootValues.get('externalSessionId')
-  if (sessionId !== expectation.sessionId && external !== expectation.sessionId) {
-    throw new Error('trace archive belongs to another session')
-  }
-  assertProvider(expectation, { providerId: rootValues.get('providerId'), runtimeProvider: rootValues.get('runtimeProvider') })
-}
-
-/** Consume one token of an `items[]` event; returns the finished event object. */
-function applyBuilderToken(builder: Builder, token: Token): unknown {
-  if (builder.skipPrimitive) {
-    if (token.name === 'endString' || token.name === 'endNumber') builder.skipPrimitive = false
-    return undefined
-  }
-  if (builder.skipDepth > 0) {
-    if (token.name === 'startObject' || token.name === 'startArray') builder.skipDepth += 1
-    else if (token.name === 'endObject' || token.name === 'endArray') builder.skipDepth -= 1
-    return undefined
-  }
-  if (builder.pending) {
-    if (token.name === 'stringChunk' || token.name === 'numberChunk') {
-      builder.pending.parts.push(token.value as string)
-      return undefined
-    }
-    if (token.name === 'endString' || token.name === 'endNumber') {
-      const raw = builder.pending.parts.join('')
-      const value = builder.pending.kind === 'string' ? raw : Number(raw)
-      builder.pending = undefined
-      const frame = builder.stack.at(-1)
-      if (frame) assignTo(frame, value)
-      return undefined
-    }
-  }
-  if (token.name === 'endObject' || token.name === 'endArray') {
-    const frame = builder.stack.pop()
-    if (!frame) return undefined
-    const parent = builder.stack.at(-1)
-    if (!parent) return frame.value
-    assignTo(parent, frame.value)
-    return undefined
-  }
-  if (token.name === 'startObject' || token.name === 'startArray') {
-    if (builder.skipNextValue) {
-      builder.skipNextValue = false
-      builder.skipDepth = 1
-      return undefined
-    }
-    builder.stack.push({
-      kind: token.name === 'startArray' ? 'array' : 'object',
-      value: token.name === 'startArray' ? [] : {}, key: null
-    })
-    return undefined
-  }
-  const frame = builder.stack.at(-1)
-  if (!frame) return undefined
-  if (token.name === 'keyValue') {
-    frame.key = token.value
-    if (builder.stack.length === 1 && !EVENT_KEYS.has(token.value)) builder.skipNextValue = true
-    return undefined
-  }
-  if (token.name === 'startString' || token.name === 'startNumber') {
-    if (builder.skipNextValue) {
-      builder.skipNextValue = false
-      builder.skipPrimitive = true
-      return undefined
-    }
-    builder.pending = { kind: token.name === 'startString' ? 'string' : 'number', parts: [] }
-    return undefined
-  }
-  if (isPrimitiveStart(token)) {
-    if (builder.skipNextValue) {
-      builder.skipNextValue = false
-      return undefined
-    }
-    assignTo(frame, primitiveValue(token))
-  }
-  return undefined
-}
-
-function assignTo(frame: BuilderFrame, value: unknown): void {
-  if (frame.kind === 'object') (frame.value as Record<string, unknown>)[frame.key ?? ''] = value
-  else (frame.value as unknown[]).push(value)
 }
