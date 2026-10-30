@@ -38,8 +38,10 @@ final class TLSLayerTests: XCTestCase {
               var payload = channel.allocator.buffer(capacity: 13)
               payload.writeInteger(UInt16(1013))
               payload.writeString("no_host_leg")
+              // Match relay-server.mjs/ws.close(): keep TCP alive for the peer's
+              // close. Immediate socket teardown can race its TLS hello and discard
+              // the frame before TunnelCodec has a close cause to preserve.
               return channel.writeAndFlush(WebSocketFrame(fin: true, opcode: .connectionClose, data: payload))
-                .flatMap { channel.close() }
             })
           return channel.pipeline.configureHTTPServerPipeline(withServerUpgrade: (
             upgraders: [upgrader], completionHandler: { _ in }))

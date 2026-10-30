@@ -174,7 +174,7 @@ try {
           return
         }
         if (${questionResultOnly}) {
-          // 已回答问答块的层级检查（真实 React + 真实 CSS），只跑这一个页面。
+          // 仅验证此页已回答问答块的层级（真实 React/CSS）。
           win.setSize(1000, 760)
           await win.loadFile(${JSON.stringify(join(temp, 'session-capability.html'))})
           Object.assign(result, await win.webContents.executeJavaScript(${JSON.stringify(`(${fixtureSources.exerciseSessionCapabilityCore})()`)}), await win.webContents.executeJavaScript(${JSON.stringify(`(${fixtureSources.exerciseSessionCapabilitySummary})()`)}), await win.webContents.executeJavaScript(${JSON.stringify(`(${fixtureSources.exerciseSessionCapabilityQuestionResult})()`)}))
@@ -236,7 +236,7 @@ try {
   `)
   const campaignResults = []
   for (const campaign of turnRefsOnly ? ['refs'] : listsOnly ? ['structure', 'history', 'live', 'refs'] : ['all']) await new Promise((resolve, reject) => {
-    const child = spawn(electron, [join(temp, 'main.cjs'), '--disable-gpu', '--disable-backgrounding-occluded-windows', ...(listsOnly ? [`--scry-lists-campaign=${campaign}`] : [])], {
+    const child = spawn(electron, [join(temp, 'main.cjs'), '--disable-gpu', '--disable-backgrounding-occluded-windows', ...(motionTokensOnly ? ['--force-prefers-reduced-motion'] : []), ...(listsOnly ? [`--scry-lists-campaign=${campaign}`] : [])], {
       env: { PATH: process.env.PATH, TMPDIR: tmpdir(), HOME: join(temp, 'home') }, stdio: ['ignore', 'pipe', 'pipe']
     })
     let output = ''
