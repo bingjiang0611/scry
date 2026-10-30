@@ -13,7 +13,7 @@
   align-items: center;
   max-width: 100%;
   border: 1px solid var(--border2);
-  border-radius: 5px;
+  border-radius: var(--r-xs);
   padding: 2px 7px;
   font: 10.5px/1.45 var(--font-mono);
   color: var(--dim);
@@ -78,7 +78,7 @@
   display: inline-flex;
   align-items: center;
   border: 1px solid var(--border2);
-  border-radius: 5px;
+  border-radius: var(--r-xs);
   padding: 1px 6px;
   font: 10.5px/1.45 var(--font-mono);
   color: var(--dim);
@@ -131,7 +131,7 @@
 .billing-row.click {
   min-height: 40px;
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: var(--r-xs);
   padding-left: 6px;
   padding-right: 6px;
 }
@@ -162,7 +162,7 @@
   margin-top: 4px;
   overflow-x: auto;
   border: 1px solid var(--border3);
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: var(--surface-subtle);
 }
 .billing-token-row {

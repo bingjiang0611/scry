@@ -38,6 +38,7 @@
   place-items: center;
   border: 1px solid var(--border);
   border-radius: var(--r-pill);
+  corner-shape: round;
   color: var(--dim2);
   font: 9px/1 var(--font-mono);
 }
@@ -99,6 +100,7 @@
   height: 6px;
   flex: none;
   border-radius: 50%;
+  corner-shape: round;
   background: var(--dim3);
 }
 

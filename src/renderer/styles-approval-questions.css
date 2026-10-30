@@ -42,7 +42,8 @@
   color: var(--warn);
   background: color-mix(in srgb, var(--warn) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--warn) 28%, transparent);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
+  corner-shape: round;
   font-size: 11px;
 }
 
@@ -107,7 +108,7 @@
   padding: 8px 10px;
   background: color-mix(in srgb, var(--warn, #c08a2e) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--warn, #c08a2e) 38%, transparent);
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   color: var(--text);
   font-size: 12px;
   line-height: 1.5;
@@ -128,7 +129,7 @@
   padding: 12px 13px;
   background: var(--panel2);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--r-sm);
   cursor: pointer;
 }
 

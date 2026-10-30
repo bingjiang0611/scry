@@ -22,7 +22,7 @@
   width: 32px;
   height: 32px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--r-xs);
   color: var(--dim);
   background: transparent;
   cursor: pointer;

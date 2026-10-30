@@ -68,7 +68,7 @@
 .diff-layout-switch { display: flex; gap: 2px; }
 .diff-code-toolbar button, .diff-all-changes, .diff-load-commits, .diff-history-status button {
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   padding: 5px 7px;
   background: transparent;
   color: var(--dim);

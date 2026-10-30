@@ -5,7 +5,7 @@
   min-width: 0;
   padding: 7px 10px;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--r-sm);
   background: var(--panel3);
   color: var(--fg);
   font: inherit;
@@ -24,7 +24,7 @@
   padding: 6px;
   overflow: auto;
   border: 1px solid var(--border2);
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: var(--panel);
   color: var(--fg);
   box-shadow: 0 12px 36px #0003;
@@ -42,7 +42,7 @@
   min-height: 36px;
   padding: 8px 9px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: inherit;
   font: inherit;
