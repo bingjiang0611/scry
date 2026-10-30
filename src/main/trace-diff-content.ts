@@ -4,8 +4,8 @@
 //
 // 只有 session 级快照（`session_diff` / `session_diff_preview`）与从不展示的
 // `turnEvidence.diff` 走引用；单轮 `turn_diff` 仍保持 inline，因为历史页会按轮展示它。
-// 读取端在页面组装时把**页面内最新一条** session 快照的正文取回，渲染层无需改动。
-import { SESSION_DIFF_PREVIEW_STAGE, SESSION_DIFF_STAGE, type DiffFile } from '../shared/turn-diff'
+// 读取端恢复页面内单轮的旧引用，以及最新一条 session 快照；不展开历史累积快照。
+import { SESSION_DIFF_PREVIEW_STAGE, SESSION_DIFF_STAGE, TURN_DIFF_PREVIEW_STAGE, TURN_DIFF_STAGE, type DiffFile } from '../shared/turn-diff'
 import type { ToolContent } from '../shared/tool-content'
 import type { TraceEvent } from '../shared/trace'
 import { readRecorderContent, writeRecorderContent } from '../core/turn-recorder/content-store'
@@ -37,10 +37,21 @@ function needsPreviewDrop(file: DiffFile): boolean {
 async function externalizeSnapshot(
   root: string,
   snapshot: PatchBearingSnapshot | undefined,
-  thresholdBytes: number
+  thresholdBytes: number,
+  copies: WeakMap<DiffFile, DiffFile>
 ): Promise<boolean> {
   if (!snapshot || !Array.isArray(snapshot.files)) return false
   let changed = false
+  // Canonical evidence may share its file list with turn_diff. Replacing those patches
+  // must not strip the inline evidence from the per-turn snapshot.
+  snapshot.files = snapshot.files.map(file => {
+    let copy = copies.get(file)
+    if (!copy) {
+      copy = { ...file }
+      copies.set(file, copy)
+    }
+    return copy
+  })
   // 逐个 publish：内容库按 sha256 去重，同一个 patch 在后面的轮次里只多做一次校验，不重复落盘。
   for (const file of snapshot.files) {
     // 已经转过引用的旧文件也走一次：清掉此前写下的内联预览，重复执行是幂等的。
@@ -80,24 +91,27 @@ export async function externalizeTraceDiffPatches(
   turn: TraceArchiveTurn
 ): Promise<{ turn: TraceArchiveTurn; changed: boolean }> {
   const root = appTraceContentRoot(userDataDir, cwd)
+  // Preserve sharing within the archived copies, without mutating the original turn files
+  // or publishing the same shared file twice.
+  const copies = new WeakMap<DiffFile, DiffFile>()
   let changed = false
   for (const item of turn.items) {
     if (isSessionSnapshotStage(item.stage)) {
       // 这些快照不进渲染页，不必为小 patch 保留 inline。
-      changed = await externalizeSnapshot(root, item.turnDiff, 1) || changed
+      changed = await externalizeSnapshot(root, item.turnDiff, 1, copies) || changed
     }
   }
   // Canonical evidence 从不进入渲染页，两份快照都可以只留引用。
   const evidenceDiffs = turn.turnEvidence?.diff.value
   if (Array.isArray(evidenceDiffs)) {
     for (const snapshot of evidenceDiffs) {
-      changed = await externalizeSnapshot(root, snapshot, 1) || changed
+      changed = await externalizeSnapshot(root, snapshot, 1, copies) || changed
     }
   }
   return { turn, changed }
 }
 
-/** 取回一条快照的 patch 正文；引用缺失或损坏时保留引用本身，不伪造空白 patch。 */
+/** 取回并校验 patch 正文；内容缺失或损坏时传播读取错误，不伪造空白 patch。 */
 const PATCH_HYDRATION_CONCURRENCY = 16
 
 async function hydrateSnapshot(root: string, snapshot: PatchBearingSnapshot | undefined): Promise<void> {
@@ -114,7 +128,7 @@ async function hydrateSnapshot(root: string, snapshot: PatchBearingSnapshot | un
 }
 
 /**
- * 页面组装后把**页面内最新一条**终态/预览 session 快照的正文取回，
+ * 页面组装后恢复每轮旧引用及最新终态/预览 session 快照的正文。
  * 其余轮次的累积快照不出现在跨 IPC 的页里，因此不必读回。
  */
 export async function hydrateNewestSessionSnapshots(
@@ -124,12 +138,16 @@ export async function hydrateNewestSessionSnapshots(
 ): Promise<void> {
   const root = appTraceContentRoot(userDataDir, cwd)
   const hydrated = new Set<string>()
-  for (let index = turns.length - 1; index >= 0 && hydrated.size < 2; index--) {
-    for (let itemIndex = turns[index].items.length - 1; itemIndex >= 0 && hydrated.size < 2; itemIndex--) {
+  for (let index = turns.length - 1; index >= 0; index--) {
+    for (let itemIndex = turns[index].items.length - 1; itemIndex >= 0; itemIndex--) {
       const item: TraceEvent = turns[index].items[itemIndex]
-      if (!isSessionSnapshotStage(item.stage) || hydrated.has(item.stage)) continue
-      hydrated.add(item.stage)
-      await hydrateSnapshot(root, item.turnDiff)
+      // Older archives may have reference-only turn patches from shared canonical file lists.
+      if (item.stage === TURN_DIFF_STAGE || item.stage === TURN_DIFF_PREVIEW_STAGE) {
+        await hydrateSnapshot(root, item.turnDiff)
+      } else if (isSessionSnapshotStage(item.stage) && !hydrated.has(item.stage)) {
+        hydrated.add(item.stage)
+        await hydrateSnapshot(root, item.turnDiff)
+      }
     }
   }
 }

@@ -201,7 +201,7 @@ export async function exerciseWorkspaceSessions(context) {
     await wait(() => evaluate(`document.querySelector('.diff-virtual-files')?.textContent.includes('remote-first.txt') &&
       document.querySelector('.diff-virtual-files')?.textContent.includes('remote-second.txt')`), 'branch Changes persists after both files are committed')
     await exerciseDiffWorkbench({ target, git, click, key, wait, evaluate, screenshot, cdp })
-    await exerciseTurnMenu({ click, key, wait, evaluate, screenshot, target, firstRunId: created.run.runId, latestRunId: second.run.runId })
+    if (await exerciseTurnMenu({ click, key, wait, evaluate, screenshot, target, firstRunId: created.run.runId, latestRunId: second.run.runId, cdp, userDataDir, inputs, evidence })) return
     await screenshot('inspector-wide')
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 900, deviceScaleFactor: 1, mobile: false })
     await wait(() => evaluate(`document.querySelector('.main-area')?.inert === true`), 'narrow inspector replaces and inerts conversation')
