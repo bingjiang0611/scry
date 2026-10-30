@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { compareNative, composerModes, exportNativeCounters, nativeCounterMetrics, nativeWorkloads, validateNative } from './performance-native.mjs'
+import { compareNative, composerModes, exportNativeCounters, nativeCounterMetrics, nativeInitialPageTurns, nativeWorkloads, validateNative } from './performance-native.mjs'
+import { DEFAULT_LOAD_SESSION_TURNS } from '../src/main/bootstrap/history-archive'
 
 const workCounters = (value: number) => Object.fromEntries(nativeCounterMetrics.map(metric => [metric, value]))
 
@@ -7,7 +8,7 @@ function report() {
   return {
     schema: 1, revision: 'fixture', harness: 'a'.repeat(64), environment: { platform: 'darwin', node: '22' }, errors: [],
     results: Object.fromEntries(Object.entries(nativeWorkloads).map(([scenario, [turnCount, sections]]) => [scenario, {
-      scenario, turnCount, sections, measurementVersion: 5, warmups: 2, iterations: 12,
+      scenario, turnCount, sections, measurementVersion: 6, warmups: 2, iterations: 12,
       artifactSha256: 'b'.repeat(64), benchmarkSha256: 'c'.repeat(64), platform: 'darwin/arm64', node: '22', electron: '35',
       sqliteStats: { status: 'ready', turns: 18, readMs: 2 },
       counterSensitivity: { baseline: workCounters(1), extra: workCounters(2), passed: true },
@@ -17,7 +18,7 @@ function report() {
         ...(mode !== 'stop-immediate' ? { sendToOutputReceiptMs: 10, sendToFirstVisibleMs: 20, sendToVisibleReadyMs: 30 } : {}),
         ...(mode !== 'complete' ? { driverStopDispatchMs: 5, stopToTerminalMs: 10, stopToSettledVisibleMs: 20, stopWorkCounters: workCounters(1) } : {}) })),
       startupDriverReadyMs: 500, nativeInput: { trusted: true, frameReadyMs: 20 }, cleanup: { tracked: 3 }, firstOpens: [{}, {}],
-      samples: Array.from({ length: 12 }, () => ({ totalTurns: Math.min(40, turnCount), completeParagraphs: sections, nativeOpenMs: 40, handlerDelayMs: 2, scriptMs: 10, domNodes: 500, workCounters: workCounters(1) })),
+      samples: Array.from({ length: 12 }, () => ({ totalTurns: Math.min(nativeInitialPageTurns, turnCount), completeParagraphs: sections, nativeOpenMs: 40, handlerDelayMs: 2, scriptMs: 10, domNodes: 500, workCounters: workCounters(1) })),
       lifecycleSamples: [false, true, false, true, false, true].map(stopped => ({
         stopped, terminalConfirmed: true, durableTurns: 1, diskVerified: true, startReceiptMs: 5, firstOutputReceiptMs: 10,
         startToTerminalMs: 30, terminalToReadableArchiveMs: 5, ...(stopped ? { stopReceiptMs: 2, stopToTerminalMs: 10 } : {})
@@ -27,6 +28,17 @@ function report() {
 }
 
 describe('native performance evidence gate', () => {
+  it('matches the current initial-page contract without shrinking workloads or accepting lost history', () => {
+    expect(nativeInitialPageTurns).toBe(DEFAULT_LOAD_SESSION_TURNS)
+    expect(nativeWorkloads).toEqual({ markdown: [40, 32], short: [20, 1], 'short-heavy': [20, 32], paged: [120, 2] })
+    const truncated = report()
+    truncated.results.paged.samples[0].totalTurns--
+    expect(() => validateNative(truncated)).toThrow('initial history page is incomplete')
+    const stale = report()
+    stale.results.paged.measurementVersion = 5
+    expect(() => validateNative(stale)).toThrow()
+  })
+
   it('compares matching evidence and detects real latency regressions', () => {
     expect(composerModes).toHaveLength(12)
     expect(composerModes.filter(mode => mode === 'stop-immediate')).toHaveLength(6)

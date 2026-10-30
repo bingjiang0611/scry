@@ -11,7 +11,10 @@ export { composerModes, nativeCounterMetrics }
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 export const nativeWorkloads = { markdown: [40, 32], short: [20, 1], 'short-heavy': [20, 32], paged: [120, 2] }
-export const nativeHarnessFiles = ['scripts/performance-native.mjs', 'scripts/session-open-bench.mjs', 'scripts/session-open-timing.mjs', 'scripts/native-composer-probe.mjs', 'src/main/providers/smoke.ts', 'scripts/owned-app-processes.mjs', 'scripts/hidden-electron-windows.cjs', 'scripts/performance-report.mjs', 'scripts/performance-paths.json']
+// Match the existing default in bootstrap/history-archive.ts, not the older-page size.
+// Seeded workloads and full history recovery remain unchanged.
+export const nativeInitialPageTurns = 10
+export const nativeHarnessFiles = ['scripts/performance-native.mjs', 'scripts/session-open-bench.mjs', 'scripts/session-open-fixture.mjs', 'scripts/session-open-history.mjs', 'scripts/session-open-timing.mjs', 'scripts/native-composer-probe.mjs', 'src/main/providers/smoke.ts', 'scripts/owned-app-processes.mjs', 'scripts/hidden-electron-windows.cjs', 'scripts/performance-report.mjs', 'scripts/performance-paths.json']
 const composerMetrics = mode => ['sendToTerminalMs', 'sendToSettledVisibleMs',
   ...(mode !== 'stop-immediate' ? ['sendToOutputReceiptMs', 'sendToFirstVisibleMs', 'sendToVisibleReadyMs'] : []),
   ...(mode !== 'complete' ? ['stopToTerminalMs', 'stopToSettledVisibleMs'] : [])]
@@ -49,7 +52,7 @@ export function validateNative(report) {
   assert.equal(report.errors.length, 0, 'failed native lanes cannot pass')
   assert.deepEqual(Object.keys(report.results).sort(), Object.keys(nativeWorkloads).sort(), 'native lane coverage differs')
   for (const [name, result] of Object.entries(report.results)) {
-    assert.equal(result.measurementVersion, 5)
+    assert.equal(result.measurementVersion, 6)
     assert.deepEqual([result.turnCount, result.sections], nativeWorkloads[name], 'native workload differs')
     assert.equal(result.scenario, name)
     assert.equal(result.warmups, 2)
@@ -70,7 +73,7 @@ export function validateNative(report) {
     assertCounters(result.counterSensitivity?.extra, `${name} sensitivity extra`)
     assert.ok(nativeCounterMetrics.some(metric => result.counterSensitivity.extra[metric] > result.counterSensitivity.baseline[metric]), 'sensitivity control must raise a work counter')
     for (const sample of result.samples) {
-      assert.equal(sample.totalTurns, Math.min(40, result.turnCount))
+      assert.equal(sample.totalTurns, Math.min(nativeInitialPageTurns, result.turnCount), 'initial history page is incomplete')
       assert.equal(sample.completeParagraphs, result.sections, 'renderer lost fixed paragraph content')
       for (const metric of ['nativeOpenMs', 'handlerDelayMs', 'scriptMs', 'domNodes']) assert.ok(finite(sample[metric]), `missing ${name}.${metric}`)
       assert.ok(sample.domNodes > 0)
