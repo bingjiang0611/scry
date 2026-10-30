@@ -41,6 +41,7 @@
   width: 52px;
   height: 52px;
   border-radius: 50%;
+  corner-shape: round;
   background: conic-gradient(var(--accent) calc(var(--p) * 1%), var(--panel3) 0);
   display: grid;
   place-items: center;
@@ -53,6 +54,7 @@
   position: absolute;
   inset: 7px;
   border-radius: 50%;
+  corner-shape: round;
   background: var(--panel);
   border: 1px solid var(--border3);
 }

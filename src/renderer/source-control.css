@@ -59,7 +59,7 @@
   color: inherit;
   background: var(--panel, #fff);
   border: 1px solid var(--sc-border);
-  border-radius: 6px;
+  border-radius: var(--r-xs);
 }
 .sc-panel button {
   padding: 6px 9px;
@@ -155,7 +155,7 @@
   padding: 10px;
   margin: 10px 0;
   border: 1px solid #b48739;
-  border-radius: 6px;
+  border-radius: var(--r-xs);
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
@@ -184,7 +184,7 @@
   overflow: auto;
   margin: 10px 0;
   border: 1px solid var(--sc-border);
-  border-radius: 6px;
+  border-radius: var(--r-xs);
 }
 .sc-code-line {
   display: flex;
@@ -220,7 +220,7 @@
   border: 1px solid var(--sc-border);
   padding: 10px;
   margin: 10px 0;
-  border-radius: 6px;
+  border-radius: var(--r-xs);
   overflow-wrap: anywhere;
 }
 .sc-pr-list {
@@ -304,7 +304,7 @@
 .sc-panel .modal .sc-actions { justify-content: flex-end; }
 .sc-panel .modal label { font-size: 12px; }
 .sc-panel .modal .sc-muted { font-size: 12px; }
-.sc-commit-files { flex-shrink: 0; max-height: 30dvh; overflow: auto; border: 1px solid var(--sc-border); border-radius: 8px; }
+.sc-commit-files { flex-shrink: 0; max-height: 30dvh; overflow: auto; border: 1px solid var(--sc-border); border-radius: var(--r-sm); }
 .sc-panel label.sc-commit-file { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin: 0; border-bottom: 1px solid var(--sc-border); }
 .sc-commit-file:last-child { border-bottom: 0; }
 .sc-commit-file span { min-width: 0; }

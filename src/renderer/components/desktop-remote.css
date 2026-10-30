@@ -10,9 +10,9 @@
 .desktop-remote__error { color: var(--bad); font-size: 12px; overflow-wrap: anywhere; }
 .desktop-remote__form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .desktop-remote__card label { display: flex; flex-direction: column; gap: 5px; margin: 10px 0; color: var(--dim); font-size: 12px; }
-.desktop-remote__card input, .desktop-remote__card textarea { box-sizing: border-box; width: 100%; border: 1px solid var(--border2); border-radius: 7px; background: var(--main-surface); color: var(--fg); padding: 8px 9px; cursor: text; }
+.desktop-remote__card input, .desktop-remote__card textarea { box-sizing: border-box; width: 100%; border: 1px solid var(--border2); border-radius: var(--r-sm); background: var(--main-surface); color: var(--fg); padding: 8px 9px; cursor: text; }
 .desktop-remote__card textarea { resize: vertical; }
-.desktop-remote__card > button, .desktop-remote__host > button, .desktop-remote__pairing-result button { border: 1px solid var(--border2); border-radius: 7px; background: var(--surface-strong); color: var(--fg); padding: 7px 12px; margin-right: 8px; }
+.desktop-remote__card > button, .desktop-remote__host > button, .desktop-remote__pairing-result button { border: 1px solid var(--border2); border-radius: var(--r-sm); background: var(--surface-strong); color: var(--fg); padding: 7px 12px; margin-right: 8px; }
 .desktop-remote__pairing-result { border-top: 1px solid var(--border3); margin-top: 14px; padding-top: 10px; }
 .desktop-remote__card code, .desktop-remote__host code { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
 .desktop-remote__invite { margin-top: 12px; border: 1px solid var(--accent-line); border-radius: var(--r-md); padding: 10px; background: var(--accent-soft); }
@@ -23,7 +23,7 @@
 .remote-access-card-head > b { font-size: 13px; }
 .remote-access-icon { width: 28px; height: 28px; display: grid; place-items: center; flex: none; border-radius: var(--r-md); background: var(--panel3); color: var(--dim); }
 .remote-access-status { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; color: var(--dim2); font-size: 11px; white-space: nowrap; }
-.remote-access-status::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.remote-access-status::before { content: ''; width: 6px; height: 6px; border-radius: 50%; corner-shape: round; background: currentColor; }
 .remote-access-status.is-ready { color: var(--ok); }
 .remote-access-status.is-dormant { color: var(--warn); }
 .remote-access-card-note { margin: 10px 0 0 !important; color: var(--dim) !important; font-size: 12px !important; }
