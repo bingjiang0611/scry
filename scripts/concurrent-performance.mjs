@@ -174,9 +174,9 @@ try {
   await wait(`document.querySelector('main.unified-conversation[data-conversation-id="${conversations[0].id}"]')`)
   const animatedTitles = await evaluate(`Array.from(document.querySelectorAll('.sb-activity [data-activity-group="working"] .sb-sesstext')).filter(e => getComputedStyle(e).animationName === 'sb-activity-sweep').length`)
   assert.ok(animatedTitles >= count, 'Activity sidebar must exercise the production sweep animation')
-  const demandAcceptance = process.env.SCRY_CONCURRENT_DEMAND_UI === '1'
-    ? await exerciseConcurrentDiffDemand({ evaluate, activate, wait, conversations })
-    : undefined
+  const demandAcceptance = await exerciseConcurrentDiffDemand({
+    evaluate, activate, wait, conversations, cdp, mode: process.env.SCRY_CONCURRENT_DEMAND_UI
+  })
   const finished = await outcome
   if (finished.error) throw finished.error
   const result = finished.result

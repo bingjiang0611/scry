@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { exerciseConcurrentDiffDemand } from './concurrent-diff-demand-ui.mjs'
 
 function fixture(backgroundUpdates = false) {
@@ -15,6 +15,8 @@ function fixture(backgroundUpdates = false) {
   const document = { querySelector: () => ({ textContent: '14 files' }) }
   const evaluate = async (expression: string) => Function('window', 'document', `return ${expression}`)(window, document)
   return {
+    mode: '1',
+    cdp: { send: async () => { throw new Error('Conversation-switch acceptance must not change the viewport') } },
     evaluate,
     activate: async (selector: string) => { phase = selector.includes('second') ? 1 : 2 },
     wait: async (expression: string) => {
@@ -24,6 +26,11 @@ function fixture(backgroundUpdates = false) {
     conversations: [{ id: 'first' }, { id: 'second' }, { id: 'never-viewed' }]
   }
 }
+it('does not query or drive a view when functional acceptance is disabled', async () => {
+  const evaluate = vi.fn(async () => { throw new Error('Disabled acceptance must not read runtime state') })
+  await expect(exerciseConcurrentDiffDemand({ ...fixture(), mode: undefined, evaluate })).resolves.toBeUndefined()
+  expect(evaluate).not.toHaveBeenCalled()
+})
 it('parses actual acceptance expressions and proves hidden stability plus a fresh returning snapshot', async () => {
   const proof = await exerciseConcurrentDiffDemand(fixture())
   expect(proof).toMatchObject({ firstFiles: 1, returnedFiles: 14, hiddenRunStillWorking: true, freshBeforeTerminal: true })
