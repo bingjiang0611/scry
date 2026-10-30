@@ -2,17 +2,17 @@ import { createHash, randomUUID } from 'node:crypto'
 import { isCommandId } from '../shared/runtime'
 import { conversationSummary } from './conversation-summary'
 import { parseSideChatCreate, parseSideChatListRequest, parseSideChatPreviewOptions, parseSideChatSource } from './conversation-request'
-import type { Conversation, SideChatInitialTarget, SideChatOrigin, SideChatSource } from '../shared/conversation'
 import {
-  MAX_SIDE_CHAT_SNAPSHOT_BYTES, MAX_SIDE_CHAT_SNAPSHOT_ITEMS, conversationIdPattern, requireValue
-} from './conversation-schema'
+  sideChatSnapshotMessageCount, type Conversation, type SideChatInitialTarget, type SideChatOrigin, type SideChatSource
+} from '../shared/conversation'
+import { conversationIdPattern, requireValue } from './conversation-schema'
 import { sealSideChatSnapshot } from './conversation-side-chat-snapshot'
 import { deleteConversationHistory } from './conversation-history-content'
 import type { SideChatServiceDeps } from './conversation-service-deps'
 import {
   captureSideChatPrefix, smallestFreezableOrdinal, type CaptureEntry, type CapturedPrefix
 } from './conversation-side-chat-source'
-import { isSideChatBudgetRefusal, SideChatBudgetRefusal } from './conversation-side-chat-refusal'
+import { isSideChatBudgetRefusal } from './conversation-side-chat-refusal'
 import {
   deliveryBlockedReason, measureSnapshot, PREVIEW_CONVERSATION_ID, PREVIEW_SNAPSHOT_ID, sideChatCoverage, snapshotItems
 } from './conversation-side-chat-coverage'
@@ -53,17 +53,14 @@ function measure(
 ): { items: ReturnType<typeof manifest>['items']; messages: ReturnType<typeof manifest>['messages']
   readerAvailable: boolean; coverage: ReturnType<typeof sideChatCoverage> } {
   const { items, messages } = manifest(snapshotId, captured.entries)
+  // Format 4 keeps the frozen item list and every body in content-addressed manifests,
+  // so a large source no longer refuses creation. This byte count describes the inline
+  // handoff cost only; it decides whether a reader is required, never whether the
+  // snapshot may exist.
   const bytes = measureSnapshot({
     conversationId, cwd: captured.cwd, snapshotId, throughOrdinal: captured.throughOrdinal,
     throughRunId: captured.throughRunId, prefixFingerprint: captured.prefixFingerprint, messages
   })
-  if (captured.entries.length > MAX_SIDE_CHAT_SNAPSHOT_ITEMS) {
-    throw new SideChatBudgetRefusal('侧聊快照消息数量超出 4000 条预算；请缩小来源范围')
-  }
-  // The sealed artifact is the single byte authority: it already contains the text.
-  if (bytes > MAX_SIDE_CHAT_SNAPSHOT_BYTES) {
-    throw new SideChatBudgetRefusal('侧聊快照正文超出完整正文预算；请缩小来源范围后重新预览')
-  }
   const reader = readerAvailable(deps, target)
   return {
     items, messages, readerAvailable: reader,
@@ -189,14 +186,15 @@ export async function createSideChat(
     id: snapshotId,
     prefixFingerprint: captured.prefixFingerprint,
     throughOrdinal: captured.throughOrdinal,
-    throughRunId: captured.throughRunId
+    throughRunId: captured.throughRunId,
+    capturedAt: Date.now()
   }
-  const content = await sealSideChatSnapshot(deps.store.userData, { id, cwd: captured.cwd }, snapshot, items, messages)
+  const sealed = await sealSideChatSnapshot(deps.store.userData, { id, cwd: captured.cwd }, snapshot, items, messages)
   const origin: SideChatOrigin = {
     source: captured.source,
     parentTitleAtCapture: captured.title,
     initialTarget: target,
-    snapshot: { ...snapshot, capturedAt: Date.now(), content, items },
+    snapshot: sealed,
     commandId: request.commandId,
     intentHash
   }
@@ -351,7 +349,9 @@ export function sideChatPage(conversation: Conversation): SideChatSnapshotPage |
     throughRunId: conversation.sideChat.snapshot.throughRunId,
     capturedAt: conversation.sideChat.snapshot.capturedAt,
     prefixFingerprint: conversation.sideChat.snapshot.prefixFingerprint,
-    messageCount: conversation.sideChat.snapshot.items.length,
-    items: structuredClone(conversation.sideChat.snapshot.items)
+    messageCount: sideChatSnapshotMessageCount(conversation.sideChat.snapshot),
+    ...(conversation.sideChat.snapshot.format === 4
+      ? {}
+      : { items: structuredClone(conversation.sideChat.snapshot.items) })
   }
 }

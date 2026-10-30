@@ -2,6 +2,7 @@ import type { DeleteSessionResult, ProviderId } from './provider'
 import type { AgentStartRequest } from './runtime'
 import type { AgentTurnRecord } from './turn-record'
 import type { ContentRef } from './tool-content'
+import type { ManifestRef } from './content-manifest'
 
 /** Explicit App archive location; not inferred from a Provider's native identity. */
 export interface ConversationArchiveRef {
@@ -53,18 +54,38 @@ export interface SideChatSnapshotItem {
   role: 'user' | 'assistant'
 }
 
-/** Immutable, child-owned record of the frozen source prefix. */
-export interface SideChatSnapshot {
+interface SideChatSnapshotBase {
   id: string
   prefixFingerprint: string
   throughOrdinal: number
   throughRunId: string
   capturedAt: number
+}
+
+/**
+ * Legacy format 3: one sealed JSON artifact holding every message, read whole.
+ *
+ * Only records written before format 4 are expected to carry this shape; new snapshots
+ * use the manifest so that item count and body size stop deciding whether creation works.
+ */
+export interface SideChatSnapshotArtifact extends SideChatSnapshotBase {
+  format?: 3
   /** Complete text sealed under this child's own content root; never a source archive path. */
   content: ContentRef
   /** Ordered metadata cross-checked against the sealed bodies on every read. */
   items: SideChatSnapshotItem[]
 }
+
+/** Format 4: bounded manifest tree, descriptor-only record. */
+export interface SideChatSnapshotManifest extends SideChatSnapshotBase {
+  format: 4
+  messageCount: number
+  bodyBytes: number
+  items: ManifestRef
+}
+
+/** Immutable, child-owned record of the frozen source prefix. */
+export type SideChatSnapshot = SideChatSnapshotArtifact | SideChatSnapshotManifest
 
 /**
  * Requested first runtime choice for a new side chat, copied from the user's
@@ -188,16 +209,55 @@ export const sideChatSnapshotRunId = (snapshotId: string, index: number): string
  * real turns. Snapshot items are context, not execution, so they never gain a run
  * id, usage row or turn ordinal in the child.
  */
-export function conversationContextItems(conversation: Pick<Conversation, 'turns' | 'sideChat'>): ConversationItemRef[] {
+export function conversationContextItems(
+  conversation: Pick<Conversation, 'turns' | 'sideChat'>,
+  snapshotRefs?: readonly ConversationItemRef[]
+): ConversationItemRef[] {
+  const snapshot = conversation.sideChat?.snapshot
   return [
-    ...(conversation.sideChat?.snapshot.items.map(item => item.ref) ?? []),
+    ...(snapshot === undefined ? [] : frozenRefs(snapshot, snapshotRefs)),
     ...conversation.turns.flatMap(turn => turn.items)
   ]
 }
 
+/**
+ * Frozen refs in order. A format 4 record keeps them in a manifest, so the caller reads
+ * them from the child's own storage; returning an empty list here would silently drop
+ * context instead of failing, so the missing input is an error.
+ */
+function frozenRefs(
+  snapshot: SideChatSnapshot,
+  snapshotRefs: readonly ConversationItemRef[] | undefined
+): readonly ConversationItemRef[] {
+  if (snapshot.format !== 4) return snapshot.items.map(item => item.ref)
+  if (snapshotRefs === undefined) throw new Error('侧聊冻结快照引用需要从清单读取，不能假定为空')
+  return snapshotRefs
+}
+
 /** Only items of this child's own snapshot; a source ref is never readable here. */
 export function sideChatSnapshotItems(conversation: Pick<Conversation, 'sideChat'>): SideChatSnapshotItem[] {
-  return conversation.sideChat?.snapshot.items ?? []
+  const snapshot = conversation.sideChat?.snapshot
+  return snapshot === undefined || snapshot.format === 4 ? [] : snapshot.items
+}
+
+/** Message count without materializing the item list. */
+export function sideChatSnapshotMessageCount(snapshot: SideChatSnapshot): number {
+  return snapshot.format === 4 ? snapshot.messageCount : snapshot.items.length
+}
+
+/**
+ * Position of one frozen message, or -1.
+ *
+ * A frozen ref is namespaced as `side-chat:<snapshot id>:<index>`, so both formats
+ * resolve a position without reading a list.
+ */
+export function sideChatSnapshotIndexOf(snapshot: SideChatSnapshot, ref: ConversationItemRef): number {
+  const prefix = `side-chat:${snapshot.id}:`
+  if (!ref.runId.startsWith(prefix)) return -1
+  const index = Number(ref.runId.slice(prefix.length))
+  const count = sideChatSnapshotMessageCount(snapshot)
+  return Number.isSafeInteger(index) && index >= 0 && index < count && String(index) === ref.runId.slice(prefix.length)
+    ? index : -1
 }
 
 export function sameConversationTarget(a: ConversationTarget, b: ConversationTarget): boolean {
@@ -222,7 +282,8 @@ export function conversationCoverage(conversation: Pick<Conversation, 'turns' | 
 /** Planning never resumes a foreign Provider/profile or treats an unknown delivery as unsent. */
 export function planConversationContinuation(
   conversation: Conversation,
-  target: ConversationTarget
+  target: ConversationTarget,
+  snapshotRefs?: readonly ConversationItemRef[]
 ): ConversationContinuation {
   if (conversation.deletion) return { kind: 'blocked', reason: '统一对话正在删除或已删除，不能恢复执行' }
   if (conversation.fork && conversation.fork.status !== 'accepted') return { kind: 'blocked', reason: conversation.fork.reason ?? '原生分支尚未确认，不能发送或重试创建' }
@@ -236,7 +297,7 @@ export function planConversationContinuation(
     candidate.nativeSessionId !== undefined && candidate.retiredReason === undefined &&
     sameConversationTarget(candidate, target))
   const covered = new Set(binding ? conversationCoverage(conversation, binding.id).map(conversationItemKey) : [])
-  const missingItems = conversationContextItems(conversation)
+  const missingItems = conversationContextItems(conversation, snapshotRefs)
     .filter((item) => !covered.has(conversationItemKey(item)))
   return binding?.nativeSessionId !== undefined
     ? { kind: 'resume', bindingId: binding.id, nativeSessionId: binding.nativeSessionId, missingItems }

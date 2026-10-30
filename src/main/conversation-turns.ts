@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto'
+import { sideChatSnapshotRefs } from './conversation-side-chat-snapshot'
 import { conversationCoverage, conversationItemKey, planConversationContinuation, sameConversationTarget,
+  sideChatSnapshotIndexOf, sideChatSnapshotMessageCount,
   SIDE_CHAT_DEFAULT_TITLE,
   type Conversation, type ConversationDelivery, type ConversationItemRef, type ConversationArchiveRef,
   type ConversationTarget, type ConversationTurn, type DispatchedConversationTurn } from '../shared/conversation'
@@ -46,10 +48,22 @@ function assertSideChatContextIntact(
   missing: ConversationItemRef[]
 ): void {
   if (!conversation.sideChat) return
-  const covered = new Set(bindingId === undefined ? [] :
-    conversationCoverage(conversation, bindingId).map(conversationItemKey))
+  const snapshot = conversation.sideChat.snapshot
+  const coveredRefs = bindingId === undefined ? [] : conversationCoverage(conversation, bindingId)
+  if (snapshot.format === 4) {
+    // Format 4 has no enumerable item list in the record, so the same invariant is
+    // checked by position: every frozen index must be covered or explicitly missing.
+    const seen = new Set<number>()
+    for (const ref of [...coveredRefs, ...missing]) {
+      const index = sideChatSnapshotIndexOf(snapshot, ref)
+      if (index >= 0) seen.add(index)
+    }
+    requireValue(seen.size === sideChatSnapshotMessageCount(snapshot), '侧聊冻结快照上下文缺失，输入未投递')
+    return
+  }
+  const covered = new Set(coveredRefs.map(conversationItemKey))
   const missingKeys = new Set(missing.map(conversationItemKey))
-  const lost = conversation.sideChat.snapshot.items
+  const lost = snapshot.items
     .filter(item => !covered.has(conversationItemKey(item.ref)) && !missingKeys.has(conversationItemKey(item.ref)))
   requireValue(lost.length === 0, '侧聊冻结快照上下文缺失，输入未投递')
 }
@@ -85,7 +99,8 @@ export async function beginConversationTurn(
     }
     requireValue(!conversation.archivedAt, '对话已存档，请先恢复')
     requireValue(conversation.revision === request.expectedRevision, '对话已变化，请重新预览')
-    const plan = planConversationContinuation(conversation, request.target)
+    const plan = planConversationContinuation(conversation, request.target,
+      conversation.sideChat ? await sideChatSnapshotRefs(ledger.userData, conversation) : undefined)
     if (plan.kind === 'blocked') throw new Error(plan.reason)
     assertSideChatContextIntact(conversation, plan.kind === 'resume' ? plan.bindingId : undefined, plan.missingItems)
     const order = new Map(plan.missingItems.map((item, index) => [conversationItemKey(item), index]))

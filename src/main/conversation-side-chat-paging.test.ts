@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { hash, modelEvent, sendTurn, sideChatFixture, type SideChatFixture } from './conversation-side-chat.fixture'
+import { sideChatSnapshotRefs } from './conversation-side-chat-snapshot'
 import { upsertTraceArchiveTurn } from './transcript-archive'
 import type { ConversationSideChatRequest, SideChatPreview } from '../shared/conversation-api'
 
@@ -110,8 +111,8 @@ describe('side-chat history paging', () => {
     const byNative = await current.service.listSideChats({ source: { kind: 'native-session', providerId: 'codex',
       cwd: current.cwd, nativeSessionId } })
     expect(byNative.items.map(item => item.id)).toEqual([ids[2], ids[1], ids[0]])
-    const page = await current.service.read(ids[0])
-    expect(await current.service.readItem(ids[0], page.sideChat!.items[0].ref)).toBe('first question')
+    const refs = await sideChatSnapshotRefs(current.userData, (await current.store.read(ids[0]))!)
+    expect(await current.service.readItem(ids[0], refs[0])).toBe('first question')
   })
 
   it('resolves one source scope by reading only the owners it names', async () => {

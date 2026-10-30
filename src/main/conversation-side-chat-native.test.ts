@@ -13,6 +13,7 @@ import {
   type SideChatFixture
 } from './conversation-side-chat.fixture'
 import type { AppSession } from './app-store'
+import { sideChatSnapshotRefs } from './conversation-side-chat-snapshot'
 import type { ConversationSideChatRequest } from '../shared/conversation-api'
 
 const roots: string[] = []
@@ -61,13 +62,13 @@ describe('native side-chat sources without a Scry archive', () => {
     expect(later.prefixFingerprint).toBe(preview.prefixFingerprint)
 
     const child = await current.service.createSideChat(createRequest(source, preview))
-    const page = await current.service.read(child.id)
-    expect(page.sideChat?.source).toEqual(source)
-    const texts = await Promise.all(page.sideChat!.items.map(item => current.service.readItem(child.id, item.ref)))
+    const refs = await sideChatSnapshotRefs(current.userData, (await current.store.read(child.id))!)
+    expect((await current.store.read(child.id))!.sideChat?.source).toEqual(source)
+    const texts = await Promise.all(refs.map(ref => current.service.readItem(child.id, ref)))
     expect(texts).toEqual(['claude question one', 'claude answer one', 'claude question two', 'claude answer two'])
     // The frozen snapshot does not depend on the mutable transcript afterwards.
     await appendFile(path, claudeLine(current.cwd, sessionId, 'assistant', 'claude answer three'))
-    expect(await current.service.readItem(child.id, page.sideChat!.items[1].ref)).toBe('claude answer one')
+    expect(await current.service.readItem(child.id, refs[1])).toBe('claude answer one')
   })
 
   it('fails closed on a torn transcript write instead of guessing its identity', async () => {
@@ -105,8 +106,8 @@ describe('native side-chat sources without a Scry archive', () => {
     const preview = await current.service.previewSideChat(source)
     expect(preview.messageCount).toBe(2)
     const child = await current.service.createSideChat(createRequest(source, preview))
-    const page = await current.service.read(child.id)
-    const texts = await Promise.all(page.sideChat!.items.map(item => current.service.readItem(child.id, item.ref)))
+    const refs = await sideChatSnapshotRefs(current.userData, (await current.store.read(child.id))!)
+    const texts = await Promise.all(refs.map(ref => current.service.readItem(child.id, ref)))
     expect(texts).toEqual(['pi question', 'pi answer'])
     expect((await current.store.list(current.cwd)).map(item => item.id)).toEqual([child.id])
   })
@@ -143,10 +144,10 @@ describe('native side-chat sources without a Scry archive', () => {
     expect(preview.throughOrdinal).toBe(managed.throughOrdinal)
     expect(preview.prefixFingerprint).not.toBe(managed.prefixFingerprint)
     const child = await current.service.createSideChat(createRequest(source, preview))
-    const page = await current.service.read(child.id)
-    expect(page.sideChat?.source).toEqual(source)
-    expect(page.sideChat?.throughRunId).toBe(preview.throughRunId)
-    const texts = await Promise.all(page.sideChat!.items.map(item => current.service.readItem(child.id, item.ref)))
+    const refs = await sideChatSnapshotRefs(current.userData, (await current.store.read(child.id))!)
+    expect((await current.store.read(child.id))!.sideChat?.source).toEqual(source)
+    expect((await current.store.read(child.id))!.sideChat?.snapshot.throughRunId).toBe(preview.throughRunId)
+    const texts = await Promise.all(refs.map(ref => current.service.readItem(child.id, ref)))
     expect(texts).toEqual(['codex question', 'answer: codex question'])
     // An unknown native identity is refused instead of producing an empty snapshot.
     await expect(current.service.previewSideChat({ ...source, nativeSessionId: 'unknown-session' }))

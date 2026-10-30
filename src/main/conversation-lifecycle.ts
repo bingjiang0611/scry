@@ -5,6 +5,7 @@ import { conversationCoverage, planConversationContinuation, type Conversation, 
   type ConversationBinding, type ConversationDeletionResult, type ConversationItemRef, type ConversationTarget,
   type ConversationTurn, type SideChatOrigin } from '../shared/conversation'
 import { conversationIdPattern, nativeOwnerKey, requireValue, sideChatSource, text, type ConversationLedger } from './conversation-store'
+import { sideChatSnapshotRefs } from './conversation-side-chat-snapshot'
 import type { ConversationMetadataChange } from '../shared/conversation-api'
 
 export interface ConversationSeed {
@@ -249,7 +250,8 @@ export async function retireConversationBinding(
     requireValue(conversation.revision === expectedRevision, '对话已变化，请重新预览')
     const binding = conversation.bindings.find((candidate) => candidate.id === bindingId)
     requireValue(binding?.nativeSessionId !== undefined, '找不到可弃用的原生绑定')
-    const plan = planConversationContinuation(conversation, binding)
+    const plan = planConversationContinuation(conversation, binding,
+      conversation.sideChat ? await sideChatSnapshotRefs(ledger.userData, conversation) : undefined)
     if (plan.kind === 'blocked') throw new Error(plan.reason)
     requireValue(binding.retiredReason === undefined, '该原生绑定已经弃用')
     binding.retiredReason = reason

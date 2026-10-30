@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { ConversationStore } from './conversation-store'
 import { traceArchiveTurnPath } from './transcript-archive'
 import { MAX_SIDE_CHAT_SNAPSHOT_BYTES } from './conversation-schema'
+import { loadSideChatSnapshotMessages, sideChatSnapshotRefs } from './conversation-side-chat-snapshot'
 import { hash, sendTurn, sideChatFixture, type SideChatFixture } from './conversation-side-chat.fixture'
 import type { ConversationSideChatRequest } from '../shared/conversation-api'
 
@@ -76,7 +77,8 @@ describe('side-chat snapshot capture', () => {
     const stored = (await current.store.read(child.id))!
     expect(stored.turns).toEqual([])
     expect(stored.bindings).toEqual([])
-    expect(stored.sideChat?.snapshot.items.map(item => [item.role, item.sourceOrdinal, item.providerId])).toEqual([
+    expect((await loadSideChatSnapshotMessages(current.userData, stored))
+      .map(message => [message.role, message.ordinal, message.providerId])).toEqual([
       ['user', 1, 'codex'], ['assistant', 1, 'codex'], ['user', 2, 'codex'], ['assistant', 2, 'codex']
     ])
     // The parent record is byte-identical: no adoption, migration, ownership or resume write.
@@ -194,9 +196,9 @@ describe('side-chat snapshot capture', () => {
         { runId: turn.runId, providerTurnId: turn.archive.providerTurnId }))
     }
     const page = await new ConversationStore(current.userData).read(child.id)
-    expect(page?.sideChat?.snapshot.items).toHaveLength(4)
-    const first = page!.sideChat!.snapshot.items[0].ref
-    expect(await current.service.readItem(child.id, first)).toBe('first question')
-    expect(await current.service.readItem(child.id, page!.sideChat!.snapshot.items[1].ref)).toBe('answer: first question')
+    const refs = await sideChatSnapshotRefs(current.userData, page!)
+    expect(refs).toHaveLength(4)
+    expect(await current.service.readItem(child.id, refs[0])).toBe('first question')
+    expect(await current.service.readItem(child.id, refs[1])).toBe('answer: first question')
   })
 })

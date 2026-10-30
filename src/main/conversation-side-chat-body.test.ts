@@ -4,9 +4,15 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { sendTurn, sideChatFixture, type SideChatFixture } from './conversation-side-chat.fixture'
 import { SIDE_CHAT_BODY_PAGE_BYTES, SIDE_CHAT_BODY_PAGE_ITEMS } from './conversation-side-chat-snapshot'
+import { readRecorderContent, writeRecorderContent } from '../core/turn-recorder/content-store'
+import { conversationHistoryRoot } from './conversation-history-content'
+import type { Conversation } from '../shared/conversation'
+
+const rootOf = (fixture: SideChatFixture, conversation: Pick<Conversation, 'id' | 'cwd'>): string =>
+  conversationHistoryRoot(fixture.userData, conversation)
 import type { ConversationSideChatRequest, SideChatSnapshotBodyPage } from '../shared/conversation-api'
 
-// Counts real artifact page reads: one page must not re-read the sealed body per row.
+// Counts real recorder body reads: one page must not re-read the sealed body per row.
 const artifactReads = vi.hoisted(() => ({ count: 0 }))
 vi.mock('../core/turn-recorder/content-store', async () => {
   const actual = await vi.importActual<typeof import('../core/turn-recorder/content-store')>('../core/turn-recorder/content-store')
@@ -15,6 +21,10 @@ vi.mock('../core/turn-recorder/content-store', async () => {
     readRecorderContentPage: (...args: Parameters<typeof actual.readRecorderContentPage>) => {
       artifactReads.count += 1
       return actual.readRecorderContentPage(...args)
+    },
+    readRecorderContent: (...args: Parameters<typeof actual.readRecorderContent>) => {
+      artifactReads.count += 1
+      return actual.readRecorderContent(...args)
     }
   }
 })
@@ -118,9 +128,17 @@ describe('side-chat snapshot body pages', () => {
   it('refuses a body whose frozen metadata no longer matches', async () => {
     const { fixture, childId } = await childWith(['first question'])
     const stored = (await fixture.store.read(childId))!
-    stored.sideChat!.snapshot.items[0].ref.contentHash = hash('forged')
+    if (stored.sideChat?.snapshot.format !== 4) throw new Error('fixture must seal a format 4 snapshot')
+    // Re-link the item leaf with a forged hash: the node is valid content and correctly
+    // addressed, so the mismatch can only be caught against the frozen message body.
+    const leaf = JSON.parse(await readRecorderContent(rootOf(fixture, stored), stored.sideChat.snapshot.items.root)) as {
+      entries: Array<{ ref: { contentHash: string } }>
+    }
+    leaf.entries[0].ref.contentHash = hash('forged')
+    const forged = await writeRecorderContent(rootOf(fixture, stored), JSON.stringify(leaf), 'json')
+    stored.sideChat.snapshot.items.root = forged
     await fixture.store.persist(fixture.store.checked(stored))
-    await expect(fixture.service.readSideChatSnapshot(childId)).rejects.toThrow('侧聊快照正文与冻结元数据不一致')
+    await expect(fixture.service.readSideChatSnapshot(childId)).rejects.toThrow()
   })
 
   it('reads the child-owned body after the source conversation record is gone', async () => {

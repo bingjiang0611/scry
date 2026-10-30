@@ -2,6 +2,7 @@ import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { upsertTraceArchiveTurn } from './transcript-archive'
+import { sideChatSnapshotRefs } from './conversation-side-chat-snapshot'
 import { hash, modelEvent, sendTurn, sideChatFixture, type SideChatFixture } from './conversation-side-chat.fixture'
 import type { ConversationSideChatRequest, SideChatPreview } from '../shared/conversation-api'
 import type { ConversationSummary } from '../shared/conversation-api'
@@ -108,12 +109,15 @@ describe('side-chat first send and frozen context', () => {
     const page = await current.service.read(child.id)
     expect(page.sideChat?.messageCount).toBe(4)
     expect(page.sideChat?.parentTitleAtCapture).toBeDefined()
-    const items = page.sideChat!.items
-    expect(await current.service.readItem(child.id, items[0].ref)).toBe('first question')
-    expect(await current.service.readItem(child.id, items[3].ref)).toBe('answer: second question')
+    const items = await sideChatSnapshotRefs(current.userData, (await current.store.read(child.id))!)
+    expect(items).toHaveLength(4)
+    expect(await current.service.readItem(child.id, items[0])).toBe('first question')
+    expect(await current.service.readItem(child.id, items[3])).toBe('answer: second question')
     const parent = (await current.store.read(parentId))!
     await expect(current.service.readItem(child.id, parent.turns[0].items[0])).rejects.toThrow('不属于当前对话')
-    await expect(current.service.readItem(child.id, { ...items[0].ref, contentHash: hash('forged') })).rejects.toThrow('不属于当前对话')
+    // A frozen run id names this snapshot, so a forged hash is refused by the snapshot
+    // body check rather than by ownership.
+    await expect(current.service.readItem(child.id, { ...items[0], contentHash: hash('forged') })).rejects.toThrow('正文引用不匹配')
     expect(page.summary.sideChat?.source).toEqual({ kind: 'conversation', conversationId: parentId })
     expect(page.summary.turnCount).toBe(0)
   })
@@ -128,8 +132,8 @@ describe('side-chat first send and frozen context', () => {
     await current.store.finishDeletion(parentId, fingerprint, { ok: true, deleted: [], retained: [], failed: [] })
     expect((await current.store.read(parentId))?.deletion?.status).toBe('complete')
 
-    const page = await current.service.read(child.id)
-    expect(await current.service.readItem(child.id, page.sideChat!.items[0].ref)).toBe('first question')
+    const refs = await sideChatSnapshotRefs(current.userData, (await current.store.read(child.id))!)
+    expect(await current.service.readItem(child.id, refs[0])).toBe('first question')
     await sendTurn(current, child.id, 'child-after-delete', 'after parent deletion')
     const artifact = JSON.parse(current.runs.at(-1)!.context!) as { messages: Array<{ text: string }> }
     expect(artifact.messages.map(message => message.text)).toContain('answer: second question')
@@ -154,10 +158,9 @@ describe('side-chat first send and frozen context', () => {
       const child = await current.service.createSideChat(request(source, preview))
       expect(child.sideChat?.source).toEqual(source)
       expect((await current.store.list(current.cwd)).map(item => item.id)).toEqual([child.id])
-      const page = await current.service.read(child.id)
-      expect(page.sideChat?.items.map(item => item.providerId)).toEqual([providerId, providerId])
-      expect(await current.service.readItem(child.id, page.sideChat!.items[0].ref)).toBe('native question')
-      expect(await current.service.readItem(child.id, page.sideChat!.items[1].ref)).toBe('native answer')
+      const refs = await sideChatSnapshotRefs(current.userData, (await current.store.read(child.id))!)
+      expect(await Promise.all(refs.map(ref => current.service.readItem(child.id, ref))))
+        .toEqual(['native question', 'native answer'])
       expect((await current.service.listSideChats({ source })).items.map(item => item.id)).toEqual([child.id])
     }
   )
@@ -165,7 +168,9 @@ describe('side-chat first send and frozen context', () => {
   it('refuses to start a send when the sealed snapshot body is missing', async () => {
     const { fixture: current, child } = await frozenChild()
     const stored = (await current.store.read(child.id))!
-    const content = stored.sideChat!.snapshot.content
+    if (stored.sideChat?.snapshot.format !== 4) throw new Error('fixture must seal a format 4 snapshot')
+    // Remove the item index root: the frozen item list is then unreadable, not empty.
+    const content = stored.sideChat.snapshot.items.root
     const body = join(current.userData, 'conversation-history-v1', hash(JSON.stringify([child.id, stored.cwd])),
       'content', 'sha256', content.sha256.slice(0, 2), `${content.sha256}.bin`)
     await rm(body)

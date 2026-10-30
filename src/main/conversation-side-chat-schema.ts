@@ -2,8 +2,9 @@ import { isAbsolute } from 'node:path'
 import { isCommandId, isAgentPermissionMode } from '../shared/runtime'
 import { isToolContentRef } from '../shared/tool-content'
 import { sideChatSnapshotRunId, type SideChatInitialTarget, type SideChatOrigin, type SideChatSource } from '../shared/conversation'
+import { assertSideChatSnapshotDescriptor } from './conversation-side-chat-manifest'
 
-/** Mirrors the 4 MiB complete-text read budget and the 4000-item reader scope. */
+/** Legacy format 3 only: format 4 keeps items and bodies in manifests instead. */
 export const MAX_SIDE_CHAT_SNAPSHOT_BYTES = 4 * 1024 * 1024
 export const MAX_SIDE_CHAT_SNAPSHOT_ITEMS = 4000
 /** Longest title a source may contribute; also bounds the frozen title copy. */
@@ -64,6 +65,12 @@ export function sideChatSource(value: unknown): asserts value is SideChatSource 
 
 function snapshot(value: unknown): asserts value is SideChatOrigin['snapshot'] {
   const frozen = object(value)
+  // Format 4 keeps the item list and message bodies in content-addressed manifests, so
+  // the record is a descriptor; its counts, binding and bounds are checked there.
+  if (frozen.format === 4) {
+    assertSideChatSnapshotDescriptor(frozen)
+    return
+  }
   requireValue(Object.keys(frozen).every(key =>
     ['id', 'prefixFingerprint', 'throughOrdinal', 'throughRunId', 'capturedAt', 'content', 'items'].includes(key)), '侧聊快照字段不受支持')
   requireValue(typeof frozen.id === 'string' && /^[a-f0-9-]{36}$/i.test(frozen.id), '侧聊快照 ID 无效')

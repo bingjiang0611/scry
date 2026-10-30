@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { isToolContentRef, type ToolContentRef } from '../shared/tool-content'
+import { MANIFEST_FANOUT, isManifestRef, type ManifestRef } from '../shared/content-manifest'
 import { readRecorderContent, writeRecorderContent } from '../core/turn-recorder/content-store'
 
 /**
@@ -12,7 +13,6 @@ import { readRecorderContent, writeRecorderContent } from '../core/turn-recorder
  * keeps only one incomplete node per level, so memory is O(fanout · height) instead of
  * O(items). Reading one entry or one range descends by counts: O(height) node reads.
  */
-export const MANIFEST_FANOUT = 32
 /** One node is serialized and verified whole, so it must stay inside a single content page. */
 export const MANIFEST_NODE_BYTES = 256 * 1024
 
@@ -22,20 +22,14 @@ export interface ManifestEntry {
   [key: string]: unknown
 }
 
+export type { ManifestRef }
+export { MANIFEST_FANOUT, isManifestRef }
+
 export interface ManifestNodeRef {
   ref: ToolContentRef
   from: number
   count: number
   bytes: number
-}
-
-/** What a caller stores in place of the item list: a root, its size and its arithmetic. */
-export interface ManifestRef {
-  root: ToolContentRef
-  from: number
-  count: number
-  bytes: number
-  fanout: number
 }
 
 interface LeafBody {
@@ -72,14 +66,6 @@ export function manifestBinding(sourceId: string, prefixFingerprint: string): st
 
 function isCount(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
-}
-
-export function isManifestRef(value: unknown): value is ManifestRef {
-  if (value === null || typeof value !== 'object') return false
-  const ref = value as Record<string, unknown>
-  return isToolContentRef(ref.root) && isCount(ref.count) && (ref.count as number) > 0 &&
-    isCount(ref.bytes) && isCount(ref.from) && (ref.from as number) === 0 &&
-    ref.fanout === MANIFEST_FANOUT
 }
 
 /**

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { upsertTraceArchiveTurn } from './transcript-archive'
 import { hash, modelEvent, sideChatFixture, type SideChatFixture } from './conversation-side-chat.fixture'
+import { loadSideChatSnapshotMessages, sideChatSnapshotRefs } from './conversation-side-chat-snapshot'
 import type { TraceEvent } from '../shared/trace'
 
 const fixtures: SideChatFixture[] = []
@@ -65,8 +66,8 @@ describe('side-chat projection of accepted steering', () => {
       expectedPrefixFingerprint: preview.prefixFingerprint, expectedManifestFingerprint: preview.manifestFingerprint,
       commandId: 'side-chat-steer'
     })
-    const page = await current.service.read(child.id)
-    const items = page.sideChat!.items
+    const frozen = await loadSideChatSnapshotMessages(current.userData, (await current.store.read(child.id))!)
+    const items = frozen.map(message => ({ ref: message.ref, role: message.role, sourceOrdinal: message.ordinal }))
     expect(items.map(item => [item.role, item.sourceOrdinal])).toEqual([
       ['user', 1], ['assistant', 1], ['user', 2], ['assistant', 2], ['user', 2], ['assistant', 2]
     ])
@@ -106,8 +107,8 @@ describe('side-chat projection of accepted steering', () => {
       expectedPrefixFingerprint: preview.prefixFingerprint, expectedManifestFingerprint: preview.manifestFingerprint,
       commandId: 'side-chat-pending-steer'
     })
-    const page = await current.service.read(child.id)
-    expect(await current.service.readItem(child.id, page.sideChat!.items[1].ref)).toBe('part one\n\npart two')
+    const steered = await sideChatSnapshotRefs(current.userData, (await current.store.read(child.id))!)
+    expect(await current.service.readItem(child.id, steered[1])).toBe('part one\n\npart two')
   })
 
   it('fails closed when an accepted steer has no completed answer inside the turn', async () => {

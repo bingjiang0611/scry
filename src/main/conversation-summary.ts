@@ -1,12 +1,16 @@
 import { createHash } from 'node:crypto'
 import {
   conversationItemKey,
+  sideChatSnapshotIndexOf,
+  sideChatSnapshotMessageCount,
   SIDE_CHAT_DEFAULT_TITLE,
+  type SideChatSnapshotManifest,
   type Conversation,
   type ConversationContinuation,
   type ConversationItemRef,
   type ConversationTarget
 } from '../shared/conversation'
+import { readSideChatSnapshotItem } from './conversation-side-chat-snapshot'
 import type { ConversationPreview, ConversationSendRequest, ConversationSummary, ConversationTargetRequest } from '../shared/conversation-api'
 
 const hash = (value: string): string => createHash('sha256').update(value, 'utf8').digest('hex')
@@ -31,7 +35,7 @@ export function conversationSummary(conversation: Conversation, activeRunIds: Re
       throughRunId: conversation.sideChat.snapshot.throughRunId,
       capturedAt: conversation.sideChat.snapshot.capturedAt,
       prefixFingerprint: conversation.sideChat.snapshot.prefixFingerprint,
-      messageCount: conversation.sideChat.snapshot.items.length
+      messageCount: sideChatSnapshotMessageCount(conversation.sideChat.snapshot)
     } } : {}),
     // A side chat has no source-derived title: it stays on the neutral default until
     // the first real question or an explicit rename assigns one.
@@ -80,11 +84,20 @@ export function dispatchPayloadHash(input: {
 }
 
 /** Preview rows come from the same context items that planning hands off. */
-export function missingDetails(conversation: Conversation, continuation: ConversationContinuation): ConversationPreview['missingItems'] {
+export async function missingDetails(
+  userData: string,
+  conversation: Conversation,
+  continuation: ConversationContinuation
+): Promise<ConversationPreview['missingItems']> {
   if (continuation.kind === 'blocked') return []
   const missing = new Set(continuation.missingItems.map(conversationItemKey))
-  const frozen = (conversation.sideChat?.snapshot.items ?? []).filter(item => missing.has(conversationItemKey(item.ref)))
-    .map(item => ({ ref: item.ref, ordinal: item.sourceOrdinal, providerId: item.providerId, role: item.role }))
+  const snapshot = conversation.sideChat?.snapshot
+  // Format 4 resolves only the missing positions, one manifest leaf at a time.
+  const frozen = snapshot === undefined ? []
+    : snapshot.format === 4
+      ? await frozenDetails(userData, conversation, snapshot, continuation.missingItems)
+      : snapshot.items.filter(item => missing.has(conversationItemKey(item.ref)))
+        .map(item => ({ ref: item.ref, ordinal: item.sourceOrdinal, providerId: item.providerId, role: item.role }))
   const own = conversation.turns.flatMap((turn) => {
     const binding = conversation.bindings.find((candidate) => candidate.id === turn.bindingId)
     return turn.items.filter((item) => missing.has(conversationItemKey(item))).map((item) => ({
@@ -95,4 +108,20 @@ export function missingDetails(conversation: Conversation, continuation: Convers
     }))
   })
   return [...frozen, ...own]
+}
+
+async function frozenDetails(
+  userData: string,
+  conversation: Conversation,
+  snapshot: SideChatSnapshotManifest,
+  missingItems: readonly ConversationItemRef[]
+): Promise<ConversationPreview['missingItems']> {
+  const rows: ConversationPreview['missingItems'] = []
+  for (const ref of missingItems) {
+    const index = sideChatSnapshotIndexOf(snapshot, ref)
+    if (index < 0) continue
+    const item = await readSideChatSnapshotItem(userData, conversation, index)
+    rows.push({ ref: item.ref, ordinal: item.sourceOrdinal, providerId: item.providerId, role: item.role })
+  }
+  return rows
 }

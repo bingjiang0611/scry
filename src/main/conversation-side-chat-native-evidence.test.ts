@@ -8,6 +8,7 @@ import {
 } from './conversation-side-chat.fixture'
 import { MAX_CONVERSATION_HISTORY_SOURCE_BYTES } from './conversation-history-limits'
 import { readPiNativeHistory } from './pi-native-history'
+import { sideChatSnapshotRefs } from './conversation-side-chat-snapshot'
 import type { ConversationSideChatRequest } from '../shared/conversation-api'
 
 const cleanups: Array<() => Promise<void>> = []
@@ -87,9 +88,9 @@ describe('native side-chat completion evidence', () => {
     ].join(''))
     expect((await current.service.previewSideChat(source)).throughOrdinal).toBe(2)
     const child = await current.service.createSideChat(request(source, preview))
-    const page = await current.service.read(child.id)
-    expect(page.sideChat?.throughOrdinal).toBe(1)
-    const texts = await Promise.all(page.sideChat!.items.map(item => current.service.readItem(child.id, item.ref)))
+    const refs = await sideChatSnapshotRefs(current.userData, (await current.store.read(child.id))!)
+    expect((await current.store.read(child.id))!.sideChat?.snapshot.throughOrdinal).toBe(1)
+    const texts = await Promise.all(refs.map(ref => current.service.readItem(child.id, ref)))
     expect(texts).toEqual(['claude question one', 'claude answer one'])
   })
 
@@ -115,8 +116,8 @@ describe('native side-chat completion evidence', () => {
     expect(preview.throughOrdinal).toBe(1)
     expect(preview.messageCount).toBe(2)
     const child = await current.service.createSideChat(request(source, preview))
-    const page = await current.service.read(child.id)
-    const texts = await Promise.all(page.sideChat!.items.map(item => current.service.readItem(child.id, item.ref)))
+    const refs = await sideChatSnapshotRefs(current.userData, (await current.store.read(child.id))!)
+    const texts = await Promise.all(refs.map(ref => current.service.readItem(child.id, ref)))
     expect(texts).toEqual(['pi question one', 'pi answer one'])
   })
 

@@ -16,7 +16,12 @@ export interface SideChatSummary {
 }
 
 export interface SideChatSnapshotPage extends SideChatSummary {
-  items: SideChatSnapshotItem[]
+  /**
+   * Legacy format 3 metadata list. A format 4 snapshot carries its items in a bounded
+   * manifest instead, so the page reports only `messageCount` and the viewer reads
+   * bodies page by page.
+   */
+  items?: SideChatSnapshotItem[]
 }
 
 /**

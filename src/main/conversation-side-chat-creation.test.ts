@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ConversationStore } from './conversation-store'
 import { sendTurn, sideChatFixture, type SideChatFixture } from './conversation-side-chat.fixture'
+import { sideChatSnapshotRefs } from './conversation-side-chat-snapshot'
 import type { ConversationSideChatRequest, SideChatPreview } from '../shared/conversation-api'
 
 const fixtures: SideChatFixture[] = []
@@ -63,8 +64,8 @@ describe('side-chat creation target and child-owned cleanup', () => {
       throw new Error('ipc reply lost')
     })
     const child = await current.service.createSideChat(request(source, preview))
-    const page = await current.service.read(child.id)
-    expect(await current.service.readItem(child.id, page.sideChat!.items[0].ref)).toBe('first question')
+    const refs = await sideChatSnapshotRefs(current.userData, (await current.store.read(child.id))!)
+    expect(await current.service.readItem(child.id, refs[0])).toBe('first question')
     // The child-owned body survived the lost acknowledgement.
     expect((await contentRoots(current.userData)).length).toBe(1)
   })

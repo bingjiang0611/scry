@@ -7,7 +7,7 @@ import type {
   ConversationDelivery,
   ConversationTarget
 } from '../shared/conversation'
-import { conversationItemKey, planConversationContinuation } from '../shared/conversation'
+import { conversationItemKey, planConversationContinuation, sideChatSnapshotIndexOf } from '../shared/conversation'
 import type {
   ConversationPage,
   ConversationPreview,
@@ -24,7 +24,9 @@ import { parseConversationFork, parseConversationTarget, parseSend, requestObjec
 import { forkConversation } from './conversation-fork'
 import { createSideChat, findSideChatCommand, listSideChats, previewSideChat } from './conversation-side-chat'
 import { readConversationPage } from './conversation-read'
-import { belongsToSideChatSnapshot, readSideChatSnapshotBodyPage, readSideChatSnapshotMessage } from './conversation-side-chat-snapshot'
+import {
+  belongsToSideChatSnapshot, readSideChatSnapshotBodyPage, readSideChatSnapshotMessage, sideChatSnapshotRefs
+} from './conversation-side-chat-snapshot'
 
 const hash = (value: string): string => createHash('sha256').update(value, 'utf8').digest('hex')
 
@@ -110,7 +112,8 @@ export class ConversationService {
     const conversation = await this.deps.store.read(id)
     if (conversation?.deletion) throw new Error('统一对话正在删除或已删除，正文不可用')
     if (!conversation) throw new Error('正文引用不属于当前对话')
-    const frozen = conversation.sideChat?.snapshot.items.some(item => conversationItemKey(item.ref) === conversationItemKey(ref)) === true
+    const frozen = conversation.sideChat !== undefined &&
+      sideChatSnapshotIndexOf(conversation.sideChat.snapshot, ref) >= 0
     if (!frozen && !conversation.turns.some(turn => turn.items.some(item => conversationItemKey(item) === conversationItemKey(ref)))) {
       throw new Error('正文引用不属于当前对话')
     }
@@ -128,14 +131,15 @@ export class ConversationService {
     if (!conversation) throw new Error('找不到对话，不会自动创建空历史')
     if (conversation.archivedAt) throw new Error('对话已存档，请先恢复')
     const target = await this.target(conversation.cwd, request)
-    const continuation: ConversationContinuation = planConversationContinuation(conversation, target)
+    const continuation: ConversationContinuation = planConversationContinuation(conversation, target,
+      conversation.sideChat ? await sideChatSnapshotRefs(this.deps.store.userData, conversation) : undefined)
     if (continuation.kind === 'blocked') throw new Error(continuation.reason)
     return {
       conversationId: id,
       revision: conversation.revision,
       target,
       continuation,
-      missingItems: missingDetails(conversation, continuation)
+      missingItems: await missingDetails(this.deps.store.userData, conversation, continuation)
     }
   }
 
@@ -216,7 +220,8 @@ export class ConversationService {
     if (!this.deps.supportsHistoricalInput(request.providerId)) throw new Error(`${request.providerId} 尚未提供可验证的历史输入交接`)
     const target = await this.target(conversation.cwd, request)
     if (target.continuationKey !== request.expectedContinuationKey) throw new Error('Provider 接续身份已变化，请重新预览')
-    const continuation = planConversationContinuation(conversation, target)
+    const continuation = planConversationContinuation(conversation, target,
+      conversation.sideChat ? await sideChatSnapshotRefs(this.deps.store.userData, conversation) : undefined)
     if (continuation.kind === 'blocked') throw new Error(continuation.reason)
     if (continuation.kind === 'fresh' && !request.confirmFresh) throw new Error('创建新的原生上下文需要明确确认')
     if (JSON.stringify(request.selectedItems.map(conversationItemKey)) !== JSON.stringify(continuation.missingItems.map(conversationItemKey))) {

@@ -2,6 +2,7 @@ import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { sendTurn, sideChatFixture, type SideChatFixture } from './conversation-side-chat.fixture'
+import { sideChatSnapshotRefs } from './conversation-side-chat-snapshot'
 import type { ConversationSideChatRequest, SideChatPreview } from '../shared/conversation-api'
 
 const fixtures: SideChatFixture[] = []
@@ -46,9 +47,10 @@ describe('side-chat preview narrowing and handoff budget', () => {
     await expect(current.service.previewSideChat(source, { completedThroughOrdinal: 1, file: '/etc/passwd' }))
       .rejects.toThrow('字段不受支持')
     const child = await current.service.createSideChat(request(source, narrow))
-    const page = await current.service.read(child.id)
-    expect(page.sideChat?.throughOrdinal).toBe(1)
-    expect(await Promise.all(page.sideChat!.items.map(item => current.service.readItem(child.id, item.ref))))
+    const stored = (await current.store.read(child.id))!
+    expect(stored.sideChat?.snapshot.throughOrdinal).toBe(1)
+    const refs = await sideChatSnapshotRefs(current.userData, stored)
+    expect(await Promise.all(refs.map(ref => current.service.readItem(child.id, ref))))
       .toEqual(['question 1', 'answer: question 1'])
   })
 
@@ -96,9 +98,9 @@ describe('side-chat preview narrowing and handoff budget', () => {
     expect(narrowed.messageCount).toBe(2)
     // The explicit smaller boundary the user chose stays exactly that boundary.
     const child = await current.service.createSideChat(request(source, narrowed))
-    const page = await current.service.read(child.id)
-    expect(page.sideChat?.throughOrdinal).toBe(1)
-    expect(page.sideChat?.items).toHaveLength(2)
+    const stored = (await current.store.read(child.id))!
+    expect(stored.sideChat?.snapshot.throughOrdinal).toBe(1)
+    expect(stored.sideChat?.snapshot.format === 4 ? stored.sideChat.snapshot.messageCount : 0).toBe(2)
     // An unknown failure never becomes a successful narrowing: an explicit boundary that
     // still exceeds the budget is reported, not silently replaced by a smaller prefix.
     await expect(current.service.previewSideChat(source, { completedThroughOrdinal: 3 }))
@@ -113,7 +115,10 @@ describe('side-chat preview narrowing and handoff budget', () => {
     const preview = await current.service.previewSideChat(source)
     const child = await current.service.createSideChat(request(source, preview))
     const stored = (await current.store.read(child.id))!
-    expect(preview.coverage.snapshotBytes).toBe(stored.sideChat!.snapshot.content.bytes)
+    if (stored.sideChat?.snapshot.format !== 4) throw new Error('creation must seal a format 4 snapshot')
+    // Preview and the sealed record agree on the same counts and body bytes.
+    expect(stored.sideChat.snapshot.messageCount).toBe(preview.messageCount)
+    expect(stored.sideChat.snapshot.bodyBytes).toBe(preview.bodyBytes)
     expect(preview.coverage.snapshotByteLimit).toBe(4 * 1024 * 1024)
     expect(preview.coverage.handoffBudgetBytes).toBeGreaterThan(0)
   })

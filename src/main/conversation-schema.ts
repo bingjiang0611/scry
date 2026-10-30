@@ -6,6 +6,7 @@ import { isToolContentRef } from '../shared/tool-content'
 export type { NativeSessionScope } from './conversation-ownership'
 export { checkNativeOwners, nativeOwnerKey } from './conversation-ownership'
 import {
+  conversationItemKey, sideChatSnapshotIndexOf,
   type Conversation,
   type ConversationBinding,
   type ConversationItemRef,
@@ -61,9 +62,14 @@ export function items(value: unknown): asserts value is ConversationItemRef[] {
 }
 export { items as assertConversationItems }
 
-export function subset(selected: ConversationItemRef[], available: ConversationItemRef[]): boolean {
+export function subset(
+  selected: ConversationItemRef[],
+  available: ConversationItemRef[],
+  isPrior?: (ref: ConversationItemRef) => boolean
+): boolean {
   const keys = new Set(available.map(item => JSON.stringify([item.runId, item.itemId, item.contentHash])))
-  return selected.every((item) => keys.has(JSON.stringify([item.runId, item.itemId, item.contentHash])))
+  return selected.every((item) => keys.has(JSON.stringify([item.runId, item.itemId, item.contentHash])) ||
+    isPrior?.(item) === true)
 }
 
 /** Source identity of a side chat; content read through it is data, never authorization. */
@@ -120,8 +126,15 @@ export function decodeConversation(value: unknown): Conversation {
   const commandIds = new Set<string>()
   // Frozen snapshot items are ordered context before any real turn; they never
   // become turns, usage or run ids of this conversation.
-  const priorItems: ConversationItemRef[] = data.sideChat === undefined
-    ? [] : (data.sideChat as SideChatOrigin).snapshot.items.map(item => item.ref)
+  const snapshot = data.sideChat === undefined ? undefined : (data.sideChat as SideChatOrigin).snapshot
+  const priorItems: ConversationItemRef[] = snapshot === undefined || snapshot.format === 4
+    ? [] : snapshot.items.map(item => item.ref)
+  // A format 4 record keeps frozen refs in a manifest, so membership is decided by the
+  // namespaced run id instead of a materialized list.
+  const isSnapshotRef = (ref: ConversationItemRef): boolean =>
+    snapshot !== undefined && sideChatSnapshotIndexOf(snapshot, ref) >= 0
+  const isPrior = (ref: ConversationItemRef): boolean =>
+    isSnapshotRef(ref) || priorItems.some(item => conversationItemKey(item) === conversationItemKey(ref))
   for (const [index, raw] of data.turns.entries()) {
     const turn = object(raw)
     requireValue(turn.ordinal === index + 1 && text(turn.runId) && !runIds.has(turn.runId), '对话轮次顺序或 run 身份无效')
@@ -149,7 +162,8 @@ export function decodeConversation(value: unknown): Conversation {
       requireValue(turn.importedItems.length > 0 || (turn.historyPolicy === 'retrievable-v1' && turn.omittedItems.length > 0)
         ? isToolContentRef(turn.history) && turn.history.encoding === 'json' && turn.history.bytes <= MAX_CONVERSATION_HISTORY_ARTIFACT_BYTES
         : turn.history === undefined, '交接 intent 缺少正文 artifact 或关联了多余正文')
-      requireValue(subset(turn.importedItems, priorItems) && subset(turn.omittedItems, priorItems), '交接引用了不存在或未来的内容')
+      requireValue(subset(turn.importedItems, priorItems, isPrior) && subset(turn.omittedItems, priorItems, isPrior),
+        '交接引用了不存在或未来的内容')
       const imported = new Set(turn.importedItems.map(item => JSON.stringify([item.runId, item.itemId, item.contentHash])))
       requireValue(turn.omittedItems.every((item) => !imported.has(JSON.stringify([item.runId, item.itemId, item.contentHash]))), '内容同时被标记为导入和省略')
       const delivery = object(turn.delivery)

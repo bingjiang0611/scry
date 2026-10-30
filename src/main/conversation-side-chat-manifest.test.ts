@@ -44,12 +44,21 @@ function contentFile(rootDir: string, sha256: string): string {
   return join(rootDir, 'content', 'sha256', sha256.slice(0, 2), `${sha256}.bin`)
 }
 
-async function item(index: number): Promise<{ ref: { runId: string; itemId: string; contentHash: string }; sourceOrdinal: number; providerId: string; role: 'user' | 'assistant' }> {
+interface ItemEntry {
+  ref: { runId: string; itemId: string; contentHash: string }
+  sourceOrdinal: number
+  providerId: string
+  role: 'user' | 'assistant'
+  status: string
+  delivery: string
+}
+
+async function item(index: number): Promise<ItemEntry> {
   const text = `消息 ${index}`
   const role = index % 2 === 0 ? 'assistant' : 'user'
   return {
     ref: { runId: sideChatSnapshotRunId(snapshotId, index - 1), itemId: role, contentHash: sha(text) },
-    sourceOrdinal: index, providerId: 'claude', role
+    sourceOrdinal: index, providerId: 'claude', role, status: 'completed', delivery: 'accepted'
   }
 }
 
@@ -97,7 +106,7 @@ describe('side-chat snapshot manifests', () => {
     }
     await writer.appendMessage({
       ref: { runId: sideChatSnapshotRunId(snapshotId, 0), itemId: 'assistant', contentHash: sha(text) },
-      sourceOrdinal: 1, providerId: 'claude', role: 'assistant'
+      sourceOrdinal: 1, providerId: 'claude', role: 'assistant', status: 'completed', delivery: 'accepted'
     }, chunks())
     const descriptor = await writer.seal()
     expect(descriptor.bodyBytes).toBe(bytes)
@@ -135,7 +144,7 @@ describe('side-chat snapshot manifests', () => {
       })
       await writer.appendMessage({
         ref: { runId: sideChatSnapshotRunId(snapshotId, 0), itemId: 'assistant', contentHash: sha(block.text) },
-        sourceOrdinal: 1, providerId: 'claude', role: 'assistant'
+        sourceOrdinal: 1, providerId: 'claude', role: 'assistant', status: 'completed', delivery: 'accepted'
       }, block.text)
       const descriptor = await writer.seal()
       const chunks: string[] = []

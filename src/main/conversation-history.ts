@@ -1,14 +1,16 @@
 import { createHash } from 'node:crypto'
 import { readRecorderContentPage, writeRecorderContent } from '../core/turn-recorder/content-store'
 import { isToolContentRef, type ContentRef } from '../shared/tool-content'
-import { conversationItemKey, type Conversation, type ConversationItemRef, type DispatchedConversationTurn } from '../shared/conversation'
+import {
+  conversationItemKey, sideChatSnapshotIndexOf, type Conversation, type ConversationItemRef, type DispatchedConversationTurn
+} from '../shared/conversation'
 import { historicalInputBytes, historicalInputPrefix } from './providers/historical-input'
 import type { ProviderHistoricalContext } from './providers/types'
 import { handoffBudget, handoffCoverage, selectHistory, type HandoffBudgetInput } from './conversation-handoff-budget'
 import { conversationHistoryRoot, type HistoryMessage } from './conversation-history-content'
 import { readConversationHistoryMessages } from './conversation-history-source'
 import { MAX_CONVERSATION_HISTORY_ARTIFACT_BYTES } from './conversation-history-limits'
-import { belongsToSideChatSnapshot } from './conversation-side-chat-snapshot'
+import { belongsToSideChatSnapshot, readSideChatSnapshotItem } from './conversation-side-chat-snapshot'
 
 const hash = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex')
 
@@ -152,7 +154,8 @@ export async function loadConversationHistory(
     const ref = turn.importedItems[index]
     if (conversationItemKey(message.ref) !== conversationItemKey(ref)) throw new Error('交接 artifact 内容引用不匹配')
     if (belongsToSideChatSnapshot(conversation, ref)) {
-      const item = conversation.sideChat!.snapshot.items.find(candidate => conversationItemKey(candidate.ref) === conversationItemKey(ref))
+      const index = sideChatSnapshotIndexOf(conversation.sideChat!.snapshot, ref)
+      const item = index < 0 ? undefined : await readSideChatSnapshotItem(userData, conversation, index)
       if (!item || message.role !== item.role || message.ordinal !== item.sourceOrdinal || message.providerId !== item.providerId ||
         message.delivery !== 'snapshot' || typeof message.text !== 'string' || hash(message.text) !== ref.contentHash) {
         throw new Error('交接 artifact 与侧聊快照元数据不匹配')

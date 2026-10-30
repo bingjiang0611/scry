@@ -34,11 +34,20 @@ export type SideChatMessageBody =
   | { store: 'text'; text: string }
   | { store: 'parts'; root: ManifestRef }
 
+/**
+ * One frozen message reference. The non-body fields are the same evidence format 3
+ * stored beside each message, so a handoff artifact keeps its provenance.
+ */
 export interface SideChatManifestItem extends ManifestEntry {
   ref: SideChatMessageRef
+  /** Source turn ordinal; two messages of one turn share it. */
   sourceOrdinal: number
   providerId: string
   role: 'user' | 'assistant'
+  status: string
+  delivery: string
+  nativeSessionId?: string
+  providerTurnId?: string
   body: SideChatMessageBody
 }
 
@@ -184,10 +193,20 @@ export class SideChatSnapshotWriter {
 
   /** `text` may be a string or a stream; a huge message must be passed as a stream. */
   async appendMessage(
-    entry: { ref: SideChatMessageRef; sourceOrdinal: number; providerId: string; role: 'user' | 'assistant' },
+    entry: {
+      ref: SideChatMessageRef
+      sourceOrdinal: number
+      providerId: string
+      role: 'user' | 'assistant'
+      status: string
+      delivery: string
+      nativeSessionId?: string
+      providerTurnId?: string
+    },
     text: AsyncIterable<string> | string
   ): Promise<void> {
-    if (!Number.isSafeInteger(entry.sourceOrdinal) || entry.sourceOrdinal <= this.lastOrdinal) {
+    if (!Number.isSafeInteger(entry.sourceOrdinal) || entry.sourceOrdinal < this.lastOrdinal ||
+      entry.sourceOrdinal <= 0) {
       throw new Error('侧聊快照消息顺序无效')
     }
     this.lastOrdinal = entry.sourceOrdinal
@@ -198,15 +217,18 @@ export class SideChatSnapshotWriter {
     if (sealed.contentHash !== entry.ref.contentHash) throw new Error('侧聊快照消息正文与引用哈希不一致')
     await this.items.append({
       ref: entry.ref, sourceOrdinal: entry.sourceOrdinal, providerId: entry.providerId,
-      role: entry.role, bytes: sealed.bytes, body: sealed.body
+      role: entry.role, status: entry.status, delivery: entry.delivery,
+      ...(entry.nativeSessionId !== undefined ? { nativeSessionId: entry.nativeSessionId } : {}),
+      ...(entry.providerTurnId !== undefined ? { providerTurnId: entry.providerTurnId } : {}),
+      bytes: sealed.bytes, body: sealed.body
     })
     this.count += 1
     this.bodyBytes += sealed.bytes
   }
 
   async seal(): Promise<SideChatSnapshotDescriptor> {
-    if (this.count !== this.options.identity.throughOrdinal) {
-      throw new Error('侧聊快照截止轮次与消息数量不一致')
+    if (this.count === 0 || this.lastOrdinal !== this.options.identity.throughOrdinal) {
+      throw new Error('侧聊快照截止轮次与消息顺序不一致')
     }
     return {
       format: SIDE_CHAT_SNAPSHOT_FORMAT,
@@ -245,7 +267,8 @@ function bindingOf(descriptor: SideChatSnapshotDescriptor): string {
 function assertItem(value: ManifestEntry, index: number, descriptor: SideChatSnapshotDescriptor): SideChatManifestItem {
   const item = value as unknown as Record<string, unknown>
   requireValue(Object.keys(item).every(key => [
-    'ref', 'sourceOrdinal', 'providerId', 'role', 'bytes', 'body'
+    'ref', 'sourceOrdinal', 'providerId', 'role', 'status', 'delivery',
+    'nativeSessionId', 'providerTurnId', 'bytes', 'body'
   ].includes(key)), '侧聊快照消息字段不受支持')
   const ref = object(item.ref)
   requireValue(Object.keys(ref).length === 3 && typeof ref.runId === 'string' && typeof ref.contentHash === 'string' &&
@@ -255,6 +278,9 @@ function assertItem(value: ManifestEntry, index: number, descriptor: SideChatSna
   requireValue(ref.itemId === item.role, '侧聊快照消息引用与角色不一致')
   requireValue(isCount(item.sourceOrdinal) && item.sourceOrdinal > 0, '侧聊快照消息顺序无效')
   requireValue(typeof item.providerId === 'string' && item.providerId.length > 0, '侧聊快照消息 Provider 无效')
+  requireValue(typeof item.status === 'string' && typeof item.delivery === 'string', '侧聊快照消息状态无效')
+  requireValue(item.nativeSessionId === undefined || typeof item.nativeSessionId === 'string', '侧聊快照消息会话身份无效')
+  requireValue(item.providerTurnId === undefined || typeof item.providerTurnId === 'string', '侧聊快照消息轮次身份无效')
   requireValue(isCount(item.bytes), '侧聊快照消息字节数无效')
   const body = object(item.body)
   if (body.store === 'text') {
@@ -315,9 +341,23 @@ export async function readSideChatMessagePage(
   offset: number,
   limit: number
 ): Promise<SideChatMessagePage> {
+  const item = await readSideChatManifestItem(dataRoot, descriptor, index)
+  return readSideChatItemBodyPage(dataRoot, descriptor, item, offset, limit)
+}
+
+/**
+ * One page of an item whose metadata the caller already read, so paging a viewer does
+ * not fetch the same index leaf once per row.
+ */
+export async function readSideChatItemBodyPage(
+  dataRoot: string,
+  descriptor: SideChatSnapshotDescriptor,
+  item: SideChatManifestItem,
+  offset: number,
+  limit: number
+): Promise<SideChatMessagePage> {
   if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('侧聊正文游标无效')
   if (!Number.isSafeInteger(limit) || limit < 1) throw new Error('侧聊正文分页大小无效')
-  const item = await readSideChatManifestItem(dataRoot, descriptor, index)
   if (offset > item.bytes) throw new Error('侧聊正文游标已越界')
   if (item.body.store === 'text') {
     const bytes = Buffer.from(item.body.text, 'utf8')
