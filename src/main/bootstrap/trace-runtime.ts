@@ -37,6 +37,7 @@ export function createTraceRuntime({
   const runTraces = new RunTraceRouter({
     runs,
     boundedLiveRun: (run) => boundedLiveRun(run),
+    onDemandChange: (runId, demanded) => runs.get(runId)?.control.setDiffPreviewDemand?.(demanded),
     canSend: rendererCanReceive,
     send: (event) => { getWindow()?.webContents.send(RUN_TRACE_CHANNEL, event) },
     warn: (message, detail) => console.warn(`[scry] ${message}:`, detail)

@@ -38,7 +38,7 @@ export function forkableRunIdsOf(
 export interface ConversationProjection { conversationId: string; turns: Turn[]; busy: boolean; atNewest: boolean }
 
 /** Same chat/composer, separate durable ownership from each native session. */
-export function ConversationView({ conversation, draftStore, chatProps, initialAgentId, onChanged, onProjection, onOpenConversation, initialViewPosition, embedded }: {
+export function ConversationView({ conversation, draftStore, chatProps, initialAgentId, onChanged, onProjection, onOpenConversation, initialViewPosition, embedded, liveVisible = true }: {
   conversation: ConversationSummary
   draftStore: ComposerDraftStore
   chatProps: ConversationHostChatProps
@@ -56,6 +56,8 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
    * keeps its management controls but does not repeat the title a second time.
    */
   embedded?: boolean
+  /** Mounted main pane may be hidden behind a maximized terminal. */
+  liveVisible?: boolean
 }) {
   const draftKey = composerDraftKey({ providerId: 'conversation', cwd: conversation.cwd, sessionId: conversation.id })
   const drafts = useSyncExternalStore(draftStore.subscribe, draftStore.getSnapshot)
@@ -124,7 +126,7 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
 
   const activeRunId = page?.summary.activeRunId
   // 只有正在看的这一个 run 走自己的有界流：没有可见流时读一次权威分页，不做定时轮询。
-  const stream = useRunTraceStream(activeRunId, () => {
+  const stream = useRunTraceStream(liveVisible ? activeRunId : undefined, () => {
     // 终态事件到达：先读回权威分页（含归档后的正式轮次），下一次渲染再让分页接管时间线。
     void refresh().catch(error => { if (mounted.current) setError(`读取本轮最终记录失败：${message(error)}`) })
   })

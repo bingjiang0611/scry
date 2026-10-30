@@ -8,12 +8,14 @@ import type { TurnChangeJournal } from '../../core/turn-recorder/change-journal'
 
 type PairedSessionDiff = { capture: GitTurnDiffCapture; snapshot: Promise<TurnDiffSnapshot> }
 export type RunDiffLifecycle = {
+  setDiffPreviewDemand: ((demanded: boolean) => void) | undefined
   finalizeTurnDiff: () => Promise<void>
   cancelTurnDiff: () => Promise<void>
   finalizeSessionDiff: () => Promise<void>
   getPairedSessionDiff: () => PairedSessionDiff | undefined
 }
 export type RunDiffDependencies = {
+  isRemoteRun: boolean
   diffPreviewer: RunDiffPreviewer
   turnDiffCapture: Promise<GitTurnDiffCapture>
   turnChangeJournal: TurnChangeJournal | null
@@ -37,6 +39,12 @@ export type RunDiffDependencies = {
 export function createRunDiffLifecycle(deps: RunDiffDependencies): RunDiffLifecycle {
   let pairedSessionDiff: PairedSessionDiff | undefined
   const { diffPreviewer, turnDiffCapture, turnChangeJournal, patchExcludeBasenames, cwd, contextKey, runId, providerId, runtimeProvider, runState, sessionDiffBaselines, mainEventId, appendCoalescedTrace, publishTrace } = deps
+  // Remote owners have no view-demand protocol. Missing evidence is not a hidden
+  // view: only local views opt out of previews until they explicitly subscribe.
+  const setDiffPreviewDemand = deps.isRemoteRun ? undefined : (demanded: boolean): void => {
+    void diffPreviewer.setDemanded(demanded)
+  }
+  setDiffPreviewDemand?.(false)
   let turnDiffPromise: Promise<void> | null = null
   // 并行工作区重叠证据：缺失就是未观测（旧记录/无基线），不能当成独占归因。
   const withOverlap = (snapshot: TurnDiffSnapshot, from?: number): TurnDiffSnapshot => {
@@ -199,5 +207,5 @@ export function createRunDiffLifecycle(deps: RunDiffDependencies): RunDiffLifecy
     })().catch((error) => console.warn('[scry] session diff finalization failed:', runId, error))
     return sessionDiffPromise
   }
-  return { finalizeTurnDiff, cancelTurnDiff, finalizeSessionDiff, getPairedSessionDiff: () => pairedSessionDiff }
+  return { setDiffPreviewDemand, finalizeTurnDiff, cancelTurnDiff, finalizeSessionDiff, getPairedSessionDiff: () => pairedSessionDiff }
 }

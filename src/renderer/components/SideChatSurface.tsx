@@ -75,7 +75,7 @@ export function SideChatHeader({ title, summary, cwd, snapshotOpen, onToggleSnap
  * detection belong to the host view and are not offered here, so a child cannot mutate
  * the host's global agent selection.
  */
-export function SideChatSurface({ conversation, draftStore, agents, onOpenFile, onOpenConversation, onChanged, onProjection, onClose, autoFocusComposer, variant = 'frame' }: {
+export function SideChatSurface({ conversation, draftStore, agents, onOpenFile, onOpenConversation, onChanged, onProjection, onClose, autoFocusComposer, variant = 'frame', liveVisible = true }: {
   conversation: ConversationSummary
   draftStore: ComposerDraftStore
   agents: ConversationHostChatProps['agents']
@@ -96,6 +96,7 @@ export function SideChatSurface({ conversation, draftStore, agents, onOpenFile, 
    * this one component so a child never inherits the host's global runtime controls.
    */
   variant?: 'frame' | 'main'
+  liveVisible?: boolean
 }) {
   const instance = useSideChatInstance({
     conversation, agents, onOpenFile,
@@ -114,7 +115,7 @@ export function SideChatSurface({ conversation, draftStore, agents, onOpenFile, 
       variant={variant} onToggleSnapshot={() => setSnapshotOpen(value => !value)} {...(onClose ? { onClose } : {})} />
     {status && <p className="side-chat-surface-notice" role="status" data-side-chat-notice>{status}</p>}
     <ConversationView
-      embedded={variant === 'frame'} conversation={conversation} draftStore={draftStore} chatProps={instance.chatProps}
+      liveVisible={liveVisible} embedded={variant === 'frame'} conversation={conversation} draftStore={draftStore} chatProps={instance.chatProps}
       onChanged={onChanged}
       onProjection={projection => { instance.applyProjection(projection); onProjection?.(projection) }}
       onOpenConversation={onOpenConversation}

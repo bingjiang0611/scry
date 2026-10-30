@@ -1,6 +1,6 @@
 import type { IpcMainInvokeEvent } from 'electron'
 import type { RunTraceRouter } from '../run-trace-router'
-import type { RunTraceReceipt } from '../../shared/run-traces'
+import { isValidRunTraceRunId, type RunTraceReceipt } from '../../shared/run-traces'
 import type { TrustedRegistrar } from './agent-runtime-ipc'
 
 /**
@@ -10,7 +10,14 @@ import type { TrustedRegistrar } from './agent-runtime-ipc'
  * 这里不引入任意路径、命令或 run 创建能力：只能订阅/退订/确认/重对齐已经登记的 run，
  * 订阅本身不改变焦点、不停止运行，也不授予任何权限。
  */
-export function registerRunTraceHandlers(handleTrusted: TrustedRegistrar, runTraces: RunTraceRouter): void {
+export function registerRunTraceHandlers(
+  handleTrusted: TrustedRegistrar, runTraces: RunTraceRouter, isFocusedRun: (runId: string) => boolean
+): void {
+  handleTrusted('runTraces:setLegacyDemand', (_event: IpcMainInvokeEvent, runId: unknown, demanded: unknown) => {
+    if (!isValidRunTraceRunId(runId) || typeof demanded !== 'boolean') return false
+    if (demanded && !isFocusedRun(runId)) return false
+    return runTraces.setLegacyDemand(runId, demanded)
+  })
   handleTrusted('runTraces:subscribe', (_event: IpcMainInvokeEvent, request: unknown) => runTraces.subscribe(request))
   handleTrusted('runTraces:unsubscribe', (_event: IpcMainInvokeEvent, subscriptionId: unknown) =>
     runTraces.unsubscribe(subscriptionId))

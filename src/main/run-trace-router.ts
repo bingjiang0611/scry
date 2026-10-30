@@ -47,6 +47,7 @@ export interface RunTraceRouterDeps {
   boundedLiveRun: (run: ActiveRun) => ActiveRun
   canSend: () => boolean
   send: (event: RunTraceEvent) => void
+  onDemandChange?: (runId: string, demanded: boolean) => void
   warn?: (message: string, detail: unknown) => void
   schedule?: (run: () => void, delayMs: number) => () => void
 }
@@ -66,6 +67,7 @@ export interface RunTraceRouterDeps {
 export class RunTraceRouter {
   private readonly subscriptions = new Map<string, Subscription>()
   private readonly byRun = new Map<string, Subscription>()
+  private legacyRunId: string | null = null
 
   constructor(private readonly deps: RunTraceRouterDeps) {}
 
@@ -108,6 +110,7 @@ export class RunTraceRouter {
     }
     this.subscriptions.set(subscription.id, subscription)
     this.byRun.set(runId, subscription)
+    if (this.legacyRunId !== runId) this.deps.onDemandChange?.(runId, true)
     return {
       status: 'subscribed',
       subscriptionId: subscription.id,
@@ -223,6 +226,7 @@ export class RunTraceRouter {
   /** 窗口重挂/导航/崩溃：在途额度不会有人确认，全部作废并关闭；renderer 之后重新订阅。 */
   reset(): void {
     for (const subscription of [...this.subscriptions.values()]) this.forget(subscription)
+    if (this.legacyRunId) this.setLegacyDemand(this.legacyRunId, false)
   }
 
   rendererReady(): void {
@@ -238,12 +242,31 @@ export class RunTraceRouter {
     return this.subscriptions.size
   }
 
+  hasDemand(runId: string): boolean {
+    return this.byRun.has(runId) || this.legacyRunId === runId
+  }
+
+  /** One legacy pane in the trusted renderer. A stale release cannot clear its replacement. */
+  setLegacyDemand(runId: string, demanded: boolean): boolean {
+    const previous = this.legacyRunId
+    if (!demanded && previous !== runId) return false
+    const next = demanded ? runId : null
+    if (previous === next) return true
+    this.legacyRunId = next
+    if (previous && !this.byRun.has(previous)) this.deps.onDemandChange?.(previous, false)
+    if (next && !this.byRun.has(next)) this.deps.onDemandChange?.(next, true)
+    return true
+  }
+
   private forget(subscription: Subscription): void {
     if (subscription.closed) return
     subscription.closed = true
     subscription.bridge.close()
     this.subscriptions.delete(subscription.id)
-    if (this.byRun.get(subscription.runId) === subscription) this.byRun.delete(subscription.runId)
+    if (this.byRun.get(subscription.runId) === subscription) {
+      this.byRun.delete(subscription.runId)
+      if (this.legacyRunId !== subscription.runId) this.deps.onDemandChange?.(subscription.runId, false)
+    }
   }
 
   private snapshotOf(subscription: Subscription): ActiveRun | undefined {

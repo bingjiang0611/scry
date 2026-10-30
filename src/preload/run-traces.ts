@@ -10,6 +10,8 @@ import { RUN_TRACE_CHANNEL } from '../shared/run-traces'
  * 轮询所有 run——main/preload/renderer 是一起发布的。
  */
 export const runTracesApi = {
+  setLegacyDiffPreviewDemand: (runId: string, demanded: boolean): Promise<boolean> =>
+    ipcRenderer.invoke('runTraces:setLegacyDemand', runId, demanded),
   runTraces: {
     subscribe: (request: RunTraceSubscribeRequest): Promise<RunTraceSubscribeResult> =>
       ipcRenderer.invoke('runTraces:subscribe', request),

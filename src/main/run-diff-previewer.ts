@@ -55,6 +55,9 @@ function defaultSchedule(run: () => void, delayMs: number): () => void {
  *     终态覆盖预览，绝不倒退。
  */
 export class RunDiffPreviewer {
+  private demanded = true
+  private demandEpoch = 0
+  private hasObservedChange = false
   private readonly lastAt = new Map<DiffPreviewScope, number>()
   /** 每个 scope 至多一条串行链：链内可能连着跑多次（trailing refresh）。 */
   private readonly cycles = new Map<DiffPreviewScope, Promise<void>>()
@@ -92,7 +95,22 @@ export class RunDiffPreviewer {
    * 便于测试确定性等待「最后一次写也发出去了」。
    */
   notifyChange(): Promise<void> {
+    this.hasObservedChange = true
     return Promise.all([this.request('turn'), this.request('session')]).then(() => undefined)
+  }
+
+  /** Pause only live previews. Final capture owns its separate, unchanged lifecycle. */
+  setDemanded(demanded: boolean): Promise<void> {
+    if (this.demanded === demanded) return Promise.resolve()
+    this.demanded = demanded
+    this.demandEpoch++
+    this.trailing.clear()
+    this.lastAt.clear()
+    this.cancelDelay('turn')
+    this.cancelDelay('session')
+    // A returning viewer must not wait for the old eight-second throttle. An old
+    // in-flight read retains its ownership, but cannot publish into the new epoch.
+    return demanded && this.hasObservedChange ? this.notifyChange() : Promise.resolve()
   }
 
   /** 终态发布前封口该 scope。 */
@@ -127,7 +145,7 @@ export class RunDiffPreviewer {
   }
 
   private request(scope: DiffPreviewScope): Promise<void> {
-    if (this.sealedScopes.has(scope)) return Promise.resolve()
+    if (!this.demanded || this.sealedScopes.has(scope)) return Promise.resolve()
     const cycle = this.cycles.get(scope)
     if (cycle) {
       // 在途采集或节流等待期间的新改动合并进同一个 trailing 标记；不要取消等待，
@@ -168,7 +186,7 @@ export class RunDiffPreviewer {
     const settled = new Promise<void>((resolve) => { settle = resolve })
     const cancel = this.schedule(() => {
       this.delays.delete(scope)
-      if (this.sealedScopes.has(scope)) {
+      if (!this.demanded || this.sealedScopes.has(scope)) {
         settle()
         return
       }
@@ -212,10 +230,11 @@ export class RunDiffPreviewer {
     return (async () => {
       this.trailing.delete(scope)
       for (;;) {
-        if (this.sealedScopes.has(scope)) break
-        await this.run(scope, capture)
+        if (!this.demanded || this.sealedScopes.has(scope)) break
+        const epoch = this.demandEpoch
+        await this.run(scope, capture, epoch)
           .catch((error) => this.options.onError?.(scope, error))
-          .finally(() => this.lastAt.set(scope, this.now()))
+          .finally(() => { if (epoch === this.demandEpoch) this.lastAt.set(scope, this.now()) })
         if (!this.trailing.delete(scope)) break
         const last = this.lastAt.get(scope)
         const remaining = last == null ? 0 : this.minIntervalMs - (this.now() - last)
@@ -258,13 +277,13 @@ export class RunDiffPreviewer {
     }
   }
 
-  private async run(scope: DiffPreviewScope, capture: Promise<GitTurnDiffCapture>): Promise<void> {
+  private async run(scope: DiffPreviewScope, capture: Promise<GitTurnDiffCapture>, epoch: number): Promise<void> {
     const resolved = await capture
-    if (resolved.status !== 'ready' || this.sealedScopes.has(scope)) return
+    if (resolved.status !== 'ready' || !this.demanded || epoch !== this.demandEpoch || this.sealedScopes.has(scope)) return
     // 保留两种 scope 的采集策略；同一首轮基线可以复用在途读取，不缓存已完成的预览。
     const snapshot = await this.readSnapshot(scope, resolved, scope === 'turn' ? this.options.hints() : {})
     // null = 终态已接管这份 capture；sealed = 终态在本次计算期间发布过。两种情况都丢弃。
-    if (!snapshot || this.sealedScopes.has(scope)) return
+    if (!snapshot || !this.demanded || epoch !== this.demandEpoch || this.sealedScopes.has(scope)) return
     if (snapshot.status !== 'captured') return
     this.options.emit({
       scope,
