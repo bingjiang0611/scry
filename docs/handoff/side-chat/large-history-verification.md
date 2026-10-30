@@ -129,6 +129,23 @@ Pi 侧聊读取走 `pi-native-stream.ts` 的两遍投影（结构一遍、正文
 
 Pi 的文件身份仍是**头部自证**（`type`/`version`/`id`/`cwd`），与 Claude 的逐条 `sessionId` 不同，写在模块注释里；已放弃的分支不会被压平。inode/dev/size 这类同 fd 身份仍保留，但只作为“文件被替换/截断”的判据，不再是前缀内容的权威。
 
+## 4.6 归档来源（conversation 源）的输入 spool 生命周期
+
+原生读取器修好后，同一资源生命周期在归档来源（`conversation-side-chat-stream.ts` 的 `streamTurns`）里还漏一处：
+每轮的输入 spool（prompt 与各事件）是 `new TextSpool(…, budget)` 直接建的，`SpoolRegistry` 只登记 `sealBody`
+产出的输出 spool；`reset()` 把 `parts`/`userSpool` 置空而不 `discard`，于是这些输入 spool 的预算占用、
+临时文件与句柄就丢了引用——小来源看不出来，几万条 5 KB 消息会把预算耗尽并让后面的 spool 全落盘。
+
+现在：一个被 `yield` 出去的轮次被 sink 消费后（`try/finally` 覆盖正常恢复、`return` 与 throw），按本轮的输入
+spool 集合（`Set` 去重 prompt 与 parts 指向同一 spool）显式 `discard`，然后才 `reset()`；外层 `finally` 仍收
+“当前未消费的 parts + registry”，输出 spool 仍由读取消息的 `finally` 释放（合同不变）。
+
+证据（`conversation-side-chat-stream.test.ts`，3 个测试）：60 轮 × 2 条 5 KB 正文、8 KiB 共享预算——
+① 消费完 `budget.available` 完整回到 8,192，且本次运行真正发生过 spill（记录到的 `mkdtemp` 目录）在结束后全部不存在；
+② 消费两轮后 `iterator.return()`：预算同样完整归还、无残留目录；
+③ 归档流中途抛错：同上。
+反向对照：去掉按轮 `discard` 后，三条都失败在 `budget.available` 只剩 3,061（预算不归还），说明这不是 GC 或等待问题。
+
 ## 5. 本轮观察到的首次失败（不改写为 flake）
 
 同一次验证里记录到的、同一代码重跑通过的第一轮失败。**根因未知**，没有把任何一步标成

@@ -194,6 +194,25 @@ async function sliceBody(userData: string, cwd: string, parts: readonly Part[]):
   return joinBodies(separated)
 }
 
+/**
+ * Input spools of the turn being built, without duplicates.
+ *
+ * A prompt's spool is pushed into the parts as well, and the turn's events each own one, so
+ * the same object can appear twice. These are created for reading the archive, not by the
+ * registry that tracks sealed bodies: nothing else frees them, and a reference dropped by
+ * `reset` takes its budget charge and its spill file with it.
+ */
+function inputSpools(parts: readonly Part[], userSpool: TextSpool | undefined): TextSpool[] {
+  const spools = new Set<TextSpool>()
+  if (userSpool) spools.add(userSpool)
+  for (const part of parts) if (part.kind !== 'break') spools.add(part.spool)
+  return [...spools]
+}
+
+async function discardSpools(spools: Iterable<TextSpool>): Promise<void> {
+  for (const spool of spools) await spool.discard()
+}
+
 /** Every spool this pass created, so an aborted capture leaves no temporary files. */
 class SpoolRegistry {
   private live = new Set<TextSpool>()
@@ -316,12 +335,20 @@ export async function* streamTurns(
   try {
     for await (const entry of entries) {
       if (entry.type === 'turn') {
+        // The bodies are sealed from these inputs, so the sink's read never comes back here.
         const messages = await assembleTurn(userData, cwd, registry, parts)
         const status = entry.status ?? 'completed'
-        yield {
-          runId: entry.runId,
-          ...(entry.providerTurnId === undefined ? {} : { providerTurnId: entry.providerTurnId }),
-          status, settled: entry.done && status === 'completed', messages
+        try {
+          yield {
+            runId: entry.runId,
+            ...(entry.providerTurnId === undefined ? {} : { providerTurnId: entry.providerTurnId }),
+            status, settled: entry.done && status === 'completed', messages
+          }
+        } finally {
+          // Runs once the sink has consumed this turn, and also when the caller abandons or
+          // fails the generator: either way this turn's inputs are done, and their budget
+          // charge and spill files are handed back before the references are dropped.
+          await discardSpools(inputSpools(parts, userSpool))
         }
         reset()
         continue
@@ -368,8 +395,8 @@ export async function* streamTurns(
       await event.spool.push(entry.chunk)
     }
   } finally {
-    for (const part of parts) if (part.kind !== 'break') await part.spool.discard()
-    await userSpool?.discard()
+    // Whatever was still being built when the pass ended; already-discarded spools are no-ops.
+    await discardSpools(inputSpools(parts, userSpool))
     await registry.discardAll()
   }
 }
