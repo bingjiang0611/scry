@@ -117,9 +117,11 @@ export async function exerciseSessionSelection(contents, scenario) {
   if (scenario === 'focused-event') await click('#focus-pi')
   else await click('.sb-sess[data-provider="pi"]:not(.running)')
   await wait(`${state}.historyReads === 1`)
+  const pendingTimeline = scenario === 'focused-event'
+    ? `document.querySelector('.chat-transcript[aria-busy="true"]') != null`
+    : `document.querySelector('.chat-transcript[aria-busy="false"][data-history-source="preview"]')?.textContent.includes('Target Pi conversation')`
   await wait(`document.querySelector('.sb-sess[data-provider="pi"]')?.getAttribute('aria-current') === 'true' &&
-    document.querySelector('.chat-transcript')?.getAttribute('aria-busy') === 'true' &&
-    !document.querySelector('.chat-transcript')?.textContent.includes('Old running conversation')`)
+    (${pendingTimeline}) && !document.querySelector('.chat-transcript')?.textContent.includes('Old running conversation')`)
   if (scenario === 'repeat-pending') {
     await click('.sb-sess[data-provider="pi"]')
     await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')

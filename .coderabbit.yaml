@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=https://www.coderabbit.ai/integrations/schema.v2.json
+language: zh-CN
+reviews:
+  high_level_summary: false
+  review_status: false
+  request_changes_workflow: false
+  auto_review:
+    enabled: true
+    drafts: false
+  pre_merge_checks:
+    docstrings:
+      mode: off
+  path_instructions:
+    - path: "**/*"
+      instructions: |
+        Follow CLAUDE.md and CONTRIBUTING.md. Review the changed behavior, not unrelated cleanup.
+        Evidence must distinguish exact/estimated/inferred/partial/disabled/unavailable and retain
+        provenance without double counting. Do not invent Provider capability parity.
+        Trust/permission, renderer/IPC, persistence and release boundaries must fail closed.
+        Product defaults, policy changes and weaker checks require a maintainer decision, not AI approval.
+    - path: "**/*.{test,spec}.{ts,tsx,js,mjs,cjs}"
+      instructions: |
+        Apply docs/agent/verification.md. Look for focused regression evidence and affected negative
+        cases; do not demand unrelated full-suite runs. Fixtures do not prove real App, device or Provider
+        acceptance. Do not propose skips, retries or larger timeouts to hide failures.
+    - path: "src/renderer/**"
+      instructions: |
+        Keep renderer unprivileged; use typed preload API only. Reuse the existing copy/i18n modules,
+        design system and virtualized/bounded UI patterns. Real interaction evidence is distinct from build success.
+    - path: ".github/**"
+      instructions: |
+        Treat PR code and text as untrusted. Write-token jobs must not execute PR code.
+        Failures, cancellations and unexplained skips must not pass required checks.
+        Review CI permissions, pinned policy authority and secret exposure explicitly.

@@ -174,7 +174,6 @@ export async function exerciseOverlays(contents) {
   key('Escape')
   await wait(`${css('.probe-modal')} == null && ${css('.sb-session-menu')} == null`)
 
-  contents.debugger.attach('1.3')
   try {
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
     await click(css('.sb-settings'))
@@ -194,8 +193,9 @@ export async function exerciseOverlays(contents) {
     check(await read(framesOnlyOpacity(`${css('.surface-menu')}.getAnimations()`)), 'Reduced menu exit includes spatial motion')
     await wait(`${css('.surface-menu')} == null`)
   } finally {
-    await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] })
-    contents.debugger.detach()
+    await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [
+      { name: 'prefers-reduced-motion', value: 'no-preference' }, { name: 'forced-colors', value: 'none' }
+    ] })
   }
   return { themes: ['light', 'dark'], dialogEntrance260: true, closeTimes, focusRestoredAtExitStart: true,
     threeClosePaths: true, firstNativeRowClickDuringExit: true, sameModalReopened: true, replacementImmediate: true,

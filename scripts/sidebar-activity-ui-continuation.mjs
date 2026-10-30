@@ -69,7 +69,6 @@ export async function exerciseSidebarActivityContinuation({ contents, screenshot
   await wait(`document.querySelector('#activity-pinned').textContent === 'true'`)
   check(await read(`document.querySelector('[data-activity-group="completed"] .sb-sess') === window.activityRow`), 'New completion was not first, or metadata refresh lost its position')
 
-  await contents.debugger.attach('1.3')
   try {
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
     await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
@@ -92,10 +91,13 @@ export async function exerciseSidebarActivityContinuation({ contents, screenshot
     await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
     await wait(`matchMedia('(forced-colors: active)').matches`)
     check(await read(`${titleAnimations}.length === 0 && getComputedStyle(window.activityRow.querySelector('.sb-sesstext')).webkitTextFillColor !== 'rgba(0, 0, 0, 0)'`), 'Forced colors hides or animates the working title')
-    await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] })
-    await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
-    await wait(`!matchMedia('(forced-colors: active)').matches && !matchMedia('(prefers-reduced-motion: reduce)').matches`)
-  } finally { contents.debugger.detach() }
+  } finally {
+    await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [
+      { name: 'prefers-reduced-motion', value: 'no-preference' }, { name: 'forced-colors', value: 'none' }
+    ] })
+  }
+  await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+  await wait(`!matchMedia('(forced-colors: active)').matches && !matchMedia('(prefers-reduced-motion: reduce)').matches`)
   check(await read(`window.activityRow === document.querySelector(${JSON.stringify(row)})`), 'Reduced-motion state change remounted the row')
   await wait(`${layoutAnimations}.length === 0`)
   for (const phase of ['unknown', 'failed']) {

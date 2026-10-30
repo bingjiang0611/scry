@@ -7,6 +7,8 @@ import { build } from 'vite'
 import electron from 'electron'
 import { fixtureSources } from './session-capability-sources.mjs'
 import { specialFixtureSources } from './session-capability-special-fixtures.mjs'
+import { runCapabilityCampaigns } from './session-capability-campaigns.mjs'
+if (process.argv.length === 2) process.exit(runCapabilityCampaigns(fileURLToPath(import.meta.url)))
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const specialSources = specialFixtureSources()
 const cacheOnly = process.argv.includes('--cache-only')
@@ -19,6 +21,7 @@ const listsOnly = turnRefsOnly || process.argv.includes('--lists-only')
 const loadingOnly = process.argv.includes('--loading-only')
 const sidebarActivityOnly = process.argv.includes('--sidebar-activity-only')
 const offscreen = overlaysOnly || listsOnly || loadingOnly
+const reducedAmbientFixture = motionTokensOnly || sidebarActivityOnly || listsOnly || loadingOnly || structureOnly || overlaysOnly
 const selectionOnly = process.argv.includes('--selection-only')
 const piCommandsOnly = process.argv.includes('--pi-commands-only')
 const piPermissionOnly = process.argv.includes('--pi-permission-only')
@@ -79,6 +82,7 @@ try {
       app.dock?.hide()
       const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: ${nativeVisibility}, offscreen: ${offscreen} } })
       if (${offscreen}) win.webContents.on('paint', () => {})
+      win.webContents.on('did-finish-load', () => win.webContents.focus())
       win.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       const logRendererError = (event) => { if (event.level === 'error') console.error('Renderer:', event.message) }
@@ -87,31 +91,18 @@ try {
       try {
         let result = {}, piCommands = {}
         const special = await (${specialSources.runner})({
-          flags: { loading: ${loadingOnly}, lists: ${listsOnly}, overlays: ${overlaysOnly}, paneBench: ${paneBenchOnly}, motion: ${fixtures.includes('motion-tokens')}, motionOnly: ${motionTokensOnly} },
+          flags: { loading: ${loadingOnly}, lists: ${listsOnly}, overlays: ${overlaysOnly}, structure: ${structureOnly}, sidebar: ${fixtures.includes('sidebar-activity')}, sidebarOnly: ${sidebarActivityOnly}, paneBench: ${paneBenchOnly}, motion: ${fixtures.includes('motion-tokens')}, motionOnly: ${motionTokensOnly} },
           win, sources: ${JSON.stringify(specialSources)},
-          paths: ${JSON.stringify({ loading: join(temp, 'loading.html'), lists: join(temp, 'lists.html'), overlays: join(temp, 'overlays.html'), paneBench: join(temp, 'structure-pane-bench.html'), motion: join(temp, 'motion-tokens.html') })},
-          screenshots: ${JSON.stringify({ loading: process.env.SCRY_LOADING_UI_SCREENSHOT ?? '', lists: process.env.SCRY_LISTS_UI_SCREENSHOT ?? '' })},
+          paths: ${JSON.stringify({ loading: join(temp, 'loading.html'), lists: join(temp, 'lists.html'), overlays: join(temp, 'overlays.html'), structure: join(temp, 'session-cache.html'), sidebar: join(temp, 'sidebar-activity.html'), paneBench: join(temp, 'structure-pane-bench.html'), motion: join(temp, 'motion-tokens.html') })},
+          screenshots: ${JSON.stringify({ loading: process.env.SCRY_LOADING_UI_SCREENSHOT ?? '', lists: process.env.SCRY_LISTS_UI_SCREENSHOT ?? '', sidebar: process.env.SCRY_SIDEBAR_ACTIVITY_SCREENSHOT ?? '' })},
           campaign: process.argv.find(argument => argument.startsWith('--scry-lists-campaign='))?.split('=')[1],
           logRendererError, setDiagnostic: contents => { diagnosticContents = contents }
         })
         Object.assign(result, special.result)
         if (special.done) { finish(result); return }
-        if (${fixtures.includes('sidebar-activity')}) {
-          win.setSize(1100, 760)
-          await win.loadFile(${JSON.stringify(join(temp, 'sidebar-activity.html'))})
-          const exerciseSidebarActivityContinuation = ${fixtureSources.exerciseSidebarActivityContinuation}
-          result.sidebarActivity = await (${fixtureSources.exerciseSidebarActivity})(win.webContents, ${JSON.stringify(process.env.SCRY_SIDEBAR_ACTIVITY_SCREENSHOT ?? '')})
-          await win.loadFile(${JSON.stringify(join(temp, 'sidebar-activity.html'))})
-          result.sidebarUnreadResults = await (${fixtureSources.exerciseSidebarUnreadResults})(win.webContents)
-          if (${sidebarActivityOnly}) { finish(result); return }
-        }
         if (${fixtures.includes('session-cache')}) {
           win.setSize(1200, 900)
           await win.loadFile(${JSON.stringify(join(temp, 'session-cache.html'))})
-          if (${structureOnly}) {
-            result.structure = await (${specialSources.structure})(win.webContents)
-            finish(result); return
-          }
           result.sessionCache = await (${fixtureSources.exerciseSessionCache})(win.webContents)
           if (${cacheOnly}) { finish(result); return }
         }
@@ -171,7 +162,7 @@ try {
           return
         }
         if (${questionResultOnly}) {
-          // 已回答问答块的层级检查（真实 React + 真实 CSS），只跑这一个页面。
+          // 仅验证此页已回答问答块的层级（真实 React/CSS）。
           win.setSize(1000, 760)
           await win.loadFile(${JSON.stringify(join(temp, 'session-capability.html'))})
           Object.assign(result, await win.webContents.executeJavaScript(${JSON.stringify(`(${fixtureSources.exerciseSessionCapabilityCore})()`)}), await win.webContents.executeJavaScript(${JSON.stringify(`(${fixtureSources.exerciseSessionCapabilitySummary})()`)}), await win.webContents.executeJavaScript(${JSON.stringify(`(${fixtureSources.exerciseSessionCapabilityQuestionResult})()`)}))
@@ -233,18 +224,19 @@ try {
   `)
   const campaignResults = []
   for (const campaign of turnRefsOnly ? ['refs'] : listsOnly ? ['structure', 'history', 'live', 'refs'] : ['all']) await new Promise((resolve, reject) => {
-    const child = spawn(electron, [join(temp, 'main.cjs'), '--disable-gpu', '--disable-backgrounding-occluded-windows', ...(listsOnly ? [`--scry-lists-campaign=${campaign}`] : [])], {
+    const child = spawn(electron, [join(temp, 'main.cjs'), '--disable-gpu', '--disable-backgrounding-occluded-windows', ...(reducedAmbientFixture ? ['--force-prefers-reduced-motion'] : []), ...(listsOnly ? [`--scry-lists-campaign=${campaign}`] : [])], {
       env: { PATH: process.env.PATH, TMPDIR: tmpdir(), HOME: join(temp, 'home') }, stdio: ['ignore', 'pipe', 'pipe']
     })
     let output = ''
-    const timer = setTimeout(() => { child.kill('SIGTERM') }, 30_000)
+    let timedOut = false
+    const timer = setTimeout(() => { timedOut = true; child.kill('SIGTERM') }, 30_000)
     child.stdout.on('data', (chunk) => { output += chunk.toString() })
     child.stderr.on('data', (chunk) => { output += chunk.toString() })
     child.once('error', (error) => { clearTimeout(timer); reject(error) })
     child.once('close', (code, signal) => {
       clearTimeout(timer)
       const result = output.match(/^SCRY_UI_SMOKE_RESULT=(.+)$/m)?.[1]
-      if (code !== 0 || !result) reject(new Error(`Hidden UI fixture failed (${code ?? signal}):\n${output.slice(-8000)}`))
+      if (code !== 0 || !result) reject(new Error(`Hidden UI fixture failed (${timedOut ? '30s deadline' : code ?? signal}):\n${output.slice(-8000)}`))
       else { if (listsOnly) campaignResults.push(JSON.parse(result).lists); else console.log(result); resolve() }
     })
   })

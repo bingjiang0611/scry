@@ -15,11 +15,14 @@ function fixture() {
   const cwd = mkdtempSync(join(tmpdir(), 'scry-session-history-'))
   roots.push(cwd)
   const args = { cwd, userDataDir: join(cwd, 'data'), sessionId: 'session-a', providerId: 'pi' as const, historyScope: 'session' as const, agentProfileId: 'profile-a' }
+  // Explicit chronology: synchronous archive writes may share a wall-clock millisecond.
+  let nextTimestamp = Date.UTC(2026, 9, 19, 2)
   function add(runId: string, userText: string, profile?: string | null) {
+    const timestamp = nextTimestamp++
     upsertTraceArchiveTurn({ ...args, runtimeProvider: 'pi_rpc', turn: {
-      runId, ts: Date.now(), userText, done: true,
+      runId, ts: timestamp, userText, done: true,
       ...(profile === undefined ? {} : { agentProfileId: profile }),
-      items: [{ id: `${runId}-item`, runId, ts: new Date().toISOString(), kind: 'model', stage: 'text', text: userText }]
+      items: [{ id: `${runId}-item`, runId, ts: new Date(timestamp).toISOString(), kind: 'model', stage: 'text', text: userText }]
     } })
   }
   return { args, add }
@@ -108,6 +111,7 @@ describe('session-scoped remote history', () => {
   })
 
   it('preserves known, legacy-unknown, and fork-prefixed turns in one session page walk', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.UTC(2026, 9, 19, 2))
     const { args, add } = fixture()
     add('run-a', 'known profile turn', 'profile-a')
     add('pi-native-fork-prefix', 'unknown legacy fork prefix')

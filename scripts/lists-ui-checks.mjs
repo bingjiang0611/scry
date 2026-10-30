@@ -83,6 +83,11 @@ export async function exerciseLists(contents, win, screenshotPrefix = '', pointe
       window.__historyFrame = requestAnimationFrame(sample)
     })()`)
     await click('#list-history')
+    // Completed turns initially window earlier activity; reveal it through the
+    // production control before testing the retained disclosures and all 50 tools.
+    await wait("document.querySelector('.turn-flow-reveal') != null")
+    check(!await read("!!document.querySelector('.thinking')"), 'completed history did not window its earlier activity')
+    await click('.turn-flow-reveal')
     await wait("document.querySelector('.si-head') && document.querySelector('.thinking')")
     await arm("node.classList.contains('motion-disclosure') && !!node.querySelector('.si-body')")
     await click('.si-head')
@@ -174,7 +179,6 @@ export async function exerciseLists(contents, win, screenshotPrefix = '', pointe
   await read('window.listFixture.appendTool()')
   check((await captured()).length===1, 'session identity baseline suppressed the next genuine arrival')
   await settle()
-  contents.debugger.attach('1.3')
   try {
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]})
     await wait("matchMedia('(prefers-reduced-motion: reduce)').matches")
@@ -212,8 +216,9 @@ export async function exerciseLists(contents, win, screenshotPrefix = '', pointe
     const reducedLongExit = await captured()
     check(reducedLongExit.every(a=>a.duration===120) && opacityOnly(reducedLongExit), `reduced long output did not exit in 120ms: ${JSON.stringify(reducedLongExit)}`)
   } finally {
-    await contents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[]})
-    contents.debugger.detach()
+    await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [
+      { name: 'prefers-reduced-motion', value: 'no-preference' }, { name: 'forced-colors', value: 'none' }
+    ] })
     await read('window.__listObserver?.disconnect()')
   }
   return { appendedToolOnly180: true, hookRows180AndLifecycleDoesNotReplay: true, tokensDoNotReplay: true, liveMetrics180: true, cacheNoEntry: true, loadingAndSessionIdentityNoEntry: true, reducedOpacityOnly: true, reducedLongEnterAndExit120: true }

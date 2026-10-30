@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   node:
     runs-on: ubuntu-latest
@@ -88,3 +92,17 @@ jobs:
       - name: Isolated renderer DOM smoke tests
         run: npm run test:renderer:ui
       - run: npm run pack:artifact
+
+  check:
+    name: Check
+    if: ${{ always() }}
+    needs: [node, cli-compat, packaged-electron]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every CI job to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$RESULTS" | jq -e 'length > 0 and all(.[]; .result == "success")' > /dev/null

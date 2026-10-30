@@ -36,7 +36,33 @@ export async function runOpeningMeasurement({ driver, options }) {
       await read('window.desktopRemoteFixture.holdHistory = false; window.releaseHistory(); delete window.releaseHistory')
       await wait('document.querySelector(".chat") !== window.openingPreviousChat && document.querySelector(".chat").textContent.includes("Remote history paragraph 79") && document.querySelector("[data-remote-session=other-native]")?.getAttribute("aria-current") === "true"', 'delayed history and selection publish together')
       await wait(bottom, 'delayed history opens at bottom')
-      await read('const extra = document.createElement("div"); extra.dataset.openingResize = "true"; extra.style.height = "900px"; document.querySelector(".chat").append(extra)')
+      await wait('document.querySelector(".model-effort-model")?.textContent === "qoder / Beta Default" && !document.querySelector(".composer-notice")', 'controls settled before the resize control')
+      await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+      // A Provider notice disappearing grows the viewport. Force that native
+      // clamp before content grows, while the browser's scroll event is queued.
+      await read(`(() => {
+        const history = document.querySelector('.chat')
+        window.openingResizeSettled = false
+        history.addEventListener('scroll', function settled() {
+          if (history.scrollHeight - history.scrollTop - history.clientHeight > 2) return
+          window.openingResizeSettled = true
+          history.removeEventListener('scroll', settled)
+        })
+        history.style.maxHeight = (history.clientHeight - 48) + 'px'
+      })()`)
+      await wait('window.openingResizeSettled', 'smaller viewport native scroll settles at latest')
+      const clamp = await read(`(() => {
+        const history = document.querySelector('.chat')
+        const before = { top: history.scrollTop, height: history.clientHeight }
+        history.style.maxHeight = ''
+        const after = { top: history.scrollTop, height: history.clientHeight }
+        const extra = document.createElement('div')
+        extra.dataset.openingResize = 'true'
+        extra.style.height = '900px'
+        history.append(extra)
+        return { before, after, distance: history.scrollHeight - history.scrollTop - history.clientHeight }
+      })()`)
+      check(clamp.after.height > clamp.before.height && Math.abs(clamp.before.top - clamp.after.top - (clamp.after.height - clamp.before.height)) <= 1 && clamp.distance > 800, 'Viewport/content control did not produce a real queued upward clamp')
       await wait(bottom, 'late history layout remains at bottom')
       await wheelUp()
       const position = await read('document.querySelector(".chat").scrollTop')

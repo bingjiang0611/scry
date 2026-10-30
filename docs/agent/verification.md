@@ -123,4 +123,4 @@ npm run publish:cli
 
 package lifecycle 会强制执行 `check:cli-release`；发布目标是执行者本机 npm 配置（或用 `--registry` 显式指定）的 registry，仓库不再固定任何部署方地址。不要从陈旧 `dist` 手工 `npm publish`。
 
-提交前检查 `git diff`，只提交本任务改动；除非用户明确要求，不推送。
+完成对应验证后，Agent 默认主动执行[本地提交前自查](pr-workflow.md#local-preflight)，检查需求与批准、范围、风险、验证证据以及完整 diff / 暂存区；无需用户再次提醒。处理发现的问题后，在任务分支只提交本任务改动，并在交付中简述自查结论与未验证项。除非用户明确要求，不推送、不创建远端 PR；获授权后按 [PR 工作流](pr-workflow.md) 推送和提审，避免混入已有无关未推送提交。本地自查不替代正式 PR 分诊或独立评审。
