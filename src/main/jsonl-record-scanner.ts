@@ -1,5 +1,5 @@
 import { once } from 'node:events'
-import type { Hash } from 'node:crypto'
+import { createHash, type Hash } from 'node:crypto'
 import type { FileHandle } from 'node:fs/promises'
 import { parser, type Token } from 'stream-json/parser.js'
 
@@ -105,4 +105,25 @@ async function endsWithNewline(handle: FileHandle, size: number): Promise<boolea
   const last = Buffer.allocUnsafe(1)
   const { bytesRead } = await handle.read(last, 0, 1, size - 1)
   return bytesRead === 1 && last[0] === 0x0a
+}
+
+/**
+ * `${bytes read}:${sha256}` over `[0, bytes)` of an open handle.
+ *
+ * A reader that parsed a prefix can call this again over the same range and compare: a
+ * rewrite that keeps the file's size changes no stat field, so only the content itself can
+ * tell the reader whether what it parsed is still what the file holds. Bytes after the range
+ * are ignored, which is what keeps an append-only writer legal.
+ */
+export async function hashFilePrefix(handle: FileHandle, bytes: number): Promise<string> {
+  const hash = createHash('sha256')
+  const buffer = Buffer.allocUnsafe(1024 * 1024)
+  let read = 0
+  while (read < bytes) {
+    const chunk = await handle.read(buffer, 0, Math.min(buffer.length, bytes - read), read)
+    if (chunk.bytesRead === 0) break
+    read += chunk.bytesRead
+    hash.update(buffer.subarray(0, chunk.bytesRead))
+  }
+  return `${read}:${hash.digest('hex')}`
 }

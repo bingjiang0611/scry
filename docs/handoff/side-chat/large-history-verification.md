@@ -110,22 +110,24 @@ cursor 不同**的合法页；旧判据（轮次号 + 长度 + 首尾字符）�
 所以：**不是“整个 App 不再有上限”**。被证明的是“侧聊大历史来源与冻结路径不再有隐藏的
 数据尺寸上限，超出交接预算的部分按需读取，缺失能力时如实拒绝”。
 
-## 4.5 Pi 原生读取器：两遍一致性与驻留上界
+## 4.5 原生读取器（Claude 与 Pi）：前缀一致性与驻留上界
 
 Pi 侧聊读取走 `pi-native-stream.ts` 的两遍投影（结构一遍、正文一遍），本轮关掉两个实际缺口：
 
-| 合同 | 现在怎么证明 | 证据 |
-|---|---|---|
-| 两遍读的是同一份前缀 | 两遍都对“第一遍量到的字节段”累计 sha256，两个 digest 必须相同；不同则抛错，已落盘的子会话内容被丢弃，不发布 snapshot | 同大小改写（`pi answer`→`PI ANSWER`）确定性拒绝；追加在已量前缀之后仍然成功 |
-| 驻留内存不随历史增长 | 正文 spool 共用一份 `SpoolBudget`，一轮关闭并在调用方消费后立即 `discard` | 60 轮 × 64 KiB 正文、预算 2 MiB：峰值驻留 98,338 B；旧形状（EOF 才释放）峰值 2,065,058 B，即被预算填满 |
-| 不是先读完整个文件再给第一轮 | 第一轮交付时正文遍只读了 1,048,576 B，文件 3,952,528 B | 同一条多轮检查里断言 `< size/2` |
+两个 Provider 的原生读取现在是同一份合同，而不是只有 Pi 正确：
 
-两遍的**文件读取次数不变**，新增的只是对已读字节做哈希（CPU），不是第三次读盘。
-反向对照都做过：去掉“每轮释放”后驻留检查失败（2,065,058 > 524,288），去掉 digest 比较后同大小改写检查失败。
+| 合同 | 怎么证明 | Claude | Pi |
+|---|---|---|---|
+| 驻留内存不随历史增长 | 正文 spool 共用一份 `SpoolBudget`（`captureSpools`），轮次在记录边界关闭，调用方消费后立即释放（`settleAndRelease`） | 60 轮 × 64 KiB，预算 2 MiB：峰值驻留 98,338 B，文件 3,951,330 B | 60 轮 × 64 KiB，预算 2 MiB：峰值驻留 98,338 B，文件 3,952,528 B |
+| 不是先读完整个文件再给第一轮 | 第一轮交付时读到的位置 | 1,048,576 B（一个 1 MiB 读块） | 1,048,576 B（同上） |
+| 解析过的前缀没有被同大小改写 | Claude：解析时对读到的字节累计 sha256，读完再对**同一固定区间**重读一遍比对；Pi：两遍各自对同一字节段累计 sha256 后比对 | 同大小改写（`answer one`→`ANSWER ONE`）确定性拒绝；追加成功 | 同大小改写（`pi answer`→`PI ANSWER`）确定性拒绝；追加成功 |
+| 追加仍然合法 | 两边都只比较“已量前缀”，区间之后的新字节不参与 | 通过（并断言文件变长） | 通过 |
 
-Pi 的文件身份仍是**头部自证**（`type`/`version`/`id`/`cwd`），与 Claude 的逐条 `sessionId` 不同，写在模块注释里；已放弃的分支不会被压平。
+反向对照都成立：去掉“每轮释放/按记录边界 drain”后，两边的驻留检查都失败（峰值 2,065,058 B > 524,288 B 上限）；去掉 digest 比较后，两边的同大小改写检查都失败。
 
-**仍存在的边界**：Claude 原生读取（`conversation-side-chat-native-stream.ts`）还是“EOF 后统一 settle”的形状，本轮按要求没有扩大范围去改它；它同一份 `TextSpool` 预算同样存在，但释放时机未改。
+成本要说清：Claude 是单遍读取，前缀证明因此**多一次同区间读取 + 哈希**（证据工作，不是免费）；Pi 的两遍本来就要读两次，只增加哈希。两者都**没有**增加第三遍解析，也没有把正文重新解析成对象。
+
+Pi 的文件身份仍是**头部自证**（`type`/`version`/`id`/`cwd`），与 Claude 的逐条 `sessionId` 不同，写在模块注释里；已放弃的分支不会被压平。inode/dev/size 这类同 fd 身份仍保留，但只作为“文件被替换/截断”的判据，不再是前缀内容的权威。
 
 ## 5. 本轮观察到的首次失败（不改写为 flake）
 
@@ -170,3 +172,17 @@ npm test
   和报告里的构建 hash 对上
 - 打包产物：`npm run install:mac:dev` 之后安装版验证由发布 gate 单独执行，不在此文件
   宣称
+
+## 7. 性能来源分类
+
+`scripts/performance-paths.json` 的 side-chat 路径 `sources` 补入本轮引入/改动的真实热路径模块：
+`conversation-side-chat-streamed.ts`、`conversation-side-chat-native-stream.ts`、`claude-jsonl-projector.ts`、
+`pi-native-stream.ts`、`pi-jsonl-projector.ts`、`jsonl-record-scanner.ts`、`conversation-side-chat-snapshot.ts`、
+`content-manifest.ts`（顺带修了该数组里已有的缩进错位）。这只是 IPC 来源分类维护，没有新增计数器或 workload。
+
+**诚实说明**：collector 的 `navigation.catalog` 并不驱动真实正文捕获，所以把新文件登记进 `sources` 不等于有了
+benchmark 覆盖；改这些模块仍必须另跑 `performance:measure`。本轮实测 135 行、0 worse、`Ratchet: passed`
+（`/tmp/scry-perf-claude-jqHAWg`），唯一变化的 5 个字节级计数器都是 trace/hash workload 的既有主分支漂移
+（`io.read.payload.bytes` −9 B、`other.hash-update-bytes` +2 B、`other.stringify-bytes` −12 B 等），
+不来自本轮改动；原生正文捕获的额外前缀读取不在这些计数器里——它是本轮新增的证据成本，如实记为“有意新增”，
+不用“0 worse”掩盖。

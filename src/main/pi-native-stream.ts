@@ -4,7 +4,7 @@ import { TextSpool, type SpoolBudget } from './text-spool'
 import { projectPiRecords, type PiJsonlEvent } from './pi-jsonl-projector'
 import { nativeBranch, validateHeader, type NativeEntry } from './pi-native-parse'
 import { historyCopy } from '../shared/constants/copy'
-import { allSpools, settleTurn, type TurnBodies } from './conversation-side-chat-streamed'
+import { allSpools, captureSpools, settleAndRelease, type TurnBodies } from './conversation-side-chat-streamed'
 import type { StreamedTurn } from './conversation-side-chat-stream'
 
 /**
@@ -282,36 +282,13 @@ export async function* streamPiNativeTurns(
     throw error
   })
   if (!handle) return
-  const live = new Set<TextSpool>()
-  const createSpool = (): TextSpool => {
-    // One allowance for the whole capture: past it a body spills instead of staying in RAM.
-    const created = new TextSpool(256 * 1024, budget)
-    live.add(created)
-    return created
-  }
-  const release = async (spools: Iterable<TextSpool>): Promise<void> => {
-    for (const spool of spools) {
-      live.delete(spool)
-      await spool.discard()
-    }
-  }
+  const spools = captureSpools(budget)
+  const { create: createSpool, release } = spools
   const ready: TurnBodies[] = []
   const state = { current: undefined as TurnBodies | undefined, sawUnsettled: false }
-  /**
-   * Settles one closed turn, then frees its bodies once the caller is done with it.
-   *
-   * The release runs when the caller asks for the next turn, which is after the sink has
-   * written this one: that is what keeps the resident set to one turn instead of the whole
-   * history. `settleTurn` may already have released the turn it refuses, and releasing twice
-   * is a no-op.
-   */
-  const settled = async function* (turn: TurnBodies): AsyncGenerator<StreamedTurn> {
-    try {
-      yield* settleTurn(turn, options, state, release)
-    } finally {
-      await release(allSpools(turn))
-    }
-  }
+  const settled = (turn: TurnBodies): AsyncGenerator<StreamedTurn> =>
+    settleAndRelease(turn, options, state, release)
+  const settleRelease = (turn: TurnBodies): Promise<void> => release(allSpools(turn))
   try {
     const before = await handle.stat()
     if (!before.isFile()) throw new Error('Pi 原生会话文件不是普通文件')
@@ -339,9 +316,9 @@ export async function* streamPiNativeTurns(
       throw new Error('Pi 原生会话文件在读取期间被替换或截断，不能确认快照来源')
     }
   } finally {
-    for (const closed of ready.splice(0)) await release(allSpools(closed))
-    if (state.current) await release(allSpools(state.current))
-    await release(live)
+    for (const closed of ready.splice(0)) await settleRelease(closed)
+    if (state.current) await settleRelease(state.current)
+    await spools.releaseAll()
     await handle.close()
   }
 }

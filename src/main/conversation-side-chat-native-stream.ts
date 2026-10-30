@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto'
 import { open } from 'node:fs/promises'
-import { TextSpool } from './text-spool'
+import { TextSpool, type SpoolBudget } from './text-spool'
 import { projectTranscript, type JsonlEvent, type ScalarSlot } from './claude-jsonl-projector'
+import { hashFilePrefix } from './jsonl-record-scanner'
 import type { StreamedTurn } from './conversation-side-chat-stream'
-import { allSpools, settleTurn, type AssistantPart } from './conversation-side-chat-streamed'
+import { allSpools, captureSpools, settleAndRelease, type AssistantPart } from './conversation-side-chat-streamed'
 import type { CaptureItem, CaptureSink } from './conversation-side-chat-capture'
 import { TitleTap, consume, type RequestedBoundary } from './conversation-side-chat-sink'
 import type { ProviderId } from '../shared/provider'
@@ -20,11 +22,18 @@ import type { ProviderId } from '../shared/provider'
  * skill directive continues the current turn; and only the Provider's own terminal marker
  * settles a turn. Visible text never settles anything.
  *
- * Only the captured prefix is authoritative. A file that shrank below the bytes this read
- * consumed, or that was replaced while it was read, proves nothing about that prefix and
- * is refused; a longer file is a later append and cannot change what was already read. An
- * unfinished trailing record is dropped rather than parsed, so a live append between
- * reads does not block freezing the completed prefix.
+ * Only the captured prefix is authoritative. The bytes this read parsed are hashed as they
+ * pass, then the same range is read once more and compared: a same-size rewrite changes no
+ * stat field, so only the content can prove the parsed prefix is still the file's own. A file
+ * that shrank below those bytes, or that was replaced while it was read, proves nothing and is
+ * refused; a longer file is a later append and cannot change what was already read. An
+ * unfinished trailing record is dropped rather than parsed, so a live append between reads
+ * does not block freezing the completed prefix.
+ *
+ * The re-read is the extra cost of that proof. Bodies share one spool allowance and are
+ * released per turn as the caller consumes them, so resident text follows one turn, not the
+ * length of the history. A caller that needs the proof without a second pass has to hash its
+ * own passes, as the Pi reader does.
  */
 
 /** The normalizer recognises a skill directive from this marker; only its head matters. */
@@ -61,25 +70,16 @@ export interface NativeTranscriptStreamOptions {
  * consumed and on error, so an aborted capture leaves no temporary file behind.
  */
 export async function* streamNativeTranscriptTurns(
-  options: NativeTranscriptStreamOptions
+  options: NativeTranscriptStreamOptions,
+  budget: SpoolBudget = { available: 4 * 1024 * 1024 }
 ): AsyncGenerator<StreamedTurn> {
   const handle = await open(options.path, 'r').catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') return null
     throw error
   })
   if (!handle) return
-  const live = new Set<TextSpool>()
-  const createSpool = (): TextSpool => {
-    const created = new TextSpool()
-    live.add(created)
-    return created
-  }
-  const release = async (spools: Iterable<TextSpool>): Promise<void> => {
-    for (const spool of spools) {
-      live.delete(spool)
-      await spool.discard()
-    }
-  }
+  const spools = captureSpools(budget)
+  const { create: createSpool, release } = spools
   const ready: TurnState[] = []
   const state = { suppress: false, sawUnsettled: false, current: undefined as TurnState | undefined }
   const record = new RecordProjection(state, createSpool, ready, {
@@ -88,24 +88,32 @@ export async function* streamNativeTranscriptTurns(
   try {
     const before = await handle.stat()
     if (!before.isFile()) throw new Error('原生会话 transcript 不是普通文件')
-    const evidence = { bytes: 0 }
+    const evidence = { bytes: 0, digest: createHash('sha256') }
     // Tokens are projected record by record; an unfinished trailing append ends the
     // generator without events, so the completed prefix is still frozen.
-    for await (const event of projectTranscript(handle, before.size, evidence)) await record.accept(event)
+    for await (const event of projectTranscript(handle, before.size, evidence)) {
+      await record.accept(event)
+      // A turn that just closed is settled before the next record is read.
+      while (ready.length > 0) yield* settleAndRelease(ready.shift()!, options, state, release)
+    }
     // The last turn ends at EOF, not at a following prompt record.
     if (state.current) {
       ready.push(state.current)
       state.current = undefined
     }
-    for (const closed of ready.splice(0)) yield* settleTurn(closed, options, state, release)
+    while (ready.length > 0) yield* settleAndRelease(ready.shift()!, options, state, release)
     const after = await handle.stat()
     if (after.ino !== before.ino || after.dev !== before.dev || after.size < evidence.bytes) {
       throw new Error('原生会话 transcript 在读取期间被替换或截断，不能确认快照来源')
     }
+    // Same-size rewrites are invisible to every stat field, so the prefix is read again.
+    if (await hashFilePrefix(handle, evidence.bytes) !== `${evidence.bytes}:${evidence.digest.digest('hex')}`) {
+      throw new Error('原生会话 transcript 在读取期间被改写，不能确认快照来源')
+    }
   } finally {
     for (const closed of ready.splice(0)) await release(allSpools(closed))
     if (state.current) await release(allSpools(state.current))
-    await release(live)
+    await spools.releaseAll()
     await handle.close()
   }
 }

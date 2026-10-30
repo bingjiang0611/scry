@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { TextSpool } from './text-spool'
+import { TextSpool, type SpoolBudget } from './text-spool'
 import type { StreamedMessage, StreamedTurn } from './conversation-side-chat-stream'
 
 /**
@@ -71,6 +71,39 @@ export function allSpools(turn: TurnBodies): TextSpool[] {
   return [turn.prompt, ...turn.assistant.flatMap(part => part.spools)]
 }
 
+/** Every spool of one capture: one shared allowance, and one place that frees them. */
+export interface CaptureSpools {
+  create(): TextSpool
+  /** Frees the given spools; a spool released twice is a no-op. */
+  release(spools: Iterable<TextSpool>): Promise<void>
+  /** Frees whatever is still live, for the abort path. */
+  releaseAll(): Promise<void>
+}
+
+export function captureSpools(budget: SpoolBudget): CaptureSpools {
+  const live = new Set<TextSpool>()
+  return {
+    create(): TextSpool {
+      // Past the shared allowance a body spills instead of staying in memory, so resident
+      // text follows one turn rather than the length of the history.
+      const spool = new TextSpool(256 * 1024, budget)
+      live.add(spool)
+      return spool
+    },
+    async release(spools: Iterable<TextSpool>): Promise<void> {
+      for (const spool of spools) {
+        live.delete(spool)
+        await spool.discard()
+      }
+    },
+    async releaseAll(): Promise<void> {
+      const all = [...live]
+      live.clear()
+      for (const spool of all) await spool.discard()
+    }
+  }
+}
+
 export interface SettleOptions {
   /** Whether a terminal marker proves the Provider finished the turn. */
   settles: (stopReason: string | undefined) => boolean
@@ -97,5 +130,25 @@ export async function* settleTurn(
   yield {
     runId: turn.runId, status: 'unavailable', settled: true, messages,
     ...(turn.providerTurnId === undefined ? {} : { providerTurnId: turn.providerTurnId })
+  }
+}
+
+/**
+ * Settles one closed turn, then frees its bodies once the caller is done with it.
+ *
+ * The release runs when the caller asks for the next turn, which is after a sink has
+ * written this one, so a body is never freed while it is still being read. `settleTurn`
+ * may already have released the turn it refuses, and releasing twice is a no-op.
+ */
+export async function* settleAndRelease(
+  turn: TurnBodies,
+  options: SettleOptions,
+  state: { sawUnsettled: boolean },
+  release: (spools: Iterable<TextSpool>) => Promise<void>
+): AsyncGenerator<StreamedTurn> {
+  try {
+    yield* settleTurn(turn, options, state, release)
+  } finally {
+    await release(allSpools(turn))
   }
 }

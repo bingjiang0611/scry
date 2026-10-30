@@ -1,14 +1,55 @@
-import { mkdtemp, open, rm, truncate, writeFile } from 'node:fs/promises'
+import { mkdtemp, open, rm, stat, truncate, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { streamNativeTranscriptTurns } from './conversation-side-chat-native-stream'
 import type { StreamedTurn } from './conversation-side-chat-stream'
+
+/**
+ * Read positions and a pass hook, so the prefix proof can be observed exactly.
+ *
+ * `furthest` resets when a read starts at offset 0, so the value describes the pass in
+ * progress rather than the whole capture. The hook changes the file once the transcript
+ * generator has finished, which is the only window between parsing the prefix and proving
+ * it is still the file's own bytes.
+ */
+const probe = vi.hoisted(() => ({
+  furthest: new Map<string, number>(),
+  afterParse: null as null | (() => Promise<void>)
+}))
+vi.mock('node:fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...actual,
+    open: async (...args: Parameters<typeof actual.open>) => {
+      const handle = await actual.open(...args)
+      const path = String(args[0])
+      return new Proxy(handle, { get(target, property) {
+        const value = Reflect.get(target, property, target)
+        if (property !== 'read') return typeof value === 'function' ? value.bind(target) : value
+        return async (...read: [unknown, unknown, unknown, unknown]) => {
+          const result = await (value as (...inner: unknown[]) => Promise<{ bytesRead: number }>).apply(target, read)
+          const position = typeof read[3] === 'number' ? read[3] as number : 0
+          const reached = position + result.bytesRead
+          probe.furthest.set(path, position === 0 ? reached : Math.max(probe.furthest.get(path) ?? 0, reached))
+          return result
+        }
+      } })
+    } }
+})
+vi.mock('./claude-jsonl-projector', async importOriginal => {
+  const actual = await importOriginal<typeof import('./claude-jsonl-projector')>()
+  return { ...actual, projectTranscript: async function* (...args: Parameters<typeof actual.projectTranscript>) {
+    yield* actual.projectTranscript(...args)
+    if (probe.afterParse) await probe.afterParse()
+  } }
+})
 
 const directories: string[] = []
 afterEach(async () => {
   await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true })))
+  probe.furthest.clear()
+  probe.afterParse = null
 })
 
 async function transcript(lines: readonly string[], trailing = ''): Promise<string> {
@@ -172,6 +213,64 @@ describe('native transcript streaming projection', () => {
       await handle.close()
       await iterator.return?.(undefined as never)
     }
+  })
+
+  it('settles and releases each turn instead of holding every earlier body', async () => {
+    // Sixty turns of ~64 KiB visible text: the bodies total well over the allowance, so
+    // holding them until EOF fills it, while one-turn-at-a-time stays far below. The file is
+    // also several read chunks long, so the pass cannot have read it all to deliver turn one.
+    const body = 'c'.repeat(32 * 1024)
+    const lines: string[] = []
+    for (let index = 0; index < 60; index += 1) {
+      lines.push(claudeUser(`question ${index} ${body}`, `prompt-${index}`))
+      lines.push(claudeAssistant(`answer ${index} ${body}`))
+    }
+    const path = await transcript(lines)
+    const size = (await stat(path)).size
+    const budget = { available: 2 * 1024 * 1024 }
+    let minimum = budget.available
+    let furthestAtFirstTurn = 0
+    let seen = 0
+    for await (const turn of streamNativeTranscriptTurns({
+      path, runId: 'native-1', sessionId: 'native-1', cwd: '/project', settles
+    }, budget)) {
+      seen += 1
+      if (seen === 1) furthestAtFirstTurn = probe.furthest.get(path) ?? 0
+      for (const message of turn.messages) {
+        let text = ''
+        for await (const chunk of message.text) text += chunk
+        expect(Buffer.byteLength(text, 'utf8')).toBe(message.bytes)
+        expect(digest(text)).toBe(message.contentHash)
+      }
+      minimum = Math.min(minimum, budget.available)
+    }
+    expect(seen).toBe(60)
+    expect(budget.available).toBe(2 * 1024 * 1024)
+    // Peak residency: one turn being consumed plus at most one open, not the whole history.
+    expect(2 * 1024 * 1024 - minimum).toBeLessThanOrEqual(512 * 1024)
+    expect(furthestAtFirstTurn).toBeGreaterThan(0)
+    expect(furthestAtFirstTurn).toBeLessThan(size / 2)
+  })
+
+  it('refuses a same-size rewrite while it reads but accepts an append', async () => {
+    const lines = [claudeUser('question', 'prompt-1'), claudeAssistant('answer one')]
+    const path = await transcript(lines)
+    // Same byte length, different text: inode, device and size all stay identical.
+    const rewritten = lines.join('').replace('answer one', 'ANSWER ONE')
+    expect(Buffer.byteLength(rewritten)).toBe((await stat(path)).size)
+    probe.afterParse = async () => { await writeFile(path, rewritten) }
+    await expect(collect(path)).rejects.toThrow('原生会话 transcript 在读取期间被改写')
+
+    // An append after the parsed prefix is legal: the frozen prefix did not change.
+    const appended = await transcript(lines)
+    const original = (await stat(appended)).size
+    probe.furthest.clear()
+    probe.afterParse = async () => {
+      await writeFile(appended, lines.join('') + claudeAssistant('a later turn'))
+    }
+    const turns = await collect(appended)
+    expect(turns.turns.map(turn => turn.texts)).toEqual([['question', 'answer one']])
+    expect((await stat(appended)).size).toBeGreaterThan(original)
   })
 
   it('drops an unfinished turn but refuses an unsettled turn before a settled one', async () => {
