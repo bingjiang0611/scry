@@ -13,8 +13,18 @@ import { MAX_CONVERSATION_HISTORY_TEXT_BYTES } from './conversation-history-limi
  */
 
 /** One shared byte budget for a bounded source read; never a per-turn allowance. */
-export interface HistoryReadBudget { textBytes: number }
+export interface HistoryReadBudget { textBytes: number; unbounded?: boolean }
 export const historyReadBudget = (): HistoryReadBudget => ({ textBytes: 0 })
+
+/**
+ * Budget for reading a source into a frozen snapshot.
+ *
+ * Capture streams the prefix one message at a time into the sealed manifest, so the
+ * prefix length is not a resident budget: a hundred MiB of history costs the manifest,
+ * not memory. What remains resident is the single message being projected, which is why
+ * a per-prefix cap would refuse a long session for no memory reason.
+ */
+export const captureReadBudget = (): HistoryReadBudget => ({ textBytes: 0, unbounded: true })
 
 /**
  * This read ran out of its one shared byte budget.
@@ -31,7 +41,7 @@ export class HistoryReadBudgetExceeded extends Error {
 
 export function chargeText(budget: HistoryReadBudget, bytes: number): void {
   budget.textBytes += bytes
-  if (budget.textBytes > MAX_CONVERSATION_HISTORY_TEXT_BYTES) {
+  if (!budget.unbounded && budget.textBytes > MAX_CONVERSATION_HISTORY_TEXT_BYTES) {
     throw new HistoryReadBudgetExceeded('交接源正文超过 4 MiB 读取预算')
   }
 }

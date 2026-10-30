@@ -1,13 +1,11 @@
-import { open, stat } from 'node:fs/promises'
+import { open } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider'
 import type { createAppSessionStore } from '../app-store'
 import type { SideChatNativeSource, SideChatNativeTurn, SideChatSourceDeps } from '../conversation-service-deps'
-import { MAX_CONVERSATION_HISTORY_SOURCE_BYTES } from '../conversation-history-limits'
-import type { NormalizeCtx } from '../normalize'
-import { parseTranscriptToTurns, type ParsedTurn } from '../normalize'
+import { appendTranscriptToTurns, createTranscriptParseState, type NormalizeCtx, type ParsedTurn } from '../normalize'
 import { readPiNativeHistory } from '../pi-native-history'
-import { archivedTranscriptPath, resolveTranscriptPath, transcriptPath } from '../transcript-archive'
+import { resolveTranscriptPath } from '../transcript-archive'
 
 export interface SideChatSourceRuntime {
   appSessionStore: () => ReturnType<typeof createAppSessionStore>
@@ -20,15 +18,21 @@ export interface SideChatSourceRuntime {
 const nativeReaders = new Set<ProviderId>(['claude', 'pi'])
 
 /**
- * Bounded, append-tolerant read of a live JSONL transcript.
+ * Streaming, append-tolerant read of a live JSONL transcript.
  *
  * A session that is still running keeps appending records, so requiring the whole
  * file to stay byte-identical would refuse every live source. Only the captured
  * prefix is used: the frozen content ends at the last newline that was complete
  * when the bytes were read, and a later appended turn can never change it. A
  * shrunk or replaced file proves nothing about that prefix and is refused.
+ *
+ * Records are parsed as they arrive, so a long transcript costs one decode buffer
+ * instead of a second copy of the whole file, and there is no size at which a real
+ * session becomes unreadable.
  */
-async function readBoundedTranscript(path: string, runId: string): Promise<ParsedTurn[]> {
+const READ_CHUNK_BYTES = 1024 * 1024
+
+async function readStreamedTranscript(path: string, runId: string): Promise<ParsedTurn[]> {
   const handle = await open(path, 'r').catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') return null
     throw error
@@ -37,41 +41,31 @@ async function readBoundedTranscript(path: string, runId: string): Promise<Parse
   try {
     const before = await handle.stat()
     if (!before.isFile()) throw new Error('原生会话 transcript 不是普通文件')
-    if (before.size > MAX_CONVERSATION_HISTORY_SOURCE_BYTES) {
-      throw new Error('原生会话超过 16 MiB 侧聊来源读取预算')
-    }
-    const buffer = Buffer.allocUnsafe(before.size)
+    const state = createTranscriptParseState()
+    const ctx = parseContext(runId)
+    const decoder = new TextDecoder('utf-8')
+    const buffer = Buffer.allocUnsafe(READ_CHUNK_BYTES)
+    let carry = ''
     let read = 0
-    while (read < buffer.length) {
-      const chunk = await handle.read(buffer, read, buffer.length - read, read)
+    for (;;) {
+      const chunk = await handle.read(buffer, 0, buffer.length, read)
       if (chunk.bytesRead === 0) break
       read += chunk.bytesRead
+      carry += decoder.decode(buffer.subarray(0, chunk.bytesRead), { stream: true })
+      const cut = carry.lastIndexOf('\n')
+      if (cut < 0) continue
+      appendTranscriptToTurns(carry.slice(0, cut), ctx, state)
+      carry = carry.slice(cut + 1)
     }
-    if (read !== before.size) throw new Error('原生会话 transcript 读取不完整')
     const after = await handle.stat()
     if (after.ino !== before.ino || after.dev !== before.dev || after.size < before.size) {
       throw new Error('原生会话 transcript 在读取期间被替换或截断，不能确认快照来源')
     }
-    return parseTranscriptToTurns(completeRecords(buffer), parseContext(runId))
+    // A half-written tail is not evidence; only newline-complete records were parsed.
+    return state.turns
   } finally {
     await handle.close()
   }
-}
-
-/** Refuse an oversized candidate before its identity or content is read. */
-async function assertTranscriptBudget(candidates: readonly string[]): Promise<void> {
-  for (const candidate of candidates) {
-    const size = await stat(candidate).then(info => info.size, () => undefined)
-    if (size !== undefined && size > MAX_CONVERSATION_HISTORY_SOURCE_BYTES) {
-      throw new Error('原生会话超过 16 MiB 侧聊来源读取预算')
-    }
-  }
-}
-
-/** Complete newline-terminated records only; a half-written tail is not evidence. */
-function completeRecords(buffer: Buffer): string {
-  const complete = buffer.lastIndexOf(10) + 1
-  return buffer.subarray(0, complete).toString('utf8')
 }
 
 function parseContext(runId: string): NormalizeCtx {
@@ -114,10 +108,11 @@ export function createSideChatSourceDeps(runtime: SideChatSourceRuntime): SideCh
   const readNativeTurns = async (source: SideChatNativeSource): Promise<SideChatNativeTurn[] | null> => {
     if (!nativeReaders.has(source.providerId)) return null
     if (source.providerId === 'pi') {
+      // Pi streams its own JSONL lines; a byte ceiling here would refuse a long
+      // session instead of letting the frozen prefix decide what is captured.
       const turns = await readPiNativeHistory({
         sessionRoot: join(runtime.homeDir, '.pi', 'agent', 'sessions'),
-        cwd: source.cwd, sessionId: source.nativeSessionId,
-        maxBytes: MAX_CONVERSATION_HISTORY_SOURCE_BYTES
+        cwd: source.cwd, sessionId: source.nativeSessionId
       })
       return turns?.map(turn => ({
         runId: turn.runId!, ...(turn.providerTurnId ? { providerTurnId: turn.providerTurnId } : {}),
@@ -125,19 +120,13 @@ export function createSideChatSourceDeps(runtime: SideChatSourceRuntime): SideCh
         userText: turn.userText, items: turn.items
       })) ?? null
     }
-    // Enforce the source budget before any transcript read: identity inspection
-    // reads the whole file and hydration parses it.
-    await assertTranscriptBudget([
-      transcriptPath(source.cwd, source.nativeSessionId, runtime.homeDir),
-      archivedTranscriptPath(runtime.userDataDir, source.cwd, source.nativeSessionId)
-    ])
     const path = resolveTranscriptPath({
       cwd: source.cwd, sessionId: source.nativeSessionId, userDataDir: runtime.userDataDir, home: runtime.homeDir
     })
     if (!path) return null
     // A transcript carries no Scry run identity: its turns share the session-scoped
     // id and are told apart by position in the frozen prefix, not by an invented run.
-    const parsed = await readBoundedTranscript(path, source.nativeSessionId)
+    const parsed = await readStreamedTranscript(path, source.nativeSessionId)
     return parsed.map(turn => ({
       runId: source.nativeSessionId,
       ...(turn.providerTurnId ? { providerTurnId: turn.providerTurnId } : {}),

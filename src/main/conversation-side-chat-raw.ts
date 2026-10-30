@@ -1,4 +1,4 @@
-import { historyReadBudget, turnMessageProjection } from './conversation-history-text'
+import { captureReadBudget, turnMessageProjection } from './conversation-history-text'
 import type { SideChatNativeTurn } from './conversation-service-deps'
 import type { ProviderId } from '../shared/provider'
 
@@ -27,7 +27,7 @@ export function projectedMessages(
   turns: readonly SideChatNativeTurn[],
   evidenceOf: (turn: SideChatNativeTurn) => { status: string; settled: boolean }
 ): Promise<ProjectedTurn[]> {
-  const budget = historyReadBudget()
+  const budget = captureReadBudget()
   return turns.reduce(async (previous, turn, index) => {
     const projected = await previous
     const messages = await turnMessageProjection(userData, { cwd }, turn, budget)

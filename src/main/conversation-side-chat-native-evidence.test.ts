@@ -1,4 +1,4 @@
-import { mkdir, realpath, truncate, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, realpath, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
@@ -6,7 +6,6 @@ import {
   nativeSideChatFixture,
   writeClaudeTranscript
 } from './conversation-side-chat.fixture'
-import { MAX_CONVERSATION_HISTORY_SOURCE_BYTES } from './conversation-history-limits'
 import { readPiNativeHistory } from './pi-native-history'
 import { sideChatSnapshotRefs } from './conversation-side-chat-snapshot'
 import type { ConversationSideChatRequest } from '../shared/conversation-api'
@@ -134,26 +133,52 @@ describe('native side-chat completion evidence', () => {
     expect((await current.store.list(current.cwd)).length).toBe(0)
   })
 
-  it('refuses a source that exceeds the 16 MiB side-chat read budget before parsing it', async () => {
+  it('captures a completed prefix from a transcript far beyond the old 16 MiB budget', async () => {
     const claudeSessionId = '51111111-2222-4333-8444-555555555555'
     const claude = await fixture('claude', claudeSessionId)
-    const claudePath = await writeClaudeTranscript(claude.home, claude.current.cwd, claudeSessionId, [
-      claudeTranscriptLine(claude.current.cwd, claudeSessionId, 'user', 'claude question'),
-      claudeTranscriptLine(claude.current.cwd, claudeSessionId, 'assistant', 'claude answer')
-    ])
-    await truncate(claudePath, MAX_CONVERSATION_HISTORY_SOURCE_BYTES + 1)
-    await expect(claude.current.service.previewSideChat({ kind: 'native-session', providerId: 'claude',
-      cwd: claude.current.cwd, nativeSessionId: claudeSessionId })).rejects.toThrow('16 MiB')
+    // 40 exchanges of 512 KiB each: the frozen prefix is ~20 MiB, so only streaming
+    // parsing can reach it. The last record is left half-written on purpose.
+    const filler = '字'.repeat(170_000)
+    const lines: string[] = []
+    for (let index = 0; index < 40; index += 1) {
+      lines.push(claudeTranscriptLine(claude.current.cwd, claudeSessionId, 'user', `问题 ${index} ${filler}`, { promptId: `prompt-${index}` }))
+      lines.push(claudeTranscriptLine(claude.current.cwd, claudeSessionId, 'assistant', `回答 ${index} ${filler}`))
+    }
+    await writeClaudeTranscript(claude.home, claude.current.cwd, claudeSessionId, lines)
+    const source = { kind: 'native-session' as const, providerId: 'claude' as const,
+      cwd: claude.current.cwd, nativeSessionId: claudeSessionId }
+    const preview = await claude.current.service.previewSideChat(source)
+    expect(preview.throughOrdinal).toBe(40)
+    const child = await claude.current.service.createSideChat(request(source, preview))
+    const record = (await claude.current.store.read(child.id))!
+    expect(record.sideChat?.snapshot.format).toBe(4)
+    const refs = await sideChatSnapshotRefs(claude.current.userData, record)
+    expect(refs.length).toBeGreaterThan(60)
+    // The half-written tail is not evidence, so it never becomes a frozen message.
+    expect(await claude.current.service.readItem(child.id, refs.at(-1)!)).toBe(`回答 39 ${filler}`)
 
     const piSessionId = '61111111-2222-4333-8444-555555555555'
     const pi = await fixture('pi', piSessionId)
-    const piPath = await writePiSession(pi.home, pi.current.cwd, piSessionId, [
-      piRecord({ id: 'u1', parentId: null, role: 'user', text: 'pi question' })
-    ])
-    await truncate(piPath, MAX_CONVERSATION_HISTORY_SOURCE_BYTES + 1)
-    await expect(pi.current.service.previewSideChat({ kind: 'native-session', providerId: 'pi',
-      cwd: pi.current.cwd, nativeSessionId: piSessionId })).rejects.toThrow('byte budget')
-  })
+    const piFiller = '字'.repeat(170_000)
+    const records: Array<Record<string, unknown>> = []
+    let parent: string | null = null
+    for (let index = 0; index < 40; index += 1) {
+      const ask = `pi-question-${index}`
+      records.push(piRecord({ id: ask, parentId: parent, role: 'user', text: `问题 ${index} ${piFiller}` }))
+      const answer = `pi-answer-${index}`
+      records.push(piRecord({ id: answer, parentId: ask, role: 'assistant', text: `回答 ${index} ${piFiller}`, stopReason: 'stop' }))
+      parent = answer
+    }
+    await writePiSession(pi.home, pi.current.cwd, piSessionId, records)
+    const piSource = { kind: 'native-session' as const, providerId: 'pi' as const,
+      cwd: pi.current.cwd, nativeSessionId: piSessionId }
+    const piPreview = await pi.current.service.previewSideChat(piSource)
+    expect(piPreview.throughOrdinal).toBe(40)
+    const piChild = await pi.current.service.createSideChat(request(piSource, piPreview))
+    const piRefs = await sideChatSnapshotRefs(pi.current.userData, (await pi.current.store.read(piChild.id))!)
+    expect(piRefs.length).toBeGreaterThan(60)
+    expect(await pi.current.service.readItem(piChild.id, piRefs.at(-1)!)).toBe(`回答 39 ${piFiller}`)
+  }, 180_000)
 
   it('refuses creation when the chosen turn content changed after the preview', async () => {
     const sessionId = '71111111-2222-4333-8444-555555555555'

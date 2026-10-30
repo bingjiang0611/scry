@@ -12,7 +12,7 @@ import {
 } from './conversation-history-limits'
 import { belongsToSideChatSnapshot, readSideChatSnapshotMessage } from './conversation-side-chat-snapshot'
 import type { NativeHandoffTarget } from './conversation-history'
-import { chargeText, historyReadBudget, turnAssistantText, turnMessageProjection } from './conversation-history-text'
+import { captureReadBudget, chargeText, historyReadBudget, turnAssistantText, turnMessageProjection } from './conversation-history-text'
 
 const hash = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex')
 
@@ -33,7 +33,9 @@ export async function readCapturedTurnMessages(
   prefix: readonly ConversationTurn[]
 ): Promise<HistoryMessage[]> {
   let sourceBytes = 0
-  const budget = historyReadBudget()
+  // The frozen snapshot streams each message into its manifest, so the source read is
+  // not charged against a resident-text cap; the archive read still has its own bound.
+  const budget = captureReadBudget()
   const messages: HistoryMessage[] = []
   for (const turn of prefix) {
     const binding = conversation.bindings.find(candidate => candidate.id === turn.bindingId)
