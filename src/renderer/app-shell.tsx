@@ -47,7 +47,6 @@ export function AppShell(props: AppShellProps) {
     setRemoteWorkspaceDirty, toggleOverviewPanel, changeView, openRemoteLocation, setShowSkills, setShowMcp,
     draftKey, questionKindsByRun
   } = props
-  useLegacyDiffPreviewDemand(session.currentRunId, view === 'chat' && !shellPanelMaximized)
   // Measured narrow layout, one-pass child catalog and the side-chat tabs of this
   // session. No child transcript is read and no per-child IPC is issued here.
   const workbench = useRightWorkbench({
@@ -69,6 +68,12 @@ export function AppShell(props: AppShellProps) {
     restorePane: surfacePane.restore
   })
   const { shellRef, narrowSingleColumn, catalog: sideChatCatalog, panel: sideChatPanel, layoutSaved } = workbench
+  const primaryPaneVisible = !shellPanelMaximized && !(narrowSingleColumn && shellPanelVisible)
+  // These surfaces share the primary run projection even when its transcript is hidden.
+  const evidenceSurfaceVisible = panelVisible && !rightSurface.activeSideChatId
+    && (rightSurface.activeId === 'overview' || rightSurface.activeId === 'diff' || rightSurface.activeId === 'agents')
+  const mainLiveVisible = primaryPaneVisible || evidenceSurfaceVisible
+  useLegacyDiffPreviewDemand(session.currentRunId, view === 'chat' && mainLiveVisible)
   return (
     <div ref={shellRef} className={`app app-shell${shellPanelMounted ? ` has-right-panel right-panel-surface${shellPanelMaximized ? ' right-panel-maximized' : ''}${!shellPanelVisible ? ' right-panel-hidden' : ''}` : ''}${narrowSingleColumn ? ' narrow-single-column' : ''}${summaryVisible ? ' pinned-summary-visible' : ''}${summaryVisible && summaryPersistent ? ' pinned-summary-persistent' : ''}${sidebarPane.collapsed ? ' sidebar-collapsed' : ''}`} data-narrow-pane={narrowSingleColumn ? (shellPanelVisible ? 'panel' : 'main') : undefined} style={appStyle}>
       <Sidebar {...(sidebarActions as ComponentProps<typeof Sidebar>)} id="sidebar-pane" draftStore={draftStore} version={packageJson.version} projects={projects}
@@ -92,10 +97,10 @@ export function AppShell(props: AppShellProps) {
               <ViewChrome cwd={logicalConversation.cwd} showSummary={summaryVisible} showPanel={panelVisible} onToggleSummary={summary.toggle} onTogglePanel={toggleOverviewPanel} />
               <div className="main-content main-content--single">
                 {/* A child opened from the sidebar keeps its own controls and snapshot reader. */}                {logicalConversation.sideChat
-                  ? <SideChatSurface liveVisible={!shellPanelMaximized} key={logicalConversation.id} variant="main" conversation={logicalConversation} draftStore={draftStore}
+                  ? <SideChatSurface liveVisible={mainLiveVisible} key={logicalConversation.id} variant="main" conversation={logicalConversation} draftStore={draftStore}
                     agents={chatProps.agents} onOpenConversation={pickConversation} onChanged={() => { void loadProjects() }}
                     onProjection={setConversationProjection} {...(chatProps.onOpenFile ? { onOpenFile: chatProps.onOpenFile } : {})} />
-                  : <ConversationView liveVisible={!shellPanelMaximized} key={logicalConversation.id} conversation={logicalConversation} draftStore={draftStore} chatProps={chatProps} initialAgentId={conversationAgent} onChanged={() => { void loadProjects() }} onProjection={setConversationProjection} onOpenConversation={pickConversation} />}
+                  : <ConversationView liveVisible={mainLiveVisible} key={logicalConversation.id} conversation={logicalConversation} draftStore={draftStore} chatProps={chatProps} initialAgentId={conversationAgent} onChanged={() => { void loadProjects() }} onProjection={setConversationProjection} onOpenConversation={pickConversation} />}
               </div>
             </> : !conversationError && <p role="status">正在打开对话…</p>}
           </> : (view === 'remote' || (view === 'meta-prompts' && metaPromptTarget.current.view === 'remote')) && remoteTarget ? <>
