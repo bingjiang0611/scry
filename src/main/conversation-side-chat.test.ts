@@ -165,12 +165,22 @@ describe('side-chat snapshot capture', () => {
     await expect(current.service.previewSideChat(source)).rejects.toThrow()
     await writeFile(path, original)
 
+    // A single visible body beyond the old 4 MiB snapshot budget is now frozen, because
+    // the manifest stores parts instead of one artifact-sized string.
     const fresh = await fixture()
     const big = 'a'.repeat(MAX_SIDE_CHAT_SNAPSHOT_BYTES + 1)
     const parentB = await fresh.service.create(fresh.cwd)
     await sendTurn(fresh, parentB.id, 'big-turn-1', big)
-    await expect(fresh.service.previewSideChat({ kind: 'conversation', conversationId: parentB.id })).rejects.toThrow(/预算/)
-    expect((await fresh.store.list(fresh.cwd)).length).toBe(1)
+    const bigSource = { kind: 'conversation' as const, conversationId: parentB.id }
+    const preview = await fresh.service.previewSideChat(bigSource)
+    const child = await fresh.service.createSideChat({
+      source: bigSource, expectedThroughOrdinal: preview.throughOrdinal, expectedThroughRunId: preview.throughRunId,
+      expectedPrefixFingerprint: preview.prefixFingerprint, expectedManifestFingerprint: preview.manifestFingerprint,
+      commandId: 'side-chat-big-body'
+    })
+    const refs = await sideChatSnapshotRefs(fresh.userData, (await fresh.store.read(child.id))!)
+    const assistant = refs.find(ref => ref.itemId === 'assistant')
+    expect(await fresh.service.readItem(child.id, assistant!)).toBe(`answer: ${big}`)
   })
 
   it('rejects a creation request whose source boundary no longer matches', async () => {

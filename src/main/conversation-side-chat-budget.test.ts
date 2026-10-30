@@ -83,28 +83,28 @@ describe('side-chat preview narrowing and handoff budget', () => {
     expect(await contentRoots(current.userData)).toEqual(roots)
   })
 
-  it('narrows only on a real budget refusal and keeps an explicit boundary exact', async () => {
+  it('freezes a prefix beyond the old 4 MiB body budget without narrowing it', async () => {
     const current = await fixture()
     const parent = await current.service.create(current.cwd)
-    // Three ~3 MiB turns exceed the 4 MiB snapshot budget; one turn still fits it.
+    // Three ~3 MiB turns are ~9 MiB of visible text, more than twice the removed 4 MiB cap.
     const body = 'y'.repeat(1_500_000)
     for (const index of [1, 2, 3]) await sendTurn(current, parent.id, `parent-${index}`, `${body} ${index}`)
     const source = { kind: 'conversation' as const, conversationId: parent.id }
-    // The bounded source read is a tagged budget boundary, not prose: three large turns
-    // exhaust it, and the preview answers with the smallest frozen prefix that fits.
-    const narrowed = await current.service.previewSideChat(source)
-    expect(narrowed.narrowed?.message).toContain('4 MiB 读取预算')
-    expect(narrowed.throughOrdinal).toBe(1)
-    expect(narrowed.messageCount).toBe(2)
-    // The explicit smaller boundary the user chose stays exactly that boundary.
-    const child = await current.service.createSideChat(request(source, narrowed))
+    // The prefix is streamed into the manifest, so its size is not a resident budget and
+    // the preview no longer offers a smaller prefix as the only way forward.
+    const preview = await current.service.previewSideChat(source)
+    expect(preview.narrowed).toBeUndefined()
+    expect(preview.throughOrdinal).toBe(3)
+    expect(preview.messageCount).toBe(6)
+    const child = await current.service.createSideChat(request(source, preview))
     const stored = (await current.store.read(child.id))!
-    expect(stored.sideChat?.snapshot.throughOrdinal).toBe(1)
-    expect(stored.sideChat?.snapshot.format === 4 ? stored.sideChat.snapshot.messageCount : 0).toBe(2)
-    // An unknown failure never becomes a successful narrowing: an explicit boundary that
-    // still exceeds the budget is reported, not silently replaced by a smaller prefix.
-    await expect(current.service.previewSideChat(source, { completedThroughOrdinal: 3 }))
-      .rejects.toThrow('4 MiB 读取预算')
+    expect(stored.sideChat?.snapshot.throughOrdinal).toBe(3)
+    expect(stored.sideChat?.snapshot.format === 4 ? stored.sideChat.snapshot.messageCount : 0).toBe(6)
+    const refs = await sideChatSnapshotRefs(current.userData, stored)
+    expect(await current.service.readItem(child.id, refs.at(-1)!)).toBe(`answer: ${body} 3`)
+    // An explicit boundary still means exactly that boundary.
+    const explicit = await current.service.previewSideChat(source, { completedThroughOrdinal: 1 })
+    expect(explicit.throughOrdinal).toBe(1)
   })
 
   it('measures the sealed artifact with one authority for preview and creation', async () => {
