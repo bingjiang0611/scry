@@ -180,6 +180,35 @@ describe('native side-chat completion evidence', () => {
     expect(await pi.current.service.readItem(piChild.id, piRefs.at(-1)!)).toBe(`回答 39 ${piFiller}`)
   }, 180_000)
 
+  it('freezes more than 2000 turns and 4000 messages without one request per item', async () => {
+    const sessionId = '71111111-2222-4333-8444-555555555555'
+    const claude = await fixture('claude', sessionId)
+    // 2100 exchanges: past the old 2000-turn budget and 4200 frozen messages.
+    const lines: string[] = []
+    for (let index = 0; index < 2100; index += 1) {
+      lines.push(claudeTranscriptLine(claude.current.cwd, sessionId, 'user', `问题 ${index}`, { promptId: `prompt-${index}` }))
+      lines.push(claudeTranscriptLine(claude.current.cwd, sessionId, 'assistant', `回答 ${index}`))
+    }
+    await writeClaudeTranscript(claude.home, claude.current.cwd, sessionId, lines)
+    const source = { kind: 'native-session' as const, providerId: 'claude' as const,
+      cwd: claude.current.cwd, nativeSessionId: sessionId }
+    const preview = await claude.current.service.previewSideChat(source)
+    expect(preview.throughOrdinal).toBe(2100)
+    expect(preview.messageCount).toBe(4200)
+    const child = await claude.current.service.createSideChat(request(source, preview, 'side-chat-4200'))
+    const record = (await claude.current.store.read(child.id))!
+    const snapshot = record.sideChat?.snapshot
+    if (snapshot?.format !== 4) throw new Error('creation must seal a format 4 snapshot')
+    expect(snapshot.messageCount).toBe(4200)
+    // The durable child record stays a descriptor, not one reference per message.
+    expect(JSON.stringify(record).length).toBeLessThan(20_000)
+    const refs = await sideChatSnapshotRefs(claude.current.userData, record)
+    expect(refs.length).toBe(4200)
+    for (const [index, expected] of [[0, '问题 0'], [2099, '回答 1049'], [4199, '回答 2099']] as const) {
+      expect(await claude.current.service.readItem(child.id, refs[index])).toBe(expected)
+    }
+  }, 240_000)
+
   it('refuses creation when the chosen turn content changed after the preview', async () => {
     const sessionId = '71111111-2222-4333-8444-555555555555'
     const { current, home } = await fixture('claude', sessionId)

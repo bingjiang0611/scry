@@ -4,6 +4,9 @@ import { sendTurn, sideChatFixture, modelEvent, hash, type SideChatFixture } fro
 import { sideChatSnapshotRefs, SIDE_CHAT_BODY_PAGE_ITEMS } from './conversation-side-chat-snapshot'
 import { readSideChatManifestItem, readSideChatMessagePage } from './conversation-side-chat-manifest'
 import { conversationHistoryRoot } from './conversation-history-content'
+import { sideChatHistoryReaderSource } from './conversation-side-chat-reader'
+import { openConversationHistoryReader, HISTORY_READER_TOOL } from './conversation-history-reader'
+import { conversationItemKey } from '../shared/conversation'
 import { traceArchiveTurnPath, readTraceArchiveForMigration } from './transcript-archive'
 import { traceArchiveCaptureInfo } from './transcript-archive-capture'
 import type { Conversation } from '../shared/conversation'
@@ -161,6 +164,10 @@ describe('large side-chat history through the production service', () => {
       expectedContinuationKey: preview.target.continuationKey, commandId: 'first-send-1', prompt: '继续',
       selectedItems: continuation.missingItems, confirmFresh: true, permissionMode: 'default'
     })
+    // The Provider of this send really received a reader connection, and that reader
+    // serves the omitted frozen messages from the sealed manifest alone.
+    const connection = current.runs.at(-1)?.managed.historyReader
+    expect(connection?.snapshotId).toBeTruthy()
     const after = (await current.store.read(before.id))!
     const dispatched = after.turns.find(turn => turn.origin === 'dispatch')
     if (!dispatched || dispatched.origin !== 'dispatch') throw new Error('the first send must publish a dispatch turn')
@@ -169,6 +176,58 @@ describe('large side-chat history through the production service', () => {
     expect(ledger + dispatched.importedItems.length).toBe((TURNS + 1) * 2)
     // 74 frozen messages must not become 74 references in the durable record.
     expect(JSON.stringify(dispatched).length).toBeLessThan(8_000)
+    // One contiguous frozen prefix stays one range however many messages it holds.
+    const omitted = (dispatched.omittedRanges ?? []).flatMap(range =>
+      Array.from({ length: range.to - range.from + 1 }, (_unused, offset) => range.from + offset))
+    expect(omitted.length).toBe((TURNS + 1) * 2 - dispatched.importedItems.length)
+    const descriptor = descriptorOf(after)
+    const reader = await openConversationHistoryReader(sideChatHistoryReaderSource(childRoot(current, after), descriptor, omitted))
+    try {
+      const call = (args: unknown) => fetch(reader.connection.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${reader.connection.token}` },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: HISTORY_READER_TOOL, arguments: args } })
+      })
+      const page = async (args: unknown) => {
+        const response = await call(args)
+        expect(response.status).toBe(200)
+        const body = await response.text()
+        // One page stays bounded by the sealed part size (256 KiB) however large the
+        // omitted history is; a manifest page is far smaller than that.
+        expect(Buffer.byteLength(body)).toBeLessThan(512 * 1024)
+        return JSON.parse((JSON.parse(body) as { result: { content: Array<{ text: string }> } })
+          .result.content[0].text) as Record<string, unknown>
+      }
+      // Page the manifest the way a model does, instead of assuming one page holds it all.
+      let cursor: number | null = 0
+      let totalItems = 0
+      let hugeRef: { id: string; bytes: number } | undefined
+      while (cursor !== null) {
+        const manifest: { kind: string; totalItems: number; items: Array<{ id: string; bytes: number }>; nextOffset: number | null } =
+          await page({ offset: cursor }) as never
+        expect(manifest.kind).toBe('manifest')
+        totalItems = manifest.totalItems
+        hugeRef ??= manifest.items.find(entry => entry.bytes > HUGE_VISIBLE)
+        cursor = manifest.nextOffset
+      }
+      expect(totalItems).toBe(omitted.length)
+      expect(hugeRef?.bytes).toBeGreaterThan(HUGE_VISIBLE)
+      let offset = 0
+      let text = ''
+      for (;;) {
+        const body = await page({ itemId: hugeRef!.id, offset }) as { text: string; nextOffset: number | null }
+        text += body.text
+        if (body.nextOffset === null) break
+        offset = body.nextOffset
+      }
+      expect(text.length).toBeGreaterThan(HUGE_VISIBLE)
+      expect(text.startsWith('huge question v')).toBe(true)
+      // A returned id never names a message outside this run's omission range.
+      await expect(page({ itemId: conversationItemKey({ runId: 'other', itemId: 'user', contentHash: 'a'.repeat(64) }) }))
+        .rejects.toThrow()
+    } finally {
+      await reader.close()
+    }
     expect(dispatched.omittedItems.length).toBe(0)
     // One contiguous frozen prefix stays one range however many messages it holds.
     expect((dispatched.omittedRanges ?? []).every(range => range.to > range.from)).toBe(true)
