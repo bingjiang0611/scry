@@ -71,18 +71,29 @@ describe('native side-chat sources without a Scry archive', () => {
     expect(await current.service.readItem(child.id, refs[1])).toBe('claude answer one')
   })
 
-  it('fails closed on a torn transcript write instead of guessing its identity', async () => {
+  it('freezes the completed prefix of a torn transcript write and refuses a corrupt record', async () => {
     const sessionId = '99999999-2222-4333-8444-555555555555'
     const { current, home } = await nativeFixture('claude', sessionId)
     const path = await writeClaudeTranscript(home, current.cwd, sessionId, [
       claudeLine(current.cwd, sessionId, 'user', 'claude question'),
       claudeLine(current.cwd, sessionId, 'assistant', 'claude answer')
     ])
-    // A half-written record leaves the transcript identity unprovable, so the
-    // source is refused instead of reusing the visible text of the intact turns.
+    const source = { kind: 'native-session' as const, providerId: 'claude' as const,
+      cwd: current.cwd, nativeSessionId: sessionId }
+    // A live writer appends a half-written record. That tail is not evidence, and it no
+    // longer blocks freezing the records that were already complete.
     await appendFile(path, '{"type":"assistant","cwd":"' + current.cwd)
-    await expect(current.service.previewSideChat({ kind: 'native-session', providerId: 'claude',
-      cwd: current.cwd, nativeSessionId: sessionId })).rejects.toThrow('没有可验证的原生历史')
+    const preview = await current.service.previewSideChat(source)
+    expect(preview.messageCount).toBe(2)
+    expect(preview.throughOrdinal).toBe(1)
+
+    // A corrupt record in the middle is a different thing: the prefix cannot be proved,
+    // so the source is refused and nothing is published.
+    await writeFile(path, [
+      claudeLine(current.cwd, sessionId, 'user', 'claude question'),
+      '{"type":"assistant","cwd":"' + current.cwd + '","message":{"role":"assistant","content":[{"type":"text",}]}}\n'
+    ].join(''))
+    await expect(current.service.previewSideChat(source)).rejects.toThrow('原生会话记录')
     expect((await current.store.list(current.cwd)).length).toBe(0)
   })
 

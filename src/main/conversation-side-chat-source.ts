@@ -8,17 +8,15 @@ import { normalizeSessionTitle, SESSION_TITLE_MAX_LENGTH } from '../shared/sessi
 import type { ProviderId } from '../shared/provider'
 import { streamTurns, type StreamedMessage } from './conversation-side-chat-stream'
 import { completedProjections, projectedMessages, stopReasonProvesCompletion } from './conversation-side-chat-raw'
-import { measureSink, type CaptureItem, type CaptureMessageMeta, type CaptureSink } from './conversation-side-chat-capture'
+import { captureStreamedNativePrefix } from './conversation-side-chat-native-stream'
+import { measureSink, type CaptureItem } from './conversation-side-chat-capture'
+import type { CaptureSink } from './conversation-side-chat-capture'
+import { TitleTap, consume, type RequestedBoundary } from './conversation-side-chat-sink'
 
 const hash = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex')
 
 export type { CaptureItem, CaptureSink } from './conversation-side-chat-capture'
-
-/** The user-visible freeze boundary; creation re-verifies this exact turn. */
-export interface RequestedBoundary {
-  ordinal: number
-  runId?: string
-}
+export type { RequestedBoundary } from './conversation-side-chat-sink'
 
 /**
  * One captured prefix, described by exact per-message facts instead of message bodies.
@@ -75,48 +73,6 @@ export function fingerprints(source: SideChatSource, through: { ordinal: number;
 /** One message of a source whose text is already in memory, typed as a stream. */
 function memoryMessage(text: string, contentHash: string, role: 'user' | 'assistant'): StreamedMessage {
   return { role, contentHash, bytes: Buffer.byteLength(text, 'utf8'), text: (async function* () { yield text })() }
-}
-
-/** Records the first characters of a title candidate without holding the whole message. */
-class TitleTap {
-  private text = ''
-  private done = false
-
-  /** Only the first user prompt names the child; later text is not a title candidate. */
-  take(message: StreamedMessage): StreamedMessage {
-    if (this.done || message.role !== 'user') return message
-    const tap = this
-    const limit = SESSION_TITLE_MAX_LENGTH * 4
-    tap.done = true
-    return {
-      ...message,
-      text: (async function* (): AsyncGenerator<string> {
-        for await (const chunk of message.text) {
-          if (tap.text.length < limit) tap.text += chunk.slice(0, limit - tap.text.length)
-          yield chunk
-        }
-      })()
-    }
-  }
-
-  get value(): string | undefined {
-    return this.text.length > 0 ? this.text : undefined
-  }
-}
-
-/**
- * Feeds one source message to the sink, keeping only the title candidate.
- *
- * The message is consumed exactly once: preview measures it, creation writes it, and the
- * title tap rides the same pass instead of asking for the body again.
- */
-async function consume(
-  sink: CaptureSink,
-  message: StreamedMessage,
-  meta: CaptureMessageMeta,
-  title: TitleTap
-): Promise<CaptureItem> {
-  return sink.append(title.take(message), meta)
 }
 
 function capturableTurn(turn: ConversationTurn): boolean {
@@ -275,14 +231,22 @@ async function captureNativePrefix(
     if (error instanceof TraceArchiveCaptureError) return undefined
     throw error
   })
+  // A streaming seam only constructs a reader here; nothing is read until it is iterated.
+  const stream = await deps.sideChatSource?.streamNativeTurns?.(native)
   let items: CaptureItem[]
   let title: string | undefined
   let through: { ordinal: number; runId: string } | undefined
+  console.error('DBG branch', JSON.stringify({ archive: archiveInfo?.totalTurns, stream: stream !== null }))
   if (archiveInfo && archiveInfo.totalTurns !== 0) {
     const archived = await captureArchivePrefix(deps, source, captureArgs, archiveInfo, boundary, sink)
     items = archived.items
     title = archived.title
     through = archived.through
+  } else if (stream) {
+    const captured = await captureStreamedNativePrefix({ source, stream, boundary, sink })
+    items = captured.items
+    title = captured.title
+    through = captured.through
   } else {
     const read = deps.sideChatSource?.readNativeTurns
     const turns = read ? await read(native) : null

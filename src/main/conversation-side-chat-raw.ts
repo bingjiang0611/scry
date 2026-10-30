@@ -58,7 +58,7 @@ export function completedProjections(turns: readonly ProjectedTurn[]): Projected
  */
 const completedStopReasons: Partial<Record<ProviderId, string>> = { claude: 'end_turn', pi: 'stop' }
 
-export function stopReasonProvesCompletion(providerId: ProviderId, turn: SideChatNativeTurn): boolean {
+export function stopReasonProvesCompletion(providerId: ProviderId, turn: { stopReason?: string }): boolean {
   const expected = completedStopReasons[providerId]
   return expected !== undefined && turn.stopReason === expected
 }

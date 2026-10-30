@@ -6,6 +6,7 @@ import type { AgentStartRequest } from '../shared/runtime'
 import type { LoadedSessionTurn } from './session-history'
 import type { ProviderId } from '../shared/provider'
 import type { TraceEvent } from '../shared/trace'
+import type { StreamedTurn } from './conversation-side-chat-stream'
 import type { ConversationStore } from './conversation-store'
 
 /** Catalog-verified composite identity of a read-only native side-chat source. */
@@ -40,7 +41,12 @@ export interface SideChatNativeTurn {
 export interface SideChatSourceDeps {
   /** Required: a native source without a verified catalog identity is not evidence. */
   assertNativeSource: (source: SideChatNativeSource) => Promise<void>
-  /** Optional: only Providers with a shipped transcript reader supply one. */
+  /**
+   * Optional: a Provider whose transcript can be projected record by record. Bodies stay
+   * spooled, so a single huge tool result never becomes a value in memory.
+   */
+  streamNativeTurns?: (source: SideChatNativeSource) => Promise<AsyncGenerator<StreamedTurn> | null>
+  /** Optional: a Provider whose own reader only returns whole turns. */
   readNativeTurns?: (source: SideChatNativeSource) => Promise<SideChatNativeTurn[] | null>
 }
 

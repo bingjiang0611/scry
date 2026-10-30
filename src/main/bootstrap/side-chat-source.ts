@@ -1,11 +1,13 @@
-import { open } from 'node:fs/promises'
+import { lstat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider'
 import type { createAppSessionStore } from '../app-store'
 import type { SideChatNativeSource, SideChatNativeTurn, SideChatSourceDeps } from '../conversation-service-deps'
-import { appendTranscriptToTurns, createTranscriptParseState, type NormalizeCtx, type ParsedTurn } from '../normalize'
+import type { StreamedTurn } from '../conversation-side-chat-stream'
+import { streamNativeTranscriptTurns } from '../conversation-side-chat-native-stream'
+import { stopReasonProvesCompletion } from '../conversation-side-chat-raw'
 import { readPiNativeHistory } from '../pi-native-history'
-import { resolveTranscriptPath } from '../transcript-archive'
+import { archivedTranscriptPath, transcriptPath } from '../transcript-archive'
 
 export interface SideChatSourceRuntime {
   appSessionStore: () => ReturnType<typeof createAppSessionStore>
@@ -14,64 +16,20 @@ export interface SideChatSourceRuntime {
   userDataDir: string
 }
 
-/** Claude and Pi ship bounded native readers; the other Providers stay archive-only. */
-const nativeReaders = new Set<ProviderId>(['claude', 'pi'])
+/** Pi ships its own whole-turn reader; every other Provider reads its transcript here. */
+const nativeReaders = new Set<ProviderId>(['pi'])
 
-/**
- * Streaming, append-tolerant read of a live JSONL transcript.
- *
- * A session that is still running keeps appending records, so requiring the whole
- * file to stay byte-identical would refuse every live source. Only the captured
- * prefix is used: the frozen content ends at the last newline that was complete
- * when the bytes were read, and a later appended turn can never change it. A
- * shrunk or replaced file proves nothing about that prefix and is refused.
- *
- * Records are parsed as they arrive, so a long transcript costs one decode buffer
- * instead of a second copy of the whole file, and there is no size at which a real
- * session becomes unreadable.
- */
-const READ_CHUNK_BYTES = 1024 * 1024
-
-async function readStreamedTranscript(path: string, runId: string): Promise<ParsedTurn[]> {
-  const handle = await open(path, 'r').catch((error: NodeJS.ErrnoException) => {
-    if (error.code === 'ENOENT') return null
-    throw error
-  })
-  if (!handle) return []
-  try {
-    const before = await handle.stat()
-    if (!before.isFile()) throw new Error('原生会话 transcript 不是普通文件')
-    const state = createTranscriptParseState()
-    const ctx = parseContext(runId)
-    const decoder = new TextDecoder('utf-8')
-    const buffer = Buffer.allocUnsafe(READ_CHUNK_BYTES)
-    let carry = ''
-    let read = 0
-    for (;;) {
-      const chunk = await handle.read(buffer, 0, buffer.length, read)
-      if (chunk.bytesRead === 0) break
-      read += chunk.bytesRead
-      carry += decoder.decode(buffer.subarray(0, chunk.bytesRead), { stream: true })
-      const cut = carry.lastIndexOf('\n')
-      if (cut < 0) continue
-      appendTranscriptToTurns(carry.slice(0, cut), ctx, state)
-      carry = carry.slice(cut + 1)
+/** First existing regular, non-link file; a symlink is never a trusted transcript. */
+async function firstTrustedFile(paths: readonly string[]): Promise<string | undefined> {
+  for (const path of paths) {
+    try {
+      const stat = await lstat(path)
+      if (stat.isFile()) return path
+    } catch {
+      // A missing candidate is simply not this source's transcript.
     }
-    const after = await handle.stat()
-    if (after.ino !== before.ino || after.dev !== before.dev || after.size < before.size) {
-      throw new Error('原生会话 transcript 在读取期间被替换或截断，不能确认快照来源')
-    }
-    // A half-written tail is not evidence; only newline-complete records were parsed.
-    return state.turns
-  } finally {
-    await handle.close()
   }
-}
-
-function parseContext(runId: string): NormalizeCtx {
-  let next = 0
-  const now = new Date().toISOString()
-  return { runId, newId: () => `side-chat-source-${next++}`, now: () => now }
+  return undefined
 }
 
 /**
@@ -107,32 +65,39 @@ export function createSideChatSourceDeps(runtime: SideChatSourceRuntime): SideCh
   }
   const readNativeTurns = async (source: SideChatNativeSource): Promise<SideChatNativeTurn[] | null> => {
     if (!nativeReaders.has(source.providerId)) return null
-    if (source.providerId === 'pi') {
-      // Pi streams its own JSONL lines; a byte ceiling here would refuse a long
-      // session instead of letting the frozen prefix decide what is captured.
-      const turns = await readPiNativeHistory({
-        sessionRoot: join(runtime.homeDir, '.pi', 'agent', 'sessions'),
-        cwd: source.cwd, sessionId: source.nativeSessionId
-      })
-      return turns?.map(turn => ({
-        runId: turn.runId!, ...(turn.providerTurnId ? { providerTurnId: turn.providerTurnId } : {}),
-        ...(turn.stopReason ? { stopReason: turn.stopReason } : {}),
-        userText: turn.userText, items: turn.items
-      })) ?? null
-    }
-    const path = resolveTranscriptPath({
-      cwd: source.cwd, sessionId: source.nativeSessionId, userDataDir: runtime.userDataDir, home: runtime.homeDir
+    // Pi streams its own JSONL lines; a byte ceiling here would refuse a long
+    // session instead of letting the frozen prefix decide what is captured.
+    const turns = await readPiNativeHistory({
+      sessionRoot: join(runtime.homeDir, '.pi', 'agent', 'sessions'),
+      cwd: source.cwd, sessionId: source.nativeSessionId
     })
-    if (!path) return null
-    // A transcript carries no Scry run identity: its turns share the session-scoped
-    // id and are told apart by position in the frozen prefix, not by an invented run.
-    const parsed = await readStreamedTranscript(path, source.nativeSessionId)
-    return parsed.map(turn => ({
-      runId: source.nativeSessionId,
-      ...(turn.providerTurnId ? { providerTurnId: turn.providerTurnId } : {}),
+    return turns?.map(turn => ({
+      runId: turn.runId!, ...(turn.providerTurnId ? { providerTurnId: turn.providerTurnId } : {}),
       ...(turn.stopReason ? { stopReason: turn.stopReason } : {}),
       userText: turn.userText, items: turn.items
-    }))
+    })) ?? null
   }
-  return { assertNativeSource, readNativeTurns }
+  /**
+   * Claude's transcript is projected record by record: a whole tool result is never parsed
+   * into a value, and a visible body is spooled instead of accumulated. A transcript carries
+   * no Scry run identity, so its turns share the session-scoped id and are told apart by
+   * position in the frozen prefix, not by an invented run.
+   */
+  const streamNativeTurns = async (source: SideChatNativeSource): Promise<AsyncGenerator<StreamedTurn> | null> => {
+    if (source.providerId !== 'claude') return null
+    // The catalog already proved provider/profile/cwd/session; what remains is locating
+    // the file. `resolveTranscriptPath` would re-parse every record through the shared
+    // whole-file identity check, which both refuses a live tail and loads a huge tool
+    // result, so the side-chat path trusts the catalog and lets the transcript's own head
+    // prove its session and cwd while it is streamed.
+    const path = transcriptPath(source.cwd, source.nativeSessionId, runtime.homeDir)
+    const mirror = archivedTranscriptPath(runtime.userDataDir, source.cwd, source.nativeSessionId)
+    const chosen = await firstTrustedFile([path, mirror])
+    if (!chosen) return null
+    return streamNativeTranscriptTurns({
+      path: chosen, runId: source.nativeSessionId, sessionId: source.nativeSessionId, cwd: source.cwd,
+      settles: stopReason => stopReasonProvesCompletion('claude', { stopReason })
+    })
+  }
+  return { assertNativeSource, streamNativeTurns, readNativeTurns }
 }

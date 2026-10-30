@@ -16,7 +16,7 @@
 
 1. **归档来源读取**：`transcript-archive-capture.ts:iterateTraceArchiveCapture` 用 `stream-json` 逐 token 投影（`trace-archive-projection.ts`），只保留结构与可见正文，正文进 `TextSpool`。195 MiB 单轮工具 payload 结构上跳过，从不成为字符串。
 2. **对话来源读取**：`conversation-side-chat-capture-stream.ts:capturedConversationMessages` 用 `streamTraceArchiveTurn` 逐个轮次文件流式投影，并把每条正文对父会话记录的 `items` hash 逐条校验；不再调用 `readTraceArchiveTurnForHistory`（整文件读 + 共享 16 MiB/4 MiB 预算）。工具 payload 不进快照，单条 >4 MiB 可见正文直接流入清单。
-3. **无归档原生来源**：`bootstrap/side-chat-source.ts:readStreamedTranscript` 1 MiB 分块 → 流式 `TextDecoder` → 只喂最后一个完整换行给既有 reducer；贴尾残行不算证据；inode/dev/size 变化拒绝替换或截断。Pi 不再传 `maxBytes`。
+3. **无归档原生来源**：Claude transcript 由 `jsonl-record-scanner.ts` + `conversation-side-chat-native-stream.ts` 逐记录投影，1 MiB 分块 → 流式 `TextDecoder` → 增量 JSON 扫描（只在字符串外按换行断记录）；记录里只保留侧聊要用的字段（`type`/`isMeta`/`isCompactSummary`/Provider turn id/`message.stop_reason`/`message.content` 与 block 的 `type`/`text`/`origin.kind`），其余值结构校验后丢弃、从不成为 JSON 值或字符串，因此单行 195 MiB 的工具结果不再被 `JSON.parse`。可见正文进 `TextSpool`（>256 KiB 落私有临时文件），按记录以空行拼接后流式喂给封存 sink。贴尾未完成记录不算证据也不阻塞已完成前缀；中间记录损坏（缺值、多余分隔符、控制字符、未闭合即换行）fail closed。文件身份用“本次读到的字节数 + inode/dev 未变、size 不小于已读”判定，追加不影响已读前缀。转录自己头部记录的 `sessionId`/`cwd` 必须与目录身份一致（有界自证），所以不再需要 `resolveTranscriptPath` 那条整文件 identity 检查。Pi 走它自己的 JSONL reader，不再传 `maxBytes`。
 4. **封存**：`SideChatSnapshotWriter` + `sealSink` 一条消息一次写入；正文 ≤2 KiB 内联、否则 256 KiB 分片进内容寻址清单树（fanout 32，分支只带计数/字节/子引用，写作者只保留每层一个未完成节点）。记录只留格式 4 描述符（`messageCount`/`bodyBytes`/`ManifestRef`）。UTF-16 代理对被 chunk 切开时 `Utf8ChunkNormalizer` 跨块持有，`text-spool.ts` 入口同样携带，hash/字节/分页三者一致。
 5. **首次与后续发送的历史选择**：`prepareConversationHandoff` → 格式 4 子会话走 `selectSideChatHistory`：先读清单元数据，正文只在“存储字节 + 最小信封”仍能进交接预算时才读；选择顺序与旧 `selectHistory` 一致（最后 user、最后 assistant、首个 user、由新到旧）。冻结条目全部来自子会话自己的清单。
 6. **遗漏台账**：`turn.omittedRanges`（`{snapshotId, from, to}` 闭区间）取代“每条遗漏一个 ref 写回 Conversation JSON”。4200 条冻结消息的 dispatch 记录仍是描述符级 JSON。
@@ -58,14 +58,13 @@
 - **共享交接读取仍有预算**：`conversation-history-source.ts:readConversationHistoryMessages` 对“把一份非侧聊父会话直接当历史交接”的 archive 读取仍是 `MAX_CONVERSATION_HISTORY_SOURCE_BYTES = 16 MiB`、`MAX_CONVERSATION_HISTORY_TURNS = 2000`、`MAX_CONVERSATION_HISTORY_TEXT_BYTES = 4 MiB`。这是**所有对话共用**的交接/Adoption 路径，不是侧聊新链路；侧聊的预览、创建、首次发送与后续发送都不再走它。因此本修复不宣称“整个 App 无上限”。
 - **计划只带内联窗口，不是全量 ref**：`sideChatPlanRefs` 对格式 4 子会话只返回最新、且单条字节仍可能内联的 ≤400 条（`sideChatInlineCandidates`，预算 `MAX_HANDOFF_BYTES`）；preview/plan/IPC 因此不随冻结消息数增长（App 实测 4010 条冻结消息，`plan.missingItems = 400`）。位置、遗漏区间与累计计数一律由清单描述符推导（`sideChatContextPositions`），旧条数记账只在 v3 记录上保留。
 - **封存常驻内存是“单条消息”**：`streamTurns` 把一条正文封进 `TextSpool`（256 KiB 常驻 + 私有临时文件）再写清单，所以一条 195 MB 的**可见**正文峰值仍约为该条消息（不是前缀）。工具 payload 不走这条路径。
-- **原生 JSONL 仍按整行 `JSON.parse`（未修）**：`normalize.ts:appendTranscriptToTurns` 对每行做 `JSON.parse`，`transcript-file-cache.ts` 保留整份 `ParsedTurn[]`。原生 transcript 里若出现单行 195 MB 的工具结果，这一行会被整体解析；Scry 自己的归档分片走的是流式投影（上面第 1 条），不受影响。这是本分支**明确未完成**的一项，见“父级 review 待办”。
+- **`normalize`/`transcript-file-cache` 仍是整行解析**：这两处服务于 App 其余读取路径（会话打开、renderer 列表），本次没有改写，调用方不变；侧聊原生来源不再经过它们。
 - **`transcript-archive.ts`（97 KB，受 20 KB 提交钩子约束不可改）**：`resolveTranscriptPath`/`inspectTranscriptIdentity` 仍是同步整文件 identity 读取，且对“贴尾残行”的 transcript 判定 invalid。因此 >16 MiB 的**已收敛**原生会话已可冻结，但“正在写且尾部破损”的实时会话仍可能被 identity 判据拒绝。
 - **相邻 UI 上限**：`MAX_SIDE_CHAT_TABS = 8`（`right-surface.ts`）、`side-chat-preferences.ts` `MAX_ENTRIES = 64`、`listSideChats` ≤100/页、查看器 40 项/256 KiB 单页、`MAX_CONVERSATION_HISTORY_ARTIFACT_BYTES = 256 KiB`。它们是界面/单页上限，不是历史读取上限。
 - **Provider 能力边界**：只有 `historyReader: true` 的 Provider（claude/codex/pi）能在首次发送时按需检索遗漏正文；qoder/opencode 如实拒绝而不是假装支持。Pi 没有 MCP 状态 API，本修复不探测、不推断。
 
 ## 父级 review 待办（本分支未完成）
 
-- **原生 JSONL 大行流式选择字段**：`normalize.ts` / `transcript-file-cache.ts` 仍整行解析、整份 `ParsedTurn[]` 常驻。需要按字段投影（类似 `trace-archive-projection.ts`）才能让单行 195 MB 的工具结果不进内存。未做，不做假声明；Scry 归档分片路径已经流式化。
 - **`conversation-history-source.ts` 的共享交接读取预算**：仍是 16 MiB / 4 MiB / 2000 轮，只作用于“把非侧聊父会话直接当历史交接”的 archive 路径（adoption 与既有普通对话）。侧聊新链路不经过它。
 
 ## 门禁
@@ -76,7 +75,7 @@
 - `npm test`：`503 passed | 4 skipped`，`5069 passed | 4 skipped`（`NPM_TEST_EXIT=0`，`/tmp/full-test-new2.log`）。
 - `npm run build`：通过。
 - `node scripts/electron-security-smoke.mjs --dev-side-chat-large-history-only`：`LH_EXIT=0`（正向大历史，见上）。
-- `node scripts/electron-security-smoke.mjs --dev-side-chat-only`：`SC_EXIT=0`（含无 reader 负向用例、既有多 Provider/重启/草稿/adoption 步骤）。首轮曾在 `orphan reader` 步骤失败（`the child could not select an agent of its own: {hostAgent:"codex", chipAgent:"codex"}`），同一代码重跑为 0；按纪律如实记录为 fixture 时序抖动，未跳过该步骤。
+- `node scripts/electron-security-smoke.mjs --dev-side-chat-only`：`SC_EXIT=0`（含无 reader 负向用例、既有多 Provider/重启/草稿/adoption 步骤）。首轮曾在 `orphan reader` 步骤失败（`the child could not select an agent of its own: {hostAgent:"codex", chipAgent:"codex"}`），同一代码重跑为 0。观察到的事实：该步骤在固定 120 ms 等待后读回 `chipAgent`，最多 3 次尝试，失败时子会话 chip 仍等于宿主 agent。**根因未知**——没有决定性证据能证明是 freshness race，所以这里只记“失败一次、随后通过”，不宣称 fixture 抖动已定位，也没有跳过该步骤。
 - `npm run test:renderer:ui`：`RENDERER_UI_EXIT=0`。
 - `npm run performance:measure -- --compare 6f2c6d2f`：`PERF_EXIT=0`，`Ratchet: passed`；135 项全部 `measured`，仅 3 项按字节的正向抖动（`io.read.payload.bytes` +17 B / 1.4 MB；`hash-update-bytes` +4 B），基线侧同样逐轮抖动，未测毫秒，故只报计数。
 
