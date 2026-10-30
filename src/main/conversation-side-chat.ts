@@ -156,8 +156,15 @@ export async function createSideChat(
       throughOrdinal: request.expectedThroughOrdinal, throughRunId: request.expectedThroughRunId, capturedAt
     }
   })
+  // A source that turns out not to prove its own prefix is refused after its body has
+  // already been streamed into the child's content root; the sealed partial must not stay
+  // behind, because this child is never published.
   const captured = await captureSideChatPrefix(deps, request.source,
     { ordinal: request.expectedThroughOrdinal, runId: request.expectedThroughRunId }, sealSink(writer, snapshotId))
+    .catch(async (error: unknown) => {
+      await discardUnpublishedContent(deps, id, cwd)
+      throw error
+    })
   if (captured.cwd !== cwd || captured.throughOrdinal !== request.expectedThroughOrdinal ||
     captured.prefixFingerprint !== request.expectedPrefixFingerprint ||
     captured.manifestFingerprint !== request.expectedManifestFingerprint) {

@@ -62,4 +62,3 @@ export function stopReasonProvesCompletion(providerId: ProviderId, turn: { stopR
   const expected = completedStopReasons[providerId]
   return expected !== undefined && turn.stopReason === expected
 }
-

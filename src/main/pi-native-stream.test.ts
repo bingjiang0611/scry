@@ -2,14 +2,58 @@ import { appendFile, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { streamPiNativeTurns } from './pi-native-stream'
 import { parsePiNativeHistory } from './pi-native-parse'
 import type { StreamedTurn } from './conversation-side-chat-stream'
 
+/**
+ * Read positions and a pass hook, so the two-pass contract can be observed exactly.
+ *
+ * `furthest` resets when a read starts at offset 0: that is how a reader begins a pass, so
+ * the value always describes the pass in progress. The hook lets a test change the file at
+ * the boundary between the structural pass and the body pass, which is the only window in
+ * which a same-size rewrite can mix the first pass's branch with the second pass's bodies.
+ */
+const probe = vi.hoisted(() => ({
+  furthest: new Map<string, number>(),
+  passes: 0,
+  beforeBodyPass: null as null | (() => Promise<void>)
+}))
+vi.mock('node:fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...actual,
+    open: async (...args: Parameters<typeof actual.open>) => {
+      const handle = await actual.open(...args)
+      const path = String(args[0])
+      return new Proxy(handle, { get(target, property) {
+        const value = Reflect.get(target, property, target)
+        if (property !== 'read') return typeof value === 'function' ? value.bind(target) : value
+        return async (...read: [unknown, unknown, unknown, unknown]) => {
+          const result = await (value as (...inner: unknown[]) => Promise<{ bytesRead: number }>).apply(target, read)
+          const position = typeof read[3] === 'number' ? read[3] as number : 0
+          const reached = position + result.bytesRead
+          probe.furthest.set(path, position === 0 ? reached : Math.max(probe.furthest.get(path) ?? 0, reached))
+          return result
+        }
+      } })
+    } }
+})
+vi.mock('./pi-jsonl-projector', async importOriginal => {
+  const actual = await importOriginal<typeof import('./pi-jsonl-projector')>()
+  return { ...actual, projectPiRecords: async function* (...args: Parameters<typeof actual.projectPiRecords>) {
+    probe.passes += 1
+    if (probe.passes === 2 && probe.beforeBodyPass) await probe.beforeBodyPass()
+    yield* actual.projectPiRecords(...args)
+  } }
+})
+
 const directories: string[] = []
 afterEach(async () => {
   await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true })))
+  probe.furthest.clear()
+  probe.passes = 0
+  probe.beforeBodyPass = null
 })
 
 const sessionId = '01a1338c-3d8b-775b-8645-fd964faa29a3'
@@ -154,6 +198,70 @@ describe('Pi native session streaming', () => {
   it('refuses a branch that names a missing parent instead of flattening it', async () => {
     const path = await sessionFile([header, user('u1', 'gone', 'orphan'), assistant('a1', 'u1', 'answer')])
     await expect(collect(path)).rejects.toThrow('Pi 原生会话分支不完整')
+  })
+
+  it('settles and releases each turn instead of holding every earlier body', async () => {
+    // Sixty turns of ~64 KiB visible text: the bodies total nearly twice the allowance, so
+    // holding them until EOF would fill it, while one-turn-at-a-time stays far below. The
+    // file is also several read chunks long, so the body pass cannot have read it all before
+    // the first turn is delivered.
+    const body = 'b'.repeat(32 * 1024)
+    const entries: unknown[] = [header]
+    for (let index = 0; index < 60; index += 1) {
+      const userId = `u${index}`
+      const answerId = `a${index}`
+      entries.push(user(userId, index === 0 ? null : `a${index - 1}`, `question ${index} ${body}`))
+      entries.push(assistant(answerId, userId, `answer ${index} ${body}`))
+    }
+    const path = await sessionFile(entries)
+    const size = (await stat(path)).size
+    const budget = { available: 2 * 1024 * 1024 }
+    let available = budget.available
+    let minimum = available
+    let furthestAtFirstTurn = 0
+    let seen = 0
+    for await (const turn of streamPiNativeTurns({
+      path, sessionId, cwd, settles
+    }, budget)) {
+      seen += 1
+      // The body pass must not have read the rest of the file to deliver this turn.
+      if (seen === 1) furthestAtFirstTurn = probe.furthest.get(path) ?? 0
+      for (const message of turn.messages) {
+        let text = ''
+        for await (const chunk of message.text) text += chunk
+        expect(Buffer.byteLength(text, 'utf8')).toBe(message.bytes)
+        expect(digest(text)).toBe(message.contentHash)
+      }
+      available = budget.available
+      minimum = Math.min(minimum, available)
+    }
+    expect(seen).toBe(60)
+    // Every body is released, so the allowance is whole again.
+    expect(budget.available).toBe(2 * 1024 * 1024)
+    // Peak residency: one turn is being consumed and at most one is open, so the whole
+    // history never becomes resident. Holding every body instead fills the allowance.
+    expect(2 * 1024 * 1024 - minimum).toBeLessThanOrEqual(512 * 1024)
+    expect(furthestAtFirstTurn).toBeGreaterThan(0)
+    expect(furthestAtFirstTurn).toBeLessThan(size / 2)
+  })
+
+  it('refuses a same-size rewrite between the two passes but accepts an append', async () => {
+    const entries = [header, user('u1', null, 'pi question'), assistant('a1', 'u1', 'pi answer')]
+    const path = await sessionFile(entries)
+    // Same byte length, different text: inode, device and size all stay identical.
+    const rewritten = entries.map(entry => JSON.stringify(entry).replace('pi answer', 'PI ANSWER')).join('\n') + '\n'
+    expect(Buffer.byteLength(rewritten)).toBe((await stat(path)).size)
+    probe.beforeBodyPass = async () => { await writeFile(path, rewritten) }
+    await expect(collect(path)).rejects.toThrow('Pi 原生会话文件在读取期间被改写')
+
+    // An append after the measured prefix is legal: the frozen prefix did not change.
+    const appended = await sessionFile(entries)
+    probe.passes = 0
+    probe.beforeBodyPass = async () => {
+      await appendFile(appended, `${JSON.stringify(user('u2', 'a1', 'later question'))}\n`)
+    }
+    const turns = await collect(appended)
+    expect(turns.map(turn => turn.texts)).toEqual([['pi question', 'pi answer']])
   })
 
   it('drops a trailing turn with no terminal marker but refuses an interior one', async () => {

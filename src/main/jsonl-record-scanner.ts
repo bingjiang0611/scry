@@ -1,4 +1,5 @@
 import { once } from 'node:events'
+import type { Hash } from 'node:crypto'
 import type { FileHandle } from 'node:fs/promises'
 import { parser, type Token } from 'stream-json/parser.js'
 
@@ -28,6 +29,14 @@ export class JsonlRecordError extends Error {
 /** Evidence of the bytes this reader actually consumed. */
 export interface TranscriptReadEvidence {
   bytes: number
+  /**
+   * Raw bytes of that span, when the caller has to prove two reads saw the same prefix.
+   *
+   * Hashing the bytes as they are read is the only way to compare two passes over one file:
+   * a same-size rewrite changes no stat field, so inode, device and size cannot tell it apart
+   * from the file the first pass measured.
+   */
+  digest?: Hash
 }
 
 /** Provider specific projection of one token stream. */
@@ -62,6 +71,7 @@ export async function* projectJsonlRecords<T>(
       if (chunk.bytesRead === 0) break
       read += chunk.bytesRead
       evidence.bytes = read
+      evidence.digest?.update(buffer.subarray(0, chunk.bytesRead))
       if (!tokens.write(decoder.decode(buffer.subarray(0, chunk.bytesRead), { stream: true }))) {
         await once(tokens, 'drain')
       }

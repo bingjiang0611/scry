@@ -98,4 +98,3 @@ async function readFrozenHistoryPages(connection: { url: string; token: string; 
   appendFileSync(readsFile, `${JSON.stringify({ runId, snapshotId: connection.snapshotId,
     totalItems, frozenItems: order.length, reads })}\n`)
 }
-

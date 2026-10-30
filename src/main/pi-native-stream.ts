@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto'
 import { open } from 'node:fs/promises'
-import { TextSpool } from './text-spool'
+import { TextSpool, type SpoolBudget } from './text-spool'
 import { projectPiRecords, type PiJsonlEvent } from './pi-jsonl-projector'
 import { nativeBranch, validateHeader, type NativeEntry } from './pi-native-parse'
 import { historyCopy } from '../shared/constants/copy'
@@ -17,10 +18,19 @@ import type { StreamedTurn } from './conversation-side-chat-stream'
  * branch; every other record, every tool payload, every image and every reasoning block is
  * dropped while it is still tokens, so a 20 MiB tool result never becomes a JSON value.
  *
- * Two passes mean one extra file read, not two snapshots: both passes stop at the size the
- * first one measured, a replaced file is refused, and an append during the read only adds
- * bytes the frozen prefix never claimed. A trailing unfinished record is dropped, exactly as
- * in the Claude reader, because a record that never ended is not evidence.
+ * Two passes mean one extra file read, not two snapshots: both passes hash the exact byte
+ * span the first one measured and the digests must match, so a same-size rewrite between the
+ * passes cannot mix the branch the first pass selected with bodies the second pass read. An
+ * append during the read only adds bytes the frozen prefix never claimed, so it stays legal.
+ * A trailing unfinished record is dropped, exactly as in the Claude reader, because a record
+ * that never ended is not evidence.
+ *
+ * Resident bodies are bounded by the shared spool budget, not by the length of the history:
+ * a turn that closes is settled and its spools released as soon as the caller has consumed
+ * it, so a long session cannot keep every earlier body in memory while the file is read.
+ *
+ * The two passes are the file read cost of this reader; the byte digests add hashing work,
+ * not a third read.
  */
 
 export interface PiNativeStreamOptions {
@@ -263,7 +273,10 @@ class BranchBodies {
   }
 }
 
-export async function* streamPiNativeTurns(options: PiNativeStreamOptions): AsyncGenerator<StreamedTurn> {
+export async function* streamPiNativeTurns(
+  options: PiNativeStreamOptions,
+  budget: SpoolBudget = { available: 4 * 1024 * 1024 }
+): AsyncGenerator<StreamedTurn> {
   const handle = await open(options.path, 'r').catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') return null
     throw error
@@ -271,7 +284,8 @@ export async function* streamPiNativeTurns(options: PiNativeStreamOptions): Asyn
   if (!handle) return
   const live = new Set<TextSpool>()
   const createSpool = (): TextSpool => {
-    const created = new TextSpool()
+    // One allowance for the whole capture: past it a body spills instead of staying in RAM.
+    const created = new TextSpool(256 * 1024, budget)
     live.add(created)
     return created
   }
@@ -283,17 +297,43 @@ export async function* streamPiNativeTurns(options: PiNativeStreamOptions): Asyn
   }
   const ready: TurnBodies[] = []
   const state = { current: undefined as TurnBodies | undefined, sawUnsettled: false }
+  /**
+   * Settles one closed turn, then frees its bodies once the caller is done with it.
+   *
+   * The release runs when the caller asks for the next turn, which is after the sink has
+   * written this one: that is what keeps the resident set to one turn instead of the whole
+   * history. `settleTurn` may already have released the turn it refuses, and releasing twice
+   * is a no-op.
+   */
+  const settled = async function* (turn: TurnBodies): AsyncGenerator<StreamedTurn> {
+    try {
+      yield* settleTurn(turn, options, state, release)
+    } finally {
+      await release(allSpools(turn))
+    }
+  }
   try {
     const before = await handle.stat()
     if (!before.isFile()) throw new Error('Pi 原生会话文件不是普通文件')
     const topology = new TopologyScan({ sessionId: options.sessionId, cwd: options.cwd })
-    for await (const event of projectPiRecords(handle, before.size, { bytes: 0 }, 'metadata')) topology.accept(event)
+    const structural = { bytes: 0, digest: createHash('sha256') }
+    for await (const event of projectPiRecords(handle, before.size, structural, 'metadata')) topology.accept(event)
     const branchIds = new Set(nativeBranch(topology.entries, topology.leaf).map(entry => entry.id))
     const bodies = new BranchBodies(branchIds, state, ready, createSpool, release)
-    const evidence = { bytes: 0 }
-    for await (const event of projectPiRecords(handle, before.size, evidence, 'body')) await bodies.accept(event)
+    const evidence = { bytes: 0, digest: createHash('sha256') }
+    for await (const event of projectPiRecords(handle, before.size, evidence, 'body')) {
+      await bodies.accept(event)
+      // A turn that just closed is settled before the next record is read.
+      while (ready.length > 0) yield* settled(ready.shift()!)
+    }
     await bodies.finish()
-    for (const closed of ready.splice(0)) yield* settleTurn(closed, options, state, release)
+    while (ready.length > 0) yield* settled(ready.shift()!)
+    // Both passes must have read the same bytes: a same-size rewrite leaves inode, device
+    // and size untouched, so only the content can prove the branch and the bodies agree.
+    if (structural.digest.digest('hex') !== evidence.digest.digest('hex') ||
+        structural.bytes !== evidence.bytes) {
+      throw new Error('Pi 原生会话文件在读取期间被改写，不能确认快照来源')
+    }
     const after = await handle.stat()
     if (after.ino !== before.ino || after.dev !== before.dev || after.size < evidence.bytes) {
       throw new Error('Pi 原生会话文件在读取期间被替换或截断，不能确认快照来源')
