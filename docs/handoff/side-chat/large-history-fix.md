@@ -79,6 +79,9 @@
 - `node scripts/electron-security-smoke.mjs --dev-side-chat-large-history-only`：`LH_EXIT=0`（正向大历史，见上）。
 - `node scripts/electron-security-smoke.mjs --dev-side-chat-only`：`SC_EXIT=0`（含无 reader 负向用例、既有多 Provider/重启/草稿/adoption 步骤）。用 `stream-json` 替换 tokenizer 之后，`npm run test:renderer:ui` 里同一模式曾停在 `drafts restored` 步骤（`checking the receipt must read its record`），随后单独重跑该模式为 0，同一次重跑的 artifact hash 与失败那次完全相同。**根因未知**，同样只记“失败一次、随后通过”。首轮曾在 `orphan reader` 步骤失败（`the child could not select an agent of its own: {hostAgent:"codex", chipAgent:"codex"}`），同一代码重跑为 0。观察到的事实：该步骤在固定 120 ms 等待后读回 `chipAgent`，最多 3 次尝试，失败时子会话 chip 仍等于宿主 agent。**根因未知**——没有决定性证据能证明是 freshness race，所以这里只记“失败一次、随后通过”，不宣称 fixture 抖动已定位，也没有跳过该步骤。
 - `npm run test:renderer:ui`：`RENDERER_UI_EXIT=0`。
-- `npm run performance:measure -- --compare 6f2c6d2f`：`PERF_EXIT=0`，`Ratchet: passed`；135 项全部 `measured`，仅 3 项按字节的正向抖动（`io.read.payload.bytes` +17 B / 1.4 MB；`hash-update-bytes` +4 B），基线侧同样逐轮抖动，未测毫秒，故只报计数。
+- `npm run performance:measure -- --compare d824c609 --out /tmp/scry-perf-final-Rg8MJQ`（合并后 HEAD `39c29192`，原始侧聊基线 `d824c609`）：`PERF_EXIT=0`，`Ratchet: passed`，`ratchet.worse = []`。135 行对照全部为 `measured`；**没有任何一行 worse**。只有 5 行有差异，且都是字节级：`files.fixed-operations/io.read.payload.bytes` 1398160 → 1398158（−2 B，基线 5 轮 `[1398125,1398160,1398150,1398102,1398150]`，候选 5 轮 `[1398158,1398122,1398156,1398149,1398143]`，两侧自身逐轮抖动 ±30 B）、`trace.r4-cell/*` 三项 +2/+2/+8 B，其余行两侧完全相同。
+  `ratchet.md` 另列出 5 个“高于记录基线、不参与门禁”的计数（`git.run.calls` 9→10、`io.readdir` 18→20、`recorder.content-cold/io.stat.calls` 36→44、`persistence.archive/ipc.bytes` 10536→10558、`io.read.payload.bytes` 1397923→1398158）。这不是本次改动造成的：同样这 5 项在 `d824c609` 现场基线与本树候选之间**完全相同**（10/10、20/20、44/44、10558/10558），说明差值来自已合并的 main，`io.read.payload.bytes` 反而比 `d824c609` 低 2 B。已记录的 ratchet 基线本身比 `d824c609` 现场值更严。
+  `analytics.stats/cpu.instructions` 在本机两侧都是 unavailable（表中 `missing`），不是 0。这些是 **L1 工作计数**，只能说明工作计数没有回归，**不能证明延迟或流式行为**；大历史的真实证据是 App 冒烟的 22.4 MB 归档、4.26 MB 单条消息、`viewerElapsedMs` 472~504、`planItems` 400、`providerReads` 3、`readsAfterDelete` 4010。
+
 
 每次合入前重跑同一组命令；毫秒结论需 `timing-run` 锁，本轮没有毫秒结论。
