@@ -8,7 +8,7 @@ export async function exerciseSessionCache(contents) {
       try { return { ok: true, value: await (${expression}) }; }
       catch (error) { return { ok: false, message: String(error?.message ?? error), state: {
         busy: document.querySelector('.chat-transcript')?.getAttribute('aria-busy'),
-        source: document.querySelector('.chat-evidence-source')?.textContent,
+        source: document.querySelector('.chat-transcript')?.getAttribute('data-history-source'),
         fixture: document.getElementById('cache-state')?.textContent,
         body: document.body.innerText.slice(-1800)
       } }; }
@@ -39,13 +39,13 @@ export async function exerciseSessionCache(contents) {
   const select = id => click(`Array.from(document.querySelectorAll('button.sb-sess')).find(element => element.textContent.includes(${JSON.stringify(id)}))`)
   const control = id => click(`document.getElementById(${JSON.stringify(id)})`)
   const pending = id => wait(`JSON.parse(document.getElementById('cache-state').textContent).pending.includes(${JSON.stringify(id)})`)
-  const ready = (id, version = 1) => wait(`document.querySelector('.chat-transcript[aria-busy="false"]') && document.querySelector('.chat-transcript').textContent.includes(${JSON.stringify(`Authoritative ${id} v${version}`)})`)
+  const ready = (id, version = 1) => wait(`document.querySelector('.chat-transcript[aria-busy="false"][data-history-source="authoritative"]') && document.querySelector('.chat-transcript').textContent.includes(${JSON.stringify(`Authoritative ${id} v${version}`)})`)
   // Bridge pending/resolution is not a React commit. Wait for the exact DOM
   // state while the fixture still holds authority replies, then assert it again.
   const cached = async id => {
-    const condition = `document.querySelector('.chat-transcript[aria-busy="true"]') != null &&
+    const condition = `document.querySelector('.chat-transcript[aria-busy="false"][data-history-source="preview"]') != null &&
       document.querySelector('.chat-transcript')?.textContent.includes(${JSON.stringify(`Authoritative ${id}`)}) &&
-      !document.querySelector('.chat-session-evidence-gap[data-status="loading"]')`
+      document.querySelector('.loading-status[data-status="loading"]') != null`
     await wait(condition)
     return read(condition)
   }
@@ -55,19 +55,24 @@ export async function exerciseSessionCache(contents) {
     await wait(condition)
     return read(condition)
   }
-  const selectionRemains = async id => {
+  const pendingPreview = async id => {
     const condition = `document.querySelector('.sb-sess[aria-current="true"]')?.textContent.includes(${JSON.stringify(id)}) &&
-      document.querySelector('.chat-transcript[aria-busy="false"]')?.textContent.includes(${JSON.stringify(`Authoritative ${id}`)})`
+      document.querySelector('.chat-transcript[aria-busy="false"][data-history-source="preview"]') != null &&
+      document.querySelector('.loading-status[data-status="loading"]') != null &&
+      document.querySelectorAll('.transcript-turn').length === 1 &&
+      document.querySelector('.transcript-turn')?.dataset.runId === ${JSON.stringify(`session-preview:${id}`)} &&
+      !document.querySelector('.chat-transcript').textContent.includes('Authoritative') &&
+      document.querySelector('button.send').disabled && !document.querySelector('button[title="从此轮创建分支会话"]')`
     await wait(condition)
     return read(condition)
   }
   await wait(`document.querySelectorAll('button.sb-sess').length === 2`)
 
   await select('cache-a'); await pending('cache-a')
-  check(await noTurns(), 'Cold selection displayed another history')
+  check(await pendingPreview('cache-a'), 'Cold A must show only its marked catalog preview with send/fork locked')
   await control('resolve-a'); await ready('cache-a')
   await select('cache-b'); await pending('cache-b')
-  check(await selectionRemains('cache-a'), 'Cold B changed selection before its content was ready')
+  check(await pendingPreview('cache-b'), 'Cold B did not switch atomically to its own marked catalog preview')
   await control('resolve-b'); await ready('cache-b')
 
   await control('emit-degraded-health')
@@ -96,11 +101,11 @@ export async function exerciseSessionCache(contents) {
   check(await read(`JSON.parse(document.getElementById('cache-state').textContent).starts === 0`), 'Enter launched a provider while cache was pending')
   await control('update-a'); await control('resolve-a'); await ready('cache-a', 2)
   check((await stateOf()).traceRecoveries === beforeCache.traceRecoveries + 1, 'Changed authority page did not acknowledge recovery once')
-  const refreshed = await read(`({ source: document.querySelector('.chat-evidence-source')?.textContent,
+  const refreshed = await read(`({ source: document.querySelector('.chat-transcript')?.getAttribute('data-history-source'),
     fork: document.querySelector('button[title="从此轮创建分支会话"]') != null,
     disabled: document.querySelector('button.send').disabled, input: document.querySelector('textarea').value,
     composer: document.querySelector('.composer')?.textContent })`)
-  check(refreshed.source == null && refreshed.fork && !refreshed.disabled,
+  check(refreshed.source === 'authoritative' && refreshed.fork && !refreshed.disabled,
     'Authority refresh did not replace cached state or restore controls: ' + JSON.stringify(refreshed))
 
   await select('cache-b'); await pending('cache-b')
@@ -133,27 +138,28 @@ export async function exerciseSessionCache(contents) {
   // Native input dispatch does not await React's commit. Observe the existing
   // uncached-loading state and require the visible cache to clear while the
   // authority request is still pending; keep the no-turns and stale-response checks.
-  await wait(`document.querySelector('.chat-transcript[aria-busy="true"]') && !document.querySelector('.chat-session-evidence-gap[data-status="loading"]')`)
+  await wait(`document.querySelector('.chat-transcript[aria-busy="true"]') && document.querySelector('.loading-status[data-status="loading"]')`)
   await wait(`document.querySelectorAll('.transcript-turn').length === 0`)
   check(await noTurns(), 'Deletion invalidation left a pending cached page visible')
   await control('resolve-b'); await ready('cache-b')
   await select('cache-a'); await pending('cache-a')
-  check(await selectionRemains('cache-b'), 'Invalidated A cache changed selection before a fresh read')
+  check(await pendingPreview('cache-a'), 'Invalidated A displayed stale history instead of its catalog preview')
   await control('resolve-a'); await ready('cache-a', 2)
   await select('cache-b'); await pending('cache-b')
-  check(await selectionRemains('cache-a'), 'An old pending read reinserted B after invalidation')
+  check(await pendingPreview('cache-b'), 'An old pending read reinserted B history after invalidation')
   await control('resolve-b'); await ready('cache-b')
   await select('cache-a'); await pending('cache-a')
   check(await cached('cache-a'), 'Focus supersession requires a real warm cache')
   await control('focus-live-b'); await pending('cache-b')
-  check(await read(`!document.querySelector('.chat-evidence-source') && !document.querySelector('.chat-session-evidence-gap')?.textContent.includes('最近会话缓存')`), 'Authoritative live focus retained the cache source label')
+  check(await read(`document.querySelector('.chat-transcript')?.getAttribute('data-history-source') === 'authoritative'`), 'Authoritative live focus retained the preview source marker')
   await control('resolve-a')
   await wait(`!JSON.parse(document.getElementById('cache-state').textContent).pending.includes('cache-a')`)
   check(await read(`document.querySelector('.chat-transcript[aria-busy="true"]') != null && !document.querySelector('.chat-transcript').textContent.includes('Authoritative cache-a')`), 'Late cache authority replaced the newer live focus')
   await control('resolve-b')
   await wait(`document.querySelector('.chat-transcript[aria-busy="false"]') && document.querySelector('.chat-transcript').textContent.includes('AUTHORITATIVE LIVE B')`)
   check(await read(`document.querySelector('.transcript-turn[data-run-id="live-b"]') != null`), 'Focused live run was lost during its own history restoration')
-  // Keep the retained session's authority request alive while a cold target waits.
+  // The 2026-10-28 contract switches immediately to the selected catalog preview.
+  // Keep A's request alive, but never let its late response replace selected B.
   await control('invalidate-cache')
   await select('cache-a'); await pending('cache-a')
   await control('resolve-a'); await ready('cache-a', 2)
@@ -161,14 +167,17 @@ export async function exerciseSessionCache(contents) {
   await wait('!document.querySelector(".sb-sess[aria-current=true]")')
   await select('cache-a'); await pending('cache-a')
   check(await cached('cache-a'), 'Retained refresh control needs a warm A snapshot')
-  await select('cache-b')
-  check(await read(`JSON.stringify(JSON.parse(document.getElementById('cache-state').textContent).pending)==='["cache-a"]'`), 'Cold B superseded A authority before A could finish')
-  await control('resolve-a'); await pending('cache-b')
-  check(await selectionRemains('cache-a'), 'A did not regain authority while B was prepared')
+  await select('cache-b'); await pending('cache-b')
+  check((await stateOf()).pending.includes('cache-a'), 'The late-A control lost its pending authority request')
+  check(await pendingPreview('cache-b'), 'Cold B retained unrelated A content')
+  await control('resolve-a')
+  await wait(`!JSON.parse(document.getElementById('cache-state').textContent).pending.includes('cache-a')`)
+  check(await pendingPreview('cache-b'), 'Late A response replaced the selected B preview')
   await control('reject-b')
   await wait('document.querySelector(".composer-status.is-error")?.textContent.includes("fixture target unavailable")')
-  check(await selectionRemains('cache-a'), 'Failed B stranded retained A in loading/cache-only state')
-  check(await read('!document.querySelector("button.send").disabled'), 'Failed B left authoritative A controls disabled')
+  await wait(`document.querySelector('.chat-session-evidence-gap[data-status="error"]') != null`)
+  check(await noTurns(), 'Failed B restored unrelated A history')
+  check(await read(`document.querySelector('.sb-sess[aria-current="true"]')?.textContent.includes('cache-b')`), 'Failed B silently navigated back to A')
   await select('cache-b'); await pending('cache-b')
   await click('document.querySelector(".sb-navitem:not([title])")')
   await wait('document.querySelector(".usage-page") != null')
@@ -179,7 +188,7 @@ export async function exerciseSessionCache(contents) {
   await control('resolve-b'); await ready('cache-b')
   const state = await read(`JSON.parse(document.getElementById('cache-state').textContent)`)
   check(state.starts === 0 && state.forks === 0 && state.pending.length === 0, 'Fixture left work or invoked a provider')
-  return { cachedBeforeAuthority: true, coldSelectionAtomic: true, retainedAuthoritySurvivesFailure: true, lateHistoryCannotNavigate: true, controlsRemainLocked: true, refreshedAuthority: true,
+  return { cachedBeforeAuthority: true, coldSelectionAtomic: true, catalogPreviewNotAuthority: true, failedTargetRemainsSelected: true, lateHistoryCannotNavigate: true, controlsRemainLocked: true, refreshedAuthority: true,
     supersededResponseIgnored: true, failureHonest: true, retryNoResurrection: true,
     deletionAndPendingReadFenced: true, draftPreserved: true, nativeInput: true,
     staleTraceIsolation: true, bufferedTraceCleared: true, cacheCannotAcknowledgeRecovery: true,

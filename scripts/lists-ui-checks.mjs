@@ -83,6 +83,11 @@ export async function exerciseLists(contents, win, screenshotPrefix = '', pointe
       window.__historyFrame = requestAnimationFrame(sample)
     })()`)
     await click('#list-history')
+    // Completed turns initially window earlier activity; reveal it through the
+    // production control before testing the retained disclosures and all 50 tools.
+    await wait("document.querySelector('.turn-flow-reveal') != null")
+    check(!await read("!!document.querySelector('.thinking')"), 'completed history did not window its earlier activity')
+    await click('.turn-flow-reveal')
     await wait("document.querySelector('.si-head') && document.querySelector('.thinking')")
     await arm("node.classList.contains('motion-disclosure') && !!node.querySelector('.si-body')")
     await click('.si-head')

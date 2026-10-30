@@ -55,12 +55,27 @@ export async function exerciseMotionTokens(contents) {
     await checkNoTransform(selector, selector)
   }
 
-  await read('window.motionFixture.reorder()')
-  await wait(`document.querySelector('[data-motion-key="motion-session"]').dataset.activityGroup === 'attention'`)
-  const normal = await read(`document.querySelector('.sb-activity').getAnimations({ subtree: true })
-    .filter(animation => animation.effect?.target?.hasAttribute('data-motion-key'))
-    .map(animation => ({ duration: animation.effect.getTiming().duration, frames: animation.effect.getKeyframes() }))`)
-  check(normal.some(animation => animation.duration === 300 && animation.frames.some(frame => frame.transform != null)), 'normal reorder did not produce the 300ms FLIP positive control')
+  // Keep the real Animation objects: a busy runner can observe the committed DOM
+  // after the 300ms animation has finished and disappeared from getAnimations().
+  await read(`(() => {
+    const animate = Element.prototype.animate
+    const created = []
+    Element.prototype.animate = function (...args) {
+      const animation = animate.apply(this, args)
+      if (this.hasAttribute('data-motion-key') && this.closest('.sb-activity')) created.push(animation)
+      return animation
+    }
+    window.__motionReorder = { created, restore: () => { Element.prototype.animate = animate } }
+  })()`)
+  try {
+    await read('window.motionFixture.reorder()')
+    await wait(`document.querySelector('[data-motion-key="motion-session"]').dataset.activityGroup === 'attention'`)
+    const normal = await read(`window.__motionReorder.created
+      .map(animation => ({ duration: animation.effect.getTiming().duration, frames: animation.effect.getKeyframes() }))`)
+    check(normal.some(animation => animation.duration === 300 && animation.frames.some(frame => frame.transform != null)), 'normal reorder did not produce the 300ms FLIP positive control')
+  } finally {
+    await read('window.__motionReorder.restore(); delete window.__motionReorder')
+  }
 
   await contents.debugger.attach('1.3')
   try {

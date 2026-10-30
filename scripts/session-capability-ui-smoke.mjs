@@ -7,6 +7,8 @@ import { build } from 'vite'
 import electron from 'electron'
 import { fixtureSources } from './session-capability-sources.mjs'
 import { specialFixtureSources } from './session-capability-special-fixtures.mjs'
+import { runCapabilityCampaigns } from './session-capability-campaigns.mjs'
+if (process.argv.length === 2) process.exit(runCapabilityCampaigns(fileURLToPath(import.meta.url)))
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const specialSources = specialFixtureSources()
 const cacheOnly = process.argv.includes('--cache-only')
@@ -79,6 +81,7 @@ try {
       app.dock?.hide()
       const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: ${nativeVisibility}, offscreen: ${offscreen} } })
       if (${offscreen}) win.webContents.on('paint', () => {})
+      win.webContents.on('did-finish-load', () => win.webContents.focus())
       win.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       const logRendererError = (event) => { if (event.level === 'error') console.error('Renderer:', event.message) }
@@ -237,14 +240,15 @@ try {
       env: { PATH: process.env.PATH, TMPDIR: tmpdir(), HOME: join(temp, 'home') }, stdio: ['ignore', 'pipe', 'pipe']
     })
     let output = ''
-    const timer = setTimeout(() => { child.kill('SIGTERM') }, 30_000)
+    let timedOut = false
+    const timer = setTimeout(() => { timedOut = true; child.kill('SIGTERM') }, 30_000)
     child.stdout.on('data', (chunk) => { output += chunk.toString() })
     child.stderr.on('data', (chunk) => { output += chunk.toString() })
     child.once('error', (error) => { clearTimeout(timer); reject(error) })
     child.once('close', (code, signal) => {
       clearTimeout(timer)
       const result = output.match(/^SCRY_UI_SMOKE_RESULT=(.+)$/m)?.[1]
-      if (code !== 0 || !result) reject(new Error(`Hidden UI fixture failed (${code ?? signal}):\n${output.slice(-8000)}`))
+      if (code !== 0 || !result) reject(new Error(`Hidden UI fixture failed (${timedOut ? '30s deadline' : code ?? signal}):\n${output.slice(-8000)}`))
       else { if (listsOnly) campaignResults.push(JSON.parse(result).lists); else console.log(result); resolve() }
     })
   })

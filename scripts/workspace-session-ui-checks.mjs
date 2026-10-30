@@ -165,6 +165,7 @@ export async function exerciseWorkspaceSessions(context) {
     await wait(() => evaluate(`document.querySelector('[data-workspace-menu="workspace"]')?.textContent.includes('worktree')`), 'bound session identifies its worktree')
     await wait(() => evaluate(`document.querySelector('[data-project-path=${JSON.stringify(canonicalWorkspace)}]')?.closest('.sb-proj')?.textContent.includes('desktop remote write one') === true`), 'worktree session stays under source project')
     assert.equal(await evaluate(`Boolean(document.querySelector('[data-project-path=${JSON.stringify(target)}]'))`), false, 'worktree storage id is not a project group')
+    const targetSessionKey = await wait(() => evaluate(`document.querySelector('.sb-sess[aria-current="true"]')?.closest('[data-motion-key]')?.dataset.motionKey`), 'created worktree session row')
     assert.equal(existsSync(join(target, 'moved-after-selection.txt')), false, 'new worktree never copies uncommitted files')
     assertHooksIdle(hookMarkers)
     rmSync(join(workspace, 'moved-after-selection.txt'))
@@ -244,7 +245,7 @@ export async function exerciseWorkspaceSessions(context) {
     assert.equal(failedRecord.status, 'failed')
     assert.equal(git(failed.run.cwd, 'branch', '--show-current'), failedBranch)
     assert.ok(existsSync(failed.run.cwd), 'Provider failure must not delete the prepared worktree')
-    await exerciseWorkspaceDiffBounds({ target, newDraft, click, evaluate, key, wait, screenshot, cdp })
+    await exerciseWorkspaceDiffBounds({ target, targetSessionKey, click, evaluate, key, wait, screenshot, cdp })
     assert.equal(inputs().length, 5, 'three workspace paths, one follow-up and one explicit failure; pressure and reload never launch a Provider')
     writeFileSync(join(evidence, 'result.json'), json({ current, created, second, reused, failed, firstRecord, secondRecord, reusedRecord, failedRecord }))
     console.log(json({ test: 'production workspace first-send and scoped diff UI', current: current.run.cwd,

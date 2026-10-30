@@ -35,14 +35,17 @@ export async function exerciseStructure(contents) {
   await click(`document.querySelector('.sb-nav .sb-navitem')`)
   await wait(`${entry}?.effect.getTiming().duration === 240`)
   check(await read(`${entry}.effect.getKeyframes().some(frame => frame.transform?.includes('6px'))`), 'Page entrance has no real 6px translation')
-  await read(`window.structureFirstFrame = null; document.addEventListener('click', () => requestAnimationFrame(() => { window.structureFirstFrame = { selected: ${row('cache-b')}?.getAttribute('aria-current') === 'true', unresolved: !${body('cache-b')}, analytics: !!document.querySelector('.usage-page') }; }), { once: true })`)
+  await read(`window.structureFirstFrame = null; document.addEventListener('click', () => requestAnimationFrame(() => { window.structureFirstFrame = { selected: ${row('cache-b')}?.getAttribute('aria-current') === 'true', unresolved: !${body('cache-b')}, preview: !!document.querySelector('.chat-transcript[data-history-source="preview"]'), sendLocked: document.querySelector('button.send')?.disabled, analytics: !!document.querySelector('.usage-page') }; }), { once: true })`)
   await click(row('cache-b'))
   await wait(`window.structureFirstFrame != null`)
-  check(await read(`!window.structureFirstFrame.selected && window.structureFirstFrame.unresolved && window.structureFirstFrame.analytics`), 'Cold selection changed the current page before history was ready')
+  check(await read(`window.structureFirstFrame.selected && window.structureFirstFrame.unresolved && window.structureFirstFrame.preview && window.structureFirstFrame.sendLocked && !window.structureFirstFrame.analytics`), 'Cold selection did not show the selected catalog preview with authority controls locked')
   await pending('cache-b')
   await control('resolve-b')
-  await wait(`${row('cache-b')}?.getAttribute('aria-current') === 'true' && ${body('cache-b')} && ${entry}?.effect.getTiming().duration === 180`)
-  check(await read(`${entry}.effect.getKeyframes().every(frame => !frame.transform || frame.transform === 'none')`), 'Session entry translated spatially')
+  await wait(`${row('cache-b')}?.getAttribute('aria-current') === 'true' && ${body('cache-b')}`)
+  check(await read(`(() => {
+    const animation = window.structureEntries.filter(item => item.id === 'scry-structure').at(-1)
+    return animation?.effect.getTiming().duration === 180 && animation.effect.getKeyframes().every(frame => !frame.transform || frame.transform === 'none')
+  })()`), 'Session entry lost its 180ms opacity-only animation')
   await wait(`${entries}.length === 0`)
 
   await click(row('cache-a'))
@@ -107,7 +110,7 @@ export async function exerciseStructure(contents) {
     contents.debugger.detach()
   }
   return { page240: true, belowChromeIncludesComposer: true, firstClickAndInputDuringEntry: true,
-    coldSelectionWaitsForContent: true, session180NoTranslation: true, rapidCancellation: true, staleHistoryRejected: true,
+    coldSelectionShowsTargetPreview: true, session180NoTranslation: true, rapidCancellation: true, staleHistoryRejected: true,
     cachedNavigationTargetsLivePage: true, staleCacheOnlyOneEntrance: true, sameSessionRefreshNoEntrance: true, sameSessionFocusNoEntrance: true,
     newConversationResetsIdentity: true, reduced120OpacityOnly: true, nativeCaptureCalls: 0 }
 }

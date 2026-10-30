@@ -9,7 +9,10 @@ export async function exerciseSessionCapabilityCore() {
     }
     // Search autofocus does not necessarily mutate the DOM.
     const observer = new MutationObserver(changed)
-    const timer = setTimeout(() => { observer.disconnect(); document.removeEventListener('focusin', changed, true); reject(new Error(`DOM condition timed out: ${predicate.toString()}`)) }, 5000)
+    const timer = setTimeout(() => {
+      observer.disconnect(); document.removeEventListener('focusin', changed, true)
+      reject(new Error(`DOM condition timed out: ${predicate.toString()}; active=${document.activeElement?.outerHTML.slice(0, 300)}; hasFocus=${document.hasFocus()}; satisfied=${predicate()}`))
+    }, 5000)
     document.addEventListener('focusin', changed, true)
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true })
   })
