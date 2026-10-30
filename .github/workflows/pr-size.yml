@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/pr-size.yml
   pull_request_target:
+    branches: [main]
     types: [opened, reopened, synchronize, edited, ready_for_review, converted_to_draft]
 
 permissions:
@@ -253,7 +254,7 @@ jobs:
             const changedLines = nonTestChangedLines === 0 ? testChangedLines : nonTestChangedLines;
             const nextLabelName = resolveSizeLabel(changedLines);
 
-            const { data: currentLabels } = await github.rest.issues.listLabelsOnIssue({
+            const currentLabels = await github.paginate(github.rest.issues.listLabelsOnIssue, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issueNumber,

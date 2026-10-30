@@ -52,18 +52,18 @@
 
 size 采用上游阈值 XS <10、S <30、M <100、L <500、XL <1000、XXL ≥1000；忽略空白改动，纯测试 PR 仍计算测试行。二进制改动没有行数，这个标签不表示风险。移植补充了标签定义任务的 push/手动触发入口、PR retarget 的 edited 事件，适配 Scry fixture 路径，并禁止 git 外部 diff/textconv。
 
-`pull_request_target` 标签任务只运行可信 workflow/Action，以 PR 为数据，不安装依赖、不构建、不运行 PR 脚本。不得在这些有写权限的 job 中切到 PR head 执行代码。普通 PR CI 保持只读 token，不添加 Provider、签名或生产凭据。
+`pull_request_target` 标签任务只运行可信 workflow/Action，以 PR 为数据，不安装 PR 依赖、不构建 PR 代码、不运行 PR 脚本。不得在这些有写权限的 job 中切到 PR head 执行代码。PR 构建/测试 job 保持只读 token；`performance.yml` 的独立 `comment` job 仅对同仓库 PR 使用 `actions: read` 和 `pull-requests: write`，读取被动报告 artifact 并发布评论，不 checkout、构建或执行 PR 代码。fork 仅保留只读 summary/artifact。不添加 Provider、签名或生产凭据。
 
 `performance-ratchet.yml` 用 `GITHUB_TOKEN` 创建的 PR 通常不会触发后续 PR Actions。当前保持原行为：维护者在获授权后用个人身份关闭再重新打开该 PR，以触发正常检查，并核实 head 与检查结果；不要免检合并。若频繁产生此类 PR，再单独授权最小权限 GitHub App token，不能为了自动化添加宽权限 PAT。
 
 ## 外部启用顺序（维护者执行或明确授权 Agent）
 
-1. 把本次配置作为 PR 合入。合入前用隔离测试验证 workflow；`pull_request_target` 新工作流要进入默认分支后才可验证事件接线。
+1. 把本次配置作为 PR 合入。合入前用隔离测试验证 workflow；`pull_request_target` 新工作流要进入默认分支后才可验证事件接线。检查 GitHub Actions 的实际审批/安全策略；若这类触发被拦截或待批准，维护者仅按需批准 `pr-size.yml`、`pr-vouch.yml`，不整体放宽策略。记录真实 PR 事件是否执行及标签结果；文件存在或手动触发成功不证明 PR 事件已放行。
 2. 安装所选 Reviewer GitHub App，仅授权 `bingjiang0611/scry`。先核实免费范围、代码访问权限和预算；不要同时默认开启两家全部功能。CodeRabbit 使用根 `.coderabbit.yaml`；Macroscope 使用 `.macroscope/`，后台验证 opt-in 标签和任何收费检查。
 3. 在默认分支运行 `PR Size` 的 `workflow_dispatch`（合入修改也会触发定义同步），确认 size 标签存在。`PR Vouch` 在 PR 事件或名单变更时同步其标签。维护者创建 `triage:keep-open` 和 `macroscope-review`；后者只在实际接线验证后使用。
 4. 用测试 PR 验证下表，包括 fork、更新 head、失败和无影响路径。先确保三个汇总检查都真实出现，不能预先添加永远不产生的 required context。
 5. 启用 main ruleset：要求 PR、`Check`、`Performance Check`、`Remote Check`；禁止删除与 force push；要求解决 review conversations；仅允许 Squash。检查来源限制为 GitHub Actions，不把任意同名第三方状态当作门禁。
-6. 单维护者阶段所需 Approval 数为 0，保持人工合并、关闭 auto-merge；这不构成独立人工审查。不要把 AI Approval 当作敏感边界决定。管理员绕过只用于明确记录的应急操作。
+6. 单维护者阶段所需 Approval 数为 0，保持人工合并、关闭 auto-merge；这不构成独立人工审查。不要把 AI Approval 当作敏感边界决定。当前 ruleset 无 bypass；任何应急放宽都需要维护者单独授权、记录并恢复，不由 Agent 自行执行。
 7. 确认实际 App 评审和 ruleset 拒绝效果后，在交付记录写明已启用的服务、实际检查名与验收 PR。未完成的项继续标为未验证。
 
 ## 验收矩阵
@@ -84,4 +84,4 @@ size 采用上游阈值 XS <10、S <30、M <100、L <500、XL <1000、XXL ≥100
 
 ## 回退
 
-本次不改变 App 运行产物。可回退相关仓库提交；已启用的外部 App/ruleset 不会随 git revert 自动回退。维护者应先确认哪些检查将消失，再调整 required contexts，避免保护规则永远等待；关闭外部自动操作须在服务后台执行并读回确认。回退不能顺带放宽 Scry 的安全或证据合同。
+流程配置与随任务合入的运行时修复分开评估，不自动回退或重装 App。可回退相关仓库提交；已启用的外部 App/ruleset 不会随 git revert 自动回退。维护者应先确认哪些检查将消失，再调整 required contexts，避免保护规则永远等待；关闭外部自动操作须在服务后台执行并读回确认。回退不能顺带放宽 Scry 的安全或证据合同。

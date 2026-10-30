@@ -151,11 +151,21 @@ function labelApi(initial: string[]) {
     },
     createLabel: async ({ name }: { name: string }) => { definitions.add(name) },
     updateLabel: async () => {},
-    listLabelsOnIssue: async () => ({ data: [...labels].map(name => ({ name })) }),
+    listLabelsOnIssue: async ({ per_page = 30, page = 1 }: { per_page?: number; page?: number }) => ({
+      data: [...labels].slice((page - 1) * per_page, page * per_page).map(name => ({ name }))
+    }),
     removeLabel: async ({ name }: { name: string }) => { labels.delete(name) },
     addLabels: async ({ labels: additions }: { labels: string[] }) => { additions.forEach(name => labels.add(name)) }
   }
-  return { labels, definitions, github: { rest: { issues } } }
+  const paginate = async (method: typeof issues.listLabelsOnIssue, options: { per_page: number }) => {
+    const labels: { name: string }[] = []
+    for (let page = 1; ; page++) {
+      const { data } = await method({ ...options, page })
+      labels.push(...data)
+      if (data.length < options.per_page) return labels
+    }
+  }
+  return { labels, definitions, github: { rest: { issues }, paginate } }
 }
 const context = { repo: { owner: 'test', repo: 'fixture' } }
 const core = { info: () => {}, warning: () => {} }
@@ -167,7 +177,7 @@ describe('ported label workflows', () => {
   it('trusted write jobs never checkout PR head or run project code; size bootstrap is reachable', () => {
     for (const file of ['pr-size.yml', 'pr-vouch.yml']) {
       const config = workflow(file)
-      expect(config.on.pull_request_target).toBeDefined()
+      expect(config.on.pull_request_target).toMatchObject({ branches: ['main'] })
       for (const job of Object.values(config.jobs)) {
         for (const step of job.steps) {
           expect(step.run).toBeUndefined()
@@ -192,10 +202,11 @@ describe('ported label workflows', () => {
     ['bot', 'trusted'], ['collaborator', 'trusted'], ['vouched', 'trusted'],
     ['denounced', 'denounced'], ['unknown', 'unvouched']
   ])('vouch %s becomes %s without removing unrelated labels', async (status, expected) => {
-    const api = labelApi(['bug', 'vouch:trusted', 'vouch:unvouched'])
+    const unrelated = Array.from({ length: 101 }, (_, index) => `unrelated-${index}`)
+    const api = labelApi([...unrelated, 'bug', 'vouch:trusted', 'vouch:unvouched'])
     const script = source(workflow('pr-vouch.yml').jobs.label, 'Sync PR labels').with!.script!
     await runScript(script, { ...api, context, core, process: { env: { PR_NUMBER: '7', VOUCH_STATUS: status } } })
-    expect([...api.labels].sort()).toEqual(['bug', `vouch:${expected}`].sort())
+    expect([...api.labels].sort()).toEqual([...unrelated, 'bug', `vouch:${expected}`].sort())
     expect(api.definitions.size).toBe(3)
   })
 
@@ -215,7 +226,8 @@ describe('ported label workflows', () => {
     await runScript(config.jobs['prepare-config'].steps[0].with!.script!, {
       core: { setOutput: (_name: string, value: string) => { labelConfig = value } }
     })
-    const api = labelApi(['bug', 'size:XXL'])
+    const unrelated = Array.from({ length: 101 }, (_, index) => `unrelated-${index}`)
+    const api = labelApi([...unrelated, 'bug', 'size:XXL'])
     const commands: string[][] = []
     await runScript(source(config.jobs.label, 'Sync PR size label').with!.script!, {
       ...api, core,
@@ -230,7 +242,7 @@ describe('ported label workflows', () => {
         } }
       }
     })
-    expect([...api.labels].sort()).toEqual(['bug', testOnly ? 'size:L' : 'size:S'].sort())
+    expect([...api.labels].sort()).toEqual([...unrelated, 'bug', testOnly ? 'size:L' : 'size:S'].sort())
     expect(git('rev-parse', 'HEAD')).toBe(base)
     for (const args of commands.filter(args => args[0] === 'diff')) {
       expect(args).toContain('--no-ext-diff')

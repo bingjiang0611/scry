@@ -162,7 +162,7 @@ jobs:
                   ? "vouch:trusted"
                   : "vouch:unvouched";
 
-            const { data: currentLabels } = await github.rest.issues.listLabelsOnIssue({
+            const currentLabels = await github.paginate(github.rest.issues.listLabelsOnIssue, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issueNumber,
