@@ -133,6 +133,31 @@ describe('native transcript streaming projection', () => {
     await expect(collect(path)).rejects.toThrow('原生会话记录')
   })
 
+  it('matches JSON.parse on invalid and duplicate-key records', async () => {
+    const cases: Array<{ name: string; record: string }> = [
+      { name: 'missing comma', record: '{"type":"user","sessionId":"native-1" "message":{"role":"user","content":"fake"}}' },
+      { name: 'missing colon', record: '{"type":"user" "message":{"role":"user","content":"fake"}}' },
+      { name: 'trailing comma', record: '{"type":"user","message":{"role":"user","content":"fake"},}' },
+      { name: 'invalid number', record: '{"type":"user","isMeta":01,"message":{"role":"user","content":"fake"}}' },
+      { name: 'unquoted key', record: '{"type":user,"message":{"role":"user","content":"fake"}}' }
+    ]
+    for (const sample of cases) {
+      // The reader's verdict must be the JSON parser's verdict, never its own opinion.
+      const jsonAccepts = ((): boolean => {
+        try { JSON.parse(sample.record); return true } catch { return false }
+      })()
+      expect(jsonAccepts, `${sample.name} must be invalid JSON`).toBe(false)
+      const path = await transcript([claudeUser('first', 'prompt-1'), `${sample.record}\n`, claudeAssistant('answer one')])
+      await expect(collect(path), sample.name).rejects.toThrow('原生会话记录语法无效')
+    }
+    // JSON keeps the last duplicate key, and so does this projection: the record is read,
+    // not rejected, and the later value decides.
+    const duplicate = '{"type":"system","sessionId":"native-1","type":"user","message":{"role":"user","content":[{"type":"text","text":"duplicate wins"}]}}'
+    expect((JSON.parse(duplicate) as { type: string }).type).toBe('user')
+    const path = await transcript([`${duplicate}\n`, claudeAssistant('answer one')])
+    expect((await collect(path)).turns[0].texts).toEqual(['duplicate wins', 'answer one'])
+  })
+
   it('refuses a transcript replaced or truncated while it was read', async () => {
     const path = await transcript([claudeUser('first', 'prompt-1'), claudeAssistant('answer one')])
     const handle = await open(path, 'r+')

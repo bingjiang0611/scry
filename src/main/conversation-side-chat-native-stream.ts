@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { open } from 'node:fs/promises'
 import { TextSpool } from './text-spool'
-import { JsonlRecordScanner, type JsonlEvent, type ScalarSlot } from './jsonl-record-scanner'
+import { projectTranscript, type JsonlEvent, type ScalarSlot } from './jsonl-record-scanner'
 import type { StreamedMessage, StreamedTurn } from './conversation-side-chat-stream'
 import type { CaptureItem, CaptureSink } from './conversation-side-chat-capture'
 import { TitleTap, consume, type RequestedBoundary } from './conversation-side-chat-sink'
@@ -27,11 +27,12 @@ import type { ProviderId } from '../shared/provider'
  * reads does not block freezing the completed prefix.
  */
 
-const READ_CHUNK_BYTES = 1024 * 1024
 /** The normalizer recognises a skill directive from this marker; only its head matters. */
 const SKILL_MARKER = 'Base directory for this skill:'
 /** Enough of a prompt to recognise a task notification or a skill directive. */
 const PROMPT_HEAD_CHARS = 4096
+/** The tokenizer emits long strings in small pieces; spooling each one would be one write each. */
+const TEXT_BATCH_CHARS = 64 * 1024
 const TASK_NOTIFICATION = '<task-notification>'
 
 /** One assistant record's visible blocks: blocks join with nothing, records by a blank line. */
@@ -131,29 +132,13 @@ export async function* streamNativeTranscriptTurns(
   const record = new RecordProjection(state, createSpool, ready, {
     sessionId: options.sessionId, ...(options.cwd === undefined ? {} : { cwd: options.cwd })
   })
-  const pump = async (events: readonly JsonlEvent[]): Promise<void> => {
-    for (const event of events) await record.accept(event)
-  }
   try {
     const before = await handle.stat()
     if (!before.isFile()) throw new Error('原生会话 transcript 不是普通文件')
-    const scanner = new JsonlRecordScanner()
-    const decoder = new TextDecoder('utf-8')
-    const buffer = Buffer.allocUnsafe(READ_CHUNK_BYTES)
-    let read = 0
-    for (;;) {
-      const chunk = await handle.read(buffer, 0, buffer.length, read)
-      if (chunk.bytesRead === 0) break
-      read += chunk.bytesRead
-      scanner.feed(decoder.decode(buffer.subarray(0, chunk.bytesRead), { stream: true }))
-      await pump(scanner.drain())
-      for (const closed of ready.splice(0)) yield* settle(closed, options, state, release)
-    }
-    const tail = decoder.decode()
-    if (tail.length > 0) scanner.feed(tail)
-    // An unfinished trailing record is not evidence; only newline-complete records are.
-    scanner.end()
-    await pump(scanner.drain())
+    const evidence = { bytes: 0 }
+    // Tokens are projected record by record; an unfinished trailing append ends the
+    // generator without events, so the completed prefix is still frozen.
+    for await (const event of projectTranscript(handle, before.size, evidence)) await record.accept(event)
     // The last turn ends at EOF, not at a following prompt record.
     if (state.current) {
       ready.push(state.current)
@@ -161,7 +146,7 @@ export async function* streamNativeTranscriptTurns(
     }
     for (const closed of ready.splice(0)) yield* settle(closed, options, state, release)
     const after = await handle.stat()
-    if (after.ino !== before.ino || after.dev !== before.dev || after.size < read) {
+    if (after.ino !== before.ino || after.dev !== before.dev || after.size < evidence.bytes) {
       throw new Error('原生会话 transcript 在读取期间被替换或截断，不能确认快照来源')
     }
   } finally {
@@ -204,6 +189,7 @@ class RecordProjection {
   private prompt?: TextSpool
   private head = ''
   private records = 0
+  private pending: { target: 'prompt' | 'block'; text: string } | undefined
 
   constructor(
     private readonly state: { suppress: boolean; current: TurnState | undefined },
@@ -231,20 +217,18 @@ class RecordProjection {
         }
         return
       case 'promptText':
-        this.prompt ??= this.createSpool()
-        await this.prompt.push(event.text)
         this.takeHead(event.text)
+        await this.buffer('prompt', event.text)
         return
       case 'blockText':
-        this.block ??= {}
-        this.block.spool ??= this.createSpool()
-        await this.block.spool.push(event.text)
         this.takeHead(event.text)
+        await this.buffer('block', event.text)
         return
       case 'beginBlock':
         this.block = {}
         return
       case 'blockEnd': {
+        await this.flushText()
         const block = this.block
         this.block = undefined
         if (!block) return
@@ -253,6 +237,7 @@ class RecordProjection {
         return
       }
       case 'endRecord':
+        await this.flushText()
         await this.endRecord()
     }
   }
@@ -303,8 +288,31 @@ class RecordProjection {
     this.blocks = []
   }
 
+  /** Collects a run of small tokenizer pieces into one spool write. */
+  private async buffer(target: 'prompt' | 'block', text: string): Promise<void> {
+    if (this.pending && this.pending.target !== target) await this.flushText()
+    this.pending ??= { target, text: '' }
+    this.pending.text += text
+    if (this.pending.text.length >= TEXT_BATCH_CHARS) await this.flushText()
+  }
+
+  private async flushText(): Promise<void> {
+    const pending = this.pending
+    this.pending = undefined
+    if (!pending || pending.text.length === 0) return
+    if (pending.target === 'prompt') {
+      this.prompt ??= this.createSpool()
+      await this.prompt.push(pending.text)
+      return
+    }
+    this.block ??= {}
+    this.block.spool ??= this.createSpool()
+    await this.block.spool.push(pending.text)
+  }
+
   /** A dropped record never keeps its spools: nothing it held belongs to the prefix. */
   private async discardRecord(): Promise<void> {
+    this.pending = undefined
     const spools = [...(this.prompt ? [this.prompt] : []), ...this.blocks,
       ...(this.block?.spool ? [this.block.spool] : [])]
     this.prompt = undefined

@@ -1,21 +1,25 @@
+import { once } from 'node:events'
+import type { FileHandle } from 'node:fs/promises'
+import { parser, type Token } from 'stream-json/parser.js'
+
 /**
- * Incremental, bounded-memory scanner for a Provider's JSONL transcript.
+ * Selective projection of a Provider's JSONL transcript, on top of the installed tokenizer.
  *
- * A raw transcript is one JSON record per line, and one record can be hundreds of MiB
- * because it embeds a whole tool result. Splitting the file on newlines would hold that
- * line, and `JSON.parse` would hold it a second time, so this scanner reads the decoded
- * character stream once and reports only the fields a side chat projects. Everything else
- * is validated structurally and dropped without becoming a value or a string.
+ * A raw transcript record can be hundreds of MiB because it embeds a whole tool result, so
+ * the side-chat path cannot read whole lines or call `JSON.parse`. The file is fed to
+ * `stream-json`, the same tokenizer the trace-archive projection uses, and this module only
+ * tracks the key path a side chat projects and forwards the few fields it needs. Every other
+ * value is consumed as tokens and dropped, so a 195 MiB payload never becomes a string.
  *
- * Text is reported as it arrives, so a caller can spool a visible body to disk instead of
- * accumulating it. Because the producer here is synchronous and spooling is not, events
- * are queued per feed and drained by the caller: a 1 MiB read therefore holds at most
- * 1 MiB of pending text, never the whole file or one record.
+ * Text leaves as it arrives so the caller can spool a visible body. Keys are matched
+ * incrementally against the known field names: an unknown or arbitrarily long key fails to
+ * match and its value is skipped, never rejected and never buffered.
  *
- * The projection follows the same rules the shared normalizer uses for native history:
- * the record's own `type`, its `isMeta`/`isCompactSummary` flags, the Provider turn id,
- * `message.stop_reason`, `message.content` (string or block array), a block's `type` and
- * `text`, and `origin.kind`. Nothing is inferred from position or from payload text.
+ * Records end at the newline the writer emits. That is also how a parse failure is
+ * classified: when the tokenizer rejects input whose region already contains a newline, the
+ * writer finished that line and it is corrupt; when it fails inside the file's unterminated
+ * last line, nothing there is a record yet, so it is an unfinished append and is dropped
+ * while the completed prefix is kept.
  */
 
 /** The only scalar fields a side chat projects, addressed by their JSON location. */
@@ -47,19 +51,21 @@ export type JsonlEvent =
 
 type Role = 'root' | 'message' | 'content' | 'block' | 'origin' | 'skip'
 
-interface Frame {
-  role: Role
-  kind: 'object' | 'array'
-}
-
-const ROOT_SLOTS: Record<string, ScalarSlot> = {
+const ROOT_KEYS: Record<string, ScalarSlot> = {
   type: 'root.type', isMeta: 'root.isMeta', isCompactSummary: 'root.isCompactSummary',
   promptId: 'root.promptId', prompt_id: 'root.prompt_id', turnId: 'root.turnId', turn_id: 'root.turn_id',
   sessionId: 'root.sessionId', cwd: 'root.cwd'
 }
+const ROOT_FIELDS = new Set([...Object.keys(ROOT_KEYS), 'message', 'origin'])
+const MESSAGE_FIELDS = new Set(['content', 'stop_reason'])
+const BLOCK_FIELDS = new Set(['type', 'text'])
+const ORIGIN_FIELDS = new Set(['kind'])
+const NO_FIELDS = new Set<string>()
 
-/** A record field name is a key, not content: a huge one is not a real transcript. */
-const MAX_KEY_CHARS = 4096
+/** Longest known field name; a longer key cannot match and stops being collected. */
+const LONGEST_FIELD = 16
+/** A projected scalar is a structural field of the Provider's record, not a body. */
+const MAX_SCALAR_CHARS = 64 * 1024
 
 export class JsonlRecordError extends Error {
   constructor(message: string) {
@@ -68,304 +74,227 @@ export class JsonlRecordError extends Error {
   }
 }
 
-export class JsonlRecordScanner {
-  private readonly frames: Frame[] = []
+/** Evidence of the bytes this projector actually consumed. */
+export interface TranscriptReadEvidence {
+  bytes: number
+}
+
+interface Capture {
+  kind: 'prompt' | 'block' | 'scalar'
+  slot?: ScalarSlot
+  text: string
+}
+
+/**
+ * Projects one transcript file as record events.
+ *
+ * The generator stops normally when the file ends in an unfinished record, and throws when
+ * a finished record is invalid. Every spool opened for the unfinished record is the caller's
+ * to drop: nothing was published for it.
+ */
+export async function* projectTranscript(
+  handle: FileHandle,
+  size: number,
+  evidence: TranscriptReadEvidence
+): AsyncGenerator<JsonlEvent> {
+  const projector = new TranscriptProjector()
+  const tokens = parser.asStream({ jsonStreaming: true, packStrings: false, packNumbers: false })
+  const decoder = new TextDecoder('utf-8')
+  const buffer = Buffer.allocUnsafe(1024 * 1024)
+  // Writing runs beside the token loop: the tokenizer only produces tokens once a chunk has
+  // been processed, so a single loop would starve on the first read.
+  const feeding = (async (): Promise<void> => {
+    let read = 0
+    for (;;) {
+      const chunk = await handle.read(buffer, 0, buffer.length, read)
+      if (chunk.bytesRead === 0) break
+      read += chunk.bytesRead
+      evidence.bytes = read
+      if (!tokens.write(decoder.decode(buffer.subarray(0, chunk.bytesRead), { stream: true }))) {
+        await once(tokens, 'drain')
+      }
+    }
+    const tail = decoder.decode()
+    if (tail.length > 0 && !tokens.write(tail)) await once(tokens, 'drain')
+    tokens.end()
+  })()
+  // Attached in this tick: a write rejected by the tokenizer must not surface as an
+  // unhandled rejection after the token loop has already reported the same verdict.
+  const feedingDone = feeding.catch(() => undefined)
+  try {
+    for await (const token of tokens as unknown as AsyncIterable<Token>) {
+      for (const event of projector.accept(token)) yield event
+    }
+  } catch (error) {
+    // A record the writer ended with a newline is a finished record that is invalid; a file
+    // whose last byte is not a newline was still being written there, and nothing in that
+    // unfinished line is evidence, so the completed prefix stands.
+    if (await endsWithNewline(handle, size)) {
+      throw new JsonlRecordError(`原生会话记录语法无效：${error instanceof Error ? error.message : String(error)}`)
+    }
+    return
+  } finally {
+    await feedingDone
+  }
+}
+
+async function endsWithNewline(handle: FileHandle, size: number): Promise<boolean> {
+  if (size === 0) return false
+  const last = Buffer.allocUnsafe(1)
+  const { bytesRead } = await handle.read(last, 0, 1, size - 1)
+  return bytesRead === 1 && last[0] === 0x0a
+}
+
+/** Applies one token, keeping only the key path a side chat projects. */
+class TranscriptProjector {
+  private readonly roles: Role[] = []
   private readonly events: JsonlEvent[] = []
   private key: string | null = null
-  private inString = false
-  private stringIsKey = false
-  private capture: 'prompt' | 'block' | null = null
-  /** A projected scalar string being collected; its value is small by contract. */
-  private scalarValue?: { slot: ScalarSlot; text: string }
-  private escape = 0
-  private unicodeDigits = ''
-  private keyBuf = ''
-  private run = ''
-  private primitive = ''
-  /** A key was read and its value has not started: a separator here is a corrupt record. */
-  private pendingValue = false
-  /** A comma was read and no member or element followed: a trailing separator. */
-  private afterComma = false
-  /** Decoded characters consumed so far, for the caller's prefix evidence. */
-  bytes = 0
+  private keyCandidates: Set<string> = NO_FIELDS
+  private keyPrefix = ''
+  private inKey = false
+  private capture?: Capture
 
-  /** Feeds one decoded piece of the file and queues everything it completes. */
-  feed(text: string): void {
-    this.bytes += Buffer.byteLength(text, 'utf8')
-    let index = 0
-    while (index < text.length) {
-      if (this.inString) {
-        if (this.escape !== 0) {
-          index = this.consumeEscape(text, index)
-          continue
-        }
-        const next = nextSpecial(text, index)
-        if (next < 0) {
-          this.consumeStringChars(text.slice(index))
-          break
-        }
-        this.consumeStringChars(text.slice(index, next))
-        const special = text[next]
-        index = next + 1
-        if (special === '\\') this.escape = 1
-        else this.finishString()
-        continue
-      }
-      const char = text[index]
-      index += 1
-      this.consumeStructural(char)
+  accept(token: Token): JsonlEvent[] {
+    this.events.length = 0
+    switch (token.name) {
+      case 'startObject': this.start('object'); break
+      case 'startArray': this.start('array'); break
+      case 'endObject':
+      case 'endArray': this.end(); break
+      case 'startKey': this.beginKey(); break
+      case 'stringChunk': this.chunk(token.value as string); break
+      case 'endKey': this.endKey(); break
+      case 'startString': this.beginValue('string'); break
+      case 'endString': this.endValue(); break
+      case 'startNumber': this.beginValue('number'); break
+      case 'numberChunk': this.chunk(token.value as string); break
+      case 'endNumber': this.endValue(); break
+      case 'trueValue': this.literal('true', 'boolean'); break
+      case 'falseValue': this.literal('false', 'boolean'); break
+      case 'nullValue': this.literal('null', 'null'); break
+      case 'keyValue': break
+      default: break
     }
-    this.flushRun()
+    return this.events
   }
 
-  /** Queued events, in document order. The caller must drain after every `feed`. */
-  drain(): JsonlEvent[] {
-    return this.events.splice(0)
-  }
-
-  /** The trailing bytes were an unfinished record: not evidence, and never projected. */
-  end(): void {
-    this.flushRun()
-  }
-
-  private consumeStructural(char: string): void {
-    if (char === '\n' || char === '\r' || char === '\t' || char === ' ') {
-      // A newline inside an open record means the writer emitted invalid JSON, not that
-      // the tail is still being appended: a truncated tail has no following newline.
-      if (char === '\n' && this.frames.length > 0) {
-        throw new JsonlRecordError('原生会话记录在未闭合时换行，无法确认前缀内容')
-      }
+  private start(kind: 'object' | 'array'): void {
+    if (this.roles.length === 0) {
+      if (kind !== 'object') throw new JsonlRecordError('原生会话记录不是 JSON 对象')
+      this.roles.push('root')
+      this.key = null
+      this.events.push({ t: 'beginRecord' })
       return
     }
-    if (this.primitive !== '') {
-      if (isPrimitiveEnd(char)) {
-        this.finishPrimitive()
-        this.consumeStructural(char)
+    const role = this.childRole(kind)
+    if (kind === 'object' && role === 'block') this.events.push({ t: 'beginBlock' })
+    this.roles.push(role)
+    this.key = null
+  }
+
+  private end(): void {
+    const role = this.roles.pop()
+    if (role === 'block') this.events.push({ t: 'blockEnd' })
+    this.key = null
+    this.capture = undefined
+    if (this.roles.length === 0) this.events.push({ t: 'endRecord' })
+  }
+
+  private childRole(kind: 'object' | 'array'): Role {
+    const parent = this.roles.at(-1)
+    if (parent === 'skip' || parent === undefined) return 'skip'
+    if (parent === 'root') {
+      if (this.key === 'message' && kind === 'object') return 'message'
+      if (this.key === 'origin' && kind === 'object') return 'origin'
+      return 'skip'
+    }
+    if (parent === 'message') return this.key === 'content' && kind === 'array' ? 'content' : 'skip'
+    if (parent === 'content') return kind === 'object' ? 'block' : 'skip'
+    return 'skip'
+  }
+
+  private beginKey(): void {
+    this.inKey = true
+    this.keyPrefix = ''
+    this.keyCandidates = this.fieldsOfCurrent()
+  }
+
+  private fieldsOfCurrent(): Set<string> {
+    const parent = this.roles.at(-1)
+    if (parent === 'root') return ROOT_FIELDS
+    if (parent === 'message') return MESSAGE_FIELDS
+    if (parent === 'block') return BLOCK_FIELDS
+    if (parent === 'origin') return ORIGIN_FIELDS
+    return NO_FIELDS
+  }
+
+  private endKey(): void {
+    this.inKey = false
+    this.key = this.keyCandidates.size === 1 ? [...this.keyCandidates][0] : null
+    this.keyPrefix = ''
+  }
+
+  /** A key that cannot match a known field stops being collected instead of growing. */
+  private chunk(text: string): void {
+    if (this.inKey) {
+      if (this.keyCandidates.size === 0) return
+      this.keyPrefix += text
+      if (this.keyPrefix.length > LONGEST_FIELD) {
+        this.keyCandidates = NO_FIELDS
+        this.keyPrefix = ''
         return
       }
-      this.primitive += char
+      const prefix = this.keyPrefix
+      this.keyCandidates = new Set([...this.keyCandidates].filter(field => field.startsWith(prefix)))
       return
     }
-    switch (char) {
-      case '{': this.openContainer('object'); return
-      case '[': this.openContainer('array'); return
-      case '}': this.trailingSeparator(); this.missingValue(); this.closeContainer('object'); return
-      case ']': this.trailingSeparator(); this.missingValue(); this.closeContainer('array'); return
-      case ',': this.missingValue(); this.afterComma = true; this.key = null; return
-      case ':': this.pendingValue = true; return
-      case '"': this.startString(); return
-      default:
-        if (char === '-' || (char >= '0' && char <= '9') || (char >= 'a' && char <= 'z')) {
-          if (this.frames.length === 0) throw new JsonlRecordError('原生会话记录不是 JSON 对象')
-          this.pendingValue = false
-          this.afterComma = false
-          this.primitive = char
-          return
-        }
-        throw new JsonlRecordError(`原生会话记录出现无法解析的字符 ${JSON.stringify(char)}`)
-    }
-  }
-
-  private missingValue(): void {
-    if (!this.pendingValue) return
-    throw new JsonlRecordError('原生会话记录缺少字段值')
-  }
-
-  private trailingSeparator(): void {
-    if (!this.afterComma) return
-    throw new JsonlRecordError('原生会话记录包含多余的分隔符')
-  }
-
-  private openContainer(kind: 'object' | 'array'): void {
-    this.pendingValue = false
-    this.afterComma = false
-    if (this.frames.length === 0) {
-      if (kind !== 'object') throw new JsonlRecordError('原生会话记录不是 JSON 对象')
-      this.events.push({ t: 'beginRecord' })
-      this.frames.push({ role: 'root', kind })
-      this.key = null
+    if (!this.capture) return
+    if (this.capture.kind === 'scalar') {
+      if (this.capture.text.length + text.length > MAX_SCALAR_CHARS) {
+        throw new JsonlRecordError('原生会话记录字段值不符合该 Provider 的格式')
+      }
+      this.capture.text += text
       return
     }
-    const role = this.childRole()
-    if (kind === 'object' && role === 'block') this.events.push({ t: 'beginBlock' })
-    this.frames.push({ role, kind })
-    this.key = null
+    if (this.capture.kind === 'prompt') this.events.push({ t: 'promptText', text })
+    else this.events.push({ t: 'blockText', text })
   }
 
-  private closeContainer(kind: 'object' | 'array'): void {
-    const frame = this.frames.at(-1)
-    if (!frame || frame.kind !== kind) throw new JsonlRecordError('原生会话记录结构不完整')
-    if (frame.role === 'block') this.events.push({ t: 'blockEnd' })
-    this.frames.pop()
-    this.key = null
-    if (this.frames.length === 0) this.events.push({ t: 'endRecord' })
-  }
-
-  private startString(): void {
-    this.pendingValue = false
-    this.afterComma = false
-    const frame = this.frames.at(-1)
-    if (!frame) throw new JsonlRecordError('原生会话记录不是 JSON 对象')
-    this.inString = true
-    // A key is the string that opens an object member: that member has no key yet.
-    this.stringIsKey = frame.kind === 'object' && this.key === null
-    if (this.stringIsKey) {
-      this.keyBuf = ''
-      return
-    }
+  private beginValue(kind: 'string' | 'number'): void {
+    const parent = this.roles.at(-1)
+    if (kind === 'string' && parent === 'root' && this.key === 'message') return
+    if (parent === 'skip' || this.key === null) return
     const slot = this.scalarSlot()
     if (slot !== undefined) {
-      this.scalarValue = { slot, text: '' }
+      this.capture = { kind: 'scalar', slot, text: '' }
       return
     }
-    this.capture = this.stringCapture()
+    if (kind !== 'string') return
+    if (parent === 'message' && this.key === 'content') this.capture = { kind: 'prompt', text: '' }
+    else if (parent === 'block' && this.key === 'text') this.capture = { kind: 'block', text: '' }
   }
 
-  private stringCapture(): 'prompt' | 'block' | null {
-    const frame = this.frames.at(-1)
-    if (!frame || frame.role === 'skip') return null
-    if (frame.kind === 'array') return frame.role === 'content' ? 'block' : null
-    if (frame.role === 'block' && this.key === 'text') return 'block'
-    if (frame.role === 'message' && this.key === 'content') return 'prompt'
-    return null
-  }
-
-  private childRole(): Role {
-    const frame = this.frames.at(-1)
-    if (!frame) return 'root'
-    if (frame.role === 'skip') return 'skip'
-    if (frame.kind === 'array') return frame.role === 'content' ? 'block' : 'skip'
-    switch (frame.role) {
-      case 'root':
-        if (this.key === 'message') return 'message'
-        if (this.key === 'origin') return 'origin'
-        return 'skip'
-      case 'message':
-        return this.key === 'content' ? 'content' : 'skip'
-      default:
-        return 'skip'
-    }
-  }
-
-  private consumeStringChars(text: string): void {
-    if (text.length === 0) return
-    for (let index = 0; index < text.length; index += 1) {
-      // A raw control character is invalid JSON and would make the prefix unverifiable.
-      if (text.charCodeAt(index) < 0x20) throw new JsonlRecordError('原生会话记录字符串包含未转义的控制字符')
-    }
-    if (this.stringIsKey) {
-      this.keyBuf += text
-      if (this.keyBuf.length > MAX_KEY_CHARS) throw new JsonlRecordError('原生会话记录字段名过长')
-      return
-    }
-    if (this.scalarValue) {
-      this.scalarValue.text += text
-      if (this.scalarValue.text.length > MAX_KEY_CHARS) throw new JsonlRecordError('原生会话记录字段值过长')
-      return
-    }
-    if (this.capture !== null) this.run += text
-  }
-
-  /** Continues an escape sequence; returns the next unconsumed character index. */
-  private consumeEscape(text: string, index: number): number {
-    const char = text[index]
-    if (char === undefined) return index
-    if (this.escape === 1) {
-      this.escape = 0
-      switch (char) {
-        case '"': case '\\': case '/': this.emitEscaped(char); return index + 1
-        case 'b': this.emitEscaped('\b'); return index + 1
-        case 'f': this.emitEscaped('\f'); return index + 1
-        case 'n': this.emitEscaped('\n'); return index + 1
-        case 'r': this.emitEscaped('\r'); return index + 1
-        case 't': this.emitEscaped('\t'); return index + 1
-        case 'u': this.escape = 2; this.unicodeDigits = ''; return index + 1
-        default: throw new JsonlRecordError('原生会话记录包含无效的字符串转义')
-      }
-    }
-    this.unicodeDigits += char
-    if (this.unicodeDigits.length < 4) return index + 1
-    if (!/^[0-9a-fA-F]{4}$/.test(this.unicodeDigits)) throw new JsonlRecordError('原生会话记录包含无效的 \\u 转义')
-    this.escape = 0
-    // Code units are emitted exactly as written; the spool pairs a split surrogate pair.
-    this.emitEscaped(String.fromCharCode(parseInt(this.unicodeDigits, 16)))
-    return index + 1
-  }
-
-  private emitEscaped(char: string): void {
-    if (this.stringIsKey) {
-      this.keyBuf += char
-      if (this.keyBuf.length > MAX_KEY_CHARS) throw new JsonlRecordError('原生会话记录字段名过长')
-      return
-    }
-    if (this.scalarValue) {
-      this.scalarValue.text += char
-      return
-    }
-    if (this.capture !== null) this.run += char
-  }
-
-  private finishString(): void {
-    this.inString = false
-    if (this.stringIsKey) {
-      this.key = this.keyBuf
-      this.keyBuf = ''
-      this.stringIsKey = false
-      return
-    }
-    this.flushRun()
-    const scalar = this.scalarValue
-    this.scalarValue = undefined
-    this.capture = null
-    if (scalar) this.events.push({ t: 'scalar', slot: scalar.slot, raw: scalar.text, kind: 'string' })
-    // The member is complete; the object is ready for its next key.
-    this.key = null
-  }
-
-  private finishPrimitive(): void {
-    const raw = this.primitive
-    this.primitive = ''
+  private literal(raw: string, kind: 'boolean' | 'null'): void {
     const slot = this.scalarSlot()
-    this.key = null
-    // Validate even a dropped literal so a corrupt record cannot pass as a value.
-    if (!/^(true|false|null)$/.test(raw) && !NUMBER.test(raw)) throw new JsonlRecordError('原生会话记录包含无效的字面量')
     if (slot === undefined) return
-    if (raw === 'true' || raw === 'false') this.events.push({ t: 'scalar', slot, raw, kind: 'boolean' })
-    else if (raw === 'null') this.events.push({ t: 'scalar', slot, raw, kind: 'null' })
-    else this.events.push({ t: 'scalar', slot, raw, kind: 'number' })
+    this.events.push({ t: 'scalar', slot, raw, kind })
+  }
+
+  private endValue(): void {
+    const capture = this.capture
+    this.capture = undefined
+    if (capture?.kind === 'scalar' && capture.slot) {
+      this.events.push({ t: 'scalar', slot: capture.slot, raw: capture.text, kind: 'string' })
+    }
   }
 
   private scalarSlot(): ScalarSlot | undefined {
-    const frame = this.frames.at(-1)
-    if (!frame || frame.role === 'skip' || frame.kind !== 'object' || this.key === null) return undefined
-    if (frame.role === 'root') return ROOT_SLOTS[this.key]
-    if (frame.role === 'message' && this.key === 'stop_reason') return 'message.stopReason'
-    if (frame.role === 'block' && this.key === 'type') return 'block.type'
-    if (frame.role === 'origin' && this.key === 'kind') return 'origin.kind'
+    const parent = this.roles.at(-1)
+    if (parent === 'root' && this.key !== null) return ROOT_KEYS[this.key]
+    if (parent === 'message' && this.key === 'stop_reason') return 'message.stopReason'
+    if (parent === 'block' && this.key === 'type') return 'block.type'
+    if (parent === 'origin' && this.key === 'kind') return 'origin.kind'
     return undefined
   }
-
-  private flushRun(): void {
-    const chunk = this.run
-    this.run = ''
-    if (chunk.length === 0) return
-    if (this.capture === 'prompt') this.events.push({ t: 'promptText', text: chunk })
-    else if (this.capture === 'block') this.events.push({ t: 'blockText', text: chunk })
-  }
-}
-
-const NUMBER = /^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?$/
-
-/** Next `"` or `\` at or after `index`; the two characters that end a plain run. */
-function nextSpecial(text: string, index: number): number {
-  for (let cursor = index; cursor < text.length; cursor += 1) {
-    const char = text.charCodeAt(cursor)
-    if (char === 0x22 || char === 0x5c) return cursor
-  }
-  return -1
-}
-
-function isPrimitiveEnd(char: string): boolean {
-  return char === ',' || char === '}' || char === ']' || char === '\n' || char === '\r' ||
-    char === '\t' || char === ' '
 }
