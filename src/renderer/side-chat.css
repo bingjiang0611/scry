@@ -8,7 +8,7 @@
   flex: 1 1 auto;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--r-sm);
   overflow: hidden;
   position: relative;
 }
@@ -238,7 +238,8 @@
   color: var(--muted);
   padding: 2px 8px;
   border: 1px dashed var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
+  corner-shape: round;
 }
 
 /* C2: the approved entry card, one flat tab strip for tools and child instances. */
@@ -294,7 +295,8 @@
 .surface-tab-status {
   margin-left: 4px;
   padding: 1px 5px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
+  corner-shape: round;
   background: color-mix(in srgb, var(--warn, #c08a2e) 16%, transparent);
   color: var(--fg);
   font-size: 10px;
@@ -363,7 +365,7 @@
   gap: 2px;
   padding: 8px 10px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--fg);
   text-align: left;
