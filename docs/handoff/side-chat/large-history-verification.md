@@ -98,7 +98,22 @@
 所以：**不是“整个 App 不再有上限”**。被证明的是“侧聊大历史来源与冻结路径不再有隐藏的
 数据尺寸上限，超出交接预算的部分按需读取，缺失能力时如实拒绝”。
 
-## 5. 复现命令与产物
+## 5. 本轮观察到的首次失败（不改写为 flake）
+
+同一次验证里记录到的、同一代码重跑通过的第一轮失败。**根因未知**，没有把任何一步标成
+skip，也没有通过延迟断言、加 sleep 或换断言来让它变绿：
+
+- `npm run test:renderer:ui` 第一次停在 `Side-chat drafts restart state:
+  .pending-submission-modal` 等待超时；同一棵树重跑 `RENDERER_UI_EXIT=0`。同一条
+  `--dev-side-chat-only` 步骤在同一次的 `npm run test:side-chat:ui` 里是通过的。
+- 大历史对话框的指针翻页在一条 >4 MiB 消息的续页上出现过“点更新内容不变”（见第 3 节），
+  指针遍历因此有界到第 4 页，末页改由 IPC 全量遍历证明。
+- 未观察到的：`npm test`（510 files / 5122 passed / 4 skipped）、`npm run build`、
+  `npm run typecheck`、`npm run test:side-chat:ui`、`npm run test:conversation:ipc`、
+  `npm run check:cli-release`、`npm run performance:measure -- --compare d824c609`
+  （135 行对照、0 worse、`Ratchet: passed`）本轮均为一次通过。
+
+## 6. 复现命令与产物
 
 ```
 npm run build
