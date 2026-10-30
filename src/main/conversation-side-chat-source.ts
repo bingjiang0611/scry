@@ -271,7 +271,7 @@ async function captureNativePrefix(
   })
   let sources: ProjectedTurn[]
   let status = 'completed'
-  if (archiveInfo && archiveInfo.totalTurns > 0) {
+  if (archiveInfo && archiveInfo.totalTurns !== 0) {
     const archived: SideChatNativeTurn[] = []
     const settled = new Map<string, boolean>()
     const statuses = new Map<string, string>()

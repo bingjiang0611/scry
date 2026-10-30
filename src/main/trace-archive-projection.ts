@@ -1,14 +1,16 @@
+import { createHash } from 'node:crypto'
+import { Transform } from 'node:stream'
 import type { FileHandle } from 'node:fs/promises'
 import { parser, type Token } from 'stream-json/parser.js'
 import type { TraceEvent } from '../shared/trace'
 import { providerIdForRuntime, type RuntimeProvider } from '../shared/runtime'
 
 /**
- * Selective, bounded-memory projection of one archived turn file.
+ * Selective, bounded-memory projection of an archived session file.
  *
- * A single archived turn can be hundreds of MiB because it stores every tool diff,
- * hook payload and preview verbatim. Side-chat capture only needs the visible text
- * events, so this reader walks the file as a JSON token stream and never keeps a
+ * One archived turn can be hundreds of MiB because it stores every tool diff, hook
+ * payload and preview verbatim. Side-chat capture only needs visible text and steer
+ * evidence, so this reader walks the file as a JSON token stream and never keeps a
  * value it will not use. Selection is decided by the structural key path, never by
  * text inside a payload, so a tool result whose body contains `"stage":"text"`
  * cannot select itself.
@@ -45,7 +47,6 @@ interface BuilderFrame {
 
 interface Builder {
   stack: BuilderFrame[]
-  /** Depth of skipped containers inside the event; 0 means nothing is being skipped. */
   skipDepth: number
   skipPrimitive: boolean
   skipNextValue: boolean
@@ -56,8 +57,17 @@ export interface ArchiveTurnExpectation {
   cwd: string
   sessionId: string
   providerId: string
-  runId: string
+  /** A canonical turn segment carries exactly one turn; a legacy file carries many. */
+  turnCount: 'single' | 'many'
+  /** Only checked for single-turn segments. */
+  runId?: string
   providerTurnId?: string
+}
+
+/** Stability evidence for the bytes that were actually read. */
+export interface ArchiveReadEvidence {
+  bytesRead: number
+  digest: string
 }
 
 function roleOf(parent: Role | undefined, key: string | null, token: Token): Role {
@@ -79,8 +89,7 @@ function primitiveValue(token: Token): unknown {
   if (token.name === 'trueValue') return true
   if (token.name === 'falseValue') return false
   if (token.name === 'nullValue') return null
-  if (token.name === 'stringValue') return token.value
-  if (token.name === 'numberValue') return token.value
+  if (token.name === 'stringValue' || token.name === 'numberValue') return token.value
   return undefined
 }
 
@@ -101,23 +110,42 @@ function assertProvider(expectation: ArchiveTurnExpectation, raw: { providerId?:
   }
 }
 
+export interface ProjectionOptions {
+  /** Only the turn metadata is needed; event bodies are skipped entirely. */
+  metadataOnly?: boolean
+}
+
 /**
- * Read one already-opened archived turn. The caller owns the handle and has
- * verified ownership, symlink status and identity before this call.
+ * Project every turn of one archive file, in file order.
+ *
+ * `evidence` is filled with the digest of exactly the bytes that were parsed, so a
+ * caller that re-reads the same file can prove both passes saw identical content.
+ * The read is bounded by the largest single value the projection keeps, not by the
+ * file size.
  */
-export async function readArchiveTurnProjection(
+export async function* iterateArchiveTurnProjections(
   handle: FileHandle,
   size: number,
-  expectation: ArchiveTurnExpectation
-): Promise<ArchiveTurnProjection> {
+  expectation: ArchiveTurnExpectation,
+  evidence: ArchiveReadEvidence,
+  options: ProjectionOptions = {}
+): AsyncGenerator<ArchiveTurnProjection> {
+  const hash = createHash('sha256')
+  const tap = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      hash.update(chunk)
+      callback(null, chunk)
+    }
+  })
   const source = handle.createReadStream({ start: 0, end: size - 1, autoClose: false })
-    .pipe(parser.asStream({ packStrings: false, packNumbers: false }))
-  const events: TraceEvent[] = []
+    .pipe(tap).pipe(parser.asStream({ packStrings: false, packNumbers: false }))
   const rootValues = new Map<string, unknown>()
-  const turnValues = new Map<string, unknown>()
+  let turnValues = new Map<string, unknown>()
+  let events: TraceEvent[] = []
   const roles: Role[] = []
   const keys: (string | null)[] = []
   let depth = 0
+  let turnDepth = -1
   let scalar: { target: Map<string, unknown>; key: string } | undefined
   let pending: { kind: 'string' | 'number'; parts: string[] } | undefined
   let builder: Builder | undefined
@@ -129,7 +157,7 @@ export async function readArchiveTurnProjection(
     const event = value as TraceEvent
     if (typeof event.stage !== 'string') throw new Error('trace archive event has no stage')
     if (event.kind !== undefined && typeof event.kind !== 'string') throw new Error('trace archive event kind is invalid')
-    if (event.runId !== expectation.runId) throw new Error('trace archive event belongs to another run')
+    if (event.runId !== turnValues.get('runId')) throw new Error('trace archive event belongs to another run')
     assertProvider(expectation, { providerId: event.providerId, runtimeProvider: event.runtimeProvider })
     if (keepEvent(event)) events.push(event)
   }
@@ -142,70 +170,107 @@ export async function readArchiveTurnProjection(
     pending = undefined
   }
 
+  const finishTurn = (): ArchiveTurnProjection => {
+    turnCount += 1
+    assertProvider(expectation, {
+      providerId: turnValues.get('providerId'), runtimeProvider: turnValues.get('runtimeProvider')
+    })
+    const runId = turnValues.get('runId')
+    if (typeof runId !== 'string' || runId.length === 0) throw new Error('trace archive turn has no run identity')
+    if (expectation.runId !== undefined && runId !== expectation.runId) {
+      throw new Error('trace archive segment belongs to another run')
+    }
+    const providerTurnId = turnValues.get('providerTurnId')
+    if (providerTurnId !== undefined && typeof providerTurnId !== 'string') throw new Error('trace archive provider turn id is invalid')
+    if (expectation.providerTurnId !== undefined && providerTurnId !== expectation.providerTurnId) {
+      throw new Error('trace archive segment changed or belongs to another Provider turn')
+    }
+    const ts = turnValues.get('ts')
+    if (typeof ts !== 'number' || !Number.isFinite(ts)) throw new Error('trace archive turn has no timestamp')
+    const done = turnValues.get('done')
+    if (typeof done !== 'boolean') throw new Error('trace archive turn has no completion evidence')
+    const status = turnValues.get('status')
+    if (status !== undefined && typeof status !== 'string') throw new Error('trace archive turn status is invalid')
+    const userText = turnValues.get('userText')
+    if (typeof userText !== 'string') throw new Error('trace archive turn has no user text')
+    const projection: ArchiveTurnProjection = {
+      runId, ...(providerTurnId !== undefined ? { providerTurnId } : {}), ts, done,
+      ...(status !== undefined ? { status } : {}), userText, events
+    }
+    turnValues = new Map()
+    events = []
+    return projection
+  }
+
   try {
     for await (const token of source as AsyncIterable<Token>) {
-    if (builder) {
-      const finished = applyBuilderToken(builder, token)
-      if (finished !== undefined) {
-        builder = undefined
-        finishEvent(finished)
-      }
-      continue
-    }
-    if (token.name === 'keyValue') {
-      finishScalar()
-      if (depth === 0) throw new Error('trace archive key outside an object')
-      keys[depth - 1] = token.value
-      const role = roles[depth - 1]
-      if ((role === 'root' && ROOT_KEYS.has(token.value)) || (role === 'turn' && TURN_KEYS.has(token.value))) {
-        scalar = { target: role === 'root' ? rootValues : turnValues, key: token.value }
-      }
-      continue
-    }
-    if (isPrimitiveStart(token)) {
-      if (scalar) {
-        if (token.name === 'startString') pending = { kind: 'string', parts: [] }
-        else if (token.name === 'startNumber') pending = { kind: 'number', parts: [] }
-        else {
-          scalar.target.set(scalar.key, primitiveValue(token))
-          scalar = undefined
-          pending = undefined
+      if (builder) {
+        const finished = applyBuilderToken(builder, token)
+        if (finished !== undefined) {
+          builder = undefined
+          finishEvent(finished)
         }
-      }
-      continue
-    }
-    if (token.name === 'stringChunk' || token.name === 'numberChunk') {
-      if (pending) pending.parts.push(token.value as string)
-      continue
-    }
-    if (token.name === 'endString' || token.name === 'endNumber') {
-      if (pending) finishScalar()
-      continue
-    }
-    if (token.name === 'startObject' || token.name === 'startArray') {
-      const role = roleOf(roles[depth - 1], keys[depth - 1] ?? null, token)
-      if (role === 'event') {
-        if (roles.length !== 4) throw new Error('trace archive items are not under a turn')
-        builder = { stack: [], skipDepth: 0, skipPrimitive: false, skipNextValue: false, pending: undefined }
-        const root = applyBuilderToken(builder, token)
-        if (root !== undefined) throw new Error('trace archive event is not an object')
         continue
       }
-      roles.push(role)
-      keys.push(null)
-      depth += 1
-      if (role === 'turn') turnCount += 1
-      if (role === 'turns') turnCount = 0
-      continue
-    }
-    if (token.name === 'endObject' || token.name === 'endArray') {
-      if (depth === 0) throw new Error('trace archive JSON closes outside a value')
-      depth -= 1
-      roles.pop()
-      keys.pop()
-      if (depth === 0) rootClosed = true
-      continue
-    }
+      if (token.name === 'keyValue') {
+        finishScalar()
+        if (depth === 0) throw new Error('trace archive key outside an object')
+        keys[depth - 1] = token.value
+        const role = roles[depth - 1]
+        if ((role === 'root' && ROOT_KEYS.has(token.value)) || (role === 'turn' && TURN_KEYS.has(token.value))) {
+          scalar = { target: role === 'root' ? rootValues : turnValues, key: token.value }
+        }
+        continue
+      }
+      if (isPrimitiveStart(token)) {
+        if (scalar) {
+          if (token.name === 'startString') pending = { kind: 'string', parts: [] }
+          else if (token.name === 'startNumber') pending = { kind: 'number', parts: [] }
+          else {
+            scalar.target.set(scalar.key, primitiveValue(token))
+            scalar = undefined
+            pending = undefined
+          }
+        }
+        continue
+      }
+      if (token.name === 'stringChunk' || token.name === 'numberChunk') {
+        if (pending) pending.parts.push(token.value as string)
+        continue
+      }
+      if (token.name === 'endString' || token.name === 'endNumber') {
+        if (pending) finishScalar()
+        continue
+      }
+      if (token.name === 'startObject' || token.name === 'startArray') {
+        const role = roleOf(roles[depth - 1], keys[depth - 1] ?? null, token)
+        if (role === 'event' && !options.metadataOnly) {
+          if (roles.length !== 4) throw new Error('trace archive items are not under a turn')
+          builder = { stack: [], skipDepth: 0, skipPrimitive: false, skipNextValue: false, pending: undefined }
+          const root = applyBuilderToken(builder, token)
+          if (root !== undefined) throw new Error('trace archive event is not an object')
+          continue
+        }
+        roles.push(role)
+        keys.push(null)
+        depth += 1
+        if (role === 'turn') {
+          turnDepth = depth - 1
+          turnValues = new Map()
+          events = []
+        }
+        if (role === 'turns') turnCount = 0
+        continue
+      }
+      if (token.name === 'endObject' || token.name === 'endArray') {
+        if (depth === 0) throw new Error('trace archive JSON closes outside a value')
+        depth -= 1
+        roles.pop()
+        keys.pop()
+        if (depth === turnDepth) yield finishTurn()
+        if (depth === 0) rootClosed = true
+        continue
+      }
     }
   } catch (error) {
     // A tokenizer error is a real parse failure, not a reason to emit a partial turn.
@@ -214,28 +279,12 @@ export async function readArchiveTurnProjection(
   }
   if (!rootClosed) throw new Error('trace archive JSON is truncated')
   if (builder) throw new Error('trace archive JSON is truncated inside an event')
-
   assertArchiveIdentity(rootValues, expectation)
-  if (turnCount !== 1) throw new Error('trace archive segment must contain exactly one turn')
-  const runId = turnValues.get('runId')
-  if (runId !== expectation.runId) throw new Error('trace archive segment belongs to another run')
-  const providerTurnId = turnValues.get('providerTurnId')
-  if (providerTurnId !== undefined && typeof providerTurnId !== 'string') throw new Error('trace archive provider turn id is invalid')
-  if (expectation.providerTurnId !== undefined && providerTurnId !== expectation.providerTurnId) {
-    throw new Error('trace archive segment changed or belongs to another Provider turn')
+  if (expectation.turnCount === 'single' && turnCount !== 1) {
+    throw new Error('trace archive segment must contain exactly one turn')
   }
-  const ts = turnValues.get('ts')
-  if (typeof ts !== 'number' || !Number.isFinite(ts)) throw new Error('trace archive turn has no timestamp')
-  const done = turnValues.get('done')
-  if (typeof done !== 'boolean') throw new Error('trace archive turn has no completion evidence')
-  const status = turnValues.get('status')
-  if (status !== undefined && typeof status !== 'string') throw new Error('trace archive turn status is invalid')
-  const userText = turnValues.get('userText')
-  if (typeof userText !== 'string') throw new Error('trace archive turn has no user text')
-  return {
-    runId, ...(providerTurnId !== undefined ? { providerTurnId } : {}), ts, done,
-    ...(status !== undefined ? { status } : {}), userText, events
-  }
+  evidence.bytesRead = size
+  evidence.digest = hash.digest('hex')
 }
 
 function parseScalar(raw: string, kind: 'string' | 'number' | undefined): unknown {

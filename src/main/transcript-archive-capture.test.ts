@@ -1,12 +1,10 @@
-import { mkdir, mkdtemp, readdir, rm, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { TraceEvent } from '../shared/trace'
-import { traceArchivePath, traceArchiveTurnPath, upsertTraceArchiveTurn } from './transcript-archive'
-import {
-  iterateTraceArchiveCapture, traceArchiveCaptureInfo, TraceArchiveCaptureError
-} from './transcript-archive-capture'
+import { traceArchivePath, traceArchiveTurnPath } from './transcript-archive'
+import { iterateTraceArchiveCapture, traceArchiveCaptureInfo } from './transcript-archive-capture'
 
 const cwd = '/tmp/capture-workspace'
 const sessionId = 'native-session-1'
@@ -27,75 +25,141 @@ function event(runId: string, stage: string, extra: Record<string, unknown> = {}
   return { id: `${runId}-${stage}`, ts: '2026-01-01T00:00:00.000Z', runId, kind: 'model', stage, ...extra } as TraceEvent
 }
 
-function turn(runId: string, ts: number, items: TraceEvent[]) {
-  return { runId, userText: `question ${runId}`, items, done: true, status: 'completed' as const, ts }
+function body(runId: string, ts: number, items: TraceEvent[], extra: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    version: 3, cwd, sessionId, providerId: 'claude',
+    turns: [{ runId, userText: `question ${runId}`, ts, done: true, status: 'completed', items, ...extra }]
+  })
+}
+
+interface SeedOptions { sidecars?: boolean }
+
+/** Writes canonical turn files (and optional metadata sidecars) without the writer API. */
+async function seed(dir: string, turns: Array<{ runId: string; body: string }>, options: SeedOptions = {}): Promise<void> {
+  const turnDir = dirname(traceArchiveTurnPath(dir, cwd, sessionId, 'claude', { runId: 'probe' }))
+  const metadataDir = turnDir.replace('/trace-archive-turns-v1/', '/trace-archive-metadata-v1/')
+  await mkdir(turnDir, { recursive: true })
+  if (options.sidecars) await mkdir(metadataDir, { recursive: true })
+  for (const [index, turn] of turns.entries()) {
+    const path = traceArchiveTurnPath(dir, cwd, sessionId, 'claude', { runId: turn.runId })
+    await writeFile(path, turn.body)
+    if (!options.sidecars) continue
+    const info = await stat(path)
+    const file = path.slice(path.lastIndexOf('/') + 1)
+    const ts = index + 1
+    await writeFile(join(metadataDir, file.replace(/\.json$/, '.meta-v1.json')), JSON.stringify({
+      profileMetadataVersion: 1, file, runId: turn.runId, ts,
+      size: info.size, mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs, ino: info.ino,
+      metadata: { userText: `question ${turn.runId}`, done: true, status: 'completed',
+        hasSuccessfulResult: false, toolIds: [], acceptedSteers: [] }
+    }))
+  }
+}
+
+async function rewriteBody(dir: string, runId: string, content: string): Promise<void> {
+  const path = traceArchiveTurnPath(dir, cwd, sessionId, 'claude', { runId })
+  await writeFile(path, content)
+  const info = await stat(path)
+  const file = path.slice(path.lastIndexOf('/') + 1)
+  const metadataDir = dirname(path).replace('/trace-archive-turns-v1/', '/trace-archive-metadata-v1/')
+  await writeFile(join(metadataDir, file.replace(/\.json$/, '.meta-v1.json')), JSON.stringify({
+    profileMetadataVersion: 1, file, runId, ts: 2,
+    size: info.size, mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs, ino: info.ino,
+    metadata: { userText: `question ${runId}`, done: true, status: 'completed',
+      hasSuccessfulResult: false, toolIds: [], acceptedSteers: [] }
+  }))
+}
+
+const args = (dir: string) => ({ userDataDir: dir, cwd, sessionId, providerId: 'claude' as const })
+
+async function collect(dir: string) {
+  const info = await traceArchiveCaptureInfo(args(dir))
+  const turns = []
+  for await (const turn of iterateTraceArchiveCapture(args(dir), info)) turns.push(turn)
+  return { info, turns }
 }
 
 describe('trace archive capture', () => {
-  it('reads a >16 MiB turn and a >16 MiB session without a byte ceiling', async () => {
+  it('inventories the latest turn without parsing any body, then reads it on demand', async () => {
     const dir = await userData()
     const huge = 'x'.repeat(20 * 1024 * 1024)
-    upsertTraceArchiveTurn({ userDataDir: dir, cwd, sessionId, providerId: 'claude', turn:
-      turn('run-1', 1, [event('run-1', 'text', { text: 'first answer' }),
-        event('run-1', 'tool:Bash', { kind: 'tool', outputContent: { storage: 'inline', content: huge } } as never)]) })
-    upsertTraceArchiveTurn({ userDataDir: dir, cwd, sessionId, providerId: 'claude', turn: turn('run-2', 2, [event('run-2', 'text', { text: 'second answer' })]) })
-
-    const info = await traceArchiveCaptureInfo({ userDataDir: dir, cwd, sessionId, providerId: 'claude' })
-    expect(info.totalTurns).toBe(2)
-    expect(info.sourceComplete).toBe(true)
-    const turns = []
-    for await (const item of iterateTraceArchiveCapture({ userDataDir: dir, cwd, sessionId, providerId: 'claude' }, info)) turns.push(item)
-    expect(turns.map(item => item.runId)).toEqual(['run-1', 'run-2'])
-    // The 20 MiB tool payload is skipped by structure, never selected as text.
-    expect(turns[0].events.map(item => item.stage)).toEqual(['text'])
-    expect(turns[1].events[0].text).toBe('second answer')
+    await seed(dir, [
+      { runId: 'run-1', body: body('run-1', 1, [event('run-1', 'text', { text: 'first' })]) },
+      { runId: 'run-2', body: body('run-2', 2, [event('run-2', 'text', { text: 'second' }),
+        event('run-2', 'tool:Bash', { kind: 'tool', outputContent: { storage: 'inline', content: huge } } as never)]) }
+    ], { sidecars: true })
+    // Replace the newest body with a truncated one and keep its sidecar stamps consistent:
+    // metadata stays valid, so only a body parse can fail.
+    await rewriteBody(dir, 'run-2', '{')
+    const info = await traceArchiveCaptureInfo(args(dir))
+    expect(info).toEqual({ readMode: 'indexed', totalTurns: 2 })
+    await expect(async () => {
+      for await (const _turn of iterateTraceArchiveCapture(args(dir), info)) { /* consume */ }
+    }).rejects.toThrow(/corrupt or truncated/)
   })
 
-  it('pages a session with more than 2000 turns instead of refusing it', async () => {
+  it('rebuilds the order from bodies when index and sidecars are missing', async () => {
     const dir = await userData()
-    for (let index = 0; index < 2100; index++) {
-      upsertTraceArchiveTurn({ userDataDir: dir, cwd, sessionId, providerId: 'claude',
-        turn: turn(`run-${index}`, index + 1, [event(`run-${index}`, 'text', { text: `answer ${index}` })]) })
-    }
-    const info = await traceArchiveCaptureInfo({ userDataDir: dir, cwd, sessionId, providerId: 'claude' })
+    await seed(dir, [
+      { runId: 'run-2', body: body('run-2', 20, [event('run-2', 'text', { text: 'later' })]) },
+      { runId: 'run-1', body: body('run-1', 10, [event('run-1', 'text', { text: 'earlier' })]) }
+    ])
+    const info = await traceArchiveCaptureInfo(args(dir))
+    expect(info).toEqual({ readMode: 'stream_rebuild', totalTurns: 2 })
+    const { turns } = await collect(dir)
+    expect(turns.map(turn => turn.runId)).toEqual(['run-1', 'run-2'])
+  })
+
+  it('never upgrades a v1 index by parsing bodies', async () => {
+    const dir = await userData()
+    const huge = 'x'.repeat(20 * 1024 * 1024)
+    await seed(dir, [
+      { runId: 'run-1', body: body('run-1', 1, [event('run-1', 'text', { text: 'answer' }),
+        event('run-1', 'tool:Bash', { kind: 'tool', outputContent: { storage: 'inline', content: huge } } as never)]) }
+    ])
+    const turnDir = dirname(traceArchiveTurnPath(dir, cwd, sessionId, 'claude', { runId: 'probe' }))
+    await writeFile(`${turnDir}.index-v1.json`, JSON.stringify({ version: 1, entries: [] }))
+    const info = await traceArchiveCaptureInfo(args(dir))
+    expect(info).toEqual({ readMode: 'stream_rebuild', totalTurns: 1 })
+    const { turns } = await collect(dir)
+    expect(turns[0].events[0].text).toBe('answer')
+  })
+
+  it('streams a legacy monolithic archive instead of parsing it whole', async () => {
+    const dir = await userData()
+    const huge = 'y'.repeat(20 * 1024 * 1024)
+    const mono = traceArchivePath(dir, cwd, sessionId, 'claude')
+    await mkdir(dirname(mono), { recursive: true })
+    const archive = JSON.stringify({
+      version: 3, cwd, sessionId, providerId: 'claude',
+      turns: [
+        { runId: 'run-1', userText: 'q1', ts: 1, done: true, status: 'completed', items: [event('run-1', 'text', { text: 'a1' })] },
+        { runId: 'run-2', userText: 'q2', ts: 2, done: true, status: 'completed', items: [event('run-2', 'text', { text: 'a2' }),
+          event('run-2', 'tool:Bash', { kind: 'tool', outputContent: { storage: 'inline', content: huge } } as never)] }
+      ]
+    })
+    await writeFile(mono, archive)
+    const info = await traceArchiveCaptureInfo(args(dir))
+    expect(info).toEqual({ readMode: 'monolithic', totalTurns: null })
+    const { turns } = await collect(dir)
+    expect(turns.map(turn => turn.events[0]?.text)).toEqual(['a1', 'a2'])
+  })
+
+  it('pages more than 2000 real turns with the default test timeout', async () => {
+    const dir = await userData()
+    const turns = Array.from({ length: 2100 }, (_unused, index) => ({
+      runId: `run-${index}`, body: body(`run-${index}`, index + 1, [event(`run-${index}`, 'text', { text: `answer ${index}` })])
+    }))
+    await seed(dir, turns, { sidecars: true })
+    const info = await traceArchiveCaptureInfo(args(dir))
     expect(info.totalTurns).toBe(2100)
     let count = 0
     let last = ''
-    for await (const item of iterateTraceArchiveCapture({ userDataDir: dir, cwd, sessionId, providerId: 'claude' }, info)) {
+    for await (const turn of iterateTraceArchiveCapture(args(dir), info)) {
       count += 1
-      last = item.runId
+      last = turn.runId
     }
     expect(count).toBe(2100)
     expect(last).toBe('run-2099')
-  }, 30_000)
-
-  it('refuses an incomplete source instead of freezing a shorter prefix', async () => {
-    const dir = await userData()
-    for (const index of [1, 2]) {
-      upsertTraceArchiveTurn({ userDataDir: dir, cwd, sessionId, providerId: 'claude',
-        turn: turn(`run-${index}`, index, [event(`run-${index}`, 'text', { text: 'answer' })]) })
-    }
-    const segmentDir = dirname(traceArchiveTurnPath(dir, cwd, sessionId, 'claude', { runId: 'run-1' }))
-    const files = (await readdir(segmentDir)).filter(name => name.endsWith('.json'))
-    await unlink(join(segmentDir, files[0]))
-    await expect(traceArchiveCaptureInfo({ userDataDir: dir, cwd, sessionId, providerId: 'claude' }))
-      .rejects.toBeInstanceOf(TraceArchiveCaptureError)
-  })
-
-  it('still reads a legacy monolithic archive and reports its read mode', async () => {
-    const dir = await userData()
-    const archive = {
-      version: 3, cwd, sessionId, providerId: 'claude',
-      turns: [turn('run-1', 1, [event('run-1', 'text', { text: 'legacy answer' })])]
-    }
-    const mono = traceArchivePath(dir, cwd, sessionId, 'claude')
-    await mkdir(dirname(mono), { recursive: true })
-    await writeFile(mono, JSON.stringify(archive))
-    const info = await traceArchiveCaptureInfo({ userDataDir: dir, cwd, sessionId, providerId: 'claude' })
-    expect(info.readMode).toBe('monolithic')
-    const turns = []
-    for await (const item of iterateTraceArchiveCapture({ userDataDir: dir, cwd, sessionId, providerId: 'claude' }, info)) turns.push(item)
-    expect(turns).toHaveLength(1)
-    expect(turns[0].events[0].text).toBe('legacy answer')
   })
 })

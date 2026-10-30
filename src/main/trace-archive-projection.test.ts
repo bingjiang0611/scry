@@ -2,7 +2,7 @@ import { open, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { readArchiveTurnProjection } from './trace-archive-projection'
+import { iterateArchiveTurnProjections, type ArchiveReadEvidence } from './trace-archive-projection'
 
 const cwd = '/tmp/workspace'
 const sessionId = 'session-1'
@@ -22,16 +22,23 @@ function archive(items: unknown[], overrides: Record<string, unknown> = {}): str
   })
 }
 
-async function read(content: string, expectation: Partial<Parameters<typeof readArchiveTurnProjection>[2]> = {}) {
+async function read(content: string, expectation: { providerId?: string; enforceRun?: boolean } = {}) {
   root = await mkdtemp(join(tmpdir(), 'scry-projection-'))
   const path = join(root, 'turn.json')
   await writeFile(path, content)
   const handle = await open(path, 'r')
+  const evidence: ArchiveReadEvidence = { bytesRead: 0, digest: '' }
   try {
     const info = await handle.stat()
-    return await readArchiveTurnProjection(handle, info.size, {
-      cwd, sessionId, providerId: 'claude', runId, ...expectation
-    })
+    const turns = []
+    for await (const turn of iterateArchiveTurnProjections(handle, info.size, {
+      cwd, sessionId, turnCount: 'single', providerId: expectation.providerId ?? 'claude',
+      ...(expectation.enforceRun === false ? {} : { runId })
+    }, evidence)) turns.push(turn)
+    expect(evidence.bytesRead).toBe(info.size)
+    expect(evidence.digest).toMatch(/^[a-f0-9]{64}$/)
+    expect(turns).toHaveLength(1)
+    return turns[0]
   } finally {
     await handle.close()
   }
@@ -53,7 +60,7 @@ describe('readArchiveTurnProjection', () => {
     expect(turn.userText).toBe('question')
     expect(turn.done).toBe(true)
     expect(turn.status).toBe('completed')
-    expect(turn.events.map(item => item.id)).toEqual(['e2', 'e3'])
+    expect(turn.events.map((item: { id: string }) => item.id)).toEqual(['e2', 'e3'])
     expect(turn.events[1].steer?.prompt).toBe('steer prompt')
   })
 
@@ -64,7 +71,7 @@ describe('readArchiveTurnProjection', () => {
       event({ id: 'tool', kind: 'tool', stage: 'tool:Bash', outputContent: { storage: 'inline', content: decoy } }),
       event({ id: 'real', text: 'real answer' })
     ]))
-    expect(turn.events.map(item => item.id)).toEqual(['real'])
+    expect(turn.events.map((item: { id: string }) => item.id)).toEqual(['real'])
   })
 
   it('keeps Unicode and long values exact across tokenizer chunk boundaries', async () => {
@@ -93,6 +100,6 @@ describe('readArchiveTurnProjection', () => {
       version: 3, cwd, sessionId, providerId: 'claude',
       turns: [{ runId, userText: 'q', ts: 1, done: true, items: [] }, { runId: 'run-2', userText: 'q2', ts: 2, done: true, items: [] }]
     })
-    await expect(read(twoTurns)).rejects.toThrow('exactly one turn')
+    await expect(read(twoTurns, { enforceRun: false })).rejects.toThrow('exactly one turn')
   })
 })
