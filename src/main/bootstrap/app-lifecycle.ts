@@ -6,6 +6,7 @@ import type { ActiveRun } from '../../shared/trace'
 import type { ProviderId } from '../../shared/provider'
 import { initDb, setBillingEnvProvider } from '../db'
 import { warmShellEnv, shellEnv } from '../claude-locate'
+import { ensureShellEnv } from '../shell'
 import { configureProviderEventLog } from '../provider-event-log'
 import { PerformanceTrace, performanceRecordingEnabled } from '../performance-timing'
 import { startPerformanceRecording, stopPerformanceRecording, recordResourcePerformance, recordStartupPerformance, performanceRecordingHealth } from '../performance-recording'
@@ -38,6 +39,9 @@ export function initializeAppEnvironment(__dirname: string, getWindow: () => Bro
       delete process.env[k]
     }
   }
+  // Linux 桌面入口不设置 SHELL。登录 shell 采集、Provider CLI 与终端都靠它，
+  // 缺失时回退到 zsh 会让 Arch/Omarchy 上的环境采集直接失败。
+  ensureShellEnv()
 
   const packagedRendererEntryUrl = pathToFileURL(join(__dirname, '../renderer/index.html')).href
   const rendererEntryUrl = resolveRendererEntryUrl(

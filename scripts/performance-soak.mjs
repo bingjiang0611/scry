@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { defaultPackagedAppPath, packagedAppLayout } from './packaged-app-layout.mjs'
 
 const requestedCycles = process.env.SCRY_SOAK_CYCLES === undefined ? null : Number(process.env.SCRY_SOAK_CYCLES)
 const cycleLimit = requestedCycles !== null && Number.isSafeInteger(requestedCycles) && requestedCycles > 0 ? requestedCycles : null
@@ -11,8 +12,8 @@ const durationMs = Math.max(10_000, Number(process.env.SCRY_SOAK_DURATION_MS ?? 
 const cycleDelayMs = Math.max(25, Number(process.env.SCRY_SOAK_CYCLE_DELAY_MS ?? 250))
 // SCRY_SOAK_CYCLES makes short counter runs possible; SCRY_SOAK_LEAK_FIXTURE=1 is sensitivity-only.
 const leakFixture = process.env.SCRY_SOAK_LEAK_FIXTURE === '1'
-const appPath = resolve(process.argv[2] || join('dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'Scry.app'))
-const executable = join(appPath, 'Contents', 'MacOS', 'Scry')
+const layout = packagedAppLayout(resolve(process.argv[2] || defaultPackagedAppPath()))
+const executable = layout.executable
 const temp = mkdtempSync(join(tmpdir(), 'scry-performance-soak-'))
 let child
 let output = ''
