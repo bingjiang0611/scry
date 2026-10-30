@@ -26,7 +26,7 @@ import { exerciseTerminalCore } from './electron-security-terminal-core.mjs'
 import { exerciseRecording } from './electron-security-recording.mjs'
 import { exerciseRestart } from './electron-security-restart.mjs'
 import { exerciseStructureApp } from './structure-app-checks.mjs'
-
+import { defaultPackagedAppPath, electronDevLayout, packagedAppLayout } from './packaged-app-layout.mjs'
 
 const structureOnly = process.argv[2] === '--dev-structure-only'
 const sourceControlOnly = process.argv[2] === '--dev-source-control-only'
@@ -50,8 +50,9 @@ const devFilesOnly = process.argv[2] === '--dev-files-only'
 const filesOnly = devFilesOnly || process.argv[2] === '--files-only'
 const devApp = structureOnly || unifiedConversationOnly || conversationOwnershipOnly || sourceControlOnly || devMetaPromptsOnly || nativeHistoryOnly || process.argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
 const packagedAppArgument = ['--files-only', '--performance-only', '--file-history-only'].includes(process.argv[2]) ? undefined : process.argv[2]
-const appPath = resolve(devApp ? 'node_modules/electron/dist/Electron.app' : packagedAppArgument || join('dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'Scry.app'))
-const executable = join(appPath, 'Contents', 'MacOS', devApp ? 'Electron' : 'Scry')
+const dev = devApp ? electronDevLayout() : null
+const appPath = resolve(packagedAppArgument || dev?.appPath || defaultPackagedAppPath())
+const executable = dev ? resolve(dev.executable) : packagedAppLayout(appPath).executable
 const temp = mkdtempSync(join(tmpdir(), 'scry-electron-smoke-'))
 let child
 let stderr = ''

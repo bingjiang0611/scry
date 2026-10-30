@@ -1,8 +1,21 @@
 # Scry Linux / Omarchy 技术方案
 
-状态：设计提案，尚未实施。本文不代表 Linux 桌面版已经可用。
+状态：M1 产物与运行时适配已实施；M3/M4 的 Linux 实机验收未完成。
+代码核查基线：`b7f1b43f`，App `0.2.227`。已在实施提交中落地第 3、4、5 节的代码改动。已有 Linux CI 配置与 CLI 支持，不等于当前桌面安装包已通过 Linux 验收。
 
-代码核查基线：`b7f1b43f`，App `0.2.227`。本次仅新增文档；没有修改运行代码、构建或安装产物。已有 Linux CI 配置与 CLI 支持，不等于当前桌面安装包已通过 Linux 验收。
+### 实施状态（后续提交更新）
+
+| 项目 | 状态 | 证据或阻碍 |
+| --- | --- | --- |
+| 私有 recorder 启动器支持两种布局 | 已实施 | 启动器测试覆盖 macOS/Linux 布局、软链接、含空格参数、缺可执行文件失败 |
+| 产物布局、打包检查、smoke/soak 共用一套路径 | 已实施，一个例外 | 新 `scripts/packaged-app-layout.mjs` 供打包检查、security smoke、performance soak 共用；`scripts/desktop-remote-host-smoke.mjs` 已在文件体积预算上限之上，本次未改动，仍按 macOS 布局 |
+| electron-builder Linux 配置 | 已实施 | 在 macOS 上交叉构建 `dist/linux-arm64-unpacked`，布局与 locale 裁剪已验证 |
+| Linux locale 裁剪 | 已实施 | 配置为 `en-US/zh-CN/zh-TW` 时剩下三个 pak；去掉覆盖后 `locales/` 为空（反向对照） |
+| 平台默认 shell | 已实施 | 启动时 `ensureShellEnv()` 补 SHELL（不覆盖用户值），终端与 `defaultShellPath` 同源；Linux 不再回退 zsh |
+| Linux 密钥环 `basic_text` 拒绝 | 已实施 | `unsafeCredentialStorageReason` + 单测；未在真实密钥环状态验证 |
+| 快捷键提示跟随平台 | 已实施 | renderer `platform.ts`；`保存 ⌘S`/`⌘↵` 改为平台值 |
+| Linux CI 打包门禁 | 已实施，未跑过 | `.github/workflows/ci.yml` 的 `packaged-linux` job 尚未在 Linux runner 实际执行 |
+| Linux 运行、pacman 安装、Wayland、中文输入、真实密钥环、真实 Provider | 未验证 | 无 Linux 主机，本地无可用容器运行时 |
 
 ## 1. 目标与范围
 
@@ -210,11 +223,11 @@ App 与独立 CLI 保持现有分别版本化策略；Linux 与 macOS App 不另
 
 | 项目 | 负责人 | 下一步 |
 | --- | --- | --- |
-| 是否按本方案开始实施 | 用户 | 确认方案；当前授权仅为出方案，不启动代码改造 |
-| 实际系统与架构 | 用户提供，实施者核验 | 提供 Omarchy 版本和 CPU 架构；如非 x86_64，先调整分发范围 |
+| 在真实 Omarchy 上跑 M2–M4 验收 | 用户与实施者 | 在目标机执行 `npm ci`、`npm run pack:artifact`、本文件第 7.3 节的 8 条工作流；结果按 Provider 分别记录 |
+| pacman 安装依赖与包布局 | 实施者 | 用 M1 产物实际 `pacman -U`，核对依赖解析、`chrome-sandbox` 权限与 `.desktop` 入口 |
 | 首批 Provider | 用户 | 指定日常使用对象及是否授权真实账号/费用验证 |
 | 目标机访问与前台验收 | 用户与实施者 | 确定 SSH/本机协作方式；SSH 不等于 GUI 验收已具备 |
-| 安装包依赖、Wayland flags、keyring 后端 | 实施者 | 在 M0–M2 用目标系统和实际产物确定，不要求用户猜配置 |
+| Linux CI 首次运行 | 实施者 | 观察 `packaged-linux` job 首轮结果；失败时修 fixture，不放宽检查 |
 
 ## 10. 参考与限制
 
@@ -222,4 +235,4 @@ App 与独立 CLI 保持现有分别版本化策略；Linux 与 macOS App 不另
 - [Electron 42.10.1 safeStorage 合同](https://github.com/electron/electron/blob/v42.10.1/docs/api/safe-storage.md)：Linux `basic_text` 使用固定明文口令，不能当成安全 secret store。
 - [Omarchy 上游](https://github.com/omacom/omarchy)：前期核查的默认分支为 `quattro`；包清单、UWSM/mise、Fcitx 与 keyring 配置只作为集成线索，不代表用户安装版本。
 
-本文依据源码定向检查和上游资料编写，没有执行 Linux 构建、Omarchy 真机测试或真实 Provider 请求。实施前重新核对 lockfile 中的 Electron 版本与目标系统；外部主分支资料不作为固定版本验收证据。
+本文依据源码检查和上游资料编写。已执行：macOS 打包与产物检查、在 macOS 上交叉构建 Linux 解包目录并核对布局/locale、启动器与运行时适配的 focused 测试。未执行：Linux 上的真实运行、pacman 安装、Wayland/Hyprland 交互、中文输入、真实密钥环与真实 Provider 请求。实施前重新核对 lockfile 中的 Electron 版本与目标系统；外部主分支资料不作为固定版本验收证据。

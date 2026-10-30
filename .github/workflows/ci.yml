@@ -88,3 +88,32 @@ jobs:
       - name: Isolated renderer DOM smoke tests
         run: npm run test:renderer:ui
       - run: npm run pack:artifact
+
+  # Linux 打包门禁：只验证产物布局、原生模块、私有 CLI、locale 裁剪与资源 allowlist。
+  # GUI smoke（pack:artifact 里的 smoke:electron）需要可用的 Chromium sandbox setuid 和显示环境，
+  # 本 job 不伪造这两者；界面与 Wayland 行为在目标 Omarchy 机器上验收。
+  packaged-linux:
+    needs: [node, cli-compat]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      QODER_SKIP_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Prepare Electron executable
+        run: node -e "require('node:fs').accessSync(require('electron'))"
+      - name: Prepare Electron native dependencies
+        run: ./node_modules/.bin/electron-builder install-app-deps
+      - name: Build desktop app and private CLI
+        run: |
+          npm run build
+          npm run build:cli
+      - name: Package Linux app directory
+        run: node scripts/run-electron-builder.mjs
+      - name: Check packaged Linux app
+        run: npm run check:packaged-app

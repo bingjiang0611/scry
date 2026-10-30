@@ -2,7 +2,7 @@
 
 Scry 是一个本地优先的 AI coding agent 观测与治理桌面应用。它在应用内驱动本机 agent CLI，把终端里的执行过程呈现为可检查的对话、工具调用、文件足迹、会话纵览、用量与诊断信息。
 
-> 当前状态：**MVP / WIP**。项目主要在 macOS 上开发和验证，暂不提供已签名、公证的安装包。
+> 当前状态：**MVP / WIP**。项目主要在 macOS 上开发和验证，暂不提供已签名、公证的安装包。Linux（Arch/Omarchy）的代码与打包路径已适配，Linux 桌面行为尚未在真实 Omarchy 机器上验收。
 
 ## 能做什么
 
@@ -38,7 +38,7 @@ Scry 是一个本地优先的 AI coding agent 观测与治理桌面应用。它�
 
 前置要求：
 
-- macOS（当前主要开发与验证平台）
+- macOS（当前主要开发与验证平台）或 Linux（首批 Linux 目标是 Arch/Omarchy，尚未完成实机验收）
 - Node.js 22.12 或更高版本（桌面 App 工具链；独立 recorder CLI 另支持 Node 20/22/24）
 - 至少一个已安装并完成登录的受支持 agent CLI
 
@@ -55,6 +55,18 @@ node node_modules/electron/install.js
 
 npm run dev
 ```
+
+Linux（Arch/Omarchy）构建需要同样的 Node.js 版本，另需 `base-devel`、`python`（node-pty、better-sqlite3 编译）与 `fpm` 所需工具链：
+
+```bash
+npm ci
+npm run build && npm run build:cli
+npm run pack:artifact        # 只出 dist/linux-unpacked 并跑产物检查
+SCRY_RELEASE_BUILD=1 npm run pack   # 产出可安装的 pacman 包
+sudo pacman -U dist/scry-*.pacman
+```
+
+Linux 的分发包不关闭 Chromium sandbox，也不自动修改 Hyprland 配置。首次运行前请确认密钥环可用（远程连接凭据需要 GNOME Keyring / libsecret）；否则凭据保存会被拒绝而不是退回明文后端。
 
 ### Git 提交文件大小检查
 
@@ -80,6 +92,7 @@ npm run check:cli-release # CLI 单测、构建、npm tarball 干净安装与 bi
 
 GitHub Actions 会在 Node 22 运行 App 的 typecheck、全量测试与构建，在 Node 20/22/24
 运行 CLI 发布检查，并在 macOS Node 22 打包后执行 packaged App 与 Electron security smoke。
+Linux 打包门禁在 ubuntu 上验证产物布局、原生模块、私有 CLI 与 locale 裁剪；GUI smoke 与 Wayland 行为仍在目标机验收。
 
 ## 独立轮次记录 CLI
 

@@ -13,6 +13,23 @@ export function configuredRemotePermissionMode(): AgentPermissionMode | undefine
   return isAgentPermissionMode(raw) ? raw : undefined
 }
 
+// Linux 的 safeStorage 在没有可用密钥环时会退回 `basic_text`（用固定明文口令加密），
+// isEncryptionAvailable() 仍返回 true。把弱后端当成安全存储会把远程设备凭据
+// 写成“看起来已加密”的伪保护，所以在这里 fail closed。
+// 纯本地项目不经过这条路径，密钥环不可用不应阻断它。
+export function unsafeCredentialStorageReason(input: {
+  platform?: NodeJS.Platform
+  encryptionAvailable: boolean
+  storageBackend?: string
+}): string | undefined {
+  const platform = input.platform ?? process.platform
+  if (!input.encryptionAvailable) return '系统安全存储不可用，无法保存远程设备凭据'
+  if (platform === 'linux' && input.storageBackend === 'basic_text') {
+    return '系统密钥环不可用（Linux 安全存储当前为 basic_text 明文后端），无法安全保存远程设备凭据；请先解锁或配置 GNOME Keyring / libsecret 后重试'
+  }
+  return undefined
+}
+
 export function createRemoteConnections({
   providerRegistry, listPiProfiles, resolvePiProfile, resolveRemoteProjectDirectory,
   withProviderOperation, remoteProjectRoots, hasRemoteHost
@@ -27,7 +44,12 @@ export function createRemoteConnections({
 }) {
   let desktopRemoteClient: DesktopRemoteClient | null = null
   function requireDesktopSecureStorage(): typeof safeStorage {
-    if (!safeStorage.isEncryptionAvailable()) throw new Error('系统安全存储不可用，无法保存远程设备凭据')
+    const unsafe = unsafeCredentialStorageReason({
+      encryptionAvailable: safeStorage.isEncryptionAvailable(),
+      // 只在 Linux 上查询后端名称；其他平台没有这个概念。
+      storageBackend: process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : undefined
+    })
+    if (unsafe) throw new Error(unsafe)
     return safeStorage
   }
   function requireDesktopRemoteClient(): DesktopRemoteClient {
