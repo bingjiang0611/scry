@@ -52,7 +52,7 @@ extension G0Transport {
             })
             // Bound even a silent malicious relay; there is no reconnect/replay.
             channel.eventLoop.scheduleTask(in: .seconds(10)) { channel.close(promise: nil) }
-            return try pipeline.configureUpgradableHTTPClientPipeline(configuration: .init(upgradeConfiguration: configuration))
+            return try configureWebSocketUpgrade(pipeline, configuration: configuration)
           }
         }
       let channel = try await upgrade.get()

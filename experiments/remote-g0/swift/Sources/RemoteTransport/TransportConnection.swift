@@ -7,6 +7,15 @@ import NIOSSL
 import NIOTLS
 
 extension G0Transport {
+  static func configureWebSocketUpgrade(_ pipeline: ChannelPipeline.SynchronousOperations,
+    configuration: NIOTypedHTTPClientUpgradeConfiguration<Channel>) throws -> EventLoopFuture<Channel> {
+    var options = NIOUpgradableHTTPClientPipelineConfiguration(upgradeConfiguration: configuration)
+    // HTTP 101 and the first WebSocket frame can arrive in the same read.
+    // NIO's default drops those buffered bytes, including an early close cause.
+    options.leftOverBytesStrategy = .forwardBytes
+    return try pipeline.configureUpgradableHTTPClientPipeline(configuration: options)
+  }
+
   static func withRelayChannel<T: Sendable>(endpoint: RelayEndpoint, mode: String, identity: G0ProbeIdentity,
     body: @Sendable (Channel, NIOSSLContext) async throws -> T) async throws -> T {
     let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
@@ -105,7 +114,7 @@ extension G0Transport {
               channel.eventLoop.makeFailedFuture(ProbeError.invalidFrame)
             })
             let timeout = channel.eventLoop.scheduleTask(in: .seconds(10)) { channel.close(promise: nil) }
-            let upgraded = try pipeline.configureUpgradableHTTPClientPipeline(configuration: .init(upgradeConfiguration: configuration))
+            let upgraded = try configureWebSocketUpgrade(pipeline, configuration: configuration)
             upgraded.whenComplete { _ in timeout.cancel() }
             return upgraded
           }

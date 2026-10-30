@@ -15,6 +15,13 @@ private final class CloseOnClientHello: ChannelInboundHandler {
 
 final class TLSLayerTests: XCTestCase {
   func testNoHostCloseAfterWebSocketUpgradeRetainsItsCause() async throws {
+    // Every iteration must pass; this is a bounded race check, not a retry.
+    for iteration in 0..<20 {
+      try await assertNoHostCloseAfterWebSocketUpgrade(iteration: iteration)
+    }
+  }
+
+  private func assertNoHostCloseAfterWebSocketUpgrade(iteration: Int) async throws {
     let material = try G0EnrollmentMaterial.generate()
     let identity = try G0ProbeIdentity(outerCA: Data(), innerCA: material.bootstrapPEM,
       certificate: material.bootstrapPEM, privateKey: material.privateKeyPEM)
@@ -54,7 +61,7 @@ final class TLSLayerTests: XCTestCase {
     try await group.shutdownGracefully()
     for (path, failure) in [("one-shot", failure), ("persistent", laneFailure)] {
       guard let failure, case let RelayTransportError.closed(code, reason) = failure else {
-        XCTFail("Early relay close cause was lost for \(path): \(String(describing: failure))")
+        XCTFail("Early relay close cause was lost for \(path) (iteration \(iteration)): \(String(describing: failure))")
         continue
       }
       XCTAssertEqual(code, 1013, path)

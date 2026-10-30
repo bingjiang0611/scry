@@ -1,6 +1,7 @@
 import XCTest
 import NIOCore
 import NIOEmbedded
+import NIOHTTP1
 import NIOWebSocket
 import NIOSSL
 import NIOConcurrencyHelpers
@@ -23,6 +24,43 @@ private final class WriteDuringCloseDrain: ChannelInboundHandler, @unchecked Sen
 }
 
 final class TunnelCodecTests: XCTestCase {
+  func testCoalescedUpgradePreservesFirstWebSocketClose() throws {
+    let channel = EmbeddedChannel()
+    let codec = TunnelCodec()
+    let recorder = ErrorRecorder()
+    defer { _ = try? channel.finish(acceptAlreadyClosed: true) }
+    let upgrader = NIOTypedWebSocketClientUpgrader<Channel>(requestKey: "dGhlIHNhbXBsZSBub25jZQ==",
+      upgradePipelineHandler: { channel, _ in
+        channel.pipeline.addHandlers([codec, recorder]).map { channel }
+      })
+    let configuration = NIOTypedHTTPClientUpgradeConfiguration(upgradeRequestHead:
+      HTTPRequestHead(version: .http1_1, method: .GET, uri: "/", headers: HTTPHeaders([("Host", "fixture")])),
+      upgraders: [upgrader], notUpgradingCompletionHandler: { channel in
+        channel.eventLoop.makeFailedFuture(ProbeError.invalidFrame)
+      })
+    let result = NIOLockedValueBox<Result<Channel, Error>?>(nil)
+    try G0Transport.configureWebSocketUpgrade(channel.pipeline.syncOperations, configuration: configuration)
+      .whenComplete { value in result.withLockedValue { $0 = value } }
+    try channel.connect(to: SocketAddress(ipAddress: "127.0.0.1", port: 0)).wait()
+    // One read contains both the HTTP response and the first unmasked WS frame.
+    var response = channel.allocator.buffer(capacity: 200)
+    response.writeString("HTTP/1.1 101 Switching Protocols\r\nConnection: upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n")
+    response.writeBytes([0x88, 13])
+    response.writeInteger(UInt16(1013))
+    response.writeString("no_host_leg")
+    _ = try channel.writeInbound(response)
+    channel.embeddedEventLoop.run()
+    guard case .success? = result.withLockedValue({ $0 }) else {
+      return XCTFail("HTTP upgrade did not complete")
+    }
+    guard case let RelayTransportError.closed(code, reason)? = recorder.errors.first as? RelayTransportError else {
+      return XCTFail("The coalesced first WebSocket close was discarded")
+    }
+    XCTAssertEqual(recorder.errors.count, 1)
+    XCTAssertEqual(code, 1013)
+    XCTAssertEqual(reason, "no_host_leg")
+  }
+
   func testCloseDrainCannotEmitNewCiphertext() throws {
     let channel = EmbeddedChannel()
     let write = channel.eventLoop.makePromise(of: Void.self)
