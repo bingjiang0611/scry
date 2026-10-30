@@ -80,6 +80,9 @@ describe('required PR checks', () => {
     expect(remote.on.pull_request).toBeNull()
     expect(remote.jobs.check.needs).toEqual(['changes', 'transport'])
     expect(remote.jobs.transport.if).toBe("${{ needs.changes.outputs.required == 'true' }}")
+    expect(remote.jobs.transport.steps.some(step => step.run === 'npm --prefix experiments/remote-g0 run smoke:g1')).toBe(true)
+    const remotePackage = JSON.parse(readFileSync(join(root, 'experiments/remote-g0/package.json'), 'utf8')) as { scripts: Record<string, string> }
+    expect(remotePackage.scripts['smoke:g1']).toContain('node --experimental-transform-types --import ./ts-relative-resolve.mjs g1-smoke.mjs')
     const results = (required: string, changes: string, transport: string) => ({
       changes: { result: changes, outputs: { required } }, transport: { result: transport }
     })

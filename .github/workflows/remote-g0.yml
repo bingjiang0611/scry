@@ -66,7 +66,7 @@ jobs:
       - run: node experiments/remote-g0/smoke.mjs
       - run: node experiments/remote-g0/enrollment-smoke.mjs
       - run: node experiments/remote-g0/pair-smoke.mjs
-      - run: node --import ./experiments/remote-g0/ts-relative-resolve.mjs experiments/remote-g0/g1-smoke.mjs
+      - run: npm --prefix experiments/remote-g0 run smoke:g1
       - name: Compile native iOS app and tests (not a device gate)
         run: >-
           xcodebuild -project apps/ios/ScryRemoteG0.xcodeproj
