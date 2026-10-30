@@ -43,15 +43,14 @@ function readArchive() {
 }
 
 function parsePkgInfo(text) {
-  return Object.fromEntries(
-    text
-      .split('\n')
-      .filter((line) => /^[a-z]+ = /.test(line))
-      .map((line) => {
-        const [key, ...rest] = line.split(' = ')
-        return [key, rest.join(' = ').trim()]
-      }),
-  )
+  const records = text.split('\n').filter((line) => line.trim() && !line.startsWith('#'))
+  // Validate raw records before parsing can discard a description continuation.
+  for (const line of records) assert.match(line, /^[a-z]+ = [^\r\n]*$/, 'pkginfo has a malformed or continued record')
+  assert.equal(records.filter((line) => line.startsWith('pkgdesc = ')).length, 1, 'pkginfo must contain exactly one pkgdesc record')
+  return Object.fromEntries(records.map((line) => {
+    const [key, ...rest] = line.split(' = ')
+    return [key, rest.join(' = ').trim()]
+  }))
 }
 
 function dependsOf(text) {
@@ -69,7 +68,6 @@ const depends = dependsOf(pkgInfo)
 // electron-builder 把 Linux 描述拼成 "${synopsis}\n ${description}" 传给 fpm；
 // pacman 的 .PKGINFO 是逐行 key = value，换行会让 pkgdesc 变成空值（pacman -Qi 显示 None）。
 assert.ok(meta.pkgdesc, `pkgdesc is empty; pacman would show Description: None\n${pkgInfo.slice(0, 400)}`)
-assert.ok(!meta.pkgdesc.includes('\n'), `pkgdesc must be a single line: ${JSON.stringify(meta.pkgdesc)}`)
 assert.equal(meta.pkgname, 'scry')
 assert.equal(meta.pkgver, `${metadata.version}-1`)
 assert.ok(meta.arch, 'pkginfo has no arch')

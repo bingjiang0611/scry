@@ -7,7 +7,7 @@
 
 ## 环境搭建
 
-容器内除 `npm ci` 外还需要：`base-devel`/`g++`/`make`/`python3`（node-pty、better-sqlite3 源码构建）、Electron 运行库（gtk3、nss、libnotify、libxtst、libxss、at-spi2-core、libsecret、alsa）、`xvfb`、`libarchive-tools`（pacman 包需要 `bsdtar`）、`pacman-package-manager`（校验产物）。仓库复制到无空格路径 `/work/scry`，因为 node-gyp 在含空格的路径上不稳定。
+容器内除 `npm ci` 外还需要：`build-essential`/`python3`（node-pty、better-sqlite3 源码构建）、Electron 运行库（gtk3、nss、libnotify、libxtst、libxss、at-spi2-core、libsecret、alsa）、`xvfb`、`libarchive-tools`（pacman 包需要 `bsdtar`）、`pacman-package-manager`（校验产物）。仓库复制到无空格路径 `/work/scry`，因为 node-gyp 在含空格的路径上不稳定。
 
 ## 结果
 
@@ -21,7 +21,7 @@
 | `electron-builder install-app-deps` | 通过 | better-sqlite3 / node-pty 按 Electron ABI 重建 |
 | `scripts/run-electron-builder.mjs`（`--dir`） | 通过 | `dist/linux-arm64-unpacked`：`scry` 可执行文件 + `resources/` + `locales/` |
 | `npm run check:packaged-app` | 通过 | `platform: linux`，`nodePty: true`，locale 三项齐全，资源 allowlist 通过，`scryCliVersion: 0.2.52` |
-| 私有 recorder CLI | 通过 | `resources/bin/scry --version` 在 Linux 上真实执行（走 `<root>/scry` 分支）——这是本次最关键的未验证项 |
+| 私有 recorder CLI | 通过 | `resources/bin/scry --version` 在当时的 Linux aarch64 容器中真实执行（走 `<root>/scry` 分支）；这是已验证项，不代表当前集成版本或 Arch/Omarchy x86_64 验收 |
 | pacman 包生成（`SCRY_RELEASE_BUILD=1`） | 通过 | `dist/scry-0.2.227-aarch64.pacman`，84.7 MB，423 条目，安装到 `/opt/Scry` |
 | `.PKGINFO` | 通过 | `pkgname/pkgver/arch/depend` 正确，8 个 Arch 依赖按配置写入，`pkgdesc` 单行（见下方修复记录） |
 | `pacman -Qip` 读取产物 | 通过 | pacman 6.0.2 读出完整描述、版本、架构、依赖 |
@@ -94,33 +94,12 @@ electron-builder 警告未设置 `desktopName`。查上游实现：`.desktop` �
 2. **`scripts/desktop-remote-host-smoke.mjs`** 仍按 macOS 布局取可执行文件，且该文件已超过仓库 2 万字节提交预算，未改动；因此 `npm run pack:artifact` 的 GUI smoke 部分在 Linux 上不能整套跑通。
 3. 包体积：Linux 解包后 330.3 MB（预算 346.0 MB），只剩约 15 MB 余量，接近上限。
 
-## 复现方式
+## 复现前置与历史限制
 
-```bash
-colima start --cpu 6 --memory 12 --disk 60
-docker run -d --name scry-linux --privileged -v "$HOME":"$HOME" ubuntu:24.04 sleep infinity
-# 安装 node 22、base-devel/python3、Electron 运行库、xvfb、libarchive-tools、pacman-package-manager
-# 仓库复制到 /work/scry（无空格路径），然后：
-npm ci
-npm run typecheck
-xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24' npx vitest run
-npm run build && npm run build:cli
-./node_modules/.bin/electron-builder install-app-deps
-node scripts/run-electron-builder.mjs && npm run check:packaged-app
-SCRY_RELEASE_BUILD=1 node scripts/run-electron-builder.mjs
-xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24' node scripts/electron-security-smoke.mjs
-node scripts/check-pacman-package.mjs
-```
+原验证使用过特权容器并挂载宿主用户目录。这不是安全隔离：容器内的仓库代码、安装脚本和依赖可以访问或修改挂载的日常数据。本文保留历史结果，但移除这套不安全的一键启动命令；不要照此运行不可信代码。原环境还调整过 VM 内核的 user namespace 策略和 `chrome-sandbox` 所属者、权限，这些条件不能当作普通 Linux 宿主的默认配置。
 
-测 Wayland `app_id`（不需要桌面会话语义，只要一个合成器）：
+后续由验证负责人准备独立、可销毁的 Linux 环境，使用专用临时 workspace、HOME 和 userData，不挂载日常用户目录，不默认赋予容器特权。依赖与构建入口见[安装指南](../linux-getting-started.md)和 CI 的 `packaged-linux` job；Ubuntu 使用 `build-essential`，不要照抄 Arch 的 `base-devel`。Chromium sandbox 无法正常启用时报告阻碍，不关闭保护或自动修改日常宿主策略。
 
-```bash
-apt-get install -y sway xwayland jq
-export XDG_RUNTIME_DIR=/tmp/xdg && mkdir -p $XDG_RUNTIME_DIR && chmod 700 $XDG_RUNTIME_DIR
-WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman sway -c /dev/null &
-export SWAYSOCK=$(ls $XDG_RUNTIME_DIR/sway-ipc.*.sock | head -1) WAYLAND_DISPLAY=wayland-1
-./dist/linux-arm64-unpacked/scry --ozone-platform=wayland --user-data-dir=/tmp/scry-wl &
-swaymsg -t get_tree | jq -c '.. | objects | select(.app_id? and .app_id != null) | {app_id, name}'
-```
+复测 Wayland `app_id` 时，须先以有界就绪检查确认当前合成器实例的 socket 和 `swaymsg` 可用，再启动冻结的 App 产物并读回窗口信息。不得在后台启动后立即取第一个 socket，也不能用固定延迟冒充就绪；保留该实例的 PID、socket、退出状态和原始输出。
 
-容器需要 `chmod 4755` + root 所属的 `chrome-sandbox`（与 CI 相同做法），并允许非特权 user namespace（`sysctl kernel.apparmor_restrict_unprivileged_userns=0`），否则 Chromium 会拒绝启动。这不代表产品层面放宽 sandbox。
+上述受限环境与自动就绪流程尚未重放，因此这里不提供未经验证的替代容器或 Sway 启动脚本，也不把它们标记为通过。目标 Arch/Omarchy 验收仍由第 9 节责任表中的用户与实施者完成，见[技术方案](linux-omarchy-technical-plan.md#9-待确认项与责任)。
