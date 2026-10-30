@@ -56,15 +56,20 @@ node node_modules/electron/install.js
 npm run dev
 ```
 
-Linux（Arch/Omarchy）构建需要同样的 Node.js 版本，另需 `base-devel`、`python`（node-pty、better-sqlite3 编译）与 `fpm` 所需工具链：
+Linux（Arch/Omarchy）构建需要同样的 Node.js 版本，另需 `base-devel`、`python`（node-pty、better-sqlite3 编译）与 `libarchive`（提供 pacman 构建/检查所需的 `bsdtar`；Ubuntu 包名为 `libarchive-tools`）：
 
 ```bash
 npm ci
+./node_modules/.bin/electron-builder install-app-deps
 npm run build && npm run build:cli
-npm run pack:artifact        # 只出 dist/linux-unpacked 并跑产物检查
-SCRY_RELEASE_BUILD=1 npm run pack   # 产出可安装的 pacman 包
-sudo pacman -U dist/scry-*.pacman
+SCRY_RELEASE_BUILD=1 node scripts/run-electron-builder.mjs
+npm run check:packaged-app
+npm run check:pacman-package
+# 确认版本与架构后，手动安装本次检查过的 dist/*.pacman 包：
+# sudo pacman -U <包路径>
 ```
+
+当前 `pack:artifact` / `pack` 包含仍依赖 macOS 布局的远程宿主 smoke，Linux 请使用上述构建检查流程；GUI 与目标机验收见 [Linux 验证与交付](docs/agent/verification.md#linux-验证与交付)。
 
 Linux 的分发包不关闭 Chromium sandbox，也不自动修改 Hyprland 配置。首次运行前请确认密钥环可用（远程连接凭据需要 GNOME Keyring / libsecret）；否则凭据保存会被拒绝而不是退回明文后端。
 
@@ -92,7 +97,7 @@ npm run check:cli-release # CLI 单测、构建、npm tarball 干净安装与 bi
 
 GitHub Actions 会在 Node 22 运行 App 的 typecheck、全量测试与构建，在 Node 20/22/24
 运行 CLI 发布检查，并在 macOS Node 22 打包后执行 packaged App 与 Electron security smoke。
-Linux 打包门禁在 ubuntu 上验证产物布局、原生模块、私有 CLI 与 locale 裁剪；GUI smoke 与 Wayland 行为仍在目标机验收。
+Linux 打包门禁在 ubuntu 上验证产物布局、原生模块、私有 CLI、locale 裁剪及 pacman 元数据/桌面入口；GUI smoke 与 Hyprland 行为不在该门禁覆盖范围内。
 
 ## 独立轮次记录 CLI
 

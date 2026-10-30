@@ -78,6 +78,13 @@ Claude 是主要路径；Codex、Qoder、OpenCode、Pi 仍是实验性路径。�
 | 性能分析、优化、指标/门禁维护 | [持续性能闭环](docs/performance-loop.md)、`scry-performance-climb` skill |
 | 内网 registry、内网需求单、本地内部资料 | `.claude/company-context.local.md`（已 gitignore，缺失时按公开默认配置工作） |
 
+## macOS / Linux 是共同维护目标
+
+- Scry 桌面 App 同时维护 macOS 与 Linux，共享业务、UI、Provider 和 recorder 代码；不建立 Linux 专属业务分支。Linux 首批目标为 Arch/Omarchy x86_64、Hyprland/Wayland、pacman 包；已有 Ubuntu aarch64 容器与 headless wlroots 验证，不等于目标机验收或 ARM64 支持承诺。
+- 每次功能、修复和依赖变更都检查跨平台影响。共享路径不得默认 `.app/Contents`、`/bin/zsh`、`⌘`、macOS 标题栏或 Keychain；先复用现有平台入口，见 [跨平台检查清单](docs/agent/change-checklists.md#macos--linux-跨平台改动)。仅限单个平台的能力必须显式降级，不用空结果伪装支持。
+- 保留 Chromium sandbox；不以 `--no-sandbox`、默认禁用 GPU、自动改 Hyprland 全局配置或 Linux 明文凭据后端换取“能运行”。
+- 验证按改动范围和平台选择，见 [Linux 验证](docs/agent/verification.md#linux-验证与交付)。共享或平台边界改动应覆盖两端相关检查；缺少目标环境时明确未验证项，不能用 macOS 通过或交叉构建代替 Linux 运行。纯文档仍只核对引用与 diff，不扩大门禁。
+
 ## 性能是默认要求
 
 用户每天在等：启动、打开会话、发送/停止、流式输出、轮次结束 diff、source-control 刷新、远程目录与终端。新代码默认按下面写；确实做不到时，在注释或提交说明里写明原因。
@@ -122,7 +129,7 @@ Claude 是主要路径；Codex、Qoder、OpenCode、Pi 仍是实验性路径。�
 - UI 修复：记录原始操作、预期及相邻路径，补 focused 回归，在当前版本真实 App 重放；构建/自动测试与真实交互结果分别报告。截图/设备/Provider 不可用则明确未验证。
 - 跨核心安全/持久化边界、高风险合入或发布：读取验证参考中的扩大/完整 gate 与发布小节；真实外部操作、成本和设备授权不可由本地测试替代。
 - 允许继续修复本次授权范围内的安全本地失败并重跑受影响检查；既有失败单列，不顺手扩大改动。外部结果未知、授权不足或需要用户决定时停止对应动作并交接。
-- **App 产物改动才默认构建安装**：本次改动影响桌面 App 运行代码或打包产物，且通过对应验证后，默认执行 `npm run install:mac:dev`，通过现有流程构建、打包并安装到 `/Applications/Scry.app`，无需再次询问；不绕过打包与安装校验。仅独立 CLI、iOS 或其他非 App 产物改动，按对应分发面验证，不顺带安装桌面 App。纯文档遵循上条豁免；用户明确要求不构建或不安装时遵循请求。
+- **App 产物改动才默认构建安装**：本次改动影响桌面 App 运行代码或打包产物，且通过对应验证后，在 macOS 宿主默认执行 `npm run install:mac:dev`，通过现有流程构建、打包并安装到 `/Applications/Scry.app`，无需再次询问；Linux 宿主按 [Linux 验证与交付](docs/agent/verification.md#linux-验证与交付) 构建检查，不运行 macOS 安装脚本，系统级 pacman 安装须明确授权；不绕过打包与安装校验。仅独立 CLI、iOS 或其他非 App 产物改动，按对应分发面验证，不顺带安装桌面 App。纯文档遵循上条豁免；用户明确要求不构建或不安装时遵循请求。
 - **使用独立 test 实例验证**：修改代码后需要验证 App 行为时，启动基于当前代码、使用独立 `userData` 和临时工作区的 test 实例，不要求用户重启当前 App，也不停止或干扰用户正在使用的实例。安装后的日常实例仍由用户自行重启加载新版本，但不作为验收前置条件；不把安装成功或 test 实例验证通过当作用户当前运行版本已更新。构建或安装失败时如实报告，不宣称已安装。
 - 检查 diff，默认只提交本次相关改动，不 push；已有 WIP 不混入。报告改动与实际检查；仅在涉及产物或验收时补充构建、安装、待用户重启状态及未验证项。纯文档不要求重启 App，不用 L1/L2 冒充 L3。
 
