@@ -30,12 +30,19 @@ npx vitest run src/main/transcript-archive src/main/conversation-adoption \
 
 新测试覆盖：最新一轮 20 MiB 无关 payload（清单不解析正文、迭代才解析且跳过 payload）、索引与 sidecar 缺失时按 ts 重建顺序、v1 索引不走正文解析、单体归档含 20 MiB 最新轮、2100 个真实轮次（正文 + sidecar 直接落盘，**默认 5 s 超时**，实测约 1.9–3.0 s；上一版 30 s 超时是无效率 fixture 掩盖，已删除）、截断/跨 cwd/跨 run/跨 provider/多轮拒绝、诱饵 payload 不能自选、Unicode 跨 chunk 精确。
 
-## 未完成（用户目标未达成）
+## 已提交（续）
 
-1. 快照正文仍是 v3 单体：`conversation-side-chat.ts:60/64`、`conversation-side-chat-snapshot.ts:92/103`、`conversation-side-chat-schema.ts:7-8` 的 **4 MiB / 4000 条**上限仍在。
-2. 首轮交接仍整段读：`conversation-history-source.ts:46/123/130`、`conversation-history-text.ts:34`（2000 轮 / 16 MiB / 4 MiB），`readConversationHistoryMessages` 先读全部再选。
+- `9b3a4bd4` 有界 fanout 的内容寻址清单树（`content-manifest.ts`）：叶子固定条目数，分支只带计数/字节上界/子引用，写作者只保留每层一个未完成节点，内存 O(fanout·height)；按计数下降读单项/单页是 O(height)。正文按 256 KiB 分片写入，边写边累积整条 hash；每个节点带 `snapshotId+fingerprint` 绑定的 binding，节点自身 hash 有效也无法从别的快照替换。
+- `8c493210` 侧聊快照改为格式 4：记录只留描述符（`messageCount`/`bodyBytes`/清单根），封存流式写入清单，读取按计数或字节偏移下降。旧格式 3 记录仍可读且不被重写。`conversationContinuation` 显式接收冻结引用（格式 4 无法自行枚举，返回空列表会静默丢失上下文，缺参数即报错），main 从子对话自己的清单按页读取。
+
+证据：`npx vitest run` 全量 5049 passed / 4 skipped；`npx tsc --noEmit -p tsconfig.node.json` 与 `-p tsconfig.web.json` 均通过。新增 `conversation-side-chat-snapshot.test.ts`：4200 条 + 单条 >4 MiB 正文封存后按位置读首个/中间/末个，正文逐字一致。
+
+## 仍未完成
+
+1. 投影仍会整条物化 `text`：`trace-archive-projection.ts` 的 `EVENT_KEYS` 在 `keepEvent` 之前 join `text`/`modelContent`/`runtimeMetadata`。下一步是按 chunk 流式输出可见正文（无法判定 stage 的字段先落 spool），让封存端直接消费 `AsyncIterable<string>`，不再先拼整条消息。
+2. 交接仍把缺失项物化为 ref 数组：`conversation-history.ts`/`conversation-history-source.ts` 按页读清单后整份传入，成本 O(n)；父级批准的「紧凑范围描述符 + 每轮显式例外」尚未落地，`ConversationContinuation.missingItems` 仍是 ref 数组。
 3. 无 Scry 归档的原生裸 transcript（Claude/Pi）仍整文件读并 16 MiB 拒绝：`bootstrap/side-chat-source.ts:40/65/120`。
-4. `Conversation` 仍内联 `sideChat.snapshot.items`；父级已拒绝把 ~8 万条当作最终上限。
+4. 未跑：`npm run test:side-chat:ui`、`npm run test:renderer:ui`、`npm run performance:measure`（改动在 `previewSideChat/createSideChat` 性能路径，合入前必须对比 `d824c609`）、真实 App 大历史验收与旧实现负对照。
 
 ## Phase 2 契约（已获父级批准，未开工）
 
