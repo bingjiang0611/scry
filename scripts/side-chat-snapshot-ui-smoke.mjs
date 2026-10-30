@@ -25,6 +25,9 @@ async function realPages(turns) {
   await build({
     configFile: false, root, logLevel: 'error', resolve: { alias: { '@shared': join(root, 'src/shared') } },
     define: { 'process.env.NODE_ENV': '"production"' },
+    // The shipped archive projection parses with `stream-json`; the fixture module runs
+    // from a temporary directory, so the parser has to be bundled, not externalized.
+    ssr: { noExternal: true },
     build: { outDir: out, emptyOutDir: false, minify: false, ssr: true, target: 'node22',
       lib: { entry: join(root, 'scripts/fixtures/side-chat-snapshot-pages.ts'), formats: ['es'],
         fileName: () => 'pages.mjs' } }

@@ -15,6 +15,7 @@ import { exerciseSideChatRestore } from './side-chat-restore-checks.mjs'
 import { prepareSideChatDrafts, verifySideChatDrafts } from './side-chat-draft-restart-checks.mjs'
 import { verifySideChatWorkbenchAfterRestart } from './side-chat-workbench-checks.mjs'
 import { exerciseSideChatAdoption } from './side-chat-adoption-checks.mjs'
+import { exerciseSideChatLargeHistory } from './side-chat-large-history-checks.mjs'
 
 /**
  * Everything the isolated App needs for one side-chat acceptance pass.
@@ -77,6 +78,11 @@ async function exerciseSideChatMode({ cdp, evaluate, check, lifecycle, options, 
   step('restore')
   const restore = await exerciseSideChatRestore({ cdp, evaluate, check, rendererFailures,
     childId: first.childId, ...options })
+  // A parent whose own archive is past every removed budget: preview, creation, the
+  // shipped viewer and one real first send, all on a separate conversation.
+  step('large history')
+  const large = await exerciseSideChatLargeHistory({ cdp, evaluate, check, rendererFailures,
+    restoreParentId: first.parentConversationId, ...options })
   step('layout')
   const layout = await exerciseSideChatLayout({ cdp, evaluate, check, rendererFailures, childId: first.childId, ...options })
   // Two unsent states before the quit: a draft the user typed but never sent, and a
@@ -129,7 +135,7 @@ async function exerciseSideChatMode({ cdp, evaluate, check, lifecycle, options, 
   const artifactHashes = Object.fromEntries(artifactPaths.map((path) =>
     [path, createHash('sha256').update(readFileSync(resolve(path))).digest('hex')]))
   const result = { test: 'side-chat execution', ...first, runtime, history, scroll, orphan, orphanReader,
-    orphanPaging, restore, layout, drafts: draftsRestored, workbench, adoption, restart: second, artifactHashes }
+    orphanPaging, restore, layout, large, drafts: draftsRestored, workbench, adoption, restart: second, artifactHashes }
   // The smoke temp tree is removed on exit; the capture directory persists, so the evidence
   // lives next to the screenshots this run really produced.
   const verificationPath = join(first.captures, 'verification.json')
