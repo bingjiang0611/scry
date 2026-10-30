@@ -123,7 +123,6 @@ function Harness() {
     <div data-races-scope>{scope}</div>
     <div data-races-tabs>{openIds.join(',')}</div>
     <div data-races-notice>{workspace.entry.notice ?? ''}</div>
-    <div data-races-narrow>{workspace.entry.narrow?.label ?? ''}</div>
     <div data-races-created>{workspace.createdId ?? ''}</div>
     <div data-races-history>{workspace.history.open ? `${workspace.history.items.length}:${workspace.history.loading}` : 'closed'}</div>
     <button type="button" data-races-create onClick={() => workspace.entry.onSelect()}>create</button>

@@ -31,7 +31,7 @@ async function contentRoots(userData: string): Promise<string[]> {
   }
 }
 
-describe('side-chat preview narrowing and handoff budget', () => {
+describe('side-chat snapshot boundary and handoff budget', () => {
   it('previews a smaller completed range and creation keeps that boundary', async () => {
     const current = await fixture()
     const parent = await current.service.create(current.cwd)
@@ -93,7 +93,6 @@ describe('side-chat preview narrowing and handoff budget', () => {
     // The prefix is streamed into the manifest, so its size is not a resident budget and
     // the preview no longer offers a smaller prefix as the only way forward.
     const preview = await current.service.previewSideChat(source)
-    expect(preview.narrowed).toBeUndefined()
     expect(preview.throughOrdinal).toBe(3)
     expect(preview.messageCount).toBe(6)
     const child = await current.service.createSideChat(request(source, preview))
@@ -105,7 +104,9 @@ describe('side-chat preview narrowing and handoff budget', () => {
     // An explicit boundary still means exactly that boundary.
     const explicit = await current.service.previewSideChat(source, { completedThroughOrdinal: 1 })
     expect(explicit.throughOrdinal).toBe(1)
-  })
+    // 9 MiB of visible text is streamed twice (preview, then the seal) plus the read-back;
+    // measured ~2.7 s idle, so the 5 s default is the artifact here, not the work.
+  }, 60_000)
 
   it('measures the sealed artifact with one authority for preview and creation', async () => {
     const current = await fixture()

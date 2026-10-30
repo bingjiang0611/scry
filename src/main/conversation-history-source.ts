@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { conversationCoverage, conversationItemKey, type Conversation, type ConversationItemRef, type ConversationTurn } from '../shared/conversation'
+import { conversationCoverage, conversationItemKey, type Conversation, type ConversationItemRef } from '../shared/conversation'
 import type { TraceEvent } from '../shared/trace'
 import { contextUsageEvidence } from '../shared/trace'
 import type { HandoffBudgetInput } from './conversation-handoff-budget'
@@ -12,82 +12,11 @@ import {
 } from './conversation-history-limits'
 import { belongsToSideChatSnapshot, readSideChatSnapshotMessage } from './conversation-side-chat-snapshot'
 import type { NativeHandoffTarget } from './conversation-history'
-import { captureReadBudget, chargeText, historyReadBudget, turnAssistantText, turnMessageProjection } from './conversation-history-text'
+import { chargeText, historyReadBudget, turnAssistantText } from './conversation-history-text'
 
 const hash = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex')
 
 export type { HistoryMessage } from './conversation-history-content'
-
-/**
- * Read the exact stable prefix of a source conversation for a side-chat snapshot.
- *
- * Every turn is read once from its committed App archive inside one shared
- * source/body budget. The parent's own recorded item hashes stay authoritative:
- * the projected initial prompt and whole assistant body must match them, and an
- * accepted steer prompt is the only message that has no parent item hash. Text
- * hashes are compared here, so a changed archive can never become a snapshot.
- */
-export async function readCapturedTurnMessages(
-  userData: string,
-  conversation: Pick<Conversation, 'id' | 'cwd' | 'turns' | 'bindings'>,
-  prefix: readonly ConversationTurn[]
-): Promise<HistoryMessage[]> {
-  let sourceBytes = 0
-  // The frozen snapshot streams each message into its manifest, so the source read is
-  // not charged against a resident-text cap; the archive read still has its own bound.
-  const budget = captureReadBudget()
-  const messages: HistoryMessage[] = []
-  for (const turn of prefix) {
-    const binding = conversation.bindings.find(candidate => candidate.id === turn.bindingId)
-    if (!binding) throw new Error('来源轮次缺少原生绑定归属')
-    if (!turn.archive) throw new Error('来源轮次缺少已提交的 App 归档，不能创建侧聊')
-    const archive = turn.archive
-    const result = await readTraceArchiveTurnForHistory({
-      userDataDir: userData, cwd: conversation.cwd, sessionId: archive.sessionId,
-      providerTurnId: archive.providerTurnId, providerId: binding.providerId, runId: turn.runId,
-      maxBytes: MAX_CONVERSATION_HISTORY_SOURCE_BYTES - sourceBytes
-    })
-    sourceBytes += result.bytesRead
-    if (!result.turn.done) throw new Error('交接源轮次尚未收敛')
-    const projection = await turnMessageProjection(userData, conversation, { ...result.turn, userText: result.turn.userText }, budget)
-    const userRef = turn.items.find(ref => ref.itemId === 'user')
-    const assistantRef = turn.items.find(ref => ref.itemId === 'assistant')
-    if (turn.items.some(ref => ref.itemId !== 'user' && ref.itemId !== 'assistant')) {
-      throw new Error('交接仅支持用户和助手可见文字')
-    }
-    let userText = projection[0].text
-    if (userRef && hash(userText) !== userRef.contentHash) {
-      // Old refs explicitly hashed the attachment-metadata-stripped projection.
-      const legacy = stripAttachmentMetadata(userText)
-      if (legacy === userText || hash(legacy) !== userRef.contentHash) throw new Error('交接源正文与预览 hash 不一致，请重新预览')
-      userText = legacy
-    }
-    const assistant = projection.filter(message => message.role === 'assistant').map(message => message.text)
-    const whole = assistant.join('\n\n')
-    if (assistantRef ? hash(whole) !== assistantRef.contentHash : whole.length > 0) {
-      throw new Error('交接源正文与预览 hash 不一致，请重新预览')
-    }
-    let assistantIndex = 0
-    for (const message of projection) {
-      const text = message.role === 'user' && message.steerMessageId === undefined ? userText : message.text
-      const ref = message.steerMessageId !== undefined
-        ? { runId: turn.runId, itemId: `steer:${message.steerMessageId}`, contentHash: hash(text) }
-        : message.role === 'user'
-          ? userRef ?? { runId: turn.runId, itemId: 'user', contentHash: hash(text) }
-          : assistantRef && assistant.length === 1
-            ? assistantRef
-            : { runId: turn.runId, itemId: `assistant:${assistantIndex++}`, contentHash: hash(text) }
-      if (ref.contentHash !== hash(text)) throw new Error('交接源正文与预览 hash 不一致，请重新预览')
-      messages.push({
-        ref: { ...ref }, providerId: binding.providerId, nativeSessionId: binding.nativeSessionId,
-        providerTurnId: archive.providerTurnId, ordinal: turn.ordinal, role: message.role,
-        status: result.turn.status ?? 'completed',
-        delivery: turn.origin === 'imported' ? 'imported' : turn.delivery.status, text
-      })
-    }
-  }
-  return messages
-}
 
 /** Build immutable App-visible refs from the same complete-body extractor used for handoff. */
 export async function conversationItemsFromTrace(input: {

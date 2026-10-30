@@ -12,9 +12,8 @@ import { sealSink } from './conversation-side-chat-capture'
 import { deleteConversationHistory } from './conversation-history-content'
 import type { SideChatServiceDeps } from './conversation-service-deps'
 import {
-  captureSideChatPrefix, smallestFreezableOrdinal, sourceWorkspaceCwd, type CapturedPrefix
+  captureSideChatPrefix, sourceWorkspaceCwd, type CapturedPrefix
 } from './conversation-side-chat-source'
-import { isSideChatBudgetRefusal } from './conversation-side-chat-refusal'
 import { deliveryBlockedReason, sideChatCoverage } from './conversation-side-chat-coverage'
 import type {
   ConversationSideChatRequest, ConversationSummary, SideChatCommandReceipt, SideChatList, SideChatPreview, SideChatSnapshotPage
@@ -100,19 +99,9 @@ export async function previewSideChat(
     return previewOf(deps, captured, measure(deps, captured.source.kind === 'conversation'
       ? captured.source.conversationId : captured.source.nativeSessionId, captured, target), target)
   }
-  try {
-    return await readAt(options.completedThroughOrdinal)
-  } catch (error) {
-    // A range that does not fit the budget is not a dead end: the smallest freezable
-    // prefix may still fit. This preview describes that smaller boundary and creates
-    // nothing; changing the frozen prefix stays an explicit user choice.
-    if (!isSideChatBudgetRefusal(error) || options.completedThroughOrdinal !== undefined) throw error
-    const smallest = await smallestFreezableOrdinal(deps, source)
-    if (!Number.isSafeInteger(smallest) || smallest < 1) throw error
-    const narrowed = await readAt(smallest).catch(() => undefined)
-    if (!narrowed) throw error
-    return { ...narrowed, narrowed: { message: error.message } }
-  }
+  // A refused range stays refused. Capture streams the whole prefix into the manifest,
+  // so there is no snapshot budget left to answer with a silently smaller prefix.
+  return readAt(options.completedThroughOrdinal)
 }
 
 function requestIntentHash(request: ConversationSideChatRequest): string {

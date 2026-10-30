@@ -92,11 +92,6 @@ export const SIDE_CHAT_COPY = {
   layoutUnsaved: '布局未保存到本地；本次打开状态在重启后可能丢失。',
   createNotFoundUnknown: '没有查到这条创建命令；这不代表没有创建。可稍后在历史里确认。',
   createRecovered: '已找回这次创建的侧边会话。',
-  previewNarrow: (ordinal: number): string => `改用第 ${ordinal} 轮作为快照边界`,
-  narrowAction: (ordinal: number): string => `改用第 ${ordinal} 轮并创建`,
-  narrowNotice: '当前已完成范围超出快照预算。可以改用更小的快照边界；边界不会自动改变。',
-  narrowUnavailable: '更小的边界也不在预算内；请缩小来源会话。',
-  previewNarrowing: '正在重新读取更小的快照边界…',
   previewBlocked: (reason: string): string => `创建后首次发送会被拒绝：${reason}`,
   creationScopeChanged: '主会话已切换，本次创建结果没有写入当前布局；它仍属于原来的主会话。',
   // 页签与状态

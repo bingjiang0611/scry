@@ -1,13 +1,11 @@
 import { createHash } from 'node:crypto'
-import { readCapturedTurnMessages } from './conversation-history-source'
+import { capturedConversationMessages } from './conversation-side-chat-capture-stream'
 import { iterateTraceArchiveCapture, traceArchiveCaptureInfo, TraceArchiveCaptureError } from './transcript-archive-capture'
 import { requireValue } from './conversation-schema'
 import type { ConversationTurn, SideChatSource } from '../shared/conversation'
 import type { SideChatServiceDeps, SideChatNativeSource } from './conversation-service-deps'
 import { normalizeSessionTitle, SESSION_TITLE_MAX_LENGTH } from '../shared/session-title'
 import type { ProviderId } from '../shared/provider'
-import { HistoryReadBudgetExceeded } from './conversation-history-text'
-import { SideChatBudgetRefusal } from './conversation-side-chat-refusal'
 import { streamTurns, type StreamedMessage } from './conversation-side-chat-stream'
 import { completedProjections, projectedMessages, stopReasonProvesCompletion } from './conversation-side-chat-raw'
 import { measureSink, type CaptureItem, type CaptureMessageMeta, type CaptureSink } from './conversation-side-chat-capture'
@@ -169,24 +167,14 @@ async function captureConversationPrefix(
   }
   const binding = conversation.bindings.find(candidate => candidate.id === through.bindingId)
   requireValue(binding !== undefined, '来源轮次缺少原生绑定归属')
-  const messages = await readCapturedTurnMessages(deps.store.userData, conversation, prefix).catch((error: unknown) => {
-    // The bounded source read is one authoritative budget boundary. Its refusal is what
-    // a smaller frozen prefix can answer; anything else keeps its own reason.
-    if (error instanceof HistoryReadBudgetExceeded) throw new SideChatBudgetRefusal(error.message)
-    throw error
-  })
-  requireValue(messages.length > 0, '来源快照正文不完整，不能创建侧聊')
   const items: CaptureItem[] = []
   // A conversation source names the child after the source conversation, not its text.
   const untitled = new TitleTap()
-  for (const message of messages) {
-    items.push(await consume(sink, memoryMessage(message.text, message.ref.contentHash, message.role), {
-      role: message.role, sourceRunId: message.ref.runId, sourceOrdinal: message.ordinal,
-      providerId: message.providerId as ProviderId, status: message.status, delivery: 'snapshot',
-      ...(message.nativeSessionId === undefined ? {} : { nativeSessionId: message.nativeSessionId }),
-      ...(message.providerTurnId === undefined ? {} : { providerTurnId: message.providerTurnId })
-    }, untitled))
+  // Streamed one turn at a time: a long prefix costs the sealed manifest, not memory.
+  for await (const entry of capturedConversationMessages(deps.store.userData, conversation, prefix)) {
+    items.push(await consume(sink, entry.message, entry.meta, untitled))
   }
+  requireValue(items.length > 0, '来源快照正文不完整，不能创建侧聊')
   return {
     source: { kind: 'conversation', conversationId },
     cwd: conversation.cwd,
@@ -363,13 +351,6 @@ export async function sourceWorkspaceCwd(deps: SideChatServiceDeps, source: Side
   const conversation = await deps.store.read(source.conversationId)
   if (!conversation) throw new Error('侧聊来源对话不存在或已删除；不会自动创建空快照')
   return conversation.cwd
-}
-
-export async function smallestFreezableOrdinal(deps: SideChatServiceDeps, source: SideChatSource): Promise<number> {
-  if (source.kind === 'native-session') return 1
-  const conversation = await deps.store.read(source.conversationId)
-  if (!conversation) return 0
-  return conversation.turns.findIndex(boundaryTurn) + 1
 }
 
 /**

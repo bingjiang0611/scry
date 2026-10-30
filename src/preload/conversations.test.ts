@@ -57,7 +57,7 @@ describe('conversation preload boundary', () => {
     const conversationSource = { kind: 'conversation' as const, conversationId: 'conversation-id' }
     await conversationsApi.previewSideChat(conversationSource)
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:previewSideChat', conversationSource)
-    // A narrowing preview forwards the typed boundary and the requested first-send target.
+    // A preview forwards an explicit typed boundary and the requested first-send target.
     const options = { completedThroughOrdinal: 3, initialTarget: { providerId: 'pi' as const, agentProfileId: 'pi:0123456789abcdef', permissionMode: 'default' as const } }
     await conversationsApi.previewSideChat(conversationSource, options)
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:previewSideChat', conversationSource, options)

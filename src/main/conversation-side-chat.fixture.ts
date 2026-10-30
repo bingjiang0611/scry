@@ -37,7 +37,7 @@ export interface SideChatFixture {
   /** Leaves the next started run pending, like a trailing turn that is still running. */
   pending: boolean
   /** Extra events appended to the archive turn of the next completed run. */
-  extraEvents: TraceEvent[]
+  extraEvents: TraceEvent[] | ((runId: string) => TraceEvent[])
   cleanup: () => Promise<void>
 }
 
@@ -52,13 +52,13 @@ export async function sideChatFixture(options: { providerId?: ProviderId; sideCh
   const cwd = await realpath(join(root, 'workspace'))
   const store = new ConversationStore(userData)
   // Mutable controls shared with the fake Provider terminal.
-  const state = { pending: false, extraEvents: [] as TraceEvent[] }
+  const state = { pending: false, extraEvents: [] as TraceEvent[] | ((runId: string) => TraceEvent[]) }
   const fixture: SideChatFixture = {
     root, userData, cwd, store, runs: [], providerId: options.providerId ?? 'codex',
     get pending() { return state.pending },
     set pending(value: boolean) { state.pending = value },
     get extraEvents() { return state.extraEvents },
-    set extraEvents(value: TraceEvent[]) { state.extraEvents = value },
+    set extraEvents(value: TraceEvent[] | ((runId: string) => TraceEvent[])) { state.extraEvents = value },
     cleanup: async () => { await rm(root, { recursive: true, force: true }) },
     service: undefined as unknown as ConversationService
   }
@@ -77,7 +77,8 @@ export async function sideChatFixture(options: { providerId?: ProviderId; sideCh
       fixture.runs.push({ prompt: request.prompt, context: managed.historicalContext?.text,
         contextHash: managed.historicalContext?.contentHash, managed })
       if (fixture.pending) return { runId }
-      const items = [modelEvent(runId, answer), ...fixture.extraEvents]
+      const extra = typeof fixture.extraEvents === 'function' ? fixture.extraEvents(runId) : fixture.extraEvents
+      const items = [modelEvent(runId, answer), ...extra]
       fixture.extraEvents = []
       upsertTraceArchiveTurn({ userDataDir: fixture.userData, cwd, sessionId: archive.sessionId, providerId: fixture.providerId,
         turn: { runId, userText: request.prompt, items, done: true, status: 'completed', ts: Date.now() } })

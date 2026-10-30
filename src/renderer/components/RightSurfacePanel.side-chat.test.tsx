@@ -83,22 +83,6 @@ describe('flat tabs with child instances', () => {
     expect(renderSideChat).not.toHaveBeenCalled()
   })
 
-  it('offers the smaller frozen boundary explicitly when the preview did not fit', () => {
-    const narrow = { label: SIDE_CHAT_COPY.narrowAction(3), description: SIDE_CHAT_COPY.previewNarrow(3) }
-    const onSelect = vi.fn()
-    const html = render({ sideChatEntry: {
-      label: SIDE_CHAT_COPY.surfaceLabel, description: SIDE_CHAT_COPY.entryDescription,
-      notice: SIDE_CHAT_COPY.narrowNotice, onSelect,
-      narrow: { ...narrow, onSelect },
-      historyLabel: SIDE_CHAT_COPY.historyLabel, onOpenHistory: () => {}
-    } })
-    expect(html).toContain('data-side-chat-narrow')
-    expect(html).toContain(SIDE_CHAT_COPY.narrowNotice)
-    expect(html).toContain(narrow.label)
-    // Nothing was created while showing the smaller boundary.
-    expect(onSelect).not.toHaveBeenCalled()
-  })
-
   it('states that the layout could not be saved instead of pretending it is durable', () => {
     const html = render({ layoutNotice: SIDE_CHAT_COPY.layoutUnsaved })
     expect(html).toContain('data-layout-unsaved')

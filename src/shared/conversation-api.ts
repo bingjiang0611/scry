@@ -192,15 +192,9 @@ export interface SideChatPreview {
   smallestThroughOrdinal: number
   /** Real current-build limitation; creation stays local and never fakes a handoff. */
   firstSendBlockedReason?: string
-  /**
-   * Present when the completed range did not fit the snapshot budget and this preview
-   * describes the smallest freezable prefix instead. `throughOrdinal` above is that
-   * smaller boundary; nothing is created until the user selects it explicitly.
-   */
-  narrowed?: { message: string }
 }
 
-/** Optional narrowing and first-send target offered by the preview UI. */
+/** Optional explicit snapshot boundary and first-send target offered by the preview UI. */
 export interface SideChatPreviewOptions {
   completedThroughOrdinal?: number
   initialTarget?: SideChatInitialTarget

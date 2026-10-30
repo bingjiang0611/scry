@@ -12,7 +12,7 @@ import electron from 'electron'
  * The production `useSideChatWorkspace` hook is mounted in an isolated sandboxed window with
  * an API whose answers are released on demand, so each read or create is answered *after*
  * the user switched parents. The driver proves the answer is filed under the parent it was
- * requested for: the visible parent's layout, notice, narrowing, history page and selection
+ * requested for: the visible parent's layout, notice, history page and selection
  * never change, and a durable create command is never dispatched twice.
  *
  * Scope: component-fixture UI evidence of the hook's wiring. Real IPC and the App shell are
@@ -100,7 +100,6 @@ async function exercise(contents) {
     scope: document.querySelector('[data-races-scope]')?.textContent ?? null,
     tabs: document.querySelector('[data-races-tabs]')?.textContent ?? null,
     notice: document.querySelector('[data-races-notice]')?.textContent ?? null,
-    narrow: document.querySelector('[data-races-narrow]')?.textContent ?? null,
     created: document.querySelector('[data-races-created]')?.textContent ?? null,
     history: document.querySelector('[data-races-history]')?.textContent ?? null }))()`)
   const pending = () => read(`window.__scryRaces.pending.map(entry => ({ kind: entry.kind, scope: entry.scope, ids: entry.ids ?? null, source: entry.source }))`)
@@ -127,7 +126,7 @@ async function exercise(contents) {
   const evidence = {}
 
   // 1. A preview answered after the switch: nothing is created and the parent on screen is
-  //    untouched — no notice, no narrowing, no layout change, no open call.
+  //    untouched — no notice, no layout change, no open call.
   await click('[data-races-create]')
   await wait(`window.__scryRaces.pending.some(entry => entry.kind === 'preview')`, 'preview requested')
   const previewPending = await pending()
@@ -139,7 +138,7 @@ async function exercise(contents) {
   await settleList(['tab-B'], ['tab-B'])
   await wait(`document.querySelector('[data-races-tabs]').textContent === 'tab-B'`, 'B layout')
   const afterPreview = await state()
-  must(afterPreview.notice === '' && afterPreview.narrow === '' && afterPreview.created === '',
+  must(afterPreview.notice === '' && afterPreview.created === '',
     `a preview answered after the switch wrote into the visible parent: ${JSON.stringify(afterPreview)}`)
   must(afterPreview.history === 'closed', `a preview answered after the switch opened a dialog: ${JSON.stringify(afterPreview)}`)
   const noCreate = (await requests()).filter((entry) => entry.kind === 'create')
@@ -196,21 +195,23 @@ async function exercise(contents) {
   must(afterHistory.history === 'closed', `a late history page opened the visible parent's dialog: ${JSON.stringify(afterHistory)}`)
   evidence.historyAfterSwitch = { visibleHistory: afterHistory.history, requestedScope: historyRequest.scope }
 
-  // 5. A narrowed preview belongs to the parent that asked; the next parent starts clean.
+  // 5. A refused preview belongs to the parent that asked; the next parent starts clean.
+  //    There is no smaller-prefix offer: a refused range stays refused.
   await switchTo('scope-A', ['tab-A'])
   await settleList(['tab-A'], ['tab-A'])
   await click('[data-races-create]')
-  await wait(`window.__scryRaces.pending.some(entry => entry.kind === 'preview')`, 'narrow preview')
-  await answer('preview', preview('scope-A', { narrowed: { message: '预算不足' }, throughOrdinal: 1, smallestThroughOrdinal: 1 }))
-  await wait(`document.querySelector('[data-races-narrow]').textContent !== ''`, 'narrow offer')
-  const narrowed = await state()
+  await wait(`window.__scryRaces.pending.some(entry => entry.kind === 'preview')`, 'refused preview')
+  await answer('preview', "'来源前缀包含无法验证的轮次，不能创建侧聊'", { failed: true })
+  await wait(`document.querySelector('[data-races-notice]').textContent !== ''`, 'refusal notice')
+  const refused = await state()
   await switchTo('scope-B', ['tab-B'])
   await settleList(['tab-B'], ['tab-B'])
-  const afterNarrow = await state()
-  must(narrowed.notice !== '' && narrowed.narrow !== '', `the narrowed preview must offer its smaller prefix: ${JSON.stringify(narrowed)}`)
-  must(afterNarrow.narrow === '' && afterNarrow.notice === '',
-    `another parent inherited a narrowed preview: ${JSON.stringify(afterNarrow)}`)
-  evidence.narrowAfterSwitch = { narrowedIn: narrowed.narrow, noticeInOther: afterNarrow.notice }
+  const afterRefusal = await state()
+  must(refused.notice.includes('不能创建侧聊'), `the refusal must be reported to its own parent: ${JSON.stringify(refused)}`)
+  must(refused.created === '', `a refused preview created a child: ${JSON.stringify(refused)}`)
+  must(afterRefusal.notice === '' && afterRefusal.created === '',
+    `another parent inherited a refusal notice: ${JSON.stringify(afterRefusal)}`)
+  evidence.refusalAfterSwitch = { refusedIn: refused.notice, noticeInOther: afterRefusal.notice }
 
   // 6. A lost create reply answered after the switch keeps its durable command for its own
   //    parent: no notice here, and the later read-only check never dispatches a second create.

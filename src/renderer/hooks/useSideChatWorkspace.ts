@@ -107,7 +107,6 @@ export function useSideChatWorkspace({
   const [creating, setCreating] = useState(false)
   const [notice, setNotice] = useState<string>()
   const [unknownCommand, setUnknownCommand] = useState<SideChatCreateCommand>()
-  const [narrowed, setNarrowed] = useState<{ throughOrdinal: number; label: string; description: string }>()
   const [createdId, setCreatedId] = useState<string>()
 
   const sourceKey = sideChatSourceKey(source)
@@ -175,7 +174,6 @@ export function useSideChatWorkspace({
     setUnknownCommand(readCreateCommands().filter((command) =>
       command.scopeKey === scopeKey && sideChatSourceKey(command.source) === sourceKey).at(-1))
     setNotice(undefined)
-    setNarrowed(undefined)
   }, [scopeKey, sourceKey])
 
   useEffect(() => {
@@ -223,17 +221,6 @@ export function useSideChatWorkspace({
       busy.current = false
       return
     }
-    if (preview.narrowed) {
-      // The completed range does not fit the snapshot budget. Offer the smaller frozen
-      // prefix explicitly; nothing is created until the user chooses it.
-      setNarrowed({ throughOrdinal: preview.throughOrdinal,
-        label: SIDE_CHAT_COPY.narrowAction(preview.throughOrdinal),
-        description: preview.narrowed.message })
-      setNotice(SIDE_CHAT_COPY.narrowNotice)
-      setCreating(false)
-      busy.current = false
-      return
-    }
     const command = commandFromPreview({
       preview, scopeKey: pinned.scopeKey, commandId,
       ...(pinned.target ?? preview.target ? { initialTarget: pinned.target ?? preview.target } : {})
@@ -263,7 +250,6 @@ export function useSideChatWorkspace({
         latest.current.onOpen(outcome.conversation.id, command.scopeKey)
         return
       }
-      setNarrowed(undefined)
       setUnknownCommand(undefined)
       setCreatedId(outcome.conversation.id)
       latest.current.onOpen(outcome.conversation.id, command.scopeKey)
@@ -345,11 +331,9 @@ export function useSideChatWorkspace({
       historyLabel: SIDE_CHAT_COPY.historyLabel,
       onOpenHistory: () => history.show(),
       ...(notice ? { notice } : {}),
-      ...(creating ? { creating: true } : {}),
-      ...(narrowed ? { narrow: { label: narrowed.label, description: narrowed.description,
-        onSelect: () => { setNarrowed(undefined); void runCreate(narrowed.throughOrdinal) } } } : {})
+      ...(creating ? { creating: true } : {})
     }
-  }, [checkUnknown, creating, hasCompletedTurn, history, narrowed, notice, runCreate, source, unknownCommand, unavailableReason])
+  }, [checkUnknown, creating, hasCompletedTurn, history, notice, runCreate, source, unknownCommand, unavailableReason])
 
   const tabs = useMemo<SideChatTabView[]>(() => openIds.map((id) => {
     const record = records.get(id)

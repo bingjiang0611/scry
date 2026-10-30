@@ -30,11 +30,6 @@ export interface SideChatEntry {
   /** Creation status announced politely; `creating` blocks a second identical attempt. */
   notice?: string
   creating?: boolean
-  /**
-   * A smaller frozen prefix that fits the snapshot budget. Present only after a budget
-   * refusal; selecting it re-previews and then creates with that explicit boundary.
-   */
-  narrow?: { label: string; description: string; onSelect: () => void }
 }
 
 export interface RightSurfacePanelProps {
@@ -329,9 +324,6 @@ export function RightSurfacePanel({
               {sideChatEntry && (
                 <div className="surface-chooser-footer">
                   {sideChatEntry.notice && <p className="surface-chooser-notice" role="status" data-side-chat-creation-notice>{sideChatEntry.notice}</p>}
-                  {sideChatEntry.narrow && <button type="button" className="btn" data-side-chat-narrow
-                    title={sideChatEntry.narrow.description}
-                    onClick={sideChatEntry.narrow.onSelect}>{sideChatEntry.narrow.label}</button>}
                   <button type="button" className="btn" onClick={sideChatEntry.onOpenHistory}>{sideChatEntry.historyLabel}</button>
                 </div>
               )}

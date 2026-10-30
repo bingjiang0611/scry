@@ -208,6 +208,35 @@ export async function* iterateTraceArchiveCapture(
   }
 }
 
+/**
+ * One turn of a split archive, read as a projected stream.
+ *
+ * The conversation-capture path needs a single turn's visible text; reading its file as a
+ * stream means a large turn costs one bounded projection pass instead of a whole-file
+ * buffer and a fixed byte ceiling. Identity is re-asserted after the pass.
+ */
+export async function* streamTraceArchiveTurn(
+  args: TraceArchiveCaptureArgs,
+  turn: { runId: string; providerTurnId?: string }
+): AsyncGenerator<import('./trace-archive-projection').ArchiveEntry> {
+  const root = await canonicalRoot(args.userDataDir)
+  const path = traceArchiveTurnPath(args.userDataDir, args.cwd, args.sessionId, args.providerId, turn)
+  const opened = await openOwnedFile(root, path)
+  try {
+    const evidence: ArchiveReadEvidence = { bytesRead: 0, digest: '' }
+    // The caller on this path (a recorded conversation turn) already holds the binding
+    // profile and the turn's item hashes, so the body is proven against those instead of
+    // against a session-level sidecar this single-file read never opens.
+    for await (const entry of iterateArchiveEntries(opened.handle, opened.size, expectationFor(args, {
+      file: '', runId: turn.runId, ts: 0,
+      ...(turn.providerTurnId === undefined ? {} : { providerTurnId: turn.providerTurnId })
+    }), evidence)) yield entry
+    await assertUnchanged(opened.handle, opened.identity)
+  } finally {
+    await opened.handle.close()
+  }
+}
+
 function segmentOf(turn: TraceArchiveTurn): SegmentMeta {
   return {
     file: '', runId: turn.runId, ts: turn.ts,
