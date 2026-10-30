@@ -8,7 +8,7 @@
 .conversation-toolbar .btn { padding: 4px 8px; font-size: 12px; }
 .conversation-options { position: relative; }
 .conversation-options > summary { cursor: pointer; padding: 6px; color: var(--dim); }
-.conversation-options > .unified-management { position: absolute; right: 0; top: 100%; z-index: 20; width: min(300px, calc(100vw - 64px)); padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px #0003; }
+.conversation-options > .unified-management { position: absolute; right: 0; top: 100%; z-index: 20; width: min(300px, calc(100vw - 64px)); padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); box-shadow: 0 8px 24px #0003; }
 .conversation-options p { margin: 4px 0; color: var(--dim); line-height: 1.5; }
 .conversation-history-notice, .conversation-recovery { margin: 0; padding: 8px 24px; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .conversation-recovery { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -36,7 +36,7 @@
 .pending-submission-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px 16px; }
 .pending-submission-label { margin: 0 0 6px; font-size: 11px; letter-spacing: 0.02em; color: var(--dim2); }
 .pending-submission-label + .pending-submission-text { margin-top: 0; }
-.pending-submission-text { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-inset); font-family: inherit; font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.pending-submission-text { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface-inset); font-family: inherit; font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .pending-submission-empty { margin: 0 0 12px; font-size: 12px; color: var(--dim); }
 .pending-submission-images { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 4px; }
 .pending-submission-image { display: flex; flex-direction: column; gap: 4px; margin: 0; min-width: 0; max-width: min(210px, 100%); }

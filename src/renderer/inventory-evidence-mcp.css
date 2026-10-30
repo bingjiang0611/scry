@@ -139,7 +139,7 @@
   display: inline-grid;
   place-items: center;
   border: 1px solid var(--accent-line);
-  border-radius: 2px;
+  border-radius: var(--r-xs);
 }
 
 .mcp-evidence-cell {
@@ -189,6 +189,7 @@
   flex: none;
   margin-top: 5px;
   border-radius: 50%;
+  corner-shape: round;
   background: currentColor;
 }
 
@@ -421,7 +422,7 @@
   width: min(940px, calc(100vw - 48px));
   min-height: 0;
   max-height: calc(100vh - 48px);
-  border-radius: 16px;
+  border-radius: var(--r-lg);
   transition: width var(--dur-slow) var(--ease-struct);
 }
 

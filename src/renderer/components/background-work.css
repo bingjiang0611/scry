@@ -57,6 +57,7 @@
   width: 5px;
   height: 5px;
   border-radius: 50%;
+  corner-shape: round;
   background: currentColor;
 }
 .background-work-task[data-status='unknown'] .background-work-state { color: var(--warn); }
@@ -129,7 +130,7 @@
 .background-work-warning { color: var(--warn); }
 .background-work-empty { display: flex; align-items: center; gap: 6px; }
 .run-status[data-background-waiting] .run-status-dot { animation: none; background: #b98b36; }
-.sb-running[data-background-waiting] { animation: none; border: 0; background: var(--dim2); border-radius: 50%; }
+.sb-running[data-background-waiting] { animation: none; border: 0; background: var(--dim2); border-radius: 50%; corner-shape: round; }
 @media (max-width: 600px) {
   .background-work-head { flex-wrap: wrap; gap: 6px 10px; }
   .background-work-identity { flex-basis: calc(100% - 26px); }
