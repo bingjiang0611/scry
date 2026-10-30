@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { APP_TRACE_CONTENT_SOURCE, readAppTraceContentPage } from './trace-tool-content'
 import { TextSpool, type SpoolBudget } from './text-spool'
+import { Utf8ChunkNormalizer } from './utf8-chunks'
 import type { ArchiveBodyFacts, ArchiveEntry } from './trace-archive-projection'
 
 /**
@@ -73,15 +74,20 @@ function refBody(userData: string, cwd: string, facts: ArchiveBodyFacts): Body {
   let digest: Promise<string> | undefined
   const read = async function* (): AsyncGenerator<string> {
     const hash = createHash('sha256')
+    // One decoder for the whole body: a page boundary may fall inside a character.
+    const decoder = new TextDecoder('utf-8')
     let offset = 0
     for (;;) {
       const page = await readAppTraceContentPage(userData, cwd, { source: 'app-trace', ref: contentRef, offset })
       const chunk = Buffer.from(page.dataBase64, 'base64')
       hash.update(chunk)
       offset = page.nextOffset
-      if (chunk.length > 0) yield chunk.toString('utf8')
+      const text = decoder.decode(chunk, { stream: true })
+      if (text.length > 0) yield text
       if (!page.hasMore || offset >= contentRef.bytes) break
     }
+    const tail = decoder.decode()
+    if (tail.length > 0) yield tail
     if (offset !== contentRef.bytes) throw new Error('来源归档正文引用长度与内容不一致')
     const actual = hash.digest('hex')
     if (actual !== contentRef.sha256) throw new Error('来源归档正文引用内容已被改写')
@@ -214,13 +220,18 @@ class SpoolRegistry {
 async function sealBody(body: Body, registry: SpoolRegistry): Promise<{ spool: TextSpool; bytes: number; contentHash: string }> {
   const spool = registry.create()
   const hash = createHash('sha256')
+  // Hash, count and store whole code points: a body reader may split a surrogate pair.
+  const normalizer = new Utf8ChunkNormalizer()
   let bytes = 0
+  const take = async (chunk: string): Promise<void> => {
+    if (chunk.length === 0) return
+    hash.update(chunk, 'utf8')
+    bytes += Buffer.byteLength(chunk, 'utf8')
+    await spool.push(chunk)
+  }
   try {
-    for await (const chunk of body.read()) {
-      hash.update(chunk, 'utf8')
-      bytes += Buffer.byteLength(chunk, 'utf8')
-      await spool.push(chunk)
-    }
+    for await (const chunk of body.read()) await take(normalizer.push(chunk))
+    await take(normalizer.flush())
   } catch (error) {
     await spool.discard()
     throw error

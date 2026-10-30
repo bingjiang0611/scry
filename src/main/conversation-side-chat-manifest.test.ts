@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { readRecorderContent } from '../core/turn-recorder/content-store'
 import { sideChatSnapshotRunId } from '../shared/conversation'
@@ -160,6 +160,85 @@ describe('side-chat snapshot manifests', () => {
       }
       expect(chunks.join('')).toBe(block.text)
     }
+  })
+
+  it('hashes a message whose surrogate pair is split across input chunks', async () => {
+    const dir = await root()
+    const cases = [
+      // Small enough to be stored inline, so the inline text path is proved too.
+      { text: `前缀🙂后缀`, chunks: ['前缀\ud83d', '\ude42后缀'] },
+      // Beyond one part, so the split also crosses the inline/parts threshold.
+      { text: `${'a'.repeat(SIDE_CHAT_PART_BYTES - 1)}🙂尾`, chunks: null as string[] | null }
+    ]
+    let expectedOrdinal = 1
+    for (const block of cases) {
+      const text = block.text
+      const chunks = block.chunks ?? (() => {
+        // Cut at the lone high surrogate so the pair spans two pushed chunks.
+        const split = text.indexOf('\ud83d') + 1
+        const pieces: string[] = []
+        for (let offset = 0; offset < text.length; offset += 1024) pieces.push(text.slice(offset, offset + 1024))
+        pieces.splice(0, pieces.length, text.slice(0, split), text.slice(split))
+        return pieces
+      })()
+      const writer = new SideChatSnapshotWriter({
+        dataRoot: dir,
+        identity: {
+          id: snapshotId, prefixFingerprint: fingerprint,
+          throughOrdinal: expectedOrdinal, throughRunId: `run-${expectedOrdinal}`, capturedAt: 1
+        }
+      })
+      async function* stream(): AsyncGenerator<string> {
+        for (const chunk of chunks) yield chunk
+      }
+      await writer.appendMessage({
+        ref: { runId: sideChatSnapshotRunId(snapshotId, 0), itemId: 'assistant', contentHash: sha(text) },
+        sourceOrdinal: expectedOrdinal, providerId: 'claude', role: 'assistant', status: 'completed', delivery: 'accepted'
+      }, stream())
+      const descriptor = await writer.seal()
+      // The seal above only succeeds when the streamed digest equals the whole-string hash.
+      expect(descriptor.bodyBytes).toBe(Buffer.byteLength(text, 'utf8'))
+      const stored = await readSideChatManifestItem(dir, descriptor, 0)
+      expect(stored.ref.contentHash).toBe(sha(text))
+      expect(stored.bytes).toBe(Buffer.byteLength(text, 'utf8'))
+      const pages: string[] = []
+      let offset = 0
+      for (;;) {
+        const page = await readSideChatMessagePage(dir, descriptor, 0, offset, 4093)
+        pages.push(page.text)
+        if (!page.hasMore) break
+        offset = page.nextOffset
+      }
+      expect(pages.join('')).toBe(text)
+      expectedOrdinal += 1
+    }
+  })
+
+  it('refuses a correctly hashed leaf whose count disagrees with its entries', async () => {
+    const dir = await root()
+    const descriptor = await sealMany(dir, 2)
+    const original = JSON.parse(await readRecorderContent(dir, descriptor.items.root)) as {
+      kind: string; count: number; entries: unknown[]
+    }
+    expect(original.kind).toBe('leaf')
+    // Rehash after lying about the count, so the content reference itself is still valid:
+    // only the index invariant can catch this, not an integrity check.
+    const tampered = { ...original, count: 3 }
+    const body = JSON.stringify(tampered)
+    const sha256 = createHash('sha256').update(body, 'utf8').digest('hex')
+    await mkdir(dirname(contentFile(dir, sha256)), { recursive: true })
+    await writeFile(contentFile(dir, sha256), body)
+    const lying: SideChatSnapshotDescriptor = {
+      ...descriptor,
+      messageCount: 3,
+      items: {
+        ...descriptor.items, count: 3,
+        root: { ...descriptor.items.root, sha256 }
+      }
+    }
+    await expect(readSideChatManifestItem(dir, lying, 0)).rejects.toThrow('清单叶子计数与条目数量不一致')
+    // A parent that claims the same wrong count cannot make the leaf readable either.
+    await expect(readSideChatManifestItems(dir, lying, 0, 3)).rejects.toThrow('清单叶子计数与条目数量不一致')
   })
 
   it('reads one item without touching unrelated index nodes', async () => {

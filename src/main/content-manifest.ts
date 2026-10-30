@@ -193,6 +193,8 @@ function assertNode(value: unknown, binding: string, expected: { from: number; c
     if (!Array.isArray(node.entries) || node.entries.length === 0 || node.entries.length > MANIFEST_FANOUT) {
       throw new Error('清单叶子条目数量无效')
     }
+    // Lookup descends by the declared count; it must describe the entries actually present.
+    if (node.entries.length !== node.count) throw new Error('清单叶子计数与条目数量不一致')
     const entries = node.entries.map(entry => {
       if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) throw new Error('清单条目不是对象')
       if (!isCount((entry as ManifestEntry).bytes)) throw new Error('清单条目字节数无效')

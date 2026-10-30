@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { readRecorderContent, writeRecorderContent } from '../core/turn-recorder/content-store'
 import type { ToolContentRef } from '../shared/tool-content'
 import { sideChatSnapshotRunId } from '../shared/conversation'
+import { Utf8ChunkNormalizer } from './utf8-chunks'
 import {
   isManifestRef, manifestBinding, readManifestByteRange, readManifestEntry, readManifestRange,
   ManifestWriter, type ManifestEntry, type ManifestRef
@@ -101,6 +102,7 @@ class MessageBodyWriter {
   private readonly parts: ManifestWriter
   private readonly hash = createHash('sha256')
   private readonly small: string[] = []
+  private readonly normalizer = new Utf8ChunkNormalizer()
   private buffer = ''
   private bufferedBytes = 0
   private bytes = 0
@@ -112,6 +114,12 @@ class MessageBodyWriter {
   }
 
   async push(chunk: string): Promise<void> {
+    // A pair split across chunks must be hashed and counted as one character.
+    const text = this.normalizer.push(chunk)
+    if (text.length > 0) await this.accept(text)
+  }
+
+  private async accept(chunk: string): Promise<void> {
     this.hash.update(chunk, 'utf8')
     const bytes = Buffer.byteLength(chunk, 'utf8')
     this.bytes += bytes
@@ -132,6 +140,8 @@ class MessageBodyWriter {
   }
 
   async seal(): Promise<{ contentHash: string; bytes: number; body: SideChatMessageBody }> {
+    const tail = this.normalizer.flush()
+    if (tail.length > 0) await this.accept(tail)
     if (this.buffer.length > 0 && this.bytes > SIDE_CHAT_INLINE_BYTES) await this.emit(this.buffer)
     this.buffer = ''
     this.bufferedBytes = 0
