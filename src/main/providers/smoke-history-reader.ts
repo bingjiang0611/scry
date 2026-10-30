@@ -30,6 +30,17 @@ export async function readFrozenHistory(connection: { url: string; token: string
   })
 }
 
+/** The hash a frozen item names in its own `[runId, itemId, contentHash]` id. */
+export function frozenHashOf(itemId: string): string {
+  let parsed: unknown
+  try { parsed = JSON.parse(itemId) as unknown }
+  catch { throw new Error(`history reader item id is not a frozen tuple: ${itemId}`) }
+  if (!Array.isArray(parsed) || parsed.length !== 3 || typeof parsed[2] !== 'string') {
+    throw new Error(`history reader item id is not a frozen tuple: ${itemId}`)
+  }
+  return parsed[2]
+}
+
 async function readFrozenHistoryPages(connection: { url: string; token: string; snapshotId: string }, runId: string, readsFile: string): Promise<void> {
   const call = async (id: number, method: string, params?: unknown): Promise<unknown> => {
     const response = await fetch(connection.url, {
@@ -74,8 +85,15 @@ async function readFrozenHistoryPages(connection: { url: string; token: string; 
       pages += 1
       position = page.nextOffset
     }
-    reads.push({ id: pick.id, bytes: pick.bytes, characters: text.length, pages,
-      hash: createHash('sha256').update(text, 'utf8').digest('hex') })
+    const hash = createHash('sha256').update(text, 'utf8').digest('hex')
+    // The item id is the frozen `[runId, itemId, contentHash]` tuple, so the frozen hash is
+    // part of the request. Serving text that hashes to anything else is a broken reader, not
+    // a passing read: equal length with different bytes must fail here.
+    const expected = frozenHashOf(pick.id)
+    if (expected !== hash) {
+      throw new Error(`history reader served text that does not match the frozen hash: ${pick.id}`)
+    }
+    reads.push({ id: pick.id, bytes: pick.bytes, characters: text.length, pages, hash, expectedHash: expected })
   }
   appendFileSync(readsFile, `${JSON.stringify({ runId, snapshotId: connection.snapshotId,
     totalItems, frozenItems: order.length, reads })}\n`)

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { json, readJsonLines, sideChatDriver } from './side-chat-driving.mjs'
+import { exerciseLargeHistoryDialog } from './side-chat-large-history-ui.mjs'
 
 const MiB = 1024 * 1024
 /** Paged viewer reads must finish inside this budget, or the check fails as incomplete. */
@@ -9,10 +10,44 @@ const VIEWER_DEADLINE_MS = 120_000
 const seedOf = (path) => JSON.parse(readFileSync(path, 'utf8'))
 
 /**
- * Positive large-history acceptance in the packaged App.
+ * Re-reads a child's sealed bodies through the shipped viewer IPC and digests every row in
+ * the renderer, so the check compares content rather than a length that equal-sized wrong
+ * text would also satisfy.
+ */
+const sealedBodiesScript = (childId) => `(async () => {
+  const encoder = new TextEncoder()
+  const digest = async (text) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(text)))]
+    .map(byte => byte.toString(16).padStart(2, '0')).join('')
+  const bodies = new Map()
+  let cursor
+  let rows = 0
+  const started = Date.now()
+  for (;;) {
+    const page = await window.scry.conversations.readSideChatSnapshot(${json(childId)}, cursor)
+    for (const item of page.items) {
+      const id = JSON.stringify([item.ref.runId, item.ref.itemId, item.ref.contentHash])
+      const previous = bodies.get(id) ?? ''
+      bodies.set(id, previous + item.text)
+      rows += 1
+    }
+    if (page.nextCursor == null) break
+    if (Date.now() - started > ${VIEWER_DEADLINE_MS}) return { complete: false, rows, digestAvailable: true, elapsedMs: Date.now() - started }
+    cursor = page.nextCursor
+  }
+  const pages = []
+  for (const [id, text] of bodies) pages.push({ id, characters: text.length, hash: await digest(text) })
+  return { complete: true, rows, digestAvailable: typeof crypto.subtle?.digest === 'function', pages, elapsedMs: Date.now() - started }
+})()`
+
+/**
+ * Positive large-history acceptance in the complete isolated dev App.
  *
- * Runs on an App launched with the reader-enabled smoke adapter, so the Provider really
- * owns a history-reader transport. The seeded parent is one the App itself reads back:
+ * `--dev-side-chat-large-history-only` launches the Electron binary against this working
+ * tree's `out/`, so this is the real main process, renderer and production IPC — not a
+ * packaged `.app` and not a service unit test. The packaged artifact is a separate gate.
+ *
+ * Runs with the reader-enabled smoke adapter, so the Provider really owns a
+ * history-reader transport. The seeded parent is one the App itself reads back:
  * more than 2000 turns, more than 4000 messages, a >16 MiB archive and a >4 MiB visible
  * message. The shipped preview freezes it, creation publishes a v4 child, the first send
  * really dispatches, the Provider pages the earliest/middle/latest omitted bodies over
@@ -94,30 +129,28 @@ export async function exerciseSideChatLargeHistory({ cdp, evaluate, check, ipcCo
   check(read.totalItems >= preview.coverage.retrievableCount,
     `the reader authorized ${json({ totalItems: read.totalItems, retrievable: preview.coverage.retrievableCount, inline: preview.coverage.inlineCount })}`)
 
-  // Every body the Provider read must equal the frozen body it names.
-  const sealed = await evaluate(`(async () => {
-    const lengths = new Map()
-    let rows = 0
-    let cursor
-    const started = Date.now()
-    for (;;) {
-      const read = await window.scry.conversations.readSideChatSnapshot(${json(childId)}, cursor)
-      for (const item of read.items) {
-        const id = JSON.stringify([item.ref.runId, item.ref.itemId, item.ref.contentHash])
-        lengths.set(id, (lengths.get(id) ?? 0) + item.text.length)
-        rows += 1
-      }
-      if (read.nextCursor == null) return { pages: [...lengths], rows, complete: true, elapsedMs: Date.now() - started }
-      if (Date.now() - started > ${VIEWER_DEADLINE_MS}) return { pages: [...lengths], rows, complete: false, elapsedMs: Date.now() - started }
-      cursor = read.nextCursor
-    }
-  })()`)
+  // Every body the Provider read must equal the frozen body it names, by hash and not by
+  // length: the sealed side is re-read through the shipped viewer IPC and digested here.
+  const sealed = await evaluate(sealedBodiesScript(childId))
   check(sealed.complete === true, `the viewer chain never reached the end: ${json({ rows: sealed.rows, elapsedMs: sealed.elapsedMs })}`)
-  const sealedById = new Map(sealed.pages)
-  for (const entry of read.reads) {
-    const length = sealedById.get(entry.id)
-    check(typeof length === 'number', `the Provider read an id this child does not own: ${json({ id: entry.id })}`)
-    check(entry.characters === length, `a read body was truncated: ${json({ id: entry.id, read: entry.characters, sealed: length })}`)
+  check(sealed.digestAvailable === true,
+    'the renderer cannot digest a body, so the content proof would be length-only')
+  const sealedById = new Map(sealed.pages.map(row => [row.id, row]))
+  // The fixture wrote these bodies; a read hash that is not among them is not the source.
+  const sourceHashes = new Set(seed.itemHashes)
+  for (const [index, entry] of read.reads.entries()) {
+    const row = sealedById.get(entry.id)
+    check(row !== undefined,
+      `the Provider read an id this child does not own: ${json({ id: entry.id, sealedRows: sealed.pages.length,
+        sealedSample: [...sealedById.keys()].slice(0, 2), sealedRowCount: sealed.rows })}`)
+    check(entry.expectedHash === JSON.parse(entry.id)[2],
+      `the reader read an id whose frozen hash it did not use: ${json({ index, id: entry.id })}`)
+    check(sourceHashes.has(entry.hash),
+      `a read body does not match any body the fixture wrote: ${json({ index, id: entry.id, hash: entry.hash })}`)
+    check(entry.characters === row.characters, `a read body was truncated: ${json({ id: entry.id, read: entry.characters, sealed: row.characters })}`)
+    // Same length with different bytes still fails: the sealed digest is compared too.
+    check(row.hash === entry.hash,
+      `the sealed body differs from what the Provider read: ${json({ id: entry.id, sealed: row.hash, read: entry.hash })}`)
     check(entry.pages > 0, `a read body never completed: ${json({ id: entry.id, pages: entry.pages })}`)
   }
 
@@ -129,30 +162,25 @@ export async function exerciseSideChatLargeHistory({ cdp, evaluate, check, ipcCo
     const plan = await window.scry.conversations.previewDeletion(id)
     await window.scry.conversations.delete(id, plan.fingerprint)
   })()`)
-  const afterDelete = await evaluate(`(async () => {
-    const lengths = new Map()
-    let cursor
-    const started = Date.now()
-    for (;;) {
-      const read = await window.scry.conversations.readSideChatSnapshot(${json(childId)}, cursor)
-      for (const item of read.items) {
-        const id = JSON.stringify([item.ref.runId, item.ref.itemId, item.ref.contentHash])
-        lengths.set(id, (lengths.get(id) ?? 0) + item.text.length)
-      }
-      if (read.nextCursor == null) return { pages: [...lengths], complete: true, elapsedMs: Date.now() - started }
-      if (Date.now() - started > ${VIEWER_DEADLINE_MS}) return { pages: [...lengths], complete: false, elapsedMs: Date.now() - started }
-      cursor = read.nextCursor
-    }
-  })()`)
+  const afterDelete = await evaluate(sealedBodiesScript(childId))
   check(afterDelete.complete === true, `the child stopped reading after its parent was deleted: ${json(afterDelete)}`)
+  check(afterDelete.digestAvailable === true, 'the renderer cannot digest a body after the parent was deleted')
   check(afterDelete.pages.length === sealed.pages.length,
     `the child lost rows after its parent was deleted: ${json({ before: sealed.pages.length, after: afterDelete.pages.length })}`)
-  const afterById = new Map(afterDelete.pages)
-  for (const entry of read.reads) {
-    check(afterById.get(entry.id) === entry.characters,
-      `a frozen body changed after its parent was deleted: ${json({ id: entry.id, before: entry.characters, after: afterById.get(entry.id) })}`)
+  const afterById = new Map(afterDelete.pages.map(row => [row.id, row]))
+  for (const [index, entry] of read.reads.entries()) {
+    const before = sealedById.get(entry.id)
+    const after = afterById.get(entry.id)
+    check(after !== undefined, `a frozen body disappeared after its parent was deleted: ${json({ id: entry.id })}`)
+    check(after.hash === before.hash,
+      `a frozen body changed after its parent was deleted: ${json({ id: entry.id, before: before.hash, after: after.hash })}`)
+    check(sourceHashes.has(after.hash),
+      `the surviving body no longer matches the source: ${json({ id: entry.id, after: after.hash })}`)
   }
-  return { parentId: seed.conversationId, childId, parentTurns: seed.turnCount, messageCount: seed.messageCount,
+  // The bodies are reachable over IPC above; this proves a user can open the dialog on the
+  // same child, read it and page it with real pointer input.
+  const dialog = await exerciseLargeHistoryDialog({ driver, evaluate, check, seed, childId, ipcCountsPath })
+  return { parentId: seed.conversationId, childId, dialog, parentTurns: seed.turnCount, messageCount: seed.messageCount,
     archiveBytes: seed.archiveBytes, hugeMessageBytes: seed.hugeMessageBytes, viewerRows: sealed.pages.length,
     viewerElapsedMs: sealed.elapsedMs, planItems: planShape.missingItems, providerReads: read.reads.length,
     readsAfterDelete: afterDelete.pages.length, coverage: preview.coverage }

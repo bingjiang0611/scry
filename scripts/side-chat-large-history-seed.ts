@@ -45,6 +45,13 @@ export interface LargeHistorySeed {
   archiveBytes: number
   hugeMessageBytes: number
   hugeOrdinal: number
+  /**
+   * The hash the fixture wrote for every frozen message, in frozen order. A read body is
+   * compared with this, so the reader cannot prove itself right by reading again.
+   */
+  itemHashes: string[]
+  /** The first message text in frozen order, for the dialog's own content check. */
+  firstMessageText: string
 }
 
 export async function seedLargeHistory(input: {
@@ -60,6 +67,7 @@ export async function seedLargeHistory(input: {
   const nativeSessionId = 'large-history-parent'
   const turns: Array<{ runId: string; items: ConversationItemRef[]; nativeItems: ConversationItemRef[]; archive: { sessionId: string; providerTurnId: string } }> = []
   let archiveBytes = 0
+  const itemHashes: string[] = []
   let hugeMessageBytes = 0
   let hugeOrdinal = 0
   const prompts = Array.from({ length: SMALL_TURNS }, (_unused, index) => `large history turn ${index}`)
@@ -84,6 +92,7 @@ export async function seedLargeHistory(input: {
       hugeMessageBytes = promptBytes
       hugeOrdinal = index + 1
     }
+    itemHashes.push(hash(prompt), hash(answer))
     turns.push({
       runId,
       items: [{ runId, itemId: 'user', contentHash: hash(prompt) }, { runId, itemId: 'assistant', contentHash: hash(answer) }],
@@ -109,9 +118,13 @@ export async function seedLargeHistory(input: {
   }]))
   // This workspace is not the App's current project: only the project authority needs it,
   // and the fixture must not change which project the App opens.
+  // The reader picks these three positions in frozen order; the fixture wrote them, so the
+  // comparison is against the source, not against another read of the same authority.
   const seed: LargeHistorySeed = {
     conversationId: conversation.id, cwd, providerId, nativeSessionId,
-    turnCount: turns.length, messageCount: turns.length * 2, archiveBytes, hugeMessageBytes, hugeOrdinal
+    turnCount: turns.length, messageCount: turns.length * 2, archiveBytes, hugeMessageBytes, hugeOrdinal,
+    itemHashes,
+    firstMessageText: prompts[0]
   }
   // The fixture is only useful if it really exceeds every removed ceiling.
   if (seed.turnCount <= 2000) throw new Error(`fixture needs >2000 turns, got ${seed.turnCount}`)

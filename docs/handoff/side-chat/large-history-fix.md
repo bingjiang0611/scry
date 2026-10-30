@@ -16,9 +16,9 @@
 
 1. **归档来源读取**：`transcript-archive-capture.ts:iterateTraceArchiveCapture` 用 `stream-json` 逐 token 投影（`trace-archive-projection.ts`），只保留结构与可见正文，正文进 `TextSpool`。195 MiB 单轮工具 payload 结构上跳过，从不成为字符串。
 2. **对话来源读取**：`conversation-side-chat-capture-stream.ts:capturedConversationMessages` 用 `streamTraceArchiveTurn` 逐个轮次文件流式投影，并把每条正文对父会话记录的 `items` hash 逐条校验；不再调用 `readTraceArchiveTurnForHistory`（整文件读 + 共享 16 MiB/4 MiB 预算）。工具 payload 不进快照，单条 >4 MiB 可见正文直接流入清单。
-3. **无归档原生来源**：Claude transcript 由 `jsonl-record-scanner.ts` + `conversation-side-chat-native-stream.ts` 逐记录投影：1 MiB 分块 → 流式 `TextDecoder` → **已安装的 `stream-json` tokenizer**（`parser.asStream({jsonStreaming:true, packStrings:false, packNumbers:false})`，与 `trace-archive-projection.ts` 同一套词法层）。本模块不再持有自己的 JSON 词法/结构状态机，只按 key path 投影侧聊要用的字段（`type`/`isMeta`/`isCompactSummary`/Provider turn id/`message.stop_reason`/`message.content` 与 block 的 `type`/`text`/`origin.kind`），其余值逐 token 丢弃、从不成为 JSON 值或字符串，因此单行 195 MiB 的工具结果不再被 `JSON.parse`。未知或任意长的 key 只是匹配不到已知字段而被跳过，不是长度拒绝。
+3. **无归档原生来源**：Claude transcript 由 `jsonl-record-scanner.ts`（tokenizer 驱动）+ `claude-jsonl-projector.ts` + `conversation-side-chat-native-stream.ts` 逐记录投影：1 MiB 分块 → 流式 `TextDecoder` → **已安装的 `stream-json` tokenizer**（`parser.asStream({jsonStreaming:true, packStrings:false, packNumbers:false})`，与 `trace-archive-projection.ts` 同一套词法层）。本模块不再持有自己的 JSON 词法/结构状态机，只按 key path 投影侧聊要用的字段（`type`/`isMeta`/`isCompactSummary`/Provider turn id/`message.stop_reason`/`message.content` 与 block 的 `type`/`text`/`origin.kind`），其余值逐 token 丢弃、从不成为 JSON 值或字符串，因此单行 195 MiB 的工具结果不再被 `JSON.parse`。未知或任意长的 key 只是匹配不到已知字段而被跳过，不是长度拒绝。
    解析失败的归类比 tokenizer 的措辞更可靠：**记录结尾是写作者写的换行**。文件最后一个字节是换行，说明那一行已写完而是完整坏记录 → fail closed；最后一个字节不是换行，说明那里仍在写入，该行尚不构成证据 → 丢弃未完成贴尾、保留已完成前缀。5 种非法写法（缺逗号、缺冒号、尾逗号、非法数字、未加引号的 key）与重复 key 记录在测试里直接和 `JSON.parse` 的结果对照，读取方不能有和 JSON parser 不同的意见（重复 key 取最后一个，与 `JSON.parse` 一致）。
-   可见正文进 `TextSpool`（>256 KiB 落私有临时文件）；tokenizer 的长字符串按 ≤256 字符切分，投影侧按 64 KiB 批量落盘，22 MiB 单一可见正文从“每 token 一次文件写”的超时降到 1.6 s。贴尾未完成记录不算证据也不阻塞已完成前缀。文件身份用“本次读到的字节数 + inode/dev 未变、size 不小于已读”判定，追加不影响已读前缀。转录自己头部记录的 `sessionId`/`cwd` 必须与目录身份一致（有界自证），所以不再需要 `resolveTranscriptPath` 那条整文件 identity 检查。Pi 走它自己的 JSONL reader，不再传 `maxBytes`。
+   可见正文进 `TextSpool`（>256 KiB 落私有临时文件）；tokenizer 的长字符串按 ≤256 字符切分，投影侧按 64 KiB 批量落盘，22 MiB 单一可见正文从“每 token 一次文件写”的超时降到 1.6 s。贴尾未完成记录不算证据也不阻塞已完成前缀。文件身份用“本次读到的字节数 + inode/dev 未变、size 不小于已读”判定，追加不影响已读前缀。转录自己头部记录的 `sessionId`/`cwd` 必须与目录身份一致（有界自证），所以不再需要 `resolveTranscriptPath` 那条整文件 identity 检查。Pi 走同一套 tokenizer 的**两遍**读取（`pi-native-stream.ts` + `pi-jsonl-projector.ts`）：第一遍只读结构，验证 header 身份（`type: 'session'`、`version: 3`、`id`、`cwd`，与 Claude 逐条 `sessionId` 的差别在模块里写明），并按文件最后一条记录的 `parentId` 祖先链选出活跃分支；第二遍只给该分支里的记录落正文，工具输出、图片与 reasoning 在还是 token 时就丢掉。两遍都停在第一遍量到的字节数，文件被替换则拒绝，贴尾未完成记录丢弃。已放弃的分支不会被压平进快照。轮次组装、消息 digest 与“已终止前缀”规则抽到 `conversation-side-chat-streamed.ts`，Claude 与 Pi 共用。
 4. **封存**：`SideChatSnapshotWriter` + `sealSink` 一条消息一次写入；正文 ≤2 KiB 内联、否则 256 KiB 分片进内容寻址清单树（fanout 32，分支只带计数/字节/子引用，写作者只保留每层一个未完成节点）。记录只留格式 4 描述符（`messageCount`/`bodyBytes`/`ManifestRef`）。UTF-16 代理对被 chunk 切开时 `Utf8ChunkNormalizer` 跨块持有，`text-spool.ts` 入口同样携带，hash/字节/分页三者一致。
 5. **首次与后续发送的历史选择**：`prepareConversationHandoff` → 格式 4 子会话走 `selectSideChatHistory`：先读清单元数据，正文只在“存储字节 + 最小信封”仍能进交接预算时才读；选择顺序与旧 `selectHistory` 一致（最后 user、最后 assistant、首个 user、由新到旧）。冻结条目全部来自子会话自己的清单。
 6. **遗漏台账**：`turn.omittedRanges`（`{snapshotId, from, to}` 闭区间）取代“每条遗漏一个 ref 写回 Conversation JSON”。4200 条冻结消息的 dispatch 记录仍是描述符级 JSON。
@@ -47,9 +47,9 @@
 
 完整门禁结果见本文件末尾“门禁”一节（每次合入前重跑并更新）。
 
-## 打包 App 级验收（真实 IPC，不是服务单测）
+## 完整隔离开发 App 验收（真实 IPC，不是服务单测，也不是打包产物）
 
-`node scripts/electron-security-smoke.mjs --dev-side-chat-large-history-only`：在临时 userData 里用生产 `ConversationStore` + 归档路径写入 **2005 轮 / 4010 条消息 / 22.4 MB 归档 / 单条 4.26 MB 可见正文**的父会话（`scripts/side-chat-large-history-seed.ts`，种子脚本自身断言四个超限），再让打包 App 通过真实 IPC 走完整链路。该模式启动的 smoke Provider 声明 `historyReader: true` 并**真的**经 loopback MCP 读遗漏正文（`smoke-history-reader.ts`）。
+`node scripts/electron-security-smoke.mjs --dev-side-chat-large-history-only`：在临时 userData 里用生产 `ConversationStore` + 归档路径写入 **2005 轮 / 4010 条消息 / 22.4 MB 归档 / 单条 4.26 MB 可见正文**的父会话（`scripts/side-chat-large-history-seed.ts`，种子脚本自身断言四个超限），再让**当前代码构建的完整隔离开发 App**（`devApp = true`，`node_modules/electron/dist/Electron.app` 加载本工作区 `out/`）通过真实 IPC 走完整链路。它是真的 main/renderer/preload 与生产 IPC，但**不是打包后的 `.app`**；打包产物的验证是独立 gate，见 [large-history-verification.md](large-history-verification.md)。该模式启动的 smoke Provider 声明 `historyReader: true` 并**真的**经 loopback MCP 读遗漏正文（`smoke-history-reader.ts`）。
 
 实测（`/tmp/lh-final2.log`）：`messageCount=4010`、`archiveBytes=22361185`、`hugeMessageBytes=4259859`、`planItems=400`、`providerReads=3`（早/中/末三条完整正文，逐条与子会话冻结正文等长）、`viewerRows=4010`（翻完所有 `nextCursor`，438 ms）、父会话删除后仍 `readsAfterDelete=4010`。
 
@@ -86,11 +86,16 @@
 
 每次合入前重跑同一组命令；毫秒结论需 `timing-run` 锁，本轮没有毫秒结论。
 
+验证范围（哪一层被证明、证据在哪、哪些边界仍然存在）集中在
+[large-history-verification.md](large-history-verification.md)：`--dev-*` 模式是当前代码
+构建的完整隔离开发 App + 生产 IPC，不是打包产物；仍存在的非侧聊交接上限、无 reader 的
+能力拒绝、UI 分页/tab 上限也列在那里。
+
 ## 最终证据包（HEAD `a28c6c9f`）
 
 - 分支 `scry/88d17fe3`；基线 `d824c609`（原始侧聊实现）；已合并 main `e5b8ebd2`（`5b123b91` 普通 merge）；本次修复提交 `21945026`（tokenizer）、`39c29192` + `a28c6c9f`（文档）。作者全部为 `bingjiang0611 <307659028+bingjiang0611@users.noreply.github.com>`。
 - 最终树上的 gate（日志在 `/tmp`）：`TYPECHECK_EXIT=0`（`p2-typecheck.log`）、`BUILD_EXIT=0`（`p2-build.log`）、`NPM_TEST_EXIT=0` 508 files / 5111 passed / 4 skipped（`p2-npmtest.log`）、`test:side-chat:ui` `SIDE_CHAT_UI_EXIT=0`（`p2-sidechat-ui.log`，含 `step: large history refusal` 与正向大历史）、`test:renderer:ui` `RENDERER_UI_EXIT=0`（`p4-renderer-ui.log`）、性能对照（`p4-perf.log` + `/tmp/scry-perf-final-Rg8MJQ/{measure,comparison,candidate,baseline}.json`、`ratchet.md`）。
-- 打包 App 正向大历史冒烟的机器可读证据：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-app-driver-MPSjNC/verification.json`（`side-chat execution`，`childId debdf67e-…`，10 条 receipt，providers `codex/claude/qoder/opencode/pi`）与同目录 `side-chat large history`：`parentTurns 2005`、`messageCount 4010`、`archiveBytes 22361185`、`hugeMessageBytes 4259859`、`planItems 400`、`providerReads 3`、`readsAfterDelete 4010`、`readerAvailable true`。`--dev-side-chat-only` 重跑证据 `/var/folders/14/…/scry-app-driver-dMVVSn/verification.json`。
+- 开发 App 正向大历史冒烟的机器可读证据（`devApp`，非打包产物）：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-app-driver-MPSjNC/verification.json`（`side-chat execution`，`childId debdf67e-…`，10 条 receipt，providers `codex/claude/qoder/opencode/pi`）与同目录 `side-chat large history`：`parentTurns 2005`、`messageCount 4010`、`archiveBytes 22361185`、`hugeMessageBytes 4259859`、`planItems 400`、`providerReads 3`、`readsAfterDelete 4010`、`readerAvailable true`。`--dev-side-chat-only` 重跑证据 `/var/folders/14/…/scry-app-driver-dMVVSn/verification.json`。
 - 构建产物 hash（最后一次 App 冒烟所验证的 `out/`，与 `test:renderer:ui` 失败那次相同）：`out/main/index.js dffa5dabb9f8558be6593c785be4e2fd39a16456452de1f5810c69ec8778778a`、`out/preload/index.cjs 21c2e11bf3b254644e7482c7d245a3cff8ae8bfc394d786765e28b077c0221f5`、`out/renderer/index.html a064c8e1c4c2a9bd1aee616ae50c0b94b70b642fc95103a792236f6c5597bae5`。
 - 卫生检查：工作区干净、无暂存文件；本次新增/改动的手写文件最大 19,987 B（`scripts/electron-security-smoke.mjs`，合并带入），本次新文件 `jsonl-record-scanner.ts` 11,435 B、`conversation-side-chat-native-stream.ts` 16,008 B、其测试 9,467 B；本文档 18,131 B。`src/main/transcript-archive.ts`（97,927 B）**早于本次任务**就超过 20 KB 且本次未改动，仍是已知遗留问题。
 - 没有残留 `electron-security-smoke`/`Scry.app` 测试进程；冒烟全部使用临时 `userData` 与临时 workspace，未写用户真实 `.scry` 记录、transcript 或 DB；未安装 App、未升版本、未 push、未移动 main。
