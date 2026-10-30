@@ -137,6 +137,15 @@ export async function exerciseWindowBoundary(smokeContext) {
       }
       return predicate()
     }
+    // 入场动画用 transform 位移 pane；待定动画在无合成器的环境里可能永不启动，
+    // 所以布局断言看去掉 transform 后的盒子左边（offsetLeft 语义），不看 getBoundingClientRect。
+    const layoutLeft = (node) => {
+      if (!node) return -1
+      const rect = node.getBoundingClientRect()
+      const transform = getComputedStyle(node).transform
+      const offset = transform && transform !== 'none' ? new DOMMatrixReadOnly(transform).m41 : 0
+      return rect.left - offset
+    }
     const splitter = document.querySelector('.sidebar-resizer')
     splitter?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     const collapsed = await waitFor(() => document.querySelector('.app')?.classList.contains('sidebar-collapsed') === true)
@@ -166,22 +175,18 @@ export async function exerciseWindowBoundary(smokeContext) {
         platform: document.documentElement.dataset.platform,
         paddingLeft: topbar ? getComputedStyle(topbar).paddingLeft : null,
         tabsScrollLeft: topbar?.querySelector('.surface-tabs')?.scrollLeft,
-        surfaceLeft: document.querySelector('.right-panel-slot')?.getBoundingClientRect().left ?? -1,
-        actionLeft: topbar?.querySelector('button')?.getBoundingClientRect().left ?? -1,
+        surfaceLeft: layoutLeft(document.querySelector('.right-panel-slot')),
+        actionLeft: layoutLeft(topbar?.querySelector('button')),
         gridColumns: getComputedStyle(document.querySelector('.app')).gridTemplateColumns,
         mainDisplay: getComputedStyle(document.querySelector('.main-area')).display
       }
       initialSurfaceChrome ??= surfaceChromeState
-      // macOS 用铺满左侧 + 避开红绿灯作为"已最大化"证据；Linux 窗口由窗口管理器加框，
-      // 这里只确认状态位已提交，像素几何作为证据另外上报。
-      if (document.documentElement.dataset.platform === 'macos') {
-        return surfaceChromeState.surfaceLeft >= 0 && surfaceChromeState.surfaceLeft < 16 && surfaceChromeState.actionLeft >= 80
-      }
-      return document.querySelector('.app')?.classList.contains('right-panel-maximized') === true
+      // 最大化后 pane 必须落到侧栏折叠留下的位置上。这个判据与平台无关：
+      // 红绿灯安全区是 macOS 自绘标题栏的额外约束，放在下面的 macOS 分支里断言。
+      return surfaceChromeState.surfaceLeft >= 0 && surfaceChromeState.surfaceLeft < 16
     })
-    // 保持未取整：maximized 判据是"距左边缘小于 16px"，round(15.5)=16 会制造假的 1px 失败。
-    const surfaceLeft = document.querySelector('.right-panel-slot')?.getBoundingClientRect().left ?? -1
-    const surfaceActionLeft = Math.round(document.querySelector('[data-session-surface-current="true"] .surface-topbar button')?.getBoundingClientRect().left ?? -1)
+    const surfaceLeft = layoutLeft(document.querySelector('.right-panel-slot'))
+    const surfaceActionLeft = layoutLeft(document.querySelector('[data-session-surface-current="true"] .surface-topbar button'))
 
     document.querySelector('[data-session-surface-current="true"] button[aria-label="恢复右侧工作区"]')?.click()
     await waitFor(() => document.querySelector('.app')?.classList.contains('right-panel-maximized') === false)
@@ -210,10 +215,11 @@ export async function exerciseWindowBoundary(smokeContext) {
   assert.ok(collapsedChrome.mainLeft < 16, `collapsed sidebar did not release its layout width: ${JSON.stringify(collapsedChrome)}`)
   assert.equal(collapsedChrome.analytics, true, `Analytics transition failed: ${JSON.stringify(collapsedChrome)}`)
   assert.equal(collapsedChrome.chatRestored, true)
-  assert.equal(collapsedChrome.maximized, true, `maximized Surface chrome did not reach the traffic-light safe area: ${JSON.stringify(collapsedChrome)}`)
+  assert.equal(collapsedChrome.maximized, true, `maximized Surface never settled into the collapsed sidebar track: ${JSON.stringify(collapsedChrome)}`)
   assert.equal(collapsedChrome.restored, true)
+  // 布局断言与平台无关：最大化后工作区必须铺到侧栏折叠后留下的位置。
+  assert.ok(collapsedChrome.surfaceLeft < 16, `maximized Surface did not move into the collapsed sidebar track: ${JSON.stringify(collapsedChrome)}`)
   if (integratedTitlebar) {
-    assert.ok(collapsedChrome.surfaceLeft < 16, `maximized Surface did not move into the collapsed sidebar track: ${JSON.stringify(collapsedChrome)}`)
     assert.ok(collapsedChrome.mainActionLeft >= 80, `collapsed main chrome overlaps traffic lights: ${JSON.stringify(collapsedChrome)}`)
     assert.deepEqual(
       [collapsedChrome.auxTop, collapsedChrome.auxHeight, collapsedChrome.auxDrag],
@@ -321,11 +327,8 @@ export async function exerciseWindowBoundary(smokeContext) {
   })()`)
   assert.notEqual(subframeIpc, 'allowed', 'an untrusted subframe reached privileged IPC')
 
-  // Linux 的窗口由窗口管理器提供边框。这里只暴露实测几何，不替它编一套断言：
-  // 最大化状态位与可恢复性已在上面验证，铺满左侧的像素结果留给目标机验收。
-  const chrome = integratedTitlebar
-    ? { platform: windowChrome.platform }
-    : { platform: windowChrome.platform, maximizedSurfaceLeft: Math.round(collapsedChrome.surfaceLeft), viewportWidth: windowChrome.viewportWidth }
+  // 只上报窗口由谁提供边框：macOS 是应用自绘标题栏，Linux 交给窗口管理器。
+  const chrome = { platform: windowChrome.platform }
 
   return { windowChrome, collapsedChrome, transportPicker, modal, subframeIpc, chrome }
 }

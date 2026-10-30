@@ -91,3 +91,9 @@ pacman:
     - xdg-utils
     - at-spi2-core
     - libsecret
+  # electron-builder 对非 rpm 目标固定把 --description 传成 "${synopsis}\n ${description}"，
+  # 换行会写进 .PKGINFO 的 pkgdesc。pacman 按行解析，结果是空描述（pacman -Qi 显示 None）。
+  # fpm 参数在文件映射之前追加，重复的 --description 以最后一个为准，所以只覆盖 pacman 目标。
+  fpm:
+    - --description
+    - Scry：本地桌面 app，驱动 AI coding agent 并呈现可检查的执行证据

@@ -113,7 +113,13 @@ jobs:
         run: |
           npm run build
           npm run build:cli
-      - name: Package Linux app directory
-        run: node scripts/run-electron-builder.mjs
+      - name: Install archive tools
+        run: sudo apt-get update && sudo apt-get install -y libarchive-tools
+      # 发布构建同时产出 dist/linux-unpacked 和 dist/*.pacman；
+      # pacman 的 pkgdesc 曾经静默变空，所以打包产物必须过 check:pacman-package。
+      - name: Package Linux app directory and pacman package
+        run: SCRY_RELEASE_BUILD=1 node scripts/run-electron-builder.mjs
       - name: Check packaged Linux app
         run: npm run check:packaged-app
+      - name: Check pacman package metadata
+        run: npm run check:pacman-package

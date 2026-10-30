@@ -16,6 +16,7 @@
 | 快捷键提示跟随平台 | 已实施 | renderer `platform.ts`；`保存 ⌘S`/`⌘↵` 改为平台值 |
 | Linux CI 打包门禁 | 已实施，未跑过 | `.github/workflows/ci.yml` 的 `packaged-linux` job 尚未在 Linux runner 实际执行 |
 | Linux 真实运行、原生模块、pacman 包生成 | 已在本地 Linux 容器验证 | 见 [本地验证记录](linux-omarchy-local-verification.md) |
+| pacman 包描述 | 已修复 | electron-builder 传给 fpm 的描述含换行，pacman 解析成空；改用 `pacman.fpm` 覆盖为单行，`check:pacman-package` 做反向对照 |
 | Wayland、中文输入、真实密钥环、真实 Provider | 未验证 | 需目标机 |
 
 ## 1. 目标与范围
