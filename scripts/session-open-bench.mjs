@@ -136,16 +136,21 @@ try {
   const sensitivityBaseStart = await beginCounters()
   const sensitivityBase = await endCounters(sensitivityBaseStart)
   const sensitivityExtraStart = await beginCounters()
-  await evaluate(`(() => {
+  // Calibrate the same mutation counter within one renderer task. Separate CDP
+  // windows include unrelated startup work and cannot be ordered by workload.
+  const mutationControl = await evaluate(`(() => {
+    const before = window.__nativeWorkCounterMark()
+    const idle = window.__nativeWorkCounterMark()
     const probe = document.createElement('div')
     probe.style.cssText = 'position: fixed; width: 13px; height: 11px; contain: layout;'
     document.body.append(probe)
     probe.getBoundingClientRect()
     probe.remove()
+    return { baseline: idle - before, extra: window.__nativeWorkCounterMark() - idle }
   })()`)
   const sensitivityExtra = await endCounters(sensitivityExtraStart)
-  const sensitivityRaised = nativeCounterMetrics.some(metric => sensitivityExtra[metric] > sensitivityBase[metric])
-  assert.equal(sensitivityRaised, true, 'native work counter sensitivity control did not detect extra layout work')
+  const sensitivityRaised = mutationControl.baseline === 0 && mutationControl.extra === 2
+  assert.equal(sensitivityRaised, true, `native mutation counter must detect both controlled mutations: ${JSON.stringify(mutationControl)}`)
   assert.deepEqual(await evaluate('window.scry.detectFast().then(items => items.map(item => ({ id: item.id, name: item.name })))'),
     [{ id: 'codex', name: 'codex Smoke Fixture' }], 'refusing any lifecycle measurement without the offline fixture adapter')
   // Composer readiness plus two excluded opens separates startup from the warm path.
@@ -257,8 +262,8 @@ try {
   const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
   assert.equal(builtArtifactHash(), artifactSha256, 'build artifacts changed during measurement')
   assert.equal(benchmarkCodeHash(), benchmarkSha256, 'benchmark changed during measurement')
-  console.log(JSON.stringify({ measurementVersion: 6, startupDriverReadyMs, nativeInput, composerSamples, lifecycleSamples, sqliteStats, artifactSha256, benchmarkSha256, scenario, turnCount, sections, warmups: 2, iterations, firstOpens,
-    counterSensitivity: { baseline: sensitivityBase, extra: sensitivityExtra, passed: sensitivityRaised },
+  console.log(JSON.stringify({ measurementVersion: 7, startupDriverReadyMs, nativeInput, composerSamples, lifecycleSamples, sqliteStats, artifactSha256, benchmarkSha256, scenario, turnCount, sections, warmups: 2, iterations, firstOpens,
+    counterSensitivity: { baseline: sensitivityBase, extra: sensitivityExtra, mutationControl, passed: sensitivityRaised },
     version: packageJson.version ?? null, platform: `${process.platform}/${process.arch}`, node: process.version,
     electron: JSON.parse(readFileSync(join(root, 'node_modules/electron/package.json'), 'utf8')).version,
     samples, medianOpenMs: percentile(samples.map(sample => sample.openMs), 0.5),

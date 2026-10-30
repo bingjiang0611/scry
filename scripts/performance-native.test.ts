@@ -8,10 +8,10 @@ function report() {
   return {
     schema: 1, revision: 'fixture', harness: 'a'.repeat(64), environment: { platform: 'darwin', node: '22' }, errors: [],
     results: Object.fromEntries(Object.entries(nativeWorkloads).map(([scenario, [turnCount, sections]]) => [scenario, {
-      scenario, turnCount, sections, measurementVersion: 6, warmups: 2, iterations: 12,
+      scenario, turnCount, sections, measurementVersion: 7, warmups: 2, iterations: 12,
       artifactSha256: 'b'.repeat(64), benchmarkSha256: 'c'.repeat(64), platform: 'darwin/arm64', node: '22', electron: '35',
       sqliteStats: { status: 'ready', turns: 18, readMs: 2 },
-      counterSensitivity: { baseline: workCounters(1), extra: workCounters(2), passed: true },
+      counterSensitivity: { baseline: workCounters(1), extra: workCounters(2), mutationControl: { baseline: 0, extra: 2 }, passed: true },
       composerSamples: composerModes.map((mode, index) => ({ mode, prompt: `native composer ${mode} ${index}`, runId: `button-${index}`, sendWorkCounters: workCounters(1),
         inputTrusted: true, sendTrusted: true, stopTrusted: mode !== 'complete', terminalConfirmed: true, stopped: mode !== 'complete',
         nativeTurnKnown: mode !== 'stop-immediate', diskVerified: true, sendToTerminalMs: 50, sendToSettledVisibleMs: 60,
@@ -35,8 +35,23 @@ describe('native performance evidence gate', () => {
     truncated.results.paged.samples[0].totalTurns--
     expect(() => validateNative(truncated)).toThrow('initial history page is incomplete')
     const stale = report()
-    stale.results.paged.measurementVersion = 5
+    stale.results.paged.measurementVersion = 6
     expect(() => validateNative(stale)).toThrow()
+  })
+
+  it('requires exact same-task mutation calibration rather than ordering unrelated startup windows', () => {
+    const noisy = report()
+    for (const result of Object.values(noisy.results)) {
+      result.counterSensitivity.baseline = workCounters(100)
+      result.counterSensitivity.extra = workCounters(2)
+    }
+    expect(() => validateNative(noisy)).not.toThrow()
+    noisy.results.short.counterSensitivity.mutationControl.extra = 0
+    expect(() => validateNative(noisy)).toThrow('mutation sensitivity control')
+    noisy.results.short.counterSensitivity.mutationControl = { baseline: 1, extra: 2 }
+    expect(() => validateNative(noisy)).toThrow('mutation sensitivity control')
+    Reflect.deleteProperty(noisy.results.short.counterSensitivity, 'mutationControl')
+    expect(() => validateNative(noisy)).toThrow('mutation sensitivity control')
   })
 
   it('compares matching evidence and detects real latency regressions', () => {

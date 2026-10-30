@@ -52,7 +52,7 @@ export function validateNative(report) {
   assert.equal(report.errors.length, 0, 'failed native lanes cannot pass')
   assert.deepEqual(Object.keys(report.results).sort(), Object.keys(nativeWorkloads).sort(), 'native lane coverage differs')
   for (const [name, result] of Object.entries(report.results)) {
-    assert.equal(result.measurementVersion, 6)
+    assert.equal(result.measurementVersion, 7)
     assert.deepEqual([result.turnCount, result.sections], nativeWorkloads[name], 'native workload differs')
     assert.equal(result.scenario, name)
     assert.equal(result.warmups, 2)
@@ -71,7 +71,7 @@ export function validateNative(report) {
     assert.equal(result.counterSensitivity?.passed, true, 'native work counter sensitivity control must pass')
     assertCounters(result.counterSensitivity?.baseline, `${name} sensitivity baseline`)
     assertCounters(result.counterSensitivity?.extra, `${name} sensitivity extra`)
-    assert.ok(nativeCounterMetrics.some(metric => result.counterSensitivity.extra[metric] > result.counterSensitivity.baseline[metric]), 'sensitivity control must raise a work counter')
+    assert.deepEqual(result.counterSensitivity.mutationControl, { baseline: 0, extra: 2 }, 'mutation sensitivity control must prove both observed mutations')
     for (const sample of result.samples) {
       assert.equal(sample.totalTurns, Math.min(nativeInitialPageTurns, result.turnCount), 'initial history page is incomplete')
       assert.equal(sample.completeParagraphs, result.sections, 'renderer lost fixed paragraph content')
