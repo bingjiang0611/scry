@@ -54,14 +54,18 @@ export function useRemoteChatPresentation(foundation: FoundationState, controlPr
   useEffect(() => {
     const history = scrollRef.current
     if (!history) return
-    let previousTop = history.scrollTop
+    let previous = { scrollTop: history.scrollTop, scrollHeight: history.scrollHeight, clientHeight: history.clientHeight }
     const onScroll = (): void => {
       if (chatNavigation.active.current) return
-      const nearLatest = chatBottomStickinessAfterScroll(history, openingLatest.current)
-      // A queued programmatic scroll may arrive after content grew. Only an
-      // upward move releases following; a larger scrollHeight alone does not.
-      if (nearLatest || history.scrollTop < previousTop) followLatest.current = nearLatest
-      previousTop = history.scrollTop
+      const position = { scrollTop: history.scrollTop, scrollHeight: history.scrollHeight, clientHeight: history.clientHeight }
+      const nearLatest = chatBottomStickinessAfterScroll(position, openingLatest.current)
+      // Removing a notice can grow the viewport and clamp scrollTop upward.
+      // Content may then grow before that scroll event arrives. That exact
+      // viewport clamp is not a reader scrolling away from the latest message.
+      const viewportClamp = position.clientHeight > previous.clientHeight &&
+        Math.abs(position.scrollTop - Math.max(0, previous.scrollHeight - position.clientHeight)) <= 1
+      if (nearLatest || (position.scrollTop < previous.scrollTop && !viewportClamp)) followLatest.current = nearLatest
+      previous = position
     }
     history.addEventListener('scroll', onScroll, { passive: true })
     const unobserve = observeChatBottomLayout(history, () => openingLatest.current || followLatest.current)
