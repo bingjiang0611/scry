@@ -1,0 +1,813 @@
+{
+  "schema": 1,
+  "scope": "Same-process same-workspace real canonical commits; ABBA, three rounds per run; tail-minus-held also includes pre/post-lock work, not pure queue latency",
+  "canonicalCommits": 108,
+  "allGroupsReleasedNativeOwner": true,
+  "comparisons": [
+    {
+      "count": 1,
+      "baseline": {
+        "samples": 6,
+        "tailMs": 30.934840166666685,
+        "nativeAttempts": 1,
+        "conflicts": 0,
+        "ownerReads": 2,
+        "heldTotalMs": 30.242312500000015,
+        "tailMinusHeldMs": 0.6925276666666681
+      },
+      "queued": {
+        "samples": 6,
+        "tailMs": 32.934208333333316,
+        "nativeAttempts": 1,
+        "conflicts": 0,
+        "ownerReads": 2,
+        "heldTotalMs": 32.2469235,
+        "tailMinusHeldMs": 0.6872848333333176
+      }
+    },
+    {
+      "count": 3,
+      "baseline": {
+        "samples": 6,
+        "tailMs": 119.65050666666666,
+        "nativeAttempts": 9,
+        "conflicts": 6,
+        "ownerReads": 12,
+        "heldTotalMs": 88.6488681666666,
+        "tailMinusHeldMs": 31.001638500000052
+      },
+      "queued": {
+        "samples": 6,
+        "tailMs": 90.98198616666666,
+        "nativeAttempts": 3,
+        "conflicts": 0,
+        "ownerReads": 6,
+        "heldTotalMs": 89.47881966666667,
+        "tailMinusHeldMs": 1.5031664999999823
+      }
+    },
+    {
+      "count": 5,
+      "baseline": {
+        "samples": 6,
+        "tailMs": 243.65396516666667,
+        "nativeAttempts": 26.333333333333332,
+        "conflicts": 21.333333333333332,
+        "ownerReads": 31.333333333333332,
+        "heldTotalMs": 185.26059683333338,
+        "tailMinusHeldMs": 58.393368333333285
+      },
+      "queued": {
+        "samples": 6,
+        "tailMs": 165.279507,
+        "nativeAttempts": 5,
+        "conflicts": 0,
+        "ownerReads": 10,
+        "heldTotalMs": 162.52507600000004,
+        "tailMinusHeldMs": 2.754430999999973
+      }
+    }
+  ],
+  "runs": [
+    {
+      "label": "1-baseline",
+      "variant": "baseline",
+      "timing": {
+        "label": "canonical-contention-baseline-1",
+        "command": [
+          "npm",
+          "run",
+          "test:unit",
+          "--",
+          "scripts/recorder-contention.measurement.test.ts"
+        ],
+        "exit": 0,
+        "signal": null,
+        "wallMs": 3652,
+        "cores": 8,
+        "loadBefore": 1.5,
+        "loadAfter": 1.5,
+        "highLoad": false
+      },
+      "samples": [
+        {
+          "round": 0,
+          "count": 1,
+          "completedMs": [
+            34.60354100000001
+          ],
+          "attempts": 1,
+          "conflicts": 0,
+          "ownerReads": 2,
+          "peakOwners": 1,
+          "heldMs": [
+            33.98037500000004
+          ]
+        },
+        {
+          "round": 0,
+          "count": 3,
+          "completedMs": [
+            26.121083,
+            67.063875,
+            110.32354199999997
+          ],
+          "attempts": 9,
+          "conflicts": 6,
+          "ownerReads": 12,
+          "peakOwners": 1,
+          "heldMs": [
+            25.670124999999985,
+            22.68233299999997,
+            24.011541000000022
+          ]
+        },
+        {
+          "round": 0,
+          "count": 5,
+          "completedMs": [
+            21.518042000000037,
+            68.58158400000002,
+            132.87245900000005,
+            188.65274999999997,
+            230.23962500000005
+          ],
+          "attempts": 27,
+          "conflicts": 22,
+          "ownerReads": 32,
+          "peakOwners": 1,
+          "heldMs": [
+            20.90666699999997,
+            27.237666000000104,
+            47.39362500000004,
+            33.91041699999994,
+            30.94020899999998
+          ]
+        },
+        {
+          "round": 1,
+          "count": 1,
+          "completedMs": [
+            28.782500000000027
+          ],
+          "attempts": 1,
+          "conflicts": 0,
+          "ownerReads": 2,
+          "peakOwners": 1,
+          "heldMs": [
+            28.12591699999996
+          ]
+        },
+        {
+          "round": 1,
+          "count": 3,
+          "completedMs": [
+            27.229832999999985,
+            74.88812499999995,
+            123.90691600000002
+          ],
+          "attempts": 9,
+          "conflicts": 6,
+          "ownerReads": 12,
+          "peakOwners": 1,
+          "heldMs": [
+            26.57062499999995,
+            29.840291999999977,
+            36.08183299999996
+          ]
+        },
+        {
+          "round": 1,
+          "count": 5,
+          "completedMs": [
+            34.410124999999994,
+            186.81708400000002,
+            250.03645899999992,
+            319.8001670000001,
+            382.13037499999996
+          ],
+          "attempts": 31,
+          "conflicts": 26,
+          "ownerReads": 36,
+          "peakOwners": 1,
+          "heldMs": [
+            33.150082999999995,
+            138.34179099999994,
+            56.36504200000013,
+            47.10675000000015,
+            39.3259579999999
+          ]
+        },
+        {
+          "round": 2,
+          "count": 1,
+          "completedMs": [
+            28.082959000000074
+          ],
+          "attempts": 1,
+          "conflicts": 0,
+          "ownerReads": 2,
+          "peakOwners": 1,
+          "heldMs": [
+            27.43558300000018
+          ]
+        },
+        {
+          "round": 2,
+          "count": 3,
+          "completedMs": [
+            30.59787500000016,
+            75.55025,
+            119.58716600000002
+          ],
+          "attempts": 9,
+          "conflicts": 6,
+          "ownerReads": 12,
+          "peakOwners": 1,
+          "heldMs": [
+            30.036958999999797,
+            30.262874999999894,
+            31.03737500000011
+          ]
+        },
+        {
+          "round": 2,
+          "count": 5,
+          "completedMs": [
+            30.674582999999984,
+            80.92762500000003,
+            121.79079200000001,
+            165.72254199999998,
+            213.9027920000001
+          ],
+          "attempts": 25,
+          "conflicts": 20,
+          "ownerReads": 30,
+          "peakOwners": 1,
+          "heldMs": [
+            29.619957999999997,
+            34.9855,
+            30.153292000000192,
+            30.43183399999998,
+            34.94183300000009
+          ]
+        }
+      ]
+    },
+    {
+      "label": "2-queued",
+      "variant": "queued",
+      "timing": {
+        "label": "canonical-contention-queued-2",
+        "command": [
+          "npm",
+          "run",
+          "test:unit",
+          "--",
+          "scripts/recorder-contention.measurement.test.ts"
+        ],
+        "exit": 0,
+        "signal": null,
+        "wallMs": 2884,
+        "cores": 8,
+        "loadBefore": 1.5,
+        "loadAfter": 1.62,
+        "highLoad": false
+      },
+      "samples": [
+        {
+          "round": 0,
+          "count": 1,
+          "completedMs": [
+            33.82970800000004
+          ],
+          "attempts": 1,
+          "conflicts": 0,
+          "ownerReads": 2,
+          "peakOwners": 1,
+          "heldMs": [
+            33.196582999999976
+          ]
+        },
+        {
+          "round": 0,
+          "count": 3,
+          "completedMs": [
+            25.422499999999957,
+            53.80029099999996,
+            78.33170799999999
+          ],
+          "attempts": 3,
+          "conflicts": 0,
+          "ownerReads": 6,
+          "peakOwners": 1,
+          "heldMs": [
+            25.081833000000017,
+            28.147500000000036,
+            24.178833999999995
+          ]
+        },
+        {
+          "round": 0,
+          "count": 5,
+          "completedMs": [
+            24.486707999999965,
+            51.40258299999999,
+            80.87599999999998,
+            106.90775000000002,
+            137.833416
+          ],
+          "attempts": 5,
+          "conflicts": 0,
+          "ownerReads": 10,
+          "peakOwners": 1,
+          "heldMs": [
+            24.073750000000018,
+            26.657916999999998,
+            29.11370800000003,
+            25.602833000000032,
+            30.538208000000054
+          ]
+        },
+        {
+          "round": 1,
+          "count": 1,
+          "completedMs": [
+            30.328832999999918
+          ],
+          "attempts": 1,
+          "conflicts": 0,
+          "ownerReads": 2,
+          "peakOwners": 1,
+          "heldMs": [
+            29.461125000000038
+          ]
+        },
+        {
+          "round": 1,
+          "count": 3,
+          "completedMs": [
+            29.218374999999924,
+            58.02520799999991,
+            91.19904199999996
+          ],
+          "attempts": 3,
+          "conflicts": 0,
+          "ownerReads": 6,
+          "peakOwners": 1,
+          "heldMs": [
+            28.626999999999953,
+            28.420374999999922,
+            32.820291999999995
+          ]
+        },
+        {
+          "round": 1,
+          "count": 5,
+          "completedMs": [
+            26.723958999999923,
+            58.79279199999996,
+            88.90374999999995,
+            125.19324999999992,
+            163.28383399999996
+          ],
+          "attempts": 5,
+          "conflicts": 0,
+          "ownerReads": 10,
+          "peakOwners": 1,
+          "heldMs": [
+            25.991040999999996,
+            31.439916999999923,
+            29.67066699999998,
+            35.52099999999996,
+            36.7355409999999
+          ]
+        },
+        {
+          "round": 2,
+          "count": 1,
+          "completedMs": [
+            32.837541999999985
+          ],
+          "attempts": 1,
+          "conflicts": 0,
+          "ownerReads": 2,
+          "peakOwners": 1,
+          "heldMs": [
+            32.17920800000002
+          ]
+        },
+        {
+          "round": 2,
+          "count": 3,
+          "completedMs": [
+            29.957416999999964,
+            58.54758300000003,
+            91.23899999999992
+          ],
+          "attempts": 3,
+          "conflicts": 0,
+          "ownerReads": 6,
+          "peakOwners": 1,
+          "heldMs": [
+            29.15625,
+            27.903999999999996,
+            32.22920799999997
+          ]
+        },
+        {
+          "round": 2,
+          "count": 5,
+          "completedMs": [
+            34.774791999999934,
+            65.5452499999999,
+            98.52979200000004,
+            132.9526249999999,
+            165.143458
+          ],
+          "attempts": 5,
+          "conflicts": 0,
+          "ownerReads": 10,
+          "peakOwners": 1,
+          "heldMs": [
+            33.99395900000013,
+            30.361041999999998,
+            32.58258300000011,
+            33.68316600000003,
+            31.799792000000025
+          ]
+        }
+      ]
+    },
+    {
+      "label": "3-queued",
+      "variant": "queued",
+      "timing": {
+        "label": "canonical-contention-queued-3",
+        "command": [
+          "npm",
+          "run",
+          "test:unit",
+          "--",
+          "scripts/recorder-contention.measurement.test.ts"
+        ],
+        "exit": 0,
+        "signal": null,
+        "wallMs": 3007,
+        "cores": 8,
+        "loadBefore": 1.62,
+        "loadAfter": 1.81,
+        "highLoad": false
+      },
+      "samples": [
+        {
+          "round": 0,
+          "count": 1,
+          "completedMs": [
+            27.723292000000015
+          ],
+          "attempts": 1,
+          "conflicts": 0,
+          "ownerReads": 2,
+          "peakOwners": 1,
+          "heldMs": [
+            27.082082999999955
+          ]
+        },
+        {
+          "round": 0,
+          "count": 3,
+          "completedMs": [
+            24.084667000000024,
+            48.78520800000001,
+            73.92170800000002
+          ],
+          "attempts": 3,
+          "conflicts": 0,
+          "ownerReads": 6,
+          "peakOwners": 1,
+          "heldMs": [
+            23.776208999999994,
+            24.50645800000001,
+            24.919584000000043
+          ]
+        },
+        {
+          "round": 0,
+          "count": 5,
+          "completedMs": [
+            26.33529199999998,
+            51.576750000000004,
+            77.45570900000001,
+            106.07570900000002,
+            133.984709
+          ],
+          "attempts": 5,
+          "conflicts": 0,
+          "ownerReads": 10,
+          "peakOwners": 1,
+          "heldMs": [
+            25.980917000000034,
+            25.031708999999978,
+            25.602833999999973,
+            28.278666999999984,
+            27.548125000000027
+          ]
+        },
+        {
+          "round": 1,
+          "count": 1,
+          "completedMs": [
+            27.403249999999957
+          ],
+          "attempts": 1,
+          "conflicts": 0,
+          "ownerReads": 2,
+          "peakOwners": 1,
+          "heldMs": [
+            26.698541999999975
+          ]
+        },
+        {
+          "round": 1,
+          "count": 3,
+          "completedMs": [
+            28.274250000000052,
+            58.426917,
+            105.481584
+          ],
+          "attempts": 3,
+          "conflicts": 0,
+          "ownerReads": 6,
+          "peakOwners": 1,
+          "heldMs": [
+            27.574625000000083,
+            29.678540999999996,
+            46.00308300000006
+          ]
+        },
+        {
+          "round": 1,
+          "count": 5,
+          "completedMs": [
+            48.910041999999976,
+            93.006167,
+            137.93825000000004,
+            177.85066700000004,
+            217.87137500000006
+          ],
+          "attempts": 5,
+          "conflicts": 0,
+          "ownerReads": 10,
+          "peakOwners": 1,
+          "heldMs": [
+            47.83166599999993,
+            43.5625,
+            44.56341599999996,
+            39.29399999999998,
+            39.58616600000005
+          ]
+        },
+        {
+          "round": 2,
+          "count": 1,
+          "completedMs": [
+            45.482624999999985
+          ],
+          "attempts": 1,
+          "conflicts": 0,
+          "ownerReads": 2,
+          "peakOwners": 1,
+          "heldMs": [
+            44.86400000000003
+          ]
+        },
+        {
+          "round": 2,
+          "count": 3,
+          "completedMs": [
+            34.16929200000004,
+            67.35799999999995,
+            105.71887500000003
+          ],
+          "attempts": 3,
+          "conflicts": 0,
+          "ownerReads": 6,
+          "peakOwners": 1,
+          "heldMs": [
+            33.34458299999994,
+            32.493334000000004,
+            38.01120900000001
+          ]
+        },
+        {
+          "round": 2,
+          "count": 5,
+          "completedMs": [
+            30.537124999999833,
+            69.92037499999992,
+            103.38595799999985,
+            139.54929199999992,
+            173.56025
+          ],
+          "attempts": 5,
+          "conflicts": 0,
+          "ownerReads": 10,
+          "peakOwners": 1,
+          "heldMs": [
+            29.740625000000136,
+            38.87970799999994,
+            32.89212500000008,
+            35.247290999999905,
+            33.34558300000003
+          ]
+        }
+      ]
+    },
+    {
+      "label": "4-baseline",
+      "variant": "baseline",
+      "timing": {
+        "label": "canonical-contention-baseline-4",
+        "command": [
+          "npm",
+          "run",
+          "test:unit",
+          "--",
+          "scripts/recorder-contention.measurement.test.ts"
+        ],
+        "exit": 0,
+        "signal": null,
+        "wallMs": 3135,
+        "cores": 8,
+        "loadBefore": 1.81,
+        "loadAfter": 1.81,
+        "highLoad": false
+      },
+      "samples": [
+        {
+          "round": 0,
+          "count": 1,
+          "completedMs": [
+            30.56020799999999
+          ],
+          "attempts": 1,
+          "conflicts": 0,
+          "ownerReads": 2,
+          "peakOwners": 1,
+          "heldMs": [
+            29.969375000000014
+          ]
+        },
+        {
+          "round": 0,
+          "count": 3,
+          "completedMs": [
+            24.907332999999994,
+            68.07320800000002,
+            111.36700000000002
+          ],
+          "attempts": 9,
+          "conflicts": 6,
+          "ownerReads": 12,
+          "peakOwners": 1,
+          "heldMs": [
+            24.52950000000004,
+            24.864334000000042,
+            25.731457999999975
+          ]
+        },
+        {
+          "round": 0,
+          "count": 5,
+          "completedMs": [
+            25.350000000000023,
+            69.84466600000002,
+            117.690541,
+            166.83020800000003,
+            210.16241600000006
+          ],
+          "attempts": 25,
+          "conflicts": 20,
+          "ownerReads": 30,
+          "peakOwners": 1,
+          "heldMs": [
+            24.853750000000048,
+            26.079707999999982,
+            31.060040999999956,
+            36.94783400000006,
+            34.93716600000005
+          ]
+        },
+        {
+          "round": 1,
+          "count": 1,
+          "completedMs": [
+            30.74675000000002
+          ],
+          "attempts": 1,
+          "conflicts": 0,
+          "ownerReads": 2,
+          "peakOwners": 1,
+          "heldMs": [
+            30.03083300000003
+          ]
+        },
+        {
+          "round": 1,
+          "count": 3,
+          "completedMs": [
+            30.946957999999995,
+            83.72191599999996,
+            125.76204099999995
+          ],
+          "attempts": 9,
+          "conflicts": 6,
+          "ownerReads": 12,
+          "peakOwners": 1,
+          "heldMs": [
+            30.294749999999908,
+            39.90041700000006,
+            35.709292000000005
+          ]
+        },
+        {
+          "round": 1,
+          "count": 5,
+          "completedMs": [
+            30.513750000000073,
+            82.19104100000004,
+            123.62016600000004,
+            169.255,
+            215.5478750000001
+          ],
+          "attempts": 25,
+          "conflicts": 20,
+          "ownerReads": 30,
+          "peakOwners": 1,
+          "heldMs": [
+            29.569582999999966,
+            34.96604100000002,
+            31.022000000000048,
+            32.17670799999996,
+            34.67795799999999
+          ]
+        },
+        {
+          "round": 2,
+          "count": 1,
+          "completedMs": [
+            32.83308299999999
+          ],
+          "attempts": 1,
+          "conflicts": 0,
+          "ownerReads": 2,
+          "peakOwners": 1,
+          "heldMs": [
+            31.911791999999878
+          ]
+        },
+        {
+          "round": 2,
+          "count": 3,
+          "completedMs": [
+            28.578917000000047,
+            76.36183299999993,
+            126.95637499999998
+          ],
+          "attempts": 9,
+          "conflicts": 6,
+          "ownerReads": 12,
+          "peakOwners": 1,
+          "heldMs": [
+            27.606166999999914,
+            30.394665999999916,
+            36.66866700000014
+          ]
+        },
+        {
+          "round": 2,
+          "count": 5,
+          "completedMs": [
+            36.354666999999836,
+            83.10129199999983,
+            115.30491699999993,
+            160.587667,
+            209.94070799999986
+          ],
+          "attempts": 25,
+          "conflicts": 20,
+          "ownerReads": 30,
+          "peakOwners": 1,
+          "heldMs": [
+            35.190624999999955,
+            37.984249999999975,
+            26.500125000000025,
+            27.670166999999992,
+            33.11699999999996
+          ]
+        }
+      ]
+    }
+  ]
+}
