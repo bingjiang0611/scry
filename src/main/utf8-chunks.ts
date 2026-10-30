@@ -31,4 +31,9 @@ export class Utf8ChunkNormalizer {
     this.carry = ''
     return tail
   }
+
+  /** The deferred unit without consuming it, for sizes read before the content is sealed. */
+  pending(): string {
+    return this.carry
+  }
 }
