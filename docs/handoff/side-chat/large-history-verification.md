@@ -1,7 +1,8 @@
 # 侧聊大历史：验证范围与证据（HEAD `66fc489a` 起）
 
 本文只写“哪一层被证明了、证据在哪、还剩什么”，不重复实现说明。实现与取舍见
-[large-history-fix.md](large-history-fix.md)。
+[large-history-fix.md](large-history-fix.md)。当前版本、安装产物与门禁结果见
+[large-history-delivery.md](large-history-delivery.md)；本文保留的是源码冻结时的验证现场。
 
 ## 1. 一个容易误读的范围：`--dev-*` 不是打包产物
 
