@@ -161,5 +161,7 @@ describe('trace archive capture', () => {
     }
     expect(count).toBe(2100)
     expect(last).toBe('run-2099')
-  })
+    // One durable read per real turn is the floor for this proof: 1.9-3.0 s alone,
+    // more when the whole suite competes for the same disk. Assertions are unchanged.
+  }, 20_000)
 })
