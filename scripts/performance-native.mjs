@@ -14,7 +14,7 @@ export const nativeWorkloads = { markdown: [40, 32], short: [20, 1], 'short-heav
 // Match the existing default in bootstrap/history-archive.ts, not the older-page size.
 // Seeded workloads and full history recovery remain unchanged.
 export const nativeInitialPageTurns = 10
-export const nativeHarnessFiles = ['scripts/performance-native.mjs', 'scripts/session-open-bench.mjs', 'scripts/session-open-fixture.mjs', 'scripts/session-open-history.mjs', 'scripts/session-open-timing.mjs', 'scripts/native-composer-probe.mjs', 'src/main/providers/smoke.ts', 'scripts/owned-app-processes.mjs', 'scripts/hidden-electron-windows.cjs', 'scripts/performance-report.mjs', 'scripts/performance-paths.json']
+export const nativeHarnessFiles = ['scripts/performance-native.mjs', 'scripts/session-open-bench.mjs', 'scripts/session-open-fixture.mjs', 'scripts/session-open-history.mjs', 'scripts/session-open-timing.mjs', 'scripts/native-composer-probe.mjs', 'src/main/providers/smoke.ts', 'scripts/owned-app-processes.mjs', 'scripts/hidden-electron-windows.cjs', 'scripts/performance-report.mjs', 'scripts/performance-paths.json', '.agents/skills/scry-performance-climb/scripts/timing-run.mjs']
 const composerMetrics = mode => ['sendToTerminalMs', 'sendToSettledVisibleMs',
   ...(mode !== 'stop-immediate' ? ['sendToOutputReceiptMs', 'sendToFirstVisibleMs', 'sendToVisibleReadyMs'] : []),
   ...(mode !== 'complete' ? ['stopToTerminalMs', 'stopToSettledVisibleMs'] : [])]
@@ -142,6 +142,18 @@ export function validateNative(report) {
   }
 }
 
+export function assertSameNativeArtifact(first, repeated) {
+  validateNative(first)
+  validateNative(repeated)
+  assert.equal(first.revision, repeated.revision, 'same-artifact control changed revision')
+  assert.equal(first.harness, repeated.harness, 'same-artifact control changed harness')
+  assert.deepEqual(first.environment, repeated.environment, 'same-artifact control changed environment')
+  for (const scenario of Object.keys(nativeWorkloads)) {
+    assert.equal(first.results[scenario].artifactSha256, repeated.results[scenario].artifactSha256, `${scenario}: same-artifact control changed build`)
+    assert.equal(first.results[scenario].benchmarkSha256, repeated.results[scenario].benchmarkSha256, `${scenario}: same-artifact control changed driver`)
+  }
+}
+
 export function compareNative(base, head) {
   validateNative(base)
   validateNative(head)
@@ -187,7 +199,7 @@ export function formatNative(report) {
     '| Scenario | Boundary | Base | Candidate | Ceiling | Result |', '|---|---|---:|---:|---:|---|',
     ...report.rows.map(row => `| ${row.scenario} | ${row.metric} | ${row.baseline.toFixed(2)} | ${row.candidate.toFixed(2)} | ${row.ceiling.toFixed(2)} | ${row.status} |`), '',
     'Hidden real Electron main/preload/renderer; GPU disabled. History uses trusted native clicks and two stable frames. Input uses a trusted input event and two frames. Startup includes driver readiness polling. The separately labelled IPC lifecycle remains distinct. Button acceptance uses trusted Send/Stop clicks, real assistant text hit-tested in the viewport across two frames, terminal notification, idle composer across two frames, and independently readable output after App exit. The offline Provider waits for actual cancellation, without timed completion.',
-    'Twelve warm history samples, one restart/input observation, three complete and three interrupted IPC runs per workload. Three fixed button cohorts each contain: stop before native turn identity, complete, stop after visible output, then early stop again; SQLite must retain all eighteen runs. Every observation is retained; no failure-dependent retries or discarded warmups. Button maxima are acceptance guardrails, not statistical latency estimates. Send-to-terminal totals on interrupted runs include driver dispatch time, recorded separately as driverStopDispatchMs. Fixture p95/max is NOT daily-use p95. These initial absolute guardrails are conservative, not user SLOs; relative checks catch changes. No paid Provider, real phone or external network is exercised.', ''].join('\n')
+    'Twelve warm history samples, one restart/input observation, three complete and three interrupted IPC runs per workload. Three fixed button cohorts each contain: stop before native turn identity, complete, stop after visible output, then early stop again; SQLite must retain all eighteen runs. Every primary observation is retained, without retries or discarded warmups. After a valid comparison fails, one separately labelled same-artifact diagnostic may run; it cannot replace either primary report or change the failed gate. Button maxima are acceptance guardrails, not statistical latency estimates. Send-to-terminal totals on interrupted runs include driver dispatch time, recorded separately as driverStopDispatchMs. Fixture p95/max is NOT daily-use p95. These initial absolute guardrails are conservative, not user SLOs; relative checks catch changes. No paid Provider, real phone or external network is exercised.', ''].join('\n')
 }
 
 async function bench(output) {

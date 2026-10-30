@@ -11,6 +11,8 @@ const { load } = createRequire(import.meta.url)('js-yaml') as { load: (text: str
 interface Step {
   name?: string
   id?: string
+  if?: string
+  'continue-on-error'?: boolean
   uses?: string
   run?: string
   with?: { script?: string; [key: string]: unknown }
@@ -74,6 +76,28 @@ describe('required PR checks', () => {
       expect(gate(file, {})).not.toBe(0)
     })
   }
+
+  it('keeps the failed native comparison authoritative when collecting one diagnostic control', () => {
+    const job = workflow('performance.yml').jobs.native
+    const primary = source(job, 'Measure baseline then candidate, retaining failures')
+    const comparison = source(job, 'Compare native evidence and budgets')
+    const control = source(job, 'Measure one same-artifact diagnostic control')
+    const directions = source(job, 'Compare diagnostic control in both directions')
+    expect(primary.run?.match(/ bench /g)).toHaveLength(2)
+    expect(primary.run).toContain('set -o pipefail')
+    expect(primary.run?.match(/timing-run.mjs/g)).toHaveLength(2)
+    expect(comparison['continue-on-error']).toBeUndefined()
+    expect(comparison.run).toBe('node candidate/scripts/performance-native.mjs compare native-results/baseline.json native-results/candidate.json native-results/report.md')
+    expect(control.if).toBe("failure() && steps.native_measurements.outcome == 'success' && steps.native_comparison.outcome == 'failure'")
+    expect(control.run?.match(/ bench /g)).toHaveLength(1)
+    expect(directions.if).toBe("failure() && steps.native_control.outcome == 'success'")
+    expect(directions.run).toContain('assertSameNativeArtifact(original, control)')
+    expect(directions.run).toContain("[['forward', original, control], ['reverse', control, original]]")
+    expect(directions.run).toContain('compareNative(first, second)')
+    expect(directions.run).toContain('Not a merge gate.')
+    expect(directions.run).toContain('native-results/control-${name}.md')
+    expect(directions.run).not.toContain('native-results/report.md')
+  })
 
   it('remote skips only on an explicit unaffected diff', () => {
     const remote = workflow('remote-g0.yml')

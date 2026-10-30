@@ -3,14 +3,15 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { compareNative, composerModes, exportNativeCounters, nativeBuildArtifacts, nativeCounterMetrics, nativeDiagnosticRecords, nativeInitialPageTurns, nativeWorkloads, validateNative } from './performance-native.mjs'
+import { assertSameNativeArtifact, compareNative, composerModes, exportNativeCounters, nativeBuildArtifacts, nativeCounterMetrics, nativeDiagnosticRecords, nativeInitialPageTurns, nativeWorkloads, validateNative } from './performance-native.mjs'
 import { DEFAULT_LOAD_SESSION_TURNS } from '../src/main/bootstrap/history-archive'
 
 const workCounters = (value: number) => Object.fromEntries(nativeCounterMetrics.map(metric => [metric, value]))
 
 function report() {
+  const errors: Array<{ scenario: string; message: string }> = []
   return {
-    schema: 1, revision: 'fixture', harness: 'a'.repeat(64), environment: { platform: 'darwin', node: '22' }, errors: [],
+    schema: 1, revision: 'fixture', harness: 'a'.repeat(64), environment: { platform: 'darwin', node: '22' }, errors,
     results: Object.fromEntries(Object.entries(nativeWorkloads).map(([scenario, [turnCount, sections]]) => [scenario, {
       scenario, turnCount, sections, measurementVersion: 7, warmups: 2, iterations: 12,
       artifactSha256: 'b'.repeat(64), benchmarkSha256: 'c'.repeat(64), platform: 'darwin/arm64', node: '22', electron: '35',
@@ -30,6 +31,33 @@ function report() {
     }]))
   }
 }
+
+describe('same-artifact diagnostic identity', () => {
+  it('accepts a complete repeated artifact and leaves the primary comparison unchanged', () => {
+    const first = report()
+    const repeated = structuredClone(first)
+    first.results.short.lifecycleSamples[0].startToTerminalMs = 180
+    expect(() => assertSameNativeArtifact(first, repeated)).not.toThrow()
+    expect(compareNative(first, repeated).passed).toBe(true)
+    expect(compareNative(repeated, first).passed).toBe(false)
+    expect(first.results.short.lifecycleSamples[0].startToTerminalMs).toBe(180)
+  })
+
+  it('rejects a different revision, environment, harness, driver or compiled artifact', () => {
+    const changes: Array<(value: ReturnType<typeof report>) => void> = [
+      value => { value.revision = 'other' },
+      value => { value.environment.node = '24' },
+      value => { value.harness = 'd'.repeat(64) },
+      value => { value.results.short.benchmarkSha256 = 'd'.repeat(64) },
+      value => { value.results.short.artifactSha256 = 'd'.repeat(64) }
+    ]
+    for (const change of changes) {
+      const repeated = report()
+      change(repeated)
+      expect(() => assertSameNativeArtifact(report(), repeated)).toThrow('same-artifact control changed')
+    }
+  })
+})
 
 describe('native diagnostic evidence', () => {
   it('retains per-file hashes without changing the existing aggregate fingerprint', () => {
@@ -104,12 +132,12 @@ describe('native performance evidence gate', () => {
     const counters = exportNativeCounters(base)
     // 4 workloads x (history + 3 send modes + 2 stop modes) x metrics; modes are never mixed.
     expect(counters.observations).toHaveLength(4 * 6 * nativeCounterMetrics.length)
-    const runsOf = (scenario: string) => counters.observations.find(observation => observation.scenario === scenario)?.runs
+    const runsOf = (scenario: string) => counters.observations.find((observation: { scenario: string }) => observation.scenario === scenario)?.runs
     expect(runsOf('short.send-settled.complete')).toHaveLength(3)
     expect(runsOf('short.send-settled.stop-immediate')).toHaveLength(6)
     expect(runsOf('short.stop-settled.stop-visible')).toHaveLength(3)
     expect(runsOf('short.stop-settled.complete')).toBeUndefined()
-    expect(counters.observations.every(observation => observation.availability === 'measured')).toBe(true)
+    expect(counters.observations.every((observation: { availability: string }) => observation.availability === 'measured')).toBe(true)
     expect(compareNative(base, structuredClone(base)).passed).toBe(true)
     const head = report()
     head.results.markdown.samples[0].nativeOpenMs = 900

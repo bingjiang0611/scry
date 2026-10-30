@@ -142,14 +142,43 @@ jobs:
           (cd baseline && npm run build) 2>&1 | tee native-results/baseline-build.log
           (cd candidate && npm run build) 2>&1 | tee native-results/candidate-build.log
       - name: Measure baseline then candidate, retaining failures
+        id: native_measurements
         run: |
+          set -o pipefail
           status=0
-          (cd baseline && node scripts/performance-native.mjs bench ../native-results/baseline.json) || status=$?
-          (cd candidate && node scripts/performance-native.mjs bench ../native-results/candidate.json) || status=$?
+          (cd baseline && node .agents/skills/scry-performance-climb/scripts/timing-run.mjs native-baseline -- node scripts/performance-native.mjs bench ../native-results/baseline.json) 2>&1 | tee native-results/baseline-timing.log || status=$?
+          (cd candidate && node .agents/skills/scry-performance-climb/scripts/timing-run.mjs native-candidate -- node scripts/performance-native.mjs bench ../native-results/candidate.json) 2>&1 | tee native-results/candidate-timing.log || status=$?
           exit "$status"
       - name: Compare native evidence and budgets
+        id: native_comparison
         if: always()
         run: node candidate/scripts/performance-native.mjs compare native-results/baseline.json native-results/candidate.json native-results/report.md
+      # Diagnostic only: the failed primary comparison remains failed. Never
+      # repeat an incomplete/incorrect fixture or replace its primary samples.
+      - name: Measure one same-artifact diagnostic control
+        id: native_control
+        if: failure() && steps.native_measurements.outcome == 'success' && steps.native_comparison.outcome == 'failure'
+        run: |
+          set -o pipefail
+          (cd candidate && node .agents/skills/scry-performance-climb/scripts/timing-run.mjs native-control -- node scripts/performance-native.mjs bench ../native-results/control.json) 2>&1 | tee native-results/control-timing.log
+      - name: Compare diagnostic control in both directions
+        if: failure() && steps.native_control.outcome == 'success'
+        run: |
+          node --input-type=module <<'JS'
+          import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
+          import { assertSameNativeArtifact, compareNative, formatNative } from './candidate/scripts/performance-native.mjs'
+          const read = name => JSON.parse(readFileSync(`native-results/${name}.json`, 'utf8'))
+          const original = read('candidate'), control = read('control')
+          assertSameNativeArtifact(original, control)
+          for (const [name, first, second] of [['forward', original, control], ['reverse', control, original]]) {
+            const report = compareNative(first, second)
+            const markdown = `# Same-artifact diagnostic: ${name}\n\nNot a merge gate. Forward is original candidate to control; reverse is control to original candidate. The primary failure remains unchanged.\n\n${formatNative(report)}`
+            writeFileSync(`native-results/control-${name}.md`, markdown)
+            writeFileSync(`native-results/control-${name}.md.json`, JSON.stringify(report, null, 2))
+            appendFileSync(process.env.GITHUB_STEP_SUMMARY, markdown)
+            if (!report.passed) process.exitCode = 1
+          }
+          JS
       - name: Preserve native npm diagnostics on failure
         if: failure()
         run: |

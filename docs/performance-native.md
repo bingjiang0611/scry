@@ -73,6 +73,10 @@ Native 比较器同时检查身份、环境、工作量、完整样本、真实�
 
 Native 输出保留 `artifactFiles` 的逐文件 SHA-256；`lifecycleTraces` 保留现有 stdout 中的启动、start/stop IPC 和 Agent trace。`localRecording.diagnostics` 另保留隔离 App journal 中已有的启动、start IPC、主进程/renderer 资源和 health 丢失记录。两路 trace 可能重复，不能相加；journal 的队列可能丢记录，必须结合 health 判断，不能假称完整。
 
-新增诊断只在测量完成并退出 App 后导出既有记录；不改变日常采集内容、频率、格式、保留策略或预算。空记录或关闭记录表示该证据不可用，不表示耗时或资源占用为零。
+上述记录只在测量完成并退出 App 后导出；不改变日常采集内容、频率、格式、保留策略或预算。空记录或关闭记录表示该证据不可用，不表示耗时或资源占用为零。
+
+CI 的 baseline/candidate 均经同一冻结版本的 `timing-run.mjs` 串行加锁，分别保存负载记录；`highLoad: true` 时不能宣称可信的延迟结论。仅当两次完整测量均成功、原始比较失败时，额外执行一次 candidate 同产物诊断。诊断必须通过 revision、环境、harness、各 lane 产物及 driver 指纹一致性校验，再用原比较器双向比较，保留 `control-forward.md` / `control-reverse.md`。双向检查避免只看到“第二次更快”，遗漏反方向超过既有预算的波动。
+
+这不是把失败样本换掉的重试：原始 `report.md`、全部样本和失败状态保持不变；对照即使通过也不能放行合并。对照失败可证明同产物观测不稳定，但不能单独证明争用、GC 或排除分支回归。fixture 不完整或身份不一致时不产生有效 A/A 结论。
 
 2026-10-30 的 [CI 41045559281](https://github.com/bingjiang0611/scry/actions/runs/41045559281) 有 29 个相关计时行超出比较门槛；其中 paged 首次 complete 的 start receipt 为 428ms、terminal 为 688ms。与上一轮相比，同一 baseline 产物的 short-heavy startup 也从约 1064ms 变为 3843ms。这证明存在明显波动，但没有证明宿主争用、GC 或排除 App 瓶颈；不能把下一次绿灯当作本次问题已修复。新增的是归因证据，不是性能修复，门禁算法与固定负载不变。
