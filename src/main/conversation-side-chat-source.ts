@@ -2,9 +2,8 @@ import { createHash } from 'node:crypto'
 import type { HistoryMessage } from './conversation-history-content'
 import { historyReadBudget, turnMessageProjection } from './conversation-history-text'
 import { readCapturedTurnMessages } from './conversation-history-source'
-import { readTraceArchiveForMigration, type TraceArchiveTurn } from './transcript-archive'
+import { iterateTraceArchiveCapture, traceArchiveCaptureInfo, TraceArchiveCaptureError } from './transcript-archive-capture'
 import { requireValue } from './conversation-schema'
-import { MAX_CONVERSATION_HISTORY_TURNS } from './conversation-history-limits'
 import type { ConversationTurn, SideChatSource } from '../shared/conversation'
 import type { SideChatServiceDeps, SideChatNativeSource, SideChatNativeTurn } from './conversation-service-deps'
 import { normalizeSessionTitle, SESSION_TITLE_MAX_LENGTH } from '../shared/session-title'
@@ -187,11 +186,6 @@ function projectedMessages(
   }, Promise.resolve<ProjectedTurn[]>([]))
 }
 
-function archivedTurns(turns: readonly TraceArchiveTurn[]): SideChatNativeTurn[] {
-  return turns.map(turn => ({ runId: turn.runId, ...(turn.providerTurnId ? { providerTurnId: turn.providerTurnId } : {}),
-    userText: turn.userText, items: turn.items }))
-}
-
 /**
  * The stable prefix ends at the last settled turn; nothing after it is frozen.
  * An unsettled turn inside the prefix is not a tail Scry can drop, so the source
@@ -266,16 +260,28 @@ async function captureNativePrefix(
   if (!seam) throw new Error('原生来源身份校验未接入，不能创建侧聊')
   await seam.assertNativeSource(native)
   await assertSourceNotOwnedBySideChat(deps, source)
-  const archive = await readTraceArchiveForMigration({
+  const captureArgs = {
     userDataDir: deps.store.userData, cwd: source.cwd, providerId: source.providerId, sessionId: source.nativeSessionId
+  }
+  // A source with no Scry archive at all is not an error here: the Provider's own
+  // bounded transcript reader below is the documented fallback.
+  const archiveInfo = await traceArchiveCaptureInfo(captureArgs).catch((error: unknown) => {
+    if (error instanceof TraceArchiveCaptureError) return undefined
+    throw error
   })
   let sources: ProjectedTurn[]
   let status = 'completed'
-  if (archive?.turns.length) {
-    if (archive.turns.length > MAX_CONVERSATION_HISTORY_TURNS) throw new SideChatBudgetRefusal('侧聊快照超过 2000 轮读取预算')
-    const settled = new Map(archive.turns.map(turn => [turn.runId, turn.done && (turn.status ?? 'completed') === 'completed']))
-    const statuses = new Map(archive.turns.map(turn => [turn.runId, turn.status ?? 'completed']))
-    sources = completedProjections(await projectedMessages(deps.store.userData, source.cwd, archivedTurns(archive.turns),
+  if (archiveInfo && archiveInfo.totalTurns > 0) {
+    const archived: SideChatNativeTurn[] = []
+    const settled = new Map<string, boolean>()
+    const statuses = new Map<string, string>()
+    for await (const turn of iterateTraceArchiveCapture(captureArgs, archiveInfo)) {
+      archived.push({ runId: turn.runId, ...(turn.providerTurnId ? { providerTurnId: turn.providerTurnId } : {}),
+        userText: turn.userText, items: turn.events })
+      statuses.set(turn.runId, turn.status ?? 'completed')
+      settled.set(turn.runId, turn.done && (turn.status ?? 'completed') === 'completed')
+    }
+    sources = completedProjections(await projectedMessages(deps.store.userData, source.cwd, archived,
       turn => ({ status: statuses.get(turn.runId) ?? 'completed', settled: settled.get(turn.runId) === true })))
   } else {
     const read = deps.sideChatSource?.readNativeTurns
@@ -283,7 +289,6 @@ async function captureNativePrefix(
     if (!turns?.length) {
       throw new Error(`该原生会话没有 Scry 归档，也没有可验证的原生历史读取器或历史文件；不会创建空快照`)
     }
-    if (turns.length > MAX_CONVERSATION_HISTORY_TURNS) throw new SideChatBudgetRefusal('侧聊快照超过 2000 轮读取预算')
     // A raw transcript carries no recorder terminal: only the Provider's own
     // marker settles a turn. A trailing turn that still shows text therefore
     // stays out of the prefix, whether or not Scry is running it right now.
