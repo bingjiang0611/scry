@@ -51,7 +51,7 @@ const filesOnly = devFilesOnly || process.argv[2] === '--files-only'
 const devApp = structureOnly || unifiedConversationOnly || conversationOwnershipOnly || sourceControlOnly || devMetaPromptsOnly || nativeHistoryOnly || process.argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
 const packagedAppArgument = ['--files-only', '--performance-only', '--file-history-only'].includes(process.argv[2]) ? undefined : process.argv[2]
 const dev = devApp ? electronDevLayout() : null
-const appPath = resolve(packagedAppArgument || dev?.appPath || defaultPackagedAppPath())
+const appPath = resolve(dev?.appPath || packagedAppArgument || defaultPackagedAppPath())
 const executable = dev ? resolve(dev.executable) : packagedAppLayout(appPath).executable
 const temp = mkdtempSync(join(tmpdir(), 'scry-electron-smoke-'))
 let child
