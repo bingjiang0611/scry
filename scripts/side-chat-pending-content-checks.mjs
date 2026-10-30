@@ -12,11 +12,20 @@ import { PENDING_IMAGE_SIZE, readDurable } from './side-chat-draft-state.mjs'
  */
 export async function verifySideChatPendingContent({ capture, check, clickAt, driver, evaluate, idle, newer,
   prepared, resize, settleModal, wait }) {
-  // The receipt's inspect action has no stable selector of its own on older renders, so the
-  // read-only view is opened through the same element the user sees.
-  const inspectAction = `document.querySelector('[data-pending-inspect]')`
+  // The inspect action has no stable selector of its own on older renders, so the read-only
+  // view is opened through the same element the user sees — scoped to this child, because the
+  // main pane can hold its own unresolved receipt and a bare query would take whichever
+  // rendered first. The candidate list is recorded so a wrong-pane click is never a guess.
+  const inspectAction = `document.querySelector('${CHILD_PANEL} [data-pending-inspect]')`
+  const inspectCandidates = await evaluate(`[...document.querySelectorAll('[data-pending-inspect]')]
+    .map(node => ({ pane: node.closest('#main-pane, #side-pane, [data-pane]')?.id ?? null,
+      sideChat: node.closest('[data-side-chat-id]')?.dataset.sideChatId ?? null,
+      state: node.dataset.pendingInspect ?? null, disabled: node.disabled,
+      rect: (({ x, y, width, height }) => ({ x, y, width, height }))(node.getBoundingClientRect()) }))`)
+  check(inspectCandidates.length >= 1, `no inspect action anywhere: ${json(inspectCandidates)}`)
+  await wait(`document.querySelector('${CHILD_PANEL} [data-pending-inspect]') != null`)
   await clickAt(inspectAction)
-  await wait(`document.querySelector('.pending-submission-modal') != null`)
+  await wait(`document.querySelector('${CHILD_PANEL}') && document.querySelector('.pending-submission-modal') != null`)
   await settleModal('.pending-submission-modal')
   await idle()
   /** What the user can actually read in the receipt, as opposed to what is in localStorage. */
@@ -81,6 +90,7 @@ export async function verifySideChatPendingContent({ capture, check, clickAt, dr
   // inside the viewport with its close action reachable, and the text must not go sideways.
   const originalSize = await evaluate(`({ width: window.innerWidth, height: window.innerHeight })`)
   await resize(860, 600)
+  await wait(`document.querySelector('${CHILD_PANEL} [data-pending-inspect]') != null`)
   await clickAt(inspectAction)
   await wait(`document.querySelector('.pending-submission-modal') != null`)
   await settleModal('.pending-submission-modal')
@@ -107,5 +117,6 @@ export async function verifySideChatPendingContent({ capture, check, clickAt, dr
   await idle()
   check((await evaluate(`document.querySelector('${CHILD_COMPOSER}')?.value ?? null`)) === newer.text,
     'resizing and closing the receipt must not touch the newer draft')
-  return { content, lightbox: lightbox.name, focusReturned: afterClose.focusReturned }
+  return { content, lightbox: lightbox.name, focusReturned: afterClose.focusReturned,
+    inspectCandidates: inspectCandidates.length, inspectOwners: inspectCandidates.map(entry => entry.sideChat) }
 }

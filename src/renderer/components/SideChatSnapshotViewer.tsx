@@ -31,6 +31,14 @@ export function SideChatSnapshotViewer({ conversationId, summary, onClose }: {
   const [position, setPosition] = useState(0)
   const [error, setError] = useState<string>()
   const [loading, setLoading] = useState(true)
+  /**
+   * The page that really loaded, as opposed to the one being requested.
+   *
+   * `cursor` moves the moment a control is pressed, so it cannot say what the DOM is
+   * showing. This is set from the resolved read, which is the only authority for
+   * "this body is on screen".
+   */
+  const [loaded, setLoaded] = useState<{ at: string; next?: string }>()
   const request = useRef(0)
   const mounted = useRef(true)
   useEffect(() => {
@@ -49,6 +57,7 @@ export function SideChatSnapshotViewer({ conversationId, summary, onClose }: {
       const next = await read(conversationId, at)
       if (!mounted.current || generation !== request.current) return
       setPage(next)
+      setLoaded({ at: at ?? '0:0', ...(next.nextCursor === undefined ? {} : { next: next.nextCursor }) })
     } catch (failure) {
       if (mounted.current && generation === request.current) { setPage(undefined); setError(message(failure)) }
     } finally {
@@ -61,7 +70,10 @@ export function SideChatSnapshotViewer({ conversationId, summary, onClose }: {
   return <ModalFrame labelledBy={titleId} initialFocusRef={closeRef} className="side-chat-snapshot-modal"
     onClose={onClose}>
     <section className="side-chat-snapshot" data-side-chat-snapshot={conversationId}
-      data-side-chat-snapshot-cursor={cursor ?? '0:0'}>
+      data-side-chat-snapshot-cursor={cursor ?? '0:0'}
+      data-side-chat-snapshot-loaded-cursor={loaded?.at}
+      data-side-chat-snapshot-next-cursor={loaded?.next}
+      aria-busy={loading}>
     <header className="side-chat-snapshot-header">
       <div>
         <h3 id={titleId}>{SIDE_CHAT_COPY.snapshotDetail} · {summary.parentTitleAtCapture}</h3>

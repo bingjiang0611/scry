@@ -181,7 +181,9 @@ describe('side-chat snapshot capture', () => {
     const refs = await sideChatSnapshotRefs(fresh.userData, (await fresh.store.read(child.id))!)
     const assistant = refs.find(ref => ref.itemId === 'assistant')
     expect(await fresh.service.readItem(child.id, assistant!)).toBe(`answer: ${big}`)
-  })
+    // Freezing and reading back a >16 MiB body is real work, not a mocked refusal: the
+    // assertions are unchanged, but the case no longer short-circuits on a budget check.
+  }, 30_000)
 
   it('rejects a creation request whose source boundary no longer matches', async () => {
     const { fixture: current, parentId } = await parentWithTwoTurns()

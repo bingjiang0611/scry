@@ -253,6 +253,7 @@ export async function verifySideChatDrafts({ cdp, evaluate, check, ipcCountsPath
     receipt: { state: receipt.state, buttons: receipt.buttons, sendDisabled: receipt.sendDisabled },
     content: { text: inspection.content.text, image: inspection.content.imageName,
       imageReady: inspection.content.imageReady, lightbox: inspection.lightbox,
-      focusReturned: inspection.focusReturned, emptyState },
+      focusReturned: inspection.focusReturned, emptyState,
+      inspectOwners: inspection.inspectOwners, inspectCandidates: inspection.inspectCandidates },
     newerDraft: afterCheck, pendingCommandId: durable.pending.commandId }
 }
