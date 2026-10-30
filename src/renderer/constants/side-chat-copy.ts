@@ -78,6 +78,13 @@ export const SIDE_CHAT_COPY = {
   creating: '正在保存快照…',
   created: '已创建侧边会话。创建不会发送消息。',
   createRefused: (reason: string): string => `没有创建侧边会话：${reason}`,
+  // 失败原因只保留可以操作的部分：IPC 拒绝会先带上通道名，那不是给用户的说明。
+  reasonOf: (error: unknown): string => {
+    const raw = error instanceof Error ? error.message : String(error)
+    const reason = raw.replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/, '').trim()
+    return reason || SIDE_CHAT_COPY.unknownReason
+  },
+  unknownReason: '未知原因；没有确认任何结果。',
   createUnknown: '创建结果尚未确认。可以只读核对同一个创建命令，不会重复创建。',
   createDurableUnavailable: '本地存储不可用，创建命令无法保存，因此没有创建。',
   createCheck: '核对创建结果',

@@ -15,7 +15,7 @@ const CREATE_NOTICE = { opened: SIDE_CHAT_COPY.created, elsewhere: SIDE_CHAT_COP
 export type SideChatApi = Pick<ConversationApi,
   'previewSideChat' | 'createSideChat' | 'listSideChats' | 'findSideChatCommand'>
 
-const message = (error: unknown): string => error instanceof Error ? error.message : String(error)
+const message = SIDE_CHAT_COPY.reasonOf
 /** The host accepts one bounded selected-id answer for eight tabs and not more. */
 const MAX_VALIDATED_TABS = 8
 
