@@ -27,7 +27,8 @@ export { parsePiNativeHistory, reconcilePiNativeHistory } from './pi-native-pars
 // Offline fallback for catalog-authorized Pi sessions only. No launcher/config
 // execution and no renderer-supplied path. Default Pi layout (session-manager).
 // Custom profile-owned session roots remain unavailable rather than guessed.
-async function locatePiNativeSession(args: {
+/** The canonical file a catalog-authorized Pi session names, if it exists. */
+export async function locatePiNativeSession(args: {
   sessionRoot: string
   cwd: string
   sessionId: string

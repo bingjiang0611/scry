@@ -1,8 +1,8 @@
-import { createHash } from 'node:crypto'
 import { open } from 'node:fs/promises'
 import { TextSpool } from './text-spool'
-import { projectTranscript, type JsonlEvent, type ScalarSlot } from './jsonl-record-scanner'
-import type { StreamedMessage, StreamedTurn } from './conversation-side-chat-stream'
+import { projectTranscript, type JsonlEvent, type ScalarSlot } from './claude-jsonl-projector'
+import type { StreamedTurn } from './conversation-side-chat-stream'
+import { allSpools, settleTurn, type AssistantPart } from './conversation-side-chat-streamed'
 import type { CaptureItem, CaptureSink } from './conversation-side-chat-capture'
 import { TitleTap, consume, type RequestedBoundary } from './conversation-side-chat-sink'
 import type { ProviderId } from '../shared/provider'
@@ -35,12 +35,8 @@ const PROMPT_HEAD_CHARS = 4096
 const TEXT_BATCH_CHARS = 64 * 1024
 const TASK_NOTIFICATION = '<task-notification>'
 
-/** One assistant record's visible blocks: blocks join with nothing, records by a blank line. */
-interface AssistantPart {
-  spools: TextSpool[]
-}
-
 interface TurnState {
+  runId: string
   prompt: TextSpool
   providerTurnId?: string
   assistant: AssistantPart[]
@@ -56,49 +52,6 @@ export interface NativeTranscriptStreamOptions {
   cwd?: string
   /** Whether a terminal marker proves the Provider finished the turn. */
   settles: (stopReason: string | undefined) => boolean
-}
-
-/** Assistant body as ordered chunks: records joined by a blank line, blocks by none. */
-async function* assistantText(parts: readonly AssistantPart[]): AsyncGenerator<string> {
-  let first = true
-  for (const part of parts) {
-    if (!first) yield '\n\n'
-    first = false
-    for (const spool of part.spools) {
-      for await (const chunk of spool.read()) yield chunk
-    }
-  }
-}
-
-async function assistantMessage(parts: readonly AssistantPart[]): Promise<StreamedMessage> {
-  const hash = createHash('sha256')
-  let bytes = 0
-  let first = true
-  for (const part of parts) {
-    if (!first) {
-      hash.update('\n\n', 'utf8')
-      bytes += 2
-    }
-    first = false
-    for (const spool of part.spools) {
-      // Flushed before the size is read, so a held surrogate is part of the message.
-      await spool.flush()
-      bytes += spool.size
-      for await (const chunk of spool.read()) hash.update(chunk, 'utf8')
-    }
-  }
-  return { role: 'assistant', bytes, contentHash: hash.digest('hex'), text: assistantText(parts) }
-}
-
-async function promptMessage(spool: TextSpool): Promise<StreamedMessage> {
-  await spool.flush()
-  const bytes = spool.size
-  const contentHash = await spool.digest()
-  return { role: 'user', bytes, contentHash, text: spool.read() }
-}
-
-function allSpools(turn: TurnState): TextSpool[] {
-  return [turn.prompt, ...turn.assistant.flatMap(part => part.spools)]
 }
 
 /**
@@ -131,7 +84,7 @@ export async function* streamNativeTranscriptTurns(
   const state = { suppress: false, sawUnsettled: false, current: undefined as TurnState | undefined }
   const record = new RecordProjection(state, createSpool, ready, {
     sessionId: options.sessionId, ...(options.cwd === undefined ? {} : { cwd: options.cwd })
-  })
+  }, options.runId)
   try {
     const before = await handle.stat()
     if (!before.isFile()) throw new Error('原生会话 transcript 不是普通文件')
@@ -144,7 +97,7 @@ export async function* streamNativeTranscriptTurns(
       ready.push(state.current)
       state.current = undefined
     }
-    for (const closed of ready.splice(0)) yield* settle(closed, options, state, release)
+    for (const closed of ready.splice(0)) yield* settleTurn(closed, options, state, release)
     const after = await handle.stat()
     if (after.ino !== before.ino || after.dev !== before.dev || after.size < evidence.bytes) {
       throw new Error('原生会话 transcript 在读取期间被替换或截断，不能确认快照来源')
@@ -154,30 +107,6 @@ export async function* streamNativeTranscriptTurns(
     if (state.current) await release(allSpools(state.current))
     await release(live)
     await handle.close()
-  }
-}
-
-/** Applies the prefix rule: a settled turn is frozen, an interior unsettled one refuses. */
-async function* settle(
-  turn: TurnState,
-  options: NativeTranscriptStreamOptions,
-  state: { sawUnsettled: boolean },
-  release: (spools: Iterable<TextSpool>) => Promise<void>
-): AsyncGenerator<StreamedTurn> {
-  if (!options.settles(turn.stopReason)) {
-    state.sawUnsettled = true
-    await release(allSpools(turn))
-    return
-  }
-  if (state.sawUnsettled) {
-    await release(allSpools(turn))
-    throw new Error('原生会话前缀包含没有终止证据的轮次，不能创建侧聊')
-  }
-  const messages: StreamedMessage[] = [await promptMessage(turn.prompt)]
-  if (turn.assistant.length > 0) messages.push(await assistantMessage(turn.assistant))
-  yield {
-    runId: options.runId, status: 'unavailable', settled: true, messages,
-    ...(turn.providerTurnId === undefined ? {} : { providerTurnId: turn.providerTurnId })
   }
 }
 
@@ -195,7 +124,8 @@ class RecordProjection {
     private readonly state: { suppress: boolean; current: TurnState | undefined },
     private readonly createSpool: () => TextSpool,
     private readonly closed: TurnState[],
-    private readonly identity: { sessionId: string; cwd?: string }
+    private readonly identity: { sessionId: string; cwd?: string },
+    private readonly runId: string
   ) {}
 
   async accept(event: JsonlEvent): Promise<void> {
@@ -273,7 +203,7 @@ class RecordProjection {
     this.state.suppress = false
     const providerTurnId = this.turnId()
     this.state.current = {
-      prompt, assistant: [], ...(providerTurnId === undefined ? {} : { providerTurnId })
+      runId: this.runId, prompt, assistant: [], ...(providerTurnId === undefined ? {} : { providerTurnId })
     }
     this.prompt = undefined
     this.blocks = []

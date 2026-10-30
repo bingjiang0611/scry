@@ -1,12 +1,12 @@
 import { lstat } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { ProviderId } from '../../shared/provider'
 import type { createAppSessionStore } from '../app-store'
-import type { SideChatNativeSource, SideChatNativeTurn, SideChatSourceDeps } from '../conversation-service-deps'
+import type { SideChatNativeSource, SideChatSourceDeps } from '../conversation-service-deps'
 import type { StreamedTurn } from '../conversation-side-chat-stream'
 import { streamNativeTranscriptTurns } from '../conversation-side-chat-native-stream'
+import { streamPiNativeTurns } from '../pi-native-stream'
 import { stopReasonProvesCompletion } from '../conversation-side-chat-raw'
-import { readPiNativeHistory } from '../pi-native-history'
+import { locatePiNativeSession } from '../pi-native-history'
 import { archivedTranscriptPath, transcriptPath } from '../transcript-archive'
 
 export interface SideChatSourceRuntime {
@@ -15,9 +15,6 @@ export interface SideChatSourceRuntime {
   homeDir: string
   userDataDir: string
 }
-
-/** Pi ships its own whole-turn reader; every other Provider reads its transcript here. */
-const nativeReaders = new Set<ProviderId>(['pi'])
 
 /** First existing regular, non-link file; a symlink is never a trusted transcript. */
 async function firstTrustedFile(paths: readonly string[]): Promise<string | undefined> {
@@ -63,20 +60,6 @@ export function createSideChatSourceDeps(runtime: SideChatSourceRuntime): SideCh
       }
     }
   }
-  const readNativeTurns = async (source: SideChatNativeSource): Promise<SideChatNativeTurn[] | null> => {
-    if (!nativeReaders.has(source.providerId)) return null
-    // Pi streams its own JSONL lines; a byte ceiling here would refuse a long
-    // session instead of letting the frozen prefix decide what is captured.
-    const turns = await readPiNativeHistory({
-      sessionRoot: join(runtime.homeDir, '.pi', 'agent', 'sessions'),
-      cwd: source.cwd, sessionId: source.nativeSessionId
-    })
-    return turns?.map(turn => ({
-      runId: turn.runId!, ...(turn.providerTurnId ? { providerTurnId: turn.providerTurnId } : {}),
-      ...(turn.stopReason ? { stopReason: turn.stopReason } : {}),
-      userText: turn.userText, items: turn.items
-    })) ?? null
-  }
   /**
    * Claude's transcript is projected record by record: a whole tool result is never parsed
    * into a value, and a visible body is spooled instead of accumulated. A transcript carries
@@ -84,6 +67,20 @@ export function createSideChatSourceDeps(runtime: SideChatSourceRuntime): SideCh
    * position in the frozen prefix, not by an invented run.
    */
   const streamNativeTurns = async (source: SideChatNativeSource): Promise<AsyncGenerator<StreamedTurn> | null> => {
+    if (source.providerId === 'pi') {
+      // Pi names its identity once in the session header and nests records by parent, so its
+      // reader proves the header, selects the active leaf's ancestry and only then reads
+      // bodies. Custom profile-owned roots stay unavailable rather than guessed.
+      const located = await locatePiNativeSession({
+        sessionRoot: join(runtime.homeDir, '.pi', 'agent', 'sessions'),
+        cwd: source.cwd, sessionId: source.nativeSessionId
+      })
+      if (!located) return null
+      return streamPiNativeTurns({
+        path: located.canonical, sessionId: source.nativeSessionId, cwd: source.cwd,
+        settles: stopReason => stopReasonProvesCompletion('pi', { stopReason })
+      })
+    }
     if (source.providerId !== 'claude') return null
     // The catalog already proved provider/profile/cwd/session; what remains is locating
     // the file. `resolveTranscriptPath` would re-parse every record through the shared
@@ -99,5 +96,7 @@ export function createSideChatSourceDeps(runtime: SideChatSourceRuntime): SideCh
       settles: stopReason => stopReasonProvesCompletion('claude', { stopReason })
     })
   }
-  return { assertNativeSource, streamNativeTurns, readNativeTurns }
+  // Every native reader this bootstrap wires streams its own records, so there is no
+  // whole-turn fallback left to hand to the capture path.
+  return { assertNativeSource, streamNativeTurns }
 }

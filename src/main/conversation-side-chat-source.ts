@@ -236,7 +236,6 @@ async function captureNativePrefix(
   let items: CaptureItem[]
   let title: string | undefined
   let through: { ordinal: number; runId: string } | undefined
-  console.error('DBG branch', JSON.stringify({ archive: archiveInfo?.totalTurns, stream: stream !== null }))
   if (archiveInfo && archiveInfo.totalTurns !== 0) {
     const archived = await captureArchivePrefix(deps, source, captureArgs, archiveInfo, boundary, sink)
     items = archived.items
