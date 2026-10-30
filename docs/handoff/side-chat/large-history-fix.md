@@ -78,10 +78,19 @@
 - `npm run build`：通过。
 - `node scripts/electron-security-smoke.mjs --dev-side-chat-large-history-only`：`LH_EXIT=0`（正向大历史，见上）。
 - `node scripts/electron-security-smoke.mjs --dev-side-chat-only`：`SC_EXIT=0`（含无 reader 负向用例、既有多 Provider/重启/草稿/adoption 步骤）。用 `stream-json` 替换 tokenizer 之后，`npm run test:renderer:ui` 里同一模式曾停在 `drafts restored` 步骤（`checking the receipt must read its record`），随后单独重跑该模式为 0，同一次重跑的 artifact hash 与失败那次完全相同。**根因未知**，同样只记“失败一次、随后通过”。首轮曾在 `orphan reader` 步骤失败（`the child could not select an agent of its own: {hostAgent:"codex", chipAgent:"codex"}`），同一代码重跑为 0。观察到的事实：该步骤在固定 120 ms 等待后读回 `chipAgent`，最多 3 次尝试，失败时子会话 chip 仍等于宿主 agent。**根因未知**——没有决定性证据能证明是 freshness race，所以这里只记“失败一次、随后通过”，不宣称 fixture 抖动已定位，也没有跳过该步骤。
-- `npm run test:renderer:ui`：`RENDERER_UI_EXIT=0`。
+- `npm run test:renderer:ui`：首轮 `RENDERER_UI_EXIT=1`，失败在 `DesktopRemote UI smoke failed (1): Timed out: late history layout remains at bottom`（与侧聊无关的滚动步骤），同一棵树重跑 `RENDERER_UI_EXIT=0`，大历史冒烟同时通过。**根因未知**，只记“失败一次、随后通过”。
 - `npm run performance:measure -- --compare d824c609 --out /tmp/scry-perf-final-Rg8MJQ`（合并后 HEAD `39c29192`，原始侧聊基线 `d824c609`）：`PERF_EXIT=0`，`Ratchet: passed`，`ratchet.worse = []`。135 行对照全部为 `measured`；**没有任何一行 worse**。只有 5 行有差异，且都是字节级：`files.fixed-operations/io.read.payload.bytes` 1398160 → 1398158（−2 B，基线 5 轮 `[1398125,1398160,1398150,1398102,1398150]`，候选 5 轮 `[1398158,1398122,1398156,1398149,1398143]`，两侧自身逐轮抖动 ±30 B）、`trace.r4-cell/*` 三项 +2/+2/+8 B，其余行两侧完全相同。
   `ratchet.md` 另列出 5 个“高于记录基线、不参与门禁”的计数（`git.run.calls` 9→10、`io.readdir` 18→20、`recorder.content-cold/io.stat.calls` 36→44、`persistence.archive/ipc.bytes` 10536→10558、`io.read.payload.bytes` 1397923→1398158）。这不是本次改动造成的：同样这 5 项在 `d824c609` 现场基线与本树候选之间**完全相同**（10/10、20/20、44/44、10558/10558），说明差值来自已合并的 main，`io.read.payload.bytes` 反而比 `d824c609` 低 2 B。已记录的 ratchet 基线本身比 `d824c609` 现场值更严。
   `analytics.stats/cpu.instructions` 在本机两侧都是 unavailable（表中 `missing`），不是 0。这些是 **L1 工作计数**，只能说明工作计数没有回归，**不能证明延迟或流式行为**；大历史的真实证据是 App 冒烟的 22.4 MB 归档、4.26 MB 单条消息、`viewerElapsedMs` 472~504、`planItems` 400、`providerReads` 3、`readsAfterDelete` 4010。
 
 
 每次合入前重跑同一组命令；毫秒结论需 `timing-run` 锁，本轮没有毫秒结论。
+
+## 最终证据包（HEAD `a28c6c9f`）
+
+- 分支 `scry/88d17fe3`；基线 `d824c609`（原始侧聊实现）；已合并 main `e5b8ebd2`（`5b123b91` 普通 merge）；本次修复提交 `21945026`（tokenizer）、`39c29192` + `a28c6c9f`（文档）。作者全部为 `bingjiang0611 <307659028+bingjiang0611@users.noreply.github.com>`。
+- 最终树上的 gate（日志在 `/tmp`）：`TYPECHECK_EXIT=0`（`p2-typecheck.log`）、`BUILD_EXIT=0`（`p2-build.log`）、`NPM_TEST_EXIT=0` 508 files / 5111 passed / 4 skipped（`p2-npmtest.log`）、`test:side-chat:ui` `SIDE_CHAT_UI_EXIT=0`（`p2-sidechat-ui.log`，含 `step: large history refusal` 与正向大历史）、`test:renderer:ui` `RENDERER_UI_EXIT=0`（`p4-renderer-ui.log`）、性能对照（`p4-perf.log` + `/tmp/scry-perf-final-Rg8MJQ/{measure,comparison,candidate,baseline}.json`、`ratchet.md`）。
+- 打包 App 正向大历史冒烟的机器可读证据：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-app-driver-MPSjNC/verification.json`（`side-chat execution`，`childId debdf67e-…`，10 条 receipt，providers `codex/claude/qoder/opencode/pi`）与同目录 `side-chat large history`：`parentTurns 2005`、`messageCount 4010`、`archiveBytes 22361185`、`hugeMessageBytes 4259859`、`planItems 400`、`providerReads 3`、`readsAfterDelete 4010`、`readerAvailable true`。`--dev-side-chat-only` 重跑证据 `/var/folders/14/…/scry-app-driver-dMVVSn/verification.json`。
+- 构建产物 hash（最后一次 App 冒烟所验证的 `out/`，与 `test:renderer:ui` 失败那次相同）：`out/main/index.js dffa5dabb9f8558be6593c785be4e2fd39a16456452de1f5810c69ec8778778a`、`out/preload/index.cjs 21c2e11bf3b254644e7482c7d245a3cff8ae8bfc394d786765e28b077c0221f5`、`out/renderer/index.html a064c8e1c4c2a9bd1aee616ae50c0b94b70b642fc95103a792236f6c5597bae5`。
+- 卫生检查：工作区干净、无暂存文件；本次新增/改动的手写文件最大 19,987 B（`scripts/electron-security-smoke.mjs`，合并带入），本次新文件为 11,435 B（`jsonl-record-scanner.ts`）、16,008 B、9,467 B、本文档 17,000 B 级。`src/main/transcript-archive.ts`（97,927 B）**早于本次任务**就超过 20 KB 且本次未改动，仍是已知遗留问题。
+- 没有残留 `electron-security-smoke`/`Scry.app` 测试进程；冒烟全部使用临时 `userData` 与临时 workspace，未写用户真实 `.scry` 记录、transcript 或 DB；未安装 App、未升版本、未 push、未移动 main。
