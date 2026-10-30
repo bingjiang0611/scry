@@ -21,7 +21,7 @@ export function runConcurrentFixture(request: ProviderRunRequest, providerId: 'c
       cwd,
       env: { ...process.env, SCRY_RECORDER_MANAGED: '1', SCRY_MANAGED_RUN_ID: identity.runId,
         SCRY_MANAGED_PROMPT_HASH: identity.promptHash,
-        NODE_OPTIONS: `--require=${process.env.SCRY_CONCURRENT_PROBE}`,
+        NODE_OPTIONS: `--require=${JSON.stringify(process.env.SCRY_CONCURRENT_PROBE)}`,
         SCRY_CONCURRENT_ROLE: 'hook' },
       stdio: ['pipe', 'pipe', 'pipe']
     })
