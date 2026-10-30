@@ -397,6 +397,8 @@
         "src/main/source-control/process.ts",
         "src/main/source-control/mutation.ts",
         "src/main/git.ts",
+        "src/main/session-diff.ts",
+        "src/main/run-diff-previewer.ts",
         "src/core/turn-recorder/git-workspace-snapshot.ts",
         "src/core/turn-recorder/git-branch-base.ts",
         "src/core/turn-recorder/git-diff-history.ts",
