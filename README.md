@@ -56,6 +56,8 @@ node node_modules/electron/install.js
 npm run dev
 ```
 
+**Linux 用户从这里开始：[安装与首次使用指南](docs/linux-getting-started.md)**（获取包/源码构建、安装启动、Provider 与项目选择、升级卸载、排错及目标机验收清单）。
+
 Linux（Arch/Omarchy）构建需要同样的 Node.js 版本，另需 `base-devel`、`python`（node-pty、better-sqlite3 编译）与 `libarchive`（提供 pacman 构建/检查所需的 `bsdtar`；Ubuntu 包名为 `libarchive-tools`）：
 
 ```bash

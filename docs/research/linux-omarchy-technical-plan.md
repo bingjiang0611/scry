@@ -225,7 +225,7 @@ App 与独立 CLI 保持现有分别版本化策略；Linux 与 macOS App 不另
 
 | 项目 | 负责人 | 下一步 |
 | --- | --- | --- |
-| 在真实 Omarchy 上跑 M2–M4 验收 | 用户与实施者 | 在目标机执行 `npm ci`、`npm run pack:artifact`、本文件第 7.3 节的 8 条工作流；结果按 Provider 分别记录 |
+| 在真实 Omarchy 上跑 M2–M4 验收 | 用户与实施者 | 按[安装指南](../linux-getting-started.md)构建安装，执行第 7.3 节工作流；按 Provider 记录结果 |
 | pacman 安装依赖与包布局 | 实施者 | 用 M1 产物实际 `pacman -U`，核对依赖解析、`chrome-sandbox` 权限与 `.desktop` 入口 |
 | 首批 Provider | 用户 | 指定日常使用对象及是否授权真实账号/费用验证 |
 | 目标机访问与前台验收 | 用户与实施者 | 确定 SSH/本机协作方式；SSH 不等于 GUI 验收已具备 |
