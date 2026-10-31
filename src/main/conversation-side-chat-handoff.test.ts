@@ -146,10 +146,11 @@ describe('side-chat first send and frozen context', () => {
       const sessionId = `native-session-${providerId}`
       upsertTraceArchiveTurn({ userDataDir: current.userData, cwd: current.cwd, sessionId, providerId,
         turn: { runId: `run-${providerId}-1`, userText: 'native question', items: [modelEvent(`run-${providerId}-1`, 'native answer')],
-          done: true, status: 'completed', ts: Date.now() } })
-      // A trailing turn that is still generating stays out of the frozen prefix.
+          done: true, status: 'completed', ts: 1_700_000_000_000 } })
+      // Make the trailing turn strictly later. Two Date.now() calls can tie; archive
+      // ties use content-addressed filenames, not insertion order, and may put it first.
       upsertTraceArchiveTurn({ userDataDir: current.userData, cwd: current.cwd, sessionId, providerId,
-        turn: { runId: `run-${providerId}-2`, userText: 'still running', items: [], done: false, ts: Date.now() } })
+        turn: { runId: `run-${providerId}-2`, userText: 'still running', items: [], done: false, ts: 1_700_000_000_001 } })
       const source = { kind: 'native-session' as const, providerId, cwd: current.cwd, nativeSessionId: sessionId }
       const preview = await current.service.previewSideChat(source)
       expect(preview.throughOrdinal).toBe(1)
