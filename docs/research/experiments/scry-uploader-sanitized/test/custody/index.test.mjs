@@ -189,25 +189,28 @@ test('pause retains legacy outbox bytes and pauses receipt-only custody', async 
   await releaseDisabled(root, legacyId)
 })
 
-test('finish leaves a legacy envelope without raw custody untouched', async (t) => {
+test('finish rejects missing custody and leaves the legacy envelope untouched', async (t) => {
   const root = await workspace()
   t.after(() => rm(root, { recursive: true, force: true }))
   const recordId = id('b')
   const record = '{"legacy":true}'
   await outboxEnvelope(root, 1, recordId, record)
-  await finishCustody(
-    root,
-    {
-      version: 1,
-      sequence: 1,
-      recordId,
-      workspaceId: 'fixture',
-      redactionVersion: 'agent-turn-v1',
-      recordBytes: Buffer.byteLength(record),
-      record
-    },
-    'uploaded',
-    'inserted'
+  await assert.rejects(
+    () => finishCustody(
+      root,
+      {
+        version: 1,
+        sequence: 1,
+        recordId,
+        workspaceId: 'fixture',
+        redactionVersion: 'agent-turn-v1',
+        recordBytes: Buffer.byteLength(record),
+        record
+      },
+      'uploaded',
+      'inserted'
+    ),
+    { code: 'custody_missing' }
   )
   assert.equal(await readReceipt(join(root, '.scry', 'upload'), recordId), null)
   assert.equal(

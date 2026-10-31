@@ -1,6 +1,8 @@
-import { open, readFile, readdir, realpath } from 'node:fs/promises'
+import { open, readFile, readdir, realpath, unlink } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import type { CustodyReceipt, OutboxEnvelope, RecordCommittedNotification } from '../types.js'
+import { validateEnvelope } from '../envelope.js'
+import { UploadError } from '../errors.js'
+import { recordUploadDisabled } from '../scry.js'
 import {
   assertLegacyLocksMigrated,
   committedPath,
@@ -11,10 +13,8 @@ import {
   recordFilename,
   uploadRoot
 } from '../storage.js'
-import { UploadError } from '../errors.js'
-import { validateEnvelope } from '../envelope.js'
+import type { CustodyReceipt, OutboxEnvelope, RecordCommittedNotification, UploadState } from '../types.js'
 import {
-  acquireDirectoryLock,
   now,
   readJson,
   syncDirectory,
@@ -22,69 +22,8 @@ import {
   writeJsonAtomic
 } from '../util.js'
 
-const RECORD_ID_RE = /^[a-f0-9]{32,64}$/
-const SHA256_RE = /^[a-f0-9]{64}$/
-const CUSTODY_STATUSES = new Set<CustodyReceipt['status']>([
-  'pending',
-  'skipped_disabled',
-  'uploaded',
-  'dead_letter'
-])
-
-function custodyError(code: string, message: string, cause?: unknown): UploadError {
-  return new UploadError(code, message, true, undefined, cause === undefined ? undefined : { cause })
-}
-
-function validateRecordIdentity(recordId: string, sequence?: number): void {
-  if (!RECORD_ID_RE.test(recordId)) throw custodyError('custody_identity_invalid', 'recordId is invalid')
-  if (sequence !== undefined && (!Number.isSafeInteger(sequence) || sequence < 1))
-    throw custodyError('custody_identity_invalid', 'sequence is invalid')
-}
-
-function validateReceipt(value: unknown, recordId: string): CustodyReceipt {
-  validateRecordIdentity(recordId)
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    throw custodyError('custody_invalid', 'custody receipt is invalid')
-  const receipt = value as Partial<CustodyReceipt>
-  if (receipt.version !== 1 || receipt.recordId !== recordId)
-    throw custodyError('custody_identity_mismatch', 'receipt identity mismatch')
-  if (!Number.isSafeInteger(receipt.sequence) || Number(receipt.sequence) < 1)
-    throw custodyError('custody_identity_invalid', 'receipt sequence is invalid')
-  validateRecordIdentity(recordId, receipt.sequence)
-  if (typeof receipt.sha256 !== 'string' || !SHA256_RE.test(receipt.sha256))
-    throw custodyError('custody_invalid', 'receipt sha256 is invalid')
-  if (typeof receipt.status !== 'string' || !CUSTODY_STATUSES.has(receipt.status as CustodyReceipt['status']))
-    throw custodyError('custody_status_invalid', 'receipt status is invalid')
-  return receipt as CustodyReceipt
-}
-
-function lockPath(base: string, recordId: string): string {
-  return join(base, 'receipts', `.${recordId}.standalone.lock`)
-}
-
-async function withRecordLock<T>(base: string, recordId: string, action: () => Promise<T>): Promise<T> {
-  const release = await acquireDirectoryLock(lockPath(base, recordId))
-  try {
-    return await action()
-  } finally {
-    await release()
-  }
-}
-
-async function readReceiptFile(base: string, recordId: string): Promise<CustodyReceipt | null> {
-  const value = await readJson<unknown>(receiptPath(base, recordId))
-  return value === null ? null : validateReceipt(value, recordId)
-}
-
-export async function readReceipt(base: string, recordId: string): Promise<CustodyReceipt | null> {
-  validateRecordIdentity(recordId)
-  try {
-    return await readReceiptFile(base, recordId)
-  } catch (error) {
-    if (error instanceof UploadError) throw error
-    throw custodyError('custody_invalid', 'custody receipt cannot be read', error)
-  }
-}
+import { SHA256_RE, custodyError, pendingReceipts, readReceipt, saveReceipt, validateReceipt, validateRecordIdentity, withRecordLock } from './receipts.js'
+export { readReceipt } from './receipts.js'
 
 export async function readCustody(base: string, receipt: CustodyReceipt): Promise<Buffer> {
   const checked = validateReceipt(receipt, receipt.recordId)
@@ -104,7 +43,7 @@ async function markDisabled(base: string, receipt: CustodyReceipt): Promise<Cust
   let current = receipt
   if (current.status === 'pending') {
     current = { ...current, status: 'skipped_disabled' }
-    await writeJsonAtomic(receiptPath(base, current.recordId), current)
+    await saveReceipt(base, current)
   }
   const line =
     JSON.stringify({
@@ -154,16 +93,27 @@ export async function takeCustody(
     throw new UploadError('invalid_sha256', 'sha256 is invalid')
 
   return await withRecordLock(base, event.recordId, async () => {
+    const policy = await readJson<UploadState>(join(base, 'state.json'))
+    const explicitlyDisabled = disabled || policy?.uploadEnabled === false
+    const beforeEnable = event.sequence <= (policy?.disabledThrough ?? 0)
     const existing = await readReceipt(base, event.recordId)
     if (existing) {
       if (existing.sequence !== event.sequence)
         throw new UploadError('custody_identity_mismatch', 'receipt identity mismatch')
+      if (existing.bodyPruneStartedAt || existing.bodyPrunedAt) {
+        if (event.sha256 !== undefined && event.sha256 !== existing.sha256)
+          throw new UploadError('notification_digest_mismatch', 'notification digest mismatch')
+        await syncDirectory(dirname(receiptPath(base, existing.recordId)))
+        return existing
+      }
       const raw = await readCustody(base, existing)
       if (event.sha256 !== undefined && digest(raw) !== event.sha256)
         throw new UploadError('notification_digest_mismatch', 'notification digest mismatch')
       await syncDirectory(dirname(committedPath(base, existing.sequence, existing.recordId)))
       await syncDirectory(dirname(receiptPath(base, existing.recordId)))
-      return disabled ? await markDisabled(base, existing) : existing
+      return explicitlyDisabled || (beforeEnable && !existing.releasedAt)
+        ? await markDisabled(base, existing)
+        : existing
     }
 
     const source = join(data, recordPath)
@@ -194,11 +144,12 @@ export async function takeCustody(
       sha256,
       ...(event.provider === undefined ? {} : { provider: event.provider }),
       ...(event.sessionId === undefined ? {} : { sessionId: event.sessionId }),
-      status: disabled ? 'skipped_disabled' : 'pending',
+      status: explicitlyDisabled || beforeEnable || await recordUploadDisabled(data, event.recordId)
+        ? 'skipped_disabled' : 'pending',
       takenAt: now()
     }
-    await writeJsonAtomic(receiptPath(base, event.recordId), receipt)
-    return disabled ? await markDisabled(base, receipt) : receipt
+    await saveReceipt(base, receipt)
+    return receipt.status === 'skipped_disabled' ? await markDisabled(base, receipt) : receipt
   })
 }
 
@@ -234,7 +185,11 @@ async function retainLegacyVariant(base: string, envelope: OutboxEnvelope): Prom
   await syncDirectory(dirname(target))
 }
 
-export async function retainEnvelope(workspace: string, envelope: OutboxEnvelope): Promise<CustodyReceipt> {
+export async function retainEnvelope(
+  workspace: string,
+  envelope: OutboxEnvelope,
+  disabled = false
+): Promise<CustodyReceipt> {
   envelopeIdentity(envelope)
   const base = await prepare(workspace)
   return await withRecordLock(base, envelope.recordId, async () => {
@@ -248,7 +203,7 @@ export async function retainEnvelope(workspace: string, envelope: OutboxEnvelope
         // evidence. Preserve both before any terminal outbox deletion.
         await retainLegacyVariant(base, envelope)
       }
-      return existing
+      return disabled ? await markDisabled(base, existing) : existing
     }
     const raw = Buffer.from(envelope.record, 'utf8')
     const target = committedPath(base, envelope.sequence, envelope.recordId)
@@ -269,8 +224,8 @@ export async function retainEnvelope(workspace: string, envelope: OutboxEnvelope
       status: 'pending',
       takenAt: now()
     }
-    await writeJsonAtomic(receiptPath(base, envelope.recordId), receipt)
-    return receipt
+    await saveReceipt(base, receipt)
+    return disabled ? await markDisabled(base, receipt) : receipt
   })
 }
 
@@ -286,7 +241,7 @@ export async function releaseDisabled(workspace: string, recordId: string): Prom
       throw new UploadError('record_not_disabled', 'record is not disabled')
     const updated: CustodyReceipt = { ...receipt, status: 'pending', releasedAt: now() }
     delete updated.wakeupQueuedAt
-    await writeJsonAtomic(receiptPath(base, recordId), updated)
+    await saveReceipt(base, updated)
   })
 }
 
@@ -299,7 +254,7 @@ export async function finishCustody(
   envelopeIdentity(envelope)
   const base = uploadRoot(workspace)
   const initial = await readReceipt(base, envelope.recordId)
-  if (!initial) return
+  if (!initial) throw new UploadError('custody_missing', 'terminal status requires a custody receipt')
   await withRecordLock(base, envelope.recordId, async () => {
     const receipt = await readReceipt(base, envelope.recordId)
     if (!receipt) throw new UploadError('custody_missing', 'custody receipt disappeared')
@@ -310,7 +265,7 @@ export async function finishCustody(
       throw new UploadError('custody_digest_mismatch', 'envelope differs from custody', true)
     const updated: CustodyReceipt = { ...receipt, status, finishedAt: now() }
     if (remoteStatus !== undefined) updated.remoteStatus = remoteStatus
-    await writeJsonAtomic(receiptPath(base, envelope.recordId), updated)
+    await saveReceipt(base, updated)
   })
 }
 
@@ -334,15 +289,14 @@ export async function pausePending(workspace: string): Promise<void> {
   const entries = await readdir(outbox, { withFileTypes: true })
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
     if (!entry.isFile() || !entry.name.endsWith('.json')) continue
+    const id = entry.name.match(/^\d{20}-([a-f0-9]{32,64})\.json$/)?.[1]
+    const existing = id ? await readReceipt(base, id) : null
+    if (existing && existing.status !== 'pending') continue
     await retainEnvelope(workspace, await loadPendingEnvelope(join(outbox, entry.name)))
   }
-  const receipts = await readdir(join(base, 'receipts'), { withFileTypes: true })
-  for (const entry of receipts.sort((left, right) => left.name.localeCompare(right.name))) {
-    if (!entry.isFile() || !entry.name.endsWith('.json')) continue
-    const recordId = entry.name.slice(0, -'.json'.length)
-    validateRecordIdentity(recordId)
-    const receipt = await readReceipt(base, recordId)
-    if (receipt?.status === 'pending') {
+  for (const receipt of await pendingReceipts(base)) {
+    const recordId = receipt.recordId
+    if (receipt.status === 'pending') {
       await withRecordLock(base, recordId, async () => {
         const current = await readReceipt(base, recordId)
         if (current?.status === 'pending') {
@@ -354,6 +308,53 @@ export async function pausePending(workspace: string): Promise<void> {
   }
 }
 
+export async function pruneAckedBodies(workspace: string, nowMs = Date.now()): Promise<number> {
+  const base = await prepare(workspace)
+  const cutoff = nowMs - 30 * 24 * 60 * 60 * 1_000
+  let pruned = 0
+  for (const name of await readdir(join(base, 'receipts'))) {
+    if (!/^[a-f0-9]{32,64}\.json$/.test(name)) continue
+    const recordId = name.slice(0, -5)
+    const candidate = await readReceipt(base, recordId)
+    if (!candidate || candidate.status !== 'uploaded' || candidate.bodyPrunedAt || !candidate.finishedAt) continue
+    if (!Number.isFinite(Date.parse(candidate.finishedAt)) || Date.parse(candidate.finishedAt) > cutoff) continue
+    await withRecordLock(base, recordId, async () => {
+      const receipt = await readReceipt(base, recordId)
+      if (!receipt || receipt.status !== 'uploaded' || receipt.bodyPrunedAt || !receipt.finishedAt) return
+      if (!Number.isFinite(Date.parse(receipt.finishedAt)) || Date.parse(receipt.finishedAt) > cutoff) return
+      const retiring = { ...receipt, bodyPruneStartedAt: receipt.bodyPruneStartedAt ?? new Date(nowMs).toISOString() }
+      // Persist retirement authority before unlink. A crash must not turn an
+      // intentionally retired ACKed body into an unexplained missing body.
+      await saveReceipt(base, retiring)
+      const canonical = committedPath(base, receipt.sequence, recordId)
+      const legacy = join(base, 'outbox', 'committed', 'legacy', recordFilename(receipt.sequence, recordId))
+      for (const path of [canonical, legacy]) {
+        try {
+          await unlink(path)
+          await syncDirectory(dirname(path))
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        }
+      }
+      // Only a definitively ACKed receipt may survive without its body.
+      // This durable marker distinguishes retirement from unexpected loss.
+      await saveReceipt(base, { ...retiring, bodyPrunedAt: new Date(nowMs).toISOString() })
+      pruned++
+    })
+  }
+  return pruned
+}
+
+export async function pruneAckedBodiesIfDue(workspace: string, nowMs = Date.now()): Promise<number> {
+  const base = await prepare(workspace)
+  const path = join(base, 'retention.json')
+  const previous = await readJson<{ completedAt: number }>(path)
+  if (previous && nowMs - previous.completedAt < 24 * 60 * 60 * 1_000) return 0
+  const pruned = await pruneAckedBodies(workspace, nowMs)
+  await writeJsonAtomic(path, { version: 1, completedAt: nowMs })
+  return pruned
+}
+
 export async function markWakeupQueued(workspace: string, sequence: number, recordId: string): Promise<void> {
   validateRecordIdentity(recordId, sequence)
   const base = uploadRoot(workspace)
@@ -363,6 +364,6 @@ export async function markWakeupQueued(workspace: string, sequence: number, reco
     if (receipt.sequence !== sequence)
       throw new UploadError('custody_identity_mismatch', 'receipt identity mismatch')
     if (receipt.status !== 'pending') return
-    await writeJsonAtomic(receiptPath(base, recordId), { ...receipt, wakeupQueuedAt: now() })
+    await saveReceipt(base, { ...receipt, wakeupQueuedAt: now() })
   })
 }

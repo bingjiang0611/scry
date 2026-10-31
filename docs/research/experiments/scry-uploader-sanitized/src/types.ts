@@ -12,6 +12,11 @@ export interface UploadState {
   redactionVersion?: string
   initializedAt?: string
   lastSuccessAt?: string
+  /** Highest export sequence observed while uploads were disabled. */
+  disabledThrough?: number
+  disabledEpoch?: number
+  enabledEpoch?: number
+  uploadEnabled?: boolean
   lastError?: { at: string; code: string; message: string }
 }
 
@@ -28,6 +33,8 @@ export interface CustodyReceipt {
   finishedAt?: string
   releasedAt?: string
   wakeupQueuedAt?: string
+  bodyPruneStartedAt?: string
+  bodyPrunedAt?: string
 }
 
 export interface OutboxEnvelope {
@@ -40,9 +47,10 @@ export interface OutboxEnvelope {
   record: string
   sha256?: string
   localRetry?: {
-    kind: 'report_timeout'
+    kind: 'report_timeout' | 'report_transient' | 'report_request'
     attempts: number
     notBeforeMs: number
+    lastCode?: string
   }
 }
 
@@ -84,4 +92,6 @@ export interface UploadSummary {
   duplicated: number
   deadLettered: number
   pending: number
+  /** Due time for remaining work after a partial/deferred invocation. */
+  deferredUntilMs?: number
 }

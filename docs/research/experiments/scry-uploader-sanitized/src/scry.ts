@@ -2,13 +2,29 @@ import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ExportPage } from './types.js'
+import { EXPORT_LIMIT } from './constants.js'
 import { object, run } from './util.js'
 
 const require = createRequire(import.meta.url)
 
+function safeDiagnostic(value: string): string {
+  return value
+    .replace(/(authorization|cookie|token|password|secret|api[-_]?key)\s*[:=]\s*[^\s,;]+/gi, '$1=<redacted>')
+    .slice(0, 512)
+}
+
 export function bundledScryEntrypoint(): string {
   const packageJson = require.resolve('@review/scry-turn-recorder/package.json')
   return join(dirname(packageJson), 'dist', 'cli', 'scry.js')
+}
+
+export async function recordUploadDisabled(dataDirectory: string, recordId: string): Promise<boolean> {
+  // Reuse the pinned recorder's identity/schema checks; do not reinterpret its
+  // saved environment or import executable settings into a recovery worker.
+  const reader = await import(require.resolve('@review/scry-turn-recorder/dist/core/turn-recorder/commit-environment.js')) as {
+    recordUploadEnvironment(root: string, id: string, env: NodeJS.ProcessEnv): Promise<NodeJS.ProcessEnv>
+  }
+  return (await reader.recordUploadEnvironment(dataDirectory, recordId, {})).SCRY_TURN_UPLOAD_ENABLED === '0'
 }
 
 export function uploaderEntrypoint(): string {
@@ -31,7 +47,15 @@ export async function runScry(
     timeoutMs: options.timeoutMs ?? 30_000
   })
   if (result.exitCode !== 0) {
-    throw new Error(`scry ${args[0] ?? ''} 失败：${result.stderr.trim() || `exit ${result.exitCode}`}`)
+    const failure = new Error(`scry ${args[0] ?? ''} 失败：${safeDiagnostic(result.stderr.trim()) || `exit ${result.exitCode}`}`) as Error & {
+      exitCode?: number
+      signal?: NodeJS.Signals
+      stderr?: string
+    }
+    failure.exitCode = result.exitCode
+    failure.signal = result.signal
+    failure.stderr = safeDiagnostic(result.stderr)
+    throw failure
   }
   return result.stdout
 }
@@ -52,9 +76,11 @@ export async function exportPage(
   after: number,
   snapshot?: number,
   timeoutMs = 30_000,
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  limit = EXPORT_LIMIT
 ): Promise<ExportPage> {
-  const args = ['turns', 'export', '--workspace', workspace, '--after', String(after), '--limit', '100']
+  const args = ['turns', 'export', '--workspace', workspace, '--after', String(after)]
+  args.push('--limit', String(limit))
   if (snapshot !== undefined) args.push('--snapshot', String(snapshot))
   const parsed = JSON.parse(await runScry(args, workspace, { timeoutMs, env })) as unknown
   const root = object(parsed)
@@ -77,6 +103,15 @@ export async function exportPage(
   }
 }
 
-export async function currentSnapshot(workspace: string): Promise<number> {
-  return (await exportPage(workspace, 0)).snapshotMaxSequence
+export async function safeSnapshotMaxSequence(
+  workspace: string,
+  env: NodeJS.ProcessEnv = process.env,
+  timeoutMs = 30_000
+): Promise<number> {
+  // The recorder supports a max-safe after cursor without reading older
+  // records. This is the only baseline contract used for enable/registration.
+  const page = await exportPage(workspace, Number.MAX_SAFE_INTEGER, undefined, timeoutMs, env, 1)
+  if (page.records.length || page.hasMore || page.nextCursor !== Number.MAX_SAFE_INTEGER)
+    throw new Error('scry baseline query returned an invalid page')
+  return page.snapshotMaxSequence
 }

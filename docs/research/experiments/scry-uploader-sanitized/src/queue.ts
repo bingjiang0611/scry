@@ -2,11 +2,11 @@ import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { readdir, rename, unlink } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join } from 'node:path'
-import { markWakeupQueued } from './custody/index.js'
 import { JOB_BACKOFF_BASE_MS, JOB_BACKOFF_MAX_MS, JOB_MAX_ATTEMPTS, PROVIDERS } from './constants.js'
+import { markWakeupQueued } from './custody/index.js'
 import { uploaderEntrypoint } from './scry.js'
 import type { QueueJob, RecordCommittedNotification } from './types.js'
-import { UploadError, prepareUploadRoot, runUpload, takeCustody, uploadRoot } from './uploader.js'
+import { UploadError, prepareUploadRoot, runUpload, setUploadPolicy, takeCustody, uploadRoot } from './uploader.js'
 import {
   acquireDirectoryLock,
   exists,
@@ -55,6 +55,15 @@ const ENV_KEYS = [
   'TRANSPORT_CLI_PATH',
   'XDG_STATE_HOME'
 ]
+// Accept old snapshots for migration, but never recover executable, installation,
+// admission-directory or current policy authority from repository-owned jobs.
+const ACTIVATION_ENV_KEYS = new Set([
+  'SCRY_CLI_PATH', 'TRANSPORT_CLI_PATH', 'XDG_STATE_HOME',
+  'SCRY_INSTALLATION_ID', 'SCRY_INSTALLATION_ID_FILE',
+  'SCRY_MANAGED_UPLOAD_WAIT_SECONDS', 'SCRY_UPLOAD_LOCK_WAIT_SECONDS',
+  'SCRY_UPLOAD_DEADLINE_SECONDS', 'SCRY_RECORDER_ENABLED', 'SCRY_TURN_UPLOAD_ENABLED'
+])
+const CONTEXT_ENV_KEYS = ENV_KEYS.filter(key => !ACTIVATION_ENV_KEYS.has(key))
 
 function queuePath(workspace: string): string {
   return join(uploadRoot(workspace), 'jobs')
@@ -65,24 +74,41 @@ function safeReason(error: unknown): string {
     .slice(0, 300)
 }
 function backoff(attempts: number): number {
-  return Math.min(JOB_BACKOFF_MAX_MS, JOB_BACKOFF_BASE_MS * 2 ** Math.min(18, Math.max(0, attempts - 1)))
+  const ceiling = Math.min(JOB_BACKOFF_MAX_MS, JOB_BACKOFF_BASE_MS * 2 ** Math.min(18, Math.max(0, attempts - 1)))
+  return Math.floor(ceiling * (0.8 + Math.random() * 0.2))
 }
 function capturedEnv(env: NodeJS.ProcessEnv): Record<string, string | null> {
-  return Object.fromEntries(ENV_KEYS.map((key) => [key, env[key] ?? null]))
+  return Object.fromEntries(CONTEXT_ENV_KEYS.map((key) => [key, env[key] ?? null]))
 }
 
 function jobEnvironment(worker: NodeJS.ProcessEnv, snapshot?: QueueJob['env']): NodeJS.ProcessEnv {
   const env = { ...worker }
   if (!snapshot) return env // v1 jobs predate environment snapshots
-  for (const key of ENV_KEYS) delete env[key]
-  for (const key of ENV_KEYS) {
+  for (const key of CONTEXT_ENV_KEYS) delete env[key]
+  for (const key of CONTEXT_ENV_KEYS) {
     const value = snapshot[key]
     if (typeof value === 'string') env[key] = value
   }
   return env
 }
 
+const queueMutations = new Map<string, Promise<void>>()
+
 async function mutateQueue<T>(workspace: string, action: () => Promise<T>): Promise<T> {
+  // Serialize local callers before competing for the cross-process lock. A
+  // burst of hooks must not spend its entire lock budget fighting itself.
+  const previous = queueMutations.get(workspace) ?? Promise.resolve()
+  const result = previous.then(() => withQueueLock(workspace, action))
+  const settled = result.then(() => undefined, () => undefined)
+  queueMutations.set(workspace, settled)
+  try {
+    return await result
+  } finally {
+    if (queueMutations.get(workspace) === settled) queueMutations.delete(workspace)
+  }
+}
+
+async function withQueueLock<T>(workspace: string, action: () => Promise<T>): Promise<T> {
   const deadline = Date.now() + 1_000
   let release: (() => Promise<void>) | undefined
   while (!release) {
@@ -213,9 +239,12 @@ export async function enqueueRecordCommit(
 
 export async function enqueueWakeup(
   workspace: string,
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  onlyIfMissing = false
 ): Promise<string> {
   await prepareUploadRoot(workspace)
+  // Persist current denial before handing control to an asynchronous worker.
+  if (env.SCRY_TURN_UPLOAD_ENABLED === '0') await setUploadPolicy(workspace, false, env)
   const trigger = env.SCRY_UPLOAD_TRIGGER
   const precise = trigger === 'completion' || trigger === 'record-commit'
   const identity = [
@@ -244,7 +273,7 @@ export async function enqueueWakeup(
         env: capturedEnv(env),
         generation: 1
       })
-    } else {
+    } else if (!onlyIfMissing) {
       await writeJsonAtomic(path, {
         ...existing,
         notBeforeMs: Date.now(),
@@ -276,6 +305,8 @@ function validJob(job: QueueJob | null, workspace: string): job is QueueJob {
     Number.isSafeInteger(job.notBeforeMs) &&
     job.notBeforeMs >= 0 &&
     (job.maxAttempts === undefined || job.maxAttempts === JOB_MAX_ATTEMPTS) &&
+    (job.generation === undefined || (Number.isSafeInteger(job.generation) && job.generation >= 0)) &&
+    (job.rerunRequested === undefined || typeof job.rerunRequested === 'boolean') &&
     (job.env === undefined ||
       (!!object(job.env) &&
         Object.entries(job.env).every(
@@ -328,17 +359,17 @@ async function executeJob(
     const current = await readJson<QueueJob>(path)
     if (!current) throw new Error('queued job disappeared')
     job = current
-    job.attempts++
     job.lastAttemptAt = now()
     delete job.lastError
     await writeJsonAtomic(path, job)
   })
   let failure: unknown
   try {
-    if (job.attempts > JOB_MAX_ATTEMPTS)
+    if (job.attempts >= JOB_MAX_ATTEMPTS)
       throw new UploadError('job_attempts_exhausted', 'job retry budget exhausted')
-    await runUpload(workspace, {
+    const result = await runUpload(workspace, {
       env: jobEnvironment(env, job.env),
+      legacyUploadDisabled: job.env?.SCRY_TURN_UPLOAD_ENABLED === '0',
       mode: job.kind === 'record-commit' ? 'record-commit' : 'wakeup',
       ...(job.kind === 'record-commit' && job.expectedSequence && job.recordId
         ? {
@@ -351,6 +382,17 @@ async function executeJob(
           }
         : {})
     })
+    if (result.deferredUntilMs !== undefined) {
+      const deferred = new UploadError(
+        'upload_deferred',
+        'upload progress completed; remaining work is deferred',
+        true,
+        result.deferredUntilMs
+      )
+      deferred.deferJobAttempt = true
+      deferred.deferred = true
+      throw deferred
+    }
   } catch (error) {
     failure = error
   }
@@ -373,7 +415,13 @@ async function executeJob(
     }
     const reason = safeReason(failure)
     const retryable = failure instanceof UploadError ? failure.retryable : true
-    if (!retryable || job.attempts >= JOB_MAX_ATTEMPTS) {
+    if (!retryable) {
+      await deadLetterJob(workspace, path, job, reason)
+      return { kind: 'dead' }
+    }
+    const deferAttempt = failure instanceof UploadError && failure.deferJobAttempt === true
+    if (!deferAttempt) job.attempts++
+    if (!deferAttempt && job.attempts >= JOB_MAX_ATTEMPTS) {
       await deadLetterJob(workspace, path, job, reason)
       return { kind: 'dead' }
     }
@@ -381,21 +429,16 @@ async function executeJob(
     job.notBeforeMs =
       failure instanceof UploadError && failure.retryAtMs
         ? Math.max(Date.now() + 100, failure.retryAtMs)
-        : Date.now() + backoff(job.attempts)
+        : Date.now() + backoff(Math.max(1, job.attempts))
     await writeJsonAtomic(path, job)
     return { kind: 'retry', retryAtMs: job.notBeforeMs }
   })
 }
 
 async function acquireWorkerLock(workspace: string): Promise<() => Promise<void>> {
-  while (true) {
-    try {
-      return await acquireDirectoryLock(join(uploadRoot(workspace), 'standalone-queue.lock'))
-    } catch (error) {
-      if (!(error instanceof Error) || error.message !== 'upload worker is already running') throw error
-      await sleep(500)
-    }
-  }
+  // Hooks are edge-triggered. A losing detached worker must exit instead of
+  // becoming a long-lived sleeper for every hook invocation.
+  return await acquireDirectoryLock(join(uploadRoot(workspace), 'standalone-queue.lock'))
 }
 
 export async function runQueueWorker(
@@ -405,14 +448,20 @@ export async function runQueueWorker(
 ): Promise<void> {
   if (!(await exists(join(workspace, 'scry.config.json')))) return
   await prepareUploadRoot(workspace)
-  while (true) {
-    if (!(await exists(join(workspace, 'scry.config.json')))) return
-    const release = await acquireWorkerLock(workspace)
-    let hadJobs = false
-    let executed = false
-    let earliest: number | undefined
-    let workspaceGone = false
-    try {
+  let release: (() => Promise<void>) | undefined
+  try {
+    release = await acquireWorkerLock(workspace)
+  } catch (error) {
+    if (error instanceof Error && error.message === 'upload worker is already running') return
+    throw error
+  }
+  try {
+    while (true) {
+      if (!(await exists(join(workspace, 'scry.config.json')))) return
+      let hadJobs = false
+      let executed = false
+      let earliest: number | undefined
+      let workspaceGone = false
       const paths = await jobPaths(workspace)
       hadJobs = paths.length > 0
       for (const path of paths) {
@@ -430,11 +479,34 @@ export async function runQueueWorker(
         }
         if (options.once) break
       }
-    } finally {
-      await release()
+      if (workspaceGone || options.once) return
+      if (!hadJobs) {
+        // Lost-wakeup handshake: relinquish ownership, then recheck before
+        // deciding that this edge-triggered worker is done.
+        await release()
+        release = undefined
+        if ((await jobPaths(workspace)).length === 0) return
+        release = await acquireWorkerLock(workspace).catch((error) => {
+          if (error instanceof Error && error.message === 'upload worker is already running') return undefined
+          throw error
+        })
+        if (!release) return
+        continue
+      }
+      if (!executed && earliest !== undefined) await sleep(Math.max(100, Math.min(1_000, earliest - Date.now())))
+      else if (executed && (await jobPaths(workspace)).length) await sleep(100)
+      else if (executed) {
+        await release()
+        release = undefined
+        if ((await jobPaths(workspace)).length === 0) return
+        release = await acquireWorkerLock(workspace).catch((error) => {
+          if (error instanceof Error && error.message === 'upload worker is already running') return undefined
+          throw error
+        })
+        if (!release) return
+      }
     }
-    if (!hadJobs || workspaceGone || options.once) return
-    if (!executed && earliest !== undefined) await sleep(Math.max(100, earliest - Date.now()))
-    else if (executed && (await jobPaths(workspace)).length) await sleep(100)
+  } finally {
+    if (release) await release()
   }
 }

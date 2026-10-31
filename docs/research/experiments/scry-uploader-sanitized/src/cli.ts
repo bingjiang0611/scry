@@ -4,7 +4,21 @@ import { resolve } from 'node:path'
 import { VERSION } from './constants.js'
 import { doctorWorkspace, initWorkspace } from './init.js'
 import { enqueueWakeup, notifyRecordCommit, runQueueWorker, validateNotification } from './queue.js'
-import { localUploadStatus, migrateLegacy, releaseDisabled, runUpload } from './uploader.js'
+import {
+  installScheduler,
+  recoverRegistered,
+  registerWorkspace,
+  schedulerStatus,
+  unregisterWorkspace
+} from './scheduler.js'
+import {
+  localUploadStatus,
+  migrateLegacy,
+  pruneAckedBodies,
+  releaseDisabled,
+  runUpload,
+  setUploadPolicy
+} from './uploader.js'
 
 async function canonicalWorkspace(path: string): Promise<string> {
   const root = await realpath(path)
@@ -50,7 +64,11 @@ Usage:
   scry-upload wakeup --workspace ROOT
   scry-upload flush --workspace ROOT [--release-disabled RECORD_ID]
   scry-upload migrate --workspace ROOT
+  scry-upload prune --workspace ROOT
   scry-upload doctor|status [--workspace ROOT] [--json]
+  scry-upload register|unregister [--workspace ROOT]
+  scry-upload enable|disable [--workspace ROOT]
+  scry-upload scheduler-install|scheduler-status [--json]
 `
 }
 async function readStdin(limit = 64 * 1024): Promise<string> {
@@ -97,6 +115,10 @@ export async function runCli(argv: string[]): Promise<number> {
     else print(`Scry 上传链路已初始化：${result.workspace}`, false)
     return 0
   }
+  if (command === 'unregister') {
+    await unregisterWorkspace(workspaceInput)
+    return 0
+  }
   const workspace = await canonicalWorkspace(workspaceInput)
   if (command === 'doctor') {
     const result = await doctorWorkspace(workspace)
@@ -107,8 +129,28 @@ export async function runCli(argv: string[]): Promise<number> {
     print(await localUploadStatus(workspace), json)
     return 0
   }
+  if (command === 'register') {
+    print({ workspace: await registerWorkspace(workspace) }, json)
+    return 0
+  }
+  if (command === 'enable' || command === 'disable') {
+    print(await setUploadPolicy(workspace, command === 'enable'), json)
+    return 0
+  }
+  if (command === 'scheduler-install') {
+    print(await installScheduler(), json)
+    return 0
+  }
+  if (command === 'scheduler-status') {
+    print(await schedulerStatus(), true)
+    return 0
+  }
   if (command === 'migrate') {
     print(await migrateLegacy(workspace), json)
+    return 0
+  }
+  if (command === 'prune') {
+    print({ pruned: await pruneAckedBodies(workspace) }, json)
     return 0
   }
   if (command === 'flush') {
@@ -135,6 +177,10 @@ export async function runCli(argv: string[]): Promise<number> {
   }
   if (command === '_worker') {
     await runQueueWorker(workspace)
+    return 0
+  }
+  if (command === '_recover') {
+    await recoverRegistered()
     return 0
   }
   throw new Error(`未知命令：${command}`)

@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { fstatSync, watch } from 'node:fs'
-import { chmod, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
@@ -11,47 +10,16 @@ import {
   initializeUploadState,
   localUploadStatus,
   migrateLegacy,
-  prepareUploadRoot,
   runUpload,
+  setUploadPolicy,
   takeCustody,
   uploadRoot
 } from '../dist/uploader.js'
 import { run, writeJsonAtomic } from '../dist/util.js'
-
-const fakeTransport = fileURLToPath(new URL('./fixtures/fake-transport.mjs', import.meta.url))
+import { fixture } from './fixtures/reliability-fixture.mjs'
 const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url))
 const hash = (value) => createHash('sha256').update(value).digest('hex')
 const filename = (sequence, recordId) => `${String(sequence).padStart(20, '0')}-${recordId}.json`
-
-async function fixture(t, exportScript) {
-  const root = await mkdtemp(join(tmpdir(), 'scry-reliability-'))
-  t.after(() => rm(root, { recursive: true, force: true }))
-  await writeFile(
-    join(root, 'scry.config.json'),
-    JSON.stringify({ schemaVersion: 1, workspaceId: 'fixture' })
-  )
-  await mkdir(join(root, '.scry/records'), { recursive: true })
-  const scry = join(root, 'fixture-scry.mjs')
-  await writeFile(
-    scry,
-    '#!/usr/bin/env node\n' +
-      (exportScript ??
-        'console.log(JSON.stringify({records:[],nextCursor:0,snapshotMaxSequence:0,hasMore:false}))\n')
-  )
-  await chmod(scry, 0o700)
-  const env = {
-    ...process.env,
-    HOME: join(root, '.home'),
-    XDG_STATE_HOME: join(root, '.state'),
-    TRANSPORT_CLI_PATH: fakeTransport,
-    FAKE_TRANSPORT_LOG: join(root, 'transport.log'),
-    SCRY_CLI_PATH: scry,
-    SCRY_UPLOADER_NO_SPAWN: '1'
-  }
-  await prepareUploadRoot(root)
-  await initializeUploadState(root, 0)
-  return { root, env, base: uploadRoot(root) }
-}
 
 async function custody(root, sequence = 1, extra = {}) {
   const recordId = sequence.toString(16).padStart(32, '0')
@@ -123,6 +91,9 @@ test('legacy payload survives disable, enabled wakeup, local release, and upload
   assert.equal((await localUploadStatus(root)).disabledHeld, 1)
   await assert.rejects(() => readFile(env.FAKE_TRANSPORT_LOG), { code: 'ENOENT' })
 
+  // Unsetting a runtime flag must not silently override a persisted pause.
+  await setUploadPolicy(root, true, env)
+  await runQueueWorker(root, env, { once: true })
   const releaseEnv = { ...env }
   delete releaseEnv.SCRY_UPLOADER_NO_SPAWN
   const release = await run(
@@ -149,7 +120,8 @@ test('equivalent reordered JSON restores canonical raw formatting without resett
   const reordered = JSON.stringify(Object.fromEntries(Object.entries(record.value).reverse()))
   const retry = { kind: 'report_timeout', attempts: 2, notBeforeMs: Date.now() + 60_000 }
   await envelope(record, reordered, 'none', { localRetry: retry })
-  await assert.rejects(() => runUpload(root, { env }), { code: 'report_timeout_cooldown', retryable: true })
+  const result = await runUpload(root, { env })
+  assert.equal(typeof result.deferredUntilMs, 'number')
   const saved = JSON.parse(await readFile(record.path, 'utf8'))
   assert.equal(saved.record, record.raw)
   assert.equal(saved.sha256, hash(record.raw))
@@ -194,7 +166,7 @@ test('remote rejection retains legacy bytes before removing the outbox', async (
   }
 })
 
-for (const mode of ['rejected', 'conflicted', 'timeout']) {
+for (const mode of ['rejected', 'conflicted']) {
   test(`terminal ${mode} preserves distinct raw and legacy submitted bytes`, async (t) => {
     const { root, env, base } = await fixture(t)
     const record = await custody(root, 1, { secret: 'canonical-only-secret' })
@@ -203,12 +175,7 @@ for (const mode of ['rejected', 'conflicted', 'timeout']) {
       workspace: { id: 'fixture', root: '<workspace>' },
       secret: '<redacted>'
     })
-    await envelope(
-      record,
-      legacy,
-      'agent-turn-v1',
-      mode === 'timeout' ? { localRetry: { kind: 'report_timeout', attempts: 11, notBeforeMs: 0 } } : {}
-    )
+    await envelope(record, legacy, 'agent-turn-v1')
     assert.equal((await runUpload(root, { env: { ...env, FAKE_TRANSPORT_MODE: mode } })).deadLettered, 1)
     const diagnostic = JSON.parse(
       await readFile(join(base, 'dead-letter', filename(1, record.value.recordId)), 'utf8')
@@ -224,6 +191,21 @@ for (const mode of ['rejected', 'conflicted', 'timeout']) {
     await assert.rejects(() => readFile(record.path), { code: 'ENOENT' })
   })
 }
+
+test('transport timeout defers without terminally deleting custody bytes', async (t) => {
+  const { root, env, base } = await fixture(t)
+  const record = await custody(root, 1, { secret: 'canonical-only-secret' })
+  const legacy = JSON.stringify({ ...record.value, workspace: { id: 'fixture', root: '<workspace>' }, secret: '<redacted>' })
+  await envelope(record, legacy, 'agent-turn-v1', { localRetry: { kind: 'report_timeout', attempts: 11, notBeforeMs: 0 } })
+  const result = await runUpload(root, { env: { ...env, FAKE_TRANSPORT_MODE: 'timeout' } })
+  assert.equal(typeof result.deferredUntilMs, 'number')
+  assert.equal((await localUploadStatus(root)).lastError, undefined)
+  assert.equal(JSON.parse(await readFile(join(base, 'health.json'), 'utf8')).status, 'deferred')
+  assert.equal((await receipt(base, record.value.recordId)).status, 'pending')
+  assert.equal(JSON.parse(await readFile(record.path, 'utf8')).localRetry.attempts, 12)
+  assert.equal(JSON.parse(await readFile(record.path, 'utf8')).record, legacy)
+  assert.equal(await readFile(join(base, 'outbox/committed', filename(1, record.value.recordId)), 'utf8'), record.raw)
+})
 
 test('atomic state writes never recreate a removed workspace ancestor', async (t) => {
   const { root, base } = await fixture(t)
@@ -288,8 +270,9 @@ test('record timeout attempts are bounded without deleting the payload', async (
     localRetry: { kind: 'report_timeout', attempts: 11, notBeforeMs: 0 }
   })
   const result = await runUpload(root, { env: { ...env, FAKE_TRANSPORT_MODE: 'timeout' } })
-  assert.equal(result.deadLettered, 1)
-  assert.equal((await receipt(base, record.value.recordId)).status, 'dead_letter')
+  assert.equal(typeof result.deferredUntilMs, 'number')
+  assert.equal((await receipt(base, record.value.recordId)).status, 'pending')
+  assert.equal(JSON.parse(await readFile(record.path, 'utf8')).localRetry.attempts, 12)
   assert.equal(
     await readFile(join(base, 'outbox/committed', filename(1, record.value.recordId)), 'utf8'),
     record.raw
@@ -404,6 +387,7 @@ console.log(JSON.stringify({records:[record],nextCursor:1,snapshotMaxSequence:1,
     text: 'token=unredacted-fixture'
   }
   await writeFile(join(root, 'export-record.json'), JSON.stringify(record))
+  await writeFile(join(root, '.scry/records', filename(1, record.recordId)), JSON.stringify(record) + '\n')
   assert.equal((await runUpload(root, { env })).uploaded, 1)
   const sent = (await calls(env))[0]
   assert.equal(sent.payload.redactionVersion, 'none')
@@ -424,6 +408,7 @@ console.log(JSON.stringify({records,nextCursor:2,snapshotMaxSequence:2,hasMore:f
     provider: 'pi',
     sessionId: 'session'
   }
+  await writeFile(join(root, '.scry/records', filename(1, record.recordId)), JSON.stringify(record) + '\n')
   await writeFile(
     join(root, 'export-records.json'),
     JSON.stringify([
@@ -431,12 +416,14 @@ console.log(JSON.stringify({records,nextCursor:2,snapshotMaxSequence:2,hasMore:f
       { ...record, sequence: 2, recordId: 'e'.repeat(32), workspace: { id: 'different-workspace', root } }
     ])
   )
-  await assert.rejects(() => runUpload(root, { env }), { code: 'workspace_mismatch' })
+  const summary = await runUpload(root, { env })
+  assert.equal(summary.uploaded, 1)
   const state = JSON.parse(await readFile(join(base, 'state.json'), 'utf8'))
   assert.equal(state.workspaceId, 'fixture')
-  assert.equal(state.enqueuedThrough, 0)
-  assert.equal((await localUploadStatus(root)).outboxPending, 1)
-  await assert.rejects(() => readFile(env.FAKE_TRANSPORT_LOG), { code: 'ENOENT' })
+  assert.equal(state.enqueuedThrough, 2)
+  assert.equal((await localUploadStatus(root)).outboxPending, 0)
+  assert.equal((await localUploadStatus(root)).deadLetterRecords, 1)
+  assert.equal((await calls(env)).length, 1)
 })
 
 test('both notification versions accept optional path/hash independently', () => {

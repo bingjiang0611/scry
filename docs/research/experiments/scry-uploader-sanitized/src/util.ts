@@ -1,8 +1,17 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
-import { access, chmod, mkdir, open, readFile, realpath, rename, rm, stat } from 'node:fs/promises'
+import { access, chmod, mkdir, open, readFile, readdir, realpath, rename, stat } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
+
+export async function directoryNames(path: string): Promise<string[]> {
+  try {
+    return await readdir(path)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw error
+  }
+}
 
 export function now(): string {
   return new Date().toISOString()
@@ -92,6 +101,13 @@ export interface RunResult {
   stdout: string
   stderr: string
   exitCode: number
+  signal?: NodeJS.Signals
+  timedOut?: boolean
+}
+
+const MAX_PROCESS_DIAGNOSTICS = 64 * 1024
+function boundedDiagnostic(chunks: Buffer[]): string {
+  return Buffer.concat(chunks).toString('utf8')
 }
 
 export async function run(
@@ -108,37 +124,76 @@ export async function run(
     const child = spawn(executablePath, args, {
       cwd: options.cwd,
       env: options.env ?? process.env,
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      detached: true
     })
     const stdout: Buffer[] = []
     const stderr: Buffer[] = []
-    child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk))
-    child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk))
+    let stderrBytes = 0
+    let settled = false
     let timedOut = false
+    let escalation: NodeJS.Timeout | undefined
+    child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk))
+    child.stderr.on('data', (chunk: Buffer) => {
+      // stderr is diagnostics, not protocol data. Keep draining the stream but
+      // retain only a bounded prefix; callers handle diagnostic redaction.
+      if (stderrBytes < MAX_PROCESS_DIAGNOSTICS) {
+        const keep = Math.min(MAX_PROCESS_DIAGNOSTICS - stderrBytes, chunk.length)
+        stderr.push(chunk.subarray(0, keep))
+      }
+      stderrBytes += chunk.length
+    })
+    const killProcessGroup = (signal: NodeJS.Signals): void => {
+      try {
+        if (child.pid) process.kill(-child.pid, signal)
+        else child.kill(signal)
+      } catch {
+        try {
+          child.kill(signal)
+        } catch {
+          // close/error will report the process outcome.
+        }
+      }
+    }
     const timer = options.timeoutMs
       ? setTimeout(() => {
           timedOut = true
-          child.kill('SIGTERM')
-          setTimeout(() => child.kill('SIGKILL'), 1_000).unref()
+          killProcessGroup('SIGTERM')
+          escalation = setTimeout(() => killProcessGroup('SIGKILL'), 1_000)
+          escalation.unref()
         }, options.timeoutMs)
       : undefined
     timer?.unref()
-    child.once('error', reject)
-    child.once('exit', (code, signal) => {
+    child.once('error', (error) => {
+      if (!settled) {
+        settled = true
+        if (timer) clearTimeout(timer)
+        if (escalation) clearTimeout(escalation)
+        reject(error)
+      }
+    })
+    // `close` waits for stdout/stderr to drain. `exit` can fire first and lose
+    // the final diagnostics needed to classify a transport failure.
+    child.once('close', (code, signal) => {
+      if (settled) return
+      settled = true
       if (timer) clearTimeout(timer)
+      if (escalation) clearTimeout(escalation)
       const out = Buffer.concat(stdout).toString('utf8')
-      const err = Buffer.concat(stderr).toString('utf8')
+      const err = boundedDiagnostic(stderr)
       if (timedOut) {
-        const error = new Error(`process timeout after ${options.timeoutMs}ms`) as Error & { code?: string }
+        const error = new Error(`process deadline exceeded after ${options.timeoutMs}ms`) as Error & {
+          code?: string
+          signal?: NodeJS.Signals
+          stderr?: string
+        }
         error.code = 'ETIMEDOUT'
+        error.signal = signal ?? undefined
+        error.stderr = err
         reject(error)
         return
       }
-      if (signal && code == null) {
-        reject(new Error(`process exited with signal ${signal}: ${err.trim()}`))
-        return
-      }
-      resolvePromise({ stdout: out, stderr: err, exitCode: code ?? 1 })
+      resolvePromise({ stdout: out, stderr: err, exitCode: code ?? 1, signal: signal ?? undefined })
     })
     child.stdin.on('error', () => undefined)
     child.stdin.end(options.input ?? '')
@@ -159,35 +214,7 @@ export async function exactGitRoot(input: string): Promise<string> {
   return root
 }
 
-export async function acquireDirectoryLock(path: string): Promise<() => Promise<void>> {
-  try {
-    await mkdir(path, { mode: 0o700 })
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    const owner = await readJson<{ pid?: number; createdAt?: number }>(`${path}/owner.json`).catch(() => null)
-    if (!owner) {
-      const metadata = await stat(path).catch(() => null)
-      const age = metadata ? Date.now() - metadata.mtimeMs : 0
-      if (age < 5 * 60_000) throw new Error('upload worker is already running')
-    }
-    let alive = false
-    if (owner?.pid && owner.pid > 0) {
-      try {
-        process.kill(owner.pid, 0)
-        alive = true
-      } catch {}
-    }
-    const old = !owner?.createdAt || Date.now() - owner.createdAt > 5 * 60_000
-    if (alive || (!owner?.pid && !old)) throw new Error('upload worker is already running')
-    await rm(path, { recursive: true, force: true })
-    await mkdir(path, { mode: 0o700 })
-  }
-  await writeJsonAtomic(`${path}/owner.json`, {
-    pid: process.pid,
-    createdAt: Date.now()
-  })
-  return async () => await rm(path, { recursive: true, force: true })
-}
+export { acquireDirectoryLock } from './locks.js'
 
 export async function sleep(ms: number): Promise<void> {
   await new Promise((resolvePromise) => setTimeout(resolvePromise, ms))

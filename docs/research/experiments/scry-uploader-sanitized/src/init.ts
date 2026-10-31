@@ -3,7 +3,8 @@ import { join } from 'node:path'
 import { actorIdentity, ensureTransportInstalled, toolArgumentStyle } from './transport.js'
 import { PROVIDERS, VERSION } from './constants.js'
 import { enqueueWakeup } from './queue.js'
-import { bundledScryEntrypoint, runScry, uploaderEntrypoint, verifyScryVersion } from './scry.js'
+import { registerWorkspace } from './scheduler.js'
+import { bundledScryEntrypoint, runScry, safeSnapshotMaxSequence, uploaderEntrypoint, verifyScryVersion } from './scry.js'
 import { initializeUploadState, localUploadStatus, prepareUploadRoot } from './uploader.js'
 import {
   ensurePrivateDirectory,
@@ -140,8 +141,12 @@ export async function initWorkspace(
   )
 
   const beforeState = await localUploadStatus(workspace)
-  const baselineSequence = beforeState.initialized === true ? Number(beforeState.enqueuedThrough ?? 0) : 0
+  const baselineSequence =
+    beforeState.initialized === true
+      ? Number(beforeState.enqueuedThrough ?? 0)
+      : await safeSnapshotMaxSequence(workspace, env)
   await initializeUploadState(workspace, baselineSequence)
+  await registerWorkspace(workspace, env)
   await enqueueWakeup(workspace, env)
   return {
     workspace,

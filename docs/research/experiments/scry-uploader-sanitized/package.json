@@ -1,6 +1,6 @@
 {
   "name": "@review/scry-uploader",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "description": "Upload Scry AgentTurnRecord data through agent-trace-service",
   "type": "module",
   "bin": {
@@ -12,7 +12,7 @@
   ],
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.json && chmod +x dist/cli.js",
-    "test": "npm run build && node --test test/*.test.mjs test/custody/*.test.mjs",
+    "test": "npm run build && node --test --test-concurrency=1 test/*.test.mjs test/custody/*.test.mjs",
     "check": "npm test && npm pack --dry-run",
     "prepublishOnly": "npm run check"
   },

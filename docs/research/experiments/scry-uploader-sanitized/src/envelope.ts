@@ -1,8 +1,8 @@
 import { basename } from 'node:path'
-import type { OutboxEnvelope } from './types.js'
+import { LEGACY_REDACTION_VERSION } from './constants.js'
 import { UploadError } from './errors.js'
 import { digest, recordFilename } from './storage.js'
-import { LEGACY_REDACTION_VERSION } from './constants.js'
+import type { OutboxEnvelope } from './types.js'
 import { object } from './util.js'
 
 const RECORD_ID_RE = /^[a-f0-9]{32,64}$/

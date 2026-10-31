@@ -9,6 +9,7 @@ import {
   localUploadStatus,
   releaseDisabled,
   runUpload,
+  setUploadPolicy,
   takeCustody,
   uploadRoot
 } from '../dist/uploader.js'
@@ -34,7 +35,7 @@ async function workspace(dataDir = '.scry') {
     `#!/usr/bin/env node
 const args = process.argv.slice(2)
 const after = Number(args[args.indexOf('--after') + 1])
-console.log(JSON.stringify({ records: [], nextCursor: after, snapshotMaxSequence: after, hasMore: false }))
+console.log(JSON.stringify({ records: [], nextCursor: after, snapshotMaxSequence: 0, hasMore: false }))
 `
   )
   await chmod(scry, 0o700)
@@ -147,6 +148,7 @@ test('disabled custody is retained and explicit release is local-only before upl
     mode: 'wakeup'
   })
   assert.equal(held.uploaded, 0)
+  await setUploadPolicy(root, true, env(log))
   await releaseDisabled(root, recordId)
   receipt = JSON.parse(await readFile(join(uploadRoot(root), 'receipts', `${recordId}.json`)))
   assert.equal(receipt.status, 'pending')

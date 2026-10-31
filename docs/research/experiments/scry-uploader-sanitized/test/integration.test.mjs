@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { chmod, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -18,6 +19,35 @@ test('package pins the tested Scry release', async () => {
     await readFile(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8')
   )
   assert.equal(packageJson.dependencies['@review/scry-turn-recorder'], '0.2.53')
+})
+
+test('native export without a commit callback retains canonical bytes and an ACK receipt', async (t) => {
+  await chmod(fixtureTransport, 0o700)
+  const root = await workspace()
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const testEnv = env(join(root, 'transport.log'))
+  await initWorkspace(root, 'claude', testEnv)
+  const configPath = join(root, 'scry.config.json')
+  const config = JSON.parse(await readFile(configPath, 'utf8'))
+  delete config.commitHook
+  await writeFile(configPath, JSON.stringify(config))
+  await completeClaudeTurn(root, testEnv, 'native-discovery')
+  const records = await readdir(join(root, '.scry/records'))
+  assert.equal(records.length, 1)
+  const raw = await readFile(join(root, '.scry/records', records[0]))
+  const record = JSON.parse(raw)
+  const base = join(root, '.scry/upload')
+  assert.deepEqual(await readdir(join(base, 'receipts')), [])
+  // Drop init's recovery wakeup as well as omitting record notifications.
+  await rm(join(base, 'jobs', 'wakeup-recovery.json'))
+  assert.deepEqual((await readdir(join(base, 'jobs'))).filter(name => name.endsWith('.json')), [])
+  assert.equal((await runUpload(root, { env: testEnv })).uploaded, 1)
+  const receipt = JSON.parse(await readFile(join(base, 'receipts', `${record.recordId}.json`)))
+  assert.equal(receipt.status, 'uploaded')
+  assert.equal(receipt.remoteStatus, 'inserted')
+  assert.equal(receipt.sha256, createHash('sha256').update(raw).digest('hex'))
+  assert.deepEqual(await readFile(join(base, 'outbox/committed', records[0])), raw)
+  assert.deepEqual(await readFile(join(root, '.scry/records', records[0])), raw)
 })
 
 test('init dependency check installs transport when it is missing', async (t) => {
@@ -99,11 +129,13 @@ async function completeClaudeTurn(root, testEnv, sessionId, filename = 'created.
   // Recorder callbacks intentionally filter arbitrary environment keys. Keep
   // fixture workers under test control without weakening that production gate.
   const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8'))
-  const callback = join(root, config.commitHook.entry)
-  const launcher = await readFile(callback, 'utf8')
-  if (!launcher.includes('export SCRY_UPLOADER_NO_SPAWN=1')) {
-    await writeFile(callback, launcher.replace('#!/bin/sh\n', '#!/bin/sh\nexport SCRY_UPLOADER_NO_SPAWN=1\n'))
-    assert.match(await readFile(callback, 'utf8'), /export SCRY_UPLOADER_NO_SPAWN=1/)
+  if (config.commitHook) {
+    const callback = join(root, config.commitHook.entry)
+    const launcher = await readFile(callback, 'utf8')
+    if (!launcher.includes('export SCRY_UPLOADER_NO_SPAWN=1')) {
+      await writeFile(callback, launcher.replace('#!/bin/sh\n', '#!/bin/sh\nexport SCRY_UPLOADER_NO_SPAWN=1\n'))
+      assert.match(await readFile(callback, 'utf8'), /export SCRY_UPLOADER_NO_SPAWN=1/)
+    }
   }
   const prompt = JSON.stringify({
     session_id: sessionId,
@@ -159,7 +191,7 @@ test('init upgrades an older bridge, preserves the cursor, and uploads a later S
   const bridge = join(canonicalRoot, '.scry/provider-hook.sh')
   await writeFile(
     bridge,
-    (await readFile(bridge, 'utf8')).replace('Managed by scry-upload 0.2.0', 'Managed by scry-upload 0.1.4')
+    (await readFile(bridge, 'utf8')).replace('Managed by scry-upload 0.2.2', 'Managed by scry-upload 0.1.4')
   )
   assert.match(await readFile(bridge, 'utf8'), /Managed by scry-upload 0\.1\.4/)
   const second = await initWorkspace(root, 'claude,codex,qoder,opencode', testEnv)
@@ -177,7 +209,7 @@ test('init upgrades an older bridge, preserves the cursor, and uploads a later S
   assert.equal((await initWorkspace(root, 'claude,codex,qoder,opencode', testEnv)).baselineSequence, 1)
   const uploaded = (await readFile(log, 'utf8')).trim().split('\n').map(JSON.parse)
   assert.equal(uploaded.length, 1)
-  assert.equal(uploaded[0].payload.uploaderVersion, 'scry-uploader/0.2.0')
+  assert.equal(uploaded[0].payload.uploaderVersion, 'scry-uploader/0.2.2')
   assert.equal(uploaded[0].decoded[0].sessionId, sessionId)
   assert.equal(uploaded[0].decoded[0].workspace.root, canonicalRoot)
   assert.match(JSON.stringify(uploaded[0].decoded[0].diff), /created\.txt/)
@@ -233,19 +265,11 @@ test('bounded queue retries preserve payload across exhaustion, cooldown, and wo
     jobs.find((name) => name.startsWith('record-'))
   )
   const failedJob = JSON.parse(await readFile(recordJobPath, 'utf8'))
-  assert.equal(failedJob.attempts, 1)
-  // The host-app contract is six job attempts, not unbounded retries.
-  failedJob.attempts = 5
-  failedJob.notBeforeMs = 0
-  await writeFile(recordJobPath, JSON.stringify(failedJob))
-  await runQueueWorker(canonicalRoot, failing, { once: true })
-  status = await localUploadStatus(canonicalRoot)
-  assert.equal(status.jobsPending, 1)
-  assert.equal(status.deadLetterJobs, 2)
-  assert.equal(status.outboxPending, 1) // exhausting a job never removes its data
-  await assert.rejects(() => readFile(recordJobPath), { code: 'ENOENT' })
+  assert.equal(failedJob.attempts, 0)
+  // Transient transport cooldown is local state and never consumes the durable
+  // job retry budget or dead-letters its custody bytes.
+  assert.equal(status.deadLetterJobs, 1)
 
-  await runQueueWorker(canonicalRoot, failing, { once: true })
   const jobPath = join(jobsDirectory, 'wakeup-recovery.json')
   const outboxPath = join(
     outboxDirectory,
@@ -262,22 +286,26 @@ test('bounded queue retries preserve payload across exhaustion, cooldown, and wo
   await runQueueWorker(canonicalRoot, testEnv, { once: true })
   status = await localUploadStatus(canonicalRoot)
   assert.equal(status.outboxPending, 1)
-  assert.equal(status.jobsPending, 1)
+  assert.equal(status.jobsPending, 2)
   assert.equal(status.timeoutRecords, 1)
   assert.equal(typeof status.nextRetryAt, 'string')
   assert.equal(await readFile(log, 'utf8'), callsBeforeCooldown)
   retryJob = JSON.parse(await readFile(jobPath, 'utf8'))
   assert.ok(retryJob.notBeforeMs >= envelope.localRetry.notBeforeMs)
 
-  envelope.localRetry.notBeforeMs = 0
+  envelope.localRetry = undefined
   await writeFile(outboxPath, JSON.stringify(envelope))
   retryJob.notBeforeMs = 0
   await writeFile(jobPath, JSON.stringify(retryJob))
+  retryJob = JSON.parse(await readFile(recordJobPath, 'utf8'))
+  retryJob.notBeforeMs = 0
+  await writeFile(recordJobPath, JSON.stringify(retryJob))
+  await runQueueWorker(canonicalRoot, testEnv, { once: true })
   await runQueueWorker(canonicalRoot, testEnv, { once: true })
   status = await localUploadStatus(canonicalRoot)
   assert.equal(status.outboxPending, 0)
   assert.equal(status.jobsPending, 0)
-  assert.equal(status.deadLetterJobs, 2)
+  assert.equal(status.deadLetterJobs, 1)
 })
 
 test('a corrupt outbox item is quarantined without blocking later recovery', async (t) => {
