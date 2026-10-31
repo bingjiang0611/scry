@@ -3,9 +3,11 @@ import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { join, resolve, posix } from 'node:path'
 import { extractFile, listPackage } from '@electron/asar'
+import { defaultPackagedAppPath, packagedAppLayout } from './packaged-app-layout.mjs'
 
-const appPath = resolve(process.argv[2] || join('dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'Scry.app'))
-const resources = join(appPath, 'Contents', 'Resources')
+const layout = packagedAppLayout(resolve(process.argv[2] || defaultPackagedAppPath()))
+const appPath = layout.appPath
+const resources = layout.resources
 const asarPath = join(resources, 'app.asar')
 const unpacked = join(resources, 'app.asar.unpacked')
 const qoderRelative = join('node_modules', '@qoder-ai', 'qoder-agent-sdk', 'dist', '_bundled', 'qodercli')
@@ -15,7 +17,7 @@ const maxBytes = Number(process.env.SCRY_APP_MAX_BYTES || 330 * 1024 * 1024)
 const scryCli = join(resources, 'bin', 'scry')
 const scryCliPackage = join(resources, 'scry-cli', 'package.json')
 const scryPiIntegration = join(resources, 'scry-cli', 'integrations', 'pi-scry-recorder.mjs')
-const electronResources = join(appPath, 'Contents', 'Frameworks', 'Electron Framework.framework', 'Versions', 'A', 'Resources')
+const electronResources = layout.locales
 
 function directoryBytes(path) {
   const stat = lstatSync(path)
@@ -89,10 +91,17 @@ const sdkIndexInAsar = entries.includes(`/${qoderIndexRelative.replaceAll('\\', 
 const sdkIndexUnpacked = existsSync(join(unpacked, qoderIndexRelative))
 if (!sdkIndexInAsar && !sdkIndexUnpacked) throw new Error('排除 Qoder CLI 时误删了 Qoder SDK JavaScript adapter')
 
-const ptyPrebuild = join(unpacked, ptyRootRelative, 'prebuilds', `darwin-${process.arch}`, 'pty.node')
-const ptySpawnHelper = join(unpacked, ptyRootRelative, 'prebuilds', `darwin-${process.arch}`, 'spawn-helper')
-if (!existsSync(ptyPrebuild)) throw new Error(`packaged app 缺少 node-pty native binding：${ptyPrebuild}`)
-accessSync(ptySpawnHelper, constants.X_OK)
+// node-pty 在 macOS 用随包分发的 prebuilds + spawn-helper（posix_spawn）；
+// Linux 走 node-gyp 的 build/Release forkpty binding，没有 spawn-helper。
+if (process.platform === 'darwin') {
+  const ptyPrebuild = join(unpacked, ptyRootRelative, 'prebuilds', `darwin-${process.arch}`, 'pty.node')
+  const ptySpawnHelper = join(unpacked, ptyRootRelative, 'prebuilds', `darwin-${process.arch}`, 'spawn-helper')
+  if (!existsSync(ptyPrebuild)) throw new Error(`packaged app 缺少 node-pty native binding：${ptyPrebuild}`)
+  accessSync(ptySpawnHelper, constants.X_OK)
+} else {
+  const ptyBinding = join(unpacked, ptyRootRelative, 'build', 'Release', 'pty.node')
+  if (!existsSync(ptyBinding)) throw new Error(`packaged app 缺少 node-pty native binding：${ptyBinding}`)
+}
 
 accessSync(scryCli, constants.X_OK)
 if (!existsSync(scryCliPackage)) throw new Error('packaged app 缺少 App 私有 Scry CLI package.json')
@@ -103,11 +112,19 @@ const historyExtensionHash = createHash('sha256').update(readFileSync(historyExt
 if (!extractFile(asarPath, 'out/main/index.js').toString('utf8').includes(historyExtensionHash)) {
   throw new Error('packaged Pi history reader 与 main 中固定的扩展指纹不匹配')
 }
-for (const locale of ['en.lproj', 'zh_CN.lproj', 'zh_TW.lproj']) {
-  if (!existsSync(join(electronResources, locale, 'locale.pak'))) throw new Error(`packaged app 缺少必需 locale：${locale}`)
+// Electron 的 locale 文件命名随平台不同：macOS 是 <lang>.lproj/locale.pak，
+// Linux 是 Chromium 的 <lang>-<REGION>.pak。electronLanguages 按文件名精确匹配，
+// 所以 Linux 必须在 electron-builder.yml 里单独声明 en-US/zh-CN/zh-TW，否则会被全部裁掉。
+const locales = process.platform === 'darwin'
+  ? { required: ['en.lproj', 'zh_CN.lproj', 'zh_TW.lproj'], forbidden: ['fr.lproj', 'de.lproj', 'ja.lproj'], inner: 'locale.pak' }
+  : { required: ['en-US.pak', 'zh-CN.pak', 'zh-TW.pak'], forbidden: ['fr.pak', 'de.pak', 'ja.pak', 'en-GB.pak'], inner: null }
+for (const locale of locales.required) {
+  const localePath = locales.inner ? join(electronResources, locale, locales.inner) : join(electronResources, locale)
+  if (!existsSync(localePath)) throw new Error(`packaged app 缺少必需 locale：${localePath}`)
 }
-for (const locale of ['fr.lproj', 'de.lproj', 'ja.lproj']) {
-  if (existsSync(join(electronResources, locale))) throw new Error(`packaged app 未裁剪非目标 locale：${locale}`)
+for (const locale of locales.forbidden) {
+  const localePath = join(electronResources, locale)
+  if (existsSync(localePath)) throw new Error(`packaged app 未裁剪非目标 locale：${localePath}`)
 }
 const expectedCliVersion = JSON.parse(readFileSync(scryCliPackage, 'utf8')).version
 // 首次执行刚签名的 bundle 可能触发 macOS 冷启动校验；仍保持有界，但不要把系统负载误判成 CLI 缺失。
@@ -121,13 +138,14 @@ if (bytes > maxBytes) {
   throw new Error(`packaged app 超过体积预算：${bytes} > ${maxBytes} bytes`)
 }
 const sizeBreakdown = {
-  frameworks: directoryBytes(join(appPath, 'Contents', 'Frameworks')),
+  ...(process.platform === 'darwin' ? { frameworks: directoryBytes(join(appPath, 'Contents', 'Frameworks')) } : {}),
   asar: directoryBytes(asarPath),
   unpacked: directoryBytes(unpacked),
   privateCli: directoryBytes(join(resources, 'scry-cli'))
 }
 console.log(JSON.stringify({
   appPath,
+  platform: process.platform,
   bytes,
   maxBytes,
   sizeBreakdown,

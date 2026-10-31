@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 
+# 解析软链接，拿到 Resources/bin/scry 的真实位置。
 self=$0
 while [ -L "$self" ]; do
   base=$(CDPATH= cd "$(dirname "$self")" && pwd -P)
@@ -13,9 +14,18 @@ done
 
 bin_dir=$(CDPATH= cd "$(dirname "$self")" && pwd -P)
 resources_dir=$(dirname "$bin_dir")
-contents_dir=$(dirname "$resources_dir")
+root_dir=$(dirname "$resources_dir")
 
-SCRY_CLI_BUNDLED=1 ELECTRON_RUN_AS_NODE=1 exec \
-  "$contents_dir/MacOS/Scry" \
-  "$resources_dir/scry-cli/dist/cli/scry.js" \
-  "$@"
+# macOS 把 Electron 可执行文件放在 <root>/Contents/MacOS/Scry；
+# electron-builder 的 Linux 解包目录把它放在 <root>/scry。
+# 只接受这两种已验证布局，不从 PATH 猜 Electron。
+if [ -x "$root_dir/MacOS/Scry" ]; then
+  electron="$root_dir/MacOS/Scry"
+elif [ -x "$root_dir/scry" ]; then
+  electron="$root_dir/scry"
+else
+  echo "scry: 找不到随 App 分发的 Electron 可执行文件（已检查 $root_dir/MacOS/Scry 与 $root_dir/scry）" >&2
+  exit 1
+fi
+
+SCRY_CLI_BUNDLED=1 ELECTRON_RUN_AS_NODE=1 exec "$electron" "$resources_dir/scry-cli/dist/cli/scry.js" "$@"

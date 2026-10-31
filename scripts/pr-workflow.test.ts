@@ -59,7 +59,7 @@ function gate(file: string, results: Record<string, unknown>) {
 // Execute the scripts used by GitHub rather than a second implementation of the gate.
 describe('required PR checks', () => {
   for (const [file, dependencies] of [
-    ['ci.yml', ['node', 'cli-compat', 'packaged-electron']],
+    ['ci.yml', ['node', 'cli-compat', 'packaged-electron', 'packaged-linux']],
     ['performance.yml', ['compare', 'native']]
   ] as const) {
     it(`${file} includes all validation jobs, not the optional comment publisher`, () => {

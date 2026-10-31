@@ -96,7 +96,7 @@ jobs:
   check:
     name: Check
     if: ${{ always() }}
-    needs: [node, cli-compat, packaged-electron]
+    needs: [node, cli-compat, packaged-electron, packaged-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -106,3 +106,38 @@ jobs:
         run: |
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
           echo "$RESULTS" | jq -e 'length > 0 and all(.[]; .result == "success")' > /dev/null
+
+  # Linux 打包门禁：只验证产物布局、原生模块、私有 CLI、locale 裁剪与资源 allowlist。
+  # GUI smoke（pack:artifact 里的 smoke:electron）需要可用的 Chromium sandbox setuid 和显示环境，
+  # 本 job 不伪造这两者；界面与 Wayland 行为在目标 Omarchy 机器上验收。
+  packaged-linux:
+    needs: [node, cli-compat]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      QODER_SKIP_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Prepare Electron executable
+        run: node -e "require('node:fs').accessSync(require('electron'))"
+      - name: Prepare Electron native dependencies
+        run: ./node_modules/.bin/electron-builder install-app-deps
+      - name: Build desktop app and private CLI
+        run: |
+          npm run build
+          npm run build:cli
+      - name: Install archive tools
+        run: sudo apt-get update && sudo apt-get install -y libarchive-tools
+      # 发布构建同时产出 dist/linux-unpacked 和 dist/*.pacman；
+      # pacman 的 pkgdesc 曾经静默变空，所以打包产物必须过 check:pacman-package。
+      - name: Package Linux app directory and pacman package
+        run: SCRY_RELEASE_BUILD=1 node scripts/run-electron-builder.mjs
+      - name: Check packaged Linux app
+        run: npm run check:packaged-app
+      - name: Check pacman package metadata
+        run: npm run check:pacman-package
