@@ -25,7 +25,8 @@ export function Composer({
   onInput, onChooseFolder, onUnbindProject = () => {}, onPickRecent, onRemoveRecent, onRetrySlash, onPickSlash,
   onSlashSel, onHideSlash, onSend, onStop, onPasteImages, onPasteClipboardImage, onRemoveDraftAttachment,
   onRemoveQueuedPrompt, onSelectAgent, onAddPiAgent, onRemovePiAgent, onRunModel, onRunEffort, onPermissionMode,
-  onRescan, unavailableAgentIds, agentScopeLabel, renderLocationPicker, remoteHost, composerNotice = null, workspaceContext, workspaceSendLabel
+  onRescan, unavailableAgentIds, agentScopeLabel, renderLocationPicker, remoteHost, composerNotice = null, workspaceContext, workspaceSendLabel,
+  onOpenRunControls
 }: Omit<ChatViewProps, 'selectedId' | 'scrollRef' | 'onSelect' | 'onOpenDiff' | 'onForkTurn' | 'forkableRunIds' | 'onOpenFile' | 'onAnswerQuestion' | 'focusedTurnRunId' | 'scrollNavigation' | 'onTurnRef' | 'historyWindow'>) {
   const remote = remoteHost != null
   const sessionOwnerLoading = sessionLoading || sessionCacheVisible
@@ -194,6 +195,7 @@ export function Composer({
           unavailableAgentIds={unavailableAgentIds} agentScopeLabel={agentScopeLabel} agentLocked={agentLocked}
           runControls={runControls} onRunModel={onRunModel} onRunEffort={onRunEffort}
           onPermissionMode={onPermissionMode} composerMenu={composerMenu} setComposerMenu={setComposerMenu}
+          onOpenRunControls={onOpenRunControls}
           modelValue={modelValue} modelOptions={modelOptions} effortOptions={effortOptions}
           permissionOptions={permissionOptions} loading={runControlsLoading}
           composerStatus={composerStatus} submitting={submitting} sessionLoading={sessionOwnerLoading}

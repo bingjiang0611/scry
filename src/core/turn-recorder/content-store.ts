@@ -3,7 +3,7 @@ import { constants } from 'node:fs'
 import { open, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { isToolContentRef, type ToolContentRef } from '../../shared/tool-content.js'
-import { syncDirectory, writeFileAtomicExclusive, writeFileAtomicExclusiveCopies } from './io.js'
+import { syncDirectory, writeFileAtomicExclusive, writeFileAtomicExclusiveBatch, writeFileAtomicExclusiveCopies } from './io.js'
 
 function contentPath(dataRoot: string, sha256: string): string {
   return join(dataRoot, 'content', 'sha256', sha256.slice(0, 2), `${sha256}.bin`)
@@ -30,6 +30,15 @@ function rememberVerified(path: string, identity: string): void {
   }
 }
 
+function assertContentBytes(existing: Buffer, expected: Buffer, sha256: string): void {
+  if (!existing.equals(expected)) throw new Error(`recorder content collision or corruption: ${sha256}`)
+}
+
+async function verifyAndSyncContent(path: string, existing: Buffer, expected: Buffer, sha256: string): Promise<void> {
+  assertContentBytes(existing, expected, sha256)
+  await syncDirectory(dirname(path))
+}
+
 export async function writeRecorderContent(
   dataRoot: string,
   content: string,
@@ -54,14 +63,48 @@ export async function writeRecorderContent(
     }
   }
   // Incoming bytes already determine the address; compare complete payloads without hashing twice.
-  if (!existing.equals(bytes)) {
-    throw new Error(`recorder content collision or corruption: ${sha256}`)
-  }
-  // The exclusive writer syncs the bytes and ancestor directories before publishing the link.
-  // Reuse must still sync that link: a previous publisher may have failed its final directory sync.
-  // Do not rewrite a temporary copy and fsync every ancestor for each history event on restart.
-  await syncDirectory(dirname(path))
+  // Reuse must still sync the link: a previous publisher may have failed its final directory sync.
+  await verifyAndSyncContent(path, existing, bytes, sha256)
   return ref
+}
+
+/** Publish one already-held snapshot without retaining all UTF-8 buffers or caching directory proof. */
+export async function writeRecorderContentBatch(
+  dataRoot: string,
+  contents: readonly string[],
+  encoding: ToolContentRef['encoding']
+): Promise<ToolContentRef[]> {
+  const refs: ToolContentRef[] = []
+  const seen = new Map<string, string>()
+  const missing: Array<{ path: string; content: string; sha256: string }> = []
+  for (const content of contents) {
+    const bytes = Buffer.from(content, 'utf8')
+    const sha256 = digest(bytes)
+    const path = contentPath(dataRoot, sha256)
+    refs.push({ storage: 'recorder-content-v1', sha256, bytes: bytes.length, encoding })
+    const previous = seen.get(path)
+    if (previous !== undefined) {
+      assertContentBytes(Buffer.from(previous, 'utf8'), bytes, sha256)
+      continue
+    }
+    seen.set(path, content)
+    let existing: Buffer
+    try {
+      existing = await readFile(path)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      missing.push({ path, content, sha256 })
+      continue
+    }
+    await verifyAndSyncContent(path, existing, bytes, sha256)
+  }
+  const outcomes = await writeFileAtomicExclusiveBatch(missing)
+  for (const [index, outcome] of outcomes.entries()) {
+    if (outcome !== 'existing') continue
+    const entry = missing[index]
+    await verifyAndSyncContent(entry.path, await readFile(entry.path), Buffer.from(entry.content, 'utf8'), entry.sha256)
+  }
+  return refs
 }
 
 /** Publish one payload to every authority before exposing its reference. */
@@ -75,10 +118,6 @@ export async function writeRecorderContentCopies(
   const sha256 = digest(bytes)
   const paths = [...new Set(dataRoots.map(root => contentPath(root, sha256)))]
   const missing: string[] = []
-  const verifyAndSync = async (path: string, existing: Buffer): Promise<void> => {
-    if (!existing.equals(bytes)) throw new Error(`recorder content collision or corruption: ${sha256}`)
-    await syncDirectory(dirname(path))
-  }
   for (const path of paths) {
     let existing: Buffer
     try {
@@ -88,13 +127,13 @@ export async function writeRecorderContentCopies(
       missing.push(path)
       continue
     }
-    await verifyAndSync(path, existing)
+    await verifyAndSyncContent(path, existing, bytes, sha256)
   }
   const outcomes = await writeFileAtomicExclusiveCopies(missing, bytes)
   for (const [index, outcome] of outcomes.entries()) {
     if (outcome === 'existing') {
       // A competing publisher won after the initial read. EEXIST alone proves nothing.
-      await verifyAndSync(missing[index], await readFile(missing[index]))
+      await verifyAndSyncContent(missing[index], await readFile(missing[index]), bytes, sha256)
     }
   }
   return { storage: 'recorder-content-v1', sha256, bytes: bytes.length, encoding }

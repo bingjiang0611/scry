@@ -108,25 +108,44 @@ function protectedToolEvent(event: TraceEvent, content: ToolContent, result: boo
     : { ...metadata, inputContent: content, ...(content.content !== undefined ? { input: content.encoding === 'json' ? JSON.parse(content.content) as unknown : content.content } : {}) }
 }
 
+export function toolContentTurnBudget(policy: ToolContentPolicy): number {
+  return policy.toolContentTurnBytes ?? 128 * 1024
+}
+
+/**
+ * One event of the turn projection: the same capture/limit/provenance rules the array form
+ * applies, with the turn budget as an argument so a caller holding a cached prefix can resume
+ * at any index. Returns the projected event and the budget left for the events after it.
+ */
+export function sanitizeToolEvent(
+  event: TraceEvent,
+  policy: ToolContentPolicy,
+  source: string,
+  remaining: number
+): { event: TraceEvent; remaining: number } {
+  if (!['tool', 'skill', 'agent'].includes(event.kind)) return { event, remaining }
+  const result = event.stage === 'tool_result'
+  const existing = result ? event.outputContent : event.inputContent
+  const raw = result ? event.output ?? event.text : event.input
+  // Persisted envelopes keep their provenance and byte bounds across replay.
+  const captured = existing ? sanitizeCapturedContent(existing, policy.toolContentFieldBytes) : captureToolContent(raw, {
+    source, maxBytes: policy.toolContentFieldBytes, ...sourceState(event, !result)
+  })
+  const content = limitToolContent(captured, Math.max(0, remaining), 'turn_budget')
+  return { event: protectedToolEvent(event, content, result), remaining: remaining - content.savedBytes }
+}
+
 export function sanitizeToolEvents(events: TraceEvent[], policy: ToolContentPolicy, source: string): TraceEvent[] {
   if (!isFullToolContentPolicy(policy)) return events
   // The turn budget is declared on the policy, so a whole turn must be bounded,
   // not just each field: a long run can otherwise retain thousands of 8 KiB
   // bodies and overflow a single evidence payload. Later bodies keep their
   // metadata (including any durable reference) and report turn_budget honestly.
-  let remaining = policy.toolContentTurnBytes ?? 128 * 1024
+  let remaining = toolContentTurnBudget(policy)
   return events.map((event) => {
-    if (!['tool', 'skill', 'agent'].includes(event.kind)) return event
-    const result = event.stage === 'tool_result'
-    const existing = result ? event.outputContent : event.inputContent
-    const raw = result ? event.output ?? event.text : event.input
-    // Persisted envelopes keep their provenance and byte bounds across replay.
-    const captured = existing ? sanitizeCapturedContent(existing, policy.toolContentFieldBytes) : captureToolContent(raw, {
-      source, maxBytes: policy.toolContentFieldBytes, ...sourceState(event, !result)
-    })
-    const content = limitToolContent(captured, Math.max(0, remaining), 'turn_budget')
-    remaining -= content.savedBytes
-    return protectedToolEvent(event, content, result)
+    const step = sanitizeToolEvent(event, policy, source, remaining)
+    remaining = step.remaining
+    return step.event
   })
 }
 

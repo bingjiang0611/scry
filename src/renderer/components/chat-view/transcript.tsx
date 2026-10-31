@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Turn } from '../../format'
+import { transcriptGrowthAboveEdge } from '../../chat-scroll'
 import { AssistantTurn, UserMessage } from '../ChatTurn'
 import type { ChatViewProps } from './types'
 
@@ -99,9 +100,14 @@ const TranscriptTurn = memo(function TranscriptTurn({
     const measure = () => {
       const rect = element.getBoundingClientRect()
       const scroller = element.closest<HTMLElement>('.chat-transcript')
-      const anchorEdge = firstMeasurement ? rect.top : rect.top + height.current
-      if (windowed && scroller && anchorEdge < scroller.getBoundingClientRect().top) {
-        scroller.scrollTop += rect.height - height.current
+      // `applyViewRestore` marks the turn it positioned. The row may materialize a frame
+      // later, so the marker survives the restore call and is consumed here.
+      const restoreAnchor = element.dataset.restoreAnchor === 'true'
+      if (restoreAnchor) delete element.dataset.restoreAnchor
+      if (windowed && scroller) {
+        const growth = transcriptGrowthAboveEdge({ top: rect.top, height: rect.height, previousHeight: height.current,
+          firstMeasurement, restoreAnchor, edge: scroller.getBoundingClientRect().top })
+        if (growth !== 0) scroller.scrollTop += growth
       }
       height.current = rect.height
       firstMeasurement = false
@@ -164,7 +170,7 @@ const TranscriptTurn = memo(function TranscriptTurn({
 
   return <div
     className={`turn transcript-turn ${selected ? 'is-selected' : ''} ${focused ? 'turn-jump-target' : ''}`}
-    data-run-id={turn.runId} data-selected={selected || undefined} data-virtualized={!mounted || undefined}
+    data-run-id={turn.runId} data-turn-ordinal={turn.ordinal} data-selected={selected || undefined} data-virtualized={!mounted || undefined}
     ref={setShell} role="article"
     aria-label={!mounted ? `第 ${index + 1} / ${total} 轮：${labelPreview}` : undefined}
     tabIndex={windowed ? 0 : undefined} onFocusCapture={() => setVisible(true)}

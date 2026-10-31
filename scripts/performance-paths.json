@@ -97,9 +97,34 @@
         "ipc.conversation:fork",
         "ipc.conversation:update",
         "ipc.conversation:previewDeletion",
-        "ipc.conversation:delete"
+        "ipc.conversation:delete",
+        "ipc.conversation:previewSideChat",
+        "ipc.conversation:createSideChat",
+        "ipc.conversation:listSideChats",
+        "ipc.conversation:findSideChatCommand"
       ],
       "sources": [
+        "src/main/conversation-side-chat.ts",
+        "src/main/conversation-side-chat-source.ts",
+        "src/main/conversation-side-chat-coverage.ts",
+        "src/main/conversation-side-chat-schema.ts",
+        "src/main/conversation-side-chat-snapshot.ts",
+        "src/main/content-manifest.ts",
+        "src/main/conversation-history-text.ts",
+        "src/main/bootstrap/side-chat-source.ts",
+        "src/main/conversation-side-chat-stream.ts",
+        "src/main/conversation-side-chat-streamed.ts",
+        "src/main/conversation-side-chat-native-stream.ts",
+        "src/main/claude-jsonl-projector.ts",
+        "src/main/pi-native-stream.ts",
+        "src/main/pi-jsonl-projector.ts",
+        "src/main/jsonl-record-scanner.ts",
+        "src/main/conversation-side-chat-manifest.ts",
+        "src/main/conversation-side-chat-capture.ts",
+        "src/main/conversation-side-chat-reader.ts",
+        "src/main/trace-archive-projection.ts",
+        "src/main/text-spool.ts",
+        "src/main/utf8-chunks.ts",
         "src/renderer/App.tsx",
         "src/renderer/app-state.ts",
         "src/renderer/app-interaction.tsx",
@@ -113,7 +138,7 @@
       "benchmarks": [
         "navigation.catalog"
       ],
-      "gap": "handler settle 可能包含用户目录选择等待，不能当纯计算；已测 500 条 catalog 读回及原生会话快速切换，未覆盖所有项目管理动作的屏幕就绪。"
+      "gap": "handler settle 可能包含用户目录选择等待，不能当纯计算；已测 500 条 catalog 读回及原生会话快速切换，未覆盖所有项目管理动作的屏幕就绪。原生正文捕获（native stream / jsonl 投影 / 快照清单）只做了来源分类：collector 的 navigation.catalog 不驱动真实正文捕获，因此这些模块被改动时仍必须另跑 performance:measure，分类本身不增加 benchmark 覆盖。"
     },
     {
       "id": "history",
@@ -127,10 +152,13 @@
         "ipc.agent:loadSessionOlder",
         "ipc.agent:turnTerminalEvidence",
         "ipc.conversation:read",
-        "ipc.conversation:readItem"
+        "ipc.conversation:readItem",
+        "ipc.conversation:readSideChatSnapshot"
       ],
       "sources": [
         "src/main/session-history.ts",
+        "src/main/conversation-read.ts",
+        "src/main/conversation-turn-history.ts",
         "src/main/bootstrap/history-load.ts",
         "src/main/bootstrap/history-project-recency.ts",
         "src/main/bootstrap/workspace-runtime.ts",
@@ -192,6 +220,7 @@
         "src/main/bootstrap/workspace-start.ts",
         "src/main/bootstrap/run-frontdoor.ts",
         "src/main/bootstrap/run-admission.ts",
+        "src/main/workspace-overlap.ts",
         "src/main/bootstrap/run-startup.ts",
         "src/main/bootstrap/run-execution.ts",
         "src/main/source-control/workspace-start.ts",
@@ -210,7 +239,7 @@
       "benchmarks": [
         "send.codex-fixture"
       ],
-      "gap": "日常日志的首段文本仍是 main 收到，不是 UI 可见。独立 native 夹具已测可信 Send 按钮到真实正文视口命中和两帧就绪；不产出文本的早停 run 单列 unavailable/cancelled，不伪造可见时间。外部 Provider 等待与本机阶段分开分析，仍需独立验收。统一对话已有功能 smoke，尚无独立的长会话/并发性能基准。"
+      "gap": "日常日志的首段文本仍是 main 收到，不是 UI 可见。独立 native 夹具已测可信 Send 按钮到真实正文视口命中和两帧就绪；不产出文本的早停 run 单列 unavailable/cancelled，不伪造可见时间。外部 Provider 等待与本机阶段分开分析，仍需独立验收。统一对话已有功能 smoke；scripts/concurrent-performance.mjs 已有 N=1/3/5 独立工作区的离线并发实验，尚未接入固定基准或门禁。长会话仍缺独立性能基准。"
     },
     {
       "id": "stream",
@@ -218,11 +247,20 @@
       "owner": "compose-live-control",
       "operations": [
         "ipc.agent:traceAck",
-        "ipc.agent:traceResynchronized"
+        "ipc.agent:traceResynchronized",
+        "ipc.runTraces:"
       ],
       "sources": [
         "src/main/trace-output.ts",
+        "src/main/run-trace-router.ts",
+        "src/main/bootstrap/run-trace-ipc.ts",
+        "src/preload/run-traces.ts",
+        "src/renderer/run-trace-stream.ts",
+        "src/renderer/run-trace-stream-session.ts",
+        "src/renderer/hooks/useLegacyDiffPreviewDemand.ts",
+        "src/renderer/hooks/useRunTraceStream.ts",
         "src/renderer/format.ts",
+        "src/renderer/trace-batch.ts",
         "src/renderer/remote-trace.ts",
         "src/renderer/turn-stream-projection.ts",
         "src/renderer/chat-scroll.ts",
@@ -266,7 +304,7 @@
       "benchmarks": [
         "controls.stop-lifecycle"
       ],
-      "gap": "已测受控 Provider 中断与真实 App 的 Stop 按钮到终态、两帧空闲界面；覆盖 native turn ID 前及正文可见后停止，并独立核对退出后的归档。真实 Provider、强杀、steer、审批、并发争用和焦点切换不由该固定场景证明。"
+      "gap": "已测受控 Provider 中断与真实 App 的 Stop 按钮到终态、两帧空闲界面；覆盖 native turn ID 前及正文可见后停止，并独立核对退出后的归档。scripts/concurrent-performance.mjs 另测离线并发争用，但未覆盖中断或焦点切换。真实 Provider、强杀、steer、审批、并发中断和焦点切换不由该固定场景证明。"
     },
     {
       "id": "persistence",
@@ -375,6 +413,8 @@
         "src/main/source-control/process.ts",
         "src/main/source-control/mutation.ts",
         "src/main/git.ts",
+        "src/main/session-diff.ts",
+        "src/main/run-diff-previewer.ts",
         "src/core/turn-recorder/git-workspace-snapshot.ts",
         "src/core/turn-recorder/git-branch-base.ts",
         "src/core/turn-recorder/git-diff-history.ts",

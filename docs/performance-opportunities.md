@@ -1,5 +1,25 @@
 # 性能机会日志
 
+## 本地可见需求与同进程锁争用（2026-10-30，L1 / 受控 L2）
+
+用户确认完整方案后，本地 Legacy/Unified/Side Chat 实时 Diff 按消费者需求采集；隐藏正文但可见 Overview/Diff/Agents 时仍保持鲜活。返回视图在真实隔离 App 内验证 2 秒内显示新证据，原动画和两份 CSS 字节不变。无需求控制的旧 artifact、窄 Files、最大化 Overview 均有失败对照与最终源码验收。远程没有可见性协议，保守维持采集，不假装全面远程停采。
+
+同绝对锁路径进程内 FIFO 保留每次真实文件系统锁与全部同步屏障。受控同工作区 N5 commit 尾部均值 243.65→165.28 ms、锁尝试 26.33→5、owner 读取 31.33→10；持有时间也变化，不把全部毫秒收益归给队列。810 次内容读取中 205 次成功路径无重复，不凭猜测增加缓存。
+
+冻结 Native N1/3/5 共12个低负载案例：N5 Git 213.5→135，但总完成 27.30→27.53 秒、内存不改善，不能称整体更快。归档解压后重验36 records、720完整文件、14400有序delta、2880工具双 authority blob、2160完整patch引用。最终236/CLI55单测5118通过，完整UI原脚本重放、ratchet及开发包通过；原始焦点瞬态失败未归因，保留而不称修复。用户选择只保留ZIP，本轮未安装、未重启、未push；磁盘目标检查期间由227变为235，未将其当作本轮安装或日常loaded版本。完整范围、失败与原始证据见[实验/交付](performance-experiments/20261030-live-diff-demand-lock-queue.md)；无真实Provider或日常L3结论。
+
+## 并发 preview 与目录批处理（2026-10-30，L1/L2 受控验证）
+
+保留 0.2.234 credits/圆角改动后，首轮兼容 preview 只共享在途读取；同一 diff snapshot 的 patch 只合并公共祖先目录准备，每个文件及链接仍完整同步。N=1/3/5 Git 100→70、252→162、411→254；main sync attempts 下降 14.5%。离线 Native 两次/格完成均值 22.98→22.76、26.12→25.64、30.33→26.93 秒；高负载 N=5 整组保留并另做完整对照，不混入 L2。
+
+54 records、1080 文件及完整工具输出、21600 有序 delta、4320 份工具双 authority blob、3240 patch 引用全部核验。GPU CPU 上升、RSS 不全面改善，不能称整体 CPU/内存优化；扫光三种候选无收益，未采用、不降帧。不是隐藏 run 全面停采、跨轮读缓存或全局写调度完成。已安装 App 0.2.235 / CLI 0.2.54（日常实例未代为重启）；源码、完整门禁、原失败与剩余边界见[本轮记录](performance-experiments/20261030-preview-and-content-batch.md)。L3 未执行，不改 ledger 或门禁上限。
+
+## Managed Claude 工具 Hook（2026-10-29，L2 已验证）
+
+每会话仍有 42 个 shell，但重复工具 Hook 不再启动 CLI；CLI 42→2。最新 Side Chat 基线的 N=1/3/5 ABBA 保守 Hook CPU 降幅为 78.39% / 79.44% / 81.87%。完整工具/文件/文本证据、恢复边界与视觉实现保留。Renderer CPU 上升约 22%–58%，Git 增量已定位为更多真实快照，不能据此宣称 App 整体更快或内存改善；不改动画/节流来美化数字。
+
+已集成并安装 0.2.232，私有 CLI 0.2.53；日常实例未由本任务重启。两组独立实验、失败与负向控制、source/build 映射，见 [实验收口](performance-experiments/20261029-managed-hook-skip.md)。L3 未验证；下一步由用户正常使用新 build 收集同场景至少 30 样本、至少 2 会话，再做只读对比。未改门禁上限、未升 candidate、未调用真实 Provider。
+
 由 `.agents/skills/scry-performance-climb` 维护。记录当前机会排名、大胆想法和覆盖缺口；实验（含失败）各自一个文件放在 `performance-experiments/`。数据结论必须注明来源与成熟度。排名超过 14 天或跨过一次发布需重新分析。
 
 ## 静态交接批次 A（2026-10-22/23，仅 perf/handoff，待核验）
@@ -57,130 +77,12 @@
 - 本机类型/build、iPhoneOS unsigned SDK 编译、完整 renderer UI、25 项失效 focused 已通过；本机完整 unit 的 Rename 超时和 Swift TLS leaked promise 首次记录保留。用户授权 mac2 复验冻结 `54e9dd1`：完整 unit **3491 pass / 4 既有 opt-in skipped**、完整 renderer UI、类型/build、Swift build、完整43项计数及 ratchet/propose/guard 均通过。未修改测试期限，未应用1字节的无关 candidate baseline 提议。mac2 Swift test 因无 XCTest/完整 Xcode 未进入执行，不把它当作 TLS 问题已解决。
 - 测试 owner 下一步在完整 Xcode 环境运行原 Swift 全套并复核 TLS；性能 owner 补独立冷/热 L2。mac2 计数时 load3.09→3.45/8核、highLoad=false，但这不是毫秒收益证明。三个 CPU 指令 candidate 缺失仍为 missing，不记0。未合入、push、安装或真机重放。范围、各轮原始失败及交付身份见[本次记录](performance-experiments/20261021-provider-discovery.md)。此前 0.2.216 安装问题是另一冻结产物，不混为本次安装结果。
 
-## 独立 CLI 多仓库采集（2026-10-21，受控实验；未改生产）
+## 历史交付与实验
 
-- 独立 CLI 日常样本提示每轮通常采集 18–19 个仓库；不能用 App journal 替代其热点证据。当前优先多仓库采集与通知重复工作，暂缓用户级服务和内容存储重建。
-- 固定 19 仓库 × 512 文件、每种调度 4 轮：19/4/1 路峰值子进程为 38/8/2，全部证据断言通过；正常无变化轮均需 190 次 Git。19 路有一轮出现 16 次 discovery_failed fallback、额外 31 次 Git，其他调度本轮没有。
-- 测量源码 `3f30987`；10 核机器负载 75.25→45.48，L2 unavailable，不据此改生产并发值或宣布提速。未优化、未合入、未安装、未推送，台账不变。
-- 后续：性能 owner 在低负载下重测同一负载，不改变原 workload 或 deadline。范围与原始结果见[实验记录](performance-experiments/20261021-cli-multirepo-concurrency.md)。
+- [2026-10-20/21：CLI、通知、目录与 UI](performance-experiments/20261021-opportunities-history.md)
+- [2026-10-17：爬坡与集成验收](performance-experiments/20261017-opportunities-history.md)
 
-## 零候选快照复用（2026-10-21，L1 已验证，未部署）
-
-- `9391016` 在完整 Git 发现成功且无候选时复用同一不可变基线和 discovery index，不再重建并比较相同快照。没有跨轮缓存，没有缩小采集范围，没有改生产并发。
-- 沿用原 19 仓库 × 512 文件负载及 19/4/1 路调度：无变化轮 Git 190→114（−40%）；单仓改动轮 192→120，所有证据及完整 patch 断言通过。峰值仍为 38/8/2。
-- 270 项 focused、typecheck、CLI build、3480 项 full unit（4 个既有 opt-in skipped）通过；现有 source-control.diff 计数仍为 8，ratchet 通过。先前全量测试不稳定不据本次通过宣称根治。
-- 两次 timing-run 均 highLoad，L2 unavailable、L3 未验证；未安装、合入、推送或发布。性能 owner 在低负载时对同一完整负载补两侧 L2，发布 owner 再确认分发；详见[实验记录](performance-experiments/20261021-cli-empty-candidates.md)。汇总优化见下节；历史读取优化仍待下一批。
-
-## CLI 汇总按记录分组（2026-10-21，L1 已验证，未部署）
-
-- 测量 `ed5c47f` 与优化 `7e8d481` 分开提交。文件调用只按 record 对象身份分组一次，不再每条记录三次扫描整个时间线；保留 legacy 回退、推断和证据质量。
-- 固定 186 轮 / 3348 调用，OrderedCall.record 读取 1,889,376→24,540（−98.70%），完整输出 hash 不变；单轮 156→120。计数不含所有 Map 工作，不等于总 CPU 或耗时比例。只读快照 2181 条记录、全部 531 个 session 的新旧完整汇总 JSON 相等。
-- 56 项相关测试、typecheck、CLI build 通过。全量 3481 通过、1 个未改动 Git 查询 timeout、4 个既有 opt-in skipped；两侧定向通过不抹掉首次失败，也没有扩大 timeout。现有 source-control.diff 计数仍为 8，ratchet 通过。
-- 两侧计时均 highLoad，单轮原始耗时上升尚不能归因；性能 owner 需在低负载下同时复测 1 / 186 轮，不能以长会话收益抵消小输入风险。未合入、安装、推送或发布，见[实验记录](performance-experiments/20261021-cli-summary-linear.md)。verify 后续优化已完成，见下节；会话选择性读取尚未实施，不预先建设持久索引。
-
-## CLI verify 单次读取（2026-10-21，受控 L1 / L2 已验证，未部署）
-
-- 测量 `aec4a47`、实现 `2a99eb6`、追加冷进程计时 `1643c23` 分开提交。复用 canonical 校验读取，仅计算身份覆盖；不再第二次读取/解析或构造无关汇总。完整性失败仍退出 4，坏记录身份仍为 unknown。
-- 固定 64 条、每条 prompt 64 KiB：读取 / parse 128→64，字节 8,614,000→4,307,000；保留 schema 校验，tools 属性读取 1,024→64。完整输出相同。
-- 真实 CLI 新进程、文件缓存已热，3 预热 / 9 样本：p50 103.264→78.285ms（−24.19%），p95 106.763→80.276ms。10 核 load1 7.35 / 8.28，timing-run 两侧均非 highLoad；只覆盖此固定负载，不是日常 L3 或其他规模结论。
-- 62 项 focused、609 项 CLI gate、临时 package smoke、typecheck / build 通过；全量 3488 通过、4 项既有 opt-in 跳过。旧实现新测试负对照 4 项失败；未削弱断言或门限。旧快照 2181 条记录前后 CLI 输出和退出码相等，均保留原有 120 处序号缺口；后续[只读调查](performance-experiments/20261022-cli-sequence-gaps.md)确认这覆盖 230 个缺号，源目录也缺失，无正常归档凭证；具体移除来源仍 unknown。数据维护者需提供历史备份或清理记录再定位，不能补造记录。
-- 未合入、安装、推送或发布。性能 owner 后续评估会话选择性读取，若需持久索引先征求架构授权；此前两项优化的 L2 仍按原记录补齐。详见[实验记录](performance-experiments/20261021-cli-verify-once.md)。
-
-## 通知身份隔离（2026-10-21，已部署独立 CLI 0.2.50）
-
-- 经另行在线授权，发现 App 与 CLI 不同指纹共用一个 ACK 文件，成功投递仍反复擦除另一身份进度。项目 bridge 合成 override 的问题已修复，但不是完整根因；没有改变 host 优先级或把两个指纹强行归一。
-- `6d4b62c` 按指纹持久保存 ACK、只读兼容旧文件。601 项 CLI 门禁与真实双版本进程并发通过，已更新两个实际独立 CLI 入口和 daemon，App 未更新。后续自然新增记录 2435 来自旧版本；App 身份旧文件为 ACK 15，新 CLI 独立文件为 ACK 2435、backlog 0，未互相覆盖。这是有限场景正确性证据，不是 L2/L3 提速证据。
-- 通知任务数不等于未上传记录数，也不把 CLI backlog 0 当作所有身份均已清空。已有队列保留，历史上传死信未重投；测试维护者后续需按全量执行顺序调查 7 项不稳定失败，本次不扩大到 App 修复。详见[交付记录](performance-experiments/20261021-cli-ack-isolation.md)。
-
-## 0.2.216 安装进度（2026-10-21，包启动仍受阻）
-
-完整 CLI gate 588 项、App unit 3463 项（另 4 opt-in skipped）、shell、类型检查和构建已通过；源码冻结 `a868251`。构建目录的签名包在私有 CLI/GUI 启动时收到 SIGKILL，尚未完成 packaged smoke，未执行安装。相同字节诊断副本与已安装 0.2.215 的对照结果、首次失败及日志见[实验记录](performance-experiments/20261021-desktop-ui-fluidity.md#0216-发布验证续跑2026-10-21)。下一步由发布/系统诊断 owner 定位该启动问题，不再重复全量测试碰运气；不修改系统防护或直接安装未通过门禁的包。
-
-## Mac UI 流畅性续轮（2026-10-21，Pi 历史打开重复归档读取）
-
-- 固定调用链复核确认：Pi 历史打开先用 `readTraceArchivePageAsync` 读取最近页；若同时存在 Pi 原生历史，随后无条件再次 `readTraceArchiveAsync` 以做 ID 对账。最近页已是 complete（`hasOlder=false`）时，这次完整读取是重复工作；超过 40 轮的 partial 页仍必须完整读取，不能把分页证据当成全量证据。
-- 最小修复：native-history 对账复用已证明 complete 的首个 archive page；partial 页保留权威完整读取。不会改变 native/Scry ID 对账、cwd/provider/session 栅栏、附件 hydration 或错误状态。
-- 证据：`src/main/session-history.test.ts` 新增 callback 负对照，complete page 不调用 full-read，partial page 调用一次；31 项通过。Pi 原生历史隔离 Electron 验收通过，验证 41 轮分页、archive reconciliation、无 Provider 执行。`npm run typecheck` 与 `npm run build` 通过。
-- 性能级别：L1 代码路径/读取次数推导；本轮未做高负载下毫秒结论，也没有 L3 日常收益结论。减少的工作是 complete archive 的第二次读取，未移到后台、未缓存过期证据、未改变 workload。
-- 限制与下一步：partial/legacy archive 仍可能读取完整源；需在并行工作冻结且机器负载正常时，以现有 history-opening native fixture 记录 archive read count 与点击→首个可用历史分段，再决定是否继续改动。`performance:measure --scenario navigation.catalog` 仍因无匹配 collector 不作为本轮证据。
-
-## Mac UI 流畅性首轮（2026-10-21，源码已验证；首轮安装门禁受阻）
-
-- 固定 277 会话原生 UI fixture：切换行执行 **555 → 2**，hover **280 → 5**；20 次流式更新仍不重绘 Sidebar。存档 277 行两次渲染的新建日期格式化器 **554 → 0**（复用模块实例）。均为 **L1**，不等于用户日常端到端耗时下降。
-- 保留视觉与交互；取消 hover owner 的列表级 context 广播，memo 隔离无关行；减少动态效果时真正禁用 transition。完整 renderer UI、typecheck、build 通过。
-- 两轮安装门禁的 unit 分别有 1/13 个失败（高负载下后端超时、清理失败及一个 Codex fixture SIGABRT）；未绕过门禁，未安装、未替换用户实例。修改隔离在分支，不混入主工作区并行 WIP。已安装 0.2.215 与当时源码 0.2.214 的版本差异本身不是阻碍；安装策略要求从已提交源码构建，后续恢复已确认 repair commit 已在提交树中。
-- 下一优先：集成 owner 在并行工作冻结、负载正常后重验安装；性能 owner 单独测历史打开与 Provider 能力加载，现有等待不能靠动画修复。iPhone 留待真机轮次。
-- 固定负载、负对照、首次失败和限制见 [实验记录](performance-experiments/20261021-desktop-ui-fluidity.md)。
-
-## 目录观测与传输修复交付（2026-10-20，已安装、待手动重启）
-
-[0.2.211交付记录](performance-experiments/20261020-catalog-observation-0211.json)已冻结本次范围：原样迁移此前 `ee782b4` 的最小脱敏目录观测，并将当前WIP中已有的Mac1连接元数据剥离修复纳入安装包。不实现按需刷新，不改变冷发现、进程退出、模型/权限或Owner/trust语义。
-
-- App **0.2.211**、CLI仍为 **0.2.49**；安装build `f6c2a4d279d7a731369907876e52976cd717638cdd7cf541d6d75fd340e00dc1`，已按 `npm run install:mac:dev` 安装 `/Applications/Scry.app`，源码build与安装包嵌入值一致。已核对编译后的元数据剥离逻辑、三个registry观测入口及两个Pi观测名称。
-- 验证：完整typecheck、3486 unit（4项既有opt-in跳过）、shell、587 CLI release、完整renderer UI（含Credits）、packaged resource/ABI/security/remote-host门禁通过。Pi工作量对照均不变：RPC进程1→1、响应4→4、grace expiry 0→0、环境Node进程1→1；无worse，不报毫秒或提速。
-- 保留首轮聚焦合并命令120秒超时；拆分用例和最终全量通过，未放宽断言或测试超时。安装取证先后修正了VM缺少原生 `structuredClone`、把动态registry事件名误当完整字面量的工具假设；这些不是产品故障。
-- 安装基于 `be907ef` + 已冻结的既有WIP基线 `b1df508a…` 及本次迁移/版本变更。72项既有脏路径已逐项验哈希，package原有脚本修改保留。既有remote/iOS工作不混入本次源码提交；不能声称仅凭新提交即可复现整个WIP安装包。
-- **尚未生效/未验收**：用户进程PID14356仍运行0.2.209/build `6bd35f8c…`，未被自动重启。需用户手动退出并重开Scry后，由我确认运行build及gateway绑定，再在已获准的iPhone13重放Mac2文件夹/Provider/模型路径。修复版真机结果、完整首次目录/relay可见耗时仍未验证；不把安装成功当作手机错误已修复。
-
-## 最新爬坡进展（2026-10-17）
-
-用户选择方案一（常驻执行服务）与方案二（增量证据引擎）；已完成五个有独立计数与受控毫秒证据的前置优化，不代表两套架构已经交付。
-
-**0.2.197 当前交付状态（2026-10-17，已安装并核对实际运行）**：
-
-- 冻结安装源码 `313f451`（base `2adcfdb`），包含五项优化。构建期间稍后提交的 `2405d92` **不在本安装包中**，不得称为最新 main 完整交付；main 中该改动保留。版本元数据通过 `ae84ff2` 集成，原始安装源码仍以 `313f451` 为准。
-- App **0.2.197**、CLI **0.2.49**，完整 build ID `5ef349e1d00e156fdcbedff0e1705e039b0969a23f8c7a77da38418482d4bf44`。冻结包 typecheck、3331 unit（4既有 opt-in skipped）、shell、587 CLI release、packaged check 与全部 packaged smoke 通过。
-- 首次新签名包 CLI 仍曾 SIGKILL（PID11281），原始 `pack.log` 保留。深度签名与同一原生二进制诊断通过后，同一未改动包通过剩余打包门禁；未改测试、安全策略或重签名来绕过。终止来源仍未知，不能因后续成功宣称根因修复。
-- 用户已授权正常退出旧 App 并启动新版。前台退出两次都中断了作为 Scry 子进程的当前 Pi，且均未安装；最后交由独立 launchd 一次性任务正常退出 PID23211，再调用原样的 `scripts/install-macos.mjs`。安装器返回成功（自带目标 CLI/版本校验），目标 asar/可执行文件 SHA 与冻结产物一致，目标深度签名通过。**安装时间 2026-10-17T12:39:42.021Z**，目标 `/Applications/Scry.app`，旧版备份 `/Applications/.Scry.app.backup`。
-- **实际生效证据**：新 PID **35636** 的真实 userData 由已打开的 `scry.db` 路径确认；真实 packaged 日志匹配版本/build，首条 **2026-10-17T12:39:42.982Z**。安装后快照经现有 gzip-aware `readRecords` 解析 82713 条、issues为空，其中新 build 659 条、1个会话；这些只是身份与运行记录，**不是659个完成场景，也不是L3改善结论**。一次性诊断器最初将 gzip 当 JSON 解析失败，改用现有 helper 后通过；这不是产品失败，未改日志或分析合同。
-- 核对证据：`/tmp/scry-install-performance.ROQOkg/handoff-receipt.json`、`runtime-verification.json`、`install-identity.json`、`install.log`。保留初次失败/最终检查日志与诊断构建；安装任务正常完成、exit0、仅运行1次，已 `bootout` 自有服务 `gui/502/com.scry.install.performance.ROQOkg`，未留下活跃安装任务。未推送或正式发布；此为本机 Apple Development 签名安装，不冒充 Developer ID 公证发布。
-- 本地日志快照：`/Users/baobingjiang/scry-performance-archive/20261017-{before,after}-0.2.197-ROQOkg`。安装前保留旧证据；当前热点必须显式选择新 build，旧 build 只作历史对照。日常 baseline 的场景/环境/source匹配与 L3 仍未验证；需要同场景两侧各 ≥30 样本、≥2 会话和数据健康证据后再比较。
-
-**前次集成交付快照（0.2.196 验证包，仅作历史记录）**：
-
-- 优化源码：`7ac7fcb`（前两项）、`afd8f03`、`aff6006`、`06a3f41`。通过 `89e4465` 合入 main，合入前 main 为 `a091c22`；原生会话 fork、远端会话改动均保留。
-- 构建：验证产物 App **0.2.196**，完整 build ID `1d7585fc0e27063072cc5fc0975b074a3a192800dedb1d68cf4888da9710b2e1`。产物 SHA 与源码树对应证据在 `/tmp/scry-perf-integration.B1UmYE/identity.json`；这是测试构建，不是已安装实例。
-- 安装/生效：本次未安装、未推送或发布。宿主实际版本/build ID、安装/首次生效时间、日常 baseline→candidate 映射仍为 `unknown`。L3 待验证；旧 build 热点不能据此判为优化回归或触发同一优化重做。
-- 验证级别：下表 L2 保留原实验源码归属；集成版重验功能及 40 项工作量计数，没有重新测量 L2 毫秒，也没有日常 L3 结论。
-
-### 集成验收与未通过项
-
-代码复查保留 main 较完整的 legacy 日志迁移/排序实现；Pi 只统一异步 fs import，保留 native fork 的身份、配置指纹与回收行为。自动合并的 turn/session diff 仍先封口 preview、等待 idle，再保持 turn→session 发布和 archive 收敛顺序。最终完整测试、CLI、UI 与打包使用集成树 `2b520429bb13904a9ee869e546fd1c609b7abb58`；验证快照 `2d1abee` 与源码 merge 的树一致。重点测试先前快照与此树仅有 skill 镜像文档差异，源代码一致；40 项计数也对同一集成源码执行。
-
-| 检查 | 结果 |
-|---|---|
-| 重点冲突/相邻路径 | 201 项通过，覆盖 Pi/fork、日志、用量、共享 diff 与 session baseline |
-| `npm test` | 最终 3331 通过、4 既有 opt-in skipped；shell 通过 |
-| 首轮完整测试 | 3330 通过、1 失败：skill 在 `.agents` / `.claude` 镜像漂移。同步三份文档后完整重跑通过；未改测试断言或超时 |
-| `check:cli-release` | 类型检查、587 项相关测试、CLI build 与 package smoke 通过（CLI 0.2.49） |
-| App build / `test:renderer:ui` | 隐藏真实 App 全套通过，包含 Credits、远端会话 parity、源代码管理、归属与统一对话重启/fork 路径；无真实账号/Provider 探针 |
-| `performance:measure` | 40 obs；38 candidate unchanged、2 gating pass，另3个CPU指令 candidate missing；8/11旧门禁、17/1共享树、18/2/0双校验保持 |
-| `pack:artifact` | 构建成功，但 `check:packaged-app` 在私有 CLI `--version` 收到 SIGKILL（PID 96233）；后续 packaged smoke 未执行，不算完整打包验收通过 |
-
-`codesign --verify --deep --strict` 对同一产物通过。macOS 对 PID 96233 记录 `Unable to apply provenance sandbox`，但不能据此确定谁发送了 SIGKILL。没有重试碰运气、换路径、改签名、关闭安全软件或放宽边界。用户在得知该结果后明确选择**仅合入源码**；发布/安装安全门禁未获豁免。首轮失败、最终测试、签名与打包日志留在 `/tmp/scry-perf-integration.B1UmYE/`；测试 App 已由 fixture 结束，诊断产物暂留供排查。
-
-| 实验 | 固定负载 L1 | L2 / L3 | 减少的工作 |
-|---|---|---|---|
-| [Pi Node 版本复用](performance-experiments/20261016-pi-node-version-reuse.md) | 五次环境解析的版本探针 5→1，五轮一致 | mac2 L2：中位批耗时557.70→400.39ms，减少28.2%；L3未验证 | 四个子进程不再启动；仍重验二进制元数据/环境，不缓存能力或trust |
-| [遥测追加保留用量聚合](performance-experiments/20261016-usage-telemetry-incremental.md) | 10000行暖账本+五次遥测追加/查询，重读 5→0 / 4757290→0 bytes，五轮一致 | mac2 L2：中位批耗时26.26→1.43ms，减少94.6%；L3未验证 | 不再重读/parse整文件；性能记录仍完整保留 |
-| [Pi只读probe关闭](performance-experiments/20261017-pi-probe-close.md) | EOF后有空闲handle：关闭grace到期1→0；4响应、1进程保持，五轮一致 | mac2 L2：总耗时1630.84→870.19ms；关闭761.07→2.26ms；L3未验证 | 成功只读探测立即TERM并仍确认退出，不把关闭移到返回后 |
-| [终态共享 after-tree](performance-experiments/20261017-terminal-shared-after.md) | 5000文件、不同脏基线：Git 24→17，写树2→1，五轮一致 | mac2 L2：整体777.59→540.32ms（30.5%）；首个turn结果约424ms不变；L3未验证 | 两个before锚点共用一个不可变终点；最后一个持有者负责清理，完整完成边界仍等待清理 |
-| [真实 Service.diff 双校验](performance-experiments/20261017-service-diff-revision.md) | 5001 tracked、4 dirty、1 remote：Git24→18，原生status2→2，remote查询6→0 | mac2有效L2：507.64→382.85ms（24.6%）；首组高负载作废，全部样本留存；L3未验证 | 只不做两个校验不需要的本机remote展示查询；不缓存、不删除revision材料 |
-| [桌面远程 trace 增量](performance-experiments/20261023-desktop-remote-trace-delta.md) | 1000 items：线上字节 55.9 MB→1.8 MB；安静轮询 10.6 MB→4.2 KB；提交次数 127→102。5000 items：基线 165 次超限、显示 2380/5001，候选 0 次错误、显示 5001/5001 | L2 受控 fixture（负载 4.9/3.7，非 highLoad）：1000 items 下提交 2002.7→941.0 ms，客户端 91.1→6.7 ms；L3 未验证 | 未变 items 不再序列化、传输、校验或提交；宿主仍做 O(n) hash；空闲时轮询从 1.5 s 退避到 5 s |
-
-前两个实验冻结collector `cafc418`、生产 `7ac7fcb`；第三个冻结测量 `1456e35`、生产 `afd8f03`。第三轮全量33个obs：1 better、30 unchanged、2 gating pass、3 macOS CPU指令candidate缺失，无worse。只收紧candidate平台基线，没有升级门禁或放宽。
-
-**日志顺序缺陷后续已修复**：[同毫秒归档排序实验](performance-experiments/20261016-journal-order.md)。保留原专项22通过/1失败和基线负对照；新归档使用可跨重启恢复的单调排序时钟，不改文件格式或recordedAt。新增冻结时钟/重启/回拨回归在旧实现确定性失败，修复后全量3261通过/4 opt-in跳过；无法恢复已有同毫秒旧归档的歧义顺序。
-
-**L2已在mac2补证**：[原始样本与方法](performance-experiments/20261017-mac2-runtime-evidence.md)。Apple M1/8核，Node24.18.0，同机同lockfile/collector、各5个fixture、串行锁内测量；负载7.95→7.12，highLoad=false，但接近8核阈值，不能称完全空闲。仅证明上述两个固定生产路径变快，不是整个App或12秒目录查询的收益证明。原本机10核负载10.36→9.39的highLoad=true结果保留，不用mac2结果冒充本机低负载结果；尚未安装或收集L3。
-
-**第三轮RPC分段结果**：离线夹具确认了一项750ms EOF等待，mac2负载2.24→2.13、highLoad=false；启动到首响应约0.87s未变，不能声称真实12秒目录延迟已解决。mac2全量3263通过/4 opt-in跳过；首轮空HEAD与metadata fixture超时的修正、以及本机worker RPC通信超时未定位的限制均记录在实验中，不用后续通过抹去失败。
-
-**第四步共享终点已验证**：冻结测量 `7ad8957` / `67a8252`，生产 `aff6006`。首版因首个turn结果晚34ms被用户拒绝；引用持有版保留首次可用边界，清理仍在整体测量窗口与诊断耗时内。隐藏真实App离线UI/IPC流程独立核对7对归档快照（3对含文件改动），两次重启通过。本轮mac2全量首次3273断言通过但worker RPC超时，改为异步等待测量CLI（`8987f46`），保留原断言、负载和120秒上限；最终3274通过/4既有opt-in跳过。旧本机worker失败的完整归因仍不追认。36个obs在收紧前为3 better、31 unchanged、2 gating pass，另3个macOS CPU指令candidate缺失，无worse；只降低三个candidate平台基线。
-
-**第五步真实 Service.diff 已验证**：冻结 `8514551`，生产 `06a3f41`；两个时间点的完整 revision 材料与公式不变，仅内部投影不取 remotes。普通面板、写入、PR/传输仍取完整 status。9 项新增验收、故意去掉 post-check 后 5 项确定性失败的负对照、mac2全量3284通过/4既有opt-in跳过、隐藏真实App源代码管理UI均通过，无外部GitHub写入。首组L2 `highLoad=true` 不作收益结论，观察到负载恢复后补得有效组（3.03→3.86 / 8核）；没有改 workload、timeout 或丢弃样本。40 obs：3 better、35 unchanged、2 gating pass，另3个CPU指令candidate缺失，无worse；只降三个candidate基线。旧11次同名负载与8次门禁不变。
-
-**后续优先顺序**：本轮性能包已安装且运行身份已核对，接下来按当前新 build 采样；同场景两侧各≥30样本、≥2会话且核对环境/数据健康后再做L3，判断真实优先级，不为继续降次数删除身份、filter或revision校验。若继续优化Provider启动/扩展/模型目录，agent先补真实listCommands/runControls的端到端分段；真实账号/费用授权不足时不运行，不把离线结果当12秒根因。未推送、未正式发布；后续并行提交不自动算作已安装。保持trust、证据收敛与崩溃恢复合同；原生客户端不在本轮范围。
+历史原文按段搬移以满足每个 staged 文件 20,000 bytes 的提交上限；下方初始排名与缺口保留。
 
 ## 原始机会排名（2026-10-16，日常记录首次分析）
 

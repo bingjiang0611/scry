@@ -56,7 +56,11 @@ export async function prepareRunAdmission(
   const contextKey = providerContextKey(providerId, cwd ?? '', agentProfileId)
   const scopedSessionKey = (sessionId: string): string =>
     providerSessionKey(providerId, catalogCwd, sessionId, agentProfileId)
-  const expectedSessionId = isRemoteRun ? (request.expectedExternalSessionId ?? null) : request.expectedExternalSessionId
+  const expectedSessionId = isRemoteRun || managedConversation
+    // 统一对话的新轮次也是确定身份：resumeSessionId 为空就是「肯定新建原生 session」，
+    // 不需要按「身份未知」把同工作区别的会话也一起挡住。
+    ? (request.expectedExternalSessionId ?? null)
+    : request.expectedExternalSessionId
   if (!managedConversation && !isRemoteRun && expectedSessionId === null && !request.forkLastTurn && !request.restartLastTurn) {
     resetSessionContext(contextKey)
   }
@@ -72,14 +76,8 @@ export async function prepareRunAdmission(
   const contextRuns = runs.unsettledStates().filter((run) =>
     run.runId !== options.runId && run.providerId === providerId && run.agentProfileId === agentProfileId && run.cwd === cwd
   )
-  if (managedConversation && contextRuns.length > 0) {
-    throw new AgentRuntimeError('Provider 工作区仍有未收口轮次，已拒绝统一对话启动', {
-      provider: runtimeProvider,
-      stage: 'frontdoor',
-      cwd,
-      nextAction: '等待现有轮次完成后重新预览并发送'
-    })
-  }
+  // 冲突域是「同一 Conversation / 同一原生 session」，不是整个工作区：同一 cwd 的不同会话
+  // 可以并行，共享文件的风险由 diff 重叠证据如实标记，而不是靠工作区级互斥假装串行。
   const catalogAliases = (): Array<{ runId: string; externalSessionId?: string; sessionId?: string }> => {
     const liveAliases = [...(sessionAliasesByContext.get(contextKey) ?? [])].map(([runId, externalSessionId]) => ({
       runId,

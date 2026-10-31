@@ -51,7 +51,8 @@ export function buildDiffStack(files: DiffFile[], layout: DiffLayout, collapsed:
   const priority = files.find(file => file.path === selectedPath)
   for (const file of priority ? [priority, ...files.filter(item => item !== priority)] : files) {
     if (collapsed.has(file.path)) continue
-    const complete = file.patchContent?.storage === 'complete' ? file.patchContent.content : undefined
+    // Complete storage may be a reference-only envelope; its empty preview is not the body.
+    const complete = file.patchContent?.storage === 'complete' ? file.patchContent.content || file.patch : undefined
     const patch = complete ?? file.patch ?? file.patchContent?.content
     const allocated = Math.min(patch?.length ?? 0, remaining)
     const limited = Boolean(patch && patch.length > allocated)

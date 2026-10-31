@@ -5,12 +5,10 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'vite'
 import electron from 'electron'
-import { exercise } from './chat-preview-ui-checks.mjs'
+import { exerciseChatPreviewDom } from './chat-preview-ui-checks.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const temp = await mkdtemp(join(tmpdir(), 'scry-image-ui-'))
-
-
 
 async function exerciseNativeComposerEnter(contents) {
   const read = (expression) => contents.executeJavaScript(expression)
@@ -222,12 +220,12 @@ try {
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       try {
         await win.loadFile(${JSON.stringify(join(temp, 'index.html'))})
-        let result = await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )})
+        let result = await win.webContents.executeJavaScript(${JSON.stringify(`(${exerciseChatPreviewDom.toString()})()` )})
         result.nativeComposerEnter = await (${exerciseNativeComposerEnter.toString()})(win.webContents)
         result.workspace = await (${exerciseNativeWorkspace.toString()})(win.webContents, ${JSON.stringify(process.env.SCRY_WORKSPACE_UI_SCREENSHOT ?? '')})
         win.setSize(560, 480)
         await win.loadFile(${JSON.stringify(join(temp, 'index.html'))})
-        result = { wide: result, narrow: await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()` )}) }
+        result = { wide: result, narrow: await win.webContents.executeJavaScript(${JSON.stringify(`(${exerciseChatPreviewDom.toString()})()` )}) }
         result.narrow.nativeComposerEnter = await (${exerciseNativeComposerEnter.toString()})(win.webContents)
         result.narrow.workspace = await (${exerciseNativeWorkspace.toString()})(win.webContents, ${JSON.stringify(process.env.SCRY_WORKSPACE_UI_SCREENSHOT ?? '')})
         console.log('SCRY_UI_SMOKE_RESULT=' + JSON.stringify(result))

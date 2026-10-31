@@ -9,13 +9,22 @@ export async function exerciseLlmPerformanceSetup(contents, win, screenshot, nat
     }
   }
   const pointOf = async (selector, fraction = 0.5) => read(`(() => {
-    const node = document.querySelector(${JSON.stringify(selector)});
-    if (!node) throw new Error('Missing performance control: ' + ${JSON.stringify(selector)});
-    node.scrollIntoView({ block: 'center' });
-    const rect = node.getBoundingClientRect();
-    const x = Math.round(rect.left + rect.width * ${fraction}), y = Math.round(rect.top + rect.height / 2);
-    if (!node.contains(document.elementFromPoint(x, y))) throw new Error('Performance control obscured: ' + ${JSON.stringify(selector)});
-    return { x, y };
+    const nodes = [...document.querySelectorAll(${JSON.stringify(selector)})];
+    if (!nodes.length) throw new Error('Missing performance control: ' + ${JSON.stringify(selector)});
+    // Interval hit bands are 24 units wide, so a dense chart paints the next band over the
+    // previous band's center: the topmost band at an x receives the pointer. Every match is
+    // a real interactive interval, so measure them all and take the first whose own center
+    // is really hit. The guard below still fails the run when none is reachable.
+    const attempts = [];
+    for (const node of nodes) {
+      node.scrollIntoView({ block: 'center' });
+      const rect = node.getBoundingClientRect();
+      const x = Math.round(rect.left + rect.width * ${fraction}), y = Math.round(rect.top + rect.height / 2);
+      const hit = document.elementFromPoint(x, y);
+      if (node.contains(hit)) return { x, y };
+      attempts.push({ x, y, rect: rect.toJSON(), hit: hit?.outerHTML.slice(0, 300) });
+    }
+    throw new Error('Performance control obscured: ' + ${JSON.stringify(selector)} + '; geometry=' + JSON.stringify({ matched: nodes.length, first: attempts[0], last: attempts[attempts.length - 1], viewport: [innerWidth, innerHeight] }));
   })()`)
   const click = async selector => {
     const point = await pointOf(selector)
@@ -55,11 +64,7 @@ export async function exerciseLlmPerformanceSetup(contents, win, screenshot, nat
   if (await read(`${modal}.textContent.includes('999') || ${modal}.textContent.includes('unmeasured-model') || ${modal}.textContent.includes('字符/s')`)) throw new Error('Failed/missing history or legacy character units leaked')
   const range = await read(`${modal}.querySelector('.llm-perf-distribution').getAttribute('aria-label')`)
   if (!range.includes('最小 60.0') || !range.includes('最大 64.0') || !range.includes('P25')) throw new Error('Distribution missing accessible full range')
-  await click('.llm-perf-notices summary')
-  await wait(`${modal}.querySelector('.llm-perf-notices details').open`)
-  if (!await read(`document.activeElement.matches('.llm-perf-help summary') && ${modal}.querySelector('.llm-perf-notices p').textContent.includes('少于 3 轮')`)) throw new Error('Accessible distribution explanation missing')
-  key('Return')
-  await wait(`!${modal}.querySelector('.llm-perf-notices details').open`)
+  if (await read(`${modal}.querySelector('.llm-perf-notices') != null || /如何读图|含运行中数据/.test(${modal}.textContent)`)) throw new Error('Removed comparison help entries remain')
   if (!await read(`${modal}.contains(document.activeElement) && ${modal}.getAttribute('role') === 'dialog' && ${modal}.getAttribute('aria-modal') === 'true' && ${modal}.getAttribute('aria-labelledby')`)) throw new Error('Dialog focus/semantics broken')
   await hover('.llm-perf-interval .llm-perf-hit', .5)
   await wait(`${modal}.querySelector('.llm-perf-tip')?.textContent.includes('token/s')`)

@@ -1,0 +1,142 @@
+{
+  "schema": 1,
+  "sourceRevision": "78bd7b9c",
+  "sourceTree": "64e0d35f2f97bdf0c43e03fab5566439a399590c",
+  "productionCommits": {
+    "preview": "cc7da355",
+    "snapshotBatch": "434d48b1",
+    "versions": "78bd7b9c"
+  },
+  "appVersion": "0.2.235",
+  "privateCliVersion": "0.2.54",
+  "installed": true,
+  "installedPath": "/Applications/Scry.app",
+  "buildId": "57f788b0d6d1e84732c842162e0b2403b6f7f2eb5616a0057235f4255fda1f75",
+  "asarSha256": "97e57b20c12ff61a38489e1c4e1ae5a9ba632dbaa3892747b844697a50f8c2f3",
+  "mainSha256": "a7a68a67167c33798ff6c13d1c2d21d1449fb64847cde75b02b06def2a3074dc",
+  "preloadSha256": "21c2e11bf3b254644e7482c7d245a3cff8ae8bfc394d786765e28b077c0221f5",
+  "cliDistSha256": "e4caff0c73cd95d750e098550a6c5401d6b41a6af0d44063ec9b3bcd88458e9e",
+  "backup": {
+    "path": "/Applications/.Scry.app.backup",
+    "version": "0.2.234",
+    "asarSha256": "37c29b0f2a3040babccf22b90fcc9b8a3915345ee3e4f076943a673879004ff3"
+  },
+  "checks": {
+    "typecheck": {
+      "command": "npm run check:cli-release (includes npm run typecheck)",
+      "node": "22.22.1",
+      "passed": true
+    },
+    "unit": {
+      "command": "npm run test:unit -- --maxWorkers=1",
+      "node": "22.22.1",
+      "filesPassed": 504,
+      "testsPassed": 5095,
+      "optInFilesSkipped": 4,
+      "optInTestsSkipped": 4
+    },
+    "cliRelease": {
+      "command": "npm run check:cli-release",
+      "node": "22.22.1",
+      "filesPassed": 59,
+      "testsPassed": 807,
+      "packageSmokePassed": true
+    },
+    "node20": {
+      "node": "20.20.2",
+      "filesPassed": 52,
+      "testsPassed": 632,
+      "scope": "Core/CLI and snapshot batch",
+      "packageSmokePassed": true
+    },
+    "node24": {
+      "node": "24.18.0",
+      "packageSmokePassed": true
+    },
+    "shell": {
+      "command": "npm run test:shell",
+      "passed": true
+    },
+    "artifact": {
+      "command": "npm run pack:artifact",
+      "passed": true,
+      "packagedBytes": 299275368,
+      "maxBytes": 346030080,
+      "packagedSecurityRecoveryAndRemoteSmokes": true
+    },
+    "rendererUi": {
+      "command": "npm run test:renderer:ui",
+      "host": "mac2",
+      "node": "24.18.0",
+      "passed": true,
+      "sourceTreeAndMainPreloadHashesMatchLocalArtifact": true,
+      "originalScriptRestored": true,
+      "firstFailuresRetained": true
+    },
+    "rendererAssets": {
+      "installedVersusApproved234": true,
+      "resourcesCompared": 6,
+      "cssByteIdentical": true,
+      "jsHtmlDifferencesOnlyAppVersionAndChunkReferences": true,
+      "fullPixelFrameEquivalenceClaimed": false
+    },
+    "ratchet": {
+      "command": "npm run performance:measure",
+      "observations": 135,
+      "ledgerRows": 141,
+      "passed": true,
+      "nonGateWorse": 4,
+      "ledgerChanged": false
+    },
+    "installer": {
+      "command": "node scripts/install-macos.mjs after separately completed equivalent full pack gates",
+      "passed": true,
+      "approved234PreconditionRechecked": true,
+      "installedArtifactReadBack": true,
+      "strictCodeSignatureVerified": true
+    },
+    "diffCheck": {
+      "passed": true
+    }
+  },
+  "coverage": {
+    "fullRunPassed": false,
+    "firstRun": {
+      "passed": 5093,
+      "failed": 2,
+      "skipped": 4
+    },
+    "versionConstantFixed": true,
+    "tlsTimeoutRetained": true,
+    "focusedFiles": 2,
+    "focusedTestsPassed": 59,
+    "finalFullOrdinaryUnitPassed": true,
+    "ignoredCoverageDirectoryIsFocusedOnly": true
+  },
+  "measuredRelease": {
+    "app": "0.2.234",
+    "cli": "0.2.53",
+    "acceptedCases": 18,
+    "records": 54,
+    "realFiles": 1080,
+    "toolOutputsHashed": 1080,
+    "orderedDeltas": 21600,
+    "toolAuthorityCopiesRead": 4320,
+    "patchReferencesRead": 3240,
+    "excludedOriginalN5CasesForLoad": 6
+  },
+  "dailyAppProcessRestarted": false,
+  "dailyRuntimeLoadedVersion": "unverified",
+  "realProviderL3": "not-run",
+  "physicalPhone": "not-run",
+  "osForegroundFocus": "not-run",
+  "push": "not-performed",
+  "signing": "development installation; no notarization claim",
+  "retainedEvidence": {
+    "local": "/tmp/scry-step4-sweep.HXVHxQ",
+    "matchedRemote": "/private/tmp/scry-step45-v234.15yvLE",
+    "currentVerificationRemote": "/private/tmp/scry-delivery235.ji2qr6",
+    "bundleSha256": "d12b58065198c0c55463919a505c2d01b7fce5080d8cb21dd9c38ce742d74459",
+    "preIntegrationStash": "9758a70962ba15691cb62f0080393aa480a8c1cf"
+  }
+}

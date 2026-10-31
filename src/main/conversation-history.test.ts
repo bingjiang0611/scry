@@ -220,7 +220,17 @@ describe('durable conversation history bodies', () => {
       const started = await store.begin(conversation.id, { ...input(conversation, prepared.selectedItems), preparedHistory: prepared.history })
       expect(started.turn.importedItems).toEqual([ref('user', 'hello')])
       expect(started.turn.omittedItems).toEqual([ref('assistant', answer)])
-      expect(prepared.readerItems.map(item => item.text)).toEqual([answer])
+      const source = prepared.reader
+      expect(source?.count).toBe(1)
+      const [entry] = await source!.page(0, 8)
+      let omitted = ''
+      for (let offset = 0; ;) {
+        const page = await source!.read(entry.id, offset)
+        omitted += page.text
+        if (page.nextOffset === null) break
+        offset = page.nextOffset
+      }
+      expect(omitted).toEqual(answer)
       expect((await store.history(conversation.id, 'run-B'))?.requiresReader).toBe(true)
       return
     }

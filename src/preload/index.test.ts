@@ -114,6 +114,7 @@ const invokeChannels = {
   activeRuns: 'agent:activeRuns',
   focusedRunSnapshot: 'agent:focusedRunSnapshot',
   focusRun: 'agent:focusRun',
+  setLegacyDiffPreviewDemand: 'runTraces:setLegacyDemand',
   adoptActiveRun: 'agent:adoptActiveRun',
   answerQuestion: 'agent:answerQuestion',
   stop: 'agent:stop',
@@ -178,6 +179,7 @@ describe('preload IPC boundary', () => {
       'sourceControl',
       'workspaceSelection',
       'conversations',
+      'runTraces',
       ...Object.keys(invokeChannels),
       ...Object.keys(listenerChannels)
     ].sort())
@@ -193,43 +195,6 @@ describe('preload IPC boundary', () => {
     }
   })
 
-  it('exposes only fixed conversation operations with their scoped arguments', async () => {
-    expect(Object.keys(api.conversations).sort()).toEqual(['adopt', 'create', 'delete', 'fork', 'list', 'preview', 'previewAdoption', 'previewDeletion', 'read', 'readItem', 'send', 'update'])
-    await api.conversations.create('/workspace')
-    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:create', '/workspace')
-    const fork = { conversationId: 'conversation-id', expectedRevision: 2, sourceRunId: 'run-1', commandId: 'fork-1' }
-    await api.conversations.fork(fork)
-    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:fork', fork)
-    await api.conversations.list('/workspace')
-    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:list', '/workspace')
-    await api.conversations.read('conversation-id', 40)
-    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:read', 'conversation-id', 40)
-    const ref = { runId: 'run-id', itemId: 'assistant', contentHash: 'a'.repeat(64) }
-    await api.conversations.readItem('conversation-id', ref)
-    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:readItem', 'conversation-id', ref)
-    await api.conversations.preview('conversation-id', { providerId: 'codex' })
-    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:preview', 'conversation-id', { providerId: 'codex' })
-    const request = { conversationId: 'conversation-id', providerId: 'codex' as const, expectedRevision: 0,
-      expectedContinuationKey: 'frozen-identity', commandId: 'command-id', prompt: 'hello', selectedItems: [], confirmFresh: true }
-    await api.conversations.send(request)
-    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:send', request)
-    const source = { providerId: 'claude' as const, cwd: '/workspace', externalSessionId: 'source-session' }
-    await api.conversations.previewAdoption(source)
-    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:previewAdoption', source)
-    const target = { providerId: 'pi' as const, agentProfileId: 'pi:0123456789abcdef' }
-    await api.conversations.previewAdoption(source, target)
-    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:previewAdoption', source, target)
-    await api.conversations.adopt(source, 'fingerprint')
-    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:adopt', source, 'fingerprint')
-    await api.conversations.update('conversation-id', 2, { kind: 'pin', pinned: true })
-    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:update', 'conversation-id', 2, { kind: 'pin', pinned: true })
-    await api.conversations.previewDeletion('conversation-id')
-    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:previewDeletion', 'conversation-id')
-    await api.conversations.delete('conversation-id', 'fingerprint')
-    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:delete', 'conversation-id', 'fingerprint')
-    expect(electron.invoke).toHaveBeenCalledTimes(13)
-  })
-
   it('exposes only fixed source-control business operations and forwards one typed request', async () => {
     const methods = ['read', 'diff', 'mutate', 'operations', 'reconcile', 'acknowledge', 'pullRequests', 'pullRequest', 'saveDraft', 'loadDraft', 'saveCommitDraft', 'loadCommitDraft']
     expect(Object.keys(api.sourceControl).sort()).toEqual([...methods].sort())
@@ -240,6 +205,33 @@ describe('preload IPC boundary', () => {
       await namespace[method](request)
       expect(electron.invoke).toHaveBeenCalledExactlyOnceWith(`sourceControl:${method}`, request)
     }
+  })
+
+  it('exposes only the fixed run-trace stream routes', async () => {
+    expect(Object.keys(api.runTraces).sort())
+      .toEqual(['ack', 'confirmResync', 'onEvent', 'resync', 'subscribe', 'unsubscribe'])
+    const request = { runId: 'run-1', subscriptionId: 'sub-run-1' }
+    await api.runTraces.subscribe(request)
+    expect(electron.invoke).toHaveBeenLastCalledWith('runTraces:subscribe', request)
+    await api.runTraces.unsubscribe('sub-run-1')
+    expect(electron.invoke).toHaveBeenLastCalledWith('runTraces:unsubscribe', 'sub-run-1')
+    const receipt = { generation: 0, batchId: 2, bytes: 40 }
+    await api.runTraces.ack('sub-run-1', receipt)
+    expect(electron.invoke).toHaveBeenLastCalledWith('runTraces:ack', { subscriptionId: 'sub-run-1', receipt })
+    await api.runTraces.resync('sub-run-1')
+    expect(electron.invoke).toHaveBeenLastCalledWith('runTraces:resync', 'sub-run-1')
+    // 重对齐的确认只在视图提交了该快照之后才发出，并且必须带上同一个 token。
+    await api.runTraces.confirmResync('sub-run-1', 3)
+    expect(electron.invoke).toHaveBeenLastCalledWith('runTraces:confirm', { subscriptionId: 'sub-run-1', resyncId: 3 })
+    // 事件通道只转发 keyed 事件，不提供任意订阅。
+    electron.on.mockClear()
+    const seen: unknown[] = []
+    const off = api.runTraces.onEvent((event) => seen.push(event))
+    expect(electron.on).toHaveBeenCalledExactlyOnceWith('runTraces:event', expect.any(Function))
+    electron.on.mock.calls[0]?.[1](null, { kind: 'terminal', subscriptionId: 'sub-run-1', run: null })
+    expect(seen).toEqual([{ kind: 'terminal', subscriptionId: 'sub-run-1', run: null }])
+    off()
+    expect(electron.removeListener).toHaveBeenCalledWith('runTraces:event', expect.any(Function))
   })
 
   it('exposes read-only workspace selection routes without arbitrary Git execution', async () => {

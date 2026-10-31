@@ -63,6 +63,17 @@ PATH="$node_bin_dir:$PATH"
 export PATH SCRY_HANDLER_ID=${HANDLER_ID}
 if [ "\${SCRY_RECORDER_MANAGED:-0}" = "1" ]; then
   [ -x "\${SCRY_CLI_PATH:-}" ] || skip managed_cli_invalid
+  case "$provider:$event" in
+    claude:PreToolUse|claude:PostToolUse|claude:PostToolUseFailure)
+      if [ -n "\${SCRY_MANAGED_RUN_ID:-}" ] && [ -n "\${SCRY_MANAGED_PROMPT_HASH:-}" ]; then
+        # Managed tool evidence comes from the App's canonical trace, not these hooks.
+        # Keep lifecycle delivery for identity, health, queued replay and notifications;
+        # activity counts only events actually delivered, never synthetic tool heartbeats.
+        # Drain large payloads before exiting so the Provider does not see a broken pipe.
+        cat >/dev/null || skip payload_read_failed
+        exit 0
+      fi ;;
+  esac
   scry_bin="$SCRY_CLI_PATH"
   "$scry_bin" recorder hook --provider "$provider" --event "$event" --workspace "$workspace" --stdin --quiet --managed
   result=$?

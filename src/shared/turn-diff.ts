@@ -67,6 +67,56 @@ export interface TurnDiffCollection {
   sharedAfter?: 'turn'
 }
 
+/**
+ * 同一 canonical cwd 上的并行运行观测。一次 before/after 采集只能证明「工作区变了」，
+ * 不能证明是哪个 run 写的：共享工作区里另一个 run 的改动会同时进入本次采集。
+ * 缺失该字段表示旧记录或没有被观测（不推出「独占」），`runIds` 为空且 coverage=observed
+ * 只表示「在这次观测窗口里没有看到其他 Scry run」，不代表用户或外部编辑器的写入不存在。
+ */
+export interface WorkspaceOverlapEvidence {
+  /** observed = 整个窗口都在本进程观测内；partial = 有观测记录被上限淘汰或窗口未覆盖。 */
+  coverage: 'observed' | 'partial'
+  /** 同 cwd、观测窗口与本次采集相交的其他 run ID（不含自己），按开始时间排序。 */
+  runIds: string[]
+  /** 本次采集的观测窗口：diff 基线建立 → 证据采集结束。 */
+  observedFrom: string
+  observedTo: string
+  /** 达到 run ID 上报上限：可能还有更多重叠运行。 */
+  truncated?: true
+}
+
+/** 上报的 run ID 上限；超过这个数必须带 truncated，不能静默少报。 */
+export const MAX_WORKSPACE_OVERLAP_RUN_IDS = 64
+
+/**
+ * 归档/记录里的重叠证据归一化。
+ *
+ * 硬规则：能证明的才保留。时间必须可解析且构成有序窗口；run ID 超过上报上限时
+ * 保留 truncated，而不是把「还有更多」悄悄抹成「就这些」。
+ */
+export function normalizeWorkspaceOverlap(value: unknown): WorkspaceOverlapEvidence | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const raw = value as Record<string, unknown>
+  if (raw.coverage !== 'observed' && raw.coverage !== 'partial') return undefined
+  if (typeof raw.observedFrom !== 'string' || !raw.observedFrom) return undefined
+  if (typeof raw.observedTo !== 'string' || !raw.observedTo) return undefined
+  const observedFrom = Date.parse(raw.observedFrom)
+  const observedTo = Date.parse(raw.observedTo)
+  if (!Number.isFinite(observedFrom) || !Number.isFinite(observedTo) || observedFrom > observedTo) return undefined
+  if (!Array.isArray(raw.runIds)) return undefined
+  const runIds = raw.runIds.flatMap((entry): string[] =>
+    typeof entry === 'string' && entry.length > 0 && entry.length <= 128 ? [entry] : [])
+  if (runIds.length !== raw.runIds.length) return undefined
+  const unique = [...new Set(runIds)]
+  return {
+    coverage: raw.coverage,
+    runIds: unique.slice(0, MAX_WORKSPACE_OVERLAP_RUN_IDS),
+    observedFrom: raw.observedFrom,
+    observedTo: raw.observedTo,
+    ...(raw.truncated === true || unique.length > MAX_WORKSPACE_OVERLAP_RUN_IDS ? { truncated: true as const } : {})
+  }
+}
+
 export interface TurnDiffSnapshot {
   version: 1
   status: TurnDiffStatus
@@ -84,6 +134,8 @@ export interface TurnDiffSnapshot {
   collection?: TurnDiffCollection
   /** 仅 session_diff / session_diff_preview 携带：净 diff 的基线是会话首轮前还是恢复后重锚。 */
   baseline?: TurnDiffBaselineOrigin
+  /** 并行工作区重叠证据；缺失 = 旧记录或未观测，不能读成「独占归因」。 */
+  workspaceOverlap?: WorkspaceOverlapEvidence
 }
 
 export function nonNegativeInteger(value: unknown): number | null {
@@ -167,6 +219,7 @@ export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | un
   const baseline = raw.baseline === 'session_start' || raw.baseline === 'resumed'
     ? (raw.baseline as TurnDiffBaselineOrigin)
     : undefined
+  const workspaceOverlap = normalizeWorkspaceOverlap(raw.workspaceOverlap)
   return {
     version: 1,
     status: raw.status as TurnDiffStatus,
@@ -180,6 +233,7 @@ export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | un
     captureMs,
     cleanup: raw.cleanup,
     ...(collection ? { collection } : {}),
-    ...(baseline ? { baseline } : {})
+    ...(baseline ? { baseline } : {}),
+    ...(workspaceOverlap ? { workspaceOverlap } : {})
   }
 }

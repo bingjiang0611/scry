@@ -106,11 +106,18 @@ export async function writeFileAtomicExclusiveCopies(
   paths: readonly string[],
   content: Buffer
 ): Promise<Array<'published' | 'existing'>> {
+  return writeFileAtomicExclusiveBatch(paths.map(path => ({ path, content })))
+}
+
+/** One bounded publication group; existing destinations still require complete-byte verification. */
+export async function writeFileAtomicExclusiveBatch(
+  entries: readonly { path: string; content: Buffer | string }[]
+): Promise<Array<'published' | 'existing'>> {
   const prepared = new Set<string>()
   const parents = new Set<string>()
   // Batch only directory preparation. No final content name is visible until ALL
   // ancestor entries are durable, including entries left by a failed earlier attempt.
-  for (const path of paths) {
+  for (const { path } of entries) {
     const directory = resolve(dirname(path))
     const root = parse(directory).root
     let current = root
@@ -127,7 +134,7 @@ export async function writeFileAtomicExclusiveCopies(
   for (const parent of parents) await syncDirectory(parent)
 
   const outcomes: Array<'published' | 'existing'> = []
-  for (const path of paths) {
+  for (const { path, content } of entries) {
     try {
       await publishPreparedFile(path, content, {})
       outcomes.push('published')
@@ -139,7 +146,7 @@ export async function writeFileAtomicExclusiveCopies(
   return outcomes
 }
 
-async function publishPreparedFile(path: string, content: Buffer, options: ExclusiveWriteOptions): Promise<void> {
+async function publishPreparedFile(path: string, content: Buffer | string, options: ExclusiveWriteOptions): Promise<void> {
   const temp = exclusiveWriteTempPath(path, options.temporaryId ?? `${process.pid}.${randomUUID()}`)
   const sync = options.syncDirectory ?? syncDirectory
   let handle
@@ -284,10 +291,63 @@ async function delay(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+// Local waiters do not poll each other. Every admitted action still acquires
+// the filesystem lock; this queue grants no cross-process ownership or fairness.
+const localLockWaiters = new Map<string, Set<() => void>>()
+
+function lockTimeout(lockDir: string): NodeJS.ErrnoException {
+  const error = new Error(`lock timeout: ${lockDir}`) as NodeJS.ErrnoException
+  error.code = 'ELOCKTIMEOUT'
+  return error
+}
+
 export async function withDirectoryLock<T>(
   lockDir: string,
   action: () => Promise<T>,
   options: { waitMs?: number; ttlMs?: number } = {}
+): Promise<T> {
+  const path = resolve(lockDir)
+  const waitMs = options.waitMs ?? 2_000
+  const deadline = Date.now() + waitMs
+  let waiters = localLockWaiters.get(path)
+  const queued = waiters !== undefined
+  if (waiters) {
+    const queue = waiters
+    await new Promise<void>((resolve, reject) => {
+      const resume = () => {
+        clearTimeout(timer)
+        resolve()
+      }
+      const timer = setTimeout(() => {
+        queue.delete(resume)
+        reject(lockTimeout(path))
+      }, waitMs)
+      queue.add(resume)
+    })
+  } else {
+    waiters = new Set()
+    localLockWaiters.set(path, waiters)
+  }
+  try {
+    // Timers may be delayed by the event loop. Expired admission cannot clear
+    // an overdue timer and run later just because the filesystem lock is free.
+    if (queued && Date.now() >= deadline) throw lockTimeout(path)
+    return await withFilesystemDirectoryLock(path, action, { ...options, waitMs: Math.max(0, deadline - Date.now()) })
+  } finally {
+    const next = waiters.values().next().value
+    if (next) {
+      waiters.delete(next)
+      next()
+    } else {
+      localLockWaiters.delete(path)
+    }
+  }
+}
+
+async function withFilesystemDirectoryLock<T>(
+  lockDir: string,
+  action: () => Promise<T>,
+  options: { waitMs?: number; ttlMs?: number }
 ): Promise<T> {
   const waitMs = options.waitMs ?? 2_000
   const ttlMs = options.ttlMs ?? 30_000
@@ -330,9 +390,7 @@ export async function withDirectoryLock<T>(
         continue
       }
       if (Date.now() >= deadline) {
-        const timeout = new Error(`lock timeout: ${lockDir}`) as NodeJS.ErrnoException
-        timeout.code = 'ELOCKTIMEOUT'
-        throw timeout
+        throw lockTimeout(lockDir)
       }
       await delay(20)
     }

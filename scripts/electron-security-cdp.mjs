@@ -34,13 +34,20 @@ export function connectCdp(url) {
   const socket = new WebSocket(url)
   const pending = new Map()
   let nextId = 1
+  // A closed client must reject instead of queueing a request nobody will ever answer.
+  let closed = false
   const rejectPending = (message) => {
+    closed = true
     for (const request of pending.values()) request.reject(new Error(message))
     pending.clear()
   }
+  const listeners = new Set()
   socket.onmessage = (message) => {
     const payload = JSON.parse(String(message.data))
-    if (!payload.id) return
+    if (!payload.id) {
+      for (const listener of listeners) listener(payload)
+      return
+    }
     const request = pending.get(payload.id)
     if (!request) return
     pending.delete(payload.id)
@@ -55,11 +62,30 @@ export function connectCdp(url) {
   return {
     async send(method, params = {}) {
       await ready
+      if (closed || socket.readyState !== 1) throw new Error('CDP WebSocket 已关闭')
       const id = nextId++
       const result = new Promise((resolveResult, reject) => pending.set(id, { resolve: resolveResult, reject }))
       socket.send(JSON.stringify({ id, method, params }))
       return result
     },
-    close() { socket.close() }
+    on(listener) {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    close() { rejectPending('CDP WebSocket 已关闭'); socket.close() }
+  }
+}
+
+/**
+ * The renderer evaluator belongs to one CDP client. A restarted App is a new client, so the
+ * pair is rebuilt instead of reusing an evaluator whose socket is already gone.
+ */
+export function rendererEvaluator(cdp) {
+  return async (expression) => {
+    const response = await cdp.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
+    if (response.exceptionDetails) {
+      throw new Error(response.exceptionDetails.exception?.description || response.exceptionDetails.text || 'renderer evaluation failed')
+    }
+    return response.result?.value
   }
 }

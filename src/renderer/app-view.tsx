@@ -14,7 +14,7 @@ import { REMOTE_ACCESS_COPY } from './constants/copy'
 import { sessionComposerDraftKey, migrateSessionComposerDraft, updateSessionComposerDraft, hasSessionOverviewContext, latestSessionRuntimeProvider } from './app-model'
 import { runtimeProviderForAgentId } from '@shared/runtime'
 import { applyTheme, browserThemeStorage, persistTheme, type AppTheme } from './theme'
-import { adoptConversationWithReadback, conversationTarget } from './conversation-handoff'
+import { adoptConversationWithReadback, conversationTarget, legacyAdoptionSourceTarget } from './conversation-handoff'
 import { useDiffInspector, useNarrowDiffLayout } from './hooks/useDiffInspector'
 import { useWorkspaceSelection } from './hooks/useWorkspaceSelection'
 import { useRemoteSessionSelection } from './hooks/useRemoteSessionSelection'
@@ -156,10 +156,10 @@ export function useAppView(context: AppViewContext) {
     setComposerError(null)
     void (async () => {
       try {
-        const sourceTarget = conversationTarget(integrations.selectedId)
+        const sourceTarget = legacyAdoptionSourceTarget(integrations.selectedId)
         const destination = conversationTarget(agentId)
         const source = {
-          providerId: sourceTarget.providerId as 'claude' | 'codex' | 'pi',
+          providerId: sourceTarget.providerId,
           ...(sourceTarget.agentProfileId ? { agentProfileId: sourceTarget.agentProfileId } : {}),
           cwd: sourceCwd, externalSessionId: selectedProviderSessionId ?? sourceSessionId
         }

@@ -465,7 +465,7 @@
   gap: 6px;
   padding: 0 11px;
   border: 1px solid var(--border2);
-  border-radius: 6px;
+  border-radius: var(--r-xs);
   color: var(--fg);
   font: 500 11.5px/1 var(--font-ui);
   white-space: nowrap;

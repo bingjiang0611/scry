@@ -47,6 +47,17 @@ describe('stacked patch projection', () => {
       .toEqual([['missing', 'missing'], ['binary', 'binary'], ['partial', 'partial']])
     expect(JSON.stringify(stack.rows)).not.toContain('"text":"wrong preview"')
   })
+  it('uses hydrated patches when complete content is stored by reference only', () => {
+    const entry: DiffFile = { ...file('restored', patch), patchStatus: 'truncated', patchContent: { storage: 'complete', content: '',
+      contentRef: { storage: 'recorder-content-v1', sha256: 'a'.repeat(64), bytes: patch.length, encoding: 'utf8' },
+      encoding: 'utf8', savedBytes: 0, source: 'scry_app_trace', redaction: 'not_run', reasons: [], sourceCompleteness: 'complete' } }
+    const stack = buildDiffStack([entry], 'unified', new Set(), new Map(), entry.path)
+    expect(stack.rows.some(row => row.kind === 'code' && row.row.kind === 'line' && row.row.line.text === '+new three')).toBe(true)
+    expect(stack.rows.some(row => row.kind === 'notice')).toBe(false)
+    const missing = { ...entry, patch: undefined }
+    expect(buildDiffStack([missing], 'unified', new Set(), new Map(), missing.path).rows)
+      .toContainEqual({ kind: 'notice', file: missing, reason: 'missing' })
+  })
   it('does not confuse complete storage with a complete source', () => {
     const entry: DiffFile = { ...file('partial-source'), patchContent: { storage: 'complete', content: patch,
       encoding: 'utf8', savedBytes: patch.length, source: 'git', redaction: 'unchanged', reasons: ['source_truncated'], sourceCompleteness: 'partial' } }

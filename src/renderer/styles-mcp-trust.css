@@ -11,7 +11,7 @@
   margin: 8px 0;
   padding: 7px 8px;
   border: 1px solid rgba(255, 100, 113, 0.28);
-  border-radius: 6px;
+  border-radius: var(--r-xs);
   color: var(--bad);
   background: rgba(255, 100, 113, 0.08);
   font: 11px/1.45 var(--font-mono);
@@ -23,7 +23,7 @@
   margin: 5px 0 8px;
   padding: 7px 8px;
   border: 1px solid rgba(246, 197, 96, 0.26);
-  border-radius: 6px;
+  border-radius: var(--r-xs);
   color: var(--warn);
   background: rgba(246, 197, 96, 0.08);
   font: 11.5px/1.35 var(--font-mono);
@@ -46,7 +46,7 @@
   align-items: center;
   min-width: 0;
   border: 1px solid var(--border2);
-  border-radius: 5px;
+  border-radius: var(--r-xs);
   padding: 2px 7px;
   font: 10.5px/1.4 var(--font-mono);
   color: var(--dim);

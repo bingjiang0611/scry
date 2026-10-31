@@ -293,7 +293,7 @@
 .theme-preview i {
   grid-row: 2;
   margin: 5px;
-  border-radius: 2px;
+  border-radius: var(--r-xs);
 }
 
 .theme-preview.dark {
@@ -352,6 +352,7 @@
   place-items: center;
   border: 1px solid var(--border2);
   border-radius: 50%;
+  corner-shape: round;
   color: transparent;
 }
 

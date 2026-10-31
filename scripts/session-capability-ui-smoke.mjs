@@ -1,10 +1,10 @@
-import { spawn } from 'node:child_process'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'vite'
 import electron from 'electron'
+import { runUiCampaign } from './ui-campaign.mjs'
 import { fixtureSources } from './session-capability-sources.mjs'
 import { specialFixtureSources } from './session-capability-special-fixtures.mjs'
 import { runCapabilityCampaigns } from './session-capability-campaigns.mjs'
@@ -35,6 +35,7 @@ const performanceOnly = process.argv.includes('--performance-only')
 const nativeVisibility = process.argv.includes('--native-visibility')
 if (nativeVisibility && !performanceOnly) throw new Error('--native-visibility requires --performance-only and user approval to display a window')
 const metaPromptsOnly = process.argv.includes('--meta-prompts-only')
+const campaigns = turnRefsOnly ? ['refs'] : listsOnly ? ['structure', 'history', 'live', 'refs'] : ['all']
 const fixtures = loadingOnly ? ['loading'] : listsOnly ? ['lists'] : overlaysOnly ? ['overlays'] : structureOnly ? ['session-cache'] : paneBenchOnly ? ['structure-pane-bench'] : motionTokensOnly ? ['motion-tokens'] : piPermissionOnly ? ['pi-permission'] : workspaceDiffOnly ? ['workspace-diff'] : sidebarActivityOnly ? ['sidebar-activity'] : cacheOnly ? ['session-cache'] : metaPromptsOnly ? ['meta-prompts'] : performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability', 'workspace-diff']
   : questionResultOnly ? ['session-capability'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance', 'llm-performance', 'meta-prompts', 'session-cache', 'sidebar-activity', 'workspace-diff', 'motion-tokens']
 
@@ -87,6 +88,7 @@ try {
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       const logRendererError = (event) => { if (event.level === 'error') console.error('Renderer:', event.message) }
       win.webContents.on('console-message', logRendererError)
+      win.webContents.on('did-finish-load', () => console.error('SCRY_UI_FIXTURE=' + win.webContents.getURL()))
       let diagnosticContents = win.webContents
       try {
         let result = {}, piCommands = {}
@@ -222,25 +224,16 @@ try {
       }
     }).catch(error => { console.error(error); app.exit(1) })
   `)
-  const campaignResults = []
-  for (const campaign of turnRefsOnly ? ['refs'] : listsOnly ? ['structure', 'history', 'live', 'refs'] : ['all']) await new Promise((resolve, reject) => {
-    const child = spawn(electron, [join(temp, 'main.cjs'), '--disable-gpu', '--disable-backgrounding-occluded-windows', ...(reducedAmbientFixture ? ['--force-prefers-reduced-motion'] : []), ...(listsOnly ? [`--scry-lists-campaign=${campaign}`] : [])], {
-      env: { PATH: process.env.PATH, TMPDIR: tmpdir(), HOME: join(temp, 'home') }, stdio: ['ignore', 'pipe', 'pipe']
-    })
-    let output = ''
-    let timedOut = false
-    const timer = setTimeout(() => { timedOut = true; child.kill('SIGTERM') }, 30_000)
-    child.stdout.on('data', (chunk) => { output += chunk.toString() })
-    child.stderr.on('data', (chunk) => { output += chunk.toString() })
-    child.once('error', (error) => { clearTimeout(timer); reject(error) })
-    child.once('close', (code, signal) => {
-      clearTimeout(timer)
-      const result = output.match(/^SCRY_UI_SMOKE_RESULT=(.+)$/m)?.[1]
-      if (code !== 0 || !result) reject(new Error(`Hidden UI fixture failed (${timedOut ? '30s deadline' : code ?? signal}):\n${output.slice(-8000)}`))
-      else { if (listsOnly) campaignResults.push(JSON.parse(result).lists); else console.log(result); resolve() }
-    })
-  })
-  if (listsOnly) console.log(JSON.stringify({ lists: Object.assign({}, ...campaignResults) }))
+  const results = []
+  for (const campaign of campaigns) results.push(await runUiCampaign({
+    electron, script: join(temp, 'main.cjs'),
+    env: { PATH: process.env.PATH, TMPDIR: tmpdir(), HOME: join(temp, 'home') },
+    argv: [
+      ...(reducedAmbientFixture ? ['--force-prefers-reduced-motion'] : []),
+      ...(listsOnly ? [`--scry-lists-campaign=${campaign}`] : [])
+    ]
+  }))
+  console.log(JSON.stringify(listsOnly ? { lists: Object.assign({}, ...results.map(value => value.lists)) } : results[0]))
 } finally {
   await rm(temp, { recursive: true, force: true })
 }

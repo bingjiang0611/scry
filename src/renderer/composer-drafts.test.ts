@@ -139,4 +139,40 @@ describe('composer drafts', () => {
     expect(drafts.size).toBe(32)
     expect(evicted).toEqual(['v0', 'v1'])
   })
+
+  it('restores every valid draft at the total bound with pending receipts interleaved', () => {
+    const storage = new MemoryStorage()
+    const drafts = new Map<string, ComposerDraft>()
+    const pendingKeys: string[] = []
+    // 24 ordinary + 8 pending = exactly the 32-entry capacity, alternating in storage
+    // order so a slice over the mixed rows cannot spend the ordinary budget on pending.
+    for (let index = 0; index < 32; index++) {
+      const pending = index % 4 === 3
+      const key = `${pending ? 'pending' : 'ordinary'}-${index}`
+      if (pending) pendingKeys.push(key)
+      drafts.set(key, {
+        input: `text-${index}`,
+        attachments: [],
+        ...(pending ? {
+          pending: {
+            commandId: `command-${index}-0000`,
+            conversationId: `conversation-${index}`,
+            prompt: `text-${index}`,
+            attachments: [],
+            target: { providerId: 'claude', permissionMode: 'default' },
+            selectedItems: [],
+            expectedRevision: 1,
+            expectedContinuationKey: `key-${index}`,
+            phase: 'unknown' as const,
+            submittedAt: 1_700_000_000_000 + index
+          }
+        } : {})
+      })
+    }
+    expect(writeComposerDrafts(storage, drafts)).toBe(true)
+    const restored = readComposerDrafts(storage)
+    expect(restored.size).toBe(32)
+    expect([...restored.keys()]).toEqual([...drafts.keys()])
+    for (const key of pendingKeys) expect(restored.get(key)?.pending?.commandId).toBe(drafts.get(key)?.pending?.commandId)
+  })
 })

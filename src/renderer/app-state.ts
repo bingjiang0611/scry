@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { Dispatch, SetStateAction } from 'react'
 import type { SessionAttentionSnapshot } from '@shared/session-attention'
 import type { ProviderId } from '@shared/provider'
+import type { AgentQuestionKind } from '@shared/runtime'
 import type { ConversationProjection } from './components/ConversationView'
 import type { ConversationSummary } from '@shared/conversation-api'
 import type { WorkspaceOpenRequest } from './components/WorkspacePanel'
@@ -55,6 +56,8 @@ export function useAppState() {
   const backgroundWorkByRun = useBackgroundWork()
   const [runningRunIds, setRunningRunIds] = useState<ReadonlySet<string>>(() => new Set())
   const [waitingQuestionRunIds, setWaitingQuestionRunIds] = useState<ReadonlySet<string>>(() => new Set())
+  /** Kind of the pending question of a run: a clarification is not an approval request. */
+  const [questionKindsByRun, setQuestionKindsByRun] = useState<ReadonlyMap<string, AgentQuestionKind>>(() => new Map())
   const [unreadSessionKeys, setUnreadSessionKeys] = useState<ReadonlySet<string>>(() => new Set())
   const unreadRevisionRef = useRef(-1)
   const terminalRunIdsRef = useRef(new Set<string>())
@@ -98,6 +101,12 @@ export function useAppState() {
     setRunningRunIds((prev) => {
       if (!prev.has(runId)) return prev
       const next = new Set(prev)
+      next.delete(runId)
+      return next
+    })
+    setQuestionKindsByRun((prev) => {
+      if (!prev.has(runId)) return prev
+      const next = new Map(prev)
       next.delete(runId)
       return next
     })
@@ -292,6 +301,8 @@ export function useAppState() {
     setRunningRunIds,
     waitingQuestionRunIds,
     setWaitingQuestionRunIds,
+    questionKindsByRun,
+    setQuestionKindsByRun,
     unreadSessionKeys,
     terminalRunIdsRef,
     localRunIdsRef,

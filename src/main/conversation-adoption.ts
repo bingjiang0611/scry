@@ -15,7 +15,12 @@ export function parseConversationLegacySource(value: unknown): ConversationLegac
     throw new Error('迁移仅支持已登记的本机会话和工作区')
   }
   const target = parseConversationTarget({ providerId: source.providerId, agentProfileId: source.agentProfileId })
-  return { providerId: target.providerId as ConversationLegacySource['providerId'],
+  // 迁移源比发送目标窄：只有这三个 Provider 的旧入口会被 App 捕获归档接管。
+  // 必须在这里拦住 Qoder/OpenCode，否则下面的 cast 会造出超出声明类型的源。
+  if (target.providerId !== 'claude' && target.providerId !== 'codex' && target.providerId !== 'pi') {
+    throw new Error('迁移源 Provider 不受支持；仅支持 Claude/Codex/Pi')
+  }
+  return { providerId: target.providerId,
     ...(target.agentProfileId ? { agentProfileId: target.agentProfileId } : {}),
     cwd: source.cwd, externalSessionId: source.externalSessionId }
 }
@@ -44,6 +49,7 @@ export async function prepareConversationAdoption(userData: string, source: Conv
     // Historical attachments stay in the archive/UI, never in the handoff payload.
     // The current target, input budget and retrieval tool are checked on Send.
     await assertConversationHistoryReadable(userData, {
+      id: source.externalSessionId,
       cwd: source.cwd,
       bindings: [{ id: source.externalSessionId, providerId: source.providerId, agentProfileId: source.agentProfileId,
         continuationKey: 'unverified-legacy', nativeSessionId: source.externalSessionId }],

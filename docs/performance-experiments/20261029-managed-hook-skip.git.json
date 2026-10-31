@@ -1,0 +1,247 @@
+{
+  "schema": 1,
+  "collectorRevision": "407e1446",
+  "purpose": "Separate N=5 ABBA Git argv diagnosis, not pooled with the main 12 samples",
+  "samples": [
+    {
+      "variant": "baseline",
+      "round": 1,
+      "raw": "baseline-r1.json",
+      "rawSha256": "f676cca68cfbce493653ba7802e528171d0f981c1a0a449bd65c56a48d23ed65",
+      "harnessHash": "84ce6f5506ab7f8fc1e0d40aa42e703884f07b182932032efa7eb6763324d6b1",
+      "artifactSha256": "9f11bfd89bf50204b7151dd5009dd737d96a7a4c16c630c3e038ebffb40844ce",
+      "lockfileSha256": "b1d8950986aeeb87e2cd47af05a452c16557a3c2c1a2414d73fab47504d434c0",
+      "sampledGit": 342,
+      "exactWindowGit": 339,
+      "commands": {
+        "rev-parse": 15,
+        "status": 34,
+        "config": 33,
+        "ls-files": 6,
+        "diff": 104,
+        "read-tree": 59,
+        "check-attr": 2,
+        "worktree": 1,
+        "for-each-ref": 1,
+        "update-index": 28,
+        "add": 28,
+        "write-tree": 28
+      },
+      "families": {
+        "other": {
+          "rev-parse": 15,
+          "status": 6,
+          "config": 33,
+          "ls-files": 1,
+          "check-attr": 1,
+          "worktree": 1,
+          "for-each-ref": 1
+        },
+        "numstat": {
+          "ls-files": 5,
+          "diff": 5,
+          "read-tree": 3,
+          "check-attr": 1
+        },
+        "clone": {
+          "read-tree": 32,
+          "update-index": 16,
+          "status": 16,
+          "add": 16,
+          "write-tree": 16,
+          "diff": 58
+        },
+        "live": {
+          "read-tree": 24,
+          "update-index": 12,
+          "status": 12,
+          "add": 12,
+          "write-tree": 12,
+          "diff": 41
+        }
+      },
+      "acceptedBatches": 190,
+      "highLoad": false
+    },
+    {
+      "variant": "candidate",
+      "round": 1,
+      "raw": "candidate-r1.json",
+      "rawSha256": "8b339d08d91a16d456ca1f3d6bd9cf0fa8fe05dfdd1dbcf7a54396492a73e065",
+      "harnessHash": "84ce6f5506ab7f8fc1e0d40aa42e703884f07b182932032efa7eb6763324d6b1",
+      "artifactSha256": "3bb5b7ebd490361ba3ed4e9bc36cce632483a37851bb83e95160beafdd6040ff",
+      "lockfileSha256": "b1d8950986aeeb87e2cd47af05a452c16557a3c2c1a2414d73fab47504d434c0",
+      "sampledGit": 412,
+      "exactWindowGit": 411,
+      "commands": {
+        "rev-parse": 15,
+        "status": 41,
+        "config": 40,
+        "ls-files": 7,
+        "diff": 126,
+        "read-tree": 73,
+        "check-attr": 2,
+        "worktree": 1,
+        "for-each-ref": 1,
+        "update-index": 35,
+        "add": 35,
+        "write-tree": 35
+      },
+      "families": {
+        "other": {
+          "rev-parse": 15,
+          "status": 6,
+          "config": 40,
+          "ls-files": 1,
+          "check-attr": 1,
+          "worktree": 1,
+          "for-each-ref": 1
+        },
+        "numstat": {
+          "ls-files": 6,
+          "diff": 6,
+          "read-tree": 3,
+          "check-attr": 1
+        },
+        "clone": {
+          "read-tree": 40,
+          "update-index": 20,
+          "status": 20,
+          "add": 20,
+          "write-tree": 20,
+          "diff": 70
+        },
+        "live": {
+          "read-tree": 30,
+          "update-index": 15,
+          "status": 15,
+          "add": 15,
+          "write-tree": 15,
+          "diff": 50
+        }
+      },
+      "acceptedBatches": 390,
+      "highLoad": false
+    },
+    {
+      "variant": "candidate",
+      "round": 2,
+      "raw": "candidate-r2.json",
+      "rawSha256": "a5e9dd70b26fa76422e97a92ec6e812bbf60ad60c8a50e26793ee422f7e2bfd1",
+      "harnessHash": "84ce6f5506ab7f8fc1e0d40aa42e703884f07b182932032efa7eb6763324d6b1",
+      "artifactSha256": "3bb5b7ebd490361ba3ed4e9bc36cce632483a37851bb83e95160beafdd6040ff",
+      "lockfileSha256": "b1d8950986aeeb87e2cd47af05a452c16557a3c2c1a2414d73fab47504d434c0",
+      "sampledGit": 402,
+      "exactWindowGit": 402,
+      "commands": {
+        "rev-parse": 15,
+        "status": 40,
+        "config": 39,
+        "ls-files": 7,
+        "diff": 123,
+        "read-tree": 71,
+        "check-attr": 3,
+        "update-index": 34,
+        "worktree": 1,
+        "for-each-ref": 1,
+        "add": 34,
+        "write-tree": 34
+      },
+      "families": {
+        "other": {
+          "rev-parse": 15,
+          "status": 6,
+          "config": 39,
+          "ls-files": 1,
+          "check-attr": 1,
+          "worktree": 1,
+          "for-each-ref": 1
+        },
+        "numstat": {
+          "ls-files": 6,
+          "diff": 6,
+          "read-tree": 3,
+          "check-attr": 2
+        },
+        "clone": {
+          "read-tree": 38,
+          "update-index": 19,
+          "status": 19,
+          "add": 19,
+          "write-tree": 19,
+          "diff": 67
+        },
+        "live": {
+          "read-tree": 30,
+          "update-index": 15,
+          "status": 15,
+          "add": 15,
+          "write-tree": 15,
+          "diff": 50
+        }
+      },
+      "acceptedBatches": 365,
+      "highLoad": false
+    },
+    {
+      "variant": "baseline",
+      "round": 2,
+      "raw": "baseline-r2.json",
+      "rawSha256": "96bec47876bf3ee9da6a907027847ae1aa10d7434cbd7b6b87cbc6dfee6cc257",
+      "harnessHash": "84ce6f5506ab7f8fc1e0d40aa42e703884f07b182932032efa7eb6763324d6b1",
+      "artifactSha256": "9f11bfd89bf50204b7151dd5009dd737d96a7a4c16c630c3e038ebffb40844ce",
+      "lockfileSha256": "b1d8950986aeeb87e2cd47af05a452c16557a3c2c1a2414d73fab47504d434c0",
+      "sampledGit": 321,
+      "exactWindowGit": 319,
+      "commands": {
+        "rev-parse": 15,
+        "status": 32,
+        "config": 31,
+        "ls-files": 6,
+        "diff": 98,
+        "read-tree": 55,
+        "check-attr": 2,
+        "worktree": 1,
+        "for-each-ref": 1,
+        "update-index": 26,
+        "add": 26,
+        "write-tree": 26
+      },
+      "families": {
+        "other": {
+          "rev-parse": 15,
+          "status": 6,
+          "config": 31,
+          "ls-files": 1,
+          "check-attr": 1,
+          "worktree": 1,
+          "for-each-ref": 1
+        },
+        "numstat": {
+          "ls-files": 5,
+          "diff": 5,
+          "read-tree": 3,
+          "check-attr": 1
+        },
+        "clone": {
+          "read-tree": 32,
+          "update-index": 16,
+          "status": 16,
+          "add": 16,
+          "write-tree": 16,
+          "diff": 58
+        },
+        "live": {
+          "read-tree": 20,
+          "update-index": 10,
+          "status": 10,
+          "add": 10,
+          "write-tree": 10,
+          "diff": 35
+        }
+      },
+      "acceptedBatches": 161,
+      "highLoad": false
+    }
+  ]
+}

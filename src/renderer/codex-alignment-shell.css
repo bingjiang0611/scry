@@ -31,10 +31,6 @@
   --sidebar-surface: #181818;
   --main-surface: #1c1c1c;
   --overview-surface: #1c1c1c;
-  --r-xs: 7px;
-  --r-sm: 10px;
-  --r-md: 14px;
-  --r-lg: 20px;
   --topbar-h: 52px;
   --shadow-pop:
     0 32px 88px rgb(0 0 0 / 46%),
@@ -160,7 +156,7 @@ select:focus-visible,
 .sb-sess,
 .sb-settings {
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--r-sm);
 }
 
 .sb-new {
@@ -189,7 +185,7 @@ select:focus-visible,
   margin: 7px 0 10px;
   padding: 0 10px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-sm);
   background: var(--panel3);
 }
 
@@ -376,7 +372,7 @@ select:focus-visible,
   height: 32px;
   min-height: 32px;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--r-sm);
   background: transparent;
   font-family: var(--font-ui);
 }

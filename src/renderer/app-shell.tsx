@@ -1,7 +1,5 @@
 import type { AppShellProps } from './app-shell-types'
 import { lazy, Suspense, type ComponentProps } from 'react'
-import type { RemoteTarget } from './app-types'
-import type { useDesktopConnections } from './hooks/useDesktopConnections'
 import { Sidebar } from './components/Sidebar'
 import { ConversationView } from './components/ConversationView'
 import { PaneSplitter } from './components/PaneSplitter'
@@ -11,11 +9,16 @@ import { ViewChrome } from './components/ViewChrome'
 import { LlmPerformancePanel } from './components/LlmPerformancePanel'
 import { OverviewPanel } from './components/OverviewPanel'
 import { CapabilitiesModal, SettingsModal } from './components/Modals'
-import { RemoteChat, remoteDraftKey } from './components/RemoteChat'
-import { hostState } from './components/LocationPicker'
+import { remoteDraftKey } from './components/RemoteChat'
+import { RemoteView } from './components/RemoteView'
 import { DiffInspector } from './components/DiffInspector'
 import { WorkspacePanel } from './components/WorkspacePanel'
 import { RightSurfacePanel } from './components/RightSurfacePanel'
+import { SideChatHistoryDialog } from './components/SideChatHistoryDialog'
+import { SideChatSurface } from './components/SideChatSurface'
+import { useRightWorkbench } from './hooks/useRightWorkbench'
+import { useLegacyDiffPreviewDemand } from './hooks/useLegacyDiffPreviewDemand'
+import { SIDE_CHAT_COPY } from './constants/side-chat-copy'
 import { SourceControlPanel } from './components/SourceControlPanel'
 import { AgentsSurface } from './components/AgentsSurface'
 import { PinnedSummaryHost } from './components/PinnedSummary'
@@ -41,10 +44,38 @@ export function AppShell(props: AppShellProps) {
     showSkills, showMcp, openSkills, openMcp, settingsTab, setSettingsTab, theme, changeTheme, archiveUndo,
     setArchiveUndo, workspace, runningRunIds, waitingQuestionRunIds, unreadSessionKeys, backgroundWorkByRun,
     catalogHealth, summary, sidebarMin, sidebarMax, panelMin, panelMax, rightPanelMounted, mountedSurfaces,
-    setRemoteWorkspaceDirty, toggleOverviewPanel, changeView, openRemoteLocation, setShowSkills, setShowMcp
+    setRemoteWorkspaceDirty, toggleOverviewPanel, changeView, openRemoteLocation, setShowSkills, setShowMcp,
+    draftKey, questionKindsByRun
   } = props
+  // Measured narrow layout, one-pass child catalog and the side-chat tabs of this
+  // session. No child transcript is read and no per-child IPC is issued here.
+  const workbench = useRightWorkbench({
+    sidebarWidth: sidebarPane.collapsed ? 0 : sidebarPane.visibleWidth,
+    projects, runningRunIds, waitingQuestionRunIds, questionKindsByRun,
+    draftKey, view,
+    ...(logicalConversation ? { conversation: logicalConversation } : {}),
+    cwd, activeSessionId, selectedProviderSessionId,
+    providerId: integrations.selectedProviderId,
+    ...(integrations.providerContext.agentProfileId ? { agentProfileId: integrations.providerContext.agentProfileId } : {}),
+    runControls: integrations.runControls,
+    completedTurns: displayedTurns.length,
+    draftStore, chatProps, pickConversation,
+    loadProjects: workspace.loadProjects,
+    openIds: currentSurface.state.sideChats,
+    dispatch: rightSurfaces.dispatch,
+    dispatchForScope: rightSurfaces.dispatchForScope,
+    layoutSaved: rightSurfaces.layoutSaved,
+    restorePane: surfacePane.restore
+  })
+  const { shellRef, narrowSingleColumn, catalog: sideChatCatalog, panel: sideChatPanel, layoutSaved } = workbench
+  const primaryPaneVisible = !shellPanelMaximized && !(narrowSingleColumn && shellPanelVisible)
+  // These surfaces share the primary run projection even when its transcript is hidden.
+  const evidenceSurfaceVisible = panelVisible && !rightSurface.activeSideChatId
+    && (rightSurface.activeId === 'overview' || rightSurface.activeId === 'diff' || rightSurface.activeId === 'agents')
+  const mainLiveVisible = primaryPaneVisible || evidenceSurfaceVisible
+  useLegacyDiffPreviewDemand(session.currentRunId, view === 'chat' && mainLiveVisible)
   return (
-    <div className={`app app-shell${shellPanelMounted ? ` has-right-panel right-panel-surface${shellPanelMaximized ? ' right-panel-maximized' : ''}${!shellPanelVisible ? ' right-panel-hidden' : ''}` : ''}${summaryVisible ? ' pinned-summary-visible' : ''}${summaryVisible && summaryPersistent ? ' pinned-summary-persistent' : ''}${sidebarPane.collapsed ? ' sidebar-collapsed' : ''}`} style={appStyle}>
+    <div ref={shellRef} className={`app app-shell${shellPanelMounted ? ` has-right-panel right-panel-surface${shellPanelMaximized ? ' right-panel-maximized' : ''}${!shellPanelVisible ? ' right-panel-hidden' : ''}` : ''}${narrowSingleColumn ? ' narrow-single-column' : ''}${summaryVisible ? ' pinned-summary-visible' : ''}${summaryVisible && summaryPersistent ? ' pinned-summary-persistent' : ''}${sidebarPane.collapsed ? ' sidebar-collapsed' : ''}`} data-narrow-pane={narrowSingleColumn ? (shellPanelVisible ? 'panel' : 'main') : undefined} style={appStyle}>
       <Sidebar {...(sidebarActions as ComponentProps<typeof Sidebar>)} id="sidebar-pane" draftStore={draftStore} version={packageJson.version} projects={projects}
         activeCwd={view === 'conversation' ? logicalConversation?.cwd ?? null : view === 'remote' ? null : cwd}
         activeSessionId={view === 'remote' || view === 'conversation' ? null : activeSessionId}
@@ -52,6 +83,7 @@ export function AppShell(props: AppShellProps) {
         activeRemote={view === 'remote' && remoteTarget ? { connectionId: remoteTarget.connectionId, cwd: remoteTarget.cwd, externalSessionId: remoteAdoptedSession } : null}
         activeProviderId={integrations.selectedProviderId} activeAgentProfileId={integrations.providerContext.agentProfileId}
         runningRunIds={runningRunIds} waitingQuestionRunIds={waitingQuestionRunIds} unreadSessionKeys={unreadSessionKeys}
+        sideChatCatalog={sideChatCatalog}
         backgroundWorkByRun={backgroundWorkByRun} archiveUndo={archiveUndo}
         analyticsActive={view === 'analytics'} metaPromptsActive={view === 'meta-prompts'} catalogHealth={catalogHealth} />
       <PaneSplitter className="sidebar-resizer" label="调整左侧栏宽度" controls="sidebar-pane" min={sidebarMin} max={sidebarMax}
@@ -63,7 +95,13 @@ export function AppShell(props: AppShellProps) {
             {conversationError && <p role="alert">{conversationError}</p>}
             {logicalConversation ? <>
               <ViewChrome cwd={logicalConversation.cwd} showSummary={summaryVisible} showPanel={panelVisible} onToggleSummary={summary.toggle} onTogglePanel={toggleOverviewPanel} />
-              <div className="main-content main-content--single"><ConversationView key={logicalConversation.id} conversation={logicalConversation} draftStore={draftStore} chatProps={chatProps} initialAgentId={conversationAgent} onChanged={() => { void loadProjects() }} onProjection={setConversationProjection} onOpenConversation={pickConversation} /></div>
+              <div className="main-content main-content--single">
+                {/* A child opened from the sidebar keeps its own controls and snapshot reader. */}                {logicalConversation.sideChat
+                  ? <SideChatSurface liveVisible={mainLiveVisible} key={logicalConversation.id} variant="main" conversation={logicalConversation} draftStore={draftStore}
+                    agents={chatProps.agents} onOpenConversation={pickConversation} onChanged={() => { void loadProjects() }}
+                    onProjection={setConversationProjection} {...(chatProps.onOpenFile ? { onOpenFile: chatProps.onOpenFile } : {})} />
+                  : <ConversationView liveVisible={mainLiveVisible} key={logicalConversation.id} conversation={logicalConversation} draftStore={draftStore} chatProps={chatProps} initialAgentId={conversationAgent} onChanged={() => { void loadProjects() }} onProjection={setConversationProjection} onOpenConversation={pickConversation} />}
+              </div>
             </> : !conversationError && <p role="status">正在打开对话…</p>}
           </> : (view === 'remote' || (view === 'meta-prompts' && metaPromptTarget.current.view === 'remote')) && remoteTarget ? <>
             <div style={{ display: view === 'remote' ? 'contents' : 'none' }}>
@@ -105,27 +143,41 @@ export function AppShell(props: AppShellProps) {
         <>
           {panelVisible && !rightSurface.maximized && <PaneSplitter className="panel-resizer" label="调整右侧面板宽度" controls="right-surface-pane" min={panelMin} max={panelMax} value={surfacePane.width} collapsed={surfacePane.collapsed} active={surfacePane.resizing} onPointerDown={surfacePane.startResize} onKeyDown={surfacePane.onKeyDown} />}
           <div className="right-panel-slot" id="right-surface-pane" style={view === 'remote' ? { display: 'none' } : undefined}>
-            {mountedSurfaces.map((surface) => (
-              <div key={surface.id} data-session-surface-current={surface.id === currentSurface.id} style={{ display: surface.id === currentSurface.id ? 'contents' : 'none' }}>
+            {mountedSurfaces.map((surface) => {
+              const current = surface.id === currentSurface.id
+              return <div key={surface.id} data-session-surface-current={current} style={{ display: current ? 'contents' : 'none' }}>
                 <RightSurfacePanel openIds={surface.state.openIds} activeId={surface.state.activeId} retainTerminal={surface.terminalMounted}
-                  workbenchPicker={surface.id === currentSurface.id && rightSurfaces.choices.length > 1 ? <button type="button" className="surface-tab-activate" aria-label="切换此会话的保留工作区" title="会话身份合并后保留了多个工作区；点击切换，不会关闭终端" onClick={rightSurfaces.selectNext}>工作区 {rightSurfaces.selectedIndex + 1}/{rightSurfaces.choices.length}</button> : null}
-                  maximized={surface.state.maximized} onOpen={(kind) => { surfacePane.restore(); handleRightSurfaceAction({ type: 'open', kind }) }} onActivate={(kind) => handleRightSurfaceAction({ type: 'activate', kind })} onClose={(kind) => handleRightSurfaceAction({ type: 'close', kind })} onHide={() => handleRightSurfaceAction({ type: 'hide' })} onToggleMaximized={() => handleRightSurfaceAction({ type: 'toggle-maximized' })}
+                  workbenchPicker={current && rightSurfaces.choices.length > 1 ? <button type="button" className="surface-tab-activate" aria-label="切换此会话的保留工作区" title="会话身份合并后保留了多个工作区；点击切换，不会关闭终端" onClick={rightSurfaces.selectNext}>工作区 {rightSurfaces.selectedIndex + 1}/{rightSurfaces.choices.length}</button> : null}
+                  maximized={surface.state.maximized}
+                  sideChats={current ? surface.state.sideChats : []}
+                  activeSideChatId={current ? surface.state.activeSideChatId : null}
+                  sideChatTabs={current ? sideChatPanel.tabs : []}
+                  sideChatEntry={current ? sideChatPanel.entry : undefined}
+                  {...(current && !layoutSaved ? { layoutNotice: SIDE_CHAT_COPY.layoutUnsaved } : {})}
+                  onActivateSideChat={(conversationId) => { if (current) sideChatPanel.activate(conversationId) }}
+                  onCloseSideChat={(conversationId) => { if (current) sideChatPanel.close(conversationId) }}
+                  // Ownership, not CSS: only this session's visible surface renders its children.
+                  renderSideChat={current ? sideChatPanel.renderTab : undefined}
+                  visible={current && panelVisible}
+                  onOpen={(kind) => { surfacePane.restore(); handleRightSurfaceAction({ type: 'open', kind }) }} onActivate={(kind) => handleRightSurfaceAction({ type: 'activate', kind })} onClose={(kind) => handleRightSurfaceAction({ type: 'close', kind })} onHide={() => handleRightSurfaceAction({ type: 'hide' })} onToggleMaximized={() => handleRightSurfaceAction({ type: 'toggle-maximized' })}
                   contents={{
                     overview: surface.id !== currentSurface.id ? null : showSessionOverview ? <OverviewPanel turns={displayedTurns} sessionId={selectedProviderSessionId} selected={session.selected} usage={integrations.usage} stats={integrations.stats} runtimeProvider={panelRuntimeProvider} gitDiff={integrations.gitDiff} gitDiffRefreshing={integrations.gitDiffRefreshing} busy={displayedBusy} onSelect={session.setSelected} onOpenTurn={openTurnInChat} /> : <EmptySessionOverview />,
-                    'source-control': surface.cwd ? <SourceControlPanel key={surface.cwd} cwd={surface.cwd} active={surface.id === currentSurface.id && panelVisible && surface.state.activeId === 'source-control'} /> : <div className="surface-unavailable"><b>源代码管理不可用</b><span>先绑定本机 Git 工作区。</span></div>,
-                    files: surface.cwd ? <WorkspacePanel cwd={surface.cwd} active={surface.id === currentSurface.id} refreshKey={workspaceRefreshKey} openRequest={workspaceOpenRequests.get(surface.id)} onDirtyChange={(dirty) => setScopeDirty(surface.id, dirty)} onAddReference={addWorkspaceReference} onClose={() => handleRightSurfaceAction({ type: 'close', kind: 'files' })} /> : <div className="surface-unavailable"><b>文件不可用</b><span>先绑定一个工作区。</span></div>,
+                    'source-control': surface.cwd ? <SourceControlPanel key={surface.cwd} cwd={surface.cwd} active={current && panelVisible && surface.state.activeId === 'source-control'} /> : <div className="surface-unavailable"><b>源代码管理不可用</b><span>先绑定本机 Git 工作区。</span></div>,
+                    files: surface.cwd ? <WorkspacePanel cwd={surface.cwd} active={current} refreshKey={workspaceRefreshKey} openRequest={workspaceOpenRequests.get(surface.id)} onDirtyChange={(dirty) => setScopeDirty(surface.id, dirty)} onAddReference={addWorkspaceReference} onClose={() => handleRightSurfaceAction({ type: 'close', kind: 'files' })} /> : <div className="surface-unavailable"><b>文件不可用</b><span>先绑定一个工作区。</span></div>,
                     diff: surface.id !== currentSurface.id ? null : <DiffInspector state={diffInspector} onClose={() => handleRightSurfaceAction({ type: 'close', kind: 'diff' })}
                       history={view === 'chat' && chatProps.onLoadOlderTurns ? { hasOlder: chatProps.historyWindow?.hasOlder ?? false,
                         loading: chatProps.historyOlderLoading ?? false, load: chatProps.onLoadOlderTurns } : undefined} />,
-                    terminal: <Suspense fallback={<div className="surface-unavailable"><span>正在加载终端…</span></div>}><TerminalSurface cwd={surface.cwd} scopeId={surface.id} active={surface.id === currentSurface.id && panelVisible && surface.state.activeId === 'terminal'} /></Suspense>,
-                    agents: surface.id === currentSurface.id ? <AgentsSurface turns={displayedTurns} busy={displayedBusy} /> : null
+                    terminal: <Suspense fallback={<div className="surface-unavailable"><span>正在加载终端…</span></div>}><TerminalSurface cwd={surface.cwd} scopeId={surface.id} active={current && panelVisible && surface.state.activeId === 'terminal'} /></Suspense>,
+                    agents: current ? <AgentsSurface turns={displayedTurns} busy={displayedBusy} /> : null
                   }}
                 />
               </div>
-            ))}
+            })}
           </div>
         </>
       )}
+      {sideChatPanel.history.open && <SideChatHistoryDialog history={sideChatPanel.history}
+        onClose={sideChatPanel.history.close} />}
       <>{showLlmPerformance && <LlmPerformancePanel open onClose={() => setShowLlmPerformance(false)} />}{(showSkills || showMcp) && <CapabilitiesModal
         key={`${integrations.selectedProviderId}:${cwd ?? ''}`}
         view={showMcp ? 'mcp' : 'skills'}
@@ -147,9 +199,4 @@ export function AppShell(props: AppShellProps) {
       />}{settingsTab !== null && <SettingsModal initialTab={settingsTab} theme={theme} onThemeChange={changeTheme} onSessionsChanged={() => { setArchiveUndo(null); workspace.loadProjects() }} onNewRemoteSession={(connectionId, remoteCwd) => openRemoteLocation(connectionId, remoteCwd)} onClose={() => setSettingsTab(null)} />}</>
     </div>
   )
-}
-
-function RemoteView({ target, connections, showPanel, onTogglePanel, ...chat }: { target: RemoteTarget; connections: ReturnType<typeof useDesktopConnections>; showPanel: boolean; onTogglePanel: () => void } & Omit<ComponentProps<typeof RemoteChat>, 'connectionId' | 'cwd' | 'session'>) {
-  const connection = connections.connections.find((item) => item.id === target.connectionId)
-  return <><ViewChrome cwd={target.cwd} showSummary={false} showPanel={showPanel} onTogglePanel={onTogglePanel} machine={{ label: connection?.label ?? '远程主机不可用', remote: true, state: connection ? hostState(connection, connections.error, connections.refreshing) : 'unknown' }} /><div className="main-content"><RemoteChat key={target.generation} connectionId={target.connectionId} cwd={target.cwd} session={target.session} preparedHistory={target.preparedHistory} {...chat} /></div></>
 }

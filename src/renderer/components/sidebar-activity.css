@@ -59,7 +59,7 @@
   min-height: 34px;
   padding: 0 34px 0 10px;
   border-color: transparent;
-  border-radius: 5px;
+  border-radius: var(--r-xs);
   background: transparent;
   box-shadow: none;
   color: var(--fg);

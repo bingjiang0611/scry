@@ -1,5 +1,5 @@
 // Production React/CSS in an isolated sandboxed Electron window, not an App acceptance test.
-export async function exercise() {
+export async function exerciseChatPreviewDom() {
   const check = (condition, message) => { if (!condition) throw new Error(message) }
   const waitFor = async (predicate) => {
     const deadline = performance.now() + 5000
@@ -111,12 +111,16 @@ export async function exercise() {
   check(!performanceFixture.querySelector('h2'), 'Unsafe long Markdown formatted before user request')
   formatWhole.click()
   await waitFor(() => performanceFixture.querySelector('h2') != null)
-  const earlierFlow = performanceFixture.querySelector('.turn-flow-reveal')
-  check(earlierFlow, 'Large completed tool history lost its explicit reveal control')
-  earlierFlow.click()
-  await waitFor(() => !performanceFixture.querySelector('.turn-flow-reveal'))
-  const toolGroup = performanceFixture.querySelector('.tool-group-row')
   check(performanceFixture.querySelectorAll('[data-trace-event-id]').length === 0, 'Collapsed tools mounted eagerly')
+  // A completed turn only mounts its tail (src/renderer/completed-turn-flow.ts), so the earlier tool
+  // flow sits behind the real reveal control; expand it before measuring the group's lazy mount.
+  const flowReveal = performanceFixture.querySelector('.turn-flow-reveal')
+  check(flowReveal != null, 'Historical tool flow has no real reveal entry')
+  flowReveal.click()
+  await waitFor(() => performanceFixture.querySelector('.turn-flow-reveal') == null)
+  check(performanceFixture.querySelectorAll('[data-trace-event-id]').length === 0, 'Revealing the earlier flow mounted closed tool cards')
+  const toolGroup = performanceFixture.querySelector('.tool-group-row')
+  check(toolGroup != null, 'Revealed historical flow lost its tool group')
   toolGroup.click()
   await waitFor(() => performanceFixture.querySelectorAll('[data-trace-event-id]').length === 100)
   toolGroup.click()

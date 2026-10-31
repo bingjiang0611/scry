@@ -11,6 +11,7 @@ import type { PiAgentProfile } from '../pi-agent-profiles'
 import { withProbeFixture } from './pi-rpc.fixture'
 import * as locate from '../claude-locate'
 import { createPiAdapter } from './pi'
+import { PiRunDiagnostics } from './pi-run-diagnostics'
 
 
 describe('Pi startup and probe lifecycle', () => {
@@ -68,18 +69,39 @@ describe('Pi startup and probe lifecycle', () => {
   })
 
   it.each(['background-cleared', 'background-cleared-resume', 'background-cleared-new-child'])('settles after cleared async evidence without reviving stale cards: %s', async (prompt) => {
-    await withProbeFixture(async (profile, cwd) => {
-      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+    const startedAt = Date.now()
+    await withProbeFixture(async (profile, cwd, starts) => {
+      const setupMs = Date.now() - startedAt
+      const diagnosticsPath = join(cwd, 'run-diagnostics.json')
+      const diagnostics = new PiRunDiagnostics(diagnosticsPath)
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile, diagnostics })
       const events: TraceEvent[] = []
       const handle = adapter.run({
         runId: 'background-cleared', prompt, cwd, agentProfileId: profile.id,
         attachments: [], permissionMode: 'full_access', emit(event) { events.push(event) }
       })
-      onTestFailed(() => {
-        const commands = join(cwd, 'commands')
+      // The 5000ms cap abandons this body, so the failure snapshot must name the startup phase, the
+      // launched child and the elapsed budget instead of inferring from one missing commands file.
+      onTestFailed(async () => {
+        await diagnostics.flush()
+        const commands = join(cwd, 'commands'), pidFile = join(cwd, 'pid'), retained = existsSync(cwd)
+        const childPid = retained && existsSync(pidFile) ? Number(readFileSync(pidFile, 'utf8')) : undefined
+        const alive = (value: number): boolean => { try { process.kill(value, 0); return true } catch { return false } }
+        const run = (retained && existsSync(diagnosticsPath) ? JSON.parse(readFileSync(diagnosticsPath, 'utf8')) : null)
+          ?.runs?.find((candidate: { runId: string }) => candidate.runId === 'background-cleared')
         console.error('Pi cleared-child lifecycle evidence', JSON.stringify({
-          events: events.map(event => ({ stage: event.stage, text: event.text })).slice(-24),
-          commands: existsSync(commands) ? readFileSync(commands, 'utf8').slice(-2000) : 'not created'
+          prompt, setupMs, elapsedMs: Date.now() - startedAt,
+          // A removed fixture directory is an evidence gap, never proof that no child ran.
+          fixtureRetained: retained,
+          events: events.map(event => ({ stage: event.stage, text: event.text, ms: Date.parse(event.ts) - startedAt })).slice(-24),
+          commands: retained && existsSync(commands) ? readFileSync(commands, 'utf8').slice(-2000) : 'missing',
+          launches: retained ? starts().length : 'fixture removed',
+          child: childPid === undefined ? 'no pid file' : { pid: childPid, alive: alive(childPid) },
+          rpcPid: run?.rpcPid ?? 'no diagnostic run',
+          phases: run
+            ? run.history.map(({ phase, at }: { phase: string; at: string }) => ({ phase, ms: Date.parse(at) - startedAt }))
+            : [],
+          native: run ? { agentStarted: run.agentStarted, agentEnded: run.agentEnded, agentSettled: run.agentSettled, nativeIdle: run.nativeIdle } : undefined
         }))
       })
       try {
@@ -99,6 +121,8 @@ describe('Pi startup and probe lifecycle', () => {
       } finally {
         handle.forceKill?.()
         await handle.promise.catch(() => undefined)
+        // Drain the coalesced diagnostic write while the fixture directory still exists.
+        await diagnostics.flush()
       }
     })
   })

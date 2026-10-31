@@ -50,7 +50,7 @@
 .skillinject {
   margin: 6px 0 14px;
   border: 1px dashed var(--border2);
-  border-radius: 10px;
+  border-radius: var(--r-sm);
   background: var(--panel);
 }
 .si-head {
@@ -101,7 +101,7 @@
   margin: 0 0 8px 12px;
   padding: 4px 9px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--r-xs);
   background: var(--bg2);
   color: var(--muted);
   font: inherit;
@@ -172,7 +172,7 @@
 .md code {
   padding: 0.12em 0.38em;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   background: var(--panel2);
   font: 0.86em/1.45 ui-monospace, Menlo, monospace;
   overflow-wrap: anywhere;
@@ -221,7 +221,7 @@
   padding: 12px 14px;
   overflow-x: auto;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--r-sm);
   background: var(--panel);
   line-height: 1.58;
   tab-size: 2;
@@ -243,7 +243,7 @@
   scrollbar-color: var(--border2) transparent;
   scrollbar-gutter: stable;
   border: 1px solid var(--border2);
-  border-radius: 8px;
+  border-radius: var(--r-sm);
 }
 .md-table-scroll:focus-visible {
   outline: 1px solid var(--accent);
@@ -316,7 +316,7 @@
   max-width: 100%;
   height: auto;
   margin: 0.9em 0;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
 }
 
 .filerow {
@@ -329,7 +329,7 @@
 .fbadge {
   width: 18px;
   height: 18px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   display: grid;
   place-items: center;
   font-size: 11px;

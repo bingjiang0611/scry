@@ -1,9 +1,9 @@
 import { isToolContent } from '../shared/tool-content'
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { SESSION_DIFF_PREVIEW_STAGE, SESSION_DIFF_STAGE, TURN_DIFF_STAGE, type DiffFile } from '../shared/turn-diff'
+import { SESSION_DIFF_PREVIEW_STAGE, SESSION_DIFF_STAGE, TURN_DIFF_PREVIEW_STAGE, TURN_DIFF_STAGE, type DiffFile } from '../shared/turn-diff'
 import type { TraceArchiveTurn } from './transcript-archive'
 import { readTraceArchivePageAsync, upsertTraceArchiveTurnAsync } from './transcript-archive'
 import { externalizeTraceDiffPatches, hydrateNewestSessionSnapshots } from './trace-diff-content'
@@ -101,6 +101,18 @@ describe('cumulative diff patch bodies move to the content store', () => {
     expect(perTurn.turnDiff!.files.every((file) => typeof file.patch === 'string' && !file.patchContent)).toBe(true)
   })
 
+  it('does not strip per-turn patches shared with canonical evidence', async () => {
+    const source = turn('run-shared', 'shared')
+    const perTurn = source.items[1].turnDiff!
+    const expected = perTurn.files.map(file => file.patch)
+    source.turnEvidence!.diff.value![0].files = perTurn.files
+    source.items[0].turnDiff!.files = perTurn.files
+    await externalizeTraceDiffPatches(userDataDir, cwd, source)
+    expect(perTurn.files.map(file => file.patch)).toEqual(expected)
+    expect(source.turnEvidence!.diff.value![0].files.every(file => !file.patch && file.patchContent?.contentRef)).toBe(true)
+    expect(source.turnEvidence!.diff.value![0].files[0]).toBe(source.items[0].turnDiff!.files[0])
+  })
+
   it('drops previews left by an earlier reference pass', async () => {
     const once = await externalizeTraceDiffPatches(userDataDir, cwd, turn('run-preview', 'preview'))
     // Simulate a file written by the previous version: reference plus a 2 KB inline preview.
@@ -193,6 +205,32 @@ describe('archive write and page read keep the same visible snapshot', () => {
     expect(onDisk).toContain('recorder-content-v1')
     expect(onDisk.length).toBeLessThan(20 * 1024)
     expect(statSync(appTraceContentRoot(userDataDir, cwd)).isDirectory()).toBe(true)
+  })
+
+  it('restores reference-only historical turn and preview patches without inventing missing content', async () => {
+    const args = { cwd, sessionId, providerId: 'pi' as const, userDataDir }
+    const archived = turn('run-old', 'old', 1)
+    const expected = filesOf(archived).map(file => file.patch)
+    // Reproduce existing reference-only archives independently of the writer fix.
+    await externalizeTraceDiffPatches(userDataDir, cwd, archived)
+    archived.items = [archived.items[0]]
+    archived.items[0].stage = TURN_DIFF_STAGE
+    archived.items.push({ ...archived.items[0], id: 'preview-old', stage: TURN_DIFF_PREVIEW_STAGE, turnDiff: structuredClone(archived.items[0].turnDiff!) })
+    expect(await upsertTraceArchiveTurnAsync({ ...args, turn: archived })).toBe(true)
+    expect(await upsertTraceArchiveTurnAsync({ ...args, turn: turn('run-new', 'new', 2) })).toBe(true)
+    const page = await readTraceArchivePageAsync(args, { limit: 2 })
+    expect(page.archive!.turns).toHaveLength(2)
+    for (const event of page.archive!.turns[0].items) {
+      expect(event.turnDiff!.files.map(file => file.patch)).toEqual(expected)
+    }
+    expect(page.archive!.turns[0].turnEvidence!.diff.value![0].files[0].patch).toBeUndefined()
+    // Content-store failures must still propagate, not become empty successful diffs.
+    const ref = filesOf(archived)[1].patchContent!.contentRef!
+    const path = join(appTraceContentRoot(userDataDir, cwd), 'content', 'sha256', ref.sha256.slice(0, 2), `${ref.sha256}.bin`)
+    writeFileSync(path, 'corrupted')
+    await expect(readTraceArchivePageAsync(args, { limit: 2 })).rejects.toThrow('integrity check failed')
+    rmSync(path)
+    await expect(readTraceArchivePageAsync(args, { limit: 2 })).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('writes each distinct patch body once no matter how many turns repeat it', async () => {

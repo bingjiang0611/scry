@@ -36,40 +36,59 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
       await wait("document.querySelector('.runtime-composer textarea').value.length>0")
     }
   }
-  // Selection now replaces the old session immediately with the target's marked
-  // catalog preview (2026-10-28 contract). Readability is not send/fork authority.
-  const arm = async id => read(`(() => {
+  const arm = async target => read(`(() => {
     window.__loadingObserver?.disconnect(); cancelAnimationFrame(window.__loadingFrame)
-    const state = window.__loadingState = { since:performance.now(), seen:false, pending:false, badControls:false, targetPreview:true, visible:true, replacement:false }
+    const state = window.__loadingState = { since:performance.now(), seen:false, pending:false, badControls:false, identityStable:true, preview:true, authority:false, visible:true, shifted:false, replacement:false, draft:null, top:null, reserved:null }
+    // The timeline's own session-history status. ChatView renders it as standard flow content
+    // above .chat-transcript-content while sessionLoading || sessionCacheVisible, so it moves the
+    // turn down by exactly its own height while the read is pending.
+    const loaderOf = transcript => transcript?.querySelector('.loading-status[data-status="loading"]:not(.chat-session-evidence-gap)') ?? null
     const scan = () => {
       const record = window.loadingFixture.records.filter(r=>r.kind==='session' && r.start>=state.since).at(-1)
       const transcript = document.querySelector('.chat-transcript')
-      const preview = transcript?.getAttribute('data-history-source')==='preview'
-      const indicator = transcript?.querySelector('.loading-status[data-status=loading]')
-      if(record && indicator) state.seen=true
+      const loader = loaderOf(transcript)
       if(record && !record.end) {
-        state.pending=true
+        // Approved catalog-preview contract (57251373): the target owns the page from the first
+        // frame and the standard delayed status is intentionally shown during a slow read, so the
+        // guards are "target selected, its own preview visible, no old authority" plus a shift
+        // budget of exactly that status' flow height.
+        if (loader) state.seen = true
+        state.pending = true
+        state.identityStable &&= document.querySelector('.sb-sess[aria-current=true]')?.textContent.includes(${JSON.stringify(target)})
         const turn = transcript?.querySelector('.transcript-turn')
-        state.targetPreview &&= preview && transcript.getAttribute('aria-busy')==='false' &&
-          document.querySelector('.sb-sess[aria-current=true]')?.textContent.includes(${JSON.stringify(id)}) &&
-          turn?.dataset.runId===${JSON.stringify('session-preview:'+id)} &&
-          !transcript.textContent.includes('Authoritative')
-        state.visible &&= !!turn && turn.isConnected && turn.getBoundingClientRect().height>0 &&
-          [turn, turn.parentElement, transcript].every(element => {
-            const style=getComputedStyle(element)
-            return Number(style.opacity)>0 && style.display!=='none' && style.visibility==='visible'
-          })
-      }
-      if(record && preview) {
-        state.badControls ||= !document.querySelector('button.send').disabled || [...document.querySelectorAll('.turn-branch-btn')].some(n=>!n.disabled)
+        state.preview &&= transcript?.getAttribute('data-history-source') === 'preview' && turn?.getAttribute('data-run-id') === ${JSON.stringify(`session-preview:${target}`)}
+        state.authority ||= (transcript?.textContent ?? '').includes('Authoritative')
+        state.draft ??= document.querySelector('.runtime-composer textarea')?.value ?? ''
+        state.badControls ||= !document.querySelector('button.send')?.disabled || [...document.querySelectorAll('.turn-branch-btn')].some(n=>!n.disabled)
+        const shown = [turn, turn?.parentElement, transcript].every(element => {
+          if(!element || !element.isConnected || element.getBoundingClientRect().height<=0) return false
+          const style=getComputedStyle(element)
+          return Number(style.opacity)>0 && style.display!=='none' && style.visibility==='visible'
+        })
+        if(!shown) state.visible=false
+        else {
+          const top = turn.getBoundingClientRect().top + transcript.scrollTop
+          const reserved = loader ? loader.getBoundingClientRect().height : 0
+          state.top ??= top
+          state.reserved ??= reserved
+          const drift = (top - state.top) - (reserved - state.reserved)
+          if (Math.abs(drift)>1 && !state.shifted) state.firstShift = {
+            from:state.top, to:top, reservedFrom:state.reserved, reservedTo:reserved, drift,
+            runId:turn.dataset.runId, source:transcript.dataset.historySource, scrollTop:transcript.scrollTop,
+            ancestors:[turn,turn.parentElement,transcript,transcript.parentElement].map(node=>({className:node.className,transform:getComputedStyle(node).transform,top:node.getBoundingClientRect().top}))
+          }
+          state.shifted ||= Math.abs(drift)>1
+        }
       }
       state.replacement ||= document.getAnimations().some(a=>a.id==='scry-structure' && a.effect.getTiming().duration===180 && a.effect.getKeyframes().every(frame=>!('transform' in frame)))
     }
     window.__loadingObserver=new MutationObserver(mutations => {
       // Include transient insertions: polling the current DOM cannot disprove a flash.
       const request=window.loadingFixture.records.find(r=>r.kind==='session' && r.start>=state.since)
-      if(request && mutations.some(m=>[...m.addedNodes].some(n=>n instanceof Element &&
-        (n.matches('.loading-status[data-status=loading]') || n.querySelector('.loading-status[data-status=loading]'))))) state.seen=true
+      const loader = node => node.matches('.loading-status[data-status="loading"]') || node.querySelector('.loading-status[data-status="loading"]') != null
+      // Scope by the mutation target, not by the added node's current ancestors: React can remove
+      // the loader before this callback, which would detach the node and lose the short-lived case.
+      if(request && mutations.some(m=>m.target instanceof Element && m.target.closest('.chat-transcript') != null && [...m.addedNodes].some(n=>n instanceof Element && loader(n)))) state.seen=true
       scan()
     })
     window.__loadingObserver.observe(document.querySelector('.chat-body'),{subtree:true,childList:true,attributes:true})
@@ -94,17 +113,20 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
     else await ready(id)
     const result = await report()
     check(result.pending && !result.badControls, `read was not observed or target controls lacked authority: ${JSON.stringify(result)}`)
-    check(result.targetPreview && result.visible, `pending target did not remain a readable, non-authoritative preview: ${JSON.stringify(result)}`)
+    check(result.identityStable && result.visible && !result.shifted, `target preview was not presented atomically: ${JSON.stringify(result)}`)
+    check(result.preview && !result.authority, `pending read did not present the target preview only: ${JSON.stringify(result)}`)
+    check((result.draft ?? '').trim().length > 0, `empty draft cannot prove the send/fork lock: ${JSON.stringify(result)}`)
     check(await read(`window.loadingFixture.records.filter(r=>r.kind==='session' && r.start>=window.__loadingState.since).length===1`), 'opening an uncached session read history twice')
-    check(!await read("!!document.querySelector('.chat-transcript .loading-status[data-status=loading]')"), 'loading bar survived completion/error')
+    check(!await read("!!document.querySelector('.chat-transcript .loading-status[data-status=loading]')"), 'session-history loading status survived completion/error')
+    check(!await read("!!document.querySelector('.chat-session-evidence-gap[data-status=loading]')"), 'evidence gap loader survived completion/error')
     return result
   }
   const fast = await measured('cache-b', 60)
-  check(!fast.seen && fast.replacement, `60ms flashed a loader or lost 180ms replacement: ${JSON.stringify(fast)}`)
+  check(!fast.seen && fast.replacement, `60ms read flashed the session-history status or lost the 180ms replacement: ${JSON.stringify(fast)}`)
   const slow = await measured('cache-a', 1000)
-  check(slow.seen, `slow session read hid its pending authority indicator: ${JSON.stringify(slow)}`)
+  check(slow.seen, `slow session read never showed the standard loading status: ${JSON.stringify(slow)}`)
   const failed = await measured('cache-b', 1000, true)
-  check(failed.seen, 'failed slow read hid its pending authority indicator')
+  check(failed.seen, 'failed session read never showed the standard loading status')
   await screenshot('failure')
   let reduced
   try {
@@ -113,7 +135,7 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
     // Restore real content first; then measure a slow switch from a populated timeline.
     await read('window.loadingFixture.configure(60)'); await select('cache-b'); await ready('cache-b')
     reduced = await measured('cache-a', 1000)
-    check(reduced.seen && reduced.visible, `reduced motion hid the pending status or blanked the target preview: ${JSON.stringify(reduced)}`)
+    check(reduced.seen && reduced.visible, `reduced motion hid the standard loading status or blanked the transcript: ${JSON.stringify(reduced)}`)
     await screenshot('reduced-ready')
   } finally {
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [

@@ -4,7 +4,7 @@
   min-width: 0;
   border: 1px solid var(--border2);
   border-top: 0;
-  border-radius: 0 0 12px 12px;
+  border-radius: 0 0 var(--r-md) var(--r-md);
   color: var(--muted);
   background: var(--panel);
   font-size: 12px;
@@ -19,7 +19,7 @@
   max-width: 55%;
   padding: 3px 5px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--r-xs);
   color: inherit;
   background: transparent;
   font: inherit;
@@ -32,7 +32,7 @@
 .workspace-context-strip .ico { flex-shrink: 0; width: 14px; height: 14px; }
 .workspace-composer-context p { margin: 4px 5px; line-height: 1.5; }
 .workspace-context-recovery { display: flex; gap: 8px; margin: 4px; }
-.workspace-context-recovery button { color: var(--fg); background: transparent; border: 1px solid var(--border); border-radius: 5px; padding: 4px 7px; font: inherit; }
+.workspace-context-recovery button { color: var(--fg); background: transparent; border: 1px solid var(--border); border-radius: var(--r-xs); padding: 4px 7px; font: inherit; }
 .workspace-picker {
   position: fixed;
   z-index: 1100;
@@ -42,7 +42,7 @@
   overflow-y: auto;
   padding: 6px;
   border: 1px solid var(--border2);
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: var(--panel);
   color: var(--fg);
   box-shadow: 0 12px 36px #0003;
@@ -58,7 +58,7 @@
   width: 100%;
   padding: 7px 8px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: inherit;
   font: inherit;

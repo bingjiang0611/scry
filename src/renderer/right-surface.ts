@@ -48,11 +48,29 @@ export const RIGHT_SURFACE_DEFINITIONS: readonly RightSurfaceDefinition[] = [
   }
 ]
 
+/**
+ * One item in the flat tab strip: a tool surface or one side-chat instance.
+ *
+ * Tools are singletons per conversation; side chats are instances, so they carry their
+ * child conversation id. Both live on the same level and share one active tab.
+ */
+export type RightSurfaceTab =
+  | { type: 'tool'; kind: RightSurfaceKind }
+  | { type: 'side-chat'; conversationId: string }
+
+/** Display bound of the tab strip; children themselves are never deleted by it. */
+export const MAX_SIDE_CHAT_TABS = 8
+
 export interface RightSurfaceState {
   openIds: RightSurfaceKind[]
+  /** Last active tool; `activeSideChatId` overrides it while a child tab is active. */
   activeId: RightSurfaceKind | null
   visible: boolean
   maximized: boolean
+  /** Open side-chat instances of this scope, ordered after the tool tabs. */
+  sideChats: string[]
+  /** The active child tab, or null when a tool (or the chooser) is active. */
+  activeSideChatId: string | null
 }
 
 export interface CreateRightSurfaceStateOptions {
@@ -60,6 +78,8 @@ export interface CreateRightSurfaceStateOptions {
   activeId?: RightSurfaceKind | null
   visible?: boolean
   maximized?: boolean
+  sideChats?: readonly string[]
+  activeSideChatId?: string | null
 }
 
 export type RightSurfaceAction =
@@ -70,6 +90,12 @@ export type RightSurfaceAction =
   | { type: 'hide' }
   | { type: 'toggle-maximized' }
   | { type: 'set-maximized'; maximized: boolean }
+  | { type: 'open-side-chat'; conversationId: string }
+  | { type: 'activate-side-chat'; conversationId: string }
+  /** Closes the view only. The child keeps running and its record is untouched. */
+  | { type: 'close-side-chat'; conversationId: string }
+  /** Drops ids a bounded summary read proved deleted; unknown ids stay open. */
+  | { type: 'drop-side-chats'; conversationIds: readonly string[] }
 
 function uniqueKinds(kinds: readonly RightSurfaceKind[]): RightSurfaceKind[] {
   return kinds.filter((kind, index) => kinds.indexOf(kind) === index)
@@ -83,12 +109,44 @@ export function createRightSurfaceState(options: CreateRightSurfaceStateOptions 
     : openIds[0] ?? null
   const visible = options.visible ?? true
 
+  const sideChats = (options.sideChats ?? []).filter(
+    (id, index, all) => Boolean(id) && all.indexOf(id) === index).slice(-MAX_SIDE_CHAT_TABS)
+  const requestedSideChat = options.activeSideChatId
   return {
     openIds,
     activeId,
     visible,
-    maximized: visible ? (options.maximized ?? false) : false
+    maximized: visible ? (options.maximized ?? false) : false,
+    sideChats,
+    activeSideChatId: requestedSideChat && sideChats.includes(requestedSideChat) ? requestedSideChat : null
   }
+}
+
+/** Active tool tab; a child tab being active means no tool is. */
+export function activeToolId(state: RightSurfaceState): RightSurfaceKind | null {
+  return state.activeSideChatId ? null : state.activeId
+}
+
+/** Flat tab order: tool tabs first, then side-chat instances in their open order. */
+export function rightSurfaceTabs(state: RightSurfaceState): RightSurfaceTab[] {
+  return [
+    ...state.openIds.map((kind): RightSurfaceTab => ({ type: 'tool', kind })),
+    ...state.sideChats.map((conversationId): RightSurfaceTab => ({ type: 'side-chat', conversationId }))
+  ]
+}
+
+export function rightSurfaceTabKey(tab: RightSurfaceTab): string {
+  return tab.type === 'tool' ? tab.kind : `side-chat:${tab.conversationId}`
+}
+
+export function activeRightSurfaceTabKey(state: RightSurfaceState): string | null {
+  if (state.activeSideChatId) return `side-chat:${state.activeSideChatId}`
+  return state.activeId
+}
+
+/** Nothing open means the chooser is the view, not an empty workbench. */
+export function rightSurfaceIsChooser(state: RightSurfaceState): boolean {
+  return state.openIds.length === 0 && state.sideChats.length === 0
 }
 
 function activeKindAfterClose(
@@ -112,17 +170,52 @@ export function reduceRightSurfaceState(state: RightSurfaceState, action: RightS
   switch (action.type) {
     case 'open': {
       const alreadyOpen = state.openIds.includes(action.kind)
-      if (alreadyOpen && state.activeId === action.kind && state.visible) return state
+      if (alreadyOpen && state.activeId === action.kind && state.visible && !state.activeSideChatId) return state
       return {
         ...state,
         openIds: alreadyOpen ? state.openIds : [...state.openIds, action.kind],
         activeId: action.kind,
-        visible: true
+        visible: true,
+        activeSideChatId: null
       }
     }
     case 'activate': {
-      if (!state.openIds.includes(action.kind) || state.activeId === action.kind) return state
-      return { ...state, activeId: action.kind }
+      if (!state.openIds.includes(action.kind)) return state
+      if (state.activeId === action.kind && !state.activeSideChatId) return state
+      return { ...state, activeId: action.kind, activeSideChatId: null }
+    }
+    case 'open-side-chat': {
+      const open = state.sideChats.includes(action.conversationId)
+      if (open && state.activeSideChatId === action.conversationId && state.visible) return state
+      // A new instance opens at the end; the list keeps at most eight views. The child
+      // record is durable, so dropping an older tab here deletes no conversation.
+      const sideChats = open ? state.sideChats : [...state.sideChats, action.conversationId].slice(-MAX_SIDE_CHAT_TABS)
+      return { ...state, sideChats, activeSideChatId: action.conversationId, visible: true }
+    }
+    case 'activate-side-chat': {
+      if (!state.sideChats.includes(action.conversationId) || state.activeSideChatId === action.conversationId) return state
+      return { ...state, activeSideChatId: action.conversationId }
+    }
+    case 'close-side-chat': {
+      const index = state.sideChats.indexOf(action.conversationId)
+      if (index < 0) return state
+      const sideChats = state.sideChats.filter((id) => id !== action.conversationId)
+      if (state.activeSideChatId !== action.conversationId) return { ...state, sideChats }
+      // Neighbour first, then the last tool, then the chooser.
+      const neighbour = sideChats[index] ?? sideChats[index - 1] ?? null
+      return { ...state, sideChats, activeSideChatId: neighbour }
+    }
+    case 'drop-side-chats': {
+      const dropped = new Set(action.conversationIds)
+      if (!state.sideChats.some((id) => dropped.has(id))) return state
+      const sideChats = state.sideChats.filter((id) => !dropped.has(id))
+      return {
+        ...state,
+        sideChats,
+        activeSideChatId: state.activeSideChatId && dropped.has(state.activeSideChatId)
+          ? sideChats.at(-1) ?? null
+          : state.activeSideChatId
+      }
     }
     case 'close': {
       if (!state.openIds.includes(action.kind)) return state

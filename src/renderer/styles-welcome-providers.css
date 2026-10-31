@@ -30,6 +30,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
+  corner-shape: round;
   background: var(--ok);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 12%, transparent);
 }
@@ -109,7 +110,7 @@
 .welcome-ready-meter i {
   width: 16px;
   height: 3px;
-  border-radius: 2px;
+  border-radius: var(--r-xs);
   background: var(--dim3);
 }
 
@@ -193,6 +194,7 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
+  corner-shape: round;
   background: var(--dim2);
 }
 
@@ -221,7 +223,7 @@
 
 .welcome-provider[data-health='unavailable'] em {
   padding: 2px 5px;
-  border-radius: 3px;
+  border-radius: var(--r-xs);
   background: var(--bad-soft);
   color: var(--bad);
 }
@@ -322,7 +324,7 @@
   height: 28px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--r-xs);
   background: transparent;
   color: var(--dim2);
   cursor: pointer;

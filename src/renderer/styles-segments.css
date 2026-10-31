@@ -89,7 +89,7 @@
 .seg-legend .sw {
   width: 10px;
   height: 10px;
-  border-radius: 2px;
+  border-radius: var(--r-xs);
 }
 .seg-compare {
   margin: 24px auto 0;
@@ -157,7 +157,7 @@
 .seg-l .kind .sw {
   width: 10px;
   height: 10px;
-  border-radius: 2px;
+  border-radius: var(--r-xs);
 }
 .seg-l h3 {
   font: 600 16px/1.2 var(--font-mono);
@@ -200,7 +200,7 @@
   padding: 3px 7px;
   background: var(--panel2);
   border: 1px solid var(--border3);
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   font: 11px/1 var(--font-mono);
   color: var(--dim);
 }
