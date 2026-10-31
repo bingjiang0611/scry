@@ -1,7 +1,7 @@
-import { once } from 'node:events'
 import { createHash, type Hash } from 'node:crypto'
 import type { FileHandle } from 'node:fs/promises'
-import { parser, type Token } from 'stream-json/parser.js'
+import { none } from 'stream-chain'
+import { jsonParser, type Token } from 'stream-json/parser.js'
 
 /**
  * Records of a Provider's JSONL transcript, read through the installed tokenizer.
@@ -59,45 +59,67 @@ export async function* projectJsonlRecords<T>(
   evidence: TranscriptReadEvidence
 ): AsyncGenerator<T> {
   const projector = create()
-  const tokens = parser.asStream({ jsonStreaming: true, packStrings: false, packNumbers: false })
+  const parse = jsonParser({ jsonStreaming: true, packValues: false })
+  // Parse each bounded input synchronously, rather than crossing the stream adapter's
+  // async bridge for every escape/token. Only projected, bounded events cross yield.
+  for await (const input of tokenInputs(handle, size, evidence)) {
+    try {
+      const parsed = parse(input)
+      if (parsed === none) continue
+      for (const token of coalesceStringTokens(parsed.values)) {
+        for (const event of projector.accept(token)) yield event
+      }
+    } catch (error) {
+      // Only tokenizer/projector failures get the unfinished-tail verdict. File reads run
+      // outside this catch: an I/O failure is not proof of an unfinished writer append.
+      if (await endsWithNewline(handle, size)) {
+        throw new JsonlRecordError(`原生会话记录语法无效：${error instanceof Error ? error.message : String(error)}`)
+      }
+      return
+    }
+  }
+}
+
+async function* tokenInputs(
+  handle: FileHandle,
+  size: number,
+  evidence: TranscriptReadEvidence
+): AsyncGenerator<string | typeof none> {
   const decoder = new TextDecoder('utf-8')
   const buffer = Buffer.allocUnsafe(1024 * 1024)
-  // Writing runs beside the token loop: the tokenizer only produces tokens once a chunk has
-  // been processed, so a single loop would starve on the first read.
-  const feeding = (async (): Promise<void> => {
-    let read = 0
-    while (read < size) {
-      const chunk = await handle.read(buffer, 0, Math.min(buffer.length, size - read), read)
-      if (chunk.bytesRead === 0) break
-      read += chunk.bytesRead
-      evidence.bytes = read
-      evidence.digest?.update(buffer.subarray(0, chunk.bytesRead))
-      if (!tokens.write(decoder.decode(buffer.subarray(0, chunk.bytesRead), { stream: true }))) {
-        await once(tokens, 'drain')
-      }
-    }
-    const tail = decoder.decode()
-    if (tail.length > 0 && !tokens.write(tail)) await once(tokens, 'drain')
-    tokens.end()
-  })()
-  // Attached in this tick: a write rejected by the tokenizer must not surface as an
-  // unhandled rejection after the token loop has already reported the same verdict.
-  const feedingDone = feeding.catch(() => undefined)
-  try {
-    for await (const token of tokens as unknown as AsyncIterable<Token>) {
-      for (const event of projector.accept(token)) yield event
-    }
-  } catch (error) {
-    // A record the writer ended with a newline is a finished record that is invalid; a file
-    // whose last byte is not a newline was still being written there, and nothing in that
-    // unfinished line is evidence, so the completed prefix stands.
-    if (await endsWithNewline(handle, size)) {
-      throw new JsonlRecordError(`原生会话记录语法无效：${error instanceof Error ? error.message : String(error)}`)
-    }
-    return
-  } finally {
-    await feedingDone
+  let read = 0
+  while (read < size) {
+    const chunk = await handle.read(buffer, 0, Math.min(buffer.length, size - read), read)
+    if (chunk.bytesRead === 0) break
+    read += chunk.bytesRead
+    evidence.bytes = read
+    evidence.digest?.update(buffer.subarray(0, chunk.bytesRead))
+    yield decoder.decode(buffer.subarray(0, chunk.bytesRead), { stream: true })
   }
+  const tail = decoder.decode()
+  if (tail.length > 0) yield tail
+  yield none
+}
+
+/** Adjacent pieces belong to the same scalar; never merge across a structural token. */
+function* coalesceStringTokens(tokens: readonly Token[]): Generator<Token> {
+  let text = ''
+  for (const token of tokens) {
+    if (token.name === 'stringChunk') {
+      text += token.value
+      while (text.length >= 16 * 1024) {
+        yield { name: 'stringChunk', value: text.slice(0, 16 * 1024) }
+        text = text.slice(16 * 1024)
+      }
+      continue
+    }
+    if (text) {
+      yield { name: 'stringChunk', value: text }
+      text = ''
+    }
+    yield token
+  }
+  if (text) yield { name: 'stringChunk', value: text }
 }
 
 async function endsWithNewline(handle: FileHandle, size: number): Promise<boolean> {
