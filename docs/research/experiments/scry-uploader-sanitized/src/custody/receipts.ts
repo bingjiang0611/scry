@@ -1,4 +1,4 @@
-import { readdir, unlink } from 'node:fs/promises'
+import { opendir, readdir, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { UploadError } from '../errors.js'
 import { receiptPath } from '../storage.js'
@@ -75,64 +75,98 @@ export async function readReceipt(base: string, recordId: string): Promise<Custo
 }
 
 
-function pendingPath(base: string, recordId: string): string {
-  return join(base, 'pending-receipts', recordId)
+const INDEXED_STATUSES = ['pending', 'skipped_disabled'] as const
+type IndexedStatus = typeof INDEXED_STATUSES[number]
+
+function indexKind(status: IndexedStatus): string {
+  return status === 'pending' ? 'pending' : 'held'
 }
 
-async function removePending(base: string, recordId: string): Promise<void> {
+function indexDirectory(base: string, status: IndexedStatus): string {
+  return join(base, `${indexKind(status)}-receipts`)
+}
+
+async function removeIndexMarker(base: string, status: IndexedStatus, recordId: string): Promise<void> {
+  const directory = indexDirectory(base, status)
   try {
-    await unlink(pendingPath(base, recordId))
-    await syncDirectory(join(base, 'pending-receipts'))
+    await unlink(join(directory, recordId))
+    await syncDirectory(directory)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
   }
 }
 
 export async function saveReceipt(base: string, receipt: CustodyReceipt): Promise<void> {
-  const directory = join(base, 'pending-receipts')
-  await ensurePrivateDirectory(directory, false)
-  // Publish the pending marker BEFORE the receipt/ACK. A crash can leave a
-  // harmless marker without a receipt, never an ACKed pending receipt unindexed.
-  if (receipt.status === 'pending') await writeFileAtomic(pendingPath(base, receipt.recordId), '')
+  // Publish the applicable marker BEFORE its receipt. A crash may leave a stale
+  // marker, never a durable pending/held receipt missing from its active index.
+  for (const status of INDEXED_STATUSES) {
+    if (receipt.status !== status) continue
+    const directory = indexDirectory(base, status)
+    await ensurePrivateDirectory(directory, false)
+    await writeFileAtomic(join(directory, receipt.recordId), '')
+  }
   await writeJsonAtomic(receiptPath(base, receipt.recordId), receipt)
-  if (receipt.status !== 'pending') await removePending(base, receipt.recordId)
+  for (const status of INDEXED_STATUSES)
+    if (receipt.status !== status) await removeIndexMarker(base, status, receipt.recordId)
 }
 
-export async function pendingReceipts(base: string): Promise<CustodyReceipt[]> {
-  const directory = join(base, 'pending-receipts')
+async function ensureReceiptIndex(base: string, status: IndexedStatus): Promise<string> {
+  const directory = indexDirectory(base, status)
   await ensurePrivateDirectory(directory, false)
-  const marker = join(base, 'pending-index.json')
+  const marker = join(base, `${indexKind(status)}-index.json`)
   const version = await readJson<{ version: number }>(marker)
-  if (version && version.version !== 1) throw custodyError('custody_invalid', 'pending index version is invalid')
+  if (version && version.version !== 1) throw custodyError('custody_invalid', `${indexKind(status)} index version is invalid`)
   if (!version) {
-    // One migration scan for pre-index receipts; new writers publish their
-    // marker first. Stale terminal markers are checked against the receipt.
-    for (const name of await readdir(join(base, 'receipts'))) {
-      if (!/^[a-f0-9]{32,64}\.json$/.test(name)) continue
-      const receipt = await readReceipt(base, name.slice(0, -5))
-      if (receipt?.status === 'pending') await writeFileAtomic(pendingPath(base, receipt.recordId), '')
+    // One migration scan per index; later wakeups never scan archived receipts.
+    // New writers publish their marker first, and readers revalidate its status.
+    for await (const entry of await opendir(join(base, 'receipts'))) {
+      if (!/^[a-f0-9]{32,64}\.json$/.test(entry.name)) continue
+      const receipt = await readReceipt(base, entry.name.slice(0, -5))
+      if (receipt?.status === status) await writeFileAtomic(join(directory, receipt.recordId), '')
     }
     await writeJsonAtomic(marker, { version: 1 })
   }
+  return directory
+}
+
+async function indexedReceipt(base: string, status: IndexedStatus, recordId: string): Promise<CustodyReceipt | null> {
+  const receipt = await readReceipt(base, recordId)
+  if (receipt?.status === status) return receipt
+  // A receipt may still be being committed. Never delete its early marker.
+  if (!receipt) return null
+  try {
+    return await withRecordLock(base, recordId, async () => {
+      const current = await readReceipt(base, recordId)
+      if (current?.status === status) return current
+      if (current) await removeIndexMarker(base, status, recordId)
+      return null
+    })
+  } catch (error) {
+    // A simultaneous status transition owns the marker until its receipt is
+    // durable. Skipping cleanup preserves its next recovery opportunity.
+    if (!(error instanceof Error) || error.message !== 'upload worker is already running') throw error
+    return null
+  }
+}
+
+export async function pendingReceipts(base: string): Promise<CustodyReceipt[]> {
+  const directory = await ensureReceiptIndex(base, 'pending')
   const pending: CustodyReceipt[] = []
   for (const recordId of await readdir(directory)) {
     if (!RECORD_ID_RE.test(recordId)) continue
-    const receipt = await readReceipt(base, recordId)
-    if (receipt?.status === 'pending') pending.push(receipt)
-    else if (receipt) {
-      try {
-        await withRecordLock(base, recordId, async () => {
-          const current = await readReceipt(base, recordId)
-          if (current?.status === 'pending') pending.push(current)
-          else if (current) await removePending(base, recordId)
-        })
-      } catch (error) {
-        // A simultaneous release/notify owns the marker until its receipt is
-        // durable. Skipping cleanup preserves its next recovery opportunity.
-        if (!(error instanceof Error) || error.message !== 'upload worker is already running') throw error
-      }
-    }
-    // A receipt may still be being committed. Never delete its early marker.
+    const receipt = await indexedReceipt(base, 'pending', recordId)
+    if (receipt) pending.push(receipt)
   }
   return pending
+}
+
+export async function hasHeldReceipts(base: string): Promise<boolean> {
+  const directory = await ensureReceiptIndex(base, 'skipped_disabled')
+  // Snapshot names before stale-marker cleanup mutates this directory. Health
+  // stops at the first held receipt, without reading retained record bodies.
+  for (const recordId of await readdir(directory)) {
+    if (!RECORD_ID_RE.test(recordId)) continue
+    if (await indexedReceipt(base, 'skipped_disabled', recordId)) return true
+  }
+  return false
 }

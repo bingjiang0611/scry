@@ -9,6 +9,7 @@ import {
 import {
   pausePending
 } from './custody/index.js'
+import { hasHeldReceipts } from './custody/receipts.js'
 import { UploadError } from './errors.js'
 import { safeSnapshotMaxSequence } from './scry.js'
 import {
@@ -237,7 +238,7 @@ export async function runUpload(
       {
         status: uploaded.deferredUntilMs
           ? 'deferred'
-          : pending
+          : await hasHeldReceipts(uploadRoot(workspace))
             ? 'held_disabled'
             : 'healthy',
         deferredUntilMs: uploaded.deferredUntilMs ?? null,

@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "kind": "sanitized-review-snapshot",
-  "sourceVersion": "0.2.2",
-  "sourceRevision": "afe8b545356115f89a42204d9ba97fe3836e83eb",
-  "sourceTrackedFiles": 47,
-  "exportedSourceFiles": 47,
+  "sourceVersion": "0.2.3",
+  "sourceRevision": "3b271c3525eb5e9a999ffefc6d311ed64c178ed0",
+  "sourceTrackedFiles": 48,
+  "exportedSourceFiles": 48,
   "additionalFiles": [
     "README.md",
     "SNAPSHOT.json"
@@ -13,12 +13,12 @@
   "productionDeployable": false,
   "verification": {
     "originalTests": {
-      "passed": 84,
+      "passed": 87,
       "failed": 0,
       "skipped": 0
     },
     "sanitizedTests": {
-      "passed": 84,
+      "passed": 87,
       "failed": 0,
       "skipped": 0
     },
@@ -26,12 +26,14 @@
     "realRemoteUploadVerified": false,
     "realRemoteUploadScope": "public-placeholder-snapshot-not-connected",
     "privateInstallationVerification": {
-      "version": "0.2.2",
+      "version": "0.2.3",
       "records": "synthetic-hooks-through-native-recorder",
       "launchdRecoveryVerified": true,
       "confirmedNewRecords": 1,
-      "disabledSessionsAbsent": 2,
-      "canonicalRecordsUnchanged": 4,
+      "disabledSessionsAbsent": 1,
+      "canonicalRecordsUnchanged": 6,
+      "heldReceiptOnlyHealth": "held_disabled",
+      "primaryCutoffUnchanged": true,
       "custodyBytesExact": true,
       "remoteStructuredBodyEqual": true
     }
@@ -47,19 +49,19 @@
     },
     {
       "path": "README.md",
-      "sha256": "dda2a22327b7a3251ceef954aad4910e928113c3f89e63fb16d04b263ba2cacc"
+      "sha256": "32c7340a1c7c1eac658a1bdc56aeb0fe47027e1efbc0e78440778ef503f85584"
     },
     {
       "path": "UPSTREAM-README.md",
-      "sha256": "391a22768931cf63f6b07882a8531cffe7ef18783408f0c1a72dafa9b6df6966"
+      "sha256": "c556fa23b9aeea82ac79d9e08cb60cc1bcb321158aa53b212461dc7dea6d5be0"
     },
     {
       "path": "package-lock.json",
-      "sha256": "a3d7489b7f536743897ad7db8e30bc20b832b26113dda9c12c57a1bd462789df"
+      "sha256": "b7ef1252df213d040bb521952835e6bee075355c64c5b84477cfc6003f33c74b"
     },
     {
       "path": "package.json",
-      "sha256": "7ded75aa6a446567c600952fc0f50cb6d6a0f2df368a9962432cbfcf3c768699"
+      "sha256": "f91519478182d34af1c0f0da5ed63f6425952a48fe6f0799a58c52825391195b"
     },
     {
       "path": "src/admission.ts",
@@ -71,7 +73,7 @@
     },
     {
       "path": "src/constants.ts",
-      "sha256": "5e0f28f19f602b89a0bb81eb8b1e490f227fe63a317d589e1f7fbc522dfcc14a"
+      "sha256": "d6c8a426b4e7b03d931f1ba990d83a57e88722383b23366eaf2332545874052c"
     },
     {
       "path": "src/custody/index.ts",
@@ -79,7 +81,7 @@
     },
     {
       "path": "src/custody/receipts.ts",
-      "sha256": "a9dfa3473ff984d9b6b8d7106f9a8d0d3989bdb4770ea0e6183d475e152b9393"
+      "sha256": "7be571627213f67f3512dc97f8bc69d59e056a5226d4f83745719d8d05c50d6a"
     },
     {
       "path": "src/envelope.ts",
@@ -143,7 +145,7 @@
     },
     {
       "path": "src/uploader.ts",
-      "sha256": "5a42acfb2af00bcd6f90da94df7b00fcc6ee4b4a665473752bba6689ca211824"
+      "sha256": "61098d7f46cf876625b620881624358e34d2ce5442e70e6ff8581b80a01ff1b8"
     },
     {
       "path": "src/util.ts",
@@ -186,8 +188,12 @@
       "sha256": "24305ae6b7dc1d3f06c45306608bb1f8aac80e3bac32900072a083d56c3b1aef"
     },
     {
+      "path": "test/held-health.test.mjs",
+      "sha256": "bea97f4ea99350051f529ef33e7d4b688c76ab22d9db2243e494f76f1d5439c5"
+    },
+    {
       "path": "test/integration.test.mjs",
-      "sha256": "a86698c3bf5f58bd8ccccd588885d6773bfd66e460cb078482c44a6f642f9bfa"
+      "sha256": "d5769d4ee8c827ee6cecf117afe247a1cc71765bc0a2c260944c08d396d5b8aa"
     },
     {
       "path": "test/locks-lifecycle.test.mjs",

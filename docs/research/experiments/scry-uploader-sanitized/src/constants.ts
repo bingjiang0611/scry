@@ -1,4 +1,4 @@
-export const VERSION = '0.2.2'
+export const VERSION = '0.2.3'
 export const UPLOADER_VERSION = `scry-uploader/${VERSION}`
 export const REDACTION_VERSION = 'none'
 export const LEGACY_REDACTION_VERSION = 'agent-turn-v1'

@@ -6,8 +6,8 @@
 
 ## 来源与覆盖
 
-- 源版本：`0.2.2`；源任务分支 revision：`afe8b545356115f89a42204d9ba97fe3836e83eb`。
-- 包含该 revision 的 **47 个 Git 跟踪文件**：源码、测试、合成 fixture、包元数据、锁文件、TypeScript 配置、上游说明及许可证。
+- 源版本：`0.2.3`；源任务分支 revision：`3b271c3525eb5e9a999ffefc6d311ed64c178ed0`。
+- 包含该 revision 的 **48 个 Git 跟踪文件**：源码、测试、合成 fixture、包元数据、锁文件、TypeScript 配置、上游说明及许可证。
 - 源仓库只做本地提交，未推送其远端。公开仓库不包含源 Git 历史或私有名称映射。
 - 保留 MIT 许可证及原有公开版权署名。
 - 不包含 `node_modules`、`dist`、tarball、本机配置、真实 records、身份、凭据或数据库。
@@ -27,6 +27,10 @@
 | 多仓恢复 | 仅恢复显式登记路径；逐仓校验和错误隔离；保留退避与会话上下文，但不从旧队列恢复 executable、安装身份或状态目录 authority | `src/scheduler.ts`、`src/queue.ts` |
 | 数据保留 | export 先接管 canonical 字节再推进游标；旧无 receipt outbox 先托管再发送；缺少 custody 禁止完成终态；legacy ACK 保留实际提交副本。只有 ACK 满 30 天的副本可清理，保留去重 receipt，不删除 canonical、held、未确认或死信正文 | `src/custody/receipts.ts`、`src/custody/index.ts` |
 | 协议与身份 | 等待进程 close 并读取完整协议 stdout；认证文件原子替换使缓存失效；仓库身份保留 host/namespace，不带 URL 凭据、query 或 fragment | `src/util.ts`、`src/transport.ts` |
+
+`0.2.3` 补齐原 P2 健康状态遗漏：同一 held receipt 不再因是否另有 outbox 副本而在 `healthy` / `held_disabled` 之间变化。状态依据 receipt，held 索引只在升级时扫描一次历史，后续读到首条 held 即停止，不读取 held 正文；索引清理在单记录锁内重验，保留并发状态变更。见 `src/custody/receipts.ts`、`src/uploader.ts` 和 `test/held-health.test.mjs`。
+
+原审查对应：P0 的毒批次、worker 堆积；P1 的超时分类、预算续传、导出隔离、闲置仓恢复、跨仓限流；P2 的 stdout close、锁竞态/EPERM、保留与扫描成本、仓库身份、错误诊断、关闭/重开及 held 健康状态均有对应处理。关闭历史的行为遵循维护者后续决定：不自动补传，而非恢复全部积压。下述外部验证限制仍成立。
 
 发现游标不是远端 ACK，也不是关闭权限边界。旧 `enqueuedThrough` 较大不能使未确认的 custody 消失。内核锁、持久状态和指纹检查也不构成安全沙箱。
 
@@ -49,13 +53,14 @@
 ## 验证
 
 - 环境：macOS arm64、Node `24.18.0`、recorder `0.2.53`。
-- 原版与脱敏副本各自运行 `npm run check`：构建、**84/84 测试，0 skipped**、`npm pack --dry-run` 均通过。原版额外的 TypeScript unused 检查通过。
+- 原版与脱敏副本各自运行 `npm run check`：构建、**87/87 测试，0 skipped**、`npm pack --dry-run` 均通过。原版额外的 TypeScript unused 检查通过。
 - 同步后逐文件核对冻结源 revision 的确定性替换结果；源码/测试不使用旧单体文件大小豁免。
 - 关键回归：60 条记录首轮完成 35 条后保留进度；追加通知与 10 个并发唤醒；三个独立 CLI 的全局并发限制；坏 exporter/不可访问仓库隔离；完整 wire 大小；跨进程关闭与重复 enable；清理中断及重放；队列环境权限隔离。
 - 四个独立破坏对照按预期失败：并发槽改为 3、恢复旧环境覆盖、移除旧关闭标记的 enable 保护、用 exit 代替 close。最后一个对照只取得 6 字节，而不是预期的 70,006 字节。
 - 真实恢复发现 `0.2.1` 的 export 路径没有持久化 custody/ACK receipt。远端查询确认该记录已保存，未重发。`0.2.2` 修复此路径及旧无 receipt outbox、legacy 提交副本；原先静默完成终态改为明确拒绝。对应旧实现失败对照已复现，原文件保留断言未删除。
 - 首轮失败保留记录：曾修正 cutoff、baseline、service 转义与 fixture 假设；升级后还有旧版本字符串/静默终态预期未同步、2 秒子进程 fixture 失败及外层命令超时。最终将独立测试文件串行化，未扩大单项超时，完整检查重新通过。验收脚本也修正了 commitHook 配置和持久锁文件的判断，不把这些脚本错误当产品成功。
-- 私有安装版 `0.2.2` 已部署：72 个包文件与 tarball 一致，99 个 recorder 运行文件与测试依赖一致。真实 launchd 在无通知、无队列任务时恢复 **1 条新记录**，获得 `inserted` ACK；远端查询确认完整结构化内容一致。**2 条关闭期间的记录均未在远端找到**，4 条 canonical 原始字节未变，新记录 custody 字节一致。随后按安全高水位启用获授权主工作区，定时恢复正常。
+- 追问逐项核对时复现 receipt-only held 被误标 `healthy`。旧实现运行新回归按预期失败；补修后的 3 项回归覆盖 outbox 有无、显式释放、旧索引迁移、不再扫描归档 receipt 及并发清理。本地初次交付漏掉此项，不能把之前 84 项通过称为原清单全部完成。
+- 私有安装版 `0.2.3` 已部署：72 个包文件与 tarball 一致，99 个 recorder 运行文件与测试依赖一致。真实 launchd 在无通知、无队列任务时恢复 **1 条新记录**，获得 `inserted` ACK；远端查询确认完整结构化内容一致。另 **1 条关闭期间记录**保留 held custody，远端查询不存在；没有 outbox 副本时健康状态仍正确为 `held_disabled`。6 条 canonical 原始字节未变，新记录 custody 字节一致；主工作区保持开启，升级未改变原高水位。此前 `0.2.2` 的两条关闭历史验证保留为历史证据，不混入本轮计数。
 - 上述真实验收使用合成 hook 记录、真实 recorder 与真实传输，不是实际 Provider 会话验收。公开占位版未连接真实服务；不附部署路径、正文、身份、凭据或原始响应。
 
 ## 可运行性与未验证边界

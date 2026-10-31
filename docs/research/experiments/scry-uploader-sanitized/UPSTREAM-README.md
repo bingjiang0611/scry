@@ -94,6 +94,8 @@ export 发现同样先接管 canonical 原始字节并持久化 receipt，再推
 
 enable、首次初始化和无 state 的注册使用 recorder 的 `--after 9007199254740991 --limit 1` 查询读取 `snapshotMaxSequence`，不是 `nextCursor`；该查询不读取旧记录。baseline probe 失败时保持关闭，不猜测文件名。策略变更与上传互斥；若提示锁忙，等待当前上传结束后再执行，不能把失败的命令当作已关闭。
 
+健康状态以 receipt 的真实状态为准，不因同一 held 记录是否另有 outbox 副本而改变。held 索引首次升级扫描一次 receipts；之后只枚举活跃索引，读到第一条 held receipt 即停止，不读取 held 正文或遍历归档 receipt。索引标记先于 receipt 持久化，过期标记清理在单记录锁内重验，避免覆盖并发 release/关闭状态。
+
 仓库身份保留 Git host/namespace，移除 URL 用户信息、query 和 fragment；没有 remote 时使用工作区路径身份。身份超过 512 个 JavaScript 字符串单元时改用 SHA-256，避免截断碰撞。
 
 ## 本地目录
@@ -104,7 +106,8 @@ enable、首次初始化和无 state 的注册使用 recorder 的 `--after 90071
 ├── outbox/                 # none 信封；legacy agent-turn-v1 信封保持可重放
 │   └── committed/          # ACK 前的原始字节 custody；legacy/ 保留不同的历史提交字节
 ├── receipts/               # sha256、provider/session 和状态
-├── pending-receipts/       # 活跃 receipt 索引，避免每次通知遍历全部历史
+├── pending-receipts/       # 待发送 receipt 索引，避免每次通知遍历全部历史
+├── held-receipts/          # held receipt 索引，供健康状态判定；不授权释放历史
 ├── dead-letter/            # 失败元数据；损坏文件的原样隔离副本
 ├── jobs/                   # 后台任务；永久失败受 6 次预算约束，传输冷却不消耗预算
 └── runtime/                # init 生成的 launcher
