@@ -1,0 +1,39 @@
+{
+  "name": "@review/scry-uploader",
+  "version": "0.2.3",
+  "description": "Upload Scry AgentTurnRecord data through agent-trace-service",
+  "type": "module",
+  "bin": {
+    "scry-upload": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.json && chmod +x dist/cli.js",
+    "test": "npm run build && node --test --test-concurrency=1 test/*.test.mjs test/custody/*.test.mjs",
+    "check": "npm test && npm pack --dry-run",
+    "prepublishOnly": "npm run check"
+  },
+  "dependencies": {
+    "@review/scry-turn-recorder": "0.2.53"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "publishConfig": {
+    "registry": "https://registry.invalid"
+  },
+  "license": "MIT",
+  "author": "bingjiang0611",
+  "private": true
+}
