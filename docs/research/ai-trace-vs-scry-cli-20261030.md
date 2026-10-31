@@ -136,9 +136,17 @@ GET http://127.0.0.1:43124/v1/config/code-detail?startTime=<unix-ms>&endTime=<un
 
 AI Trace 的源码观察定位符为 `DATA_REPORTING_KEYS`、`SLS_EVENT_REPORTING_SCOPES`、`SESSION_OTEL_ENV_SNAPSHOT_FIELD_IDS`、`resolveCodexHookControl`、`CodeDetailHandler` 和 `redactCodeGenerationFields`。这些名称仅用于有权访问同一 bundle 的人复核；本文未附私有源码，公共仓库读者无法仅凭附件独立复算其实现。
 
-## 6. 本次边界
+## 6. 对比调查的边界
+
+本节描述首次对比文档与 JSON 证据的验证范围；后续 uploader 源码快照的检查单独见第 7 节。
 
 - 本文和 JSON 是只读调查材料，不参与构建、测试 fixture 或产品运行。不改变 Scry 或 AI Trace 的采集/上报行为。
-- 没有公开内部源码、内部服务地址、令牌、身份或原始代码/会话正文。公开记录是明确标注的脱敏派生物；不是逐字原始证据。
+- 未附 AI Trace 的内部实现源码、内部服务地址、令牌、身份或原始代码/会话正文。公开记录是明确标注的脱敏派生物；不是逐字原始证据。
 - 已核对 JSON 可解析、保留值与本地响应一致、正文长度按 UTF-8 计算、引用路径存在以及 Markdown diff 无空白错误。
 - 未执行产品单测、构建、安装或同任务双采集实验；纯文档不需要这些检查。没有证明实时网络流量、服务端接收、完整历史覆盖或其他 Provider 的端到端行为。
+
+## 7. 补充：uploader 的公开脱敏源码
+
+按维护者后续授权，附上 [uploader 审阅快照](experiments/scry-uploader-sanitized/README.md)，包含源版本 `0.2.0` 的 27 个跟踪文件的脱敏副本、完整测试和哈希清单。名称、身份协议标识及 URL 均使用公开占位形式；没有附依赖、历史或真实采集数据。
+
+原副本与脱敏副本分别完成构建及 44 项测试，均通过。此结果仅覆盖 fake transport 和临时工作区；快照所需 recorder 为 `0.2.53`，与本文对比的 `0.2.52` 不同。公开占位依赖不可直接下载安装，具体替换、测试条件、阅读入口及限制见快照 README。
