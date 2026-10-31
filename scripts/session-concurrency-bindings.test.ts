@@ -16,28 +16,25 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)))
 function unresolvedNames(files: string[]) {
   const program = ts.createProgram(files, { allowJs: true, checkJs: true, noEmit: true,
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.NodeNext,
-    moduleResolution: ts.ModuleResolutionKind.NodeNext, skipLibCheck: true })
+    moduleResolution: ts.ModuleResolutionKind.NodeNext, skipLibCheck: true, types: ['node'] })
   return [...program.getSemanticDiagnostics(), ...program.getSyntacticDiagnostics()]
     .filter(diagnostic => UNRESOLVED_NAME.has(diagnostic.code))
-    .map(diagnostic => `${diagnostic.file?.fileName ?? '<global>'}:${diagnostic.code}: `
-      + ts.flattenDiagnosticMessageText(diagnostic.messageText, ' '))
 }
 
 describe('harness modules have no unresolved identifiers', () => {
-  it('resolves every harness module without an unbound name', () => {
-    expect(unresolvedNames(HARNESS_FILES.map(file => join(root, file)))).toEqual([])
-  })
-
-  // Negative control: the same program must report a name it cannot bind, otherwise a green first case would only
-  // mean the filter never matches anything.
-  it('reports a missing binding in a fixture', () => {
+  // Check the full harness and the negative control in one program. This preserves both
+  // verdicts without loading/checking TypeScript's library graph twice (or moving work into a hook).
+  it('resolves every harness module and detects a missing fixture binding in the same program', () => {
     const dir = mkdtempSync(join(tmpdir(), 'scry-bindings-'))
     try {
       const fixture = join(dir, 'missing-binding.mjs')
       writeFileSync(fixture, 'export function useIt() { return deletedHelper(1) }\n')
-      const found = unresolvedNames([fixture]).join('\n')
-      expect(found).toContain('2304')
-      expect(found).toContain('deletedHelper')
+      const found = unresolvedNames([...HARNESS_FILES.map(file => join(root, file)), fixture])
+      expect(found.filter(diagnostic => diagnostic.file?.fileName !== fixture)).toEqual([])
+      const missing = found.filter(diagnostic => diagnostic.file?.fileName === fixture)
+      expect(missing.some(diagnostic => diagnostic.code === 2304)).toBe(true)
+      expect(missing.map(diagnostic => ts.flattenDiagnosticMessageText(diagnostic.messageText, ' ')).join('\n'))
+        .toContain('deletedHelper')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

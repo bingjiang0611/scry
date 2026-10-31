@@ -1,3 +1,4 @@
+import { AssertionError, deepStrictEqual } from 'node:assert'
 import { describe, expect, it } from 'vitest'
 import { createTraceRuntime } from '../src/main/bootstrap/trace-runtime'
 import { DockBadgeState } from '../src/main/dock-badge'
@@ -92,7 +93,8 @@ describe('concurrency trace revisions', () => {
   // The real command scales through the real projection and store. Each step is compared as
   // complete JSON: bodies, inputs, order and every metadata field. read() already delivers a
   // decoded copy, so the view can be compared with the projected oracle directly instead of
-  // serializing the whole 50k run a second time.
+  // serializing the whole 50k run a second time. Node's strict JSON-object comparison avoids
+  // the general matcher dispatch per field while still checking every item and metadata key.
   it.each([1000, 10000, 50000])('projects the whole workload through the real revision store at k=%i', (k) => {
     const runtime = boundedRuntime()
     const revisions = createTraceRevisions()
@@ -103,7 +105,7 @@ describe('concurrency trace revisions', () => {
       const bounded = runtime.boundedLiveRun(run)
       const answer = revisions.observe(run.runId, bounded.items, view?.cursor)
       view = follow(view, read(bounded, answer, view))
-      expect(view.run).toEqual(oracleRun(run))
+      deepStrictEqual(view.run, oracleRun(run))
     }
     expect(view!.run.done).toBe(true)
   })
@@ -238,6 +240,6 @@ describe('concurrency trace revisions', () => {
     // The dropped read keeps the delivered text: this control is about the missing change,
     // not about unrelated drift between the view and the run.
     expect(merged.run.items.at(-1)?.text).toBe(deliveredTail)
-    expect(projection(merged.run)).not.toEqual(oracleRun(run))
+    expect(() => deepStrictEqual(projection(merged.run), oracleRun(run))).toThrow(AssertionError)
   })
 })
