@@ -152,7 +152,7 @@ export function registerAgentRuntimeHandlers({
   handleTrusted('agent:stopBackgroundTask', (_event, payload: unknown) => stopObservedBackgroundTask(payload, (runId) => runs.get(runId)))
 
   // 多视图 live 流：每个可见 run 一条自有有界流（上限两个），与 legacy 焦点通道分离。
-  registerRunTraceHandlers(handleTrusted, runTraces)
+  registerRunTraceHandlers(handleTrusted, runTraces, runId => runs.isViewed(runId))
 
   handleTrusted('agent:stop', (_event, runId: string) => requestRunStop(runId))
   handleTrusted('agent:steer', (_event, payload: unknown) => steerObservedRun(payload, (runId) => runs.get(runId)))

@@ -1,7 +1,5 @@
 import type { AppShellProps } from './app-shell-types'
 import { lazy, Suspense, type ComponentProps } from 'react'
-import type { RemoteTarget } from './app-types'
-import type { useDesktopConnections } from './hooks/useDesktopConnections'
 import { Sidebar } from './components/Sidebar'
 import { ConversationView } from './components/ConversationView'
 import { PaneSplitter } from './components/PaneSplitter'
@@ -11,14 +9,15 @@ import { ViewChrome } from './components/ViewChrome'
 import { LlmPerformancePanel } from './components/LlmPerformancePanel'
 import { OverviewPanel } from './components/OverviewPanel'
 import { CapabilitiesModal, SettingsModal } from './components/Modals'
-import { RemoteChat, remoteDraftKey } from './components/RemoteChat'
-import { hostState } from './components/LocationPicker'
+import { remoteDraftKey } from './components/RemoteChat'
+import { RemoteView } from './components/RemoteView'
 import { DiffInspector } from './components/DiffInspector'
 import { WorkspacePanel } from './components/WorkspacePanel'
 import { RightSurfacePanel } from './components/RightSurfacePanel'
 import { SideChatHistoryDialog } from './components/SideChatHistoryDialog'
 import { SideChatSurface } from './components/SideChatSurface'
 import { useRightWorkbench } from './hooks/useRightWorkbench'
+import { useLegacyDiffPreviewDemand } from './hooks/useLegacyDiffPreviewDemand'
 import { SIDE_CHAT_COPY } from './constants/side-chat-copy'
 import { SourceControlPanel } from './components/SourceControlPanel'
 import { AgentsSurface } from './components/AgentsSurface'
@@ -69,6 +68,12 @@ export function AppShell(props: AppShellProps) {
     restorePane: surfacePane.restore
   })
   const { shellRef, narrowSingleColumn, catalog: sideChatCatalog, panel: sideChatPanel, layoutSaved } = workbench
+  const primaryPaneVisible = !shellPanelMaximized && !(narrowSingleColumn && shellPanelVisible)
+  // These surfaces share the primary run projection even when its transcript is hidden.
+  const evidenceSurfaceVisible = panelVisible && !rightSurface.activeSideChatId
+    && (rightSurface.activeId === 'overview' || rightSurface.activeId === 'diff' || rightSurface.activeId === 'agents')
+  const mainLiveVisible = primaryPaneVisible || evidenceSurfaceVisible
+  useLegacyDiffPreviewDemand(session.currentRunId, view === 'chat' && mainLiveVisible)
   return (
     <div ref={shellRef} className={`app app-shell${shellPanelMounted ? ` has-right-panel right-panel-surface${shellPanelMaximized ? ' right-panel-maximized' : ''}${!shellPanelVisible ? ' right-panel-hidden' : ''}` : ''}${narrowSingleColumn ? ' narrow-single-column' : ''}${summaryVisible ? ' pinned-summary-visible' : ''}${summaryVisible && summaryPersistent ? ' pinned-summary-persistent' : ''}${sidebarPane.collapsed ? ' sidebar-collapsed' : ''}`} data-narrow-pane={narrowSingleColumn ? (shellPanelVisible ? 'panel' : 'main') : undefined} style={appStyle}>
       <Sidebar {...(sidebarActions as ComponentProps<typeof Sidebar>)} id="sidebar-pane" draftStore={draftStore} version={packageJson.version} projects={projects}
@@ -92,10 +97,10 @@ export function AppShell(props: AppShellProps) {
               <ViewChrome cwd={logicalConversation.cwd} showSummary={summaryVisible} showPanel={panelVisible} onToggleSummary={summary.toggle} onTogglePanel={toggleOverviewPanel} />
               <div className="main-content main-content--single">
                 {/* A child opened from the sidebar keeps its own controls and snapshot reader. */}                {logicalConversation.sideChat
-                  ? <SideChatSurface key={logicalConversation.id} variant="main" conversation={logicalConversation} draftStore={draftStore}
+                  ? <SideChatSurface liveVisible={mainLiveVisible} key={logicalConversation.id} variant="main" conversation={logicalConversation} draftStore={draftStore}
                     agents={chatProps.agents} onOpenConversation={pickConversation} onChanged={() => { void loadProjects() }}
                     onProjection={setConversationProjection} {...(chatProps.onOpenFile ? { onOpenFile: chatProps.onOpenFile } : {})} />
-                  : <ConversationView key={logicalConversation.id} conversation={logicalConversation} draftStore={draftStore} chatProps={chatProps} initialAgentId={conversationAgent} onChanged={() => { void loadProjects() }} onProjection={setConversationProjection} onOpenConversation={pickConversation} />}
+                  : <ConversationView liveVisible={mainLiveVisible} key={logicalConversation.id} conversation={logicalConversation} draftStore={draftStore} chatProps={chatProps} initialAgentId={conversationAgent} onChanged={() => { void loadProjects() }} onProjection={setConversationProjection} onOpenConversation={pickConversation} />}
               </div>
             </> : !conversationError && <p role="status">正在打开对话…</p>}
           </> : (view === 'remote' || (view === 'meta-prompts' && metaPromptTarget.current.view === 'remote')) && remoteTarget ? <>
@@ -194,9 +199,4 @@ export function AppShell(props: AppShellProps) {
       />}{settingsTab !== null && <SettingsModal initialTab={settingsTab} theme={theme} onThemeChange={changeTheme} onSessionsChanged={() => { setArchiveUndo(null); workspace.loadProjects() }} onNewRemoteSession={(connectionId, remoteCwd) => openRemoteLocation(connectionId, remoteCwd)} onClose={() => setSettingsTab(null)} />}</>
     </div>
   )
-}
-
-function RemoteView({ target, connections, showPanel, onTogglePanel, ...chat }: { target: RemoteTarget; connections: ReturnType<typeof useDesktopConnections>; showPanel: boolean; onTogglePanel: () => void } & Omit<ComponentProps<typeof RemoteChat>, 'connectionId' | 'cwd' | 'session'>) {
-  const connection = connections.connections.find((item) => item.id === target.connectionId)
-  return <><ViewChrome cwd={target.cwd} showSummary={false} showPanel={showPanel} onTogglePanel={onTogglePanel} machine={{ label: connection?.label ?? '远程主机不可用', remote: true, state: connection ? hostState(connection, connections.error, connections.refreshing) : 'unknown' }} /><div className="main-content"><RemoteChat key={target.generation} connectionId={target.connectionId} cwd={target.cwd} session={target.session} preparedHistory={target.preparedHistory} {...chat} /></div></>
 }

@@ -10,6 +10,23 @@ const counters = { fsync: 0, git: 0, children: 0, activeRunsCalls: 0, activeRuns
 const ipc = []
 const hookTrees = []
 const gitCalls = []
+const fileCalls = []
+let fileCallsTruncated = false
+// API attempts, not successful writes or kernel/SQLite/Git-child syscalls. Never record contents.
+const recordFileCall = (operation, method, path, fd, flags) => {
+  if (fileCalls.length >= 20000) { fileCallsTruncated = true; return }
+  const call = { at: Date.now(), operation, method, path: typeof path === 'string' ? path : null,
+    fd: typeof fd === 'number' ? fd : null, flags: typeof flags === 'string' || typeof flags === 'number' ? flags : null }
+  fileCalls.push(call)
+  return call
+}
+const finishRead = (call, error, content) => {
+  if (!call) return
+  call.endedAt = Date.now()
+  call.outcome = error ? 'error' : 'read'
+  if (error) call.errorCode = error.code ?? null
+  else if (Buffer.isBuffer(content)) call.returnedBytes = content.length
+}
 let gitCallsTruncated = false
 const recordGit = (argv, cwd) => {
   if (gitCalls.length < 10000) gitCalls.push({ at: Date.now(), argv, cwd })
@@ -22,6 +39,7 @@ fs.promises.open = async function (...args) {
     const original = handle[method]
     handle[method] = function (...values) {
       counters.fsync++
+      recordFileCall('sync', `FileHandle.${method}`, args[0], this.fd, args[1])
       return original.apply(this, values)
     }
   }
@@ -29,7 +47,36 @@ fs.promises.open = async function (...args) {
 }
 for (const method of ['fsync', 'fsyncSync', 'fdatasync', 'fdatasyncSync']) {
   const original = fs[method]
-  fs[method] = function (...args) { counters.fsync++; return original.apply(this, args) }
+  fs[method] = function (...args) {
+    counters.fsync++
+    recordFileCall('sync', `fs.${method}`, undefined, args[0])
+    return original.apply(this, args)
+  }
+}
+for (const [target, prefix] of [[fs, 'fs'], [fs.promises, 'fs.promises']]) {
+  for (const method of target === fs ? ['readFile', 'readFileSync'] : ['readFile']) {
+    const original = target[method]
+    target[method] = function (...args) {
+      const call = recordFileCall('readFile', `${prefix}.${method}`, args[0], args[0])
+      try {
+        if (target === fs && method === 'readFile') {
+          const callback = args.at(-1)
+          if (typeof callback === 'function') args[args.length - 1] = function (error, content) {
+            finishRead(call, error, content)
+            return callback.apply(this, arguments)
+          }
+          return original.apply(this, args)
+        }
+        const result = original.apply(this, args)
+        if (method === 'readFileSync') finishRead(call, null, result)
+        else result.then(content => finishRead(call, null, content), error => finishRead(call, error))
+        return result
+      } catch (error) {
+        finishRead(call, error)
+        throw error
+      }
+    }
+  }
 }
 const spawn = ChildProcess.prototype.spawn
 ChildProcess.prototype.spawn = function (options) {
@@ -109,7 +156,8 @@ const flush = () => {
   delay.disable()
   fs.appendFileSync(process.env.SCRY_CONCURRENT_LOG, JSON.stringify({ role, pid: process.pid, at: Date.now(),
     argv: process.argv.slice(2), cpu: process.cpuUsage(), usage: process.resourceUsage(), uptimeSeconds: process.uptime(),
-    counters, samples, ipc, hookTrees, gitCalls, gitCallsTruncated, ...(role === 'main' ? { scopedTrace, scopedTraceTruncated } : {}) }) + '\n')
+    counters, samples, ipc, hookTrees, gitCalls, gitCallsTruncated, fileCalls, fileCallsTruncated,
+    ...(role === 'main' ? { scopedTrace, scopedTraceTruncated } : {}) }) + '\n')
 }
 process.on('exit', flush)
 module.exports = { counters, flush }

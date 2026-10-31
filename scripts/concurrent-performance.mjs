@@ -11,6 +11,7 @@ import { stopOwnedApp } from './owned-app-processes.mjs'
 import { nativeUiPointer } from './native-ui-pointer.mjs'
 import { connectConcurrentApp } from './concurrent-performance-cdp.mjs'
 import { summarizeHookTrees, assertScopedDelivery } from './concurrent-performance-summary.mjs'
+import { exerciseConcurrentDiffDemand } from './concurrent-diff-demand-ui.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const count = Number(process.argv[2] ?? 1)
@@ -33,7 +34,7 @@ const output = []
 const hash = value => createHash('sha256').update(value).digest('hex')
 const files = ['scripts/concurrent-performance.mjs', 'scripts/concurrent-performance-probe.cjs',
   'scripts/concurrent-performance.config.ts', 'scripts/fixtures/concurrent-performance-provider.ts', 'scripts/native-ui-pointer.mjs',
-  'scripts/concurrent-performance-cdp.mjs', 'scripts/concurrent-performance-summary.mjs']
+  'scripts/concurrent-performance-cdp.mjs', 'scripts/concurrent-performance-summary.mjs', 'scripts/concurrent-diff-demand-ui.mjs']
 const harnessHash = hash(files.map(path => readFileSync(join(root, path))).join('\0'))
 const artifactHash = () => hash(['out', 'packages/turn-recorder-cli/dist'].flatMap(dir =>
   readdirSync(join(root, dir), { recursive: true, withFileTypes: true }).filter(entry => entry.isFile()).map(entry =>
@@ -173,6 +174,9 @@ try {
   await wait(`document.querySelector('main.unified-conversation[data-conversation-id="${conversations[0].id}"]')`)
   const animatedTitles = await evaluate(`Array.from(document.querySelectorAll('.sb-activity [data-activity-group="working"] .sb-sesstext')).filter(e => getComputedStyle(e).animationName === 'sb-activity-sweep').length`)
   assert.ok(animatedTitles >= count, 'Activity sidebar must exercise the production sweep animation')
+  const demandAcceptance = await exerciseConcurrentDiffDemand({
+    evaluate, activate, wait, conversations, cdp, mode: process.env.SCRY_CONCURRENT_DEMAND_UI
+  })
   const finished = await outcome
   if (finished.error) throw finished.error
   const result = finished.result
@@ -182,6 +186,10 @@ try {
   const settledAt = Date.now()
   result.ui.transcriptComplete = true
   result.ui.animatedTitles = animatedTitles
+  if (demandAcceptance) {
+    result.ui.demandAcceptance = { ...demandAcceptance, evidence: 'Production App, native trusted-hit switching and real Git; diagnostic activeRuns reads; not an end-to-end latency benchmark' }
+    console.log('SCRY_DIFF_DEMAND_UI=' + JSON.stringify(result.ui.demandAcceptance))
+  }
   const afterMetrics = await cdp.send('Performance.getMetrics')
   let traceTimer
   try {

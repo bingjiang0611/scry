@@ -55,6 +55,7 @@ if (new URLSearchParams(location.search).has('app')) {
   const listeners = new Set<(events: TraceEvent[]) => void>()
   const noopSubscribe = () => noop
   Object.defineProperty(window, 'scry', { value: {
+    setLegacyDiffPreviewDemand: async () => true,
     workspaceSelection: unavailableWorkspaceSelection,
     activeRun: async () => null, activeRuns: async () => [],
     onTrace: (listener: (events: TraceEvent[]) => void) => { listeners.add(listener); return () => listeners.delete(listener) },

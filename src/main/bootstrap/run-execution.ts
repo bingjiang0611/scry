@@ -81,7 +81,7 @@ type RunHost = {
   mirrorSessionTranscript: (providerId: ProviderId, cwd: string | undefined, sessionId: string | undefined) => Promise<void>
   flushTraceSend: () => void
   runStopLifecycle: RunStopLifecycle
-  runTraces: Pick<RunTraceRouter, 'settle'>
+  runTraces: Pick<RunTraceRouter, 'settle' | 'hasDemand'>
 }
 
 export async function startRun(
@@ -160,8 +160,8 @@ export async function startRun(
         onError: (scope, error) => console.warn('[scry] diff preview failed:', runId, scope, error)
       })
       notifyDiffChangeRef.current = () => void diffPreviewer.notifyChange()
-      const diffLifecycle = createRunDiffLifecycle({ diffPreviewer, turnDiffCapture, turnChangeJournal, patchExcludeBasenames, cwd, contextKey, runId, providerId, runtimeProvider, runState, sessionDiffBaselines, getDiffContextKey: () => diffContextKey, getObservedSessionId: () => liveRunState.observedSessionId, getResume: () => resume, getContextRevision: () => contextRevision, mainEventId, appendCoalescedTrace, publishTrace })
-      const { finalizeTurnDiff, cancelTurnDiff, finalizeSessionDiff } = diffLifecycle
+      const diffLifecycle = createRunDiffLifecycle({ isRemoteRun, diffPreviewer, turnDiffCapture, turnChangeJournal, patchExcludeBasenames, cwd, contextKey, runId, providerId, runtimeProvider, runState, sessionDiffBaselines, getDiffContextKey: () => diffContextKey, getObservedSessionId: () => liveRunState.observedSessionId, getResume: () => resume, getContextRevision: () => contextRevision, mainEventId, appendCoalescedTrace, publishTrace })
+      const { setDiffPreviewDemand, finalizeTurnDiff, cancelTurnDiff, finalizeSessionDiff } = diffLifecycle
       const publishSessionId = createSessionPublisher({
         runState,
         providerId,
@@ -265,6 +265,8 @@ export async function startRun(
         canonicalLifecycle,
         assertLegacyConversationWriteAllowed
       })
+      runtimeStartup.control.setDiffPreviewDemand = setDiffPreviewDemand
+      setDiffPreviewDemand?.(runTraces.hasDemand(runId))
       const { runProvider, requestRemoteStop, eventLog, getObservedProviderStartedAt, resolveSettled } = runtimeStartup
       const remoteState = createRemoteRunState({ isRemoteRun, runId, providerId, runtimeProvider, runState, getObservedSessionId: () => liveRunState.observedSessionId, getWindow, dockBadge, scopedSessionKey, runs })
       const runTerminalState = remoteState.state
@@ -370,6 +372,7 @@ export async function startRun(
             runStopLifecycle.settle(runId)
             userQuestionBroker.cancelRun(runId)
             // 收口：先终态 flush + terminal，再离开登记，这样终态 diff 与 resync 仍可读。
+            runtimeStartup.control.setDiffPreviewDemand = undefined
             runTraces.settle(runId)
             runs.remove(runId)
             forgetBoundedRun(runId)

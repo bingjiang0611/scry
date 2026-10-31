@@ -46,6 +46,7 @@ const agents = [
   { id: 'pi:second', name: 'Pi second', path: '/fixture/pi', bin: 'pi' }
 ]
 Object.defineProperty(window, 'scry', { value: {
+  setLegacyDiffPreviewDemand: async () => true,
   workspaceSelection: unavailableWorkspaceSelection,
   activeRun: async () => focusedRun ? runs.get(focusedRun) : null,
   activeRuns: async () => [...runs.values()],

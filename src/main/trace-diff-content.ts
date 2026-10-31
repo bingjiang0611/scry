@@ -8,7 +8,7 @@
 import { SESSION_DIFF_PREVIEW_STAGE, SESSION_DIFF_STAGE, TURN_DIFF_PREVIEW_STAGE, TURN_DIFF_STAGE, type DiffFile } from '../shared/turn-diff'
 import type { ToolContent } from '../shared/tool-content'
 import type { TraceEvent } from '../shared/trace'
-import { readRecorderContent, writeRecorderContent } from '../core/turn-recorder/content-store'
+import { readRecorderContent, writeRecorderContentBatch } from '../core/turn-recorder/content-store'
 import { APP_TRACE_CONTENT_SOURCE, appTraceContentRoot } from './trace-tool-content'
 import type { TraceArchiveTurn } from './transcript-archive'
 
@@ -52,20 +52,20 @@ async function externalizeSnapshot(
     }
     return copy
   })
-  // 逐个 publish：内容库按 sha256 去重，同一个 patch 在后面的轮次里只多做一次校验，不重复落盘。
   for (const file of snapshot.files) {
-    // 已经转过引用的旧文件也走一次：清掉此前写下的内联预览，重复执行是幂等的。
     if (needsPreviewDrop(file)) {
       file.patchContent = { ...file.patchContent!, content: '', savedBytes: 0 }
       changed = true
-      continue
     }
-    if (!needsReference(file, thresholdBytes)) continue
-    const patch = file.patch!
-    const ref = await writeRecorderContent(root, patch, 'utf8')
+  }
+  // Only this already-held snapshot is a batch. File bytes and each published link still
+  // get their durability barriers; common ancestor preparation is not repeated per patch.
+  const pending = [...new Set(snapshot.files.filter(file => needsReference(file, thresholdBytes)))]
+  const refs = await writeRecorderContentBatch(root, pending.map(file => file.patch!), 'utf8')
+  for (const [index, file] of pending.entries()) {
     const patchContent: ToolContent = {
       content: '',
-      contentRef: ref,
+      contentRef: refs[index],
       encoding: 'utf8',
       savedBytes: 0,
       source: APP_TRACE_CONTENT_SOURCE,

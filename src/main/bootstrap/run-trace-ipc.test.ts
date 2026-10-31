@@ -21,25 +21,40 @@ function fixture() {
     unsubscribe: vi.fn(() => true),
     ack: vi.fn(() => true),
     resync: vi.fn(() => ({ status: 'missing' as const })),
-    confirmResync: vi.fn(() => true)
+    confirmResync: vi.fn(() => true),
+    setLegacyDemand: vi.fn(() => true)
   }
   registerRunTraceHandlers(
     (channel, listener) => registerTrustedIpcHandler(
       { handle: (name, handler) => { handlers.set(name, handler) } },
       channel, () => window, mainFrame.url, listener
     ),
-    router as unknown as RunTraceRouter
+    router as unknown as RunTraceRouter,
+    runId => runId === 'run-1'
   )
   const invoke = (channel: string, ...args: unknown[]): unknown => handlers.get(channel)!(event, ...args)
   return { handlers, router, invoke, webContents, mainFrame }
 }
 
-const trustedChannels = ['runTraces:subscribe', 'runTraces:unsubscribe', 'runTraces:ack', 'runTraces:resync', 'runTraces:confirm']
+const trustedChannels = ['runTraces:setLegacyDemand', 'runTraces:subscribe', 'runTraces:unsubscribe', 'runTraces:ack', 'runTraces:resync', 'runTraces:confirm']
 
 describe('run trace IPC trust gate', () => {
   it('registers every channel through the production wrapper', () => {
     const { handlers } = fixture()
     for (const channel of trustedChannels) expect(handlers.has(channel)).toBe(true)
+  })
+
+  it('only admits a focused legacy demand, validates both arguments and accepts stale-release checks without refocusing', () => {
+    const { invoke, router } = fixture()
+    expect(invoke('runTraces:setLegacyDemand', 'run-1', true)).toBe(true)
+    expect(router.setLegacyDemand).toHaveBeenCalledWith('run-1', true)
+    router.setLegacyDemand.mockClear()
+    for (const [id, demanded] of [[null, true], ['', true], ['x'.repeat(129), true], ['run-1', 1], ['run-1', null], ['other-run', true]]) {
+      expect(invoke('runTraces:setLegacyDemand', id, demanded)).toBe(false)
+    }
+    expect(router.setLegacyDemand).not.toHaveBeenCalled()
+    expect(invoke('runTraces:setLegacyDemand', 'other-run', false)).toBe(true)
+    expect(router.setLegacyDemand).toHaveBeenCalledWith('other-run', false)
   })
 
   it('forwards validated payloads to the router', () => {
@@ -89,6 +104,7 @@ describe('run trace IPC trust gate', () => {
     expect(router.ack).not.toHaveBeenCalled()
     expect(router.resync).not.toHaveBeenCalled()
     expect(router.confirmResync).not.toHaveBeenCalled()
+    expect(router.setLegacyDemand).not.toHaveBeenCalled()
   })
 
   it('rejects a malformed acknowledgement instead of releasing credit', () => {
@@ -115,7 +131,8 @@ describe('run trace IPC trust gate', () => {
         { handle: (name, handler) => { handlers.set(name, handler) } },
         channel, () => window, 'file:///test/renderer/index.html', listener
       ),
-      router as unknown as RunTraceRouter
+      router as unknown as RunTraceRouter,
+      () => false
     )
     const event = { sender: webContents, senderFrame: mainFrame } as unknown as IpcMainInvokeEvent
     for (const channel of trustedChannels) expect(() => handlers.get(channel)!(event, 'sub-run-1')).toThrow()

@@ -114,6 +114,7 @@ const invokeChannels = {
   activeRuns: 'agent:activeRuns',
   focusedRunSnapshot: 'agent:focusedRunSnapshot',
   focusRun: 'agent:focusRun',
+  setLegacyDiffPreviewDemand: 'runTraces:setLegacyDemand',
   adoptActiveRun: 'agent:adoptActiveRun',
   answerQuestion: 'agent:answerQuestion',
   stop: 'agent:stop',

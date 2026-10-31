@@ -64,6 +64,58 @@ const latestHealth = (h: Harness) => {
 }
 
 describe('run trace router', () => {
+  it('tracks view demand after ownership changes, including idempotence, stale release and teardown', () => {
+    const h = harness()
+    h.add('run-main')
+    const changes: Array<[string, boolean]> = []
+    const router = new RunTraceRouter({
+      runs: h.runs, boundedLiveRun: run => run, canSend: () => true, send: () => {},
+      onDemandChange: (runId, demanded) => {
+        expect(router.hasDemand(runId)).toBe(demanded)
+        changes.push([runId, demanded])
+      }
+    })
+    expect(router.hasDemand('run-main')).toBe(false)
+    expect(router.subscribe({ runId: 'missing', subscriptionId: 'sub-main-1' }).status).toBe('unavailable')
+    expect(router.subscribe({ runId: 'run-main', subscriptionId: 'sub-main-1' }).status).toBe('subscribed')
+    expect(router.subscribe({ runId: 'run-main', subscriptionId: 'sub-main-1' }).status).toBe('subscribed')
+    expect(router.unsubscribe('stale-sub')).toBe(false)
+    expect(changes).toEqual([['run-main', true]])
+    router.settle('run-main')
+    expect(router.hasDemand('run-main')).toBe(true)
+    router.unsubscribe('sub-main-1')
+    router.subscribe({ runId: 'run-main', subscriptionId: 'sub-main-2' })
+    expect(router.unsubscribe('sub-main-1')).toBe(false)
+    expect(router.hasDemand('run-main')).toBe(true)
+    router.close()
+    expect(changes).toEqual([['run-main', true], ['run-main', false], ['run-main', true], ['run-main', false]])
+  })
+
+  it('combines legacy and scoped demand without allowing stale releases or resets to leak ownership', () => {
+    const h = harness()
+    h.add('run-main')
+    h.add('run-child')
+    const changes: Array<[string, boolean]> = []
+    const router = new RunTraceRouter({
+      runs: h.runs, boundedLiveRun: run => run, canSend: () => true, send: () => {},
+      onDemandChange: (id, demand) => { expect(router.hasDemand(id)).toBe(demand); changes.push([id, demand]) }
+    })
+    router.setLegacyDemand('run-main', true)
+    router.subscribe({ runId: 'run-main', subscriptionId: 'sub-main-1' })
+    router.setLegacyDemand('run-child', true)
+    expect(router.setLegacyDemand('run-main', false)).toBe(false)
+    expect(router.hasDemand('run-main')).toBe(true)
+    router.unsubscribe('sub-main-1')
+    router.subscribe({ runId: 'run-child', subscriptionId: 'sub-child-1' })
+    router.setLegacyDemand('run-child', false)
+    expect(router.hasDemand('run-child')).toBe(true)
+    router.reset()
+    expect(changes).toEqual([['run-main', true], ['run-child', true], ['run-main', false], ['run-child', false]])
+    router.setLegacyDemand('run-main', true)
+    router.reset()
+    expect(router.hasDemand('run-main')).toBe(false)
+  })
+
   it('streams two runs independently and never mixes their events', () => {
     const h = harness()
     h.add('run-main')
