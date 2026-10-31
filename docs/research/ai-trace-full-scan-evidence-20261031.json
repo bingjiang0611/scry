@@ -1,0 +1,455 @@
+{
+  "schemaVersion": 1,
+  "kind": "sanitized_local_scan_evidence",
+  "scope": {
+    "snapshotStartedAtUtc": "2026-10-31T02:58:41.567932+00:00",
+    "snapshotCompletedAtUtc": "2026-10-31T02:58:46.026811+00:00",
+    "hostLocalDate": "2026-10-30",
+    "hostUtcOffset": "-07:00",
+    "method": "Read-only SQLite online backup; every table row/column scanned; all nonempty *_json columns parsed. Other files read and hashed, JSON/JSONL parsed. Not a semantic reading of every conversation.",
+    "excluded": [
+      "versions software directory",
+      "referenced original Provider transcript directories",
+      "remote receiver data"
+    ],
+    "crossFileAtomicSnapshot": false,
+    "rawTemporarySnapshotRetained": false,
+    "publicProjection": "Allowlisted aggregate counts and structural shapes only; no record IDs, paths, timestamps of individual events, user/repository identity, body text, credential values or internal service addresses."
+  },
+  "coverage": {
+    "tableCountIncludingSqliteSequence": 37,
+    "totalRowsIncludingStateAndInternalTables": 272170,
+    "parsedJsonColumnValues": 172438,
+    "invalidJsonColumnValues": 0,
+    "sqliteQuickCheck": "ok",
+    "databaseSnapshotBytes": 1619611648,
+    "otherFilesReadAndHashed": 1889,
+    "otherFileBytes": 604585281,
+    "copyErrors": 0,
+    "filesChangedDuringCopy": 0,
+    "parsedJsonDocuments": 1552,
+    "directlyParsedJsonLines": 13393,
+    "initialJsonLineParseFailures": 18,
+    "nulPrefixedFirstLinesRecovered": 18,
+    "nulPrefixBytes": 402237587,
+    "fileCountCaveat": "Includes local configuration, scripts and skills; file/JSON-line counts are not collection-event counts."
+  },
+  "rowCounts": {
+    "ai_session": 588,
+    "ai_session_turn": 1348,
+    "ai_session_turn_file": 136,
+    "ai_trace_gateway_delivery": 33,
+    "code_adoption_repo_repair_probe": 0,
+    "codex_tools_artifact": 0,
+    "codex_tools_request": 0,
+    "codex_tools_snapshot": 0,
+    "codex_tools_storage_bundle": 0,
+    "codex_tools_storage_migration": 1,
+    "codex_tools_storage_payload": 0,
+    "codex_tools_storage_root": 0,
+    "codex_tools_turn_end": 0,
+    "copilot_token_metric_state": 0,
+    "dsh_event_identity": 0,
+    "dsh_legacy_source": 0,
+    "dsh_session_checkpoint": 0,
+    "dsh_session_tool_projection": 0,
+    "local_db_source_cursor": 5,
+    "session_channel_delivery_intent": 2912,
+    "session_channel_rollout": 70,
+    "session_channel_sender_lease": 0,
+    "session_channel_shadow_audit": 0,
+    "session_code_adoption_detail": 113840,
+    "session_daily_token_usage": 97,
+    "session_daily_token_usage_supplement": 0,
+    "session_fact_shadow_checkpoint": 102,
+    "session_fact_source_cursor": 9045,
+    "session_message_fact": 43744,
+    "session_model_usage": 7265,
+    "session_observation_fact": 2311,
+    "session_report_status": 46404,
+    "session_request_fact": 2186,
+    "session_skill_call": 66,
+    "session_tool_call": 5895,
+    "session_transcript_cursor": 36121,
+    "sqlite_sequence": 1
+  },
+  "rowsByClient": {
+    "ai_session": {
+      "codex-cli": 127,
+      "Qoder": 41,
+      "qoder-cli": 420
+    },
+    "ai_session_turn": {
+      "codex-cli": 1348
+    },
+    "session_message_fact": {
+      "codex-cli": 42422,
+      "qoder-cli": 786,
+      "Qoder": 536
+    },
+    "session_code_adoption_detail": {
+      "Cursor": 23,
+      "qoder-work": 759,
+      "Qoder": 2483,
+      "claude-code-cli": 81843,
+      "qoder-cli": 912,
+      "codex-cli": 27783,
+      "OpenCode": 37
+    },
+    "session_model_usage": {
+      "codex-cli": 6693,
+      "qoder-cli": 311,
+      "Qoder": 261
+    },
+    "session_skill_call": {
+      "codex-cli": 62,
+      "Qoder": 4
+    }
+  },
+  "nonemptyColumns": {
+    "ai_session_turn": {
+      "started_at": 1348,
+      "ended_at": 0,
+      "degraded_reason": 0,
+      "source_start_offset": 0,
+      "source_end_offset": 0
+    },
+    "session_message_fact": {
+      "turn_id": 43321,
+      "model": 42131,
+      "provider": 40239
+    },
+    "session_code_adoption_detail": {
+      "session_id": 112335,
+      "tool_call_id": 37944,
+      "content": 76735,
+      "inline_diff_message": 63493
+    },
+    "session_skill_call": {
+      "end_time": 26,
+      "duration_ms": 22,
+      "parent_event_id": 0
+    },
+    "session_observation_fact": {
+      "runtime_metadata_json": 1239,
+      "env_snapshot_json": 0,
+      "agent_envs_json": 0
+    },
+    "session_model_usage": {
+      "input_tokens": 7265,
+      "output_tokens": 7265,
+      "cache_read_tokens": 7265,
+      "cache_write_tokens": 7265,
+      "reasoning_tokens": 7265,
+      "total_tokens": 7265,
+      "credit": 0
+    }
+  },
+  "messages": {
+    "roles": {
+      "system": 864,
+      "assistant": 23143,
+      "user": 19737
+    },
+    "contentBlocksByClient": {
+      "codex-cli": {
+        "text": 25098,
+        "tool_use": 17791,
+        "tool_result": 17749,
+        "thinking": 3881
+      },
+      "Qoder": {
+        "text": 62,
+        "tool_use": 124,
+        "tool_result": 124,
+        "thinking": 51
+      }
+    },
+    "countingCaveat": "Block occurrences, not unique calls. The stored scan recursively visits structured content; a subsequent read-only top-level block count matched exactly. String content (including qoder-cli) is not interpreted as tool blocks.",
+    "nonemptyBlockBodies": {
+      "text": {
+        "text": 25160
+      },
+      "tool_use": {
+        "input": 17886
+      },
+      "tool_result": {
+        "content": 17447
+      },
+      "thinking": {
+        "thinking": 3932
+      }
+    },
+    "toolPairing": {
+      "uniqueUses": 15919,
+      "uniqueResults": 15892,
+      "matchingUsesAndResults": 15892,
+      "usesWithoutResultInMessageFacts": 27,
+      "resultsWithoutUseInMessageFacts": 0
+    },
+    "toolPairingKey": [
+      "client_type",
+      "session_id",
+      "call_id"
+    ],
+    "callIdFields": {
+      "tool_use": "content[].id",
+      "tool_result": "content[].tool_use_id"
+    },
+    "turnJoinColumns": [
+      "client_type",
+      "messages",
+      "nonNullTurnId",
+      "matchedTurnFact"
+    ],
+    "turnJoinRows": [
+      [
+        "Qoder",
+        536,
+        536,
+        0
+      ],
+      [
+        "codex-cli",
+        42422,
+        41999,
+        39062
+      ],
+      [
+        "qoder-cli",
+        786,
+        786,
+        0
+      ]
+    ],
+    "sessionJoinColumns": [
+      "client_type",
+      "messages",
+      "matchedSessionFact"
+    ],
+    "sessionJoinRows": [
+      [
+        "Qoder",
+        536,
+        536
+      ],
+      [
+        "codex-cli",
+        42422,
+        42422
+      ],
+      [
+        "qoder-cli",
+        786,
+        782
+      ]
+    ],
+    "representativeShapes": {
+      "codex-cli:tool_use": {
+        "type": {
+          "type": "string",
+          "utf8Bytes": 8
+        },
+        "id": {
+          "type": "string",
+          "utf8Bytes": 29
+        },
+        "name": {
+          "type": "string",
+          "utf8Bytes": 4
+        },
+        "input": {
+          "type": "string",
+          "utf8Bytes": 438
+        },
+        "caller": null
+      },
+      "codex-cli:tool_result": {
+        "type": {
+          "type": "string",
+          "utf8Bytes": 11
+        },
+        "tool_use_id": {
+          "type": "string",
+          "utf8Bytes": 29
+        },
+        "content": {
+          "type": "string",
+          "utf8Bytes": 12528
+        },
+        "is_error": false
+      },
+      "codex-cli:thinking": {
+        "type": {
+          "type": "string",
+          "utf8Bytes": 8
+        },
+        "thinking": {
+          "type": "string",
+          "utf8Bytes": 36
+        },
+        "signature": null
+      }
+    },
+    "shapeCaveat": "Each string value is replaced by its type and UTF-8 byte length. These are shapes from actual records, not unchanged wire payloads or complete transcripts."
+  },
+  "partialEvidence": {
+    "turnCompletionStates": {
+      "completed": 1348
+    },
+    "nonemptyObservationExtraFields": {
+      "started_at": 1540,
+      "ended_at": 1540,
+      "source_start_offset": 1224,
+      "source_end_offset": 1224,
+      "dirty_patch_unavailable_reason": 203,
+      "workspace_delta": 293
+    },
+    "dirtyPatchUnavailableReasons": {
+      "diff_generation_failed": 1,
+      "shell_evidence_missing": 139,
+      "unsafe_path": 63
+    },
+    "reasonCountsReadOnlyRecheckAtUtc": "2026-10-31T03:19:29.100835+00:00",
+    "workspaceSnapshots": {
+      "files": 520,
+      "statuses": {
+        "ready": 386,
+        "skipped": 79,
+        "failed": 55
+      },
+      "nonemptyWorkspaceStart": 386
+    },
+    "workspaceDiff": {
+      "nonemptyPatchSnapshots": 380,
+      "patchUtf8Bytes": 36430951,
+      "largestPatchUtf8Bytes": 1586188,
+      "statuses": {
+        "partial": 11
+      },
+      "skippedFileReasons": {
+        "not_regular_file": 22
+      }
+    }
+  },
+  "delivery": {
+    "codeDetailUploadStatus": {
+      "success": 113834,
+      "failed": 6
+    },
+    "reportStatus": {
+      "pending": 110,
+      "success": 44933,
+      "failed": 1241,
+      "oversized": 120
+    },
+    "deliveryIntentColumns": [
+      "delivery_status",
+      "rows",
+      "maximumAttemptCount"
+    ],
+    "deliveryIntentRows": [
+      [
+        "cancelled",
+        327,
+        601
+      ],
+      [
+        "delivered",
+        2585,
+        1994
+      ]
+    ],
+    "gatewayStates": {
+      "dead": 21,
+      "cancelled": 12
+    },
+    "meaning": "Locally recorded states and counters, not proof of remote receipt or end-to-end delivery guarantees."
+  },
+  "codeCoverage": {
+    "columns": [
+      "client_type",
+      "rows",
+      "nonemptySessionId",
+      "nonemptyToolCallId",
+      "nonemptyContent",
+      "nonemptyInlineDiff"
+    ],
+    "rows": [
+      [
+        "Cursor",
+        23,
+        6,
+        0,
+        3,
+        20
+      ],
+      [
+        "OpenCode",
+        37,
+        37,
+        37,
+        11,
+        26
+      ],
+      [
+        "Qoder",
+        2483,
+        2413,
+        1000,
+        633,
+        1868
+      ],
+      [
+        "claude-code-cli",
+        81843,
+        80448,
+        14486,
+        65596,
+        35579
+      ],
+      [
+        "codex-cli",
+        27783,
+        27783,
+        20817,
+        10052,
+        24768
+      ],
+      [
+        "qoder-cli",
+        912,
+        912,
+        904,
+        218,
+        695
+      ],
+      [
+        "qoder-work",
+        759,
+        736,
+        700,
+        222,
+        537
+      ]
+    ],
+    "meaning": "Field presence only; not proof of causal attribution. Content and inline-diff counts may overlap."
+  },
+  "sensitiveDiagnostics": {
+    "files": 4,
+    "nonemptySensitiveNamedValues": 8,
+    "valuesPrinted": false,
+    "credentialValidityTested": false
+  },
+  "provenance": {
+    "localReportSha256": {
+      "manifest.json": "69b5880cf4659d3082e6dd1f254072fba079b31a83296719e05635aaec5e18a7",
+      "database-profile.json": "c6d404dbd0740e8e3a816ce55c93e00581c08b19113cac942e700b81de494595",
+      "file-profile.json": "87c77343729dfd1de7371378a55e31da083783c525628229cf05b41599182ea3",
+      "detail-profile.json": "2699d626a14ebf44efb78bfd5d38d3683ea7259504c1b41c827eacfc04668de6",
+      "supplemental-profile.json": "6cd75e17df47971eed51ae983297f36f6eebfdfe7f9909203a8802a81933fc94",
+      "nul-prefix-recovery.json": "d68b0a58045fff591eca020d6dccacfc55d50cfea8f0ed5c015de71e989708c1"
+    },
+    "meaning": "Fingerprints identify private analysis reports. Those reports and raw sources are not published; hashes do not independently authenticate or reproduce the underlying observations."
+  }
+}
