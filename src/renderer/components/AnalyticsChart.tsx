@@ -215,7 +215,9 @@ export function UsageChart({ analytics, metric }: { analytics: UsageAnalytics; m
           }
           return {
             value: metricValue(row, metric),
-            display: metric === 'cost' ? formatChartCost(row.costUsd) : formatAggregateTokens(row),
+            display: metric === 'cost'
+              ? isApproximateCost(row) ? copy.approximateCost(formatChartCost(row.costUsd)) : formatChartCost(row.costUsd)
+              : formatAggregateTokens(row),
             evidence: metric === 'cost' ? displayCostEvidence(row, providerRow.provider) : tokenEvidence(row)
           }
         })
@@ -338,8 +340,7 @@ export function UsageChart({ analytics, metric }: { analytics: UsageAnalytics; m
                 <span key={series.provider}>
                   <ProviderMark provider={series.provider} />
                   <em>{providerLabel(series.provider)}</em>
-                  <strong>{sample.display}</strong>
-                  <small>{sample.evidence}</small>
+                  <strong title={sample.evidence}>{sample.display}</strong>
                 </span>
               )
             })}

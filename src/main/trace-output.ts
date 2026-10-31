@@ -47,6 +47,8 @@ export interface TraceBatch extends TraceBatchReceipt {
 }
 
 export interface TraceBacklogState {
+  /** 交付代数：reset/fence 之后递增，用于隔离过期的确认与快照。 */
+  generation: number
   /** live 视图是否已经落后于权威证据。归档与 runState 始终是完整的。 */
   degraded: boolean
   /** 因为超过安全上限而没有镜像到 live 视图的事件数。 */
@@ -98,7 +100,9 @@ export class TraceOutputBridge {
   private bufferedBytes = 0
   private inFlightBytes = 0
   private readonly inFlightBatches = new Map<number, { generation: number; bytes: number; events: number }>()
-  private generation = 0
+  private deliveryGeneration = 0
+  /** 最近一次快照栅栏时已经上报的缺口；确认这一代快照时只抵扣这一部分。 */
+  private fencedSkipped: number | undefined
   private nextBatchId = 0
   private skippedEvents = 0
   private degraded = false
@@ -199,7 +203,12 @@ export class TraceOutputBridge {
     return true
   }
 
-  /** renderer 已用权威快照对齐 live 视图。 */
+  /** 当前交付代数。每次快照栅栏与窗口重挂之后递增。 */
+  get generation(): number {
+    return this.deliveryGeneration
+  }
+
+  /** renderer 已用权威快照对齐 live 视图（legacy 通道：没有代数参数，清全部缺口）。 */
   resynchronized(): void {
     if (!this.degraded && !this.resyncRequired) return
     this.degraded = false
@@ -209,18 +218,46 @@ export class TraceOutputBridge {
   }
 
   /**
+   * 权威快照即将替换 renderer 视图：丢掉这一代还没交付/在途的事件，并从新一代重新计数。
+   *
+   * 与 reset() 唯一的差别是**不要求** renderer 再做一次重对齐：快照本身就是对齐。
+   * 之前记录的缺口也先留着，等这一代快照被真正提交并确认时才抵扣（见 confirmSnapshot）。
+   */
+  fenceForSnapshot(): number {
+    this.discardDelivery()
+    this.fencedSkipped = this.skippedEvents
+    this.deliveryGeneration += 1
+    return this.deliveryGeneration
+  }
+
+  /**
+   * 拥有这个视图的 renderer 已经把第 generation 代的权威快照应用到视图。
+   *
+   * 只抵扣栅栏那一刻已经上报的缺口：快照之后又丢的事件属于新一代，必须继续如实上报，
+   * 否则「已对齐」会把新的缺口一起抹掉。代数对不上说明这个确认已经过期，不能清除任何东西。
+   */
+  confirmSnapshot(generation: number): boolean {
+    if (generation !== this.deliveryGeneration) return false
+    const fenced = this.fencedSkipped
+    this.fencedSkipped = undefined
+    if (fenced == null) return false
+    this.skippedEvents = Math.max(0, this.skippedEvents - fenced)
+    // 快照之后新增的缺口仍然成立，并要求再对齐一次。
+    this.degraded = this.skippedEvents > 0
+    this.resyncRequired = this.skippedEvents > 0
+    this.publishHealth()
+    return true
+  }
+
+  /**
    * 窗口重挂或 renderer 重建：在途字节不再有人 ACK，必须清零否则永久堵塞。
    * 丢掉未交付的缓冲同样意味着 live 视图不再完整，所以一并要求用权威快照重新对齐。
    */
   reset(): void {
-    this.clearTimer()
     const discarded = this.buffer.length > 0 || this.inFlightBytes > 0
-    this.buffer = []
-    this.bufferedBytes = 0
-    this.inFlightBytes = 0
-    this.inFlightEvents = 0
-    this.inFlightBatches.clear()
-    this.generation += 1
+    this.discardDelivery()
+    this.fencedSkipped = undefined
+    this.deliveryGeneration += 1
     if (this.degraded || discarded) {
       this.resyncRequired = true
       this.publishHealth()
@@ -228,13 +265,9 @@ export class TraceOutputBridge {
   }
 
   close(): void {
-    this.clearTimer()
-    this.buffer = []
-    this.bufferedBytes = 0
-    this.inFlightBytes = 0
-    this.inFlightEvents = 0
-    this.inFlightBatches.clear()
-    this.generation += 1
+    this.discardDelivery()
+    this.fencedSkipped = undefined
+    this.deliveryGeneration += 1
     this.degraded = false
     this.resyncRequired = false
     this.skippedEvents = 0
@@ -242,6 +275,7 @@ export class TraceOutputBridge {
 
   snapshot(): TraceBacklogState {
     return {
+      generation: this.deliveryGeneration,
       degraded: this.degraded,
       skippedEvents: this.skippedEvents,
       bufferedEvents: this.buffer.length,
@@ -249,6 +283,16 @@ export class TraceOutputBridge {
       inFlightBytes: this.inFlightBytes,
       resyncRequired: this.resyncRequired
     }
+  }
+
+  /** 清掉这一代还没交付的缓冲与在途额度：它们要么已被快照覆盖，要么已无人确认。 */
+  private discardDelivery(): void {
+    this.clearTimer()
+    this.buffer = []
+    this.bufferedBytes = 0
+    this.inFlightBytes = 0
+    this.inFlightEvents = 0
+    this.inFlightBatches.clear()
   }
 
   /** 连续发批直到缓冲排空或被背压/不可发送挡住。 */
@@ -275,8 +319,8 @@ export class TraceOutputBridge {
     this.inFlightBytes += bytes
     this.inFlightEvents += events.length
     const batchId = this.nextBatchId++
-    this.inFlightBatches.set(batchId, { generation: this.generation, bytes, events: events.length })
-    this.options.send({ events, bytes, generation: this.generation, batchId })
+    this.inFlightBatches.set(batchId, { generation: this.deliveryGeneration, bytes, events: events.length })
+    this.options.send({ events, bytes, generation: this.deliveryGeneration, batchId })
     return true
   }
 

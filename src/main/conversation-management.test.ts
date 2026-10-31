@@ -100,9 +100,12 @@ describe('logical conversation migration and metadata', () => {
     publish('unfinished', false)
     await expect(prepareConversationAdoption(userData, source, catalog())).rejects.toThrow('未收敛')
     expect(() => parseConversationLegacySource({ ...source, providerId: 'pi' })).toThrow('Pi 必须选择')
-    expect(() => parseConversationLegacySource({ ...source, agentProfileId: 'named' })).toThrow('Claude/Codex 仅支持默认配置')
+    expect(() => parseConversationLegacySource({ ...source, agentProfileId: 'named' })).toThrow('其他 Provider 仅支持默认配置')
     expect(() => parseConversationLegacySource({ ...source, nativeItems: [] })).toThrow('迁移仅支持')
-    expect(() => parseConversationLegacySource({ ...source, providerId: 'qoder' })).toThrow('Provider 不受支持')
+    expect(() => parseConversationLegacySource({ ...source, providerId: 'gemini' })).toThrow('Provider 不受支持')
+    // 发送目标支持 Qoder/OpenCode，但迁移源只认 Claude/Codex/Pi：不能靠 parseTarget 放行。
+    expect(() => parseConversationLegacySource({ ...source, providerId: 'qoder' })).toThrow('不受支持')
+    expect(() => parseConversationLegacySource({ ...source, providerId: 'opencode' })).toThrow('不受支持')
   })
 
   it('retains Pi profile ownership without inventing legacy native coverage', async () => {

@@ -4,6 +4,7 @@ import type { ChatViewProps } from './types'
 import { WorkdirPicker } from '../Pickers'
 import { Icon } from '../primitives/Icon'
 import { QUEUE_COPY } from '../../constants/copy'
+import { CONVERSATION_COPY } from '../../constants/conversation-copy'
 import { RunElapsed } from './RunElapsed'
 import { imageFilesFromClipboardData, composerEnterConfirmsIme, navigateComposerHistory } from './composer-utils'
 
@@ -162,7 +163,8 @@ export function ComposerInput({
                   className="run-status-trace-degraded"
                   title="实时视图为了保持界面可用而暂停镜像最新事件；本轮完整证据仍在 runState 与本机归档里，收口后会自动对齐"
                 >
-                  实时视图已降级 · 缺 {traceHealth.skippedEvents} 条
+                  {/* 没有 scoped 流时一条也没丢：只报降级，不编一个缺口条数。 */}
+                  {CONVERSATION_COPY.traceDegraded(traceHealth.skippedEvents)}
                 </span>
               )}
               {!Number.isNaN(runStartedAt) && <RunElapsed startedAt={runStartedAt} />}

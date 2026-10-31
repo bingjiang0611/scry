@@ -15,7 +15,18 @@ export async function exercisePiAgentSwitch({ cdp, evaluate, fixture, click, wai
   await wait(() => evaluate(`window.scry.activeRuns().then(runs=>!runs.some(run=>run.runId===${json(started.runId)}))`), 'Pi source settles')
   const source = { ...sourceContext, externalSessionId: inputs(fixture).at(-1).sessionId }
   await wait(() => evaluate(`window.scry.conversations.previewAdoption(${json(source)}).catch(error=>{if(String(error).includes('源 Provider 仍在执行'))return false;throw error})`), 'Pi source archive settles')
-  assert.match(await evaluate(`window.scry.conversations.previewAdoption(${json(source)}, {providerId:'qoder'}).then(()=>'',error=>String(error))`), /不受支持/)
+  const preflightSnapshot = () => evaluate(`(async () => ({ preview: await window.scry.conversations.previewAdoption(${json(source)}),
+    conversations: (await window.scry.conversations.list(${json(fixture.workspace)})).map(item => item.id) }))()`)
+  const before = await preflightSnapshot()
+  const callsBefore = inputs(fixture).length
+  // 真正不受支持的 Provider 仍然在解析阶段被拒。
+  assert.match(await evaluate(`window.scry.conversations.previewAdoption(${json(source)}, {providerId:'gemini'}).then(()=>'',error=>String(error))`), /不受支持/)
+  // Qoder 是受支持的发送目标；这个 smoke 环境把它禁用，所以必须诚实报“被禁用”，
+  // 不能冒充“不受支持”，也不能因此放过迁移源。
+  assert.match(await evaluate(`window.scry.conversations.previewAdoption(${json(source)}, {providerId:'qoder'}).then(()=>'',error=>String(error))`), /SCRY_DISABLED_PROVIDERS: qoder/)
+  const after = await preflightSnapshot()
+  assert.deepEqual(after, before, 'rejected target preflights must not adopt or mutate the Pi source')
+  assert.equal(inputs(fixture).length, callsBefore, 'rejected target preflights must not reach a Provider handler')
   assert.match(await evaluate(`window.scry.conversations.previewAdoption(${json({ ...source, agentProfileId: 'pi:fedcba9876543210' })}).then(()=>'',error=>String(error))`), /不属于已登记/)
   await wait(() => evaluate("Boolean(document.querySelector('.sidebar .sb-sess[data-provider=\"pi\"]'))"), 'Pi source remains selectable after rejected preflight')
   await click('.sidebar .sb-sess[data-provider="pi"]')
@@ -144,8 +155,32 @@ export async function exerciseConversationImages({ cdp, evaluate, fixture, click
   await click('.conversation-chat .send')
   await wait(() => evaluate("document.querySelector('.composer-status.is-error')?.textContent.includes('历史检索工具')"), 'unavailable reader refuses before native input')
   assert.equal(inputs(fixture).length, before)
-  assert.equal(await evaluate('document.querySelector(\'textarea[aria-label="描述任务"]\').value'), 'retain this draft')
-  assert.equal(await evaluate("document.querySelectorAll('.draft-attachment').length"), 1)
+  await wait(() => evaluate("document.querySelector('.conversation-chat .conversation-recovery[data-pending-state]') != null"), 'refused send keeps a durable receipt')
+  // 统一对话在派发前把已提交的文字与图片移入持久回执（唯一事实源），输入框不再留第二份
+  // 可编辑副本：否则用户可能在结果未知时再发一次。因此这里断言内容没有丢，而不是断言
+  // 输入框还留着它——原文必须原样存在于回执，并被界面标为“待核对、不自动重发”。
+  const refused = await evaluate(`(() => {
+    const rows = JSON.parse(localStorage.getItem('scry.composer-drafts.v1') ?? '[]')
+    const entry = rows.find(([, value]) => value?.pending?.conversationId === ${json(failed.id)})
+    const recovery = document.querySelector('.conversation-chat .conversation-recovery[data-pending-state]')
+    return {
+      input: document.querySelector('textarea[aria-label="描述任务"]').value,
+      draftAttachments: document.querySelectorAll('.draft-attachment').length,
+      state: recovery?.dataset.pendingState ?? null,
+      recovery: recovery?.textContent ?? '',
+      buttons: [...(recovery?.querySelectorAll('button') ?? [])].map(node => node.textContent.trim()),
+      receipt: entry ? { prompt: entry[1].pending.prompt, attachments: entry[1].pending.attachments.length,
+        phase: entry[1].pending.phase, providerId: entry[1].pending.target.providerId } : null
+    }
+  })()`)
+  assert.equal(refused.state, 'unresolved', 'a refused send stays unknown until the record is read')
+  assert.match(refused.recovery, /原文与图片已保留，不会自动重发/)
+  assert.ok(!refused.buttons.includes('重新发送'), 'an unresolved send must not offer a resend')
+  assert.equal(refused.receipt?.prompt, 'retain this draft', 'the durable receipt keeps the exact text')
+  assert.equal(refused.receipt?.attachments, 1, 'the durable receipt keeps the submitted image')
+  assert.equal(refused.receipt?.phase, 'unknown')
+  assert.equal(refused.receipt?.providerId, 'codex')
+  assert.equal(refused.input, '', 'the submitted text is not duplicated into the composer')
   assert.equal((await read(evaluate, failed.id)).turns.length, 1, 'failed admission did not add a native turn')
   return { id: created.id, failedId: failed.id, contentHash, runIds: second.turns.map(turn => turn.runId) }
 }

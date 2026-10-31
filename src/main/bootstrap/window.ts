@@ -5,6 +5,7 @@ import { windowBackgroundColor, windowTitleBarOptions } from '../window-chrome'
 import { shouldShowEditContextMenu, shouldShowImageContextMenu, editContextMenuTemplate, imageContextMenuTemplate } from '../edit-context-menu'
 import type { TerminalOutputBridge } from '../terminal-output'
 import type { TraceOutputBridge } from '../trace-output'
+import type { RunTraceRouter } from '../run-trace-router'
 import type { DockBadgeState } from '../dock-badge'
 import type { RendererRestartLog } from './renderer-restart'
 
@@ -17,6 +18,7 @@ export interface WindowBootstrapDependencies {
   setWindow: (window: BrowserWindow | null) => void
   terminalOutput: TerminalOutputBridge
   traceOutput: TraceOutputBridge
+  runTraces: RunTraceRouter
   dockBadge: DockBadgeState
   isShuttingDown: () => boolean
   rendererAutoReloadCooldownMs: number
@@ -26,7 +28,7 @@ export interface WindowBootstrapDependencies {
 export function createWindow(deps: WindowBootstrapDependencies): void {
   const {
     __dirname, rendererEntryUrl, useDevelopmentRenderer, isOwnedTestApp, getWindow, setWindow,
-    terminalOutput, traceOutput, dockBadge, isShuttingDown, rendererAutoReloadCooldownMs, rendererRestart
+    terminalOutput, traceOutput, runTraces, dockBadge, isShuttingDown, rendererAutoReloadCooldownMs, rendererRestart
   } = deps
   setWindow(new BrowserWindow({
     width: 1280,
@@ -56,12 +58,14 @@ export function createWindow(deps: WindowBootstrapDependencies): void {
     terminalOutput.detachRenderer()
     // renderer 消失后没人再 ACK 在途 trace 字节；不清零会让下一个窗口永久卡在 high-water。
     traceOutput.reset()
+    runTraces.reset()
     if (getWindow() === createdWindow) setWindow(null)
   })
   createdWindow.webContents.on('did-start-navigation', (details) => {
     if (!details.isMainFrame || details.isSameDocument) return
     terminalOutput.detachRenderer()
     traceOutput.reset()
+    runTraces.reset()
   })
   // Renderer 崩溃后窗口不会自己恢复，只剩背景色（黑屏）。自动重载一次；冷却期内再次崩溃说明
   // 可能是确定性崩溃，改为询问用户，避免无限重载循环。重载后 app:rendererReady 会重新驱动 trace 投递。
@@ -69,6 +73,7 @@ export function createWindow(deps: WindowBootstrapDependencies): void {
   createdWindow.webContents.on('render-process-gone', (_event, details) => {
     terminalOutput.detachRenderer()
     traceOutput.reset()
+    runTraces.reset()
     console.error(`[scry] renderer process gone: reason=${details.reason} exitCode=${details.exitCode}`)
     if (details.reason === 'clean-exit' || isShuttingDown() || createdWindow.isDestroyed()) return
     const now = Date.now()
@@ -134,6 +139,7 @@ export function createWindow(deps: WindowBootstrapDependencies): void {
     // renderer 已经挂好监听：恢复 trace 投递，而不是靠定时器轮询等它就绪。
     // 监听器刻意不在首次 show 之后摘除，这样 renderer 重挂后也能重新驱动投递。
     traceOutput.rendererReady()
+    runTraces.rendererReady()
     showWindow()
   }
   const showWindow = (): void => {

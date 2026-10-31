@@ -14,9 +14,11 @@ import { readAuthorizedRecorderContentPage } from '../recorder-content-access'
 import { CommandReceipts } from '../command-receipts'
 import type { RemoteHostService } from '../remote/remote-host-service'
 import type { RunRegistry } from '../run-registry'
+import type { RunTraceRouter } from '../run-trace-router'
 import type { DockBadgeState } from '../dock-badge'
 import type { UserQuestionBroker } from '../user-question'
 import type { TraceOutputBridge, TraceBatchReceipt } from '../trace-output'
+import { registerRunTraceHandlers } from './run-trace-ipc'
 import type { RunControl } from './run-control'
 
 export type TrustedRegistrar = <Args extends unknown[], Result>(
@@ -27,7 +29,7 @@ export type TrustedRegistrar = <Args extends unknown[], Result>(
 export function registerAgentRuntimeHandlers({
   handleTrusted, startAppRun, runs, boundedLiveRun, dockBadge, activeRunSessionKey,
   getWindow, getRemoteRunLedgerId, getRemoteHostService, userQuestionBroker,
-  resolveKnownProjectDirectory, getCurrentCwd, traceOutput, requestRunStop
+  resolveKnownProjectDirectory, getCurrentCwd, traceOutput, requestRunStop, runTraces
 }: {
   handleTrusted: TrustedRegistrar
   startAppRun: (payload: AgentStartRequest) => Promise<AgentStartResult>
@@ -43,6 +45,7 @@ export function registerAgentRuntimeHandlers({
   getCurrentCwd: () => string | undefined
   traceOutput: TraceOutputBridge
   requestRunStop: (runId: string) => boolean
+  runTraces: RunTraceRouter
 }): void {
   // Re-delivery returns the original admission receipt, never starts another logical run.
   const agentStartReceipts = new CommandReceipts<AgentStartResult>()
@@ -147,6 +150,9 @@ export function registerAgentRuntimeHandlers({
   })
 
   handleTrusted('agent:stopBackgroundTask', (_event, payload: unknown) => stopObservedBackgroundTask(payload, (runId) => runs.get(runId)))
+
+  // 多视图 live 流：每个可见 run 一条自有有界流（上限两个），与 legacy 焦点通道分离。
+  registerRunTraceHandlers(handleTrusted, runTraces, runId => runs.isViewed(runId))
 
   handleTrusted('agent:stop', (_event, runId: string) => requestRunStop(runId))
   handleTrusted('agent:steer', (_event, payload: unknown) => steerObservedRun(payload, (runId) => runs.get(runId)))

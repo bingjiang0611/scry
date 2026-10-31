@@ -143,6 +143,12 @@ export interface TraceLiveHealth {
 
 export const TRACE_LIVE_HEALTHY: TraceLiveHealth = { degraded: false, skippedEvents: 0 }
 
+/**
+ * 拿不到 live 流时的健康状态：降级而不是「健康」。没有流就没有证据，
+ * 显示成健康等于把「看不到」说成「没问题」。
+ */
+export const TRACE_LIVE_UNAVAILABLE: TraceLiveHealth = { degraded: true, skippedEvents: 0 }
+
 export function traceLiveHealthOf(state: TraceBacklogState): TraceLiveHealth {
   return { degraded: state.degraded, skippedEvents: state.skippedEvents }
 }

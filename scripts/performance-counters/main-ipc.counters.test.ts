@@ -2,7 +2,7 @@ import { Buffer } from 'node:buffer'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TraceEvent } from '../../src/shared/trace'
 import { sessionHistoryPage, type LoadedSessionTurn } from '../../src/main/session-history'
 import { projectHistoryPageSnapshots } from '../../src/main/session-history-page-projection'
@@ -207,8 +207,13 @@ async function diffArchivePageTransfer(args: { cwd: string; sessionId: string; p
 }
 
 describe('main and IPC work counters', () => {
+  let fixture: ReturnType<typeof makeArchiveFixture>
+  beforeEach(() => {
+    // Prepare all 120 turns for every case; setup is outside the counted operations below.
+    fixture = makeArchiveFixture()
+  })
+
   it('counts history page, archive page, terminal, remote preview and analytics transfers', async () => {
-    const fixture = makeArchiveFixture()
     try {
       const historyRuns = await repeatCounters(defaultRepeats, () => historyPageTransfer())
       // The first archive read may rebuild its rebuildable index. Measure the steady-state
@@ -247,7 +252,6 @@ describe('main and IPC work counters', () => {
   })
 
   it('is sensitive to duplicate main work and duplicate IPC delivery', async () => {
-    const fixture = makeArchiveFixture()
     try {
       const history = historyPageTransfer()
       const historySecond = historyPageTransfer()

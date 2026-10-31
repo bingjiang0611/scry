@@ -1,10 +1,14 @@
 .unified-conversation { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+/* The transcript owns the leftover height, so the composer stays anchored at the bottom
+   of its own column instead of floating under a short transcript. */
+.unified-conversation > .chat-body { flex: 1 1 auto; min-height: 0; }
+.unified-conversation > .composer { flex: none; }
 .conversation-toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 24px; border-bottom: 1px solid var(--border); font-size: 12px; }
 .conversation-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-toolbar .btn { padding: 4px 8px; font-size: 12px; }
 .conversation-options { position: relative; }
 .conversation-options > summary { cursor: pointer; padding: 6px; color: var(--dim); }
-.conversation-options > .unified-management { position: absolute; right: 0; top: 100%; z-index: 20; width: min(300px, calc(100vw - 64px)); padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px #0003; }
+.conversation-options > .unified-management { position: absolute; right: 0; top: 100%; z-index: 20; width: min(300px, calc(100vw - 64px)); padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); box-shadow: 0 8px 24px #0003; }
 .conversation-options p { margin: 4px 0; color: var(--dim); line-height: 1.5; }
 .conversation-history-notice, .conversation-recovery { margin: 0; padding: 8px 24px; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .conversation-recovery { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -21,3 +25,21 @@
 .unified-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px; }
 .unified-conversation :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .unified-management { display: flex; flex-wrap: wrap; gap: 8px; }
+/* Pending receipt reader: a real modal, bounded by height so a long submitted prompt or a
+   short window still leaves the close action and the images reachable without scrolling
+   the page. */
+.modal.pending-submission-modal { width: min(560px, 92vw); max-height: min(76dvh, 640px); padding: 0; }
+.pending-submission { display: flex; flex-direction: column; min-height: 0; max-height: inherit; }
+.pending-submission-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 16px 10px; border-bottom: 1px solid var(--border); flex: none; }
+.pending-submission-header h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.pending-submission-header p { margin: 4px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--dim); }
+.pending-submission-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px 16px; }
+.pending-submission-label { margin: 0 0 6px; font-size: 11px; letter-spacing: 0.02em; color: var(--dim2); }
+.pending-submission-label + .pending-submission-text { margin-top: 0; }
+.pending-submission-text { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface-inset); font-family: inherit; font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.pending-submission-empty { margin: 0 0 12px; font-size: 12px; color: var(--dim); }
+.pending-submission-images { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 4px; }
+.pending-submission-image { display: flex; flex-direction: column; gap: 4px; margin: 0; min-width: 0; max-width: min(210px, 100%); }
+.pending-submission-image figcaption { font-size: 11px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pending-submission-footer { flex: none; padding: 9px 16px 12px; border-top: 1px solid var(--border); }
+.pending-submission-footer p { margin: 0; font-size: 11px; line-height: 1.5; color: var(--dim2); }

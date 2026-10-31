@@ -34,6 +34,7 @@
   inset: 3px 1px;
   border: 1px solid var(--accent-line);
   border-radius: var(--r-pill);
+  corner-shape: round;
   pointer-events: none;
 }
 .sidebar-resizer {
@@ -189,7 +190,7 @@ body.pane-resizing * {
   bottom: 8px;
   width: 2px;
   background: var(--accent);
-  border-radius: 2px;
+  border-radius: var(--r-xs);
 }
 .sb-sesstext {
   flex: 1;
@@ -221,6 +222,7 @@ body.pane-resizing * {
   border: 2px solid var(--dim2);
   border-top-color: transparent;
   border-radius: 50%;
+  corner-shape: round;
   animation: sb-running-spin 900ms linear infinite;
 }
 @keyframes sb-running-spin {
@@ -241,7 +243,7 @@ body.pane-resizing * {
   position: fixed;
   background: var(--panel2);
   border: 1px solid var(--border2);
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
   padding: 4px;
   min-width: 130px;
@@ -256,7 +258,7 @@ body.pane-resizing * {
   border: 0;
   background: transparent;
   text-align: left;
-  border-radius: 6px;
+  border-radius: var(--r-xs);
   cursor: pointer;
   font-size: 13px;
 }
@@ -270,7 +272,7 @@ body.pane-resizing * {
   font: 10.5px/1 var(--font-mono);
   padding: 3px 6px;
   border: 1px solid var(--border2);
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   color: var(--dim2);
   background: var(--panel);
 }

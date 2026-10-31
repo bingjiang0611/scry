@@ -87,6 +87,7 @@
   height: 5px;
   flex: none;
   border-radius: 50%;
+  corner-shape: round;
   background: #68707d;
 }
 

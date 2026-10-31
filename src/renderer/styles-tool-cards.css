@@ -43,6 +43,7 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
+  corner-shape: round;
   flex: none;
   background: var(--kind, var(--border2));
   box-shadow: 0 0 0 3px var(--surface-subtle);
@@ -98,7 +99,8 @@
 .tool-row .meta .bar {
   flex: 0 0 54px;
   height: 4px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
+  corner-shape: round;
   overflow: hidden;
   background: var(--panel3);
 }
@@ -116,7 +118,7 @@
 .tool-row .chev { color: var(--dim2); flex: none; }
 .tool-row .op {
   width: 16px; height: 14px; font: 700 9px/14px var(--font-mono); letter-spacing: 0.04em;
-  border-radius: 3px; text-align: center; flex: none;
+  border-radius: var(--r-xs); text-align: center; flex: none;
 }
 .tool-row .op.r { color: var(--read); }
 .tool-row .op.w { color: var(--write); }

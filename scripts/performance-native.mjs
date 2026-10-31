@@ -14,7 +14,7 @@ export const nativeWorkloads = { markdown: [40, 32], short: [20, 1], 'short-heav
 // Match the existing default in bootstrap/history-archive.ts, not the older-page size.
 // Seeded workloads and full history recovery remain unchanged.
 export const nativeInitialPageTurns = 10
-export const nativeHarnessFiles = ['scripts/performance-native.mjs', 'scripts/session-open-bench.mjs', 'scripts/session-open-fixture.mjs', 'scripts/session-open-history.mjs', 'scripts/session-open-timing.mjs', 'scripts/native-composer-probe.mjs', 'src/main/providers/smoke.ts', 'scripts/owned-app-processes.mjs', 'scripts/hidden-electron-windows.cjs', 'scripts/performance-report.mjs', 'scripts/performance-paths.json', '.agents/skills/scry-performance-climb/scripts/timing-run.mjs']
+export const nativeHarnessFiles = ['scripts/performance-native.mjs', 'scripts/session-open-bench.mjs', 'scripts/session-open-fixture.mjs', 'scripts/session-open-history.mjs', 'scripts/session-open-timing.mjs', 'scripts/native-composer-probe.mjs', 'src/main/providers/smoke.ts', 'src/main/providers/smoke-history-reader.ts', 'scripts/owned-app-processes.mjs', 'scripts/hidden-electron-windows.cjs', 'scripts/performance-report.mjs', 'scripts/performance-paths.json', '.agents/skills/scry-performance-climb/scripts/timing-run.mjs']
 const composerMetrics = mode => ['sendToTerminalMs', 'sendToSettledVisibleMs',
   ...(mode !== 'stop-immediate' ? ['sendToOutputReceiptMs', 'sendToFirstVisibleMs', 'sendToVisibleReadyMs'] : []),
   ...(mode !== 'complete' ? ['stopToTerminalMs', 'stopToSettledVisibleMs'] : [])]

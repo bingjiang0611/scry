@@ -318,7 +318,8 @@
 
 .diff-file-nav::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
+  corner-shape: round;
   background: var(--border2);
   background-clip: padding-box;
 }

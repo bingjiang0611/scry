@@ -50,7 +50,10 @@ export function useRemoteChatPresentation(foundation: FoundationState, controlPr
 
   // This mounted remote context owns its scroll intent, independently of the
   // last local/remote session. Follow late Markdown/image layout until the
-  // reader deliberately scrolls away from the latest message.
+  // reader deliberately scrolls away from the latest message. The observers are
+  // bound to one concrete `.chat` element, so they must be re-bound when the
+  // presented context changes: `scrollRef` alone is a stable object and would
+  // leave the late-layout follow on an element the reader no longer sees.
   useEffect(() => {
     const history = scrollRef.current
     if (!history) return
@@ -70,7 +73,7 @@ export function useRemoteChatPresentation(foundation: FoundationState, controlPr
     history.addEventListener('scroll', onScroll, { passive: true })
     const unobserve = observeChatBottomLayout(history, () => openingLatest.current || followLatest.current)
     return () => { history.removeEventListener('scroll', onScroll); unobserve?.() }
-  }, [scrollRef])
+  }, [scrollRef, contextKey])
   useLayoutEffect(() => {
     scrollChatToBottomIfNeeded(scrollRef.current, openingLatest.current || followLatest.current)
     if (!openingLatest.current || historyLoading || (sessionId && !historyEvidence && !historyError)) return

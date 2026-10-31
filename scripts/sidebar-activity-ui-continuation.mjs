@@ -67,6 +67,7 @@ export async function exerciseSidebarActivityContinuation({ contents, screenshot
   check(await read(`document.querySelector('[data-activity-group="completed"] .sb-sess') === window.activityRow`), 'New completion did not move ahead of an existing completed task')
   await click('[aria-label="置顶会话：Retry failed webhook delivery"]')
   await wait(`document.querySelector('#activity-pinned').textContent === 'true'`)
+  check(await read(`document.querySelector('#activity-action-cwd').textContent === '/fixture/storefront-worktree'`), 'Pin must use the session worktree')
   check(await read(`document.querySelector('[data-activity-group="completed"] .sb-sess') === window.activityRow`), 'New completion was not first, or metadata refresh lost its position')
 
   try {
@@ -105,6 +106,10 @@ export async function exerciseSidebarActivityContinuation({ contents, screenshot
     await wait(`!document.querySelector(${JSON.stringify(row)})`)
     check(await read(`!document.querySelector('.sb-activity').textContent.includes('Retry failed webhook delivery')`), 'Non-success terminal evidence appeared completed')
   }
+  await read('window.activityFixture.setUnread(true)')
+  await wait(`${group} === 'updates' && document.querySelector(${JSON.stringify(row)}).classList.contains('unread') && ${layoutAnimations}.length === 0`)
+  await click(row)
+  await wait(`!document.querySelector(${JSON.stringify(row)})`)
   await read("window.activityFixture.setPhase('working')")
   await wait(`${group} === 'working' && ${layoutAnimations}.length === 0`)
   for (const theme of ['dark', 'light']) {
@@ -132,6 +137,7 @@ export async function exerciseSidebarActivityContinuation({ contents, screenshot
   await wait(`document.activeElement === document.querySelector(${JSON.stringify(row)})`)
   await click('[aria-label="存档会话：Retry failed webhook delivery"]')
   await wait(`!document.querySelector(${JSON.stringify(row)})`)
+  check(await read(`document.querySelector('#activity-action-cwd').textContent === '/fixture/storefront-worktree'`), 'Archive must use the session worktree')
   await read('window.activityFixture.setBulk(true)')
   await wait(`document.querySelector('.sb-activity-limit')?.textContent.includes('31')`)
   check(await read(`document.querySelectorAll('.sb-activity-item').length === 41`), 'History DOM is not bounded')
@@ -145,7 +151,7 @@ export async function exerciseSidebarActivityContinuation({ contents, screenshot
   await wait(`!document.querySelector('.sb-activity') && document.querySelector('.sb-project-section') != null`)
   await read('window.activityFixture.unmount()')
   await wait(`!document.querySelector('.sidebar')`)
-  return { tabsKeyboard: true, nativeSelection: true, crossGroupIdentityAndFocus: true, animatedLayout: true,
+  return { tabsKeyboard: true, nativeSelection: true, worktreeSelectionAndActions: true, worktreeUnread: true, crossGroupIdentityAndFocus: true, animatedLayout: true,
     conditionalSections: true, movingHeadings: true, flatAppearance: true, honestCompletion: true, inGroupReorder: true,
     stateColumn: true, livePeak: true,
     pointerHeldTarget: true, pinAndArchive: true, reducedMotion: true, largeActivitySurvivor300: true, boundedHistory: true, searchAndEmpty: true, originalView: true, unmount: true,

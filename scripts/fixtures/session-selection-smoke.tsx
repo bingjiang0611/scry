@@ -56,6 +56,7 @@ const update = () => {
   status.textContent = JSON.stringify({ cwd, activeReads, activeListReads, adoptedRuns, historyReads, historyOperations, cancelledLoads, newSessions, starts, snapshots: pendingSnapshots.length })
 }
 const bridge = {
+  setLegacyDiffPreviewDemand: async () => true,
   workspaceSelection: unavailableWorkspaceSelection,
   activeRun: () => {
     activeReads += 1

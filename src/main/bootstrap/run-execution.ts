@@ -11,6 +11,7 @@ import type { ConversationStore, NativeSessionScope } from '../conversation-stor
 import type { createAppSessionStore } from '../app-store'
 import type { RunRegistry } from '../run-registry'
 import type { RunStopLifecycle } from '../run-stop-lifecycle'
+import type { RunTraceRouter } from '../run-trace-router'
 import type { UserQuestionBroker } from '../user-question'
 import type { DockBadgeState } from '../dock-badge'
 import type { SourceControlService } from '../source-control/service'
@@ -60,7 +61,7 @@ type RunHost = {
   nextRunSequence: () => number
   llmNetworkConfiguration: LlmNetworkConfigurationCache
   sessionDiffBaselines: SessionDiffBaselineRegistry
-  queueTrace: (event: TraceEvent) => void
+  publishTrace: (event: TraceEvent) => void
   rendererCanReceive: () => boolean
   mainEventId: (prefix: string, runId: string) => string
   LIVE_TOOL_CONTENT_POLICY: Parameters<typeof createLiveRunState>[0]['LIVE_TOOL_CONTENT_POLICY']
@@ -76,9 +77,11 @@ type RunHost = {
   remoteRunIds: Set<string>
   remoteRunLedgerIds: Map<string, string>
   boundedLiveRun: (run: ActiveRun) => ActiveRun
+  forgetBoundedRun: (runId: string) => void
   mirrorSessionTranscript: (providerId: ProviderId, cwd: string | undefined, sessionId: string | undefined) => Promise<void>
   flushTraceSend: () => void
   runStopLifecycle: RunStopLifecycle
+  runTraces: Pick<RunTraceRouter, 'settle' | 'hasDemand'>
 }
 
 export async function startRun(
@@ -93,11 +96,11 @@ export async function startRun(
     resetSessionContext, sessionRevisionByContext, sessionByContext, sessionAliasesByContext,
     runs, deletingSessions, conversationStore, assertLegacyConversationWriteAllowed,
     recordingBlockedSessions, homeDir, nextRunSequence, llmNetworkConfiguration,
-    sessionDiffBaselines, queueTrace, rendererCanReceive, mainEventId, LIVE_TOOL_CONTENT_POLICY,
+    sessionDiffBaselines, publishTrace, rendererCanReceive, mainEventId, LIVE_TOOL_CONTENT_POLICY,
     recordingRecoveryHint, sessionBaselineKey, dockBadge, userQuestionBroker,
     publishQuestionOpened, publishQuestionClosed, requestRunStop, bumpSessionRevision,
-    sourceControl, remoteRunIds, remoteRunLedgerIds, boundedLiveRun, mirrorSessionTranscript,
-    flushTraceSend, runStopLifecycle
+    sourceControl, remoteRunIds, remoteRunLedgerIds, boundedLiveRun, forgetBoundedRun, mirrorSessionTranscript,
+    flushTraceSend, runStopLifecycle, runTraces
   } = host
   const frontdoor = prepareRunFrontdoor(payload, options, {
     providerRegistry, isShuttingDown: isShuttingDown(), currentCwd: getCurrentCwd(), appSessionStore, resolveRemoteProjectDirectory,
@@ -124,7 +127,7 @@ export async function startRun(
         options, providerId, runtimeProvider, request, managedConversation, cwd, catalogCwd, resume, contextKey,
         agentProfileId, codexHookTrust, openCodePluginTrust, managedRecorderEnabled, managedRecorderEnablement, homeDir,
         createRunId: (managed, runOptions) => managed?.runId ?? runOptions.runId ?? `run-${Date.now().toString(36)}-${nextRunSequence()}`,
-        llmNetworkConfiguration, sessionDiffBaselines, appSessionStore, recordingBlockedSessions, getWindow, runs, queueTrace,
+        llmNetworkConfiguration, sessionDiffBaselines, appSessionStore, recordingBlockedSessions, getWindow, publishTrace,
         rendererCanReceive, mainEventId, LIVE_TOOL_CONTENT_POLICY, recordingRecoveryHint, userDataDir: app.getPath('userData'),
         scopedSessionKey, isRemoteRun, editSourceSessionId, deleteRunAttachments, sessionBaselineKey
       })
@@ -151,13 +154,14 @@ export async function startRun(
             turnDiff: snapshot
           }
           upsertTraceById(runState.items, event)
-          if (runs.isFocused(runId)) queueTrace(event)
+          // 运行中预览也是这一轮的证据：仍在看的 scoped 视图必须在收口前收到它。
+          publishTrace(event)
         },
         onError: (scope, error) => console.warn('[scry] diff preview failed:', runId, scope, error)
       })
       notifyDiffChangeRef.current = () => void diffPreviewer.notifyChange()
-      const diffLifecycle = createRunDiffLifecycle({ diffPreviewer, turnDiffCapture, turnChangeJournal, patchExcludeBasenames, cwd, contextKey, runId, providerId, runtimeProvider, runState, sessionDiffBaselines, getDiffContextKey: () => diffContextKey, getObservedSessionId: () => liveRunState.observedSessionId, getResume: () => resume, getContextRevision: () => contextRevision, mainEventId, appendCoalescedTrace, queueTrace, runs })
-      const { finalizeTurnDiff, cancelTurnDiff, finalizeSessionDiff } = diffLifecycle
+      const diffLifecycle = createRunDiffLifecycle({ isRemoteRun, diffPreviewer, turnDiffCapture, turnChangeJournal, patchExcludeBasenames, cwd, contextKey, runId, providerId, runtimeProvider, runState, sessionDiffBaselines, getDiffContextKey: () => diffContextKey, getObservedSessionId: () => liveRunState.observedSessionId, getResume: () => resume, getContextRevision: () => contextRevision, mainEventId, appendCoalescedTrace, publishTrace })
+      const { setDiffPreviewDemand, finalizeTurnDiff, cancelTurnDiff, finalizeSessionDiff } = diffLifecycle
       const publishSessionId = createSessionPublisher({
         runState,
         providerId,
@@ -261,6 +265,8 @@ export async function startRun(
         canonicalLifecycle,
         assertLegacyConversationWriteAllowed
       })
+      runtimeStartup.control.setDiffPreviewDemand = setDiffPreviewDemand
+      setDiffPreviewDemand?.(runTraces.hasDemand(runId))
       const { runProvider, requestRemoteStop, eventLog, getObservedProviderStartedAt, resolveSettled } = runtimeStartup
       const remoteState = createRemoteRunState({ isRemoteRun, runId, providerId, runtimeProvider, runState, getObservedSessionId: () => liveRunState.observedSessionId, getWindow, dockBadge, scopedSessionKey, runs })
       const runTerminalState = remoteState.state
@@ -313,7 +319,7 @@ export async function startRun(
         .then(
           (result) => handleRunCompletion(result, completionContext()),
           (error: unknown) => handleRunFailure(error, {
-            ...completionContext(), handle, interrupted: runtimeStartup.getInterrupted(), queueTrace, mainEventId
+            ...completionContext(), handle, interrupted: runtimeStartup.getInterrupted(), publishTrace, mainEventId
           })
         )
         .catch(async (error) => {
@@ -365,7 +371,11 @@ export async function startRun(
             firstTextPerf.finish(undefined, runtimeStartup.getInterrupted() ? 'cancelled' : 'unavailable')
             runStopLifecycle.settle(runId)
             userQuestionBroker.cancelRun(runId)
+            // 收口：先终态 flush + terminal，再离开登记，这样终态 diff 与 resync 仍可读。
+            runtimeStartup.control.setDiffPreviewDemand = undefined
+            runTraces.settle(runId)
             runs.remove(runId)
+            forgetBoundedRun(runId)
             releaseSessionBaseline?.()
             resolveSettled?.()
             if (providerId === 'pi') host.piRunDiagnostics.record(runId, 'main_settled', { mainDone: runState.done, mainSettled: true })

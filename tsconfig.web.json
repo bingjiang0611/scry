@@ -9,5 +9,5 @@
       "@shared/*": ["src/shared/*"]
     }
   },
-  "include": ["src/renderer/**/*", "src/shared/**/*"]
+  "include": ["src/renderer/**/*", "src/shared/**/*", "scripts/fixtures/concurrency-trace-live-profile.tsx"]
 }

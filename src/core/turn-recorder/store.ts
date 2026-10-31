@@ -13,7 +13,7 @@ export { type RecordCommittedNotification, type CommitNotificationStatus, commit
 export { type ArchiveState, readArchiveState, type ArchiveOptions, archiveRecords } from './store-archive.js'
 
 
-export const RECORDER_VERSION = '0.2.52'
+export const RECORDER_VERSION = '0.2.55'
 
 export interface RecorderHealth {
   schemaVersion: 1

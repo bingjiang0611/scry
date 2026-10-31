@@ -19,12 +19,27 @@ export interface CreditRequest {
   credits: number | null
 }
 
+const CREDIT_SOURCES: readonly CreditUsageSource[] = ['qoder_sdk', 'qoder_native_transcript', 'pi_qoder_credit_observation']
+
+/** Credits describe the billing provider, which is not always the agent transport: a Pi run
+ * through Rotom bills Qoder models. Pair each agent with the sources only it can observe, so a
+ * Pi record never borrows Qoder's SDK/native sources and Qoder never borrows Pi's observation. */
+export function creditSourcesMatchProvider(
+  providerId: unknown,
+  sources: readonly string[]
+): boolean {
+  if (!sources.length) return false
+  if (providerId === 'pi') return sources.every((source) => source === 'pi_qoder_credit_observation')
+  if (providerId === 'qoder') return sources.every((source) => source === 'qoder_sdk' || source === 'qoder_native_transcript')
+  return false
+}
+
 export function isCreditUsageEvidence(value: unknown): value is CreditUsageEvidence {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const raw = value as CreditUsageEvidence
   const usage = raw.value
   if (!usage || usage.provider !== 'qoder' || usage.unit !== 'credits' || usage.scope !== 'main') return false
-  if (!Array.isArray(raw.source) || !raw.source.length || !raw.source.every((source) => source === 'qoder_sdk' || source === 'qoder_native_transcript' || source === 'pi_qoder_credit_observation')) return false
+  if (!Array.isArray(raw.source) || !raw.source.length || !raw.source.every((source) => CREDIT_SOURCES.includes(source as CreditUsageSource))) return false
   if (!Number.isSafeInteger(usage.knownRequests) || usage.knownRequests < 0 || !Number.isSafeInteger(usage.missingRequests) || usage.missingRequests < 0) return false
   if (typeof raw.omissionReason !== 'string' || !raw.omissionReason) return false
   if (usage.knownRequests === 0) return raw.status === 'unavailable' && raw.quality === 'unavailable' && usage.amount === undefined

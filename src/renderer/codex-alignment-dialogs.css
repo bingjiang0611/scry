@@ -51,7 +51,7 @@
 
 .surface-tab {
   height: 30px;
-  border-radius: 9px;
+  border-radius: var(--r-sm);
 }
 
 .surface-tab.active {
@@ -77,13 +77,13 @@
 }
 
 .surface-menu {
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: var(--panel);
 }
 
 .surface-card {
   border-color: var(--border);
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: var(--panel2);
 }
 
@@ -98,7 +98,7 @@
 .modal {
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 18px;
+  border-radius: var(--r-lg);
   background: var(--panel);
   box-shadow: var(--shadow-pop);
 }
@@ -117,7 +117,7 @@
 .modal-x,
 .modal-refresh {
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--r-sm);
   background: transparent;
 }
 
@@ -141,7 +141,7 @@
 .settings-tab {
   min-height: 38px;
   padding-inline: 12px;
-  border-radius: 9px;
+  border-radius: var(--r-sm);
   color: var(--dim);
   font-size: 13px;
 }
@@ -178,7 +178,7 @@
 .theme-option {
   min-height: 88px;
   padding: 14px;
-  border-radius: 14px;
+  border-radius: var(--r-md);
   background: var(--panel);
 }
 
@@ -223,7 +223,7 @@
 
 .inventory-provider,
 .inventory-scope {
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   background: var(--panel2);
 }
 
@@ -237,7 +237,7 @@
 .inventory-search {
   height: 38px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-sm);
   background: var(--panel2);
 }
 
@@ -249,7 +249,7 @@
 .skill-scope-tabs button.active::after {
   right: 20%;
   left: 20%;
-  border-radius: 2px;
+  border-radius: var(--r-xs);
   background: var(--accent);
 }
 
@@ -274,7 +274,7 @@
 .arch-search,
 .arch-filter {
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-sm);
   background: var(--panel2);
 }
 
@@ -282,7 +282,7 @@
 .ctxmenu,
 .sb-project-menu {
   border-color: var(--border);
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: var(--panel);
   box-shadow: var(--shadow-pop);
 }
@@ -339,14 +339,17 @@
     justify-content: flex-end;
   }
 
+  /* The Provider chip keeps its own width budget: a 76px cap showed only "c…" in a
+     400px column. The model picker is the control that shrinks instead. */
   .composer-action-controls .clipick {
-    flex: 0 1 76px;
+    flex: 0 1 auto;
+    min-width: 0;
   }
 
-  .composer-action-controls .clibtn {
-    width: 100%;
-    max-width: 76px;
-    padding-inline: 5px;
+  .runtime-composer .composer-action-controls .clibtn {
+    width: auto;
+    max-width: min(168px, 42cqi);
+    padding-inline: 6px;
   }
 
   .model-effort-picker {

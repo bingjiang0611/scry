@@ -1,4 +1,5 @@
 import type { TraceEvent } from '../shared/trace'
+import { markTraceMutation } from './live-trace'
 import type { ProviderId } from '../shared/provider'
 import type { RuntimeFailureBrief, RuntimeProvider } from '../shared/runtime'
 
@@ -60,8 +61,13 @@ export function ensureFailedTerminalResult(
     errorMessage: args.message
   }
   const corrections: TraceEvent[] = []
-  if (canonicalIndex == null) items.push(terminal)
-  else {
+  // Both branches write in place: a new terminal, or every duplicate plus the canonical
+  // result. The earliest touched index bounds what the projection may reuse.
+  if (canonicalIndex == null) {
+    items.push(terminal)
+    markTraceMutation(items, items.length - 1)
+  } else {
+    markTraceMutation(items, indices[0])
     for (const index of indices.slice(0, -1)) {
       const duplicate = items[index]
       duplicate.stage = 'result_superseded'

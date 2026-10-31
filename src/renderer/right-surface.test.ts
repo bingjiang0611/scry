@@ -14,6 +14,8 @@ describe('right surface state', () => {
     expect(createRightSurfaceState()).toEqual({
       openIds: ['overview'],
       activeId: 'overview',
+      sideChats: [],
+      activeSideChatId: null,
       visible: true,
       maximized: false
     })
@@ -26,6 +28,8 @@ describe('right surface state', () => {
     })).toEqual({
       openIds: ['files', 'overview'],
       activeId: 'files',
+      sideChats: [],
+      activeSideChatId: null,
       visible: true,
       maximized: false
     })
@@ -109,6 +113,8 @@ describe('right surface state', () => {
     expect(shown).toEqual({
       openIds: ['overview', 'terminal'],
       activeId: 'terminal',
+      sideChats: [],
+      activeSideChatId: null,
       visible: true,
       maximized: false
     })

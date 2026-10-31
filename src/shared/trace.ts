@@ -39,7 +39,9 @@ export {
   type TurnDiffFallbackReason,
   type TurnDiffCollection,
   type TurnDiffSnapshot,
-  normalizeTurnDiffSnapshot
+  type WorkspaceOverlapEvidence,
+  normalizeTurnDiffSnapshot,
+  normalizeWorkspaceOverlap
 } from './turn-diff.js'
 
 // 统一 trace 事件模型 —— 所有 Provider 共享 kind/baggage/stage 设计，

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { adoptConversationWithReadback, conversationTarget, prepareConversationSend } from './conversation-handoff'
+import { adoptConversationWithReadback, conversationTarget, legacyAdoptionSourceTarget, prepareConversationSend } from './conversation-handoff'
 import type { ConversationAdoptionPreview, ConversationPreview } from '@shared/conversation-api'
 
 const preview: ConversationPreview = {
@@ -31,9 +31,19 @@ describe('same-composer Agent handoff', () => {
     expect(api.adopt).toHaveBeenCalledTimes(3)
   })
 
-  it('preserves the exact Pi profile and rejects unsupported Agents', () => {
+  it('targets all five Providers for a send and keeps only the legacy adoption source narrow', () => {
     expect(conversationTarget('pi:0123456789abcdef')).toEqual({ providerId: 'pi', agentProfileId: 'pi:0123456789abcdef' })
-    expect(() => conversationTarget('qoder')).toThrow('尚不支持')
+    // Send target: every registered Provider owns a real native continuation.
+    expect(conversationTarget('claude')).toEqual({ providerId: 'claude' })
+    expect(conversationTarget('codex')).toEqual({ providerId: 'codex' })
+    expect(conversationTarget('qoder')).toEqual({ providerId: 'qoder' })
+    expect(conversationTarget('opencode')).toEqual({ providerId: 'opencode' })
+    expect(() => conversationTarget('gemini')).toThrow('尚未注册 Provider adapter')
+    // Adoption source: only the three Providers with an adoptable captured archive.
+    expect(legacyAdoptionSourceTarget('claude')).toEqual({ providerId: 'claude' })
+    expect(legacyAdoptionSourceTarget('pi:0123456789abcdef')).toEqual({ providerId: 'pi', agentProfileId: 'pi:0123456789abcdef' })
+    expect(() => legacyAdoptionSourceTarget('qoder')).toThrow('迁移来源仅支持 Claude/Codex/Pi')
+    expect(() => legacyAdoptionSourceTarget('opencode')).toThrow('迁移来源仅支持 Claude/Codex/Pi')
   })
 
   it('plans every missing item automatically, without dispatching or dropping controls', async () => {

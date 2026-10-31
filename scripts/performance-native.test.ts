@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { assertSameNativeArtifact, compareNative, composerModes, exportNativeCounters, nativeBuildArtifacts, nativeCounterMetrics, nativeDiagnosticRecords, nativeInitialPageTurns, nativeWorkloads, validateNative } from './performance-native.mjs'
+import { assertSameNativeArtifact, compareNative, composerModes, exportNativeCounters, nativeBuildArtifacts, nativeCounterMetrics, nativeDiagnosticRecords, nativeHarnessFiles, nativeInitialPageTurns, nativeWorkloads, validateNative } from './performance-native.mjs'
 import { DEFAULT_LOAD_SESSION_TURNS } from '../src/main/bootstrap/history-archive'
 
 const workCounters = (value: number) => Object.fromEntries(nativeCounterMetrics.map(metric => [metric, value]))
@@ -97,6 +97,12 @@ describe('native diagnostic evidence', () => {
 })
 
 describe('native performance evidence gate', () => {
+  it('freezes the smoke adapter and its history-reader dependency together', () => {
+    expect(nativeHarnessFiles).toEqual(expect.arrayContaining([
+      'src/main/providers/smoke.ts', 'src/main/providers/smoke-history-reader.ts'
+    ]))
+  })
+
   it('matches the current initial-page contract without shrinking workloads or accepting lost history', () => {
     expect(nativeInitialPageTurns).toBe(DEFAULT_LOAD_SESSION_TURNS)
     expect(nativeWorkloads).toEqual({ markdown: [40, 32], short: [20, 1], 'short-heavy': [20, 32], paged: [120, 2] })

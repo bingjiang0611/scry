@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { nativeUiPointer } from './native-ui-pointer.mjs'
@@ -11,6 +11,8 @@ import { assertPickerAnchored, assertNewWorktreeDefaults, assertCompactMenus } f
 import { wait, sendWorkspacePrompt } from './workspace-session-ui-run.mjs'
 import { selectDiffScope, exerciseTurnMenu } from './diff-inspector-ui.mjs'
 import { assertHooksIdle, installHookTraps } from './workspace-session-ui-hooks.mjs'
+import { providerInputs, recorderRecord } from './workspace-session-ui-evidence.mjs'
+import { openWorktreeSession } from './workspace-session-ui-open.mjs'
 
 const json = JSON.stringify
 /** Production App + preload + native Git, with the existing isolated, non-network Provider fixture. */
@@ -20,8 +22,7 @@ export async function exerciseWorkspaceSessions(context) {
   const git = (cwd, ...args) => execFileSync('git', ['-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null',
     '-c', 'user.name=bingjiang0611', '-c', 'user.email=307659028+bingjiang0611@users.noreply.github.com', ...args],
   { cwd, encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }).trim()
-  const inputs = () => existsSync(conversationInputs)
-    ? readFileSync(conversationInputs, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse).filter(item => item.operation !== 'steer') : []
+  const inputs = () => providerInputs(conversationInputs)
   const click = async (selector, text = '') => {
     const point = await evaluate(`(${nativeUiPointer.toString()})(${json(selector)}, ${json({ text, timeoutMs: 5000, scroll: true, captureReceipt: true })})`)
     await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point })
@@ -69,15 +70,8 @@ export async function exerciseWorkspaceSessions(context) {
   }
   const send = (prompt, pause = false, expectedReply) =>
     sendWorkspacePrompt({ inputs, type, click, cdp, evaluate, record }, prompt, pause, expectedReply)
-  const record = async (cwd, runId) => wait(() => {
-    const dir = join(cwd, '.scry', 'records')
-    if (!existsSync(dir)) return null
-    for (const name of readdirSync(dir).filter(name => name.endsWith('.json'))) {
-      const value = JSON.parse(readFileSync(join(dir, name), 'utf8'))
-      if (json(value).includes(runId)) return value
-    }
-    return null
-  }, 'canonical recorder record in the prepared target')
+  const record = recorderRecord
+  const openWorktree = cwd => openWorktreeSession({ cwd, evaluate, click, wait })
 
   try {
     await cdp.send('Debugger.enable')
@@ -165,7 +159,7 @@ export async function exerciseWorkspaceSessions(context) {
     await wait(() => evaluate(`document.querySelector('[data-workspace-menu="workspace"]')?.textContent.includes('worktree')`), 'bound session identifies its worktree')
     await wait(() => evaluate(`document.querySelector('[data-project-path=${JSON.stringify(canonicalWorkspace)}]')?.closest('.sb-proj')?.textContent.includes('desktop remote write one') === true`), 'worktree session stays under source project')
     assert.equal(await evaluate(`Boolean(document.querySelector('[data-project-path=${JSON.stringify(target)}]'))`), false, 'worktree storage id is not a project group')
-    const targetSessionKey = await wait(() => evaluate(`document.querySelector('.sb-sess[aria-current="true"]')?.closest('[data-motion-key]')?.dataset.motionKey`), 'created worktree session row')
+    await wait(() => evaluate(`document.querySelector('.sb-sess[aria-current="true"]')?.closest('[data-motion-key]')?.dataset.motionKey`), 'created worktree session row')
     assert.equal(existsSync(join(target, 'moved-after-selection.txt')), false, 'new worktree never copies uncommitted files')
     assertHooksIdle(hookMarkers)
     rmSync(join(workspace, 'moved-after-selection.txt'))
@@ -202,7 +196,7 @@ export async function exerciseWorkspaceSessions(context) {
     await wait(() => evaluate(`document.querySelector('.diff-virtual-files')?.textContent.includes('remote-first.txt') &&
       document.querySelector('.diff-virtual-files')?.textContent.includes('remote-second.txt')`), 'branch Changes persists after both files are committed')
     await exerciseDiffWorkbench({ target, git, click, key, wait, evaluate, screenshot, cdp })
-    await exerciseTurnMenu({ click, key, wait, evaluate, screenshot, target, firstRunId: created.run.runId, latestRunId: second.run.runId })
+    if (await exerciseTurnMenu({ click, key, wait, evaluate, screenshot, target, firstRunId: created.run.runId, latestRunId: second.run.runId, cdp, userDataDir, inputs, evidence })) return
     await screenshot('inspector-wide')
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 900, deviceScaleFactor: 1, mobile: false })
     await wait(() => evaluate(`document.querySelector('.main-area')?.inert === true`), 'narrow inspector replaces and inerts conversation')
@@ -245,7 +239,7 @@ export async function exerciseWorkspaceSessions(context) {
     assert.equal(failedRecord.status, 'failed')
     assert.equal(git(failed.run.cwd, 'branch', '--show-current'), failedBranch)
     assert.ok(existsSync(failed.run.cwd), 'Provider failure must not delete the prepared worktree')
-    await exerciseWorkspaceDiffBounds({ target, targetSessionKey, click, evaluate, key, wait, screenshot, cdp })
+    await exerciseWorkspaceDiffBounds({ target, openWorkspace: openWorktree, click, evaluate, key, wait, screenshot, cdp })
     assert.equal(inputs().length, 5, 'three workspace paths, one follow-up and one explicit failure; pressure and reload never launch a Provider')
     writeFileSync(join(evidence, 'result.json'), json({ current, created, second, reused, failed, firstRecord, secondRecord, reusedRecord, failedRecord }))
     console.log(json({ test: 'production workspace first-send and scoped diff UI', current: current.run.cwd,

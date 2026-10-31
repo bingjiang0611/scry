@@ -22,6 +22,18 @@
 4. 分诊按完整证据给出 eligible、exempt、ineligible、needs-info 或 incomplete。保护标签/维护者介入阻止自动关闭。现有服务可能独立自动评审；分诊通过不表示评审完成。
 5. 维护者处理评审发现、敏感边界决定及不能由 CI 替代的验收，再手动合并。分诊和 AI 都不拥有 merge/release 权限。
 
+### 平台环境与验证信息
+
+涉及平台行为、打包或 Bug 复现时，在 PR / Issue 中提供必要的环境摘要；纯文档改动不因此增加平台验收：
+
+- 记录 Scry 版本或源码 revision、操作系统版本、CPU 架构，以及相关 Provider / CLI 版本。Linux 写明发行版及版本，不只写“Linux”。
+- 说明安装或运行方式：源码开发、解包目录，或安装包格式与版本。容器、虚拟机与实际桌面会话分别标明。
+- Linux UI / 桌面问题再注明桌面环境或窗口管理器及版本、Wayland / X11；使用 Xvfb 或 headless wlroots 时明确标注，不能当作目标桌面会话。
+- 按[Linux 验证与交付](verification.md#linux-验证与交付)选择范围。共享或平台边界改动分别记录 macOS / Linux 的具体检查、结果和未验证原因；平台专属改动说明另一端为何不受影响。不要求无关的全套验收。
+- Linux 解包 App / pacman 检查不证明 Arch/Omarchy GUI、密钥环或安装升级通过；macOS Native 性能数据不代表 Linux 性能。缺少目标环境时保留未验证项，不关闭保护或放宽门禁来补结果。
+
+只提供必要的脱敏信息，不粘贴完整环境变量、凭据、密钥环内容或私人用户数据。
+
 <a id="local-preflight"></a>
 
 ## 本地提交前自查（默认）
@@ -44,7 +56,7 @@
 
 | 文件 | 行为 | 门禁身份 |
 | --- | --- | --- |
-| `ci.yml` | Node/coverage/shell/App build、Node 20/22/24 CLI、macOS renderer/packaging | `Check` 汇总全部 jobs；失败、取消或跳过均拒绝 |
+| `ci.yml` | Node/coverage/shell/App build、Node 20/22/24 CLI、macOS renderer/packaging、Linux 解包 App / pacman 检查 | `Check` 汇总全部 jobs（含 `packaged-linux`）；失败、取消或跳过均拒绝 |
 | `performance.yml` | 现有 compare 与 native 测量 | `Performance Check` 汇总两个 jobs；评论发布不属于正确性门禁 |
 | `remote-g0.yml` | 每个 PR 发出检查，仅 remote/iOS/工作流变化运行 macOS 验证 | `Remote Check` 只接受验证成功，或 changes 明确判定无影响且 transport 跳过；检测失败拒绝 |
 | `pr-vouch.yml` | 使用默认分支的 VOUCHED 配置，自动同步 `vouch:*` | 仅上下文，不是准入或门禁 |
@@ -87,6 +99,44 @@ size 采用上游阈值 XS <10、S <30、M <100、L <500、XL <1000、XXL ≥100
 | Reviewer 未安装或标签接线未验证 | 评审未完成；不能凭配置文件或标签宣称已评审 |
 
 本地合同检查：`npm run test:unit -- scripts/pr-workflow.test.ts`。它执行 workflow 的汇总脚本和标签逻辑、用临时 Git 仓库验证路径判断，并核对可信写入边界；不证明 GitHub 后台权限、真实 fork 或第三方 App 接线。分诊语义案例位于 [.agents/skills/contribution-triage/evals/cases.json](../../.agents/skills/contribution-triage/evals/cases.json)，需由新的 Agent 会话按本地政策快照只读复核，不冒充机械断言能证明模型判断。
+
+<a id="workflow-maintenance"></a>
+
+## 维护清单（修改流程时必读）
+
+规则只在权威文件中定义，模板、Skill 和评审配置按需引用；不要维护多份相互独立的同义规则。修改 PR 政策、模板、分诊、工作流或后台配置时，必须按本节检查同步范围、验证和实际生效结果。
+
+### 改哪层，同步哪里
+
+| 变化 | 主要修改位置 | 必须核对的关联项 |
+| --- | --- | --- |
+| 贡献准入、批准或豁免规则 | `CONTRIBUTING.md` | 分诊 Skill、案例和必要的模板提示；政策变化由维护者决定 |
+| 工程、安全或平台边界 | `CLAUDE.md`、`docs/agent/verification.md` | 领域检查清单和相关模板；评审器引用权威规则，不复制整套合同 |
+| 提交信息经常缺失 | `.github/pull_request_template.md`、`.github/ISSUE_TEMPLATE/` | 只补必要信息；文案改动不顺带增加必填项或无关验收 |
+| CI 任务、命令或平台 | `.github/workflows/` | 本文的接线表、汇总逻辑和合同测试；新增任务不得被汇总漏掉，检查改名须核对 Ruleset 的 required context |
+| 分诊行为 | `.agents/skills/contribution-triage/`、`.claude/skills/contribution-triage/` | 两份 Skill 与案例同步；用案例验证语义，不只检查文本相同 |
+| 贡献者信任或分诊豁免 | `.github/VOUCHED.td`、`.github/TRIAGE_EXEMPTIONS.td` | 由维护者确认，区分可信身份与分诊豁免；核验标签，不能据此跳过 CI 或安全检查 |
+| AI 评审误报、漏报 | `.coderabbit.yaml`、`.macroscope/` | 优先修正具体指令；确认服务实际启用范围，不默认增加服务、权限或费用 |
+| 性能指标或预算 | 现有性能配置与台账 | 遵循[性能闭环](../performance-loop.md)，不通过减负载、放宽预算或重试掩盖回归 |
+
+### 每次修改的闭环
+
+1. **确认问题与授权**：说明为何现有流程不够，读取当前权威文件和实际配置。权限、准入、分发策略、门禁弱化或收费服务变化必须先取得维护者明确决定；历史单次例外不是新授权。
+2. **最小修改与同步**：只改受影响的层和引用，不为一个问题重写整套流程。同步上表关联项，避免手册宣称的检查与实际执行不一致。
+3. **按范围验证**：
+   - 纯文档或模板文案：检查 diff、引用、锚点和需要的 YAML 格式，不触发 App 构建或全套测试。
+   - 工作流逻辑：运行 `npm run test:unit -- scripts/pr-workflow.test.ts` 及受影响检查；关键拒绝路径应有能证明保护失效时失败的负对照。
+   - Skill：用 `npm run test:unit -- scripts/agent-skills-sync.test.ts` 检查同步；行为变化还须按分诊案例复核判断，机械测试不代替语义评估。
+   - 平台或性能行为：按验证指南和性能闭环执行，保留失败、测量环境和未验证项；配置存在不等于对应平台已验收。
+4. **自查与提审**：按[本地自查](#local-preflight)核对最终 diff、范围和证据。获得授权后才推送、开 PR 或操作后台；PR 说明规则变化、风险和验证结果，维护者负责合并决定。
+5. **核验实际生效**：标签或触发器变化合入后，用获授权的受控 PR 验证真实事件；记录目标仓库、事件、head、检查或标签结果。后台保护变更先保存原配置，修改后读回；经明确批准的临时例外须恢复原规则并核验，记录剩余问题和负责人，不把失败改写成成功。未执行的远端核验继续标为待验证。
+
+### 日常维护节奏与责任
+
+- 平时按问题维护：发现反复失败、误报或信息缺失时记录根因和负责人，不把反复豁免当作修复。
+- 每月由维护者做一次轻量人工巡检：runner / Actions 弃用通知、评审服务权限与费用、名单是否需要调整，以及手册、检查名和后台保护是否一致。本清单不创建定时任务，也不授权 Agent 自动修改后台。
+- 新增维护者、自动合并或支持平台时，重新核对审批、权限和验证范围；涉及治理变化时按前述单维护者限制重新决策，不能只补模板。
+- 维护者负责政策、权限、预算和风险取舍；Agent 可在已授权范围内执行修改、自查和验证，不自行批准敏感变更。
 
 ## 回退
 

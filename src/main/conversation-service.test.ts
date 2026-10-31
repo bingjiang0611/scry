@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, realpath, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -87,7 +87,7 @@ describe('conversation backend lane', () => {
     for (const invalid of [null, [], { ...valid, attachments: [{}] }, { ...valid, attachments: 'not-an-array' },
       { ...valid, historyReader: { url: 'http://127.0.0.1/mcp' } }, { ...valid, resume: 'foreign-native' },
       { ...valid, confirmFresh: 'yes' }, { ...valid, permissionMode: 'invalid-mode' },
-      { ...valid, agentProfileId: 'unimplemented-profile' }, { ...valid, providerId: 'opencode' },
+      { ...valid, agentProfileId: 'unimplemented-profile' }, { ...valid, providerId: 'cursor' },
       { ...valid, model: { id: 42 } }, { ...valid, selectedItems: [{ runId: 'r', itemId: 'user', contentHash: hash('body'), text: 'untrusted history' }] }]) {
       await expect(service.send(invalid)).rejects.toThrow()
     }
@@ -337,5 +337,34 @@ describe('conversation backend lane', () => {
     const current = await store.read(created.id)
     await expect(service.send(request(created.id, current!.revision, 'command-account-1'))).rejects.toThrow('接续身份')
     expect(dispatches).toBe(1)
+  })
+
+  it('answers rows and the owned-native filter from one store read', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-conversation-catalog-'))
+    roots.push(root)
+    const cwd = join(root, 'project')
+    await mkdir(cwd)
+    const store = new ConversationStore(join(root, 'user-data'))
+    const service = new ConversationService({
+      store,
+      resolveContinuationKey: async () => 'identity-a',
+      supportsHistoricalInput: () => true,
+      startAppRun: async () => ({ runId: 'run-unused' })
+    })
+    await service.create(cwd)
+    let reads = 0
+    const list = store.list.bind(store)
+    store.list = async (projectCwd: string) => {
+      reads++
+      return list(projectCwd)
+    }
+    const catalog = await service.listCatalog(await realpath(cwd))
+    expect(reads).toBe(1)
+    expect(catalog.conversations).toHaveLength(1)
+    expect(catalog.ownedNativeAliases.size).toBe(0)
+    // The two legacy accessors share the same seam instead of reading the store twice.
+    await service.list(await realpath(cwd))
+    await service.nativeSessionAliases(await realpath(cwd))
+    expect(reads).toBe(3)
   })
 })

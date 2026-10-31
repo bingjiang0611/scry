@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
-import { freePort, waitForTarget, connectCdp } from './electron-security-cdp.mjs'
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { freePort, waitForTarget, connectCdp, rendererEvaluator } from './electron-security-cdp.mjs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -26,9 +26,14 @@ import { exerciseTerminalCore } from './electron-security-terminal-core.mjs'
 import { exerciseRecording } from './electron-security-recording.mjs'
 import { exerciseRestart } from './electron-security-restart.mjs'
 import { exerciseStructureApp } from './structure-app-checks.mjs'
+import { prepareSideChatMode } from './side-chat-smoke.mjs'
+import { lostReplyPath, writeConversationFaultEntry, writeFileOpenEntry, writeIpcCountEntry } from './smoke-app-entries.mjs'
+
 import { defaultPackagedAppPath, electronDevLayout, packagedAppLayout } from './packaged-app-layout.mjs'
 
 const structureOnly = process.argv[2] === '--dev-structure-only'
+const sideChatOnly = process.argv[2] === '--dev-side-chat-only'
+const largeHistoryOnly = process.argv[2] === '--dev-side-chat-large-history-only'
 const sourceControlOnly = process.argv[2] === '--dev-source-control-only'
 const conversationOwnershipOnly = process.argv[2] === '--dev-conversation-ownership-only'
 const unifiedConversationOnly = process.argv[2] === '--dev-unified-conversation-only'
@@ -48,7 +53,7 @@ if (devQuestionOnly && !foreground) {
 }
 const devFilesOnly = process.argv[2] === '--dev-files-only'
 const filesOnly = devFilesOnly || process.argv[2] === '--files-only'
-const devApp = structureOnly || unifiedConversationOnly || conversationOwnershipOnly || sourceControlOnly || devMetaPromptsOnly || nativeHistoryOnly || process.argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
+const devApp = sideChatOnly || largeHistoryOnly || structureOnly || unifiedConversationOnly || conversationOwnershipOnly || sourceControlOnly || devMetaPromptsOnly || nativeHistoryOnly || process.argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
 const packagedAppArgument = ['--files-only', '--performance-only', '--file-history-only'].includes(process.argv[2]) ? undefined : process.argv[2]
 const dev = devApp ? electronDevLayout() : null
 const appPath = resolve(dev?.appPath || packagedAppArgument || defaultPackagedAppPath())
@@ -86,8 +91,7 @@ async function main() {
   }]))
   const nativeSessionId = '01a1338c-3d8b-775b-8645-fd964faa29a3'
   if (nativeHistoryOnly) {
-    // Reproduce a phone-created catalog row after host restart: no Scry archive,
-    // but the Provider's real-format JSONL survives. No Provider is ever launched.
+    // A phone-created catalog row after restart: no Scry archive, real JSONL survives.
     const nativeDir = join(home, '.pi', 'agent', 'sessions', `--${canonicalWorkspace.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`)
     mkdirSync(nativeDir, { recursive: true })
     const entry = (id, parentId, role, text) => ({ type: 'message', id, parentId,
@@ -98,8 +102,7 @@ async function main() {
       entry('u', null, 'user', '手机发起的真实格式消息'),
       entry('old', 'u', 'assistant', 'abandoned branch must not appear')
     ].map((value) => JSON.stringify(value)).join('\n') + '\n')
-    // A real >64 MiB JSONL file, not a mocked stat. Abandoned payloads must not
-    // block native-only recovery or later archive reconciliation.
+    // A real >64 MiB JSONL, not a mocked stat: abandoned payloads must not block recovery.
     const padding = 'x'.repeat(1024 * 1024)
     for (let i = 0; i < 65; i++) {
       appendFileSync(nativePath, JSON.stringify(entry(`old-${i}`, 'u', 'assistant', padding)) + '\n')
@@ -133,21 +136,7 @@ async function main() {
   }) : undefined
   const openReceipt = join(temp, 'opened-paths.json')
   const filesEntry = join(temp, 'files-main.mjs')
-  if (devFilesOnly) {
-    // Run production handlers without launching viewers or executing fixture programs.
-    // The receipt records the exact OS handoff after resolution and authorization.
-    writeFileSync(filesEntry, `
-      import { shell } from 'electron'
-      import { writeFileSync } from 'node:fs'
-      const opened = []
-      shell.openPath = async (path) => {
-        opened.push(path)
-        writeFileSync(${JSON.stringify(openReceipt)}, JSON.stringify(opened))
-        return path.endsWith('/fail.custom') ? 'fixture: no application associated' : ''
-      }
-      await import(${JSON.stringify(pathToFileURL(resolve('out/main/index.js')).href)})
-    `)
-  }
+  if (devFilesOnly) writeFileOpenEntry(filesEntry, openReceipt)
   const badgeReceipt = join(temp, 'dock-badge.json')
   const questionEntry = join(temp, 'question-main.mjs')
   if (devQuestionOnly) {
@@ -178,33 +167,20 @@ async function main() {
     `)
   }
   const conversationEntry = join(temp, 'conversation-main.mjs')
-  if (unifiedConversationOnly) {
-    // Fault injection surrounds, rather than replaces, the production trusted handler.
-    // Lose one reply after the native effect and durable commit; recovery must not replay it.
-    writeFileSync(conversationEntry, `
-      import { ipcMain } from 'electron'
-      import { existsSync, writeFileSync } from 'node:fs'
-      const marker = ${JSON.stringify(join(temp, 'fork-reply-lost'))}
-      const handle = ipcMain.handle.bind(ipcMain)
-      ipcMain.handle = (channel, listener) => handle(channel, async (...args) => {
-        const result = await listener(...args)
-        if (channel === 'conversation:fork' && result.fork?.status === 'accepted' && !existsSync(marker)) {
-          writeFileSync(marker, 'native fork committed')
-          throw new Error('fixture: native fork reply lost after commit')
-        }
-        return result
-      })
-      await import(${JSON.stringify(pathToFileURL(resolve('out/main/index.js')).href)})
-    `)
-  }
+  if (unifiedConversationOnly) writeConversationFaultEntry(conversationEntry, join(temp, 'fork-reply-lost'))
+  const structureEntry = join(temp, 'structure-main.mjs')
+  const structureIpc = join(temp, 'structure-ipc-counts.json')
+  if (structureOnly) writeIpcCountEntry(structureEntry, structureIpc)
+  const sideChatMode = (sideChatOnly || largeHistoryOnly) && await prepareSideChatMode({ temp, entryPath: structureEntry,
+    workspace: canonicalWorkspace, userDataDir, inputsPath: conversationInputs, callsPath: conversationCalls,
+    identity: smokeIdentity, largeHistory: largeHistoryOnly })
   const launchApp = () => {
     child = spawn(executable, [
-      ...(devApp ? [devQuestionOnly ? questionEntry : devFilesOnly ? filesEntry : unifiedConversationOnly ? conversationEntry : resolve('.')] : []),
+      ...(devApp ? [devQuestionOnly ? questionEntry : devFilesOnly ? filesEntry : unifiedConversationOnly ? conversationEntry : (structureOnly || sideChatOnly || largeHistoryOnly) ? structureEntry : resolve('.')] : []),
       `--remote-debugging-port=${port}`,
       `--user-data-dir=${userDataDir}`,
       '--disable-gpu',
-      // This isolated fixture may be occluded by the user's active apps. Keep its
-      // bounded UI waits independent of Chromium's background timer/priority throttling.
+      // An occluded fixture keeps bounded UI waits immune to Chromium background throttling.
       '--disable-background-timer-throttling',
       '--disable-renderer-backgrounding',
       '--no-first-run'
@@ -218,8 +194,9 @@ async function main() {
         SCRY_ELECTRON_SMOKE_PROVIDER: '1',
         ...(ownershipFixture ? { SCRY_ELECTRON_SMOKE_CALLS: ownershipFixture.callsFile } : {}),
         ...(unifiedConversationOnly ? { SCRY_ELECTRON_SMOKE_CONVERSATIONS: '1', SCRY_ELECTRON_SMOKE_INPUTS: conversationInputs, SCRY_ELECTRON_SMOKE_CALLS: conversationCalls, SCRY_ELECTRON_SMOKE_IDENTITY: smokeIdentity } : {}),
+        ...(sideChatMode ? sideChatMode.env : {}),
         // Only explicit smoke adapters may run. Never discover/start real Provider services.
-        SCRY_DISABLED_PROVIDERS: unifiedConversationOnly ? 'qoder,opencode' : 'claude,qoder,opencode,pi',
+        SCRY_DISABLED_PROVIDERS: unifiedConversationOnly ? 'qoder,opencode' : (sideChatOnly || largeHistoryOnly) ? '' : 'claude,qoder,opencode,pi',
         SCRY_REMOTE_HOST: '0'
       },
       stdio: ['ignore', 'pipe', 'pipe']
@@ -237,20 +214,16 @@ async function main() {
   assert.match(page.url, /^file:/, 'production renderer must load from a local file URL')
   let cdp = connectCdp(page.webSocketDebuggerUrl)
   await cdp.send('Runtime.enable')
-  const evaluate = async (expression) => {
-    const response = await cdp.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
-    if (response.exceptionDetails) {
-      throw new Error(response.exceptionDetails.exception?.description || response.exceptionDetails.text || 'renderer evaluation failed')
-    }
-    return response.result?.value
-  }
+  const evaluate = rendererEvaluator(cdp)
+  const check = (condition, label) => { if (!condition) throw new Error(`Side-chat App: ${label}`) }
   const context = () => ({ ownershipFixture, smokeIdentity, setSmokeIdentity: (value) => { smokeIdentity = value }, conversationInputs, conversationCalls, sourceFileHistory, evaluate, cdp, workspace, secondWorkspace, canonicalWorkspace, canonicalHome, home, temp, userDataDir, openReceipt, badgeReceipt, nativeHistoryPerformanceOnly, nativeSessionId, performanceOnly, filesOnly, devFilesOnly, devQuestionOnly, foreground, waitForTarget, stopOwnedApp, launchApp, port, child, stderr, initialTargets, page })
   if (structureOnly) {
-    const result = await exerciseStructureApp(cdp, evaluate)
+    const result = await exerciseStructureApp(cdp, evaluate, { ipcCountsPath: structureIpc, lostReplyPath: lostReplyPath(structureIpc) })
     cdp.close()
     console.log(JSON.stringify(result))
     return
   }
+  if (sideChatOnly || largeHistoryOnly) return sideChatMode.run({ cdp, evaluate, check, lifecycle: { port, launch: launchApp, child: () => child, stop: stopOwnedApp, waitTarget: waitForTarget, connect: connectCdp } })
   if (ownershipFixture) return exerciseOwnership(context())
   if (sourceControlOnly) {
     const result = await exerciseSourceControlApp(cdp, evaluate, { workspace: canonicalWorkspace, remote: realpathSync(secondWorkspace), home })
@@ -324,16 +297,19 @@ async function main() {
   }))
 }
 
+let failed = false
 try {
   await main()
 } catch (error) {
+  failed = true
   // Keep the primary assertion and App logs visible even if cleanup independently fails.
   console.error('[scry] smoke failure:', error, stderr.slice(-8000))
   throw error
 } finally {
-  // A failed cleanup throws before deleting the fixture, preserving evidence for diagnosis.
   await stopOwnedApp(child)
-  try {
+  // A failed run keeps its fixture as evidence; only clean runs delete it.
+  if (failed) console.warn(`[scry] smoke fixture kept for diagnosis: ${temp}`)
+  else try {
     rmSync(temp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
   } catch (error) {
     console.warn(`[scry] smoke temp cleanup failed: ${error.message}`)

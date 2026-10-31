@@ -33,7 +33,7 @@
 .sb-brand::before {
   width: 22px;
   height: 22px;
-  border-radius: 6px;
+  border-radius: var(--r-xs);
 }
 
 .sb-brand .name {
@@ -81,7 +81,7 @@
   height: 31px;
   min-height: 31px;
   padding: 0 9px;
-  border-radius: 5px;
+  border-radius: var(--r-xs);
   font-size: 13px;
 }
 
@@ -176,7 +176,7 @@
   place-items: center;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--r-xs);
   background: transparent;
   color: var(--dim2);
   cursor: pointer;
@@ -234,7 +234,7 @@
   overflow: auto;
   padding: 10px 12px;
   border: 1px solid var(--border2);
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: var(--panel);
   color: var(--fg);
   box-shadow: var(--shadow-pop);
@@ -403,7 +403,7 @@
   gap: 7px;
   margin: 0;
   padding: 0 8px 0 27px;
-  border-radius: 5px;
+  border-radius: var(--r-xs);
 }
 
 .sb-session-main {
@@ -434,6 +434,7 @@
   height: 7px;
   flex: none;
   border-radius: 50%;
+  corner-shape: round;
   background: var(--accent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
 }
@@ -506,7 +507,7 @@
   gap: 6px;
   padding: 0 8px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--r-xs);
   font: 600 10.5px/1 var(--font-mono);
 }
 

@@ -73,3 +73,43 @@ describe('normalizeTurnDiffSnapshot', () => {
     }
   })
 })
+
+describe('normalizeWorkspaceOverlap', () => {
+  const overlap = {
+    coverage: 'observed' as const,
+    runIds: ['run-a'],
+    observedFrom: '2026-07-29T00:00:00.000Z',
+    observedTo: '2026-07-29T00:00:01.000Z'
+  }
+
+  it('保留合法的重叠证据原样', () => {
+    expect(normalizeTurnDiffSnapshot({ ...snapshot, workspaceOverlap: overlap })?.workspaceOverlap).toEqual(overlap)
+  })
+
+  it('按上限截断 run ID 时如实标记 truncated，而不是静默少报', () => {
+    const runIds = Array.from({ length: 70 }, (_unused, index) => `run-${index}`)
+    const normalized = normalizeTurnDiffSnapshot({ ...snapshot, workspaceOverlap: { ...overlap, runIds } })?.workspaceOverlap
+    expect(normalized?.runIds).toHaveLength(64)
+    expect(normalized?.truncated).toBe(true)
+  })
+
+  it('重复的 run ID 去重后不算截断', () => {
+    const normalized = normalizeTurnDiffSnapshot({
+      ...snapshot, workspaceOverlap: { ...overlap, runIds: ['run-a', 'run-a'] }
+    })?.workspaceOverlap
+    expect(normalized?.runIds).toEqual(['run-a'])
+    expect(normalized?.truncated).toBeUndefined()
+  })
+
+  it('拒绝无法解析或倒序的观测窗口，不把畸形时间当作已观测', () => {
+    const invalidWindows = [
+      { observedFrom: 'not-a-timestamp', observedTo: overlap.observedTo },
+      { observedFrom: overlap.observedFrom, observedTo: '2026-13-40T99:99:99.999Z' },
+      { observedFrom: overlap.observedTo, observedTo: overlap.observedFrom }
+    ]
+    for (const window of invalidWindows) {
+      expect(normalizeTurnDiffSnapshot({ ...snapshot, workspaceOverlap: { ...overlap, ...window } })?.workspaceOverlap)
+        .toBeUndefined()
+    }
+  })
+})

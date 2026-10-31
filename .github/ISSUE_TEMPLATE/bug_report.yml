@@ -10,7 +10,10 @@ body:
     id: environment
     attributes:
       label: 环境
-      description: Scry 版本、操作系统、Provider / CLI 版本；敏感路径请脱敏。
+      description: |
+        Scry 版本、操作系统版本、CPU 架构、相关 Provider / CLI 版本，以及安装或运行方式（源码开发、解包目录、安装包格式与版本）。
+        Linux 请写发行版及版本；UI/桌面问题再补桌面环境或窗口管理器及版本、Wayland/X11。容器、虚拟机、Xvfb 或 headless wlroots 请明确标注。
+        敏感路径请脱敏；不要粘贴完整环境变量或密钥环内容。
     validations:
       required: true
   - type: textarea
@@ -30,4 +33,4 @@ body:
     id: evidence
     attributes:
       label: 验证与证据
-      description: 脱敏截图、日志片段、已尝试的检查和未验证项。不要以推测代替结果。
+      description: 脱敏截图、日志片段、已尝试的检查和未验证项。跨平台结果分开记录；构建或包检查不等于目标桌面验收。不要以推测代替结果。

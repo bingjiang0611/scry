@@ -27,6 +27,7 @@ export const SIDEBAR_PROJECT_COPY = {
   sessionsPinned: '会话已置顶',
   projectLabel: (name: string, cwd: string) => `${name} · ${cwd || '未关联工作目录'}`,
   newChat: (name: string) => `在 ${name} 中新建会话`,
+  newChatAction: '新建会话',
   newChatLabel: (name: string, cwd: string) => `在 ${name} 中新建会话 · ${cwd}`,
   manage: (name: string) => `管理项目 ${name}`,
   manageLabel: (name: string, cwd: string) => `管理项目 ${name} · ${cwd}`,

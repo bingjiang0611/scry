@@ -6,7 +6,8 @@
   gap: 4px;
   padding: 0 7px;
   border: 1px solid color-mix(in srgb, var(--warn) 38%, transparent);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
+  corner-shape: round;
   background: color-mix(in srgb, var(--warn) 10%, transparent);
   color: var(--warn);
   font: 600 10px/1 var(--font-ui);
@@ -111,7 +112,8 @@
 
 .question-recommended {
   padding: 2px 6px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
+  corner-shape: round;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: color-mix(in srgb, var(--accent) 82%, white);
   font: 650 9.5px/1.2 var(--font-ui);

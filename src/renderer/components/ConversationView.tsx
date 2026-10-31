@@ -1,30 +1,63 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps } from 'react'
-import type { ActiveRun } from '@shared/trace'
-import type { ConversationForkRequest, ConversationMetadataChange, ConversationPage, ConversationSendRequest, ConversationSummary } from '@shared/conversation-api'
-import { attachmentsAfterSuccessfulSubmit, composerDraftKey, inputAttachments, type ComposerDraftStore } from '../composer-drafts'
-import { CONVERSATION_COPY } from '../constants/copy'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import type { ConversationForkRequest, ConversationMetadataChange, ConversationPage, ConversationSummary } from '@shared/conversation-api'
+import { composerDraftKey, type ComposerDraftStore } from '../composer-drafts'
+import type { ConversationHostChatProps } from '../conversation-chat-props'
+import { createScopedComposerHandlers } from '../composer-attachments'
+import { CONVERSATION_COPY } from '../constants/conversation-copy'
 import { chatBottomStickinessAfterScroll, observeChatBottomLayout, scrollChatToBottomIfNeeded } from '../chat-scroll'
+import type { SideChatViewPosition } from '../side-chat-view-state'
+import { applyViewRestore, type PendingViewRestore } from '../conversation-view-restore'
 import { conversationTarget, prepareConversationSend } from '../conversation-handoff'
 import type { Turn } from '../format'
+import { resendContent, useConversationSubmission } from '../hooks/useConversationSubmission'
 import { runStructuralTransition } from '../structural-motion'
-import { SessionChatView } from './ChatView'
+import { useRunTraceStream } from '../hooks/useRunTraceStream'
 
 
 import '../conversation.css'
 import { ConversationViewBody } from './ConversationViewBody'
 
 const message = (error: unknown): string => error instanceof Error ? error.message : String(error)
-export interface ConversationProjection { conversationId: string; turns: Turn[]; busy: boolean }
+/** No turn of a side chat can create a native fork; the backend refuses it as well. */
+const NO_FORKABLE_RUNS: ReadonlySet<string> = new Set()
+
+/**
+ * Turns that may create a native fork. A side chat owns no native continuation of its
+ * source, so it never advertises a fork action that main would reject.
+ */
+export function forkableRunIdsOf(
+  conversation: Pick<ConversationSummary, 'sideChat'>,
+  page: ConversationPage | undefined
+): ReadonlySet<string> {
+  if (conversation.sideChat) return NO_FORKABLE_RUNS
+  return new Set((page?.turns ?? []).filter(turn =>
+    turn.delivery.status === 'accepted' &&
+    page?.bindings.some(binding => binding.id === turn.bindingId && binding.nativeSessionId && !binding.retiredReason))
+    .map(turn => turn.runId))
+}
+export interface ConversationProjection { conversationId: string; turns: Turn[]; busy: boolean; atNewest: boolean }
 
 /** Same chat/composer, separate durable ownership from each native session. */
-export function ConversationView({ conversation, draftStore, chatProps, initialAgentId, onChanged, onProjection, onOpenConversation }: {
+export function ConversationView({ conversation, draftStore, chatProps, initialAgentId, onChanged, onProjection, onOpenConversation, initialViewPosition, embedded, liveVisible = true }: {
   conversation: ConversationSummary
   draftStore: ComposerDraftStore
-  chatProps: ComponentProps<typeof SessionChatView>
+  chatProps: ConversationHostChatProps
   initialAgentId?: string
   onChanged: () => void
   onProjection: (projection: ConversationProjection) => void
   onOpenConversation: (conversation: ConversationSummary) => void
+  /**
+   * Remembered position of this exact view. It is applied once, in the same commit that
+   * first shows authoritative turns, so the restore never races the asynchronous page.
+   */
+  initialViewPosition?: SideChatViewPosition
+  /**
+   * The host frame already shows this conversation's title and provenance. The toolbar
+   * keeps its management controls but does not repeat the title a second time.
+   */
+  embedded?: boolean
+  /** Mounted main pane may be hidden behind a maximized terminal. */
+  liveVisible?: boolean
 }) {
   const draftKey = composerDraftKey({ providerId: 'conversation', cwd: conversation.cwd, sessionId: conversation.id })
   const drafts = useSyncExternalStore(draftStore.subscribe, draftStore.getSnapshot)
@@ -33,10 +66,7 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
   const [before, setBefore] = useState<number>()
   const [reload, setReload] = useState(0)
   const [latestRequest, setLatestRequest] = useState(0)
-  const [live, setLive] = useState<ActiveRun>()
-  const [attempt, setAttempt] = useState<{ request: ConversationSendRequest; attachments: Array<{ id: string; previewUrl: string }> }>()
   const [forkAttempt, setForkAttempt] = useState<ConversationForkRequest>()
-  const [attemptReadback, setAttemptReadback] = useState(false)
   const [error, setError] = useState<string>()
   const [notice, setNotice] = useState<string>()
   const [working, setWorking] = useState(false)
@@ -56,17 +86,29 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
   changedRef.current = onChanged
   const selectAgentRef = useRef(chatProps.onSelectAgent)
   selectAgentRef.current = chatProps.onSelectAgent
+  const scopedComposerHandlers = useRef<ReturnType<typeof createScopedComposerHandlers>>()
+  /**
+   * The remembered position still waiting to be applied. It survives the one bounded page
+   * read a restore may request, so an anchor outside the loaded window is applied to the
+   * window this restore asked for instead of to whichever page is on screen.
+   */
+  const pendingRestore = useRef<PendingViewRestore>()
+  const restoreSeeded = useRef(false)
+  if (!restoreSeeded.current) {
+    restoreSeeded.current = true
+    if (initialViewPosition) {
+      pendingRestore.current = { conversationId: conversation.id, position: initialViewPosition, attempts: 0 }
+    }
+  }
   const historyRef = chatProps.scrollRef
   const navigation = chatProps.scrollNavigation
 
+  // 权威分页是唯一的历史来源：live 输出走 run 级订阅，不再轮询所有 activeRuns。
   const refresh = useCallback(async (): Promise<ConversationPage | undefined> => {
     const generation = ++refreshGeneration.current
     const next = await window.scry.conversations.read(conversation.id, before)
-    const run = next.summary.activeRunId
-      ? (await window.scry.activeRuns()).find(candidate => candidate.runId === next.summary.activeRunId)
-      : undefined
     if (!mounted.current || generation !== refreshGeneration.current) return
-    const commit = (): void => { setPage(next); setLive(run) }
+    const commit = (): void => { setPage(next) }
     if (!initialized.current && next.turns.some(turn => turn.history)) runStructuralTransition('session', commit)
     else commit()
     if (lastRevision.current !== next.summary.revision) {
@@ -83,34 +125,35 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
   }, [conversation.id, before, initialAgentId])
 
   const activeRunId = page?.summary.activeRunId
+  // 只有正在看的这一个 run 走自己的有界流：没有可见流时读一次权威分页，不做定时轮询。
+  const stream = useRunTraceStream(liveVisible ? activeRunId : undefined, () => {
+    // 终态事件到达：先读回权威分页（含归档后的正式轮次），下一次渲染再让分页接管时间线。
+    void refresh().catch(error => { if (mounted.current) setError(`读取本轮最终记录失败：${message(error)}`) })
+  })
+  const live = stream.run
+  useEffect(() => {
+    if (stream.status === 'limit') setNotice(CONVERSATION_COPY.liveStreamLimited)
+  }, [stream.status, setNotice])
   useEffect(() => {
     mounted.current = true
-    let timer: ReturnType<typeof setTimeout> | undefined
     let disposed = false
-    const update = async (): Promise<void> => {
-      try {
-        if (activeRunId) {
-          const active = (await window.scry.activeRuns()).find(run => run.runId === activeRunId)
-          if (disposed) return
-          setLive(active)
-          if (!active) await refresh()
-        } else await refresh()
-      } catch (error) { if (!disposed) setError(message(error)); return }
-      if (!disposed && activeRunId && !document.hidden) timer = setTimeout(() => { void update() }, 1000)
-    }
-    const resume = (): void => { if (!document.hidden) { clearTimeout(timer); void update() } }
-    void update()
+    void refresh().catch(error => { if (!disposed) setError(message(error)) })
+    const resume = (): void => { if (!document.hidden) void refresh().catch(() => undefined) }
     const off = window.scry.onDataUpdated?.(event => {
       if (event?.kind === 'conversation_changed' && event.conversationId === conversation.id) {
+        void refresh().catch(error => { if (!disposed) setError(message(error)) })
+      }
+      // 本轮记录真的落库后（turn_recorded）才刷新：没有写记录就不会有这条事件。
+      if (event?.kind === 'turn_recorded' && activeRunId && event.runId === activeRunId) {
         void refresh().catch(error => { if (!disposed) setError(message(error)) })
       }
     })
     document.addEventListener('visibilitychange', resume)
     return () => {
       disposed = true; mounted.current = false; ++refreshGeneration.current
-      clearTimeout(timer); off?.(); document.removeEventListener('visibilitychange', resume)
+      off?.(); document.removeEventListener('visibilitychange', resume)
     }
-  }, [refresh, activeRunId, reload, conversation.id])
+  }, [refresh, reload, conversation.id, activeRunId])
 
   useEffect(() => {
     const history = historyRef.current
@@ -129,6 +172,16 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
       followLatest.current = false
       return
     }
+    const restore = pendingRestore.current
+    const element = historyRef.current
+    if (restore && element && page && applyViewRestore({
+      restore, conversationId: conversation.id, before, page, element,
+      requestBefore: setBefore, follow: atBottom => { followLatest.current = atBottom },
+      clear: () => { pendingRestore.current = undefined }
+    })) {
+      openingLatest.current = false
+      return
+    }
     if (before !== undefined) return
     scrollChatToBottomIfNeeded(historyRef.current, openingLatest.current || followLatest.current)
     if (!page || !openingLatest.current) return
@@ -139,14 +192,18 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
       followLatest.current = true
     })
     return () => cancelAnimationFrame(frame)
-  }, [page, live, before, latestRequest, historyRef, chatProps.focusedTurnRunId, navigation?.active])
+  }, [page, live, before, latestRequest, historyRef, chatProps.focusedTurnRunId, navigation?.active,
+    initialViewPosition, conversation.id])
 
+  // live 只覆盖「本轮仍在运行」的那一格；一旦分页不再报告 activeRunId，归档后的正式轮次接管，
+  // 不会把有界的 live 投影当成已完成轮次的正文。
   const turns = useMemo<Turn[]>(() => (page?.turns ?? []).flatMap(turn => {
-    const history = live?.runId === turn.runId ? live : turn.history
-    return history ? [{ ...history, runId: turn.runId, done: history.done === true,
+    const liveTurn = activeRunId === turn.runId ? live : undefined
+    const history = liveTurn?.runId === turn.runId ? liveTurn : turn.history
+    return history ? [{ ...history, runId: turn.runId, ordinal: turn.ordinal, done: history.done === true,
       providerId: turn.providerId, cwd: conversation.cwd }] : []
-  }), [page, live, conversation.cwd])
-  useEffect(() => { onProjection({ conversationId: conversation.id, turns, busy: Boolean(activeRunId) }) }, [conversation.id, turns, activeRunId, onProjection])
+  }), [page, live, activeRunId, conversation.cwd])
+  useEffect(() => { onProjection({ conversationId: conversation.id, turns, busy: Boolean(activeRunId), atNewest: before === undefined }) }, [conversation.id, turns, activeRunId, before, onProjection])
 
   const showLatest = (): void => {
     navigation?.cancel()
@@ -155,9 +212,9 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
     setLatestRequest(value => value + 1)
     if (before !== undefined) { setPage(undefined); setBefore(undefined) }
   }
-  const setInput = (value: string): void => {
-    draftStore.update(current => new Map(current).set(draftKey, { ...current.get(draftKey), input: value, attachments: current.get(draftKey)?.attachments ?? [] }))
-  }
+  // Every mutation of this draft goes through one bounded, draft-scoped owner.
+  const { setInput, addPastedImages, addClipboardImage, removeDraftAttachment } =
+    scopedComposerHandlers.current ??= createScopedComposerHandlers(draftStore, draftKey)
   const updateMetadata = async (change: ConversationMetadataChange): Promise<void> => {
     if (!page || managementPending.current) return
     managementPending.current = true
@@ -170,57 +227,44 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
   }
   const blockedReason = !page ? '正在读取对话…' : page.summary.blockedReason ??
     (page.summary.archivedAt ? '对话已存档；恢复后可继续发送' : null)
-  const send = async (original?: typeof attempt): Promise<void> => {
-    const draft = draftStore.getSnapshot().get(draftKey)
-    const prompt = draft?.input ?? ''
-    const attachments = draft?.attachments ?? []
-    const submitted = original?.attachments ?? attachments.map(({ id, previewUrl }) => ({ id, previewUrl }))
-    if (busyRef.current || forkAttempt || (!original && (blockedReason || attempt || (!prompt.trim() && !attachments.length) || chatProps.sendBlockedReason))) return
-    busyRef.current = true
-    setWorking(true)
-    setError(undefined)
-    let request = original?.request
-    try {
-      request ??= await prepareConversationSend(window.scry.conversations, conversation.id,
-        conversationTarget(chatProps.selectedAgentId, chatProps.runControls), prompt, crypto.randomUUID(), inputAttachments(attachments))
-      if (!mounted.current) return
-      setAttempt({ request, attachments: submitted })
-      setAttemptReadback(false)
-      const result = await window.scry.conversations.send(request)
-      const sentPrompt = request.prompt
-      const submittedIds = new Set(submitted.map(attachment => attachment.id))
-      draftStore.update(current => {
-        const draft = current.get(draftKey)
-        if (!draft) return current
-        const remaining = { input: draft.input === sentPrompt ? '' : draft.input,
-          attachments: attachmentsAfterSuccessfulSubmit(draft.attachments, submittedIds) }
-        const next = new Map(current)
-        if (remaining.input || remaining.attachments.length) next.set(draftKey, remaining)
-        else next.delete(draftKey)
-        return next
-      })
-      for (const attachment of submitted) if (attachment.previewUrl.startsWith('blob:')) URL.revokeObjectURL(attachment.previewUrl)
-      if (!mounted.current) return
-      setAttempt(undefined)
+  const submission = useConversationSubmission({
+    api: window.scry.conversations, draftStore, draftKey, mounted,
+    expectedRevision: () => page?.summary.revision,
+    prepare: (prompt, attachments, commandId) => prepareConversationSend(window.scry.conversations, conversation.id,
+      conversationTarget(chatProps.selectedAgentId, chatProps.runControls), prompt, commandId, attachments),
+    onError: setError, onNotice: setNotice,
+    onSubmitted: () => {
       showLatest()
-      setNotice(result.disposition === 'duplicate' ? '已找到原发送记录，没有再次发送。' : undefined)
       changedRef.current()
-      await refresh().catch(error => { if (mounted.current) setError(`请求已登记，但读取状态失败：${message(error)}`) })
-    } catch (error) {
-      if (mounted.current) {
-        setError(message(error))
-        if (request) {
-          setNotice('发送结果尚未确认。草稿已保留，不会自动重发。')
-          try { setAttemptReadback(Boolean(await refresh())) } catch (readError) { setError(`${message(error)}；读取状态失败：${message(readError)}`) }
-        }
-      }
-    } finally { busyRef.current = false; if (mounted.current) setWorking(false) }
+      void refresh().catch(error => { if (mounted.current) setError(`请求已登记，但读取状态失败：${message(error)}`) })
+    }
+  })
+  const { pending, pendingHealth, working: submitting, checkPending, settlePending } = submission
+  // Mount, restart and every authoritative page settle the exact command id read-only.
+  // A page that predates the submission cannot answer it, and a page read while the
+  // start reply is still in flight must not report a false "missing record".
+  useEffect(() => {
+    if (!page || submitting) return
+    if (pending && page.summary.revision <= pending.expectedRevision) return
+    if (pending) settlePending(pending.commandId, page.turns)
+  }, [page, pending, submitting, settlePending])
+  const sendBlocked = Boolean(blockedReason || forkAttempt || pending || chatProps.sendBlockedReason)
+  const send = async (): Promise<void> => {
+    if (busyRef.current || sendBlocked) return
+    busyRef.current = true
+    try { await submission.submit() } finally { busyRef.current = false }
   }
-  const forkableRunIds = useMemo(() => new Set((page?.turns ?? []).filter(turn =>
-    turn.delivery.status === 'accepted' && page?.bindings.some(binding => binding.id === turn.bindingId && binding.nativeSessionId && !binding.retiredReason))
-    .map(turn => turn.runId)), [page])
+  const resend = async (): Promise<void> => {
+    if (busyRef.current || !pending || pendingHealth?.kind !== 'not_sent' || blockedReason) return
+    busyRef.current = true
+    try { await submission.submit(resendContent(pending)) } finally { busyRef.current = false }
+  }
+  // A side chat owns no native continuation of the source, so it never offers a fork
+  // action that main would reject anyway.
+  const forkUnsupported = Boolean(conversation.sideChat)
+  const forkableRunIds = useMemo(() => forkableRunIdsOf(conversation, page), [conversation, page])
   const fork = async (turn?: Turn, original?: ConversationForkRequest): Promise<void> => {
-    if (!page || busyRef.current || managing || (!original && (blockedReason || attempt || forkAttempt))) return
+    if (!page || busyRef.current || managing || (!original && (blockedReason || pending || forkAttempt))) return
     let request = original
     if (!request) {
       const selected = page.turns.find(item => item.runId === turn?.runId)
@@ -253,13 +297,16 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
   const limitation = CONVERSATION_COPY.handoffScope
 
   return <ConversationViewBody
-    conversation={conversation} draftKey={draftKey} page={page} before={before} input={input} missing={missing}
-    working={working} managing={managing} attempt={attempt} forkAttempt={forkAttempt} attemptReadback={attemptReadback}
+    conversation={conversation} embedded={embedded} draftKey={draftKey} page={page} before={before} input={input} missing={missing}
+    working={working || submitting} managing={managing} forkAttempt={forkAttempt}
+    pending={pending} pendingHealth={pendingHealth} onCheckPending={() => { void checkPending() }} onResendPending={() => { void resend() }}
     renaming={renaming} deleting={deleting} activeRunId={activeRunId} inherited={inherited} firstHandoff={firstHandoff}
-    limitation={limitation} drafts={drafts} live={live} forkableRunIds={forkableRunIds} error={error} notice={notice}
+    limitation={limitation} drafts={drafts} live={live} forkableRunIds={forkableRunIds} forkUnsupported={forkUnsupported} error={error} notice={notice}
     refreshButton={refreshButton} chatProps={chatProps} setError={setError} setNotice={setNotice} setBefore={setBefore}
     showLatest={showLatest} updateMetadata={updateMetadata} setRenaming={setRenaming} setDeleting={setDeleting}
-    setAttempt={setAttempt} send={send} fork={fork} refresh={refresh} onOpenConversation={onOpenConversation}
-    mounted={mounted} changedRef={changedRef} setReload={setReload} draftStore={draftStore} turns={turns} blockedReason={blockedReason} setInput={setInput}
+    send={send} fork={fork} refresh={refresh} onOpenConversation={onOpenConversation}
+    liveHealth={stream.health}
+    mounted={mounted} changedRef={changedRef} setReload={setReload} draftStore={draftStore} turns={turns} blockedReason={blockedReason}
+    setInput={setInput} addPastedImages={addPastedImages} addClipboardImage={addClipboardImage} removeDraftAttachment={removeDraftAttachment}
   />
 }

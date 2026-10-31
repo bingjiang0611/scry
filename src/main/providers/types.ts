@@ -50,7 +50,12 @@ export type ProviderInputReceipt = { contextHash: string | null } & (
       textHash: string
       nativeSessionId: string
       providerTurnId?: string
-      source: 'claude_sdk_success_result' | 'codex_turn_start_response' | 'pi_persisted_session_entry'
+      source:
+        | 'claude_sdk_success_result'
+        | 'codex_turn_start_response'
+        | 'pi_persisted_session_entry'
+        | 'qoder_transcript_user_uuid'
+        | 'opencode_prompt_user_message'
     }
 )
 

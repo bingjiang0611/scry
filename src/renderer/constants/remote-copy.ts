@@ -14,6 +14,7 @@ export const REMOTE_ACCESS_COPY = {
   devicePaired: '设备已配对。',
   retry: '重试',
   loadingHosts: '正在读取主机…',
+  hostUnavailable: '远程主机不可用',
   noHosts: '没有主机',
   noHostsHint: '在远端生成 SSH 邀请后添加。',
   status: {

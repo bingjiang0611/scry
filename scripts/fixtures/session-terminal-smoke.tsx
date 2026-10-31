@@ -46,6 +46,7 @@ const projects = [
 ]
 const noopSubscribe = () => () => {}
 Object.defineProperty(window, 'scry', { value: {
+  setLegacyDiffPreviewDemand: async () => true,
   workspaceSelection: unavailableWorkspaceSelection,
   activeRun: async () => null, activeRuns: async () => [],
   onTrace: noopSubscribe, onTurnDone: noopSubscribe, onError: noopSubscribe,

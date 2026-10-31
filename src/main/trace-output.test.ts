@@ -306,6 +306,47 @@ describe('TraceOutputBridge bounded delivery', () => {
     expect(bridge.snapshot()).toMatchObject({ degraded: false, skippedEvents: 0, resyncRequired: false })
   })
 
+  it('fences the delivery generation at a snapshot and keeps the loss recorded after it', () => {
+    const unit = sizeOf(event('probe'))
+    const { bridge, sent } = harness({
+      maxBatchEvents: 1,
+      maxBufferBytes: unit,
+      highWaterBytes: 1
+    })
+    bridge.push(event('e0'))
+    bridge.push(event('e1'))
+    expect(bridge.snapshot()).toMatchObject({ degraded: true, skippedEvents: 1, generation: 0 })
+
+    // 栅栏：这一代未交付的事件由快照取代，但缺口在拥有者确认之前仍然如实上报。
+    const generation = bridge.fenceForSnapshot()
+    expect(generation).toBe(1)
+    expect(bridge.generation).toBe(1)
+    expect(bridge.snapshot()).toMatchObject({ generation: 1, degraded: true, skippedEvents: 1, bufferedEvents: 0, inFlightBytes: 0 })
+
+    // 栅栏之后又丢了一条：这属于新一代，确认旧快照不能把它一起抹掉。
+    bridge.push(event('e2'))
+    bridge.push(event('e3'))
+    expect(bridge.snapshot()).toMatchObject({ degraded: true, skippedEvents: 2 })
+
+    expect(bridge.confirmSnapshot(generation)).toBe(true)
+    expect(bridge.snapshot()).toMatchObject({ degraded: true, skippedEvents: 1, resyncRequired: true })
+    expect(sent.flatMap((batch) => batch.events.map((item) => item.id))).not.toContain('e1')
+  })
+
+  it('refuses a confirmation that belongs to another delivery generation', () => {
+    const unit = sizeOf(event('probe'))
+    const { bridge } = harness({ maxBatchEvents: 1, maxBufferBytes: unit, highWaterBytes: 1 })
+    bridge.push(event('e0'))
+    bridge.push(event('e1'))
+    const generation = bridge.fenceForSnapshot()
+    // 窗口重挂之后代数又变了：旧快照的确认不能清除任何缺口。
+    bridge.reset()
+    expect(bridge.confirmSnapshot(generation)).toBe(false)
+    expect(bridge.snapshot().degraded).toBe(true)
+    // 没有栅栏就没有可抵扣的缺口：凭空确认不算对齐。
+    expect(bridge.confirmSnapshot(bridge.generation)).toBe(false)
+  })
+
   it('flushAll ignores the high-water mark so terminal state is never left truncated', () => {
     const { bridge, sent } = harness({ maxBatchEvents: 1, highWaterBytes: 1 })
     bridge.push(event('e0'))
