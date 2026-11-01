@@ -1,5 +1,5 @@
 import type { AppShellProps } from './app-shell-types'
-import { lazy, Suspense, type ComponentProps } from 'react'
+import { lazy, Suspense, useCallback, type ComponentProps } from 'react'
 import { Sidebar } from './components/Sidebar'
 import { ConversationView } from './components/ConversationView'
 import { PaneSplitter } from './components/PaneSplitter'
@@ -9,7 +9,6 @@ import { ViewChrome } from './components/ViewChrome'
 import { LlmPerformancePanel } from './components/LlmPerformancePanel'
 import { OverviewPanel } from './components/OverviewPanel'
 import { CapabilitiesModal, SettingsModal } from './components/Modals'
-import { remoteDraftKey } from './components/RemoteChat'
 import { RemoteView } from './components/RemoteView'
 import { DiffInspector } from './components/DiffInspector'
 import { WorkspacePanel } from './components/WorkspacePanel'
@@ -34,9 +33,9 @@ export function AppShell(props: AppShellProps) {
     summaryVisible, summaryPersistent, draftStore, chatProps, sidebarActions, projects, cwd, activeSessionId,
     logicalConversation, conversationError, conversationAgent, loadProjects,
     setConversationProjection, pickConversation, desktopConnections, remoteTarget, remoteQueueStore,
-    setRemoteDraft, scrollRef, taRef, renderLocationPicker, remoteSurfaceKey, remoteSurfaces,
+    setRemoteDraft, scrollRef, taRef, renderLocationPicker, remoteSurfaces,
     remoteSurfaceTarget, setRemoteSurfaceTarget, remoteSurface, remotePanelVisible, remoteAdoptedSession,
-    setRemoteAdoptedSession, setRemoteTarget, dispatchRemoteSurface, returnFromMetaPrompts, insertMetaPrompt,
+    adoptRemoteSession, dispatchRemoteSurface, returnFromMetaPrompts, insertMetaPrompt,
     metaPromptTarget, integrations, session, displayedTurns, displayedBusy, selectedProviderSessionId,
     panelRuntimeProvider, showSessionOverview, panelVisible, currentSurface, rightSurface, rightSurfaces,
     handleRightSurfaceAction, openTurnInChat, diffInspector, openWorkspaceDiff, workspaceRefreshKey,
@@ -69,6 +68,14 @@ export function AppShell(props: AppShellProps) {
   })
   const { shellRef, narrowSingleColumn, catalog: sideChatCatalog, panel: sideChatPanel, layoutSaved } = workbench
   const primaryPaneVisible = !shellPanelMaximized && !(narrowSingleColumn && shellPanelVisible)
+  const revealTurnInChat = useCallback<AppShellProps['openTurnInChat']>((...args) => {
+    // A hidden timeline has no layout box for the navigation anchor.
+    if (!primaryPaneVisible) {
+      handleRightSurfaceAction({ type: 'hide' })
+      scrollRef.current?.focus({ preventScroll: true })
+    }
+    openTurnInChat(...args)
+  }, [primaryPaneVisible, handleRightSurfaceAction, openTurnInChat, scrollRef])
   // These surfaces share the primary run projection even when its transcript is hidden.
   const evidenceSurfaceVisible = panelVisible && !rightSurface.activeSideChatId
     && (rightSurface.activeId === 'overview' || rightSurface.activeId === 'diff' || rightSurface.activeId === 'agents')
@@ -108,13 +115,8 @@ export function AppShell(props: AppShellProps) {
               <RemoteView target={remoteTarget} connections={desktopConnections} draftStore={draftStore} queueStore={remoteQueueStore}
                 onDraftInput={setRemoteDraft} scrollRef={scrollRef} textareaRef={taRef}
                 renderLocationPicker={renderLocationPicker({ machineId: remoteTarget.connectionId, cwd: remoteTarget.cwd })}
-                onSessionAdopted={(externalSessionId, provider) => {
-                  remoteSurfaces.migrate(remoteSurfaceKey, remoteDraftKey(remoteTarget.connectionId, remoteTarget.cwd, externalSessionId))
-                  setRemoteAdoptedSession(externalSessionId)
-                  if (metaPromptTarget.current.view === 'remote' && metaPromptTarget.current.draftKey === remoteSurfaceKey) metaPromptTarget.current.draftKey = remoteDraftKey(remoteTarget.connectionId, remoteTarget.cwd, externalSessionId)
-                  setRemoteTarget(current => current ? { ...current, session: { sessionId: externalSessionId, externalSessionId, cwd: current.cwd, providerId: provider.id, agentProfileId: provider.agentProfileId, label: current.session?.label ?? '', ts: current.session?.ts ?? Date.now() } } : current)
-                }} showPanel={remotePanelVisible} onTogglePanel={() => dispatchRemoteSurface(remotePanelVisible ? { type: 'hide' } : { type: 'show' })}
-                surface={{ target: remoteSurfaceTarget, state: remoteSurface, scopeId: remoteSurfaces.current.id, retainTerminal: remoteSurfaces.current.terminalMounted, onDirtyChange: setRemoteWorkspaceDirty, onAction: dispatchRemoteSurface }} />
+                onSessionAdopted={(...args) => adoptRemoteSession(remoteTarget, ...args)} showPanel={remotePanelVisible} onTogglePanel={() => dispatchRemoteSurface(remotePanelVisible ? { type: 'hide' } : { type: 'show' })}
+                surface={{ target: remoteSurfaceTarget, primaryVisible: primaryPaneVisible, state: remoteSurface, scopeId: remoteSurfaces.current.id, retainTerminal: remoteSurfaces.current.terminalMounted, onDirtyChange: setRemoteWorkspaceDirty, onAction: dispatchRemoteSurface }} />
             </div>
             {view === 'meta-prompts' && <div className="main-content main-content--single"><MetaPromptsView onBack={returnFromMetaPrompts} onInsert={insertMetaPrompt} /></div>}
           </> : view === 'analytics' ? <div className="main-content main-content--single"><Suspense fallback={<div className="lazy-panel-loading">正在加载分析视图…</div>}>
@@ -133,7 +135,7 @@ export function AppShell(props: AppShellProps) {
             temporary={!summaryPersistent}
             onDismiss={summary.dismiss}
             onOpenChanges={() => { summary.dismiss(); openWorkspaceDiff() }}
-            onOpenCall={(runId, event) => { summary.dismiss(); openTurnInChat(runId, event, 'event') }}
+            onOpenCall={(runId, event) => { summary.dismiss(); revealTurnInChat(runId, event, 'event') }}
             onOpenAgents={() => { summary.dismiss(); surfacePane.restore(); rightSurfaces.dispatch({ type: 'open', kind: 'agents' }) }}
           />
         </>
@@ -161,7 +163,7 @@ export function AppShell(props: AppShellProps) {
                   visible={current && panelVisible}
                   onOpen={(kind) => { surfacePane.restore(); handleRightSurfaceAction({ type: 'open', kind }) }} onActivate={(kind) => handleRightSurfaceAction({ type: 'activate', kind })} onClose={(kind) => handleRightSurfaceAction({ type: 'close', kind })} onHide={() => handleRightSurfaceAction({ type: 'hide' })} onToggleMaximized={() => handleRightSurfaceAction({ type: 'toggle-maximized' })}
                   contents={{
-                    overview: surface.id !== currentSurface.id ? null : showSessionOverview ? <OverviewPanel turns={displayedTurns} sessionId={selectedProviderSessionId} selected={session.selected} usage={integrations.usage} stats={integrations.stats} runtimeProvider={panelRuntimeProvider} gitDiff={integrations.gitDiff} gitDiffRefreshing={integrations.gitDiffRefreshing} busy={displayedBusy} onSelect={session.setSelected} onOpenTurn={openTurnInChat} /> : <EmptySessionOverview />,
+                    overview: surface.id !== currentSurface.id ? null : showSessionOverview ? <OverviewPanel turns={displayedTurns} sessionId={selectedProviderSessionId} selected={session.selected} usage={integrations.usage} stats={integrations.stats} runtimeProvider={panelRuntimeProvider} gitDiff={integrations.gitDiff} gitDiffRefreshing={integrations.gitDiffRefreshing} busy={displayedBusy} onSelect={session.setSelected} onOpenTurn={revealTurnInChat} /> : <EmptySessionOverview />,
                     'source-control': surface.cwd ? <SourceControlPanel key={surface.cwd} cwd={surface.cwd} active={current && panelVisible && surface.state.activeId === 'source-control'} /> : <div className="surface-unavailable"><b>源代码管理不可用</b><span>先绑定本机 Git 工作区。</span></div>,
                     files: surface.cwd ? <WorkspacePanel cwd={surface.cwd} active={current} refreshKey={workspaceRefreshKey} openRequest={workspaceOpenRequests.get(surface.id)} onDirtyChange={(dirty) => setScopeDirty(surface.id, dirty)} onAddReference={addWorkspaceReference} onClose={() => handleRightSurfaceAction({ type: 'close', kind: 'files' })} /> : <div className="surface-unavailable"><b>文件不可用</b><span>先绑定一个工作区。</span></div>,
                     diff: surface.id !== currentSurface.id ? null : <DiffInspector state={diffInspector} onClose={() => handleRightSurfaceAction({ type: 'close', kind: 'diff' })}

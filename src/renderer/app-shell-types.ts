@@ -1,4 +1,5 @@
-import type { ComponentProps, Dispatch, MutableRefObject, RefObject, SetStateAction } from 'react'
+import type { ComponentProps, MutableRefObject, RefObject } from 'react'
+import type { RemoteProviderRef } from '@shared/desktop-remote'
 import type { RuntimeProvider } from '@shared/runtime'
 import type { WorkspaceEntry } from '@shared/workspace'
 import type { ConversationSummary } from '@shared/conversation-api'
@@ -47,15 +48,13 @@ export interface AppShellProps {
   scrollRef: RefObject<HTMLDivElement>
   taRef: RefObject<HTMLTextAreaElement>
   renderLocationPicker: (current: ExecutionLocation) => (menu: { open: boolean; onOpenChange: (open: boolean) => void }) => JSX.Element
-  remoteSurfaceKey: string
   remoteSurfaces: ReturnType<typeof useSessionRightSurfaces>
   remoteSurfaceTarget: HTMLDivElement | null
   setRemoteSurfaceTarget: (target: HTMLDivElement | null) => void
   remoteSurface: ReturnType<typeof useSessionRightSurfaces>['current']['state']
   remotePanelVisible: boolean
   remoteAdoptedSession?: string
-  setRemoteAdoptedSession: (session: string | undefined) => void
-  setRemoteTarget: Dispatch<SetStateAction<RemoteTarget | null>>
+  adoptRemoteSession: (target: RemoteTarget, externalSessionId: string, provider: RemoteProviderRef) => void
   dispatchRemoteSurface: (action: RightSurfaceAction) => void
   returnFromMetaPrompts: () => void
   insertMetaPrompt: (body: string) => void

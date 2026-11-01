@@ -69,7 +69,7 @@ function VisibilityPollingFixture() {
     <RemoteChat connectionId={connection.id} cwd="/fixture/project-a" draftStore={createComposerDraftStore(new Map(${visibilityPollingCheck} ? [[remoteDraftKey(connection.id, '/fixture/project-a'), { input: 'visibility draft', attachments: [] }]] : []))}
       queueStore={new RemotePromptQueueStore()} onDraftInput={() => {}} scrollRef={scrollRef} textareaRef={textareaRef}
       renderLocationPicker={() => null} onSessionAdopted={() => {}}
-      surface={{ target: null, state: createRightSurfaceState(), onAction: () => {} }} />
+      surface={{ target: null, primaryVisible: true, state: createRightSurfaceState(), onAction: () => {} }} />
   </>
 }
 function Fixture() {

@@ -15,7 +15,7 @@ import { intentMatches, remoteControlsValid, remoteRunControlCatalog } from './R
 // runtime state: an offline, unknown or forgotten host keeps the draft and blocks send.
 
 
-export function useRemoteChatPresentation(foundation: FoundationState, controlProvider: RemoteProviderRef | undefined, { scrollRef, cwd, queueStore }: Pick<RemoteChatProps, 'scrollRef' | 'cwd' | 'queueStore'>) {
+export function useRemoteChatPresentation(foundation: FoundationState, controlProvider: RemoteProviderRef | undefined, { scrollRef, cwd, queueStore, surface }: Pick<RemoteChatProps, 'scrollRef' | 'cwd' | 'queueStore' | 'surface'>) {
   const { connectionRefreshing, connection, connected, host, catalogEntry, catalog, catalogReady, sessionId, controls, providerControlsError, turns, setSelected, historyEvidence, historyLoading, activeRun, runStatus, foreignRun, intents, pollError, pollFresh, historyError, openingLatest, followLatest, provider, providerId, context, contextKey, catalogSession, adoptedIntent, draftKey } = foundation
   const runControlCatalog = useMemo(() => remoteRunControlCatalog(controlProvider, host), [host, controlProvider])
   const chosenModel = controlProvider?.models?.find((option) => option.id === controls.model?.id && (option.providerId ?? '') === (controls.model?.providerId ?? ''))
@@ -45,6 +45,10 @@ export function useRemoteChatPresentation(foundation: FoundationState, controlPr
     openingLatest.current = false
     followLatest.current = false
     if (event) setSelected(event)
+    if (!surface.primaryVisible) {
+      surface.onAction({ type: 'hide' })
+      scrollRef.current?.focus({ preventScroll: true })
+    }
     chatNavigation.navigate(runId, target === 'event' ? event?.id : undefined)
   }
 

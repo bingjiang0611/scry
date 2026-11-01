@@ -378,7 +378,7 @@ function Fixture({ target, draftStore: drafts, queueStore: queue }: { target: Li
       onDraftInput={() => recordUnexpected('onDraftInput (read-only visit)')}
       scrollRef={scrollRef} textareaRef={textareaRef} renderLocationPicker={() => null}
       onSessionAdopted={() => recordUnexpected('onSessionAdopted (read-only visit)')}
-      surface={{ target: null, state: createRightSurfaceState(), onAction: () => {} }} />
+      surface={{ target: null, primaryVisible: true, state: createRightSurfaceState(), onAction: () => {} }} />
   </Profiler>
 }
 
