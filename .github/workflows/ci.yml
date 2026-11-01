@@ -37,8 +37,10 @@ jobs:
           fi
       - name: Typecheck
         run: npm run typecheck
-      # Coverage includes CPU-heavy 50k-trace and compiler contracts. Run one worker so
-      # those contracts do not compete for the hosted runner within their unchanged timeout.
+      - name: Harness binding checks
+        run: npm run check:harness-bindings
+      # Coverage includes CPU-heavy 50k-trace contracts. Run one worker so those
+      # contracts do not compete for the hosted runner within their unchanged timeout.
       - name: Unit, contract tests and coverage
         run: xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24' npm run test:coverage -- --maxWorkers=1
       - name: Coverage report

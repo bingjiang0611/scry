@@ -77,6 +77,18 @@ describe('required PR checks', () => {
     })
   }
 
+  it('requires whole-program harness binding checks before coverage', () => {
+    const job = workflow('ci.yml').jobs.node
+    const bindings = source(job, 'Harness binding checks')
+    const coverage = source(job, 'Unit, contract tests and coverage')
+    const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> }
+    expect(scripts['check:harness-bindings']).toBe('node scripts/check-harness-bindings.mjs')
+    expect(bindings.run).toBe('npm run check:harness-bindings')
+    expect(bindings.if).toBeUndefined()
+    expect(bindings['continue-on-error']).toBeUndefined()
+    expect(job.steps.indexOf(bindings)).toBeLessThan(job.steps.indexOf(coverage))
+  })
+
   it('serializes hosted coverage without filtering tests or overriding their timeouts', () => {
     const coverage = source(workflow('ci.yml').jobs.node, 'Unit, contract tests and coverage')
     expect(coverage.run).toBe("xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24' npm run test:coverage -- --maxWorkers=1")

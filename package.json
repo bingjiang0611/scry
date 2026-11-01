@@ -29,6 +29,7 @@
     "publish:cli": "npm publish ./packages/turn-recorder-cli",
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "check:staged-file-size": "node scripts/check-staged-file-size.mjs",
+    "check:harness-bindings": "node scripts/check-harness-bindings.mjs",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",

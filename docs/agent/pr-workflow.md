@@ -56,7 +56,7 @@
 
 | 文件 | 行为 | 门禁身份 |
 | --- | --- | --- |
-| `ci.yml` | Node/coverage/shell/App build、Node 20/22/24 CLI、macOS renderer/packaging、Linux 解包 App / pacman 检查 | `Check` 汇总全部 jobs（含 `packaged-linux`）；失败、取消或跳过均拒绝 |
+| `ci.yml` | Node/typecheck、`check:harness-bindings` 静态检查、coverage/shell/App build、Node 20/22/24 CLI、macOS renderer/packaging、Linux 解包 App / pacman 检查 | `Check` 汇总全部 jobs（含 `packaged-linux`）；失败、取消或跳过均拒绝 |
 | `performance.yml` | 现有 compare 与 native 测量 | `Performance Check` 汇总两个 jobs；评论发布不属于正确性门禁 |
 | `remote-g0.yml` | 每个 PR 发出检查，仅 remote/iOS/工作流变化运行 macOS 验证 | `Remote Check` 只接受验证成功，或 changes 明确判定无影响且 transport 跳过；检测失败拒绝 |
 | `pr-vouch.yml` | 使用默认分支的 VOUCHED 配置，自动同步 `vouch:*` | 仅上下文，不是准入或门禁 |

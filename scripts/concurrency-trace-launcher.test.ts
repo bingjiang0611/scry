@@ -6,24 +6,12 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import * as ts from 'typescript'
 
-// Static and CLI-argument checks only — none of these prove the Electron cell runs. They cover the two
-// things that fail silently instead: a helper that is called but no longer bound (node --check would pass
-// it), and an argument path that starts a build, a temp tree or a process before it has to. Whether the
-// measured cell works is answered by running it under the timing lock, not here.
+// Static AST and CLI-argument checks only; these do not prove the Electron cell runs.
+// Whole-program name resolution and its negative control run in check:harness-bindings.
+// Actual cell execution remains a separate measurement under the timing lock.
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const launcher = join(root, 'scripts/concurrency-trace-bench.mjs')
 const entry = join(root, 'scripts/fixtures/concurrency-trace-electron.ts')
-const UNRESOLVED_NAME = new Set([2304, 2552, 18004])
-
-function unresolvedNames(files: string[]) {
-  const program = ts.createProgram(files, { allowJs: true, checkJs: true, noEmit: true,
-    target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.NodeNext,
-    moduleResolution: ts.ModuleResolutionKind.NodeNext, skipLibCheck: true })
-  return [...program.getSemanticDiagnostics(), ...program.getSyntacticDiagnostics()]
-    .filter(diagnostic => UNRESOLVED_NAME.has(diagnostic.code))
-    .map(diagnostic => `${diagnostic.file?.fileName ?? '<global>'}:${diagnostic.code}: `
-      + ts.flattenDiagnosticMessageText(diagnostic.messageText, ' '))
-}
 
 // Counts real `new BrowserWindow(...)` expressions. Comments and strings cannot produce a NewExpression, so
 // a comment that explains why no window is created stays free of charge.
@@ -57,25 +45,6 @@ const guardSource = [
 ].join('\n')
 
 describe('concurrency trace launcher contract', () => {
-  it('resolves the launcher and the Electron entry without an unbound name', () => {
-    expect(unresolvedNames([launcher, entry])).toEqual([])
-  })
-
-  // Negative control: the same program must report a name it cannot bind, otherwise a green case above
-  // would only mean the filter never matches anything.
-  it('reports a missing binding in a fixture', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'scry-trace-launcher-bindings-'))
-    try {
-      const fixture = join(dir, 'missing-binding.mjs')
-      writeFileSync(fixture, 'export function runIt() { return deletedLauncherHelper(1) }\n')
-      const found = unresolvedNames([fixture]).join('\n')
-      expect(found).toContain('2304')
-      expect(found).toContain('deletedLauncherHelper')
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-
   it('creates no BrowserWindow in the launcher or the entry', () => {
     expect({ launcher: browserWindowConstructions(launcher), entry: browserWindowConstructions(entry) })
       .toEqual({ launcher: 0, entry: 0 })
