@@ -8,7 +8,7 @@ import { isRendererPerformanceSample } from '../../shared/performance'
 import { performanceRecordingEnabled } from '../performance-timing'
 import { recordRendererPerformance } from '../performance-recording'
 import { windowBackgroundColor } from '../window-chrome'
-import { canonicalizePiAgentPaths, piProfileForExecutable, createPiAgentProfileStore, type PiAgentProfile } from '../pi-agent-profiles'
+import { canonicalizePiAgentPaths, resolvePiLauncherExecutable, piProfileForExecutable, createPiAgentProfileStore, type PiAgentProfile } from '../pi-agent-profiles'
 import { detectAgentsFast, probeCliVersion, PI_VERSION_PROBE_TIMEOUT_MS, type DetectedAgent } from '../claude-locate'
 import { providerIdForAgentId } from '../../shared/runtime'
 import { piRpcEnvironment, probePiAgent } from '../providers/pi'
@@ -106,7 +106,7 @@ export function registerAppAgentHandlers(deps: AppAgentBootstrapDependencies): v
     const result = await dialog.showOpenDialog({ title: '选择 Pi Agent 启动器', properties: ['openFile'] })
     if (result.canceled || result.filePaths.length === 0) return null
     try {
-      const profile = piProfileForExecutable(result.filePaths[0])
+      const profile = piProfileForExecutable(await resolvePiLauncherExecutable(result.filePaths[0]))
       const versionProbe = await probeCliVersion(profile.executable, ['--version'], {
         env: await piRpcEnvironment(profile),
         timeout: PI_VERSION_PROBE_TIMEOUT_MS

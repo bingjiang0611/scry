@@ -1,8 +1,12 @@
-import { chmodSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
-import { canonicalizePiAgentPaths, createPiAgentProfileStore, piProfileForExecutable, undetectedPiProfiles } from './pi-agent-profiles'
+import { describe, expect, it, vi } from 'vitest'
+import * as agentDiscovery from './claude-locate'
+import { createPiProfileRuntime } from './bootstrap/pi-profiles'
+import { canonicalizePiAgentPaths, createPiAgentProfileStore, piProfileForExecutable, resolvePiLauncherExecutable, undetectedPiProfiles } from './pi-agent-profiles'
 
 describe('Pi Agent Profile store', () => {
   it('uses the canonical executable path as stable identity and persists profiles', () => {
@@ -40,6 +44,56 @@ describe('Pi Agent Profile store', () => {
 })
 
 describe('Pi profile discovery identity', () => {
+  it.each(['pi', 'rotom'])('resolves the mise %s shim before canonicalizing or launching RPC', async (command) => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-pi-mise space-'))
+    try {
+      const mise = join(dir, 'mise')
+      const shim = join(dir, command)
+      const installed = join(dir, 'installed launcher')
+      const log = join(dir, 'mise-argv.json')
+      writeFileSync(installed, '#!/bin/sh\n[ "$#" = 2 ] && [ "$1" = --mode ] && [ "$2" = rpc ] || exit 9\nprintf "rpc-ready"\n', { mode: 0o755 })
+      writeFileSync(mise, `#!/bin/sh\n[ "$#" = 2 ] && [ "$1" = which ] && [ "$2" = ${command} ] || exit 2\nprintf '%s' "$PWD" > '${log}'\nprintf '%s\\n' '${installed}'\n`, { mode: 0o755 })
+      symlinkSync(mise, shim)
+      const agent = { id: command === 'pi' ? 'pi:default' : 'pi:rotom', name: command, bin: command, path: shim }
+      const [detected] = await canonicalizePiAgentPaths([agent])
+      expect(detected).toEqual({ ...agent, path: realpathSync(installed) })
+      expect(readFileSync(log, 'utf8')).toBe(realpathSync(homedir()))
+      // The file-picker path must resolve to the same profile identity as discovery.
+      const profile = piProfileForExecutable(await resolvePiLauncherExecutable(shim))
+      expect(profile.executable).toBe(detected.path)
+      const discovery = vi.spyOn(agentDiscovery, 'detectAgentsFast').mockReturnValue([agent])
+      try {
+        const runtime = createPiProfileRuntime({ userDataDir: dir })
+        expect(await runtime.resolvePiProfile(agent.id)).toMatchObject({ id: agent.id, executable: profile.executable })
+        expect(await runtime.listPiProfiles()).toEqual([expect.objectContaining({ id: agent.id, executable: profile.executable })])
+      } finally {
+        discovery.mockRestore()
+      }
+      const result = await promisify(execFile)(profile.executable, ['--mode', 'rpc'])
+      expect(result.stdout).toBe('rpc-ready')
+      expect(() => piProfileForExecutable(shim)).toThrow('mise')
+      expect(() => piProfileForExecutable(mise)).toThrow('mise')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('does not launch mise when shim resolution fails', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-pi-mise-failed-'))
+    try {
+      const mise = join(dir, 'mise')
+      const shim = join(dir, 'rotom')
+      writeFileSync(mise, '#!/bin/sh\necho "not installed" >&2\nexit 1\n', { mode: 0o755 })
+      symlinkSync(mise, shim)
+      await expect(resolvePiLauncherExecutable(shim)).rejects.toThrow('not installed')
+      const agent = { id: 'pi:rotom', name: 'Rotom', bin: 'rotom', path: shim }
+      expect(await canonicalizePiAgentPaths([agent])).toEqual([agent])
+      expect(() => piProfileForExecutable(shim)).toThrow('mise')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('canonicalizes Pi launchers without losing built-in or saved history IDs', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'scry-pi-alias-'))
     try {
