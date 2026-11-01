@@ -77,6 +77,11 @@ describe('required PR checks', () => {
     })
   }
 
+  it('serializes hosted coverage without filtering tests or overriding their timeouts', () => {
+    const coverage = source(workflow('ci.yml').jobs.node, 'Unit, contract tests and coverage')
+    expect(coverage.run).toBe("xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24' npm run test:coverage -- --maxWorkers=1")
+  })
+
   it('keeps the failed native comparison authoritative when collecting one diagnostic control', () => {
     const job = workflow('performance.yml').jobs.native
     const primary = source(job, 'Measure baseline then candidate, retaining failures')
