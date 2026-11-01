@@ -55,6 +55,7 @@ export interface TranscriptRead {
   }
   observed: boolean
   identityMatched?: boolean
+  providerTurnId?: string
   complete?: boolean
   terminalStatus?: AgentTurnRecord['status']
   completedAt?: string
@@ -89,6 +90,7 @@ export function nestedRecord(payload: Record<string, unknown>, key: string): Rec
 
 export interface ModelIdentity {
   model?: string
+  modelTier?: string
   status: TurnModelStatus
   source?: TurnModelSource
   omissionReason?: string
@@ -116,12 +118,19 @@ export function resolveModelIdentity(
           `(${[...models].sort().slice(0, 3).map((id) => id.slice(0, 64)).join(', ')})`
       }
     }
+    const tiers = new Set(modelEvents.flatMap((event) => {
+      const tier = event.runtimeMetadata?.modelTier
+      return typeof tier === 'string' ? [tier] : []
+    }))
     if (complete && models.size === 1) {
-      return { model: [...models][0], status: 'observed', source: 'provider_model_event' }
+      return { model: [...models][0], ...(tiers.size === 1 ? { modelTier: [...tiers][0] } : {}), status: 'observed', source: 'provider_model_event' }
+    }
+    if (complete && models.size === 0 && tiers.size === 1) {
+      return { modelTier: [...tiers][0], status: 'observed', source: 'provider_model_event' }
     }
     return {
       status: 'incomplete',
-      omissionReason: models.size === 0
+      omissionReason: models.size === 0 && tiers.size === 0
         ? 'provider model observation carried no usable model id'
         : 'provider model observation was marked incomplete'
     }
@@ -242,8 +251,20 @@ export function subagentScopedPayload(payload: Record<string, unknown>): boolean
   )
 }
 
+export interface CodexRolloutIdentity {
+  sessionId?: string
+  parentSessionId?: string
+  parentThreadId?: string
+  forkedFromId?: string
+  cwd?: string
+  agentPath?: string
+  isSubagent: boolean
+}
+
 export interface ParsedTranscriptTurn {
   providerTurnId?: string
+  /** Native Codex turn attribution; child rollouts use this to exclude inherited history. */
+  parentTurnId?: string
   userText: string
   startedAt?: string
   completedAt?: string
@@ -251,7 +272,7 @@ export interface ParsedTranscriptTurn {
   terminalStatus?: AgentTurnRecord['status']
   events: TraceEvent[]
   observable: TranscriptRead['observable']
-  childThreads: Array<{ sessionId: string; parentToolUseId?: string; name?: string }>
+  childThreads: Array<{ sessionId: string; parentToolUseId?: string; parentTurnId?: string; name?: string }>
   pendingToolCalls: Set<string>
 }
 

@@ -48,6 +48,7 @@ export async function beginOpenTurn(
     ? rawManagedPromptHash
     : undefined
   const providerTurnId = providerTurnIdOf(payload, provider)
+  const requestSetId = provider === 'qoder' ? stringAt(payload, 'request_set_id', 'requestSetId') : undefined
   const transcriptPath = transcriptPathOf(payload)
   const transcriptOffset = transcriptPath ? 0 : undefined
   const open: OpenTurnState = {
@@ -71,6 +72,7 @@ export async function beginOpenTurn(
     ...(transcriptPath ? { transcriptPath } : {}),
     ...(transcriptOffset != null ? { transcriptStartOffset: transcriptOffset } : {}),
     ...(providerTurnId ? { providerTurnId } : {}),
+    ...(requestSetId ? { requestSetId } : {}),
     ...(managedByScry ? { managedByScry: true } : {}),
     ...(staleTerminalProtection ? { staleTerminalProtection: true } : {}),
     uploadEnvironment,

@@ -200,7 +200,10 @@ export async function recoverRecorder(
                 open.provider,
                 open.promptHash,
                 open.providerTurnId,
-                open.transcriptStartOffset
+                open.transcriptStartOffset,
+                open.requestSetId,
+                open.sessionId,
+                enablement.workspaceRoot
               )
               if (!transcript.terminalStatus || !transcript.completedAt || transcript.identityMatched === false) {
                 // A long tool, approval wait or silent Provider can still be running. Keep its

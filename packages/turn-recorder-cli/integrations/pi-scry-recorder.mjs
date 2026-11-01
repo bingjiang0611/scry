@@ -7,6 +7,8 @@ import { randomUUID } from 'node:crypto'
 
 const MAX_JSON_BYTES = 64 * 1024
 const MAX_ASSISTANT_BYTES = 256 * 1024
+// A tool event stays below the daemon's 8 MiB request limit, including metadata.
+const MAX_TOOL_BYTES = 4 * 1024 * 1024
 
 function debug(message) {
   if (process.env.SCRY_RECORDER_DEBUG === '1') process.stderr.write(`[scry-pi] ${message}\n`)
@@ -37,10 +39,11 @@ function limitation(fields) {
 }
 
 function boundedJson(value) {
+  // Preserve native tool bodies up to the transport budget; CAS precedes previews.
   try {
     const source = JSON.stringify(value)
     const bytes = Buffer.byteLength(source)
-    if (bytes <= MAX_JSON_BYTES) return { value }
+    if (bytes <= MAX_TOOL_BYTES) return { value }
     const preview = utf8Prefix(source, 4_000)
     return {
       value: { truncated: true, bytes, preview },
@@ -74,20 +77,29 @@ function assistantText(message) {
 }
 
 function emptyUsage() {
-  return { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_tokens: 0, cost_usd: 0 }
+  return {}
 }
 
 function addUsage(total, message) {
   const usage = message && typeof message.usage === 'object' ? message.usage : {}
   const cost = usage && typeof usage.cost === 'object' ? usage.cost : {}
-  const fields = [usage.input, usage.output, usage.cacheRead, usage.cacheWrite, usage.reasoning, cost.total]
-  if (!fields.some((value) => typeof value === 'number' && Number.isFinite(value))) return false
-  total.input_tokens += Number(usage.input) || 0
-  total.output_tokens += Number(usage.output) || 0
-  total.cache_read_input_tokens += Number(usage.cacheRead) || 0
-  total.cache_creation_input_tokens += Number(usage.cacheWrite) || 0
-  total.reasoning_tokens += Number(usage.reasoning) || 0
-  total.cost_usd += Number(cost.total) || 0
+  const values = [usage.input, usage.output, usage.cacheRead, usage.cacheWrite, usage.reasoning, cost.total]
+  const numeric = values.filter((value) => typeof value === 'number' && Number.isFinite(value))
+  if (numeric.length === 0) return false
+  // Pi reports an SDK-fetch failure as an all-zero usage object. It proves neither
+  // zero spend nor zero reasoning, so it must not turn an unavailable snapshot into
+  // an exact zero. Real partial values remain admissible.
+  const failed = message?.stopReason === 'error' || message?.stopReason === 'aborted'
+  if (failed && numeric.every((value) => value === 0)) return false
+  const add = (key, value) => {
+    if (typeof value === 'number' && Number.isFinite(value)) total[key] = (total[key] || 0) + value
+  }
+  add('input_tokens', usage.input)
+  add('output_tokens', usage.output)
+  add('cache_read_input_tokens', usage.cacheRead)
+  add('cache_creation_input_tokens', usage.cacheWrite)
+  add('reasoning_tokens', usage.reasoning)
+  add('cost_usd', cost.total)
   return true
 }
 
@@ -219,6 +231,7 @@ export default function scryPiRecorder(pi) {
       assistant: [],
       usage: emptyUsage(),
       usageObserved: false,
+      usageIncomplete: false,
       modelSegments: [],
       startedAt: new Date().toISOString(),
       settled: false,
@@ -249,11 +262,13 @@ export default function scryPiRecorder(pi) {
     const text = assistantText(message)
     if (text) active.assistant.push(text)
     active.usageObserved = addUsage(active.usage, message) || active.usageObserved
+    active.usageIncomplete ||= message.stopReason === 'error' || message.stopReason === 'aborted'
     const id = message.responseId || message.id || randomUUID()
     const completedAtMs = Date.now()
     const startedAtMs = responseStartedAt ?? completedAtMs
     active.modelSegments.push({
       response_id: id,
+      ...(typeof message.model === 'string' && message.model ? { model: message.model } : {}),
       completed_at: new Date(completedAtMs).toISOString(),
       duration_ms: Math.max(0, completedAtMs - startedAtMs),
     })
@@ -300,7 +315,11 @@ export default function scryPiRecorder(pi) {
       assistant_response: assistant.value,
       ...limitation({ assistant_response: assistant, error: turn.error }),
       ...(turn.usageObserved ? { usage: turn.usage } : {}),
+      ...(turn.usageIncomplete ? { usage_complete: false } : turn.usageObserved ? { usage_complete: true } : {}),
       model_segments: turn.modelSegments,
+      ...(turn.modelSegments.some((segment) => typeof segment.model === 'string')
+        ? { model_ids: [...new Set(turn.modelSegments.flatMap((segment) => typeof segment.model === 'string' ? [segment.model] : []))], model_ids_complete: turn.modelSegments.every((segment) => typeof segment.model === 'string' && segment.model.length > 0) }
+        : {}),
       ...(turn.error ? { error: turn.error.value } : {}),
       status: event.aborted ? 'cancelled' : turn.terminalStatus ?? 'completed',
       timestamp: new Date().toISOString(),
@@ -319,7 +338,11 @@ export default function scryPiRecorder(pi) {
         assistant_response: assistant.value,
         ...limitation({ assistant_response: assistant, error: turn.error }),
         ...(turn.usageObserved ? { usage: turn.usage } : {}),
+        ...(turn.usageIncomplete ? { usage_complete: false } : turn.usageObserved ? { usage_complete: true } : {}),
         model_segments: turn.modelSegments,
+        ...(turn.modelSegments.some((segment) => typeof segment.model === 'string')
+          ? { model_ids: [...new Set(turn.modelSegments.flatMap((segment) => typeof segment.model === 'string' ? [segment.model] : []))], model_ids_complete: turn.modelSegments.every((segment) => typeof segment.model === 'string' && segment.model.length > 0) }
+          : {}),
         ...(turn.error ? { error: turn.error.value } : {}),
         status: turn.terminalStatus ?? 'interrupted',
         timestamp: new Date().toISOString(),

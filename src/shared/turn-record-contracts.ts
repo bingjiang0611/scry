@@ -214,6 +214,8 @@ export interface AgentTurnRecord extends TurnEvidence {
     id: ProviderId
     version?: string
     model?: string
+    /** Provider-reported logical tier, separate from a concrete native model id. */
+    modelTier?: string
     /**
      * Why `model` reads the way it does. A missing model has several distinct
      * causes and they are not interchangeable: the provider may never expose
@@ -255,7 +257,7 @@ export interface AgentTurnRecord extends TurnEvidence {
   termination?: Evidence<TurnTermination>
 }
 
-/** `observed` is the only status that permits reading `provider.model` as fact. */
+/** `observed` is the only status that permits reading provider model metadata as fact. */
 export type TurnModelStatus = 'observed' | 'unobserved' | 'incomplete' | 'conflict'
 
 /** Provenance of an observed model id. `usage_event` is a billed model, not a requested one. */
