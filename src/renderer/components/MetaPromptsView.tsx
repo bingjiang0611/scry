@@ -5,7 +5,7 @@ import type { PresenceCloseReason } from '../hooks/usePresence'
 import { Icon } from './primitives/Icon'
 import { useFirstReadyList } from '../hooks/useFirstReadyList'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
-import { MODAL_COPY } from '../constants/copy'
+import { META_PROMPT_COPY, MODAL_COPY } from '../constants/copy'
 import './meta-prompts.css'
 
 type LibraryState = { status: 'ready'; prompts: MetaPrompt[] } | { status: 'error'; error: string }
@@ -172,9 +172,10 @@ function PromptEditor({ prompt, error, onSave, onClose }: {
           <label>提示词正文<textarea required value={body} placeholder="写下你希望重复使用的指令…" onChange={event => setBody(event.target.value)} /></label>
           <div className="mp-editor-meta"><span>{Array.from(body).length} 字</span></div>
           {error && <p className="mp-form-error" role="alert">{error}</p>}
-          {discarding && <div className="mp-discard" role="alert"><strong>放弃未保存的修改？</strong><p>放弃后，本次修改不会保存。</p><div className="mp-actions"><button type="button" className="mp-button" onClick={() => setDiscarding(false)}>继续编辑</button><button type="button" className="mp-button mp-danger" onClick={() => requestModalClose('confirm')}>放弃修改</button></div></div>}
         </div>
-        {!discarding && <footer className="mp-modal-footer"><button type="button" className="mp-button" onClick={() => requestModalClose()}>取消</button><button type="submit" className="mp-button mp-primary" disabled={!title.trim() || !body.trim()}>保存提示词</button></footer>}
+        {discarding
+          ? <div className="mp-discard" role="alert"><strong>{META_PROMPT_COPY.discardTitle}</strong><p>{META_PROMPT_COPY.discardDescription}</p><div className="mp-actions"><button type="button" className="mp-button" onClick={() => setDiscarding(false)}>{META_PROMPT_COPY.continueEditing}</button><button type="button" className="mp-button mp-danger" onClick={() => requestModalClose('confirm')}>{META_PROMPT_COPY.discardChanges}</button></div></div>
+          : <footer className="mp-modal-footer"><button type="button" className="mp-button" onClick={() => requestModalClose()}>{META_PROMPT_COPY.cancel}</button><button type="submit" className="mp-button mp-primary" disabled={!title.trim() || !body.trim()}>{META_PROMPT_COPY.save}</button></footer>}
       </form>
     </ModalFrame>
   )

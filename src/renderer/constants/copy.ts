@@ -89,6 +89,15 @@ export const ANALYTICS_COPY = {
   outputEvidence: (known: number, total: number, reasoning: string) => `${known}/${total} 条明细已上报；推理 ${reasoning}`
 } as const
 
+export const META_PROMPT_COPY = {
+  discardTitle: '放弃未保存的修改？',
+  discardDescription: '放弃后，本次修改不会保存。',
+  continueEditing: '继续编辑',
+  discardChanges: '放弃修改',
+  cancel: '取消',
+  save: '保存提示词'
+} as const
+
 export const MODAL_COPY = {
   close: '关闭',
   closeRename: '关闭重命名',
