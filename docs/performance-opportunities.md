@@ -1,5 +1,9 @@
 # 性能机会日志
 
+## 零预算正文（2026-11-01，L1）
+
+`limitToolContent` 不再编码即将完全省略的正文：每个零预算字段少一次 Buffer 编码，来源、引用和省略语义不变。实现 `412ad2c3`，完整 coverage 5262 项通过；不提高 50k 用例期限或减少工作量。带 profiler 的计时仅用于诊断，尚无 App L2/L3 结论。详见[实验与交付状态](performance-experiments/20261101-zero-budget-content.md)。
+
 ## 本地可见需求与同进程锁争用（2026-10-30，L1 / 受控 L2）
 
 用户确认完整方案后，本地 Legacy/Unified/Side Chat 实时 Diff 按消费者需求采集；隐藏正文但可见 Overview/Diff/Agents 时仍保持鲜活。返回视图在真实隔离 App 内验证 2 秒内显示新证据，原动画和两份 CSS 字节不变。无需求控制的旧 artifact、窄 Files、最大化 Overview 均有失败对照与最终源码验收。远程没有可见性协议，保守维持采集，不假装全面远程停采。
