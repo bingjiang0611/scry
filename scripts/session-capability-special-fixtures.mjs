@@ -50,8 +50,8 @@ export function specialFixtureSources() {
 
 // Serialized into the isolated Electron process. Only the caller owns process exit:
 // the default campaign must continue after optional motion and sidebar checks.
-export async function runSpecialFixtures({ flags, win, paths, sources, screenshots, campaign, logRendererError, setDiagnostic }) {
-  const decode = source => Function('return (' + source + ')')()
+export async function runSpecialFixtures({ flags, win, paths, sources, screenshots, campaign, logRendererError, setDiagnostic, nodeRequire }) {
+  const decode = source => Function('require', 'return (' + source + ')')(nodeRequire)
   const withMedia = decode(sources.media)
   if (flags.loading) {
     win.setSize(1400, 900)
@@ -104,7 +104,7 @@ export async function runSpecialFixtures({ flags, win, paths, sources, screensho
   if (flags.sidebar) {
     win.setSize(1100, 760)
     await withMedia(win.webContents, () => win.loadFile(paths.sidebar), async () => {
-      const exercise = Function('exerciseSidebarActivityContinuation', 'return (' + sources.sidebar + ')')(decode(sources.sidebarContinuation))
+      const exercise = Function('exerciseSidebarActivityContinuation', 'require', 'return (' + sources.sidebar + ')')(decode(sources.sidebarContinuation), nodeRequire)
       result.sidebarActivity = await exercise(win.webContents, screenshots.sidebar)
       await win.loadFile(paths.sidebar)
       result.sidebarUnreadResults = await decode(sources.sidebarUnread)(win.webContents)

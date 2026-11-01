@@ -94,7 +94,7 @@ try {
         let result = {}, piCommands = {}
         const special = await (${specialSources.runner})({
           flags: { loading: ${loadingOnly}, lists: ${listsOnly}, overlays: ${overlaysOnly}, structure: ${structureOnly}, sidebar: ${fixtures.includes('sidebar-activity')}, sidebarOnly: ${sidebarActivityOnly}, paneBench: ${paneBenchOnly}, motion: ${fixtures.includes('motion-tokens')}, motionOnly: ${motionTokensOnly} },
-          win, sources: ${JSON.stringify(specialSources)},
+          win, nodeRequire: require, sources: ${JSON.stringify(specialSources)},
           paths: ${JSON.stringify({ loading: join(temp, 'loading.html'), lists: join(temp, 'lists.html'), overlays: join(temp, 'overlays.html'), structure: join(temp, 'session-cache.html'), sidebar: join(temp, 'sidebar-activity.html'), paneBench: join(temp, 'structure-pane-bench.html'), motion: join(temp, 'motion-tokens.html') })},
           screenshots: ${JSON.stringify({ loading: process.env.SCRY_LOADING_UI_SCREENSHOT ?? '', lists: process.env.SCRY_LISTS_UI_SCREENSHOT ?? '', sidebar: process.env.SCRY_SIDEBAR_ACTIVITY_SCREENSHOT ?? '' })},
           campaign: process.argv.find(argument => argument.startsWith('--scry-lists-campaign='))?.split('=')[1],
