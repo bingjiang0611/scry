@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 export function createWindowResize({ wait, idle, check, windowControlPath, json }) {
   let seq = 0
   const applied = []
-  const resize = async (width, height) => {
+  const resize = async (width, height, narrow) => {
     check(typeof windowControlPath === 'string', 'the layout acceptance needs the fixture window control path')
     seq += 1
     const receiptPath = `${windowControlPath}.receipt`
@@ -34,6 +34,11 @@ export function createWindowResize({ wait, idle, check, windowControlPath, json 
       `the native window clamped ${width}x${height} to ${json(receipt)}`)
     await wait(`window.innerWidth === ${width} && window.innerHeight === ${height}`, 20000)
     await idle()
+    // Native size and animation-idle receipts do not acknowledge the ResizeObserver's
+    // React update. Layout assertions can require its narrow/wide state explicitly.
+    if (narrow !== undefined) {
+      await wait(`(document.querySelector('.app-shell.narrow-single-column') != null) === ${narrow}`, 20000)
+    }
     applied.push({ width, height, contentSize: receipt.contentSize })
     return receipt
   }

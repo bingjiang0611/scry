@@ -72,7 +72,7 @@ export async function exerciseSideChatLayout({ cdp, evaluate, check, ipcCountsPa
 
   // 1. A wide real window keeps both panes side by side; the panel then shrinks to its
   //    own minimum with the resizer's keyboard control.
-  await resize(1400, 900)
+  await resize(1400, 900, false)
   await showChild()
   const wide = await panelFacts()
   check(wide.narrow === false, `a 1400px window must keep both panes side by side: ${json(wide)}`)
@@ -106,7 +106,7 @@ export async function exerciseSideChatLayout({ cdp, evaluate, check, ipcCountsPa
 
   // 2. The measured breakpoint itself, in a real window: the shell keeps one column when
   //    the chat would no longer fit beside the workbench (880px chat + sidebar + resizer).
-  await resize(1100, 900)
+  await resize(1100, 900, true)
   await showChild()
   const narrowSide = await panelFacts()
   check(narrowSide.narrow === true, `a 1100px window must use the measured single column: ${json(narrowSide)}`)
@@ -156,7 +156,7 @@ export async function exerciseSideChatLayout({ cdp, evaluate, check, ipcCountsPa
   check(minimumPanel.composerInside && minimumPanel.surfaceOverflow <= 1 && minimumPanel.chipWidth >= 100,
     `the workbench must stay usable at the minimum window: ${json(minimumPanel)}`)
   await capture('layout-minimum-window')
-  await resize(1200, 600)
+  await resize(1200, 600, false)
   await revealPanel()
   const lowWindow = await panelFacts()
   check(lowWindow.composerInside, `the composer left a 600px-high window: ${json(lowWindow)}`)
