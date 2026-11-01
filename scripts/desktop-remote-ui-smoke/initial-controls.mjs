@@ -53,6 +53,36 @@ export async function runInitialControls({ contents, click, wait, check, fixture
     await wait(aligned, 'logical conversation keeps target through layout changes')
     await wait('!document.querySelector(".turn-jump-target")', 'logical navigation highlight expires')
     await wait(aligned, 'logical conversation does not resume old bottom-follow intent')
+    await activateTurn()
+    await wait('document.querySelector(".turn-jump-target") != null', 'navigation anchor active before delayed frame')
+    await wait(aligned, 'navigation aligned before delayed frame')
+    await read(`(() => {
+      const request = window.requestAnimationFrame.bind(window)
+      const cancel = window.cancelAnimationFrame.bind(window)
+      const pending = new Map()
+      window.requestAnimationFrame = callback => {
+        const id = request(time => pending.set(id, () => callback(time)))
+        return id
+      }
+      window.cancelAnimationFrame = id => { pending.delete(id); cancel(id) }
+      window.__navigationFrames = {
+        pending,
+        restore: () => {
+          window.requestAnimationFrame = request
+          window.cancelAnimationFrame = cancel
+          for (const callback of pending.values()) request(callback)
+          delete window.__navigationFrames
+        }
+      }
+      document.querySelector('[data-run-id="conversation-run-3"]').style.minHeight = '2100px'
+    })()`)
+    try {
+      await wait('window.__navigationFrames.pending.size > 0', 'layout alignment frame queued')
+      await wait('!document.querySelector(".turn-jump-target")', 'highlight expires with an alignment frame pending')
+      await wait(aligned, 'pending layout alignment settles before navigation expires')
+    } finally {
+      await read('window.__navigationFrames.restore()')
+    }
     contents.getOwnerBrowserWindow().setContentSize(1024, 653)
     await wait('document.querySelector(".app.narrow-single-column") != null', 'narrow desktop layout')
     await activateTurn()
@@ -66,6 +96,6 @@ export async function runInitialControls({ contents, click, wait, check, fixture
     await activateTurn()
     await wait(aligned, 'maximized overview reveals the conversation prompt')
     check(await read('document.querySelector(".chat-transcript").clientHeight > 0 && document.activeElement === document.querySelector(".chat-transcript")'), 'Maximized navigation must reveal and focus the timeline')
-    return { conversationNavigation: { productionApp: true, overviewTurnId: true, virtualRows: true, repeatActivation: true, layoutAnchor: true, bottomFollowReleased: true, narrowLayout: true, maximizedPanel: true }, nativeCoordinateInput: true }
+    return { conversationNavigation: { productionApp: true, overviewTurnId: true, virtualRows: true, repeatActivation: true, layoutAnchor: true, bottomFollowReleased: true, pendingFrameAtExpiry: true, narrowLayout: true, maximizedPanel: true }, nativeCoordinateInput: true }
   }
 }
