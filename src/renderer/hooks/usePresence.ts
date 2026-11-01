@@ -79,7 +79,10 @@ export function usePresence({ onClose, exitMs, onExitStart }: PresenceOptions): 
     }
     node?.addEventListener('animationend', onAnimationEnd)
     removeAnimationListener.current = () => node?.removeEventListener('animationend', onAnimationEnd)
-    timer.current = setTimeout(finish, (prefersReducedMotion() ? 120 : exitMs) + 80)
+    // The fallback only runs when animationend never arrives (dropped or late
+    // compositor frames). It must leave real headroom inside the 250ms modal
+    // removal budget: at +80 a loaded machine missed it by 1-2ms on every close.
+    timer.current = setTimeout(finish, (prefersReducedMotion() ? 120 : exitMs) + 40)
     if (pendingExits.size === 0) {
       document.addEventListener('pointerdown', onNextInteraction, true)
       document.addEventListener('keydown', onNextInteraction, true)
