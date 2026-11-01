@@ -60,13 +60,17 @@ export async function runInitialControls({ contents, click, wait, check, fixture
       const request = window.requestAnimationFrame.bind(window)
       const cancel = window.cancelAnimationFrame.bind(window)
       const pending = new Map()
+      let queued = 0
+      // Record registration even if expiry cancels the native frame before it fires.
       window.requestAnimationFrame = callback => {
-        const id = request(time => pending.set(id, () => callback(time)))
+        const id = request(() => {})
+        pending.set(id, callback)
+        queued++
         return id
       }
       window.cancelAnimationFrame = id => { pending.delete(id); cancel(id) }
       window.__navigationFrames = {
-        pending,
+        get queued() { return queued },
         restore: () => {
           window.requestAnimationFrame = request
           window.cancelAnimationFrame = cancel
@@ -74,10 +78,11 @@ export async function runInitialControls({ contents, click, wait, check, fixture
           delete window.__navigationFrames
         }
       }
-      document.querySelector('[data-run-id="conversation-run-3"]').style.minHeight = '2100px'
+      const neighbor = document.querySelector('[data-run-id="conversation-run-3"]')
+      neighbor.style.minHeight = (neighbor.getBoundingClientRect().height + 300) + 'px'
     })()`)
     try {
-      await wait('window.__navigationFrames.pending.size > 0', 'layout alignment frame queued')
+      await wait('window.__navigationFrames.queued > 0', 'layout alignment frame queued')
       await wait('!document.querySelector(".turn-jump-target")', 'highlight expires with an alignment frame pending')
       await wait(aligned, 'pending layout alignment settles before navigation expires')
     } finally {
