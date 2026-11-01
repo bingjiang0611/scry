@@ -5,6 +5,7 @@ const navigationConversation = { id: 'navigation-conversation', cwd: '/fixture/p
 window.scry = {
   // Same minimal full-App bridge contract as session-selection-smoke.tsx.
   activeRun: async () => null, activeRuns: async () => [],
+  workspaceSelection: unavailableWorkspaceSelection,
   onTrace: noopSubscribe, onTurnDone: noopSubscribe, onError: noopSubscribe,
   listProjects: async () => [
     { cwd: '/fixture/pinned', name: 'Pinned local', pinnedAt: 1, mtime: 1, sessions: [], ...(${conversationNavigationOnly} ? { conversations: [navigationConversation] } : {}) },

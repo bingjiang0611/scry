@@ -10,6 +10,8 @@ export async function runInitialControls({ click, wait, check, fixture, read }, 
 
   // Full production App: the remote session uses the same ChatView as local sessions.
   await click('[data-app-fixture]')
+  check(await read('window.scry.workspaceSelection.read({ cwd: "/fixture/pinned", kind: "branches" }).then(result => result.status === "unavailable")'),
+    'Offline Full App must expose workspace selection as unavailable, not a missing bridge')
   if (options.conversationNavigationOnly) {
     await wait('document.querySelector("[data-conversation-id=navigation-conversation]") != null', 'logical conversation catalog')
     await click('[data-conversation-id=navigation-conversation]')
