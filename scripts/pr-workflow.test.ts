@@ -18,6 +18,7 @@ interface Step {
   with?: { script?: string; [key: string]: unknown }
 }
 interface Job {
+  'runs-on'?: string
   name?: string
   if?: string
   needs?: string[] | string
@@ -76,6 +77,10 @@ describe('required PR checks', () => {
       expect(gate(file, {})).not.toBe(0)
     })
   }
+
+  it('pins the packaged macOS gate to a supported standard runner image', () => {
+    expect(workflow('ci.yml').jobs['packaged-electron']['runs-on']).toBe('macos-15')
+  })
 
   it('requires whole-program harness binding checks before coverage', () => {
     const job = workflow('ci.yml').jobs.node
