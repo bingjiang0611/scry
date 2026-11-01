@@ -73,8 +73,8 @@ function safeReason(error: unknown): string {
     .replace(/[^A-Za-z0-9_.:\- ]+/g, '-')
     .slice(0, 300)
 }
-function backoff(attempts: number): number {
-  const ceiling = Math.min(JOB_BACKOFF_MAX_MS, JOB_BACKOFF_BASE_MS * 2 ** Math.min(18, Math.max(0, attempts - 1)))
+function backoff(failures: number): number {
+  const ceiling = Math.min(JOB_BACKOFF_MAX_MS, JOB_BACKOFF_BASE_MS * 2 ** Math.min(18, Math.max(0, failures - 1)))
   return Math.floor(ceiling * (0.8 + Math.random() * 0.2))
 }
 function capturedEnv(env: NodeJS.ProcessEnv): Record<string, string | null> {
@@ -302,6 +302,7 @@ function validJob(job: QueueJob | null, workspace: string): job is QueueJob {
     ID_RE.test(job.id) &&
     Number.isSafeInteger(job.attempts) &&
     job.attempts >= 0 &&
+    (job.failures === undefined || (Number.isSafeInteger(job.failures) && job.failures >= 0)) &&
     Number.isSafeInteger(job.notBeforeMs) &&
     job.notBeforeMs >= 0 &&
     (job.maxAttempts === undefined || job.maxAttempts === JOB_MAX_ATTEMPTS) &&
@@ -384,7 +385,7 @@ async function executeJob(
     })
     if (result.deferredUntilMs !== undefined) {
       const deferred = new UploadError(
-        'upload_deferred',
+        result.deferredReason === 'upload_admission_busy' ? 'upload_admission_busy' : 'upload_deferred',
         'upload progress completed; remaining work is deferred',
         true,
         result.deferredUntilMs
@@ -405,6 +406,7 @@ async function executeJob(
       // with the just-finished invocation's stale snapshot.
       current.rerunRequested = false
       current.attempts = 0
+      current.failures = 0
       current.notBeforeMs = Date.now()
       await writeJsonAtomic(path, current)
       return { kind: 'success' }
@@ -419,17 +421,28 @@ async function executeJob(
       await deadLetterJob(workspace, path, job, reason)
       return { kind: 'dead' }
     }
+    // Two counters: `attempts` is the terminal budget for real failures, and
+    // `failures` is every consecutive failure. A deferred attempt keeps the
+    // budget, but it must still widen the retry interval; otherwise a
+    // persistent transient error retries once per second forever.
     const deferAttempt = failure instanceof UploadError && failure.deferJobAttempt === true
+    job.failures = (job.failures ?? 0) + 1
     if (!deferAttempt) job.attempts++
     if (!deferAttempt && job.attempts >= JOB_MAX_ATTEMPTS) {
       await deadLetterJob(workspace, path, job, reason)
       return { kind: 'dead' }
     }
     job.lastError = reason
-    job.notBeforeMs =
-      failure instanceof UploadError && failure.retryAtMs
-        ? Math.max(Date.now() + 100, failure.retryAtMs)
-        : Date.now() + backoff(Math.max(1, job.attempts))
+    if (failure instanceof UploadError && failure.code === 'upload_admission_busy') {
+      // Every slot is busy with a long upload. Re-probing once per second would
+      // spawn a short-lived worker per second, so let the failure count widen the
+      // gap instead of honouring only the caller's immediate retry hint.
+      job.notBeforeMs = Math.max(failure.retryAtMs ?? 0, Date.now() + backoff(job.failures))
+    } else
+      job.notBeforeMs =
+        failure instanceof UploadError && failure.retryAtMs
+          ? Math.max(Date.now() + 100, failure.retryAtMs)
+          : Date.now() + backoff(job.failures)
     await writeJsonAtomic(path, job)
     return { kind: 'retry', retryAtMs: job.notBeforeMs }
   })

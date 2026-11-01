@@ -56,7 +56,14 @@ if (args.includes('whoami')) {
     writeFileSync(path, `${Number(readFileSync(path, 'utf8')) + 1}\n`)
   }
   log({ phase: 'end' })
-  if (process.env.RECOVERY_STATUS) {
+  if (process.env.RECOVERY_FAIL_RECORD_ID && records.some(record => record.recordId === process.env.RECOVERY_FAIL_RECORD_ID)) {
+    // Business failure without any HTTP status: the client cannot classify it
+    // from a status code and must not retry the same batch forever.
+    respond({ success: false, error: process.env.RECOVERY_BUSINESS_ERROR || '参数校验失败',
+      ...(process.env.RECOVERY_BUSINESS_CODE ? { code: process.env.RECOVERY_BUSINESS_CODE } : {}) })
+  } else if (process.env.RECOVERY_MALFORMED_RESPONSE) {
+    respond({ success: true, data: { received: 0, items: [] } })
+  } else if (process.env.RECOVERY_STATUS) {
     respond({ success: false, statusCode: Number(process.env.RECOVERY_STATUS),
       retryAfter: process.env.RECOVERY_RETRY_AFTER, error: 'fixture transport failure' })
   } else respond({ success: true, data: {

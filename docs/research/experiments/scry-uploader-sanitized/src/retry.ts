@@ -9,7 +9,16 @@ export type TransportDetails = {
   retryAfterMs?: number
   signal?: string
   stderr?: string
+  /** Structured service error code, independent of free-form message text. */
+  businessCode?: string
 }
+
+const TIMEOUT_CODE = /^(?:ETIMEDOUT|ABORT_ERR|DEADLINE_EXCEEDED)$/
+const NETWORK_CODE = /^(?:ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|EPIPE|ENOTFOUND)$/
+const DETERMINISTIC_CODE = /^(?:INVALID_ARGUMENT|INVALID_REQUEST|VALIDATION_FAILED|BAD_REQUEST|PAYLOAD_TOO_LARGE|REQUEST_INVALID)$/i
+// Only explicit denial wording. A local hint such as "run transport auth login" must
+// not turn an unrelated timeout into an authentication failure.
+const AUTH_TEXT = /unauthori[sz]ed|not (?:logged in|authenticated)|credentials? (?:expired|invalid|missing)|(?:auth|login) required|permission denied|请先登录|未登录|登录已过期/i
 
 function transportDetails(error: unknown): TransportDetails {
   let current: unknown = error
@@ -21,17 +30,20 @@ function transportDetails(error: unknown): TransportDetails {
       retryAfterMs?: number
       signal?: string
       stderr?: string
+      businessCode?: string
     }
     const text = `${value.message} ${value.stderr ?? ''}`
     const statusMatch = text.match(/(?:status|HTTP|code)[^0-9]{0,8}(\d{3})/i)
     const status = value.statusCode ?? (statusMatch ? Number(statusMatch[1]) : undefined)
-    if (status || value.exitCode !== undefined || value.retryAfterMs || value.signal || value.stderr)
+    const businessCode = typeof value.businessCode === 'string' ? value.businessCode.trim().slice(0, 64) : undefined
+    if (status || value.exitCode !== undefined || value.retryAfterMs || value.signal || value.stderr || businessCode)
       return {
         statusCode: status,
         exitCode: value.exitCode,
         retryAfterMs: value.retryAfterMs,
         signal: value.signal,
-        stderr: value.stderr
+        stderr: value.stderr,
+        businessCode: businessCode || undefined
       }
     current = (value as Error).cause
   }
@@ -52,22 +64,19 @@ export function classifyTransport(error: unknown): { kind: TransportClass; detai
   })()
   const code = text.match(/\b(ETIMEDOUT|ABORT_ERR|DEADLINE_EXCEEDED|ECONNRESET|ECONNREFUSED|EAI_AGAIN)\b/i)?.[1]?.toUpperCase()
   const status = details.statusCode
-  if (status !== undefined && (status === 429 || status >= 500)) return { kind: 'transient', details }
-  if (status === 401 || status === 403 || /unauthori[sz]ed|not logged in|auth(?:entication|orization).*fail|login/i.test(text))
-    return { kind: 'auth', details }
-  if (
-    code === 'ETIMEDOUT' ||
-    code === 'ABORT_ERR' ||
-    code === 'DEADLINE_EXCEEDED' ||
-    /deadline exceeded|context deadline|timed out|timeout|signal.*SIGTERM/i.test(text)
-  )
-    return { kind: 'timeout', details }
-  if (/\b(ECONNRESET|ECONNREFUSED|EAI_AGAIN)\b/i.test(code ?? ''))
-    return { kind: 'transient', details }
-  if (
-    (status !== undefined && status >= 400 && status < 500) ||
-    /bad request|payload too large|request invalid|invalid request|\b(?:HTTP|status)?\s*(?:400|413)\b/i.test(text)
-  )
+  const businessCode = details.businessCode
+  // A structured code outranks message text. Then HTTP status, then a local
+  // deadline, then wording. Auth is recognised from an explicit denial before
+  // generic wording, and a deadline is never reported as a login failure.
+  if (businessCode && DETERMINISTIC_CODE.test(businessCode)) return { kind: 'deterministic', details }
+  if (status === 401 || status === 403) return { kind: 'auth', details }
+  if (status === 429 || (status !== undefined && status >= 500)) return { kind: 'transient', details }
+  if (TIMEOUT_CODE.test(code ?? '')) return { kind: 'timeout', details }
+  if (status !== undefined && status >= 400 && status < 500) return { kind: 'deterministic', details }
+  if (NETWORK_CODE.test(code ?? '')) return { kind: 'transient', details }
+  if (/deadline exceeded|context deadline|timed out|timeout|signal.*SIGTERM/i.test(text)) return { kind: 'timeout', details }
+  if (AUTH_TEXT.test(text)) return { kind: 'auth', details }
+  if (/bad request|payload too large|request invalid|invalid request|\b(?:HTTP|status)?\s*(?:400|413)\b/i.test(text))
     return { kind: 'deterministic', details }
   return { kind: 'unknown', details }
 }
@@ -94,12 +103,12 @@ function retryJitter(attempts: number): number {
 export async function deferLocal(
   path: string,
   envelope: OutboxEnvelope,
-  kind: 'report_timeout' | 'report_transient' | 'report_request',
+  kind: NonNullable<OutboxEnvelope['localRetry']>['kind'],
   code: string,
   retryAfterMs?: number
 ): Promise<number> {
   const attempts = localAttempts(envelope, kind) + 1
-  const base = kind === 'report_timeout' ? TIMEOUT_RETRY_BASE_SECONDS * 1_000 : 1_000
+  const base = kind === 'report_timeout' ? TIMEOUT_RETRY_BASE_SECONDS * 1_000 : kind === 'report_unknown' ? 5_000 : 1_000
   const maximum = kind === 'report_timeout' ? TIMEOUT_RETRY_MAX_SECONDS * 1_000 : 15 * 60_000
   const delay = Math.min(maximum, base * 2 ** Math.min(attempts - 1, 8)) + retryJitter(attempts)
   const next = Math.max(Date.now() + delay, retryAfterMs ?? 0)

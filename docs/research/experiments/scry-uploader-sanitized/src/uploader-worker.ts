@@ -12,7 +12,8 @@ import {
 import { admissionRetryAt, deferUploadAdmission } from './admission.js'
 import {
   MAX_BATCH_BYTES,
-  UPLOADER_VERSION
+  UPLOADER_VERSION,
+  UNKNOWN_BATCH_SPLIT_ATTEMPTS
 } from './constants.js'
 import {
   finishCustody
@@ -84,8 +85,16 @@ export async function uploadPending(
   deadLettered: number
   retryAtMs?: number
   deferredUntilMs?: number
+  /** True only when the endpoint itself failed, not when work was merely deferred. */
+  endpointFailed?: boolean
 }> {
-  const summary: { uploaded: number; duplicated: number; deadLettered: number; deferredUntilMs?: number } = {
+  const summary: {
+    uploaded: number
+    duplicated: number
+    deadLettered: number
+    deferredUntilMs?: number
+    endpointFailed?: boolean
+  } = {
     uploaded: 0,
     duplicated: 0,
     deadLettered: 0
@@ -204,6 +213,39 @@ export async function uploadPending(
             )
             deferred.add(path)
           }
+          summary.endpointFailed = true
+          if (retryAtMs !== undefined && retryAtMs !== Infinity) {
+            summary.deferredUntilMs = retryAtMs
+            return summary
+          }
+          data = undefined
+          break
+        }
+        if (classified.kind === 'unknown') {
+          // An unrecognised failure (for example a business error returned with
+          // success:false and no status) must still make progress. Only the head
+          // record owns the batch counter; a batch that keeps failing is treated
+          // as a request problem and bisected, and an isolated record ends in the
+          // dead-letter queue instead of blocking the whole workspace.
+          const [headPath, headEnvelope] = active[0]
+          if (localAttempts(headEnvelope, 'report_unknown') + 1 >= UNKNOWN_BATCH_SPLIT_ATTEMPTS) {
+            if (active.length > 1) {
+              const cut = Math.max(1, Math.ceil(active.length / 2))
+              pendingBatches.unshift(active.slice(cut))
+              active = active.slice(0, cut)
+              continue
+            }
+            await deadLetter(workspace, headPath, headEnvelope, 'rejected', 'report_unknown_exhausted')
+            summary.deadLettered++
+            data = undefined
+            break
+          }
+          summary.endpointFailed = true
+          retryAtMs = Math.min(
+            retryAtMs ?? Infinity,
+            await deferLocal(headPath, headEnvelope, 'report_unknown', 'report_unknown', classified.details.retryAfterMs)
+          )
+          deferred.add(headPath)
           if (retryAtMs !== undefined && retryAtMs !== Infinity) {
             summary.deferredUntilMs = retryAtMs
             return summary
@@ -316,7 +358,7 @@ async function transportStage<T>(
     failure.retryAfterMs = classified.details.retryAfterMs
     failure.signal = classified.details.signal
     failure.stderr = classified.details.stderr?.slice(0, 512)
-    if (classified.kind === 'transient' || classified.kind === 'timeout' || classified.kind === 'unknown')
+    if (classified.kind === 'timeout' || classified.kind === 'transient' || classified.kind === 'unknown')
       failure.deferJobAttempt = true
     throw failure
   } finally {

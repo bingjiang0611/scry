@@ -4,6 +4,7 @@ import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { basename, delimiter, dirname, join } from 'node:path'
 import { TRANSPORT_TIMEOUT_SECONDS, MCP_SERVER, MCP_SKILL, MCP_TOOL } from './constants.js'
+import { classifyTransport } from './retry.js'
 import { executable, object, run } from './util.js'
 
 export interface Actor {
@@ -144,6 +145,7 @@ type TransportFailure = Error & {
   stdout?: string
   statusCode?: number
   retryAfterMs?: number
+  businessCode?: string
 }
 
 function statusFromText(value: string): number | undefined {
@@ -223,7 +225,12 @@ export async function actorIdentity(
     stdout = await runTransport(['auth', 'whoami', '-f', 'json'], { timeoutMs, env })
   } catch (error) {
     invalidateAuthCache(env)
-    throw new Error('transport 已安装但未登录；请先执行 transport auth login --sso', { cause: error })
+    // A deadline or a dropped connection is not proof that the user is logged
+    // out. Only wrap an explicit denial, otherwise the transport layer must be
+    // able to classify the real cause.
+    if (classifyTransport(error).kind === 'auth')
+      throw new Error('transport 已安装但未登录；请先执行 transport auth login --sso', { cause: error })
+    throw error
   }
   const raw = JSON.parse(stdout) as unknown
   const value = object(raw)
@@ -307,8 +314,19 @@ export async function callSubmitTurns(
     const failure = new Error(`submitTurns 失败：${message}`) as Error & {
       statusCode?: number
       retryAfterMs?: number
+      businessCode?: string
     }
-    const status = Number(root.status ?? root.statusCode ?? message.match(/(?:HTTP|status)[^0-9]*(\d{3})/i)?.[1])
+    const declared = [root.code, root.errorCode, root.error_code].find(
+      (value): value is string => typeof value === 'string' && value.trim() !== ''
+    )
+    // Prefer a structured code so classification never depends on wording.
+    if (declared) failure.businessCode = declared.trim().slice(0, 64)
+    const status = Number(
+      root.status ??
+        root.statusCode ??
+        (declared && /^\d{3}$/.test(declared.trim()) ? declared.trim() : undefined) ??
+        message.match(/(?:HTTP|status)[^0-9]*(\d{3})/i)?.[1]
+    )
     if (Number.isInteger(status)) {
       failure.statusCode = status
       if (status === 401 || status === 403) invalidateAuthCache(env)

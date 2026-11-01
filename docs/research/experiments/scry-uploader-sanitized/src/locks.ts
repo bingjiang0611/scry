@@ -1,13 +1,77 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { constants } from 'node:fs'
+import { accessSync, constants, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { lstat, open, readFile, rename, rm } from 'node:fs/promises'
+import { delimiter, dirname, join } from 'node:path'
 
 const BUSY = 'upload worker is already running'
 const READY = '__scry_lock_acquired__\n'
 // EOF releases the lease even if the caller crashes. These are fixed shell
 // instructions; the workspace path is a separate argv entry, never shell text.
 const HOLD = "printf '__scry_lock_acquired__\\n'; exec /bin/cat >/dev/null"
+
+function executableSync(path: string): boolean {
+  try {
+    accessSync(path, constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Kernel lock helper discovery. A hardcoded distribution path breaks Alpine or
+ * NixOS, where a missing helper must fail with an actionable error instead of
+ * silently removing exclusion.
+ */
+export function lockHelper(
+  target: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env
+): { executable: string; args: string[]; busy: number } | undefined {
+  const search = (name: string, fallbacks: string[]): string | undefined => {
+    for (const directory of (env.PATH ?? '').split(delimiter)) {
+      if (!directory) continue
+      if (executableSync(join(directory, name))) return join(directory, name)
+    }
+    return fallbacks.find(candidate => executableSync(candidate))
+  }
+  if (target === 'darwin') {
+    const path = search('lockf', ['/usr/bin/lockf'])
+    return path ? { executable: path, args: ['-k', '-t', '0'], busy: 75 } : undefined
+  }
+  if (target === 'linux') {
+    const path = search('flock', ['/usr/bin/flock', '/bin/flock'])
+    return path ? { executable: path, args: ['-n'], busy: 1 } : undefined
+  }
+  return undefined
+}
+
+/**
+ * The kernel lease is the only thing preventing a second writer. Record the
+ * loss with synchronous I/O because the process must not yield to other work
+ * between detecting the loss and exiting; this runs once on an unrecoverable
+ * path, never on the upload hot path.
+ */
+function recordLeaseLoss(base: string): void {
+  const path = join(base, 'health.json')
+  try {
+    let current: Record<string, unknown> = {}
+    try {
+      current = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
+    } catch {
+      current = {}
+    }
+    const temporary = `${path}.${process.pid}.lease-lost.tmp`
+    writeFileSync(
+      temporary,
+      `${JSON.stringify({ ...current, status: 'error', lastErrorCode: 'lock_lease_lost', lockLeaseLostAt: new Date().toISOString() }, null, 2)}\n`,
+      { mode: 0o600 }
+    )
+    renameSync(temporary, path)
+  } catch {
+    // Diagnostics are best effort; losing the lease must still stop this writer.
+  }
+}
 
 async function retireLegacyDirectory(path: string): Promise<void> {
   let metadata
@@ -40,12 +104,11 @@ async function retireLegacyDirectory(path: string): Promise<void> {
 }
 
 export async function acquireDirectoryLock(path: string): Promise<() => Promise<void>> {
-  const command = process.platform === 'darwin'
-    ? { executable: '/usr/bin/lockf', args: ['-k', '-t', '0'], busy: 75 }
-    : process.platform === 'linux'
-      ? { executable: '/usr/bin/flock', args: ['-n'], busy: 1 }
-      : undefined
-  if (!command) throw new Error('kernel lock helper is unavailable on this platform')
+  const command = lockHelper()
+  if (!command)
+    throw new Error(
+      `kernel lock helper is unavailable on ${process.platform}; install util-linux (flock) or provide it on PATH`
+    )
 
   // Never remove this inode: unlinking an advisory-lock file creates two
   // independently lockable resources. Legacy directory migration is separate.
@@ -70,6 +133,7 @@ export async function acquireDirectoryLock(path: string): Promise<() => Promise<
     if (acquired && !released) {
       // Continuing after losing the kernel lease could create two writers.
       // This helper is used only inside the standalone uploader process.
+      recordLeaseLoss(dirname(path))
       process.stderr.write('scry-upload: kernel lock lease was lost\n')
       process.kill(process.pid, 'SIGKILL')
     }

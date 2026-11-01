@@ -18,6 +18,10 @@ export interface UploadState {
   enabledEpoch?: number
   uploadEnabled?: boolean
   lastError?: { at: string; code: string; message: string }
+  /** Consecutive transport failures used for the workspace cooldown. */
+  transportFailures?: number
+  /** Background wakeups defer until this time instead of probing each second. */
+  transportCooldownUntilMs?: number
 }
 
 export interface CustodyReceipt {
@@ -47,7 +51,7 @@ export interface OutboxEnvelope {
   record: string
   sha256?: string
   localRetry?: {
-    kind: 'report_timeout' | 'report_transient' | 'report_request'
+    kind: 'report_timeout' | 'report_transient' | 'report_request' | 'report_unknown'
     attempts: number
     notBeforeMs: number
     lastCode?: string
@@ -61,6 +65,8 @@ export interface QueueJob {
   workspace: string
   createdAt: string
   attempts: number
+  /** Consecutive failures; drives backoff and never consumes the dead-letter budget. */
+  failures?: number
   maxAttempts?: number
   notBeforeMs: number
   expectedSequence?: number
@@ -94,4 +100,8 @@ export interface UploadSummary {
   pending: number
   /** Due time for remaining work after a partial/deferred invocation. */
   deferredUntilMs?: number
+  /** Set only when the endpoint itself failed, not when work was merely deferred. */
+  endpointFailed?: boolean
+  /** Why the remaining work was deferred, when the caller must tell the cases apart. */
+  deferredReason?: string
 }

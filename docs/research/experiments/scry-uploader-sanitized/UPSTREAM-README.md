@@ -58,7 +58,7 @@ scry-upload scheduler-install
 scry-upload scheduler-status --json
 ```
 
-`wakeup` 持久化后台任务；`flush` 同步执行。两者都会消费 custody/outbox，并通过 recorder export 增量发现 canonical records，不扫描业务归档或重新采集。`status` 只读取本地状态；`doctor` 检查 Scry、transport、MCP 和 runtime。`register` 只把明确指定的 canonical workspace 加入用户级 `scry-upload` registry（独立于桌面 Scry 状态目录）；若 workspace 尚无 state，会先用 recorder max-safe snapshot 建立安全 baseline，不改变上传开关。`scheduler-install` 只写入用户级服务定义；`scheduler-status` 返回持久登记列表和安装标记，不证明目录当前可访问或系统服务正在运行。恢复逐仓重验 canonical 身份；权限等错误写入本地 `recovery-health.json`，不阻塞其他仓库。目录删除后仍可用登记的 canonical 路径执行 `unregister`。恢复只扫描 registry 中的 workspace，每轮公平处理到期任务；所有 uploader 进程共享每用户最多两个上传配额。已有任务的冷却时间不会被定时恢复覆盖，单个工作区失败不阻断其他工作区。队列只恢复会话上下文，不从历史快照恢复 CLI 路径、安装身份、状态目录或运行预算；这些配置来自当前激活环境。旧任务的关闭标记仅在尚未显式启用时生效，不能推翻之后的 enable。
+`wakeup` 持久化后台任务；`flush` 同步执行。两者都会消费 custody/outbox，并通过 recorder export 增量发现 canonical records，不扫描业务归档或重新采集。`status` 只读取本地状态；`doctor` 检查 Scry、transport、MCP 和 runtime。`register` 只把明确指定的 canonical workspace 加入用户级 `scry-upload` registry（独立于桌面 Scry 状态目录）；若 workspace 尚无 state，会先用 recorder max-safe snapshot 建立安全 baseline，不改变上传开关。`scheduler-install` 写入用户级服务定义后立即激活：macOS 执行 `launchctl bootstrap gui/<uid>` 并 `print` 校验，Linux 执行 `systemctl --user daemon-reload`、`enable --now scry-uploader.timer` 并 `is-active` 校验；校验失败直接报错，不把“写了文件”说成已安装。`scheduler-status` 返回持久登记列表、安装标记和实际观测到的服务状态（`loaded`/`not_loaded`/`not_installed`），不证明目录当前可访问。Linux 若未开启 linger，会提示执行 `loginctl enable-linger`，否则用户登出后 timer 停止。`init` 不会自动安装该服务，需要显式执行 `scheduler-install`。恢复逐仓重验 canonical 身份；权限等错误写入本地 `recovery-health.json`，不阻塞其他仓库。目录删除后仍可用登记的 canonical 路径执行 `unregister`。恢复只扫描 registry 中的 workspace，每轮公平处理到期任务；所有 uploader 进程共享每用户最多两个上传配额。已有任务的冷却时间不会被定时恢复覆盖，单个工作区失败不阻断其他工作区。队列只恢复会话上下文，不从历史快照恢复 CLI 路径、安装身份、状态目录或运行预算；这些配置来自当前激活环境。旧任务的关闭标记仅在尚未显式启用时生效，不能推翻之后的 enable。
 
 安装后还需激活系统服务（仅登记自己明确允许恢复的工作区）：
 
@@ -72,7 +72,7 @@ systemctl --user enable --now scry-uploader.timer
 systemctl --user status scry-uploader.timer
 ```
 
-服务每 60 秒恢复一次，不依赖桌面 App 是否打开。服务保存必要的路径和非敏感运行配置，不保存环境 token；transport 必须已有可用登录。Node 或 uploader 安装位置改变后须重新安装服务定义。Linux 需要可用的用户级 systemd；不支持的环境不自动降级到其他后台方案。
+服务每 60 秒恢复一次，不依赖桌面 App 是否打开。服务保存必要的路径和非敏感运行配置，不保存环境 token；transport 必须已有可用登录。Node 或 uploader 安装位置改变后须重新安装服务定义（并再次激活）。Linux 需要可用的用户级 systemd；不支持的环境不自动降级到其他后台方案。`scheduler-install` 激活时使用 `PATH` 中的 `launchctl`/`systemctl`/`loginctl`，找不到时明确报错。
 
 工作区命令支持 `--workspace <工作区目录>`；只有 `init` 要求 Git 根目录。`init`、`doctor`、`status`、`flush`、`migrate` 支持 `--json`。
 
@@ -82,7 +82,9 @@ systemctl --user status scry-uploader.timer
 
 export 发现同样先接管 canonical 原始字节并持久化 receipt，再推进游标；不能只把导出 JSON 放入 outbox。旧版本遗留的无 receipt outbox 在发送前接管其现有字节，保留原来的传输内容。缺少 custody 时禁止静默完成终态；legacy ACK 也保留与 canonical 不同的实际提交副本。
 
-新记录使用 `redactionVersion=none`，保留原始内容；已有 `agent-turn-v1` 脱敏 outbox 保持可重放，不会被静默丢弃。上传成功只接受 `inserted`/`duplicated`，明确的 `conflicted`/`rejected` 先保留 payload custody，再写入仅含元数据的失败诊断；损坏的本地队列文件会原样隔离，可能包含原始内容。传输超时、deadline、429 和网络/5xx 故障保留未知远端结果，按指数冷却、jitter 和 Retry-After 重试，不消耗 job 的永久失败次数；Retry-After（秒数或 HTTP-date）也会限制同一用户其他工作区的新请求。确定性 400/413 请求错误才拆批，单条连续三次确定性失败后保留为死信。完整编码参数 JSON 在发送前限制为 512 KiB；单条超限不发送并保留正文。这是客户端限额，不代表已确认网关的实际限额。
+新记录使用 `redactionVersion=none`，保留原始内容；已有 `agent-turn-v1` 脱敏 outbox 保持可重放，不会被静默丢弃。上传成功只接受 `inserted`/`duplicated`，明确的 `conflicted`/`rejected` 先保留 payload custody，再写入仅含元数据的失败诊断；损坏的本地队列文件会原样隔离，可能包含原始内容。传输超时、deadline、429 和网络/5xx 故障保留未知远端结果，按指数冷却、jitter 和 Retry-After 重试，不消耗 job 的永久失败次数；Retry-After（秒数或 HTTP-date）也会限制同一用户其他工作区的新请求。确定性 400/413 请求错误才拆批，单条连续三次确定性失败后保留为死信。无法识别的失败（例如 `success:false` 且没有状态码的业务错误）不会让整轮失败或原地卡死：它落到记录级重试状态，以 jitter 递增冷却；同一批连续三次无法识别则按请求问题拆批，拆到单条仍失败才保留为死信。服务端若返回结构化 `code`（如 `INVALID_ARGUMENT`），分类按 code 判定，不依赖错误文案。完整编码参数 JSON 在发送前限制为 512 KiB；单条超限不发送并保留正文。这是客户端限额，不代表已确认网关的实际限额。
+
+后台唤醒还受工作区级熔断约束：传输、协议或发现阶段的持续失败会累加 `transportFailures` 并写入 `transportCooldownUntilMs`，冷却期内新的 hook 唤醒不再发请求，只按冷却时间重新排队；显式 `flush` 是用户主动操作，不受该冷却约束。任务自身区分两个计数器：`failures` 每次失败都递增并驱动退避，`attempts` 只在真实失败时消耗，达到 6 次才进入死信。因此持续故障的调用频率有上限（指数退避、上限 60 秒），不会每秒重试一次。
 
 恢复发送前还会读取 recorder 的 `record-environments/<recordId>.json`：即使原通知丢失，其中明确的 `SCRY_TURN_UPLOAD_ENABLED=0` 也会保留为 held，不由后台服务上传。读取复用 pinned recorder 的身份和 schema 校验，不把快照内的 executable/配置当作新的执行授权。
 
@@ -97,6 +99,8 @@ enable、首次初始化和无 state 的注册使用 recorder 的 `--after 90071
 健康状态以 receipt 的真实状态为准，不因同一 held 记录是否另有 outbox 副本而改变。held 索引首次升级扫描一次 receipts；之后只枚举活跃索引，读到第一条 held receipt 即停止，不读取 held 正文或遍历归档 receipt。索引标记先于 receipt 持久化，过期标记清理在单记录锁内重验，避免覆盖并发 release/关闭状态。
 
 仓库身份保留 Git host/namespace，移除 URL 用户信息、query 和 fragment；没有 remote 时使用工作区路径身份。身份超过 512 个 JavaScript 字符串单元时改用 SHA-256，避免截断碰撞。
+
+注意：仓库标识由裸仓库名改为 `host/namespace/repo` 后，服务端按 repo 聚合的历史统计会与旧数据分成两组。升级前先与服务端确认对齐方式（统一规范化到新格式，或做旧名映射），否则同一仓库会出现两份统计。
 
 ## 本地目录
 
@@ -113,7 +117,7 @@ enable、首次初始化和无 state 的注册使用 recorder 的 `--after 90071
 └── runtime/                # init 生成的 launcher
 ```
 
-worker 使用 macOS `lockf -k` 或 Linux `flock` 的内核锁，持有稳定 inode，不 unlink 锁文件。调用者退出会关闭租约管道；helper 异常退出则终止当前 uploader 进程，避免失锁后继续写入。缺少锁能力或旧 owner 身份未知时 fail closed，不盲删替换 owner。每个工作区只有一个常驻 worker，新的唤醒合并为持久任务。
+worker 使用 macOS `lockf -k` 或 Linux `flock` 的内核锁，持有稳定 inode，不 unlink 锁文件。helper 按 `PATH` 查找（缺失时回落常见绝对路径），找不到就报明确错误并 fail closed，不会退化成无锁写入；Alpine、NixOS 等把 `flock` 装在别处的系统需自行提供。调用者退出会关闭租约管道；helper 异常退出时先在 `health.json` 记录 `lock_lease_lost`，再终止当前 uploader 进程，避免失锁后继续写入。旧 owner 身份未知时 fail closed，不盲删替换 owner。每个工作区只有一个常驻 worker，新的唤醒合并为持久任务。等待用户级上传名额的空闲循环按 200ms 起、上限 500ms 的 jitter 间隔重试，避免每次等待启动数百个锁 helper 进程。后台唤醒最多等 1 秒就必须拿到名额：拿不到就持久化延迟并退出，由队列按递增间隔重排，而不是把进程停在两个名额后面；显式 `flush` 最多等 5 秒。名额不足只延迟任务，不算端点失败、不消耗任务永久失败预算。
 
 远端明确 ACK 后满 30 天，后台每日维护才清理 uploader 正文副本，也可显式执行 `scry-upload prune`。先持久化清理意图，再删除正文并记录完成；崩溃后可恢复，去重 receipt 保留，重复通知仍校验 digest。canonical Scry records、disabled/held、未确认或失败正文均不自动删除。
 

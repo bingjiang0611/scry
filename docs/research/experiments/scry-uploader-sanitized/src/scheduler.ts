@@ -1,12 +1,12 @@
 import { realpath, stat } from 'node:fs/promises'
 import { homedir, platform, tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { delimiter, dirname, join, resolve } from 'node:path'
 import { REDACTION_VERSION } from './constants.js'
 import { pruneAckedBodiesIfDue } from './custody/index.js'
 import { enqueueWakeup, runQueueWorker } from './queue.js'
 import { safeSnapshotMaxSequence, uploaderEntrypoint } from './scry.js'
 import { assertLegacyLocksMigrated, prepareUploadRoot } from './storage.js'
-import { acquireDirectoryLock, ensurePrivateDirectory, exists, readJson, sleep, writeJsonAtomic } from './util.js'
+import { acquireDirectoryLock, ensurePrivateDirectory, executable, exists, readJson, run, sleep, writeJsonAtomic } from './util.js'
 
 type Registry = { version: 1; workspaces: Array<{ workspace: string; registeredAt: string }> }
 
@@ -156,8 +156,7 @@ ExecStart=${systemdQuote(node)} ${systemdQuote(cli)} _recover
 `
 }
 
-async function installedEntrypoint(): Promise<string> {
-  const cli = uploaderEntrypoint()
+async function installedEntrypoint(cli: string): Promise<string> {
   let canonical: string
   try {
     canonical = await realpath(cli)
@@ -174,38 +173,116 @@ async function installedEntrypoint(): Promise<string> {
   return canonical
 }
 
-export async function installScheduler(env: NodeJS.ProcessEnv = process.env): Promise<{ platform: string; path: string }> {
-  const cli = await installedEntrypoint()
+export async function installScheduler(
+  env: NodeJS.ProcessEnv = process.env,
+  entrypoint: string = uploaderEntrypoint()
+): Promise<Record<string, unknown>> {
+  const cli = await installedEntrypoint(entrypoint)
   if (platform() === 'darwin') {
     const path = join(env.HOME?.trim() || homedir(), 'Library', 'LaunchAgents', 'com.scry.uploader.plist')
     await ensurePrivateDirectory(join(path, '..'))
     await ensurePrivateDirectory(join(registryPath(env), '..'))
     const { writeFileAtomic } = await import('./util.js')
     await writeFileAtomic(path, renderLaunchAgent(process.execPath, cli, env), 0o600)
+    const activation = await activateRecoveryService(env, { platform: 'darwin', path })
     await writeJsonAtomic(join(registryPath(env), '..', 'install-marker.json'), { version: 1, platform: 'darwin', path, installedAt: new Date().toISOString() })
-    return { platform: 'darwin', path }
+    return { platform: 'darwin', path, ...activation }
   }
   if (platform() !== 'linux') throw new Error('scheduler requires macOS launchd or Linux systemd')
   const directory = join(env.XDG_CONFIG_HOME?.trim() || join(env.HOME?.trim() || homedir(), '.config'), 'systemd', 'user')
   const path = join(directory, 'scry-uploader.service')
+  const timer = join(directory, 'scry-uploader.timer')
   await ensurePrivateDirectory(directory)
   const { writeFileAtomic } = await import('./util.js')
   await writeFileAtomic(path, renderSystemdService(process.execPath, cli, env), 0o600)
-  await writeFileAtomic(join(directory, 'scry-uploader.timer'), `[Unit]\nDescription=Periodic Scry uploader recovery\n[Timer]\nOnBootSec=30s\nOnUnitActiveSec=60s\nPersistent=true\n[Install]\nWantedBy=timers.target\n`, 0o600)
+  await writeFileAtomic(timer, `[Unit]\nDescription=Periodic Scry uploader recovery\n[Timer]\nOnBootSec=30s\nOnUnitActiveSec=60s\nPersistent=true\n[Install]\nWantedBy=timers.target\n`, 0o600)
   await ensurePrivateDirectory(join(registryPath(env), '..'))
+  const activation = await activateRecoveryService(env, { platform: 'linux', path, timer })
   await writeJsonAtomic(join(registryPath(env), '..', 'install-marker.json'), {
     version: 1,
     platform: 'linux',
     path,
-    timer: join(directory, 'scry-uploader.timer'),
-    installedAt: new Date().toISOString()
+    timer,
+    installedAt: new Date().toISOString(),
+    lingerEnabled: activation.lingerEnabled ?? false
   })
-  return { platform: 'linux', path }
+  return { platform: 'linux', path, timer, ...activation }
 }
 
+/**
+ * Writing a unit file never starts anything. Load the unit now and verify the
+ * observed state, so a machine that never logs out is not left with silent
+ * recovery gaps. Failures are reported, never downgraded to "installed".
+ */
+export async function activateRecoveryService(
+  env: NodeJS.ProcessEnv,
+  service: { platform: string; path: string; timer?: string }
+): Promise<{ loaded: boolean; lingerEnabled?: boolean; hint?: string }> {
+  if (service.platform === 'darwin') {
+    const domain = `gui/${process.getuid?.() ?? 0}`
+    const label = `${domain}/com.scry.uploader`
+    await serviceCommand(env, 'launchctl', ['bootout', label], { allowFailure: true })
+    await serviceCommand(env, 'launchctl', ['bootstrap', domain, service.path])
+    const loaded = await serviceCommand(env, 'launchctl', ['print', label], { allowFailure: true })
+    if (loaded.exitCode !== 0) throw new Error('launchd did not load com.scry.uploader after bootstrap')
+    return { loaded: true }
+  }
+  if (service.platform !== 'linux') throw new Error(`scheduler requires launchd or systemd, not ${service.platform}`)
+  await serviceCommand(env, 'systemctl', ['--user', 'daemon-reload'])
+  await serviceCommand(env, 'systemctl', ['--user', 'enable', '--now', 'scry-uploader.timer'])
+  const active = await serviceCommand(env, 'systemctl', ['--user', 'is-active', 'scry-uploader.timer'], { allowFailure: true })
+  if (active.stdout.trim() !== 'active') throw new Error('systemd did not activate scry-uploader.timer')
+  const linger = await serviceCommand(env, 'loginctl', ['show-user', env.USER || env.LOGNAME || '', '-p', 'Linger', '--value'], { allowFailure: true })
+  const lingerEnabled = linger.exitCode === 0 && linger.stdout.trim() === 'yes'
+  return {
+    loaded: true,
+    lingerEnabled,
+    ...(lingerEnabled ? {} : { hint: 'run: loginctl enable-linger $USER; otherwise the timer stops when you log out' })
+  }
+}
+
+/** `scheduler-status` reports the observed service state, not just a marker file. */
 export async function schedulerStatus(env: NodeJS.ProcessEnv = process.env): Promise<Record<string, unknown>> {
   const workspaces = await registeredWorkspaces(env)
-  return { platform: platform(), registry: registryPath(env), workspaces, installed: await readJson(join(registryPath(env), '..', 'install-marker.json')) }
+  const marker = await readJson<{ platform?: string }>(join(registryPath(env), '..', 'install-marker.json'))
+  let activation: Record<string, unknown>
+  if (marker === null) activation = { state: 'not_installed' }
+  else if (platform() === 'darwin') {
+    const label = `gui/${process.getuid?.() ?? 0}/com.scry.uploader`
+    const loaded = await serviceCommand(env, 'launchctl', ['print', label], { allowFailure: true })
+    activation = { state: loaded.exitCode === 0 ? 'loaded' : 'not_loaded', target: label }
+  } else if (platform() === 'linux') {
+    const loaded = await serviceCommand(env, 'systemctl', ['--user', 'is-active', 'scry-uploader.timer'], { allowFailure: true })
+    const state = loaded.stdout.trim()
+    activation = { state: state === 'active' ? 'loaded' : 'not_loaded', detail: state || `exit ${loaded.exitCode}`, target: 'scry-uploader.timer' }
+  } else activation = { state: 'unavailable', detail: `unsupported platform ${platform()}` }
+  return { platform: platform(), registry: registryPath(env), workspaces, installed: marker, activation }
+}
+
+async function serviceCommand(
+  env: NodeJS.ProcessEnv,
+  name: string,
+  args: string[],
+  options: { allowFailure?: boolean } = {}
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  const executable = await findCommand(name, env)
+  if (!executable) {
+    if (options.allowFailure) return { stdout: '', stderr: `${name} is unavailable`, exitCode: 127 }
+    throw new Error(`${name} is required to activate the recovery service but was not found on PATH`)
+  }
+  const result = await run(executable, args, { env, timeoutMs: 20_000 })
+  if (!options.allowFailure && result.exitCode !== 0)
+    throw new Error(`${name} ${args.join(' ')} failed (exit ${result.exitCode}): ${result.stderr.trim().slice(0, 300)}`)
+  return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode }
+}
+
+async function findCommand(name: string, env: NodeJS.ProcessEnv): Promise<string | undefined> {
+  for (const directory of (env.PATH ?? '').split(delimiter)) {
+    if (!directory) continue
+    const candidate = join(directory, name)
+    if (await executable(candidate)) return candidate
+  }
+  return undefined
 }
 
 export async function recoverRegistered(env: NodeJS.ProcessEnv = process.env): Promise<void> {

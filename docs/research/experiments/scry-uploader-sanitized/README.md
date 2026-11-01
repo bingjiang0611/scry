@@ -6,8 +6,8 @@
 
 ## 来源与覆盖
 
-- 源版本：`0.2.3`；源任务分支 revision：`3b271c3525eb5e9a999ffefc6d311ed64c178ed0`。
-- 包含该 revision 的 **48 个 Git 跟踪文件**：源码、测试、合成 fixture、包元数据、锁文件、TypeScript 配置、上游说明及许可证。
+- 源版本：`0.2.4`；源任务分支 revision：`8e637007e4d8ec6fcdb002ef9f51592390210f9b`。
+- 包含该 revision 的 **51 个 Git 跟踪文件**：源码、测试、合成 fixture、包元数据、锁文件、TypeScript 配置、上游说明及许可证。
 - 源仓库只做本地提交，未推送其远端。公开仓库不包含源 Git 历史或私有名称映射。
 - 保留 MIT 许可证及原有公开版权署名。
 - 不包含 `node_modules`、`dist`、tarball、本机配置、真实 records、身份、凭据或数据库。
@@ -30,7 +30,18 @@
 
 `0.2.3` 补齐原 P2 健康状态遗漏：同一 held receipt 不再因是否另有 outbox 副本而在 `healthy` / `held_disabled` 之间变化。状态依据 receipt，held 索引只在升级时扫描一次历史，后续读到首条 held 即停止，不读取 held 正文；索引清理在单记录锁内重验，保留并发状态变更。见 `src/custody/receipts.ts`、`src/uploader.ts` 和 `test/held-health.test.mjs`。
 
-原审查对应：P0 的毒批次、worker 堆积；P1 的超时分类、预算续传、导出隔离、闲置仓恢复、跨仓限流；P2 的 stdout close、锁竞态/EPERM、保留与扫描成本、仓库身份、错误诊断、关闭/重开及 held 健康状态均有对应处理。关闭历史的行为遵循维护者后续决定：不自动补传，而非恢复全部积压。下述外部验证限制仍成立。
+原审查对应：P0 的毒批次、worker 堆积；P1 的超时分类、预算续传、导出隔离、闲置仓恢复、跨仓限流；P2 的 stdout close、锁竞态/EPERM、保留与扫描成本、仓库身份、错误诊断、关闭/重开及 held 健康状态均有对应处理。关闭历史的行为遵循维护者后续决定：不自动补传，而非恢复全部积压。
+
+第二轮审查补充（`0.2.4`）：
+
+- 无法识别的失败（`success:false` 且无状态码）不再让整轮失败并原地卡死。它落到记录级重试状态，jitter 冷却递增；同批连续三次无法识别则拆批，拆到单条仍失败才进死信。旧实现运行新回归直接抛 `transport_reportAgentTurns`。
+- 任务拆成两个计数器：`failures` 每次失败递增并驱动退避，`attempts` 只在真实失败时消耗。旧实现让所有可重试错误都不计 `attempts`，退避停在第一档、约每秒重试；`invalid_mcp_response` 由约 1 秒变为逐次翻倍（上限 60 秒）。
+- 新增工作区级熔断：传输、协议与发现阶段失败累加 `transportFailures` 并写入 `transportCooldownUntilMs`；冷却期内新的 hook 唤醒不发请求，只按冷却时间重排。显式 `flush` 不受该冷却限制。旧实现断网时每次都拿新批次试探。
+- 超时不再被误判成登录失败：只在明确 401/403 或未登录文案时包装登录提示；分类顺序改为结构化 code、HTTP 状态、超时码、网络码、文案。旧实现把 `whoami` 超时归为 `auth` 并停 15 分钟。
+- `scheduler-install` 写文件后直接激活并校验：macOS `launchctl bootstrap gui/<uid>` 加 `print`，Linux `systemctl --user daemon-reload`、`enable --now scry-uploader.timer` 加 `is-active`；未激活即报错。`scheduler-status` 报告实际观测状态；Linux 未开 linger 时提示 `loginctl enable-linger`。`init` 不自动安装该服务。
+- 锁 helper 改为按 `PATH` 查找并允许常见绝对路径回落，缺失时报明确错误并 fail closed；租约意外丢失时先在 `health.json` 记录 `lock_lease_lost` 再退出。
+- 名额不足不再停住 worker：后台唤醒最多等 1 秒（`flush` 最多 5 秒），拿不到就持久化延迟并退出，由队列按递增间隔重排；名额争用不算端点失败、不消耗永久失败预算。旧实现等待上限为整个运行预算，实测同一场景 4 次里有 3 次留下的 worker 进程超过 5 秒仍未收敛（回归 `R4 lost wakeup`），修复后 4/4 通过。
+- README 增补发布注意：仓库身份改为 `host/namespace/repo` 后，服务端按 repo 聚合的历史统计会与旧数据分成两组，升级前需与服务端对齐或做旧名映射。下述外部验证限制仍成立。
 
 发现游标不是远端 ACK，也不是关闭权限边界。旧 `enqueuedThrough` 较大不能使未确认的 custody 消失。内核锁、持久状态和指纹检查也不构成安全沙箱。
 
@@ -53,7 +64,7 @@
 ## 验证
 
 - 环境：macOS arm64、Node `24.18.0`、recorder `0.2.53`。
-- 原版与脱敏副本各自运行 `npm run check`：构建、**87/87 测试，0 skipped**、`npm pack --dry-run` 均通过。原版额外的 TypeScript unused 检查通过。
+- 原版与脱敏副本各自运行 `npm run check`：构建、**97/97 测试，0 skipped**、`npm pack --dry-run` 均通过。原版额外的 TypeScript unused 检查通过。
 - 同步后逐文件核对冻结源 revision 的确定性替换结果；源码/测试不使用旧单体文件大小豁免。
 - 关键回归：60 条记录首轮完成 35 条后保留进度；追加通知与 10 个并发唤醒；三个独立 CLI 的全局并发限制；坏 exporter/不可访问仓库隔离；完整 wire 大小；跨进程关闭与重复 enable；清理中断及重放；队列环境权限隔离。
 - 四个独立破坏对照按预期失败：并发槽改为 3、恢复旧环境覆盖、移除旧关闭标记的 enable 保护、用 exit 代替 close。最后一个对照只取得 6 字节，而不是预期的 70,006 字节。

@@ -20,7 +20,7 @@ import {
 } from './storage.js'
 import type { UploadState, UploadSummary } from './types.js'
 import { enqueueCommitted, enqueueSnapshot, outboxPaths } from './uploader-custody.js'
-import { initializeUploadState, statePath, updateHealth } from './uploader-state.js'
+import { initializeUploadState, noteTransportFailure, clearTransportFailure, statePath, updateHealth } from './uploader-state.js'
 import { uploadPending } from './uploader-worker.js'
 import {
   acquireDirectoryLock,
@@ -134,6 +134,7 @@ export async function runUpload(
   let state: UploadState | null = null
   const timings: Record<string, number> = {}
   let discoveryFailure: UploadError | undefined
+  let endpointFailed = false
   let discoverySourceCode: string | undefined
   try {
     await assertLegacyLocksMigrated(base)
@@ -158,6 +159,26 @@ export async function runUpload(
       return { ...empty, pending: (await outboxPaths(workspace)).length }
     }
     state.uploadEnabled = true
+    // A background invocation must respect the workspace cooldown recorded by
+    // the previous transport failure. Record-level backoff alone would let each
+    // fresh wakeup probe the endpoint again with a new batch.
+    const background = options.mode === 'wakeup' || options.mode === 'record-commit'
+    if (background && (state.transportCooldownUntilMs ?? 0) > Date.now()) {
+      const until = Number(state.transportCooldownUntilMs)
+      await updateHealth(
+        workspace,
+        state,
+        {
+          status: 'deferred',
+          deferredUntilMs: until,
+          deferredReason: 'workspace_cooldown',
+          currentAttemptId: null,
+          currentAttemptStartedAt: null
+        },
+        env
+      )
+      return { ...empty, pending: (await outboxPaths(workspace)).length, deferredUntilMs: until }
+    }
     const attempt = now()
     await updateHealth(
       workspace,
@@ -173,12 +194,15 @@ export async function runUpload(
     const expected = options.expected ?? expectedFromEnv(env)
     // Admission precedes actor/whoami/list-tools, so concurrent workspaces do
     // not amplify expensive authenticated CLI calls.
-    releaseAdmission = await acquireUploadAdmission(env, preparationDeadline)
+    // A queued wakeup gives up fast when every slot is busy so worker processes
+    // do not pile up behind one long upload; an explicit flush is worth waiting for.
+    releaseAdmission = await acquireUploadAdmission(env, preparationDeadline, background ? 1_000 : 5_000)
     await waitForManagedTurn(workspace, env, preparationDeadline)
     await enqueueCommitted(workspace, state, expected)
     // A slow or broken exporter must not consume the budget needed by bytes
     // already in our custody. Drain those before attempting discovery.
     const uploaded = await uploadPending(workspace, deadline, env, timings)
+    endpointFailed = uploaded.endpointFailed === true
     let enqueued = 0
     if (!expected && !uploaded.deferredUntilMs) {
       try {
@@ -211,8 +235,16 @@ export async function runUpload(
         uploaded.duplicated += discovered.duplicated
         uploaded.deadLettered += discovered.deadLettered
         uploaded.deferredUntilMs = discovered.deferredUntilMs
+        endpointFailed = endpointFailed || discovered.endpointFailed === true
       }
     }
+    // Only endpoint failures widen the workspace cooldown. Budget deferrals and
+    // ordinary record backoff are not endpoint health signals, and counting them
+    // would block every later wakeup for no reason.
+    if (endpointFailed || discoveryFailure) {
+      const until = noteTransportFailure(state)
+      if (uploaded.deferredUntilMs !== undefined) uploaded.deferredUntilMs = Math.max(uploaded.deferredUntilMs, until)
+    } else clearTransportFailure(state)
     await writeJsonAtomic(statePath(workspace), state)
     await updateHealth(workspace, state, { lastUploadedCount: uploaded.uploaded }, env)
     const pending = (await outboxPaths(workspace)).length
@@ -275,7 +307,12 @@ export async function runUpload(
         lastErrorCode: null,
         lastErrorAt: null
       }, env)
-      return { ...empty, pending: (await outboxPaths(workspace)).length, deferredUntilMs: failure.retryAtMs }
+      return {
+        ...empty,
+        pending: (await outboxPaths(workspace)).length,
+        deferredUntilMs: failure.retryAtMs,
+        deferredReason: failure.code
+      }
     }
     const failedAt = now()
     if (
@@ -284,6 +321,12 @@ export async function runUpload(
     )
       failure.deferJobAttempt = true
     if (state) {
+      // Protocol and transport failures also widen the workspace cooldown; this
+      // covers failures raised outside a transport stage, such as an invalid
+      // response envelope. Progress deferrals and lock contention are not
+      // endpoint failures and must not delay the next attempt.
+      if (failure.stage !== undefined || failure.code.startsWith('transport_') || failure.code === 'invalid_mcp_response')
+        noteTransportFailure(state)
       state.lastError = { at: failedAt, code: failure.code, message: failure.message.slice(0, 500) }
       await writeJsonAtomic(statePath(workspace), state)
     }

@@ -1,6 +1,11 @@
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
-import { LEGACY_REDACTION_VERSION, REDACTION_VERSION } from './constants.js'
+import {
+  LEGACY_REDACTION_VERSION,
+  REDACTION_VERSION,
+  TRANSPORT_COOLDOWN_BASE_MS,
+  TRANSPORT_COOLDOWN_MAX_MS
+} from './constants.js'
 import { readReceipt } from './custody/index.js'
 import { UploadError } from './errors.js'
 import { uploadRoot } from './storage.js'
@@ -35,6 +40,10 @@ export async function initializeUploadState(workspace: string, baseline: number)
       if (value !== undefined && (!Number.isSafeInteger(value) || value < 0))
         throw new UploadError('invalid_upload_state', 'upload epoch is invalid')
     }
+    for (const value of [existing.transportFailures, existing.transportCooldownUntilMs]) {
+      if (value !== undefined && (!Number.isSafeInteger(value) || value < 0))
+        throw new UploadError('invalid_upload_state', 'transport cooldown state is invalid')
+    }
     if (existing.uploadEnabled !== undefined && typeof existing.uploadEnabled !== 'boolean')
       throw new UploadError('invalid_upload_state', 'upload policy is invalid')
     existing.redactionVersion = REDACTION_VERSION
@@ -49,6 +58,30 @@ export async function initializeUploadState(workspace: string, baseline: number)
   await ensurePrivateDirectory(uploadRoot(workspace), false)
   await writeJsonAtomic(statePath(workspace), state)
   return state
+}
+
+export function cooldownDelayMs(failures: number): number {
+  const ceiling = Math.min(
+    TRANSPORT_COOLDOWN_MAX_MS,
+    TRANSPORT_COOLDOWN_BASE_MS * 2 ** Math.min(10, Math.max(0, failures - 1))
+  )
+  return Math.floor(ceiling * (0.8 + Math.random() * 0.2))
+}
+
+/**
+ * Workspace-wide circuit breaker. Record-level backoff alone lets every new
+ * wakeup probe a failing endpoint once, so the failure counter and its cooldown
+ * live beside the upload policy and apply to all background invocations.
+ */
+export function noteTransportFailure(state: UploadState, at = Date.now()): number {
+  state.transportFailures = (state.transportFailures ?? 0) + 1
+  state.transportCooldownUntilMs = at + cooldownDelayMs(state.transportFailures)
+  return state.transportCooldownUntilMs
+}
+
+export function clearTransportFailure(state: UploadState): void {
+  delete state.transportFailures
+  delete state.transportCooldownUntilMs
 }
 
 export async function updateHealth(
@@ -124,6 +157,8 @@ export async function localUploadStatus(workspace: string): Promise<Record<strin
     timeoutRecords,
     nextRetryAt: nextRetry === undefined ? undefined : new Date(nextRetry).toISOString(),
     lastSuccessAt: state?.lastSuccessAt,
-    lastError: state?.lastError
+    lastError: state?.lastError,
+    transportFailures: state?.transportFailures,
+    transportCooldownUntilMs: state?.transportCooldownUntilMs
   }
 }

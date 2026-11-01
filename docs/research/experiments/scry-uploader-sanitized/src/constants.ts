@@ -1,4 +1,4 @@
-export const VERSION = '0.2.3'
+export const VERSION = '0.2.4'
 export const UPLOADER_VERSION = `scry-uploader/${VERSION}`
 export const REDACTION_VERSION = 'none'
 export const LEGACY_REDACTION_VERSION = 'agent-turn-v1'
@@ -19,5 +19,10 @@ export const TIMEOUT_RETRY_MAX_SECONDS = 15 * 60
 export const JOB_MAX_ATTEMPTS = 6
 export const JOB_BACKOFF_BASE_MS = 1_000
 export const JOB_BACKOFF_MAX_MS = 60_000
+/** Consecutive unrecognised failures before a batch is treated as a request problem. */
+export const UNKNOWN_BATCH_SPLIT_ATTEMPTS = 3
+/** Workspace-level cooldown shared by every background wakeup. */
+export const TRANSPORT_COOLDOWN_BASE_MS = 5_000
+export const TRANSPORT_COOLDOWN_MAX_MS = 60_000
 export const PROVIDERS = ['claude', 'codex', 'qoder', 'opencode', 'pi'] as const
 export type Provider = (typeof PROVIDERS)[number]

@@ -39,12 +39,21 @@ export async function deferUploadAdmission(env: NodeJS.ProcessEnv, notBeforeMs: 
 
 export async function acquireUploadAdmission(
   env: NodeJS.ProcessEnv,
-  deadline: number
+  deadline: number,
+  // A queued wakeup must not park a process behind a long upload while every
+  // slot is busy: the job is durable, so give up quickly and let the queue
+  // reschedule. Waiting forever is what piles up worker processes.
+  waitBudgetMs = 5_000
 ): Promise<() => Promise<void>> {
   const root = admissionRoot(env)
   await ensurePrivateDirectory(root)
   if (Date.now() >= deadline)
     throw new UploadError('upload_deadline_exhausted', 'upload deadline exhausted', true)
+  // Every attempt spawns a kernel lock helper per slot. Polling at a fixed
+  // 100ms spends hundreds of processes on a busy user, so widen the interval
+  // with jitter as the wait grows.
+  const stopAt = Math.min(deadline, Date.now() + waitBudgetMs)
+  let wait = 200
   while (Date.now() < deadline) {
     const retryAt = await admissionRetryAt(env)
     if (retryAt) {
@@ -60,7 +69,21 @@ export async function acquireUploadAdmission(
         if (!(error instanceof Error) || error.message !== 'upload worker is already running') throw error
       }
     }
-    await sleep(Math.min(100, Math.max(1, deadline - Date.now())))
+    if (Date.now() >= stopAt) break
+    const jittered = Math.floor(wait * (0.8 + Math.random() * 0.4))
+    await sleep(Math.min(jittered, Math.max(1, stopAt - Date.now())))
+    wait = Math.min(500, Math.floor(wait * 1.6))
+  }
+  if (Date.now() < deadline && Date.now() >= stopAt) {
+    const deferred = new UploadError(
+      'upload_admission_busy',
+      'user upload concurrency limit reached',
+      true,
+      Date.now() + 250 + Math.floor(Math.random() * 750)
+    )
+    deferred.deferred = true
+    deferred.deferJobAttempt = true
+    throw deferred
   }
   throw new UploadError('upload_admission_busy', 'user upload concurrency limit reached', true)
 }

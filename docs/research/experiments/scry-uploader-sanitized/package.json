@@ -1,6 +1,6 @@
 {
   "name": "@review/scry-uploader",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Upload Scry AgentTurnRecord data through agent-trace-service",
   "type": "module",
   "bin": {
