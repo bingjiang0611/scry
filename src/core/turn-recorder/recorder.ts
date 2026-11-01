@@ -27,6 +27,7 @@ export { mergeTurnTraceEvents } from './recorder-trace-merge.js'
 export async function handleRecorderHook(input: RecorderHookInput): Promise<RecorderHookResult> {
   // Taken before the lock wait: a hook queued after HOOK_LOCK_WAIT_MS still arrived now.
   const arrivedAt = new Date().toISOString()
+  const arrivalOrder = process.hrtime.bigint()
   input = {
     ...input,
     uploadEnvironment: captureUploadEnvironment(input.env ?? process.env),
@@ -54,7 +55,7 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
   }
   try {
     if (input.queueOnly) {
-      await queueHook(enablement, input, sessionId, arrivedAt)
+      await queueHook(enablement, input, sessionId, arrivedAt, arrivalOrder)
       return { status: 'pending', reason: 'daemon delivery uncertain; event queued for replay' }
     }
     let entered = false
@@ -69,7 +70,7 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
       if (entered || !isLockTimeout(error)) throw error
       // The session is busy (a long finalize, recovery or a stuck peer). The event was never applied,
       // so queue it durably instead of dropping it; the next lock holder replays it in arrival order.
-      await queueHook(enablement, input, sessionId, arrivedAt)
+      await queueHook(enablement, input, sessionId, arrivedAt, arrivalOrder)
       return { status: 'pending', reason: 'session busy; event queued for replay' }
     }
     try {

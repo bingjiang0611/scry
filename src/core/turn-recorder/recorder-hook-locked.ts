@@ -236,7 +236,8 @@ export async function queueHook(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   input: RecorderHookInput,
   sessionId: string,
-  arrivedAt: string
+  arrivedAt: string,
+  arrivalOrder: bigint
 ): Promise<void> {
   const entry: QueuedHook = {
     schemaVersion: 1,
@@ -248,8 +249,10 @@ export async function queueHook(
     ...(input.managed ? { managed: true } : {}),
     arrivedAt
   }
-  // Names sort by arrival; the UUID only separates hooks that arrive in the same millisecond.
-  const name = `${String(Date.parse(arrivedAt)).padStart(15, '0')}-${randomUUID()}.json`
+  // Capture monotonic order before async work/lock waits, not at queue write time.
+  // Same-millisecond arrivals must not be ordered by a random UUID. Legacy files
+  // remain readable, but their same-millisecond order cannot be reconstructed.
+  const name = `${String(Date.parse(arrivedAt)).padStart(15, '0')}-${String(arrivalOrder).padStart(20, '0')}-${randomUUID()}.json`
   await writeJsonAtomic(join(hookInbox(enablement.dataRoot, input.provider, sessionId), name), entry)
   await appendRotatingLog(
     join(enablement.dataRoot, 'logs', 'recorder.log'),
