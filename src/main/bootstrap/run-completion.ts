@@ -5,6 +5,7 @@ import type { ProviderId } from '../../shared/provider'
 import type { ProviderRunResult } from '../providers/types'
 import type { ArchiveTraceTurnArgs } from './archive'
 import type { AppRunStartOptions } from './run-frontdoor'
+import type { createSessionPublisher } from './run-session'
 import type { AgentInputAttachment, NormalizedAgentStartRequest } from '../../shared/runtime'
 import type { createAppSessionStore } from '../app-store'
 import type { LiveTraceIngestion } from '../live-trace-ingestion'
@@ -53,7 +54,7 @@ export type RunCompletionContext = {
   observedProviderStartedAt: string | undefined
   getObservedSessionId: () => string | undefined
   getResume: () => string | undefined
-  publishSessionId: (sessionId: string | undefined) => void
+  publishSessionId: ReturnType<typeof createSessionPublisher>
   appSessionStore: () => ReturnType<typeof createAppSessionStore>
   mirrorSessionTranscript: (providerId: ProviderId, cwd: string | undefined, sessionId: string | undefined) => Promise<void>
   ingestion: Pick<LiveTraceIngestion, 'idle' | 'liveIdle'>
@@ -136,7 +137,9 @@ export async function handleRunCompletion(r: ProviderRunResult, ctx: RunCompleti
       console.warn('[scry] terminal attachment ownership update failed:', runId, error)
     }
   }
-  publishSessionId(r.externalSessionId)
+  // Publish identity/baseline changes, but write the catalog once with the final outcome
+  // below. Its failure must use the terminal catalog error path, not a deferred warning.
+  publishSessionId(r.externalSessionId, { recordCatalog: false })
   try {
     appSessionStore().record({
       lastRunOutcome: completionStatus,
