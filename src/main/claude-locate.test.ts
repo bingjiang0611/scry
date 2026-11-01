@@ -390,7 +390,8 @@ printf '%s\n' '${RECORDER_VERSION}'
         writeFileSync(path, '#!/bin/sh\n')
         chmodSync(path, 0o755)
       }
-      expect(resolveRecorderCliPath({ PATH: providerDir }, '/usr/bin:/bin', fallbackDir)).toBe(fallbackScry)
+      // An empty trusted PATH keeps host-installed CLIs out of this fallback test.
+      expect(resolveRecorderCliPath({ PATH: providerDir }, '', fallbackDir)).toBe(fallbackScry)
     } finally {
       rmSync(providerDir, { recursive: true, force: true })
       rmSync(fallbackDir, { recursive: true, force: true })

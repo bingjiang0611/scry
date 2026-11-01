@@ -141,9 +141,10 @@ describe('DesktopRemoteClient over real host TLS', () => {
       if (!captureFailure) {
         const context = { cwd: directory, providerId: 'pi' as const, externalSessionId: 'large-session' }
         const text = '中文🙂\"\n'.repeat(400_000)
+        // Explicit turn times preserve chronology even when writes share a millisecond.
         for (let i = 0; i < 3; i++) expect(upsertTraceArchiveTurn({
           cwd: directory, userDataDir: directory, sessionId: context.externalSessionId, providerId: 'pi',
-          turn: { runId: `history-${i}`, agentProfileId: null, userText: `prompt ${i}`, done: true, items: [{ id: `event-${i}`, ts: '2026-10-14T00:00:00Z', runId: `history-${i}`, kind: 'model', stage: 'text', text: i === 2 ? text : `answer ${i}` }] }
+          turn: { runId: `history-${i}`, ts: Date.parse('2026-10-14T00:00:00Z') + i, agentProfileId: null, userText: `prompt ${i}`, done: true, items: [{ id: `event-${i}`, ts: '2026-10-14T00:00:00Z', runId: `history-${i}`, kind: 'model', stage: 'text', text: i === 2 ? text : `answer ${i}` }] }
         })).toBe(true)
         const history = await client.history(pending.connection.id, context)
         expect(history.turns.map(turn => turn.userText)).toEqual(['prompt 1', 'prompt 2'])
