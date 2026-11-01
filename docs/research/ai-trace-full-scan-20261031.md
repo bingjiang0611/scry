@@ -13,7 +13,7 @@
 | 逐轮过程组织 | 1,348 条轮次事实、43,744 条消息及关联校验 | 每个 Provider、每一轮都完整 |
 | 工具输入输出 | 17,915 个 tool_use、17,873 个 tool_result 内容块 | 内容块数就是独立调用数、所有结果都完整 |
 | 思考片段 | 3,932 个非空 thinking 块 | 完整内部推理或决策原因已经被证明 |
-| 缺失/部分证据 | 203 个 patch 不可用原因；11 个工作区快照标 partial | 每种数据都有与 Scry 同构的 evidence envelope |
+| 缺失/部分证据 | 203 个 patch 不可用原因；11 个工作区 diff（`workspaceDiff`）标 partial | 每种数据都有与 Scry 同构的 evidence envelope |
 | 有状态投递 | revision/hash、投递意图、尝试计数、dead/cancelled 等真实记录 | 服务端已经收到，或端到端可靠性已验收 |
 | 代码调用关联 | 37,944 条代码动作有 tool_call_id | 每个动作都有 ID、关联就等于因果归因准确 |
 

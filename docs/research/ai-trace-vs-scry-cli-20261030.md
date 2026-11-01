@@ -62,7 +62,7 @@ AI Trace 环境快照中的 `os.env_vars` 只证明存在这类能力，本文**
 
 1. `available/partial/disabled/unavailable` 和 `exact/estimated/inferred/unavailable` 表达证据语义，不是显示样式。
 2. 完整工具正文可存入 `.scry/content/sha256/`，通过 `contentRef` 引用。8 KiB 单字段、128 KiB 单轮默认预算是 inline 预览预算，**不是完整正文的总磁盘上限**。
-3. 新采集的工具正文不自动脱敏；旧 `full-redacted` 配置在当前源码里是 `full` 的迁移别名，不再代表保密承诺。显式 `none/summary` 仍有效。
+3. 新采集的工具正文不自动脱敏；旧 `full-redacted` 配置在当前源码里是 `full` 的迁移别名，不再代表保密承诺。显式 `none/summary` 仍有效，但只关闭工具正文：工具入参（如 Bash 命令原文、Edit 的 old/new 字符串）和文件路径仍会落盘，diff patch 也默认保存，除非另设 `diff: false`（见 `packages/turn-recorder-cli/README.md`）。
 4. 无 `scry.config.json` 的工作区不会因此自动启用 recorder。本文没有采集本机 Scry 私人 records，也没有做两者同一轮任务的对照实验。
 5. Hook、MCP、文件足迹等字段存在，不代表每个 Provider 都提供完整证据。例如 Codex rollout 不包含原生 Hook 事件。
 6. Scry 还把每轮开始时的上传环境 allowlist 保存到 `.scry/record-environments/<recordId>.json`。它不进入 record/export/support bundle，但旁路文件不加密，可能包含敏感值，不能原样分享；归档也不代表它已被删除。
