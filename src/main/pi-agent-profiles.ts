@@ -14,6 +14,9 @@ import {
   writeFileSync
 } from 'node:fs'
 import { realpath } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { homedir } from 'node:os'
+import { promisify } from 'node:util'
 import { createHash, randomUUID } from 'node:crypto'
 import { basename, dirname, join } from 'node:path'
 import { providerIdForAgentId } from '../shared/runtime'
@@ -33,13 +36,28 @@ const validProfile = (value: unknown): value is PiAgentProfile => {
     typeof profile.executable === 'string' && profile.executable.startsWith('/') && profile.executable.length <= 4_096
 }
 
+const execFileAsync = promisify(execFile)
+
+export async function resolvePiLauncherExecutable(executable: string): Promise<string> {
+  const canonical = await realpath(executable)
+  if (basename(canonical) !== 'mise') return canonical
+  const command = basename(executable)
+  if (command !== 'pi' && command !== 'rotom') throw new Error('mise 不是 Pi Agent 启动器')
+  // mise shims dispatch by argv[0]; realpath alone turns `rotom --mode rpc` into
+  // `mise --mode rpc`. Resolve the installed launcher, outside repository config.
+  const { stdout } = await execFileAsync(canonical, ['which', command], {
+    cwd: homedir(), timeout: 5_000, maxBuffer: 64 * 1024
+  })
+  return realpath(stdout.trim())
+}
+
 // Picker equivalence uses canonical launchers, not labels or versions. Keep IDs intact:
 // historical sessions still resolve their saved profile independently of discovery.
 export async function canonicalizePiAgentPaths(agents: DetectedAgent[]): Promise<DetectedAgent[]> {
   return Promise.all(agents.map(async (agent) => {
     if (providerIdForAgentId(agent.id) !== 'pi') return agent
     try {
-      return { ...agent, path: await realpath(agent.path) }
+      return { ...agent, path: await resolvePiLauncherExecutable(agent.path) }
     } catch {
       // Discovery can race with an uninstall. Preserve the entry and its health evidence.
       return agent
@@ -55,6 +73,7 @@ export function undetectedPiProfiles(profiles: PiAgentProfile[], detected: Array
 
 export function piProfileForExecutable(executable: string): PiAgentProfile {
   const canonical = realpathSync(executable)
+  if (basename(canonical) === 'mise') throw new Error('请先解析 mise 的 Pi Agent 启动器')
   const stat = lstatSync(canonical)
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Pi Agent launcher 必须是普通文件')
   accessSync(canonical, constants.X_OK)

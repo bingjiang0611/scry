@@ -1,20 +1,20 @@
 import { createCachedAsyncLoader } from '../provider-detection'
 import { detectAgents, detectAgentsFast } from '../claude-locate'
-import { canonicalizePiAgentPaths, createPiAgentProfileStore, piProfileForExecutable, undetectedPiProfiles, type PiAgentProfile } from '../pi-agent-profiles'
+import { canonicalizePiAgentPaths, createPiAgentProfileStore, piProfileForExecutable, resolvePiLauncherExecutable, undetectedPiProfiles, type PiAgentProfile } from '../pi-agent-profiles'
 import { providerIdForAgentId } from '../../shared/runtime'
 import { piRpcEnvironment } from '../providers/pi'
 
 export function createPiProfileRuntime(deps: { userDataDir: string }) {
   const piProfileStore = () => createPiAgentProfileStore(deps.userDataDir)
   const fullAgentDetection = createCachedAsyncLoader(async () => canonicalizePiAgentPaths(await detectAgents({
-    versionProbeEnv: (agent, executable) => providerIdForAgentId(agent.id) === 'pi'
-      ? piRpcEnvironment({ id: agent.id, label: agent.name, executable })
+    versionProbeEnv: async (agent, executable) => providerIdForAgentId(agent.id) === 'pi'
+      ? piRpcEnvironment({ id: agent.id, label: agent.name, executable: await resolvePiLauncherExecutable(executable) })
       : undefined
   })), { ttlMs: 60_000 })
   const detectInstalledAgents = () => fullAgentDetection.load()
   // Provider descriptors and runtime profile resolution only need executable identity. Do not turn
   // their frequent availability reads into version subprocesses for every installed Provider.
-  const detectedPiProfiles = async (): Promise<PiAgentProfile[]> => detectAgentsFast().flatMap((agent) => {
+  const detectedPiProfiles = async (): Promise<PiAgentProfile[]> => (await canonicalizePiAgentPaths(detectAgentsFast())).flatMap((agent) => {
     if (providerIdForAgentId(agent.id) !== 'pi') return []
     try {
       const profile = piProfileForExecutable(agent.path)
