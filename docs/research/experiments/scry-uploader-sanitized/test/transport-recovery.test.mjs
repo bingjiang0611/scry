@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { mock } from 'node:test'
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,7 +9,8 @@ import { actorIdentity } from '../dist/transport.js'
 import { enqueueWakeup, runQueueWorker } from '../dist/queue.js'
 import { classifyTransport } from '../dist/retry.js'
 import { activateRecoveryService, schedulerStatus } from '../dist/scheduler.js'
-import { runUpload } from '../dist/uploader.js'
+import { redriveDeadLetters } from '../dist/redrive.js'
+import { localUploadStatus, runUpload } from '../dist/uploader.js'
 import { fixture, custody, logs, waitFor } from './fixtures/recovery-helpers.mjs'
 
 const jobOf = async (base, id) => JSON.parse(await readFile(join(base, 'jobs', `${id}.json`)))
@@ -34,20 +36,18 @@ test('a business error with no status code cannot pin the queue', async (t) => {
   const transportEnv = { ...env, RECOVERY_FAIL_RECORD_ID: records[0].recordId }
 
   const first = await runUpload(root, { env: transportEnv })
-  assert.equal(first.uploaded, 0)
+  assert.ok(first.uploaded > 0, 'the run must probe the other half and keep draining')
   assert.ok(first.deferredUntilMs > Date.now(), 'an unknown failure must schedule a retry, not fail the run')
+  assert.equal(first.deadLettered, 0, 'one ambiguous failure is not enough to discard a record')
 
-  // The next run must skip the deferred poison record and drain the rest.
-  const second = await runUpload(root, { env: transportEnv })
-  assert.equal(second.uploaded, 4)
-  assert.equal((await readdir(join(base, 'outbox'))).filter(name => name.endsWith(`${records[0].recordId}.json`)).length, 1)
-
-  // Repeated isolated failures are treated as a request problem and isolated.
-  await makeDue(base, records[0].recordId)
-  await runUpload(root, { env: transportEnv })
-  await makeDue(base, records[0].recordId)
-  const final = await runUpload(root, { env: transportEnv })
-  assert.equal(final.deadLettered, 1)
+  // Repeated failures of the same record, with the service still answering, are
+  // treated as a request problem and isolated.
+  let deadLettered = 0
+  for (let round = 0; round < 6 && !deadLettered; round++) {
+    await makeDue(base, records[0].recordId)
+    deadLettered = (await runUpload(root, { env: transportEnv })).deadLettered
+  }
+  assert.equal(deadLettered, 1)
   assert.deepEqual((await readdir(join(base, 'outbox'))).filter(name => name.endsWith(records[0].recordId + '.json')), [])
   const receipt = JSON.parse(await readFile(join(base, 'receipts', `${records[0].recordId}.json`)))
   assert.equal(receipt.status, 'dead_letter')
@@ -223,12 +223,15 @@ test('a background wakeup gives up its slot wait instead of parking a worker', a
   const shared = await fixture(t, { RECOVERY_GATE_FILE: gate })
   // Two gated flushes hold both user-level slots while a wakeup arrives.
   const holders = []
+  const holding = []
   for (const sequence of [1, 2]) {
     const other = await fixture(t, { XDG_STATE_HOME: shared.env.XDG_STATE_HOME, RECOVERY_GATE_FILE: gate })
     await custody(other.root, sequence)
     holders.push(other)
-    void runUpload(other.root, { env: { ...other.env, RECOVERY_GATE_FILE: gate }, mode: 'flush' }).catch(
-      () => undefined
+    holding.push(
+      runUpload(other.root, { env: { ...other.env, RECOVERY_GATE_FILE: gate }, mode: 'flush' }).catch(
+        () => undefined
+      )
     )
   }
   await waitFor(async () => {
@@ -253,4 +256,119 @@ test('a background wakeup gives up its slot wait instead of parking a worker', a
   assert.ok(job.notBeforeMs >= Date.now() + 700, 'the retry gap must widen with consecutive contention')
   assert.equal(JSON.parse(await readFile(join(shared.base, 'receipts', `${record.recordId}.json`))).status, 'pending')
   await rm(gate, { force: true })
+  // Let the two flushes finish before teardown removes their workspaces.
+  await Promise.all(holding)
+})
+
+async function freeForRetry(base) {
+  const path = join(base, 'state.json')
+  const state = JSON.parse(await readFile(path))
+  // Simulate the cooldown window ending while keeping the failure count.
+  delete state.transportCooldownUntilMs
+  await writeFile(path, JSON.stringify(state))
+  const jobs = join(base, 'jobs')
+  for (const name of (await readdir(jobs)).filter(entry => entry.endsWith('.json')))
+    await writeFile(join(jobs, name), JSON.stringify({ ...JSON.parse(await readFile(join(jobs, name))), notBeforeMs: 0 }))
+  const outbox = join(base, 'outbox')
+  for (const name of (await readdir(outbox)).filter(entry => entry.endsWith('.json'))) {
+    const target = join(outbox, name)
+    const envelope = JSON.parse(await readFile(target))
+    if (!envelope.localRetry) continue
+    envelope.localRetry.notBeforeMs = 0
+    await writeFile(target, JSON.stringify(envelope))
+  }
+}
+
+async function deadLetterNames(base) {
+  return (await readdir(join(base, 'dead-letter')).catch(() => [])).filter(name => /^\d{20}-[a-f0-9]{32,64}\.json$/.test(name))
+}
+
+test('a service-wide unrecognised failure never dead-letters intact records', async (t) => {
+  const { root, base, env } = await fixture(t)
+  const records = []
+  for (const sequence of [1, 2, 3, 4, 5]) records.push(await custody(root, sequence))
+  const outage = { ...env, RECOVERY_ALL_BUSINESS_ERROR: '服务繁忙，请稍后重试' }
+  await enqueueWakeup(root, outage, true)
+  const startsPerRun = []
+  for (let round = 0; round < 5; round++) {
+    const before = (await logs(env.RECOVERY_TRANSPORT_LOG)).filter(entry => entry.phase === 'start').length
+    await runQueueWorker(root, outage, { once: true })
+    startsPerRun.push((await logs(env.RECOVERY_TRANSPORT_LOG)).filter(entry => entry.phase === 'start').length - before)
+    await freeForRetry(base)
+  }
+  assert.deepEqual(await deadLetterNames(base), [], 'an outage must not bury intact records')
+  assert.ok(startsPerRun.every(count => count <= 2), `each run must stay bounded, saw ${startsPerRun.join(',')}`)
+  const state = JSON.parse(await readFile(join(base, 'state.json')))
+  assert.ok(state.transportFailures >= 1, 'the outage must accumulate the workspace cooldown')
+  const outbox = (await readdir(join(base, 'outbox'))).filter(name => name.endsWith('.json'))
+  assert.equal(outbox.length, 5)
+  for (const name of outbox) {
+    const envelope = JSON.parse(await readFile(join(base, 'outbox', name)))
+    // A probed half may still be waiting for its next attempt, so the retry
+    // record is optional; what matters is that no budget was spent.
+    assert.equal(envelope.localRetry?.attempts ?? 0, 0, 'a service failure must not spend a record budget')
+  }
+  const status = await localUploadStatus(root)
+  assert.equal(status.deadLetterRecords, 0)
+  assert.equal(status.outboxPending, 5)
+})
+
+test('a run too close to its deadline starts no report request', async (t) => {
+  const clockDir = await mkdtemp(join(tmpdir(), 'scry-clock-'))
+  t.after(() => rm(clockDir, { recursive: true, force: true }))
+  const clock = join(clockDir, 'count')
+  await writeFile(clock, '0\n')
+  const { root, base, env } = await fixture(t, {
+    RECOVERY_CLOCK_FILE: clock,
+    RECOVERY_CLOCK_ALL_PHASES: '1',
+    SCRY_UPLOAD_DEADLINE_SECONDS: '30'
+  })
+  const baseNow = Date.now()
+  // Preparation alone consumes two 10-second steps, leaving less than the
+  // 20-second floor, so the report request must never start.
+  mock.method(Date, 'now', () => baseNow + Number(readFileSync(clock, 'utf8')) * 10_000)
+  try {
+    const record = await custody(root, 1)
+    await enqueueWakeup(root, env)
+    await runQueueWorker(root, env, { once: true })
+    const reports = await logs(env.RECOVERY_TRANSPORT_LOG)
+    assert.equal(reports.filter(entry => entry.phase === 'start').length, 0, 'no request may be cut by our own deadline')
+    const status = await localUploadStatus(root)
+    assert.equal(status.timeoutRecords, 0)
+    assert.equal(status.outboxPending, 1)
+    const state = JSON.parse(await readFile(join(base, 'state.json')))
+    assert.equal(state.transportFailures, undefined, 'a budget truncation is not an endpoint failure')
+    const envelope = JSON.parse(await readFile(join(base, 'outbox', `${String(1).padStart(20, '0')}-${record.recordId}.json`)))
+    assert.equal(envelope.localRetry, undefined)
+    assert.equal(JSON.parse(await readFile(join(base, 'receipts', `${record.recordId}.json`))).status, 'pending')
+  } finally {
+    mock.restoreAll()
+  }
+})
+
+test('redrive returns a dead-lettered record to the queue and it uploads', async (t) => {
+  const { root, base, env } = await fixture(t)
+  const record = await custody(root, 1)
+  const rejected = { ...env, RECOVERY_FAIL_RECORD_ID: record.recordId, RECOVERY_BUSINESS_CODE: 'INVALID_ARGUMENT' }
+  for (let round = 0; round < 3; round++) {
+    await runUpload(root, { env: rejected })
+    await freeForRetry(base)
+  }
+  assert.deepEqual(await deadLetterNames(base), [`${String(1).padStart(20, '0')}-${record.recordId}.json`])
+  assert.equal(JSON.parse(await readFile(join(base, 'receipts', `${record.recordId}.json`))).status, 'dead_letter')
+
+  const redriven = await redriveDeadLetters(root, { reason: 'fixture redrive' })
+  assert.deepEqual(redriven.redriven, [record.recordId])
+  assert.deepEqual(redriven.skipped, [])
+  assert.equal(JSON.parse(await readFile(join(base, 'receipts', `${record.recordId}.json`))).status, 'pending')
+  assert.deepEqual(await deadLetterNames(base), [])
+  const archived = JSON.parse(
+    await readFile(join(base, 'dead-letter', 'redriven', `${String(1).padStart(20, '0')}-${record.recordId}.json`))
+  )
+  assert.equal(archived.redrive.reason, 'fixture redrive')
+
+  await freeForRetry(base)
+  const result = await runUpload(root, { env })
+  assert.equal(result.uploaded, 1)
+  assert.equal(JSON.parse(await readFile(join(base, 'receipts', `${record.recordId}.json`))).remoteStatus, 'inserted')
 })

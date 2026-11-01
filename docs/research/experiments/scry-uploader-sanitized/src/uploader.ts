@@ -196,12 +196,20 @@ export async function runUpload(
     // not amplify expensive authenticated CLI calls.
     // A queued wakeup gives up fast when every slot is busy so worker processes
     // do not pile up behind one long upload; an explicit flush is worth waiting for.
-    releaseAdmission = await acquireUploadAdmission(env, preparationDeadline, background ? 1_000 : 5_000)
+    releaseAdmission = await acquireUploadAdmission(
+      env,
+      preparationDeadline,
+      background ? 1_000 : Number.POSITIVE_INFINITY
+    )
     await waitForManagedTurn(workspace, env, preparationDeadline)
     await enqueueCommitted(workspace, state, expected)
     // A slow or broken exporter must not consume the budget needed by bytes
     // already in our custody. Drain those before attempting discovery.
-    const uploaded = await uploadPending(workspace, deadline, env, timings)
+    // A run's own successes are evidence too, but the check needs a stable
+    // snapshot of what was acknowledged before this run started.
+    const lastSuccessAt = state.lastSuccessAt ? Date.parse(state.lastSuccessAt) : undefined
+    const lastSuccessAtMs = Number.isFinite(lastSuccessAt) ? lastSuccessAt : undefined
+    const uploaded = await uploadPending(workspace, deadline, env, timings, { lastSuccessAtMs })
     endpointFailed = uploaded.endpointFailed === true
     let enqueued = 0
     if (!expected && !uploaded.deferredUntilMs) {
@@ -230,7 +238,7 @@ export async function runUpload(
         }
       }
       if (!uploaded.deferredUntilMs) {
-        const discovered = await uploadPending(workspace, deadline, env, timings)
+        const discovered = await uploadPending(workspace, deadline, env, timings, { lastSuccessAtMs })
         uploaded.uploaded += discovered.uploaded
         uploaded.duplicated += discovered.duplicated
         uploaded.deadLettered += discovered.deadLettered
@@ -240,11 +248,13 @@ export async function runUpload(
     }
     // Only endpoint failures widen the workspace cooldown. Budget deferrals and
     // ordinary record backoff are not endpoint health signals, and counting them
-    // would block every later wakeup for no reason.
+    // would block every later wakeup for no reason. Clearing it requires a real
+    // acknowledgement: a run that sent nothing proves nothing about the endpoint.
+    const acknowledged = uploaded.uploaded + uploaded.duplicated > 0
     if (endpointFailed || discoveryFailure) {
       const until = noteTransportFailure(state)
       if (uploaded.deferredUntilMs !== undefined) uploaded.deferredUntilMs = Math.max(uploaded.deferredUntilMs, until)
-    } else clearTransportFailure(state)
+    } else if (acknowledged) clearTransportFailure(state)
     await writeJsonAtomic(statePath(workspace), state)
     await updateHealth(workspace, state, { lastUploadedCount: uploaded.uploaded }, env)
     const pending = (await outboxPaths(workspace)).length
@@ -261,7 +271,10 @@ export async function runUpload(
       )
       throw discoveryFailure
     }
-    state.lastSuccessAt = now()
+    // "Last success" means a real acknowledgement. A run that only deferred
+    // proves nothing about the endpoint, and the retry classifier relies on this
+    // being the last time the server accepted a record.
+    if (acknowledged) state.lastSuccessAt = now()
     delete state.lastError
     await writeJsonAtomic(statePath(workspace), state)
     await updateHealth(

@@ -55,6 +55,8 @@ export interface OutboxEnvelope {
     attempts: number
     notBeforeMs: number
     lastCode?: string
+    /** First failure of the current streak; evidence must be newer than this. */
+    firstAtMs?: number
   }
 }
 

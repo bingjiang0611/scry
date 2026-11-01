@@ -1,4 +1,4 @@
-export const VERSION = '0.2.4'
+export const VERSION = '0.2.5'
 export const UPLOADER_VERSION = `scry-uploader/${VERSION}`
 export const REDACTION_VERSION = 'none'
 export const LEGACY_REDACTION_VERSION = 'agent-turn-v1'
@@ -21,6 +21,10 @@ export const JOB_BACKOFF_BASE_MS = 1_000
 export const JOB_BACKOFF_MAX_MS = 60_000
 /** Consecutive unrecognised failures before a batch is treated as a request problem. */
 export const UNKNOWN_BATCH_SPLIT_ATTEMPTS = 3
+/** A request shorter than this cannot finish; sending it would look like a server timeout. */
+export const MIN_REPORT_BUDGET_MS = 20_000
+/** Upper bound on report requests inside one run, so a bisect loop cannot burst. */
+export const MAX_REQUESTS_PER_RUN = 12
 /** Workspace-level cooldown shared by every background wakeup. */
 export const TRANSPORT_COOLDOWN_BASE_MS = 5_000
 export const TRANSPORT_COOLDOWN_MAX_MS = 60_000

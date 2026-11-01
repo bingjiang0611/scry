@@ -18,7 +18,9 @@ const NETWORK_CODE = /^(?:ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENETUNREACH|EHOSTUNR
 const DETERMINISTIC_CODE = /^(?:INVALID_ARGUMENT|INVALID_REQUEST|VALIDATION_FAILED|BAD_REQUEST|PAYLOAD_TOO_LARGE|REQUEST_INVALID)$/i
 // Only explicit denial wording. A local hint such as "run transport auth login" must
 // not turn an unrelated timeout into an authentication failure.
-const AUTH_TEXT = /unauthori[sz]ed|not (?:logged in|authenticated)|credentials? (?:expired|invalid|missing)|(?:auth|login) required|permission denied|请先登录|未登录|登录已过期/i
+// "permission denied" is deliberately absent: a local EACCES on the record or
+// custody file is not a login problem and must not pause uploads for 15 minutes.
+const AUTH_TEXT = /unauthori[sz]ed|not (?:logged in|authenticated)|credentials? (?:expired|invalid|missing)|(?:auth|login) required|请先登录|未登录|登录已过期/i
 
 function transportDetails(error: unknown): TransportDetails {
   let current: unknown = error
@@ -105,16 +107,22 @@ export async function deferLocal(
   envelope: OutboxEnvelope,
   kind: NonNullable<OutboxEnvelope['localRetry']>['kind'],
   code: string,
-  retryAfterMs?: number
+  retryAfterMs?: number,
+  // A failure the client cannot attribute to this record must not spend the
+  // record's retry budget; only the workspace cooldown accounts for it.
+  options: { count?: boolean } = {}
 ): Promise<number> {
-  const attempts = localAttempts(envelope, kind) + 1
+  const counted = localAttempts(envelope, kind)
+  const attempts = options.count === false ? counted : counted + 1
   const base = kind === 'report_timeout' ? TIMEOUT_RETRY_BASE_SECONDS * 1_000 : kind === 'report_unknown' ? 5_000 : 1_000
   const maximum = kind === 'report_timeout' ? TIMEOUT_RETRY_MAX_SECONDS * 1_000 : 15 * 60_000
-  const delay = Math.min(maximum, base * 2 ** Math.min(attempts - 1, 8)) + retryJitter(attempts)
+  const step = Math.max(attempts, 1)
+  const delay = Math.min(maximum, base * 2 ** Math.min(step - 1, 8)) + retryJitter(step)
   const next = Math.max(Date.now() + delay, retryAfterMs ?? 0)
+  const firstAtMs = envelope.localRetry?.firstAtMs ?? Date.now()
   await writeJsonAtomic(path, {
     ...envelope,
-    localRetry: { kind, attempts, notBeforeMs: next, lastCode: code }
+    localRetry: { kind, attempts, notBeforeMs: next, lastCode: code, firstAtMs }
   })
   return next
 }

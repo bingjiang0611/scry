@@ -54,6 +54,7 @@ scry-upload flush --workspace "$PWD" --release-disabled <record-id>
 scry-upload enable --workspace "$PWD"
 scry-upload disable --workspace "$PWD"
 scry-upload register --workspace "$PWD"
+scry-upload redrive --workspace "$PWD" [--record-id <id>] [--reason TEXT]
 scry-upload scheduler-install
 scry-upload scheduler-status --json
 ```
@@ -82,13 +83,13 @@ systemctl --user status scry-uploader.timer
 
 export 发现同样先接管 canonical 原始字节并持久化 receipt，再推进游标；不能只把导出 JSON 放入 outbox。旧版本遗留的无 receipt outbox 在发送前接管其现有字节，保留原来的传输内容。缺少 custody 时禁止静默完成终态；legacy ACK 也保留与 canonical 不同的实际提交副本。
 
-新记录使用 `redactionVersion=none`，保留原始内容；已有 `agent-turn-v1` 脱敏 outbox 保持可重放，不会被静默丢弃。上传成功只接受 `inserted`/`duplicated`，明确的 `conflicted`/`rejected` 先保留 payload custody，再写入仅含元数据的失败诊断；损坏的本地队列文件会原样隔离，可能包含原始内容。传输超时、deadline、429 和网络/5xx 故障保留未知远端结果，按指数冷却、jitter 和 Retry-After 重试，不消耗 job 的永久失败次数；Retry-After（秒数或 HTTP-date）也会限制同一用户其他工作区的新请求。确定性 400/413 请求错误才拆批，单条连续三次确定性失败后保留为死信。无法识别的失败（例如 `success:false` 且没有状态码的业务错误）不会让整轮失败或原地卡死：它落到记录级重试状态，以 jitter 递增冷却；同一批连续三次无法识别则按请求问题拆批，拆到单条仍失败才保留为死信。服务端若返回结构化 `code`（如 `INVALID_ARGUMENT`），分类按 code 判定，不依赖错误文案。完整编码参数 JSON 在发送前限制为 512 KiB；单条超限不发送并保留正文。这是客户端限额，不代表已确认网关的实际限额。
+新记录使用 `redactionVersion=none`，保留原始内容；已有 `agent-turn-v1` 脱敏 outbox 保持可重放，不会被静默丢弃。上传成功只接受 `inserted`/`duplicated`，明确的 `conflicted`/`rejected` 先保留 payload custody，再写入仅含元数据的失败诊断；损坏的本地队列文件会原样隔离，可能包含原始内容。传输超时、deadline、429 和网络/5xx 故障保留未知远端结果，按指数冷却、jitter 和 Retry-After 重试，不消耗 job 的永久失败次数；Retry-After（秒数或 HTTP-date）也会限制同一用户其他工作区的新请求。确定性 400/413 请求错误才拆批，单条连续三次确定性失败后保留为死信。无法识别的失败（例如 `success:false` 且没有状态码的“服务繁忙”）不会让整轮失败，也不会把正常记录送进死信。是否归因到具体记录要看证据：本轮确实上传成功过（或拆出的另一半成功、或该记录首次失败之后本工作区有过真实 ACK），才会按记录计数、拆批，并在单条连续三次失败后进死信；没有任何成功证据时按服务故障处理，只累加工作区熔断，不消耗记录预算、不拆批。首次无法识别时最多把另一批拆半探测一次，每轮请求数另有上限，避免故障期连续轰炸。服务端若返回结构化 `code`（如 `INVALID_ARGUMENT`），分类按 code 判定，不依赖错误文案。完整编码参数 JSON 在发送前限制为 512 KiB；单条超限不发送并保留正文。这是客户端限额，不代表已确认网关的实际限额。
 
 后台唤醒还受工作区级熔断约束：传输、协议或发现阶段的持续失败会累加 `transportFailures` 并写入 `transportCooldownUntilMs`，冷却期内新的 hook 唤醒不再发请求，只按冷却时间重新排队；显式 `flush` 是用户主动操作，不受该冷却约束。任务自身区分两个计数器：`failures` 每次失败都递增并驱动退避，`attempts` 只在真实失败时消耗，达到 6 次才进入死信。因此持续故障的调用频率有上限（指数退避、上限 60 秒），不会每秒重试一次。
 
 恢复发送前还会读取 recorder 的 `record-environments/<recordId>.json`：即使原通知丢失，其中明确的 `SCRY_TURN_UPLOAD_ENABLED=0` 也会保留为 held，不由后台服务上传。读取复用 pinned recorder 的身份和 schema 校验，不把快照内的 executable/配置当作新的执行授权。
 
-耗尽单轮预算会保留已完成的上传数和待处理任务，不把正常进度记为失败。已接管的 outbox 优先于 export 处理；对于 pinned recorder 明确拒绝、且可核对 canonical 路径和序号的记录，先保留原始字节，再推进发现游标。其他 export 错误保持 `discovery_blocked`，不盲跳记录。
+耗尽单轮预算会保留已完成的上传数和待处理任务，不把正常进度记为失败。剩余时间不足 20 秒时不再发起新的上报请求，直接按“已完成部分”返回并重新排队：被本地 deadline 杀掉请求会被服务端记成超时，从而错误地推迟整批记录并触发熔断。熔断只在收到真实 ACK 时清零；某轮只是跳过了仍在退避期的记录，不能算端点恢复。已接管的 outbox 优先于 export 处理；对于 pinned recorder 明确拒绝、且可核对 canonical 路径和序号的记录，先保留原始字节，再推进发现游标。其他 export 错误保持 `discovery_blocked`，不盲跳记录。
 
 关闭上传（worker 观察到 `SCRY_TURN_UPLOAD_ENABLED=0`，或执行 `scry-upload disable`）会先持久化关闭状态，继续接管新提交并标记 `skipped_disabled`。关闭不依赖 export 成功。移除环境变量或重启服务不会自动重新开启，必须显式执行 `scry-upload enable`。
 
@@ -112,12 +113,14 @@ enable、首次初始化和无 state 的注册使用 recorder 的 `--after 90071
 ├── receipts/               # sha256、provider/session 和状态
 ├── pending-receipts/       # 待发送 receipt 索引，避免每次通知遍历全部历史
 ├── held-receipts/          # held receipt 索引，供健康状态判定；不授权释放历史
-├── dead-letter/            # 失败元数据；损坏文件的原样隔离副本
+├── dead-letter/            # 失败元数据；损坏文件的原样隔离副本；redriven/ 是已回放的审计副本
 ├── jobs/                   # 后台任务；永久失败受 6 次预算约束，传输冷却不消耗预算
 └── runtime/                # init 生成的 launcher
 ```
 
-worker 使用 macOS `lockf -k` 或 Linux `flock` 的内核锁，持有稳定 inode，不 unlink 锁文件。helper 按 `PATH` 查找（缺失时回落常见绝对路径），找不到就报明确错误并 fail closed，不会退化成无锁写入；Alpine、NixOS 等把 `flock` 装在别处的系统需自行提供。调用者退出会关闭租约管道；helper 异常退出时先在 `health.json` 记录 `lock_lease_lost`，再终止当前 uploader 进程，避免失锁后继续写入。旧 owner 身份未知时 fail closed，不盲删替换 owner。每个工作区只有一个常驻 worker，新的唤醒合并为持久任务。等待用户级上传名额的空闲循环按 200ms 起、上限 500ms 的 jitter 间隔重试，避免每次等待启动数百个锁 helper 进程。后台唤醒最多等 1 秒就必须拿到名额：拿不到就持久化延迟并退出，由队列按递增间隔重排，而不是把进程停在两个名额后面；显式 `flush` 最多等 5 秒。名额不足只延迟任务，不算端点失败、不消耗任务永久失败预算。
+worker 使用 macOS `lockf -k` 或 Linux `flock` 的内核锁，持有稳定 inode，不 unlink 锁文件。helper 按 `PATH` 查找（缺失时回落常见绝对路径），找不到就报明确错误并 fail closed，不会退化成无锁写入；Alpine、NixOS 等把 `flock` 装在别处的系统需自行提供。调用者退出会关闭租约管道；helper 异常退出时先在 `health.json` 记录 `lock_lease_lost`，再终止当前 uploader 进程，避免失锁后继续写入。旧 owner 身份未知时 fail closed，不盲删替换 owner。每个工作区只有一个常驻 worker，新的唤醒合并为持久任务。等待用户级上传名额的空闲循环按 200ms 起、上限 500ms 的 jitter 间隔重试，避免每次等待启动数百个锁 helper 进程。后台唤醒最多等 1 秒就必须拿到名额：拿不到就持久化延迟并退出，由队列按递增间隔重排，而不是把进程停在两个名额后面。显式 `flush` 是用户主动操作，会一直等到拿到名额或本轮预算用尽，不会在只等了 5 秒后就悄悄返回 `deferred`。名额不足只延迟任务，不算端点失败、不消耗任务永久失败预算。
+
+死信是 uploader 的终态，不是用户的终点：`scry-upload redrive [--record-id ID] [--reason 说明]` 把 `dead-letter/` 里的记录重新放回 outbox 并排队，只有 custody 正文仍在、sha256 与死信记录一致、receipt 仍是 `dead_letter` 时才回放；不满足条件的记录列入 `skipped` 并保持原样。回放成功后原元数据移入 `dead-letter/redriven/` 作为审计副本。
 
 远端明确 ACK 后满 30 天，后台每日维护才清理 uploader 正文副本，也可显式执行 `scry-upload prune`。先持久化清理意图，再删除正文并记录完成；崩溃后可恢复，去重 receipt 保留，重复通知仍校验 digest。canonical Scry records、disabled/held、未确认或失败正文均不自动删除。
 

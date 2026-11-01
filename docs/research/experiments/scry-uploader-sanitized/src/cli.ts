@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { VERSION } from './constants.js'
 import { doctorWorkspace, initWorkspace } from './init.js'
 import { enqueueWakeup, notifyRecordCommit, runQueueWorker, validateNotification } from './queue.js'
+import { redriveDeadLetters } from './redrive.js'
 import {
   installScheduler,
   recoverRegistered,
@@ -47,7 +48,7 @@ function parseArgs(argv: string[]): Args {
       continue
     }
     const name = current.slice(2)
-    if (['workspace', 'providers', 'record-id', 'release-disabled'].includes(name)) {
+    if (['workspace', 'providers', 'record-id', 'release-disabled', 'reason'].includes(name)) {
       const next = argv[++i]
       if (!next) throw new Error(`--${name} 缺少值`)
       values.set(name, next)
@@ -65,6 +66,7 @@ Usage:
   scry-upload flush --workspace ROOT [--release-disabled RECORD_ID]
   scry-upload migrate --workspace ROOT
   scry-upload prune --workspace ROOT
+  scry-upload redrive --workspace ROOT [--record-id ID] [--reason TEXT]
   scry-upload doctor|status [--workspace ROOT] [--json]
   scry-upload register|unregister [--workspace ROOT]
   scry-upload enable|disable [--workspace ROOT]
@@ -152,6 +154,15 @@ export async function runCli(argv: string[]): Promise<number> {
   if (command === 'prune') {
     print({ pruned: await pruneAckedBodies(workspace) }, json)
     return 0
+  }
+  if (command === 'redrive') {
+    const recordId = args.values.get('record-id')
+    const result = await redriveDeadLetters(workspace, {
+      ...(recordId ? { recordIds: [recordId] } : {}),
+      ...(args.values.get('reason') ? { reason: args.values.get('reason') } : {})
+    })
+    print(result, json)
+    return result.redriven.length || !result.skipped.length ? 0 : 3
   }
   if (command === 'flush') {
     const release = args.values.get('release-disabled') ?? args.values.get('record-id')

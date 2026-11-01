@@ -11,6 +11,11 @@ function log(value) {
 function respond(value) {
   process.stdout.write(JSON.stringify(value) + '\n')
 }
+function tickClock() {
+  const path = process.env.RECOVERY_CLOCK_FILE
+  if (!path) return
+  writeFileSync(path, `${Number(readFileSync(path, 'utf8')) + 1}\n`)
+}
 
 if (args.includes('whoami')) {
   let actor = { subject_id: 'fixture', nickname: 'Fixture' }
@@ -19,9 +24,11 @@ if (args.includes('whoami')) {
   } catch (error) {
     if (error.code !== 'ENOENT') throw error
   }
+  if (process.env.RECOVERY_CLOCK_ALL_PHASES) tickClock()
   log({ phase: 'actor' })
   respond(actor)
 } else if (args.includes('list-tools')) {
+  if (process.env.RECOVERY_CLOCK_ALL_PHASES) tickClock()
   log({ phase: 'schema' })
   const fields = ['actorUserId', 'actorNick', 'repo', 'installationId', 'uploaderVersion', 'redactionVersion', 'records']
   respond([{ name: 'submitTurns', inputSchema: { properties: Object.fromEntries(fields.map(key => [key, {}])) } }])
@@ -51,12 +58,13 @@ if (args.includes('whoami')) {
       }
     })
   }
-  if (process.env.RECOVERY_CLOCK_FILE) {
-    const path = process.env.RECOVERY_CLOCK_FILE
-    writeFileSync(path, `${Number(readFileSync(path, 'utf8')) + 1}\n`)
-  }
+  tickClock()
   log({ phase: 'end' })
-  if (process.env.RECOVERY_FAIL_RECORD_ID && records.some(record => record.recordId === process.env.RECOVERY_FAIL_RECORD_ID)) {
+  if (process.env.RECOVERY_ALL_BUSINESS_ERROR) {
+    // Whole-service outage: every request fails with an unclassifiable business
+    // error and no status code.
+    respond({ success: false, error: process.env.RECOVERY_ALL_BUSINESS_ERROR })
+  } else if (process.env.RECOVERY_FAIL_RECORD_ID && records.some(record => record.recordId === process.env.RECOVERY_FAIL_RECORD_ID)) {
     // Business failure without any HTTP status: the client cannot classify it
     // from a status code and must not retry the same batch forever.
     respond({ success: false, error: process.env.RECOVERY_BUSINESS_ERROR || '参数校验失败',

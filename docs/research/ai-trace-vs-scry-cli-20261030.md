@@ -152,7 +152,7 @@ AI Trace 的源码观察定位符为 `DATA_REPORTING_KEYS`、`SLS_EVENT_REPORTIN
 
 ## 7. 补充：uploader 的公开脱敏源码
 
-按维护者后续授权，附上 [uploader 审阅快照](experiments/scry-uploader-sanitized/README.md)，已同步源版本 `0.2.4` 的 51 个跟踪文件的脱敏副本、完整测试和哈希清单。名称、身份协议标识及 URL 均使用公开占位形式；没有附依赖、历史或真实采集数据。
+按维护者后续授权，附上 [uploader 审阅快照](experiments/scry-uploader-sanitized/README.md)，已同步源版本 `0.2.5` 的 53 个跟踪文件的脱敏副本、完整测试和哈希清单。名称、身份协议标识及 URL 均使用公开占位形式；没有附依赖、历史或真实采集数据。
 
 原版与脱敏副本分别通过构建、97 项测试及打包检查。修复覆盖批次隔离、传输退避、worker/全局并发、多仓恢复、关闭后安全重新开启、ACK 正文保留及 receipt-only held 健康状态。私有安装版另通过真实 launchd/传输验收：新记录有 ACK，关闭期间记录未补传；验收使用合成 hook 记录，不等于实际 Provider 会话验收。公开占位版不连接真实服务。
 

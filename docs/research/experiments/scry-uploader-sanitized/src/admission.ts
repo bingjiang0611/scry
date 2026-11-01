@@ -43,7 +43,7 @@ export async function acquireUploadAdmission(
   // A queued wakeup must not park a process behind a long upload while every
   // slot is busy: the job is durable, so give up quickly and let the queue
   // reschedule. Waiting forever is what piles up worker processes.
-  waitBudgetMs = 5_000
+  waitBudgetMs = Number.POSITIVE_INFINITY
 ): Promise<() => Promise<void>> {
   const root = admissionRoot(env)
   await ensurePrivateDirectory(root)

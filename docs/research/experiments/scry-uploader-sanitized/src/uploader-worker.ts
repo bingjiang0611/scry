@@ -12,6 +12,8 @@ import {
 import { admissionRetryAt, deferUploadAdmission } from './admission.js'
 import {
   MAX_BATCH_BYTES,
+  MAX_REQUESTS_PER_RUN,
+  MIN_REPORT_BUDGET_MS,
   UPLOADER_VERSION,
   UNKNOWN_BATCH_SPLIT_ATTEMPTS
 } from './constants.js'
@@ -78,7 +80,11 @@ export async function uploadPending(
   workspace: string,
   deadline: number,
   env: NodeJS.ProcessEnv,
-  timings: Record<string, number>
+  timings: Record<string, number>,
+  // Last acknowledged upload in this workspace. A record that keeps failing
+  // while something else was acknowledged after its first failure is provably
+  // the problem; without that proof an outage looks exactly the same.
+  options: { lastSuccessAtMs?: number } = {}
 ): Promise<{
   uploaded: number
   duplicated: number
@@ -102,6 +108,8 @@ export async function uploadPending(
   const deferred = new Set<string>()
   const pendingBatches: Array<Array<[string, OutboxEnvelope]>> = []
   let retryAtMs: number | undefined
+  let requests = 0
+  let probedUnknown = false
   if (!(await outboxPaths(workspace)).length) return summary
   let context:
     | {
@@ -114,6 +122,13 @@ export async function uploadPending(
   while (true) {
     if (Date.now() >= deadline) {
       summary.deferredUntilMs = Date.now() + 100
+      return summary
+    }
+    // Never start a request the remaining budget cannot finish: our own
+    // deadline would kill it and the batch would be charged as a server
+    // timeout even though the server was healthy.
+    if (requests >= MAX_REQUESTS_PER_RUN || deadline - Date.now() < MIN_REPORT_BUDGET_MS) {
+      summary.deferredUntilMs = Date.now() + 5_000
       return summary
     }
     const userCooldown = await admissionRetryAt(env)
@@ -171,7 +186,14 @@ export async function uploadPending(
         data = undefined
         break
       }
+      // Preparation can consume most of the budget, so re-check right before the
+      // request: a request killed by our own deadline is not a server timeout.
+      if (requests >= MAX_REQUESTS_PER_RUN || deadline - Date.now() < MIN_REPORT_BUDGET_MS) {
+        summary.deferredUntilMs = Date.now() + 5_000
+        return summary
+      }
       try {
+        requests++
         data = await transportStage('submitTurns', timings, () =>
           callSubmitTurns(serialized, env, remainingTimeout(deadline, 115_000))
         )
@@ -223,11 +245,46 @@ export async function uploadPending(
         }
         if (classified.kind === 'unknown') {
           // An unrecognised failure (for example a business error returned with
-          // success:false and no status) must still make progress. Only the head
-          // record owns the batch counter; a batch that keeps failing is treated
-          // as a request problem and bisected, and an isolated record ends in the
-          // dead-letter queue instead of blocking the whole workspace.
+          // success:false and no status) is ambiguous: the record may be bad, or
+          // the whole service may be unavailable. Record budgets and bisecting
+          // are only justified once this run proved the endpoint works, either by
+          // uploading another record or by succeeding on a probed batch. Without
+          // that evidence a service-wide outage would feed intact records into
+          // the dead-letter queue one by one.
           const [headPath, headEnvelope] = active[0]
+          const acknowledged = (options.lastSuccessAtMs ?? 0) > (headEnvelope.localRetry?.firstAtMs ?? Infinity)
+          if (summary.uploaded + summary.duplicated === 0 && !acknowledged) {
+            if (active.length > 1 && !probedUnknown) {
+              // No evidence yet: probe one half instead of bisecting the whole
+              // batch. A success is the only cheap proof that the service works
+              // and that the other half is the problem.
+              probedUnknown = true
+              const cut = Math.max(1, Math.ceil(active.length / 2))
+              pendingBatches.unshift(active.slice(0, cut))
+              active = active.slice(cut)
+              continue
+            }
+            // Every request this run failed: charge the workspace cooldown only.
+            // Record budgets and bisecting stay untouched so an outage cannot
+            // dead-letter intact records.
+            summary.endpointFailed = true
+            for (const [path, envelope] of active) {
+              retryAtMs = Math.min(
+                retryAtMs ?? Infinity,
+                await deferLocal(
+                  path,
+                  envelope,
+                  'report_unknown',
+                  'report_unknown_service',
+                  classified.details.retryAfterMs,
+                  { count: false }
+                )
+              )
+              deferred.add(path)
+            }
+            if (retryAtMs !== undefined && retryAtMs !== Infinity) summary.deferredUntilMs = retryAtMs
+            return summary
+          }
           if (localAttempts(headEnvelope, 'report_unknown') + 1 >= UNKNOWN_BATCH_SPLIT_ATTEMPTS) {
             if (active.length > 1) {
               const cut = Math.max(1, Math.ceil(active.length / 2))

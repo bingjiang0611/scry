@@ -107,7 +107,7 @@ test('init upgrades an older bridge, preserves the cursor, and uploads a later S
   const bridge = join(canonicalRoot, '.scry/provider-hook.sh')
   await writeFile(
     bridge,
-    (await readFile(bridge, 'utf8')).replace('Managed by scry-upload 0.2.4', 'Managed by scry-upload 0.1.4')
+    (await readFile(bridge, 'utf8')).replace('Managed by scry-upload 0.2.5', 'Managed by scry-upload 0.1.4')
   )
   assert.match(await readFile(bridge, 'utf8'), /Managed by scry-upload 0\.1\.4/)
   const second = await initWorkspace(root, 'claude,codex,qoder,opencode', testEnv)
@@ -125,7 +125,7 @@ test('init upgrades an older bridge, preserves the cursor, and uploads a later S
   assert.equal((await initWorkspace(root, 'claude,codex,qoder,opencode', testEnv)).baselineSequence, 1)
   const uploaded = (await readFile(log, 'utf8')).trim().split('\n').map(JSON.parse)
   assert.equal(uploaded.length, 1)
-  assert.equal(uploaded[0].payload.uploaderVersion, 'scry-uploader/0.2.4')
+  assert.equal(uploaded[0].payload.uploaderVersion, 'scry-uploader/0.2.5')
   assert.equal(uploaded[0].decoded[0].sessionId, sessionId)
   assert.equal(uploaded[0].decoded[0].workspace.root, canonicalRoot)
   assert.match(JSON.stringify(uploaded[0].decoded[0].diff), /created\.txt/)

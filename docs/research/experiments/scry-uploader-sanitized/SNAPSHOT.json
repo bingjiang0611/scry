@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "kind": "sanitized-review-snapshot",
-  "sourceVersion": "0.2.4",
-  "sourceRevision": "8e637007e4d8ec6fcdb002ef9f51592390210f9b",
-  "sourceTrackedFiles": 51,
-  "exportedSourceFiles": 51,
+  "sourceVersion": "0.2.5",
+  "sourceRevision": "3e2ae9cd80041772bd5827c23f2a3c3bc59e783f",
+  "sourceTrackedFiles": 53,
+  "exportedSourceFiles": 53,
   "additionalFiles": [
     "README.md",
     "SNAPSHOT.json"
@@ -13,12 +13,12 @@
   "productionDeployable": false,
   "verification": {
     "originalTests": {
-      "passed": 97,
+      "passed": 103,
       "failed": 0,
       "skipped": 0
     },
     "sanitizedTests": {
-      "passed": 97,
+      "passed": 103,
       "failed": 0,
       "skipped": 0
     },
@@ -26,16 +26,17 @@
     "realRemoteUploadVerified": false,
     "realRemoteUploadScope": "public-placeholder-snapshot-not-connected",
     "privateInstallationVerification": {
-      "version": "0.2.4",
+      "version": "0.2.5",
       "records": "synthetic-hooks-through-native-recorder",
-      "launchdRecoveryVerified": true,
+      "launchdServiceLoaded": true,
       "confirmedNewRecords": 1,
-      "disabledSessionsAbsent": 1,
-      "canonicalRecordsUnchanged": 6,
-      "heldReceiptOnlyHealth": "held_disabled",
-      "primaryCutoffUnchanged": true,
-      "custodyBytesExact": true,
-      "remoteStructuredBodyEqual": true
+      "uploaderVersionOnRemote": "scry-uploader/0.2.5",
+      "installedFilesMatchTarball": 74,
+      "canonicalBytesUnchanged": true,
+      "remoteStructuredBodyEqual": true,
+      "deadLettersUnchanged": 2208,
+      "redriveNoOpVerified": true,
+      "primaryCutoffUnchanged": true
     }
   },
   "files": [
@@ -49,31 +50,31 @@
     },
     {
       "path": "README.md",
-      "sha256": "8977ee2f6831939a3c0ba62d775922b23bc07e8faf2e0de524ddd0a0d91d63bc"
+      "sha256": "a1f4edc33f94798bec43e6e3c1ec792a0753f44c3dde302a4f6c409e49e7f09f"
     },
     {
       "path": "UPSTREAM-README.md",
-      "sha256": "5c58ba72854099523536f59ed06b854958e1df36dd9d8ac1764847f41ae7a0ff"
+      "sha256": "92fe0281860d815cc683f649aa883e734f1b20b71217686136351e2dfee5b4aa"
     },
     {
       "path": "package-lock.json",
-      "sha256": "ad1226f3c1daf1c60a219c4a37d9de09a41ff16f715a659715eabbf348edbf29"
+      "sha256": "d3a984f85a8911321f139a96408b1bdd241a08043e1ea17848ea39b3523ebc6b"
     },
     {
       "path": "package.json",
-      "sha256": "ca56961d4116f787662e0300fb888efab41ee8216dad6adc1dbd13b0f332b927"
+      "sha256": "8eb3af568567799f0ddef54c4d59c323fa96454fb93d4e143896cc0eab492e90"
     },
     {
       "path": "src/admission.ts",
-      "sha256": "3d84a84b2c45fcdfd3ccf376347233f23f5bfc41fafcbc2e09b2d095493b30e8"
+      "sha256": "d3fa0ff3079576b89ee6e84751fc34b7a2968052671ab3fde22bda0d028f1b00"
     },
     {
       "path": "src/cli.ts",
-      "sha256": "0c13c26f2160611a3a46eff62988c9526e11a3be83bfc793ce9c5ca6e954c95c"
+      "sha256": "da5ae476e74407199068ba1529b3cf285f57fbdaf94c034aafa0a7c166fb43d9"
     },
     {
       "path": "src/constants.ts",
-      "sha256": "d658e8556f1024f5f18091452ab65f002307d64b675974e0a24c13fe8538ff5c"
+      "sha256": "3eb19c6c97e6b9e8a0b878dfa655c47270b299a8ae0a2df374f0fee5992338ea"
     },
     {
       "path": "src/custody/index.ts",
@@ -104,8 +105,12 @@
       "sha256": "ada61511c16255fe3e774b4da660b30285540e57e809690212f99eb2f78fd190"
     },
     {
+      "path": "src/redrive.ts",
+      "sha256": "6aa43b352a23b6feef18aa179990a961f3211e75de56094683a2d708b4a5c300"
+    },
+    {
       "path": "src/retry.ts",
-      "sha256": "4a2f71ba4583d54442b35165e583a81db2b2b0929913b5643ef670c89fc29375"
+      "sha256": "7048e1ec48775e2c8d060cc670c5c0fcf1b4337caee3a68b5afccf26bfe90e13"
     },
     {
       "path": "src/scheduler.ts",
@@ -125,7 +130,7 @@
     },
     {
       "path": "src/types.ts",
-      "sha256": "1c4ef6e3cdaa51ae7338d783d619d14fd5b6db9b953014a621d072e6d790b9ed"
+      "sha256": "7b446ed97e59ae7d4394d9fc7a528a4eddf781285d5da4b7d9282eca463f3918"
     },
     {
       "path": "src/uploader-batch.ts",
@@ -141,11 +146,11 @@
     },
     {
       "path": "src/uploader-worker.ts",
-      "sha256": "61a8d8d89626e1fd3754b0797a361e56d45ff02384ee4d29364d0e384d20365c"
+      "sha256": "7ed803225cb568971343f051b033d701190655edf9ab2be4e781abcba3c20226"
     },
     {
       "path": "src/uploader.ts",
-      "sha256": "595373a9ab910b36ebc0c4bc6cb87001122950cb24f7ebcc373fb86eab6f66ef"
+      "sha256": "db33a85030ba76a1566c3e69266d08242e14ee24f1c4c54588d2620f126eaab0"
     },
     {
       "path": "src/util.ts",
@@ -185,7 +190,7 @@
     },
     {
       "path": "test/fixtures/recovery-transport.mjs",
-      "sha256": "02fa34a6894b75e3eb9992535a66d943ac349140e97ca49da1f862540cba5c84"
+      "sha256": "23a117cdaafb72ef2b5caf958e2f463e5a4ce667e71ff456a75f0dac268bbffd"
     },
     {
       "path": "test/fixtures/reliability-fixture.mjs",
@@ -201,7 +206,7 @@
     },
     {
       "path": "test/integration.test.mjs",
-      "sha256": "ffe5fc702e7d688f1ce57e4895d490cbe88299345eea7d034d62b9b4d0a7d295"
+      "sha256": "599f12ba1b9321278c74ad0ba5240bc8e88c2ecf600a1aa917dea7237786830a"
     },
     {
       "path": "test/locks-lifecycle.test.mjs",
@@ -214,6 +219,10 @@
     {
       "path": "test/recovery-contracts.test.mjs",
       "sha256": "c6c9c842221e07e7220f157b555ef5cb8c2ebc57af4fac0a3e51b5f9c91a6e0b"
+    },
+    {
+      "path": "test/redrive.test.mjs",
+      "sha256": "f8fc6e05fb43fb52156c2350d5bd925a4b37f7a522a341e73ebda7c1c72a5a41"
     },
     {
       "path": "test/reliability-fixes.test.mjs",
@@ -233,11 +242,11 @@
     },
     {
       "path": "test/transport-recovery.test.mjs",
-      "sha256": "43ea9cfb02fd927ced60c08d1fe0941e41040e19666f61e9144993fe6d982c5e"
+      "sha256": "fd9480b0ebab310b9e7c728174fc34c06aa8a5070b70c3ef660ebb8139f64476"
     },
     {
       "path": "test/uploader-regressions.test.mjs",
-      "sha256": "73d0324df9cb5ac830a6198f0f75cfacbefb781d6d921dcd7827ced3b3500b9c"
+      "sha256": "a68d0f7446fb976902be63ca185e2ca6f3efe30e0795a87af4550b359ab08ec5"
     },
     {
       "path": "test/wire.test.mjs",
