@@ -37,7 +37,9 @@ function serializableValue(value: unknown, seen: Set<object>, depth: number): un
 
 export function limitToolContent(field: ToolContent, bytes: number, reason: 'field_budget' | 'turn_budget'): ToolContent {
   if (field.content === undefined || field.savedBytes <= bytes) return field
-  const content = new StringDecoder('utf8').write(Buffer.from(field.content).subarray(0, Math.max(0, bytes)))
+  const content = bytes > 0
+    ? new StringDecoder('utf8').write(Buffer.from(field.content).subarray(0, bytes))
+    : ''
   const { content: _content, ...metadata } = field
   return {
     ...metadata,
