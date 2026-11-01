@@ -68,21 +68,21 @@ describe('overlay presence lifecycle', () => {
     expect(p.onClose).toHaveBeenCalledWith('escape')
     expect(p.onExitStart).toHaveBeenCalledOnce()
   })
-  it('uses exitMs + 80 when animationend is missing', () => {
+  it('uses exitMs + 40 when animationend is missing', () => {
     const p = mount()
     p.requestClose('backdrop')
-    vi.advanceTimersByTime(239)
+    vi.advanceTimersByTime(199)
     expect(p.onClose).not.toHaveBeenCalled()
     vi.advanceTimersByTime(1)
     expect(p.onClose).toHaveBeenCalledOnce()
     p.node.dispatchEvent(new Event('animationend'))
     expect(p.onClose).toHaveBeenCalledOnce()
   })
-  it('uses 120ms + 80 under reduced motion', () => {
+  it('uses 120ms + 40 under reduced motion', () => {
     media.matches = true
     const p = mount()
     p.requestClose('escape')
-    vi.advanceTimersByTime(199)
+    vi.advanceTimersByTime(159)
     expect(p.onClose).not.toHaveBeenCalled()
     vi.advanceTimersByTime(1)
     expect(p.onClose).toHaveBeenCalledOnce()
