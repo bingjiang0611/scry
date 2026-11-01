@@ -7,7 +7,7 @@ import { normalizeAgentStartRequest } from '../../shared/runtime'
 import type { ActiveRun, TraceEvent } from '../../shared/trace'
 import { createAppSessionStore } from '../app-store'
 import { DockBadgeState } from '../dock-badge'
-import { PerformanceTrace } from '../performance-timing'
+import { PerformanceTrace, setPerformanceRecordingSink, type PerformanceSample } from '../performance-timing'
 import { SessionDiffBaselineRegistry } from '../session-diff'
 import { archiveTraceTurn, persistTerminalProgress } from './archive'
 import { handleRunCompletion, type RunCompletionContext } from './run-completion'
@@ -24,6 +24,7 @@ vi.mock('./archive', () => ({
 
 const directories: string[] = []
 afterEach(async () => {
+  setPerformanceRecordingSink(null)
   vi.restoreAllMocks()
   vi.clearAllMocks()
   await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true })))
@@ -74,6 +75,24 @@ async function fixture() {
 }
 
 describe('terminal catalog publication', () => {
+  it.each(['completed', 'interrupted'] as const)('separates terminal work before diff completion: %s', async status => {
+    const current = await fixture()
+    const samples: PerformanceSample[] = []
+    setPerformanceRecordingSink(sample => samples.push(sample))
+    await handleRunCompletion({ externalSessionId: 'native-1', status }, current.ctx)
+    const terminal = samples.filter(sample => sample.name === 'agent.terminal_finalize')
+    expect(terminal).toHaveLength(1)
+    expect(terminal[0].checkpoints.map(point => point.stage)).toEqual([
+      'provider_terminal', 'llm_performance_settled', 'attachment_owner_settled',
+      'catalog_settled', 'live_ingestion_idle', 'terminal_progress_settled',
+      'turn_diff_joined', 'diff_complete', 'archive_committed', 'database_projected', 'renderer_terminal'
+    ])
+    expect(terminal[0].dimensions).toEqual({ provider: 'codex' })
+    expect(terminal[0].counters).toEqual({ events: 0, committed: 1 })
+    expect(JSON.stringify(terminal)).not.toContain('native-1')
+    expect(JSON.stringify(terminal)).not.toContain(current.ctx.catalogCwd)
+  })
+
   it.each([false, true])('records identity and outcome once when the Provider ID was already published: %s', async alreadyPublished => {
     const current = await fixture()
     if (alreadyPublished) {

@@ -112,6 +112,7 @@ export async function handleRunCompletion(r: ProviderRunResult, ctx: RunCompleti
   const completionStatus = r.status ?? (r.stopped ? 'interrupted' : 'completed')
   ctx.state.terminalStatus = completionStatus
   await persistLlmPerformance(completionStatus !== 'completed', storageSessionId)
+  terminalPerf.mark('llm_performance_settled')
   const completionNeedsAttention = completionStatus === 'completed' || completionStatus === 'failed'
   const completionArchiveArgs: ArchiveTraceTurnArgs = {
     agentProfileId: agentProfileId ?? null,
@@ -137,6 +138,7 @@ export async function handleRunCompletion(r: ProviderRunResult, ctx: RunCompleti
       console.warn('[scry] terminal attachment ownership update failed:', runId, error)
     }
   }
+  terminalPerf.mark('attachment_owner_settled')
   // Publish identity/baseline changes, but write the catalog once with the final outcome
   // below. Its failure must use the terminal catalog error path, not a deferred warning.
   publishSessionId(r.externalSessionId, { recordCatalog: false })
@@ -159,10 +161,12 @@ export async function handleRunCompletion(r: ProviderRunResult, ctx: RunCompleti
       hint: '保留 userData/app-sessions.json 与 .bak 后重试；本轮 trace 仍会继续归档'
     })
   }
+  terminalPerf.mark('catalog_settled')
   void mirrorSessionTranscript(providerId, cwd, nativeSessionId)
   const alreadyDone = runState.done
   runState.done = true
   await ingestion.liveIdle()
+  terminalPerf.mark('live_ingestion_idle')
   flushTraceSend() // 先把模型/工具事件发完，再发 turnDone；turn_diff 可稍后增量到达
   const recordingPolicy = providerRecordingPolicy('completed', r.recordingFailure)
   if (!recordingPolicy.allowCanonicalCommit) {
@@ -203,6 +207,7 @@ export async function handleRunCompletion(r: ProviderRunResult, ctx: RunCompleti
       hint: runState.errorHint
     })
   }
+  terminalPerf.mark('terminal_progress_settled')
   if (!canonicalLifecycle && !alreadyDone) {
     getWindow()?.webContents.send('agent:turnDone', {
       runId,
@@ -218,6 +223,7 @@ export async function handleRunCompletion(r: ProviderRunResult, ctx: RunCompleti
     terminalPerf.mark('renderer_terminal')
   }
   await turnDiffDone
+  terminalPerf.mark('turn_diff_joined')
   await finalizeSessionDiff()
   terminalPerf.mark('diff_complete')
   try {

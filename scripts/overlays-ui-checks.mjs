@@ -24,7 +24,7 @@ export async function exerciseOverlays(contents) {
   const closeTimes = []
   const close = async (selector, trigger, path = 'button') => {
     const nativeEvent = path === 'escape' ? 'keydown' : path === 'backdrop' ? 'mousedown' : 'click'
-    await read(`window.exitingOverlay = ${css(selector)}.parentElement; window.overlayCloseStart = null; window.overlayRemovedAt = null; window.overlayExitEndAt = null; window.addEventListener('${nativeEvent}', () => { window.overlayCloseStart = performance.now() }, { once: true, capture: true }); window.exitingOverlay.addEventListener('animationend', event => { if (event.target === window.exitingOverlay) window.overlayExitEndAt = performance.now() }); { const removal = new MutationObserver(() => { if (!window.exitingOverlay.isConnected) { window.overlayRemovedAt = performance.now(); removal.disconnect() } }); removal.observe(document.body, { childList: true, subtree: true }) }`)
+    await read(`window.exitingOverlay = ${css(selector)}.parentElement; window.overlayCloseStart = null; window.overlayRemovedAt = null; window.overlayExitEndAt = null; window.overlayExitStartAt = null; window.exitingOverlay.addEventListener('animationstart', event => { if (event.target === window.exitingOverlay) window.overlayExitStartAt = performance.now() }); window.addEventListener('${nativeEvent}', () => { window.overlayCloseStart = performance.now() }, { once: true, capture: true }); window.exitingOverlay.addEventListener('animationend', event => { if (event.target === window.exitingOverlay) window.overlayExitEndAt = performance.now() }); { const removal = new MutationObserver(() => { if (!window.exitingOverlay.isConnected) { window.overlayRemovedAt = performance.now(); removal.disconnect() } }); removal.observe(document.body, { childList: true, subtree: true }) }`)
     if (path === 'escape') key('Escape')
     else if (path === 'backdrop') {
       const point = await read(`(() => { const r = window.exitingOverlay.getBoundingClientRect(); const p = { x: r.left + 8, y: r.bottom - 8 }; if (document.elementFromPoint(p.x, p.y) !== window.exitingOverlay) throw new Error('Backdrop point is not the overlay'); return p; })()`)
@@ -35,10 +35,13 @@ export async function exerciseOverlays(contents) {
     check(await read(`window.exitingOverlay.isConnected && window.exitingOverlay.inert && document.activeElement === ${css(trigger)}`), `${path} did not restore focus at exit start`)
     check(await read(`window.exitingOverlay.getAnimations().some(animation => animation.effect.getTiming().duration === 160) && window.exitingOverlay.querySelector('.modal').getAnimations().some(animation => animation.effect.getTiming().duration === 150)`), 'Wrong backdrop/dialog exit duration')
     await wait(`!window.exitingOverlay.isConnected`)
-    const clock = await read('({ start: window.overlayCloseStart, end: window.overlayRemovedAt })')
+    const clock = await read('({ start: window.overlayCloseStart, end: window.overlayRemovedAt, animationStart: window.overlayExitStartAt, animationEnd: window.overlayExitEndAt })')
     check(Number.isFinite(clock.start) && Number.isFinite(clock.end) && clock.end >= clock.start, 'Missing native close/removal clock')
     const ms = clock.end - clock.start
-    check(ms <= 250, `${path} retained the modal for ${ms}ms`)
+    if (ms > 250) {
+      const environment = await read('({ viewport: [innerWidth, innerHeight, devicePixelRatio], visibility: document.visibilityState, reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches })')
+      check(false, `${path} retained the modal for ${ms}ms: ${JSON.stringify({ selector, clock, environment })}`)
+    }
     closeTimes.push({ selector, path, ms, nativeAnimationEnd: await read('window.overlayExitEndAt != null') })
   }
   await wait(`document.querySelectorAll('button.sb-sess').length === 2 && window.overlayFixture != null`)
