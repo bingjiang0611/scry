@@ -65,6 +65,8 @@ describe('desktop authenticated evidence source', () => {
   })
 
   it('pages real structured archive turns and rejects a stale page snapshot', async () => {
+    // Fixture chronology must not depend on writes crossing a wall-clock millisecond.
+    vi.spyOn(Date, 'now').mockReturnValue(Date.UTC(2026, 9, 14))
     const f = fixture()
     for (let i = 0; i < 3; i++) expect(f.archive(i)).toBe(true)
     const first = await f.read({ kind: 'history', context: f.context })

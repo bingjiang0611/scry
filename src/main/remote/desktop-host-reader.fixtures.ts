@@ -26,7 +26,7 @@ export function desktopReaderFixture() {
   return { read, context, userDataDir, root, setRun: (value: ActiveRun) => { run = value }, revoke: () => { allowed = false },
     archive: (index: number, text = `answer ${index}`) => upsertTraceArchiveTurn({
       cwd, userDataDir, sessionId: context.externalSessionId, providerId: 'codex', runtimeProvider: 'codex_cli',
-      turn: { runId: `run-${index}`, agentProfileId: null, userText: `prompt ${index}`, done: true, items: [{
+      turn: { runId: `run-${index}`, agentProfileId: null, userText: `prompt ${index}`, done: true, ts: Date.UTC(2026, 9, 14, 0, 0, index), items: [{
         id: `event-${index}`, runId: `run-${index}`, ts: `2026-10-14T00:00:0${index}Z`, kind: 'model', stage: 'text', text
       }] }
     }) }
