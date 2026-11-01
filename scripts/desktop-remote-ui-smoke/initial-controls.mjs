@@ -22,7 +22,21 @@ export async function runInitialControls({ click, wait, check, fixture, read }, 
     }
     await wait('[...document.querySelectorAll("#right-surface-pane .turn-call-open")].some(button => button.textContent === "T05")', 'logical overview contains target turn')
     await click('#right-surface-pane .turn-call-open', 'T05')
-    const aligned = `(() => { const prompt = document.querySelector('[data-run-id="conversation-run-4"] .turn-user'); return prompt && Math.abs(prompt.getBoundingClientRect().top - document.querySelector('.chat-transcript').getBoundingClientRect().top - 16) < 2; })()`
+    const aligned = `(() => {
+      const prompt = document.querySelector('[data-run-id="conversation-run-4"] .turn-user')
+      const chat = document.querySelector('.chat-transcript')
+      const promptTop = prompt?.getBoundingClientRect().top
+      const chatTop = chat?.getBoundingClientRect().top
+      window.desktopRemoteFixture.navigationGeometry = {
+        targetFound: !!prompt, targetInChat: !!chat?.contains(prompt),
+        scrollers: document.querySelectorAll('.chat-transcript').length,
+        promptTop, chatTop, scrollTop: chat?.scrollTop,
+        scrollHeight: chat?.scrollHeight, clientHeight: chat?.clientHeight,
+        highlightedRun: document.querySelector('.turn-jump-target')?.dataset.runId,
+        viewport: [innerWidth, innerHeight, devicePixelRatio]
+      }
+      return !!prompt && !!chat && Math.abs(promptTop - chatTop - 16) < 2
+    })()`
     await wait(aligned, 'logical conversation overview navigates to prompt, not bottom')
     await read('document.querySelector(".chat-transcript").scrollTop += 100')
     await click('#right-surface-pane .turn-call-open', 'T05')

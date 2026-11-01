@@ -4,7 +4,7 @@ export function createNativeDriver(contents, pointer, capture) {
   const wait = async (expression, label = expression) => {
     const deadline = Date.now() + 7000
     while (!await read(expression)) {
-      if (Date.now() > deadline) throw new Error(`Timed out: ${label}; DOM=${await read('JSON.stringify({ focus: document.activeElement?.tagName, selects: [...document.querySelectorAll("select")].map(node => ({value:node.value, options:[...node.options].map(option => ({text:option.text, value:option.value}))})), text: document.body.innerText.slice(-2000), events: window.desktopRemoteFixture.uiEvents })')}`)
+      if (Date.now() > deadline) throw new Error(`Timed out: ${label}; DOM=${await read('JSON.stringify({ focus: document.activeElement?.tagName, selects: [...document.querySelectorAll("select")].map(node => ({value:node.value, options:[...node.options].map(option => ({text:option.text, value:option.value}))})), text: document.body.innerText.slice(-2000), events: window.desktopRemoteFixture.uiEvents, navigation: window.desktopRemoteFixture.navigationGeometry })')}`)
       await new Promise((resolve) => setTimeout(resolve, 20))
     }
   }
