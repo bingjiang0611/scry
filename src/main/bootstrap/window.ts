@@ -46,6 +46,8 @@ export function createWindow(deps: WindowBootstrapDependencies): void {
     }
   }))
   const createdWindow = getWindow()!
+  // Remove Linux's default menu entirely; auto-hide would bring it back on Alt.
+  if (process.platform === 'linux') createdWindow.setMenu(null)
   createdWindow.on('focus', () => {
     // A completion received while the app was in the background is considered
     // read once its already-selected conversation becomes visible again.
