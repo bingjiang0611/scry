@@ -141,10 +141,23 @@ describe('DesktopRemoteClient over real host TLS', () => {
       if (!captureFailure) {
         const context = { cwd: directory, providerId: 'pi' as const, externalSessionId: 'large-session' }
         const text = '中文🙂\"\n'.repeat(400_000)
-        for (let i = 0; i < 3; i++) expect(upsertTraceArchiveTurn({
-          cwd: directory, userDataDir: directory, sessionId: context.externalSessionId, providerId: 'pi',
-          turn: { runId: `history-${i}`, agentProfileId: null, userText: `prompt ${i}`, done: true, items: [{ id: `event-${i}`, ts: '2026-10-14T00:00:00Z', runId: `history-${i}`, kind: 'model', stage: 'text', text: i === 2 ? text : `answer ${i}` }] }
-        })).toBe(true)
+        // Synchronous writes may share a millisecond; the fixture must carry chronology.
+        const archiveClock = vi.spyOn(Date, 'now').mockReturnValue(Date.UTC(2026, 9, 14))
+        try {
+          for (let i = 0; i < 3; i++) {
+            const timestamp = Date.UTC(2026, 9, 14, 0, 0, i)
+            expect(upsertTraceArchiveTurn({
+              cwd: directory, userDataDir: directory, sessionId: context.externalSessionId, providerId: 'pi',
+              turn: {
+                runId: `history-${i}`, agentProfileId: null, userText: `prompt ${i}`, done: true, ts: timestamp,
+                items: [{ id: `event-${i}`, ts: new Date(timestamp).toISOString(), runId: `history-${i}`,
+                  kind: 'model', stage: 'text', text: i === 2 ? text : `answer ${i}` }]
+              }
+            })).toBe(true)
+          }
+        } finally {
+          archiveClock.mockRestore()
+        }
         const history = await client.history(pending.connection.id, context)
         expect(history.turns.map(turn => turn.userText)).toEqual(['prompt 1', 'prompt 2'])
         expect(history.turns[1].items[0].text).toBe(text)
