@@ -1,0 +1,33 @@
+name: Bug report
+description: 报告可复现的 Scry 问题
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先搜索已有 Issue。不要提交凭据、原始会话、用户数据库或私人性能记录。
+        安全漏洞不要公开利用细节；先请求维护者提供私有报告渠道。
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境
+      description: Scry 版本、操作系统、Provider / CLI 版本；敏感路径请脱敏。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤
+      description: 从什么状态开始，做了什么；是否稳定复现？
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: 预期与实际行为
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 验证与证据
+      description: 脱敏截图、日志片段、已尝试的检查和未验证项。不要以推测代替结果。

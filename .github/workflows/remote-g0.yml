@@ -2,22 +2,45 @@ name: Remote G0 local contracts
 
 on:
   pull_request:
-    paths:
-      - 'experiments/remote-g0/**'
-      - 'apps/ios/**'
-      - '.github/workflows/remote-g0.yml'
   push:
     branches: [main]
-    paths:
-      - 'experiments/remote-g0/**'
-      - 'apps/ios/**'
-      - '.github/workflows/remote-g0.yml'
 
 permissions:
   contents: read
 
+concurrency:
+  group: remote-g0-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      required: ${{ steps.diff.outputs.required }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: diff
+        name: Detect remote changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [[ "$BASE_SHA" =~ ^0+$ ]]; then
+            echo 'required=true' >> "$GITHUB_OUTPUT"
+          elif git diff --quiet --no-ext-diff --no-textconv "$BASE_SHA" HEAD -- experiments/remote-g0 apps/ios .github/workflows; then
+            echo 'required=false' >> "$GITHUB_OUTPUT"
+          else
+            status=$?
+            if [ "$status" -ne 1 ]; then exit "$status"; fi
+            echo 'required=true' >> "$GITHUB_OUTPUT"
+          fi
+
   transport:
+    needs: changes
+    if: ${{ needs.changes.outputs.required == 'true' }}
     runs-on: macos-15
     timeout-minutes: 20
     env:
@@ -43,7 +66,7 @@ jobs:
       - run: node experiments/remote-g0/smoke.mjs
       - run: node experiments/remote-g0/enrollment-smoke.mjs
       - run: node experiments/remote-g0/pair-smoke.mjs
-      - run: node --import ./experiments/remote-g0/ts-relative-resolve.mjs experiments/remote-g0/g1-smoke.mjs
+      - run: npm --prefix experiments/remote-g0 run smoke:g1
       - name: Compile native iOS app and tests (not a device gate)
         run: >-
           xcodebuild -project apps/ios/ScryRemoteG0.xcodeproj
@@ -58,3 +81,21 @@ jobs:
           -destination 'generic/platform=iOS Simulator'
           -derivedDataPath "$RUNNER_TEMP/scry-remote-ui"
           CODE_SIGNING_ALLOWED=NO build
+
+  check:
+    name: Remote Check
+    if: ${{ always() }}
+    needs: [changes, transport]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require remote validation or an unaffected diff
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$RESULTS" | jq -e '
+            .changes.result == "success" and (
+              (.changes.outputs.required == "true" and .transport.result == "success") or
+              (.changes.outputs.required == "false" and .transport.result == "skipped")
+            )' > /dev/null

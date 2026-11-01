@@ -18,6 +18,21 @@
 12. **写入真实 `.scry` fixture。** 自动化测试使用临时 workspace/userData，不修改用户项目的 canonical records、Provider transcript 或真实 Scry DB。
 13. **把 release 产物混进源码。** `dist`、generated CLI `dist` 和本机审计/会话文件不是实现真相；构建前从源码生成并由脚本验收。
 
+## macOS / Linux 跨平台改动
+
+每次改动先判断是否涉及下面的边界；纯业务改动不机械增加平台分支。
+
+| 边界 | 优先复用 | 检查项 |
+| --- | --- | --- |
+| 打包路径与私有 CLI | `scripts/packaged-app-layout.mjs`、`build/scry-cli` | macOS `.app/Contents` 与 Linux `scry` + `resources/`；不硬编码单端路径、不回退全局 CLI；含空格路径与软链接需保留 |
+| Shell / Provider 发现 / 终端 | `src/main/shell.ts`、`src/main/claude-locate.ts` | 保留用户已有 SHELL；无值时使用平台默认；GUI 启动环境与 CLI 启动不同，不假定 zsh 或 macOS 工具存在 |
+| 窗口 / 快捷键 | `src/main/window-chrome.ts`、`src/renderer/platform.ts` | macOS 集成标题栏与 Linux 窗口装饰分开；快捷键行为和提示一致；文案仍集中管理；共同布局断言不能因 Linux 失败而跳过 |
+| 凭据 | `src/main/bootstrap/remote-connections.ts` | Linux `basic_text` 必须拒绝保存；`isEncryptionAvailable()` 为 true 不足以证明安全存储；不影响纯本地项目 |
+| 原生依赖 / locale | `electron-builder.yml`、`scripts/check-packaged-app.mjs` | 按目标 OS/架构/Electron ABI 重建；检查 node-pty、SQLite、资源 allowlist 与 Linux 的 `en-US/zh-CN/zh-TW.pak` |
+| pacman / 桌面入口 | `scripts/check-pacman-package.mjs` | 单行非空 `pkgdesc`、运行依赖、安装脚本；保留 `desktopName: scry.desktop` 与 `linux.syncDesktopName`，文件名、`StartupWMClass` 与运行时标识一致 |
+
+新增 macOS 专用能力（如 Dock）时明确 Linux 的不可用行为；不要借平台适配弱化 sandbox、renderer 隔离或仓库 trust gate。平台结论分别记录；Xvfb/容器 smoke 不等于 Hyprland、输入法、缩放或真实密钥环验收。命令与已知限制见 [验证与交付](verification.md#linux-验证与交付)。
+
 ## 跨表面检查清单
 
 ### Provider 或 run-control 改动

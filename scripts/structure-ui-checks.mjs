@@ -59,8 +59,11 @@ export async function exerciseStructure(contents) {
   check(await read(`(() => { const frame = window.structureFirstFrame; return frame.selected && frame.source === 'preview' && frame.busy === 'false' && frame.turns === 1 && frame.runId === 'session-preview:cache-b' && frame.turnText.trim().length > 0 && !frame.text.includes('Authoritative') && !frame.analytics && frame.locked })()`), 'First frame did not present the target catalog preview')
   await pending('cache-b')
   await control('resolve-b')
-  await wait(`${row('cache-b')}?.getAttribute('aria-current') === 'true' && ${body('cache-b')} && ${entry}?.effect.getTiming().duration === 180`)
-  check(await read(`${entry}.effect.getKeyframes().every(frame => !frame.transform || frame.transform === 'none')`), 'Session entry translated spatially')
+  await wait(`${row('cache-b')}?.getAttribute('aria-current') === 'true' && ${body('cache-b')}`)
+  check(await read(`(() => {
+    const animation = window.structureEntries.filter(item => item.id === 'scry-structure').at(-1)
+    return animation?.effect.getTiming().duration === 180 && animation.effect.getKeyframes().every(frame => !frame.transform || frame.transform === 'none')
+  })()`), 'Session entry lost its 180ms opacity-only animation')
   await wait(`${entries}.length === 0`)
 
   await click(row('cache-a'))
@@ -112,7 +115,6 @@ export async function exerciseStructure(contents) {
   await wait(`${body('cache-b')} && ${entries}.length === 0`)
   check(await read(`${entryCount} === 1`), 'New conversation did not reset the presented session identity')
 
-  contents.debugger.attach('1.3')
   try {
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
     await click(`document.querySelector('.sb-nav .sb-navitem')`)
@@ -121,8 +123,9 @@ export async function exerciseStructure(contents) {
     await wait(`${entries}.length === 0`)
     check(await read(`document.querySelector('.usage-page') != null && window.nativeCaptureCalls === 0`), 'Latest navigation failed or used native capture')
   } finally {
-    await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] })
-    contents.debugger.detach()
+    await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [
+      { name: 'prefers-reduced-motion', value: 'no-preference' }, { name: 'forced-colors', value: 'none' }
+    ] })
   }
   return { page240: true, belowChromeIncludesComposer: true, firstClickAndInputDuringEntry: true,
     coldSelectionPresentsTargetPreview: true, session180NoTranslation: true, rapidCancellation: true, staleHistoryRejected: true,

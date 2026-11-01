@@ -344,7 +344,7 @@ export function AskUserQuestionInline({
           </button>
           <button type="submit" className="btn primary question-submit" disabled={!answers || submitting}>
             {submitting ? QUESTIONNAIRE_COPY.submitting : groupedPiQuestionnaire ? QUESTIONNAIRE_COPY.submitAll : QUESTIONNAIRE_COPY.submit}
-            <span className="question-shortcut" aria-hidden="true">⌘↵</span>
+            <span className="question-shortcut" aria-hidden="true">{QUESTIONNAIRE_COPY.submitShortcut}</span>
           </button>
         </div>
       </footer>

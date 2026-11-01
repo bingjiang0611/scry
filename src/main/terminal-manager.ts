@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { realpathSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { DirectTerminalRecordingBackend, type TerminalRecordingBackend } from './terminal-recording-backend'
+import { defaultShellPath } from './shell'
 import type {
   TerminalCloseRequest,
   TerminalDataEvent,
@@ -118,8 +119,8 @@ function dispose(subscription: Disposable | undefined): void {
 }
 
 function defaultShell(): string {
-  if (process.platform === 'win32') return process.env.COMSPEC || 'cmd.exe'
-  return process.env.SHELL || '/bin/zsh'
+  if (process.platform === 'win32') return defaultShellPath()
+  return process.env.SHELL || defaultShellPath()
 }
 
 function defaultArgs(): string[] {

@@ -3,6 +3,7 @@ import { TerminalOutputBridge } from '../terminal-output'
 import { TerminalRecordingWorkerClient } from '../terminal-recording-backend'
 import { createTerminalManager, type TerminalManager } from '../terminal-manager'
 import { warmShellEnv } from '../claude-locate'
+import { defaultShellPath } from '../shell'
 
 export function createTerminalRuntime(deps: { userDataDir: string; getCurrentCwd: () => string | undefined; getHomeDir: () => string; getWindow: () => Electron.BrowserWindow | null; rendererCanReceive: () => boolean }) {
   let terminalManager: TerminalManager | undefined
@@ -47,7 +48,7 @@ export function createTerminalRuntime(deps: { userDataDir: string; getCurrentCwd
               console.warn('[scry] terminal recording unavailable:', event.id)
               if (deps.rendererCanReceive()) deps.getWindow()?.webContents.send('terminal:recordingError', event)
             },
-            shell: env.SHELL || process.env.SHELL || '/bin/zsh',
+            shell: env.SHELL || process.env.SHELL || defaultShellPath(),
             env
           })
           terminalManager = manager

@@ -83,8 +83,7 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
       state.replacement ||= document.getAnimations().some(a=>a.id==='scry-structure' && a.effect.getTiming().duration===180 && a.effect.getKeyframes().every(frame=>!('transform' in frame)))
     }
     window.__loadingObserver=new MutationObserver(mutations => {
-      // Inspect inserted subtrees even if React removed them again before this callback.
-      // A current-DOM-only scan cannot prove that a short request never mounted a loader.
+      // Include transient insertions: polling the current DOM cannot disprove a flash.
       const request=window.loadingFixture.records.find(r=>r.kind==='session' && r.start>=state.since)
       const loader = node => node.matches('.loading-status[data-status="loading"]') || node.querySelector('.loading-status[data-status="loading"]') != null
       // Scope by the mutation target, not by the added node's current ancestors: React can remove
@@ -92,7 +91,7 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
       if(request && mutations.some(m=>m.target instanceof Element && m.target.closest('.chat-transcript') != null && [...m.addedNodes].some(n=>n instanceof Element && loader(n)))) state.seen=true
       scan()
     })
-    window.__loadingObserver.observe(document.body,{subtree:true,childList:true,attributes:true})
+    window.__loadingObserver.observe(document.querySelector('.chat-body'),{subtree:true,childList:true,attributes:true})
     const frame=()=>{scan(); window.__loadingFrame=requestAnimationFrame(frame)}
     window.__loadingFrame=requestAnimationFrame(frame)
   })()`)
@@ -129,7 +128,6 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
   const failed = await measured('cache-b', 1000, true)
   check(failed.seen, 'failed session read never showed the standard loading status')
   await screenshot('failure')
-  contents.debugger.attach('1.3')
   let reduced
   try {
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]})
@@ -140,7 +138,9 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
     check(reduced.seen && reduced.visible, `reduced motion hid the standard loading status or blanked the transcript: ${JSON.stringify(reduced)}`)
     await screenshot('reduced-ready')
   } finally {
-    await contents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[]}); contents.debugger.detach()
+    await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [
+      { name: 'prefers-reduced-motion', value: 'no-preference' }, { name: 'forced-colors', value: 'none' }
+    ] })
   }
   // Other read surfaces use the same primitive; controls/evidence stay synchronous.
   const surfaces = []

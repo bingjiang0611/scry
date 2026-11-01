@@ -1,5 +1,10 @@
 export async function runSidebarActivity({ driver, options }) {
-  const { read, wait, check, click, key, insert, capture, fixture, remoteShown } = driver
+  const { read, wait, check, click, key, insert, capture, fixture, remoteShown, send } = driver
+  // The outer fixture owns the debugger; positive animation checks own their media precondition.
+  await send('Emulation.setEmulatedMedia', { features: [
+    { name: 'prefers-reduced-motion', value: 'no-preference' }, { name: 'forced-colors', value: 'none' }
+  ] })
+  await wait("!matchMedia('(prefers-reduced-motion: reduce)').matches && !matchMedia('(forced-colors: active)').matches")
   await click('.settings-modal .modal-x')
   check(await read('document.activeElement === document.querySelector(".location-button")'), 'Closing settings did not return focus to the location picker')
   await click('textarea[aria-label="描述任务"]'); await read('document.querySelector(\'textarea[aria-label="描述任务"]\').select()'); await key('Backspace')

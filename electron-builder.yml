@@ -60,3 +60,44 @@ mac:
   # Dock badge 依赖 macOS 通知权限，正式分发必须使用稳定的 Developer ID 身份并公证。
   target:
     - dir
+
+linux:
+  # electron-builder 的 Linux 可执行文件名不是产品名。App 私有 CLI 启动器（build/scry-cli）
+  # 与产物检查（scripts/check-packaged-app.mjs）都按这个固定文件名定位，不要改名。
+  executableName: scry
+  category: Development
+  # Omarchy/Arch 用 pacman 包装分发；`--dir` 仍产出 linux-unpacked 供本机 smoke 与产物检查。
+  target:
+    - pacman
+  # Electron 用 package.json 的 desktopName 作为 app_id / WM_CLASS。
+  # 打开同步后 .desktop 文件名与 StartupWMClass 都用同一个值，桌面环境才能把
+  # 运行中的窗口和启动器条目关联起来（否则会显示成无图标的独立窗口）。
+  syncDesktopName: true
+  # fpm 需要带邮箱的 maintainer（package.json 的 author 只有名字），使用公开的 GitHub 身份。
+  maintainer: bingjiang0611 <307659028+bingjiang0611@users.noreply.github.com>
+  # electronLanguages 按 locale 文件名精确匹配。Linux 上是 Chromium 的 <lang>-<REGION>.pak，
+  # 沿用 mac 的 en/zh_CN/zh_TW 会一个都匹配不上，导致所有 locale 被裁掉。
+  electronLanguages:
+    - en-US
+    - zh-CN
+    - zh-TW
+
+# 依赖只能写在目标包里（LinuxConfiguration 不接受 depends）。
+pacman:
+  # electron-builder 默认的 pacman 依赖表对应旧版 Arch（http-parser、libvpx、re2、minizip 等已不在仓库），
+  # 这里只声明当前 Arch 官方仓库存在的运行时依赖。安装依赖仍需在目标机验证后才能当作支持结论。
+  depends:
+    - gtk3
+    - nss
+    - libnotify
+    - libxtst
+    - libxss
+    - xdg-utils
+    - at-spi2-core
+    - libsecret
+  # electron-builder 对非 rpm 目标固定把 --description 传成 "${synopsis}\n ${description}"，
+  # 换行会写进 .PKGINFO 的 pkgdesc。pacman 按行解析，结果是空描述（pacman -Qi 显示 None）。
+  # fpm 参数在文件映射之前追加，重复的 --description 以最后一个为准，所以只覆盖 pacman 目标。
+  fpm:
+    - --description
+    - Scry：本地桌面 app，驱动 AI coding agent 并呈现可检查的执行证据

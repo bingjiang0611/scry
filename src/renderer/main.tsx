@@ -3,6 +3,7 @@ import { App } from './App'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { applyTheme, browserThemeStorage, readStoredTheme } from './theme'
 import { installRendererPerformanceMonitor } from './performance-monitor'
+import { detectRendererPlatform } from './platform'
 import './styles.css'
 import './motion.css'
 import './analytics-evidence.css'
@@ -10,8 +11,7 @@ import './inventory-evidence.css'
 import './session-evidence.css'
 import './codex-alignment.css'
 
-document.documentElement.dataset.platform =
-  navigator.userAgent.includes('Electron') && navigator.platform.startsWith('Mac') ? 'macos' : 'other'
+document.documentElement.dataset.platform = detectRendererPlatform()
 const syncPageVisibility = (): void => {
   document.documentElement.dataset.pageVisibility = document.visibilityState
 }

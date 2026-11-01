@@ -12,9 +12,6 @@ import { exerciseSessionTerminals } from './session-terminals-ui-check.mjs'
 import { exerciseSessionModels } from './session-models-ui-check.mjs'
 import { exerciseOverviewDensity } from './session-overview-ui-check.mjs'
 import { exercisePiPermission } from './pi-permission-ui-check.mjs'
-import { exerciseSidebarActivity } from './sidebar-activity-ui-checks.mjs'
-import { exerciseSidebarActivityContinuation } from './sidebar-activity-ui-continuation.mjs'
-import { exerciseSidebarUnreadResults } from './sidebar-unread-results-ui-checks.mjs'
 import { exerciseWorkspaceDiff } from './workspace-diff-ui-checks.mjs'
 
-export const fixtureSources = Object.fromEntries(Object.entries({ exerciseMetaPrompts, exerciseSummarySampling, exerciseSessionCapabilityCore, exerciseSessionCapabilitySummary, exerciseSessionCapabilityQuestionResult, exerciseLlmPerformanceSetup, exerciseLlmPerformanceFinish, exerciseSessionCache, exercisePiCommands, exerciseSessionSelection, exerciseSessionTerminals, exerciseSessionModels, exerciseOverviewDensity, exercisePiPermission, exerciseSidebarActivity, exerciseSidebarActivityContinuation, exerciseSidebarUnreadResults, exerciseWorkspaceDiff }).map(([name, fn]) => [name, fn.toString()]))
+export const fixtureSources = Object.fromEntries(Object.entries({ exerciseMetaPrompts, exerciseSummarySampling, exerciseSessionCapabilityCore, exerciseSessionCapabilitySummary, exerciseSessionCapabilityQuestionResult, exerciseLlmPerformanceSetup, exerciseLlmPerformanceFinish, exerciseSessionCache, exercisePiCommands, exerciseSessionSelection, exerciseSessionTerminals, exerciseSessionModels, exerciseOverviewDensity, exercisePiPermission, exerciseWorkspaceDiff }).map(([name, fn]) => [name, fn.toString()]))

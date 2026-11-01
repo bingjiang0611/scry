@@ -51,7 +51,7 @@ export async function exerciseSessionCache(contents) {
     const condition = `document.querySelector('.chat-transcript[aria-busy="false"]') != null &&
       document.querySelector('.chat-transcript')?.getAttribute('data-history-source') === 'preview' &&
       document.querySelector('.chat-transcript')?.textContent.includes(${JSON.stringify(`Authoritative ${id}`)}) &&
-      !document.querySelector('.chat-session-evidence-gap[data-status="loading"]')`
+      document.querySelector('.loading-status[data-status="loading"]') != null`
     await wait(condition)
     return read(condition)
   }
@@ -151,7 +151,7 @@ export async function exerciseSessionCache(contents) {
   // Native input dispatch does not await React's commit. Observe the existing
   // uncached-loading state and require the visible cache to clear while the
   // authority request is still pending; keep the no-turns and stale-response checks.
-  await wait(`document.querySelector('.chat-transcript[aria-busy="true"]') && !document.querySelector('.chat-session-evidence-gap[data-status="loading"]')`)
+  await wait(`document.querySelector('.chat-transcript[aria-busy="true"]') && document.querySelector('.loading-status[data-status="loading"]')`)
   await wait(`document.querySelectorAll('.transcript-turn').length === 0`)
   check(await noTurns(), 'Deletion invalidation left a pending cached page visible')
   await control('resolve-b'); await ready('cache-b')
@@ -175,7 +175,8 @@ export async function exerciseSessionCache(contents) {
   await control('resolve-b')
   await wait(`document.querySelector('.chat-transcript[aria-busy="false"]') && document.querySelector('.chat-transcript').textContent.includes('AUTHORITATIVE LIVE B')`)
   check(await read(`document.querySelector('.transcript-turn[data-run-id="live-b"]') != null`), 'Focused live run was lost during its own history restoration')
-  // Keep the retained session's authority request alive while a cold target waits.
+  // The 2026-10-28 contract switches immediately to the selected catalog preview.
+  // Keep A's request alive, but never let its late response replace selected B.
   await control('invalidate-cache')
   await select('cache-a'); await pending('cache-a')
   await control('resolve-a'); await ready('cache-a', 2)

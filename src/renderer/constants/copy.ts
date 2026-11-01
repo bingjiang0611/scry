@@ -1,3 +1,9 @@
+import { detectRendererPlatform, shortcutModifierLabel } from '../platform'
+
+// 快捷键提示里的修饰键跟随实际生效的按键：macOS 显示 ⌘，其他平台显示 Ctrl。
+// 处理事件时两个修饰键都接受，所以文案只需跟随平台，不改变行为。
+const shortcutModifier = shortcutModifierLabel(detectRendererPlatform())
+
 export const PI_PICKER_COPY = {
   nativePi: '原生 Pi',
   detail: (detected: boolean, version?: string) =>
@@ -156,7 +162,7 @@ export const WORKSPACE_EDITOR_COPY = {
   saved: '已保存',
   status: (state: string, kib: number) => `${state} · ${kib} KiB`,
   saving: '保存中…',
-  save: '保存 ⌘S'
+  save: `保存 ${shortcutModifier}S`
 } as const
 
 export const OVERVIEW_CACHE_COPY = {
@@ -229,7 +235,8 @@ export const QUESTIONNAIRE_COPY = {
   ready: '已选择，可继续',
   cancel: '取消',
   submitting: '正在提交…',
-  submit: '提交并继续'
+  submit: '提交并继续',
+  submitShortcut: `${shortcutModifier}↵`
 } as const
 
 // 排队消息块的全部用户可见文案。Steer 的状态文案与证据语义绑定：

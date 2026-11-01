@@ -1,23 +1,29 @@
 import { describe, expect, it } from 'vitest'
-import { compareNative, composerModes, exportNativeCounters, nativeCounterMetrics, nativeWorkloads, validateNative } from './performance-native.mjs'
+import { createHash } from 'node:crypto'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { assertSameNativeArtifact, compareNative, composerModes, exportNativeCounters, nativeBuildArtifacts, nativeCounterMetrics, nativeDiagnosticRecords, nativeInitialPageTurns, nativeWorkloads, validateNative } from './performance-native.mjs'
+import { DEFAULT_LOAD_SESSION_TURNS } from '../src/main/bootstrap/history-archive'
 
 const workCounters = (value: number) => Object.fromEntries(nativeCounterMetrics.map(metric => [metric, value]))
 
 function report() {
+  const errors: Array<{ scenario: string; message: string }> = []
   return {
-    schema: 1, revision: 'fixture', harness: 'a'.repeat(64), environment: { platform: 'darwin', node: '22' }, errors: [],
+    schema: 1, revision: 'fixture', harness: 'a'.repeat(64), environment: { platform: 'darwin', node: '22' }, errors,
     results: Object.fromEntries(Object.entries(nativeWorkloads).map(([scenario, [turnCount, sections]]) => [scenario, {
-      scenario, turnCount, sections, measurementVersion: 5, warmups: 2, iterations: 12,
+      scenario, turnCount, sections, measurementVersion: 7, warmups: 2, iterations: 12,
       artifactSha256: 'b'.repeat(64), benchmarkSha256: 'c'.repeat(64), platform: 'darwin/arm64', node: '22', electron: '35',
       sqliteStats: { status: 'ready', turns: 18, readMs: 2 },
-      counterSensitivity: { baseline: workCounters(1), extra: workCounters(2), passed: true },
+      counterSensitivity: { baseline: workCounters(1), extra: workCounters(2), mutationControl: { baseline: 0, extra: 2 }, passed: true },
       composerSamples: composerModes.map((mode, index) => ({ mode, prompt: `native composer ${mode} ${index}`, runId: `button-${index}`, sendWorkCounters: workCounters(1),
         inputTrusted: true, sendTrusted: true, stopTrusted: mode !== 'complete', terminalConfirmed: true, stopped: mode !== 'complete',
         nativeTurnKnown: mode !== 'stop-immediate', diskVerified: true, sendToTerminalMs: 50, sendToSettledVisibleMs: 60,
         ...(mode !== 'stop-immediate' ? { sendToOutputReceiptMs: 10, sendToFirstVisibleMs: 20, sendToVisibleReadyMs: 30 } : {}),
         ...(mode !== 'complete' ? { driverStopDispatchMs: 5, stopToTerminalMs: 10, stopToSettledVisibleMs: 20, stopWorkCounters: workCounters(1) } : {}) })),
       startupDriverReadyMs: 500, nativeInput: { trusted: true, frameReadyMs: 20 }, cleanup: { tracked: 3 }, firstOpens: [{}, {}],
-      samples: Array.from({ length: 12 }, () => ({ totalTurns: Math.min(40, turnCount), completeParagraphs: sections, nativeOpenMs: 40, handlerDelayMs: 2, scriptMs: 10, domNodes: 500, workCounters: workCounters(1) })),
+      samples: Array.from({ length: 12 }, () => ({ totalTurns: Math.min(nativeInitialPageTurns, turnCount), completeParagraphs: sections, nativeOpenMs: 40, handlerDelayMs: 2, scriptMs: 10, domNodes: 500, workCounters: workCounters(1) })),
       lifecycleSamples: [false, true, false, true, false, true].map(stopped => ({
         stopped, terminalConfirmed: true, durableTurns: 1, diskVerified: true, startReceiptMs: 5, firstOutputReceiptMs: 10,
         startToTerminalMs: 30, terminalToReadableArchiveMs: 5, ...(stopped ? { stopReceiptMs: 2, stopToTerminalMs: 10 } : {})
@@ -26,7 +32,97 @@ function report() {
   }
 }
 
+describe('same-artifact diagnostic identity', () => {
+  it('accepts a complete repeated artifact and leaves the primary comparison unchanged', () => {
+    const first = report()
+    const repeated = structuredClone(first)
+    first.results.short.lifecycleSamples[0].startToTerminalMs = 180
+    expect(() => assertSameNativeArtifact(first, repeated)).not.toThrow()
+    expect(compareNative(first, repeated).passed).toBe(true)
+    expect(compareNative(repeated, first).passed).toBe(false)
+    expect(first.results.short.lifecycleSamples[0].startToTerminalMs).toBe(180)
+  })
+
+  it('rejects a different revision, environment, harness, driver or compiled artifact', () => {
+    const changes: Array<(value: ReturnType<typeof report>) => void> = [
+      value => { value.revision = 'other' },
+      value => { value.environment.node = '24' },
+      value => { value.harness = 'd'.repeat(64) },
+      value => { value.results.short.benchmarkSha256 = 'd'.repeat(64) },
+      value => { value.results.short.artifactSha256 = 'd'.repeat(64) }
+    ]
+    for (const change of changes) {
+      const repeated = report()
+      change(repeated)
+      expect(() => assertSameNativeArtifact(report(), repeated)).toThrow('same-artifact control changed')
+    }
+  })
+})
+
+describe('native diagnostic evidence', () => {
+  it('retains per-file hashes without changing the existing aggregate fingerprint', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'scry-native-artifacts-'))
+    const hash = (value: string) => createHash('sha256').update(value).digest('hex')
+    try {
+      mkdirSync(join(directory, 'out', 'main'), { recursive: true })
+      mkdirSync(join(directory, 'out', 'renderer'), { recursive: true })
+      writeFileSync(join(directory, 'out', 'main', 'index.js'), 'main')
+      writeFileSync(join(directory, 'out', 'renderer', 'index.html'), 'renderer')
+      const files = [
+        { path: 'main/index.js', sha256: hash('main') },
+        { path: 'renderer/index.html', sha256: hash('renderer') }
+      ]
+      const artifact = nativeBuildArtifacts(directory)
+      expect(artifact.files).toEqual(files)
+      expect(artifact.sha256).toBe(hash(files.map(file => `${file.path}\0${file.sha256}\n`).join('')))
+      writeFileSync(join(directory, 'out', 'main', 'index.js'), 'changed main')
+      const changed = nativeBuildArtifacts(directory)
+      expect(changed.sha256).not.toBe(artifact.sha256)
+      expect(changed.files[0].sha256).not.toBe(files[0].sha256)
+      expect(changed.files[1]).toEqual(files[1])
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('preserves startup, start IPC, resources and loss evidence without inventing absent observations', () => {
+    const records = ['resource', 'renderer', 'app.startup', 'ipc.agent:start', 'ipc.agent:loadSession', 'health'].map(kind => ({
+      build: 'fixture-build', session: 'fixture-session',
+      observation: kind.includes('.') ? { kind: 'trace', sample: { name: kind } }
+        : kind === 'health' ? { kind, sample: { droppedRecords: 5, closed: true } } : { kind }
+    }))
+    expect(nativeDiagnosticRecords(records)).toEqual([...records.slice(0, 4), records.at(-1)])
+    expect(nativeDiagnosticRecords([])).toEqual([])
+  })
+})
+
 describe('native performance evidence gate', () => {
+  it('matches the current initial-page contract without shrinking workloads or accepting lost history', () => {
+    expect(nativeInitialPageTurns).toBe(DEFAULT_LOAD_SESSION_TURNS)
+    expect(nativeWorkloads).toEqual({ markdown: [40, 32], short: [20, 1], 'short-heavy': [20, 32], paged: [120, 2] })
+    const truncated = report()
+    truncated.results.paged.samples[0].totalTurns--
+    expect(() => validateNative(truncated)).toThrow('initial history page is incomplete')
+    const stale = report()
+    stale.results.paged.measurementVersion = 6
+    expect(() => validateNative(stale)).toThrow()
+  })
+
+  it('requires exact same-task mutation calibration rather than ordering unrelated startup windows', () => {
+    const noisy = report()
+    for (const result of Object.values(noisy.results)) {
+      result.counterSensitivity.baseline = workCounters(100)
+      result.counterSensitivity.extra = workCounters(2)
+    }
+    expect(() => validateNative(noisy)).not.toThrow()
+    noisy.results.short.counterSensitivity.mutationControl.extra = 0
+    expect(() => validateNative(noisy)).toThrow('mutation sensitivity control')
+    noisy.results.short.counterSensitivity.mutationControl = { baseline: 1, extra: 2 }
+    expect(() => validateNative(noisy)).toThrow('mutation sensitivity control')
+    Reflect.deleteProperty(noisy.results.short.counterSensitivity, 'mutationControl')
+    expect(() => validateNative(noisy)).toThrow('mutation sensitivity control')
+  })
+
   it('compares matching evidence and detects real latency regressions', () => {
     expect(composerModes).toHaveLength(12)
     expect(composerModes.filter(mode => mode === 'stop-immediate')).toHaveLength(6)
@@ -36,12 +132,12 @@ describe('native performance evidence gate', () => {
     const counters = exportNativeCounters(base)
     // 4 workloads x (history + 3 send modes + 2 stop modes) x metrics; modes are never mixed.
     expect(counters.observations).toHaveLength(4 * 6 * nativeCounterMetrics.length)
-    const runsOf = (scenario: string) => counters.observations.find(observation => observation.scenario === scenario)?.runs
+    const runsOf = (scenario: string) => counters.observations.find((observation: { scenario: string }) => observation.scenario === scenario)?.runs
     expect(runsOf('short.send-settled.complete')).toHaveLength(3)
     expect(runsOf('short.send-settled.stop-immediate')).toHaveLength(6)
     expect(runsOf('short.stop-settled.stop-visible')).toHaveLength(3)
     expect(runsOf('short.stop-settled.complete')).toBeUndefined()
-    expect(counters.observations.every(observation => observation.availability === 'measured')).toBe(true)
+    expect(counters.observations.every((observation: { availability: string }) => observation.availability === 'measured')).toBe(true)
     expect(compareNative(base, structuredClone(base)).passed).toBe(true)
     const head = report()
     head.results.markdown.samples[0].nativeOpenMs = 900

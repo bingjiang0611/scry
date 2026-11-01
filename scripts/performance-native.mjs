@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { cpus, release } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -11,7 +11,10 @@ export { composerModes, nativeCounterMetrics }
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 export const nativeWorkloads = { markdown: [40, 32], short: [20, 1], 'short-heavy': [20, 32], paged: [120, 2] }
-export const nativeHarnessFiles = ['scripts/performance-native.mjs', 'scripts/session-open-bench.mjs', 'scripts/session-open-timing.mjs', 'scripts/native-composer-probe.mjs', 'src/main/providers/smoke.ts', 'scripts/owned-app-processes.mjs', 'scripts/hidden-electron-windows.cjs', 'scripts/performance-report.mjs', 'scripts/performance-paths.json']
+// Match the existing default in bootstrap/history-archive.ts, not the older-page size.
+// Seeded workloads and full history recovery remain unchanged.
+export const nativeInitialPageTurns = 10
+export const nativeHarnessFiles = ['scripts/performance-native.mjs', 'scripts/session-open-bench.mjs', 'scripts/session-open-fixture.mjs', 'scripts/session-open-history.mjs', 'scripts/session-open-timing.mjs', 'scripts/native-composer-probe.mjs', 'src/main/providers/smoke.ts', 'scripts/owned-app-processes.mjs', 'scripts/hidden-electron-windows.cjs', 'scripts/performance-report.mjs', 'scripts/performance-paths.json', '.agents/skills/scry-performance-climb/scripts/timing-run.mjs']
 const composerMetrics = mode => ['sendToTerminalMs', 'sendToSettledVisibleMs',
   ...(mode !== 'stop-immediate' ? ['sendToOutputReceiptMs', 'sendToFirstVisibleMs', 'sendToVisibleReadyMs'] : []),
   ...(mode !== 'complete' ? ['stopToTerminalMs', 'stopToSettledVisibleMs'] : [])]
@@ -19,6 +22,28 @@ const finite = value => typeof value === 'number' && Number.isFinite(value) && v
 const integerCounter = value => Number.isSafeInteger(value) && value >= 0
 const assertCounters = (counters, label) => {
   assert.ok(counters && nativeCounterMetrics.every(metric => integerCounter(counters[metric])), `missing ${label} work counters`)
+}
+
+export function nativeBuildArtifacts(projectRoot) {
+  const artifactDir = join(projectRoot, 'out')
+  const digest = createHash('sha256')
+  const files = []
+  for (const path of readdirSync(artifactDir, { recursive: true }).sort()) {
+    if (!statSync(join(artifactDir, path)).isFile()) continue
+    const sha256 = createHash('sha256').update(readFileSync(join(artifactDir, path))).digest('hex')
+    files.push({ path, sha256 })
+    digest.update(`${path}\0${sha256}\n`)
+  }
+  return { sha256: digest.digest('hex'), files }
+}
+
+// Retain existing isolated-App observations after measurement; do not add sampling
+// or use diagnostics to override a failed budget.
+export function nativeDiagnosticRecords(records) {
+  return records.filter(({ observation }) => {
+    if (['resource', 'renderer', 'health'].includes(observation.kind)) return true
+    return observation.kind === 'trace' && ['app.startup', 'ipc.agent:start'].includes(observation.sample.name)
+  })
 }
 
 export function exportNativeCounters(report) {
@@ -49,7 +74,7 @@ export function validateNative(report) {
   assert.equal(report.errors.length, 0, 'failed native lanes cannot pass')
   assert.deepEqual(Object.keys(report.results).sort(), Object.keys(nativeWorkloads).sort(), 'native lane coverage differs')
   for (const [name, result] of Object.entries(report.results)) {
-    assert.equal(result.measurementVersion, 5)
+    assert.equal(result.measurementVersion, 7)
     assert.deepEqual([result.turnCount, result.sections], nativeWorkloads[name], 'native workload differs')
     assert.equal(result.scenario, name)
     assert.equal(result.warmups, 2)
@@ -68,9 +93,9 @@ export function validateNative(report) {
     assert.equal(result.counterSensitivity?.passed, true, 'native work counter sensitivity control must pass')
     assertCounters(result.counterSensitivity?.baseline, `${name} sensitivity baseline`)
     assertCounters(result.counterSensitivity?.extra, `${name} sensitivity extra`)
-    assert.ok(nativeCounterMetrics.some(metric => result.counterSensitivity.extra[metric] > result.counterSensitivity.baseline[metric]), 'sensitivity control must raise a work counter')
+    assert.deepEqual(result.counterSensitivity.mutationControl, { baseline: 0, extra: 2 }, 'mutation sensitivity control must prove both observed mutations')
     for (const sample of result.samples) {
-      assert.equal(sample.totalTurns, Math.min(40, result.turnCount))
+      assert.equal(sample.totalTurns, Math.min(nativeInitialPageTurns, result.turnCount), 'initial history page is incomplete')
       assert.equal(sample.completeParagraphs, result.sections, 'renderer lost fixed paragraph content')
       for (const metric of ['nativeOpenMs', 'handlerDelayMs', 'scriptMs', 'domNodes']) assert.ok(finite(sample[metric]), `missing ${name}.${metric}`)
       assert.ok(sample.domNodes > 0)
@@ -114,6 +139,18 @@ export function validateNative(report) {
         for (const metric of metrics) assert.ok(finite(cycle[metric]), `missing lifecycle ${metric}`)
       }
     }
+  }
+}
+
+export function assertSameNativeArtifact(first, repeated) {
+  validateNative(first)
+  validateNative(repeated)
+  assert.equal(first.revision, repeated.revision, 'same-artifact control changed revision')
+  assert.equal(first.harness, repeated.harness, 'same-artifact control changed harness')
+  assert.deepEqual(first.environment, repeated.environment, 'same-artifact control changed environment')
+  for (const scenario of Object.keys(nativeWorkloads)) {
+    assert.equal(first.results[scenario].artifactSha256, repeated.results[scenario].artifactSha256, `${scenario}: same-artifact control changed build`)
+    assert.equal(first.results[scenario].benchmarkSha256, repeated.results[scenario].benchmarkSha256, `${scenario}: same-artifact control changed driver`)
   }
 }
 
@@ -162,7 +199,7 @@ export function formatNative(report) {
     '| Scenario | Boundary | Base | Candidate | Ceiling | Result |', '|---|---|---:|---:|---:|---|',
     ...report.rows.map(row => `| ${row.scenario} | ${row.metric} | ${row.baseline.toFixed(2)} | ${row.candidate.toFixed(2)} | ${row.ceiling.toFixed(2)} | ${row.status} |`), '',
     'Hidden real Electron main/preload/renderer; GPU disabled. History uses trusted native clicks and two stable frames. Input uses a trusted input event and two frames. Startup includes driver readiness polling. The separately labelled IPC lifecycle remains distinct. Button acceptance uses trusted Send/Stop clicks, real assistant text hit-tested in the viewport across two frames, terminal notification, idle composer across two frames, and independently readable output after App exit. The offline Provider waits for actual cancellation, without timed completion.',
-    'Twelve warm history samples, one restart/input observation, three complete and three interrupted IPC runs per workload. Three fixed button cohorts each contain: stop before native turn identity, complete, stop after visible output, then early stop again; SQLite must retain all eighteen runs. Every observation is retained; no failure-dependent retries or discarded warmups. Button maxima are acceptance guardrails, not statistical latency estimates. Send-to-terminal totals on interrupted runs include driver dispatch time, recorded separately as driverStopDispatchMs. Fixture p95/max is NOT daily-use p95. These initial absolute guardrails are conservative, not user SLOs; relative checks catch changes. No paid Provider, real phone or external network is exercised.', ''].join('\n')
+    'Twelve warm history samples, one restart/input observation, three complete and three interrupted IPC runs per workload. Three fixed button cohorts each contain: stop before native turn identity, complete, stop after visible output, then early stop again; SQLite must retain all eighteen runs. Every primary observation is retained, without retries or discarded warmups. After a valid comparison fails, one separately labelled same-artifact diagnostic may run; it cannot replace either primary report or change the failed gate. Button maxima are acceptance guardrails, not statistical latency estimates. Send-to-terminal totals on interrupted runs include driver dispatch time, recorded separately as driverStopDispatchMs. Fixture p95/max is NOT daily-use p95. These initial absolute guardrails are conservative, not user SLOs; relative checks catch changes. No paid Provider, real phone or external network is exercised.', ''].join('\n')
 }
 
 async function bench(output) {

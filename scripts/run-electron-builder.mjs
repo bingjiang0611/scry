@@ -31,7 +31,11 @@ env = releaseBuildEnvironment({
 })
 
 const builder = join(process.cwd(), 'node_modules', '.bin', 'electron-builder')
-const args = ['--dir', ...(releaseBuild && process.platform === 'darwin' ? ['--config.mac.notarize=true'] : [])]
+// macOS 发布只出 .app（由 install:mac 安装）；Linux 发布要产出可安装的 pacman 包。
+// 两种情况都保留 dist/<platform>-unpacked，供后续产物检查与 smoke 使用。
+const args = releaseBuild && process.platform === 'linux'
+  ? ['--linux', 'pacman']
+  : ['--dir', ...(releaseBuild && process.platform === 'darwin' ? ['--config.mac.notarize=true'] : [])]
 const result = spawnSync(builder, args, { env, stdio: 'inherit' })
 if (result.error) throw result.error
 if (result.status !== 0) throw new Error(`electron-builder failed with exit ${result.status ?? 'unknown'}`)

@@ -55,15 +55,44 @@ export async function exerciseMotionTokens(contents) {
     await checkNoTransform(selector, selector)
   }
 
-  await read('window.motionFixture.reorder()')
-  await wait(`document.querySelector('[data-motion-key="motion-session"]').dataset.activityGroup === 'attention'`)
-  const normal = await read(`document.querySelector('.sb-activity').getAnimations({ subtree: true })
-    .filter(animation => animation.effect?.target?.hasAttribute('data-motion-key'))
-    .map(animation => ({ duration: animation.effect.getTiming().duration, frames: animation.effect.getKeyframes() }))`)
-  check(normal.some(animation => animation.duration === 300 && animation.frames.some(frame => frame.transform != null)), 'normal reorder did not produce the 300ms FLIP positive control')
-
+  const ambientReduced = await read("matchMedia('(prefers-reduced-motion: reduce)').matches")
   await contents.debugger.attach('1.3')
   try {
+    // Establish both media-query controls, regardless of the runner's preference.
+    await contents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }]
+    })
+    await wait("!matchMedia('(prefers-reduced-motion: reduce)').matches")
+    const positions = `[...document.querySelectorAll('.sb-activity [data-motion-key]')]
+      .map(node => ({ key: node.dataset.motionKey, group: node.dataset.activityGroup, top: node.offsetTop }))`
+    const before = await read(positions)
+    // Keep real Animation objects even if observation happens after completion.
+    await read(`(() => {
+      const animate = Element.prototype.animate
+      const created = []
+      Element.prototype.animate = function (...args) {
+        const animation = animate.apply(this, args)
+        if (this.hasAttribute('data-motion-key') && this.closest('.sb-activity')) created.push(animation)
+        return animation
+      }
+      window.__motionReorder = { created, restore: () => { Element.prototype.animate = animate } }
+    })()`)
+    try {
+      await read('window.motionFixture.reorder()')
+      await wait(`document.querySelector('[data-motion-key="motion-session"]').dataset.activityGroup === 'attention'`)
+      const normal = await read(`({
+        reduced: matchMedia('(prefers-reduced-motion: reduce)').matches,
+        positions: ${positions},
+        animations: window.__motionReorder.created.map(animation => ({
+          id: animation.id, duration: animation.effect.getTiming().duration, frames: animation.effect.getKeyframes()
+        }))
+      })`)
+      check(!normal.reduced && normal.animations.some(animation => animation.duration === 300 && animation.frames.some(frame => frame.transform != null)),
+        `normal reorder did not produce the 300ms FLIP positive control: ${JSON.stringify({ ambientReduced, before, normal })}`)
+    } finally {
+      await read('window.__motionReorder.restore(); delete window.__motionReorder')
+    }
+
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia', {
       features: [{ name: 'prefers-reduced-motion', value: 'reduce' }]
     })
@@ -120,6 +149,8 @@ export async function exerciseMotionTokens(contents) {
 
   return {
     cssTokens: true,
+    ambientReducedMotion: ambientReduced,
+    normalMotionReorder: true,
     themes: ['dark', 'light'],
     hoverStates: ['tool-card', 'composer-send', 'sidebar-activity', 'analysis'],
     focusStates: true,

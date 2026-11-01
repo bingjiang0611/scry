@@ -7,7 +7,8 @@ import { defaultScenarios, selectScenario } from './desktop-remote-ui-smoke/scen
 const directory = resolve('scripts/desktop-remote-ui-smoke')
 const files = readdirSync(directory).filter(name => name.endsWith('.mjs')).map(name => resolve(directory, name))
 
-function unboundNames(removeCheck = false): string[] {
+function unboundNames(): { actual: string[]; control: string[] } {
+  const control = resolve(directory, '__missing-check-control.mjs')
   const options: ts.CompilerOptions = {
     allowJs: true, checkJs: true, noEmit: true, target: ts.ScriptTarget.ES2022,
     module: ts.ModuleKind.NodeNext, skipLibCheck: true, lib: ['lib.es2022.d.ts'], types: ['node']
@@ -15,14 +16,21 @@ function unboundNames(removeCheck = false): string[] {
   const host = ts.createCompilerHost(options)
   const getSourceFile = host.getSourceFile.bind(host)
   host.getSourceFile = (file, languageVersion, onError, shouldCreateNewSourceFile) => {
-    if (removeCheck && file === resolve(directory, 'initial-controls.mjs')) {
-      return ts.createSourceFile(file, readFileSync(file, 'utf8').replace('click, wait, check, fixture', 'click, wait, fixture'), ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS)
+    if (file === control) {
+      const original = readFileSync(resolve(directory, 'initial-controls.mjs'), 'utf8')
+      return ts.createSourceFile(file, original.replace('click, wait, check, fixture', 'click, wait, fixture'), ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS)
     }
     return getSourceFile(file, languageVersion, onError, shouldCreateNewSourceFile)
   }
-  return ts.createProgram(files, options, host).getSemanticDiagnostics()
+  // Check all original modules and the deliberately broken control in one program.
+  // Two complete TypeScript programs duplicate dependency analysis and timed out in CI.
+  const diagnostics = ts.createProgram([...files, control], options, host).getSemanticDiagnostics()
     .filter(diagnostic => diagnostic.code === 2304 || diagnostic.code === 2552)
-    .map(diagnostic => ts.flattenDiagnosticMessageText(diagnostic.messageText, ' '))
+  const message = (diagnostic: ts.Diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, ' ')
+  return {
+    actual: diagnostics.filter(diagnostic => diagnostic.file?.fileName !== control).map(message),
+    control: diagnostics.filter(diagnostic => diagnostic.file?.fileName === control).map(message)
+  }
 }
 
 describe('DesktopRemote UI scenario organization', () => {
@@ -50,7 +58,8 @@ describe('DesktopRemote UI scenario organization', () => {
   })
 
   it('has no hidden bindings left over from the former monolithic function', () => {
-    expect(unboundNames()).toEqual([])
-    expect(unboundNames(true)).toContain("Cannot find name 'check'.")
+    const diagnostics = unboundNames()
+    expect(diagnostics.actual).toEqual([])
+    expect(diagnostics.control).toContain("Cannot find name 'check'.")
   })
 })

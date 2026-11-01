@@ -28,7 +28,7 @@ import { exerciseRestart } from './electron-security-restart.mjs'
 import { exerciseStructureApp } from './structure-app-checks.mjs'
 import { prepareSideChatMode } from './side-chat-smoke.mjs'
 import { lostReplyPath, writeConversationFaultEntry, writeIpcCountEntry } from './smoke-app-entries.mjs'
-
+import { defaultPackagedAppPath, electronDevLayout, packagedAppLayout } from './packaged-app-layout.mjs'
 
 const structureOnly = process.argv[2] === '--dev-structure-only'
 const sideChatOnly = process.argv[2] === '--dev-side-chat-only'
@@ -54,8 +54,9 @@ const devFilesOnly = process.argv[2] === '--dev-files-only'
 const filesOnly = devFilesOnly || process.argv[2] === '--files-only'
 const devApp = sideChatOnly || largeHistoryOnly || structureOnly || unifiedConversationOnly || conversationOwnershipOnly || sourceControlOnly || devMetaPromptsOnly || nativeHistoryOnly || process.argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
 const packagedAppArgument = ['--files-only', '--performance-only', '--file-history-only'].includes(process.argv[2]) ? undefined : process.argv[2]
-const appPath = resolve(devApp ? 'node_modules/electron/dist/Electron.app' : packagedAppArgument || join('dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'Scry.app'))
-const executable = join(appPath, 'Contents', 'MacOS', devApp ? 'Electron' : 'Scry')
+const dev = devApp ? electronDevLayout() : null
+const appPath = resolve(dev?.appPath || packagedAppArgument || defaultPackagedAppPath())
+const executable = dev ? resolve(dev.executable) : packagedAppLayout(appPath).executable
 const temp = mkdtempSync(join(tmpdir(), 'scry-electron-smoke-'))
 let child
 let stderr = ''
@@ -278,7 +279,7 @@ async function main() {
   const restart = await exerciseRestart({ ...context(), terminalSmoke: terminalCore.terminalSmoke, cdp, child })
   const { surfaceSmoke } = surfaces
   const { lifecycleSmoke, historyReloadSmoke } = providerHistory
-  const { windowChrome, collapsedChrome, transportPicker, modal, subframeIpc } = windowBoundary
+  const { windowChrome, collapsedChrome, transportPicker, modal, subframeIpc, chrome } = windowBoundary
   const { terminalSmoke, reloadAdoption, activeAfterReload } = terminalCore
   const { recordingSmoke } = recording
   const { historyRestart } = restart
@@ -301,6 +302,7 @@ async function main() {
     historyReload: historyReloadSmoke,
     historyRestart: { ...historyRestart, mode: 'owned-app-crash' },
     surfaces: surfaceSmoke,
+    chrome,
     modal,
     subframeIpc,
     popupDenied: true,
