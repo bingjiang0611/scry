@@ -87,7 +87,7 @@ function sameSummary(left: ConversationSummary, right: ConversationSummary): boo
  * for, but it can never write a notice, dialog page or focus request into another parent.
  */
 export function useSideChatWorkspace({
-  api, scopeKey, source, target, openIds, hasCompletedTurn, unavailableReason, onOpen, onDrop, onClose, statusOf
+  api, scopeKey, source, target, openIds, hasTerminalTurn, unavailableReason, onOpen, onDrop, onClose, statusOf
 }: {
   api?: SideChatApi
   scopeKey: string
@@ -95,7 +95,7 @@ export function useSideChatWorkspace({
   /** Runtime intent of the parent controls at click time; revalidated by main on send. */
   target?: SideChatInitialTarget
   openIds: readonly string[]
-  hasCompletedTurn: boolean
+  hasTerminalTurn: boolean
   unavailableReason?: string
   /** Opens the child in the scope it was created for; never in whatever is visible now. */
   onOpen: (conversationId: string, scopeKey: string) => void
@@ -113,8 +113,8 @@ export function useSideChatWorkspace({
   const openKey = openIds.join(',')
   // One ref holds the inputs whose identity legitimately changes every render. Effects
   // and the create path read it, so they never depend on a fresh object or callback.
-  const latest = useRef({ api, source, target, openIds, hasCompletedTurn, onOpen, onDrop, onClose, statusOf, scopeKey })
-  latest.current = { api, source, target, openIds, hasCompletedTurn, onOpen, onDrop, onClose, statusOf, scopeKey }
+  const latest = useRef({ api, source, target, openIds, hasTerminalTurn, onOpen, onDrop, onClose, statusOf, scopeKey })
+  latest.current = { api, source, target, openIds, hasTerminalTurn, onOpen, onDrop, onClose, statusOf, scopeKey }
   const busy = useRef(false)
   const inFlight = useRef<string>()
 
@@ -193,7 +193,7 @@ export function useSideChatWorkspace({
 
   const runCreate = useCallback(async (boundary?: number): Promise<void> => {
     const current = latest.current
-    if (!current.api || !current.source || busy.current || !current.hasCompletedTurn) return
+    if (!current.api || !current.source || busy.current || !current.hasTerminalTurn) return
     busy.current = true
     setCreating(true)
     setNotice(SIDE_CHAT_COPY.creating)
@@ -322,7 +322,7 @@ export function useSideChatWorkspace({
 
   const entry = useMemo<SideChatEntry>(() => {
     const reason = unavailableReason ?? (!source ? SIDE_CHAT_COPY.entryUnavailableNoSource
-      : !hasCompletedTurn ? SIDE_CHAT_COPY.entryUnavailableNoTurn : undefined)
+      : !hasTerminalTurn ? SIDE_CHAT_COPY.entryUnavailableNoTurn : undefined)
     return {
       label: SIDE_CHAT_COPY.surfaceLabel,
       description: SIDE_CHAT_COPY.entryDescription,
@@ -333,7 +333,7 @@ export function useSideChatWorkspace({
       ...(notice ? { notice } : {}),
       ...(creating ? { creating: true } : {})
     }
-  }, [checkUnknown, creating, hasCompletedTurn, history, notice, runCreate, source, unknownCommand, unavailableReason])
+  }, [checkUnknown, creating, hasTerminalTurn, history, notice, runCreate, source, unknownCommand, unavailableReason])
 
   const tabs = useMemo<SideChatTabView[]>(() => openIds.map((id) => {
     const record = records.get(id)

@@ -120,10 +120,14 @@ export function attachRunSettlement<T>(
   onFailed: (error: unknown) => Promise<void>,
   deps: RunSettlementDeps
 ): void {
-  const providerSettled = (): void => deps.onProviderSettled()
-  void runtimePromise.then(providerSettled, providerSettled)
+  // Recording the settle is the first step of the same handled chain: a throwing
+  // `onProviderSettled` becomes a rejected handler instead of an unhandled rejection that
+  // would leave this run's finalization unreported.
   runtimePromise
-    .then((result) => onCompleted(result), (error: unknown) => onFailed(error))
+    .then(
+      (result) => { deps.onProviderSettled(); return onCompleted(result) },
+      (error: unknown) => { deps.onProviderSettled(); return onFailed(error) }
+    )
     .catch((error: unknown) => finalizeSettlementFailure(error, deps))
     .catch((error: unknown) => {
       if (deps.isRemoteRun && !deps.remote.state.remoteCompletion) {

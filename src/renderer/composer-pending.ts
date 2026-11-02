@@ -1,7 +1,7 @@
 import type { ConversationPage, ConversationSendRequest, ConversationSendResult } from '@shared/conversation-api'
 import type { AgentInputAttachment } from '@shared/runtime'
-import { updateComposerDraft, type ComposerDraft, type ComposerDraftAttachment, type ComposerDraftStore,
-  type ComposerPendingSubmission } from './composer-drafts'
+import { NOT_SENT_REASON_LIMIT, updateComposerDraft, type ComposerDraft, type ComposerDraftAttachment,
+  type ComposerDraftStore, type ComposerPendingSubmission } from './composer-drafts'
 
 /**
  * What the durable record proves about one pending submission.
@@ -206,10 +206,14 @@ export async function runSubmission({
   }
 }
 
-/** Records the host's refusal on this exact receipt; no other draft is touched. */
+/**
+ * Records the host's refusal on this exact receipt; no other draft is touched. The reason
+ * is capped here, before the receipt can be persisted, so a long Provider message cannot
+ * outgrow the draft record and be dropped on reload.
+ */
 export function markPendingNotSent(draft: ComposerDraft, commandId: string, reason: string): ComposerDraft {
   if (draft.pending?.commandId !== commandId) return draft
-  return { ...draft, pending: { ...draft.pending, notSent: { reason } } }
+  return { ...draft, pending: { ...draft.pending, notSent: { reason: reason.slice(0, NOT_SENT_REASON_LIMIT) } } }
 }
 
 export const DURABLE_WRITE_FAILED = '本地存储不可用，发送状态与原文无法保存；本次没有发送。'

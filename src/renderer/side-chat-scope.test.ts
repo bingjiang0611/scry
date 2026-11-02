@@ -20,7 +20,7 @@ const childConversation = (): ConversationSummary => conversation({
 function chatScope(overrides: Partial<Parameters<typeof sideChatScope>[0]> = {}) {
   return sideChatScope({
     draftKey: 'draft-key', view: 'chat', providerId: 'claude', runControls: controls, cwd: '/repo',
-    nativeSessionId: 'native-1', completedTurns: 8, apiAvailable: true, ...overrides
+    nativeSessionId: 'native-1', terminalTurns: 8, apiAvailable: true, ...overrides
   })
 }
 
@@ -28,7 +28,7 @@ function chatScope(overrides: Partial<Parameters<typeof sideChatScope>[0]> = {})
 function conversationScope(overrides: Partial<Parameters<typeof sideChatScope>[0]> = {}) {
   return sideChatScope({
     draftKey: 'draft-key', view: 'conversation', providerId: 'claude', runControls: controls, cwd: '/repo',
-    nativeSessionId: 'native-1', completedTurns: 8, apiAvailable: true, ...overrides
+    nativeSessionId: 'native-1', terminalTurns: 8, apiAvailable: true, ...overrides
   })
 }
 
@@ -86,7 +86,7 @@ describe('side-chat source scope', () => {
   })
 
   it('never claims a snapshot from zero turns', () => {
-    expect(conversationScope({ conversation: conversation(), completedTurns: 0 }).hasCompletedTurn).toBe(false)
-    expect(conversationScope({ conversation: conversation(), completedTurns: 3 }).hasCompletedTurn).toBe(true)
+    expect(conversationScope({ conversation: conversation(), terminalTurns: 0 }).hasTerminalTurn).toBe(false)
+    expect(conversationScope({ conversation: conversation(), terminalTurns: 3 }).hasTerminalTurn).toBe(true)
   })
 })

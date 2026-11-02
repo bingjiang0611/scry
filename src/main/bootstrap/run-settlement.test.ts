@@ -116,6 +116,34 @@ describe('run settlement', () => {
     expect(run.runState.localFinalizing).toBe(false)
   })
 
+  it('keeps a throwing Provider settle inside the handled chain', async () => {
+    const run = harness()
+    const rejections: unknown[] = []
+    const onRejection = (reason: unknown): void => { rejections.push(reason) }
+    process.on('unhandledRejection', onRejection)
+    try {
+      // The settle is recorded, then publishing that state throws: a partial failure must
+      // still be reported rather than leaving the run open or the rejection unhandled.
+      run.deps.onProviderSettled = () => {
+        run.runState.providerSettled = true
+        run.runState.localFinalizing = true
+        throw new Error('settle bookkeeping failed')
+      }
+      run.provider.resolve({ ok: true })
+      // The failure is reported as a settlement failure, and local finalization still runs.
+      await vi.waitFor(() => expect(run.deps.remote.finishRemote)
+        .toHaveBeenCalledWith('failed', 'settle bookkeeping failed'))
+      run.releaseFinalization()
+      await vi.waitFor(() => expect(run.events).toContain('registry-removed'))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(rejections).toEqual([])
+      expect(run.runState.localFinalizing).toBe(false)
+      expect(run.events).not.toContain('completed')
+    } finally {
+      process.off('unhandledRejection', onRejection)
+    }
+  })
+
   it('reports a Provider rejection as failed before finalization closes the run', async () => {
     const run = harness()
     run.provider.reject(new Error('provider exploded'))

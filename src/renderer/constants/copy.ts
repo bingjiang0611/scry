@@ -326,6 +326,6 @@ export const RUN_STOP_COPY = {
   interruptRequestFailed: {
     label: '停止请求未生效',
     hint: (providerId: string): string =>
-      `${providerId} 的取消调用失败，Scry 无法确认取消已经发出。这一轮可能仍在运行，用量与文件足迹尚未收敛；仍会按窗口升级强制终止，收到 Provider 终态前不会显示完成`
+      `${providerId} 的取消调用失败，Scry 无法确认取消已经发出。这一轮可能仍在运行，用量与文件足迹尚未收敛；停止意图会继续按窗口升级，只有存在安全的硬杀范围时才会发出强制终止，否则如实显示未确认终止，收到 Provider 终态前不会显示完成`
   }
 } as const

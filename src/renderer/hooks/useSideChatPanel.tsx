@@ -20,7 +20,7 @@ import { sideChatScope } from '../side-chat-scope'
  */
 export function useSideChatPanel({
   draftKey, view, conversation, cwd, activeSessionId, selectedProviderSessionId, providerId, agentProfileId,
-  runControls, completedTurns, draftStore, chatProps, pickConversation, loadProjects, openIds, dispatch,
+  runControls, terminalTurns, draftStore, chatProps, pickConversation, loadProjects, openIds, dispatch,
   dispatchForScope, restorePane, runningRunIds, waitingQuestionRunIds, questionKindsByRun
 }: {
   draftKey: string
@@ -32,7 +32,7 @@ export function useSideChatPanel({
   providerId: ProviderId
   agentProfileId?: string
   runControls: ConversationHostChatProps['runControls']
-  completedTurns: number
+  terminalTurns: number
   draftStore: ComposerDraftStore
   chatProps: Pick<ConversationHostChatProps, 'agents' | 'onOpenFile'>
   pickConversation: (conversation: ConversationSummary) => void
@@ -54,7 +54,7 @@ export function useSideChatPanel({
     runControls,
     cwd,
     nativeSessionId: selectedProviderSessionId ?? activeSessionId,
-    completedTurns,
+    terminalTurns,
     // Static render and tests have no preload bridge; treat that as "api unavailable"
     // rather than reaching for a `window` that does not exist.
     apiAvailable: typeof window !== 'undefined' && Boolean(window.scry?.conversations)
@@ -77,7 +77,7 @@ export function useSideChatPanel({
     ...(scope.source ? { source: scope.source } : {}),
     ...(scope.target ? { target: scope.target } : {}),
     openIds,
-    hasCompletedTurn: scope.hasCompletedTurn,
+    hasTerminalTurn: scope.hasTerminalTurn,
     ...(scope.unavailableReason ? { unavailableReason: scope.unavailableReason } : {}),
     statusOf,
     // The child is opened in the scope it was created for. Switching parents while a

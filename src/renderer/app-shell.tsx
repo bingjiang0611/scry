@@ -57,7 +57,7 @@ export function AppShell(props: AppShellProps) {
     providerId: integrations.selectedProviderId,
     ...(integrations.providerContext.agentProfileId ? { agentProfileId: integrations.providerContext.agentProfileId } : {}),
     runControls: integrations.runControls,
-    completedTurns: displayedTurns.length,
+    terminalTurns: displayedTurns.length,
     draftStore, chatProps, pickConversation,
     loadProjects: workspace.loadProjects,
     openIds: currentSurface.state.sideChats,

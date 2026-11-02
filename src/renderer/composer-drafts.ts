@@ -119,6 +119,12 @@ const STORAGE_KEY = 'scry.composer-drafts.v1'
 export const MAX_DRAFTS = 32
 export const MAX_PENDING_DRAFTS = 8
 
+/**
+ * Host reasons are free text and can quote a long Provider message. The receipt keeps the
+ * beginning so a restart still explains the refusal without growing the draft record.
+ */
+export const NOT_SENT_REASON_LIMIT = 2000
+
 // Input subscribers update independently of App. Sending/migration always reads the same
 // synchronous snapshot; there is no debounced copy that can lose the last keystroke.
 export function createComposerDraftStore(initial: ReadonlyMap<string, ComposerDraft>) {
@@ -241,7 +247,7 @@ function validPending(value: unknown): value is StoredPending {
     (pending.notSent === undefined ||
       (typeof pending.notSent === 'object' && pending.notSent !== null &&
         typeof (pending.notSent as { reason?: unknown }).reason === 'string' &&
-        (pending.notSent as { reason: string }).reason.length <= 2000)) &&
+        (pending.notSent as { reason: string }).reason.length <= NOT_SENT_REASON_LIMIT)) &&
     Number.isSafeInteger(pending.submittedAt) && Number(pending.submittedAt) > 0
 }
 
@@ -272,7 +278,7 @@ function storedPending(pending: ComposerPendingSubmission): StoredPending {
     expectedRevision: pending.expectedRevision,
     expectedContinuationKey: pending.expectedContinuationKey,
     phase: pending.phase,
-    ...(pending.notSent ? { notSent: { ...pending.notSent } } : {}),
+    ...(pending.notSent ? { notSent: { reason: pending.notSent.reason.slice(0, NOT_SENT_REASON_LIMIT) } } : {}),
     submittedAt: pending.submittedAt
   }
 }

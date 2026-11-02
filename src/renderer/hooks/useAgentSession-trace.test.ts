@@ -108,6 +108,9 @@ describe('stop lifecycle projection', () => {
     expect(interruptFailed.tone).toBe('unsettled')
     expect(interruptFailed.label).toBe('停止请求未生效')
     expect(interruptFailed.hint).toContain('取消调用失败')
+    // 升级不是无条件承诺：没有安全硬杀范围时只能如实报告未确认终止。
+    expect(interruptFailed.hint).toContain('只有存在安全的硬杀范围时')
+    expect(interruptFailed.hint).not.toContain('仍会按窗口升级强制终止')
     expect(interruptFailed.hint).toContain('不会显示完成')
     expect(interruptFailed.providerSettled).toBe(false)
     expect(runStopStatus(stopState('r1', 'settled', 'x')).providerSettled).toBe(true)

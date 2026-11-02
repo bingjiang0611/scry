@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ConversationSendRequest } from '@shared/conversation-api'
 import {
-  COMPOSER_DRAFT_SAVE_INTERVAL_MS, MAX_DRAFTS, MAX_PENDING_DRAFTS, createComposerDraftStore, persistComposerDraftStore,
+  COMPOSER_DRAFT_SAVE_INTERVAL_MS, MAX_DRAFTS, MAX_PENDING_DRAFTS, NOT_SENT_REASON_LIMIT, createComposerDraftStore, persistComposerDraftStore,
   readComposerDrafts, updateComposerDraft, writeComposerDrafts, type ComposerDraft, type ComposerPendingSubmission
 } from './composer-drafts'
 import {
@@ -133,6 +133,26 @@ describe('pending submission receipts', () => {
     const edited = updateComposerDraft(new Map([['draft', drafts.getSnapshot().get('draft')!]]), 'draft',
       draft => ({ ...draft, input: 'newer question' })).drafts.get('draft')!
     expect(edited.pending?.commandId).toBe(pending.commandId)
+  })
+
+  it('caps a long refusal reason so the receipt survives a restart', async () => {
+    const storage = new MemoryStorage()
+    const drafts = store(new Map([['draft', { input: 'question', attachments: [] }]]))
+    const persistence = persistComposerDraftStore(drafts, list => writeComposerDrafts(storage, list))
+    const longReason = `Provider 拒绝了本次请求：${'x'.repeat(5000)}`
+    const send = vi.fn(async () => ({ status: 'not_sent' as const, reason: longReason }))
+    await runSubmission({
+      draftStore: drafts, draftKey: 'draft', expectedRevision: 3,
+      prepare: async (_prompt, _attachments, commandId) => request(commandId),
+      send, input: { prompt: 'question', attachments: [] }
+    })
+    persistence.dispose()
+    // The persisted receipt keeps a bounded explanation; an unbounded one would exceed the
+    // validator on reload and silently drop the proof that this input was never sent.
+    const reopened = store(readComposerDrafts(storage)).getSnapshot().get('draft')!
+    expect(reopened.pending?.notSent?.reason.length).toBe(NOT_SENT_REASON_LIMIT)
+    expect(longReason.startsWith(reopened.pending!.notSent!.reason)).toBe(true)
+    expect(pendingRecovery(reopened.pending!, undefined)).toEqual({ state: 'not_sent', reason: reopened.pending!.notSent!.reason })
   })
 
   it('keeps a lost reply unknown even when no page record exists', async () => {
