@@ -66,11 +66,13 @@ export function sidebarActivity(
   const group = (evidence: {
     active: boolean
     runId?: string
+    /** Conversation-only: a host-persisted reason the user must resolve first. */
+    blockedReason?: boolean
     outcome?: SessionMeta['lastRunOutcome']
     unread?: boolean
   }): ActivityGroup | undefined => activityGroupOf({
     active: evidence.active,
-    blocked: Boolean(evidence.runId && waitingQuestionRunIds.has(evidence.runId)),
+    blocked: evidence.blockedReason === true || Boolean(evidence.runId && waitingQuestionRunIds.has(evidence.runId)),
     outcome: evidence.outcome,
     unread: evidence.unread
   })
@@ -78,9 +80,11 @@ export function sidebarActivity(
     const matches = (title: string): boolean => !needle || `${project.name} ${project.cwd} ${title}`.toLocaleLowerCase().includes(needle)
     for (const conversation of project.conversations ?? []) {
       if (conversation.archivedAt || !matches(conversation.title)) continue
-      // A conversation's active run id is its own liveness evidence.
+      // A conversation's active run id is its own liveness evidence, but a durable block —
+      // deletion, an unconfirmed fork, an unresolved delivery — outranks it: the user has
+      // to resolve that first, so the row must not read as background progress.
       const status = group({ active: Boolean(conversation.activeRunId), runId: conversation.activeRunId,
-        outcome: conversation.lastRunOutcome })
+        blockedReason: Boolean(conversation.blockedReason), outcome: conversation.lastRunOutcome })
       if (!status) continue
       // A child's own run is background activity of its parent, so it is listed here with
       // that parent named instead of being flattened into the root conversation list.

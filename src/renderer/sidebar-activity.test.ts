@@ -173,6 +173,26 @@ describe('sidebar activity projection', () => {
     expect(new Set(rows.map((row) => row.key)).size).toBe(5)
   })
 
+  it('puts a blocked conversation in attention, outranking its active run', () => {
+    const blocked = (blockedReason: string, activeRunId?: string): ProjectMeta[] => [{
+      ...projects[0], sessions: [],
+      conversations: [{ id: 'blocked', cwd: '/work/store', title: '被阻塞', revision: 3, turnCount: 2,
+        ...(activeRunId ? { activeRunId } : {}), blockedReason }]
+    }]
+    // Each durable block reason the host persists must reach the user, including while a
+    // run is still active: attention proves a decision is missing, not that work is moving.
+    for (const reason of ['统一对话正在删除或已删除，不能执行', '原生分支结果尚未确认：回执丢失；不会自动重建',
+      '投递结果尚未确认，且没有可关联的运行；请重启核查', '当前轮仍在投递']) {
+      expect(sidebarActivity(blocked(reason), new Set(['run-blocked']), empty, '').map((row) => row.group))
+        .toEqual(['attention'])
+      expect(sidebarActivity(blocked(reason, 'run-blocked'), new Set(['run-blocked']), empty, '').map((row) => row.group))
+        .toEqual(['attention'])
+    }
+    // The same conversation without a block reason keeps its liveness reading.
+    expect(sidebarActivity(blocked('', 'run-blocked'), new Set(['run-blocked']), empty, '').map((row) => row.group))
+      .toEqual(['working'])
+  })
+
   it('keeps a background child run visible without flattening it into a root row', () => {
     const parent = '主会话：重构侧边栏'
     const withChild: ProjectMeta[] = [{
