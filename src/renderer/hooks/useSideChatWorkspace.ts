@@ -207,7 +207,7 @@ export function useSideChatWorkspace({
     try {
       preview = await pinned.api.previewSideChat(pinned.source, {
         ...(pinned.target ? { initialTarget: pinned.target } : {}),
-        ...(boundary === undefined ? {} : { completedThroughOrdinal: boundary })
+        ...(boundary === undefined ? {} : { terminalThroughOrdinal: boundary })
       })
     } catch (error) {
       if (mine()) setNotice(SIDE_CHAT_COPY.createRefused(message(error)))

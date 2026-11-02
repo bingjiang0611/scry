@@ -39,12 +39,12 @@ describe('side-chat snapshot boundary and handoff budget', () => {
     const source = { kind: 'conversation' as const, conversationId: parent.id }
     const full = await current.service.previewSideChat(source)
     expect(full.smallestThroughOrdinal).toBe(1)
-    const narrow = await current.service.previewSideChat(source, { completedThroughOrdinal: 1 })
+    const narrow = await current.service.previewSideChat(source, { terminalThroughOrdinal: 1 })
     expect(narrow.throughOrdinal).toBe(1)
     expect(narrow.messageCount).toBe(2)
     expect(narrow.prefixFingerprint).not.toBe(full.prefixFingerprint)
-    await expect(current.service.previewSideChat(source, { completedThroughOrdinal: 0 })).rejects.toThrow('截止轮次')
-    await expect(current.service.previewSideChat(source, { completedThroughOrdinal: 1, file: '/etc/passwd' }))
+    await expect(current.service.previewSideChat(source, { terminalThroughOrdinal: 0 })).rejects.toThrow('截止轮次')
+    await expect(current.service.previewSideChat(source, { terminalThroughOrdinal: 1, file: '/etc/passwd' }))
       .rejects.toThrow('字段不受支持')
     const child = await current.service.createSideChat(request(source, narrow))
     const stored = (await current.store.read(child.id))!
@@ -102,7 +102,7 @@ describe('side-chat snapshot boundary and handoff budget', () => {
     const refs = await sideChatSnapshotRefs(current.userData, stored)
     expect(await current.service.readItem(child.id, refs.at(-1)!)).toBe(`answer: ${body} 3`)
     // An explicit boundary still means exactly that boundary.
-    const explicit = await current.service.previewSideChat(source, { completedThroughOrdinal: 1 })
+    const explicit = await current.service.previewSideChat(source, { terminalThroughOrdinal: 1 })
     expect(explicit.throughOrdinal).toBe(1)
     // 9 MiB of visible text is streamed twice (preview, then the seal) plus the read-back;
     // measured ~2.7 s idle, so the 5 s default is the artifact here, not the work.

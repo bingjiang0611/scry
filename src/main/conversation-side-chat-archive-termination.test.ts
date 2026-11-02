@@ -18,7 +18,6 @@ afterEach(async () => {
 const PROFILE = 'pi:rotom'
 const SESSION = 'pi-rotom-termination-session'
 const NO_TERMINAL = '原生会话前缀包含没有终止证据的轮次，不能创建侧聊'
-const NOT_COMPLETED = '侧聊边界不是已完成的轮次，请重新预览；本次未创建侧聊'
 
 interface RecordedTurn {
   runId: string
@@ -111,25 +110,28 @@ describe('native side-chat archive termination evidence', () => {
     expect(sealed.ordinals).toEqual([1, 1, 2, 2, 3, 3])
   })
 
-  it('ends the default prefix at the last completed turn and leaves out a trailing interrupted turn', async () => {
+  // A terminal turn is a stable boundary whatever it ended as: the latest terminal turn
+  // is the default boundary even when it failed or was interrupted.
+  it('ends the default prefix at the latest terminal turn, including a trailing interrupted one', async () => {
     const { current, source, record } = await archiveFixture()
     record({ runId: 'run-a', prompt: 'question a', answer: 'answer a', done: true, status: 'completed' })
     record({ runId: 'run-b', prompt: 'trailing b', answer: 'trailing answer b', done: true, status: 'interrupted' })
     const preview = await current.service.previewSideChat(source)
-    expect(preview.throughOrdinal).toBe(1)
-    expect(preview.throughRunId).toBe('run-a')
-    expect(preview.messageCount).toBe(2)
+    expect(preview.throughOrdinal).toBe(2)
+    expect(preview.throughRunId).toBe('run-b')
+    expect(preview.messageCount).toBe(4)
     const child = await current.service.createSideChat(createRequest(source, preview, 'termination-trailing'))
     const sealed = await sealedFacts(current, child.id)
-    expect(sealed.throughOrdinal).toBe(1)
-    expect(sealed.texts).toEqual(['question a', 'answer a'])
-    expect(sealed.ordinals).toEqual([1, 1])
-    expect(sealed.texts).not.toContain('trailing b')
-    // Title and body bytes describe the frozen prefix only, never the turn that ended it.
+    expect(sealed.throughOrdinal).toBe(2)
+    expect(sealed.texts).toEqual(['question a', 'answer a', 'trailing b', 'trailing answer b'])
+    expect(sealed.ordinals).toEqual([1, 1, 2, 2])
+    // The interrupted boundary keeps its own status; it never becomes completed.
+    expect(sealed.statuses).toEqual(['completed', 'completed', 'interrupted', 'interrupted'])
+    // Title and body bytes describe the frozen prefix, including the turn that ended it.
     expect(sealed.title).toBe('question a')
-    expect(sealed.bodyBytes).toBe(Buffer.byteLength('question a') + Buffer.byteLength('answer a'))
-    // Creation re-derives both fingerprints from the captured items, so a preview
-    // fingerprint that leaked the trailing turn could not have sealed this child.
+    expect(sealed.bodyBytes).toBe(['question a', 'answer a', 'trailing b', 'trailing answer b']
+      .reduce((bytes, text) => bytes + Buffer.byteLength(text), 0))
+    // Creation re-derives both fingerprints from the captured items.
     expect(sealed.throughOrdinal).toBe(preview.throughOrdinal)
   })
 
@@ -153,28 +155,40 @@ describe('native side-chat archive termination evidence', () => {
     expect(await readdir(historyRoot).catch(() => [] as string[])).toEqual(before)
   })
 
-  it('reports an interrupted-only archive as having no completed turn', async () => {
+  it('captures an interrupted-only archive with its non-success status', async () => {
     const { current, source, record } = await archiveFixture()
     record({ runId: 'run-a', prompt: 'question a', answer: 'partial a', done: true, status: 'interrupted' })
-    // The turn did end, so this is not "no termination evidence": the prefix simply has
-    // no completed turn to freeze, and creation stays local.
-    await expect(current.service.previewSideChat(source)).rejects.toThrow('该原生会话没有已完成轮次；不会创建空快照')
-    expect(await childIds(current)).toEqual([])
+    // The turn ended, so it is a stable boundary even though it did not succeed.
+    const preview = await current.service.previewSideChat(source)
+    expect(preview.throughOrdinal).toBe(1)
+    const child = await current.service.createSideChat(createRequest(source, preview, 'termination-only-interrupted'))
+    const sealed = await sealedFacts(current, child.id)
+    expect(sealed.texts).toEqual(['question a', 'partial a'])
+    expect(sealed.statuses).toEqual(['interrupted', 'interrupted'])
   })
 
-  it('refuses an explicitly requested boundary that points at an interrupted turn', async () => {
+  it('accepts an explicitly requested non-success terminal boundary and keeps its status', async () => {
     const { current, source, record } = await archiveFixture()
     record({ runId: 'run-a', prompt: 'question a', answer: 'answer a', done: true, status: 'completed' })
-    record({ runId: 'run-b', prompt: 'question b', answer: 'partial b', done: true, status: 'interrupted' })
+    record({ runId: 'run-b', prompt: 'question b', answer: 'partial b', done: true, status: 'failed' })
     record({ runId: 'run-c', prompt: 'question c', answer: 'answer c', done: true, status: 'completed' })
-    await expect(current.service.previewSideChat(source, { completedThroughOrdinal: 2 })).rejects.toThrow(NOT_COMPLETED)
+    const narrowed = await current.service.previewSideChat(source, { terminalThroughOrdinal: 2 })
+    expect(narrowed.throughOrdinal).toBe(2)
+    expect(narrowed.throughRunId).toBe('run-b')
+    const child = await current.service.createSideChat(createRequest(source, narrowed, 'termination-failed-boundary'))
+    const sealed = await sealedFacts(current, child.id)
+    expect(sealed.texts).toEqual(['question a', 'answer a', 'question b', 'partial b'])
+    expect(sealed.statuses).toEqual(['completed', 'completed', 'failed', 'failed'])
+  })
+
+  it('still refuses a requested boundary without recorder termination evidence', async () => {
+    const { current, source, record } = await archiveFixture()
+    record({ runId: 'run-a', prompt: 'question a', answer: 'answer a', done: true, status: 'completed' })
+    record({ runId: 'run-b', prompt: 'question b', answer: 'partial b', done: false, status: 'interrupted' })
+    await expect(current.service.previewSideChat(source, { terminalThroughOrdinal: 2 })).rejects.toThrow(NO_TERMINAL)
     await expect(current.service.createSideChat({ source, expectedThroughOrdinal: 2, expectedThroughRunId: 'run-b',
-      expectedPrefixFingerprint: hash('interrupted boundary'), expectedManifestFingerprint: hash('interrupted manifest'),
-      commandId: 'termination-interrupted-boundary' })).rejects.toThrow(NOT_COMPLETED)
+      expectedPrefixFingerprint: hash('unterminated boundary'), expectedManifestFingerprint: hash('unterminated manifest'),
+      commandId: 'termination-unterminated-boundary' })).rejects.toThrow(NO_TERMINAL)
     expect(await childIds(current)).toEqual([])
-    // Positive control: the completed turn before it is still a usable requested boundary.
-    const narrowed = await current.service.previewSideChat(source, { completedThroughOrdinal: 1 })
-    expect(narrowed.throughOrdinal).toBe(1)
-    expect(narrowed.messageCount).toBe(2)
   })
 })

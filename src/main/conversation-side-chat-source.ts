@@ -7,7 +7,8 @@ import type { SideChatServiceDeps, SideChatNativeSource } from './conversation-s
 import { normalizeSessionTitle, SESSION_TITLE_MAX_LENGTH } from '../shared/session-title'
 import type { ProviderId } from '../shared/provider'
 import { streamTurns, type StreamedMessage } from './conversation-side-chat-stream'
-import { completedProjections, projectedMessages, stopReasonProvesCompletion } from './conversation-side-chat-raw'
+import { projectedMessages, terminalProjections } from './conversation-side-chat-raw'
+import { NO_TERMINAL_TURN, providerTurnTerminal } from './conversation-turn-terminal'
 import { captureStreamedNativePrefix } from './conversation-side-chat-native-stream'
 import { measureSink, type CaptureItem } from './conversation-side-chat-capture'
 import type { CaptureSink } from './conversation-side-chat-capture'
@@ -80,27 +81,33 @@ function capturableTurn(turn: ConversationTurn): boolean {
   return turn.origin === 'imported' || (turn.origin === 'dispatch' && turn.delivery.status === 'accepted')
 }
 
+/**
+ * A turn whose own delivery evidence proves it ended, whatever it ended as.
+ *
+ * Stability, not success, is what a frozen prefix needs: a completed, failed, cancelled
+ * or interrupted turn all have a terminal outcome and a fixed body, so any of them may be
+ * the boundary. The snapshot keeps that exact outcome; only `pending`/`unknown`/`not_sent`
+ * deliveries are not terminal and stay out.
+ */
 function boundaryTurn(turn: ConversationTurn): boolean {
   if (!capturableTurn(turn) || turn.items.length === 0) return false
-  // A failed/interrupted turn is not the default freeze boundary, but it stays in
-  // an earlier prefix with its captured status.
-  return turn.origin === 'imported' || (turn.origin === 'dispatch' && turn.delivery.status === 'accepted' && turn.delivery.outcome === 'completed')
+  return turn.origin === 'imported' || turn.delivery.status === 'accepted'
 }
 
 function prefixEnd(prefix: readonly ConversationTurn[], boundary: RequestedBoundary | undefined): number {
   const end = boundary === undefined ? prefix.findLastIndex(boundaryTurn) : boundary.ordinal - 1
-  if (end < 0) throw new Error('来源没有可验证的已完成轮次与正文；不会创建空快照')
+  if (end < 0) throw new Error('来源没有可验证的已终止轮次与正文；不会创建空快照')
   const through = prefix[end]
   if (!through) throw new Error('来源快照边界已不存在，请重新预览；本次未创建侧聊')
   if (boundary?.runId !== undefined && through.runId !== boundary.runId) {
     throw new Error('来源快照边界已变化，请重新预览；本次未创建侧聊')
   }
-  if (!boundaryTurn(through)) throw new Error('来源边界不是可冻结的已完成轮次，请重新预览')
+  if (!boundaryTurn(through)) throw new Error('来源边界不是可冻结的已终止轮次，请重新预览')
   return end
 }
 
 /**
- * Read-only capture of a source conversation's stable completed prefix. A trailing
+ * Read-only capture of a source conversation's stable terminal prefix. A trailing
  * turn that is still running is skipped instead of waited for or adopted, and an
  * explicitly selected earlier boundary stays valid when the source keeps appending.
  */
@@ -159,7 +166,7 @@ async function assertSourceNotOwnedBySideChat(
   if (owning) throw new Error(`该原生会话属于侧聊 ${owning.id}；不支持嵌套侧聊`)
 }
 
-/** Feeds the settled archive prefix straight from the bounded projection. */
+/** Feeds the terminal archive prefix straight from the bounded projection. */
 async function captureArchivePrefix(
   deps: SideChatServiceDeps,
   source: Extract<SideChatSource, { kind: 'native-session' }>,
@@ -171,8 +178,6 @@ async function captureArchivePrefix(
   const items: CaptureItem[] = []
   const title = new TitleTap()
   let through: { ordinal: number; runId: string } | undefined
-  /** Item count the default prefix claims: whatever the last completed turn added. */
-  let captured = 0
   let sawUnterminated = false
   // Segments are read one file at a time, so the archive-wide ordinal is counted here.
   let ordinal = 0
@@ -182,14 +187,11 @@ async function captureArchivePrefix(
     if (!turn.terminal) {
       // No recorder terminal: either the tail Scry drops, or an unproven prefix when a
       // later turn is terminal (checked below). This turn's text is not read.
-      if (boundary !== undefined) throw new Error('原生会话前缀包含没有终止证据的轮次，不能创建侧聊')
+      if (boundary !== undefined) throw new Error(NO_TERMINAL_TURN)
       sawUnterminated = true
       continue
     }
-    if (sawUnterminated) throw new Error('原生会话前缀包含没有终止证据的轮次，不能创建侧聊')
-    if (boundary !== undefined && ordinal === boundary.ordinal && !turn.settled) {
-      throw new Error('侧聊边界不是已完成的轮次，请重新预览；本次未创建侧聊')
-    }
+    if (sawUnterminated) throw new Error(NO_TERMINAL_TURN)
     if (boundary?.runId !== undefined && ordinal === boundary.ordinal && turn.runId !== boundary.runId) {
       throw new Error('原生会话快照边界已变化，请重新预览；本次未创建侧聊')
     }
@@ -201,17 +203,10 @@ async function captureArchivePrefix(
         ...(turn.providerTurnId === undefined ? {} : { providerTurnId: turn.providerTurnId })
       }, title))
     }
-    // A failed/interrupted turn has termination evidence, so it is a stable part of an
-    // earlier prefix and keeps its captured status, but it never ends the default
-    // prefix: only a completed turn can be the freeze boundary.
-    if (!turn.settled) continue
+    // A terminal turn ends the prefix whatever its outcome. A failed or interrupted
+    // turn is a stable boundary too; its captured status says it did not succeed.
     through = { ordinal, runId: turn.runId }
-    captured = items.length
   }
-  // A terminal turn after the last completed one was measured only to advance the
-  // stream; the default prefix ends at the last completed turn, so it is dropped here.
-  // A requested boundary breaks the loop before such a turn is ever read.
-  if (boundary === undefined) items.length = captured
   return { items, ...(title.value === undefined ? {} : { title: title.value }), ...(through === undefined ? {} : { through }) }
 }
 
@@ -267,15 +262,15 @@ async function captureNativePrefix(
       throw new Error(`该原生会话没有 Scry 归档，也没有可验证的原生历史读取器或历史文件；不会创建空快照`)
     }
     // A raw transcript carries no recorder terminal: only the Provider's own
-    // marker settles a turn. A trailing turn that still shows text therefore
-    // stays out of the prefix, whether or not Scry is running it right now.
-    const status = 'unavailable'
-    const selected = completedProjections(await projectedMessages(deps.store.userData, source.cwd, turns,
-      turn => ({ status, settled: stopReasonProvesCompletion(source.providerId, turn) })))
-    if (selected.length === 0) throw new Error('该原生会话没有已完成轮次；不会创建空快照')
+    // marker makes a turn terminal, and it also proves the outcome. A trailing turn
+    // that still shows text therefore stays out of the prefix, whether or not Scry
+    // is running it right now.
+    const selected = terminalProjections(await projectedMessages(deps.store.userData, source.cwd, turns,
+      turn => providerTurnTerminal(source.providerId, turn.stopReason)))
+    if (selected.length === 0) throw new Error('该原生会话没有已终止的轮次；不会创建空快照')
     const last = boundary === undefined ? selected.length - 1 : boundary.ordinal - 1
     const end = selected[last]
-    if (!end) throw new Error('该原生会话没有已完成轮次；不会创建空快照')
+    if (!end) throw new Error('该原生会话没有已终止的轮次；不会创建空快照')
     if (boundary?.runId !== undefined && end.runId !== boundary.runId) {
       throw new Error('原生会话快照边界已变化，请重新预览；本次未创建侧聊')
     }
@@ -287,7 +282,7 @@ async function captureNativePrefix(
         collected.push(await consume(sink, memoryMessage(message.text, contentHash, message.role), {
           role: message.role, sourceRunId: turn.runId,
           sourceOrdinal: turn.ordinal,
-          providerId: source.providerId, status, delivery: 'snapshot',
+          providerId: source.providerId, status: turn.status ?? 'unavailable', delivery: 'snapshot',
           nativeSessionId: source.nativeSessionId,
           ...(turn.providerTurnId === undefined ? {} : { providerTurnId: turn.providerTurnId })
         }, tap))
@@ -297,7 +292,7 @@ async function captureNativePrefix(
     title = tap.value
     through = { ordinal: end.ordinal, runId: end.runId }
   }
-  if (items.length === 0 || through === undefined) throw new Error('该原生会话没有已完成轮次；不会创建空快照')
+  if (items.length === 0 || through === undefined) throw new Error('该原生会话没有已终止的轮次；不会创建空快照')
   return {
     source,
     cwd: source.cwd,

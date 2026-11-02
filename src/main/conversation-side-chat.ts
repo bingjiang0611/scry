@@ -101,7 +101,7 @@ export async function previewSideChat(
   }
   // A refused range stays refused. Capture streams the whole prefix into the manifest,
   // so there is no snapshot budget left to answer with a silently smaller prefix.
-  return readAt(options.completedThroughOrdinal)
+  return readAt(options.terminalThroughOrdinal)
 }
 
 function requestIntentHash(request: ConversationSideChatRequest): string {

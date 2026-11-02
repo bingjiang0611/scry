@@ -99,11 +99,11 @@ function parseInitialTarget(value: unknown): SideChatInitialTarget {
 
 export function parseSideChatPreviewOptions(input: unknown): SideChatPreviewOptions {
   if (input === undefined) return {}
-  const value = requestObject(input, ['completedThroughOrdinal', 'initialTarget'])
-  if (value.completedThroughOrdinal !== undefined && (!Number.isSafeInteger(value.completedThroughOrdinal) ||
-    Number(value.completedThroughOrdinal) <= 0)) throw new Error('侧聊预览截止轮次无效')
+  const value = requestObject(input, ['terminalThroughOrdinal', 'initialTarget'])
+  if (value.terminalThroughOrdinal !== undefined && (!Number.isSafeInteger(value.terminalThroughOrdinal) ||
+    Number(value.terminalThroughOrdinal) <= 0)) throw new Error('侧聊预览截止轮次无效')
   return {
-    ...(value.completedThroughOrdinal === undefined ? {} : { completedThroughOrdinal: Number(value.completedThroughOrdinal) }),
+    ...(value.terminalThroughOrdinal === undefined ? {} : { terminalThroughOrdinal: Number(value.terminalThroughOrdinal) }),
     ...(value.initialTarget === undefined ? {} : { initialTarget: parseInitialTarget(value.initialTarget) })
   }
 }
