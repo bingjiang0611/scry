@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ConversationService } from './conversation-service'
 import { ConversationStore } from './conversation-store'
 import type { Conversation } from '../shared/conversation'
+import { upsertTraceArchiveTurn } from './transcript-archive'
 import type { ConversationSendRequest } from '../shared/conversation-api'
 
 const hash = (text: string) => createHash('sha256').update(text).digest('hex')
@@ -72,12 +73,26 @@ function service(store: ConversationStore, before = async (): Promise<void> => u
       managed.onProviderDispatchAttempt?.()
       await managed.onTerminal({
         status: 'completed', finalItems: [],
-        receipt: { contextHash: null, status: 'accepted', textHash: managed.inputTextHash,
+        receipt: { contextHash: managed.historicalContext?.contentHash ?? null, status: 'accepted',
+          textHash: managed.inputTextHash,
           nativeSessionId: 'native-a', source: 'codex_turn_start_response' },
         archive: { sessionId: 'archive-a' }
       })
       return { runId: managed.runId }
     }
+  })
+}
+
+/** A source turn with real archive evidence, so a preview offers concrete missing items. */
+async function seededConversation(store: ConversationStore, user: string, answer: string): Promise<Conversation> {
+  expect(upsertTraceArchiveTurn({ userDataDir: userData, cwd, sessionId: 'archive-seed', providerId: 'claude',
+    turn: { runId: 'seed-run', userText: user, done: true, status: 'completed', ts: Date.now(),
+      items: [{ id: 'answer', runId: 'seed-run', ts: '2026-10-01T00:00:00Z', kind: 'model', stage: 'text', text: answer }] }
+  })).toBe(true)
+  return store.create(cwd, {
+    target: { providerId: 'claude', continuationKey: 'identity-a' }, nativeSessionId: 'native-a',
+    turns: [{ runId: 'seed-run', nativeItems: [], archive: { sessionId: 'archive-seed' },
+      items: ['user', 'assistant'].map((itemId, index) => ({ runId: 'seed-run', itemId, contentHash: hash(index ? answer : user) })) }]
   })
 }
 
@@ -171,6 +186,28 @@ describe('conversation send refusal evidence', () => {
     const unknown = (await store.read(conversation.id))!
     await expect(api.send(request(conversation.id, unknown.revision, 'pending-command')))
       .rejects.toThrow('该命令的投递结果尚未确认')
+  })
+
+  it('replays an exact non-empty selection and rejects a changed one for the same command', async () => {
+    const store = new FaultyStore(userData)
+    const dispatches = vi.fn()
+    const api = service(store, async () => { dispatches() })
+    const conversation = await seededConversation(store, 'earlier question', 'earlier answer')
+    const view = await api.preview(conversation.id, { providerId: 'codex' })
+    expect(view.missingItems.length).toBeGreaterThan(0)
+    const selectionRequest = {
+      ...request(conversation.id, view.revision, 'selection-command'),
+      selectedItems: view.missingItems.map((item) => item.ref)
+    }
+    await expect(api.send(selectionRequest)).resolves.toMatchObject({ status: 'accepted', disposition: 'created' })
+    // The same command with the same ordered selection is the same intent.
+    await expect(api.send(selectionRequest)).resolves.toMatchObject({ status: 'accepted', disposition: 'duplicate' })
+    // A reused command id may not carry a different history/side-chat selection, in either
+    // direction: dropping, replacing or reordering the frozen items is a different request.
+    for (const selectedItems of [[], selectionRequest.selectedItems.slice(1), [...selectionRequest.selectedItems].reverse()]) {
+      await expect(api.send({ ...selectionRequest, selectedItems })).rejects.toThrow('同一命令 ID 不能替换请求内容或目标')
+    }
+    expect(dispatches).toHaveBeenCalledTimes(1)
   })
 
   it('replays a durable not sent attempt as a refusal', async () => {
