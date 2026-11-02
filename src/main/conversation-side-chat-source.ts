@@ -171,22 +171,24 @@ async function captureArchivePrefix(
   const items: CaptureItem[] = []
   const title = new TitleTap()
   let through: { ordinal: number; runId: string } | undefined
-  let closed = false
+  /** Item count the default prefix claims: whatever the last completed turn added. */
+  let captured = 0
+  let sawUnterminated = false
   // Segments are read one file at a time, so the archive-wide ordinal is counted here.
   let ordinal = 0
   for await (const turn of streamTurns(deps.store.userData, source.cwd, iterateTraceArchiveCapture(captureArgs, info))) {
     ordinal += 1
     if (boundary !== undefined && ordinal > boundary.ordinal) break
-    if (closed) {
-      if (turn.settled) throw new Error('原生会话前缀包含没有终止证据的轮次，不能创建侧聊')
+    if (!turn.terminal) {
+      // No recorder terminal: either the tail Scry drops, or an unproven prefix when a
+      // later turn is terminal (checked below). This turn's text is not read.
+      if (boundary !== undefined) throw new Error('原生会话前缀包含没有终止证据的轮次，不能创建侧聊')
+      sawUnterminated = true
       continue
     }
-    if (!turn.settled) {
-      // A trailing unsettled turn is a tail Scry drops. One inside a requested
-      // boundary, or before a later settled turn, is an unproven prefix.
-      if (boundary !== undefined) throw new Error('原生会话前缀包含没有终止证据的轮次，不能创建侧聊')
-      closed = true
-      continue
+    if (sawUnterminated) throw new Error('原生会话前缀包含没有终止证据的轮次，不能创建侧聊')
+    if (boundary !== undefined && ordinal === boundary.ordinal && !turn.settled) {
+      throw new Error('侧聊边界不是已完成的轮次，请重新预览；本次未创建侧聊')
     }
     if (boundary?.runId !== undefined && ordinal === boundary.ordinal && turn.runId !== boundary.runId) {
       throw new Error('原生会话快照边界已变化，请重新预览；本次未创建侧聊')
@@ -199,8 +201,17 @@ async function captureArchivePrefix(
         ...(turn.providerTurnId === undefined ? {} : { providerTurnId: turn.providerTurnId })
       }, title))
     }
+    // A failed/interrupted turn has termination evidence, so it is a stable part of an
+    // earlier prefix and keeps its captured status, but it never ends the default
+    // prefix: only a completed turn can be the freeze boundary.
+    if (!turn.settled) continue
     through = { ordinal, runId: turn.runId }
+    captured = items.length
   }
+  // A terminal turn after the last completed one was measured only to advance the
+  // stream; the default prefix ends at the last completed turn, so it is dropped here.
+  // A requested boundary breaks the loop before such a turn is ever read.
+  if (boundary === undefined) items.length = captured
   return { items, ...(title.value === undefined ? {} : { title: title.value }), ...(through === undefined ? {} : { through }) }
 }
 

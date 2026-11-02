@@ -109,7 +109,12 @@ export interface SettleOptions {
   settles: (stopReason: string | undefined) => boolean
 }
 
-/** Applies the prefix rule: a settled turn is frozen, an interior unsettled one refuses. */
+/**
+ * Applies the prefix rule: a settled turn is frozen, an interior unsettled one refuses.
+ *
+ * A native transcript carries one terminal per turn, so here termination and completion
+ * are the same fact: a turn without a proven terminal is not yielded at all.
+ */
 export async function* settleTurn(
   turn: TurnBodies,
   options: SettleOptions,
@@ -128,7 +133,7 @@ export async function* settleTurn(
   const messages: StreamedMessage[] = [await promptMessage(turn.prompt)]
   if (turn.assistant.length > 0) messages.push(await assistantMessage(turn.assistant))
   yield {
-    runId: turn.runId, status: 'unavailable', settled: true, messages,
+    runId: turn.runId, status: 'unavailable', terminal: true, settled: true, messages,
     ...(turn.providerTurnId === undefined ? {} : { providerTurnId: turn.providerTurnId })
   }
 }

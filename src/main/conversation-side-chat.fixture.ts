@@ -116,7 +116,26 @@ export async function sideChatFixture(options: { providerId?: ProviderId; sideCh
 }
 
 /**
- * Native source over real Provider files: the production read-only seam with a fake
+ * Re-points a fixture at a fake App catalog, so the production native-source seam runs
+ * over real archives and native transcripts. The catalog is the only fake part.
+ */
+export function catalogService(current: SideChatFixture, catalog: AppSession[]): ConversationService {
+  return new ConversationService({
+    store: current.store,
+    resolveContinuationKey: async ({ providerId, agentProfileId }) => `identity:${providerId}:${agentProfileId ?? 'default'}`,
+    supportsHistoricalInput: () => true,
+    supportsHistoryReader: () => true,
+    startAppRun: async () => { throw new Error('no Provider may start during a source capture') },
+    sideChatSource: createSideChatSourceDeps({
+      appSessionStore: () => ({ load: () => catalog }) as ReturnType<typeof createAppSessionStore>,
+      resolveKnownProjectDirectory: cwd => cwd,
+      homeDir: current.root,
+      userDataDir: current.userData
+    })
+  })
+}
+
+/** Native source over real Provider files: the production read-only seam with a fake
  * App catalog, so identity checks, bounded reads and completion evidence are real.
  */
 export interface NativeSideChatFixture {

@@ -29,6 +29,13 @@ export interface StreamedTurn {
   runId: string
   providerTurnId?: string
   status: string
+  /**
+   * Evidence the turn ended, not evidence it succeeded: a recorder terminal for a
+   * Scry archive, the Provider's own terminal marker for a native transcript.
+   * `status` says how it ended.
+   */
+  terminal: boolean
+  /** A `completed` terminal: the only status that may end the default frozen prefix. */
   settled: boolean
   messages: StreamedMessage[]
 }
@@ -313,7 +320,8 @@ async function assembleTurn(userData: string, cwd: string, registry: SpoolRegist
 
 /**
  * Streams one turn at a time. A turn is yielded only once its header proves identity and
- * completion evidence, so a caller never freezes a turn whose provenance is still open.
+ * its termination evidence, so a caller never freezes a turn whose provenance is still
+ * open: `terminal` is that evidence, `settled` is the completed outcome.
  */
 export async function* streamTurns(
   userData: string,
@@ -338,11 +346,15 @@ export async function* streamTurns(
         // The bodies are sealed from these inputs, so the sink's read never comes back here.
         const messages = await assembleTurn(userData, cwd, registry, parts)
         const status = entry.status ?? 'completed'
+        // `done` is the recorder's terminal, written when the Provider result was
+        // recorded; a failed or interrupted run has it too. Only `completed` may end a
+        // default prefix, so termination and completion stay separate facts.
+        const terminal = entry.done === true
         try {
           yield {
             runId: entry.runId,
             ...(entry.providerTurnId === undefined ? {} : { providerTurnId: entry.providerTurnId }),
-            status, settled: entry.done && status === 'completed', messages
+            status, terminal, settled: terminal && status === 'completed', messages
           }
         } finally {
           // Runs once the sink has consumed this turn, and also when the caller abandons or
