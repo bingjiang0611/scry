@@ -78,7 +78,14 @@ export async function exerciseConversationDeletion({ cdp, evaluate, fixture, cli
   assert.deepEqual(page.turns, [], 'deleted bodies are unavailable, not replayed from a cache')
   assert.ok(archives.every(path => !existsSync(path)), 'both Providers really lost their owned App archive copies')
   assert.equal(readFileSync(marker, 'utf8'), 'workspace evidence must survive')
-  assert.match((await evaluate(`window.scry.conversations.send(${json(first)})`)).reason ?? '', /正在删除或已删除/)
+  // Retrying an already-accepted command proves its durable outcome, not the current
+  // deletion state: replaying it must never be relabelled as "not sent".
+  assert.equal((await evaluate(`window.scry.conversations.send(${json(first)})`)).status, 'accepted')
+  // A new command is still refused before dispatch while the conversation is deleting.
+  const fresh = { ...first, commandId: 'delete-during-deletion-command' }
+  const refusedSend = await evaluate(`window.scry.conversations.send(${json(fresh)})`)
+  assert.equal(refusedSend.status, 'not_sent')
+  assert.match(refusedSend.reason, /正在删除或已删除/)
   assert.match(await evaluate(`window.scry.conversations.update(${json(id)},${page.summary.revision},{kind:'archive',archived:false}).then(()=>'',error=>String(error))`), /正在删除或已删除/)
   assert.match(await evaluate(`window.scry.conversations.delete(${json(id)},${json(oldPreview.fingerprint)}).then(()=>'',error=>String(error))`), /本次请求未执行清理/, 'a stale retry must not claim that earlier partial effects never happened')
   await capture('deletion-partial')
@@ -119,7 +126,12 @@ export async function verifyConversationDeletionRestart(evaluate, fixture, resul
   assert.equal(page.summary.deletion.status, 'complete')
   assert.deepEqual(page.turns, [])
   assert.deepEqual(await evaluate(`window.scry.conversations.delete(${json(result.id)},${json(result.fingerprint)})`), result.receipt)
-  assert.match((await evaluate(`window.scry.conversations.send(${json(result.first)})`)).reason ?? '', /正在删除或已删除/)
+  // The deleted conversation's ledger still holds the accepted command, so a retry after
+  // restart reports that durable outcome; a new command is refused before dispatch.
+  assert.equal((await evaluate(`window.scry.conversations.send(${json(result.first)})`)).status, 'accepted')
+  const fresh = await evaluate(`window.scry.conversations.send(${json({ ...result.first, commandId: 'deleted-restart-command' })})`)
+  assert.equal(fresh.status, 'not_sent')
+  assert.match(fresh.reason, /正在删除或已删除/)
   assert.equal(readFileSync(result.marker, 'utf8'), 'workspace evidence must survive')
   assert.ok(result.archives.every(path => !existsSync(path)))
   assert.deepEqual(inputs(fixture), before)

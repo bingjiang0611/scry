@@ -139,7 +139,12 @@ export async function exerciseUnifiedConversationContinuation(state) {
   assert.equal(await evaluate("document.querySelector('.conversation-chat textarea').value"), '')
   assert.equal(await evaluate("document.querySelector('.conversation-chat .send').disabled"), true)
   assert.equal(await evaluate(`window.scry.conversations.preview(${json(unknown.id)},{providerId:'claude'}).then(()=>false,()=>true)`), true)
-  assert.deepEqual(await evaluate(`window.scry.conversations.send(${json(unknownRequest)})`), { status: 'accepted', runId: unknownRun.runId, disposition: 'duplicate' })
+  // An unknown attempt carries no delivery evidence: retrying it is refused as unresolved
+  // and never re-dispatched, because claiming `accepted` would invent a delivery.
+  const inputsBeforeUnknownRetry = inputs(fixture).length
+  assert.match(await evaluate(`window.scry.conversations.send(${json(unknownRequest)}).then(()=>'',error=>String(error))`),
+    /投递结果尚未确认/)
+  assert.equal(inputs(fixture).length, inputsBeforeUnknownRetry, 'an unresolved retry must not reach the Provider')
   // Block the real per-session archive directory with a fixture file while the
   // Provider is awaiting input. Native acceptance must not survive as accepted
   // coverage when production persistence fails (including its terminal cleanup).
@@ -165,8 +170,11 @@ export async function exerciseUnifiedConversationContinuation(state) {
   assert.equal(existsSync(archivePath), false)
   assert.equal(await evaluate(`window.scry.conversations.preview(${json(archiveFailure.id)},{providerId:'claude'}).then(()=>false,()=>true)`), true)
   const invocationCount = inputs(fixture).length
-  assert.deepEqual(await evaluate(`window.scry.conversations.send(${json(archiveRequest)})`), { status: 'accepted', runId: archiveStart.runId, disposition: 'duplicate' })
-  assert.equal(inputs(fixture).length, invocationCount)
+  // The delivery could not be proven from the archive evidence, so a retry reports it as
+  // unresolved instead of replaying it as accepted, and it never re-enters the Provider.
+  assert.match(await evaluate(`window.scry.conversations.send(${json(archiveRequest)}).then(()=>'',error=>String(error))`),
+    /投递结果尚未确认/)
+  assert.equal(inputs(fixture).length, invocationCount, 'an unresolved archive retry must not reach the Provider')
   return { test: 'production unified conversation UI and IPC', id, unknownId: unknown.id,
     archiveFailure: { id: archiveFailure.id, runId: archiveStart.runId, nativeReceipt, delivery: failedArchive.turns[0].delivery },
     duplicate, nativeFork, management, deletion, piSwitch, images, runIds: final.turns.map((turn) => turn.runId), receipts: inputs(fixture), screenshots }
