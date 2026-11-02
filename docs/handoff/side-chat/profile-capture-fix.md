@@ -1,5 +1,7 @@
 # 侧边会话 · 原生来源 Profile 修复
 
+> 当前安装状态以 [archive-termination-fix.md](./archive-termination-fix.md) 为准：`/Applications/Scry.app` 已是 App `0.2.238` / CLI `0.2.56`，同时包含本 Profile 修复与归档终止证据修复。下文「当前安装仍是坏的」「等待 CLI 0.56 并入主线」等内容是 `0.2.237` 当时的事实，不是当前状态。
+
 ## 后续集成交付
 
 Profile 修复与 [Recorder 0.2.56 修复](../recorder-content-repair.md) 已一并整合到本地 `main` 的 `74d68038`。本次发布以该提交的完整 Git tree（`e5843a0d68cb83b8927cc33c55bc261c5a8967a1`）为基础，仅本交接文档随后更新状态并省略私人会话标识。运行代码保持一致，不包含本地私有提交历史。
