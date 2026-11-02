@@ -7,28 +7,36 @@ import {
   callSubmitTurns,
   reportArguments,
   repositoryName,
-  toolArgumentStyle
+  toolArgumentStyle,
+  uploadCapabilities
 } from './transport.js'
 import { admissionRetryAt, deferUploadAdmission } from './admission.js'
 import {
   MAX_BATCH_BYTES,
+  MAX_RECORD_BYTES,
   MAX_REQUESTS_PER_RUN,
   MIN_REPORT_BUDGET_MS,
+  REDACTION_VERSION,
   UPLOADER_VERSION,
   UNKNOWN_BATCH_SPLIT_ATTEMPTS
 } from './constants.js'
+import { CONTENT_PROTOCOL, contentRecord, contentReferences } from './content.js'
 import {
-  finishCustody
+  finishCustody,
+  readCustodyContent,
+  readReceipt
 } from './custody/index.js'
 import { UploadError } from './errors.js'
 import { classifyTransport, deferLocal, localAttempts, retryAt } from './retry.js'
 import {
+  digest,
   uploadRoot
 } from './storage.js'
 import type { OutboxEnvelope } from './types.js'
 import {
   ensurePrivateDirectory, object,
   readJson,
+  redactDiagnostic,
   writeFileAtomic,
   writeJsonAtomic
 } from './util.js'
@@ -117,6 +125,7 @@ export async function uploadPending(
         repo: string
         style: Awaited<ReturnType<typeof toolArgumentStyle>>
         iid: string
+        contentReady?: boolean
       }
     | undefined
   while (true) {
@@ -163,6 +172,27 @@ export async function uploadPending(
     const { actor, repo, style, iid } = context
     let active = batch
     let data: unknown
+    const prepared = new Map<string, { wire: string; contentSha256?: string }>()
+    for (const [, envelope] of batch) {
+      let contentJson: string | undefined
+      if (envelope.redactionVersion === REDACTION_VERSION && contentReferences(envelope.record).size) {
+        const receipt = await readReceipt(uploadRoot(workspace), envelope.recordId)
+        if (!receipt) throw new UploadError('custody_missing', 'content upload requires a custody receipt', true)
+        contentJson = await readCustodyContent(uploadRoot(workspace), receipt, envelope.record)
+      }
+      const wire = encodeRecordForWire(contentJson === undefined ? envelope.record : contentRecord(envelope.record, contentJson))
+      if (Buffer.byteLength(wire) > MAX_RECORD_BYTES) throw new UploadError('content_wire_limit', 'encoded record and content exceed 9 MiB', true)
+      prepared.set(envelope.recordId, { wire, contentSha256: contentJson === undefined ? undefined : digest(contentJson) })
+    }
+    if ([...prepared.values()].some(value => value.contentSha256) && !context.contentReady) {
+      const capability = await transportStage('contentCapabilities', timings, () =>
+        uploadCapabilities(env, remainingTimeout(deadline, 30_000)))
+      if (!capability || typeof capability !== 'object' || !('contentProtocol' in capability) || capability.contentProtocol !== CONTENT_PROTOCOL)
+        throw new UploadError('content_protocol_unavailable', 'receiver does not support verified content custody', true)
+      context.contentReady = true
+    }
+    while (active.length > 1 && active.reduce((sum, [, envelope]) => sum + Buffer.byteLength(prepared.get(envelope.recordId)!.wire), 0) > MAX_BATCH_BYTES)
+      active = active.slice(0, -1)
     while (true) {
       const values = {
         actorUserId: actor.userId,
@@ -171,7 +201,7 @@ export async function uploadPending(
         installationId: iid,
         uploaderVersion: UPLOADER_VERSION,
         redactionVersion: active[0][1].redactionVersion,
-        records: active.map(([, envelope]) => encodeRecordForWire(envelope.record))
+        records: active.map(([, envelope]) => prepared.get(envelope.recordId)!.wire)
       }
       const serialized = JSON.stringify(reportArguments(values, style))
       if (Buffer.byteLength(serialized) > MAX_BATCH_BYTES) {
@@ -341,6 +371,11 @@ export async function uploadPending(
     if (data === undefined) continue
     const items = validateReportResponse(data, active)
     for (let index = 0; index < active.length; index++) {
+      const expected = prepared.get(active[index][1].recordId)!.contentSha256
+      if (expected && ['inserted', 'duplicated'].includes(String(items[index].status)) && items[index].contentSha256 !== expected)
+        throw new UploadError('content_ack_missing', 'receiver did not acknowledge exact content bytes', true)
+    }
+    for (let index = 0; index < active.length; index++) {
       const [path, envelope] = active[index]
       const status = String(items[index].status)
       if (status === 'inserted' || status === 'duplicated') {
@@ -383,6 +418,13 @@ async function workspaceInstallationId(workspace: string, env: NodeJS.ProcessEnv
   return value.slice(0, 64)
 }
 
+// The stage name alone cannot tell an operator why a call failed; the cause
+// text can also carry a credential the CLI printed, so it is redacted here.
+function transportCause(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error)
+  return redactDiagnostic(raw).slice(0, 200)
+}
+
 async function transportStage<T>(
   stage: string,
   timings: Record<string, number>,
@@ -400,7 +442,7 @@ async function transportStage<T>(
             classified.kind === 'auth' ? 'transport_auth' : `transport_${stage}`,
             classified.kind === 'auth'
               ? 'uploader authentication failed; run transport auth login --sso'
-              : `${stage} failed (${error instanceof Error ? error.name : 'unknown'})`,
+              : `${stage} failed (${error instanceof Error ? error.name : 'unknown'}): ${transportCause(error)}`,
             true,
             classified.kind === 'auth'
               ? Date.now() + 15 * 60_000
