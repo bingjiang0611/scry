@@ -104,6 +104,7 @@ describe('required PR checks', () => {
     expect(coverage.if).toBeUndefined()
     expect(coverage.run).toBe("xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24' npm run test:coverage -- --maxWorkers=1 --shard=${{ matrix.shard }}/4 --reporter=default --reporter=blob --outputFile.blob=.vitest-reports/blob-${{ matrix.shard }}.json")
     expect(ci.jobs['unit-coverage'].needs).toBe('unit')
+    expect(ci.jobs['unit-coverage'].if).toBe('${{ !cancelled() }}')
     expect(source(ci.jobs['unit-coverage'], 'Merge shard results and coverage').run).toBe('npx vitest run --merge-reports --coverage')
   })
 

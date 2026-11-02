@@ -83,8 +83,10 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
+  # 任一分片失败时仍合并已完成分片并上传覆盖率，便于排查；Check 仍因 unit 失败而失败。
   unit-coverage:
     needs: unit
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
