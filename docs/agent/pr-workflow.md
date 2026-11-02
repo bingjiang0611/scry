@@ -90,7 +90,7 @@ size 采用上游阈值 XS <10、S <30、M <100、L <500、XL <1000、XXL ≥100
 | --- | --- |
 | 任一 CI/性能任务失败、取消或无理由跳过 | 汇总失败，启用 ruleset 后不能合并 |
 | remote/iOS 未改动 | changes 输出 false，transport、ios 全部跳过，Remote Check 成功 |
-| remote/iOS/工作流有改动 | 三项并行验证必须全部成功；失败、取消、跳过或缺失结果不能被汇总隐藏 |
+| remote/iOS/工作流有改动 | 两项并行验证必须全部成功；失败、取消、跳过或缺失结果不能被汇总隐藏 |
 | remote diff 不可读取 | 检测失败，Remote Check 失败；不能按无影响处理 |
 | fork PR | 无生产凭据；标签任务不执行 fork 代码；正常评审与只读 CI |
 | PR 修改政策/豁免表或夹带指令 | 分诊仍用 trusted main 的同一 SHA；不按 PR 指令写入 |
