@@ -17,6 +17,25 @@ export function now(): string {
   return new Date().toISOString()
 }
 
+// Diagnostics end up in logs and error messages, so credentials must not
+// survive them. Keys can be quoted (JSON) or separated by `:`/`=`, and an
+// Authorization value carries a scheme word before the secret.
+const SECRET_KEY = String.raw`(?:proxy-)?authorization|cookie|token|password|passwd|secret|api[-_]?key`
+const SECRET_PAIR = new RegExp(
+  String.raw`(${SECRET_KEY})(["']?\s*[:=]\s*["']?)(?:(bearer|basic|digest)\s+)?([^\s"',;{}\[\]\x60]+)`,
+  'gi'
+)
+
+export function redactDiagnostic(value: string): string {
+  return value
+    .replace(
+      SECRET_PAIR,
+      (_match, key: string, separator: string, scheme?: string) =>
+        `${key}${separator}${scheme ? `${scheme} ` : ''}<redacted>`
+    )
+    .slice(0, 512)
+}
+
 export function object(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)

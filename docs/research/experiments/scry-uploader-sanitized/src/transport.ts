@@ -5,7 +5,7 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, delimiter, dirname, join } from 'node:path'
 import { TRANSPORT_TIMEOUT_SECONDS, MCP_SERVER, MCP_SKILL, MCP_TOOL } from './constants.js'
 import { classifyTransport } from './retry.js'
-import { executable, object, run } from './util.js'
+import { executable, object, redactDiagnostic, run } from './util.js'
 
 export interface Actor {
   userId: string
@@ -152,11 +152,6 @@ function statusFromText(value: string): number | undefined {
   const match = value.match(/(?:status|http|HTTP|code)[^0-9]{0,8}(4\d\d|5\d\d)\b/)
   return match ? Number(match[1]) : undefined
 }
-function safeDiagnostic(value: string): string {
-  return value
-    .replace(/(authorization|cookie|token|password|secret|api[-_]?key)\s*[:=]\s*[^\s,;]+/gi, '$1=<redacted>')
-    .slice(0, 512)
-}
 function retryAfterFromText(value: string): number | undefined {
   const match = value.match(/retry[- ]after\s*[:=]?\s*([^\r\n]+)/i)
   if (!match) return undefined
@@ -190,21 +185,21 @@ async function runTransport(
     Object.assign(wrapped, {
       code: source.code,
       signal: source.signal,
-      stderr: source.stderr ? safeDiagnostic(source.stderr) : undefined,
+      stderr: source.stderr ? redactDiagnostic(source.stderr) : undefined,
       statusCode: source.statusCode ?? statusFromText(`${source.message ?? ''} ${source.stderr ?? ''}`),
       retryAfterMs: retryAfterFromText(source.stderr ?? '')
     })
     throw wrapped
   }
   if (result.exitCode !== 0) {
-    const diagnostic = safeDiagnostic(result.stderr.trim())
+    const diagnostic = redactDiagnostic(result.stderr.trim())
     const failure = new Error(`transport 调用失败：${diagnostic || `exit ${result.exitCode}`}`) as TransportFailure
     if (result.stderr.includes('401') || result.stderr.includes('403')) invalidateAuthCache(options.env ?? process.env)
     Object.assign(failure, {
       code: result.signal ? `SIG${result.signal}` : undefined,
       exitCode: result.exitCode,
       signal: result.signal,
-      stderr: safeDiagnostic(result.stderr),
+      stderr: redactDiagnostic(result.stderr),
       statusCode: statusFromText(result.stderr),
       retryAfterMs: retryAfterFromText(result.stderr)
     })
