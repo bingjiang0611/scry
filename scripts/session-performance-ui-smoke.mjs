@@ -204,7 +204,7 @@ try {
     app.setPath('userData', ${JSON.stringify(join(temp, 'userData'))});
     app.setPath('sessionData', ${JSON.stringify(join(temp, 'sessionData'))});
     app.whenReady().then(async () => {
-      const win = new BrowserWindow({ title: 'Scry performance regression', show: false, width: 1100, height: 750,
+      const win = new BrowserWindow({ enableLargerThanScreen: true, title: 'Scry performance regression', show: false, width: 1100, height: 750,
         webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
       win.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }));
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));

@@ -90,7 +90,7 @@ export async function runSpecialFixtures({ flags, win, paths, sources, screensho
   }
   const result = {}
   if (flags.motion) {
-    const motionWin = new win.constructor({ show: false, width: 1400, height: 1000, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, offscreen: true } })
+    const motionWin = new win.constructor({ enableLargerThanScreen: true, show: false, width: 1400, height: 1000, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, offscreen: true } })
     motionWin.webContents.on('paint', () => {})
     motionWin.webContents.on('console-message', logRendererError)
     motionWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))

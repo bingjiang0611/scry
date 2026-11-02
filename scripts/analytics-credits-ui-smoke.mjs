@@ -288,7 +288,7 @@ try {
         runtimeProvider: 'claude_sdk', billingProvider: 'anthropic',
         items: [{ id: 'zero-result', runId: 'measured-zero', kind: 'harness', stage: 'result', ts: zeroDate.toISOString(), tokensIn: 0, tokensOut: 0, costUsd: 0 }] })) throw new Error('Zero fixture write failed')
       analytics = await usageAnalyticsWithCreditsQuery(7)
-      const win = new BrowserWindow({ width: 1100, height: 850, show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } })
+      const win = new BrowserWindow({ enableLargerThanScreen: true, width: 1100, height: 850, show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } })
       win.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       await win.loadFile(join(root, 'index.html'))
