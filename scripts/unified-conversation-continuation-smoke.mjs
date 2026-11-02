@@ -31,10 +31,13 @@ export async function exerciseUnifiedConversationContinuation(state) {
   assert.equal(omitted.missingItems.length, 2)
   assert.ok(omitted.missingItems.every(item => item.ref.runId === final.turns[2].runId), 'confirmed history is never resent')
   const duplicate = { ...sendRequest(aPreview, stored.turns[2].commandId, 'desktop remote write three'), permissionMode: 'default' }
-  assert.deepEqual(await evaluate(`window.scry.conversations.send(${json(duplicate)})`), { runId: final.turns[2].runId, disposition: 'duplicate' })
+  assert.deepEqual(await evaluate(`window.scry.conversations.send(${json(duplicate)})`), { status: 'accepted', runId: final.turns[2].runId, disposition: 'duplicate' })
   const stale = { ...duplicate, commandId: 'stale-ui-preview', expectedRevision: 0 }
-  const error = await evaluate(`window.scry.conversations.send(${json(stale)}).then(()=>null,error=>String(error))`)
-  assert.match(error ?? '', /对话已变化，请重新预览/)
+  // A stale preview is refused before dispatch, so the host answers with the typed
+  // not_sent result instead of an exception the renderer would have to guess about.
+  const refused = await evaluate(`window.scry.conversations.send(${json(stale)})`)
+  assert.equal(refused.status, 'not_sent')
+  assert.match(refused.reason, /对话已变化，请重新预览/)
   assert.equal(inputs(fixture).length, 3)
   const catalog = await evaluate('window.scry.listProjects()')
   const project = catalog.find((project) => project.cwd === fixture.workspace)
@@ -120,7 +123,7 @@ export async function exerciseUnifiedConversationContinuation(state) {
     await wait(() => evaluate(`window.scry.activeRuns().then(runs=>!runs.find(run=>run.runId===${json(liveStart.runId)})?.pendingQuestions?.some(question=>question.questionId===${json(question.questionId)}))`), 'UI answer accepted')
   }
   await settled(evaluate, liveConversation.id, 1)
-  assert.deepEqual(await evaluate(`window.scry.conversations.send(${json(liveRequest)})`), { runId: liveStart.runId, disposition: 'duplicate' })
+  assert.deepEqual(await evaluate(`window.scry.conversations.send(${json(liveRequest)})`), { status: 'accepted', runId: liveStart.runId, disposition: 'duplicate' })
 
   // A completed result is not an input receipt. Persist unknown and never retry it.
   const unknown = await evaluate(`window.scry.conversations.create(${json(fixture.workspace)})`)
@@ -136,7 +139,7 @@ export async function exerciseUnifiedConversationContinuation(state) {
   assert.equal(await evaluate("document.querySelector('.conversation-chat textarea').value"), '')
   assert.equal(await evaluate("document.querySelector('.conversation-chat .send').disabled"), true)
   assert.equal(await evaluate(`window.scry.conversations.preview(${json(unknown.id)},{providerId:'claude'}).then(()=>false,()=>true)`), true)
-  assert.deepEqual(await evaluate(`window.scry.conversations.send(${json(unknownRequest)})`), { runId: unknownRun.runId, disposition: 'duplicate' })
+  assert.deepEqual(await evaluate(`window.scry.conversations.send(${json(unknownRequest)})`), { status: 'accepted', runId: unknownRun.runId, disposition: 'duplicate' })
   // Block the real per-session archive directory with a fixture file while the
   // Provider is awaiting input. Native acceptance must not survive as accepted
   // coverage when production persistence fails (including its terminal cleanup).
@@ -162,7 +165,7 @@ export async function exerciseUnifiedConversationContinuation(state) {
   assert.equal(existsSync(archivePath), false)
   assert.equal(await evaluate(`window.scry.conversations.preview(${json(archiveFailure.id)},{providerId:'claude'}).then(()=>false,()=>true)`), true)
   const invocationCount = inputs(fixture).length
-  assert.deepEqual(await evaluate(`window.scry.conversations.send(${json(archiveRequest)})`), { runId: archiveStart.runId, disposition: 'duplicate' })
+  assert.deepEqual(await evaluate(`window.scry.conversations.send(${json(archiveRequest)})`), { status: 'accepted', runId: archiveStart.runId, disposition: 'duplicate' })
   assert.equal(inputs(fixture).length, invocationCount)
   return { test: 'production unified conversation UI and IPC', id, unknownId: unknown.id,
     archiveFailure: { id: archiveFailure.id, runId: archiveStart.runId, nativeReceipt, delivery: failedArchive.turns[0].delivery },

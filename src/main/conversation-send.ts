@@ -120,7 +120,9 @@ export async function sendConversationMessage(
   if (/^\s*\//.test(prompt)) throw new Error('统一对话仅支持普通文本，不支持 slash 命令')
   const conversation = await deps.store.read(request.conversationId)
   if (!conversation) throw new Error('找不到对话，不会自动创建空历史')
-  if (conversation.deletion) throw new Error('统一对话正在删除或已删除，不能发送')
+  // Being deleted is a concurrent-state refusal proven before dispatch, so it answers
+  // like a stale revision instead of leaving the renderer with an unknown outcome.
+  if (conversation.deletion) return { status: 'not_sent', reason: '统一对话正在删除或已删除，不能发送' }
   // Resolve an existing command from its immutable binding before checking current
   // continuation state. A pending/unknown retry must return its original attempt, not be
   // blocked by the current plan.

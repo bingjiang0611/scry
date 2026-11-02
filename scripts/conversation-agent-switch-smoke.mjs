@@ -173,9 +173,11 @@ export async function exerciseConversationImages({ cdp, evaluate, fixture, click
         phase: entry[1].pending.phase, providerId: entry[1].pending.target.providerId } : null
     }
   })()`)
-  assert.equal(refused.state, 'unresolved', 'a refused send stays unknown until the record is read')
-  assert.match(refused.recovery, /原文与图片已保留，不会自动重发/)
-  assert.ok(!refused.buttons.includes('重新发送'), 'an unresolved send must not offer a resend')
+  // 宿主在派发前拒绝了这次输入：界面必须说“已确认没有发送”，并允许用户显式重发，
+  // 而不是把回执永久标成结果未知。
+  assert.equal(refused.state, 'not_sent', 'a pre-dispatch refusal is a typed not_sent receipt')
+  assert.match(refused.recovery, /已确认未发送/)
+  assert.ok(refused.buttons.includes('重新发送'), 'a known-not-sent send offers an explicit resend')
   assert.equal(refused.receipt?.prompt, 'retain this draft', 'the durable receipt keeps the exact text')
   assert.equal(refused.receipt?.attachments, 1, 'the durable receipt keeps the submitted image')
   assert.equal(refused.receipt?.phase, 'unknown')

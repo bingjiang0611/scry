@@ -34,7 +34,7 @@ export async function verifyUnifiedConversationRestart(evaluate, fixture, result
   assert.equal(archiveFailure.summary.lastRunOutcome, undefined, 'unknown delivery must not be displayed as completed')
   assert.equal(archiveFailure.turns[0].history, undefined)
   assert.ok(archiveFailure.summary.blockedReason)
-  assert.deepEqual(await evaluate(`window.scry.conversations.send(${json(result.duplicate)})`), { runId: result.runIds[2], disposition: 'duplicate' })
+  assert.deepEqual(await evaluate(`window.scry.conversations.send(${json(result.duplicate)})`), { status: 'accepted', runId: result.runIds[2], disposition: 'duplicate' })
   assert.equal(page.summary.title, result.management.originalTitle)
   assert.ok(page.summary.pinnedAt)
   const adopted = await read(evaluate, result.management.id)

@@ -30,7 +30,7 @@ type ConversationSendResult =
   | { status: 'not_sent'; reason: string }
 ```
 
-- 只有**在 `beginDispatch` 之前就被宿主拒绝**的路径才是 `not_sent`：revision 变化、接续身份变化、缺少 fresh 确认、待交接项不一致、历史交接预算不足、fork 屏障、Provider 不支持历史交接。
+- 只有**在 `beginDispatch` 之前就被宿主拒绝**的路径才是 `not_sent`：revision 变化、对话正在删除、接续身份变化、缺少 fresh 确认、待交接项不一致、历史交接预算不足、fork 屏障、Provider 不支持历史交接。请求本身非法（空提示、slash 命令、同一命令 ID 换内容）仍然抛错，因为那不是并发状态事实。
 - Provider runner 已经接手（`onProviderDispatchAttempt` 已调用，或 runner 已经返回）之后的所有失败，包括回执丢失、runId 不一致、结算失败，都不是 `not_sent`，仍然抛出 → renderer 记为 `unknown`，不重放。
 - 重试同一 `commandId` 时返回**该次尝试的持久结果**：`not_sent` 的尝试仍然返回 `not_sent`，不会被说成 `accepted`。
 - renderer 把 `not_sent` 写进 durable receipt（`pending.notSent`）。它**跨重启存活**，并且在页面没有对应记录时仍然是 known-not-sent，而不是退回 `unresolved`。清空 receipt、显式重发是用户动作，不自动发生。
