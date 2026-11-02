@@ -58,7 +58,7 @@
 | --- | --- | --- |
 | `ci.yml` | Node/typecheck、`check:harness-bindings` 静态检查、coverage/shell/App build、Node 20/22/24 CLI、macOS 15 renderer/packaging、Linux 解包 App / pacman 检查 | `Check` 汇总全部 jobs（含 `packaged-linux`）；失败、取消或跳过均拒绝 |
 | `performance.yml` | 现有 compare 与 native 测量 | `Performance Check` 汇总两个 jobs；评论发布不属于正确性门禁 |
-| `remote-g0.yml` | 每个 PR 发出检查，仅 remote/iOS/工作流变化运行 macOS 验证 | `Remote Check` 只接受验证成功，或 changes 明确判定无影响且 transport 跳过；检测失败拒绝 |
+| `remote-g0.yml` | 每个 PR 发出检查，仅 remote/iOS/工作流变化并行运行 transport、ios_g0、ios_ui；每项仍限 20 分钟 | `Remote Check` 要求三项全部成功，或 changes 明确判定无影响且三项全部跳过；检测失败、结果缺失或任一项取消均拒绝 |
 | `pr-vouch.yml` | 使用默认分支的 VOUCHED 配置，自动同步 `vouch:*` | 仅上下文，不是准入或门禁 |
 | `pr-size.yml` | 基础仓库代码读取 PR git diff，不运行 PR 内容；混合 PR 排除测试行 | 仅上下文，不按大小拒绝 PR |
 
@@ -89,8 +89,8 @@ size 采用上游阈值 XS <10、S <30、M <100、L <500、XL <1000、XXL ≥100
 | 场景 | 必须观察到的结果 |
 | --- | --- |
 | 任一 CI/性能任务失败、取消或无理由跳过 | 汇总失败，启用 ruleset 后不能合并 |
-| remote/iOS 未改动 | changes 输出 false、transport 跳过、Remote Check 成功 |
-| remote/iOS/工作流有改动 | 必须执行 transport；失败不能被汇总隐藏 |
+| remote/iOS 未改动 | changes 输出 false，transport、ios_g0、ios_ui 全部跳过，Remote Check 成功 |
+| remote/iOS/工作流有改动 | 三项并行验证必须全部成功；失败、取消、跳过或缺失结果不能被汇总隐藏 |
 | remote diff 不可读取 | 检测失败，Remote Check 失败；不能按无影响处理 |
 | fork PR | 无生产凭据；标签任务不执行 fork 代码；正常评审与只读 CI |
 | PR 修改政策/豁免表或夹带指令 | 分诊仍用 trusted main 的同一 SHA；不按 PR 指令写入 |

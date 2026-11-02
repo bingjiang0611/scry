@@ -19,6 +19,9 @@ interface Step {
 }
 interface Job {
   'runs-on'?: string
+  'timeout-minutes'?: number
+  'continue-on-error'?: boolean
+  env?: Record<string, string>
   name?: string
   if?: string
   needs?: string[] | string
@@ -124,17 +127,54 @@ describe('required PR checks', () => {
   it('remote skips only on an explicit unaffected diff', () => {
     const remote = workflow('remote-g0.yml')
     expect(remote.on.pull_request).toBeNull()
-    expect(remote.jobs.check.needs).toEqual(['changes', 'transport'])
-    expect(remote.jobs.transport.if).toBe("${{ needs.changes.outputs.required == 'true' }}")
+    expect(remote.jobs.check.needs).toEqual(['changes', 'transport', 'ios_g0', 'ios_ui'])
+    for (const name of ['transport', 'ios_g0', 'ios_ui']) {
+      const job = remote.jobs[name]
+      expect(job.needs).toBe('changes')
+      expect(job.if).toBe("${{ needs.changes.outputs.required == 'true' }}")
+      expect(job['runs-on']).toBe('macos-15')
+      expect(job['timeout-minutes']).toBe(20)
+      expect(job['continue-on-error']).toBeUndefined()
+      expect(job.env?.DEVELOPER_DIR).toBe('/Applications/Xcode_26.3.app/Contents/Developer')
+      for (const step of job.steps) expect(step['continue-on-error']).toBeUndefined()
+    }
+    expect(remote.jobs.transport.steps.some(step => step.run?.includes('xcodebuild'))).toBe(false)
+    for (const [job, project, action, derived] of [
+      ['ios_g0', 'ScryRemoteG0', 'build-for-testing', 'scry-g0-ios'],
+      ['ios_ui', 'ScryRemote', 'build', 'scry-remote-ui']
+    ]) {
+      const commands = remote.jobs[job].steps.filter(step => step.run).map(step => step.run!.trim())
+      expect(commands).toEqual([
+        `xcodebuild -project apps/ios/${project}.xcodeproj -scheme ${project} -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/${derived}" CODE_SIGNING_ALLOWED=NO ${action}`
+      ])
+    }
     expect(remote.jobs.transport.steps.some(step => step.run === 'npm --prefix experiments/remote-g0 run smoke:g1')).toBe(true)
     const remotePackage = JSON.parse(readFileSync(join(root, 'experiments/remote-g0/package.json'), 'utf8')) as { scripts: Record<string, string>; engines: { node: string } }
     expect(remotePackage.engines.node).toBe('^22.7.0 || ^24.0.0')
     const remoteLock = JSON.parse(readFileSync(join(root, 'experiments/remote-g0/package-lock.json'), 'utf8')) as { packages: Record<string, { engines?: { node: string } }> }
     expect(remoteLock.packages[''].engines?.node).toBe(remotePackage.engines.node)
     expect(remotePackage.scripts['smoke:g1']).toContain('node --experimental-transform-types --import ./ts-relative-resolve.mjs g1-smoke.mjs')
-    const results = (required: string, changes: string, transport: string) => ({
-      changes: { result: changes, outputs: { required } }, transport: { result: transport }
+  })
+
+  it('remote requires each parallel validation result and rejects missing results', () => {
+    const jobs = ['transport', 'ios_g0', 'ios_ui']
+    const results = (required: string, changes: string, result: string) => ({
+      changes: { result: changes, outputs: { required } },
+      ...Object.fromEntries(jobs.map(job => [job, { result }]))
     })
+    const affected = results('true', 'success', 'success')
+    const unaffected = results('false', 'success', 'skipped')
+    for (const job of jobs) {
+      for (const result of ['failure', 'cancelled', 'skipped']) {
+        expect(gate('remote-g0.yml', { ...affected, [job]: { result } }), `${job}: ${result}`).not.toBe(0)
+      }
+      for (const result of ['failure', 'cancelled', 'success']) {
+        expect(gate('remote-g0.yml', { ...unaffected, [job]: { result } }), `${job}: ${result}`).not.toBe(0)
+      }
+      const missing: Record<string, unknown> = { ...affected }
+      delete missing[job]
+      expect(gate('remote-g0.yml', missing), `missing ${job}`).not.toBe(0)
+    }
     expect(gate('remote-g0.yml', results('true', 'success', 'success'))).toBe(0)
     expect(gate('remote-g0.yml', results('false', 'success', 'skipped'))).toBe(0)
     for (const state of ['failure', 'cancelled', 'skipped']) {
