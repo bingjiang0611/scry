@@ -12,7 +12,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 4
+        "darwin-arm64": 4,
+        "linux-x64": 4
       }
     },
     "recorder.content-cold/io.read.calls": {
@@ -26,7 +27,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 4
+        "darwin-arm64": 4,
+        "linux-x64": 4
       }
     },
     "recorder.content-cold/io.mkdir.calls": {
@@ -40,7 +42,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 8
+        "darwin-arm64": 8,
+        "linux-x64": 8
       }
     },
     "recorder.content-cold/io.stat.calls": {
@@ -54,7 +57,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 36
+        "darwin-arm64": 36,
+        "linux-x64": 28
       }
     },
     "recorder.content-cold/io.directory.metadata.calls": {
@@ -68,7 +72,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 52
+        "darwin-arm64": 52,
+        "linux-x64": 36
       }
     },
     "recorder.content-cold/io.open.calls": {
@@ -82,7 +87,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 56
+        "darwin-arm64": 56,
+        "linux-x64": 40
       }
     },
     "recorder.content-cold/io.sync.calls": {
@@ -96,7 +102,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 56
+        "darwin-arm64": 56,
+        "linux-x64": 40
       }
     },
     "recorder.content-cold/io.write.calls": {
@@ -110,7 +117,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 4
+        "darwin-arm64": 4,
+        "linux-x64": 4
       }
     },
     "recorder.content-cold/io.link.calls": {
@@ -124,7 +132,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 4
+        "darwin-arm64": 4,
+        "linux-x64": 4
       }
     },
     "recorder.content-cold/io.rm.calls": {
@@ -138,7 +147,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 4
+        "darwin-arm64": 4,
+        "linux-x64": 4
       }
     },
     "recorder.content-dual/crypto.sha256.calls": {
@@ -152,7 +162,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 8
+        "darwin-arm64": 8,
+        "linux-x64": 8
       }
     },
     "recorder.content-dual/io.read.calls": {
@@ -166,7 +177,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 8
+        "darwin-arm64": 8,
+        "linux-x64": 8
       }
     },
     "recorder.content-dual/io.mkdir.calls": {
@@ -180,7 +192,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 17
+        "darwin-arm64": 17,
+        "linux-x64": 17
       }
     },
     "recorder.content-dual/io.stat.calls": {
@@ -194,7 +207,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 68
+        "darwin-arm64": 68,
+        "linux-x64": 52
       }
     },
     "recorder.content-dual/io.directory.metadata.calls": {
@@ -208,7 +222,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 85
+        "darwin-arm64": 85,
+        "linux-x64": 69
       }
     },
     "recorder.content-dual/io.open.calls": {
@@ -222,7 +237,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 88
+        "darwin-arm64": 88,
+        "linux-x64": 72
       }
     },
     "recorder.content-dual/io.sync.calls": {
@@ -236,7 +252,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 88
+        "darwin-arm64": 88,
+        "linux-x64": 72
       }
     },
     "recorder.content-dual/io.write.calls": {
@@ -250,7 +267,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 8
+        "darwin-arm64": 8,
+        "linux-x64": 8
       }
     },
     "recorder.content-dual/io.link.calls": {
@@ -264,7 +282,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 8
+        "darwin-arm64": 8,
+        "linux-x64": 8
       }
     },
     "recorder.content-dual/io.rm.calls": {
@@ -278,7 +297,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 8
+        "darwin-arm64": 8,
+        "linux-x64": 8
       }
     }
   }

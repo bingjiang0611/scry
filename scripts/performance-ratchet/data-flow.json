@@ -12,7 +12,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 0
+        "darwin-arm64": 0,
+        "linux-x64": 0
       }
     },
     "renderer.remote-tail/merge.prefix.reads": {
@@ -26,7 +27,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 100000
+        "darwin-arm64": 100000,
+        "linux-x64": 100000
       }
     },
     "recorder.content-reuse/crypto.sha256.calls": {
@@ -40,7 +42,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 32
+        "darwin-arm64": 32,
+        "linux-x64": 32
       }
     },
     "recorder.content-reuse/io.read.calls": {
@@ -54,7 +57,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 32
+        "darwin-arm64": 32,
+        "linux-x64": 32
       }
     },
     "recorder.content-reuse/io.read.bytes": {
@@ -68,7 +72,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 8388608
+        "darwin-arm64": 8388608,
+        "linux-x64": 8388608
       }
     },
     "recorder.content-reuse/io.open.calls": {
@@ -82,7 +87,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 32
+        "darwin-arm64": 32,
+        "linux-x64": 32
       }
     },
     "recorder.content-reuse/io.sync.calls": {
@@ -96,7 +102,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 32
+        "darwin-arm64": 32,
+        "linux-x64": 32
       }
     },
     "recorder.content-reuse/io.write.calls": {
@@ -110,7 +117,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 0
+        "darwin-arm64": 0,
+        "linux-x64": 0
       }
     },
     "files.fixed-operations/io.open": {
@@ -124,7 +132,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 6
+        "darwin-arm64": 6,
+        "linux-x64": 6
       }
     },
     "files.fixed-operations/io.read.api.calls": {
@@ -138,7 +147,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 214
+        "darwin-arm64": 214,
+        "linux-x64": 214
       }
     },
     "files.fixed-operations/io.stat": {
@@ -152,7 +162,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1065
+        "darwin-arm64": 1065,
+        "linux-x64": 1038
       }
     },
     "files.fixed-operations/io.readdir": {
@@ -166,7 +177,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 18
+        "darwin-arm64": 18,
+        "linux-x64": 20
       }
     },
     "files.fixed-operations/io.read.payload.bytes": {
@@ -180,7 +192,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1397923
+        "darwin-arm64": 1397923,
+        "linux-x64": 1361546
       }
     },
     "files.fixed-operations/io.write": {
@@ -194,7 +207,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 4
+        "darwin-arm64": 4,
+        "linux-x64": 3
       }
     },
     "files.fixed-operations/io.rename": {
@@ -208,7 +222,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 3
+        "darwin-arm64": 3,
+        "linux-x64": 3
       }
     },
     "history.page/ipc.messages": {
@@ -222,7 +237,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1
+        "darwin-arm64": 1,
+        "linux-x64": 1
       }
     },
     "history.page/ipc.bytes": {
@@ -236,7 +252,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 10020
+        "darwin-arm64": 10020,
+        "linux-x64": 10020
       }
     },
     "history.page/json.stringify.calls": {
@@ -250,7 +267,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1
+        "darwin-arm64": 1,
+        "linux-x64": 1
       }
     },
     "persistence.archive/ipc.messages": {
@@ -264,7 +282,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1
+        "darwin-arm64": 1,
+        "linux-x64": 1
       }
     },
     "persistence.archive/ipc.bytes": {
@@ -278,7 +297,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 10536
+        "darwin-arm64": 10536,
+        "linux-x64": 10514
       }
     },
     "persistence.archive/json.parse.calls": {
@@ -292,7 +312,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 41
+        "darwin-arm64": 41,
+        "linux-x64": 41
       }
     },
     "terminal.delivery/ipc.messages": {
@@ -306,7 +327,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 2
+        "darwin-arm64": 2,
+        "linux-x64": 2
       }
     },
     "terminal.delivery/ipc.bytes": {
@@ -320,7 +342,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 30109
+        "darwin-arm64": 30109,
+        "linux-x64": 30109
       }
     },
     "remote.trace.preview/ipc.messages": {
@@ -334,7 +357,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1
+        "darwin-arm64": 1,
+        "linux-x64": 1
       }
     },
     "remote.trace.preview/ipc.bytes": {
@@ -348,7 +372,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 2778
+        "darwin-arm64": 2778,
+        "linux-x64": 2778
       }
     },
     "trace.delivery/ipc.messages": {
@@ -362,7 +387,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 2
+        "darwin-arm64": 2,
+        "linux-x64": 2
       }
     },
     "trace.delivery/ipc.bytes": {
@@ -376,7 +402,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 165996
+        "darwin-arm64": 165996,
+        "linux-x64": 165996
       }
     },
     "history.page/cpu.instructions": {
@@ -412,7 +439,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 38756
+        "darwin-arm64": 38756,
+        "linux-x64": 38712
       }
     },
     "history.diff-page/ipc.messages": {
@@ -426,7 +454,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1
+        "darwin-arm64": 1,
+        "linux-x64": 1
       }
     },
     "history.diff-page/json.parse.calls": {
@@ -440,7 +469,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 5
+        "darwin-arm64": 5,
+        "linux-x64": 5
       }
     },
     "workspace.remember-consecutive/io.write.calls": {
@@ -454,7 +484,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 0
+        "darwin-arm64": 0,
+        "linux-x64": 0
       }
     },
     "workspace.remember-consecutive/io.rename.calls": {
@@ -468,7 +499,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 0
+        "darwin-arm64": 0,
+        "linux-x64": 0
       }
     },
     "renderer.giant-completed-turn/rendered.flow-items": {
@@ -482,7 +514,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 16
+        "darwin-arm64": 16,
+        "linux-x64": 16
       }
     },
     "renderer.large-completed-text/rendered.text-characters": {
@@ -496,7 +529,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 8000
+        "darwin-arm64": 8000,
+        "linux-x64": 8000
       }
     },
     "persistence.trace-ingestion-burst/persistence.rounds": {
@@ -510,7 +544,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1
+        "darwin-arm64": 1,
+        "linux-x64": 1
       }
     }
   }
