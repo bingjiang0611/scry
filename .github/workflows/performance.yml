@@ -137,7 +137,7 @@ jobs:
 
   native:
     # Same frozen driver, two real source builds, one runner, serial measurements.
-    runs-on: macos-latest
+    runs-on: macos-15-intel
     timeout-minutes: 30
     env:
       QODER_SKIP_DOWNLOAD: '1'
