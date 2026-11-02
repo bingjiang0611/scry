@@ -35,7 +35,14 @@ export interface BeginConversationTurn {
   /** Hash of the frozen actual input, attachments and selected run settings. */
   payloadHash: string
   items: ConversationItemRef[]
+  /** What this dispatch actually delivers; the budget may trim the requested selection. */
   selectedItems: ConversationItemRef[]
+  /**
+   * The caller's requested selection, when trimming means `selectedItems` alone no longer
+   * describes the request. The intent hash binds what the caller asked for, so a retry can
+   * prove it names the same selection instead of only the part that survived the budget.
+   */
+  requestedItems?: ConversationItemRef[]
   /**
    * First user text of this dispatch. A side chat whose title is still unset takes
    * a truncated copy of it in this same transaction; an explicit rename or any
@@ -103,12 +110,14 @@ export async function beginConversationTurn(
     items(request.items)
     requireValue(request.items.every((item) => item.runId === request.runId), '轮次包含其他 run 的内容')
     items(request.selectedItems)
+    if (request.requestedItems) items(request.requestedItems)
+    const intentSelection = request.requestedItems ?? request.selectedItems
     const intentHash = conversationIntentHash({
       commandId: request.commandId,
       target: request.target,
       payloadHash: request.payloadHash,
       items: request.items,
-      selectedItems: request.selectedItems
+      selectedItems: intentSelection
     })
     const conversation = await ledger.required(id)
     requireValue(!conversation.deletion, '统一对话正在删除或已删除，不能执行')

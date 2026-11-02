@@ -35,6 +35,7 @@ type ConversationSendResult =
 - 意图已经持久化、但 Provider 从未接手的失败（例如 `store.history` 读不出）先在持久记录上结算成 `not_sent` 并写明确原因，再返回 typed `not_sent`，不会留下 pending。若这次结算本身失败，结果不再可证明，仍然抛出。
 - Provider runner 已经接手（`onProviderDispatchAttempt` 已调用，或 runner 已经返回）之后的所有失败，包括回执丢失、runId 不一致、结算失败，都不是 `not_sent`，仍然抛出 → renderer 记为 `unknown`，不重放。
 - 重试同一 `commandId` 时返回**该次尝试的持久结果**，且重复解析发生在删除等并发状态判断之前：`accepted` 才重播 `accepted`，`not_sent` 重播 `not_sent`；`pending` / `unknown` 没有投递证据，既不升级成 `accepted`，也不重发，只报告结果尚未确认。
+- 意图指纹绑定**调用方请求的选择**（`requestedItems`），不是预算裁剪后实际投递的子集：历史裁剪不会让合法重试变成“换了内容”，而改动、删减或重排选择的重试会被拒绝，不重播。
 - renderer 把 `not_sent` 写进 durable receipt（`pending.notSent`）。它**跨重启存活**，并且在页面没有对应记录时仍然是 known-not-sent，而不是退回 `unresolved`。清空 receipt、显式重发是用户动作，不自动发生。
 - 页面回执优先：权威记录说 `not_sent` 时，receipt 只是副本。
 

@@ -63,11 +63,13 @@ function request(conversationId: string, revision: number, commandId: string, pr
   }
 }
 
-function service(store: ConversationStore, before = async (): Promise<void> => undefined) {
+function service(store: ConversationStore, before = async (): Promise<void> => undefined,
+  options: { historyReader?: boolean } = {}) {
   return new ConversationService({
     store,
     resolveContinuationKey: async () => 'identity-a',
     supportsHistoricalInput: () => true,
+    supportsHistoryReader: () => options.historyReader === true,
     startAppRun: async (_request, { managedConversation: managed }) => {
       await before()
       managed.onProviderDispatchAttempt?.()
@@ -204,6 +206,32 @@ describe('conversation send refusal evidence', () => {
     await expect(api.send(selectionRequest)).resolves.toMatchObject({ status: 'accepted', disposition: 'duplicate' })
     // A reused command id may not carry a different history/side-chat selection, in either
     // direction: dropping, replacing or reordering the frozen items is a different request.
+    for (const selectedItems of [[], selectionRequest.selectedItems.slice(1), [...selectionRequest.selectedItems].reverse()]) {
+      await expect(api.send({ ...selectionRequest, selectedItems })).rejects.toThrow('同一命令 ID 不能替换请求内容或目标')
+    }
+    expect(dispatches).toHaveBeenCalledTimes(1)
+  })
+
+  it('replays an exact request whose history the budget trimmed and rejects a changed one', async () => {
+    const store = new FaultyStore(userData)
+    const dispatches = vi.fn()
+    const api = service(store, async () => dispatches(), { historyReader: true })
+    // Two available history items, one of them too large for the handoff budget.
+    const conversation = await seededConversation(store, 'u'.repeat(20_000), '中'.repeat(7000))
+    const view = await api.preview(conversation.id, { providerId: 'codex' })
+    expect(view.missingItems.length).toBeGreaterThan(1)
+    const selectionRequest = {
+      ...request(conversation.id, view.revision, 'trimmed-selection-command'),
+      selectedItems: view.missingItems.map((item) => item.ref)
+    }
+    await expect(api.send(selectionRequest)).resolves.toMatchObject({ status: 'accepted', disposition: 'created' })
+    const frozen = (await store.read(conversation.id))!.turns.at(-1)!
+    if (frozen.origin !== 'dispatch') throw new Error('missing dispatch intent')
+    // The budget delivered only part of the request, so the durable turn's imported items
+    // are a strict subset: the intent must still bind what the caller actually asked for.
+    expect(frozen.importedItems.length).toBeLessThan(selectionRequest.selectedItems.length)
+    expect(frozen.omittedItems.length).toBeGreaterThan(0)
+    await expect(api.send(selectionRequest)).resolves.toMatchObject({ status: 'accepted', disposition: 'duplicate' })
     for (const selectedItems of [[], selectionRequest.selectedItems.slice(1), [...selectionRequest.selectedItems].reverse()]) {
       await expect(api.send({ ...selectionRequest, selectedItems })).rejects.toThrow('同一命令 ID 不能替换请求内容或目标')
     }

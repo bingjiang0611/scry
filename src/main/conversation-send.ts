@@ -4,8 +4,7 @@ import { openConversationHistoryReader } from './conversation-history-reader'
 import { providerAttachmentPrompt } from './attachment-store'
 import { conversationItemKey, planConversationContinuation } from '../shared/conversation'
 import type {
-  Conversation, ConversationContinuation, ConversationDelivery, ConversationItemRef, ConversationTarget,
-  DispatchedConversationTurn
+  Conversation, ConversationContinuation, ConversationDelivery, ConversationTarget
 } from '../shared/conversation'
 import type { ConversationSendRequest, ConversationSendResult } from '../shared/conversation-api'
 import type { ProviderHistoricalContext } from './providers/types'
@@ -51,33 +50,6 @@ function duplicateResult(runId: string, delivery?: ConversationDelivery): Conver
   if (delivery?.status === 'accepted') return { status: 'accepted', runId, disposition: 'duplicate' }
   if (delivery?.status === 'not_sent') return { status: 'not_sent', reason: delivery.reason }
   throw new Error('该命令的投递结果尚未确认；不会自动重发')
-}
-
-/**
- * Ordered canonical identity of one item selection.
- *
- * `contentHash` is part of `conversationItemKey`, so a ref whose body changed is a
- * different item, and the same refs in a different order are a different selection.
- */
-function sameOrderedSelection(left: ConversationItemRef[], right: ConversationItemRef[]): boolean {
-  return left.length === right.length &&
-    left.every((item, index) => conversationItemKey(item) === conversationItemKey(right[index]))
-}
-
-/**
- * Proves the caller's `selectedItems` is the selection this command froze.
- *
- * A dispatch records what it delivered (`importedItems`) plus what it deliberately
- * omitted (`omittedItems`); together they are the exact request selection, because
- * `beginConversationTurn` partitions the requested items into delivered and omitted.
- * A legacy omission does not preserve the original interleaving of the two, so that case
- * is compared as an exact multiset; a request with nothing omitted is compared in order.
- */
-function sameFrozenSelection(incoming: ConversationItemRef[], turn: DispatchedConversationTurn): boolean {
-  if (!turn.omittedItems.length) return sameOrderedSelection(incoming, turn.importedItems)
-  const frozen = [...turn.importedItems, ...turn.omittedItems].map(conversationItemKey).sort()
-  const requested = incoming.map(conversationItemKey).sort()
-  return frozen.length === requested.length && frozen.every((key, index) => key === requested[index])
 }
 
 /**
@@ -155,6 +127,8 @@ async function prepareDispatch(
     payloadHash: payload,
     items: [],
     selectedItems,
+    // The budget may hand over only part of the request; the intent still binds all of it.
+    requestedItems: request.selectedItems,
     firstQuestion: request.prompt,
     preparedHistory: prepared.history
   })
@@ -212,22 +186,17 @@ export async function sendConversationMessage(
       model: request.model, effort: request.effort,
       permissionMode: request.permissionMode, selectedItems: existing.importedItems
     })
-    // The selection is an intent input, so a reused command id must still name the exact
-    // history/side-chat selection this command froze. Accepting a changed one would answer
-    // `accepted` for content this command never carried.
-    if (!sameFrozenSelection(request.selectedItems, existing)) {
-      throw new Error('同一命令 ID 不能替换请求内容或目标')
-    }
-    // A retry is answered from the durable record itself: replaying it must not publish a
-    // second intent, which is also why a deleting conversation can still be replayed. The
-    // frozen intent of this seam carries no caller items; the stored turn's items are the
-    // derived transcript refs, so comparing them would reject every legitimate retry.
+    // The selection is an intent input, so the hash is recomputed from the caller's own
+    // ordered selection: a reused command id that names different history or a different
+    // side-chat position is a different request, and must not replay this one. The frozen
+    // intent of this seam carries no caller items; the stored turn's items are the derived
+    // transcript refs, so comparing those would reject every legitimate retry.
     const intentHash = conversationIntentHash({
       commandId: request.commandId,
       target: duplicateTarget,
       payloadHash: duplicatePayloadHash,
       items: [],
-      selectedItems: existing.importedItems
+      selectedItems: request.selectedItems
     })
     if (intentHash !== existing.intentHash) throw new Error('同一命令 ID 不能替换请求内容或目标')
     return duplicateResult(existing.runId, existing.delivery)
