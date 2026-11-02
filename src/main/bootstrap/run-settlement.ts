@@ -1,8 +1,13 @@
+import type { BrowserWindow } from 'electron'
 import type { ActiveRun } from '../../shared/trace'
+import type { ProviderId } from '../../shared/provider'
 import type { ManagedConversationStart } from '../conversation-service'
 import type { ProviderRunHandle } from '../providers/types'
+import type { PiRunDiagnostics } from '../providers/pi-run-diagnostics'
+import type { PerformanceTrace } from '../performance-timing'
 import { conversationItemsFromTrace } from '../conversation-history'
-import type { ArchiveTraceTurnArgs } from './archive'
+import { archiveTraceTurn, type ArchiveTraceTurnArgs } from './archive'
+import { createRemoteRunState } from './run-remote-state'
 
 type SettlementState = { terminalArchiveArgs?: ArchiveTraceTurnArgs; terminalArchiveCommitted: boolean; managedSettlementAttempted: boolean }
 export function createManagedConversationSettlement(deps: {
@@ -54,4 +59,154 @@ export function createManagedConversationSettlement(deps: {
     }
   }
   return settleManagedConversation
+}
+
+type SettlementRemote = ReturnType<typeof createRemoteRunState>
+
+/**
+ * Everything the local finalization of one settled run still needs. All of it is stable
+ * for the run's lifetime, so a single object can be built before the Provider settles.
+ */
+export type RunSettlementDeps = {
+  /** Provider transport settled; recorded before any local finalization work starts. */
+  onProviderSettled: () => void
+  finalizeTurnDiff: () => Promise<void>
+  runState: ActiveRun
+  runId: string
+  providerId: ProviderId
+  isRemoteRun: boolean
+  remote: SettlementRemote
+  settleManagedConversation: (status: 'completed' | 'failed' | 'cancelled' | 'interrupted') => Promise<void>
+  interrupted: () => boolean
+  flushTraceSend: () => void
+  getWindow: () => BrowserWindow | null
+  recordingBlockedSessions: Map<string, string>
+  scopedSessionKey: (sessionId: string) => string
+  recordingRecoveryHint: string
+  getObservedSessionId: () => string | undefined
+  resume: string | undefined
+  piRunDiagnostics: PiRunDiagnostics
+  lifecycle: {
+    runStopLifecycle: { settle: (runId: string) => void }
+    userQuestionBroker: { cancelRun: (runId: string) => void }
+    runTraces: { settle: (runId: string) => void }
+    runs: { remove: (runId: string) => void }
+    forgetBoundedRun: (runId: string) => void
+    releaseSessionBaseline: (() => void) | undefined
+    resolveSettled: (() => void) | undefined
+    clearDiffPreviewDemand: () => void
+    closeEventLog: () => void
+  }
+  firstTracePerf: PerformanceTrace
+  firstTextPerf: PerformanceTrace
+  stopSignal: AbortSignal | undefined
+  requestRemoteStop: () => void
+  remoteRunIds: Set<string>
+  remoteRunLedgerIds: Map<string, string>
+}
+
+/**
+ * The Provider settle is recorded first, before this handler's own local finalization.
+ *
+ * The completion handler still owns the run: it reads the turn diff, commits the archive
+ * and settles managed delivery, so the registry entry must stay and admission must keep
+ * blocking this context. What cannot wait for that is stop control — once the transport
+ * is settled there is nothing left to interrupt, so the escalation windows are cancelled
+ * here instead of firing against an already-ended Provider.
+ */
+export function attachRunSettlement<T>(
+  runtimePromise: Promise<T>,
+  onCompleted: (result: T) => Promise<void>,
+  onFailed: (error: unknown) => Promise<void>,
+  deps: RunSettlementDeps
+): void {
+  const providerSettled = (): void => deps.onProviderSettled()
+  void runtimePromise.then(providerSettled, providerSettled)
+  runtimePromise
+    .then((result) => onCompleted(result), (error: unknown) => onFailed(error))
+    .catch((error: unknown) => finalizeSettlementFailure(error, deps))
+    .catch((error: unknown) => {
+      if (deps.isRemoteRun && !deps.remote.state.remoteCompletion) {
+        deps.remote.state.remoteRecordingFailed = true
+        deps.remote.finishRemote(deps.interrupted() ? 'interrupted' : 'failed', String((error as Error).message ?? error))
+      }
+    })
+    .finally(() => finalizeSettledRun(deps))
+}
+
+/**
+ * The completion or failure handler itself threw. The turn may still have authoritative
+ * archive arguments, so they get one commit attempt; everything else is reported as a
+ * recording failure rather than silently leaving the run looking complete.
+ */
+async function finalizeSettlementFailure(error: unknown, deps: RunSettlementDeps): Promise<void> {
+  console.error('[scry] run completion handler failed:', error)
+  await deps.finalizeTurnDiff()
+  const state = deps.remote.state
+  if (state.terminalArchiveArgs && !state.terminalArchiveCommitted) {
+    const sessionId = state.terminalArchiveArgs.sessionId
+    try {
+      await archiveTraceTurn(state.terminalArchiveArgs)
+      state.terminalArchiveCommitted = true
+      if (sessionId) deps.recordingBlockedSessions.delete(deps.scopedSessionKey(sessionId))
+    } catch (archiveError) {
+      if (sessionId) deps.recordingBlockedSessions.set(deps.scopedSessionKey(sessionId), deps.recordingRecoveryHint)
+      console.error('[scry] fallback terminal archive failed:', archiveError)
+    }
+  }
+  if (!deps.runState.done) deps.runState.done = true
+  deps.flushTraceSend()
+  deps.getWindow()?.webContents.send('agent:error', {
+    runId: deps.runId,
+    message: `Scry 处理 Provider 终态失败：${String((error as Error).message)}`,
+    category: 'recording',
+    hint: '保留 userData 与 workspace/.scry 后重启 Scry 检查归档'
+  })
+  if (deps.isRemoteRun) state.remoteRecordingFailed = true
+  deps.remote.markTerminalAttention(
+    state.terminalArchiveArgs?.sessionId ?? deps.getObservedSessionId() ?? deps.resume ?? deps.runId,
+    !deps.interrupted()
+  )
+  deps.remote.finishRemote(deps.interrupted() ? 'interrupted' : 'failed', String((error as Error).message ?? error))
+}
+
+/**
+ * Local finalization: managed delivery settles, the terminal flush publishes before the
+ * registry entry leaves, and only then does the run stop owning its conversation. The
+ * registry entry is what makes the terminal diff and resync still readable.
+ */
+async function finalizeSettledRun(deps: RunSettlementDeps): Promise<void> {
+  const { lifecycle, runState } = deps
+  const interrupted = deps.interrupted()
+  try {
+    if (deps.providerId === 'pi') deps.piRunDiagnostics.record(deps.runId, 'main_settlement', { mainDone: runState.done })
+    await deps.settleManagedConversation(deps.remote.state.terminalStatus ?? (interrupted ? 'interrupted' : 'failed'))
+    deps.stopSignal?.removeEventListener('abort', deps.requestRemoteStop)
+    if (!runState.providerSettled) deps.onProviderSettled()
+    deps.firstTracePerf.finish(undefined, interrupted ? 'cancelled' : 'unavailable')
+    deps.firstTextPerf.finish(undefined, interrupted ? 'cancelled' : 'unavailable')
+    lifecycle.runStopLifecycle.settle(deps.runId)
+    lifecycle.userQuestionBroker.cancelRun(deps.runId)
+    // 收口：先终态 flush + terminal，再离开登记，这样终态 diff 与 resync 仍可读。
+    lifecycle.clearDiffPreviewDemand()
+    lifecycle.runTraces.settle(deps.runId)
+    lifecycle.runs.remove(deps.runId)
+    // Finalization is closed: the run owns nothing from here on.
+    runState.localFinalizing = false
+    lifecycle.forgetBoundedRun(deps.runId)
+    lifecycle.releaseSessionBaseline?.()
+    lifecycle.resolveSettled?.()
+    if (deps.providerId === 'pi') deps.piRunDiagnostics.record(deps.runId, 'main_settled', { mainDone: runState.done, mainSettled: true })
+    lifecycle.closeEventLog()
+  } finally {
+    if (!deps.isRemoteRun) return
+    const state = deps.remote.state
+    if (!state.remoteCompletion) {
+      state.remoteRecordingFailed = true
+      deps.remote.finishRemote('failed', 'remote_run_terminal_unknown')
+    }
+    deps.remoteRunIds.delete(deps.runId)
+    deps.remoteRunLedgerIds.delete(deps.runId)
+    if (state.remoteCompletion) state.resolveRemoteCompletion?.(state.remoteCompletion)
+  }
 }

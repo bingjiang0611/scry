@@ -138,4 +138,23 @@ describe('RunRegistry', () => {
     registry.focus(null) // renderer 切到历史会话
     expect(registry.isViewed('run-cur')).toBe(false)
   })
+
+  it('Provider 已结束但本地收口未完成时仍占用上下文，结束后才释放', () => {
+    const registry = new RunRegistry<
+      { runId: string; done: boolean; providerSettled?: boolean; localFinalizing?: boolean },
+      { runId: string }
+    >()
+    const finalizing = { runId: 'run-finalizing', done: true, providerSettled: true, localFinalizing: true }
+    const settled = { runId: 'run-settled', done: true, providerSettled: true }
+    registry.register(finalizing, { runId: 'run-finalizing' })
+    registry.register(settled, { runId: 'run-settled' })
+
+    // A settled Provider alone is not ownership; an open finalization still is.
+    expect(registry.unsettledStates().map((state) => state.runId)).toEqual(['run-finalizing'])
+    expect(registry.unsettledControls().map((control) => control.runId)).toEqual(['run-finalizing'])
+
+    finalizing.localFinalizing = false
+    expect(registry.unsettledStates()).toEqual([])
+    expect(registry.unsettledControls()).toEqual([])
+  })
 })
