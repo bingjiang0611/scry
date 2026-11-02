@@ -154,6 +154,10 @@ function PromptEditor({ prompt, error, onSave, onClose }: {
   const [title, setTitle] = useState(prompt?.title ?? '')
   const [body, setBody] = useState(prompt?.body ?? '')
   const [discarding, setDiscarding] = useState(false)
+  const discardRef = useRef<HTMLDivElement>(null)
+  // The confirmation renders at the end of the scrollable fields. In a short window it
+  // lands below the fold, so closing looks like it did nothing. Reveal it when it opens.
+  useEffect(() => { if (discarding) discardRef.current?.scrollIntoView({ block: 'nearest' }) }, [discarding])
   const changed = title !== (prompt?.title ?? '') || body !== (prompt?.body ?? '')
   const canClose = (reason: PresenceCloseReason): boolean => {
     if (changed && reason !== 'confirm') { setDiscarding(true); return false }
@@ -172,7 +176,7 @@ function PromptEditor({ prompt, error, onSave, onClose }: {
           <label>提示词正文<textarea required value={body} placeholder="写下你希望重复使用的指令…" onChange={event => setBody(event.target.value)} /></label>
           <div className="mp-editor-meta"><span>{Array.from(body).length} 字</span></div>
           {error && <p className="mp-form-error" role="alert">{error}</p>}
-          {discarding && <div className="mp-discard" role="alert"><strong>放弃未保存的修改？</strong><p>放弃后，本次修改不会保存。</p><div className="mp-actions"><button type="button" className="mp-button" onClick={() => setDiscarding(false)}>继续编辑</button><button type="button" className="mp-button mp-danger" onClick={() => requestModalClose('confirm')}>放弃修改</button></div></div>}
+          {discarding && <div ref={discardRef} className="mp-discard" role="alert"><strong>放弃未保存的修改？</strong><p>放弃后，本次修改不会保存。</p><div className="mp-actions"><button type="button" className="mp-button" onClick={() => setDiscarding(false)}>继续编辑</button><button type="button" className="mp-button mp-danger" onClick={() => requestModalClose('confirm')}>放弃修改</button></div></div>}
         </div>
         {!discarding && <footer className="mp-modal-footer"><button type="button" className="mp-button" onClick={() => requestModalClose()}>取消</button><button type="submit" className="mp-button mp-primary" disabled={!title.trim() || !body.trim()}>保存提示词</button></footer>}
       </form>
