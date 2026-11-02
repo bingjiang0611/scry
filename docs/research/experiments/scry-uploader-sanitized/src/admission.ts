@@ -1,6 +1,7 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { UploadError } from './errors.js'
+import { isLockBusy } from './locks.js'
 import { acquireDirectoryLock, ensurePrivateDirectory, readJson, sleep, writeJsonAtomic } from './util.js'
 
 function admissionRoot(env: NodeJS.ProcessEnv): string {
@@ -23,7 +24,7 @@ export async function deferUploadAdmission(env: NodeJS.ProcessEnv, notBeforeMs: 
     try {
       release = await acquireDirectoryLock(join(root, 'retry-after.lock'))
     } catch (error) {
-      if (!(error instanceof Error) || error.message !== 'upload worker is already running') throw error
+      if (!isLockBusy(error)) throw error
       if (Date.now() >= deadline) throw new UploadError('admission_state_busy', 'user cooldown update is busy', true)
       await sleep(20)
     }
@@ -66,7 +67,7 @@ export async function acquireUploadAdmission(
       try {
         return await acquireDirectoryLock(join(root, `slot-${index}`))
       } catch (error) {
-        if (!(error instanceof Error) || error.message !== 'upload worker is already running') throw error
+        if (!isLockBusy(error)) throw error
       }
     }
     if (Date.now() >= stopAt) break

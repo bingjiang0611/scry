@@ -4,6 +4,7 @@ import { readdir, rename, unlink } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join } from 'node:path'
 import { JOB_BACKOFF_BASE_MS, JOB_BACKOFF_MAX_MS, JOB_MAX_ATTEMPTS, PROVIDERS } from './constants.js'
 import { markWakeupQueued } from './custody/index.js'
+import { LOCK_BUSY_MESSAGE, isLockBusy } from './locks.js'
 import { uploaderEntrypoint } from './scry.js'
 import type { QueueJob, RecordCommittedNotification } from './types.js'
 import { UploadError, prepareUploadRoot, runUpload, setUploadPolicy, takeCustody, uploadRoot } from './uploader.js'
@@ -115,7 +116,7 @@ async function withQueueLock<T>(workspace: string, action: () => Promise<T>): Pr
     try {
       release = await acquireDirectoryLock(join(uploadRoot(workspace), 'jobs-mutation.lock'))
     } catch (error) {
-      if (!(error instanceof Error) || error.message !== 'upload worker is already running') throw error
+      if (!isLockBusy(error)) throw error
       if (Date.now() >= deadline) throw new UploadError('queue_busy', 'queue mutation lock busy', true)
       await sleep(20)
     }
@@ -465,7 +466,7 @@ export async function runQueueWorker(
   try {
     release = await acquireWorkerLock(workspace)
   } catch (error) {
-    if (error instanceof Error && error.message === 'upload worker is already running') return
+    if (isLockBusy(error)) return
     throw error
   }
   try {
@@ -500,7 +501,7 @@ export async function runQueueWorker(
         release = undefined
         if ((await jobPaths(workspace)).length === 0) return
         release = await acquireWorkerLock(workspace).catch((error) => {
-          if (error instanceof Error && error.message === 'upload worker is already running') return undefined
+          if (isLockBusy(error)) return undefined
           throw error
         })
         if (!release) return
@@ -513,7 +514,7 @@ export async function runQueueWorker(
         release = undefined
         if ((await jobPaths(workspace)).length === 0) return
         release = await acquireWorkerLock(workspace).catch((error) => {
-          if (error instanceof Error && error.message === 'upload worker is already running') return undefined
+          if (isLockBusy(error)) return undefined
           throw error
         })
         if (!release) return

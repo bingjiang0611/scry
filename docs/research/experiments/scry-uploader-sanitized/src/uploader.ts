@@ -11,6 +11,7 @@ import {
 } from './custody/index.js'
 import { hasHeldReceipts } from './custody/receipts.js'
 import { UploadError } from './errors.js'
+import { LOCK_BUSY_MESSAGE, isLockBusy } from './locks.js'
 import { safeSnapshotMaxSequence } from './scry.js'
 import {
   assertLegacyLocksMigrated,
@@ -49,9 +50,9 @@ async function acquireUploadLock(
     try {
       return await acquireDirectoryLock(join(base, 'standalone.lock'))
     } catch (error) {
-      if (!(error instanceof Error) || error.message !== 'upload worker is already running') throw error
+      if (!isLockBusy(error)) throw error
       if (Date.now() >= deadline)
-        throw new UploadError('upload_locked', 'upload worker is already running', true)
+        throw new UploadError('upload_locked', LOCK_BUSY_MESSAGE, true)
       await sleep(Math.min(100, deadline - Date.now()))
     }
   }
@@ -388,32 +389,45 @@ export async function setUploadPolicy(
   let state: UploadState
   try {
     state = await initializeUploadState(workspace, 0)
-    if (state.uploadEnabled === enabled) {
+    if (enabled && state.uploadEnabled === undefined) {
+      // No policy was ever recorded, and uploads are already allowed by default.
+      // Enabling is not a transition here: pausing and moving the high-water
+      // would hold records that were never disabled and force a manual release.
+      state.uploadEnabled = true
+      state.enabledEpoch = state.enabledEpoch ?? 1
+      await writeJsonAtomic(statePath(workspace), state)
+      await updateHealth(workspace, state, {
+        status: 'ready',
+        currentAttemptId: null,
+        currentAttemptStartedAt: null
+      }, { ...env, SCRY_TURN_UPLOAD_ENABLED: '1' })
+    } else if (state.uploadEnabled === enabled) {
       if (enabled && state.enabledEpoch === undefined) {
         state.enabledEpoch = 1
         await writeJsonAtomic(statePath(workspace), state)
       }
       return state
-    }
-    state.uploadEnabled = false
-    if (!enabled) state.disabledEpoch = (state.disabledEpoch ?? 0) + 1
-    await writeJsonAtomic(statePath(workspace), state)
-    await pausePending(workspace)
-    if (enabled) {
-      // Never activate until the canonical high-water excludes the complete
-      // disabled interval, including records whose hooks never ran.
-      const baseline = await safeSnapshotMaxSequence(workspace, env)
-      state.disabledThrough = Math.max(state.disabledThrough ?? 0, baseline)
-      state.enqueuedThrough = Math.max(state.enqueuedThrough, baseline)
-      state.uploadEnabled = true
-      state.enabledEpoch = (state.enabledEpoch ?? 0) + 1
+    } else {
+      state.uploadEnabled = false
+      if (!enabled) state.disabledEpoch = (state.disabledEpoch ?? 0) + 1
       await writeJsonAtomic(statePath(workspace), state)
+      await pausePending(workspace)
+      if (enabled) {
+        // Never activate until the canonical high-water excludes the complete
+        // disabled interval, including records whose hooks never ran.
+        const baseline = await safeSnapshotMaxSequence(workspace, env)
+        state.disabledThrough = Math.max(state.disabledThrough ?? 0, baseline)
+        state.enqueuedThrough = Math.max(state.enqueuedThrough, baseline)
+        state.uploadEnabled = true
+        state.enabledEpoch = (state.enabledEpoch ?? 0) + 1
+        await writeJsonAtomic(statePath(workspace), state)
+      }
+      await updateHealth(workspace, state, {
+        status: enabled ? 'ready' : 'disabled',
+        currentAttemptId: null,
+        currentAttemptStartedAt: null
+      }, { ...env, SCRY_TURN_UPLOAD_ENABLED: enabled ? '1' : '0' })
     }
-    await updateHealth(workspace, state, {
-      status: enabled ? 'ready' : 'disabled',
-      currentAttemptId: null,
-      currentAttemptStartedAt: null
-    }, { ...env, SCRY_TURN_UPLOAD_ENABLED: enabled ? '1' : '0' })
   } finally {
     await release()
   }

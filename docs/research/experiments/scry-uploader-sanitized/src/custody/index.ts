@@ -40,6 +40,10 @@ export async function readCustody(base: string, receipt: CustodyReceipt): Promis
 }
 
 async function markDisabled(base: string, receipt: CustodyReceipt): Promise<CustodyReceipt> {
+  // An acknowledgement or a dead letter is terminal evidence. A replayed
+  // disabled notification for such a record changes nothing, so logging a hold
+  // event would contradict the receipt and invent a state that never existed.
+  if (receipt.status === 'uploaded' || receipt.status === 'dead_letter') return receipt
   let current = receipt
   if (current.status === 'pending') {
     current = { ...current, status: 'skipped_disabled' }

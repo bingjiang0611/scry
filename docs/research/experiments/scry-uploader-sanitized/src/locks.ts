@@ -4,7 +4,18 @@ import { accessSync, constants, readFileSync, renameSync, writeFileSync } from '
 import { lstat, open, readFile, rename, rm } from 'node:fs/promises'
 import { delimiter, dirname, join } from 'node:path'
 
-const BUSY = 'upload worker is already running'
+// Callers must distinguish contention from real failures. Keep one literal so a
+// retry loop can never match a message it merely guessed at.
+export const LOCK_BUSY_MESSAGE = 'upload worker is already running'
+
+// Contention has two forms: the immediate kernel-lock refusal and the typed
+// error a caller gets after waiting. Both mean "someone else owns it", so
+// optional work tolerates them together and required work retries later.
+export function isLockBusy(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  if (error.message === LOCK_BUSY_MESSAGE) return true
+  return (error as { code?: unknown }).code === 'record_lock_busy'
+}
 const READY = '__scry_lock_acquired__\n'
 // EOF releases the lease even if the caller crashes. These are fixed shell
 // instructions; the workspace path is a separate argv entry, never shell text.
@@ -87,20 +98,20 @@ async function retireLegacyDirectory(path: string): Promise<void> {
     owner = JSON.parse(await readFile(`${path}/owner.json`, 'utf8'))
   } catch {
     // An incomplete legacy owner is not evidence that its process is dead.
-    throw new Error(BUSY)
+    throw new Error(LOCK_BUSY_MESSAGE)
   }
-  if (!Number.isSafeInteger(owner.pid) || Number(owner.pid) <= 0) throw new Error(BUSY)
+  if (!Number.isSafeInteger(owner.pid) || Number(owner.pid) <= 0) throw new Error(LOCK_BUSY_MESSAGE)
   try {
     process.kill(Number(owner.pid), 0)
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw new Error(BUSY)
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw new Error(LOCK_BUSY_MESSAGE)
     // All new-version reclaimers hold the same native lock before this step.
     const retired = `${path}.retired-${randomUUID()}`
     await rename(path, retired)
     await rm(retired, { recursive: true })
     return
   }
-  throw new Error(BUSY)
+  throw new Error(LOCK_BUSY_MESSAGE)
 }
 
 export async function acquireDirectoryLock(path: string): Promise<() => Promise<void>> {
@@ -166,7 +177,7 @@ export async function acquireDirectoryLock(path: string): Promise<() => Promise<
         }
       }
     })
-    void closed.then(code => reject(spawnError ?? new Error(code === command.busy ? BUSY : 'kernel lock helper failed')))
+    void closed.then(code => reject(spawnError ?? new Error(code === command.busy ? LOCK_BUSY_MESSAGE : 'kernel lock helper failed')))
   })
   try {
     await ready

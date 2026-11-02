@@ -1,11 +1,11 @@
 import { chmod, readFile, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { actorIdentity, ensureTransportInstalled, toolArgumentStyle } from './transport.js'
 import { PROVIDERS, VERSION } from './constants.js'
 import { enqueueWakeup } from './queue.js'
 import { registerWorkspace } from './scheduler.js'
 import { bundledScryEntrypoint, runScry, safeSnapshotMaxSequence, uploaderEntrypoint, verifyScryVersion } from './scry.js'
-import { initializeUploadState, localUploadStatus, prepareUploadRoot } from './uploader.js'
+import { initializeUploadState, localUploadStatus, prepareUploadRoot, uploadRoot } from './uploader.js'
 import {
   ensurePrivateDirectory,
   exactGitRoot,
@@ -17,6 +17,9 @@ import {
 
 const UPLOADER_MARKER = 'Managed by scry-upload'
 const SCRY_MARKER = 'SCRY_HANDLER_ID=turn-recorder-v1'
+// Entry written by versions that ignored `dataDir`. It stays recognized so an
+// existing workspace can be re-initialized instead of rejected.
+const LEGACY_RUNTIME_ENTRY = '.scry/upload/runtime/record-committed'
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`
@@ -29,17 +32,21 @@ exec ${shellQuote(process.execPath)} ${shellQuote(uploaderEntrypoint())} ${actio
 `
 }
 
-function wrapperSource(workspace: string, transportPath: string): string {
+function wrapperSource(workspace: string, runtimeEntry: string, transportPath: string): string {
+  // The runtime path follows the configured dataDir, so it is user content: hold
+  // it in a quoted variable instead of splicing it into the command word, where
+  // $() or a backtick would still expand inside double quotes.
   return `#!/bin/sh
 # ${UPLOADER_MARKER} ${VERSION}
 set -u
 workspace=${shellQuote(workspace)}
+runtime=${shellQuote(runtimeEntry)}
 export TRANSPORT_CLI_PATH=${shellQuote(transportPath)}
 "$workspace/.scry/provider-hook-scry.sh" "$@"
 hook_status=$?
 case "\${2:-}" in
   UserPromptSubmit|Stop)
-    "$workspace/.scry/upload/runtime/wakeup" </dev/null >/dev/null 2>&1 || true
+    "$workspace/$runtime/wakeup" </dev/null >/dev/null 2>&1 || true
     ;;
 esac
 exit "$hook_status"
@@ -55,22 +62,24 @@ async function readOptional(path: string): Promise<string | null> {
   }
 }
 
-async function ensureCommitHook(workspace: string): Promise<void> {
+async function ensureCommitHook(workspace: string, runtimeEntry: string): Promise<void> {
   const path = join(workspace, 'scry.config.json')
   const config = await readJson<Record<string, unknown>>(path)
   if (!config) throw new Error(`${path} 不存在`)
-  const managed = {
-    entry: '.scry/upload/runtime/record-committed',
-    files: ['.scry/upload/runtime/record-committed']
-  }
+  // The hook entry must point at this workspace's own uploader runtime, which
+  // follows the configured dataDir rather than a fixed .scry path.
+  const managed = { entry: `${runtimeEntry}/record-committed`, files: [`${runtimeEntry}/record-committed`] }
+  const known = [managed.entry, LEGACY_RUNTIME_ENTRY]
   const current = object(config.commitHook)
   if (current) {
     if (
-      current.entry !== managed.entry ||
+      !known.includes(String(current.entry)) ||
       !Array.isArray(current.files) ||
-      !current.files.includes(managed.entry)
+      !current.files.some((entry) => known.includes(String(entry)))
     )
       throw new Error(`${path} 已配置其他 commitHook；scry-upload 不会覆盖它`)
+    if (current.entry === managed.entry && current.files.includes(managed.entry)) return
+    await writeJsonAtomic(path, { ...config, commitHook: managed })
     return
   }
   await writeJsonAtomic(path, { ...config, commitHook: managed })
@@ -120,14 +129,18 @@ export async function initWorkspace(
     string,
     unknown
   >
-  await ensureCommitHook(workspace)
+  // Both the hook entry and the launchers live beside the queue, which follows
+  // the workspace dataDir. `.scry/provider-hook*.sh` stays in `.scry` because it
+  // is Scry's own bridge, not uploader state.
+  const runtime = join(uploadRoot(workspace), 'runtime')
+  const runtimeEntry = relative(workspace, runtime)
+  await ensureCommitHook(workspace, runtimeEntry)
   const providerList = Array.isArray(scryResult.providers) ? scryResult.providers.map(String) : []
   const bridgePath = join(workspace, '.scry', 'provider-hook.sh')
   const scryBridge = await readFile(bridgePath, 'utf8')
   if (!scryBridge.includes(SCRY_MARKER)) throw new Error('Scry init 未生成预期的 Provider bridge')
 
   await prepareUploadRoot(workspace)
-  const runtime = join(workspace, '.scry', 'upload', 'runtime')
   await ensurePrivateDirectory(runtime, false)
   const recorderLauncher = join(runtime, 'record-committed')
   const wakeupLauncher = join(runtime, 'wakeup')
@@ -135,7 +148,7 @@ export async function initWorkspace(
   await writeFileAtomic(recorderLauncher, launcherSource(workspace, 'notify', transportPath), 0o700)
   await writeFileAtomic(wakeupLauncher, launcherSource(workspace, 'wakeup', transportPath), 0o700)
   await writeFileAtomic(originalBridge, scryBridge, 0o700)
-  await writeFileAtomic(bridgePath, wrapperSource(workspace, transportPath), 0o700)
+  await writeFileAtomic(bridgePath, wrapperSource(workspace, runtimeEntry, transportPath), 0o700)
   await Promise.all(
     [recorderLauncher, wakeupLauncher, originalBridge, bridgePath].map((path) => chmod(path, 0o700))
   )
@@ -188,7 +201,7 @@ export async function doctorWorkspace(
     if (!source.includes(UPLOADER_MARKER) || !original.includes(SCRY_MARKER))
       throw new Error('Provider bridge 未由 scry-upload 管理')
     for (const name of ['record-committed', 'wakeup']) {
-      const metadata = await stat(join(workspace, '.scry', 'upload', 'runtime', name))
+      const metadata = await stat(join(uploadRoot(workspace), 'runtime', name))
       if (!metadata.isFile() || (metadata.mode & 0o111) === 0) throw new Error(`${name} launcher 不可执行`)
     }
     return 'configured'

@@ -189,6 +189,26 @@ test('pause retains legacy outbox bytes and pauses receipt-only custody', async 
   await releaseDisabled(root, legacyId)
 })
 
+test('a disabled replay never invents a hold event for a terminal receipt', async (t) => {
+  const root = await workspace()
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const upload = join(root, '.scry', 'upload')
+  const results = []
+  for (const [sequence, status] of [[1, 'uploaded'], [2, 'dead_letter']]) {
+    const recordId = id(String(sequence))
+    const raw = Buffer.from(JSON.stringify({ sequence, recordId }))
+    await putRecord(root, sequence, recordId, raw)
+    await takeCustody(root, event(root, sequence, recordId, raw))
+    await finishCustody(root, { version: 1, sequence, recordId, workspaceId: 'fixture', redactionVersion: 'none', recordBytes: raw.length, record: raw.toString('utf8'), sha256: sha256(raw) }, status, status === 'uploaded' ? 'inserted' : 'rejected')
+    // Replaying the notification while uploads are disabled must not rewrite a
+    // terminal receipt, and must not log a hold that never happened.
+    await takeCustody(root, event(root, sequence, recordId, raw), true)
+    results.push((await readReceipt(upload, recordId)).status)
+  }
+  assert.deepEqual(results, ['uploaded', 'dead_letter'])
+  await assert.rejects(() => readFile(join(upload, 'skipped_disabled.jsonl')), { code: 'ENOENT' })
+})
+
 test('finish rejects missing custody and leaves the legacy envelope untouched', async (t) => {
   const root = await workspace()
   t.after(() => rm(root, { recursive: true, force: true }))
