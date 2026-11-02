@@ -131,7 +131,7 @@ try {
     app.setPath('sessionData', ${JSON.stringify(join(temp, 'sessionData'))})
     app.whenReady().then(async () => {
       app.dock?.hide()
-      const win = new BrowserWindow({ show: false, width: 1200, height: 850, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } })
+      const win = new BrowserWindow({ enableLargerThanScreen: true, show: false, width: 1200, height: 850, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } })
       win.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       try {

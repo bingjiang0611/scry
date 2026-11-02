@@ -143,7 +143,8 @@ describe('DesktopRemoteClient over real host TLS', () => {
         const text = '中文🙂\"\n'.repeat(400_000)
         for (let i = 0; i < 3; i++) expect(upsertTraceArchiveTurn({
           cwd: directory, userDataDir: directory, sessionId: context.externalSessionId, providerId: 'pi',
-          turn: { runId: `history-${i}`, agentProfileId: null, userText: `prompt ${i}`, done: true, items: [{ id: `event-${i}`, ts: '2026-10-14T00:00:00Z', runId: `history-${i}`, kind: 'model', stage: 'text', text: i === 2 ? text : `answer ${i}` }] }
+          // Explicit turn ts: same-millisecond writes otherwise fall back to hashed-file order.
+          turn: { runId: `history-${i}`, agentProfileId: null, userText: `prompt ${i}`, done: true, ts: Date.parse(`2026-10-14T00:00:0${i}Z`), items: [{ id: `event-${i}`, ts: '2026-10-14T00:00:00Z', runId: `history-${i}`, kind: 'model', stage: 'text', text: i === 2 ? text : `answer ${i}` }] }
         })).toBe(true)
         const history = await client.history(pending.connection.id, context)
         expect(history.turns.map(turn => turn.userText)).toEqual(['prompt 1', 'prompt 2'])

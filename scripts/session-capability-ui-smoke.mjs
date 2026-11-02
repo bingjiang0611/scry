@@ -80,7 +80,7 @@ try {
     app.setPath('sessionData', ${JSON.stringify(join(temp, 'sessionData'))})
     app.whenReady().then(async () => {
       app.dock?.hide()
-      const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: ${nativeVisibility}, offscreen: ${offscreen} } })
+      const win = new BrowserWindow({ enableLargerThanScreen: true, show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: ${nativeVisibility}, offscreen: ${offscreen} } })
       if (${offscreen}) win.webContents.on('paint', () => {})
       win.webContents.on('did-finish-load', () => win.webContents.focus())
       win.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))
@@ -107,7 +107,7 @@ try {
           if (${cacheOnly}) { finish(result); return }
         }
         if (${fixtures.includes('meta-prompts')}) {
-          const metaWin = new BrowserWindow({ show: false, width: 1200, height: 850, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, partition: 'persist:meta-prompts-test', preload: ${JSON.stringify(join(temp, 'meta-prompts-preload.cjs'))} } })
+          const metaWin = new BrowserWindow({ enableLargerThanScreen: true, show: false, width: 1200, height: 850, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, partition: 'persist:meta-prompts-test', preload: ${JSON.stringify(join(temp, 'meta-prompts-preload.cjs'))} } })
           metaWin.webContents.on('console-message', logRendererError)
           const metaUrl = require('node:url').pathToFileURL(${JSON.stringify(join(temp, 'meta-prompts.html'))}).href
           require(${JSON.stringify(join(temp, 'meta-prompts-ipc.cjs'))}).registerMetaPromptsFixtureIpc(metaWin, metaUrl)
