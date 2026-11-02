@@ -6,6 +6,7 @@ import { pruneAckedBodiesIfDue } from './custody/index.js'
 import { enqueueWakeup, runQueueWorker } from './queue.js'
 import { safeSnapshotMaxSequence, uploaderEntrypoint } from './scry.js'
 import { assertLegacyLocksMigrated, prepareUploadRoot } from './storage.js'
+import { isLockBusy } from './locks.js'
 import { acquireDirectoryLock, ensurePrivateDirectory, executable, exists, readJson, run, sleep, writeJsonAtomic } from './util.js'
 
 type Registry = { version: 1; workspaces: Array<{ workspace: string; registeredAt: string }> }
@@ -53,7 +54,7 @@ async function mutateRegistry<T>(env: NodeJS.ProcessEnv, action: () => Promise<T
         await release()
       }
     } catch (error) {
-      if (!(error instanceof Error) || error.message !== 'upload worker is already running') throw error
+      if (!isLockBusy(error)) throw error
       if (Date.now() >= deadline) throw new Error('scry workspace registry is busy')
       await sleep(20)
     }
@@ -292,7 +293,7 @@ export async function recoverRegistered(env: NodeJS.ProcessEnv = process.env): P
   try {
     release = await acquireDirectoryLock(join(directory, 'recovery.lock'))
   } catch (error) {
-    if (error instanceof Error && error.message === 'upload worker is already running') return
+    if (isLockBusy(error)) return
     throw error
   }
   try {

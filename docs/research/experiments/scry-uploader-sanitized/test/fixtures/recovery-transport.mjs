@@ -45,17 +45,23 @@ if (args.includes('whoami')) {
   log({ phase: 'start', ids: records.map(record => record.recordId), bytes: Buffer.byteLength(input), traceTask: process.env.HOST_TRACE_TASK_ID })
   const gate = process.env.RECOVERY_GATE_FILE
   if (gate && existsSync(gate)) {
-    await new Promise(resolve => {
-      const watcher = watch(gate, () => {
-        if (!existsSync(gate)) {
-          watcher.close()
-          resolve()
-        }
-      })
-      if (!existsSync(gate)) {
-        watcher.close()
+    await new Promise((resolve, reject) => {
+      let watcher
+      const released = () => {
+        watcher?.close()
         resolve()
       }
+      try {
+        watcher = watch(gate, () => {
+          if (!existsSync(gate)) released()
+        })
+      } catch (error) {
+        // The gate can vanish between the check above and watch(). A missing
+        // gate means the test released it, so this is not a failure.
+        if (error.code === 'ENOENT') return resolve()
+        return reject(error)
+      }
+      if (!existsSync(gate)) released()
     })
   }
   tickClock()

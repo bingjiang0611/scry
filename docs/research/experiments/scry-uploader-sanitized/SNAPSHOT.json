@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "kind": "sanitized-review-snapshot",
-  "sourceVersion": "0.2.5",
-  "sourceRevision": "3e2ae9cd80041772bd5827c23f2a3c3bc59e783f",
-  "sourceTrackedFiles": 53,
-  "exportedSourceFiles": 53,
+  "sourceVersion": "0.2.6",
+  "sourceRevision": "c0ea5394020cfdae119c4fa8b3de95a574e76b70",
+  "sourceTrackedFiles": 57,
+  "exportedSourceFiles": 57,
   "additionalFiles": [
     "README.md",
     "SNAPSHOT.json"
@@ -13,12 +13,12 @@
   "productionDeployable": false,
   "verification": {
     "originalTests": {
-      "passed": 103,
+      "passed": 116,
       "failed": 0,
       "skipped": 0
     },
     "sanitizedTests": {
-      "passed": 103,
+      "passed": 116,
       "failed": 0,
       "skipped": 0
     },
@@ -26,15 +26,15 @@
     "realRemoteUploadVerified": false,
     "realRemoteUploadScope": "public-placeholder-snapshot-not-connected",
     "privateInstallationVerification": {
-      "version": "0.2.5",
+      "version": "0.2.6",
       "records": "synthetic-hooks-through-native-recorder",
       "launchdServiceLoaded": true,
       "confirmedNewRecords": 1,
-      "uploaderVersionOnRemote": "scry-uploader/0.2.5",
+      "uploaderVersionOnRemote": "scry-uploader/0.2.6",
       "installedFilesMatchTarball": 74,
       "canonicalBytesUnchanged": true,
       "remoteStructuredBodyEqual": true,
-      "deadLettersUnchanged": 2208,
+      "deadLettersUnchanged": 2209,
       "redriveNoOpVerified": true,
       "primaryCutoffUnchanged": true
     }
@@ -50,23 +50,23 @@
     },
     {
       "path": "README.md",
-      "sha256": "b3af3fa5b9df66a291917a6bb613a444265f09695e7ff637fcd97ecd4d8256de"
+      "sha256": "9333d8e36bd8d77415cb0434f686293056b7d0f064b0716980e5e3bbeae1949d"
     },
     {
       "path": "UPSTREAM-README.md",
-      "sha256": "92fe0281860d815cc683f649aa883e734f1b20b71217686136351e2dfee5b4aa"
+      "sha256": "b8b9d9932cfd518e9aae5ad28bf4edd0e8b0e6f8ca7bb87e12cd4b01780b690d"
     },
     {
       "path": "package-lock.json",
-      "sha256": "d3a984f85a8911321f139a96408b1bdd241a08043e1ea17848ea39b3523ebc6b"
+      "sha256": "46994517edd6edd7fcd2c52f857327182844ec459c87ee93af4c96d8b72f1301"
     },
     {
       "path": "package.json",
-      "sha256": "8eb3af568567799f0ddef54c4d59c323fa96454fb93d4e143896cc0eab492e90"
+      "sha256": "d498e8a9c0b0334a728e85ce07ac201966ec40219a1a1be8afc929c0c794d2ec"
     },
     {
       "path": "src/admission.ts",
-      "sha256": "d3fa0ff3079576b89ee6e84751fc34b7a2968052671ab3fde22bda0d028f1b00"
+      "sha256": "29739f4b1dea4807c278763121e1d07d8b4aa7be9c976905430a95ec7ddc4f1e"
     },
     {
       "path": "src/cli.ts",
@@ -74,15 +74,15 @@
     },
     {
       "path": "src/constants.ts",
-      "sha256": "3eb19c6c97e6b9e8a0b878dfa655c47270b299a8ae0a2df374f0fee5992338ea"
+      "sha256": "c03cacd0e79c953e729f492d145e21ae0ddf123db51e72184456e5ab9909f1ab"
     },
     {
       "path": "src/custody/index.ts",
-      "sha256": "049f11dc2701b7fa8dca52c4e98b067c1d45290106095c472e89b8a136bcc41d"
+      "sha256": "e78d188b1fbccbcf540597b480412fd8cb23d4fcc728dcae28ff789b563003e2"
     },
     {
       "path": "src/custody/receipts.ts",
-      "sha256": "7be571627213f67f3512dc97f8bc69d59e056a5226d4f83745719d8d05c50d6a"
+      "sha256": "ae4566857b7c1512e059564c991e08c883cc8969e443c5e2caa67ea31eaccff3"
     },
     {
       "path": "src/envelope.ts",
@@ -94,15 +94,15 @@
     },
     {
       "path": "src/init.ts",
-      "sha256": "0f010f12bebd9fb7c98e687bc6f238d767a4f57f7be8dad26fde2b87a6e4cc4c"
+      "sha256": "87256b7d81ee9cc0969e1ba2ac3e9fae559c44bd73ca9e3a33cf9a7f81fb11a7"
     },
     {
       "path": "src/locks.ts",
-      "sha256": "ec166e9c4394c42b3a90771392c0f3d4fc7911736112b4fa1310c9d7d20b07fd"
+      "sha256": "47a17c8e7c00c454f2e6c26269abf2ec780dfd78705e6055ab751a584892f588"
     },
     {
       "path": "src/queue.ts",
-      "sha256": "ada61511c16255fe3e774b4da660b30285540e57e809690212f99eb2f78fd190"
+      "sha256": "2e8b2dcbd25eb896bdfaea3662bbeed2b0a8ed3df695e27333a91fc525029a71"
     },
     {
       "path": "src/redrive.ts",
@@ -114,7 +114,7 @@
     },
     {
       "path": "src/scheduler.ts",
-      "sha256": "f86b0274f8861f62f626d14d8b7bcb7abf241f21d39646b4cdc59b1eaaed4923"
+      "sha256": "f2ba7ac2a89d48c5ae3bd227e056295a9acf5141b2470a2cfc0888d9f7f7d84e"
     },
     {
       "path": "src/scry.ts",
@@ -150,7 +150,7 @@
     },
     {
       "path": "src/uploader.ts",
-      "sha256": "db33a85030ba76a1566c3e69266d08242e14ee24f1c4c54588d2620f126eaab0"
+      "sha256": "6350e5330195ebcbd51045df1c1a019f1d2aae86e6f3b98c3f438dc5839cbbff"
     },
     {
       "path": "src/util.ts",
@@ -166,7 +166,7 @@
     },
     {
       "path": "test/custody/index.test.mjs",
-      "sha256": "251ef4d85ccdc71b18b04be04d1c10407f33e28a38a2807a1fefcbe8d3ed571e"
+      "sha256": "d844e61a40c61a97fd358bc2dc1820182e83bb5a642ca27638a7dad5b48d6f35"
     },
     {
       "path": "test/discovery-custody.test.mjs",
@@ -190,15 +190,23 @@
     },
     {
       "path": "test/fixtures/recovery-transport.mjs",
-      "sha256": "23a117cdaafb72ef2b5caf958e2f463e5a4ce667e71ff456a75f0dac268bbffd"
+      "sha256": "9d11b2f824a5d707d73986f0833ecdbeeeb1578d3db0d4d2213f0d64c6f156e2"
     },
     {
       "path": "test/fixtures/reliability-fixture.mjs",
       "sha256": "24305ae6b7dc1d3f06c45306608bb1f8aac80e3bac32900072a083d56c3b1aef"
     },
     {
+      "path": "test/gate-fixture.test.mjs",
+      "sha256": "657818ed342eb97952867b62feb581bdd2ce099bd5413621766e317b3db90a25"
+    },
+    {
       "path": "test/held-health.test.mjs",
       "sha256": "bea97f4ea99350051f529ef33e7d4b688c76ab22d9db2243e494f76f1d5439c5"
+    },
+    {
+      "path": "test/init-runtime.test.mjs",
+      "sha256": "4c32d7a0120643399da8b67b7f6655f98f91a63d4cce45e3838d7b1a3c04df12"
     },
     {
       "path": "test/integration-upload.test.mjs",
@@ -206,7 +214,7 @@
     },
     {
       "path": "test/integration.test.mjs",
-      "sha256": "599f12ba1b9321278c74ad0ba5240bc8e88c2ecf600a1aa917dea7237786830a"
+      "sha256": "1491b18abfd5e347e4b674d7e531c70dc08da6cf8d43ec6993ef1bd7113f88ab"
     },
     {
       "path": "test/locks-lifecycle.test.mjs",
@@ -215,6 +223,10 @@
     {
       "path": "test/queue-policy.test.mjs",
       "sha256": "1bcd5e78c687d8f97c9eca1f5ba839bdc79c08653b0b298c4a34989a52828f00"
+    },
+    {
+      "path": "test/record-lock.test.mjs",
+      "sha256": "c95551743ba93c9ac40cde8460b19f1e100716b49f2d6e89a09e5d84a6674f7a"
     },
     {
       "path": "test/recovery-contracts.test.mjs",
@@ -243,6 +255,10 @@
     {
       "path": "test/transport-recovery.test.mjs",
       "sha256": "fd9480b0ebab310b9e7c728174fc34c06aa8a5070b70c3ef660ebb8139f64476"
+    },
+    {
+      "path": "test/upload-policy.test.mjs",
+      "sha256": "f0faa142bbac6df3a0c82aaa78d40710b223239b2485687970d2692c1cbb08c9"
     },
     {
       "path": "test/uploader-regressions.test.mjs",

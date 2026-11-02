@@ -3,7 +3,16 @@ import { join } from 'node:path'
 import { UploadError } from '../errors.js'
 import { receiptPath } from '../storage.js'
 import type { CustodyReceipt } from '../types.js'
-import { acquireDirectoryLock, ensurePrivateDirectory, readJson, syncDirectory, writeFileAtomic, writeJsonAtomic } from '../util.js'
+import { isLockBusy } from '../locks.js'
+import { acquireDirectoryLock, ensurePrivateDirectory, readJson, sleep, syncDirectory, writeFileAtomic, writeJsonAtomic } from '../util.js'
+
+/**
+ * Concurrency, not failure: a duplicate hook notification or a commit that
+ * races an in-flight upload must wait for the record instead of losing the
+ * notification. Stale leases are impossible because the kernel releases them
+ * with the holder process, so the wait only needs to cover a live holder.
+ */
+const RECORD_LOCK_WAIT_MS = 15_000
 
 const RECORD_ID_RE = /^[a-f0-9]{32,64}$/
 export const SHA256_RE = /^[a-f0-9]{64}$/
@@ -50,8 +59,25 @@ function lockPath(base: string, recordId: string): string {
   return join(base, 'receipts', `.${recordId}.standalone.lock`)
 }
 
-export async function withRecordLock<T>(base: string, recordId: string, action: () => Promise<T>): Promise<T> {
-  const release = await acquireDirectoryLock(lockPath(base, recordId))
+export async function withRecordLock<T>(
+  base: string,
+  recordId: string,
+  action: () => Promise<T>,
+  options: { waitMs?: number } = {}
+): Promise<T> {
+  const deadline = Date.now() + (options.waitMs ?? RECORD_LOCK_WAIT_MS)
+  let release: (() => Promise<void>) | undefined
+  for (;;) {
+    try {
+      release = await acquireDirectoryLock(lockPath(base, recordId))
+      break
+    } catch (error) {
+      if (!isLockBusy(error)) throw error
+      if (Date.now() >= deadline)
+        throw new UploadError('record_lock_busy', `record ${recordId} is still locked by another uploader`, true)
+      await sleep(20 + Math.floor(Math.random() * 40))
+    }
+  }
   try {
     return await action()
   } finally {
@@ -135,16 +161,22 @@ async function indexedReceipt(base: string, status: IndexedStatus, recordId: str
   // A receipt may still be being committed. Never delete its early marker.
   if (!receipt) return null
   try {
-    return await withRecordLock(base, recordId, async () => {
-      const current = await readReceipt(base, recordId)
-      if (current?.status === status) return current
-      if (current) await removeIndexMarker(base, status, recordId)
-      return null
-    })
+    // Cleanup is optional: never make a reader wait for a live writer.
+    return await withRecordLock(
+      base,
+      recordId,
+      async () => {
+        const current = await readReceipt(base, recordId)
+        if (current?.status === status) return current
+        if (current) await removeIndexMarker(base, status, recordId)
+        return null
+      },
+      { waitMs: 0 }
+    )
   } catch (error) {
     // A simultaneous status transition owns the marker until its receipt is
     // durable. Skipping cleanup preserves its next recovery opportunity.
-    if (!(error instanceof Error) || error.message !== 'upload worker is already running') throw error
+    if (!isLockBusy(error)) throw error
     return null
   }
 }
