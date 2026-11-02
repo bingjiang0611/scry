@@ -61,6 +61,7 @@ export async function prepareUploadRoot(workspace: string): Promise<string> {
     'outbox',
     'outbox/committed',
     'outbox/committed/legacy',
+    'outbox/committed/content',
     'receipts',
     'dead-letter',
     'jobs',

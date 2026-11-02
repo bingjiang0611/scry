@@ -45,6 +45,8 @@ export function validateReceipt(value: unknown, recordId: string): CustodyReceip
   validateRecordIdentity(recordId, receipt.sequence)
   if (typeof receipt.sha256 !== 'string' || !SHA256_RE.test(receipt.sha256))
     throw custodyError('custody_invalid', 'receipt sha256 is invalid')
+  if (receipt.contentSha256 !== undefined && !SHA256_RE.test(receipt.contentSha256))
+    throw custodyError('custody_invalid', 'receipt content sha256 is invalid')
   if (typeof receipt.status !== 'string' || !CUSTODY_STATUSES.has(receipt.status as CustodyReceipt['status']))
     throw custodyError('custody_status_invalid', 'receipt status is invalid')
   for (const timestamp of [receipt.bodyPruneStartedAt, receipt.bodyPrunedAt]) {
