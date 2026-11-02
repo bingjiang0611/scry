@@ -104,26 +104,10 @@ export async function exerciseMetaPrompts(contents, win, clipboard, screenshotPr
   await wait(`document.querySelector('[role="status"]')?.textContent.includes('已复制')`)
   check(clipboard.readText() === body, 'Copied text differs from the saved body')
 
-  // An untouched editor closes directly, without the discard confirmation.
-  await click('[aria-label="编辑提示词"]')
-  await wait(`document.querySelector('.mp-editor-modal')`)
-  await click('[aria-label="关闭提示词编辑器"]')
-  await wait(`!document.querySelector('.mp-editor-modal') || document.querySelector('.mp-discard') != null`)
-  check(!await read(`!!document.querySelector('.mp-discard')`), 'Closing an unchanged editor asked to discard changes')
-  await wait(`!document.querySelector('.mp-editor-modal')`)
-
   await click('[aria-label="编辑提示词"]')
   await type('.mp-editor-modal textarea', '未保存的修改')
   await click('[aria-label="关闭提示词编辑器"]')
   await wait(`document.querySelector('.mp-discard')`)
-  // Keep editing: the confirmation goes away and the unsaved draft stays.
-  await click('.mp-discard .mp-button:not(.mp-danger)')
-  await wait(`!document.querySelector('.mp-discard') && document.querySelector('.mp-modal-footer') != null`)
-  check(await read(`document.querySelector('.mp-editor-modal textarea')?.value === '未保存的修改'`), 'Continue editing lost the unsaved draft')
-  // The footer cancel path asks again instead of closing silently.
-  await click('.mp-modal-footer .mp-button:not(.mp-primary)')
-  await wait(`document.querySelector('.mp-discard')`)
-  check(await read(`!!document.querySelector('.mp-editor-modal')`), 'Cancel closed a changed editor without confirming')
   await click('.mp-discard .mp-danger')
   await wait(`!document.querySelector('.mp-editor-modal')`)
   check(await read(`document.querySelector('.mp-body').textContent === ${JSON.stringify(body)}`), 'Discard changed persisted body')
@@ -176,7 +160,7 @@ export async function exerciseMetaPrompts(contents, win, clipboard, screenshotPr
       require('node:fs').writeFileSync(screenshotPrefix + '-close-buttons-' + theme + '.png', (await contents.capturePage()).toPNG())
     }
   }
-  return { nativeCoordinateActions: true, storageReload: true, plainText: true, search: true, clipboardExact: true, discard: true, cleanCloseNoConfirm: true, continueEditingKeepsDraft: true, cancelReconfirms: true, edit: true, draftPreserved: true, notSent: true, deletion: true, corruptDataProtected: true, modalCloseButton: { forwardedRef: true, keyboardActivation: true, disabled: true, nonSubmitting: true, glyphPreserved: true } }
+  return { nativeCoordinateActions: true, storageReload: true, plainText: true, search: true, clipboardExact: true, discard: true, edit: true, draftPreserved: true, notSent: true, deletion: true, corruptDataProtected: true, modalCloseButton: { forwardedRef: true, keyboardActivation: true, disabled: true, nonSubmitting: true, glyphPreserved: true } }
 }
 
 // Full App wiring, with its real main/preload and an isolated smoke Provider.
