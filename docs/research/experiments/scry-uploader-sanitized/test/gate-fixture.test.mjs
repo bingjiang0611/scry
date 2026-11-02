@@ -4,7 +4,7 @@ import { rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { run, sleep } from '../dist/util.js'
+import { run } from '../dist/util.js'
 import { fixture, logs, waitFor } from './fixtures/recovery-helpers.mjs'
 
 const transport = fileURLToPath(new URL('./fixtures/recovery-transport.mjs', import.meta.url))
@@ -82,7 +82,12 @@ test('a held gate keeps the request open until the gate is released', async (t) 
   assert.equal(stdout, '')
 
   await rm(gate, { force: true })
-  const code = await Promise.race([closed, sleep(30_000).then(() => 'timeout')])
+  // Bound the wait so a wedged child cannot hang the run, and clear the timer
+  // so it does not hold the test process open after a fast exit.
+  let timer
+  const guard = new Promise(resolve => { timer = setTimeout(() => resolve('timeout'), 30_000) })
+  const code = await Promise.race([closed, guard])
+  clearTimeout(timer)
   if (code === 'timeout') {
     child.kill('SIGKILL')
     assert.fail('the fixture did not exit after the gate was released')

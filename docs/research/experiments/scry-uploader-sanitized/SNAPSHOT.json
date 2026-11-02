@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "kind": "sanitized-review-snapshot",
   "sourceVersion": "0.2.7",
-  "sourceRevision": "df4ab835ab0eaf89eb9f5f2415bc12c39c82123a",
+  "sourceRevision": "77d45ecccae8b1a9cc927ed6e4a9380efdbdaf72",
   "sourceTrackedFiles": 58,
   "exportedSourceFiles": 58,
   "additionalFiles": [
@@ -50,7 +50,7 @@
     },
     {
       "path": "README.md",
-      "sha256": "67f162b89173979867d72fa5cf2d993b3695a372785c701fc5a4a906a8fe24a4"
+      "sha256": "eba74e3c026e983f4e36f5d018bf49092d9ec71d3da74f1523844f06b5f1c983"
     },
     {
       "path": "UPSTREAM-README.md",
@@ -202,7 +202,7 @@
     },
     {
       "path": "test/gate-fixture.test.mjs",
-      "sha256": "9f53ca8f91bec3b6c6ed8fc1ddcdbfe3d47eacfdf307bad0ac973136d28aa7f9"
+      "sha256": "912b498595f075be08c813096eef02a821a58b4cb843c1dab496f5f2ff47007f"
     },
     {
       "path": "test/held-health.test.mjs",

@@ -6,7 +6,7 @@
 
 ## 来源与覆盖
 
-- 源版本：`0.2.7`；源任务分支 revision：`df4ab835ab0eaf89eb9f5f2415bc12c39c82123a`。
+- 源版本：`0.2.7`；源任务分支 revision：`77d45ecccae8b1a9cc927ed6e4a9380efdbdaf72`。
 - 包含该 revision 的 **58 个 Git 跟踪文件**：源码、测试、合成 fixture、包元数据、锁文件、TypeScript 配置、上游说明及许可证。
 - 源仓库只做本地提交，未推送其远端。公开仓库不包含源 Git 历史或私有名称映射。
 - 保留 MIT 许可证及原有公开版权署名。
