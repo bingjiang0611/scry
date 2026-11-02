@@ -220,6 +220,7 @@
         "src/main/bootstrap/workspace-start.ts",
         "src/main/bootstrap/run-frontdoor.ts",
         "src/main/bootstrap/run-admission.ts",
+        "src/main/conversation-send.ts",
         "src/main/workspace-overlap.ts",
         "src/main/bootstrap/run-startup.ts",
         "src/main/bootstrap/run-execution.ts",
