@@ -102,6 +102,8 @@ export type AgentForceKillScope = 'run_scoped' | 'shared_transport'
  * 停止请求的真实进度。它描述 Scry 对 Provider 做了什么以及拿到了什么证据，
  * 不代表「这一轮已经结束」——只有 Provider runtime 真正 settle 才是终止证据。
  * - interrupt_requested：已发出协作式取消，等待 Provider 收口。
+ * - interrupt_request_failed：取消调用本身失败，Scry 无法确认取消已发出；用户的停止意图
+ *   仍然保留（继续升级），Provider 终止证据仍然缺失。
  * - force_kill_requested：优雅窗口耗尽，已升级到 run-scoped forceKill，仍在等待 settle。
  * - no_safe_force_kill：优雅窗口耗尽，但硬杀只能作用于共享 transport，会波及无关 run；
  *   Scry 没有发出硬杀，这一轮的终止仍然未被 Provider 确认。
@@ -110,6 +112,7 @@ export type AgentForceKillScope = 'run_scoped' | 'shared_transport'
  */
 export type AgentStopPhase =
   | 'interrupt_requested'
+  | 'interrupt_request_failed'
   | 'force_kill_requested'
   | 'no_safe_force_kill'
   | 'provider_unsettled'

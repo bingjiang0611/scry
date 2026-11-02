@@ -320,3 +320,12 @@ export const LOADING_COPY = {
   mcpNoConfigEvidence: '没有配置证据不等于运行正常，也不等于连接失败。',
   mcpSummary: (configured: number, connected: number, runtime: number, tests: number) => `${configured} 配置 · ${runtime > 0 ? connected + ' 已连接 / ' + runtime + ' 运行态' : '运行态未返回'} · ${tests} 测试证据`
 } as const
+
+/** 停止控制调用的事实文案：调用失败不冒充“已请求”，更不冒充“已终止”。 */
+export const RUN_STOP_COPY = {
+  interruptRequestFailed: {
+    label: '停止请求未生效',
+    hint: (providerId: string): string =>
+      `${providerId} 的取消调用失败，Scry 无法确认取消已经发出。这一轮可能仍在运行，用量与文件足迹尚未收敛；仍会按窗口升级强制终止，收到 Provider 终态前不会显示完成`
+  }
+} as const

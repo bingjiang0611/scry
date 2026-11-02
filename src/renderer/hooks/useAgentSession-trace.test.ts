@@ -103,6 +103,13 @@ describe('stop lifecycle projection', () => {
     expect(noSafeKill.hint).toContain('共用')
     expect(noSafeKill.hint).toContain('先进队列')
     expect(noSafeKill.providerSettled).toBe(false)
+    const interruptFailed = runStopStatus(stopState('r1', 'interrupt_request_failed', 'x'))
+    // 取消调用失败必须可见：不能显示“停止中”，也不能显示“已终止”。
+    expect(interruptFailed.tone).toBe('unsettled')
+    expect(interruptFailed.label).toBe('停止请求未生效')
+    expect(interruptFailed.hint).toContain('取消调用失败')
+    expect(interruptFailed.hint).toContain('不会显示完成')
+    expect(interruptFailed.providerSettled).toBe(false)
     expect(runStopStatus(stopState('r1', 'settled', 'x')).providerSettled).toBe(true)
   })
 })
