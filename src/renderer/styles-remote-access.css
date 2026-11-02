@@ -10,7 +10,7 @@
 }
 .remote-pairing__code code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
-  word-break: break-all; color: var(--fg); background: var(--panel3);
+  overflow-wrap: anywhere; color: var(--fg); background: var(--panel3);
   padding: 8px; border-radius: var(--r-sm);
 }
 .remote-pairing__devicecode { line-height: 1.5; }

@@ -103,6 +103,16 @@ describe('MarkdownImpl trust boundary', () => {
     expect(html).toContain('decoding="async"')
   })
 
+  it('adds Chinese language, BudouX heading breaks, prose measure and non-breaking pairs', () => {
+    const source = '## 在本地查看每一次执行如何变成可核对的证据\n\n这是一段足够长的中文正文，Scry 通过 Provider CLI 记录 30 tokens，并把执行证据整理成可核对的时间线。\n\nEnglish body with 30 tokens.'
+    const html = renderToStaticMarkup(<MarkdownImpl>{source}</MarkdownImpl>)
+    expect(html).toContain('<h2 lang="zh-CN" class="zh-balanced-heading">')
+    expect(html).toContain('<wbr/>')
+    expect(html).toContain('<p lang="zh-CN" class="zh-prose">')
+    expect(html).toContain('30\u00a0tokens')
+    expect(html).toContain('<p>English body with 30\u00a0tokens.</p>')
+  })
+
   it('repairs common model-authored strong spacing without touching code', () => {
     const source = '**我的判断： **最值得关注。\n\n**结论：**继续优化。\n\n先**检查**项目。\n\n`** inline literal **`\n\n```md\n** fenced literal **\n```'
     expect(normalizeMarkdownForDisplay(source)).toBe(
@@ -284,7 +294,7 @@ describe('MarkdownImpl trust boundary', () => {
 
     expect(html).toContain('class="task-list-item"')
     expect(html).toContain('<input type="checkbox" disabled=""/>')
-    expect(html).toContain(label)
+    expect(html).toContain(label.replaceAll('— ', '—\u00a0'))
   })
 
   it('wraps GFM tables in a keyboard-scrollable region', () => {
