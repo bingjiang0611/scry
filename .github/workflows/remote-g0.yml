@@ -74,17 +74,19 @@ jobs:
       - run: node experiments/remote-g0/pair-smoke.mjs
       - run: npm --prefix experiments/remote-g0 run smoke:g1
 
-  ios_g0:
+  # 两个 iOS 工程在同一 runner 上依次编译：GitHub Free 同时最多 5 个 macOS job，
+  # 拆成两个 job 会与 CI 的 renderer 分片和 Performance native 争抢而排队。
+  ios:
     needs: changes
     if: ${{ needs.changes.outputs.required == 'true' }}
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
       # 只缓存 SwiftPM 源码下载（约 1.5 分钟），不缓存编译产物。
-      - name: Cache Swift package checkouts
+      - name: Cache ScryRemoteG0 Swift package checkouts
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/scry-g0-ios/SourcePackages
@@ -96,18 +98,8 @@ jobs:
           -destination 'generic/platform=iOS Simulator'
           -derivedDataPath "$RUNNER_TEMP/scry-g0-ios"
           ARCHS=arm64 CODE_SIGNING_ALLOWED=NO build-for-testing
-
-  ios_ui:
-    needs: changes
-    if: ${{ needs.changes.outputs.required == 'true' }}
-    runs-on: macos-15
-    timeout-minutes: 20
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
-    steps:
-      - uses: actions/checkout@v4
       # 只缓存 SwiftPM 源码下载（约 1.5 分钟），不缓存编译产物。
-      - name: Cache Swift package checkouts
+      - name: Cache ScryRemote Swift package checkouts
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/scry-remote-ui/SourcePackages
@@ -123,7 +115,7 @@ jobs:
   check:
     name: Remote Check
     if: ${{ always() }}
-    needs: [changes, transport, ios_g0, ios_ui]
+    needs: [changes, transport, ios]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -135,7 +127,7 @@ jobs:
           echo "$RESULTS" | jq -e '
             .changes.result == "success" and (
               (.changes.outputs.required == "true" and
-                ([.transport.result, .ios_g0.result, .ios_ui.result] | all(. == "success"))) or
+                ([.transport.result, .ios.result] | all(. == "success"))) or
               (.changes.outputs.required == "false" and
-                ([.transport.result, .ios_g0.result, .ios_ui.result] | all(. == "skipped")))
+                ([.transport.result, .ios.result] | all(. == "skipped")))
             )' > /dev/null

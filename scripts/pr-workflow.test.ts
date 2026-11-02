@@ -110,16 +110,16 @@ describe('required PR checks', () => {
   it('runs every renderer UI smoke exactly once across the macOS shards', () => {
     const job = workflow('ci.yml').jobs['packaged-electron'] as Job & { strategy: { 'fail-fast': boolean; matrix: { shard: number[] } } }
     expect(job.needs).toBeUndefined()
-    expect(job.strategy.matrix.shard).toEqual([1, 2, 3])
+    expect(job.strategy.matrix.shard).toEqual([1, 2])
     expect(job.strategy['fail-fast']).toBe(false)
     expect(source(job, 'Isolated renderer DOM smoke tests').run).toBe('npm run test:renderer:ui:${{ matrix.shard }}')
     const pack = source(job, 'Package and smoke the macOS app')
     expect(pack.run).toBe('npm run pack:artifact')
-    expect(pack.if).toBe('${{ matrix.shard == 2 }}')
+    expect(pack.if).toBe('${{ matrix.shard == 1 }}')
     const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> }
-    const shards = [1, 2, 3].map(shard => `npm run test:renderer:ui:${shard}`)
+    const shards = [1, 2].map(shard => `npm run test:renderer:ui:${shard}`)
     expect(scripts['test:renderer:ui']).toBe(shards.join(' && '))
-    const commands = [1, 2, 3].flatMap(shard => scripts[`test:renderer:ui:${shard}`].split(' && '))
+    const commands = [1, 2].flatMap(shard => scripts[`test:renderer:ui:${shard}`].split(' && '))
     expect(new Set(commands).size).toBe(commands.length)
     for (const required of ['npm run test:side-chat:ui', 'npm run test:conversation:ipc', 'npm run test:source-control:ui', 'npm run test:workspace:ui', 'node scripts/analytics-credits-ui-smoke.mjs', 'node scripts/desktop-remote-ui-smoke.mjs --session-parity-only']) {
       expect(commands).toContain(required)
@@ -151,27 +151,25 @@ describe('required PR checks', () => {
   it('remote skips only on an explicit unaffected diff', () => {
     const remote = workflow('remote-g0.yml')
     expect(remote.on.pull_request).toBeNull()
-    expect(remote.jobs.check.needs).toEqual(['changes', 'transport', 'ios_g0', 'ios_ui'])
-    for (const name of ['transport', 'ios_g0', 'ios_ui']) {
+    expect(remote.jobs.check.needs).toEqual(['changes', 'transport', 'ios'])
+    for (const name of ['transport', 'ios']) {
       const job = remote.jobs[name]
       expect(job.needs).toBe('changes')
       expect(job.if).toBe("${{ needs.changes.outputs.required == 'true' }}")
       expect(job['runs-on']).toBe('macos-15')
-      expect(job['timeout-minutes']).toBe(20)
+      expect(job['timeout-minutes']).toBe(name === 'ios' ? 30 : 20)
       expect(job['continue-on-error']).toBeUndefined()
       expect(job.env?.DEVELOPER_DIR).toBe('/Applications/Xcode_26.3.app/Contents/Developer')
       for (const step of job.steps) expect(step['continue-on-error']).toBeUndefined()
     }
     expect(remote.jobs.transport.steps.some(step => step.run?.includes('xcodebuild'))).toBe(false)
-    for (const [job, project, action, derived] of [
-      ['ios_g0', 'ScryRemoteG0', 'build-for-testing', 'scry-g0-ios'],
-      ['ios_ui', 'ScryRemote', 'build', 'scry-remote-ui']
-    ]) {
-      const commands = remote.jobs[job].steps.filter(step => step.run).map(step => step.run!.trim())
-      expect(commands).toEqual([
-        `xcodebuild -project apps/ios/${project}.xcodeproj -scheme ${project} -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/${derived}" ARCHS=arm64 CODE_SIGNING_ALLOWED=NO ${action}`
-      ])
-    }
+    const commands = remote.jobs.ios.steps.filter(step => step.run).map(step => step.run!.trim())
+    expect(commands).toEqual([
+      ['ScryRemoteG0', 'build-for-testing', 'scry-g0-ios'],
+      ['ScryRemote', 'build', 'scry-remote-ui']
+    ].map(([project, action, derived]) =>
+      `xcodebuild -project apps/ios/${project}.xcodeproj -scheme ${project} -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/${derived}" ARCHS=arm64 CODE_SIGNING_ALLOWED=NO ${action}`
+    ))
     expect(remote.jobs.transport.steps.some(step => step.run === 'npm --prefix experiments/remote-g0 run smoke:g1')).toBe(true)
     const remotePackage = JSON.parse(readFileSync(join(root, 'experiments/remote-g0/package.json'), 'utf8')) as { scripts: Record<string, string>; engines: { node: string } }
     expect(remotePackage.engines.node).toBe('^22.7.0 || ^24.0.0')
@@ -181,7 +179,7 @@ describe('required PR checks', () => {
   })
 
   it('remote requires each parallel validation result and rejects missing results', () => {
-    const jobs = ['transport', 'ios_g0', 'ios_ui']
+    const jobs = ['transport', 'ios']
     const results = (required: string, changes: string, result: string) => ({
       changes: { result: changes, outputs: { required } },
       ...Object.fromEntries(jobs.map(job => [job, { result }]))
