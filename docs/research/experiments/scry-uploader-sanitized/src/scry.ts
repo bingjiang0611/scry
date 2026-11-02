@@ -3,15 +3,10 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ExportPage } from './types.js'
 import { EXPORT_LIMIT } from './constants.js'
-import { object, run } from './util.js'
+import { object, redactDiagnostic, run } from './util.js'
 
 const require = createRequire(import.meta.url)
 
-function safeDiagnostic(value: string): string {
-  return value
-    .replace(/(authorization|cookie|token|password|secret|api[-_]?key)\s*[:=]\s*[^\s,;]+/gi, '$1=<redacted>')
-    .slice(0, 512)
-}
 
 export function bundledScryEntrypoint(): string {
   const packageJson = require.resolve('@review/scry-turn-recorder/package.json')
@@ -47,14 +42,14 @@ export async function runScry(
     timeoutMs: options.timeoutMs ?? 30_000
   })
   if (result.exitCode !== 0) {
-    const failure = new Error(`scry ${args[0] ?? ''} 失败：${safeDiagnostic(result.stderr.trim()) || `exit ${result.exitCode}`}`) as Error & {
+    const failure = new Error(`scry ${args[0] ?? ''} 失败：${redactDiagnostic(result.stderr.trim()) || `exit ${result.exitCode}`}`) as Error & {
       exitCode?: number
       signal?: NodeJS.Signals
       stderr?: string
     }
     failure.exitCode = result.exitCode
     failure.signal = result.signal
-    failure.stderr = safeDiagnostic(result.stderr)
+    failure.stderr = redactDiagnostic(result.stderr)
     throw failure
   }
   return result.stdout

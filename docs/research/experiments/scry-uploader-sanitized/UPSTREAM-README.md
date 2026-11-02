@@ -85,6 +85,8 @@ export 发现同样先接管 canonical 原始字节并持久化 receipt，再推
 
 新记录使用 `redactionVersion=none`，保留原始内容；已有 `agent-turn-v1` 脱敏 outbox 保持可重放，不会被静默丢弃。上传成功只接受 `inserted`/`duplicated`，明确的 `conflicted`/`rejected` 先保留 payload custody，再写入仅含元数据的失败诊断；损坏的本地队列文件会原样隔离，可能包含原始内容。传输超时、deadline、429 和网络/5xx 故障保留未知远端结果，按指数冷却、jitter 和 Retry-After 重试，不消耗 job 的永久失败次数；Retry-After（秒数或 HTTP-date）也会限制同一用户其他工作区的新请求。确定性 400/413 请求错误才拆批，单条连续三次确定性失败后保留为死信。无法识别的失败（例如 `success:false` 且没有状态码的“服务繁忙”）不会让整轮失败，也不会把正常记录送进死信。是否归因到具体记录要看证据：本轮确实上传成功过（或拆出的另一半成功、或该记录首次失败之后本工作区有过真实 ACK），才会按记录计数、拆批，并在单条连续三次失败后进死信；没有任何成功证据时按服务故障处理，只累加工作区熔断，不消耗记录预算、不拆批。首次无法识别时最多把另一批拆半探测一次，每轮请求数另有上限，避免故障期连续轰炸。服务端若返回结构化 `code`（如 `INVALID_ARGUMENT`），分类按 code 判定，不依赖错误文案。完整编码参数 JSON 在发送前限制为 512 KiB；单条超限不发送并保留正文。这是客户端限额，不代表已确认网关的实际限额。
 
+失败诊断在进入日志或错误消息前会去掉凭据：`Authorization` 保留 `Bearer`/`Basic`/`Digest` 方案名再替换密钥，`cookie`、`token`、`password`、`passwd`、`secret`、`api-key` 等键同理；带引号的 JSON 形式（`"token":"..."`）与 `key=value` 都覆盖，替换后仍限制 512 字符。
+
 后台唤醒还受工作区级熔断约束：传输、协议或发现阶段的持续失败会累加 `transportFailures` 并写入 `transportCooldownUntilMs`，冷却期内新的 hook 唤醒不再发请求，只按冷却时间重新排队；显式 `flush` 是用户主动操作，不受该冷却约束。任务自身区分两个计数器：`failures` 每次失败都递增并驱动退避，`attempts` 只在真实失败时消耗，达到 6 次才进入死信。因此持续故障的调用频率有上限（指数退避、上限 60 秒），不会每秒重试一次。
 
 恢复发送前还会读取 recorder 的 `record-environments/<recordId>.json`：即使原通知丢失，其中明确的 `SCRY_TURN_UPLOAD_ENABLED=0` 也会保留为 held，不由后台服务上传。读取复用 pinned recorder 的身份和 schema 校验，不把快照内的 executable/配置当作新的执行授权。

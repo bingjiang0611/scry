@@ -6,8 +6,8 @@
 
 ## 来源与覆盖
 
-- 源版本：`0.2.6`；源任务分支 revision：`c0ea5394020cfdae119c4fa8b3de95a574e76b70`。
-- 包含该 revision 的 **57 个 Git 跟踪文件**：源码、测试、合成 fixture、包元数据、锁文件、TypeScript 配置、上游说明及许可证。
+- 源版本：`0.2.7`；源任务分支 revision：`df4ab835ab0eaf89eb9f5f2415bc12c39c82123a`。
+- 包含该 revision 的 **58 个 Git 跟踪文件**：源码、测试、合成 fixture、包元数据、锁文件、TypeScript 配置、上游说明及许可证。
 - 源仓库只做本地提交，未推送其远端。公开仓库不包含源 Git 历史或私有名称映射。
 - 保留 MIT 许可证及原有公开版权署名。
 - 不包含 `node_modules`、`dist`、tarball、本机配置、真实 records、身份、凭据或数据库。
@@ -51,13 +51,16 @@
 - 本地 `permission denied`（EACCES）不再被当成登录失效而停 15 分钟：鉴权只认明确拒绝。
 - 新增 `scry-upload redrive [--record-id <id>] [--reason <text>]`，把保留中的死信放回队列。回放前要求 payload 正是该记录自己的 custody 文件（拒绝 `..` 逃逸与其他记录），并在记录锁内用 custody receipt 重验状态、序号与摘要；legacy 保留副本用它自己的摘要校验。原元数据移入 `dead-letter/redriven/` 作为审计副本。
 
-第四轮补充（`0.2.6`，用户复核发现的五个缺陷）：
+第四轮补充（`0.2.6`/`0.2.7`，用户复核发现的六个缺陷）：
 
 - 从未记录过开关状态的工作区执行首次 `enable`，旧实现把它当成状态切换：写关闭策略、暂停已排队的 custody、把关闭高水位推高，pending 记录永久 `skipped_disabled`。现在首次开启只补字段，不暂停、不移动高水位；已经明确关闭过的记录仍保持 held，`enable` 不释放它们。
 - 关闭期重放的提交通知之前会为已经 `uploaded` 或 `dead_letter` 的 receipt 追加一条 `skipped_disabled` 事件，与 receipt 自相矛盾。现在只有真正处于（或变成）held 的记录才写该事件。
 - `init` 之前把 runtime launcher、`commitHook.entry` 和 doctor 检查写死为 `.scry/upload/runtime`，忽略配置的 `dataDir`；`dataDir` 指向新目录时非递归 `mkdir` 还会报 `ENOENT`。现在三者都从 `uploadRoot(workspace)` 推导，旧版本写入的 `.scry/upload/runtime/record-committed` 会在再次 `init` 时改指向。runtime 路径来自用户配置，因此以单引号变量传入 hook 脚本，不再拼进双引号命令字；`dataDir` 含 `$()` 或反引号时旧实现会真的执行（新回归在旧实现下创建了 `PWNED` 文件）。
 - `withRecordLock` 之前遇到并发立刻抛通用错误，重复的 hook 通知直接丢失。现在有限等待（默认 15 秒、20–60ms jitter），超时抛带 `record_lock_busy` 的可重试错误；非竞争错误不吞。可选索引清理用零等待，读者不会被活跃写者拖住。
 - 恢复测试 fixture 在 `existsSync` 与 `watch` 之间被删除 gate 文件时同步抛 `ENOENT` 崩溃；现在只有 `ENOENT` 视为已释放，其他错误照旧抛出，并以“gate 一直关闭时请求保持等待”作对照。
+- 失败诊断的脱敏正则要求关键词后直接跟 `:` 或 `=`，因此 `Authorization: Bearer abc123` 只替换了方案名，`abc123` 仍留在消息里；JSON 形式的 `"token":"abc"` 完全不匹配。现在统一为 `redactDiagnostic`：接受带引号的键与分隔符，保留 `Bearer`/`Basic`/`Digest` 方案名后再替换密钥，覆盖 `cookie`/`password`/`passwd`/`api-key`，仍限制 512 字符；原先 `src/transport.ts` 与 `src/scry.ts` 两处副本合并到 `src/util.ts`。新回归在旧正则下 `abc123` 与 `"abc"` 都会留在输出中。
+- 同轮收紧三条新回归自身的有效性：`Promise.withResolvers` 是 Node 22+ API，而包声明支持 Node ≥20，改为本地 deferred；held-gate 测试不再用固定 400ms 判断“仍在等待”，由 fixture 在真正驻留前先写 `gate-wait` 信号，并对子进程退出加 30 秒上限；hook 断言改为比较调用前后的任务 `generation` 并要求 hook 退出码为 0——`init` 自己就会排队一个 recovery wakeup，且 wrapper 用 `|| true`，旧的“存在 wakeup 任务”断言在 hook 根本没调用时也会通过（移除该调用的对照现在会以 `bounded wait expired` 失败）。
+
 
 发现游标不是远端 ACK，也不是关闭权限边界。旧 `enqueuedThrough` 较大不能使未确认的 custody 消失。内核锁、持久状态和指纹检查也不构成安全沙箱。
 
@@ -80,15 +83,15 @@
 ## 验证
 
 - 环境：macOS arm64、Node `24.18.0`、recorder `0.2.53`。
-- 原版与脱敏副本各自运行 `npm run check`：构建、**116/116 测试，0 skipped**、`npm pack --dry-run` 均通过。原版额外的 TypeScript unused 检查通过。
+- 原版与脱敏副本各自运行 `npm run check`：构建、**118/118 测试，0 skipped**、`npm pack --dry-run` 均通过。原版额外的 TypeScript unused 检查通过。
 - 同步后逐文件核对冻结源 revision 的确定性替换结果；源码/测试不使用旧单体文件大小豁免。
 - 关键回归：60 条记录首轮完成 35 条后保留进度；追加通知与 10 个并发唤醒；三个独立 CLI 的全局并发限制；坏 exporter/不可访问仓库隔离；完整 wire 大小；跨进程关闭与重复 enable；清理中断及重放；队列环境权限隔离。
 - 四个独立破坏对照按预期失败：并发槽改为 3、恢复旧环境覆盖、移除旧关闭标记的 enable 保护、用 exit 代替 close。最后一个对照只取得 6 字节，而不是预期的 70,006 字节。
 - 真实恢复发现 `0.2.1` 的 export 路径没有持久化 custody/ACK receipt。远端查询确认该记录已保存，未重发。`0.2.2` 修复此路径及旧无 receipt outbox、legacy 提交副本；原先静默完成终态改为明确拒绝。对应旧实现失败对照已复现，原文件保留断言未删除。
 - 首轮失败保留记录：曾修正 cutoff、baseline、service 转义与 fixture 假设；升级后还有旧版本字符串/静默终态预期未同步、2 秒子进程 fixture 失败及外层命令超时。最终将独立测试文件串行化，未扩大单项超时，完整检查重新通过。验收脚本也修正了 commitHook 配置和持久锁文件的判断，不把这些脚本错误当产品成功。
 - 追问逐项核对时复现 receipt-only held 被误标 `healthy`。旧实现运行新回归按预期失败；补修后的 3 项回归覆盖 outbox 有无、显式释放、旧索引迁移、不再扫描归档 receipt 及并发清理。本地初次交付漏掉此项，不能把之前 84 项通过称为原清单全部完成。
-- 私有安装版 `0.2.6` 已部署：75 个 tarball 文件在主前缀与 nvm 前缀两处安装后逐字节一致（无缺失、无差异、无多余文件）。真实 launchd 服务保持 `loaded`；合成 hook 记录经真实 recorder 与真实传输提交，取得 `inserted` ACK，远端结构化内容与 canonical 记录一致，`uploaderVersion` 为 `scry-uploader/0.2.6`。`redrive` 在无死信的工作区返回空结果，在 2209 条真实死信的工作区带不存在的 `--record-id` 时为 no-op，死信数量不变；主工作区保持开启，历史高水位未变。`0.2.5` 及更早的部署证据保留为历史，不混入本轮计数。
-- 破坏对照覆盖到每一处修复：`0.2.5` 的三轮回归在旧实现下分别重新死信、重新发出请求、把逃逸路径与伪造摘要当成可回放；`0.2.6` 的八条新回归在旧实现下全部失败（首次开启后的 pending 记录变 held、终态 receipt 被写上 held 事件、custom `dataDir` 下 init 报 `ENOENT` 且 hook 入口不迁移、hook 命令字里的 `$()` 真的执行并创建 `PWNED`、通知在锁竞争下丢失、锁超时没有错误码、gate 竞态崩溃），同时“明确关闭仍保持 held”“外部 commitHook 仍被拒绝”“默认 `.scry` 位置不变”“gate 保持关闭时请求继续等待”四条对照仍然通过。
+- 私有安装版 `0.2.7` 已部署：tarball 共 75 个文件，其中 74 个与两处全局前缀逐字节一致（`package.json` 只核对版本号），无缺失、无差异、无多余文件。真实 launchd 服务保持 `loaded`；合成 hook 记录经真实 recorder 与真实传输提交，取得 `inserted` ACK，远端结构化内容与 canonical 记录一致，`uploaderVersion` 为 `scry-uploader/0.2.7`。`redrive` 在无死信的工作区返回空结果，在 2210 条真实死信的工作区带不存在的 `--record-id` 时为 no-op，死信数量不变；主工作区保持开启，历史高水位未变。`0.2.6` 及更早的部署证据保留为历史，不混入本轮计数。
+- 破坏对照覆盖到每一处修复：`0.2.5` 的三轮回归在旧实现下分别重新死信、重新发出请求、把逃逸路径与伪造摘要当成可回放；`0.2.6` 的十条新回归在旧实现下全部失败（首次开启后的 pending 记录变 held、终态 receipt 被写上 held 事件、custom `dataDir` 下 init 报 `ENOENT` 且 hook 入口不迁移、hook 命令字里的 `$()` 真的执行并创建 `PWNED`、通知在锁竞争下丢失、锁超时没有错误码、gate 竞态崩溃、`Bearer` 与 JSON token 未被脱敏），同时“明确关闭仍保持 held”“外部 commitHook 仍被拒绝”“默认 `.scry` 位置不变”“gate 保持关闭时请求继续等待”四条对照仍然通过。
 - 私有安装版 `0.2.3` 已部署：72 个包文件与 tarball 一致，99 个 recorder 运行文件与测试依赖一致。真实 launchd 在无通知、无队列任务时恢复 **1 条新记录**，获得 `inserted` ACK；远端查询确认完整结构化内容一致。另 **1 条关闭期间记录**保留 held custody，远端查询不存在；没有 outbox 副本时健康状态仍正确为 `held_disabled`。6 条 canonical 原始字节未变，新记录 custody 字节一致；主工作区保持开启，升级未改变原高水位。此前 `0.2.2` 的两条关闭历史验证保留为历史证据，不混入本轮计数。
 - 上述部署与远端结论（`inserted` ACK、远端查询一致、死信数量等）均为**维护者在私有环境中自报的验收结果，本仓库没有留存可复核的证据**。验收使用合成 hook 记录、真实 recorder 与真实传输，不是实际 Provider 会话验收。公开占位版未连接真实服务；不附部署路径、正文、身份、凭据或原始响应。
 

@@ -9,6 +9,13 @@ import { custody, fixture } from './fixtures/recovery-helpers.mjs'
 
 const jobNames = async base => (await readdir(join(base, 'jobs'))).filter(name => name.endsWith('.json'))
 
+// `Promise.withResolvers` needs Node 22; the package supports Node >=20.
+function deferred() {
+  let resolve = () => {}
+  const promise = new Promise(done => { resolve = done })
+  return { promise, resolve }
+}
+
 test('a record notification waits for a held record lock instead of being dropped', async (t) => {
   const { root, base, env } = await fixture(t)
   const record = await custody(root, 1)
@@ -21,8 +28,8 @@ test('a record notification waits for a held record lock instead of being droppe
     recordId: record.recordId,
     sequence: 1
   }
-  const entered = Promise.withResolvers()
-  const release = Promise.withResolvers()
+  const entered = deferred()
+  const release = deferred()
   const holder = withRecordLock(base, record.recordId, async () => {
     entered.resolve()
     await release.promise
@@ -45,8 +52,8 @@ test('a record notification waits for a held record lock instead of being droppe
 test('a lock that never yields fails with a typed retryable error', async (t) => {
   const { root, base } = await fixture(t)
   const record = await custody(root, 1)
-  const entered = Promise.withResolvers()
-  const release = Promise.withResolvers()
+  const entered = deferred()
+  const release = deferred()
   const holder = withRecordLock(base, record.recordId, async () => {
     entered.resolve()
     await release.promise

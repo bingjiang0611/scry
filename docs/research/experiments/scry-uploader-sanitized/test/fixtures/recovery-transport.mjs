@@ -45,6 +45,9 @@ if (args.includes('whoami')) {
   log({ phase: 'start', ids: records.map(record => record.recordId), bytes: Buffer.byteLength(input), traceTask: process.env.HOST_TRACE_TASK_ID })
   const gate = process.env.RECOVERY_GATE_FILE
   if (gate && existsSync(gate)) {
+    // Tell the test the request is parked, so a "still waiting" assertion
+    // cannot pass just because the child has not arrived yet.
+    log({ phase: 'gate-wait' })
     await new Promise((resolve, reject) => {
       let watcher
       const released = () => {

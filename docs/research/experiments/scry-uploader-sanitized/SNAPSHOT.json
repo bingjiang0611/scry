@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "kind": "sanitized-review-snapshot",
-  "sourceVersion": "0.2.6",
-  "sourceRevision": "c0ea5394020cfdae119c4fa8b3de95a574e76b70",
-  "sourceTrackedFiles": 57,
-  "exportedSourceFiles": 57,
+  "sourceVersion": "0.2.7",
+  "sourceRevision": "df4ab835ab0eaf89eb9f5f2415bc12c39c82123a",
+  "sourceTrackedFiles": 58,
+  "exportedSourceFiles": 58,
   "additionalFiles": [
     "README.md",
     "SNAPSHOT.json"
@@ -13,12 +13,12 @@
   "productionDeployable": false,
   "verification": {
     "originalTests": {
-      "passed": 116,
+      "passed": 118,
       "failed": 0,
       "skipped": 0
     },
     "sanitizedTests": {
-      "passed": 116,
+      "passed": 118,
       "failed": 0,
       "skipped": 0
     },
@@ -26,15 +26,15 @@
     "realRemoteUploadVerified": false,
     "realRemoteUploadScope": "public-placeholder-snapshot-not-connected",
     "privateInstallationVerification": {
-      "version": "0.2.6",
+      "version": "0.2.7",
       "records": "synthetic-hooks-through-native-recorder",
       "launchdServiceLoaded": true,
       "confirmedNewRecords": 1,
-      "uploaderVersionOnRemote": "scry-uploader/0.2.6",
+      "uploaderVersionOnRemote": "scry-uploader/0.2.7",
       "installedFilesMatchTarball": 74,
       "canonicalBytesUnchanged": true,
       "remoteStructuredBodyEqual": true,
-      "deadLettersUnchanged": 2209,
+      "deadLettersUnchanged": 2210,
       "redriveNoOpVerified": true,
       "primaryCutoffUnchanged": true
     }
@@ -50,19 +50,19 @@
     },
     {
       "path": "README.md",
-      "sha256": "9333d8e36bd8d77415cb0434f686293056b7d0f064b0716980e5e3bbeae1949d"
+      "sha256": "67f162b89173979867d72fa5cf2d993b3695a372785c701fc5a4a906a8fe24a4"
     },
     {
       "path": "UPSTREAM-README.md",
-      "sha256": "b8b9d9932cfd518e9aae5ad28bf4edd0e8b0e6f8ca7bb87e12cd4b01780b690d"
+      "sha256": "5a0f7c55aac5d01d14b4583a0f05e977af544ec0e501039b400396dde455a0b3"
     },
     {
       "path": "package-lock.json",
-      "sha256": "46994517edd6edd7fcd2c52f857327182844ec459c87ee93af4c96d8b72f1301"
+      "sha256": "7b927ed82157109227548dae6a4cab4f06bdd3d09210968035a7b2d064557a99"
     },
     {
       "path": "package.json",
-      "sha256": "d498e8a9c0b0334a728e85ce07ac201966ec40219a1a1be8afc929c0c794d2ec"
+      "sha256": "258730ef051bea313db921896b80011a387a557ed07a067c43fb93f8176e63d8"
     },
     {
       "path": "src/admission.ts",
@@ -74,7 +74,7 @@
     },
     {
       "path": "src/constants.ts",
-      "sha256": "c03cacd0e79c953e729f492d145e21ae0ddf123db51e72184456e5ab9909f1ab"
+      "sha256": "c9fef8ef51721b5c1baae4d36c9bd7c98f34bbedee6a12348d6c056c7a6ec49f"
     },
     {
       "path": "src/custody/index.ts",
@@ -118,7 +118,7 @@
     },
     {
       "path": "src/scry.ts",
-      "sha256": "975eb972f978d849445e51a36da388391e9c505ada4b786a1a56cc8d191ee9da"
+      "sha256": "316ab2b5fd98e5de9e59610ed02e68fa3232d0e11ed2086e0b9408500b0fed1a"
     },
     {
       "path": "src/storage.ts",
@@ -126,7 +126,7 @@
     },
     {
       "path": "src/transport.ts",
-      "sha256": "3b5ba1a19daf3cc82e19adf0abaf1af9320acc74f1dccf27731cbcd32d30776f"
+      "sha256": "08f2f2ae2200fb3f64652163018773d5c1c1782df33718b43b2071e6cbeece93"
     },
     {
       "path": "src/types.ts",
@@ -154,7 +154,7 @@
     },
     {
       "path": "src/util.ts",
-      "sha256": "1a50bfe1430b4f62ea60d4cf8af65ac3da0e136372fed704f1a968f4965f3ada"
+      "sha256": "efda30818185788381029b283eca521d75d49c5ba0872ce2a83fac605c78a0c2"
     },
     {
       "path": "src/wire.ts",
@@ -167,6 +167,10 @@
     {
       "path": "test/custody/index.test.mjs",
       "sha256": "d844e61a40c61a97fd358bc2dc1820182e83bb5a642ca27638a7dad5b48d6f35"
+    },
+    {
+      "path": "test/diagnostics.test.mjs",
+      "sha256": "05540c9e7af8df45aec9062382baec77e497902feefc432443326bd2e9bb14e5"
     },
     {
       "path": "test/discovery-custody.test.mjs",
@@ -190,7 +194,7 @@
     },
     {
       "path": "test/fixtures/recovery-transport.mjs",
-      "sha256": "9d11b2f824a5d707d73986f0833ecdbeeeb1578d3db0d4d2213f0d64c6f156e2"
+      "sha256": "aa670856892f8419fc4028bc4e546fb4ee20cf647096966f197ecfe7ceda1c4a"
     },
     {
       "path": "test/fixtures/reliability-fixture.mjs",
@@ -198,7 +202,7 @@
     },
     {
       "path": "test/gate-fixture.test.mjs",
-      "sha256": "657818ed342eb97952867b62feb581bdd2ce099bd5413621766e317b3db90a25"
+      "sha256": "9f53ca8f91bec3b6c6ed8fc1ddcdbfe3d47eacfdf307bad0ac973136d28aa7f9"
     },
     {
       "path": "test/held-health.test.mjs",
@@ -206,7 +210,7 @@
     },
     {
       "path": "test/init-runtime.test.mjs",
-      "sha256": "4c32d7a0120643399da8b67b7f6655f98f91a63d4cce45e3838d7b1a3c04df12"
+      "sha256": "1129bf239317844f0a0aef345043a1775ea0a6f65423beb57b7ef68b04832738"
     },
     {
       "path": "test/integration-upload.test.mjs",
@@ -214,7 +218,7 @@
     },
     {
       "path": "test/integration.test.mjs",
-      "sha256": "1491b18abfd5e347e4b674d7e531c70dc08da6cf8d43ec6993ef1bd7113f88ab"
+      "sha256": "afd550298d282ed5d65507e3a4fd7565f39ccf519006cc37ae722e5c7e7beba0"
     },
     {
       "path": "test/locks-lifecycle.test.mjs",
@@ -226,7 +230,7 @@
     },
     {
       "path": "test/record-lock.test.mjs",
-      "sha256": "c95551743ba93c9ac40cde8460b19f1e100716b49f2d6e89a09e5d84a6674f7a"
+      "sha256": "9c0e3ed2ca4d26a9128e1069b25394c8e5b76a70c6dbd6ac3db8ad57530ac56f"
     },
     {
       "path": "test/recovery-contracts.test.mjs",

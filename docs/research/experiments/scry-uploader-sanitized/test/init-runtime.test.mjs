@@ -6,10 +6,39 @@ import { doctorWorkspace, initWorkspace } from '../dist/init.js'
 import { uploadRoot } from '../dist/uploader.js'
 import { run } from '../dist/util.js'
 import { env, workspace } from './fixtures/integration-fixture.mjs'
+import { waitFor } from './fixtures/recovery-helpers.mjs'
 
 const CONFIGURED = { schemaVersion: 1, workspaceId: 'fixture', dataDir: 'custom-store' }
 const LEGACY_ENTRY = '.scry/upload/runtime/record-committed'
 const ENTRY = 'custom-store/upload/runtime/record-committed'
+
+
+// init enqueues its own recovery wakeup, so a job existing proves nothing about
+// the hook. Read the generation and require the hook to advance it.
+async function wakeupGeneration(jobsDir) {
+  const names = (await readdir(jobsDir)).filter(name => name.startsWith('wakeup-'))
+  const generations = {}
+  for (const name of names) {
+    generations[name] = JSON.parse(await readFile(join(jobsDir, name), 'utf8')).generation ?? 0
+  }
+  return generations
+}
+
+async function runHookAndExpectWakeup(root, testEnv, jobsDir, uploadDir) {
+  const before = await wakeupGeneration(jobsDir)
+  const hook = await run(join(root, '.scry', 'provider-hook.sh'), ['claude', 'Stop'], {
+    cwd: root,
+    env: testEnv,
+    timeoutMs: 60_000
+  })
+  assert.equal(hook.exitCode, 0, hook.stderr)
+  await access(join(uploadDir, 'runtime', 'wakeup'))
+  await waitFor(async () => {
+    const after = await wakeupGeneration(jobsDir)
+    return Object.keys(after).length > 0 &&
+      Object.entries(after).every(([name, generation]) => generation > (before[name] ?? -1))
+  }, 30_000)
+}
 
 async function configuredWorkspace(t) {
   const root = await workspace()
@@ -39,6 +68,13 @@ test('init places launchers, hook entry and doctor checks beside the configured 
 
   const doctor = await doctorWorkspace(root, testEnv)
   assert.equal(doctor.healthy, true, JSON.stringify(doctor.checks))
+
+  await runHookAndExpectWakeup(
+    root,
+    testEnv,
+    join(root, 'custom-store', 'upload', 'jobs'),
+    join(root, 'custom-store', 'upload')
+  )
 })
 
 test('re-running init repoints a hook entry written before dataDir was honored', async (t) => {
@@ -98,14 +134,7 @@ test('a dataDir with shell metacharacters is quoted, not executed', async (t) =>
   assert.ok(wrapper.includes(`runtime=${escaped}`), wrapper)
 
   // Running the hook must reach the real launcher and never evaluate the name.
-  await run(join(root, '.scry', 'provider-hook.sh'), ['Stop', 'Stop'], {
-    cwd: root,
-    env: testEnv,
-    timeoutMs: 60_000
-  })
-  await access(join(root, dataDir, 'upload', 'runtime', 'wakeup'))
-  const jobs = await readdir(join(root, dataDir, 'upload', 'jobs'))
-  assert.ok(jobs.some(name => name.startsWith('wakeup-')), jobs.join(','))
+  await runHookAndExpectWakeup(root, testEnv, join(root, dataDir, 'upload', 'jobs'), join(root, dataDir, 'upload'))
   for (const target of [marker, join(root, 'PWNED2')]) {
     await assert.rejects(() => access(target), { code: 'ENOENT' })
   }

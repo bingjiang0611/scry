@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { run, sleep } from '../dist/util.js'
-import { fixture } from './fixtures/recovery-helpers.mjs'
+import { fixture, logs, waitFor } from './fixtures/recovery-helpers.mjs'
 
 const transport = fileURLToPath(new URL('./fixtures/recovery-transport.mjs', import.meta.url))
 const request = JSON.stringify({ records: [JSON.stringify({ recordId: 'a'.repeat(32) })] })
@@ -62,20 +62,31 @@ test('a held gate keeps the request open until the gate is released', async (t) 
     env: { ...env, RECOVERY_GATE_FILE: gate },
     stdio: ['pipe', 'pipe', 'pipe']
   })
+  t.after(() => {
+    if (child.exitCode === null) child.kill('SIGKILL')
+  })
+  t.after(() => rm(gate, { force: true }))
   let stdout = ''
   child.stdout.on('data', chunk => { stdout += chunk.toString() })
   child.stderr.resume()
   child.stdin.end(request)
   const closed = new Promise(resolve => child.once('close', code => resolve(code)))
-  try {
-    await sleep(400)
-    assert.equal(child.exitCode, null, 'a held gate must not answer early')
-    assert.equal(stdout, '')
-    await rm(gate, { force: true })
-    assert.equal(await closed, 0)
-    assert.equal(JSON.parse(stdout).success, true)
-  } finally {
-    await rm(gate, { force: true })
-    if (child.exitCode === null) child.kill('SIGTERM')
+
+  // Wait for the fixture to report that it is parked on the gate, instead of
+  // sleeping and hoping it got that far.
+  await waitFor(
+    async () => (await logs(env.RECOVERY_TRANSPORT_LOG)).some(event => event.phase === 'gate-wait'),
+    20_000
+  )
+  assert.equal(child.exitCode, null, 'a held gate must not answer early')
+  assert.equal(stdout, '')
+
+  await rm(gate, { force: true })
+  const code = await Promise.race([closed, sleep(30_000).then(() => 'timeout')])
+  if (code === 'timeout') {
+    child.kill('SIGKILL')
+    assert.fail('the fixture did not exit after the gate was released')
   }
+  assert.equal(code, 0)
+  assert.equal(JSON.parse(stdout).success, true)
 })
