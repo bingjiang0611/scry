@@ -32,6 +32,42 @@ describe('Qoder credits canonical recording', () => {
     expect(records[0].usage.value?.credits?.value?.amount).toBeUndefined()
   })
 
+  it('maps request_set_id hooks through transcript requestSetId to promptId and native credits', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-request-set-identity-'))
+    roots.push(root)
+    await writeFile(join(root, 'scry.config.json'), JSON.stringify({ schemaVersion: 1, workspaceId: 'fixture', capture: { diff: false } }))
+    const transcript = join(root, 'native.jsonl')
+    await writeFile(transcript, '')
+    await handleRecorderHook({
+      provider: 'qoder', event: 'UserPromptSubmit', workspace: root,
+      payload: {
+        session_id: 'session', request_set_id: 'R', transcript_path: transcript, cwd: root, model: 'Ultimate',
+        prompt: 'same text', timestamp: '2026-09-09T00:00:00.000Z'
+      }
+    })
+    await writeFile(transcript, [
+      { type: 'user', uuid: 'u', sessionId: 'session', cwd: root, requestSetId: 'R', promptId: 'P', message: { content: 'same text' } },
+      { type: 'assistant', uuid: 'a', parentUuid: 'u', sessionId: 'session', cwd: root,
+        message: { id: 'm', content: [{ type: 'text', text: 'done' }], usage: { request_id: 'credit-1', credits: 4.5, billable: true } } }
+    ].map((row) => JSON.stringify(row)).join('\n') + '\n')
+    await handleRecorderHook({
+      provider: 'qoder', event: 'Stop', workspace: root,
+      payload: {
+        session_id: 'session', parent_request_set_id: 'R', transcript_path: transcript, cwd: root, model: 'Ultimate',
+        timestamp: '2026-09-09T00:00:01.000Z'
+      }
+    })
+
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record).toMatchObject({ providerTurnId: 'P', status: 'completed' })
+    expect(record.provider).toMatchObject({ modelTier: 'Ultimate', modelStatus: 'observed', modelSource: 'provider_model_event' })
+    expect(record.provider.model).toBeUndefined()
+    expect(record.usage.value?.credits).toMatchObject({
+      status: 'partial',
+      value: { provider: 'qoder', unit: 'credits', scope: 'main', amount: 4.5, knownRequests: 1, missingRequests: 0 }
+    })
+  })
+
   it('records native discounted requests once, survives reread, and summarizes zero/unknown/legacy separately from USD', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-canonical-credits-'))
     roots.push(root)

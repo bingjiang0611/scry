@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { qoderCreditRequests, readQoderCreditRows, reconcileQoderCreditRows, withQoderCredits, type QoderCreditScope } from './qoder-credits'
+import { readQoderCreditRows, reconcileQoderCreditRows, withQoderCredits, type QoderCreditScope } from './qoder-credits'
 import { upsertTraceArchiveTurn } from './transcript-archive'
 import { buildUsageAnalytics } from './span-ledger'
 import { creditUsageEvidence } from '../shared/credit-usage'
@@ -91,48 +91,6 @@ describe('Qoder native Credits projection', () => {
     expect(rows).toHaveLength(201)
     expect(rows.every(row => row.evidence.credits == null)).toBe(true)
     expect(rows.at(-1)?.evidence).toMatchObject({ totalTurns: 1, matchedTurns: 0, omissionReason: expect.stringContaining('200') })
-  })
-
-  it('uses exact user identity/parent ancestry, not text, order or cumulative result totals', () => {
-    const parsed = qoderCreditRequests(text([
-      user(),
-      assistant('a1', 'u1', { credits: 2, original_credits: 9, billable: true, request_id: 'r1' }),
-      { type: 'result', total_credits: 1000 },
-      user('untracked'),
-      assistant('a2', 'untracked', { credits: 50, billable: true }),
-      // Late delivery still belongs to its explicit parent, not the latest prompt.
-      assistant('a3', 'a1', { credits: 3, billable: true, request_id: 'r3' }),
-      assistant('foreign', 'u1', { credits: 100, billable: true }, { cwd: '/foreign' }),
-      assistant('side', 'u1', { credits: 100, billable: true }, { isSidechain: true }),
-      assistant('child', 'u1', { credits: 100, billable: true }, { parent_tool_use_id: 'agent' }),
-      assistant('fork', 'u1', { credits: 100, billable: true }, { forkedFrom: { sessionId: 'source' } })
-    ]), [{ ...scope, forkTurnId: 'u1' }])
-    expect(parsed.matched).toEqual(new Set(['run-1']))
-    expect(parsed.requests.map((request) => request.credits)).toEqual([2, 3])
-    expect(qoderCreditRequests(text([user(), assistant('a', 'u1', { credits: 2, billable: true })]), [scope]).requests).toEqual([])
-  })
-
-  it('supports legacy promptId, tool-result ancestry, and missing/corrupt evidence without inventing zero', () => {
-    const parsed = qoderCreditRequests(text([
-      user('u1', { promptId: 'p1' }),
-      assistant('a1', 'u1', { credits: 10, billable: false }),
-      user('tool', { parentUuid: 'a1', message: { content: [{ type: 'tool_result', tool_use_id: 't1' }] } }),
-      assistant('a2', 'tool', { original_credits: 5, billable: true }),
-      assistant('a3', 'a2', { credits: -1, billable: true }),
-      assistant('a4', 'a3', { credits: 2 }),
-      assistant('a5', 'a4', { credits: 0, billable: true })
-    ]) + '\n{torn', [{ ...scope, providerTurnId: 'p1' }])
-    expect(parsed.requests.map((request) => request.credits)).toEqual([0, null, null, null, 0])
-    expect(qoderCreditRequests(text([user('u1', { promptId: 'p1' })]), [
-      { ...scope, forkTurnId: 'p1', providerTurnId: 'p1' }
-    ]).matched.size).toBe(1)
-    expect(qoderCreditRequests(text([user('u1', { promptId: 'p1' })]), [
-      { ...scope, forkTurnId: 'wrong', providerTurnId: 'p1' }
-    ]).matched.size).toBe(0)
-    expect(qoderCreditRequests(text([
-      user('u1', { promptId: 'ambiguous' }), user('u2', { promptId: 'ambiguous' }),
-      assistant('a', 'u2', { credits: 5, billable: true })
-    ]), [{ ...scope, providerTurnId: 'ambiguous' }]).requests).toEqual([])
   })
 
   it('deduplicates request blocks across turns, fills missing progress, and rejects conflicting known amounts', async () => {

@@ -81,7 +81,10 @@ export async function sideChatFixture(options: { providerId?: ProviderId; sideCh
       const items = [modelEvent(runId, answer), ...extra]
       fixture.extraEvents = []
       upsertTraceArchiveTurn({ userDataDir: fixture.userData, cwd, sessionId: archive.sessionId, providerId: fixture.providerId,
-        turn: { runId, userText: request.prompt, items, done: true, status: 'completed', ts: Date.now() } })
+        // Production records the run's Profile: the id for a named Profile, an explicit
+        // null for a default run. The archive reader compares that against the source.
+        turn: { runId, userText: request.prompt, items, done: true, status: 'completed', ts: Date.now(),
+          agentProfileId: request.agentProfileId ?? null } })
       managed.onProviderDispatchAttempt?.()
       const finalItems: ConversationItemRef[] = [
         { runId, itemId: 'user', contentHash: hash(request.prompt) },

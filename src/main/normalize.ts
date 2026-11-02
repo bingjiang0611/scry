@@ -251,7 +251,25 @@ export interface ParsedTurn {
   providerTurnId?: string
   /** `stop_reason` of the last assistant message, verbatim; absent when the log never reported one. */
   stopReason?: string
+  requestSetId?: string
+  /** Identity selection excludes provider-marked fork/replay/sidechain prompts. */
+  identityEligible?: boolean
+  identityContradictory?: boolean
   items: TraceEvent[]
+}
+
+function transcriptIdentityContradictory(line: Record<string, unknown>): boolean {
+  const pairs: Array<[string, string]> = [['prompt_id', 'promptId'], ['request_set_id', 'requestSetId']]
+  return pairs.some(([snake, camel]) => {
+    const snakeValue = typeof line[snake] === 'string' ? line[snake] as string : undefined
+    const camelValue = typeof line[camel] === 'string' ? line[camel] as string : undefined
+    return !!snakeValue && !!camelValue && snakeValue !== camelValue
+  })
+}
+
+function transcriptIdentityEligible(line: Record<string, unknown>): boolean {
+  return line.parent_tool_use_id == null && line.isMeta !== true && line.isSynthetic !== true &&
+    line.isSidechain !== true && line.isReplay !== true && !line.forkedFrom
 }
 
 function transcriptProviderTurnId(line: Record<string, unknown>): string | undefined {
@@ -373,6 +391,11 @@ export function appendTranscriptToTurns(content: string, ctx: NormalizeCtx, stat
           cur = {
             userText: text,
             ...(transcriptProviderTurnId(o) ? { providerTurnId: transcriptProviderTurnId(o) } : {}),
+            ...((typeof o.request_set_id === 'string' && o.request_set_id)
+              ? { requestSetId: o.request_set_id }
+              : typeof o.requestSetId === 'string' && o.requestSetId ? { requestSetId: o.requestSetId } : {}),
+            ...(transcriptIdentityEligible(o) ? {} : { identityEligible: false }),
+            ...(transcriptIdentityContradictory(o) ? { identityContradictory: true } : {}),
             items: []
           }
           if (pendingBeforeFirstTurn.length) {

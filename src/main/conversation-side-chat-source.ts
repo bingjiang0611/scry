@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { capturedConversationMessages } from './conversation-side-chat-capture-stream'
-import { iterateTraceArchiveCapture, traceArchiveCaptureInfo, TraceArchiveCaptureError } from './transcript-archive-capture'
+import { iterateTraceArchiveCapture, traceArchiveCaptureInfo, TraceArchiveCaptureError, type TraceArchiveCaptureArgs } from './transcript-archive-capture'
 import { requireValue } from './conversation-schema'
 import type { ConversationTurn, SideChatSource } from '../shared/conversation'
 import type { SideChatServiceDeps, SideChatNativeSource } from './conversation-service-deps'
@@ -163,7 +163,7 @@ async function assertSourceNotOwnedBySideChat(
 async function captureArchivePrefix(
   deps: SideChatServiceDeps,
   source: Extract<SideChatSource, { kind: 'native-session' }>,
-  captureArgs: { userDataDir: string; cwd: string; providerId: ProviderId; sessionId: string },
+  captureArgs: TraceArchiveCaptureArgs,
   info: Awaited<ReturnType<typeof traceArchiveCaptureInfo>>,
   boundary: RequestedBoundary | undefined,
   sink: CaptureSink
@@ -222,8 +222,11 @@ async function captureNativePrefix(
   if (!seam) throw new Error('原生来源身份校验未接入，不能创建侧聊')
   await seam.assertNativeSource(native)
   await assertSourceNotOwnedBySideChat(deps, source)
-  const captureArgs = {
-    userDataDir: deps.store.userData, cwd: source.cwd, providerId: source.providerId, sessionId: source.nativeSessionId
+  const captureArgs: TraceArchiveCaptureArgs = {
+    userDataDir: deps.store.userData, cwd: native.cwd, providerId: native.providerId, sessionId: native.nativeSessionId,
+    // The archive reader rejects a segment recorded under a different Profile, so the
+    // capture must carry the identity that was just proven instead of a weaker copy.
+    ...(native.agentProfileId === undefined ? {} : { agentProfileId: native.agentProfileId })
   }
   // A source with no Scry archive at all is not an error here: the Provider's own
   // bounded transcript reader below is the documented fallback.

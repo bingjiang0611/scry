@@ -214,14 +214,22 @@ export function lifecycleTraceEvents(args: {
   }
   const usage = usageTrace(args.payload, args.runId, at)
   if (usage) out.push(usage)
-  if (!subagentScopedPayload(args.payload) && 'model_ids' in args.payload) {
+  const nativeTier = args.provider === 'qoder' ? stringAt(args.payload, 'model') : undefined
+  if (!subagentScopedPayload(args.payload) && ('model_ids' in args.payload || 'model_tier' in args.payload || 'modelTier' in args.payload || nativeTier)) {
     const ids = args.payload.model_ids
     const valid = Array.isArray(ids) && ids.length <= 64 && ids.every((id) =>
       typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:/+\-]{0,127}$/.test(id))
+    const tier = nativeTier ?? stringAt(args.payload, 'model_tier', 'modelTier')
+    const validTier = tier && /^[A-Za-z0-9][A-Za-z0-9._:/+\-]{0,127}$/.test(tier) ? tier : undefined
     out.push({
-      id: `provider-model-${stableHash([ids, args.payload.model_ids_complete]).slice(0, 16)}`,
+      id: `provider-model-${stableHash([ids, tier, args.payload.model_ids_complete]).slice(0, 16)}`,
       ts: at, runId: args.runId, kind: 'harness', stage: 'provider_model',
-      runtimeMetadata: { modelIds: valid ? [...new Set(ids)] : [], complete: valid && args.payload.model_ids_complete === true }
+      runtimeMetadata: {
+        modelIds: valid ? [...new Set(ids)] : [],
+        ...(validTier ? { modelTier: validTier } : {}),
+        complete: (args.provider === 'qoder' && !!validTier && !('model_ids' in args.payload) && args.payload.model_ids_complete !== false) ||
+          ((valid || !('model_ids' in args.payload) && !!validTier) && args.payload.model_ids_complete === true)
+      }
     })
   }
   if (!subagentScopedPayload(args.payload) && 'turn_role' in args.payload) {

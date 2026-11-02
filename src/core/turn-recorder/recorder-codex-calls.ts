@@ -122,7 +122,7 @@ export function literalArgument(value: string): Record<string, unknown> {
 
 export function isCodexSpawnTool(name: string): boolean {
   // Only the native namespace is an alias; MCP and unknown namespaces retain their identity.
-  return name === 'spawn_agent' || name === 'multi_agent_v1__spawn_agent'
+  return name === 'spawn_agent' || name === 'multi_agent_v1__spawn_agent' || name === 'collaboration__spawn_agent'
 }
 
 export function codexToolName(name: string, input: Record<string, unknown>): NormalizedCodexCall | null {
@@ -138,6 +138,7 @@ export function codexToolName(name: string, input: Record<string, unknown>): Nor
     return {
       tool: 'Bash',
       input: {
+        ...input,
         ...(command ? { command } : {}),
         ...(typeof input.workdir === 'string' ? { cwd: input.workdir } : {}),
         ...(typeof input.yield_time_ms === 'number' ? { yieldTimeMs: input.yield_time_ms } : {})
@@ -226,13 +227,17 @@ export function nestedCodexCalls(source: string): NormalizedCodexCall[] {
     const openIndex = (match.index ?? 0) + match[0].length - 1
     const expanded = mapped.get(openIndex)
     if (expanded) {
-      for (const call of expanded) calls.push({ ...call, suffix: String(calls.length + 1) })
+      for (const call of expanded) calls.push({ ...call, input: { ...call.input, execSource: source }, suffix: String(calls.length + 1) })
       continue
     }
     const argument = balancedCallArgument(source, openIndex)
     if (argument == null) continue
     const normalized = codexToolName(match[1], literalArgument(argument))
-    if (normalized) calls.push({ ...normalized, suffix: String(calls.length + 1) })
+    if (normalized) calls.push({
+      ...normalized,
+      input: { ...normalized.input, execSource: source },
+      suffix: String(calls.length + 1)
+    })
   }
   return calls
 }
@@ -240,7 +245,12 @@ export function nestedCodexCalls(source: string): NormalizedCodexCall[] {
 export function normalizedCodexCalls(payload: Record<string, unknown>): NormalizedCodexCall[] {
   const name = stringAt(payload, 'name') ?? ''
   const input = callInput(payload)
-  if (name === 'exec' && typeof input.raw === 'string') return nestedCodexCalls(input.raw)
+  if (name === 'exec' && typeof input.raw === 'string') {
+    const calls = nestedCodexCalls(input.raw)
+    // An opaque native exec call is still evidence. Preserve its original program,
+    // without inventing nested calls or evaluating arbitrary JavaScript.
+    return calls.length ? calls : [{ tool: 'exec', input }]
+  }
   const namespace = stringAt(payload, 'namespace')
   const qualifiedName = namespace && name ? `${namespace}__${name}` : name
   const normalized = codexToolName(qualifiedName || stringAt(payload, 'type') || 'unknown', input)

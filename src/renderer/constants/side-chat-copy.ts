@@ -1,3 +1,8 @@
+/** The IPC wrapper main adds to a rejected handler; the channel name is not user copy. */
+const IPC_WRAPPER = /^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/
+/** An internal error class (`TraceArchiveCaptureError:`) is evidence for us, not copy. */
+const ERROR_CLASS_NAME = /^(?:[A-Za-z_$][\w$]*)?Error:\s+/
+
 /** Side-chat surface copy. Kept out of components so every string is reviewable here. */
 export const SIDE_CHAT_COPY = {
   surfaceLabel: '侧边会话',
@@ -78,10 +83,10 @@ export const SIDE_CHAT_COPY = {
   creating: '正在保存快照…',
   created: '已创建侧边会话。创建不会发送消息。',
   createRefused: (reason: string): string => `没有创建侧边会话：${reason}`,
-  // 失败原因只保留可以操作的部分：IPC 拒绝会先带上通道名，那不是给用户的说明。
+  // 失败原因只保留可以操作的部分：IPC 拒绝会先带上通道名，内部错误类名也不是给用户的说明。
   reasonOf: (error: unknown): string => {
     const raw = error instanceof Error ? error.message : String(error)
-    const reason = raw.replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/, '').trim()
+    const reason = raw.replace(IPC_WRAPPER, '').replace(ERROR_CLASS_NAME, '').trim()
     return reason || SIDE_CHAT_COPY.unknownReason
   },
   unknownReason: '未知原因；没有确认任何结果。',

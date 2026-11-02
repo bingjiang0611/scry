@@ -35,7 +35,9 @@ const performanceOnly = process.argv.includes('--performance-only')
 const nativeVisibility = process.argv.includes('--native-visibility')
 if (nativeVisibility && !performanceOnly) throw new Error('--native-visibility requires --performance-only and user approval to display a window')
 const metaPromptsOnly = process.argv.includes('--meta-prompts-only')
-const campaigns = turnRefsOnly ? ['refs'] : listsOnly ? ['structure', 'history', 'live', 'refs'] : ['all']
+// Default entry: two serial campaigns so each keeps its 30s deadline; a subset flag runs one.
+const splitCampaigns = !(paneBenchOnly || process.argv.slice(2).some(argument => argument.endsWith('-only')))
+const campaigns = turnRefsOnly ? ['refs'] : listsOnly ? ['structure', 'history', 'live', 'refs'] : splitCampaigns ? ['core', 'terminals'] : ['all']
 const fixtures = loadingOnly ? ['loading'] : listsOnly ? ['lists'] : overlaysOnly ? ['overlays'] : structureOnly ? ['session-cache'] : paneBenchOnly ? ['structure-pane-bench'] : motionTokensOnly ? ['motion-tokens'] : piPermissionOnly ? ['pi-permission'] : workspaceDiffOnly ? ['workspace-diff'] : sidebarActivityOnly ? ['sidebar-activity'] : cacheOnly ? ['session-cache'] : metaPromptsOnly ? ['meta-prompts'] : performanceOnly ? ['llm-performance'] : summaryOnly ? ['pinned-summary-performance', 'session-capability', 'workspace-diff']
   : questionResultOnly ? ['session-capability'] : overviewOnly ? ['session-capability'] : terminalsOnly ? ['session-terminal'] : modelsOnly ? ['session-model'] : piCommandsOnly ? ['session-capability'] : selectionOnly ? ['session-selection'] : ['session-capability', 'session-selection', 'pi-permission', 'session-model', 'session-terminal', 'pinned-summary-performance', 'llm-performance', 'meta-prompts', 'session-cache', 'sidebar-activity', 'workspace-diff', 'motion-tokens']
 
@@ -72,7 +74,9 @@ try {
   }
   for (const fixture of fixtures) await writeFile(join(temp, `${fixture}.html`), `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'${['sidebar-activity', 'motion-tokens', 'session-cache', 'overlays', 'lists', 'loading'].includes(fixture) ? '; img-src data:' : ''}"><link rel="stylesheet" href="${fixture}.css"><div id="root"></div><script src="${fixture}.js"></script>`)
 
-  await writeFile(join(temp, 'main.cjs'), `
+  const mainScript = (campaignName) => {
+    const terminalScoped = campaignName === 'terminals', skipTerminals = campaignName === 'core'
+    return `
     const { app, BrowserWindow, clipboard, ipcMain } = require('electron')
     if (!${nativeVisibility}) require(${JSON.stringify(join(root, 'scripts/hidden-electron-windows.cjs'))})(app)
     const finish = (result) => process.stdout.write('SCRY_UI_SMOKE_RESULT=' + JSON.stringify(result) + '\\n', () => app.exit(0))
@@ -92,7 +96,7 @@ try {
       let diagnosticContents = win.webContents
       try {
         let result = {}, piCommands = {}
-        const special = await (${specialSources.runner})({
+        const special = ${terminalScoped} ? { result: {}, done: false } : await (${specialSources.runner})({
           flags: { loading: ${loadingOnly}, lists: ${listsOnly}, overlays: ${overlaysOnly}, structure: ${structureOnly}, sidebar: ${fixtures.includes('sidebar-activity')}, sidebarOnly: ${sidebarActivityOnly}, paneBench: ${paneBenchOnly}, motion: ${fixtures.includes('motion-tokens')}, motionOnly: ${motionTokensOnly} },
           win, nodeRequire: require, sources: ${JSON.stringify(specialSources)},
           paths: ${JSON.stringify({ loading: join(temp, 'loading.html'), lists: join(temp, 'lists.html'), overlays: join(temp, 'overlays.html'), structure: join(temp, 'session-cache.html'), sidebar: join(temp, 'sidebar-activity.html'), paneBench: join(temp, 'structure-pane-bench.html'), motion: join(temp, 'motion-tokens.html') })},
@@ -102,13 +106,13 @@ try {
         })
         Object.assign(result, special.result)
         if (special.done) { finish(result); return }
-        if (${fixtures.includes('session-cache')}) {
+        if (${fixtures.includes('session-cache') && !terminalScoped}) {
           win.setSize(1200, 900)
           await win.loadFile(${JSON.stringify(join(temp, 'session-cache.html'))})
           result.sessionCache = await (${fixtureSources.exerciseSessionCache})(win.webContents)
           if (${cacheOnly}) { finish(result); return }
         }
-        if (${fixtures.includes('meta-prompts')}) {
+        if (${fixtures.includes('meta-prompts') && !terminalScoped}) {
           const metaWin = new BrowserWindow({ show: false, width: 1200, height: 850, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, partition: 'persist:meta-prompts-test', preload: ${JSON.stringify(join(temp, 'meta-prompts-preload.cjs'))} } })
           metaWin.webContents.on('console-message', logRendererError)
           const metaUrl = require('node:url').pathToFileURL(${JSON.stringify(join(temp, 'meta-prompts.html'))}).href
@@ -127,7 +131,7 @@ try {
             return
           }
         }
-        if (${fixtures.includes('llm-performance')}) {
+        if (${fixtures.includes('llm-performance') && !terminalScoped}) {
           win.setSize(1000, 800)
           await win.loadFile(${JSON.stringify(join(temp, 'llm-performance.html'))})
           const llmPerformanceState = await (${fixtureSources.exerciseLlmPerformanceSetup})(win.webContents, win, ${JSON.stringify(process.env.SCRY_LLM_UI_SCREENSHOT ?? '')}, ${nativeVisibility})
@@ -137,12 +141,12 @@ try {
             return
           }
         }
-        if (${fixtures.includes('workspace-diff')}) {
+        if (${fixtures.includes('workspace-diff') && !terminalScoped}) {
           await win.loadFile(${JSON.stringify(join(temp, 'workspace-diff.html'))})
           result.workspaceDiff = await (${fixtureSources.exerciseWorkspaceDiff})(win.webContents)
           if (${workspaceDiffOnly}) { finish(result); return }
         }
-        if (${fixtures.includes('pinned-summary-performance')}) {
+        if (${fixtures.includes('pinned-summary-performance') && !terminalScoped}) {
           await win.loadFile(${JSON.stringify(join(temp, 'pinned-summary-performance.html'))})
           result.summarySampling = await win.webContents.executeJavaScript(${JSON.stringify(`(${fixtureSources.exerciseSummarySampling})()`)})
           const summaryScreenshot = ${JSON.stringify(process.env.SCRY_SUMMARY_UI_SCREENSHOT ?? '')}
@@ -184,7 +188,7 @@ try {
           finish(result)
           return
         }
-        if (!${selectionOnly || modelsOnly || terminalsOnly || piPermissionOnly}) {
+        if (!${selectionOnly || modelsOnly || terminalsOnly || piPermissionOnly || terminalScoped}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-capability.html'))})
           if (!${piCommandsOnly || overviewOnly}) Object.assign(result, await win.webContents.executeJavaScript(${JSON.stringify(`(${fixtureSources.exerciseSessionCapabilityCore})()`)}), await win.webContents.executeJavaScript(${JSON.stringify(`(${fixtureSources.exerciseSessionCapabilitySummary})()`)}), await win.webContents.executeJavaScript(${JSON.stringify(`(${fixtureSources.exerciseSessionCapabilityQuestionResult})()`)}))
           if (!${overviewOnly}) piCommands = await (${fixtureSources.exercisePiCommands})(win.webContents)
@@ -196,22 +200,22 @@ try {
         }
         const selection = []
         win.setSize(1200, 900)
-        for (const scenario of ${JSON.stringify(overviewOnly || piCommandsOnly || modelsOnly || terminalsOnly || piPermissionOnly ? [] : ['repeat-pending', 'late-startup-loading', 'provider-switch', 'same-provider', 'late-startup', 'rapid-switch', 'focused-event', 'new-draft', 'stale-live', 'stale-run'])}) {
+        for (const scenario of ${JSON.stringify(overviewOnly || piCommandsOnly || modelsOnly || terminalsOnly || piPermissionOnly || terminalScoped ? [] : ['repeat-pending', 'late-startup-loading', 'provider-switch', 'same-provider', 'late-startup', 'rapid-switch', 'focused-event', 'new-draft', 'stale-live', 'stale-run'])}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-selection.html'))}, { query: { scenario } })
           selection.push(await (${fixtureSources.exerciseSessionSelection})(win.webContents, scenario))
         }
         const piPermissions = []
-        for (const scenario of ${JSON.stringify(overviewOnly || selectionOnly || piCommandsOnly || modelsOnly || terminalsOnly ? [] : ['fresh', 'saved'])}) {
+        for (const scenario of ${JSON.stringify(overviewOnly || selectionOnly || piCommandsOnly || modelsOnly || terminalsOnly || terminalScoped ? [] : ['fresh', 'saved'])}) {
           await win.loadFile(${JSON.stringify(join(temp, 'pi-permission.html'))}, { query: { scenario } })
           piPermissions.push(await (${fixtureSources.exercisePiPermission})(win.webContents, scenario))
         }
         let sessionModels = null
-        if (${!overviewOnly && !selectionOnly && !piCommandsOnly && !terminalsOnly && !piPermissionOnly}) {
+        if (${!overviewOnly && !selectionOnly && !piCommandsOnly && !terminalsOnly && !piPermissionOnly && !terminalScoped}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-model.html'))})
           sessionModels = await (${fixtureSources.exerciseSessionModels})(win.webContents, ${JSON.stringify(process.env.SCRY_CAPABILITIES_UI_SCREENSHOT ?? '')})
         }
         const sessionTerminals = []
-        for (const scenario of ${JSON.stringify(overviewOnly || selectionOnly || piCommandsOnly || modelsOnly || piPermissionOnly ? [] : ['restored', 'pending'])}) {
+        for (const scenario of ${JSON.stringify(overviewOnly || selectionOnly || piCommandsOnly || modelsOnly || piPermissionOnly || skipTerminals ? [] : ['restored', 'pending'])}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-terminal.html'))}, { query: { scenario } })
           sessionTerminals.push(await (${fixtureSources.exerciseSessionTerminals})(win.webContents, scenario, ${JSON.stringify(specialSources.pointer)}))
         }
@@ -223,17 +227,20 @@ try {
         app.exit(1)
       }
     }).catch(error => { console.error(error); app.exit(1) })
-  `)
+  `
+  }
+
+  for (const campaign of campaigns) await writeFile(join(temp, `main-${campaign}.cjs`), mainScript(campaign))
   const results = []
   for (const campaign of campaigns) results.push(await runUiCampaign({
-    electron, script: join(temp, 'main.cjs'),
+    electron, script: join(temp, `main-${campaign}.cjs`),
     env: { PATH: process.env.PATH, TMPDIR: tmpdir(), HOME: join(temp, 'home') },
-    argv: [
-      ...(reducedAmbientFixture ? ['--force-prefers-reduced-motion'] : []),
-      ...(listsOnly ? [`--scry-lists-campaign=${campaign}`] : [])
-    ]
+    argv: [...(reducedAmbientFixture ? ['--force-prefers-reduced-motion'] : []), ...(listsOnly ? [`--scry-lists-campaign=${campaign}`] : [])]
   }))
-  console.log(JSON.stringify(listsOnly ? { lists: Object.assign({}, ...results.map(value => value.lists)) } : results[0]))
+  // The second campaign owns sessionTerminals only; its empty selection/models must not win.
+  const result = listsOnly ? { lists: Object.assign({}, ...results.map(value => value.lists)) }
+    : results.length === 1 ? results[0] : { ...results[0], sessionTerminals: results[1].sessionTerminals }
+  console.log(JSON.stringify(result))
 } finally {
   await rm(temp, { recursive: true, force: true })
 }
