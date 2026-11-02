@@ -56,7 +56,7 @@ describe('pending submission receipts', () => {
       send: async () => {
         // The durable copy must already exist at the moment the send IPC starts.
         durableAtSend = storage.value ?? undefined
-        return { disposition: 'created' as const }
+        return { status: 'accepted' as const, runId: 'run-test', disposition: 'created' as const }
       },
       input: { prompt: 'question', attachments: [image('shot.png')] }
     })
@@ -75,7 +75,7 @@ describe('pending submission receipts', () => {
 
   it('refuses to dispatch when no persistence owner can prove the receipt is durable', async () => {
     const drafts = store(new Map([['draft', { input: 'question', attachments: [] }]]))
-    const send = vi.fn(async () => ({ disposition: 'created' as const }))
+    const send = vi.fn(async () => ({ status: 'accepted' as const, runId: 'run-test', disposition: 'created' as const }))
     const result = await runSubmission({
       draftStore: drafts, draftKey: 'draft', expectedRevision: 3,
       prepare: async (_prompt, _attachments, commandId) => request(commandId),
@@ -104,6 +104,50 @@ describe('pending submission receipts', () => {
     expect(pendingRecovery(pending, { kind: 'absent' })).toEqual({ state: 'unresolved' })
     expect(pendingRecovery(pending, { kind: 'not_sent' })).toEqual({ state: 'not_sent' })
     expect(send).toHaveBeenCalledTimes(1)
+    persistence.dispose()
+  })
+
+  it('turns a host-confirmed pre-dispatch refusal into a durable known-not-sent receipt', async () => {
+    const storage = new MemoryStorage()
+    const drafts = store(new Map([['draft', { input: 'question', attachments: [image('shot.png')] }]]))
+    const persistence = persistComposerDraftStore(drafts, list => writeComposerDrafts(storage, list))
+    const send = vi.fn(async () => ({ status: 'not_sent' as const, reason: '对话已变化，请重新预览' }))
+    const result = await runSubmission({
+      draftStore: drafts, draftKey: 'draft', expectedRevision: 3,
+      prepare: async (_prompt, _attachments, commandId) => request(commandId),
+      send, input: { prompt: 'question', attachments: [image('shot.png')] }
+    })
+    expect(result).toEqual({ status: 'not-sent', commandId: expect.stringMatching(/^[0-9a-f-]{36}$/), error: '对话已变化，请重新预览' })
+    const pending = drafts.getSnapshot().get('draft')!.pending!
+    expect(pending.notSent).toEqual({ reason: '对话已变化，请重新预览' })
+    // The refusal survives a restart as the same known-not-sent state, and an absent
+    // record does not relabel it as unresolved.
+    persistence.dispose()
+    const reopened = store(readComposerDrafts(storage)).getSnapshot().get('draft')!.pending!
+    expect(reopened.notSent).toEqual({ reason: '对话已变化，请重新预览' })
+    expect(pendingRecovery(reopened, undefined)).toEqual({ state: 'not_sent', reason: '对话已变化，请重新预览' })
+    expect(pendingRecovery(reopened, { kind: 'absent' })).toEqual({ state: 'not_sent', reason: '对话已变化，请重新预览' })
+    // The authoritative page still wins when it reports the same refusal.
+    expect(pendingRecovery(reopened, { kind: 'not_sent' })).toEqual({ state: 'not_sent' })
+    // A newer edit keeps its place while the receipt stays resentable.
+    const edited = updateComposerDraft(new Map([['draft', drafts.getSnapshot().get('draft')!]]), 'draft',
+      draft => ({ ...draft, input: 'newer question' })).drafts.get('draft')!
+    expect(edited.pending?.commandId).toBe(pending.commandId)
+  })
+
+  it('keeps a lost reply unknown even when no page record exists', async () => {
+    const drafts = store(new Map([['draft', { input: 'question', attachments: [] }]]))
+    const persistence = persistComposerDraftStore(drafts, () => true)
+    const send = vi.fn(async () => { throw new Error('ipc reply lost') })
+    const result = await runSubmission({
+      draftStore: drafts, draftKey: 'draft', expectedRevision: 3,
+      prepare: async (_prompt, _attachments, commandId) => request(commandId),
+      send, input: { prompt: 'question', attachments: [] }
+    })
+    expect(result.status).toBe('unknown')
+    const pending = drafts.getSnapshot().get('draft')!.pending!
+    expect(pending.notSent).toBeUndefined()
+    expect(pendingRecovery(pending, { kind: 'absent' })).toEqual({ state: 'unresolved' })
     persistence.dispose()
   })
 
@@ -137,7 +181,7 @@ describe('pending submission receipts', () => {
   it('refuses the send and restores the live draft when the durable write fails', async () => {
     const drafts = store(new Map([['draft', { input: 'keep me', attachments: [image('shot.png')] }]]))
     const persistence = persistComposerDraftStore(drafts, () => false)
-    const send = vi.fn(async () => ({ disposition: 'created' as const }))
+    const send = vi.fn(async () => ({ status: 'accepted' as const, runId: 'run-test', disposition: 'created' as const }))
     const result = await runSubmission({
       draftStore: drafts, draftKey: 'draft', expectedRevision: 3,
       prepare: async (_prompt, _attachments, commandId) => request(commandId),
@@ -182,7 +226,7 @@ describe('bounded pending capacity', () => {
     }
     const drafts = store(new Map([['draft', { input: 'question', attachments: [image('shot.png')] }], ...occupied]))
     const persistence = persistComposerDraftStore(drafts, () => true)
-    const send = vi.fn(async () => ({ disposition: 'created' as const }))
+    const send = vi.fn(async () => ({ status: 'accepted' as const, runId: 'run-test', disposition: 'created' as const }))
     const result = await runSubmission({
       draftStore: drafts, draftKey: 'draft', expectedRevision: 3,
       prepare: async (_prompt, _attachments, commandId) => request(commandId),

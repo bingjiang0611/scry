@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { ConversationSendRequest } from '@shared/conversation-api'
+import type { ConversationSendRequest, ConversationSendResult } from '@shared/conversation-api'
 import {
   MAX_DRAFTS, createComposerDraftStore, persistComposerDraftStore,
   updateComposerDraft, type ComposerDraft, type ComposerPendingSubmission
@@ -41,7 +41,7 @@ describe('deferred preparation ownership', () => {
   it('writes and dispatches nothing when the view closed while preparing', async () => {
     const drafts = store(new Map([['draft', { input: 'question', attachments: [image('shot.png')] }]]))
     const persistence = persistComposerDraftStore(drafts, () => true)
-    const send = vi.fn(async () => ({ disposition: 'created' as const }))
+    const send = vi.fn(async () => ({ status: 'accepted' as const, runId: 'run-test', disposition: 'created' as const }))
     let closed = false
     let release: () => void = () => undefined
     const gateway = new Promise<void>(resolve => { release = resolve })
@@ -64,7 +64,7 @@ describe('deferred preparation ownership', () => {
   it('lets only the newest preparation publish a receipt for one child', async () => {
     const drafts = store(new Map([['draft', { input: 'first', attachments: [] }]]))
     const persistence = persistComposerDraftStore(drafts, () => true)
-    const send = vi.fn(async () => ({ disposition: 'created' as const }))
+    const send = vi.fn(async () => ({ status: 'accepted' as const, runId: 'run-test', disposition: 'created' as const }))
     let active = 0
     let releaseFirst: () => void = () => undefined
     const firstGate = new Promise<void>(resolve => { releaseFirst = resolve })
@@ -96,7 +96,7 @@ describe('deferred preparation ownership', () => {
     const drafts = store(new Map([['draft', { input: 'first', attachments: [] }]]))
     const persistence = persistComposerDraftStore(drafts, () => true)
     let rejectFirst: (error: Error) => void = () => undefined
-    const firstSend = new Promise<{ disposition: 'created' }>((_resolve, reject) => { rejectFirst = reject })
+    const firstSend = new Promise<ConversationSendResult>((_resolve, reject) => { rejectFirst = reject })
     const first = runSubmission({
       draftStore: drafts, draftKey: 'draft', expectedRevision: 3,
       prepare: async (_prompt, _attachments, commandId) => request(commandId),
@@ -109,7 +109,7 @@ describe('deferred preparation ownership', () => {
     const second = await runSubmission({
       draftStore: drafts, draftKey: 'draft', expectedRevision: 3,
       prepare: async (_prompt, _attachments, commandId) => request(commandId),
-      send: async () => ({ disposition: 'created' as const }),
+      send: async () => ({ status: 'accepted' as const, runId: 'run-test', disposition: 'created' as const }),
       input: { prompt: 'second', attachments: [], replaceCommandId: commandA }
     })
     expect(second.status).toBe('sent')
@@ -125,7 +125,7 @@ describe('deferred preparation ownership', () => {
   it('restores only its own entry when the durable write fails during a newer edit', async () => {
     const drafts = store(new Map([['draft', { input: 'question', attachments: [] }], ['other', { input: 'keep', attachments: [] }]]))
     const persistence = persistComposerDraftStore(drafts, () => false)
-    const send = vi.fn(async () => ({ disposition: 'created' as const }))
+    const send = vi.fn(async () => ({ status: 'accepted' as const, runId: 'run-test', disposition: 'created' as const }))
     const result = await runSubmission({
       draftStore: drafts, draftKey: 'draft', expectedRevision: 3,
       prepare: async (_prompt, _attachments, commandId) => {
@@ -153,7 +153,7 @@ describe('deferred preparation ownership', () => {
           draft => ({ ...draft, input: 'next thought', attachments: [...draft.attachments, later] })).drafts)
         return request(commandId)
       },
-      send: async () => ({ disposition: 'created' as const }),
+      send: async () => ({ status: 'accepted' as const, runId: 'run-test', disposition: 'created' as const }),
       input: { prompt: 'question', attachments: [submitted] }
     })
     const after = drafts.getSnapshot().get('draft')!

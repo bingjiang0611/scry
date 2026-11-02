@@ -120,7 +120,7 @@ describe('native conversation fork backend', () => {
       commandId: 'branch-send-1', prompt: 'continue', providerId: 'codex', selectedItems: [], confirmFresh: true,
       permissionMode: 'default'
     })
-    expect(sent.disposition).toBe('created')
+    expect(sent).toMatchObject({ status: 'accepted', disposition: 'created' })
     expect(sentContext).toEqual({ historicalContext: undefined, resumeSessionId: 'native-fork-a' })
     const afterSend = (await store.read(branch.id))!
     expect(afterSend.turns.at(-1)).toMatchObject({ importedItems: [], resumeSessionId: 'native-fork-a' })
@@ -181,12 +181,15 @@ describe('native conversation fork backend', () => {
     const restarted = service(new ConversationStore(userData), async () => { replayed++; return 'must-not-run' })
     await restarted.fork(forkRequest(source, 'run-a'))
     expect(replayed).toBe(0)
+    // The unresolved fork barrier refuses the input before any Provider dispatch, so the
+    // host can prove this attempt was not sent while the barrier itself stays in place.
     await expect(restarted.send({
       conversationId: persisted.id, expectedRevision: persisted.revision, expectedContinuationKey: target.continuationKey,
       commandId: 'blocked-send-1', prompt: 'blocked', providerId: 'codex', selectedItems: [], confirmFresh: true,
       permissionMode: 'default'
-    })).rejects.toThrow('native fork acknowledgement lost')
+    })).resolves.toEqual({ status: 'not_sent', reason: 'native fork acknowledgement lost' })
     const restartedStore = new ConversationStore(userData)
+    await expect(restartedStore.read(persisted.id)).resolves.toMatchObject({ fork: { status: 'unknown' } })
     const archived = await restartedStore.updateMetadata(persisted.id, persisted.revision, { kind: 'archive', archived: true })
     await expect(restartedStore.beginDeletion(archived.id, archived.revision, hash('delete'))).rejects.toThrow('尚未收敛')
     await expect(restartedStore.assertLegacyWriteAllowed({ providerId: 'codex', cwd: archived.cwd, nativeSessionId: 'native-a' })).rejects.toThrow(/归属|未确认的原生分支/)
@@ -216,7 +219,7 @@ describe('native conversation fork backend', () => {
       conversationId: recovered.id, expectedRevision: recovered.revision, expectedContinuationKey: target.continuationKey,
       commandId: 'pending-blocked-send', prompt: 'blocked', providerId: 'codex', selectedItems: [], confirmFresh: true,
       permissionMode: 'default'
-    })).rejects.toThrow('宿主重启后缺少原生分支回执')
+    })).resolves.toEqual({ status: 'not_sent', reason: '宿主重启后缺少原生分支回执；不会自动重建分支' })
     const archived = await recoveredStore.updateMetadata(recovered.id, recovered.revision, { kind: 'archive', archived: true })
     await expect(recoveredStore.beginDeletion(archived.id, archived.revision, hash('delete'))).rejects.toThrow('尚未收敛')
   })

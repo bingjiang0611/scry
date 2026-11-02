@@ -126,6 +126,11 @@ export function useConversationSubmission({ api, draftStore, draftKey, expectedR
       } else if (result.status === 'unknown') {
         onError(result.error)
         onNotice(CONVERSATION_COPY.pendingDispatchUnknown)
+      } else if (result.status === 'not-sent') {
+        // The host proved the input never reached the Provider: say so and offer an
+        // explicit resend instead of blocking the receipt as an unknown outcome.
+        onError(result.error)
+        onNotice(CONVERSATION_COPY.pendingNotSent)
       } else onError(result.error)
     } finally {
       busy.current = false

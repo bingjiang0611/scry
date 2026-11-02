@@ -16,5 +16,6 @@ export const CONVERSATION_COPY = {
   pendingSettledAccepted: '已确认发送；待核对内容已清理。',
   pendingCheckFailed: (reason: string): string => `核对发送状态失败：${reason}`,
   pendingDuplicate: '已找到原发送记录，没有再次发送。',
-  pendingDispatchUnknown: '发送结果尚未确认。原文与图片已保留，不会自动重发。'
+  pendingDispatchUnknown: '发送结果尚未确认。原文与图片已保留，不会自动重发。',
+  pendingNotSent: '已确认没有发送：宿主在投递前拒绝了本次请求。原文与图片已保留，可显式重发。'
 } as const

@@ -43,7 +43,8 @@ export function ConversationViewBody({
   const [inspectingPending, setInspectingPending] = useState(false)
   const recovery = recoveryState ? {
     state: recoveryState.state,
-    explanation: recoveryState.state === 'not_sent' ? SIDE_CHAT_COPY.pendingStates.notSent
+    explanation: recoveryState.state === 'not_sent'
+      ? `${SIDE_CHAT_COPY.pendingStates.notSent}${recoveryState.reason ? `（${recoveryState.reason}）` : ''}`
       : `${SIDE_CHAT_COPY.pendingStates.unresolved}${recoveryState.reason ? `（${recoveryState.reason}）` : ''}`
   } : undefined
   return <main className="unified-conversation conversation-chat" aria-label="对话" data-conversation-id={conversation.id}>
