@@ -61,6 +61,39 @@ function gate(file: string, results: Record<string, unknown>) {
 }
 
 // Execute the scripts used by GitHub rather than a second implementation of the gate.
+// Historical single-job order of `test:renderer:ui` before sharding.
+const SERIAL_RENDERER_UI_ORDER = [
+  'node scripts/desktop-remote-ui-smoke.mjs --session-opening-only',
+  'node scripts/desktop-remote-ui-smoke.mjs --structure-only',
+  'node scripts/desktop-remote-ui-smoke.mjs --conversation-navigation-only',
+  'node scripts/desktop-remote-ui-smoke.mjs --unknown-receipt-only',
+  'node scripts/desktop-remote-ui-smoke.mjs --unknown-receipt-only --negative-unknown-receipt-control',
+  'node scripts/session-capability-ui-smoke.mjs',
+  'node scripts/session-capability-ui-smoke.mjs --structure-only',
+  'node scripts/session-capability-ui-smoke.mjs --overlays-only',
+  'node scripts/session-capability-ui-smoke.mjs --lists-only',
+  'node scripts/session-capability-ui-smoke.mjs --loading-only',
+  'node scripts/session-capability-ui-smoke.mjs --turn-refs-only',
+  'node scripts/session-capability-ui-smoke.mjs --sidebar-activity-only',
+  'node scripts/model-picker-ui-smoke.mjs',
+  'node scripts/analytics-credits-ui-smoke.mjs',
+  'node scripts/chat-preview-ui-smoke.mjs',
+  'node scripts/session-performance-ui-smoke.mjs',
+  'npm run test:background-ui',
+  'npm run test:steer-ui',
+  'npm run test:remote-queue-ui',
+  'node scripts/desktop-remote-ui-smoke.mjs',
+  'node scripts/desktop-remote-ui-smoke.mjs --session-parity-only',
+  'node scripts/desktop-remote-ui-smoke.mjs --composer-history-only',
+  'node scripts/desktop-remote-ui-smoke.mjs --remote-settings-only',
+  'node scripts/desktop-remote-ui-smoke.mjs --session-lifecycle-only',
+  'npm run test:source-control:ui',
+  'npm run test:workspace:ui',
+  'npm run test:side-chat:ui',
+  'npm run test:conversation:ipc',
+  'node scripts/electron-security-smoke.mjs --dev-pi-history-only',
+]
+
 describe('required PR checks', () => {
   for (const [file, dependencies] of [
     ['ci.yml', ['node', 'unit', 'unit-coverage', 'cli-compat', 'packaged-electron', 'packaged-linux']],
@@ -121,6 +154,9 @@ describe('required PR checks', () => {
     const shards = [1, 2].map(shard => `npm run test:renderer:ui:${shard}`)
     expect(scripts['test:renderer:ui']).toBe(shards.join(' && '))
     const commands = [1, 2].flatMap(shard => scripts[`test:renderer:ui:${shard}`].split(' && '))
+    // Shards are contiguous slices of the historical serial order: several fixtures are
+    // sensitive to what ran before them on the same runner, so never reorder across shards.
+    expect(commands).toEqual(SERIAL_RENDERER_UI_ORDER)
     expect(new Set(commands).size).toBe(commands.length)
     for (const required of ['npm run test:side-chat:ui', 'npm run test:conversation:ipc', 'npm run test:source-control:ui', 'npm run test:workspace:ui', 'node scripts/analytics-credits-ui-smoke.mjs', 'node scripts/desktop-remote-ui-smoke.mjs --session-parity-only']) {
       expect(commands).toContain(required)

@@ -133,7 +133,7 @@ jobs:
         run: npm run check:cli-release
 
   # 不再等待 node/cli-compat：最终 Check 仍要求全部 job 成功，只是并行跑。
-  # renderer UI smoke 按耗时拆成 2 片，打包只在第 1 片执行一次。
+  # renderer UI smoke 按原串行顺序连续切成 2 片（部分 fixture 对前序脚本敏感，不跨片重排），打包只在第 1 片执行一次。
   # 只拆 2 片：GitHub Free 同时最多 5 个 macOS job，需与 Performance native、
   # Remote transport/ios 同时运行而不排队。
   packaged-electron:
