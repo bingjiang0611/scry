@@ -39,10 +39,70 @@ jobs:
         run: npm run typecheck
       - name: Harness binding checks
         run: npm run check:harness-bindings
-      # Coverage includes CPU-heavy 50k-trace contracts. Run one worker so those
-      # contracts do not compete for the hosted runner within their unchanged timeout.
-      - name: Unit, contract tests and coverage
-        run: xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24' npm run test:coverage -- --maxWorkers=1
+      - name: Workspace hook shell test
+        run: npm run test:shell
+      - name: Build desktop app
+        run: npm run build
+      - name: Build recorder CLI
+        run: npm run build:cli
+
+  # 全量 Vitest 按文件分成 4 片并行。每片仍只用一个 worker，
+  # 50k-trace 等 CPU 密集契约不会互相争抢，超时保持不变；不过滤任何测试。
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      QODER_SKIP_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Prepare Electron executable
+        run: |
+          node -e "require('node:fs').accessSync(require('electron'))"
+          electron_bin="$(node -e "process.stdout.write(require('electron'))")"
+          sandbox="$(dirname "${electron_bin}")/chrome-sandbox"
+          sudo chown root:root "${sandbox}"
+          sudo chmod 4755 "${sandbox}"
+      - name: Unit, contract tests and coverage shard
+        run: xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24' npm run test:coverage -- --maxWorkers=1 --shard=${{ matrix.shard }}/4 --reporter=default --reporter=blob --outputFile.blob=.vitest-reports/blob-${{ matrix.shard }}.json
+      - name: Keep shard results for the merged coverage report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-blob-${{ matrix.shard }}
+          path: .vitest-reports/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 3
+
+  unit-coverage:
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      QODER_SKIP_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: unit-blob-*
+          path: .vitest-reports
+          merge-multiple: true
+      - name: Merge shard results and coverage
+        run: npx vitest run --merge-reports --coverage
       - name: Coverage report
         if: always()
         uses: actions/upload-artifact@v4
@@ -50,12 +110,6 @@ jobs:
           name: unit-coverage
           path: coverage/
           if-no-files-found: ignore
-      - name: Workspace hook shell test
-        run: npm run test:shell
-      - name: Build desktop app
-        run: npm run build
-      - name: Build recorder CLI
-        run: npm run build:cli
 
   cli-compat:
     runs-on: ubuntu-latest
@@ -76,10 +130,15 @@ jobs:
       - name: CLI tests and clean tarball smoke
         run: npm run check:cli-release
 
+  # 不再等待 node/cli-compat：最终 Check 仍要求全部 job 成功，只是并行跑。
+  # renderer UI smoke 按耗时拆成 3 片，打包只在第 2 片执行一次。
   packaged-electron:
-    needs: [node, cli-compat]
     runs-on: macos-15
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     env:
       QODER_SKIP_DOWNLOAD: "1"
     steps:
@@ -97,20 +156,22 @@ jobs:
         id: renderer-ui
         env:
           SCRY_SIDEBAR_ACTIVITY_SCREENSHOT: ${{ runner.temp }}/scry-sidebar
-        run: npm run test:renderer:ui
+        run: npm run test:renderer:ui:${{ matrix.shard }}
       - name: Preserve synthetic sidebar pixel diagnostics on failure
         if: ${{ failure() && steps.renderer-ui.outcome == 'failure' }}
         uses: actions/upload-artifact@v4
         with:
-          name: sidebar-paint-diagnostics
+          name: sidebar-paint-diagnostics-${{ matrix.shard }}
           path: ${{ runner.temp }}/scry-sidebar-*.png
           if-no-files-found: ignore
-      - run: npm run pack:artifact
+      - name: Package and smoke the macOS app
+        if: ${{ matrix.shard == 2 }}
+        run: npm run pack:artifact
 
   check:
     name: Check
     if: ${{ always() }}
-    needs: [node, cli-compat, packaged-electron, packaged-linux]
+    needs: [node, unit, unit-coverage, cli-compat, packaged-electron, packaged-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -125,7 +186,6 @@ jobs:
   # GUI smoke（pack:artifact 里的 smoke:electron）需要可用的 Chromium sandbox setuid 和显示环境，
   # 本 job 不伪造这两者；界面与 Wayland 行为在目标 Omarchy 机器上验收。
   packaged-linux:
-    needs: [node, cli-compat]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
