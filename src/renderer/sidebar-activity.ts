@@ -66,13 +66,13 @@ export function sidebarActivity(
   const group = (evidence: {
     active: boolean
     runId?: string
-    /** Conversation-only: a host-persisted reason the user must resolve first. */
-    blockedReason?: boolean
+    /** Conversation-only: a durable block the user must resolve, never a liveness reading. */
+    blocked?: boolean
     outcome?: SessionMeta['lastRunOutcome']
     unread?: boolean
   }): ActivityGroup | undefined => activityGroupOf({
     active: evidence.active,
-    blocked: evidence.blockedReason === true || Boolean(evidence.runId && waitingQuestionRunIds.has(evidence.runId)),
+    blocked: evidence.blocked === true || Boolean(evidence.runId && waitingQuestionRunIds.has(evidence.runId)),
     outcome: evidence.outcome,
     unread: evidence.unread
   })
@@ -80,11 +80,19 @@ export function sidebarActivity(
     const matches = (title: string): boolean => !needle || `${project.name} ${project.cwd} ${title}`.toLocaleLowerCase().includes(needle)
     for (const conversation of project.conversations ?? []) {
       if (conversation.archivedAt || !matches(conversation.title)) continue
-      // A conversation's active run id is its own liveness evidence, but a durable block —
-      // deletion, an unconfirmed fork, an unresolved delivery — outranks it: the user has
-      // to resolve that first, so the row must not read as background progress.
-      const status = group({ active: Boolean(conversation.activeRunId), runId: conversation.activeRunId,
-        blockedReason: Boolean(conversation.blockedReason), outcome: conversation.lastRunOutcome })
+      // A conversation's active run id is its own liveness evidence. Only a durable block
+      // outranks it: deletion, an unaccepted native fork, or a delivery whose outcome is
+      // unresolved with no live run to watch. `blockedReason` alone cannot decide this —
+      // it also carries the ordinary "request still in flight" note, which is progress.
+      const active = Boolean(conversation.activeRunId)
+      const status = group({
+        active,
+        runId: conversation.activeRunId,
+        blocked: Boolean(conversation.deletion) ||
+          (conversation.fork !== undefined && conversation.fork.status !== 'accepted') ||
+          (!active && conversation.blockedReason !== undefined),
+        outcome: conversation.lastRunOutcome
+      })
       if (!status) continue
       // A child's own run is background activity of its parent, so it is listed here with
       // that parent named instead of being flattened into the root conversation list.

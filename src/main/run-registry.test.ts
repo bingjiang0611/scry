@@ -151,10 +151,24 @@ describe('RunRegistry', () => {
 
     // A settled Provider alone is not ownership; an open finalization still is.
     expect(registry.unsettledStates().map((state) => state.runId)).toEqual(['run-finalizing'])
-    expect(registry.unsettledControls().map((control) => control.runId)).toEqual(['run-finalizing'])
+    // Shutdown must not interrupt a Provider that already settled: finalization alone is
+    // not a cancellation target, so no control is offered for it.
+    expect(registry.unsettledControls()).toEqual([])
 
     finalizing.localFinalizing = false
     expect(registry.unsettledStates()).toEqual([])
     expect(registry.unsettledControls()).toEqual([])
+  })
+
+  it('从不为 Provider 已 settle 的 run 交出停止控制权，但仍在运行的要交出', () => {
+    const registry = new RunRegistry<
+      { runId: string; done: boolean; providerSettled?: boolean; localFinalizing?: boolean },
+      { runId: string }
+    >()
+    registry.register({ runId: 'run-live', done: false }, { runId: 'run-live' })
+    registry.register({ runId: 'run-finalizing', done: true, providerSettled: true, localFinalizing: true },
+      { runId: 'run-finalizing' })
+    expect(registry.unsettledStates().map((state) => state.runId)).toEqual(['run-live', 'run-finalizing'])
+    expect(registry.unsettledControls().map((control) => control.runId)).toEqual(['run-live'])
   })
 })

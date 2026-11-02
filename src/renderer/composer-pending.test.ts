@@ -171,6 +171,17 @@ describe('pending submission receipts', () => {
     persistence.dispose()
   })
 
+  it('shows recovery only for the receipt that lost its reply while the host still holds it', () => {
+    // The host still reports the attempt pending; a dispatched receipt is simply in flight,
+    // so no dialog is owed. Once this surface lost the reply and marked itself unknown, the
+    // user needs the inspect/check affordance in this very process.
+    expect(pendingRecovery({ phase: 'dispatched' }, { kind: 'pending' })).toBeUndefined()
+    expect(pendingRecovery({ phase: 'unknown' }, { kind: 'pending' })).toEqual({ state: 'unresolved' })
+    // An accepted or known-refused receipt never turns into a recovery block either.
+    expect(pendingRecovery({ phase: 'dispatched', notSent: { reason: '已停止' } }, { kind: 'pending' }))
+      .toEqual({ state: 'not_sent', reason: '已停止' })
+  })
+
   it('survives closing and reopening the surface with the exact original content', async () => {
     const storage = new MemoryStorage()
     const first = store(new Map([['draft', { input: 'original question', attachments: [image('shot.png')] }]]))

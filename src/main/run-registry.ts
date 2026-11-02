@@ -50,9 +50,17 @@ export class RunRegistry<
       .filter((state) => state.providerSettled !== true || state.localFinalizing === true)
   }
 
+  /**
+   * Controls that may still need to cancel something at shutdown.
+   *
+   * A Provider that already settled has nothing left to interrupt: interrupting it would
+   * stake a stop on a transport that ended. Local finalization alone is not a cancellation
+   * target, so it stays in `unsettledStates` — which fences admission and deletion — but
+   * not here.
+   */
   unsettledControls(): Control[] {
-    return [...this.entries.values()].map(({ control, state }) => ({ control, state }))
-      .filter(({ state }) => state.providerSettled !== true || state.localFinalizing === true)
+    return [...this.entries.values()]
+      .filter(({ state }) => state.providerSettled !== true)
       .map(({ control }) => control)
   }
 

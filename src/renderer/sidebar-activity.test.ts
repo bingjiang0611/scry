@@ -173,24 +173,34 @@ describe('sidebar activity projection', () => {
     expect(new Set(rows.map((row) => row.key)).size).toBe(5)
   })
 
-  it('puts a blocked conversation in attention, outranking its active run', () => {
-    const blocked = (blockedReason: string, activeRunId?: string): ProjectMeta[] => [{
+  it('puts a durable conversation block in attention and keeps ordinary progress working', () => {
+    const conversation = (extra: { activeRunId?: string; blockedReason?: string; deletion?: boolean
+      fork?: { status: 'pending' | 'unknown' | 'not_sent' | 'accepted' } }): ProjectMeta[] => [{
       ...projects[0], sessions: [],
-      conversations: [{ id: 'blocked', cwd: '/work/store', title: '被阻塞', revision: 3, turnCount: 2,
-        ...(activeRunId ? { activeRunId } : {}), blockedReason }]
+      conversations: [{
+        id: 'scoped', cwd: '/work/store', title: '状态测试', revision: 3, turnCount: 2,
+        ...(extra.activeRunId ? { activeRunId: extra.activeRunId } : {}),
+        ...(extra.blockedReason ? { blockedReason: extra.blockedReason } : {}),
+        // The renderer maps the typed summary fields; a deletion carries its own record.
+        ...(extra.deletion ? { deletion: { status: 'pending' as const, fingerprint: 'f'.repeat(64) } } : {}),
+        ...(extra.fork ? { fork: { sourceConversationId: 'parent', sourceRunId: 'parent-run',
+          bindingId: 'binding', status: extra.fork.status } } : {})
+      }]
     }]
-    // Each durable block reason the host persists must reach the user, including while a
-    // run is still active: attention proves a decision is missing, not that work is moving.
-    for (const reason of ['统一对话正在删除或已删除，不能执行', '原生分支结果尚未确认：回执丢失；不会自动重建',
-      '投递结果尚未确认，且没有可关联的运行；请重启核查', '当前轮仍在投递']) {
-      expect(sidebarActivity(blocked(reason), new Set(['run-blocked']), empty, '').map((row) => row.group))
-        .toEqual(['attention'])
-      expect(sidebarActivity(blocked(reason, 'run-blocked'), new Set(['run-blocked']), empty, '').map((row) => row.group))
-        .toEqual(['attention'])
+    const group = (extra: Parameters<typeof conversation>[0]): (string | undefined)[] =>
+      sidebarActivity(conversation(extra), new Set(['run-scoped']), empty, '').map((row) => row.group)
+    // An ordinary in-flight delivery is progress, not a decision the user owes.
+    expect(group({ activeRunId: 'run-scoped', blockedReason: '当前轮仍在投递' })).toEqual(['working'])
+    // Deletion and an unaccepted native fork are durable blocks: they outrank a live run.
+    expect(group({ activeRunId: 'run-scoped', blockedReason: '统一对话正在删除或已删除，不能执行', deletion: true }))
+      .toEqual(['attention'])
+    for (const status of ['pending', 'unknown', 'not_sent'] as const) {
+      expect(group({ activeRunId: 'run-scoped', fork: { status },
+        blockedReason: `原生分支结果尚未确认：${status}；不会自动重建` })).toEqual(['attention'])
     }
-    // The same conversation without a block reason keeps its liveness reading.
-    expect(sidebarActivity(blocked('', 'run-blocked'), new Set(['run-blocked']), empty, '').map((row) => row.group))
-      .toEqual(['working'])
+    // An unresolved delivery with no live run is a block the user has to clear.
+    expect(group({ blockedReason: '投递结果尚未确认，且没有可关联的运行；请重启核查' })).toEqual(['attention'])
+    expect(group({ fork: { status: 'accepted' }, activeRunId: 'run-scoped' })).toEqual(['working'])
   })
 
   it('keeps a background child run visible without flattening it into a root row', () => {

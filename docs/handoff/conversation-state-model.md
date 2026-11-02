@@ -36,6 +36,7 @@ type ConversationSendResult =
 - Provider runner 已经接手（`onProviderDispatchAttempt` 已调用，或 runner 已经返回）之后的所有失败，包括回执丢失、runId 不一致、结算失败，都不是 `not_sent`，仍然抛出 → renderer 记为 `unknown`，不重放。
 - 重试同一 `commandId` 时返回**该次尝试的持久结果**，且重复解析发生在删除等并发状态判断之前：`accepted` 才重播 `accepted`，`not_sent` 重播 `not_sent`；`pending` / `unknown` 没有投递证据，既不升级成 `accepted`，也不重发，只报告结果尚未确认。
 - 意图指纹绑定**调用方请求的选择**（`requestedItems`），不是预算裁剪后实际投递的子集：历史裁剪不会让合法重试变成“换了内容”，而改动、删减或重排选择的重试会被拒绝，不重播。
+- 0.2.239 之前的记录把**裁剪后的投递子集**写进了意图指纹。这类历史命令若发生客户端重试，宿主可能以 `同一命令 ID 不能替换请求内容或目标` 拒绝——这是 fail-closed：结果没有重播，也没有第二次派发。此时用对话读取或“这次发送的原文与图片”核对这次尝试的真实状态；renderer 不做自动重发，也不存在退回旧指纹的兜底路径。
 - renderer 把 `not_sent` 写进 durable receipt（`pending.notSent`）。它**跨重启存活**，并且在页面没有对应记录时仍然是 known-not-sent，而不是退回 `unresolved`。清空 receipt、显式重发是用户动作，不自动发生。
 - 页面回执优先：权威记录说 `not_sent` 时，receipt 只是副本。
 

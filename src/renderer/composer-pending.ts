@@ -240,6 +240,10 @@ export function pendingRecovery(
   // new: this stays a known-not-sent receipt instead of being relabelled unresolved.
   if (pending.notSent !== undefined) return { state: 'not_sent', reason: pending.notSent.reason }
   if (health?.kind === 'absent') return { state: 'unresolved' }
+  // The host still holds the attempt pending, but this surface already lost the reply and
+  // marked its own receipt unknown: the user needs the inspect/check affordance in this
+  // process instead of a receipt that quietly looks dispatched.
+  if (health?.kind === 'pending' && pending.phase === 'unknown') return { state: 'unresolved' }
   if (health === undefined && pending.phase === 'unknown') return { state: 'unresolved' }
   return undefined
 }
