@@ -343,13 +343,18 @@ export async function* streamTurns(
   try {
     for await (const entry of entries) {
       if (entry.type === 'turn') {
-        // The bodies are sealed from these inputs, so the sink's read never comes back here.
-        const messages = await assembleTurn(userData, cwd, registry, parts)
         const status = entry.status ?? 'completed'
         // `done` is the recorder's terminal, written when the Provider result was
         // recorded; a failed or interrupted run has it too. Only `completed` may end a
         // default prefix, so termination and completion stay separate facts.
         const terminal = entry.done === true
+        // A turn the recorder never terminated is never capturable, so its visible
+        // bodies are not sealed at all. The caller can only drop it, and sealing would
+        // hold one output copy and its spill file per unfinished segment until the pass
+        // ends. Input spools are still filled and released in the `finally` below.
+        // The bodies of a terminal turn are sealed from these inputs, so the sink's read
+        // never comes back here.
+        const messages = terminal ? await assembleTurn(userData, cwd, registry, parts) : []
         try {
           yield {
             runId: entry.runId,
