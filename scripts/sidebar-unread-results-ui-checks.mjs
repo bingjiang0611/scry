@@ -37,6 +37,10 @@ export async function exerciseSidebarUnreadResults(contents) {
     await click(row)
     if (phase === 'completed') {
       await wait(`${group} === 'completed' && !document.querySelector(${JSON.stringify(row)}).querySelector('.sb-unread')`)
+    } else if (phase === 'failed') {
+      // 已读只清掉未读标记：终态失败仍留在“待查看”，不会因为读过就消失。
+      await wait(`document.querySelector(${JSON.stringify(row)}) != null && !document.querySelector(${JSON.stringify(row)}).querySelector('.sb-unread') && ${layoutIdle}`)
+      await wait(`${group} === 'updates'`)
     } else {
       await wait(`!document.querySelector(${JSON.stringify(row)}) && ${layoutIdle}`)
     }

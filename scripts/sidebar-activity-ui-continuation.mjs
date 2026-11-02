@@ -101,15 +101,18 @@ export async function exerciseSidebarActivityContinuation({ contents, screenshot
   await wait(`!matchMedia('(forced-colors: active)').matches && !matchMedia('(prefers-reduced-motion: reduce)').matches`)
   check(await read(`window.activityRow === document.querySelector(${JSON.stringify(row)})`), 'Reduced-motion state change remounted the row')
   await wait(`${layoutAnimations}.length === 0`)
-  for (const phase of ['unknown', 'failed']) {
-    await read(`window.activityFixture.setPhase('${phase}')`)
-    await wait(`!document.querySelector(${JSON.stringify(row)})`)
-    check(await read(`!document.querySelector('.sb-activity').textContent.includes('Retry failed webhook delivery')`), 'Non-success terminal evidence appeared completed')
-  }
+  // An unknown outcome is not evidence and disappears; a terminal failure is evidence and
+  // must stay in 待查看 instead of vanishing or borrowing the completed presentation.
+  await read("window.activityFixture.setPhase('unknown')")
+  await wait(`!document.querySelector(${JSON.stringify(row)})`)
+  await read("window.activityFixture.setPhase('failed')")
+  await wait(`${group} === 'updates' && document.querySelector(${JSON.stringify(row)}) != null`)
+  check(await read(`document.querySelector('[data-activity-group="completed"] [data-provider="pi"]') == null`), 'Non-success terminal evidence appeared completed')
   await read('window.activityFixture.setUnread(true)')
   await wait(`${group} === 'updates' && document.querySelector(${JSON.stringify(row)}).classList.contains('unread') && ${layoutAnimations}.length === 0`)
   await click(row)
-  await wait(`!document.querySelector(${JSON.stringify(row)})`)
+  // Reading clears the unread mark; the terminal failure itself stays in 待查看.
+  await wait(`!document.querySelector(${JSON.stringify(row)}).classList.contains('unread') && ${layoutAnimations}.length === 0`)
   await read("window.activityFixture.setPhase('working')")
   await wait(`${group} === 'working' && ${layoutAnimations}.length === 0`)
   for (const theme of ['dark', 'light']) {
@@ -155,5 +158,6 @@ export async function exerciseSidebarActivityContinuation({ contents, screenshot
     conditionalSections: true, movingHeadings: true, flatAppearance: true, honestCompletion: true, inGroupReorder: true,
     stateColumn: true, livePeak: true,
     pointerHeldTarget: true, pinAndArchive: true, reducedMotion: true, largeActivitySurvivor300: true, boundedHistory: true, searchAndEmpty: true, originalView: true, unmount: true,
-    sharedTypography: true, workingSweep: true, longTitleSweepContrast: true, staticTerminalTitles: true, forcedColors: true }
+    sharedTypography: true, workingSweep: true, longTitleSweepContrast: true, staticTerminalTitles: true, forcedColors: true,
+    failedVisibleNotCompleted: true }
 }
