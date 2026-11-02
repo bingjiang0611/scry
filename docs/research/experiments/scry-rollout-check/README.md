@@ -128,7 +128,7 @@ node perf-bench.mjs --source <你的仓库> --work <副本路径，必须在源�
 
 - **副本**：逐项克隆源仓库（macOS 用 APFS 写时复制，Linux 用 reflink），不复制 `.scry`；删除副本 `scry.config.json` 里的 `commitHook`，把 `origin` 改到 `perf-bench.invalid`。克隆失败时直接报错，加 `--allow-full-copy` 才做完整复制。源仓库是 linked worktree 时拒绝运行（副本会共享原索引）。
 - **recorder**：在副本里 `scry init`，用合成的 hook 事件经副本自己的 `.scry/provider-hook.sh` 跑完整轮次（默认按 Qoder 的事件格式，`--provider` 可改）。场景：干净工作树下 0 / 5 / 30 次工具调用；修改 20 个已跟踪文件并新增 50 个文件后 5 次工具调用。daemon 快路径和 CLI 回退（`SCRY_RECORDER_TRANSPORT=direct`）各跑一遍。量轮次开始、单个工具事件、轮次结束、每轮 hook 合计、结束到记录落盘，以及 daemon 的 RSS 和 CPU（含 30 秒空闲）、每条记录占用的磁盘。
-- **uploader**：临时 HOME + 假传输层，载荷是 recorder 阶段生成的真实记录（循环使用，大小分布和你的仓库一致）。场景：边提交边上传（streaming）100 条；先积压再一次唤醒排空（backlog）100 / 500 条；假服务端延迟 0 和 250 ms 两档。量 notify 耗时、排空时间、条/秒、请求数、worker 峰值数和 RSS、上传目录每条占用。
+- **uploader**：临时 HOME + 假传输层，载荷是 recorder 阶段生成的真实记录（循环使用，大小分布和你的仓库一致），记录引用的 `.scry/content` 正文一并克隆过去。场景：边提交边上传（streaming）100 条；先积压再一次唤醒排空（backlog）100 / 500 条；假服务端延迟 0 和 250 ms 两档。量 notify 耗时、排空时间、条/秒、请求数、worker 峰值数和 RSS、上传目录每条占用。
 - **端到端（可选，花钱）**：`node perf-bench.mjs e2e --work <副本> --cmd '<Provider 命令，提示词位置写 {prompt}>' --runs 5`。同一提示词轮流在开启和关闭记录（`SCRY_RECORDER_ENABLED=0`）下各跑一次，记录耗时差值；模型响应波动远大于 hook 开销，只记录，不做门禁。先在副本里对这个 Provider 执行 `scry init`。
 
 输出 `baseline-<时间>.json` 和 `.md`。毫秒是本机在当时负载下的墙钟时间，报告里带每个阶段的负载；只和同一台机器的后续结果比较。测不到的项写 `unavailable` 和原因，不写 0。脚本持锁，同一时间只跑一份；运行时不要跑别的重任务。这是受控测量，不是日常使用下的结论，也不进 `scripts/performance-ratchet.json`。

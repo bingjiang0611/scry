@@ -245,6 +245,12 @@ async function recorderPhase(scry, work, report) {
   return r
 }
 
+function cloneTree(from, to) {
+  mkdirSync(dirname(to), { recursive: true })
+  const args = platform() === 'darwin' ? ['-cR', from, to] : ['-a', '--reflink=auto', from, to]
+  if (spawnSync('cp', args, { stdio: 'ignore' }).status !== 0) cpSync(from, to, { recursive: true })
+}
+
 // ---------- uploader (fake transport, temp HOME) ----------
 function uploaderUser(protocol, root) {
   for (const d of ['home', 'state', 'config']) mkdirSync(join(root, d), { recursive: true })
@@ -259,9 +265,12 @@ function uploaderUser(protocol, root) {
   return { root, env, control: (v) => writeFileSync(control, JSON.stringify(v)) }
 }
 
-function uploaderWorkspace(user, name) {
+function uploaderWorkspace(user, name, contentSource) {
   const ws = join(user.root, name)
   mkdirSync(join(ws, '.scry', 'records'), { recursive: true })
+  // Records reference tool/model bodies by hash under .scry/content; uploaders that inline
+  // them fail with ENOENT if only the record JSON is copied.
+  if (contentSource && existsSync(contentSource)) cloneTree(contentSource, join(ws, '.scry', 'content'))
   run('git', ['init', '-q', ws])
   writeFileSync(join(ws, 'scry.config.json'), JSON.stringify({ schemaVersion: 1, workspaceId: `ws-${name}` }))
   return { ws: realpathSync(ws), seq: 0, name }
@@ -277,14 +286,19 @@ function commit(uploader, user, w, template, extraEnv = {}) {
   const event = { schemaVersion: 2, event: 'record-committed', workspace: w.ws, provider: record.provider?.id ?? 'qoder', sessionId: record.sessionId ?? 'perf',
     sequence, recordId, recordPath: `records/${name}`, sha256: createHash('sha256').update(raw).digest('hex') }
   const t = now()
-  execFileSync(process.execPath, [uploader, 'notify', '--workspace', w.ws], { input: JSON.stringify(event), env: { ...user.env, ...extraEnv }, stdio: ['pipe', 'ignore', 'pipe'] })
+  try {
+    execFileSync(process.execPath, [uploader, 'notify', '--workspace', w.ws], { input: JSON.stringify(event), env: { ...user.env, ...extraEnv }, stdio: ['pipe', 'ignore', 'pipe'] })
+  } catch (error) {
+    throw new Error(`uploader notify exited ${error.status}: ${String(error.stderr ?? error.message).trim().slice(0, 400)}`)
+  }
   return { recordId, ms: now() - t, bytes: Buffer.byteLength(raw) }
 }
 
 const upStatus = (uploader, user, w) => JSON.parse(execFileSync(process.execPath, [uploader, 'status', '--workspace', w.ws, '--json'], { env: user.env, encoding: 'utf8' }))
 function uploaderProcesses(uploader, w) {
   const out = tryRun('ps', ['-axo', 'pid=,rss=,pcpu=,command=']) ?? ''
-  return out.split('\n').filter((l) => l.includes(uploader) && l.includes(w.ws) && /\s_worker\b/.test(l))
+  // Match by this run's unique temp workspace, not the CLI path: a bin symlink or wrapper may differ from the worker's path.
+  return out.split('\n').filter((l) => l.includes(w.ws) && /\s_worker\b/.test(l))
     .map((l) => { const [pid, rss, pcpu] = l.trim().split(/\s+/); return { pid: Number(pid), rssMiB: Math.round(Number(rss) / 1024), pcpu: Number(pcpu) } })
 }
 
@@ -329,6 +343,7 @@ async function uploaderPhase(uploader, report) {
   let templates = [{ provider: { id: 'qoder' }, sessionId: 'perf', user: { status: 'available', value: { text: 'x'.repeat(400) } } }]
   let templateSource = 'synthetic 0.4 KiB record (no recorder-phase records found)'
   const recordsDir = work && join(work, '.scry', 'records')
+  const contentSource = work && join(work, '.scry', 'content')
   if (recordsDir && existsSync(recordsDir)) {
     const files = readdirSync(recordsDir).filter((n) => n.endsWith('.json')).sort().map((n) => join(recordsDir, n))
     if (files.length) {
@@ -339,12 +354,13 @@ async function uploaderPhase(uploader, report) {
     }
   }
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'scry-perf-uploader-')))
-  const u = { version: tryRun(process.execPath, [uploader, 'version']) ?? tryRun(process.execPath, [uploader, '--version']), payload: templateSource, transport: 'fake transport (no network); fakeLatencyMs emulates a slow server', runs: {} }
+  const u = { contentBlobs: contentSource && existsSync(contentSource) ? 'copied from recorder phase' : 'none (no recorder-phase content)', version: tryRun(process.execPath, [uploader, 'version']) ?? tryRun(process.execPath, [uploader, '--version']), payload: templateSource, transport: 'fake transport (no network); fakeLatencyMs emulates a slow server', runs: {} }
+  report.uploader = u   // keep finished runs even if a later one fails
   try {
     // Hook-path latency: notify only, background upload paused by a slow fake server.
     {
       const user = uploaderUser(protocol, join(root, 'notify'))
-      const w = uploaderWorkspace(user, 'notify')
+      const w = uploaderWorkspace(user, 'notify', contentSource)
       user.control({ slowMs: 60_000 })
       const times = []
       for (let i = 0; i < Math.max(20, ROUNDS * 4); i++) times.push(commit(uploader, user, w, templates[i % templates.length]).ms)
@@ -354,7 +370,7 @@ async function uploaderPhase(uploader, report) {
     for (const [mode, count, slowMs] of [['streaming', 100, 0], ['streaming', 100, 250], ['backlog', 100, 0], ['backlog', 500, 0], ['backlog', 500, 250]]) {
       const key = `${mode} ${count}, fake latency ${slowMs}ms`
       const user = uploaderUser(protocol, join(root, `${mode}-${count}-${slowMs}`))
-      const w = uploaderWorkspace(user, `${mode}${count}`)
+      const w = uploaderWorkspace(user, `${mode}${count}`, contentSource)
       const loadBefore = load()
       const result = await drain(uploader, user, w, count, templates, slowMs, mode)
       const uploadKiB = Number(tryRun('du', ['-sk', join(w.ws, '.scry', 'upload')])?.split(/\s+/)[0] ?? NaN)
@@ -400,7 +416,8 @@ async function e2e() {
 function markdown(report) {
   const lines = [`# Scry 性能基线 ${report.environment.at.slice(0, 10)}`, '', '## 环境', '', '```json', JSON.stringify({ environment: report.environment, versions: report.versions, repository: report.repository }, null, 2), '```', '']
   const cell = (m) => m?.status === 'measured' ? `${m.p50} / ${m.p95}` : `unavailable${m?.reason ? `（${m.reason}）` : ''}`
-  if (report.recorder) {
+  if (report.recorder?.status === 'unavailable') lines.push('## Recorder hook 路径', '', `unavailable：${report.recorder.reason}`, '')
+  if (report.recorder?.modes) {
     lines.push('## Recorder hook 路径（毫秒，p50 / p95）', '', `Provider 形状：${report.recorder.provider}；${report.recorder.note}；每格 ${ROUNDS} 轮。`, '')
     for (const [mode, scenarios] of Object.entries(report.recorder.modes)) {
       lines.push(`### ${mode}`, '', '| 场景 | 轮次开始 | 单个工具事件 | 轮次结束 | 每轮 hook 合计 | 结束到记录落盘 |', '| --- | --- | --- | --- | --- | --- |')
@@ -409,11 +426,12 @@ function markdown(report) {
     }
     lines.push('```json', JSON.stringify({ daemon: report.recorder.daemon, disk: report.recorder.disk, hookSkips: report.recorder.hookSkips, verify: report.recorder.verify }, null, 2), '```', '')
   }
+  if (report.uploader?.status === 'unavailable') lines.push('## Uploader', '', `unavailable：${report.uploader.reason}（下表只含失败前完成的场景）`, '')
   if (report.uploader) {
     lines.push('## Uploader（假传输层，不联网）', '', `载荷：${report.uploader.payload}`, '', `hook 路径 notify（上传进行中）：${cell(report.uploader.notifyWhileUploading)} ms`, '',
       'streaming：记录逐条到达、边提交边上传；backlog：先积压（不拉起 worker），再一次唤醒排空。', '',
       '| 场景 | notify p50 / p95 | 提交阶段 | 最后一条提交后排空 | 条/秒 | 请求数（条/请求） | worker 峰值数 | worker 峰值 RSS | upload 目录 KiB/条 |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- |')
-    for (const [name, m] of Object.entries(report.uploader.runs)) {
+    for (const [name, m] of Object.entries(report.uploader.runs ?? {})) {
       if (m.status !== 'measured') { lines.push(`| ${name} | unavailable（${m.reason}） | | | | | | | |`); continue }
       lines.push(`| ${name} | ${cell(m.notify)} | ${m.commitPhaseMs} ms | ${m.drainAfterLastCommitMs} ms | ${m.recordsPerSecond} | ${m.transportRequests}（${m.recordsPerRequest}） | ${m.worker.peakConcurrent} | ${m.worker.peakRssMiB ? `${m.worker.peakRssMiB} MiB` : 'unavailable（采样时没有 worker）'} | ${m.uploadDirKiBPerRecord} |`)
     }
@@ -434,13 +452,19 @@ async function baseline() {
     report.versions.scry = tryRun(process.execPath, [scry, 'version'])
     report.repository = { name: basename(realpathSync(opt('source'))), copy: work, copyInfo: JSON.parse(readFileSync(join(work, MARKER), 'utf8')), ...repoStats(work) }
     console.log(`recorder phase on ${work} (${report.repository.tracked} tracked files)`)
-    await recorderPhase(scry, work, report)
+    try { await recorderPhase(scry, work, report) } catch (error) {
+      report.recorder = unavailable(`recorder phase failed: ${error.message}`)
+      console.error(`recorder phase failed: ${error.message}`)
+    }
   }
   if (only !== 'recorder') {
     if (!uploader) throw new Error('uploader phase needs --uploader')
     console.log('uploader phase (fake transport)')
-    await uploaderPhase(uploader, report)
-    report.versions.uploader = report.uploader.version
+    try { await uploaderPhase(uploader, report) } catch (error) {
+      report.uploader = { ...(report.uploader ?? {}), status: 'unavailable', reason: `uploader phase failed: ${error.message}` }
+      console.error(`uploader phase failed: ${error.message}`)
+    }
+    report.versions.uploader = report.uploader?.version ?? tryRun(process.execPath, [uploader, 'version'])
   }
   report.environment.loadAverageAtEnd = load()
   const stamp = report.environment.at.replace(/[:.]/g, '-')
