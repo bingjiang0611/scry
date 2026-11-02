@@ -10,8 +10,10 @@ import type { ConversationSendRequest, ConversationSendResult } from '../shared/
 import type { ProviderHistoricalContext } from './providers/types'
 import type { ConversationServiceDeps, ConversationTerminal } from './conversation-service-deps'
 import { handoffBudget } from './conversation-handoff-budget'
+import { conversationIntentHash } from './conversation-store'
 import { dispatchPayloadHash, targetRequest } from './conversation-summary'
 import { parseSend } from './conversation-request'
+import { ConversationTurnBeginUncertainError } from './conversation-turns'
 import { sideChatPlanRefs } from './conversation-side-chat-snapshot'
 
 const hash = (value: string): string => createHash('sha256').update(value, 'utf8').digest('hex')
@@ -37,13 +39,45 @@ type DispatchPlan =
   | ({ kind: 'ready' } & PreparedDispatch)
 
 /**
- * A retry reports the durable outcome of the original attempt. A provably undelivered
- * attempt stays `not_sent`: reporting it as accepted would claim a dispatch that never
- * happened, and reporting it as unknown would withhold evidence the host already has.
+ * A retry reports the durable outcome of the original attempt, and nothing more.
+ *
+ * Only an `accepted` delivery may be replayed as accepted; a `not_sent` delivery stays a
+ * refusal. A `pending` or `unknown` attempt is not evidence of anything, so it can neither
+ * be upgraded to accepted nor be replayed as a new dispatch: the caller gets an unknown
+ * outcome and the command is never re-executed.
  */
 function duplicateResult(runId: string, delivery?: ConversationDelivery): ConversationSendResult {
+  if (delivery?.status === 'accepted') return { status: 'accepted', runId, disposition: 'duplicate' }
   if (delivery?.status === 'not_sent') return { status: 'not_sent', reason: delivery.reason }
-  return { status: 'accepted', runId, disposition: 'duplicate' }
+  throw new Error('该命令的投递结果尚未确认；不会自动重发')
+}
+
+/**
+ * Settles a durable turn that exists but provably never reached the Provider.
+ *
+ * Returning a typed refusal while a pending intent stays behind would make the next read
+ * ambiguous, so the durable record is closed first. If that settlement fails the outcome
+ * is unknown and the caller must not claim the input was undelivered.
+ */
+async function settleNotSentBeforeReturn(
+  deps: ConversationServiceDeps, conversationId: string, runId: string, reason: string
+): Promise<void> {
+  try {
+    await deps.store.settle(conversationId, runId, { status: 'not_sent', reason }, [])
+  } catch (error) {
+    throw new ConversationSettlementUncertainError(`统一对话未能记录未投递结果：${reasonOf(error)}`, error)
+  }
+}
+
+/**
+ * The durable record of this attempt could not be closed either way. A refusal is no
+ * longer provable, so the caller must report an unknown outcome instead.
+ */
+class ConversationSettlementUncertainError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message, { cause })
+    this.name = 'ConversationSettlementUncertainError'
+  }
 }
 
 /**
@@ -99,7 +133,15 @@ async function prepareDispatch(
   if (begun.disposition === 'duplicate') {
     return { kind: 'duplicate', runId: begun.turn.runId, delivery: begun.turn.delivery }
   }
-  const context = await deps.store.history(request.conversationId, runId)
+  let context: ProviderHistoricalContext | undefined
+  try {
+    context = await deps.store.history(request.conversationId, runId)
+  } catch (error) {
+    // The intent is durable but the Provider never ran, so the attempt is provably not
+    // sent — only after the durable turn says so. A failed settlement stays unknown.
+    await settleNotSentBeforeReturn(deps, request.conversationId, runId, reasonOf(error))
+    throw error
+  }
   return { kind: 'ready', begun, prepared, context, target, payload }
 }
 
@@ -120,12 +162,9 @@ export async function sendConversationMessage(
   if (/^\s*\//.test(prompt)) throw new Error('统一对话仅支持普通文本，不支持 slash 命令')
   const conversation = await deps.store.read(request.conversationId)
   if (!conversation) throw new Error('找不到对话，不会自动创建空历史')
-  // Being deleted is a concurrent-state refusal proven before dispatch, so it answers
-  // like a stale revision instead of leaving the renderer with an unknown outcome.
-  if (conversation.deletion) return { status: 'not_sent', reason: '统一对话正在删除或已删除，不能发送' }
   // Resolve an existing command from its immutable binding before checking current
-  // continuation state. A pending/unknown retry must return its original attempt, not be
-  // blocked by the current plan.
+  // continuation state or deletion: a retry replays the durable outcome of that attempt
+  // instead of being answered by whatever state the conversation is in now.
   const existing = await deps.store.findDispatch(request.conversationId, request.commandId)
   if (existing) {
     const binding = conversation.bindings.find((candidate) => candidate.id === existing.bindingId)
@@ -145,27 +184,31 @@ export async function sendConversationMessage(
       model: request.model, effort: request.effort,
       permissionMode: request.permissionMode, selectedItems: existing.importedItems
     })
-    const duplicate = await deps.store.begin(request.conversationId, {
-      expectedRevision: request.expectedRevision,
+    // A retry is answered from the durable record itself: replaying it must not publish a
+    // second intent, which is also why a deleting conversation can still be replayed. The
+    // frozen intent of this seam carries no caller items; the stored turn's items are the
+    // derived transcript refs, so comparing them would reject every legitimate retry.
+    const intentHash = conversationIntentHash({
       commandId: request.commandId,
-      runId: randomUUID(),
       target: duplicateTarget,
       payloadHash: duplicatePayloadHash,
       items: [],
-      // A retry reuses the exact immutable selection published by the first attempt.
-      selectedItems: existing.importedItems,
-      firstQuestion: prompt
+      selectedItems: existing.importedItems
     })
-    if (duplicate.disposition === 'duplicate') return duplicateResult(duplicate.turn.runId, duplicate.turn.delivery)
-    // The durable record contradicts the command lookup: this is command-level
-    // uncertainty, not a refusal this request can prove, so it stays unresolved.
-    throw new Error('重复命令状态发生变化，请重新预览')
+    if (intentHash !== existing.intentHash) throw new Error('同一命令 ID 不能替换请求内容或目标')
+    return duplicateResult(existing.runId, existing.delivery)
   }
+  // A new command on a deleting conversation is a concurrent-state refusal proven before
+  // dispatch, so it answers like a stale revision instead of an unknown outcome.
+  if (conversation.deletion) return { status: 'not_sent', reason: '统一对话正在删除或已删除，不能发送' }
   let plan: DispatchPlan
   try {
     plan = await prepareDispatch(deps, conversation, request)
   } catch (error) {
-    // Nothing was dispatched: the host can prove the input was never delivered.
+    // A refusal proven before any durable dispatch intent is a known-not-sent answer. An
+    // attempt whose intent may already be published is unknown and must throw through.
+    if (error instanceof ConversationTurnBeginUncertainError ||
+      error instanceof ConversationSettlementUncertainError) throw error
     return { status: 'not_sent', reason: reasonOf(error) }
   }
   if (plan.kind === 'duplicate') return duplicateResult(plan.runId, plan.delivery)

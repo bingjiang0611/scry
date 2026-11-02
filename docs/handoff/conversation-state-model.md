@@ -31,8 +31,10 @@ type ConversationSendResult =
 ```
 
 - 只有**在 `beginDispatch` 之前就被宿主拒绝**的路径才是 `not_sent`：revision 变化、对话正在删除、接续身份变化、缺少 fresh 确认、待交接项不一致、历史交接预算不足、fork 屏障、Provider 不支持历史交接。请求本身非法（空提示、slash 命令、同一命令 ID 换内容）仍然抛错，因为那不是并发状态事实。
+- “是否已经写出持久投递意图”是独立边界：`beginConversationTurn` 在 `turns.push` 之前的失败是确定未开始；从 push 起（原子写入可能已成功而回执丢失）的任何失败都由 `ConversationTurnBeginUncertainError` 表达，仍然抛出 → renderer 记为 `unknown`，不重放。
+- 意图已经持久化、但 Provider 从未接手的失败（例如 `store.history` 读不出）先在持久记录上结算成 `not_sent` 并写明确原因，再返回 typed `not_sent`，不会留下 pending。若这次结算本身失败，结果不再可证明，仍然抛出。
 - Provider runner 已经接手（`onProviderDispatchAttempt` 已调用，或 runner 已经返回）之后的所有失败，包括回执丢失、runId 不一致、结算失败，都不是 `not_sent`，仍然抛出 → renderer 记为 `unknown`，不重放。
-- 重试同一 `commandId` 时返回**该次尝试的持久结果**：`not_sent` 的尝试仍然返回 `not_sent`，不会被说成 `accepted`。
+- 重试同一 `commandId` 时返回**该次尝试的持久结果**，且重复解析发生在删除等并发状态判断之前：`accepted` 才重播 `accepted`，`not_sent` 重播 `not_sent`；`pending` / `unknown` 没有投递证据，既不升级成 `accepted`，也不重发，只报告结果尚未确认。
 - renderer 把 `not_sent` 写进 durable receipt（`pending.notSent`）。它**跨重启存活**，并且在页面没有对应记录时仍然是 known-not-sent，而不是退回 `unresolved`。清空 receipt、显式重发是用户动作，不自动发生。
 - 页面回执优先：权威记录说 `not_sent` 时，receipt 只是副本。
 
@@ -54,7 +56,7 @@ type ConversationSendResult =
 `entry.status ?? 'completed'` 曾经让“旧归档没有写状态”读成成功。现在 `src/main/trace-archive-turn-status.ts` 只从结构化证据派生：
 
 - 顶层 `error` 存在，或 `result.isError === true` → `failed`
-- 明确写了 `result.succeeded` / 结构化成功证据 → `completed`
+- 存在终态 `result` 结构事件且其 `isError === false` → `completed`（不读可见正文当作结论）
 - 其他 → `unavailable`
 
 三种读取路径（indexed、stream_rebuild、monolithic）都使用同一派生函数。不 hydrate 正文、不从 prompt 猜测。侧聊呈现 `status`（`completed` / `failed` / `unavailable`）与 `terminal`（是否显式终止）两个字段，不再有 `settled`。

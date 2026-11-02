@@ -14,6 +14,19 @@ import type { NativeHandoffTarget } from './conversation-history'
 import type { HandoffBudgetInput } from './conversation-handoff-budget'
 import { conversationIntentHash, hashPattern, items, requireValue, subset, target, type ConversationLedger } from './conversation-store'
 
+/**
+ * Thrown when a failure happens at or after this attempt published its durable dispatch
+ * intent. The atomic write may have succeeded before its acknowledgement was lost, so
+ * neither "no turn exists" nor "the turn is exactly what we sent" can be proven: callers
+ * must report an unknown outcome and must not retry or claim the input was not sent.
+ */
+export class ConversationTurnBeginUncertainError extends Error {
+  constructor(readonly reason: string, cause?: unknown) {
+    super(reason, { cause })
+    this.name = 'ConversationTurnBeginUncertainError'
+  }
+}
+
 export interface BeginConversationTurn {
   expectedRevision: number
   commandId: string
@@ -166,15 +179,22 @@ export async function beginConversationTurn(
       ...(omitted.ranges.length ? { omittedRanges: omitted.ranges } : {}),
       delivery: { status: 'pending' }
     }
+    // From here on this attempt owns a durable dispatch intent: the atomic publish may
+    // succeed before its acknowledgement is lost, so every failure is reported as unknown.
     conversation.turns.push(turn)
-    if (conversation.sideChat && conversation.title === undefined && request.firstQuestion?.trim()) {
-      conversation.title = captureTitle(request.firstQuestion, SIDE_CHAT_DEFAULT_TITLE)
+    try {
+      if (conversation.sideChat && conversation.title === undefined && request.firstQuestion?.trim()) {
+        conversation.title = captureTitle(request.firstQuestion, SIDE_CHAT_DEFAULT_TITLE)
+      }
+      conversation.revision++
+      const checked = ledger.checked(conversation)
+      await loadConversationHistory(ledger.userData, checked, turn)
+      await ledger.persist(checked)
+      return { disposition: 'created', conversation: checked, turn: structuredClone(turn) }
+    } catch (error) {
+      throw new ConversationTurnBeginUncertainError(
+        `统一对话投递意图可能已经写入：${String((error as Error)?.message ?? error)}`, error)
     }
-    conversation.revision++
-    const checked = ledger.checked(conversation)
-    await loadConversationHistory(ledger.userData, checked, turn)
-    await ledger.persist(checked)
-    return { disposition: 'created', conversation: checked, turn: structuredClone(turn) }
   })
 }
 

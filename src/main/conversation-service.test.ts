@@ -232,18 +232,20 @@ describe('conversation backend lane', () => {
     expect((await service.read(created.id)).summary.blockedReason).toBeUndefined()
   })
 
-  it('returns the durable duplicate before plan state for pending, unknown, and completed attempts', async () => {
+  it('answering a duplicate ignores plan state but never upgrades a pending or unknown attempt', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-conversation-service-'))
     roots.push(root)
     const cwd = join(root, 'project')
     await mkdir(cwd)
     const store = new ConversationStore(join(root, 'user-data'))
     let terminal: ((value: Parameters<NonNullable<import('./conversation-service').ManagedConversationStart['onTerminal']>>[0]) => Promise<void>) | undefined
+    let dispatches = 0
     const service = new ConversationService({
       store,
       resolveContinuationKey: async () => 'identity-a',
       supportsHistoricalInput: () => true,
       startAppRun: async (_request, options) => {
+        dispatches++
         terminal = options.managedConversation.onTerminal
         return { runId: options.managedConversation.runId }
       }
@@ -251,12 +253,16 @@ describe('conversation backend lane', () => {
     const created = await service.create(cwd)
     const first = await service.send(request(created.id, created.revision, 'command-retry-1'))
     if (first.status !== 'accepted') throw new Error('the first attempt must be accepted')
-    const pendingDuplicate = await service.send({ ...request(created.id, 999, 'command-retry-1'), confirmFresh: false })
-    expect(pendingDuplicate).toEqual({ status: 'accepted', runId: first.runId, disposition: 'duplicate' })
+    // A pending attempt is not evidence of delivery: the retry is answered as unknown and
+    // never re-dispatched, even though the revision advanced.
+    await expect(service.send({ ...request(created.id, 999, 'command-retry-1'), confirmFresh: false }))
+      .rejects.toThrow('该命令的投递结果尚未确认')
+    expect(dispatches).toBe(1)
     await terminal!({ status: 'failed', finalItems: [], receipt: { contextHash: null, status: 'accepted', textHash: hash('hello'), nativeSessionId: 'native-a', source: 'codex_turn_start_response' } })
     expect((await store.read(created.id))?.turns.find((turn) => turn.origin === 'dispatch')?.delivery).toMatchObject({ status: 'unknown' })
-    const unknownDuplicate = await service.send({ ...request(created.id, 999, 'command-retry-1'), confirmFresh: false })
-    expect(unknownDuplicate).toEqual({ status: 'accepted', runId: first.runId, disposition: 'duplicate' })
+    await expect(service.send({ ...request(created.id, 999, 'command-retry-1'), confirmFresh: false }))
+      .rejects.toThrow('该命令的投递结果尚未确认')
+    expect(dispatches).toBe(1)
 
     // A second conversation proves completed duplicates are also independent of
     // the mutated revision/continuation plan.
@@ -327,7 +333,8 @@ describe('conversation backend lane', () => {
         await options.managedConversation.onTerminal({
           status: 'completed',
           finalItems: [{ runId: options.managedConversation.runId, itemId: 'user', contentHash: hash('hello') }],
-          receipt: { contextHash: null, status: 'accepted', textHash: hash('hello'), nativeSessionId: 'native-a', source: 'codex_turn_start_response' }
+          receipt: { contextHash: null, status: 'accepted', textHash: hash('hello'), nativeSessionId: 'native-a', source: 'codex_turn_start_response' },
+          archive: { sessionId: 'archive-a' }
         })
         return { runId: options.managedConversation.runId }
       }
