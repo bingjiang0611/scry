@@ -97,8 +97,14 @@ export const eventApi = {
     ipcRenderer.on('agent:userQuestion', l)
     return () => ipcRenderer.removeListener('agent:userQuestion', l)
   },
-  onQuestionAttention: (cb: (event: { runId: string; pendingCount: number }) => void): (() => void) => {
-    const l = (_: unknown, event: { runId: string; pendingCount: number }): void => cb(event)
+  // Bounded attention summary: how many questions wait and how many of them are
+  // permission decisions. No transcript content travels here.
+  onQuestionAttention: (cb: (event: {
+    runId: string; pendingCount: number; permissionCount?: number; inputCount?: number
+  }) => void): (() => void) => {
+    const l = (_: unknown, event: {
+      runId: string; pendingCount: number; permissionCount?: number; inputCount?: number
+    }): void => cb(event)
     ipcRenderer.on('agent:questionAttention', l)
     return () => ipcRenderer.removeListener('agent:questionAttention', l)
   },

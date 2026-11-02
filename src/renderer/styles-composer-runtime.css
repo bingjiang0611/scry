@@ -43,6 +43,7 @@
   height: 8px;
   flex: none;
   border-radius: 50%;
+  corner-shape: round;
   background: var(--selected);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--selected) 14%, transparent);
 }
@@ -79,7 +80,7 @@
 .run-status-stop {
   min-height: 30px;
   padding: 0 12px;
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   font-size: 12px;
 }
 
@@ -357,7 +358,7 @@
   display: grid;
   place-items: center;
   border: 1px solid var(--border2);
-  border-radius: 10px;
+  border-radius: var(--r-sm);
   background: var(--panel2);
 }
 

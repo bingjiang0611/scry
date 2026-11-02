@@ -45,7 +45,7 @@ export function SidebarProjectMenu({
     <div ref={(node) => { menuRef.current = node; presence.ref(node) }} className="menu sb-project-menu" data-state={presence.state}
       role="menu" aria-label={copy.manage(menu.project.name)} style={{ left: menu.left, top: menu.top, transformOrigin: 'top left' }}>
       <div className="sb-project-menu-head"><b>{menu.project.name}</b><code>{menu.project.cwd}</code></div>
-      {onNewProjectChat && <button type="button" className="mitem on" onClick={() => { onNewProjectChat(menu.project.cwd); presence.requestClose('button') }}><Icon name="plus" /> {copy.newChat(menu.project.name)}</button>}
+      {onNewProjectChat && <button type="button" className="mitem on" onClick={() => { onNewProjectChat(menu.project.cwd); presence.requestClose('button') }}><Icon name="plus" /> {copy.newChatAction}</button>}
       <div className="mdiv" />
       {onToggleProjectPin && <button type="button" className="mitem" onClick={() => { onToggleProjectPin(menu.project); presence.requestClose('button') }}><Icon name="pin" /> {menu.project.pinnedAt ? copy.unpin : copy.pin}</button>}
       {onRevealProject && <button type="button" className="mitem" onClick={() => { onRevealProject(menu.project); presence.requestClose('button') }}><Icon name="folder" /> {copy.reveal}</button>}

@@ -34,6 +34,7 @@ export function ChatView(props: ChatViewProps) {
     sessionLoading = false,
     sessionCacheVisible = false,
     sessionEvidenceGap = null,
+    emptyState = null,
     busy,
     queuedPrompts,
     pendingQuestions = NO_PENDING_QUESTIONS,
@@ -67,7 +68,7 @@ export function ChatView(props: ChatViewProps) {
     <>
       <WorkspaceFileLinkProvider workspaces={workspaceRoots} onOpen={onOpenFile}>
         <div className="body chat-body" data-screen-label="对话 · 真实 Turn transcript">
-          <div className="chat chat-transcript" ref={scrollRef} aria-label="执行时间线" aria-busy={sessionLoading && !sessionCacheVisible} data-history-source={sessionCacheVisible ? 'preview' : 'authoritative'}>
+          <div className="chat chat-transcript" ref={scrollRef} tabIndex={-1} aria-label="执行时间线" aria-busy={sessionLoading && !sessionCacheVisible} data-history-source={sessionCacheVisible ? 'preview' : 'authoritative'}>
             {turns.length === 0 && !sessionLoading && sessionEvidenceGap && (
               <div className="chat-session-evidence-gap" role="status" data-status={sessionEvidenceGap.status}>
                 <b>{sessionEvidenceGap.status === 'error' ? '会话历史加载失败' : sessionEvidenceGap.status === 'unavailable' ? (remote ? `这条会话没有可读的 ${remoteHost} 证据` : '这条会话没有可读的本机证据') : '这条会话的归档里没有轮次'}</b>
@@ -76,10 +77,15 @@ export function ChatView(props: ChatViewProps) {
               </div>
             )}
             {turns.length === 0 && !sessionLoading && !sessionEvidenceGap && hasSelectedSession && (
-              <div className="chat-session-evidence-gap" role="status" data-status="empty">
-                <b>这条会话暂时没有可显示的轮次</b>
-                <span>{remote ? `会话已选中；正在等待 ${remoteHost} 的归档或运行事件，不会将它当作新会话。` : '会话已选中；正在等待本机归档或运行事件，不会将它当作新会话。'}</span>
-              </div>
+              emptyState
+                ? <div className="chat-session-evidence-gap" role="status" data-status={emptyState.status ?? 'new-side-chat'}>
+                  <b>{emptyState.title}</b>
+                  <span>{emptyState.detail}</span>
+                </div>
+                : <div className="chat-session-evidence-gap" role="status" data-status="empty">
+                  <b>这条会话暂时没有可显示的轮次</b>
+                  <span>{remote ? `会话已选中；正在等待 ${remoteHost} 的归档或运行事件，不会将它当作新会话。` : '会话已选中；正在等待本机归档或运行事件，不会将它当作新会话。'}</span>
+                </div>
             )}
             {turns.length === 0 && !sessionLoading && !sessionEvidenceGap && !hasSelectedSession && (
               <div className={`unbound-empty welcome-field ${cwd ? 'bound' : ''}`}>

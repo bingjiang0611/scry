@@ -7,6 +7,7 @@ import { ModalFrame, requestModalClose } from '../../src/renderer/components/Mod
 import { ModalCloseButton } from '../../src/renderer/components/primitives/ModalCloseButton'
 import { MODAL_COPY } from '../../src/renderer/constants/copy'
 import { SessionRenameMenu, type SessionMenuTarget } from '../../src/renderer/components/SessionRename'
+import { SidebarProjectMenu } from '../../src/renderer/components/SidebarProjectMenu'
 
 // Same full App/memory bridge as the session fixture; no Provider or real data.
 document.documentElement.dataset.platform = 'macos'
@@ -20,10 +21,12 @@ Object.assign(window.scry, {
 const copy = {
   openBoth: 'Open placement probes', openModal: 'Open modal probe',
   title: 'Overlay placement', nestedTitle: 'Nested overlay', nested: 'Open nested',
-  busy: 'Toggle pending', input: 'Nested input'
+  busy: 'Toggle pending', input: 'Nested input',
+  projectMenu: 'Open long project menu', projectName: 'scry-main-diff-integration-超长项目名称-'.repeat(6)
 }
 function Probes() {
   const [menu, setMenu] = useState<SessionMenuTarget | null>(null)
+  const [projectMenu, setProjectMenu] = useState(false)
   const [modal, setModal] = useState(false)
   const [nested, setNested] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -44,7 +47,10 @@ function Probes() {
         setModal(true)
       }}>{copy.openBoth}</button>
       <button className="btn" id="probe-modal" onClick={() => { recordPageTime(); setModal(true) }}>{copy.openModal}</button>
+      <button className="btn" id="probe-project-menu" onClick={() => setProjectMenu(true)}>{copy.projectMenu}</button>
     </div>
+    {projectMenu && <SidebarProjectMenu menu={{ project: { cwd: '/fixture/long-project', name: copy.projectName, mtime: 1, sessions: [] }, left: 450, top: 160 }}
+      onClose={() => setProjectMenu(false)} onNewProjectChat={cwd => { document.getElementById('overlay-probe-host')!.dataset.newChatCwd = cwd }} />}
     {menu && <SessionRenameMenu target={menu} onRename={async () => {}} onClose={() => setMenu(null)} />}
     {modal && <ModalFrame labelledBy="probe-title" className="probe-modal" closeDisabled={busy} onClose={() => setModal(false)}>
       <div className="modal-head"><h2 id="probe-title">{copy.title}</h2><ModalCloseButton aria-label={MODAL_COPY.close} onClick={() => requestModalClose()} /></div>

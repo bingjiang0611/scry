@@ -61,10 +61,11 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --text-supporting-size: 12px;
   --text-compact-size: 11px;
+  /* Nested radius stack: 20 - 8 = 12, 12 - 4 = 8, 8 - 4 = 4. */
   --r-xs: 4px;
-  --r-sm: 4px;
-  --r-md: 6px;
-  --r-lg: 8px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 20px;
   --r-pill: 999px;
   --sidebar-w: 230px;
   --overview-panel-w: 380px;
@@ -166,6 +167,17 @@ svg.ico {
   box-sizing: border-box;
 }
 
+@supports (corner-shape: superellipse(1.25)) {
+  :where(*) {
+    corner-shape: superellipse(1.25);
+  }
+
+  *::before,
+  *::after {
+    corner-shape: superellipse(1.25);
+  }
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -196,7 +208,8 @@ body {
   background: var(--scrollbar-thumb);
   background-clip: padding-box;
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
+  corner-shape: round;
 }
 
 ::-webkit-scrollbar-thumb:hover {

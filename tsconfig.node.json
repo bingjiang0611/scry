@@ -4,5 +4,5 @@
     "lib": ["ES2023"],
     "types": ["node"]
   },
-  "include": ["src/main/**/*", "src/preload/**/*", "src/shared/**/*", "src/cli/**/*", "electron.vite.config.ts"]
+  "include": ["src/main/**/*", "src/preload/**/*", "src/shared/**/*", "src/cli/**/*", "scripts/fixtures/concurrency-trace-*.ts", "scripts/concurrency-trace-*.test.ts", "scripts/performance-counters/concurrency-trace-*.ts", "electron.vite.config.ts"]
 }

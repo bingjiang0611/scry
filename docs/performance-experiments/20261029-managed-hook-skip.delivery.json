@@ -1,0 +1,64 @@
+{
+  "appPath": "/Applications/Scry.app",
+  "version": "0.2.232",
+  "sourceBuildId": "bb020408efd2749cac1514fc717a992323b7187835e10e8ca768918463b77215",
+  "installedBuildId": "bb020408efd2749cac1514fc717a992323b7187835e10e8ca768918463b77215",
+  "installedAsarSha256": "3ef548df1e2f30f7b0c3398c7774b76a2619e512a5510502d07ef54d1192324d",
+  "baselineBuildId": "4f6d2e9ebb939fa6927d9a7e47cc793d38291951826d0b1369ce5656b98f9d8f",
+  "baselineAsarSha256": "5711c0599fcb925fc33a48077ccfb8770eb1d6a25310849b8a74019e73a2ae1c",
+  "optimizedHookSourceSha256": "bd179aa18cfcf54fb9939952c075e2ba4ceb573f913221edf1f256d6bbd3977a",
+  "rendererFiles": [
+    {
+      "before": "out/renderer/assets/AnalyticsView-C8N38fMb.js",
+      "after": "out/renderer/assets/AnalyticsView-CC0A9ZXd.js",
+      "beforeSha256": "bee201d05e7f40e375aa12aff424ac0419982cc1341ead8672b05031a01c49d9",
+      "afterSha256": "67c07007d71b559b336bd636b8c9d6639767912e2add0ba0915832fd6577c1a4",
+      "normalizedBeforeSha256": "67c07007d71b559b336bd636b8c9d6639767912e2add0ba0915832fd6577c1a4",
+      "identicalAfterVersionAndChunkNormalization": true
+    },
+    {
+      "before": "out/renderer/assets/TerminalSurface-8GxnNgZg.js",
+      "after": "out/renderer/assets/TerminalSurface-CsO2B8x9.js",
+      "beforeSha256": "33f1a3fbd3ffaedc15ebbce9db3c82223d8dc9989174892113689c5744afc659",
+      "afterSha256": "b4b88d28dd6426b780833a9fea9370a2d2eb10c7820b807f889efdbbdcfe2568",
+      "normalizedBeforeSha256": "b4b88d28dd6426b780833a9fea9370a2d2eb10c7820b807f889efdbbdcfe2568",
+      "identicalAfterVersionAndChunkNormalization": true
+    },
+    {
+      "before": "out/renderer/assets/TerminalSurface-GVL3fBIr.css",
+      "after": "out/renderer/assets/TerminalSurface-GVL3fBIr.css",
+      "beforeSha256": "854a7c0fb70e8b1a083c16797ab827299fb18744f5ad34f227b48337e33293c6",
+      "afterSha256": "854a7c0fb70e8b1a083c16797ab827299fb18744f5ad34f227b48337e33293c6",
+      "normalizedBeforeSha256": "854a7c0fb70e8b1a083c16797ab827299fb18744f5ad34f227b48337e33293c6",
+      "identicalAfterVersionAndChunkNormalization": true
+    },
+    {
+      "before": "out/renderer/assets/index-B2xB-tY0.css",
+      "after": "out/renderer/assets/index-B2xB-tY0.css",
+      "beforeSha256": "c819ca36352f9e9cfb1abc4b864a529dd261dcaf31839ab67ff3383f1064eb9a",
+      "afterSha256": "c819ca36352f9e9cfb1abc4b864a529dd261dcaf31839ab67ff3383f1064eb9a",
+      "normalizedBeforeSha256": "c819ca36352f9e9cfb1abc4b864a529dd261dcaf31839ab67ff3383f1064eb9a",
+      "identicalAfterVersionAndChunkNormalization": true
+    },
+    {
+      "before": "out/renderer/assets/index-C7oI1SZC.js",
+      "after": "out/renderer/assets/index-CCeZhFU9.js",
+      "beforeSha256": "d92b14067ad6d43031b080ddbd4216b6570bf7afb48d002b31f791d7c82ab143",
+      "afterSha256": "e1498c52b748800d0628d3f080d5001751721f0ed2e3e12f0206ff44aff636a0",
+      "normalizedBeforeSha256": "e1498c52b748800d0628d3f080d5001751721f0ed2e3e12f0206ff44aff636a0",
+      "identicalAfterVersionAndChunkNormalization": true
+    },
+    {
+      "before": "out/renderer/index.html",
+      "after": "out/renderer/index.html",
+      "beforeSha256": "e8438dc4bb57c44c51ca29363346ce8bfbc9291492cb629209a1e8cc6a118512",
+      "afterSha256": "18237fe42cbd66d4a2a7aae5211e4b7b734ea456fbca71e53fb9e8e082906728",
+      "normalizedBeforeSha256": "18237fe42cbd66d4a2a7aae5211e4b7b734ea456fbca71e53fb9e8e082906728",
+      "identicalAfterVersionAndChunkNormalization": true
+    }
+  ],
+  "limitation": "Version text and content-hash chunk references normalized; no pixel/frame equivalence claim. Current daily process was not restarted.",
+  "privateCliVersion": "0.2.53",
+  "installedHookModuleSha256": "bfd0de98221f6435942c6a67347d3c21bd881573c4658bf4bdfafc1cc9a93051",
+  "privateHookModuleEqualsCurrentBuild": true
+}

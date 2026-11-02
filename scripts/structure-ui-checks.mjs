@@ -35,10 +35,28 @@ export async function exerciseStructure(contents) {
   await click(`document.querySelector('.sb-nav .sb-navitem')`)
   await wait(`${entry}?.effect.getTiming().duration === 240`)
   check(await read(`${entry}.effect.getKeyframes().some(frame => frame.transform?.includes('6px'))`), 'Page entrance has no real 6px translation')
-  await read(`window.structureFirstFrame = null; document.addEventListener('click', () => requestAnimationFrame(() => { window.structureFirstFrame = { selected: ${row('cache-b')}?.getAttribute('aria-current') === 'true', unresolved: !${body('cache-b')}, preview: !!document.querySelector('.chat-transcript[data-history-source="preview"]'), sendLocked: document.querySelector('button.send')?.disabled, analytics: !!document.querySelector('.usage-page') }; }), { once: true })`)
+  // Approved catalog-preview contract: the first frame after a cold selection already owns the
+  // target page — target selected, previous surface gone, the target's own catalog preview marked
+  // preview, no authoritative body yet, execution still locked. The retired expectation was
+  // "keep the previous page unselected until history is ready"; that contract no longer exists.
+  await read(`window.structureFirstFrame = null; document.addEventListener('click', () => requestAnimationFrame(() => {
+    const transcript = document.querySelector('.chat-transcript')
+    const turns = transcript ? [...transcript.querySelectorAll('.transcript-turn')] : []
+    window.structureFirstFrame = {
+      selected: ${row('cache-b')}?.getAttribute('aria-current') === 'true',
+      source: transcript?.getAttribute('data-history-source'),
+      busy: transcript?.getAttribute('aria-busy'),
+      turns: turns.length,
+      runId: turns[0]?.getAttribute('data-run-id'),
+      turnText: turns[0]?.textContent ?? '',
+      text: transcript?.textContent ?? '',
+      analytics: !!document.querySelector('.usage-page'),
+      locked: document.querySelector('button.send')?.disabled === true && [...document.querySelectorAll('.turn-branch-btn')].every(node => node.disabled)
+    };
+  }), { once: true })`)
   await click(row('cache-b'))
   await wait(`window.structureFirstFrame != null`)
-  check(await read(`window.structureFirstFrame.selected && window.structureFirstFrame.unresolved && window.structureFirstFrame.preview && window.structureFirstFrame.sendLocked && !window.structureFirstFrame.analytics`), 'Cold selection did not show the selected catalog preview with authority controls locked')
+  check(await read(`(() => { const frame = window.structureFirstFrame; return frame.selected && frame.source === 'preview' && frame.busy === 'false' && frame.turns === 1 && frame.runId === 'session-preview:cache-b' && frame.turnText.trim().length > 0 && !frame.text.includes('Authoritative') && !frame.analytics && frame.locked })()`), 'First frame did not present the target catalog preview')
   await pending('cache-b')
   await control('resolve-b')
   await wait(`${row('cache-b')}?.getAttribute('aria-current') === 'true' && ${body('cache-b')}`)
@@ -110,7 +128,7 @@ export async function exerciseStructure(contents) {
     ] })
   }
   return { page240: true, belowChromeIncludesComposer: true, firstClickAndInputDuringEntry: true,
-    coldSelectionShowsTargetPreview: true, session180NoTranslation: true, rapidCancellation: true, staleHistoryRejected: true,
+    coldSelectionPresentsTargetPreview: true, session180NoTranslation: true, rapidCancellation: true, staleHistoryRejected: true,
     cachedNavigationTargetsLivePage: true, staleCacheOnlyOneEntrance: true, sameSessionRefreshNoEntrance: true, sameSessionFocusNoEntrance: true,
     newConversationResetsIdentity: true, reduced120OpacityOnly: true, nativeCaptureCalls: 0 }
 }

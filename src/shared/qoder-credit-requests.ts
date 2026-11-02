@@ -12,12 +12,23 @@ export interface CreditTurn {
   cwd?: string
   providerTurnId?: string
   forkTurnId?: string
+  /** Hook request-set identity; never used as a provider prompt ID. */
+  requestSetId?: string
 }
 
 const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 const string = (value: unknown): string | undefined => typeof value === 'string' && value ? value : undefined
 const amount = (value: unknown): number | null => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+
+function identityPair(row: Record<string, unknown>, snake: string, camel: string): { value?: string; contradictory: boolean } {
+  const snakeValue = string(row[snake])
+  const camelValue = string(row[camel])
+  return {
+    value: snakeValue ?? camelValue,
+    contradictory: !!snakeValue && !!camelValue && snakeValue !== camelValue
+  }
+}
 
 /** Use native user identity and parent links, never prompt text or a timestamp guess.
  * Session totals, original_credits and fork copies are not additional charges. */
@@ -45,10 +56,23 @@ export function qoderCreditRequests(text: string, turns: CreditTurn[]): { reques
       const previous = messageRequests.get(id)
       messageRequests.set(id, previous === undefined || previous === requestId ? requestId : null)
     }
-    if (!isTranscriptUserPrompt(row) || row.isMeta === true || row.isSynthetic === true || row.isSidechain === true || row.forkedFrom) continue
-    const candidates = turns.filter((turn) => (turn.sessionId == null || row.sessionId === turn.sessionId) && (turn.cwd == null || row.cwd === turn.cwd) &&
-      (uuid === turn.forkTurnId || ((!turn.forkTurnId || turn.forkTurnId === turn.providerTurnId) &&
-        !!turn.providerTurnId && row.promptId === turn.providerTurnId)))
+    if (!isTranscriptUserPrompt(row) || row.isMeta === true || row.isSynthetic === true || row.isSidechain === true || row.isReplay === true || row.forkedFrom) continue
+    const requestSet = identityPair(row, 'request_set_id', 'requestSetId')
+    const prompt = identityPair(row, 'prompt_id', 'promptId')
+    if (requestSet.contradictory || prompt.contradictory) continue
+    const candidates = turns.filter((turn) => {
+      if (turn.sessionId != null && row.sessionId !== turn.sessionId) return false
+      if (turn.cwd != null && row.cwd !== turn.cwd) return false
+      const forkMatch = !!turn.forkTurnId && uuid === turn.forkTurnId &&
+        (!turn.providerTurnId || prompt.value === turn.providerTurnId) &&
+        (!turn.requestSetId || requestSet.value === turn.requestSetId)
+      const providerMatch = !!turn.providerTurnId && prompt.value === turn.providerTurnId &&
+        (!turn.forkTurnId || turn.forkTurnId === turn.providerTurnId) &&
+        (!turn.requestSetId || requestSet.value === turn.requestSetId)
+      const requestSetMatch = !!turn.requestSetId && !turn.providerTurnId &&
+        requestSet.value === turn.requestSetId && !!prompt.value
+      return forkMatch || providerMatch || requestSetMatch
+    })
     if (candidates.length === 1) {
       const runId = candidates[0].runId
       const candidatesForRun = rootCandidates.get(runId) ?? new Set<string>()

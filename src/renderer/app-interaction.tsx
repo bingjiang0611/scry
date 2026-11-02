@@ -1,5 +1,8 @@
 import { useCallback, useRef, useState } from 'react'
 import { AppShell } from './app-shell'
+import type { RemoteTarget } from './app-types'
+import type { RemoteProviderRef } from '@shared/desktop-remote'
+import { remoteDraftKey } from './components/RemoteChat'
 import { useAppComposer } from './app-composer'
 import { useAppRuntimeEffects } from './app-runtime'
 import { useAppView } from './app-view'
@@ -31,7 +34,7 @@ export function useAppInteraction(context: AppInteractionContext) {
   const { theme, setTheme, composerError, setComposerError, composerSubmitting, setComposerSubmitting, sessionLoading, setSessionLoading,
     sessionCacheVisible, setSessionCacheVisible, sessionSnapshots, sessionEvidenceGap, setSessionEvidenceGap, draftStartPendingRef,
     activeRunHydrated, setActiveRunHydrated, workspace, cwd, setCwd, recent, projects, activeSessionId, loadProjects, chooseFolder,
-    removeRecentFolder, workspaceRoots, setRunningRunIds, setWaitingQuestionRunIds, terminalRunIdsRef, localRunIdsRef, localStartsRef, localDraftOwnersRef, markRunStarted,
+    removeRecentFolder, workspaceRoots, setRunningRunIds, setWaitingQuestionRunIds, setQuestionKindsByRun, terminalRunIdsRef, localRunIdsRef, localStartsRef, localDraftOwnersRef, markRunStarted,
     markRunFinished, cwdRef, activeSessionIdRef, selectSessionId, showSkills, setShowSkills, showMcp, setShowMcp, showLlmPerformance,
     setShowLlmPerformance, view, setView, logicalConversation, setLogicalConversation, setConversationError, setConversationAgent,
     conversationProjection, setConversationProjection, switchingAgent, setSwitchingAgent,
@@ -144,7 +147,8 @@ export function useAppInteraction(context: AppInteractionContext) {
     localStartsRef, localDraftOwnersRef, terminalRunIdsRef, requestChatBottom, markRunStarted, setComposerError,
     setSessionLoading, session, selectAgentRef, setSessionCacheVisible, setCwd, selectSessionId, setView,
     activeSessionIdRef, cwdRef, draftContextRef, migrateRightSurface, integrations, setSessionDrafts, setSessionPromptQueues,
-    loadProjects, setRunningRunIds, setWaitingQuestionRunIds, restoreStoredSelection: restoreStoredSelectionRef
+    loadProjects, setRunningRunIds, setWaitingQuestionRunIds, setQuestionKindsByRun,
+    restoreStoredSelection: restoreStoredSelectionRef
   })
 
   const composer = useAppComposer({
@@ -222,6 +226,21 @@ export function useAppInteraction(context: AppInteractionContext) {
     setSettingsTab
   })
 
+  const adoptRemoteSession = (target: RemoteTarget, externalSessionId: string, provider: RemoteProviderRef): void => {
+    const adoptedKey = remoteDraftKey(target.connectionId, target.cwd, externalSessionId)
+    remoteSurfaces.migrate(remoteSurfaceKey, adoptedKey)
+    setRemoteAdoptedSession(externalSessionId)
+    const metaPrompt = appView.metaPromptTarget.current
+    if (metaPrompt.view === 'remote' && metaPrompt.draftKey === remoteSurfaceKey) metaPrompt.draftKey = adoptedKey
+    setRemoteTarget(current => current ? {
+      ...current,
+      session: {
+        sessionId: externalSessionId, externalSessionId, cwd: current.cwd,
+        providerId: provider.id, agentProfileId: provider.agentProfileId,
+        label: current.session?.label ?? '', ts: current.session?.ts ?? Date.now()
+      }
+    } : current)
+  }
 
   const shellProps = {
     ...state,
@@ -239,11 +258,9 @@ export function useAppInteraction(context: AppInteractionContext) {
     remoteSurface,
     remotePanelVisible,
     remoteAdoptedSession,
-    remoteSurfaceKey,
     remoteSurfaces,
     remoteTarget,
-    setRemoteTarget,
-    setRemoteAdoptedSession,
+    adoptRemoteSession,
     dispatchRemoteSurface,
     scrollRef,
     taRef,

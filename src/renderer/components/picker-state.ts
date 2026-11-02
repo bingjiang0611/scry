@@ -10,6 +10,8 @@ export function usePickerOpen(controlledOpen?: boolean, onOpenChange?: (open: bo
   const open = controlledOpen ?? localOpen
   const setOpen = (next: boolean | ((current: boolean) => boolean)): void => {
     const value = typeof next === 'function' ? next(open) : next
+    // A sibling picker may share the owner; a no-op close must not dismiss its menu.
+    if (value === open) return
     if (controlledOpen === undefined) setLocalOpen(value)
     onOpenChange?.(value)
   }

@@ -34,6 +34,12 @@ describe('performance measurement tool', () => {
     expect(collectorFiles('history.page').map(file => file.split('/').at(-1))).toEqual(['main-ipc.counters.test.ts'])
     expect(collectorFiles('source-control.service.diff-validated').map(file => file.split('/').at(-1)))
       .toEqual(['subprocesses.counters.test.ts'])
+    expect(collectorFiles('trace.r4-cell').map(file => file.split('/').at(-1)))
+      .toEqual(['concurrency-trace-r4.counters.test.ts'])
+    for (const scenario of ['trace.main-10k', 'trace.main-50k']) {
+      expect(collectorFiles(scenario).map(file => file.split('/').at(-1)))
+        .toEqual(['concurrency-trace-main.counters.test.ts'])
+    }
   })
 
   it('calculates integer deltas and percentages from conservative repeated values', () => {

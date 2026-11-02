@@ -34,6 +34,7 @@ export interface RemoteChatProps {
   onSessionAdopted: (externalSessionId: string, provider: RemoteProviderRef) => void
   surface: {
     target: HTMLElement | null
+    primaryVisible: boolean
     state: RightSurfaceState
     scopeId?: string
     retainTerminal?: boolean
@@ -59,7 +60,7 @@ export function RemoteChat({
   const foundationState = useRemoteChatFoundation({ connectionId, cwd, session, preparedHistory, draftStore, queueStore, surface })
   const controlsState = useRemoteChatControls(foundationState, { connectionId, cwd, draftStore, queueStore, onSessionAdopted })
   const { controlProvider } = controlsState
-  const presentationState = useRemoteChatPresentation(foundationState, controlProvider, { scrollRef, cwd, queueStore })
+  const presentationState = useRemoteChatPresentation(foundationState, controlProvider, { scrollRef, cwd, queueStore, surface })
   const executionState = useRemoteChatExecution(foundationState, presentationState, { connectionId, draftStore, queueStore })
   return <RemoteChatView
     {...foundationState} {...presentationState} {...executionState} {...controlsState}

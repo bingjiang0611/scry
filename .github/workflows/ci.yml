@@ -37,8 +37,12 @@ jobs:
           fi
       - name: Typecheck
         run: npm run typecheck
+      - name: Harness binding checks
+        run: npm run check:harness-bindings
+      # Coverage includes CPU-heavy 50k-trace contracts. Run one worker so those
+      # contracts do not compete for the hosted runner within their unchanged timeout.
       - name: Unit, contract tests and coverage
-        run: xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24' npm run test:coverage
+        run: xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24' npm run test:coverage -- --maxWorkers=1
       - name: Coverage report
         if: always()
         uses: actions/upload-artifact@v4
@@ -90,7 +94,17 @@ jobs:
       - name: Prepare Electron native dependencies
         run: ./node_modules/.bin/electron-builder install-app-deps
       - name: Isolated renderer DOM smoke tests
+        id: renderer-ui
+        env:
+          SCRY_SIDEBAR_ACTIVITY_SCREENSHOT: ${{ runner.temp }}/scry-sidebar
         run: npm run test:renderer:ui
+      - name: Preserve synthetic sidebar pixel diagnostics on failure
+        if: ${{ failure() && steps.renderer-ui.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidebar-paint-diagnostics
+          path: ${{ runner.temp }}/scry-sidebar-*.png
+          if-no-files-found: ignore
       - run: npm run pack:artifact
 
   check:

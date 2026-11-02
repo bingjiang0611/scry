@@ -29,7 +29,7 @@ export function desktopReaderFixture() {
     // give each one the same deterministic time as its item.
     archive: (index: number, text = `answer ${index}`) => upsertTraceArchiveTurn({
       cwd, userDataDir, sessionId: context.externalSessionId, providerId: 'codex', runtimeProvider: 'codex_cli',
-      turn: { runId: `run-${index}`, agentProfileId: null, userText: `prompt ${index}`, done: true, ts: Date.parse(`2026-10-14T00:00:0${index}Z`), items: [{
+      turn: { runId: `run-${index}`, agentProfileId: null, userText: `prompt ${index}`, done: true, ts: Date.UTC(2026, 9, 14, 0, 0, index), items: [{
         id: `event-${index}`, runId: `run-${index}`, ts: `2026-10-14T00:00:0${index}Z`, kind: 'model', stage: 'text', text
       }] }
     }) }

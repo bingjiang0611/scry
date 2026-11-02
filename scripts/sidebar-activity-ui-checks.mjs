@@ -61,6 +61,7 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
   check(await read(`Array.from(document.querySelectorAll('[data-activity-group="completed"] .sb-sesstext')).every(title => title.getAnimations().length === 0 && getComputedStyle(title).webkitTextFillColor !== 'rgba(0, 0, 0, 0)')`), 'Completed titles inherited the working sweep')
   await click(row)
   await wait(`document.querySelector('#activity-selection').textContent === 'webhook' && document.activeElement === document.querySelector(${JSON.stringify(row)})`)
+  check(await read(`document.querySelector('#activity-selection-cwd').textContent === '/fixture/storefront-worktree' && document.querySelector(${JSON.stringify(row)}).getAttribute('aria-current') === 'true'`), 'Activity click must select the session worktree, not its project root')
   await read('window.activityFixture.setLongTitle(true)')
   await wait(`document.querySelector(${JSON.stringify(row)}).textContent.includes('/design-loop ios')`)
   check(await read(`(() => { const title = document.querySelector(${JSON.stringify(row)}).querySelector('.sb-sesstext'); return title.scrollWidth > title.clientWidth && getComputedStyle(title).textOverflow === 'ellipsis'; })()`), 'Long running title does not truncate')
@@ -68,6 +69,7 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
     await read(`document.documentElement.dataset.theme = '${theme}'`)
     await wait(`document.querySelector('.sidebar').getAnimations({ subtree: true }).every(animation => animation.effect.getComputedTiming().endTime === Infinity)`)
     const sweepImages = []
+    const sweepFrames = []
     for (const time of [1100, 2100]) {
       const rect = await read(`(async () => {
         const title = document.querySelector(${JSON.stringify(row)}).querySelector('.sb-sesstext');
@@ -81,16 +83,31 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
       await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
       const image = await contents.capturePage(rect)
       sweepImages.push(image.toBitmap())
-      if (screenshotPrefix) require('node:fs').writeFileSync(`${screenshotPrefix}-sweep-${theme}-${time}.png`, image.toPNG())
+      sweepFrames.push({ time, image })
     }
     // A different PNG alone accepted an imperceptible shimmer. Require a visible
     // channel change on multiple glyph pixels, not just a single changed byte.
     let visiblePixels = 0
+    let maxDelta = 0
     for (let index = 0; index < sweepImages[0].length; index += 4) {
       const delta = Math.max(...[0, 1, 2].map(channel => Math.abs(sweepImages[0][index + channel] - sweepImages[1][index + channel])))
+      maxDelta = Math.max(maxDelta, delta)
       if (delta >= 40) visiblePixels++
     }
-    check(visiblePixels >= 20, `Long ${theme} working title sweep is too faint: ${visiblePixels} pixels changed by >=40/255`)
+    // Write only after both samples: diagnostic I/O must not change capture pacing.
+    if (screenshotPrefix) for (const { time, image } of sweepFrames) {
+      require('node:fs').writeFileSync(`${screenshotPrefix}-sweep-${theme}-${time}.png`, image.toPNG())
+    }
+    const diagnostic = visiblePixels < 20 ? await read(`(() => {
+      const title = document.querySelector(${JSON.stringify(row)}).querySelector('.sb-sesstext');
+      const bounds = title.getBoundingClientRect();
+      const style = getComputedStyle(title);
+      return { bounds: bounds.toJSON(), viewport: [innerWidth, innerHeight, devicePixelRatio],
+        background: style.backgroundImage, base: style.backgroundColor, fill: style.webkitTextFillColor,
+        position: style.backgroundPositionX, opacity: style.opacity, visibility: document.visibilityState,
+        animations: title.getAnimations().map(item => ({ name: item.animationName, time: item.currentTime, state: item.playState })) };
+    })()`) : undefined
+    check(visiblePixels >= 20, `Long ${theme} working title sweep is too faint: ${visiblePixels} pixels changed by >=40/255; maxDelta=${maxDelta}; sizes=${JSON.stringify(sweepFrames.map(frame => frame.image.getSize()))}; ${JSON.stringify(diagnostic)}`)
   }
   await read(`${titleAnimations}.find(animation => animation.animationName === 'sb-activity-sweep').play(); window.activityFixture.setLongTitle(false); document.documentElement.dataset.theme = 'dark'`)
   await wait(`document.querySelector(${JSON.stringify(row)}).textContent.includes('Retry failed webhook delivery')`)

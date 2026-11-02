@@ -1,12 +1,15 @@
 import { type TraceEvent, classifyTool, fileOpOf, parseMcp } from '../../shared/trace.js'
-import { type ParsedTranscriptTurn, stringAt, nestedRecord, timestampOf, epochSecondsAt, terminalStatus, inferredSkillEvents, summarize } from './recorder-contracts.js'
+import { type CodexRolloutIdentity, type ParsedTranscriptTurn, stringAt, nestedRecord, timestampOf, epochSecondsAt, terminalStatus, inferredSkillEvents, summarize } from './recorder-contracts.js'
 import { classifyDanger } from '../../main/danger.js'
 import { stableHash } from './store.js'
 import { appendCodexPatchResult, finalizeCodexTurns, callInput, codexHookEvent, explicitSkillEvent, indexedToolOutputs, normalizedCodexCalls, outputFailed, outputText, rejectedBeforeExecution, runningCellId, skillInjection, textContent } from './recorder-codex-calls.js'
 import { CodexUsageDeltaFilter } from '../../shared/usage-dedupe.js'
+import { codexIdentityFromSessionMeta, recordCodexItemCompleted, recordCodexSubAgentActivity } from './recorder-codex-rollout-children.js'
 
-export function parseCodexRollout(content: string, runId: string): { recognized: boolean; turns: ParsedTranscriptTurn[] } {
+export function parseCodexRollout(content: string, runId: string, sessionIdentity?: CodexRolloutIdentity): { recognized: boolean; turns: ParsedTranscriptTurn[]; identity: CodexRolloutIdentity } {
   const turns: ParsedTranscriptTurn[] = []
+  let identity: CodexRolloutIdentity = sessionIdentity ?? { isSubagent: false }
+  let identitySeen = !!sessionIdentity?.sessionId
   let current: ParsedTranscriptTurn | undefined
   let sawCodexLine = false
   type UsageCounters = Required<Pick<TraceEvent, 'tokensIn' | 'tokensOut' | 'cacheReadTokens' | 'cacheCreationTokens' | 'reasoningTokens'>>
@@ -204,10 +207,17 @@ export function parseCodexRollout(content: string, runId: string): { recognized:
     const at = timestampOf(row)
     lastAt = at
     if (type === 'session_meta' || type === 'turn_context' || type === 'event_msg' || type === 'response_item') sawCodexLine = true
+    if (type === 'session_meta' && !identitySeen) {
+      identitySeen = true
+      identity = codexIdentityFromSessionMeta(payload)
+      continue
+    }
     if (type === 'event_msg' && payload.type === 'task_started') {
       finishUsage(at)
+      const attribution = nestedRecord(payload, 'turn_attribution')
       current = {
         providerTurnId: stringAt(payload, 'turn_id', 'turnId'),
+        ...(stringAt(attribution ?? {}, 'parent_turn_id', 'parentTurnId') ? { parentTurnId: stringAt(attribution ?? {}, 'parent_turn_id', 'parentTurnId') } : {}),
         userText: '',
         startedAt: at,
         events: [],
@@ -260,27 +270,12 @@ export function parseCodexRollout(content: string, runId: string): { recognized:
       current.userText = stringAt(payload, 'message', 'text', 'prompt') ?? textContent(payload.content) ?? current.userText
       continue
     }
+    if (type === 'event_msg' && payload.type === 'item_completed') {
+      recordCodexItemCompleted(payload, identity, current, toolById, runId, at)
+      continue
+    }
     if (type === 'event_msg' && payload.type === 'sub_agent_activity') {
-      const sessionId = stringAt(payload, 'agent_thread_id', 'agentThreadId')
-      const parentToolUseId = stringAt(payload, 'event_id', 'eventId')
-      const name = stringAt(payload, 'agent_path', 'agentPath')?.replace(/^\/root\//, '')
-      if (sessionId && !current.childThreads.some((child) => child.sessionId === sessionId)) {
-        current.childThreads.push({ sessionId, parentToolUseId, name })
-      }
-      if (payload.kind === 'started') {
-        current.events.push({
-          id: `codex-agent-${stableHash([sessionId, parentToolUseId, at]).slice(0, 16)}`,
-          ts: at,
-          runId,
-          kind: 'agent',
-          stage: `agent:${name ?? 'subagent'}`,
-          tool: 'Agent',
-          toolUseId: parentToolUseId,
-          agentId: sessionId,
-          name: name ?? 'subagent',
-          input: { source: 'sub_agent_activity', sessionId }
-        })
-      }
+      recordCodexSubAgentActivity(payload, current, toolById, runId, at)
       continue
     }
     if (type === 'event_msg' && payload.type === 'patch_apply_end') {
@@ -444,6 +439,7 @@ export function parseCodexRollout(content: string, runId: string): { recognized:
   if (lastAt) finishUsage(lastAt)
   return {
     recognized: sawCodexLine && turns.length > 0,
-    turns: finalizeCodexTurns(turns, current, injectedSkill)
+    turns: finalizeCodexTurns(turns, current, injectedSkill),
+    identity
   }
 }

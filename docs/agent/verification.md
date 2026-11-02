@@ -28,6 +28,7 @@ npm run build
 
 ## 覆盖率与 fixture 隔离
 
+- 并发 harness 的整图绑定检查运行 `npm run check:harness-bindings`：检查 session-concurrency 全部源码及 trace launcher / Electron entry，保留 TypeScript 源码依赖图、DOM 声明和缺失绑定负对照。它是 Node CI 中独立的必需步骤，失败仍阻止 `Check`；不再计作 5 秒 Vitest 用例，也不替代真实 Electron 或性能验收。修改这些 harness 时同时运行此命令。
 - `npm run test:coverage` 使用与 Vitest 匹配的 V8 插件，统计 `src/` 生产 TS/TSX；仅排除测试、benchmark 与类型声明。Node CI 用这一次运行替代普通 unit run，并上传 `coverage/`，不重复跑两遍套件。
 - 定向报告：`npm run test:coverage -- src/main/git.test.ts src/main/providers/pi-lifecycle.test.ts`。定向报告不是全仓覆盖率；对比必须固定源码、测试范围和工具版本，不能把其他并行 WIP 的变化归功于本次测试。
 - `--coverage.reportsDirectory=<独立目录>` 会清理原报告目录；禁止指向源码或基线备份。默认 `coverage/` 已忽略。

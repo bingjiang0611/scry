@@ -1,5 +1,5 @@
 import type { CreditUsageEvidence } from './credit-usage.js'
-import type { TurnDiffStatus, TurnDiffReason, DiffFile, TurnDiffCollection, DangerLevel, CompactionTrigger } from './trace.js'
+import type { TurnDiffStatus, TurnDiffReason, DiffFile, TurnDiffCollection, DangerLevel, CompactionTrigger, WorkspaceOverlapEvidence } from './trace.js'
 import type { AgentSteerEvidence, AgentImageMimeType, AgentIntervention } from './runtime.js'
 import type { ProviderId } from './provider.js'
 
@@ -144,6 +144,8 @@ export interface TurnDiffSnapshotRecord {
   captureMs: number
   cleanup: 'ok' | 'failed'
   collection?: TurnDiffCollection
+  /** 同工作区并行运行的观测证据；缺失 = 旧记录或未观测，不能读成独占归因。 */
+  workspaceOverlap?: WorkspaceOverlapEvidence
 }
 
 export interface TurnDanger {
@@ -212,6 +214,8 @@ export interface AgentTurnRecord extends TurnEvidence {
     id: ProviderId
     version?: string
     model?: string
+    /** Provider-reported logical tier, separate from a concrete native model id. */
+    modelTier?: string
     /**
      * Why `model` reads the way it does. A missing model has several distinct
      * causes and they are not interchangeable: the provider may never expose
@@ -253,7 +257,7 @@ export interface AgentTurnRecord extends TurnEvidence {
   termination?: Evidence<TurnTermination>
 }
 
-/** `observed` is the only status that permits reading `provider.model` as fact. */
+/** `observed` is the only status that permits reading provider model metadata as fact. */
 export type TurnModelStatus = 'observed' | 'unobserved' | 'incomplete' | 'conflict'
 
 /** Provenance of an observed model id. `usage_event` is a billed model, not a requested one. */

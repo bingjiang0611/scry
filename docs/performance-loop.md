@@ -45,6 +45,8 @@
 
 `completed` 表示测量的里程碑达到：IPC 是 Promise resolved，不是业务成功；`error` 是抛出/拒绝；`cancelled`、`unavailable` 单列。首段文本是 main 收到文本而非屏幕绘制。历史错误/过期分页和无输出 run 也会结束其 named trace，不只保留成功快样本。
 
+`agent.terminal_finalize` 的 `diff_complete` 不是纯 Git 耗时：此前还执行用量、附件归属、catalog、实时 ingestion 和终态快照。维护者于 2026-11-01 批准增加 `llm_performance_settled`、`attachment_owner_settled`、`catalog_settled`、`live_ingestion_idle`、`terminal_progress_settled` 和 `turn_diff_joined` 阶段。`settled` 仅表示该路径已返回或处理错误，不声明数据写入成功；`turn_diff_joined` 是已有并行任务的等待点，不是 diff 的完整执行时长。原 `diff_complete`、总时长、保留策略和隐私边界不变，旧记录缺少这些阶段时不补零。
+
 ## 发布后比较
 
 先关闭待比较的 App，确保退出刷新；在轮转前另存需要长期比较的 performance 目录。备份也是本机诊断数据，不自动共享。

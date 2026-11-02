@@ -8,6 +8,7 @@ import { RemoteHostPanel } from ${JSON.stringify(join(root, 'src/renderer/compon
 import { RemotePairing } from ${JSON.stringify(join(root, 'src/renderer/components/RemotePairing.tsx'))}
 import { RemoteChat, remoteDraftKey } from ${JSON.stringify(join(root, 'src/renderer/components/RemoteChat.tsx'))}
 import { App } from ${JSON.stringify(join(root, 'src/renderer/App.tsx'))}
+import { unavailableWorkspaceSelection } from ${JSON.stringify(join(root, 'scripts/fixtures/workspace-selection-unavailable.ts'))}
 import { refreshRemoteCatalog, useConnectedCatalogLoader } from ${JSON.stringify(join(root, 'src/renderer/hooks/useRemoteCatalogs.ts'))}
 import { SidebarRemoteProjects, useRemoteProjectGroups } from ${JSON.stringify(join(root, 'src/renderer/components/SidebarRemoteProjects.tsx'))}
 import { refreshDesktopConnections } from ${JSON.stringify(join(root, 'src/renderer/hooks/useDesktopConnections.ts'))}

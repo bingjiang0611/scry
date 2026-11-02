@@ -10,6 +10,12 @@ export interface LoadedSessionTurn {
   attachments?: AgentInputAttachment[]
   items: TraceEvent[]
   done?: boolean
+  /**
+   * Terminal marker the Provider wrote on this turn's last assistant message
+   * (Pi `stopReason`). Absent when the source records prove no completion, so a
+   * visible partial answer is never reported as a finished turn.
+   */
+  stopReason?: string
   error?: string
   errorHint?: string
 }

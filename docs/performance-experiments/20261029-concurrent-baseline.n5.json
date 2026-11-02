@@ -1,0 +1,255 @@
+{
+  "schema": 1,
+  "count": 5,
+  "samples": [
+    {
+      "round": 1,
+      "count": 5,
+      "elapsedMs": 31224,
+      "resourceWindowMs": 31641,
+      "samples": 125,
+      "animatedTitles": 10,
+      "mainCpuMs": 5323.057000000001,
+      "rendererCpuMs": 5295.045,
+      "gpuCpuMs": 4979.375,
+      "hookCpuMs": 32051.779999999973,
+      "hookCpuMsPerStart": 152.6275238095237,
+      "measuredCpuMs": 47649.256999999976,
+      "mainCpuOneCorePct": 16.823289402989793,
+      "peakMainRssMiB": 305.234375,
+      "peakRendererWorkingSetMiB": 306.390625,
+      "peakHookRssMiB": 76.359375,
+      "idleBefore": {
+        "mainRssMiB": 210.609375,
+        "rendererWorkingSetMiB": [
+          151.84375
+        ]
+      },
+      "idleAfter": {
+        "mainRssMiB": 299.859375,
+        "rendererWorkingSetMiB": [
+          305.734375
+        ]
+      },
+      "idleAfterAt": 1793275858766,
+      "maxIntervalEventLoopP95Ms": 80.871423,
+      "maxEventLoopDelayMs": 86.179839,
+      "counters": {
+        "fsync": 8520,
+        "git": 318,
+        "children": 529,
+        "activeRunsCalls": 35,
+        "activeRunsJsonBytes": 20254274
+      },
+      "hookFsync": 480,
+      "hookGit": 0,
+      "activeRuns": {
+        "calls": 35,
+        "jsonBytes": 20254274,
+        "maxConcurrent": 5,
+        "handlerAndProbeMs": 55.078454000007696
+      },
+      "rendererMetrics": {
+        "TaskDuration": 3.2446960000000002,
+        "ScriptDuration": 1.288531,
+        "LayoutDuration": 0.062344,
+        "RecalcStyleDuration": 0.397502,
+        "LayoutCount": 92,
+        "RecalcStyleCount": 2036
+      },
+      "trace": {
+        "complete": true,
+        "Paint": {
+          "count": 18691,
+          "durationUs": 605089
+        },
+        "Layout": {
+          "count": 92,
+          "durationUs": 87885
+        }
+      },
+      "canonicalRecords": 5,
+      "archiveVerified": true,
+      "highLoad": false,
+      "harnessHash": "2c5b48ee6a38b30b46c495a8bc6bbae9ce01d2edd03ee5efc1a90922eabd09db",
+      "rawDirectory": "round-1-n5",
+      "rawSha256": "23a2b5d809a89e4f0794a57e39434b91e47667467ec8bfb45b8530f1de818f40",
+      "initialLoad": [
+        3.22705078125,
+        3.18017578125,
+        3.15869140625
+      ],
+      "finalLoad": [
+        2.98095703125,
+        3.1220703125,
+        3.1376953125
+      ]
+    },
+    {
+      "round": 2,
+      "count": 5,
+      "elapsedMs": 34246,
+      "resourceWindowMs": 34358,
+      "samples": 136,
+      "animatedTitles": 10,
+      "mainCpuMs": 5343.405,
+      "rendererCpuMs": 5860.2210000000005,
+      "gpuCpuMs": 5958.449,
+      "hookCpuMs": 31457.987999999983,
+      "hookCpuMsPerStart": 149.79994285714278,
+      "measuredCpuMs": 48620.06299999998,
+      "mainCpuOneCorePct": 15.552142150299783,
+      "peakMainRssMiB": 299.28125,
+      "peakRendererWorkingSetMiB": 306.859375,
+      "peakHookRssMiB": 77.0625,
+      "idleBefore": {
+        "mainRssMiB": 211.5625,
+        "rendererWorkingSetMiB": [
+          152.3125
+        ]
+      },
+      "idleAfter": {
+        "mainRssMiB": 249.9375,
+        "rendererWorkingSetMiB": [
+          243.359375
+        ]
+      },
+      "idleAfterAt": 1793275968947,
+      "maxIntervalEventLoopP95Ms": 35.749887,
+      "maxEventLoopDelayMs": 88.735743,
+      "counters": {
+        "fsync": 8520,
+        "git": 337,
+        "children": 548,
+        "activeRunsCalls": 47,
+        "activeRunsJsonBytes": 21182323
+      },
+      "hookFsync": 480,
+      "hookGit": 0,
+      "activeRuns": {
+        "calls": 47,
+        "jsonBytes": 21182323,
+        "maxConcurrent": 5,
+        "handlerAndProbeMs": 67.3586669999886
+      },
+      "rendererMetrics": {
+        "TaskDuration": 3.609032,
+        "ScriptDuration": 1.213716,
+        "LayoutDuration": 0.062236,
+        "RecalcStyleDuration": 0.49446599999999996,
+        "LayoutCount": 86,
+        "RecalcStyleCount": 2210
+      },
+      "trace": {
+        "complete": true,
+        "Paint": {
+          "count": 20336,
+          "durationUs": 789236
+        },
+        "Layout": {
+          "count": 86,
+          "durationUs": 88307
+        }
+      },
+      "canonicalRecords": 5,
+      "archiveVerified": true,
+      "highLoad": false,
+      "harnessHash": "2c5b48ee6a38b30b46c495a8bc6bbae9ce01d2edd03ee5efc1a90922eabd09db",
+      "rawDirectory": "round-2-n5",
+      "rawSha256": "d17df384968abd515a915b788131ca0cea246eeda3dc74eda60eee5778f48fad",
+      "initialLoad": [
+        2.4609375,
+        2.94482421875,
+        3.06640625
+      ],
+      "finalLoad": [
+        2.6435546875,
+        2.9326171875,
+        3.0556640625
+      ]
+    },
+    {
+      "round": 3,
+      "count": 5,
+      "elapsedMs": 33105,
+      "resourceWindowMs": 33332,
+      "samples": 132,
+      "animatedTitles": 10,
+      "mainCpuMs": 5288.552000000001,
+      "rendererCpuMs": 5653.353999999999,
+      "gpuCpuMs": 5357.135,
+      "hookCpuMs": 31621.20000000001,
+      "hookCpuMsPerStart": 150.57714285714292,
+      "measuredCpuMs": 47920.24100000001,
+      "mainCpuOneCorePct": 15.866290651626066,
+      "peakMainRssMiB": 295.078125,
+      "peakRendererWorkingSetMiB": 311.375,
+      "peakHookRssMiB": 76.40625,
+      "idleBefore": {
+        "mainRssMiB": 212.40625,
+        "rendererWorkingSetMiB": [
+          151.84375
+        ]
+      },
+      "idleAfter": {
+        "mainRssMiB": 289.9375,
+        "rendererWorkingSetMiB": [
+          300.71875
+        ]
+      },
+      "idleAfterAt": 1793276077932,
+      "maxIntervalEventLoopP95Ms": 61.571071,
+      "maxEventLoopDelayMs": 123.404287,
+      "counters": {
+        "fsync": 8520,
+        "git": 327,
+        "children": 538,
+        "activeRunsCalls": 35,
+        "activeRunsJsonBytes": 20621580
+      },
+      "hookFsync": 480,
+      "hookGit": 0,
+      "activeRuns": {
+        "calls": 35,
+        "jsonBytes": 20621580,
+        "maxConcurrent": 5,
+        "handlerAndProbeMs": 59.89025300001049
+      },
+      "rendererMetrics": {
+        "TaskDuration": 3.53004,
+        "ScriptDuration": 1.41705,
+        "LayoutDuration": 0.063851,
+        "RecalcStyleDuration": 0.43377499999999997,
+        "LayoutCount": 91,
+        "RecalcStyleCount": 2149
+      },
+      "trace": {
+        "complete": true,
+        "Paint": {
+          "count": 19738,
+          "durationUs": 675431
+        },
+        "Layout": {
+          "count": 91,
+          "durationUs": 89478
+        }
+      },
+      "canonicalRecords": 5,
+      "archiveVerified": true,
+      "highLoad": false,
+      "harnessHash": "2c5b48ee6a38b30b46c495a8bc6bbae9ce01d2edd03ee5efc1a90922eabd09db",
+      "rawDirectory": "round-3-n5",
+      "rawSha256": "0515182131c60f0af09c4a027e7a5a85d5983bfb065e1edf02412cb11e4404b5",
+      "initialLoad": [
+        2.44482421875,
+        2.78515625,
+        2.98828125
+      ],
+      "finalLoad": [
+        3.53125,
+        3.02783203125,
+        3.068359375
+      ]
+    }
+  ]
+}

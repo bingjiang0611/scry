@@ -17,14 +17,18 @@ export function useAppDraftPersistence({
 }) {
   useEffect(() => {
     const storageError = '本地存储不可用，草稿未能保存；当前内容仍在本窗口中'
+    // The same owner serves the debounced save and the required pre-send flush; a
+    // failed write reports `false` so a submission can refuse instead of pretending.
     const persistence = persistComposerDraftStore(draftStore, (drafts) => {
       try {
         const saved = writeComposerDrafts(window.localStorage, drafts)
         setComposerError((current) => saved
           ? (current === storageError ? null : current)
           : (current ?? storageError))
+        return saved
       } catch {
         setComposerError((current) => current ?? storageError)
+        return false
       }
     })
     const flushWhenHidden = () => {

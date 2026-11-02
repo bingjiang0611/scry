@@ -187,6 +187,83 @@ export function registerSuite5(): void {
     expect(await readFile(openState, 'utf8')).toBe(before)
   }, 15_000)
 
+  it('Q01: Qoder deferred terminal snapshot excludes late actor edits and preserves the next turn boundary', async () => {
+    const root = await workspace()
+    const pluginConfig = join(root, 'plugin.config.json')
+    const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8')) as Record<string, any>
+    config.capture = { ...config.capture, diff: true }
+    await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
+    await writeFile(pluginConfig, 'baseline\n')
+    await pexecFile('git', ['init', '-q', '.'], { cwd: root })
+    await pexecFile('git', ['-c', 'user.email=a@b', '-c', 'user.name=a', 'add', '.'], { cwd: root })
+    await pexecFile('git', ['-c', 'user.email=a@b', '-c', 'user.name=a', 'commit', '-q', '-m', 'baseline'], { cwd: root })
+
+    // Qoder does not provide a native prompt id on this path. The successor start arms stale-terminal
+    // protection for the next unidentified Stop, so that Stop can wait for transcript convergence.
+    await handleRecorderHook({
+      provider: 'qoder',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: payload('q-deferred', { prompt: 'first qoder turn', timestamp: undefined })
+    })
+    await handleRecorderHook({
+      provider: 'qoder',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: payload('q-deferred', { prompt: 'successor qoder turn', timestamp: undefined })
+    })
+    await expect(handleRecorderHook({
+      provider: 'qoder',
+      event: 'Stop',
+      workspace: root,
+      payload: payload('q-deferred', { timestamp: undefined })
+    })).resolves.toMatchObject({ status: 'pending' })
+
+    const openState = join(root, '.scry', 'runtime', 'qoder', safeKey('q-deferred'), 'open.json')
+    const deferred = JSON.parse(await readFile(openState, 'utf8'))
+    expect(deferred).toMatchObject({ status: 'closing', deferredTerminalEventId: expect.any(String) })
+    expect(deferred.terminalDiffs).toEqual([expect.objectContaining({
+      repository: expect.any(String),
+      snapshot: expect.objectContaining({ status: 'captured', files: [] })
+    })])
+    await expect(recoverRecorder(root)).resolves.toMatchObject({ recovered: 0, pending: 1 })
+    const capturePaths = deferred.captures.map((item: { capture: { tempDir: string } }) => item.capture.tempDir)
+    expect(capturePaths.length).toBeGreaterThan(0)
+    for (const path of capturePaths) await expect(access(path)).resolves.toBeUndefined()
+
+    // This write happens after the Provider terminal boundary and must not be attributed to it.
+    await writeFile(pluginConfig, 'late actor edit\n')
+    await writeFile(openState, JSON.stringify({ ...deferred, deferredTerminalAt: '2000-01-01T00:00:00.000Z' }))
+    await expect(recoverRecorder(root)).resolves.toMatchObject({ recovered: 1, pending: 0 })
+    for (const path of capturePaths) await expect(access(path)).rejects.toMatchObject({ code: 'ENOENT' })
+
+    const afterDeferred = await listRecords(join(root, '.scry'))
+    const deferredRecord = afterDeferred.find((record) => record.user.value?.text === 'successor qoder turn')
+    expect(deferredRecord?.diff).toMatchObject({ status: 'available', value: [expect.objectContaining({ files: [] })] })
+
+    // The next turn captures the post-boundary state as its own baseline and reports only its edit.
+    await handleRecorderHook({
+      provider: 'qoder',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: payload('q-deferred', { prompt: 'next qoder turn', timestamp: undefined })
+    })
+    await writeFile(pluginConfig, 'late actor edit\nnext turn edit\n')
+    await handleRecorderHook({
+      provider: 'qoder',
+      event: 'Stop',
+      workspace: root,
+      payload: payload('q-deferred', { timestamp: new Date().toISOString() })
+    })
+
+    const records = await listRecords(join(root, '.scry'))
+    const nextRecord = records.find((record) => record.user.value?.text === 'next qoder turn')
+    const nextFile = nextRecord?.diff.value?.[0].files[0]
+    expect(nextRecord?.diff.status).toBe('available')
+    expect(nextFile).toMatchObject({ path: expect.stringContaining('plugin.config.json'), added: 1, deleted: 0 })
+    expect(nextFile?.patch).toContain('+next turn edit')
+  }, 35_000)
+
   it('transcript 仍在增长的长任务不被误判为过期', async () => {
     const root = await workspace()
     const transcript = join(root, 'transcript.jsonl')

@@ -6,10 +6,14 @@ import { pathToFileURL } from 'node:url'
 import type { ProviderAdapter } from './types'
 import { runtimeProviderForProviderId, type AgentSteerInput } from '../../shared/runtime'
 import { HistoricalInput } from './historical-input'
+import { smokeHistoryReaderFacet, smokeReaderRead } from './smoke-history-reader'
 import { handleRecorderHook } from '../../core/turn-recorder/recorder'
 
+/** Providers the packaged fixture can impersonate. Order is irrelevant; the gate is not. */
+export type SmokeFixtureProviderId = 'claude' | 'codex' | 'qoder' | 'opencode' | 'pi'
+
 /** Packaged smoke-only adapter. Enabled only by the explicit test process environment. */
-export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' | 'pi' = 'codex'): ProviderAdapter {
+export function createSmokeProviderAdapter(providerId: SmokeFixtureProviderId = 'codex'): ProviderAdapter {
   // Test-only entry receipts prove that a rejected production IPC never reached the
   // privileged adapter. This adapter itself requires the existing explicit smoke gate.
   const callsFile = process.env.SCRY_ELECTRON_SMOKE_CALLS
@@ -25,6 +29,7 @@ export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' | 'pi'
   } : undefined
   return {
     forkSession,
+    ...smokeHistoryReaderFacet,
     id: providerId,
     runtimeProvider: runtimeProviderForProviderId(providerId),
     historicalContext: true,
@@ -42,6 +47,7 @@ export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' | 'pi'
       recordCall('run', request.runId)
       const history = new HistoricalInput(request)
       const outgoingPrompt = history.text(request.prompt)
+      const readerRead = smokeReaderRead(request)
       const sessionId = request.resume ?? `smoke-session-${request.runId}`
       const inputsFile = process.env.SCRY_ELECTRON_SMOKE_INPUTS
       if (inputsFile) appendFileSync(inputsFile, `${JSON.stringify({ providerId, agentProfileId: request.agentProfileId, cwd: request.cwd, runId: request.runId, prompt: request.prompt,
@@ -54,13 +60,19 @@ export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' | 'pi'
       const questionAbort = new AbortController()
       const promise = Promise.resolve().then(async () => {
         const startedAt = Date.now()
+        // The retrieval runs before the provider claims acceptance of the input.
+        await readerRead
         if (!deferredNativeTurn) request.onExternalSessionId?.(sessionId)
         if (inputsFile) request.emit({ id: `${request.runId}:steer-capability`, runId: request.runId, ts: new Date().toISOString(),
           kind: 'harness', stage: 'runtime:steer_capability', steerCapability: { status: 'available', attachments: false } })
         if (request.trackInputReceipt) {
           history.attempting(outgoingPrompt)
+          // One native-acceptance source per Provider, all of them real receipt kinds: the
+          // fixture never claims acceptance for a Provider whose own evidence differs.
           if (providerId === 'codex' && request.prompt !== 'conversation unknown input') history.accepted(sessionId, 'codex_turn_start_response', `${request.runId}:provider-turn`)
           if (providerId === 'pi') history.accepted(sessionId, 'pi_persisted_session_entry', `${request.runId}:provider-turn`)
+          if (providerId === 'qoder') history.accepted(sessionId, 'qoder_transcript_user_uuid', `${request.runId}:provider-turn`)
+          if (providerId === 'opencode') history.accepted(sessionId, 'opencode_prompt_user_message', `${request.runId}:provider-turn`)
         }
         if (request.managedRecorder && request.cwd) {
           await handleRecorderHook({ provider: providerId, event: 'UserPromptSubmit', workspace: request.cwd, managed: true,
@@ -91,6 +103,21 @@ export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' | 'pi'
           if (!request.requestUserInput) throw new Error('Performance smoke requires requestUserInput')
           await request.requestUserInput({ runId: request.runId, questionId: `${request.runId}:performance`, providerId,
             questions: [{ header: 'Performance fixture', question: 'Keep this isolated run open?', options: [], multiSelect: false }]
+          }, questionAbort.signal)
+        }
+        if (request.prompt === 'concurrency trace live') {
+          // Offline trace-volume fixture: the whole seed burst is emitted synchronously, before any
+          // user interaction, so a run's event order never depends on timing.
+          if (!request.requestUserInput) throw new Error('Concurrency trace fixture requires requestUserInput')
+          for (let index = 1; index <= 1000; index++) {
+            const label = String(index).padStart(4, '0')
+            request.emit({ id: `${request.runId}:concurrency-trace:${label}`, runId: request.runId, ts: new Date().toISOString(),
+              kind: 'harness', stage: 'runtime:progress', text: `concurrency trace seed ${label}` })
+          }
+          request.emit({ id: `${request.runId}:concurrency-trace-ready`, runId: request.runId, ts: new Date().toISOString(),
+            kind: 'model', stage: 'text', text: 'concurrency trace ready' })
+          await request.requestUserInput({ runId: request.runId, questionId: `${request.runId}:concurrency-trace`, providerId,
+            questions: [{ header: 'Concurrency trace', question: 'Continue the concurrency trace fixture?', options: [], multiSelect: false }]
           }, questionAbort.signal)
         }
         if (request.prompt === 'dock badge question smoke') {
@@ -146,6 +173,51 @@ export function createSmokeProviderAdapter(providerId: 'claude' | 'codex' | 'pi'
           text: 'smoke fixture result Authorization: Bearer sk-ant-api03-scry-smoke-not-a-real-key-000000' +
             (request.prompt === 'packaged fake-provider smoke' ? `\n${'x'.repeat(12 * 1024 * 1024)}\nCOMPLETE_LARGE_TOOL_TAIL` : '')
         })
+        // Side-chat execution fixtures. Each one performs a real, safe filesystem or
+        // interaction action in the temporary workspace, so acceptance can prove what the
+        // child actually did instead of asserting that a fake reply appeared.
+        const sideChat = /^side chat ([a-z-]+)(?: (.*))?$/s.exec(request.prompt)
+        if (sideChat) {
+          const [, action, argument = ''] = sideChat
+          const token = (argument || 'evidence').replace(/[^A-Za-z0-9-]/g, '-').slice(0, 40)
+          const messageId = `${request.runId}:message`
+          if (action === 'write') {
+            if (!request.cwd) throw new Error('side chat write fixture requires a workspace')
+            const file = `side-chat-${token}.txt`
+            await writeFile(join(request.cwd, file), `${providerId} ${request.runId} ${token}\n`)
+            request.emit({ id: `${request.runId}:side-chat-write`, runId: request.runId, ts: new Date().toISOString(),
+              kind: 'tool', stage: 'tool_result', tool: 'Write', toolUseId: `${request.runId}:write`,
+              fileOp: 'write', filePath: file, text: `wrote ${file}` })
+            request.emit({ id: `${request.runId}:side-chat-text`, runId: request.runId, ts: new Date().toISOString(),
+              kind: 'model', stage: 'text_delta', messageId, text: `${providerId} wrote ${file}` })
+          } else if (action === 'ask') {
+            request.emit({ id: `${request.runId}:side-chat-text`, runId: request.runId, ts: new Date().toISOString(),
+              kind: 'model', stage: 'text_delta', messageId, text: `${providerId} needs approval for ${token}` })
+            if (!request.requestUserInput) throw new Error('Approval smoke requires requestUserInput')
+            await request.requestUserInput({
+              runId: request.runId, questionId: `${request.runId}:approval`, providerId, questionKind: 'permission',
+              questions: [{ header: 'Approval fixture', question: `Allow the isolated ${providerId} fixture to continue?`,
+                options: [{ label: 'Allow once', description: 'Finish the fixture run' }, { label: 'Deny', description: 'Stop here' }],
+                multiSelect: false }]
+            }, questionAbort.signal)
+            request.emit({ id: `${request.runId}:side-chat-approved`, runId: request.runId, ts: new Date().toISOString(),
+              kind: 'model', stage: 'text_delta', messageId, text: `${providerId} continued after approval` })
+          } else if (action === 'fill') {
+            // A tall assistant body, so an acceptance can scroll inside one page instead of
+            // only at its edges; the text is emitted like any other fixture reply.
+            const lines = Array.from({ length: 60 }, (_, line) => `${providerId} 正文第 ${line + 1} 行：回滚锚点需要真实的长正文。`)
+            request.emit({ id: `${request.runId}:side-chat-fill`, runId: request.runId, ts: new Date().toISOString(),
+              kind: 'model', stage: 'text_delta', messageId, text: lines.join('\n') })
+          } else if (action === 'hold') {
+            request.emit({ id: `${request.runId}:side-chat-text`, runId: request.runId, ts: new Date().toISOString(),
+              kind: 'model', stage: 'text_delta', messageId, text: `${providerId} holding ${token}` })
+            // A controlled hold waits for the real interrupt instead of a timing-dependent sleep.
+                  if (!stopped) await new Promise<void>(resolve => questionAbort.signal.addEventListener('abort', () => resolve(), { once: true }))
+          } else {
+            request.emit({ id: `${request.runId}:side-chat-text`, runId: request.runId, ts: new Date().toISOString(),
+              kind: 'model', stage: 'text_delta', messageId, text: `${providerId} side chat reply: ${argument}` })
+          }
+        }
         if (request.prompt === 'file links smoke') {
           if (!request.cwd) throw new Error('file-link fixture requires a workspace')
           const absolute = pathToFileURL(join(dirname(request.cwd), 'rotom-team/docs/NATIVE-DELIVERY.md')).href

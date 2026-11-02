@@ -53,7 +53,7 @@
 .mp-row-select { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--fg); cursor: pointer; text-align: left; padding: 13px 8px 13px 11px; }
 .mp-row-select strong { display: block; font-size: 13px; font-weight: 520; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
 .mp-row-select span { display: block; margin-top: 5px; color: var(--dim2); font-size: 12px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
-.mp-icon-button { flex-shrink: 0; display: inline-flex; justify-content: center; align-items: center; width: 32px; height: 32px; border: 0; border-radius: 7px; background: transparent; color: var(--dim2); cursor: pointer; }
+.mp-icon-button { flex-shrink: 0; display: inline-flex; justify-content: center; align-items: center; width: 32px; height: 32px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--dim2); cursor: pointer; }
 .mp-icon-button:hover { background: var(--surface-hover); color: var(--fg); }
 .mp-row .mp-icon-button { margin-right: 4px; }
 .mp-detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 28px 32px 24px; }
@@ -87,7 +87,8 @@
 .mp-delete-content { padding: 12px 26px; overflow-wrap: anywhere; }
 .mp-delete-content p { color: var(--dim); font-size: 13px; }
 .mp-delete-content .mp-form-error { color: var(--bad); }
-.mp-discard { border-top: 1px solid var(--border); padding-top: 18px; font-size: 13px; }
+/* Confirmation replaces the footer, outside the scrolling fields, so short windows keep both choices reachable. */
+.mp-discard { flex-shrink: 0; border-top: 1px solid var(--border); padding: 18px 26px 24px; font-size: 13px; }
 .mp-discard strong { font-weight: 550; }
 .mp-discard p { color: var(--dim2); margin: 7px 0 14px; }
 @media (max-width: 1050px) {

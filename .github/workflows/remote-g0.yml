@@ -67,6 +67,16 @@ jobs:
       - run: node experiments/remote-g0/enrollment-smoke.mjs
       - run: node experiments/remote-g0/pair-smoke.mjs
       - run: npm --prefix experiments/remote-g0 run smoke:g1
+
+  ios_g0:
+    needs: changes
+    if: ${{ needs.changes.outputs.required == 'true' }}
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
       - name: Compile native iOS app and tests (not a device gate)
         run: >-
           xcodebuild -project apps/ios/ScryRemoteG0.xcodeproj
@@ -74,6 +84,16 @@ jobs:
           -destination 'generic/platform=iOS Simulator'
           -derivedDataPath "$RUNNER_TEMP/scry-g0-ios"
           CODE_SIGNING_ALLOWED=NO build-for-testing
+
+  ios_ui:
+    needs: changes
+    if: ${{ needs.changes.outputs.required == 'true' }}
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
       - name: Compile ScryRemote product UI (design v2, unsigned)
         run: >-
           xcodebuild -project apps/ios/ScryRemote.xcodeproj
@@ -85,7 +105,7 @@ jobs:
   check:
     name: Remote Check
     if: ${{ always() }}
-    needs: [changes, transport]
+    needs: [changes, transport, ios_g0, ios_ui]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -96,6 +116,8 @@ jobs:
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
           echo "$RESULTS" | jq -e '
             .changes.result == "success" and (
-              (.changes.outputs.required == "true" and .transport.result == "success") or
-              (.changes.outputs.required == "false" and .transport.result == "skipped")
+              (.changes.outputs.required == "true" and
+                ([.transport.result, .ios_g0.result, .ios_ui.result] | all(. == "success"))) or
+              (.changes.outputs.required == "false" and
+                ([.transport.result, .ios_g0.result, .ios_ui.result] | all(. == "skipped")))
             )' > /dev/null

@@ -9,7 +9,7 @@ Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,�
 ## 安装与接入
 
 ```bash
-npm install -g scry-turn-recorder@0.2.52
+npm install -g scry-turn-recorder@0.2.56
 
 cd /path/to/project      # 必须是 Git 仓库根目录
 scry init                # 自动检测 claude / codex / qoder / opencode
@@ -205,12 +205,4 @@ scry doctor --workspace "$WORKSPACE"
 
 ## 证据口径
 
-- 无调用记为 `available + []`;Provider 未暴露的记为 `unavailable`,**不会伪装成 0**。
-- `普通工具` / `MCP` / `Skill` / `子 Agent` 四列互斥,总调用等于四列之和。
-- Hook 同时报告"处理器实例"与"生命周期事件";文件同时报告结构化证据与 Bash 推断读取,并保留 quality/coverage —— 分母不同不可直接相比。
-- Codex 顶层轮次会合并子 Agent rollout,但 token 与最终回复只取顶层权威值;子 rollout 缺失时相关字段降级 `partial`。Codex rollout 不含原生 Hook 事件,Hook 通常为 `unavailable`。
-- Pi 的 assistant/tool payload 与 OpenCode 的 assistant payload 超过字节上限时会发送版本化 `scry_capture` 元数据；record 的对应 evidence 段标为 `partial/exact`，不会把截断内容冒充完整证据。OpenCode 未观测到 usage 时不再写 exact zero；升级后需运行 `scry integrations repair --yes` 更新存量插件。
-- Codex 无服务端精确 latency,`response_intervals` 是观测区间,可能包含请求构造、调度、传输与重试。
-- `modelTiming.cumulativeMs` 累计并行子 Agent 时间,`occupiedMs` 是所有模型区间的并集(用于与整轮墙钟比较)。旧记录缺该字段时保持 `unavailable`。
-- `modelSegments` 与 `compactions` 在旧记录缺失时标 `unavailable`,不会误算成 0。
-- Recorder 只保证**新生成**记录使用当前口径,不会重写历史记录。
+详细的 evidence status、Provider 上限与 provenance 口径见[证据限制与口径](docs/evidence-limits.md)。

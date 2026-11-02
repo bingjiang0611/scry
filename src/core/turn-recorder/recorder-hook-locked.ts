@@ -11,6 +11,8 @@ import { END_EVENTS, SESSION_END_EVENTS, START_EVENTS, hookArrival, type Recorde
 import { beginOpenTurn, quarantineOpenTurn, storeLifecycleEvent } from './recorder-turn-state.js'
 import { finalizeOpenTurn } from './recorder-turn-finalize.js'
 import { isClaudeTaskNotification, isCommittedProviderTurn, isContinuationProviderTurn, rememberContinuationProviderTurn, storeOrphanEvent, continuationProviderTurnIds } from './recorder-hook-support.js'
+import { snapshotSessionNetDiff } from './git.js'
+import { terminalSnapshot } from './git-capture.js'
 
 export async function applyHookLocked(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
@@ -171,6 +173,7 @@ export async function applyHookLocked(
     delete open.closingAt
     delete open.deferredTerminalAt
     delete open.deferredTerminalEventId
+    delete open.terminalDiffs
     delete open.staleTerminalProtection
     await writeJsonAtomic(openPath(root), open, { sync: false })
   }
@@ -191,6 +194,22 @@ export async function applyHookLocked(
       open.terminalAt = terminalAt
       open.terminalAtSource = 'recorder_observed_terminal'
       open.endReason ??= 'provider_terminal'
+      // Freeze at the Provider boundary without consuming the baseline: a newer
+      // prompt can still cancel this deferred terminal. Keep runtime promise queues
+      // on the temporary view, not in the JSON-persisted capture.
+      open.terminalDiffs = await Promise.all(open.captures.map(async ({ repository, capture }) => {
+        const started = Date.now()
+        try {
+          const snapshot = await snapshotSessionNetDiff({ ...capture, opChain: undefined, finishPromise: undefined }, undefined, {
+            patchExcludeBasenames: enablement.config.capture.patchExcludeBasenames,
+            completePatches: true
+          })
+          return { repository, snapshot }
+        } catch {
+          // A failed boundary capture cannot be replaced by a later worktree view.
+          return { repository, snapshot: terminalSnapshot(capture, 'unavailable', 'git_error', [], terminalAt, Date.now() - started, 'failed') }
+        }
+      }))
       open.deferredTerminalAt = new Date().toISOString()
       open.deferredTerminalEventId = eventId
       await writeJsonAtomic(openPath(root), open)

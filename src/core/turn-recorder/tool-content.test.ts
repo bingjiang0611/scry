@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { parseMcp, type TraceEvent } from '../../shared/trace.js'
-import { isToolContent } from '../../shared/tool-content.js'
+import { isToolContent, type ToolContentRef } from '../../shared/tool-content.js'
 import { aggregateTurnEvidence } from './aggregate.js'
-import { captureToolContent, modelEventBodies, persistModelEventContent, sanitizeToolEvents } from './tool-content.js'
+import { captureToolContent, limitToolContent, modelEventBodies, persistModelEventContent, sanitizeToolEvents } from './tool-content.js'
 
 const policy = { toolOutput: 'full' as const }
 function events(output?: string, input: unknown = { command: 'echo hello' }): TraceEvent[] {
@@ -105,6 +105,29 @@ describe('full raw tool content', () => {
     })
     const bounded = sanitizeToolEvents(raw, { toolOutput: 'full', toolContentFieldBytes: 8 * 1024, toolContentTurnBytes: 8 * 1024 }, 'fixture')
     expect(bounded.at(-1)!.outputContent).toMatchObject({ contentRef, storage: 'omitted', reasons: expect.arrayContaining(['turn_budget']) })
+  })
+
+  it.each([
+    { value: '中😀文', encoding: 'utf8' },
+    { value: { text: '中😀文' }, encoding: 'json-fragment' }
+  ])('omits $encoding at zero budget without encoding a discarded body', ({ value, encoding }) => {
+    const captured = captureToolContent(value, { source: 'fixture', maxBytes: null,
+      sourceCompleteness: 'partial', reasons: ['source_truncated'] })
+    const contentRef: ToolContentRef = { storage: 'recorder-content-v1', sha256: 'a'.repeat(64),
+      bytes: captured.savedBytes, encoding: captured.encoding === 'json' ? 'json' : 'utf8' }
+    const field = { ...captured, contentRef }
+    const { content: original, ...metadata } = field
+    const bufferFrom = vi.spyOn(Buffer, 'from')
+    try {
+      const limited = limitToolContent(field, 0, 'turn_budget')
+      const allocations = bufferFrom.mock.calls.length
+      expect(limited).toStrictEqual({ ...metadata, savedBytes: 0, encoding, storage: 'omitted',
+        reasons: ['source_truncated', 'turn_budget'] })
+      expect(field.content).toBe(original)
+      expect(allocations).toBe(0)
+    } finally {
+      bufferFrom.mockRestore()
+    }
   })
 
   it('cuts UTF-8 safely and labels JSON fragments', () => {

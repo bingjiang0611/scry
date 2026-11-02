@@ -36,11 +36,14 @@ function transcriptSnapshotCacheKey(args: {
   provider: ProviderId
   promptHash?: string
   providerTurnId?: string
+  requestSetId?: string
+  sessionId?: string
+  cwd?: string
   identity: TranscriptSnapshotIdentity
 }): string {
   return JSON.stringify([
     args.path, args.startOffset ?? 0, args.stable, args.runId, args.provider,
-    args.promptHash ?? '', args.providerTurnId ?? '', args.identity.dev, args.identity.ino,
+    args.promptHash ?? '', args.providerTurnId ?? '', args.requestSetId ?? '', args.sessionId ?? '', args.cwd ?? '', args.identity.dev, args.identity.ino,
     args.identity.size, args.identity.mtimeMs, args.identity.ctimeMs
   ])
 }
@@ -95,7 +98,10 @@ function transcriptLineAnchor(
       .some((candidate) => createHash('sha256').update(candidate).digest('hex') === promptHash)
     return matchesHash || !promptHash && !providerTurnId ? 'user' : undefined
   }
-  if (row.type !== 'user') return undefined
+  if (row.type !== 'user' || row.parent_tool_use_id != null || row.isSidechain === true ||
+      row.isMeta === true || row.isSynthetic === true || row.isReplay === true || row.forkedFrom) return undefined
+  const content = nestedRecord(row, 'message')?.content
+  if (Array.isArray(content) && content.some(block => block && typeof block === 'object' && block.type === 'tool_result')) return undefined
   const id = stringAt(row, 'promptId', 'prompt_id', 'turnId', 'turn_id')
   if (providerTurnId && id === providerTurnId) return 'turn'
   const text = textContent((row.message as Record<string, unknown> | undefined)?.content) ?? ''
@@ -181,6 +187,9 @@ async function cachedTranscriptSnapshot(args: {
   provider: ProviderId
   promptHash?: string
   providerTurnId?: string
+  requestSetId?: string
+  sessionId?: string
+  cwd?: string
   identity: TranscriptSnapshotIdentity
 }): Promise<TranscriptRead> {
   const key = transcriptSnapshotCacheKey(args)
@@ -195,7 +204,10 @@ async function cachedTranscriptSnapshot(args: {
   const read = await parseTranscriptSnapshot({ ...args, endOffset: args.identity.size })
   // A read that raced truncation/rotation must be retried; caching it under the stable identity
   // would otherwise keep a recoverable turn pending for the lifetime of this process.
-  if (!args.stable || read.stable) transcriptSnapshotCache.set(key, { key, read })
+  // Agent sidecars have identities independent of the root log. Do not cache a
+  // cross-file projection under only the root's identity (including missing children).
+  const hasChildSources = read.events.some(event => event.kind === 'agent' || event.runtimeMetadata?.childTranscript !== undefined)
+  if ((!args.stable || read.stable) && !hasChildSources) transcriptSnapshotCache.set(key, { key, read })
   while (transcriptSnapshotCache.size > TRANSCRIPT_SNAPSHOT_CACHE_LIMIT) {
     const oldest = transcriptSnapshotCache.keys().next().value
     if (typeof oldest !== 'string') break
@@ -210,7 +222,10 @@ export async function stableTranscript(
   provider: ProviderId,
   promptHash?: string,
   providerTurnId?: string,
-  startOffset?: number
+  startOffset?: number,
+  requestSetId?: string,
+  sessionId?: string,
+  cwd?: string
 ): Promise<TranscriptRead> {
   path = await readableTranscriptPath(path, provider)
   // Recompute an exact JSONL turn anchor. Older persisted offsets were heuristic
@@ -250,7 +265,7 @@ export async function stableTranscript(
     latestIdentity = identity
     if (identity.size === previous) {
       startOffset = await transcriptAnchorOffset(path, identity.size, provider, promptHash, providerTurnId)
-      return cachedTranscriptSnapshot({ path, startOffset, stable: true, runId, provider, promptHash, providerTurnId, identity })
+      return cachedTranscriptSnapshot({ path, startOffset, stable: true, runId, provider, promptHash, providerTurnId, requestSetId, sessionId, cwd, identity })
     }
     previous = identity.size
     await new Promise((resolve) => setTimeout(resolve, 25))
@@ -265,6 +280,9 @@ export async function stableTranscript(
         provider,
         promptHash,
         providerTurnId,
+        requestSetId,
+        sessionId,
+        cwd,
         identity: latestIdentity
       })
     : parseTranscriptSnapshot({
@@ -275,6 +293,9 @@ export async function stableTranscript(
         runId,
         provider,
         promptHash,
-        providerTurnId
+        providerTurnId,
+        requestSetId,
+        sessionId,
+        cwd
       })
 }

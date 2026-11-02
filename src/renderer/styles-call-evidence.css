@@ -46,7 +46,7 @@ button.turn-id.turn-call-open {
   min-height: 28px;
   justify-content: center;
   padding: 0 4px;
-  border-radius: 5px;
+  border-radius: var(--r-xs);
   font: 9.5px/1 var(--font-mono);
 }
 button.turn-call-open:focus-visible {
@@ -86,7 +86,7 @@ button.turn-call-open:focus-visible {
   max-width: 100%;
   padding: 2px 5px 2px 2px;
   border: 1px solid var(--border3);
-  border-radius: 6px;
+  border-radius: var(--r-xs);
   background: var(--surface-subtle);
   font: 10.5px/1.35 var(--font-mono);
 }
@@ -148,7 +148,7 @@ button.turn-call-group:focus-visible {
 .turn-call-kind {
   flex: 0 0 auto;
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   color: var(--fg);
   background: var(--panel3);
 }
@@ -172,7 +172,7 @@ button.turn-call-group:focus-visible {
   min-width: 0;
   padding: 7px 9px;
   border: 1px solid var(--border3);
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: var(--surface-inset);
 }
 .turn-call-detail.mcp {
@@ -187,7 +187,7 @@ button.turn-call-group:focus-visible {
   gap: 7px;
   padding: 8px 9px;
   border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border3));
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: var(--surface-inset);
 }
 .turn-intervention-head,
@@ -233,7 +233,7 @@ button.turn-call-group:focus-visible {
   min-width: 0;
   padding: 8px;
   border: 1px solid var(--border3);
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   background: var(--surface-subtle);
 }
 .intervention-summary-grid span {
@@ -293,7 +293,7 @@ button.turn-call-group:focus-visible {
   min-width: 0;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--bad) 34%, var(--border3));
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--bad) 7%, var(--surface-inset));
 }
 .turn-tool-error > summary {
@@ -368,7 +368,7 @@ button.turn-call-group:focus-visible {
 .turn-tool-error-evidence-head button {
   padding: 4px 7px;
   border: 1px solid var(--border3);
-  border-radius: 5px;
+  border-radius: var(--r-xs);
   background: var(--surface-subtle);
   color: var(--dim2);
   font: 10px/1.2 var(--font-mono);
@@ -399,7 +399,7 @@ button.turn-call-group:focus-visible {
   overflow: auto;
   padding: 7px 8px;
   border: 1px solid var(--border3);
-  border-radius: 5px;
+  border-radius: var(--r-xs);
   background: var(--surface-inset);
   color: var(--dim);
   font: 10.5px/1.5 var(--font-mono);
@@ -414,7 +414,7 @@ button.turn-call-group:focus-visible {
   min-width: 0;
   overflow: hidden;
   border: 1px solid rgba(91, 182, 255, 0.16);
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: var(--surface-inset);
 }
 .turn-file-heading {
@@ -472,7 +472,7 @@ button.turn-call-group:focus-visible {
   gap: 10px;
   padding: 10px;
   border: 1px solid rgba(123, 171, 255, 0.18);
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: var(--surface-inset);
   cursor: default;
 }
@@ -506,7 +506,7 @@ button.turn-call-group:focus-visible {
   gap: 2px 6px;
   padding: 6px 7px;
   border: 1px solid var(--border3);
-  border-radius: 6px;
+  border-radius: var(--r-xs);
   background: var(--surface-faint);
   font: var(--text-compact-size)/1.25 var(--font-mono);
 }

@@ -190,6 +190,7 @@ export async function listenRecorderDaemon(args: {
   let idleTimer: NodeJS.Timeout | undefined
   let cancelRecoveryTimer: (() => void) | undefined
   let recoveryInFlight: Promise<{ recovered: number; pending: number }> | undefined
+  const deliveryInFlight = new Set<Promise<void>>()
   const recoveryPollMs = Math.max(1, Math.floor(args.recoveryPollMs ?? RECOVERY_POLL_MS))
   const maxRecoveryPollMs = Math.max(recoveryPollMs, Math.floor(args.maxRecoveryPollMs ?? MAX_RECOVERY_POLL_MS))
   let recoveryDelayMs = recoveryPollMs
@@ -341,7 +342,9 @@ export async function listenRecorderDaemon(args: {
       writeJson(response, 200, { ok: true, status: result.status })
       // The daemon outlives this response, so delivery runs after it instead of inside the
       // Provider's hook budget. A crash before it lands is covered by at-least-once redelivery.
-      void drainRecorderDelivery(enablement.workspaceRoot, env).catch(() => undefined)
+      const delivery = drainRecorderDelivery(enablement.workspaceRoot, env).catch(() => undefined)
+      deliveryInFlight.add(delivery)
+      void delivery.finally(() => { deliveryInFlight.delete(delivery) })
     } catch (error) {
       errorCount++
       const statusCode = typeof (error as { statusCode?: unknown }).statusCode === 'number' ? (error as { statusCode: number }).statusCode : 500
@@ -365,6 +368,8 @@ export async function listenRecorderDaemon(args: {
       server.close(() => resolvePromise())
     }).then(async () => {
       await recoveryInFlight
+      // HTTP responses can finish before delivery; shutdown must not release a workspace still in use.
+      await Promise.all(deliveryInFlight)
     }).finally(async () => {
       await rm(socketPath, { force: true }).catch(() => undefined)
       await removeOwnedMarker(markerPath, instanceId).catch(() => undefined)

@@ -1,0 +1,433 @@
+{
+  "schema": 1,
+  "source": {
+    "commit": "7e5580f7070f2a54eaa5eb055fcc9acd50345e9f",
+    "tree": "2f2c98ef4a0fd5a7b58c185d81927aa576c89248",
+    "branch": "scry/998b6254",
+    "mainBaseline": "e5b8ebd2be736542d26a758dfcef0e0d985fdf2f",
+    "buildId": "29b3eae5dde56188580d2307bf109fce245b8855a37fb58085d0e4b16b09ce44",
+    "productionCommits": [
+      "7286555e",
+      "c90c0152",
+      "111f0bf7",
+      "7e5580f7"
+    ],
+    "measurementOrFixtureCommits": [
+      "bc4029c1",
+      "da107796",
+      "522b1701"
+    ]
+  },
+  "artifact": {
+    "appVersion": "0.2.236",
+    "cliVersion": "0.2.55",
+    "bundleBytes": 299282320,
+    "maxBundleBytes": 346030080,
+    "asarSha256": "5c9dae87ba127f4c56293b432450ac0ad41290d9c946a460aaf07a5f354d3fdb",
+    "mainSha256": "2e1bf9607fb0058300d624c731d4476b605b7332ba6aa2eecadee0200d42a429",
+    "bundleManifestSha256": "3ba17cb5dc7224db1e3f82627c2f9fd701a3bce8aba21612324d51317a535871",
+    "bundleEntries": 514,
+    "cliDistSha256": "72c25f026bfaa254a0733f782d69e8cc8034cb820e9c240a4e5b3a25e63be356",
+    "cliDistHashDefinition": "sha256(JSON.stringify(sorted recursive directory manifest: path,type,mode,bytes,sha256))",
+    "css": [
+      {
+        "entry": "/out/renderer/assets/TerminalSurface-GVL3fBIr.css",
+        "bytes": 7112,
+        "sha256": "854a7c0fb70e8b1a083c16797ab827299fb18744f5ad34f227b48337e33293c6"
+      },
+      {
+        "entry": "/out/renderer/assets/index-B_VDw92z.css",
+        "bytes": 494139,
+        "sha256": "26ab5646a02a74026e8fcd0af2f53614d5b0d3ba3dbf5ba9891324cee7cf8ada"
+      }
+    ],
+    "cssByteIdenticalToFrozenBaseline": true,
+    "codeSignature": {
+      "sourceExit": 0,
+      "zipRoundtripExit": 0,
+      "mode": "development; not a notarization claim"
+    },
+    "zip": {
+      "fileName": "Scry-0.2.236-arm64-dev-7e5580f7.zip",
+      "bytes": 122374399,
+      "sha256": "0d4da49a54d2bb654b90b04be861dbcfa1435d2d2bbe69af416871b6fc55fabe",
+      "location": "user Downloads; not installed"
+    },
+    "roundtrip": {
+      "allFileBytesModesAndSymlinkTargetsEqual": true,
+      "localMainEqual": true,
+      "completeLocalCliDistEqual": true
+    },
+    "remoteProductionMainEqual": true,
+    "completeRemoteCliDistEqual": true
+  },
+  "evidence": {
+    "archiveFile": "step45-demand-evidence.tgz",
+    "remoteRoot": "/private/tmp/scry-delivery236.2ki5qt",
+    "localRoot": "/tmp/scry-step45-final-evidence.saCwSB",
+    "sha256": "d0f34db2b80f7c2a30844739839a332f9fbb66c103f77aa0a9fd3ba59b4b37c6",
+    "localRemoteDigestMatched": true,
+    "roundtripVerifier": "scry-step45-verify-archived.mjs (included in raw archive)",
+    "roundtripVerifierSha256": "89f90c989e809012c3134e78d34c2a2d231428b47d33aca96215d64d916202aa",
+    "proof": {
+      "cases": 12,
+      "records": 36,
+      "physicalFiles": 720,
+      "footprints": 720,
+      "tools": 720,
+      "orderedDeltas": 14400,
+      "toolAuthorityCopies": 2880,
+      "archiveTurns": 36,
+      "patchReferences": 2160
+    },
+    "readProfile": {
+      "result": "/private/var/folders/gq/gr5v20ss57550_3x_vbk9tpw0000gn/T/scry-concurrent-n5-bgdKOt/result.json",
+      "attemptedContentReads": 810,
+      "enoent": 605,
+      "successful": 205,
+      "uniqueSuccessfulPaths": 205,
+      "truncated": false
+    },
+    "all12OriginalMainPidsAbsent": true,
+    "frozenArtifactScope": "App235/CLI54 timings, not final236 timing claims",
+    "frozen": [
+      {
+        "variant": "baseline",
+        "mainSha256": "379828cf09a599f340ed351a73d381a4dc9b21d71eaf0cc7e5516637dbe9ce0c",
+        "cliDistSha256": "7481926b87fd89aa3d3682455b503638bb5ac31b3a3be16fa6766348ef7fc6f8",
+        "css": [
+          {
+            "name": "TerminalSurface-GVL3fBIr.css",
+            "bytes": 7112,
+            "sha256": "854a7c0fb70e8b1a083c16797ab827299fb18744f5ad34f227b48337e33293c6"
+          },
+          {
+            "name": "index-B_VDw92z.css",
+            "bytes": 494139,
+            "sha256": "26ab5646a02a74026e8fcd0af2f53614d5b0d3ba3dbf5ba9891324cee7cf8ada"
+          }
+        ],
+        "cliDistHashDefinition": "sha256(JSON.stringify(sorted [{path,sha256}] of all files))"
+      },
+      {
+        "variant": "demand-only",
+        "mainSha256": "dc55af3a8802b465af4163ebabb795e578bbb00ab8842fdc55693b1acf816a3e",
+        "cliDistSha256": null,
+        "css": [
+          {
+            "name": "TerminalSurface-GVL3fBIr.css",
+            "bytes": 7112,
+            "sha256": "854a7c0fb70e8b1a083c16797ab827299fb18744f5ad34f227b48337e33293c6"
+          },
+          {
+            "name": "index-B_VDw92z.css",
+            "bytes": 494139,
+            "sha256": "26ab5646a02a74026e8fcd0af2f53614d5b0d3ba3dbf5ba9891324cee7cf8ada"
+          }
+        ],
+        "cliDistHashDefinition": null,
+        "cliDistAvailability": "not separately frozen"
+      },
+      {
+        "variant": "combined",
+        "mainSha256": "57c430d871ba8555fda7c1816f9c3912805276721b7d99adaced27186de67619",
+        "cliDistSha256": "f992b53701961d0182850f0b5de63285730a4953bb15c1767c8c50b3fcb24f38",
+        "css": [
+          {
+            "name": "TerminalSurface-GVL3fBIr.css",
+            "bytes": 7112,
+            "sha256": "854a7c0fb70e8b1a083c16797ab827299fb18744f5ad34f227b48337e33293c6"
+          },
+          {
+            "name": "index-B_VDw92z.css",
+            "bytes": 494139,
+            "sha256": "26ab5646a02a74026e8fcd0af2f53614d5b0d3ba3dbf5ba9891324cee7cf8ada"
+          }
+        ],
+        "cliDistHashDefinition": "sha256(JSON.stringify(sorted [{path,sha256}] of all files))"
+      }
+    ],
+    "harnessHashes": [
+      "4a671c50b27dc35347a879791b7f5d02b2ff4f3013b7b5058ff4e8be4c45deb4"
+    ],
+    "lockfileHashes": [
+      "7344bd011ab76c2d7c8dab7ba79164a7c6849bed484dec143bf859bf3be9fe19"
+    ],
+    "caseArtifactHashes": {
+      "baseline": [
+        "1e8a3a17dcac76923bc23789584ce1f48b77c81856018cd99f391f082a942ed4"
+      ],
+      "combined": [
+        "0870bbd1bfe14ce5074f5915941e10f68a564761f74d80be9bdbb2950d8b64c7"
+      ]
+    },
+    "defaultNativeSamples": 12,
+    "defaultNativeTurns": 36,
+    "samplesPerVariantAndConcurrency": 2,
+    "order": "ABBA at each N=1/3/5",
+    "defaultNativeHighLoadCases": 0,
+    "sharedWorkspaceNative": false,
+    "canonicalContentionCommits": 108,
+    "canonicalContentionScope": "same-process same-workspace real filesystem; 6 groups/variant/N; all highLoad=false",
+    "functionalFinalSource": [
+      {
+        "log": "final-switch-demand.log",
+        "runId": "8e12d926-e1e0-4a5e-ae04-e8355ff50157",
+        "mode": "switch",
+        "firstAfterAt": "2026-10-30T16:28:59.431Z",
+        "hiddenAfterAt": "2026-10-30T16:28:59.431Z",
+        "returnedAfterAt": "2026-10-30T16:29:12.424Z",
+        "firstFiles": 1,
+        "returnedFiles": 14,
+        "renderedDiffFiles": "14 files",
+        "hiddenRunStillWorking": true,
+        "staleTimeNotRewritten": true,
+        "freshBeforeTerminal": true,
+        "evidence": "Production App, native trusted-hit switching and real Git; diagnostic activeRuns reads; not an end-to-end latency benchmark"
+      },
+      {
+        "log": "maximized-overview-positive.log",
+        "runId": "bb8d921e-e2f1-45bb-b906-dc4ebdbb7760",
+        "mode": "maximized-overview",
+        "firstAfterAt": "2026-10-30T15:28:13.563Z",
+        "visibleAfterAt": "2026-10-30T15:28:22.674Z",
+        "visibleFiles": 10,
+        "renderedNewFile": "fixture-bb8d921e-e2f1-45bb-b906-dc4ebdbb7760-1.txt",
+        "visibleOverviewKeptFresh": true,
+        "freshBeforeTerminal": true,
+        "evidence": "Production App, native trusted-hit switching and real Git; diagnostic activeRuns reads; not an end-to-end latency benchmark"
+      },
+      {
+        "log": "narrow-files-positive.log",
+        "runId": "7ac32e60-70f2-4f03-8c9e-cb607d87e890",
+        "mode": "narrow-files",
+        "firstAfterAt": "2026-10-30T15:27:38.723Z",
+        "hiddenAfterAt": "2026-10-30T15:27:38.723Z",
+        "returnedAfterAt": "2026-10-30T15:27:51.733Z",
+        "firstFiles": 1,
+        "returnedFiles": 14,
+        "renderedDiffFiles": "14 files",
+        "hiddenRunStillWorking": true,
+        "staleTimeNotRewritten": true,
+        "freshBeforeTerminal": true,
+        "evidence": "Production App, native trusted-hit switching and real Git; diagnostic activeRuns reads; not an end-to-end latency benchmark"
+      }
+    ],
+    "functionalNotATimingComparison": true,
+    "desktopViewportNotPhysicalOsWindow": true,
+    "functionalOriginalMainPidsAbsent": 3
+  },
+  "gates": [
+    {
+      "command": "npm run typecheck; focused demand/surface unit",
+      "status": "passed",
+      "scope": "final consumer code; 4 files/31 tests",
+      "log": "local scry-step45-consumer-demand-*"
+    },
+    {
+      "command": "npm run test:unit -- --maxWorkers=1",
+      "status": "passed",
+      "node": "22.22.1",
+      "filesPassed": 511,
+      "filesSkipped": 4,
+      "testsPassed": 5118,
+      "testsSkipped": 4,
+      "durationSeconds": 1037.84,
+      "log": "final-consumer-unit.log",
+      "skips": [
+        "performance-correlation opt-in",
+        "billing-admin-real opt-in",
+        "p0-integration opt-in",
+        "p1-integration opt-in"
+      ]
+    },
+    {
+      "command": "npm run test:shell",
+      "status": "passed",
+      "log": "shell.log",
+      "scope": "shell/CLI source unchanged by final UI-only consumer correction"
+    },
+    {
+      "command": "npm run check:cli-release",
+      "status": "passed",
+      "files": 61,
+      "tests": 813,
+      "log": "cli55-release.log",
+      "scope": "CLI55; Core/CLI unchanged by final UI-only correction"
+    },
+    {
+      "command": "npm run test:unit -- src/core/turn-recorder src/cli",
+      "status": "passed",
+      "node": "20.20.2",
+      "files": 53,
+      "tests": 628,
+      "log": "node20-core.log",
+      "scope": "Core/CLI only, not whole-repo Node20"
+    },
+    {
+      "command": "npm run smoke:cli-package",
+      "status": "passed",
+      "nodes": [
+        "20.20.2",
+        "24.18.0"
+      ],
+      "logs": [
+        "node20-smoke.log",
+        "node24-smoke.log"
+      ]
+    },
+    {
+      "command": "npm run test:renderer:ui",
+      "status": "passed-on-original-script-replay",
+      "log": "final-consumer-ui-replay.log",
+      "firstFailureRetained": true
+    },
+    {
+      "command": "timing-run.mjs final236-consumer-ratchet -- npm run performance:measure",
+      "status": "passed",
+      "log": "final-consumer-performance.log",
+      "observations": 135,
+      "rows": 141,
+      "highLoad": false,
+      "loadBefore": 5.15,
+      "loadAfter": 3.83,
+      "cores": 8,
+      "worse": [
+        {
+          "key": "source-control.workspace-choices-current-run/git.run.calls",
+          "layer": "main",
+          "unit": "count",
+          "status": "candidate",
+          "ceiling": null,
+          "tolerance": 0,
+          "value": 10,
+          "min": 10,
+          "runs": 5,
+          "spread": 0,
+          "result": "worse",
+          "baseline": 9,
+          "gateFailed": false
+        },
+        {
+          "key": "files.fixed-operations/io.readdir",
+          "layer": "io",
+          "unit": "count",
+          "status": "candidate",
+          "ceiling": null,
+          "tolerance": 0,
+          "value": 20,
+          "min": 20,
+          "runs": 5,
+          "spread": 0,
+          "result": "worse",
+          "baseline": 18,
+          "gateFailed": false
+        },
+        {
+          "key": "persistence.archive/ipc.bytes",
+          "layer": "ipc",
+          "unit": "bytes",
+          "status": "candidate",
+          "ceiling": null,
+          "tolerance": 0,
+          "value": 10558,
+          "min": 10558,
+          "runs": 5,
+          "spread": 0,
+          "result": "worse",
+          "baseline": 10536,
+          "gateFailed": false
+        },
+        {
+          "key": "recorder.content-cold/io.stat.calls",
+          "layer": "io",
+          "unit": "count",
+          "status": "candidate",
+          "ceiling": null,
+          "tolerance": 0,
+          "value": 44,
+          "min": 44,
+          "runs": 5,
+          "spread": 0,
+          "result": "worse",
+          "baseline": 36,
+          "gateFailed": false
+        }
+      ],
+      "explanation": "Four pre-existing non-gate worse values equal the prior mainline control; no limits or ledger changed"
+    },
+    {
+      "command": "npm run pack:artifact; ZIP full-manifest roundtrip",
+      "status": "passed",
+      "log": "local scry-step45-pack236-consumer.log",
+      "packageScope": "local development App236/CLI55"
+    }
+  ],
+  "preservedFailures": [
+    {
+      "log": "node22-full-unit.log",
+      "failure": "unchanged workspace-choices test timed out under default two workers",
+      "followup": "unchanged file 7/7 focused; later full serial 5117 and final full serial 5118 passed; no timeout/assertion/skip changes"
+    },
+    {
+      "log": "full-ui.log",
+      "failure": "old session-cache and related fixtures missing new typed legacy demand bridge",
+      "followup": "da107796 adds the method to 7 fixtures; production bridge already existed; focused and full UI passed"
+    },
+    {
+      "log": "final-consumer-ui.log",
+      "failure": "Surface menu trigger focus not restored; composer textarea active",
+      "followup": "Inspected unchanged focus paths; current and pre-consumer App shell with temporary focus diagnostics passed; restored original source and scripts before full UI replay passed",
+      "attribution": "unknown; diagnostics may change timing; not claimed fixed or unrelated",
+      "nextOwnerAction": "Maintainer may authorize a separate focus-order reproduction; no focus production change in this task"
+    },
+    {
+      "log": "final-consumer.exit",
+      "exit": 1,
+      "scope": "original composite stopped at UI focus failure; preserved unchanged; later individual original-UI and performance receipts are 0"
+    },
+    {
+      "scope": "exploratory acceptance setup",
+      "failures": [
+        "N=2 unsupported by fixture",
+        "Runtime.evaluate top-level await syntax",
+        "Overview incorrectly chosen as a no-consumer narrow target",
+        "shell scalar splitting caused timing-run usage exit 2 before Native dispatch"
+      ],
+      "acceptedNativeSample": false
+    }
+  ],
+  "boundaries": {
+    "remoteDemand": "no protocol; preserve original collection",
+    "cache": "not added; no repeated successful content paths in measured read profile",
+    "queue": "per absolute lock path and process; each operation still acquires native filesystem lock; not cross-process fairness",
+    "visuals": "animation implementation and CSS unchanged; no static substitute, FPS reduction or foreground full-frame pixel-equivalence claim",
+    "latency": "Native N5 total mean 27302.5 -> 27532 ms; no overall-speed or memory-improvement claim",
+    "fullCoverage": "not established as passing",
+    "realProvider": "not run",
+    "physicalPhone": "not run",
+    "osFocusOrMinimize": "not verified",
+    "dailyL3": "not run"
+  },
+  "finalState": {
+    "installed": false,
+    "reason": "User explicitly selected package only after observing the target had changed to App227",
+    "observedInstalledBeforePack": {
+      "version": "0.2.227",
+      "asarSha256": "5147deeacba58052dcaf99259527ea9ebb0e1464fc296960bce5e48bd522d146"
+    },
+    "observedInstalledAtFinalCheck": {
+      "version": "0.2.235",
+      "asarSha256": "74fcedb9d983c47adf25d81904091644be82dd3fe1e6c4d605d93ea5ad439815",
+      "asarModifiedAt": "2026-10-30T17:01:06.084Z",
+      "localPackLogCompletedAt": "2026-10-30T15:38:05.412Z",
+      "changedSinceBeforePack": true,
+      "attribution": "unknown; this task did not invoke the installer and did not install its App236 artifact"
+    },
+    "dailyProcessRestarted": false,
+    "dailyLoadedVersion": "unknown",
+    "pushed": false,
+    "merged": false,
+    "npmPublished": false
+  }
+}
