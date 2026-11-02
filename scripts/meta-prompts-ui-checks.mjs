@@ -25,7 +25,14 @@ export async function exerciseMetaPrompts(contents, win, clipboard, screenshotPr
       if (!node) throw new Error('Missing control: ' + ${JSON.stringify(selector)});
       const r = node.getBoundingClientRect();
       const x = Math.round(r.x + r.width / 2), y = Math.round(r.y + r.height / 2);
-      if (!node.contains(document.elementFromPoint(x, y))) throw new Error('Control is obscured: ' + ${JSON.stringify(selector)});
+      const hit = document.elementFromPoint(x, y);
+      // Failure-only evidence: what was hit, where the control was and the viewport, so an
+      // obscured control can be told apart from one clipped below a scroll container.
+      if (!node.contains(hit)) throw new Error('Control is obscured: ' + ${JSON.stringify(selector)} + ' ' + JSON.stringify({
+        rect: r.toJSON(), point: { x, y }, viewport: [innerWidth, innerHeight], screen: [screen.width, screen.height, screen.availHeight],
+        hit: hit?.outerHTML.slice(0, 300) ?? null,
+        scrollers: [...document.querySelectorAll('.mp-editor-fields, .modal, .modal-overlay')].map(el => ({ cls: el.className, rect: el.getBoundingClientRect().toJSON(), scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight }))
+      }));
       return { x, y };
     })()`)
     contents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
