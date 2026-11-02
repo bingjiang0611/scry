@@ -56,7 +56,7 @@
 
 | 文件 | 行为 | 门禁身份 |
 | --- | --- | --- |
-| `ci.yml` | Node/typecheck、`check:harness-bindings` 静态检查、shell/App build、4 片并行 coverage（合并报告）、Node 20/22/24 CLI、3 片并行 macOS 15 renderer UI（第 2 片打包）、Linux 解包 App / pacman 检查；各 job 不互相等待 | `Check` 汇总全部 jobs（含 `packaged-linux`）；失败、取消或跳过均拒绝 |
+| `ci.yml` | Node/typecheck、`check:harness-bindings` 静态检查、shell/App build、4 片并行 coverage（合并报告）、Node 20/22/24 CLI、3 片并行 macOS 15 renderer UI（第 2 片打包）、Linux 解包 App / pacman 检查；顶层验证 job 并行运行，只有 `unit-coverage` 等待 4 个 `unit` 分片、`Check` 等待全部 job | `Check` 汇总全部 jobs（含 `packaged-linux`）；失败、取消或跳过均拒绝 |
 | `performance.yml` | 现有 compare 与 native 测量 | `Performance Check` 汇总两个 jobs；评论发布不属于正确性门禁 |
 | `remote-g0.yml` | 每个 PR 发出检查，仅 remote/iOS/工作流变化并行运行 transport、ios_g0、ios_ui；每项仍限 20 分钟 | `Remote Check` 要求三项全部成功，或 changes 明确判定无影响且三项全部跳过；检测失败、结果缺失或任一项取消均拒绝 |
 | `pr-vouch.yml` | 使用默认分支的 VOUCHED 配置，自动同步 `vouch:*` | 仅上下文，不是准入或门禁 |

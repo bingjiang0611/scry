@@ -121,7 +121,7 @@ describe('required PR checks', () => {
     expect(scripts['test:renderer:ui']).toBe(shards.join(' && '))
     const commands = [1, 2, 3].flatMap(shard => scripts[`test:renderer:ui:${shard}`].split(' && '))
     expect(new Set(commands).size).toBe(commands.length)
-    for (const required of ['npm run test:side-chat:ui', 'npm run test:conversation:ipc', 'npm run test:source-control:ui', 'npm run test:workspace:ui', 'node scripts/analytics-credits-ui-smoke.mjs']) {
+    for (const required of ['npm run test:side-chat:ui', 'npm run test:conversation:ipc', 'npm run test:source-control:ui', 'npm run test:workspace:ui', 'node scripts/analytics-credits-ui-smoke.mjs', 'node scripts/desktop-remote-ui-smoke.mjs --session-parity-only']) {
       expect(commands).toContain(required)
     }
   })
