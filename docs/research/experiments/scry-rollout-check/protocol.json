@@ -1,0 +1,12 @@
+{
+  "_comment": "Defaults are the public aliases used by the sanitized snapshot in the scry repo. Replace each value with the real name from the private uploader source before running against your installed uploader.",
+  "transportEnv": "TRANSPORT_CLI_PATH",
+  "toolName": "submitTurns",
+  "argumentNames": ["actorUserId", "actorNick", "repo", "installationId", "uploaderVersion", "redactionVersion", "records"],
+  "recordsArgument": "records",
+  "whoami": { "userIdField": "subject_id", "nickField": "nickname" },
+  "response": {
+    "wrapSuccess": true,
+    "itemStatuses": { "inserted": "inserted", "duplicated": "duplicated", "rejected": "rejected" }
+  }
+}
