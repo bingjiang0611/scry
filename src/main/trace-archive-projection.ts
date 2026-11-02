@@ -6,6 +6,7 @@ import { TextSpool } from './text-spool'
 import {
   BODY_KEYS, REF_KEYS, assertArchiveIdentity, assertProvider, factsOf, keepText, parseScalar, primitiveValue
 } from './trace-archive-fields'
+import { archivedTurnStatus } from './trace-archive-turn-status'
 
 /**
  * Selective, bounded-memory projection of an archived session file.
@@ -36,8 +37,12 @@ export interface ArchiveBodyFacts {
 }
 
 export type ArchiveEntry =
-  /** Turn header, emitted after its chunks: the body fixes run identity first. */
-  | { type: 'turn'; turn: number; runId: string; providerTurnId?: string; ts: number; done: boolean; status?: string }
+  /**
+   * Turn header, emitted after its chunks: the body fixes run identity first. `status` is
+   * the recorder's explicit status, or the archive's own structured evidence when a legacy
+   * turn has none; it is `unavailable` when the record proves only that the turn ended.
+   */
+  | { type: 'turn'; turn: number; runId: string; providerTurnId?: string; ts: number; done: boolean; status: string }
   | { type: 'user'; turn: number; chunk: string }
   | {
       type: 'text'
@@ -79,11 +84,13 @@ export interface ProjectionOptions {
 }
 
 /** Turn-level scalars; every other root/turn field is skipped. */
-const TURN_KEYS = new Set(['runId', 'providerTurnId', 'ts', 'done', 'status', 'providerId', 'runtimeProvider'])
+const TURN_KEYS = new Set(['runId', 'providerTurnId', 'ts', 'done', 'status', 'error', 'providerId', 'runtimeProvider'])
 const ROOT_KEYS = new Set(['version', 'cwd', 'sessionId', 'externalSessionId', 'providerId', 'runtimeProvider'])
 /** Event scalars that decide whether the event is visible at all. */
 const EVENT_KEYS = new Set([
-  'id', 'kind', 'stage', 'runId', 'messageId', 'agentId', 'parentToolUseId', 'ts', 'providerId', 'runtimeProvider'
+  'id', 'kind', 'stage', 'runId', 'messageId', 'agentId', 'parentToolUseId', 'ts', 'providerId', 'runtimeProvider',
+  // A `result` event's own verdict is the only success/failure evidence a legacy turn has.
+  'isError'
 ])
 const STEER_KEYS = new Set(['status', 'messageId'])
 const RUNTIME_KEYS = new Set(['replacesStreamedText', 'codexItemId'])
@@ -155,6 +162,8 @@ export async function* iterateArchiveEntries(
   let spoolKey: string | undefined
   let rootClosed = false
   let turns = 0
+  let resultIsError = false
+  let resultSucceeded = false
   let eventNumber = 0
   let userTextSeen = false
 
@@ -221,6 +230,13 @@ export async function* iterateArchiveEntries(
     if (kind !== undefined && typeof kind !== 'string') throw new Error('trace archive event kind is invalid')
     const stage = eventMeta.get('stage')
     if (stage !== undefined && typeof stage !== 'string') throw new Error('trace archive event stage is invalid')
+    // A `result` event's `isError` is the turn's own success/failure verdict; the stage
+    // decides what it is, so a tool output carrying `isError` cannot select itself.
+    if (stage === 'result') {
+      const isError = eventMeta.get('isError')
+      if (isError === true) resultIsError = true
+      else if (isError === false) resultSucceeded = true
+    }
     if (!visible) {
       yield { type: 'break', turn: turns, event: eventNumber }
       return
@@ -249,12 +265,24 @@ export async function* iterateArchiveEntries(
     if (typeof done !== 'boolean') throw new Error('trace archive turn has no completion evidence')
     const status = turnValues.get('status')
     if (status !== undefined && typeof status !== 'string') throw new Error('trace archive turn status is invalid')
+    const error = turnValues.get('error')
+    if (error !== undefined && typeof error !== 'string') throw new Error('trace archive turn error is invalid')
     if (!userTextSeen) throw new Error('trace archive turn has no user text')
+    // An explicit recorder status wins. A legacy turn without one keeps only what its own
+    // structured evidence proves; a record with neither error nor result stays unknown
+    // rather than being reported as a completed turn.
+    const resolved = status ?? archivedTurnStatus({
+      ...(error !== undefined ? { error } : {}),
+      ...(resultIsError ? { resultIsError } : {}),
+      ...(resultSucceeded ? { resultSucceeded } : {})
+    })
     turnValues = new Map()
     userTextSeen = false
+    resultIsError = false
+    resultSucceeded = false
     return {
       type: 'turn', turn: turns, runId, ...(providerTurnId !== undefined ? { providerTurnId } : {}), ts, done,
-      ...(status !== undefined ? { status } : {})
+      status: resolved
     }
   }
 
@@ -383,6 +411,8 @@ export async function* iterateArchiveEntries(
         eventMeta = new Map()
         steerMeta = new Map()
         userTextSeen = false
+        resultIsError = false
+        resultSucceeded = false
       }
       if (role === 'event') {
         eventNumber += 1

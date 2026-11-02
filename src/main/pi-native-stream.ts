@@ -6,6 +6,7 @@ import { nativeBranch, validateHeader, type NativeEntry } from './pi-native-pars
 import { historyCopy } from '../shared/constants/copy'
 import { allSpools, captureSpools, settleAndRelease, type TurnBodies } from './conversation-side-chat-streamed'
 import type { StreamedTurn } from './conversation-side-chat-stream'
+import type { TurnTerminal } from './conversation-turn-terminal'
 
 /**
  * Streaming projection of a Pi session file for side chats.
@@ -26,7 +27,7 @@ import type { StreamedTurn } from './conversation-side-chat-stream'
  * that never ended is not evidence.
  *
  * Resident bodies are bounded by the shared spool budget, not by the length of the history:
- * a turn that closes is settled and its spools released as soon as the caller has consumed
+ * a turn that closes is projected and its spools released as soon as the caller has consumed
  * it, so a long session cannot keep every earlier body in memory while the file is read.
  *
  * The two passes are the file read cost of this reader; the byte digests add hashing work,
@@ -38,8 +39,8 @@ export interface PiNativeStreamOptions {
   /** Identity the header must claim itself. */
   sessionId: string
   cwd: string
-  /** Whether a terminal marker proves Pi finished the turn. */
-  settles: (stopReason: string | undefined) => boolean
+  /** What Pi's own terminal marker proves about this turn. */
+  terminalOf: (stopReason: string | undefined) => TurnTerminal
 }
 
 interface PiEntryMeta {
@@ -300,7 +301,7 @@ export async function* streamPiNativeTurns(
     const evidence = { bytes: 0, digest: createHash('sha256') }
     for await (const event of projectPiRecords(handle, before.size, evidence, 'body')) {
       await bodies.accept(event)
-      // A turn that just closed is settled before the next record is read.
+      // A turn that just closed is projected before the next record is read.
       while (ready.length > 0) yield* settled(ready.shift()!)
     }
     await bodies.finish()

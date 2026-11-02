@@ -28,15 +28,18 @@ export interface StreamedMessage {
 export interface StreamedTurn {
   runId: string
   providerTurnId?: string
+  /**
+   * Exact captured outcome of this turn. A Scry archive keeps the recorder's own status
+   * (or the archive's structured evidence for a legacy turn); a raw Provider transcript
+   * keeps what its terminal marker proves, so a non-success outcome is never hidden.
+   */
   status: string
   /**
-   * Evidence the turn ended, not evidence it succeeded: a recorder terminal for a
-   * Scry archive, the Provider's own terminal marker for a native transcript.
-   * `status` says how it ended.
+   * Evidence the turn ended, not evidence it succeeded: a recorder terminal for a Scry
+   * archive, the Provider's own terminal marker for a native transcript. This is what may
+   * end a frozen prefix; `status` says how it ended.
    */
   terminal: boolean
-  /** A `completed` terminal: the only status that may end the default frozen prefix. */
-  settled: boolean
   messages: StreamedMessage[]
 }
 
@@ -321,7 +324,7 @@ async function assembleTurn(userData: string, cwd: string, registry: SpoolRegist
 /**
  * Streams one turn at a time. A turn is yielded only once its header proves identity and
  * its termination evidence, so a caller never freezes a turn whose provenance is still
- * open: `terminal` is that evidence, `settled` is the completed outcome.
+ * open. `terminal` is that evidence; `status` is the recorded outcome.
  */
 export async function* streamTurns(
   userData: string,
@@ -343,10 +346,12 @@ export async function* streamTurns(
   try {
     for await (const entry of entries) {
       if (entry.type === 'turn') {
-        const status = entry.status ?? 'completed'
+        // A legacy turn whose archive proves no outcome keeps `unavailable`: an absent
+        // status is not permission to call it completed.
+        const status = entry.status
         // `done` is the recorder's terminal, written when the Provider result was
-        // recorded; a failed or interrupted run has it too. Only `completed` may end a
-        // default prefix, so termination and completion stay separate facts.
+        // recorded; a failed or interrupted run has it too. Termination and outcome stay
+        // separate facts: every terminal turn may end a frozen prefix, `status` says how.
         const terminal = entry.done === true
         // A turn the recorder never terminated is never capturable, so its visible
         // bodies are not sealed at all. The caller can only drop it, and sealing would
@@ -359,7 +364,7 @@ export async function* streamTurns(
           yield {
             runId: entry.runId,
             ...(entry.providerTurnId === undefined ? {} : { providerTurnId: entry.providerTurnId }),
-            status, terminal, settled: terminal && status === 'completed', messages
+            status, terminal, messages
           }
         } finally {
           // Runs once the sink has consumed this turn, and also when the caller abandons or

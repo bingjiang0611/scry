@@ -1,22 +1,24 @@
 import { captureReadBudget, turnMessageProjection } from './conversation-history-text'
 import type { SideChatNativeTurn } from './conversation-service-deps'
-import type { ProviderId } from '../shared/provider'
+import { NO_TERMINAL_TURN, type TurnTerminal } from './conversation-turn-terminal'
 
 /**
  * The Provider's own raw transcript path, used only when a native session has no Scry
  * archive. That reader is separately bounded, so its turns are already in memory; what
- * matters here is which turns prove completion and which stay out of a frozen prefix.
+ * matters here is which turns are terminal, what their own marker proves about the
+ * outcome, and which turns stay out of a frozen prefix.
  */
 export interface ProjectedTurn {
   ordinal: number
   runId: string
   providerTurnId?: string
-  status: string
+  /** Exact captured outcome; only a terminal turn carries one. */
+  status?: string
   /**
-   * Proven finished turn: the recorder terminal for a Scry archive, the Provider's
-   * own terminal marker for a raw transcript. Visible text never settles a turn.
+   * Provider termination evidence for this turn. Visible text never makes a turn terminal,
+   * and a terminal turn may still have failed: `status` says how it ended.
    */
-  settled: boolean
+  terminal: boolean
   messages: Array<{ role: 'user' | 'assistant'; text: string; steerMessageId?: string }>
 }
 
@@ -25,40 +27,29 @@ export function projectedMessages(
   userData: string,
   cwd: string,
   turns: readonly SideChatNativeTurn[],
-  evidenceOf: (turn: SideChatNativeTurn) => { status: string; settled: boolean }
+  terminalOf: (turn: SideChatNativeTurn) => TurnTerminal
 ): Promise<ProjectedTurn[]> {
   const budget = captureReadBudget()
   return turns.reduce(async (previous, turn, index) => {
     const projected = await previous
     const messages = await turnMessageProjection(userData, { cwd }, turn, budget)
-    return [...projected, { ordinal: index + 1, runId: turn.runId, ...(turn.providerTurnId ? { providerTurnId: turn.providerTurnId } : {}),
-      ...evidenceOf(turn), messages }]
+    const evidence = terminalOf(turn)
+    return [...projected, {
+      ordinal: index + 1, runId: turn.runId, ...(turn.providerTurnId ? { providerTurnId: turn.providerTurnId } : {}),
+      terminal: evidence.terminal, ...(evidence.terminal ? { status: evidence.status } : {}), messages
+    }]
   }, Promise.resolve<ProjectedTurn[]>([]))
 }
 
 /**
- * The stable prefix ends at the last settled turn; nothing after it is frozen.
- * An unsettled turn inside the prefix is not a tail Scry can drop, so the source
- * is refused instead of freezing output whose completion is unknown.
+ * The stable prefix ends at the last terminal turn; nothing after it is frozen. A
+ * nonterminal turn inside the prefix is not a tail Scry can drop, so the source is
+ * refused instead of freezing output whose termination is unknown.
  */
-export function completedProjections(turns: readonly ProjectedTurn[]): ProjectedTurn[] {
-  const last = turns.findLastIndex(turn => turn.settled)
+export function terminalProjections(turns: readonly ProjectedTurn[]): ProjectedTurn[] {
+  const last = turns.findLastIndex(turn => turn.terminal)
   if (last < 0) return []
   const prefix = turns.slice(0, last + 1)
-  if (prefix.some(turn => !turn.settled)) {
-    throw new Error('原生会话前缀包含没有终止证据的轮次，不能创建侧聊')
-  }
+  if (prefix.some(turn => !turn.terminal)) throw new Error(NO_TERMINAL_TURN)
   return prefix
-}
-
-/**
- * The only markers that prove a Provider finished a turn: Claude writes
- * `message.stop_reason`, Pi writes `message.stopReason`. `tool_use` / `toolUse`
- * means the turn is still producing, and a missing marker proves nothing.
- */
-const completedStopReasons: Partial<Record<ProviderId, string>> = { claude: 'end_turn', pi: 'stop' }
-
-export function stopReasonProvesCompletion(providerId: ProviderId, turn: { stopReason?: string }): boolean {
-  const expected = completedStopReasons[providerId]
-  return expected !== undefined && turn.stopReason === expected
 }

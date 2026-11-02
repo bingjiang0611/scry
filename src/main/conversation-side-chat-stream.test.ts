@@ -110,7 +110,6 @@ describe('archive-backed side-chat streaming', () => {
     const live: number[] = []
     for await (const turn of streamTurns(userData, cwd, from(entries), budget)) {
       expect(turn.terminal).toBe(false)
-      expect(turn.settled).toBe(false)
       // No sealed copy, and no text a sink could read, for an uncapturable turn.
       expect(turn.messages).toEqual([])
       // Spills really happen in this fixture, so what is left is this turn's own inputs

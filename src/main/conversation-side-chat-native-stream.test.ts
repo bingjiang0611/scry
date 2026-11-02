@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { streamNativeTranscriptTurns } from './conversation-side-chat-native-stream'
 import type { StreamedTurn } from './conversation-side-chat-stream'
+import { providerTurnTerminal, type TurnTerminal } from './conversation-turn-terminal'
 
 /**
  * Read positions and a pass hook, so the prefix proof can be observed exactly.
@@ -62,8 +63,8 @@ async function transcript(lines: readonly string[], trailing = ''): Promise<stri
 
 const digest = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex')
 
-/** Claude settles a turn only with its own terminal marker. */
-const settles = (stopReason: string | undefined): boolean => stopReason === 'end_turn'
+/** Claude makes a turn terminal only with its own marker, which also proves the outcome. */
+const terminalOf = (stopReason: string | undefined): TurnTerminal => providerTurnTerminal('claude', stopReason)
 
 function claudeUser(text: string, promptId?: string): string {
   return `${JSON.stringify({
@@ -84,7 +85,7 @@ Promise<{ turns: Array<StreamedTurn & { texts: string[] }>; largest: number }> {
   const turns: Array<StreamedTurn & { texts: string[] }> = []
   let largest = 0
   for await (const turn of streamNativeTranscriptTurns({
-    path, runId: 'native-1', sessionId: identity.sessionId ?? 'native-1', cwd: identity.cwd ?? '/project', settles
+    path, runId: 'native-1', sessionId: identity.sessionId ?? 'native-1', cwd: identity.cwd ?? '/project', terminalOf
   })) {
     const texts: string[] = []
     for (const message of turn.messages) {
@@ -202,7 +203,7 @@ describe('native transcript streaming projection', () => {
   it('refuses a transcript replaced or truncated while it was read', async () => {
     const path = await transcript([claudeUser('first', 'prompt-1'), claudeAssistant('answer one')])
     const handle = await open(path, 'r+')
-    const iterator = streamNativeTranscriptTurns({ path, runId: 'native-1', sessionId: 'native-1', settles })
+    const iterator = streamNativeTranscriptTurns({ path, runId: 'native-1', sessionId: 'native-1', terminalOf })
     try {
       const first = await iterator.next()
       expect(first.done).toBe(false)
@@ -232,7 +233,7 @@ describe('native transcript streaming projection', () => {
     let furthestAtFirstTurn = 0
     let seen = 0
     for await (const turn of streamNativeTranscriptTurns({
-      path, runId: 'native-1', sessionId: 'native-1', cwd: '/project', settles
+      path, runId: 'native-1', sessionId: 'native-1', cwd: '/project', terminalOf
     }, budget)) {
       seen += 1
       if (seen === 1) furthestAtFirstTurn = probe.furthest.get(path) ?? 0
@@ -273,7 +274,7 @@ describe('native transcript streaming projection', () => {
     expect((await stat(appended)).size).toBeGreaterThan(original)
   })
 
-  it('drops an unfinished turn but refuses an unsettled turn before a settled one', async () => {
+  it('drops an unfinished turn but refuses an unfinished turn before a finished one', async () => {
     const tailOnly = await transcript([claudeUser('first', 'prompt-1'), claudeAssistant('still running', 'tool_use')])
     expect((await collect(tailOnly)).turns).toEqual([])
     const interior = await transcript([
@@ -283,5 +284,26 @@ describe('native transcript streaming projection', () => {
       claudeAssistant('answer two')
     ])
     await expect(collect(interior)).rejects.toThrow('没有终止证据的轮次')
+  })
+
+  // Claude names four explicit non-success terminals. A raw transcript between completed
+  // turns used to be refused as if it had no terminal evidence at all.
+  it('keeps an explicit non-success terminal as a terminal failed turn', async () => {
+    const path = await transcript([
+      claudeUser('first', 'prompt-1'), claudeAssistant('answer one'),
+      claudeUser('second', 'prompt-2'), claudeAssistant('cut off', 'max_tokens'),
+      claudeUser('third', 'prompt-3'), claudeAssistant('answer three')
+    ])
+    const turns = await collect(path)
+    expect(turns.turns.map(turn => [turn.texts, turn.terminal, turn.status])).toEqual([
+      [['first', 'answer one'], true, 'completed'],
+      [['second', 'cut off'], true, 'failed'],
+      [['third', 'answer three'], true, 'completed']
+    ])
+    for (const stopReason of ['refusal', 'model_context_window_exceeded', 'stop_sequence']) {
+      const single = await transcript([claudeUser('question', 'prompt-1'), claudeAssistant('body', stopReason)])
+      const status = stopReason === 'stop_sequence' ? 'completed' : 'failed'
+      expect((await collect(single)).turns.map(turn => [turn.terminal, turn.status])).toEqual([[true, status]])
+    }
   })
 })
