@@ -57,6 +57,8 @@ async function archiveFixture(): Promise<{
 /** Sealed snapshot facts: per-message status plus the exact text the child serves. */
 async function sealedFacts(current: SideChatFixture, id: string): Promise<{
   throughOrdinal: number
+  title: string
+  bodyBytes: number
   statuses: string[]
   ordinals: number[]
   texts: string[]
@@ -68,6 +70,8 @@ async function sealedFacts(current: SideChatFixture, id: string): Promise<{
   const refs = await sideChatSnapshotRefs(current.userData, stored)
   return {
     throughOrdinal: snapshot.throughOrdinal,
+    title: stored.sideChat!.parentTitleAtCapture,
+    bodyBytes: snapshot.bodyBytes,
     statuses: items.map(item => item.status),
     ordinals: items.map(item => item.sourceOrdinal),
     texts: await Promise.all(refs.map(ref => current.service.readItem(id, ref)))
@@ -121,6 +125,12 @@ describe('native side-chat archive termination evidence', () => {
     expect(sealed.texts).toEqual(['question a', 'answer a'])
     expect(sealed.ordinals).toEqual([1, 1])
     expect(sealed.texts).not.toContain('trailing b')
+    // Title and body bytes describe the frozen prefix only, never the turn that ended it.
+    expect(sealed.title).toBe('question a')
+    expect(sealed.bodyBytes).toBe(Buffer.byteLength('question a') + Buffer.byteLength('answer a'))
+    // Creation re-derives both fingerprints from the captured items, so a preview
+    // fingerprint that leaked the trailing turn could not have sealed this child.
+    expect(sealed.throughOrdinal).toBe(preview.throughOrdinal)
   })
 
   it('still refuses an interior turn with no recorder terminal', async () => {
@@ -141,6 +151,15 @@ describe('native side-chat archive termination evidence', () => {
       commandId: 'termination-unterminated' })).rejects.toThrow(NO_TERMINAL)
     expect(await childIds(current)).toEqual([])
     expect(await readdir(historyRoot).catch(() => [] as string[])).toEqual(before)
+  })
+
+  it('reports an interrupted-only archive as having no completed turn', async () => {
+    const { current, source, record } = await archiveFixture()
+    record({ runId: 'run-a', prompt: 'question a', answer: 'partial a', done: true, status: 'interrupted' })
+    // The turn did end, so this is not "no termination evidence": the prefix simply has
+    // no completed turn to freeze, and creation stays local.
+    await expect(current.service.previewSideChat(source)).rejects.toThrow('该原生会话没有已完成轮次；不会创建空快照')
+    expect(await childIds(current)).toEqual([])
   })
 
   it('refuses an explicitly requested boundary that points at an interrupted turn', async () => {
