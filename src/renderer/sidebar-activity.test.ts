@@ -53,14 +53,21 @@ describe('sidebar activity projection', () => {
     expect(JSON.stringify(projects)).toBe(before)
   })
 
-  it('excludes unknown, failed, cancelled and interrupted history instead of claiming success', () => {
-    for (const lastRunOutcome of [undefined, 'failed', 'cancelled', 'interrupted'] as const) {
+  it('keeps terminal non-success reviewable without ever claiming success, and hides only unknown history', () => {
+    const unknown = [{ ...projects[0],
+      sessions: [{ ...projects[0].sessions[0], lastRunOutcome: undefined }],
+      conversations: [{ ...projects[0].conversations![0], activeRunId: undefined, lastRunOutcome: undefined }]
+    }]
+    // Absence of an outcome is not evidence, so nothing is shown for it.
+    expect(sidebarActivity(unknown, empty, empty, '')).toEqual([])
+    for (const lastRunOutcome of ['failed', 'cancelled', 'interrupted'] as const) {
       const source = [{ ...projects[0],
         sessions: [{ ...projects[0].sessions[0], lastRunOutcome }],
         conversations: [{ ...projects[0].conversations![0], activeRunId: undefined, lastRunOutcome }]
       }]
-      expect(sidebarActivity(source, empty, empty, '')).toEqual([])
-      expect(sidebarActivity(source, new Set(['run-a']), empty, '')[0].group).toBe('working')
+      // A terminal non-success is reviewable evidence: it stays visible, never completed.
+      expect(sidebarActivity(source, empty, empty, '').map((row) => row.group)).toEqual(['updates', 'updates'])
+      expect(sidebarActivity(source, new Set(['run-a']), empty, '').map((row) => row.group)).toEqual(['updates', 'working'])
     }
     const completed = [{ ...projects[0], sessions: [], conversations: [
       { ...projects[0].conversations![0], activeRunId: undefined, lastRunOutcome: 'completed' as const }
@@ -72,21 +79,21 @@ describe('sidebar activity projection', () => {
     const session = { ...projects[0].sessions[0], externalSessionId: 'native-id' }
     const source = [{ ...projects[0], conversations: [], sessions: [session] }]
     const unread = new Set([sessionAttentionKey({ providerId: session.providerId, cwd: source[0].cwd, sessionId: 'native-id' })])
-    for (const lastRunOutcome of [undefined, 'failed', 'cancelled', 'interrupted'] as const) {
-      const catalog = [{ ...source[0], sessions: [{ ...session, lastRunOutcome }] }]
-      const rows = sidebarActivity(catalog, empty, empty, '', [], unread)
-      expect(rows).toHaveLength(1)
-      expect(rows[0].group).toBe('updates')
-      expect(sidebarActivity(catalog, empty, empty, '', [], empty)).toEqual([])
-      expect(sidebarActivity(catalog, new Set(['run-a']), empty, '', [], unread)[0].group).toBe('working')
-      expect(sidebarActivity(catalog, new Set(['run-a']), new Set(['run-a']), '', [], unread)[0].group).toBe('attention')
-      expect(sidebarActivity(catalog, empty, empty, 'missing', [], unread)).toEqual([])
-      expect(sidebarActivity([{ ...catalog[0], sessions: [{ ...catalog[0].sessions[0], archivedAt: 1 }] }], empty, empty, '', [], unread)).toEqual([])
-      for (const change of [{ providerId: 'pi' }, { agentProfileId: 'work' }, { externalSessionId: 'another' }] as const) {
-        expect(sidebarActivity([{ ...catalog[0], sessions: [{ ...catalog[0].sessions[0], ...change }] }], empty, empty, '', [], unread)).toEqual([])
-      }
-      expect(sidebarActivity([{ ...catalog[0], cwd: '/another' }], empty, empty, '', [], unread)).toEqual([])
+    // Unread evidence alone decides visibility here, so the outcome stays unknown.
+    const catalog = [{ ...source[0], sessions: [{ ...session, lastRunOutcome: undefined }] }]
+    const rows = sidebarActivity(catalog, empty, empty, '', [], unread)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].group).toBe('updates')
+    // Without unread evidence an unknown outcome is not activity at all.
+    expect(sidebarActivity(catalog, empty, empty, '', [], empty)).toEqual([])
+    expect(sidebarActivity(catalog, new Set(['run-a']), empty, '', [], unread)[0].group).toBe('working')
+    expect(sidebarActivity(catalog, new Set(['run-a']), new Set(['run-a']), '', [], unread)[0].group).toBe('attention')
+    expect(sidebarActivity(catalog, empty, empty, 'missing', [], unread)).toEqual([])
+    expect(sidebarActivity([{ ...catalog[0], sessions: [{ ...catalog[0].sessions[0], archivedAt: 1 }] }], empty, empty, '', [], unread)).toEqual([])
+    for (const change of [{ providerId: 'pi' }, { agentProfileId: 'work' }, { externalSessionId: 'another' }] as const) {
+      expect(sidebarActivity([{ ...catalog[0], sessions: [{ ...catalog[0].sessions[0], ...change }] }], empty, empty, '', [], unread)).toEqual([])
     }
+    expect(sidebarActivity([{ ...catalog[0], cwd: '/another' }], empty, empty, '', [], unread)).toEqual([])
     expect(sidebarActivity(source, empty, empty, '', [], unread)[0].group).toBe('completed')
     expect(sidebarActivity(source, empty, empty, '', [], empty)[0].group).toBe('completed')
   })
@@ -130,14 +137,17 @@ describe('sidebar activity projection', () => {
     }
   })
 
-  it('restores host-confirmed completed sessions to Activity after reconnect, but not failed/unknown history', () => {
+  it('restores host-confirmed completed and non-success sessions to Activity after reconnect, but not unknown history', () => {
     const completed = { ...remoteProject.sessions[0], isActive: false, lastRunId: 'done', lastRunOutcome: 'completed' as const }
     const project = { ...remoteProject, sessions: [completed] }
     expect(sidebarActivity([], empty, empty, '', [{ ...project, state: 'disconnected' }])).toEqual([])
     expect(sidebarActivity([], empty, empty, '', [project])[0]).toMatchObject({ kind: 'remote', group: 'completed' })
     expect(sidebarActivity([], empty, empty, '', [{ ...project, sessions: [{ ...completed, isActive: true }] }])[0].group).toBe('working')
-    for (const lastRunOutcome of [undefined, 'failed', 'cancelled', 'interrupted'] as const) {
-      expect(sidebarActivity([], empty, empty, '', [{ ...project, sessions: [{ ...completed, lastRunOutcome }] }])).toEqual([])
+    expect(sidebarActivity([], empty, empty, '', [{ ...project, sessions: [{ ...completed, lastRunOutcome: undefined }] }])).toEqual([])
+    for (const lastRunOutcome of ['failed', 'cancelled', 'interrupted'] as const) {
+      // The host persisted a terminal non-success: it needs review, not "no activity".
+      expect(sidebarActivity([], empty, empty, '', [{ ...project, sessions: [{ ...completed, lastRunOutcome }] }])
+        .map((row) => row.group)).toEqual(['updates'])
     }
   })
 
@@ -185,5 +195,18 @@ describe('sidebar activity projection', () => {
       .toEqual([['conversation', 'working', parent]])
     // The child keeps its own identity instead of borrowing the parent row.
     expect(rows[0].kind === 'conversation' && rows[0].conversation.id).toBe('child')
+  })
+
+  it('surfaces a host-reported blocked remote run as attention and keeps its terminal failures visible', () => {
+    const blocked = { ...remoteProject.sessions[0], isActive: true, pendingQuestions: 1 }
+    expect(sidebarActivity([], empty, empty, '', [{ ...remoteProject, sessions: [blocked] }])
+      .map((row) => row.group)).toEqual(['attention'])
+    const idle = { ...blocked, isActive: false, pendingQuestions: 0 }
+    expect(sidebarActivity([], empty, empty, '', [{ ...remoteProject, sessions: [idle] }])).toEqual([])
+    for (const lastRunOutcome of ['failed', 'cancelled', 'interrupted'] as const) {
+      const terminal = { ...remoteProject.sessions[0], isActive: false, lastRunOutcome }
+      expect(sidebarActivity([], empty, empty, '', [{ ...remoteProject, sessions: [terminal] }])
+        .map((row) => row.group)).toEqual(['updates'])
+    }
   })
 })
