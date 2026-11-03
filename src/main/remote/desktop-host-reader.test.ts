@@ -191,9 +191,15 @@ describe('desktop authenticated evidence source', () => {
     await expect(f.read({ ...query, chunk: { id: first.id, offset } })).rejects.toThrow('invalid_history_chunk')
   })
 
-  it('caps assembled pages instead of dropping evidence from an oversized turn', async () => {
+  it('caps assembled pages at 512 MiB instead of dropping evidence from an oversized turn', async () => {
     const f = fixture()
-    expect(f.archive(0, 'x'.repeat(DESKTOP_HISTORY_MAX_BYTES))).toBe(true)
+    expect(DESKTOP_HISTORY_MAX_BYTES).toBe(512 * 1024 * 1024)
+    expect(f.archive(0)).toBe(true)
+    const byteLength = Buffer.byteLength
+    vi.spyOn(Buffer, 'byteLength').mockImplementation((value, encoding) =>
+      typeof value === 'string' && value.startsWith('{"kind":"history"')
+        ? DESKTOP_HISTORY_MAX_BYTES + 1
+        : byteLength(value, encoding))
     await expect(f.read({ kind: 'history', context: f.context, byteChunks: true })).rejects.toThrow('desktop_evidence_response_too_large')
   })
 
