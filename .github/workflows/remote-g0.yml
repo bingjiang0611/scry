@@ -59,6 +59,12 @@ jobs:
           swift --version
           echo "$(brew --prefix openssl@3)/bin" >> "$GITHUB_PATH"
       - run: npm --prefix experiments/remote-g0 ci --ignore-scripts
+      # 依赖编译占 swift test 的大部分时间；按锁文件缓存 SwiftPM 构建目录，源码变化仍会增量重编。
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: experiments/remote-g0/swift/.build
+          key: swiftpm-build-${{ runner.os }}-${{ runner.arch }}-xcode26.3-${{ hashFiles('experiments/remote-g0/swift/Package.resolved') }}
       - run: node experiments/remote-g0/generate-wire.mjs --check
       - run: npm --prefix experiments/remote-g0 test
       - run: swift test --package-path experiments/remote-g0/swift -j 4
@@ -68,44 +74,48 @@ jobs:
       - run: node experiments/remote-g0/pair-smoke.mjs
       - run: npm --prefix experiments/remote-g0 run smoke:g1
 
-  ios_g0:
+  # 两个 iOS 工程在同一 runner 上依次编译：GitHub Free 同时最多 5 个 macOS job，
+  # 拆成两个 job 会与 CI 的 renderer 分片和 Performance native 争抢而排队。
+  ios:
     needs: changes
     if: ${{ needs.changes.outputs.required == 'true' }}
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
+      # 只缓存 SwiftPM 源码下载（约 1.5 分钟），不缓存编译产物。
+      - name: Cache ScryRemoteG0 Swift package checkouts
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/scry-g0-ios/SourcePackages
+          key: spm-sources-scry-g0-ios-${{ hashFiles('apps/ios/ScryRemoteG0.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
       - name: Compile native iOS app and tests (not a device gate)
         run: >-
           xcodebuild -project apps/ios/ScryRemoteG0.xcodeproj
           -scheme ScryRemoteG0 -configuration Debug -sdk iphonesimulator
           -destination 'generic/platform=iOS Simulator'
           -derivedDataPath "$RUNNER_TEMP/scry-g0-ios"
-          CODE_SIGNING_ALLOWED=NO build-for-testing
-
-  ios_ui:
-    needs: changes
-    if: ${{ needs.changes.outputs.required == 'true' }}
-    runs-on: macos-15
-    timeout-minutes: 20
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
-    steps:
-      - uses: actions/checkout@v4
+          ARCHS=arm64 CODE_SIGNING_ALLOWED=NO build-for-testing
+      # 只缓存 SwiftPM 源码下载（约 1.5 分钟），不缓存编译产物。
+      - name: Cache ScryRemote Swift package checkouts
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/scry-remote-ui/SourcePackages
+          key: spm-sources-scry-remote-ui-${{ hashFiles('apps/ios/ScryRemote.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
       - name: Compile ScryRemote product UI (design v2, unsigned)
         run: >-
           xcodebuild -project apps/ios/ScryRemote.xcodeproj
           -scheme ScryRemote -configuration Debug -sdk iphonesimulator
           -destination 'generic/platform=iOS Simulator'
           -derivedDataPath "$RUNNER_TEMP/scry-remote-ui"
-          CODE_SIGNING_ALLOWED=NO build
+          ARCHS=arm64 CODE_SIGNING_ALLOWED=NO build
 
   check:
     name: Remote Check
     if: ${{ always() }}
-    needs: [changes, transport, ios_g0, ios_ui]
+    needs: [changes, transport, ios]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -117,7 +127,7 @@ jobs:
           echo "$RESULTS" | jq -e '
             .changes.result == "success" and (
               (.changes.outputs.required == "true" and
-                ([.transport.result, .ios_g0.result, .ios_ui.result] | all(. == "success"))) or
+                ([.transport.result, .ios.result] | all(. == "success"))) or
               (.changes.outputs.required == "false" and
-                ([.transport.result, .ios_g0.result, .ios_ui.result] | all(. == "skipped")))
+                ([.transport.result, .ios.result] | all(. == "skipped")))
             )' > /dev/null
