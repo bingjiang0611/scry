@@ -12,7 +12,7 @@ export const ssh = { hostname: 'desktop.example', username: 'scry', port: 22 }
 export const encrypt = (value: string): Buffer => Buffer.from(`encrypted:${Buffer.from(value).toString('base64')}`)
 export const decrypt = (value: Buffer): string => Buffer.from(value.toString().slice('encrypted:'.length), 'base64').toString()
 
-export async function setup(setupOptions: { submitResponse?: () => unknown; intentStatusResponse?: () => unknown; resolveIntentResponse?: () => unknown; unknownIntent?: boolean; providerDiscovery?: boolean; encrypt?: typeof encrypt } = {}) {
+export async function setup(setupOptions: { watchState?: string | null; liveRuns?: unknown[]; submitResponse?: () => unknown; intentStatusResponse?: () => unknown; resolveIntentResponse?: () => unknown; unknownIntent?: boolean; providerDiscovery?: boolean; encrypt?: typeof encrypt } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'scry-desktop-client-'))
   const identity = await generateDesktopDeviceIdentity()
   const host = await ensureHostIdentity(join(directory, 'host'))
@@ -51,6 +51,9 @@ export async function setup(setupOptions: { submitResponse?: () => unknown; inte
     if (request.op === 'intentStatus' && setupOptions.unknownIntent) return { error: 'unknown_intent' }
     if (request.op === 'resolveIntent' && setupOptions.resolveIntentResponse) return setupOptions.resolveIntentResponse()
     if (request.op === 'poll') return { cursor: 0, minCursor: 0, events: [] }
+    // Lifecycle long poll: nothing new, so a caller sees an unchanged run.
+    if (request.op === 'watch') return { watch: { state: setupOptions.watchState ?? null, questions: [], poll: { cursor: 0, minCursor: 0, events: [] } } }
+    if (request.op === 'liveRuns') return { liveRuns: { revision: 'fixture-revision', runs: setupOptions.liveRuns ?? [] } }
     return { error: 'unexpected_request' }
   }
 

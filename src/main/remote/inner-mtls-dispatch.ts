@@ -16,6 +16,8 @@ export interface RemoteRequestEnvelope {
   cursor?: number
   outputCursor?: number
   waitMs?: number
+  // watch only: false asks for lifecycle evidence without the shadow output spool.
+  output?: boolean
   before?: number
   limit?: number
   snapshot?: string
@@ -99,10 +101,15 @@ export async function dispatchRemoteRequest(controller: HostController, fingerpr
     }
     if (request.op === 'watch') {
       if (typeof request.runId !== 'string' || !Number.isSafeInteger(request.cursor) || !Number.isSafeInteger(request.outputCursor) ||
-          !Number.isSafeInteger(request.waitMs)) return { error: 'invalid_request' }
-      return { watch: await controller.watchRun(fingerprint, {
+          !Number.isSafeInteger(request.waitMs) || (request.output !== undefined && typeof request.output !== 'boolean')) return { error: 'invalid_request' }
+      const watch = {
         runId: request.runId, cursor: request.cursor as number, outputCursor: request.outputCursor as number, waitMs: request.waitMs as number
-      }) }
+      }
+      // `output: false` skips the shadow output spool; the reply then carries no
+      // output page at all, rather than an empty one that could read as "no content".
+      return request.output === false
+        ? { watch: await controller.watchLifecycle(fingerprint, watch) }
+        : { watch: await controller.watchRun(fingerprint, watch) }
     }
     if (request.op === 'liveRuns') {
       if (!Number.isSafeInteger(request.waitMs) || (request.revision !== undefined &&

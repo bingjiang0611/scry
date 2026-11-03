@@ -195,9 +195,11 @@ describe('DesktopRemoteClient catalog and trace reads', () => {
       await fixture.client.finishPairing(id)
       await fixture.client.connect(id)
       await fixture.client.submit(id, { context: { cwd: '/workspace', providerId: 'pi' }, prompt: 'new session' })
-      fixture.tlsRequest.mockResolvedValueOnce({ state: 'dispatched' })
-      fixture.tlsRequest.mockResolvedValueOnce({ poll: { cursor: 1, events: [{ runId, kind: 'run_progress', detail: JSON.stringify({ event: 'session', externalSessionId: 'native-adopted' }) }] } })
+      // One lifecycle long poll, no shadow output page.
+      fixture.tlsRequest.mockResolvedValueOnce({ watch: { state: 'dispatched', questions: [], poll: { cursor: 1, events: [{ runId, kind: 'run_progress', detail: JSON.stringify({ event: 'session', externalSessionId: 'native-adopted' }) }] } } })
       await expect(fixture.client.runStatus(id, runId)).resolves.toMatchObject({ externalSessionId: 'native-adopted' })
+      expect(fixture.tlsRequest.mock.calls.filter(call => (call[0].request as { op?: string }).op === 'watch'))
+        .toContainEqual([expect.objectContaining({ request: expect.objectContaining({ output: false }) })])
       reloaded = new DesktopRemoteClient({ directory: fixture.directory, encrypt, decrypt }, { openTunnel: fixture.openTunnel, tlsRequest: fixture.tlsRequest })
       await expect(reloaded.intents(id)).resolves.toMatchObject([{ runId, context: { cwd: '/workspace', providerId: 'pi', externalSessionId: 'native-adopted' } }])
       expect(fixture.tlsRequest.mock.calls.filter(call => (call[0].request as { op?: string }).op === 'submit')).toHaveLength(1)
@@ -215,10 +217,11 @@ describe('DesktopRemoteClient catalog and trace reads', () => {
       const scope = { cwd: '/workspace', providerId: 'pi', externalSessionId: 'session-a' }
       const live = (externalSessionId: string) => ({ origin: 'remote', runId: ledgerRunId, providerId: 'pi', cwd: '/workspace', externalSessionId, prompt: 'p', state: 'running', questions: [] })
       fixture.tlsRequest.mockResolvedValueOnce({ liveRuns: { revision: 'r1', runs: [live('session-a')] } })
-      fixture.tlsRequest.mockResolvedValueOnce({ state: 'dispatched' })
-      fixture.tlsRequest.mockResolvedValueOnce({ poll: { cursor: 1, events: [{ runId: ledgerRunId, kind: 'run_progress', detail: JSON.stringify({ event: 'bound', scryRunId: 'run-phone-1' }) }] } })
+      fixture.tlsRequest.mockResolvedValueOnce({ watch: { state: 'dispatched', questions: [], poll: { cursor: 1, events: [{ runId: ledgerRunId, kind: 'run_progress', detail: JSON.stringify({ event: 'bound', scryRunId: 'run-phone-1' }) }] } } })
       await expect(fixture.client.liveRun(id, scope)).resolves.toEqual({ runId: ledgerRunId, origin: 'remote', state: 'running', scryRunId: 'run-phone-1' })
-      expect(fixture.tlsRequest.mock.calls.map(call => (call[0].request as { op?: string }).op).slice(-3)).toEqual(['liveRuns', 'runState', 'poll'])
+      // The live set is already fresh, so the status read does not wait again.
+      expect(fixture.tlsRequest.mock.calls.map(call => (call[0].request as { op?: string }).op).slice(-2)).toEqual(['liveRuns', 'watch'])
+      expect(fixture.tlsRequest.mock.calls.at(-1)?.[0].request).toMatchObject({ op: 'watch', waitMs: 0 })
       fixture.tlsRequest.mockResolvedValueOnce({ liveRuns: { revision: 'r2', runs: [live('session-b')] } })
       await expect(fixture.client.liveRun(id, scope)).resolves.toBeNull()
       fixture.tlsRequest.mockResolvedValueOnce({ liveRuns: { revision: 'r3', runs: [{ ...live('session-a'), state: 'done' }] } })

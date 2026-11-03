@@ -4,24 +4,37 @@ import type { DesktopRemoteContext, DesktopRemoteRunStatus, DesktopRemoteLiveRun
 import { DesktopRemoteClientSession } from './desktop-client-session'
 import { context, fail, record, text, validRunId, MAX_PAGES, MAX_ITEMS } from './desktop-client-validation'
 
+// The device waits on the host instead of ticking: one watch call holds until
+// something changes, so an idle run costs one request per window, not one per
+// second. The window stays below the lane's 40 s response timeout.
+const RUN_STATUS_WAIT_MS = 15_000
+const LIVE_RUNS_WAIT_MS = 15_000
+
 export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
-  async runStatus(connectionIdValue: string, runIdValue: string): Promise<DesktopRemoteRunStatus> {
+  // Revision the device last saw, so the host can wait while it is unchanged.
+  protected readonly liveRunsRevision = new Map<string, string>()
+
+  async runStatus(connectionIdValue: string, runIdValue: string, options: { waitMs?: number } = {}): Promise<DesktopRemoteRunStatus> {
     if (!validRunId(runIdValue)) fail('invalid_run_id')
     const key = `${connectionIdValue}:${runIdValue}`
     const watch = this.runWatch.get(key) ?? { cursor: 0 }
-    // Desktop content comes from canonical trace reads, not the shadow output
-    // spool. Its overflow or I/O failure must not block authoritative lifecycle.
-    // Read state before events so a terminal snapshot cannot retire the receipt
-    // before we have read its preceding bound/session markers.
-    const stateResponse = await this.requestForConnection(connectionIdValue, { op: 'runState', runId: runIdValue })
-    if (!record(stateResponse) || (stateResponse.state !== null && !['recorded', 'dispatched', 'settled', 'failed', 'cancelled'].includes(String(stateResponse.state)))) fail('invalid_run_status_response')
-    const authoritativeState = stateResponse.state === null ? null : String(stateResponse.state)
+    // `output: false` keeps the shadow output spool out of the lifecycle path: its
+    // overflow or I/O failure must not block authoritative state. Desktop content
+    // comes from canonical trace reads.
     let observedState: DesktopRemoteRunStatus['state'] = 'unknown'
+    let authoritativeState: string | null = null
+    // The first read for this run answers now; later reads wait for a change.
+    // A device that has never seen the run must not sit in a window first.
+    let waitMs = options.waitMs ?? (this.runWatch.has(key) ? RUN_STATUS_WAIT_MS : 0)
     for (let page = 0; page < MAX_PAGES; page++) {
-      const response = await this.requestForConnection(connectionIdValue, { op: 'poll', cursor: watch.cursor })
-      if (!record(response) || !record(response.poll) || !Array.isArray(response.poll.events) ||
-          !Number.isSafeInteger(response.poll.cursor) || (response.poll.reset !== undefined && !record(response.poll.reset))) fail('invalid_run_status_response')
-      const poll = response.poll as { events: unknown[]; cursor: number }
+      const response = await this.requestForConnection(connectionIdValue, { op: 'watch', runId: runIdValue, cursor: watch.cursor, outputCursor: 0, waitMs, output: false })
+      if (!record(response) || !record(response.watch) || !record(response.watch.poll) || !Array.isArray(response.watch.poll.events) ||
+          !Number.isSafeInteger(response.watch.poll.cursor) || (response.watch.poll.reset !== undefined && !record(response.watch.poll.reset))) fail('invalid_run_status_response')
+      const snapshot = response.watch as { poll: { events: unknown[]; cursor: number }; state?: unknown }
+      if (snapshot.state !== undefined && snapshot.state !== null &&
+          !['recorded', 'dispatched', 'settled', 'failed', 'cancelled'].includes(String(snapshot.state))) fail('invalid_run_status_response')
+      if (snapshot.state !== undefined) authoritativeState = snapshot.state === null ? null : String(snapshot.state)
+      const poll = snapshot.poll
       watch.cursor = poll.cursor
       for (const event of poll.events) {
         if (!record(event) || event.runId !== runIdValue || !text(event.kind, 64)) continue
@@ -36,7 +49,9 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
           if (marker.event === 'session' && text(marker.externalSessionId, 256)) watch.externalSessionId = marker.externalSessionId
         } catch { /* opaque progress is not evidence */ }
       }
-      if (poll.events.length === 0 || poll.events.length < 256) break
+      // Only a full page needs another read; the cursor jump is the common case.
+      if (poll.events.length < 256) break
+      waitMs = 0
     }
     this.runWatch.set(key, watch)
     const state: DesktopRemoteRunStatus['state'] = authoritativeState === null ? observedState : authoritativeState === 'cancelled' ? 'failed' : authoritativeState as DesktopRemoteRunStatus['state']
@@ -57,13 +72,19 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
   }
 
   // Finds the host's live run on one opened session, whichever client started
-  // it. Uses the device liveRuns snapshot (waitMs 0, no long-poll): the renderer
-  // already polls, and only while the catalog marks the session active.
-  async liveRun(connectionIdValue: string, value: DesktopRemoteContext): Promise<DesktopRemoteLiveRun | null> {
+  // it. Long-polls the device liveRuns set: the host answers as soon as the set
+  // differs from the revision this device last saw, or when the window ends.
+  async liveRun(connectionIdValue: string, value: DesktopRemoteContext, options: { waitMs?: number } = {}): Promise<DesktopRemoteLiveRun | null> {
     const scope = context(value)
     if (!scope.externalSessionId) fail('session_required')
-    const response = await this.requestForConnection(connectionIdValue, { op: 'liveRuns', waitMs: 0 })
-    if (!record(response) || !record(response.liveRuns) || !Array.isArray(response.liveRuns.runs) || response.liveRuns.runs.length > MAX_ITEMS) fail('invalid_live_runs_response')
+    const known = this.liveRunsRevision.get(connectionIdValue)
+    // No known revision yet: answer with the current set instead of waiting for a
+    // change the device could not compare against.
+    const waitMs = options.waitMs ?? (known ? LIVE_RUNS_WAIT_MS : 0)
+    const response = await this.requestForConnection(connectionIdValue, { op: 'liveRuns', waitMs, ...(known && waitMs > 0 ? { revision: known } : {}) })
+    if (!record(response) || !record(response.liveRuns) || !Array.isArray(response.liveRuns.runs) || response.liveRuns.runs.length > MAX_ITEMS ||
+        !text(response.liveRuns.revision, 64)) fail('invalid_live_runs_response')
+    this.liveRunsRevision.set(connectionIdValue, String(response.liveRuns.revision))
     for (const item of response.liveRuns.runs) {
       if (!record(item) || !validRunId(item.runId) || (item.origin !== 'remote' && item.origin !== 'mac') ||
           (item.state !== 'running' && item.state !== 'waiting' && item.state !== 'stopping') ||
@@ -76,7 +97,8 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
       // Host-UI runs are already canonical Scry runs. Device runs carry a ledger
       // UUID; the trace identity exists only after the host's bound marker.
       if (item.origin === 'mac') return { ...live, scryRunId: item.runId }
-      const status = await this.runStatus(connectionIdValue, item.runId)
+      // Status only: the live set is already fresh, so do not wait again.
+      const status = await this.runStatus(connectionIdValue, item.runId, { waitMs: 0 })
       return { ...live, ...(status.scryRunId ? { scryRunId: status.scryRunId } : {}) }
     }
     return null

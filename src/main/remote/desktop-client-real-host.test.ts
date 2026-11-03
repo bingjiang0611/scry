@@ -133,13 +133,13 @@ describe('DesktopRemoteClient over real host TLS', () => {
       expect(wire.filter((request) => (request as { operation?: string }).operation?.startsWith('pair.'))).toHaveLength(pairingRequests)
       await expect(client.history(pending.connection.id, { cwd: '/workspace', providerId: 'claude', externalSessionId: 'session-real' })).resolves.toMatchObject({ turns: [] })
       const sessionContext = { cwd: '/workspace', providerId: 'claude', externalSessionId: 'session-real' }
-      await expect(client.liveRun(pending.connection.id, sessionContext)).resolves.toBeNull()
+      await expect(client.liveRun(pending.connection.id, sessionContext, { waitMs: 0 })).resolves.toBeNull()
       hostUiRuns = [
         { runId: 'run-other-1', providerId: 'claude', cwd: '/workspace', externalSessionId: 'session-other', prompt: 'other', questions: [], stopping: false },
         { runId: 'run-hostui-1', providerId: 'claude', cwd: '/workspace', externalSessionId: 'session-real', prompt: '继续', questions: [], stopping: false }
       ]
-      await expect(client.liveRun(pending.connection.id, sessionContext)).resolves.toEqual({ runId: 'run-hostui-1', origin: 'mac', state: 'running', scryRunId: 'run-hostui-1' })
-      await expect(client.liveRun(pending.connection.id, { ...sessionContext, agentProfileId: 'other-profile' })).resolves.toBeNull()
+      await expect(client.liveRun(pending.connection.id, sessionContext, { waitMs: 0 })).resolves.toEqual({ runId: 'run-hostui-1', origin: 'mac', state: 'running', scryRunId: 'run-hostui-1' })
+      await expect(client.liveRun(pending.connection.id, { ...sessionContext, agentProfileId: 'other-profile' }, { waitMs: 0 })).resolves.toBeNull()
       hostUiRuns = []
       if (!captureFailure) {
         const context = { cwd: directory, providerId: 'pi' as const, externalSessionId: 'large-session' }
@@ -199,10 +199,16 @@ describe('DesktopRemoteClient over real host TLS', () => {
       await expect(client.runStatus(pending.connection.id, intent.runId!)).resolves.toMatchObject({ state: expectedState, scryRunId: 'run-real-1', externalSessionId: 'session-real' })
       await expect(client.intents(pending.connection.id)).resolves.toEqual([])
       expect(outputReads).not.toHaveBeenCalled()
-      expect(wire.some((request) => (request as { op?: string }).op === 'watch')).toBe(false)
-      const polls = wire.filter((request): request is { op: string; cursor: number } => (request as { op?: string }).op === 'poll')
-      expect(polls[0]?.cursor).toBe(0)
-      expect(polls[1]?.cursor).toBeGreaterThan(0)
+      // The lifecycle long poll never reads the shadow output spool: that is what
+      // `output: false` buys, and the only watch shape this client may send.
+      const watches = wire.filter((request) => (request as { op?: string }).op === 'watch')
+      expect(watches.length).toBeGreaterThan(0)
+      expect(watches.every((request) => (request as { output?: unknown }).output === false)).toBe(true)
+      // The ledger cursor advances across the long polls: the device never re-reads
+      // events it already applied.
+      const cursors = watches.map((request) => (request as { cursor: number }).cursor)
+      expect(cursors[0]).toBe(0)
+      expect(cursors.at(-1)).toBeGreaterThan(0)
       const grant = binding.controller.authority.inspectLocal().grants[0]
       expect(providerStarts).toBe(1)
       dropBeforeDelivery = true

@@ -2,7 +2,10 @@ import type { AgentPermissionMode, AgentRunControlCatalog, AgentRunControls } fr
 import type { DesktopRemoteContext, DesktopRemoteIntent, RemoteProviderRef } from '@shared/desktop-remote'
 import { REMOTE_SESSION_COPY } from '../constants/copy'
 
-export const POLL_MS = 1500
+// Minimum gap between poll cycles. The wait now happens on the host: one long
+// poll holds until something changes, so this is only the gap between a reply
+// and the next request, not the latency budget. Quiet results still back off.
+export const POLL_MS = 250
 export const QUIET_POLL_MAX_MS = 5000
 
 export function keepIfEqual<T>(next: T): (current: T) => T {
