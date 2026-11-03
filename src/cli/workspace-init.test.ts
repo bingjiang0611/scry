@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
+import { EventEmitter } from 'node:events'
 import { chmod, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { createServer } from 'node:net'
@@ -6,6 +7,8 @@ import { join, resolve } from 'node:path'
 import { runInNewContext } from 'node:vm'
 import { afterEach, describe, expect, it } from 'vitest'
 import { initWorkspace } from './workspace-init'
+import { handleRecorderHook } from '../core/turn-recorder/recorder'
+import { listRecords } from '../core/turn-recorder/store'
 
 const roots: string[] = []
 
@@ -238,6 +241,91 @@ describe('scry init', () => {
     await idle('failed-dispatch')
     await idle('failed-dispatch')
     expect(stops()).toHaveLength(before + 3)
+  })
+
+  it('OpenCode 使用原生消息身份立即终结对应轮次，不进入 180 秒陈旧终态宽限期', async () => {
+    const root = await gitWorkspace()
+    await initWorkspace({ workspace: root, providers: 'opencode', cliPath: process.execPath })
+    const source = (await readFile(join(root, '.opencode/plugins/scry-recorder.js'), 'utf8'))
+      .replace(/^import .*$/gm, '')
+      .replace("const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')", `const root = ${JSON.stringify(root)}`)
+      .replace('export const ScryRecorder', 'const ScryRecorder')
+      .replace('export default ScryRecorder', 'ScryRecorder()')
+    const delivered: Record<string, unknown>[] = []
+    const hooks = await runInNewContext(source, {
+      resolve, Buffer, TextDecoder, process,
+      spawnSync: (_hook: string, _args: string[], options: { input: string }) => {
+        delivered.push(JSON.parse(options.input))
+        return { status: 0 }
+      }
+    }) as Record<string, (input: unknown, output?: unknown) => Promise<void>>
+
+    await hooks['chat.message']({ sessionID: 'session-1', messageID: 'message-1', prompt: 'finish promptly' })
+    await hooks['tool.execute.before']({ sessionID: 'session-1', tool: 'bash', callID: 'call-1', args: { command: 'true' } })
+    await hooks['tool.execute.after'](
+      { sessionID: 'session-1', tool: 'bash', callID: 'call-1', args: { command: 'true' } },
+      { output: 'ok' }
+    )
+    await hooks.event({ event: { type: 'session.idle', properties: { sessionID: 'session-1' } } })
+
+    expect(delivered).toHaveLength(4)
+    expect(delivered.map(payload => payload.turn_id)).toEqual(Array(4).fill('message-1'))
+    for (const payload of delivered) {
+      await handleRecorderHook({
+        workspace: root,
+        provider: 'opencode',
+        event: String(payload.hook_event_name),
+        payload
+      })
+    }
+    const records = await listRecords(join(root, '.scry'))
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({ provider: { id: 'opencode' }, status: 'completed' })
+  })
+
+  it('OpenCode 单一活动轮次收到 SIGINT 时先提交 interrupted 终态再保留信号退出', async () => {
+    const root = await gitWorkspace()
+    await initWorkspace({ workspace: root, providers: 'opencode', cliPath: process.execPath })
+    const source = (await readFile(join(root, '.opencode/plugins/scry-recorder.js'), 'utf8'))
+      .replace(/^import .*$/gm, '')
+      .replace("const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')", `const root = ${JSON.stringify(root)}`)
+      .replace('export const ScryRecorder', 'const ScryRecorder')
+      .replace('export default ScryRecorder', 'ScryRecorder()')
+    const delivered: Record<string, unknown>[] = []
+    const signals: string[] = []
+    const fakeProcess = new EventEmitter() as EventEmitter & {
+      pid: number
+      kill: (_pid: number, signal: string) => void
+      stderr: { write: (_message: string) => void }
+    }
+    fakeProcess.pid = 123
+    fakeProcess.kill = (_pid, signal) => { signals.push(signal) }
+    fakeProcess.stderr = { write: () => undefined }
+    const signalExit = () => {
+      if (fakeProcess.listeners('SIGINT').length !== 1) return
+      fakeProcess.removeListener('SIGINT', signalExit)
+      fakeProcess.kill(fakeProcess.pid, 'SIGINT')
+    }
+    fakeProcess.on('SIGINT', signalExit)
+    const hooks = await runInNewContext(source, {
+      resolve, Buffer, TextDecoder, process: fakeProcess,
+      spawnSync: (_hook: string, _args: string[], options: { input: string }) => {
+        delivered.push(JSON.parse(options.input))
+        return { status: 0 }
+      }
+    }) as Record<string, (input: unknown, output?: unknown) => Promise<void>>
+
+    await hooks['chat.message']({ sessionID: 'signal-session', messageID: 'signal-message', prompt: 'wait' })
+    fakeProcess.emit('SIGINT')
+
+    expect(delivered).toHaveLength(2)
+    expect(delivered[1]).toMatchObject({
+      session_id: 'signal-session',
+      turn_id: 'signal-message',
+      hook_event_name: 'Stop',
+      status: 'interrupted'
+    })
+    expect(signals).toContain('SIGINT')
   })
 
   it.each(['none', 'summary'])('保留已有显式 %s 配置，不猜测用户意图', async (toolOutput) => {

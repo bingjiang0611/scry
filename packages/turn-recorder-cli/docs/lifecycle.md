@@ -2,6 +2,12 @@
 
 [返回 CLI README](../README.md)
 
+## 未发布：OpenCode / Pi 终态收敛
+
+- OpenCode 插件把原生 `messageID` 作为同轮 `turn_id` 贯穿 start、tool 与 idle 终态。已知轮次不再因为缺少身份而进入 180 秒陈旧终态宽限期；无法取得原生消息身份时仍保留原有保守路径，不猜测。非交互进程收到 `SIGINT` 且只有一个活动轮次时，插件同步提交该轮 `interrupted` Stop 后再重新发送信号；存在多个活动轮次时不猜测目标，保留 open 状态供后续真实终态或恢复处理。
+- Pi 扩展在进程收到 `SIGINT` 时，先按队列顺序持久化当前轮次的 `interrupted` Stop，再移除自己的监听并重新发送同一信号。这样保留原生信号退出语义，同时避免非交互 `pi -p` 直接退出后遗留永不收口的 `open.json`。
+- 两项修复只影响新轮次，不重写历史记录。OpenCode 工作区需要 repair/re-init 更新生成插件；Pi 需要更新并重新加载用户级扩展。
+
 ## 0.2.52 sequence 水位、投递空洞与丢失结果恢复
 
 - sequence 分配改为持久化已发号水位：提交锁内先 durable 写入再写 record，删除最新 record 或删光 records 后不再复用号。`doctor` 新增 `records.sequence`，水位高于现存最大号时报 warn。

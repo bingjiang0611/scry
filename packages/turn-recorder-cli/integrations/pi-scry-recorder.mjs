@@ -10,6 +10,47 @@ const MAX_ASSISTANT_BYTES = 256 * 1024
 // A tool event stays below the daemon's 8 MiB request limit, including metadata.
 const MAX_TOOL_BYTES = 4 * 1024 * 1024
 
+let sigintHandler
+let sigintFlush
+let sigintFlushing = false
+
+function armSigint(flush) {
+  sigintFlush = flush
+  if (sigintHandler) return
+  sigintHandler = () => {
+    if (sigintFlushing) return
+    const action = sigintFlush
+    const handler = sigintHandler
+    sigintFlush = undefined
+    if (!action) {
+      sigintHandler = undefined
+      if (handler) process.removeListener('SIGINT', handler)
+      process.kill(process.pid, 'SIGINT')
+      return
+    }
+    // Pi loads signal-exit. Keep this listener installed for the whole first signal
+    // emission; removing it synchronously would make signal-exit the sole listener,
+    // and it would re-raise SIGINT before the asynchronous terminal delivery finishes.
+    sigintFlushing = true
+    void action().finally(() => {
+      if (sigintHandler === handler) sigintHandler = undefined
+      if (handler) process.removeListener('SIGINT', handler)
+      sigintFlushing = false
+      process.kill(process.pid, 'SIGINT')
+    })
+  }
+  process.prependListener('SIGINT', sigintHandler)
+}
+
+function disarmSigint(flush) {
+  if (sigintFlush !== flush) return
+  sigintFlush = undefined
+  if (sigintFlushing) return
+  const handler = sigintHandler
+  sigintHandler = undefined
+  if (handler) process.removeListener('SIGINT', handler)
+}
+
 function debug(message) {
   if (process.env.SCRY_RECORDER_DEBUG === '1') process.stderr.write(`[scry-pi] ${message}\n`)
 }
@@ -219,6 +260,33 @@ export default function scryPiRecorder(pi) {
     queue = queue.then(() => deliver(workspace, event, payload)).catch((error) => debug(String(error)))
     return queue
   }
+  const settleActive = async (status) => {
+    const turn = active
+    if (!turn || turn.settled) return
+    turn.settled = true
+    disarmSigint(flushOnSigint)
+    const assistant = boundedText(turn.assistant.join('\n'))
+    await enqueue(turn.workspace, 'Stop', {
+      session_id: turn.sessionId,
+      promptId: turn.providerTurnId,
+      assistant_response: assistant.value,
+      ...limitation({ assistant_response: assistant, error: turn.error }),
+      ...(turn.usageObserved ? { usage: turn.usage } : {}),
+      ...(turn.usageIncomplete ? { usage_complete: false } : turn.usageObserved ? { usage_complete: true } : {}),
+      model_segments: turn.modelSegments,
+      ...(turn.modelSegments.some((segment) => typeof segment.model === 'string')
+        ? { model_ids: [...new Set(turn.modelSegments.flatMap((segment) => typeof segment.model === 'string' ? [segment.model] : []))], model_ids_complete: turn.modelSegments.every((segment) => typeof segment.model === 'string' && segment.model.length > 0) }
+        : {}),
+      ...(turn.error ? { error: turn.error.value } : {}),
+      status,
+      timestamp: new Date().toISOString(),
+    })
+    if (active === turn) active = undefined
+  }
+  const flushOnSigint = async () => {
+    await settleActive('interrupted')
+    await queue
+  }
 
   pi.on('before_agent_start', async (event, ctx) => {
     responseStartedAt = undefined
@@ -236,6 +304,7 @@ export default function scryPiRecorder(pi) {
       startedAt: new Date().toISOString(),
       settled: false,
     }
+    armSigint(flushOnSigint)
     await enqueue(ctx.cwd, 'UserPromptSubmit', {
       session_id: sessionId,
       promptId: providerTurnId,
@@ -307,47 +376,13 @@ export default function scryPiRecorder(pi) {
   pi.on('agent_settled', async (event) => {
     const turn = active
     if (!turn || turn.settled) return
-    turn.settled = true
-    const assistant = boundedText(turn.assistant.join('\n'))
-    await enqueue(turn.workspace, 'Stop', {
-      session_id: turn.sessionId,
-      promptId: turn.providerTurnId,
-      assistant_response: assistant.value,
-      ...limitation({ assistant_response: assistant, error: turn.error }),
-      ...(turn.usageObserved ? { usage: turn.usage } : {}),
-      ...(turn.usageIncomplete ? { usage_complete: false } : turn.usageObserved ? { usage_complete: true } : {}),
-      model_segments: turn.modelSegments,
-      ...(turn.modelSegments.some((segment) => typeof segment.model === 'string')
-        ? { model_ids: [...new Set(turn.modelSegments.flatMap((segment) => typeof segment.model === 'string' ? [segment.model] : []))], model_ids_complete: turn.modelSegments.every((segment) => typeof segment.model === 'string' && segment.model.length > 0) }
-        : {}),
-      ...(turn.error ? { error: turn.error.value } : {}),
-      status: event.aborted ? 'cancelled' : turn.terminalStatus ?? 'completed',
-      timestamp: new Date().toISOString(),
-    })
-    if (active === turn) active = undefined
+    await settleActive(event.aborted ? 'cancelled' : turn.terminalStatus ?? 'completed')
   })
 
   pi.on('session_shutdown', async () => {
     const turn = active
-    if (turn && !turn.settled) {
-      turn.settled = true
-      const assistant = boundedText(turn.assistant.join('\n'))
-      await enqueue(turn.workspace, 'Stop', {
-        session_id: turn.sessionId,
-        promptId: turn.providerTurnId,
-        assistant_response: assistant.value,
-        ...limitation({ assistant_response: assistant, error: turn.error }),
-        ...(turn.usageObserved ? { usage: turn.usage } : {}),
-        ...(turn.usageIncomplete ? { usage_complete: false } : turn.usageObserved ? { usage_complete: true } : {}),
-        model_segments: turn.modelSegments,
-        ...(turn.modelSegments.some((segment) => typeof segment.model === 'string')
-          ? { model_ids: [...new Set(turn.modelSegments.flatMap((segment) => typeof segment.model === 'string' ? [segment.model] : []))], model_ids_complete: turn.modelSegments.every((segment) => typeof segment.model === 'string' && segment.model.length > 0) }
-          : {}),
-        ...(turn.error ? { error: turn.error.value } : {}),
-        status: turn.terminalStatus ?? 'interrupted',
-        timestamp: new Date().toISOString(),
-      })
-    }
+    await settleActive(turn?.terminalStatus ?? 'interrupted')
+    disarmSigint(flushOnSigint)
     await queue
   })
 }
