@@ -12,7 +12,7 @@
 | T3 长轮询 | 完成 | `70fc0b9`、`8589154` | watch 生命周期模式 + `liveRuns` revision 长轮询；renderer 只在报告变化时读 trace |
 | T4 catalog 合批 | 完成 | `d521442` | `catalogSnapshot` 一次带回 info/projects/providers/首页；unchanged 不回 payload |
 | T5 协议版本校验 | 完成 | `e2d7426` | `REMOTE_PROTOCOL_VERSION=2`，lane 请求带版本，不符即拒并指出哪一端更旧；Swift 测试未运行 |
-| T6 P3/P4 设计文档 | 未开始 | | |
+| T6 P3/P4 设计文档 | 完成 | 待填 | 只写文档：daemon 边界与本机通道、事件日志契约与迁移 |
 
 
 ## 每个任务的证据
@@ -25,6 +25,7 @@
 - [T3 长轮询](status/t3.md)
 - [T4 catalog 合批](status/t4.md)
 - [T5 协议版本校验](status/t5.md)
+- [T6 P3/P4 设计文档](status/t6.md)
 
 ## 阻塞
 
