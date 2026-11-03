@@ -66,7 +66,9 @@ export async function finalizeOpenTurn(
     ? `${options.forcedReason}; the transcript no longer contains this turn`
     : open.endReason === 'session_end'
       ? 'provider session ended without a matching transcript; only lifecycle-hook evidence remains'
-      : undefined
+      : open.terminalIdentityConfirmedBySessionEnd
+        ? 'provider session ended after the terminal hook without a matching transcript; only lifecycle-hook evidence remains'
+        : undefined
   if (transcript.identityMatched === false) {
     // A prompt cancelled before model execution may never reach the native transcript. A real
     // session end can close that turn on lifecycle evidence alone; discard every unmatched byte.

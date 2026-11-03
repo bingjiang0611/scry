@@ -7,7 +7,7 @@ import { findRecordById, recordError, safeKey } from './store.js'
 import { recorderInboxEntries, INBOX_MAX_ATTEMPTS, quarantineInboxEntry, readInboxFailure, readInboxJson } from './inbox.js'
 import { recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
 import type { RecorderEnablement } from './config.js'
-import { END_EVENTS, SESSION_END_EVENTS, START_EVENTS, hookArrival, type RecorderHookInput, type RecorderHookResult, type QueuedHook, explicitTimestampOf, providerTurnIdOf, promptOf, stringAt, subagentScopedPayload, timestampOf, startFingerprintOf, STALE_TERMINAL_PROVIDERS, STOP_HOOK_ACTIVE_PROVIDERS, STALE_TERMINAL_WINDOW_MS } from './recorder-contracts.js'
+import { END_EVENTS, SESSION_END_EVENTS, START_EVENTS, hookArrival, type RecorderHookInput, type RecorderHookResult, type QueuedHook, explicitTimestampOf, providerTurnIdOf, promptOf, stringAt, subagentScopedPayload, terminalStatus, timestampOf, startFingerprintOf, STALE_TERMINAL_PROVIDERS, STOP_HOOK_ACTIVE_PROVIDERS, STALE_TERMINAL_WINDOW_MS } from './recorder-contracts.js'
 import { beginOpenTurn, quarantineOpenTurn, storeLifecycleEvent } from './recorder-turn-state.js'
 import { finalizeOpenTurn } from './recorder-turn-finalize.js'
 import { isClaudeTaskNotification, isCommittedProviderTurn, isContinuationProviderTurn, rememberContinuationProviderTurn, storeOrphanEvent, continuationProviderTurnIds } from './recorder-hook-support.js'
@@ -167,7 +167,16 @@ export async function applyHookLocked(
   const sessionEndEvent = SESSION_END_EVENTS.has(input.event)
   const endEvent = END_EVENTS.has(input.event) || sessionEndEvent
   if (open.deferredTerminalEventId) {
-    if (endEvent) return { status: 'pending' as const, reason: 'unidentified terminal is already deferred' }
+    if (endEvent) {
+      if (!sessionEndEvent) return { status: 'pending' as const, reason: 'unidentified terminal is already deferred' }
+      await storeLifecycleEvent(enablement, open, input.event, input.payload)
+      open.terminalFallbackStatus ??= 'completed'
+      open.terminalIdentityConfirmedBySessionEnd = true
+      delete open.deferredTerminalAt
+      delete open.deferredTerminalEventId
+      await writeJsonAtomic(openPath(root), open)
+      return { status: 'pending' as const, reason: 'session end confirmed the deferred terminal; aggregation deferred to recovery' }
+    }
     await rm(join(turnRoot(root, open.generation), 'events', `${open.deferredTerminalEventId}.json`), { force: true })
     open.status = 'open'
     delete open.closingAt
@@ -210,11 +219,15 @@ export async function applyHookLocked(
           return { repository, snapshot: terminalSnapshot(capture, 'unavailable', 'git_error', [], terminalAt, Date.now() - started, 'failed') }
         }
       }))
+      open.terminalFallbackStatus ??= terminalStatus(input.payload, 'completed')
       open.deferredTerminalAt = new Date().toISOString()
       open.deferredTerminalEventId = eventId
       await writeJsonAtomic(openPath(root), open)
       return { status: 'pending' as const, reason: 'unidentified early terminal deferred for stale-event protection' }
     }
+  }
+  if (sessionEndEvent && open.terminalIdentityConfirmedBySessionEnd) {
+    return { status: 'pending' as const, reason: 'session end already confirmed the deferred terminal' }
   }
   await storeLifecycleEvent(enablement, open, input.event, input.payload)
   if (!endEvent) return { status: 'recorded' as const }

@@ -163,6 +163,54 @@ export function registerSuite1(): void {
     expect(JSON.stringify(records)).not.toContain('foreign answer')
   })
 
+  it('Qoder SessionEnd confirms an already deferred Stop without waiting for stale-terminal grace', async () => {
+    const root = await workspace()
+    const sessionId = 'qoder-headless-completed'
+    const base = { provider: 'qoder' as const, workspace: root }
+    const native = {
+      session_id: sessionId,
+      cwd: root,
+      transcript_path: join(root, 'non-persisted-qoder.jsonl')
+    }
+    await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: {
+      ...native, hook_event_name: 'UserPromptSubmit', prompt: 'answer once'
+    } })
+    await expect(handleRecorderHook({ ...base, event: 'Stop', payload: {
+      ...native, hook_event_name: 'Stop', assistant_response: 'done'
+    } })).resolves.toMatchObject({ status: 'pending' })
+    const openPath = join(root, '.scry/runtime/qoder', safeKey(sessionId), 'open.json')
+    const deferred = JSON.parse(await readFile(openPath, 'utf8'))
+    expect(deferred).toMatchObject({ status: 'closing', endReason: 'provider_terminal' })
+    expect(deferred.deferredTerminalEventId).toBeTruthy()
+
+    const sessionEnd = { ...base, event: 'SessionEnd', payload: {
+      ...native, hook_event_name: 'SessionEnd', reason: 'other'
+    } }
+    await expect(handleRecorderHook(sessionEnd)).resolves.toMatchObject({ status: 'pending' })
+    const confirmed = JSON.parse(await readFile(openPath, 'utf8'))
+    expect(confirmed).toMatchObject({
+      status: 'closing',
+      endReason: 'provider_terminal',
+      terminalFallbackStatus: 'completed',
+      terminalIdentityConfirmedBySessionEnd: true
+    })
+    expect(confirmed.deferredTerminalAt).toBeUndefined()
+    expect(confirmed.deferredTerminalEventId).toBeUndefined()
+    const terminalAt = confirmed.terminalAt
+    await expect(handleRecorderHook(sessionEnd)).resolves.toMatchObject({ status: 'pending' })
+    expect(JSON.parse(await readFile(openPath, 'utf8')).terminalAt).toBe(terminalAt)
+
+    await recoverRecorder(root)
+    await expect(handleRecorderHook(sessionEnd)).resolves.toMatchObject({ status: 'duplicate' })
+    const records = await listRecords(join(root, '.scry'))
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({
+      sessionId,
+      status: 'completed',
+      termination: { value: { reason: 'provider_terminal' } }
+    })
+  })
+
   it('a terminal timestamp from a skewed Provider clock is not trusted as the end time', async () => {
     const root = await workspace()
     const base = { provider: 'claude' as const, workspace: root }
