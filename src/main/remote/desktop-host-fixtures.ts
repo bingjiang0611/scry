@@ -1,3 +1,4 @@
+import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import 'reflect-metadata'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -6,7 +7,8 @@ import { webcrypto } from 'node:crypto'
 import { Pkcs10CertificateRequestGenerator, cryptoProvider } from '@peculiar/x509'
 import { RemoteHostService } from './remote-host-service'
 import { RunOutputFileStore } from './run-output-file'
-import { DesktopLanes } from './desktop-lane'
+import { DesktopLanes, type DesktopLaneEndpoint, type DesktopLaneName } from './desktop-lane'
+import { framedRequest } from './remote-protocol'
 import { verifyCSR } from './enrollment'
 import { ProviderOperationGate } from '../provider-operation-gate'
 
@@ -31,7 +33,7 @@ export async function withPairedHost<T>(run: (host: PairedHost) => Promise<T>): 
     // The minimum desktop surface a device needs: info, projects, providers and
     // the session page. Anything else is honestly unavailable on this host.
     readDesktop: (query) => query.kind === 'info'
-      ? Promise.resolve({ kind: 'info' as const, protocol: 1 as const, hostId: 'host-fixture', execution: 'canonical' as const })
+      ? Promise.resolve({ kind: 'info' as const, protocol: REMOTE_PROTOCOL_VERSION, hostId: 'host-fixture', execution: 'canonical' as const })
       : Promise.reject(new Error('desktop_protocol_unavailable')),
     listProjects: () => [],
     listProviders: () => [],
@@ -61,4 +63,11 @@ export async function withPairedHost<T>(run: (host: PairedHost) => Promise<T>): 
     await service.dispose()
     rmSync(dir, { recursive: true, force: true })
   }
+}
+
+// Speak the wire the way a client does: every request declares the protocol
+// version this build speaks, so a test cannot pass by omitting it.
+export function requestOn(lanes: DesktopLanes, lane: DesktopLaneName, id: string, options: { endpoint: DesktopLaneEndpoint; request: unknown; replayable: boolean; signal?: AbortSignal }): Promise<unknown> {
+  const request = options.request && typeof options.request === 'object' && !Array.isArray(options.request) ? framedRequest(options.request as Record<string, unknown>) : options.request
+  return lanes.request(lane, id, { ...options, request })
 }

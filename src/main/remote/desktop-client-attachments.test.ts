@@ -1,3 +1,4 @@
+import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -16,7 +17,7 @@ describe('DesktopRemoteClient attachment submission fence', () => {
       const original = fixture.tlsRequest.getMockImplementation()!
       fixture.tlsRequest.mockImplementation(async (options) => {
         const request = options.request as { op?: string }
-        if (request.op === 'desktop') return { desktop: { kind: 'info', protocol: 1, hostId: fixture.host.hostId, execution: 'canonical', attachments: { transport: 'chunked', maxBytes: 16 * 1024 * 1024, maxTotalBytes: 32 * 1024 * 1024, maxCount: 16, chunkBytes: 256 * 1024 } } }
+        if (request.op === 'desktop') return { desktop: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: fixture.host.hostId, execution: 'canonical', attachments: { transport: 'chunked', maxBytes: 16 * 1024 * 1024, maxTotalBytes: 32 * 1024 * 1024, maxCount: 16, chunkBytes: 256 * 1024 } } }
         if (request.op === 'attachmentStart') { entered(); await blocked; throw new Error('network_down') }
         return original(options)
       })

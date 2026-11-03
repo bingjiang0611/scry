@@ -1,3 +1,4 @@
+import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import { describe, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -123,7 +124,7 @@ describe('desktop attachment transport storage', () => {
   })
 
   it('does not advertise chunked attachments from an old host without the store', async () => {
-    const controller = new HostController({ pairing: pairing(), ledgerStore: new LedgerStoreMemory(), workspace: { authorize: (cwd) => cwd }, readDesktop: async () => ({ kind: 'info', protocol: 1, hostId: 'old-host', execution: 'canonical' }), runProvider: async () => {} })
+    const controller = new HostController({ pairing: pairing(), ledgerStore: new LedgerStoreMemory(), workspace: { authorize: (cwd) => cwd }, readDesktop: async () => ({ kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: 'old-host', execution: 'canonical' }), runProvider: async () => {} })
     const pair = await controller.authority.begin()
     await controller.authority.prove({ pairingId: pair.pairingId, secret: pair.secret, csrPEM: 'csr', deviceLabel: 'desktop' }, 'b'.repeat(64))
     await controller.authority.confirmLocal(pair.pairingId, 'b'.repeat(64))

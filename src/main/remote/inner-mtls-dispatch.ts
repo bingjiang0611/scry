@@ -2,6 +2,7 @@ import type { HostController } from './host-controller'
 import { executionTargetError, type ExecutionTargetRouter } from './execution-targets'
 import { historyProfileSelection } from './remote-gateway'
 import { dispatchHistoryRequest, parseLiveRunsHistory } from './inner-mtls-history-dispatch'
+import { protocolMismatch } from './remote-protocol'
 
 // The device-facing request vocabulary: which controller capability an
 // authenticated request reaches, and how its envelope is bounded before it does.
@@ -10,6 +11,8 @@ import { dispatchHistoryRequest, parseLiveRunsHistory } from './inner-mtls-histo
 export interface RemoteRequestEnvelope {
   op?: string
   keepAlive?: unknown
+  // Declared by every run-channel request; a mismatch is refused, not inferred.
+  protocol?: number
   deviceLabel?: unknown
   intentId?: string
   detail?: string
@@ -52,12 +55,16 @@ export interface RemoteRequestEnvelope {
 export async function dispatchRemoteRequest(controller: HostController, fingerprint: string, parsed: unknown, executionTargets?: ExecutionTargetRouter): Promise<unknown> {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { error: 'invalid_request' }
   const request = parsed as RemoteRequestEnvelope
+  // Version gate before any op runs: a request that does not declare this host's
+  // version is answered with both versions, never partially executed.
+  const mismatch = protocolMismatch(request)
+  if (mismatch) return mismatch
   try {
     if (request.op === 'executionTargets') {
       // Discovery runs on the persistent control lane, so it carries the same
       // authenticated phone metadata as other run requests. Strip those
       // transport-only fields here; nothing else may cross this boundary.
-      if (Object.keys(request).some((key) => !['op', 'keepAlive', 'deviceLabel'].includes(key)) ||
+      if (Object.keys(request).some((key) => !['op', 'keepAlive', 'deviceLabel', 'protocol'].includes(key)) ||
           (request.keepAlive !== undefined && typeof request.keepAlive !== 'boolean')) return { error: 'invalid_request' }
       if (!executionTargets) return { error: 'execution_targets_unavailable' }
       if (request.deviceLabel !== undefined) await controller.authority.updateDeviceLabel(fingerprint, request.deviceLabel)
@@ -68,7 +75,7 @@ export async function dispatchRemoteRequest(controller: HostController, fingerpr
       if (request.deviceLabel !== undefined) await controller.authority.updateDeviceLabel(fingerprint, request.deviceLabel)
       // These describe the authenticated phone's Mac1 transport, not the
       // forwarded operation or Mac2's desktop peer. Keep business validation exact.
-      const { keepAlive: _keepAlive, deviceLabel: _deviceLabel, ...envelope } = request
+      const { keepAlive: _keepAlive, deviceLabel: _deviceLabel, protocol: _protocol, ...envelope } = request
       try { return await executionTargets.dispatch(fingerprint, envelope) } catch (error) { return executionTargetError(error) }
     }
     if (request.deviceLabel !== undefined) await controller.authority.updateDeviceLabel(fingerprint, request.deviceLabel)

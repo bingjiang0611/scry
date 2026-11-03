@@ -31,6 +31,10 @@ public final class RelaySession: Sendable {
   // the focused run's watch or a large history page.
   public enum Lane: Sendable, CaseIterable { case control, watch, status, bulk }
 
+  // Run-channel protocol version. The host refuses a different one and reports
+  // its own, so the UI can name the end that is behind instead of degrading.
+  static let protocolVersion = 2
+
   private let lanes: [Lane: RelayLane]
   private let deviceLabel: String?
 
@@ -87,7 +91,7 @@ public final class RelaySession: Sendable {
   // repeat the same value (the host's JSON.parse keeps the last duplicate).
   static func keepAliveRequest(_ request: Data, deviceLabel: String? = nil) throws -> Data {
     precondition(request.first == UInt8(ascii: "{") && request.count >= 2)
-    var prefix = Data("{\"keepAlive\":true".utf8)
+    var prefix = Data("{\"keepAlive\":true,\"protocol\":\(Self.protocolVersion)".utf8)
     if let deviceLabel {
       prefix += Data(",\"deviceLabel\":".utf8)
       prefix += try JSONEncoder().encode(deviceLabel)

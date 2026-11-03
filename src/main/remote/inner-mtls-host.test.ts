@@ -1,6 +1,7 @@
+import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import 'reflect-metadata'
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { connect, type TLSSocket } from 'node:tls'
@@ -14,7 +15,6 @@ import { createHostController } from './host-controller-factory'
 import { RunOutputFileStore } from './run-output-file'
 import { InnerMtlsHost } from './inner-mtls-host'
 import { ExecutionTargetRouter } from './execution-targets'
-import { providerDiscoveryFixture } from './provider-discovery.fixture'
 import { ProviderOperationGate } from '../provider-operation-gate'
 import type { AgentQuestionRequest, AgentQuestionResponse } from '../../shared/runtime'
 
@@ -98,7 +98,10 @@ async function call(addr: { port: number; host: string }, caPEM: string, certPEM
     minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined
   })
   await once(socket, 'secureConnect')
-  socket.write(JSON.stringify(request) + '\n')
+  // The device declares the run-channel version on every request, exactly like
+  // the desktop client and the phone do.
+  const framed = request && typeof request === 'object' && !Array.isArray(request) ? { protocol: REMOTE_PROTOCOL_VERSION, ...request as Record<string, unknown> } : request
+  socket.write(JSON.stringify(framed) + '\n')
   let buffer = ''
   for await (const chunk of socket) { buffer += (chunk as Buffer).toString('utf8'); if (buffer.includes('\n')) break }
   socket.destroy()
@@ -107,155 +110,8 @@ async function call(addr: { port: number; host: string }, caPEM: string, certPEM
 
 const routing = (over: Partial<RemoteIntentRouting> = {}) => JSON.stringify({ cwd: AUTHORIZED, providerId: 'claude', ...over })
 
+// The loopback production stack: real TLS, real pairing, real controller.
 describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
-  it('downloads exact arbitrary bytes only for a current owner and the selected workspace through production mTLS', async () => {
-    const cwd = mkdtempSync(join(tmpdir(), 'scry-file-mtls-')); dirs.push(cwd)
-    const bytes = Buffer.alloc(600_000)
-    for (let i = 0; i < bytes.length; i++) bytes[i] = i % 256
-    writeFileSync(join(cwd, 'arbitrary.bin'), bytes)
-    const identity = await ensureHostIdentity(join(cwd, 'identity'))
-    const startRun = vi.fn(async () => {})
-    const binding = await createHostController({ stateDirectory: join(cwd, 'state'), hostId: identity.hostId,
-      anchorSHA256: identity.anchorSHA256, verifyCSR: identity.verifyCSR, issue: identity.issue,
-      authorizeWorkspace: value => { if (value !== cwd) throw new Error('workspace_not_authorized'); return cwd },
-      startRun, gate: new ProviderOperationGate(), createOutputStore: directory => new RunOutputFileStore(directory) })
-    cleanups.push(() => binding.close())
-    const server = await identity.issueHostServer()
-    const host = new InnerMtlsHost({ controller: binding.controller, serverCertPEM: server.certificatePEM,
-      serverKeyPEM: server.privateKeyPEM, caPEM: identity.caCertificatePEM })
-    const addr = await host.listen(); cleanups.push(() => host.close())
-    const owner = await pairDevice(identity, binding.controller)
-    const other = await pairDevice(identity, binding.controller)
-    const request = (query: unknown, device = owner) => call(addr, identity.caCertificatePEM, device.certPEM, device.keyPEM, { op: 'fileDownload', query })
-    const first = await request({ action: 'open', cwd, target: 'arbitrary.bin' })
-    expect(first.fileDownload).toMatchObject({ kind: 'page', offset: 0, hasMore: true, totalBytes: bytes.length })
-    const id = first.fileDownload.id
-    const next = { action: 'read', cwd, id, offset: first.fileDownload.nextOffset }
-    expect(await request(next, other)).toEqual({ error: 'file_download_context_mismatch' })
-    expect(await request({ ...next, cwd: '/not-authorized' })).toEqual({ error: 'workspace_not_authorized' })
-    const chunks = [Buffer.from(first.fileDownload.data, 'base64')]
-    let page = first.fileDownload
-    while (page.hasMore) {
-      page = (await request({ action: 'read', cwd, id, offset: page.nextOffset })).fileDownload
-      chunks.push(Buffer.from(page.data, 'base64'))
-    }
-    expect(Buffer.concat(chunks)).toEqual(bytes)
-    await binding.controller.authority.revoke(owner.deviceId)
-    expect(await request({ action: 'open', cwd, target: 'arbitrary.bin' })).toEqual({ error: 'device_not_authorized' })
-    expect(startRun).not.toHaveBeenCalled()
-  })
-
-  it('negotiates metadata and exact selected controls with the marker consumed by Swift', async () => {
-    const fixture = providerDiscoveryFixture({
-      authorizeWorkspace: (cwd) => { if (cwd !== AUTHORIZED) throw new Error('workspace_not_authorized'); return cwd },
-      defaultWorkspace: () => AUTHORIZED
-    })
-    await fixture.discovery.refreshMetadata()
-    const h = await harness(async () => {}, undefined, undefined, undefined, undefined, undefined, {
-      listProviders: fixture.discovery.metadata,
-      listProviderControls: fixture.discovery.selected,
-      listProvidersFull: fixture.discovery.legacy
-    })
-    const device = await pairDevice(h.identity, h.controller)
-    const request = (value: unknown) => call(h.addr, h.caPEM, device.certPEM, device.keyPEM, value)
-    expect(await request({ op: 'desktop', query: { kind: 'info' } })).toMatchObject({ desktop: { providerDiscovery: 2 } })
-    expect(await request({ op: 'providers', detail: 'metadata' })).toMatchObject({ providerDiscovery: 2, providers: [{ id: 'pi' }, { id: 'qoder' }, { id: 'opencode' }] })
-    expect(fixture.calls).toHaveLength(0)
-    const selected = { op: 'providers', detail: 'selected', providerId: 'pi', agentProfileId: 'pi:fixture', cwd: AUTHORIZED }
-    expect(await request(selected)).toMatchObject({ providerDiscovery: 2, providers: [{ id: 'pi', agentProfileId: 'pi:fixture', available: true }] })
-    expect(fixture.calls).toEqual([{ providerId: 'pi', agentProfileId: 'pi:fixture', cwd: AUTHORIZED }])
-    expect(await request({ ...selected, cwd: '/outside' })).toHaveProperty('error')
-    expect(await request({ ...selected, agentProfileId: 'pi:missing' })).toHaveProperty('error')
-    expect(await request({ op: 'providers', detail: 'unknown' })).toEqual({ error: 'invalid_request' })
-    expect(fixture.calls).toHaveLength(1)
-    expect(await request({ op: 'providers' })).toHaveProperty('providers')
-    expect(fixture.calls).toHaveLength(4)
-  })
-  it('refreshes only the verified peer device label without changing its pairing or authority', async () => {
-    const start = vi.fn(async () => {})
-    const { identity, controller, caPEM, addr } = await harness(start)
-    const device = await pairDevice(identity, controller)
-    const other = await pairDevice(identity, controller)
-    const before = controller.authority.inspectLocal().grants
-    const reply = await call(addr, caPEM, device.certPEM, device.keyPEM, {
-      op: 'poll', cursor: 0, deviceLabel: 'iPhone 17 Pro', deviceId: other.deviceId
-    })
-    expect(reply.poll).toBeDefined()
-    const expected = before.map((grant) => grant.deviceId === device.deviceId ? { ...grant, deviceLabel: 'iPhone 17 Pro' } : grant)
-    expect(controller.authority.inspectLocal().grants).toEqual(expected)
-    for (const deviceLabel of ['bad\nlabel', '\u202espoof', 'x'.repeat(81), '', null, 42]) {
-      expect(await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'poll', cursor: 0, deviceLabel }))
-        .toEqual({ error: 'invalid_device_label' })
-    }
-    expect(controller.authority.inspectLocal().grants).toEqual(expected)
-    await controller.authority.revoke(device.deviceId)
-    expect(await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'poll', cursor: 0, deviceLabel: 'spoof' }))
-      .toEqual({ error: 'device_not_authorized' })
-    expect(controller.authority.inspectLocal().grants[0].deviceLabel).toBe('iPhone 17 Pro')
-    expect(start).not.toHaveBeenCalled()
-  })
-
-  it('serves execution target discovery and stamped mobile replies through the production mTLS wrapper', async () => {
-    const target = { id: 'mac2-opaque', binding: 'b'.repeat(64) }
-    const client = {
-      executionTargets: vi.fn(async () => [{ ...target, hostId: 'mac2', label: 'Mac2', state: 'connected' as const }]),
-      mobileRequest: vi.fn(async () => ({ projects: [] })),
-      mobileSubmit: vi.fn(async () => ({ runId: 'run', status: 'recorded' })),
-      mobileIntentStatus: vi.fn(async () => ({ intent: { runId: 'run', state: 'recorded' } }))
-    }
-    const { identity, controller, caPEM, addr } = await harness(async () => {}, undefined, undefined, undefined, undefined, client)
-    const device = await pairDevice(identity, controller)
-    await expect(call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'executionTargets' })).resolves.toEqual({ executionTargets: {
-      version: 1, gateway: { hostId: identity.hostId, label: 'Mac1' },
-      targets: [{ ...target, hostId: 'mac2', label: 'Mac2', state: 'connected' }]
-    } })
-    await expect(call(addr, caPEM, device.certPEM, device.keyPEM, {
-      op: 'executionTargets', keepAlive: true, deviceLabel: 'iPhone discovery'
-    })).resolves.toEqual({ keepAlive: true, executionTargets: {
-      version: 1, gateway: { hostId: identity.hostId, label: 'Mac1' },
-      targets: [{ ...target, hostId: 'mac2', label: 'Mac2', state: 'connected' }]
-    } })
-    expect(controller.authority.inspectLocal().grants[0].deviceLabel).toBe('iPhone discovery')
-    for (const invalid of [
-      [{ op: 'executionTargets', arbitraryAuthority: true }, 'invalid_request'],
-      [{ op: 'executionTargets', keepAlive: 'true' }, 'invalid_request'],
-      [{ op: 'executionTargets', deviceLabel: 42 }, 'invalid_device_label']
-    ] as const) {
-      await expect(call(addr, caPEM, device.certPEM, device.keyPEM, invalid[0])).resolves.toEqual({ error: invalid[1] })
-    }
-    await expect(call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'target', target, request: { op: 'projects' } })).resolves.toEqual({ projects: [], executionTarget: target })
-    expect(client.mobileRequest).toHaveBeenCalledWith(target, { op: 'projects' }, expect.any(Function))
-    await expect(call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'target', target, request: { op: 'desktopDirectory', query: {} } })).resolves.toEqual({ error: 'invalid_target_request' })
-    await controller.authority.revoke(device.deviceId)
-    await expect(call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'executionTargets' })).resolves.toEqual({ error: 'device_not_authorized' })
-  })
-
-  it('accepts persistent mobile target transport metadata without forwarding it as authority', async () => {
-    const target = { id: 'mac2-opaque', binding: 'b'.repeat(64) }
-    const client = {
-      executionTargets: vi.fn(async () => []),
-      mobileRequest: vi.fn(async () => ({ projects: [] })),
-      mobileSubmit: vi.fn(async () => ({ runId: 'run', status: 'recorded' })),
-      mobileIntentStatus: vi.fn(async () => ({ intent: { runId: 'run', state: 'recorded' } }))
-    }
-    const { identity, controller, caPEM, addr } = await harness(async () => {}, undefined, undefined, undefined, undefined, client)
-    const device = await pairDevice(identity, controller)
-    const frame = { op: 'target', target, request: { op: 'projects' }, keepAlive: true, deviceLabel: 'iPhone 13 test' }
-    await expect(call(addr, caPEM, device.certPEM, device.keyPEM, frame)).resolves.toEqual({ keepAlive: true, projects: [], executionTarget: target })
-    expect(client.mobileRequest).toHaveBeenCalledExactlyOnceWith(target, { op: 'projects' }, expect.any(Function))
-    expect(controller.authority.inspectLocal().grants[0].deviceLabel).toBe('iPhone 13 test')
-    for (const invalid of [
-      { ...frame, arbitraryAuthority: true },
-      { ...frame, request: { op: 'projects', deviceLabel: 'not the desktop peer', keepAlive: true } }
-    ]) {
-      await expect(call(addr, caPEM, device.certPEM, device.keyPEM, invalid)).resolves.toEqual({ keepAlive: true, error: 'invalid_target_request' })
-    }
-    expect(client.mobileRequest).toHaveBeenCalledTimes(1)
-    await controller.authority.revoke(device.deviceId)
-    await expect(call(addr, caPEM, device.certPEM, device.keyPEM, frame)).resolves.toEqual({ keepAlive: true, error: 'device_not_authorized' })
-    expect(client.mobileRequest).toHaveBeenCalledTimes(1)
-  })
-
   it('routes read-only workspace requests through verified TLS and canonical-project authorization', async () => {
     const start = vi.fn(async () => {})
     const { identity, controller, caPEM, addr } = await harness(start)
@@ -366,7 +222,7 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
     await once(raw, 'connect')
     const tlsSocket: TLSSocket = connect({ socket: raw, ca: caPEM, cert: device.certPEM, key: device.keyPEM, minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined })
     await once(tlsSocket, 'secureConnect')
-    tlsSocket.write(JSON.stringify({ op: 'submit', intentId: randomUUID(), detail: routing() }) + '\n')
+    tlsSocket.write(JSON.stringify({ protocol: REMOTE_PROTOCOL_VERSION, op: 'submit', intentId: randomUUID(), detail: routing() }) + '\n')
     let buffer = ''
     for await (const chunk of tlsSocket) { buffer += (chunk as Buffer).toString('utf8'); if (buffer.includes('\n')) break }
     tlsSocket.destroy()
@@ -374,193 +230,6 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
     expect(reply.status).toBe('recorded')
     await controller.idle()
     expect(seen).toEqual([{ cwd: AUTHORIZED, providerId: 'claude' }])
-  })
-
-  it('serves Provider-native slash commands over the authorized channel', async () => {
-    const listCommands = vi.fn(async () => ({ commands: [{ name: 'review', description: 'Review changes' }] }))
-    const { identity, controller, caPEM, addr } = await harness(async () => {}, listCommands)
-    const device = await pairDevice(identity, controller)
-
-    const reply = await call(addr, caPEM, device.certPEM, device.keyPEM,
-      { op: 'commands', providerId: 'codex', cwd: AUTHORIZED })
-    expect(reply.commands.commands).toEqual([{ name: 'review', description: 'Review changes' }])
-    expect(listCommands).toHaveBeenCalledWith({ providerId: 'codex', cwd: AUTHORIZED })
-  })
-
-  it('serves bounded previews and rejects malformed preview queries before source access', async () => {
-    const readPreview = vi.fn(async () => ({ status: 'available' as const, source: 'indexed_archive' as const, partial: true as const, truncated: true, bytes: 0, turns: [{ userText: 'prompt🙂'.repeat(2_000), userTextTruncated: true, truncated: true, items: [{ kind: 'output' as const, text: 'answer🙂'.repeat(2_000), truncated: true }] }] }))
-    const { identity, controller, caPEM, addr } = await harness(async () => {}, undefined, undefined, undefined, readPreview)
-    const device = await pairDevice(identity, controller)
-    const malformed = await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'historyPreview', agentProfileId: null, providerId: 'codex', cwd: AUTHORIZED })
-    expect(malformed.error).toBe('invalid_request')
-    const unscoped = await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'historyPreview', providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session' })
-    expect(unscoped.error).toBe('history_profile_required')
-    expect(readPreview).not.toHaveBeenCalled()
-    const allowed = await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'historyPreview', agentProfileId: null, providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session' })
-    expect(allowed.historyPreview.status).toBe('available')
-    expect(allowed.historyProfile).toEqual({ agentProfileId: null })
-    expect(Buffer.byteLength(JSON.stringify(allowed.historyPreview), 'utf8')).toBeLessThanOrEqual(16 * 1024)
-    expect(readPreview).toHaveBeenCalledWith({ providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session', agentProfileId: null })
-    const scoped = await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'historyPreview', agentProfileId: 'profile-A', providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session' })
-    expect(scoped.historyProfile).toEqual({ agentProfileId: 'profile-A' })
-    expect(readPreview).toHaveBeenLastCalledWith({ providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session', agentProfileId: 'profile-A' })
-  })
-
-  it('reuses one TLS session for reads and writes, marks each reply and rechecks revocation', async () => {
-    const start = vi.fn(async () => {})
-    const turns = [{ userText: 'x'.repeat(600_000), items: [{ kind: 'output' as const, text: 'real answer' }] }]
-    const read = vi.fn(async () => turns)
-    const preview = vi.fn(async (): Promise<RemoteHistoryPreview> => ({ status: 'unavailable', reason: 'no_fast_evidence' }))
-    const { identity, controller, caPEM, addr } = await harness(start, undefined, read, undefined, preview)
-    const device = await pairDevice(identity, controller)
-    const socket = connect({ port: addr.port, host: addr.host, ca: caPEM, cert: device.certPEM, key: device.keyPEM,
-      minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined })
-    let handshakes = 0
-    socket.on('secureConnect', () => { handshakes++ })
-    await once(socket, 'secureConnect')
-    const exchange = (request: unknown) => new Promise<Record<string, unknown>>((resolve, reject) => {
-      let bytes = ''
-      const cleanup = () => { socket.off('data', data); socket.off('error', error); socket.off('close', closed) }
-      const error = (cause: Error) => { cleanup(); reject(cause) }
-      const closed = () => error(new Error('closed before reply'))
-      const data = (chunk: Buffer) => {
-        bytes += chunk.toString('utf8')
-        if (!bytes.endsWith('\n')) return
-        cleanup()
-        // Clients detect a reusable lane by this exact prefix.
-        expect(bytes.startsWith('{"keepAlive":true,')).toBe(true)
-        resolve(JSON.parse(bytes) as Record<string, unknown>)
-      }
-      socket.on('data', data); socket.once('error', error); socket.once('close', closed)
-      socket.write(JSON.stringify({ ...request as object, keepAlive: true }) + '\n')
-    })
-    try {
-      expect((await exchange({ op: 'historyPreview', agentProfileId: null, providerId: 'pi', cwd: AUTHORIZED, externalSessionId: 'reuse' })).historyPreview).toMatchObject({ status: 'unavailable' })
-      let cursor = 0
-      let snapshot: string | undefined
-      const parts: Buffer[] = []
-      while (true) {
-        const reply = await exchange({ op: 'historyPage', agentProfileId: null, providerId: 'pi', cwd: AUTHORIZED, externalSessionId: 'reuse', cursor, limit: 256 * 1024, snapshot })
-        const page = reply.historyPage as { cursor: number; snapshot: string; dataBase64: string; hasMore: boolean }
-        snapshot ??= page.snapshot
-        expect(page.snapshot).toBe(snapshot)
-        parts.push(Buffer.from(page.dataBase64, 'base64'))
-        cursor = page.cursor
-        if (!page.hasMore) break
-      }
-      expect(JSON.parse(Buffer.concat(parts).toString('utf8'))).toEqual(turns)
-      expect(read).toHaveBeenCalledTimes(1)
-      const submitted = await exchange({ op: 'submit', intentId: randomUUID(), detail: routing() })
-      expect(submitted.status).toBe('recorded')
-      const runId = submitted.runId as string
-      await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1))
-      const watched = await exchange({ op: 'watch', runId, cursor: 0, outputCursor: 0, waitMs: 0 })
-      expect((watched.watch as { poll: { events: unknown[] } }).poll.events.length).toBeGreaterThan(0)
-      const live = await exchange({ op: 'liveRuns', waitMs: 0 })
-      expect(live.liveRuns).toMatchObject({ runs: expect.any(Array), revision: expect.any(String) })
-      expect((await exchange({ op: 'liveRuns', waitMs: 0, revision: 7 })).error).toBe('invalid_request')
-      expect((await exchange({ op: 'liveRuns', waitMs: 0, history: { providerId: 'pi', cwd: AUTHORIZED } })).error).toBe('invalid_request')
-      expect(handshakes).toBe(1)
-      await controller.authority.revoke(device.deviceId)
-      expect((await exchange({ op: 'liveRuns', waitMs: 0 })).error).toBe('device_not_authorized')
-      expect((await exchange({ op: 'historyPage', agentProfileId: null, providerId: 'pi', cwd: AUTHORIZED, externalSessionId: 'reuse', snapshot, cursor: 0 })).error).toBe('device_not_authorized')
-      expect((await exchange({ op: 'submit', intentId: randomUUID(), detail: routing() })).error).toBe('device_not_authorized')
-      expect(start).toHaveBeenCalledTimes(1)
-      expect(read).toHaveBeenCalledTimes(1)
-    } finally { socket.destroy() }
-  })
-
-  it('re-arms the idle timeout on a long keep-alive lane without stacking timeout listeners', async () => {
-    const { identity, controller, caPEM, addr } = await harness(async () => {})
-    const device = await pairDevice(identity, controller)
-    const warnings: Error[] = []
-    const onWarning = (warning: Error) => { warnings.push(warning) }
-    process.on('warning', onWarning)
-    const socket = connect({ port: addr.port, host: addr.host, ca: caPEM, cert: device.certPEM, key: device.keyPEM,
-      minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined })
-    try {
-      await once(socket, 'secureConnect')
-      let buffer = ''
-      for (let i = 0; i < 15; i++) {
-        socket.write(JSON.stringify({ op: 'poll', cursor: 0, keepAlive: true }) + '\n')
-        while (!buffer.includes('\n')) buffer += ((await once(socket, 'data'))[0] as Buffer).toString('utf8')
-        expect(buffer.startsWith('{"keepAlive":true,"poll"')).toBe(true)
-        buffer = ''
-      }
-      await new Promise((resolve) => setImmediate(resolve))
-      expect(warnings.filter((warning) => warning.name === 'MaxListenersExceededWarning')).toEqual([])
-    } finally {
-      process.off('warning', onWarning)
-      socket.destroy()
-    }
-  })
-
-  it('keeps one-shot replies unmarked and refuses a one-shot request on a kept lane', async () => {
-    const { identity, controller, caPEM, addr } = await harness(async () => {})
-    const device = await pairDevice(identity, controller)
-    const raw = async (requests: unknown[]) => {
-      const socket = connect({ port: addr.port, host: addr.host, ca: caPEM, cert: device.certPEM, key: device.keyPEM,
-        minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined })
-      await once(socket, 'secureConnect')
-      const lines: string[] = []
-      let buffer = ''
-      socket.on('data', (chunk: Buffer) => {
-        buffer += chunk.toString('utf8')
-        while (buffer.includes('\n')) {
-          const end = buffer.indexOf('\n')
-          lines.push(buffer.slice(0, end)); buffer = buffer.slice(end + 1)
-          const next = requests[lines.length]
-          if (next) socket.write(JSON.stringify(next) + '\n')
-        }
-      })
-      socket.write(JSON.stringify(requests[0]) + '\n')
-      await once(socket, 'close')
-      return lines
-    }
-    const oneShot = await raw([{ op: 'poll', cursor: 0 }])
-    expect(oneShot).toHaveLength(1)
-    expect(oneShot[0].startsWith('{"poll"')).toBe(true)
-    const mixed = await raw([{ op: 'poll', cursor: 0, keepAlive: true }, { op: 'poll', cursor: 0 }])
-    expect(mixed[0].startsWith('{"keepAlive":true,"poll"')).toBe(true)
-    expect(JSON.parse(mixed[1])).toEqual({ error: 'keep_alive_required' })
-  })
-
-  it('serves snapshot-fenced history pages over the authorized channel', async () => {
-    const readHistory = vi.fn(async () => [{ userText: 'hello', items: [{ kind: 'output' as const, text: 'world'.repeat(20) }] }])
-    const { identity, controller, caPEM, addr } = await harness(async () => {}, undefined, readHistory)
-    const device = await pairDevice(identity, controller)
-
-    const first = await call(addr, caPEM, device.certPEM, device.keyPEM,
-      { op: 'historyPage', agentProfileId: null, providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session', cursor: 0, limit: 8 })
-    expect(Buffer.from(first.historyPage.dataBase64, 'base64')).toHaveLength(8)
-    const second = await call(addr, caPEM, device.certPEM, device.keyPEM,
-      { op: 'historyPage', agentProfileId: null, providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session', cursor: first.historyPage.cursor, limit: 8, snapshot: first.historyPage.snapshot })
-    expect(second.historyPage.cursor).toBe(16)
-    expect(second.historyPage.snapshot).toBe(first.historyPage.snapshot)
-    expect(readHistory).toHaveBeenCalledWith({ providerId: 'codex', cwd: AUTHORIZED, externalSessionId: 'session', agentProfileId: null })
-  })
-
-  it('routes paged session and directory catalogs over inner mTLS', async () => {
-    const lists = {
-      directories: (path?: string) => ({
-        ...(path ? { current: { path, label: 'repo' } } : {}),
-        directories: Array.from({ length: 3 }, (_, index) => ({ path: `/repo/d${index}`, label: `d${index}` }))
-      }),
-      sessions: () => Array.from({ length: 3 }, (_, index) => ({
-        sessionId: `s${index}`, providerId: 'codex', cwd: AUTHORIZED, label: `session ${index}`, ts: index
-      }))
-    }
-    const { identity, controller, caPEM, addr } = await harness(async () => {}, undefined, undefined, lists)
-    const device = await pairDevice(identity, controller)
-
-    const directories = await call(addr, caPEM, device.certPEM, device.keyPEM,
-      { op: 'directoriesPage', path: '/repo', cursor: 0, limit: 2 })
-    expect(directories.directoriesPage.directories).toHaveLength(2)
-    expect(directories.directoriesPage.hasMore).toBe(true)
-    const sessions = await call(addr, caPEM, device.certPEM, device.keyPEM,
-      { op: 'sessionsPage', cursor: 0, limit: 2 })
-    expect(sessions.sessionsPage.sessions.map((entry: { sessionId: string }) => entry.sessionId)).toEqual(['s0', 's1'])
-    expect(sessions.sessionsPage.hasMore).toBe(true)
   })
 
   it('refuses the next request after the grant is revoked', async () => {

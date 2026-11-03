@@ -1,3 +1,4 @@
+import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { readFile, rm } from 'node:fs/promises'
@@ -24,7 +25,7 @@ describe('DesktopRemoteClient receipt and mobile delivery', () => {
       expect(resolved).toEqual({ ...receipt, status: 'recorded', runId })
       await expect(fixture.client.resolveIntent(id, receipt.intentId)).resolves.toEqual(resolved)
       const requests = fixture.tlsRequest.mock.calls.map(([call]) => call.request as { op?: string; intentId?: string })
-      expect(requests.filter(request => request.op === 'resolveIntent')).toEqual([{ op: 'resolveIntent', intentId: receipt.intentId }])
+      expect(requests.filter(request => request.op === 'resolveIntent')).toEqual([{ protocol: REMOTE_PROTOCOL_VERSION, op: 'resolveIntent', intentId: receipt.intentId }])
       expect(requests.filter(request => request.op === 'submit')).toHaveLength(1)
       expect(requests.some(request => request.op === 'stop')).toBe(false)
       await fixture.client.dispose()

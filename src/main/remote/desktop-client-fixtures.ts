@@ -1,3 +1,4 @@
+import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import { randomUUID } from 'node:crypto'
 import { vi } from 'vitest'
 import { mkdtemp } from 'node:fs/promises'
@@ -41,7 +42,7 @@ export async function setup(setupOptions: { watchState?: string | null; liveRuns
       return { protocolMajor: 1, requestId: request.requestId, kind: 'pair.granted', pairingId, deviceId: grant.deviceId, certificatePEM: grant.certificatePEM,
         certificateSHA256: grant.certificateSHA256, expiresAt: grant.expiresAt, scope: 'g0_echo_only' }
     }
-    if (phase === 'status' && request.op === 'desktop') return { desktop: { kind: 'info', protocol: 1, hostId: host.hostId, execution: 'canonical', ...(setupOptions.providerDiscovery === false ? {} : { providerDiscovery: 2 }) } }
+    if (phase === 'status' && request.op === 'desktop') return { desktop: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: host.hostId, execution: 'canonical', ...(setupOptions.providerDiscovery === false ? {} : { providerDiscovery: 2 }) } }
     if (request.op === 'providers') return { providers: [{ id: 'claude', label: 'Claude', available: true, permissions: [{ id: 'default', label: 'Default' }] }] }
     if (request.op === 'submit') {
       if (setupOptions.submitResponse) return setupOptions.submitResponse()
@@ -62,7 +63,7 @@ export async function setup(setupOptions: { watchState?: string | null; liveRuns
       if (request.revision === revision) return { catalogSnapshot: { unchanged: true, revision } }
       return { catalogSnapshot: {
         revision,
-        info: { kind: 'info', protocol: 1, hostId: host.hostId, execution: 'canonical', ...(setupOptions.providerDiscovery === false ? {} : { providerDiscovery: 2 }) },
+        info: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: host.hostId, execution: 'canonical', ...(setupOptions.providerDiscovery === false ? {} : { providerDiscovery: 2 }) },
         projects: setupOptions.projects ?? [],
         providers: [{ id: 'claude', label: 'Claude', available: true, permissions: [{ id: 'default', label: 'Default' }] }],
         sessionsPage: setupOptions.sessionsPage ?? { sessions: [], cursor: 0, total: 0, hasMore: false, snapshot: 'fixture-sessions-1' }

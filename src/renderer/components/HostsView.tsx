@@ -2,7 +2,7 @@
 // in RemotePairing so the two directions remain separate while sharing one tab.
 import { useId, useRef, useState, type FormEvent } from 'react'
 import type { DesktopRemoteConnection, DesktopSshTarget } from '@shared/desktop-remote'
-import { REMOTE_ACCESS_COPY as copy } from '../constants/copy'
+import { REMOTE_ACCESS_COPY as copy, REMOTE_SESSION_COPY } from '../constants/copy'
 import { desktopConnectionLabel, refreshDesktopConnections, useDesktopConnections } from '../hooks/useDesktopConnections'
 import { forgetRemoteCatalog, refreshRemoteCatalog, useRemoteCatalogs } from '../hooks/useRemoteCatalogs'
 import { bridge, ClientPairForm } from './DesktopRemote'
@@ -12,8 +12,14 @@ import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import './hosts-view.css'
 
+// Connect-time refusals include the version gate: say which end to upgrade
+// instead of showing a raw protocol code.
 function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  const message = error instanceof Error ? error.message : String(error)
+  if (message.includes('desktop_protocol_host_older')) return REMOTE_SESSION_COPY.protocolHostOlder('远端主机')
+  if (message.includes('desktop_protocol_client_older')) return REMOTE_SESSION_COPY.protocolClientOlder
+  if (message.includes('desktop_protocol_mismatch') || message.includes('desktop_protocol_missing')) return REMOTE_SESSION_COPY.protocolMismatch
+  return message
 }
 
 export function RemoteConnectionsSettings({ onNewSession }: { onNewSession: (connectionId: string, cwd: string) => void }) {

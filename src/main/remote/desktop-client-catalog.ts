@@ -1,7 +1,8 @@
 import type { DesktopDirectoryPage, DesktopRemoteCatalog, DesktopRemoteContext, DesktopRemoteSessionAction, DesktopRemoteForkSessionRequest, DesktopRemoteDeleteSessionRequest, RemoteCommandCatalog, RemoteProviderRef, RemoteProjectRef, RemoteSessionRef } from '../../shared/desktop-remote'
 import type { DeleteSessionResult } from '../../shared/provider'
 import { DesktopRemoteClientConnections } from './desktop-client-connections'
-import { context, fail, record, text, pathText, HASH, MAX_ITEMS, MAX_PAGES, validateInfo, validateProject, validateProvider, validateSession, validateDeleteSessionResult } from './desktop-client-validation'
+import { context, fail, record, text, pathText, HASH, MAX_ITEMS, MAX_PAGES, validateProject, validateProvider, validateSession, validateDeleteSessionResult } from './desktop-client-validation'
+import { validateInfo } from './desktop-client-capabilities'
 
 export abstract class DesktopRemoteClientCatalog extends DesktopRemoteClientConnections {
   // One round trip for info, projects, provider metadata and the first session

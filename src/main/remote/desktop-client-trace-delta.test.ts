@@ -1,3 +1,4 @@
+import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import { randomUUID } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -44,7 +45,7 @@ describe('DesktopRemoteClient trace delta negotiation', () => {
         if ((request as { revision?: string }).revision === revision) return { catalogSnapshot: { unchanged: true, revision } }
         return { catalogSnapshot: {
           revision,
-          info: { kind: 'info', protocol: 1, hostId: host.hostId, execution: 'canonical', providerDiscovery: 2, ...(options.legacyHost ? {} : { traceDelta: 1 }) },
+          info: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: host.hostId, execution: 'canonical', providerDiscovery: 2, ...(options.legacyHost ? {} : { traceDelta: 1 }) },
           projects: [], providers: [],
           sessionsPage: { sessions: [], cursor: 0, total: 0, hasMore: false, snapshot: 'catalog' }
         } }

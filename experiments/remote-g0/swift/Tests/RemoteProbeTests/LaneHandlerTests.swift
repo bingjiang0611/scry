@@ -23,7 +23,19 @@ final class LaneHandlerTests: XCTestCase {
 
   func testKeepAliveRequestPrefixKeepsFields() throws {
     let request = Data(#"{"op":"poll","cursor":3}"#.utf8)
-    XCTAssertEqual(String(decoding: try RelaySession.keepAliveRequest(request), as: UTF8.self), #"{"keepAlive":true,"op":"poll","cursor":3}"#)
+    // The prefix also declares the run-channel protocol version, so the host
+    // refuses a mismatch instead of guessing which fields it may read.
+    XCTAssertEqual(String(decoding: try RelaySession.keepAliveRequest(request), as: UTF8.self),
+                   #"{"keepAlive":true,"protocol":2,"op":"poll","cursor":3}"#)
+  }
+
+  func testEveryRequestDeclaresTheProtocolVersion() throws {
+    XCTAssertEqual(RelaySession.protocolVersion, 2)
+    for request in [Data("{}".utf8), Data(#"{"op":"projects"}"#.utf8), Data(#"{"op":"watch","runId":"r","waitMs":15000}"#.utf8)] {
+      let fields = try XCTUnwrap(JSONSerialization.jsonObject(with: try RelaySession.keepAliveRequest(request)) as? [String: Any])
+      XCTAssertEqual(fields["protocol"] as? Int, RelaySession.protocolVersion)
+      XCTAssertEqual(fields["keepAlive"] as? Bool, true)
+    }
   }
 
   func testDeviceModelMetadataSurvivesEscapingAndReconnectRequests() throws {

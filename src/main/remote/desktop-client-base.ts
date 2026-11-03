@@ -1,12 +1,14 @@
 import { isAgentPermissionMode } from '../../shared/runtime'
-import type { DesktopHostRead, DesktopPairingResult, DesktopRemoteCatalog, DesktopRemoteContext, DesktopRemoteIntent, DesktopRemoteSubmit } from '../../shared/desktop-remote'
+import { type DesktopHostRead, type DesktopPairingResult, type DesktopRemoteCatalog, type DesktopRemoteContext, type DesktopRemoteIntent, type DesktopRemoteSubmit } from '../../shared/desktop-remote'
 import { createHash, randomUUID, X509Certificate as NodeCertificate } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { desktopTlsRequest, generateDesktopDeviceIdentity, openDesktopSshTunnel, type DesktopDeviceIdentity, type DesktopSshTunnel } from './desktop-transport'
 import { DesktopLanes, laneForRequest, replayableRequest, type DesktopLaneConnector } from './desktop-lane'
+import { framedRequest, protocolFailure } from './remote-protocol'
 import { DESKTOP_ATTACHMENT_CHUNK_BYTES, DESKTOP_ATTACHMENT_MAX_COUNT, attachmentSha256, newAttachmentId, normalizeDesktopAttachment } from './desktop-attachments'
-import { context, fail, record, text, uuid, hash, digest, validateState, validateIdentity, validatePairingResponse, validateCertificate, publicConnection, STATE_FILE, type EncryptedState, type StoredConnection, type ActiveConnection, type RunStatusCursor, type DesktopRemoteClientTransportDeps, type DesktopCapabilities } from './desktop-client-validation'
+import { context, fail, record, text, uuid, hash, digest, validateState, validateIdentity, validatePairingResponse, validateCertificate, publicConnection, STATE_FILE, type EncryptedState, type StoredConnection, type ActiveConnection, type RunStatusCursor, type DesktopRemoteClientTransportDeps, } from './desktop-client-validation'
+import type { DesktopCapabilities } from './desktop-client-capabilities'
 
 export abstract class DesktopRemoteClientBase {
   protected abstract intentStatus(connectionIdValue: string, intentId: string): Promise<DesktopRemoteIntent>
@@ -26,9 +28,9 @@ export abstract class DesktopRemoteClientBase {
   protected readonly requests = new Set<Promise<unknown>>()
   protected readonly locks = new Map<string, Promise<void>>()
   protected readonly runWatch = new Map<string, RunStatusCursor>()
-  // Last fully paged catalog per connection, with the host revision it came from
-  // and the capabilities it declared. Dropped on disconnect and dispose: a stale
-  // revision or capability must never outlive the connection it was read on.
+  // Last fully paged catalog per connection with the host revision and the
+  // capabilities it declared. Cleared on dispose: neither may outlive the
+  // connection they were read on.
   protected readonly catalogCache = new Map<string, { revision: string; catalog: DesktopRemoteCatalog; capabilities: DesktopCapabilities }>()
   protected readonly answerIds = new Map<string, string>()
   protected readonly submitting = new Set<string>()
@@ -143,15 +145,21 @@ export abstract class DesktopRemoteClientBase {
     // Check after all awaited state work and immediately before dispatch.
     authorizePeer?.()
     this.controllers.add(controller)
-    const promise = this.lanes.request(laneForRequest(request), id, {
+    // Every run-channel request declares the version it speaks. The host refuses a
+    // different one, so no request is ever partially understood.
+    const payload = record(request) ? framedRequest(request) : request
+    const promise = this.lanes.request(laneForRequest(payload), id, {
       endpoint: { path: runPath, caPEM: item.anchorPEM, certPEM: item.certificatePEM ?? identity.bootstrapCertPEM, keyPEM: identity.keyPEM },
-      request,
-      replayable: replayableRequest(request),
+      request: payload,
+      replayable: replayableRequest(payload),
       signal: controller.signal
     })
     this.requests.add(promise)
     try {
       const response = await promise
+      // A version disagreement names the end that is behind, so the UI can say
+      // which one to upgrade instead of "protocol error".
+      if (record(response) && response.error === 'protocol_mismatch') fail(protocolFailure(response.hostProtocol))
       if (record(response) && typeof response.error === 'string' && response.error.length > 0 && response.error.length <= 128) fail(`desktop_remote_${response.error}`)
       return response as Record<string, unknown>
     } finally { this.requests.delete(promise); this.controllers.delete(controller) }

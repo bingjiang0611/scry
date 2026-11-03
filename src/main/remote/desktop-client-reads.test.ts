@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { rm } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 import { DesktopRemoteClient } from './desktop-client'
-import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES } from '../../shared/desktop-remote'
+import { REMOTE_PROTOCOL_VERSION, DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES } from '../../shared/desktop-remote'
 import { setup, ssh, encrypt, decrypt } from './desktop-client-fixtures'
 
 describe('DesktopRemoteClient history, trace and session reads', () => {
@@ -22,7 +22,7 @@ describe('DesktopRemoteClient history, trace and session reads', () => {
       fixture.tlsRequest.mockResolvedValueOnce({ desktop: first }).mockResolvedValueOnce({ desktop: second })
       const loaded = await fixture.client.history(id, context, 7, 'stamp')
       expect(loaded).toMatchObject(history)
-      expect(fixture.tlsRequest).toHaveBeenLastCalledWith(expect.objectContaining({ request: { op: 'desktop', query: { kind: 'history', historyScope: 'session', context, before: 7, snapshot: 'stamp', byteChunks: true, images: true, chunk: { id: first.id, offset: DESKTOP_HISTORY_CHUNK_BYTES } } } }))
+      expect(fixture.tlsRequest).toHaveBeenLastCalledWith(expect.objectContaining({ request: { protocol: REMOTE_PROTOCOL_VERSION, op: 'desktop', query: { kind: 'history', historyScope: 'session', context, before: 7, snapshot: 'stamp', byteChunks: true, images: true, chunk: { id: first.id, offset: DESKTOP_HISTORY_CHUNK_BYTES } } } }))
       // The scope stamp is required even when no byte chunking is needed.
       fixture.tlsRequest.mockResolvedValueOnce({ desktop: result })
       await expect(fixture.client.history(id, context)).resolves.toMatchObject(history)
@@ -61,7 +61,7 @@ describe('DesktopRemoteClient history, trace and session reads', () => {
       fixture.tlsRequest.mockResolvedValueOnce({ desktop: first }).mockResolvedValueOnce({ desktop: second })
       const loaded = await fixture.client.trace(id, context, 'remote-run-mvl1omap-a', 0)
       expect(loaded?.items[0]?.text).toBe(text)
-      expect(fixture.tlsRequest).toHaveBeenLastCalledWith(expect.objectContaining({ request: { op: 'desktop', query: { kind: 'trace', context, runId: 'remote-run-mvl1omap-a', images: true, byteChunks: true, chunk: { id: first.id, offset: DESKTOP_HISTORY_CHUNK_BYTES } } } }))
+      expect(fixture.tlsRequest).toHaveBeenLastCalledWith(expect.objectContaining({ request: { protocol: REMOTE_PROTOCOL_VERSION, op: 'desktop', query: { kind: 'trace', context, runId: 'remote-run-mvl1omap-a', images: true, byteChunks: true, chunk: { id: first.id, offset: DESKTOP_HISTORY_CHUNK_BYTES } } } }))
       for (const invalid of [{ ...second, id: randomUUID() }, { ...second, offset: 1 }, { ...second, data: '' }]) {
         fixture.tlsRequest.mockResolvedValueOnce({ desktop: first }).mockResolvedValueOnce({ desktop: invalid })
         await expect(fixture.client.trace(id, context, 'remote-run-mvl1omap-a', 0)).rejects.toThrow('invalid_trace_response')
@@ -93,7 +93,7 @@ describe('DesktopRemoteClient history, trace and session reads', () => {
       expect(fixture.tlsRequest.mock.calls).toHaveLength(before)
       fixture.tlsRequest.mockResolvedValueOnce({ directory: { action: 'select', project: page.current } })
       await expect(fixture.client.selectDirectory(id, page.current.path)).resolves.toEqual(page.current)
-      expect(fixture.tlsRequest).toHaveBeenLastCalledWith(expect.objectContaining({ request: { op: 'desktopDirectory', query: { action: 'select', path: page.current.path } } }))
+      expect(fixture.tlsRequest).toHaveBeenLastCalledWith(expect.objectContaining({ request: { protocol: REMOTE_PROTOCOL_VERSION, op: 'desktopDirectory', query: { action: 'select', path: page.current.path } } }))
       expect(await fixture.client.intents(id)).toEqual([])
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
@@ -114,7 +114,7 @@ describe('DesktopRemoteClient history, trace and session reads', () => {
       const before = fixture.tlsRequest.mock.calls.length
       await expect(fixture.client.sessionAction(id, { cwd: '/workspace', providerId: 'claude', externalSessionId: 'session-1' }, { kind: 'pin', pinned: true })).rejects.toThrow('desktop_session_actions_unsupported')
       expect(fixture.tlsRequest.mock.calls.slice(before).map((call) => (call[0] as { request: { op?: string } }).request.op)).toEqual(['desktop'])
-      fixture.tlsRequest.mockResolvedValueOnce({ desktop: { kind: 'info', protocol: 1, hostId: fixture.host.hostId, execution: 'canonical', sessionActions: true } })
+      fixture.tlsRequest.mockResolvedValueOnce({ desktop: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: fixture.host.hostId, execution: 'canonical', sessionActions: true } })
       fixture.tlsRequest.mockResolvedValueOnce({ sessionAction: 'yes' })
       await expect(fixture.client.sessionAction(id, { cwd: '/workspace', providerId: 'claude', externalSessionId: 'session-1' }, { kind: 'pin', pinned: true })).rejects.toThrow('invalid_session_action_response')
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }

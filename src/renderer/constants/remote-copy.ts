@@ -120,7 +120,11 @@ export const REMOTE_SESSION_COPY = {
   deleteFailed: (detail: string) => `未能完整删除远端会话：${detail}`,
   operationUnknown: '远端操作结果未确认。请刷新会话列表核对，不要直接重复操作。',
   forkBoundaryMissing: '当前轮次缺少可验证的 Provider 会话边界。',
-  forkUnsupported: '此远端或 Provider 不支持创建分支，请更新远端 Scry 后确认能力。'
+  forkUnsupported: '此远端或 Provider 不支持创建分支，请更新远端 Scry 后确认能力。',
+  // Version disagreement: say which end is behind instead of "protocol error".
+  protocolHostOlder: (host: string) => `${host} 上的 Scry 版本比这台设备旧，请升级并重启该主机上的 Scry 后再连接。`,
+  protocolClientOlder: '这台设备上的 Scry 版本比远端主机旧，请更新本机 Scry 后再连接。',
+  protocolMismatch: '远端主机与这台设备的协议版本不一致，请确认两端都升级到最新版 Scry。'
 } as const
 
 export const REMOTE_ATTACHMENTS_COPY = {

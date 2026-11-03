@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { AgentInputAttachment } from '../../shared/runtime'
 import { readStoredAttachmentBytes } from '../attachment-store'
 import { DESKTOP_ATTACHMENT_MAX_BYTES, DESKTOP_ATTACHMENT_MAX_COUNT } from './desktop-attachments'
-import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES, type DesktopHostRead, type DesktopHostReadResult, type DesktopRemoteContext, type DesktopTraceCursor } from '../../shared/desktop-remote'
+import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES, REMOTE_PROTOCOL_VERSION, type DesktopHostRead, type DesktopHostReadResult, type DesktopRemoteContext, type DesktopTraceCursor } from '../../shared/desktop-remote'
 import type { ActiveRun } from '../../shared/trace'
 import type { ProviderId } from '../../shared/provider'
 import { mergeSessionTurns } from '../session-history'
@@ -122,7 +122,7 @@ export function createDesktopHostReader(deps: {
     const now = Date.now()
     for (const [id, page] of pages) if (now - page.touched >= CHUNK_IDLE_MS) pages.delete(id)
     traceRevisions.sweep(now, CHUNK_IDLE_MS)
-    if (query.kind === 'info') return { kind: 'info', protocol: 1, hostId: deps.hostId(), execution: 'canonical', traceDelta: 1 }
+    if (query.kind === 'info') return { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: deps.hostId(), execution: 'canonical', traceDelta: 1 }
     const cwd = deps.authorizeWorkspace(query.context.cwd)
     const context = { ...query.context, cwd }
     const sessionScope = query.kind !== 'trace' && query.historyScope === 'session'

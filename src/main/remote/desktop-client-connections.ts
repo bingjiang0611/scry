@@ -1,6 +1,7 @@
 import type { DesktopRemoteConnection, DesktopPairingResult, DesktopSshTarget } from '../../shared/desktop-remote'
 import { DesktopRemoteClientBase } from './desktop-client-base'
-import { fail, text, validateSsh, parseInvitation, connectionId, publicConnection, validateInfo, type EncryptedState, type StoredConnection } from './desktop-client-validation'
+import { fail, text, validateSsh, parseInvitation, connectionId, publicConnection, type EncryptedState, type StoredConnection } from './desktop-client-validation'
+import { validateInfo } from './desktop-client-capabilities'
 
 export abstract class DesktopRemoteClientConnections extends DesktopRemoteClientBase {
   async list(): Promise<DesktopRemoteConnection[]> { const state = await this.state(); return state.connections.map((item) => publicConnection(item, this.active.get(item.id)?.tunnel.alive === true)) }

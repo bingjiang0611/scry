@@ -136,6 +136,7 @@ final class WireTests: XCTestCase {
     let outerFields = try XCTUnwrap(JSONSerialization.jsonObject(with: outer) as? [String: Any])
     XCTAssertEqual(outerFields["keepAlive"] as? Bool, true)
     XCTAssertEqual(outerFields["deviceLabel"] as? String, "iPhone")
+    XCTAssertEqual(outerFields["protocol"] as? Int, RelaySession.protocolVersion)
     let outerNested = try XCTUnwrap(outerFields["request"] as? [String: Any])
     XCTAssertNil(outerNested["keepAlive"])
     XCTAssertNil(outerNested["deviceLabel"])

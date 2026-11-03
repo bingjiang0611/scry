@@ -1,3 +1,4 @@
+import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import 'reflect-metadata'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { connect } from 'node:net'
@@ -137,7 +138,8 @@ describe('DesktopHostListeners', () => {
         minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined
       })
       await once(socket, 'secureConnect')
-      socket.write('{"op":"projects"}\n')
+      // A device declares the run-channel version; the host refuses without it.
+      socket.write(JSON.stringify({ protocol: REMOTE_PROTOCOL_VERSION, op: 'projects' }) + '\n')
       let response = ''
       for await (const chunk of socket) {
         response += (chunk as Buffer).toString('utf8')

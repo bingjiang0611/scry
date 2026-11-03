@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { webcrypto } from 'node:crypto'
 import { Pkcs10CertificateRequestGenerator, cryptoProvider } from '@peculiar/x509'
 import { RemoteHostService } from './remote-host-service'
+import { requestOn } from './desktop-host-fixtures'
 import { RunOutputFileStore } from './run-output-file'
 import { connectDesktopLane, DesktopLanes, type DesktopLaneChannel, type DesktopLaneEndpoint } from './desktop-lane'
 import { verifyCSR } from './enrollment'
@@ -48,9 +49,9 @@ const hostConnections = (samples: PerformanceSample[]) => samples.filter(sample 
 // The host's liveRuns waits up to 20 s while the revision is unchanged: a real
 // in-flight long poll without any test-only host hook.
 async function pendingLiveRuns(lanes: DesktopLanes, lane: 'status' | 'bulk', endpoint: DesktopLaneEndpoint, signal?: AbortSignal) {
-  const first = await lanes.request(lane, 'c1', { endpoint, request: { op: 'liveRuns', waitMs: 0 }, replayable: true }) as { liveRuns: { revision: string } }
+  const first = await requestOn(lanes, lane, 'c1', { endpoint, request: { op: 'liveRuns', waitMs: 0 }, replayable: true }) as { liveRuns: { revision: string } }
   // Wrapped: an async function would otherwise wait for the whole poll.
-  return { pending: lanes.request(lane, 'c1', { endpoint, request: { op: 'liveRuns', waitMs: 20_000, revision: first.liveRuns.revision }, replayable: false, ...(signal ? { signal } : {}) }) }
+  return { pending: requestOn(lanes, lane, 'c1', { endpoint, request: { op: 'liveRuns', waitMs: 20_000, revision: first.liveRuns.revision }, replayable: false, ...(signal ? { signal } : {}) }) }
 }
 
 describe('desktop lanes over the real inner-mTLS host', () => {
@@ -61,7 +62,7 @@ describe('desktop lanes over the real inner-mTLS host', () => {
     const lanes = new DesktopLanes()
     cleanups.push(() => lanes.closeAll())
     for (let index = 0; index < 3; index++) {
-      await expect(lanes.request('control', 'c1', { endpoint, request: { op: 'providers' }, replayable: true })).resolves.toHaveProperty('providers')
+      await expect(requestOn(lanes, 'control', 'c1', { endpoint, request: { op: 'providers' }, replayable: true })).resolves.toHaveProperty('providers')
     }
     expect(hostConnections(samples)).toBe(1)
     expect(samples.filter(sample => sample.name === 'remote.host.request')).toHaveLength(3)
@@ -87,12 +88,12 @@ describe('desktop lanes over the real inner-mTLS host', () => {
     let opened: DesktopLaneChannel | undefined
     const lanes = new DesktopLanes(async target => { opened = await connectDesktopLane(target); return opened })
     cleanups.push(() => lanes.closeAll())
-    await lanes.request('control', 'c1', { endpoint, request: { op: 'providers' }, replayable: true })
+    await requestOn(lanes, 'control', 'c1', { endpoint, request: { op: 'providers' }, replayable: true })
     const dropped = new Promise<void>(resolve => { opened!.onClose(() => resolve()) })
     // The same host-side destroy the 30 s idle timeout performs.
     service.host.closePeer(fingerprint)
     await dropped
-    await expect(lanes.request('control', 'c1', { endpoint, request: { op: 'providers' }, replayable: true })).resolves.toHaveProperty('providers')
+    await expect(requestOn(lanes, 'control', 'c1', { endpoint, request: { op: 'providers' }, replayable: true })).resolves.toHaveProperty('providers')
     expect(hostConnections(samples)).toBe(2)
   })
 
@@ -107,7 +108,7 @@ describe('desktop lanes over the real inner-mTLS host', () => {
     })
     cleanups.push(() => lanes.closeAll())
     // Not sent: even a non-replayable request may go out on the new channel.
-    await expect(lanes.request('control', 'c1', { endpoint, request: { op: 'providers' }, replayable: false })).resolves.toHaveProperty('providers')
+    await expect(requestOn(lanes, 'control', 'c1', { endpoint, request: { op: 'providers' }, replayable: false })).resolves.toHaveProperty('providers')
     expect(attempts).toBe(2)
     expect(samples.filter(sample => sample.name === 'remote.host.request')).toHaveLength(1)
   })
@@ -119,10 +120,10 @@ describe('desktop lanes over the real inner-mTLS host', () => {
     const controller = new AbortController()
     const bulk = await pendingLiveRuns(lanes, 'bulk', endpoint, controller.signal)
     const outcome = expect(bulk.pending).rejects.toThrow('desktop_lane_cancelled')
-    await expect(lanes.request('control', 'c1', { endpoint, request: { op: 'providers' }, replayable: true })).resolves.toHaveProperty('providers')
+    await expect(requestOn(lanes, 'control', 'c1', { endpoint, request: { op: 'providers' }, replayable: true })).resolves.toHaveProperty('providers')
     controller.abort()
     await outcome
-    await expect(lanes.request('control', 'c1', { endpoint, request: { op: 'providers' }, replayable: true })).resolves.toHaveProperty('providers')
+    await expect(requestOn(lanes, 'control', 'c1', { endpoint, request: { op: 'providers' }, replayable: true })).resolves.toHaveProperty('providers')
   })
 
   it('fails an in-flight long poll on revocation and rejects later requests', async () => {
@@ -136,6 +137,6 @@ describe('desktop lanes over the real inner-mTLS host', () => {
     await outcome
     // Closed by revocation, far below the 20 s long-poll window.
     expect(Date.now() - started).toBeLessThan(5_000)
-    await expect(lanes.request('control', 'c1', { endpoint, request: { op: 'providers' }, replayable: true })).resolves.toEqual({ error: 'device_not_authorized' })
+    await expect(requestOn(lanes, 'control', 'c1', { endpoint, request: { op: 'providers' }, replayable: true })).resolves.toEqual({ error: 'device_not_authorized' })
   })
 })

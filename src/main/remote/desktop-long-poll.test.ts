@@ -2,7 +2,7 @@ import 'reflect-metadata'
 import { describe, expect, it } from 'vitest'
 import { rm } from 'node:fs/promises'
 import { setup, ssh } from './desktop-client-fixtures'
-import { withPairedHost } from './desktop-host-fixtures'
+import { requestOn, withPairedHost } from './desktop-host-fixtures'
 import { LiveWatchers } from './host-controller-watch'
 import { setPerformanceRecordingSink } from '../performance-timing'
 import type { PerformanceSample } from '../performance-timing'
@@ -37,11 +37,11 @@ describe('long polling instead of ticking', () => {
 
   it('answers at once for a device that has not seen the set, then waits for a change', async () => {
     await withPairedHost(async ({ lanes, endpoint }) => {
-      const first = await lanes.request('status', 'c1', { endpoint, request: { op: 'liveRuns', waitMs: 0 }, replayable: true }) as { liveRuns: { revision: string; runs: unknown[] } }
+      const first = await requestOn(lanes, 'status', 'c1', { endpoint, request: { op: 'liveRuns', waitMs: 0 }, replayable: true }) as { liveRuns: { revision: string; runs: unknown[] } }
       expect(first.liveRuns.runs).toEqual([])
       // Same revision: the host holds the request instead of answering immediately.
       const started = Date.now()
-      const held = lanes.request('status', 'c1', { endpoint, request: { op: 'liveRuns', waitMs: 400, revision: first.liveRuns.revision }, replayable: false })
+      const held = requestOn(lanes, 'status', 'c1', { endpoint, request: { op: 'liveRuns', waitMs: 400, revision: first.liveRuns.revision }, replayable: false })
       const second = await held as { liveRuns: { revision: string } }
       expect(Date.now() - started).toBeGreaterThanOrEqual(300)
       expect(second.liveRuns.revision).toBe(first.liveRuns.revision)
@@ -81,7 +81,7 @@ describe('long polling instead of ticking', () => {
     setPerformanceRecordingSink(sample => samples.push(sample))
     try {
       await withPairedHost(async ({ lanes, endpoint }) => {
-        const response = await lanes.request('watch', 'c1', { endpoint, request: { op: 'watch', runId: '11111111-1111-4111-8111-111111111111', cursor: 0, outputCursor: 0, waitMs: 0, output: false }, replayable: true })
+        const response = await requestOn(lanes, 'watch', 'c1', { endpoint, request: { op: 'watch', runId: '11111111-1111-4111-8111-111111111111', cursor: 0, outputCursor: 0, waitMs: 0, output: false }, replayable: true })
         // Lifecycle only: the reply never carries an output page, so an output-cache
         // fault cannot appear here at all.
         expect(response).toEqual({ error: 'unknown_run' })

@@ -1,3 +1,4 @@
+import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import 'reflect-metadata'
 import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -80,7 +81,7 @@ describe('inner-mTLS host request segmentation', () => {
       await once(socket, 'secureConnect')
       let buffer = ''
       for (const request of [{ op: 'poll', cursor: 0 }, { op: 'providers' }]) {
-        socket.write(JSON.stringify({ ...request, keepAlive: true }) + '\n')
+        socket.write(JSON.stringify({ protocol: REMOTE_PROTOCOL_VERSION, ...request as object, keepAlive: true }) + '\n')
         while (!buffer.includes('\n')) buffer += ((await once(socket, 'data'))[0] as Buffer).toString('utf8')
         // Clients detect a reusable lane by this exact prefix.
         expect(buffer.startsWith('{"keepAlive":true,')).toBe(true)

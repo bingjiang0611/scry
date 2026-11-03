@@ -167,13 +167,17 @@ export interface DesktopRemoteHistory {
 export const DESKTOP_HISTORY_CHUNK_BYTES = 512 * 1024
 export const DESKTOP_HISTORY_MAX_BYTES = 32 * 1024 * 1024
 
+// Version spoken on the run channel. Both ends refuse to talk across a mismatch
+// instead of degrading: a silent half-supported protocol is worse than a refusal.
+export const REMOTE_PROTOCOL_VERSION = 2
+
 export type DesktopHostRead =
   | { kind: 'info' }
   | { kind: 'history'; context: DesktopRemoteContext; historyScope?: 'session'; before?: number; snapshot?: string; byteChunks?: true; images?: true; chunk?: { id: string; offset: number } }
   | { kind: 'trace'; context: DesktopRemoteContext; runId: string; images?: true; delta?: { after?: DesktopTraceCursor }; byteChunks?: true; chunk?: { id: string; offset: number } }
   | { kind: 'image'; context: DesktopRemoteContext; historyScope?: 'session'; runId: string; providerTurnId?: string; index: number; chunk?: { id: string; offset: number } }
 export type DesktopHostReadResult =
-  | { kind: 'info'; protocol: 1; hostId: string; execution: 'canonical'; providerDiscovery?: 2; directorySelection?: true; workbench?: 1; sessionActions?: true; sessionFork?: true; sessionDelete?: true; traceDelta?: 1; attachments?: DesktopRemoteAttachmentCapability }
+  | { kind: 'info'; protocol: number; hostId: string; execution: 'canonical'; providerDiscovery?: 2; directorySelection?: true; workbench?: 1; sessionActions?: true; sessionFork?: true; sessionDelete?: true; traceDelta?: 1; attachments?: DesktopRemoteAttachmentCapability }
   | { kind: 'history'; history: DesktopRemoteHistory }
   | { kind: 'history_chunk'; id: string; offset: number; totalBytes: number; data: string }
   // `revision` is present only when the query asked for `delta`; with it the

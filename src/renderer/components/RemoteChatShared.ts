@@ -65,8 +65,11 @@ export function remoteControlsValid(provider: RemoteProviderRef | undefined, con
     : controls.permissionMode === 'default'
 }
 
-export function errorText(error: unknown): string {
+export function errorText(error: unknown, host?: string): string {
   const message = error instanceof Error ? error.message : String(error)
+  if (message.includes('desktop_protocol_host_older')) return REMOTE_SESSION_COPY.protocolHostOlder(host ?? '远端主机')
+  if (message.includes('desktop_protocol_client_older')) return REMOTE_SESSION_COPY.protocolClientOlder
+  if (message.includes('desktop_protocol_mismatch') || message.includes('desktop_protocol_missing')) return REMOTE_SESSION_COPY.protocolMismatch
   return message.includes('desktop_session_operation_unknown') ? REMOTE_SESSION_COPY.operationUnknown : message
 }
 

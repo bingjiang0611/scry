@@ -1,3 +1,4 @@
+import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { readFile, rm } from 'node:fs/promises'
@@ -29,7 +30,8 @@ describe('DesktopRemoteClient startup restoration', () => {
       await Promise.all([client.restoreConnections(), client.restoreConnections()])
       await expect(client.list()).resolves.toMatchObject([{ id: fixture.id, state: 'connected' }])
       expect(fixture.openTunnel).toHaveBeenCalledTimes(1)
-      expect(fixture.tlsRequest.mock.calls.map(([options]) => options.request)).toEqual([{ op: 'desktop', query: { kind: 'info' } }])
+      // Every run-channel request declares the protocol version it speaks.
+      expect(fixture.tlsRequest.mock.calls.map(([options]) => options.request)).toEqual([{ protocol: REMOTE_PROTOCOL_VERSION, op: 'desktop', query: { kind: 'info' } }])
     } finally { await client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
 
@@ -146,7 +148,7 @@ describe('DesktopRemoteClient startup restoration', () => {
       await client.restoreConnections()
       await expect(client.intents(fixture.id)).resolves.toMatchObject([{ intentId: receipt.intentId, status: 'unknown' }])
       expect(fixture.tlsRequest.mock.calls.map(([options]) => options.request)).toEqual([
-        { op: 'desktop', query: { kind: 'info' } }, { op: 'intentStatus', intentId: receipt.intentId }
+        { protocol: REMOTE_PROTOCOL_VERSION, op: 'desktop', query: { kind: 'info' } }, { protocol: REMOTE_PROTOCOL_VERSION, op: 'intentStatus', intentId: receipt.intentId }
       ])
     } finally { await client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
