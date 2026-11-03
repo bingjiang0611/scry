@@ -34,7 +34,8 @@ function Fixture() {
         .typography-smoke-row button { padding: 7px 11px; }
         .typography-smoke-chat { position: fixed; top: 0; left: -10000px; width: 240px; height: 80px; }
         .typography-smoke-chat-content { width: 600px; height: 200px; }
-        .typography-smoke-focus { position: fixed; top: 0; left: -10000px; width: 90px; }
+        .typography-smoke-chat-label { display: block; width: 90px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+        .typography-smoke-focus, .typography-smoke-code { position: fixed; top: 0; left: -10000px; width: 90px; }
         .typography-smoke-focus span { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
       `}</style>
       <main className="typography-smoke-page">
@@ -54,11 +55,14 @@ function Fixture() {
         <p id="typography-mixed" className="zh-prose" lang="zh-CN">{copy.mixed}</p>
       </section>
       <div id="typography-chat" className="chat typography-smoke-chat" aria-hidden="true">
-        <div className="typography-smoke-chat-content" />
+        <div className="typography-smoke-chat-content">
+          <span className="typography-smoke-chat-label">A transcript label that is intentionally truncated</span>
+        </div>
       </div>
       <button id="typography-focus" className="typography-smoke-focus" type="button">
         <span>Keyboard focus reveals this truncated label</span>
       </button>
+      <code id="typography-code" className="typography-smoke-code" lang="zh-CN">30 ms 中文</code>
       </main>
     </>
   )

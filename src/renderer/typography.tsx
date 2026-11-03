@@ -36,8 +36,9 @@ export function keepRequiredPairsTogether(value: string): string {
 function mapText(children: ReactNode, transform: (value: string) => ReactNode): ReactNode {
   return Children.map(children, child => {
     if (typeof child === 'string') return transform(child)
-    if (!isValidElement<{ children?: ReactNode }>(child) || child.props.children == null) return child
-    if (typeof child.type === 'string' && ['code', 'pre', 'kbd', 'samp'].includes(child.type)) return child
+    if (!isValidElement<{ children?: ReactNode; node?: { tagName?: string } }>(child) || child.props.children == null) return child
+    const tagName = typeof child.type === 'string' ? child.type : child.props.node?.tagName
+    if (tagName && ['code', 'pre', 'kbd', 'samp'].includes(tagName)) return child
     return cloneElement(child as ReactElement<{ children?: ReactNode }>, undefined, mapText(child.props.children, transform))
   })
 }

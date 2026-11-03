@@ -32,14 +32,17 @@ async function exercise() {
   const button = document.querySelector('.typography-smoke-row button')
   const mixed = document.querySelector('#typography-mixed')
   const chat = document.querySelector('#typography-chat')
+  const chatLabel = chat.querySelector('.typography-smoke-chat-label')
   const focusButton = document.querySelector('#typography-focus')
   const focusLabel = focusButton.querySelector('span')
+  const code = document.querySelector('#typography-code')
   const headingStyle = getComputedStyle(heading)
   const paragraphStyle = getComputedStyle(paragraph)
   const numberStyle = getComputedStyle(number)
   const truncatedStyle = getComputedStyle(truncated)
   const mixedStyle = getComputedStyle(mixed)
   const chatStyle = getComputedStyle(chat)
+  const codeStyle = getComputedStyle(code)
 
   check(headingStyle.textWrap === 'balance', 'Heading is not balanced')
   check(heading.querySelectorAll('wbr').length > 0, 'Chinese heading has no BudouX break points')
@@ -69,12 +72,18 @@ async function exercise() {
   check(mixedStyle.maxWidth !== 'none', 'Chinese measure is not capped to whole characters')
   check(mixedStyle.textAutospace === 'normal', 'Chinese and Latin autospace is not enabled')
   check(mixedStyle.textSpacingTrim === 'trim-start', 'Chinese opening punctuation trim is not enabled')
+  check(codeStyle.textAutospace === 'no-autospace', 'Chinese language rules leak into code autospace')
+  check(codeStyle.textSpacingTrim === 'space-all', 'Chinese language rules leak into code punctuation spacing')
   check(chatStyle.overflowX === 'hidden', 'Chat exposes horizontal overflow')
   check(chatStyle.overflowY === 'auto', 'Chat no longer scrolls vertically')
   check(chatStyle.scrollbarWidth === 'none', 'Chat vertical scrollbar is visible')
   check(getComputedStyle(chat, '::-webkit-scrollbar').display === 'none', 'Chromium chat scrollbar is visible')
   chat.scrollTop = chat.scrollHeight
   check(chat.scrollTop > 0, 'Hidden chat scrollbar also disabled scrolling')
+  check(chatLabel.scrollWidth > chatLabel.clientWidth, 'Transcript descendant fixture is not actually cut')
+  chat.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+  chat.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+  check(!chat.title, 'Generic transcript containers scan truncated descendants')
   check(focusLabel.scrollWidth > focusLabel.clientWidth, 'Focus tooltip fixture is not actually cut')
   focusButton.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
   check(focusButton.title === focusLabel.textContent, 'Focused control does not expose its cut descendant')
@@ -90,6 +99,8 @@ async function exercise() {
     chineseMixedText: true,
     hiddenChatScrollbars: true,
     focusedTruncationTooltip: true,
+    codeTypographyExcluded: true,
+    boundedOverflowDiscovery: true,
     viewport: [innerWidth, innerHeight]
   }
 }

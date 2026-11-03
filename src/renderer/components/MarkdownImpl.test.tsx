@@ -113,6 +113,12 @@ describe('MarkdownImpl trust boundary', () => {
     expect(html).toContain('<p>English body with 30\u00a0tokens.</p>')
   })
 
+  it('keeps required prose pairs together without rewriting inline code', () => {
+    const html = renderToStaticMarkup(<MarkdownImpl>{'Wait 30 ms, then compare `30 ms`.'}</MarkdownImpl>)
+    expect(html).toContain('Wait 30\u00a0ms')
+    expect(html).toContain('<code>30 ms</code>')
+  })
+
   it('repairs common model-authored strong spacing without touching code', () => {
     const source = '**我的判断： **最值得关注。\n\n**结论：**继续优化。\n\n先**检查**项目。\n\n`** inline literal **`\n\n```md\n** fenced literal **\n```'
     expect(normalizeMarkdownForDisplay(source)).toBe(

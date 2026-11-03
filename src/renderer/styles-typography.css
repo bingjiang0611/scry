@@ -26,7 +26,7 @@
   text-overflow: ellipsis;
 }
 
-:lang(zh) {
+:where(:lang(zh)) {
   text-autospace: normal;
   text-spacing-trim: trim-start;
 }
