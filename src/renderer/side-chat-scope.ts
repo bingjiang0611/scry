@@ -3,6 +3,7 @@ import type { ProviderId } from '@shared/provider'
 import type { AgentRunControls } from '@shared/runtime'
 import type { ConversationSummary } from '@shared/conversation-api'
 import type { AppView } from './app-types'
+import type { Turn } from './format-types'
 import { SIDE_CHAT_COPY } from './constants/side-chat-copy'
 
 export interface SideChatScope {
@@ -14,6 +15,17 @@ export interface SideChatScope {
   hasTerminalTurn: boolean
   /** Set when no child can be created at all, with the real reason. */
   unavailableReason?: string
+}
+
+/**
+ * How many displayed turns are terminal evidence a snapshot could freeze.
+ *
+ * `done` is a settled turn and `error` is terminal even when the settled flag never
+ * arrived. A `pendingStart` placeholder, a running turn and a finalizing turn are none of
+ * those, so a parent holding only a running turn offers no side chat at all.
+ */
+export function terminalTurnCount(turns: readonly Pick<Turn, 'done' | 'error'>[]): number {
+  return turns.filter(turn => turn.done || Boolean(turn.error)).length
 }
 
 /**
