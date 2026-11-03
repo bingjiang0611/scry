@@ -13,7 +13,7 @@
 | B2-S1 trace 读取频率测量 | 完成 | `a334c20`、`77dd703` | 基线 40/min，优化前 240/min（6.0×），合并后 60/min（1.5×）；测量与优化分开提交 |
 | B2-P3a 宿主组装层 | 完成 | `3d48307` | `src/host-runtime/createHostRuntime`；值导入图断言无 `electron`（195 个文件） |
 | B2-P3b daemon 与本机通道 | **未完成**（本机通道已完成） | `见 status` | 本机 unix socket mTLS 已实现并验证；daemon 进程/supervisor/影子模式被运行管线依赖阻塞，见[说明](status/b2-p3b.md) |
-| B2-D 本机运行管线设计 | 待办 | — | |
+| B2-D 本机运行管线设计 | 完成 | `见下` | `P3b-local-runtime-design.md`：迁移边界、SQLite 归属、trace 推送、recorder、终端/SCM、auth 锁、步骤与回滚 |
 | 交付前全局验证 | 待办 | — | |
 
 ## 每个任务的证据
@@ -25,3 +25,4 @@
 - [B2-S1 trace 读取频率](status/b2-s1.md)
 - [B2-P3a 宿主组装层](status/b2-p3a.md)
 - [B2-P3b daemon 与本机通道](status/b2-p3b.md)
+- [B2-D 本机运行管线设计](P3b-local-runtime-design.md)
