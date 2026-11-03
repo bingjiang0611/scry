@@ -1,27 +1,33 @@
 import { describe, expect, it } from 'vitest'
 import { errorText, needsTraceRead, POLL_MS, TRACE_REFRESH_FLOOR_MS } from './RemoteChatShared'
 
-// The renderer no longer ticks: the host long poll reports change, so content
-// reads must follow that report instead of a timer.
-describe('trace reads follow the long poll', () => {
-  it('reads when the poll reports a change', () => {
-    expect(needsTraceRead({ shownRunId: 'run-a', runId: 'run-a', changed: true, lastReadAt: 1_000, now: 1_001 })).toBe(true)
-  })
-
-  it('reads nothing on a window that expired without change', () => {
-    expect(needsTraceRead({ shownRunId: 'run-a', runId: 'run-a', changed: false, lastReadAt: 1_000, now: 1_001 })).toBe(false)
-    // An unreported flag is not evidence of "no change", so the floor still applies.
+// The renderer no longer ticks: the host long poll reports change. Content reads
+// coalesce on a floor instead of following every report.
+describe('trace reads coalesce on the floor', () => {
+  it('reads nothing inside the floor, even right after a change report', () => {
     expect(needsTraceRead({ shownRunId: 'run-a', runId: 'run-a', lastReadAt: 1_000, now: 1_001 })).toBe(false)
+    expect(needsTraceRead({ shownRunId: 'run-a', runId: 'run-a', lastReadAt: 1_000, now: 1_000 + TRACE_REFRESH_FLOOR_MS - 1 })).toBe(false)
   })
 
-  it('reads a run that is not on screen yet, whatever the flag', () => {
-    expect(needsTraceRead({ runId: 'run-b', changed: false, lastReadAt: 1_000, now: 1_001 })).toBe(true)
+  it('reads a run that is not on screen at once', () => {
+    expect(needsTraceRead({ runId: 'run-b', lastReadAt: 1_000, now: 1_001 })).toBe(true)
     expect(needsTraceRead({ shownRunId: 'run-a', runId: 'run-b', lastReadAt: 1_000, now: 1_001 })).toBe(true)
   })
 
-  it('refreshes a followed run without ledger events on the floor', () => {
-    expect(needsTraceRead({ shownRunId: 'run-a', runId: 'run-a', changed: false, lastReadAt: 1_000, now: 1_000 + TRACE_REFRESH_FLOOR_MS })).toBe(true)
-    expect(TRACE_REFRESH_FLOOR_MS).toBeGreaterThan(POLL_MS)
+  it('refreshes a followed run on the floor', () => {
+    expect(needsTraceRead({ shownRunId: 'run-a', runId: 'run-a', lastReadAt: 1_000, now: 1_000 + TRACE_REFRESH_FLOOR_MS })).toBe(true)
+  })
+
+  it('bounds one followed run to at most one read per floor per second', () => {
+    // The measured regression: reading on every change report cost 6x the
+    // pre-long-poll rate. Count what this policy issues in one second of a run
+    // that reports a change every 100 ms.
+    let lastReadAt = Number.NEGATIVE_INFINITY
+    let reads = 0
+    for (let now = 0; now < 1_000; now += POLL_MS) {
+      if (needsTraceRead({ shownRunId: 'run-a', runId: 'run-a', lastReadAt, now })) { reads += 1; lastReadAt = now }
+    }
+    expect(reads).toBeLessThanOrEqual(Math.ceil(1_000 / TRACE_REFRESH_FLOOR_MS))
   })
 })
 

@@ -73,10 +73,14 @@ export function errorText(error: unknown, host?: string): string {
   return message.includes('desktop_session_operation_unknown') ? REMOTE_SESSION_COPY.operationUnknown : message
 }
 
-// Whether the shown run's content needs another read. The host long poll reports
-// change, so a quiet window reads nothing; a followed run without ledger events
-// under it, or a run that is not the one on screen, still refreshes on the floor.
-export function needsTraceRead(state: { shownRunId?: string; runId: string; changed?: boolean; lastReadAt: number; now: number }): boolean {
-  if (state.shownRunId === state.runId && state.changed !== true && state.now - state.lastReadAt < TRACE_REFRESH_FLOOR_MS) return false
-  return true
+// Whether the shown run's content needs another read.
+//
+// A run that is not the one on screen is read at once: opening a session must not
+// wait for a floor. Otherwise at most one content read happens per floor, however
+// many change reports arrive in between: an active run emits a ledger batch every
+// few hundred milliseconds, and reading on every report made one followed run cost
+// six times the trace reads the pre-long-poll renderer did per minute.
+export function needsTraceRead(state: { shownRunId?: string; runId: string; lastReadAt: number; now: number }): boolean {
+  if (state.shownRunId !== state.runId) return true
+  return state.now - state.lastReadAt >= TRACE_REFRESH_FLOOR_MS
 }

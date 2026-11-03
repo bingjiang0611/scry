@@ -98,11 +98,11 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
       // expired; the next request is issued straight away. Backoff stays for errors.
       setPollInterval(quiet ? Math.min(QUIET_POLL_MAX_MS, pollIntervalMs.current * 2) : POLL_MS)
     }
-    // Trace content is read only when the long poll reports new evidence, when the
-    // shown run is not this run yet, or on the refresh floor.
-    const traceNeedsRead = (runId: string, changed: boolean | undefined): boolean => {
+    // Trace content is read when the shown run is not this run yet, and otherwise at
+    // most once per floor so a burst of ledger events coalesces into one read.
+    const traceNeedsRead = (runId: string): boolean => {
       const now = Date.now()
-      const read = needsTraceRead({ ...(traceViewRef.current?.run.runId ? { shownRunId: traceViewRef.current.run.runId } : {}), runId, ...(changed === undefined ? {} : { changed }), lastReadAt: lastTraceRead.current, now })
+      const read = needsTraceRead({ ...(traceViewRef.current?.run.runId ? { shownRunId: traceViewRef.current.run.runId } : {}), runId, lastReadAt: lastTraceRead.current, now })
       if (read) lastTraceRead.current = now
       return read
     }
@@ -123,7 +123,6 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
           const followed = foreignRunRef.current
           const live = context.externalSessionId && (sessionActive || followed) ? await api.liveRun(connectionId, context) : null
           if (cancelled || sequence !== pollSequence.current) return
-          const liveChanged = JSON.stringify(live) !== JSON.stringify(foreignRunRef.current)
           setForeignRun(keepIfEqual(live))
           if (followed && live?.runId !== followed.runId) {
             // The followed run left the host's live set; its turn is now history.
@@ -131,7 +130,7 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
             void refreshRemoteCatalog(connectionId)
           }
           let traceChanged: boolean | undefined
-          if (live?.scryRunId && traceNeedsRead(live.scryRunId, liveChanged)) {
+          if (live?.scryRunId && traceNeedsRead(live.scryRunId)) {
             traceChanged = await followTrace(live.scryRunId, sequence)
             if (traceChanged === undefined) return
           } else if (!live?.scryRunId) showTrace(null)
@@ -183,7 +182,7 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
           void refreshRemoteCatalog(connectionId)
         }
         let traceChanged: boolean | undefined
-        if (nextStatus.scryRunId && traceNeedsRead(nextStatus.scryRunId, nextStatus.changed)) {
+        if (nextStatus.scryRunId && traceNeedsRead(nextStatus.scryRunId)) {
           traceChanged = await followTrace(nextStatus.scryRunId, sequence)
           if (traceChanged === undefined) return
         } else if (!nextStatus.scryRunId) showTrace(null)
