@@ -12,6 +12,7 @@ import { PerformanceTrace, performanceRecordingEnabled } from '../performance-ti
 import { homedir } from 'node:os'
 import { dirname } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
+import { ProviderWarmPool, providerWarmKey } from './provider-warm-pool'
 import { contextUsageEvidence } from '../../shared/trace'
 import { effortOption } from './run-controls'
 import { questionFromExtension } from './pi-events'
@@ -66,60 +67,45 @@ function piRpcArgs(options: { noSession?: boolean; session?: string; offline?: b
 
 // A cold `pi --mode rpc` start (Node plus the Pi bootstrap) costs seconds on this machine, while the
 // capability reads on a live process cost milliseconds. Park a bounded working set per
-// profile+workspace for 60 seconds. Explicit context invalidation closes only the matching child,
-// while every read still sends the same four live queries. Nothing is answered from a settled
-// snapshot, and the existing idle expiry still bounds how long startup-loaded Pi resources live.
+// provider+profile+workspace+executable for 60 seconds. Explicit context invalidation closes only
+// the matching child, while every read still sends the same four live queries. Nothing is answered
+// from a settled snapshot, and the existing idle expiry still bounds how long startup-loaded Pi
+// resources live.
 const PI_CATALOG_IDLE_MS = 60_000
 const PI_CATALOG_WARM_PROCESS_LIMIT = 8
 
 interface WarmCatalogProcess {
   rpc: PiRpcProcess
-  env: NodeJS.ProcessEnv
   off: () => void
-  profileId: string
-  cwd: string
-  idle?: NodeJS.Timeout
 }
 
-const warmCatalogProcesses = new Map<string, WarmCatalogProcess>()
+const warmCatalogProcesses = new ProviderWarmPool<WarmCatalogProcess>({
+  limit: PI_CATALOG_WARM_PROCESS_LIMIT,
+  idleMs: PI_CATALOG_IDLE_MS,
+  reusable: entry => entry.rpc.reusable(),
+  sameEnvironment: (parked, next) => isDeepStrictEqual(parked, next),
+  close: async entry => {
+    entry.off()
+    await entry.rpc.close()
+  },
+  onCloseError: error => { console.warn('[scry] failed to close evicted Pi catalog process:', error) }
+})
 
-async function closeWarmCatalogProcess(key: string, entry: WarmCatalogProcess): Promise<void> {
-  if (warmCatalogProcesses.get(key) === entry) warmCatalogProcesses.delete(key)
-  if (entry.idle) clearTimeout(entry.idle)
-  entry.off()
-  await entry.rpc.close()
-}
-
-function parkWarmCatalogProcess(key: string, entry: WarmCatalogProcess): void {
-  entry.idle = setTimeout(() => { void closeWarmCatalogProcess(key, entry) }, PI_CATALOG_IDLE_MS)
-  entry.idle.unref()
-  warmCatalogProcesses.delete(key)
-  warmCatalogProcesses.set(key, entry)
-  while (warmCatalogProcesses.size > PI_CATALOG_WARM_PROCESS_LIMIT) {
-    const oldest = warmCatalogProcesses.entries().next().value as [string, WarmCatalogProcess] | undefined
-    if (!oldest) return
-    warmCatalogProcesses.delete(oldest[0])
-    void closeWarmCatalogProcess(oldest[0], oldest[1]).catch((error: unknown) => {
-      console.warn('[scry] failed to close evicted Pi catalog process:', error)
-    })
-  }
+// Provider identity is part of the key so a pool shared by later Providers cannot
+// hand a Pi process to another adapter.
+function warmCatalogKey(profile: PiAgentProfile, cwd: string): string {
+  return providerWarmKey({ provider: 'pi', profile: profile.id, executable: profile.executable, cwd })
 }
 
 /** Close parked probe processes and await their exit. Adapter disposal calls this. */
 export async function disposePiCatalog(): Promise<void> {
-  const entries = [...warmCatalogProcesses]
-  warmCatalogProcesses.clear()
-  await Promise.all(entries.map(async ([key, entry]) => closeWarmCatalogProcess(key, entry)))
+  await warmCatalogProcesses.dispose()
 }
 
 /** Invalidate only the matching catalog generation; unrelated workspaces remain warm. */
 export async function invalidatePiCatalog(context: ProviderContext): Promise<void> {
   if (!context.cwd) return disposePiCatalog()
-  const entries = [...warmCatalogProcesses].filter(([, entry]) =>
-    entry.cwd === context.cwd &&
-    (!context.agentProfileId || entry.profileId === context.agentProfileId)
-  )
-  await Promise.all(entries.map(async ([key, entry]) => closeWarmCatalogProcess(key, entry)))
+  await warmCatalogProcesses.invalidate({ cwd: context.cwd, ...(context.agentProfileId ? { profileId: context.agentProfileId } : {}) })
 }
 
 async function withPiRpc<T>(
@@ -133,21 +119,17 @@ async function withPiRpc<T>(
 ): Promise<T> {
   const env = await piRpcEnvironment(profile)
   catalogTrace?.mark('environment_ready')
-  const parked = warmKey === undefined ? undefined : warmCatalogProcesses.get(warmKey)
+  // A parked process that cannot be reused (failed, closing, different environment) is closed
+  // inside take(), before a replacement starts, so a broken child never lingers behind a working one.
+  const parked = warmKey === undefined ? undefined : await warmCatalogProcesses.take(warmKey, env)
   let rpc: PiRpcProcess
   let off: () => void
-  if (parked && parked.rpc.reusable() && isDeepStrictEqual(parked.env, env)) {
-    warmCatalogProcesses.delete(warmKey!)
-    if (parked.idle) clearTimeout(parked.idle)
-    parked.idle = undefined
+  if (parked) {
     rpc = parked.rpc
     off = parked.off
     if (warm) warm.reused = true
     rpc.attachCatalogTrace(catalogTrace)
   } else {
-    // A parked process that cannot be reused (failed, closing, different environment) is dropped
-    // before a replacement starts, so a broken child never lingers behind a working one.
-    if (parked) await closeWarmCatalogProcess(warmKey!, parked)
     rpc = PiRpcProcess.start(profile, args, env, cwd, PI_RPC_MAX_FRAME_BYTES, catalogTrace)
     off = rpc.onEvent((event) => {
       // Catalog/session operations have no interactive owner. Decline startup dialogs;
@@ -167,13 +149,7 @@ async function withPiRpc<T>(
     // early exit) closes its child immediately, so the next attempt starts from a clean process
     // instead of reusing one whose RPC surface just failed.
     if (warmKey !== undefined && completed && rpc.reusable()) {
-      parkWarmCatalogProcess(warmKey, {
-        rpc,
-        env,
-        off,
-        profileId: profile.id,
-        cwd: cwd ?? ''
-      })
+      warmCatalogProcesses.park(warmKey, { rpc, off }, env, { profileId: profile.id, cwd: cwd ?? '' })
     } else {
       off()
       await rpc.close()
@@ -187,7 +163,7 @@ const piProbesInFlight = new Map<string, Promise<PiProbe>>()
 
 export function probePiAgent(profile: PiAgentProfile, cwd?: string): Promise<PiProbe> {
   const probeCwd = cwd || homedir()
-  const key = JSON.stringify([profile.id, profile.executable, probeCwd])
+  const key = warmCatalogKey(profile, probeCwd)
   const pending = piProbesInFlight.get(key)
   if (pending) return pending
   const trace = performanceRecordingEnabled() ? new PerformanceTrace('pi.catalog.probe', { provider: 'pi' }) : undefined

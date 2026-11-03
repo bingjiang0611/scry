@@ -12,6 +12,7 @@ import type { WorkspaceAuthorizer } from './remote-run-policy'
 import type { ProviderOperationGate } from '../provider-operation-gate'
 import type { AgentQuestionRequest, AgentQuestionResponse } from '../../shared/runtime'
 import type { DesktopAttachmentStore } from './desktop-attachments'
+import { createProviderPrewarmer } from './remote-provider-prewarm'
 
 // Production binding for the remote subsystem. It gives HostController the real
 // durable persistence (exclusive-lease JSONL ledger + fsynced pairing state) and
@@ -152,6 +153,16 @@ export async function createHostController(deps: HostControllerFactoryDependenci
   }
 
   const workspace: WorkspaceAuthorizer = { authorize: (cwd) => deps.authorizeWorkspace(cwd) }
+  // Opening a session warms that Provider context. Two checks decide: the device
+  // grant is already verified by the gateway, and the workspace must pass the same
+  // authorization a run needs - starting a Provider inside a repository whose
+  // config is not authorized would load repository-controlled code.
+  const prewarm = deps.listCommands ? createProviderPrewarmer(deps.listCommands) : undefined
+  const warmSession = prewarm === undefined ? undefined : (target: { providerId: string; cwd?: string; agentProfileId?: string }): void => {
+    if (!target.cwd) return
+    try { workspace.authorize(target.cwd) } catch { return }
+    prewarm(target)
+  }
   const controllerDeps: HostControllerDependencies = {
     ...(deps.readDesktop ? { readDesktop: deps.readDesktop } : {}),
     ...(deps.desktopWorkbench ? { desktopWorkbench: deps.desktopWorkbench } : {}),
@@ -184,7 +195,7 @@ export async function createHostController(deps: HostControllerFactoryDependenci
     ...(deps.sessionCatalogRevision ? { sessionCatalogRevision: deps.sessionCatalogRevision } : {}),
     ...(deps.readSessionStatus ? { readSessionStatus: deps.readSessionStatus } : {}),
     ...(deps.macRuns ? { macRuns: deps.macRuns } : {}),
-    ...(deps.readHistory ? { readHistory: deps.readHistory } : {}),
+    ...(deps.readHistory ? { readHistory: withPrewarm(deps.readHistory, warmSession) } : {}),
     ...(deps.readHistoryPreview ? { readHistoryPreview: deps.readHistoryPreview } : {}),
     ...(deps.readHistoryVersion ? { readHistoryVersion: deps.readHistoryVersion } : {}),
     ...(deps.readHistoryTurnsPage ? { readHistoryTurnsPage: deps.readHistoryTurnsPage } : {})  }
@@ -217,5 +228,24 @@ export async function createHostController(deps: HostControllerFactoryDependenci
         }
       }
     }
+  }
+}
+
+// Attaches the background warm-up to a session read. The read's own result and
+// error travel unchanged: prewarming never turns a successful read into a failed
+// one, and never reports a Provider start as session evidence.
+function withPrewarm<Q extends { providerId: string; cwd?: string | null; agentProfileId?: string | null }, R>(
+  read: (query: Q) => Promise<R>,
+  prewarm: ((target: { providerId: string; cwd?: string; agentProfileId?: string }) => void) | undefined
+): (query: Q) => Promise<R> {
+  if (!prewarm) return read
+  return async (query: Q): Promise<R> => {
+    const result = await read(query)
+    prewarm({
+      providerId: query.providerId,
+      ...(query.cwd ? { cwd: query.cwd } : {}),
+      ...(query.agentProfileId ? { agentProfileId: query.agentProfileId } : {})
+    })
+    return result
   }
 }
