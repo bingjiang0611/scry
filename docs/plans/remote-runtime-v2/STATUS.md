@@ -7,7 +7,7 @@
 | 任务 | 状态 | 提交 | 备注 |
 |---|---|---|---|
 | T0 分段测量 | 完成 | `4b72294` | 传输 / 宿主 dispatch / Provider cold-reused 三段可分别读 |
-| T1 Provider 热池 | 完成 | `T1` | `ProviderWarmPool` 泛化 + Pi 接入 + 宿主单飞 + 打开会话预热 |
+| T1 Provider 热池 | 完成 | `6090a21` | `ProviderWarmPool` 泛化 + Pi 接入 + 宿主单飞 + 打开会话预热 |
 | T2 Desktop 持久 lane | 未开始 | | |
 | T3 长轮询 | 未开始 | | |
 | T4 catalog 合批 | 未开始 | | |
