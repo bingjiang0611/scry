@@ -195,7 +195,9 @@ interface LaneState {
   channel?: DesktopLaneChannel
   endpoint?: string
   idle?: NodeJS.Timeout
-  busy: boolean
+  // The call whose exchange is on the wire right now. Cancelling a call that is
+  // still queued must never tear down the channel another call is using.
+  current?: DesktopLaneCall
   // Set when the connection's tunnel goes away. A retired lane never opens a
   // channel again: a reconnect or replay would target a stale tunnel path.
   retired: boolean
@@ -220,7 +222,7 @@ export class DesktopLanes {
 
   request(lane: DesktopLaneName, connectionId: string, call: DesktopLaneCall): Promise<unknown> {
     const key = `${connectionId}\u0000${lane}`
-    const state = this.#lanes.get(key) ?? { queue: Promise.resolve(), busy: false, retired: false }
+    const state = this.#lanes.get(key) ?? { queue: Promise.resolve(), retired: false }
     this.#lanes.set(key, state)
     const policy = LANE_POLICY[lane]
     const operation = state.queue.then(async () => await this.#exchange(lane, state, call, policy))
@@ -231,8 +233,10 @@ export class DesktopLanes {
     return new Promise<unknown>((resolve, reject) => {
       const onAbort = (): void => {
         // Close only the channel carrying this call; later calls queued on the
-        // lane open a fresh channel. The cancelled call itself never retries.
-        if (state.busy) this.#dropChannel(state)
+        // lane open a fresh channel. A call that has not been written yet drops
+        // nothing - the exchange in front of it owns the channel. The cancelled
+        // call itself never retries.
+        if (state.current === call) this.#dropChannel(state)
         reject(laneError('desktop_lane_cancelled'))
       }
       if (call.signal!.aborted) { onAbort(); return }
@@ -252,7 +256,7 @@ export class DesktopLanes {
       if (!key.startsWith(`${connectionId}\u0000`)) continue
       this.#lanes.delete(key)
       state.retired = true
-      if (!state.busy) this.#dropChannel(state)
+      if (!state.current) this.#dropChannel(state)
     }
   }
 
@@ -269,9 +273,9 @@ export class DesktopLanes {
     // Nothing was written yet: a pre-dispatch rejection, never an unknown write.
     if (state.retired) throw laneError('desktop_not_connected')
     if (call.signal?.aborted) throw laneError('desktop_lane_cancelled')
-    state.busy = true
+    state.current = call
     try { return await this.#exchangeOnLane(lane, state, call, policy) } finally {
-      state.busy = false
+      state.current = undefined
       if (state.retired) this.#dropChannel(state)
     }
   }

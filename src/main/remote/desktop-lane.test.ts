@@ -143,6 +143,32 @@ describe('DesktopLanes', () => {
     lanes.closeAll()
   })
 
+  it('cancels a queued read without dropping the exchange in front of it', async () => {
+    let release!: () => void
+    let calls = 0
+    const connect = vi.fn(fakeLaneConnector(async () => {
+      calls++
+      const seq = calls
+      if (seq === 1) await new Promise<void>((resolve) => { release = resolve })
+      return { seq }
+    }))
+    const lanes = new DesktopLanes(connect)
+    // Same lane: the second call queues behind the first instead of owning a channel.
+    const first = lanes.request('watch', 'c1', { endpoint, request: { op: 'watch' }, replayable: true })
+    await vi.waitFor(() => expect(calls).toBe(1))
+    const controller = new AbortController()
+    const queued = lanes.request('watch', 'c1', { endpoint, request: { op: 'watch' }, replayable: true, signal: controller.signal })
+    // The queued read has not been written yet, so its cancellation owns no channel.
+    controller.abort()
+    await expect(queued).rejects.toThrow('desktop_lane_cancelled')
+    release()
+    // The in-flight read keeps its channel: one handshake for the whole lane.
+    await expect(first).resolves.toEqual({ seq: 1 })
+    expect(connect).toHaveBeenCalledTimes(1)
+    expect(calls).toBe(1)
+    lanes.closeAll()
+  })
+
   it('fails queued work on a closed connection before writing it', async () => {
     let release!: () => void
     const handler = vi.fn(async () => { await new Promise<void>(resolve => { release = resolve }); return { ok: true } })
