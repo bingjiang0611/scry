@@ -53,9 +53,25 @@ export function captureTitle(value: string | undefined, fallback: string): strin
 }
 
 /**
+ * Every fact one sealed manifest entry will claim, in one fixed order.
+ *
+ * The sealed entry keeps the source ordinal, Provider, role, content hash, status, delivery
+ * and native identities, so all of them are fingerprinted. A source that only rewrote its
+ * terminal status therefore previews as a different prefix instead of matching one frozen
+ * under the old verdict.
+ */
+function sealedMetadata(item: CaptureItem): Array<string | number | null> {
+  return [
+    item.sourceOrdinal, item.providerId, item.role, item.contentHash, item.status, item.delivery,
+    item.nativeSessionId ?? null, item.providerTurnId ?? null
+  ]
+}
+
+/**
  * Fingerprints cover the selected messages only. File mtime, a mutable trailing
  * turn or the source's full archive length never participate, so appending to the
- * source cannot change an already-previewed prefix.
+ * source cannot change an already-previewed prefix. Source identity stays in the
+ * prefix fingerprint: the manifest itself only names the messages.
  */
 export function fingerprints(source: SideChatSource, through: { ordinal: number; runId: string }, items: readonly CaptureItem[]): {
   prefixFingerprint: string
@@ -64,10 +80,9 @@ export function fingerprints(source: SideChatSource, through: { ordinal: number;
   return {
     prefixFingerprint: hash(JSON.stringify({
       source: sourceIdentity(source), throughOrdinal: through.ordinal, throughRunId: through.runId,
-      items: items.map(item => [item.sourceRunId, item.role, item.contentHash, item.sourceOrdinal, item.providerId])
+      items: items.map(item => [item.sourceRunId, ...sealedMetadata(item)])
     })),
-    manifestFingerprint: hash(JSON.stringify(items.map(item =>
-      [item.sourceOrdinal, item.providerId, item.role, item.contentHash])))
+    manifestFingerprint: hash(JSON.stringify(items.map(sealedMetadata)))
   }
 }
 
