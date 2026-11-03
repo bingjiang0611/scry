@@ -71,7 +71,7 @@
 
 - 在独立 worktree 里改 recorder（本仓库）和 uploader（私有仓库）的代码、本地提交。
 - 构建、在 `$HOME/scry-perf/climb/` 下安装候选、跑所有本地测量和测试。
-- 推送到本分支 `perf/rate-native-climb`（只推下面允许的内容）。
+- 推送到本分支 `perf/multi-repo-climb`（只推下面允许的内容）。
 - 在 `scry-rollout-check/` 里补测量能力（单独提交，A/A 证明一致）。
 
 ## 必须停下记为阻碍的（不能自己做）
