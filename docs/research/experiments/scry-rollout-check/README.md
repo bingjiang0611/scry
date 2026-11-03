@@ -136,3 +136,16 @@ node perf-bench.mjs --source <你的仓库> --work <副本路径，必须在源�
 - **端到端（可选，花钱）**：`node perf-bench.mjs e2e --work <副本> --cmd '<Provider 命令，提示词位置写 {prompt}>' --runs 5`。同一提示词轮流在开启和关闭记录（`SCRY_RECORDER_ENABLED=0`）下各跑一次，记录耗时差值；模型响应波动远大于 hook 开销，只记录，不做门禁。先在副本里对这个 Provider 执行 `scry init`。
 
 输出 `baseline-<时间>.json` 和 `.md`。毫秒是本机在当时负载下的墙钟时间，报告里带每个阶段的负载；只和同一台机器的后续结果比较。测不到的项写 `unavailable` 和原因，不写 0。脚本持锁，同一时间只跑一份；运行时不要跑别的重任务。这是受控测量，不是日常使用下的结论，也不进 `scripts/performance-ratchet.json`。
+
+### 合成基线：perf-compare.mjs
+
+单次运行只说明那一次。把同一台机器上的两次或多次运行合成一份基线：
+
+```sh
+node perf-compare.mjs <baseline-A.json> <baseline-B.json> [更多...] [--threshold 20] [--out <目录>]
+```
+
+- **可以只含一个阶段**：`--only recorder` 和 `--only uploader` 分开跑出的文件可以一起传入，每个阶段只在包含它的文件之间比较（例如两份 recorder-only 加两份 uploader-only）。只有一份文件含某个阶段时，这个阶段标为“未比较”。
+- **环境不一致就拒绝**（退出码 2，并写明是哪个字段）：所有文件必须来自同一台机器（系统、内核、芯片、核数、内存、Node）；同一阶段内还要求版本和工作量一致——recorder：git、scry 版本、轮数、Provider 形状、源仓库规模；uploader：uploader 版本、轮数、载荷、传输层、正文来源。
+- **怎么判定**：每个指标取各次运行的 p50，波动 =（最大 − 最小）/ 各次 p50 的中位数；波动 ≤ `--threshold`（默认 20%）的进基线，基线值取各次 p50 的中位数。其余列为“不稳定”；任何一次测不到的列为“测不到”，附每次的原因，不算 0。
+- 输出 `BASELINE-<日期>.json` 和 `.md`，带环境、每次运行的负载和各次 p50 / p95。它只是同机对比的参考，不是门禁，不写入 `scripts/performance-ratchet.json`。
