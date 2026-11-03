@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DesktopLanes, laneForRequest, replayableRequest, type DesktopLaneChannel, type DesktopLaneEndpoint } from './desktop-lane'
+import { DesktopLanes, laneForRequest, laneNotSent, replayableRequest, type DesktopLaneChannel, type DesktopLaneEndpoint } from './desktop-lane'
 import { fakeLaneConnector } from './desktop-lane-fixtures'
 import { setPerformanceRecordingSink, type PerformanceSample } from '../performance-timing'
 
@@ -46,6 +46,55 @@ describe('desktop lane routing', () => {
     expect(laneForRequest({ op: 'desktop', query: { kind: 'trace' } })).toBe('bulk')
     expect(laneForRequest({ op: 'historyPage' })).toBe('bulk')
     expect(replayableRequest({ op: 'poll' })).toBe(true)
+  })
+})
+
+describe('DesktopLanes send failures', () => {
+  // A channel whose writes fail the way `socket.write` does: the callback reports an
+  // error, so the bytes may or may not have reached the host.
+  function writeFailingChannel() {
+    const frames: string[] = []
+    const channel: DesktopLaneChannel = {
+      send: async frame => { frames.push(frame); throw new Error('write_eio') },
+      receive: async () => await new Promise<string>(() => undefined),
+      destroy: () => undefined,
+      onClose: () => () => undefined
+    }
+    return { channel, frames }
+  }
+
+  it('never re-sends a write when the write callback reports an error', async () => {
+    const failing = writeFailingChannel()
+    const connect = vi.fn(async () => failing.channel)
+    const lanes = new DesktopLanes(connect)
+    // The outcome is unproven, so the caller keeps it unknown and reconciles by intent.
+    await expect(lanes.request('control', 'c1', { endpoint, request: { op: 'sessionFork' }, replayable: false })).rejects.toThrow('write_eio')
+    // One attempt, one frame: a second fork would have been a second real fork.
+    expect(connect).toHaveBeenCalledTimes(1)
+    expect(failing.frames).toHaveLength(1)
+  })
+
+  it('still replays a read once when the write callback reports an error', async () => {
+    const failing = writeFailingChannel()
+    const healthy = scriptedChannel(() => '{"keepAlive":true,"cursor":2}')
+    const connect = vi.fn().mockResolvedValueOnce(failing.channel).mockResolvedValueOnce(healthy.channel)
+    const lanes = new DesktopLanes(connect)
+    await expect(lanes.request('bulk', 'c1', { endpoint, request: { op: 'historyPage' }, replayable: true })).resolves.toEqual({ cursor: 2 })
+    expect(connect).toHaveBeenCalledTimes(2)
+  })
+
+  it('re-sends a write whose frame was refused before any write', async () => {
+    const refused: DesktopLaneChannel = {
+      send: async () => { throw laneNotSent(new Error('desktop_lane_closed')) },
+      receive: async () => await new Promise<string>(() => undefined),
+      destroy: () => undefined,
+      onClose: () => () => undefined
+    }
+    const healthy = scriptedChannel(() => '{"keepAlive":true,"sessionAction":true}')
+    const connect = vi.fn().mockResolvedValueOnce(refused).mockResolvedValueOnce(healthy.channel)
+    const lanes = new DesktopLanes(connect)
+    await expect(lanes.request('control', 'c1', { endpoint, request: { op: 'sessionAction' }, replayable: false })).resolves.toEqual({ sessionAction: true })
+    expect(connect).toHaveBeenCalledTimes(2)
   })
 })
 

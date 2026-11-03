@@ -109,6 +109,23 @@ function laneError(message: string): Error {
   return new Error(message)
 }
 
+// A send failure proves the bytes never left this process only when the channel
+// already knew it was closed and refused the frame outright. A write callback
+// error is ambiguous: part of the frame may have reached the host, so a write that
+// fails there keeps its outcome unknown instead of being re-sent. Channels mark
+// the provable case with this helper; everything else counts as possibly written.
+const NOT_SENT = 'desktopLaneNotSent'
+
+/** Bytes provably never left this process: the frame was refused before any write. */
+export function laneNotSent(error: Error): Error {
+  Object.defineProperty(error, NOT_SENT, { value: true, enumerable: false })
+  return error
+}
+
+export function laneWasNotSent(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as Record<string, unknown>)[NOT_SENT] === true
+}
+
 // A TLS 1.3 channel over a unix socket (Desktop, SSH `-L`) or a TCP endpoint
 // (tests and the loopback harness). One reply line per request.
 export function connectDesktopLane(endpoint: DesktopLaneEndpoint): Promise<DesktopLaneChannel> {
@@ -156,7 +173,9 @@ export function connectDesktopLane(endpoint: DesktopLaneEndpoint): Promise<Deskt
     socket.once('secureConnect', () => {
       resolve({
         send: frame => new Promise<void>((done, failed) => {
-          if (closed) { failed(closed); return }
+          // Refusing before write is the only provable "not sent": nothing was handed
+          // to the socket. The write callback below reports the ambiguous case.
+          if (closed) { failed(laneNotSent(closed)); return }
           socket.write(frame, error => { if (error) failed(error); else done() })
         }),
         receive: () => new Promise<string>((done, failed) => {
@@ -309,7 +328,12 @@ export class DesktopLanes {
         trace?.mark('request_written')
       } catch (error) {
         this.#dropChannel(state)
-        if (!state.retired && !call.signal?.aborted && notSentRetries++ < MAX_NOT_SENT_RETRIES) continue
+        // Refused before any write: safe to re-send on a new channel, for a read
+        // and for a write alike.
+        if (laneWasNotSent(error) && !state.retired && !call.signal?.aborted && notSentRetries++ < MAX_NOT_SENT_RETRIES) continue
+        // The write itself failed: bytes may have reached the host, so only a
+        // replayable read may try again once. A write reports an unproven outcome.
+        if (!state.retired && !call.signal?.aborted && call.replayable && lostReplays++ < MAX_LOST_REPLAYS) continue
         trace?.finish(counters(reused), 'error')
         if (state.retired) throw laneError('desktop_not_connected')
         throw error instanceof Error ? error : laneError('desktop_lane_not_sent')
