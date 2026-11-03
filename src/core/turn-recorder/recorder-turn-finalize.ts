@@ -96,7 +96,7 @@ export async function finalizeOpenTurn(
   // An expired turn's baseline can be days old, so finishing its diff would attribute every later
   // change — including other turns' work — to this one. Release the baseline instead of publishing
   // an attribution we cannot defend, and say why.
-  if (options.forcedReason || open.terminalDiffs) {
+  if (options.forcedReason || open.terminalDiffs || identityUnmatched) {
     await Promise.all(open.captures.map(async ({ repository, capture }) => {
       try {
         await cancelGitTurnDiff(capture)
@@ -106,7 +106,7 @@ export async function finalizeOpenTurn(
       }
     }))
   }
-  const diffs = options.forcedReason
+  const diffs = options.forcedReason || identityUnmatched
     ? []
     : limitTurnDiffPatchBytes(await persistTurnDiffContent(
         enablement.dataRoot,
@@ -195,6 +195,9 @@ export async function finalizeOpenTurn(
   if (identityUnmatched) {
     evidence.assistant = unavailable(unmatchedReason!)
     evidence.modelSegments = unavailable(unmatchedReason!)
+    evidence.diff = unavailable(
+      `${unmatchedReason!}; the Git baseline may include work after the unmatched turn boundary`
+    )
   }
   if (open.repositoryDiscovery) {
     evidence.diff.discovery = {

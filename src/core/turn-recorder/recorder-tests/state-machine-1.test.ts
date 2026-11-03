@@ -158,12 +158,13 @@ export function registerSuite1(): void {
       } },
       assistant: { status: 'unavailable' },
       transcript: { status: 'unavailable' },
-      usage: { status: 'unavailable' }
+      usage: { status: 'unavailable' },
+      diff: { status: 'unavailable' }
     })
     expect(JSON.stringify(records)).not.toContain('foreign answer')
   })
 
-  it('Qoder SessionEnd confirms an already deferred Stop without waiting for stale-terminal grace', async () => {
+  it('Qoder SessionEnd confirms an already deferred interrupted Stop without waiting for stale-terminal grace', async () => {
     const root = await workspace()
     const sessionId = 'qoder-headless-completed'
     const base = { provider: 'qoder' as const, workspace: root }
@@ -176,7 +177,7 @@ export function registerSuite1(): void {
       ...native, hook_event_name: 'UserPromptSubmit', prompt: 'answer once'
     } })
     await expect(handleRecorderHook({ ...base, event: 'Stop', payload: {
-      ...native, hook_event_name: 'Stop', assistant_response: 'done'
+      ...native, hook_event_name: 'Stop', assistant_response: 'cancelled', status: 'interrupted'
     } })).resolves.toMatchObject({ status: 'pending' })
     const openPath = join(root, '.scry/runtime/qoder', safeKey(sessionId), 'open.json')
     const deferred = JSON.parse(await readFile(openPath, 'utf8'))
@@ -191,7 +192,7 @@ export function registerSuite1(): void {
     expect(confirmed).toMatchObject({
       status: 'closing',
       endReason: 'provider_terminal',
-      terminalFallbackStatus: 'completed',
+      terminalFallbackStatus: 'interrupted',
       terminalIdentityConfirmedBySessionEnd: true
     })
     expect(confirmed.deferredTerminalAt).toBeUndefined()
@@ -206,7 +207,7 @@ export function registerSuite1(): void {
     expect(records).toHaveLength(1)
     expect(records[0]).toMatchObject({
       sessionId,
-      status: 'completed',
+      status: 'interrupted',
       termination: { value: { reason: 'provider_terminal' } }
     })
   })

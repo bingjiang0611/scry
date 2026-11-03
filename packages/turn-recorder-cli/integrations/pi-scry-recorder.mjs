@@ -18,7 +18,14 @@ function armSigint(flush) {
   sigintFlush = flush
   if (sigintHandler) return
   sigintHandler = () => {
-    if (sigintFlushing) return
+    if (sigintFlushing) {
+      const handler = sigintHandler
+      sigintHandler = undefined
+      sigintFlush = undefined
+      if (handler) process.removeListener('SIGINT', handler)
+      process.kill(process.pid, 'SIGINT')
+      return
+    }
     const action = sigintFlush
     const handler = sigintHandler
     sigintFlush = undefined

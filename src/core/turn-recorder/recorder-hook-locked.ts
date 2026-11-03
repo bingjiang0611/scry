@@ -167,10 +167,11 @@ export async function applyHookLocked(
   const sessionEndEvent = SESSION_END_EVENTS.has(input.event)
   const endEvent = END_EVENTS.has(input.event) || sessionEndEvent
   if (open.deferredTerminalEventId) {
-    if (endEvent) {
-      if (!sessionEndEvent) return { status: 'pending' as const, reason: 'unidentified terminal is already deferred' }
+    if (endEvent && !sessionEndEvent) {
+      return { status: 'pending' as const, reason: 'unidentified terminal is already deferred' }
+    }
+    if (sessionEndEvent && open.terminalFallbackStatus === 'interrupted') {
       await storeLifecycleEvent(enablement, open, input.event, input.payload)
-      open.terminalFallbackStatus ??= 'completed'
       open.terminalIdentityConfirmedBySessionEnd = true
       delete open.deferredTerminalAt
       delete open.deferredTerminalEventId
@@ -180,9 +181,14 @@ export async function applyHookLocked(
     await rm(join(turnRoot(root, open.generation), 'events', `${open.deferredTerminalEventId}.json`), { force: true })
     open.status = 'open'
     delete open.closingAt
+    delete open.terminalAt
+    delete open.terminalAtSource
+    delete open.terminalFallbackStatus
+    delete open.endReason
     delete open.deferredTerminalAt
     delete open.deferredTerminalEventId
     delete open.terminalDiffs
+    delete open.terminalIdentityConfirmedBySessionEnd
     delete open.staleTerminalProtection
     await writeJsonAtomic(openPath(root), open, { sync: false })
   }
