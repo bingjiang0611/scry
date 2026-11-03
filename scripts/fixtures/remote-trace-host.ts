@@ -10,6 +10,7 @@ import { performance } from 'node:perf_hooks'
 import { ensureHostIdentity } from '../../src/main/remote/host-identity'
 import { generateDesktopDeviceIdentity, type DesktopSshTunnel } from '../../src/main/remote/desktop-transport'
 import { DesktopRemoteClient } from '../../src/main/remote/desktop-client'
+import { fakeLaneConnector } from '../../src/main/remote/desktop-lane-fixtures'
 import { createDesktopHostReader, parseDesktopHostRead } from '../../src/main/remote/desktop-host-reader'
 import { appendCoalescedTrace } from '../../src/main/live-trace'
 import { sanitizeToolEvents } from '../../src/core/turn-recorder/tool-content'
@@ -101,8 +102,9 @@ export async function createProfileHost(options: { items: number; perPoll: numbe
     let result: unknown
     try { result = await reader(parseDesktopHostRead(JSON.parse(JSON.stringify(request.query)))) } catch (error) {
       // A rejected read (for example the 4 MiB response cap) still spent host time.
+      // Like inner-mtls-dispatch, the host answers with a bounded error code.
       wire = { ...wire, requests: wire.requests + 1, hostMs: wire.hostMs + performance.now() - hostStart }
-      throw error
+      return { error: String((error as Error)?.message ?? 'error').slice(0, 64) }
     }
     // Injected gap: an unknown base whose changes were lost. Patching it would drop events.
     const answer = result as { kind?: string; base?: string; changes?: unknown[] }
@@ -114,7 +116,7 @@ export async function createProfileHost(options: { items: number; perPoll: numbe
     return JSON.parse(serialized)
   }
   const tunnel = (): DesktopSshTunnel => ({ pairPath: 'pair', runPath: 'run', alive: true, close: async () => {} })
-  const client = new DesktopRemoteClient({ directory, encrypt, decrypt }, { generateIdentity: async () => identity, openTunnel: async () => tunnel(), tlsRequest })
+  const client = new DesktopRemoteClient({ directory, encrypt, decrypt }, { generateIdentity: async () => identity, openTunnel: async () => tunnel(), tlsRequest, openLane: fakeLaneConnector(tlsRequest) })
   const pending = await client.pair({ label: 'Profile', ssh: { hostname: 'profile.invalid', username: 'profile', port: 22 }, invitation })
   const connectionId = pending.connection.id
   await client.finishPairing(connectionId)

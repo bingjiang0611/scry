@@ -19,6 +19,7 @@ import { performance } from 'node:perf_hooks'
 import { createTraceRuntime } from '../../src/main/bootstrap/trace-runtime'
 import { DockBadgeState } from '../../src/main/dock-badge'
 import { DesktopRemoteClient } from '../../src/main/remote/desktop-client'
+import { fakeLaneConnector } from '../../src/main/remote/desktop-lane-fixtures'
 import { createDesktopHostReader, parseDesktopHostRead } from '../../src/main/remote/desktop-host-reader'
 import { generateDesktopDeviceIdentity, type DesktopSshTunnel } from '../../src/main/remote/desktop-transport'
 import { ensureHostIdentity } from '../../src/main/remote/host-identity'
@@ -165,49 +166,53 @@ export async function createTraceHost(input: { runs: Map<string, ActiveRun>; rea
         version: 1, hostId: host.hostId, anchorPEM: host.caCertificatePEM,
         pairPort: 2201, runPort: 2202, pairingId, secret: `pairing-secret-${index}`, expiresAt: Date.now() + 60_000
       })).toString('base64url')}`
+      const tlsRequest = async (options: { request: unknown }): Promise<unknown> => {
+        counters.requests++
+        const request = options.request as { operation?: string; requestId?: string; op?: string; query?: unknown }
+        if (request.operation === 'pair.prove') {
+          return { protocolMajor: 1, requestId: request.requestId, kind: 'pair.pending', pairingId, publicKeySHA256: identity.publicKeySHA256 }
+        }
+        if (request.operation === 'pair.status') {
+          const verified = await host.verifyCSR(identity.csrPEM)
+          const grant = await host.issue({ ...verified, deviceId: randomUUID() })
+          return {
+            protocolMajor: 1, requestId: request.requestId, kind: 'pair.granted', pairingId, deviceId: grant.deviceId,
+            certificatePEM: grant.certificatePEM, certificateSHA256: grant.certificateSHA256, expiresAt: grant.expiresAt, scope: 'g0_echo_only'
+          }
+        }
+        // Run-status polling during connect(); no run exists here.
+        if (request.op === 'poll') return { cursor: 0, minCursor: 0, events: [] }
+        if (request.op !== 'desktop') throw new Error(`unexpected_operation:${String(request.op ?? request.operation)}`)
+        const query = parseDesktopHostRead(JSON.parse(JSON.stringify(request.query)))
+        if (query.kind === 'trace') {
+          counters.traceRequests++
+          if (query.chunk) counters.chunkRequests++
+          else counters.logicalPolls++
+        }
+        const hostStart = performance.now()
+        const cpuStart = process.cpuUsage()
+        let result: Awaited<ReturnType<typeof reader>>
+        try { result = await reader(query) } catch (error) {
+          // A rejected read still spent host time and CPU. Like inner-mtls-dispatch,
+          // the host answers with a bounded error code; it does not drop the lane.
+          recordHostRead(hostStart, cpuStart)
+          return { error: String((error as Error)?.message ?? 'error').slice(0, 64) }
+        }
+        recordHostRead(hostStart, cpuStart)
+        const encodeStart = performance.now()
+        const serialized = JSON.stringify({ desktop: result })
+        counters.encodeMs += performance.now() - encodeStart
+        counters.responseBytes += Buffer.byteLength(serialized)
+        // One encode, one decode: the peer never holds the host's own objects.
+        return JSON.parse(serialized)
+      }
       const client = new DesktopRemoteClient({ directory: join(directory, `peer-${index}`), encrypt, decrypt }, {
         // A real per-peer identity and grant, so certificates are not shared between peers.
         generateIdentity: async () => identity,
         openTunnel: async () => tunnel(),
-        tlsRequest: async (options) => {
-          counters.requests++
-          const request = options.request as { operation?: string; requestId?: string; op?: string; query?: unknown }
-          if (request.operation === 'pair.prove') {
-            return { protocolMajor: 1, requestId: request.requestId, kind: 'pair.pending', pairingId, publicKeySHA256: identity.publicKeySHA256 }
-          }
-          if (request.operation === 'pair.status') {
-            const verified = await host.verifyCSR(identity.csrPEM)
-            const grant = await host.issue({ ...verified, deviceId: randomUUID() })
-            return {
-              protocolMajor: 1, requestId: request.requestId, kind: 'pair.granted', pairingId, deviceId: grant.deviceId,
-              certificatePEM: grant.certificatePEM, certificateSHA256: grant.certificateSHA256, expiresAt: grant.expiresAt, scope: 'g0_echo_only'
-            }
-          }
-          // Run-status polling during connect(); no run exists here.
-          if (request.op === 'poll') return { cursor: 0, minCursor: 0, events: [] }
-          if (request.op !== 'desktop') throw new Error(`unexpected_operation:${String(request.op ?? request.operation)}`)
-          const query = parseDesktopHostRead(JSON.parse(JSON.stringify(request.query)))
-          if (query.kind === 'trace') {
-            counters.traceRequests++
-            if (query.chunk) counters.chunkRequests++
-            else counters.logicalPolls++
-          }
-          const hostStart = performance.now()
-          const cpuStart = process.cpuUsage()
-          let result: Awaited<ReturnType<typeof reader>>
-          try { result = await reader(query) } catch (error) {
-            // A rejected read still spent host time and CPU; the caller sees the real error.
-            recordHostRead(hostStart, cpuStart)
-            throw error
-          }
-          recordHostRead(hostStart, cpuStart)
-          const encodeStart = performance.now()
-          const serialized = JSON.stringify({ desktop: result })
-          counters.encodeMs += performance.now() - encodeStart
-          counters.responseBytes += Buffer.byteLength(serialized)
-          // One encode, one decode: the peer never holds the host's own objects.
-          return JSON.parse(serialized)
-        }
+        // Pairing is one-shot; run requests use the production lane client over a fake channel.
+        tlsRequest,
+        openLane: fakeLaneConnector(tlsRequest)
       })
       clients.push(client)
       const pending = await client.pair({ label: `peer-${index}`, ssh: { hostname: 'fixture.invalid', username: 'fixture', port: 22 }, invitation })

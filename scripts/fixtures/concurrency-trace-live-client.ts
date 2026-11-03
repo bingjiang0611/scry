@@ -1,7 +1,7 @@
 // Measurement-only client layer for the live concurrency trace fixture (R6.2).
 //
-// The real DesktopRemoteClient, the real device identity and the real
-// desktopTlsRequest are used unchanged. The only substitution is the SSH hop:
+// The real DesktopRemoteClient, the real device identity, the real pairing
+// desktopTlsRequest and the real run-channel lanes are used unchanged. The only substitution is the SSH hop:
 // a direct loopback adapter dials exactly the 127.0.0.1 pair/run ports the
 // current invitation advertises, so production TLS, certificate checks and the
 // host's own mTLS listener stay in the measured path. Never shipped.
@@ -16,6 +16,7 @@ import {
   type DesktopSshTunnel,
   type DesktopTlsRequestOptions
 } from '../../src/main/remote/desktop-transport'
+import { connectDesktopLane, type DesktopLaneConnector } from '../../src/main/remote/desktop-lane'
 import type {
   DesktopHostInvitation,
   DesktopPairingResult,
@@ -85,6 +86,8 @@ export interface LivePeerCounters {
 export interface LiveDirectTransport {
   openTunnel: NonNullable<DesktopRemoteClientTransportDeps['openTunnel']>
   tlsRequest: LiveTlsRequest
+  /** Run-channel lanes: the production TLS lane dialed at the loopback run port. */
+  openLane: DesktopLaneConnector
   /** Reset-on-read, so a caller can bracket one visit or one round. */
   takeCounters(): LiveTlsCounters
 }
@@ -153,9 +156,26 @@ export function createLiveDirectTransport(options: {
     }
     return forward(forwarded)
   }
+  // Same path check as tlsRequest. runRequests counts frames, not connections, so
+  // a visit's request count does not depend on lane reuse.
+  const openLane: DesktopLaneConnector = async (endpoint) => {
+    if (endpoint.path !== runPath) {
+      counters = { ...counters, rejectedPaths: counters.rejectedPaths + 1 }
+      throw new Error('concurrency_trace_live_unknown_tls_path')
+    }
+    const channel = await connectDesktopLane({ ...endpoint, path: undefined, host: '127.0.0.1', port: runPort })
+    return {
+      ...channel,
+      send: async (frame) => {
+        counters = { ...counters, runRequests: counters.runRequests + 1 }
+        await channel.send(frame)
+      }
+    }
+  }
   return {
     openTunnel,
     tlsRequest,
+    openLane,
     takeCounters(): LiveTlsCounters {
       const value = counters
       counters = { tunnelOpens: 0, pairRequests: 0, runRequests: 0, rejectedPaths: 0 }
@@ -248,7 +268,7 @@ export async function pairLivePeer(options: {
   })
   const client = new DesktopRemoteClient(
     { directory: options.directory, encrypt: encryptState, decrypt: decryptState },
-    { generateIdentity: generateDesktopDeviceIdentity, openTunnel: transport.openTunnel, tlsRequest: transport.tlsRequest }
+    { generateIdentity: generateDesktopDeviceIdentity, openTunnel: transport.openTunnel, tlsRequest: transport.tlsRequest, openLane: transport.openLane }
   )
   const pairing = await client.pair({
     label: options.label,
