@@ -66,6 +66,10 @@ export interface MacRunView {
 
 export interface MacRunSource {
   list(): MacRunView[]
+  // Change signal for the live-runs long poll: a Mac run appears, disappears,
+  // changes state or gains/loses a pending question. Without it a device waits for
+  // the fallback tick, which is a cost every parked device pays.
+  subscribe?(listener: () => void): () => void
   // Same bounded stop lifecycle as the Mac stop button; true = requested.
   stop(runId: string): boolean
   // Same broker as the Mac question dialog; false = no such pending question.

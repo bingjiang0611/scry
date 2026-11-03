@@ -305,6 +305,7 @@ export class HostController {
   }
 
   closeReadResources(): void {
+    this.#watchers.close()
     this.#fileDownloads.dispose()
   }
 

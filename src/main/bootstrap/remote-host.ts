@@ -51,7 +51,7 @@ export type RemoteHostRuntime = {
   sourceControl: SourceControlService
   providerOperationGate: ProviderOperationGate
   providerRegistry: ProviderRegistry
-  runs: RemoteRuns
+  runs: RemoteRuns & { subscribe?: (listener: () => void) => () => void }
   requestRunStop: (runId: string) => boolean
   forkSessionWithAuthority: (request: DesktopRemoteForkSessionRequest, authorize?: () => void) => Promise<AgentForkSessionResult>
   deleteOneSession: (request: SessionDeletionRequest, options: DeleteOptions) => Promise<DeleteSessionResult>
@@ -260,6 +260,7 @@ export async function startRemoteHostIfEnabled(runtime: RemoteHostRuntime): Prom
           questions: run.pendingQuestions ?? [],
           stopping: Boolean(run.stopState)
         }] : []),
+        subscribe: (listener) => runtime.runs.subscribe?.(listener) ?? (() => undefined),
         stop: (runId) => runtime.requestRunStop(runId),
         answer: (response) => runtime.userQuestionBroker.answer(response)
       },

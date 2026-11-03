@@ -12,11 +12,12 @@ import type { RemoteIntentRouting, MacRunSource, LiveRunRef } from './host-contr
 // of ticking. Every pass re-runs the authorized readers, so a revoked grant fails
 // the next wake-up rather than being remembered for the whole wait.
 const LIVE_RUNS_MAX_WAIT_MS = 20_000
-// Mac runs are in-memory state without a change signal into this controller;
-// a long-poll re-checks them on this bounded tick. The re-check is one in-memory
-// snapshot and a hash, so the tick is short enough that a Mac-side change reaches
-// the device in well under a second.
-const LIVE_RUNS_TICK_MS = 250
+// Fallback tick for the live-runs long poll. Every pass also re-reads the joined
+// history version, so the tick rate is a per-device cost: at 250 ms one parked
+// phone asked for that version ~78 times in a 20 s window instead of ~20. Mac-side
+// changes arrive immediately through `MacRunSource.subscribe`; this tick only
+// bounds the cases with no notification (a mac source without a signal).
+const LIVE_RUNS_TICK_MS = 1000
 const LIVE_RUN_PROMPT_CHARS = 200
 // Below the inner host's 30-second idle timer and the device's response deadline.
 const WATCH_MAX_WAIT_MS = 20_000
@@ -54,7 +55,21 @@ export class LiveWatchers {
   #seq = 0
   #waiters = new Set<() => void>()
 
-  constructor(deps: LiveWatcherDeps) { this.#deps = deps }
+  // Subscription to a Mac-side change signal. Undefined when the mac source has
+  // none: then the fallback tick is the only wake-up.
+  #unsubscribe?: () => void
+
+  constructor(deps: LiveWatcherDeps) {
+    this.#deps = deps
+    // A Mac run appearing, stopping or asking a question wakes a parked device at
+    // once instead of on the next tick.
+    this.#unsubscribe = deps.macRuns?.subscribe?.(() => this.notify())
+  }
+
+  close(): void {
+    this.#unsubscribe?.()
+    this.#unsubscribe = undefined
+  }
 
   async watchRun(peerCertSHA256: string, input: WatchInput): Promise<WatchResult> {
     return await this.#watch(peerCertSHA256, input, true) as WatchResult

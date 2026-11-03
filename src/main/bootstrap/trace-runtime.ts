@@ -128,6 +128,7 @@ export function createTraceRuntime({
   const userQuestionBroker = new UserQuestionBroker((change: UserQuestionChange) => {
     if (change.kind === 'open') publishQuestionOpened(change.request)
     else publishQuestionClosed(change.runId, change.questionId, change.intervention)
+    runs.notifyChanged()
   })
   // 性能：把 onTrace 逐条 IPC 合批——流式期每 token 一条 IPC（每秒上百）→ 缓冲一批数组发。
   // 保序（FIFO buffer）、不丢（done/error 前 flushTraceSend 强制清空全部）。
@@ -266,6 +267,9 @@ export function createTraceRuntime({
       forceKillScope: stopping.forceKillScope
     })
     userQuestionBroker.cancelRun(stopping.runId)
+    // Live-run observers (the remote host's long poll) re-read on this signal
+    // instead of discovering the stop on their next tick.
+    runs.notifyChanged()
     return true
   }
 
