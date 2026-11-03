@@ -3,7 +3,7 @@
 //
 //   node perf-compare.mjs baseline-A.json baseline-B.json [more...] [--threshold 20] [--out <dir>]
 //
-// Files may hold both phases or only one (`perf-bench --only recorder|uploader`). Each phase is
+// Files may hold any of the phases recorder, uploader, hookwrap (`perf-bench --only <phase>`). Each phase is
 // compared across the files that contain it, so two recorder-only runs and two uploader-only runs
 // can be combined. Every file must come from the same machine; within a phase, the versions and
 // workload inputs must match too. Any difference is refused with the field named, because a
@@ -22,6 +22,7 @@
 // Exit: 0 written, 2 refused (environment mismatch, or no phase with two complete runs), 1 error.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
+import { MACHINE, PHASES, VERSIONS, WORKLOAD, get, median, mismatches, phaseFailure, phaseMetrics, round } from './perf-metrics.mjs'
 
 const argv = process.argv.slice(2)
 const opt = (name, fallback) => { const i = argv.indexOf(`--${name}`); return i >= 0 ? argv[i + 1] : fallback }
@@ -36,98 +37,20 @@ if (!Number.isFinite(threshold) || threshold <= 0) refuse('--threshold must be a
 const runs = files.map((file) => {
   const report = JSON.parse(readFileSync(file, 'utf8'))
   if (!report.environment) throw new Error(`${file} is not a perf-bench baseline (no environment)`)
-  const phases = ['recorder', 'uploader'].filter((p) => report[p] !== undefined)
+  const phases = PHASES.filter((p) => report[p] !== undefined)
   return { file: basename(file), report, phases }
 })
 
 // ---------- environment checks ----------
-const get = (obj, path) => path.split('.').reduce((v, k) => (v === undefined || v === null ? undefined : v[k]), obj)
-const MACHINE = ['environment.platform', 'environment.release', 'environment.arch', 'environment.cpu', 'environment.cpuCount',
-  'environment.memoryGiB', 'environment.macos', 'environment.node']
-const PHASE_FIELDS = {
-  recorder: ['environment.git', 'versions.scry', 'rounds', 'recorder.provider', 'repository.name', 'repository.tracked',
-    'repository.commits', 'repository.gitDirMiB', 'repository.submodules'],
-  // The uploader payload is built from the copy's recorder records, so it is part of the workload.
-  uploader: ['versions.uploader', 'rounds', 'uploader.payload', 'uploader.transport', 'uploader.contentBlobs']
-}
-// ignoreMissing: a run whose phase failed has no workload description; it cannot contradict
-// the others, and its metrics are reported as unavailable anyway.
-function mismatches(group, fields, ignoreMissing = false) {
-  const out = []
-  for (const field of fields) {
-    const pairs = group.map((r) => [r.file, get(r.report, field)]).filter(([, v]) => !ignoreMissing || (v !== undefined && v !== null))
-    const values = pairs.map(([, v]) => JSON.stringify(v ?? null))
-    if (new Set(values).size > 1) out.push(`${field}: ${pairs.map(([f], i) => `${f}=${values[i]}`).join(', ')}`)
-  }
-  return out
-}
+const PHASE_FIELDS = Object.fromEntries(PHASES.map((p) => [p, [...VERSIONS[p], ...WORKLOAD[p]]]))
 const machine = mismatches(runs, MACHINE)
 if (machine.length) refuse(`files come from different machines or setups:\n  ${machine.join('\n  ')}`)
 
-// ---------- metric extraction ----------
-const UNIT_BY_NAME = [[/Ms$/, 'ms'], [/MiB$/, 'MiB'], [/KiB/, 'KiB'], [/PerSecond$/, 'rec/s'], [/cpuSeconds/, 's'], [/Pcpu$/, '%cpu']]
-const unitOf = (name) => UNIT_BY_NAME.find(([re]) => re.test(name))?.[1] ?? 'count'
-
-// One metric value: { value, unit, p95? } or { unavailable: reason }.
-function metric(raw, name) {
-  if (raw === undefined || raw === null) return { unavailable: 'not reported' }
-  if (typeof raw === 'number') return Number.isFinite(raw) ? { value: raw, unit: unitOf(name) } : { unavailable: 'not a finite number' }
-  if (typeof raw === 'object' && raw.status === 'measured' && typeof raw.p50 === 'number') return { value: raw.p50, p95: raw.p95, n: raw.n, unit: raw.unit ?? unitOf(name) }
-  if (typeof raw === 'object' && raw.status === 'unavailable') return { unavailable: raw.reason ?? 'unavailable' }
-  return { unavailable: `unrecognised value ${JSON.stringify(raw).slice(0, 80)}` }
-}
-
-function recorderMetrics(rec) {
-  const out = {}
-  if (!rec || rec.status === 'unavailable' || !rec.modes) return { out, phaseReason: rec?.reason ?? 'recorder phase not measured' }
-  for (const [mode, scenarios] of Object.entries(rec.modes)) {
-    for (const [scenario, m] of Object.entries(scenarios)) {
-      for (const field of ['turnStart', 'toolEvent', 'stop', 'hookTotalPerTurn', 'stopToRecordVisible'])
-        out[`recorder / ${mode} / ${scenario} / ${field}`] = metric(m[field], field)
-    }
-  }
-  const d = rec.daemon ?? {}
-  const daemonMissing = d.status === 'unavailable' ? { unavailable: d.reason } : undefined
-  for (const k of ['afterWarmup', 'afterRun', 'after30sIdle']) out[`recorder / daemon / rssMiB.${k}`] = daemonMissing ?? metric(d.rssMiB?.[k], 'rssMiB')
-  for (const k of ['cpuSecondsDuringRun', 'cpuSecondsIn30sIdle']) out[`recorder / daemon / ${k}`] = daemonMissing ?? metric(d[k], k)
-  out['recorder / disk / kibPerRecord'] = metric(rec.disk?.kibPerRecord, 'diskKiB')
-  out['recorder / hookSkips'] = metric(rec.hookSkips, 'hookSkips')
-  return { out }
-}
-
-function uploaderMetrics(up) {
-  const out = {}
-  if (!up) return { out, phaseReason: 'uploader phase not run' }
-  out['uploader / notifyWhileUploading'] = metric(up.notifyWhileUploading, 'notifyMs')
-  for (const [name, r] of Object.entries(up.runs ?? {})) {
-    const p = `uploader / ${name}`
-    if (r.status !== 'measured') {
-      for (const f of UPLOADER_FIELDS) out[`${p} / ${f}`] = { unavailable: r.reason ?? 'scenario not measured' }
-      continue
-    }
-    for (const f of UPLOADER_FIELDS) out[`${p} / ${f}`] = metric(get(r, f), f.split('.').pop())
-  }
-  return { out, phaseReason: up.status === 'unavailable' ? up.reason : undefined }
-}
-const UPLOADER_FIELDS = ['notify', 'commitPhaseMs', 'drainAfterLastCommitMs', 'recordsPerSecond', 'transportRequests', 'recordsPerRequest',
-  'requestKiB', 'capabilityCalls', 'deadLetters', 'worker.peakConcurrent', 'worker.peakRssMiB', 'uploadDirKiBPerRecord']
-
-// Phase-level failure: the run started the phase but produced no comparable measurement.
-function phaseFailure(phase, report) {
-  const p = report[phase]
-  if (!p) return 'phase not run'
-  if (p.status === 'unavailable') return p.reason ?? `${phase} phase unavailable`
-  if (phase === 'recorder' && !p.modes) return 'recorder phase has no measured modes'
-  return undefined
-}
-
 // ---------- per phase comparison ----------
-const median = (v) => { const s = [...v].sort((a, b) => a - b); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2 }
-const round = (v) => Math.round(v * 10) / 10
 const result = { baseline: {}, unstable: {}, unavailable: {} }
 const phaseSummary = {}
 
-for (const phase of ['recorder', 'uploader']) {
+for (const phase of PHASES) {
   const present = runs.filter((r) => r.phases.includes(phase))
   if (present.length === 0) continue
   const excluded = present.map((r) => ({ file: r.file, reason: phaseFailure(phase, r.report) })).filter((e) => e.reason)
@@ -139,13 +62,20 @@ for (const phase of ['recorder', 'uploader']) {
   }
   const diff = mismatches(group, PHASE_FIELDS[phase], true)
   if (diff.length) refuse(`${phase} runs differ in versions or workload:\n  ${diff.join('\n  ')}`)
-  const extracted = group.map((r) => (phase === 'recorder' ? recorderMetrics(r.report.recorder) : uploaderMetrics(r.report.uploader)))
+  const extracted = group.map((r) => phaseMetrics(phase, r.report))
   const keys = [...new Set(extracted.flatMap((e) => Object.keys(e.out)))]
   for (const key of keys) {
     const perRun = extracted.map((e, i) => e.out[key] ?? { unavailable: e.phaseReason ? `phase failed: ${e.phaseReason}` : 'metric missing in this run' })
     const missing = perRun.map((m, i) => (m.unavailable !== undefined ? `${group[i].file}: ${m.unavailable}` : null)).filter(Boolean)
     if (missing.length) { result.unavailable[key] = missing; continue }
     const values = perRun.map((m) => m.value)
+    if (perRun[0].kind === 'evidence') {
+      const same = new Set(values).size === 1
+      const entry = { unit: perRun[0].unit, p50ByRun: values.map((v) => String(v).slice(0, 12)), baseline: same ? values[0] : 'differs between runs', spreadPct: same ? 0 : 'differs' }
+      if (same) result.baseline[key] = entry
+      else result.unstable[key] = entry
+      continue
+    }
     const mid = median(values)
     const spread = mid === 0 ? (Math.max(...values) === Math.min(...values) ? 0 : Infinity) : ((Math.max(...values) - Math.min(...values)) / Math.abs(mid)) * 100
     const entry = { unit: perRun[0].unit, p50ByRun: values.map(round), p95ByRun: perRun.some((m) => m.p95 !== undefined) ? perRun.map((m) => (m.p95 === undefined ? null : round(m.p95))) : undefined,
@@ -154,7 +84,7 @@ for (const phase of ['recorder', 'uploader']) {
     if (Number.isFinite(spread) && spread <= threshold) result.baseline[key] = entry
     else result.unstable[key] = entry
   }
-  phaseSummary[phase] = { compared: true, files: group.map((r) => r.file), excluded, versions: phase === 'recorder' ? group[0].report.versions?.scry : group[0].report.versions?.uploader }
+  phaseSummary[phase] = { compared: true, files: group.map((r) => r.file), excluded, versions: Object.fromEntries(VERSIONS[phase].map((f) => [f.replace('versions.', ''), get(group[0].report, f)])) }
 }
 if (!Object.values(phaseSummary).some((p) => p.compared))
   refuse(`no phase has two or more complete files:\n  ${Object.entries(phaseSummary).map(([p, s]) => `${p}: ${s.reason}`).join('\n  ')}`)
@@ -166,7 +96,7 @@ const doc = {
   generatedAt, kind: 'scry perf baseline (informational, not a ratchet gate)', thresholdPct: threshold,
   spreadDefinition: '(max - min) / median of per-run p50, in percent',
   machine: Object.fromEntries(MACHINE.map((f) => [f.replace('environment.', ''), get(first, f)])),
-  repository: runs.find((r) => r.report.repository)?.report.repository && (({ name, tracked, untracked, commits, gitDirMiB, submodules }) => ({ name, tracked, untracked, commits, gitDirMiB, submodules }))(runs.find((r) => r.report.repository).report.repository),
+  repository: runs.find((r) => r.report.repository)?.report.repository && (({ name, tracked, untracked, commits, gitDirMiB, submodules, nestedRepos }) => ({ name, tracked, untracked, commits, gitDirMiB, submodules, nestedRepos }))(runs.find((r) => r.report.repository).report.repository),
   phases: phaseSummary,
   inputs: runs.map((r) => ({ file: r.file, at: r.report.environment.at, phases: r.phases, rounds: r.report.rounds,
     loadAverage: { start: r.report.environment.loadAverage, end: r.report.environment.loadAverageAtEnd } })),
