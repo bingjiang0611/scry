@@ -313,16 +313,18 @@ export async function sendConversationMessage(
     // A dispatch attempt, or a runner that answered at all, means this request is no longer
     // provably undelivered — including a runner that answered with a different runId. The
     // durable receipt and this reply must agree on the same unknown outcome.
-    const provenNotSent = !dispatched && !providerStartReturned
+    const intendedNotSent = !dispatched && !providerStartReturned
+    let settled = false
     try {
       await settle({
         status: 'failed',
         finalItems: [],
         receipt: {
-          contextHash: context?.contentHash ?? null, status: provenNotSent ? 'not_sent' : 'unknown',
+          contextHash: context?.contentHash ?? null, status: intendedNotSent ? 'not_sent' : 'unknown',
           textHash: hash(prompt), reason
         }
       })
+      settled = true
     } catch (settlementError) {
       // The durable attempt could not be settled: the outcome stays unknown.
       console.error('[scry] failed to record conversation send outcome:', settlementError)
@@ -330,10 +332,10 @@ export async function sendConversationMessage(
       active.delete(runId)
       await reader?.close()
     }
-    // Only a refusal proven before dispatch becomes a known-not-sent answer. A lost reply, a
-    // runner that answered, a settlement failure or an error after the dispatch attempt
-    // stays unknown.
-    if (provenNotSent) return { status: 'not_sent', reason }
+    // A typed refusal needs both a pre-dispatch refusal and a durable record of it. A
+    // settlement failure leaves the attempt unproven, so it throws instead of claiming
+    // the input was never delivered.
+    if (intendedNotSent && settled) return { status: 'not_sent', reason }
     throw error
   }
 }

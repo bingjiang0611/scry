@@ -253,4 +253,31 @@ describe('conversation send refusal evidence', () => {
     await expect(refusedStart.send(request(conversation.id, after.revision, 'refused-command')))
       .resolves.toEqual({ status: 'not_sent', reason: 'Provider 尚未就绪' })
   })
+
+  it('refuses to answer not_sent when the runner refusal itself cannot be settled', async () => {
+    const store = new FaultyStore(userData)
+    const start = vi.fn(async () => { throw new Error('Provider 启动被拒绝') })
+    const api = new ConversationService({
+      store,
+      resolveContinuationKey: async () => 'identity-a',
+      supportsHistoricalInput: () => true,
+      startAppRun: start
+    })
+    const conversation = await store.create(cwd)
+    // The runner refused before any dispatch, so the intended receipt is not_sent — but the
+    // durable write fails, so nothing proves the input was undelivered.
+    store.failSettleCount = 1
+    await expect(api.send(request(conversation.id, conversation.revision, 'unsettled-refusal')))
+      .rejects.toThrow('Provider 启动被拒绝')
+    expect(start).toHaveBeenCalledTimes(1)
+    // The durable turn cannot claim not_sent, so the renderer reads it as an unresolved
+    // attempt instead of an explicitly resendable refusal, and no input was delivered.
+    const after = (await store.read(conversation.id))!
+    expect(after.turns.at(-1)).toMatchObject({ delivery: { status: 'pending' }, items: [] })
+    const page = await api.read(conversation.id)
+    expect(page.turns.map(turn => turn.delivery)).toEqual([{ status: 'pending' }])
+    await expect(api.send(request(conversation.id, after.revision, 'unsettled-refusal')))
+      .rejects.toThrow('该命令的投递结果尚未确认')
+    expect(start).toHaveBeenCalledTimes(1)
+  })
 })
