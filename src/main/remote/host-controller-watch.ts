@@ -35,6 +35,16 @@ export interface LiveWatcherDeps {
   runOutput(peer: string, input: { runId: string; cursor: number }): Promise<RunOutputPage>
 }
 
+export interface WatchInput { runId: string; cursor: number; outputCursor: number; waitMs: number }
+// Ledger evidence, pending questions and lifecycle. No shadow output: a device
+// that reads content from canonical traces never depends on the output spool.
+export interface WatchLifecycle {
+  poll: ReturnType<SessionLedger['since']>
+  questions: AgentQuestionRequest[]
+  state: RunLifecycle | null
+}
+export interface WatchResult extends WatchLifecycle { output: RunOutputPage }
+
 export class LiveWatchers {
   readonly #deps: LiveWatcherDeps
   // Wake-up signal. Ledger events and output appends bump it; a watcher always
@@ -44,12 +54,23 @@ export class LiveWatchers {
 
   constructor(deps: LiveWatcherDeps) { this.#deps = deps }
 
-  async watchRun(peerCertSHA256: string, input: { runId: string; cursor: number; outputCursor: number; waitMs: number }): Promise<{ poll: ReturnType<SessionLedger['since']>; questions: AgentQuestionRequest[]; output: RunOutputPage; state: RunLifecycle | null }> {
+  async watchRun(peerCertSHA256: string, input: WatchInput): Promise<WatchResult> {
+    return await this.#watch(peerCertSHA256, input, true) as WatchResult
+  }
+
+  async watchLifecycle(peerCertSHA256: string, input: WatchInput): Promise<WatchLifecycle> {
+    return await this.#watch(peerCertSHA256, input, false)
+  }
+
+  // One long poll, read output only when the caller wants it. Its overflow or
+  // I/O failure must not block authoritative lifecycle, so content reads stay
+  // separate (the device uses canonical trace reads).
+  async #watch(peerCertSHA256: string, input: WatchInput, includeOutput: boolean): Promise<WatchResult | WatchLifecycle> {
     const waitMs = Math.min(Math.max(0, input.waitMs), WATCH_MAX_WAIT_MS)
     const deadline = Date.now() + waitMs
     while (true) {
       const seen = this.#seq
-      const output = await this.#deps.runOutput(peerCertSHA256, { runId: input.runId, cursor: input.outputCursor })
+      const output = includeOutput ? await this.#deps.runOutput(peerCertSHA256, { runId: input.runId, cursor: input.outputCursor }) : undefined
       // Read lifecycle and its ledger evidence together after the async output
       // read. Otherwise a newly terminal state can omit its failure/result event.
       const poll = this.#deps.poll(peerCertSHA256, { cursor: input.cursor })
@@ -57,12 +78,12 @@ export class LiveWatchers {
       const state = this.#deps.ledger.runState(input.runId) ?? null
       const terminal = state === 'settled' || state === 'failed' || state === 'cancelled'
       const remaining = deadline - Date.now()
-      if (poll.events.length > 0 || poll.reset || output.chunks.length > 0 || terminal || remaining <= 0) {
-        return { poll, questions, output, state }
+      if (poll.events.length > 0 || poll.reset || (output?.chunks.length ?? 0) > 0 || terminal || remaining <= 0) {
+        return { poll, questions, ...(output ? { output } : {}), state }
       }
       if (seen === this.#seq) await this.#waitForChange(remaining)
     }
-}
+  }
 
   async liveRuns(peerCertSHA256: string, input: { revision?: string; waitMs: number; history?: { query: RemoteHistoryQuery; known?: string } }): Promise<{ revision: string; runs: LiveRunRef[]; historyVersion?: RemoteHistoryVersion }> {
     const deadline = Date.now() + Math.min(Math.max(0, input.waitMs), LIVE_RUNS_MAX_WAIT_MS)
