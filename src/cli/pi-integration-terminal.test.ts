@@ -280,6 +280,7 @@ setInterval(() => {}, 60_000)
       },
       stdio: ['ignore', 'pipe', 'pipe']
     })
+    const childClose = once(child, 'close')
     try {
       let stdout = ''
       await new Promise<void>((resolveReady, reject) => {
@@ -292,13 +293,21 @@ setInterval(() => {}, 60_000)
         child.once('close', (code, signal) => reject(new Error(`child exited before READY: ${String(code)} ${String(signal)}`)))
       })
       expect(child.kill('SIGINT')).toBe(true)
-      await stopSeen
+      await new Promise<void>((resolveStop, rejectStop) => {
+        const timeout = setTimeout(() => rejectStop(new Error('Pi Stop delivery did not reach the recorder socket')), 2_000)
+        void stopSeen.then(() => {
+          clearTimeout(timeout)
+          resolveStop()
+        })
+      })
       const forcedAt = Date.now()
       expect(child.kill('SIGINT')).toBe(true)
-      const [code, signal] = await once(child, 'close') as [number | null, NodeJS.Signals | null]
+      const [code, signal] = await childClose as [number | null, NodeJS.Signals | null]
       expect({ code, signal }).toEqual({ code: null, signal: 'SIGINT' })
       expect(Date.now() - forcedAt).toBeLessThan(2_000)
     } finally {
+      if (child.exitCode == null && child.signalCode == null) child.kill('SIGKILL')
+      await childClose
       await new Promise<void>((resolve) => {
         server.close(() => resolve())
         server.closeAllConnections()

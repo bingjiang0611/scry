@@ -195,7 +195,7 @@ export async function finalizeOpenTurn(
   if (identityUnmatched) {
     evidence.assistant = unavailable(unmatchedReason!)
     evidence.modelSegments = unavailable(unmatchedReason!)
-    if (enablement.config.capture.diff) {
+    if (enablement.config.capture.diff && open.captures.some(({ capture }) => capture.status === 'ready')) {
       evidence.diff = unavailable(
         `${unmatchedReason!}; the Git baseline may include work after the unmatched turn boundary`
       )

@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { handleRecorderHook, recoverRecorder } from '../recorder'
@@ -9,6 +9,10 @@ export function registerQoderSessionEndSuite(): void {
   it('Qoder SessionEnd does not bless an unidentified completed Stop without matching transcript evidence', async () => {
     const root = await workspace()
     const sessionId = 'qoder-stale-completed-stop'
+    const configPath = join(root, 'scry.config.json')
+    const config = JSON.parse(await readFile(configPath, 'utf8'))
+    config.capture.diff = true
+    await writeFile(configPath, JSON.stringify(config))
     const base = { provider: 'qoder' as const, workspace: root }
     const native = {
       session_id: sessionId,
@@ -43,7 +47,7 @@ export function registerQoderSessionEndSuite(): void {
       assistant: { status: 'unavailable' },
       diff: { status: 'unavailable' }
     })
-    expect(records[0].diff.omissionReason).toBe('turn diff capture was disabled or unavailable')
+    expect(records[0].diff.omissionReason).toBe('turn diff snapshot was not captured')
     expect(JSON.stringify(records)).not.toContain('possibly from the previous turn')
   })
 

@@ -1,9 +1,13 @@
+import { execFile } from 'node:child_process'
 import { readFile, writeFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
 import { it, expect } from 'vitest'
 import { handleRecorderHook, recoverRecorder } from '../recorder'
 import { safeKey, readHealth, listRecords } from '../store'
 import { workspace, payload, completeTurn } from './fixture.test'
+
+const pexecFile = promisify(execFile)
 
 export function registerSuite1(): void {
 
@@ -125,6 +129,9 @@ export function registerSuite1(): void {
     config.capture.toolOutput = 'full'
     config.capture.diff = true
     await writeFile(configPath, JSON.stringify(config))
+    await pexecFile('git', ['init', '-q', '.'], { cwd: root })
+    await pexecFile('git', ['-c', 'user.email=a@b', '-c', 'user.name=a', 'add', '.'], { cwd: root })
+    await pexecFile('git', ['-c', 'user.email=a@b', '-c', 'user.name=a', 'commit', '-q', '-m', 'baseline'], { cwd: root })
     const base = { provider: 'qoder' as const, workspace: root }
     const native = { session_id: sessionId, cwd: root, transcript_path: join(root, 'qoder.jsonl') }
     if (source === 'previous-turn') {
