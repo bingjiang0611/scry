@@ -4,6 +4,7 @@ import { createHash, randomUUID, X509Certificate as NodeCertificate } from 'node
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { desktopTlsRequest, generateDesktopDeviceIdentity, openDesktopSshTunnel, type DesktopDeviceIdentity, type DesktopSshTunnel } from './desktop-transport'
+import { DesktopLanes, laneForRequest, replayableRequest, type DesktopLaneConnector } from './desktop-lane'
 import { DESKTOP_ATTACHMENT_CHUNK_BYTES, DESKTOP_ATTACHMENT_MAX_COUNT, attachmentSha256, newAttachmentId, normalizeDesktopAttachment } from './desktop-attachments'
 import { context, fail, record, text, uuid, hash, digest, validateState, validateIdentity, validatePairingResponse, validateCertificate, publicConnection, STATE_FILE, type EncryptedState, type StoredConnection, type ActiveConnection, type RunStatusCursor, type DesktopRemoteClientTransportDeps } from './desktop-client-validation'
 
@@ -17,6 +18,9 @@ export abstract class DesktopRemoteClientBase {
     openTunnel: (options: { username: string; hostname: string; port: number; pairPort: number; runPort: number }) => Promise<DesktopSshTunnel>
     tlsRequest: (options: { path: string; caPEM: string; certPEM: string; keyPEM: string; request: unknown; signal?: AbortSignal; timeoutMs?: number }) => Promise<unknown>
   }
+  // Persistent lanes for the run channel. Pairing keeps its one-shot exchange:
+  // pairing happens once, before any lane exists.
+  protected readonly lanes: DesktopLanes
   protected readonly active = new Map<string, ActiveConnection>()
   protected readonly controllers = new Set<AbortController>()
   protected readonly requests = new Set<Promise<unknown>>()
@@ -37,6 +41,7 @@ export abstract class DesktopRemoteClientBase {
     this.encrypt = options.encrypt
     this.decrypt = options.decrypt
     this.transport = { generateIdentity: injected.generateIdentity ?? generateDesktopDeviceIdentity, openTunnel: injected.openTunnel ?? openDesktopSshTunnel, tlsRequest: injected.tlsRequest ?? (desktopTlsRequest as NonNullable<DesktopRemoteClientTransportDeps['tlsRequest']>) }
+    this.lanes = new DesktopLanes(injected.openLane as DesktopLaneConnector | undefined)
     this.statePromise = this.load()
   }
   async dispose(): Promise<void> {
@@ -46,6 +51,7 @@ export abstract class DesktopRemoteClientBase {
       for (const controller of this.controllers) controller.abort()
       await Promise.allSettled([this.statePromise])
       await Promise.allSettled([...this.requests])
+      this.lanes.closeAll()
       await Promise.allSettled([...this.active.values()].map((active) => active.tunnel.close()))
       this.active.clear(); this.runWatch.clear(); this.answerIds.clear()
     })
@@ -118,13 +124,42 @@ export abstract class DesktopRemoteClientBase {
   }
   protected pairPort(item: StoredConnection): number { return item.pairPort }
   protected runPort(item: StoredConnection): number { return item.runPort }
-  protected async requestForConnection(id: string, request: unknown, authorizePeer?: () => void): Promise<Record<string, unknown>> { const state = await this.state(); const item = this.connection(state, id); const active = this.active.get(id); if (!active?.tunnel.alive) fail('desktop_not_connected'); return await this.request(active.tunnel.runPath, item, request, authorizePeer) as Record<string, unknown> }
+  protected async requestForConnection(id: string, request: unknown, authorizePeer?: () => void): Promise<Record<string, unknown>> {
+    const state = await this.state()
+    const item = this.connection(state, id)
+    const active = this.active.get(id)
+    if (!active?.tunnel.alive) fail('desktop_not_connected')
+    return await this.laneRequest(id, active.tunnel.runPath, item, state.identity, request, authorizePeer)
+  }
+
+  // Every run-channel request goes through a persistent lane; there is no
+  // one-shot fallback on the run channel.
+  protected async laneRequest(id: string, runPath: string, item: StoredConnection, identity: EncryptedState['identity'], request: unknown, authorizePeer?: () => void): Promise<Record<string, unknown>> {
+    const controller = new AbortController()
+    // Check after all awaited state work and immediately before dispatch.
+    authorizePeer?.()
+    this.controllers.add(controller)
+    const promise = this.lanes.request(laneForRequest(request), id, {
+      endpoint: { path: runPath, caPEM: item.anchorPEM, certPEM: item.certificatePEM ?? identity.bootstrapCertPEM, keyPEM: identity.keyPEM },
+      request,
+      replayable: replayableRequest(request),
+      signal: controller.signal
+    })
+    this.requests.add(promise)
+    try {
+      const response = await promise
+      if (record(response) && typeof response.error === 'string' && response.error.length > 0 && response.error.length <= 128) fail(`desktop_remote_${response.error}`)
+      return response as Record<string, unknown>
+    } finally { this.requests.delete(promise); this.controllers.delete(controller) }
+  }
   protected async desktop(id: string, query: DesktopHostRead): Promise<Record<string, unknown>> {
     const response = await this.requestForConnection(id, { op: 'desktop', query })
     if (!record(response) || !record(response.desktop) || !['info', 'history', 'history_chunk', 'trace', 'trace_delta', 'image_chunk'].includes(String(response.desktop.kind))) fail('invalid_desktop_response')
     return response.desktop
   }
   async catalogRequest<T>(id: string, request: unknown, key: string): Promise<T> { const response = await this.requestForConnection(id, request); if (!record(response) || !(key in response)) fail('invalid_catalog_response'); return response[key] as T }
+  // Pairing only: one-shot request on the pair channel. The run channel uses the
+  // persistent lanes above; there is no one-shot fallback there.
   protected async request(path: string, item: StoredConnection, request: unknown, authorizePeer?: () => void): Promise<unknown> {
     const controller = new AbortController()
     const identity = (await this.state()).identity
@@ -141,6 +176,7 @@ export abstract class DesktopRemoteClientBase {
   }
   protected async disconnectActive(connectionIdValue: string): Promise<void> {
     const active = this.active.get(connectionIdValue)
+    this.lanes.closeConnection(connectionIdValue)
     if (!active) return
     this.active.delete(connectionIdValue)
     await active.tunnel.close()

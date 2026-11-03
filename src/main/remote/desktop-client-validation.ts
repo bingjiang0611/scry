@@ -5,6 +5,7 @@ import type { DeleteSessionResult } from '../../shared/provider'
 import type { TraceEvent } from '../../shared/trace'
 import type { LoadedSessionTurn } from '../../shared/session-history'
 import type { DesktopDeviceIdentity, DesktopSshTunnel } from './desktop-transport'
+import type { DesktopLaneConnector } from './desktop-lane'
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 export const MAC_RUN_ID = /^(?:remote-)?run-[0-9a-z]{1,24}-[0-9a-z]{1,12}$/
@@ -18,6 +19,9 @@ export const STATE_FILE = 'desktop-client.state'
 export interface DesktopRemoteClientTransportDeps {
   generateIdentity?: () => Promise<DesktopDeviceIdentity>
   openTunnel?: (options: { username: string; hostname: string; port: number; pairPort: number; runPort: number }) => Promise<DesktopSshTunnel>
+  // One persistent lane channel to the run channel. Absent => the production TLS
+  // lane connector. Tests inject a fake channel instead of TLS.
+  openLane?: DesktopLaneConnector
   tlsRequest?: (options: {
     path: string
     caPEM: string

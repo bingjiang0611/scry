@@ -83,13 +83,15 @@ export abstract class DesktopRemoteClientConnections extends DesktopRemoteClient
     await this.disconnectActive(item.id)
     const tunnel = await this.transport.openTunnel({ ...item.ssh, pairPort: item.pairPort, runPort: item.runPort })
     try {
-      const response = await this.request(tunnel.runPath, item, { op: 'desktop', query: { kind: 'info' } })
+      // The first run request opens the control lane, so the catalog that follows
+      // reuses this handshake; an old one-shot host fails here as a protocol mismatch.
+      const response = await this.laneRequest(item.id, tunnel.runPath, item, state.identity, { op: 'desktop', query: { kind: 'info' } })
       const capabilities = validateInfo(response, item.hostId)
       if (this.disposed) fail('desktop_client_disposed')
       await this.save(state, state.connections.map((connection) => connection.id === item.id ? { ...connection, autoConnect: true } : connection))
       this.active.set(item.id, { tunnel, serial: Promise.resolve(), ...(capabilities.attachments ? { attachments: capabilities.attachments } : {}), ...(capabilities.traceDelta ? { traceDelta: capabilities.traceDelta } : {}) })
       await this.reconcileUnknown(state, item.id)
-    } catch (error) { await tunnel.close(); throw error }
+    } catch (error) { this.lanes.closeConnection(item.id); await tunnel.close(); throw error }
   }
 
   async disconnect(connectionIdValue: string): Promise<void> {

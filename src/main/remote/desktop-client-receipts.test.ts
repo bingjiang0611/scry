@@ -109,7 +109,7 @@ describe('DesktopRemoteClient receipt and mobile delivery', () => {
       // Simulate a Mac1 restart after the receipt was committed. The same
       // encrypted receipt supplies the downstream key; no fresh UUID is made.
       await fixture.client.dispose()
-      reloaded = new DesktopRemoteClient({ directory: fixture.directory, encrypt, decrypt }, { openTunnel: fixture.openTunnel, tlsRequest: fixture.tlsRequest })
+      reloaded = new DesktopRemoteClient({ directory: fixture.directory, encrypt, decrypt }, { openTunnel: fixture.openTunnel, tlsRequest: fixture.tlsRequest, openLane: fixture.openLane })
       await reloaded.connect(id)
       const reloadedTarget = (await reloaded.executionTargets())[0]!
       await expect(reloaded.mobileSubmit({ ...input, target: reloadedTarget })).resolves.toEqual({ runId, status: 'duplicate' })

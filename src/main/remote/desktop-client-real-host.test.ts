@@ -7,6 +7,8 @@ import { describe, expect, it, vi, type MockInstance } from 'vitest'
 import { ensureHostIdentity } from './host-identity'
 import { desktopTlsRequest, type DesktopSshTunnel } from './desktop-transport'
 import { DesktopRemoteClient } from './desktop-client'
+import { connectDesktopLane } from './desktop-lane'
+import { faultyLaneConnector } from './desktop-lane-fixtures'
 import { createHostController } from './host-controller-factory'
 import { InnerMtlsHost } from './inner-mtls-host'
 import type { MacRunView } from './host-controller'
@@ -87,20 +89,21 @@ describe('DesktopRemoteClient over real host TLS', () => {
     let dropSubmitResponse = true
     let dropBeforeDelivery = false
     let lateSubmit: Parameters<typeof tlsRequest>[0] | undefined
-    const tlsRequest = async (options: { path: string; caPEM: string; certPEM: string; keyPEM: string; request: unknown; signal?: AbortSignal }): Promise<unknown> => {
+    // Pairing stays one-shot; the run channel uses real TLS lanes to the real host.
+    const tlsRequest = async (options: { path?: string; caPEM: string; certPEM: string; keyPEM: string; request: unknown; signal?: AbortSignal }): Promise<unknown> => {
       wire.push(options.request)
-      if (dropBeforeDelivery && (options.request as { op?: string }).op === 'submit') {
-        dropBeforeDelivery = false
-        lateSubmit = options
-        throw new Error('request_delivery_unknown')
-      }
       const address = options.path === `pair:${pairAddress.port}` ? pairAddress : runAddress
-      const response = await desktopTlsRequest({ ...options, path: undefined, host: address.host, port: address.port })
-      if (dropSubmitResponse && (options.request as { op?: string }).op === 'submit') { dropSubmitResponse = false; throw new Error('response_lost_after_delivery') }
-      return response
+      return await desktopTlsRequest({ ...options, path: undefined, host: address.host, port: address.port })
     }
+    const openLane = faultyLaneConnector(endpoint => connectDesktopLane({ ...endpoint, path: undefined, host: runAddress.host, port: runAddress.port }), (request, endpoint) => {
+      wire.push(request)
+      if (request.op !== 'submit') return 'deliver'
+      if (dropBeforeDelivery) { dropBeforeDelivery = false; lateSubmit = { ...endpoint, request }; return 'drop_before_delivery' }
+      if (dropSubmitResponse) { dropSubmitResponse = false; return 'drop_reply' }
+      return 'deliver'
+    })
     const openTunnel = async (): Promise<DesktopSshTunnel> => ({ pairPath: `pair:${pairAddress.port}`, runPath: `run:${runAddress.port}`, alive: true, close: async () => {} })
-    let client = new DesktopRemoteClient({ directory: join(directory, 'client'), encrypt, decrypt }, { openTunnel, tlsRequest })
+    let client = new DesktopRemoteClient({ directory: join(directory, 'client'), encrypt, decrypt }, { openTunnel, tlsRequest, openLane })
     try {
       const pairing = await binding.controller.authority.begin()
       const invitation = `scry-desktop1:${Buffer.from(JSON.stringify({ version: 1, hostId: identity.hostId, anchorPEM: identity.caCertificatePEM, pairPort: pairAddress.port, runPort: runAddress.port, pairingId: pairing.pairingId, secret: pairing.secret, expiresAt: pairing.expiresAt })).toString('base64url')}`
@@ -109,7 +112,7 @@ describe('DesktopRemoteClient over real host TLS', () => {
       const paired = await client.finishPairing(pending.connection.id)
       expect(paired.state).toBe('paired')
       await client.dispose()
-      client = new DesktopRemoteClient({ directory: join(directory, 'client'), encrypt, decrypt }, { openTunnel, tlsRequest })
+      client = new DesktopRemoteClient({ directory: join(directory, 'client'), encrypt, decrypt }, { openTunnel, tlsRequest, openLane })
       await client.restoreConnections()
       await expect(client.list()).resolves.toMatchObject([{ id: pending.connection.id, state: 'connected' }])
       const catalog = await client.catalog(pending.connection.id)

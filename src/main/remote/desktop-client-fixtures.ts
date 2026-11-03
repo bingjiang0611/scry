@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ensureHostIdentity } from './host-identity'
 import { generateDesktopDeviceIdentity, type DesktopSshTunnel } from './desktop-transport'
+import { fakeLaneConnector } from './desktop-lane-fixtures'
 import { DesktopRemoteClient } from './desktop-client'
 
 export const ssh = { hostname: 'desktop.example', username: 'scry', port: 22 }
@@ -26,8 +27,10 @@ export async function setup(setupOptions: { submitResponse?: () => unknown; inte
     tunnelShutdowns.push(stop)
     return { pairPath: `pair-${++tunnelCount}`, runPath: `run-${tunnelCount}`, get alive() { return alive }, close: async () => { stop() } }
   }
-  const tlsRequest = vi.fn(async (options: { path: string; request: unknown }): Promise<unknown> => {
-    const request = options.request as { operation?: string; requestId?: string; pairingId?: string }
+  // The wire handler, shared by the pairing one-shot and the run lanes: run
+  // requests go through a fake lane channel that still records the exact wire
+  // request on the same tlsRequest spy the tests assert on.
+  const handle = async (request: { operation?: string; requestId?: string; pairingId?: string; op?: string }): Promise<unknown> => {
     if (request.operation === 'pair.prove') {
       phase = 'status'
       return { protocolMajor: 1, requestId: request.requestId, kind: 'pair.pending', pairingId, publicKeySHA256: identity.publicKeySHA256 }
@@ -38,19 +41,24 @@ export async function setup(setupOptions: { submitResponse?: () => unknown; inte
       return { protocolMajor: 1, requestId: request.requestId, kind: 'pair.granted', pairingId, deviceId: grant.deviceId, certificatePEM: grant.certificatePEM,
         certificateSHA256: grant.certificateSHA256, expiresAt: grant.expiresAt, scope: 'g0_echo_only' }
     }
-    if (phase === 'status' && (request as { op?: string }).op === 'desktop') return { desktop: { kind: 'info', protocol: 1, hostId: host.hostId, execution: 'canonical', ...(setupOptions.providerDiscovery === false ? {} : { providerDiscovery: 2 }) } }
-    if ((request as { op?: string }).op === 'providers') return { providers: [{ id: 'claude', label: 'Claude', available: true, permissions: [{ id: 'default', label: 'Default' }] }] }
-    if ((request as { op?: string }).op === 'submit') {
+    if (phase === 'status' && request.op === 'desktop') return { desktop: { kind: 'info', protocol: 1, hostId: host.hostId, execution: 'canonical', ...(setupOptions.providerDiscovery === false ? {} : { providerDiscovery: 2 }) } }
+    if (request.op === 'providers') return { providers: [{ id: 'claude', label: 'Claude', available: true, permissions: [{ id: 'default', label: 'Default' }] }] }
+    if (request.op === 'submit') {
       if (setupOptions.submitResponse) return setupOptions.submitResponse()
       throw new Error('network_down')
     }
-    if ((request as { op?: string }).op === 'intentStatus' && setupOptions.intentStatusResponse) return setupOptions.intentStatusResponse()
-    if ((request as { op?: string }).op === 'intentStatus' && setupOptions.unknownIntent) return { error: 'unknown_intent' }
-    if ((request as { op?: string }).op === 'resolveIntent' && setupOptions.resolveIntentResponse) return setupOptions.resolveIntentResponse()
-    if ((request as { op?: string }).op === 'poll') return { cursor: 0, minCursor: 0, events: [] }
+    if (request.op === 'intentStatus' && setupOptions.intentStatusResponse) return setupOptions.intentStatusResponse()
+    if (request.op === 'intentStatus' && setupOptions.unknownIntent) return { error: 'unknown_intent' }
+    if (request.op === 'resolveIntent' && setupOptions.resolveIntentResponse) return setupOptions.resolveIntentResponse()
+    if (request.op === 'poll') return { cursor: 0, minCursor: 0, events: [] }
     return { error: 'unexpected_request' }
-  })
+  }
+
+  const tlsRequest = vi.fn(async (options: { path: string; request: unknown }): Promise<unknown> =>
+    await handle(options.request as { operation?: string; requestId?: string; pairingId?: string; op?: string }))
+
+  const openLane = vi.fn(fakeLaneConnector(tlsRequest))
   const openTunnel = vi.fn(async (_options: { username: string; hostname: string; port: number; pairPort: number; runPort: number }) => tunnel())
-  const client = new DesktopRemoteClient({ directory, encrypt: setupOptions.encrypt ?? encrypt, decrypt }, { generateIdentity: async () => identity, openTunnel, tlsRequest })
-  return { directory, host, invitation, client, openTunnel, tlsRequest, phase: () => phase, tunnelCount: () => tunnelCount, dropTunnel: () => tunnelShutdowns.at(-1)!() }
+  const client = new DesktopRemoteClient({ directory, encrypt: setupOptions.encrypt ?? encrypt, decrypt }, { generateIdentity: async () => identity, openTunnel, tlsRequest, openLane })
+  return { directory, host, invitation, client, openTunnel, tlsRequest, openLane, phase: () => phase, tunnelCount: () => tunnelCount, dropTunnel: () => tunnelShutdowns.at(-1)!() }
 }

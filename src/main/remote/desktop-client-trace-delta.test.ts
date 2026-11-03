@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { ensureHostIdentity } from './host-identity'
 import { generateDesktopDeviceIdentity } from './desktop-transport'
 import { DesktopRemoteClient } from './desktop-client'
+import { fakeLaneConnector } from './desktop-lane-fixtures'
 import { createDesktopHostReader, parseDesktopHostRead } from './desktop-host-reader'
 import { mergeRemoteTrace } from '../../renderer/remote-trace'
 import type { ActiveRun, TraceEvent } from '../../shared/trace'
@@ -51,7 +52,7 @@ describe('DesktopRemoteClient trace delta negotiation', () => {
       if (wire.desktop.kind === 'trace_delta') options.tamper?.(wire.desktop)
       return wire
     })
-    const client = new DesktopRemoteClient({ directory, encrypt, decrypt }, { generateIdentity: async () => identity, openTunnel: async () => ({ pairPath: 'pair', runPath: 'run', alive: true, close: async () => {} }), tlsRequest })
+    const client = new DesktopRemoteClient({ directory, encrypt, decrypt }, { generateIdentity: async () => identity, openTunnel: async () => ({ pairPath: 'pair', runPath: 'run', alive: true, close: async () => {} }), tlsRequest, openLane: fakeLaneConnector(tlsRequest) })
     const pending = await client.pair({ label: 'Target', ssh, invitation })
     const id = pending.connection.id
     await client.finishPairing(id)

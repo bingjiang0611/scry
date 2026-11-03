@@ -47,6 +47,9 @@ export class InnerMtlsHost {
   #server: Server
   #maxFrame: number
   #connections = new Set<TLSSocket>()
+  // Open sockets by verified peer fingerprint, so revoking a device closes the
+  // tunnels it holds open instead of waiting for their idle timeout.
+  #peers = new Map<string, Set<TLSSocket>>()
 
   constructor(options: InnerMtlsHostOptions) {
     this.#maxFrame = options.maxFrameBytes ?? DEFAULT_MAX_FRAME
@@ -88,7 +91,14 @@ export class InnerMtlsHost {
     handshake?.mark('peer_verified', { connections: 1 })
     handshake?.finish({ connections: 1 })
     this.#connections.add(socket)
-    socket.once('close', () => this.#connections.delete(socket))
+    const peerSockets = this.#peers.get(fingerprint) ?? new Set<TLSSocket>()
+    peerSockets.add(socket)
+    this.#peers.set(fingerprint, peerSockets)
+    socket.once('close', () => {
+      this.#connections.delete(socket)
+      peerSockets.delete(socket)
+      if (peerSockets.size === 0 && this.#peers.get(fingerprint) === peerSockets) this.#peers.delete(fingerprint)
+    })
     let buffer = Buffer.alloc(0)
     let busy = false
     let kept = false
@@ -168,6 +178,12 @@ export class InnerMtlsHost {
     const address = this.#server.address()
     if (!address || typeof address === 'string') throw new Error('inner_mtls_host_not_listening')
     return { port: address.port, host: address.address }
+  }
+
+  // Called after a grant is revoked. Requests already fail authorization; this
+  // drops the peer's open tunnels, including one waiting inside a long poll.
+  closePeer(certificateSHA256: string): void {
+    for (const socket of this.#peers.get(certificateSHA256) ?? []) socket.destroy()
   }
 
   async close(): Promise<void> {
