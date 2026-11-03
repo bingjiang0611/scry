@@ -168,6 +168,9 @@ export function validateDeleteSessionResult(value: unknown): DeleteSessionResult
   return value as unknown as DeleteSessionResult
 }
 
+/** Host capabilities negotiated by `desktop info`, reused by the catalog snapshot. */
+export type DesktopCapabilities = ReturnType<typeof validateInfo>
+
 export function validateInfo(response: unknown, hostId: string): { providerDiscovery?: 2; directorySelection?: true; workbench?: 1; sessionActions?: true; sessionFork?: true; sessionDelete?: true; traceDelta?: 1; attachments?: DesktopAttachmentCapability } {
   if (!record(response) || !record(response.desktop) || response.desktop.kind !== 'info' || response.desktop.protocol !== 1 ||
       response.desktop.hostId !== hostId || response.desktop.execution !== 'canonical' ||

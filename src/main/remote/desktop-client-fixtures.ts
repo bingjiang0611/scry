@@ -12,7 +12,7 @@ export const ssh = { hostname: 'desktop.example', username: 'scry', port: 22 }
 export const encrypt = (value: string): Buffer => Buffer.from(`encrypted:${Buffer.from(value).toString('base64')}`)
 export const decrypt = (value: Buffer): string => Buffer.from(value.toString().slice('encrypted:'.length), 'base64').toString()
 
-export async function setup(setupOptions: { watchState?: string | null; liveRuns?: unknown[]; submitResponse?: () => unknown; intentStatusResponse?: () => unknown; resolveIntentResponse?: () => unknown; unknownIntent?: boolean; providerDiscovery?: boolean; encrypt?: typeof encrypt } = {}) {
+export async function setup(setupOptions: { watchState?: string | null; liveRuns?: unknown[]; catalogSnapshot?: (request: Record<string, unknown>) => unknown; projects?: unknown[]; sessionsPage?: Record<string, unknown>; submitResponse?: () => unknown; intentStatusResponse?: () => unknown; resolveIntentResponse?: () => unknown; unknownIntent?: boolean; providerDiscovery?: boolean; encrypt?: typeof encrypt } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'scry-desktop-client-'))
   const identity = await generateDesktopDeviceIdentity()
   const host = await ensureHostIdentity(join(directory, 'host'))
@@ -30,7 +30,7 @@ export async function setup(setupOptions: { watchState?: string | null; liveRuns
   // The wire handler, shared by the pairing one-shot and the run lanes: run
   // requests go through a fake lane channel that still records the exact wire
   // request on the same tlsRequest spy the tests assert on.
-  const handle = async (request: { operation?: string; requestId?: string; pairingId?: string; op?: string }): Promise<unknown> => {
+  const handle = async (request: { operation?: string; requestId?: string; pairingId?: string; op?: string; revision?: string }): Promise<unknown> => {
     if (request.operation === 'pair.prove') {
       phase = 'status'
       return { protocolMajor: 1, requestId: request.requestId, kind: 'pair.pending', pairingId, publicKeySHA256: identity.publicKeySHA256 }
@@ -54,11 +54,25 @@ export async function setup(setupOptions: { watchState?: string | null; liveRuns
     // Lifecycle long poll: nothing new, so a caller sees an unchanged run.
     if (request.op === 'watch') return { watch: { state: setupOptions.watchState ?? null, questions: [], poll: { cursor: 0, minCursor: 0, events: [] } } }
     if (request.op === 'liveRuns') return { liveRuns: { revision: 'fixture-revision', runs: setupOptions.liveRuns ?? [] } }
+    // Catalog in one round trip. The fixture keeps the same answer for the same
+    // revision so the unchanged path can be exercised.
+    if (request.op === 'catalogSnapshot') {
+      if (setupOptions.catalogSnapshot) return { catalogSnapshot: await setupOptions.catalogSnapshot(request) }
+      const revision = 'fixture-catalog-1'
+      if (request.revision === revision) return { catalogSnapshot: { unchanged: true, revision } }
+      return { catalogSnapshot: {
+        revision,
+        info: { kind: 'info', protocol: 1, hostId: host.hostId, execution: 'canonical', ...(setupOptions.providerDiscovery === false ? {} : { providerDiscovery: 2 }) },
+        projects: setupOptions.projects ?? [],
+        providers: [{ id: 'claude', label: 'Claude', available: true, permissions: [{ id: 'default', label: 'Default' }] }],
+        sessionsPage: setupOptions.sessionsPage ?? { sessions: [], cursor: 0, total: 0, hasMore: false, snapshot: 'fixture-sessions-1' }
+      } }
+    }
     return { error: 'unexpected_request' }
   }
 
   const tlsRequest = vi.fn(async (options: { path: string; request: unknown }): Promise<unknown> =>
-    await handle(options.request as { operation?: string; requestId?: string; pairingId?: string; op?: string }))
+    await handle(options.request as { operation?: string; requestId?: string; pairingId?: string; op?: string; revision?: string }))
 
   const openLane = vi.fn(fakeLaneConnector(tlsRequest))
   const openTunnel = vi.fn(async (_options: { username: string; hostname: string; port: number; pairPort: number; runPort: number }) => tunnel())

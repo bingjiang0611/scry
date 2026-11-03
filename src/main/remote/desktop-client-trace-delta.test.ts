@@ -39,9 +39,16 @@ describe('DesktopRemoteClient trace delta negotiation', () => {
           certificateSHA256: grant.certificateSHA256, expiresAt: grant.expiresAt, scope: 'g0_echo_only' }
       }
       if (request.op === 'poll') return { cursor: 0, minCursor: 0, events: [] }
-      if (request.op === 'projects') return { projects: [] }
-      if (request.op === 'providers') return { providers: [] }
-      if (request.op === 'sessionsPage') return { sessionsPage: { sessions: [], cursor: 0, total: 0, hasMore: false, snapshot: 'catalog' } }
+      if (request.op === 'catalogSnapshot') {
+        const revision = 'catalog-1'
+        if ((request as { revision?: string }).revision === revision) return { catalogSnapshot: { unchanged: true, revision } }
+        return { catalogSnapshot: {
+          revision,
+          info: { kind: 'info', protocol: 1, hostId: host.hostId, execution: 'canonical', providerDiscovery: 2, ...(options.legacyHost ? {} : { traceDelta: 1 }) },
+          projects: [], providers: [],
+          sessionsPage: { sessions: [], cursor: 0, total: 0, hasMore: false, snapshot: 'catalog' }
+        } }
+      }
       if (request.op !== 'desktop') return { error: 'unexpected_request' }
       queries.push(JSON.parse(JSON.stringify(request.query)) as Record<string, unknown>)
       const query = JSON.parse(JSON.stringify(request.query)) as Record<string, unknown>

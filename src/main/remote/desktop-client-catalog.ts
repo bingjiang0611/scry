@@ -1,40 +1,62 @@
-import type { DesktopDirectoryPage, DesktopRemoteCatalog, DesktopRemoteContext, DesktopRemoteSessionAction, DesktopRemoteForkSessionRequest, DesktopRemoteDeleteSessionRequest, RemoteCommandCatalog, RemoteProviderRef, RemoteProjectRef, RemoteProviderQuery, RemoteSessionRef } from '../../shared/desktop-remote'
+import type { DesktopDirectoryPage, DesktopRemoteCatalog, DesktopRemoteContext, DesktopRemoteSessionAction, DesktopRemoteForkSessionRequest, DesktopRemoteDeleteSessionRequest, RemoteCommandCatalog, RemoteProviderRef, RemoteProjectRef, RemoteSessionRef } from '../../shared/desktop-remote'
 import type { DeleteSessionResult } from '../../shared/provider'
 import { DesktopRemoteClientConnections } from './desktop-client-connections'
 import { context, fail, record, text, pathText, HASH, MAX_ITEMS, MAX_PAGES, validateInfo, validateProject, validateProvider, validateSession, validateDeleteSessionResult } from './desktop-client-validation'
 
 export abstract class DesktopRemoteClientCatalog extends DesktopRemoteClientConnections {
+  // One round trip for info, projects, provider metadata and the first session
+  // page. A host that reports the same revision costs the request and nothing
+  // else: the whole payload is skipped, not re-sent and re-validated.
   async catalog(connectionIdValue: string): Promise<DesktopRemoteCatalog> {
-    const info = await this.desktop(connectionIdValue, { kind: 'info' })
-    const state = await this.state()
-    const item = this.connection(state, connectionIdValue)
-    const capabilities = validateInfo({ desktop: info }, item.hostId)
-    const rawProjects = await this.catalogRequest<unknown>(connectionIdValue, { op: 'projects' }, 'projects')
-    const rawProviders = await this.catalogRequest<unknown>(connectionIdValue, {
-      op: 'providers', ...(capabilities.providerDiscovery === 2 ? { detail: 'metadata' satisfies RemoteProviderQuery['detail'] } : {})
-    }, 'providers')
+    let cached = this.catalogCache.get(connectionIdValue)
+    let response = await this.requestForConnection(connectionIdValue, { op: 'catalogSnapshot', ...(cached ? { revision: cached.revision } : {}) })
+    if (!record(response) || !record(response.catalogSnapshot)) fail('invalid_catalog_response')
+    if (response.catalogSnapshot.unchanged === true && !cached) {
+      // The cache can be dropped by a disconnect between the request and the reply.
+      // Ask again from scratch rather than report a failure the host did not cause.
+      response = await this.requestForConnection(connectionIdValue, { op: 'catalogSnapshot' })
+      if (!record(response) || !record(response.catalogSnapshot)) fail('invalid_catalog_response')
+      cached = undefined
+    }
+    const snapshot = response.catalogSnapshot
+    if (snapshot.unchanged === true) {
+      // Only a fully paged catalog is cached, so unchanged always has an answer.
+      if (!cached || !text(snapshot.revision, 64)) fail('invalid_catalog_response')
+      return cached.catalog
+    }
+    if (!text(snapshot.revision, 64)) fail('invalid_catalog_response')
+    const item = this.connection(await this.state(), connectionIdValue)
+    const capabilities = validateInfo({ desktop: snapshot.info }, item.hostId)
+    const rawProjects = snapshot.projects
+    const rawProviders = snapshot.providers
     if (!Array.isArray(rawProjects) || !Array.isArray(rawProviders) || rawProjects.length > MAX_ITEMS || rawProviders.length > MAX_ITEMS) fail('catalog_too_large')
-    const sessions: RemoteSessionRef[] = []; let cursor = 0; let snapshot: string | undefined
+    const sessions: RemoteSessionRef[] = []; let cursor = 0; let pageSnapshot: string | undefined
+    const first = snapshot.sessionsPage
     for (let page = 0; page < MAX_PAGES; page++) {
-      const response = await this.catalogRequest<Record<string, unknown>>(connectionIdValue, { op: 'sessionsPage', includeArchived: true, cursor, limit: 100, ...(snapshot ? { snapshot } : {}) }, 'sessionsPage')
-      if (!Array.isArray(response.sessions) || !Number.isSafeInteger(response.cursor) || !Number.isSafeInteger(response.total) || typeof response.hasMore !== 'boolean' || !text(response.snapshot, 256)) fail('invalid_catalog_response')
-      if (snapshot !== undefined && response.snapshot !== snapshot) fail('catalog_snapshot_changed')
-      if (response.sessions.length > 100 || sessions.length + response.sessions.length > MAX_ITEMS) fail('catalog_too_large')
-      sessions.push(...response.sessions.map((item) => validateSession(item)))
-      if (!response.hasMore) break
-      if ((response.cursor as number) <= cursor) fail('invalid_catalog_cursor')
-      cursor = response.cursor as number; snapshot = response.snapshot as string
+      const pageResponse = page === 0 ? first : await this.catalogRequest<Record<string, unknown>>(connectionIdValue, { op: 'sessionsPage', includeArchived: true, cursor, limit: 100, ...(pageSnapshot ? { snapshot: pageSnapshot } : {}) }, 'sessionsPage')
+      if (!record(pageResponse) || !Array.isArray(pageResponse.sessions) || !Number.isSafeInteger(pageResponse.cursor) || !Number.isSafeInteger(pageResponse.total) || typeof pageResponse.hasMore !== 'boolean' || !text(pageResponse.snapshot, 256)) fail('invalid_catalog_response')
+      if (pageSnapshot !== undefined && pageResponse.snapshot !== pageSnapshot) fail('catalog_snapshot_changed')
+      if (pageResponse.sessions.length > 100 || sessions.length + pageResponse.sessions.length > MAX_ITEMS) fail('catalog_too_large')
+      sessions.push(...pageResponse.sessions.map((session) => validateSession(session)))
+      if (!pageResponse.hasMore) break
+      if ((pageResponse.cursor as number) <= cursor) fail('invalid_catalog_cursor')
+      cursor = pageResponse.cursor as number; pageSnapshot = pageResponse.snapshot as string
       if (page === MAX_PAGES - 1) fail('catalog_too_large')
     }
-    return { projects: rawProjects.map((item) => validateProject(item)), providers: rawProviders.map((item) => validateProvider(item)), sessions, providerEvidence: capabilities.providerDiscovery === 2 ? 'host_snapshot' : 'legacy_host', ...capabilities }
+    const catalog: DesktopRemoteCatalog = { projects: rawProjects.map((project) => validateProject(project)), providers: rawProviders.map((provider) => validateProvider(provider)), sessions, providerEvidence: capabilities.providerDiscovery === 2 ? 'host_snapshot' : 'legacy_host', ...capabilities }
+    this.catalogCache.set(connectionIdValue, { revision: snapshot.revision, catalog, capabilities })
+    return catalog
   }
 
   async providerControls(connectionIdValue: string, value: DesktopRemoteContext): Promise<RemoteProviderRef> {
     const query = context(value)
-    const info = await this.desktop(connectionIdValue, { kind: 'info' })
-    const state = await this.state()
-    const item = this.connection(state, connectionIdValue)
-    const capabilities = validateInfo({ desktop: info }, item.hostId)
+    // Capabilities come from the catalog snapshot this device just read. Without
+    // one, read them now rather than guess: an older host must fail closed.
+    let capabilities = this.catalogCache.get(connectionIdValue)?.capabilities
+    if (!capabilities) {
+      const state = await this.state()
+      capabilities = validateInfo({ desktop: await this.desktop(connectionIdValue, { kind: 'info' }) }, this.connection(state, connectionIdValue).hostId)
+    }
     if (capabilities.providerDiscovery !== 2) fail('provider_controls_unavailable')
     const raw = await this.catalogRequest<unknown>(connectionIdValue, {
       op: 'providers', detail: 'selected', providerId: query.providerId, cwd: query.cwd,

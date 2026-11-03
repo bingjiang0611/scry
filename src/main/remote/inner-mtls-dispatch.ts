@@ -201,6 +201,12 @@ export async function dispatchRemoteRequest(controller: HostController, fingerpr
     if (request.op === 'sessionDelete') {
       return { sessionDelete: await controller.sessionDelete(fingerprint, request.request) }
     }
+    if (request.op === 'catalogSnapshot') {
+      // Whole-catalog read in one round trip. A known revision that still matches
+      // answers `unchanged` instead of re-sending it.
+      if (request.revision !== undefined && (typeof request.revision !== 'string' || request.revision.length > 64)) return { error: 'invalid_request' }
+      return { catalogSnapshot: await controller.catalogSnapshot(fingerprint, { ...(typeof request.revision === 'string' ? { revision: request.revision } : {}) }) }
+    }
     if (request.op === 'sessions') {
       // Same owner-device authorization; display-only catalog metadata.
       return { sessions: controller.listSessions(fingerprint) }

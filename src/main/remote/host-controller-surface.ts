@@ -18,6 +18,7 @@ import { authorizedCwd, isRemoteRun, macRun } from './host-controller-runs'
 import { chunkAttachment, commitAttachment, releaseIntentAttachments, resolveIntentAttachments, startAttachment, type AttachmentDeps } from './host-controller-attachments'
 import { createExecution } from './host-controller-execution'
 import { readDesktop, readDesktopDirectory, readDesktopWorkbench, type DesktopReadDeps } from './host-controller-desktop-reads'
+import { catalogSnapshot, type CatalogSnapshotReply } from './host-controller-catalog-snapshot'
 import { readToolPanel, type ToolPanelDeps } from './host-controller-tool-panel'
 import { runSessionAction, runSessionDelete, runSessionFork, type SessionActionDeps } from './host-controller-session'
 import { submitIntent, submitReceivedIntent, type SubmitDeps } from './host-controller-submit'
@@ -237,12 +238,8 @@ export class HostController {
     return this.#gateway.listCommands(peerCertSHA256, query)
   }
 
-  // Device-facing read of one bounded tool panel. Unknown kinds and out-of-range
-  // analytics windows are rejected; a missing source reports unavailable with a
-  // reason instead of an empty panel that would read as "nothing happened".
-  // One object satisfies every device-facing deps interface (submit, desktop
-  // reads, run controls, session actions, attachments); each helper reads only
-  // its own fields. `authorizeDevice` re-checks the verified peer every time.
+  // One object satisfies every device-facing deps interface; each helper reads
+  // only its own fields, and `authorizeDevice` re-checks the peer every time.
   #deps(): SubmitDeps & DesktopReadDeps & ToolPanelDeps & RunControlDeps & SessionActionDeps & AttachmentDeps {
     return {
       authorizeDevice: (value) => this.authorizeDevice(value), toolPanels: this.#toolPanels,
@@ -258,8 +255,6 @@ export class HostController {
       interactions: this.#interactions, stops: this.#stops
     }
   }
-
-
 
   async readToolPanel(peerCertSHA256: string, input: unknown): Promise<ToolPanelPayload> {
     return await readToolPanel(this.#deps(), peerCertSHA256, input)
@@ -285,6 +280,18 @@ export class HostController {
 
   listSessionsPage(peerCertSHA256: string, input: RemoteSessionPageQuery): RemoteSessionPage {
     return this.#gateway.listSessionsPage(peerCertSHA256, input)
+  }
+
+  // One device round trip for the whole catalog opening a host needs, with a
+  // content revision so an unchanged host answers without re-sending it.
+  async catalogSnapshot(peerCertSHA256: string, input: { revision?: string }): Promise<CatalogSnapshotReply> {
+    return await catalogSnapshot({
+      authorizeDevice: (peer) => this.authorizeDevice(peer),
+      readDesktop: (peer, query) => this.readDesktop(peer, query),
+      listProjects: (peer) => this.#gateway.listProjects(peer),
+      listProviders: (peer) => this.#gateway.listProviders(peer),
+      listSessionsPage: (peer, query) => this.#gateway.listSessionsPage(peer, query)
+    }, peerCertSHA256, input)
   }
 
   // Device-facing: one session's real conversation content, authorized by the

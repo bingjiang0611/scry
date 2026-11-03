@@ -1,12 +1,12 @@
 import { isAgentPermissionMode } from '../../shared/runtime'
-import type { DesktopHostRead, DesktopPairingResult, DesktopRemoteContext, DesktopRemoteIntent, DesktopRemoteSubmit } from '../../shared/desktop-remote'
+import type { DesktopHostRead, DesktopPairingResult, DesktopRemoteCatalog, DesktopRemoteContext, DesktopRemoteIntent, DesktopRemoteSubmit } from '../../shared/desktop-remote'
 import { createHash, randomUUID, X509Certificate as NodeCertificate } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { desktopTlsRequest, generateDesktopDeviceIdentity, openDesktopSshTunnel, type DesktopDeviceIdentity, type DesktopSshTunnel } from './desktop-transport'
 import { DesktopLanes, laneForRequest, replayableRequest, type DesktopLaneConnector } from './desktop-lane'
 import { DESKTOP_ATTACHMENT_CHUNK_BYTES, DESKTOP_ATTACHMENT_MAX_COUNT, attachmentSha256, newAttachmentId, normalizeDesktopAttachment } from './desktop-attachments'
-import { context, fail, record, text, uuid, hash, digest, validateState, validateIdentity, validatePairingResponse, validateCertificate, publicConnection, STATE_FILE, type EncryptedState, type StoredConnection, type ActiveConnection, type RunStatusCursor, type DesktopRemoteClientTransportDeps } from './desktop-client-validation'
+import { context, fail, record, text, uuid, hash, digest, validateState, validateIdentity, validatePairingResponse, validateCertificate, publicConnection, STATE_FILE, type EncryptedState, type StoredConnection, type ActiveConnection, type RunStatusCursor, type DesktopRemoteClientTransportDeps, type DesktopCapabilities } from './desktop-client-validation'
 
 export abstract class DesktopRemoteClientBase {
   protected abstract intentStatus(connectionIdValue: string, intentId: string): Promise<DesktopRemoteIntent>
@@ -26,6 +26,10 @@ export abstract class DesktopRemoteClientBase {
   protected readonly requests = new Set<Promise<unknown>>()
   protected readonly locks = new Map<string, Promise<void>>()
   protected readonly runWatch = new Map<string, RunStatusCursor>()
+  // Last fully paged catalog per connection, with the host revision it came from
+  // and the capabilities it declared. Dropped on disconnect and dispose: a stale
+  // revision or capability must never outlive the connection it was read on.
+  protected readonly catalogCache = new Map<string, { revision: string; catalog: DesktopRemoteCatalog; capabilities: DesktopCapabilities }>()
   protected readonly answerIds = new Map<string, string>()
   protected readonly submitting = new Set<string>()
   protected lifecycle: Promise<void> = Promise.resolve()
@@ -53,7 +57,7 @@ export abstract class DesktopRemoteClientBase {
       await Promise.allSettled([...this.requests])
       this.lanes.closeAll()
       await Promise.allSettled([...this.active.values()].map((active) => active.tunnel.close()))
-      this.active.clear(); this.runWatch.clear(); this.answerIds.clear()
+      this.active.clear(); this.runWatch.clear(); this.answerIds.clear(); this.catalogCache.clear()
     })
   }
   close(): Promise<void> { return this.dispose() }
