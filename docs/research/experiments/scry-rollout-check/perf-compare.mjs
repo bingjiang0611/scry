@@ -12,9 +12,14 @@
 // For every metric: the p50 of each run, spread = (max - min) / median of those p50s, and
 // stable = spread <= threshold (default 20 %). Only stable metrics enter the baseline; unstable and
 // unavailable ones are listed separately with their reasons. Unavailable is never turned into 0.
+//
+// A file whose phase failed as a whole (the phase reports status "unavailable", e.g. "uploader phase
+// failed: ...") has no measurement for that phase. It is excluded from that phase and listed with its
+// reason, instead of turning every metric of the phase into "unavailable". Each phase needs at least
+// two complete files; otherwise the phase is reported as not compared, with the reason.
 // The output is informational, not a ratchet gate.
 //
-// Exit: 0 written, 2 refused (environment mismatch or fewer than two runs for every phase), 1 error.
+// Exit: 0 written, 2 refused (environment mismatch, or no phase with two complete runs), 1 error.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 
@@ -107,6 +112,15 @@ function uploaderMetrics(up) {
 const UPLOADER_FIELDS = ['notify', 'commitPhaseMs', 'drainAfterLastCommitMs', 'recordsPerSecond', 'transportRequests', 'recordsPerRequest',
   'requestKiB', 'capabilityCalls', 'deadLetters', 'worker.peakConcurrent', 'worker.peakRssMiB', 'uploadDirKiBPerRecord']
 
+// Phase-level failure: the run started the phase but produced no comparable measurement.
+function phaseFailure(phase, report) {
+  const p = report[phase]
+  if (!p) return 'phase not run'
+  if (p.status === 'unavailable') return p.reason ?? `${phase} phase unavailable`
+  if (phase === 'recorder' && !p.modes) return 'recorder phase has no measured modes'
+  return undefined
+}
+
 // ---------- per phase comparison ----------
 const median = (v) => { const s = [...v].sort((a, b) => a - b); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2 }
 const round = (v) => Math.round(v * 10) / 10
@@ -114,9 +128,15 @@ const result = { baseline: {}, unstable: {}, unavailable: {} }
 const phaseSummary = {}
 
 for (const phase of ['recorder', 'uploader']) {
-  const group = runs.filter((r) => r.phases.includes(phase))
-  if (group.length === 0) continue
-  if (group.length < 2) { phaseSummary[phase] = { compared: false, reason: `only ${group[0].file} contains this phase`, files: group.map((r) => r.file) }; continue }
+  const present = runs.filter((r) => r.phases.includes(phase))
+  if (present.length === 0) continue
+  const excluded = present.map((r) => ({ file: r.file, reason: phaseFailure(phase, r.report) })).filter((e) => e.reason)
+  const group = present.filter((r) => !excluded.some((e) => e.file === r.file))
+  if (group.length < 2) {
+    phaseSummary[phase] = { compared: false, files: group.map((r) => r.file), excluded,
+      reason: `${group.length} complete file(s) for this phase, need 2${excluded.length ? `; excluded: ${excluded.map((e) => `${e.file} (${e.reason})`).join('; ')}` : ''}` }
+    continue
+  }
   const diff = mismatches(group, PHASE_FIELDS[phase], true)
   if (diff.length) refuse(`${phase} runs differ in versions or workload:\n  ${diff.join('\n  ')}`)
   const extracted = group.map((r) => (phase === 'recorder' ? recorderMetrics(r.report.recorder) : uploaderMetrics(r.report.uploader)))
@@ -134,9 +154,10 @@ for (const phase of ['recorder', 'uploader']) {
     if (Number.isFinite(spread) && spread <= threshold) result.baseline[key] = entry
     else result.unstable[key] = entry
   }
-  phaseSummary[phase] = { compared: true, files: group.map((r) => r.file), versions: phase === 'recorder' ? group[0].report.versions?.scry : group[0].report.versions?.uploader }
+  phaseSummary[phase] = { compared: true, files: group.map((r) => r.file), excluded, versions: phase === 'recorder' ? group[0].report.versions?.scry : group[0].report.versions?.uploader }
 }
-if (!Object.values(phaseSummary).some((p) => p.compared)) refuse('no phase is present in two or more files')
+if (!Object.values(phaseSummary).some((p) => p.compared))
+  refuse(`no phase has two or more complete files:\n  ${Object.entries(phaseSummary).map(([p, s]) => `${p}: ${s.reason}`).join('\n  ')}`)
 
 // ---------- output ----------
 const first = runs[0].report
@@ -149,7 +170,8 @@ const doc = {
   phases: phaseSummary,
   inputs: runs.map((r) => ({ file: r.file, at: r.report.environment.at, phases: r.phases, rounds: r.report.rounds,
     loadAverage: { start: r.report.environment.loadAverage, end: r.report.environment.loadAverageAtEnd } })),
-  counts: { baseline: Object.keys(result.baseline).length, unstable: Object.keys(result.unstable).length, unavailable: Object.keys(result.unavailable).length },
+  counts: { baseline: Object.keys(result.baseline).length, unstable: Object.keys(result.unstable).length, unavailable: Object.keys(result.unavailable).length,
+    excludedPhaseInputs: Object.values(phaseSummary).reduce((n, p) => n + (p.excluded?.length ?? 0), 0) },
   ...result
 }
 mkdirSync(outDir, { recursive: true })
@@ -174,10 +196,15 @@ table('不稳定，不能作基线', result.unstable)
 lines.push(`## 测不到（${Object.keys(result.unavailable).length} 项）`, '')
 if (!Object.keys(result.unavailable).length) lines.push('无', '')
 else { lines.push('| 指标 | 原因 |', '| --- | --- |'); for (const [k, r] of Object.entries(result.unavailable)) lines.push(`| ${k} | ${r.join('；').replaceAll('|', '\\|')} |`); lines.push('') }
+const excludedRows = Object.entries(phaseSummary).flatMap(([p, s]) => (s.excluded ?? []).map((e) => `| ${p} | ${e.file} | ${String(e.reason).replaceAll('|', '\\|')} |`))
+if (excludedRows.length) lines.push(`## 排除的输入（${excludedRows.length} 项）`, '', '这些文件的该阶段整体失败，没有可比较的测量，只从该阶段排除；文件里其他阶段照常参与。', '',
+  '| 阶段 | 文件 | 原因 |', '| --- | --- | --- |', ...excludedRows, '')
 const skipped = Object.entries(phaseSummary).filter(([, p]) => !p.compared)
 if (skipped.length) lines.push('## 未比较的阶段', '', ...skipped.map(([p, s]) => `- ${p}：${s.reason}`), '')
 lines.push('测不到的项不等于 0。毫秒值只和同一台机器、相同版本和负载条件下的后续结果比较。', '')
 const mdPath = jsonPath.replace(/\.json$/, '.md')
 writeFileSync(mdPath, lines.join('\n'))
-console.log(`baseline ${doc.counts.baseline}, unstable ${doc.counts.unstable}, unavailable ${doc.counts.unavailable}`)
+console.log(`baseline ${doc.counts.baseline}, unstable ${doc.counts.unstable}, unavailable ${doc.counts.unavailable}, excluded phase inputs ${doc.counts.excludedPhaseInputs}`)
+for (const [p, s] of Object.entries(phaseSummary)) for (const e of s.excluded ?? []) console.log(`excluded from ${p}: ${e.file} (${e.reason})`)
+for (const [p, s] of Object.entries(phaseSummary)) if (!s.compared) console.log(`${p} not compared: ${s.reason}`)
 console.log(`written: ${jsonPath}\nwritten: ${mdPath}`)

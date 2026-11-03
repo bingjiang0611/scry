@@ -145,7 +145,8 @@ node perf-bench.mjs --source <你的仓库> --work <副本路径，必须在源�
 node perf-compare.mjs <baseline-A.json> <baseline-B.json> [更多...] [--threshold 20] [--out <目录>]
 ```
 
-- **可以只含一个阶段**：`--only recorder` 和 `--only uploader` 分开跑出的文件可以一起传入，每个阶段只在包含它的文件之间比较（例如两份 recorder-only 加两份 uploader-only）。只有一份文件含某个阶段时，这个阶段标为“未比较”。
+- **可以只含一个阶段**：`--only recorder` 和 `--only uploader` 分开跑出的文件可以一起传入，每个阶段只在包含它的文件之间比较（例如两份 recorder-only 加两份 uploader-only）。
+- **整体失败的阶段会被排除**：某个文件里某阶段整体失败（例如 `uploader phase failed: ...`），它没有可比较的测量，只从这个阶段排除，并在输出的“排除的输入”里写明文件和原因；同一文件里成功的其他阶段照常参与。每个阶段至少要有两份完整文件，不够就标为“未比较”并写明原因；没有任何阶段可比较时拒绝（退出码 2）。单个指标测不到仍按下面的规则列入“测不到”。
 - **环境不一致就拒绝**（退出码 2，并写明是哪个字段）：所有文件必须来自同一台机器（系统、内核、芯片、核数、内存、Node）；同一阶段内还要求版本和工作量一致——recorder：git、scry 版本、轮数、Provider 形状、源仓库规模；uploader：uploader 版本、轮数、载荷、传输层、正文来源。
 - **怎么判定**：每个指标取各次运行的 p50，波动 =（最大 − 最小）/ 各次 p50 的中位数；波动 ≤ `--threshold`（默认 20%）的进基线，基线值取各次 p50 的中位数。其余列为“不稳定”；任何一次测不到的列为“测不到”，附每次的原因，不算 0。
 - 输出 `BASELINE-<日期>.json` 和 `.md`，带环境、每次运行的负载和各次 p50 / p95。它只是同机对比的参考，不是门禁，不写入 `scripts/performance-ratchet.json`。
