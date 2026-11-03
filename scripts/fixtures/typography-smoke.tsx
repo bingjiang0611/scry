@@ -54,7 +54,7 @@ function Fixture() {
         </div>
         <p id="typography-mixed" className="zh-prose" lang="zh-CN">{copy.mixed}</p>
       </section>
-      <div id="typography-chat" className="chat typography-smoke-chat" aria-hidden="true">
+      <div id="typography-chat" className="chat typography-smoke-chat" tabIndex={-1} aria-hidden="true">
         <div className="typography-smoke-chat-content">
           <span className="typography-smoke-chat-label">A transcript label that is intentionally truncated</span>
         </div>

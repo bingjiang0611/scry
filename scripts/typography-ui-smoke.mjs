@@ -82,13 +82,16 @@ async function exercise() {
   check(chat.scrollTop > 0, 'Hidden chat scrollbar also disabled scrolling')
   check(chatLabel.scrollWidth > chatLabel.clientWidth, 'Transcript descendant fixture is not actually cut')
   chat.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
-  chat.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+  chat.focus()
+  check(document.activeElement === chat, 'Transcript focus fixture did not receive focus')
   check(!chat.title, 'Generic transcript containers scan truncated descendants')
   check(focusLabel.scrollWidth > focusLabel.clientWidth, 'Focus tooltip fixture is not actually cut')
-  focusButton.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+  focusButton.focus()
+  check(document.activeElement === focusButton, 'Truncated control fixture did not receive focus')
   check(focusButton.title === focusLabel.textContent, 'Focused control does not expose its cut descendant')
   focusLabel.textContent = 'Short'
-  focusButton.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+  chat.focus()
+  focusButton.focus()
   check(!focusButton.title, 'Focused control keeps a tooltip after its descendant stops truncating')
 
   return {
@@ -145,6 +148,7 @@ try {
       win.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       await win.loadFile(join(root, 'index.html'))
+      win.webContents.focus()
       await win.webContents.executeJavaScript(${JSON.stringify(`new Promise((resolve, reject) => {
         const deadline = performance.now() + 5000
         const wait = () => {
