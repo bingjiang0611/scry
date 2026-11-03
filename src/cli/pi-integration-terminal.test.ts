@@ -1,4 +1,5 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
+import { once } from 'node:events'
 import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
@@ -174,6 +175,145 @@ describe('Pi recorder extension lifecycle', () => {
       else process.env.PATH = previousPath
     }
   })
+
+  it('SIGINT 先持久化 interrupted 终态，再保留原生信号退出语义', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-pi-extension-sigint-'))
+    roots.push(root)
+    const capture = join(root, 'capture.jsonl')
+    const cli = join(root, 'scry')
+    const harness = join(root, 'harness.mjs')
+    const extensionUrl = pathToFileURL(resolve('packages/turn-recorder-cli/integrations/pi-scry-recorder.mjs')).href
+    await writeFile(cli, `#!/bin/sh\npayload=$(cat)\nprintf '%s\\n' "$payload" >> ${JSON.stringify(capture)}\n`)
+    await chmod(cli, 0o700)
+    await writeFile(harness, `
+import extension from ${JSON.stringify(extensionUrl)}
+// Pi loads signal-exit. It re-raises SIGINT when its listener becomes the only one
+// during the same signal emission, so the recorder listener must remain installed
+// until its asynchronous terminal delivery has completed.
+const signalExit = () => {
+  if (process.listeners('SIGINT').length !== 1) return
+  process.removeListener('SIGINT', signalExit)
+  process.kill(process.pid, 'SIGINT')
+}
+process.on('SIGINT', signalExit)
+const handlers = new Map()
+extension({ on(name, handler) { handlers.set(name, [...(handlers.get(name) ?? []), handler]) } })
+const ctx = { cwd: process.cwd(), sessionManager: { getSessionId: () => 'pi-sigint', getLeafId: () => 'pi-sigint-turn' } }
+for (const handler of handlers.get('before_agent_start') ?? []) await handler({ prompt: 'interrupt me' }, ctx)
+process.stdout.write('READY\\n')
+setInterval(() => {}, 60_000)
+`)
+
+    const child = spawn(process.execPath, [harness], {
+      cwd: root,
+      env: { ...process.env, SCRY_CLI_PATH: cli, SCRY_RECORDER_TRANSPORT: 'direct' },
+      stdio: ['ignore', 'pipe', 'pipe']
+    })
+    let stdout = ''
+    await new Promise<void>((resolveReady, reject) => {
+      child.once('error', reject)
+      child.stdout.setEncoding('utf8')
+      child.stdout.on('data', (chunk) => {
+        stdout += chunk
+        if (stdout.includes('READY\n')) resolveReady()
+      })
+      child.once('close', (code, signal) => reject(new Error(`child exited before READY: ${String(code)} ${String(signal)}`)))
+    })
+    expect(child.kill('SIGINT')).toBe(true)
+    const [code, signal] = await once(child, 'close') as [number | null, NodeJS.Signals | null]
+    expect({ code, signal }).toEqual({ code: null, signal: 'SIGINT' })
+    const rows = (await readFile(capture, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>)
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toMatchObject({ session_id: 'pi-sigint', promptId: 'pi-sigint-turn' })
+    expect(rows[1]).toMatchObject({ session_id: 'pi-sigint', promptId: 'pi-sigint-turn', status: 'interrupted' })
+  })
+
+  it('second SIGINT preserves the native force-exit path while recorder delivery is pending', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-pi-extension-double-sigint-'))
+    roots.push(root)
+    const socket = join(root, 'recorder.sock')
+    const cli = join(root, 'scry')
+    const harness = join(root, 'harness.mjs')
+    const extensionUrl = pathToFileURL(resolve('packages/turn-recorder-cli/integrations/pi-scry-recorder.mjs')).href
+    await writeFile(cli, '#!/bin/sh\nexit 1\n')
+    await chmod(cli, 0o700)
+    let requestCount = 0
+    let stopSeenResolve!: () => void
+    const stopSeen = new Promise<void>((resolve) => { stopSeenResolve = resolve })
+    const server = createServer((_request, response) => {
+      requestCount++
+      if (requestCount === 1) {
+        response.writeHead(200, { 'Content-Type': 'application/json' })
+        response.end('{"ok":true}')
+      } else {
+        stopSeenResolve()
+      }
+    })
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(socket, resolve)
+    })
+    await writeFile(harness, `
+import extension from ${JSON.stringify(extensionUrl)}
+const signalExit = () => {
+  if (process.listeners('SIGINT').length !== 1) return
+  process.removeListener('SIGINT', signalExit)
+  process.kill(process.pid, 'SIGINT')
+}
+process.on('SIGINT', signalExit)
+const handlers = new Map()
+extension({ on(name, handler) { handlers.set(name, [...(handlers.get(name) ?? []), handler]) } })
+const ctx = { cwd: process.cwd(), sessionManager: { getSessionId: () => 'pi-double-sigint', getLeafId: () => 'pi-double-sigint-turn' } }
+for (const handler of handlers.get('before_agent_start') ?? []) await handler({ prompt: 'interrupt me twice' }, ctx)
+process.stdout.write('READY\\n')
+setInterval(() => {}, 60_000)
+`)
+
+    const child = spawn(process.execPath, [harness], {
+      cwd: root,
+      env: {
+        ...process.env,
+        SCRY_CLI_PATH: cli,
+        SCRY_RECORDER_SOCKET: socket,
+        SCRY_RECORDER_TRANSPORT: 'socket',
+        SCRY_PI_SOCKET_TIMEOUT_MS: '120000'
+      },
+      stdio: ['ignore', 'pipe', 'pipe']
+    })
+    const childClose = once(child, 'close')
+    try {
+      let stdout = ''
+      await new Promise<void>((resolveReady, reject) => {
+        child.once('error', reject)
+        child.stdout.setEncoding('utf8')
+        child.stdout.on('data', (chunk) => {
+          stdout += chunk
+          if (stdout.includes('READY\n')) resolveReady()
+        })
+        child.once('close', (code, signal) => reject(new Error(`child exited before READY: ${String(code)} ${String(signal)}`)))
+      })
+      expect(child.kill('SIGINT')).toBe(true)
+      await new Promise<void>((resolveStop, rejectStop) => {
+        const timeout = setTimeout(() => rejectStop(new Error('Pi Stop delivery did not reach the recorder socket')), 2_000)
+        void stopSeen.then(() => {
+          clearTimeout(timeout)
+          resolveStop()
+        })
+      })
+      const forcedAt = Date.now()
+      expect(child.kill('SIGINT')).toBe(true)
+      const [code, signal] = await childClose as [number | null, NodeJS.Signals | null]
+      expect({ code, signal }).toEqual({ code: null, signal: 'SIGINT' })
+      expect(Date.now() - forcedAt).toBeLessThan(2_000)
+    } finally {
+      if (child.exitCode == null && child.signalCode == null) child.kill('SIGKILL')
+      await childClose
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve())
+        server.closeAllConnections()
+      })
+    }
+  }, 10_000)
 
   it('direct transport 子进程提前关闭 stdin 时不让 EPIPE 杀死 Pi', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-pi-extension-epipe-'))

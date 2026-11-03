@@ -8,14 +8,14 @@ export const PROVIDERS = ['claude', 'codex', 'qoder', 'opencode'] as const
 export const EVENTS = ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Stop'] as const
 /**
  * Session-end hooks per Provider, registered only where the Provider really has the event. Claude
- * publishes `SessionEnd` in its SDK `HOOK_EVENTS`; Codex and Qoder expose no verified session-end
- * hook, and OpenCode has no session-end event at all, so they stay unregistered rather than pretend
- * parity. Without it those Providers rely on turn-end resolution instead of an earlier close.
+ * publishes `SessionEnd` in its SDK `HOOK_EVENTS`; Qoder CLI 1.1.81 was verified to invoke a
+ * project SessionEnd command on native /quit, including before any model turn. Codex has no
+ * verified session-end hook and OpenCode has no such event, so they stay unregistered.
  */
 export const PROVIDER_SESSION_END_EVENTS: Record<Exclude<InitProvider, 'opencode'>, readonly string[]> = {
   claude: ['SessionEnd'],
   codex: [],
-  qoder: []
+  qoder: ['SessionEnd']
 }
 /** Session end must only persist and enqueue, so it gets a much tighter budget than a turn end. */
 export const SESSION_END_HOOK_TIMEOUT_SECONDS = 3
@@ -190,6 +190,7 @@ const turns = new Map()
 // session.idle can repeat without new work. Retain only this instance's last 128 idle sessions;
 // after eviction/reload the first unpaired idle is unknown and must still reach the recorder.
 const idleSessions = new Set()
+let sigintHandler
 
 const object = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {}
 const first = (...values) => values.find((value) => value !== undefined && value !== null && value !== '')
@@ -222,6 +223,12 @@ function sessionId(input) {
   const properties = object(event.properties)
   const info = object(first(input?.info, properties.info))
   return String(first(input?.sessionID, input?.sessionId, properties.sessionID, properties.sessionId, info.sessionID, info.sessionId, info.id, ''))
+}
+
+function messageId(input, output = {}) {
+  const inputMessage = object(input?.message)
+  const outputMessage = object(output?.message)
+  return first(input?.messageID, input?.messageId, output?.messageID, output?.messageId, inputMessage.id, outputMessage.id)
 }
 
 function tool(input, output = {}) {
@@ -274,11 +281,12 @@ function deliver(event, payload) {
   return result
 }
 
-function payload(event, input, output = {}) {
+function payload(event, input, output = {}, turnId) {
   const call = tool(input, output)
   return {
     session_id: sessionId(input),
     hook_event_name: event,
+    ...(turnId ? { turn_id: turnId } : {}),
     prompt: first(input?.prompt, text(input?.parts), text(output?.parts)),
     tool_name: call.name,
     tool_use_id: first(input?.callID, input?.callId, input?.tool_use_id),
@@ -288,18 +296,63 @@ function payload(event, input, output = {}) {
   }
 }
 
+function stopPayload(input, state, status) {
+  const assistant = utf8Prefix(state ? [...state.assistant.values()].join('\\n') : '', 262144)
+  const observedUsage = usage(state)
+  return {
+    ...payload('Stop', input, {}, state?.turnId),
+    assistant_response: assistant.value,
+    ...(assistant.capture ? { scry_capture: { schemaVersion: 1, fields: { assistant_response: assistant.capture } } } : {}),
+    ...(observedUsage ? {
+      // Older recorders must see unavailable, never an exact partial sum.
+      ...(observedUsage.complete ? { usage: observedUsage.totals } : { usage_partial: observedUsage.totals }),
+      usage_complete: observedUsage.complete
+    } : {}),
+    ...(status ? { status, timestamp: new Date().toISOString() } : {})
+  }
+}
+
+function armSigint() {
+  if (sigintHandler) return
+  sigintHandler = () => {
+    const handler = sigintHandler
+    if (turns.size === 1) {
+      const [id, state] = turns.entries().next().value
+      deliver('Stop', stopPayload({ sessionID: id }, state, 'interrupted'))
+    }
+    turns.clear()
+    sigintHandler = undefined
+    if (handler) process.removeListener('SIGINT', handler)
+    process.kill(process.pid, 'SIGINT')
+  }
+  process.prependListener('SIGINT', sigintHandler)
+}
+
+function disarmSigint() {
+  if (turns.size > 0) return
+  const handler = sigintHandler
+  sigintHandler = undefined
+  if (handler) process.removeListener('SIGINT', handler)
+}
+
 export const ScryRecorder = async () => ({
   'chat.message': async (input, output) => {
     const id = sessionId(input)
     const prompt = first(input?.prompt, text(input?.parts), text(output?.parts), '')
+    const turnId = messageId(input, output)
     idleSessions.delete(id)
-    turns.set(id, { assistant: new Map(), assistantMessages: new Set(), usage: new Map() })
-    deliver('UserPromptSubmit', { ...payload('UserPromptSubmit', input, output), prompt })
+    turns.set(id, { assistant: new Map(), assistantMessages: new Set(), usage: new Map(), turnId })
+    armSigint()
+    deliver('UserPromptSubmit', { ...payload('UserPromptSubmit', input, output, turnId), prompt })
   },
-  'tool.execute.before': async (input, output) => deliver('PreToolUse', payload('PreToolUse', input, output)),
+  'tool.execute.before': async (input, output) => {
+    const state = turns.get(sessionId(input))
+    deliver('PreToolUse', payload('PreToolUse', input, output, state?.turnId))
+  },
   'tool.execute.after': async (input, output) => {
     const event = output?.error ? 'PostToolUseFailure' : 'PostToolUse'
-    deliver(event, payload(event, input, output))
+    const state = turns.get(sessionId(input))
+    deliver(event, payload(event, input, output, state?.turnId))
   },
   event: async (input) => {
     const envelope = object(input?.event)
@@ -323,19 +376,9 @@ export const ScryRecorder = async () => ({
     }
     if (envelope.type === 'session.idle') {
       if (idleSessions.has(id)) return
-      const assistant = utf8Prefix(state ? [...state.assistant.values()].join('\\n') : '', 262144)
-      const observedUsage = usage(state)
-      const delivered = deliver('Stop', {
-        ...payload('Stop', input),
-        assistant_response: assistant.value,
-        ...(assistant.capture ? { scry_capture: { schemaVersion: 1, fields: { assistant_response: assistant.capture } } } : {}),
-        ...(observedUsage ? {
-          // Older recorders must see unavailable, never an exact partial sum.
-          ...(observedUsage.complete ? { usage: observedUsage.totals } : { usage_partial: observedUsage.totals }),
-          usage_complete: observedUsage.complete
-        } : {})
-      })
+      const delivered = deliver('Stop', stopPayload(input, state))
       turns.delete(id)
+      disarmSigint()
       // Failed dispatch is not evidence of a delivered terminal. Do not suppress a later retry.
       if (!delivered.error && delivered.status === 0) {
         idleSessions.add(id)

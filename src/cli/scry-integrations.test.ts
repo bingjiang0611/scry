@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runScryCli } from './scry'
 import { workspace, captureStdout } from './scry.test-fixture.js'
+import { integrationsDiff, integrationsRepair, integrationsUninstall, managedCommand } from './workspace-integrations.js'
 
 
 describe('scry commit-hook', () => {
@@ -171,6 +172,33 @@ describe('scry integrations diff/uninstall', () => {
     await expect(runScryCli(['integrations', 'diff', '--workspace', root])).resolves.toBe(3)
     const claude = (JSON.parse(stdout.text()) as Record<string, any>).providers.find((row: any) => row.provider === 'claude')
     expect(claude.duplicateEvents).toEqual(['Stop'])
+  })
+
+  it('repairs legacy Qoder SessionEnd once and uninstall preserves the user callback', async () => {
+    const root = await workspace()
+    const path = join(root, '.qoder', 'settings.json')
+    await mkdir(join(root, '.qoder'))
+    const userHook = { type: 'command', command: foreign }
+    await writeFile(path, JSON.stringify({ hooks: {
+      Stop: [{ hooks: [{ type: 'command', command: managed.replace('claude Stop', 'qoder Stop') }] }],
+      SessionEnd: [{ hooks: [userHook] }]
+    } }))
+    // A foreign callback does not supply Scry's terminal evidence. This is the old-config control.
+    const before = await integrationsDiff(root)
+    expect(before.providers.find(row => row.provider === 'qoder')?.missingEvents).toContain('SessionEnd')
+    await integrationsRepair({ workspace: root, cliPath: process.execPath })
+    const once = await readFile(path, 'utf8')
+    type Hook = { type: string; command: string; timeout?: number }
+    const settings = JSON.parse(once) as { hooks: { SessionEnd: { hooks: Hook[] }[] } }
+    const hooks = settings.hooks.SessionEnd.flatMap(group => group.hooks)
+    expect(hooks.filter(managedCommand)).toHaveLength(1)
+    expect(hooks.find(managedCommand)?.timeout).toBe(3)
+    expect(hooks).toContainEqual(userHook)
+    expect((await integrationsDiff(root)).providers.find(row => row.provider === 'qoder')?.missingEvents).toEqual([])
+    await integrationsRepair({ workspace: root, cliPath: process.execPath })
+    expect(await readFile(path, 'utf8')).toBe(once)
+    await integrationsUninstall(root)
+    expect(JSON.parse(await readFile(path, 'utf8')).hooks.SessionEnd).toEqual([{ hooks: [userHook] }])
   })
 
   it('uninstall 不带 --yes 只打印计划', async () => {

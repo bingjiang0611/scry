@@ -51,6 +51,8 @@ export interface RecorderOpenTurnState {
   staleTerminalProtection?: boolean
   deferredTerminalAt?: string
   deferredTerminalEventId?: string
+  /** SessionEnd proved that a deferred unidentified terminal belongs to the final open turn. */
+  terminalIdentityConfirmedBySessionEnd?: boolean
   repositoryDiscovery?: Pick<RepositoryDiscovery, 'maxDepth' | 'depthLimitedDirectories'>
   captures: Array<{ repository: string; capture: GitTurnDiffCapture }>
 }

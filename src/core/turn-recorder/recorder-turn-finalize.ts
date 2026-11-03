@@ -62,12 +62,18 @@ export async function finalizeOpenTurn(
       }
   if (!transcript.stable && !options.allowUnstableTranscript) return { status: 'pending', reason: 'transcript is still changing' }
   let identityUnmatched = false
+  const unmatchedReason = options.forcedReason
+    ? `${options.forcedReason}; the transcript no longer contains this turn`
+    : open.endReason === 'session_end'
+      ? 'provider session ended without a matching transcript; only lifecycle-hook evidence remains'
+      : open.terminalIdentityConfirmedBySessionEnd
+        ? 'provider session ended after the terminal hook without a matching transcript; only lifecycle-hook evidence remains'
+        : undefined
   if (transcript.identityMatched === false) {
-    // Waiting for identity to appear is right while a turn may still converge, but an expired turn
-    // never will: Providers rotate transcripts away, and holding the turn open forever loses it and
-    // keeps the daemon alive. Close it on lifecycle evidence alone rather than borrowing content
-    // that was never confirmed to be this turn's.
-    if (!options.forcedReason) return { status: 'pending', reason: 'target turn is not present in transcript snapshot' }
+    // A prompt cancelled before model execution may never reach the native transcript. A real
+    // session end can close that turn on lifecycle evidence alone; discard every unmatched byte.
+    // Ordinary turn ends still wait for identity, unless the existing closing-expiry rule applies.
+    if (!unmatchedReason) return { status: 'pending', reason: 'target turn is not present in transcript snapshot' }
     identityUnmatched = true
     transcript = {
       stable: true,
@@ -90,7 +96,7 @@ export async function finalizeOpenTurn(
   // An expired turn's baseline can be days old, so finishing its diff would attribute every later
   // change — including other turns' work — to this one. Release the baseline instead of publishing
   // an attribution we cannot defend, and say why.
-  if (options.forcedReason || open.terminalDiffs) {
+  if (options.forcedReason || open.terminalDiffs || identityUnmatched) {
     await Promise.all(open.captures.map(async ({ repository, capture }) => {
       try {
         await cancelGitTurnDiff(capture)
@@ -100,7 +106,7 @@ export async function finalizeOpenTurn(
       }
     }))
   }
-  const diffs = options.forcedReason
+  const diffs = options.forcedReason || identityUnmatched
     ? []
     : limitTurnDiffPatchBytes(await persistTurnDiffContent(
         enablement.dataRoot,
@@ -185,9 +191,14 @@ export async function finalizeOpenTurn(
     evidence.diff = unavailable(
       `${options.forcedReason}; the turn diff baseline spans that window and cannot be attributed to this turn`
     )
-    if (identityUnmatched) {
-      evidence.assistant = unavailable(`${options.forcedReason}; the transcript no longer contains this turn`)
-      evidence.modelSegments = unavailable(`${options.forcedReason}; the transcript no longer contains this turn`)
+  }
+  if (identityUnmatched) {
+    evidence.assistant = unavailable(unmatchedReason!)
+    evidence.modelSegments = unavailable(unmatchedReason!)
+    if (enablement.config.capture.diff && open.captures.some(({ capture }) => capture.status === 'ready')) {
+      evidence.diff = unavailable(
+        `${unmatchedReason!}; the Git baseline may include work after the unmatched turn boundary`
+      )
     }
   }
   if (open.repositoryDiscovery) {
