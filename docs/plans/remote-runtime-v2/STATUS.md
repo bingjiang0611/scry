@@ -10,7 +10,7 @@
 | T1 Provider 热池 | 完成 | `6090a21` | `ProviderWarmPool` 泛化 + Pi 接入 + 宿主单飞 + 打开会话预热 |
 | T2 Desktop 持久 lane | 完成 | `4915672`、`817778c` | 运行通道四条持久 lane，无 one-shot 回退；撤销即断开宿主连接 |
 | T3 长轮询 | 完成 | `70fc0b9`、`8589154` | watch 生命周期模式 + `liveRuns` revision 长轮询；renderer 只在报告变化时读 trace |
-| T4 catalog 合批 | 未开始 | | |
+| T4 catalog 合批 | 完成 | `d521442` | `catalogSnapshot` 一次带回 info/projects/providers/首页；unchanged 不回 payload |
 | T5 协议版本校验 | 未开始 | | |
 | T6 P3/P4 设计文档 | 未开始 | | |
 
@@ -23,6 +23,7 @@
 - [T1 Provider 热池](status/t1.md)
 - [T2 Desktop 持久 lane](status/t2.md)
 - [T3 长轮询](status/t3.md)
+- [T4 catalog 合批](status/t4.md)
 
 ## 需要决定
 
