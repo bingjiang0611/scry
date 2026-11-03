@@ -11,7 +11,7 @@
 | T2 Desktop 持久 lane | 完成 | `4915672`、`817778c` | 运行通道四条持久 lane，无 one-shot 回退；撤销即断开宿主连接 |
 | T3 长轮询 | 完成 | `70fc0b9`、`8589154` | watch 生命周期模式 + `liveRuns` revision 长轮询；renderer 只在报告变化时读 trace |
 | T4 catalog 合批 | 完成 | `d521442` | `catalogSnapshot` 一次带回 info/projects/providers/首页；unchanged 不回 payload |
-| T5 协议版本校验 | 未开始 | | |
+| T5 协议版本校验 | 完成 | `e2d7426` | `REMOTE_PROTOCOL_VERSION=2`，lane 请求带版本，不符即拒并指出哪一端更旧；Swift 测试未运行 |
 | T6 P3/P4 设计文档 | 未开始 | | |
 
 
@@ -24,6 +24,11 @@
 - [T2 Desktop 持久 lane](status/t2.md)
 - [T3 长轮询](status/t3.md)
 - [T4 catalog 合批](status/t4.md)
+- [T5 协议版本校验](status/t5.md)
+
+## 阻塞
+
+- `swift test` 在本机不可用：只有 Command Line Tools，缺 XCTest（`swift test` 报 `no such module 'XCTest'`）。T5 的 Swift 断言因此未被执行，需要装有完整 Xcode 的环境补跑 `swift test --package-path experiments/remote-g0/swift --filter 'WireTests|LaneHandlerTests'`。`swift build` 已通过。
 
 ## 需要决定
 
