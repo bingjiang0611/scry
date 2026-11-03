@@ -82,6 +82,19 @@ const FAILED = legacyTurn('run-failed', 1, [text('run-failed', 'answer'), event(
 const SUCCEEDED = legacyTurn('run-ok', 2, [text('run-ok', 'answer ok'), event('run-ok', 'result', { id: 'r', isError: false })])
 const NO_EVIDENCE = legacyTurn('run-unknown', 3, [text('run-unknown', 'answer with no verdict')])
 
+/**
+ * Legacy turns whose `result` says `isError: false` while its own structured termination
+ * proves the run stopped before it finished: a truncated answer is not a completed turn.
+ * The last case is the pre-`terminationReason` shape, where only the Provider's raw stop
+ * reason was archived.
+ */
+const TRUNCATED = legacyTurn('run-truncated', 4, [text('run-truncated', 'answer cut off'),
+  event('run-truncated', 'result', { id: 'r', isError: false, terminationReason: 'output_token_limit' })])
+const RAW_MAX_TOKENS = legacyTurn('run-raw-tokens', 5, [text('run-raw-tokens', 'answer cut off'),
+  event('run-raw-tokens', 'result', { id: 'r', isError: false, providerStopReason: 'max_tokens' })])
+const RAW_LENGTH = legacyTurn('run-raw-length', 6, [text('run-raw-length', 'answer cut off'),
+  event('run-raw-length', 'result', { id: 'r', isError: false, providerStopReason: 'length' })])
+
 describe('legacy archive turn status', () => {
   it('derives failed/success/unknown from structured evidence only', () => {
     expect(archivedTurnStatus({ error: 'upstream failure' })).toBe('failed')
@@ -90,6 +103,48 @@ describe('legacy archive turn status', () => {
     // No error and no result verdict proves no outcome: never success.
     expect(archivedTurnStatus({})).toBe('unavailable')
     expect(archivedTurnStatus({ error: '   ' })).toBe('unavailable')
+  })
+
+  it('never turns a structured non-success termination into a completed turn', () => {
+    // `isError: false` only says the Provider answered; the run still stopped early.
+    for (const reason of ['input_context_overflow', 'output_token_limit', 'model_context_window_exceeded',
+      'max_turns', 'budget_exceeded']) {
+      expect(archivedTurnStatus({ resultSucceeded: true, terminationReason: reason })).toBe('failed')
+      // Termination alone is a failure verdict, not an unknown one.
+      expect(archivedTurnStatus({ terminationReason: reason })).toBe('failed')
+    }
+    // The pre-`terminationReason` shape: only the Provider's raw stop reason was archived.
+    expect(archivedTurnStatus({ resultSucceeded: true, providerStopReason: 'max_tokens' })).toBe('failed')
+    expect(archivedTurnStatus({ resultSucceeded: true, providerStopReason: 'length' })).toBe('failed')
+    // A normal Provider stop reason proves nothing, and an unknown reason string is not
+    // guessed from text: both keep the record's own result verdict.
+    expect(archivedTurnStatus({ resultSucceeded: true, providerStopReason: 'end_turn' })).toBe('completed')
+    expect(archivedTurnStatus({ resultSucceeded: true, terminationReason: 'future_reason' })).toBe('completed')
+  })
+
+  it('reports a truncated legacy turn as failed in every read mode', async () => {
+    const truncated = [TRUNCATED, RAW_MAX_TOKENS, RAW_LENGTH]
+    const indexed = await seedSegments(truncated, { sidecars: true })
+    const indexedInfo = await traceArchiveCaptureInfo(args(indexed))
+    expect(indexedInfo.readMode).toBe('indexed')
+    expect((await statuses(indexed, indexedInfo)).map(turn => turn.status)).toEqual(['failed', 'failed', 'failed'])
+
+    const rebuilt = await seedSegments(truncated)
+    const rebuiltInfo = await traceArchiveCaptureInfo(args(rebuilt))
+    expect(rebuiltInfo.readMode).toBe('stream_rebuild')
+    expect((await statuses(rebuilt, rebuiltInfo)).map(turn => turn.status)).toEqual(['failed', 'failed', 'failed'])
+
+    const mono = await seedMonolithic(truncated)
+    const monoInfo = await traceArchiveCaptureInfo(args(mono))
+    expect(monoInfo.readMode).toBe('monolithic')
+    expect((await statuses(mono, monoInfo)).map(turn => turn.status)).toEqual(['failed', 'failed', 'failed'])
+  })
+
+  it('refuses a non-string termination field instead of guessing its meaning', async () => {
+    const dir = await seedMonolithic([legacyTurn('run-corrupt', 1, [text('run-corrupt', 'answer'),
+      event('run-corrupt', 'result', { id: 'r', isError: false, terminationReason: 7 })])])
+    const info = await traceArchiveCaptureInfo(args(dir))
+    await expect(statuses(dir, info)).rejects.toThrow('trace archive event terminationReason is invalid')
   })
 
   it('reports a missing status per read mode without defaulting to completed', async () => {
@@ -117,9 +172,11 @@ describe('legacy archive turn status', () => {
   })
 
   it('keeps the recorder status when it is present, whatever the other evidence says', async () => {
-    // An explicit status is the recorder's own verdict and wins over archive leftovers.
+    // An explicit status is the recorder's own verdict and wins over archive leftovers,
+    // including a termination reason that would otherwise make the turn failed.
     const dir = await seedMonolithic([{
-      ...legacyTurn('run-explicit', 1, [event('run-explicit', 'result', { id: 'r', isError: true })], { error: 'stale text' }),
+      ...legacyTurn('run-explicit', 1, [event('run-explicit', 'result',
+        { id: 'r', isError: true, terminationReason: 'output_token_limit' })], { error: 'stale text' }),
       status: 'interrupted'
     }])
     const info = await traceArchiveCaptureInfo(args(dir))

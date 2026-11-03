@@ -22,12 +22,20 @@ export type RuntimeFailureStage =
   | 'frontdoor'
   | 'capability'
 
-export type RunTerminationReason =
-  | 'input_context_overflow'
-  | 'output_token_limit'
-  | 'model_context_window_exceeded'
-  | 'max_turns'
-  | 'budget_exceeded'
+export const RUN_TERMINATION_REASONS = [
+  'input_context_overflow',
+  'output_token_limit',
+  'model_context_window_exceeded',
+  'max_turns',
+  'budget_exceeded'
+] as const
+
+/** Every value proves the run ended without finishing its own work. */
+export type RunTerminationReason = typeof RUN_TERMINATION_REASONS[number]
+
+export function isRunTerminationReason(value: unknown): value is RunTerminationReason {
+  return typeof value === 'string' && (RUN_TERMINATION_REASONS as readonly string[]).includes(value)
+}
 
 export interface RunTerminationEvidence {
   rawReason?: unknown

@@ -4,7 +4,8 @@ import type { FileHandle } from 'node:fs/promises'
 import { parser, type Token } from 'stream-json/parser.js'
 import { TextSpool } from './text-spool'
 import {
-  BODY_KEYS, REF_KEYS, assertArchiveIdentity, assertProvider, factsOf, keepText, parseScalar, primitiveValue
+  BODY_KEYS, EVENT_KEYS, REF_KEYS, assertArchiveIdentity, assertProvider, factsOf, keepText, parseScalar,
+  primitiveValue, resultScalar
 } from './trace-archive-fields'
 import { archivedTurnStatus } from './trace-archive-turn-status'
 
@@ -86,12 +87,6 @@ export interface ProjectionOptions {
 /** Turn-level scalars; every other root/turn field is skipped. */
 const TURN_KEYS = new Set(['runId', 'providerTurnId', 'ts', 'done', 'status', 'error', 'providerId', 'runtimeProvider'])
 const ROOT_KEYS = new Set(['version', 'cwd', 'sessionId', 'externalSessionId', 'providerId', 'runtimeProvider'])
-/** Event scalars that decide whether the event is visible at all. */
-const EVENT_KEYS = new Set([
-  'id', 'kind', 'stage', 'runId', 'messageId', 'agentId', 'parentToolUseId', 'ts', 'providerId', 'runtimeProvider',
-  // A `result` event's own verdict is the only success/failure evidence a legacy turn has.
-  'isError'
-])
 const STEER_KEYS = new Set(['status', 'messageId'])
 const RUNTIME_KEYS = new Set(['replacesStreamedText', 'codexItemId'])
 
@@ -164,6 +159,9 @@ export async function* iterateArchiveEntries(
   let turns = 0
   let resultIsError = false
   let resultSucceeded = false
+  /** First structured termination the turn's own `result` events named. */
+  let resultTerminationReason: string | undefined
+  let resultProviderStopReason: string | undefined
   let eventNumber = 0
   let userTextSeen = false
 
@@ -230,12 +228,17 @@ export async function* iterateArchiveEntries(
     if (kind !== undefined && typeof kind !== 'string') throw new Error('trace archive event kind is invalid')
     const stage = eventMeta.get('stage')
     if (stage !== undefined && typeof stage !== 'string') throw new Error('trace archive event stage is invalid')
-    // A `result` event's `isError` is the turn's own success/failure verdict; the stage
-    // decides what it is, so a tool output carrying `isError` cannot select itself.
+    // A `result` event's `isError` is the turn's own success/failure verdict, and the same
+    // event can name why it stopped. The stage decides what it is, so a tool output
+    // carrying `isError` cannot select itself.
     if (stage === 'result') {
       const isError = eventMeta.get('isError')
       if (isError === true) resultIsError = true
       else if (isError === false) resultSucceeded = true
+      const terminationReason = resultScalar(eventMeta, 'terminationReason')
+      const providerStopReason = resultScalar(eventMeta, 'providerStopReason')
+      resultTerminationReason ??= terminationReason
+      resultProviderStopReason ??= providerStopReason
     }
     if (!visible) {
       yield { type: 'break', turn: turns, event: eventNumber }
@@ -274,12 +277,16 @@ export async function* iterateArchiveEntries(
     const resolved = status ?? archivedTurnStatus({
       ...(error !== undefined ? { error } : {}),
       ...(resultIsError ? { resultIsError } : {}),
-      ...(resultSucceeded ? { resultSucceeded } : {})
+      ...(resultSucceeded ? { resultSucceeded } : {}),
+      ...(resultTerminationReason !== undefined ? { terminationReason: resultTerminationReason } : {}),
+      ...(resultProviderStopReason !== undefined ? { providerStopReason: resultProviderStopReason } : {})
     })
     turnValues = new Map()
     userTextSeen = false
     resultIsError = false
     resultSucceeded = false
+    resultTerminationReason = undefined
+    resultProviderStopReason = undefined
     return {
       type: 'turn', turn: turns, runId, ...(providerTurnId !== undefined ? { providerTurnId } : {}), ts, done,
       status: resolved
@@ -413,6 +420,8 @@ export async function* iterateArchiveEntries(
         userTextSeen = false
         resultIsError = false
         resultSucceeded = false
+        resultTerminationReason = undefined
+        resultProviderStopReason = undefined
       }
       if (role === 'event') {
         eventNumber += 1
