@@ -43,6 +43,7 @@ export function registerQoderSessionEndSuite(): void {
       assistant: { status: 'unavailable' },
       diff: { status: 'unavailable' }
     })
+    expect(records[0].diff.omissionReason).toBe('turn diff capture was disabled or unavailable')
     expect(JSON.stringify(records)).not.toContain('possibly from the previous turn')
   })
 

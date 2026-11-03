@@ -123,6 +123,7 @@ export function registerSuite1(): void {
     const configPath = join(root, 'scry.config.json')
     const config = JSON.parse(await readFile(configPath, 'utf8'))
     config.capture.toolOutput = 'full'
+    config.capture.diff = true
     await writeFile(configPath, JSON.stringify(config))
     const base = { provider: 'qoder' as const, workspace: root }
     const native = { session_id: sessionId, cwd: root, transcript_path: join(root, 'qoder.jsonl') }
@@ -161,6 +162,7 @@ export function registerSuite1(): void {
       usage: { status: 'unavailable' },
       diff: { status: 'unavailable' }
     })
+    expect(records[0].diff.omissionReason).toContain('Git baseline may include work after the unmatched turn boundary')
     expect(JSON.stringify(records)).not.toContain('foreign answer')
   })
 

@@ -299,8 +299,10 @@ setInterval(() => {}, 60_000)
       expect({ code, signal }).toEqual({ code: null, signal: 'SIGINT' })
       expect(Date.now() - forcedAt).toBeLessThan(2_000)
     } finally {
-      server.closeAllConnections()
-      await new Promise<void>((resolve) => server.close(() => resolve()))
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve())
+        server.closeAllConnections()
+      })
     }
   }, 10_000)
 

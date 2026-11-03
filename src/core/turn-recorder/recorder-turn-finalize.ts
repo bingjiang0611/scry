@@ -195,9 +195,11 @@ export async function finalizeOpenTurn(
   if (identityUnmatched) {
     evidence.assistant = unavailable(unmatchedReason!)
     evidence.modelSegments = unavailable(unmatchedReason!)
-    evidence.diff = unavailable(
-      `${unmatchedReason!}; the Git baseline may include work after the unmatched turn boundary`
-    )
+    if (enablement.config.capture.diff) {
+      evidence.diff = unavailable(
+        `${unmatchedReason!}; the Git baseline may include work after the unmatched turn boundary`
+      )
+    }
   }
   if (open.repositoryDiscovery) {
     evidence.diff.discovery = {
