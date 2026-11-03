@@ -208,6 +208,20 @@ async function finalizeSettledRun(deps: RunSettlementDeps): Promise<void> {
     // swallowed by the finally block, and rethrowing would only become an unhandled
     // rejection because this handler runs as a chain terminator.
     console.error('[scry] run local finalization failed:', deps.runId, error)
+    if (deps.isRemoteRun) {
+      const state = deps.remote.state
+      state.remoteRecordingFailed = true
+      // A Provider outcome already reported stays authoritative, but its evidence verdict
+      // does not: the caller must not receive `committed` for a turn whose local
+      // finalization failed, and the failure must not be reported as a Provider failure.
+      if (state.remoteCompletion) {
+        state.remoteCompletion = {
+          ...state.remoteCompletion,
+          recording: 'failed',
+          error: state.remoteCompletion.error ?? `local_finalization_failed: ${String((error as Error).message ?? error)}`
+        }
+      }
+    }
   } finally {
     if (deps.isRemoteRun) {
       const state = deps.remote.state

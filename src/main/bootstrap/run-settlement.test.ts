@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ActiveRun } from '../../shared/trace'
+import { createRemoteRunState } from './run-remote-state'
 import { attachRunSettlement, type RunSettlementDeps } from './run-settlement'
 
 /**
@@ -10,6 +11,8 @@ import { attachRunSettlement, type RunSettlementDeps } from './run-settlement'
 function harness(options: {
   onCompleted?: () => Promise<void>
   isRemoteRun?: boolean
+  /** Production handleRunCompletion always reports the Provider outcome; a run that never does is the fallback case. */
+  reportRemoteCompletion?: boolean
   remoteRunIds?: string[]
   remoteRunLedgerIds?: string[]
 } = {}) {
@@ -25,12 +28,22 @@ function harness(options: {
   }
   const runState = { runId: 'run-1', items: [], done: false } as unknown as ActiveRun
   const finalization = withResolvers<void>()
-  const remote = {
-    state: { terminalArchiveCommitted: false, managedSettlementAttempted: false, remoteRecordingFailed: false },
-    remoteResult: undefined,
-    finishRemote: vi.fn(),
-    markTerminalAttention: vi.fn()
-  }
+  const isRemoteRun = options.isRemoteRun ?? false
+  // The real terminal state owner, so `finishRemote`/`remoteCompletion`/`remoteResult`
+  // behave exactly as in production instead of accepting calls that change nothing.
+  const remote = createRemoteRunState({
+    isRemoteRun,
+    runId: 'run-1',
+    providerId: 'claude',
+    runtimeProvider: 'claude_sdk',
+    runState,
+    getObservedSessionId: () => undefined,
+    getWindow: () => null,
+    dockBadge: { markAttention: () => undefined },
+    scopedSessionKey: (sessionId) => `key:${sessionId}`,
+    runs: { isViewed: () => false }
+  })
+  const finishRemote = vi.fn(remote.finishRemote)
   const deps: RunSettlementDeps = {
     onProviderSettled: () => {
       events.push('provider-settled')
@@ -41,8 +54,8 @@ function harness(options: {
     runState,
     runId: 'run-1',
     providerId: 'claude',
-    isRemoteRun: options.isRemoteRun ?? false,
-    remote: remote as unknown as RunSettlementDeps['remote'],
+    isRemoteRun,
+    remote: { ...remote, finishRemote } as unknown as RunSettlementDeps['remote'],
     settleManagedConversation: async () => {
       events.push('managed-settled')
       await finalization.promise
@@ -81,12 +94,13 @@ function harness(options: {
     provider.promise,
     async () => {
       events.push('completed')
+      if (isRemoteRun && (options.reportRemoteCompletion ?? true)) finishRemote('completed')
       await options.onCompleted?.()
     },
     async () => { events.push('failed') },
     deps
   )
-  return { events, deps, runState, provider, releaseFinalization: () => finalization.resolve() }
+  return { events, deps, runState, remote, finishRemote, provider, releaseFinalization: () => finalization.resolve() }
 }
 
 describe('run settlement', () => {
@@ -182,7 +196,7 @@ describe('run settlement', () => {
     }
   })
 
-  it('still releases the remote registration after a local finalization failure', async () => {
+  it('reports a local finalization failure inside a completed remote result', async () => {
     const run = harness({ isRemoteRun: true, remoteRunIds: ['run-1'], remoteRunLedgerIds: ['run-1'] })
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     try {
@@ -191,11 +205,20 @@ describe('run settlement', () => {
       run.releaseFinalization()
       await vi.waitFor(() => expect(consoleError)
         .toHaveBeenCalledWith('[scry] run local finalization failed:', 'run-1', expect.any(Error)))
+      // The Provider outcome stays completed: only the evidence verdict changes, so the
+      // device is told the local finalization did not finish instead of receiving
+      // `committed` for a turn whose archive/registry closure failed.
+      expect(await run.remote.remoteResult).toEqual({
+        status: 'completed',
+        recording: 'failed',
+        error: 'local_finalization_failed: trace settle failed'
+      })
+      expect(run.finishRemote.mock.calls).toEqual([['completed']])
       // Remote cleanup is independent of local finalization success: the host must not
       // keep a registration for a run the Provider already ended.
-      expect(run.deps.remote.finishRemote).toHaveBeenCalledWith('failed', 'remote_run_terminal_unknown')
       expect(run.deps.remoteRunIds.has('run-1')).toBe(false)
       expect(run.deps.remoteRunLedgerIds.has('run-1')).toBe(false)
+      // Ownership and `localFinalizing` keep blocking: the local side never closed the run.
       expect(run.events).not.toContain('registry-removed')
       expect(run.runState.localFinalizing).toBe(true)
     } finally {
@@ -203,13 +226,37 @@ describe('run settlement', () => {
     }
   })
 
-  it('releases the remote registration once a remote run finalizes', async () => {
+  it('resolves a completed remote run as committed evidence', async () => {
     const run = harness({ isRemoteRun: true, remoteRunIds: ['run-1'], remoteRunLedgerIds: ['run-1'] })
     run.provider.resolve({ ok: true })
     run.releaseFinalization()
     await vi.waitFor(() => expect(run.events).toContain('registry-removed'))
     expect(run.runState.localFinalizing).toBe(false)
-    expect(run.deps.remote.finishRemote).toHaveBeenCalledWith('failed', 'remote_run_terminal_unknown')
+    // The completion handler already reported the Provider outcome, so the finally block
+    // must not replace it with the failure fallback.
+    expect(await run.remote.remoteResult).toEqual({ status: 'completed', recording: 'committed' })
+    expect(run.finishRemote.mock.calls).toEqual([['completed']])
+    expect(run.deps.remoteRunIds.has('run-1')).toBe(false)
+    expect(run.deps.remoteRunLedgerIds.has('run-1')).toBe(false)
+  })
+
+  it('falls back to a failed remote result when no completion was reported', async () => {
+    const run = harness({
+      isRemoteRun: true,
+      reportRemoteCompletion: false,
+      remoteRunIds: ['run-1'],
+      remoteRunLedgerIds: ['run-1']
+    })
+    run.provider.resolve({ ok: true })
+    run.releaseFinalization()
+    await vi.waitFor(() => expect(run.events).toContain('registry-removed'))
+    // Nothing authoritative was reported, so the fallback says exactly that.
+    expect(await run.remote.remoteResult).toEqual({
+      status: 'failed',
+      recording: 'failed',
+      error: 'remote_run_terminal_unknown'
+    })
+    expect(run.finishRemote.mock.calls).toEqual([['failed', 'remote_run_terminal_unknown']])
     expect(run.deps.remoteRunIds.has('run-1')).toBe(false)
     expect(run.deps.remoteRunLedgerIds.has('run-1')).toBe(false)
   })
