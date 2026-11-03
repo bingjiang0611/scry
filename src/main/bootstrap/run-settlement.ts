@@ -202,15 +202,22 @@ async function finalizeSettledRun(deps: RunSettlementDeps): Promise<void> {
     lifecycle.resolveSettled?.()
     if (deps.providerId === 'pi') deps.piRunDiagnostics.record(deps.runId, 'main_settled', { mainDone: runState.done, mainSettled: true })
     lifecycle.closeEventLog()
+  } catch (error) {
+    // A core step threw before the registry entry left, so ownership and
+    // `localFinalizing` stay blocking on purpose. Report it here: the failure must not be
+    // swallowed by the finally block, and rethrowing would only become an unhandled
+    // rejection because this handler runs as a chain terminator.
+    console.error('[scry] run local finalization failed:', deps.runId, error)
   } finally {
-    if (!deps.isRemoteRun) return
-    const state = deps.remote.state
-    if (!state.remoteCompletion) {
-      state.remoteRecordingFailed = true
-      deps.remote.finishRemote('failed', 'remote_run_terminal_unknown')
+    if (deps.isRemoteRun) {
+      const state = deps.remote.state
+      if (!state.remoteCompletion) {
+        state.remoteRecordingFailed = true
+        deps.remote.finishRemote('failed', 'remote_run_terminal_unknown')
+      }
+      deps.remoteRunIds.delete(deps.runId)
+      deps.remoteRunLedgerIds.delete(deps.runId)
+      if (state.remoteCompletion) state.resolveRemoteCompletion?.(state.remoteCompletion)
     }
-    deps.remoteRunIds.delete(deps.runId)
-    deps.remoteRunLedgerIds.delete(deps.runId)
-    if (state.remoteCompletion) state.resolveRemoteCompletion?.(state.remoteCompletion)
   }
 }

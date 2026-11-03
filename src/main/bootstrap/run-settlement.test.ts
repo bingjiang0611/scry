@@ -7,7 +7,12 @@ import { attachRunSettlement, type RunSettlementDeps } from './run-settlement'
  * ownership and stop escalation. These tests drive the chain directly so the ordering is
  * observed rather than inferred from the App.
  */
-function harness(options: { onCompleted?: () => Promise<void> } = {}) {
+function harness(options: {
+  onCompleted?: () => Promise<void>
+  isRemoteRun?: boolean
+  remoteRunIds?: string[]
+  remoteRunLedgerIds?: string[]
+} = {}) {
   const events: string[] = []
   const withResolvers = <T,>() => {
     let resolve!: (value: T) => void
@@ -36,7 +41,7 @@ function harness(options: { onCompleted?: () => Promise<void> } = {}) {
     runState,
     runId: 'run-1',
     providerId: 'claude',
-    isRemoteRun: false,
+    isRemoteRun: options.isRemoteRun ?? false,
     remote: remote as unknown as RunSettlementDeps['remote'],
     settleManagedConversation: async () => {
       events.push('managed-settled')
@@ -66,8 +71,10 @@ function harness(options: { onCompleted?: () => Promise<void> } = {}) {
     firstTextPerf: { finish: () => undefined } as unknown as RunSettlementDeps['firstTextPerf'],
     stopSignal: undefined,
     requestRemoteStop: () => undefined,
-    remoteRunIds: new Set<string>(),
-    remoteRunLedgerIds: new Map<string, string>()
+    remoteRunIds: new Set<string>(options.remoteRunIds ?? []),
+    remoteRunLedgerIds: new Map<string, string>(
+      (options.remoteRunLedgerIds ?? []).map((id) => [id, `ledger:${id}`])
+    )
   }
   const provider = withResolvers<{ ok: true }>()
   attachRunSettlement(
@@ -142,6 +149,69 @@ describe('run settlement', () => {
     } finally {
       process.off('unhandledRejection', onRejection)
     }
+  })
+
+  it('reports a local finalization failure without releasing the run', async () => {
+    const run = harness()
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const rejections: unknown[] = []
+    const onRejection = (reason: unknown): void => { rejections.push(reason) }
+    process.on('unhandledRejection', onRejection)
+    try {
+      // A core step fails before the registry entry leaves: ownership and
+      // `localFinalizing` must keep blocking, and the failure must stay observable.
+      run.deps.lifecycle.runTraces.settle = () => {
+        run.events.push('traces-settled')
+        throw new Error('trace settle failed')
+      }
+      run.provider.resolve({ ok: true })
+      run.releaseFinalization()
+      await vi.waitFor(() => expect(consoleError)
+        .toHaveBeenCalledWith('[scry] run local finalization failed:', 'run-1', expect.any(Error)))
+      const failure = consoleError.mock.calls
+        .find((call) => call[0] === '[scry] run local finalization failed:')
+      expect((failure?.[2] as Error).message).toBe('trace settle failed')
+      expect(run.events).toContain('traces-settled')
+      expect(run.events).not.toContain('registry-removed')
+      expect(run.runState.localFinalizing).toBe(true)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(rejections).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onRejection)
+      consoleError.mockRestore()
+    }
+  })
+
+  it('still releases the remote registration after a local finalization failure', async () => {
+    const run = harness({ isRemoteRun: true, remoteRunIds: ['run-1'], remoteRunLedgerIds: ['run-1'] })
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      run.deps.lifecycle.runTraces.settle = () => { throw new Error('trace settle failed') }
+      run.provider.resolve({ ok: true })
+      run.releaseFinalization()
+      await vi.waitFor(() => expect(consoleError)
+        .toHaveBeenCalledWith('[scry] run local finalization failed:', 'run-1', expect.any(Error)))
+      // Remote cleanup is independent of local finalization success: the host must not
+      // keep a registration for a run the Provider already ended.
+      expect(run.deps.remote.finishRemote).toHaveBeenCalledWith('failed', 'remote_run_terminal_unknown')
+      expect(run.deps.remoteRunIds.has('run-1')).toBe(false)
+      expect(run.deps.remoteRunLedgerIds.has('run-1')).toBe(false)
+      expect(run.events).not.toContain('registry-removed')
+      expect(run.runState.localFinalizing).toBe(true)
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
+  it('releases the remote registration once a remote run finalizes', async () => {
+    const run = harness({ isRemoteRun: true, remoteRunIds: ['run-1'], remoteRunLedgerIds: ['run-1'] })
+    run.provider.resolve({ ok: true })
+    run.releaseFinalization()
+    await vi.waitFor(() => expect(run.events).toContain('registry-removed'))
+    expect(run.runState.localFinalizing).toBe(false)
+    expect(run.deps.remote.finishRemote).toHaveBeenCalledWith('failed', 'remote_run_terminal_unknown')
+    expect(run.deps.remoteRunIds.has('run-1')).toBe(false)
+    expect(run.deps.remoteRunLedgerIds.has('run-1')).toBe(false)
   })
 
   it('reports a Provider rejection as failed before finalization closes the run', async () => {
