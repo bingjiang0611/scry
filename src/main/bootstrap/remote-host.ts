@@ -1,81 +1,24 @@
 import { app, shell } from 'electron'
-import { basename, join } from 'node:path'
-import { createHash } from 'node:crypto'
-import type { AgentForkSessionResult, AgentPermissionMode, AgentQuestionRequest, AgentQuestionResponse, AgentStartRequest } from '../../shared/runtime'
-import type { ProviderContext, ProviderId, DeleteSessionResult } from '../../shared/provider'
-import type { ActiveRun, UsageAnalyticsRangeDays, TraceEvent } from '../../shared/trace'
-import type { AppSessionRef, createAppSessionStore } from '../app-store'
+import type { ProviderId } from '../../shared/provider'
+import type { UsageAnalyticsRangeDays } from '../../shared/trace'
+import { join } from 'node:path'
 import type { RemoteHostService } from '../remote/remote-host-service'
-import type { SourceControlService } from '../source-control/service'
-import type { ProviderRegistry } from '../providers/registry'
-import type { ProviderOperationGate } from '../provider-operation-gate'
-import { createProviderDiscovery } from '../remote/provider-discovery'
-import type { DesktopRemoteClient } from '../remote/desktop-client'
-import type { DesktopRemoteContext, DesktopRemoteSessionAction, DesktopRemoteForkSessionRequest, DesktopRemoteDeleteSessionRequest, RemoteSessionRef } from '../../shared/desktop-remote'
-import type { UserQuestionBroker } from '../user-question'
-import type { RemoteRunCompletion } from '../remote/remote-run-binding'
-import type { SessionDeletionRequest } from './session-deletion'
-import { RemoteHostService as RemoteHostServiceImpl } from '../remote/remote-host-service'
-import { createDesktopHostReader } from '../remote/desktop-host-reader'
-import { createDesktopWorkbench } from '../remote/desktop-workbench'
-import { listDesktopDirectories, selectDesktopDirectory } from '../remote/desktop-directory-picker'
-import { createRemoteRunBinding } from '../remote/remote-run-binding'
-import { bindRemoteHistoryContext } from '../remote/history-context'
 import { shellEnv, warmShellEnv } from '../claude-locate'
 import { buildMcpExecutionSnapshot } from '../mcp-execution-trust'
 import { isMcpGuardReport } from '../../shared/mcpguard-report'
-import { canonicalRemoteProjectRoots } from '../remote/remote-directory-browser'
-import { observeSessionStatus } from '../remote/remote-workspace'
 import { usageAnalyticsWithCreditsQuery } from '../db'
 import { readLlmPerformanceHistory } from '../llm-performance-history'
 import { summarizeRunningLlmSessions } from '../../shared/llm-performance'
-import { archiveSessionAndStop } from '../session-archive'
 import { resolveRemoteRelay } from './remote-relay'
 import { createRemoteHistoryHandlers } from './remote-history'
 import { remoteHostEnabled } from '../remote/remote-defaults'
 import type { IpcMainInvokeEvent } from 'electron'
 import type { RemoteStatus } from '../../shared/remote'
 
-type RemoteStartOptions = { origin: 'remote'; runId: string; stopSignal: AbortSignal; requestUserInput: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>; ledgerRunId: string; permissionModeOverride?: AgentPermissionMode; providerPrompt?: string; onTraceEvent?: (event: TraceEvent) => void; onSession?: (id: string) => void }
-type RemoteRuns = { activeStates: () => ActiveRun[]; get: (runId: string) => { state: ActiveRun } | undefined }
-type RemoteReceipts = { submit: (key: string, task: () => Promise<RemoteRunCompletion>) => Promise<{ result: RemoteRunCompletion }> }
-type DeleteOptions = { confirm: boolean; notifyFailure: boolean; conversationId?: string; runIds?: readonly string[]; authorize?: () => void }
-export type RemoteHostRuntime = {
-  remoteHostService: RemoteHostService | null
-  remoteProviderRefresh?: ReturnType<typeof setInterval>
-  getRemoteProviderDiscovery: () => ReturnType<typeof createProviderDiscovery>
-  refreshRemoteProviderSnapshot: () => Promise<void>
-  configuredRemotePermissionMode: () => AgentPermissionMode | undefined
-  remoteStartReceipts: RemoteReceipts
-  startAppRun: (payload: AgentStartRequest, options: RemoteStartOptions) => Promise<RemoteRunCompletion | { runId: string }>
-  sourceControl: SourceControlService
-  providerOperationGate: ProviderOperationGate
-  providerRegistry: ProviderRegistry
-  runs: RemoteRuns & { subscribe?: (listener: () => void) => () => void }
-  requestRunStop: (runId: string) => boolean
-  forkSessionWithAuthority: (request: DesktopRemoteForkSessionRequest, authorize?: () => void) => Promise<AgentForkSessionResult>
-  deleteOneSession: (request: SessionDeletionRequest, options: DeleteOptions) => Promise<DeleteSessionResult>
-  sessionRefFromRequest: (value: unknown) => AppSessionRef | null
-  changeLegacySessionMetadata: (ref: AppSessionRef, change: () => boolean) => Promise<boolean>
-  appSessionStore: () => ReturnType<typeof createAppSessionStore>
-  knownProjectDirectories: () => Set<string>
-  remoteProjectRoots: () => string[]
-  resolveRemoteProjectDirectory: (cwd: string) => string
-  resolveCanonicalRemoteProjectDirectory: (cwd: string, roots: readonly string[]) => string
-  listRemoteDirectories: typeof import('../remote/remote-directory-browser').listRemoteDirectories
-  rememberProject: (cwd: string) => void
-  remoteRunIds: Set<string>
-  userQuestionBroker: UserQuestionBroker
-  withProviderOperation: <T>(providerId: ProviderId, operation: () => T | Promise<T>, profile?: string) => Promise<T>
-  providerContextKey: (providerId: ProviderId, cwd: string, profile?: string) => string
-  boundedLiveRun: (run: ActiveRun) => ActiveRun
-  getCurrentCwd: () => string | undefined
-  homeDir: string
-  openLocalPath: (path: string) => Promise<void>
-  desktopRemoteClient: () => DesktopRemoteClient
-  isShuttingDown: boolean
-}
+import { createHostRuntime } from '../../host-runtime/host-runtime'
+import type { RemoteHostRuntime, RemoteRuns, RemoteReceipts, DeleteOptions, RemoteStartOptions } from '../../host-runtime/host-runtime-types'
 
+export type { RemoteHostRuntime, RemoteRuns, RemoteReceipts, DeleteOptions, RemoteStartOptions }
 export async function startRemoteHostIfEnabled(runtime: RemoteHostRuntime): Promise<void> {
 
   if (runtime.remoteHostService || !remoteHostEnabled(process.env.SCRY_REMOTE_HOST, app.isPackaged)) return
@@ -88,94 +31,17 @@ export async function startRemoteHostIfEnabled(runtime: RemoteHostRuntime): Prom
     const remotePermissionMode = runtime.configuredRemotePermissionMode()
     if (remotePermissionRaw && !remotePermissionMode) console.warn(`[scry] ignoring invalid SCRY_REMOTE_PERMISSION_MODE=${remotePermissionRaw}`)
     else if (remotePermissionMode) console.warn(`[scry] remote runs use owner-set permissionMode=${remotePermissionMode}`)
-    const bindRemoteHistory = (input: Parameters<typeof bindRemoteHistoryContext>[0]) =>
-      bindRemoteHistoryContext(input, runtime.appSessionStore().load(), runtime.resolveRemoteProjectDirectory)
-    runtime.remoteHostService = await RemoteHostServiceImpl.create({
+    const historyHandlers = createRemoteHistoryHandlers(runtime)
+    const service = await createHostRuntime({
+      runtime,
       stateDirectory,
-      desktopWorkbench: createDesktopWorkbench({
-        directory: join(app.getPath('userData'), 'desktop-terminal-recordings'),
-        authorizeWorkspace: runtime.resolveRemoteProjectDirectory,
-        sourceControl: runtime.sourceControl, environment: warmShellEnv, openPath: runtime.openLocalPath,
-        trashItem: (path) => shell.trashItem(path)
-      }),
-      readDesktop: createDesktopHostReader({
-        userDataDir: app.getPath('userData'),
-        hostId: () => runtime.remoteHostService!.hostId,
-        authorizeWorkspace: (cwd) => runtime.resolveRemoteProjectDirectory(cwd),
-        authorizeSession: (context) => { bindRemoteHistory({ ...context, externalSessionId: context.externalSessionId!, historyScope: 'session' }) },
-        getRun: (runId) => {
-          const state = runtime.runs.get(runId)?.state
-          return state ? runtime.boundedLiveRun(state) : null
-        }
-      }),
-      desktopDirectories: {
-        list: listDesktopDirectories,
-        select: (path) => selectDesktopDirectory(path, runtime.rememberProject)
-      },
-      authorizeWorkspace: (cwd) => runtime.resolveRemoteProjectDirectory(cwd),
-      gate: runtime.providerOperationGate,
-      createTransport: relay.createTransport,
-      relayAdvertisement: relay.relayAdvertisement,
-      desktopRemoteClient: runtime.desktopRemoteClient,
+      userDataDir: app.getPath('userData'),
+      relay,
       gatewayLabel: 'Mac1',
-      startRun: createRemoteRunBinding({
-        permissionModeOverride: remotePermissionMode,
-        startAppRun: (input) => runtime.remoteStartReceipts.submit(`remote-${input.ledgerRunId}`, () => runtime.startAppRun({
-          ...input.request,
-          backend: 'local',
-          runtimeProvider: undefined
-        }, {
-          origin: 'remote',
-          runId: input.runId,
-          stopSignal: input.stopSignal,
-          requestUserInput: input.requestUserInput,
-          ledgerRunId: input.ledgerRunId,
-          permissionModeOverride: input.permissionModeOverride,
-          providerPrompt: input.providerPrompt,
-          onTraceEvent: input.onTraceEvent,
-          onSession: input.onSession
-        }) as Promise<RemoteRunCompletion>).then((receipt) => receipt.result)
-      }),
-      hasCatalogWarmPool: (providerId) => runtime.providerRegistry.hasCatalogWarmPool(providerId),
-      listProjects: () => runtime.remoteProjectRoots().map((path) => ({ path, label: basename(path) || path })),
-      listDirectories: (path) => runtime.listRemoteDirectories(path, runtime.knownProjectDirectories()),
-      listProviders: () => runtime.getRemoteProviderDiscovery().metadata(),
-      listProviderControls: (query) => runtime.getRemoteProviderDiscovery().selected(query),
-      listProvidersFull: () => runtime.getRemoteProviderDiscovery().legacy(),
-      listCommands: async ({ providerId, cwd, agentProfileId }) => {
-        if (!['claude', 'codex', 'qoder', 'opencode', 'pi'].includes(providerId)) {
-          return { commands: [], reason: 'unsupported_provider' }
-        }
-        const canonical = runtime.resolveRemoteProjectDirectory(cwd)
-        const context: ProviderContext = {
-          providerId: providerId as ProviderId,
-          cwd: canonical,
-          ...(agentProfileId ? { agentProfileId } : {})
-        }
-        const result = await runtime.withProviderOperation(
-          context.providerId,
-          () => runtime.providerRegistry.listCommands(context),
-          context.agentProfileId
-        )
-        return {
-          commands: result.data ?? [],
-          ...(result.reason ? { reason: result.reason } : {})
-        }
-      },
-      sessionAction: async (context: DesktopRemoteContext, action: DesktopRemoteSessionAction, authorize: () => void) => {
-        const ref = runtime.sessionRefFromRequest(context)
-        if (!ref) throw new Error('无效的远程会话操作请求')
-        return runtime.changeLegacySessionMetadata(ref, () => {
-          authorize()
-          if (action.kind === 'rename') return runtime.appSessionStore().rename(ref, action.title)
-          if (action.kind === 'pin') return runtime.appSessionStore().setPinned(ref, action.pinned)
-          return action.archived
-            ? archiveSessionAndStop(runtime.appSessionStore(), ref, runtime.runs.activeStates(), runtime.requestRunStop)
-            : runtime.appSessionStore().setArchived(ref, false)
-        })
-      },
-      sessionFork: async (request: DesktopRemoteForkSessionRequest, authorize: () => void) =>
-        runtime.forkSessionWithAuthority(request, authorize),
+      shellEnvironment: warmShellEnv,
+      openPath: runtime.openLocalPath,
+      trashItem: (path: string) => shell.trashItem(path),
+      historyHandlers,
       toolPanels: {
         analytics: (rangeDays: UsageAnalyticsRangeDays) => usageAnalyticsWithCreditsQuery(rangeDays),
         llmPerformance: async () => [await readLlmPerformanceHistory(app.getPath('userData')),
@@ -204,70 +70,10 @@ export async function startRemoteHostIfEnabled(runtime: RemoteHostRuntime): Prom
           }
           return { snapshot: envelope.data, ...(scan ? { scan } : {}) }
         }
-      },
-      sessionDelete: async (request: DesktopRemoteDeleteSessionRequest, authorize: () => void) => {
-        const ref = runtime.sessionRefFromRequest(request)
-        if (!ref) throw new Error('无效的远程会话删除请求')
-        const authorizeArchived = (): void => {
-          authorize()
-          const current = runtime.appSessionStore().load().find((session) =>
-            session.providerId === ref.providerId && session.agentProfileId === ref.agentProfileId &&
-            session.cwd === ref.cwd && (session.sessionId === ref.externalSessionId || session.externalSessionId === ref.externalSessionId))
-          if (!current?.archivedAt) throw new Error('远程删除只允许已存档会话')
-        }
-        authorizeArchived()
-        return runtime.deleteOneSession(ref, { confirm: false, notifyFailure: false, authorize: authorizeArchived })
-      },
-      sessionCatalogRevision: () => createHash('sha256').update(JSON.stringify(canonicalRemoteProjectRoots(runtime.knownProjectDirectories()))).digest('hex'),
-      listSessions: () => {
-        const roots = canonicalRemoteProjectRoots(runtime.knownProjectDirectories())
-        const activeRuns = runtime.runs.activeStates()
-        const out: RemoteSessionRef[] = []
-        for (const s of runtime.appSessionStore().load()) {
-          if (!s.cwd) continue
-          let canonical: string
-          try { canonical = runtime.resolveCanonicalRemoteProjectDirectory(s.cwd, roots) } catch { continue }
-          const activeRun = activeRuns.find((run) =>
-            run.providerId === s.providerId && run.cwd === canonical &&
-            (run.runId === s.runId || Boolean(s.externalSessionId && run.externalSessionId === s.externalSessionId)))
-          const isActive = activeRun !== undefined
-          out.push({
-            sessionId: s.sessionId,
-            ...(s.externalSessionId ? { externalSessionId: s.externalSessionId } : {}),
-            providerId: s.providerId ?? 'legacy_unknown',
-            ...(s.agentProfileId ? { agentProfileId: s.agentProfileId } : {}),
-            cwd: canonical,
-            label: (s.title ?? s.preview ?? '').slice(0, 256),
-            ts: s.ts,
-            ...(s.pinnedAt ? { pinnedAt: s.pinnedAt } : {}),
-            ...(s.archivedAt ? { archivedAt: s.archivedAt } : {}),
-            ...(isActive ? { isActive: true } : {}),
-            ...(activeRun?.pendingQuestions?.length ? { pendingQuestions: activeRun.pendingQuestions.length } : {}),
-            ...(s.lastRunOutcome ? { lastRunOutcome: s.lastRunOutcome, ...(s.runId ? { lastRunId: s.runId } : {}) } : {})
-          })
-        }
-        out.sort((a, b) => b.ts - a.ts)
-        return out
-      },
-      readSessionStatus: (query) => observeSessionStatus(query, runtime.runs.activeStates()),
-      macRuns: {
-        list: () => runtime.runs.activeStates().flatMap((run) => run.providerId && run.cwd && !runtime.remoteRunIds.has(run.runId) ? [{
-          runId: run.runId,
-          providerId: run.providerId,
-          ...(run.agentProfileId ? { agentProfileId: run.agentProfileId } : {}),
-          cwd: run.cwd,
-          ...(run.externalSessionId ? { externalSessionId: run.externalSessionId } : {}),
-          prompt: run.userText,
-          questions: run.pendingQuestions ?? [],
-          stopping: Boolean(run.stopState)
-        }] : []),
-        subscribe: (listener) => runtime.runs.subscribe?.(listener) ?? (() => undefined),
-        stop: (runId) => runtime.requestRunStop(runId),
-        answer: (response) => runtime.userQuestionBroker.answer(response)
-      },
-      ...createRemoteHistoryHandlers(runtime),
+      }
     })
-    await runtime.remoteHostService.start()
+    runtime.remoteHostService = service
+    await service.start()
     console.warn(`[scry] remote host subsystem started (${relay.createTransport ? 'relay transport configured' : 'dormant: no relay transport configured'})`)
   } catch (error) {
     console.warn('[scry] remote host subsystem failed to start:', error)
