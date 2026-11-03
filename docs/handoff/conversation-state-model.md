@@ -8,7 +8,7 @@
 
 | 维度 | 问题 | 权威来源 | 不能推出 |
 | --- | --- | --- | --- |
-| 接收 / 投递 | 这次输入有没有交给 Provider？ | 统一对话 `.scry` dispatch 回执（`accepted` / `not_sent` / `unknown`）、composer 持久 receipt | 不能推出这一轮已经完成 |
+| 接收 / 投递 | 这次输入有没有交给 Provider？ | 同步 `ConversationApi.send` 结果（`accepted` 只表示宿主已启动运行；`not_sent` 表示宿主拒绝且未投递）、`.scry` 持久投递记录（`accepted` 只在 Provider 终态回执校验通过后写入，另有 `not_sent` / `unknown`）、composer 持久 receipt | 不能推出这一轮已经完成；同步 `accepted` 也不能推出 Provider 收到了输入 |
 | Provider 生命周期 | Provider 的 transport 是否已经结束？ | `runtimePromise` settle、`runtime:provider_ended`、停止阶段 `providerSettled` | 不能推出执行成功 |
 | 执行结局 | 这一轮是成功、失败、取消还是中断？ | Provider 终态、`status`、`error`、`isError` | 不能推出证据已经收口 |
 | 证据收口 | 归档、diff、managed 结算是否写完？ | `.scry/records`、terminal archive 回执 | 不能推出用户已经看到 |
@@ -16,7 +16,7 @@
 
 三条全局禁令：
 
-- **accepted ≠ completed**：回执只证明输入送达，不证明这一轮成功。
+- **accepted ≠ completed**：同步 `send` 的 `accepted` 只证明宿主启动了运行，不证明 Provider 已经接手输入；持久记录的 `accepted` 要等 Provider 终态回执通过 hash 与归档校验才写入，也只证明接收，不证明这一轮成功。
 - **terminal ≠ completed**：终止可以是失败、取消或中断。
 - **inactive ≠ completed**：没有活跃运行只说明没有正在跑的 transport；历史缺失就是 `unavailable`。
 
@@ -30,7 +30,8 @@ type ConversationSendResult =
   | { status: 'not_sent'; reason: string }
 ```
 
-- 只有**在 `beginDispatch` 之前就被宿主拒绝**的路径才是 `not_sent`：revision 变化、对话正在删除、接续身份变化、缺少 fresh 确认、待交接项不一致、历史交接预算不足、fork 屏障、Provider 不支持历史交接。请求本身非法（空提示、slash 命令、同一命令 ID 换内容）仍然抛错，因为那不是并发状态事实。
+- `not_sent` 的权威是两个条件同时成立：**Provider 从未接手**，并且这次尝试**已经在持久记录上成功结算成 `not_sent`**。只满足其中一条都不够——Provider 接手过就不是 `not_sent`，结算失败则结果不可证明。
+- `beginDispatch` 之前的宿主拒绝是它的一个来源：revision 变化、对话正在删除、接续身份变化、缺少 fresh 确认、待交接项不一致、历史交接预算不足、fork 屏障、Provider 不支持历史交接。另一个来源是意图已持久化、但 Provider 从未接手的失败（见下两条）。请求本身非法（空提示、slash 命令、同一命令 ID 换内容）仍然抛错，因为那不是并发状态事实。
 - “是否已经写出持久投递意图”是独立边界：`beginConversationTurn` 在 `turns.push` 之前的失败是确定未开始；从 push 起（原子写入可能已成功而回执丢失）的任何失败都由 `ConversationTurnBeginUncertainError` 表达，仍然抛出 → renderer 记为 `unknown`，不重放。
 - 意图已经持久化、但 Provider 从未接手的失败（例如 `store.history` 读不出）先在持久记录上结算成 `not_sent` 并写明确原因，再返回 typed `not_sent`，不会留下 pending。若这次结算本身失败，结果不再可证明，仍然抛出。
 - Provider runner 已经接手（`onProviderDispatchAttempt` 已调用，或 runner 已经返回）之后的所有失败，包括回执丢失、runId 不一致、结算失败，都不是 `not_sent`，仍然抛出 → renderer 记为 `unknown`，不重放。

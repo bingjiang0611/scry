@@ -1,6 +1,6 @@
 # 侧边会话 · 原生来源 Profile 修复
 
-> 当前安装状态以 [archive-termination-fix.md](./archive-termination-fix.md) 为准：`/Applications/Scry.app` 已是 App `0.2.238` / CLI `0.2.56`，同时包含本 Profile 修复与归档终止证据修复。下文「当前安装仍是坏的」「等待 CLI 0.56 并入主线」等内容是 `0.2.237` 当时的事实，不是当前状态。
+> 当前状态以 [side-chat/README.md](./README.md) 与 [conversation-state-model.md](../conversation-state-model.md) 为准：当前已安装的是 App `0.2.239` / 私有 CLI `0.2.56`。`0.2.238` 的 [archive-termination-fix.md](./archive-termination-fix.md) 是更早的归档终止证据修复记录，同样是历史，不是当前合同。下文「当前安装仍是坏的」「等待 CLI 0.56 并入主线」等内容是 `0.2.237` 当时的事实，不是当前状态。
 
 ## 后续集成交付
 
