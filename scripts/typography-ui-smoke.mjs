@@ -31,11 +31,13 @@ async function exercise() {
   const truncateContainer = document.querySelector('[data-truncate-container]')
   const button = document.querySelector('.typography-smoke-row button')
   const mixed = document.querySelector('#typography-mixed')
+  const chat = document.querySelector('#typography-chat')
   const headingStyle = getComputedStyle(heading)
   const paragraphStyle = getComputedStyle(paragraph)
   const numberStyle = getComputedStyle(number)
   const truncatedStyle = getComputedStyle(truncated)
   const mixedStyle = getComputedStyle(mixed)
+  const chatStyle = getComputedStyle(chat)
 
   check(headingStyle.textWrap === 'balance', 'Heading is not balanced')
   check(heading.querySelectorAll('wbr').length > 0, 'Chinese heading has no BudouX break points')
@@ -65,6 +67,12 @@ async function exercise() {
   check(mixedStyle.maxWidth !== 'none', 'Chinese measure is not capped to whole characters')
   check(mixedStyle.textAutospace === 'normal', 'Chinese and Latin autospace is not enabled')
   check(mixedStyle.textSpacingTrim === 'trim-start', 'Chinese opening punctuation trim is not enabled')
+  check(chatStyle.overflowX === 'hidden', 'Chat exposes horizontal overflow')
+  check(chatStyle.overflowY === 'auto', 'Chat no longer scrolls vertically')
+  check(chatStyle.scrollbarWidth === 'none', 'Chat vertical scrollbar is visible')
+  check(getComputedStyle(chat, '::-webkit-scrollbar').display === 'none', 'Chromium chat scrollbar is visible')
+  chat.scrollTop = chat.scrollHeight
+  check(chat.scrollTop > 0, 'Hidden chat scrollbar also disabled scrolling')
 
   return {
     balancedHeading: true,
@@ -72,6 +80,7 @@ async function exercise() {
     tabularNumber: true,
     truncatedTooltip: true,
     chineseMixedText: true,
+    hiddenChatScrollbars: true,
     viewport: [innerWidth, innerHeight]
   }
 }

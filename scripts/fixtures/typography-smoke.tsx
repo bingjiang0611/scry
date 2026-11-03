@@ -32,6 +32,8 @@ function Fixture() {
         .typography-smoke-row { display: flex; align-items: center; gap: 12px; width: 100%; }
         .typography-smoke-flex-item { flex: 1; }
         .typography-smoke-row button { padding: 7px 11px; }
+        .typography-smoke-chat { position: fixed; top: 0; left: -10000px; width: 240px; height: 80px; }
+        .typography-smoke-chat-content { width: 600px; height: 200px; }
       `}</style>
       <main className="typography-smoke-page">
       <section className="typography-smoke-card">
@@ -49,6 +51,9 @@ function Fixture() {
         </div>
         <p id="typography-mixed" className="zh-prose" lang="zh-CN">{copy.mixed}</p>
       </section>
+      <div id="typography-chat" className="chat typography-smoke-chat" aria-hidden="true">
+        <div className="typography-smoke-chat-content" />
+      </div>
       </main>
     </>
   )
