@@ -26,6 +26,7 @@ afterEach(async () => {
 async function boundController(options: {
   readHistory?: (query: { providerId: string; cwd: string; externalSessionId: string }) => Promise<Array<{ userText: string; items: Array<{ kind: 'output'; text: string }> }>>
   listCommands?: (query: { providerId: string; cwd: string; agentProfileId?: string }) => Promise<{ commands: { name: string; description: string }[] }>
+  hasCatalogWarmPool?: (providerId: string) => boolean
 }) {
   const dir = mkdtempSync(join(tmpdir(), 'scry-prewarm-'))
   dirs.push(dir)
@@ -38,7 +39,10 @@ async function boundController(options: {
     readSessionStatus: () => 'not_observed',
     createOutputStore: directory => new RunOutputFileStore(directory),
     ...(options.readHistory ? { readHistory: options.readHistory } : {}),
-    ...(options.listCommands ? { listCommands: options.listCommands } : {})
+    ...(options.listCommands ? { listCommands: options.listCommands } : {}),
+    // Pi is the only adapter with a catalog warm pool today; the host asks this
+    // capability instead of matching provider ids.
+    ...(options.hasCatalogWarmPool ? { hasCatalogWarmPool: options.hasCatalogWarmPool } : { hasCatalogWarmPool: (providerId: string) => providerId === 'pi' })
   })
   cleanups.push(() => binding.close())
   return { identity, controller: binding.controller as HostController }
@@ -64,6 +68,22 @@ describe('session open prewarms the provider context', () => {
     const { identity, controller } = await boundController({ readHistory, listCommands })
     const { peer } = await pairedPeer(identity, controller)
     expect(await controller.readHistory(peer, query)).toHaveLength(1)
+    await vi.waitFor(() => expect(listCommands).toHaveBeenCalledTimes(1))
+    expect(listCommands).toHaveBeenCalledWith({ providerId: 'pi', cwd: AUTHORIZED, agentProfileId: 'pi:fixture' })
+  })
+
+  it('prewarms only a provider that declares a catalog warm pool', async () => {
+    const readHistory = vi.fn(async () => [{ userText: 'hello', items: [{ kind: 'output' as const, text: 'hi' }] }])
+    const listCommands = vi.fn(async () => ({ commands: [] }))
+    const { identity, controller } = await boundController({ readHistory, listCommands })
+    const { peer } = await pairedPeer(identity, controller)
+    // Claude's command read is a per-window SDK start with no pool behind it: the
+    // warm read would be one extra start that nothing reuses.
+    await controller.readHistory(peer, { ...query, providerId: 'claude', agentProfileId: 'claude:fixture' })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(listCommands).not.toHaveBeenCalled()
+    // Pi keeps a pooled process, so the same read warms it.
+    await controller.readHistory(peer, query)
     await vi.waitFor(() => expect(listCommands).toHaveBeenCalledTimes(1))
     expect(listCommands).toHaveBeenCalledWith({ providerId: 'pi', cwd: AUTHORIZED, agentProfileId: 'pi:fixture' })
   })

@@ -136,6 +136,7 @@ export async function startRemoteHostIfEnabled(runtime: RemoteHostRuntime): Prom
           onSession: input.onSession
         }) as Promise<RemoteRunCompletion>).then((receipt) => receipt.result)
       }),
+      hasCatalogWarmPool: (providerId) => runtime.providerRegistry.hasCatalogWarmPool(providerId),
       listProjects: () => runtime.remoteProjectRoots().map((path) => ({ path, label: basename(path) || path })),
       listDirectories: (path) => runtime.listRemoteDirectories(path, runtime.knownProjectDirectories()),
       listProviders: () => runtime.getRemoteProviderDiscovery().metadata(),

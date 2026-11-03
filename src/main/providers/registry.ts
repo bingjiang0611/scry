@@ -57,6 +57,11 @@ export class ProviderRegistry {
     return adapter
   }
 
+  /** Whether this adapter keeps a pooled process that a later catalog read reuses. */
+  hasCatalogWarmPool(providerId: string): boolean {
+    return this.adapters.get(providerId as ProviderId)?.catalogWarmPool === true
+  }
+
   isDisabled(providerId: ProviderId): boolean {
     return this.disabledProviders.has(providerId)
   }

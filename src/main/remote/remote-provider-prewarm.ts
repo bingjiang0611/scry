@@ -16,10 +16,18 @@ export interface ProviderWarmTarget {
 // fails is dropped, because an optimization is not evidence about the session.
 // One warm read per context is in flight at a time; the pooled Provider process
 // then answers later reads without another start.
-export function createProviderPrewarmer(readCommands: (query: RemoteCommandQuery) => Promise<RemoteCommandCatalog>, onError?: (error: unknown) => void) {
+//
+// Only a provider that keeps such a pool gains anything from this: for a
+// cold-only provider the warm read is one extra process start that nothing
+// reuses, so the capability decides, not the provider id.
+export function createProviderPrewarmer(
+  readCommands: (query: RemoteCommandQuery) => Promise<RemoteCommandCatalog>,
+  hasWarmPool: (providerId: string) => boolean,
+  onError?: (error: unknown) => void
+) {
   const inFlight = new Set<string>()
   return function prewarmProviderCatalog(target: ProviderWarmTarget): void {
-    if (!target.cwd) return
+    if (!target.cwd || !hasWarmPool(target.providerId)) return
     const key = [target.providerId, target.agentProfileId ?? '', target.cwd].join('\u0000')
     if (inFlight.has(key)) return
     inFlight.add(key)

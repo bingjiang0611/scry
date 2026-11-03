@@ -103,6 +103,7 @@ export class RemoteHostService {
       ...(deps.readHistory ? { readHistory: deps.readHistory } : {}),
       ...(deps.readHistoryPreview ? { readHistoryPreview: deps.readHistoryPreview } : {}),
       ...(deps.readHistoryVersion ? { readHistoryVersion: deps.readHistoryVersion } : {}),
+      ...(deps.hasCatalogWarmPool ? { hasCatalogWarmPool: deps.hasCatalogWarmPool } : {}),
       ...(deps.readHistoryTurnsPage ? { readHistoryTurnsPage: deps.readHistoryTurnsPage } : {})    })
     let host: InnerMtlsHost
     let pairing: PairingTransport

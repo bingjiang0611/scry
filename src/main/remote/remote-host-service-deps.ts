@@ -43,6 +43,8 @@ export interface RemoteHostServiceDependencies {
   readHistory?(query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]>
   readHistoryPreview?(query: RemoteHistoryQuery): Promise<RemoteHistoryPreview>
   readHistoryVersion?(query: RemoteHistoryQuery): Promise<import('./remote-gateway').RemoteHistoryVersion>
+  // Capability lookup: session open only warms a provider that keeps a pool.
+  hasCatalogWarmPool?(providerId: string): boolean
   readHistoryTurnsPage?(query: import('./remote-gateway').RemoteHistoryTurnsPageQuery): Promise<import('./remote-gateway').RemoteHistoryTurnsPage>
   // The app-wide gate, so remote runs share auth-vs-run mutual exclusion.
   gate: ProviderOperationGate

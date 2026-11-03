@@ -84,6 +84,8 @@ export interface HostControllerFactoryDependencies {
   readHistory?(query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]>
   readHistoryPreview?(query: RemoteHistoryQuery): Promise<RemoteHistoryPreview>
   readHistoryVersion?(query: RemoteHistoryQuery): Promise<import('./remote-gateway').RemoteHistoryVersion>
+  // Capability lookup: session open only warms a provider that keeps a pool.
+  hasCatalogWarmPool?(providerId: string): boolean
   readHistoryTurnsPage?(query: import('./remote-gateway').RemoteHistoryTurnsPageQuery): Promise<import('./remote-gateway').RemoteHistoryTurnsPage>
 }
 
@@ -157,7 +159,9 @@ export async function createHostController(deps: HostControllerFactoryDependenci
   // grant is already verified by the gateway, and the workspace must pass the same
   // authorization a run needs - starting a Provider inside a repository whose
   // config is not authorized would load repository-controlled code.
-  const prewarm = deps.listCommands ? createProviderPrewarmer(deps.listCommands) : undefined
+  const prewarm = deps.listCommands && deps.hasCatalogWarmPool
+    ? createProviderPrewarmer(deps.listCommands, deps.hasCatalogWarmPool)
+    : undefined
   const warmSession = prewarm === undefined ? undefined : (target: { providerId: string; cwd?: string; agentProfileId?: string }): void => {
     if (!target.cwd) return
     try { workspace.authorize(target.cwd) } catch { return }

@@ -234,6 +234,13 @@ export interface ProviderAdapter {
   run(request: ProviderRunRequest): ProviderRunHandle
   /** Opt in after history wire input and native receipts (including ordinary input) are implemented. */
   readonly historicalContext?: true
+  /**
+   * The adapter keeps a pooled process that later catalog reads reuse (see
+   * `provider-warm-pool.ts`). Only such an adapter benefits from a warm read on
+   * session open: for a cold-only provider that read is one extra start with no
+   * later reuse, so the host does not prewarm it.
+   */
+  readonly catalogWarmPool?: true
   /** Adapter checks the actual reader is active before submitting model input. */
   readonly historyReader?: true
   readonly forkLastTurn?: ForkLastTurnFacet
