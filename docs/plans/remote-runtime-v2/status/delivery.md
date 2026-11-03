@@ -34,7 +34,9 @@
 
 - `scripts/desktop-remote-host-smoke.mjs` 原本 42,166 B，被 20,000 B 的 staged 文件门禁拦住（`scripts/check-staged-file-size.mjs` 对已存在的大文件也不豁免），导致 T5 要求的协议字段无法写进该 smoke。按职责拆成 `scripts/desktop-remote-host-smoke/` 下的 `harness.mjs`（传输辅助、协议 framing、启动）与 `pairing` / `workbench` / `runs` / `unknown` / `questions` / `failure` / `revocation` 七个阶段模块，驱动脚本只保留独立启停、阶段顺序和报告；提交 `b08f9f37`。
 - 拆分边界按真实依赖传递：pairing 产出邀请/身份/证书，runs 产出 `submit` / `sessionAction` / `sessionPage` 供后续阶段复用，questions 返回 `activeTrace`、failure 返回 `records`/`scryEntries` 供报告使用。
-- 拆分同时补上 T5 遗漏的一项：该 smoke 的每个运行通道请求现在都经 `harness.mjs` 声明 `protocol: 2`，期望的 `info` 回包也断言 `protocol: REMOTE_PROTOCOL_VERSION`。此前它断言 `protocol: 1`，即 T5 之后该 smoke 本应失败——这一点在本轮之前没有被发现，因为该文件当时无法被修改，也就没有被重跑。
+- 拆分同时补上 T5 遗漏的一项：该 smoke 的每个运行通道请求现在都经 `harness.mjs` 声明 `protocol: 2`，期望的 `info` 回包也断言 `protocol: REMOTE_PROTOCOL_VERSION`。
+
+这里有一个本轮才发现的事实：拆分前的 smoke 在 T5 之后**已经是失败状态**，报错是 `assert.deepEqual(info.desktop, …)` 的左侧为 `undefined`。原因不是配对或权限：该 smoke 从不发送 `protocol` 字段，T5 的版本门在分发任何 op 之前就拒绝了请求，回包因此是 `{ error: 'protocol_mismatch', … }` 而没有 `desktop` 键。这也反向证明 T5 的版本门在真实宿主上生效，而不只在 unit test 里生效——此前因为该文件超出 20,000 B 门禁而无法修改，它也就没有被重跑，这个失败一直没暴露。
 
 ## 未验证
 
