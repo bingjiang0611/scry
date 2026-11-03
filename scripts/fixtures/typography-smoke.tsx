@@ -34,6 +34,8 @@ function Fixture() {
         .typography-smoke-row button { padding: 7px 11px; }
         .typography-smoke-chat { position: fixed; top: 0; left: -10000px; width: 240px; height: 80px; }
         .typography-smoke-chat-content { width: 600px; height: 200px; }
+        .typography-smoke-focus { position: fixed; top: 0; left: -10000px; width: 90px; }
+        .typography-smoke-focus span { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
       `}</style>
       <main className="typography-smoke-page">
       <section className="typography-smoke-card">
@@ -54,6 +56,9 @@ function Fixture() {
       <div id="typography-chat" className="chat typography-smoke-chat" aria-hidden="true">
         <div className="typography-smoke-chat-content" />
       </div>
+      <button id="typography-focus" className="typography-smoke-focus" type="button">
+        <span>Keyboard focus reveals this truncated label</span>
+      </button>
       </main>
     </>
   )

@@ -32,6 +32,8 @@ async function exercise() {
   const button = document.querySelector('.typography-smoke-row button')
   const mixed = document.querySelector('#typography-mixed')
   const chat = document.querySelector('#typography-chat')
+  const focusButton = document.querySelector('#typography-focus')
+  const focusLabel = focusButton.querySelector('span')
   const headingStyle = getComputedStyle(heading)
   const paragraphStyle = getComputedStyle(paragraph)
   const numberStyle = getComputedStyle(number)
@@ -73,6 +75,12 @@ async function exercise() {
   check(getComputedStyle(chat, '::-webkit-scrollbar').display === 'none', 'Chromium chat scrollbar is visible')
   chat.scrollTop = chat.scrollHeight
   check(chat.scrollTop > 0, 'Hidden chat scrollbar also disabled scrolling')
+  check(focusLabel.scrollWidth > focusLabel.clientWidth, 'Focus tooltip fixture is not actually cut')
+  focusButton.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+  check(focusButton.title === focusLabel.textContent, 'Focused control does not expose its cut descendant')
+  focusLabel.textContent = 'Short'
+  focusButton.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+  check(!focusButton.title, 'Focused control keeps a tooltip after its descendant stops truncating')
 
   return {
     balancedHeading: true,
@@ -81,6 +89,7 @@ async function exercise() {
     truncatedTooltip: true,
     chineseMixedText: true,
     hiddenChatScrollbars: true,
+    focusedTruncationTooltip: true,
     viewport: [innerWidth, innerHeight]
   }
 }
