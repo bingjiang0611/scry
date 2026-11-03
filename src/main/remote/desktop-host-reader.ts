@@ -11,7 +11,7 @@ import { createTraceRevisions } from './desktop-trace-delta'
 
 // Leave room for the desktop transport's outer response envelope.
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024 - 1024
-const MAX_CACHED_BYTES = 64 * 1024 * 1024
+const MAX_CACHED_BYTES = DESKTOP_HISTORY_MAX_BYTES
 const MAX_CACHED_PAGES = 4
 const CHUNK_IDLE_MS = 60_000
 const PROVIDERS: readonly string[] = ['claude', 'codex', 'qoder', 'opencode', 'pi']
@@ -99,9 +99,9 @@ export function createDesktopHostReader(deps: {
   // Cache only immutable serialized pages, never a full session. Continuations
   // reauthorize the workspace but reuse the original stamped bytes, so archive
   // writes cannot mix snapshots or force repeated projection of a large turn.
-  // Bounds: 32 MiB/page, 64 MiB/reader, four pages; 60s-idle cursors are pruned
-  // on access. Expired/evicted cursors fail explicitly, never as empty history.
-  // Pages beyond 32 MiB require archive/event-level paging, not larger wire frames.
+  // The shared assembled-page cap also bounds the reader's total cached bytes; up to four
+  // smaller pages may coexist. 60s-idle cursors are pruned on access. Expired or evicted
+  // cursors fail explicitly, never as empty history.
   const pages = new Map<string, { key: string; bytes: Buffer; touched: number; image?: Pick<AgentInputAttachment, 'name' | 'mimeType'> }>()
   const traceRevisions = createTraceRevisions()
   function chunkResult(id: string, bytes: Buffer, offset: number): DesktopHostReadResult {
