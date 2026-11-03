@@ -279,7 +279,11 @@ function uploaderWorkspace(user, name, contentSource) {
 function commit(uploader, user, w, template, extraEnv = {}) {
   const sequence = ++w.seq
   const recordId = randomBytes(16).toString('hex')
-  const record = { ...template, schemaVersion: template.schemaVersion ?? 1, sequence, recordId, workspace: { id: `ws-${w.name}`, root: w.ws } }
+  // Templates are reused, but a real record is the only record of its turn: give every copy its own
+  // session and turn identity so the uploader never sees two recordIds claiming one Provider turn.
+  const turnKey = recordId.slice(0, 16)
+  const record = { ...template, schemaVersion: template.schemaVersion ?? 1, sequence, recordId, workspace: { id: `ws-${w.name}`, root: w.ws },
+    sessionId: `perf-session-${turnKey}`, ...(template.providerTurnId !== undefined ? { providerTurnId: `perf-turn-${turnKey}` } : {}) }
   const raw = JSON.stringify(record) + '\n'   // same compact form the recorder writes
   const name = `${String(sequence).padStart(20, '0')}-${recordId}.json`
   writeFileSync(join(w.ws, '.scry', 'records', name), raw)
@@ -314,7 +318,7 @@ async function drain(uploader, user, w, count, templates, slowMs, mode) {
   if (mode === 'backlog') execFileSync(process.execPath, [uploader, 'wakeup', '--workspace', w.ws], { env: user.env, stdio: 'ignore' })
   let peakWorkers = 0, peakRss = 0, peakCpu = 0, samples = 0
   let done
-  for (const deadline = now() + 15 * 60_000; now() < deadline; await sleep(250)) {
+  for (const deadline = now() + Number(opt('drain-timeout-min', 15)) * 60_000; now() < deadline; await sleep(250)) {
     const procs = uploaderProcesses(uploader, w)
     peakWorkers = Math.max(peakWorkers, procs.length)
     for (const p of procs) { peakRss = Math.max(peakRss, p.rssMiB); peakCpu = Math.max(peakCpu, p.pcpu) }
@@ -324,7 +328,20 @@ async function drain(uploader, user, w, count, templates, slowMs, mode) {
   }
   const drainMs = now() - drainStart
   user.control({})
-  if (!done) return { status: 'unavailable', reason: 'not drained within 15 minutes', committedMs: Math.round(committedMs) }
+  if (!done) {
+    // Keep the uploader's own words: the reason is what a maintainer needs, a timeout alone is not.
+    let last = {}
+    try { last = upStatus(uploader, user, w) } catch (error) { last = { statusError: String(error.message).slice(0, 300) } }
+    let health = {}
+    try { health = JSON.parse(readFileSync(join(w.ws, '.scry', 'upload', 'health.json'), 'utf8')) } catch {}
+    const deadDir = join(w.ws, '.scry', 'upload', 'dead-letter')
+    const deadReasons = existsSync(deadDir) ? readdirSync(deadDir).slice(0, 3).map((n) => { try { const d = JSON.parse(readFileSync(join(deadDir, n), 'utf8')); return d.reason ?? d.status } catch { return n } }) : []
+    user.control({})
+    return { status: 'unavailable', reason: `not drained within ${opt('drain-timeout-min', 15)} minutes`, committedMs: Math.round(committedMs),
+      diagnostics: { outboxPending: last.outboxPending, committedPending: last.committedPending, deadLetterRecords: last.deadLetterRecords,
+        lastError: last.lastError, statusError: last.statusError, healthStatus: health.status, healthLastErrorCode: health.lastErrorCode,
+        healthLastFailure: health.lastFailure ?? health.lastFailureMessage, deadLetterReasons: deadReasons } }
+  }
   const requests = existsSync(user.env.FAKE_LOG) ? readFileSync(user.env.FAKE_LOG, 'utf8').split('\n').filter((l) => l.includes('"phase":"end"')).length : 0
   const total = mode === 'backlog' ? drainMs : committedMs + drainMs
   return {
@@ -356,7 +373,18 @@ async function uploaderPhase(uploader, report) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'scry-perf-uploader-')))
   const u = { contentBlobs: contentSource && existsSync(contentSource) ? 'copied from recorder phase' : 'none (no recorder-phase content)', version: tryRun(process.execPath, [uploader, 'version']) ?? tryRun(process.execPath, [uploader, '--version']), payload: templateSource, transport: 'fake transport (no network); fakeLatencyMs emulates a slow server', runs: {} }
   report.uploader = u   // keep finished runs even if a later one fails
+  const stopWorkers = (w) => { for (const p of uploaderProcesses(uploader, w)) try { process.kill(p.pid, 'SIGKILL') } catch {} }
   try {
+    // Fail closed before any record exists: an uploader that ignores protocol.transportEnv would use
+    // the real transport, and every synthetic record below would be uploaded for real.
+    {
+      const user = uploaderUser(protocol, join(root, 'preflight'))
+      const w = uploaderWorkspace(user, 'preflight')
+      spawnSync(process.execPath, [uploader, 'doctor', '--workspace', w.ws, '--json'], { env: user.env, stdio: 'ignore', timeout: 60_000 })
+      const invoked = existsSync(user.env.FAKE_LOG) && readFileSync(user.env.FAKE_LOG, 'utf8').includes('"phase":"invoke"')
+      if (!invoked) throw new Error(`uploader did not call the fake transport (protocol.json transportEnv=${protocol.transportEnv}); fill protocol.json with the real values from the uploader source. Stopped before committing any record, nothing was uploaded`)
+      u.fakeTransport = `confirmed via ${protocol.transportEnv}`
+    }
     // Hook-path latency: notify only, background upload paused by a slow fake server.
     {
       const user = uploaderUser(protocol, join(root, 'notify'))
@@ -365,7 +393,7 @@ async function uploaderPhase(uploader, report) {
       const times = []
       for (let i = 0; i < Math.max(20, ROUNDS * 4); i++) times.push(commit(uploader, user, w, templates[i % templates.length]).ms)
       u.notifyWhileUploading = stats(times)
-      for (const p of uploaderProcesses(uploader, w)) try { process.kill(p.pid, 'SIGKILL') } catch {}
+      stopWorkers(w)
     }
     for (const [mode, count, slowMs] of [['streaming', 100, 0], ['streaming', 100, 250], ['backlog', 100, 0], ['backlog', 500, 0], ['backlog', 500, 250]]) {
       const key = `${mode} ${count}, fake latency ${slowMs}ms`
@@ -373,12 +401,19 @@ async function uploaderPhase(uploader, report) {
       const w = uploaderWorkspace(user, `${mode}${count}`, contentSource)
       const loadBefore = load()
       const result = await drain(uploader, user, w, count, templates, slowMs, mode)
+      stopWorkers(w)   // an undrained run must not keep writing into the next run or the cleanup
       const uploadKiB = Number(tryRun('du', ['-sk', join(w.ws, '.scry', 'upload')])?.split(/\s+/)[0] ?? NaN)
       u.runs[key] = { ...result, uploadDirKiBPerRecord: Math.round((uploadKiB / count) * 10) / 10, loadAverage: { before: loadBefore, after: load() } }
-      process.stdout.write(`  uploader ${key}: drain ${result.drainAfterLastCommitMs}ms after last commit, ${result.recordsPerSecond} rec/s, ${result.transportRequests} requests\n`)
+      process.stdout.write(result.status === 'measured'
+        ? `  uploader ${key}: drain ${result.drainAfterLastCommitMs}ms after last commit, ${result.recordsPerSecond} rec/s, ${result.transportRequests} requests\n`
+        : `  uploader ${key}: unavailable (${result.reason}; lastError ${JSON.stringify(result.diagnostics?.lastError ?? null)})\n`)
     }
   } finally {
-    rmSync(root, { recursive: true, force: true })
+    // Cleanup must never replace the real error: workers that were still running can recreate files.
+    try { rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 }) } catch (error) {
+      u.leftover = { path: root, reason: String(error.message).slice(0, 200) }
+      console.error(`could not remove ${root}: ${error.message} (left in place)`)
+    }
   }
   report.uploader = u
 }
@@ -432,7 +467,7 @@ function markdown(report) {
       'streaming：记录逐条到达、边提交边上传；backlog：先积压（不拉起 worker），再一次唤醒排空。', '',
       '| 场景 | notify p50 / p95 | 提交阶段 | 最后一条提交后排空 | 条/秒 | 请求数（条/请求） | worker 峰值数 | worker 峰值 RSS | upload 目录 KiB/条 |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- |')
     for (const [name, m] of Object.entries(report.uploader.runs ?? {})) {
-      if (m.status !== 'measured') { lines.push(`| ${name} | unavailable（${m.reason}） | | | | | | | |`); continue }
+      if (m.status !== 'measured') { lines.push(`| ${name} | unavailable（${m.reason}${m.diagnostics ? `；${JSON.stringify(m.diagnostics).replaceAll('|', '\\|')}` : ''}） | | | | | | | |`); continue }
       lines.push(`| ${name} | ${cell(m.notify)} | ${m.commitPhaseMs} ms | ${m.drainAfterLastCommitMs} ms | ${m.recordsPerSecond} | ${m.transportRequests}（${m.recordsPerRequest}） | ${m.worker.peakConcurrent} | ${m.worker.peakRssMiB ? `${m.worker.peakRssMiB} MiB` : 'unavailable（采样时没有 worker）'} | ${m.uploadDirKiBPerRecord} |`)
     }
     lines.push('')

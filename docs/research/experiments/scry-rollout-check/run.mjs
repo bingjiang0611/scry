@@ -89,7 +89,7 @@ const ends = user => calls(user).filter(c => c.phase === 'end')
 const uploadedIds = user => new Set(ends(user).filter(c => /inserted|duplicated/.test(c.result)).flatMap(c => c.ids))
 function maxConcurrency(user) {
   let live = 0, max = 0
-  const ev = calls(user).map(c => [c.t, c.phase === 'start' ? 1 : -1]).sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  const ev = calls(user).filter(c => c.phase === 'start' || c.phase === 'end').map(c => [c.t, c.phase === 'start' ? 1 : -1]).sort((a, b) => a[0] - b[0] || a[1] - b[1])
   for (const [, d] of ev) { live += d; max = Math.max(max, live) }
   return max
 }
@@ -381,7 +381,18 @@ function fail(detail, s) { return { result: 'FAIL', detail: s ? `${detail} | sta
 function known(detail) { return { result: 'KNOWN', detail } }
 
 // ---------- main ----------
-console.log(`uploader: ${uploader}\nversion: ${cli(makeUser('probe'), ['version']).trim()}\ntemp root: ${root}\n`)
+// Fail closed before any record exists: if this uploader ignores protocol.transportEnv it would use the
+// real transport and the synthetic records of every scenario would be uploaded for real.
+{
+  const probe = makeUser('probe')
+  const w = makeWorkspace(probe, 'probe')
+  cli(probe, ['doctor', '--workspace', w.ws, '--json'], { allowFail: true })
+  if (!calls(probe).some(c => c.phase === 'invoke')) {
+    console.error(`uploader did not call the fake transport (protocol.json transportEnv=${protocol.transportEnv}).\nFill protocol.json with the real values from the uploader source before running; otherwise records would go to the real service.`)
+    process.exit(2)
+  }
+  console.log(`uploader: ${uploader}\nversion: ${cli(probe, ['version']).trim()}\nfake transport: confirmed via ${protocol.transportEnv}\ntemp root: ${root}\n`)
+}
 const results = []
 for (const id of Object.keys(scenarios).sort()) {
   if (only && !only.includes(id)) continue

@@ -32,6 +32,8 @@ const fail = (text, code = 1) => {
   process.exit(code)
 }
 
+// Every invocation is logged so the harness can prove the uploader really calls this fake and not the real transport.
+log({ phase: 'invoke', args: args.slice(0, 2) })
 if (args[0] === 'version') { console.log('transport 0.0.0-fake'); process.exit(0) }
 // Expired login: every authenticated call fails with the transport's own wording.
 if (control.loggedOut) { log({ phase: 'denied', args: args.slice(0, 2) }); fail('Error: not logged in; run transport auth login --sso') }
