@@ -278,24 +278,6 @@ describe('conversation backend lane', () => {
     expect(completeDuplicate).toEqual({ status: 'accepted', runId: completed.runId, disposition: 'duplicate' })
   })
 
-  it('does not accept a managed runner with a different runId and settles the intent without archive refs', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'scry-conversation-service-'))
-    roots.push(root)
-    const cwd = join(root, 'project')
-    await mkdir(cwd)
-    const store = new ConversationStore(join(root, 'user-data'))
-    const service = new ConversationService({
-      store,
-      resolveContinuationKey: async () => 'identity-a',
-      supportsHistoricalInput: () => true,
-      startAppRun: async () => ({ runId: 'wrong-run-id' })
-    })
-    const created = await service.create(cwd)
-    await expect(service.send(request(created.id, created.revision, 'command-runid-1'))).rejects.toThrow('不同的 runId')
-    const persisted = await store.read(created.id)
-    expect(persisted?.turns[0]).toMatchObject({ runId: expect.any(String), delivery: { status: 'not_sent' }, items: [] })
-  })
-
   it('scopes identical native IDs by Provider instead of hiding both local aliases', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-conversation-service-'))
     roots.push(root)

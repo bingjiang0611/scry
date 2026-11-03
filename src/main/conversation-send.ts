@@ -310,15 +310,19 @@ export async function sendConversationMessage(
     return { status: 'accepted', runId: started.runId, disposition: 'created' }
   } catch (error) {
     const reason = reasonOf(error)
-    let provenNotSent = false
+    // A dispatch attempt, or a runner that answered at all, means this request is no longer
+    // provably undelivered — including a runner that answered with a different runId. The
+    // durable receipt and this reply must agree on the same unknown outcome.
+    const provenNotSent = !dispatched && !providerStartReturned
     try {
       await settle({
         status: 'failed',
         finalItems: [],
-        receipt: dispatched ? { contextHash: context?.contentHash ?? null, status: 'unknown', textHash: hash(prompt), reason } :
-          { contextHash: context?.contentHash ?? null, status: 'not_sent', reason }
+        receipt: {
+          contextHash: context?.contentHash ?? null, status: provenNotSent ? 'not_sent' : 'unknown',
+          textHash: hash(prompt), reason
+        }
       })
-      provenNotSent = !dispatched && !providerStartReturned
     } catch (settlementError) {
       // The durable attempt could not be settled: the outcome stays unknown.
       console.error('[scry] failed to record conversation send outcome:', settlementError)
