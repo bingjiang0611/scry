@@ -117,6 +117,52 @@ export function registerSuite1(): void {
     expect((await listRecords(join(root, '.scry')))).toHaveLength(1)
   })
 
+  it.each(['missing', 'previous-turn'])('Qoder SessionEnd closes a pre-model cancellation with %s transcript', async (source) => {
+    const root = await workspace()
+    const sessionId = 'qoder-cancelled-before-model'
+    const configPath = join(root, 'scry.config.json')
+    const config = JSON.parse(await readFile(configPath, 'utf8'))
+    config.capture.toolOutput = 'full'
+    await writeFile(configPath, JSON.stringify(config))
+    const base = { provider: 'qoder' as const, workspace: root }
+    const native = { session_id: sessionId, cwd: root, transcript_path: join(root, 'qoder.jsonl') }
+    if (source === 'previous-turn') {
+      await writeFile(native.transcript_path, [
+        { type: 'user', promptId: 'old', message: { role: 'user', content: 'previous prompt' } },
+        { type: 'assistant', promptId: 'old', message: { content: [{ type: 'text', text: 'foreign answer' }], usage: { input_tokens: 999 } } }
+      ].map(row => JSON.stringify(row)).join('\n'))
+    }
+    await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: {
+      ...native, hook_event_name: 'UserPromptSubmit', prompt: 'cancel before the model starts'
+    } })
+    const openPath = join(root, '.scry/runtime/qoder', safeKey(sessionId), 'open.json')
+    expect(JSON.parse(await readFile(openPath, 'utf8')).staleTerminalProtection).toBe(true)
+    await recoverRecorder(root)
+    expect(await listRecords(join(root, '.scry'))).toEqual([])
+    const terminal = { ...base, event: 'SessionEnd', payload: {
+      ...native, hook_event_name: 'SessionEnd', reason: 'other'
+    } }
+    await expect(handleRecorderHook(terminal)).resolves.toMatchObject({ status: 'pending' })
+    const closing = JSON.parse(await readFile(openPath, 'utf8'))
+    expect(closing.status).toBe('closing')
+    expect(closing.deferredTerminalAt).toBeUndefined()
+    await expect(handleRecorderHook(terminal)).resolves.toMatchObject({ status: 'pending' })
+    await recoverRecorder(root)
+    await expect(handleRecorderHook(terminal)).resolves.toMatchObject({ status: 'duplicate' })
+    const records = await listRecords(join(root, '.scry'))
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({
+      sessionId, status: 'interrupted',
+      termination: { quality: 'estimated', value: {
+        reason: 'session_end', completedAtSource: 'recorder_observed_terminal'
+      } },
+      assistant: { status: 'unavailable' },
+      transcript: { status: 'unavailable' },
+      usage: { status: 'unavailable' }
+    })
+    expect(JSON.stringify(records)).not.toContain('foreign answer')
+  })
+
   it('a terminal timestamp from a skewed Provider clock is not trusted as the end time', async () => {
     const root = await workspace()
     const base = { provider: 'claude' as const, workspace: root }

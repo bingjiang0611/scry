@@ -8,14 +8,14 @@ export const PROVIDERS = ['claude', 'codex', 'qoder', 'opencode'] as const
 export const EVENTS = ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Stop'] as const
 /**
  * Session-end hooks per Provider, registered only where the Provider really has the event. Claude
- * publishes `SessionEnd` in its SDK `HOOK_EVENTS`; Codex and Qoder expose no verified session-end
- * hook, and OpenCode has no session-end event at all, so they stay unregistered rather than pretend
- * parity. Without it those Providers rely on turn-end resolution instead of an earlier close.
+ * publishes `SessionEnd` in its SDK `HOOK_EVENTS`; Qoder CLI 1.1.81 was verified to invoke a
+ * project SessionEnd command on native /quit, including before any model turn. Codex has no
+ * verified session-end hook and OpenCode has no such event, so they stay unregistered.
  */
 export const PROVIDER_SESSION_END_EVENTS: Record<Exclude<InitProvider, 'opencode'>, readonly string[]> = {
   claude: ['SessionEnd'],
   codex: [],
-  qoder: []
+  qoder: ['SessionEnd']
 }
 /** Session end must only persist and enqueue, so it gets a much tighter budget than a turn end. */
 export const SESSION_END_HOOK_TIMEOUT_SECONDS = 3
