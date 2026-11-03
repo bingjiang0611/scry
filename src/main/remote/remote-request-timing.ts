@@ -30,7 +30,9 @@ export function remoteOperationCounters(request: unknown): Readonly<Record<strin
   return { [`op.${remoteOperationLabel(request)}`]: 1 }
 }
 
-export type RemoteTimingName = 'remote.host.connection' | 'remote.host.request' | 'remote.desktop.request'
+// remote.desktop.request: one-shot pairing exchange. remote.client.request: one
+// request on a persistent run-channel lane.
+export type RemoteTimingName = 'remote.host.connection' | 'remote.host.request' | 'remote.desktop.request' | 'remote.client.request'
 
 export function remoteRequestTrace(name: RemoteTimingName): PerformanceTrace | undefined {
   if (!performanceRecordingEnabled()) return undefined

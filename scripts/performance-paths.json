@@ -47,6 +47,7 @@
         "src/main/providers/registry.ts",
         "src/main/providers/pi.ts",
         "src/main/providers/pi-catalog.ts",
+        "src/main/providers/provider-warm-pool.ts",
         "src/main/providers/pi-entry-proof.ts",
         "src/main/providers/pi-events.ts",
         "src/main/providers/pi-rpc.ts",
@@ -455,11 +456,14 @@
       "owner": "remote-device",
       "operations": [
         "ipc.desktopRemote:",
-        "ipc.remote:"
+        "ipc.remote:",
+        "remote.client.request",
+        "remote.desktop.request",
+        "remote.host.connection",
+        "remote.host.request"
       ],
       "sources": [
-        "src/main/remote/desktop-client-ipc.ts",
-        "src/main/remote/remote-host-service.ts",
+        "src/main/remote",
         "src/renderer/components/RemoteChat.tsx",
         "src/renderer/components/RemoteChatFoundation.tsx",
         "src/renderer/components/RemoteChatControls.tsx",
