@@ -1,0 +1,4 @@
+{
+  "_comment": "Pass with --allow only for regressions accepted on purpose. Key = metric name or prefix from perf-ab; value = the reason, which must also be written in the experiment record. Never use it to hide a slower target metric or a changed evidence digest.",
+  "recorder / daemon / rssMiB.afterRun": "example: cache added on purpose, bounded at 8 MiB, see experiment 20261104-git-cache"
+}
