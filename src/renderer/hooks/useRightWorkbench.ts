@@ -25,7 +25,7 @@ const RESIZER = 6
 export function useRightWorkbench({
   sidebarWidth, projects, runningRunIds, waitingQuestionRunIds, questionKindsByRun,
   draftKey, view, conversation, cwd, activeSessionId, selectedProviderSessionId, providerId, agentProfileId,
-  runControls, completedTurns, draftStore, chatProps, pickConversation, loadProjects, openIds, dispatch,
+  runControls, terminalTurns, draftStore, chatProps, pickConversation, loadProjects, openIds, dispatch,
   dispatchForScope, restorePane, layoutSaved
 }: {
   sidebarWidth: number
@@ -42,7 +42,7 @@ export function useRightWorkbench({
   providerId: ProviderId
   agentProfileId?: string
   runControls: ConversationHostChatProps['runControls']
-  completedTurns: number
+  terminalTurns: number
   draftStore: ComposerDraftStore
   chatProps: Pick<ConversationHostChatProps, 'agents' | 'onOpenFile'>
   pickConversation: (conversation: ConversationSummary) => void
@@ -65,7 +65,7 @@ export function useRightWorkbench({
     ...(conversation ? { conversation } : {}),
     cwd, activeSessionId, selectedProviderSessionId, providerId,
     ...(agentProfileId ? { agentProfileId } : {}),
-    runControls, completedTurns, draftStore, chatProps, pickConversation, loadProjects, openIds, dispatch,
+    runControls, terminalTurns, draftStore, chatProps, pickConversation, loadProjects, openIds, dispatch,
     dispatchForScope, restorePane, runningRunIds, waitingQuestionRunIds, questionKindsByRun
   })
   return { shellRef, narrowSingleColumn, catalog, panel, layoutSaved }

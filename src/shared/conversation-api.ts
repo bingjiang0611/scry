@@ -194,9 +194,13 @@ export interface SideChatPreview {
   firstSendBlockedReason?: string
 }
 
-/** Optional explicit snapshot boundary and first-send target offered by the preview UI. */
+/**
+ * Optional explicit snapshot boundary and first-send target offered by the preview UI.
+ * The boundary is any terminal turn (a failed or interrupted one included), never a turn
+ * that is still running.
+ */
 export interface SideChatPreviewOptions {
-  completedThroughOrdinal?: number
+  terminalThroughOrdinal?: number
   initialTarget?: SideChatInitialTarget
 }
 
@@ -242,6 +246,18 @@ export type SideChatCommandReceipt =
   | { commandId: string; status: 'found'; conversation: ConversationSummary }
   | { commandId: string; status: 'not-found' }
 
+/**
+ * Answer of one send attempt.
+ *
+ * `accepted` means the host started the run; `not_sent` means the host refused the
+ * request and proved no Provider input was delivered, so the original text may be sent
+ * again. A lost reply is neither: it stays unknown and is never answered by resending the
+ * same command. The two outcomes are separate values, never parsed out of an error text.
+ */
+export type ConversationSendResult =
+  | { status: 'accepted'; runId: string; disposition: 'created' | 'duplicate' }
+  | { status: 'not_sent'; reason: string }
+
 /** Only these typed operations cross the preload boundary; runtime callbacks stay in main. */
 export interface ConversationApi {
   create(cwd: string): Promise<ConversationSummary>
@@ -260,5 +276,5 @@ export interface ConversationApi {
   readSideChatSnapshot(id: string, cursor?: string): Promise<SideChatSnapshotBodyPage>
   readItem(id: string, ref: ConversationItemRef): Promise<string>
   preview(id: string, target: ConversationTargetRequest): Promise<ConversationPreview>
-  send(request: ConversationSendRequest): Promise<{ runId: string; disposition: 'created' | 'duplicate' }>
+  send(request: ConversationSendRequest): Promise<ConversationSendResult>
 }

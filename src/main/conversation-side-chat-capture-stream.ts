@@ -78,7 +78,7 @@ export async function* capturedConversationMessages(
     let turnsSeen = 0
     for await (const streamed of source) {
       if (streamed.runId !== turn.runId) throw new Error('来源归档分片与轮次不一致')
-      if (!streamed.settled) throw new Error('交接源轮次尚未收敛')
+      if (!streamed.terminal) throw new Error('交接源轮次尚未收敛')
       turnsSeen += 1
       for (const message of streamed.messages) {
         const meta: CaptureMessageMeta = {

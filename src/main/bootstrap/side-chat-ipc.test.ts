@@ -140,9 +140,9 @@ describe('side-chat IPC trust and source authorization', () => {
 
   it('canonicalizes the native source and forwards only typed options', async () => {
     const current = fixture()
-    await current.invoke('conversation:previewSideChat', native, { completedThroughOrdinal: 2,
+    await current.invoke('conversation:previewSideChat', native, { terminalThroughOrdinal: 2,
       initialTarget: { providerId: 'pi', agentProfileId: 'pi:0123456789abcdef' } })
-    expect(current.conversations.previewSideChat).toHaveBeenCalledWith(native, { completedThroughOrdinal: 2,
+    expect(current.conversations.previewSideChat).toHaveBeenCalledWith(native, { terminalThroughOrdinal: 2,
       initialTarget: { providerId: 'pi', agentProfileId: 'pi:0123456789abcdef' } })
     await expect(current.invoke('conversation:previewSideChat', {
       ...native, path: '/tmp/transcript.jsonl'

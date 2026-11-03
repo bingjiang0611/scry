@@ -1,7 +1,7 @@
-import type { ConversationPage, ConversationSendRequest } from '@shared/conversation-api'
+import type { ConversationPage, ConversationSendRequest, ConversationSendResult } from '@shared/conversation-api'
 import type { AgentInputAttachment } from '@shared/runtime'
-import { updateComposerDraft, type ComposerDraft, type ComposerDraftAttachment, type ComposerDraftStore,
-  type ComposerPendingSubmission } from './composer-drafts'
+import { NOT_SENT_REASON_LIMIT, updateComposerDraft, type ComposerDraft, type ComposerDraftAttachment,
+  type ComposerDraftStore, type ComposerPendingSubmission } from './composer-drafts'
 
 /**
  * What the durable record proves about one pending submission.
@@ -90,6 +90,8 @@ export function pendingContent(pending: ComposerPendingSubmission): PendingConte
 
 export type SubmissionResult =
   | { status: 'sent'; commandId: string; duplicate: boolean }
+  /** The host proved nothing was dispatched; the receipt may be resent explicitly. */
+  | { status: 'not-sent'; commandId: string; error: string }
   | { status: 'unknown'; commandId: string; error: string }
   | { status: 'refused'; error: string }
   | { status: 'not-prepared'; error: string }
@@ -118,7 +120,7 @@ export async function runSubmission({
   draftStore: Pick<ComposerDraftStore, 'getSnapshot' | 'update' | 'flushDrafts'>
   draftKey: string
   prepare: (prompt: string, attachments: AgentInputAttachment[], commandId: string) => Promise<ConversationSendRequest>
-  send: (request: ConversationSendRequest) => Promise<{ disposition: 'created' | 'duplicate' }>
+  send: (request: ConversationSendRequest) => Promise<ConversationSendResult>
   input: SubmissionInput
   expectedRevision?: number
   /**
@@ -182,6 +184,14 @@ export async function runSubmission({
   }
   try {
     const result = await send(request)
+    if (result.status === 'not_sent') {
+      // A host-confirmed refusal is durable proof that nothing was dispatched. The
+      // original text stays in this receipt and only an explicit resend unlocks it.
+      draftStore.update(drafts => updateComposerDraft(drafts, draftKey,
+        draft => markPendingNotSent(draft, request.commandId, result.reason)).drafts)
+      draftStore.flushDrafts()
+      return { status: 'not-sent', commandId: request.commandId, error: result.reason }
+    }
     draftStore.update(drafts => updateComposerDraft(drafts, draftKey,
       draft => updatePendingPhase(draft, request.commandId, 'dispatched')).drafts)
     draftStore.flushDrafts()
@@ -194,6 +204,16 @@ export async function runSubmission({
     return { status: 'unknown', commandId: request.commandId,
       error: error instanceof Error ? error.message : String(error) }
   }
+}
+
+/**
+ * Records the host's refusal on this exact receipt; no other draft is touched. The reason
+ * is capped here, before the receipt can be persisted, so a long Provider message cannot
+ * outgrow the draft record and be dropped on reload.
+ */
+export function markPendingNotSent(draft: ComposerDraft, commandId: string, reason: string): ComposerDraft {
+  if (draft.pending?.commandId !== commandId) return draft
+  return { ...draft, pending: { ...draft.pending, notSent: { reason: reason.slice(0, NOT_SENT_REASON_LIMIT) } } }
 }
 
 export const DURABLE_WRITE_FAILED = '本地存储不可用，发送状态与原文无法保存；本次没有发送。'
@@ -211,12 +231,19 @@ export type PendingRecoveryState = 'not_sent' | 'unresolved'
  * as unsent, so nothing here can unlock an accidental duplicate send.
  */
 export function pendingRecovery(
-  pending: Pick<ComposerPendingSubmission, 'phase'>,
+  pending: Pick<ComposerPendingSubmission, 'phase' | 'notSent'>,
   health: PendingResolution | undefined
 ): { state: PendingRecoveryState; reason?: string } | undefined {
   if (health?.kind === 'not_sent') return { state: 'not_sent' }
   if (health?.kind === 'unknown') return { state: 'unresolved', ...(health.reason ? { reason: health.reason } : {}) }
+  // The host refused the request outright, so the absence of a page record proves nothing
+  // new: this stays a known-not-sent receipt instead of being relabelled unresolved.
+  if (pending.notSent !== undefined) return { state: 'not_sent', reason: pending.notSent.reason }
   if (health?.kind === 'absent') return { state: 'unresolved' }
+  // The host still holds the attempt pending, but this surface already lost the reply and
+  // marked its own receipt unknown: the user needs the inspect/check affordance in this
+  // process instead of a receipt that quietly looks dispatched.
+  if (health?.kind === 'pending' && pending.phase === 'unknown') return { state: 'unresolved' }
   if (health === undefined && pending.phase === 'unknown') return { state: 'unresolved' }
   return undefined
 }

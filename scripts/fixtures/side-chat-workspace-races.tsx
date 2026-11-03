@@ -108,7 +108,7 @@ function Harness() {
     source: sourceOf(scope),
     target: { providerId: 'codex', permissionMode: 'default' },
     openIds,
-    hasCompletedTurn: true,
+    hasTerminalTurn: true,
     onOpen: (conversationId, scopeKey) => {
       races.calls.open.push([conversationId, scopeKey])
       // Mirrors the App: a child opened for another parent is saved to that parent's own

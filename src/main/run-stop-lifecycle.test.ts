@@ -148,8 +148,27 @@ describe('RunStopLifecycle', () => {
       forceKillScope: () => 'run_scoped'
     })
     expect(warnings).toEqual(['stop interrupt failed'])
+    // 取消调用失败是独立事实：用户的停止意图保留并继续升级，但阶段必须如实反映
+    // “取消没有发出去”，不能停留在 interrupt_requested 冒充已请求。
+    expect(published.map((state) => state.phase)).toEqual(['interrupt_request_failed'])
+    expect(published[0]?.providerSettled).toBe(false)
     clock.advance(stopEscalationWindow('qoder_cli').gracefulMs)
     expect(killed).toBe(1)
+    expect(published.map((state) => state.phase)).toEqual(['interrupt_request_failed', 'force_kill_requested'])
+  })
+
+  it('replays a failed interrupt request without re-invoking it', () => {
+    const clock = fakeClock()
+    const { lifecycle, published } = tracker(clock)
+    const broken = target({ runId: 'run-broken', interrupt: () => { throw new Error('no handle') } })
+
+    lifecycle.request(broken)
+    lifecycle.request(broken)
+    expect(published.map((state) => state.phase)).toEqual(['interrupt_request_failed', 'interrupt_request_failed'])
+    expect(broken.interrupts).toBe(0)
+    // 重播不重置窗口：升级仍按第一次请求计时。
+    clock.advance(stopEscalationWindow('claude_sdk').gracefulMs)
+    expect(broken.kills).toBe(1)
     expect(published.at(-1)?.phase).toBe('force_kill_requested')
   })
 

@@ -2,6 +2,8 @@ export interface RunRegistryState {
   runId: string
   done: boolean
   providerSettled?: boolean
+  /** Provider settled but local finalization is still open; see `unsettledStates`. */
+  localFinalizing?: boolean
 }
 
 export interface RunRegistryControl {
@@ -37,12 +39,27 @@ export class RunRegistry<
       .map(({ control }) => control)
   }
 
+  /**
+   * Runs that still own something: an unsettled Provider transport, or a Provider that
+   * settled while its local finalization is still open. Admission, recovery and deletion
+   * use this list, so a finalizing run keeps blocking its context even though nothing is
+   * left to interrupt.
+   */
   unsettledStates(): State[] {
-    return [...this.entries.values()].map(({ state }) => state).filter((state) => state.providerSettled !== true)
+    return [...this.entries.values()].map(({ state }) => state)
+      .filter((state) => state.providerSettled !== true || state.localFinalizing === true)
   }
 
+  /**
+   * Controls that may still need to cancel something at shutdown.
+   *
+   * A Provider that already settled has nothing left to interrupt: interrupting it would
+   * stake a stop on a transport that ended. Local finalization alone is not a cancellation
+   * target, so it stays in `unsettledStates` — which fences admission and deletion — but
+   * not here.
+   */
   unsettledControls(): Control[] {
-    return [...this.entries.values()].map(({ control, state }) => ({ control, state }))
+    return [...this.entries.values()]
       .filter(({ state }) => state.providerSettled !== true)
       .map(({ control }) => control)
   }

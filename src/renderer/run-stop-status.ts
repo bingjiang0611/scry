@@ -1,4 +1,5 @@
 import type { AgentStopState } from '@shared/runtime'
+import { RUN_STOP_COPY } from './constants/copy'
 import type { TraceEvent } from '@shared/trace'
 
 export function providerHasEnded(items: readonly TraceEvent[]): boolean {
@@ -38,6 +39,13 @@ export function runStopStatus(state: AgentStopState | undefined, providerEnded =
         tone: 'stopping',
         label: '停止中',
         hint: `已请求 ${state.providerId} 取消当前轮次，等待 Provider 收口`,
+        providerSettled: false
+      }
+    case 'interrupt_request_failed':
+      return {
+        tone: 'unsettled',
+        label: RUN_STOP_COPY.interruptRequestFailed.label,
+        hint: RUN_STOP_COPY.interruptRequestFailed.hint(state.providerId),
         providerSettled: false
       }
     case 'force_kill_requested':

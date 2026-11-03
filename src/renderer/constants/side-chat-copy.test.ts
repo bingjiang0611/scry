@@ -18,8 +18,8 @@ describe('side-chat failure copy', () => {
   })
 
   it('leaves a plain reason alone and falls back when nothing actionable is left', () => {
-    expect(SIDE_CHAT_COPY.reasonOf(new Error('该原生会话没有已完成轮次；不会创建空快照')))
-      .toBe('该原生会话没有已完成轮次；不会创建空快照')
+    expect(SIDE_CHAT_COPY.reasonOf(new Error('该原生会话没有已终止的轮次；不会创建空快照')))
+      .toBe('该原生会话没有已终止的轮次；不会创建空快照')
     // A class name alone carries no instruction, so it becomes the honest unknown.
     expect(SIDE_CHAT_COPY.reasonOf(new Error('TraceArchiveCaptureError: '))).toBe(SIDE_CHAT_COPY.unknownReason)
     expect(SIDE_CHAT_COPY.reasonOf(new Error(`Error invoking remote method 'x:y': Error: `)))

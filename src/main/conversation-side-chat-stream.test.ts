@@ -35,11 +35,16 @@ async function workspace(): Promise<{ userData: string; cwd: string }> {
 }
 
 /** One archive turn: prompt, visible answer, then the header that closes it. */
-function turnEntries(turn: number, question: string, answer: string): ArchiveEntry[] {
+function turnEntries(
+  turn: number,
+  question: string,
+  answer: string,
+  end: { done: boolean; status: 'completed' | 'interrupted' } = { done: true, status: 'completed' }
+): ArchiveEntry[] {
   return [
     { type: 'user', turn, chunk: question },
     { type: 'text', turn, event: 1, stage: 'text', messageId: `m${turn}`, chunk: answer },
-    { type: 'turn', turn, runId: `run-${turn}`, ts: 1_760_000_000_000 + turn, done: true, status: 'completed' }
+    { type: 'turn', turn, runId: `run-${turn}`, ts: 1_760_000_000_000 + turn, done: end.done, status: end.status }
   ]
 }
 
@@ -90,6 +95,31 @@ describe('archive-backed side-chat streaming', () => {
     // Spills really happened (the fixture is far larger than the allowance), and none of
     // those directories, handles or budget charges survived the turn that used them.
     expect(spills.created.length).toBeGreaterThan(0)
+    expect(await leftovers()).toEqual([])
+  })
+
+  it('never seals a turn the recorder did not terminate', async () => {
+    const { userData, cwd } = await workspace()
+    const body = 'e'.repeat(5 * 1024)
+    // Six segments the recorder never terminated, then EOF: the caller may only drop
+    // them, so nothing about them may become a sealed body while the prefix is judged.
+    const entries = Array.from({ length: 6 }, (_unused, index) =>
+      turnEntries(index + 1, `question ${index} ${body}`, `partial ${index} ${body}`,
+        { done: false, status: 'interrupted' })).flat()
+    const budget = { available: 8 * 1024 }
+    const live: number[] = []
+    for await (const turn of streamTurns(userData, cwd, from(entries), budget)) {
+      expect(turn.terminal).toBe(false)
+      // No sealed copy, and no text a sink could read, for an uncapturable turn.
+      expect(turn.messages).toEqual([])
+      // Spills really happen in this fixture, so what is left is this turn's own inputs
+      // and nothing older: a turn that sealed a copy the caller never reads would leave
+      // one more directory behind on every segment.
+      live.push((await leftovers()).length)
+    }
+    expect(spills.created.length).toBeGreaterThan(0)
+    expect(new Set(live).size).toBe(1)
+    expect(budget.available).toBe(8 * 1024)
     expect(await leftovers()).toEqual([])
   })
 

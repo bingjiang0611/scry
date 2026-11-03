@@ -16,6 +16,7 @@ import { RightSurfacePanel } from './components/RightSurfacePanel'
 import { SideChatHistoryDialog } from './components/SideChatHistoryDialog'
 import { SideChatSurface } from './components/SideChatSurface'
 import { useRightWorkbench } from './hooks/useRightWorkbench'
+import { terminalTurnCount } from './side-chat-scope'
 import { useLegacyDiffPreviewDemand } from './hooks/useLegacyDiffPreviewDemand'
 import { SIDE_CHAT_COPY } from './constants/side-chat-copy'
 import { SourceControlPanel } from './components/SourceControlPanel'
@@ -57,7 +58,7 @@ export function AppShell(props: AppShellProps) {
     providerId: integrations.selectedProviderId,
     ...(integrations.providerContext.agentProfileId ? { agentProfileId: integrations.providerContext.agentProfileId } : {}),
     runControls: integrations.runControls,
-    completedTurns: displayedTurns.length,
+    terminalTurns: terminalTurnCount(displayedTurns),
     draftStore, chatProps, pickConversation,
     loadProjects: workspace.loadProjects,
     openIds: currentSurface.state.sideChats,

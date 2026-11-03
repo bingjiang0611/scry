@@ -10,6 +10,7 @@ import { applyViewRestore, type PendingViewRestore } from '../conversation-view-
 import { conversationTarget, prepareConversationSend } from '../conversation-handoff'
 import type { Turn } from '../format'
 import { resendContent, useConversationSubmission } from '../hooks/useConversationSubmission'
+import { pendingRecovery } from '../composer-pending'
 import { runStructuralTransition } from '../structural-motion'
 import { useRunTraceStream } from '../hooks/useRunTraceStream'
 
@@ -255,7 +256,9 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
     try { await submission.submit() } finally { busyRef.current = false }
   }
   const resend = async (): Promise<void> => {
-    if (busyRef.current || !pending || pendingHealth?.kind !== 'not_sent' || blockedReason) return
+    // A host-confirmed refusal is durable evidence even before (or without) a page read.
+    if (busyRef.current || !pending || blockedReason) return
+    if (pendingRecovery(pending, pendingHealth)?.state !== 'not_sent') return
     busyRef.current = true
     try { await submission.submit(resendContent(pending)) } finally { busyRef.current = false }
   }

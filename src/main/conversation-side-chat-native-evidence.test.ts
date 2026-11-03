@@ -75,7 +75,7 @@ describe('native side-chat completion evidence', () => {
     expect(preview.throughOrdinal).toBe(1)
     expect(preview.messageCount).toBe(2)
     expect(preview.prefixFingerprint).toBe(
-      (await current.service.previewSideChat(source, { completedThroughOrdinal: 1 })).prefixFingerprint)
+      (await current.service.previewSideChat(source, { terminalThroughOrdinal: 1 })).prefixFingerprint)
 
     // The chosen prefix stays frozen when that in-flight turn finishes.
     await writeFile(path, [
@@ -129,7 +129,7 @@ describe('native side-chat completion evidence', () => {
       // A missing marker stays unknown; visible text cannot stand in for it.
       piRecord({ id: 'a1', parentId: 'u1', role: 'assistant', text: 'pi partial answer' })
     ])
-    await expect(current.service.previewSideChat(source)).rejects.toThrow('没有已完成轮次')
+    await expect(current.service.previewSideChat(source)).rejects.toThrow('没有已终止的轮次')
     expect((await current.store.list(current.cwd)).length).toBe(0)
   })
 

@@ -140,7 +140,7 @@ describe('side-chat snapshot capture', () => {
   })
 
   it.each([
-    ['no completed body', 'empty'],
+    ['no terminal body', 'empty'],
     ['unverifiable prefix', 'no-archive']
   ])('refuses %s instead of publishing an empty snapshot', async (_label, kind) => {
     const current = await fixture()
@@ -149,7 +149,7 @@ describe('side-chat snapshot capture', () => {
       : await current.store.create(current.cwd, { target: { providerId: 'codex', continuationKey: 'identity:codex:default' }, nativeSessionId: 'native-x',
         turns: [{ runId: 'imported-run', items: [{ runId: 'imported-run', itemId: 'user', contentHash: hash('hello') }], nativeItems: [] }] })
     const source = { kind: 'conversation' as const, conversationId: parent.id }
-    await expect(current.service.previewSideChat(source)).rejects.toThrow(/已完成轮次|无法验证/)
+    await expect(current.service.previewSideChat(source)).rejects.toThrow(/已终止|无法验证/)
     expect((await current.store.list(current.cwd)).length).toBe(1)
   })
 

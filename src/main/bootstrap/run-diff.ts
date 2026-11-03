@@ -4,6 +4,7 @@ import type { ProviderId } from '../../shared/provider'
 import type { GitTurnDiffCapture } from '../git'
 import { cancelGitTurnDiff, finishGitTurnAndSessionDiff, finishGitTurnDiff, snapshotSessionNetDiff } from '../git'
 import { RunDiffPreviewer, SessionDiffBaselineRegistry } from '../session-diff'
+import { upsertTraceById } from '../live-trace'
 import type { TurnChangeJournal } from '../../core/turn-recorder/change-journal'
 
 type PairedSessionDiff = { capture: GitTurnDiffCapture; snapshot: Promise<TurnDiffSnapshot> }
@@ -34,6 +35,53 @@ export type RunDiffDependencies = {
   mainEventId: (prefix: string, runId: string) => string
   appendCoalescedTrace: (items: ActiveRun['items'], event: TraceEvent) => void
   publishTrace: (event: TraceEvent) => void
+}
+
+type RunDiffPreviewDependencies = {
+  runId: string
+  providerId: ProviderId
+  runtimeProvider: RuntimeProvider
+  cwd: string | undefined
+  turnCapture: Promise<GitTurnDiffCapture> | null
+  sessionCapture: Promise<GitTurnDiffCapture> | null
+  sessionBaselineOrigin: TurnDiffBaselineOrigin | undefined
+  turnChangeJournal: TurnChangeJournal | null
+  patchExcludeBasenames: string[]
+  runState: ActiveRun
+  publishTrace: (event: TraceEvent) => void
+}
+
+/**
+ * The previewer publishes each in-flight snapshot as the same `harness` evidence the
+ * terminal diff uses, so a scoped view that is still watching receives it before the run
+ * closes. It is created before the Provider starts, which is why it lives here rather
+ * than inside the terminal lifecycle.
+ */
+export function createRunDiffPreviewer(deps: RunDiffPreviewDependencies): RunDiffPreviewer {
+  const { runId, providerId, runtimeProvider, runState, publishTrace } = deps
+  return new RunDiffPreviewer({
+    runId,
+    turnCapture: deps.cwd ? deps.turnCapture : null,
+    sessionCapture: deps.sessionCapture,
+    ...(deps.sessionBaselineOrigin ? { sessionBaselineOrigin: deps.sessionBaselineOrigin } : {}),
+    hints: () => ({ ...deps.turnChangeJournal?.snapshot(), patchExcludeBasenames: deps.patchExcludeBasenames }),
+    emit: ({ stage, id, snapshot }) => {
+      const event: TraceEvent = {
+        id,
+        ts: new Date().toISOString(),
+        runId,
+        kind: 'harness',
+        stage,
+        providerId,
+        runtimeProvider,
+        turnDiff: snapshot
+      }
+      upsertTraceById(runState.items, event)
+      // 运行中预览也是这一轮的证据：仍在看的 scoped 视图必须在收口前收到它。
+      publishTrace(event)
+    },
+    onError: (scope, error) => console.warn('[scry] diff preview failed:', runId, scope, error)
+  })
 }
 
 export function createRunDiffLifecycle(deps: RunDiffDependencies): RunDiffLifecycle {

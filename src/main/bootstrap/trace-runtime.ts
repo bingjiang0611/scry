@@ -253,6 +253,9 @@ export function createTraceRuntime({
   function requestRunStop(runId: string): boolean {
     const entry = runs.get(runId)
     if (!entry || entry.state.done) return false
+    // The Provider is already settled and only local finalization is left: there is no
+    // transport to interrupt or kill, so no control call is issued and no stop is claimed.
+    if (entry.state.providerSettled === true) return false
     const stopping = entry.control
     // 有界升级取代旧的「2s 后假装这一轮已结束」：先协作取消，窗口到点升级 forceKill，
     // 再到点只诚实报告 Provider 未确认终止。终态仍然只能由真实 settle 产生。

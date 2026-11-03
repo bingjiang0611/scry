@@ -1,6 +1,6 @@
 # 侧边会话 · 设计稿
 
-状态：本文件保留为**历史设计提案**（当时未实现 App 功能）。功能已经实现并通过发布门禁。**当前最新的是源码候选 `4ea51adf`（App `0.2.237` / 私有 CLI `0.2.55`，合并主线 `f9a01039`）——用户明确选择只合入源码、不安装**：`/Applications/Scry.app` 里是其它来源的同号 `0.2.237` / CLI `0.2.56` / `app.asar` `7a5ddc40…`，那份不含原生来源 Profile 修复，重启也不会修好。根因、证据、两种 0.237 产物的哈希差异与后续集成条件见 **[profile-capture-fix.md](./profile-capture-fix.md)**；`0.2.235` 大历史交付与安装记录（App `0.2.235` / CLI `0.2.53` / `app.asar` `74fcedb9…`）现在只是历史，见 [large-history-delivery.md](./large-history-delivery.md)；大历史实现与逐项验证分别见 [large-history-fix.md](./large-history-fix.md) 与 [large-history-verification.md](./large-history-verification.md)。更早一轮 `0.2.231` 的记录（[final-delivery.md](./final-delivery.md)、[release-verification.md](./release-verification.md)）是历史，不是当前证明。下面各节的布局、文案与默认行为仍是设计基线，不是实现状态声明。
+状态：本文件保留为**历史设计提案**（当时未实现 App 功能）。功能已经实现并通过发布门禁。**当前已安装的是 App `0.2.239` / 私有 CLI `0.2.56`**：它在 `0.2.238` 的基础上统一了对话/运行状态模型（typed `not_sent` 回执、Provider 原生终止证据、归档缺失状态不再默认成功、Provider settle 与本地收口分开、Activity 呈现失败与阻断、侧聊边界改为任何显式终止轮次、停止控制调用失败可见），合同见 **[conversation-state-model.md](../conversation-state-model.md)**。上一轮 `0.2.238` 的归档终止证据修复与字节校验见 [archive-termination-fix.md](./archive-termination-fix.md)。用户正在运行的旧实例需要自己重启才会加载新版本。`0.2.237` 源码候选（[profile-capture-fix.md](./profile-capture-fix.md)）、`0.2.235` 大历史交付（[large-history-delivery.md](./large-history-delivery.md)、[large-history-fix.md](./large-history-fix.md)、[large-history-verification.md](./large-history-verification.md)）与 `0.2.231` 记录（[final-delivery.md](./final-delivery.md)、[release-verification.md](./release-verification.md)）现在只是历史，不是当前证明。下面各节的布局、文案与默认行为仍是设计基线；其中快照边界已按上述状态模型改为任何显式终止轮次。
 
 - [交互设计稿](./index.html)：独立 HTML 示例，不连接 Provider，不修改项目文件，不保存真实会话。
 - [技术方案](./technical-plan.md)：现有调用链、数据合同、并行边界、实施顺序与验收。
@@ -12,8 +12,8 @@
 | --- | --- |
 | 目的 | 临时岔开去提问或做改动，不打乱主会话的对话上下文 |
 | Provider | Claude、Codex、Qoder、OpenCode、Pi 都纳入首版范围；不假装能力完全一致 |
-| 上下文 | 冻结主会话截至最近已完成轮次的用户消息、助手正文；不是原生 fork |
-| 主聊运行中 | 直接读取已完成消息，不接管、不迁移主聊，不等待当前轮结束；没有已完成消息时明确不可用 |
+| 上下文 | 冻结主会话截至**最近一个明确终止且证据完整**的轮次（`completed` / `failed` / `cancelled` / `interrupted`）的用户消息、助手正文；不是原生 fork |
+| 主聊运行中 | 直接读取已终止轮次的消息，不接管、不迁移主聊，不等待当前轮结束；其后的未终止尾部被排除，没有任何终止轮次时明确不可用 |
 | 保存 | 长期保存；关闭页签、隐藏面板、退出 App 都不等于删除 |
 | 关联 | 每个主会话有自己的多个侧聊；切换主会话时跟随切换 |
 | 执行 | 完整 Agent；主聊与侧聊、多个侧聊可以并行 |
@@ -53,7 +53,7 @@
 常驻一行：`主会话快照 · 截至第 8 轮`。点击查看详情：
 
 - 来源标题、冻结时间、截止轮次、已包含消息数。
-- 主会话当前第 9 轮尚未完成：明确「不含正在生成的第 9 轮」。选择边界时也排除尚未完成证据提交的轮次。
+- 主会话当前第 9 轮尚未终止：明确「不含正在生成的第 9 轮」。选择边界时排除未终止的尾部；未终止轮次夹在中间且后面还有终止轮次时拒绝，不静默跳过。
 - 包含用户消息与助手正文；不重放历史附件、隐藏推理、工具状态。需要图片或文件时重新附加。工作区文件是实时的，不是冻结文件版本。
 - 消息完整带入、部分通过受限历史检索提供、正文缺失，分别展示；不把后两者叫作「全部上下文」。预算不足且 Provider 无可靠历史检索时拒绝创建，提供缩小范围后重新预览；不静默截断或自动摘要。
 - 来源后续变化不会自动同步；首版不提供「刷新快照」以免改变已发送会话的上下文。需要新的上下文就新建侧聊。
