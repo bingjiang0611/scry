@@ -90,7 +90,7 @@ describe('选中的历史会话读不到证据时不假装成新会话', () => {
   it('真正的新会话（无证据缺失）仍然渲染简洁 hero', () => {
     const html = renderWelcome({ cwd: '/tmp/project' })
 
-    expect(html).toContain('今天想在 <span>project</span> 中构建什么？')
+    expect(html).toContain('<h1 class="zh-balanced-heading" lang="zh-CN">今天<wbr/>想<wbr/>在<wbr/> <span>project</span> <wbr/>中构<wbr/>建<wbr/>什么？</h1>')
     expect(html).toContain('welcome-hero-icon')
     expect(html).not.toContain('chat-session-evidence-gap')
   })

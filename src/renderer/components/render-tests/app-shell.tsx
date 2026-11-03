@@ -13,7 +13,7 @@ describe('App shell 集成 smoke：拆分后的 shell / hooks / panes 首屏仍�
     expect(html).toContain('title="右侧工作区"')
     expect(html).toContain('aria-pressed="false"')
     expect(html).toContain('不绑定项目')
-    expect(html).toContain('今天想构建什么？')
+    expect(html).toContain('<h1 class="zh-balanced-heading" lang="zh-CN">今天<wbr/>想构<wbr/>建<wbr/>什么？</h1>')
     expect(html).toContain('aria-label="会话上下文"')
     expect(html).toContain('aria-label="权限配置"')
     expect(html).toContain('aria-label="Agent、Model 与 Effort"')

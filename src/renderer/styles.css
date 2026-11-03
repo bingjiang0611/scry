@@ -1,5 +1,6 @@
 /* Preserve this order: later domain sections override earlier rules. */
 @import './styles-theme-shell.css';
+@import './styles-typography.css';
 @import './styles-sidebar.css';
 @import './styles-dialog-controls.css';
 @import './styles-chat-entry.css';
