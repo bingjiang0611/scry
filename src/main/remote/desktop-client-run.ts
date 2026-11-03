@@ -22,6 +22,7 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
     // overflow or I/O failure must not block authoritative state. Desktop content
     // comes from canonical trace reads.
     let observedState: DesktopRemoteRunStatus['state'] = 'unknown'
+    let sawEvents = false
     let authoritativeState: string | null = null
     // The first read for this run answers now; later reads wait for a change.
     // A device that has never seen the run must not sit in a window first.
@@ -36,6 +37,7 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
       if (snapshot.state !== undefined) authoritativeState = snapshot.state === null ? null : String(snapshot.state)
       const poll = snapshot.poll
       watch.cursor = poll.cursor
+      if (poll.events.length > 0) sawEvents = true
       for (const event of poll.events) {
         if (!record(event) || event.runId !== runIdValue || !text(event.kind, 64)) continue
         if (event.kind === 'intent_recorded') observedState = 'recorded'
@@ -53,8 +55,13 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
       if (poll.events.length < 256) break
       waitMs = 0
     }
-    this.runWatch.set(key, watch)
     const state: DesktopRemoteRunStatus['state'] = authoritativeState === null ? observedState : authoritativeState === 'cancelled' ? 'failed' : authoritativeState as DesktopRemoteRunStatus['state']
+    // Change detection is per run: new ledger events or a different lifecycle
+    // state. Not the cursor alone, and not "we just answered" -- a window that
+    // expired without evidence is not a change.
+    const changed = sawEvents || watch.state !== state
+    watch.state = state
+    this.runWatch.set(key, watch)
     if (state === 'settled' || state === 'failed' || watch.externalSessionId) {
       const stateData = await this.state()
       const intent = stateData.intents.find((item) => item.connectionId === connectionIdValue && item.runId === runIdValue)
@@ -68,7 +75,7 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
         await this.save(stateData)
       }
     }
-    return { state, ...(watch.scryRunId ? { scryRunId: watch.scryRunId } : {}), ...(watch.externalSessionId ? { externalSessionId: watch.externalSessionId } : {}) }
+    return { state, changed, ...(watch.scryRunId ? { scryRunId: watch.scryRunId } : {}), ...(watch.externalSessionId ? { externalSessionId: watch.externalSessionId } : {}) }
   }
 
   // Finds the host's live run on one opened session, whichever client started

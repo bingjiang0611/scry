@@ -240,6 +240,10 @@ export interface DesktopRemoteRunStatus {
   scryRunId?: string
   externalSessionId?: string
   detail?: string
+  // The long poll saw new ledger evidence or a new lifecycle state. A device uses
+  // this to skip redundant content reads; absent means "not reported", never "no
+  // change", so a missing flag must not suppress a read.
+  changed?: boolean
 }
 // A host run on an opened session that this client did not submit (host UI,
 // phone or another desktop). `runId` is the host's stop/answer identity;

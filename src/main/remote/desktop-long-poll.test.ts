@@ -10,6 +10,7 @@ import { RemoteHostService } from './remote-host-service'
 import { setup, ssh } from './desktop-client-fixtures'
 import { RunOutputFileStore } from './run-output-file'
 import { DesktopLanes } from './desktop-lane'
+import { LiveWatchers } from './host-controller-watch'
 import { verifyCSR } from './enrollment'
 import { ProviderOperationGate } from '../provider-operation-gate'
 import { setPerformanceRecordingSink } from '../performance-timing'
@@ -94,6 +95,34 @@ describe('long polling instead of ticking', () => {
     const second = await held as { liveRuns: { revision: string } }
     expect(Date.now() - started).toBeGreaterThanOrEqual(300)
     expect(second.liveRuns.revision).toBe(first.liveRuns.revision)
+  })
+
+  it('hands a changed Mac run set to a waiting device within a second', async () => {
+    const runs: Array<Record<string, unknown>> = []
+    const watchers = new LiveWatchers({
+      authorizeDevice: () => {},
+      authorizedCwd: (cwd: string) => cwd,
+      ledger: {} as never,
+      gateway: {} as never,
+      interactions: { list: () => [] } as never,
+      stops: new Map(),
+      live: new Map(),
+      macRuns: { list: () => runs as never, stop: () => true, answer: () => true },
+      poll: () => ({ cursor: 0, minCursor: 0, events: [] }) as never,
+      pendingQuestions: () => [],
+      runOutput: async () => { throw new Error('lifecycle watch must not read output') }
+    })
+    const first = await watchers.liveRuns('peer', { waitMs: 0 })
+    expect(first.runs).toEqual([])
+    const started = Date.now()
+    const held = watchers.liveRuns('peer', { waitMs: 5_000, revision: first.revision })
+    // The Mac side starts a run; nothing tells the host controller, so the wait
+    // must notice it on its own within the budget.
+    setTimeout(() => { runs.push({ runId: 'run-abc-1', providerId: 'pi', cwd: '/workspace', prompt: 'p', questions: [] }) }, 50)
+    const answered = await held
+    expect(Date.now() - started).toBeLessThan(1_000)
+    expect(answered.runs).toHaveLength(1)
+    expect(answered.revision).not.toBe(first.revision)
   })
 
   it('refuses a lifecycle watch for an unknown run without returning output', async () => {

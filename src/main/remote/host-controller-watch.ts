@@ -13,8 +13,10 @@ import type { RemoteIntentRouting, MacRunSource, LiveRunRef } from './host-contr
 // the next wake-up rather than being remembered for the whole wait.
 const LIVE_RUNS_MAX_WAIT_MS = 20_000
 // Mac runs are in-memory state without a change signal into this controller;
-// a long-poll re-checks them on this bounded tick.
-const LIVE_RUNS_TICK_MS = 1_000
+// a long-poll re-checks them on this bounded tick. The re-check is one in-memory
+// snapshot and a hash, so the tick is short enough that a Mac-side change reaches
+// the device in well under a second.
+const LIVE_RUNS_TICK_MS = 250
 const LIVE_RUN_PROMPT_CHARS = 200
 // Below the inner host's 30-second idle timer and the device's response deadline.
 const WATCH_MAX_WAIT_MS = 20_000

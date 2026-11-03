@@ -6,6 +6,9 @@ import { REMOTE_SESSION_COPY } from '../constants/copy'
 // poll holds until something changes, so this is only the gap between a reply
 // and the next request, not the latency budget. Quiet results still back off.
 export const POLL_MS = 250
+// A run the device is following may stream content that its live-set revision
+// does not reflect; its trace is re-read no faster than this.
+export const TRACE_REFRESH_FLOOR_MS = 1_000
 export const QUIET_POLL_MAX_MS = 5000
 
 export function keepIfEqual<T>(next: T): (current: T) => T {
@@ -65,4 +68,12 @@ export function remoteControlsValid(provider: RemoteProviderRef | undefined, con
 export function errorText(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
   return message.includes('desktop_session_operation_unknown') ? REMOTE_SESSION_COPY.operationUnknown : message
+}
+
+// Whether the shown run's content needs another read. The host long poll reports
+// change, so a quiet window reads nothing; a followed run without ledger events
+// under it, or a run that is not the one on screen, still refreshes on the floor.
+export function needsTraceRead(state: { shownRunId?: string; runId: string; changed?: boolean; lastReadAt: number; now: number }): boolean {
+  if (state.shownRunId === state.runId && state.changed !== true && state.now - state.lastReadAt < TRACE_REFRESH_FLOOR_MS) return false
+  return true
 }

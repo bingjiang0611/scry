@@ -55,7 +55,13 @@ export interface StoredConnection {
   pending?: { pairingId: string; secret: string; expiresAt: number; publicKeySHA256: string }
 }
 export interface ActiveConnection { tunnel: DesktopSshTunnel; serial: Promise<void>; attachments?: DesktopAttachmentCapability; traceDelta?: 1 }
-export interface RunStatusCursor { cursor: number; scryRunId?: string; externalSessionId?: string }
+export interface RunStatusCursor {
+  cursor: number
+  scryRunId?: string
+  externalSessionId?: string
+  // Last lifecycle state handed back to the caller, for change detection.
+  state?: string
+}
 
 export function fail(code: string): never { throw new Error(code) }
 export function submitFailure(error: unknown): string {

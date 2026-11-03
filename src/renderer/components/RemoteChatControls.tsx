@@ -10,7 +10,7 @@ import { desktopProviderKey, historyTurns } from './DesktopRemote'
 import { initialRemoteRunControls, readRemoteRunControls, remoteRunControlsKey, writeRemoteRunControls } from '../remote-run-controls'
 import type { FoundationState } from './RemoteChatFoundation'
 import type { RemoteChatProps } from './RemoteChat'
-import { errorText, intentMatches, keepIfEqual, POLL_MS, QUIET_POLL_MAX_MS, remoteDraftKey } from './RemoteChatShared'
+import { errorText, intentMatches, keepIfEqual, needsTraceRead, POLL_MS, QUIET_POLL_MAX_MS, remoteDraftKey } from './RemoteChatShared'
 
 // A conversation that executes on a saved remote Scry desktop. It renders the same
 // ChatView as local sessions; only the controller differs. The host owns Provider
@@ -21,7 +21,7 @@ import { errorText, intentMatches, keepIfEqual, POLL_MS, QUIET_POLL_MAX_MS, remo
 export type ControlsState = ReturnType<typeof useRemoteChatControls>
 
 export function useRemoteChatControls(foundation: FoundationState, { connectionId, cwd, draftStore, queueStore, onSessionAdopted }: Pick<RemoteChatProps, 'connectionId' | 'cwd' | 'draftStore' | 'queueStore' | 'onSessionAdopted'>) {
-  const { api, connected, catalog, catalogReady, providerSelection, sessionId, setSessionId, setControls, selectedProvider, selectedProviderContextKey, initializedControlsContext, setTurns, setHistoryEvidence, setHistoryLoading, historyRevision, setHistoryRevision, traceViewRef, showTrace, pollIntervalMs, applyPollInterval, setPollInterval, lastPollKey, setRunStatus, setForeignRun, foreignRunRef, setIntents, setPollError, setPollFresh, setHistoryError, generation, provider, providerId, context, presentedHistoryContext, preparedHistoryContext, controlContextKey, contextKey, sessionActive, traceDelta, pollSequence, pollInFlight, pollRef, adoptingSession, adoptedIntent, queueKey } = foundation
+  const { api, connected, catalog, catalogReady, providerSelection, sessionId, setSessionId, setControls, selectedProvider, selectedProviderContextKey, initializedControlsContext, setTurns, setHistoryEvidence, setHistoryLoading, historyRevision, setHistoryRevision, traceViewRef, showTrace, lastTraceRead, pollIntervalMs, applyPollInterval, setPollInterval, lastPollKey, setRunStatus, setForeignRun, foreignRunRef, setIntents, setPollError, setPollFresh, setHistoryError, generation, provider, providerId, context, presentedHistoryContext, preparedHistoryContext, controlContextKey, contextKey, sessionActive, traceDelta, pollSequence, pollInFlight, pollRef, adoptingSession, adoptedIntent, queueKey } = foundation
   const controlProvider = catalog?.providerDiscovery !== 2 ? provider
     : selectedProvider && selectedProviderContextKey === controlContextKey && desktopProviderKey(selectedProvider) === providerSelection ? selectedProvider : undefined
   // Initialize once per execution context. Refresh validates rather than silently
@@ -94,7 +94,17 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
     const settlePoll = (key: string, traceChanged: boolean | undefined): void => {
       const quiet = traceChanged === false && key === lastPollKey.current
       lastPollKey.current = key
+      // The host does the waiting now, so a quiet cycle only means the window
+      // expired; the next request is issued straight away. Backoff stays for errors.
       setPollInterval(quiet ? Math.min(QUIET_POLL_MAX_MS, pollIntervalMs.current * 2) : POLL_MS)
+    }
+    // Trace content is read only when the long poll reports new evidence, when the
+    // shown run is not this run yet, or on the refresh floor.
+    const traceNeedsRead = (runId: string, changed: boolean | undefined): boolean => {
+      const now = Date.now()
+      const read = needsTraceRead({ ...(traceViewRef.current?.run.runId ? { shownRunId: traceViewRef.current.run.runId } : {}), runId, ...(changed === undefined ? {} : { changed }), lastReadAt: lastTraceRead.current, now })
+      if (read) lastTraceRead.current = now
+      return read
     }
     const readPoll = async (): Promise<void> => {
       const sequence = ++pollSequence.current
@@ -113,6 +123,7 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
           const followed = foreignRunRef.current
           const live = context.externalSessionId && (sessionActive || followed) ? await api.liveRun(connectionId, context) : null
           if (cancelled || sequence !== pollSequence.current) return
+          const liveChanged = JSON.stringify(live) !== JSON.stringify(foreignRunRef.current)
           setForeignRun(keepIfEqual(live))
           if (followed && live?.runId !== followed.runId) {
             // The followed run left the host's live set; its turn is now history.
@@ -120,10 +131,10 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
             void refreshRemoteCatalog(connectionId)
           }
           let traceChanged: boolean | undefined
-          if (live?.scryRunId) {
+          if (live?.scryRunId && traceNeedsRead(live.scryRunId, liveChanged)) {
             traceChanged = await followTrace(live.scryRunId, sequence)
             if (traceChanged === undefined) return
-          } else showTrace(null)
+          } else if (!live?.scryRunId) showTrace(null)
           settlePoll(JSON.stringify([pending, live]), traceChanged)
           setPollError(null)
           setPollFresh(true)
@@ -172,10 +183,10 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
           void refreshRemoteCatalog(connectionId)
         }
         let traceChanged: boolean | undefined
-        if (nextStatus.scryRunId) {
+        if (nextStatus.scryRunId && traceNeedsRead(nextStatus.scryRunId, nextStatus.changed)) {
           traceChanged = await followTrace(nextStatus.scryRunId, sequence)
           if (traceChanged === undefined) return
-        } else showTrace(null)
+        } else if (!nextStatus.scryRunId) showTrace(null)
         settlePoll(JSON.stringify([pending, nextStatus]), traceChanged)
         setPollError(null)
         setPollFresh(true)

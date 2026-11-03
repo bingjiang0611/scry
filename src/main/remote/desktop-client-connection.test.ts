@@ -264,8 +264,13 @@ describe('DesktopRemoteClient connection and receipt lifecycle', () => {
       }
       fixture.tlsRequest.mockResolvedValueOnce({ watch: { state: 'settled', poll: { events: [], cursor: 0 } } })
       await expect(fixture.client.runStatus(id, runId)).resolves.toMatchObject({ state: 'settled' })
+      // No state and no evidence is unknown. The previous answer said settled, so
+      // the lifecycle did change; a window that expires with the same state is not
+      // a change and must not make the caller re-read content.
       fixture.tlsRequest.mockResolvedValueOnce({ watch: { state: null, poll: { events: [], cursor: 0 } } })
-      await expect(fixture.client.runStatus(id, runId)).resolves.toEqual({ state: 'unknown' })
+      await expect(fixture.client.runStatus(id, runId)).resolves.toEqual({ state: 'unknown', changed: true })
+      fixture.tlsRequest.mockResolvedValueOnce({ watch: { state: null, poll: { events: [], cursor: 0 } } })
+      await expect(fixture.client.runStatus(id, runId)).resolves.toEqual({ state: 'unknown', changed: false })
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
 
