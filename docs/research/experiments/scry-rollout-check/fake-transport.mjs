@@ -52,6 +52,14 @@ if (args[0] === 'mcp' && args[1] === 'call-tool') {
   let input = ''
   for await (const chunk of process.stdin) input += chunk
   const payload = JSON.parse(input)
+  // argv[2] is `<server>::<tool>`. Only the report tool is simulated; any other tool must fail loudly
+  // instead of receiving a report-shaped answer it cannot use.
+  const tool = String(args[2] ?? '').split('::').pop()
+  const keys = Object.keys(payload ?? {}).sort()
+  if (tool !== protocol.toolName) {
+    log({ phase: 'unsupported', tool, argumentKeys: keys })
+    fail(`fake transport: tool ${tool} is not simulated (only ${protocol.toolName}); argument keys: ${keys.join(',')}`, 2)
+  }
   const recordsIndex = protocol.argumentNames.indexOf(protocol.recordsArgument)
   const raw = payload[protocol.recordsArgument] ?? payload[`fieldName_${recordsIndex}`] ?? payload[`arg${recordsIndex}`] ?? []
   const records = raw.map(text => {
@@ -59,7 +67,7 @@ if (args[0] === 'mcp' && args[1] === 'call-tool') {
     return value.scryEncoding === 'gzip-base64' ? JSON.parse(gunzipSync(Buffer.from(value.payload, 'base64')).toString('utf8')) : value
   })
   const ids = records.map(r => r.recordId)
-  log({ phase: 'start', ids })
+  log({ phase: 'start', ids, ...(ids.length ? {} : { tool, argumentKeys: keys }) })
   const end = result => log({ phase: 'end', ids, result })
   if (control.slowMs) await sleep(control.slowMs)
   const mode = control.mode || 'ok'

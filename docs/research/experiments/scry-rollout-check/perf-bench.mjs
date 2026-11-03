@@ -336,11 +336,14 @@ async function drain(uploader, user, w, count, templates, slowMs, mode) {
     try { health = JSON.parse(readFileSync(join(w.ws, '.scry', 'upload', 'health.json'), 'utf8')) } catch {}
     const deadDir = join(w.ws, '.scry', 'upload', 'dead-letter')
     const deadReasons = existsSync(deadDir) ? readdirSync(deadDir).slice(0, 3).map((n) => { try { const d = JSON.parse(readFileSync(join(deadDir, n), 'utf8')); return d.reason ?? d.status } catch { return n } }) : []
+    const transportTail = existsSync(user.env.FAKE_LOG) ? readFileSync(user.env.FAKE_LOG, 'utf8').trim().split('\n').slice(-3) : ['no transport.log: the fake transport was never called']
+    const unsupported = transportTail.map((l) => { try { return JSON.parse(l) } catch { return {} } }).find((e) => e.phase === 'unsupported')
     user.control({})
+    if (unsupported) return { status: 'unavailable', reason: `uploader called tool ${unsupported.tool}, which the fake transport does not simulate (argument keys: ${unsupported.argumentKeys?.join(',')})`, committedMs: Math.round(committedMs), diagnostics: { transportTail } }
     return { status: 'unavailable', reason: `not drained within ${opt('drain-timeout-min', 15)} minutes`, committedMs: Math.round(committedMs),
       diagnostics: { outboxPending: last.outboxPending, committedPending: last.committedPending, deadLetterRecords: last.deadLetterRecords,
         lastError: last.lastError, statusError: last.statusError, healthStatus: health.status, healthLastErrorCode: health.lastErrorCode,
-        healthLastFailure: health.lastFailure ?? health.lastFailureMessage, deadLetterReasons: deadReasons } }
+        healthLastFailure: health.lastFailure ?? health.lastFailureMessage, deadLetterReasons: deadReasons, transportTail } }
   }
   const requests = existsSync(user.env.FAKE_LOG) ? readFileSync(user.env.FAKE_LOG, 'utf8').split('\n').filter((l) => l.includes('"phase":"end"')).length : 0
   const total = mode === 'backlog' ? drainMs : committedMs + drainMs
