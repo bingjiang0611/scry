@@ -4,8 +4,8 @@ import type { FileHandle } from 'node:fs/promises'
 import { parser, type Token } from 'stream-json/parser.js'
 import { TextSpool } from './text-spool'
 import {
-  BODY_KEYS, EVENT_KEYS, REF_KEYS, assertArchiveIdentity, assertProvider, factsOf, keepText, parseScalar,
-  primitiveValue, resultScalar
+  BODY_KEYS, EVENT_KEYS, REF_KEYS, RESULT_VERDICT_KEYS, assertArchiveIdentity, assertProvider, factsOf, keepText,
+  parseScalar, primitiveValue, resultScalar
 } from './trace-archive-fields'
 import { archivedTurnStatus } from './trace-archive-turn-status'
 
@@ -394,6 +394,13 @@ export async function* iterateArchiveEntries(
           scalar = undefined
         }
         continue
+      }
+      // A selected verdict field must hold a scalar: an object or array here is a corrupt
+      // record. Skipping it would silently drop the only evidence that a `result` saying
+      // `isError: false` stopped early, so it fails closed instead of falling through. Every
+      // other field keeps its generic skip, so unrelated payloads still never fail.
+      if (scalar !== undefined && RESULT_VERDICT_KEYS.has(scalar.key)) {
+        throw new Error(`trace archive event ${scalar.key} is invalid`)
       }
       scalar = undefined
       pending = undefined

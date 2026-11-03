@@ -19,6 +19,14 @@ export const EVENT_KEYS = new Set([
   'isError', 'terminationReason', 'providerStopReason'
 ])
 
+/**
+ * A `result` event's verdict fields that carry text.
+ *
+ * Both may only prove a non-successful turn, so a value that is not a scalar must fail
+ * closed: skipping an object or array here would let `isError: false` decide alone.
+ */
+export const RESULT_VERDICT_KEYS: ReadonlySet<string> = new Set(['terminationReason', 'providerStopReason'])
+
 /** A `result` event's own verdict field; a non-string value is a corrupt record, not text. */
 export function resultScalar(eventMeta: Map<string, unknown>, key: string): string | undefined {
   const value = eventMeta.get(key)
