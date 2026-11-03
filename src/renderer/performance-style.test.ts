@@ -16,6 +16,14 @@ describe('chat scroll stability', () => {
   it('disables native anchoring so opening a replaced transcript stays at the requested bottom', () => {
     expect(declaration(styles, '.chat')).toContain('overflow-anchor: none')
   })
+
+  it('keeps vertical scrolling while hiding both chat scrollbars', () => {
+    const chat = declaration(styles, '.chat')
+    expect(chat).toContain('overflow-x: hidden')
+    expect(chat).toContain('overflow-y: auto')
+    expect(chat).toContain('scrollbar-width: none')
+    expect(declaration(styles, '.chat::-webkit-scrollbar')).toContain('display: none')
+  })
 })
 
 describe('idle renderer paint budget', () => {

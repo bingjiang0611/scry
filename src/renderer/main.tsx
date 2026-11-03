@@ -4,6 +4,7 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { applyTheme, browserThemeStorage, readStoredTheme } from './theme'
 import { installRendererPerformanceMonitor } from './performance-monitor'
 import { detectRendererPlatform } from './platform'
+import { installOverflowTitles } from './overflow-title'
 import './styles.css'
 import './motion.css'
 import './analytics-evidence.css'
@@ -18,6 +19,7 @@ const syncPageVisibility = (): void => {
 syncPageVisibility()
 document.addEventListener('visibilitychange', syncPageVisibility)
 applyTheme(readStoredTheme(browserThemeStorage()), document.documentElement)
+const disposeOverflowTitles = installOverflowTitles(document)
 
 let disposePerformanceMonitor: (() => void) | null = null
 void window.scry.performanceDiagnosticsEnabled?.().then((enabled) => {
@@ -28,6 +30,7 @@ void window.scry.performanceDiagnosticsEnabled?.().then((enabled) => {
 }).catch(() => {})
 window.addEventListener('pagehide', () => {
   document.removeEventListener('visibilitychange', syncPageVisibility)
+  disposeOverflowTitles()
   disposePerformanceMonitor?.()
   disposePerformanceMonitor = null
 }, { once: true })

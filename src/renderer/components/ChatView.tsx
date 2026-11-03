@@ -7,6 +7,7 @@ import { Icon } from './primitives/Icon'
 import { WorkspaceFileLinkProvider } from './MarkdownImpl'
 import { DelayedLoadingStatus } from './LoadingStatus'
 import { LOADING_COPY } from '../constants/copy'
+import { ChineseHeadingText } from '../typography'
 
 const NO_PENDING_QUESTIONS: AgentQuestionRequest[] = []
 const NO_TURNS: ChatViewProps['turns'] = []
@@ -89,7 +90,7 @@ export function ChatView(props: ChatViewProps) {
             )}
             {turns.length === 0 && !sessionLoading && !sessionEvidenceGap && !hasSelectedSession && (
               <div className={`unbound-empty welcome-field ${cwd ? 'bound' : ''}`}>
-                <header className="welcome-heading welcome-heading-minimal"><span className="welcome-hero-icon" aria-hidden="true"><Icon name="terminal" /></span><h1>{workspaceName ? <>今天想在 <span>{workspaceName}</span> 中构建什么？</> : '今天想构建什么？'}</h1></header>
+                <header className="welcome-heading welcome-heading-minimal"><span className="welcome-hero-icon" aria-hidden="true"><Icon name="terminal" /></span><h1 className="zh-balanced-heading" lang="zh-CN"><ChineseHeadingText>{workspaceName ? <>今天想在 <span>{workspaceName}</span> 中构建什么？</> : '今天想构建什么？'}</ChineseHeadingText></h1></header>
               </div>
             )}
             {!sessionLoading && historyWindow?.hasOlder && (

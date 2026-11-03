@@ -6,6 +6,7 @@ import { canOpenWorkspaceFileExternally } from '@shared/workspace'
 import { remarkWorkspaceFileDirectories, resolveWorkspaceFileTargets, type WorkspaceFileTarget } from '../workspace-links'
 import { Icon } from './primitives/Icon'
 import { createIncrementalMarkdownPlugin } from '../markdown-incremental'
+import { ChineseHeadingText, TypographyText, hasChineseText, isChineseProse } from '../typography'
 
 function safeExternalHref(href: string | undefined): string | undefined {
   if (!href) return undefined
@@ -137,6 +138,35 @@ function WorkspaceFileAction({ targets, reference, title, onOpen, children }: {
 }
 
 const baseComponents: Components = {
+  h1: ({ node: _node, children, className, ...props }) => {
+    const chinese = hasChineseText(children)
+    return <h1 {...props} lang={chinese ? 'zh-CN' : undefined} className={[className, chinese ? 'zh-balanced-heading' : ''].filter(Boolean).join(' ') || undefined}>
+      {chinese ? <ChineseHeadingText>{children}</ChineseHeadingText> : <TypographyText>{children}</TypographyText>}
+    </h1>
+  },
+  h2: ({ node: _node, children, className, ...props }) => {
+    const chinese = hasChineseText(children)
+    return <h2 {...props} lang={chinese ? 'zh-CN' : undefined} className={[className, chinese ? 'zh-balanced-heading' : ''].filter(Boolean).join(' ') || undefined}>
+      {chinese ? <ChineseHeadingText>{children}</ChineseHeadingText> : <TypographyText>{children}</TypographyText>}
+    </h2>
+  },
+  h3: ({ node: _node, children, className, ...props }) => {
+    const chinese = hasChineseText(children)
+    return <h3 {...props} lang={chinese ? 'zh-CN' : undefined} className={[className, chinese ? 'zh-balanced-heading' : ''].filter(Boolean).join(' ') || undefined}>
+      {chinese ? <ChineseHeadingText>{children}</ChineseHeadingText> : <TypographyText>{children}</TypographyText>}
+    </h3>
+  },
+  p: ({ node: _node, children, className, ...props }) => {
+    const chinese = hasChineseText(children)
+    const prose = chinese && isChineseProse(children)
+    return <p {...props} lang={chinese ? 'zh-CN' : undefined} className={[className, prose ? 'zh-prose' : ''].filter(Boolean).join(' ') || undefined}>
+      <TypographyText>{children}</TypographyText>
+    </p>
+  },
+  li: ({ node: _node, children, ...props }) => {
+    const chinese = hasChineseText(children)
+    return <li {...props} lang={chinese ? 'zh-CN' : undefined}><TypographyText>{children}</TypographyText></li>
+  },
   img: ({ src, alt }) => {
     // 只放行内联 data:/blob: 图片（远程图片仍然阻断）；懒加载 + 异步解码避免长会话里
     // 一次性解码所有历史图片阻塞主线程。

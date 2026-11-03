@@ -301,7 +301,7 @@ button.toptool {
 .gp-h h2 {
   font: 600 16px/1.2 var(--font-mono);
   letter-spacing: -0.005em;
-  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 .gp-h .subhead {
   margin-top: 8px;
@@ -337,7 +337,7 @@ button.toptool {
 }
 .kv dd {
   color: var(--fg);
-  word-break: break-all;
+  overflow-wrap: anywhere;
   margin: 0;
 }
 .gp-section pre {

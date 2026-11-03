@@ -124,7 +124,7 @@ it('思考默认展开并以独立 disclosure 区别于最终回复', () => {
     expect(html).toContain('思考过程')
     expect(html).toContain('class="ico think-bulb"')
     expect(html).toContain('class="ico think-chevron motion-chevron"')
-    expect(html).toContain('class="think-text md"><p><strong>先写文件再读回</strong></p>')
+    expect(html).toContain('class="think-text md"><p lang="zh-CN"><strong>先写文件再读回</strong></p>')
     expect(html).not.toContain('**先写文件再读回**')
     expect(html).not.toContain('class="think-mark"')
     expect(html).toContain('class="tool-group"')
