@@ -1,12 +1,29 @@
 {
-  "_comment": "Defaults are the public aliases used by the sanitized snapshot in the scry repo. Replace each value with the real name from the private uploader source before running against your installed uploader.",
+  "_comment": "Defaults are the public aliases used by the sanitized snapshot in the scry repo. Replace each value with the real name from the private uploader source before running against your installed uploader. capabilityTool: the content-capability query that uploaders from 0.2.8 call before reporting records with content references; leave it as is for older uploaders.",
   "transportEnv": "TRANSPORT_CLI_PATH",
   "toolName": "submitTurns",
-  "argumentNames": ["actorUserId", "actorNick", "repo", "installationId", "uploaderVersion", "redactionVersion", "records"],
+  "capabilityTool": "queryUploadCapabilities",
+  "contentProtocol": "recorder-content-v1",
+  "argumentNames": [
+    "actorUserId",
+    "actorNick",
+    "repo",
+    "installationId",
+    "uploaderVersion",
+    "redactionVersion",
+    "records"
+  ],
   "recordsArgument": "records",
-  "whoami": { "userIdField": "subject_id", "nickField": "nickname" },
+  "whoami": {
+    "userIdField": "subject_id",
+    "nickField": "nickname"
+  },
   "response": {
     "wrapSuccess": true,
-    "itemStatuses": { "inserted": "inserted", "duplicated": "duplicated", "rejected": "rejected" }
+    "itemStatuses": {
+      "inserted": "inserted",
+      "duplicated": "duplicated",
+      "rejected": "rejected"
+    }
   }
 }

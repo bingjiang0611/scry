@@ -128,7 +128,7 @@ scry status --workspace "$R/a"
 
 各 Provider 的权限参数以本机版本的 `--help` 为准，只允许在 `$R` 下的测试仓库里放开写权限。
 
-中途停止的那一轮在 tmux 里跑：`tmux new -d -s rc-$P '<命令>'`，等到 `.scry/runtime/<provider>/` 下出现 `open.json`（或 20 秒）后 `tmux send-keys -t rc-$P C-c`。非交互模式下中断没有产生记录时，改为在 tmux 里启动交互模式、提交同一提示词后发送 Esc。两种都没有记录就是 `FAIL`，用 `scry doctor --workspace "$R/a"` 的 orphan 和 hook-skip 计数分清是 Provider 没发终态事件还是 recorder 没落盘。
+中途停止的那一轮，先确认 Provider 已经原生接受了提示词，再开始计时：`.scry/runtime/<provider>/` 下出现新的 `open.json`，或 Provider 原生日志记录了这次提交。按过回车、屏幕上出现了文字都不算接受。看不到接受证据，就把这一轮记为“提示词未提交”，不发中断，也不能当作 recorder 丢轮。确认接受后，优先对非交互进程发 SIGINT（`kill -INT <pid>`）。不要用驱动去操作 `/quit` 这类补全菜单：补全没更新就回车会执行别的命令。必须用交互方式退出时，只有界面上选中的就是目标命令、并且原生日志里看到它被派发，才算退出完成。最后不得不用 SIGTERM 结束进程的，判为 `FAIL`，即使记录本身是对的。确认已接受、却没有产生记录，也是 `FAIL`：用 `scry doctor --workspace "$R/a"` 的 orphan 和 hook-skip 计数分清是 Provider 没发终态事件，还是 recorder 没落盘。
 
 通过标准：每个 Provider 的 `turns` 和 `upload` 都是 0 个 `FAIL`，`scry status` 退出 0。另外用 `/usr/bin/time -p` 记下纯文本轮的耗时，并在 `$R/probe` 里跑 3 次同样的提示词对比中位数：这个差值只记录，不做门禁（模型响应波动远大于 hook 开销），hook 开销的门禁是 S18。
 
@@ -230,6 +230,8 @@ node "$UP" status --workspace "$R/c" --json
 | 鉴权失败后冷却 15 分钟 | 重新登录后不会立即上传 | 文档告诉同事重新登录后可以手动 `flush` |
 | Pi 不走 `init` | 需要 `scry integrations install-pi`，是用户级扩展，没有卸载命令 | 已纳入本轮测试；推广文档单写 Pi 的接入和手动卸载 |
 | 服务端去重、请求体上限未实测 | 大轮次或重发时行为未知 | 列入放行条件，向服务方确认 |
+| Qoder 直接退出时，被取消的那一轮可能不落盘 | 退出前正在进行的轮次缺记录 | recorder 没有为 Qoder 注册 SessionEnd；修复候选在本地回归中，回归通过后提 PR |
+| uploader 内置的 recorder 版本过旧 | 读不了合法的 Qoder 记录字段，本地导出失败被记成远端拒收，还会覆盖已上传的回执，产生假死信 | 修复候选已交给 uploader 维护者；发布前推广版本须内置新版 recorder |
 | 真实断网和合盖睡眠没有实测 | 睡眠中错过的补传是否在唤醒后立即补跑，只依赖 launchd 自身行为 | 会中断 Agent 自己，由合成场景和 launchd 补传步骤代替；试点期间看同事机器上的采样数据 |
 
 分批推广：

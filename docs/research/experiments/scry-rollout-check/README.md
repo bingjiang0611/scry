@@ -15,6 +15,8 @@
 | `argumentNames` / `recordsArgument` | 工具参数名（7 个，顺序不能变） | `transport.ts` 的 `ARGUMENT_ORDER` |
 | `whoami.userIdField` / `nickField` | 身份查询返回的字段名 | `transport.ts` 的 `actorIdentity` |
 | `response.*` | 上报响应的包装与条目状态名 | `uploader-worker.ts` 的 `validateReportResponse` |
+| `capabilityTool` | 记录带 content 引用时、上报前先调用的能力查询工具名（0.2.8 起；更早的版本不调用，保持默认即可） | 私有源码里上报前的能力查询调用 |
+| `contentProtocol` / `contentDigestPrefix` | 能力查询应答的 content 协议名；条目 `contentSha256` 的前缀（默认无前缀，十六进制） | 同上，以及上报响应校验 |
 
 ## 运行
 

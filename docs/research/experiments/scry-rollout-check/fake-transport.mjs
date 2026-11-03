@@ -14,6 +14,13 @@
 //   slowMs: number               -> sleep before answering
 //   stderrSecret: string         -> extra stderr text on failures (redaction check)
 //   authProbeFails: true          -> `auth whoami` fails with stderrSecret appended
+//   loggedOut: true               -> every authenticated call fails with "not logged in"
+//   capabilityFails: true         -> the content-capability query answers success:false
+//
+// Records may arrive as plain JSON, as {scryEncoding:"gzip-base64"} and/or as a
+// {scryEncoding:"recorder-content-v1", recordJson, contentJson} envelope; items for
+// envelopes carry contentSha256 = sha256 hex of contentJson.
+import { createHash } from 'node:crypto'
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -56,18 +63,38 @@ if (args[0] === 'mcp' && args[1] === 'call-tool') {
   // instead of receiving a report-shaped answer it cannot use.
   const tool = String(args[2] ?? '').split('::').pop()
   const keys = Object.keys(payload ?? {}).sort()
+  const wrap = data => console.log(JSON.stringify(protocol.response.wrapSuccess ? { success: true, data } : data))
+  if (protocol.capabilityTool && tool === protocol.capabilityTool) {
+    log({ phase: 'capability', argumentKeys: keys })
+    if (control.loggedOut) fail('Error: not logged in; run transport auth login --sso')
+    if (control.capabilityFails) { console.log(JSON.stringify({ success: false, error: 'capability query failed' })); process.exit(0) }
+    wrap({ contentProtocol: protocol.contentProtocol ?? 'recorder-content-v1' })
+    process.exit(0)
+  }
   if (tool !== protocol.toolName) {
     log({ phase: 'unsupported', tool, argumentKeys: keys })
     fail(`fake transport: tool ${tool} is not simulated (only ${protocol.toolName}); argument keys: ${keys.join(',')}`, 2)
   }
   const recordsIndex = protocol.argumentNames.indexOf(protocol.recordsArgument)
   const raw = payload[protocol.recordsArgument] ?? payload[`fieldName_${recordsIndex}`] ?? payload[`arg${recordsIndex}`] ?? []
+  let contentBytes = 0
   const records = raw.map(text => {
-    const value = JSON.parse(text)
-    return value.scryEncoding === 'gzip-base64' ? JSON.parse(gunzipSync(Buffer.from(value.payload, 'base64')).toString('utf8')) : value
+    let value = JSON.parse(text)
+    if (value.scryEncoding === 'gzip-base64') value = JSON.parse(gunzipSync(Buffer.from(value.payload, 'base64')).toString('utf8'))
+    if (value.scryEncoding === 'recorder-content-v1') {
+      const content = JSON.parse(value.contentJson)
+      for (const item of content) {
+        const data = Buffer.from(item.dataBase64, 'base64')
+        if (data.length !== item.bytes || createHash('sha256').update(data).digest('hex') !== item.sha256)
+          fail(`fake transport: content ${item.sha256} does not match its bytes`, 3)
+        contentBytes += data.length
+      }
+      return { ...JSON.parse(value.recordJson), __contentSha256: (protocol.contentDigestPrefix ?? '') + createHash('sha256').update(value.contentJson).digest('hex') }
+    }
+    return value
   })
   const ids = records.map(r => r.recordId)
-  log({ phase: 'start', ids, ...(ids.length ? {} : { tool, argumentKeys: keys }) })
+  log({ phase: 'start', ids, wireBytes: Buffer.byteLength(input), contentBytes, ...(ids.length ? {} : { tool, argumentKeys: keys }) })
   const end = result => log({ phase: 'end', ids, result })
   if (control.slowMs) await sleep(control.slowMs)
   const mode = control.mode || 'ok'
@@ -94,12 +121,13 @@ if (args[0] === 'mcp' && args[1] === 'call-tool') {
     status = statuses.duplicated
   }
   const items = records.map((r, index) => ({ index, recordId: r.recordId,
-    status: control.rejectRecordIds?.includes(r.recordId) ? statuses.rejected : status }))
+    status: control.rejectRecordIds?.includes(r.recordId) ? statuses.rejected : status,
+    ...(r.__contentSha256 ? { contentSha256: r.__contentSha256 } : {}) }))
   const count = s => items.filter(i => i.status === s).length
   const data = { received: items.length, inserted: count(statuses.inserted), duplicated: count(statuses.duplicated),
     conflicted: 0, rejected: count(statuses.rejected), items }
   if (mode === 'malformed') { delete data.received; end('malformed') } else end(items.map(i => i.status).join(','))
-  console.log(JSON.stringify(protocol.response.wrapSuccess ? { success: true, data } : data))
+  wrap(data)
   process.exit(0)
 }
 fail(`fake transport: unexpected command ${args.join(' ')}`, 2)

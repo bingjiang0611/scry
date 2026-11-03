@@ -8,15 +8,15 @@
 //   snapshot  --workspace W                                   > snap.json
 //   turns     --workspace W --since snap.json --provider P \
 //             --expect tool:MARK,text:MARK,interrupt:MARK [--file NAME]
-//   upload    --workspace W --turns turns.json --uploader CLI [--timeout 180]
+//   upload    --workspace W --turns turns.json --uploader CLI [--timeout 180] [--repo-module FILE]
 //   observe   --workspaces W1,W2 --uploader CLI --interval 60 --count N --out obs.jsonl
 //   report    obs.jsonl
 //
 // Exit code: 1 when any check is FAIL, otherwise 0.
 
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, readdirSync, appendFileSync, statSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { existsSync, readFileSync, readdirSync, appendFileSync, realpathSync, statSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const [command, ...rest] = process.argv.slice(2)
@@ -155,16 +155,23 @@ function uploaderStatus(uploader, workspace) {
   return JSON.parse(out)
 }
 
+// The uploader computes the wire `repo` value itself; call that same function instead of
+// re-implementing it. Builds differ in which module holds it, so look for the export among the
+// uploader's own dist modules (only files whose source mentions it are imported).
 async function repositoryName(uploader, workspace) {
-  const module = join(dirname(resolve(uploader)), 'transport.js')
-  if (!existsSync(module)) return { unavailable: 'uploader build has no transport.js next to cli.js' }
-  try {
-    const transport = await import(pathToFileURL(module).href)
-    if (typeof transport.repositoryName !== 'function') return { unavailable: 'repositoryName is not exported by this build' }
-    return { value: await transport.repositoryName(workspace) }
-  } catch (error) {
-    return { unavailable: String(error).slice(0, 200) }
+  const dir = dirname(realpathSync(resolve(uploader)))
+  const candidates = args['repo-module'] ? [resolve(args['repo-module'])]
+    : readdirSync(dir).filter((n) => n.endsWith('.js') && n !== basename(uploader)).map((n) => join(dir, n))
+      .filter((f) => { try { return readFileSync(f, 'utf8').includes('repositoryName') } catch { return false } })
+  const tried = []
+  for (const file of candidates) {
+    try {
+      const mod = await import(pathToFileURL(file).href)
+      if (typeof mod.repositoryName === 'function') return { value: await mod.repositoryName(workspace), module: basename(file) }
+      tried.push(`${basename(file)}: no export`)
+    } catch (error) { tried.push(`${basename(file)}: ${String(error.message).slice(0, 80)}`) }
   }
+  return { unavailable: candidates.length ? `no repositoryName export (${tried.join('; ')}); pass --repo-module <file>` : `no module next to ${basename(uploader)} mentions repositoryName; pass --repo-module <file>` }
 }
 
 async function commandUpload() {
@@ -200,7 +207,7 @@ async function commandUpload() {
   }
   const repo = await repositoryName(uploader, workspace)
   if (repo.unavailable) check('repo identity host/org/repo', 'UNAVAILABLE', { reason: repo.unavailable })
-  else check('repo identity host/org/repo', /^[^/\s]+\/[^/\s]+\/[^/\s]+/.test(repo.value) ? 'PASS' : 'FAIL', { repo: repo.value })
+  else check('repo identity host/org/repo', /^[^/\s]+\/[^/\s]+\/[^/\s]+/.test(repo.value) ? 'PASS' : 'FAIL', { repo: repo.value, module: repo.module })
   return { workspace, drainedMs, ids }
 }
 

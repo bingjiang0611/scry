@@ -345,13 +345,17 @@ async function drain(uploader, user, w, count, templates, slowMs, mode) {
         lastError: last.lastError, statusError: last.statusError, healthStatus: health.status, healthLastErrorCode: health.lastErrorCode,
         healthLastFailure: health.lastFailure ?? health.lastFailureMessage, deadLetterReasons: deadReasons, transportTail } }
   }
-  const requests = existsSync(user.env.FAKE_LOG) ? readFileSync(user.env.FAKE_LOG, 'utf8').split('\n').filter((l) => l.includes('"phase":"end"')).length : 0
+  const logLines = existsSync(user.env.FAKE_LOG) ? readFileSync(user.env.FAKE_LOG, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return {} } }) : []
+  const requests = logLines.filter((e) => e.phase === 'end').length
+  const starts = logLines.filter((e) => e.phase === 'start' && typeof e.wireBytes === 'number')
+  const capabilityCalls = logLines.filter((e) => e.phase === 'capability').length
   const total = mode === 'backlog' ? drainMs : committedMs + drainMs
   return {
     status: 'measured', mode, records: count, fakeLatencyMs: slowMs, notify: stats(commits.map((c) => c.ms)),
     commitPhaseMs: Math.round(committedMs), drainAfterLastCommitMs: Math.round(drainMs),
     recordsPerSecond: Math.round((count / (total / 1000)) * 10) / 10,
-    transportRequests: requests, recordsPerRequest: requests ? Math.round((count / requests) * 10) / 10 : null, deadLetters: done.deadLetterRecords,
+    requestKiB: starts.length ? stats(starts.map((e) => e.wireBytes / 1024), 'KiB') : unavailable('fake transport did not log request sizes'),
+    capabilityCalls, transportRequests: requests, recordsPerRequest: requests ? Math.round((count / requests) * 10) / 10 : null, deadLetters: done.deadLetterRecords,
     worker: { peakConcurrent: peakWorkers, peakRssMiB: peakRss || null, peakPcpu: peakCpu || null, psSamples: samples }
   }
 }
@@ -387,6 +391,7 @@ async function uploaderPhase(uploader, report) {
       const invoked = existsSync(user.env.FAKE_LOG) && readFileSync(user.env.FAKE_LOG, 'utf8').includes('"phase":"invoke"')
       if (!invoked) throw new Error(`uploader did not call the fake transport (protocol.json transportEnv=${protocol.transportEnv}); fill protocol.json with the real values from the uploader source. Stopped before committing any record, nothing was uploaded`)
       u.fakeTransport = `confirmed via ${protocol.transportEnv}`
+      console.log(`  fake transport: confirmed via ${protocol.transportEnv}`)
     }
     // Hook-path latency: notify only, background upload paused by a slow fake server.
     {
@@ -468,10 +473,10 @@ function markdown(report) {
   if (report.uploader) {
     lines.push('## Uploader（假传输层，不联网）', '', `载荷：${report.uploader.payload}`, '', `hook 路径 notify（上传进行中）：${cell(report.uploader.notifyWhileUploading)} ms`, '',
       'streaming：记录逐条到达、边提交边上传；backlog：先积压（不拉起 worker），再一次唤醒排空。', '',
-      '| 场景 | notify p50 / p95 | 提交阶段 | 最后一条提交后排空 | 条/秒 | 请求数（条/请求） | worker 峰值数 | worker 峰值 RSS | upload 目录 KiB/条 |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- |')
+      '| 场景 | notify p50 / p95 | 提交阶段 | 最后一条提交后排空 | 条/秒 | 请求数（条/请求） | 请求体 KiB p50 / p95 | worker 峰值数 | worker 峰值 RSS | upload 目录 KiB/条 |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |')
     for (const [name, m] of Object.entries(report.uploader.runs ?? {})) {
-      if (m.status !== 'measured') { lines.push(`| ${name} | unavailable（${m.reason}${m.diagnostics ? `；${JSON.stringify(m.diagnostics).replaceAll('|', '\\|')}` : ''}） | | | | | | | |`); continue }
-      lines.push(`| ${name} | ${cell(m.notify)} | ${m.commitPhaseMs} ms | ${m.drainAfterLastCommitMs} ms | ${m.recordsPerSecond} | ${m.transportRequests}（${m.recordsPerRequest}） | ${m.worker.peakConcurrent} | ${m.worker.peakRssMiB ? `${m.worker.peakRssMiB} MiB` : 'unavailable（采样时没有 worker）'} | ${m.uploadDirKiBPerRecord} |`)
+      if (m.status !== 'measured') { lines.push(`| ${name} | unavailable（${m.reason}${m.diagnostics ? `；${JSON.stringify(m.diagnostics).replaceAll('|', '\\|')}` : ''}） | | | | | | | | |`); continue }
+      lines.push(`| ${name} | ${cell(m.notify)} | ${m.commitPhaseMs} ms | ${m.drainAfterLastCommitMs} ms | ${m.recordsPerSecond} | ${m.transportRequests}（${m.recordsPerRequest}） | ${cell(m.requestKiB)} | ${m.worker.peakConcurrent} | ${m.worker.peakRssMiB ? `${m.worker.peakRssMiB} MiB` : 'unavailable（采样时没有 worker）'} | ${m.uploadDirKiBPerRecord} |`)
     }
     lines.push('')
   }
