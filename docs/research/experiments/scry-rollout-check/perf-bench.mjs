@@ -317,6 +317,7 @@ async function drain(uploader, user, w, count, templates, slowMs, mode) {
   const drainStart = now()
   if (mode === 'backlog') execFileSync(process.execPath, [uploader, 'wakeup', '--workspace', w.ws], { env: user.env, stdio: 'ignore' })
   let peakWorkers = 0, peakRss = 0, peakCpu = 0, samples = 0
+  const pendingTrail = []
   let done
   for (const deadline = now() + Number(opt('drain-timeout-min', 15)) * 60_000; now() < deadline; await sleep(250)) {
     const procs = uploaderProcesses(uploader, w)
@@ -324,6 +325,8 @@ async function drain(uploader, user, w, count, templates, slowMs, mode) {
     for (const p of procs) { peakRss = Math.max(peakRss, p.rssMiB); peakCpu = Math.max(peakCpu, p.pcpu) }
     samples++
     const s = upStatus(uploader, user, w)
+    pendingTrail.push({ at: now(), pending: (s.outboxPending ?? 0) + (s.committedPending ?? 0), deadLetters: s.deadLetterRecords ?? 0 })
+    if (pendingTrail.length > 2000) pendingTrail.shift()
     if (s.outboxPending === 0 && s.committedPending === 0) { done = s; break }
   }
   const drainMs = now() - drainStart
@@ -340,7 +343,15 @@ async function drain(uploader, user, w, count, templates, slowMs, mode) {
     const unsupported = transportTail.map((l) => { try { return JSON.parse(l) } catch { return {} } }).find((e) => e.phase === 'unsupported')
     user.control({})
     if (unsupported) return { status: 'unavailable', reason: `uploader called tool ${unsupported.tool}, which the fake transport does not simulate (argument keys: ${unsupported.argumentKeys?.join(',')})`, committedMs: Math.round(committedMs), diagnostics: { transportTail } }
-    return { status: 'unavailable', reason: `not drained within ${opt('drain-timeout-min', 15)} minutes`, committedMs: Math.round(committedMs),
+    // A timeout is still unavailable, but say whether the queue was still moving or stuck:
+    // compare pending now with pending ~30 s earlier.
+    const lastSample = pendingTrail.at(-1)
+    const earlier = lastSample && [...pendingTrail].reverse().find((e) => lastSample.at - e.at >= 30_000)
+    const progress = !lastSample || !earlier ? { state: 'unknown (fewer than 30 s of samples)' }
+      : lastSample.pending < earlier.pending && lastSample.deadLetters === earlier.deadLetters
+        ? { state: 'still draining', pendingAtTimeout: lastSample.pending, pending30sBefore: earlier.pending, recordsPerSecondLast30s: Math.round(((earlier.pending - lastSample.pending) / ((lastSample.at - earlier.at) / 1000)) * 10) / 10 }
+        : { state: 'stuck', pendingAtTimeout: lastSample.pending, pending30sBefore: earlier.pending, deadLettersAdded: lastSample.deadLetters - earlier.deadLetters }
+    return { status: 'unavailable', reason: `not drained within ${opt('drain-timeout-min', 15)} minutes (${progress.state})`, committedMs: Math.round(committedMs), progress,
       diagnostics: { outboxPending: last.outboxPending, committedPending: last.committedPending, deadLetterRecords: last.deadLetterRecords,
         lastError: last.lastError, statusError: last.statusError, healthStatus: health.status, healthLastErrorCode: health.lastErrorCode,
         healthLastFailure: health.lastFailure ?? health.lastFailureMessage, deadLetterReasons: deadReasons, transportTail } }
@@ -414,7 +425,7 @@ async function uploaderPhase(uploader, report) {
       u.runs[key] = { ...result, uploadDirKiBPerRecord: Math.round((uploadKiB / count) * 10) / 10, loadAverage: { before: loadBefore, after: load() } }
       process.stdout.write(result.status === 'measured'
         ? `  uploader ${key}: drain ${result.drainAfterLastCommitMs}ms after last commit, ${result.recordsPerSecond} rec/s, ${result.transportRequests} requests\n`
-        : `  uploader ${key}: unavailable (${result.reason}; lastError ${JSON.stringify(result.diagnostics?.lastError ?? null)})\n`)
+        : `  uploader ${key}: unavailable (${result.reason}; ${result.progress?.state === 'still draining' ? `pending ${result.progress.pending30sBefore} -> ${result.progress.pendingAtTimeout} in the last 30 s, ${result.progress.recordsPerSecondLast30s} rec/s; rerun with a longer --drain-timeout-min` : `lastError ${JSON.stringify(result.diagnostics?.lastError ?? null)}`})\n`)
     }
   } finally {
     // Cleanup must never replace the real error: workers that were still running can recreate files.
@@ -473,10 +484,10 @@ function markdown(report) {
   if (report.uploader) {
     lines.push('## Uploader（假传输层，不联网）', '', `载荷：${report.uploader.payload}`, '', `hook 路径 notify（上传进行中）：${cell(report.uploader.notifyWhileUploading)} ms`, '',
       'streaming：记录逐条到达、边提交边上传；backlog：先积压（不拉起 worker），再一次唤醒排空。', '',
-      '| 场景 | notify p50 / p95 | 提交阶段 | 最后一条提交后排空 | 条/秒 | 请求数（条/请求） | 请求体 KiB p50 / p95 | worker 峰值数 | worker 峰值 RSS | upload 目录 KiB/条 |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |')
+      '| 场景 | notify p50 / p95 | 提交阶段 | 最后一条提交后排空 | 条/秒 | 请求数（条/请求） | 能力查询次数 | 请求体 KiB p50 / p95 | worker 峰值数 | worker 峰值 RSS | upload 目录 KiB/条 |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |')
     for (const [name, m] of Object.entries(report.uploader.runs ?? {})) {
-      if (m.status !== 'measured') { lines.push(`| ${name} | unavailable（${m.reason}${m.diagnostics ? `；${JSON.stringify(m.diagnostics).replaceAll('|', '\\|')}` : ''}） | | | | | | | | |`); continue }
-      lines.push(`| ${name} | ${cell(m.notify)} | ${m.commitPhaseMs} ms | ${m.drainAfterLastCommitMs} ms | ${m.recordsPerSecond} | ${m.transportRequests}（${m.recordsPerRequest}） | ${cell(m.requestKiB)} | ${m.worker.peakConcurrent} | ${m.worker.peakRssMiB ? `${m.worker.peakRssMiB} MiB` : 'unavailable（采样时没有 worker）'} | ${m.uploadDirKiBPerRecord} |`)
+      if (m.status !== 'measured') { lines.push(`| ${name} | unavailable（${m.reason}${m.progress ? `；${JSON.stringify(m.progress).replaceAll('|', '\\|')}` : ''}${m.diagnostics ? `；${JSON.stringify(m.diagnostics).replaceAll('|', '\\|')}` : ''}） | | | | | | | | | |`); continue }
+      lines.push(`| ${name} | ${cell(m.notify)} | ${m.commitPhaseMs} ms | ${m.drainAfterLastCommitMs} ms | ${m.recordsPerSecond} | ${m.transportRequests}（${m.recordsPerRequest}） | ${m.capabilityCalls ?? 'unavailable'} | ${cell(m.requestKiB)} | ${m.worker.peakConcurrent} | ${m.worker.peakRssMiB ? `${m.worker.peakRssMiB} MiB` : 'unavailable（采样时没有 worker）'} | ${m.uploadDirKiBPerRecord} |`)
     }
     lines.push('')
   }
