@@ -128,7 +128,8 @@ async function withPiRpc<T>(
   args: string[],
   operation: (rpc: PiRpcProcess) => Promise<T>,
   catalogTrace?: PerformanceTrace,
-  warmKey?: string
+  warmKey?: string,
+  warm?: { reused: boolean }
 ): Promise<T> {
   const env = await piRpcEnvironment(profile)
   catalogTrace?.mark('environment_ready')
@@ -141,6 +142,7 @@ async function withPiRpc<T>(
     parked.idle = undefined
     rpc = parked.rpc
     off = parked.off
+    if (warm) warm.reused = true
     rpc.attachCatalogTrace(catalogTrace)
   } else {
     // A parked process that cannot be reused (failed, closing, different environment) is dropped
@@ -189,6 +191,9 @@ export function probePiAgent(profile: PiAgentProfile, cwd?: string): Promise<PiP
   const pending = piProbesInFlight.get(key)
   if (pending) return pending
   const trace = performanceRecordingEnabled() ? new PerformanceTrace('pi.catalog.probe', { provider: 'pi' }) : undefined
+  // Cold vs reused is the number the warm pool has to move: a reused probe answers
+  // from a running child, a cold one pays the whole Provider startup first.
+  const warm = { reused: false }
   const probe = withPiRpc(profile, probeCwd, piRpcArgs({ noSession: true, offline: true }), async (rpc) => {
     const [state, models, levels, commands] = await Promise.all([
       rpc.send({ type: 'get_state' }, PI_RPC_STARTUP_TIMEOUT_MS),
@@ -208,8 +213,8 @@ export function probePiAgent(profile: PiAgentProfile, cwd?: string): Promise<PiP
       commands: Array.isArray(commandRows) ? commandRows.map(record) : []
     }
     return snapshot
-  }, trace, key).then(snapshot => {
-    trace?.finish()
+  }, trace, key, warm).then(snapshot => {
+    trace?.finish(warm.reused ? { catalogReused: 1 } : { catalogCold: 1 })
     return snapshot
   }, (error: unknown) => {
     trace?.finish(undefined, 'error')

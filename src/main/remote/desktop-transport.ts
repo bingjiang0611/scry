@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { sanitizeMcpAuthError } from '../providers/mcp-auth-security'
 import { connect as tlsConnect, type ConnectionOptions, type TLSSocket } from 'node:tls'
+import { remoteOperationCounters, remoteRequestTrace } from './remote-request-timing'
 import {
   BasicConstraintsExtension,
   ExtendedKeyUsage,
@@ -269,6 +270,10 @@ export function desktopTlsRequest(options: DesktopTlsRequestOptions): Promise<un
   }
   const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
   if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 120_000) return Promise.reject(requestError('invalid_timeout'))
+  // One sample per request: the TLS handshake and the time to the first response
+  // byte are the segments that a per-request connection pays on every call.
+  const trace = remoteRequestTrace('remote.desktop.request')
+  trace?.mark('connect_started')
   let payload: string
   try {
     const encoded = JSON.stringify(options.request)
@@ -302,6 +307,7 @@ export function desktopTlsRequest(options: DesktopTlsRequestOptions): Promise<un
       // A reset can arrive while destroy is closing the underlying stream.
       socket?.on('error', () => {})
       socket?.destroy()
+      trace?.finish(error ? undefined : { ...remoteOperationCounters(options.request), handshakes: 1 }, error ? 'error' : 'completed')
       if (error) reject(error)
       else resolve(value)
     }
@@ -318,10 +324,13 @@ export function desktopTlsRequest(options: DesktopTlsRequestOptions): Promise<un
     }
     socket.once('secureConnect', () => {
       if (settled) return
+      trace?.mark('secure_connect')
       socket?.write(payload)
+      trace?.mark('request_written')
     })
     socket.on('data', (chunk: Buffer) => {
       if (settled) return
+      trace?.mark('first_byte')
       if (buffer.length + chunk.length > MAX_RESPONSE_BYTES) { finish(requestError('response_too_large')); return }
       buffer = Buffer.concat([buffer, chunk])
       const end = buffer.indexOf(10)
