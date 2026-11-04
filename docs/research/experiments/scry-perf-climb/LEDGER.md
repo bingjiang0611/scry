@@ -28,7 +28,7 @@
 | # | 机会 | 指标 | 预期 | 置信度 | 状态 | 实验 |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | 轮次结束候选发现重建隔离 index（每个改动仓库一次 `read-tree --reset` 并丢掉 stat cache） | `gitCalls.stop`、结束耗时 | 结束 git 调用 −1/仓库 | 高 | 已保留 | `20261104-recorder-end-index-reuse` |
-| 2 | uploader 包装的 hook 在队列空时仍启动一次 Node 唤醒 | `hookwrap / wakeup launcher`、`wrapped.turnStart` | 每轮省掉 0–2 次启动（约 180 ms/次） | 高 | 进行中 | `20261104-uploader-idle-wakeup` |
+| 2 | uploader 包装的 hook 在队列空时仍启动一次 Node 唤醒 | `hookwrap / wakeup launcher`、`wrapped.turnStart` | 每轮省掉 0–2 次启动（约 180 ms/次） | 曾经为高，实测后否 | 不成立 | `20261104-uploader-idle-wakeup` |
 | 3 | 每次上传都重新问一遍工具参数契约（每轮一个新进程，进程内缓存活不过一轮） | `wrapped.stop`、`transportRequests` | 每轮省 1 次传输调用（约 200–400 ms） | 中 | 进行中 | `20261104-uploader-contract-probe` |
 | 4 | CLI 回退模式下每个工具事件重新加载整个 CLI（30 个工具事件 ~29.4 s，约 0.98 s/事件） | `recorder / CLI fallback` 的 `toolEvent`、`hookTotalPerTurn` | 每事件降到 0.5 s 以内 | 中 | 待做 | – |
 | 5 | uploader 每条记录一次请求，且每个 worker 重查一次内容能力 | `uploader / capabilityCalls`、`recordsPerRequest` | 合并能力查询与请求 | 中 | 待做 | – |
@@ -50,3 +50,4 @@
 | --- | --- | --- | --- | --- |
 | 2026-11-04 | A/A 校准 | NO CLEAR CHANGE（变好 0、变差 0、计数全部相同、摘要相同） | – | `7922f511` 及之前的测量修复 |
 | 2026-11-04 | recorder 结束复用启动 index | IMPROVED（计数 47 → 36，结束耗时 −20.5%，变差 0） | L1 | `38686164` |
+| 2026-11-04 | uploader 空闲唤醒跳过 | 不成立：候选运行上传 0/74（队列为空=尚未发现），已回退 | – | `8487a382`（记录） |
