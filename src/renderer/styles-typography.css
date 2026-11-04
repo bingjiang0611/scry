@@ -33,7 +33,6 @@
 
 :lang(zh).zh-prose,
 :lang(zh) .zh-prose {
-  max-inline-size: 26em;
   text-align: justify;
 }
 

@@ -76,7 +76,7 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
   const [turns, setTurns] = useState<Turn[]>(() => preparedHistory?.status === 'ready' ? historyTurns(preparedHistory.history) : [])
   const [selected, setSelected] = useState<TraceEvent | null>(null)
   const [historyEvidence, setHistoryEvidence] = useState<Pick<DesktopRemoteHistory, 'status' | 'reason' | 'hasOlder' | 'before' | 'snapshot'> | null>(preparedHistory?.status === 'ready' ? preparedHistory.history : null)
-  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyLoading, setHistoryLoading] = useState(preparedHistory?.status === 'loading')
   const [historyRevision, setHistoryRevision] = useState(0)
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null)
   // The shown run and the host revision it came from; updated synchronously so

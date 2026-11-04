@@ -69,7 +69,7 @@ async function exercise() {
   truncated.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
   check(!truncated.title, 'Uncut text keeps a truncation tooltip')
   check(mixedStyle.textAlign === 'justify', 'Chinese body text is not justified')
-  check(mixedStyle.maxWidth !== 'none', 'Chinese measure is not capped to whole characters')
+  check(mixedStyle.maxWidth === 'none', 'Chinese body text is capped before its container edge')
   check(mixedStyle.textAutospace === 'normal', 'Chinese and Latin autospace is not enabled')
   check(mixedStyle.textSpacingTrim === 'trim-start', 'Chinese opening punctuation trim is not enabled')
   check(codeStyle.textAutospace === 'no-autospace', 'Chinese language rules leak into code autospace')
