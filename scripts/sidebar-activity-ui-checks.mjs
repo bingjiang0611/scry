@@ -33,6 +33,9 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
   const layoutAnimations = `document.querySelector('.sb-activity').getAnimations({ subtree: true }).filter(animation => animation.effect.target.hasAttribute('data-motion-key'))`
   await wait('window.activityFixture && document.querySelector("[role=tab]")')
   check(await read(`document.querySelector('[role="tab"][aria-selected="true"]').textContent === '项目'`), 'Original project view is not the default')
+  check(await read(`document.querySelector('.sb-search input').placeholder === '搜索会话或项目'`), 'Search placeholder was not refined')
+  check(await read(`document.querySelector('.sb-sess').getBoundingClientRect().height === 36 && document.querySelector('.sb-proj-head').getBoundingClientRect().height === 32`), 'Project and session rows do not use the refined rhythm')
+  if (screenshotPrefix) require('node:fs').writeFileSync(`${screenshotPrefix}-projects.png`, (await contents.capturePage({ x: 0, y: 0, width: 280, height: 650 })).toPNG())
   const projectTypography = await read(`(() => {
     const style = getComputedStyle(document.querySelector('.sb-sess .sb-sesstext'));
     return { family: style.fontFamily, size: style.fontSize, weight: style.fontWeight };
@@ -42,6 +45,7 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
   contents.sendInputEvent({ type: 'keyDown', keyCode: 'Right' })
   contents.sendInputEvent({ type: 'keyUp', keyCode: 'Right' })
   await wait(`document.activeElement?.id === 'activity-sidebar-view-activity' && ${group} === 'working'`)
+  check(projectTypography.size === '13px' && projectTypography.weight === '400', 'Project titles do not use the refined type scale')
   const activityTypography = await read(`(() => {
     const style = getComputedStyle(document.querySelector(${JSON.stringify(row)}).querySelector('.sb-sesstext'));
     return { family: style.fontFamily, size: style.fontSize, weight: style.fontWeight };

@@ -83,7 +83,7 @@ textarea:focus-visible,
 }
 
 .sb-search input::placeholder {
-  color: var(--dim3);
+  color: var(--dim2);
 }
 
 .sb-search input {

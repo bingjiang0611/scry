@@ -63,25 +63,13 @@
 /* 会话行保持静止：横向位移会扩大滚动区域，并在列表底部反复触发/取消 hover。 */
 .sb-sess.active {
   border: 1px solid color-mix(in srgb, var(--selected-line) 58%, var(--border3));
-  background:
-    linear-gradient(90deg, var(--selected-soft), transparent 76%),
-    var(--surface-hover);
-  box-shadow:
-    inset 2px 0 0 var(--selected),
-    0 8px 22px rgb(0 0 0 / 10%);
-}
-
-:root[data-theme='light'] .sb-sess.active {
-  box-shadow:
-    inset 2px 0 0 var(--selected),
-    0 8px 22px rgb(35 35 32 / 6%);
+  background: var(--selected-soft);
+  box-shadow: inset 2px 0 0 var(--selected);
 }
 
 .sb-search:focus-within {
   border-color: var(--accent-line);
-  box-shadow:
-    0 0 0 1px var(--accent-line),
-    0 0 0 4px var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent-line);
 }
 
 /* Welcome: a quiet Codex-like prompt. Provider discovery stays in the composer menu. */

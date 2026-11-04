@@ -1,8 +1,8 @@
 .sb-view-tabs {
   position: relative;
   display: flex;
-  gap: 22px;
-  margin: 8px 10px 12px;
+  gap: 24px;
+  margin: 8px 12px 12px;
 }
 
 .sb-view-tabs [role='tab'] {
@@ -29,11 +29,11 @@
 .sb-activity-heading {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin: 26px 10px 8px;
+  gap: 8px;
+  margin: 24px 12px 8px;
   color: var(--fg);
-  font: 680 13px/18px var(--font-ui);
-  letter-spacing: 0.03em;
+  font: 500 13px/20px var(--font-ui);
+  letter-spacing: 0;
 }
 
 .sb-activity-heading::after {
@@ -56,8 +56,8 @@
    only the activity presentation loses its cards and secondary visual labels. */
 :root .sidebar .sb-activity .sb-sess,
 :root .sidebar .sb-activity .sb-sess.active {
-  min-height: 34px;
-  padding: 0 34px 0 10px;
+  min-height: 36px;
+  padding: 0 36px 0 12px;
   border-color: transparent;
   border-radius: var(--r-xs);
   background: transparent;
@@ -90,8 +90,8 @@
 /* Archive rows run denser than live rows: the list keeps its peak at the work
    still in flight, and the finished tail reads as one compact ledger. */
 :root .sidebar .sb-activity [data-activity-group='completed'] .sb-sess {
-  height: 28px;
-  min-height: 28px;
+  height: 32px;
+  min-height: 32px;
 }
 
 :root .sidebar .sb-activity [data-activity-group='completed'] .sb-activity-status { top: 6px; }

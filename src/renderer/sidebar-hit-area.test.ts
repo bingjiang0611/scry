@@ -46,4 +46,20 @@ describe('侧边栏会话行命中区域', () => {
       /\.sb-sess:hover,\s*\.sb-sess-row:focus-within \.sb-sess\s*\{[^}]*translateX/
     )
   })
+
+  it('选中会话使用平静表面，而不是渐变和投影', () => {
+    const rules = [...alignmentCss.matchAll(/\.sb-sess\.active\s*\{([^}]*)\}/g)]
+    const finalRule = rules.at(-1)?.[1] ?? ''
+    expect(finalRule).toContain('background: var(--selected-soft)')
+    expect(finalRule).toContain('box-shadow: inset 2px 0 0 var(--selected)')
+    expect(finalRule).not.toContain('linear-gradient')
+    expect(finalRule).not.toContain('0 8px')
+  })
+
+  it('搜索焦点只保留单层描边', () => {
+    const rules = [...alignmentCss.matchAll(/\.sb-search:focus-within\s*\{([^}]*)\}/g)]
+    const finalRule = rules.at(-1)?.[1] ?? ''
+    expect(finalRule).toContain('0 0 0 1px var(--accent-line)')
+    expect(finalRule).not.toContain('0 0 0 4px')
+  })
 })

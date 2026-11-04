@@ -3,7 +3,7 @@
 import { memo, useCallback, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { relTime } from '../format'
 import { sidebarActivity } from '../sidebar-activity'
-import { SIDEBAR_ACTIVITY_COPY as activityCopy } from '../constants/copy'
+import { SIDEBAR_ACTIVITY_COPY as activityCopy, SIDEBAR_PROJECT_COPY as projectCopy } from '../constants/copy'
 import { SIDE_CHAT_COPY } from '../constants/side-chat-copy'
 import { SideChatOrphanGroup } from './SideChatOrphanGroup'
 import { SidebarActivity } from './SidebarActivity'
@@ -207,7 +207,7 @@ export const Sidebar = memo(function Sidebar({
       </button>
       <div className="sb-search">
         <Icon name="search" />
-        <input placeholder="搜索会话 / 项目…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input placeholder={projectCopy.searchPlaceholder} value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
 
       {(onAnalytics || onLlmPerformance || onSkills || onMcp || onMetaPrompts) && (

@@ -18,6 +18,7 @@ export const SIDEBAR_SESSION_COPY = {
 } as const
 
 export const SIDEBAR_PROJECT_COPY = {
+  searchPlaceholder: '搜索会话或项目',
   pinned: '置顶',
   projects: '项目',
   noProjects: '暂无项目',
