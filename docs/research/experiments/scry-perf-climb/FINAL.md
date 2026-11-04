@@ -1,0 +1,60 @@
+# 爬坡最终报告（rn-shell，recorder + uploader）
+
+本文件收束这一轮爬坡：最初基线 → 最终候选的 `perf-ab` 对比、保留的改动、证据级别、阻碍与建议下一步。数值都在同一台机器（Apple M1 / 8 核 / 16 GiB / macOS 26.3.2 / Node v24.18.0 / git 2.50.1）、同一份 `rn-shell` 工作区副本上测；耗时只与这份基线比较。
+
+## 结论
+
+- 保留 1 项改动，全部在 recorder：轮次结束复用启动快照的隔离 index。`perf-ab` 判定 **IMPROVED**，计数下降是 L1，受控耗时下降是 L2。
+- 2 项 uploader 改动实测不成立或未验证，已回退（`hooks` 空闲唤醒跳过、跨进程复用契约探测）。
+- 最终候选相对最初基线：结束 git 调用 −11/轮（47 → 36），轮次结束耗时约 −20%（受控会话，p ≈ 7e-6）。最终那一组 4 次运行的条件被负载打断，`perf-ab` 判 REGRESSION：变差项落在轮次**开始**，而本轮改动只碰轮次结束，且同侧运行自身跨度（485 ms）大于差值；因此它只用来复核计数（四次完全一致），不用来宣称耗时。
+
+## 最初基线 → 最终候选
+
+受控会话：`results/index-reuse-20261104/AB-2026-11-04T09-14-25-737Z.md`（`perf-ab`，基线 2 份、候选 2 份，A/A 校准 `results/aa-20261104/AB-2026-11-04T07-30-40-178Z.json`）。最终那一组运行在 `results/final-20261104/`，结论不可用（原因见该目录 README）：它只复核了计数，四次运行一致。
+
+| 指标 | 最初基线 | 最终候选 | 变化 | 级别 |
+| --- | --- | --- | --- | --- |
+| recorder / daemon fast path / clean, 0 tools / gitCalls.stop | 47 | 36 | −11（每个仓库一次） | L1 |
+| recorder / daemon fast path / clean, 0 tools / gitCalls.total | 75 | 64 | −11 | L1 |
+| recorder / daemon fast path / dirty / gitCalls.stop | 68 | 57 | −11 | L1 |
+| recorder / daemon fast path / clean, 0 tools / stop | 1285.3 ms（受控会话基线侧） | 1021.9 ms | −263.5（−20.5%，p ≈ 7e-6） | L2 |
+| recorder / daemon fast path / clean, 5 tools / hookTotalPerTurn | 3679.3 ms（受控会话基线侧） | 2172.1 ms | −1507.1（−41%），`stop` 单项 −35.2% | L2 |
+| recorder / CLI fallback / clean, 30 tools / stop | 1897.0 ms（受控会话基线侧） | 1530.8 ms | −366.2（−19.3%） | L2 |
+| hookwrap / daemon fast path / clean, 0 tools / wrapped.hookTotalPerTurn | 4764.3 ms（A/A 基线） | 未测出 | 包装路径的基线侧开销（约 2.4–3.0 s）远大于本轮改动的结束段收益，2v2 分辨不出来 | – |
+| hookwrap / daemon fast path / clean, 5 tools / wrapped.hookTotalPerTurn | 3970.5 ms（A/A 基线） | 未测出 | 同上 | – |
+
+## 保留的改动
+
+| 改动 | 提交 | 作用 | 级别 | 实验 |
+| --- | --- | --- | --- | --- |
+| 轮次结束复用启动快照的隔离 index（省掉每个仓库一次 `read-tree --reset`，保住 stat cache） | `38686164`（首次提交 `55a3d9c1`，发布条件写反后修正） | 结束 git 调用 47 → 36；`stop` 1285.3 → 1021.9 ms（−20.5%，p ≈ 7e-6） | L1（计数），L2 有支持但以 L1 结论 | `experiments/20261104-recorder-end-index-reuse.md` |
+| 测量基础设施：`perf-bench` 拆成入口 + `bench-*.mjs`；修掉“恢复副本时删掉 985 个跟踪文件”和“假传输层到不了 uploader worker”两个缺陷；报告不再写真实传输变量名 | `6af83d22`、`35bdf39b` | 修好后 A/A 才干净（74/74 上传、摘要一致） | – | `results/aa-20261104/README.md` |
+
+## 回退的改动
+
+| 改动 | 私有提交 | 结论 | 原因 |
+| --- | --- | --- | --- |
+| 队列空时跳过唤醒启动 | `07f4c89`（回退 `37a172f`） | 不成立 | 这条路径上记录靠唤醒发现，队列为空等于“还没被发现”；候选运行上传 0/74 |
+| 跨进程复用工具参数契约探测 | `7f0118b`（回退 `efb54f2`） | 未验证 | 候选运行同样上传 0/74，原因未定位；即使成立也低于 10% 门槛 |
+
+## 证据级别说明
+
+- L1：git 子进程计数（每个仓库每次轮次结束少一次），四次运行完全一致，可复核 `results/index-reuse-20261104/`。
+- L2：受控耗时（同一台机器、同一副本、A/A 校准过的门槛、Mann-Whitney p < 0.01）。不宣称 L3：没有发布后日常使用数据。
+- uploader 侧没有保留改动，故 `uploader` 阶段的 `recordsPerSecond` 与 `transportRequests` 仍为“测不到”（一轮 500 条积压排空要 185–325 s，预算内放不下 4 次运行；已有的单侧观察见“阻碍”）。
+
+## 阻碍（需要别人决定或需要更好的条件）
+
+| 阻碍 | 需要什么 | 影响 |
+| --- | --- | --- |
+| 共享测量机的负载多次越过 `ab-session` 门槛（cores/2 = 4），最多让一次会话等了 45 分钟；中途还有一次约 19 分钟的网络中断 | 一台更安静的机器，或允许更长的等待窗口 | 一次 uploader 会话因此作废；最终会话也多等了一轮 |
+| uploader 候选（两份）在 `hookwrap` 阶段上传 0/74，本机最小复现正常 | 一次专门的多仓库时序调试会话 | 两个 uploader 机会都停在“未验证” |
+| `uploader` 阶段的积压排空（500 条，0 ms 假延迟）初始状态是每条 1 次请求、约 2.4–2.7 条/秒 | 允许把该阶段单独跑、或减少积压规模（属于改测量口径，需要批准） | 台账里两个 uploader 指标仍是测不到 |
+| CLI 回退模式每个工具事件约 0.98 s（30 个工具事件 32 s），主要是每次事件重新加载整个 CLI | 需要先补一个“模块加载耗时”的测量口径，再改懒加载 | 机会 4 未开始 |
+
+## 建议下一步
+
+1. 结束段还剩两块工作：`writeTargetedSnapshotTree` 对每个候选仓库仍各做一次 `read-tree`（候选数量决定收益），以及每仓库的 `rev-parse` / `config` 调用合并。前者与本次改动同源，风险低。
+2. CLI 回退模式是下一个量级最大的目标（每个工具事件约 1 s）。先补测量口径（模块加载耗时、每事件 git 调用），再谈懒加载或让工具事件走 daemon。
+3. uploader 侧要动，先解决“候选运行上传 0/74”的诊断条件，并且优先考虑结构性改动（worker 复用、请求合并），单项 200–400 ms 的微优化够不到 10% 门槛。
+4. 需要维护者决定的两处：`uploader` 阶段的测量口径（积压规模/是否单独跑），以及 uploader 的契约探测缓存是否值得以“跨进程状态文件”的形式存在。
