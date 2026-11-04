@@ -48,6 +48,9 @@ export function initDb(): void {
     }
     invalidateQueryCaches()
   } catch (e) {
+    // A missing storage root is a wiring bug, not a broken SQLite: fail loudly
+    // instead of reporting every analytics metric as unavailable.
+    if ((e as Error)?.message === 'storage_not_configured') throw e
     try { db?.close() } catch { /* retain the original initialization error */ }
     db = null // 降级：sqlite 不可用就不写不查，app 照常跑
     console.warn('[scry] sqlite 初始化失败，观测分析降级:', (e as Error)?.message)

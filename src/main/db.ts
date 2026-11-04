@@ -4,6 +4,9 @@
 // (db-stats). Importers keep importing from here.
 //
 // 原生模块，打包要 asarUnpack。加载失败（EDR/ABI）整体降级 no-op，不连累 app 启动。
+// configureStorage is re-exported here so a bundle that only pulls db.ts (the
+// analytics credits UI smoke) can inject storage without a second entry point.
+export { configureStorage } from './storage-paths'
 export { setBillingEnvProvider, initDb, deleteSessionData, resolveSessionRunIds } from './db-connection'
 export type { RecordTurnArgs } from './db-types'
 export { turnOutboxSessionRunIds, deleteTurnOutboxSessionRows, replayDatabaseTurnOutbox } from './db-outbox'

@@ -88,12 +88,14 @@ try {
     process.env.QODER_CONFIG_DIR = join(root, 'qoder')
     app.whenReady().then(async () => {
       app.dock?.hide()
-      const { initDb, recordTurn, usageAnalyticsWithCreditsQuery } = await import('./db.mjs')
+      const { configureStorage, initDb, recordTurn, usageAnalyticsWithCreditsQuery } = await import('./db.mjs')
       const { upsertTraceArchiveTurn } = await import('./transcript-archive.mjs')
       const { aggregateTurnEvidence } = await import('./aggregate.mjs')
       const { creditUsageEvidence } = await import('./credit-usage.mjs')
       const cwd = join(root, 'workspace')
       const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+      // The database no longer asks Electron for userData: inject the temporary root.
+      configureStorage({ userDataDir: app.getPath('userData'), appPath: app.getAppPath() })
       initDb()
       for (const provider of ['qoder', 'claude']) {
         if (!recordTurn({ runId: provider, sessionId, cwd, userText: 'fixture', providerId: provider,
