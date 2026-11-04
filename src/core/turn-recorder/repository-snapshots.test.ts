@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, expect, it, vi } from 'vitest'
+import { beginGitTurnDiff } from './git-capture.js'
 import { handleRecorderHook } from './recorder.js'
 import { listRecords } from './store.js'
 import { isAgentTurnRecord } from '../../shared/turn-record.js'
@@ -98,6 +99,28 @@ async function turnDiffOf(root: string, session: string) {
   await handleRecorderHook({ provider: 'pi', workspace: root, env: {}, event: 'UserPromptSubmit', payload: { ...payload, prompt: 'change files' } })
   return payload
 }
+
+// 复用启动 index 是纯性能优化：发布错了不会改结果，只会白跑调用。用直接观测把发布条件钉住。
+it('publishes the reusable start index only while sparse checkout is off', async () => {
+  const dirtyRoot = await committedRepo('index-publish')
+  const dirtyRepo = join(dirtyRoot, 'repo')
+  await writeFile(join(dirtyRepo, 'untracked.txt'), 'later\n')
+  const dirty = await beginGitTurnDiff(dirtyRepo, 15_000)
+  expect(dirty.status).toBe('ready')
+  expect(dirty.baselineClean).toBe(false)
+  expect(dirty.beforeIndex).toBeDefined()
+
+  const cleanRoot = await committedRepo('index-publish-clean')
+  const clean = await beginGitTurnDiff(join(cleanRoot, 'repo'), 15_000)
+  expect(clean.baselineClean).toBe(true)
+  expect(clean.indexState).toBeDefined()
+
+  await writeFile(join(dirtyRepo, '.git', 'info', 'sparse-checkout'), '')
+  const sparse = await beginGitTurnDiff(dirtyRepo, 15_000)
+  expect(sparse.status).toBe('ready')
+  expect(sparse.beforeIndex).toBeUndefined()
+  expect(sparse.indexState).toBeUndefined()
+}, 20_000)
 
 it('captures a dirty worktree that appears after a clean start', async () => {
   const root = await committedRepo('clean-start')

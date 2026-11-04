@@ -313,7 +313,7 @@ export async function beginGitTurnDiff(
     )
     // Sparse checkout 的 skip-worktree 标记代表「本来就不在工作树里」，重建 index 会把它们
     // 变成删除。那种仓库不发布可复用的基线 index，finish 仍走 read-tree --reset。
-    const reusableIndex = existsSync(join(commonDir, 'info', 'sparse-checkout'))
+    const sparseCheckout = existsSync(join(commonDir, 'info', 'sparse-checkout'))
     if (baselineClean) {
       return {
         beforeAt,
@@ -327,7 +327,7 @@ export async function beginGitTurnDiff(
         branch,
         baselineClean,
         indexPath,
-        ...(indexState && reusableIndex ? { indexState } : {}),
+        ...(indexState && !sparseCheckout ? { indexState } : {}),
         tempDir,
         objectDir,
         alternateObjectDirs,
@@ -365,7 +365,7 @@ export async function beginGitTurnDiff(
       branch,
       baselineClean,
       indexPath,
-      ...(reusableIndex ? { beforeIndex } : {}),
+      ...(sparseCheckout ? {} : { beforeIndex }),
       tempDir,
       objectDir,
       alternateObjectDirs,
