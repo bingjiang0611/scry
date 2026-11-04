@@ -120,7 +120,7 @@ node record-check.mjs report obs.jsonl
 
 ## perf-bench.mjs：性能基线
 
-给 recorder 的 hook 路径和 uploader 跑一份带环境信息的基线，用于以后在同一台机器上对比。默认不联网、不花钱、不碰源仓库。
+给 recorder 的 hook 路径和 uploader 跑一份带环境信息的基线，用于以后在同一台机器上对比。默认不联网、不花钱、不碰源仓库。`perf-bench.mjs` 只是入口，实现按职责拆在同目录的 `bench-*.mjs`（参数、通用工具、工作区副本、git 计数、recorder、uploader、hookwrap）。
 
 **先按上面“准备”一节填好 `protocol.json`。** 公开快照里的 `transportEnv` 是别名，真实 uploader 不认它时会直接调用真实传输 CLI。`run.mjs` 和 `perf-bench.mjs` 开始时都会先跑一次 `doctor`，确认 uploader 真的调用了假传输层；确认不了就在提交任何记录之前退出，不会上传。
 
