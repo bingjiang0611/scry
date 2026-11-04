@@ -31,11 +31,12 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
       }}
     />
   )
-  it('verdict 卡：聚合 token + 无报错无危险 → 极简展示 Provider 轮次终态', () => {
+  it('verdict 卡：聚合 token + 无报错无危险 → 不再写“轮次已结束”，只留指标', () => {
     expect(html).toContain('<strong>3.0k</strong>') // 跨轮累计本会话 token（含 cache）
     expect(html).not.toContain('$0.1234')
     expect(html).toContain('overview-verdict ok') // 无 error/danger → ok
-    expect(html).toContain('轮次已结束')
+    expect(html).not.toContain('轮次已结束') // 完成态不再重复总结，调用次数移到面板头部
+    expect(html).not.toContain('overview-verdict-line')
     expect(html).toContain('输入+输出+缓存')
     expect(html).not.toContain('reasoning 单列')
     expect(html).not.toContain('overview-metric-foot')
@@ -121,7 +122,7 @@ it('历史会话合并 archive 与 transcript usage 时仍按用户 turn 展示�
       <OverviewPanel turns={[mergedTurn]} selected={null} onSelect={() => {}} usage={null} stats={null} />
     )
 
-    expect(mergedHtml).toContain('轮次已结束')
+    expect(mergedHtml).not.toContain('轮次已结束')
     expect(mergedHtml).not.toContain('轮已捕获')
     expect(mergedHtml).toContain('<strong>35</strong>')
     expect(mergedHtml).not.toContain('<strong>47</strong>')

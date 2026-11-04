@@ -575,34 +575,19 @@
 }
 
 .overview-dossier .turn-call-row {
-  align-items: start;
-  margin-bottom: 0;
-  padding: 12px 0;
-  border: 0;
-  border-bottom: 1px solid var(--border3);
-  border-radius: 0;
-  background: transparent;
+  margin-bottom: 10px;
+  padding: 14px;
+  border: 1px solid var(--border3);
+  border-radius: var(--r-md);
+  background: var(--surface-faint);
   transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
 }
 
 .overview-dossier .turn-call-row:hover,
 .overview-dossier .turn-call-row:focus-within {
-  border-color: var(--border3);
-  background: var(--surface-faint);
-  box-shadow: none;
-}
-
-.overview-dossier button.turn-id.turn-call-open {
-  border-color: transparent;
-  border-radius: var(--r-sm);
-  background: transparent;
-}
-
-.overview-dossier button.turn-id.turn-call-open:hover,
-.overview-dossier button.turn-id.turn-call-open:focus-visible {
-  border-color: transparent;
-  background: var(--surface-hover);
-  color: var(--fg);
+  border-color: var(--border2);
+  background: var(--surface-subtle);
+  box-shadow: var(--shadow-card);
 }
 
 .overview-dossier .turn-call-heading strong {
@@ -611,59 +596,25 @@
   letter-spacing: -0.02em;
 }
 
+/* 列宽下限 88px：面板宽度随窗口变化，固定四列会把「结构化介入」截断，按可用宽度自适应。 */
 .overview-dossier .turn-call-groups {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0 8px;
-  margin-top: 8px;
-  padding-top: 4px;
-  border-top: 1px solid var(--border3);
+  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+  gap: 6px;
+  margin-top: 12px;
 }
 
 .overview-dossier .turn-call-group {
-  height: 32px;
-  min-height: 32px;
-  padding: 0 4px;
-  border: 0;
-  border-bottom: 1px solid var(--border3);
-  border-radius: 0;
-  background: transparent;
-}
-
-.overview-dossier button.turn-call-group:not(:disabled):hover {
-  background: var(--surface-hover);
-}
-
-.overview-dossier .turn-call-kind {
-  padding: 0;
-  background: transparent;
-  color: var(--dim);
-  font-weight: 400;
-}
-
-.overview-dossier .turn-call-count {
-  color: var(--fg);
-  font-weight: 600;
-}
-
-.overview-dossier .turn-call-group.error,
-.overview-dossier .turn-call-group.error .turn-call-kind,
-.overview-dossier .turn-call-group.error .turn-call-count {
-  color: var(--bad);
-}
-
-.overview-dossier .turn-tool-errors {
-  gap: 4px;
-  margin-top: 8px;
-}
-
-.overview-dossier .turn-tool-error {
-  border-color: color-mix(in srgb, var(--bad) 28%, var(--border3));
+  min-height: 27px;
+  gap: 3px;
+  padding: 6px;
+  border-color: var(--border3);
   border-radius: var(--r-sm);
-  background: transparent;
+  background: var(--surface-subtle);
 }
 
-.overview-dossier .turn-tool-error > summary:hover {
-  background: color-mix(in srgb, var(--bad) 4%, transparent);
+/* 标签自带内边距会让「结构化介入」在三列卡片里溢出，这里改为只靠卡内留白分隔。 */
+.overview-dossier .turn-call-kind {
+  padding-inline: 0;
 }
 
 /* Pinned summary: a light, inspectable floating sheet. */

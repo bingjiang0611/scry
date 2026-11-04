@@ -204,7 +204,8 @@ export function useOverviewPanelModel({
   const turnError = turns.some((t) => !!t.error)
   const hasError = toolErrors > 0 || turnError
   let vstate: 'ok' | 'warn' | 'bad' = 'ok'
-  let judge = '轮次已结束'
+  // 只在还活着的状态（运行中、高危、可疑）占一行；已完成且无风险时不写“轮次已结束”。
+  let judge: string | null = null
   if (busy) {
     vstate = 'warn'
     const activeTurn = turns.find(turn => !turn.done && !turn.error)
@@ -214,10 +215,9 @@ export function useOverviewPanelModel({
     judge = `${dangerHi} 处高危操作`
   } else if (hasError) {
     vstate = 'warn'
-    judge = toolErrors > 0 ? `轮次已结束 · ${toolErrors} 处工具报错` : '轮次已结束 · 有报错'
   } else if (dangers.length > 0) {
     vstate = 'warn'
-    judge = `轮次已结束 · ${dangers.length} 处可疑操作`
+    judge = `${dangers.length} 处可疑操作`
   }
   const diffFiles = gitDiff?.files ?? []
   const diffAdd = diffFiles.reduce((s, d) => s + d.added, 0)
