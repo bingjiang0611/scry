@@ -1,10 +1,10 @@
 # Scry CLI 与 uploader 推广前本地测试清单
 
-最后更新：2026-11-02
+最后更新：2026-11-04
 
 ## 目的与范围
 
-整份清单交给一个 Agent 在一台 Mac 上执行，没有人工步骤：每一步都写成可以直接运行的命令和机器可判定的通过标准，Agent 跑完给出一份报告。全部通过（或已知问题均已接受）后，再按“试点 → 小组 → 全员”分批推广。被测对象是 Scry CLI（recorder）和 uploader 0.2.7 及以上；Provider 覆盖 Codex、Qoder、OpenCode、Pi，本轮不测 Claude；场景包括一个人同时在多个仓库里使用 Agent。
+整份清单交给一个 Agent 在一台 Mac 上执行，没有人工步骤：每一步都写成可以直接运行的命令和机器可判定的通过标准，Agent 跑完给出一份报告。全部通过（或已知问题均已接受）后，再按“试点 → 小组 → 全员”分批推广。被测对象是推广版本：Scry CLI（recorder）0.2.57 和 uploader 0.2.10（内置 recorder 0.2.57）；Provider 覆盖 Codex、Qoder、OpenCode、Pi，本轮不测 Claude；场景包括一个人同时在多个仓库里使用 Agent。
 
 | 部分 | 怎么测 | 主要回答的问题 |
 | --- | --- | --- |
@@ -99,7 +99,7 @@ remote 只用来生成仓库标识，永远不 push。
 - 在 `$R/a/sub`（先 `mkdir`）里执行 init → 退出码非 0，提示到 Git 根目录执行。
 - 在 clash 里先写入别人的 hook：`printf '{"schemaVersion":1,"commitHook":{"entry":"tools/other-hook","files":["tools/other-hook"]}}' > "$R/clash/scry.config.json"`，再执行 uploader init → 退出码非 0，`commitHook` 仍是 `tools/other-hook`。
 - `scry integrations install-pi` → `scry integrations status-pi` 退出 0。Pi 扩展是用户级的，只在有 `scry.config.json` 的仓库里产生记录。
-- `scry-upload doctor --workspace "$R/a" --json` → 退出 0，`healthy: true`。把 `checks.scry.value.version` 和 `scry version` 都写进报告：Pi 调用的是全局 `scry`，两者不一致要标出来。
+- `scry-upload doctor --workspace "$R/a" --json` → 退出 0，`healthy: true`。把 `checks.scry.value.version` 和 `scry version` 都写进报告：两者都必须是 0.2.57，否则判 `FAIL`（Pi 调用的是全局 `scry`，版本不一致会让 Pi 的记录由另一个 recorder 写出）。
 
 ### 3. 各 Provider 录制与上传
 
@@ -130,7 +130,7 @@ scry status --workspace "$R/a"
 
 中途停止的那一轮，先确认 Provider 已经原生接受了提示词，再开始计时：`.scry/runtime/<provider>/` 下出现新的 `open.json`，或 Provider 原生日志记录了这次提交。按过回车、屏幕上出现了文字都不算接受。看不到接受证据，就把这一轮记为“提示词未提交”，不发中断，也不能当作 recorder 丢轮。确认接受后，优先对非交互进程发 SIGINT（`kill -INT <pid>`）。不要用驱动去操作 `/quit` 这类补全菜单：补全没更新就回车会执行别的命令。必须用交互方式退出时，只有界面上选中的就是目标命令、并且原生日志里看到它被派发，才算退出完成。最后不得不用 SIGTERM 结束进程的，判为 `FAIL`，即使记录本身是对的。确认已接受、却没有产生记录，也是 `FAIL`：用 `scry doctor --workspace "$R/a"` 的 orphan 和 hook-skip 计数分清是 Provider 没发终态事件，还是 recorder 没落盘。
 
-通过标准：每个 Provider 的 `turns` 和 `upload` 都是 0 个 `FAIL`，`scry status` 退出 0。另外用 `/usr/bin/time -p` 记下纯文本轮的耗时，并在 `$R/probe` 里跑 3 次同样的提示词对比中位数：这个差值只记录，不做门禁（模型响应波动远大于 hook 开销），hook 开销的门禁是 S18。
+通过标准：每个 Provider 的 `turns` 和 `upload` 都是 0 个 `FAIL`，`scry status` 退出 0。本轮还要确认两个修复（见“已知问题”）：每个 Provider 已被接受的中途停止轮都有记录，包括 Qoder；Qoder 的三轮全部 `uploaded`，`deadLetterRecords` 为 0。另外用 `/usr/bin/time -p` 记下纯文本轮的耗时，并在 `$R/probe` 里跑 3 次同样的提示词对比中位数：这个差值只记录，不做门禁（模型响应波动远大于 hook 开销），hook 开销的门禁是 S18。
 
 ### 4. 多仓库同时使用
 
@@ -230,8 +230,8 @@ node "$UP" status --workspace "$R/c" --json
 | 鉴权失败后冷却 15 分钟 | 重新登录后不会立即上传 | 文档告诉同事重新登录后可以手动 `flush` |
 | Pi 不走 `init` | 需要 `scry integrations install-pi`，是用户级扩展，没有卸载命令 | 已纳入本轮测试；推广文档单写 Pi 的接入和手动卸载 |
 | 服务端去重、请求体上限未实测 | 大轮次或重发时行为未知 | 列入放行条件，向服务方确认 |
-| Qoder 直接退出时，被取消的那一轮可能不落盘 | 退出前正在进行的轮次缺记录 | recorder 没有为 Qoder 注册 SessionEnd；修复候选在本地回归中，回归通过后提 PR |
-| uploader 内置的 recorder 版本过旧 | 读不了合法的 Qoder 记录字段，本地导出失败被记成远端拒收，还会覆盖已上传的回执，产生假死信 | 修复候选已交给 uploader 维护者；发布前推广版本须内置新版 recorder |
+| Qoder 直接退出时，被取消的那一轮可能不落盘 | 退出前正在进行的轮次缺记录 | 已在 recorder 0.2.57 修复（Qoder SessionEnd，OpenCode/Pi 中断收尾）；本轮第 3 步验证 |
+| uploader 内置的 recorder 版本过旧 | 读不了合法的 Qoder 记录字段，本地导出失败被记成远端拒收，还会覆盖已上传的回执，产生假死信 | 已在 uploader 0.2.10 修复（内置 recorder 0.2.57，本地导出失败不再记成远端拒收，不覆盖已确认回执）；本轮第 3 步验证 |
 | 真实断网和合盖睡眠没有实测 | 睡眠中错过的补传是否在唤醒后立即补跑，只依赖 launchd 自身行为 | 会中断 Agent 自己，由合成场景和 launchd 补传步骤代替；试点期间看同事机器上的采样数据 |
 
 分批推广：
