@@ -58,20 +58,48 @@
 - **source-control**：迁读写实现，但 `git` 调用与 workspace 授权必须仍在同一授权函数下（`authorizeWorkspace`）。App 侧只保留 UI 与 diff 展示。
 - 两者都不新增绕过 authorization 的入口。
 
-## 7. auth 与同 provider/profile 互斥锁
+## 7. auth、凭据与同 provider/profile 互斥锁
 
 - `ProviderOperationGate` 现在在 main 进程内保证「同 provider/profile 操作互斥」。迁入 daemon 后锁必须跟着走，否则本机 App 与远程设备会同时在同一个 profile 上启动 Provider。
 - 结论：**锁只能有一个持有者**。daemon 持有；App 的登录/重认证也经本机通道排队，不再直接在 main 里启动 Provider 进程。
-- auth 的凭据文件仍由 App 加密存储（`safeStorage`），daemon 通过本机通道拿到短时凭据，不落盘第二份。
 
-## 8. 迁移步骤与回滚
+凭据的实际分布（按代码更正，之前写的「daemon 通过本机通道拿短时凭据」是错的）：
 
-1. `db.ts` / `remote-history.ts` 的 userData 注入化（不动行为，测试不变）。
-2. `trace-runtime.ts` 拆成「事件源」与「renderer 转发」两半；App 侧先接本地实现。
-3. `createHostRuntime` 在 daemon 内跑起来（影子模式，`SCRY_HOST_DAEMON=1`，台账锁决定单写者）。
-4. 本机通道成为 App 的唯一运行入口；main 不再组装宿主。
-5. 删除进程内宿主与 App 直连 SQLite。
-6. 每一步都有回滚点：回滚 = 关掉 `SCRY_HOST_DAEMON`，App 回到进程内宿主（第 5 步之后回滚需要保留一段兼容期）。
+| 凭据 | 现在在哪 | 迁移后 |
+|---|---|---|
+| 宿主身份私钥与证书 | `host-identity.ts` 写的 `0600` 文件，路径在 userData | 随 daemon 走：daemon 直接读同一份 `0600` 文件，不经 App |
+| 桌面端连**别的**宿主的配对凭据 | `src/main/bootstrap/remote-connections.ts` 的 `DesktopRemoteClient`，`safeStorage` 加密 | 留在 App：这是「本机作为客户端」的能力，与 daemon 无关 |
+| Provider 认证（登录、token、订阅） | 各 Provider CLI/SDK 自己管理的文件 | **不经 Scry 存储**，daemon 只负责以同一用户身份启动 Provider，不搬运、不缓存、不落第二份 |
+
+`safeStorage` 不参与 Provider 认证，因此 daemon 不需要任何「凭据通道」：它需要的一切要么是它自己 userData 里的 `0600` 文件，要么由 Provider 自己读取。
+
+## 8. 迁移步骤与进度
+
+| 步骤 | 内容 | 状态 |
+|---|---|---|
+| 1 | `db.ts` / `app-store.ts` / `remote-history.ts` / `mcp-execution-trust.ts` 的 userData 注入化（不动行为） | Batch 3 · B3-M1 |
+| 2 | `trace-runtime.ts` 拆成「事件源」与「renderer 转发」；run 管线对 `app`/`BrowserWindow`/`webContents` 的依赖改为注入 | Batch 3 · B3-M2 |
+| 3 | daemon 进程承载宿主（`SCRY_HOST_DAEMON=1` 只是开发期开关，台账锁决定单写者） | Batch 3 · B3-P1 |
+| 4 | 本机通道成为 App 的唯一运行入口；main 不再组装宿主 | Batch 4 |
+| 5 | 删除进程内宿主与 App 直连 SQLite | Batch 4 |
+
+本批（Batch 3）做到第 3 步，且只验证「daemon 能承载远程宿主并真跑 run」；App 仍用进程内宿主，两者不共存于同一 userData（`SCRY_HOST_DAEMON` 决定启动哪一条，默认关闭）。
+
+回滚：Batch 3 之后关掉 `SCRY_HOST_DAEMON` 即回到进程内宿主；Batch 4 合入前删除进程内宿主与 App 直连 SQLite，**不保留兼容版本**（Scry 未对外发布，见 REVIEW-BATCH2 更正 3）。
+
+## 8.1 daemon 用什么运行时（REVIEW-BATCH2 更正 2 要求的补充）
+
+`better-sqlite3` 按 **Electron ABI** 编译并在打包产物里 `asarUnpack`，普通 Node 加载不了同一个 `.node`。可选方案：
+
+| 方案 | 结论 |
+|---|---|
+| 系统 Node + 第二份原生构建 | 否：要维护两套 ABI 的 `better-sqlite3`，且 Node 版本由用户机器决定 |
+| `utilityProcess.fork` | 否：Electron 的 utility 进程随 App 退出，不满足「关闭 App 后 run 继续」 |
+| **App 自带 Electron 可执行文件 + `ELECTRON_RUN_AS_NODE=1`** | **采用**：同一个已签名二进制、同一 ABI、同一 Node 版本，不需要第二份原生构建；进程独立于 App 主进程，App 退出后仍活着。开发期用 `node_modules/.bin/electron` |
+
+采用 RunAsNode 有意的取舍：它让 Electron 可执行文件以纯 Node 运行（无 `app`、无窗口、无 GPU），所以 daemon 代码路径**不得**依赖任何 Electron API——这正是 B3-M1/M2 的目标，也由导入图测试守住。若将来 Electron 收紧 RunAsNode，替代路径是用同一二进制的独立入口重新评估，而不是退回系统 Node。
+
+启动环境同样适用 App 的规则：清洗后的环境（不继承调用者的任意外部变量）、私有 CLI 用**绝对路径**（`process.resourcesPath` 下）、`runAsNode` 子进程不得把 Electron 相关变量当成可信输入。
 
 ## 9. 测试计划
 
@@ -98,5 +126,6 @@
 1. daemon 是否独占 SQLite（本文建议独占），还是 App 保留只读连接（会有 WAL 语义与「读到半截」的风险）。
 2. 本机通道是否需要 `scope: local` grant 字段（现有 `DeviceGrant` 没有 scope）。
 3. `ProviderOperationGate` 由 daemon 独占后，App 的登录/重认证是否接受经过本机通道排队（会增加一次进程跳转）。
-4. 迁移期是否允许「App 直连 SQLite」与「daemon 独占」两条路径共存一段时间（本文建议保留一个版本），以及何时删除。
-5. daemon 崩溃后是否自动重启（本文建议由 supervisor 兜底，但要有退避与次数上限，且不掩盖失败）。
+4. daemon 崩溃后是否自动重启（本文建议由 supervisor 兜底，但要有退避与次数上限，且不掩盖失败）。
+
+已决定、不再列为待定的：迁移期**不保留**两条路径共存的兼容版本（REVIEW-BATCH2 明确）；`scope: local` grant 留到 Batch 4；unix socket 用 `0700` 目录 + `0600` socket + 属主 + mTLS，不引原生模块。
