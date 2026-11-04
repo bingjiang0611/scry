@@ -88,12 +88,16 @@ export abstract class DesktopRemoteClientConnections extends DesktopRemoteClient
       const response = await this.request(tunnel.runPath, item, { op: 'desktop', query: { kind: 'info' } })
       const capabilities = validateInfo(response, item.hostId)
       if (this.disposed) fail('desktop_client_disposed')
-      const baseline = await readRemoteSessionPages(async (request) => {
-        const response = await this.request(tunnel.runPath, item, request)
-        if (!record(response)) fail('invalid_catalog_response')
-        return response
-      })
-      this.attention?.baseline(item.id, baseline)
+      try {
+        const baseline = await readRemoteSessionPages(async (request) => {
+          const response = await this.request(tunnel.runPath, item, request)
+          if (!record(response)) fail('invalid_catalog_response')
+          return response
+        })
+        this.attention?.baseline(item.id, baseline)
+      } catch (error) {
+        if (this.disposed || !tunnel.alive) throw error
+      }
       await this.save(state, state.connections.map((connection) => connection.id === item.id ? { ...connection, autoConnect: true } : connection))
       this.active.set(item.id, { tunnel, serial: Promise.resolve(),
         ...(capabilities.attachments ? { attachments: capabilities.attachments } : {}),

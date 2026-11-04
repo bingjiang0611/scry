@@ -59,7 +59,7 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
       progress, output: vi.fn()
     })
     expect(startAppRun).toHaveBeenCalledWith(expect.objectContaining({ request: expect.objectContaining({
-      cwd: '/source', workspace
+      cwd: '/source', workspace, expectedExternalSessionId: null
     }) }))
     expect(progress).toHaveBeenCalledWith(expect.stringContaining('"cwd":"/managed/topic"'))
     const { run } = fakeRun(async () => ({ status: 'completed' }))

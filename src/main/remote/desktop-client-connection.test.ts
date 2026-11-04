@@ -56,6 +56,21 @@ describe('DesktopRemoteClient connection and receipt lifecycle', () => {
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
 
+  it('keeps an otherwise valid connection available when its attention baseline cannot be read', async () => {
+    const baseline = vi.fn()
+    const fixture = await setup({
+      attention: { baseline, catalog: () => [], viewed: () => {}, disconnect: () => {}, forget: () => {} },
+      sessionsResponse: () => ({ invalid: true })
+    })
+    try {
+      const pending = await fixture.client.pair({ label: 'Baseline unavailable', ssh, invitation: fixture.invitation })
+      await fixture.client.finishPairing(pending.connection.id)
+      await expect(fixture.client.connect(pending.connection.id)).resolves.toBeUndefined()
+      expect((await fixture.client.list())[0].state).toBe('connected')
+      expect(baseline).not.toHaveBeenCalled()
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
   it('reports an exited SSH tunnel as disconnected and rejects unsent work without creating an unknown receipt', async () => {
     const fixture = await setup()
     try {

@@ -33,15 +33,17 @@ export function viewRemoteSession(key: string | null, focused: boolean): void {
   }
 }
 
-export function useViewedRemoteSession(connectionId?: string, session?: RemoteSessionRef): void {
+export function useViewedRemoteSession(connectionId?: string, session?: RemoteSessionRef, connected = true): void {
   const key = connectionId && session?.externalSessionId ? remoteSessionAttentionKey(connectionId, session) : null
   useEffect(() => {
     const context: DesktopRemoteContext | null = session?.externalSessionId ? {
       cwd: session.cwd, providerId: session.providerId, externalSessionId: session.externalSessionId,
       ...(session.agentProfileId ? { agentProfileId: session.agentProfileId } : {})
     } : null
+    let lastFocused = false
     const update = (): void => {
-      const focused = document.hasFocus()
+      const focused = connected && document.hasFocus()
+      lastFocused = focused
       viewRemoteSession(key, focused)
       if (connectionId) void window.scry.desktopRemote.setViewedSession(connectionId, focused ? context : null).catch(() => {})
     }
@@ -52,9 +54,9 @@ export function useViewedRemoteSession(connectionId?: string, session?: RemoteSe
       window.removeEventListener('focus', update)
       window.removeEventListener('blur', update)
       viewRemoteSession(null, false)
-      if (connectionId) void window.scry.desktopRemote.setViewedSession(connectionId, null).catch(() => {})
+      if (connectionId && lastFocused) void window.scry.desktopRemote.setViewedSession(connectionId, null).catch(() => {})
     }
-  }, [connectionId, key, session?.agentProfileId, session?.cwd, session?.externalSessionId, session?.providerId])
+  }, [connected, connectionId, key, session?.agentProfileId, session?.cwd, session?.externalSessionId, session?.providerId])
 }
 
 export function remoteCatalogUnread(catalog: DesktopRemoteCatalog, viewedKey: string | null): ReadonlySet<string> {

@@ -60,7 +60,7 @@ export async function startCanonicalRemoteRun(input: RemoteRunInput, deps: Remot
         request: {
           prompt, cwd: routing.cwd, providerId: routing.providerId as AgentStartRequest['providerId'],
           ...(routing.agentProfileId ? { agentProfileId: routing.agentProfileId } : {}),
-          ...(resume ? { expectedExternalSessionId: resume } : {}), attachments,
+          ...(resume ? { expectedExternalSessionId: resume } : routing.workspace ? { expectedExternalSessionId: null } : {}), attachments,
           ...(routing.modelId ? { model: { id: routing.modelId, ...(routing.modelProviderId ? { providerId: routing.modelProviderId } : {}) } } : {}),
           ...(routing.effort ? { effort: routing.effort } : {}), ...(routing.permissionMode ? { permissionMode: routing.permissionMode } : {}),
           ...(routing.workspace ? { workspace: routing.workspace } : {})

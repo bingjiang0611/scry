@@ -124,6 +124,29 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
   const traceDelta = catalog?.traceDelta === 1
   const previousContextKey = useRef<string | undefined>(preparedHistory ? contextKey : undefined)
   const preparedHistoryContext = useRef<string | undefined>(preparedHistory ? contextKey : undefined)
+  const appliedPreparedHistory = useRef(preparedHistory)
+  useEffect(() => {
+    if (!preparedHistory || appliedPreparedHistory.current === preparedHistory) return
+    appliedPreparedHistory.current = preparedHistory
+    preparedHistoryContext.current = contextKey
+    if (preparedHistory.status === 'loading') {
+      setHistoryLoading(true)
+      return
+    }
+    setHistoryLoading(false)
+    if (preparedHistory.status === 'error') {
+      setHistoryError(preparedHistory.error)
+      return
+    }
+    setHistoryError(null)
+    setTurns(historyTurns(preparedHistory.history))
+    setHistoryEvidence({
+      status: preparedHistory.history.status, reason: preparedHistory.history.reason,
+      hasOlder: preparedHistory.history.hasOlder, before: preparedHistory.history.before,
+      snapshot: preparedHistory.history.snapshot
+    })
+    presentedHistoryContext.current = context
+  }, [context, contextKey, preparedHistory])
   const contextGeneration = useRef(0)
   const pollSequence = useRef(0)
   const pollInFlight = useRef<Promise<void> | undefined>(undefined)

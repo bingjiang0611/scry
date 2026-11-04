@@ -1,34 +1,27 @@
-// @ts-nocheck
-import { createHash, randomUUID } from 'node:crypto'
-import type { DesktopDirectoryPage, DesktopDirectoryQuery, DesktopDirectoryResult, DesktopHostRead, DesktopHostReadResult, DesktopRemoteContext, DesktopRemoteSessionAction, DesktopRemoteForkSessionRequest, DesktopRemoteDeleteSessionRequest, RemoteProviderQuery } from '../../shared/desktop-remote'
-import type { DeleteSessionResult, McpSnapshot } from '../../shared/provider'
-import type { LlmPerformanceHistory, LlmPerformanceSummary } from '../../shared/llm-performance'
-import { shapeAnalyticsPanel, shapeLlmPanel, shapeMcpPanel, shapeMcpScan, type ToolPanelPayload } from '../../shared/tool-panel'
-import type { UsageAnalytics, UsageAnalyticsRangeDays } from '../../shared/trace'
-import { parseDesktopDirectoryQuery } from './desktop-directory-picker'
-import { parseDesktopHostRead } from './desktop-host-reader'
-import { parseDesktopWorkbenchQuery } from './desktop-workbench'
-import { PairingAuthority, type PairingDependencies } from './pairing'
-import { SessionLedger, type LedgerStore, type RunLifecycle } from './session-ledger'
-import { RemoteGateway, scopedIntentId, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteDirectoryPage, type RemoteDirectoryPageQuery, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteCommandSource, type RemoteSessionRef, type RemoteSessionPage, type RemoteSessionPageQuery, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPage, type RemoteHistoryPageQuery, type RemoteHistorySource, type RemoteHistoryPreview, type RemoteHistoryPreviewSource, type RemoteHistoryVersion, type RemoteHistoryVersionSource, type RemoteHistoryTurnsPage, type RemoteHistoryTurnsPageQuery, type RemoteHistoryTurnsPageSource } from './remote-gateway'
-import { RunOutputLog, type RunOutputPage, type RunOutputStore } from './run-output-log'
-export type { RemoteProjectRef, RemoteDirectoryListing, RemoteDirectoryPage, RemoteDirectoryPageQuery, RemoteProviderRef, RemoteCommandRef, RemoteCommandCatalog, RemoteCommandQuery, RemoteSessionRef, RemoteSessionPage, RemoteSessionPageQuery, RemoteHistoryTurn, RemoteHistoryQuery, RemoteHistoryPreview, RemoteHistoryVersion, RemoteHistoryTurnsPage, RemoteHistoryTurnsPageQuery } from './remote-gateway'
-export type { RunOutputPage, OutputChunk } from './run-output-log'
+import { randomUUID } from 'node:crypto'
+import { PairingAuthority } from './pairing'
+import { SessionLedger, type RunLifecycle } from './session-ledger'
+import { RemoteGateway, scopedIntentId, type RemoteCommandSource, type RemoteHistorySource, type RemoteHistoryPreviewSource, type RemoteHistoryVersionSource, type RemoteHistoryTurnsPageSource } from './remote-gateway'
+import { RunOutputLog } from './run-output-log'
 import { RemoteDispatcher, type RemoteExecutor, type RemoteExecutorInput } from './remote-dispatcher'
-import { RemoteRunPolicy, GatedExecutor, RemoteRunDenied, type WorkspaceAuthorizer, type RemoteRunTarget } from './remote-run-policy'
-import { readRemoteWorkspace, type RemoteSessionStatus, type RemoteSessionStatusQuery } from './remote-workspace'
+import { RemoteRunPolicy, GatedExecutor, type WorkspaceAuthorizer } from './remote-run-policy'
+import { readRemoteWorkspace } from './remote-workspace'
 import { RemoteFileDownloads } from './remote-file-download'
 import { RemoteTerminalOwnership } from './remote-terminal-ownership'
 import { ProviderOperationGate } from '../provider-operation-gate'
-import { decodedBase64ByteLength, isAgentPermissionMode, isSupportedImageMimeType, type AgentPermissionMode, type AgentQuestionRequest, type AgentQuestionResponse } from '../../shared/runtime'
-import type { WorkspaceStartSelection } from '../../shared/workspace-selection'
-import { parseWorkspaceStartSelection } from '../../shared/workspace-selection-input'
+import type { AgentQuestionRequest, AgentQuestionResponse } from '../../shared/runtime'
 import { RemoteInteractionBroker, RemoteInteractionError, type RemoteQuestionAnswerReceipt } from './remote-interaction-broker'
-import { attachmentCapability, DesktopAttachmentStore, DESKTOP_ATTACHMENT_MAX_COUNT, DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES, DESKTOP_ATTACHMENT_MAX_BYTES, type DesktopAttachmentReference } from './desktop-attachments'
-import type { RemoteIntentAttachment, RemoteIntentRouting, MacRunView, MacRunSource, LiveRunRef, ToolPanelSources, HostControllerDependencies } from './host-controller-contracts'
+import { DesktopAttachmentStore, type DesktopAttachmentReference } from './desktop-attachments'
+import type { RemoteIntentRouting, MacRunSource, HostControllerDependencies } from './host-controller-contracts'
 import { parseRouting, sessionMarkerId, stampAttachmentPeer, HOST_RESTARTED_DETAIL, REMOTE_RUN_ID } from './host-controller'
 
-export class HostControllerBase {
+export abstract class HostControllerBase {
+  protected abstract authorizeDevice(peerCertSHA256: string): void
+  protected abstract notifyChange(): void
+  protected abstract resolveAttachments(routing: RemoteIntentRouting): Promise<RemoteIntentRouting>
+  protected abstract releaseAttachments(routing: RemoteIntentRouting): Promise<void>
+  protected abstract isRemoteRun(runId: string): boolean
+  protected abstract macRun(runId: string): import('./host-controller-contracts').MacRunView
   readonly authority: PairingAuthority
   readonly terminals = new RemoteTerminalOwnership()
   ledger: SessionLedger

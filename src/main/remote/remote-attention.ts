@@ -26,7 +26,7 @@ export function createRemoteAttentionTracker(publish: RemoteAttentionSink): Remo
   const viewed = new Map<string, string | null>()
 
   const flush = (): void => {
-    publish([...unread.values()].flatMap((keys) => [...keys]))
+    publish([...unread].flatMap(([connectionId, keys]) => sessions.has(connectionId) ? [...keys] : []))
   }
 
   const recompute = (connectionId: string): ReadonlySet<string> => {
@@ -70,7 +70,7 @@ export function createRemoteAttentionTracker(publish: RemoteAttentionSink): Remo
     // Disconnect clears visible attention but keeps the last observed catalog as
     // the reconnect baseline. Forgetting the host removes that retained identity.
     disconnect(connectionId): void {
-      sessions.delete(connectionId); unread.delete(connectionId); viewed.delete(connectionId)
+      sessions.delete(connectionId); viewed.delete(connectionId)
       flush()
     },
     forget(connectionId): void {
