@@ -13,20 +13,15 @@
 | B3-M1 存储注入化 | **未开始** | — | |
 | B3-M2 运行管线去 Electron 化 | **未开始** | — | |
 | B3-P1 daemon 承载宿主 | **未开始** | — | |
-| B3-V1 security smoke 归属 | **未开始** | — | |
+| B3-V1 security smoke 归属 | 完成（结论：非回归，调用方式错误） | `见下` | [b3-v1](status/b3-v1.md)：无 `--dev` 时脚本跑的是 0.2.220 旧产物，源码 0.2.237；`--dev` 下起点与当前 HEAD 均通过 |
 | 交付前全局验证 | **未执行** | — | |
 
-## 未开始的原因（如实记录）
+## 剩余任务的执行顺序（不得跳序）
 
-本批剩余任务的规模与依赖关系要求连续多轮改代码并反复跑全量门禁（B3-M2 一项就要改 `run-*.ts`、`trace-runtime.ts`、`conversation.ts`、`app-agent.ts`、`agent-runner.ts`、`source-control`、`desktop-workbench` 的 6 类 Electron 依赖注入，且必须保持行为不变；B3-P1 依赖 M1、M2 完成）。本次会话的上下文预算在 F2 之后不足以完成任何一个后续任务并留下可验证的证据，因此没有开工，而不是先写一半再放弃。
-
-下一步的执行顺序（不得跳序）：
-
-1. **B3-V1** —— 与其他任务无依赖，可先做，用临时 worktree 在 `a0b2355` 与 `aada148` 复跑 security smoke，确定失败归属。
-2. **B3-F1** —— 独立于 M1/M2；修 S1 的尾沿与跟随 run 的内容读取。
-3. **B3-D** —— 纯文档，按 REVIEW-BATCH2 三处更正改 `P3b-local-runtime-design.md`。
-4. **B3-M1** → **B3-M2** → **B3-P1** —— 严格串行。
-5. 交付前全局验证 + `npm run test:renderer:ui`。
+1. **B3-F1** —— 独立于 M1/M2；修 S1 的尾沿与跟随 run 的内容读取（下一步）。
+2. **B3-D** —— 纯文档，按 REVIEW-BATCH2 三处更正改 `P3b-local-runtime-design.md`。
+3. **B3-M1** → **B3-M2** → **B3-P1** —— 严格串行。
+4. 交付前全局验证 + `npm run test:renderer:ui`。
 
 ## 阻塞
 
