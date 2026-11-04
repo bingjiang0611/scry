@@ -12,10 +12,12 @@
 
 | 指标 | 基线 | 最新 | 变化 | 证据级别 |
 | --- | --- | --- | --- | --- |
-| hookwrap / daemon fast path / clean, 0 tools / wrapped.hookTotalPerTurn | 4764.3 ms | 未测出 | 包装路径的结束段收益小于其自身噪声，见 `results/final-20261104/README.md` | – |
-| hookwrap / daemon fast path / clean, 5 tools / wrapped.hookTotalPerTurn | 3970.5 ms | 未测出 | 同上 | – |
+| hookwrap / daemon fast path / clean, 0 tools / wrapped.hookTotalPerTurn | 4765.0 ms | 4477.4 ms | −287.6（−6%），未过 10% 门槛；同路径 `plain.stop` −17% 算数 | L2（仅结束段） |
+| hookwrap / daemon fast path / clean, 5 tools / wrapped.hookTotalPerTurn | 3908.7 ms | 3754.6 ms | −154（−3.9%），未过门槛 | 未过门槛 |
 | recorder / daemon fast path / clean, 0 tools / gitCalls.turnStart | 28 | 28 | 未变 | 基线 |
 | recorder / daemon fast path / clean, 0 tools / gitCalls.stop | 47 | 36 | −11（每个仓库一次） | L1 |
+| recorder / daemon fast path / clean, 0 tools / stop | 1161.7 ms | 996.2 ms | −165.5（−14.3%，p ≈ 1.6e-5） | L2 |
+| recorder / daemon fast path / dirty, 5 tools / stop | 1506.7 ms | 1347.7 ms | −159（−10.6%） | L2 |
 | hookwrap / wakeup launcher | 178.6 ms | 178.6 ms | 未变（跳过唤醒的改动不成立，已回退） | 基线 |
 | recorder / CLI fallback / clean, 30 tools / hookTotalPerTurn | 32073.8 ms | 受 recorder 改动影响的是结束段：`stop` 1897.0 → 1530.8 ms（−19.3%） | −366 ms（结束段） | L2（局部） |
 | uploader / backlog 500, fake latency 0ms / recordsPerSecond | 测不到 | 测不到 | A/A 未跑 `uploader` 阶段；由 uploader 实验的基线侧补齐 | – |
@@ -27,7 +29,7 @@
 
 | # | 机会 | 指标 | 预期 | 置信度 | 状态 | 实验 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 轮次结束候选发现重建隔离 index（每个改动仓库一次 `read-tree --reset` 并丢掉 stat cache） | `gitCalls.stop`、结束耗时 | 结束 git 调用 −1/仓库 | 高 | 已保留 | `20261104-recorder-end-index-reuse` |
+| 1 | 轮次结束候选发现重建隔离 index（每个改动仓库一次 `read-tree --reset` 并丢掉 stat cache） | `gitCalls.stop`、结束耗时 | 结束 git 调用 −1/仓库 | 高 | 已保留（PR #25） | `20261104-recorder-end-index-reuse` |
 | 2 | uploader 包装的 hook 在队列空时仍启动一次 Node 唤醒 | `hookwrap / wakeup launcher`、`wrapped.turnStart` | 每轮省掉 0–2 次启动（约 180 ms/次） | 曾经为高，实测后否 | 不成立 | `20261104-uploader-idle-wakeup` |
 | 3 | 每次上传都重新问一遍工具参数契约（每轮一个新进程，进程内缓存活不过一轮） | `wrapped.stop`、`transportRequests` | 每轮省 1 次传输调用（约 200–400 ms，低于 10% 门槛） | 中→低 | 未验证，已回退 | `20261104-uploader-contract-probe` |
 | 4 | CLI 回退模式下每个工具事件重新加载整个 CLI（30 个工具事件 ~29.4 s，约 0.98 s/事件） | `recorder / CLI fallback` 的 `toolEvent`、`hookTotalPerTurn` | 每事件降到 0.5 s 以内 | 中 | 待做（缺测量口径） | – |
@@ -56,4 +58,5 @@
 | 2026-11-04 | recorder 结束复用启动 index | IMPROVED（计数 47 → 36，结束耗时 −20.5%，变差 0） | L1 | `38686164` |
 | 2026-11-04 | uploader 空闲唤醒跳过 | 不成立：候选运行上传 0/74（队列为空=尚未发现），已回退 | – | `8487a382`（记录） |
 | 2026-11-04 | uploader 跨进程复用契约探测 | 未验证：候选运行上传 0/74，原因未定位；收益低于门槛，已回退 | – | `05ca6e67`（记录） |
-| 2026-11-04 | 最终对比（基线 vs 最终候选） | REGRESSION，但变差项在轮次开始、同侧跨度 485 ms、会话被负载打断 → 只复核计数（47/47 → 36/36），耗时结论需重跑 | L1（计数） | `results/final-20261104/` |
+| 2026-11-04 | 最终对比（基线 vs 最终候选，首轮） | REGRESSION，变差项在轮次开始、同侧跨度 485 ms、会话被负载打断 → 作废 | – | `results/final-20261104/` |
+| 2026-11-04 | 最终对比重跑（安静窗口） | **IMPROVED**：变好 49（计数 32、耗时 17），变差 0，计数不稳定 0；`stop` 1161.7 → 996.2 ms（−14.3%），计数 47/47 → 36/36 | L1 + L2 | `results/final-rerun-20261104/` |
