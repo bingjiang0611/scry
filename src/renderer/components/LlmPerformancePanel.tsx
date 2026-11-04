@@ -6,7 +6,7 @@ import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY } from '../constants/copy'
 import { LLM_PERFORMANCE_COPY as copy } from '../constants/llm-performance-copy'
 import { MetricChart, MetricHelp, ModelComparison } from './LlmPerformanceCharts'
-import { compareModels, formatMetric, type RangeHours } from './llm-performance-data'
+import { compareModels, type RangeHours } from './llm-performance-data'
 import './llm-performance.css'
 
 const RANGES: RangeHours[] = [1, 24, 168]
@@ -106,7 +106,6 @@ export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose:
           <div className="llm-perf-detail-head">
             <div>
               <h3 id={`${titleId}-detail`} className="llm-perf-detail-title"><i aria-hidden="true" style={{ background: colorOf(current.model) }} />{current.model}</h3>
-              <p className="llm-perf-detail-summary">{current.waitSummary ? copy.firstTokenSummary(formatMetric(current.waitSummary.median)) : copy.missingFirstToken}</p>
             </div>
             <div className="llm-perf-metric" role="group" aria-label={copy.metricLabel}>
               {(['speed', 'firstToken'] as const).map(item => <button key={item} type="button" aria-pressed={metric === item} onClick={() => setMetric(item)}>{copy.metrics[item].label}</button>)}

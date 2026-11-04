@@ -62,6 +62,7 @@ export async function exerciseLlmPerformanceSetup(contents, win, screenshot, nat
   if (JSON.stringify(readings) !== JSON.stringify([{model: 'fast-model', values: ['62.0','2.0']}, {model: 'slow-model', values: ['21.0','—']}])) throw new Error('Real comparison medians/missing evidence wrong: '+JSON.stringify(readings))
   if (!await read(`${modal}.querySelector('.llm-perf-mrow').children.length === 4 && ${modal}.querySelector('.llm-perf-detail-title').textContent === 'fast-model'`)) throw new Error('Four-column comparison or default selection wrong')
   if (!await read(`Array.from(${modal}.querySelectorAll('.llm-perf-metric button')).map(node => node.textContent).join(',') === 'TPS,TTFT'`)) throw new Error('Metric tabs do not use TPS and TTFT')
+  if (await read(`${modal}.querySelector('.llm-perf-detail-summary, .llm-perf-mhead small') != null`)) throw new Error('Removed metric summary or header units remain')
   if (await read(`${modal}.textContent.includes('999') || ${modal}.textContent.includes('unmeasured-model') || ${modal}.textContent.includes('字符/s')`)) throw new Error('Failed/missing history or legacy character units leaked')
   const range = await read(`${modal}.querySelector('.llm-perf-distribution').getAttribute('aria-label')`)
   if (!range.includes('最小 60.0') || !range.includes('最大 64.0') || !range.includes('P25')) throw new Error('Distribution missing accessible full range')

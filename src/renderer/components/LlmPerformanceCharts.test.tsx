@@ -11,8 +11,10 @@ const render = (groups: ReturnType<typeof compareModels>) => renderToStaticMarku
 describe('performance comparison rendering', () => {
   it('shows both real medians in four columns and keeps provisional counts explicit', () => {
     const html = render(compareModels([sample(1, 20), sample(2, 30, 'model', true)], [sample(1, 3), sample(2, 4)]))
-    expect(html).toContain('TPS 中位数<small>token/s</small>')
-    expect(html).toContain('TTFT 中位数<small>秒</small>')
+    expect(html).toContain('<span>TPS 中位数</span>')
+    expect(html).toContain('<span>TTFT 中位数</span>')
+    expect(html).not.toContain('<small>token/s</small>')
+    expect(html).not.toContain('<small>秒</small>')
     expect(html).toContain('aria-label="TPS 中位数">25.0</span>')
     expect(html).toContain('aria-label="TTFT 中位数">3.5</span>')
     expect(html).toContain('1 轮 · 1 暂计')

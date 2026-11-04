@@ -21,8 +21,8 @@ export function ModelComparison({ groups, selected, colorOf, onSelect }: {
   return <div className="llm-perf-comparison-scroll"><div className={`llm-perf-models ${motion.className}`}>
     <div className="llm-perf-mhead">
       <span>{copy.columns.model}</span><span>{copy.columns.distribution}</span>
-      <span>{copy.columns.speed}<small>{copy.metrics.speed.unit}</small></span>
-      <span>{copy.columns.firstToken}<small>{copy.metrics.firstToken.unit}</small></span>
+      <span>{copy.columns.speed}</span>
+      <span>{copy.columns.firstToken}</span>
     </div>
     {groups.map((group, index) => {
       const speed = group.speedSummary, wait = group.waitSummary

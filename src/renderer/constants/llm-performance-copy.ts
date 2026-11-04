@@ -25,8 +25,6 @@ export const LLM_PERFORMANCE_COPY = {
   rounds: (complete: number, running: number) => running ? `${complete} 轮 · ${running} 暂计` : `${complete} 轮`,
   roundsLabel: (metric: string, complete: number, running: number) => `${metric}：已完成 ${complete} 轮，运行中暂计 ${running} 轮`,
   waitRounds: (rounds: string) => `TTFT ${rounds}`,
-  firstTokenSummary: (value: string) => `TTFT 中位数 ${value} 秒`,
-  missingFirstToken: '暂无 TTFT 数据',
   chartLabel: (model: string, metric: string) => `${model} 的${metric}时间区间图。左右方向键查看测量，Home 和 End 跳到两端，Escape 关闭提示。`,
   intervalLabel: (stamp: string, count: number, median: string, min: string, max: string, unit: string, provisional: number) =>
     `${stamp}，${count} 轮，中位数 ${median} ${unit}，范围 ${min}–${max} ${unit}${provisional ? `，含 ${provisional} 轮暂计数据` : ''}`,
