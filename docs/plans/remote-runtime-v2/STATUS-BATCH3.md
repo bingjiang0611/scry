@@ -7,6 +7,7 @@
 
 | 任务 | 状态 | 提交 | 说明 |
 |---|---|---|---|
+| B3-F1 核验修复（F1-1/2/3） | 完成 | `见下` | [b3-f1-review](status/b3-f1-review.md)：跟随 run 首次发现即读、读取单飞、换 run 立即读；三项都先失败 |
 | B3-F1 trace 尾沿补读 | 完成 | `见下` | [b3-f1](status/b3-f1.md)：尾沿 + 跟随 run 按窗口读；L1 仍 60/min；另加 security smoke 产物版本闸门 |
 | B3-F2 Mac run 绑定发信号 | 完成 | `b95e47f` | [b3-f2](status/b3-f2.md) |
 | B3-D 设计稿三处更正 | 完成 | `见下` | [b3-d](status/b3-d.md)：§7 凭据如实拆分、新增 §8.1 daemon 运行时、§11 删除共存版本项、§8 加进度表 |

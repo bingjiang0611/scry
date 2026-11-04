@@ -80,6 +80,14 @@ export function errorText(error: unknown, host?: string): string {
 // many change reports arrive in between: an active run emits a ledger batch every
 // few hundred milliseconds, and reading on every report made one followed run cost
 // six times the trace reads the pre-long-poll renderer did per minute.
+// The external run whose content the renderer should follow, if any. A run started
+// on the host UI, a phone or another desktop is followed from the first time it is
+// seen: gating this on "was it already followed last poll" leaves the window that
+// discovered it unread.
+export function followedLiveRunId(live: { scryRunId?: string } | null | undefined): string | undefined {
+  return live?.scryRunId
+}
+
 export function needsTraceRead(state: { shownRunId?: string; runId: string; lastReadAt: number; now: number }): boolean {
   if (state.shownRunId !== state.runId) return true
   return state.now - state.lastReadAt >= TRACE_REFRESH_FLOOR_MS

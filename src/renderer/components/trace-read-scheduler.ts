@@ -42,10 +42,14 @@ export interface TraceReadScheduler {
 }
 
 export function createTraceReadScheduler(
-  read: (runId: string, reason: TraceReadReason) => void,
+  // The read may be asynchronous; while it is in flight no second read starts.
+  read: (runId: string, reason: TraceReadReason) => void | Promise<void>,
   environment: TraceReadEnvironment = browserEnvironment()
 ): TraceReadScheduler {
   let lastReadAt = Number.NEGATIVE_INFINITY
+  let lastRunId: string | undefined
+  let decidedRunId: string | undefined
+  let inFlight = false
   let pending: string | undefined
   let tail: number | undefined
   let liveRunId: string | undefined
@@ -66,13 +70,30 @@ export function createTraceReadScheduler(
   // the next visible report reads immediately.
   const perform = (runId: string, reason: TraceReadReason): boolean => {
     if (environment.isHidden()) return false
-    if (environment.now() - lastReadAt < TRACE_REFRESH_FLOOR_MS) return false
+    // One read at a time: a slow read keeps its turn instead of racing the next
+    // tick, which would merge two patches onto the same stale view.
+    if (inFlight) { pending = runId; return false }
+    if (runId === lastRunId && environment.now() - lastReadAt < TRACE_REFRESH_FLOOR_MS) return false
     lastReadAt = environment.now()
-    read(runId, reason)
+    lastRunId = runId
+    const result = read(runId, reason)
+    if (result && typeof result.then === 'function') {
+      inFlight = true
+      const settle = (): void => {
+        inFlight = false
+        const next = pending
+        pending = undefined
+        if (next) perform(next, 'tail')
+        else armLive()
+      }
+      void result.then(settle, settle)
+    }
     return true
   }
   const armTail = (): void => {
-    if (tail !== undefined || !pending) return
+    // While a read is in flight the tail waits for it to settle instead of arming
+    // a timer that would fire into the same guard.
+    if (tail !== undefined || !pending || inFlight) return
     tail = environment.setTimeout(() => {
       tail = undefined
       const runId = pending
@@ -84,7 +105,9 @@ export function createTraceReadScheduler(
   // the remaining part of the floor keeps the cadence without double reading; while
   // the page is hidden the timer keeps spinning but performs no read.
   const armLive = (): void => {
-    if (live !== undefined || !liveRunId) return
+    // Blocked reads resume from settle()/markRead(), so a chain never spins while
+    // one read is still outstanding.
+    if (live !== undefined || !liveRunId || inFlight) return
     live = environment.setTimeout(() => {
       live = undefined
       if (!liveRunId) return
@@ -98,9 +121,15 @@ export function createTraceReadScheduler(
 
   return {
     decide(runId) {
-      if (!environment.isHidden() && environment.now() - lastReadAt >= TRACE_REFRESH_FLOOR_MS) {
+      // A different run is read at once: moving from run A to run B in one session
+      // must not wait for A's floor to expire.
+      const differentRun = runId !== lastRunId
+      if (!environment.isHidden() && !inFlight && (differentRun || environment.now() - lastReadAt >= TRACE_REFRESH_FLOOR_MS)) {
         clearTail()
         pending = undefined
+        decidedRunId = runId
+        // The caller owns this read; it clears the slot with markRead().
+        inFlight = true
         return 'read-now'
       }
       pending = runId
@@ -109,8 +138,14 @@ export function createTraceReadScheduler(
     },
     markRead(at) {
       lastReadAt = at ?? environment.now()
+      lastRunId = decidedRunId ?? lastRunId
+      decidedRunId = undefined
+      inFlight = false
       clearTail()
+      const next = pending
       pending = undefined
+      if (next) perform(next, 'tail')
+      else armLive()
     },
     setLive(runId) {
       // Same run with the chain still armed is a no-op; same run with no timer

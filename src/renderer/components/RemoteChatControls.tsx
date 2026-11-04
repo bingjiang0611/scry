@@ -10,7 +10,7 @@ import { desktopProviderKey, historyTurns } from './DesktopRemote'
 import { initialRemoteRunControls, readRemoteRunControls, remoteRunControlsKey, writeRemoteRunControls } from '../remote-run-controls'
 import type { FoundationState } from './RemoteChatFoundation'
 import type { RemoteChatProps } from './RemoteChat'
-import { errorText, intentMatches, keepIfEqual, POLL_MS, QUIET_POLL_MAX_MS, remoteDraftKey } from './RemoteChatShared'
+import { errorText, followedLiveRunId, intentMatches, keepIfEqual, POLL_MS, QUIET_POLL_MAX_MS, remoteDraftKey } from './RemoteChatShared'
 import { createTraceReadScheduler } from './trace-read-scheduler'
 
 // A conversation that executes on a saved remote Scry desktop. It renders the same
@@ -115,9 +115,10 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
     // once and the floor starts at request time, not at completion.
     const readNow = async (runId: string, sequence: number): Promise<boolean | undefined> => {
       const at = Date.now()
-      const changed = await followTrace(runId, sequence)
-      scheduler.markRead(at)
-      return changed
+      try { return await followTrace(runId, sequence) }
+      // The read was claimed by decide(); release it even when the read failed, or
+      // the tail and live paths would stay blocked forever.
+      finally { scheduler.markRead(at) }
     }
     const readPoll = async (): Promise<void> => {
       const sequence = ++pollSequence.current
@@ -148,7 +149,7 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
               traceChanged = await readNow(live.scryRunId, sequence)
               if (traceChanged === undefined) return
             }
-            scheduler.setLive(followed ? live.scryRunId : undefined)
+            scheduler.setLive(followedLiveRunId(live))
           } else { showTrace(null); scheduler.setLive(undefined) }
           settlePoll(JSON.stringify([pending, live]), traceChanged)
           setPollError(null)

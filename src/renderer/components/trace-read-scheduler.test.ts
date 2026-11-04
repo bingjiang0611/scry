@@ -35,7 +35,7 @@ describe('trace read tail edge', () => {
   it('reads a batch skipped inside the floor when the floor expires, without another report', () => {
     const { env, advance } = environment()
     const reads: Array<{ runId: string; at: number }> = []
-    const scheduler = createTraceReadScheduler((runId) => reads.push({ runId, at: env.now() }), env)
+    const scheduler = createTraceReadScheduler((runId) => { reads.push({ runId, at: env.now() }) }, env)
 
     expect(scheduler.decide('run-a')).toBe('read-now')
     reads.push({ runId: 'run-a', at: env.now() })
@@ -52,7 +52,7 @@ describe('trace read tail edge', () => {
   it('reads a followed run on the floor while it is live, not when a poll happens', () => {
     const { env, advance } = environment()
     const reads: number[] = []
-    const scheduler = createTraceReadScheduler(() => reads.push(env.now()), env)
+    const scheduler = createTraceReadScheduler(() => { reads.push(env.now()) }, env)
 
     scheduler.setLive('run-mac')
     advance(3_000)
@@ -82,7 +82,7 @@ describe('trace read tail edge', () => {
   it('keeps one read per floor when reports and live ticks overlap', () => {
     const { env, advance } = environment()
     const reads: number[] = []
-    const scheduler = createTraceReadScheduler(() => reads.push(env.now()), env)
+    const scheduler = createTraceReadScheduler(() => { reads.push(env.now()) }, env)
     scheduler.setLive('run-a')
     for (let elapsed = 0; elapsed < 3_000; elapsed += 100) {
       if (scheduler.decide('run-a') === 'read-now') { reads.push(env.now()); scheduler.markRead() }
@@ -99,7 +99,7 @@ describe('trace read tail edge', () => {
   it('pauses while the page is hidden and reads on the next report', () => {
     const { env, advance, hide, show } = environment()
     const reads: number[] = []
-    const scheduler = createTraceReadScheduler(() => reads.push(env.now()), env)
+    const scheduler = createTraceReadScheduler(() => { reads.push(env.now()) }, env)
     scheduler.setLive('run-a')
     hide()
     advance(5_000)
@@ -110,6 +110,44 @@ describe('trace read tail edge', () => {
     reads.push(env.now())
     scheduler.markRead()
     expect(reads).toEqual([5_100])
+    scheduler.dispose()
+  })
+})
+
+// A run that is not the one last read is read at once: a session that moves from
+// run A to run B must not wait for A's floor to expire.
+describe('run identity changes read at once', () => {
+  it('reads a different run immediately, even inside the floor', () => {
+    const { env } = environment()
+    const scheduler = createTraceReadScheduler(() => undefined, env)
+    expect(scheduler.decide('run-a')).toBe('read-now')
+    scheduler.markRead()
+    expect(scheduler.decide('run-a')).toBe('coalesced')
+    expect(scheduler.decide('run-b')).toBe('read-now')
+    scheduler.dispose()
+  })
+})
+
+// One read at a time per run: a slow read must not overlap the next tick.
+describe('single flight', () => {
+  it('does not start a second read while the first is still in flight', async () => {
+    const { env, advance } = environment()
+    let calls = 0
+    let resolve: () => void = () => {}
+    const scheduler = createTraceReadScheduler(() => {
+      calls += 1
+      return new Promise<void>((done) => { resolve = done })
+    }, env)
+    scheduler.setLive('run-a')
+    advance(300)
+    expect(calls).toBe(1)
+    advance(4_000)
+    // Four floors passed while the first read hangs: still one call, one pending request.
+    expect(calls).toBe(1)
+    resolve()
+    await Promise.resolve()
+    advance(1_000)
+    expect(calls).toBe(2)
     scheduler.dispose()
   })
 })

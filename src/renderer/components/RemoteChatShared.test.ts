@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { errorText, needsTraceRead, POLL_MS, TRACE_REFRESH_FLOOR_MS } from './RemoteChatShared'
+import { errorText, followedLiveRunId, needsTraceRead, POLL_MS, TRACE_REFRESH_FLOOR_MS } from './RemoteChatShared'
 
 // The renderer no longer ticks: the host long poll reports change. Content reads
 // coalesce on a floor instead of following every report.
@@ -43,5 +43,19 @@ describe('protocol refusal copy', () => {
 
   it('leaves unrelated errors alone', () => {
     expect(errorText(new Error('desktop_not_connected'))).toBe('desktop_not_connected')
+  })
+})
+
+// A run started elsewhere is followed for content from the first time it is seen.
+// Gating that on "was it already followed last poll" leaves its first window unread.
+describe('followed run selection', () => {
+  it('follows a live external run even before it was followed previously', () => {
+    expect(followedLiveRunId({ scryRunId: 'run-mac' })).toBe('run-mac')
+    expect(followedLiveRunId({ scryRunId: 'run-mac' })).toBe('run-mac')
+  })
+
+  it('follows nothing when no external run is live', () => {
+    expect(followedLiveRunId(null)).toBeUndefined()
+    expect(followedLiveRunId({})).toBeUndefined()
   })
 })
