@@ -33,3 +33,14 @@ V1、F2、D、db 拆分接受。M1 方向正确，但漏了两个直接调用 `i
 ## 下一步
 
 先修 M1-1、F1-1、F1-2、F1-3（测量代码修复单独提交），然后进入 M2。M2 按设计 §8 第 2 步，可以拆成几次，每次单独过门禁。
+
+## 复核（`186b306`、`7ae84a6`、`00cdc9b`）
+
+- F1 三项（`186b306`）：接受。外部 run 首次发现即跟随；scheduler 单飞，`decide` 占位、`markRead` 在 `finally` 里释放；换 run 立即读。
+- M2-1（`00cdc9b`）：接受。`RunRendererSink` 注入，8 处发送与 focus 判定逐一替换，Electron 适配留在 `app-trace-runtime.ts`。
+- M1-1（`7ae84a6`）：注入与 `storage_not_configured` 直接抛出都对，但**引入了一个新失败**：
+
+**M1-2 必修：counters 测试在普通 Node 下 4 个全部失败，会让 Node CI 变红。**
+`vitest run`（`test:unit` / `test:coverage`）的默认 include 包含 `scripts/**`，所以这个文件在 Node CI 里是要跑的。新增的 `if (installed && injected) expect(db.statsQuery().status).toBe('ready')` 里，`installed` 只说明 `import('better-sqlite3')` 这个 JS 模块加载成功；原生 binding 是在 `new Database()` 时才加载的，普通 Node 下会因为 ABI 不符而失败。于是 `installed` 为真，SQLite 却不可用，断言失败。
+status 里说「stash 掉改动重跑同样 4 个失败，是既有问题」，这和我的复跑结果不符：同一文件在 `01bca85` 和 `ee2c933` 上普通 Node 都是 4 passed（走 unavailable 分支），在 `7ae84a6` 上是 4 failed（`expected 'unavailable' to be 'ready'`）。
+修法：`installCounter()` 里实际打开一次 `new Database(':memory:')` 并关闭，打开失败就返回 false，这样 `installed` 表示「原生 SQLite 可用」。验证：普通 Node 下 4 passed（unavailable 分支）；Electron 收集器下三个指标仍是 measured；`performance:measure -- --compare 01bca85` 仍无 unavailable。这是测量代码，单独提交。
