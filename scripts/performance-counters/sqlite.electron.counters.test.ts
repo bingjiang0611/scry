@@ -29,6 +29,14 @@ afterAll(() => rmSync(root, { recursive: true, force: true }))
 async function installCounter(): Promise<boolean> {
   let Database: { prototype: { prepare: (sql: string) => object; exec: (sql: string) => unknown } }
   try { Database = (await import('better-sqlite3')).default as never } catch { return false }
+  // The JS module loads even when the native binding does not: better-sqlite3 is
+  // built for Electron's ABI, and the binding is resolved on the first Database.
+  // Open one in memory so `installed` means "SQLite really works here", not "the
+  // wrapper resolved".
+  try {
+    const probe = new (Database as unknown as new (path: string) => { close: () => void })(':memory:')
+    probe.close()
+  } catch { return false }
   const prototype = Database.prototype
   const prepare = prototype.prepare
   const exec = prototype.exec

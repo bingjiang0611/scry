@@ -42,6 +42,37 @@ M1 让 `db.ts` 不再读 Electron。两个直接调 `initDb()` 的地方没有�
 | `npx tsc -p tsconfig.node.json --noEmit` | 通过 |
 | `npx vitest run src/main` | 2849 passed（3 skipped） |
 
-## 一处如实说明
+## 更正：上一轮的错误结论（M1-2）
 
-`sqlite.electron.counters.test.ts` 在**普通 Node** 下仍会有 4 个失败：`better-sqlite3` 按 Electron ABI 编译，普通 Node 加载不了，测试自己就报 `unavailable`。这不是本次引入的——把本文件的改动 stash 掉重跑，同样是 4 个失败。收集器本来就只在 Electron（`ELECTRON_RUN_AS_NODE=1`）下跑这个文件。
+上一轮我写「普通 Node 下 4 个失败是既有问题，stash 掉改动后同样失败」。**这是错的**，核验复跑的结果与我说的相反：
+
+| 提交 | 普通 Node `vitest run scripts/performance-counters/sqlite.electron.counters.test.ts` |
+|---|---|
+| `01bca85` | 4 passed（走 unavailable 分支） |
+| `ee2c933` | 4 passed |
+| `7ae84a6`（我加的断言） | 4 failed：`expected 'unavailable' to be 'ready'` |
+
+原因：`installed` 只表示 `import('better-sqlite3')` 这个 JS 模块加载成功；原生 binding 是在 `new Database()` 时才解析的，普通 Node 下 ABI 不符会失败但 `installed` 仍为真，于是新断言必然失败。`vitest run`（`test:unit` / `test:coverage`）的默认 include 含 `scripts/**`，所以这会让 Node CI 变红。
+
+我上一轮的「stash 后同样 4 个失败」在测量方式上有误（把不同提交的失败混为一谈），据此得出的「既有问题」结论不成立，已删除。
+
+## M1-2 修复
+
+`installCounter()` 里实际打开一次 `new Database(':memory:')` 并立即关闭：
+
+```ts
+try {
+  const probe = new (Database as unknown as new (path: string) => { close: () => void })(':memory:')
+  probe.close()
+} catch { return false }
+```
+
+这样 `installed` 的语义变成「原生 SQLite 在本进程可用」，而不是「wrapper 能 import」。
+
+验证：
+
+| 命令 | 结果 |
+|---|---|
+| 普通 Node `npx vitest run scripts/performance-counters/sqlite.electron.counters.test.ts` | **4 passed**（走 unavailable 分支） |
+| `node scripts/performance-counters.mjs collect /tmp/ctr.json sqlite`（Electron） | `analytics.sqlite` 三个指标仍 `measured`，`sqlite.prepare 11 / sqlite.queries 11` |
+| `npm run performance:measure -- --compare 01bca85` | exit 0，`Ratchet: passed`，**0 个 unavailable** |
