@@ -104,6 +104,18 @@ function prepareCopy(source, work) {
     }
     writeFileSync(join(target, MARKER), JSON.stringify({ source, copiedAt: new Date().toISOString(), copyMs: Math.round(now() - started) }))
   }
+  // A nested repository whose `.git` is a file (linked worktree, absorbed submodule) points at a git
+  // directory. If that directory is outside the copy, git commands in the copy (the dirty scenario
+  // edits and restores files) would write the source's index. Refuse instead.
+  const outside = []
+  for (const repo of nestedRepositories(target)) {
+    const dotgit = join(repo, '.git')
+    if (!statSync(dotgit).isFile()) continue
+    const line = readFileSync(dotgit, 'utf8').split('\n').find((l) => l.startsWith('gitdir:'))
+    const gitdir = line && resolve(repo, line.slice('gitdir:'.length).trim())
+    if (!gitdir || gitdir !== target && !gitdir.startsWith(target + '/')) outside.push(`${relative(target, repo)} -> ${gitdir ?? 'unreadable'}`)
+  }
+  if (outside.length) throw new Error(`nested repositories in the copy point at git directories outside it (worktrees or external git dirs); git in the copy would change the source:\n  ${outside.join('\n  ')}\nUse a source whose nested repositories are plain clones or submodules with relative git dirs.`)
   // The copy must not inherit the source's recorder data or upload configuration.
   rmSync(join(target, '.scry'), { recursive: true, force: true })
   const config = join(target, 'scry.config.json')
