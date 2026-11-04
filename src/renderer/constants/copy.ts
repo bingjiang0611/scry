@@ -146,6 +146,9 @@ export const BACKGROUND_WORK_COPY = {
 
 export const OVERVIEW_SESSION_COPY = {
   heading: '会话',
+  dataDimensions: '总览数据维度',
+  callCount: (count: number) => `${count} 次调用`,
+  turnCount: (count: number) => `${count} 轮`,
   context: '上下文占用',
   contextUnavailable: '暂无上下文数据',
   id: 'ID',

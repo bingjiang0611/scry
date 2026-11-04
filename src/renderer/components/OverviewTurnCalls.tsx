@@ -4,6 +4,7 @@ import type { TraceEvent, TurnDiffSnapshot } from '@shared/trace'
 import type { FileRow } from '../format'
 import { basename, fileBadge } from '../format'
 import { displayDiffPath } from '../turn-diff'
+import { OVERVIEW_SESSION_COPY } from '../constants/copy'
 import { TurnToolErrorDetails } from './OverviewToolErrors'
 import { HooksSummary } from './ChatTurn'
 import { Icon } from './primitives/Icon'
@@ -97,7 +98,7 @@ export function OverviewTurnCalls({
         <div className="panel-section turn-calls-section">
           <h4>
             每轮调用
-            <span className="more">{rows.length} turns</span>
+            <span className="more">{OVERVIEW_SESSION_COPY.turnCount(rows.length)}</span>
           </h4>
           <div className="turn-call-list">
             {rows.map((row) => {

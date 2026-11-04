@@ -191,7 +191,7 @@ function OverviewPanelBody({
               <span className={`sdot ${vstate}`} />
               <strong>{judge}</strong>
             </div>
-            <em>{calls.totalCalls} calls</em>
+            <em>{OVERVIEW_SESSION_COPY.callCount(calls.totalCalls)}</em>
           </header>
           <div className="overview-metric-grid">
             <div className="overview-metric accent lead">
@@ -227,7 +227,7 @@ function OverviewPanelBody({
       )}
 
       {turns.length > 0 && (
-        <div className="overview-data-tabs" role="tablist" aria-label="纵览数据维度">
+        <div className="overview-data-tabs" role="tablist" aria-label={OVERVIEW_SESSION_COPY.dataDimensions}>
           <button
             type="button"
             id="overview-turns-tab"

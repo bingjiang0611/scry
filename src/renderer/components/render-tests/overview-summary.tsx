@@ -218,7 +218,7 @@ it('TOP TOOLS 段：tool+mcp 合并排名 + mini-bar', () => {
   })
 it('每轮调用段：按 turn 聚合工具并可跳回该轮用户消息', () => {
     expect(html).toContain('每轮调用')
-    expect(html).toContain('1 turns')
+    expect(html).toContain('1 轮')
     expect(html).toContain('aria-label="跳到第 1 轮，对话中共 3 次工具/Skill/MCP/子 Agent 调用"')
     expect(html).toContain('创建并读回文件')
     expect(html).toContain('turn-call-group turn-call-toggle timing')
@@ -254,7 +254,7 @@ it('纵览按轮次与会话拆成二级 tab，并把会话汇总放入会话数
     const turnsPanel = tabHtml.slice(tabHtml.indexOf('id="overview-turns-panel"'), tabHtml.indexOf('id="overview-session-panel"'))
     const sessionPanel = tabHtml.slice(tabHtml.indexOf('id="overview-session-panel"'))
 
-    expect(tabHtml).toContain('aria-label="纵览数据维度"')
+    expect(tabHtml).toContain('aria-label="总览数据维度"')
     expect(tabHtml).toMatch(/id="overview-turns-tab"[^>]*aria-selected="true"/)
     expect(tabHtml).toMatch(/id="overview-session-tab"[^>]*aria-selected="false"/)
     expect(turnsPanel).toContain('每轮调用')

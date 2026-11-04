@@ -2,7 +2,7 @@ export async function runWorkbench({ driver }) {
   const { contents, read, wait, check, click, capture, pointFor, send, insert, fixture, remoteShown } = driver
   await click('button[aria-label="右侧工作区"]')
   const remotePanel = '#remote-right-surface-pane'
-  await wait(`document.querySelector('${remotePanel} [role=tab][aria-selected=true]')?.textContent.includes('纵览')`, 'remote uses normal overview tab')
+  await wait(`document.querySelector('${remotePanel} [role=tab][aria-selected=true]')?.textContent.includes('总览')`, 'remote uses normal overview tab')
   await click(remotePanel + ' .turn-call-open')
   const aligned = `(() => { const prompt = document.querySelector('.turn-jump-target .turn-user'); const chat = document.querySelector('.chat-transcript'); if (!prompt || !chat?.clientHeight) return false; const offset = prompt.getBoundingClientRect().top - chat.getBoundingClientRect().top; return offset >= 0 && offset < 64; })()`
   await wait(aligned, 'remote overview turn ID navigates to its visible user prompt')

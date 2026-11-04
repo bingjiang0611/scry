@@ -111,15 +111,15 @@ export async function prepareSideChatDrafts({ cdp, evaluate, check, ipcCountsPat
   // The tool tab first: this is the chooser card, the same shipped surface entry a user
   // clicks when nothing is open.
   await wait(`[...document.querySelectorAll('${SIDE_CHAT_SURFACE} .surface-card')]
-    .some(node => node.querySelector('strong')?.textContent.trim() === '纵览')`, 10000)
+    .some(node => node.querySelector('strong')?.textContent.trim() === '总览')`, 10000)
   await clickAt(`[...document.querySelectorAll('${SIDE_CHAT_SURFACE} .surface-card')]
-    .find(node => node.querySelector('strong')?.textContent.trim() === '纵览')`)
+    .find(node => node.querySelector('strong')?.textContent.trim() === '总览')`)
   await wait(`document.querySelector('${SIDE_CHAT_SURFACE} [data-surface-tab="tool"]') != null`)
   for (const child of [pendingChild, childId, ordinaryChild]) await openChildFromHistory(child)
   await click(`[data-side-chat-tab-id="${childId}"] [role="tab"]`)
   await wait(`document.querySelector('${CHILD_PANEL} .side-chat-surface')?.dataset.sideChatId === ${json(childId)}`)
   await idle()
-  const layout = { tool: '纵览', children: [pendingChild, childId, ordinaryChild], active: childId }
+  const layout = { tool: '总览', children: [pendingChild, childId, ordinaryChild], active: childId }
   let workbench = await readWorkbench(evaluate, layout.children)
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const settled = workbench.saved != null &&

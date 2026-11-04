@@ -28,6 +28,12 @@ export async function exerciseOverviewDensity(contents, screenshotPath) {
           sessionGap: session.top - metrics.bottom, tabsGap: tabs.top - session.bottom,
           firstTurnTop: firstTurn.top, overflow: document.querySelector('.ov-scroll').scrollWidth > ${width},
           columns: getComputedStyle(document.querySelector('.overview-metric-grid')).gridTemplateColumns.split(' ').length,
+          turnColumns: getComputedStyle(document.querySelector('.turn-call-groups')).gridTemplateColumns.split(' ').length,
+          truncatedTurnLabels: Array.from(document.querySelectorAll('.turn-call-kind')).filter(label => label.scrollWidth > label.clientWidth + 1).map(label => label.textContent),
+          turnRowRadius: getComputedStyle(document.querySelector('.turn-call-row')).borderRadius,
+          contextTrackHeight: document.querySelector('.ctx-track').getBoundingClientRect().height,
+          leadFontSize: getComputedStyle(document.querySelector('.overview-metric.lead > strong')).fontSize,
+          metricLabelTransform: getComputedStyle(document.querySelector('.overview-metric.lead + .overview-metric > span')).textTransform,
           metricCount: document.querySelectorAll('.overview-metric').length,
           hasInputOutput: Array.from(document.querySelectorAll('.overview-metric > span')).some(label => label.textContent === '输入 / 输出'),
           hasTitleSubtitle: document.querySelector('.overview-panel-title span') != null,
@@ -37,7 +43,7 @@ export async function exerciseOverviewDensity(contents, screenshotPath) {
         const image = await contents.capturePage({ x: 0, y: 0, width, height: 650 })
         require('node:fs').writeFileSync(screenshotPath, image.toPNG())
       }
-      if (geometry.headerHeight > 48 || geometry.contextGap > 16 || geometry.sessionGap > 16 || geometry.tabsGap > 12 || geometry.firstTurnTop > 460 || geometry.overflow || geometry.columns !== 2 || geometry.metricCount !== 3 || geometry.hasInputOutput || geometry.hasTitleSubtitle || geometry.hasTurnFootnote) {
+      if (geometry.headerHeight > 48 || geometry.contextGap > 16 || geometry.sessionGap > 16 || geometry.tabsGap > 12 || geometry.firstTurnTop > 460 || geometry.overflow || geometry.columns !== 2 || geometry.turnColumns !== 3 || geometry.truncatedTurnLabels.length > 0 || geometry.turnRowRadius !== '0px' || geometry.contextTrackHeight !== 6 || geometry.leadFontSize !== '24px' || geometry.metricLabelTransform !== 'none' || geometry.metricCount !== 3 || geometry.hasInputOutput || geometry.hasTitleSubtitle || geometry.hasTurnFootnote) {
         throw new Error('Overview density ' + theme + '/' + width + ': ' + JSON.stringify(geometry))
       }
       results.push({ theme, width, ...geometry })
