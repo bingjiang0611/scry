@@ -25,7 +25,7 @@
 
 ## 一次性准备
 
-1. **工作区**：用已经执行过 `init.sh`、子仓库齐全的主检出作为 `--source`。不要改它；所有测量都在副本上。新建 worktree 做源时先执行 `init.sh`。结果里用别名：`--workload-name rn-shell`，不要写真实仓库名。
+1. **工作区**：用已经执行过 `init.sh`、子仓库齐全的主检出作为 `--source`。不要改它；所有测量都在副本上。`init.sh` 用普通 clone 拉子仓库，perf-bench 会把子仓库连同各自的 `.git` 一起写时复制，副本里的 git 操作不碰源。不要用 linked worktree 做 `--source`（perf-bench 会拒绝：副本会共享原索引）；没有合适的主检出时，另 `git clone` 一份并执行 `init.sh` 作为源。结果里用别名：`--workload-name rn-shell`，不要写真实仓库名。
 2. **协议映射放在仓库外**：把填好真实值的协议文件放到 `$HOME/scry-perf/climb/protocol.json`，所有命令加 `--protocol "$HOME/scry-perf/climb/protocol.json"`。仓库里的 `protocol.json` 保持公开别名，永远不改、不提交。
 3. **构建基线二进制**，放到不会被改动的目录：
    - recorder：在 scry 检出（本分支）执行 `npm ci && npm run build:cli`，把整个 `packages/turn-recorder-cli` 复制到 `$HOME/scry-perf/climb/bin/scry-base-<commit>/`，CLI 是其中的 `dist/cli/scry.js`。
