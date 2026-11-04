@@ -2,7 +2,6 @@ import { app, ipcMain, dialog, shell, type BrowserWindow, type IpcMainInvokeEven
 import { fileURLToPath } from 'node:url'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import type { AppRunStartOptions } from './bootstrap/run-frontdoor'
 import { startRun } from './bootstrap/run-execution'
 import { startWorkspaceRun } from './bootstrap/workspace-start'
 import { createForkOperations } from './bootstrap/run-fork'
@@ -15,16 +14,12 @@ import { SourceControlService } from './source-control/service'
 import { registerSourceControlIpc } from './source-control/ipc'
 import { registerWorkspaceSelectionIpc } from './source-control/workspace-ipc'
 import { readUsageStats } from './usage-jsonl'
-import { LlmNetworkConfigurationCache } from './llm-network-configuration'
 import {
   normalizeAgentForkSessionRequest,
-  type AgentForkSessionResult,
-  type AgentStartRequest,
-  type AgentStartResult
+  type AgentForkSessionResult
 } from '../shared/runtime'
 import { type ProviderContext, type ProviderId } from '../shared/provider'
 import { providerOperationKey } from './provider-operation-gate'
-import { CommandReceipts } from './command-receipts'
 import { RemoteHostService } from './remote/remote-host-service'
 import { registerDesktopClientIpc } from './remote/desktop-client-ipc'
 import { createRemoteAttentionTracker } from './remote/remote-attention'
@@ -39,7 +34,7 @@ import type { Conversation } from '../shared/conversation'
 import type { ConversationDeletionPreview } from '../shared/conversation-api'
 import { initializeAppEnvironment, registerAppLifecycle } from './bootstrap/app-lifecycle'
 import { registerAgentRuntimeHandlers } from './bootstrap/agent-runtime-ipc'
-import { createAppTraceRuntime } from './bootstrap/app-trace-runtime'
+import { createRunPipeline } from '../host-runtime/create-run-pipeline'
 import { deleteConversationHistory } from './conversation-history'
 import { createWindow as createBootstrapWindow } from './bootstrap/window'
 import { createRendererRestartLog } from './bootstrap/renderer-restart'
@@ -51,7 +46,6 @@ import { createProviderRuntime } from './bootstrap/provider-runtime'
 import { createWorkspaceRuntime } from './bootstrap/workspace-runtime'
 import { createPiProfileRuntime } from './bootstrap/pi-profiles'
 import { createTerminalRuntime } from './bootstrap/terminal-runtime'
-import type { RemoteRunCompletion } from './remote/remote-run-binding'
 import { registerSessionDeletionHandlers, type SessionDeletionRequest } from './bootstrap/session-deletion'
 import { registerProviderHandlers } from './bootstrap/provider-handlers'
 import { registerProjectHandlers } from './bootstrap/project-handlers'
@@ -92,7 +86,10 @@ const {
   appSessionStore, conversationStore, conversationService,
   assertLegacyConversationWriteAllowed, listProjectCatalog
 } = createSessionCatalog({
-  recentStore, projectStore, forkManagedConversation, startAppRun,
+  recentStore, projectStore, forkManagedConversation,
+  // The pipeline is assembled after the catalog (it needs the stores), so hand the
+  // catalog a deferred call instead of the const itself.
+  startAppRun: (payload, options) => pipeline.startAppRun(payload, options),
   getWindow: () => win,
   unsettledRuns: () => runs.unsettledStates(),
   getProviderRegistry: () => providerRegistry,
@@ -255,42 +252,32 @@ historyRuntime.register({
 })
 
 
-const traceRuntime = createAppTraceRuntime({ getWindow: () => win, rendererCanReceive, activeRunSessionKey, dockBadge, mainEventId })
+// Device-started runs live in the same RunRegistry as Mac runs, so every Mac and
+// remote-history reader sees one active-run truth: history while the first turn
+// is still running, the Mac sidebar/session view, stop, and same-session
+// conflicts. They are never auto-focused. Their questions remain owned by the
+// remote broker, while the canonical RunRegistry state mirrors pending UI.
+const remoteRunIds = new Set<string>()
+// scry runId -> durable ledger runId, the key of the remote question broker.
+const remoteRunLedgerIds = new Map<string, string>()
+
+const pipeline = createRunPipeline({
+  renderer: { send: (channel, payload) => { win?.webContents.send(channel, payload) }, isFocused: () => Boolean(win?.isFocused()) },
+  rendererCanReceive, activeRunSessionKey, dockBadge, mainEventId, getWindow: () => win,
+  getCurrentCwd: () => currentCwd, getStartupManagedRecovery: () => startupManagedRecovery,
+  isShuttingDown: () => isShuttingDown, nextRunSequence: () => runSeq++,
+  sourceControl, providerRegistry, resolveKnownProjectDirectory, resolveRemoteProjectDirectory,
+  startWorkspaceRun, startRun, piRunDiagnostics, appSessionStore, providerOperationGate,
+  providerContextKey, providerSessionKey, contextAdmission, resetSessionContext,
+  sessionRevisionByContext, sessionByContext, sessionAliasesByContext, deletingSessions,
+  conversationStore, assertLegacyConversationWriteAllowed, recordingBlockedSessions, homeDir,
+  sessionDiffBaselines, recordingRecoveryHint, sessionBaselineKey, requestRunStop,
+  bumpSessionRevision, remoteRunIds, remoteRunLedgerIds, mirrorSessionTranscript
+})
 const {
-  runs, runStopLifecycle, publishQuestionOpened, publishQuestionClosed,
-  userQuestionBroker, traceOutput, flushTraceSend, boundedLiveRun, forgetBoundedRun,
-  LIVE_TOOL_CONTENT_POLICY, publishTrace, runTraces
-} = traceRuntime
-const llmNetworkConfiguration = new LlmNetworkConfigurationCache()
-
-
-function startAppRun(payload: AgentStartRequest, options?: AppRunStartOptions & { origin?: 'local' }): Promise<AgentStartResult>
-function startAppRun(payload: AgentStartRequest, options?: AppRunStartOptions): Promise<AgentStartResult | RemoteRunCompletion>
-async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptions = {}): Promise<AgentStartResult | RemoteRunCompletion> {
-  if (payload?.workspace !== undefined) return startWorkspaceRun(payload, options, {
-    sourceControl, providerRegistry, resolveKnownProjectDirectory,
-    getCurrentCwd: () => currentCwd, getStartupManagedRecovery: () => startupManagedRecovery,
-    start: startAppRun
-  })
-  return startRun(payload, options, {
-    providerRegistry, piRunDiagnostics, appSessionStore, resolveRemoteProjectDirectory, resolveKnownProjectDirectory,
-    providerOperationGate, providerContextKey, providerSessionKey, contextAdmission,
-    resetSessionContext, sessionRevisionByContext, sessionByContext, sessionAliasesByContext,
-    runs, deletingSessions, conversationStore, assertLegacyConversationWriteAllowed,
-    recordingBlockedSessions, homeDir, llmNetworkConfiguration, sessionDiffBaselines, publishTrace,
-    rendererCanReceive, mainEventId, LIVE_TOOL_CONTENT_POLICY, recordingRecoveryHint, sessionBaselineKey,
-    dockBadge, userQuestionBroker, publishQuestionOpened, publishQuestionClosed, requestRunStop,
-    bumpSessionRevision, sourceControl, remoteRunIds, remoteRunLedgerIds, boundedLiveRun,
-    forgetBoundedRun, mirrorSessionTranscript, flushTraceSend, runStopLifecycle, runTraces,
-    isShuttingDown: () => isShuttingDown,
-    getCurrentCwd: () => currentCwd,
-    getWindow: () => win,
-    getStartupManagedRecovery: () => startupManagedRecovery,
-    nextRunSequence: () => runSeq++
-  })
-}
-/** 远端分发的收据台账；键是 ledger 的 runId，与本地 IPC 的命令标识互不干扰。 */
-const remoteStartReceipts = new CommandReceipts<RemoteRunCompletion>()
+  runs, runStopLifecycle, userQuestionBroker, traceOutput, boundedLiveRun, runTraces,
+  startAppRun, remoteStartReceipts
+} = pipeline
 registerAgentRuntimeHandlers({
   handleTrusted, startAppRun, runs, boundedLiveRun, dockBadge, activeRunSessionKey,
   userQuestionBroker, resolveKnownProjectDirectory, traceOutput, requestRunStop, runTraces,
@@ -302,17 +289,9 @@ registerAgentRuntimeHandlers({
 
 // Shared by the Mac stop button and a paired device stopping a Mac run.
 function requestRunStop(runId: string): boolean {
-  return traceRuntime.requestRunStop(runId)
+  return pipeline.requestRunStop(runId)
 }
 
-// Device-started runs live in the same RunRegistry as Mac runs, so every Mac and
-// remote-history reader sees one active-run truth: history while the first turn
-// is still running, the Mac sidebar/session view, stop, and same-session
-// conflicts. They are never auto-focused. Their questions remain owned by the
-// remote broker, while the canonical RunRegistry state mirrors pending UI.
-const remoteRunIds = new Set<string>()
-// scry runId -> durable ledger runId, the key of the remote question broker.
-const remoteRunLedgerIds = new Map<string, string>()
 // B2-lite：累计用量统计（读 usage.jsonl 聚合）
 handleTrusted('agent:usageStats', (_event, context?: ProviderContext) =>
   readUsageStats(app.getPath('userData'), context ? {

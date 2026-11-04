@@ -14,21 +14,23 @@
 | B3-M1 前置 db.ts 拆分（纯搬移） | 完成 | `见下` | [b3-m1-split](status/b3-m1-split.md)：8 个模块，全部 < 20 KB，`db.ts` 只做 re-export；调用方与逻辑不变 |
 | B3-M1 核验修复（M1-1、M1-2） | 完成 | `见下` | [b3-m1-review](status/b3-m1-review.md)：counters 收集器与 analytics smoke 注入 storage；`initDb` 对 `storage_not_configured` 直接抛；measure 0 个 unavailable |
 | B3-M1 存储注入化 | 完成 | `见下` | [b3-m1](status/b3-m1.md)：`storage-paths` 注入，db 各子模块与 `remote-history` 不再要 electron；导入图测试先失败后通过 |
-| B3-M2 运行管线去 Electron 化 | **未完成**：M2-1/2/3 完成，M2-4 未开始 | `见下` | [b3-m2](status/b3-m2.md)：4 段计划；M2-1 renderer sink 注入已完成并过门禁 |
+| B3-M2 运行管线去 Electron 化 | 完成（4 段） | `见下` | [b3-m2](status/b3-m2.md)：M2-1 renderer sink、M2-2 存储根注入、M2-3 通知/dock/shell 边界、M2-4 `create-run-pipeline.ts` 组装入口 + 导入图断言 |
 | B3-P1 daemon 承载宿主 | **未开始** | — | |
 | B3-V1 security smoke 归属 | 完成（结论：非回归，调用方式错误） | `见下` | [b3-v1](status/b3-v1.md)：无 `--dev` 时脚本跑的是 0.2.220 旧产物，源码 0.2.237；`--dev` 下起点与当前 HEAD 均通过 |
 | 交付前全局验证 | **未执行** | — | |
 
 ## 剩余任务的执行顺序（不得跳序）
 
-1. **B3-M1** → **B3-M2** → **B3-P1** —— 严格串行。
-3. 交付前全局验证 + `npm run test:renderer:ui`。
+1. **B3-P1**：daemon 托管远端 host——用 `createHostRuntime` + `createRunPipeline` 在无 Electron 环境装起管线。本批最后一段。
+2. 交付前全局验证 + `npm run test:renderer:ui`。
 
 ## 阻塞
 
 无。`db.ts` 超过提交门禁的问题已按门禁要求先做纯搬移拆分（`01bca85f`），M1 随后落到子模块。
 
-M1 之后的 M2 依赖面（本步没有改变，留给 M2 处理）：`trace-runtime.ts`、`run-*.ts`、`conversation.ts`、`app-agent.ts`、`agent-runner.ts`、`source-control`、`desktop-workbench` 里对 `app` / `BrowserWindow` / `webContents` 的依赖尚未注入。
+M2 完成后运行管线的值导入图已无 electron（`src/host-runtime/create-run-pipeline-imports.test.ts` + `run-pipeline-imports.test.ts` + `run-pipeline-seams.test.ts` 三重守护）。仍留在 main 的 Electron 依赖是 IPC 面（`agent-runtime-ipc`、`app-agent`、`provider-handlers`、`project-handlers`、`workspace`）与 `remote-host`，它们属于 Batch 4 的 daemon 化范围，不在 M2。
+
+未验证：daemon 尚未真正调用 `createRunPipeline`（B3-P1 才做），所以 M2-4 证明的是「能在无 Electron 环境构造并委派」，不是「daemon 已经用它跑起一轮」。
 
 ## 需要决定
 

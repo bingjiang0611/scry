@@ -16,9 +16,9 @@ const PIPELINE = [
   'run-startup.ts',
   'run-failure.ts',
   'run-fork.ts',
-  'trace-runtime.ts',
-  'app-trace-runtime.ts'
+  'trace-runtime.ts'
 ]
+const ASSEMBLY = '../../host-runtime/create-run-pipeline.ts'
 const FORBIDDEN = [
   // Notifications, dock and shell are main's surface. A pipeline module that names
   // them has taken a decision the daemon cannot honour.
@@ -36,6 +36,12 @@ describe('run pipeline seams', () => {
       expect(hits).toEqual([])
     })
   }
+
+  // The assembly entry must obey the same rule: it is what the daemon builds.
+  it(`${ASSEMBLY} names no Electron effect either`, () => {
+    const source = readFileSync(resolve(BOOTSTRAP, ASSEMBLY), 'utf8')
+    expect(FORBIDDEN.filter((pattern) => pattern.test(source)).map((pattern) => pattern.source)).toEqual([])
+  })
 
   // The dock badge is the one shared piece: it must stay a callback-driven module so
   // it can run outside Electron.
