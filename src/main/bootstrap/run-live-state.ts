@@ -1,4 +1,3 @@
-import { app } from 'electron'
 import type { BrowserWindow } from 'electron'
 import type { ActiveRun, TraceEvent, TurnDiffBaselineOrigin } from '../../shared/trace'
 import type { RuntimeProvider } from '../../shared/runtime'
@@ -30,6 +29,7 @@ import { beginGitTurnDiff, cloneGitTurnDiffCapture } from '../git'
 import type { createAppSessionStore } from '../app-store'
 import type { AppRunStartOptions } from './run-frontdoor'
 import { createLlmPerformanceRecorder } from './run-metrics'
+import { storageUserDataDir } from '../storage-paths'
 
 export type LiveRunState = {
   runId: string
@@ -166,7 +166,7 @@ export async function createLiveRunState(deps: {
     // 谁在看这个 run 由 publishTrace 决定：legacy 焦点通道 + 该 run 自己的 scoped 流。
     publish: (event) => publishTrace(event),
     persist: async (event) => {
-      const [persisted] = await persistTraceToolEvents(app.getPath('userData'), catalogCwd, [event], ingestionRecorderRoot)
+      const [persisted] = await persistTraceToolEvents(storageUserDataDir(), catalogCwd, [event], ingestionRecorderRoot)
       return persisted
     },
     // Same-id enrichment only; the helper records the write so the live projection refetches.
@@ -184,7 +184,7 @@ export async function createLiveRunState(deps: {
     if (ev.llmPerformance) runState.llmPerformance = ev.llmPerformance
     if (ev.kind === 'harness' && ev.stage === 'result') {
       appendUsage(
-        app.getPath('userData'),
+        storageUserDataDir(),
         { providerId, agentProfileId, runtimeProvider, cwd, externalSessionId: observedSessionId, runId, source: ev.usageSource },
         ev
       )
@@ -200,7 +200,7 @@ export async function createLiveRunState(deps: {
   }
   const persistLlmPerformance = createLlmPerformanceRecorder({
     runState, request, catalogCwd, runId, providerId, agentProfileId, networkConfiguration,
-    userDataDir: app.getPath('userData')
+    userDataDir: storageUserDataDir()
   })
   emit({
     id: mainEventId('controls', runId),
@@ -242,7 +242,7 @@ export async function createLiveRunState(deps: {
       })
     }
     attachments = prepareRunAttachments(
-      app.getPath('userData'),
+      storageUserDataDir(),
       runId,
       request.attachments,
       cwd ? { providerId, cwd, ...(resume ? { sessionId: resume } : {}) } : undefined
@@ -274,7 +274,7 @@ export async function createLiveRunState(deps: {
     }
   } catch (error) {
     try { cleanupProvisional() } catch { /* preserve the frontdoor error */ }
-    deleteRunAttachments(app.getPath('userData'), runId)
+    deleteRunAttachments(storageUserDataDir(), runId)
     throw error
   }
   // Git 快照与非 managed Provider 的 recorder 配置读取彼此独立；并行启动，避免把

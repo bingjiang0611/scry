@@ -1,5 +1,4 @@
 import type { BrowserWindow } from 'electron'
-import { app } from 'electron'
 import type { ActiveRun, TraceEvent } from '../../shared/trace'
 import type { ProviderId } from '../../shared/provider'
 import type { RuntimeProvider, NormalizedAgentStartRequest, AgentQuestionRequest, AgentPermissionMode, AgentIntervention } from '../../shared/runtime'
@@ -21,6 +20,7 @@ import { openProviderEventWriter } from '../provider-event-log'
 import { createRunProvider } from './run-provider'
 import { cancelGitTurnDiff } from '../git'
 import { authorizedMcpExecution } from './trust'
+import { storageUserDataDir } from '../storage-paths'
 
 type StartRuns = { get: (runId: string) => { control: RunControl } | undefined; register: (state: ActiveRun, control: RunControl, options?: { focus?: boolean }) => void }
 type StartSourceControl = { admitRun: (cwd: string | undefined, callback: () => void) => Promise<void> }
@@ -200,7 +200,7 @@ export async function startRunProviderAndRegister(deps: RunStartupDeps) {
     }
     releaseSessionBaseline?.()
     try { cleanupProvisional() } catch { /* preserve the original registration error */ }
-    deleteRunAttachments(app.getPath('userData'), runId)
+    deleteRunAttachments(storageUserDataDir(), runId)
     try { await cancelGitTurnDiff(await turnDiffCapture) } catch { /* preserve the original registration error */ }
     throw error
   }

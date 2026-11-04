@@ -1,4 +1,3 @@
-import { app } from 'electron'
 import type { ActiveRun } from '../../shared/trace'
 import type { ProviderId } from '../../shared/provider'
 import { AgentRuntimeError } from '../run-outcome'
@@ -15,6 +14,7 @@ import type { prepareRunFrontdoor, AppRunStartOptions } from './run-frontdoor'
 import { prepareRunRecovery } from './run-recovery'
 import { applyForkOrRestart } from './run-fork'
 import { resolveCodexHookTrust, resolveOpenCodePluginTrust, ensureMcpExecutionAuthorized } from './trust'
+import { storageUserDataDir } from '../storage-paths'
 
 export async function prepareRunAdmission(
   frontdoor: ReturnType<typeof prepareRunFrontdoor>,
@@ -175,7 +175,7 @@ export async function prepareRunAdmission(
   }
   const { managedRecorderEnabled, managedRecorderEnablement, managedCommitHookEnv, recoveredManagedTurns } = await prepareRunRecovery({
     cwd, providerId, runtimeProvider, resume, isLiveManagedRun
-  }, { userDataDir: app.getPath('userData'), startPerf })
+  }, { userDataDir: storageUserDataDir(), startPerf })
   const recordingKey = resume ? scopedSessionKey(resume) : undefined
   if (recordingKey && recoveredManagedTurns > 0) recordingBlockedSessions.delete(recordingKey)
   const recordingFailure = recordingKey ? recordingBlockedSessions.get(recordingKey) : undefined
@@ -210,7 +210,7 @@ export async function prepareRunAdmission(
     request, providerId, agentProfileId, runtimeProvider, cwd, catalogCwd, resume, contextKey,
     expectedSessionId, forkSourceSessionId, restartSourceSessionId, adapter, codexHookTrust,
     openCodePluginTrust, mcpExecutionSnapshot, contextChangedError
-  }, { userDataDir: app.getPath('userData'), sessionByContext, sessionAliasesByContext })
+  }, { userDataDir: storageUserDataDir(), sessionByContext, sessionAliasesByContext })
   const committedResume = managedConversation ? resume : isRemoteRun ? resume : sessionByContext.get(contextKey)
   const committedRevision = sessionRevisionByContext.get(contextKey) ?? 0
   const committedRuns = runs.unsettledStates().filter((run) =>

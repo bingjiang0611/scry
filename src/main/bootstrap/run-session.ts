@@ -1,4 +1,3 @@
-import { app } from 'electron'
 import type { BrowserWindow } from 'electron'
 import type { ActiveRun } from '../../shared/trace'
 import type { RuntimeProvider } from '../../shared/runtime'
@@ -7,6 +6,7 @@ import type { createAppSessionStore } from '../app-store'
 import type { SessionDiffBaselineRegistry } from '../session-diff'
 import type { DockBadgeState } from '../dock-badge'
 import { updateRunAttachmentOwner } from '../attachment-store'
+import { storageUserDataDir } from '../storage-paths'
 
 // `notifyChanged` is the live-run change signal: binding a native session id
 // changes what a paired device reads in the live-run set.
@@ -59,7 +59,7 @@ export function createSessionPublisher(deps: {
     deps.runs.notifyChanged?.()
     deps.dockBadge.rekey(previousSessionKey, deps.scopedSessionKey(sessionId))
     if (deps.cwd) {
-      try { updateRunAttachmentOwner(app.getPath('userData'), deps.runId, { providerId: deps.providerId, cwd: deps.cwd, sessionId }) } catch (error) {
+      try { updateRunAttachmentOwner(storageUserDataDir(), deps.runId, { providerId: deps.providerId, cwd: deps.cwd, sessionId }) } catch (error) {
         console.warn('[scry] attachment ownership update deferred:', deps.runId, error)
       }
     }

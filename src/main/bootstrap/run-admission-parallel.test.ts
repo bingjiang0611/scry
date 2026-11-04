@@ -15,6 +15,7 @@ import type { ProviderRegistry } from '../providers/registry'
 import type { RunControl } from './run-control'
 import { prepareRunFrontdoor, type AppRunStartOptions } from './run-frontdoor'
 import { prepareRunAdmission } from './run-admission'
+import { configureStorage } from '../storage-paths'
 
 const receipts = vi.hoisted(() => ({ userData: '' }))
 vi.mock('electron', () => ({ app: { getPath: () => receipts.userData } }))
@@ -45,6 +46,8 @@ async function fixture(): Promise<Fixture> {
   await mkdir(join(root, 'workspace'))
   const cwd = await realpath(join(root, 'workspace'))
   receipts.userData = userData
+  // Storage is injected now: the pipeline reads the root here, not from Electron.
+  configureStorage({ userDataDir: userData, appPath: userData })
   return {
     root, userData, cwd,
     store: new ConversationStore(userData),

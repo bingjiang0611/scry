@@ -1,4 +1,4 @@
-import { app, type BrowserWindow } from 'electron'
+import type { BrowserWindow } from 'electron'
 import type { AgentStartRequest, AgentQuestionRequest, AgentIntervention } from '../../shared/runtime'
 import type { ActiveRun, TraceEvent } from '../../shared/trace'
 import type { ProviderId } from '../../shared/provider'
@@ -33,6 +33,7 @@ import { handleRunCompletion } from './run-completion'
 import { handleRunFailure } from './run-failure'
 import { archiveTraceTurn } from './archive'
 import type { RunControl } from './run-control'
+import { storageUserDataDir } from '../storage-paths'
 
 type RunHost = {
   providerRegistry: ProviderRegistry
@@ -128,7 +129,7 @@ export async function startRun(
         agentProfileId, codexHookTrust, openCodePluginTrust, managedRecorderEnabled, managedRecorderEnablement, homeDir,
         createRunId: (managed, runOptions) => managed?.runId ?? runOptions.runId ?? `run-${Date.now().toString(36)}-${nextRunSequence()}`,
         llmNetworkConfiguration, sessionDiffBaselines, appSessionStore, recordingBlockedSessions, getWindow, publishTrace,
-        rendererCanReceive, mainEventId, LIVE_TOOL_CONTENT_POLICY, recordingRecoveryHint, userDataDir: app.getPath('userData'),
+        rendererCanReceive, mainEventId, LIVE_TOOL_CONTENT_POLICY, recordingRecoveryHint, userDataDir: storageUserDataDir(),
         scopedSessionKey, isRemoteRun, editSourceSessionId, deleteRunAttachments, sessionBaselineKey
       })
       let { runId, diffContextKey, finishTurnWallTiming, turnChangeJournal, attachments, managedInputTextHash,
@@ -196,7 +197,7 @@ export async function startRun(
       const steering = new RunSteering(
         runState,
         () => handle.current?.steer,
-        (input) => prepareRunAttachments(app.getPath('userData'), runId, input.attachments,
+        (input) => prepareRunAttachments(storageUserDataDir(), runId, input.attachments,
           cwd ? { providerId, cwd, sessionId: runState.externalSessionId } : undefined, input.messageId),
         emit
       )
@@ -272,7 +273,7 @@ export async function startRun(
       const runTerminalState = remoteState.state
       remoteResult = remoteState.remoteResult
       const { finishRemote, markTerminalAttention } = remoteState
-      const settleManagedConversation = createManagedConversationSettlement({ state: runTerminalState, managedConversation, handle, cwd, runId, displayPrompt, runState, userDataDir: app.getPath('userData') })
+      const settleManagedConversation = createManagedConversationSettlement({ state: runTerminalState, managedConversation, handle, cwd, runId, displayPrompt, runState, userDataDir: storageUserDataDir() })
       const runtimePromise = startProviderAfterBaseline({ turnDiffCapture, sessionBaselineReady, markReady: () => firstTextPerf.mark('git_baseline_ready'), runProvider })
       const completionContext = () => ({
         state: runTerminalState,

@@ -1,4 +1,3 @@
-import { app } from 'electron'
 import { homedir } from 'node:os'
 import { packagedRecorderCliPath, shellEnv } from '../claude-locate'
 import { AgentRuntimeError } from '../run-outcome'
@@ -11,6 +10,7 @@ import { buildMcpExecutionSnapshot, type McpExecutionOperation, type McpExecutio
 import type { ProviderRegistry } from '../providers/registry'
 import type { ProviderContext } from '../../shared/provider'
 import type { AuthorizedMcpExecution } from '../providers/types'
+import { storageUserDataDir } from '../storage-paths'
 
 const homeDir = homedir()
 const mcpExecutionTrust = new McpExecutionTrust()
@@ -48,7 +48,7 @@ export async function resolveCodexHookTrust(cwd: string, providerRegistry: Provi
 
   const trust = pending.map(({ key, currentHash }) => ({ key, currentHash }))
   const fingerprint = codexHookFingerprint(inspection.hooks)
-  const store = createCodexHookGrantStore(app.getPath('userData'))
+  const store = createCodexHookGrantStore(storageUserDataDir())
   if (!store.isGranted(cwd, fingerprint)) {
     const enabledCount = inspection.hooks.filter((hook) => hook.enabled).length
     try {
@@ -78,7 +78,7 @@ export async function resolveOpenCodePluginTrust(cwd: string): Promise<OpenCodeP
   }
   if (projection.plugins.length === 0) return undefined
 
-  const store = createOpenCodePluginGrantStore(app.getPath('userData'))
+  const store = createOpenCodePluginGrantStore(storageUserDataDir())
   if (!store.isGranted(projection.cwd, projection.pluginFingerprint)) {
     try {
       store.grant(projection.cwd, projection.pluginFingerprint, projection.plugins.length)
@@ -122,7 +122,7 @@ export async function resolveManagedCommitHookEnv(
     return baseEnv
   }
 
-  const store = createCommitHookTrustStore(app.getPath('userData'))
+  const store = createCommitHookTrustStore(storageUserDataDir())
   let granted = await store.isGranted(inspection.workspace, inspection.fingerprint)
   if (granted) {
     try {
@@ -172,7 +172,7 @@ export async function resolveGrantedManagedCommitHookEnv(cwd: string): Promise<N
     const capability = await resolveGrantedCommitHookCapability(
       cwd,
       enablement.config.commitHook,
-      app.getPath('userData'),
+      storageUserDataDir(),
       undefined,
       { autoGrant: true }
     )

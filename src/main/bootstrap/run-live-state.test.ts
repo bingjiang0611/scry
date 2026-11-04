@@ -10,6 +10,7 @@ import { DockBadgeState } from '../dock-badge'
 import { SessionDiffBaselineRegistry } from '../session-diff'
 import { createTraceRuntime } from './trace-runtime'
 import { createLiveRunState } from './run-live-state'
+import { configureStorage } from '../storage-paths'
 
 const receipts = vi.hoisted(() => ({
   getPath: vi.fn<() => string>(),
@@ -51,6 +52,8 @@ let userDataDir: string
 beforeEach(async () => {
   userDataDir = await mkdtemp(join(tmpdir(), 'scry-live-binding-'))
   receipts.getPath.mockReturnValue(userDataDir)
+  // Storage is injected now: the pipeline reads the root here, not from Electron.
+  configureStorage({ userDataDir, appPath: userDataDir })
   receipts.appendUsage.mockClear()
 })
 afterEach(async () => { await rm(userDataDir, { recursive: true, force: true }) })

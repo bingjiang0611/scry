@@ -9,13 +9,13 @@ import type { createSessionPublisher } from './run-session'
 import type { AgentInputAttachment, NormalizedAgentStartRequest } from '../../shared/runtime'
 import type { createAppSessionStore } from '../app-store'
 import type { LiveTraceIngestion } from '../live-trace-ingestion'
-import { app } from 'electron'
 import { PerformanceTrace } from '../performance-timing'
 import { archiveSessionId } from '../session-id'
 import { providerRecordingPolicy } from '../provider-recording-policy'
 import { terminalOutcomeLabel } from '../run-outcome'
 import { updateRunAttachmentOwner } from '../attachment-store'
 import { archiveTraceTurn, persistTerminalProgress, observedTurnTiming } from './archive'
+import { storageUserDataDir } from '../storage-paths'
 
 type CompletionState = {
   terminalArchiveArgs?: ArchiveTraceTurnArgs
@@ -134,7 +134,7 @@ export async function handleRunCompletion(r: ProviderRunResult, ctx: RunCompleti
     beforePersist: () => ingestion.idle()
   }
   if (cwd) {
-    try { updateRunAttachmentOwner(app.getPath('userData'), runId, { providerId, cwd, sessionId: storageSessionId }) } catch (error) {
+    try { updateRunAttachmentOwner(storageUserDataDir(), runId, { providerId, cwd, sessionId: storageSessionId }) } catch (error) {
       console.warn('[scry] terminal attachment ownership update failed:', runId, error)
     }
   }

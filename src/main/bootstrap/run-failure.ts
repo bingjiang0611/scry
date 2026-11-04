@@ -1,4 +1,3 @@
-import { app } from 'electron'
 import type { TraceEvent } from '../../shared/trace'
 import { runTerminationHint } from '../../shared/runtime'
 import type { ProviderRunHandle } from '../providers/types'
@@ -10,6 +9,7 @@ import { providerRecordingPolicy } from '../provider-recording-policy'
 import { updateRunAttachmentOwner } from '../attachment-store'
 import { archiveTraceTurn, persistTerminalProgress, observedTurnTiming } from './archive'
 import type { RunCompletionContext } from './run-completion'
+import { storageUserDataDir } from '../storage-paths'
 
 type RunFailureContext = RunCompletionContext & {
   handle: { current: ProviderRunHandle | null }
@@ -93,7 +93,7 @@ export async function handleRunFailure(err: unknown, ctx: RunFailureContext): Pr
     ...(stopped ? {} : { error: message, errorHint: hint })
   }
   if (cwd) {
-    try { updateRunAttachmentOwner(app.getPath('userData'), runId, { providerId, cwd, sessionId: storageSessionId }) } catch (error) {
+    try { updateRunAttachmentOwner(storageUserDataDir(), runId, { providerId, cwd, sessionId: storageSessionId }) } catch (error) {
       console.warn('[scry] terminal attachment ownership update failed:', runId, error)
     }
   }
@@ -114,7 +114,7 @@ export async function handleRunFailure(err: unknown, ctx: RunFailureContext): Pr
       for (const correction of failure.corrections) publishTrace({ ...correction })
       if (failure.created) {
         appendUsage(
-          app.getPath('userData'),
+          storageUserDataDir(),
           {
             providerId,
             agentProfileId,
