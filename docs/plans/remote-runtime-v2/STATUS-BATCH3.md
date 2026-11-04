@@ -10,6 +10,7 @@
 | B3-F1 trace 尾沿补读 | 完成 | `见下` | [b3-f1](status/b3-f1.md)：尾沿 + 跟随 run 按窗口读；L1 仍 60/min；另加 security smoke 产物版本闸门 |
 | B3-F2 Mac run 绑定发信号 | 完成 | `b95e47f` | [b3-f2](status/b3-f2.md) |
 | B3-D 设计稿三处更正 | 完成 | `见下` | [b3-d](status/b3-d.md)：§7 凭据如实拆分、新增 §8.1 daemon 运行时、§11 删除共存版本项、§8 加进度表 |
+| B3-M1 前置 db.ts 拆分（纯搬移） | 完成 | `见下` | [b3-m1-split](status/b3-m1-split.md)：8 个模块，全部 < 20 KB，`db.ts` 只做 re-export；调用方与逻辑不变 |
 | B3-M1 存储注入化 | **代码完成、验证通过，提交被门禁阻塞** | 未提交 | [b3-m1](status/b3-m1.md)：`storage-paths` 注入 + db/remote-history 去 electron；`src/main/db.ts` 44,168 B 超 20 KB 门禁，需决定拆分或豁免 |
 | B3-M2 运行管线去 Electron 化 | **未开始** | — | |
 | B3-P1 daemon 承载宿主 | **未开始** | — | |
@@ -30,3 +31,7 @@ M1 之后的 M2 依赖面（本步没有改变，留给 M2 处理）：`trace-ru
 ## 需要决定
 
 无。
+
+## 既有问题（本批未处理）
+
+`src/main/source-control/workspace-choices.test.ts › paginates bounded refs…` 在整批并行跑时偶发 5 s 超时，单跑通过。属既有并行负载脆弱点，与本批改动无关；没有放宽超时或跳过。详见 [b3-m1-split](status/b3-m1-split.md)。
