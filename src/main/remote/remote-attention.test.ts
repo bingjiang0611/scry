@@ -48,6 +48,8 @@ describe('remote attention tracking for the Dock badge', () => {
     expect(published.at(-1)).toHaveLength(1)
     tracker.disconnect('conn')
     expect(published.at(-1)).toEqual([])
+    tracker.viewed('conn', null)
+    expect(published.at(-1)).toEqual([])
     tracker.baseline('conn', [session({ lastRunId: 'run-2', lastRunOutcome: 'failed' })])
     expect(published.at(-1)).toHaveLength(1)
     tracker.catalog('conn', catalog([session({ lastRunId: 'run-3', lastRunOutcome: 'completed' })]))

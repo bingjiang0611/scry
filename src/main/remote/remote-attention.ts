@@ -63,8 +63,7 @@ export function createRemoteAttentionTracker(publish: RemoteAttentionSink): Remo
     // later completion on that same session become unread again.
     viewed(connectionId, context): void {
       viewed.set(connectionId, context?.externalSessionId ? remoteSessionAttentionKey(connectionId, context) : null)
-      sessions.set(connectionId, sessions.get(connectionId) ?? [])
-      recompute(connectionId)
+      if (sessions.has(connectionId)) recompute(connectionId)
       flush()
     },
     // Disconnect clears visible attention but keeps the last observed catalog as
