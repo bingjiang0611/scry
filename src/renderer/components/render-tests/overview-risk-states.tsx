@@ -114,6 +114,17 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
     expect(html).not.toContain('title="会话状态')
   })
 
+  it('失败轮次保留可见判词：每轮调用里没有失败 chip，不能被静默隐藏', () => {
+    const failed: Turn = { runId: 'failed-turn', userText: 'x', done: true, error: 'provider exited 1', items: [] }
+    const html = panel(failed)
+    expect(html).toContain('overview-verdict warn')
+    expect(html).toContain('<strong>1 轮失败</strong>')
+    expect(html).not.toContain('轮次已结束')
+
+    const twoFailed = renderToStaticMarkup(<OverviewPanel turns={[failed, { ...failed, runId: 'failed-turn-2' }]} selected={null} onSelect={() => {}} usage={null} stats={null} />)
+    expect(twoFailed).toContain('<strong>2 轮失败</strong>')
+  })
+
   it('busy → 静态运行中状态（仅在真 busy 时）', () => {
     const t: Turn = {
       runId: 'rn',
