@@ -172,7 +172,9 @@ async function uploaderPhase(uploader, report) {
       spawnSync(process.execPath, [uploader, 'doctor', '--workspace', w.ws, '--json'], { env: user.env, stdio: 'ignore', timeout: 60_000 })
       const invoked = existsSync(user.env.FAKE_LOG) && readFileSync(user.env.FAKE_LOG, 'utf8').includes('"phase":"invoke"')
       if (!invoked) throw new Error(`uploader did not call the fake transport (protocol.json transportEnv=${protocol.transportEnv}); fill protocol.json with the real values from the uploader source. Stopped before committing any record, nothing was uploaded`)
-      u.fakeTransport = `confirmed via ${protocol.transportEnv}`
+      // The variable name is the one real protocol value that reaches a report; keep it out of the
+      // pushed results and say only that the transport was confirmed.
+      u.fakeTransport = 'confirmed'
       console.log(`  fake transport: confirmed via ${protocol.transportEnv}`)
     }
     // Hook-path latency: notify only, background upload paused by a slow fake server.

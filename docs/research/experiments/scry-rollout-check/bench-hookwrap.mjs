@@ -117,7 +117,9 @@ async function hookwrapPhase(scry, uploader, work, report) {
       spawnSync(process.execPath, [uploader, 'doctor', '--workspace', w.ws, '--json'], { env, stdio: 'ignore', timeout: 60_000 })
       const invoked = existsSync(env.FAKE_LOG) && readFileSync(env.FAKE_LOG, 'utf8').includes('"phase":"invoke"')
       if (!invoked) throw new Error(`uploader did not call the fake transport (protocol.json transportEnv=${protocol.transportEnv}); stopped before uploader init, nothing installed or uploaded`)
-      h.fakeTransport = `confirmed via ${protocol.transportEnv}`
+      // The variable name is the one real protocol value that reaches a report; keep it out of the
+      // pushed results and say only that the transport was confirmed.
+      h.fakeTransport = 'confirmed'
       console.log(`  fake transport: confirmed via ${protocol.transportEnv}`)
     }
     // Plain: Scry's own hook script.
