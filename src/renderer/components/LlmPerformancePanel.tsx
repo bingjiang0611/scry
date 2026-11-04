@@ -111,7 +111,7 @@ export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose:
               {(['speed', 'firstToken'] as const).map(item => <button key={item} type="button" aria-pressed={metric === item} onClick={() => setMetric(item)}>{copy.metrics[item].label}</button>)}
             </div>
           </div>
-          <div className="llm-perf-chart-meta"><span className="llm-perf-unit">{copy.metrics[metric].unit}</span><MetricHelp label={copy.intervals[hours]} text={copy.intervalHelp} /></div>
+          <div className="llm-perf-chart-meta"><MetricHelp label={copy.intervals[hours]} text={copy.intervalHelp} /></div>
           {currentSamples.length ? <MetricChart key={`${current.model}:${metric}:${hours}`} samples={currentSamples} model={current.model} metric={metric}
             from={from} to={to} hours={hours} color={colorOf(current.model)} />
             : <div className="llm-perf-empty">{copy.selectedEmpty(current.model, copy.metrics[metric].label)}</div>}

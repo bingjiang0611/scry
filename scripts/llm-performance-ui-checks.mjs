@@ -50,7 +50,7 @@ export async function exerciseLlmPerformanceFinish(contents, win, screenshot, na
     await read(`document.documentElement.setAttribute('data-theme', ${JSON.stringify(theme)})`)
     contrastByTheme[theme] = await read(`(() => {
       const luminance = color => color.match(/[\\d.]+/g).slice(0, 3).map(Number).map(value => value / 255).map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4).reduce((sum, value, index) => sum + value * [.2126, .7152, .0722][index], 0)
-      const nodes = Array.from(${modal}.querySelectorAll('.llm-perf-mname, .llm-perf-mname small, .llm-perf-reading, .llm-perf-unit, .llm-perf-axis text, .llm-perf-mhead > span, .llm-perf-help summary'))
+      const nodes = Array.from(${modal}.querySelectorAll('.llm-perf-mname, .llm-perf-mname small, .llm-perf-reading, .llm-perf-axis text, .llm-perf-mhead > span, .llm-perf-help summary'))
       return Math.min(...nodes.map(node => {
         const style = getComputedStyle(node)
         const foreground = luminance(node instanceof SVGElement ? style.fill : style.color)
