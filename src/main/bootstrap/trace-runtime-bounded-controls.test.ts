@@ -51,7 +51,7 @@ const storage = (event: TraceEvent): string | undefined =>
 
 let seq = 0
 const runtime = () => createTraceRuntime({
-  getWindow: () => null,
+  renderer: { send: () => undefined, isFocused: () => false },
   rendererCanReceive: () => false,
   activeRunSessionKey: () => null,
   dockBadge: new DockBadgeState(() => { }),

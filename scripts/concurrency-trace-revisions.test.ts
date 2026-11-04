@@ -26,7 +26,7 @@ const BASE_TS = 1_800_000_000_000
 let eventSeq = 0
 
 const boundedRuntime = () => createTraceRuntime({
-  getWindow: () => null,
+  renderer: { send: () => undefined, isFocused: () => false },
   rendererCanReceive: () => false,
   activeRunSessionKey: () => null,
   dockBadge: new DockBadgeState(() => {}),

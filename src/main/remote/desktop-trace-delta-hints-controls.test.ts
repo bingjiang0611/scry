@@ -14,7 +14,7 @@ import { createTraceRevisions } from './desktop-trace-delta'
 const RUN = 'run-control-1'
 let seq = 0
 const runtime = () => createTraceRuntime({
-  getWindow: () => null,
+  renderer: { send: () => undefined, isFocused: () => false },
   rendererCanReceive: () => false,
   activeRunSessionKey: () => null,
   dockBadge: new DockBadgeState(() => { }),

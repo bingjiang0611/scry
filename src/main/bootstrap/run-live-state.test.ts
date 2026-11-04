@@ -78,7 +78,7 @@ const createState = async (runId = 'run-live-binding') => {
 }
 let seq = 0
 const boundedRuntime = () => createTraceRuntime({
-  getWindow: () => null,
+  renderer: { send: () => undefined, isFocused: () => false },
   rendererCanReceive: () => false,
   activeRunSessionKey: () => null,
   dockBadge: new DockBadgeState(() => { }),

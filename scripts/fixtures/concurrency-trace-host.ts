@@ -135,7 +135,7 @@ export async function createTraceHost(input: { runs: Map<string, ActiveRun>; rea
     const host = await ensureHostIdentity(join(directory, 'host'))
     // Only boundedLiveRun and mainEventId are used; runs is intentionally unused.
     const runtime = createTraceRuntime({
-      getWindow: () => null,
+      renderer: { send: () => undefined, isFocused: () => false },
       rendererCanReceive: () => false,
       activeRunSessionKey: () => null,
       dockBadge: new DockBadgeState(() => {}),

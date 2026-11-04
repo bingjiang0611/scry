@@ -39,7 +39,7 @@ import type { Conversation } from '../shared/conversation'
 import type { ConversationDeletionPreview } from '../shared/conversation-api'
 import { initializeAppEnvironment, registerAppLifecycle } from './bootstrap/app-lifecycle'
 import { registerAgentRuntimeHandlers } from './bootstrap/agent-runtime-ipc'
-import { createTraceRuntime } from './bootstrap/trace-runtime'
+import { createAppTraceRuntime } from './bootstrap/app-trace-runtime'
 import { deleteConversationHistory } from './conversation-history'
 import { createWindow as createBootstrapWindow } from './bootstrap/window'
 import { createRendererRestartLog } from './bootstrap/renderer-restart'
@@ -255,9 +255,7 @@ historyRuntime.register({
 })
 
 
-const traceRuntime = createTraceRuntime({
-  getWindow: () => win, rendererCanReceive, activeRunSessionKey, dockBadge, mainEventId
-})
+const traceRuntime = createAppTraceRuntime({ getWindow: () => win, rendererCanReceive, activeRunSessionKey, dockBadge, mainEventId })
 const {
   runs, runStopLifecycle, publishQuestionOpened, publishQuestionClosed,
   userQuestionBroker, traceOutput, flushTraceSend, boundedLiveRun, forgetBoundedRun,
