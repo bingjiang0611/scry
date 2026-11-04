@@ -13,6 +13,7 @@
   - L1 计数变化：`gitCalls.stop` 47 → 36、`gitCalls.total` 75 → 64，8 个场景全部相同幅度（每个仓库少一次）；脏工作区场景 68 → 57、96 → 85
   - 耗时连带变化：`daemon fast path / clean, 5 tools / hookTotalPerTurn` 3679.3 → 2172.1 ms（−41%）；`clean, 30 tools / stop` 1343.4 → 1034.6 ms；`CLI fallback / clean, 30 tools / stop` 1897.0 → 1530.8 ms（−19.3%）
   - 变差项：无
+  - 没测出变化的部分：脏工作区场景的耗时（`dirty / stop` 2056.4 → 1437.8 ms、`hookTotalPerTurn` 3765.6 → 2634.5 ms）名义上降 30%，但两次基线运行落在 1508.5 / 2604.2 ms 的两侧，`perf-ab` 判为“无明确变化”（runs overlap）；该场景的结论只有计数（68 → 57）算数
 - 结论：成立并保留
 - 证据级别：L1（计数）；受控耗时下降另有 L2 支持，但公开结论以计数的 L1 为准
 - 下一步：同一条“别丢 stat cache”的思路可以继续看结束时的 `writeTargetedSnapshotTree`（候选仓库仍各做一次 `read-tree`）；收益取决于候选仓库数量，见台账机会排名
