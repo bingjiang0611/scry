@@ -8,8 +8,10 @@ import {
   mkdtemp,
   mkdir,
   rm,
-  realpath
+  realpath,
+  stat
 } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import {
   join,
   dirname,
@@ -47,6 +49,13 @@ export interface GitTurnDiffCapture {
   branch?: string
   baselineClean?: boolean
   indexPath?: string
+  /**
+   * 启动时观测到的真实 index 身份。finish 的候选发现只在 index 未被改写时沿用它：
+   * 那时 index 仍等于 beforeTree，可以省掉一次 read-tree --reset，且 stat cache 仍然有效。
+   */
+  indexState?: { mtimeMs: number; ctimeMs: number; size: number; ino: number }
+  /** 启动快照自带、内容等于 beforeTree 且 stat cache 有效的隔离 index（仅 worktree 脏时存在）。 */
+  beforeIndex?: string
   tempDir?: string
   objectDir?: string
   alternateObjectDirs?: string
@@ -298,6 +307,13 @@ export async function beginGitTurnDiff(
     const alternateObjectDirs = [join(commonDir, 'objects'), process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES]
       .filter((value): value is string => !!value)
       .join(delimiter)
+    const indexState = await stat(indexPath).then(
+      (value) => ({ mtimeMs: value.mtimeMs, ctimeMs: value.ctimeMs, size: value.size, ino: value.ino }),
+      () => undefined
+    )
+    // Sparse checkout 的 skip-worktree 标记代表「本来就不在工作树里」，重建 index 会把它们
+    // 变成删除。那种仓库不发布可复用的基线 index，finish 仍走 read-tree --reset。
+    const reusableIndex = existsSync(join(commonDir, 'info', 'sparse-checkout'))
     if (baselineClean) {
       return {
         beforeAt,
@@ -311,6 +327,7 @@ export async function beginGitTurnDiff(
         branch,
         baselineClean,
         indexPath,
+        ...(indexState && reusableIndex ? { indexState } : {}),
         tempDir,
         objectDir,
         alternateObjectDirs,
@@ -348,6 +365,7 @@ export async function beginGitTurnDiff(
       branch,
       baselineClean,
       indexPath,
+      ...(reusableIndex ? { beforeIndex } : {}),
       tempDir,
       objectDir,
       alternateObjectDirs,

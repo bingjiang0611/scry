@@ -73,3 +73,58 @@ it('retains every discovered repository and its captured/timeout/failed outcome 
   const legacy = { ...records[0], diff: { ...legacyDiff, value: diff.value?.map(({ requestedRoot: _requestedRoot, ...snapshot }) => snapshot) } }
   expect(isAgentTurnRecord(legacy)).toBe(true)
 }, 15_000)
+
+// The finish path may reuse the start capture's index instead of rebuilding it with
+// `read-tree --reset`; the candidate set must stay exactly the worktree-vs-baseline one.
+async function committedRepo(name: string): Promise<string> {
+  const root = await realpath(await mkdtemp(join(tmpdir(), `scry-reuse-${name}-`)))
+  roots.push(root)
+  const repo = join(root, 'repo')
+  await mkdir(repo)
+  await exec('git', ['init', '-q', repo])
+  await writeFile(join(repo, 'README.md'), 'before\n')
+  await exec('git', ['-C', repo, 'add', 'README.md'])
+  await exec('git', ['-C', repo, '-c', 'user.name=bingjiang0611', '-c', 'user.email=307659028+bingjiang0611@users.noreply.github.com', 'commit', '-qm', 'fixture'])
+  await writeFile(join(root, 'scry.config.json'), JSON.stringify({
+    schemaVersion: 1, enabled: true, workspaceId: name, dataDir: '.scry',
+    repositories: { mode: 'discover-nested-git' },
+    capture: { prompt: true, assistant: true, toolOutput: 'summary', diff: true, hooks: true }
+  }))
+  return root
+}
+
+async function turnDiffOf(root: string, session: string) {
+  const payload = { session_id: session, turn_id: session, timestamp: new Date().toISOString(), cwd: root }
+  await handleRecorderHook({ provider: 'pi', workspace: root, env: {}, event: 'UserPromptSubmit', payload: { ...payload, prompt: 'change files' } })
+  return payload
+}
+
+it('captures a dirty worktree that appears after a clean start', async () => {
+  const root = await committedRepo('clean-start')
+  const repo = join(root, 'repo')
+  const payload = await turnDiffOf(root, 'reuse-clean')
+  const snapshot = JSON.parse(JSON.stringify(payload))
+  await writeFile(join(repo, 'README.md'), 'after\n')
+  await writeFile(join(repo, 'new.txt'), 'untracked\n')
+  await handleRecorderHook({ provider: 'pi', workspace: root, env: {}, event: 'Stop', payload: { ...snapshot, assistant_response: 'done', timestamp: new Date().toISOString() } })
+  const records = await listRecords(join(root, '.scry'))
+  expect(records).toHaveLength(1)
+  const files = records[0].diff.value?.flatMap(snapshot => snapshot.files ?? []) ?? []
+  expect(files.map(file => [basename(file.path), file.change]).sort()).toEqual([['README.md', 'modified'], ['new.txt', 'added']])
+}, 20_000)
+
+it('still captures the turn when the user rewrote the index mid-turn', async () => {
+  const root = await committedRepo('staged-midturn')
+  const repo = join(root, 'repo')
+  const payload = await turnDiffOf(root, 'reuse-staged')
+  await writeFile(join(repo, 'README.md'), 'staged\n')
+  await exec('git', ['-C', repo, 'add', 'README.md'])
+  await writeFile(join(repo, 'staged-only.txt'), 'later\n')
+  await exec('git', ['-C', repo, 'add', 'staged-only.txt'])
+  await exec('git', ['-C', repo, 'reset', '-q', 'staged-only.txt'])
+  await handleRecorderHook({ provider: 'pi', workspace: root, env: {}, event: 'Stop', payload: { ...payload, assistant_response: 'done', timestamp: new Date().toISOString() } })
+  const records = await listRecords(join(root, '.scry'))
+  expect(records).toHaveLength(1)
+  const files = records[0].diff.value?.flatMap(snapshot => snapshot.files ?? []) ?? []
+  expect(files.map(file => [basename(file.path), file.change]).sort()).toEqual([['README.md', 'modified'], ['staged-only.txt', 'added']])
+}, 20_000)
