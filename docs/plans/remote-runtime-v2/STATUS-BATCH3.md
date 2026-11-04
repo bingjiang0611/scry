@@ -7,7 +7,7 @@
 
 | 任务 | 状态 | 提交 | 说明 |
 |---|---|---|---|
-| B3-F1 trace 尾沿补读 | **未开始** | — | 见「未开始」原因 |
+| B3-F1 trace 尾沿补读 | 完成 | `见下` | [b3-f1](status/b3-f1.md)：尾沿 + 跟随 run 按窗口读；L1 仍 60/min；另加 security smoke 产物版本闸门 |
 | B3-F2 Mac run 绑定发信号 | 完成 | `b95e47f` | [b3-f2](status/b3-f2.md) |
 | B3-D 设计稿三处更正 | **未开始** | — | |
 | B3-M1 存储注入化 | **未开始** | — | |
@@ -18,10 +18,9 @@
 
 ## 剩余任务的执行顺序（不得跳序）
 
-1. **B3-F1** —— 独立于 M1/M2；修 S1 的尾沿与跟随 run 的内容读取（下一步）。
-2. **B3-D** —— 纯文档，按 REVIEW-BATCH2 三处更正改 `P3b-local-runtime-design.md`。
-3. **B3-M1** → **B3-M2** → **B3-P1** —— 严格串行。
-4. 交付前全局验证 + `npm run test:renderer:ui`。
+1. **B3-D** —— 纯文档，按 REVIEW-BATCH2 三处更正改 `P3b-local-runtime-design.md`。
+2. **B3-M1** → **B3-M2** → **B3-P1** —— 严格串行。
+3. 交付前全局验证 + `npm run test:renderer:ui`。
 
 ## 阻塞
 

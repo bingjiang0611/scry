@@ -30,6 +30,7 @@ import { prepareSideChatMode } from './side-chat-smoke.mjs'
 import { lostReplyPath, writeConversationFaultEntry, writeFileOpenEntry, writeIpcCountEntry } from './smoke-app-entries.mjs'
 
 import { defaultPackagedAppPath, electronDevLayout, packagedAppLayout } from './packaged-app-layout.mjs'
+import { assertArtifactMatchesSource } from './packaged-artifact-guard.mjs'
 
 const structureOnly = process.argv[2] === '--dev-structure-only'
 const sideChatOnly = process.argv[2] === '--dev-side-chat-only'
@@ -57,6 +58,7 @@ const devApp = sideChatOnly || largeHistoryOnly || structureOnly || unifiedConve
 const packagedAppArgument = ['--files-only', '--performance-only', '--file-history-only'].includes(process.argv[2]) ? undefined : process.argv[2]
 const dev = devApp ? electronDevLayout() : null
 const appPath = resolve(dev?.appPath || packagedAppArgument || defaultPackagedAppPath())
+if (!dev) assertArtifactMatchesSource(appPath)
 const executable = dev ? resolve(dev.executable) : packagedAppLayout(appPath).executable
 const temp = mkdtempSync(join(tmpdir(), 'scry-electron-smoke-'))
 let child
