@@ -171,6 +171,29 @@ export async function lastRecordVersion(dataRoot: string): Promise<string | null
   }
 }
 
+/**
+ * Which installs are still writing. One newest record hides a split install: when a second
+ * recorder keeps committing after an upgrade, the newest file shows the new version while the
+ * old one still owns part of the batch. Samples the newest `limit` records and counts versions.
+ */
+export async function recentRecordVersions(
+  dataRoot: string,
+  limit = 20
+): Promise<Array<{ version: string; records: number }>> {
+  const counts = new Map<string, number>()
+  for (const file of (await recordFiles(dataRoot)).slice(-limit)) {
+    try {
+      const record = await readRecordFile(join(dataRoot, 'records', file.name))
+      counts.set(record.recorderVersion, (counts.get(record.recorderVersion) ?? 0) + 1)
+    } catch {
+      // Unreadable records are `store.integrity` evidence; they cannot prove a writer version.
+    }
+  }
+  return [...counts]
+    .map(([version, records]) => ({ version, records }))
+    .sort((a, b) => b.records - a.records || a.version.localeCompare(b.version))
+}
+
 export async function verifyStore(
   dataRoot: string,
   onRecord?: (record: AgentTurnRecord) => void

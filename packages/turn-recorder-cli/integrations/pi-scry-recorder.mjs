@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { existsSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { request } from 'node:http'
 import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
@@ -151,18 +151,27 @@ function addUsage(total, message) {
   return true
 }
 
-function executable() {
-  const configured = process.env.SCRY_CLI_PATH
-  if (configured !== undefined) {
-    if (!isAbsolute(configured) || !existsSync(configured)) {
-      debug('configured SCRY_CLI_PATH is unavailable; refusing PATH fallback')
-      return undefined
-    }
-    try { return realpathSync(configured) } catch {
-      debug('configured SCRY_CLI_PATH cannot be resolved; refusing PATH fallback')
-      return undefined
-    }
+function resolveExecutable(candidate, source) {
+  if (!isAbsolute(candidate) || !existsSync(candidate)) {
+    debug(source + ' is unavailable; refusing PATH fallback')
+    return undefined
   }
+  try { return realpathSync(candidate) } catch {
+    debug(source + ' cannot be resolved; refusing PATH fallback')
+    return undefined
+  }
+}
+
+// 工作区把要用的 CLI 绝对路径写在 .scry/cli-path（`scry init`/`repair` 写入，provider hook 也读它）。
+// 固定猜 ~/.local/bin/scry 会在多份安装并存时静默用错版本，所以固定路径必须先于猜测。
+function executable(workspace) {
+  const configured = process.env.SCRY_CLI_PATH
+  if (configured !== undefined) return resolveExecutable(configured, 'configured SCRY_CLI_PATH')
+  let pinned
+  try {
+    pinned = String(readFileSync(join(workspace, '.scry', 'cli-path'), 'utf8')).split('\n')[0].trim()
+  } catch {}
+  if (pinned) return resolveExecutable(pinned, 'workspace .scry/cli-path')
   const candidates = [
     join(homedir(), '.local', 'bin', 'scry'),
     ...String(process.env.PATH || '').split(':').filter(Boolean).map((directory) => join(directory, 'scry')),
@@ -221,7 +230,7 @@ function sendSocket(workspace, event, payload) {
 }
 
 function sendDirect(workspace, event, payload) {
-  const scry = executable()
+  const scry = executable(workspace)
   if (!scry) return Promise.resolve(false)
   return new Promise((resolve) => {
     let settled = false

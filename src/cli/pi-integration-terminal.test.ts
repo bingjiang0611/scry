@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -314,6 +314,38 @@ setInterval(() => {}, 60_000)
       })
     }
   }, 10_000)
+
+  it('工作区 .scry/cli-path 优先于 ~/.local/bin 与 PATH 中的其他安装', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-pi-extension-cli-path-'))
+    roots.push(root)
+    const pinnedCapture = join(root, 'pinned-called')
+    const fallbackCapture = join(root, 'fallback-called')
+    const pinned = join(root, 'pinned-scry')
+    const fallback = join(root, 'scry')
+    await writeFile(pinned, `#!/bin/sh\nprintf '%s\\n' "$*" >> ${JSON.stringify(pinnedCapture)}\ncat >/dev/null\n`)
+    await writeFile(fallback, `#!/bin/sh\n: > ${JSON.stringify(fallbackCapture)}\ncat >/dev/null\n`)
+    await chmod(pinned, 0o700)
+    await chmod(fallback, 0o700)
+    await mkdir(join(root, '.scry'), { recursive: true })
+    await writeFile(join(root, '.scry', 'cli-path'), `${pinned}\n`)
+    const previousPath = process.env.PATH
+    process.env.PATH = root
+    process.env.SCRY_RECORDER_TRANSPORT = 'direct'
+    try {
+      const handlers = new Map<string, Array<(event: any, ctx: any) => any>>()
+      const pi = { on(name: string, handler: (event: any, ctx: any) => any) { handlers.set(name, [...(handlers.get(name) ?? []), handler]) } }
+      // @ts-expect-error the distributed Pi extension is runtime JavaScript by design
+      const extension = await import('../../packages/turn-recorder-cli/integrations/pi-scry-recorder.mjs')
+      extension.default(pi)
+      const ctx = { cwd: root, sessionManager: { getSessionId: () => 'pi-cli-path', getLeafId: () => 'pi-cli-path-turn' } }
+      for (const handler of handlers.get('before_agent_start') ?? []) await handler({ prompt: 'hello' }, ctx)
+      expect(await readFile(pinnedCapture, 'utf8')).toContain('--event UserPromptSubmit')
+      await expect(readFile(fallbackCapture, 'utf8')).rejects.toThrow()
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH
+      else process.env.PATH = previousPath
+    }
+  })
 
   it('direct transport 子进程提前关闭 stdin 时不让 EPIPE 杀死 Pi', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-pi-extension-epipe-'))
