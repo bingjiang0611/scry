@@ -31,10 +31,13 @@ export async function exerciseUnifiedConversationContinuation(state) {
   assert.equal(omitted.missingItems.length, 2)
   assert.ok(omitted.missingItems.every(item => item.ref.runId === final.turns[2].runId), 'confirmed history is never resent')
   const duplicate = { ...sendRequest(aPreview, stored.turns[2].commandId, 'desktop remote write three'), permissionMode: 'default' }
-  assert.deepEqual(await evaluate(`window.scry.conversations.send(${json(duplicate)})`), { runId: final.turns[2].runId, disposition: 'duplicate' })
+  assert.deepEqual(await evaluate(`window.scry.conversations.send(${json(duplicate)})`), { status: 'accepted', runId: final.turns[2].runId, disposition: 'duplicate' })
   const stale = { ...duplicate, commandId: 'stale-ui-preview', expectedRevision: 0 }
-  const error = await evaluate(`window.scry.conversations.send(${json(stale)}).then(()=>null,error=>String(error))`)
-  assert.match(error ?? '', /对话已变化，请重新预览/)
+  // A stale preview is refused before dispatch, so the host answers with the typed
+  // not_sent result instead of an exception the renderer would have to guess about.
+  const refused = await evaluate(`window.scry.conversations.send(${json(stale)})`)
+  assert.equal(refused.status, 'not_sent')
+  assert.match(refused.reason, /对话已变化，请重新预览/)
   assert.equal(inputs(fixture).length, 3)
   const catalog = await evaluate('window.scry.listProjects()')
   const project = catalog.find((project) => project.cwd === fixture.workspace)
@@ -69,8 +72,12 @@ export async function exerciseUnifiedConversationContinuation(state) {
   const liveRevision = (await read(evaluate, liveConversation.id)).summary.revision
   assert.match(await evaluate(`window.scry.conversations.update(${json(liveConversation.id)},${liveRevision},{kind:'archive',archived:true}).then(()=>'',error=>String(error))`), /运行|投递未收敛/)
   const callsBefore = inputs(fixture)
-  const bypass = await evaluate(`window.scry.start({providerId:'codex',cwd:${json(fixture.workspace)},prompt:'legacy bypass must not run',expectedExternalSessionId:null}).then(()=>null,error=>String(error))`)
-  assert.match(bypass ?? '', /统一对话仍在执行或保存证据/)
+  // 旧入口不能写统一对话正在使用的那条原生 session。同 cwd 的全新旧会话可以并行，
+  // 所以这里拦的是目标 session，不是整个工作区。
+  const legacyWrite = await evaluate(`window.scry.deleteSession({providerId:'codex',cwd:${json(fixture.workspace)},externalSessionId:${json(live.externalSessionId)}}).then(()=>null,error=>String(error))`)
+  // 这一轮的原生身份可能还没写入 binding：此时 store 的保守所有权围栏先拦，
+  // 身份已确认时由 catalog 的会话级围栏拦。两种都是“不能从旧入口写”。
+  assert.match(legacyWrite ?? '', /统一对话仍在执行或保存证据|存在未确认投递|已归属统一对话/)
   const adoption = await evaluate(`window.scry.adoptActiveRun(${json(liveStart.runId)}).then(()=>null,error=>String(error))`)
   assert.match(adoption ?? '', /统一对话不能由旧会话入口接管/)
   const steer = await evaluate(`window.scry.steer(${json({ runId: liveStart.runId, providerId: 'codex', cwd: fixture.workspace,
@@ -78,6 +85,30 @@ export async function exerciseUnifiedConversationContinuation(state) {
   assert.equal(steer.status, 'unavailable')
   assert.match(steer.message, /统一对话暂不支持 Steer/)
   assert.deepEqual(inputs(fixture), callsBefore, 'legacy and Steer refusals must not enter an available Provider handler')
+
+  // 同一 cwd 并行：第二个统一对话的 run 与 A 同时存活、各自登记原生身份，
+  // 并且停掉兄弟 run 不会中断 A 的待答问题。
+  const liveBefore = await read(evaluate, liveConversation.id)
+  const sibling = await evaluate(`window.scry.conversations.create(${json(fixture.workspace)})`)
+  const siblingView = await preview(evaluate, sibling.id, 'codex')
+  const siblingStart = await evaluate(`window.scry.conversations.send(${json(sendRequest(siblingView, 'sibling-parallel-command', 'dock badge question smoke'))})`)
+  const parallelRuns = await wait(() => evaluate(`window.scry.activeRuns().then(runs => {
+    const wanted = runs.filter(run => run.runId === ${json(liveStart.runId)} || run.runId === ${json(siblingStart.runId)})
+    return wanted.length === 2 && wanted.every(run => run.pendingQuestions?.length) ? wanted.map(run => [run.runId, run.externalSessionId]) : false
+  })`), 'two managed runs pending in one workspace')
+  assert.deepEqual(parallelRuns.map(([runId]) => runId).sort(), [liveStart.runId, siblingStart.runId].sort())
+  assert.notEqual(parallelRuns[0][1], parallelRuns[1][1], 'parallel managed runs must own distinct native sessions')
+  const siblingReceipt = inputs(fixture).at(-1)
+  assert.equal(siblingReceipt.cwd, fixture.workspace)
+  assert.notEqual(siblingReceipt.sessionId, live.externalSessionId)
+  assert.equal((await read(evaluate, liveConversation.id)).summary.revision, liveBefore.summary.revision,
+    'starting a sibling conversation must not mutate the live conversation')
+  assert.equal(await evaluate(`window.scry.stop(${json(siblingStart.runId)})`), true)
+  await wait(() => evaluate(`window.scry.activeRuns().then(runs => !runs.some(run => run.runId === ${json(siblingStart.runId)}))`), 'sibling stop settles')
+  const survivor = await evaluate(`window.scry.activeRuns().then(runs => runs.find(run => run.runId === ${json(liveStart.runId)}))`)
+  assert.ok(survivor?.pendingQuestions?.length, 'stopping the sibling must not interrupt the other managed run')
+  assert.equal(survivor.done, false)
+  assert.equal(survivor.externalSessionId, live.externalSessionId, 'the sibling stop must not touch the other native session')
   const liveEntry = `.sidebar [data-conversation-id=${json(liveConversation.id)}]`
   await wait(() => evaluate(`Boolean(document.querySelector(${json(liveEntry)}))`), 'live logical entry')
   await click(liveEntry)
@@ -92,7 +123,7 @@ export async function exerciseUnifiedConversationContinuation(state) {
     await wait(() => evaluate(`window.scry.activeRuns().then(runs=>!runs.find(run=>run.runId===${json(liveStart.runId)})?.pendingQuestions?.some(question=>question.questionId===${json(question.questionId)}))`), 'UI answer accepted')
   }
   await settled(evaluate, liveConversation.id, 1)
-  assert.deepEqual(await evaluate(`window.scry.conversations.send(${json(liveRequest)})`), { runId: liveStart.runId, disposition: 'duplicate' })
+  assert.deepEqual(await evaluate(`window.scry.conversations.send(${json(liveRequest)})`), { status: 'accepted', runId: liveStart.runId, disposition: 'duplicate' })
 
   // A completed result is not an input receipt. Persist unknown and never retry it.
   const unknown = await evaluate(`window.scry.conversations.create(${json(fixture.workspace)})`)
@@ -108,7 +139,12 @@ export async function exerciseUnifiedConversationContinuation(state) {
   assert.equal(await evaluate("document.querySelector('.conversation-chat textarea').value"), '')
   assert.equal(await evaluate("document.querySelector('.conversation-chat .send').disabled"), true)
   assert.equal(await evaluate(`window.scry.conversations.preview(${json(unknown.id)},{providerId:'claude'}).then(()=>false,()=>true)`), true)
-  assert.deepEqual(await evaluate(`window.scry.conversations.send(${json(unknownRequest)})`), { runId: unknownRun.runId, disposition: 'duplicate' })
+  // An unknown attempt carries no delivery evidence: retrying it is refused as unresolved
+  // and never re-dispatched, because claiming `accepted` would invent a delivery.
+  const inputsBeforeUnknownRetry = inputs(fixture).length
+  assert.match(await evaluate(`window.scry.conversations.send(${json(unknownRequest)}).then(()=>'',error=>String(error))`),
+    /投递结果尚未确认/)
+  assert.equal(inputs(fixture).length, inputsBeforeUnknownRetry, 'an unresolved retry must not reach the Provider')
   // Block the real per-session archive directory with a fixture file while the
   // Provider is awaiting input. Native acceptance must not survive as accepted
   // coverage when production persistence fails (including its terminal cleanup).
@@ -134,8 +170,11 @@ export async function exerciseUnifiedConversationContinuation(state) {
   assert.equal(existsSync(archivePath), false)
   assert.equal(await evaluate(`window.scry.conversations.preview(${json(archiveFailure.id)},{providerId:'claude'}).then(()=>false,()=>true)`), true)
   const invocationCount = inputs(fixture).length
-  assert.deepEqual(await evaluate(`window.scry.conversations.send(${json(archiveRequest)})`), { runId: archiveStart.runId, disposition: 'duplicate' })
-  assert.equal(inputs(fixture).length, invocationCount)
+  // The delivery could not be proven from the archive evidence, so a retry reports it as
+  // unresolved instead of replaying it as accepted, and it never re-enters the Provider.
+  assert.match(await evaluate(`window.scry.conversations.send(${json(archiveRequest)}).then(()=>'',error=>String(error))`),
+    /投递结果尚未确认/)
+  assert.equal(inputs(fixture).length, invocationCount, 'an unresolved archive retry must not reach the Provider')
   return { test: 'production unified conversation UI and IPC', id, unknownId: unknown.id,
     archiveFailure: { id: archiveFailure.id, runId: archiveStart.runId, nativeReceipt, delivery: failedArchive.turns[0].delivery },
     duplicate, nativeFork, management, deletion, piSwitch, images, runIds: final.turns.map((turn) => turn.runId), receipts: inputs(fixture), screenshots }

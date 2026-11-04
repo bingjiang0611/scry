@@ -1,0 +1,55 @@
+/* Progressive text behavior. Unsupported properties fall back to normal browser wrapping. */
+:where(h1, h2, h3, .card-title, .hero-line, .panel-section-heading, .inventory-modal__title-line, .welcome-heading h1) {
+  text-wrap: balance;
+}
+
+:where(p, li, .description, [data-description]) {
+  text-wrap: pretty;
+}
+
+:where(table, time, output, [data-tabular], .usage-metrics, .overview-metric, .stat, .timer, .price, .llm-perf-axis text, .llm-perf-reading, .llm-perf-scale) {
+  font-variant-numeric: tabular-nums;
+}
+
+:where(button, [role='button']) {
+  white-space: nowrap;
+}
+
+[data-truncate-container] {
+  min-width: 0;
+}
+
+[data-truncate] {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+:where(:lang(zh)) {
+  text-autospace: normal;
+  text-spacing-trim: trim-start;
+}
+
+:lang(zh).zh-prose,
+:lang(zh) .zh-prose {
+  max-inline-size: 26em;
+  text-align: justify;
+}
+
+:lang(zh).zh-balanced-heading,
+:lang(zh) .zh-balanced-heading {
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+  text-wrap: balance;
+}
+
+:lang(zh).zh-long-form-indent,
+:lang(zh) .zh-long-form-indent {
+  text-spacing-trim: space-first;
+}
+
+:where(code, pre, kbd, samp, input, textarea, [contenteditable='true'], .mono, [class*='mono']) {
+  text-autospace: no-autospace;
+  text-spacing-trim: space-all;
+}

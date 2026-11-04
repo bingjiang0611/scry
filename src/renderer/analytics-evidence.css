@@ -110,7 +110,7 @@
   flex: none;
   display: grid;
   place-items: center;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--dim2);
 }
@@ -137,13 +137,13 @@
   display: inline-flex;
   flex: none;
   padding: 3px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: var(--usage-control);
 }
 .usage-segmented button {
   min-width: 63px;
   padding: 5px 13px;
-  border-radius: 5px;
+  border-radius: var(--r-xs);
   background: transparent;
   color: var(--dim2);
   font-size: 13px;
@@ -155,14 +155,14 @@
 .usage-segmented.is-compact {
   padding: 2px;
   border: 1px solid var(--usage-border);
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   background: transparent;
 }
 .usage-segmented.is-compact button {
   min-width: 0;
   padding: 4px 13px;
   font-size: 11px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
 }
 .usage-inline-error {
   margin-top: 20px;
@@ -349,6 +349,7 @@
   position: absolute;
   content: '';
   border-radius: 50%;
+  corner-shape: round;
 }
 .usage-provider-mark::before {
   width: 10px;
@@ -472,7 +473,7 @@
   gap: 12px;
   padding: 15px 16px;
   border: 1px solid var(--usage-border);
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--usage-bg) 95%, var(--fg));
   box-shadow: 0 12px 30px #0003;
   pointer-events: none;
@@ -497,13 +498,6 @@
 .usage-chart-tooltip strong {
   font-weight: 520;
   font-variant-numeric: tabular-nums;
-}
-.usage-chart-tooltip small {
-  grid-column: 2 / -1;
-  color: var(--dim2);
-  font-size: 11px;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
 }
 .usage-visually-hidden {
   position: absolute;
@@ -647,7 +641,7 @@
 .usage-state.is-error button {
   padding: 8px 14px;
   border: 1px solid var(--usage-border);
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   background: var(--usage-control);
   color: var(--fg);
 }

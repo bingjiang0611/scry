@@ -63,6 +63,7 @@ const subscribe = <T,>(listeners: Set<T>) => (callback: T) => { listeners.add(ca
 const noopSubscribe = () => () => {}
 const agents = [{ id: 'claude', name: 'Claude Code', path: '/fixture/claude', bin: 'claude', health: { state: 'ready', transport: 'sdk' } }]
 Object.defineProperty(window, 'scry', { value: {
+  setLegacyDiffPreviewDemand: async () => true,
   workspaceSelection: unavailableWorkspaceSelection,
   activeRun: async () => null, activeRuns: async () => [],
   onDataUpdated: subscribe(dataListeners),

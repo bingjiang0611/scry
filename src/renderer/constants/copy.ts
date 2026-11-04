@@ -76,6 +76,7 @@ export const ANALYTICS_COPY = {
   noCostChart: '该时间范围没有可绘制的成本数据。',
   noTokenChart: '该时间范围没有可绘制的 Token 数据。',
   noDailyRecord: '当日无记录',
+  approximateCost: (value: string) => `≈${value}`,
   creditAmount: (value: number | null) => {
     if (value == null) return 'Credit 不可用'
     if (value > 0 && value < 0.01) return '<0.01 Credits'
@@ -86,6 +87,15 @@ export const ANALYTICS_COPY = {
   totalEvidence: (evidence: string, turns: number) => `${evidence}；${turns.toLocaleString()} 轮；不代表实际账单。部分覆盖只表示已知下界。`,
   tokenCoverage: (known: number, total: number) => `${known}/${total} 条明细已上报`,
   outputEvidence: (known: number, total: number, reasoning: string) => `${known}/${total} 条明细已上报；推理 ${reasoning}`
+} as const
+
+export const META_PROMPT_COPY = {
+  discardTitle: '放弃未保存的修改？',
+  discardDescription: '放弃后，本次修改不会保存。',
+  continueEditing: '继续编辑',
+  discardChanges: '放弃修改',
+  cancel: '取消',
+  save: '保存提示词'
 } as const
 
 export const MODAL_COPY = {
@@ -238,10 +248,6 @@ export const QUESTIONNAIRE_COPY = {
   submitShortcut: `${shortcutModifier}↵`
 } as const
 
-export const CONVERSATION_COPY = {
-  handoffScope: '缺失文字按预算补齐，其余可检索。只发送当前图片，不重放历史图片。原生命令和 Steer 暂不支持。'
-} as const
-
 // 排队消息块的全部用户可见文案。Steer 的状态文案与证据语义绑定：
 // pending/unknown 不是「稍后再试」，而是「已经交出去，不能撤销」。
 export const QUEUE_COPY = {
@@ -313,4 +319,13 @@ export const LOADING_COPY = {
   skillsVisible: (shown: number, total: number) => `显示 ${shown} / ${total}`,
   mcpNoConfigEvidence: '没有配置证据不等于运行正常，也不等于连接失败。',
   mcpSummary: (configured: number, connected: number, runtime: number, tests: number) => `${configured} 配置 · ${runtime > 0 ? connected + ' 已连接 / ' + runtime + ' 运行态' : '运行态未返回'} · ${tests} 测试证据`
+} as const
+
+/** 停止控制调用的事实文案：调用失败不冒充“已请求”，更不冒充“已终止”。 */
+export const RUN_STOP_COPY = {
+  interruptRequestFailed: {
+    label: '停止请求未生效',
+    hint: (providerId: string): string =>
+      `${providerId} 的取消调用失败，Scry 无法确认取消已经发出。这一轮可能仍在运行，用量与文件足迹尚未收敛；停止意图会继续按窗口升级，只有存在安全的硬杀范围时才会发出强制终止，否则如实显示未确认终止，收到 Provider 终态前不会显示完成`
+  }
 } as const

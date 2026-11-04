@@ -1,10 +1,33 @@
 export async function runWorkbench({ driver }) {
-  const { read, wait, check, click, capture, pointFor, send, insert, fixture, remoteShown } = driver
+  const { contents, read, wait, check, click, capture, pointFor, send, insert, fixture, remoteShown } = driver
   await click('button[aria-label="右侧工作区"]')
   const remotePanel = '#remote-right-surface-pane'
   await wait(`document.querySelector('${remotePanel} [role=tab][aria-selected=true]')?.textContent.includes('纵览')`, 'remote uses normal overview tab')
   await click(remotePanel + ' .turn-call-open')
-  await wait(`(() => { const prompt = document.querySelector('.turn-jump-target .turn-user'); if (!prompt) return false; const offset = prompt.getBoundingClientRect().top - document.querySelector('.chat-transcript').getBoundingClientRect().top; return offset >= 0 && offset < 64; })()`, 'remote overview turn ID navigates to its user prompt')
+  const aligned = `(() => { const prompt = document.querySelector('.turn-jump-target .turn-user'); const chat = document.querySelector('.chat-transcript'); if (!prompt || !chat?.clientHeight) return false; const offset = prompt.getBoundingClientRect().top - chat.getBoundingClientRect().top; return offset >= 0 && offset < 64; })()`
+  await wait(aligned, 'remote overview turn ID navigates to its visible user prompt')
+  const revealPanel = async () => {
+    if (await read('document.querySelector(".app").classList.contains("right-panel-hidden")')) {
+      await click('button[aria-label="右侧工作区"]')
+    }
+  }
+  contents.getOwnerBrowserWindow().setContentSize(1024, 653)
+  await wait('document.querySelector(".app.narrow-single-column") != null', 'remote narrow desktop layout')
+  await revealPanel()
+  await click(remotePanel + ' .turn-call-open')
+  await wait(aligned, 'narrow remote overview reveals its user prompt')
+  check(await read('document.activeElement === document.querySelector(".chat-transcript")'), 'Narrow remote navigation must focus the revealed timeline')
+  contents.getOwnerBrowserWindow().setContentSize(1200, 900)
+  await wait('innerWidth === 1200 && innerHeight === 900 && !document.querySelector(".app.narrow-single-column")', 'remote wide desktop layout')
+  await revealPanel()
+  await click(remotePanel + ' button[aria-label="最大化右侧工作区"]')
+  await wait('document.querySelector(".app.right-panel-maximized") != null', 'remote overview maximized')
+  await click(remotePanel + ' .turn-call-open')
+  await wait(aligned, 'maximized remote overview reveals its user prompt')
+  check(await read('document.activeElement === document.querySelector(".chat-transcript")'), 'Maximized remote navigation must focus the revealed timeline')
+  await revealPanel()
+  // The existing hide action also clears maximized state.
+  await wait('!document.querySelector(".app.right-panel-maximized")', 'remote columns restored before file checks')
   const addSurface = async (label) => {
     await click(remotePanel + ' button[aria-label="添加 Surface"]')
     await click(remotePanel + ' [role=menuitem]', label)
@@ -12,7 +35,7 @@ export async function runWorkbench({ driver }) {
   await addSurface('文件')
   await wait(`document.querySelector('${remotePanel} [data-workspace-path="README.md"]') != null`, 'remote shared file tree loaded')
   check(!(await read('document.querySelector(".remote-files-drawer")')), 'Remote still uses its separate overlay drawer')
-  check(await read(`(() => { const chat = document.querySelector('.main-area').getBoundingClientRect(); const panel = document.querySelector('${remotePanel}').getBoundingClientRect(); return panel.width > 0 && chat.right <= panel.left })()`), 'Remote panel overlaps the conversation instead of sharing normal columns')
+  check(await read(`(() => { const chat = document.querySelector('.main-area').getBoundingClientRect(); const panel = document.querySelector('${remotePanel}').getBoundingClientRect(); return chat.width > 0 && panel.width > 0 && chat.right <= panel.left })()`), 'Remote panel overlaps the conversation instead of sharing normal columns')
   check(!(await read(`document.querySelector('${remotePanel} button[title="新建文件"]')`)), 'Remote read-only tree exposes local file creation')
   await click(remotePanel + ' [data-workspace-path="src"]')
   await wait(`document.querySelector('${remotePanel} [data-workspace-path="src/nested.txt"]') != null`, 'nested remote tree expansion')

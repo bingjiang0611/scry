@@ -1,10 +1,36 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { RIGHT_SURFACE_DEFINITIONS, type RightSurfaceKind } from '../right-surface'
+import {
+  RIGHT_SURFACE_DEFINITIONS, rightSurfaceTabKey, type RightSurfaceKind, type RightSurfaceTab
+} from '../right-surface'
 import { Icon } from './primitives/Icon'
 import { usePresence } from '../hooks/usePresence'
-import { useTabIndicator } from '../hooks/useTabIndicator'
+import { RightSurfaceTabStrip, rightSurfacePanelId } from './RightSurfaceTabStrip'
 
 export type RightSurfaceContents = Readonly<Partial<Record<RightSurfaceKind, ReactNode>>>
+
+/** One open side-chat instance as the tab strip shows it. */
+export interface SideChatTabView {
+  conversationId: string
+  /** Full title; the strip truncates it visually and keeps this accessible. */
+  title: string
+  /** Text status such as `需处理`; absent means nothing needs the user. */
+  status?: string
+}
+
+/** The approved creation entry shown on top of the chooser and in the `+` menu. */
+export interface SideChatEntry {
+  label: string
+  description: string
+  /** Why creation is unavailable right now, shown instead of the description. */
+  unavailableReason?: string
+  /** Read a snapshot and create the child; a bare click never sends a prompt. */
+  onSelect: () => void
+  historyLabel: string
+  onOpenHistory: () => void
+  /** Creation status announced politely; `creating` blocks a second identical attempt. */
+  notice?: string
+  creating?: boolean
+}
 
 export interface RightSurfacePanelProps {
   openIds: readonly RightSurfaceKind[]
@@ -19,33 +45,30 @@ export interface RightSurfacePanelProps {
   onClose: (kind: RightSurfaceKind) => void
   onHide: () => void
   onToggleMaximized: () => void
+  sideChats?: readonly string[]
+  activeSideChatId?: string | null
+  sideChatTabs?: readonly SideChatTabView[]
+  sideChatEntry?: SideChatEntry
+  /** Only the active child of a visible panel is mounted; hidden children keep running in main. */
+  renderSideChat?: (conversationId: string) => ReactNode
+  onActivateSideChat?: (conversationId: string) => void
+  onCloseSideChat?: (conversationId: string) => void
+  /** Honest status when the local layout could not be saved; absent means saved. */
+  layoutNotice?: string
+  /**
+   * Whether this panel is really on screen. Ownership of a mounted child body follows the
+   * visible panel, not just the selected tab: a hidden workbench must not keep a scoped
+   * child subscription alive, and the child's run belongs to main either way.
+   */
+  visible?: boolean
   className?: string
 }
 
-function nextTabKind(
-  openKinds: readonly RightSurfaceKind[],
-  currentKind: RightSurfaceKind,
-  direction: -1 | 1
-): RightSurfaceKind {
-  const currentIndex = openKinds.indexOf(currentKind)
-  const nextIndex = (currentIndex + direction + openKinds.length) % openKinds.length
-  return openKinds[nextIndex] ?? currentKind
-}
-
 export function RightSurfacePanel({
-  openIds,
-  activeId,
-  contents,
-  unavailable,
-  retainTerminal = false,
-  workbenchPicker,
-  maximized,
-  onOpen,
-  onActivate,
-  onClose,
-  onHide,
-  onToggleMaximized,
-  className
+  openIds, activeId, contents, unavailable, retainTerminal = false, workbenchPicker, maximized, layoutNotice,
+  onOpen, onActivate, onClose, onHide, onToggleMaximized,
+  sideChats = [], activeSideChatId = null, sideChatTabs = [], sideChatEntry, renderSideChat,
+  onActivateSideChat, onCloseSideChat, visible = true, className
 }: RightSurfacePanelProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const rootId = useId().replaceAll(':', '')
@@ -63,17 +86,16 @@ export function RightSurfacePanel({
       restoreMenuFocusRef.current = false
     }
   })
-  const tabRefs = useRef<Partial<Record<RightSurfaceKind, HTMLButtonElement | null>>>({})
-  const tabItemRefs = useRef(new Map<string, HTMLElement | null>())
-  const surfaceTabsRef = useRef<HTMLDivElement>(null)
-  const pendingCloseFocusRef = useRef<{
-    closingKind: RightSurfaceKind
-    targetKind: RightSurfaceKind | null
-  } | null>(null)
-  const activeKind = activeId && openIds.includes(activeId) ? activeId : openIds[0] ?? null
-  const { indicatorRef: surfaceIndicatorRef } = useTabIndicator(surfaceTabsRef, activeKind, tabItemRefs.current, openIds)
+  const tabs: RightSurfaceTab[] = [
+    ...openIds.map((kind): RightSurfaceTab => ({ type: 'tool', kind })),
+    ...sideChats.map((conversationId): RightSurfaceTab => ({ type: 'side-chat', conversationId }))
+  ]
+  const activeKey = activeSideChatId ? `side-chat:${activeSideChatId}` : activeId && openIds.includes(activeId) ? activeId : null
+  const titles = new Map(sideChatTabs.map((tab) => [tab.conversationId, tab.title]))
+  const statuses = new Map(sideChatTabs.flatMap((tab) => tab.status ? [[tab.conversationId, tab.status] as const] : []))
   const mountedKinds: readonly RightSurfaceKind[] = retainTerminal && !openIds.includes('terminal')
     ? [...openIds, 'terminal'] : openIds
+  const chooser = openIds.length < 1 && sideChats.length < 1
 
   const closeMenu = (restoreFocus: boolean): void => {
     restoreMenuFocusRef.current = restoreFocus
@@ -88,9 +110,7 @@ export function RightSurfacePanel({
     const onPointerDown = (event: PointerEvent): void => {
       const target = event.target
       if (!(target instanceof Node)) return
-      if (!menuRef.current?.contains(target) && !addButtonRef.current?.contains(target)) {
-        closeMenu(false)
-      }
+      if (!menuRef.current?.contains(target) && !addButtonRef.current?.contains(target)) closeMenu(false)
     }
     const onEscape = (event: globalThis.KeyboardEvent): void => {
       if (event.key !== 'Escape') return
@@ -106,49 +126,6 @@ export function RightSurfacePanel({
       document.removeEventListener('keydown', onEscape)
     }
   }, [menuOpen, menuPresence.state, menuPresence.requestClose])
-
-  useEffect(() => {
-    const pending = pendingCloseFocusRef.current
-    if (!pending) return
-    pendingCloseFocusRef.current = null
-    // The parent can reject a close (for example, a dirty-file confirmation).
-    // Only move focus after the requested tab actually disappeared.
-    if (openIds.includes(pending.closingKind)) return
-    if (pending.targetKind && openIds.includes(pending.targetKind)) {
-      tabRefs.current[pending.targetKind]?.focus()
-      return
-    }
-    addButtonRef.current?.focus()
-  }, [openIds])
-
-  const activateAndFocus = (kind: RightSurfaceKind): void => {
-    onActivate(kind)
-    tabRefs.current[kind]?.focus()
-  }
-
-  const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, kind: RightSurfaceKind): void => {
-    if (openIds.length < 1) return
-
-    let target: RightSurfaceKind | undefined
-    if (event.key === 'ArrowLeft') target = nextTabKind(openIds, kind, -1)
-    if (event.key === 'ArrowRight') target = nextTabKind(openIds, kind, 1)
-    if (event.key === 'Home') target = openIds[0]
-    if (event.key === 'End') target = openIds[openIds.length - 1]
-    if (!target) return
-
-    event.preventDefault()
-    activateAndFocus(target)
-  }
-
-  const closeSurface = (kind: RightSurfaceKind): void => {
-    const closingIndex = openIds.indexOf(kind)
-    const neighbour = openIds[closingIndex + 1] ?? openIds[closingIndex - 1] ?? null
-    pendingCloseFocusRef.current = {
-      closingKind: kind,
-      targetKind: kind === activeKind ? neighbour : activeKind
-    }
-    onClose(kind)
-  }
 
   const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     const items = menuItemRefs.current.filter((item): item is HTMLButtonElement => item != null)
@@ -180,43 +157,22 @@ export function RightSurfacePanel({
     >
       <div className="surface-topbar">
         {workbenchPicker}
-        <div className="surface-tabs" ref={surfaceTabsRef} role="tablist" aria-label="已打开的 Surface">
-          {openIds.map((kind) => {
-            const definition = RIGHT_SURFACE_DEFINITIONS.find((item) => item.kind === kind)!
-            const selected = activeKind === kind
-            const tabId = `${rootId}-${kind}-tab`
-            const panelId = `${rootId}-${kind}-panel`
-            return (
-              <div ref={(node) => { tabItemRefs.current.set(kind, node) }} className={`surface-tab${selected ? ' active' : ''}`} role="presentation" key={kind}>
-                <button
-                  ref={(node) => { tabRefs.current[kind] = node }}
-                  id={tabId}
-                  className="surface-tab-activate"
-                  type="button"
-                  role="tab"
-                  aria-selected={selected}
-                  aria-controls={panelId}
-                  tabIndex={selected || (!activeKind && kind === openIds[0]) ? 0 : -1}
-                  onClick={() => onActivate(kind)}
-                  onKeyDown={(event) => onTabKeyDown(event, kind)}
-                >
-                  <Icon name={definition.icon} className="surface-icon" />
-                  <span className="label">{definition.label}</span>
-                </button>
-                <button
-                  className="surface-tab-close"
-                  type="button"
-                  aria-label={`关闭 ${definition.label}`}
-                  title={`关闭 ${definition.label}`}
-                  onClick={() => closeSurface(kind)}
-                >
-                  <Icon name="x" />
-                </button>
-              </div>
-            )
-          })}
-          <span ref={surfaceIndicatorRef} className="motion-tab-indicator" aria-hidden="true" />
-        </div>
+        <RightSurfaceTabStrip
+          tabs={tabs}
+          activeKey={activeKey}
+          sideChatTitles={titles}
+          sideChatStatus={statuses}
+          fallbackFocusRef={addButtonRef}
+          onActivate={(tab) => {
+            if (tab.type === 'tool') onActivate(tab.kind)
+            else onActivateSideChat?.(tab.conversationId)
+          }}
+          onClose={(tab) => {
+            if (tab.type === 'tool') onClose(tab.kind)
+            else onCloseSideChat?.(tab.conversationId)
+          }}
+        />
+        {layoutNotice && <p className="surface-layout-notice" role="status" data-layout-unsaved>{layoutNotice}</p>}
 
         <div className="surface-actions">
           <div className="surface-add-wrap">
@@ -255,16 +211,43 @@ export function RightSurfacePanel({
                 aria-label="可用的 Surface"
                 onKeyDown={onMenuKeyDown}
               >
+                {sideChatEntry && (
+                  <>
+                    <button
+                      ref={(node) => { menuItemRefs.current[0] = node }}
+                      className="menu-item"
+                      type="button"
+                      role="menuitem"
+                      title={sideChatEntry.unavailableReason}
+                      disabled={sideChatEntry.creating || Boolean(sideChatEntry.unavailableReason)}
+                      onClick={() => { sideChatEntry.onSelect(); closeMenu(true) }}
+                    >
+                      <Icon name="message" />
+                      <span>{sideChatEntry.label}</span>
+                      {sideChatEntry.unavailableReason ? <small>不可用</small> : null}
+                    </button>
+                    <button
+                      ref={(node) => { menuItemRefs.current[1] = node }}
+                      className="menu-item"
+                      type="button"
+                      role="menuitem"
+                      onClick={() => { sideChatEntry.onOpenHistory(); closeMenu(true) }}
+                    >
+                      <Icon name="clock" />
+                      <span>{sideChatEntry.historyLabel}</span>
+                    </button>
+                  </>
+                )}
                 {RIGHT_SURFACE_DEFINITIONS.map((definition, index) => {
                   const isOpen = openIds.includes(definition.kind)
                   return (
                     <button
-                      ref={(node) => { menuItemRefs.current[index] = node }}
+                      ref={(node) => { menuItemRefs.current[sideChatEntry ? index + 2 : index] = node }}
                       className="menu-item"
                       type="button"
                       role="menuitem"
                       key={definition.kind}
-                      aria-current={activeKind === definition.kind ? 'page' : undefined}
+                      aria-current={activeId === definition.kind && !activeSideChatId ? 'page' : undefined}
                       title={unavailable?.[definition.kind]}
                       onClick={() => {
                         onOpen(definition.kind)
@@ -303,14 +286,28 @@ export function RightSurfacePanel({
       </div>
 
       <div className="surface-body">
-        {openIds.length < 1 ? (
+        {chooser ? (
           <div className="empty-surface">
             <div className="empty-inner">
               <div className="empty-heading">
                 <h2>打开一个 Surface</h2>
                 <p>选择要在右侧工作区中显示的内容。</p>
               </div>
-              <div className="surface-card-grid">
+              <div className="surface-card-grid" data-surface-chooser>
+                {sideChatEntry && (
+                  <button
+                    className="surface-card surface-card-wide"
+                    type="button"
+                    data-side-chat-entry
+                    title={sideChatEntry.unavailableReason ?? sideChatEntry.description}
+                    disabled={sideChatEntry.creating || Boolean(sideChatEntry.unavailableReason)}
+                    onClick={sideChatEntry.onSelect}
+                  >
+                    <span className="card-icon"><Icon name="message" /></span>
+                    <strong>{sideChatEntry.label}</strong>
+                    <p>{sideChatEntry.unavailableReason ?? sideChatEntry.description}</p>
+                  </button>
+                )}
                 {RIGHT_SURFACE_DEFINITIONS.map((definition) => (
                   <button
                     className="surface-card"
@@ -324,25 +321,50 @@ export function RightSurfacePanel({
                   </button>
                 ))}
               </div>
+              {sideChatEntry && (
+                <div className="surface-chooser-footer">
+                  {sideChatEntry.notice && <p className="surface-chooser-notice" role="status" data-side-chat-creation-notice>{sideChatEntry.notice}</p>}
+                  <button type="button" className="btn" onClick={sideChatEntry.onOpenHistory}>{sideChatEntry.historyLabel}</button>
+                </div>
+              )}
             </div>
           </div>
         ) : null}
         {mountedKinds.map((kind) => {
-            return (
-              <section
-                id={`${rootId}-${kind}-panel`}
-                className={`surface-content surface-content-${kind}`}
-                role="tabpanel"
-                aria-labelledby={`${rootId}-${kind}-tab`}
-                tabIndex={0}
-                hidden={activeKind !== kind || !openIds.includes(kind)}
-                key={kind}
-              >
-                {activeKind === kind || kind === 'terminal' || kind === 'files' ? contents[kind] : null}
-              </section>
-            )
-          })}
+          const key = kind
+          return (
+            <section
+              id={rightSurfacePanelId(rootId, key)}
+              className={`surface-content surface-content-${kind}`}
+              role="tabpanel"
+              aria-labelledby={`${rootId}-${key}-tab`}
+              tabIndex={0}
+              hidden={activeKey !== key || !openIds.includes(kind)}
+              key={kind}
+            >
+              {activeKey === key || kind === 'terminal' || kind === 'files' ? contents[kind] : null}
+            </section>
+          )
+        })}
+        {sideChats.map((conversationId) => (
+          <section
+            id={rightSurfacePanelId(rootId, `side-chat:${conversationId}`)}
+            className="surface-content surface-content-side-chat"
+            role="tabpanel"
+            aria-labelledby={`${rootId}-side-chat:${conversationId}-tab`}
+            tabIndex={0}
+            data-side-chat-panel={conversationId}
+            hidden={activeKey !== `side-chat:${conversationId}`}
+            key={conversationId}
+          >
+            {/* Only the active child of a visible panel is mounted: an inactive or hidden
+                view is not rerun, and its run keeps living in main. */}
+            {visible && activeKey === `side-chat:${conversationId}` && renderSideChat ? renderSideChat(conversationId) : null}
+          </section>
+        ))}
       </div>
     </aside>
   )
 }
+
+export { rightSurfaceTabKey }

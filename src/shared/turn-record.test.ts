@@ -65,6 +65,25 @@ describe('AgentTurnRecord strict schema-v1 validation', () => {
     expect(isAgentTurnRecord({ ...valid, provider: { id: 'codex' } })).toBe(false)
   })
 
+  it('accepts Qoder credits on a Pi turn only from Pi native observation', () => {
+    const valid = record()
+    const piCredits = creditUsageEvidence([{ id: 'request', runId: 'run', credits: 5.3 }], 'pi_qoder_credit_observation')
+    const withCredits = (credits: unknown) => ({
+      ...valid,
+      provider: { id: 'pi' },
+      usage: { status: 'partial', quality: 'exact', source: ['pi_qoder_credit_observation'], value: { credits }, omissionReason: 'main requests only' }
+    })
+    expect(isAgentTurnRecord(withCredits(piCredits))).toBe(true)
+    // A Pi credential never borrows Qoder's own SDK/native sources, and Qoder never borrows Pi's observation.
+    const qoderObserved = creditUsageEvidence([{ id: 'request', runId: 'run', credits: 1.25 }], 'qoder_sdk')
+    expect(isAgentTurnRecord(withCredits(qoderObserved))).toBe(false)
+    expect(isAgentTurnRecord({
+      ...withCredits(piCredits),
+      provider: { id: 'qoder' }
+    })).toBe(false)
+    expect(isAgentTurnRecord({ ...withCredits(piCredits), provider: { id: 'claude' } })).toBe(false)
+  })
+
   it.each([
     ['durationMs', Number.NaN],
     ['status', 'unknown'],

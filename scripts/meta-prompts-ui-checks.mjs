@@ -104,13 +104,22 @@ export async function exerciseMetaPrompts(contents, win, clipboard, screenshotPr
   await wait(`document.querySelector('[role="status"]')?.textContent.includes('已复制')`)
   check(clipboard.readText() === body, 'Copied text differs from the saved body')
 
-  await click('[aria-label="编辑提示词"]')
-  await type('.mp-editor-modal textarea', '未保存的修改')
-  await click('[aria-label="关闭提示词编辑器"]')
-  await wait(`document.querySelector('.mp-discard')`)
-  await click('.mp-discard .mp-danger')
-  await wait(`!document.querySelector('.mp-editor-modal')`)
-  check(await read(`document.querySelector('.mp-body').textContent === ${JSON.stringify(body)}`), 'Discard changed persisted body')
+  for (const [width, height] of [[1200, 850], [1024, 653]]) {
+    win.setContentSize(width, height)
+    await wait(`innerWidth === ${width} && innerHeight === ${height}`)
+    await click('[aria-label="编辑提示词"]')
+    await type('.mp-editor-modal textarea', '未保存的修改')
+    await click('[aria-label="关闭提示词编辑器"]')
+    await wait(`document.querySelector('.mp-discard')`)
+    await click('.mp-discard .mp-button:not(.mp-danger)')
+    await wait(`!document.querySelector('.mp-discard')`)
+    check(await read(`document.querySelector('.mp-editor-modal textarea').value === '未保存的修改'`), 'Continue editing lost the unsaved draft')
+    await click('[aria-label="关闭提示词编辑器"]')
+    await wait(`document.querySelector('.mp-discard')`)
+    await click('.mp-discard .mp-danger')
+    await wait(`!document.querySelector('.mp-editor-modal')`)
+    check(await read(`document.querySelector('.mp-body').textContent === ${JSON.stringify(body)}`), 'Discard changed persisted body')
+  }
 
   await click('[aria-label="编辑提示词"]')
   await type('.mp-editor-modal input', '先写方案，再开始实现（修订）')
@@ -160,7 +169,7 @@ export async function exerciseMetaPrompts(contents, win, clipboard, screenshotPr
       require('node:fs').writeFileSync(screenshotPrefix + '-close-buttons-' + theme + '.png', (await contents.capturePage()).toPNG())
     }
   }
-  return { nativeCoordinateActions: true, storageReload: true, plainText: true, search: true, clipboardExact: true, discard: true, edit: true, draftPreserved: true, notSent: true, deletion: true, corruptDataProtected: true, modalCloseButton: { forwardedRef: true, keyboardActivation: true, disabled: true, nonSubmitting: true, glyphPreserved: true } }
+  return { nativeCoordinateActions: true, storageReload: true, plainText: true, search: true, clipboardExact: true, discard: true, shortWindowDiscard: true, continueEditing: true, edit: true, draftPreserved: true, notSent: true, deletion: true, corruptDataProtected: true, modalCloseButton: { forwardedRef: true, keyboardActivation: true, disabled: true, nonSubmitting: true, glyphPreserved: true } }
 }
 
 // Full App wiring, with its real main/preload and an isolated smoke Provider.

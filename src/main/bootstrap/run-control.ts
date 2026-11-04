@@ -4,6 +4,7 @@ import type { AgentForceKillScope, AgentSteerInput, AgentSteerResult, RuntimePro
 import type { BackgroundTaskStopResult } from '../../shared/background-work'
 
 export interface RunControl {
+  setDiffPreviewDemand?: (demanded: boolean) => void
   runId: string
   providerId: ProviderId
   interrupt: () => void

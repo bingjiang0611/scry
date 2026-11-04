@@ -39,7 +39,7 @@ const remoteChat = (connectionId: string, draft = '') => {
   return renderToStaticMarkup(<RemoteChat
     connectionId={connectionId} cwd="/remote/app" draftStore={draftStore} queueStore={new RemotePromptQueueStore()} onDraftInput={() => {}}
     scrollRef={createRef()} textareaRef={createRef()} renderLocationPicker={() => null}
-    onSessionAdopted={() => {}} surface={{ target: null, state: createRightSurfaceState(), onAction: () => {} }}
+    onSessionAdopted={() => {}} surface={{ target: null, primaryVisible: true, state: createRightSurfaceState(), onAction: () => {} }}
   />)
 }
 

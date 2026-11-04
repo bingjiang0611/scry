@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, realpath, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -87,7 +87,7 @@ describe('conversation backend lane', () => {
     for (const invalid of [null, [], { ...valid, attachments: [{}] }, { ...valid, attachments: 'not-an-array' },
       { ...valid, historyReader: { url: 'http://127.0.0.1/mcp' } }, { ...valid, resume: 'foreign-native' },
       { ...valid, confirmFresh: 'yes' }, { ...valid, permissionMode: 'invalid-mode' },
-      { ...valid, agentProfileId: 'unimplemented-profile' }, { ...valid, providerId: 'opencode' },
+      { ...valid, agentProfileId: 'unimplemented-profile' }, { ...valid, providerId: 'cursor' },
       { ...valid, model: { id: 42 } }, { ...valid, selectedItems: [{ runId: 'r', itemId: 'user', contentHash: hash('body'), text: 'untrusted history' }] }]) {
       await expect(service.send(invalid)).rejects.toThrow()
     }
@@ -125,12 +125,12 @@ describe('conversation backend lane', () => {
       ...request(created.id, created.revision, 'pi-profile-a'), providerId: 'pi', agentProfileId: profileA,
       expectedContinuationKey: `${profileA}-identity`
     })
-    expect(started.disposition).toBe('created')
+    expect(started).toMatchObject({ status: 'accepted', disposition: 'created' })
     const after = await service.read(created.id)
     await expect(service.send({
       ...request(created.id, after.summary.revision, 'pi-profile-b'), providerId: 'pi', agentProfileId: profileB,
       expectedContinuationKey: `${profileB}-identity`
-    })).resolves.toMatchObject({ disposition: 'created' })
+    })).resolves.toMatchObject({ status: 'accepted', disposition: 'created' })
   })
 
   it('writes intent before dispatch and settles accepted input through the canonical runner seam', async () => {
@@ -166,7 +166,7 @@ describe('conversation backend lane', () => {
     })
     const created = await service.create(cwd)
     const started = await service.send(request(created.id, created.revision, 'command-accept-1'))
-    expect(started.disposition).toBe('created')
+    expect(started).toMatchObject({ status: 'accepted', disposition: 'created' })
     expect(calls).toEqual(['dispatch'])
     const persisted = await store.read(created.id)
     expect(persisted?.turns[0]).toMatchObject({
@@ -199,10 +199,13 @@ describe('conversation backend lane', () => {
       }
     })
     const created = await service.create(cwd)
-    await expect(service.send(request(created.id, created.revision, 'command-cancel-1'))).rejects.toThrow('cancelled')
+    // A runner refusal before the dispatch attempt is a typed not-sent answer, not an
+    // unknown one: the caller may resend with a fresh command.
+    await expect(service.send(request(created.id, created.revision, 'command-cancel-1')))
+      .resolves.toEqual({ status: 'not_sent', reason: 'cancelled before provider dispatch' })
     const afterCancel = await store.read(created.id)
     const valid = await service.send(request(created.id, afterCancel!.revision, 'command-valid-1'))
-    expect(valid.disposition).toBe('created')
+    expect(valid).toMatchObject({ status: 'accepted' })
     const persistedTurns = (await store.read(created.id))?.turns.filter((turn) => turn.origin === 'dispatch')
     expect(persistedTurns?.map((turn) => turn.delivery.status)).toEqual(['not_sent', 'accepted'])
   })
@@ -229,60 +232,50 @@ describe('conversation backend lane', () => {
     expect((await service.read(created.id)).summary.blockedReason).toBeUndefined()
   })
 
-  it('returns the durable duplicate before plan state for pending, unknown, and completed attempts', async () => {
+  it('answering a duplicate ignores plan state but never upgrades a pending or unknown attempt', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-conversation-service-'))
     roots.push(root)
     const cwd = join(root, 'project')
     await mkdir(cwd)
     const store = new ConversationStore(join(root, 'user-data'))
     let terminal: ((value: Parameters<NonNullable<import('./conversation-service').ManagedConversationStart['onTerminal']>>[0]) => Promise<void>) | undefined
+    let dispatches = 0
     const service = new ConversationService({
       store,
       resolveContinuationKey: async () => 'identity-a',
       supportsHistoricalInput: () => true,
       startAppRun: async (_request, options) => {
+        dispatches++
         terminal = options.managedConversation.onTerminal
         return { runId: options.managedConversation.runId }
       }
     })
     const created = await service.create(cwd)
     const first = await service.send(request(created.id, created.revision, 'command-retry-1'))
-    const pendingDuplicate = await service.send({ ...request(created.id, 999, 'command-retry-1'), confirmFresh: false })
-    expect(pendingDuplicate).toEqual({ runId: first.runId, disposition: 'duplicate' })
+    if (first.status !== 'accepted') throw new Error('the first attempt must be accepted')
+    // A pending attempt is not evidence of delivery: the retry is answered as unknown and
+    // never re-dispatched, even though the revision advanced.
+    await expect(service.send({ ...request(created.id, 999, 'command-retry-1'), confirmFresh: false }))
+      .rejects.toThrow('该命令的投递结果尚未确认')
+    expect(dispatches).toBe(1)
     await terminal!({ status: 'failed', finalItems: [], receipt: { contextHash: null, status: 'accepted', textHash: hash('hello'), nativeSessionId: 'native-a', source: 'codex_turn_start_response' } })
     expect((await store.read(created.id))?.turns.find((turn) => turn.origin === 'dispatch')?.delivery).toMatchObject({ status: 'unknown' })
-    const unknownDuplicate = await service.send({ ...request(created.id, 999, 'command-retry-1'), confirmFresh: false })
-    expect(unknownDuplicate).toEqual({ runId: first.runId, disposition: 'duplicate' })
+    await expect(service.send({ ...request(created.id, 999, 'command-retry-1'), confirmFresh: false }))
+      .rejects.toThrow('该命令的投递结果尚未确认')
+    expect(dispatches).toBe(1)
 
     // A second conversation proves completed duplicates are also independent of
     // the mutated revision/continuation plan.
     const second = await service.create(cwd)
     const completed = await service.send(request(second.id, second.revision, 'command-complete-1'))
+    if (completed.status !== 'accepted') throw new Error('the completed attempt must be accepted')
     await terminal!({
       status: 'completed', finalItems: [{ runId: completed.runId, itemId: 'user', contentHash: hash('hello') }],
       receipt: { contextHash: null, status: 'accepted', textHash: hash('hello'), nativeSessionId: 'native-a', source: 'codex_turn_start_response' },
       archive: { sessionId: 'archive-complete' }
     })
     const completeDuplicate = await service.send({ ...request(second.id, 999, 'command-complete-1'), confirmFresh: false })
-    expect(completeDuplicate).toEqual({ runId: completed.runId, disposition: 'duplicate' })
-  })
-
-  it('does not accept a managed runner with a different runId and settles the intent without archive refs', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'scry-conversation-service-'))
-    roots.push(root)
-    const cwd = join(root, 'project')
-    await mkdir(cwd)
-    const store = new ConversationStore(join(root, 'user-data'))
-    const service = new ConversationService({
-      store,
-      resolveContinuationKey: async () => 'identity-a',
-      supportsHistoricalInput: () => true,
-      startAppRun: async () => ({ runId: 'wrong-run-id' })
-    })
-    const created = await service.create(cwd)
-    await expect(service.send(request(created.id, created.revision, 'command-runid-1'))).rejects.toThrow('不同的 runId')
-    const persisted = await store.read(created.id)
-    expect(persisted?.turns[0]).toMatchObject({ runId: expect.any(String), delivery: { status: 'not_sent' }, items: [] })
+    expect(completeDuplicate).toEqual({ status: 'accepted', runId: completed.runId, disposition: 'duplicate' })
   })
 
   it('scopes identical native IDs by Provider instead of hiding both local aliases', async () => {
@@ -322,20 +315,52 @@ describe('conversation backend lane', () => {
         await options.managedConversation.onTerminal({
           status: 'completed',
           finalItems: [{ runId: options.managedConversation.runId, itemId: 'user', contentHash: hash('hello') }],
-          receipt: { contextHash: null, status: 'accepted', textHash: hash('hello'), nativeSessionId: 'native-a', source: 'codex_turn_start_response' }
+          receipt: { contextHash: null, status: 'accepted', textHash: hash('hello'), nativeSessionId: 'native-a', source: 'codex_turn_start_response' },
+          archive: { sessionId: 'archive-a' }
         })
         return { runId: options.managedConversation.runId }
       }
     })
     const created = await service.create(cwd)
-    await expect(service.send(request(created.id, created.revision + 1, 'command-stale-1'))).rejects.toThrow('变化')
+    await expect(service.send(request(created.id, created.revision + 1, 'command-stale-1')))
+      .resolves.toEqual({ status: 'not_sent', reason: '对话已变化，请重新预览' })
     const started = await service.send(request(created.id, created.revision, 'command-duplicate-1'))
-    expect(started.disposition).toBe('created')
+    expect(started).toMatchObject({ status: 'accepted', disposition: 'created' })
     const duplicate = await service.send(request(created.id, created.revision, 'command-duplicate-1'))
-    expect(duplicate.disposition).toBe('duplicate')
+    expect(duplicate).toMatchObject({ status: 'accepted', disposition: 'duplicate' })
     identity = 'identity-b'
     const current = await store.read(created.id)
-    await expect(service.send(request(created.id, current!.revision, 'command-account-1'))).rejects.toThrow('接续身份')
+    await expect(service.send(request(created.id, current!.revision, 'command-account-1')))
+      .resolves.toEqual({ status: 'not_sent', reason: 'Provider 接续身份已变化，请重新预览' })
     expect(dispatches).toBe(1)
+  })
+
+  it('answers rows and the owned-native filter from one store read', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-conversation-catalog-'))
+    roots.push(root)
+    const cwd = join(root, 'project')
+    await mkdir(cwd)
+    const store = new ConversationStore(join(root, 'user-data'))
+    const service = new ConversationService({
+      store,
+      resolveContinuationKey: async () => 'identity-a',
+      supportsHistoricalInput: () => true,
+      startAppRun: async () => ({ runId: 'run-unused' })
+    })
+    await service.create(cwd)
+    let reads = 0
+    const list = store.list.bind(store)
+    store.list = async (projectCwd: string) => {
+      reads++
+      return list(projectCwd)
+    }
+    const catalog = await service.listCatalog(await realpath(cwd))
+    expect(reads).toBe(1)
+    expect(catalog.conversations).toHaveLength(1)
+    expect(catalog.ownedNativeAliases.size).toBe(0)
+    // The two legacy accessors share the same seam instead of reading the store twice.
+    await service.list(await realpath(cwd))
+    await service.nativeSessionAliases(await realpath(cwd))
+    expect(reads).toBe(3)
   })
 })

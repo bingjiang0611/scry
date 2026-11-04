@@ -2,7 +2,7 @@ import { isTurnRepositoryDiscovery, isDateString, isEvidence, isOptionalString, 
 import type { AgentTurnRecord, Evidence, EvidenceQuality, TurnCall, TurnHookCall, TurnUsage, TurnFile, TurnDiffSnapshotRecord, TurnDanger, TurnRole, TurnError, TurnRecordValidationResult, TurnRecordValidationIssue } from './turn-record-contracts.js'
 import { isToolContentRef, isToolContent } from './tool-content.js'
 import { isSupportedImageMimeType } from './runtime.js'
-import { isCreditUsageEvidence } from './credit-usage.js'
+import { isCreditUsageEvidence, creditSourcesMatchProvider } from './credit-usage.js'
 import { normalizeTurnDiffSnapshot } from './trace.js'
 import { isIntervention } from './turn-intervention-validation.js'
 
@@ -246,13 +246,13 @@ export function validateAgentTurnRecord(value: unknown): TurnRecordValidationRes
   const workspace = raw.workspace as Record<string, unknown> | undefined
   require(!!workspace && typeof workspace.id === 'string' && workspace.id.length > 0 && typeof workspace.root === 'string' && workspace.root.length > 0, '$.workspace', 'invalid workspace identity')
   const provider = raw.provider as Record<string, unknown> | undefined
-  require(!!provider && ['claude', 'codex', 'qoder', 'opencode', 'pi'].includes(String(provider.id)) && isOptionalString(provider.version) && isOptionalString(provider.model), '$.provider', 'invalid provider identity')
+  require(!!provider && ['claude', 'codex', 'qoder', 'opencode', 'pi'].includes(String(provider.id)) && isOptionalString(provider.version) && isOptionalString(provider.model) && isOptionalString(provider.modelTier), '$.provider', 'invalid provider identity')
   if (provider?.modelStatus !== undefined) require(
-    (provider.modelStatus === 'observed' && typeof provider.model === 'string' && provider.model.length > 0 &&
+    (provider.modelStatus === 'observed' && (typeof provider.model === 'string' && provider.model.length > 0 || typeof provider.modelTier === 'string' && provider.modelTier.length > 0) &&
       ['provider_model_event', 'usage_event'].includes(String(provider.modelSource)) &&
       provider.modelOmissionReason === undefined) ||
     (['unobserved', 'incomplete', 'conflict'].includes(String(provider.modelStatus)) &&
-      provider.model === undefined && provider.modelSource === undefined &&
+      provider.model === undefined && provider.modelTier === undefined && provider.modelSource === undefined &&
       typeof provider.modelOmissionReason === 'string' && provider.modelOmissionReason.length > 0),
   '$.provider.modelStatus', 'must match the observed model and carry a reason when absent')
   require(provider?.modelSource === undefined || provider.modelStatus !== undefined,
@@ -283,7 +283,7 @@ export function validateAgentTurnRecord(value: unknown): TurnRecordValidationRes
     require(isTurnRepositoryDiscovery(raw.diff.discovery), '$.diff.discovery', 'invalid repository discovery metadata')
   }
   const usage = raw.usage as Evidence<TurnUsage> | undefined
-  if (usage?.value?.credits !== undefined) require(provider?.id === 'qoder', '$.usage.value.credits', 'Qoder credits require Qoder provider identity')
+  if (usage?.value?.credits !== undefined) require(creditSourcesMatchProvider(provider?.id, usage.value.credits.source), '$.usage.value.credits', 'credits require a source matching the agent provider')
   if (raw.compactions !== undefined) require(isCompactionsEvidence(raw.compactions), '$.compactions', 'invalid compaction evidence')
   if (raw.modelSegments !== undefined) require(isModelSegmentsEvidence(raw.modelSegments), '$.modelSegments', 'invalid model segment evidence')
   if (raw.modelTiming !== undefined) require(isModelTimingEvidence(raw.modelTiming), '$.modelTiming', 'invalid model timing evidence')

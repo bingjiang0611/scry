@@ -48,6 +48,9 @@ try {
   const { userData, home, cwd, sessions, bootstrap } = writeSessionFixture(root, temp, turnCount, sections)
   const port = await freePort()
   const launchStarted = performance.now()
+  // Diagnostic milestones only: keep every readiness operation inside the original startup interval.
+  const startupCheckpoints = []
+  const startupCheckpoint = stage => startupCheckpoints.push({ stage, elapsedMs: performance.now() - launchStarted })
   child = spawn(electron, [bootstrap, `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`,
     '--disable-gpu', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--no-first-run'], {
     env: { ...process.env, HOME: home, SCRY_TEST_APP: '1', SCRY_PERF_LOG: '1', ELECTRON_ENABLE_LOGGING: '1',
@@ -57,8 +60,10 @@ try {
   child.stdout.on('data', capture)
   child.stderr.on('data', capture)
   cdp = await connect(port)
+  startupCheckpoint('driver_connected')
   await cdp.send('Runtime.enable')
   await cdp.send('Performance.enable')
+  startupCheckpoint('domains_enabled')
   const evaluate = async expression => {
     const response = await cdp.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
     if (response.exceptionDetails) throw new Error(response.exceptionDetails.exception?.description ?? response.exceptionDetails.text)
@@ -124,6 +129,7 @@ try {
     }
   })()`)
   await wait(`document.querySelectorAll('button.sb-sess').length === 2 && typeof window.scry === 'object'`)
+  startupCheckpoint('sidebar_ready')
   const sensitivityBaseStart = await beginCounters()
   const sensitivityBase = await endCounters(sensitivityBaseStart)
   const sensitivityExtraStart = await beginCounters()
@@ -142,11 +148,14 @@ try {
   const sensitivityExtra = await endCounters(sensitivityExtraStart)
   const sensitivityRaised = mutationControl.baseline === 0 && mutationControl.extra === 2
   assert.equal(sensitivityRaised, true, `native mutation counter must detect both controlled mutations: ${JSON.stringify(mutationControl)}`)
+  startupCheckpoint('counter_calibrated')
   assert.deepEqual(await evaluate('window.scry.detectFast().then(items => items.map(item => ({ id: item.id, name: item.name })))'),
     [{ id: 'codex', name: 'codex Smoke Fixture' }], 'refusing any lifecycle measurement without the offline fixture adapter')
+  startupCheckpoint('provider_verified')
   // Composer readiness plus two excluded opens separates startup from the warm path.
   await wait(`document.querySelector('textarea') != null`)
   const startupDriverReadyMs = performance.now() - launchStarted
+  startupCheckpoints.push({ stage: 'composer_ready', elapsedMs: startupDriverReadyMs })
   const { samples, firstOpens, nativeInput, loads } = await measureHistory({
     evaluate, wait, click, cdp, beginCounters, endCounters, metricValues, lastMetrics: () => lastCounterMetrics,
     sessions, iterations, turnCount, sections, cwd, traces
@@ -254,7 +263,7 @@ try {
   const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
   assert.equal(nativeBuildArtifacts(root).sha256, artifactSha256, 'build artifacts changed during measurement')
   assert.equal(benchmarkCodeHash(), benchmarkSha256, 'benchmark changed during measurement')
-  console.log(JSON.stringify({ measurementVersion: 7, startupDriverReadyMs, nativeInput, composerSamples, lifecycleSamples, sqliteStats, artifactSha256, artifactFiles, benchmarkSha256, scenario, turnCount, sections, warmups: 2, iterations, firstOpens,
+  console.log(JSON.stringify({ measurementVersion: 7, startupDriverReadyMs, startupCheckpoints, nativeInput, composerSamples, lifecycleSamples, sqliteStats, artifactSha256, artifactFiles, benchmarkSha256, scenario, turnCount, sections, warmups: 2, iterations, firstOpens,
     counterSensitivity: { baseline: sensitivityBase, extra: sensitivityExtra, mutationControl, passed: sensitivityRaised },
     version: packageJson.version ?? null, platform: `${process.platform}/${process.arch}`, node: process.version,
     electron: JSON.parse(readFileSync(join(root, 'node_modules/electron/package.json'), 'utf8')).version,

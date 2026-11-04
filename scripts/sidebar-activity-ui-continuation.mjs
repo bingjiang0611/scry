@@ -67,6 +67,7 @@ export async function exerciseSidebarActivityContinuation({ contents, screenshot
   check(await read(`document.querySelector('[data-activity-group="completed"] .sb-sess') === window.activityRow`), 'New completion did not move ahead of an existing completed task')
   await click('[aria-label="置顶会话：Retry failed webhook delivery"]')
   await wait(`document.querySelector('#activity-pinned').textContent === 'true'`)
+  check(await read(`document.querySelector('#activity-action-cwd').textContent === '/fixture/storefront-worktree'`), 'Pin must use the session worktree')
   check(await read(`document.querySelector('[data-activity-group="completed"] .sb-sess') === window.activityRow`), 'New completion was not first, or metadata refresh lost its position')
 
   try {
@@ -100,11 +101,18 @@ export async function exerciseSidebarActivityContinuation({ contents, screenshot
   await wait(`!matchMedia('(forced-colors: active)').matches && !matchMedia('(prefers-reduced-motion: reduce)').matches`)
   check(await read(`window.activityRow === document.querySelector(${JSON.stringify(row)})`), 'Reduced-motion state change remounted the row')
   await wait(`${layoutAnimations}.length === 0`)
-  for (const phase of ['unknown', 'failed']) {
-    await read(`window.activityFixture.setPhase('${phase}')`)
-    await wait(`!document.querySelector(${JSON.stringify(row)})`)
-    check(await read(`!document.querySelector('.sb-activity').textContent.includes('Retry failed webhook delivery')`), 'Non-success terminal evidence appeared completed')
-  }
+  // An unknown outcome is not evidence and disappears; a terminal failure is evidence and
+  // must stay in 待查看 instead of vanishing or borrowing the completed presentation.
+  await read("window.activityFixture.setPhase('unknown')")
+  await wait(`!document.querySelector(${JSON.stringify(row)})`)
+  await read("window.activityFixture.setPhase('failed')")
+  await wait(`${group} === 'updates' && document.querySelector(${JSON.stringify(row)}) != null`)
+  check(await read(`document.querySelector('[data-activity-group="completed"] [data-provider="pi"]') == null`), 'Non-success terminal evidence appeared completed')
+  await read('window.activityFixture.setUnread(true)')
+  await wait(`${group} === 'updates' && document.querySelector(${JSON.stringify(row)}).classList.contains('unread') && ${layoutAnimations}.length === 0`)
+  await click(row)
+  // Reading clears the unread mark; the terminal failure itself stays in 待查看.
+  await wait(`!document.querySelector(${JSON.stringify(row)}).classList.contains('unread') && ${layoutAnimations}.length === 0`)
   await read("window.activityFixture.setPhase('working')")
   await wait(`${group} === 'working' && ${layoutAnimations}.length === 0`)
   for (const theme of ['dark', 'light']) {
@@ -132,6 +140,7 @@ export async function exerciseSidebarActivityContinuation({ contents, screenshot
   await wait(`document.activeElement === document.querySelector(${JSON.stringify(row)})`)
   await click('[aria-label="存档会话：Retry failed webhook delivery"]')
   await wait(`!document.querySelector(${JSON.stringify(row)})`)
+  check(await read(`document.querySelector('#activity-action-cwd').textContent === '/fixture/storefront-worktree'`), 'Archive must use the session worktree')
   await read('window.activityFixture.setBulk(true)')
   await wait(`document.querySelector('.sb-activity-limit')?.textContent.includes('31')`)
   check(await read(`document.querySelectorAll('.sb-activity-item').length === 41`), 'History DOM is not bounded')
@@ -145,9 +154,10 @@ export async function exerciseSidebarActivityContinuation({ contents, screenshot
   await wait(`!document.querySelector('.sb-activity') && document.querySelector('.sb-project-section') != null`)
   await read('window.activityFixture.unmount()')
   await wait(`!document.querySelector('.sidebar')`)
-  return { tabsKeyboard: true, nativeSelection: true, crossGroupIdentityAndFocus: true, animatedLayout: true,
+  return { tabsKeyboard: true, nativeSelection: true, worktreeSelectionAndActions: true, worktreeUnread: true, crossGroupIdentityAndFocus: true, animatedLayout: true,
     conditionalSections: true, movingHeadings: true, flatAppearance: true, honestCompletion: true, inGroupReorder: true,
     stateColumn: true, livePeak: true,
     pointerHeldTarget: true, pinAndArchive: true, reducedMotion: true, largeActivitySurvivor300: true, boundedHistory: true, searchAndEmpty: true, originalView: true, unmount: true,
-    sharedTypography: true, workingSweep: true, longTitleSweepContrast: true, staticTerminalTitles: true, forcedColors: true }
+    sharedTypography: true, workingSweep: true, longTitleSweepContrast: true, staticTerminalTitles: true, forcedColors: true,
+    failedVisibleNotCompleted: true }
 }

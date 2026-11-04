@@ -9,6 +9,7 @@ type ComposerControlsProps = Pick<ChatViewProps,
   'agents'
   | 'selectedAgentId'
   | 'onSelectAgent'
+  | 'onOpenRunControls'
   | 'onAddPiAgent'
   | 'onRemovePiAgent'
   | 'onRescan'
@@ -44,6 +45,7 @@ export function ComposerControls({
   agents,
   selectedAgentId,
   onSelectAgent,
+  onOpenRunControls,
   onAddPiAgent,
   onRemovePiAgent,
   onRescan,
@@ -82,6 +84,7 @@ export function ComposerControls({
               options={permissionOptions}
               tone={runControls.permissionMode === 'full_access' ? 'danger' : undefined}
               onChange={(value) => onPermissionMode(value as AgentPermissionMode)}
+              onOpenChange={(open) => { if (open) onOpenRunControls?.('permission') }}
             />
           </div>
           <div className="spacer" />
@@ -97,7 +100,10 @@ export function ComposerControls({
               scopeLabel={agentScopeLabel}
               disabled={agentLocked}
               open={composerMenu === 'agent'}
-              onOpenChange={(open) => setComposerMenu(open ? 'agent' : null)}
+              onOpenChange={(open) => {
+                setComposerMenu(open ? 'agent' : null)
+                if (open) onOpenRunControls?.('agent')
+              }}
             />
             <ModelEffortPicker
               modelValue={modelValue}
@@ -106,7 +112,10 @@ export function ComposerControls({
               effortOptions={effortOptions}
               loading={loading}
               open={composerMenu === 'modelEffort'}
-              onOpenChange={(open) => setComposerMenu(open ? 'modelEffort' : null)}
+              onOpenChange={(open) => {
+                setComposerMenu(open ? 'modelEffort' : null)
+                if (open) onOpenRunControls?.('modelEffort')
+              }}
               onModelChange={(value) => {
                 const option = runControlCatalog.models.find(
                   (candidate) => JSON.stringify([candidate.model.providerId ?? null, candidate.model.id]) === value

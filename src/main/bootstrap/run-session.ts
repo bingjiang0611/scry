@@ -40,7 +40,7 @@ export function createSessionPublisher(deps: {
   sessionRevisionByContext: Map<string, number>
 }) {
   let notifiedSessionId = deps.initialSessionId
-  const publishSessionId = (sessionId: string | undefined): void => {
+  const publishSessionId = (sessionId: string | undefined, options?: { recordCatalog?: boolean }): void => {
     if (!sessionId) return
     deps.setObservedSessionId(sessionId)
     if (deps.isRemoteRun) deps.onSession?.(sessionId)
@@ -58,18 +58,20 @@ export function createSessionPublisher(deps: {
         console.warn('[scry] attachment ownership update deferred:', deps.runId, error)
       }
     }
-    try {
-      deps.appSessionStore().record({
-        providerId: deps.providerId,
-        agentProfileId: deps.agentProfileId,
-        runtimeProvider: deps.runtimeProvider,
-        runId: deps.runId,
-        externalSessionId: sessionId,
-        cwd: deps.catalogCwd,
-        prompt: deps.displayPrompt
-      })
-    } catch (error) {
-      console.warn('[scry] native session catalog update deferred:', deps.runId, error)
+    if (options?.recordCatalog !== false) {
+      try {
+        deps.appSessionStore().record({
+          providerId: deps.providerId,
+          agentProfileId: deps.agentProfileId,
+          runtimeProvider: deps.runtimeProvider,
+          runId: deps.runId,
+          externalSessionId: sessionId,
+          cwd: deps.catalogCwd,
+          prompt: deps.displayPrompt
+        })
+      } catch (error) {
+        console.warn('[scry] native session catalog update deferred:', deps.runId, error)
+      }
     }
     if (deps.runs.isViewed(deps.runId)) {
       deps.dockBadge.view(deps.scopedSessionKey(sessionId), Boolean(deps.getWindow()?.isFocused()))

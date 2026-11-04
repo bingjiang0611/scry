@@ -18,6 +18,10 @@ interface Step {
   with?: { script?: string; [key: string]: unknown }
 }
 interface Job {
+  'runs-on'?: string
+  'timeout-minutes'?: number
+  'continue-on-error'?: boolean
+  env?: Record<string, string>
   name?: string
   if?: string
   needs?: string[] | string
@@ -57,9 +61,42 @@ function gate(file: string, results: Record<string, unknown>) {
 }
 
 // Execute the scripts used by GitHub rather than a second implementation of the gate.
+// Historical single-job order of `test:renderer:ui` before sharding.
+const SERIAL_RENDERER_UI_ORDER = [
+  'node scripts/desktop-remote-ui-smoke.mjs --session-opening-only',
+  'node scripts/desktop-remote-ui-smoke.mjs --structure-only',
+  'node scripts/desktop-remote-ui-smoke.mjs --conversation-navigation-only',
+  'node scripts/desktop-remote-ui-smoke.mjs --unknown-receipt-only',
+  'node scripts/desktop-remote-ui-smoke.mjs --unknown-receipt-only --negative-unknown-receipt-control',
+  'node scripts/session-capability-ui-smoke.mjs',
+  'node scripts/session-capability-ui-smoke.mjs --structure-only',
+  'node scripts/session-capability-ui-smoke.mjs --overlays-only',
+  'node scripts/session-capability-ui-smoke.mjs --lists-only',
+  'node scripts/session-capability-ui-smoke.mjs --loading-only',
+  'node scripts/session-capability-ui-smoke.mjs --turn-refs-only',
+  'node scripts/session-capability-ui-smoke.mjs --sidebar-activity-only',
+  'node scripts/model-picker-ui-smoke.mjs',
+  'node scripts/analytics-credits-ui-smoke.mjs',
+  'node scripts/chat-preview-ui-smoke.mjs',
+  'node scripts/session-performance-ui-smoke.mjs',
+  'npm run test:background-ui',
+  'npm run test:steer-ui',
+  'npm run test:remote-queue-ui',
+  'node scripts/desktop-remote-ui-smoke.mjs',
+  'node scripts/desktop-remote-ui-smoke.mjs --session-parity-only',
+  'node scripts/desktop-remote-ui-smoke.mjs --composer-history-only',
+  'node scripts/desktop-remote-ui-smoke.mjs --remote-settings-only',
+  'node scripts/desktop-remote-ui-smoke.mjs --session-lifecycle-only',
+  'npm run test:source-control:ui',
+  'npm run test:workspace:ui',
+  'npm run test:side-chat:ui',
+  'npm run test:conversation:ipc',
+  'node scripts/electron-security-smoke.mjs --dev-pi-history-only',
+]
+
 describe('required PR checks', () => {
   for (const [file, dependencies] of [
-    ['ci.yml', ['node', 'cli-compat', 'packaged-electron', 'packaged-linux']],
+    ['ci.yml', ['node', 'unit', 'unit-coverage', 'cli-compat', 'packaged-electron', 'packaged-linux']],
     ['performance.yml', ['compare', 'native']]
   ] as const) {
     it(`${file} includes all validation jobs, not the optional comment publisher`, () => {
@@ -76,6 +113,55 @@ describe('required PR checks', () => {
       expect(gate(file, {})).not.toBe(0)
     })
   }
+
+  it('pins the packaged macOS gate to a supported standard runner image', () => {
+    expect(workflow('ci.yml').jobs['packaged-electron']['runs-on']).toBe('macos-15')
+  })
+
+  it('requires whole-program harness binding checks as an unconditional gate', () => {
+    const job = workflow('ci.yml').jobs.node
+    const bindings = source(job, 'Harness binding checks')
+    const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> }
+    expect(scripts['check:harness-bindings']).toBe('node scripts/check-harness-bindings.mjs')
+    expect(bindings.run).toBe('npm run check:harness-bindings')
+    expect(bindings.if).toBeUndefined()
+    expect(bindings['continue-on-error']).toBeUndefined()
+  })
+
+  it('shards hosted coverage without filtering tests or overriding their timeouts', () => {
+    const ci = workflow('ci.yml')
+    const unit = ci.jobs.unit as Job & { strategy: { 'fail-fast': boolean; matrix: { shard: number[] } } }
+    expect(unit.strategy.matrix.shard).toEqual([1, 2, 3, 4])
+    expect(unit.strategy['fail-fast']).toBe(false)
+    const coverage = source(unit, 'Unit, contract tests and coverage shard')
+    expect(coverage.if).toBeUndefined()
+    expect(coverage.run).toBe("xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24' npm run test:coverage -- --maxWorkers=1 --shard=${{ matrix.shard }}/4 --reporter=default --reporter=blob --outputFile.blob=.vitest-reports/blob-${{ matrix.shard }}.json")
+    expect(ci.jobs['unit-coverage'].needs).toBe('unit')
+    expect(ci.jobs['unit-coverage'].if).toBe('${{ !cancelled() }}')
+    expect(source(ci.jobs['unit-coverage'], 'Merge shard results and coverage').run).toBe('npx vitest run --merge-reports --coverage')
+  })
+
+  it('runs every renderer UI smoke exactly once across the macOS shards', () => {
+    const job = workflow('ci.yml').jobs['packaged-electron'] as Job & { strategy: { 'fail-fast': boolean; matrix: { shard: number[] } } }
+    expect(job.needs).toBeUndefined()
+    expect(job.strategy.matrix.shard).toEqual([1, 2])
+    expect(job.strategy['fail-fast']).toBe(false)
+    expect(source(job, 'Isolated renderer DOM smoke tests').run).toBe('npm run test:renderer:ui:${{ matrix.shard }}')
+    const pack = source(job, 'Package and smoke the macOS app')
+    expect(pack.run).toBe('npm run pack:artifact')
+    expect(pack.if).toBe('${{ matrix.shard == 1 }}')
+    const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> }
+    const shards = [1, 2].map(shard => `npm run test:renderer:ui:${shard}`)
+    expect(scripts['test:renderer:ui']).toBe(shards.join(' && '))
+    const commands = [1, 2].flatMap(shard => scripts[`test:renderer:ui:${shard}`].split(' && '))
+    // Shards are contiguous slices of the historical serial order: several fixtures are
+    // sensitive to what ran before them on the same runner, so never reorder across shards.
+    expect(commands).toEqual(SERIAL_RENDERER_UI_ORDER)
+    expect(new Set(commands).size).toBe(commands.length)
+    for (const required of ['npm run test:side-chat:ui', 'npm run test:conversation:ipc', 'npm run test:source-control:ui', 'npm run test:workspace:ui', 'node scripts/analytics-credits-ui-smoke.mjs', 'node scripts/desktop-remote-ui-smoke.mjs --session-parity-only']) {
+      expect(commands).toContain(required)
+    }
+  })
 
   it('keeps the failed native comparison authoritative when collecting one diagnostic control', () => {
     const job = workflow('performance.yml').jobs.native
@@ -102,17 +188,52 @@ describe('required PR checks', () => {
   it('remote skips only on an explicit unaffected diff', () => {
     const remote = workflow('remote-g0.yml')
     expect(remote.on.pull_request).toBeNull()
-    expect(remote.jobs.check.needs).toEqual(['changes', 'transport'])
-    expect(remote.jobs.transport.if).toBe("${{ needs.changes.outputs.required == 'true' }}")
+    expect(remote.jobs.check.needs).toEqual(['changes', 'transport', 'ios'])
+    for (const name of ['transport', 'ios']) {
+      const job = remote.jobs[name]
+      expect(job.needs).toBe('changes')
+      expect(job.if).toBe("${{ needs.changes.outputs.required == 'true' }}")
+      expect(job['runs-on']).toBe('macos-15')
+      expect(job['timeout-minutes']).toBe(name === 'ios' ? 30 : 20)
+      expect(job['continue-on-error']).toBeUndefined()
+      expect(job.env?.DEVELOPER_DIR).toBe('/Applications/Xcode_26.3.app/Contents/Developer')
+      for (const step of job.steps) expect(step['continue-on-error']).toBeUndefined()
+    }
+    expect(remote.jobs.transport.steps.some(step => step.run?.includes('xcodebuild'))).toBe(false)
+    const commands = remote.jobs.ios.steps.filter(step => step.run).map(step => step.run!.trim())
+    expect(commands).toEqual([
+      ['ScryRemoteG0', 'build-for-testing', 'scry-g0-ios'],
+      ['ScryRemote', 'build', 'scry-remote-ui']
+    ].map(([project, action, derived]) =>
+      `xcodebuild -project apps/ios/${project}.xcodeproj -scheme ${project} -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/${derived}" ARCHS=arm64 CODE_SIGNING_ALLOWED=NO ${action}`
+    ))
     expect(remote.jobs.transport.steps.some(step => step.run === 'npm --prefix experiments/remote-g0 run smoke:g1')).toBe(true)
     const remotePackage = JSON.parse(readFileSync(join(root, 'experiments/remote-g0/package.json'), 'utf8')) as { scripts: Record<string, string>; engines: { node: string } }
     expect(remotePackage.engines.node).toBe('^22.7.0 || ^24.0.0')
     const remoteLock = JSON.parse(readFileSync(join(root, 'experiments/remote-g0/package-lock.json'), 'utf8')) as { packages: Record<string, { engines?: { node: string } }> }
     expect(remoteLock.packages[''].engines?.node).toBe(remotePackage.engines.node)
     expect(remotePackage.scripts['smoke:g1']).toContain('node --experimental-transform-types --import ./ts-relative-resolve.mjs g1-smoke.mjs')
-    const results = (required: string, changes: string, transport: string) => ({
-      changes: { result: changes, outputs: { required } }, transport: { result: transport }
+  })
+
+  it('remote requires each parallel validation result and rejects missing results', () => {
+    const jobs = ['transport', 'ios']
+    const results = (required: string, changes: string, result: string) => ({
+      changes: { result: changes, outputs: { required } },
+      ...Object.fromEntries(jobs.map(job => [job, { result }]))
     })
+    const affected = results('true', 'success', 'success')
+    const unaffected = results('false', 'success', 'skipped')
+    for (const job of jobs) {
+      for (const result of ['failure', 'cancelled', 'skipped']) {
+        expect(gate('remote-g0.yml', { ...affected, [job]: { result } }), `${job}: ${result}`).not.toBe(0)
+      }
+      for (const result of ['failure', 'cancelled', 'success']) {
+        expect(gate('remote-g0.yml', { ...unaffected, [job]: { result } }), `${job}: ${result}`).not.toBe(0)
+      }
+      const missing: Record<string, unknown> = { ...affected }
+      delete missing[job]
+      expect(gate('remote-g0.yml', missing), `missing ${job}`).not.toBe(0)
+    }
     expect(gate('remote-g0.yml', results('true', 'success', 'success'))).toBe(0)
     expect(gate('remote-g0.yml', results('false', 'success', 'skipped'))).toBe(0)
     for (const state of ['failure', 'cancelled', 'skipped']) {

@@ -43,6 +43,7 @@ export function page(sessionId: string): SessionHistoryPage {
     offset: 0, totalTurns: 1, hasOlder: false, completeness: 'complete' }
 }
 Object.defineProperty(window, 'scry', { value: {
+  setLegacyDiffPreviewDemand: async () => true,
   workspaceSelection: unavailableWorkspaceSelection,
   activeRun: async () => null, activeRuns: async () => [],
   focusedRunSnapshot: async () => { recoveryReads++; update(); return null },

@@ -117,15 +117,29 @@ export async function exerciseSessionSelection(contents, scenario) {
   if (scenario === 'focused-event') await click('#focus-pi')
   else await click('.sb-sess[data-provider="pi"]:not(.running)')
   await wait(`${state}.historyReads === 1`)
-  const pendingTimeline = scenario === 'focused-event'
-    ? `document.querySelector('.chat-transcript[aria-busy="true"]') != null`
-    : `document.querySelector('.chat-transcript[aria-busy="false"][data-history-source="preview"]')?.textContent.includes('Target Pi conversation')`
+  // An explicit focus restores a live run: no catalog hint exists for it, so its target
+  // timeline stays busy until the run's own read lands. Every other cold target publishes
+  // the catalog preview instead (docs/performance-experiments/20261028-session-under-100ms.md
+  // §实现1/2): the target shell, exactly its own session-preview turn and no previous
+  // history. Execution stays locked — ChatView withholds onForkTurn while sessionLoading,
+  // so the fork control must not exist even though one turn is already displayed.
+  const targetShell = scenario === 'focused-event'
+    ? `document.querySelector('.chat-transcript')?.getAttribute('aria-busy') === 'true' &&
+      document.querySelector('.chat-transcript')?.getAttribute('data-history-source') === 'authoritative' &&
+      document.querySelectorAll('.transcript-turn').length === 0`
+    : `document.querySelector('.chat-transcript')?.getAttribute('data-history-source') === 'preview' &&
+      document.querySelector('.chat-transcript')?.getAttribute('aria-busy') === 'false' &&
+      document.querySelectorAll('.transcript-turn').length === 1 &&
+      document.querySelector('.transcript-turn')?.dataset.runId === 'session-preview:new-session' &&
+      document.querySelector('.chat-transcript')?.textContent.includes('Target Pi conversation') &&
+      document.querySelector('button.send')?.disabled === true &&
+      document.querySelector('button[title="从此轮创建分支会话"]') == null`
   await wait(`document.querySelector('.sb-sess[data-provider="pi"]')?.getAttribute('aria-current') === 'true' &&
-    (${pendingTimeline}) && !document.querySelector('.chat-transcript')?.textContent.includes('Old running conversation')`)
+    !document.querySelector('.chat-transcript')?.textContent.includes('Old running conversation') && ${targetShell}`)
   if (scenario === 'repeat-pending') {
     await click('.sb-sess[data-provider="pi"]')
     await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
-    if (await read(`${state}.historyReads !== 1 || document.querySelector('.sb-sess[data-provider="pi"]')?.getAttribute('aria-current') !== 'true' || document.querySelector('.chat-transcript')?.textContent.includes('Old running conversation')`)) {
+    if (await read(`${state}.historyReads !== 1 || document.querySelector('.sb-sess[data-provider="pi"]')?.getAttribute('aria-current') !== 'true' || document.querySelector('.chat-transcript')?.getAttribute('data-history-source') !== 'preview' || document.querySelector('.transcript-turn')?.dataset.runId !== 'session-preview:new-session' || document.querySelector('.chat-transcript')?.textContent.includes('Old running conversation')`)) {
       throw new Error('Repeated pending selection restarted history or replaced the target shell')
     }
     if (await read(`document.body.innerText.includes('这条会话暂时没有可显示的轮次')`)) throw new Error('Pending history was reported as empty')

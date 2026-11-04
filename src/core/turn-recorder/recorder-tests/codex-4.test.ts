@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises'
+import { truncate, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { it, expect } from 'vitest'
 import { handleRecorderHook } from '../recorder'
@@ -11,7 +11,8 @@ export function registerSuite12(): void {
   it.each([
     { name: 'spawn_agent' },
     { name: 'multi_agent_v1__spawn_agent' },
-    { namespace: 'multi_agent_v1', name: 'spawn_agent' }
+    { namespace: 'multi_agent_v1', name: 'spawn_agent' },
+    { namespace: 'collaboration', name: 'spawn_agent' }
   ])('还原 slash prompt、展开 Codex exec，并把子 agent 调用并入父轮但不重复 usage: %j', async (spawnName) => {
     const root = await workspace()
     const parent = join(root, 'rollout-parent.jsonl')
@@ -19,6 +20,7 @@ export function registerSuite12(): void {
     const child = join(root, `rollout-child-${childId}.jsonl`)
     const row = (timestamp: string, type: string, payload: Record<string, unknown>) => ({ timestamp, type, payload })
     const parentLines = [
+      row('2026-07-19T12:00:00.000Z', 'session_meta', { id: 'parent-session', cwd: root }),
       row('2026-07-19T12:00:00.000Z', 'event_msg', { type: 'task_started', turn_id: 'parent-turn' }),
       row('2026-07-19T12:00:00.010Z', 'event_msg', { type: 'user_message', message: '84441877' }),
       row('2026-07-19T12:00:00.020Z', 'response_item', {
@@ -97,7 +99,11 @@ export function registerSuite12(): void {
       })
     ]
     const childLines = [
-      row('2026-07-19T12:00:00.310Z', 'event_msg', { type: 'task_started', turn_id: 'child-turn' }),
+      row('2026-07-19T12:00:00.310Z', 'session_meta', {
+        id: childId, session_id: 'parent-session', parent_thread_id: 'parent-session',
+        forked_from_id: 'parent-session', cwd: root, source: { subagent: { thread_spawn: { parent_thread_id: 'parent-session' } } }
+      }),
+      row('2026-07-19T12:00:00.310Z', 'event_msg', { type: 'task_started', turn_id: 'child-turn', turn_attribution: { parent_turn_id: 'parent-turn' } }),
       row('2026-07-19T12:00:00.400Z', 'response_item', {
         type: 'function_call',
         name: 'exec_command',
@@ -150,12 +156,108 @@ export function registerSuite12(): void {
       ['Edit', 'patch-1'],
       ['Bash', 'child-bash']
     ])
+    const execSource = parentLines.find((line) => line.payload.call_id === 'exec-map')?.payload.input
+    expect(typeof execSource).toBe('string')
+    expect(record.tools.value?.find((call) => call.id === 'exec-map:1')?.input).toMatchObject({
+      cmd: 'printf one', execSource
+    })
+    expect(record.tools.value?.find((call) => call.id === 'exec-map:2')?.input).toMatchObject({
+      cmd: 'printf two', execSource
+    })
     expect(record.mcps.value).toEqual([
       expect.objectContaining({ id: 'exec-1:2', name: 'Bash', mcp: expect.objectContaining({ server: 'workitem', action: 'query' }) })
     ])
     expect(record.skills.value?.map((call) => call.name)).toEqual(['rate-workflow'])
     expect(record.files.value).toEqual([{ path: '/repo/new.txt', operation: 'edit' }])
     expect(record.usage.value).toMatchObject({ inputTokens: 100, outputTokens: 20, cacheReadTokens: 80, reasoningTokens: 5 })
+  })
+
+  it.each<{ name: string; identity: Record<string, unknown>; accepted: boolean }>([
+    { name: 'matching', identity: {}, accepted: true },
+    { name: 'wrong session', identity: { id: 'unrelated' }, accepted: false },
+    { name: 'wrong parent session', identity: { session_id: 'unrelated' }, accepted: false },
+    { name: 'wrong parent thread', identity: { parent_thread_id: 'unrelated' }, accepted: false },
+    { name: 'wrong fork', identity: { forked_from_id: 'unrelated' }, accepted: false },
+    { name: 'wrong cwd', identity: { cwd: '/unrelated' }, accepted: false },
+    { name: 'missing cwd', identity: { cwd: null }, accepted: false },
+    { name: 'oversize', identity: {}, accepted: false }
+  ])('原生 Codex 子会话按 parent/session/cwd/fork 边界并入，并排除继承工具: $name', async ({ name, identity, accepted }) => {
+    const root = await workspace()
+    const parentPath = join(root, 'rollout-native-parent.jsonl')
+    const childId = 'native-child-session'
+    const parentId = 'native-parent-session'
+    const parentCallId = 'native-agent-call'
+    const childPath = join(root, `rollout-native-${childId}.jsonl`)
+    const cwd = root
+    const row = (timestamp: string, type: string, payload: Record<string, unknown>) => ({ timestamp, type, payload })
+    const parentLines = [
+      row('2026-07-19T12:00:00.000Z', 'session_meta', { session_id: parentId, id: parentId, cwd, source: 'exec' }),
+      row('2026-07-19T12:00:00.010Z', 'event_msg', {
+        type: 'task_started',
+        turn_id: 'native-parent-turn',
+        turn_attribution: { turn_id: 'native-parent-turn', root_turn_id: 'native-parent-turn', parent_turn_id: null }
+      }),
+      row('2026-07-19T12:00:00.020Z', 'response_item', {
+        type: 'function_call', namespace: 'collaboration', name: 'spawn_agent', call_id: parentCallId,
+        arguments: JSON.stringify({ task_name: 'native-child', message: 'inspect it' })
+      }),
+      row('2026-07-19T12:00:00.300Z', 'event_msg', {
+        type: 'item_completed', thread_id: parentId, turn_id: 'native-parent-turn',
+        item: { type: 'SubAgentActivity', id: parentCallId, kind: 'started', agent_thread_id: childId, agent_path: '/root/native-child' }
+      }),
+      row('2026-07-19T12:00:00.800Z', 'event_msg', { type: 'task_complete', turn_id: 'native-parent-turn', last_agent_message: 'done' })
+    ]
+    const childLines = [
+      row('2026-07-19T12:00:00.100Z', 'session_meta', {
+        session_id: parentId, id: childId, forked_from_id: parentId, parent_thread_id: parentId, cwd,
+        source: { subagent: { thread_spawn: { parent_thread_id: parentId, agent_path: '/root/native-child' } } },
+        ...identity
+      }),
+      row('2026-07-19T12:00:00.110Z', 'event_msg', {
+        type: 'task_started', turn_id: 'inherited-turn',
+        turn_attribution: { turn_id: 'inherited-turn', root_turn_id: 'inherited-turn', parent_turn_id: null }
+      }),
+      row('2026-07-19T12:00:00.150Z', 'response_item', {
+        type: 'function_call', name: 'exec_command', call_id: 'inherited-call',
+        arguments: JSON.stringify({ cmd: 'inherited' })
+      }),
+      row('2026-07-19T12:00:00.160Z', 'response_item', { type: 'function_call_output', call_id: 'inherited-call', output: 'duplicate' }),
+      row('2026-07-19T12:00:00.200Z', 'event_msg', { type: 'task_complete', turn_id: 'inherited-turn' }),
+      row('2026-07-19T12:00:00.300Z', 'event_msg', {
+        type: 'task_started', turn_id: 'native-child-turn',
+        turn_attribution: { turn_id: 'native-child-turn', root_turn_id: 'native-parent-turn', parent_turn_id: 'native-parent-turn', initiating_agent_path: '/root' }
+      }),
+      row('2026-07-19T12:00:00.400Z', 'response_item', {
+        type: 'function_call', name: 'exec_command', call_id: 'native-child-call',
+        arguments: JSON.stringify({ cmd: 'owned' })
+      }),
+      row('2026-07-19T12:00:00.500Z', 'response_item', { type: 'function_call_output', call_id: 'native-child-call', output: 'owned result' }),
+      row('2026-07-19T12:00:00.600Z', 'event_msg', { type: 'task_complete', turn_id: 'native-child-turn' })
+    ]
+    await writeFile(parentPath, `${parentLines.map((line) => JSON.stringify(line)).join('\n')}\n`)
+    await writeFile(childPath, `${childLines.map((line) => JSON.stringify(line)).join('\n')}\n`)
+    if (name === 'oversize') await truncate(childPath, 16 * 1024 * 1024 + 1)
+
+    await handleRecorderHook({
+      provider: 'codex', event: 'turn.started', workspace: root,
+      payload: payload('native-c1', { prompt: 'native', turn_id: 'native-parent-turn', rollout_path: parentPath })
+    })
+    await handleRecorderHook({
+      provider: 'codex', event: 'turn/completed', workspace: root,
+      payload: payload('native-c1', { turn_id: 'native-parent-turn', rollout_path: parentPath, timestamp: '2026-07-19T12:00:00.800Z' })
+    })
+
+    const [record] = await listRecords(join(root, '.scry'))
+    if (accepted) {
+      // Canonical TurnCall expresses this relationship with parentId (not agentId).
+      expect(record.tools.value).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: 'Bash', id: 'native-child-call', parentId: parentCallId })
+      ]))
+    } else {
+      expect(record.tools.value?.map((tool) => tool.id)).not.toContain('native-child-call')
+      expect(record.tools.status).toBe('partial')
+    }
+    expect(record.tools.value?.map((tool) => tool.id)).not.toContain('inherited-call')
   })
 
   it('未知 transcript 格式无法匹配指定 turn 时保持 pending，不伪造或借用记录', async () => {

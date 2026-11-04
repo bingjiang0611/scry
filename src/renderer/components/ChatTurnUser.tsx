@@ -55,7 +55,8 @@ export function SteerEvidenceMessage({ evidence }: { evidence: AgentSteerEvidenc
   )
 }
 
-function ImageLightbox({ attachment, onClose }: { attachment: AgentInputAttachment; onClose: () => void }) {
+/** Reused by any read-only surface that shows a real submitted image (transcript, pending receipt). */
+export function ImageLightbox({ attachment, onClose }: { attachment: AgentInputAttachment; onClose: () => void }) {
   const titleId = useId()
   const closeRef = useRef<HTMLButtonElement>(null)
   const [zoom, setZoom] = useState(1)

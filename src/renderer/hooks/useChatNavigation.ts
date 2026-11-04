@@ -53,8 +53,15 @@ export function useChatNavigation(scrollRef: RefObject<HTMLDivElement>, enabled:
     chat.addEventListener('pointerdown', clear)
     chat.addEventListener('keydown', keydown)
     schedule()
-    // Preserve the existing highlight lifetime; never retain a permanent scroll lock.
-    const timer = window.setTimeout(clear, 2200)
+    // Preserve the highlight lifetime, but finish observed layout changes before
+    // releasing the anchor. A delayed frame must not be discarded by expiry.
+    const timer = window.setTimeout(() => {
+      if (active.current && frame !== null) {
+        cancelAnimationFrame(frame)
+        align()
+      }
+      clear()
+    }, 2200)
     return () => {
       resize.disconnect()
       mutation.disconnect()

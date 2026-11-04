@@ -50,7 +50,7 @@
   gap: 12px;
   padding: 16px;
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--r-lg);
   background: var(--panel);
   box-shadow: var(--shadow-card);
   text-align: left;
@@ -73,7 +73,7 @@
 .welcome-provider {
   padding: 12px 13px;
   border-color: var(--border);
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: var(--panel2);
 }
 
@@ -118,7 +118,7 @@
   max-width: 100%;
   padding: 10px 14px;
   border: 0;
-  border-radius: 18px;
+  border-radius: var(--r-lg);
   background: var(--panel2);
   box-shadow: var(--shadow-card);
   font-size: 14.5px;
@@ -182,14 +182,14 @@
 
 .chat-body .tool-group-row .tg-pill {
   border-color: var(--border);
-  border-radius: 6px;
+  border-radius: var(--r-xs);
   background: var(--panel2);
 }
 
 .chat-body .tool-group-body {
   padding-inline: 10px;
   border: 1px solid var(--border3);
-  border-radius: 10px;
+  border-radius: var(--r-sm);
   background: var(--panel2);
 }
 
@@ -221,7 +221,7 @@
   padding: 8px 12px 9px;
   overflow: visible;
   border: 1px solid var(--border);
-  border-radius: 20px;
+  border-radius: var(--r-lg);
   background: var(--panel);
   box-shadow: 0 10px 30px rgb(0 0 0 / 10%), 0 1px 2px rgb(0 0 0 / 7%);
 }
@@ -240,7 +240,7 @@
   margin: -8px -12px 3px;
   padding: 5px 14px;
   border-bottom: 1px solid var(--border3);
-  border-radius: 19px 19px 0 0;
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
   background: transparent;
 }
 
@@ -255,7 +255,7 @@
   min-height: 38px;
   padding: 0 14px;
   border: 0;
-  border-radius: 11px;
+  border-radius: var(--r-md);
   background: var(--surface-muted);
   color: var(--fg);
   font-size: 13px;
@@ -308,7 +308,7 @@
   min-height: 32px;
   padding-inline: 8px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: transparent;
 }
 
@@ -367,7 +367,7 @@
   padding: 0 8px;
   border: 0;
   overflow: hidden;
-  border-radius: 9px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--dim);
   font-size: 11.5px;
@@ -450,7 +450,7 @@
   width: min(400px, calc(100vw - 32px));
   padding: 7px;
   border: 1px solid var(--border2);
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: color-mix(in srgb, var(--panel) 97%, transparent);
   box-shadow: var(--shadow-pop);
   backdrop-filter: blur(18px);
@@ -477,7 +477,7 @@
   gap: 10px;
   padding: 8px 10px;
   border: 0;
-  border-radius: 11px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--fg);
   cursor: pointer;
@@ -551,7 +551,7 @@
   width: min(258px, calc(100vw - 24px));
   padding: 8px;
   border: 1px solid var(--border2);
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: color-mix(in srgb, var(--panel) 97%, transparent);
   box-shadow: var(--shadow-pop);
   backdrop-filter: blur(18px);
@@ -574,7 +574,7 @@
 
 .runtime-composer .model-effort-current {
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   background: transparent;
   cursor: pointer;
   text-align: left;
@@ -630,7 +630,8 @@
   height: 20px;
   margin: 0;
   appearance: none;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
+  corner-shape: round;
   outline: none;
   background: linear-gradient(
     to right,
@@ -648,7 +649,8 @@
 
 .runtime-composer .model-effort-slider input[type='range']::-webkit-slider-runnable-track {
   height: 20px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
+  corner-shape: round;
   background: transparent;
 }
 
@@ -659,6 +661,7 @@
   appearance: none;
   border: 1px solid var(--accent-line);
   border-radius: 50%;
+  corner-shape: round;
   background: var(--panel);
   box-shadow: 0 1px 4px rgb(0 0 0 / 20%);
 }
@@ -666,7 +669,8 @@
 .runtime-composer .model-effort-slider input[type='range']::-moz-range-track {
   height: 20px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
+  corner-shape: round;
   background: transparent;
 }
 
@@ -675,6 +679,7 @@
   height: 16px;
   border: 1px solid var(--accent-line);
   border-radius: 50%;
+  corner-shape: round;
   background: var(--panel);
   box-shadow: 0 1px 4px rgb(0 0 0 / 20%);
 }
@@ -693,6 +698,7 @@
   width: 4px;
   height: 4px;
   border-radius: 50%;
+  corner-shape: round;
   background: var(--dim3);
 }
 
@@ -719,7 +725,7 @@
   gap: 8px;
   padding: 0 10px;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--dim);
   cursor: pointer;
@@ -758,6 +764,7 @@
   min-height: 34px;
   border: 0;
   border-radius: 50%;
+  corner-shape: round;
   background: var(--fg);
   color: var(--main-surface);
   box-shadow: none;
@@ -782,7 +789,7 @@
 .runtime-composer .draft-attachments,
 .runtime-composer .slash-menu {
   border-color: var(--border);
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: var(--panel);
   box-shadow: var(--shadow-pop);
 }
@@ -791,7 +798,7 @@
    --shadow-pop 的 64px 投影会让它读成弹窗。 */
 .runtime-composer .prompt-queue {
   border-color: var(--border3);
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: var(--surface-inset-soft);
   box-shadow: none;
 }

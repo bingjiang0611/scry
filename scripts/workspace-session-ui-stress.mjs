@@ -3,21 +3,15 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 // Real temporary files, production snapshot IPC and native keyboard scrolling; no injected diff data.
-export async function exerciseWorkspaceDiffBounds({ target, targetSessionKey, click, evaluate, key, wait, screenshot, cdp }) {
-  const newTargetDraft = async () => {
-    // Managed worktrees stay under their source project, not a separate
-    // project row. Reopen the actual session, then make a draft in its cwd.
-    await click(`[data-motion-key=${JSON.stringify(targetSessionKey)}] .sb-sess`)
-    await wait(() => evaluate(`document.querySelector('.tb-thread')?.title === ${JSON.stringify(target)}`), 'selected worktree session')
-    await click('.sb-new')
-    await wait(() => evaluate(`document.querySelector('.tb-thread')?.title === ${JSON.stringify(target)} && document.querySelector('.workspace-context-strip button')?.disabled === false && document.querySelector('textarea')?.value === ''`), 'draft in selected worktree')
-  }
+// openWorkspace(cwd) must reach the real workspace whose execution cwd is cwd: the project draft for a
+// project root, the nested session for a managed worktree (a worktree is never a project group).
+export async function exerciseWorkspaceDiffBounds({ target, openWorkspace, click, evaluate, key, wait, screenshot, cdp }) {
   for (let index = 0; index < 1000; index++) {
     const text = index === 0
       ? Array.from({ length: 2000 }, (_, line) => `pressure-line-${String(line).padStart(4, '0')}\n`).join('') : 'one\n'
     writeFileSync(join(target, `pressure-${String(index).padStart(4, '0')}.txt`), text)
   }
-  await newTargetDraft()
+  await openWorkspace(target)
   await wait(() => evaluate(`document.querySelector('.tb-thread')?.title === ${JSON.stringify(target)}`), 'pressure workspace selected')
   const open = async () => {
     if (!await evaluate(`Boolean(document.querySelector('button.pinned-summary-row'))`)) await click('[data-pinned-summary-toggle]')
@@ -58,7 +52,7 @@ export async function exerciseWorkspaceDiffBounds({ target, targetSessionKey, cl
   await evaluate(`localStorage.setItem('scry.theme', 'light')`)
   await cdp.send('Page.reload')
   await wait(() => evaluate(`document.documentElement?.dataset.theme === 'light' && Boolean(document.querySelector('[data-pinned-summary-toggle]'))`), 'light preference after reload')
-  await newTargetDraft()
+  await openWorkspace(target)
   await wait(() => evaluate(`document.querySelector('.tb-thread')?.title === ${JSON.stringify(target)}`), 'pressure workspace restored')
   await open()
   await screenshot('inspector-pressure-light')

@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { runSpecialFixtures, withFixtureMedia } from './session-capability-special-fixtures.mjs'
 
@@ -18,7 +19,7 @@ class FixtureWindow {
 
 function fixture(flags: Record<string, boolean>) {
   return {
-    flags, win: new FixtureWindow(),
+    flags, win: new FixtureWindow(), nodeRequire: createRequire(import.meta.url),
     paths: { motion: 'motion.html', lists: 'lists.html', loading: 'loading.html', overlays: 'overlays.html', structure: 'structure.html', sidebar: 'sidebar.html' },
     sources: {
       media: withFixtureMedia.toString(),
@@ -90,6 +91,15 @@ describe('special UI fixture campaign ownership', () => {
     } })
     expect(args.win.loadFile.mock.calls).toEqual([['sidebar.html'], ['sidebar.html']])
     expect(args.win.webContents.debugger.attach).toHaveBeenCalledOnce()
+  })
+
+  it('binds Node screenshot dependencies in both serialized sidebar stages', async () => {
+    const args = fixture({ sidebar: true, sidebarOnly: true })
+    args.sources.sidebar = 'async () => ({ writerAvailable: typeof require("node:fs").writeFileSync === "function", continuation: exerciseSidebarActivityContinuation() })'
+    args.sources.sidebarContinuation = '() => require("node:path").basename("/fixture/sweep.png")'
+    expect(await runSpecialFixtures(args)).toEqual({ done: true, result: {
+      sidebarActivity: { writerAvailable: true, continuation: 'sweep.png' }, sidebarUnreadResults: { checked: true }
+    } })
   })
 
   it('clears media and detaches when an early positive assertion fails', async () => {

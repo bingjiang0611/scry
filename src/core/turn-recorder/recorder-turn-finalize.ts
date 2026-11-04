@@ -40,7 +40,10 @@ export async function finalizeOpenTurn(
         open.provider,
         open.promptHash,
         open.providerTurnId,
-        open.transcriptStartOffset
+        open.transcriptStartOffset,
+        open.requestSetId,
+        open.sessionId,
+        enablement.workspaceRoot
       )
     : {
         stable: true,
@@ -59,12 +62,18 @@ export async function finalizeOpenTurn(
       }
   if (!transcript.stable && !options.allowUnstableTranscript) return { status: 'pending', reason: 'transcript is still changing' }
   let identityUnmatched = false
+  const unmatchedReason = options.forcedReason
+    ? `${options.forcedReason}; the transcript no longer contains this turn`
+    : open.endReason === 'session_end'
+      ? 'provider session ended without a matching transcript; only lifecycle-hook evidence remains'
+      : open.terminalIdentityConfirmedBySessionEnd
+        ? 'provider session ended after the terminal hook without a matching transcript; only lifecycle-hook evidence remains'
+        : undefined
   if (transcript.identityMatched === false) {
-    // Waiting for identity to appear is right while a turn may still converge, but an expired turn
-    // never will: Providers rotate transcripts away, and holding the turn open forever loses it and
-    // keeps the daemon alive. Close it on lifecycle evidence alone rather than borrowing content
-    // that was never confirmed to be this turn's.
-    if (!options.forcedReason) return { status: 'pending', reason: 'target turn is not present in transcript snapshot' }
+    // A prompt cancelled before model execution may never reach the native transcript. A real
+    // session end can close that turn on lifecycle evidence alone; discard every unmatched byte.
+    // Ordinary turn ends still wait for identity, unless the existing closing-expiry rule applies.
+    if (!unmatchedReason) return { status: 'pending', reason: 'target turn is not present in transcript snapshot' }
     identityUnmatched = true
     transcript = {
       stable: true,
@@ -74,6 +83,7 @@ export async function finalizeOpenTurn(
       observable: { tools: false, skills: false, mcps: false, hooks: false, usage: false, files: false, errors: false }
     }
   }
+  const effectiveProviderTurnId = open.providerTurnId ?? transcript.providerTurnId
   const contentPolicy = open.toolContentPolicy ?? enablement.config.capture
   const storedEvents = await readStoredEvents(join(turnRoot(root, open.generation), 'events'))
   const transcriptEvents = await persistRecorderEventContent(
@@ -86,23 +96,32 @@ export async function finalizeOpenTurn(
   // An expired turn's baseline can be days old, so finishing its diff would attribute every later
   // change — including other turns' work — to this one. Release the baseline instead of publishing
   // an attribution we cannot defend, and say why.
-  if (options.forcedReason) {
-    await Promise.all(open.captures.map(({ capture }) => cancelGitTurnDiff(capture).catch(() => undefined)))
+  if (options.forcedReason || open.terminalDiffs || identityUnmatched) {
+    await Promise.all(open.captures.map(async ({ repository, capture }) => {
+      try {
+        await cancelGitTurnDiff(capture)
+      } catch {
+        const frozen = open.terminalDiffs?.find(item => item.repository === repository)
+        if (frozen) frozen.snapshot.cleanup = 'failed'
+      }
+    }))
   }
-  const diffs = options.forcedReason
+  const diffs = options.forcedReason || identityUnmatched
     ? []
     : limitTurnDiffPatchBytes(await persistTurnDiffContent(
         enablement.dataRoot,
-        await Promise.all(open.captures.map(async ({ repository, capture }) => ({
-          ...await finishGitTurnDiff(capture, undefined, {
-            ...turnChangeHints(repository, mergedEvents),
-            patchExcludeBasenames: enablement.config.capture.patchExcludeBasenames,
-            completePatches: true
-          }),
-          // A failed Git baseline may not resolve repoRoot. Preserve the known request
-          // directory separately, without inventing a successful Git-root observation.
-          requestedRoot: repository
-        })))
+        open.terminalDiffs
+          ? open.terminalDiffs.map(({ repository, snapshot }) => ({ ...snapshot, requestedRoot: repository }))
+          : await Promise.all(open.captures.map(async ({ repository, capture }) => ({
+              ...await finishGitTurnDiff(capture, undefined, {
+                ...turnChangeHints(repository, mergedEvents),
+                patchExcludeBasenames: enablement.config.capture.patchExcludeBasenames,
+                completePatches: true
+              }),
+              // A failed Git baseline may not resolve repoRoot. Preserve the known request
+              // directory separately, without inventing a successful Git-root observation.
+              requestedRoot: repository
+            })))
       ))
   const diffEvents: TraceEvent[] = diffs.map((turnDiff, index) => ({
     id: `diff-${open.generation}-${index}`,
@@ -172,9 +191,14 @@ export async function finalizeOpenTurn(
     evidence.diff = unavailable(
       `${options.forcedReason}; the turn diff baseline spans that window and cannot be attributed to this turn`
     )
-    if (identityUnmatched) {
-      evidence.assistant = unavailable(`${options.forcedReason}; the transcript no longer contains this turn`)
-      evidence.modelSegments = unavailable(`${options.forcedReason}; the transcript no longer contains this turn`)
+  }
+  if (identityUnmatched) {
+    evidence.assistant = unavailable(unmatchedReason!)
+    evidence.modelSegments = unavailable(unmatchedReason!)
+    if (enablement.config.capture.diff && open.captures.some(({ capture }) => capture.status === 'ready')) {
+      evidence.diff = unavailable(
+        `${unmatchedReason!}; the Git baseline may include work after the unmatched turn boundary`
+      )
     }
   }
   if (open.repositoryDiscovery) {
@@ -268,6 +292,7 @@ export async function finalizeOpenTurn(
     provider: {
       id: open.provider,
       ...(model ? { model } : {}),
+      ...(modelIdentity.modelTier ? { modelTier: modelIdentity.modelTier } : {}),
       modelStatus: modelIdentity.status,
       ...(modelIdentity.source ? { modelSource: modelIdentity.source } : {}),
       ...(modelIdentity.omissionReason ? { modelOmissionReason: modelIdentity.omissionReason } : {})
@@ -280,7 +305,7 @@ export async function finalizeOpenTurn(
     turnRoleStatus: observedTurnRole ? 'observed' : turnRoleEvents.length ? 'conflict' : 'unobserved',
     ...(observedTurnRole ? { turnRole: observedTurnRole } : {}),
     sessionId: open.sessionId,
-    ...(open.providerTurnId ? { providerTurnId: open.providerTurnId } : {}),
+    ...(effectiveProviderTurnId ? { providerTurnId: effectiveProviderTurnId } : {}),
     generation: open.generation,
     turnIndex: open.turnIndex,
     startedAt,
@@ -295,8 +320,8 @@ export async function finalizeOpenTurn(
   }
   const committed = await commitRecord(enablement.dataRoot, draft, open.uploadEnvironment)
   const session = await nextSessionState(enablement.dataRoot, root, open.provider, open.sessionId)
-  const committedProviderTurnIds = open.providerTurnId
-    ? [...new Set([...(session.committedProviderTurnIds ?? []), open.providerTurnId])].slice(-200)
+  const committedProviderTurnIds = effectiveProviderTurnId
+    ? [...new Set([...(session.committedProviderTurnIds ?? []), effectiveProviderTurnId])].slice(-200)
     : session.committedProviderTurnIds
   await writeJsonAtomic(statePath(root), {
     ...session,

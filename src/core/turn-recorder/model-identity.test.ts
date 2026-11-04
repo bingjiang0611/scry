@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
 import { resolveModelIdentity } from './recorder'
+import { lifecycleTraceEvents } from './recorder-lifecycle-events'
 
-const modelEvent = (complete: boolean, ids: string[]): TraceEvent => ({
-  id: `provider-model-${ids.join('-')}-${complete}`,
+const modelEvent = (complete: boolean, ids: string[], modelTier?: string): TraceEvent => ({
+  id: `provider-model-${ids.join('-')}-${complete}-${modelTier ?? ''}`,
   ts: '2026-01-01T00:00:00.000Z',
   runId: 'r',
   kind: 'harness',
   stage: 'provider_model',
-  runtimeMetadata: { modelIds: ids, complete }
+  runtimeMetadata: { modelIds: ids, ...(modelTier ? { modelTier } : {}), complete }
 })
 
 describe('resolveModelIdentity', () => {
@@ -20,6 +21,28 @@ describe('resolveModelIdentity', () => {
   it('labels a billed usage model as observed but from the usage event', () => {
     expect(resolveModelIdentity([], new Set(), 'claude-opus-4-6'))
       .toEqual({ model: 'claude-opus-4-6', status: 'observed', source: 'usage_event' })
+  })
+
+  it('retains a provider logical model tier without inventing a concrete model id', () => {
+    expect(resolveModelIdentity([modelEvent(true, [], 'Ultimate')], new Set(), undefined))
+      .toEqual({ modelTier: 'Ultimate', status: 'observed', source: 'provider_model_event' })
+  })
+
+  it('retains a logical tier alongside one authoritative native model id', () => {
+    expect(resolveModelIdentity([modelEvent(true, ['qoder-native-1'], 'Ultimate')], new Set(['qoder-native-1']), undefined))
+      .toEqual({ model: 'qoder-native-1', modelTier: 'Ultimate', status: 'observed', source: 'provider_model_event' })
+  })
+
+  it.each([
+    { payload: {}, complete: true },
+    { payload: { model_ids: ['native-model'], model_ids_complete: false }, complete: false },
+    { payload: { model_ids: [null], model_ids_complete: true }, complete: false },
+    { payload: { model_ids_complete: false }, complete: false }
+  ])('a Qoder tier never upgrades explicit incomplete or invalid model evidence: %j', ({ payload, complete }) => {
+    const events = lifecycleTraceEvents({ provider: 'qoder', event: 'Stop', runId: 'r', captureOutput: false,
+      payload: { session_id: 's', model: 'Ultimate', ...payload } })
+    expect(events.find(event => event.stage === 'provider_model')?.runtimeMetadata)
+      .toMatchObject({ modelTier: 'Ultimate', complete })
   })
 
   it('reports an incomplete observation instead of dropping the model silently', () => {

@@ -94,7 +94,7 @@ function Fixture() {
       session={{ sessionId: 'profile-session', externalSessionId: info.session, providerId: 'claude', cwd: info.cwd, label: 'Profile session', ts: 1_800_000_000_000, isActive: true }}
       draftStore={createComposerDraftStore(new Map())} queueStore={new RemotePromptQueueStore()} onDraftInput={() => {}}
       scrollRef={scrollRef} textareaRef={textareaRef} renderLocationPicker={() => null} onSessionAdopted={() => {}}
-      surface={{ target: null, state: createRightSurfaceState(), onAction: () => {} }} />
+      surface={{ target: null, primaryVisible: true, state: createRightSurfaceState(), onAction: () => {} }} />
   </Profiler>
 }
 await refreshRemoteCatalog(info.connectionId)

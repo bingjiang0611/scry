@@ -196,7 +196,7 @@ it('斜杠菜单只展示当前输入匹配项，且标题不展示数量', () =
       slashCmds: commands
     })
     expect(chatHtml).toContain('<span>Commands</span>')
-    expect(chatHtml).toContain('今天想在 <span>project</span> 中构建什么？')
+    expect(chatHtml).toContain('<h1 class="zh-balanced-heading" lang="zh-CN">今天<wbr/>想<wbr/>在<wbr/> <span>project</span> <wbr/>中构<wbr/>建<wbr/>什么？</h1>')
     expect(chatHtml).toContain('welcome-hero-icon')
     expect(chatHtml).not.toContain('welcome-provider-field')
     expect(chatHtml).not.toContain('Provider 可用')
@@ -235,7 +235,7 @@ it('ChatView 不在空态展示 Provider 探测和健康状态', () => {
       }]
     })
 
-    expect(html).toContain('今天想构建什么？')
+    expect(html).toContain('<h1 class="zh-balanced-heading" lang="zh-CN">今天<wbr/>想构<wbr/>建<wbr/>什么？</h1>')
     expect(html).toContain('data-agent-id="pi:25f2d533d0a8b391"')
     expect(html).toContain('class="provider-glyph" data-provider="pi"')
     expect(html).not.toContain('Provider 可用')

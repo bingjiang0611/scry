@@ -11,6 +11,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
+  corner-shape: round;
   background: var(--ok);
   box-shadow: 0 0 0 4px var(--ok-soft);
 }
@@ -342,7 +343,7 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
 }
 .segment-inspector > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--dim2); font: 10px/1.2 var(--font-mono); letter-spacing: .1em; }
 .segment-inspector > header em { display: inline-flex; align-items: center; gap: 6px; font-style: normal; text-transform: uppercase; }
-.segment-inspector > header i { width: 6px; height: 6px; border-radius: 50%; }
+.segment-inspector > header i { width: 6px; height: 6px; border-radius: 50%; corner-shape: round; }
 .segment-inspector-title { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 14px; align-items: start; margin-top: 38px; }
 .segment-inspector-title > span { color: var(--selected); font: 600 28px/1 var(--font-mono); }
 .segment-inspector-title h2 { margin: 0 0 8px; font-size: 22px; line-height: 1.15; }

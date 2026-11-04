@@ -11,7 +11,13 @@ export type ActivityEntry = {
   group: ActivityGroup
 } & (
   | { kind: 'session'; project: ProjectMeta; session: SessionMeta }
-  | { kind: 'conversation'; project: ProjectMeta; conversation: ConversationSummary }
+  | {
+    kind: 'conversation'
+    project: ProjectMeta
+    conversation: ConversationSummary
+    /** Set for a side-chat child: its own run is real activity, but not a root row. */
+    sideChatParent?: string
+  }
   | { kind: 'remote'; project: RemoteProjectGroup; session: RemoteSessionRef }
 )
 
@@ -21,6 +27,31 @@ export const activityGroups: { id: ActivityGroup; label: string }[] = [
   { id: 'updates', label: copy.updates },
   { id: 'completed', label: copy.completed }
 ]
+
+/**
+ * One mapping for every activity row, so local conversations, local sessions and remote
+ * sessions cannot disagree about what a run means.
+ *
+ * Blocked and waiting evidence outranks liveness: a run that is waiting for the user is
+ * not "in progress". A terminal non-success is reviewable evidence, not an absence —
+ * dropping it would make a failed, cancelled or interrupted run look like nothing
+ * happened. Only an explicit `completed` outcome is shown as completed.
+ */
+export function activityGroupOf(evidence: {
+  active: boolean
+  /** Waiting on the user: a pending question, or a host-reported blocked run. */
+  blocked: boolean
+  outcome?: SessionMeta['lastRunOutcome']
+  unread?: boolean
+}): ActivityGroup | undefined {
+  if (evidence.blocked) return 'attention'
+  if (evidence.active) return 'working'
+  if (evidence.outcome === 'completed') return 'completed'
+  if (evidence.outcome === 'failed' || evidence.outcome === 'cancelled' || evidence.outcome === 'interrupted') {
+    return 'updates'
+  }
+  return evidence.unread ? 'updates' : undefined
+}
 
 export function sidebarActivity(
   projects: ProjectMeta[],
@@ -32,26 +63,54 @@ export function sidebarActivity(
 ): ActivityEntry[] {
   const entries: ActivityEntry[] = []
   const needle = query.trim().toLocaleLowerCase()
-  const group = (runId?: string, outcome?: SessionMeta['lastRunOutcome']): ActivityGroup | undefined => runId && waitingQuestionRunIds.has(runId)
-    ? 'attention'
-    : runId && runningRunIds.has(runId) ? 'working' : outcome === 'completed' ? 'completed' : undefined
+  const group = (evidence: {
+    active: boolean
+    runId?: string
+    /** Conversation-only: a durable block the user must resolve, never a liveness reading. */
+    blocked?: boolean
+    outcome?: SessionMeta['lastRunOutcome']
+    unread?: boolean
+  }): ActivityGroup | undefined => activityGroupOf({
+    active: evidence.active,
+    blocked: evidence.blocked === true || Boolean(evidence.runId && waitingQuestionRunIds.has(evidence.runId)),
+    outcome: evidence.outcome,
+    unread: evidence.unread
+  })
   for (const project of projects) {
     const matches = (title: string): boolean => !needle || `${project.name} ${project.cwd} ${title}`.toLocaleLowerCase().includes(needle)
     for (const conversation of project.conversations ?? []) {
       if (conversation.archivedAt || !matches(conversation.title)) continue
-      const status = conversation.activeRunId
-        ? waitingQuestionRunIds.has(conversation.activeRunId) ? 'attention' : 'working'
-        : group(undefined, conversation.lastRunOutcome)
-      if (status) entries.push({ key: `conversation:${conversation.id}`, kind: 'conversation', project, conversation, group: status })
+      // A conversation's active run id is its own liveness evidence. Only a durable block
+      // outranks it: deletion, an unaccepted native fork, or a delivery whose outcome is
+      // unresolved with no live run to watch. `blockedReason` alone cannot decide this —
+      // it also carries the ordinary "request still in flight" note, which is progress.
+      const active = Boolean(conversation.activeRunId)
+      const status = group({
+        active,
+        runId: conversation.activeRunId,
+        blocked: Boolean(conversation.deletion) ||
+          (conversation.fork !== undefined && conversation.fork.status !== 'accepted') ||
+          (!active && conversation.blockedReason !== undefined),
+        outcome: conversation.lastRunOutcome
+      })
+      if (!status) continue
+      // A child's own run is background activity of its parent, so it is listed here with
+      // that parent named instead of being flattened into the root conversation list.
+      entries.push({
+        key: `conversation:${conversation.id}`, kind: 'conversation', project, conversation, group: status,
+        ...(conversation.sideChat ? { sideChatParent: conversation.sideChat.parentTitleAtCapture } : {})
+      })
     }
     for (const session of project.sessions) {
       if (session.archivedAt || !matches(session.preview)) continue
+      const cwd = session.cwd ?? project.cwd
       // The same unread evidence powers the project-list blue dot. It proves a new
       // result needs review, not success: older catalogs can lack an outcome.
       const unread = unreadSessionKeys.has(sessionAttentionKey({ providerId: session.providerId,
-        agentProfileId: session.agentProfileId, cwd: project.cwd, sessionId: session.externalSessionId ?? session.sessionId }))
-      const status = group(session.runId, session.lastRunOutcome) ?? (unread ? 'updates' : undefined)
-      if (status) entries.push({ key: `session:${JSON.stringify([project.cwd, session.providerId, session.agentProfileId, session.sessionId])}`,
+        agentProfileId: session.agentProfileId, cwd, sessionId: session.externalSessionId ?? session.sessionId }))
+      const status = group({ active: Boolean(session.runId && runningRunIds.has(session.runId)),
+        runId: session.runId, outcome: session.lastRunOutcome, unread })
+      if (status) entries.push({ key: `session:${JSON.stringify([cwd, session.providerId, session.agentProfileId, session.sessionId])}`,
         kind: 'session', project, session, group: status })
     }
   }
@@ -61,7 +120,13 @@ export function sidebarActivity(
     if (project.state !== 'connected') continue
     for (const session of project.sessions) {
       if (session.archivedAt || !session.externalSessionId) continue
-      const status = session.isActive ? 'working' : session.lastRunOutcome === 'completed' ? 'completed' : undefined
+      // The host reports both liveness and the questions its runs are blocked on, so a
+      // remote run awaiting the user is attention rather than background progress.
+      const status = activityGroupOf({
+        active: session.isActive === true,
+        blocked: (session.pendingQuestions ?? 0) > 0,
+        outcome: session.lastRunOutcome
+      })
       if (!status) continue
       if (needle && !`${project.connection.label} ${project.name} ${project.cwd} ${session.label}`.toLocaleLowerCase().includes(needle)) continue
       entries.push({

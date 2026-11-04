@@ -43,11 +43,8 @@ export async function exerciseLlmPerformanceFinish(contents, win, screenshot, na
   await click('#performance-group')
   await wait(`${liveRow}?.textContent.includes('0 + 3*') && ${liveRow}.querySelectorAll('.llm-perf-reading')[0].textContent === '40.0' && ${liveRow}.querySelectorAll('.llm-perf-reading')[1].textContent === '1.5'`)
   if (await read(`${modal}.querySelector('.llm-perf-run') != null`)) throw new Error('Running cards reappeared')
-  await click('.llm-perf-notices details:first-child summary')
-  await wait(`${modal}.querySelector('.llm-perf-notices details').open`)
-  if (!await read(`${modal}.querySelector('.llm-perf-notices p').textContent.includes('最终记录替换')`)) throw new Error('Provisional evidence lacks replacement explanation')
-  key('Return')
-  await wait(`!${modal}.querySelector('.llm-perf-notices details').open`)
+  if (await read(`${modal}.querySelector('.llm-perf-notices') != null || /如何读图|含运行中数据/.test(${modal}.textContent)`)) throw new Error('Removed comparison help entries returned with live data')
+  if (!await read(`${liveRow}.querySelector('small').getAttribute('aria-label').includes('运行中暂计 3 轮')`)) throw new Error('Live sample evidence was removed with help entries')
   const contrastByTheme = {}
   for (const theme of ['dark', 'light']) {
     await read(`document.documentElement.setAttribute('data-theme', ${JSON.stringify(theme)})`)
@@ -73,10 +70,7 @@ export async function exerciseLlmPerformanceFinish(contents, win, screenshot, na
     await wait(`innerWidth === ${width}`)
     await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
     if (!await read(`${modal}.querySelector('.llm-perf-body').scrollWidth <= ${modal}.querySelector('.llm-perf-body').clientWidth && ${modal}.scrollWidth <= ${modal}.clientWidth`)) throw new Error('Comparison overflow escaped local scroll container')
-    await click('.llm-perf-notices details:first-child summary')
-    await wait(`${modal}.querySelector('.llm-perf-notices details').open`)
-    if (!await read(`(() => { const body = ${modal}.querySelector('.llm-perf-body').getBoundingClientRect(); const help = ${modal}.querySelector('.llm-perf-notices details p').getBoundingClientRect(); return help.left >= body.left && help.right <= body.right })()`)) throw new Error('Narrow provisional explanation clipped')
-    key('Return')
+    if (await read(`${modal}.querySelector('.llm-perf-notices') != null`)) throw new Error('Removed help entries returned at narrow width')
     await capture('-narrow-' + width)
   }
   win.setSize(1000, 800)
@@ -130,5 +124,5 @@ export async function exerciseLlmPerformanceFinish(contents, win, screenshot, na
   await wait(`${modal}?.textContent.includes('fixture history unavailable')`)
   if (await read(`${modal}.querySelector('.llm-perf-mrow, .llm-perf-chart') != null`)) throw new Error('History error retained apparently successful measurements')
   await click('.modal-x')
-  return { assertions: ['four-column distribution-first layout', 'running cards and smoothed curves removed', 'independent real medians and missing evidence', 'failed rounds excluded', 'full distribution accessible', 'model selection and disappearance fallback', 'metric and range switches', 'measured interval tooltip and keyboard navigation', 'provisional completed-call samples retained', 'cross-provider model pooling omits missing evidence', 'focus-independent source', 'completion/stop refresh', 'read errors clear stale evidence', 'visibility subscription and close stop polling', 'close restores focus', 'dark/light AA contrast', 'local narrow scroll and help containment'], nativeVisibility: nativeVisibility ? 'passed' : 'not-run (visibility event simulated)', contrastByTheme }
+  return { assertions: ['four-column distribution-first layout', 'running cards and smoothed curves removed', 'independent real medians and missing evidence', 'failed rounds excluded', 'full distribution accessible', 'model selection and disappearance fallback', 'metric and range switches', 'measured interval tooltip and keyboard navigation', 'provisional completed-call samples retained', 'cross-provider model pooling omits missing evidence', 'focus-independent source', 'completion/stop refresh', 'read errors clear stale evidence', 'visibility subscription and close stop polling', 'close restores focus', 'dark/light AA contrast', 'local narrow scroll and removed comparison help entries'], nativeVisibility: nativeVisibility ? 'passed' : 'not-run (visibility event simulated)', contrastByTheme }
 }

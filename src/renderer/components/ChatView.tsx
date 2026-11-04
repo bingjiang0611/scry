@@ -7,6 +7,7 @@ import { Icon } from './primitives/Icon'
 import { WorkspaceFileLinkProvider } from './MarkdownImpl'
 import { DelayedLoadingStatus } from './LoadingStatus'
 import { LOADING_COPY } from '../constants/copy'
+import { ChineseHeadingText } from '../typography'
 
 const NO_PENDING_QUESTIONS: AgentQuestionRequest[] = []
 const NO_TURNS: ChatViewProps['turns'] = []
@@ -34,6 +35,7 @@ export function ChatView(props: ChatViewProps) {
     sessionLoading = false,
     sessionCacheVisible = false,
     sessionEvidenceGap = null,
+    emptyState = null,
     busy,
     queuedPrompts,
     pendingQuestions = NO_PENDING_QUESTIONS,
@@ -67,7 +69,7 @@ export function ChatView(props: ChatViewProps) {
     <>
       <WorkspaceFileLinkProvider workspaces={workspaceRoots} onOpen={onOpenFile}>
         <div className="body chat-body" data-screen-label="对话 · 真实 Turn transcript">
-          <div className="chat chat-transcript" ref={scrollRef} aria-label="执行时间线" aria-busy={sessionLoading && !sessionCacheVisible} data-history-source={sessionCacheVisible ? 'preview' : 'authoritative'}>
+          <div className="chat chat-transcript" ref={scrollRef} tabIndex={-1} aria-label="执行时间线" aria-busy={sessionLoading && !sessionCacheVisible} data-history-source={sessionCacheVisible ? 'preview' : 'authoritative'}>
             {turns.length === 0 && !sessionLoading && sessionEvidenceGap && (
               <div className="chat-session-evidence-gap" role="status" data-status={sessionEvidenceGap.status}>
                 <b>{sessionEvidenceGap.status === 'error' ? '会话历史加载失败' : sessionEvidenceGap.status === 'unavailable' ? (remote ? `这条会话没有可读的 ${remoteHost} 证据` : '这条会话没有可读的本机证据') : '这条会话的归档里没有轮次'}</b>
@@ -76,14 +78,19 @@ export function ChatView(props: ChatViewProps) {
               </div>
             )}
             {turns.length === 0 && !sessionLoading && !sessionEvidenceGap && hasSelectedSession && (
-              <div className="chat-session-evidence-gap" role="status" data-status="empty">
-                <b>这条会话暂时没有可显示的轮次</b>
-                <span>{remote ? `会话已选中；正在等待 ${remoteHost} 的归档或运行事件，不会将它当作新会话。` : '会话已选中；正在等待本机归档或运行事件，不会将它当作新会话。'}</span>
-              </div>
+              emptyState
+                ? <div className="chat-session-evidence-gap" role="status" data-status={emptyState.status ?? 'new-side-chat'}>
+                  <b>{emptyState.title}</b>
+                  <span>{emptyState.detail}</span>
+                </div>
+                : <div className="chat-session-evidence-gap" role="status" data-status="empty">
+                  <b>这条会话暂时没有可显示的轮次</b>
+                  <span>{remote ? `会话已选中；正在等待 ${remoteHost} 的归档或运行事件，不会将它当作新会话。` : '会话已选中；正在等待本机归档或运行事件，不会将它当作新会话。'}</span>
+                </div>
             )}
             {turns.length === 0 && !sessionLoading && !sessionEvidenceGap && !hasSelectedSession && (
               <div className={`unbound-empty welcome-field ${cwd ? 'bound' : ''}`}>
-                <header className="welcome-heading welcome-heading-minimal"><span className="welcome-hero-icon" aria-hidden="true"><Icon name="terminal" /></span><h1>{workspaceName ? <>今天想在 <span>{workspaceName}</span> 中构建什么？</> : '今天想构建什么？'}</h1></header>
+                <header className="welcome-heading welcome-heading-minimal"><span className="welcome-hero-icon" aria-hidden="true"><Icon name="terminal" /></span><h1 className="zh-balanced-heading" lang="zh-CN"><ChineseHeadingText>{workspaceName ? <>今天想在 <span>{workspaceName}</span> 中构建什么？</> : '今天想构建什么？'}</ChineseHeadingText></h1></header>
               </div>
             )}
             {!sessionLoading && historyWindow?.hasOlder && (

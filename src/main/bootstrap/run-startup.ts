@@ -2,8 +2,8 @@ import type { BrowserWindow } from 'electron'
 import { app } from 'electron'
 import type { ActiveRun, TraceEvent } from '../../shared/trace'
 import type { ProviderId } from '../../shared/provider'
-import type { RuntimeProvider, NormalizedAgentStartRequest, AgentForceKillScope, AgentSteerInput, AgentSteerResult, AgentQuestionRequest, AgentPermissionMode, AgentIntervention } from '../../shared/runtime'
-import type { BackgroundTaskStopResult } from '../../shared/background-work'
+import type { RuntimeProvider, NormalizedAgentStartRequest, AgentQuestionRequest, AgentPermissionMode, AgentIntervention } from '../../shared/runtime'
+import type { RunControl } from './run-control'
 import type { ProviderRunHandle } from '../providers/types'
 import type { GitTurnDiffCapture } from '../git'
 import type { ProviderRegistry } from '../providers/registry'
@@ -25,15 +25,7 @@ import { authorizedMcpExecution } from './trust'
 type StartRuns = { get: (runId: string) => { control: RunControl } | undefined; register: (state: ActiveRun, control: RunControl, options?: { focus?: boolean }) => void }
 type StartSourceControl = { admitRun: (cwd: string | undefined, callback: () => void) => Promise<void> }
 type StartHandle = { current: ProviderRunHandle | null }
-export interface RunControl {
-  runId: string; providerId: ProviderId; interrupt: () => void; forceKill: () => void
-  stopBackgroundTask: (taskId: string) => Promise<BackgroundTaskStopResult>
-  steer: (input: AgentSteerInput) => Promise<AgentSteerResult>
-  forceKillScope: () => AgentForceKillScope | undefined
-  cwd?: string; resume?: string; getExternalSessionId: () => string | undefined; getProviderTurnId: () => string | undefined
-  canonicalLifecycle: boolean; runtimeProvider: RuntimeProvider; runState: ActiveRun; adoptSession: () => void
-  cleanupProvisional: () => void; finalizeTurnDiff: () => Promise<void>; cancelTurnDiff: () => Promise<void>; settled: Promise<void>
-}
+export type { RunControl } from './run-control'
 export type RunStartupDeps = {
   piRunDiagnostics: PiRunDiagnostics
   options: AppRunStartOptions; providerId: ProviderId; runtimeProvider: RuntimeProvider; providerRegistry: ProviderRegistry

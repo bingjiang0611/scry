@@ -1,16 +1,33 @@
 import { providerIdForAgentId, type AgentInputAttachment, type AgentRunControls } from '@shared/runtime'
 import type { ConversationAdoptionPreview, ConversationApi, ConversationSendRequest, ConversationSummary, ConversationTargetRequest } from '@shared/conversation-api'
 
+/**
+ * Send target of the clicked Agent. Every registered Provider owns its own native
+ * continuation, so the send contract is the five-Provider one; a Provider that is not
+ * registered at all is refused instead of being silently mapped onto another one.
+ */
 export function conversationTarget(agentId: string, controls?: AgentRunControls): ConversationTargetRequest {
   const providerId = providerIdForAgentId(agentId)
-  if (providerId !== 'claude' && providerId !== 'codex' && providerId !== 'pi') {
-    throw new Error('此 Agent 尚不支持跨 Agent 接续；当前对话和草稿已保留')
-  }
+  if (!providerId) throw new Error(`Agent ${agentId} 尚未注册 Provider adapter；当前对话和草稿已保留`)
   return {
     providerId,
     ...(providerId === 'pi' ? { agentProfileId: agentId } : {}),
     ...controls
   }
+}
+
+/**
+ * Adoption source of the legacy capture entry. It is deliberately narrower than the send
+ * target: only these three Providers keep an adoptable captured archive. Widening it here
+ * would promise a migration the host refuses, and narrowing the send target would deny
+ * Qoder/OpenCode their own real native continuation.
+ */
+export function legacyAdoptionSourceTarget(agentId: string): ConversationTargetRequest & { providerId: 'claude' | 'codex' | 'pi' } {
+  const target = conversationTarget(agentId)
+  if (target.providerId !== 'claude' && target.providerId !== 'codex' && target.providerId !== 'pi') {
+    throw new Error('旧捕获的迁移来源仅支持 Claude/Codex/Pi；可改用侧边会话或分支，当前对话和草稿已保留')
+  }
+  return { ...target, providerId: target.providerId }
 }
 
 /** Never replay an adoption after an unknown IPC result; read the original ownership. */

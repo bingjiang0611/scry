@@ -1,4 +1,5 @@
-export async function exerciseStructureApp(cdp, evaluate) {
+import { exerciseSideChatApp } from './structure-side-chat-checks.mjs'
+export async function exerciseStructureApp(cdp, evaluate, options = {}) {
   const { mkdtempSync, writeFileSync } = await import('node:fs')
   const { tmpdir } = await import('node:os')
   const { join } = await import('node:path')
@@ -124,9 +125,39 @@ export async function exerciseStructureApp(cdp, evaluate) {
     await cdp.send('Page.captureScreenshot', { format: 'png' })
     await wait(`document.querySelector('.surface-menu').getAnimations().every(a => a.playState === 'finished')`)
     await capture(`${theme}-surface-menu`)
+    // The side-chat entry and its history item are the first two items of the same add
+    // menu; the six tool items follow unchanged.
+    check(await evaluate(`(() => {
+      const items = [...document.querySelectorAll('.surface-menu [role="menuitem"]')]
+      if (items.length !== 8) return false
+      const [entry, history] = items
+      if (!entry || !history) return false
+      if (entry.disabled || !entry.querySelector('svg')) return false
+      const label = entry.querySelector('span')?.textContent ?? ''
+      const historyLabel = history.querySelector('span')?.textContent ?? ''
+      return label.length > 0 && historyLabel.length > 0 && label !== historyLabel
+    })()`), 'Side-chat entry is missing from the add menu')
     await key('Escape')
     check(await evaluate(`document.querySelector('.surface-menu')?.dataset.state === 'exit' && document.querySelector('.surface-menu').getAnimations().some(a => a.effect.getTiming().duration === 100)`), 'Surface menu exit is not 100ms')
     await wait(`document.querySelector('.surface-menu') == null`)
+    // Chooser: with no tab open the side-chat card is the first item of the same grid.
+    const currentSurface = '#right-surface-pane [data-session-surface-current="true"]'
+    while (await evaluate(`document.querySelector('${currentSurface} .surface-tab-close') != null`)) {
+      await click(`${currentSurface} .surface-tab-close`)
+      await idle()
+    }
+    await wait(`document.querySelector('${currentSurface} [data-surface-chooser] [data-side-chat-entry]') != null`)
+    check(await evaluate(`(() => {
+      const grid = document.querySelector('${currentSurface} [data-surface-chooser]')
+      const entry = grid.querySelector('[data-side-chat-entry]')
+      return grid.firstElementChild === entry
+        && entry.classList.contains('surface-card-wide')
+        && entry.getAttribute('title').length > 0
+    })()`), 'Side-chat card is not the wide first chooser card')
+    await capture(`${theme}-surface-chooser`)
+    await click(`${currentSurface} [data-surface-chooser] .surface-card:not([data-side-chat-entry])`)
+    await wait(`document.querySelector('${currentSurface} [data-surface-chooser]') == null`)
+    await idle()
     const hoverPoint = await pointFor('button.sb-sess')
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...hoverPoint })
     await wait(`document.querySelector('.session-hover-card') != null`)
@@ -165,8 +196,10 @@ export async function exerciseStructureApp(cdp, evaluate) {
     await click('.panel-pill:not(.summary-pill)')
     await idle()
   } finally { await cdp.send('Emulation.setEmulatedMedia', { features: [] }) }
+  const sideChat = await exerciseSideChatApp({ cdp, evaluate, capture, check, click, idle, pointFor, wait,
+    ipcCountsPath: options.ipcCountsPath, lostReplyPath: options.lostReplyPath })
   return { test: 'structure production App', themes: ['light', 'dark'], page240: true, newConversation180: true,
     metaPrompts: true, paneFallbackF: true, transcriptWidthCommittedOnce: true, interruptedPane: true, maximizeRestore: true,
     sidebarKeyboardFoldRestore: true, reducedPane120OpacityOnly: true, themeImmediate: true, nativeCaptureCalls: 0, modalCloseTimes: closeTimes,
-    nativeSend: true, unsentDraftRetained: true, overlays: { settingsSkillsMcpLlm: true, surfaceMenu160And100: true, hoverCard160: true, focusRestoredBeforeUnmount: true }, captures }
+    nativeSend: true, unsentDraftRetained: true, sideChat, overlays: { settingsSkillsMcpLlm: true, surfaceMenu160And100: true, hoverCard160: true, focusRestoredBeforeUnmount: true }, captures }
 }

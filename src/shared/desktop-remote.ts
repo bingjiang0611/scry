@@ -165,7 +165,7 @@ export interface DesktopRemoteHistory {
 // Oversized history pages and live traces are transferred losslessly in bounded byte chunks.
 // The assembled page is capped separately from the 4 MiB wire response limit.
 export const DESKTOP_HISTORY_CHUNK_BYTES = 512 * 1024
-export const DESKTOP_HISTORY_MAX_BYTES = 32 * 1024 * 1024
+export const DESKTOP_HISTORY_MAX_BYTES = 512 * 1024 * 1024
 
 export type DesktopHostRead =
   | { kind: 'info' }

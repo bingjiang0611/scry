@@ -25,3 +25,4 @@ artifacts/
 # 内部团队推广方案与内部验收 skill：只保留在本地工作区。
 docs/cli-team-rollout.md
 .agents/skills/validate-scry-rate-workflow
+.vitest-reports/

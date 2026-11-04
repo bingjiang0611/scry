@@ -1,0 +1,226 @@
+{
+  "schema": 1,
+  "host": {
+    "label": "mac2",
+    "cpu": "Apple M1",
+    "cores": 8,
+    "memoryGiB": 16,
+    "controllerNode": "24.18.0",
+    "electron": "42.10.1"
+  },
+  "scope": "Frozen App235/CLI54 baseline vs demand-and-FIFO variants; offline Native, separate workspaces, ABBA; not final236 timings or daily L3",
+  "evidenceRoot": "/private/tmp/scry-step45-demand.prEJ4G",
+  "comparison": {
+    "count": 1,
+    "baseline": {
+      "elapsedMs": 23548.5,
+      "mainCpuMs": 1461.3535000000002,
+      "rendererCpuMs": 16418.9985,
+      "gpuCpuMs": 3022.0985,
+      "mainRssMiB": 256.125,
+      "rendererWorkingSetMiB": 335.046875,
+      "counters": [
+        {
+          "fsync": 1457,
+          "git": 70,
+          "children": 113,
+          "activeRunsCalls": 0,
+          "activeRunsJsonBytes": 0
+        },
+        {
+          "fsync": 1457,
+          "git": 67,
+          "children": 110,
+          "activeRunsCalls": 0,
+          "activeRunsJsonBytes": 0
+        }
+      ]
+    },
+    "combined": {
+      "elapsedMs": 22723.5,
+      "mainCpuMs": 1459.4765000000002,
+      "rendererCpuMs": 16434.71,
+      "gpuCpuMs": 2888.3450000000003,
+      "mainRssMiB": 254.1484375,
+      "rendererWorkingSetMiB": 349.4609375,
+      "counters": [
+        {
+          "fsync": 1457,
+          "git": 67,
+          "children": 110,
+          "activeRunsCalls": 0,
+          "activeRunsJsonBytes": 0
+        },
+        {
+          "fsync": 1457,
+          "git": 69,
+          "children": 112,
+          "activeRunsCalls": 0,
+          "activeRunsJsonBytes": 0
+        }
+      ]
+    }
+  },
+  "samples": [
+    {
+      "variant": "baseline",
+      "round": 1,
+      "count": 1,
+      "timing": {
+        "label": "demand-and-queue-baseline-n1-1",
+        "command": [
+          "node",
+          "scripts/concurrent-performance.mjs",
+          "1",
+          "2"
+        ],
+        "exit": 0,
+        "signal": null,
+        "wallMs": 33160,
+        "cores": 8,
+        "loadBefore": 3.13,
+        "loadAfter": 2.59,
+        "highLoad": false
+      },
+      "elapsedMs": 24151,
+      "resourceWindowMs": 24328,
+      "mainCpuMs": 1484.7030000000002,
+      "rendererCpuMs": 16597.377,
+      "gpuCpuMs": 3153.157,
+      "peakMainRssMiB": 254.75,
+      "peakRendererWorkingSetMiB": 337.953125,
+      "counters": {
+        "fsync": 1457,
+        "git": 70,
+        "children": 113,
+        "activeRunsCalls": 0,
+        "activeRunsJsonBytes": 0
+      },
+      "canonicalRecords": 1,
+      "archiveVerified": true,
+      "highLoad": false,
+      "harnessHash": "4a671c50b27dc35347a879791b7f5d02b2ff4f3013b7b5058ff4e8be4c45deb4",
+      "temp": "/var/folders/gq/gr5v20ss57550_3x_vbk9tpw0000gn/T/scry-concurrent-n1-XNLJmQ"
+    },
+    {
+      "variant": "combined",
+      "round": 2,
+      "count": 1,
+      "timing": {
+        "label": "demand-and-queue-combined-n1-2",
+        "command": [
+          "node",
+          "scripts/concurrent-performance.mjs",
+          "1",
+          "2"
+        ],
+        "exit": 0,
+        "signal": null,
+        "wallMs": 31297,
+        "cores": 8,
+        "loadBefore": 2.59,
+        "loadAfter": 4.53,
+        "highLoad": false
+      },
+      "elapsedMs": 22706,
+      "resourceWindowMs": 22825,
+      "mainCpuMs": 1435.241,
+      "rendererCpuMs": 16406.153,
+      "gpuCpuMs": 2880,
+      "peakMainRssMiB": 252.96875,
+      "peakRendererWorkingSetMiB": 342.09375,
+      "counters": {
+        "fsync": 1457,
+        "git": 67,
+        "children": 110,
+        "activeRunsCalls": 0,
+        "activeRunsJsonBytes": 0
+      },
+      "canonicalRecords": 1,
+      "archiveVerified": true,
+      "highLoad": false,
+      "harnessHash": "4a671c50b27dc35347a879791b7f5d02b2ff4f3013b7b5058ff4e8be4c45deb4",
+      "temp": "/var/folders/gq/gr5v20ss57550_3x_vbk9tpw0000gn/T/scry-concurrent-n1-9IVu9g"
+    },
+    {
+      "variant": "combined",
+      "round": 3,
+      "count": 1,
+      "timing": {
+        "label": "demand-and-queue-combined-n1-3",
+        "command": [
+          "node",
+          "scripts/concurrent-performance.mjs",
+          "1",
+          "2"
+        ],
+        "exit": 0,
+        "signal": null,
+        "wallMs": 31287,
+        "cores": 8,
+        "loadBefore": 4.53,
+        "loadAfter": 5.8,
+        "highLoad": false
+      },
+      "elapsedMs": 22741,
+      "resourceWindowMs": 22853,
+      "mainCpuMs": 1483.7120000000002,
+      "rendererCpuMs": 16463.267000000003,
+      "gpuCpuMs": 2896.69,
+      "peakMainRssMiB": 255.328125,
+      "peakRendererWorkingSetMiB": 356.828125,
+      "counters": {
+        "fsync": 1457,
+        "git": 69,
+        "children": 112,
+        "activeRunsCalls": 0,
+        "activeRunsJsonBytes": 0
+      },
+      "canonicalRecords": 1,
+      "archiveVerified": true,
+      "highLoad": false,
+      "harnessHash": "4a671c50b27dc35347a879791b7f5d02b2ff4f3013b7b5058ff4e8be4c45deb4",
+      "temp": "/var/folders/gq/gr5v20ss57550_3x_vbk9tpw0000gn/T/scry-concurrent-n1-APFoPS"
+    },
+    {
+      "variant": "baseline",
+      "round": 4,
+      "count": 1,
+      "timing": {
+        "label": "demand-and-queue-baseline-n1-4",
+        "command": [
+          "node",
+          "scripts/concurrent-performance.mjs",
+          "1",
+          "2"
+        ],
+        "exit": 0,
+        "signal": null,
+        "wallMs": 31537,
+        "cores": 8,
+        "loadBefore": 5.8,
+        "loadAfter": 5.32,
+        "highLoad": false
+      },
+      "elapsedMs": 22946,
+      "resourceWindowMs": 23069,
+      "mainCpuMs": 1438.004,
+      "rendererCpuMs": 16240.619999999999,
+      "gpuCpuMs": 2891.0400000000004,
+      "peakMainRssMiB": 257.5,
+      "peakRendererWorkingSetMiB": 332.140625,
+      "counters": {
+        "fsync": 1457,
+        "git": 67,
+        "children": 110,
+        "activeRunsCalls": 0,
+        "activeRunsJsonBytes": 0
+      },
+      "canonicalRecords": 1,
+      "archiveVerified": true,
+      "highLoad": false,
+      "harnessHash": "4a671c50b27dc35347a879791b7f5d02b2ff4f3013b7b5058ff4e8be4c45deb4",
+      "temp": "/var/folders/gq/gr5v20ss57550_3x_vbk9tpw0000gn/T/scry-concurrent-n1-rY4xl3"
+    }
+  ]
+}

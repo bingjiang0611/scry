@@ -95,7 +95,8 @@ const {
   recentStore, projectStore, forkManagedConversation, startAppRun,
   getWindow: () => win,
   unsettledRuns: () => runs.unsettledStates(),
-  getProviderRegistry: () => providerRegistry
+  getProviderRegistry: () => providerRegistry,
+  homeDir, resolveKnownProjectDirectory
 })
 const { piProfileStore, detectInstalledAgents, storedPiProfilesNotDetected, listPiProfiles, resolvePiProfile } = createPiProfileRuntime({ userDataDir: app.getPath('userData') })
 const { providerCompatibility, providerRegistry, piRunDiagnostics, smokeProviderEnabled, smokeDetectedAgents } = createProviderRuntime({ homeDir, listPiProfiles, resolvePiProfile })
@@ -122,6 +123,7 @@ const createWindow = (): void => createBootstrapWindow({
   setWindow: (next) => { win = next },
   terminalOutput,
   traceOutput,
+  runTraces,
   dockBadge,
   isShuttingDown: () => isShuttingDown,
   rendererAutoReloadCooldownMs,
@@ -258,8 +260,8 @@ const traceRuntime = createTraceRuntime({
 })
 const {
   runs, runStopLifecycle, publishQuestionOpened, publishQuestionClosed,
-  userQuestionBroker, traceOutput, flushTraceSend, queueTrace, boundedLiveRun,
-  LIVE_TOOL_CONTENT_POLICY
+  userQuestionBroker, traceOutput, flushTraceSend, boundedLiveRun, forgetBoundedRun,
+  LIVE_TOOL_CONTENT_POLICY, publishTrace, runTraces
 } = traceRuntime
 const llmNetworkConfiguration = new LlmNetworkConfigurationCache()
 
@@ -277,11 +279,11 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
     providerOperationGate, providerContextKey, providerSessionKey, contextAdmission,
     resetSessionContext, sessionRevisionByContext, sessionByContext, sessionAliasesByContext,
     runs, deletingSessions, conversationStore, assertLegacyConversationWriteAllowed,
-    recordingBlockedSessions, homeDir, llmNetworkConfiguration, sessionDiffBaselines, queueTrace,
+    recordingBlockedSessions, homeDir, llmNetworkConfiguration, sessionDiffBaselines, publishTrace,
     rendererCanReceive, mainEventId, LIVE_TOOL_CONTENT_POLICY, recordingRecoveryHint, sessionBaselineKey,
     dockBadge, userQuestionBroker, publishQuestionOpened, publishQuestionClosed, requestRunStop,
     bumpSessionRevision, sourceControl, remoteRunIds, remoteRunLedgerIds, boundedLiveRun,
-    mirrorSessionTranscript, flushTraceSend, runStopLifecycle,
+    forgetBoundedRun, mirrorSessionTranscript, flushTraceSend, runStopLifecycle, runTraces,
     isShuttingDown: () => isShuttingDown,
     getCurrentCwd: () => currentCwd,
     getWindow: () => win,
@@ -293,7 +295,7 @@ async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptio
 const remoteStartReceipts = new CommandReceipts<RemoteRunCompletion>()
 registerAgentRuntimeHandlers({
   handleTrusted, startAppRun, runs, boundedLiveRun, dockBadge, activeRunSessionKey,
-  userQuestionBroker, resolveKnownProjectDirectory, traceOutput, requestRunStop,
+  userQuestionBroker, resolveKnownProjectDirectory, traceOutput, requestRunStop, runTraces,
   getWindow: () => win,
   getCurrentCwd: () => currentCwd,
   getRemoteRunLedgerId: (runId) => remoteRunLedgerIds.get(runId),
@@ -388,7 +390,7 @@ registerAppLifecycle({
   primaryInstance, useDevelopmentRenderer, dockBadge, createWindow, traceOutput, runs,
   remoteHostRuntime, requireDesktopRemoteClient, conversationStore, terminalOutput,
   getTerminalManagerInstance, runStopLifecycle, sessionDiffBaselines, userQuestionBroker,
-  mirrorSessionTranscript, providerRegistry, sourceControl,
+  mirrorSessionTranscript, providerRegistry, sourceControl, runTraces,
   setStartupManagedRecovery: (recovery) => { startupManagedRecovery = recovery },
   beginShutdown: () => { isShuttingDown = true },
   getRemoteHostService: () => remoteHostService,

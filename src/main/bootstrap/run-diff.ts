@@ -4,17 +4,19 @@ import type { ProviderId } from '../../shared/provider'
 import type { GitTurnDiffCapture } from '../git'
 import { cancelGitTurnDiff, finishGitTurnAndSessionDiff, finishGitTurnDiff, snapshotSessionNetDiff } from '../git'
 import { RunDiffPreviewer, SessionDiffBaselineRegistry } from '../session-diff'
+import { upsertTraceById } from '../live-trace'
 import type { TurnChangeJournal } from '../../core/turn-recorder/change-journal'
 
-type DiffRuns = { isViewed: (runId: string) => boolean }
 type PairedSessionDiff = { capture: GitTurnDiffCapture; snapshot: Promise<TurnDiffSnapshot> }
 export type RunDiffLifecycle = {
+  setDiffPreviewDemand: ((demanded: boolean) => void) | undefined
   finalizeTurnDiff: () => Promise<void>
   cancelTurnDiff: () => Promise<void>
   finalizeSessionDiff: () => Promise<void>
   getPairedSessionDiff: () => PairedSessionDiff | undefined
 }
 export type RunDiffDependencies = {
+  isRemoteRun: boolean
   diffPreviewer: RunDiffPreviewer
   turnDiffCapture: Promise<GitTurnDiffCapture>
   turnChangeJournal: TurnChangeJournal | null
@@ -32,14 +34,72 @@ export type RunDiffDependencies = {
   getContextRevision: () => number
   mainEventId: (prefix: string, runId: string) => string
   appendCoalescedTrace: (items: ActiveRun['items'], event: TraceEvent) => void
-  queueTrace: (event: TraceEvent) => void
-  runs: DiffRuns
+  publishTrace: (event: TraceEvent) => void
+}
+
+type RunDiffPreviewDependencies = {
+  runId: string
+  providerId: ProviderId
+  runtimeProvider: RuntimeProvider
+  cwd: string | undefined
+  turnCapture: Promise<GitTurnDiffCapture> | null
+  sessionCapture: Promise<GitTurnDiffCapture> | null
+  sessionBaselineOrigin: TurnDiffBaselineOrigin | undefined
+  turnChangeJournal: TurnChangeJournal | null
+  patchExcludeBasenames: string[]
+  runState: ActiveRun
+  publishTrace: (event: TraceEvent) => void
+}
+
+/**
+ * The previewer publishes each in-flight snapshot as the same `harness` evidence the
+ * terminal diff uses, so a scoped view that is still watching receives it before the run
+ * closes. It is created before the Provider starts, which is why it lives here rather
+ * than inside the terminal lifecycle.
+ */
+export function createRunDiffPreviewer(deps: RunDiffPreviewDependencies): RunDiffPreviewer {
+  const { runId, providerId, runtimeProvider, runState, publishTrace } = deps
+  return new RunDiffPreviewer({
+    runId,
+    turnCapture: deps.cwd ? deps.turnCapture : null,
+    sessionCapture: deps.sessionCapture,
+    ...(deps.sessionBaselineOrigin ? { sessionBaselineOrigin: deps.sessionBaselineOrigin } : {}),
+    hints: () => ({ ...deps.turnChangeJournal?.snapshot(), patchExcludeBasenames: deps.patchExcludeBasenames }),
+    emit: ({ stage, id, snapshot }) => {
+      const event: TraceEvent = {
+        id,
+        ts: new Date().toISOString(),
+        runId,
+        kind: 'harness',
+        stage,
+        providerId,
+        runtimeProvider,
+        turnDiff: snapshot
+      }
+      upsertTraceById(runState.items, event)
+      // 运行中预览也是这一轮的证据：仍在看的 scoped 视图必须在收口前收到它。
+      publishTrace(event)
+    },
+    onError: (scope, error) => console.warn('[scry] diff preview failed:', runId, scope, error)
+  })
 }
 
 export function createRunDiffLifecycle(deps: RunDiffDependencies): RunDiffLifecycle {
   let pairedSessionDiff: PairedSessionDiff | undefined
-  const { diffPreviewer, turnDiffCapture, turnChangeJournal, patchExcludeBasenames, cwd, contextKey, runId, providerId, runtimeProvider, runState, sessionDiffBaselines, mainEventId, appendCoalescedTrace, queueTrace, runs } = deps
+  const { diffPreviewer, turnDiffCapture, turnChangeJournal, patchExcludeBasenames, cwd, contextKey, runId, providerId, runtimeProvider, runState, sessionDiffBaselines, mainEventId, appendCoalescedTrace, publishTrace } = deps
+  // Remote owners have no view-demand protocol. Missing evidence is not a hidden
+  // view: only local views opt out of previews until they explicitly subscribe.
+  const setDiffPreviewDemand = deps.isRemoteRun ? undefined : (demanded: boolean): void => {
+    void diffPreviewer.setDemanded(demanded)
+  }
+  setDiffPreviewDemand?.(false)
   let turnDiffPromise: Promise<void> | null = null
+  // 并行工作区重叠证据：缺失就是未观测（旧记录/无基线），不能当成独占归因。
+  const withOverlap = (snapshot: TurnDiffSnapshot, from?: number): TurnDiffSnapshot => {
+    if (snapshot.status !== 'captured') return snapshot
+    const overlap = sessionDiffBaselines.workspaceOverlap(runId, from)
+    return overlap ? { ...snapshot, workspaceOverlap: overlap } : snapshot
+  }
   const finalizeTurnDiff = (): Promise<void> => {
     // 终态第一次进入收口就把所有 scope 封口，再等全局 idle：idle 等的是全部在途预览链，
     // 只封 turn 的话 session 链还能继续续 trailing，收口要么白等，要么让迟到的预览
@@ -64,7 +124,8 @@ export function createRunDiffLifecycle(deps: RunDiffDependencies): RunDiffLifecy
         void pair.session.catch(error => console.warn('[scry] paired session diff failed:', runId, error))
         return pair.turn
       })
-      .then((turnDiff) => {
+      .then((captured) => {
+        const turnDiff = withOverlap(captured)
         const event: TraceEvent = {
           id: mainEventId('turn-diff', runId),
           ts: new Date().toISOString(),
@@ -76,9 +137,9 @@ export function createRunDiffLifecycle(deps: RunDiffDependencies): RunDiffLifecy
           turnDiff
         }
         appendCoalescedTrace(runState.items, event)
-        // 终态在 done=true 之后才算完，isFocused 此刻已是 false；用 isViewed 判定
-        // 「renderer 是否还在看这个 run」，否则归档里有 diff 而当前 UI 永远收不到。
-        if (runs.isViewed(runId)) queueTrace(event)
+        // 终态在 done=true 之后才算完，isFocused 此刻已是 false。publishTrace 用「仍在看」判定
+        // legacy 焦点通道，同时把这条终态 diff 交给该 run 的 scoped 流，归档里有的不会收不到。
+        publishTrace(event)
         if (turnDiff.status === 'failed' || turnDiff.status === 'timeout') {
           console.warn('[scry] turn diff capture degraded:', runId, turnDiff.reason, turnDiff.captureMs)
         }
@@ -135,7 +196,10 @@ export function createRunDiffLifecycle(deps: RunDiffDependencies): RunDiffLifecy
     diffPreviewer.sealAll()
     sessionDiffPromise ??= (async () => {
       await diffPreviewer.idle()
-      const publishSessionDiff = (snapshot: TurnDiffSnapshot, origin?: TurnDiffBaselineOrigin): void => {
+      const entry = sessionDiffBaselines.get(deps.getDiffContextKey(), 0, deps.getObservedSessionId() ?? deps.getResume())
+      const publishSessionDiff = (published: TurnDiffSnapshot, origin?: TurnDiffBaselineOrigin): void => {
+        // 会话净 diff 跨前面的轮次与空闲时间：窗口回溯到会话基线，而不是本轮基线。
+        const snapshot = withOverlap(published, entry?.observedAt)
         const event: TraceEvent = {
           id: mainEventId('session-diff', runId),
           ts: new Date().toISOString(),
@@ -147,13 +211,12 @@ export function createRunDiffLifecycle(deps: RunDiffDependencies): RunDiffLifecy
           turnDiff: origin ? { ...snapshot, baseline: origin } : snapshot
         }
         appendCoalescedTrace(runState.items, event)
-        if (runs.isViewed(runId)) queueTrace(event)
+        publishTrace(event)
       }
       const unavailableSnapshot = (reason: TurnDiffReason): TurnDiffSnapshot => {
         const at = new Date().toISOString()
         return { version: 1, status: 'unavailable', reason, files: [], beforeAt: at, afterAt: at, captureMs: 0, cleanup: 'ok' }
       }
-      const entry = sessionDiffBaselines.get(deps.getDiffContextKey(), 0, deps.getObservedSessionId() ?? deps.getResume())
       if (!entry) {
         console.warn('[scry] session diff baseline not found:', runId, {
           contextRevision: deps.getContextRevision(),
@@ -192,5 +255,5 @@ export function createRunDiffLifecycle(deps: RunDiffDependencies): RunDiffLifecy
     })().catch((error) => console.warn('[scry] session diff finalization failed:', runId, error))
     return sessionDiffPromise
   }
-  return { finalizeTurnDiff, cancelTurnDiff, finalizeSessionDiff, getPairedSessionDiff: () => pairedSessionDiff }
+  return { setDiffPreviewDemand, finalizeTurnDiff, cancelTurnDiff, finalizeSessionDiff, getPairedSessionDiff: () => pairedSessionDiff }
 }

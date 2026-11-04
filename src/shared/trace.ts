@@ -39,7 +39,9 @@ export {
   type TurnDiffFallbackReason,
   type TurnDiffCollection,
   type TurnDiffSnapshot,
-  normalizeTurnDiffSnapshot
+  type WorkspaceOverlapEvidence,
+  normalizeTurnDiffSnapshot,
+  normalizeWorkspaceOverlap
 } from './turn-diff.js'
 
 // 统一 trace 事件模型 —— 所有 Provider 共享 kind/baggage/stage 设计，
@@ -85,7 +87,15 @@ export interface ActiveRun {
   /** Latest bounded legacy observation; global summaries must not rescan the trace. */
   llmPerformance?: import('./llm-performance.js').LlmPerformance
   done: boolean
+  /** Provider transport settled. Independent of the local finalization below. */
   providerSettled?: boolean
+  /**
+   * Local finalization (turn diff, archive, managed settlement) is still open after the
+   * Provider settled. Such a run still owns its conversation and its recording fences, so
+   * admission and deletion keep waiting for it, while stop control must not call into an
+   * ended Provider.
+   */
+  localFinalizing?: boolean
   /** 已请求停止时的真实停止进度；缺失表示没有人请求过停止，不表示已终止。 */
   stopState?: AgentStopState
   sessionId?: string

@@ -14,7 +14,7 @@ import type { RunCompletionContext } from './run-completion'
 type RunFailureContext = RunCompletionContext & {
   handle: { current: ProviderRunHandle | null }
   interrupted: boolean
-  queueTrace: (event: TraceEvent) => void
+  publishTrace: (event: TraceEvent) => void
   mainEventId: (prefix: string, runId: string) => string
 }
 
@@ -26,8 +26,8 @@ export async function handleRunFailure(err: unknown, ctx: RunFailureContext): Pr
     scopedSessionKey, getWindow, emit, finishTurnWallTiming, finalizeTurnDiff, finalizeSessionDiff,
     persistLlmPerformance, observedProviderStartedAt, getObservedSessionId, getResume,
     appSessionStore, mirrorSessionTranscript, ingestion, flushTraceSend, persistRunData,
-    settleManagedConversation, finishRemote, markTerminalAttention, runs, handle,
-    interrupted, queueTrace, mainEventId
+    settleManagedConversation, finishRemote, markTerminalAttention, handle,
+    interrupted, publishTrace, mainEventId
   } = ctx
   emit(finishTurnWallTiming())
   const turnDiffDone = finalizeTurnDiff()
@@ -110,9 +110,8 @@ export async function handleRunFailure(err: unknown, ctx: RunFailureContext): Pr
         id: mainEventId('result', runId),
         ts: new Date().toISOString()
       })
-      if (runs.isFocused(runId)) {
-        for (const correction of failure.corrections) queueTrace({ ...correction })
-      }
+      // 修正事件是这一轮的证据：legacy 焦点通道与 scoped 流各拿一份，失败的一轮不能悄悄消失。
+      for (const correction of failure.corrections) publishTrace({ ...correction })
       if (failure.created) {
         appendUsage(
           app.getPath('userData'),

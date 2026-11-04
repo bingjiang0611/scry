@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { NormalizeCtx } from '../normalize'
+import type { NormalizeCtx } from '../normalize-core'
 import { normalizeQoderMessage, QoderBackgroundTasks as QoderBackgroundShellTasks } from './qoder-messages'
 
 function context(): NormalizeCtx {
@@ -86,6 +86,18 @@ describe('Qoder background shell input lifetime', () => {
 })
 
 describe('Qoder wire task lifecycle', () => {
+  it('retains parent_tool_use_id on nested assistant events while filtering child notifications', () => {
+    const events = normalizeQoderMessage({
+      type: 'assistant', parent_tool_use_id: 'agent-parent',
+      message: { id: 'child-message', content: [{ type: 'text', text: 'nested output' }] }
+    }, context())
+    expect(events).toMatchObject([{
+      kind: 'model', stage: 'text', text: 'nested output',
+      parentToolUseId: 'agent-parent', messageId: 'child-message'
+    }])
+    expect(normalizeQoderMessage({ ...notification(), parent_tool_use_id: 'agent-parent' }, context())).toEqual([])
+  })
+
   it.each([true, false])('recognizes Qoder synthetic completion (blocks=%s) with explicit provenance', (blocks) => {
     expect(normalizeQoderMessage(notification(envelope(), blocks), context())).toMatchObject([{
       kind: 'tool', stage: 'tool_result', tool: 'Agent', toolUseId: 'agent-1', isError: false,

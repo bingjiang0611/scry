@@ -2,6 +2,7 @@ import { access, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import type { AgentTurnRecord } from '../../shared/turn-record.js'
+import type { TurnDiffSnapshot } from '../../shared/trace.js'
 import type { GitTurnDiffCapture } from './git.js'
 import type { RepositoryDiscovery } from './config.js'
 import { listFiles, readJson, withDirectoryLock } from './io.js'
@@ -42,11 +43,16 @@ export interface RecorderOpenTurnState {
   transcriptPath?: string
   transcriptStartOffset?: number
   providerTurnId?: string
+  /** Qoder hook identity; it must be mapped to a native promptId before use. */
+  requestSetId?: string
+  terminalDiffs?: Array<{ repository: string; snapshot: TurnDiffSnapshot }>
   continuationProviderTurnIds?: string[]
   managedByScry?: boolean
   staleTerminalProtection?: boolean
   deferredTerminalAt?: string
   deferredTerminalEventId?: string
+  /** SessionEnd proved that a deferred unidentified terminal belongs to the final open turn. */
+  terminalIdentityConfirmedBySessionEnd?: boolean
   repositoryDiscovery?: Pick<RepositoryDiscovery, 'maxDepth' | 'depthLimitedDirectories'>
   captures: Array<{ repository: string; capture: GitTurnDiffCapture }>
 }

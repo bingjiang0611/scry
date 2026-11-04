@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createRightSurfaceState, reduceRightSurfaceState } from '../right-surface'
 import { exitText } from '../components/TerminalSurface'
-import { migrateRightSurfaces, restoreSurfaces, type SessionRightSurface } from './useSessionRightSurfaces'
+import { migrateRightSurfaces, restoreSurfaces, type SessionRightSurface } from '../right-surface-storage'
 
 function surface(id: string): SessionRightSurface {
   return { id, cwd: '/repo', state: createRightSurfaceState({ openIds: ['files', 'terminal', 'agents'], activeId: 'terminal' }), terminalMounted: true }

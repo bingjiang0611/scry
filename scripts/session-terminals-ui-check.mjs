@@ -28,6 +28,11 @@ export async function exerciseSessionTerminals(contents, scenario, pointerSource
     await click(`.surface-menu [role="menuitem"]:nth-child(${index + 1})`)
   }
   const state = `JSON.parse(document.querySelector('#terminal-state').textContent)`
+  // Local workbenches persist to the durable namespace in localStorage and read the older
+  // session-scoped key once to migrate it (`src/renderer/right-surface-storage.ts`). The
+  // fixture seeds only that legacy key, so the promotion assertions read the migrated copy
+  // rather than the legacy slot the app no longer rewrites.
+  const durableRows = `JSON.parse(localStorage.getItem('scry.session-right-surfaces.v2') ?? '[]')`
   const originalStarts = scenario === 'restored' ? 0 : 1
   const select = async (selector, id) => {
     await click(selector)
@@ -134,14 +139,14 @@ export async function exerciseSessionTerminals(contents, scenario, pointerSource
   await wait(`document.querySelector('[data-session-surface-current="true"] .terminal-xterm .xterm')?.getBoundingClientRect().width > 0`)
   await read(`globalThis.promotedXterm = [...document.querySelectorAll('.terminal-xterm .xterm')].find(node => node.getBoundingClientRect().width > 0)`)
   await click('#promote-session')
-  await wait(`JSON.parse(sessionStorage.getItem('scry.session-right-surfaces.v1')).some(([key]) => JSON.parse(key).at(-1) === 'native-one')`)
+  await wait(`${durableRows}.some(([key]) => JSON.parse(key).at(-1) === 'native-one')`)
   if (!await read(`globalThis.promotedXterm.isConnected && globalThis.promotedXterm.getBoundingClientRect().width > 0 && ${state}.starts.length === ${originalStarts + 4}`)) throw new Error('Native session capture remounted its workbench')
   await select(session('new', 1), 'three')
   await select(session('old', 1), 'native-one')
   if (!await read(`globalThis.promotedXterm.isConnected && globalThis.promotedXterm.getBoundingClientRect().width > 0`)) throw new Error('Captured conversation lost its terminal identity')
   await click('#merge-session')
   await wait(`document.querySelector('[aria-label="切换此会话的保留工作区"]')?.textContent.includes('1/2')`)
-  const mergedScope = await read(`JSON.parse(sessionStorage.getItem('scry.session-right-surfaces.v1')).find(([key]) => { try { return JSON.parse(key).at(-1) === 'two' } catch { return false } })[1]`)
+  const mergedScope = await read(`${durableRows}.find(([key]) => { try { return JSON.parse(key).at(-1) === 'two' } catch { return false } })[1]`)
   if (!mergedScope.relatedIds?.length) throw new Error('Promotion collision orphaned the existing native workbench')
   await click('[aria-label="切换此会话的保留工作区"]')
   await wait(`globalThis.promotedXterm.getBoundingClientRect().width === 0 && document.querySelector('[data-session-surface-current="true"] .workspace-textarea')?.getBoundingClientRect().width > 0`)

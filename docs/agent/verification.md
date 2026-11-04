@@ -2,6 +2,18 @@
 
 按任务读取相关小节，不要求每次全文读取。代码块与行内路径均相对仓库根；命令执行前核对实际文件和 package scripts。当前根指南见 [CLAUDE.md](../../CLAUDE.md)。
 
+## 测试维护纪律
+
+- 手机端操作与验收不使用模拟器或仿真设备；需要操作手机时，直接使用 `ictrl-phone-control` skill，通过 iCTRL 操作真实手机。真机或 iCTRL 不可用时，明确报告阻碍，不改用模拟器，也不将未执行的验收标为通过。
+- 先按业务/权限合同写验收场景；关键回归证明一次旧实现或故意破坏保护时失败。测试可以由 AI 维护，但删断言、改预期、skip、扩大超时必须说明依据；首次失败不能被重跑通过抹掉。
+- 本地 focused 使用 `npm run test:unit -- <test-files>`；`npm test` 是 unit 与 shell 的复合入口。合入沿用现有 CI，macOS gate 同时执行 `npm run test:renderer:ui`（含 Credits），避免有脚本却没有门禁。
+- DOM/事件问题走现有隔离 Electron fixture；CSS 源码、SSR 或程序化 `.click()` 不单独证明 cascade、坐标命中与焦点行为。main IPC 拒绝测试必须触发生产注册 wrapper 并证明特权 listener 未执行，不能只看 iframe 没有 preload API。
+- shell fixture 按参数记录并检查 argv 边界及退出码，不能用 `$*` 展平后 grep 证明含空格路径正确。持久化、SQLite 与 Provider transport 优先复用现有真实临时目录/本地进程测试，不绕过本次风险边界。
+- `P0_PROBE`、`P1_PROBE`、`BILLING_ADMIN_REAL` 默认关闭；真实探针仅在明确账号/费用授权后执行，使用临时 workspace/HOME/配置与凭据 allowlist，结束后确认进程收敛再清理。不得在当前开发仓库直接驱动真实 Agent。
+- 超时先调查 fixture、资源争用和子进程收敛，不先加 sleep/retry。报告具体环境、执行范围、skip、首轮失败及未验证项；组件 smoke 不等于完整 App 或真实 Provider 验收。
+
+- `npm run test:coverage` 是 Node CI 的 unit/contract 入口，同时保存覆盖率报告。对比固定源码与测试范围；并行 WIP、focused 与 full 的数字分别报告。报告目录不能复用源码/备份目录，细节见[覆盖率与 fixture 隔离](#覆盖率与-fixture-隔离)。
+
 ## 测试约定
 
 - 测试与实现 colocate 为 `*.test.ts` / `*.test.tsx`；Provider wire 差异使用 fixture/contract test，不用 shared mock 抹平。
@@ -28,6 +40,7 @@ npm run build
 
 ## 覆盖率与 fixture 隔离
 
+- 并发 harness 的整图绑定检查运行 `npm run check:harness-bindings`：检查 session-concurrency 全部源码及 trace launcher / Electron entry，保留 TypeScript 源码依赖图、DOM 声明和缺失绑定负对照。它是 Node CI 中独立的必需步骤，失败仍阻止 `Check`；不再计作 5 秒 Vitest 用例，也不替代真实 Electron 或性能验收。修改这些 harness 时同时运行此命令。
 - `npm run test:coverage` 使用与 Vitest 匹配的 V8 插件，统计 `src/` 生产 TS/TSX；仅排除测试、benchmark 与类型声明。Node CI 用这一次运行替代普通 unit run，并上传 `coverage/`，不重复跑两遍套件。
 - 定向报告：`npm run test:coverage -- src/main/git.test.ts src/main/providers/pi-lifecycle.test.ts`。定向报告不是全仓覆盖率；对比必须固定源码、测试范围和工具版本，不能把其他并行 WIP 的变化归功于本次测试。
 - `--coverage.reportsDirectory=<独立目录>` 会清理原报告目录；禁止指向源码或基线备份。默认 `coverage/` 已忽略。
