@@ -15,9 +15,9 @@
 | hookwrap / daemon fast path / clean, 0 tools / wrapped.hookTotalPerTurn | 4764.3 ms | 4764.3 ms | – | 基线 |
 | hookwrap / daemon fast path / clean, 5 tools / wrapped.hookTotalPerTurn | 3970.5 ms | 3970.5 ms | – | 基线 |
 | recorder / daemon fast path / clean, 0 tools / gitCalls.turnStart | 28 | 28 | – | 基线 |
-| recorder / daemon fast path / clean, 0 tools / gitCalls.stop | 47 | 47 | – | 基线 |
+| recorder / daemon fast path / clean, 0 tools / gitCalls.stop | 47 | 36 | −11（每个仓库一次） | L1 |
 | hookwrap / wakeup launcher | 178.6 ms | 178.6 ms | – | 基线 |
-| recorder / CLI fallback / clean, 30 tools / hookTotalPerTurn | 32073.8 ms | 32073.8 ms | – | 基线 |
+| recorder / CLI fallback / clean, 30 tools / hookTotalPerTurn | 32073.8 ms | 32073.8 ms | 受 recorder 改动影响的是结束段：`stop` 1897.0 → 1530.8 ms | L2（局部） |
 | uploader / backlog 500, fake latency 0ms / recordsPerSecond | 测不到 | 测不到 | A/A 未跑 `uploader` 阶段；由 uploader 实验的基线侧补齐 | – |
 | uploader / backlog 500, fake latency 0ms / transportRequests | 测不到 | 测不到 | 同上 | – |
 
@@ -27,7 +27,7 @@
 
 | # | 机会 | 指标 | 预期 | 置信度 | 状态 | 实验 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 轮次结束候选发现重建隔离 index（每个改动仓库一次 `read-tree --reset` 并丢掉 stat cache） | `gitCalls.stop`、`daemon fast path / dirty` 结束耗时 | 结束 git 调用 −1/仓库 | 高 | 进行中 | `20261104-recorder-end-index-reuse` |
+| 1 | 轮次结束候选发现重建隔离 index（每个改动仓库一次 `read-tree --reset` 并丢掉 stat cache） | `gitCalls.stop`、结束耗时 | 结束 git 调用 −1/仓库 | 高 | 已保留 | `20261104-recorder-end-index-reuse` |
 | 2 | uploader 包装的 hook 在队列空时仍启动一次 Node 唤醒 | `hookwrap / wakeup launcher`、`wrapped.turnStart` | 每轮省掉 0–2 次启动（约 180 ms/次） | 高 | 进行中 | `20261104-uploader-idle-wakeup` |
 | 3 | 每次上传都重新问一遍工具参数契约（每轮一个新进程，进程内缓存活不过一轮） | `wrapped.stop`、`transportRequests` | 每轮省 1 次传输调用（约 200–400 ms） | 中 | 进行中 | `20261104-uploader-contract-probe` |
 | 4 | CLI 回退模式下每个工具事件重新加载整个 CLI（30 个工具事件 ~29.4 s，约 0.98 s/事件） | `recorder / CLI fallback` 的 `toolEvent`、`hookTotalPerTurn` | 每事件降到 0.5 s 以内 | 中 | 待做 | – |
@@ -48,4 +48,5 @@
 
 | 日期 | 实验 | 结论 | 级别 | 提交 |
 | --- | --- | --- | --- | --- |
-| 2026-11-04 | A/A 校准 | NO CLEAR CHANGE（变好 0、变差 0、计数全部相同、摘要相同） | – | `35bdf39b` 之前的测量修复 |
+| 2026-11-04 | A/A 校准 | NO CLEAR CHANGE（变好 0、变差 0、计数全部相同、摘要相同） | – | `7922f511` 及之前的测量修复 |
+| 2026-11-04 | recorder 结束复用启动 index | IMPROVED（计数 47 → 36，结束耗时 −20.5%，变差 0） | L1 | `38686164` |
