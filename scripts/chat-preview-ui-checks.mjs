@@ -129,14 +129,22 @@ export async function exerciseChatPreviewDom() {
   check(projectPicker() != null, 'New draft lost project selection')
   const input = document.querySelector('#composer-project textarea')
   const composerShell = () => document.querySelector('#composer-project .composer-shell')
-  const unfocusedShadow = getComputedStyle(composerShell()).boxShadow
   input.focus()
   await new Promise((resolve) => requestAnimationFrame(resolve))
   check(input.getBoundingClientRect().height === 64, 'Composer default height regressed')
-  const composerFocusShadow = getComputedStyle(composerShell()).boxShadow
   // 焦点态必须真的比未聚焦多一层可见描边，且仍是单层安静描边（没有 4px 以上的光晕）。
-  check(composerFocusShadow !== unfocusedShadow, 'Composer focus must add a visible outline layer')
-  check(composerFocusShadow.includes('1px') && !/\b([4-9]|[1-9]\d)px\b/.test(composerFocusShadow), 'Composer focus must use one quiet outline layer')
+  // 两种主题分别验证：浅色主题多一条同权重规则，只断言未聚焦形状会漏掉它。
+  const themeBeforeFocusCheck = document.documentElement.dataset.theme
+  for (const theme of ['dark', 'light']) {
+    document.documentElement.dataset.theme = theme
+    input.blur()
+    const unfocusedShadow = getComputedStyle(composerShell()).boxShadow
+    input.focus()
+    const composerFocusShadow = getComputedStyle(composerShell()).boxShadow
+    check(composerFocusShadow !== unfocusedShadow, `Composer focus must add a visible outline in ${theme}`)
+    check(composerFocusShadow.includes('1px') && !/\b([4-9]|[1-9]\d)px\b/.test(composerFocusShadow), `Composer focus must use one quiet outline layer in ${theme}`)
+  }
+  if (themeBeforeFocusCheck) document.documentElement.dataset.theme = themeBeforeFocusCheck
   for (const trigger of document.querySelectorAll('#composer-project .permission-mode-trigger, #composer-project .model-effort-trigger, #composer-project .composer-action-controls .clibtn')) {
     check(trigger.getBoundingClientRect().height === 32, 'Composer controls must share the compact 32px rhythm')
   }

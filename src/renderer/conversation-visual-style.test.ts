@@ -40,6 +40,8 @@ describe('compact control hover language', () => {
 describe('quiet composer surface', () => {
   it('uses a compact input and single-layer focus indication', () => {
     expect(declaration(editorial, '.runtime-composer .input,\n.runtime-composer textarea')).toContain('height: 64px')
+    // 浅色主题的静态阴影权重更高，必须排除焦点态，否则焦点描边永远不显示。
+    expect(declaration(editorial, ":root[data-theme='light'] .runtime-composer .composer-shell:not(:focus-within)")).toContain('0 1px 2px')
     const focus = declaration(editorial, '.runtime-composer .composer-shell:focus-within')
     expect(focus).toContain('0 0 0 1px var(--accent-soft)')
     expect(focus).not.toContain('5px')
