@@ -76,7 +76,7 @@ TE=$(node -p "require('$K/protocol.json').transportEnv")
 - 记录版本：`scry version`、`node "$UP" --help | head -1`、`codex --version`、`qodercli --version`、`opencode --version`、`pi --version`、`sw_vers -productVersion`、`uname -m`、`node -v`，写在报告开头。
 - 备份到 `$R/before/`：`scry-upload scheduler-status --json`、`launchctl print gui/$(id -u)/com.scry.uploader`（不存在也记下）、`~/.pi/agent/settings.json`、`ls ~/.pi/agent/extensions`、用户主工作区的 `scry-upload status --json`。第 9 步按这些恢复。
 - Provider 登录：在 `$R/probe`（`git init` 的空仓库，不 init Scry）里用第 3 步表中的命令给每个 Provider 跑一句“只回答 ok” → 4 个都退出 0。任何一个失败就停。
-- 跑合成场景：`node "$K/run.mjs" --uploader "$UP" --old-uploader <同事手上最老版本的 cli.js> --report "$R/rollout-report.json"` → 0 个 `FAIL` / `ERROR`，S15 为 `KNOWN` 可接受，S19 不能是 `SKIP`。
+- 跑合成场景：`node "$K/run.mjs" --uploader "$UP" --old-uploader <0.2.0 的 cli.js> --report "$R/rollout-report.json"`（0.2.0 是还在支持的最老版本；0.1.x 没有 `notify`，跑不了 S19）→ 0 个 `FAIL` / `ERROR`，S15 为 `KNOWN` 可接受，S19 不能是 `SKIP`。
 
 ### 1. 搭测试仓库
 
@@ -128,7 +128,7 @@ scry status --workspace "$R/a"
 
 各 Provider 的权限参数以本机版本的 `--help` 为准，只允许在 `$R` 下的测试仓库里放开写权限。
 
-中途停止的那一轮，先确认 Provider 已经原生接受了提示词，再开始计时：`.scry/runtime/<provider>/` 下出现新的 `open.json`，或 Provider 原生日志记录了这次提交。按过回车、屏幕上出现了文字都不算接受。看不到接受证据，就把这一轮记为“提示词未提交”，不发中断，也不能当作 recorder 丢轮。确认接受后，优先对非交互进程发 SIGINT（`kill -INT <pid>`）。不要用驱动去操作 `/quit` 这类补全菜单：补全没更新就回车会执行别的命令。必须用交互方式退出时，只有界面上选中的就是目标命令、并且原生日志里看到它被派发，才算退出完成。最后不得不用 SIGTERM 结束进程的，判为 `FAIL`，即使记录本身是对的。确认已接受、却没有产生记录，也是 `FAIL`：用 `scry doctor --workspace "$R/a"` 的 orphan 和 hook-skip 计数分清是 Provider 没发终态事件，还是 recorder 没落盘。
+中途停止的那一轮，先确认 Provider 已经原生接受了提示词，再开始计时：`.scry/runtime/<provider>/` 下出现这次的新 session 目录（里面有 `open.json`，轮次收尾后只剩 `session.json`），或 Provider 原生日志记录了这次提交。按过回车、屏幕上出现了文字都不算接受。看不到接受证据，就把这一轮记为“提示词未提交”，不发中断，也不能当作 recorder 丢轮。确认接受后，优先对非交互进程发 SIGINT（`kill -INT <pid>`）。不要用驱动去操作 `/quit` 这类补全菜单：补全没更新就回车会执行别的命令。必须用交互方式退出时，只有界面上选中的就是目标命令、并且原生日志里看到它被派发，才算退出完成。最后不得不用 SIGTERM 结束进程的，判为 `FAIL`，即使记录本身是对的。确认已接受、却没有产生记录，也是 `FAIL`：用 `scry doctor --workspace "$R/a"` 的 orphan 和 hook-skip 计数分清是 Provider 没发终态事件，还是 recorder 没落盘。
 
 通过标准：每个 Provider 的 `turns` 和 `upload` 都是 0 个 `FAIL`，`scry status` 退出 0。本轮还要确认两个修复（见“已知问题”）：每个 Provider 已被接受的中途停止轮都有记录，包括 Qoder；Qoder 的三轮全部 `uploaded`，`deadLetterRecords` 为 0。另外用 `/usr/bin/time -p` 记下纯文本轮的耗时，并在 `$R/probe` 里跑 3 次同样的提示词对比中位数：这个差值只记录，不做门禁（模型响应波动远大于 hook 开销），hook 开销的门禁是 S18。
 
@@ -189,7 +189,7 @@ node "$UP" status --workspace "$R/c" --json
 
 - [ ] 推广文档明确写出会上传什么：提示词、回复、工具入参和输出、文件路径、diff。`toolOutput: none` 只关闭工具正文，入参和路径仍会记录，diff 除非设 `diff: false` 也会记录
 - [ ] 文档告诉同事哪些仓库不要启用（含密钥、客户数据的仓库），以及如何 `disable`
-- [ ] 权限：`find "$R"/*/.scry/upload \( -type d ! -perm 700 \) -o \( -type f ! -perm 600 \)` 没有输出；`git -C "$R/a" check-ignore -q .scry` 退出 0（`.scry/` 不会被误提交）
+- [ ] 权限：`find "$R"/*/.scry/upload \( -type d ! -perm 700 \) -o \( -type f ! -path '*/runtime/*' ! -perm 600 \) -o \( -type f -path '*/runtime/*' ! -perm 700 \)` 没有输出（`runtime/` 下是必须可执行的 hook 入口，要求 0700，其余文件 0600）；`git -C "$R/a" check-ignore -q .scry` 退出 0（`.scry/` 不会被误提交）
 - [ ] 凭证不落盘：第 7 步之后，`grep -rlF rc-secret-0123456789abcdef "$R"/*/.scry "${XDG_STATE_HOME:-$HOME/.local/state}" ~/Library/LaunchAgents` 和 `scry-upload doctor --workspace "$R/c" --json` 的输出都没有命中；`grep -rElI 'Bearer [A-Za-z0-9._-]{12,}|eyJ[A-Za-z0-9_-]{10,}\.' "$R"/*/.scry/upload` 没有命中
 - [ ] 服务端的数据保留期和访问权限：Agent 无法验证，由服务方确认（列在放行条件里），确认结果写进推广文档
 - [ ] 仓库里的 hook、MCP、插件配置会自动执行（只校验指纹），推广文档提醒同事不要在不可信的仓库里启用
