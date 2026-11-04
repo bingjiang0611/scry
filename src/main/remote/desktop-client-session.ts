@@ -45,14 +45,17 @@ export class DesktopRemoteClientSession extends DesktopRemoteClientTrace {
       authorize()
       if (!HASH.test(input.phonePeerFingerprint) || !uuid(input.phoneIntentId) || !HASH.test(input.target.binding) || !HASH.test(input.payloadHash)) fail('invalid_submit')
       if (input.request.op !== 'submit' || typeof input.request.detail !== 'string') fail('invalid_submit')
+      const workspace = this.workspaceFromDetail(input.request.detail)
       const existing = state.intents.find((receipt) => receipt.connectionId === item.id && receipt.origin?.phonePeerFingerprint === input.phonePeerFingerprint &&
         receipt.origin.phoneIntentId === input.phoneIntentId && receipt.origin.targetBinding === input.target.binding)
       if (existing?.origin?.payloadHash !== undefined && existing.origin.payloadHash !== input.payloadHash) fail('intent_payload_conflict')
       if (existing?.runId && existing.status === 'recorded') return { runId: existing.runId, status: 'duplicate' }
-      if (!this.active.get(item.id)?.tunnel.alive) {
+      const active = this.active.get(item.id)
+      if (!active?.tunnel.alive) {
         if (existing) return { error: 'target_delivery_unknown' }
         fail('desktop_not_connected')
       }
+      if (workspace && active.managedWorktrees !== 1) fail('desktop_remote_workspace_selection_unavailable')
       if (!existing && state.intents.some((receipt) => receipt.connectionId === item.id && receipt.status === 'unknown')) fail('unknown_receipts_pending')
       if (!existing && state.intents.length >= MAX_RECEIPTS) fail('intent_receipt_capacity_exceeded')
       const intent: DesktopRemoteIntent = existing ?? {
@@ -113,6 +116,8 @@ export class DesktopRemoteClientSession extends DesktopRemoteClientTrace {
 
   protected async submitInternal(connectionIdValue: string, input: DesktopRemoteSubmit): Promise<DesktopRemoteIntent> {
     const state = await this.state(); const item = this.connection(state, connectionIdValue); this.assertSubmit(input)
+    const active = this.active.get(connectionIdValue)
+    if (input.workspace && active?.tunnel.alive && active.managedWorktrees !== 1) fail('desktop_remote_workspace_selection_unavailable')
     const attachments = (input.attachments ?? []).map(normalizeDesktopAttachment)
     if (attachments.length > DESKTOP_ATTACHMENT_MAX_COUNT || attachments.reduce((total, attachment) => total + (attachment.size ?? 0), 0) > DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES) fail('attachments_too_large')
     if (state.intents.some((receipt) => receipt.connectionId === connectionIdValue && receipt.status === 'unknown')) fail('unknown_receipts_pending')
@@ -138,7 +143,7 @@ export class DesktopRemoteClientSession extends DesktopRemoteClientTrace {
     state.intents.push(intent)
     await this.save(state) // Durable fence immediately before the actual submit.
     const detail = canonicalJson({ cwd: input.context.cwd, providerId: input.context.providerId, ...(input.context.agentProfileId ? { agentProfileId: input.context.agentProfileId } : {}), prompt: input.prompt,
-      ...(input.modelId ? { modelId: input.modelId } : {}), ...(input.modelProviderId ? { modelProviderId: input.modelProviderId } : {}), ...(input.effort ? { effort: input.effort } : {}), ...(input.permissionMode ? { permissionMode: input.permissionMode } : {}), ...(input.context.externalSessionId ? { resume: input.context.externalSessionId } : {}), ...(attachmentEntries.length > 0 ? { attachments: attachmentEntries } : {}) })
+      ...(input.modelId ? { modelId: input.modelId } : {}), ...(input.modelProviderId ? { modelProviderId: input.modelProviderId } : {}), ...(input.effort ? { effort: input.effort } : {}), ...(input.permissionMode ? { permissionMode: input.permissionMode } : {}), ...(input.context.externalSessionId ? { resume: input.context.externalSessionId } : {}), ...(input.workspace ? { workspace: input.workspace } : {}), ...(attachmentEntries.length > 0 ? { attachments: attachmentEntries } : {}) })
     let response: unknown
     try { response = await this.write(connectionIdValue, { op: 'submit', intentId: intent.intentId, detail }) }
     catch (error) {

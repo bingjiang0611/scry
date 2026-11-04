@@ -187,6 +187,12 @@ export const OVERVIEW_COST_COPY = {
   coverage: (known: number, total: number) => `${known}/${total} 轮上报了成本`
 } as const
 
+export const OVERVIEW_CREDIT_COPY = {
+  label: 'Credit',
+  unavailable: '当前会话没有可用的 Qoder Credit 证据',
+  coverage: (partial: boolean) => `仅统计已观测到的主会话请求 Credit${partial ? '，存在未覆盖请求或轮次' : ''}`
+} as const
+
 export const OVERVIEW_TOOL_ERROR_COPY = {
   heading: '调用证据',
   openInChat: '定位到对话',

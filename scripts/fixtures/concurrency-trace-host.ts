@@ -183,7 +183,9 @@ export async function createTraceHost(input: { runs: Map<string, ActiveRun>; rea
               certificatePEM: grant.certificatePEM, certificateSHA256: grant.certificateSHA256, expiresAt: grant.expiresAt, scope: 'g0_echo_only'
             }
           }
-          // Run-status polling during connect(); no run exists here.
+          // Connection-time attention baseline and run-status polling do not enter
+          // the trace projection workload measured below.
+          if (request.op === 'sessionsPage') return { sessionsPage: { sessions: [], cursor: 0, total: 0, hasMore: false, snapshot: 'baseline' } }
           if (request.op === 'poll') return { cursor: 0, minCursor: 0, events: [] }
           if (request.op !== 'desktop') throw new Error(`unexpected_operation:${String(request.op ?? request.operation)}`)
           const query = parseDesktopHostRead(JSON.parse(JSON.stringify(request.query)))

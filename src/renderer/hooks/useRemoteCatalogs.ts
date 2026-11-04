@@ -1,6 +1,6 @@
 import { useEffect, useSyncExternalStore } from 'react'
 import type { DesktopRemoteCatalog, DesktopRemoteConnection, RemoteSessionRef } from '@shared/desktop-remote'
-import { reconcileRemoteSessionAttention, remoteSessionAttentionKey } from '@shared/remote-session-attention'
+import { remoteSessionAttentionKey } from '@shared/remote-session-attention'
 import { useVisibilityPolling } from './useVisibilityPolling'
 
 // One host catalog per saved connection, shared by the sidebar, location picker,
@@ -48,6 +48,12 @@ export function useViewedRemoteSession(connectionId?: string, session?: RemoteSe
   }, [key])
 }
 
+export function remoteCatalogUnread(catalog: DesktopRemoteCatalog, viewedKey: string | null): ReadonlySet<string> {
+  const unread = new Set<string>(catalog.unreadSessionKeys ?? [])
+  if (viewedKey) unread.delete(viewedKey)
+  return unread
+}
+
 function publish(connectionId: string, entry: RemoteCatalogEntry): void {
   const next = new Map(snapshot)
   next.set(connectionId, entry)
@@ -69,8 +75,7 @@ export function refreshRemoteCatalog(connectionId: string): Promise<void> {
     try {
       const catalog = await window.scry.desktopRemote.catalog(connectionId)
       if (revisions.get(connectionId) !== revision) return
-      const unreadSessionKeys = reconcileRemoteSessionAttention(connectionId, previous?.catalog?.sessions,
-        catalog.sessions, snapshot.get(connectionId)?.unreadSessionKeys ?? new Set(), viewedSessionKey)
+      const unreadSessionKeys = remoteCatalogUnread(catalog, viewedSessionKey)
       publish(connectionId, { catalog, loading: false, stale: false, unreadSessionKeys })
     } catch (error) {
       if (revisions.get(connectionId) !== revision) return

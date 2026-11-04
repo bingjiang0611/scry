@@ -7,6 +7,7 @@ import { createCachedAsyncLoader } from '../provider-detection'
 import { DesktopRemoteClient } from '../remote/desktop-client'
 import { createProviderDiscovery } from '../remote/provider-discovery'
 import type { RemoteHostRuntime } from './remote-host'
+import type { RemoteAttentionTracker } from '../remote/remote-attention'
 
 export function configuredRemotePermissionMode(): AgentPermissionMode | undefined {
   const raw = process.env.SCRY_REMOTE_PERMISSION_MODE
@@ -32,7 +33,7 @@ export function unsafeCredentialStorageReason(input: {
 
 export function createRemoteConnections({
   providerRegistry, listPiProfiles, resolvePiProfile, resolveRemoteProjectDirectory,
-  withProviderOperation, remoteProjectRoots, hasRemoteHost
+  withProviderOperation, remoteProjectRoots, hasRemoteHost, remoteAttention
 }: {
   providerRegistry: ProviderRegistry
   listPiProfiles: Parameters<typeof createProviderDiscovery>[0]['profiles']
@@ -41,6 +42,7 @@ export function createRemoteConnections({
   withProviderOperation: RemoteHostRuntime['withProviderOperation']
   remoteProjectRoots: () => string[]
   hasRemoteHost: () => boolean
+  remoteAttention: RemoteAttentionTracker
 }) {
   let desktopRemoteClient: DesktopRemoteClient | null = null
   function requireDesktopSecureStorage(): typeof safeStorage {
@@ -58,7 +60,8 @@ export function createRemoteConnections({
     desktopRemoteClient ??= new DesktopRemoteClient({
       directory: join(app.getPath('userData'), 'desktop-connections'),
       encrypt: (value) => requireDesktopSecureStorage().encryptString(value),
-      decrypt: (value) => requireDesktopSecureStorage().decryptString(value)
+      decrypt: (value) => requireDesktopSecureStorage().decryptString(value),
+      attention: remoteAttention
     })
     return desktopRemoteClient
   }

@@ -29,7 +29,10 @@ describe('DesktopRemoteClient startup restoration', () => {
       await Promise.all([client.restoreConnections(), client.restoreConnections()])
       await expect(client.list()).resolves.toMatchObject([{ id: fixture.id, state: 'connected' }])
       expect(fixture.openTunnel).toHaveBeenCalledTimes(1)
-      expect(fixture.tlsRequest.mock.calls.map(([options]) => options.request)).toEqual([{ op: 'desktop', query: { kind: 'info' } }])
+      expect(fixture.tlsRequest.mock.calls.map(([options]) => options.request)).toEqual([
+        { op: 'desktop', query: { kind: 'info' } },
+        { op: 'sessionsPage', includeArchived: true, cursor: 0, limit: 100 }
+      ])
     } finally { await client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
 
@@ -146,7 +149,9 @@ describe('DesktopRemoteClient startup restoration', () => {
       await client.restoreConnections()
       await expect(client.intents(fixture.id)).resolves.toMatchObject([{ intentId: receipt.intentId, status: 'unknown' }])
       expect(fixture.tlsRequest.mock.calls.map(([options]) => options.request)).toEqual([
-        { op: 'desktop', query: { kind: 'info' } }, { op: 'intentStatus', intentId: receipt.intentId }
+        { op: 'desktop', query: { kind: 'info' } },
+        { op: 'sessionsPage', includeArchived: true, cursor: 0, limit: 100 },
+        { op: 'intentStatus', intentId: receipt.intentId }
       ])
     } finally { await client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })

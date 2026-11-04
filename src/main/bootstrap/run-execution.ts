@@ -342,6 +342,7 @@ export async function startRun(
       startPerf.finish({ attachments: attachments.length })
       return { runId, ...(runState.externalSessionId ? { externalSessionId: runState.externalSessionId } : {}) }
     })
+    options.onRegistered?.(started)
     return isRemoteRun ? await remoteResult! : started
   } catch (error) {
     startPerf.finish(undefined, 'error')

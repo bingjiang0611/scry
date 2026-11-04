@@ -208,13 +208,13 @@ export class SourceControlService {
     }
   }
 
-  async startWorkspace(request: WorkspaceStartRequest, start: StartPreparedWorkspace) {
+  async startWorkspace(request: WorkspaceStartRequest, start: StartPreparedWorkspace, requestedRunId?: string) {
     const identity = await this.identity(request.workspace.intent)
     return this.exclusive(identity, async () => {
       await this.identity(request.workspace.intent)
       const cwd = this.options.authorizeDirectory(request.cwd)
       if ((await this.git.identity(cwd)).id !== identity.id) throw new Error('所选仓库与发送目录不一致')
-      return startWorkspace(identity, { ...request, cwd }, this.workspaceDependencies(identity), start)
+      return startWorkspace(identity, { ...request, cwd }, this.workspaceDependencies(identity), start, requestedRunId)
     })
   }
 

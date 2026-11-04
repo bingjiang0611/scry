@@ -1,6 +1,7 @@
 import type { DesktopRemoteConnection, DesktopPairingResult, DesktopSshTarget } from '../../shared/desktop-remote'
 import { DesktopRemoteClientBase } from './desktop-client-base'
-import { fail, text, validateSsh, parseInvitation, connectionId, publicConnection, validateInfo, type EncryptedState, type StoredConnection } from './desktop-client-validation'
+import { fail, text, validateSsh, parseInvitation, connectionId, publicConnection, validateInfo, record, type EncryptedState, type StoredConnection } from './desktop-client-validation'
+import { readRemoteSessionPages } from './desktop-client-session-catalog'
 
 export abstract class DesktopRemoteClientConnections extends DesktopRemoteClientBase {
   async list(): Promise<DesktopRemoteConnection[]> { const state = await this.state(); return state.connections.map((item) => publicConnection(item, this.active.get(item.id)?.tunnel.alive === true)) }
@@ -81,15 +82,30 @@ export abstract class DesktopRemoteClientConnections extends DesktopRemoteClient
     if (item.pending) fail('pairing_in_progress')
     if (!item.certificatePEM || !item.certificateExpiresAt || item.certificateExpiresAt <= Date.now()) fail('device_certificate_expired')
     await this.disconnectActive(item.id)
+    this.attention?.disconnect(item.id)
     const tunnel = await this.transport.openTunnel({ ...item.ssh, pairPort: item.pairPort, runPort: item.runPort })
     try {
       const response = await this.request(tunnel.runPath, item, { op: 'desktop', query: { kind: 'info' } })
       const capabilities = validateInfo(response, item.hostId)
       if (this.disposed) fail('desktop_client_disposed')
+      const baseline = await readRemoteSessionPages(async (request) => {
+        const response = await this.request(tunnel.runPath, item, request)
+        if (!record(response)) fail('invalid_catalog_response')
+        return response
+      })
+      this.attention?.baseline(item.id, baseline)
       await this.save(state, state.connections.map((connection) => connection.id === item.id ? { ...connection, autoConnect: true } : connection))
-      this.active.set(item.id, { tunnel, serial: Promise.resolve(), ...(capabilities.attachments ? { attachments: capabilities.attachments } : {}), ...(capabilities.traceDelta ? { traceDelta: capabilities.traceDelta } : {}) })
+      this.active.set(item.id, { tunnel, serial: Promise.resolve(),
+        ...(capabilities.attachments ? { attachments: capabilities.attachments } : {}),
+        ...(capabilities.traceDelta ? { traceDelta: capabilities.traceDelta } : {}),
+        ...(capabilities.managedWorktrees === 1 ? { managedWorktrees: 1 as const } : {}) })
       await this.reconcileUnknown(state, item.id)
-    } catch (error) { await tunnel.close(); throw error }
+    } catch (error) {
+      this.active.delete(item.id)
+      this.attention?.disconnect(item.id)
+      await tunnel.close()
+      throw error
+    }
   }
 
   async disconnect(connectionIdValue: string): Promise<void> {
@@ -98,6 +114,7 @@ export abstract class DesktopRemoteClientConnections extends DesktopRemoteClient
       const item = this.connection(state, connectionIdValue)
       await this.save(state, state.connections.map((connection) => connection.id === item.id ? { ...connection, autoConnect: false } : connection))
       await this.disconnectActive(item.id)
+      this.attention?.disconnect(item.id)
     })
   }
 
@@ -106,6 +123,7 @@ export abstract class DesktopRemoteClientConnections extends DesktopRemoteClient
       const state = await this.state(); this.connection(state, connectionIdValue)
       if (state.intents.some((item) => item.connectionId === connectionIdValue && item.status === 'unknown')) fail('unknown_receipts_pending')
       await this.disconnectActive(connectionIdValue)
+      this.attention?.forget(connectionIdValue)
       state.connections = state.connections.filter((item) => item.id !== connectionIdValue)
       state.intents = state.intents.filter((item) => item.connectionId !== connectionIdValue)
       for (const key of [...this.runWatch.keys()]) if (key.startsWith(`${connectionIdValue}:`)) this.runWatch.delete(key)
