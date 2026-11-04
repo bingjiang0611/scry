@@ -187,6 +187,8 @@ import { fileURLToPath } from 'node:url'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const hook = resolve(root, '.scry/provider-hook.sh')
 const turns = new Map()
+// Provider 终态错误只在本进程内暂存到下一个 session.idle；没有错误就不带这个字段。
+const turnErrors = new Map()
 // session.idle can repeat without new work. Retain only this instance's last 128 idle sessions;
 // after eviction/reload the first unpaired idle is unknown and must still reach the recorder.
 const idleSessions = new Set()
@@ -197,6 +199,13 @@ const first = (...values) => values.find((value) => value !== undefined && value
 const text = (parts) => Array.isArray(parts)
   ? parts.filter((part) => part?.type === 'text' && !part.ignored).map((part) => part.text).filter(Boolean).join('\\n')
   : ''
+// session.error 的错误对象形状不稳定：优先取可读消息，退回到错误名。
+const errorDetail = (error) => {
+  const value = object(error)
+  const data = object(value.data)
+  const detail = first(value.message, data.message, value.name, data.name)
+  return detail === undefined ? undefined : String(detail)
+}
 
 function utf8Prefix(value, limit) {
   const source = Buffer.from(String(value ?? ''))
@@ -299,9 +308,12 @@ function payload(event, input, output = {}, turnId) {
 function stopPayload(input, state, status) {
   const assistant = utf8Prefix(state ? [...state.assistant.values()].join('\\n') : '', 262144)
   const observedUsage = usage(state)
+  // 终态错误必须随 Stop 上报，否则失败的一轮会被记成 completed 且 errors 为空。
+  const failure = turnErrors.get(sessionId(input))
   return {
     ...payload('Stop', input, {}, state?.turnId),
     assistant_response: assistant.value,
+    ...(failure ? { error: failure } : {}),
     ...(assistant.capture ? { scry_capture: { schemaVersion: 1, fields: { assistant_response: assistant.capture } } } : {}),
     ...(observedUsage ? {
       // Older recorders must see unavailable, never an exact partial sum.
@@ -341,6 +353,7 @@ export const ScryRecorder = async () => ({
     const prompt = first(input?.prompt, text(input?.parts), text(output?.parts), '')
     const turnId = messageId(input, output)
     idleSessions.delete(id)
+    turnErrors.delete(id)
     turns.set(id, { assistant: new Map(), assistantMessages: new Set(), usage: new Map(), turnId })
     armSigint()
     deliver('UserPromptSubmit', { ...payload('UserPromptSubmit', input, output, turnId), prompt })
@@ -374,10 +387,15 @@ export const ScryRecorder = async () => ({
         state.assistant.set(String(first(part.id, state.assistant.size)), part.text)
       }
     }
+    if (envelope.type === 'session.error') {
+      const detail = errorDetail(properties.error)
+      if (id && detail) turnErrors.set(id, detail)
+    }
     if (envelope.type === 'session.idle') {
       if (idleSessions.has(id)) return
       const delivered = deliver('Stop', stopPayload(input, state))
       turns.delete(id)
+      turnErrors.delete(id)
       disarmSigint()
       // Failed dispatch is not evidence of a delivered terminal. Do not suppress a later retry.
       if (!delivered.error && delivered.status === 0) {

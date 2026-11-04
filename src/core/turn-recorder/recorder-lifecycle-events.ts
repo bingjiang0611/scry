@@ -3,7 +3,7 @@ import { HOOK_DELIVERY_STAGE, classifyTool, fileOpOf, parseMcp, type TraceEvent 
 import { classifyDanger } from '../../main/danger.js'
 import { stableHash } from './store.js'
 import { captureToolContent, isFullToolContentPolicy, type ToolContentPolicy } from './tool-content.js'
-import { nestedRecord, sessionIdOf, stringAt, subagentScopedPayload, timestampOf, toolInputOf, toolNameOf, toolUseIdOf, inferredSkillEvents, summarize } from './recorder-contracts.js'
+import { nestedRecord, sessionIdOf, stringAt, subagentScopedPayload, timestampOf, toolInputOf, toolNameOf, toolUseIdOf, inferredSkillEvents, summarize, END_EVENTS } from './recorder-contracts.js'
 import { codexToolName, isCodexSpawnTool } from './recorder-codex-calls.js'
 
 function usageTrace(payload: Record<string, unknown>, runId: string, at: string): TraceEvent | null {
@@ -267,9 +267,12 @@ export function lifecycleTraceEvents(args: {
       } : { invalid: true }
     })
   }
-  const providerError = args.provider === 'pi' && args.event === 'Stop' ? stringAt(args.payload, 'error') : undefined
+  // Pi 与 OpenCode 的插件把 Provider 终态错误放在终态事件载荷里；其他 Provider 的错误来自 transcript。
+  const providerError = (args.provider === 'pi' || args.provider === 'opencode') && END_EVENTS.has(args.event)
+    ? stringAt(args.payload, 'error')
+    : undefined
   if (providerError) out.push({
-    id: `pi-error-${stableHash([args.runId, providerError]).slice(0, 16)}`,
+    id: `${args.provider}-error-${stableHash([args.runId, providerError]).slice(0, 16)}`,
     ts: at,
     runId: args.runId,
     kind: 'harness',
