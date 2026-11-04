@@ -28,6 +28,15 @@ describe('conversation reading hierarchy', () => {
   })
 })
 
+describe('compact control hover language', () => {
+  it('uses the same recessed hover and radius for workspace and topbar actions', () => {
+    expect(declaration(workspace, '.workspace-context-strip button:not(:disabled):hover,\n.workspace-context-strip button[aria-expanded="true"]')).toContain('background: var(--surface-hover)')
+    expect(declaration(workspace, '.workspace-context-strip button')).toContain('border-radius: var(--r-sm)')
+    expect(declaration(shell, '.panel-pill:hover')).toContain('background: var(--surface-hover)')
+    expect(declaration(shell, '.panel-pill .ico')).toContain('width: 16px')
+  })
+})
+
 describe('quiet composer surface', () => {
   it('uses a compact input and single-layer focus indication', () => {
     expect(declaration(editorial, '.runtime-composer .input,\n.runtime-composer textarea')).toContain('height: 64px')

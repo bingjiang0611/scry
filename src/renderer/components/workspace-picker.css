@@ -17,9 +17,9 @@
   min-width: 0;
   min-height: 26px;
   max-width: 55%;
-  padding: 3px 5px;
+  padding: 3px 6px;
   border: 0;
-  border-radius: var(--r-xs);
+  border-radius: var(--r-sm);
   color: inherit;
   background: transparent;
   font: inherit;
@@ -27,7 +27,7 @@
 }
 .workspace-context-strip button:disabled { cursor: default; }
 .workspace-context-strip button:not(:disabled):hover,
-.workspace-context-strip button[aria-expanded="true"] { background: var(--panel3); color: var(--fg); }
+.workspace-context-strip button[aria-expanded="true"] { background: var(--surface-hover); color: var(--fg); }
 .workspace-context-strip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-context-strip .ico { flex-shrink: 0; width: 14px; height: 14px; }
 .workspace-composer-context p { margin: 4px 5px; line-height: 1.5; }

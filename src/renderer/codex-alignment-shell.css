@@ -422,8 +422,21 @@ select:focus-visible,
 .panel-pill:hover,
 .panel-pill.on {
   border-color: transparent;
-  background: var(--surface-strong);
   color: var(--fg);
+}
+
+.panel-pill:hover {
+  background: var(--surface-hover);
+}
+
+.panel-pill.on {
+  background: var(--surface-subtle);
+}
+
+.panel-pill .ico {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.6;
 }
 
 .tb-action-label {
