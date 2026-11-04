@@ -225,9 +225,18 @@
 }
 
 .chat-body .model-text {
-  max-width: 76ch;
+  max-width: 704px;
   font-size: 15px;
   line-height: 1.72;
+}
+
+.chat-body .model-text:not(.thinking) {
+  color: var(--fg);
+}
+
+.chat-body .model-text.md > ul > li + li,
+.chat-body .model-text.md > ol > li + li {
+  margin-top: 0.35em;
 }
 
 .chat-body .turn-flow {
@@ -341,55 +350,49 @@
 /* Composer: one floating surface with calm footer chips and focus light. */
 
 .runtime-composer {
-  padding: 0 var(--evidence-gutter) 20px;
+  padding: 0 var(--evidence-gutter) 16px;
 }
 
 .runtime-composer .composer-shell {
   border-color: var(--border);
   border-radius: var(--r-lg);
   background: color-mix(in srgb, var(--panel) 96%, transparent);
-  box-shadow:
-    0 1px 0 rgb(255 255 255 / 4%),
-    0 20px 52px rgb(0 0 0 / 24%);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
   transition: border-color var(--dur-micro) linear;
 }
 
 :root[data-theme='light'] .runtime-composer .composer-shell {
-  box-shadow:
-    0 1px 2px rgb(35 35 32 / 6%),
-    0 20px 48px rgb(35 35 32 / 11%);
+  box-shadow: 0 1px 2px rgb(35 35 32 / 6%);
 }
 
 .runtime-composer .composer-shell:focus-within {
   border-color: var(--accent-line);
-  box-shadow:
-    0 0 0 1px var(--accent-line),
-    0 0 0 5px var(--accent-soft),
-    0 24px 56px rgb(0 0 0 / 28%);
-}
-
-:root[data-theme='light'] .runtime-composer .composer-shell:focus-within {
-  box-shadow:
-    0 0 0 1px var(--accent-line),
-    0 0 0 5px var(--accent-soft),
-    0 24px 56px rgb(35 35 32 / 13%);
+  box-shadow: 0 0 0 1px var(--accent-soft);
 }
 
 .runtime-composer .composer-bottom {
-  gap: 10px;
-  margin-top: 6px;
-  padding-top: 10px;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 8px;
   border-top: 1px solid var(--border3);
 }
 
+.runtime-composer .input,
+.runtime-composer textarea {
+  height: 64px;
+  min-height: 64px;
+  padding: 12px 8px 8px;
+}
+
 .runtime-composer .permission-mode-trigger,
-.runtime-composer .model-effort-trigger {
-  min-height: 30px;
-  padding-inline: 10px;
-  border: 1px solid transparent;
-  border-radius: var(--r-pill);
-  corner-shape: round;
-  background: var(--surface-subtle);
+.runtime-composer .model-effort-trigger,
+.runtime-composer .composer-action-controls .clibtn {
+  height: 32px;
+  min-height: 32px;
+  padding-inline: 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
   transition: color var(--dur-micro) linear, background-color var(--dur-micro) linear, border-color var(--dur-micro) linear;
 }
 
@@ -401,16 +404,12 @@
 }
 
 .runtime-composer .send {
-  box-shadow:
-    0 8px 20px rgb(0 0 0 / 18%),
-    inset 0 1px 0 rgb(255 255 255 / 22%);
+  box-shadow: none;
   transition: background-color var(--dur-micro) linear;
 }
 
 .runtime-composer .send:not(:disabled):hover {
-  box-shadow:
-    0 12px 26px rgb(0 0 0 / 24%),
-    inset 0 1px 0 rgb(255 255 255 / 22%);
+  box-shadow: none;
 }
 
 /* Overview: editorial session verdict, independent KPI tiles and evidence rows. */

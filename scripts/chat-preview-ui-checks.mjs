@@ -128,6 +128,15 @@ export async function exerciseChatPreviewDom() {
   const projectPicker = () => document.querySelector('#composer-project .composer-context')
   check(projectPicker() != null, 'New draft lost project selection')
   const input = document.querySelector('#composer-project textarea')
+  input.focus()
+  await new Promise((resolve) => requestAnimationFrame(resolve))
+  check(input.getBoundingClientRect().height === 64, 'Composer default height regressed')
+  const composerFocusShadow = getComputedStyle(document.querySelector('#composer-project .composer-shell')).boxShadow
+  check(composerFocusShadow.includes('1px') && !composerFocusShadow.includes('5px'), 'Composer focus must use one quiet outline layer')
+  for (const trigger of document.querySelectorAll('#composer-project .permission-mode-trigger, #composer-project .model-effort-trigger, #composer-project .composer-action-controls .clibtn')) {
+    check(trigger.getBoundingClientRect().height === 32, 'Composer controls must share the compact 32px rhythm')
+  }
+  input.blur()
   const draft = input.value
   const enter = (options = {}) => {
     const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...options })
