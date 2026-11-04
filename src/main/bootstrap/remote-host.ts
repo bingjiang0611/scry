@@ -31,7 +31,7 @@ export async function startRemoteHostIfEnabled(runtime: RemoteHostRuntime): Prom
     const remotePermissionMode = runtime.configuredRemotePermissionMode()
     if (remotePermissionRaw && !remotePermissionMode) console.warn(`[scry] ignoring invalid SCRY_REMOTE_PERMISSION_MODE=${remotePermissionRaw}`)
     else if (remotePermissionMode) console.warn(`[scry] remote runs use owner-set permissionMode=${remotePermissionMode}`)
-    const historyHandlers = createRemoteHistoryHandlers(runtime)
+    const historyHandlers = createRemoteHistoryHandlers(runtime, app.getPath('userData'))
     const service = await createHostRuntime({
       runtime,
       stateDirectory,

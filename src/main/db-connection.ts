@@ -1,15 +1,15 @@
 // SQLite 连接、模块级缓存与迁移闸控。schema/行映射/查询 SQL 在 span-ledger.ts。
 // 这里是唯一持有连接、缓存槽与失效入口的模块；其它 db-* 模块只读这些槽。
-// P0（RFC v2.4）：可信数据底座的 electron 胶水层。schema/行映射/查询 SQL 在纯模块 span-ledger.ts，
-// 本文件只负责 electron 路径解析 + 预编译语句执行 + 迁移闸控。WAL + user_version 增量迁移。
+// P0（RFC v2.4）：可信数据底座的持久化层。schema/行映射/查询 SQL 在纯模块 span-ledger.ts，
+// 本文件只负责路径注入 + 预编译语句执行 + 迁移闸控。WAL + user_version 增量迁移。
+// 路径来自 storage-paths 的注入（main 或 daemon 各自提供 userData），这里不碰 Electron。
 // 原生模块，打包要 asarUnpack。加载失败（EDR/ABI）整体降级 no-op，不连累 app 启动。
 import type Database from 'better-sqlite3'
-import { app } from 'electron'
 import { createRequire } from 'node:module'
-import { join } from 'node:path'
 import { chmodSync, existsSync } from 'node:fs'
 import { type DbStats, type UsageAnalytics, type UsageAnalyticsRangeDays } from '../shared/trace'
 import { migrateDatabase } from './db-migrations'
+import { storageDbFilePath } from './storage-paths'
 import type { BillingGuardianState } from '../shared/billing'
 import type { ProviderId } from '../shared/provider'
 import { deleteSessionDataRows, resolveSessionDataRunIds, type SessionDeleteDatabase } from './session-data-delete'
@@ -37,7 +37,7 @@ export function setBillingEnvProvider(provider: () => NodeJS.ProcessEnv): void {
 export function initDb(): void {
   try {
     const Database = require('better-sqlite3') as typeof import('better-sqlite3')
-    dbFilePath = join(app.getPath('userData'), 'scry.db')
+    dbFilePath = storageDbFilePath()
     db = new Database(dbFilePath)
     chmodSync(dbFilePath, 0o600)
     db.pragma('journal_mode = WAL')
@@ -61,7 +61,7 @@ export function deleteSessionData(args: {
   runIds: Iterable<string>
 }): { status: 'deleted' | 'not_present' | 'unavailable'; runIds: string[]; deletedRows: number; error?: string } {
   if (!db) {
-    const file = dbFilePath ?? join(app.getPath('userData'), 'scry.db')
+    const file = dbFilePath ?? storageDbFilePath()
     return existsSync(file)
       ? { status: 'unavailable', runIds: [...args.runIds], deletedRows: 0, error: 'SQLite 当前不可用，无法确认会话数据已清除' }
       : { status: 'not_present', runIds: [...args.runIds], deletedRows: 0 }
@@ -87,7 +87,7 @@ export function resolveSessionRunIds(args: {
   runIds: Iterable<string>
 }): { status: 'ready' | 'not_present' | 'unavailable'; runIds: string[]; conflicts: string[]; error?: string } {
   if (!db) {
-    const file = dbFilePath ?? join(app.getPath('userData'), 'scry.db')
+    const file = dbFilePath ?? storageDbFilePath()
     return existsSync(file)
       ? { status: 'unavailable', runIds: [], conflicts: [], error: 'SQLite 当前不可用，无法校验会话 runId 归属' }
       : { status: 'not_present', runIds: [...args.runIds], conflicts: [] }

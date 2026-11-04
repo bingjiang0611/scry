@@ -11,7 +11,7 @@
 | B3-F2 Mac run 绑定发信号 | 完成 | `b95e47f` | [b3-f2](status/b3-f2.md) |
 | B3-D 设计稿三处更正 | 完成 | `见下` | [b3-d](status/b3-d.md)：§7 凭据如实拆分、新增 §8.1 daemon 运行时、§11 删除共存版本项、§8 加进度表 |
 | B3-M1 前置 db.ts 拆分（纯搬移） | 完成 | `见下` | [b3-m1-split](status/b3-m1-split.md)：8 个模块，全部 < 20 KB，`db.ts` 只做 re-export；调用方与逻辑不变 |
-| B3-M1 存储注入化 | **代码完成、验证通过，提交被门禁阻塞** | 未提交 | [b3-m1](status/b3-m1.md)：`storage-paths` 注入 + db/remote-history 去 electron；`src/main/db.ts` 44,168 B 超 20 KB 门禁，需决定拆分或豁免 |
+| B3-M1 存储注入化 | 完成 | `见下` | [b3-m1](status/b3-m1.md)：`storage-paths` 注入，db 各子模块与 `remote-history` 不再要 electron；导入图测试先失败后通过 |
 | B3-M2 运行管线去 Electron 化 | **未开始** | — | |
 | B3-P1 daemon 承载宿主 | **未开始** | — | |
 | B3-V1 security smoke 归属 | 完成（结论：非回归，调用方式错误） | `见下` | [b3-v1](status/b3-v1.md)：无 `--dev` 时脚本跑的是 0.2.220 旧产物，源码 0.2.237；`--dev` 下起点与当前 HEAD 均通过 |
@@ -24,7 +24,7 @@
 
 ## 阻塞
 
-**B3-M1 无法提交。** pre-commit hook 拒绝暂存任何 > 20,000 B 的手写文件且不豁免既有文件；`src/main/db.ts` 事前就是 44,168 B，而 M1 必须编辑它。没有绕过门禁。两个选项写在 [b3-m1](status/b3-m1.md)「需要维护者决定」：批准按职责拆分 `db.ts`，或给「未变大的既有超限文件」例外。
+无。`db.ts` 超过提交门禁的问题已按门禁要求先做纯搬移拆分（`01bca85f`），M1 随后落到子模块。
 
 M1 之后的 M2 依赖面（本步没有改变，留给 M2 处理）：`trace-runtime.ts`、`run-*.ts`、`conversation.ts`、`app-agent.ts`、`agent-runner.ts`、`source-control`、`desktop-workbench` 里对 `app` / `BrowserWindow` / `webContents` 的依赖尚未注入。
 

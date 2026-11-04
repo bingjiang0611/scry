@@ -3,16 +3,16 @@
 // P0（RFC v2.4）：可信数据底座的 electron 胶水层。schema/行映射/查询 SQL 在纯模块 span-ledger.ts，
 // 本文件只负责 electron 路径解析 + 预编译语句执行 + 迁移闸控。WAL + user_version 增量迁移。
 // 原生模块，打包要 asarUnpack。加载失败（EDR/ABI）整体降级 no-op，不连累 app 启动。
-import { app } from 'electron'
 import { join } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import type { ProviderId } from '../shared/provider'
 import { db } from './db-connection'
 import type { RecordTurnArgs } from './db-types'
+import { storageUserDataDir } from './storage-paths'
 import { recordTurn } from './db-turns'
 
-const turnOutboxDir = (userDataDir = app.getPath('userData')): string => join(userDataDir, 'db-turn-outbox')
+const turnOutboxDir = (userDataDir = storageUserDataDir()): string => join(userDataDir, 'db-turn-outbox')
 export const turnOutboxPath = (runId: string): string => join(
   turnOutboxDir(),
   `${createHash('sha256').update(runId).digest('hex')}.json`

@@ -5,6 +5,7 @@ import { resolveRendererEntryUrl } from '../renderer-security'
 import type { ActiveRun } from '../../shared/trace'
 import type { ProviderId } from '../../shared/provider'
 import { initDb, setBillingEnvProvider } from '../db'
+import { configureStorage } from '../storage-paths'
 import { warmShellEnv, shellEnv } from '../claude-locate'
 import { ensureShellEnv } from '../shell'
 import { configureProviderEventLog } from '../provider-event-log'
@@ -125,6 +126,8 @@ export function registerAppLifecycle({
     void warmShellEnv()
     // SQLite 是 turn 分析事实的写入前置条件；在 renderer 可发送前完成初始化，
     // 避免快速完成的首轮落过 archive 却永久缺少 spans/usage/intervention。
+    // Storage 的路径由这里注入一次：数据库层不再问 Electron 要 userData。
+    configureStorage({ userDataDir: app.getPath('userData'), appPath: app.getAppPath() })
     initDb()
     startupPerf.mark('database_ready')
     createWindow()

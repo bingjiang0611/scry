@@ -2,13 +2,13 @@
 // P0（RFC v2.4）：可信数据底座的 electron 胶水层。schema/行映射/查询 SQL 在纯模块 span-ledger.ts，
 // 本文件只负责 electron 路径解析 + 预编译语句执行 + 迁移闸控。WAL + user_version 增量迁移。
 // 原生模块，打包要 asarUnpack。加载失败（EDR/ABI）整体降级 no-op，不连累 app 启动。
-import { app } from 'electron'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { readQoderCreditRows, reconcileQoderCreditRows, withQoderCredits, type QoderCreditScope } from './qoder-credits'
 import { type DbStats, type UsageAnalytics, type UsageAnalyticsRangeDays } from '../shared/trace'
 import { TOTALS_SQL, TOP_TOOLS_SQL, BY_CWD_SQL, BY_MODEL_SQL, TOOL_STATS_SQL, DANGER_TREND_SQL, INTERVENTION_STATS_SQL, ANALYTICS_RESULTS_SQL, ANALYTICS_TOOLS_SQL, ANALYTICS_DANGER_SQL, ANALYTICS_MCP_SQL, USAGE_ANALYTICS_TOKENS_SQL, USAGE_ANALYTICS_COSTS_SQL, buildAnalyticsStats, buildUsageAnalytics, usageAnalyticsBounds, type AnalyticsResultRow, type AnalyticsToolRow, type AnalyticsDangerRow, type AnalyticsMcpRow, type UsageAnalyticsTokenRow, type UsageAnalyticsCostRow, canonicalUsdCostWhere } from './span-ledger'
 import { dataRevision, db, statsCacheSlot, usageAnalyticsCache } from './db-connection'
+import { storageUserDataDir } from './storage-paths'
 
 const EMPTY: DbStats = {
   status: 'unavailable',
@@ -84,7 +84,7 @@ export async function usageAnalyticsWithCreditsQuery(rangeDays: UsageAnalyticsRa
     const scopes = readScopes(analytics)
     const credits = await readQoderCreditRows({
       scopes,
-      userDataDir: app.getPath('userData'),
+      userDataDir: storageUserDataDir(),
       projectsDir: join(process.env.QODER_CONFIG_DIR || join(process.env.QODER_CLI_HOME || homedir(), '.qoder'), 'projects')
     })
     if (revision === dataRevision) return withQoderCredits(analytics, credits)
