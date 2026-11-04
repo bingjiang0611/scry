@@ -96,7 +96,7 @@ export async function inspectWorkspaceStart(
 /** The caller owns SourceControlService.exclusive for the entire awaited function. */
 export async function startWorkspace(
   identity: GitIdentity, request: WorkspaceStartRequest,
-  deps: WorkspaceStartDependencies, start: StartPreparedWorkspace
+  deps: WorkspaceStartDependencies, start: StartPreparedWorkspace, requestedRunId?: string
 ): Promise<AgentStartResult> {
   const { workspace: selection } = request
   const requestHash = digest({ selection, cwd: request.cwd, providerId: request.providerId, agentProfileId: request.agentProfileId })
@@ -170,7 +170,7 @@ export async function startWorkspace(
     // 刚刚在本调用内验证过的结果直接复用：中间只有日志写入与 Provider 启动，没有 Git 写入；
     // 登记前仍会在 admit 里重验一次，所以并没有放宽最后一道检查。
     const target = preparedThisCall ?? await verifyWorkspacePlan(deps.git, identity, journal.plan, selection.operationId)
-    const runId = `run-workspace-${randomUUID()}`
+    const runId = requestedRunId ?? `run-workspace-${randomUUID()}`
     const result = await start(target, runId, async register => {
       if (admissionCalled) throw new Error('工作区预留只能登记一个 run')
       admissionCalled = true
@@ -193,7 +193,15 @@ export async function startWorkspace(
     journal.phase = 'registered'
     record.operation.status = 'succeeded'
     record.operation.message = '工作区与新 run 已绑定；Provider 的执行结果由该轮记录证明'
-    await save(deps.store, record)
+    try {
+      await save(deps.store, record)
+    } catch (error) {
+      if (!(error instanceof JournalPersistenceError)) throw error
+      // start_requested was durably saved before synchronous registration. The
+      // Provider run is now authoritative; read-only inspection can reconcile
+      // this bookkeeping write without replaying Git or Provider work.
+      console.warn('[scry] workspace registration journal remains recoverable:', error.message)
+    }
     return { ...result, workspace: target }
   } catch (error) {
     if (error instanceof JournalPersistenceError) throw error

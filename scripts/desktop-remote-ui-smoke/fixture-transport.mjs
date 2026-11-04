@@ -12,12 +12,21 @@ export function fixtureTransport(options) {
     state.connected = false
   },
   async connect() { state.connectCalls++; state.connected = true },
-  async disconnect() { state.connected = false },
+  async disconnect() { state.connected = false; state.unreadRemote = false },
   async forget() {},
   async catalog() {
     state.catalogCalls++
     await holdVisibilityRead('catalog')
     if (state.catalogFailure) throw new Error('fixture catalog unavailable')
+    const terminalFingerprint = state.sessionLastRunOutcome === 'completed' || state.sessionLastRunOutcome === 'failed'
+      ? String(state.sessionLastRunId || '') + ':' + state.sessionLastRunOutcome : null
+    if (!state.attentionInitialized) {
+      state.attentionInitialized = true
+      state.attentionFingerprint = terminalFingerprint
+    } else if (!state.sessionActive && terminalFingerprint && terminalFingerprint !== state.attentionFingerprint) {
+      state.unreadRemote = true
+    }
+    if (terminalFingerprint) state.attentionFingerprint = terminalFingerprint
     return structuredClone({ ...catalog,
       projects: catalog.projects.map(project => ({ ...project, label: project.label + (state.catalogRevision ? ' v2' : '') })),
       sessions: catalog.sessions.map(session => session.externalSessionId === 'old-native' ? { ...session, isActive: state.sessionActive, ts: state.sessionTs,
@@ -27,7 +36,9 @@ export function fixtureTransport(options) {
         : ({ id: provider.id, label: provider.label, available: provider.available, observedAt: state.providerMetadataObservedAt, metadataRevision: state.providerMetadataRevision, ...(provider.forkSession === true ? { forkSession: true } : {}), ...(provider.agentProfileId ? { agentProfileId: provider.agentProfileId } : {}) })),
       providerDiscovery: state.legacyProviderHost ? undefined : 2,
       providerEvidence: state.legacyProviderHost ? 'legacy_host' : 'host_snapshot',
-      directorySelection: state.oldDirectoryHost ? undefined : true
+      managedWorktrees: state.oldWorktreeHost ? undefined : 1,
+      directorySelection: state.oldDirectoryHost ? undefined : true,
+      unreadSessionKeys: state.unreadRemote ? [JSON.stringify(['fixture-connection', 'claude', '', '/fixture/project-a', 'old-native'])] : []
     })
   },
   async workbench(id, request) {
@@ -37,6 +48,7 @@ export function fixtureTransport(options) {
     if (request.method === 'workspaceRead') return { name: 'notes.txt', path: 'notes.txt', content: 'original remote file', size: 20, mtimeMs: 1, revision: 'structure-rev', language: 'plaintext' }
     throw new Error('Unexpected remote workspace operation: ' + request.method)
   },
+  async setViewedSession(id, context) { state.viewedSessionCalls.push({ id, context }) },
   async providerControls(id, context) {
     state.providerControlsCalls.push({ id, context: contextFor({ context }) })
     if (state.holdProviderControls) await new Promise(resolve => state.providerControlWaiters.push(resolve))
@@ -49,6 +61,22 @@ export function fixtureTransport(options) {
     if (state.holdCommands) await new Promise(resolve => { window.releaseCommands = resolve })
     if (state.commandFailure) throw new Error('fixture host commands unavailable')
     return { commands: [{ name: 'skill:host-only', description: 'Skill from the remote host' }] }
+  },
+  async workspaceChoices(id, request) {
+    state.workspaceChoiceCalls.push({ id, request })
+    const main = { kind: 'local', name: 'refs/heads/main', head: 'a'.repeat(40) }
+    return { status: 'available', data: {
+      repositoryId: 'b'.repeat(64), root: request.cwd, revision: 'c'.repeat(64), branch: 'main', head: main.head,
+      dirty: false, writeBlocker: null, commonDirBusy: false, observedAt: 1, defaultBase: main,
+      page: request.kind === 'branches'
+        ? { kind: 'branches', items: [{ ...main, worktreeIds: [] }] }
+        : { kind: 'worktrees', items: [] },
+      nextCursor: null, limited: false
+    } }
+  },
+  async validateWorkspaceBranch(id, request) {
+    state.workspaceBranchCalls.push({ id, request })
+    return { status: 'available', data: { name: request.name } }
   },
   async sessionAction(id, context, action) {
     state.sessionActions.push({ id, context, action })
@@ -90,6 +118,7 @@ export function fixtureTransport(options) {
   },
   async history(_id, context) {
     state.historyCalls.push(contextFor({ context }))
+    if (context.externalSessionId === 'old-native') state.unreadRemote = false
     if (state.holdHistory) await new Promise(resolve => { window.releaseHistory = resolve })
     if (${openingOnly || measureOpening || structureOnly}) return { turns: [{ runId: 'opening-history', userText: 'Long remote history', done: true, items: [
       { id: 'opening-answer', runId: 'opening-history', ts: '2026-10-19T12:00:00.000Z', kind: 'model', stage: 'text', text: Array.from({ length: 80 }, (_, i) => 'Remote history paragraph ' + i).join('\\n\\n') }
@@ -106,7 +135,7 @@ export function fixtureTransport(options) {
   },
   async trace(_id, context, runId) {
     state.traceCalls.push({ context: contextFor({ context }), runId })
-    if (context.cwd !== '/fixture/project-a') throw new Error('fixture trace context mismatch: ' + context.cwd)
+    if (context.cwd !== (state.workspaceExecutionCwd ?? '/fixture/project-a')) throw new Error('fixture trace context mismatch: ' + context.cwd)
     if (runId === firstScryRun && state.firstIntentCleared) throw new Error('terminal trace unavailable')
     if (runId === firstScryRun) return activeRun(firstScryRun, 'native-session', 'first remote run', question)
     if (runId === secondScryRun) return activeRun(secondScryRun, 'native-session', 'second remote run', undefined, true)
@@ -119,6 +148,7 @@ export function fixtureTransport(options) {
   },
   async submit(_id, input) {
     state.submitInputs.push(input)
+    state.workspaceExecutionCwd = input.workspace ? '/fixture/project-a-worktrees/alternate' : null
     if (state.autoResetOnSubmit) state.runState = 'dispatched'
     if (state.holdSubmit) await new Promise(resolve => { window.releaseSubmit = resolve })
     const first = state.submitInputs.length === 1
@@ -149,12 +179,16 @@ export function fixtureTransport(options) {
     }
     if (state.intent && !state.intent.context.externalSessionId) {
       state.intent.context.externalSessionId = 'native-session'
+      if (state.workspaceExecutionCwd) {
+        state.intent.context.cwd = state.workspaceExecutionCwd
+        if (!catalog.projects.some(project => project.path === state.workspaceExecutionCwd)) catalog.projects.push({ path: state.workspaceExecutionCwd, label: 'alternate' })
+      }
       if (!catalog.sessions.some(session => session.externalSessionId === 'native-session')) catalog.sessions.push({
         sessionId: 'native-session', externalSessionId: 'native-session', ...state.intent.context, label: 'Adopted remote session', ts: Date.now()
       })
     }
     if (runId === firstLedger) return { state: 'dispatched', scryRunId: firstScryRun, externalSessionId: 'native-session', detail: 'fixture dispatched' }
-    return { state: 'dispatched', scryRunId: secondScryRun, externalSessionId: 'native-session', detail: 'fixture background work' }
+    return { state: 'dispatched', scryRunId: secondScryRun, externalSessionId: 'native-session', ...(state.workspaceExecutionCwd ? { cwd: state.workspaceExecutionCwd } : {}), detail: 'fixture background work' }
   },
   // Host-UI run on old-native: present only while the catalog marks it active.
   async liveRun(_id, context) {

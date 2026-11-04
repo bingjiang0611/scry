@@ -5,7 +5,7 @@ import type { TraceEvent, DbStats, WorkspaceDiffResult } from '@shared/trace'
 import type { RuntimeProvider } from '@shared/runtime'
 import { fmtTok } from '../format'
 import type { Turn } from '../format'
-import { OVERVIEW_CACHE_COPY, OVERVIEW_COST_COPY, OVERVIEW_SESSION_COPY } from '../constants/copy'
+import { OVERVIEW_CACHE_COPY, OVERVIEW_COST_COPY, OVERVIEW_CREDIT_COPY, OVERVIEW_SESSION_COPY } from '../constants/copy'
 import { Icon } from './primitives/Icon'
 import { OverviewSessionPanel } from './OverviewSessionPanel'
 import { OverviewTurnCalls } from './OverviewTurnCalls'
@@ -210,12 +210,12 @@ function OverviewPanelBody({
             <div
               className={`overview-metric ${isQoder ? (qoderCreditKnown ? 'accent' : 'unsupported') : cost.value == null ? 'unsupported' : ''}`}
               title={isQoder
-                ? qoderCreditKnown ? `仅统计已观测到的主会话请求 Credit${qoderCreditPartial ? '，存在未覆盖请求或轮次' : ''}` : '当前会话没有可用的 Qoder Credit 证据'
+                ? qoderCreditKnown ? OVERVIEW_CREDIT_COPY.coverage(qoderCreditPartial) : OVERVIEW_CREDIT_COPY.unavailable
                 : cost.value == null ? OVERVIEW_COST_COPY.unavailable : OVERVIEW_COST_COPY.coverage(cost.known, results.length)}
             >
-              <span>{isQoder ? 'Credit' : OVERVIEW_COST_COPY.label}</span>
+              <span>{isQoder ? OVERVIEW_CREDIT_COPY.label : OVERVIEW_COST_COPY.label}</span>
               <strong>{isQoder
-                ? qoderCreditKnown ? `${qoderCreditPartial ? '≥' : ''}${formatOverviewCredits(qoderCredits)}` : '—'
+                ? qoderCreditKnown ? formatOverviewCredits(qoderCredits) : '—'
                 : cost.value == null ? '—' : formatOverviewCost(cost.value)}</strong>
             </div>
           </div>

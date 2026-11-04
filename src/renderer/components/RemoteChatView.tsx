@@ -23,6 +23,8 @@ import type { PresentationState } from './RemoteChatPresentation'
 import type { ExecutionState } from './RemoteChatExecution'
 import type { RemoteChatProps } from './RemoteChat'
 import { errorText, remoteAgentId, remoteControlsValid } from './RemoteChatShared'
+import { WorkspaceContext } from './WorkspacePicker'
+import type { WorkspaceSelectionController } from '../hooks/useWorkspaceSelection'
 
 const TerminalSurface = lazy(() => import('./TerminalSurface').then((module) => ({ default: module.TerminalSurface })))
 
@@ -32,10 +34,12 @@ const TerminalSurface = lazy(() => import('./TerminalSurface').then((module) => 
 // runtime state: an offline, unknown or forgotten host keeps the draft and blocks send.
 
 
-export type RemoteChatViewProps = FoundationState & ControlsState & PresentationState & ExecutionState & RemoteChatProps
+export type RemoteChatViewProps = FoundationState & ControlsState & PresentationState & ExecutionState & RemoteChatProps & {
+  workspaceSelection: WorkspaceSelectionController
+}
 
 export function RemoteChatView(props: RemoteChatViewProps) {
-  const { api, workbench, fileRequest, setFileRequest, setWorkspaceDirty, dispatchSurface, connected, host, catalog, setProviderSelection, sessionId, setSessionId, controls, providerControlsError, setProviderControlsRevision, selected, setSelected, historyEvidence, historyLoading, activeRun, setError, pollFresh, submitting, generation, provider, providerId, context, draftKey, input, draftAttachments, releaseAttachments, updateDraft, queueKey, queue, editingMessageId, setEditingMessageId, movedMessageId, setMovedMessageId, slashCmds, slashReason, slashLoading, setSlashRevision, slashSel, setSlashSel, setSlashHidden, slashOpen, controlProvider, updateControls, runControlCatalog, validPermissionMode, displayTurns, chatNavigation, openTurnInChat, runActive, controlRunId, sessionArchived, sendBlockedReason, submit, stop, answer, loadOlderHistory, agents, unavailableAgentIds, selectedAgentId, notice, diffReview, workspaceAvailable, upgradeWorkbench, connectionId, cwd, queueStore, onDraftInput, scrollRef, textareaRef, renderLocationPicker, onSessionAdopted, surface } = props
+  const { api, workbench, fileRequest, setFileRequest, setWorkspaceDirty, dispatchSurface, connected, host, catalog, setProviderSelection, sessionId, setSessionId, controls, providerControlsError, setProviderControlsRevision, selected, setSelected, historyEvidence, historyLoading, activeRun, setError, pollFresh, submitting, generation, provider, providerId, context, draftKey, input, draftAttachments, releaseAttachments, updateDraft, queueKey, queue, editingMessageId, setEditingMessageId, movedMessageId, setMovedMessageId, slashCmds, slashReason, slashLoading, setSlashRevision, slashSel, setSlashSel, setSlashHidden, slashOpen, controlProvider, updateControls, runControlCatalog, validPermissionMode, displayTurns, chatNavigation, openTurnInChat, runActive, controlRunId, sessionArchived, sendBlockedReason, submit, stop, answer, loadOlderHistory, agents, unavailableAgentIds, selectedAgentId, notice, diffReview, workspaceAvailable, upgradeWorkbench, connectionId, cwd, queueStore, onDraftInput, scrollRef, textareaRef, renderLocationPicker, onSessionAdopted, surface, workspaceSelection } = props
   return (
     <>
       <ChatView
@@ -56,7 +60,7 @@ export function RemoteChatView(props: RemoteChatViewProps) {
         runControlsReason={provider && runControlCatalog.models.length === 0 ? `${host} 未提供模型列表；使用 Provider 默认模型` : null}
         input={input}
         composerScopeKey={draftKey}
-        sendBlockedReason={sendBlockedReason}
+        sendBlockedReason={workspaceSelection.blockedReason ?? sendBlockedReason}
         submitting={submitting}
         sessionLoading={historyLoading && displayTurns.length === 0}
         sessionEvidenceGap={sessionId && historyEvidence?.status === 'unavailable' && displayTurns.length === 0
@@ -166,6 +170,10 @@ export function RemoteChatView(props: RemoteChatViewProps) {
         }}
         onRunEffort={(effort) => updateControls({ ...controls, effort })}
         onPermissionMode={(permissionMode) => updateControls({ ...controls, permissionMode })}
+        workspaceContext={catalog?.managedWorktrees === 1 && !sessionId
+          ? <WorkspaceContext controller={workspaceSelection} cwd={cwd} onOpenRun={() => undefined} />
+          : undefined}
+        workspaceSendLabel={workspaceSelection.sendLabel}
         renderLocationPicker={renderLocationPicker}
         remoteHost={host}
         composerNotice={notice ?? (providerControlsError || (controlProvider && !controlProvider.available)

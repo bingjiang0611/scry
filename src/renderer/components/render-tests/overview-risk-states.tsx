@@ -233,7 +233,8 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
       />
     )
 
-    expect(html).toContain(`<span>Credit</span><strong>≥${formatted}</strong>`)
+    expect(html).toContain(`<span>Credit</span><strong>${formatted}</strong>`)
+    expect(html).toContain('存在未覆盖请求或轮次')
     expect(html).not.toContain('<span>成本</span><strong>$9.00</strong>')
   })
 

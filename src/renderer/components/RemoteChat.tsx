@@ -1,6 +1,7 @@
-import { type ReactNode, type RefObject } from 'react'
+import { useMemo, type ReactNode, type RefObject } from 'react'
 import type { RightSurfaceAction, RightSurfaceState } from '../right-surface'
 import type { RemoteProviderRef, RemoteSessionRef } from '@shared/desktop-remote'
+import { useWorkspaceSelection } from '../hooks/useWorkspaceSelection'
 import type { ComposerDraftStore } from '../composer-drafts'
 import type { PreparedRemoteHistory } from '../app-types'
 import { RemotePromptQueueStore } from '../remote-prompt-queue'
@@ -31,7 +32,7 @@ export interface RemoteChatProps {
   scrollRef: RefObject<HTMLDivElement>
   textareaRef: RefObject<HTMLTextAreaElement>
   renderLocationPicker: (menu: { open: boolean; onOpenChange: (open: boolean) => void }) => ReactNode
-  onSessionAdopted: (externalSessionId: string, provider: RemoteProviderRef) => void
+  onSessionAdopted: (externalSessionId: string, provider: RemoteProviderRef, cwd?: string) => void
   surface: {
     target: HTMLElement | null
     primaryVisible: boolean
@@ -58,6 +59,18 @@ export function RemoteChat({
   surface
 }: RemoteChatProps) {
   const foundationState = useRemoteChatFoundation({ connectionId, cwd, session, preparedHistory, draftStore, queueStore, surface })
+  const workspaceBackend = useMemo(() => ({
+    read: (request: Parameters<typeof foundationState.api.workspaceChoices>[1]) => foundationState.api.workspaceChoices(connectionId, request),
+    validateBranch: (request: { repositoryId: string; name: string }) => foundationState.api.validateWorkspaceBranch(connectionId, { cwd, ...request })
+  }), [foundationState.api, connectionId, cwd])
+  const workspaceSelection = useWorkspaceSelection({
+    cwd, draftKey: foundationState.draftKey, draftStore,
+    editable: foundationState.connected && foundationState.catalog?.managedWorktrees === 1 && !foundationState.sessionId,
+    active: foundationState.connected && foundationState.catalog?.managedWorktrees === 1 && !foundationState.sessionId,
+    busy: foundationState.submitting || foundationState.connecting,
+    selectionEpoch: 0,
+    backend: workspaceBackend
+  })
   const controlsState = useRemoteChatControls(foundationState, { connectionId, cwd, draftStore, queueStore, onSessionAdopted })
   const { controlProvider } = controlsState
   const presentationState = useRemoteChatPresentation(foundationState, controlProvider, { scrollRef, cwd, queueStore, surface })
@@ -67,5 +80,6 @@ export function RemoteChat({
     connectionId={connectionId} cwd={cwd} session={session} draftStore={draftStore} queueStore={queueStore}
     onDraftInput={onDraftInput} scrollRef={scrollRef} textareaRef={textareaRef}
     renderLocationPicker={renderLocationPicker} onSessionAdopted={onSessionAdopted} surface={surface}
+    workspaceSelection={workspaceSelection}
   />
 }

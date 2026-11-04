@@ -25,7 +25,8 @@ function Fixture() {
         .typography-smoke-page { min-height: 100vh; display: grid; place-items: center; padding: 48px; background: var(--bg); color: var(--fg); }
         .typography-smoke-card { width: 560px; padding: 28px; border: 1px solid var(--border2); border-radius: var(--r-md); background: var(--panel); }
         .typography-smoke-card h1 { max-width: 16ch; margin: 0 0 18px; font-size: 30px; line-height: 1.24; }
-        .typography-smoke-card p { max-width: 44ch; margin: 16px 0; }
+        .typography-smoke-card p { margin: 16px 0; }
+        #typography-paragraph { max-width: 44ch; }
         .typography-smoke-metric { margin: 22px 0; }
         .typography-smoke-metric dt { color: var(--dim); }
         .typography-smoke-metric dd { margin: 4px 0 0; font-size: 30px; font-weight: 650; }

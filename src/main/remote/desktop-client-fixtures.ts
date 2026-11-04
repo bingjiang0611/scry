@@ -6,12 +6,13 @@ import { join } from 'node:path'
 import { ensureHostIdentity } from './host-identity'
 import { generateDesktopDeviceIdentity, type DesktopSshTunnel } from './desktop-transport'
 import { DesktopRemoteClient } from './desktop-client'
+import type { RemoteAttentionTracker } from './remote-attention'
 
 export const ssh = { hostname: 'desktop.example', username: 'scry', port: 22 }
 export const encrypt = (value: string): Buffer => Buffer.from(`encrypted:${Buffer.from(value).toString('base64')}`)
 export const decrypt = (value: Buffer): string => Buffer.from(value.toString().slice('encrypted:'.length), 'base64').toString()
 
-export async function setup(setupOptions: { submitResponse?: () => unknown; intentStatusResponse?: () => unknown; resolveIntentResponse?: () => unknown; unknownIntent?: boolean; providerDiscovery?: boolean; encrypt?: typeof encrypt } = {}) {
+export async function setup(setupOptions: { submitResponse?: () => unknown; intentStatusResponse?: () => unknown; resolveIntentResponse?: () => unknown; sessionsResponse?: () => unknown; unknownIntent?: boolean; providerDiscovery?: boolean; managedWorktrees?: boolean; encrypt?: typeof encrypt; attention?: RemoteAttentionTracker } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'scry-desktop-client-'))
   const identity = await generateDesktopDeviceIdentity()
   const host = await ensureHostIdentity(join(directory, 'host'))
@@ -38,8 +39,9 @@ export async function setup(setupOptions: { submitResponse?: () => unknown; inte
       return { protocolMajor: 1, requestId: request.requestId, kind: 'pair.granted', pairingId, deviceId: grant.deviceId, certificatePEM: grant.certificatePEM,
         certificateSHA256: grant.certificateSHA256, expiresAt: grant.expiresAt, scope: 'g0_echo_only' }
     }
-    if (phase === 'status' && (request as { op?: string }).op === 'desktop') return { desktop: { kind: 'info', protocol: 1, hostId: host.hostId, execution: 'canonical', ...(setupOptions.providerDiscovery === false ? {} : { providerDiscovery: 2 }) } }
+    if (phase === 'status' && (request as { op?: string }).op === 'desktop') return { desktop: { kind: 'info', protocol: 1, hostId: host.hostId, execution: 'canonical', ...(setupOptions.providerDiscovery === false ? {} : { providerDiscovery: 2 }), ...(setupOptions.managedWorktrees ? { managedWorktrees: 1 } : {}) } }
     if ((request as { op?: string }).op === 'providers') return { providers: [{ id: 'claude', label: 'Claude', available: true, permissions: [{ id: 'default', label: 'Default' }] }] }
+    if ((request as { op?: string }).op === 'sessionsPage') return setupOptions.sessionsResponse?.() ?? { sessionsPage: { sessions: [], cursor: 0, total: 0, hasMore: false, snapshot: 'baseline' } }
     if ((request as { op?: string }).op === 'submit') {
       if (setupOptions.submitResponse) return setupOptions.submitResponse()
       throw new Error('network_down')
@@ -51,6 +53,6 @@ export async function setup(setupOptions: { submitResponse?: () => unknown; inte
     return { error: 'unexpected_request' }
   })
   const openTunnel = vi.fn(async (_options: { username: string; hostname: string; port: number; pairPort: number; runPort: number }) => tunnel())
-  const client = new DesktopRemoteClient({ directory, encrypt: setupOptions.encrypt ?? encrypt, decrypt }, { generateIdentity: async () => identity, openTunnel, tlsRequest })
+  const client = new DesktopRemoteClient({ directory, encrypt: setupOptions.encrypt ?? encrypt, decrypt, attention: setupOptions.attention }, { generateIdentity: async () => identity, openTunnel, tlsRequest })
   return { directory, host, invitation, client, openTunnel, tlsRequest, phase: () => phase, tunnelCount: () => tunnelCount, dropTunnel: () => tunnelShutdowns.at(-1)!() }
 }

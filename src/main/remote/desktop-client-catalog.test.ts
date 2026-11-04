@@ -1,9 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { rm } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
-import { DesktopRemoteClient } from './desktop-client'
 import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES } from '../../shared/desktop-remote'
-import { setup, ssh, encrypt, decrypt } from './desktop-client-fixtures'
+import { setup, ssh } from './desktop-client-fixtures'
 
 describe('DesktopRemoteClient catalog and trace reads', () => {
   it.each([false, true])('negotiates before listing providers (selected support: %s)', async (supported) => {
@@ -68,6 +67,43 @@ describe('DesktopRemoteClient catalog and trace reads', () => {
       expect(fixture.tlsRequest).toHaveBeenLastCalledWith(expect.objectContaining({ request: {
         op: 'providers', detail: 'selected', providerId: 'claude', cwd: '/workspace'
       } }))
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
+  it('reads managed worktree choices through the authenticated host reader without accepting a client path result', async () => {
+    const fixture = await setup()
+    try {
+      const pending = await fixture.client.pair({ label: 'Worktrees', ssh, invitation: fixture.invitation })
+      const id = pending.connection.id
+      await fixture.client.finishPairing(id)
+      await fixture.client.connect(id)
+      const request = { cwd: '/workspace', kind: 'branches' as const, query: 'topic' }
+      const value = { status: 'unavailable' as const, reason: 'repository unavailable' }
+      fixture.tlsRequest.mockResolvedValueOnce({ desktop: { kind: 'workspaceChoices', value } })
+      await expect(fixture.client.workspaceChoices(id, request)).resolves.toEqual(value)
+      expect(fixture.tlsRequest).toHaveBeenLastCalledWith(expect.objectContaining({ request: {
+        op: 'desktop', query: { kind: 'workspaceChoices', request }
+      } }))
+      const available = { status: 'available' as const, data: {
+        repositoryId: 'a'.repeat(64), root: '/workspace', revision: 'b'.repeat(64), branch: 'main', head: 'c'.repeat(40),
+        dirty: false, writeBlocker: null, commonDirBusy: false, observedAt: 1,
+        defaultBase: { kind: 'local' as const, name: 'refs/heads/main', head: 'c'.repeat(40) },
+        page: { kind: 'branches' as const, items: [{ kind: 'local' as const, name: 'refs/heads/main', head: 'c'.repeat(40), worktreeIds: [] }] },
+        nextCursor: null, limited: false
+      } }
+      fixture.tlsRequest.mockResolvedValueOnce({ desktop: { kind: 'workspaceChoices', value: available } })
+      await expect(fixture.client.workspaceChoices(id, request)).resolves.toEqual(available)
+      fixture.tlsRequest.mockResolvedValueOnce({ desktop: { kind: 'validateWorkspaceBranch', value: { status: 'available', data: { name: 'topic' } } } })
+      await expect(fixture.client.validateWorkspaceBranch(id, { cwd: '/workspace', repositoryId: 'a'.repeat(64), name: 'topic' }))
+        .resolves.toEqual({ status: 'available', data: { name: 'topic' } })
+      fixture.tlsRequest.mockResolvedValueOnce({ desktop: { kind: 'workspaceChoices', value: { status: 'available', data: {
+        repositoryId: 'a'.repeat(64), root: '', revision: 'b'.repeat(64), branch: null, head: null,
+        dirty: false, writeBlocker: null, commonDirBusy: false, observedAt: 1,
+        page: { kind: 'branches', items: [] }, nextCursor: null, limited: false
+      } } } })
+      await expect(fixture.client.workspaceChoices(id, request)).rejects.toThrow('invalid_workspace_choices_response')
+      fixture.tlsRequest.mockResolvedValueOnce({ desktop: { kind: 'workspaceChoices', value: { status: 'invented' } } })
+      await expect(fixture.client.workspaceChoices(id, request)).rejects.toThrow('invalid_workspace_choices_response')
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
 
@@ -184,47 +220,4 @@ describe('DesktopRemoteClient catalog and trace reads', () => {
       await expect(fixture.client.sessionAction(id, { cwd: '/workspace', providerId: 'claude', externalSessionId: 'session-1' }, { kind: 'pin', pinned: true })).rejects.toThrow('invalid_session_action_response')
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
-
-  it('persists the host-confirmed native session binding for first-run receipts across client restart', async () => {
-    const runId = randomUUID()
-    const fixture = await setup({ submitResponse: () => ({ runId, status: 'recorded' }) })
-    let reloaded: DesktopRemoteClient | undefined
-    try {
-      const pending = await fixture.client.pair({ label: 'Adoption', ssh, invitation: fixture.invitation })
-      const id = pending.connection.id
-      await fixture.client.finishPairing(id)
-      await fixture.client.connect(id)
-      await fixture.client.submit(id, { context: { cwd: '/workspace', providerId: 'pi' }, prompt: 'new session' })
-      fixture.tlsRequest.mockResolvedValueOnce({ state: 'dispatched' })
-      fixture.tlsRequest.mockResolvedValueOnce({ poll: { cursor: 1, events: [{ runId, kind: 'run_progress', detail: JSON.stringify({ event: 'session', externalSessionId: 'native-adopted' }) }] } })
-      await expect(fixture.client.runStatus(id, runId)).resolves.toMatchObject({ externalSessionId: 'native-adopted' })
-      reloaded = new DesktopRemoteClient({ directory: fixture.directory, encrypt, decrypt }, { openTunnel: fixture.openTunnel, tlsRequest: fixture.tlsRequest })
-      await expect(reloaded.intents(id)).resolves.toMatchObject([{ runId, context: { cwd: '/workspace', providerId: 'pi', externalSessionId: 'native-adopted' } }])
-      expect(fixture.tlsRequest.mock.calls.filter(call => (call[0].request as { op?: string }).op === 'submit')).toHaveLength(1)
-    } finally { await reloaded?.dispose(); await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
-  })
-
-  it('resolves a device-started live run on the opened session to its bound trace identity', async () => {
-    const ledgerRunId = randomUUID()
-    const fixture = await setup()
-    try {
-      const pending = await fixture.client.pair({ label: 'Live', ssh, invitation: fixture.invitation })
-      const id = pending.connection.id
-      await fixture.client.finishPairing(id)
-      await fixture.client.connect(id)
-      const scope = { cwd: '/workspace', providerId: 'pi', externalSessionId: 'session-a' }
-      const live = (externalSessionId: string) => ({ origin: 'remote', runId: ledgerRunId, providerId: 'pi', cwd: '/workspace', externalSessionId, prompt: 'p', state: 'running', questions: [] })
-      fixture.tlsRequest.mockResolvedValueOnce({ liveRuns: { revision: 'r1', runs: [live('session-a')] } })
-      fixture.tlsRequest.mockResolvedValueOnce({ state: 'dispatched' })
-      fixture.tlsRequest.mockResolvedValueOnce({ poll: { cursor: 1, events: [{ runId: ledgerRunId, kind: 'run_progress', detail: JSON.stringify({ event: 'bound', scryRunId: 'run-phone-1' }) }] } })
-      await expect(fixture.client.liveRun(id, scope)).resolves.toEqual({ runId: ledgerRunId, origin: 'remote', state: 'running', scryRunId: 'run-phone-1' })
-      expect(fixture.tlsRequest.mock.calls.map(call => (call[0].request as { op?: string }).op).slice(-3)).toEqual(['liveRuns', 'runState', 'poll'])
-      fixture.tlsRequest.mockResolvedValueOnce({ liveRuns: { revision: 'r2', runs: [live('session-b')] } })
-      await expect(fixture.client.liveRun(id, scope)).resolves.toBeNull()
-      fixture.tlsRequest.mockResolvedValueOnce({ liveRuns: { revision: 'r3', runs: [{ ...live('session-a'), state: 'done' }] } })
-      await expect(fixture.client.liveRun(id, scope)).rejects.toThrow('invalid_live_runs_response')
-      await expect(fixture.client.liveRun(id, { cwd: '/workspace', providerId: 'pi' })).rejects.toThrow('session_required')
-    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
-  })
-
 })

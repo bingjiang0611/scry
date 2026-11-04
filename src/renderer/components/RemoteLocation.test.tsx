@@ -186,6 +186,23 @@ describe('remote conversation guards', () => {
     expect(html).toContain('>连接</button>')
   })
 
+  it('shows managed Worktree controls only for a connected capable host and a new session', async () => {
+    list.mockResolvedValue([host])
+    catalog.mockResolvedValue({
+      projects: [{ path: '/remote/app', label: 'Remote app' }], providers: [], providerEvidence: 'host_snapshot',
+      sessions: [], managedWorktrees: 1
+    })
+    await refreshDesktopConnections()
+    await refreshRemoteCatalog(host.id)
+    const capable = remoteChat('mac2', 'draft')
+    expect(capable).toContain('aria-label="工作区与分支"')
+    expect(capable).toContain('当前工作区')
+
+    catalog.mockResolvedValue({ projects: [{ path: '/remote/app', label: 'Remote app' }], providers: [], providerEvidence: 'host_snapshot', sessions: [] })
+    await refreshRemoteCatalog(host.id)
+    expect(remoteChat('mac2', 'draft')).not.toContain('aria-label="工作区与分支"')
+  })
+
   it('does not advertise a local Shell for an unavailable remote terminal', () => {
     const html = renderToStaticMarkup(<RightSurfacePanel
       openIds={[]} activeId={null} contents={{}} maximized={false}

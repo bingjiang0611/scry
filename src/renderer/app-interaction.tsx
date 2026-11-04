@@ -226,16 +226,17 @@ export function useAppInteraction(context: AppInteractionContext) {
     setSettingsTab
   })
 
-  const adoptRemoteSession = (target: RemoteTarget, externalSessionId: string, provider: RemoteProviderRef): void => {
-    const adoptedKey = remoteDraftKey(target.connectionId, target.cwd, externalSessionId)
+  const adoptRemoteSession = (target: RemoteTarget, externalSessionId: string, provider: RemoteProviderRef, executionCwd = target.cwd): void => {
+    const adoptedKey = remoteDraftKey(target.connectionId, executionCwd, externalSessionId)
     remoteSurfaces.migrate(remoteSurfaceKey, adoptedKey)
     setRemoteAdoptedSession(externalSessionId)
     const metaPrompt = appView.metaPromptTarget.current
     if (metaPrompt.view === 'remote' && metaPrompt.draftKey === remoteSurfaceKey) metaPrompt.draftKey = adoptedKey
     setRemoteTarget(current => current ? {
       ...current,
+      cwd: executionCwd,
       session: {
-        sessionId: externalSessionId, externalSessionId, cwd: current.cwd,
+        sessionId: externalSessionId, externalSessionId, cwd: executionCwd,
         providerId: provider.id, agentProfileId: provider.agentProfileId,
         label: current.session?.label ?? '', ts: current.session?.ts ?? Date.now()
       }

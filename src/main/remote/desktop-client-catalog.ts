@@ -1,9 +1,101 @@
-import type { DesktopDirectoryPage, DesktopRemoteCatalog, DesktopRemoteContext, DesktopRemoteSessionAction, DesktopRemoteForkSessionRequest, DesktopRemoteDeleteSessionRequest, RemoteCommandCatalog, RemoteProviderRef, RemoteProjectRef, RemoteProviderQuery, RemoteSessionRef } from '../../shared/desktop-remote'
+import type { DesktopDirectoryPage, DesktopRemoteCatalog, DesktopRemoteContext, DesktopRemoteSessionAction, DesktopRemoteForkSessionRequest, DesktopRemoteDeleteSessionRequest, RemoteCommandCatalog, RemoteProviderRef, RemoteProjectRef, RemoteProviderQuery } from '../../shared/desktop-remote'
 import type { DeleteSessionResult } from '../../shared/provider'
+import type { ScRead } from '../../shared/source-control'
+import type { WorkspaceBranchChoice, WorkspaceBranchRef, WorkspaceChoices, WorkspaceChoicesRequest, WorkspaceWorktreeChoice } from '../../shared/workspace-selection'
 import { DesktopRemoteClientConnections } from './desktop-client-connections'
-import { context, fail, record, text, pathText, HASH, MAX_ITEMS, MAX_PAGES, validateInfo, validateProject, validateProvider, validateSession, validateDeleteSessionResult } from './desktop-client-validation'
+import { context, fail, record, text, pathText, HASH, MAX_ITEMS, validateInfo, validateProject, validateProvider, validateDeleteSessionResult } from './desktop-client-validation'
+import { readRemoteSessionPages } from './desktop-client-session-catalog'
+
+function scReason(value: unknown): string {
+  if (!record(value) || !text(value.reason, 16_384)) fail('invalid_workspace_response')
+  return value.reason
+}
+
+function gitHash(value: unknown): string {
+  if (!text(value, 64) || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value)) fail('invalid_workspace_response')
+  return value
+}
+
+function branchRef(value: unknown): WorkspaceBranchRef {
+  if (!record(value) || (value.kind !== 'local' && value.kind !== 'remote') || !text(value.name, 1024)) fail('invalid_workspace_response')
+  if (!value.name.startsWith(value.kind === 'local' ? 'refs/heads/' : 'refs/remotes/')) fail('invalid_workspace_response')
+  return { kind: value.kind, name: value.name, head: gitHash(value.head) }
+}
+
+function branchChoice(value: unknown): WorkspaceBranchChoice {
+  const ref = branchRef(value)
+  if (!record(value) || !Array.isArray(value.worktreeIds) || value.worktreeIds.length > MAX_ITEMS ||
+      value.worktreeIds.some((id) => !text(id, 24) || !/^[a-f0-9]{24}$/.test(id))) fail('invalid_workspace_response')
+  return { ...ref, worktreeIds: [...value.worktreeIds] as string[] }
+}
+
+function nullableString(value: unknown, max: number): string | null {
+  if (value === null) return null
+  if (!text(value, max)) fail('invalid_workspace_response')
+  return value
+}
+
+function worktreeChoice(value: unknown): WorkspaceWorktreeChoice {
+  if (!record(value) || !text(value.id, 24) || !/^[a-f0-9]{24}$/.test(value.id) || !text(value.path, 16_384) ||
+      typeof value.current !== 'boolean' || typeof value.busy !== 'boolean' || typeof value.bare !== 'boolean') fail('invalid_workspace_response')
+  return {
+    id: value.id, path: value.path,
+    branchRef: nullableString(value.branchRef, 1024),
+    head: value.head === null ? null : gitHash(value.head),
+    current: value.current, busy: value.busy, bare: value.bare,
+    locked: nullableString(value.locked, 4096), prunable: nullableString(value.prunable, 4096)
+  }
+}
+
+function workspaceChoicesRead(value: unknown): ScRead<WorkspaceChoices> {
+  if (!record(value) || !['available', 'unavailable', 'failed'].includes(String(value.status))) fail('invalid_workspace_choices_response')
+  if (value.status !== 'available') return { status: value.status, reason: scReason(value) } as ScRead<WorkspaceChoices>
+  const data = value.data
+  if (!record(data) || !HASH.test(String(data.repositoryId)) || !text(data.root, 16_384) || !HASH.test(String(data.revision)) ||
+      (data.branch !== null && !text(data.branch, 1024)) || (data.head !== null && data.head !== undefined && !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(String(data.head))) ||
+      typeof data.dirty !== 'boolean' || (data.writeBlocker !== null && !text(data.writeBlocker, 16_384)) ||
+      typeof data.commonDirBusy !== 'boolean' || typeof data.observedAt !== 'number' || !Number.isFinite(data.observedAt) || data.observedAt < 0 ||
+      !record(data.page) || (data.page.kind !== 'branches' && data.page.kind !== 'worktrees') || !Array.isArray(data.page.items) ||
+      data.page.items.length > MAX_ITEMS || typeof data.limited !== 'boolean') fail('invalid_workspace_choices_response')
+  let nextCursor: WorkspaceChoicesRequest['cursor'] | null = null
+  if (data.nextCursor !== null) {
+    if (!record(data.nextCursor) || !text(data.nextCursor.revision, 24) || !/^[a-f0-9]{24}$/.test(data.nextCursor.revision) ||
+        !Number.isSafeInteger(data.nextCursor.offset) || (data.nextCursor.offset as number) < 0 || (data.nextCursor.offset as number) > 1_000) fail('invalid_workspace_choices_response')
+    nextCursor = { revision: data.nextCursor.revision, offset: data.nextCursor.offset as number }
+  }
+  return { status: 'available', data: {
+    repositoryId: data.repositoryId as string, root: data.root as string, revision: data.revision as string,
+    branch: data.branch as string | null, head: data.head == null ? null : String(data.head), dirty: data.dirty,
+    writeBlocker: data.writeBlocker as string | null, commonDirBusy: data.commonDirBusy, observedAt: data.observedAt,
+    ...(data.defaultBase === undefined ? {} : { defaultBase: branchRef(data.defaultBase) }),
+    ...(data.selectedWorktree === undefined ? {} : { selectedWorktree: worktreeChoice(data.selectedWorktree) }),
+    page: data.page.kind === 'branches'
+      ? { kind: 'branches', items: data.page.items.map(branchChoice) }
+      : { kind: 'worktrees', items: data.page.items.map(worktreeChoice) },
+    nextCursor, limited: data.limited
+  } }
+}
+
+function workspaceBranchRead(value: unknown): ScRead<{ name: string }> {
+  if (!record(value) || !['available', 'unavailable', 'failed'].includes(String(value.status))) fail('invalid_workspace_branch_response')
+  if (value.status !== 'available') return { status: value.status, reason: scReason(value) } as ScRead<{ name: string }>
+  if (!record(value.data) || !text(value.data.name, 240)) fail('invalid_workspace_branch_response')
+  return { status: 'available', data: { name: value.data.name } }
+}
 
 export abstract class DesktopRemoteClientCatalog extends DesktopRemoteClientConnections {
+  async workspaceChoices(connectionIdValue: string, request: WorkspaceChoicesRequest): Promise<ScRead<WorkspaceChoices>> {
+    const result = await this.desktop(connectionIdValue, { kind: 'workspaceChoices', request })
+    if (result.kind !== 'workspaceChoices') fail('invalid_workspace_choices_response')
+    return workspaceChoicesRead(result.value)
+  }
+
+  async validateWorkspaceBranch(connectionIdValue: string, request: { cwd: string; repositoryId: string; name: string }): Promise<ScRead<{ name: string }>> {
+    const result = await this.desktop(connectionIdValue, { kind: 'validateWorkspaceBranch', request })
+    if (result.kind !== 'validateWorkspaceBranch') fail('invalid_workspace_branch_response')
+    return workspaceBranchRead(result.value)
+  }
+
   async catalog(connectionIdValue: string): Promise<DesktopRemoteCatalog> {
     const info = await this.desktop(connectionIdValue, { kind: 'info' })
     const state = await this.state()
@@ -14,19 +106,10 @@ export abstract class DesktopRemoteClientCatalog extends DesktopRemoteClientConn
       op: 'providers', ...(capabilities.providerDiscovery === 2 ? { detail: 'metadata' satisfies RemoteProviderQuery['detail'] } : {})
     }, 'providers')
     if (!Array.isArray(rawProjects) || !Array.isArray(rawProviders) || rawProjects.length > MAX_ITEMS || rawProviders.length > MAX_ITEMS) fail('catalog_too_large')
-    const sessions: RemoteSessionRef[] = []; let cursor = 0; let snapshot: string | undefined
-    for (let page = 0; page < MAX_PAGES; page++) {
-      const response = await this.catalogRequest<Record<string, unknown>>(connectionIdValue, { op: 'sessionsPage', includeArchived: true, cursor, limit: 100, ...(snapshot ? { snapshot } : {}) }, 'sessionsPage')
-      if (!Array.isArray(response.sessions) || !Number.isSafeInteger(response.cursor) || !Number.isSafeInteger(response.total) || typeof response.hasMore !== 'boolean' || !text(response.snapshot, 256)) fail('invalid_catalog_response')
-      if (snapshot !== undefined && response.snapshot !== snapshot) fail('catalog_snapshot_changed')
-      if (response.sessions.length > 100 || sessions.length + response.sessions.length > MAX_ITEMS) fail('catalog_too_large')
-      sessions.push(...response.sessions.map((item) => validateSession(item)))
-      if (!response.hasMore) break
-      if ((response.cursor as number) <= cursor) fail('invalid_catalog_cursor')
-      cursor = response.cursor as number; snapshot = response.snapshot as string
-      if (page === MAX_PAGES - 1) fail('catalog_too_large')
-    }
-    return { projects: rawProjects.map((item) => validateProject(item)), providers: rawProviders.map((item) => validateProvider(item)), sessions, providerEvidence: capabilities.providerDiscovery === 2 ? 'host_snapshot' : 'legacy_host', ...capabilities }
+    const sessions = await readRemoteSessionPages((request) => this.requestForConnection(connectionIdValue, request))
+    const unreadSessionKeys = this.attention?.catalog(connectionIdValue, { sessions })
+    return { projects: rawProjects.map((item) => validateProject(item)), providers: rawProviders.map((item) => validateProvider(item)), sessions, providerEvidence: capabilities.providerDiscovery === 2 ? 'host_snapshot' : 'legacy_host', ...capabilities,
+      ...(unreadSessionKeys ? { unreadSessionKeys: [...unreadSessionKeys] } : {}) }
   }
 
   async providerControls(connectionIdValue: string, value: DesktopRemoteContext): Promise<RemoteProviderRef> {

@@ -38,6 +38,7 @@ export const workspaceCopy = {
   noProject: '先选择项目目录',
   unborn: '尚无 HEAD · 可在当前目录聊天',
   invalidSelection: '保存的工作区选择已无效，请重新选择后再发送。',
+  firstSendOnly: 'Worktree 只能用于新会话的首次发送。',
   inspect: '只读核查',
   unknown: '先前准备或启动结果未知；不能重复发送，请先只读核查。',
   prepared: '工作区已准备，尚未启动；再次发送将复用它。',

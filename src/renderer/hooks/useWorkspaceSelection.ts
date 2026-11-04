@@ -14,7 +14,13 @@ interface Editor {
   cursor?: WorkspaceChoicesRequest['cursor']
 }
 
-export function useWorkspaceSelection({ cwd, draftKey, draftStore, editable, active, busy, selectionEpoch }: {
+export interface WorkspaceSelectionBackend {
+  read: (request: WorkspaceChoicesRequest) => Promise<ScRead<WorkspaceChoices>>
+  validateBranch: (request: { repositoryId: string; name: string }) => Promise<ScRead<{ name: string }>>
+  inspectStart?: (request: { repositoryId: string; operationId: string }) => Promise<ScRead<WorkspaceStartStatus | null>>
+}
+
+export function useWorkspaceSelection({ cwd, draftKey, draftStore, editable, active, busy, selectionEpoch, backend }: {
   cwd: string | null
   draftKey: string
   draftStore: ComposerDraftStore
@@ -22,6 +28,7 @@ export function useWorkspaceSelection({ cwd, draftKey, draftStore, editable, act
   active: boolean
   busy: boolean
   selectionEpoch: number
+  backend?: WorkspaceSelectionBackend
 }) {
   const readSelection = () => draftStore.getSnapshot().get(draftKey)?.workspace
   const storedSelection = useSyncExternalStore(draftStore.subscribe, readSelection, readSelection)
@@ -59,7 +66,7 @@ export function useWorkspaceSelection({ cwd, draftKey, draftStore, editable, act
     if (!active || !cwd) return
     setLoading(true)
     const timer = window.setTimeout(() => {
-      void window.scry.workspaceSelection.read({ cwd, kind, query: editor.query, cursor: editor.cursor, selectedWorktreeId })
+      void (backend?.read ?? window.scry.workspaceSelection.read)({ cwd, kind, query: editor.query, cursor: editor.cursor, selectedWorktreeId })
         .then(value => {
           if (sequence === readSequence.current && currentKey.current === key) setResult({ key, queryKey, value })
         }, error => {
@@ -68,7 +75,7 @@ export function useWorkspaceSelection({ cwd, draftKey, draftStore, editable, act
         }).finally(() => { if (sequence === readSequence.current) setLoading(false) })
     }, editor.query ? 200 : 0)
     return () => { window.clearTimeout(timer); readSequence.current++ }
-  }, [active, cwd, key, kind, queryKey, refreshKey, open])
+  }, [active, cwd, key, kind, queryKey, refreshKey, open, backend?.read])
 
   const inspect = useCallback(async (): Promise<void> => {
     if (!selection || 'invalid' in selection || !statusKey || !metadata) return
@@ -77,16 +84,18 @@ export function useWorkspaceSelection({ cwd, draftKey, draftStore, editable, act
       setInspection({ key: statusKey, value: { status: 'failed', reason: copy.invalidSelection } })
       return
     }
+    if (!backend?.inspectStart) {
+      setInspection({ key: statusKey, value: { status: 'available', data: null } })
+      return
+    }
     try {
-      const value = await window.scry.workspaceSelection.inspectStart({
-        repositoryId: selection.intent.repositoryId, operationId: selection.operationId
-      })
+      const value = await backend.inspectStart({ repositoryId: selection.intent.repositoryId, operationId: selection.operationId })
       if (sequence === inspectSequence.current && currentKey.current === key) setInspection({ key: statusKey, value })
     } catch (error) {
       if (sequence === inspectSequence.current && currentKey.current === key)
         setInspection({ key: statusKey, value: { status: 'failed', reason: copy.failure(error) } })
     }
-  }, [selection, statusKey, metadata?.repositoryId, key])
+  }, [selection, statusKey, metadata?.repositoryId, key, backend?.inspectStart])
   useEffect(() => {
     if (active && editable && !busy) void inspect()
     return () => { inspectSequence.current++ }
@@ -122,7 +131,7 @@ export function useWorkspaceSelection({ cwd, draftKey, draftStore, editable, act
     setError(undefined)
     try {
       if (intent.kind === 'newWorktree') {
-        const validated = await window.scry.workspaceSelection.validateBranch({ repositoryId: choices.repositoryId, name: intent.newBranch })
+        const validated = await (backend?.validateBranch ?? window.scry.workspaceSelection.validateBranch)({ repositoryId: choices.repositoryId, name: intent.newBranch })
         if (validated.status !== 'available') throw new Error(validated.reason)
         intent = { ...intent, newBranch: validated.data.name }
       }

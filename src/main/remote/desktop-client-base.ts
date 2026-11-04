@@ -6,6 +6,9 @@ import { join } from 'node:path'
 import { desktopTlsRequest, generateDesktopDeviceIdentity, openDesktopSshTunnel, type DesktopDeviceIdentity, type DesktopSshTunnel } from './desktop-transport'
 import { DESKTOP_ATTACHMENT_CHUNK_BYTES, DESKTOP_ATTACHMENT_MAX_COUNT, attachmentSha256, newAttachmentId, normalizeDesktopAttachment } from './desktop-attachments'
 import { context, fail, record, text, uuid, hash, digest, validateState, validateIdentity, validatePairingResponse, validateCertificate, publicConnection, STATE_FILE, type EncryptedState, type StoredConnection, type ActiveConnection, type RunStatusCursor, type DesktopRemoteClientTransportDeps } from './desktop-client-validation'
+import type { RemoteAttentionTracker } from './remote-attention'
+import type { WorkspaceStartSelection } from '../../shared/workspace-selection'
+import { parseWorkspaceStartSelection } from '../../shared/workspace-selection-input'
 
 export abstract class DesktopRemoteClientBase {
   protected abstract intentStatus(connectionIdValue: string, intentId: string): Promise<DesktopRemoteIntent>
@@ -18,6 +21,7 @@ export abstract class DesktopRemoteClientBase {
     tlsRequest: (options: { path: string; caPEM: string; certPEM: string; keyPEM: string; request: unknown; signal?: AbortSignal; timeoutMs?: number }) => Promise<unknown>
   }
   protected readonly active = new Map<string, ActiveConnection>()
+  protected readonly attention?: RemoteAttentionTracker
   protected readonly controllers = new Set<AbortController>()
   protected readonly requests = new Set<Promise<unknown>>()
   protected readonly locks = new Map<string, Promise<void>>()
@@ -30,10 +34,11 @@ export abstract class DesktopRemoteClientBase {
   protected restoration?: Promise<void>
   protected disposed = false
 
-  constructor(options: { directory: string; encrypt: (value: string) => Buffer; decrypt: (value: Buffer) => string } & DesktopRemoteClientTransportDeps, deps: DesktopRemoteClientTransportDeps = {}) {
+  constructor(options: { directory: string; encrypt: (value: string) => Buffer; decrypt: (value: Buffer) => string; attention?: RemoteAttentionTracker } & DesktopRemoteClientTransportDeps, deps: DesktopRemoteClientTransportDeps = {}) {
     if (!text(options.directory, 4096)) fail('invalid_state_directory')
     const injected = { ...options, ...deps }
     this.directory = options.directory
+    this.attention = options.attention
     this.encrypt = options.encrypt
     this.decrypt = options.decrypt
     this.transport = { generateIdentity: injected.generateIdentity ?? generateDesktopDeviceIdentity, openTunnel: injected.openTunnel ?? openDesktopSshTunnel, tlsRequest: injected.tlsRequest ?? (desktopTlsRequest as NonNullable<DesktopRemoteClientTransportDeps['tlsRequest']>) }
@@ -51,6 +56,11 @@ export abstract class DesktopRemoteClientBase {
     })
   }
   close(): Promise<void> { return this.dispose() }
+  async setViewedSession(connectionIdValue: string, value: DesktopRemoteContext | null): Promise<void> {
+    const state = await this.state()
+    this.connection(state, connectionIdValue)
+    this.attention?.viewed(connectionIdValue, value === null ? null : context(value))
+  }
 
   protected async state(): Promise<EncryptedState> { this.assertLive(); return this.statePromise }
   protected async load(): Promise<EncryptedState> {
@@ -121,7 +131,7 @@ export abstract class DesktopRemoteClientBase {
   protected async requestForConnection(id: string, request: unknown, authorizePeer?: () => void): Promise<Record<string, unknown>> { const state = await this.state(); const item = this.connection(state, id); const active = this.active.get(id); if (!active?.tunnel.alive) fail('desktop_not_connected'); return await this.request(active.tunnel.runPath, item, request, authorizePeer) as Record<string, unknown> }
   protected async desktop(id: string, query: DesktopHostRead): Promise<Record<string, unknown>> {
     const response = await this.requestForConnection(id, { op: 'desktop', query })
-    if (!record(response) || !record(response.desktop) || !['info', 'history', 'history_chunk', 'trace', 'trace_delta', 'image_chunk'].includes(String(response.desktop.kind))) fail('invalid_desktop_response')
+    if (!record(response) || !record(response.desktop) || !['info', 'workspaceChoices', 'validateWorkspaceBranch', 'history', 'history_chunk', 'trace', 'trace_delta', 'image_chunk'].includes(String(response.desktop.kind))) fail('invalid_desktop_response')
     return response.desktop
   }
   async catalogRequest<T>(id: string, request: unknown, key: string): Promise<T> { const response = await this.requestForConnection(id, request); if (!record(response) || !(key in response)) fail('invalid_catalog_response'); return response[key] as T }
@@ -178,7 +188,7 @@ export abstract class DesktopRemoteClientBase {
   }
   protected isPreDispatchRejection(error: unknown): boolean {
     if (!(error instanceof Error)) return false
-    return /^(?:desktop_remote_(?:device_not_authorized|invalid_request|invalid_intent_id|intent_payload_conflict|unknown_op|ledger_capacity_exceeded|attachments_unsupported)|attachment_transfer_failed|attachments_too_large|attachment_invalid|attachment_path_forbidden|desktop_not_connected|desktop_client_disposed|device_not_authorized|execution_target_binding_changed|unknown_connection)$/i.test(error.message)
+    return /^(?:desktop_remote_(?:device_not_authorized|invalid_request|invalid_intent_id|intent_payload_conflict|unknown_op|ledger_capacity_exceeded|attachments_unsupported|workspace_selection_unavailable)|attachment_transfer_failed|attachments_too_large|attachment_invalid|attachment_path_forbidden|desktop_not_connected|desktop_client_disposed|device_not_authorized|execution_target_binding_changed|unknown_connection)$/i.test(error.message)
   }
   protected isExplicitUnknownIntent(error: unknown): boolean { return error instanceof Error && /desktop_remote_unknown_intent$/i.test(error.message) }
   protected async uploadAttachments(connectionIdValue: string, intentId: string, attachments: ReturnType<typeof normalizeDesktopAttachment>[]): Promise<unknown[]> {
@@ -212,6 +222,7 @@ export abstract class DesktopRemoteClientBase {
     context(input.context)
     for (const key of ['modelId', 'modelProviderId', 'effort'] as const) if (input[key] !== undefined && !text(input[key], 256)) fail('invalid_submit')
     if (input.permissionMode !== undefined && !isAgentPermissionMode(input.permissionMode)) fail('invalid_submit')
+    if (input.workspace !== undefined) parseWorkspaceStartSelection(input.workspace)
     if (input.attachments !== undefined && (!Array.isArray(input.attachments) || input.attachments.length > DESKTOP_ATTACHMENT_MAX_COUNT)) fail('invalid_submit')
   }
   protected targetBinding(item: StoredConnection): string {
@@ -219,6 +230,13 @@ export abstract class DesktopRemoteClientBase {
     let certificate: NodeCertificate
     try { certificate = new NodeCertificate(item.certificatePEM) } catch { fail('execution_target_binding_changed') }
     return createHash('sha256').update(`${item.hostId}\0${item.anchorSHA256}\0${digest(certificate.raw)}`).digest('hex')
+  }
+  protected workspaceFromDetail(detail: string): WorkspaceStartSelection | undefined {
+    if (detail.length > 1_310_720) fail('invalid_submit')
+    let value: unknown
+    try { value = JSON.parse(detail) } catch { fail('invalid_submit') }
+    if (!record(value) || value.workspace === undefined) return undefined
+    try { return parseWorkspaceStartSelection(value.workspace) } catch { fail('invalid_submit') }
   }
   protected contextFromDetail(detail: string): DesktopRemoteContext {
     if (detail.length > 1_310_720) fail('invalid_submit')

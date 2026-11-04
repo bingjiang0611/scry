@@ -20,16 +20,16 @@ closeOverlays: () => void) {
     const key = JSON.stringify([connectionId, cwd, session?.providerId, session?.agentProfileId, session?.externalSessionId])
     const pending = pendingSelection.current
     if (pending?.sequence === sessionSelectionSeqRef.current && pending.navigationSequence === sessionNavigationSeqRef.current && pending.key === key) return
+    const sourceView = viewRef.current
+    if (sourceView === 'remote' && workspaceDirty.current && !window.confirm(REMOTE_ACCESS_COPY.discardWorkspaceChanges)) return
     sessionNavigationSeqRef.current += 1
     const request = { sequence: sessionSelectionSeqRef.current, navigationSequence: sessionNavigationSeqRef.current, key }
     pendingSelection.current = request
-    const sourceView = viewRef.current
-    const commit = (preparedHistory?: PreparedRemoteHistory): void => {
-      if (pendingSelection.current !== request || request.sequence !== sessionSelectionSeqRef.current || request.navigationSequence !== sessionNavigationSeqRef.current) return
-      if (sourceView === 'remote' && workspaceDirty.current && !window.confirm(REMOTE_ACCESS_COPY.discardWorkspaceChanges)) return
-      sessionSelectionSeqRef.current += 1
+    const open = (preparedHistory?: PreparedRemoteHistory): boolean => {
+      if (pendingSelection.current !== request || request.sequence !== sessionSelectionSeqRef.current || request.navigationSequence !== sessionNavigationSeqRef.current) return false
+      request.sequence = ++sessionSelectionSeqRef.current
       setRemoteWorkspaceDirty(false)
-      setSessionLoading(false)
+      setSessionLoading(preparedHistory?.status === 'loading')
       closeOverlays()
       cancelPaneMotion()
       runStructuralTransition('page', () => {
@@ -37,15 +37,22 @@ closeOverlays: () => void) {
         setRemoteAdoptedSession(session?.externalSessionId)
         setView('remote')
       })
+      return true
     }
-    if (!session) { commit(); pendingSelection.current = null; return }
-    // Read once before publishing the new context, then seed its controller with
-    // that exact result. A failed read opens an explicit error, not stale content.
+    const finish = (preparedHistory: PreparedRemoteHistory): void => {
+      if (pendingSelection.current !== request || request.sequence !== sessionSelectionSeqRef.current || request.navigationSequence !== sessionNavigationSeqRef.current) return
+      setSessionLoading(false)
+      setRemoteTarget((current) => current ? { ...current, preparedHistory } : current)
+    }
+    if (!session) { open(); pendingSelection.current = null; return }
+    // Publish the selected session immediately with an empty loading transcript.
+    // The old session must never remain visible while the host history read is pending.
+    if (!open({ status: 'loading' })) return
     void window.scry.desktopRemote.history(connectionId, {
       cwd, providerId: session.providerId, agentProfileId: session.agentProfileId,
       externalSessionId: session.externalSessionId
-    }, undefined, undefined).then(history => commit({ status: 'ready', history }),
-      error => commit({ status: 'error', error: error instanceof Error ? error.message : String(error) }))
+    }, undefined, undefined).then(history => finish({ status: 'ready', history }),
+      error => finish({ status: 'error', error: error instanceof Error ? error.message : String(error) }))
       .finally(() => { if (pendingSelection.current === request) pendingSelection.current = null })
   }
 }

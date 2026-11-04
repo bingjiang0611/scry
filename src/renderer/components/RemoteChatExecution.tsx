@@ -13,6 +13,8 @@ import type { FoundationState } from './RemoteChatFoundation'
 import type { PresentationState } from './RemoteChatPresentation'
 import type { RemoteChatProps } from './RemoteChat'
 import { errorText, remoteAgentId } from './RemoteChatShared'
+import { workspaceCopy } from '../constants/workspace-copy'
+import { consumeWorkspaceDraft, type WorkspaceDraftSelection } from '../workspace-drafts'
 
 // A conversation that executes on a saved remote Scry desktop. It renders the same
 // ChatView as local sessions; only the controller differs. The host owns Provider
@@ -25,8 +27,9 @@ const POLL_MS = 1500
 export function useRemoteChatExecution(foundation: FoundationState, presentation: PresentationState, { connectionId, draftStore, queueStore }: Pick<RemoteChatProps, 'connectionId' | 'draftStore' | 'queueStore'>) {
   const { api, connectionRefreshing, readError, connection, connected, host, catalogEntry, catalog, catalogReady, providerSelection, sessionId, setTurns, historyEvidence, setHistoryEvidence, setPollInterval, intents, setIntents, status, setStatus, error, setError, pollError, pollFresh, historyError, setHistoryError, submitting, setSubmitting, connecting, setConnecting, resolvingIntentId, setResolvingIntentId, unknownReceiptError, setUnknownReceiptError, generation, followLatest, provider, context, contextGeneration, draftKey, releaseAttachments, updateDraft, queueKey, queue, editingMessageId, setEditingMessageId, movedMessageId, setMovedMessageId, submissionInFlight } = foundation
   const { chosenModel, validEffort, validPermissionMode, displayTurns, chatNavigation, currentIntent, unknownReceiptBlocked, currentRunStatus, runActive, controlRunId, projectAvailable, contextAvailable } = presentation
-  const submission = (text: string, attachments: AgentInputAttachment[] = []) => ({
+  const submission = (text: string, attachments: AgentInputAttachment[] = [], workspace?: WorkspaceDraftSelection) => ({
     context, prompt: text,
+    ...(workspace && !('invalid' in workspace) ? { workspace } : {}),
     ...(attachments.length ? { attachments } : {}),
     ...(chosenModel ? { modelId: chosenModel.id, modelProviderId: chosenModel.providerId } : {}),
     ...(validEffort ? { effort: validEffort } : {}),
@@ -47,12 +50,18 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
       if (queued) queueStore.submitted(queueKey, intent)
       // Preserve edits made while the network write was pending.
       else {
-        const current = draftStore.getSnapshot().get(submittedKey)
-        if (current) {
-          const unchangedText = current.input.trim() === request.prompt
-          const remaining = attachmentsAfterSuccessfulSubmit(current.attachments, new Set(submittedAttachments.map(attachment => attachment.id)))
-          if (unchangedText || remaining.length !== current.attachments.length) {
-            updateDraft(submittedKey, (draft) => ({ input: unchangedText ? '' : draft.input, attachments: remaining }))
+        if (request.workspace) {
+          draftStore.update(current => consumeWorkspaceDraft(current, submittedKey, request.workspace!.operationId, undefined, {
+            input: request.prompt, attachments: submittedAttachments, workspace: request.workspace
+          }))
+        } else {
+          const current = draftStore.getSnapshot().get(submittedKey)
+          if (current) {
+            const unchangedText = current.input.trim() === request.prompt
+            const remaining = attachmentsAfterSuccessfulSubmit(current.attachments, new Set(submittedAttachments.map(attachment => attachment.id)))
+            if (unchangedText || remaining.length !== current.attachments.length) {
+              updateDraft(submittedKey, (draft) => ({ input: unchangedText ? '' : draft.input, attachments: remaining }))
+            }
           }
         }
         releaseAttachments(submittedAttachments.filter(attachment => !draftStore.getSnapshot().get(submittedKey)?.attachments.some(current => current.id === attachment.id)))
@@ -88,9 +97,17 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
     const submittedAttachments = draft?.attachments ?? []
     const attachments = inputAttachments(submittedAttachments)
     if (!contextAvailable || unknownReceiptBlocked || (!text && attachments.length === 0) || submitting) return
+    if (draft?.workspace && ('invalid' in draft.workspace || catalog?.managedWorktrees !== 1 || sessionId)) {
+      setError(workspaceCopy.invalidSelection)
+      return
+    }
     const limitError = attachmentError(attachments)
     if (limitError) { setError(limitError); return }
-    const request = submission(text, attachments)
+    const request = submission(text, attachments, draft?.workspace)
+    if (draft?.workspace && (runActive || queue.prompts.length > 0)) {
+      setError(workspaceCopy.firstSendOnly)
+      return
+    }
     if (runActive || queue.prompts.length > 0) {
       try {
         if (editingMessageId) {

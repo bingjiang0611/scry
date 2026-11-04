@@ -5,6 +5,8 @@ import { DESKTOP_ATTACHMENT_MAX_BYTES, DESKTOP_ATTACHMENT_MAX_COUNT } from './de
 import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES, type DesktopHostRead, type DesktopHostReadResult, type DesktopRemoteContext, type DesktopTraceCursor } from '../../shared/desktop-remote'
 import type { ActiveRun } from '../../shared/trace'
 import type { ProviderId } from '../../shared/provider'
+import type { ScRead } from '../../shared/source-control'
+import type { WorkspaceChoices, WorkspaceChoicesRequest } from '../../shared/workspace-selection'
 import { mergeSessionTurns } from '../session-history'
 import { readTraceArchivePageAsync, readTraceArchiveVersionAsync, readTraceArchiveTurnForHistory } from '../transcript-archive'
 import { createTraceRevisions } from './desktop-trace-delta'
@@ -28,6 +30,33 @@ function text(value: unknown, max: number): string {
 export function parseDesktopHostRead(value: unknown): DesktopHostRead {
   const query = object(value)
   if (query.kind === 'info') return { kind: 'info' }
+  if (query.kind === 'workspaceChoices') {
+    const request = object(query.request)
+    if (request.kind !== 'branches' && request.kind !== 'worktrees') throw new Error('invalid_request')
+    let cursor: WorkspaceChoicesRequest['cursor']
+    if (request.cursor !== undefined) {
+      const value = object(request.cursor)
+      const revision = text(value.revision, 24)
+      if (!/^[a-f0-9]{24}$/.test(revision) || !Number.isSafeInteger(value.offset) || (value.offset as number) < 0 || (value.offset as number) > 1_000) throw new Error('invalid_request')
+      cursor = { revision, offset: value.offset as number }
+    }
+    const search = request.query === undefined ? undefined : request.query
+    if (search !== undefined && (typeof search !== 'string' || search.length > 240 || search.includes('\0'))) throw new Error('invalid_request')
+    const selectedWorktreeId = request.selectedWorktreeId === undefined ? undefined : text(request.selectedWorktreeId, 24)
+    if (selectedWorktreeId && !/^[a-f0-9]{24}$/.test(selectedWorktreeId)) throw new Error('invalid_request')
+    return { kind: 'workspaceChoices', request: {
+      cwd: text(request.cwd, 4096), kind: request.kind,
+      ...(search === undefined ? {} : { query: search }),
+      ...(selectedWorktreeId ? { selectedWorktreeId } : {}),
+      ...(cursor ? { cursor } : {})
+    } }
+  }
+  if (query.kind === 'validateWorkspaceBranch') {
+    const request = object(query.request)
+    const repositoryId = text(request.repositoryId, 64)
+    if (!/^[a-f0-9]{64}$/.test(repositoryId)) throw new Error('invalid_request')
+    return { kind: 'validateWorkspaceBranch', request: { cwd: text(request.cwd, 4096), repositoryId, name: text(request.name, 240) } }
+  }
   if (query.kind !== 'history' && query.kind !== 'trace' && query.kind !== 'image') throw new Error('invalid_request')
   const input = object(query.context)
   const providerId = text(input.providerId, 64)
@@ -95,6 +124,8 @@ export function createDesktopHostReader(deps: {
   authorizeWorkspace(cwd: string): string
   authorizeSession?(context: DesktopRemoteContext): void
   getRun(runId: string): ActiveRun | null
+  workspaceChoices?: (request: WorkspaceChoicesRequest) => Promise<ScRead<WorkspaceChoices>>
+  validateWorkspaceBranch?: (request: { cwd: string; repositoryId: string; name: string }) => Promise<ScRead<{ name: string }>>
 }): (query: DesktopHostRead) => Promise<DesktopHostReadResult> {
   // Cache only immutable serialized pages, never a full session. Continuations
   // reauthorize the workspace but reuse the original stamped bytes, so archive
@@ -122,7 +153,16 @@ export function createDesktopHostReader(deps: {
     const now = Date.now()
     for (const [id, page] of pages) if (now - page.touched >= CHUNK_IDLE_MS) pages.delete(id)
     traceRevisions.sweep(now, CHUNK_IDLE_MS)
-    if (query.kind === 'info') return { kind: 'info', protocol: 1, hostId: deps.hostId(), execution: 'canonical', traceDelta: 1 }
+    if (query.kind === 'info') return { kind: 'info', protocol: 1, hostId: deps.hostId(), execution: 'canonical', traceDelta: 1,
+      ...(deps.workspaceChoices && deps.validateWorkspaceBranch ? { managedWorktrees: 1 as const } : {}) }
+    if (query.kind === 'workspaceChoices') {
+      if (!deps.workspaceChoices) throw new Error('workspace_selection_unavailable')
+      return { kind: 'workspaceChoices', value: await deps.workspaceChoices({ ...query.request, cwd: deps.authorizeWorkspace(query.request.cwd) }) }
+    }
+    if (query.kind === 'validateWorkspaceBranch') {
+      if (!deps.validateWorkspaceBranch) throw new Error('workspace_selection_unavailable')
+      return { kind: 'validateWorkspaceBranch', value: await deps.validateWorkspaceBranch({ ...query.request, cwd: deps.authorizeWorkspace(query.request.cwd) }) }
+    }
     const cwd = deps.authorizeWorkspace(query.context.cwd)
     const context = { ...query.context, cwd }
     const sessionScope = query.kind !== 'trace' && query.historyScope === 'session'

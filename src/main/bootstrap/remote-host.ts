@@ -14,6 +14,7 @@ import type { DesktopRemoteClient } from '../remote/desktop-client'
 import type { DesktopRemoteContext, DesktopRemoteSessionAction, DesktopRemoteForkSessionRequest, DesktopRemoteDeleteSessionRequest, RemoteSessionRef } from '../../shared/desktop-remote'
 import type { UserQuestionBroker } from '../user-question'
 import type { RemoteRunCompletion } from '../remote/remote-run-binding'
+import type { RemoteWorkspaceRunStart } from './workspace-start'
 import type { SessionDeletionRequest } from './session-deletion'
 import { RemoteHostService as RemoteHostServiceImpl } from '../remote/remote-host-service'
 import { createDesktopHostReader } from '../remote/desktop-host-reader'
@@ -36,7 +37,7 @@ import { remoteHostEnabled } from '../remote/remote-defaults'
 import type { IpcMainInvokeEvent } from 'electron'
 import type { RemoteStatus } from '../../shared/remote'
 
-type RemoteStartOptions = { origin: 'remote'; runId: string; stopSignal: AbortSignal; requestUserInput: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>; ledgerRunId: string; permissionModeOverride?: AgentPermissionMode; providerPrompt?: string; onTraceEvent?: (event: TraceEvent) => void; onSession?: (id: string) => void }
+type RemoteStartOptions = { origin: 'remote'; runId: string; stopSignal: AbortSignal; requestUserInput: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>; ledgerRunId: string; permissionModeOverride?: AgentPermissionMode; providerPrompt?: string; onTraceEvent?: (event: TraceEvent) => void; onSession?: (id: string) => void; onRegistered?: (result: { runId: string; externalSessionId?: string; cwd?: string }) => void }
 type RemoteRuns = { activeStates: () => ActiveRun[]; get: (runId: string) => { state: ActiveRun } | undefined }
 type RemoteReceipts = { submit: (key: string, task: () => Promise<RemoteRunCompletion>) => Promise<{ result: RemoteRunCompletion }> }
 type DeleteOptions = { confirm: boolean; notifyFailure: boolean; conversationId?: string; runIds?: readonly string[]; authorize?: () => void }
@@ -47,7 +48,7 @@ export type RemoteHostRuntime = {
   refreshRemoteProviderSnapshot: () => Promise<void>
   configuredRemotePermissionMode: () => AgentPermissionMode | undefined
   remoteStartReceipts: RemoteReceipts
-  startAppRun: (payload: AgentStartRequest, options: RemoteStartOptions) => Promise<RemoteRunCompletion | { runId: string }>
+  startAppRun: (payload: AgentStartRequest, options: RemoteStartOptions) => Promise<RemoteRunCompletion | { runId: string } | RemoteWorkspaceRunStart>
   sourceControl: SourceControlService
   providerOperationGate: ProviderOperationGate
   providerRegistry: ProviderRegistry
@@ -106,6 +107,13 @@ export async function startRemoteHostIfEnabled(runtime: RemoteHostRuntime): Prom
         getRun: (runId) => {
           const state = runtime.runs.get(runId)?.state
           return state ? runtime.boundedLiveRun(state) : null
+        },
+        workspaceChoices: (request) => runtime.sourceControl.workspaceChoices(request),
+        validateWorkspaceBranch: async ({ cwd, repositoryId, name }) => {
+          const choices = await runtime.sourceControl.workspaceChoices({ cwd, kind: 'branches' })
+          if (choices.status !== 'available') return choices
+          if (choices.data.repositoryId !== repositoryId) return { status: 'failed', reason: '仓库身份已变化，请重新选择' }
+          return runtime.sourceControl.validateWorkspaceBranch({ repositoryId, name })
         }
       }),
       desktopDirectories: {
@@ -120,21 +128,26 @@ export async function startRemoteHostIfEnabled(runtime: RemoteHostRuntime): Prom
       gatewayLabel: 'Mac1',
       startRun: createRemoteRunBinding({
         permissionModeOverride: remotePermissionMode,
-        startAppRun: (input) => runtime.remoteStartReceipts.submit(`remote-${input.ledgerRunId}`, () => runtime.startAppRun({
-          ...input.request,
-          backend: 'local',
-          runtimeProvider: undefined
-        }, {
-          origin: 'remote',
-          runId: input.runId,
-          stopSignal: input.stopSignal,
-          requestUserInput: input.requestUserInput,
-          ledgerRunId: input.ledgerRunId,
-          permissionModeOverride: input.permissionModeOverride,
-          providerPrompt: input.providerPrompt,
-          onTraceEvent: input.onTraceEvent,
-          onSession: input.onSession
-        }) as Promise<RemoteRunCompletion>).then((receipt) => receipt.result)
+        startAppRun: (input) => runtime.remoteStartReceipts.submit(`remote-${input.ledgerRunId}`, async () => {
+          const started = await runtime.startAppRun({
+            ...input.request,
+            commandId: input.ledgerRunId,
+            backend: 'local',
+            runtimeProvider: undefined
+          }, {
+            origin: 'remote',
+            runId: input.runId,
+            stopSignal: input.stopSignal,
+            requestUserInput: input.requestUserInput,
+            ledgerRunId: input.ledgerRunId,
+            permissionModeOverride: input.permissionModeOverride,
+            providerPrompt: input.providerPrompt,
+            onTraceEvent: input.onTraceEvent,
+            onSession: input.onSession,
+            onRegistered: (result) => input.onRegistered?.({ cwd: result.cwd ?? input.request.cwd! })
+          })
+          return 'remoteCompletion' in started ? started.remoteCompletion : started as RemoteRunCompletion
+        }).then((receipt) => receipt.result)
       }),
       listProjects: () => runtime.remoteProjectRoots().map((path) => ({ path, label: basename(path) || path })),
       listDirectories: (path) => runtime.listRemoteDirectories(path, runtime.knownProjectDirectories()),

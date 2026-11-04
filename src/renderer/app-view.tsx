@@ -124,7 +124,7 @@ export function useAppView(context: AppViewContext) {
   const changeView = (next: AppView): boolean => {
     if (view === 'remote' && next !== 'remote' && remoteWorkspaceDirty && !window.confirm(REMOTE_ACCESS_COPY.discardWorkspaceChanges)) return false
     setRemoteWorkspaceDirty(false)
-    if (next !== view) sessionNavigationSeqRef.current += 1
+    if (next !== view && next !== 'meta-prompts' && view !== 'meta-prompts') sessionNavigationSeqRef.current += 1
     cancelPaneMotion()
     runStructuralTransition('page', () => setView(next))
     if (next === 'analytics') integrations.loadAnalytics()

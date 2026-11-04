@@ -80,6 +80,23 @@ describe('desktop authenticated evidence source', () => {
     await expect(f.read({ kind: 'history', context: f.context, before: first.history.before, snapshot: first.history.snapshot })).rejects.toThrow('history_snapshot_changed')
   })
 
+  it('advertises managed worktrees only with host-owned readers and reauthorizes every repository request', async () => {
+    const workspaceChoices = vi.fn(async (request) => ({ status: 'unavailable' as const, reason: request.cwd }))
+    const validateWorkspaceBranch = vi.fn(async (request) => ({ status: 'available' as const, data: { name: request.name } }))
+    const f = desktopReaderFixture({ workspaceChoices, validateWorkspaceBranch })
+    roots.push(f.root)
+    await expect(f.read({ kind: 'info' })).resolves.toMatchObject({ managedWorktrees: 1 })
+    const choices = parseDesktopHostRead({ kind: 'workspaceChoices', request: { cwd: f.context.cwd, kind: 'branches', query: '' } })
+    await expect(f.read(choices)).resolves.toEqual({ kind: 'workspaceChoices', value: { status: 'unavailable', reason: f.context.cwd } })
+    const repositoryId = 'a'.repeat(64)
+    const branch = parseDesktopHostRead({ kind: 'validateWorkspaceBranch', request: { cwd: f.context.cwd, repositoryId, name: 'topic' } })
+    await expect(f.read(branch)).resolves.toEqual({ kind: 'validateWorkspaceBranch', value: { status: 'available', data: { name: 'topic' } } })
+    f.revoke()
+    await expect(f.read(choices)).rejects.toThrow('workspace_not_authorized')
+    expect(workspaceChoices).toHaveBeenCalledTimes(1)
+    expect(() => parseDesktopHostRead({ kind: 'workspaceChoices', request: { cwd: f.context.cwd, kind: 'branches', selectedWorktreeId: '../escape' } })).toThrow('invalid_request')
+  })
+
   it('serves trace deltas only on request and keeps the legacy snapshot shape for older clients', async () => {
     const f = fixture()
     expect(await f.read({ kind: 'info' })).toMatchObject({ kind: 'info', traceDelta: 1 })

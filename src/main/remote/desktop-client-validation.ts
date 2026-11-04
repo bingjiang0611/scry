@@ -50,8 +50,8 @@ export interface StoredConnection {
   autoConnect?: boolean
   pending?: { pairingId: string; secret: string; expiresAt: number; publicKeySHA256: string }
 }
-export interface ActiveConnection { tunnel: DesktopSshTunnel; serial: Promise<void>; attachments?: DesktopAttachmentCapability; traceDelta?: 1 }
-export interface RunStatusCursor { cursor: number; scryRunId?: string; externalSessionId?: string }
+export interface ActiveConnection { tunnel: DesktopSshTunnel; serial: Promise<void>; attachments?: DesktopAttachmentCapability; traceDelta?: 1; managedWorktrees?: 1 }
+export interface RunStatusCursor { cursor: number; scryRunId?: string; externalSessionId?: string; cwd?: string }
 
 export function fail(code: string): never { throw new Error(code) }
 export function submitFailure(error: unknown): string {
@@ -158,10 +158,11 @@ export function validateDeleteSessionResult(value: unknown): DeleteSessionResult
   return value as unknown as DeleteSessionResult
 }
 
-export function validateInfo(response: unknown, hostId: string): { providerDiscovery?: 2; directorySelection?: true; workbench?: 1; sessionActions?: true; sessionFork?: true; sessionDelete?: true; traceDelta?: 1; attachments?: DesktopAttachmentCapability } {
+export function validateInfo(response: unknown, hostId: string): { providerDiscovery?: 2; managedWorktrees?: 1; directorySelection?: true; workbench?: 1; sessionActions?: true; sessionFork?: true; sessionDelete?: true; traceDelta?: 1; attachments?: DesktopAttachmentCapability } {
   if (!record(response) || !record(response.desktop) || response.desktop.kind !== 'info' || response.desktop.protocol !== 1 ||
       response.desktop.hostId !== hostId || response.desktop.execution !== 'canonical' ||
       (response.desktop.providerDiscovery !== undefined && response.desktop.providerDiscovery !== 2) ||
+      (response.desktop.managedWorktrees !== undefined && response.desktop.managedWorktrees !== 1) ||
       (response.desktop.directorySelection !== undefined && response.desktop.directorySelection !== true) ||
       (response.desktop.workbench !== undefined && response.desktop.workbench !== 1) ||
       (response.desktop.sessionActions !== undefined && response.desktop.sessionActions !== true) ||
@@ -172,6 +173,7 @@ export function validateInfo(response: unknown, hostId: string): { providerDisco
   if (attachmentInfo !== undefined && (!record(attachmentInfo) || attachmentInfo.transport !== 'chunked' || attachmentInfo.maxBytes !== DESKTOP_ATTACHMENT_MAX_BYTES || attachmentInfo.maxTotalBytes !== DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES || attachmentInfo.maxCount !== DESKTOP_ATTACHMENT_MAX_COUNT || attachmentInfo.chunkBytes !== DESKTOP_ATTACHMENT_CHUNK_BYTES)) fail('desktop_capability_unavailable')
   return {
     ...(response.desktop.providerDiscovery === 2 ? { providerDiscovery: 2 as const } : {}),
+    ...(response.desktop.managedWorktrees === 1 ? { managedWorktrees: 1 as const } : {}),
     ...(response.desktop.directorySelection === true ? { directorySelection: true as const } : {}),
     ...(response.desktop.workbench === 1 ? { workbench: 1 as const } : {}),
     ...(response.desktop.sessionActions === true ? { sessionActions: true as const } : {}),

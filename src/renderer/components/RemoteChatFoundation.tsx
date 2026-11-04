@@ -6,7 +6,7 @@ import { createRemoteWorkbench } from '../remote-workbench'
 import type { RightSurfaceAction } from '../right-surface'
 import type { DesktopRemoteContext, DesktopRemoteHistory, DesktopRemoteIntent, DesktopRemoteRunStatus, DesktopRemoteLiveRun, RemoteProviderRef } from '@shared/desktop-remote'
 import type { Turn } from '../format'
-import { updateComposerDraft, type ComposerDraftAttachment } from '../composer-drafts'
+import { updateComposerDraft, type ComposerDraft, type ComposerDraftAttachment } from '../composer-drafts'
 
 import { remoteQueueKey } from '../remote-prompt-queue'
 import type { SlashCmd } from '@shared/trace'
@@ -76,7 +76,7 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
   const [turns, setTurns] = useState<Turn[]>(() => preparedHistory?.status === 'ready' ? historyTurns(preparedHistory.history) : [])
   const [selected, setSelected] = useState<TraceEvent | null>(null)
   const [historyEvidence, setHistoryEvidence] = useState<Pick<DesktopRemoteHistory, 'status' | 'reason' | 'hasOlder' | 'before' | 'snapshot'> | null>(preparedHistory?.status === 'ready' ? preparedHistory.history : null)
-  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyLoading, setHistoryLoading] = useState(preparedHistory?.status === 'loading')
   const [historyRevision, setHistoryRevision] = useState(0)
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null)
   // The shown run and the host revision it came from; updated synchronously so
@@ -124,6 +124,29 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
   const traceDelta = catalog?.traceDelta === 1
   const previousContextKey = useRef<string | undefined>(preparedHistory ? contextKey : undefined)
   const preparedHistoryContext = useRef<string | undefined>(preparedHistory ? contextKey : undefined)
+  const appliedPreparedHistory = useRef(preparedHistory)
+  useEffect(() => {
+    if (!preparedHistory || appliedPreparedHistory.current === preparedHistory) return
+    appliedPreparedHistory.current = preparedHistory
+    preparedHistoryContext.current = contextKey
+    if (preparedHistory.status === 'loading') {
+      setHistoryLoading(true)
+      return
+    }
+    setHistoryLoading(false)
+    if (preparedHistory.status === 'error') {
+      setHistoryError(preparedHistory.error)
+      return
+    }
+    setHistoryError(null)
+    setTurns(historyTurns(preparedHistory.history))
+    setHistoryEvidence({
+      status: preparedHistory.history.status, reason: preparedHistory.history.reason,
+      hasOlder: preparedHistory.history.hasOlder, before: preparedHistory.history.before,
+      snapshot: preparedHistory.history.snapshot
+    })
+    presentedHistoryContext.current = context
+  }, [context, contextKey, preparedHistory])
   const contextGeneration = useRef(0)
   const pollSequence = useRef(0)
   const pollInFlight = useRef<Promise<void> | undefined>(undefined)
@@ -140,9 +163,9 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
       if (attachment.previewUrl.startsWith('blob:')) URL.revokeObjectURL(attachment.previewUrl)
     }
   }, [])
-  const updateDraft = useCallback((key: string, update: (current: { input: string; attachments: ComposerDraftAttachment[] }) => { input: string; attachments: ComposerDraftAttachment[] }): void => {
+  const updateDraft = useCallback((key: string, update: (current: ComposerDraft) => Pick<ComposerDraft, 'input' | 'attachments'>): void => {
     draftStore.update((drafts) => {
-      const result = updateComposerDraft(drafts, key, update)
+      const result = updateComposerDraft(drafts, key, current => ({ ...current, ...update(current) }))
       for (const evicted of result.evicted) releaseAttachments(evicted.attachments)
       return result.drafts
     })
