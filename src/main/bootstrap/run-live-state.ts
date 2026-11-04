@@ -158,9 +158,11 @@ export async function createLiveRunState(deps: {
   const notifyDiffChangeRef = { current: (): void => { } }
   // App trace capture does not require a workspace recorder. Keep raw evidence until its
   // durable body exists; then release it from run state and send only the bounded projection.
+  // The body also goes to the workspace recorder store whenever that recorder owns this turn:
+  // the commit stores only references, so a body that exists only in the App store would make
+  // the committed record and the workspace export unresolvable.
   const ingestionEnablement = managedRecorderEnablement?.enabled ? managedRecorderEnablement : undefined
-  const ingestionRecorderRoot = managedRecorderEnabled && ingestionEnablement?.config.capture.toolOutput === 'full'
-    ? ingestionEnablement.dataRoot : undefined
+  const ingestionRecorderRoot = managedRecorderEnabled ? ingestionEnablement?.dataRoot : undefined
   const ingestion = new LiveTraceIngestion({
     provider: providerId,
     // 谁在看这个 run 由 publishTrace 决定：legacy 焦点通道 + 该 run 自己的 scoped 流。

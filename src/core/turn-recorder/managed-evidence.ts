@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto'
-import { isToolContent } from '../../shared/tool-content.js'
+import { isToolContent, type ToolContent, type ToolContentRef } from '../../shared/tool-content.js'
 import { type ToolContentPolicy, isFullToolContentPolicy, captureToolContent } from './tool-content.js'
 import { type ProviderId } from '../../shared/provider.js'
-import { type AgentTurnRecord, type Evidence, type TurnTermination, type TurnEvidence } from '../../shared/turn-record.js'
+import { type AgentTurnRecord, type Evidence, type EvidenceQuality, type EvidenceStatus, type TurnCall, type TurnTermination, type TurnEvidence } from '../../shared/turn-record.js'
+import { readRecorderContent } from './content-store.js'
 import { type RecorderEnablement } from './config.js'
 import { type RecorderOpenTurnState } from './runtime-state.js'
 import { stableHash, RECORDER_VERSION } from './store.js'
@@ -255,5 +256,133 @@ export function assertCommittedRecordMatchesHandoff(
   const { sequence: _sequence, ...draft } = record
   if (stableHash(draft) !== stableHash(handoff.record)) {
     throw new Error('managed recorder duplicate record differs from prepared canonical handoff')
+  }
+}
+
+/**
+ * 一条记录里的 contentRef 必须在本工作区 recorder 内容库里可解析。App 实时通道可能把正文只写进
+ * 自己的内容库（工作区副本依赖采集策略），提交时又跳过已带 ref 的事件，于是记录会引用不存在的
+ * 字节：读取失败、导出游标被钉死。这里在写记录前用内容库自己的校验读一遍，缺失的字段降级为
+ * unavailable 并让所在分区标 partial，绝不保留悬空引用，也不把缺失写成空内容。
+ */
+export const CONTENT_MISSING_REASON = 'complete body missing from workspace recorder content store'
+
+function unavailableContent(field: ToolContent): ToolContent {
+  const { content: _content, contentRef: _contentRef, ...rest } = field
+  return {
+    ...rest,
+    savedBytes: 0,
+    storage: 'omitted',
+    sourceCompleteness: 'unavailable',
+    reasons: [...new Set([...rest.reasons, 'not_collected' as const])]
+  }
+}
+
+function degradedSection<T extends { status: EvidenceStatus; quality: EvidenceQuality; omissionReason?: string }>(
+  section: T,
+  reason: string
+): T {
+  return {
+    ...section,
+    status: section.status === 'unavailable' ? 'unavailable' : 'partial',
+    quality: section.quality === 'exact' ? 'inferred' : section.quality,
+    omissionReason: [...new Set([...(section.omissionReason ? section.omissionReason.split('; ') : []), reason])].join('; ')
+  }
+}
+
+export async function enforceEvidenceDurability(
+  evidence: TurnEvidence,
+  dataRoot: string
+): Promise<TurnEvidence> {
+  const durable = async (ref: ToolContentRef): Promise<boolean> => {
+    try {
+      await readRecorderContent(dataRoot, ref)
+      return true
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+      throw error
+    }
+  }
+  const field = async (value: ToolContent | undefined): Promise<{ value: ToolContent | undefined; lost: boolean }> => {
+    if (!value?.contentRef) return { value, lost: false }
+    return await durable(value.contentRef) ? { value, lost: false } : { value: unavailableContent(value), lost: true }
+  }
+  const refs = async (value: ToolContentRef[] | undefined): Promise<ToolContentRef[] | undefined> => {
+    if (!value?.length) return value
+    const kept = await Promise.all(value.map(durable))
+    // A complete body chain only holds when every ordered ref resolves; otherwise keep the
+    // bounded inline projection and let the section report the loss.
+    return kept.every(Boolean) ? value : undefined
+  }
+
+  const calls = async (section: Evidence<TurnCall[]>): Promise<Evidence<TurnCall[]>> => {
+    if (!section.value) return section
+    let lost = false
+    const value = await Promise.all(section.value.map(async (call) => {
+      const [input, output] = await Promise.all([field(call.inputContent), field(call.outputContent)])
+      lost ||= input.lost || output.lost
+      return {
+        ...call,
+        ...(input.value ? { inputContent: input.value } : {}),
+        ...(output.value ? { outputContent: output.value } : {})
+      }
+    }))
+    return lost ? degradedSection({ ...section, value }, CONTENT_MISSING_REASON) : { ...section, value }
+  }
+
+  const assistantRefs = await refs(evidence.assistant.value?.contentRefs)
+  const assistant = evidence.assistant.value?.contentRefs && !assistantRefs
+    ? degradedSection(
+      { ...evidence.assistant, value: { ...evidence.assistant.value, contentRefs: undefined } },
+      CONTENT_MISSING_REASON
+    )
+    : evidence.assistant
+
+  let segmentLoss = false
+  const modelSegments = evidence.modelSegments?.value
+    ? await Promise.all(evidence.modelSegments.value.map(async (segment) => {
+      const kept = await refs(segment.contentRefs)
+      if (segment.contentRefs && !kept) segmentLoss = true
+      return kept ? segment : { ...segment, contentRefs: undefined }
+    }))
+    : undefined
+
+  let patchLoss = false
+  const diffValue = evidence.diff.value
+    ? await Promise.all(evidence.diff.value.map(async (snapshot) => ({
+      ...snapshot,
+      files: await Promise.all(snapshot.files.map(async (file) => {
+        const patch = await field(file.patchContent)
+        patchLoss ||= patch.lost
+        return { ...file, ...(patch.value ? { patchContent: patch.value } : {}) }
+      }))
+    })))
+    : undefined
+
+  const transcriptDurable = evidence.transcript?.value ? await durable(evidence.transcript.value.contentRef) : true
+  const [tools, skills, mcps] = await Promise.all([calls(evidence.tools), calls(evidence.skills), calls(evidence.mcps)])
+  return {
+    ...evidence,
+    assistant,
+    tools,
+    skills,
+    mcps,
+    diff: patchLoss
+      ? degradedSection({ ...evidence.diff, ...(diffValue ? { value: diffValue } : {}) }, CONTENT_MISSING_REASON)
+      : { ...evidence.diff, ...(diffValue ? { value: diffValue } : {}) },
+    ...(modelSegments
+      ? { modelSegments: segmentLoss
+        ? degradedSection({ ...evidence.modelSegments!, value: modelSegments }, CONTENT_MISSING_REASON)
+        : { ...evidence.modelSegments!, value: modelSegments } }
+      : {}),
+    ...(evidence.transcript
+      ? { transcript: transcriptDurable ? evidence.transcript : {
+        ...evidence.transcript,
+        value: undefined,
+        status: 'unavailable' as const,
+        quality: 'unavailable' as const,
+        omissionReason: CONTENT_MISSING_REASON
+      } }
+      : {})
   }
 }

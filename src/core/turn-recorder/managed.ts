@@ -7,7 +7,7 @@ import { resolveRecorderEnablement } from './config.js'
 import { readJson, listFiles, writeJsonAtomic } from './io.js'
 import { recorderTurnRoot, recorderSessionRoot, withRecorderSessionLock, type RecorderOpenTurnState, recorderOpenPath, SESSION_LOCK_WAIT_MS, recorderPendingHealth, recorderQuarantinedOpenTurns, type RecorderSessionState, recorderStatePath } from './runtime-state.js'
 import { clearRuntimeTurn, updateHealth, commitRecord, drainCommitNotifications, HOOK_DRAIN_MAX_RECORDS, HOOK_DRAIN_BUDGET_MS } from './store.js'
-import { type ManagedRecorderProviderId, type ManagedTurnCancellationResult, type ManagedTurnHandoff, type EnabledRecorder, assertStrictCapture, type PrepareManagedTurnInput, type ManagedTurnResult, assertProtectedToolEvidence, assertExactText, assertOptionalAssistantText, assertTiming, assertDuplicateMatchesInput, managedProvisionalMatches, managedRecorderAllowsMissingProviderTurnId, recordDraft, assertCommittedRecordMatchesHandoff, type ManagedTurnTiming } from './managed-evidence.js'
+import { type ManagedRecorderProviderId, type ManagedTurnCancellationResult, type ManagedTurnHandoff, type EnabledRecorder, assertStrictCapture, type PrepareManagedTurnInput, type ManagedTurnResult, assertProtectedToolEvidence, enforceEvidenceDurability, assertExactText, assertOptionalAssistantText, assertTiming, assertDuplicateMatchesInput, managedProvisionalMatches, managedRecorderAllowsMissingProviderTurnId, recordDraft, assertCommittedRecordMatchesHandoff, type ManagedTurnTiming } from './managed-evidence.js'
 import { recordById, recordByProviderTurnId, advanceProviderTurnIndex } from './managed-index.js'
 import { reserveCanonicalJournalRecovery } from './managed-recovery.js'
 export { type ManagedTurnTiming, type ManagedRecorderProviderId, isManagedRecorderProvider, managedRecorderAllowsMissingProviderTurnId, isManagedProviderRuntimePair, type PrepareManagedTurnInput, type ManagedTurnResult, type ManagedTurnCancellationResult } from './managed-evidence.js'
@@ -96,15 +96,18 @@ async function handoffForRun(root: string, runId: string): Promise<{ path: strin
 export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput): Promise<ManagedTurnResult> {
   const mode = await managedRecorderMode(input.workspace, input.env)
   if (mode.status === 'disabled') return mode
-  assertProtectedToolEvidence(input.evidence, isFullToolContentPolicy(input.toolContentPolicy) ? input.toolContentPolicy : mode.enablement.config.capture)
-  assertExactText(input.evidence.user, input.userText, 'user')
+  // 引用必须指向本工作区内容库里真实存在的字节；缺失的正文在写记录前降级，不留下悬空 ref。
+  const evidence = await enforceEvidenceDurability(input.evidence, mode.enablement.dataRoot)
+  const protectedInput = { ...input, evidence }
+  assertProtectedToolEvidence(evidence, isFullToolContentPolicy(input.toolContentPolicy) ? input.toolContentPolicy : mode.enablement.config.capture)
+  assertExactText(evidence.user, input.userText, 'user')
   if (
     (input.provider === 'claude' || input.provider === 'qoder' || input.provider === 'opencode' || input.provider === 'pi') &&
     input.status !== 'completed'
   ) {
-    assertOptionalAssistantText(input.evidence.assistant)
+    assertOptionalAssistantText(evidence.assistant)
   } else {
-    assertExactText(input.evidence.assistant, undefined, 'assistant')
+    assertExactText(evidence.assistant, undefined, 'assistant')
   }
   assertTiming(input.timing)
   const { enablement } = mode
@@ -213,7 +216,7 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
     }
     const open = matches[0]
 
-    const draft = recordDraft(enablement, open, input)
+    const draft = recordDraft(enablement, open, protectedInput)
     if (observedInterruption && draft.termination) {
       draft.recordId = observedInterruptionRecordId(enablement.config.workspaceId, input)
       draft.termination = {
