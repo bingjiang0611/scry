@@ -19,13 +19,14 @@ describe('desktop client IPC production trust wrapper', () => {
     registerDesktopClientIpc<IpcMainInvokeEvent>(
       (channel, listener) => registerTrustedIpcHandler(ipc, channel, () => window as unknown as BrowserWindow, origin, listener), client
     )
-    expect(listeners.size).toBe(31)
+    expect(listeners.size).toBe(32)
     expect(listeners.has('desktopRemote:workspaceChoices')).toBe(true)
     expect(listeners.has('desktopRemote:validateWorkspaceBranch')).toBe(true)
     expect(listeners.has('desktopRemote:liveRun')).toBe(true)
     expect(listeners.has('desktopRemote:traceDelta')).toBe(true)
     expect(listeners.has('desktopRemote:providerControls')).toBe(true)
     expect(listeners.has('desktopRemote:workbench')).toBe(true)
+    expect(listeners.has('desktopRemote:setViewedSession')).toBe(true)
     expect(listeners.has('desktopRemote:raw')).toBe(false)
     const invoke = async (channel: string, event: unknown, ...args: unknown[]) => listeners.get(channel)!(event as IpcMainInvokeEvent, ...args)
     for (const channel of listeners.keys()) {
@@ -47,5 +48,17 @@ describe('desktop client IPC production trust wrapper', () => {
     expect(resolveIntent).not.toHaveBeenCalled()
     await expect(invoke('desktopRemote:resolveIntent', { sender, senderFrame: mainFrame }, 'saved-id', 'intent-id')).resolves.toEqual({ status: 'recorded' })
     expect(resolveIntent).toHaveBeenCalledExactlyOnceWith('saved-id', 'intent-id')
+  })
+
+  it('tracks focused and unfocused remote sessions without contacting the host', () => {
+    const listeners = new Map<string, (_event: unknown, ...args: unknown[]) => unknown>()
+    const setViewedSession = vi.fn(async () => {})
+    const client = vi.fn(() => ({ setViewedSession }) as unknown as DesktopRemoteAPI)
+    registerDesktopClientIpc((channel, listener) => { listeners.set(channel, listener) }, client)
+    const context = { cwd: '/repo', providerId: 'pi', externalSessionId: 'session' }
+    listeners.get('desktopRemote:setViewedSession')!({}, 'connection', context)
+    listeners.get('desktopRemote:setViewedSession')!({}, 'connection', null)
+    expect(setViewedSession).toHaveBeenNthCalledWith(1, 'connection', context)
+    expect(setViewedSession).toHaveBeenNthCalledWith(2, 'connection', null)
   })
 })

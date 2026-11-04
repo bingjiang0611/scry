@@ -56,6 +56,11 @@ export abstract class DesktopRemoteClientBase {
     })
   }
   close(): Promise<void> { return this.dispose() }
+  async setViewedSession(connectionIdValue: string, value: DesktopRemoteContext | null): Promise<void> {
+    const state = await this.state()
+    this.connection(state, connectionIdValue)
+    this.attention?.viewed(connectionIdValue, value === null ? null : context(value))
+  }
 
   protected async state(): Promise<EncryptedState> { this.assertLive(); return this.statePromise }
   protected async load(): Promise<EncryptedState> {

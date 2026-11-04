@@ -73,6 +73,9 @@ export async function startCanonicalRemoteRun(input: RemoteRunInput, deps: Remot
         },
         onTraceEvent,
         onSession: (externalSessionId) => progress(marker({ event: 'session', externalSessionId })),
+        onRegistered: ({ cwd }) => {
+          if (cwd !== routing.cwd) progress(marker({ event: 'bound', ledgerRunId, scryRunId, providerId: routing.providerId, cwd }))
+        },
         permissionModeOverride: deps.permissionModeOverride
       })
       if (completion.recording === 'failed') throw new Error(completion.error ?? 'remote_recording_failed')

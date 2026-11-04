@@ -54,7 +54,7 @@ export interface AppShellProps {
   remoteSurface: ReturnType<typeof useSessionRightSurfaces>['current']['state']
   remotePanelVisible: boolean
   remoteAdoptedSession?: string
-  adoptRemoteSession: (target: RemoteTarget, externalSessionId: string, provider: RemoteProviderRef) => void
+  adoptRemoteSession: (target: RemoteTarget, externalSessionId: string, provider: RemoteProviderRef, executionCwd?: string) => void
   dispatchRemoteSurface: (action: RightSurfaceAction) => void
   returnFromMetaPrompts: () => void
   insertMetaPrompt: (body: string) => void

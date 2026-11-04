@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createRemoteRunBinding } from './remote-run-binding'
+import { createRemoteRunBinding, type RemoteRunBindingDependencies } from './remote-run-binding'
 import type { ProviderRunHandle, ProviderRunRequest } from '../providers/types'
 import type { TraceEvent } from '../../shared/trace'
 
@@ -49,14 +49,19 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
     const workspace = { operationId: '11111111-1111-4111-8111-111111111111', intent: {
       kind: 'current' as const, repositoryId: 'a'.repeat(64), expectedRevision: 'b'.repeat(64)
     } }
-    const startAppRun = vi.fn(async () => ({ status: 'completed' as const, recording: 'committed' as const }))
+    const startAppRun = vi.fn(async (input: Parameters<NonNullable<RemoteRunBindingDependencies['startAppRun']>>[0]) => {
+      input.onRegistered?.({ cwd: '/managed/topic' })
+      return { status: 'completed' as const, recording: 'committed' as const }
+    })
+    const progress = vi.fn()
     await createRemoteRunBinding({ startAppRun, nextScryRunId: () => 'canonical-worktree' })({
       runId: 'ledger-worktree', routing: { cwd: '/source', providerId: 'claude', prompt: 'go', workspace },
-      progress: vi.fn(), output: vi.fn()
+      progress, output: vi.fn()
     })
     expect(startAppRun).toHaveBeenCalledWith(expect.objectContaining({ request: expect.objectContaining({
       cwd: '/source', workspace
     }) }))
+    expect(progress).toHaveBeenCalledWith(expect.stringContaining('"cwd":"/managed/topic"'))
     const { run } = fakeRun(async () => ({ status: 'completed' }))
     await expect(createRemoteRunBinding({ run })({
       runId: 'legacy-worktree', routing: { cwd: '/source', providerId: 'claude', prompt: 'go', workspace },

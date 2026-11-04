@@ -37,7 +37,7 @@ import { remoteHostEnabled } from '../remote/remote-defaults'
 import type { IpcMainInvokeEvent } from 'electron'
 import type { RemoteStatus } from '../../shared/remote'
 
-type RemoteStartOptions = { origin: 'remote'; runId: string; stopSignal: AbortSignal; requestUserInput: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>; ledgerRunId: string; permissionModeOverride?: AgentPermissionMode; providerPrompt?: string; onTraceEvent?: (event: TraceEvent) => void; onSession?: (id: string) => void }
+type RemoteStartOptions = { origin: 'remote'; runId: string; stopSignal: AbortSignal; requestUserInput: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>; ledgerRunId: string; permissionModeOverride?: AgentPermissionMode; providerPrompt?: string; onTraceEvent?: (event: TraceEvent) => void; onSession?: (id: string) => void; onRegistered?: (result: { runId: string; externalSessionId?: string; cwd?: string }) => void }
 type RemoteRuns = { activeStates: () => ActiveRun[]; get: (runId: string) => { state: ActiveRun } | undefined }
 type RemoteReceipts = { submit: (key: string, task: () => Promise<RemoteRunCompletion>) => Promise<{ result: RemoteRunCompletion }> }
 type DeleteOptions = { confirm: boolean; notifyFailure: boolean; conversationId?: string; runIds?: readonly string[]; authorize?: () => void }
@@ -143,7 +143,8 @@ export async function startRemoteHostIfEnabled(runtime: RemoteHostRuntime): Prom
             permissionModeOverride: input.permissionModeOverride,
             providerPrompt: input.providerPrompt,
             onTraceEvent: input.onTraceEvent,
-            onSession: input.onSession
+            onSession: input.onSession,
+            onRegistered: (result) => input.onRegistered?.({ cwd: result.cwd ?? input.request.cwd! })
           })
           return 'remoteCompletion' in started ? started.remoteCompletion : started as RemoteRunCompletion
         }).then((receipt) => receipt.result)

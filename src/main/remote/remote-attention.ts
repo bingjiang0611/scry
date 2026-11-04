@@ -14,7 +14,7 @@ export interface RemoteAttentionSink {
 export interface RemoteAttentionTracker {
   baseline(connectionId: string, sessions: readonly RemoteSessionRef[]): void
   catalog(connectionId: string, catalog: Pick<DesktopRemoteCatalog, 'sessions'>): readonly string[]
-  viewed(connectionId: string, context: DesktopRemoteContext): void
+  viewed(connectionId: string, context: DesktopRemoteContext | null): void
   disconnect(connectionId: string): void
   forget(connectionId: string): void
 }
@@ -59,10 +59,10 @@ export function createRemoteAttentionTracker(publish: RemoteAttentionSink): Remo
       flush()
       return [...result]
     },
-    // Opening a remote session clears its own key; the renderer already shows the run.
+    // Only a focused remote session suppresses its own key. Clearing focus lets a
+    // later completion on that same session become unread again.
     viewed(connectionId, context): void {
-      if (!context.externalSessionId) return
-      viewed.set(connectionId, remoteSessionAttentionKey(connectionId, context))
+      viewed.set(connectionId, context?.externalSessionId ? remoteSessionAttentionKey(connectionId, context) : null)
       sessions.set(connectionId, sessions.get(connectionId) ?? [])
       recompute(connectionId)
       flush()

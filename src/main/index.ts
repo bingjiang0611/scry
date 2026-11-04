@@ -315,7 +315,7 @@ const remoteConnections = createRemoteConnections({
   remoteAttention
 })
 const { requireDesktopRemoteClient, remoteProviderDiscovery, refreshRemoteProviderSnapshot } = remoteConnections
-registerDesktopClientIpc(handleTrusted, requireDesktopRemoteClient, remoteAttention)
+registerDesktopClientIpc(handleTrusted, requireDesktopRemoteClient)
 let remoteProviderRefresh: ReturnType<typeof setInterval> | undefined
 
 function invalidateRemoteProviderMetadata(providerId: ProviderId): void {

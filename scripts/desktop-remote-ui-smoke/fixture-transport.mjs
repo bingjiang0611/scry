@@ -48,6 +48,7 @@ export function fixtureTransport(options) {
     if (request.method === 'workspaceRead') return { name: 'notes.txt', path: 'notes.txt', content: 'original remote file', size: 20, mtimeMs: 1, revision: 'structure-rev', language: 'plaintext' }
     throw new Error('Unexpected remote workspace operation: ' + request.method)
   },
+  async setViewedSession(id, context) { state.viewedSessionCalls.push({ id, context }) },
   async providerControls(id, context) {
     state.providerControlsCalls.push({ id, context: contextFor({ context }) })
     if (state.holdProviderControls) await new Promise(resolve => state.providerControlWaiters.push(resolve))
@@ -134,7 +135,7 @@ export function fixtureTransport(options) {
   },
   async trace(_id, context, runId) {
     state.traceCalls.push({ context: contextFor({ context }), runId })
-    if (context.cwd !== '/fixture/project-a') throw new Error('fixture trace context mismatch: ' + context.cwd)
+    if (context.cwd !== (state.workspaceExecutionCwd ?? '/fixture/project-a')) throw new Error('fixture trace context mismatch: ' + context.cwd)
     if (runId === firstScryRun && state.firstIntentCleared) throw new Error('terminal trace unavailable')
     if (runId === firstScryRun) return activeRun(firstScryRun, 'native-session', 'first remote run', question)
     if (runId === secondScryRun) return activeRun(secondScryRun, 'native-session', 'second remote run', undefined, true)
@@ -147,6 +148,7 @@ export function fixtureTransport(options) {
   },
   async submit(_id, input) {
     state.submitInputs.push(input)
+    state.workspaceExecutionCwd = input.workspace ? '/fixture/project-a-worktrees/alternate' : null
     if (state.autoResetOnSubmit) state.runState = 'dispatched'
     if (state.holdSubmit) await new Promise(resolve => { window.releaseSubmit = resolve })
     const first = state.submitInputs.length === 1
@@ -177,12 +179,16 @@ export function fixtureTransport(options) {
     }
     if (state.intent && !state.intent.context.externalSessionId) {
       state.intent.context.externalSessionId = 'native-session'
+      if (state.workspaceExecutionCwd) {
+        state.intent.context.cwd = state.workspaceExecutionCwd
+        if (!catalog.projects.some(project => project.path === state.workspaceExecutionCwd)) catalog.projects.push({ path: state.workspaceExecutionCwd, label: 'alternate' })
+      }
       if (!catalog.sessions.some(session => session.externalSessionId === 'native-session')) catalog.sessions.push({
         sessionId: 'native-session', externalSessionId: 'native-session', ...state.intent.context, label: 'Adopted remote session', ts: Date.now()
       })
     }
     if (runId === firstLedger) return { state: 'dispatched', scryRunId: firstScryRun, externalSessionId: 'native-session', detail: 'fixture dispatched' }
-    return { state: 'dispatched', scryRunId: secondScryRun, externalSessionId: 'native-session', detail: 'fixture background work' }
+    return { state: 'dispatched', scryRunId: secondScryRun, externalSessionId: 'native-session', ...(state.workspaceExecutionCwd ? { cwd: state.workspaceExecutionCwd } : {}), detail: 'fixture background work' }
   },
   // Host-UI run on old-native: present only while the catalog marks it active.
   async liveRun(_id, context) {

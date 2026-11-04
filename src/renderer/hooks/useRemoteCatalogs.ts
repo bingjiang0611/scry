@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from 'react'
-import type { DesktopRemoteCatalog, DesktopRemoteConnection, RemoteSessionRef } from '@shared/desktop-remote'
+import type { DesktopRemoteCatalog, DesktopRemoteConnection, DesktopRemoteContext, RemoteSessionRef } from '@shared/desktop-remote'
 import { remoteSessionAttentionKey } from '@shared/remote-session-attention'
 import { useVisibilityPolling } from './useVisibilityPolling'
 
@@ -36,7 +36,15 @@ export function viewRemoteSession(key: string | null, focused: boolean): void {
 export function useViewedRemoteSession(connectionId?: string, session?: RemoteSessionRef): void {
   const key = connectionId && session?.externalSessionId ? remoteSessionAttentionKey(connectionId, session) : null
   useEffect(() => {
-    const update = (): void => viewRemoteSession(key, document.hasFocus())
+    const context: DesktopRemoteContext | null = session?.externalSessionId ? {
+      cwd: session.cwd, providerId: session.providerId, externalSessionId: session.externalSessionId,
+      ...(session.agentProfileId ? { agentProfileId: session.agentProfileId } : {})
+    } : null
+    const update = (): void => {
+      const focused = document.hasFocus()
+      viewRemoteSession(key, focused)
+      if (connectionId) void window.scry.desktopRemote.setViewedSession(connectionId, focused ? context : null).catch(() => {})
+    }
     update()
     window.addEventListener('focus', update)
     window.addEventListener('blur', update)
@@ -44,8 +52,9 @@ export function useViewedRemoteSession(connectionId?: string, session?: RemoteSe
       window.removeEventListener('focus', update)
       window.removeEventListener('blur', update)
       viewRemoteSession(null, false)
+      if (connectionId) void window.scry.desktopRemote.setViewedSession(connectionId, null).catch(() => {})
     }
-  }, [key])
+  }, [connectionId, key, session?.agentProfileId, session?.cwd, session?.externalSessionId, session?.providerId])
 }
 
 export function remoteCatalogUnread(catalog: DesktopRemoteCatalog, viewedKey: string | null): ReadonlySet<string> {

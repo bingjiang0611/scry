@@ -32,7 +32,10 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
         if (event.kind !== 'run_progress' || typeof event.detail !== 'string') continue
         try {
           const marker = JSON.parse(event.detail) as Record<string, unknown>
-          if (marker.event === 'bound' && validRunId(marker.scryRunId)) watch.scryRunId = marker.scryRunId
+          if (marker.event === 'bound' && validRunId(marker.scryRunId)) {
+            watch.scryRunId = marker.scryRunId
+            if (text(marker.cwd, 16_384)) watch.cwd = marker.cwd
+          }
           if (marker.event === 'session' && text(marker.externalSessionId, 256)) watch.externalSessionId = marker.externalSessionId
         } catch { /* opaque progress is not evidence */ }
       }
@@ -46,14 +49,22 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
       if (intent && (state === 'settled' || state === 'failed')) {
         stateData.intents = stateData.intents.filter((item) => item.intentId !== intent.intentId)
         await this.save(stateData)
-      } else if (intent && !intent.context.externalSessionId && watch.externalSessionId) {
-        // Keep the host-confirmed session binding across navigation and restart.
-        // This changes no submitted prompt and never replays the original intent.
-        intent.context.externalSessionId = watch.externalSessionId
-        await this.save(stateData)
+      } else if (intent) {
+        let changed = false
+        if (!intent.context.externalSessionId && watch.externalSessionId) {
+          // Keep the host-confirmed session binding across navigation and restart.
+          // This changes no submitted prompt and never replays the original intent.
+          intent.context.externalSessionId = watch.externalSessionId
+          changed = true
+        }
+        if (watch.cwd && intent.context.cwd !== watch.cwd) {
+          intent.context.cwd = watch.cwd
+          changed = true
+        }
+        if (changed) await this.save(stateData)
       }
     }
-    return { state, ...(watch.scryRunId ? { scryRunId: watch.scryRunId } : {}), ...(watch.externalSessionId ? { externalSessionId: watch.externalSessionId } : {}) }
+    return { state, ...(watch.scryRunId ? { scryRunId: watch.scryRunId } : {}), ...(watch.externalSessionId ? { externalSessionId: watch.externalSessionId } : {}), ...(watch.cwd ? { cwd: watch.cwd } : {}) }
   }
 
   // Finds the host's live run on one opened session, whichever client started

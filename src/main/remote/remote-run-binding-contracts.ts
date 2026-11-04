@@ -37,6 +37,7 @@ export interface RemoteRunBindingDependencies {
     requestUserInput(request: AgentQuestionRequest, signal: AbortSignal): Promise<AgentQuestionResponse>
     onTraceEvent(event: TraceEvent): void
     onSession?(externalSessionId: string): void
+    onRegistered?(info: { cwd: string }): void
     permissionModeOverride?: AgentStartRequest['permissionMode']
   }): Promise<RemoteRunCompletion>
   // Legacy seam retained for focused binding tests. Production provides startAppRun.

@@ -47,6 +47,8 @@ export async function runRouting({ driver, localBefore }) {
   await insert('alternate profile prompt')
   await key('Enter')
   await wait('window.desktopRemoteFixture.submitInputs.length === 3', 'alternate profile submit')
+  await wait('window.desktopRemoteFixture.traceCalls.at(-1)?.context.cwd === "/fixture/project-a-worktrees/alternate"', 'managed Worktree trace uses effective host cwd')
+  await wait('document.querySelector(".execution-location.is-remote")?.closest(".tb-thread")?.getAttribute("title") === "/fixture/project-a-worktrees/alternate"', 'managed Worktree execution location adopted')
   const finalState = await fixture()
   check(finalState.submitInputs[2].context.providerId === 'claude' && finalState.submitInputs[2].context.agentProfileId === 'alternate', 'Same-provider profile selection routed to the wrong runtime')
   check(finalState.submitInputs[2].workspace?.intent.kind === 'newWorktree' && !('path' in finalState.submitInputs[2].workspace), 'Remote Worktree submit did not preserve a host-validated selection-only contract')

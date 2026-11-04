@@ -251,6 +251,7 @@ export interface DesktopRemoteRunStatus {
   state: 'recorded' | 'dispatched' | 'settled' | 'failed' | 'unknown'
   scryRunId?: string
   externalSessionId?: string
+  cwd?: string
   detail?: string
 }
 // A host run on an opened session that this client did not submit (host UI,
@@ -292,6 +293,7 @@ export interface DesktopRemoteAPI {
   disconnect(connectionId: string): Promise<void>
   forget(connectionId: string): Promise<void>
   catalog(connectionId: string): Promise<DesktopRemoteCatalog>
+  setViewedSession(connectionId: string, context: DesktopRemoteContext | null): Promise<void>
   providerControls(connectionId: string, context: DesktopRemoteContext): Promise<RemoteProviderRef>
   commands(connectionId: string, context: DesktopRemoteContext): Promise<RemoteCommandCatalog>
   workspaceChoices(connectionId: string, request: WorkspaceChoicesRequest): Promise<ScRead<WorkspaceChoices>>

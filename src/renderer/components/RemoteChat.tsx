@@ -32,7 +32,7 @@ export interface RemoteChatProps {
   scrollRef: RefObject<HTMLDivElement>
   textareaRef: RefObject<HTMLTextAreaElement>
   renderLocationPicker: (menu: { open: boolean; onOpenChange: (open: boolean) => void }) => ReactNode
-  onSessionAdopted: (externalSessionId: string, provider: RemoteProviderRef) => void
+  onSessionAdopted: (externalSessionId: string, provider: RemoteProviderRef, cwd?: string) => void
   surface: {
     target: HTMLElement | null
     primaryVisible: boolean

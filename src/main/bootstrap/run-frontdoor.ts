@@ -16,7 +16,7 @@ export interface AppRunStartOptions {
   /** Sidebar project root for a run prepared in a separate worktree. */
   projectCwd?: string
   /** Host-only registration signal used by managed remote workspace launch. */
-  onRegistered?: (result: { runId: string; externalSessionId?: string }) => void
+  onRegistered?: (result: { runId: string; externalSessionId?: string; cwd?: string }) => void
   origin?: 'local' | 'remote'
   runId?: string
   stopSignal?: AbortSignal

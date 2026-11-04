@@ -13,6 +13,7 @@ export const remoteApi = {
     disconnect: (id) => ipcRenderer.invoke('desktopRemote:disconnect', id),
     forget: (id) => ipcRenderer.invoke('desktopRemote:forget', id),
     catalog: (id) => ipcRenderer.invoke('desktopRemote:catalog', id),
+    setViewedSession: (id, context) => ipcRenderer.invoke('desktopRemote:setViewedSession', id, context),
     providerControls: (id, context) => ipcRenderer.invoke('desktopRemote:providerControls', id, context),
     commands: (id, context) => ipcRenderer.invoke('desktopRemote:commands', id, context),
     workspaceChoices: (id, request) => ipcRenderer.invoke('desktopRemote:workspaceChoices', id, request),

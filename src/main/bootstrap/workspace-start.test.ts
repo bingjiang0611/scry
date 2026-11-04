@@ -31,7 +31,8 @@ describe('workspace run bootstrap', () => {
       const result = await launch(prepared, requestedRunId!, async (register: () => void) => register())
       return { ...result, workspace: prepared }
     })
-    const result = await startWorkspaceRun(request(), { origin: 'remote', runId: 'remote-scry-run' }, {
+    const onRegistered = vi.fn()
+    const result = await startWorkspaceRun(request(), { origin: 'remote', runId: 'remote-scry-run', onRegistered }, {
       sourceControl: { startWorkspace } as unknown as SourceControlService,
       providerRegistry: { get: () => ({ runtimeProvider: 'claude_sdk' }) } as unknown as ProviderRegistry,
       getCurrentCwd: () => '/different/local/project',
@@ -45,6 +46,7 @@ describe('workspace run bootstrap', () => {
       origin: 'remote', runId: 'remote-scry-run', projectCwd: '/source', workspaceAdmission: expect.any(Object)
     }))
     expect(result.runId).toBe('remote-scry-run')
+    expect(onRegistered).toHaveBeenCalledWith({ runId: 'remote-scry-run', cwd: '/managed/worktree' })
     expect('remoteCompletion' in result).toBe(true)
     finish({ status: 'completed', recording: 'committed' })
     if (!('remoteCompletion' in result)) throw new Error('missing remote completion')

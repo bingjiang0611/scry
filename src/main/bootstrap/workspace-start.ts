@@ -49,7 +49,11 @@ export async function startWorkspaceRun(payload: AgentStartRequest, options: App
         let registered = false
         remoteCompletion = deps.start({ ...request, cwd: workspace.cwd, workspace: undefined }, {
           ...startOptions,
-          onRegistered: (value) => { registered = true; resolve(value) }
+          onRegistered: (value) => {
+            registered = true
+            options.onRegistered?.({ ...value, cwd: workspace.cwd })
+            resolve(value)
+          }
         }).then((value) => {
           if ('status' in value) return value
           throw new Error('远程 Worktree 启动缺少终态回执')

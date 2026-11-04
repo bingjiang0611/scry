@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import type { AgentRunControls } from '@shared/runtime'
 import { runStructuralTransition } from '../structural-motion'
-import type { DesktopRemoteRunStatus } from '@shared/desktop-remote'
+import type { DesktopRemoteContext, DesktopRemoteRunStatus } from '@shared/desktop-remote'
 import { remoteQueueKey } from '../remote-prompt-queue'
 import { refreshRemoteCatalog } from '../hooks/useRemoteCatalogs'
 import { useVisibilityPolling } from '../hooks/useVisibilityPolling'
@@ -70,21 +70,21 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
     if (!connected || !catalogReady) return
     let cancelled = false
     // Returns whether the shown run changed, or undefined when this poll went stale.
-    const followTrace = async (runId: string, sequence: number): Promise<boolean | undefined> => {
+    const followTrace = async (runId: string, sequence: number, traceContext: DesktopRemoteContext = context): Promise<boolean | undefined> => {
       const previous = traceViewRef.current?.run.runId === runId ? traceViewRef.current : null
       const knownCount = previous?.run.attachments?.length
       const stale = (): boolean => cancelled || sequence !== pollSequence.current
       if (!traceDelta) {
-        const run = await api.trace(connectionId, context, runId, knownCount)
+        const run = await api.trace(connectionId, traceContext, runId, knownCount)
         if (stale()) return undefined
         const merged = mergeRemoteTrace(previous, { kind: 'snapshot', run })
         if (merged.kind === 'applied') showTrace(merged.view)
         return true
       }
-      let merged = mergeRemoteTrace(previous, await api.traceDelta(connectionId, context, runId, previous?.cursor, knownCount))
+      let merged = mergeRemoteTrace(previous, await api.traceDelta(connectionId, traceContext, runId, previous?.cursor, knownCount))
       if (stale()) return undefined
       // A gap, reset or revision discontinuity never patches the shown run: read it whole.
-      if (merged.kind === 'gap') merged = mergeRemoteTrace(previous, await api.traceDelta(connectionId, context, runId, undefined, knownCount))
+      if (merged.kind === 'gap') merged = mergeRemoteTrace(previous, await api.traceDelta(connectionId, traceContext, runId, undefined, knownCount))
       if (stale()) return undefined
       if (merged.kind === 'gap') throw new Error('remote_trace_gap')
       if (merged.changed) showTrace(merged.view)
@@ -131,8 +131,13 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
         }
         setForeignRun(null)
         const nextStatus = await api.runStatus(connectionId, activeIntent.runId)
+        const effectiveCwd = nextStatus.cwd ?? activeIntent.context.cwd
+        const effectiveContext: DesktopRemoteContext = {
+          ...context, cwd: effectiveCwd,
+          ...(nextStatus.externalSessionId ? { externalSessionId: nextStatus.externalSessionId } : {})
+        }
         const boundQueueKey = nextStatus.externalSessionId
-          ? remoteQueueKey(remoteDraftKey(connectionId, cwd, nextStatus.externalSessionId), providerSelection) : queueKey
+          ? remoteQueueKey(remoteDraftKey(connectionId, effectiveCwd, nextStatus.externalSessionId), providerSelection) : queueKey
         // runStatus may retire the durable receipt. Reconcile App-owned queued
         // work even if navigation cancelled this view while the read was pending.
         if (nextStatus.externalSessionId && !context.externalSessionId) {
@@ -146,7 +151,7 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
           adoptingSession.current = true
           // Text typed while the first run was starting belongs to the adopted session.
           const pendingKey = remoteDraftKey(connectionId, cwd)
-          const adoptedKey = remoteDraftKey(connectionId, cwd, nextStatus.externalSessionId)
+          const adoptedKey = remoteDraftKey(connectionId, effectiveCwd, nextStatus.externalSessionId)
           draftStore.update((drafts) => {
             const pendingDraft = drafts.get(pendingKey)
             if (!pendingDraft || pendingKey === adoptedKey) return drafts
@@ -163,7 +168,9 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
             return next
           })
           setSessionId(nextStatus.externalSessionId)
-          if (provider) onSessionAdopted(nextStatus.externalSessionId, provider)
+        }
+        if (nextStatus.externalSessionId && provider && (!context.externalSessionId || effectiveCwd !== cwd)) {
+          onSessionAdopted(nextStatus.externalSessionId, provider, effectiveCwd)
         }
         // Terminal status retires the main-process receipt. Refresh history even
         // if the last trace read fails, before the next poll drops that receipt.
@@ -173,7 +180,7 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
         }
         let traceChanged: boolean | undefined
         if (nextStatus.scryRunId) {
-          traceChanged = await followTrace(nextStatus.scryRunId, sequence)
+          traceChanged = await followTrace(nextStatus.scryRunId, sequence, effectiveContext)
           if (traceChanged === undefined) return
         } else showTrace(null)
         settlePoll(JSON.stringify([pending, nextStatus]), traceChanged)

@@ -35,6 +35,9 @@ describe('remote attention tracking for the Dock badge', () => {
     tracker.viewed('conn', context)
     tracker.catalog('conn', catalog([session({ lastRunId: 'run-1', lastRunOutcome: 'completed' })]))
     expect(published.at(-1)).toEqual([])
+    tracker.viewed('conn', null)
+    tracker.catalog('conn', catalog([session({ lastRunId: 'run-2', lastRunOutcome: 'completed' })]))
+    expect(published.at(-1)).toHaveLength(1)
   })
 
   it('drops every key for a disconnected host', () => {

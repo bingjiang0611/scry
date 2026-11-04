@@ -1,10 +1,24 @@
 import { randomUUID } from 'node:crypto'
 import { rm } from 'node:fs/promises'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { DesktopRemoteClient } from './desktop-client'
 import { setup, ssh, encrypt, decrypt } from './desktop-client-fixtures'
 
 describe('DesktopRemoteClient session catalog bindings', () => {
+  it('accepts the real composite connection id when focus enters or leaves a session', async () => {
+    const viewed = vi.fn()
+    const attention = { baseline: vi.fn(), catalog: vi.fn(() => []), viewed, disconnect: vi.fn(), forget: vi.fn() }
+    const fixture = await setup({ attention })
+    try {
+      const pending = await fixture.client.pair({ label: 'Attention', ssh, invitation: fixture.invitation })
+      const context = { cwd: '/workspace', providerId: 'pi', externalSessionId: 'native-session' }
+      await fixture.client.setViewedSession(pending.connection.id, context)
+      await fixture.client.setViewedSession(pending.connection.id, null)
+      expect(viewed).toHaveBeenNthCalledWith(1, pending.connection.id, context)
+      expect(viewed).toHaveBeenNthCalledWith(2, pending.connection.id, null)
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
   it('persists the host-confirmed native session binding for first-run receipts across client restart', async () => {
     const runId = randomUUID()
     const fixture = await setup({ submitResponse: () => ({ runId, status: 'recorded' }) })
@@ -16,10 +30,13 @@ describe('DesktopRemoteClient session catalog bindings', () => {
       await fixture.client.connect(id)
       await fixture.client.submit(id, { context: { cwd: '/workspace', providerId: 'pi' }, prompt: 'new session' })
       fixture.tlsRequest.mockResolvedValueOnce({ state: 'dispatched' })
-      fixture.tlsRequest.mockResolvedValueOnce({ poll: { cursor: 1, events: [{ runId, kind: 'run_progress', detail: JSON.stringify({ event: 'session', externalSessionId: 'native-adopted' }) }] } })
-      await expect(fixture.client.runStatus(id, runId)).resolves.toMatchObject({ externalSessionId: 'native-adopted' })
+      fixture.tlsRequest.mockResolvedValueOnce({ poll: { cursor: 1, events: [
+        { runId, kind: 'run_progress', detail: JSON.stringify({ event: 'bound', scryRunId: 'run-managed-1', cwd: '/managed/topic' }) },
+        { runId, kind: 'run_progress', detail: JSON.stringify({ event: 'session', externalSessionId: 'native-adopted' }) }
+      ] } })
+      await expect(fixture.client.runStatus(id, runId)).resolves.toMatchObject({ scryRunId: 'run-managed-1', externalSessionId: 'native-adopted', cwd: '/managed/topic' })
       reloaded = new DesktopRemoteClient({ directory: fixture.directory, encrypt, decrypt }, { openTunnel: fixture.openTunnel, tlsRequest: fixture.tlsRequest })
-      await expect(reloaded.intents(id)).resolves.toMatchObject([{ runId, context: { cwd: '/workspace', providerId: 'pi', externalSessionId: 'native-adopted' } }])
+      await expect(reloaded.intents(id)).resolves.toMatchObject([{ runId, context: { cwd: '/managed/topic', providerId: 'pi', externalSessionId: 'native-adopted' } }])
       expect(fixture.tlsRequest.mock.calls.filter(call => (call[0].request as { op?: string }).op === 'submit')).toHaveLength(1)
     } finally { await reloaded?.dispose(); await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
