@@ -22,7 +22,7 @@ export const LLM_PERFORMANCE_COPY = {
   valueList: (values: string[]) => values.join('、'),
   intervals: { 1: '每 10 分钟', 24: '每 2 小时', 168: '每天' },
   intervalHelp: '每个区间显示中位数、中间 50% 和完整测量范围；少于 3 轮时保留实际测量点。没有测量的时间留空，不补零或连线。',
-  rounds: (complete: number, running: number) => running ? `${complete} + ${running}* 轮` : `${complete} 轮`,
+  rounds: (complete: number, running: number) => running ? `${complete} 轮 · ${running} 暂计` : `${complete} 轮`,
   roundsLabel: (metric: string, complete: number, running: number) => `${metric}：已完成 ${complete} 轮，运行中暂计 ${running} 轮`,
   waitRounds: (rounds: string) => `首 token ${rounds}`,
   firstTokenSummary: (value: string) => `首 token 中位数 ${value} 秒`,

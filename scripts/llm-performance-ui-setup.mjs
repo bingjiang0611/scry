@@ -97,7 +97,7 @@ export async function exerciseLlmPerformanceSetup(contents, win, screenshot, nat
   await wait(`${modal}.querySelector('.llm-perf-mrow .llm-perf-reading').textContent === '62.0'`)
   await click('.llm-perf-range button:nth-child(2)')
   await click('#performance-stream')
-  await wait(`Array.from(${modal}.querySelectorAll('.llm-perf-mrow')).some(node => node.textContent.includes('pi-live-model') && node.textContent.includes('40.0') && node.textContent.includes('1.5') && node.textContent.includes('0 + 1*'))`)
+  await wait(`Array.from(${modal}.querySelectorAll('.llm-perf-mrow')).some(node => node.textContent.includes('pi-live-model') && node.textContent.includes('40.0') && node.textContent.includes('1.5') && node.textContent.includes('0 轮 · 1 暂计'))`)
   if (await read(`${modal}.querySelector('.llm-perf-running, .llm-perf-run') != null`)) throw new Error('Live evidence restored removed cards')
   return { baselineListeners }
 }

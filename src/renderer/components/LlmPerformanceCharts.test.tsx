@@ -15,7 +15,7 @@ describe('performance comparison rendering', () => {
     expect(html).toContain('首 token 中位数<small>秒</small>')
     expect(html).toContain('aria-label="中位速度">25.0</span>')
     expect(html).toContain('aria-label="首 token 中位数">3.5</span>')
-    expect(html).toContain('1 + 1* 轮')
+    expect(html).toContain('1 轮 · 1 暂计')
     expect(html).toContain('aria-pressed="true"')
     expect(html.match(/class="llm-perf-median"/g)).toHaveLength(2)
     expect(html).not.toContain('class="llm-perf-middle"')

@@ -41,7 +41,7 @@ export async function exerciseLlmPerformanceFinish(contents, win, screenshot, na
   const modal = `document.querySelector('.llm-perf-modal')`
   const liveRow = `Array.from(${modal}.querySelectorAll('.llm-perf-mrow')).find(node => node.textContent.includes('pi-live-model'))`
   await click('#performance-group')
-  await wait(`${liveRow}?.textContent.includes('0 + 3*') && ${liveRow}.querySelectorAll('.llm-perf-reading')[0].textContent === '40.0' && ${liveRow}.querySelectorAll('.llm-perf-reading')[1].textContent === '1.5'`)
+  await wait(`${liveRow}?.textContent.includes('0 轮 · 3 暂计') && ${liveRow}.querySelectorAll('.llm-perf-reading')[0].textContent === '40.0' && ${liveRow}.querySelectorAll('.llm-perf-reading')[1].textContent === '1.5'`)
   if (await read(`${modal}.querySelector('.llm-perf-run') != null`)) throw new Error('Running cards reappeared')
   if (await read(`${modal}.querySelector('.llm-perf-notices') != null || /如何读图|含运行中数据/.test(${modal}.textContent)`)) throw new Error('Removed comparison help entries returned with live data')
   if (!await read(`${liveRow}.querySelector('small').getAttribute('aria-label').includes('运行中暂计 3 轮')`)) throw new Error('Live sample evidence was removed with help entries')
@@ -62,7 +62,8 @@ export async function exerciseLlmPerformanceFinish(contents, win, screenshot, na
     })()`)
     if (contrastByTheme[theme] < 4.5) throw new Error('Performance labels lack AA text contrast in ' + theme + ': ' + contrastByTheme[theme])
 
-    if (!await read(`Array.from(${modal}.querySelectorAll('.llm-perf-reading')).every(node => parseFloat(getComputedStyle(node).fontSize) === 21)`)) throw new Error('Metric typography differs from approved draft')
+    if (!await read(`Array.from(${modal}.querySelectorAll('.llm-perf-reading')).every(node => parseFloat(getComputedStyle(node).fontSize) === 20)`)) throw new Error('Metric typography differs from the refined type scale')
+    if (!await read(`parseFloat(getComputedStyle(${modal}.querySelector('.llm-perf-chart > svg')).height) === 208`)) throw new Error('Metric chart does not use the refined plot height')
     await capture('-comparison-' + theme)
   }
   for (const width of [700, 520]) {
@@ -77,7 +78,7 @@ export async function exerciseLlmPerformanceFinish(contents, win, screenshot, na
   await wait('innerWidth === 1000')
   await read("document.documentElement.dataset.theme = 'dark'")
   await click('#performance-ungroup')
-  await wait(`${liveRow}?.textContent.includes('0 + 1*')`)
+  await wait(`${liveRow}?.textContent.includes('0 轮 · 1 暂计')`)
   await click('#performance-focus')
   await read('new Promise(resolve => setTimeout(resolve, 1100))')
   if (!await read(`${liveRow}?.textContent.includes('40.0')`)) throw new Error('Focus changed global measurements')

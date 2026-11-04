@@ -73,7 +73,7 @@ export function MetricChart({ samples, model, metric, from, to, hours, color }: 
   }, [])
   const intervals = useMemo(() => metricIntervals(samples, from, to, INTERVAL_MS[hours]), [samples, from, to, hours])
   const max = metricAxisMax(intervals.map(interval => interval.max))
-  const H = 160, L = 38, R = 12, T = 15, B = 28
+  const H = 208, L = 40, R = 12, T = 16, B = 28
   const x = (ts: number): number => L + (ts - from) / (to - from) * (width - L - R)
   const y = (value: number): number => H - B - value / max * (H - T - B)
   const label = (index: number): string => {
