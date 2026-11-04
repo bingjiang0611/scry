@@ -25,7 +25,7 @@ export function createRemoteRunState(deps: {
   getWindow: () => Pick<BrowserWindow, 'isFocused'> | null
   dockBadge: { markAttention: (key: string, value: { windowFocused: boolean; sessionViewed: boolean; needsAttention: boolean }) => void }
   scopedSessionKey: (sessionId: string) => string
-  runs: { isViewed: (runId: string) => boolean }
+  runs: { isViewed: (runId: string) => boolean; notifyChanged?: () => void }
 }) {
   const state: RunTerminalState = {
     terminalArchiveArgs: undefined,

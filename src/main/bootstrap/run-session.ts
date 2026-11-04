@@ -8,7 +8,9 @@ import type { SessionDiffBaselineRegistry } from '../session-diff'
 import type { DockBadgeState } from '../dock-badge'
 import { updateRunAttachmentOwner } from '../attachment-store'
 
-type SessionRuns = { isViewed: (runId: string) => boolean }
+// `notifyChanged` is the live-run change signal: binding a native session id
+// changes what a paired device reads in the live-run set.
+type SessionRuns = { isViewed: (runId: string) => boolean; notifyChanged?: () => void }
 export function createSessionPublisher(deps: {
   runState: ActiveRun
   providerId: ProviderId
@@ -52,6 +54,9 @@ export function createSessionPublisher(deps: {
     const previousSessionKey = deps.scopedSessionKey(deps.runState.externalSessionId ?? deps.runState.sessionId ?? deps.runId)
     deps.runState.sessionId = sessionId
     deps.runState.externalSessionId = sessionId
+    // The device reads the session binding from the live-run set; without the
+    // signal a Mac run that binds late is only visible on the fallback tick.
+    deps.runs.notifyChanged?.()
     deps.dockBadge.rekey(previousSessionKey, deps.scopedSessionKey(sessionId))
     if (deps.cwd) {
       try { updateRunAttachmentOwner(app.getPath('userData'), deps.runId, { providerId: deps.providerId, cwd: deps.cwd, sessionId }) } catch (error) {

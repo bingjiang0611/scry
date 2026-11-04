@@ -36,6 +36,7 @@ async function fixture() {
   const store = createAppSessionStore(userData)
   const record = vi.spyOn(store, 'record')
   const send = vi.fn()
+  const notifyChanged = vi.fn()
   const getWindow = () => ({ webContents: { send } }) as unknown as BrowserWindow
   const runState: ActiveRun = { runId: 'run-1', userText: 'question', done: false, items: [] }
   let observedSessionId: string | undefined
@@ -50,7 +51,7 @@ async function fixture() {
     sessionDiffBaselines: new SessionDiffBaselineRegistry(),
     sessionByContext: new Map(), sessionAliasesByContext: new Map(), sessionRevisionByContext: new Map(),
     scopedSessionKey: id => id, dockBadge: new DockBadgeState(() => undefined),
-    appSessionStore: () => store, runs: { isViewed: () => false }, getWindow
+    appSessionStore: () => store, runs: { isViewed: () => false, notifyChanged }, getWindow
   })
   const timing: TraceEvent = { id: 'timing', runId: runState.runId, ts: new Date(0).toISOString(), kind: 'model', stage: 'text', text: '' }
   const ctx: RunCompletionContext = {
@@ -71,7 +72,7 @@ async function fixture() {
     markTerminalAttention: () => undefined, firstTextPerf: new PerformanceTrace('test.first_text'),
     runs: { isFocused: () => false }
   }
-  return { ctx, store, record, observed, send, publishSessionId }
+  return { ctx, store, record, observed, send, publishSessionId, notifyChanged }
 }
 
 describe('terminal catalog publication', () => {
@@ -120,5 +121,13 @@ describe('terminal catalog publication', () => {
     expect(current.send).toHaveBeenCalledWith('agent:error', expect.objectContaining({ category: 'catalog', message: expect.stringContaining('catalog write failed') }))
     expect(current.store.load()).toEqual([])
     expect(archiveTraceTurn).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('session binding signal', () => {
+  it('notifies the live-run readers so a bound session is visible without a tick', async () => {
+    const { publishSessionId, notifyChanged } = await fixture()
+    publishSessionId('native-session-1')
+    expect(notifyChanged).toHaveBeenCalled()
   })
 })

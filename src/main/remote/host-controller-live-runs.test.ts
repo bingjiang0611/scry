@@ -69,4 +69,22 @@ describe('live-runs long poll work per idle window', () => {
     expect(woke.runs.map((run) => [run.origin, run.runId])).toEqual([['mac', 'run-abc123-9']])
     expect(source.subscribe).toHaveBeenCalledTimes(1)
   })
+
+  it('wakes the device when a Mac run binds its native session id', async () => {
+    const source = macSource([{ runId: 'run-abc123-7', providerId: 'claude', cwd: AUTHORIZED, prompt: 'mac task', questions: [], stopping: false }])
+    const fixture = await boundController({ macRuns: source })
+    cleanup.push(fixture.close)
+    const { peer } = await pairedPeer(fixture.identity, fixture.controller)
+    const live = await fixture.controller.liveRuns(peer, { waitMs: 0 })
+    expect(live.runs[0]?.externalSessionId).toBeUndefined()
+
+    const started = Date.now()
+    const waiting = fixture.controller.liveRuns(peer, { revision: live.revision, waitMs: 10_000 })
+    // The binding the run-session publisher performs: the id appears, then the
+    // registry signal fires. Without the signal this waits for the fallback tick.
+    source.change([{ runId: 'run-abc123-7', providerId: 'claude', cwd: AUTHORIZED, prompt: 'mac task', externalSessionId: 'native-1', questions: [], stopping: false }])
+    const woke = await waiting
+    expect(Date.now() - started).toBeLessThan(1_000)
+    expect(woke.runs[0]?.externalSessionId).toBe('native-1')
+  })
 })
