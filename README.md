@@ -108,12 +108,12 @@ Linux 打包门禁在 ubuntu 上验证产物布局、原生模块、私有 CLI�
 桌面 App 已自带同源 CLI，并固定通过 App Resources 内的绝对路径驱动 Provider/Hook；安装或更新 App 时会同步更新其私有 CLI，不依赖用户 `PATH` 中的全局版本。下面的 npm 安装仅用于没有桌面 App 的 headless/独立终端环境。
 
 ```bash
-npm install -g scry-turn-recorder@0.2.57
+npm install -g scry-turn-recorder@0.2.59
 scry doctor --workspace /path/to/workspace
 ```
 
 CLI 支持 Node.js 20、22、24，运行平台为 macOS / Linux。Windows 原生当前不在支持范围；
-默认 daemon 使用 Unix socket，rate-native 的 Hook/uploader 也依赖 Unix shell。
+默认 daemon 使用 Unix socket，Hook 与 uploader 也依赖 Unix shell。
 
 独立 npm 安装默认不执行后台更新；可用 `scry upgrade --check` 检查、`scry upgrade` 明确升级。
 需要后台检查兼容更新时显式设置 `SCRY_AUTO_UPDATE=1`；后台任务只检查、不安装，升级仍需前台运行
@@ -122,7 +122,7 @@ CLI 支持 Node.js 20、22、24，运行平台为 macOS / Linux。Windows 原生
 若 npm 的系统全局目录不可写，可安装到用户目录，并确保 `~/.local/bin` 在 `PATH`：
 
 ```bash
-npm install -g --prefix "$HOME/.local" scry-turn-recorder@0.2.57
+npm install -g --prefix "$HOME/.local" scry-turn-recorder@0.2.59
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
