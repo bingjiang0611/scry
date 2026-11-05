@@ -115,6 +115,148 @@ function transcriptLineAnchor(
   return matchesHash || !promptHash && !providerTurnId ? 'turn' : undefined
 }
 
+interface AnchorCacheEntry {
+  /** Byte offset the window starts at (the newline before the anchor line, or 0). */
+  offset: number
+  /** File size already scanned for a newer matching anchor. */
+  scannedTo: number
+  dev: number
+  ino: number
+}
+
+const ANCHOR_CACHE_LIMIT = 32
+const anchorCache = new Map<string, AnchorCacheEntry>()
+
+export function resetTranscriptAnchorCache(): void {
+  anchorCache.clear()
+}
+
+function rememberAnchor(key: string, entry: AnchorCacheEntry): void {
+  anchorCache.delete(key)
+  anchorCache.set(key, entry)
+  while (anchorCache.size > ANCHOR_CACHE_LIMIT) {
+    const oldest = anchorCache.keys().next().value
+    if (typeof oldest !== 'string') break
+    anchorCache.delete(oldest)
+  }
+}
+
+/**
+ * The newest matching anchor in [from, endOffset), read forward only. Returns -1 when that region
+ * holds none. A cached anchor is a candidate, never the answer: the same prompt can be sent twice,
+ * and the full backwards scan always returns the latest match.
+ */
+async function latestAnchorFrom(
+  path: string,
+  from: number,
+  endOffset: number,
+  provider: ProviderId,
+  promptHash?: string,
+  providerTurnId?: string
+): Promise<number> {
+  if (from >= endOffset) return -1
+  const handle = await openFile(path, 'r')
+  const chunkBytes = 1024 * 1024
+  let cursor = from
+  let pending = Buffer.alloc(0)
+  let pendingStart = from
+  let latest = -1
+  try {
+    while (cursor < endOffset) {
+      const length = Math.min(chunkBytes, endOffset - cursor)
+      const chunk = Buffer.allocUnsafe(length)
+      const { bytesRead } = await handle.read(chunk, 0, length, cursor)
+      if (bytesRead !== length) break
+      recordTranscriptAnchorBytes(bytesRead)
+      const combined = pending.length ? Buffer.concat([pending, chunk]) : chunk
+      let lineStart = 0
+      for (;;) {
+        const newline = combined.indexOf(0x0a, lineStart)
+        if (newline < 0) break
+        if (newline > lineStart && transcriptLineAnchor(
+          combined.subarray(lineStart, newline).toString('utf8'), provider, promptHash, providerTurnId
+        )) {
+          latest = Math.max(latest, Math.max(0, pendingStart + lineStart - 1))
+        }
+        lineStart = newline + 1
+      }
+      pending = Buffer.from(combined.subarray(lineStart))
+      pendingStart += lineStart
+      cursor += bytesRead
+    }
+  } finally {
+    await handle.close()
+  }
+  return latest
+}
+
+/** Read the single JSONL line a cached offset points at (the offset may be its preceding newline). */
+async function lineAtAnchor(path: string, offset: number): Promise<string | undefined> {
+  const handle = await openFile(path, 'r')
+  const buffer = Buffer.allocUnsafe(8192)
+  try {
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset)
+    recordTranscriptAnchorBytes(bytesRead)
+    const view = buffer.subarray(0, bytesRead)
+    const start = view[0] === 0x0a ? 1 : 0
+    const end = view.indexOf(0x0a, start)
+    if (end < 0) return undefined
+    return view.subarray(start, end).toString('utf8')
+  } finally {
+    await handle.close()
+  }
+}
+
+/**
+ * Reuse a previously located anchor for the same prompt identity.
+ *
+ * Correctness comes from re-proving every part of the claim: the path is the same file, the line at
+ * the cached offset still passes the anchor test, and only bytes appended since the last scan are
+ * searched for a newer match. Anything unprovable falls back to the full backwards scan.
+ */
+async function anchorOffsetFor(
+  path: string,
+  endOffset: number,
+  provider: ProviderId,
+  promptHash?: string,
+  providerTurnId?: string
+): Promise<number> {
+  // Codex anchors are found through a forward state machine over each scanned chunk, so a single
+  // line cannot re-prove one; its scan also stops at the turn boundary, which is the same work.
+  if (provider === 'codex' || !promptHash && !providerTurnId) {
+    return transcriptAnchorOffset(path, endOffset, provider, promptHash, providerTurnId)
+  }
+  const key = JSON.stringify([path, provider, promptHash ?? '', providerTurnId ?? ''])
+  const cached = anchorCache.get(key)
+  if (cached) {
+    let reusable = false
+    try {
+      const info = await stat(path)
+      // Append-only growth is proven by dev/ino identity and a size that still covers what was
+      // already scanned; a replaced or truncated file cannot reuse this offset.
+      if (info.dev === cached.dev && info.ino === cached.ino && info.size >= cached.scannedTo) {
+        const line = await lineAtAnchor(path, cached.offset)
+        reusable = line !== undefined && !!transcriptLineAnchor(line, provider, promptHash, providerTurnId)
+      }
+    } catch {
+      // An unreadable path falls through to the authoritative scan.
+    }
+    if (reusable) {
+      const newer = await latestAnchorFrom(path, cached.scannedTo, endOffset, provider, promptHash, providerTurnId)
+      const offset = newer >= 0 ? newer : cached.offset
+      rememberAnchor(key, { offset, scannedTo: endOffset, dev: cached.dev, ino: cached.ino })
+      return offset
+    }
+    anchorCache.delete(key)
+  }
+  const offset = await transcriptAnchorOffset(path, endOffset, provider, promptHash, providerTurnId)
+  try {
+    const info = await stat(path)
+    rememberAnchor(key, { offset, scannedTo: endOffset, dev: info.dev, ino: info.ino })
+  } catch {}
+  return offset
+}
+
 async function transcriptAnchorOffset(
   path: string,
   endOffset: number,
@@ -265,13 +407,13 @@ export async function stableTranscript(
     }
     latestIdentity = identity
     if (identity.size === previous) {
-      startOffset = await transcriptAnchorOffset(path, identity.size, provider, promptHash, providerTurnId)
+      startOffset = await anchorOffsetFor(path, identity.size, provider, promptHash, providerTurnId)
       return cachedTranscriptSnapshot({ path, startOffset, stable: true, runId, provider, promptHash, providerTurnId, requestSetId, sessionId, cwd, identity })
     }
     previous = identity.size
     await new Promise((resolve) => setTimeout(resolve, 25))
   }
-  if (latestIdentity) startOffset = await transcriptAnchorOffset(path, latestIdentity.size, provider, promptHash, providerTurnId)
+  if (latestIdentity) startOffset = await anchorOffsetFor(path, latestIdentity.size, provider, promptHash, providerTurnId)
   return latestIdentity
     ? cachedTranscriptSnapshot({
         path,

@@ -18,7 +18,7 @@ export function summarize(input) {
     notes: input.notes,
     scenarios: input.results.map((result) => {
       const groups = new Map()
-      for (const entry of result.stages) {
+      for (const entry of result.stages ?? []) {
         const key = `${entry.name}:${entry.history ?? ''}`
         const group = groups.get(key) ?? {
           name: entry.name, history: entry.history, ms: [], git: entry.git, parse: 0, anchor: 0, rss: 0, records: 0

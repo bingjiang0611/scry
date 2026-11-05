@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -82,6 +82,9 @@ import { handleRecorderHook } from '../src/core/turn-recorder/recorder'
 import { commitRecord, RECORDER_VERSION, listRecords } from '../src/core/turn-recorder/store'
 import { persistTurnDiffContent } from '../src/core/turn-recorder/recorder-turn-state'
 import { contentStoreStats, resetContentStoreStats } from '../src/core/turn-recorder/content-store'
+import { stableTranscript } from '../src/core/turn-recorder/recorder-transcript-cache'
+import { resetTranscriptReadStats, transcriptReadStats } from '../src/core/turn-recorder/recorder-transcript-io'
+import { resetTranscriptAnchorCache, resetTranscriptSnapshotCache } from '../src/core/turn-recorder/recorder-transcript-cache'
 
 const roots: string[] = []
 afterEach(async () => {
@@ -229,3 +232,66 @@ it('measures redundant content publishes for repeated identical payloads', async
     schema: 1, scope: '20 identical patches in one turn', firstWrite: first, alreadyStored: second
   }))
 }, 60_000)
+
+/**
+ * A daemon recovery sweep asks for the same open turn repeatedly while its transcript grows. Measure
+ * that sequence twice: with the anchor cache reset before every call (the pre-cache behaviour, which
+ * rescans the whole window) and with it warm (only appended bytes are searched).
+ */
+it('measures transcript reads across repeated sweeps of one growing open turn', async () => {
+  const root = join(await mkdtemp(join(tmpdir(), 'scry-engine-sweeps-')), 'session.jsonl')
+  roots.push(join(root, '..'))
+  const prompt = 'measure the recovering turn'
+  const promptHash = createHash('sha256').update(prompt).digest('hex')
+  const head = `${JSON.stringify({ type: 'user', message: { role: 'user', content: prompt } })}\n`
+  const filler = (from: number, until: number): string => {
+    const lines = []
+    let written = 0
+    let index = from
+    while (written < until) {
+      const line = `${JSON.stringify({
+        type: 'assistant',
+        message: { role: 'assistant', content: [{ type: 'text', text: `${index}:${'x'.repeat(1024)}` }] },
+        timestamp: new Date(Date.UTC(2026, 0, 1, 0, 0, index % 3600)).toISOString()
+      })}\n`
+      lines.push(line)
+      written += line.length
+      index++
+    }
+    return lines.join('')
+  }
+  const sweeps = 6
+  const turnBytes = 4 * 1024 * 1024
+  const appendBytes = 512 * 1024
+  const baseline = head + filler(0, turnBytes)
+
+  const run = async (cold: boolean): Promise<{ anchorBytes: number; parseBytes: number }> => {
+    await writeFile(root, baseline)
+    resetTranscriptAnchorCache()
+    resetTranscriptSnapshotCache()
+    resetTranscriptReadStats()
+    let index = 1_000_000
+    for (let sweep = 0; sweep < sweeps; sweep++) {
+      if (cold) {
+        resetTranscriptAnchorCache()
+        resetTranscriptSnapshotCache()
+      }
+      await stableTranscript(root, `measure:sweep:${sweep}`, 'claude', promptHash)
+      await appendFile(root, filler(index, appendBytes))
+      index += 4_000
+    }
+    const stats = transcriptReadStats()
+    return { anchorBytes: stats.anchorBytesScanned, parseBytes: stats.bytesRead }
+  }
+
+  const cold = await run(true)
+  const warm = await run(false)
+  console.log('SCRY_TRANSCRIPT_SWEEPS=' + JSON.stringify({
+    schema: 1,
+    scope: `${sweeps} sweeps of one open turn with a ${turnBytes / 1024 / 1024} MB window growing by ${appendBytes / 1024} KB per sweep`,
+    coldAnchorBytes: cold.anchorBytes,
+    warmAnchorBytes: warm.anchorBytes,
+    parseBytesEach: cold.parseBytes,
+    warmParseBytes: warm.parseBytes
+  }))
+}, 180_000)

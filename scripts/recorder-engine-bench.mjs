@@ -23,7 +23,7 @@ import { arch, cpus, loadavg, platform, release, totalmem } from 'node:os'
 import { join } from 'node:path'
 import {
   commitAll, cleanupTemp, git, installGitProbe, loadDist, makeTempRoot, median, newRepo,
-  recordFiles, resetRepo, startRssSampler, waitForRecord, workspaceRoot,
+  buildTranscript, recordFiles, resetRepo, startRssSampler, waitForRecord, workspaceRoot,
   writeRecorderConfig
 } from './recorder-engine-bench-fixtures.mjs'
 import { printTable, summarize } from './recorder-engine-bench-report.mjs'
@@ -188,6 +188,7 @@ async function largeRepo() {
 const largeRepos = new Map()
 
 /** Single-repository workspace: the workspace root is the Git worktree and the config is committed. */
+
 async function smallWorkspace(label, { files = 100 } = {}) {
   const root = await workspaceRoot(tempRoot, label)
   await writeRecorderConfig(root, { workspaceId: label })
@@ -301,24 +302,6 @@ await record('S7', '30 tool calls (60 events), no file changes', async () => {
   return { stages, git: gitTotals(stages) }
 })
 
-async function buildTranscript(path, bytes) {
-  const chunk = 'x'.repeat(1024)
-  const lines = ['{"type":"user","message":{"role":"user","content":"long session prompt"}}']
-  let written = lines[0].length
-  let index = 0
-  while (written < bytes) {
-    const line = JSON.stringify({
-      type: index % 3 === 0 ? 'assistant' : 'progress',
-      message: { role: 'assistant', content: [{ type: 'text', text: `${index}:${chunk}` }] },
-      timestamp: new Date(Date.UTC(2026, 0, 1, 0, 0, index % 3600)).toISOString()
-    })
-    lines.push(line)
-    written += line.length + 1
-    index++
-  }
-  await writeFile(path, `${lines.join('\n')}\n`)
-  return written
-}
 
 await record('S8', 'long transcript (50 MB) turn end', async () => {
   const root = await smallWorkspace('s8', { files: 20 })
@@ -337,6 +320,26 @@ await record('S8', 'long transcript (50 MB) turn end', async () => {
     stages[stages.length - 1].fixture = { transcriptBytes: bytes }
   }
   return { stages, git: gitTotals(stages), fixture: { transcriptBytes: TRANSCRIPT_BYTES } }
+})
+
+await record('S12', 'multi-turn transcript (10 turns, 50 MB), turn end', async () => {
+  const root = await smallWorkspace('s12', { files: 20 })
+  const stages = []
+  for (let round = 0; round < rounds; round++) {
+    const transcript = join(root, `transcript-${round}.jsonl`)
+    const bytes = await buildTranscript(transcript, TRANSCRIPT_BYTES, { turns: 10 })
+    await rm(dataRootOf(root), { recursive: true, force: true })
+    await writeRecorderConfig(root, { workspaceId: 's12' })
+    const before = await recordFiles(dataRootOf(root))
+    // The prompt matches the LAST turn's user line, so this turn's window is 1/10 of the file.
+    stages.push(await stage('start', () => startTurn(root, `s12-${round}`, { prompt: 'long session prompt 9', transcript })))
+    const stop = await stage('end', () => stopTurn(root, `s12-${round}`, { transcript }))
+    stop.recordVisibleMs = await waitForRecord(dataRootOf(root), before)
+    stages.push(stop)
+    await rm(transcript, { force: true })
+    stages[stages.length - 1].fixture = { transcriptBytes: bytes, turns: 10 }
+  }
+  return { stages, git: gitTotals(stages), fixture: { transcriptBytes: TRANSCRIPT_BYTES, turns: 10 } }
 })
 
 function draftFor(root, index) {

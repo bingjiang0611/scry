@@ -235,4 +235,34 @@ export async function statOf(path) {
   try { return await stat(path) } catch { return undefined }
 }
 
+/**
+ * A Claude-shaped JSONL transcript. `turns` user lines split the byte budget, which is what tells a
+ * per-turn window apart from a whole-file read: turn N's own bytes are about `bytes / turns`.
+ */
+export async function buildTranscript(path, bytes, { turns = 1, promptOf = (index) => `long session prompt ${index}` } = {}) {
+  const chunk = 'x'.repeat(1024)
+  const lines = []
+  const share = Math.max(1, Math.floor(bytes / turns))
+  let written = 0
+  let index = 0
+  for (let turn = 0; turn < turns; turn++) {
+    const user = JSON.stringify({ type: 'user', message: { role: 'user', content: promptOf(turn) } })
+    lines.push(user)
+    written += user.length + 1
+    const until = written + (turn === turns - 1 ? Math.max(0, bytes - written) : share)
+    while (written < until) {
+      const line = JSON.stringify({
+        type: index % 3 === 0 ? 'assistant' : 'progress',
+        message: { role: 'assistant', content: [{ type: 'text', text: `${index}:${chunk}` }] },
+        timestamp: new Date(Date.UTC(2026, 0, 1, 0, 0, index % 3600)).toISOString()
+      })
+      lines.push(line)
+      written += line.length + 1
+      index++
+    }
+  }
+  await writeFile(path, `${lines.join('\n')}\n`)
+  return written
+}
+
 export { existsSync, readFile, utimes, writeFile, mkdir, rm, chmod }
