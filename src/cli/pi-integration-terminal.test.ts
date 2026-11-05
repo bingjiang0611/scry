@@ -129,23 +129,40 @@ describe('Pi recorder extension lifecycle', () => {
     roots.push(root)
     const capture = join(root, 'capture.txt')
     const cli = join(root, 'scry')
-    await writeFile(cli, `#!/bin/sh\nprintf '%s' "$*" > ${JSON.stringify(capture)}\ncat >/dev/null\n`)
+    // 只用 shell 内建命令读 stdin：外部 cat 在受限 PATH 下失败也会让脚本继续跑，“跑到过”不等于
+    // “送达过”。delivered 只在 stdin 真的带来 payload 时才写，断言才有意义。
+    await writeFile(cli, `#!/bin/sh\nprintf '%s' "$*" > ${JSON.stringify(capture)}\npayload=''\n` +
+      `while IFS= read -r line || [ -n "$line" ]; do payload="$payload$line"; done\n` +
+      `if [ -n "$payload" ]; then printf '\\ndelivered' >> ${JSON.stringify(capture)}\nfi\n`)
     await chmod(cli, 0o700)
+    const previousConfigured = process.env.SCRY_CLI_PATH
+    const previousSocket = process.env.SCRY_RECORDER_SOCKET
+    const previousTransport = process.env.SCRY_RECORDER_TRANSPORT
     process.env.SCRY_CLI_PATH = cli
     process.env.SCRY_RECORDER_SOCKET = join(root, 'unused.sock')
     process.env.SCRY_RECORDER_TRANSPORT = 'direct'
+    try {
+      const handlers = new Map<string, Array<(event: any, ctx: any) => any>>()
+      const pi = { on(name: string, handler: (event: any, ctx: any) => any) { handlers.set(name, [...(handlers.get(name) ?? []), handler]) } }
+      // @ts-expect-error the distributed Pi extension is runtime JavaScript by design
+      const extension = await import('../../packages/turn-recorder-cli/integrations/pi-scry-recorder.mjs')
+      extension.default(pi)
+      const ctx = { cwd: root, sessionManager: { getSessionId: () => 'pi-direct', getLeafId: () => 'pi-direct-turn' } }
+      for (const handler of handlers.get('before_agent_start') ?? []) await handler({ prompt: 'hello' }, ctx)
 
-    const handlers = new Map<string, Array<(event: any, ctx: any) => any>>()
-    const pi = { on(name: string, handler: (event: any, ctx: any) => any) { handlers.set(name, [...(handlers.get(name) ?? []), handler]) } }
-    // @ts-expect-error the distributed Pi extension is runtime JavaScript by design
-    const extension = await import('../../packages/turn-recorder-cli/integrations/pi-scry-recorder.mjs')
-    extension.default(pi)
-    const ctx = { cwd: root, sessionManager: { getSessionId: () => 'pi-direct', getLeafId: () => 'pi-direct-turn' } }
-    for (const handler of handlers.get('before_agent_start') ?? []) await handler({ prompt: 'hello' }, ctx)
-
-    const args = await readFile(capture, 'utf8')
-    expect(args).toContain('--event UserPromptSubmit')
-    expect(args).not.toContain('--start-daemon')
+      const args = await readFile(capture, 'utf8')
+      expect(args).toContain('--event UserPromptSubmit')
+      expect(args).not.toContain('--start-daemon')
+      // 送达证据：CLI 读到了 payload，而不只是被启动过。
+      expect(args).toContain('delivered')
+    } finally {
+      if (previousConfigured === undefined) delete process.env.SCRY_CLI_PATH
+      else process.env.SCRY_CLI_PATH = previousConfigured
+      if (previousSocket === undefined) delete process.env.SCRY_RECORDER_SOCKET
+      else process.env.SCRY_RECORDER_SOCKET = previousSocket
+      if (previousTransport === undefined) delete process.env.SCRY_RECORDER_TRANSPORT
+      else process.env.SCRY_RECORDER_TRANSPORT = previousTransport
+    }
   })
 
   it('显式 CLI pin 失效或为空时不回退 PATH 中的未知安装', async () => {
