@@ -330,7 +330,8 @@ function armSigint() {
     const handler = sigintHandler
     if (turns.size === 1) {
       const [id, state] = turns.entries().next().value
-      deliver('Stop', stopPayload({ sessionID: id }, state, 'interrupted'))
+      const delivered = deliver('Stop', stopPayload({ sessionID: id }, state, 'interrupted'))
+      if (!delivered.error && delivered.status === 0) turnErrors.delete(id)
     }
     turns.clear()
     sigintHandler = undefined
@@ -394,11 +395,12 @@ export const ScryRecorder = async () => ({
     if (envelope.type === 'session.idle') {
       if (idleSessions.has(id)) return
       const delivered = deliver('Stop', stopPayload(input, state))
-      turns.delete(id)
-      turnErrors.delete(id)
-      disarmSigint()
-      // Failed dispatch is not evidence of a delivered terminal. Do not suppress a later retry.
+      // Failed dispatch is not evidence of a delivered terminal. Keep the turn and its staged
+      // error so the retry carries the same evidence instead of dropping it.
       if (!delivered.error && delivered.status === 0) {
+        turns.delete(id)
+        turnErrors.delete(id)
+        disarmSigint()
         idleSessions.add(id)
         if (idleSessions.size > 128) idleSessions.delete(idleSessions.values().next().value)
       }

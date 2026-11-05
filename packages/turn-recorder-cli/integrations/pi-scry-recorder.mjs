@@ -162,16 +162,26 @@ function resolveExecutable(candidate, source) {
   }
 }
 
+// A pin that exists but cannot be used must never fall through to a guessed installation: the
+// guess is how a workspace silently records with an older CLI. Only an absent pin file means
+// "no pin"; an empty file or an unreadable one is a broken pin.
+function pinnedCliPath(workspace) {
+  try {
+    return { present: true, value: String(readFileSync(join(workspace, '.scry', 'cli-path'), 'utf8')).split('\n')[0].trim() }
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return { present: false }
+    debug('workspace .scry/cli-path cannot be read; refusing PATH fallback')
+    return { present: true, value: '' }
+  }
+}
+
 // 工作区把要用的 CLI 绝对路径写在 .scry/cli-path（`scry init`/`repair` 写入，provider hook 也读它）。
 // 固定猜 ~/.local/bin/scry 会在多份安装并存时静默用错版本，所以固定路径必须先于猜测。
 function executable(workspace) {
   const configured = process.env.SCRY_CLI_PATH
   if (configured !== undefined) return resolveExecutable(configured, 'configured SCRY_CLI_PATH')
-  let pinned
-  try {
-    pinned = String(readFileSync(join(workspace, '.scry', 'cli-path'), 'utf8')).split('\n')[0].trim()
-  } catch {}
-  if (pinned) return resolveExecutable(pinned, 'workspace .scry/cli-path')
+  const pin = pinnedCliPath(workspace)
+  if (pin.present) return resolveExecutable(pin.value, 'workspace .scry/cli-path')
   const candidates = [
     join(homedir(), '.local', 'bin', 'scry'),
     ...String(process.env.PATH || '').split(':').filter(Boolean).map((directory) => join(directory, 'scry')),
