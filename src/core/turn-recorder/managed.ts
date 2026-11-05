@@ -1,5 +1,5 @@
 import { observedInterruptionRecordId, reserveObservedInterruption } from './managed-interruption.js'
-import { isFullToolContentPolicy } from './tool-content.js'
+import { isFullToolContentPolicy, type ToolContentPolicy } from './tool-content.js'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { isAgentTurnRecord, type TurnEvidence, type AgentTurnRecord } from '../../shared/turn-record.js'
@@ -98,13 +98,15 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
   if (mode.status === 'disabled') return mode
   // 记录只保存工作区采集策略允许的正文，且保存的正文必须有本地字节；缺失的正文降级而不是抛错，
   // 准备、提交与重试都使用这份归一化后的证据表示，去重比较才不会把降级当成不一致。
+  // A turn frozen under the full policy keeps its bodies even if the workspace config changed after
+  // it started; the policy this turn promised is the one recorded in its canonical handoff, so a
+  // later retry in another process compares against the same representation.
+  const toolContentPolicy = input.toolContentPolicy ?? mode.enablement.config.capture
   const evidence = await applyCapturePolicy(input.evidence, mode.enablement.dataRoot, {
-    // A turn frozen under the full policy keeps its bodies even if the workspace config changed
-    // after it started; the recorded policy is the one this turn promised.
-    keepToolOutputBody: isFullToolContentPolicy(input.toolContentPolicy ?? mode.enablement.config.capture)
+    keepToolOutputBody: isFullToolContentPolicy(toolContentPolicy)
   })
   const protectedInput = { ...input, evidence }
-  assertProtectedToolEvidence(evidence, isFullToolContentPolicy(input.toolContentPolicy) ? input.toolContentPolicy : mode.enablement.config.capture)
+  assertProtectedToolEvidence(evidence, toolContentPolicy)
   assertExactText(evidence.user, input.userText, 'user')
   if (evidence.assistant.status !== 'unavailable' && evidence.assistant.quality === 'inferred' &&
     evidence.assistant.omissionReason?.includes(CONTENT_MISSING_REASON)) {
@@ -241,6 +243,7 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
       archiveFingerprint: input.archiveFingerprint,
       preparedAt: new Date().toISOString(),
       record: draft,
+      toolContentPolicy,
       uploadEnvironment: open.uploadEnvironment
     }
     await writeJsonAtomic(canonicalPath(root, open.generation), handoff)
@@ -311,6 +314,14 @@ export async function deliverCommitNotifications(
   await drain()
 }
 
+function recordKeepsToolBodies(record: AgentTurnRecord): boolean {
+  // Presence, not content: a full-policy turn whose body was lost keeps the omitted envelope, while
+  // the summary policy removes the output field entirely.
+  return [record.tools, record.skills, record.mcps]
+    .flatMap((section) => section.value ?? [])
+    .some((call) => 'outputContent' in call)
+}
+
 export async function commitManagedRecorderTurn(input: {
   workspace: string
   provider: ManagedRecorderProviderId
@@ -323,23 +334,33 @@ export async function commitManagedRecorderTurn(input: {
   evidence: TurnEvidence
   timing: ManagedTurnTiming
   status: AgentTurnRecord['status']
+  /** 这一轮冻结的策略；省略时用 canonical handoff 里记录的那份，再退回当前工作区配置。 */
+  toolContentPolicy?: ToolContentPolicy
   env?: NodeJS.ProcessEnv
   commitNotifications?: CommitNotificationDelivery
 }): Promise<ManagedTurnResult> {
   const mode = await managedRecorderMode(input.workspace, input.env)
   if (mode.status === 'disabled') return mode
   const { enablement } = mode
-  // Same normalisation as prepare: a retry compares against the record's own representation.
-  const protectedInput = {
-    ...input,
-    evidence: await applyCapturePolicy(input.evidence, enablement.dataRoot, {
-      keepToolOutputBody: isFullToolContentPolicy(enablement.config.capture)
-    })
-  }
   const result = await withRecorderSessionLock(enablement.dataRoot, input.provider, input.sessionId, async () => {
     const duplicate = await recordById(enablement.dataRoot, input.recordId)
     const root = recorderSessionRoot(enablement.dataRoot, input.provider, input.sessionId)
     const existing = await handoffForRun(root, input.runId)
+    // Same normalisation as prepare, against the policy this turn froze. Falling back to the current
+    // workspace config would re-trim a full-policy turn when the user narrows capture mid-turn and
+    // make the retry look like different evidence.
+    const frozen = existing?.handoff.toolContentPolicy ?? input.toolContentPolicy
+    const keepToolOutputBody = frozen
+      ? isFullToolContentPolicy(frozen)
+      : duplicate
+        // 提交成功后 canonical handoff 会被清掉，这一轮冻结的策略只剩记录自己可证：full 策略的轮次
+        // 保留了工具输出正文。用它而不是当前配置比较重试，中途收窄采集策略才不会改写已有证据。
+        ? recordKeepsToolBodies(duplicate)
+        : isFullToolContentPolicy(enablement.config.capture)
+    const protectedInput = {
+      ...input,
+      evidence: await applyCapturePolicy(input.evidence, enablement.dataRoot, { keepToolOutputBody })
+    }
     if (duplicate && !existing) {
       assertDuplicateMatchesInput(duplicate, protectedInput)
       return { status: 'duplicate' as const, recordId: duplicate.recordId, record: duplicate }
