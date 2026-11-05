@@ -20,7 +20,7 @@ import { stableTranscript } from './recorder-transcript-cache.js'
 export type { RecorderHookInput, RecorderHookResult, RecorderRecoveryProbe } from './recorder-contracts.js'
 export { OPEN_TURN_EXPIRY_MS, resolveModelIdentity, subagentScopedPayload } from './recorder-contracts.js'
 export { lifecycleTraceEvents } from './recorder-lifecycle-events.js'
-export { readTranscriptWindow, type TranscriptSnapshotIdentity } from './recorder-transcript-io.js'
+export { readTranscriptWindow, transcriptReadStats, resetTranscriptReadStats, type TranscriptSnapshotIdentity } from './recorder-transcript-io.js'
 export { transcriptSnapshotCacheStats, resetTranscriptSnapshotCache } from './recorder-transcript-cache.js'
 export { mergeTurnTraceEvents } from './recorder-trace-merge.js'
 

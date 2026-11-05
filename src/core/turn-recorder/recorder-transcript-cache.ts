@@ -5,7 +5,7 @@ import type { ProviderId } from '../../shared/provider.js'
 import { parseTranscriptSnapshot } from './recorder-transcript-parse.js'
 import { nestedRecord, stringAt, type TranscriptRead } from './recorder-contracts.js'
 import { textContent } from './recorder-codex-calls.js'
-import type { TranscriptSnapshotIdentity } from './recorder-transcript-io.js'
+import { recordTranscriptAnchorBytes, type TranscriptSnapshotIdentity } from './recorder-transcript-io.js'
 
 interface TranscriptSnapshotCacheEntry {
   key: string
@@ -134,6 +134,7 @@ async function transcriptAnchorOffset(
       const start = Math.max(0, cursor - chunkBytes)
       const chunk = Buffer.allocUnsafe(cursor - start)
       const { bytesRead } = await handle.read(chunk, 0, chunk.length, start)
+      recordTranscriptAnchorBytes(bytesRead)
       if (bytesRead !== chunk.length) return 0
       const combined = Buffer.concat([chunk, suffix])
       let lineEnd = combined.length
