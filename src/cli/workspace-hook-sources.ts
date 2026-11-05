@@ -28,6 +28,11 @@ export function isSessionEndEvent(provider: Exclude<InitProvider, 'opencode'>, e
   return PROVIDER_SESSION_END_EVENTS[provider].includes(event)
 }
 export const HANDLER_ID = 'turn-recorder-v1'
+/**
+ * 投递未成功的退出码。Provider 的 hook 仍然 exit 0（观测失败不能阻断 Agent）；只有 OpenCode 插件
+ * 需要区分“真的送达”和“跳过了”，否则一次失败的 Stop 会被当成终态已交付。
+ */
+export const HOOK_UNDELIVERED_STATUS = 3
 export const CONFIG_PATHS: Record<Exclude<InitProvider, 'opencode'>, string> = {
   claude: '.claude/settings.local.json',
   codex: '.codex/hooks.json',
@@ -48,12 +53,18 @@ set -u
 unset SCRY_RECORDER_DAEMON_TRIED
 workspace="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 0
 # Failure-only diagnostics: the successful fast path starts no extra process.
+not_delivered() {
+  # OpenCode 的插件是本脚本唯一的调用方：它必须知道这次没有送达，才会保留暂存的终态错误并在下一次
+  # session.idle 重试。Provider 自己的 hook 一律 exit 0——观测失败绝不能阻断 Agent 运行。
+  [ "$provider" = opencode ] && exit ${HOOK_UNDELIVERED_STATUS}
+  exit 0
+}
 skip() {
   # Invalid storage must not turn an observational error into a write outside this workspace.
-  [ ! -L "$workspace/.scry" ] && [ ! -L "$workspace/.scry/logs" ] && [ ! -L "$workspace/.scry/logs/hook-skip.log" ] || exit 0
+  [ ! -L "$workspace/.scry" ] && [ ! -L "$workspace/.scry/logs" ] && [ ! -L "$workspace/.scry/logs/hook-skip.log" ] || not_delivered
   (umask 077; mkdir -p "$workspace/.scry/logs" &&
     printf '%s\\t%s\\t%s\\t%s\\t%s\\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$provider" "$event" "$1" "\${2:-0}" >> "$workspace/.scry/logs/hook-skip.log") 2>/dev/null || :
-  exit 0
+  not_delivered
 }
 provider="\${1:-unknown}"
 event="\${2:-unknown}"
@@ -287,6 +298,8 @@ function deliver(event, payload) {
     timeout: event === 'Stop' ? 15000 : 10000
   })
   if (result.error) process.stderr.write('[scry-recorder] ' + event + ': ' + result.error.message + '\\n')
+  // 未送达不是异常：本插件保留这一轮和暂存错误，下一次 session.idle 重试。
+  else if (result.status !== 0) process.stderr.write('[scry-recorder] ' + event + ': not delivered (exit ' + result.status + ')\\n')
   return result
 }
 
