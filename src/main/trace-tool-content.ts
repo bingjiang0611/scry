@@ -37,15 +37,14 @@ export async function persistTraceToolEvents(
   const bounded: TraceEvent[] = []
   // Do not retain every serialized body in a turn concurrently while loading old archives.
   for (const event of events) {
-    const output = event.stage === 'tool_result'
     // One event remains the batch boundary. Both authorities must be durable before the live queue
     // can publish its reference; the offline CLI cannot depend on App data.
     const appRoot = appTraceContentRoot(userDataDir, cwd)
-    const roots: [string, ...string[]] = recorder && (!output || recorder.toolOutput === 'full')
-      ? [appRoot, recorder.root]
-      : [appRoot]
+    // 采集策略按字段判定，不按事件类型：tool_result 也可能带工具入参正文，而工具入参始终属于工作区库。
+    const roots = (field: 'input' | 'output'): [string, ...string[]] =>
+      recorder && (field === 'input' || recorder.toolOutput === 'full') ? [appRoot, recorder.root] : [appRoot]
     bounded.push(...await persistToolEventContent([event], TRACE_TOOL_CONTENT_POLICY, APP_TRACE_CONTENT_SOURCE,
-      async (content, encoding) => writeRecorderContentCopies(roots, content, encoding)))
+      async (content, encoding, field) => writeRecorderContentCopies(roots(field), content, encoding)))
   }
   return bounded
 }

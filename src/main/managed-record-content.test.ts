@@ -3,17 +3,24 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { TraceEvent } from '../shared/trace'
 import type { AgentTurnRecord, TurnCall, TurnEvidence } from '../shared/turn-record'
-import type { ToolContentRef } from '../shared/tool-content'
+import type { ToolContent, ToolContentRef } from '../shared/tool-content'
 import { aggregateTurnEvidence } from '../core/turn-recorder/aggregate'
 import { readRecorderContent } from '../core/turn-recorder/content-store'
-import { CONTENT_MISSING_REASON } from '../core/turn-recorder/managed-evidence'
+import { applyCapturePolicy, CONTENT_MISSING_REASON } from '../core/turn-recorder/managed-evidence'
 import { listRecords } from '../core/turn-recorder/store'
 import { persistTraceToolEvents, TRACE_TOOL_CONTENT_POLICY, type TraceRecorderIngestion } from './trace-tool-content'
+import { commitManagedRecorderTurn, prepareManagedRecorderTurn } from '../core/turn-recorder/managed'
 import { commitManagedTraceTurn, type ManagedTraceTurnCommitInput } from './managed-turn-commit'
 import { fixture, input, startManaged } from './managed-turn-tests/fixture.test'
 
 const OUTPUT = `full output body ${'payload '.repeat(2_000)}end`
 const INPUT = { command: `ls ${'long-argument '.repeat(600)}` }
+
+const summaryCapture = JSON.stringify({
+  schemaVersion: 1, enabled: true, workspaceId: 'managed-main-fixture', dataDir: '.scry',
+  repositories: { mode: 'workspace-only' },
+  capture: { prompt: true, assistant: true, toolOutput: 'summary', diff: true, hooks: true }
+})
 
 const fullCapture = JSON.stringify({
   schemaVersion: 1, enabled: true, workspaceId: 'managed-main-fixture', dataDir: '.scry',
@@ -183,15 +190,126 @@ describe('managed record capture policy', () => {
       bytes: 32,
       encoding: 'utf8' as const
     }
-    evidence.assistant = { ...before, value: { ...before.value!, contentRefs: [ghost] } }
+    evidence.assistant = {
+      ...before,
+      omissionReason: 'provider reported a partial assistant body',
+      value: { ...before.value!, contentRefs: [ghost] }
+    }
 
     await commitManagedTraceTurn({ ...request, turn: { ...request.turn, turnEvidence: evidence } }, { waitMs: 0 })
 
     const [record] = await listRecords(dataRoot)
     expect(record.assistant.status).toBe('partial')
     expect(record.assistant.quality).toBe('inferred')
-    expect(record.assistant.omissionReason).toBe(CONTENT_MISSING_REASON)
+    // 既有 omissionReason 必须保留，只追加新的原因，否则一次降级会抹掉 Provider 一侧的说明。
+    expect(record.assistant.omissionReason).toBe(`provider reported a partial assistant body; ${CONTENT_MISSING_REASON}`)
     expect(record.assistant.value?.contentRefs).toBeUndefined()
     expect(record.assistant.value?.text).toBe(before.value?.text)
+  })
+
+  it('provider_missing、truncated、omitted 原样保留，只有悬空引用与自相矛盾的 complete 才算丢失', async () => {
+    const { workspace, userDataDir } = await fixture()
+    await startManaged(workspace)
+    const base = input(workspace, userDataDir)
+    const dataRoot = join(workspace, '.scry')
+    const { request } = await withToolCall(base, { root: dataRoot, toolOutput: 'full' })
+    const evidence = request.turn.turnEvidence!
+    const call = callById(evidence)!
+    const envelope = { source: 'provider_adapter', redaction: 'not_run' as const, encoding: 'utf8' as const }
+    const preserved: ToolContent[] = [
+      // Provider 自己说没给正文：保留这个含义，不改写成 Scry 没采集。
+      { ...envelope, storage: 'omitted', sourceCompleteness: 'unavailable', savedBytes: 0, reasons: ['provider_missing'] },
+      { ...envelope, storage: 'truncated', sourceCompleteness: 'partial', savedBytes: 12, reasons: ['source_truncated'], content: 'clipped body' },
+      { ...envelope, storage: 'omitted', sourceCompleteness: 'unavailable', savedBytes: 0, reasons: ['not_collected'] }
+    ]
+    const trimmed = await applyCapturePolicy({
+      ...evidence,
+      tools: {
+        status: 'available',
+        quality: 'exact',
+        source: ['scry_provider_adapter'],
+        value: preserved.map((outputContent, index) => ({
+          ...call,
+          id: `kept-${index}`,
+          inputContent: undefined,
+          outputContent,
+          outputSummary: `summary ${index}`
+        }))
+      }
+    }, dataRoot, { keepToolOutputBody: true })
+
+    // 采集策略以外的裁剪是上游事实，不是 Scry 丢正文：既不改写 storage，也不丢摘要，也不把分区降级。
+    expect(trimmed.tools.value!.map((item) => item.outputContent)).toEqual(preserved)
+    expect(trimmed.tools.value!.map((item) => item.outputSummary)).toEqual(['summary 0', 'summary 1', 'summary 2'])
+    expect(trimmed.tools.status).toBe('available')
+    expect(trimmed.tools.quality).toBe('exact')
+    expect(trimmed.tools.omissionReason).toBeUndefined()
+  })
+
+  it('轮次中途把 full 改成 summary：重试仍按这一轮冻结的策略提交，正文不丢也不报错', async () => {
+    const { workspace, userDataDir } = await fixture()
+    await writeFile(join(workspace, 'scry.config.json'), fullCapture)
+    await startManaged(workspace)
+    const base = input(workspace, userDataDir)
+    const dataRoot = join(workspace, '.scry')
+    const { request } = await withToolCall(base, { root: dataRoot, toolOutput: 'full' })
+    const evidence = request.turn.turnEvidence!
+    const prepareInput = {
+      workspace,
+      provider: 'codex' as const,
+      sessionId: request.sessionId,
+      providerTurnId: request.providerTurnId,
+      runId: request.turn.runId,
+      userText: request.turn.userText,
+      evidence,
+      timing: request.timing,
+      status: request.status,
+      archiveFingerprint: 'fingerprint-frozen-policy',
+      toolContentPolicy: { toolOutput: 'full' as const, toolContentFieldBytes: 8 * 1024, toolContentTurnBytes: 128 * 1024 }
+    }
+    const prepared = await prepareManagedRecorderTurn(prepareInput)
+    expect(prepared).toMatchObject({ status: 'prepared' })
+    // 用户在这一轮中途把采集策略收窄：已经承诺过 full 的这一轮不能因此被重新裁剪。
+    await writeFile(join(workspace, 'scry.config.json'), summaryCapture)
+    const commitInput = {
+      workspace,
+      provider: 'codex' as const,
+      sessionId: request.sessionId,
+      runId: request.turn.runId,
+      recordId: (prepared as { recordId: string }).recordId,
+      archiveFingerprint: 'fingerprint-frozen-policy',
+      providerTurnId: request.providerTurnId,
+      userText: request.turn.userText,
+      evidence,
+      timing: request.timing,
+      status: request.status
+    }
+    const committed = await commitManagedRecorderTurn(commitInput)
+    const retry = await commitManagedRecorderTurn(commitInput)
+    expect(committed.status).toBe('committed')
+    expect(retry).toMatchObject({ status: 'duplicate', recordId: committed.status === 'committed' ? committed.recordId : '' })
+    expect(await listRecords(dataRoot)).toHaveLength(1)
+
+    const [record] = await listRecords(dataRoot)
+    const outputRef = callById(record)!.outputContent?.contentRef
+    expect(outputRef).toBeDefined()
+    expect(await readRecorderContent(dataRoot, outputRef!)).toBe(OUTPUT)
+  })
+
+  it('tool_result 事件携带的工具入参正文也写进工作区库，summary 只裁输出', async () => {
+    const { workspace, userDataDir } = await fixture()
+    const dataRoot = join(workspace, '.scry')
+    const event: TraceEvent = {
+      id: 'result-with-input', ts: '2026-07-29T12:00:05.000Z', runId: 'run-1', kind: 'tool',
+      stage: 'tool_result', tool: 'Bash', toolUseId: 'call-1', input: INPUT, output: OUTPUT
+    }
+    const [stored] = await persistTraceToolEvents(userDataDir, workspace, [event], { root: dataRoot, toolOutput: 'summary' })
+    const inputRef = stored.inputContent?.contentRef
+    expect(inputRef).toBeDefined()
+    expect(JSON.parse(await readRecorderContent(dataRoot, inputRef!))).toEqual(INPUT)
+    // 输出正文留在 App 侧：工作区库不接受策略以外的输出字节。
+    expect(stored.outputContent?.contentRef).toBeDefined()
+    await expect(readRecorderContent(dataRoot, stored.outputContent!.contentRef!)).rejects.toThrow()
+    for (const body of await storedBodies(dataRoot)) expect(body).not.toContain(OUTPUT)
   })
 })
