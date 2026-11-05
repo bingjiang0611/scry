@@ -9,6 +9,7 @@ import { createAppSessionStore } from '../app-store'
 import { DockBadgeState } from '../dock-badge'
 import { SessionDiffBaselineRegistry } from '../session-diff'
 import { createTraceRuntime } from './trace-runtime'
+import type { TraceRecorderIngestion } from '../trace-tool-content'
 import { createLiveRunState } from './run-live-state'
 
 const receipts = vi.hoisted(() => ({
@@ -33,10 +34,10 @@ vi.mock('../trace-tool-content', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../trace-tool-content')>()
   return {
     ...actual,
-    persistTraceToolEvents: async (userDataDir: string, cwd: string, events: TraceEvent[], recorderRoot?: string) => {
+    persistTraceToolEvents: async (userDataDir: string, cwd: string, events: TraceEvent[], recorder?: TraceRecorderIngestion) => {
       gate.signal()
       await gate.released
-      return await actual.persistTraceToolEvents(userDataDir, cwd, events, recorderRoot)
+      return await actual.persistTraceToolEvents(userDataDir, cwd, events, recorder)
     }
   }
 })

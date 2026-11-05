@@ -95,6 +95,46 @@ describe('scry doctor schema and exit codes', () => {
     expect(report.status).toBe('healthy')
   })
 
+  it('最新记录是本版本、旧版本仍在写批次时也报版本漂移', async () => {
+    const root = await workspace()
+    for (const session of ['batch-a', 'batch-b', 'batch-c']) {
+      await handleRecorderHook({
+        provider: 'claude',
+        event: 'UserPromptSubmit',
+        workspace: root,
+        payload: { session_id: session, timestamp: '2026-07-19T12:00:00.000Z', prompt: 'x' }
+      })
+      await handleRecorderHook({
+        provider: 'claude',
+        event: 'Stop',
+        workspace: root,
+        payload: { session_id: session, timestamp: '2026-07-19T12:00:01.000Z' }
+      })
+    }
+    // 较新安装写了最新一条，另一份旧安装仍留在批次里。只看“最新记录”会误判健康。
+    const names = (await readdir(join(root, '.scry', 'records'))).sort()
+    expect(names).toHaveLength(3)
+    for (const name of names.slice(0, 2)) {
+      const file = join(root, '.scry', 'records', name)
+      const record = JSON.parse(await readFile(file, 'utf8')) as Record<string, any>
+      await writeFile(file, JSON.stringify({ ...record, recorderVersion: '0.1.0' }))
+    }
+
+    const stdout = captureStdout()
+    await expect(runScryCli(['doctor', '--workspace', root])).resolves.toBe(0)
+    const report = JSON.parse(stdout.text()) as Record<string, any>
+    const check = report.checks.find((c: any) => c.id === 'recorder.version')
+    expect(check.status).toBe('warn')
+    expect(check.detail).toContain('0.1.0×2')
+    expect(check.detail).toContain(`${RECORDER_VERSION}×1`)
+    expect(report.recorderVersions.recent).toEqual([
+      expect.objectContaining({ version: '0.1.0', records: 2 }),
+      expect.objectContaining({ version: RECORDER_VERSION, records: 1 })
+    ])
+    // 旧版本仍能正确记录：只告警，不把工作区判成不健康。
+    expect(report.status).toBe('healthy')
+  })
+
   it('静默 open 轮次报诊断警告，但不引导用户伪造中断', async () => {
     const root = await workspace()
     // 三天前开始、没有 transcript：终态仍未知。

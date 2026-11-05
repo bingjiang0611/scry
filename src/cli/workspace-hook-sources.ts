@@ -28,6 +28,11 @@ export function isSessionEndEvent(provider: Exclude<InitProvider, 'opencode'>, e
   return PROVIDER_SESSION_END_EVENTS[provider].includes(event)
 }
 export const HANDLER_ID = 'turn-recorder-v1'
+/**
+ * 投递未成功的退出码。Provider 的 hook 仍然 exit 0（观测失败不能阻断 Agent）；只有 OpenCode 插件
+ * 需要区分“真的送达”和“跳过了”，否则一次失败的 Stop 会被当成终态已交付。
+ */
+export const HOOK_UNDELIVERED_STATUS = 3
 export const CONFIG_PATHS: Record<Exclude<InitProvider, 'opencode'>, string> = {
   claude: '.claude/settings.local.json',
   codex: '.codex/hooks.json',
@@ -48,12 +53,18 @@ set -u
 unset SCRY_RECORDER_DAEMON_TRIED
 workspace="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 0
 # Failure-only diagnostics: the successful fast path starts no extra process.
+not_delivered() {
+  # OpenCode 的插件是本脚本唯一的调用方：它必须知道这次没有送达，才会保留暂存的终态错误并在下一次
+  # session.idle 重试。Provider 自己的 hook 一律 exit 0——观测失败绝不能阻断 Agent 运行。
+  [ "$provider" = opencode ] && exit ${HOOK_UNDELIVERED_STATUS}
+  exit 0
+}
 skip() {
   # Invalid storage must not turn an observational error into a write outside this workspace.
-  [ ! -L "$workspace/.scry" ] && [ ! -L "$workspace/.scry/logs" ] && [ ! -L "$workspace/.scry/logs/hook-skip.log" ] || exit 0
+  [ ! -L "$workspace/.scry" ] && [ ! -L "$workspace/.scry/logs" ] && [ ! -L "$workspace/.scry/logs/hook-skip.log" ] || not_delivered
   (umask 077; mkdir -p "$workspace/.scry/logs" &&
     printf '%s\\t%s\\t%s\\t%s\\t%s\\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$provider" "$event" "$1" "\${2:-0}" >> "$workspace/.scry/logs/hook-skip.log") 2>/dev/null || :
-  exit 0
+  not_delivered
 }
 provider="\${1:-unknown}"
 event="\${2:-unknown}"
@@ -187,6 +198,8 @@ import { fileURLToPath } from 'node:url'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const hook = resolve(root, '.scry/provider-hook.sh')
 const turns = new Map()
+// Provider 终态错误只在本进程内暂存到下一个 session.idle；没有错误就不带这个字段。
+const turnErrors = new Map()
 // session.idle can repeat without new work. Retain only this instance's last 128 idle sessions;
 // after eviction/reload the first unpaired idle is unknown and must still reach the recorder.
 const idleSessions = new Set()
@@ -197,6 +210,13 @@ const first = (...values) => values.find((value) => value !== undefined && value
 const text = (parts) => Array.isArray(parts)
   ? parts.filter((part) => part?.type === 'text' && !part.ignored).map((part) => part.text).filter(Boolean).join('\\n')
   : ''
+// session.error 的错误对象形状不稳定：优先取可读消息，退回到错误名。
+const errorDetail = (error) => {
+  const value = object(error)
+  const data = object(value.data)
+  const detail = first(value.message, data.message, value.name, data.name)
+  return detail === undefined ? undefined : String(detail)
+}
 
 function utf8Prefix(value, limit) {
   const source = Buffer.from(String(value ?? ''))
@@ -278,6 +298,8 @@ function deliver(event, payload) {
     timeout: event === 'Stop' ? 15000 : 10000
   })
   if (result.error) process.stderr.write('[scry-recorder] ' + event + ': ' + result.error.message + '\\n')
+  // 未送达不是异常：本插件保留这一轮和暂存错误，下一次 session.idle 重试。
+  else if (result.status !== 0) process.stderr.write('[scry-recorder] ' + event + ': not delivered (exit ' + result.status + ')\\n')
   return result
 }
 
@@ -299,9 +321,12 @@ function payload(event, input, output = {}, turnId) {
 function stopPayload(input, state, status) {
   const assistant = utf8Prefix(state ? [...state.assistant.values()].join('\\n') : '', 262144)
   const observedUsage = usage(state)
+  // 终态错误必须随 Stop 上报，否则失败的一轮会被记成 completed 且 errors 为空。
+  const failure = turnErrors.get(sessionId(input))
   return {
     ...payload('Stop', input, {}, state?.turnId),
     assistant_response: assistant.value,
+    ...(failure ? { error: failure } : {}),
     ...(assistant.capture ? { scry_capture: { schemaVersion: 1, fields: { assistant_response: assistant.capture } } } : {}),
     ...(observedUsage ? {
       // Older recorders must see unavailable, never an exact partial sum.
@@ -318,7 +343,8 @@ function armSigint() {
     const handler = sigintHandler
     if (turns.size === 1) {
       const [id, state] = turns.entries().next().value
-      deliver('Stop', stopPayload({ sessionID: id }, state, 'interrupted'))
+      const delivered = deliver('Stop', stopPayload({ sessionID: id }, state, 'interrupted'))
+      if (!delivered.error && delivered.status === 0) turnErrors.delete(id)
     }
     turns.clear()
     sigintHandler = undefined
@@ -341,6 +367,7 @@ export const ScryRecorder = async () => ({
     const prompt = first(input?.prompt, text(input?.parts), text(output?.parts), '')
     const turnId = messageId(input, output)
     idleSessions.delete(id)
+    turnErrors.delete(id)
     turns.set(id, { assistant: new Map(), assistantMessages: new Set(), usage: new Map(), turnId })
     armSigint()
     deliver('UserPromptSubmit', { ...payload('UserPromptSubmit', input, output, turnId), prompt })
@@ -374,13 +401,19 @@ export const ScryRecorder = async () => ({
         state.assistant.set(String(first(part.id, state.assistant.size)), part.text)
       }
     }
+    if (envelope.type === 'session.error') {
+      const detail = errorDetail(properties.error)
+      if (id && detail) turnErrors.set(id, detail)
+    }
     if (envelope.type === 'session.idle') {
       if (idleSessions.has(id)) return
       const delivered = deliver('Stop', stopPayload(input, state))
-      turns.delete(id)
-      disarmSigint()
-      // Failed dispatch is not evidence of a delivered terminal. Do not suppress a later retry.
+      // Failed dispatch is not evidence of a delivered terminal. Keep the turn and its staged
+      // error so the retry carries the same evidence instead of dropping it.
       if (!delivered.error && delivered.status === 0) {
+        turns.delete(id)
+        turnErrors.delete(id)
+        disarmSigint()
         idleSessions.add(id)
         if (idleSessions.size > 128) idleSessions.delete(idleSessions.values().next().value)
       }

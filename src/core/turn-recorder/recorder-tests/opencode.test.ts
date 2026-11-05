@@ -38,5 +38,26 @@ describe('OpenCode compact lifecycle evidence', () => {
       expect.objectContaining({ trigger: 'auto' })
     ])
   })
+
+  it('Stop 上的 Provider 错误变成 failed 与错误证据，而不是 completed', async () => {
+    const root = await workspace()
+    await handleRecorderHook({
+      provider: 'opencode',
+      event: 'chat.message',
+      workspace: root,
+      payload: payload('o2', { prompt: 'create a file' })
+    })
+    await handleRecorderHook({
+      provider: 'opencode',
+      event: 'session.idle',
+      workspace: root,
+      payload: payload('o2', { error: 'APIError: fetch() URL is invalid', timestamp: '2026-07-19T12:00:01.000Z' })
+    })
+
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record.status).toBe('failed')
+    expect(record.errors.status).toBe('available')
+    expect(record.errors.value).toEqual([expect.objectContaining({ message: 'APIError: fetch() URL is invalid' })])
+  })
 })
 }

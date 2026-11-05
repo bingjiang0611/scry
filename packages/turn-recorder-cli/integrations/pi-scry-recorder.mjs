@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { existsSync, realpathSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs'
 import { request } from 'node:http'
 import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
@@ -151,18 +151,45 @@ function addUsage(total, message) {
   return true
 }
 
-function executable() {
-  const configured = process.env.SCRY_CLI_PATH
-  if (configured !== undefined) {
-    if (!isAbsolute(configured) || !existsSync(configured)) {
-      debug('configured SCRY_CLI_PATH is unavailable; refusing PATH fallback')
-      return undefined
-    }
-    try { return realpathSync(configured) } catch {
-      debug('configured SCRY_CLI_PATH cannot be resolved; refusing PATH fallback')
-      return undefined
-    }
+function resolveExecutable(candidate, source) {
+  if (!isAbsolute(candidate) || !existsSync(candidate)) {
+    debug(source + ' is unavailable; refusing PATH fallback')
+    return undefined
   }
+  try { return realpathSync(candidate) } catch {
+    debug(source + ' cannot be resolved; refusing PATH fallback')
+    return undefined
+  }
+}
+
+// A pin that exists but cannot be used must never fall through to a guessed installation: the
+// guess is how a workspace silently records with an older CLI. Only an absent pin path means
+// "no pin"; an empty file, an unreadable one or a dangling symlink is a broken pin. lstat asks
+// whether the path itself exists, so a link to a deleted file still counts as a pin.
+function pinnedCliPath(workspace) {
+  const path = join(workspace, '.scry', 'cli-path')
+  try {
+    lstatSync(path)
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return { present: false }
+    debug('workspace .scry/cli-path cannot be inspected; refusing PATH fallback')
+    return { present: true, value: '' }
+  }
+  try {
+    return { present: true, value: String(readFileSync(path, 'utf8')).split('\n')[0].trim() }
+  } catch {
+    debug('workspace .scry/cli-path cannot be read; refusing PATH fallback')
+    return { present: true, value: '' }
+  }
+}
+
+// 工作区把要用的 CLI 绝对路径写在 .scry/cli-path（`scry init`/`repair` 写入，provider hook 也读它）。
+// 固定猜 ~/.local/bin/scry 会在多份安装并存时静默用错版本，所以固定路径必须先于猜测。
+function executable(workspace) {
+  const configured = process.env.SCRY_CLI_PATH
+  if (configured !== undefined) return resolveExecutable(configured, 'configured SCRY_CLI_PATH')
+  const pin = pinnedCliPath(workspace)
+  if (pin.present) return resolveExecutable(pin.value, 'workspace .scry/cli-path')
   const candidates = [
     join(homedir(), '.local', 'bin', 'scry'),
     ...String(process.env.PATH || '').split(':').filter(Boolean).map((directory) => join(directory, 'scry')),
@@ -221,7 +248,7 @@ function sendSocket(workspace, event, payload) {
 }
 
 function sendDirect(workspace, event, payload) {
-  const scry = executable()
+  const scry = executable(workspace)
   if (!scry) return Promise.resolve(false)
   return new Promise((resolve) => {
     let settled = false

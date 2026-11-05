@@ -158,15 +158,19 @@ export async function createLiveRunState(deps: {
   const notifyDiffChangeRef = { current: (): void => { } }
   // App trace capture does not require a workspace recorder. Keep raw evidence until its
   // durable body exists; then release it from run state and send only the bounded projection.
+  // A workspace recorder that owns this turn keeps its own copies of the bodies it records: tool
+  // input always, tool output only under the full capture policy. A reference whose bytes exist
+  // only in the App store would make the committed record and the workspace export unresolvable.
   const ingestionEnablement = managedRecorderEnablement?.enabled ? managedRecorderEnablement : undefined
-  const ingestionRecorderRoot = managedRecorderEnabled && ingestionEnablement?.config.capture.toolOutput === 'full'
-    ? ingestionEnablement.dataRoot : undefined
+  const ingestionRecorder = managedRecorderEnabled && ingestionEnablement
+    ? { root: ingestionEnablement.dataRoot, toolOutput: ingestionEnablement.config.capture.toolOutput }
+    : undefined
   const ingestion = new LiveTraceIngestion({
     provider: providerId,
     // 谁在看这个 run 由 publishTrace 决定：legacy 焦点通道 + 该 run 自己的 scoped 流。
     publish: (event) => publishTrace(event),
     persist: async (event) => {
-      const [persisted] = await persistTraceToolEvents(app.getPath('userData'), catalogCwd, [event], ingestionRecorderRoot)
+      const [persisted] = await persistTraceToolEvents(app.getPath('userData'), catalogCwd, [event], ingestionRecorder)
       return persisted
     },
     // Same-id enrichment only; the helper records the write so the live projection refetches.

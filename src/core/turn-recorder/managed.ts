@@ -1,5 +1,5 @@
 import { observedInterruptionRecordId, reserveObservedInterruption } from './managed-interruption.js'
-import { isFullToolContentPolicy } from './tool-content.js'
+import { isFullToolContentPolicy, type ToolContentPolicy } from './tool-content.js'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { isAgentTurnRecord, type TurnEvidence, type AgentTurnRecord } from '../../shared/turn-record.js'
@@ -7,7 +7,7 @@ import { resolveRecorderEnablement } from './config.js'
 import { readJson, listFiles, writeJsonAtomic } from './io.js'
 import { recorderTurnRoot, recorderSessionRoot, withRecorderSessionLock, type RecorderOpenTurnState, recorderOpenPath, SESSION_LOCK_WAIT_MS, recorderPendingHealth, recorderQuarantinedOpenTurns, type RecorderSessionState, recorderStatePath } from './runtime-state.js'
 import { clearRuntimeTurn, updateHealth, commitRecord, drainCommitNotifications, HOOK_DRAIN_MAX_RECORDS, HOOK_DRAIN_BUDGET_MS } from './store.js'
-import { type ManagedRecorderProviderId, type ManagedTurnCancellationResult, type ManagedTurnHandoff, type EnabledRecorder, assertStrictCapture, type PrepareManagedTurnInput, type ManagedTurnResult, assertProtectedToolEvidence, assertExactText, assertOptionalAssistantText, assertTiming, assertDuplicateMatchesInput, managedProvisionalMatches, managedRecorderAllowsMissingProviderTurnId, recordDraft, assertCommittedRecordMatchesHandoff, type ManagedTurnTiming } from './managed-evidence.js'
+import { type ManagedRecorderProviderId, type ManagedTurnCancellationResult, type ManagedTurnHandoff, type EnabledRecorder, assertStrictCapture, type PrepareManagedTurnInput, type ManagedTurnResult, assertProtectedToolEvidence, applyCapturePolicy, CONTENT_MISSING_REASON, assertExactText, assertOptionalAssistantText, assertTiming, assertDuplicateMatchesInput, managedProvisionalMatches, managedRecorderAllowsMissingProviderTurnId, recordDraft, assertCommittedRecordMatchesHandoff, type ManagedTurnTiming } from './managed-evidence.js'
 import { recordById, recordByProviderTurnId, advanceProviderTurnIndex } from './managed-index.js'
 import { reserveCanonicalJournalRecovery } from './managed-recovery.js'
 export { type ManagedTurnTiming, type ManagedRecorderProviderId, isManagedRecorderProvider, managedRecorderAllowsMissingProviderTurnId, isManagedProviderRuntimePair, type PrepareManagedTurnInput, type ManagedTurnResult, type ManagedTurnCancellationResult } from './managed-evidence.js'
@@ -96,15 +96,34 @@ async function handoffForRun(root: string, runId: string): Promise<{ path: strin
 export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput): Promise<ManagedTurnResult> {
   const mode = await managedRecorderMode(input.workspace, input.env)
   if (mode.status === 'disabled') return mode
-  assertProtectedToolEvidence(input.evidence, isFullToolContentPolicy(input.toolContentPolicy) ? input.toolContentPolicy : mode.enablement.config.capture)
-  assertExactText(input.evidence.user, input.userText, 'user')
-  if (
+  // 记录只保存工作区采集策略允许的正文，且保存的正文必须有本地字节；缺失的正文降级而不是抛错，
+  // 准备、提交与重试都使用这份归一化后的证据表示，去重比较才不会把降级当成不一致。
+  // A turn frozen under the full policy keeps its bodies even if the workspace config changed after
+  // it started; the policy this turn promised is the one recorded in its canonical handoff, so a
+  // later retry in another process compares against the same representation. Same precedence as
+  // commit: the prepared handoff first, then the caller, then the workspace config.
+  const frozen = (await handoffForRun(
+    recorderSessionRoot(mode.enablement.dataRoot, input.provider, input.sessionId),
+    input.runId
+  ))?.handoff.toolContentPolicy
+  const toolContentPolicy = frozen ?? input.toolContentPolicy ?? mode.enablement.config.capture
+  const evidence = await applyCapturePolicy(input.evidence, mode.enablement.dataRoot, {
+    keepToolOutputBody: isFullToolContentPolicy(toolContentPolicy)
+  })
+  const protectedInput = { ...input, evidence }
+  assertProtectedToolEvidence(evidence, toolContentPolicy)
+  assertExactText(evidence.user, input.userText, 'user')
+  if (evidence.assistant.status !== 'unavailable' && evidence.assistant.quality === 'inferred' &&
+    evidence.assistant.omissionReason?.includes(CONTENT_MISSING_REASON)) {
+    // 助手正文缺失时保留已降级的证据：既不放宽成 exact，也不因缺正文而拒绝提交这一轮。
+    assertOptionalAssistantText(evidence.assistant)
+  } else if (
     (input.provider === 'claude' || input.provider === 'qoder' || input.provider === 'opencode' || input.provider === 'pi') &&
     input.status !== 'completed'
   ) {
-    assertOptionalAssistantText(input.evidence.assistant)
+    assertOptionalAssistantText(evidence.assistant)
   } else {
-    assertExactText(input.evidence.assistant, undefined, 'assistant')
+    assertExactText(evidence.assistant, undefined, 'assistant')
   }
   assertTiming(input.timing)
   const { enablement } = mode
@@ -113,14 +132,14 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
     if (input.expectedRecordId) {
       const duplicate = await recordById(enablement.dataRoot, input.expectedRecordId)
       if (duplicate) {
-        assertDuplicateMatchesInput(duplicate, input)
+        assertDuplicateMatchesInput(duplicate, protectedInput)
         return { status: 'duplicate' as const, recordId: duplicate.recordId, record: duplicate }
       }
     }
     if (input.allowObservedInterruption) {
       const duplicate = await recordById(enablement.dataRoot, observedInterruptionRecordId(enablement.config.workspaceId, input))
       if (duplicate) {
-        assertDuplicateMatchesInput(duplicate, input)
+        assertDuplicateMatchesInput(duplicate, protectedInput)
         return { status: 'duplicate' as const, recordId: duplicate.recordId, record: duplicate }
       }
     }
@@ -135,7 +154,7 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
         )
       : undefined
     if (providerDuplicate) {
-      assertDuplicateMatchesInput(providerDuplicate, input)
+      assertDuplicateMatchesInput(providerDuplicate, protectedInput)
       return {
         status: 'duplicate' as const,
         recordId: providerDuplicate.recordId,
@@ -150,7 +169,7 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
       }
       assertDuplicateMatchesInput(
         { ...existing.handoff.record, sequence: 1 },
-        input
+        protectedInput
       )
       return { status: 'prepared' as const, recordId: existing.handoff.record.recordId }
     }
@@ -213,7 +232,7 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
     }
     const open = matches[0]
 
-    const draft = recordDraft(enablement, open, input)
+    const draft = recordDraft(enablement, open, protectedInput)
     if (observedInterruption && draft.termination) {
       draft.recordId = observedInterruptionRecordId(enablement.config.workspaceId, input)
       draft.termination = {
@@ -229,6 +248,7 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
       archiveFingerprint: input.archiveFingerprint,
       preparedAt: new Date().toISOString(),
       record: draft,
+      toolContentPolicy,
       uploadEnvironment: open.uploadEnvironment
     }
     await writeJsonAtomic(canonicalPath(root, open.generation), handoff)
@@ -299,6 +319,14 @@ export async function deliverCommitNotifications(
   await drain()
 }
 
+function recordKeepsToolBodies(record: AgentTurnRecord): boolean {
+  // Presence, not content: a full-policy turn whose body was lost keeps the omitted envelope, while
+  // the summary policy removes the output field entirely.
+  return [record.tools, record.skills, record.mcps]
+    .flatMap((section) => section.value ?? [])
+    .some((call) => 'outputContent' in call)
+}
+
 export async function commitManagedRecorderTurn(input: {
   workspace: string
   provider: ManagedRecorderProviderId
@@ -311,6 +339,8 @@ export async function commitManagedRecorderTurn(input: {
   evidence: TurnEvidence
   timing: ManagedTurnTiming
   status: AgentTurnRecord['status']
+  /** 这一轮冻结的策略；省略时用 canonical handoff 里记录的那份，再退回当前工作区配置。 */
+  toolContentPolicy?: ToolContentPolicy
   env?: NodeJS.ProcessEnv
   commitNotifications?: CommitNotificationDelivery
 }): Promise<ManagedTurnResult> {
@@ -321,8 +351,23 @@ export async function commitManagedRecorderTurn(input: {
     const duplicate = await recordById(enablement.dataRoot, input.recordId)
     const root = recorderSessionRoot(enablement.dataRoot, input.provider, input.sessionId)
     const existing = await handoffForRun(root, input.runId)
+    // Same normalisation as prepare, against the policy this turn froze. Falling back to the current
+    // workspace config would re-trim a full-policy turn when the user narrows capture mid-turn and
+    // make the retry look like different evidence.
+    const frozen = existing?.handoff.toolContentPolicy ?? input.toolContentPolicy
+    const keepToolOutputBody = frozen
+      ? isFullToolContentPolicy(frozen)
+      : duplicate
+        // 提交成功后 canonical handoff 会被清掉，这一轮冻结的策略只剩记录自己可证：full 策略的轮次
+        // 保留了工具输出正文。用它而不是当前配置比较重试，中途收窄采集策略才不会改写已有证据。
+        ? recordKeepsToolBodies(duplicate)
+        : isFullToolContentPolicy(enablement.config.capture)
+    const protectedInput = {
+      ...input,
+      evidence: await applyCapturePolicy(input.evidence, enablement.dataRoot, { keepToolOutputBody })
+    }
     if (duplicate && !existing) {
-      assertDuplicateMatchesInput(duplicate, input)
+      assertDuplicateMatchesInput(duplicate, protectedInput)
       return { status: 'duplicate' as const, recordId: duplicate.recordId, record: duplicate }
     }
     if (!existing) return { status: 'pending' as const, reason: 'managed recorder prepared handoff is missing' }

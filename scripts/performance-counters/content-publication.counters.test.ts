@@ -149,7 +149,7 @@ describe('cold and dual-authority durable publication', () => {
               id: `result-${index}`, runId: 'run', ts: '2026-10-25T00:00:00.000Z',
               kind: 'tool', stage: 'tool_result', toolUseId: `call-${index}`, output: body, text: body
             }))
-            const bounded = await persistTrace(userData, cwd, events, recorder)
+            const bounded = await persistTrace(userData, cwd, events, { root: recorder, toolOutput: 'full' })
             refs.push(...bounded.map(event => event.outputContent!.contentRef!))
             boundedEvents.push(...bounded)
           } else {

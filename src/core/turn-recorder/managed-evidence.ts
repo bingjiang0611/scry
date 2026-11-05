@@ -6,6 +6,7 @@ import { type AgentTurnRecord, type Evidence, type TurnTermination, type TurnEvi
 import { type RecorderEnablement } from './config.js'
 import { type RecorderOpenTurnState } from './runtime-state.js'
 import { stableHash, RECORDER_VERSION } from './store.js'
+import { isDegradedContent } from './managed-capture.js'
 
 
 export interface ManagedTurnTiming {
@@ -73,6 +74,8 @@ export type ManagedTurnCancellationResult =
 
 export interface ManagedTurnHandoff {
   uploadEnvironment?: import('./commit-environment.js').UploadEnvironment
+  /** 这一轮开始时冻结的工具内容策略：重试与提交都按它比较，工作区后来改配置不影响这一轮。 */
+  toolContentPolicy?: ToolContentPolicy
   schemaVersion: 1
   phase: 'prepared' | 'archive_committed'
   runId: string
@@ -154,6 +157,9 @@ export function assertProtectedToolEvidence(evidence: TurnEvidence, policy: Tool
   for (const call of [evidence.tools, evidence.skills, evidence.mcps].flatMap((section) => section.value ?? [])) {
     if (call.input !== undefined) throw new Error('full managed input requires bounded content envelopes')
     for (const field of [call.inputContent, call.outputContent]) {
+      // A body this recorder could not prove is already marked unavailable; the record states the
+      // omission instead of presenting a claim the evidence cannot support.
+      if (isDegradedContent(field)) continue
       if (!isToolContent(field)) throw new Error('full managed evidence requires content provenance')
       if (field.content !== undefined) {
         const checked = captureToolContent(field.content, { source: field.source, maxBytes: policy.toolContentFieldBytes })
@@ -161,6 +167,7 @@ export function assertProtectedToolEvidence(evidence: TurnEvidence, policy: Tool
       }
       bytes += field.savedBytes
     }
+    if (isDegradedContent(call.outputContent)) continue
     const output = call.outputContent?.content
     const summary = output ? (output.length <= 500 ? output : `${output.slice(0, 500)}…`) : undefined
     if (call.outputSummary !== undefined && call.outputSummary !== summary) throw new Error('managed summary differs from protected output')
@@ -257,3 +264,12 @@ export function assertCommittedRecordMatchesHandoff(
     throw new Error('managed recorder duplicate record differs from prepared canonical handoff')
   }
 }
+
+// 采集策略归一化放在 managed-capture：本文件只做断言与草稿组装，两个边界都保持可读。
+export {
+  CONTENT_MISSING_REASON,
+  applyCapturePolicy,
+  degradedSection,
+  isDegradedContent,
+  type CaptureTrim
+} from './managed-capture.js'
