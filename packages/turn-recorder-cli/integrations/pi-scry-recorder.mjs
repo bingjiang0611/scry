@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs'
 import { request } from 'node:http'
 import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
@@ -163,13 +163,21 @@ function resolveExecutable(candidate, source) {
 }
 
 // A pin that exists but cannot be used must never fall through to a guessed installation: the
-// guess is how a workspace silently records with an older CLI. Only an absent pin file means
-// "no pin"; an empty file or an unreadable one is a broken pin.
+// guess is how a workspace silently records with an older CLI. Only an absent pin path means
+// "no pin"; an empty file, an unreadable one or a dangling symlink is a broken pin. lstat asks
+// whether the path itself exists, so a link to a deleted file still counts as a pin.
 function pinnedCliPath(workspace) {
+  const path = join(workspace, '.scry', 'cli-path')
   try {
-    return { present: true, value: String(readFileSync(join(workspace, '.scry', 'cli-path'), 'utf8')).split('\n')[0].trim() }
+    lstatSync(path)
   } catch (error) {
     if (error && error.code === 'ENOENT') return { present: false }
+    debug('workspace .scry/cli-path cannot be inspected; refusing PATH fallback')
+    return { present: true, value: '' }
+  }
+  try {
+    return { present: true, value: String(readFileSync(path, 'utf8')).split('\n')[0].trim() }
+  } catch {
     debug('workspace .scry/cli-path cannot be read; refusing PATH fallback')
     return { present: true, value: '' }
   }
