@@ -53,13 +53,14 @@ export async function applyCapturePolicy(
   trim: CaptureTrim
 ): Promise<TurnEvidence> {
   const keepsOutputBody = trim.keepToolOutputBody
+  // 任何读不回来都等于“无法证明这份正文”：文件不存在、权限不足、长度或摘要不符，都只能降级成
+  // unavailable，不能让一次降级把整轮记录的准备与提交打断。校验失败的正文按缺失处理，记录里写清原因。
   const hasBody = async (ref: ToolContentRef): Promise<boolean> => {
     try {
       await readRecorderContent(dataRoot, ref)
       return true
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
-      throw error
+    } catch {
+      return false
     }
   }
   // A kept body must be durable here: persist the inline copy when the reference has no bytes, and

@@ -100,8 +100,13 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
   // 准备、提交与重试都使用这份归一化后的证据表示，去重比较才不会把降级当成不一致。
   // A turn frozen under the full policy keeps its bodies even if the workspace config changed after
   // it started; the policy this turn promised is the one recorded in its canonical handoff, so a
-  // later retry in another process compares against the same representation.
-  const toolContentPolicy = input.toolContentPolicy ?? mode.enablement.config.capture
+  // later retry in another process compares against the same representation. Same precedence as
+  // commit: the prepared handoff first, then the caller, then the workspace config.
+  const frozen = (await handoffForRun(
+    recorderSessionRoot(mode.enablement.dataRoot, input.provider, input.sessionId),
+    input.runId
+  ))?.handoff.toolContentPolicy
+  const toolContentPolicy = frozen ?? input.toolContentPolicy ?? mode.enablement.config.capture
   const evidence = await applyCapturePolicy(input.evidence, mode.enablement.dataRoot, {
     keepToolOutputBody: isFullToolContentPolicy(toolContentPolicy)
   })

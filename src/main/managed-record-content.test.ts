@@ -271,6 +271,9 @@ describe('managed record capture policy', () => {
     expect(prepared).toMatchObject({ status: 'prepared' })
     // 用户在这一轮中途把采集策略收窄：已经承诺过 full 的这一轮不能因此被重新裁剪。
     await writeFile(join(workspace, 'scry.config.json'), summaryCapture)
+    // 调用方省略 toolContentPolicy 的重试也必须按 handoff 冻结的那份归一化。
+    const { toolContentPolicy: _omitted, ...retryPrepare } = prepareInput
+    expect(await prepareManagedRecorderTurn(retryPrepare)).toMatchObject({ status: 'prepared', recordId: (prepared as { recordId: string }).recordId })
     const commitInput = {
       workspace,
       provider: 'codex' as const,
@@ -311,5 +314,26 @@ describe('managed record capture policy', () => {
     expect(stored.outputContent?.contentRef).toBeDefined()
     await expect(readRecorderContent(dataRoot, stored.outputContent!.contentRef!)).rejects.toThrow()
     for (const body of await storedBodies(dataRoot)) expect(body).not.toContain(OUTPUT)
+  })
+
+  it('正文在盘上但校验不通过时降级为 unavailable，不让一次损坏打断 prepare 与提交', async () => {
+    const { workspace, userDataDir } = await fixture()
+    await writeFile(join(workspace, 'scry.config.json'), fullCapture)
+    await startManaged(workspace)
+    const base = input(workspace, userDataDir)
+    const dataRoot = join(workspace, '.scry')
+    const { request } = await withToolCall(base, { root: dataRoot, toolOutput: 'full' })
+    const evidence = request.turn.turnEvidence!
+    const ref = callById(evidence)!.outputContent!.contentRef!
+    // 同一路径、同样长度、不同内容：引用还在，但字节已经不是这条引用声称的那一份。
+    const stored = join(dataRoot, 'content', 'sha256', ref.sha256.slice(0, 2), `${ref.sha256}.bin`)
+    await writeFile(stored, 'x'.repeat(ref.bytes))
+
+    const result = await commitManagedTraceTurn(request, { waitMs: 0 })
+    expect(result.recorder).toBe('committed')
+    const [record] = await listRecords(dataRoot)
+    expect(callById(record)!.outputContent).toMatchObject({ storage: 'omitted', sourceCompleteness: 'unavailable' })
+    expect(record.tools.status).toBe('partial')
+    expect(record.tools.omissionReason).toContain(CONTENT_MISSING_REASON)
   })
 })
