@@ -14,7 +14,12 @@ if (!stateDirectory) {
 }
 
 const startedBy = process.env.SCRY_DAEMON_STARTED_BY ?? 'unknown'
-const result = startDaemon({ stateDirectory, startedBy })
+const result = await startDaemon({
+  stateDirectory, startedBy,
+  // A pid that reused ours and still runs this entry cannot be told apart from a
+  // live daemon, so the lock refuses to start a second writer instead of guessing.
+  daemonEntry: 'daemon.js'
+})
 if (result.status !== 'started') process.exit(exitCodeForStartup(result))
 // The host is not wired yet (P1-2), so this process has no work to keep it alive and
 // must not look like a healthy daemon to whatever started it. Exiting with its own

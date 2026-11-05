@@ -16,22 +16,22 @@ afterEach(() => {
 })
 
 describe('daemon startup', () => {
-  it('reports started and a second start exits without touching the lock', () => {
+  it('reports started and a second start exits without touching the lock', async () => {
     const stateDirectory = tempDir()
     const lines: string[] = []
-    const first = startDaemon({ stateDirectory, startedBy: 'app', log: (line) => lines.push(line) })
+    const first = await startDaemon({ stateDirectory, startedBy: 'app', log: (line) => lines.push(line) })
     expect(first.status).toBe('started')
     const before = readFileSync(join(stateDirectory, DAEMON_LOCK_NAME), 'utf8')
-    const second = startDaemon({ stateDirectory, startedBy: 'app', log: (line) => lines.push(line) })
+    const second = await startDaemon({ stateDirectory, startedBy: 'app', log: (line) => lines.push(line) })
     expect(second.status).toBe('already-running')
     expect(exitCodeForStartup(second)).toBe(3)
     expect(readFileSync(join(stateDirectory, DAEMON_LOCK_NAME), 'utf8')).toBe(before)
     expect(lines.some((line) => line.startsWith('daemon.already-running'))).toBe(true)
   })
 
-  it('gives a started daemon exit code 0 and a release that removes its own lock', () => {
+  it('gives a started daemon exit code 0 and a release that removes its own lock', async () => {
     const stateDirectory = tempDir()
-    const result = startDaemon({ stateDirectory, startedBy: 'app', log: () => {} })
+    const result = await startDaemon({ stateDirectory, startedBy: 'app', log: () => {} })
     expect(exitCodeForStartup(result)).toBe(0)
     if (result.status !== 'started') return
     result.release()

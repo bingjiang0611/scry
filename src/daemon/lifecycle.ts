@@ -8,37 +8,40 @@ export interface DaemonStartupInput {
   /** Absolute directory owned by the daemon; `<userData>/daemon` in the App layout. */
   stateDirectory: string
   startedBy: string
+  /** This daemon's own entry, so a reused pid that looks like it is not taken over. */
+  daemonEntry?: string
   log?: (line: string) => void
 }
 
 export type DaemonStartupResult =
   | { status: 'started'; lock: DaemonLockRecord; release: () => void }
-  | { status: 'already-running'; holder: DaemonLockRecord }
-  | { status: 'identity-changed'; holder: DaemonLockRecord }
+  | { status: 'already-running'; holder: DaemonLockRecord; reason?: string }
 
 const EXIT_ALREADY_RUNNING = 3
-const EXIT_IDENTITY_CHANGED = 4
 
 export function exitCodeForStartup(result: DaemonStartupResult): number {
+  // A daemon that already owns the ledger is not an error in itself, but this
+  // process must not start: report it with a distinct code and leave the file alone.
   if (result.status === 'already-running') return EXIT_ALREADY_RUNNING
-  if (result.status === 'identity-changed') return EXIT_IDENTITY_CHANGED
   return 0
 }
 
-export function startDaemon(input: DaemonStartupInput): DaemonStartupResult {
+export async function startDaemon(input: DaemonStartupInput): Promise<DaemonStartupResult> {
   const log = input.log ?? ((line: string) => { process.stdout.write(`${line}\n`) })
-  const outcome = acquireDaemonLock({ directory: input.stateDirectory, startedBy: input.startedBy })
+  const outcome = await acquireDaemonLock({
+    directory: input.stateDirectory,
+    startedBy: input.startedBy,
+    daemonEntry: input.daemonEntry
+  })
   if (outcome.status === 'already-running') {
     // The holder owns the ledger. Say who it is and leave without touching a file.
-    log(`daemon.already-running pid=${outcome.holder.pid} stateDirectory=${input.stateDirectory}`)
-    return { status: 'already-running', holder: outcome.holder }
-  }
-  if (outcome.status === 'identity-changed') {
-    log(`daemon.identity-changed recordedPid=${outcome.holder.pid} stateDirectory=${input.stateDirectory}`)
-    return { status: 'identity-changed', holder: outcome.holder }
+    log(`daemon.already-running pid=${outcome.holder.pid} reason=${outcome.reason ?? 'live-holder'} stateDirectory=${input.stateDirectory}`)
+    return { status: 'already-running', holder: outcome.holder, reason: outcome.reason }
   }
   if (outcome.status === 'replaced-stale' && outcome.previous) {
-    log(`daemon.took-over stalePid=${outcome.previous.pid}`)
+    // Taking over is a file operation: the process that reused the pid is not ours to
+    // stop, so it is only named here, never signalled.
+    log(`daemon.took-over reason=${outcome.reason} stalePid=${outcome.previous.pid}`)
   }
   log(`daemon.started pid=${outcome.record.pid} stateDirectory=${input.stateDirectory}`)
   return { status: 'started', lock: outcome.record, release: outcome.release }

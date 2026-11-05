@@ -1,12 +1,20 @@
-import { closeSync, mkdirSync, openSync, readFileSync, writeFileSync, chmodSync, rmSync } from 'node:fs'
+import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { processIdentityKey, readProcessSnapshot, type ProcessSnapshot } from '../main/process-diagnostics'
+import { execFileSync } from 'node:child_process'
+import { parseProcessSnapshot, processIdentityKey, type ProcessRow } from '../main/process-diagnostics'
 
 // One daemon per state directory. The lock is the only writer gate for the session
-// ledger, so the decision has to be made from evidence: a live holder with the same
-// start time means "join it", a holder whose identity changed means "stop and say
-// so", never "kill whatever owns this pid now".
+// ledger, so every decision has to come from evidence: a live holder with the same
+// start time means "join it"; a live pid whose start time differs means the pid was
+// reused, which proves the holder is gone; an unverifiable same-entry holder means
+// "do not start a second writer".
 export const DAEMON_LOCK_NAME = 'daemon.lock'
+// Short-lived mutex around takeover. Two daemons can both decide the lock is stale;
+// only the one that creates this file may rewrite it.
+const TAKEOVER_NAME = 'daemon.lock.takeover'
+const TAKEOVER_STALE_MS = 10_000
+const TAKEOVER_ATTEMPTS = 200
+const TAKEOVER_WAIT_MS = 5
 
 export interface DaemonLockRecord {
   pid: number
@@ -17,23 +25,53 @@ export interface DaemonLockRecord {
   startedBy: string
 }
 
+export type TakeoverReason = 'holder-missing' | 'holder-zombie' | 'unreadable-record' | 'pid-reused'
+
 export type DaemonLockOutcome =
   | { status: 'acquired'; record: DaemonLockRecord; release: () => void }
   // A live daemon holds the lock. The caller must exit without touching the ledger.
-  | { status: 'already-running'; holder: DaemonLockRecord }
-  // The pid now belongs to a different process; replacing the lock would hand the
-  // ledger to a stranger, so the caller stops and reports.
-  | { status: 'identity-changed'; holder: DaemonLockRecord }
-  // The previous holder is gone (crashed or killed). Safe to take over.
-  | { status: 'replaced-stale'; record: DaemonLockRecord; previous?: DaemonLockRecord; release: () => void }
+  // `identity-unverifiable` is the conservative case: same entry, different start
+  // time, so this module cannot prove the holder is dead.
+  | { status: 'already-running'; holder: DaemonLockRecord; reason?: 'live-holder' | 'identity-unverifiable' }
+  // The previous holder is gone. Taking over is a file operation: this module never
+  // signals the process that owns the reused pid.
+  | { status: 'replaced-stale'; record: DaemonLockRecord; previous?: DaemonLockRecord; reason: TakeoverReason; release: () => void }
 
 export interface AcquireDaemonLockOptions {
   /** Directory that holds the lock; created 0700 and never widened. */
   directory: string
   startedBy: string
   pid?: number
-  lister?: () => ProcessSnapshot
-  now?: () => Date
+  lister?: () => ReadonlyMap<number, ProcessRow>
+  /** Marker for this daemon's own command line, used only to refuse unsafe takeover. */
+  daemonEntry?: string
+  /** Test seam: runs after the stale decision and inside the takeover mutex. */
+  afterValidate?: () => void | Promise<void>
+  /** Test seam: how the waiter yields; the real one sleeps briefly. */
+  sleep?: (ms: number) => Promise<void>
+  now?: () => number
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => { setTimeout(resolve, ms) })
+
+// `lstart` is local time, so the identity must be read under a fixed zone: a daemon
+// that keeps running across a timezone change would otherwise read a different text
+// for itself and mistake its own record for a stale one.
+const utcProcessLister = (): string => execFileSync(
+  '/bin/ps',
+  ['-axo', 'pid=,ppid=,stat=,lstart=,command='],
+  { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } }
+)
+
+function defaultSnapshot(): ReadonlyMap<number, ProcessRow> {
+  return parseProcessSnapshot(utcProcessLister())
+}
+
+/** Identity of one pid as this module reads it; exported so tests can pin the zone. */
+export function readDaemonIdentity(pid: number): DaemonLockRecord | undefined {
+  const row = defaultSnapshot().get(pid)
+  if (!row) return undefined
+  return { pid, startedAt: row.startedAt, identityKey: processIdentityKey(row), startedBy: '' }
 }
 
 function readRecord(path: string): DaemonLockRecord | undefined {
@@ -47,18 +85,34 @@ function readRecord(path: string): DaemonLockRecord | undefined {
       startedBy: typeof parsed.startedBy === 'string' ? parsed.startedBy : ''
     }
   } catch {
-    // An unreadable lock cannot describe a live holder, so it is treated as stale
-    // rather than blocking startup forever.
+    // An unreadable lock cannot describe a live holder, so it is stale rather than a
+    // permanent block.
     return undefined
   }
 }
 
-export function acquireDaemonLock(options: AcquireDaemonLockOptions): DaemonLockOutcome {
+type HolderCheck =
+  | { kind: 'live'; holder: DaemonLockRecord }
+  | { kind: 'unverifiable'; holder: DaemonLockRecord }
+  | { kind: 'stale'; holder?: DaemonLockRecord; reason: TakeoverReason }
+
+function checkHolder(previous: DaemonLockRecord | undefined, row: ProcessRow | undefined, daemonEntry?: string): HolderCheck {
+  if (!previous) return { kind: 'stale', reason: 'unreadable-record' }
+  if (!row) return { kind: 'stale', holder: previous, reason: 'holder-missing' }
+  if (row.status.startsWith('Z')) return { kind: 'stale', holder: previous, reason: 'holder-zombie' }
+  if (row.startedAt === previous.startedAt) return { kind: 'live', holder: previous }
+  // Same pid, different start time: the pid was reused, so the writer is gone.
+  if (daemonEntry && row.command.includes(daemonEntry)) return { kind: 'unverifiable', holder: previous }
+  return { kind: 'stale', holder: previous, reason: 'pid-reused' }
+}
+
+export async function acquireDaemonLock(options: AcquireDaemonLockOptions): Promise<DaemonLockOutcome> {
   mkdirSync(options.directory, { recursive: true, mode: 0o700 })
   chmodSync(options.directory, 0o700)
   const path = join(options.directory, DAEMON_LOCK_NAME)
+  const takeoverPath = join(options.directory, TAKEOVER_NAME)
   const pid = options.pid ?? process.pid
-  const snapshotOf = (): ProcessSnapshot => (options.lister ? options.lister() : readProcessSnapshot())
+  const snapshotOf = (): ReadonlyMap<number, ProcessRow> => (options.lister ? options.lister() : defaultSnapshot())
   const self = snapshotOf().get(pid)
   const record: DaemonLockRecord = {
     pid,
@@ -89,19 +143,53 @@ export function acquireDaemonLock(options: AcquireDaemonLockOptions): DaemonLock
     if ((error as { code?: string }).code !== 'EEXIST') throw error
   }
 
-  const previous = readRecord(path)
-  // Every takeover rewrites the record: leaving the old pid in place would make the
-  // crashed daemon's release() delete a lock it no longer owns.
-  const takeOver = (): DaemonLockOutcome => {
-    write()
-    return { status: 'replaced-stale', record, ...(previous ? { previous } : {}), release }
+  const evaluate = (): HolderCheck => {
+    const previous = readRecord(path)
+    const row = previous ? snapshotOf().get(previous.pid) : undefined
+    return checkHolder(previous, row, options.daemonEntry)
   }
-  if (!previous) return takeOver()
-  const holder = snapshotOf().get(previous.pid)
-  if (!holder) return takeOver()
-  if (holder.status.startsWith('Z')) return takeOver()
-  // Same pid, different start time: the pid was reused, so the live process is not
-  // the daemon that wrote this lock. Replacing the file would steal the ledger.
-  if (holder.startedAt !== previous.startedAt) return { status: 'identity-changed', holder: previous }
-  return { status: 'already-running', holder: previous }
+  const first = evaluate()
+  if (first.kind === 'live') return { status: 'already-running', holder: first.holder, reason: 'live-holder' }
+  if (first.kind === 'unverifiable') return { status: 'already-running', holder: first.holder, reason: 'identity-unverifiable' }
+
+  // Takeover mutex: `wx` is atomic, so exactly one daemon owns the rewrite. A holder
+  // that died inside the critical section leaves the file behind; anything older
+  // than TAKEOVER_STALE_MS is treated as that leftover and cleared.
+  const now = options.now ?? Date.now
+  const wait = options.sleep ?? sleep
+  let takenOver = false
+  for (let attempt = 0; attempt < TAKEOVER_ATTEMPTS && !takenOver; attempt += 1) {
+    try {
+      closeSync(openSync(takeoverPath, 'wx', 0o600))
+      takenOver = true
+    } catch (error) {
+      if ((error as { code?: string }).code !== 'EEXIST') throw error
+      try {
+        if (now() - statSync(takeoverPath).mtimeMs > TAKEOVER_STALE_MS) rmSync(takeoverPath, { force: true })
+      } catch {
+        // Someone else cleaned it first; the next attempt will compete normally.
+      }
+      await wait(TAKEOVER_WAIT_MS)
+    }
+  }
+  if (!takenOver) return { status: 'already-running', holder: readRecord(path) ?? record, reason: 'identity-unverifiable' }
+
+  try {
+    await options.afterValidate?.()
+    // Re-read inside the critical section: another daemon may have finished its
+    // takeover while this one was waiting for the mutex.
+    const second = evaluate()
+    if (second.kind === 'live') return { status: 'already-running', holder: second.holder, reason: 'live-holder' }
+    if (second.kind === 'unverifiable') return { status: 'already-running', holder: second.holder, reason: 'identity-unverifiable' }
+    write()
+    return {
+      status: 'replaced-stale',
+      record,
+      reason: second.reason,
+      ...(second.holder ? { previous: second.holder } : {}),
+      release
+    }
+  } finally {
+    rmSync(takeoverPath, { force: true })
+  }
 }
