@@ -7,11 +7,20 @@ import { electronDependents } from '../host-runtime/value-import-graph'
 // throw at startup. Nothing here may import it, transitively or otherwise.
 const ENTRY = resolve(__dirname, 'main.ts')
 const MAIN_ENTRY = resolve(__dirname, '../main/index.ts')
+// The daemon reuses main's history readers; they must stay usable without Electron,
+// which is only true while their userData directory is a parameter.
+const HISTORY = resolve(__dirname, '../main/bootstrap/remote-history.ts')
 
 describe('daemon entry has no Electron dependency', () => {
   it('never needs the electron runtime through a value import', () => {
     const { files, electron } = electronDependents(ENTRY)
     expect(files).toBeGreaterThan(2)
+    expect(electron).toEqual([])
+  })
+
+  it('reads history through an injected userData directory', () => {
+    const { files, electron } = electronDependents(HISTORY)
+    expect(files).toBeGreaterThan(1)
     expect(electron).toEqual([])
   })
 
