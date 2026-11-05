@@ -38,7 +38,9 @@
 }
 
 .sidebar .provider-glyph {
-  margin-right: 9px;
+  width: 16px;
+  height: 16px;
+  margin-right: 0;
   letter-spacing: 0;
   text-transform: none;
 }

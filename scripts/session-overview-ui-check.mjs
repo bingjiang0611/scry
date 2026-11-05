@@ -19,6 +19,8 @@ export async function exerciseOverviewDensity(contents, screenshotPath) {
   try {
     for (const theme of ['dark', 'light']) for (const width of [380, 340, 535]) {
       await contents.executeJavaScript(`document.documentElement.dataset.theme = ${JSON.stringify(theme)}; document.querySelector('#overview').style.width = '${width}px'`)
+      // 组内列宽下限 88px：窄面板降到两列，宽面板回到四列，都不截断标签。
+      const expectedTurnColumns = width >= 500 ? 4 : width >= 360 ? 3 : 2
       const geometry = await contents.executeJavaScript(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => {
         const rect = selector => document.querySelector(selector).getBoundingClientRect();
         const header = rect('.ov-topbar'), context = rect('.ctx-gauge'), metrics = rect('.overview-metric-grid');
@@ -28,6 +30,18 @@ export async function exerciseOverviewDensity(contents, screenshotPath) {
           sessionGap: session.top - metrics.bottom, tabsGap: tabs.top - session.bottom,
           firstTurnTop: firstTurn.top, overflow: document.querySelector('.ov-scroll').scrollWidth > ${width},
           columns: getComputedStyle(document.querySelector('.overview-metric-grid')).gridTemplateColumns.split(' ').length,
+          turnColumns: getComputedStyle(document.querySelector('.turn-call-groups')).gridTemplateColumns.split(' ').length,
+          truncatedTurnLabels: Array.from(document.querySelectorAll('.turn-call-kind')).filter(label => { const text = document.createRange(); text.selectNodeContents(label); return text.getBoundingClientRect().width > label.clientWidth + 0.5 }).map(label => label.textContent),
+          turnRowRadius: getComputedStyle(document.querySelector('.turn-call-row')).borderRadius,
+          turnRowBackground: getComputedStyle(document.querySelector('.turn-call-row')).backgroundColor,
+          turnChipRadius: getComputedStyle(document.querySelector('.turn-call-group')).borderRadius,
+          hasRealDataLabel: document.querySelector('.overview-panel-title em')?.textContent?.includes('本机真实数据') ?? false,
+          hasVerdictLine: document.querySelector('.overview-verdict-line') != null,
+          callCountLabel: document.querySelector('.overview-panel-title em')?.textContent ?? '',
+          expectedTurnColumns: ${expectedTurnColumns},
+          contextTrackHeight: document.querySelector('.ctx-track').getBoundingClientRect().height,
+          leadFontSize: getComputedStyle(document.querySelector('.overview-metric.lead > strong')).fontSize,
+          metricLabelTransform: getComputedStyle(document.querySelector('.overview-metric.lead + .overview-metric > span')).textTransform,
           metricCount: document.querySelectorAll('.overview-metric').length,
           hasInputOutput: Array.from(document.querySelectorAll('.overview-metric > span')).some(label => label.textContent === '输入 / 输出'),
           hasTitleSubtitle: document.querySelector('.overview-panel-title span') != null,
@@ -37,7 +51,7 @@ export async function exerciseOverviewDensity(contents, screenshotPath) {
         const image = await contents.capturePage({ x: 0, y: 0, width, height: 650 })
         require('node:fs').writeFileSync(screenshotPath, image.toPNG())
       }
-      if (geometry.headerHeight > 48 || geometry.contextGap > 16 || geometry.sessionGap > 16 || geometry.tabsGap > 12 || geometry.firstTurnTop > 460 || geometry.overflow || geometry.columns !== 2 || geometry.metricCount !== 3 || geometry.hasInputOutput || geometry.hasTitleSubtitle || geometry.hasTurnFootnote) {
+      if (geometry.headerHeight > 48 || geometry.contextGap > 16 || geometry.sessionGap > 16 || geometry.tabsGap > 12 || geometry.firstTurnTop > 460 || geometry.overflow || geometry.columns !== 2 || geometry.turnColumns !== geometry.expectedTurnColumns || geometry.truncatedTurnLabels.length > 0 || geometry.turnRowRadius !== '12px' || geometry.turnRowBackground === 'rgba(0, 0, 0, 0)' || geometry.turnChipRadius !== '8px' || geometry.hasRealDataLabel || geometry.hasVerdictLine || geometry.callCountLabel !== '2 次调用' || geometry.contextTrackHeight !== 6 || geometry.leadFontSize !== '24px' || geometry.metricLabelTransform !== 'none' || geometry.metricCount !== 3 || geometry.hasInputOutput || geometry.hasTitleSubtitle || geometry.hasTurnFootnote) {
         throw new Error('Overview density ' + theme + '/' + width + ': ' + JSON.stringify(geometry))
       }
       results.push({ theme, width, ...geometry })

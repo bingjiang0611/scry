@@ -7,15 +7,6 @@
   flex-direction: column;
 }
 
-.overview-panel-title em i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  corner-shape: round;
-  background: var(--ok);
-  box-shadow: 0 0 0 4px var(--ok-soft);
-}
-
 .overview-panel-title {
   min-height: 45px;
   display: flex;
@@ -44,12 +35,6 @@
   color: var(--fg);
   font-style: normal;
   white-space: nowrap;
-}
-
-.overview-panel-title em i {
-  width: 5px;
-  height: 5px;
-  box-shadow: 0 0 0 3px var(--ok-soft);
 }
 
 .overview-verdict {

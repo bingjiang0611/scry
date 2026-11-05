@@ -155,7 +155,7 @@ function OverviewPanelBody({
       <div className="ov-topbar">
         <div className="overview-panel-title">
           <strong>总览</strong>
-          <em><i aria-hidden="true" />本机真实数据</em>
+          {turns.length > 0 && <em>{OVERVIEW_SESSION_COPY.callCount(calls.totalCalls)}</em>}
         </div>
       </div>
       <div className="ov-scroll overview-scroll-content">
@@ -186,13 +186,15 @@ function OverviewPanelBody({
 
       {turns.length > 0 && (
         <section className={`overview-verdict ${vstate}`} aria-label="当前会话判词与尺度">
-          <header className="overview-verdict-line">
-            <div>
-              <span className={`sdot ${vstate}`} />
-              <strong>{judge}</strong>
-            </div>
-            <em>{calls.totalCalls} calls</em>
-          </header>
+          {/* 完成态不再重复总结「轮次已结束」：报错与危险已在本轮清单和会话数据里各自成证。 */}
+          {judge !== null && (
+            <header className="overview-verdict-line">
+              <div>
+                <span className={`sdot ${vstate}`} />
+                <strong>{judge}</strong>
+              </div>
+            </header>
+          )}
           <div className="overview-metric-grid">
             <div className="overview-metric accent lead">
               <span>{billing.tokenFormulaLabel}</span>
@@ -227,7 +229,7 @@ function OverviewPanelBody({
       )}
 
       {turns.length > 0 && (
-        <div className="overview-data-tabs" role="tablist" aria-label="纵览数据维度">
+        <div className="overview-data-tabs" role="tablist" aria-label={OVERVIEW_SESSION_COPY.dataDimensions}>
           <button
             type="button"
             id="overview-turns-tab"

@@ -4,8 +4,8 @@ export const LLM_PERFORMANCE_COPY = {
   rangeLabel: '时间范围',
   metricLabel: '时间图指标',
   metrics: {
-    speed: { label: '输出速度', unit: 'token/s' },
-    firstToken: { label: '首 token', unit: '秒' }
+    speed: { label: 'TPS', unit: 'token/s' },
+    firstToken: { label: 'TTFT', unit: '秒' }
   },
   reading: '读取中',
   summaryError: (detail: string) => `运行中数据读取失败：${detail}`,
@@ -16,17 +16,15 @@ export const LLM_PERFORMANCE_COPY = {
   empty: '还没有数据',
   missing: '—',
   comparison: '模型对比',
-  columns: { model: '模型', distribution: '速度分布', speed: '中位速度', firstToken: '首 token 中位数' },
-  sparseDistribution: (values: string) => `速度实测值：${values} token/s`,
-  distributionLabel: (min: string, q1: string, median: string, q3: string, max: string) => `速度分布：最小 ${min}，P25 ${q1}，中位数 ${median}，P75 ${q3}，最大 ${max} token/s`,
+  columns: { model: '模型', distribution: 'TPS 分布', speed: 'TPS 中位数', firstToken: 'TTFT 中位数' },
+  sparseDistribution: (values: string) => `TPS 实测值：${values} token/s`,
+  distributionLabel: (min: string, q1: string, median: string, q3: string, max: string) => `TPS 分布：最小 ${min}，P25 ${q1}，中位数 ${median}，P75 ${q3}，最大 ${max} token/s`,
   valueList: (values: string[]) => values.join('、'),
   intervals: { 1: '每 10 分钟', 24: '每 2 小时', 168: '每天' },
   intervalHelp: '每个区间显示中位数、中间 50% 和完整测量范围；少于 3 轮时保留实际测量点。没有测量的时间留空，不补零或连线。',
-  rounds: (complete: number, running: number) => running ? `${complete} + ${running}* 轮` : `${complete} 轮`,
+  rounds: (complete: number, running: number) => running ? `${complete} 轮 · ${running} 暂计` : `${complete} 轮`,
   roundsLabel: (metric: string, complete: number, running: number) => `${metric}：已完成 ${complete} 轮，运行中暂计 ${running} 轮`,
-  waitRounds: (rounds: string) => `首 token ${rounds}`,
-  firstTokenSummary: (value: string) => `首 token 中位数 ${value} 秒`,
-  missingFirstToken: '暂无首 token 数据',
+  waitRounds: (rounds: string) => `TTFT ${rounds}`,
   chartLabel: (model: string, metric: string) => `${model} 的${metric}时间区间图。左右方向键查看测量，Home 和 End 跳到两端，Escape 关闭提示。`,
   intervalLabel: (stamp: string, count: number, median: string, min: string, max: string, unit: string, provisional: number) =>
     `${stamp}，${count} 轮，中位数 ${median} ${unit}，范围 ${min}–${max} ${unit}${provisional ? `，含 ${provisional} 轮暂计数据` : ''}`,

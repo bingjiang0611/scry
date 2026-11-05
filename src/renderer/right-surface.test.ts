@@ -10,7 +10,7 @@ import {
 } from './right-surface'
 
 describe('right surface state', () => {
-  it('默认打开并激活纵览', () => {
+  it('默认打开并激活总览', () => {
     expect(createRightSurfaceState()).toEqual({
       openIds: ['overview'],
       activeId: 'overview',

@@ -89,7 +89,7 @@ Object.defineProperty(window, 'scry', { value: {
 } })
 const controls = document.createElement('div')
 controls.id = 'performance-fixture-controls'
-controls.style.cssText = 'position:fixed;left:0;bottom:0;z-index:99999;display:flex;max-width:100vw;height:22px;overflow:auto;background:white;color:black'
+controls.style.cssText = 'position:fixed;left:0;bottom:0;z-index:99999;display:flex;flex-wrap:wrap;max-width:100vw;max-height:64px;overflow:auto;background:white;color:black'
 for (const [id, action] of Object.entries({
   'performance-stream': () => {
     publish('first', { text: 'abc' }, 1000); publish('first', { text: 'def' }, 2000)
