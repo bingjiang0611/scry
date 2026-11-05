@@ -117,12 +117,32 @@ codex 不缓存：它的锚点是用前向状态机在扫描块里判定的，�
 `readFile` 12 / 412 / 2,012、耗时 25 / 52 / 175 ms（M3 测量）；S11 场景（1,000 个已完成目录 +
 1 个未完成会话）恢复 204–254 ms。
 
-没做的原因：需要新增「待恢复会话」标记目录，并把「写 open 状态」与「写标记」放进同一会话锁内；
-崩溃点必须用故障注入测试证明「在两者之间崩溃，下一次恢复仍能找到该会话」，同时保留周期性
-全量兜底。这是持久性边界的改动，本批时间不足以做到可交付的严格程度。
+读代码后，这一条比交接文档描述的更大：**同一个全量扫描有四个入口**，都在遍历
+`runtime/<provider>/<session>/`：
 
-**下一步**：按 R.md 的方案二实现标记目录 + 每 N 次增量恢复做一次全量扫描，故障注入测试放在
-`recorder/recovery.test.ts` 里用现有 seam 抛错。
+| 函数 | 现存位置 | 调用时机 |
+|---|---|---|
+| `recoverRecorder` | `recorder.ts` | 每次恢复（daemon 轮询，1 s 起步、最长 15 s 退避） |
+| `recorderHasOpenTurn` | `runtime-state.ts` | 每次恢复前后各一次（`daemon.ts` 的 `run`） |
+| `recorderPendingHealth` | `runtime-state.ts` | 每次健康状态更新 |
+| `recorderStaleOpenTurns` | `runtime-state.ts` | 过期判定 |
+
+所以只改 `recoverRecorder` 不会有收益——daemon 每轮仍然会因为 `recorderHasOpenTurn` 扫两遍。
+
+没做的原因与下一步（按 R.md 的方案二）：
+
+1. 在会话锁内维护一个「需要注意的会话」标记（`runtime/<provider>/<session>/attention` 或独立的
+   标记目录）。写入时机：**先写标记，再写 `open.json`**；排队 hook 入队时也写标记。
+2. 清理时机：轮次终结且 inbox 为空时删除标记。标记残留是允许的——恢复遇到没有 `open.json`、
+   也没有 inbox 的标记时直接删掉即可，所以「标记先于 open.json」这个顺序在崩溃后仍然自洽。
+3. 四个入口都改成读标记集合；`recoverRecorder` 保留周期性全量兜底（例如每 N 次增量恢复做一次），
+   用来兜住标记丢失或历史遗留目录。
+4. 故障注入测试：在「写标记」与「写 open.json」之间抛错，下一次恢复仍必须找到该会话；另外要覆盖
+   标记残留（有标记、无 open、无 inbox）与 inbox 存在但无 open 两种情况。
+5. 代价：每轮多一次标记写入（是否 fsync 需要按现有持久性要求决定，报告里要写清楚），
+   终结时多一次删除。
+
+按上面的顺序实施，然后重跑 S11，目标是 `readdir` / `readFile` 与已完成会话数无关。
 
 ## R4 提交临界区（部分完成，见 R4-design.md）
 
