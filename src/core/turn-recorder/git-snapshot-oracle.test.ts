@@ -1,9 +1,11 @@
-import { chmod, copyFile, rm, symlink, utimes, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
+import { beginGitTurnDiff, cleanupCapture } from './git-capture.js'
 import {
-  OLD_TIMESTAMP,
+  captureRootFor,
   commitAll,
+  finishCapture,
   git,
   gitWith,
   removeTrackedRoots,
@@ -201,4 +203,39 @@ describe('git snapshot oracle: linked worktree', () => {
     expectIndexAndObjectsUntouched(targeted, full)
     expectSameEvidence(targeted, full, worktrees[0], worktrees[1])
   }, 60_000)
+})
+
+describe('git snapshot oracle: the reused discovery base', () => {
+  // G1-1 publishes discovery.index as the after index only when its content already equals
+  // beforeTree. Prove that precondition directly for a clean and a dirty baseline instead of
+  // trusting the comment: `write-tree` over the surviving discovery index must yield beforeTree.
+  for (const dirty of [false, true]) {
+    it(`discovery.index equals beforeTree (${dirty ? 'dirty' : 'clean'} baseline)`, async () => {
+      const { root, repo } = await newRepoRoot(`discovery-base-${dirty ? 'dirty' : 'clean'}`)
+      await writeFileAt(repo, 'tracked.txt', 'v1\n')
+      await writeFileAt(repo, 'other.txt', 'v1\n')
+      await commitAll(repo)
+      if (dirty) await writeFileAt(repo, 'other.txt', 'v1 dirty baseline\n')
+      const capture = await beginGitTurnDiff(repo, 20_000, captureRootFor(root), [])
+      expect(capture.status).toBe('ready')
+      try {
+        await writeFileAt(repo, 'tracked.txt', 'v2 in turn\n')
+        await finishCapture(capture, false, 20_000)
+        const discoveryIndex = join(capture.tempDir!, 'discovery.index')
+        const tree = (await gitWith(['write-tree'], repo, {
+          GIT_INDEX_FILE: discoveryIndex,
+          GIT_OBJECT_DIRECTORY: capture.objectDir!
+        })).trim()
+        // A clean baseline records HEAD (a commit) as beforeTree; a dirty one records a tree that
+        // only exists in the capture's private object store, so alternates must be visible here.
+        const expected = (await gitWith(['rev-parse', `${capture.beforeTree}^{tree}`], repo, {
+          GIT_OBJECT_DIRECTORY: capture.objectDir!,
+          GIT_ALTERNATE_OBJECT_DIRECTORIES: capture.alternateObjectDirs ?? ''
+        })).trim()
+        expect(tree).toBe(expected)
+      } finally {
+        await cleanupCapture(capture)
+      }
+    }, 60_000)
+  }
 })
