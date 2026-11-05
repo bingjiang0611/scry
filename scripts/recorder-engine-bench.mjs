@@ -308,7 +308,7 @@ await record('S8', 'long transcript (50 MB) turn end', async () => {
   const stages = []
   for (let round = 0; round < rounds; round++) {
     const transcript = join(root, `transcript-${round}.jsonl`)
-    const bytes = await buildTranscript(transcript, TRANSCRIPT_BYTES)
+    const bytes = await buildTranscript(transcript, TRANSCRIPT_BYTES, { promptOf: () => 'long session prompt' })
     await rm(dataRootOf(root), { recursive: true, force: true })
     await writeRecorderConfig(root, { workspaceId: 's8' })
     const before = await recordFiles(dataRootOf(root))
