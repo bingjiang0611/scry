@@ -12,8 +12,8 @@
  *   - hook return time and record-visible time, reported separately
  *   - peak RSS of the process that runs the hooks
  *
- * Hooks are driven in-process through `handleRecorderHook` (the direct write path), not through a
- * Provider or the daemon. That is deliberate: it isolates recorder work from Provider latency.
+ * Hooks are driven in-process through `handleRecorderHook`, not through a Provider or the daemon:
+ * that isolates recorder work from Provider latency.
  *
  * Usage:
  *   npm run build:cli && node scripts/recorder-engine-bench.mjs --out=<file.json> [--only=S1,S4]
@@ -407,15 +407,19 @@ await record('S10', '4 concurrent sessions x 5 turns on one workspace', async ()
 
 await record('S11', 'recovery with 1000 completed session directories', async () => {
   const root = await smallWorkspace('s11', { files: 20 })
+  const attention = join(dataRootOf(root), 'runtime', 'attention')
   const stages = []
   for (let round = 0; round < rounds; round++) {
     const runtime = join(dataRootOf(root), 'runtime', 'claude')
     await rm(runtime, { recursive: true, force: true })
+    await rm(attention, { recursive: true, force: true })
     for (let index = 0; index < 1_000; index++) await mkdir(join(runtime, `done-session-${index}`), { recursive: true })
-    // One genuinely unfinished turn that recovery must still find and commit.
+    // One unfinished turn recovery must find and commit; starting it builds the attention index.
     await startTurn(root, `s11-open-${round}`, { prompt: 'unfinished turn' })
-    stages.push(await stage('recovery', () => recoverRecorder(root)))
-    stages[stages.length - 1].sessionDirs = 1_000
+    stages.push({ ...await stage('recovery', () => recoverRecorder(root)), sessionDirs: 1_000 })
+    // A pass with no index rebuilds from the 1,000 session directories, by design.
+    await rm(attention, { recursive: true, force: true })
+    stages.push({ ...await stage('rebuild', () => recoverRecorder(root)), sessionDirs: 1_000 })
   }
   return { stages, git: gitTotals(stages), fixture: { completedSessionDirs: 1_000 } }
 })

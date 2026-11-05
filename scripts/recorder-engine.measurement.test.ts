@@ -212,6 +212,36 @@ it('measures recovery cost against completed session directories', async () => {
   console.log('SCRY_ENGINE_RECOVERY=' + JSON.stringify({ schema: 1, scope: 'recover with one unfinished turn', samples }))
 }, 120_000)
 
+/**
+ * `recorderPendingHealth` runs on the hook path: every start/end event asks it for the pending
+ * counters. Measure one call against a workspace with a live turn and a growing number of finished
+ * sessions, which is the shape that made it scale with workspace history.
+ */
+it('measures hook-path pending health against completed session directories', async () => {
+  const samples = []
+  for (const completed of [0, 200, 1_000]) {
+    const root = await workspace(2)
+    const runtime = join(root, '.scry', 'runtime', 'claude')
+    for (let index = 0; index < completed; index++) await mkdir(join(runtime, `done-${index}`), { recursive: true })
+    await handleRecorderHook({ provider: 'claude', event: 'UserPromptSubmit', workspace: root, payload: payload(`open-health-${completed}`) })
+    const { recorderPendingHealth } = await import('../src/core/turn-recorder/runtime-state')
+    const sample = counters()
+    state.current = sample
+    const started = performance.now()
+    const health = await recorderPendingHealth(join(root, '.scry'))
+    const totalMs = performance.now() - started
+    state.current = null
+    samples.push({
+      completedSessionDirs: completed,
+      totalMs: Math.round(totalMs * 100) / 100,
+      readdir: sample.readdir,
+      readFile: sample.readFile,
+      pendingCount: health.pendingCount
+    })
+  }
+  console.log('SCRY_ENGINE_PENDING_HEALTH=' + JSON.stringify({ schema: 1, scope: 'one health read with one live turn', samples }))
+}, 120_000)
+
 it('measures redundant content publishes for repeated identical payloads', async () => {
   const root = await mkdtemp(join(tmpdir(), 'scry-engine-content-'))
   roots.push(root)
