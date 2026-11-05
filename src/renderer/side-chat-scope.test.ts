@@ -41,9 +41,20 @@ describe('side-chat source scope', () => {
   })
 
   it('pins the parent provider, profile, model, effort and permission as the first target', () => {
-    const scope = conversationScope({ conversation: conversation(), agentProfileId: 'pi:0123456789abcdef', providerId: 'pi' })
+    const scope = conversationScope({ conversation: conversation(), agentProfileId: 'pi:0123456789abcdef',
+      targetAgentProfileId: 'pi:0123456789abcdef', providerId: 'pi' })
     expect(scope.target).toEqual({ providerId: 'pi', agentProfileId: 'pi:0123456789abcdef',
       model: { id: 'model-a', providerId: 'claude' }, effort: 'high', permissionMode: 'auto_accept_edits' })
+  })
+
+  // 回归：历史 Pi id（Pi · Rotom）只能作为原生来源身份；新子会话的首次发送目标必须是已登记 Profile。
+  it('keeps a historical Pi id as the native source but never as the first target', () => {
+    const scope = chatScope({ agentProfileId: 'pi:rotom', targetAgentProfileId: 'pi:0123456789abcdef', providerId: 'pi' })
+    expect(scope.source).toEqual({ kind: 'native-session', providerId: 'pi',
+      agentProfileId: 'pi:rotom', cwd: '/repo', nativeSessionId: 'native-1' })
+    expect(scope.target).toMatchObject({ providerId: 'pi', agentProfileId: 'pi:0123456789abcdef' })
+    // 没有已登记 Profile 时不伪造目标身份，也不会把历史 id 当成 Agent Profile。
+    expect(chatScope({ agentProfileId: 'pi:rotom', providerId: 'pi' }).target).not.toHaveProperty('agentProfileId')
   })
 
   it('keeps the exact native session tuple instead of a bare session id', () => {

@@ -7,6 +7,8 @@ import type { Turn } from '../format'
 import type { WorkspaceFileTarget } from '../workspace-links'
 import type { ConversationHostChatProps } from '../conversation-chat-props'
 import { SIDE_CHAT_COPY } from '../constants/side-chat-copy'
+import { CONVERSATION_COPY } from '../constants/conversation-copy'
+import { registeredPiProfileIdOf } from '../conversation-handoff'
 import { createRunControlCatalogReader } from '../side-chat-catalog'
 import { readSideChatPreferences, writeSideChatPreference, type SideChatPreferences } from '../side-chat-preferences'
 import { readSideChatViewPosition, rememberSideChatViewPosition, sideChatViewPosition } from '../side-chat-view-state'
@@ -18,11 +20,19 @@ import { contextKey, fallbackRunControlCatalog, readRunControlCatalogCache } fro
 type ChatProps = ConversationHostChatProps
 type Availability = 'available' | 'unavailable' | 'reading'
 
-/** Provider context of one agent id; an unknown id has no context instead of a guessed one. */
-export function providerContextOf(agentId: string, cwd: string): ProviderContext | undefined {
+/**
+ * Provider context of one agent id; an unknown id has no context instead of a guessed one.
+ *
+ * A control read must name the launcher this child runs. The registered profile reported
+ * for that exact agent is preferred; a historical built-in id names the same detected
+ * launcher, so main still resolves it when nothing is registered (sending stays blocked).
+ */
+export function providerContextOf(agentId: string, cwd: string,
+  agents: readonly { id: string; agentProfileId?: string }[]): ProviderContext | undefined {
   const providerId = providerIdForAgentId(agentId)
   if (!providerId) return undefined
-  return { providerId, ...(providerId === 'pi' ? { agentProfileId: agentId } : {}), cwd }
+  if (providerId !== 'pi') return { providerId, cwd }
+  return { providerId, agentProfileId: registeredPiProfileIdOf(agentId, agents) ?? agentId, cwd }
 }
 
 /**
@@ -96,7 +106,7 @@ export function useSideChatInstance({ conversation, agents, onOpenFile, renderLo
   // immediately and needs no read when the picker opens; a cold child reads on open.
   const seeded = useRef<{ cached?: AgentRunControlCatalog }>()
   if (!seeded.current) {
-    const seedContext = providerContextOf(selectedAgentId, conversation.cwd)
+    const seedContext = providerContextOf(selectedAgentId, conversation.cwd, agents)
     const cached = seedContext ? readRunControlCatalogCache().get(contextKey(seedContext))?.data : null
     seeded.current = { ...(cached ? { cached } : {}) }
   }
@@ -124,7 +134,7 @@ export function useSideChatInstance({ conversation, agents, onOpenFile, renderLo
         } else setCatalogReason(result.reason || SIDE_CHAT_COPY.catalogUnavailable)
       }
     })
-    const seedContext = providerContextOf(selectedAgentId, conversation.cwd)
+    const seedContext = providerContextOf(selectedAgentId, conversation.cwd, agents)
     if (seeded.current?.cached && seedContext) reader.markLoaded(contextKey(seedContext))
     catalogReader.current = reader
   }
@@ -192,7 +202,7 @@ export function useSideChatInstance({ conversation, agents, onOpenFile, renderLo
     }
     writeSideChatPreference(conversation.id, value)
   }, [conversation.id])
-  const context = providerContextOf(selectedAgentId, conversation.cwd)
+  const context = providerContextOf(selectedAgentId, conversation.cwd, agents)
   /**
    * One coalesced read for the current Provider context, started only by an explicit
    * picker open or control change. An unavailable Provider has no context to read.
@@ -213,13 +223,13 @@ export function useSideChatInstance({ conversation, agents, onOpenFile, renderLo
     setRunControls(restored)
     persist(agentId, restored)
     // Never keep the previous Provider's catalog on screen while the new one is read.
-    const nextContext = providerContextOf(agentId, conversation.cwd)
+    const nextContext = providerContextOf(agentId, conversation.cwd, agents)
     const nextCached = nextContext ? readRunControlCatalogCache().get(contextKey(nextContext)) : undefined
     setCatalog(nextCached?.data ?? fallbackRunControlCatalog(restored.permissionMode))
     setCatalogReason(nextCached?.data ? SIDE_CHAT_COPY.catalogReading : SIDE_CHAT_COPY.catalogNotRead)
     if (!nextContext) return
     if (catalogReader.current?.request(nextContext)) setCatalogLoading(true)
-  }, [conversation.cwd, persist, runControls, selectedAgentId])
+  }, [agents, conversation.cwd, persist, runControls, selectedAgentId])
   const changeControls = useCallback((change: (current: AgentRunControls) => AgentRunControls): void => {
     const next = change(runControls)
     setRunControls(next)
@@ -237,9 +247,19 @@ export function useSideChatInstance({ conversation, agents, onOpenFile, renderLo
   // A side chat shares the frozen source workspace; it may not move to another one.
   const refuseWorkspaceChange = useCallback((): void => { setNotice(SIDE_CHAT_COPY.workspaceFixed) }, [])
 
-  const blockedReason = availability === 'available' ? undefined
+  /**
+   * A historical Pi id (the label the picker shows, e.g. `pi:rotom`) is not a registered
+   * Agent Profile, so this child cannot send yet. It stays usable: picking a registered
+   * profile in the Agent menu is the only way out, and no other launcher is substituted.
+   */
+  const unavailablePiProfile = availability !== 'reading' && providerIdForAgentId(selectedAgentId) === 'pi' &&
+    !registeredPiProfileIdOf(selectedAgentId, agents)
+    ? CONVERSATION_COPY.piProfileNotRegistered(
+      agents.find(agent => agent.id === selectedAgentId)?.name ?? (selectedAgentId || SIDE_CHAT_COPY.providerUnknown))
+    : undefined
+  const blockedReason = unavailablePiProfile ?? (availability === 'available' ? undefined
     : availability === 'reading' ? SIDE_CHAT_COPY.providerReading
-      : SIDE_CHAT_COPY.providerUnavailable(selectedAgentId || SIDE_CHAT_COPY.providerUnknown)
+      : SIDE_CHAT_COPY.providerUnavailable(selectedAgentId || SIDE_CHAT_COPY.providerUnknown))
 
   const navigation = useChatNavigation(scrollRef, true, turns.length, conversation.id)
   const diff = useDiffInspector({

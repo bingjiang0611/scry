@@ -10,6 +10,7 @@ import { SIDE_CHAT_COPY } from '../constants/side-chat-copy'
 import { SideChatTabBody } from '../components/SideChatTabBody'
 import { useSideChatWorkspace } from './useSideChatWorkspace'
 import { sideChatScope } from '../side-chat-scope'
+import { registeredPiProfileIdOf } from '../conversation-handoff'
 
 /**
  * Composition of the side-chat workspace of the active parent session.
@@ -46,11 +47,18 @@ export function useSideChatPanel({
   waitingQuestionRunIds: ReadonlySet<string>
   questionKindsByRun: ReadonlyMap<string, import('@shared/runtime').AgentQuestionKind>
 }) {
+  // A new child's first send names the parent's registered Pi profile. The parent's own
+  // recorded id stays the source identity; without a registered profile the target carries
+  // none, so main never receives a historical id as an Agent Profile.
+  const targetAgentProfileId = providerId === 'pi'
+    ? registeredPiProfileIdOf(agentProfileId ?? '', chatProps.agents)
+    : agentProfileId
   const scope = sideChatScope({
     draftKey, view,
     ...(conversation ? { conversation } : {}),
     providerId,
     ...(agentProfileId ? { agentProfileId } : {}),
+    ...(targetAgentProfileId ? { targetAgentProfileId } : {}),
     runControls,
     cwd,
     nativeSessionId: selectedProviderSessionId ?? activeSessionId,

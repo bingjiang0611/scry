@@ -97,7 +97,7 @@ const {
   getProviderRegistry: () => providerRegistry,
   homeDir, resolveKnownProjectDirectory
 })
-const { piProfileStore, detectInstalledAgents, storedPiProfilesNotDetected, listPiProfiles, resolvePiProfile } = createPiProfileRuntime({ userDataDir: app.getPath('userData') })
+const { piProfileStore, detectInstalledAgents, storedPiProfiles, listPiProfiles, resolvePiProfile } = createPiProfileRuntime({ userDataDir: app.getPath('userData') })
 const { providerCompatibility, providerRegistry, piRunDiagnostics, smokeProviderEnabled, smokeDetectedAgents } = createProviderRuntime({ homeDir, listPiProfiles, resolvePiProfile })
 
 function setCurrentCwd(dir: string | undefined): void {
@@ -137,7 +137,7 @@ function handleTrusted<TArgs extends unknown[], TResult>(
 
 registerAppAgentHandlers({
   handleTrusted, getWindow: () => win, smokeProviderEnabled, smokeDetectedAgents,
-  storedPiProfilesNotDetected, providerCompatibility, detectInstalledAgents, providerRegistry,
+  storedPiProfiles, providerCompatibility, detectInstalledAgents, providerRegistry,
   dialog, piProfileStore, invalidateRemoteProviderMetadata, recentStore, canonicalExistingDirectory,
   invalidateSessionHistoryLoad, rememberProject, setCurrentCwd,
   resolveKnownProjectDirectory, getCurrentCwd: () => currentCwd

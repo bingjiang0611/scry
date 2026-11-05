@@ -19,7 +19,7 @@ import { homedir } from 'node:os'
 import { promisify } from 'node:util'
 import { createHash, randomUUID } from 'node:crypto'
 import { basename, dirname, join } from 'node:path'
-import { providerIdForAgentId } from '../shared/runtime'
+import { isPiAgentProfileId, providerIdForAgentId } from '../shared/runtime'
 import type { DetectedAgent } from './claude-locate'
 
 export interface PiAgentProfile {
@@ -31,7 +31,7 @@ export interface PiAgentProfile {
 const validProfile = (value: unknown): value is PiAgentProfile => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const profile = value as Partial<PiAgentProfile>
-  return typeof profile.id === 'string' && /^pi:[a-f0-9]{16}$/.test(profile.id) &&
+  return isPiAgentProfileId(profile.id) &&
     typeof profile.label === 'string' && profile.label.length > 0 && profile.label.length <= 120 &&
     typeof profile.executable === 'string' && profile.executable.startsWith('/') && profile.executable.length <= 4_096
 }
@@ -69,6 +69,23 @@ export async function canonicalizePiAgentPaths(agents: DetectedAgent[]): Promise
 export function undetectedPiProfiles(profiles: PiAgentProfile[], detected: Array<{ id: string }>): PiAgentProfile[] {
   const detectedIds = new Set(detected.map((agent) => agent.id))
   return profiles.filter((profile) => !detectedIds.has(profile.id))
+}
+
+/**
+ * Registered Agent Profile identity of one detected Pi launcher.
+ *
+ * Discovery keeps the historical id (`pi:rotom`) so saved native sessions still resolve,
+ * but a conversation send must name a registered profile. Only a single profile whose
+ * canonical executable is exactly this launcher qualifies: two profiles on one launcher
+ * is ambiguous, and no profile is reported rather than an arbitrary one.
+ */
+export function registeredPiProfileId(
+  agent: { id: string; path: string },
+  profiles: readonly PiAgentProfile[]
+): string | undefined {
+  if (isPiAgentProfileId(agent.id)) return agent.id
+  const matches = profiles.filter((profile) => profile.executable === agent.path)
+  return matches.length === 1 ? matches[0].id : undefined
 }
 
 export function piProfileForExecutable(executable: string): PiAgentProfile {

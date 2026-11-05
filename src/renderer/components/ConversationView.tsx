@@ -7,7 +7,7 @@ import { CONVERSATION_COPY } from '../constants/conversation-copy'
 import { chatBottomStickinessAfterScroll, observeChatBottomLayout, scrollChatToBottomIfNeeded } from '../chat-scroll'
 import type { SideChatViewPosition } from '../side-chat-view-state'
 import { applyViewRestore, type PendingViewRestore } from '../conversation-view-restore'
-import { conversationTarget, prepareConversationSend } from '../conversation-handoff'
+import { conversationTarget, prepareConversationSend, selectedAgentProfileId } from '../conversation-handoff'
 import type { Turn } from '../format'
 import { resendContent, useConversationSubmission } from '../hooks/useConversationSubmission'
 import { pendingRecovery } from '../composer-pending'
@@ -232,7 +232,7 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
     api: window.scry.conversations, draftStore, draftKey, mounted,
     expectedRevision: () => page?.summary.revision,
     prepare: (prompt, attachments, commandId) => prepareConversationSend(window.scry.conversations, conversation.id,
-      conversationTarget(chatProps.selectedAgentId, chatProps.runControls), prompt, commandId, attachments),
+      conversationTarget(chatProps.selectedAgentId, chatProps.runControls, chatProps.agents), prompt, commandId, attachments),
     onError: setError, onNotice: setNotice,
     onSubmitted: () => {
       showLatest()
@@ -273,7 +273,10 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
       const selected = page.turns.find(item => item.runId === turn?.runId)
       const binding = page.bindings.find(item => item.id === selected?.bindingId)
       if (!binding || !turn || !forkableRunIds.has(turn.runId)) throw new Error('该轮没有可执行的原生归属；共享历史请回到源对话操作')
-      const sameAgent = chatProps.selectedAgentId === (binding.agentProfileId ?? binding.providerId)
+      // The binding records the Agent Profile identity of its run, which is the registered
+      // Pi profile rather than the historical discovery id the picker shows.
+      const sameAgent = selectedAgentProfileId(chatProps.selectedAgentId, chatProps.agents) ===
+        (binding.agentProfileId ?? binding.providerId)
       if (binding.providerId === 'pi' && (!sameAgent || chatProps.runControls.permissionMode !== 'full_access')) {
         throw new Error('请先选择该轮的 Pi Profile 并明确启用本机完全访问，再创建原生分支；不会发送消息')
       }

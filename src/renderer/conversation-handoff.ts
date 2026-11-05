@@ -1,19 +1,47 @@
-import { providerIdForAgentId, type AgentInputAttachment, type AgentRunControls } from '@shared/runtime'
+import { isPiAgentProfileId, providerIdForAgentId, type AgentInputAttachment, type AgentRunControls } from '@shared/runtime'
 import type { ConversationAdoptionPreview, ConversationApi, ConversationSendRequest, ConversationSummary, ConversationTargetRequest } from '@shared/conversation-api'
+import { CONVERSATION_COPY } from './constants/conversation-copy'
+
+/** What discovery reported for one Agent: its own id and its registered Pi profile, if any. */
+export interface AgentProfileIdentity {
+  id: string
+  agentProfileId?: string
+}
+
+/**
+ * Registered Pi Agent Profile identity of the selected Agent.
+ *
+ * Discovery keeps historical ids such as `pi:rotom` so saved native sessions resolve, but
+ * a conversation send must name a registered profile. Only the exact selected Agent may
+ * supply it: another Pi launcher is a different identity, so a same-Provider neighbour is
+ * never substituted. `undefined` means this selection cannot be sent.
+ */
+export function registeredPiProfileIdOf(agentId: string, agents: readonly AgentProfileIdentity[]): string | undefined {
+  if (isPiAgentProfileId(agentId)) return agentId
+  const agentProfileId = agents.find(agent => agent.id === agentId)?.agentProfileId
+  return isPiAgentProfileId(agentProfileId) ? agentProfileId : undefined
+}
+
+/** The Agent Profile identity a new run records for the selected Agent. */
+export function selectedAgentProfileId(agentId: string, agents: readonly AgentProfileIdentity[]): string | undefined {
+  return providerIdForAgentId(agentId) === 'pi' ? registeredPiProfileIdOf(agentId, agents) : agentId
+}
 
 /**
  * Send target of the clicked Agent. Every registered Provider owns its own native
  * continuation, so the send contract is the five-Provider one; a Provider that is not
  * registered at all is refused instead of being silently mapped onto another one.
  */
-export function conversationTarget(agentId: string, controls?: AgentRunControls): ConversationTargetRequest {
+export function conversationTarget(agentId: string, controls?: AgentRunControls,
+  agents: readonly AgentProfileIdentity[] = []): ConversationTargetRequest {
   const providerId = providerIdForAgentId(agentId)
   if (!providerId) throw new Error(`Agent ${agentId} 尚未注册 Provider adapter；当前对话和草稿已保留`)
-  return {
-    providerId,
-    ...(providerId === 'pi' ? { agentProfileId: agentId } : {}),
-    ...controls
-  }
+  if (providerId !== 'pi') return { providerId, ...controls }
+  const agentProfileId = registeredPiProfileIdOf(agentId, agents)
+  // A historical Pi id is not an Agent Profile. Sending it would be refused by the host
+  // anyway, so say so here, before any read, and never pick a neighbour launcher.
+  if (!agentProfileId) throw new Error(CONVERSATION_COPY.piProfileNotRegistered(agentId))
+  return { providerId, agentProfileId, ...controls }
 }
 
 /**
@@ -23,6 +51,11 @@ export function conversationTarget(agentId: string, controls?: AgentRunControls)
  * Qoder/OpenCode their own real native continuation.
  */
 export function legacyAdoptionSourceTarget(agentId: string): ConversationTargetRequest & { providerId: 'claude' | 'codex' | 'pi' } {
+  // The source is the identity the native session was captured under, so it cannot be
+  // rewritten to a registered profile: the host matches it against the recorded session.
+  if (providerIdForAgentId(agentId) === 'pi' && !isPiAgentProfileId(agentId)) {
+    throw new Error(CONVERSATION_COPY.legacyPiSourceNotMigratable(agentId))
+  }
   const target = conversationTarget(agentId)
   if (target.providerId !== 'claude' && target.providerId !== 'codex' && target.providerId !== 'pi') {
     throw new Error('旧捕获的迁移来源仅支持 Claude/Codex/Pi；可改用侧边会话或分支，当前对话和草稿已保留')
