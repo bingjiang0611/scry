@@ -18,7 +18,7 @@
  * Usage:
  *   npm run build:cli && node scripts/recorder-engine-bench.mjs --out=<file.json> [--only=S1,S4]
  */
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { arch, cpus, loadavg, platform, release, totalmem } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -26,14 +26,18 @@ import {
   recordFiles, resetRepo, startRssSampler, waitForRecord, workspaceRoot,
   writeRecorderConfig
 } from './recorder-engine-bench-fixtures.mjs'
+import { printTable, summarize } from './recorder-engine-bench-report.mjs'
 
 const args = process.argv.slice(2)
 const only = (args.find((value) => value.startsWith('--only=')) ?? '').replace('--only=', '')
   .split(',').map((value) => value.trim()).filter(Boolean)
 const outPath = (args.find((value) => value.startsWith('--out=')) ?? '').replace('--out=', '')
+const detailPath = (args.find((value) => value.startsWith('--detail=')) ?? '').replace('--detail=', '')
+const summarizeFrom = (args.find((value) => value.startsWith('--summarize-from=')) ?? '').replace('--summarize-from=', '')
 const rounds = Number(process.env.SCRY_BENCH_ROUNDS ?? 3)
 const LARGE_FILES = Number(process.env.SCRY_BENCH_LARGE_FILES ?? 20_000)
 const TRANSCRIPT_BYTES = Number(process.env.SCRY_BENCH_TRANSCRIPT_BYTES ?? 50 * 1024 * 1024)
+const RECORDS_MAX = Number(process.env.SCRY_BENCH_RECORDS_MAX ?? 10_000)
 
 const tempRoot = makeTempRoot()
 const probe = installGitProbe(tempRoot)
@@ -60,9 +64,10 @@ async function stage(name, action) {
   const rssBefore = rss.read()
   probe.beginStage(name)
   const startedAt = process.hrtime.bigint()
-  let value
   let error
-  try { value = await action() } catch (caught) { error = caught }
+  // The hook result is deliberately not retained: a Stop hook returns the whole committed record,
+  // and keeping every stage's record would make the report itself the largest allocation.
+  try { await action() } catch (caught) { error = caught }
   const ms = Number(process.hrtime.bigint() - startedAt) / 1e6
   const git = probe.endStage()
   const transcript = transcriptReadStats()
@@ -76,7 +81,9 @@ async function stage(name, action) {
     rssBeforeBytes: rssBefore.currentBytes,
     rssAfterBytes: rssAfter.currentBytes,
     peakRssBytes: rssAfter.peakBytes,
-    ...(value === undefined ? {} : { value })
+    // Peak over the stage window, expressed as growth from the RSS at stage start: the process
+    // keeps earlier scenarios' memory, so an absolute peak alone would flatter a later stage.
+    rssGrowthBytes: Math.max(0, rssAfter.peakBytes - rssBefore.currentBytes)
   }
 }
 
@@ -350,7 +357,7 @@ function draftFor(root, index) {
 
 await record('S9', 'commit one record with 0 / 1000 / 10000 existing records', async () => {
   const stages = []
-  for (const history of [0, 1_000, 10_000]) {
+  for (const history of [0, 1_000, RECORDS_MAX].filter((value, index, all) => all.indexOf(value) === index)) {
     const dataRoot = join(tempRoot, `s9-${history}`, '.scry')
     await mkdir(dataRoot, { recursive: true })
     for (let index = 0; index < history; index++) await commitRecord(dataRoot, draftFor(tempRoot, index))
@@ -365,10 +372,11 @@ await record('S9', 'commit one record with 0 / 1000 / 10000 existing records', a
       ms: median(samples.map((sample) => sample.ms)),
       git: gitTotals(samples),
       samples: samples.map((sample) => sample.ms),
-      peakRssBytes: samples.at(-1).peakRssBytes
+      peakRssBytes: samples.at(-1).peakRssBytes,
+      rssGrowthBytes: samples.at(-1).rssGrowthBytes
     })
   }
-  return { stages, fixture: { recordsHistories: [0, 1_000, 10_000] } }
+  return { stages, fixture: { recordsHistories: [0, 1_000, RECORDS_MAX] } }
 })
 
 await record('S10', '4 concurrent sessions x 5 turns on one workspace', async () => {
@@ -414,42 +422,22 @@ await record('S11', 'recovery with 1000 completed session directories', async ()
 probe.stop()
 rss.stop()
 const report = { schema: 1, generatedAt: new Date().toISOString(), environment, rounds, results, notes }
+if (detailPath) {
+  await mkdir(join(detailPath, '..'), { recursive: true })
+  await writeFile(detailPath, `${JSON.stringify(report)}\n`)
+}
+
+const source = summarizeFrom
+  ? summarize(JSON.parse(await readFile(summarizeFrom, 'utf8')))
+  : summarize(report)
 if (outPath) {
   await mkdir(join(outPath, '..'), { recursive: true })
-  await writeFile(outPath, `${JSON.stringify(report, null, 2)}\n`)
+  await writeFile(outPath, `${JSON.stringify(source, null, 2)}\n`)
 }
 
-function formatCounts(gitCount) {
-  const entries = Object.entries(gitCount.byCommand ?? {}).sort((left, right) => right[1] - left[1])
-  return entries.map(([command, count]) => `${command}:${count}`).join(' ') || '-'
-}
-
-process.stdout.write(`recorder engine L1 bench, ${rounds} rounds/scenario, ${platform()} ${process.version}\n\n`)
-for (const result of results) {
-  if (result.error) {
-    process.stdout.write(`${result.id}  ${result.title}\n  FAILED: ${result.error}\n\n`)
-    continue
-  }
-  process.stdout.write(`${result.id}  ${result.title}\n`)
-  for (const entry of result.stages) {
-    if (entry.name === 'record-visible') continue
-    const extra = entry.history === undefined ? '' : ` history=${entry.history}`
-    const transcriptBytes = entry.transcript
-      ? ` parse=${entry.transcript.bytesRead}B anchor=${entry.transcript.anchorBytesScanned}B`
-      : ''
-    const visible = entry.recordVisibleMs === undefined || entry.recordVisibleMs === null
-      ? '' : ` recordVisible=${Math.round(entry.recordVisibleMs)}ms`
-    process.stdout.write(
-      `  ${entry.name.padEnd(11)} ms=${String(Math.round(entry.ms)).padStart(6)}${extra}` +
-      ` git=${String(entry.git?.total ?? 0).padStart(3)} [${formatCounts(entry.git ?? {})}]` +
-      `${entry.git?.indexBytes ? ` idx≈${entry.git.indexBytes}B` : ''}${transcriptBytes}${visible}` +
-      `${entry.peakRssBytes ? ` rss=${Math.round(entry.peakRssBytes / 1024 / 1024)}MB` : ''}\n`
-    )
-  }
-  process.stdout.write(`  total git=${result.git?.total ?? '-'}  wall=${Math.round(result.wallMs / 1000)}s\n\n`)
-}
-if (notes.length > 0) process.stdout.write(`notes:\n${notes.map((note) => `  ${note}`).join('\n')}\n`)
-if (outPath) process.stdout.write(`json: ${outPath}\n`)
+printTable(results, { rounds, notes, platformLabel: `${platform()} ${process.version}` })
+if (outPath) process.stdout.write(`json summary: ${outPath}\n`)
+if (detailPath) process.stdout.write(`json detail: ${detailPath}\n`)
 
 cleanupTemp(tempRoot)
 process.exit(0)
