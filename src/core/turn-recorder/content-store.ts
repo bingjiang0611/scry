@@ -96,12 +96,22 @@ export async function writeRecorderContentBatch(
 ): Promise<ToolContentRef[]> {
   const refs: ToolContentRef[] = []
   const seen = new Map<string, string>()
+  // Identical payloads in one batch are one address: hash each distinct value once instead of
+  // paying a second SHA-256 over bytes that are already known to be equal.
+  const hashed = new Map<string, ToolContentRef>()
   const missing: Array<{ path: string; content: string; sha256: string }> = []
   for (const content of contents) {
+    const known = hashed.get(content)
+    if (known) {
+      refs.push(known)
+      continue
+    }
     const bytes = Buffer.from(content, 'utf8')
     const sha256 = digest(bytes)
     const path = contentPath(dataRoot, sha256)
-    refs.push({ storage: 'recorder-content-v1', sha256, bytes: bytes.length, encoding })
+    const ref: ToolContentRef = { storage: 'recorder-content-v1', sha256, bytes: bytes.length, encoding }
+    hashed.set(content, ref)
+    refs.push(ref)
     const previous = seen.get(path)
     if (previous !== undefined) {
       assertContentBytes(Buffer.from(previous, 'utf8'), bytes, sha256)

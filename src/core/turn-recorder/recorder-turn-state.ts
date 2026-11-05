@@ -262,22 +262,42 @@ export async function persistTurnDiffContent(
   dataRoot: string,
   snapshots: import('../../shared/trace.js').TurnDiffSnapshot[]
 ): Promise<import('../../shared/trace.js').TurnDiffSnapshot[]> {
-  return Promise.all(snapshots.map(async (snapshot) => ({
+  // The same patch text can appear many times in one turn (a file read twice, a repeated snippet).
+  // Publish each distinct payload once, and publish the distinct payloads concurrently: a turn with
+  // 300 different patches must keep the same publish profile it had before, while a turn with 20
+  // copies of one patch stops re-verifying the copies it just wrote.
+  const prepared = snapshots.map((snapshot) => snapshot.files.map((file) => file.patch
+    ? captureToolContent(file.patch, { source: 'git_turn_diff', maxBytes: null, sourceCompleteness: 'complete' })
+    : undefined))
+  const occurrence = new Map<string, number>()
+  const unique: string[] = []
+  const slotOf: number[][] = snapshots.map((snapshot) => snapshot.files.map(() => -1))
+  snapshots.forEach((snapshot, snapshotIndex) => {
+    snapshot.files.forEach((_, fileIndex) => {
+      const content = prepared[snapshotIndex][fileIndex]?.content
+      if (content === undefined) return
+      let slot = occurrence.get(content)
+      if (slot === undefined) {
+        slot = unique.length
+        unique.push(content)
+        occurrence.set(content, slot)
+      }
+      slotOf[snapshotIndex][fileIndex] = slot
+    })
+  })
+  const refs = await Promise.all(unique.map((content) => writeRecorderContent(dataRoot, content, 'utf8')))
+  return snapshots.map((snapshot, snapshotIndex) => ({
     ...snapshot,
-    files: await Promise.all(snapshot.files.map(async (file) => {
-      if (!file.patch) return file
-      const full = captureToolContent(file.patch, {
-        source: 'git_turn_diff', maxBytes: null, sourceCompleteness: 'complete'
-      })
-      if (full.content === undefined) return file
-      const contentRef = await writeRecorderContent(dataRoot, full.content, 'utf8')
-      const patchContent = { ...full, contentRef }
+    files: snapshot.files.map((file, fileIndex) => {
+      const full = prepared[snapshotIndex][fileIndex]
+      if (full === undefined) return file
+      const patchContent = { ...full, contentRef: refs[slotOf[snapshotIndex][fileIndex]] }
       return {
         ...file,
         patch: patchContent.content,
         patchContent,
         patchStatus: patchContent.storage === 'complete' ? 'captured' as const : 'truncated' as const
       }
-    }))
-  })))
+    })
+  }))
 }
