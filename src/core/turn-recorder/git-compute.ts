@@ -13,7 +13,8 @@ import {
   cleanupCapture
 } from './git-capture.js'
 import {
-  rm
+  rm,
+  stat
 } from 'node:fs/promises'
 import {
   gitCommand,
@@ -103,6 +104,17 @@ async function writeTargetedSnapshotTree(options: {
   return (await gitCommand(snapshotGitArgs(filterOverrides, ['write-tree']), { cwd, env, deadline })).trim()
 }
 
+/** 启动时的 index 在这一轮里没有被改写时，它仍然是 beforeTree 的可用基线。 */
+async function unchangedIndexPath(capture: GitTurnDiffCapture): Promise<string | undefined> {
+  const { indexPath, indexState } = capture
+  if (!capture.baselineClean || !indexPath || !indexState) return undefined
+  const now = await stat(indexPath).catch(() => undefined)
+  if (!now) return undefined
+  const same = now.mtimeMs === indexState.mtimeMs && now.ctimeMs === indexState.ctimeMs &&
+    now.size === indexState.size && now.ino === indexState.ino
+  return same ? indexPath : undefined
+}
+
 export async function computeGitTurnDiff(
   capture: GitTurnDiffCapture,
   deadlineMs: number,
@@ -180,17 +192,27 @@ export async function computeGitTurnDiff(
           const discoveryEnv: NodeJS.ProcessEnv = { ...env, GIT_INDEX_FILE: discoveryIndex }
           await rm(discoveryIndex, { force: true })
           await rm(`${discoveryIndex}.lock`, { force: true })
-          const discoverySource = capture.baselineClean
-            ? capture.indexPath ?? join(capture.tempDir, 'missing.index')
-            : join(capture.tempDir, 'before.index')
-          await copyIndexWithTimestamps(discoverySource, discoveryIndex).catch(() => undefined)
+          // 启动快照自带的 index（worktree 脏时由 writeSnapshotTree 写出，或启动后没被改写的
+          // 真实 index）内容已经等于 beforeTree，且 stat cache 有效。直接沿用它就省掉一次
+          // read-tree --reset；只有无法证明时才重建，保持原来的语义。
+          const reusableBase = capture.beforeIndex ?? await unchangedIndexPath(capture)
+          let copiedBase = false
+          if (reusableBase) {
+            copiedBase = await copyIndexWithTimestamps(reusableBase, discoveryIndex).then(() => true, () => false)
+          }
+          if (!copiedBase) {
+            const discoverySource = capture.baselineClean
+              ? capture.indexPath ?? join(capture.tempDir, 'missing.index')
+              : join(capture.tempDir, 'before.index')
+            await copyIndexWithTimestamps(discoverySource, discoveryIndex).catch(() => undefined)
+            await gitCommand(snapshotGitArgs(filterOverrides, ['read-tree', '--reset', capture.beforeTree]), {
+              cwd: capture.repoRoot,
+              env: discoveryEnv,
+              deadline: discoveryDeadline
+            })
+          }
           // 在 beforeTree 上保留可复用的 stat cache；really-refresh 同时清掉
           // assume-unchanged 对候选发现的遮蔽，不必像 git add -A 那样重写整个 scope。
-          await gitCommand(snapshotGitArgs(filterOverrides, ['read-tree', '--reset', capture.beforeTree]), {
-            cwd: capture.repoRoot,
-            env: discoveryEnv,
-            deadline: discoveryDeadline
-          })
           await gitCommand(snapshotGitArgs(filterOverrides, ['update-index', '--really-refresh']), {
             cwd: capture.repoRoot,
             env: discoveryEnv,

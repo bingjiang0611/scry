@@ -8,7 +8,8 @@ import {
   mkdtemp,
   mkdir,
   rm,
-  realpath
+  realpath,
+  stat
 } from 'node:fs/promises'
 import {
   join,
@@ -47,6 +48,13 @@ export interface GitTurnDiffCapture {
   branch?: string
   baselineClean?: boolean
   indexPath?: string
+  /**
+   * 启动时观测到的真实 index 身份。finish 的候选发现只在 index 未被改写时沿用它：
+   * 那时 index 仍等于 beforeTree，可以省掉一次 read-tree --reset，且 stat cache 仍然有效。
+   */
+  indexState?: { mtimeMs: number; ctimeMs: number; size: number; ino: number }
+  /** 启动快照自带、内容等于 beforeTree 且 stat cache 有效的隔离 index（仅 worktree 脏时存在）。 */
+  beforeIndex?: string
   tempDir?: string
   objectDir?: string
   alternateObjectDirs?: string
@@ -231,7 +239,10 @@ export async function beginGitTurnDiff(
     // 一轮并行 Git 进程，不再串行执行 HEAD 与 status 两轮探测。
     const [layoutResult, statusResult] = await Promise.allSettled([
       gitCommand(
-        ['rev-parse', '--is-inside-work-tree', '--show-toplevel', '--git-common-dir', '--git-path', 'index'],
+        [
+          'rev-parse', '--is-inside-work-tree', '--show-toplevel', '--git-common-dir',
+          '--git-path', 'index', '--git-path', 'info/sparse-checkout'
+        ],
         { cwd: canonicalCwd, env: readEnv, deadline }
       ),
       gitCommand(snapshotGitArgs([], ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all', '--', '.']), {
@@ -246,9 +257,9 @@ export async function beginGitTurnDiff(
       if (layoutResult.reason instanceof GitDeadlineError) throw layoutResult.reason
       return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'not_git' }
     }
-    const [inside, repoRoot, commonDirRaw, indexPathRaw] = layoutResult.value
+    const [inside, repoRoot, commonDirRaw, indexPathRaw, sparsePathRaw] = layoutResult.value
       .split('\n').map((line) => line.trim())
-    if (inside !== 'true' || !repoRoot || !commonDirRaw || !indexPathRaw) {
+    if (inside !== 'true' || !repoRoot || !commonDirRaw || !indexPathRaw || !sparsePathRaw) {
       return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'not_git' }
     }
     if (statusResult.status === 'rejected') throw statusResult.reason
@@ -298,6 +309,21 @@ export async function beginGitTurnDiff(
     const alternateObjectDirs = [join(commonDir, 'objects'), process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES]
       .filter((value): value is string => !!value)
       .join(delimiter)
+    // Sparse checkout 的 skip-worktree 标记代表「本来就不在工作树里」，重建 index 会把它们
+    // 变成删除。那种仓库不发布可复用的基线 index，finish 仍走 read-tree --reset。
+    // linked worktree 的规则文件在自己的 git 目录（`<common>/worktrees/<id>/info/...`），
+    // 所以路径必须由 `--git-path` 解析，不能拼 commonDir。
+    const sparsePath = isAbsolute(sparsePathRaw) ? sparsePathRaw : resolve(canonicalCwd, sparsePathRaw)
+    const [indexState, sparseCheckout] = await Promise.all([
+      stat(indexPath).then(
+        (value) => ({ mtimeMs: value.mtimeMs, ctimeMs: value.ctimeMs, size: value.size, ino: value.ino }),
+        () => undefined
+      ),
+      // 只有 ENOENT 能证明“这个工作树没有 sparse 规则文件”。其他错误（EACCES、ENOTDIR、悬空路径）
+      // 说明判断失败，此时按 sparse 处理：宁可白跑一次 read-tree --reset，也不能把 skip-worktree
+      // 条目当成删除写进证据。
+      stat(sparsePath).then(() => true, (error: NodeJS.ErrnoException) => error.code !== 'ENOENT')
+    ])
     if (baselineClean) {
       return {
         beforeAt,
@@ -311,6 +337,7 @@ export async function beginGitTurnDiff(
         branch,
         baselineClean,
         indexPath,
+        ...(indexState && !sparseCheckout ? { indexState } : {}),
         tempDir,
         objectDir,
         alternateObjectDirs,
@@ -348,6 +375,7 @@ export async function beginGitTurnDiff(
       branch,
       baselineClean,
       indexPath,
+      ...(sparseCheckout ? {} : { beforeIndex }),
       tempDir,
       objectDir,
       alternateObjectDirs,

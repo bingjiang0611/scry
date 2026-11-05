@@ -1,9 +1,11 @@
 import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { promisify } from 'node:util'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest'
+import { beginGitTurnDiff } from './git-capture.js'
 import { handleRecorderHook } from './recorder.js'
 import { listRecords } from './store.js'
 import { isAgentTurnRecord } from '../../shared/turn-record.js'
@@ -25,6 +27,20 @@ vi.mock('./git.js', async importOriginal => {
 
 const roots: string[] = []
 const exec = promisify(execFile)
+// 夹具只跑临时仓库，但 `git` 会读宿主配置：`core.hooksPath` 指向拒绝提交的 hook 就让 `commit` 失败，
+// `GIT_DIR`/`GIT_INDEX_FILE` 这些仓库定位变量还会把对象和提交写进宿主仓库（`git -C` 只改工作目录）。
+// 整个文件统一隔离宿主全局/系统配置、环境配置与模板，保留临时仓库自己的 .git/config。
+beforeAll(() => {
+  vi.stubEnv('GIT_CONFIG_GLOBAL', '/dev/null')
+  vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1')
+  vi.stubEnv('GIT_CONFIG_COUNT', '0')
+  vi.stubEnv('GIT_TEMPLATE_DIR', '')
+  for (const key of [
+    'GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE',
+    'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES'
+  ]) vi.stubEnv(key, undefined)
+})
+afterAll(() => vi.unstubAllEnvs())
 afterEach(async () => {
   vi.useRealTimers()
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
@@ -73,3 +89,111 @@ it('retains every discovered repository and its captured/timeout/failed outcome 
   const legacy = { ...records[0], diff: { ...legacyDiff, value: diff.value?.map(({ requestedRoot: _requestedRoot, ...snapshot }) => snapshot) } }
   expect(isAgentTurnRecord(legacy)).toBe(true)
 }, 15_000)
+
+// The finish path may reuse the start capture's index instead of rebuilding it with
+// `read-tree --reset`; the candidate set must stay exactly the worktree-vs-baseline one.
+async function committedRepo(name: string): Promise<string> {
+  const root = await realpath(await mkdtemp(join(tmpdir(), `scry-reuse-${name}-`)))
+  roots.push(root)
+  const repo = join(root, 'repo')
+  await mkdir(repo)
+  await exec('git', ['init', '-q', repo])
+  await writeFile(join(repo, 'README.md'), 'before\n')
+  await exec('git', ['-C', repo, 'add', 'README.md'])
+  await exec('git', ['-C', repo, '-c', 'user.name=bingjiang0611', '-c', 'user.email=307659028+bingjiang0611@users.noreply.github.com', 'commit', '-qm', 'fixture'])
+  await writeFile(join(root, 'scry.config.json'), JSON.stringify({
+    schemaVersion: 1, enabled: true, workspaceId: name, dataDir: '.scry',
+    repositories: { mode: 'discover-nested-git' },
+    capture: { prompt: true, assistant: true, toolOutput: 'summary', diff: true, hooks: true }
+  }))
+  return root
+}
+
+async function turnDiffOf(root: string, session: string) {
+  const payload = { session_id: session, turn_id: session, timestamp: new Date().toISOString(), cwd: root }
+  await handleRecorderHook({ provider: 'pi', workspace: root, env: {}, event: 'UserPromptSubmit', payload: { ...payload, prompt: 'change files' } })
+  return payload
+}
+
+// 复用启动 index 是纯性能优化：发布错了不会改结果，只会白跑调用。用直接观测把发布条件钉住。
+it('publishes the reusable start index only while sparse checkout is off', async () => {
+  const dirtyRoot = await committedRepo('index-publish')
+  const dirtyRepo = join(dirtyRoot, 'repo')
+  await writeFile(join(dirtyRepo, 'untracked.txt'), 'later\n')
+  const dirty = await beginGitTurnDiff(dirtyRepo, 15_000, dirtyRoot)
+  expect(dirty.status).toBe('ready')
+  expect(dirty.baselineClean).toBe(false)
+  expect(dirty.beforeIndex).toBeDefined()
+
+  const cleanRoot = await committedRepo('index-publish-clean')
+  const clean = await beginGitTurnDiff(join(cleanRoot, 'repo'), 15_000, cleanRoot)
+  expect(clean.baselineClean).toBe(true)
+  expect(clean.indexState).toBeDefined()
+
+  // GIT_TEMPLATE_DIR='' 让 `git init` 不复制默认模板，`.git/info` 得自己建。
+  await mkdir(join(dirtyRepo, '.git', 'info'), { recursive: true })
+  await writeFile(join(dirtyRepo, '.git', 'info', 'sparse-checkout'), '')
+  const sparse = await beginGitTurnDiff(dirtyRepo, 15_000, dirtyRoot)
+  expect(sparse.status).toBe('ready')
+  expect(sparse.beforeIndex).toBeUndefined()
+  expect(sparse.indexState).toBeUndefined()
+
+  // linked worktree 的规则文件在自己的 git 目录里，common 目录看不到它。
+  const linked = join(cleanRoot, 'linked')
+  await exec('git', ['-C', join(cleanRoot, 'repo'), 'worktree', 'add', '-q', linked, '-b', 'sparse-linked'])
+  await exec('git', ['-C', linked, 'sparse-checkout', 'set', '--no-cone', 'untracked-only.txt'])
+  const commonDir = (await exec('git', ['-C', linked, 'rev-parse', '--git-common-dir'])).stdout.trim()
+  expect(existsSync(join(commonDir, 'info', 'sparse-checkout'))).toBe(false)
+  const linkedSparse = await beginGitTurnDiff(linked, 15_000, cleanRoot)
+  expect(linkedSparse.status).toBe('ready')
+  expect(linkedSparse.beforeIndex).toBeUndefined()
+  expect(linkedSparse.indexState).toBeUndefined()
+}, 20_000)
+
+// 只有 ENOENT 能证明“这个工作树没有 sparse 规则文件”。其他 stat 错误只说明判断失败，
+// 这时必须按 sparse 处理：白跑一次 read-tree --reset 只是慢，误判会把 skip-worktree 条目写成删除。
+it('sparse 规则文件探测只把 ENOENT 当作“没有 sparse checkout”', async () => {
+  const root = await committedRepo('index-sparse-probe')
+  const repo = join(root, 'repo')
+  const clean = await beginGitTurnDiff(repo, 15_000, root)
+  expect(clean.status).toBe('ready')
+  expect(clean.indexState).toBeDefined()
+
+  // `info` 变成普通文件后，`info/sparse-checkout` 的 stat 返回 ENOTDIR 而不是 ENOENT。
+  await rm(join(repo, '.git', 'info'), { recursive: true, force: true })
+  await writeFile(join(repo, '.git', 'info'), 'not a directory\n')
+  const unreadable = await beginGitTurnDiff(repo, 15_000, root)
+  expect(unreadable.status).toBe('ready')
+  expect(unreadable.indexState).toBeUndefined()
+  expect(unreadable.beforeIndex).toBeUndefined()
+}, 20_000)
+
+it('captures a dirty worktree that appears after a clean start', async () => {
+  const root = await committedRepo('clean-start')
+  const repo = join(root, 'repo')
+  const payload = await turnDiffOf(root, 'reuse-clean')
+  const snapshot = JSON.parse(JSON.stringify(payload))
+  await writeFile(join(repo, 'README.md'), 'after\n')
+  await writeFile(join(repo, 'new.txt'), 'untracked\n')
+  await handleRecorderHook({ provider: 'pi', workspace: root, env: {}, event: 'Stop', payload: { ...snapshot, assistant_response: 'done', timestamp: new Date().toISOString() } })
+  const records = await listRecords(join(root, '.scry'))
+  expect(records).toHaveLength(1)
+  const files = records[0].diff.value?.flatMap(snapshot => snapshot.files ?? []) ?? []
+  expect(files.map(file => [basename(file.path), file.change]).sort()).toEqual([['README.md', 'modified'], ['new.txt', 'added']])
+}, 20_000)
+
+it('still captures the turn when the user rewrote the index mid-turn', async () => {
+  const root = await committedRepo('staged-midturn')
+  const repo = join(root, 'repo')
+  const payload = await turnDiffOf(root, 'reuse-staged')
+  await writeFile(join(repo, 'README.md'), 'staged\n')
+  await exec('git', ['-C', repo, 'add', 'README.md'])
+  await writeFile(join(repo, 'staged-only.txt'), 'later\n')
+  await exec('git', ['-C', repo, 'add', 'staged-only.txt'])
+  await exec('git', ['-C', repo, 'reset', '-q', 'staged-only.txt'])
+  await handleRecorderHook({ provider: 'pi', workspace: root, env: {}, event: 'Stop', payload: { ...payload, assistant_response: 'done', timestamp: new Date().toISOString() } })
+  const records = await listRecords(join(root, '.scry'))
+  expect(records).toHaveLength(1)
+  const files = records[0].diff.value?.flatMap(snapshot => snapshot.files ?? []) ?? []
+  expect(files.map(file => [basename(file.path), file.change]).sort()).toEqual([['README.md', 'modified'], ['staged-only.txt', 'added']])
+}, 20_000)
