@@ -10,7 +10,25 @@ function contentPath(dataRoot: string, sha256: string): string {
 }
 
 function digest(content: Buffer): string {
+  contentStoreCounters.hashes++
   return createHash('sha256').update(content).digest('hex')
+}
+
+/**
+ * Process-local, monotonic counters for the content-addressed writes: how many payloads were
+ * hashed, how many were read back for corruption detection, and how many directory syncs those
+ * verifications issued. Diagnostics only; they never change a publish decision.
+ */
+const contentStoreCounters = { hashes: 0, verifies: 0, directorySyncs: 0 }
+
+export function contentStoreStats(): { hashes: number; verifies: number; directorySyncs: number } {
+  return { ...contentStoreCounters }
+}
+
+export function resetContentStoreStats(): void {
+  contentStoreCounters.hashes = 0
+  contentStoreCounters.verifies = 0
+  contentStoreCounters.directorySyncs = 0
 }
 
 const verifiedContent = new Map<string, string>()
@@ -35,7 +53,9 @@ function assertContentBytes(existing: Buffer, expected: Buffer, sha256: string):
 }
 
 async function verifyAndSyncContent(path: string, existing: Buffer, expected: Buffer, sha256: string): Promise<void> {
+  contentStoreCounters.verifies++
   assertContentBytes(existing, expected, sha256)
+  contentStoreCounters.directorySyncs++
   await syncDirectory(dirname(path))
 }
 
