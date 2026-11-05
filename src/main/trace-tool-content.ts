@@ -18,22 +18,34 @@ export function appTraceContentRoot(userDataDir: string, cwd: string): string {
   return join(userDataDir, 'trace-content-v1', createHash('sha256').update(cwd).digest('hex'))
 }
 
+/**
+ * A workspace recorder owns the turn: its store must hold every body the record keeps. Tool input is
+ * always recorded, tool output only under the full capture policy, so the two authorities diverge
+ * exactly where the capture policy says they may.
+ */
+export interface TraceRecorderIngestion {
+  root: string
+  toolOutput: 'none' | 'summary' | 'full'
+}
+
 export async function persistTraceToolEvents(
   userDataDir: string,
   cwd: string,
   events: TraceEvent[],
-  recorderRoot?: string
+  recorder?: TraceRecorderIngestion
 ): Promise<TraceEvent[]> {
   const bounded: TraceEvent[] = []
   // Do not retain every serialized body in a turn concurrently while loading old archives.
   for (const event of events) {
+    const output = event.stage === 'tool_result'
+    // One event remains the batch boundary. Both authorities must be durable before the live queue
+    // can publish its reference; the offline CLI cannot depend on App data.
+    const appRoot = appTraceContentRoot(userDataDir, cwd)
+    const roots: [string, ...string[]] = recorder && (!output || recorder.toolOutput === 'full')
+      ? [appRoot, recorder.root]
+      : [appRoot]
     bounded.push(...await persistToolEventContent([event], TRACE_TOOL_CONTENT_POLICY, APP_TRACE_CONTENT_SOURCE,
-      async (content, encoding) => {
-        const appRoot = appTraceContentRoot(userDataDir, cwd)
-        // One event remains the batch boundary. Both authorities must be durable before
-        // the live queue can publish its reference; the offline CLI cannot depend on App data.
-        return writeRecorderContentCopies(recorderRoot ? [appRoot, recorderRoot] : [appRoot], content, encoding)
-      }))
+      async (content, encoding) => writeRecorderContentCopies(roots, content, encoding)))
   }
   return bounded
 }

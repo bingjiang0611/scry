@@ -53,7 +53,7 @@ describe('App trace content projection', () => {
     const original = JSON.stringify(archive)
     await writeFile(path, original)
     const loaded = JSON.parse(await readFile(path, 'utf8')) as TraceArchive
-    loaded.turns[0].items = await persistTraceToolEvents(root, '/repo', loaded.turns[0].items, join(root, 'recorder'))
+    loaded.turns[0].items = await persistTraceToolEvents(root, '/repo', loaded.turns[0].items, { root: join(root, 'recorder'), toolOutput: 'full' })
     const [turn] = mergeSessionTurns([], loaded)
     expect(Buffer.byteLength(JSON.stringify(loaded))).toBeLessThan(32 * 1024)
     expect(Buffer.byteLength(JSON.stringify(turn))).toBeLessThan(32 * 1024)

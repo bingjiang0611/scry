@@ -3,7 +3,7 @@ import { isToolContent, type ToolContent, type ToolContentRef } from '../../shar
 import { type ToolContentPolicy, isFullToolContentPolicy, captureToolContent } from './tool-content.js'
 import { type ProviderId } from '../../shared/provider.js'
 import { type AgentTurnRecord, type Evidence, type EvidenceQuality, type EvidenceStatus, type TurnCall, type TurnTermination, type TurnEvidence } from '../../shared/turn-record.js'
-import { readRecorderContent } from './content-store.js'
+import { readRecorderContent, writeRecorderContent } from './content-store.js'
 import { type RecorderEnablement } from './config.js'
 import { type RecorderOpenTurnState } from './runtime-state.js'
 import { stableHash, RECORDER_VERSION } from './store.js'
@@ -155,6 +155,9 @@ export function assertProtectedToolEvidence(evidence: TurnEvidence, policy: Tool
   for (const call of [evidence.tools, evidence.skills, evidence.mcps].flatMap((section) => section.value ?? [])) {
     if (call.input !== undefined) throw new Error('full managed input requires bounded content envelopes')
     for (const field of [call.inputContent, call.outputContent]) {
+      // A body this recorder could not prove is already marked unavailable; the record states the
+      // omission instead of presenting a claim the evidence cannot support.
+      if (isDegradedContent(field)) continue
       if (!isToolContent(field)) throw new Error('full managed evidence requires content provenance')
       if (field.content !== undefined) {
         const checked = captureToolContent(field.content, { source: field.source, maxBytes: policy.toolContentFieldBytes })
@@ -162,6 +165,7 @@ export function assertProtectedToolEvidence(evidence: TurnEvidence, policy: Tool
       }
       bytes += field.savedBytes
     }
+    if (isDegradedContent(call.outputContent)) continue
     const output = call.outputContent?.content
     const summary = output ? (output.length <= 500 ? output : `${output.slice(0, 500)}…`) : undefined
     if (call.outputSummary !== undefined && call.outputSummary !== summary) throw new Error('managed summary differs from protected output')
@@ -260,12 +264,16 @@ export function assertCommittedRecordMatchesHandoff(
 }
 
 /**
- * 一条记录里的 contentRef 必须在本工作区 recorder 内容库里可解析。App 实时通道可能把正文只写进
- * 自己的内容库（工作区副本依赖采集策略），提交时又跳过已带 ref 的事件，于是记录会引用不存在的
- * 字节：读取失败、导出游标被钉死。这里在写记录前用内容库自己的校验读一遍，缺失的字段降级为
- * unavailable 并让所在分区标 partial，绝不保留悬空引用，也不把缺失写成空内容。
+ * 记录必须能自我兑现：写进 `.scry/records` 的每个引用都要在本工作区 recorder 内容库里存在字节，
+ * 而正文保留多少由工作区采集策略决定（工具入参始终保留，工具输出按 toolOutput 裁剪）。缺失的正文
+ * 降级为 unavailable 并让所在分区标 partial，绝不保留悬空引用，也不把缺失写成空内容或抛错。
  */
 export const CONTENT_MISSING_REASON = 'complete body missing from workspace recorder content store'
+
+export function isDegradedContent(field: ToolContent | undefined): boolean {
+  return field !== undefined && field.storage === 'omitted' &&
+    field.sourceCompleteness === 'unavailable' && field.contentRef === undefined
+}
 
 function unavailableContent(field: ToolContent): ToolContent {
   const { content: _content, contentRef: _contentRef, ...rest } = field
@@ -290,11 +298,18 @@ function degradedSection<T extends { status: EvidenceStatus; quality: EvidenceQu
   }
 }
 
-export async function enforceEvidenceDurability(
+export interface CaptureTrim {
+  /** Tool output bodies are a promise of the full policy only; summary keeps the bounded summary. */
+  keepToolOutputBody: boolean
+}
+
+export async function applyCapturePolicy(
   evidence: TurnEvidence,
-  dataRoot: string
+  dataRoot: string,
+  trim: CaptureTrim
 ): Promise<TurnEvidence> {
-  const durable = async (ref: ToolContentRef): Promise<boolean> => {
+  const keepsOutputBody = trim.keepToolOutputBody
+  const hasBody = async (ref: ToolContentRef): Promise<boolean> => {
     try {
       await readRecorderContent(dataRoot, ref)
       return true
@@ -303,39 +318,64 @@ export async function enforceEvidenceDurability(
       throw error
     }
   }
-  const field = async (value: ToolContent | undefined): Promise<{ value: ToolContent | undefined; lost: boolean }> => {
-    if (!value?.contentRef) return { value, lost: false }
-    return await durable(value.contentRef) ? { value, lost: false } : { value: unavailableContent(value), lost: true }
-  }
-  const refs = async (value: ToolContentRef[] | undefined): Promise<ToolContentRef[] | undefined> => {
-    if (!value?.length) return value
-    const kept = await Promise.all(value.map(durable))
-    // A complete body chain only holds when every ordered ref resolves; otherwise keep the
-    // bounded inline projection and let the section report the loss.
-    return kept.every(Boolean) ? value : undefined
+  // A kept body must be durable here: persist the inline copy when the reference has no bytes, and
+  // degrade only when this recorder cannot prove it holds the whole body. A truncated projection is
+  // never promoted to a reference, because the reference would then claim more than its bytes.
+  const durable = async (value: ToolContent | undefined): Promise<{ value?: ToolContent; lost: boolean }> => {
+    if (!value) return { lost: false }
+    if (value.contentRef && await hasBody(value.contentRef)) return { value, lost: false }
+    if (value.storage !== 'complete' || value.content === undefined) {
+      return { value: unavailableContent(value), lost: true }
+    }
+    const contentRef = await writeRecorderContent(dataRoot, value.content, value.encoding === 'json' ? 'json' : 'utf8')
+    return { value: { ...value, contentRef }, lost: false }
   }
 
   const calls = async (section: Evidence<TurnCall[]>): Promise<Evidence<TurnCall[]>> => {
     if (!section.value) return section
     let lost = false
-    const value = await Promise.all(section.value.map(async (call) => {
-      const [input, output] = await Promise.all([field(call.inputContent), field(call.outputContent)])
-      lost ||= input.lost || output.lost
+    const value = await Promise.all(section.value.map(async (call): Promise<TurnCall> => {
+      const input = await durable(call.inputContent)
+      lost ||= input.lost
+      const kept: TurnCall = { ...call, ...(input.value ? { inputContent: input.value } : {}) }
+      if (!keepsOutputBody) {
+        // summary/none: the record keeps the bounded summary only. The body and its reference stay
+        // in the App trace store, so the workspace store never receives the full tool output.
+        const { outputContent: _dropped, ...summaryOnly } = kept
+        return summaryOnly
+      }
+      const output = await durable(kept.outputContent)
+      if (!output.lost) return { ...kept, ...(output.value ? { outputContent: output.value } : {}) }
+      lost = true
+      // The body is gone: the summary and error it produced cannot outlive it, and 'tool failed'
+      // is the only claim the remaining evidence still supports.
       return {
-        ...call,
-        ...(input.value ? { inputContent: input.value } : {}),
-        ...(output.value ? { outputContent: output.value } : {})
+        ...kept,
+        outputContent: output.value!,
+        outputSummary: undefined,
+        ...(call.error !== undefined ? { error: 'tool failed' } : {})
       }
     }))
     return lost ? degradedSection({ ...section, value }, CONTENT_MISSING_REASON) : { ...section, value }
   }
 
+  const refs = async (value: ToolContentRef[] | undefined): Promise<ToolContentRef[] | undefined> => {
+    if (!value?.length) return value
+    const kept = await Promise.all(value.map(hasBody))
+    return kept.every(Boolean) ? value : undefined
+  }
+
   const assistantRefs = await refs(evidence.assistant.value?.contentRefs)
   const assistant = evidence.assistant.value?.contentRefs && !assistantRefs
-    ? degradedSection(
-      { ...evidence.assistant, value: { ...evidence.assistant.value, contentRefs: undefined } },
-      CONTENT_MISSING_REASON
-    )
+    ? {
+      ...evidence.assistant,
+      value: { ...evidence.assistant.value, contentRefs: undefined },
+      // The bounded text projection stays, but the complete body is gone: the section says so and
+      // is never re-labelled exact.
+      status: 'partial' as const,
+      quality: 'inferred' as const,
+      omissionReason: CONTENT_MISSING_REASON
+    }
     : evidence.assistant
 
   let segmentLoss = false
@@ -352,14 +392,14 @@ export async function enforceEvidenceDurability(
     ? await Promise.all(evidence.diff.value.map(async (snapshot) => ({
       ...snapshot,
       files: await Promise.all(snapshot.files.map(async (file) => {
-        const patch = await field(file.patchContent)
+        const patch = await durable(file.patchContent)
         patchLoss ||= patch.lost
         return { ...file, ...(patch.value ? { patchContent: patch.value } : {}) }
       }))
     })))
     : undefined
 
-  const transcriptDurable = evidence.transcript?.value ? await durable(evidence.transcript.value.contentRef) : true
+  const transcriptDurable = evidence.transcript?.value ? await hasBody(evidence.transcript.value.contentRef) : true
   const [tools, skills, mcps] = await Promise.all([calls(evidence.tools), calls(evidence.skills), calls(evidence.mcps)])
   return {
     ...evidence,

@@ -7,7 +7,7 @@ import { resolveRecorderEnablement } from './config.js'
 import { readJson, listFiles, writeJsonAtomic } from './io.js'
 import { recorderTurnRoot, recorderSessionRoot, withRecorderSessionLock, type RecorderOpenTurnState, recorderOpenPath, SESSION_LOCK_WAIT_MS, recorderPendingHealth, recorderQuarantinedOpenTurns, type RecorderSessionState, recorderStatePath } from './runtime-state.js'
 import { clearRuntimeTurn, updateHealth, commitRecord, drainCommitNotifications, HOOK_DRAIN_MAX_RECORDS, HOOK_DRAIN_BUDGET_MS } from './store.js'
-import { type ManagedRecorderProviderId, type ManagedTurnCancellationResult, type ManagedTurnHandoff, type EnabledRecorder, assertStrictCapture, type PrepareManagedTurnInput, type ManagedTurnResult, assertProtectedToolEvidence, enforceEvidenceDurability, assertExactText, assertOptionalAssistantText, assertTiming, assertDuplicateMatchesInput, managedProvisionalMatches, managedRecorderAllowsMissingProviderTurnId, recordDraft, assertCommittedRecordMatchesHandoff, type ManagedTurnTiming } from './managed-evidence.js'
+import { type ManagedRecorderProviderId, type ManagedTurnCancellationResult, type ManagedTurnHandoff, type EnabledRecorder, assertStrictCapture, type PrepareManagedTurnInput, type ManagedTurnResult, assertProtectedToolEvidence, applyCapturePolicy, CONTENT_MISSING_REASON, assertExactText, assertOptionalAssistantText, assertTiming, assertDuplicateMatchesInput, managedProvisionalMatches, managedRecorderAllowsMissingProviderTurnId, recordDraft, assertCommittedRecordMatchesHandoff, type ManagedTurnTiming } from './managed-evidence.js'
 import { recordById, recordByProviderTurnId, advanceProviderTurnIndex } from './managed-index.js'
 import { reserveCanonicalJournalRecovery } from './managed-recovery.js'
 export { type ManagedTurnTiming, type ManagedRecorderProviderId, isManagedRecorderProvider, managedRecorderAllowsMissingProviderTurnId, isManagedProviderRuntimePair, type PrepareManagedTurnInput, type ManagedTurnResult, type ManagedTurnCancellationResult } from './managed-evidence.js'
@@ -96,12 +96,21 @@ async function handoffForRun(root: string, runId: string): Promise<{ path: strin
 export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput): Promise<ManagedTurnResult> {
   const mode = await managedRecorderMode(input.workspace, input.env)
   if (mode.status === 'disabled') return mode
-  // 引用必须指向本工作区内容库里真实存在的字节；缺失的正文在写记录前降级，不留下悬空 ref。
-  const evidence = await enforceEvidenceDurability(input.evidence, mode.enablement.dataRoot)
+  // 记录只保存工作区采集策略允许的正文，且保存的正文必须有本地字节；缺失的正文降级而不是抛错，
+  // 准备、提交与重试都使用这份归一化后的证据表示，去重比较才不会把降级当成不一致。
+  const evidence = await applyCapturePolicy(input.evidence, mode.enablement.dataRoot, {
+    // A turn frozen under the full policy keeps its bodies even if the workspace config changed
+    // after it started; the recorded policy is the one this turn promised.
+    keepToolOutputBody: isFullToolContentPolicy(input.toolContentPolicy ?? mode.enablement.config.capture)
+  })
   const protectedInput = { ...input, evidence }
   assertProtectedToolEvidence(evidence, isFullToolContentPolicy(input.toolContentPolicy) ? input.toolContentPolicy : mode.enablement.config.capture)
   assertExactText(evidence.user, input.userText, 'user')
-  if (
+  if (evidence.assistant.status !== 'unavailable' && evidence.assistant.quality === 'inferred' &&
+    evidence.assistant.omissionReason?.includes(CONTENT_MISSING_REASON)) {
+    // 助手正文缺失时保留已降级的证据：既不放宽成 exact，也不因缺正文而拒绝提交这一轮。
+    assertOptionalAssistantText(evidence.assistant)
+  } else if (
     (input.provider === 'claude' || input.provider === 'qoder' || input.provider === 'opencode' || input.provider === 'pi') &&
     input.status !== 'completed'
   ) {
@@ -116,14 +125,14 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
     if (input.expectedRecordId) {
       const duplicate = await recordById(enablement.dataRoot, input.expectedRecordId)
       if (duplicate) {
-        assertDuplicateMatchesInput(duplicate, input)
+        assertDuplicateMatchesInput(duplicate, protectedInput)
         return { status: 'duplicate' as const, recordId: duplicate.recordId, record: duplicate }
       }
     }
     if (input.allowObservedInterruption) {
       const duplicate = await recordById(enablement.dataRoot, observedInterruptionRecordId(enablement.config.workspaceId, input))
       if (duplicate) {
-        assertDuplicateMatchesInput(duplicate, input)
+        assertDuplicateMatchesInput(duplicate, protectedInput)
         return { status: 'duplicate' as const, recordId: duplicate.recordId, record: duplicate }
       }
     }
@@ -138,7 +147,7 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
         )
       : undefined
     if (providerDuplicate) {
-      assertDuplicateMatchesInput(providerDuplicate, input)
+      assertDuplicateMatchesInput(providerDuplicate, protectedInput)
       return {
         status: 'duplicate' as const,
         recordId: providerDuplicate.recordId,
@@ -153,7 +162,7 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
       }
       assertDuplicateMatchesInput(
         { ...existing.handoff.record, sequence: 1 },
-        input
+        protectedInput
       )
       return { status: 'prepared' as const, recordId: existing.handoff.record.recordId }
     }
@@ -320,12 +329,19 @@ export async function commitManagedRecorderTurn(input: {
   const mode = await managedRecorderMode(input.workspace, input.env)
   if (mode.status === 'disabled') return mode
   const { enablement } = mode
+  // Same normalisation as prepare: a retry compares against the record's own representation.
+  const protectedInput = {
+    ...input,
+    evidence: await applyCapturePolicy(input.evidence, enablement.dataRoot, {
+      keepToolOutputBody: isFullToolContentPolicy(enablement.config.capture)
+    })
+  }
   const result = await withRecorderSessionLock(enablement.dataRoot, input.provider, input.sessionId, async () => {
     const duplicate = await recordById(enablement.dataRoot, input.recordId)
     const root = recorderSessionRoot(enablement.dataRoot, input.provider, input.sessionId)
     const existing = await handoffForRun(root, input.runId)
     if (duplicate && !existing) {
-      assertDuplicateMatchesInput(duplicate, input)
+      assertDuplicateMatchesInput(duplicate, protectedInput)
       return { status: 'duplicate' as const, recordId: duplicate.recordId, record: duplicate }
     }
     if (!existing) return { status: 'pending' as const, reason: 'managed recorder prepared handoff is missing' }

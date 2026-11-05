@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -9,10 +9,9 @@ import { createAppSessionStore } from '../app-store'
 import { DockBadgeState } from '../dock-badge'
 import { SessionDiffBaselineRegistry } from '../session-diff'
 import { createTraceRuntime } from './trace-runtime'
-import { resolveRecorderEnablement } from '../../core/turn-recorder/config'
+import type { TraceRecorderIngestion } from '../trace-tool-content'
 import { createLiveRunState } from './run-live-state'
 
-const recorderRoots: Array<string | undefined> = []
 const receipts = vi.hoisted(() => ({
   getPath: vi.fn<() => string>(),
   appendUsage: vi.fn(),
@@ -35,11 +34,10 @@ vi.mock('../trace-tool-content', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../trace-tool-content')>()
   return {
     ...actual,
-    persistTraceToolEvents: async (userDataDir: string, cwd: string, events: TraceEvent[], recorderRoot?: string) => {
-      recorderRoots.push(recorderRoot)
+    persistTraceToolEvents: async (userDataDir: string, cwd: string, events: TraceEvent[], recorder?: TraceRecorderIngestion) => {
       gate.signal()
       await gate.released
-      return await actual.persistTraceToolEvents(userDataDir, cwd, events, recorderRoot)
+      return await actual.persistTraceToolEvents(userDataDir, cwd, events, recorder)
     }
   }
 })
@@ -57,33 +55,6 @@ beforeEach(async () => {
   receipts.appendUsage.mockClear()
 })
 afterEach(async () => { await rm(userDataDir, { recursive: true, force: true }) })
-
-const createManagedState = async (
-  enablement: Awaited<ReturnType<typeof resolveRecorderEnablement>>,
-  runId = 'run-live-managed'
-) => {
-  const sessions = createAppSessionStore(userDataDir)
-  return await createLiveRunState({
-    options: {}, providerId: 'claude', runtimeProvider: 'claude_sdk',
-    request: normalizeAgentStartRequest({ prompt: 'task', providerId: 'claude' }),
-    cwd: undefined, catalogCwd: '', contextKey: 'context',
-    codexHookTrust: [], openCodePluginTrust: undefined,
-    managedRecorderEnabled: true,
-    managedRecorderEnablement: enablement,
-    homeDir: userDataDir,
-    createRunId: () => runId,
-    llmNetworkConfiguration: { read: async () => undefined },
-    sessionDiffBaselines: new SessionDiffBaselineRegistry(),
-    appSessionStore: () => sessions,
-    recordingBlockedSessions: new Map(), getWindow: () => null,
-    publishTrace: () => { }, rendererCanReceive: () => false,
-    mainEventId: (prefix, id) => `${prefix}-${id}`,
-    LIVE_TOOL_CONTENT_POLICY: POLICY,
-    recordingRecoveryHint: '', userDataDir, scopedSessionKey: (id) => id,
-    isRemoteRun: false, deleteRunAttachments: () => { },
-    sessionBaselineKey: (context, id) => `${context}:${id}`
-  })
-}
 
 const createState = async (runId = 'run-live-binding') => {
   const sessions = createAppSessionStore(userDataDir)
@@ -191,31 +162,6 @@ describe('live run identity', () => {
     } finally {
       if (!released) gate.release()
       await state.ingestion.idle()
-    }
-  })
-
-  it('summary 采集策略下仍把工具正文写进工作区 recorder 库，提交记录不会悬空引用', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'scry-live-managed-workspace-'))
-    try {
-      await writeFile(join(workspace, 'scry.config.json'), JSON.stringify({
-        schemaVersion: 1, enabled: true, workspaceId: 'live-managed-summary',
-        dataDir: '.scry', repositories: { mode: 'workspace-only' },
-        capture: { prompt: true, assistant: true, toolOutput: 'summary', diff: true, hooks: true }
-      }))
-      const enablement = await resolveRecorderEnablement(workspace)
-      expect(enablement.enabled).toBe(true)
-      const state = await createManagedState(enablement)
-      recorderRoots.length = 0
-      state.emit(toolResult(state.runId, 't-managed', 'durable body'))
-      await state.ingestion.idle()
-      // The App trace store is not enough: the committed record stores a reference, so the
-      // workspace recorder store must receive the same bytes even under the summary policy.
-      expect(recorderRoots.filter(Boolean)).toEqual([
-        enablement.enabled ? enablement.dataRoot : 'disabled'
-      ])
-    } finally {
-      gate.release()
-      await rm(workspace, { recursive: true, force: true })
     }
   })
 })
