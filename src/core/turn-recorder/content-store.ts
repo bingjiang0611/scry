@@ -9,7 +9,7 @@ function contentPath(dataRoot: string, sha256: string): string {
   return join(dataRoot, 'content', 'sha256', sha256.slice(0, 2), `${sha256}.bin`)
 }
 
-function digest(content: Buffer): string {
+function digest(content: Buffer | string): string {
   contentStoreCounters.hashes++
   return createHash('sha256').update(content).digest('hex')
 }
@@ -64,17 +64,19 @@ export async function writeRecorderContent(
   content: string,
   encoding: ToolContentRef['encoding']
 ): Promise<ToolContentRef> {
-  const bytes = Buffer.from(content, 'utf8')
-  const sha256 = digest(bytes)
+  // Hash the string itself: `Buffer.from` would materialize a second full copy of a large patch
+  // before the publish can start, and the publish writes the string in bounded slices.
+  const length = Buffer.byteLength(content, 'utf8')
+  const sha256 = digest(content)
   const path = contentPath(dataRoot, sha256)
-  const ref: ToolContentRef = { storage: 'recorder-content-v1', sha256, bytes: bytes.length, encoding }
+  const ref: ToolContentRef = { storage: 'recorder-content-v1', sha256, bytes: length, encoding }
   let existing: Buffer
   try {
     existing = await readFile(path)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     try {
-      await writeFileAtomicExclusive(path, bytes)
+      await writeFileAtomicExclusive(path, content)
       return ref
     } catch (writeError) {
       if ((writeError as NodeJS.ErrnoException).code !== 'EEXIST') throw writeError
@@ -84,7 +86,7 @@ export async function writeRecorderContent(
   }
   // Incoming bytes already determine the address; compare complete payloads without hashing twice.
   // Reuse must still sync the link: a previous publisher may have failed its final directory sync.
-  await verifyAndSyncContent(path, existing, bytes, sha256)
+  await verifyAndSyncContent(path, existing, Buffer.from(content, 'utf8'), sha256)
   return ref
 }
 

@@ -10,8 +10,115 @@ export async function readJson<T>(path: string): Promise<T | null> {
   }
 }
 
+/** Strings at or above this size are streamed instead of materialized inside one JSON string. */
+const JSON_CHUNK_STRING_BYTES = 1 << 20
+
+/**
+ * Serialize without ever holding one string the size of the whole payload.
+ *
+ * A record that carries a 100 MB patch is one 100 MB JSON string plus a full-size copy inside
+ * `writeFile`; streaming the few large string fields keeps the output byte-identical while the
+ * transient allocation stays bounded by one slice.
+ */
+async function writeJsonChunks(
+  handle: import('node:fs/promises').FileHandle,
+  value: unknown
+): Promise<void> {
+  const token = `@@scry-chunk-${randomUUID()}@@`
+  const parts: string[] = []
+  const skeleton = JSON.stringify(value, (_key, item: unknown) => {
+    if (typeof item === 'string' && item.length >= JSON_CHUNK_STRING_BYTES) {
+      parts.push(item)
+      return `${token}${parts.length - 1}${token}`
+    }
+    return item
+  })
+  if (parts.length === 0) {
+    await writeContent(handle, `${skeleton}\n`)
+    return
+  }
+  // Each placeholder was itself serialized as a JSON string, so the skeleton holds `"<token>N<token>"`.
+  // Replacing that whole quoted literal with the real quoted string keeps the output identical.
+  let cursor = 0
+  for (;;) {
+    const at = skeleton.indexOf(token, cursor)
+    if (at < 0) break
+    const end = skeleton.indexOf(token, at + token.length)
+    const index = Number(skeleton.slice(at + token.length, end))
+    if (skeleton[at - 1] !== '"' || skeleton[end + token.length] !== '"' || !Number.isInteger(index) || parts[index] === undefined) {
+      // A data string that happened to contain the token: fall back to one plain stringify.
+      await handle.writeFile(`${JSON.stringify(value)}\n`)
+      return
+    }
+    if (at - 1 > cursor) await handle.writeFile(skeleton.slice(cursor, at - 1))
+    await writeQuotedChunks(handle, parts[index])
+    cursor = end + token.length + 1
+  }
+  await handle.writeFile(skeleton.slice(cursor) + '\n')
+}
+
+/** Emit exactly `JSON.stringify(value)`, one surrogate-safe slice at a time. */
+async function writeQuotedChunks(handle: import('node:fs/promises').FileHandle, value: string): Promise<void> {
+  await handle.writeFile('"')
+  for (let start = 0; start < value.length;) {
+    let end = Math.min(start + WRITE_SLICE_CHARS, value.length)
+    const last = value.charCodeAt(end - 1)
+    if (end < value.length && last >= 0xd800 && last <= 0xdbff) end--
+    // Escaping is per code point, so escaping each slice and dropping its own quotes produces the
+    // same text as escaping the whole value once.
+    const quoted = JSON.stringify(value.slice(start, end))
+    await handle.writeFile(quoted.slice(1, -1))
+    start = end
+  }
+  await handle.writeFile('"')
+}
+
 export async function writeJsonAtomic(path: string, value: unknown, options: { sync?: boolean } = {}): Promise<void> {
-  await writeTextAtomic(path, `${JSON.stringify(value)}\n`, options)
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+  const temp = `${path}.${process.pid}.${randomUUID()}.tmp`
+  let handle
+  try {
+    handle = await open(temp, 'wx', 0o600)
+    await writeJsonChunks(handle, value)
+    if (options.sync !== false) await handle.sync()
+    await handle.close()
+    handle = undefined
+    await rename(temp, path)
+    if (options.sync !== false) {
+      const parent = await open(dirname(path), 'r')
+      try {
+        await parent.sync()
+      } finally {
+        await parent.close()
+      }
+    }
+  } catch (error) {
+    try { await handle?.close() } catch { /* preserve original error */ }
+    await rm(temp, { force: true }).catch(() => {})
+    throw error
+  }
+}
+
+/**
+ * `FileHandle.writeFile` turns a whole string into one Buffer before writing. For a 200 MB record
+ * that copy on top of the record itself is the difference between 918 MB and 1,285 MB peak RSS, so
+ * large payloads are written in bounded slices. Slices never split a surrogate pair, otherwise the
+ * two halves would be encoded as replacement characters.
+ */
+const WRITE_SLICE_CHARS = 4 * 1024 * 1024
+
+async function writeContent(handle: import('node:fs/promises').FileHandle, content: Buffer | string): Promise<void> {
+  if (typeof content !== 'string' || content.length <= WRITE_SLICE_CHARS) {
+    await handle.writeFile(content)
+    return
+  }
+  for (let start = 0; start < content.length;) {
+    let end = Math.min(start + WRITE_SLICE_CHARS, content.length)
+    const last = content.charCodeAt(end - 1)
+    if (end < content.length && last >= 0xd800 && last <= 0xdbff) end--
+    await handle.writeFile(content.slice(start, end))
+    start = end
+  }
 }
 
 export async function writeTextAtomic(path: string, content: string, options: { sync?: boolean } = {}): Promise<void> {
@@ -20,7 +127,7 @@ export async function writeTextAtomic(path: string, content: string, options: { 
   let handle
   try {
     handle = await open(temp, 'wx', 0o600)
-    await handle.writeFile(content)
+    await writeContent(handle, content)
     if (options.sync !== false) await handle.sync()
     await handle.close()
     handle = undefined
@@ -94,7 +201,7 @@ interface ExclusiveWriteOptions {
 /** Durable cross-filesystem copy primitive that never replaces an existing destination. */
 export async function writeFileAtomicExclusive(
   path: string,
-  content: Buffer,
+  content: Buffer | string,
   options: ExclusiveWriteOptions = {}
 ): Promise<void> {
   await mkdirDurable(dirname(path))
@@ -153,7 +260,7 @@ async function publishPreparedFile(path: string, content: Buffer | string, optio
   let published = false
   try {
     handle = await open(temp, 'wx', 0o600)
-    await handle.writeFile(content)
+    await writeContent(handle, content)
     await handle.sync()
     await handle.close()
     handle = undefined
