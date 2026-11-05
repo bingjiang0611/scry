@@ -34,9 +34,8 @@ import {
   type TurnDiffFallbackReason
 } from '../../shared/trace.js'
 import {
-  parseNameStatus,
   captureTurnPatches,
-  parseNumstat
+  parseRawNumstat
 } from './git-patches.js'
 
 import { WORKSPACE_FILE_LIMIT, WORKSPACE_PATCH_BYTES, WorkspaceReadUnavailable } from './git-workspace-limits.js'
@@ -315,43 +314,26 @@ export async function computeGitTurnDiff(
       )
     }
 
-    const [numstat, nameStatus] = await Promise.all([
-      gitCommand(
-        snapshotGitArgs(filterOverrides, [
-          'diff',
-          '--no-renames',
-          '--no-ext-diff',
-          '--no-textconv',
-          '--numstat',
-          '-z',
-          capture.beforeTree,
-          afterTree,
-          '--',
-          ...fullPathspec
-        ]),
-        { cwd: capture.repoRoot, env, deadline }
-      ),
-      gitCommand(
-        snapshotGitArgs(filterOverrides, [
-          'diff',
-          '--no-renames',
-          '--no-ext-diff',
-          '--no-textconv',
-          '--name-status',
-          '-z',
-          capture.beforeTree,
-          afterTree,
-          '--',
-          ...fullPathspec
-        ]),
-        { cwd: capture.repoRoot, env, deadline }
-      )
-    ])
-    const changes = parseNameStatus(nameStatus, capture.repoRoot)
-    files = parseNumstat(numstat, capture.repoRoot).map((file) => {
-      const change = changes.get(file.path)
-      return { ...file, ...(change ? { change } : {}) }
-    })
+    // One tree comparison yields both the change kinds and the line counts: `--raw` and
+    // `--numstat` are independent output sections of the same diff, so a second Git process
+    // cannot produce anything the first one did not already decide.
+    const numstat = await gitCommand(
+      snapshotGitArgs(filterOverrides, [
+        'diff',
+        '--no-renames',
+        '--no-ext-diff',
+        '--no-textconv',
+        '--raw',
+        '--numstat',
+        '-z',
+        capture.beforeTree,
+        afterTree,
+        '--',
+        ...fullPathspec
+      ]),
+      { cwd: capture.repoRoot, env, deadline }
+    )
+    files = parseRawNumstat(numstat, capture.repoRoot)
     if (options.workspaceSnapshot && files.length > WORKSPACE_FILE_LIMIT) {
       throw new WorkspaceReadUnavailable('workspace_limit')
     }
