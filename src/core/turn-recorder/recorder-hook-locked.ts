@@ -3,6 +3,7 @@ import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { appendRotatingLog, readJson, writeJsonAtomic } from './io.js'
+import { markSessionAttention } from './attention.js'
 import { findRecordById, recordError, safeKey } from './store.js'
 import { recorderInboxEntries, INBOX_MAX_ATTEMPTS, quarantineInboxEntry, readInboxFailure, readInboxJson } from './inbox.js'
 import { recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
@@ -288,6 +289,8 @@ export async function queueHook(
   }
   // Names sort by arrival; the UUID only separates hooks that arrive in the same millisecond.
   const name = `${String(Date.parse(arrivedAt)).padStart(15, '0')}-${randomUUID()}.json`
+  // Index first: a queued hook that nothing knows about would never be replayed.
+  await markSessionAttention(enablement.dataRoot, input.provider, safeKey(sessionId))
   await writeJsonAtomic(join(hookInbox(enablement.dataRoot, input.provider, sessionId), name), entry)
   await appendRotatingLog(
     join(enablement.dataRoot, 'logs', 'recorder.log'),
