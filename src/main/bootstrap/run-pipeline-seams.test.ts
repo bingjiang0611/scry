@@ -16,10 +16,18 @@ const PIPELINE = [
   'run-startup.ts',
   'run-failure.ts',
   'run-fork.ts',
+  'run-remote-state.ts',
   'trace-runtime.ts'
 ]
 const ASSEMBLY = '../../host-runtime/create-run-pipeline.ts'
 const FORBIDDEN = [
+  // M2-5: the pipeline may not hold the window itself. Reaching webContents or a
+  // getWindow getter means the daemon (which has no window) silently drops error,
+  // turnDone and session events; the BrowserWindow type is banned too so the
+  // shortcut cannot creep back as a type-only import.
+  /\bwebContents\b/,
+  /\bgetWindow\b/,
+  /\bBrowserWindow\b/,
   // Notifications, dock and shell are main's surface. A pipeline module that names
   // them has taken a decision the daemon cannot honour.
   /\bnew Notification\(/,

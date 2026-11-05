@@ -22,8 +22,8 @@ interface ProjectionCacheEntry {
 }
 
 // Everything this module sends to a view goes through a sink, so the run pipeline
-// has no Electron dependency: main owns the window and passes
-// { send: (channel, payload) => window?.webContents.send(channel, payload) }.
+// has no Electron dependency: main owns the window and forwards each channel to it,
+// while the daemon forwards to whatever transport it has.
 export interface RunRendererSink {
   send: (channel: string, payload: unknown) => void
   // Whether the owning window has focus; the dock badge only needs this much.

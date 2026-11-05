@@ -1,4 +1,4 @@
-import type { BrowserWindow } from 'electron'
+import type { RunRendererSink } from './trace-runtime'
 import type { ActiveRun, TraceEvent } from '../../shared/trace'
 import type { ProviderId } from '../../shared/provider'
 import type { RuntimeProvider, NormalizedAgentStartRequest, AgentQuestionRequest, AgentPermissionMode, AgentIntervention } from '../../shared/runtime'
@@ -48,7 +48,7 @@ export type RunStartupDeps = {
   remoteRunIds: Set<string>; remoteRunLedgerIds: Map<string, string>
   deleteRunAttachments: (userDataDir: string, runId: string) => void; turnDiffCapture: Promise<GitTurnDiffCapture>; sessionBaselineReady: Promise<unknown>
   startPerf: PerformanceTrace; dockBadge: { view: (key: string, focused: boolean) => void }; scopedSessionKey: (id: string) => string
-  getWindow: () => BrowserWindow | null; boundedLiveRun: (run: ActiveRun) => ActiveRun
+  renderer: RunRendererSink; boundedLiveRun: (run: ActiveRun) => ActiveRun
   releaseSessionBaseline?: () => void; interruptedState: { value: boolean }
 }
 export function startProviderAfterBaseline<T>(deps: { turnDiffCapture: Promise<unknown>; sessionBaselineReady: Promise<unknown>; markReady: () => void; runProvider: () => Promise<T> }): Promise<T> {
@@ -116,7 +116,7 @@ export async function startRunProviderAndRegister(deps: RunStartupDeps) {
     startPerf,
     dockBadge,
     scopedSessionKey,
-    getWindow,
+    renderer,
     boundedLiveRun,
     releaseSessionBaseline,
     interruptedState,
@@ -206,10 +206,10 @@ export async function startRunProviderAndRegister(deps: RunStartupDeps) {
   }
   startPerf.mark('run_registered')
   firstTextPerf.mark('run_registered')
-  if (!isRemoteRun && !managedConversation && !options.workspaceAdmission) dockBadge.view(scopedSessionKey(resume ?? runId), Boolean(getWindow()?.isFocused()))
+  if (!isRemoteRun && !managedConversation && !options.workspaceAdmission) dockBadge.view(scopedSessionKey(resume ?? runId), renderer.isFocused())
   if (!isRemoteRun && !managedConversation && !options.workspaceAdmission) {
     try {
-      getWindow()?.webContents.send('agent:focusedRun', boundedLiveRun(runState))
+      renderer.send('agent:focusedRun', boundedLiveRun(runState))
     } catch (error) {
       console.warn('[scry] focused run renderer notification failed:', runId, error)
     }

@@ -19,7 +19,7 @@ describe('run terminal attention', () => {
       runtimeProvider: 'claude_sdk',
       runState: { runId: 'run-attention', userText: 'task', items: [], done: false },
       getObservedSessionId: () => 'session',
-      getWindow: () => currentWindow,
+      isWindowFocused: () => Boolean(currentWindow?.isFocused()),
       dockBadge: { markAttention },
       scopedSessionKey: (id) => `scope:${id}`,
       runs: { isViewed: () => false }

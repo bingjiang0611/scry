@@ -1,7 +1,6 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { BrowserWindow } from 'electron'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { normalizeAgentStartRequest } from '../../shared/runtime'
 import type { ActiveRun, TraceEvent } from '../../shared/trace'
@@ -37,7 +36,8 @@ async function fixture() {
   const record = vi.spyOn(store, 'record')
   const send = vi.fn()
   const notifyChanged = vi.fn()
-  const getWindow = () => ({ webContents: { send } }) as unknown as BrowserWindow
+  // The pipeline only ever sees a sink; the fake window is this test's own capture.
+  const renderer = { send, isFocused: () => false }
   const runState: ActiveRun = { runId: 'run-1', userText: 'question', done: false, items: [] }
   let observedSessionId: string | undefined
   let diffContext = 'run-1'
@@ -51,7 +51,7 @@ async function fixture() {
     sessionDiffBaselines: new SessionDiffBaselineRegistry(),
     sessionByContext: new Map(), sessionAliasesByContext: new Map(), sessionRevisionByContext: new Map(),
     scopedSessionKey: id => id, dockBadge: new DockBadgeState(() => undefined),
-    appSessionStore: () => store, runs: { isViewed: () => false, notifyChanged }, getWindow
+    appSessionStore: () => store, runs: { isViewed: () => false, notifyChanged }, renderer
   })
   const timing: TraceEvent = { id: 'timing', runId: runState.runId, ts: new Date(0).toISOString(), kind: 'model', stage: 'text', text: '' }
   const ctx: RunCompletionContext = {
@@ -61,7 +61,7 @@ async function fixture() {
     options: {}, displayPrompt: 'question', attachments: [], runState, managedCommitHookEnv: undefined,
     managedRecorderEnabled: false, canonicalLifecycle: true, isRemoteRun: false,
     recordingRecoveryHint: 'recover', recordingBlockedSessions: new Map(), scopedSessionKey: id => id,
-    getWindow, emit: () => undefined, finishTurnWallTiming: () => timing,
+    renderer, emit: () => undefined, finishTurnWallTiming: () => timing,
     finalizeTurnDiff: async () => undefined, finalizeSessionDiff: async () => undefined,
     persistLlmPerformance: async () => undefined, observedProviderStartedAt: undefined,
     getObservedSessionId: () => observedSessionId, getResume: () => undefined, publishSessionId,

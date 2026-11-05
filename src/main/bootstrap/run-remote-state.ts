@@ -1,4 +1,3 @@
-import type { BrowserWindow } from 'electron'
 import type { ActiveRun } from '../../shared/trace'
 import type { ProviderId } from '../../shared/provider'
 import type { RuntimeProvider } from '../../shared/runtime'
@@ -22,7 +21,7 @@ export function createRemoteRunState(deps: {
   runtimeProvider: RuntimeProvider
   runState: ActiveRun
   getObservedSessionId: () => string | undefined
-  getWindow: () => Pick<BrowserWindow, 'isFocused'> | null
+  isWindowFocused: () => boolean
   dockBadge: { markAttention: (key: string, value: { windowFocused: boolean; sessionViewed: boolean; needsAttention: boolean }) => void }
   scopedSessionKey: (sessionId: string) => string
   runs: { isViewed: (runId: string) => boolean; notifyChanged?: () => void }
@@ -54,7 +53,7 @@ export function createRemoteRunState(deps: {
   }
   const markTerminalAttention = (sessionId: string, needsAttention: boolean): void => {
     deps.dockBadge.markAttention(deps.scopedSessionKey(sessionId), {
-      windowFocused: Boolean(deps.getWindow()?.isFocused()),
+      windowFocused: deps.isWindowFocused(),
       sessionViewed: deps.runs.isViewed(deps.runId),
       needsAttention
     })

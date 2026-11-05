@@ -263,7 +263,7 @@ const remoteRunLedgerIds = new Map<string, string>()
 
 const pipeline = createRunPipeline({
   renderer: { send: (channel, payload) => { win?.webContents.send(channel, payload) }, isFocused: () => Boolean(win?.isFocused()) },
-  rendererCanReceive, activeRunSessionKey, dockBadge, mainEventId, getWindow: () => win,
+  rendererCanReceive, activeRunSessionKey, dockBadge, mainEventId,
   getCurrentCwd: () => currentCwd, getStartupManagedRecovery: () => startupManagedRecovery,
   isShuttingDown: () => isShuttingDown, nextRunSequence: () => runSeq++,
   sourceControl, providerRegistry, resolveKnownProjectDirectory, resolveRemoteProjectDirectory,

@@ -70,7 +70,7 @@ const createState = async (runId = 'run-live-binding') => {
     llmNetworkConfiguration: { read: async () => undefined },
     sessionDiffBaselines: new SessionDiffBaselineRegistry(),
     appSessionStore: () => sessions,
-    recordingBlockedSessions: new Map(), getWindow: () => null,
+    recordingBlockedSessions: new Map(), renderer: { send: () => undefined, isFocused: () => false },
     publishTrace: () => { }, rendererCanReceive: () => false,
     mainEventId: (prefix, id) => `${prefix}-${id}`,
     LIVE_TOOL_CONTENT_POLICY: POLICY,

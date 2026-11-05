@@ -1,4 +1,4 @@
-import type { BrowserWindow } from 'electron'
+import type { RunRendererSink } from './trace-runtime'
 import type { ActiveRun } from '../../shared/trace'
 import type { RuntimeProvider } from '../../shared/runtime'
 import type { ProviderId } from '../../shared/provider'
@@ -37,7 +37,7 @@ export function createSessionPublisher(deps: {
   dockBadge: DockBadgeState
   appSessionStore: () => ReturnType<typeof createAppSessionStore>
   runs: SessionRuns
-  getWindow: () => BrowserWindow | null
+  renderer: RunRendererSink
   initialSessionId?: string
   sessionRevisionByContext: Map<string, number>
 }) {
@@ -79,12 +79,12 @@ export function createSessionPublisher(deps: {
       }
     }
     if (deps.runs.isViewed(deps.runId)) {
-      deps.dockBadge.view(deps.scopedSessionKey(sessionId), Boolean(deps.getWindow()?.isFocused()))
+      deps.dockBadge.view(deps.scopedSessionKey(sessionId), deps.renderer.isFocused())
     }
     if (notifiedSessionId === sessionId) return
     notifiedSessionId = sessionId
     try {
-      deps.getWindow()?.webContents.send('agent:session', {
+      deps.renderer.send('agent:session', {
         runId: deps.runId,
         sessionId,
         previousSessionId: deps.editSourceSessionId ?? deps.runId,

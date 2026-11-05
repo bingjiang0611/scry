@@ -1,4 +1,4 @@
-import type { BrowserWindow } from 'electron'
+import type { RunRendererSink } from './trace-runtime'
 import type { ActiveRun, TraceEvent, TurnDiffBaselineOrigin } from '../../shared/trace'
 import type { RuntimeProvider } from '../../shared/runtime'
 import type { ProviderId } from '../../shared/provider'
@@ -66,13 +66,13 @@ export async function createLiveRunState(deps: {
   homeDir: string; createRunId: (managed: ManagedConversationStart | undefined, options: AppRunStartOptions) => string
   llmNetworkConfiguration: { read: () => Promise<LlmNetworkConfiguration | undefined> }; sessionDiffBaselines: SessionDiffBaselineRegistry
   appSessionStore: () => ReturnType<typeof createAppSessionStore>; recordingBlockedSessions: Map<string, string>
-  getWindow: () => BrowserWindow | null; publishTrace: (event: TraceEvent) => void; rendererCanReceive: () => boolean
+  renderer: RunRendererSink; publishTrace: (event: TraceEvent) => void; rendererCanReceive: () => boolean
   mainEventId: (prefix: string, runId: string) => string; LIVE_TOOL_CONTENT_POLICY: Parameters<typeof sanitizeToolEvents>[1]
   recordingRecoveryHint: string; userDataDir: string; scopedSessionKey: (id: string) => string
   isRemoteRun: boolean; editSourceSessionId?: string; deleteRunAttachments: (userDataDir: string, runId: string) => void
   sessionBaselineKey: (context: string, sessionId: string) => string
 }) {
-  const { options, providerId, runtimeProvider, request, managedConversation, cwd, catalogCwd, resume, contextKey, agentProfileId, managedRecorderEnabled, managedRecorderEnablement, homeDir, createRunId, llmNetworkConfiguration, sessionDiffBaselines, appSessionStore, getWindow, publishTrace, rendererCanReceive, mainEventId, LIVE_TOOL_CONTENT_POLICY, isRemoteRun, editSourceSessionId, deleteRunAttachments, sessionBaselineKey } = deps
+  const { options, providerId, runtimeProvider, request, managedConversation, cwd, catalogCwd, resume, contextKey, agentProfileId, managedRecorderEnabled, managedRecorderEnablement, homeDir, createRunId, llmNetworkConfiguration, sessionDiffBaselines, appSessionStore, renderer, publishTrace, rendererCanReceive, mainEventId, LIVE_TOOL_CONTENT_POLICY, isRemoteRun, editSourceSessionId, deleteRunAttachments, sessionBaselineKey } = deps
   const runId = createRunId(managedConversation, options)
   if (managedConversation) {
     if (options.runId !== undefined && options.runId !== managedConversation.runId) {
@@ -147,7 +147,7 @@ export async function createLiveRunState(deps: {
       runtimeProvider,
       billingProvider: result?.billingProvider
     })) return
-    getWindow()?.webContents.send('agent:dataUpdated', { runId, kind: 'turn_recorded' })
+    renderer.send('agent:dataUpdated', { runId, kind: 'turn_recorded' })
   }
   const cleanupProvisional = (): void => {
     if (resume || runState.externalSessionId) return
@@ -192,7 +192,7 @@ export async function createLiveRunState(deps: {
     const liveEvent = sanitizeToolEvents([ev], LIVE_TOOL_CONTENT_POLICY, 'live_renderer')[0]
     appendCoalescedTrace(runState.items, ev)
     ingestion.enqueue(ev, liveEvent)
-    if (ev.backgroundWork && rendererCanReceive()) getWindow()?.webContents.send('agent:backgroundWork', { runId, work: ev.backgroundWork })
+    if (ev.backgroundWork && rendererCanReceive()) renderer.send('agent:backgroundWork', { runId, work: ev.backgroundWork })
     // 结构化写入的 tool_result 到达 = 那次写入已经结束（成功或失败都可能已落盘）→ 刷新运行中 Diff
     // 预览。绝不在 tool start 上刷：那时文件通常还没写盘，预览会读到写前状态。
     if (writeCompletions.observe(ev)) notifyDiffChangeRef.current()
@@ -254,7 +254,7 @@ export async function createLiveRunState(deps: {
       managedInputTextHash = prepared.inputTextHash
     } else runtimePrompt = providerAttachmentPrompt(providerId, runtimePrompt, attachments)
     if (resume) {
-      getWindow()?.webContents.send('agent:session', {
+      renderer.send('agent:session', {
         runId,
         sessionId: resume,
         ...(editSourceSessionId ? { previousSessionId: editSourceSessionId } : {}),
@@ -263,7 +263,7 @@ export async function createLiveRunState(deps: {
         agentProfileId
       })
     } else {
-      getWindow()?.webContents.send('agent:session', {
+      renderer.send('agent:session', {
         runId,
         sessionId: runId,
         ...(editSourceSessionId ? { previousSessionId: editSourceSessionId } : {}),

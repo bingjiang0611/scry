@@ -1,10 +1,10 @@
-import type { BrowserWindow } from 'electron'
 import type { ActiveRun, TraceEvent } from '../../shared/trace'
 import type { RuntimeProvider } from '../../shared/runtime'
 import type { ProviderId } from '../../shared/provider'
 import type { ProviderRunResult } from '../providers/types'
 import type { ArchiveTraceTurnArgs } from './archive'
 import type { AppRunStartOptions } from './run-frontdoor'
+import type { RunRendererSink } from './trace-runtime'
 import type { createSessionPublisher } from './run-session'
 import type { AgentInputAttachment, NormalizedAgentStartRequest } from '../../shared/runtime'
 import type { createAppSessionStore } from '../app-store'
@@ -24,7 +24,6 @@ type CompletionState = {
   remoteRecordingFailed: boolean
 }
 type CompletionRuns = { isFocused: (runId: string) => boolean }
-type CompletionWindow = BrowserWindow | null
 export type RunCompletionContext = {
   state: CompletionState
   providerId: ProviderId
@@ -45,7 +44,7 @@ export type RunCompletionContext = {
   recordingRecoveryHint: string
   recordingBlockedSessions: Map<string, string>
   scopedSessionKey: (sessionId: string) => string
-  getWindow: () => CompletionWindow
+  renderer: RunRendererSink
   emit: (event: TraceEvent) => void
   finishTurnWallTiming: () => TraceEvent
   finalizeTurnDiff: () => Promise<void>
@@ -85,7 +84,7 @@ export async function handleRunCompletion(r: ProviderRunResult, ctx: RunCompleti
     recordingRecoveryHint,
     recordingBlockedSessions,
     scopedSessionKey,
-    getWindow,
+    renderer,
     emit,
     finishTurnWallTiming,
     finalizeTurnDiff,
@@ -154,7 +153,7 @@ export async function handleRunCompletion(r: ProviderRunResult, ctx: RunCompleti
       prompt: displayPrompt
     })
   } catch (error) {
-    getWindow()?.webContents.send('agent:error', {
+    renderer.send('agent:error', {
       runId,
       message: `${terminalOutcomeLabel(completionStatus)}，但会话 catalog 更新失败：${String((error as Error).message)}`,
       category: 'catalog',
@@ -177,7 +176,7 @@ export async function handleRunCompletion(r: ProviderRunResult, ctx: RunCompleti
     if (recordingPolicy.blockSession) {
       recordingBlockedSessions.set(scopedSessionKey(storageSessionId), runState.errorHint)
     }
-    getWindow()?.webContents.send('agent:error', {
+    renderer.send('agent:error', {
       runId,
       message,
       category,
@@ -200,7 +199,7 @@ export async function handleRunCompletion(r: ProviderRunResult, ctx: RunCompleti
     runState.error = message
     runState.errorHint = recordingRecoveryHint
     recordingBlockedSessions.set(scopedSessionKey(storageSessionId), runState.errorHint)
-    getWindow()?.webContents.send('agent:error', {
+    renderer.send('agent:error', {
       runId,
       message,
       category: 'recording',
@@ -209,7 +208,7 @@ export async function handleRunCompletion(r: ProviderRunResult, ctx: RunCompleti
   }
   terminalPerf.mark('terminal_progress_settled')
   if (!canonicalLifecycle && !alreadyDone) {
-    getWindow()?.webContents.send('agent:turnDone', {
+    renderer.send('agent:turnDone', {
       runId,
       sessionId: storageSessionId,
       externalSessionId: storageSessionId,
@@ -238,7 +237,7 @@ export async function handleRunCompletion(r: ProviderRunResult, ctx: RunCompleti
     runState.error = message
     runState.errorHint = recordingRecoveryHint
     recordingBlockedSessions.set(scopedSessionKey(storageSessionId), runState.errorHint)
-    getWindow()?.webContents.send('agent:error', {
+    renderer.send('agent:error', {
       runId,
       message,
       category: 'recording',
@@ -252,7 +251,7 @@ export async function handleRunCompletion(r: ProviderRunResult, ctx: RunCompleti
   persistRunData(storageSessionId)
   terminalPerf.mark('database_projected')
   if (canonicalLifecycle && !alreadyDone) {
-    getWindow()?.webContents.send('agent:turnDone', {
+    renderer.send('agent:turnDone', {
       runId,
       sessionId: storageSessionId,
       externalSessionId: storageSessionId,

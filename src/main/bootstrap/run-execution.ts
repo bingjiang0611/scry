@@ -1,5 +1,5 @@
-import type { BrowserWindow } from 'electron'
 import type { AgentStartRequest, AgentQuestionRequest, AgentIntervention } from '../../shared/runtime'
+import type { RunRendererSink } from './trace-runtime'
 import type { ActiveRun, TraceEvent } from '../../shared/trace'
 import type { ProviderId } from '../../shared/provider'
 import type { ProviderRunHandle } from '../providers/types'
@@ -40,7 +40,7 @@ type RunHost = {
   piRunDiagnostics: PiRunDiagnostics
   isShuttingDown: () => boolean
   getCurrentCwd: () => string | undefined
-  getWindow: () => BrowserWindow | null
+  renderer: RunRendererSink
   appSessionStore: () => ReturnType<typeof createAppSessionStore>
   resolveRemoteProjectDirectory: (cwd: string) => string
   resolveKnownProjectDirectory: (cwd: string) => string
@@ -91,7 +91,7 @@ export async function startRun(
   host: RunHost
 ): Promise<{ runId: string } | RemoteRunCompletion> {
   const {
-    providerRegistry, isShuttingDown, getCurrentCwd, getWindow, appSessionStore,
+    providerRegistry, isShuttingDown, getCurrentCwd, renderer, appSessionStore,
     resolveRemoteProjectDirectory, resolveKnownProjectDirectory, providerOperationGate,
     providerContextKey, providerSessionKey, contextAdmission, getStartupManagedRecovery,
     resetSessionContext, sessionRevisionByContext, sessionByContext, sessionAliasesByContext,
@@ -128,7 +128,7 @@ export async function startRun(
         options, providerId, runtimeProvider, request, managedConversation, cwd, catalogCwd, resume, contextKey,
         agentProfileId, codexHookTrust, openCodePluginTrust, managedRecorderEnabled, managedRecorderEnablement, homeDir,
         createRunId: (managed, runOptions) => managed?.runId ?? runOptions.runId ?? `run-${Date.now().toString(36)}-${nextRunSequence()}`,
-        llmNetworkConfiguration, sessionDiffBaselines, appSessionStore, recordingBlockedSessions, getWindow, publishTrace,
+        llmNetworkConfiguration, sessionDiffBaselines, appSessionStore, recordingBlockedSessions, renderer, publishTrace,
         rendererCanReceive, mainEventId, LIVE_TOOL_CONTENT_POLICY, recordingRecoveryHint, userDataDir: storageUserDataDir(),
         scopedSessionKey, isRemoteRun, editSourceSessionId, deleteRunAttachments, sessionBaselineKey
       })
@@ -189,7 +189,7 @@ export async function startRun(
         dockBadge,
         appSessionStore,
         runs,
-        getWindow,
+        renderer,
         initialSessionId: resume,
         sessionRevisionByContext
       })
@@ -259,7 +259,7 @@ export async function startRun(
         startPerf,
         dockBadge,
         scopedSessionKey,
-        getWindow,
+        renderer,
         boundedLiveRun,
         releaseSessionBaseline,
         interruptedState,
@@ -269,7 +269,7 @@ export async function startRun(
       runtimeStartup.control.setDiffPreviewDemand = setDiffPreviewDemand
       setDiffPreviewDemand?.(runTraces.hasDemand(runId))
       const { runProvider, requestRemoteStop, eventLog, getObservedProviderStartedAt, resolveSettled } = runtimeStartup
-      const remoteState = createRemoteRunState({ isRemoteRun, runId, providerId, runtimeProvider, runState, getObservedSessionId: () => liveRunState.observedSessionId, getWindow, dockBadge, scopedSessionKey, runs })
+      const remoteState = createRemoteRunState({ isRemoteRun, runId, providerId, runtimeProvider, runState, getObservedSessionId: () => liveRunState.observedSessionId, isWindowFocused: () => renderer.isFocused(), dockBadge, scopedSessionKey, runs })
       const runTerminalState = remoteState.state
       remoteResult = remoteState.remoteResult
       const { finishRemote, markTerminalAttention } = remoteState
@@ -295,7 +295,7 @@ export async function startRun(
         recordingRecoveryHint,
         recordingBlockedSessions,
         scopedSessionKey,
-        getWindow,
+        renderer,
         emit,
         finishTurnWallTiming,
         finalizeTurnDiff,
@@ -343,7 +343,7 @@ export async function startRun(
           }
           if (!runState.done) runState.done = true
           flushTraceSend()
-          getWindow()?.webContents.send('agent:error', {
+          renderer.send('agent:error', {
             runId,
             message: `Scry 处理 Provider 终态失败：${String((error as Error).message)}`,
             category: 'recording',
