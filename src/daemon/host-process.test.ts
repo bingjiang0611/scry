@@ -1,12 +1,22 @@
+import 'reflect-metadata'
 import { afterEach, describe, expect, it } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, webcrypto } from 'node:crypto'
+import { connect as netConnect, type Socket } from 'node:net'
+import { connect as tlsConnect, type TLSSocket } from 'node:tls'
+import { once } from 'node:events'
+import { Pkcs10CertificateRequestGenerator, cryptoProvider } from '@peculiar/x509'
 import { createDaemonHostProcess } from './host-process'
 import type { OutputChunk, RunOutputStore } from '../main/remote/run-output-log'
 import { SessionLedger } from '../main/remote/session-ledger'
 import { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
+import { createRecentFoldersStore } from '../main/app-store'
+import { REMOTE_PROTOCOL_VERSION } from '../shared/desktop-remote'
+import { verifyCSR } from '../main/remote/enrollment'
+
+cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
 const dirs: string[] = []
 function tempDir(): string {
@@ -32,6 +42,32 @@ class MemoryOutputStore implements RunOutputStore {
   close(): void {}
 }
 
+async function pair(service: Awaited<ReturnType<typeof createDaemonHostProcess>>['service']) {
+  const keys = await webcrypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
+  const pkcs8 = await webcrypto.subtle.exportKey('pkcs8', keys.privateKey)
+  const b64 = Buffer.from(pkcs8).toString('base64').replace(/(.{64})/g, '$1\n').replace(/\n$/, '')
+  const keyPEM = `-----BEGIN PRIVATE KEY-----\n${b64}\n-----END PRIVATE KEY-----\n`
+  const csr = await Pkcs10CertificateRequestGenerator.create({ name: 'CN=daemon-device', keys, signingAlgorithm: { name: 'ECDSA', hash: 'SHA-256' } })
+  const csrPEM = csr.toString('pem')
+  const publicKeySHA256 = (await verifyCSR(csrPEM)).publicKeySHA256
+  const invitation = await service.authority.begin()
+  await service.authority.prove({ pairingId: invitation.pairingId, secret: invitation.secret, csrPEM, deviceLabel: 'daemon fixture' }, publicKeySHA256)
+  const grant = await service.authority.confirmLocal(invitation.pairingId, publicKeySHA256)
+  return { keyPEM, certPEM: grant.certificatePEM }
+}
+
+async function call(socketPath: string, ca: string, cert: string, key: string, request: Record<string, unknown>) {
+  const raw: Socket = netConnect(socketPath)
+  await once(raw, 'connect')
+  const socket: TLSSocket = tlsConnect({ socket: raw, ca, cert, key, minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined })
+  await once(socket, 'secureConnect')
+  socket.write(`${JSON.stringify({ protocol: REMOTE_PROTOCOL_VERSION, ...request })}\n`)
+  let buffer = ''
+  for await (const chunk of socket) { buffer += (chunk as Buffer).toString('utf8'); if (buffer.includes('\n')) break }
+  socket.destroy()
+  return JSON.parse(buffer.split('\n')[0]) as Record<string, any>
+}
+
 describe('daemon host process', () => {
   it('assembles the run pipeline and host, serves only a unix socket, and disposes it', async () => {
     const root = tempDir()
@@ -50,8 +86,16 @@ describe('daemon host process', () => {
     ledger.markDispatched(orphan)
     ledgerStore.close()
 
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace, { mode: 0o700 })
+    createRecentFoldersStore(userDataDir).push(workspace)
     const oldRelay = process.env.SCRY_REMOTE_RELAY_ENABLED
+    const oldSmoke = process.env.SCRY_ELECTRON_SMOKE_PROVIDER
+    const oldLogging = process.env.ELECTRON_ENABLE_LOGGING
     process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
+    process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
+    process.env.ELECTRON_ENABLE_LOGGING = '1'
+    process.argv.push('--remote-debugging-port=0')
     try {
       const host = await createDaemonHostProcess({
         userDataDir,
@@ -70,11 +114,42 @@ describe('daemon host process', () => {
       expect(recovered).toContain(`\"runId\":\"${orphan}\"`)
       expect(recovered).toContain('run_failed')
       expect(recovered).toContain('host_restarted')
+
+      const device = await pair(host.service)
+      const intentId = randomUUID()
+      const submitted = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'submit', intentId, detail: JSON.stringify({ cwd: workspace, providerId: 'codex', prompt: 'daemon parity' })
+      })
+      expect(submitted.status).toBe('recorded')
+      const runId = submitted.runId as string
+      let cursor = 0
+      let outputCursor = 0
+      const events: Array<{ kind: string }> = []
+      const chunks: unknown[] = []
+      let state = 'dispatched'
+      for (let attempt = 0; attempt < 10 && state === 'dispatched'; attempt += 1) {
+        const watched = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+          op: 'watch', runId, cursor, outputCursor, waitMs: 5_000
+        })
+        state = watched.watch.state
+        cursor = watched.watch.poll.cursor
+        outputCursor = watched.watch.output.cursor
+        events.push(...watched.watch.poll.events)
+        chunks.push(...watched.watch.output.chunks)
+      }
+      expect(state).toBe('settled')
+      expect(events.some((event) => event.kind === 'run_settled')).toBe(true)
+      expect(chunks.length).toBeGreaterThan(0)
       await host.dispose()
       expect(existsSync(host.channel.socketPath)).toBe(false)
     } finally {
+      process.argv.splice(process.argv.indexOf('--remote-debugging-port=0'), 1)
       if (oldRelay === undefined) delete process.env.SCRY_REMOTE_RELAY_ENABLED
       else process.env.SCRY_REMOTE_RELAY_ENABLED = oldRelay
+      if (oldSmoke === undefined) delete process.env.SCRY_ELECTRON_SMOKE_PROVIDER
+      else process.env.SCRY_ELECTRON_SMOKE_PROVIDER = oldSmoke
+      if (oldLogging === undefined) delete process.env.ELECTRON_ENABLE_LOGGING
+      else process.env.ELECTRON_ENABLE_LOGGING = oldLogging
     }
   }, 30_000)
 })
