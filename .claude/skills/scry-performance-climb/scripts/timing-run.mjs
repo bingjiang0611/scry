@@ -11,6 +11,7 @@
 import { spawn } from 'node:child_process'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { cpus, loadavg } from 'node:os'
+import { observeTimingEnvironment } from './timing-observation.mjs'
 
 // Fixed path: agents may run with different TMPDIR values but share the same host.
 const lock = '/tmp/scry-performance-timing.lock'
@@ -53,13 +54,15 @@ acquire()
 const release = () => rmSync(lock, { recursive: true, force: true })
 const loadBefore = load()
 const startedAt = Date.now()
+const finishObservation = observeTimingEnvironment()
 const child = spawn(command[0], command.slice(1), { stdio: 'inherit' })
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => child.kill(signal))
-child.once('error', error => { release(); console.error(error.message); process.exit(1) })
+child.once('error', error => { finishObservation(); release(); console.error(error.message); process.exit(1) })
 child.once('exit', (code, signal) => {
   const loadAfter = load()
   release()
-  const result = { label, command, exit: code, signal, wallMs: Date.now() - startedAt, cores, loadBefore, loadAfter, highLoad: loadBefore > cores || loadAfter > cores }
+  const result = { label, command, exit: code, signal, wallMs: Date.now() - startedAt, cores, loadBefore, loadAfter, highLoad: loadBefore > cores || loadAfter > cores, diagnostics: finishObservation() }
   console.log(`SCRY_TIMING_RUN=${JSON.stringify(result)}`)
-  process.exit(code ?? 1)
+  // stdout is a pipe in CI. Let its pending diagnostic footer drain before exit.
+  process.exitCode = code ?? 1
 })
