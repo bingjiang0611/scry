@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { isAgentPermissionMode, type AgentStartRequest } from '../shared/runtime'
-import type { AppSessionRef } from '../main/app-store'
 import { configureStorage, initDb } from '../main/db'
 import { createSessionState, createMirrorSessionTranscript } from '../main/bootstrap/session-state'
 import { createWorkspaceRuntime } from '../main/bootstrap/workspace-runtime'
@@ -42,21 +41,6 @@ export interface DaemonHostProcess {
 
 const unavailable = (capability: string): never => {
   throw new Error(`daemon_capability_unavailable:${capability}`)
-}
-
-function sessionRef(value: unknown): AppSessionRef | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const row = value as Record<string, unknown>
-  if (typeof row.providerId !== 'string' || typeof row.cwd !== 'string') return null
-  const externalSessionId = typeof row.externalSessionId === 'string' ? row.externalSessionId
-    : typeof row.sessionId === 'string' ? row.sessionId : undefined
-  if (!externalSessionId) return null
-  return {
-    providerId: row.providerId,
-    cwd: row.cwd,
-    externalSessionId,
-    ...(typeof row.agentProfileId === 'string' ? { agentProfileId: row.agentProfileId } : {})
-  }
 }
 
 /**
@@ -181,7 +165,9 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     ),
     defaultWorkspace: () => workspace.remoteProjectRoots()[0],
     permissionOverride: configuredRemotePermissionMode,
-    supportsForkSession: (providerId) => providers.providerRegistry.get(providerId).forkSession !== undefined,
+    // The daemon does not yet own the App's session-mutation control plane, so
+    // discovery must not advertise a fork operation that the host cannot execute.
+    supportsForkSession: () => false,
     onError: (error) => log(`daemon.provider-discovery-failed ${(error as Error)?.message ?? String(error)}`)
   })
   const refreshRemoteProviderSnapshot = () => providerDiscovery.refreshMetadata()
@@ -199,10 +185,6 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     providerRegistry: providers.providerRegistry,
     runs: pipeline.runs,
     requestRunStop,
-    forkSessionWithAuthority: async () => unavailable('fork-session'),
-    deleteOneSession: async () => unavailable('delete-session'),
-    sessionRefFromRequest: sessionRef,
-    changeLegacySessionMetadata: async () => unavailable('session-metadata'),
     appSessionStore: catalog.appSessionStore,
     knownProjectDirectories: workspace.knownProjectDirectories,
     remoteProjectRoots: workspace.remoteProjectRoots,

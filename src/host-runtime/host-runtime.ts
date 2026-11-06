@@ -91,35 +91,41 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
         ...(result.reason ? { reason: result.reason } : {})
       }
     },
-    sessionAction: async (context: DesktopRemoteContext, action: import('../shared/desktop-remote').DesktopRemoteSessionAction, authorize: () => void) => {
-      const ref = runtime.sessionRefFromRequest(context)
-      if (!ref) throw new Error('无效的远程会话操作请求')
-      return runtime.changeLegacySessionMetadata(ref, () => {
-        authorize()
-        if (action.kind === 'rename') return runtime.appSessionStore().rename(ref, action.title)
-        if (action.kind === 'pin') return runtime.appSessionStore().setPinned(ref, action.pinned)
-        return action.archived
-          ? archiveSessionAndStop(runtime.appSessionStore(), ref, runtime.runs.activeStates(), runtime.requestRunStop)
-          : runtime.appSessionStore().setArchived(ref, false)
-      })
-    },
-    sessionFork: async (request: DesktopRemoteForkSessionRequest, authorize: () => void) =>
-      runtime.forkSessionWithAuthority(request, authorize),
+    ...(runtime.sessionRefFromRequest && runtime.changeLegacySessionMetadata ? {
+      sessionAction: async (context: DesktopRemoteContext, action: import('../shared/desktop-remote').DesktopRemoteSessionAction, authorize: () => void) => {
+        const ref = runtime.sessionRefFromRequest!(context)
+        if (!ref) throw new Error('无效的远程会话操作请求')
+        return runtime.changeLegacySessionMetadata!(ref, () => {
+          authorize()
+          if (action.kind === 'rename') return runtime.appSessionStore().rename(ref, action.title)
+          if (action.kind === 'pin') return runtime.appSessionStore().setPinned(ref, action.pinned)
+          return action.archived
+            ? archiveSessionAndStop(runtime.appSessionStore(), ref, runtime.runs.activeStates(), runtime.requestRunStop)
+            : runtime.appSessionStore().setArchived(ref, false)
+        })
+      }
+    } : {}),
+    ...(runtime.forkSessionWithAuthority ? {
+      sessionFork: async (request: DesktopRemoteForkSessionRequest, authorize: () => void) =>
+        runtime.forkSessionWithAuthority!(request, authorize)
+    } : {}),
     toolPanels: inputs.toolPanels,
     ...(inputs.createOutputStore ? { createOutputStore: inputs.createOutputStore } : {}),
-    sessionDelete: async (request: DesktopRemoteDeleteSessionRequest, authorize: () => void) => {
-      const ref = runtime.sessionRefFromRequest(request)
-      if (!ref) throw new Error('无效的远程会话删除请求')
-      const authorizeArchived = (): void => {
-        authorize()
-        const current = runtime.appSessionStore().load().find((session) =>
-          session.providerId === ref.providerId && session.agentProfileId === ref.agentProfileId &&
-          session.cwd === ref.cwd && (session.sessionId === ref.externalSessionId || session.externalSessionId === ref.externalSessionId))
-        if (!current?.archivedAt) throw new Error('远程删除只允许已存档会话')
+    ...(runtime.sessionRefFromRequest && runtime.deleteOneSession ? {
+      sessionDelete: async (request: DesktopRemoteDeleteSessionRequest, authorize: () => void) => {
+        const ref = runtime.sessionRefFromRequest!(request)
+        if (!ref) throw new Error('无效的远程会话删除请求')
+        const authorizeArchived = (): void => {
+          authorize()
+          const current = runtime.appSessionStore().load().find((session) =>
+            session.providerId === ref.providerId && session.agentProfileId === ref.agentProfileId &&
+            session.cwd === ref.cwd && (session.sessionId === ref.externalSessionId || session.externalSessionId === ref.externalSessionId))
+          if (!current?.archivedAt) throw new Error('远程删除只允许已存档会话')
+        }
+        authorizeArchived()
+        return runtime.deleteOneSession!(ref, { confirm: false, notifyFailure: false, authorize: authorizeArchived })
       }
-      authorizeArchived()
-      return runtime.deleteOneSession(ref, { confirm: false, notifyFailure: false, authorize: authorizeArchived })
-    },
+    } : {}),
     sessionCatalogRevision: () => createHash('sha256').update(JSON.stringify(canonicalRemoteProjectRoots(runtime.knownProjectDirectories()))).digest('hex'),
     listSessions: () => {
       const roots = canonicalRemoteProjectRoots(runtime.knownProjectDirectories())

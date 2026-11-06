@@ -47,10 +47,10 @@ export type RemoteHostRuntime = {
   providerRegistry: ProviderRegistry
   runs: RemoteRuns & { subscribe?: (listener: () => void) => () => void }
   requestRunStop: (runId: string) => boolean
-  forkSessionWithAuthority: (request: DesktopRemoteForkSessionRequest, authorize?: () => void) => Promise<AgentForkSessionResult>
-  deleteOneSession: (request: SessionDeletionRequest, options: DeleteOptions) => Promise<DeleteSessionResult>
-  sessionRefFromRequest: (value: unknown) => AppSessionRef | null
-  changeLegacySessionMetadata: (ref: AppSessionRef, change: () => boolean) => Promise<boolean>
+  forkSessionWithAuthority?: (request: DesktopRemoteForkSessionRequest, authorize?: () => void) => Promise<AgentForkSessionResult>
+  deleteOneSession?: (request: SessionDeletionRequest, options: DeleteOptions) => Promise<DeleteSessionResult>
+  sessionRefFromRequest?: (value: unknown) => AppSessionRef | null
+  changeLegacySessionMetadata?: (ref: AppSessionRef, change: () => boolean) => Promise<boolean>
   appSessionStore: () => ReturnType<typeof createAppSessionStore>
   knownProjectDirectories: () => Set<string>
   remoteProjectRoots: () => string[]

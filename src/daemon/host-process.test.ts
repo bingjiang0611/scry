@@ -116,6 +116,18 @@ describe('daemon host process', () => {
       expect(recovered).toContain('host_restarted')
 
       const device = await pair(host.service)
+      const desktop = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'desktop', query: { kind: 'info' }
+      })
+      expect(desktop.desktop).not.toHaveProperty('sessionActions')
+      expect(desktop.desktop).not.toHaveProperty('sessionFork')
+      expect(desktop.desktop).not.toHaveProperty('sessionDelete')
+      const providers = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'providers', detail: 'metadata'
+      })
+      expect(providers.providers.find((provider: { providerId?: string; id?: string }) =>
+        (provider.providerId ?? provider.id) === 'codex')).not.toMatchObject({ forkSession: true })
+
       const intentId = randomUUID()
       const submitted = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'submit', intentId, detail: JSON.stringify({ cwd: workspace, providerId: 'codex', prompt: 'daemon parity' })
