@@ -25,7 +25,8 @@ const attentionDir = (root: string): string => join(dataRoot(root), 'runtime', '
 const sessionDir = (root: string, sessionId: string): string => join(dataRoot(root), 'runtime', 'claude', safeKey(sessionId))
 
 async function markers(root: string): Promise<string[]> {
-  return readdir(attentionDir(root)).catch(() => [])
+  // Readiness is directory metadata, not a session needing recovery.
+  return (await readdir(attentionDir(root)).catch(() => [])).filter(name => name !== 'initialized')
 }
 
 describe('recorder attention index', () => {

@@ -1,4 +1,4 @@
-import { access, stat } from 'node:fs/promises'
+import { access, readdir, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import type { AgentTurnRecord } from '../../shared/turn-record.js'
@@ -8,7 +8,7 @@ import type { RepositoryDiscovery } from './config.js'
 import { listFiles, readJson, withDirectoryLock } from './io.js'
 import {
   ATTENTION_PROVIDERS, attentionIndexPresent, clearSessionAttention, markSessionAttention,
-  markedSessions, withSessionAttentionLock, type MarkedSession
+  markedSessions, publishAttentionIndexReady, withSessionAttentionLock, type MarkedSession
 } from './attention.js'
 import { safeKey } from './store.js'
 import { recorderHasRetryableInbox, recorderInboxEntries } from './inbox.js'
@@ -125,12 +125,21 @@ export async function recorderQuarantinedOpenTurns(
  * hook, or a quarantined turn. Also drops markers whose session directory is gone.
  */
 export async function reconcileAttentionIndex(dataRoot: string): Promise<MarkedSession[]> {
+  const indexed = new Set((await markedSessions(dataRoot)).map(marker => `${marker.provider}__${marker.sessionKey}`))
   const live = new Set<string>()
   for (const provider of ATTENTION_PROVIDERS) {
     const providerRoot = join(dataRoot, 'runtime', provider)
-    for (const sessionKey of await listFiles(providerRoot)) {
+    // Missing providers are empty; an interrupted/unreadable scan must not publish readiness.
+    const sessionKeys = await readdir(providerRoot).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return []
+      throw error
+    })
+    for (const sessionKey of sessionKeys) {
       const sessionDir = join(providerRoot, sessionKey)
       live.add(`${provider}__${sessionKey}`)
+      // Nothing is removed on this path. A publisher arriving after the snapshot keeps its marker.
+      // Only existing markers or legacy pending evidence need a locked, authoritative recheck.
+      if (!indexed.has(`${provider}__${sessionKey}`) && !await sessionHasPendingEvidence(sessionDir)) continue
       await withSessionAttentionLock(dataRoot, provider, sessionKey, async () => {
         if (await sessionHasPendingEvidence(sessionDir)) {
           await markSessionAttention(dataRoot, provider, sessionKey)
@@ -146,6 +155,7 @@ export async function reconcileAttentionIndex(dataRoot: string): Promise<MarkedS
       await releaseStaleAttention(dataRoot, marker.provider, marker.sessionDir)
     }
   }
+  await publishAttentionIndexReady(dataRoot)
   return markedSessions(dataRoot)
 }
 
@@ -195,7 +205,7 @@ async function pathExists(path: string): Promise<boolean> {
 }
 
 async function attentionSessions(dataRoot: string): Promise<MarkedSession[]> {
-  // No index means unknown, not an empty workspace. Diagnostic readers must rebuild it too:
+  // An uninitialized index means unknown, not an empty workspace. Diagnostic readers rebuild it:
   // doctor/status may run before the daemon has visited a legacy or restored workspace.
   return await attentionIndexPresent(dataRoot)
     ? await markedSessions(dataRoot)

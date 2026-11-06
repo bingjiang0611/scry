@@ -1,7 +1,7 @@
 import { mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
-import { listFiles, syncDirectory, withDirectoryLock } from './io.js'
+import { listFiles, syncDirectory, withDirectoryLock, writeTextAtomic } from './io.js'
 
 /**
  * A flat "this session may need a recovery pass" index.
@@ -93,10 +93,17 @@ export async function markedSessions(dataRoot: string): Promise<MarkedSession[]>
   return result
 }
 
-/** Whether the index exists at all: an absent index means "unknown", never "nothing to do". */
+/** Only a completed full reconciliation makes the index authoritative for session discovery. */
+export async function publishAttentionIndexReady(dataRoot: string): Promise<void> {
+  if (!await attentionIndexPresent(dataRoot)) {
+    await writeTextAtomic(join(attentionRoot(dataRoot), 'initialized'), '1\n')
+  }
+}
+
+/** Writers may create the directory before legacy sessions have been indexed. */
 export async function attentionIndexPresent(dataRoot: string): Promise<boolean> {
   try {
-    return (await stat(attentionRoot(dataRoot))).isDirectory()
+    return (await stat(join(attentionRoot(dataRoot), 'initialized'))).isFile()
   } catch {
     return false
   }
