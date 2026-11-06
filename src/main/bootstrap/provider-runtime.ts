@@ -1,4 +1,3 @@
-import { app } from 'electron'
 import { join } from 'node:path'
 import { parseDisabledProviders, ProviderRegistry } from '../providers/registry'
 import { ProviderCompatibilityStore } from '../provider-compatibility-manifest'
@@ -7,9 +6,18 @@ import { createSmokeProviderAdapter, type SmokeFixtureProviderId } from '../prov
 import type { PiAgentProfile } from '../pi-agent-profiles'
 import { PiRunDiagnostics } from '../providers/pi-run-diagnostics'
 
-export function createProviderRuntime(deps: { homeDir: string; listPiProfiles: () => Promise<PiAgentProfile[]>; resolvePiProfile: (id: string) => Promise<PiAgentProfile | undefined> }) {
-  const { homeDir, listPiProfiles, resolvePiProfile } = deps
-  const piRunDiagnostics = new PiRunDiagnostics(join(app.getPath('userData'), 'pi-run-diagnostics.json'))
+export function createProviderRuntime(deps: {
+  homeDir: string
+  userDataDir: string
+  appPath: string
+  resourcesPath: string
+  appVersion: string
+  isPackaged: boolean
+  listPiProfiles: () => Promise<PiAgentProfile[]>
+  resolvePiProfile: (id: string) => Promise<PiAgentProfile | undefined>
+}) {
+  const { homeDir, userDataDir, appPath, resourcesPath, appVersion, isPackaged, listPiProfiles, resolvePiProfile } = deps
+  const piRunDiagnostics = new PiRunDiagnostics(join(userDataDir, 'pi-run-diagnostics.json'))
   const smokeProviderEnabled = process.env.SCRY_ELECTRON_SMOKE_PROVIDER === '1' &&
     process.env.ELECTRON_ENABLE_LOGGING === '1' &&
     process.argv.some((arg) => arg.startsWith('--remote-debugging-port='))
@@ -25,12 +33,12 @@ export function createProviderRuntime(deps: { homeDir: string; listPiProfiles: (
   }))
   const builtInProviderAdapters = smokeProviderEnabled ? smokeProviderIds.map((id) => createSmokeProviderAdapter(id)) : createBuiltInProviderAdapters(
     homeDir,
-    join(app.getPath('userData'), 'codex-home-v1'),
-    join(app.getPath('userData'), 'provider-auth', 'opencode'),
-    join(app.getPath('userData'), 'provider-state', 'opencode-v1'),
+    join(userDataDir, 'codex-home-v1'),
+    join(userDataDir, 'provider-auth', 'opencode'),
+    join(userDataDir, 'provider-state', 'opencode-v1'),
     {
       listProfiles: listPiProfiles, resolveProfile: resolvePiProfile, diagnostics: piRunDiagnostics,
-      historyExtensionPath: join(app.isPackaged ? process.resourcesPath : join(app.getAppPath(), 'resources'), 'scry-history', 'pi-history-reader.mjs')
+      historyExtensionPath: join(isPackaged ? resourcesPath : join(appPath, 'resources'), 'scry-history', 'pi-history-reader.mjs')
     }
   )
   /**
@@ -38,8 +46,8 @@ export function createProviderRuntime(deps: { homeDir: string; listPiProfiles: (
    * 没配置就只用内置策略，不产生额外网络请求。拉取失败不影响 Provider 探测。
    */
   const providerCompatibility = new ProviderCompatibilityStore({
-    scryVersion: app.getVersion(),
-    cachePath: join(app.getPath('userData'), 'provider-compatibility-v1.json'),
+    scryVersion: appVersion,
+    cachePath: join(userDataDir, 'provider-compatibility-v1.json'),
     ...(process.env.SCRY_PROVIDER_MANIFEST_URL?.trim()
       ? { remoteUrl: process.env.SCRY_PROVIDER_MANIFEST_URL.trim() }
       : {})

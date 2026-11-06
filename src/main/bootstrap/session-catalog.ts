@@ -1,4 +1,3 @@
-import { app, type BrowserWindow } from 'electron'
 import type { ActiveRun } from '../../shared/trace'
 import type { AgentDataUpdated, AgentStartRequest } from '../../shared/runtime'
 import { createAppSessionStore, mergeProjectMetas, type ProjectMeta } from '../app-store'
@@ -26,12 +25,13 @@ function ownsNativeSession(conversation: Conversation, turn: ConversationTurn, s
 }
 
 export function createSessionCatalog({
-  recentStore, projectStore, getWindow, unsettledRuns, getProviderRegistry,
+  recentStore, projectStore, userDataDir, publishDataUpdated, unsettledRuns, getProviderRegistry,
   forkManagedConversation, startAppRun, homeDir, resolveKnownProjectDirectory
 }: {
   recentStore: ReturnType<typeof createWorkspaceRuntime>['recentStore']
   projectStore: ReturnType<typeof createWorkspaceRuntime>['projectStore']
-  getWindow: () => BrowserWindow | null
+  userDataDir: string
+  publishDataUpdated: (event: AgentDataUpdated) => void
   unsettledRuns: () => ActiveRun[]
   getProviderRegistry: () => ProviderRegistry
   forkManagedConversation: NonNullable<ConversationServiceDeps['forkNative']>
@@ -45,10 +45,10 @@ export function createSessionCatalog({
   // recovery hint, so a failed recovery is logged and the next launch retries from the dirty index.
   const recoverTraceCatalogOnce = (): Promise<void> => {
     if (traceCatalogRecovery) return traceCatalogRecovery
-    traceCatalogRecovery = recoverQoderCatalogSessions(app.getPath('userData'), appSessionStore())
+    traceCatalogRecovery = recoverQoderCatalogSessions(userDataDir, appSessionStore())
       .then((recovered) => {
         // The renderer may already show a list read before recovery finished; ask it to reload.
-        if (recovered > 0) getWindow()?.webContents.send('agent:dataUpdated', { kind: 'catalog_recovered' } satisfies AgentDataUpdated)
+        if (recovered > 0) publishDataUpdated({ kind: 'catalog_recovered' })
       })
       .catch((error: unknown) => {
         console.warn('[scry] trace catalog recovery failed:', error instanceof Error ? error.message : String(error))
@@ -85,9 +85,9 @@ export function createSessionCatalog({
     }))
   }
   let appSessionStoreInstance: ReturnType<typeof createAppSessionStore> | undefined
-  const appSessionStore = () => appSessionStoreInstance ??= createAppSessionStore(app.getPath('userData'))
+  const appSessionStore = () => appSessionStoreInstance ??= createAppSessionStore(userDataDir)
   let conversationStoreInstance: ConversationStore | undefined
-  const conversationStore = () => conversationStoreInstance ??= new ConversationStore(app.getPath('userData'))
+  const conversationStore = () => conversationStoreInstance ??= new ConversationStore(userDataDir)
   async function assertLegacyConversationWriteAllowed(scope: NativeSessionScope, deletion?: { ownerId?: string }): Promise<void> {
     const activeIds = new Set(unsettledRuns().filter((run) => run.providerId === scope.providerId &&
       run.agentProfileId === scope.agentProfileId && (run.cwd ?? '') === scope.cwd).map((run) => run.runId))
@@ -112,12 +112,12 @@ export function createSessionCatalog({
       if (!('runId' in result)) throw new Error('统一对话不能使用远程执行结果')
       return result
     },
-    loadItemText: (conversation, ref) => readConversationHistoryItem(app.getPath('userData'), conversation, ref),
+    loadItemText: (conversation, ref) => readConversationHistoryItem(userDataDir, conversation, ref),
     // One page read projects every selected archived turn: each binding/session is read
     // once instead of once per turn, which is what a pure tab change used to trigger.
-    loadTurns: createConversationTurnLoader({ userDataDir: app.getPath('userData') }),
+    loadTurns: createConversationTurnLoader({ userDataDir }),
     sideChatSource: createSideChatSourceDeps({
-      appSessionStore, resolveKnownProjectDirectory, homeDir, userDataDir: app.getPath('userData')
+      appSessionStore, resolveKnownProjectDirectory, homeDir, userDataDir
     })
   })
 

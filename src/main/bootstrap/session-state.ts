@@ -1,25 +1,32 @@
-import { app, type BrowserWindow } from 'electron'
 import { realpathSync } from 'node:fs'
 import type { ProviderId } from '../../shared/provider'
 import type { ActiveRun } from '../../shared/trace'
-import { sessionAttentionKey } from '../../shared/session-attention'
+import { sessionAttentionKey, type SessionAttentionSnapshot } from '../../shared/session-attention'
 import { DockBadgeState } from '../dock-badge'
 import { SessionDiffBaselineRegistry } from '../session-diff'
 import { ContextAdmission } from '../context-admission'
 import { ProviderOperationGate, providerOperationKey } from '../provider-operation-gate'
 import { mirrorTranscript } from '../transcript-archive'
 
-export async function mirrorSessionTranscript(providerId: ProviderId, cwd: string | undefined, sessionId: string | undefined): Promise<void> {
-  if (providerId !== 'claude' || !cwd || !sessionId) return
-  try {
-    const ok = await mirrorTranscript({ cwd, sessionId, userDataDir: app.getPath('userData') })
-    if (!ok) console.warn('[scry] transcript mirror skipped:', cwd, sessionId)
-  } catch (error) {
-    console.warn('[scry] transcript mirror failed:', cwd, sessionId, error)
+export function createMirrorSessionTranscript(userDataDir: string) {
+  return async (providerId: ProviderId, cwd: string | undefined, sessionId: string | undefined): Promise<void> => {
+    if (providerId !== 'claude' || !cwd || !sessionId) return
+    try {
+      const ok = await mirrorTranscript({ cwd, sessionId, userDataDir })
+      if (!ok) console.warn('[scry] transcript mirror skipped:', cwd, sessionId)
+    } catch (error) {
+      console.warn('[scry] transcript mirror failed:', cwd, sessionId, error)
+    }
   }
 }
 
-export function createSessionState(getWindow: () => BrowserWindow | null) {
+export function createSessionState({
+  setBadgeCount,
+  publishUnreadSessions
+}: {
+  setBadgeCount: (count: number) => boolean
+  publishUnreadSessions: (snapshot: SessionAttentionSnapshot) => void
+}) {
   // 每个 Provider + cwd 维护各自的会话；空 cwd 是“不绑定项目”的持久会话作用域。
   const sessionByContext = new Map<string, string>()
   const sessionRevisionByContext = new Map<string, number>()
@@ -60,12 +67,12 @@ export function createSessionState(getWindow: () => BrowserWindow | null) {
     sessionAttentionKey({ providerId, agentProfileId, cwd, sessionId })
   let badgePermissionWarningShown = false
   const dockBadge = new DockBadgeState((count) => {
-    if (app.setBadgeCount(count) || process.platform !== 'darwin' || badgePermissionWarningShown) return
+    if (setBadgeCount(count) || process.platform !== 'darwin' || badgePermissionWarningShown) return
     badgePermissionWarningShown = true
     console.warn('[scry] macOS Dock badge permission is unavailable')
   }, (snapshot) => {
     try {
-      getWindow()?.webContents.send('agent:unreadSessions', snapshot)
+      publishUnreadSessions(snapshot)
     } catch (error) {
       console.warn('[scry] unread session notification failed:', error)
     }

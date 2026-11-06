@@ -7,7 +7,7 @@ import { startWorkspaceRun } from './bootstrap/workspace-start'
 import { createForkOperations } from './bootstrap/run-fork'
 import { createSessionCatalog } from './bootstrap/session-catalog'
 import { createHistoryRuntime } from './bootstrap/history-runtime'
-import { createSessionState, mirrorSessionTranscript } from './bootstrap/session-state'
+import { createMirrorSessionTranscript, createSessionState } from './bootstrap/session-state'
 import { createRemoteConnections, configuredRemotePermissionMode } from './bootstrap/remote-connections'
 import { resolveSessionRunIds } from './db'
 import { SourceControlService } from './source-control/service'
@@ -66,7 +66,11 @@ const {
   providerOperationGate, recordingRecoveryHint, deletingSessions, adoptingSessionKeys,
   providerContextKey, providerSessionKey, canonicalProviderCwd, withProviderOperation,
   dockBadge, activeRunSessionKey, bumpSessionRevision, resetSessionContext
-} = createSessionState(() => win)
+} = createSessionState({
+  setBadgeCount: (count) => app.setBadgeCount(count),
+  publishUnreadSessions: (snapshot) => { win?.webContents.send('agent:unreadSessions', snapshot) }
+})
+const mirrorSessionTranscript = createMirrorSessionTranscript(app.getPath('userData'))
 const historyRuntime = createHistoryRuntime()
 const { invalidateSessionHistoryLoad } = historyRuntime
 
@@ -90,13 +94,23 @@ const {
   // The pipeline is assembled after the catalog (it needs the stores), so hand the
   // catalog a deferred call instead of the const itself.
   startAppRun: (payload, options) => pipeline.startAppRun(payload, options),
-  getWindow: () => win,
+  userDataDir: app.getPath('userData'),
+  publishDataUpdated: (event) => { win?.webContents.send('agent:dataUpdated', event) },
   unsettledRuns: () => runs.unsettledStates(),
   getProviderRegistry: () => providerRegistry,
   homeDir, resolveKnownProjectDirectory
 })
 const { piProfileStore, detectInstalledAgents, storedPiProfilesNotDetected, listPiProfiles, resolvePiProfile } = createPiProfileRuntime({ userDataDir: app.getPath('userData') })
-const { providerCompatibility, providerRegistry, piRunDiagnostics, smokeProviderEnabled, smokeDetectedAgents } = createProviderRuntime({ homeDir, listPiProfiles, resolvePiProfile })
+const { providerCompatibility, providerRegistry, piRunDiagnostics, smokeProviderEnabled, smokeDetectedAgents } = createProviderRuntime({
+  homeDir,
+  userDataDir: app.getPath('userData'),
+  appPath: app.getAppPath(),
+  resourcesPath: process.resourcesPath,
+  appVersion: app.getVersion(),
+  isPackaged: app.isPackaged,
+  listPiProfiles,
+  resolvePiProfile
+})
 
 function setCurrentCwd(dir: string | undefined): void {
   // Selection is not process ownership. Existing shells retain their spawn cwd;
