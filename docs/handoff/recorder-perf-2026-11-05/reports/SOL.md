@@ -3,7 +3,7 @@
 基线仍为 `50bd7202`（origin/main），第一轮审查对象为 `6cf305b2` 的完整分支差异。
 维护者随后授予 full-send：允许推送、建 PR、跟进 CI / 评审并按保护规则合并；不发布或安装日常版本。
 
-模型从实际可用目录选择：`openai-codex/gpt-6.1-sol`，通过 Pi 原生只读 reviewer；未暴露 effort。
+模型从实际可用目录选择：`openai-codex/gpt-6.1-sol`，通过 Pi 原生只读 reviewer；第一阶段记录未暴露 effort。后续获授权的第 6 / 7 轮状态显示 thinking high。
 第一轮 verdict 为 CHANGES，第二轮为 APPROVE。随后仅收紧初始化的空会话锁成本，第三轮也为
 APPROVE；S1 / S2 / S3 均 resolved，没有开放的 blocker / should。
 没有把失败、超时或未答复当作批准。后续轮只检查改动及开放项。
@@ -15,6 +15,7 @@ APPROVE；S1 / S2 / S3 均 resolved，没有开放的 blocker / should。
 | S1 | should | 新 hook 可先创建 attention 目录，旧会话尚未遍历却被认为已初始化；中断重建也类似 | 增加完整重建后才原子发布并同步的 `runtime/attention/initialized`。新 writer 不发布该标志；源 provider 目录遍历只忽略 ENOENT，其他错误阻止发布完成标志 |
 | S2 | should | 扫描到 JSONL 半行后把游标推进到整个文件末尾；补齐该行后会漏过新锚点 | 缓存分别保留已观察文件大小与最后一个换行后的字节位置；两种扫描返回可重扫的行边界，并保持无换行 EOF 的解析语义 |
 | S3 | nit | offset 失效测试用不同 prompt hash 预热和读取，没有命中同一个缓存键 | 改用同一身份预热，保留失效后必须回扫的断言 |
+| S4 | should（第 6 轮） | 扩大的计时诊断 footer 经 pipe 输出后立即退出，可能截断 | 真实 tee 负对照只得到 65,536 字节；改用 exitCode 排空输出，完整 4096 样本及退出 7 回归通过；第 7 轮 resolved |
 
 没有增加新解析状态机或后台缓存，也没有改变记录格式。初次初始化仍为全量扫描；只有已经完整
 初始化的索引才能提供 O(需要关注的会话数) 的普通恢复。并发发布 / 清理仍使用上一轮的同会话锁。
@@ -69,4 +70,4 @@ fsync 都保留。先前 5491 全量通过只对应 `6cf305b2`；当前分支的
 - 旧报告中的本地提交限制是当时状态，已被后续 full-send 明确覆盖；测试数量按对应 revision 解读。
 - 报告中的测量机地址改为 A / B / C；保留负载、失败原因与测量限制，不发布机器专属地址。
 - 仍不把离线 transcript / hook 夹具称为真实付费 Provider 验收，不把进程 SIGKILL 称为断电验证。
-- Sol 使用量未在回执暴露，未估算费用。最终轮数和 verdict 在 PR 描述中记录。
+- 第一阶段 Sol 使用量未在回执暴露，未估算费用。后续第 6 / 7 轮使用量、授权与 APPROVE 记录见 [CI-diagnostics.md](CI-diagnostics.md)；最终轮数和 verdict 在 PR 描述中记录。

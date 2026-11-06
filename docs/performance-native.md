@@ -75,8 +75,10 @@ Native 输出保留 `artifactFiles` 的逐文件 SHA-256；`lifecycleTraces` 保
 
 上述记录只在测量完成并退出 App 后导出；不改变日常采集内容、频率、格式、保留策略或预算。空记录或关闭记录表示该证据不可用，不表示耗时或资源占用为零。
 
-CI 的 baseline/candidate 均经同一冻结版本的 `timing-run.mjs` 串行加锁，分别保存负载记录；`highLoad: true` 时不能宣称可信的延迟结论。仅当两次完整测量均成功、原始比较失败时，额外执行一次 candidate 同产物诊断。诊断必须通过 revision、环境、harness、各 lane 产物及 driver 指纹一致性校验，再用原比较器双向比较，保留 `control-forward.md` / `control-reverse.md`。双向检查避免只看到“第二次更快”，遗漏反方向超过既有预算的波动。
+CI 的 baseline/candidate 均经同一冻结版本的 `timing-run.mjs` 及其 `timing-observation.mjs` 依赖串行加锁，分别保存负载记录；`highLoad: true` 时不能宣称可信的延迟结论。仅当两次完整测量均成功、原始比较失败时，额外执行一次 candidate 同产物诊断。诊断必须通过 revision、环境、harness、各 lane 产物及 driver 指纹一致性校验，再用原比较器双向比较，保留 `control-forward.md` / `control-reverse.md`。双向检查避免只看到“第二次更快”，遗漏反方向超过既有预算的波动。
 
 这不是把失败样本换掉的重试：原始 `report.md`、全部样本和失败状态保持不变；对照即使通过也不能放行合并。对照失败可证明同产物观测不稳定，但不能单独证明争用、GC 或排除分支回归。fixture 不完整或身份不一致时不产生有效 A/A 结论。
+
+计时父进程另以 250ms 间隔记录 OS 暴露的 CPU tick 忙碌比例、20ms 分辨率的事件循环延迟直方图和 UTC 时间；最多保留 4096 个窗口（约 17 分钟），超出后标 `samplesTruncated`，仍保留全程观测到的最大延迟。没有 CPU tick 增量或直方图样本时记 `null`，不记 0。`observerCpuMs` 是采样父进程自身的 CPU 开销，不含子进程。它不直接测宿主调度、VM steal、Git 子进程 CPU 或 App 阻塞；必须结合 App trace/资源记录与 Node batch/GC 记录判断，也不能用“未观测到停顿”证明没有停顿。所有诊断仅增加证据，不扣除原始耗时、不改变退出码、高负载判断、预算或必需检查。
 
 2026-10-30 的 [CI 41045559281](https://github.com/bingjiang0611/scry/actions/runs/41045559281) 有 29 个相关计时行超出比较门槛；其中 paged 首次 complete 的 start receipt 为 428ms、terminal 为 688ms。与上一轮相比，同一 baseline 产物的 short-heavy startup 也从约 1064ms 变为 3843ms。这证明存在明显波动，但没有证明宿主争用、GC 或排除 App 瓶颈；不能把下一次绿灯当作本次问题已修复。新增的是归因证据，不是性能修复，门禁算法与固定负载不变。

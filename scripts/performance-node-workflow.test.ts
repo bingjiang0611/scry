@@ -59,6 +59,21 @@ describe('Node performance diagnostic workflow', () => {
     expect(workflow.jobs.check.needs).toContain('compare')
   })
 
+  it('freezes the timing wrapper and its diagnostic dependency for the baseline too', () => {
+    const { results } = fixture()
+    const cwd = resolve(results, '..')
+    for (const directory of ['scripts', 'src/main/providers/fixtures', '.agents/skills/scry-performance-climb/scripts']) {
+      mkdirSync(join(cwd, 'baseline', directory), { recursive: true })
+    }
+    const freeze = steps.find(entry => entry.name === 'Freeze candidate harness for both source revisions')!
+    const result = spawnSync('bash', ['-e', '-c', freeze.run!], { cwd, encoding: 'utf8' })
+    expect(result.status, result.stderr).toBe(0)
+    for (const file of ['timing-run.mjs', 'timing-observation.mjs']) {
+      const relative = join('.agents/skills/scry-performance-climb/scripts', file)
+      expect(readFileSync(join(cwd, 'baseline', relative))).toEqual(readFileSync(join(root, relative)))
+    }
+  })
+
   it('writes both diagnostic directions without replacing the failed primary report', () => {
     const { results, artifact, run } = fixture()
     for (const result of Object.values(artifact.results)) result.durationMs.fill(10)

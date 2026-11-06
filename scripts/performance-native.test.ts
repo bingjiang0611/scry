@@ -99,7 +99,9 @@ describe('native diagnostic evidence', () => {
 describe('native performance evidence gate', () => {
   it('freezes the smoke adapter and its history-reader dependency together', () => {
     expect(nativeHarnessFiles).toEqual(expect.arrayContaining([
-      'src/main/providers/smoke.ts', 'src/main/providers/smoke-history-reader.ts'
+      'src/main/providers/smoke.ts', 'src/main/providers/smoke-history-reader.ts',
+      '.agents/skills/scry-performance-climb/scripts/timing-run.mjs',
+      '.agents/skills/scry-performance-climb/scripts/timing-observation.mjs'
     ]))
   })
 

@@ -51,7 +51,7 @@ jobs:
           mkdir -p ../performance-results
           node scripts/performance-report.mjs inventory > ../performance-results/inventory.json
           cp scripts/performance-budgets.json scripts/performance-paths.json ../performance-results/
-          npm run test:unit -- scripts/performance-feedback.test.ts scripts/performance-node-workflow.test.ts scripts/performance-native.test.ts scripts/performance-ratchet.test.ts src/main/performance-journal.test.ts src/main/performance-timing.test.ts src/main/ipc-trust.test.ts
+          npm run test:unit -- scripts/performance-feedback.test.ts scripts/performance-node-workflow.test.ts scripts/performance-native.test.ts scripts/performance-timing-observation.test.ts scripts/performance-ratchet.test.ts src/main/performance-journal.test.ts src/main/performance-timing.test.ts src/main/ipc-trust.test.ts
       - name: Guard work-counter ceilings (only tightening is free)
         env:
           # A maintainer-applied label is the explicit approval for loosening; re-run after labelling.
@@ -66,6 +66,7 @@ jobs:
         run: |
           cp candidate/scripts/performance-baseline.test.ts baseline/scripts/
           cp candidate/scripts/performance-bench.mjs baseline/scripts/
+          cp candidate/.agents/skills/scry-performance-climb/scripts/timing-{run,observation}.mjs baseline/.agents/skills/scry-performance-climb/scripts/
           cp candidate/vitest.config.ts baseline/vitest.config.ts
           cp candidate/src/main/providers/fixtures/codex-app-server.mjs baseline/src/main/providers/fixtures/codex-app-server.mjs
       - name: Measure baseline then candidate on the same runner (never parallel)
