@@ -27,6 +27,7 @@ function launch() {
       SCRY_DAEMON_APP_PATH: resolve('.'),
       SCRY_DAEMON_RESOURCES_PATH: resolve('resources'),
       SCRY_DAEMON_APP_VERSION: '0.2.237',
+      SCRY_DAEMON_PACKAGED: '0',
       SCRY_DAEMON_STARTED_BY: 'sigkill-acceptance'
     },
     stdio: ['ignore', logFd, logFd]

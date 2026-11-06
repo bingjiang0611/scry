@@ -29,6 +29,8 @@ function directoryBytes(path) {
 if (!existsSync(asarPath)) throw new Error(`packaged app 缺少 app.asar：${asarPath}`)
 const entries = listPackage(asarPath)
 const entrySet = new Set(entries)
+const mainJavaScript = entries.filter((entry) => entry.startsWith('/out/main/') && entry.endsWith('.js'))
+const packagedMainSources = mainJavaScript.map((entry) => extractFile(asarPath, entry.slice(1)).toString('utf8'))
 // A linked node_modules can make the packager collect direct dependencies but
 // omit their required children. Check the actual archive, not the checkout.
 const packageFiles = ['/package.json', ...entries.filter(entry => /\/node_modules\/(?:@[^/]+\/)?[^/]+\/package\.json$/.test(entry))]
@@ -83,10 +85,13 @@ if (!entries.includes('/out/preload/index.cjs')) {
 for (const daemonEntry of ['/out/main/daemon.js', '/out/main/daemon-supervisor.js']) {
   if (!entries.includes(daemonEntry)) throw new Error(`packaged app 缺少 daemon 入口：${daemonEntry}`)
 }
-const daemonSource = extractFile(asarPath, 'out/main/daemon.js').toString('utf8')
 const supervisorSource = extractFile(asarPath, 'out/main/daemon-supervisor.js').toString('utf8')
-if (!daemonSource.includes('SCRY_DAEMON_USER_DATA_DIR')) throw new Error('packaged daemon 缺少显式 userData 接线')
+if (!packagedMainSources.some((source) => source.includes('SCRY_DAEMON_USER_DATA_DIR'))) throw new Error('packaged daemon 缺少显式 userData 接线')
 if (!supervisorSource.includes('ELECTRON_RUN_AS_NODE')) throw new Error('packaged daemon supervisor 未使用 Electron Node 模式')
+for (const key of ['SCRY_DAEMON_APP_PATH', 'SCRY_DAEMON_RESOURCES_PATH', 'SCRY_DAEMON_APP_VERSION', 'SCRY_DAEMON_PACKAGED']) {
+  if (!packagedMainSources.some((source) => source.includes(key))) throw new Error(`packaged daemon 缺少必需环境接线：${key}`)
+}
+if (!packagedMainSources.some((source) => source.includes('daemon_config_missing_'))) throw new Error('packaged daemon 缺少 fail-closed 配置校验')
 if (entries.some((entry) => /^\/out\/preload\/.*\.mjs$/.test(entry))) {
   throw new Error('packaged app 仍包含 sandbox 无法执行的 ESM preload')
 }
@@ -117,8 +122,7 @@ if (!existsSync(scryPiIntegration)) throw new Error('packaged app 缺少 Pi reco
 const historyExtension = join(resources, 'scry-history', 'pi-history-reader.mjs')
 if (!existsSync(historyExtension) || !lstatSync(historyExtension).isFile()) throw new Error('packaged app 缺少普通文件 Pi history reader')
 const historyExtensionHash = createHash('sha256').update(readFileSync(historyExtension)).digest('hex')
-const mainJavaScript = entries.filter((entry) => entry.startsWith('/out/main/') && entry.endsWith('.js'))
-if (!mainJavaScript.some((entry) => extractFile(asarPath, entry.slice(1)).toString('utf8').includes(historyExtensionHash))) {
+if (!packagedMainSources.some((source) => source.includes(historyExtensionHash))) {
   throw new Error('packaged Pi history reader 与 main 运行图中固定的扩展指纹不匹配')
 }
 // Electron 的 locale 文件命名随平台不同：macOS 是 <lang>.lproj/locale.pak，

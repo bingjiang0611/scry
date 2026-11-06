@@ -8,6 +8,8 @@ import { createSessionCatalog } from '../main/bootstrap/session-catalog'
 import { createPiProfileRuntime } from '../main/bootstrap/pi-profiles'
 import { createProviderRuntime } from '../main/bootstrap/provider-runtime'
 import { runStartupRecovery } from '../main/bootstrap/startup-recovery'
+import { warmShellEnv } from '../main/claude-locate'
+import { daemonPrivateCliPath } from './daemon-config'
 import { startRun } from '../main/bootstrap/run-execution'
 import { startWorkspaceRun } from '../main/bootstrap/workspace-start'
 import { SourceControlService } from '../main/source-control/service'
@@ -155,8 +157,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   // a new run while the previous process is still being reconciled.
   startupManagedRecovery = runStartupRecovery({
     userDataDir: options.userDataDir,
-    ...(options.isPackaged ? { recorderCli: join(options.resourcesPath, 'bin', 'scry') } :
-      process.env.SCRY_CLI_PATH ? { recorderCli: process.env.SCRY_CLI_PATH } : {}),
+    recorderCli: daemonPrivateCliPath(options.resourcesPath),
     startupPerf: { mark: () => undefined, finish: () => undefined },
     conversationStore: catalog.conversationStore,
     runs: pipeline.runs,
@@ -227,7 +228,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     userDataDir: options.userDataDir,
     relay,
     gatewayLabel: options.gatewayLabel ?? 'Scry daemon',
-    shellEnvironment: async () => process.env,
+    shellEnvironment: warmShellEnv,
     openPath: async () => unavailable('open-path'),
     trashItem: async () => unavailable('trash-item'),
     historyHandlers: createRemoteHistoryHandlers(runtime, options.userDataDir),

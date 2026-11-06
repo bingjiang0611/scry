@@ -29,3 +29,13 @@
 新增构建产物验收 `scripts/daemon-sigkill-restart.mjs`：用 Electron binary + `ELECTRON_RUN_AS_NODE=1` 启动 `out/main/daemon.js`，确认三个 lease 含 UTC 身份，真实 `SIGKILL`，同 userData 重启并等待新 socket inode/新 lease owner，最后 SIGTERM exit 0 且所有 active lease 清理。结果：`{"firstSignal":"SIGKILL","restartReady":true,"secondCode":0,"leaseIdentity":true}`；daemon 日志 `/tmp/b3-r3-sigkill-gate.log`。
 
 门禁：main+daemon+host-runtime 2909 passed（3 skipped）；typecheck、build、构建产物 SIGKILL/restart、完整 `test:desktop-remote`、串行重建后的 `--dev` security smoke 全绿。
+
+## R4 路径 / 版本 / 环境 + R5 supervisor——完成
+
+R4 先扩展模板测试：旧 launchd/systemd 文件缺 `APP_PATH/RESOURCES_PATH/APP_VERSION/PACKAGED`，断言失败。新增 `daemon-config.ts` 作为 daemon 与 supervisor 共用的 fail-closed 解析器；STATE、USER_DATA、APP、RESOURCES、VERSION、PACKAGED 任一缺失或 PACKAGED 非 0/1 都在入口 exit 2，不再从 cwd、`process.resourcesPath` 或硬编码 `0.2.237` 猜测。模板写齐所有变量；`daemon-config-smoke.mjs` 用构建后的两个入口逐项删除变量，12/12 均 exit 2 并返回对应机器错误码。
+
+recorder CLI 只由注入的 `resourcesPath` 解析为 `<resources>/bin/scry`，不再回退 PATH/global npm CLI；测试把 PATH 指向 fake scry，结果仍是 private absolute path。Provider shell 环境改为复用 App 的 `warmShellEnv`，不直接使用 launchd/systemd 的贫瘠 `process.env`。`check-packaged-app.mjs` 检查打包 main 运行图含全部必需环境接线和 fail-closed 校验，并继续验证 Resources 私有 CLI 可执行。
+
+R5 同批：supervisor 的异常重启预算在一次运行达到 60 s 后归零；exit 2 是确定性配置失败，只启动一次并写失败记录。子进程 stderr 改为 bounded pipe，只提取 `daemon_[a-z0-9_]+` 机器码，正文不进入结果或 failure JSON。failure 仍不含路径、prompt、证书或错误正文。
+
+门禁：main+daemon+host-runtime 2920 passed（3 skipped）；typecheck/build、构建入口缺变量 12 项 smoke、真实 SIGKILL/restart、security smoke、`pack:artifact` 全绿。完整 `test:desktop-remote` 首轮在 composer-history fixture 的键盘 completion 等待超时；同一 focused campaign 随即通过，完整门禁复跑通过，首轮失败没有删除或隐藏。
