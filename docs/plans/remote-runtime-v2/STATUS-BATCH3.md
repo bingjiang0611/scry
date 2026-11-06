@@ -15,14 +15,13 @@
 | B3-M1 核验修复（M1-1、M1-2） | 完成 | `见下` | [b3-m1-review](status/b3-m1-review.md)：counters 收集器与 analytics smoke 注入 storage；`initDb` 对 `storage_not_configured` 直接抛；measure 0 个 unavailable |
 | B3-M1 存储注入化 | 完成 | `见下` | [b3-m1](status/b3-m1.md)：`storage-paths` 注入，db 各子模块与 `remote-history` 不再要 electron；导入图测试先失败后通过 |
 | B3-M2 运行管线去 Electron 化 | 完成（5 段） | `见下` | [b3-m2](status/b3-m2.md)：M2-1 renderer sink、M2-2 存储根注入、M2-3 通知/dock/shell 边界、M2-4 `create-run-pipeline.ts` 组装入口 + 导入图断言；M2-5 管线不再持有窗口（`renderer.send`/`isFocused`） |
-| B3-P1 daemon 承载宿主 | **未完成**：**完成**：宿主装配、supervisor、打包、重启语义与七项验收均完成 | `见下` | [b3-p1](status/b3-p1.md)：PID 复用接管、TZ=UTC 身份读取、接管互斥；宿主装配、supervisor、打包、重启语义、7 条验收仍缺 |
+| B3-P1 daemon 承载宿主 | **完成** | `6d90cc7a` | [b3-p1](status/b3-p1.md)：单写者锁、真实宿主装配、bounded supervisor、打包、重启语义、mTLS-over-unix 端到端与七项验收 |
 | B3-V1 security smoke 归属 | 完成（结论：非回归，调用方式错误） | `见下` | [b3-v1](status/b3-v1.md)：无 `--dev` 时脚本跑的是 0.2.220 旧产物，源码 0.2.237；`--dev` 下起点与当前 HEAD 均通过 |
-| 交付前全局验证 | **未执行** | — | |
+| 交付前全局验证 | **除 renderer UI 既有失败外完成** | `见下` | test/typecheck/build/CLI/inventory/measure/desktop/security/pack 全绿；renderer performance fixture 在 P1-2 起点同样失败 |
 
 ## 剩余任务的执行顺序（不得跳序）
 
-1. **B3-P1**：daemon 托管远端 host——用 `createHostRuntime` + `createRunPipeline` 在无 Electron 环境装起管线。本批最后一段。
-2. 交付前全局验证 + `npm run test:renderer:ui`。
+1. **停止，等待维护者核验。** P1 已完成；不得开始新的 Batch。
 
 ## 阻塞
 
@@ -43,3 +42,20 @@ M2 完成后运行管线的值导入图已无 electron（`src/host-runtime/creat
 ## 更正记录
 
 上一轮我在 STATUS 里写过「counters 测试普通 Node 下 4 个失败是既有问题」——**这个结论是错的**。核验复跑显示 `01bca85`、`ee2c933` 在普通 Node 下都是 4 passed，只有我加的断言让它变成 4 failed（`installed` 只代表 JS wrapper 能 import，不代表原生 binding 可用）。M1-2 已修复：`installCounter()` 实际打开一次 `:memory:` 数据库来判定可用性；普通 Node 下回到 4 passed，Electron 收集器仍为 measured。详见 [b3-m1-review](status/b3-m1-review.md)。
+
+## Batch 3 最终门禁（P1 完成后）
+
+| 门禁 | 结果 |
+|---|---|
+| `npm test` | 通过；unit + shell 全绿 |
+| `npm run typecheck` | 通过 |
+| `npm run build` / `npm run build:cli` | 通过 |
+| `npm run performance:inventory` | 通过 |
+| `npm run performance:measure -- --compare 577995b` | exit 0，Ratchet passed，0 worse |
+| `npm run test:desktop-remote` | 通过 |
+| `electron-security-smoke.mjs --dev` | 通过 |
+| `npm run pack:artifact` | 通过；未安装产物 |
+| `git diff --check` | 通过 |
+| `npm run test:renderer:ui` | **失败**：`session-capability-ui-smoke --performance-only` 报 `Performance control obscured: #performance-empty` |
+
+renderer 失败不归因于 P1：在临时 detached worktree 的 P1-2 起点 `743b5e6c` 上重建并单跑同一 `--performance-only`，得到完全相同错误。P1 后的改动没有 renderer 文件；按既有失败单列，不顺带修改 UI。本批没有把该门禁写成通过。
