@@ -1,8 +1,10 @@
 # 汇总：recorder 引擎性能（M / G / R）
 
-分支：`perf/recorder-engine`。已完成本批范围内的实现与本地验证，待独立 PR 评审；未合入、未发布。
-并发修复见 [R3-attention-race](R3-attention-race.md)，后续索引初始化与 JSONL 半行修正见
-[SOL](SOL.md)；验证须按各报告的 revision 区分。完整条目见 [STATUS](../STATUS.md)。
+分支：`perf/recorder-engine`。已完成本批实现、本地验证与 Sol 复核；未发布。
+提交时点的维护失败隔离、JSON 修正与门禁情况见 [PR-follow-up](PR-follow-up.md)；最新远端状态以
+[PR #31](https://github.com/bingjiang0611/scry/pull/31) 为准。并发修复见
+[R3-attention-race](R3-attention-race.md)，初始化与半行修正见 [SOL](SOL.md)。
+验证须按各报告的 revision 区分；完整条目见 [STATUS](../STATUS.md)。
 
 ## 本次 PR 的边界
 

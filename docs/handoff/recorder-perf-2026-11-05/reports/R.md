@@ -83,6 +83,10 @@ daemon 在轮次打开期间按 `RECOVERY_POLL_MS` 起步、最长 15 s 退避�
 
 锚点扫描 −79%（33.0 MB → 6.9 MB）。解析字节没变，这是 R1 剩下的那一半。
 
+缓存命中时只用最多 8 KiB 重新证明锚点行。超长 prompt 无法在该窗口内证明时会回到完整反向扫描，
+不是截断证据；因此该收益不覆盖所有长行。若真实长行负载证明此回退成为主要成本，再单独测量
+并考虑分块行校验，不在本次 PR 扩大缓存协议。
+
 ### 改法
 
 `recorder-transcript-cache.ts` 里按 `(path, provider, promptHash, providerTurnId)` 记一个
@@ -214,8 +218,8 @@ R2 在 recorder core（`packages/turn-recorder-cli`）。需要 `npm run build:c
 
 ## 未验证 / 留给用户
 
-- R1、R3 是本批未完成的条目，进入条件都已成立，数字在上面。是否要继续做、按什么顺序，
-  需要你确认。
+- R1 尚未完成真正的增量解析；锚点复用已实施。继续解析增量需要单独确认。
+  R3 已实施，后续正确性修复见 [R3-attention-race](R3-attention-race.md) 和 [SOL](SOL.md)。
 - R2 的收益只在「同一轮出现重复正文」时出现（同文件被多次读取、同一 snippet 重复）。单次唯一
   正文的轮次没有变化：S1 结束阶段 637–681 ms（G1 之后 622–828 ms，基线 914–1413 ms），
   S4 结束阶段 3469–4747 ms（G1 之后 3545–5310 ms）。
