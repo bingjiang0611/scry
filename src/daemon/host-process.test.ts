@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { createDaemonHostProcess } from './host-process'
 import type { OutputChunk, RunOutputStore } from '../main/remote/run-output-log'
+import { SessionLedger } from '../main/remote/session-ledger'
+import { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
 
 const dirs: string[] = []
 function tempDir(): string {
@@ -34,6 +37,19 @@ describe('daemon host process', () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonStateDirectory = join(userDataDir, 'daemon')
+    const ledgerDirectory = join(userDataDir, 'remote', 'ledger')
+    mkdirSync(ledgerDirectory, { recursive: true, mode: 0o700 })
+    const ledgerStore = new SessionLedgerFileStore(ledgerDirectory)
+    const ledger = new SessionLedger({ store: ledgerStore })
+    const orphan = randomUUID()
+    ledger.recordIntent({
+      intentId: randomUUID(),
+      runId: orphan,
+      detail: JSON.stringify({ cwd: root, providerId: 'claude', prompt: 'unknown outcome' })
+    })
+    ledger.markDispatched(orphan)
+    ledgerStore.close()
+
     const oldRelay = process.env.SCRY_REMOTE_RELAY_ENABLED
     process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
     try {
@@ -50,6 +66,10 @@ describe('daemon host process', () => {
       expect(host.channel.socketPath).toBe(join(daemonStateDirectory, 'local.sock'))
       expect(existsSync(host.channel.socketPath)).toBe(true)
       expect(host.service.relayConfigured).toBe(false)
+      const recovered = readFileSync(join(ledgerDirectory, 'session-ledger.log'), 'utf8')
+      expect(recovered).toContain(`\"runId\":\"${orphan}\"`)
+      expect(recovered).toContain('run_failed')
+      expect(recovered).toContain('host_restarted')
       await host.dispose()
       expect(existsSync(host.channel.socketPath)).toBe(false)
     } finally {

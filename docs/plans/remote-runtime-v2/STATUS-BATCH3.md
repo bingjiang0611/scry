@@ -15,7 +15,7 @@
 | B3-M1 核验修复（M1-1、M1-2） | 完成 | `见下` | [b3-m1-review](status/b3-m1-review.md)：counters 收集器与 analytics smoke 注入 storage；`initDb` 对 `storage_not_configured` 直接抛；measure 0 个 unavailable |
 | B3-M1 存储注入化 | 完成 | `见下` | [b3-m1](status/b3-m1.md)：`storage-paths` 注入，db 各子模块与 `remote-history` 不再要 electron；导入图测试先失败后通过 |
 | B3-M2 运行管线去 Electron 化 | 完成（5 段） | `见下` | [b3-m2](status/b3-m2.md)：M2-1 renderer sink、M2-2 存储根注入、M2-3 通知/dock/shell 边界、M2-4 `create-run-pipeline.ts` 组装入口 + 导入图断言；M2-5 管线不再持有窗口（`renderer.send`/`isFocused`） |
-| B3-P1 daemon 承载宿主 | **未完成**：P1-1/P1-2/supervisor/打包完成；重启语义、余下验收未完成 | `见下` | [b3-p1](status/b3-p1.md)：PID 复用接管、TZ=UTC 身份读取、接管互斥；宿主装配、supervisor、打包、重启语义、7 条验收仍缺 |
+| B3-P1 daemon 承载宿主 | **未完成**：P1-1/P1-2/supervisor/打包/重启语义完成；余下验收未完成 | `见下` | [b3-p1](status/b3-p1.md)：PID 复用接管、TZ=UTC 身份读取、接管互斥；宿主装配、supervisor、打包、重启语义、7 条验收仍缺 |
 | B3-V1 security smoke 归属 | 完成（结论：非回归，调用方式错误） | `见下` | [b3-v1](status/b3-v1.md)：无 `--dev` 时脚本跑的是 0.2.220 旧产物，源码 0.2.237；`--dev` 下起点与当前 HEAD 均通过 |
 | 交付前全局验证 | **未执行** | — | |
 
