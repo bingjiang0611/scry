@@ -5,7 +5,7 @@ import { aggregateTurnEvidence } from './aggregate.js'
 import { isFullToolContentPolicy } from './tool-content.js'
 import { writeRecorderContent } from './content-store.js'
 import { limitTurnDiffPatchBytes, cancelGitTurnDiff, finishGitTurnDiff } from './git.js'
-import { writeJsonAtomic } from './io.js'
+import { appendRotatingLog, writeJsonAtomic } from './io.js'
 import { RECORDER_VERSION, commitRecord, clearRuntimeTurn, stableHash } from './store.js'
 import { releaseStaleAttention, recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState } from './runtime-state.js'
 import type { RecorderEnablement } from './config.js'
@@ -331,7 +331,11 @@ export async function finalizeOpenTurn(
   await rm(openPath(root), { force: true })
   // A hook queued while this turn was finalizing still needs a recovery pass, so the index entry is
   // only dropped when nothing is left to replay. Caller holds the session lock.
-  await releaseStaleAttention(enablement.dataRoot, open.provider, root)
   await clearRuntimeTurn(enablement.dataRoot, turnRoot(root, open.generation))
+  // The record is durable. A disposable-index cleanup failure must not change its acknowledgement.
+  await releaseStaleAttention(enablement.dataRoot, open.provider, root).catch(error => appendRotatingLog(
+    join(enablement.dataRoot, 'logs', 'recorder.log'),
+    `${new Date().toISOString()} WARN attention cleanup: ${error instanceof Error ? error.message : String(error)}`
+  ).catch(() => undefined))
   return { status: committed.status, record: committed.record }
 }

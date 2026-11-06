@@ -142,9 +142,19 @@ let recoveryPasses = 0
 
 async function recoverySessions(dataRoot: string): Promise<Array<{ provider: ProviderId; sessionDir: string }>> {
   recoveryPasses++
-  const rebuild = !await attentionIndexPresent(dataRoot) || recoveryPasses % FULL_INDEX_REBUILD_EVERY === 0
-  const sessions = rebuild ? await reconcileAttentionIndex(dataRoot) : await markedSessions(dataRoot)
-  return sessions.map(({ provider, sessionDir }) => ({ provider, sessionDir }))
+  const initialized = await attentionIndexPresent(dataRoot)
+  if (!initialized || recoveryPasses % FULL_INDEX_REBUILD_EVERY === 0) {
+    try {
+      return await reconcileAttentionIndex(dataRoot)
+    } catch (error) {
+      // A partial initial index is never usable. A failed periodic repair must not starve known work.
+      if (!initialized || !await attentionIndexPresent(dataRoot)) throw error
+      await appendRotatingLog(join(dataRoot, 'logs', 'recorder.log'),
+        `${new Date().toISOString()} WARN attention rebuild: ${error instanceof Error ? error.message : String(error)}`
+      ).catch(() => undefined)
+    }
+  }
+  return markedSessions(dataRoot)
 }
 
 async function pendingHealth(dataRoot: string): Promise<{ pendingCount: number; oldestPendingAgeMs: number }> {
