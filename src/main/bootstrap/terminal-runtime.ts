@@ -5,7 +5,14 @@ import { createTerminalManager, type TerminalManager } from '../terminal-manager
 import { warmShellEnv } from '../claude-locate'
 import { defaultShellPath } from '../shell'
 
-export function createTerminalRuntime(deps: { userDataDir: string; getCurrentCwd: () => string | undefined; getHomeDir: () => string; getWindow: () => Electron.BrowserWindow | null; rendererCanReceive: () => boolean }) {
+export function createTerminalRuntime(deps: {
+  userDataDir: string
+  recordingWorkerUrl: URL
+  getCurrentCwd: () => string | undefined
+  getHomeDir: () => string
+  getWindow: () => Electron.BrowserWindow | null
+  rendererCanReceive: () => boolean
+}) {
   let terminalManager: TerminalManager | undefined
   let terminalManagerPromise: Promise<TerminalManager> | undefined
   const terminalOutput = new TerminalOutputBridge({
@@ -36,7 +43,8 @@ export function createTerminalRuntime(deps: { userDataDir: string; getCurrentCwd
                 if (paused) manager?.pauseRecording(id)
                 else manager?.resumeRecording(id)
               }
-            }
+            },
+            deps.recordingWorkerUrl
           )
           manager = createTerminalManager({
             getCurrentCwd: () => deps.getCurrentCwd(),

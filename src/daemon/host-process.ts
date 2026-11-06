@@ -1,0 +1,269 @@
+import { randomUUID } from 'node:crypto'
+import { join } from 'node:path'
+import { isAgentPermissionMode, type AgentStartRequest } from '../shared/runtime'
+import type { AppSessionRef } from '../main/app-store'
+import { configureStorage, initDb } from '../main/db'
+import { createSessionState, createMirrorSessionTranscript } from '../main/bootstrap/session-state'
+import { createWorkspaceRuntime } from '../main/bootstrap/workspace-runtime'
+import { createSessionCatalog } from '../main/bootstrap/session-catalog'
+import { createPiProfileRuntime } from '../main/bootstrap/pi-profiles'
+import { createProviderRuntime } from '../main/bootstrap/provider-runtime'
+import { startRun } from '../main/bootstrap/run-execution'
+import { startWorkspaceRun } from '../main/bootstrap/workspace-start'
+import { SourceControlService } from '../main/source-control/service'
+import { createProviderDiscovery } from '../main/remote/provider-discovery'
+import { listRemoteDirectories, resolveCanonicalRemoteProjectDirectory } from '../main/remote/remote-directory-browser'
+import { createRemoteHistoryHandlers } from '../main/bootstrap/remote-history'
+import { resolveRemoteRelay } from '../main/bootstrap/remote-relay'
+import { createRunPipeline } from '../host-runtime/create-run-pipeline'
+import { createHostRuntime } from '../host-runtime/host-runtime'
+import type { RemoteHostRuntime } from '../host-runtime/host-runtime-types'
+import type { RemoteHostService, RemoteHostServiceDependencies } from '../main/remote/remote-host-service'
+import { RunOutputWorkerStore } from '../main/remote/run-output-worker'
+import { openLocalChannel, type LocalChannel } from './local-channel'
+
+export interface DaemonHostProcessOptions {
+  userDataDir: string
+  daemonStateDirectory: string
+  appPath: string
+  resourcesPath: string
+  appVersion: string
+  isPackaged: boolean
+  gatewayLabel?: string
+  createOutputStore?: RemoteHostServiceDependencies['createOutputStore']
+  log?: (line: string) => void
+}
+
+export interface DaemonHostProcess {
+  service: RemoteHostService
+  channel: LocalChannel
+  dispose(): Promise<void>
+}
+
+const unavailable = (capability: string): never => {
+  throw new Error(`daemon_capability_unavailable:${capability}`)
+}
+
+function sessionRef(value: unknown): AppSessionRef | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const row = value as Record<string, unknown>
+  if (typeof row.providerId !== 'string' || typeof row.cwd !== 'string') return null
+  const externalSessionId = typeof row.externalSessionId === 'string' ? row.externalSessionId
+    : typeof row.sessionId === 'string' ? row.sessionId : undefined
+  if (!externalSessionId) return null
+  return {
+    providerId: row.providerId,
+    cwd: row.cwd,
+    externalSessionId,
+    ...(typeof row.agentProfileId === 'string' ? { agentProfileId: row.agentProfileId } : {})
+  }
+}
+
+/**
+ * Build the same run and host assemblies in a plain Node process. Native UI
+ * capabilities are deliberately absent: tool panels return unavailable envelopes,
+ * outbound desktop execution is omitted, and shell/session mutation calls fail with
+ * named capability errors rather than pretending they succeeded.
+ */
+export async function createDaemonHostProcess(options: DaemonHostProcessOptions): Promise<DaemonHostProcess> {
+  const log = options.log ?? ((line: string) => { process.stdout.write(`${line}\n`) })
+  configureStorage({ userDataDir: options.userDataDir, appPath: options.appPath })
+  initDb()
+
+  let isShuttingDown = false
+  let currentCwd: string | undefined
+  let runSequence = 0
+  let startupManagedRecovery: Promise<void> = Promise.resolve()
+  let pipeline!: ReturnType<typeof createRunPipeline>
+  let remoteHostService: RemoteHostService | null = null
+
+  const mirrorSessionTranscript = createMirrorSessionTranscript(options.userDataDir)
+  const session = createSessionState({
+    setBadgeCount: () => true,
+    publishUnreadSessions: () => undefined
+  })
+
+  let loadSessions = (): Array<{ cwd?: string }> => []
+  const workspace = createWorkspaceRuntime({
+    appUserDataDir: options.userDataDir,
+    loadSessions: () => loadSessions()
+  })
+  const pi = createPiProfileRuntime({ userDataDir: options.userDataDir })
+  const providers = createProviderRuntime({
+    homeDir: workspace.homeDir,
+    userDataDir: options.userDataDir,
+    appPath: options.appPath,
+    resourcesPath: options.resourcesPath,
+    appVersion: options.appVersion,
+    isPackaged: options.isPackaged,
+    listPiProfiles: pi.listPiProfiles,
+    resolvePiProfile: pi.resolvePiProfile
+  })
+
+  const catalog = createSessionCatalog({
+    recentStore: workspace.recentStore,
+    projectStore: workspace.projectStore,
+    userDataDir: options.userDataDir,
+    publishDataUpdated: () => undefined,
+    unsettledRuns: () => pipeline.runs.unsettledStates(),
+    getProviderRegistry: () => providers.providerRegistry,
+    forkManagedConversation: async () => unavailable('fork-session'),
+    startAppRun: (request, startOptions) => pipeline.startAppRun(request, startOptions),
+    homeDir: workspace.homeDir,
+    resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory
+  })
+  loadSessions = () => catalog.appSessionStore().load()
+
+  const sourceControl = new SourceControlService({
+    userData: options.userDataDir,
+    authorizeDirectory: workspace.resolveKnownProjectDirectory,
+    unsettledDirectories: () => pipeline.runs.unsettledStates().map((run) => run.cwd),
+    registeredWorkspaceRun: (runId, cwd) => pipeline.runs.get(runId)?.state.cwd === cwd
+  })
+
+  const remoteRunIds = new Set<string>()
+  const remoteRunLedgerIds = new Map<string, string>()
+  const requestRunStop = (runId: string): boolean => pipeline.requestRunStop(runId)
+  pipeline = createRunPipeline({
+    renderer: { send: () => undefined, isFocused: () => false },
+    rendererCanReceive: () => false,
+    activeRunSessionKey: session.activeRunSessionKey,
+    dockBadge: session.dockBadge,
+    mainEventId: (prefix, runId) => `${prefix}-${runId}-${randomUUID()}`,
+    getCurrentCwd: () => currentCwd,
+    getStartupManagedRecovery: () => startupManagedRecovery,
+    isShuttingDown: () => isShuttingDown,
+    nextRunSequence: () => runSequence++,
+    sourceControl,
+    providerRegistry: providers.providerRegistry,
+    resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory,
+    resolveRemoteProjectDirectory: workspace.resolveRemoteProjectDirectory,
+    startWorkspaceRun,
+    startRun,
+    piRunDiagnostics: providers.piRunDiagnostics,
+    appSessionStore: catalog.appSessionStore,
+    providerOperationGate: session.providerOperationGate,
+    providerContextKey: session.providerContextKey,
+    providerSessionKey: session.providerSessionKey,
+    contextAdmission: session.contextAdmission,
+    resetSessionContext: session.resetSessionContext,
+    sessionRevisionByContext: session.sessionRevisionByContext,
+    sessionByContext: session.sessionByContext,
+    sessionAliasesByContext: session.sessionAliasesByContext,
+    deletingSessions: session.deletingSessions,
+    conversationStore: catalog.conversationStore,
+    assertLegacyConversationWriteAllowed: catalog.assertLegacyConversationWriteAllowed,
+    recordingBlockedSessions: session.recordingBlockedSessions,
+    homeDir: workspace.homeDir,
+    sessionDiffBaselines: session.sessionDiffBaselines,
+    recordingRecoveryHint: session.recordingRecoveryHint,
+    sessionBaselineKey: session.sessionBaselineKey,
+    requestRunStop,
+    bumpSessionRevision: session.bumpSessionRevision,
+    remoteRunIds,
+    remoteRunLedgerIds,
+    mirrorSessionTranscript
+  })
+
+  const configuredRemotePermissionMode = () => {
+    const raw = process.env.SCRY_REMOTE_PERMISSION_MODE
+    return isAgentPermissionMode(raw) ? raw : undefined
+  }
+  const providerDiscovery = createProviderDiscovery({
+    descriptors: () => providers.providerRegistry.describe(),
+    profiles: pi.listPiProfiles,
+    resolveProfile: pi.resolvePiProfile,
+    authorizeWorkspace: workspace.resolveRemoteProjectDirectory,
+    controls: (context) => session.withProviderOperation(
+      context.providerId,
+      () => providers.providerRegistry.runControls(context),
+      context.agentProfileId
+    ),
+    defaultWorkspace: () => workspace.remoteProjectRoots()[0],
+    permissionOverride: configuredRemotePermissionMode,
+    supportsForkSession: (providerId) => providers.providerRegistry.get(providerId).forkSession !== undefined,
+    onError: (error) => log(`daemon.provider-discovery-failed ${(error as Error)?.message ?? String(error)}`)
+  })
+  const refreshRemoteProviderSnapshot = () => providerDiscovery.refreshMetadata()
+
+  const runtime: RemoteHostRuntime = {
+    get remoteHostService() { return remoteHostService },
+    set remoteHostService(value) { remoteHostService = value },
+    getRemoteProviderDiscovery: () => providerDiscovery,
+    refreshRemoteProviderSnapshot,
+    configuredRemotePermissionMode,
+    remoteStartReceipts: pipeline.remoteStartReceipts,
+    startAppRun: (payload: AgentStartRequest, startOptions) => pipeline.startAppRun(payload, startOptions),
+    sourceControl,
+    providerOperationGate: session.providerOperationGate,
+    providerRegistry: providers.providerRegistry,
+    runs: pipeline.runs,
+    requestRunStop,
+    forkSessionWithAuthority: async () => unavailable('fork-session'),
+    deleteOneSession: async () => unavailable('delete-session'),
+    sessionRefFromRequest: sessionRef,
+    changeLegacySessionMetadata: async () => unavailable('session-metadata'),
+    appSessionStore: catalog.appSessionStore,
+    knownProjectDirectories: workspace.knownProjectDirectories,
+    remoteProjectRoots: workspace.remoteProjectRoots,
+    resolveRemoteProjectDirectory: workspace.resolveRemoteProjectDirectory,
+    resolveCanonicalRemoteProjectDirectory,
+    listRemoteDirectories,
+    rememberProject: workspace.rememberProject,
+    remoteRunIds,
+    userQuestionBroker: pipeline.userQuestionBroker,
+    withProviderOperation: session.withProviderOperation,
+    providerContextKey: session.providerContextKey,
+    boundedLiveRun: pipeline.boundedLiveRun,
+    getCurrentCwd: () => currentCwd,
+    homeDir: workspace.homeDir,
+    openLocalPath: async () => unavailable('open-path'),
+    get isShuttingDown() { return isShuttingDown }
+  }
+
+  await refreshRemoteProviderSnapshot()
+  const remoteStateDirectory = join(options.userDataDir, 'remote')
+  const relay = await resolveRemoteRelay(remoteStateDirectory)
+  const service = await createHostRuntime({
+    runtime,
+    stateDirectory: remoteStateDirectory,
+    userDataDir: options.userDataDir,
+    relay,
+    gatewayLabel: options.gatewayLabel ?? 'Scry daemon',
+    shellEnvironment: async () => process.env,
+    openPath: async () => unavailable('open-path'),
+    trashItem: async () => unavailable('trash-item'),
+    historyHandlers: createRemoteHistoryHandlers(runtime, options.userDataDir),
+    // Omit every source. HostController returns explicit unavailable envelopes with
+    // reasons for analytics, LLM performance and MCP trust.
+    toolPanels: undefined,
+    createOutputStore: options.createOutputStore ?? ((directory) => RunOutputWorkerStore.create(
+      directory,
+      // This expression stays in the daemon entry (out/main/daemon.js), while the
+      // worker is another top-level main entry beside it. Supplying it avoids the
+      // worker module's default URL, which resolves from its shared chunks file.
+      new URL('./run-output-file-worker.js', import.meta.url)
+    ))
+  })
+  remoteHostService = service
+  await service.start()
+  const channel = await openLocalChannel({
+    directory: options.daemonStateDirectory,
+    serve: (stream) => service.host.serve(stream)
+  })
+  log(`daemon.host-ready socket=${channel.socketPath}`)
+
+  let disposed = false
+  return {
+    service,
+    channel,
+    dispose: async () => {
+      if (disposed) return
+      disposed = true
+      isShuttingDown = true
+      startupManagedRecovery = Promise.resolve()
+      await channel.close()
+      await service.dispose()
+    }
+  }
+}

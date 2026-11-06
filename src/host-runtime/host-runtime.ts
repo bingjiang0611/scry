@@ -45,7 +45,7 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
     gate: runtime.providerOperationGate,
     createTransport: relay.createTransport,
     relayAdvertisement: relay.relayAdvertisement,
-    desktopRemoteClient: runtime.desktopRemoteClient,
+    ...(runtime.desktopRemoteClient ? { desktopRemoteClient: runtime.desktopRemoteClient } : {}),
     gatewayLabel,
     startRun: createRemoteRunBinding({
       permissionModeOverride: remotePermissionMode,
@@ -106,6 +106,7 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
     sessionFork: async (request: DesktopRemoteForkSessionRequest, authorize: () => void) =>
       runtime.forkSessionWithAuthority(request, authorize),
     toolPanels: inputs.toolPanels,
+    ...(inputs.createOutputStore ? { createOutputStore: inputs.createOutputStore } : {}),
     sessionDelete: async (request: DesktopRemoteDeleteSessionRequest, authorize: () => void) => {
       const ref = runtime.sessionRefFromRequest(request)
       if (!ref) throw new Error('无效的远程会话删除请求')

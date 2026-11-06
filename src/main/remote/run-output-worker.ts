@@ -37,8 +37,8 @@ export class RunOutputWorkerStore implements RunOutputStore {
     worker.on('exit', (code) => this.stop(new Error(`run_output_worker_exit_${code}`)))
   }
 
-  static async create(directory: string): Promise<RunOutputWorkerStore> {
-    const worker = new Worker(new URL('./run-output-file-worker.js', import.meta.url), { workerData: { directory } })
+  static async create(directory: string, workerUrl = new URL('./run-output-file-worker.js', import.meta.url)): Promise<RunOutputWorkerStore> {
+    const worker = new Worker(workerUrl, { workerData: { directory } })
     const store = new RunOutputWorkerStore(worker)
     await store.ready
     return store

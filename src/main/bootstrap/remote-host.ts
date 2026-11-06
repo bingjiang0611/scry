@@ -11,6 +11,7 @@ import { readLlmPerformanceHistory } from '../llm-performance-history'
 import { summarizeRunningLlmSessions } from '../../shared/llm-performance'
 import { resolveRemoteRelay } from './remote-relay'
 import { createRemoteHistoryHandlers } from './remote-history'
+import { RunOutputWorkerStore } from '../remote/run-output-worker'
 import { remoteHostEnabled } from '../remote/remote-defaults'
 import type { IpcMainInvokeEvent } from 'electron'
 import type { RemoteStatus } from '../../shared/remote'
@@ -42,6 +43,13 @@ export async function startRemoteHostIfEnabled(runtime: RemoteHostRuntime): Prom
       openPath: runtime.openLocalPath,
       trashItem: (path: string) => shell.trashItem(path),
       historyHandlers,
+      // This expression stays in out/main/index.js, beside the worker entry. The
+      // store module is shared with the daemon and may be emitted under chunks, so
+      // its own import.meta.url is not a stable production base.
+      createOutputStore: (directory) => RunOutputWorkerStore.create(
+        directory,
+        new URL('./run-output-file-worker.js', import.meta.url)
+      ),
       toolPanels: {
         analytics: (rangeDays: UsageAnalyticsRangeDays) => usageAnalyticsWithCreditsQuery(rangeDays),
         llmPerformance: async () => [await readLlmPerformanceHistory(app.getPath('userData')),

@@ -107,8 +107,12 @@ export class TerminalRecordingWorkerClient implements TerminalRecordingBackend {
     })
   }
 
-  static create(directory: string, callbacks: TerminalRecordingWorkerCallbacks): TerminalRecordingWorkerClient {
-    const worker = new Worker(new URL('./terminal-recording-worker.js', import.meta.url), { workerData: { directory } })
+  static create(
+    directory: string,
+    callbacks: TerminalRecordingWorkerCallbacks,
+    workerUrl = new URL('./terminal-recording-worker.js', import.meta.url)
+  ): TerminalRecordingWorkerClient {
+    const worker = new Worker(workerUrl, { workerData: { directory } })
     return new TerminalRecordingWorkerClient(worker, callbacks)
   }
 

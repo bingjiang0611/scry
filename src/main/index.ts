@@ -80,7 +80,9 @@ function rendererCanReceive(): boolean {
 }
 
 const { terminalOutput, getTerminalManager, getTerminalManagerInstance } = createTerminalRuntime({
-  userDataDir: app.getPath('userData'), getCurrentCwd: () => currentCwd, getHomeDir: () => homeDir,
+  userDataDir: app.getPath('userData'),
+  recordingWorkerUrl: new URL('./terminal-recording-worker.js', import.meta.url),
+  getCurrentCwd: () => currentCwd, getHomeDir: () => homeDir,
   getWindow: () => win, rendererCanReceive
 })
 const { homeDir, homeFileAccess, recentStore, projectStore, rememberProject, knownProjectDirectories, resolveKnownProjectDirectory, remoteProjectRoots, resolveRemoteProjectDirectory } = createWorkspaceRuntime({

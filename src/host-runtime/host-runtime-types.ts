@@ -66,7 +66,9 @@ export type RemoteHostRuntime = {
   getCurrentCwd: () => string | undefined
   homeDir: string
   openLocalPath: (path: string) => Promise<void>
-  desktopRemoteClient: () => DesktopRemoteClient
+  // Outbound desktop-to-desktop execution is an App capability. A headless daemon
+  // that only hosts this machine omits it instead of advertising a throwing target.
+  desktopRemoteClient?: () => DesktopRemoteClient
   isShuttingDown: boolean
 }
 
@@ -89,6 +91,8 @@ export interface HostRuntimeInputs {
   historyHandlers: Pick<RemoteHostServiceDependencies, 'readHistory' | 'readHistoryPreview' | 'readHistoryVersion' | 'readHistoryTurnsPage'>
   // Analytics / LLM performance / MCP trust panels.
   toolPanels: HostControllerFactoryDependencies['toolPanels']
+  // Test/embedding seam. Production omits it and uses the bounded worker-backed store.
+  createOutputStore?: RemoteHostServiceDependencies['createOutputStore']
 }
 
 export type { UsageAnalyticsRangeDays, ProviderContext }

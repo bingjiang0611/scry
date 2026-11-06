@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { startDaemon, exitCodeForStartup } from './lifecycle'
@@ -16,6 +16,23 @@ afterEach(() => {
 })
 
 describe('daemon startup', () => {
+  it('starts the host after taking the lock and disposes host before releasing it', async () => {
+    const stateDirectory = tempDir()
+    const order: string[] = []
+    const result = await startDaemon({
+      stateDirectory,
+      startedBy: 'app',
+      log: () => {},
+      ...({ startHost: async () => ({ dispose: async () => { order.push('host') } }) } as object)
+    })
+    expect(result.status).toBe('started')
+    expect(order).toEqual([])
+    if (result.status !== 'started') return
+    await (result as typeof result & { dispose(): Promise<void> }).dispose()
+    order.push(existsSync(join(stateDirectory, DAEMON_LOCK_NAME)) ? 'lock-present' : 'missing')
+    expect(order).toEqual(['host', 'missing'])
+  })
+
   it('reports started and a second start exits without touching the lock', async () => {
     const stateDirectory = tempDir()
     const lines: string[] = []

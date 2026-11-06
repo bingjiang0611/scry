@@ -1,5 +1,6 @@
 import { resolve } from 'node:path'
 import { startDaemon, exitCodeForStartup } from './lifecycle'
+import { createDaemonHostProcess } from './host-process'
 
 // Daemon entry. It runs on the App's Electron binary with ELECTRON_RUN_AS_NODE=1,
 // so it gets the same Node, the same ABI for better-sqlite3 and the same signature;
@@ -9,8 +10,9 @@ import { startDaemon, exitCodeForStartup } from './lifecycle'
 // The App passes its own userData directory; a daemon that guesses one would write
 // to the wrong ledger, so a missing value fails loudly instead of defaulting.
 const stateDirectory = process.env.SCRY_DAEMON_STATE_DIR
-if (!stateDirectory) {
-  process.stderr.write('daemon_state_dir_missing: set SCRY_DAEMON_STATE_DIR\n')
+const userDataDir = process.env.SCRY_DAEMON_USER_DATA_DIR
+if (!stateDirectory || !userDataDir) {
+  process.stderr.write('daemon_paths_missing: set SCRY_DAEMON_STATE_DIR and SCRY_DAEMON_USER_DATA_DIR\n')
   process.exit(2)
 }
 
@@ -19,11 +21,28 @@ const startedBy = process.env.SCRY_DAEMON_STARTED_BY ?? 'unknown'
 // command line of a reused pid, and a short marker would match unrelated processes
 // (or miss this one when it is installed somewhere else).
 const daemonEntry = resolve(process.argv[1] ?? '')
-const result = await startDaemon({ stateDirectory, startedBy, daemonEntry })
+const appPath = resolve(process.env.SCRY_DAEMON_APP_PATH ?? process.cwd())
+const resourcesPath = resolve(process.env.SCRY_DAEMON_RESOURCES_PATH ?? `${appPath}/resources`)
+const result = await startDaemon({
+  stateDirectory,
+  startedBy,
+  daemonEntry,
+  startHost: () => createDaemonHostProcess({
+    userDataDir,
+    daemonStateDirectory: stateDirectory,
+    appPath,
+    resourcesPath,
+    appVersion: process.env.SCRY_DAEMON_APP_VERSION ?? '0.2.237',
+    isPackaged: process.env.SCRY_DAEMON_PACKAGED === '1'
+  })
+})
 if (result.status !== 'started') process.exit(exitCodeForStartup(result))
-// The host is not wired yet (P1-2), so this process has no work to keep it alive and
-// must not look like a healthy daemon to whatever started it. Exiting with its own
-// code leaves no stale lock and no supervisor that believes the daemon is serving.
-process.stderr.write('daemon_host_not_wired: this build acquires the lock and exits\n')
-result.release()
-process.exit(5)
+
+let stopping = false
+const stop = async (): Promise<void> => {
+  if (stopping) return
+  stopping = true
+  try { await result.dispose() } finally { process.exit(0) }
+}
+process.on('SIGTERM', () => { void stop() })
+process.on('SIGINT', () => { void stop() })

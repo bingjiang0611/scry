@@ -10,11 +10,13 @@ export interface DaemonStartupInput {
   startedBy: string
   /** This daemon's own entry, so a reused pid that looks like it is not taken over. */
   daemonEntry?: string
+  /** Construct the serving host only after this process owns the ledger lock. */
+  startHost?: () => Promise<{ dispose(): Promise<void> }>
   log?: (line: string) => void
 }
 
 export type DaemonStartupResult =
-  | { status: 'started'; lock: DaemonLockRecord; release: () => void }
+  | { status: 'started'; lock: DaemonLockRecord; release: () => void; dispose: () => Promise<void> }
   | { status: 'already-running'; holder: DaemonLockRecord; reason?: string }
 
 const EXIT_ALREADY_RUNNING = 3
@@ -43,6 +45,18 @@ export async function startDaemon(input: DaemonStartupInput): Promise<DaemonStar
     // stop, so it is only named here, never signalled.
     log(`daemon.took-over reason=${outcome.reason} stalePid=${outcome.previous.pid}`)
   }
-  log(`daemon.started pid=${outcome.record.pid} stateDirectory=${input.stateDirectory}`)
-  return { status: 'started', lock: outcome.record, release: outcome.release }
+  try {
+    const host = await input.startHost?.()
+    log(`daemon.started pid=${outcome.record.pid} stateDirectory=${input.stateDirectory}`)
+    let disposed = false
+    const dispose = async (): Promise<void> => {
+      if (disposed) return
+      disposed = true
+      try { await host?.dispose() } finally { outcome.release() }
+    }
+    return { status: 'started', lock: outcome.record, release: outcome.release, dispose }
+  } catch (error) {
+    outcome.release()
+    throw error
+  }
 }
