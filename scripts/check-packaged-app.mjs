@@ -1,7 +1,7 @@
 import { accessSync, constants, existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { join, resolve, posix } from 'node:path'
+import { join, resolve, posix, sep } from 'node:path'
 import { extractFile, listPackage } from '@electron/asar'
 import { defaultPackagedAppPath, packagedAppLayout } from './packaged-app-layout.mjs'
 
@@ -80,6 +80,13 @@ for (const forbiddenRoot of ['/.claude', '/.local', '/src', '/docs', '/scripts',
 if (!entries.includes('/out/preload/index.cjs')) {
   throw new Error('packaged app 缺少 sandbox-compatible CommonJS preload')
 }
+for (const daemonEntry of ['/out/main/daemon.js', '/out/main/daemon-supervisor.js']) {
+  if (!entries.includes(daemonEntry)) throw new Error(`packaged app 缺少 daemon 入口：${daemonEntry}`)
+}
+const daemonSource = extractFile(asarPath, 'out/main/daemon.js').toString('utf8')
+const supervisorSource = extractFile(asarPath, 'out/main/daemon-supervisor.js').toString('utf8')
+if (!daemonSource.includes('SCRY_DAEMON_USER_DATA_DIR')) throw new Error('packaged daemon 缺少显式 userData 接线')
+if (!supervisorSource.includes('ELECTRON_RUN_AS_NODE')) throw new Error('packaged daemon supervisor 未使用 Electron Node 模式')
 if (entries.some((entry) => /^\/out\/preload\/.*\.mjs$/.test(entry))) {
   throw new Error('packaged app 仍包含 sandbox 无法执行的 ESM preload')
 }
@@ -103,14 +110,16 @@ if (process.platform === 'darwin') {
   if (!existsSync(ptyBinding)) throw new Error(`packaged app 缺少 node-pty native binding：${ptyBinding}`)
 }
 
+if (!resolve(scryCli).startsWith(resolve(resources) + sep)) throw new Error('App 私有 CLI 不是 Resources 下的绝对路径')
 accessSync(scryCli, constants.X_OK)
 if (!existsSync(scryCliPackage)) throw new Error('packaged app 缺少 App 私有 Scry CLI package.json')
 if (!existsSync(scryPiIntegration)) throw new Error('packaged app 缺少 Pi recorder integration')
 const historyExtension = join(resources, 'scry-history', 'pi-history-reader.mjs')
 if (!existsSync(historyExtension) || !lstatSync(historyExtension).isFile()) throw new Error('packaged app 缺少普通文件 Pi history reader')
 const historyExtensionHash = createHash('sha256').update(readFileSync(historyExtension)).digest('hex')
-if (!extractFile(asarPath, 'out/main/index.js').toString('utf8').includes(historyExtensionHash)) {
-  throw new Error('packaged Pi history reader 与 main 中固定的扩展指纹不匹配')
+const mainJavaScript = entries.filter((entry) => entry.startsWith('/out/main/') && entry.endsWith('.js'))
+if (!mainJavaScript.some((entry) => extractFile(asarPath, entry.slice(1)).toString('utf8').includes(historyExtensionHash))) {
+  throw new Error('packaged Pi history reader 与 main 运行图中固定的扩展指纹不匹配')
 }
 // Electron 的 locale 文件命名随平台不同：macOS 是 <lang>.lproj/locale.pak，
 // Linux 是 Chromium 的 <lang>-<REGION>.pak。electronLanguages 按文件名精确匹配，
