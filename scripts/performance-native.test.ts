@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { assertSameNativeArtifact, combineNativeShards, compareNative, composerModes, exportNativeCounters, nativeBuildArtifacts, nativeCounterMetrics, nativeDiagnosticRecords, nativeHarnessFiles, nativeInitialPageTurns, nativeWorkloads, validateNative } from './performance-native.mjs'
+import { assertSameNativeArtifact, compareNative, composerModes, exportNativeCounters, nativeBuildArtifacts, nativeCounterMetrics, nativeDiagnosticRecords, nativeHarnessFiles, nativeInitialPageTurns, nativeWorkloads, validateNative } from './performance-native.mjs'
+import { combineNativeShards } from './performance-native-run.mjs'
 import { DEFAULT_LOAD_SESSION_TURNS } from '../src/main/bootstrap/history-archive'
 
 const workCounters = (value: number) => Object.fromEntries(nativeCounterMetrics.map(metric => [metric, value]))
@@ -36,11 +37,21 @@ describe('same-artifact diagnostic identity', () => {
   it('accepts a complete repeated artifact and leaves the primary comparison unchanged', () => {
     const first = report()
     const repeated = structuredClone(first)
-    first.results.short.lifecycleSamples[0].startToTerminalMs = 180
+    first.results.short.lifecycleSamples[0].startToTerminalMs = 400
     expect(() => assertSameNativeArtifact(first, repeated)).not.toThrow()
     expect(compareNative(first, repeated).passed).toBe(true)
     expect(compareNative(repeated, first).passed).toBe(false)
-    expect(first.results.short.lifecycleSamples[0].startToTerminalMs).toBe(180)
+    expect(first.results.short.lifecycleSamples[0].startToTerminalMs).toBe(400)
+  })
+
+  it('keeps the documented run-maximum noise allowance and no more', () => {
+    const first = report()
+    const repeated = structuredClone(first)
+    // Fixture value is 50 ms, so 250 ms of fixed noise versus the 1.5x ratio gives a 300 ms ceiling.
+    first.results.short.lifecycleSamples[0].startToTerminalMs = 300
+    expect(compareNative(first, repeated).passed).toBe(true)
+    first.results.short.lifecycleSamples[0].startToTerminalMs = 301
+    expect(compareNative(repeated, first).passed).toBe(false)
   })
 
   it('rejects a different revision, environment, harness, driver or compiled artifact', () => {

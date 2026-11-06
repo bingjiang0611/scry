@@ -186,16 +186,16 @@ jobs:
           # unchanged; only the order changes, so a transiently slow machine window cannot
           # land entirely on one side and read as a code regression.
           for scenario in markdown short short-heavy paged; do
-            (cd baseline && node .agents/skills/scry-performance-climb/scripts/timing-run.mjs "native-baseline-$scenario" -- node scripts/performance-native.mjs bench "../native-results/baseline-$scenario.json" "$scenario") 2>&1 | tee "native-results/baseline-$scenario-timing.log" || status=$?
-            (cd candidate && node .agents/skills/scry-performance-climb/scripts/timing-run.mjs "native-candidate-$scenario" -- node scripts/performance-native.mjs bench "../native-results/candidate-$scenario.json" "$scenario") 2>&1 | tee "native-results/candidate-$scenario-timing.log" || status=$?
+            (cd baseline && node .agents/skills/scry-performance-climb/scripts/timing-run.mjs "native-baseline-$scenario" -- node scripts/performance-native-run.mjs bench "../native-results/baseline-$scenario.json" "$scenario") 2>&1 | tee "native-results/baseline-$scenario-timing.log" || status=$?
+            (cd candidate && node .agents/skills/scry-performance-climb/scripts/timing-run.mjs "native-candidate-$scenario" -- node scripts/performance-native-run.mjs bench "../native-results/candidate-$scenario.json" "$scenario") 2>&1 | tee "native-results/candidate-$scenario-timing.log" || status=$?
           done
           baseline_shards=(); candidate_shards=()
           for scenario in markdown short short-heavy paged; do
             baseline_shards+=("../native-results/baseline-$scenario.json")
             candidate_shards+=("../native-results/candidate-$scenario.json")
           done
-          (cd baseline && node scripts/performance-native.mjs combine ../native-results/baseline.json "${baseline_shards[@]}") 2>&1 | tee native-results/baseline-combine.log || status=$?
-          (cd candidate && node scripts/performance-native.mjs combine ../native-results/candidate.json "${candidate_shards[@]}") 2>&1 | tee native-results/candidate-combine.log || status=$?
+          (cd baseline && node scripts/performance-native-run.mjs combine ../native-results/baseline.json "${baseline_shards[@]}") 2>&1 | tee native-results/baseline-combine.log || status=$?
+          (cd candidate && node scripts/performance-native-run.mjs combine ../native-results/candidate.json "${candidate_shards[@]}") 2>&1 | tee native-results/candidate-combine.log || status=$?
           exit "$status"
       - name: Compare native evidence and budgets
         id: native_comparison
@@ -211,10 +211,10 @@ jobs:
           status=0
           control_shards=()
           for scenario in markdown short short-heavy paged; do
-            (cd candidate && node .agents/skills/scry-performance-climb/scripts/timing-run.mjs "native-control-$scenario" -- node scripts/performance-native.mjs bench "../native-results/control-$scenario.json" "$scenario") 2>&1 | tee "native-results/control-$scenario-timing.log" || status=$?
+            (cd candidate && node .agents/skills/scry-performance-climb/scripts/timing-run.mjs "native-control-$scenario" -- node scripts/performance-native-run.mjs bench "../native-results/control-$scenario.json" "$scenario") 2>&1 | tee "native-results/control-$scenario-timing.log" || status=$?
             control_shards+=("../native-results/control-$scenario.json")
           done
-          (cd candidate && node scripts/performance-native.mjs combine ../native-results/control.json "${control_shards[@]}") 2>&1 | tee native-results/control-combine.log || status=$?
+          (cd candidate && node scripts/performance-native-run.mjs combine ../native-results/control.json "${control_shards[@]}") 2>&1 | tee native-results/control-combine.log || status=$?
           exit "$status"
       - name: Compare diagnostic control in both directions
         if: failure() && steps.native_control.outcome == 'success'
