@@ -37,6 +37,13 @@ async function writeJsonChunks(
     await writeContent(handle, `${skeleton}\n`)
     return
   }
+  // Generated placeholders contribute exactly two tokens per part. Any extra token belongs to
+  // user data (including keys). Decide the fallback before writing; a late fallback appends a
+  // second document, while a valid-looking colliding marker silently substitutes the wrong value.
+  if (skeleton.split(token).length !== parts.length * 2 + 1) {
+    await writeContent(handle, `${JSON.stringify(value)}\n`)
+    return
+  }
   // Each placeholder was itself serialized as a JSON string, so the skeleton holds `"<token>N<token>"`.
   // Replacing that whole quoted literal with the real quoted string keeps the output identical.
   let cursor = 0
@@ -45,11 +52,6 @@ async function writeJsonChunks(
     if (at < 0) break
     const end = skeleton.indexOf(token, at + token.length)
     const index = Number(skeleton.slice(at + token.length, end))
-    if (skeleton[at - 1] !== '"' || skeleton[end + token.length] !== '"' || !Number.isInteger(index) || parts[index] === undefined) {
-      // A data string that happened to contain the token: fall back to one plain stringify.
-      await handle.writeFile(`${JSON.stringify(value)}\n`)
-      return
-    }
     if (at - 1 > cursor) await handle.writeFile(skeleton.slice(cursor, at - 1))
     await writeQuotedChunks(handle, parts[index])
     cursor = end + token.length + 1
