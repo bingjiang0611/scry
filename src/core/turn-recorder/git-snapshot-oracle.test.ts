@@ -224,10 +224,11 @@ describe('git snapshot oracle: the reused discovery base', () => {
         const discoveryIndex = join(capture.tempDir!, 'discovery.index')
         const tree = (await gitWith(['write-tree'], repo, {
           GIT_INDEX_FILE: discoveryIndex,
-          GIT_OBJECT_DIRECTORY: capture.objectDir!
+          GIT_OBJECT_DIRECTORY: capture.objectDir!,
+          GIT_ALTERNATE_OBJECT_DIRECTORIES: capture.alternateObjectDirs ?? ''
         })).trim()
-        // A clean baseline records HEAD (a commit) as beforeTree; a dirty one records a tree that
-        // only exists in the capture's private object store, so alternates must be visible here.
+        // Both reads need the capture's real object view: unchanged blobs may exist only in the
+        // original repository, while a dirty baseline tree may exist only in the private store.
         const expected = (await gitWith(['rev-parse', `${capture.beforeTree}^{tree}`], repo, {
           GIT_OBJECT_DIRECTORY: capture.objectDir!,
           GIT_ALTERNATE_OBJECT_DIRECTORIES: capture.alternateObjectDirs ?? ''
