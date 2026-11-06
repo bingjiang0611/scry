@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { assertSameNativeArtifact, compareNative, composerModes, exportNativeCounters, nativeBuildArtifacts, nativeCounterMetrics, nativeDiagnosticRecords, nativeHarnessFiles, nativeInitialPageTurns, nativeWorkloads, validateNative } from './performance-native.mjs'
+import { assertSameNativeArtifact, combineNativeShards, compareNative, composerModes, exportNativeCounters, nativeBuildArtifacts, nativeCounterMetrics, nativeDiagnosticRecords, nativeHarnessFiles, nativeInitialPageTurns, nativeWorkloads, validateNative } from './performance-native.mjs'
 import { DEFAULT_LOAD_SESSION_TURNS } from '../src/main/bootstrap/history-archive'
 
 const workCounters = (value: number) => Object.fromEntries(nativeCounterMetrics.map(metric => [metric, value]))
@@ -56,6 +56,45 @@ describe('same-artifact diagnostic identity', () => {
       change(repeated)
       expect(() => assertSameNativeArtifact(report(), repeated)).toThrow('same-artifact control changed')
     }
+  })
+})
+
+describe('interleaved scenario shards', () => {
+  const shards = () => {
+    const full = report()
+    return Object.keys(nativeWorkloads).map(scenario => ({ ...structuredClone(full),
+      results: { [scenario]: structuredClone(full.results[scenario]) } }))
+  }
+
+  it('recombines per-scenario shards into the same complete report', () => {
+    const full = report()
+    const combined = combineNativeShards(shards())
+    expect(Object.keys(combined.results).sort()).toEqual(Object.keys(full.results).sort())
+    for (const scenario of Object.keys(nativeWorkloads)) expect(combined.results[scenario]).toEqual(full.results[scenario])
+    expect(() => validateNative(combined)).not.toThrow()
+    expect(exportNativeCounters(combined).observations).toHaveLength(exportNativeCounters(full).observations.length)
+  })
+
+  it('rejects shards from another revision, harness, environment or duplicate lane', () => {
+    const mutations: Array<(value: ReturnType<typeof report>) => void> = [
+      value => { value.revision = 'other' },
+      value => { value.harness = 'd'.repeat(64) },
+      value => { value.environment.node = '20' },
+      value => { value.results.markdown = value.results.short }
+    ]
+    for (const mutate of mutations) {
+      const shard = shards()
+      mutate(shard[3])
+      expect(() => combineNativeShards(shard)).toThrow()
+    }
+  })
+
+  it('rejects a missing lane and any shard that recorded a failed lane', () => {
+    const missing = shards().slice(0, 3)
+    expect(() => combineNativeShards(missing)).toThrow('native lane coverage differs')
+    const failed = shards()
+    failed[1].errors.push({ scenario: 'short', message: 'boom' })
+    expect(() => combineNativeShards(failed)).toThrow('failed native lanes cannot pass')
   })
 })
 

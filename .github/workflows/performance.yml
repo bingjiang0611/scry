@@ -51,7 +51,7 @@ jobs:
           mkdir -p ../performance-results
           node scripts/performance-report.mjs inventory > ../performance-results/inventory.json
           cp scripts/performance-budgets.json scripts/performance-paths.json ../performance-results/
-          npm run test:unit -- scripts/performance-feedback.test.ts scripts/performance-node-workflow.test.ts scripts/performance-native.test.ts scripts/performance-timing-observation.test.ts scripts/performance-ratchet.test.ts src/main/performance-journal.test.ts src/main/performance-timing.test.ts src/main/ipc-trust.test.ts
+          npm run test:unit -- scripts/performance-feedback.test.ts scripts/performance-node-workflow.test.ts scripts/performance-native.test.ts scripts/performance-interleaving.test.ts scripts/performance-timing-observation.test.ts scripts/performance-ratchet.test.ts src/main/performance-journal.test.ts src/main/performance-timing.test.ts src/main/ipc-trust.test.ts
       - name: Guard work-counter ceilings (only tightening is free)
         env:
           # A maintainer-applied label is the explicit approval for loosening; re-run after labelling.
@@ -182,8 +182,20 @@ jobs:
         run: |
           set -o pipefail
           status=0
-          (cd baseline && node .agents/skills/scry-performance-climb/scripts/timing-run.mjs native-baseline -- node scripts/performance-native.mjs bench ../native-results/baseline.json) 2>&1 | tee native-results/baseline-timing.log || status=$?
-          (cd candidate && node .agents/skills/scry-performance-climb/scripts/timing-run.mjs native-candidate -- node scripts/performance-native.mjs bench ../native-results/candidate.json) 2>&1 | tee native-results/candidate-timing.log || status=$?
+          # Interleave each scenario's two sources. Thresholds, metrics and fixed work are
+          # unchanged; only the order changes, so a transiently slow machine window cannot
+          # land entirely on one side and read as a code regression.
+          for scenario in markdown short short-heavy paged; do
+            (cd baseline && node .agents/skills/scry-performance-climb/scripts/timing-run.mjs "native-baseline-$scenario" -- node scripts/performance-native.mjs bench "../native-results/baseline-$scenario.json" "$scenario") 2>&1 | tee "native-results/baseline-$scenario-timing.log" || status=$?
+            (cd candidate && node .agents/skills/scry-performance-climb/scripts/timing-run.mjs "native-candidate-$scenario" -- node scripts/performance-native.mjs bench "../native-results/candidate-$scenario.json" "$scenario") 2>&1 | tee "native-results/candidate-$scenario-timing.log" || status=$?
+          done
+          baseline_shards=(); candidate_shards=()
+          for scenario in markdown short short-heavy paged; do
+            baseline_shards+=("../native-results/baseline-$scenario.json")
+            candidate_shards+=("../native-results/candidate-$scenario.json")
+          done
+          (cd baseline && node scripts/performance-native.mjs combine ../native-results/baseline.json "${baseline_shards[@]}") 2>&1 | tee native-results/baseline-combine.log || status=$?
+          (cd candidate && node scripts/performance-native.mjs combine ../native-results/candidate.json "${candidate_shards[@]}") 2>&1 | tee native-results/candidate-combine.log || status=$?
           exit "$status"
       - name: Compare native evidence and budgets
         id: native_comparison
@@ -196,7 +208,14 @@ jobs:
         if: failure() && steps.native_measurements.outcome == 'success' && steps.native_comparison.outcome == 'failure'
         run: |
           set -o pipefail
-          (cd candidate && node .agents/skills/scry-performance-climb/scripts/timing-run.mjs native-control -- node scripts/performance-native.mjs bench ../native-results/control.json) 2>&1 | tee native-results/control-timing.log
+          status=0
+          control_shards=()
+          for scenario in markdown short short-heavy paged; do
+            (cd candidate && node .agents/skills/scry-performance-climb/scripts/timing-run.mjs "native-control-$scenario" -- node scripts/performance-native.mjs bench "../native-results/control-$scenario.json" "$scenario") 2>&1 | tee "native-results/control-$scenario-timing.log" || status=$?
+            control_shards+=("../native-results/control-$scenario.json")
+          done
+          (cd candidate && node scripts/performance-native.mjs combine ../native-results/control.json "${control_shards[@]}") 2>&1 | tee native-results/control-combine.log || status=$?
+          exit "$status"
       - name: Compare diagnostic control in both directions
         if: failure() && steps.native_control.outcome == 'success'
         run: |

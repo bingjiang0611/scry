@@ -202,14 +202,10 @@ export function formatNative(report) {
     'Twelve warm history samples, one restart/input observation, three complete and three interrupted IPC runs per workload. Three fixed button cohorts each contain: stop before native turn identity, complete, stop after visible output, then early stop again; SQLite must retain all eighteen runs. Every primary observation is retained, without retries or discarded warmups. After a valid comparison fails, one separately labelled same-artifact diagnostic may run; it cannot replace either primary report or change the failed gate. Button maxima are acceptance guardrails, not statistical latency estimates. Send-to-terminal totals on interrupted runs include driver dispatch time, recorded separately as driverStopDispatchMs. Fixture p95/max is NOT daily-use p95. These initial absolute guardrails are conservative, not user SLOs; relative checks catch changes. No paid Provider, real phone or external network is exercised.', ''].join('\n')
 }
 
-async function bench(output) {
+async function bench(output, scenarios = Object.keys(nativeWorkloads)) {
   mkdirSync(dirname(resolve(output)), { recursive: true })
-  const hash = createHash('sha256')
-  for (const file of nativeHarnessFiles) hash.update(file).update(readFileSync(join(root, file)))
-  const revision = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' })
-  assert.equal(revision.status, 0)
-  const report = { schema: 1, revision: revision.stdout.trim(), harness: hash.digest('hex'), environment: { platform: process.platform, arch: process.arch, osRelease: release(), cpu: cpus()[0]?.model, node: process.version }, results: {}, errors: [] }
-  for (const scenario of Object.keys(nativeWorkloads)) {
+  const report = nativeReportHeader()
+  for (const scenario of scenarios) {
     const run = spawnSync(process.execPath, ['scripts/session-open-bench.mjs', scenario], { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
     writeFileSync(`${output}.${scenario}.log`, `${run.stdout ?? ''}\n${run.stderr ?? ''}`)
     try {
@@ -219,17 +215,63 @@ async function bench(output) {
     report.counters = exportNativeCounters(report)
     writeFileSync(output, JSON.stringify(report, null, 2))
   }
-  validateNative(report)
+  // A single-scenario shard is validated after `combine`; complete runs validate here.
+  if (scenarios.length === Object.keys(nativeWorkloads).length) validateNative(report)
+  publishNativeReport(output, report)
+}
+
+function nativeReportHeader() {
+  const hash = createHash('sha256')
+  for (const file of nativeHarnessFiles) hash.update(file).update(readFileSync(join(root, file)))
+  const revision = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' })
+  assert.equal(revision.status, 0)
+  return { schema: 1, revision: revision.stdout.trim(), harness: hash.digest('hex'), environment: { platform: process.platform, arch: process.arch, osRelease: release(), cpu: cpus()[0]?.model, node: process.version }, results: {}, errors: [] }
+}
+
+function publishNativeReport(output, report) {
   report.counters = exportNativeCounters(report)
   writeFileSync(output, JSON.stringify(report, null, 2))
   const counterOutput = output.endsWith('.json') ? `${output.slice(0, -'.json'.length)}.counters.json` : `${output}.counters.json`
   writeFileSync(counterOutput, `${JSON.stringify(report.counters, null, 2)}\n`)
 }
 
+/** Combine per-scenario shards measured in the same job. Interleaving each scenario's two
+ * sources keeps a slow machine window from landing entirely on one side, while every
+ * threshold, metric and fixed workload stays exactly as before. */
+export function combineNativeShards(shards) {
+  assert.ok(shards.length > 0, 'no native shards to combine')
+  const [first] = shards
+  assert.equal(first.schema, 1, 'shard schema')
+  const report = { schema: 1, revision: first.revision, harness: first.harness, environment: first.environment, results: {}, errors: [] }
+  for (const shard of shards) {
+    assert.equal(shard.schema, 1, 'shard schema')
+    assert.equal(shard.revision, report.revision, 'shard revision differs')
+    assert.equal(shard.harness, report.harness, 'shard harness differs')
+    assert.deepEqual(shard.environment, report.environment, 'shard environment differs')
+    for (const [scenario, result] of Object.entries(shard.results)) {
+      assert.equal(report.results[scenario], undefined, `duplicate ${scenario} shard`)
+      report.results[scenario] = result
+    }
+    report.errors.push(...shard.errors)
+  }
+  validateNative(report)
+  return report
+}
+
+function combine(output, shardPaths) {
+  const header = nativeReportHeader()
+  const report = combineNativeShards(shardPaths.map(shardPath => JSON.parse(readFileSync(shardPath, 'utf8'))))
+  assert.equal(report.revision, header.revision, 'shards belong to another revision')
+  assert.equal(report.harness, header.harness, 'shards used another harness')
+  assert.deepEqual(report.environment, header.environment, 'shards came from another environment')
+  publishNativeReport(output, report)
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const [command, ...args] = process.argv.slice(2)
-    if (command === 'bench' && args.length === 1) await bench(args[0])
+    if (command === 'bench' && (args.length === 1 || (args.length === 2 && Object.hasOwn(nativeWorkloads, args[1])))) await bench(args[0], args[1] ? [args[1]] : undefined)
+    else if (command === 'combine' && args.length >= 2) combine(args[0], args.slice(1))
     else if (command === 'compare' && args.length === 3) {
       const [base, head, output] = args
       const report = compareNative(JSON.parse(readFileSync(base, 'utf8')), JSON.parse(readFileSync(head, 'utf8')))
@@ -238,6 +280,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       writeFileSync(`${output}.json`, JSON.stringify(report, null, 2))
       if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, markdown)
       if (!report.passed) process.exitCode = 1
-    } else throw new Error('Usage: performance-native.mjs bench <output.json> | compare <baseline.json> <candidate.json> <report.md>')
+    } else throw new Error('Usage: performance-native.mjs bench <output.json> [scenario] | combine <output.json> <shard.json>... | compare <baseline.json> <candidate.json> <report.md>')
   } catch (error) { console.error(error.message); process.exitCode = 1 }
 }

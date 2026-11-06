@@ -40,7 +40,7 @@ node scripts/performance-native.mjs compare /tmp/scry-native-baseline.json /tmp/
 - 原有四项批均值 p95 的绝对 20 ms 预算不变。新增磁盘/进程场景使用 `performance-budgets.json` 中显式上限。所有场景仍受基线加上 max(2 ms, 基线的 50%) 的相对门禁约束，不承诺拦住亚毫秒抖动。
 - 回退退出码为 1，写 Markdown/JSON 报告。真实重复发布和截断 renderer 输出有负对照测试。
 
-`.github/workflows/performance.yml` 的 Node job 对 base SHA 与候选 merge checkout 分别安装对应 lockfile 的依赖，将**同一份候选 harness、bench runner 和 Vitest 配置**放入两侧，串行测量，保留原始样本/清单/预算/报告 30 天。独立的 macOS native job 同样冻结夹具、构建 base/candidate，并在同一 runner 串行运行四种固定历史负载。比较 12 个原生点击到两帧就绪样本、单次启动/原生输入观测，以及每负载三次完成、三次中断的真实 main/preload/archive 生命周期。发送回执、首输出接收、终态通知、停止回执、停止终态及可读归档分别计时，并在 App 退出后独立读取 canonical turn 文件核对输出；这些 IPC 阶段继续独立列出，不冒充按钮时间。启动含驱动等待开销，不是 OS 冷启动。
+`.github/workflows/performance.yml` 的 Node job 对 base SHA 与候选 merge checkout 分别安装对应 lockfile 的依赖，将**同一份候选 harness、bench runner 和 Vitest 配置**放入两侧，串行测量，保留原始样本/清单/预算/报告 30 天。独立的 macOS native job 同样冻结夹具、构建 base/candidate，并在同一 runner 上**按场景交替**运行四种固定历史负载：`markdown`、`short`、`short-heavy`、`paged` 每个场景先 base 后 candidate 背靠背各测一次，再用 `combine` 合并成两侧完整报告。阈值、指标、样本数、每次工作量、warmup 与 App 启动次数均未改变，只改变测量顺序，避免某个持续数十秒的机器状态窗口整体落在单侧并伪装成代码回归。合并校验收到的分片必须同 revision、同 harness、同环境，缺场景、重复场景或任一分片含失败 lane 均直接失败，且失败时不留下半成品报告。比较 12 个原生点击到两帧就绪样本、单次启动/原生输入观测，以及每负载三次完成、三次中断的真实 main/preload/archive 生命周期。发送回执、首输出接收、终态通知、停止回执、停止终态及可读归档分别计时，并在 App 退出后独立读取 canonical turn 文件核对输出；这些 IPC 阶段继续独立列出，不冒充按钮时间。启动含驱动等待开销，不是 OS 冷启动。
 
 `measurementVersion: 5` 另增每负载三组、每组四次真实按钮验收：Provider 已进入夹具但尚无 native turn ID 时停止、正常完成、正文可见后停止、再次在 native turn ID 前停止。使用 Chromium 原生输入和可信 Send/Stop 点击；不调用 `window.scry.start/stop` 替代按钮。停止夹具等待实际 interrupt，不靠延时自然结束。早停先等待夹具的 pending 通知，避免把 Provider 启动前的前门取消混作 Provider 中断。
 
@@ -80,5 +80,7 @@ CI 的 baseline/candidate 均经同一冻结版本的 `timing-run.mjs` 及其 `t
 这不是把失败样本换掉的重试：原始 `report.md`、全部样本和失败状态保持不变；对照即使通过也不能放行合并。对照失败可证明同产物观测不稳定，但不能单独证明争用、GC 或排除分支回归。fixture 不完整或身份不一致时不产生有效 A/A 结论。
 
 计时父进程另以 250ms 间隔记录 OS 暴露的 CPU tick 忙碌比例、20ms 分辨率的事件循环延迟直方图和 UTC 时间；最多保留 4096 个窗口（约 17 分钟），超出后标 `samplesTruncated`，仍保留全程观测到的最大延迟。没有 CPU tick 增量或直方图样本时记 `null`，不记 0。`observerCpuMs` 是采样父进程自身的 CPU 开销，不含子进程。它不直接测宿主调度、VM steal、Git 子进程 CPU 或 App 阻塞；必须结合 App trace/资源记录与 Node batch/GC 记录判断，也不能用“未观测到停顿”证明没有停顿。所有诊断仅增加证据，不扣除原始耗时、不改变退出码、高负载判断、预算或必需检查。
+
+2026-11-06 三次 native 失败的方向互相翻转（同一产物在相邻两次测量中几乎对调），而阈值与工作量未变；这作为测量偏置的证据，不是通过结论。改成场景级交替测量后，单侧仍可能整段处于差窗口，但不再独占整个测量周期。交替测量不是重跑求绿：原始失败报告继续保留，任何一次运行的比较结果仍按原门限判定。
 
 2026-10-30 的 [CI 41045559281](https://github.com/bingjiang0611/scry/actions/runs/41045559281) 有 29 个相关计时行超出比较门槛；其中 paged 首次 complete 的 start receipt 为 428ms、terminal 为 688ms。与上一轮相比，同一 baseline 产物的 short-heavy startup 也从约 1064ms 变为 3843ms。这证明存在明显波动，但没有证明宿主争用、GC 或排除 App 瓶颈；不能把下一次绿灯当作本次问题已修复。新增的是归因证据，不是性能修复，门禁算法与固定负载不变。

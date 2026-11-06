@@ -37,15 +37,47 @@ Node 的实际 workspace diff 调用路径没有被本 PR 改动；追加的 raw
 
 状态回执分别显示约 21k / 6.9k tokens；未提供费用，不估算。没有开放的代码 blocker / should；该批准不等于性能门禁通过。
 
-## 本地证据
+## 跨运行方向对照
+
+三次 native 失败（42198944979、42224305503、42239197641）中，逐场景中位数差异的**方向在翻转**，并没有稳定的退化信号：
+
+| 场景 / 指标 | 42198944979 基线→候选 | 42224305503 基线→候选 | 42239197641 基线→候选 |
+|---|---:|---:|---:|
+| short / 打开中位 ms | 92.2 → 104.2 | 73.1 → 37.7 | 38.5 → 69.5 |
+| short / complete 发→终态中位 | 184.6 → 138.8 | 153.0 → 66.0 | 57.5 → 87.2 |
+| short-heavy / 打开中位 | 276.5 → 376.2 | 220.4 → 123.4 | 138.9 → 134.9 |
+| paged / 打开中位 | 121.2 → 138.0 | 71.8 → 78.5 | 62.7 → 42.6 |
+
+同一份 `short` 输出在相邻两次测量里几乎对调（73.1→37.7，然后 38.5→69.5）。最近一次中 `short` 的每个 compose 指标都约为基线的 1.6–1.9 倍，而同产物第三次运行（control，二进制逐文件相同，只有 `main/index.js` 因产品改动不同）又回到基线水平。因此该次差异跟随测量窗口，而不是被比较的代码。
+
+同一次运行的 Node Git 场景已通过（38.103 → 35.491ms），此前的 121.687ms 异常未复现；这与同批次内 205ms 的阻塞等待一致，即宿主机 I/O 停顿，而非被测进程自身计算。
+
+父进程诊断没有在失败窗口记录到与之等量的停顿（native 最大 110–131ms，Node 最大 21–24ms），说明单次运行的偏差不是可观测的整机暂停，而更像持续半个测量窗口的频率/邻居负载差异。**这不能证明代码无回归，也不能把失败改写成通过。**
+
+## 仍阻塞的事实
+
+门禁协议原为“每一侧只测一次，然后比较两侧”。只要某一侧整个测量窗口处于不同机器状态，就会产生假回归；三次成功/失败方向因此不稳定。
+
+## 已批准的协议修正（场景级交替）
+
+维护者在上述证据下明确批准修改测量协议：native 的四个场景改为**每个场景 base / candidate 背靠背各测一次**，随后用 `combine` 合并成两侧完整报告。保持不变的是：门限、指标集合、每场景样本数、固定工作量、warmup、App 启动次数、比较器与必需检查。改变的是测量顺序，使一个持续数十秒的机器状态窗口不能整体落在单侧。
+
+`combine` 同时强化而不是放宽证据：分片的 revision / harness / environment 必须一致，缺场景、重复场景或任一分片含失败 lane 都直接失败；失败时不写半成品报告；合并后的报告仍走原有 `compareNative` 预算与 base-relative 判定。Node job 未改动。
+
+本机真实产物的端到端验证：把上一轮 CI 的 `candidate.json` 按场景拆成 4 个真实分片，用真实 CLI `combine` 重建完整报告（4 场景、0 errors、72 条 counters 观测）；把其中一个分片改到另一 revision 后 CLI 以 `shard revision differs` 失败，且未留下半成品输出。
+
 
 | 检查 | 结果 / 日志 |
 |---|---|
 | 定向 tests：timing、Node workflow、native、feedback、PR workflow | 最终 5 文件 / 55 passed；`/tmp/scry-pr31-timing-final-tests.log` |
-| S4 旧代码负对照 | 1 failed / 4 passed，输出截断为 65,536 字节；`/tmp/scry-pr31-timing-pipe-negative.log` |
 | 类型检查 | 最终通过；`/tmp/scry-pr31-timing-final-typecheck.log` |
 | App build | 通过；`/tmp/scry-pr31-timing-build.log`。之后只改 wrapper / test / 文档，没有 App 输入变化 |
 | 真实 wrapper 子进程退出 7 | 仍返回 7；highLoad 判定不变，诊断存在；`/tmp/scry-pr31-timing-exit.log`。该高负载短夹具不是速度结论 |
 | 检测器负对照 | 独立进程主动阻塞事件循环 120ms，被检测为至少 100ms；不是等待机器变空闲 |
+| 交替测量分片合同 | native 14 tests（含 3 个新用例）、PR workflow 1 用例均通过 |
+| 交替测量旧协议负对照 | 把 `performance.yml` 换回旧版本后，新断言失败（`for scenario in …` 缺失） |
+| 真实 CLI `combine` 冒烟 | 4 个真实分片→完整报告；跨 revision 分片被拒且无半成品输出 |
 
 自查：未改变事件触发器、token 权限、检查名称、预算、固定工作或比较器；未触碰日常 App / daemon。所有本次完整暂存文件需保持 ≤20,000 bytes。下一步由 Agent 推送该诊断改动，读取新一轮原始产物；尚未验证远端诊断或解决原性能失败。
+
+本地 Electron 为 ABI 146，而仓库 `better-sqlite3` 编译为 Node ABI 137；`electron-builder install-app-deps` 在离线/长时间重建时未能完成，因此本轮没有在本机原生复现采样，未经本地 native 验收。CI 侧两份产物均保留（`~/Library/Caches/scry-pr31-evidence/`）。
