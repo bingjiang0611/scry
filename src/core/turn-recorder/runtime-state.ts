@@ -190,13 +190,21 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
+async function attentionSessions(dataRoot: string): Promise<MarkedSession[]> {
+  // No index means unknown, not an empty workspace. Diagnostic readers must rebuild it too:
+  // doctor/status may run before the daemon has visited a legacy or restored workspace.
+  return await attentionIndexPresent(dataRoot)
+    ? await markedSessions(dataRoot)
+    : await reconcileAttentionIndex(dataRoot)
+}
+
 export async function recorderPendingHealth(
   dataRoot: string
 ): Promise<{ pendingCount: number; oldestPendingAgeMs: number }> {
   let pendingCount = 0
   let oldestPendingAgeMs = 0
   const now = Date.now()
-  for (const { sessionDir: root } of await markedSessions(dataRoot)) {
+  for (const { sessionDir: root } of await attentionSessions(dataRoot)) {
       for (const entry of await recorderInboxEntries(root)) {
         pendingCount++
         // queueHook encodes the arrival clock in the name; file mtime would reset on repair.
@@ -232,7 +240,7 @@ export async function recorderStaleOpenTurns(
   now = Date.now()
 ): Promise<Array<{ provider: ProviderId; sessionId: string; startedAt: string; ageMs: number }>> {
   const result: Array<{ provider: ProviderId; sessionId: string; startedAt: string; ageMs: number }> = []
-  for (const { provider, sessionDir } of await markedSessions(dataRoot)) {
+  for (const { provider, sessionDir } of await attentionSessions(dataRoot)) {
     const open = await readJson<RecorderOpenTurnState>(recorderOpenPath(sessionDir))
     if (!open || open.status !== 'open' || open.managedByScry) continue
     const startedAt = Date.parse(open.startedAt)
@@ -241,8 +249,8 @@ export async function recorderStaleOpenTurns(
       const touchedAt = await transcriptTouchedAt(open.transcriptPath)
       // Unreadable transcript counts as no activity: the turn cannot converge from it either.
       if (touchedAt != null && now - touchedAt <= expiryMs) continue
-      result.push({ provider, sessionId: open.sessionId, startedAt: open.startedAt, ageMs: now - startedAt })
     }
+    result.push({ provider, sessionId: open.sessionId, startedAt: open.startedAt, ageMs: now - startedAt })
   }
   return result
 }
@@ -260,11 +268,7 @@ async function transcriptTouchedAt(path: string): Promise<number | null> {
  * pass: that pass rebuilds the index from the session directories.
  */
 export async function recorderHasOpenTurn(dataRoot: string): Promise<boolean> {
-  // An absent index cannot answer the question; rebuilding it is what makes a fresh or upgraded
-  // workspace converge on the same answer as an indexed one.
-  const sessions = await attentionIndexPresent(dataRoot)
-    ? await markedSessions(dataRoot)
-    : await reconcileAttentionIndex(dataRoot)
+  const sessions = await attentionSessions(dataRoot)
   for (const session of sessions) {
     if (await sessionNeedsPass(session.sessionDir)) return true
   }
