@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type RefCallback } from 'react'
 import { flushSync } from 'react-dom'
-import { prefersReducedMotion } from '../motion'
+import { MOTION, prefersReducedMotion } from '../motion'
 
 export type PresenceState = 'enter' | 'exit'
 export type PresenceCloseReason = 'button' | 'escape' | 'backdrop' | 'pointer' | 'replace' | 'confirm'
@@ -82,7 +82,7 @@ export function usePresence({ onClose, exitMs, onExitStart }: PresenceOptions): 
     // The fallback only runs when animationend never arrives (dropped or late
     // compositor frames). It must leave real headroom inside the 250ms modal
     // removal budget: at +80 a loaded machine missed it by 1-2ms on every close.
-    timer.current = setTimeout(finish, (prefersReducedMotion() ? 120 : exitMs) + 40)
+    timer.current = setTimeout(finish, (prefersReducedMotion() ? MOTION.durationReduced : exitMs) + 40)
     if (pendingExits.size === 0) {
       document.addEventListener('pointerdown', onNextInteraction, true)
       document.addEventListener('keydown', onNextInteraction, true)

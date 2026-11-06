@@ -2,41 +2,60 @@ import SwiftUI
 
 // Shared timing contract. System navigation and sheets keep their native motion.
 enum Motion {
-  static let micro = 0.10
-  static let fast = 0.16
-  static let base = 0.22
-  static let slow = 0.30
-  static let reducedDuration = 0.12
+  static let hover = 0.12
+  static let small = 0.20
+  static let medium = 0.25
+  static let large = 0.40
+  static let exitSmall = 0.15
+  static let exitMedium = 0.20
+  static let reducedDuration = 0.15
+  static let overshoot = 0.30
   static let fade: AnyTransition = .opacity
   static let none: AnyTransition = .identity
 
   enum Effect: CaseIterable {
-    case press, select, tab, disclosureOpen, disclosureClose, rowIn, streamIn, sheet
+    case press, select, confirm, enter, exit, tab, reorder
+    case disclosureOpen, disclosureClose, chevron, rowIn, streamIn
+    case drawerOpen, drawerClose, drawerRelease, reset, scroll, page, sheet
   }
 
   static func easeOut(duration: Double) -> Animation {
-    .timingCurve(0.23, 1, 0.32, 1, duration: duration)
+    .timingCurve(0, 0, 0.58, 1, duration: duration)
   }
 
-  static func easeStruct(duration: Double) -> Animation {
-    .timingCurve(0.32, 0.72, 0, 1, duration: duration)
+  static func easeOutStrong(duration: Double) -> Animation {
+    .timingCurve(0.22, 1, 0.36, 1, duration: duration)
   }
 
-  static func easeExit(duration: Double) -> Animation {
-    .timingCurve(0.4, 0, 1, 1, duration: duration)
+  static func easeIn(duration: Double) -> Animation {
+    .timingCurve(0.42, 0, 1, 1, duration: duration)
+  }
+
+  static func easeInOut(duration: Double) -> Animation {
+    .timingCurve(0.42, 0, 0.58, 1, duration: duration)
+  }
+
+  static func easeOvershoot(duration: Double) -> Animation {
+    .timingCurve(0.34, 1.56, 0.64, 1, duration: duration)
   }
 
   static func animation(_ effect: Effect, reduceMotion: Bool) -> Animation {
-    if reduceMotion { return .linear(duration: reducedDuration) }
+    if reduceMotion { return easeOut(duration: reducedDuration) }
     switch effect {
-    case .press: return .linear(duration: micro)
-    case .select: return easeOut(duration: fast)
-    case .tab: return easeStruct(duration: base)
-    case .disclosureOpen: return easeStruct(duration: 0.24)
-    case .disclosureClose: return easeExit(duration: fast)
-    case .rowIn: return easeOut(duration: base)
-    case .streamIn: return easeOut(duration: 0.18)
-    case .sheet: return easeStruct(duration: slow)
+    case .press: return easeOut(duration: hover)
+    case .select, .chevron: return easeOutStrong(duration: small)
+    case .confirm: return easeOvershoot(duration: overshoot)
+    case .enter, .rowIn, .streamIn: return easeOut(duration: small)
+    case .exit: return easeIn(duration: exitSmall)
+    case .tab: return easeInOut(duration: small)
+    case .reorder, .reset, .scroll: return easeInOut(duration: medium)
+    case .disclosureOpen: return easeOut(duration: small)
+    case .disclosureClose: return easeIn(duration: exitSmall)
+    case .drawerOpen: return easeOut(duration: medium)
+    case .drawerClose: return easeIn(duration: exitMedium)
+    // SwiftUI owns the spring; this call path has no release-velocity input.
+    case .drawerRelease: return .spring(duration: 0.38, bounce: 0.12)
+    case .page, .sheet: return easeOut(duration: large)
     }
   }
 
@@ -46,7 +65,7 @@ enum Motion {
     case .rowIn, .streamIn: return .opacity.combined(with: .offset(y: 4))
     case .sheet: return .opacity.combined(with: .move(edge: .bottom))
     case .press: return .opacity.combined(with: .scale(scale: 0.98))
-    case .select, .tab, .disclosureOpen, .disclosureClose: return .opacity
+    default: return .opacity
     }
   }
 

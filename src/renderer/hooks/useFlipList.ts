@@ -43,16 +43,19 @@ export function useFlipList(root: RefObject<HTMLElement>, revision: unknown, bud
     initialized.current = true
     const resumed = oversized.current
     oversized.current = false
-    if (resumed || prefersReducedMotion()) return
+    if (resumed) return
+    const reduced = prefersReducedMotion()
     for (const { node, key, delta, entering } of measurements) {
-      if (!entering && Math.abs(delta) < 1) continue
-      const animation = node.animate([
-        { transform: `translateY(${delta}px)`, opacity: entering ? 0 : 1 },
-        { transform: 'translateY(0)', opacity: 1 }
-      ], {
+      if ((!entering && Math.abs(delta) < 1) || (reduced && !entering)) continue
+      const animation = node.animate(reduced
+        ? [{ opacity: 0 }, { opacity: 1 }]
+        : [
+            { transform: `translateY(${delta}px)`, opacity: entering ? 0 : 1 },
+            { transform: 'translateY(0)', opacity: 1 }
+          ], {
         id: entering ? 'scry-list-arrival' : 'scry-list-reorder',
-        duration: entering ? MOTION.durBase : MOTION.durSlow,
-        easing: entering ? MOTION.easeOut : MOTION.easeStruct
+        duration: reduced ? MOTION.durationReduced : entering ? MOTION.durationSm : MOTION.durationMd,
+        easing: reduced || entering ? MOTION.easeOut : MOTION.easeInOut
       })
       animations.current.set(key, animation)
       animation.onfinish = () => { if (animations.current.get(key) === animation) animations.current.delete(key) }

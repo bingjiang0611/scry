@@ -46,7 +46,7 @@
   height: 80px;
   padding: 10px;
   border-bottom: 1px solid var(--border3);
-  transition: background-color var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out);
 }
 
 .mcp-fleet__row > th {
@@ -130,7 +130,7 @@
   background: transparent;
   color: var(--accent);
   font: 620 11px/1 var(--font-mono);
-  transition: color var(--dur-micro) linear;
+  transition: color var(--duration-hover) var(--ease-out);
 }
 
 .mcp-tools-toggle > span {
@@ -423,7 +423,7 @@
   min-height: 0;
   max-height: calc(100vh - 48px);
   border-radius: var(--r-lg);
-  transition: width var(--dur-slow) var(--ease-struct);
+  transition: width var(--duration-md) var(--ease-in-out);
 }
 
 .modal.capabilities-modal--skills {

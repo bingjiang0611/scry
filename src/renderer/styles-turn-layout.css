@@ -60,7 +60,7 @@
   background: var(--panel2);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
-  transition: color var(--dur-micro) linear, border-color var(--dur-micro) linear;
+  transition: color var(--duration-hover) var(--ease-out), border-color var(--duration-hover) var(--ease-out);
 }
 .tool-group-row .tg-pill.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); }
 .tool-group-row:hover .tg-pill { color: var(--fg); border-color: var(--border2); }
@@ -72,7 +72,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: color var(--dur-micro) linear;
+  transition: color var(--duration-hover) var(--ease-out);
 }
 .tool-group-row:hover .tg-label { color: var(--dim); }
 .tool-group-row .tg-rule { flex: 1 1 24px; min-width: 16px; height: 1px; background: var(--border3); }
@@ -83,7 +83,7 @@
   color: var(--dim3);
   font-variant-numeric: tabular-nums;
   opacity: 0;
-  transition: opacity var(--dur-micro) linear;
+  transition: opacity var(--duration-hover) var(--ease-out);
 }
 .tool-group-row:hover .tg-dur,
 .tool-group.open .tg-dur { opacity: 1; }
@@ -115,7 +115,7 @@
   inset: 0 auto 0 -45%;
   width: 40%;
   background: linear-gradient(90deg, transparent, var(--border2), transparent);
-  animation: skeleton-shimmer 1.3s ease-in-out infinite;
+  animation: skeleton-shimmer 1.3s linear infinite;
   will-change: transform;
 }
 @keyframes skeleton-shimmer {

@@ -178,9 +178,9 @@ struct HomeSessions: View {
       // section only exists because the host persisted the turn's outcome.
       activitySection(ConnectionCopy.sectionCompleted, rows: catalog.completed, completed: true)
     }
-    .animation(reduceMotion ? nil : Motion.animation(.tab, reduceMotion: false), value: catalog.waiting.map(\.id))
-    .animation(reduceMotion ? nil : Motion.animation(.tab, reduceMotion: false), value: catalog.running.map(\.id))
-    .animation(reduceMotion ? nil : Motion.animation(.tab, reduceMotion: false), value: catalog.completed.map(\.id))
+    .animation(reduceMotion ? nil : Motion.animation(.reorder, reduceMotion: false), value: catalog.waiting.map(\.id))
+    .animation(reduceMotion ? nil : Motion.animation(.reorder, reduceMotion: false), value: catalog.running.map(\.id))
+    .animation(reduceMotion ? nil : Motion.animation(.reorder, reduceMotion: false), value: catalog.completed.map(\.id))
     .homeContentFade(trigger: catalog.waiting.map(\.id) + catalog.running.map(\.id) + catalog.completed.map(\.id),
                      reduceMotion: reduceMotion)
   }
@@ -235,7 +235,7 @@ struct HomeSessions: View {
           HStack(spacing: 8) {
             Image(systemName: Symbol.chevron).font(Typography.meta)
               .rotationEffect(.degrees(expanded ? 90 : 0))
-              .animation(reduceMotion ? nil : Motion.animation(expanded ? .disclosureOpen : .disclosureClose, reduceMotion: false), value: expanded)
+              .animation(reduceMotion ? nil : Motion.animation(.chevron, reduceMotion: false), value: expanded)
             Image(systemName: Symbol.folder).font(Typography.rowTitle)
             Text(projectName(project.cwd)).font(Typography.headerTitle).foregroundStyle(Palette.fg).lineLimit(1)
             if targets.aggregatesHosts {

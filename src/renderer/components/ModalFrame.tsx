@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { usePresence, flushPresenceExits, type PresenceCloseReason } from '../hooks/usePresence'
+import { MOTION } from '../motion'
 
 type ModalEntry = { element: HTMLElement; active: boolean; requestClose: (reason: PresenceCloseReason) => void }
 const activeModals: ModalEntry[] = []
@@ -43,7 +44,7 @@ export function ModalFrame({
   canCloseRef.current = canClose
   const presence = usePresence({
     onClose,
-    exitMs: 160,
+    exitMs: MOTION.durationExitSm,
     onExitStart: () => {
       if (entryRef.current) entryRef.current.active = false
       if (frameRef.current !== undefined) window.cancelAnimationFrame(frameRef.current)
