@@ -47,6 +47,17 @@ describe('stacked patch projection', () => {
       .toEqual([['missing', 'missing'], ['binary', 'binary'], ['partial', 'partial']])
     expect(JSON.stringify(stack.rows)).not.toContain('"text":"wrong preview"')
   })
+  it.each(['legacy', 'content-only'] as const)('renders %s inline patch evidence without a reference fetch', shape => {
+    const entry: DiffFile = {
+      path: 'inline', added: 3, deleted: 2, patchStatus: 'captured',
+      ...(shape === 'legacy' ? { patch } : {}),
+      patchContent: { storage: 'complete', content: patch, encoding: 'utf8', savedBytes: patch.length,
+        source: 'git_turn_diff', redaction: 'disabled', reasons: [], sourceCompleteness: 'complete' }
+    }
+    const stack = buildDiffStack([entry], 'unified', new Set(), new Map(), entry.path)
+    expect(stack.rows.some(row => row.kind === 'code' && row.row.kind === 'line' && row.row.line.text === '+new three')).toBe(true)
+    expect(stack.rows.some(row => row.kind === 'notice')).toBe(false)
+  })
   it('uses hydrated patches when complete content is stored by reference only', () => {
     const entry: DiffFile = { ...file('restored', patch), patchStatus: 'truncated', patchContent: { storage: 'complete', content: '',
       contentRef: { storage: 'recorder-content-v1', sha256: 'a'.repeat(64), bytes: patch.length, encoding: 'utf8' },

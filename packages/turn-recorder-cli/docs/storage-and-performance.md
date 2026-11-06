@@ -73,6 +73,19 @@ hook 在 Provider 每个生命周期事件上同步执行,所以这条路径的�
 
 存储量取决于实际采集的原文和 diff，不能按 inline 预算估算总磁盘占用。默认 `full` 的单轮工具正文 inline 预算为 128 KiB（可配置到 1 MiB），但 `contentRef` 指向的完整正文不受此预览预算限制；diff patch 不再设置单文件或单轮容量上限，另有元数据、归档和恢复副本。显式 `summary` 仍只保存输出摘要，单次 input 超 8 KiB 会省略并标 `partial`。
 
+### Diff 正文：一份完整内联内容（方案 C）
+
+CLI / daemon 自行采集 Git diff 后，新生成的记录把完整 patch 保存在
+`diff.value[].files[].patchContent.content`，并保留 `patchContent.contentRef`，不再重复写
+`files[].patch`。`savedBytes`、完整性状态和内容库校验不变；正文没有截断，也不是按需加载。
+旧记录不重写，仍可读取、导出与归档。App managed canonical handoff 不经过这处 Git 正文生成路径，
+本次不修改它的证据结构或重复提交判定。
+
+自建 uploader / 消费方不能假定每个文件都有 `patch`；完整正文优先读
+`patchContent.content`，旧记录可读 `patch`。若遇到只有引用的记录，仍按既有引用合同读取正文，
+不能把空预览当成完整正文。方案 C 只删除记录内的重复副本，内容库仍保存正文，读取大记录时仍需
+加载内联正文。
+
 可选的 `storage` 配置提供软 quota、retention 候选和孤立文件宽限期：
 
 ```json

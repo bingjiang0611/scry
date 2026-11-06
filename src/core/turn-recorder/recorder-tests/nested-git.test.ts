@@ -2,7 +2,7 @@ import { writeFile, readFile, mkdir, chmod, realpath, rm, appendFile } from 'nod
 import { join } from 'node:path'
 import { describe, it, vi, expect } from 'vitest'
 import { handleRecorderHook } from '../recorder'
-import { safeKey, listRecords, archiveRecords } from '../store'
+import { safeKey, listRecords, archiveRecords, exportRecords } from '../store'
 import { readRecorderContent } from '../content-store'
 import { workspace, pexecFile, payload } from './fixture.test'
 
@@ -128,17 +128,26 @@ exec "$SCRY_TEST_REAL_GIT" "$@"
     const [record] = await listRecords(join(root, '.scry'))
     const file = record.diff.value?.[0].files[0]
     expect(file).toMatchObject({ patchStatus: 'captured', patchContent: { storage: 'complete', sourceCompleteness: 'complete' } })
-    expect(Buffer.byteLength(file?.patch ?? '')).toBeGreaterThan(32 * 1024)
+    expect(file).not.toHaveProperty('patch')
+    expect(Buffer.byteLength(file?.patchContent?.content ?? '')).toBeGreaterThan(32 * 1024)
     expect(file?.patchContent?.contentRef?.bytes).toBeGreaterThan(32 * 1024)
     const dataRoot = join(root, '.scry')
     const fullPatch = await readRecorderContent(dataRoot, file!.patchContent!.contentRef!)
     expect(fullPatch).toContain('第11999行😀')
     expect(fullPatch).toContain('END-OF-FULL-PATCH')
+    expect(file?.patchContent?.content).toBe(fullPatch)
+    // Reading and exporting the canonical record must keep the new single-inline shape.
+    const exported = await exportRecords(dataRoot)
+    expect(exported.records[0].diff.value?.[0].files[0]).toEqual(file)
+    const recordPath = join(dataRoot, 'records', `${String(record.sequence).padStart(20, '0')}-${record.recordId}.json`)
+    const saved = JSON.parse(await readFile(recordPath, 'utf8'))
+    expect(saved.diff.value[0].files[0]).toEqual(file)
 
     const target = join(root, 'diff-archive')
     await archiveRecords(dataRoot, { throughSequence: 1, target })
     await rm(join(dataRoot, 'content'), { recursive: true, force: true })
     const [archived] = await listRecords(target)
+    expect(archived.diff.value?.[0].files[0]).toEqual(file)
     await expect(readRecorderContent(target, archived.diff.value![0].files[0].patchContent!.contentRef!))
       .resolves.toBe(fullPatch)
   }, 35_000)

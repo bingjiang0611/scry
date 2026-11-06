@@ -297,9 +297,11 @@ export async function persistTurnDiffContent(
       const full = prepared[snapshotIndex][fileIndex]
       if (full === undefined) return file
       const patchContent = { ...full, contentRef: refs[slotOf[snapshotIndex][fileIndex]] }
+      // Keep the complete inline body in its evidence envelope, not twice in the record.
+      // Do not mutate the Git snapshot: callers may still use its patch field.
+      const { patch: _patch, ...metadata } = file
       return {
-        ...file,
-        patch: patchContent.content,
+        ...metadata,
         patchContent,
         patchStatus: patchContent.storage === 'complete' ? 'captured' as const : 'truncated' as const
       }

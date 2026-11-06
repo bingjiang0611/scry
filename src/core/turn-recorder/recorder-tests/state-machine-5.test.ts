@@ -261,7 +261,8 @@ export function registerSuite5(): void {
     const nextFile = nextRecord?.diff.value?.[0].files[0]
     expect(nextRecord?.diff.status).toBe('available')
     expect(nextFile).toMatchObject({ path: expect.stringContaining('plugin.config.json'), added: 1, deleted: 0 })
-    expect(nextFile?.patch).toContain('+next turn edit')
+    expect(nextFile).not.toHaveProperty('patch')
+    expect(nextFile?.patchContent?.content).toContain('+next turn edit')
   }, 35_000)
 
   it('transcript 仍在增长的长任务不被误判为过期', async () => {
