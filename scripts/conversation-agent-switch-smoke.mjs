@@ -6,7 +6,7 @@ import { join } from 'node:path'
 const json = JSON.stringify
 
 // Production App/IPC routing with a synthetic Pi profile. Exact Pi RPC/file
-// receipts are separately exercised by providers/pi.test.ts; no real account.
+// receipts are separately exercised by providers/pi-*-test suites (pi-identity, pi-lifecycle); no real account.
 export async function exercisePiAgentSwitch({ cdp, evaluate, fixture, click, wait, inputs, read, settled, ledger }) {
   const profile = 'pi:0123456789abcdef'
   const sourceContext = { providerId: 'pi', agentProfileId: profile, cwd: fixture.workspace }

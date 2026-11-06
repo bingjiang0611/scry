@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { basename, delimiter, dirname, join, resolve } from 'node:path'
 import type { PiAgentProfile } from '../pi-agent-profiles'
 import { execFileText, resolveCommandOnPath, sanitizeProviderEnv, shellEnv } from '../claude-locate'
+import { piConfigDigest } from './pi-config-identity'
 
 export const PI_HISTORY_EXTENSION_SHA256 = 'c86db7857dddea255eda02931d32827e62babc7a4b440e74d5ac8b7f2d11e186'
 export const PI_BOOTSTRAP_MAX_BYTES = 64 * 1024
@@ -112,7 +113,13 @@ export const isRotomLauncher = (profile: PiAgentProfile): boolean => ['rotom', '
 // Reviewed public delegation and product launcher contracts from Rotom 0.1.25.
 // A changed shell launcher needs a new contract review, not marker-based trust.
 const ROTOM_PUBLIC_ENTRY_HASH = 'c9f1dd3df66d995540c006e8f8cd930ab7bb9a8f0741aaf71e44c1bd56f15e80'
-const ROTOM_PRODUCT_LAUNCHER_HASH = '89c5d505468726df13ebc87232b56e3d506a5c1c1d2cd989bc122d7e0bcb8bcd'
+// 0.1.26 ships 89c5d505…; 0.1.27 adds one guard to that same launcher (the argument scan stops
+// at `--`, so a literal `--trace` after it is passed through instead of rejected): still the same
+// product launcher that hands off to runtime/launch-runtime.mjs, no new spawn, download or env read.
+const ROTOM_PRODUCT_LAUNCHER_HASHES = [
+  '89c5d505468726df13ebc87232b56e3d506a5c1c1d2cd989bc122d7e0bcb8bcd',
+  '23b0a67e84c1a90646a4e3a6907faeeb3af4129a06aa960c178f33b8316b4487'
+] as const
 
 async function verifyRotomLauncher(profile: PiAgentProfile): Promise<PiPackageIdentity> {
   const launcher = await piPackageIdentity(profile.executable, '@bingjiang0611/rotom')
@@ -125,7 +132,8 @@ async function verifyRotomLauncher(profile: PiAgentProfile): Promise<PiPackageId
     if (basename(launcher.executable) === 'rotom' && await fileDigest(launcher.executable) !== ROTOM_PUBLIC_ENTRY_HASH) {
       throw new Error('Rotom public entry contract 未验证')
     }
-    if (await fileDigest(join(launcher.root, 'bin/rotom-launcher')) !== ROTOM_PRODUCT_LAUNCHER_HASH) {
+    const launcherDigest = await fileDigest(join(launcher.root, 'bin/rotom-launcher'))
+    if (!ROTOM_PRODUCT_LAUNCHER_HASHES.some(digest => digest === launcherDigest)) {
       throw new Error('Rotom product launcher contract 未验证')
     }
     for (const relativePath of ROTOM_HANDOFF_RESOURCES) {
@@ -196,25 +204,6 @@ export async function fileDigest(path: string): Promise<string> {
   try { return await digest } catch (error) { piBinaryDigests.delete(path); throw error }
 }
 
-async function piConfigDigest(path: string): Promise<string | undefined> {
-  let info
-  try { info = await lstat(path) } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
-    throw error
-  }
-  if (!info.isFile() || info.isSymbolicLink() || info.size > 4 * 1024 * 1024) throw new Error('Pi 配置不是受支持的普通文件或超过 4 MiB')
-  const bytes = await readFileAsync(path)
-  let value: unknown
-  try { value = JSON.parse(bytes.toString('utf8')) } catch { throw new Error('Pi 配置 JSON 无效，接续身份不可用') }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Pi 配置必须是对象')
-  // Pi resolveConfigValue executes !commands for auth keys and model headers.
-  // Their future output cannot be proved by hashing their source command.
-  const dynamic = (value: unknown): boolean => typeof value === 'string' ? value.startsWith('!') :
-    Boolean(value && typeof value === 'object' && Object.values(value).some(dynamic))
-  if (basename(path) !== 'settings.json' && dynamic(value)) throw new Error('Pi 动态配置 helper 的接续身份不可验证')
-  return createHash('sha256').update(bytes).digest('hex')
-}
-
 /** Identity for managed handoff only; secret bytes are hashed, never returned or logged. */
 export async function piContinuationKey(
   profile: PiAgentProfile,
@@ -244,10 +233,10 @@ export async function piContinuationKey(
   const canonicalConfigNamespace = await realpathAsync(configNamespace)
   const [nodeHash, launcherHash, runtimeHash, authHash, settingsHash, modelsHash, projectSettingsHash] = await Promise.all([
     fileDigest(node), fileDigest(launcher.executable), fileDigest(runtime.executable),
-    piConfigDigest(join(canonicalConfigNamespace, 'auth.json')),
-    piConfigDigest(join(canonicalConfigNamespace, 'settings.json')),
-    piConfigDigest(join(canonicalConfigNamespace, 'models.json')),
-    cwd ? piConfigDigest(join(cwd, '.pi', 'settings.json')) : undefined
+    piConfigDigest(join(canonicalConfigNamespace, 'auth.json'), env),
+    piConfigDigest(join(canonicalConfigNamespace, 'settings.json'), env),
+    piConfigDigest(join(canonicalConfigNamespace, 'models.json'), env),
+    cwd ? piConfigDigest(join(cwd, '.pi', 'settings.json'), env) : undefined
   ])
   // models.json supports arbitrary named environment references, not only a
   // fixed list of known providers. Hash the actual sanitized launch environment.
