@@ -72,27 +72,6 @@ export function undetectedPiProfiles(profiles: PiAgentProfile[], detected: Array
 }
 
 /**
- * Filesystem identity of a launcher path.
- *
- * A profile saved before canonicalization (or installed through an nvm/mise-style shim)
- * stores a symlink path while discovery reports the real target. Comparing the raw strings
- * would then report "no registered profile" for the launcher the user actually registered.
- *
- * A shim whose target has a different basename (mise) is *not* comparable: every mise shim
- * resolves to the same binary, so that comparison would join unrelated launchers. Such a
- * path keeps its raw form and stays unmatched, which is the honest fail-closed result.
- */
-export function launcherIdentity(executable: string): string {
-  try {
-    const canonical = realpathSync(executable)
-    return basename(canonical) === basename(executable) ? canonical : executable
-  } catch {
-    // A removed launcher keeps its recorded path; only the comparison gives up.
-    return executable
-  }
-}
-
-/**
  * Registered Agent Profile identity of one detected Pi launcher.
  *
  * Discovery keeps the historical id (`pi:rotom`) so saved native sessions still resolve,
@@ -105,8 +84,9 @@ export function registeredPiProfileId(
   profiles: readonly PiAgentProfile[]
 ): string | undefined {
   if (isPiAgentProfileId(agent.id)) return agent.id
-  const agentIdentity = launcherIdentity(agent.path)
-  const matches = profiles.filter((profile) => launcherIdentity(profile.executable) === agentIdentity)
+  // Callers canonicalize stored executables before comparing (see bootstrap/pi-profiles.ts),
+  // so an nvm-style symlink path and the detected real target already name one launcher.
+  const matches = profiles.filter((profile) => profile.executable === agent.path)
   return matches.length === 1 ? matches[0].id : undefined
 }
 

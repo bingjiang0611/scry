@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { homedir, tmpdir } from 'node:os'
@@ -145,45 +145,5 @@ describe('Pi profile discovery identity', () => {
     // 同一启动器上的两个 Profile 有歧义，不选其中一个。
     expect(registeredPiProfileId({ id: 'pi:rotom', path: '/bin/rotom' },
       [saved, { id: 'pi:fedcba9876543210', label: 'Pi · copy', executable: '/bin/rotom' }])).toBeUndefined()
-  })
-
-  // 回归（真机）：Profile 保存的是 nvm/符号链接路径，检测报告 realpath，按字符串比较会误判“没有登记”。
-  it('matches a stored symlinked launcher against the detected real path', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'scry-pi-symlink-'))
-    try {
-      const executable = join(dir, 'rotom')
-      writeFileSync(executable, '#!/bin/sh\nexit 0\n')
-      chmodSync(executable, 0o755)
-      // nvm 风格的 bin 目录：同名的 rotom 链接到真实启动器。
-      const bindir = join(dir, 'bin')
-      mkdirSync(bindir)
-      const shim = join(bindir, 'rotom')
-      symlinkSync(executable, shim)
-      // 旧版保存的是符号链接路径，id 也是当时按该路径或更早的目标算出的：id 不重算。
-      const saved = { id: 'pi:564f7a994e4e34da', label: 'Pi · Rotom', executable: shim }
-      expect(registeredPiProfileId({ id: 'pi:rotom', path: realpathSync(executable) }, [saved])).toBe(saved.id)
-      expect(registeredPiProfileId({ id: 'pi:rotom', path: shim }, [saved])).toBe(saved.id)
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-
-  // mise 型 shim 的 realpath 是 mise 本身：所有 shim 共享它，不能据此互相映射。
-  it('never joins launchers through a shim whose target has a different name', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'scry-pi-mise-identity-'))
-    try {
-      const mise = join(dir, 'mise')
-      writeFileSync(mise, '#!/bin/sh\nexit 0\n')
-      chmodSync(mise, 0o755)
-      const piShim = join(dir, 'pi')
-      const rotomShim = join(dir, 'rotom')
-      symlinkSync(mise, piShim)
-      symlinkSync(mise, rotomShim)
-      const savedPi = { id: 'pi:0123456789abcdef', label: 'Pi', executable: piShim }
-      expect(registeredPiProfileId({ id: 'pi:rotom', path: rotomShim }, [savedPi])).toBeUndefined()
-      expect(registeredPiProfileId({ id: 'pi:rotom', path: piShim }, [savedPi])).toBe(savedPi.id)
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
   })
 })
