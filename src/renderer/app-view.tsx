@@ -157,7 +157,9 @@ export function useAppView(context: AppViewContext) {
     void (async () => {
       try {
         const sourceTarget = legacyAdoptionSourceTarget(integrations.selectedId)
-        const destination = conversationTarget(agentId)
+        // The destination is the new send target, so it names the registered Pi profile of
+        // the agent the user just picked; the source keeps the identity it was recorded as.
+        const destination = conversationTarget(agentId, undefined, integrations.agents)
         const source = {
           providerId: sourceTarget.providerId,
           ...(sourceTarget.agentProfileId ? { agentProfileId: sourceTarget.agentProfileId } : {}),

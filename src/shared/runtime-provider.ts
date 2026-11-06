@@ -13,6 +13,14 @@ export function runtimeProviderForAgentId(agentId: string | undefined): RuntimeP
   return undefined
 }
 
+/**
+ * Registered Pi Agent Profile ids are stable launcher hashes. Historical discovery ids
+ * (`pi:default`, `pi:rotom`) name a native session, not a registered Agent Profile.
+ */
+export function isPiAgentProfileId(agentId: unknown): agentId is string {
+  return typeof agentId === 'string' && /^pi:[a-f0-9]{16}$/.test(agentId)
+}
+
 export function providerIdForAgentId(agentId: string | undefined): ProviderId | undefined {
   if (!agentId) return undefined
   if (agentId === 'claude') return 'claude'

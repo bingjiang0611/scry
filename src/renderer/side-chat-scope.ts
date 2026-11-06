@@ -41,14 +41,20 @@ export function terminalTurnCount(turns: readonly Pick<Turn, 'done' | 'error'>[]
  * Provider session into "another side chat's source", which hid its children.
  */
 export function sideChatScope({
-  draftKey, view, conversation, providerId, agentProfileId, runControls, cwd, nativeSessionId,
+  draftKey, view, conversation, providerId, agentProfileId, targetAgentProfileId, runControls, cwd, nativeSessionId,
   terminalTurns, apiAvailable
 }: {
   draftKey: string
   view: AppView
   conversation?: ConversationSummary
   providerId: ProviderId
+  /** The parent's own recorded identity; a native source must address this exact session. */
   agentProfileId?: string
+  /**
+   * The Agent Profile identity the child's first send will name. It matches
+   * `agentProfileId` except for a historical Pi id, which is not a registered profile.
+   */
+  targetAgentProfileId?: string
   runControls: AgentRunControls
   cwd: string | null
   nativeSessionId: string | null
@@ -57,7 +63,7 @@ export function sideChatScope({
 }): SideChatScope {
   const target: SideChatInitialTarget = {
     providerId,
-    ...(agentProfileId ? { agentProfileId } : {}),
+    ...(targetAgentProfileId ? { agentProfileId: targetAgentProfileId } : {}),
     ...(runControls.model ? { model: { ...runControls.model } } : {}),
     ...(runControls.effort ? { effort: runControls.effort } : {}),
     permissionMode: runControls.permissionMode
