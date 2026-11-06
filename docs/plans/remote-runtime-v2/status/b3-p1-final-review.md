@@ -39,3 +39,14 @@ recorder CLI 只由注入的 `resourcesPath` 解析为 `<resources>/bin/scry`，
 R5 同批：supervisor 的异常重启预算在一次运行达到 60 s 后归零；exit 2 是确定性配置失败，只启动一次并写失败记录。子进程 stderr 改为 bounded pipe，只提取 `daemon_[a-z0-9_]+` 机器码，正文不进入结果或 failure JSON。failure 仍不含路径、prompt、证书或错误正文。
 
 门禁：main+daemon+host-runtime 2920 passed（3 skipped）；typecheck/build、构建入口缺变量 12 项 smoke、真实 SIGKILL/restart、security smoke、`pack:artifact` 全绿。完整 `test:desktop-remote` 首轮在 composer-history fixture 的键盘 completion 等待超时；同一 focused campaign 随即通过，完整门禁复跑通过，首轮失败没有删除或隐藏。
+
+## R6 renderer UI 归属——完成
+
+按核验要求使用 detached worktree、共享当前 `node_modules`，每个 revision 先 `npm run build`，再单跑完全相同的命令：
+
+| revision | 命令 | exit | 日志 |
+|---|---|---:|---|
+| `59fa817dd86482617ffde6f3cfee78d29bb53d00` | `node scripts/session-capability-ui-smoke.mjs --performance-only` | 1 | `/tmp/b3-r6-pre-p1-performance.log` |
+| `577995bce9bbcc03d10a5b95e03ae51df8caa072` | `node scripts/session-capability-ui-smoke.mjs --performance-only` | 1 | `/tmp/b3-r6-batch3-start-performance.log` |
+
+两次都是 `Renderer: Uncaught Error: Performance control obscured: #performance-empty`。对应 revision 记录在 `/tmp/b3-r6-pre-p1-revision.log`、`/tmp/b3-r6-batch3-start-revision.log`，exit code 在同名前缀的 `*-exit-code.log`，构建日志在 `*-build.log`。因此该 renderer gate 失败至少从 Batch 3 起点就存在，不由 P1 引入；仍如实标为失败，不宣称门禁通过，也不在本批顺带修改 UI。

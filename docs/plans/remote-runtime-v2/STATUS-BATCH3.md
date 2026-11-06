@@ -15,15 +15,13 @@
 | B3-M1 核验修复（M1-1、M1-2） | 完成 | `见下` | [b3-m1-review](status/b3-m1-review.md)：counters 收集器与 analytics smoke 注入 storage；`initDb` 对 `storage_not_configured` 直接抛；measure 0 个 unavailable |
 | B3-M1 存储注入化 | 完成 | `见下` | [b3-m1](status/b3-m1.md)：`storage-paths` 注入，db 各子模块与 `remote-history` 不再要 electron；导入图测试先失败后通过 |
 | B3-M2 运行管线去 Electron 化 | 完成（5 段） | `见下` | [b3-m2](status/b3-m2.md)：M2-1 renderer sink、M2-2 存储根注入、M2-3 通知/dock/shell 边界、M2-4 `create-run-pipeline.ts` 组装入口 + 导入图断言；M2-5 管线不再持有窗口（`renderer.send`/`isFocused`） |
-| B3-P1 daemon 承载宿主 | **未完成（R1–R5 完成；待 R6）** | `见下` | [REVIEW-BATCH3-P1-FINAL](REVIEW-BATCH3-P1-FINAL.md)；进度见 [b3-p1-final-review](status/b3-p1-final-review.md) |
+| B3-P1 daemon 承载宿主 | **完成（R1–R6 已处理，等待核验）** | `见下` | [REVIEW-BATCH3-P1-FINAL](REVIEW-BATCH3-P1-FINAL.md)；进度见 [b3-p1-final-review](status/b3-p1-final-review.md) |
 | B3-V1 security smoke 归属 | 完成（结论：非回归，调用方式错误） | `见下` | [b3-v1](status/b3-v1.md)：无 `--dev` 时脚本跑的是 0.2.220 旧产物，源码 0.2.237；`--dev` 下起点与当前 HEAD 均通过 |
-| 交付前全局验证 | **除 renderer UI 既有失败外完成** | `见下` | test/typecheck/build/CLI/inventory/measure/desktop/security/pack 全绿；renderer performance fixture 在 P1-2 起点同样失败 |
+| 交付前全局验证 | **除 renderer UI 既有失败外完成** | `见下` | test/typecheck/build/CLI/inventory/measure/desktop/security/pack 全绿；renderer performance fixture 在 P1 前 `59fa817` 与 Batch 3 起点 `577995b` 均同样失败 |
 
 ## 剩余任务的执行顺序（不得跳序）
 
-1. **R1 → R2 → R3 → R4**：每项先写失败测试，每段通过门禁后推送；R5 可随同修复。
-2. **R6**：在 `59fa817`（仍失败再到 `577995b`）单跑 `--performance-only` 并记录 revision、命令、exit code、日志路径。
-3. 全部完成后停止，等待维护者核验。
+1. **停止，等待维护者核验。** R1–R6 已按顺序完成并推送。
 
 ## 阻塞
 
@@ -60,4 +58,4 @@ M2 完成后运行管线的值导入图已无 electron（`src/host-runtime/creat
 | `git diff --check` | 通过 |
 | `npm run test:renderer:ui` | **失败**：`session-capability-ui-smoke --performance-only` 报 `Performance control obscured: #performance-empty` |
 
-renderer 失败不归因于 P1：在临时 detached worktree 的 P1-2 起点 `743b5e6c` 上重建并单跑同一 `--performance-only`，得到完全相同错误。P1 后的改动没有 renderer 文件；按既有失败单列，不顺带修改 UI。本批没有把该门禁写成通过。
+R6 归属验证：在 detached worktree 的 `59fa817dd86482617ffde6f3cfee78d29bb53d00` 与 `577995bce9bbcc03d10a5b95e03ae51df8caa072` 上各自重建后单跑 `node scripts/session-capability-ui-smoke.mjs --performance-only`，均 exit 1，均为 `Performance control obscured: #performance-empty`。日志分别为 `/tmp/b3-r6-pre-p1-performance.log`、`/tmp/b3-r6-batch3-start-performance.log`。因此失败至少从 Batch 3 起点存在；仍标为失败，不顺带修改 UI。
