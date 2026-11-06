@@ -87,6 +87,22 @@ describe('Pi RPC Provider', () => {
       chmodSync(join(cwd, 'synthetic-key.sh'), 0o755)
       writeFileSync(auth, JSON.stringify({ custom: { type: 'api_key', key: '!./synthetic-key.sh' } }))
       expect(await piContinuationKey(profile, cwd, env)).toBe(literal)
+      // A cwd that does not exist cannot start the helper, so no identity is issued.
+      await expect(piContinuationKey(profile, join(cwd, 'missing-cwd'), env))
+        .rejects.toThrow('helper 未成功返回')
+      // settings.json is repo-controllable: its helper is hashed as written and never executed.
+      writeFileSync(join(cwd, '.pi', 'agent', 'settings.json'), JSON.stringify({ marker: '!touch settings-ran' }))
+      expect(await piContinuationKey(profile, cwd, env)).toBeTypeOf('string')
+      expect(existsSync(join(cwd, 'settings-ran'))).toBe(false)
+      // Omitting the cwd uses the home directory, so a cwd-independent helper still resolves.
+      writeFileSync(auth, JSON.stringify({ custom: { type: 'api_key', key: '!printf synthetic-a' } }))
+      expect(await piContinuationKey(profile, undefined, env)).toBeTypeOf('string')
+      // Output past the readable cap cannot be proven complete, so it is refused, not hashed.
+      writeFileSync(join(cwd, 'big.sh'), '#!/bin/sh\ns=$(printf "%1000s" "")\ni=0\nwhile [ $i -lt 70 ]; do printf "%s" "$s"; i=$((i+1)); done\n')
+      chmodSync(join(cwd, 'big.sh'), 0o755)
+      writeFileSync(auth, JSON.stringify({ custom: { type: 'api_key', key: '!./big.sh' } }))
+      await expect(piContinuationKey(profile, cwd, env)).rejects.toThrow('输出超过可验证上限')
+      writeFileSync(auth, JSON.stringify({ custom: { type: 'api_key', key: 'synthetic-a' } }))
       // models.json helpers are resolved too: a rotated model key changes the identity.
       const models = join(cwd, '.pi', 'agent', 'models.json')
       writeFileSync(models, JSON.stringify({ providers: { switch: { apiKey: '!printf model-key-a' } } }))

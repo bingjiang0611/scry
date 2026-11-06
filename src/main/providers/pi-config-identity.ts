@@ -5,6 +5,8 @@ import { execFileOutcome } from '../claude-locate'
 
 // A keychain or password-manager read is a local lookup; anything slower is not a usable identity.
 export const PI_CONFIG_HELPER_TIMEOUT_MS = 5_000
+// The shared runner keeps at most 64 KiB of stdout, and Pi fails rather than use a partial value.
+export const PI_CONFIG_HELPER_MAX_BYTES = 64 * 1024
 const PI_CONFIG_HELPER_LIMIT = 16
 
 /**
@@ -64,6 +66,10 @@ async function resolveHelpers(
     if (budget.left-- <= 0) throw new Error('Pi 动态配置 helper 超过可验证上限；接续身份不可用')
     const outcome = await execFileOutcome('/bin/sh', ['-c', helperScript(candidate.slice(1), cwd)], { env, timeout: PI_CONFIG_HELPER_TIMEOUT_MS })
     if (outcome.exitCode !== 0) throw new Error('Pi 动态配置 helper 未成功返回；接续身份不可用')
+    // A capped read cannot prove the value is complete, so refuse instead of hashing a truncation.
+    if (outcome.stdout.length >= PI_CONFIG_HELPER_MAX_BYTES) {
+      throw new Error('Pi 动态配置 helper 输出超过可验证上限；接续身份不可用')
+    }
     return outcome.stdout
   }
   if (Array.isArray(candidate)) {

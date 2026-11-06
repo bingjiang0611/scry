@@ -223,7 +223,10 @@ export async function piContinuationKey(
     : launcher
   const node = await nodeIdentity(env, rotom)
   const configuredNamespace = env.PI_CODING_AGENT_DIR || (env.HOME ? join(env.HOME, '.pi', 'agent') : undefined)
-  const configNamespace = configuredNamespace && resolve(cwd ?? process.cwd(),
+  // Pi spawns its process in the conversation cwd and falls back to the home directory; helpers,
+  // a relative config namespace and the project settings all resolve from that same directory.
+  const helperCwd = cwd || homedir()
+  const configNamespace = configuredNamespace && resolve(helperCwd,
     configuredNamespace === '~' && env.HOME ? env.HOME :
       configuredNamespace.startsWith('~/') && env.HOME ? join(env.HOME, configuredNamespace.slice(2)) : configuredNamespace)
   if (!runtime || !node || !configNamespace) throw new Error('Pi runtime、Node 或 config/auth namespace 不可验证；接续身份不可用')
@@ -232,14 +235,12 @@ export async function piContinuationKey(
     throw new Error('Pi config/auth namespace 不是可验证的本地目录；接续身份不可用')
   }
   const canonicalConfigNamespace = await realpathAsync(configNamespace)
-  // Pi spawns its process in the conversation cwd; helpers see the same directory.
-  const helperCwd = cwd || homedir()
   const [nodeHash, launcherHash, runtimeHash, authHash, settingsHash, modelsHash, projectSettingsHash] = await Promise.all([
     fileDigest(node), fileDigest(launcher.executable), fileDigest(runtime.executable),
     piConfigDigest(join(canonicalConfigNamespace, 'auth.json'), env, helperCwd),
     piConfigDigest(join(canonicalConfigNamespace, 'settings.json'), env, helperCwd),
     piConfigDigest(join(canonicalConfigNamespace, 'models.json'), env, helperCwd),
-    cwd ? piConfigDigest(join(cwd, '.pi', 'settings.json'), env, helperCwd) : undefined
+    piConfigDigest(join(helperCwd, '.pi', 'settings.json'), env, helperCwd)
   ])
   // models.json supports arbitrary named environment references, not only a
   // fixed list of known providers. Hash the actual sanitized launch environment.
@@ -250,7 +251,7 @@ export async function piContinuationKey(
   const resources = rotom ? await Promise.all(ROTOM_HANDOFF_RESOURCES.map(path => fileDigest(join(launcher.root, path)))) : []
   const identity = [
     ...resources,
-    'scry-pi-continuation-v2', profile.id, cwd ?? '',
+    'scry-pi-continuation-v2', profile.id, helperCwd,
     `launcher:${launcher.executable}:${launcher.version}:${launcherHash}`,
     `runtime:${runtime.executable}:${runtime.version}:${runtimeHash}`, `node:${node}:${nodeHash}`,
     `config:${canonicalConfigNamespace}`, `auth:${authHash ?? 'env'}`, `settings:${settingsHash ?? 'missing'}`,
