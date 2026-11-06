@@ -1,7 +1,8 @@
 # 汇总：recorder 引擎性能（M / G / R）
 
 分支：`perf/recorder-engine`。已完成本批范围内的实现与本地验证，待独立 PR 评审；未合入、未发布。
-最新验证与限制以 [R3-attention-race](R3-attention-race.md) 为准；完整条目见 [STATUS](../STATUS.md)。
+并发修复见 [R3-attention-race](R3-attention-race.md)，后续索引初始化与 JSONL 半行修正见
+[SOL](SOL.md)；验证须按各报告的 revision 区分。完整条目见 [STATUS](../STATUS.md)。
 
 ## 本次 PR 的边界
 
@@ -18,7 +19,7 @@
 | R3 并发修复 | 标记与状态发布、检查与删除使用同一短文件锁；阻止真实 inbox / open 被漏索引 | [R3-attention-race](R3-attention-race.md) |
 
 减少的工作是删除、合并与复用，不是移出计数范围。没有降低正文完整性、原子发布、fsync、序号
-分配或去重要求。新增 attention 锁有必要成本：单轮 fsync 41→43，正常恢复 readFile 12→14；
+分配或去重要求。互斥与完整初始化有必要成本：新工作区首次轮 fsync 41→46，正常恢复 readFile 12→14；
 不能把正确性成本写成性能收益，也不能声称总 I/O 不变。
 
 ## 性能结论的强度
@@ -60,7 +61,8 @@ SIGKILL 只证明进程崩溃场景，不等于断电测试。混用旧进程不
 
 ## 生效与交付
 
-本批仅做本地提交，不自动推送、创建 PR、发布 npm、安装全局 CLI 或替换日常 App / daemon。
+维护者随后以 full-send 授权推送、创建 PR、跟进 CI / 评审并按保护规则合并。
+不发布 npm、不安装全局 CLI、不替换日常 App / daemon。
 `npm run build:cli` 只生成本检出的 CLI 产物，不会升级已安装 CLI。后续获准部署时，需要更新
 所有参与的 CLI / daemon 并重启对应 daemon；仅这些 core 改动不需要 `scry integrations repair`。
 旧记录不迁移；只读取旧 `patch` 字段的外部消费者需要适配 C 的既有文档合同。

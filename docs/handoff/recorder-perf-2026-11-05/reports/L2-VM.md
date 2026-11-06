@@ -9,10 +9,10 @@ Spotlight `mdworker_shared` ~55% CPU、Chrome 同跑、空闲页 ~62 MB）。复
 
 | 机器 | 状态 | 能否用作安静环境 |
 |---|---|---|
-| `30.7.226.226`（macOS 26.3.2，M1，8 核） | AliEntSafe `CloudShell` 61% CPU、Chrome Helper 38%、WindowServer 25%，load 4.7，4 个登录会话，空闲页 ~148 MB | 不能 |
-| `30.7.224.127` | 主机密钥已变更，`Permission denied (publickey)`，我们的 key 不再有效 | 不能（需要新凭据） |
-| `30.7.225.156` | 22 端口超时 | 不可达 |
-| 本机 Mac（10 核） | load 14.8，16 个 `mdworker_shared`、Chrome 40% | 比 226.226 更吵 |
+| 测量机 A（macOS 26.3.2，M1，8 核） | 宿主安全进程 61% CPU、Chrome Helper 38%、WindowServer 25%，load 4.7，4 个登录会话，空闲页 ~148 MB | 不能 |
+| 测量机 B | 主机密钥已变更，`Permission denied (publickey)` | 不能（需要恢复访问） |
+| 测量机 C | SSH 连接超时 | 不可达 |
+| 本机 Mac（10 核） | load 14.8，16 个 `mdworker_shared`、Chrome 40% | 不能作为安静基线 |
 | colima VM（本机 Lima guest） | Ubuntu 24.04、kernel 6.8.0-117、aarch64、6 vCPU、8 GiB、ext4，guest load 0.1–1.7 | **用它** |
 
 因此本轮 L2 是 **Linux guest 上的受控 A/B**，不是 macOS 复测。跨平台绝对值不可比（git 2.43.0 vs
@@ -85,7 +85,7 @@ Spotlight `mdworker_shared` ~55% CPU、Chrome 同跑、空闲页 ~62 MB）。复
 
 ## 未验证
 
-- 只测了 Linux guest。macOS 上的毫秒行为仍未在安静机器上测过；本机与 `30.7.226.226` 都不可用。
+- 只测了 Linux guest。macOS 上的毫秒行为仍未在安静机器上测过；本机与测量机 A 都不可用。
 - git 2.43.0（guest）与 2.50.1（旧 macOS 测量机）不同，git 版本本身也会影响 diff/read-tree 的耗时。
 - `record-visible` 全部是 0.0–0.1 ms，那是 bench 的轮询分辨率，不是 hook 端到端延迟；真实 App 的
   hook 到记录可见时间本轮没有测。

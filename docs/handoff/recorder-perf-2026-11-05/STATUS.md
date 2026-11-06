@@ -4,7 +4,8 @@
 [attention 竞态报告](reports/R3-attention-race.md)，分支汇总见 [SUMMARY](reports/SUMMARY.md)。
 **待核验指独立 PR 评审，不表示尚未执行本地测试。** 分支未合入、未发布。
 
-本批当前授权仅限本地提交，不自动 push、创建 PR、安装日常 App / CLI 或重启日常 daemon。
+维护者随后以 full-send 授权推送、创建 PR、跟进 CI / 评审并按保护规则合并。
+不安装日常 App / CLI，不重启日常 daemon。Sol 后续修正见 [SOL](reports/SOL.md)。
 历史报告按各自 revision 解读，不用旧通过替代新改动的验证。
 
 | # | 条目 | 批次 | 状态 | 报告 | 备注 |
@@ -29,4 +30,4 @@
 
 延后项不构成本次 PR 的隐含承诺。安静独立宿主、真实 Provider / App 与安装版本验收仍未完成；
 Linux guest 不是 Arch/Omarchy x86_64 目标机验收。新锁要求参与进程使用更新后的 core，混用旧
-CLI / daemon 不在验证保证内；升级前已损坏的索引仍走现有重建机制。
+CLI / daemon 不在验证保证内；缺少完整初始化标志的旧索引会先重建，不能仅因目录存在就跳过旧会话。
