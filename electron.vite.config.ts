@@ -15,6 +15,7 @@ export default defineConfig({
         // The daemon runs on the same Electron binary with ELECTRON_RUN_AS_NODE=1,
         // so it is a main-process entry: same bundle format, no renderer/preload.
         daemon: resolve('src/daemon/main.ts'),
+        'daemon-supervisor': resolve('src/daemon/supervisor-main.ts'),
         'terminal-recording-worker': resolve('src/main/terminal-recording-worker.ts'),
         'run-output-file-worker': resolve('src/main/remote/run-output-file-worker.ts'),
         'transcript-parser-worker': resolve('src/main/transcript-parser-worker.ts')
