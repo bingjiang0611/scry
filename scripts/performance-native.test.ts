@@ -100,6 +100,20 @@ describe('interleaved scenario shards', () => {
     }
   })
 
+  it('rejects shards measured on different builds or runtimes of the same revision', () => {
+    const mutations: Array<(result: Record<string, unknown>) => void> = [
+      result => { result.artifactSha256 = 'd'.repeat(64) },
+      result => { result.electron = '43.0.0' },
+      result => { result.platform = 'linux/x64' },
+      result => { result.node = 'v24.0.0' }
+    ]
+    for (const mutate of mutations) {
+      const shard = shards()
+      mutate(Object.values(shard[2].results)[0])
+      expect(() => combineNativeShards(shard)).toThrow('different builds or runtimes')
+    }
+  })
+
   it('rejects a missing lane and any shard that recorded a failed lane', () => {
     const missing = shards().slice(0, 3)
     expect(() => combineNativeShards(missing)).toThrow('native lane coverage differs')

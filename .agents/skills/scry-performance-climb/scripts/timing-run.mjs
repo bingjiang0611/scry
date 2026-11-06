@@ -56,13 +56,23 @@ const loadBefore = load()
 const startedAt = Date.now()
 const finishObservation = observeTimingEnvironment()
 const child = spawn(command[0], command.slice(1), { stdio: 'inherit' })
-for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => child.kill(signal))
-child.once('error', error => { finishObservation(); release(); console.error(error.message); process.exit(1) })
-child.once('exit', (code, signal) => {
+let finished = false
+function finish(record) {
+  if (finished) return
+  finished = true
   const loadAfter = load()
+  const diagnostics = finishObservation()
   release()
-  const result = { label, command, exit: code, signal, wallMs: Date.now() - startedAt, cores, loadBefore, loadAfter, highLoad: loadBefore > cores || loadAfter > cores, diagnostics: finishObservation() }
+  const result = { ...record, loadBefore, loadAfter, highLoad: loadBefore > cores || loadAfter > cores, diagnostics }
   console.log(`SCRY_TIMING_RUN=${JSON.stringify(result)}`)
-  // stdout is a pipe in CI. Let its pending diagnostic footer drain before exit.
-  process.exitCode = code ?? 1
+  // stdout is a pipe in CI. Let its pending diagnostic footer drain before exiting.
+  process.exitCode = typeof record.exit === 'number' ? record.exit : 1
+}
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => child.kill(signal))
+child.once('error', error => {
+  console.error(error.message)
+  // A spawn failure never emitted measurement data, but the wrapper must still report one
+  // record and release the lock exactly once; 'exit' may or may not follow this event.
+  finish({ label, command, exit: 1, signal: null, wallMs: Date.now() - startedAt, cores, spawnError: error.message })
 })
+child.once('exit', (code, signal) => finish({ label, command, exit: code, signal, wallMs: Date.now() - startedAt, cores }))

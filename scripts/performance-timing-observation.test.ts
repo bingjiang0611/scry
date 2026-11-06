@@ -1,5 +1,5 @@
 import { execFile, spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -73,6 +73,32 @@ describe('timing parent diagnostics', () => {
       expect(footer.exit).toBe(7)
       expect(footer.diagnostics.samples).toHaveLength(4096)
       expect(readFileSync(output, 'utf8')).toBe(result.stdout)
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('reports one record and releases the lock when the child cannot be spawned', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'scry-timing-spawn-'))
+    try {
+      const wrapper = readFileSync('.agents/skills/scry-performance-climb/scripts/timing-run.mjs', 'utf8')
+      const lockDeclaration = "const lock = '/tmp/scry-performance-timing.lock'"
+      const privateLock = join(directory, 'lock')
+      writeFileSync(join(directory, 'timing-run.mjs'), wrapper.replace(lockDeclaration, `const lock = ${JSON.stringify(privateLock)}`))
+      writeFileSync(join(directory, 'timing-observation.mjs'),
+        'export const observeTimingEnvironment = () => () => ({samples:[],samplesTruncated:false,maxEventLoopDelayMs:null})\n')
+      // A missing executable emits 'error' and may never emit 'exit'. The wrapper must still
+      // release the lock and report exactly one record instead of exiting silently.
+      const result = spawnSync(process.execPath, [join(directory, 'timing-run.mjs'), 'spawn-failure', '--',
+        join(directory, 'does-not-exist')], { encoding: 'utf8', maxBuffer: 1024 * 1024 })
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain('ENOENT')
+      const lines = result.stdout.trim().split('\n').filter(line => line.startsWith('SCRY_TIMING_RUN='))
+      expect(lines).toHaveLength(1)
+      const record = JSON.parse(lines[0].slice('SCRY_TIMING_RUN='.length))
+      expect(record.exit).toBe(1)
+      expect(record.spawnError).toContain('ENOENT')
+      expect(existsSync(privateLock)).toBe(false)
     } finally {
       rmSync(directory, { recursive: true, force: true })
     }
