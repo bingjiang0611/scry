@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, rename, rm, truncate, writeFile } from 'node:fs/promises'
+import { appendFile, mkdtemp, rename, rm, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -117,7 +117,7 @@ describe('transcript anchor reuse', () => {
     const prompt = 'shifted prompt'
     const hash = hashOf(prompt)
     await writeFile(path, turn(prompt, 30) + turn('later prompt', 30, 200))
-    await stableTranscript(path, 'anchor:shift-1', 'claude', hashOf('later prompt'))
+    await stableTranscript(path, 'anchor:shift-1', 'claude', hash)
 
     // Rewrite the head so the cached offset points at a different line.
     await writeFile(path, turn('other prompt', 30) + turn(prompt, 30, 400) + turn('later prompt', 10, 700))
@@ -126,6 +126,41 @@ describe('transcript anchor reuse', () => {
     expect(transcriptReadStats().anchorBytesScanned).toBeGreaterThan(4_000)
     expect(shape(reread)).toEqual(shape(await coldRead(path, hash, 'anchor:shift-3')))
     expect(reread.events.length).toBeGreaterThan(0)
+  })
+
+  it.each(['cold', 'warm'] as const)('rescans an unfinished UTF-8 line left by a %s anchor scan', async (scan) => {
+    const path = await transcriptPath()
+    const prompt = 'repeated 🧪 prompt'
+    const hash = hashOf(prompt)
+    const prior = turn(prompt, 3) + turn('middle prompt', 3, 100)
+    const next = Buffer.from(turn(prompt, 2, 200))
+    const split = next.indexOf(Buffer.from('🧪')) + 1
+    await writeFile(path, prior)
+    if (scan === 'warm') await stableTranscript(path, 'anchor:partial-before', 'claude', hash)
+    await appendFile(path, next.subarray(0, split))
+    await stableTranscript(path, 'anchor:partial', 'claude', hash)
+    await appendFile(path, next.subarray(split))
+
+    const warm = await stableTranscript(path, 'anchor:partial-completed', 'claude', hash)
+    const cold = await coldRead(path, hash, 'anchor:partial-oracle')
+    expect(cold.source?.startOffset).toBeGreaterThan(0)
+    expect(warm.source).toEqual(cold.source)
+    expect(shape(warm)).toEqual(shape(cold))
+  })
+
+  it('matches the backward scanner for a complete anchor at EOF without a newline', async () => {
+    const path = await transcriptPath()
+    const prompt = 'EOF prompt'
+    const hash = hashOf(prompt)
+    await writeFile(path, turn(prompt, 3) + turn('middle prompt', 3, 100))
+    await stableTranscript(path, 'anchor:eof-before', 'claude', hash)
+    await appendFile(path, turn(prompt, 0).trimEnd())
+
+    const warm = await stableTranscript(path, 'anchor:eof', 'claude', hash)
+    const cold = await coldRead(path, hash, 'anchor:eof-oracle')
+    expect(cold.source?.startOffset).toBeGreaterThan(0)
+    expect(warm.source).toEqual(cold.source)
+    expect(shape(warm)).toEqual(shape(cold))
   })
 
   it('keeps the whole window when no prompt identity is available', async () => {

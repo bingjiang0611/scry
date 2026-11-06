@@ -115,11 +115,15 @@ function transcriptLineAnchor(
   return matchesHash || !promptHash && !providerTurnId ? 'turn' : undefined
 }
 
-interface AnchorCacheEntry {
+interface AnchorScan {
   /** Byte offset the window starts at (the newline before the anchor line, or 0). */
   offset: number
-  /** File size already scanned for a newer matching anchor. */
+  /** End of the last newline-terminated line; an unfinished tail must be rescanned. */
   scannedTo: number
+}
+
+interface AnchorCacheEntry extends AnchorScan {
+  size: number
   dev: number
   ino: number
 }
@@ -153,8 +157,8 @@ async function latestAnchorFrom(
   provider: ProviderId,
   promptHash?: string,
   providerTurnId?: string
-): Promise<number> {
-  if (from >= endOffset) return -1
+): Promise<AnchorScan> {
+  if (from >= endOffset) return { offset: -1, scannedTo: from }
   const handle = await openFile(path, 'r')
   const chunkBytes = 1024 * 1024
   let cursor = from
@@ -187,7 +191,11 @@ async function latestAnchorFrom(
   } finally {
     await handle.close()
   }
-  return latest
+  // A complete JSON value at EOF is an anchor too, but its line must be rescanned if appended.
+  if (cursor === endOffset && pending.length && transcriptLineAnchor(pending.toString('utf8'), provider, promptHash, providerTurnId)) {
+    latest = Math.max(latest, Math.max(0, pendingStart - 1))
+  }
+  return { offset: latest, scannedTo: pendingStart }
 }
 
 /** Read the single JSONL line a cached offset points at (the offset may be its preceding newline). */
@@ -224,7 +232,7 @@ async function anchorOffsetFor(
   // Codex anchors are found through a forward state machine over each scanned chunk, so a single
   // line cannot re-prove one; its scan also stops at the turn boundary, which is the same work.
   if (provider === 'codex' || !promptHash && !providerTurnId) {
-    return transcriptAnchorOffset(path, endOffset, provider, promptHash, providerTurnId)
+    return (await transcriptAnchorOffset(path, endOffset, provider, promptHash, providerTurnId)).offset
   }
   const key = JSON.stringify([path, provider, promptHash ?? '', providerTurnId ?? ''])
   const cached = anchorCache.get(key)
@@ -234,7 +242,7 @@ async function anchorOffsetFor(
       const info = await stat(path)
       // Append-only growth is proven by dev/ino identity and a size that still covers what was
       // already scanned; a replaced or truncated file cannot reuse this offset.
-      if (info.dev === cached.dev && info.ino === cached.ino && info.size >= cached.scannedTo) {
+      if (info.dev === cached.dev && info.ino === cached.ino && info.size >= cached.size) {
         const line = await lineAtAnchor(path, cached.offset)
         reusable = line !== undefined && !!transcriptLineAnchor(line, provider, promptHash, providerTurnId)
       }
@@ -243,18 +251,18 @@ async function anchorOffsetFor(
     }
     if (reusable) {
       const newer = await latestAnchorFrom(path, cached.scannedTo, endOffset, provider, promptHash, providerTurnId)
-      const offset = newer >= 0 ? newer : cached.offset
-      rememberAnchor(key, { offset, scannedTo: endOffset, dev: cached.dev, ino: cached.ino })
+      const offset = newer.offset >= 0 ? newer.offset : cached.offset
+      rememberAnchor(key, { offset, scannedTo: newer.scannedTo, size: endOffset, dev: cached.dev, ino: cached.ino })
       return offset
     }
     anchorCache.delete(key)
   }
-  const offset = await transcriptAnchorOffset(path, endOffset, provider, promptHash, providerTurnId)
+  const scan = await transcriptAnchorOffset(path, endOffset, provider, promptHash, providerTurnId)
   try {
     const info = await stat(path)
-    rememberAnchor(key, { offset, scannedTo: endOffset, dev: info.dev, ino: info.ino })
+    rememberAnchor(key, { ...scan, size: endOffset, dev: info.dev, ino: info.ino })
   } catch {}
-  return offset
+  return scan.offset
 }
 
 async function transcriptAnchorOffset(
@@ -263,10 +271,11 @@ async function transcriptAnchorOffset(
   provider: ProviderId,
   promptHash?: string,
   providerTurnId?: string
-): Promise<number> {
-  if (endOffset <= 0 || !promptHash && !providerTurnId) return 0
+): Promise<AnchorScan> {
+  if (endOffset <= 0 || !promptHash && !providerTurnId) return { offset: 0, scannedTo: 0 }
   const handle = await openFile(path, 'r')
   const chunkBytes = 1024 * 1024
+  let scannedTo = 0
   let cursor = endOffset
   let suffix = Buffer.alloc(0)
   let matchedUserOffset: number | undefined
@@ -277,7 +286,11 @@ async function transcriptAnchorOffset(
       const chunk = Buffer.allocUnsafe(cursor - start)
       const { bytesRead } = await handle.read(chunk, 0, chunk.length, start)
       recordTranscriptAnchorBytes(bytesRead)
-      if (bytesRead !== chunk.length) return 0
+      if (bytesRead !== chunk.length) return { offset: 0, scannedTo: 0 }
+      if (scannedTo === 0) {
+        const newline = chunk.lastIndexOf(0x0a)
+        if (newline >= 0) scannedTo = start + newline + 1
+      }
       const combined = Buffer.concat([chunk, suffix])
       let lineEnd = combined.length
       for (let index = combined.length - 1; index >= 0; index--) {
@@ -288,12 +301,12 @@ async function transcriptAnchorOffset(
           const anchor = transcriptLineAnchor(combined.subarray(lineStart, lineEnd).toString('utf8'), provider, promptHash, providerTurnId)
           const windowOffset = Math.max(0, absoluteOffset - 1)
           if (provider !== 'codex') {
-            if (anchor === 'turn') return windowOffset
+            if (anchor === 'turn') return { offset: windowOffset, scannedTo }
           } else {
             const anyAnchor = transcriptLineAnchor(
               combined.subarray(lineStart, lineEnd).toString('utf8'), provider, undefined, undefined
             )
-            if (matchedTurnOffset != null && anyAnchor === 'turn') return windowOffset
+            if (matchedTurnOffset != null && anyAnchor === 'turn') return { offset: windowOffset, scannedTo }
             if (anchor === 'turn' || matchedUserOffset != null && anyAnchor === 'turn') {
               matchedTurnOffset = windowOffset
             } else if (anchor === 'user' && matchedUserOffset == null) {
@@ -306,17 +319,17 @@ async function transcriptAnchorOffset(
       suffix = combined.subarray(0, lineEnd)
       // NUL cannot occur in a valid JSONL record. Sparse/uninitialized prefixes are
       // therefore a hard format boundary, not evidence that must be loaded to byte 0.
-      if (matchedTurnOffset != null && suffix.includes(0)) return matchedTurnOffset
+      if (matchedTurnOffset != null && suffix.includes(0)) return { offset: matchedTurnOffset, scannedTo }
       cursor = start
     }
     if (suffix.length) {
       const firstLine = suffix.toString('utf8')
       const anchor = transcriptLineAnchor(firstLine, provider, promptHash, providerTurnId)
-      if (anchor === 'turn') return 0
-      if (provider === 'codex' && matchedTurnOffset != null && transcriptLineAnchor(firstLine, provider) === 'turn') return 0
+      if (anchor === 'turn') return { offset: 0, scannedTo }
+      if (provider === 'codex' && matchedTurnOffset != null && transcriptLineAnchor(firstLine, provider) === 'turn') return { offset: 0, scannedTo }
       if (anchor === 'user' && matchedUserOffset == null) matchedUserOffset = 0
     }
-    return matchedTurnOffset ?? matchedUserOffset ?? 0
+    return { offset: matchedTurnOffset ?? matchedUserOffset ?? 0, scannedTo }
   } finally {
     await handle.close()
   }
