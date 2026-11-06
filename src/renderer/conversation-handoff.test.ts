@@ -95,6 +95,9 @@ describe('same-composer Agent handoff', () => {
     expect(api.preview).not.toHaveBeenCalled()
     // 负对照：旧实现把原始 `pi:rotom` 当成 Agent Profile 发出去，宿主才报错。
     expect(() => conversationTarget('pi:rotom')).toThrow(CONVERSATION_COPY.piProfileNotRegistered('pi:rotom'))
+    // The menus' own label is what the user sees; a raw id only appears when nothing named it.
+    expect(() => conversationTarget('pi:rotom', undefined, [{ id: 'pi:rotom', name: 'Pi · Rotom' }]))
+      .toThrow(CONVERSATION_COPY.piProfileNotRegistered('Pi · Rotom'))
     expect(conversationTarget('pi:rotom', undefined, [{ id: 'pi:rotom', agentProfileId: 'pi:0123456789abcdef' }]))
       .toEqual({ providerId: 'pi', agentProfileId: 'pi:0123456789abcdef' })
   })

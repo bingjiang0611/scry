@@ -74,7 +74,6 @@ describe('Pi RPC Provider', () => {
       expect(await piContinuationKey(profile, cwd, { ...env, CUSTOM_AUTH: 'synthetic-b' })).not.toBe(first)
       writeFileSync(join(cwd, '.pi', 'settings.json'), JSON.stringify({ defaultProvider: 'custom' }))
       expect(await piContinuationKey(profile, cwd, env)).not.toBe(first)
-      writeFileSync(auth, JSON.stringify({ custom: { type: 'api_key', key: '!printf synthetic-a' } }))
       // The helper's resolved value is the identity, so it equals the same credential written literally.
       writeFileSync(auth, JSON.stringify({ custom: { type: 'api_key', key: 'synthetic-a' } }))
       const literal = await piContinuationKey(profile, cwd, env)

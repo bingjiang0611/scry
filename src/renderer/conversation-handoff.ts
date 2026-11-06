@@ -2,11 +2,16 @@ import { isPiAgentProfileId, providerIdForAgentId, type AgentInputAttachment, ty
 import type { ConversationAdoptionPreview, ConversationApi, ConversationSendRequest, ConversationSummary, ConversationTargetRequest } from '@shared/conversation-api'
 import { CONVERSATION_COPY } from './constants/conversation-copy'
 
-/** What discovery reported for one Agent: its own id and its registered Pi profile, if any. */
+/** What discovery reported for one Agent: its own id, display name and registered Pi profile. */
 export interface AgentProfileIdentity {
   id: string
   agentProfileId?: string
+  name?: string
 }
+
+/** The name the menus show for this Agent; the raw id is only the last resort. */
+const agentLabelOf = (agentId: string, agents: readonly AgentProfileIdentity[]): string =>
+  agents.find(agent => agent.id === agentId)?.name ?? agentId
 
 /**
  * Registered Pi Agent Profile identity of the selected Agent.
@@ -40,7 +45,7 @@ export function conversationTarget(agentId: string, controls?: AgentRunControls,
   const agentProfileId = registeredPiProfileIdOf(agentId, agents)
   // A historical Pi id is not an Agent Profile. Sending it would be refused by the host
   // anyway, so say so here, before any read, and never pick a neighbour launcher.
-  if (!agentProfileId) throw new Error(CONVERSATION_COPY.piProfileNotRegistered(agentId))
+  if (!agentProfileId) throw new Error(CONVERSATION_COPY.piProfileNotRegistered(agentLabelOf(agentId, agents)))
   return { providerId, agentProfileId, ...controls }
 }
 
