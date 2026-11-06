@@ -7,6 +7,7 @@ import { createWorkspaceRuntime } from '../main/bootstrap/workspace-runtime'
 import { createSessionCatalog } from '../main/bootstrap/session-catalog'
 import { createPiProfileRuntime } from '../main/bootstrap/pi-profiles'
 import { createProviderRuntime } from '../main/bootstrap/provider-runtime'
+import { runStartupRecovery } from '../main/bootstrap/startup-recovery'
 import { startRun } from '../main/bootstrap/run-execution'
 import { startWorkspaceRun } from '../main/bootstrap/workspace-start'
 import { SourceControlService } from '../main/source-control/service'
@@ -148,6 +149,20 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     remoteRunLedgerIds,
     mirrorSessionTranscript
   })
+
+  // Startup recovery owns unfinished recorder/outbox/conversation evidence. The
+  // daemon must finish it before exposing local.sock, otherwise a device can start
+  // a new run while the previous process is still being reconciled.
+  startupManagedRecovery = runStartupRecovery({
+    userDataDir: options.userDataDir,
+    ...(options.isPackaged ? { recorderCli: join(options.resourcesPath, 'bin', 'scry') } :
+      process.env.SCRY_CLI_PATH ? { recorderCli: process.env.SCRY_CLI_PATH } : {}),
+    startupPerf: { mark: () => undefined, finish: () => undefined },
+    conversationStore: catalog.conversationStore,
+    runs: pipeline.runs,
+    deferMs: 0
+  })
+  await startupManagedRecovery
 
   const configuredRemotePermissionMode = () => {
     const raw = process.env.SCRY_REMOTE_PERMISSION_MODE

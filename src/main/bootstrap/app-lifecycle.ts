@@ -6,7 +6,7 @@ import type { ActiveRun } from '../../shared/trace'
 import type { ProviderId } from '../../shared/provider'
 import { initDb, setBillingEnvProvider } from '../db'
 import { configureStorage } from '../storage-paths'
-import { warmShellEnv, shellEnv } from '../claude-locate'
+import { packagedRecorderCliPath, warmShellEnv, shellEnv } from '../claude-locate'
 import { ensureShellEnv } from '../shell'
 import { configureProviderEventLog } from '../provider-event-log'
 import { PerformanceTrace, performanceRecordingEnabled } from '../performance-timing'
@@ -155,7 +155,13 @@ export function registerAppLifecycle({
     void requireDesktopRemoteClient().restoreConnections().catch((error) => {
       console.warn('[scry] desktop connection startup recovery failed:', error)
     })
-    setStartupManagedRecovery(runStartupRecovery({ startupPerf, conversationStore, runs }))
+    setStartupManagedRecovery(runStartupRecovery({
+      userDataDir: app.getPath('userData'),
+      recorderCli: packagedRecorderCliPath() ?? process.env.SCRY_CLI_PATH,
+      startupPerf,
+      conversationStore,
+      runs
+    }))
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })

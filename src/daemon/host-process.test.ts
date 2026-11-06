@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { afterEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID, webcrypto } from 'node:crypto'
@@ -89,6 +89,8 @@ describe('daemon host process', () => {
     const workspace = join(root, 'workspace')
     mkdirSync(workspace, { mode: 0o700 })
     createRecentFoldersStore(userDataDir).push(workspace)
+    const staleAtomicTemp = join(userDataDir, 'app-sessions.json.tmp')
+    writeFileSync(staleAtomicTemp, 'stale', { mode: 0o600 })
     const oldRelay = process.env.SCRY_REMOTE_RELAY_ENABLED
     const oldSmoke = process.env.SCRY_ELECTRON_SMOKE_PROVIDER
     const oldLogging = process.env.ELECTRON_ENABLE_LOGGING
@@ -108,6 +110,7 @@ describe('daemon host process', () => {
         log: () => undefined
       })
       expect(host.channel.socketPath).toBe(join(daemonStateDirectory, 'local.sock'))
+      expect(existsSync(staleAtomicTemp)).toBe(false)
       expect(existsSync(host.channel.socketPath)).toBe(true)
       expect(host.service.relayConfigured).toBe(false)
       const recovered = readFileSync(join(ledgerDirectory, 'session-ledger.log'), 'utf8')
