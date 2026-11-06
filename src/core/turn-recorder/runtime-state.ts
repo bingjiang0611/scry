@@ -8,7 +8,7 @@ import type { RepositoryDiscovery } from './config.js'
 import { listFiles, readJson, withDirectoryLock } from './io.js'
 import {
   ATTENTION_PROVIDERS, attentionIndexPresent, clearSessionAttention, markSessionAttention,
-  markedSessions, type MarkedSession
+  markedSessions, withSessionAttentionLock, type MarkedSession
 } from './attention.js'
 import { safeKey } from './store.js'
 import { recorderHasRetryableInbox, recorderInboxEntries } from './inbox.js'
@@ -125,27 +125,28 @@ export async function recorderQuarantinedOpenTurns(
  * hook, or a quarantined turn. Also drops markers whose session directory is gone.
  */
 export async function reconcileAttentionIndex(dataRoot: string): Promise<MarkedSession[]> {
-  const reconciled: MarkedSession[] = []
   const live = new Set<string>()
   for (const provider of ATTENTION_PROVIDERS) {
     const providerRoot = join(dataRoot, 'runtime', provider)
     for (const sessionKey of await listFiles(providerRoot)) {
       const sessionDir = join(providerRoot, sessionKey)
       live.add(`${provider}__${sessionKey}`)
-      if (!await sessionHasPendingEvidence(sessionDir)) {
-        await clearSessionAttention(dataRoot, provider, sessionKey)
-        continue
-      }
-      await markSessionAttention(dataRoot, provider, sessionKey)
-      reconciled.push({ provider, sessionKey, sessionDir })
+      await withSessionAttentionLock(dataRoot, provider, sessionKey, async () => {
+        if (await sessionHasPendingEvidence(sessionDir)) {
+          await markSessionAttention(dataRoot, provider, sessionKey)
+        } else {
+          await clearSessionAttention(dataRoot, provider, sessionKey)
+        }
+      })
     }
   }
   for (const marker of await markedSessions(dataRoot)) {
     if (!live.has(`${marker.provider}__${marker.sessionKey}`)) {
-      await clearSessionAttention(dataRoot, marker.provider, marker.sessionKey)
+      // A publisher may have created the session after the directory snapshot; recheck under lock.
+      await releaseStaleAttention(dataRoot, marker.provider, marker.sessionDir)
     }
   }
-  return reconciled
+  return markedSessions(dataRoot)
 }
 
 /**
@@ -158,8 +159,11 @@ export async function releaseStaleAttention(
   provider: ProviderId,
   sessionDir: string
 ): Promise<void> {
-  if (await sessionHasPendingEvidence(sessionDir)) return
-  await clearSessionAttention(dataRoot, provider, basename(sessionDir))
+  const sessionKey = basename(sessionDir)
+  await withSessionAttentionLock(dataRoot, provider, sessionKey, async () => {
+    if (await sessionHasPendingEvidence(sessionDir)) return
+    await clearSessionAttention(dataRoot, provider, sessionKey)
+  })
 }
 
 /**

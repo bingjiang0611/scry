@@ -4,13 +4,10 @@ import { available, disabled, partial, unavailable, type AgentTurnRecord, type T
 import { aggregateTurnEvidence } from './aggregate.js'
 import { isFullToolContentPolicy } from './tool-content.js'
 import { writeRecorderContent } from './content-store.js'
-import { clearSessionAttention } from './attention.js'
-import { recorderInboxEntries } from './inbox.js'
-import { safeKey } from './store-index.js'
 import { limitTurnDiffPatchBytes, cancelGitTurnDiff, finishGitTurnDiff } from './git.js'
 import { writeJsonAtomic } from './io.js'
 import { RECORDER_VERSION, commitRecord, clearRuntimeTurn, stableHash } from './store.js'
-import { recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState } from './runtime-state.js'
+import { releaseStaleAttention, recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState } from './runtime-state.js'
 import type { RecorderEnablement } from './config.js'
 import { terminalStatus, type RecorderHookResult, resolveModelIdentity } from './recorder-contracts.js'
 import { readStoredEvents, mergeTurnTraceEvents, dedupeTraceEvents } from './recorder-trace-merge.js'
@@ -334,9 +331,7 @@ export async function finalizeOpenTurn(
   await rm(openPath(root), { force: true })
   // A hook queued while this turn was finalizing still needs a recovery pass, so the index entry is
   // only dropped when nothing is left to replay. Caller holds the session lock.
-  if ((await recorderInboxEntries(root)).length === 0) {
-    await clearSessionAttention(enablement.dataRoot, open.provider, safeKey(open.sessionId))
-  }
+  await releaseStaleAttention(enablement.dataRoot, open.provider, root)
   await clearRuntimeTurn(enablement.dataRoot, turnRoot(root, open.generation))
   return { status: committed.status, record: committed.record }
 }

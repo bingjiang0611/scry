@@ -6,7 +6,7 @@ import type { TraceEvent } from '../../shared/trace.js'
 import { available, partial, type Evidence, type TurnEndReason, type TurnEvidence, type TurnTermination } from '../../shared/turn-record.js'
 import { captureToolContent, isFullToolContentPolicy, persistModelEventContent, persistToolEventContent, type ToolContentPolicy } from './tool-content.js'
 import { writeRecorderContent } from './content-store.js'
-import { markSessionAttention } from './attention.js'
+import { markSessionAttention, withSessionAttentionLock } from './attention.js'
 import { safeKey } from './store-index.js'
 import { discoverRepositories, type RecorderEnablement } from './config.js'
 import { beginGitTurnDiff } from './git.js'
@@ -80,11 +80,12 @@ export async function beginOpenTurn(
     uploadEnvironment,
     captures: []
   }
-  // The recovery index is written first: a crash after this point leaves a stale marker (one wasted
-  // visit) rather than an open turn no recovery pass knows about.
-  await markSessionAttention(enablement.dataRoot, provider, safeKey(sessionId))
-  // Publish the initial identity durably before acknowledging the start hook.
-  await writeJsonAtomic(openPath(root), open)
+  // Publish the marker first and the initial identity durably before acknowledging the start hook.
+  // Cleanup shares this lock, so it cannot strand a new open turn between those writes.
+  await withSessionAttentionLock(enablement.dataRoot, provider, safeKey(sessionId), async () => {
+    await markSessionAttention(enablement.dataRoot, provider, safeKey(sessionId))
+    await writeJsonAtomic(openPath(root), open)
+  })
   await writeJsonAtomic(statePath(root), { ...session, lastGeneration: generation, lastTurnIndex: turnIndex })
   if (!managedByScry && enablement.config.capture.diff) {
     const captureDir = join(turnRoot(root, generation), 'captures')

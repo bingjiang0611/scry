@@ -1,7 +1,7 @@
 import { mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
-import { listFiles, syncDirectory } from './io.js'
+import { listFiles, syncDirectory, withDirectoryLock } from './io.js'
 
 /**
  * A flat "this session may need a recovery pass" index.
@@ -17,6 +17,9 @@ import { listFiles, syncDirectory } from './io.js'
  * it points at; creating a marker that already exists costs one failed exclusive create and no
  * fsync. `recoverRecorder` still rebuilds the index from the session directories when it is absent
  * or periodically, which is what repairs a marker lost to disk-level corruption.
+ * Publication (marker through atomic state write) and reclamation (evidence check through unlink)
+ * share a short per-session filesystem lock. Index-first ordering alone cannot prevent a cleaner
+ * from removing a marker while its writer has not yet published the state.
  */
 export const ATTENTION_PROVIDERS = ['claude', 'codex', 'qoder', 'opencode', 'pi'] as const
 
@@ -28,6 +31,17 @@ function markerName(provider: ProviderId, sessionKey: string): string {
   return `${provider}__${sessionKey}`
 }
 
+/** Never acquire a session/commit lock inside this lock, or hold it for Git or transcript work. */
+export function withSessionAttentionLock<T>(
+  dataRoot: string,
+  provider: ProviderId,
+  sessionKey: string,
+  action: () => Promise<T>
+): Promise<T> {
+  return withDirectoryLock(join(dataRoot, 'locks', 'attention', provider, `${sessionKey}.lock`), action)
+}
+
+/** Caller holds the attention lock through publication of the indexed state. */
 export async function markSessionAttention(
   dataRoot: string,
   provider: ProviderId,
@@ -51,6 +65,7 @@ export async function markSessionAttention(
   }
 }
 
+/** Caller holds the attention lock from the pending-evidence check through removal. */
 export async function clearSessionAttention(
   dataRoot: string,
   provider: ProviderId,
