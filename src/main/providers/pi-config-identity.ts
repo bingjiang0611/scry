@@ -15,7 +15,11 @@ const PI_CONFIG_HELPER_LIMIT = 16
  * the same way Pi does and hash the result: a rotated key changes the continuation key and a stale
  * request is rejected, instead of silently resuming on an unprovable credential.
  */
-export async function piConfigDigest(path: string, env: Record<string, string>): Promise<string | undefined> {
+export async function piConfigDigest(
+  path: string,
+  env: Record<string, string>,
+  cwd: string
+): Promise<string | undefined> {
   let info
   try { info = await lstat(path) } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
@@ -30,7 +34,7 @@ export async function piConfigDigest(path: string, env: Record<string, string>):
   if (!hasDynamicValue(value)) return raw
   // settings.json keeps its reviewed behaviour: a project-owned helper stays opaque here.
   if (basename(path) === 'settings.json') return raw
-  const resolved = await resolveHelpers(value, env, { left: PI_CONFIG_HELPER_LIMIT })
+  const resolved = await resolveHelpers(value, env, cwd, { left: PI_CONFIG_HELPER_LIMIT })
   // Same effective config must yield the same identity however it was written, so hash the resolved
   // JSON rather than the file bytes that still contain the helper command.
   return createHash('sha256').update(JSON.stringify(resolved)).digest('hex')
@@ -39,25 +43,35 @@ export async function piConfigDigest(path: string, env: Record<string, string>):
 const hasDynamicValue = (candidate: unknown): boolean => typeof candidate === 'string' ? candidate.startsWith('!') :
   Boolean(candidate && typeof candidate === 'object' && Object.values(candidate).some(hasDynamicValue))
 
+const shellQuote = (value: string): string => `'${value.split("'").join("'\\''")}'`
+
+/**
+ * A Pi run spawns its process with the conversation cwd (`request.cwd`, else the home directory),
+ * so a helper that resolves a relative path must start there as well. The shared process runner is
+ * already at the commit size budget and cannot take a cwd, so enter the directory in the shell.
+ */
+const helperScript = (command: string, cwd: string): string => `cd -- ${shellQuote(cwd)} || exit 1\n${command}`
+
 // The helper output is a credential: it stays inside this function and only its hash travels.
 async function resolveHelpers(
   candidate: unknown,
   env: Record<string, string>,
+  cwd: string,
   budget: { left: number }
 ): Promise<unknown> {
   if (typeof candidate === 'string') {
     if (!candidate.startsWith('!')) return candidate
     if (budget.left-- <= 0) throw new Error('Pi 动态配置 helper 超过可验证上限；接续身份不可用')
-    const outcome = await execFileOutcome('/bin/sh', ['-c', candidate.slice(1)], { env, timeout: PI_CONFIG_HELPER_TIMEOUT_MS })
+    const outcome = await execFileOutcome('/bin/sh', ['-c', helperScript(candidate.slice(1), cwd)], { env, timeout: PI_CONFIG_HELPER_TIMEOUT_MS })
     if (outcome.exitCode !== 0) throw new Error('Pi 动态配置 helper 未成功返回；接续身份不可用')
     return outcome.stdout
   }
   if (Array.isArray(candidate)) {
-    return Promise.all(candidate.map(item => resolveHelpers(item, env, budget)))
+    return Promise.all(candidate.map(item => resolveHelpers(item, env, cwd, budget)))
   }
   if (candidate && typeof candidate === 'object') {
     const entries = await Promise.all(Object.entries(candidate as Record<string, unknown>)
-      .map(async ([key, item]) => [key, await resolveHelpers(item, env, budget)] as const))
+      .map(async ([key, item]) => [key, await resolveHelpers(item, env, cwd, budget)] as const))
     return Object.fromEntries(entries)
   }
   return candidate

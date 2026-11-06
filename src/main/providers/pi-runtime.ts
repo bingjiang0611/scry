@@ -1,6 +1,7 @@
 import { accessSync, constants, createReadStream, readFileSync, realpathSync, statSync } from 'node:fs'
 import { access as accessAsync, lstat, readFile as readFileAsync, realpath as realpathAsync, stat as statAsync } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
+import { homedir } from 'node:os'
 import { basename, delimiter, dirname, join, resolve } from 'node:path'
 import type { PiAgentProfile } from '../pi-agent-profiles'
 import { execFileText, resolveCommandOnPath, sanitizeProviderEnv, shellEnv } from '../claude-locate'
@@ -231,12 +232,14 @@ export async function piContinuationKey(
     throw new Error('Pi config/auth namespace 不是可验证的本地目录；接续身份不可用')
   }
   const canonicalConfigNamespace = await realpathAsync(configNamespace)
+  // Pi spawns its process in the conversation cwd; helpers see the same directory.
+  const helperCwd = cwd || homedir()
   const [nodeHash, launcherHash, runtimeHash, authHash, settingsHash, modelsHash, projectSettingsHash] = await Promise.all([
     fileDigest(node), fileDigest(launcher.executable), fileDigest(runtime.executable),
-    piConfigDigest(join(canonicalConfigNamespace, 'auth.json'), env),
-    piConfigDigest(join(canonicalConfigNamespace, 'settings.json'), env),
-    piConfigDigest(join(canonicalConfigNamespace, 'models.json'), env),
-    cwd ? piConfigDigest(join(cwd, '.pi', 'settings.json'), env) : undefined
+    piConfigDigest(join(canonicalConfigNamespace, 'auth.json'), env, helperCwd),
+    piConfigDigest(join(canonicalConfigNamespace, 'settings.json'), env, helperCwd),
+    piConfigDigest(join(canonicalConfigNamespace, 'models.json'), env, helperCwd),
+    cwd ? piConfigDigest(join(cwd, '.pi', 'settings.json'), env, helperCwd) : undefined
   ])
   // models.json supports arbitrary named environment references, not only a
   // fixed list of known providers. Hash the actual sanitized launch environment.

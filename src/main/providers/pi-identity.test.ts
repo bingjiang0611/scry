@@ -81,6 +81,12 @@ describe('Pi RPC Provider', () => {
       expect(await piContinuationKey(profile, cwd, env)).toBe(literal)
       writeFileSync(auth, JSON.stringify({ custom: { type: 'api_key', key: '!printf synthetic-b' } }))
       expect(await piContinuationKey(profile, cwd, env)).not.toBe(literal)
+      // Pi spawns its process in the conversation cwd, so a helper that reads a relative file
+      // resolves it there; running it anywhere else would leave the credential unverifiable.
+      writeFileSync(join(cwd, 'synthetic-key.sh'), '#!/bin/sh\nprintf synthetic-a')
+      chmodSync(join(cwd, 'synthetic-key.sh'), 0o755)
+      writeFileSync(auth, JSON.stringify({ custom: { type: 'api_key', key: '!./synthetic-key.sh' } }))
+      expect(await piContinuationKey(profile, cwd, env)).toBe(literal)
       // models.json helpers are resolved too: a rotated model key changes the identity.
       const models = join(cwd, '.pi', 'agent', 'models.json')
       writeFileSync(models, JSON.stringify({ providers: { switch: { apiKey: '!printf model-key-a' } } }))

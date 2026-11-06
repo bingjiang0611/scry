@@ -22,7 +22,7 @@
 4. **封存**：`SideChatSnapshotWriter` + `sealSink` 一条消息一次写入；正文 ≤2 KiB 内联、否则 256 KiB 分片进内容寻址清单树（fanout 32，分支只带计数/字节/子引用，写作者只保留每层一个未完成节点）。记录只留格式 4 描述符（`messageCount`/`bodyBytes`/`ManifestRef`）。UTF-16 代理对被 chunk 切开时 `Utf8ChunkNormalizer` 跨块持有，`text-spool.ts` 入口同样携带，hash/字节/分页三者一致。
 5. **首次与后续发送的历史选择**：`prepareConversationHandoff` → 格式 4 子会话走 `selectSideChatHistory`：先读清单元数据，正文只在“存储字节 + 最小信封”仍能进交接预算时才读；选择顺序与旧 `selectHistory` 一致（最后 user、最后 assistant、首个 user、由新到旧）。冻结条目全部来自子会话自己的清单。
 6. **遗漏台账**：`turn.omittedRanges`（`{snapshotId, from, to}` 闭区间）取代“每条遗漏一个 ref 写回 Conversation JSON”。4200 条冻结消息的 dispatch 记录仍是描述符级 JSON。
-7. **遗漏检索**：reader 接收 `HistoryReaderSource`；格式 4 子会话由 `sideChatHistoryReaderSource` 分页清单（元数据页只读覆盖叶子，正文页只读该条消息分片）。Provider 侧由既有 Pi 扩展经 loopback JSON-RPC 调用（`provider-historical-input.test.ts`、`pi-*.test.ts` 证明真实调用与准入）。
+7. **遗漏检索**：reader 接收 `HistoryReaderSource`；格式 4 子会话由 `sideChatHistoryReaderSource` 分页清单（元数据页只读覆盖叶子，正文页只读该条消息分片）。Provider 侧由 Pi 扩展经 loopback JSON-RPC 调用（`provider-historical-input.test.ts` 直调 reader，`pi-managed-lifecycle.test.ts` 证 fixture 准入；未验证真实扩展）。
 8. **错误文案**：`SIDE_CHAT_COPY.reasonOf` 去掉 `Error invoking remote method '…':` 外壳并集中管理，未知原因如实标明。
 
 旧“缩小前缀”提现已删除：`SideChatBudgetRefusal`、`smallestFreezableOrdinal`、`SideChatPreview.narrowed`、renderer `setNarrowed`/`previewNarrow*` 文案与相关断言都不在了；被拒绝的范围保持拒绝，不会提议把用户历史缩小成别的范围。`smallestThroughOrdinal` 保留，它是用户在预览里主动选择更早边界的那一个入口。
