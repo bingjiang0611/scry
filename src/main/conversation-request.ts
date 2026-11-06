@@ -3,7 +3,7 @@ import type {
   SideChatListRequest, SideChatPreviewOptions
 } from '../shared/conversation-api'
 import type { SideChatInitialTarget, SideChatSource } from '../shared/conversation'
-import { boundedControlValue, isAgentPermissionMode, isCommandId, normalizeAgentAttachments, type AgentStartRequest } from '../shared/runtime'
+import { boundedControlValue, isAgentPermissionMode, isCommandId, isPiAgentProfileId, normalizeAgentAttachments, type AgentStartRequest } from '../shared/runtime'
 import { assertConversationItems, hashPattern, sideChatInitialTarget, sideChatSource } from './conversation-schema'
 
 export const targetFields = ['providerId', 'agentProfileId', 'model', 'effort', 'permissionMode']
@@ -26,7 +26,7 @@ function parseTarget(value: Record<string, unknown>): ConversationTargetRequest 
   if (value.providerId !== 'claude' && value.providerId !== 'codex' && value.providerId !== 'pi' &&
     value.providerId !== 'qoder' && value.providerId !== 'opencode') throw new Error('统一对话 Provider 不受支持')
   if (value.providerId === 'pi') {
-    if (typeof value.agentProfileId !== 'string' || !/^pi:[a-f0-9]{16}$/.test(value.agentProfileId)) {
+    if (!isPiAgentProfileId(value.agentProfileId)) {
       throw new Error('统一对话 Pi 必须选择已登记的 Agent Profile')
     }
   } else if (value.agentProfileId !== undefined) throw new Error('统一对话仅支持 Pi 命名 Profile；其他 Provider 仅支持默认配置')

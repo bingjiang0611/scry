@@ -10,18 +10,17 @@ import { recordRendererPerformance } from '../performance-recording'
 import { windowBackgroundColor } from '../window-chrome'
 import { canonicalizePiAgentPaths, resolvePiLauncherExecutable, piProfileForExecutable, createPiAgentProfileStore, type PiAgentProfile } from '../pi-agent-profiles'
 import { detectAgentsFast, probeCliVersion, PI_VERSION_PROBE_TIMEOUT_MS, type DetectedAgent } from '../claude-locate'
-import { providerIdForAgentId } from '../../shared/runtime'
 import { piRpcEnvironment, probePiAgent } from '../providers/pi'
 import type { ProviderRegistry } from '../providers/registry'
 import type { ProviderCompatibilityStore } from '../provider-compatibility-manifest'
-import { composeProviderDetectionResults } from '../provider-detection'
+import { composeProviderDetectionResults, fastProviderDetectionResults } from '../provider-detection'
 
 export interface AppAgentBootstrapDependencies {
   handleTrusted: <TArgs extends unknown[], TResult>(channel: string, listener: (event: IpcMainInvokeEvent, ...args: TArgs) => TResult) => void
   getWindow: () => BrowserWindow | null
   smokeProviderEnabled: boolean
   smokeDetectedAgents: DetectedAgent[]
-  storedPiProfilesNotDetected: (detected: Array<{ id: string }>) => PiAgentProfile[]
+  storedPiProfiles: () => PiAgentProfile[]
   providerCompatibility: ProviderCompatibilityStore
   detectInstalledAgents: () => Promise<DetectedAgent[]>
   providerRegistry: ProviderRegistry
@@ -38,7 +37,7 @@ export interface AppAgentBootstrapDependencies {
 }
 
 export function registerAppAgentHandlers(deps: AppAgentBootstrapDependencies): void {
-  const { handleTrusted, getWindow, smokeProviderEnabled, smokeDetectedAgents, storedPiProfilesNotDetected, providerCompatibility, detectInstalledAgents, providerRegistry, dialog, piProfileStore, invalidateRemoteProviderMetadata, recentStore, canonicalExistingDirectory, invalidateSessionHistoryLoad, rememberProject, setCurrentCwd, getCurrentCwd } = deps
+  const { handleTrusted, getWindow, smokeProviderEnabled, smokeDetectedAgents, storedPiProfiles, providerCompatibility, detectInstalledAgents, providerRegistry, dialog, piProfileStore, invalidateRemoteProviderMetadata, recentStore, canonicalExistingDirectory, invalidateSessionHistoryLoad, rememberProject, setCurrentCwd, getCurrentCwd } = deps
   handleTrusted('app:setTheme', (_event, theme: unknown) => {
     if (theme !== 'dark' && theme !== 'light') throw new Error('无效的界面主题')
     nativeTheme.themeSource = theme
@@ -57,28 +56,7 @@ export function registerAppAgentHandlers(deps: AppAgentBootstrapDependencies): v
 
   handleTrusted('agent:detectFast', async () => {
     if (smokeProviderEnabled) return smokeDetectedAgents
-    const detected = (await canonicalizePiAgentPaths(detectAgentsFast())).flatMap((agent) => {
-      const providerId = providerIdForAgentId(agent.id)
-      if (!providerId) return []
-      return [{
-        ...agent,
-        ...(providerId === 'pi'
-          ? { agentProfileId: agent.id, runtimeProvider: 'pi_rpc' as const, transport: 'JSONL RPC subprocess' }
-          : {})
-      }]
-    })
-    return [
-      ...detected,
-      ...storedPiProfilesNotDetected(detected).map((profile) => ({
-        id: profile.id,
-        name: profile.label,
-        bin: basename(profile.executable),
-        path: profile.executable,
-        agentProfileId: profile.id,
-        runtimeProvider: 'pi_rpc' as const,
-        transport: 'JSONL RPC subprocess'
-      }))
-    ]
+    return fastProviderDetectionResults(await canonicalizePiAgentPaths(detectAgentsFast()), storedPiProfiles())
   })
 
   handleTrusted('agent:detect', async () => {
@@ -92,7 +70,7 @@ export function registerAppAgentHandlers(deps: AppAgentBootstrapDependencies): v
     return composeProviderDetectionResults({
       detected,
       descriptors,
-      storedPiProfiles: smokeProviderEnabled ? [] : storedPiProfilesNotDetected(detected),
+      storedPiProfiles: smokeProviderEnabled ? [] : storedPiProfiles(),
       probeStoredPiProfile: async (profile) => probeCliVersion(profile.executable, ['--version'], {
         env: await piRpcEnvironment(profile),
         timeout: PI_VERSION_PROBE_TIMEOUT_MS

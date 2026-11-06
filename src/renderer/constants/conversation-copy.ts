@@ -17,5 +17,13 @@ export const CONVERSATION_COPY = {
   pendingCheckFailed: (reason: string): string => `核对发送状态失败：${reason}`,
   pendingDuplicate: '已找到原发送记录，没有再次发送。',
   pendingDispatchUnknown: '发送结果尚未确认。原文与图片已保留，不会自动重发。',
-  pendingNotSent: '已确认没有发送：宿主在投递前拒绝了本次请求。原文与图片已保留，可显式重发。'
+  pendingNotSent: '已确认没有发送：宿主在投递前拒绝了本次请求。原文与图片已保留，可显式重发。',
+  // 历史 Pi Agent（如内置 `pi:rotom`）本身不是已登记的 Agent Profile，不能直接发送。
+  // 这个启动器不可直接被选中：既可能是还没登记，也可能是同一启动器登记了多个 Profile。
+  piProfileNotRegistered: (agentLabel: string): string =>
+    `无法发送：${agentLabel} 还不是可选中的已登记 Pi Profile，或同一启动器登记了多个 Profile。请在 Agent 菜单里选择同一启动器的单个 Pi Profile；当前对话和草稿已保留。`,
+  // 旧捕获迁移的来源是当时记录的启动器身份，不能改写成已登记 Profile（宿主按记录身份匹配）。
+  // 新增 Profile 也不会把那段历史变成该 Profile 的记录，所以只给出真正可行的下一步。
+  legacyPiSourceNotMigratable: (agentLabel: string): string =>
+    `无法迁移：这段 Pi 会话记录的历史启动器身份 ${agentLabel} 不是已登记的 Agent Profile，不能作为迁移来源；新增 Profile 也不会改写已有记录。请在已登记的 Pi Profile 下新建对话；当前对话和草稿已保留。`
 } as const

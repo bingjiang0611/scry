@@ -77,7 +77,7 @@ Codex 等这次请求调用的工具全部跑完，才发出它的 usage 通知�
 ## 验证入口
 
 ```sh
-npm run test:unit -- src/shared/llm-performance.test.ts src/renderer/components/llm-performance-data.test.ts src/main/llm-performance.test.ts src/main/llm-performance-history.test.ts src/main/providers/pi.test.ts src/main/providers/codex.test.ts src/main/llm-network-configuration.test.ts src/main/usage-jsonl.test.ts src/preload/index.test.ts src/main/ipc-trust.test.ts --exclude '.local/**'
+npm run test:unit -- src/shared/llm-performance.test.ts src/renderer/components/llm-performance-data.test.ts src/main/llm-performance.test.ts src/main/llm-performance-history.test.ts src/main/providers/pi-*.test.ts src/main/providers/codex.test.ts src/main/llm-network-configuration.test.ts src/main/usage-jsonl.test.ts src/preload/index.test.ts src/main/ipc-trust.test.ts --exclude '.local/**'
 node scripts/session-capability-ui-smoke.mjs --performance-only
 npm run typecheck:web
 npm run build

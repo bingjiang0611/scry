@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ProviderDescriptor } from '../shared/provider'
-import { composeProviderDetectionResults, createCachedAsyncLoader } from './provider-detection'
+import { composeProviderDetectionResults, createCachedAsyncLoader, fastProviderDetectionResults } from './provider-detection'
 
 const descriptor = (
   id: ProviderDescriptor['id'],
@@ -143,9 +143,10 @@ describe('Provider 完整探测结果组装', () => {
     })
     expect(result[1]).toMatchObject({
       id: 'pi:default',
-      agentProfileId: 'pi:default',
       version: '0.84.4'
     })
+    // 历史内置 id 不是已登记的 Agent Profile：没有同一启动器的 Profile 就不报。
+    expect(result[1].agentProfileId).toBeUndefined()
     expect(result[2]).toMatchObject({
       id: 'pi:25f2d533d0a8b391',
       name: 'Pi · pi-agent',
@@ -158,6 +159,63 @@ describe('Provider 完整探测结果组装', () => {
       }
     })
     expect(probeStoredPiProfile).toHaveBeenCalledOnce()
+  })
+
+  // 回归：截图里的发送失败。发现层保留历史 id（Pi · Rotom），但统一对话发送必须用已登记 Profile，
+  // 而两者是同一个 canonical 启动器时才映射；不合并 id，存储 Profile 条目继续保留。
+  it('reports the registered profile of a detected legacy Pi id on the same canonical launcher', async () => {
+    const launcher = '/Users/example/.local/bin/rotom'
+    const result = await composeProviderDetectionResults({
+      detected: [{ id: 'pi:rotom', name: 'Pi · Rotom', bin: 'rotom', path: launcher, version: '0.1.26',
+        health: { state: 'ready', transport: 'CLI version probe' } }],
+      descriptors: [descriptor('pi', 'Pi', 'pi_rpc', 'JSONL RPC subprocess')],
+      storedPiProfiles: [{ id: 'pi:0123456789abcdef', label: 'Pi · rotom', executable: launcher }],
+      probeStoredPiProfile: vi.fn().mockResolvedValue({ health: { state: 'ready' as const, transport: 'CLI version probe' } })
+    })
+
+    expect(result.map((agent) => agent.id)).toEqual(['pi:rotom', 'pi:0123456789abcdef'])
+    expect(result[0]).toMatchObject({ id: 'pi:rotom', name: 'Pi · Rotom', agentProfileId: 'pi:0123456789abcdef' })
+    expect(result[1]).toMatchObject({ id: 'pi:0123456789abcdef', agentProfileId: 'pi:0123456789abcdef' })
+  })
+
+  it('reports no profile for a legacy Pi id whose launcher is not registered exactly', async () => {
+    const result = await composeProviderDetectionResults({
+      detected: [{ id: 'pi:rotom', name: 'Pi · Rotom', bin: 'rotom', path: '/Users/example/.local/bin/rotom' }],
+      descriptors: [descriptor('pi', 'Pi', 'pi_rpc', 'JSONL RPC subprocess')],
+      storedPiProfiles: [{ id: 'pi:0123456789abcdef', label: 'Pi · other', executable: '/Users/example/dev-agent/bin/pi-agent' }],
+      probeStoredPiProfile: vi.fn().mockResolvedValue({ health: { state: 'ready' as const, transport: 'CLI version probe' } })
+    })
+
+    // 另一个 Pi 启动器不是这个 Agent 的身份；不猜同一个 Provider 的邻居。
+    expect(result[0]).toMatchObject({ id: 'pi:rotom' })
+    expect(result[0].agentProfileId).toBeUndefined()
+  })
+
+  it('reports no profile when two registered profiles share one launcher', async () => {
+    const shared = '/Users/example/.local/bin/rotom'
+    const result = await composeProviderDetectionResults({
+      detected: [{ id: 'pi:rotom', name: 'Pi · Rotom', bin: 'rotom', path: shared }],
+      descriptors: [descriptor('pi', 'Pi', 'pi_rpc', 'JSONL RPC subprocess')],
+      storedPiProfiles: [
+        { id: 'pi:0123456789abcdef', label: 'Pi · rotom', executable: shared },
+        { id: 'pi:fedcba9876543210', label: 'Pi · rotom copy', executable: shared }
+      ],
+      probeStoredPiProfile: vi.fn().mockResolvedValue({ health: { state: 'ready' as const, transport: 'CLI version probe' } })
+    })
+
+    expect(result[0].agentProfileId).toBeUndefined()
+  })
+
+  it('keeps an already registered Pi id as its own profile', async () => {
+    const result = await composeProviderDetectionResults({
+      detected: [{ id: 'pi:0123456789abcdef', name: 'Pi · rotom', bin: 'rotom', path: '/bin/rotom' }],
+      descriptors: [descriptor('pi', 'Pi', 'pi_rpc', 'JSONL RPC subprocess')],
+      storedPiProfiles: [{ id: 'pi:0123456789abcdef', label: 'Pi · rotom', executable: '/bin/rotom' }],
+      probeStoredPiProfile: vi.fn()
+    })
+
+    expect(result.map((agent) => agent.id)).toEqual(['pi:0123456789abcdef'])
+    expect(result[0].agentProfileId).toBe('pi:0123456789abcdef')
   })
 
   it('缺少 Pi descriptor 时不伪造自定义 Profile', async () => {
@@ -290,5 +348,40 @@ describe('Provider 完整探测结果组装', () => {
 
     expect(compatibility).not.toHaveBeenCalled()
     expect(result[0].compatibility).toBeUndefined()
+  })
+})
+
+describe('Provider 快速探测结果组装', () => {
+  // 回归：冷启动首屏显示的 Pi · Rotom 必须已经带上可发送的已登记 Profile。
+  it('maps a detected legacy Pi id to the registered profile on the same canonical launcher', () => {
+    const launcher = '/Users/example/.local/bin/rotom'
+    const result = fastProviderDetectionResults([
+      { id: 'claude', name: 'Claude Code', bin: 'claude', path: '/bin/claude' },
+      { id: 'pi:rotom', name: 'Pi · Rotom', bin: 'rotom', path: launcher }
+    ], [{ id: 'pi:0123456789abcdef', label: 'Pi · rotom', executable: launcher }])
+
+    expect(result.map((agent) => agent.id)).toEqual(['claude', 'pi:rotom', 'pi:0123456789abcdef'])
+    expect(result[0].agentProfileId).toBeUndefined()
+    expect(result[1]).toMatchObject({ id: 'pi:rotom', agentProfileId: 'pi:0123456789abcdef' })
+    expect(result[2]).toMatchObject({ id: 'pi:0123456789abcdef', agentProfileId: 'pi:0123456789abcdef',
+      path: launcher, bin: 'rotom', name: 'Pi · rotom', runtimeProvider: 'pi_rpc' })
+  })
+
+  it('never reports a historical id as an Agent Profile', () => {
+    const result = fastProviderDetectionResults([
+      { id: 'pi:default', name: 'Pi', bin: 'pi', path: '/bin/pi' },
+      { id: 'pi:rotom', name: 'Pi · Rotom', bin: 'rotom', path: '/bin/rotom' }
+    ], [{ id: 'pi:0123456789abcdef', label: 'Pi · other', executable: '/bin/other' }])
+
+    expect(result.filter((agent) => agent.id.startsWith('pi:'))
+      .map((agent) => [agent.id, agent.agentProfileId])).toEqual([
+      ['pi:default', undefined],
+      ['pi:rotom', undefined],
+      ['pi:0123456789abcdef', 'pi:0123456789abcdef']
+    ])
+  })
+
+  it('drops an agent without a Provider adapter instead of inventing one', () => {
+    expect(fastProviderDetectionResults([{ id: 'unknown', name: 'Unknown', bin: 'u', path: '/bin/u' }], [])).toEqual([])
   })
 })

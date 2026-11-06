@@ -4,6 +4,7 @@ import type { ConversationSummary } from '@shared/conversation-api'
 import { SIDE_CHAT_DEFAULT_TITLE } from '@shared/conversation'
 import type { DetectedAgent } from './env'
 import { SIDE_CHAT_COPY } from './constants/side-chat-copy'
+import { CONVERSATION_COPY } from './constants/conversation-copy'
 import { providerContextOf, requestedAgentId, useSideChatInstance } from './hooks/useSideChatInstance'
 import { readSideChatPreferences, writeSideChatPreference } from './side-chat-preferences'
 import { SideChatHeader, SideChatSurface } from './components/SideChatSurface'
@@ -78,16 +79,47 @@ describe('side chat runtime seeding', () => {
   })
 
   it('keeps the requested Provider when it is missing instead of picking another', () => {
-    // Persisted target names a Pi profile that no longer exists; Claude is installed.
-    const child = summary({ sideChat: { ...summary().sideChat!, initialTarget: { providerId: 'pi', agentProfileId: 'pi:deleted' } } })
+    // Persisted target names a registered Pi profile that no longer exists; Claude is installed.
+    const deleted = 'pi:0123456789abcdef'
+    const child = summary({ sideChat: { ...summary().sideChat!, initialTarget: { providerId: 'pi', agentProfileId: deleted } } })
     expect(requestedAgentId({ conversation: child, agents: [agent('claude')] }))
-      .toEqual({ agentId: 'pi:deleted', availability: 'unavailable' })
+      .toEqual({ agentId: deleted, availability: 'unavailable' })
     const rendered = probe(child, [agent('claude')])
-    expect(rendered.selectedAgentId).toBe('pi:deleted')
-    expect(rendered.blocked).toBe(SIDE_CHAT_COPY.providerUnavailable('pi:deleted'))
-    expect(rendered.sendBlocked).toBe(SIDE_CHAT_COPY.providerUnavailable('pi:deleted'))
+    expect(rendered.selectedAgentId).toBe(deleted)
+    expect(rendered.blocked).toBe(SIDE_CHAT_COPY.providerUnavailable(deleted))
+    expect(rendered.sendBlocked).toBe(SIDE_CHAT_COPY.providerUnavailable(deleted))
     expect(rendered.addPi).toBe('undefined')
     expect(rendered.removePi).toBe('undefined')
+  })
+
+  // 回归：截图里的 Pi · Rotom 是历史发现 id，不是已登记的 Agent Profile。发送前就要说清楚，
+  // 而不是等到提交时才由宿主报错；换个已登记 Profile 就能继续用这个侧聊。
+  it('blocks sending a historical Pi profile until one exact registered profile exists', () => {
+    const child = summary({ sideChat: { ...summary().sideChat!, initialTarget: { providerId: 'pi', agentProfileId: 'pi:rotom' } } })
+    const rotom = { id: 'pi:rotom', name: 'Pi · Rotom', bin: 'rotom', path: '/bin/rotom' }
+    const blocked = probe(child, [agent('claude'), rotom])
+    expect(blocked.selectedAgentId).toBe('pi:rotom')
+    expect(blocked.blocked).toBe(CONVERSATION_COPY.piProfileNotRegistered('Pi · Rotom'))
+    expect(blocked.sendBlocked).toBe(CONVERSATION_COPY.piProfileNotRegistered('Pi · Rotom'))
+    // 不是「Provider 不可用」：这个 Provider 装着，只是这个身份不能发送。
+    expect(blocked.blocked).not.toBe(SIDE_CHAT_COPY.providerUnavailable('pi:rotom'))
+
+    const unblocked = probe(child, [{ ...rotom, agentProfileId: 'pi:0123456789abcdef' }])
+    expect(unblocked.selectedAgentId).toBe('pi:rotom')
+    expect(unblocked.blocked).toBeNull()
+    expect(unblocked.sendBlocked).toBeNull()
+    // 已登记的稳定 id 选中时同样可以发送。
+    const registered = summary({ sideChat: { ...summary().sideChat!,
+      initialTarget: { providerId: 'pi', agentProfileId: 'pi:0123456789abcdef' } } })
+    expect(probe(registered, [{ ...rotom, agentProfileId: 'pi:0123456789abcdef' },
+      { ...rotom, id: 'pi:0123456789abcdef', name: 'Pi · rotom' }]).sendBlocked).toBeNull()
+  })
+
+  it('does not claim a missing Pi profile while detection is still reading', () => {
+    const child = summary({ sideChat: { ...summary().sideChat!, initialTarget: { providerId: 'pi', agentProfileId: 'pi:rotom' } } })
+    const reading = probe(child, [])
+    expect(reading.blocked).toBe(SIDE_CHAT_COPY.providerReading)
+    expect(reading.sendBlocked).toBe(SIDE_CHAT_COPY.providerReading)
   })
 
   it('blocks an unavailable Qoder instead of falling back to an installed Claude', () => {
@@ -113,10 +145,21 @@ describe('side chat runtime seeding', () => {
   })
 
   it('rejects an unknown agent id instead of guessing Claude', () => {
-    expect(providerContextOf('pi:work', '/repo')).toEqual({ providerId: 'pi', agentProfileId: 'pi:work', cwd: '/repo' })
-    expect(providerContextOf('codex', '/repo')).toEqual({ providerId: 'codex', cwd: '/repo' })
-    expect(providerContextOf('', '/repo')).toBeUndefined()
-    expect(providerContextOf('not-a-provider', '/repo')).toBeUndefined()
+    expect(providerContextOf('pi:work', '/repo', [agent('pi:work')]))
+      .toEqual({ providerId: 'pi', agentProfileId: 'pi:work', cwd: '/repo' })
+    expect(providerContextOf('codex', '/repo', [agent('codex')])).toEqual({ providerId: 'codex', cwd: '/repo' })
+    expect(providerContextOf('', '/repo', [])).toBeUndefined()
+    expect(providerContextOf('not-a-provider', '/repo', [])).toBeUndefined()
+  })
+
+  // 回归：截图里的 Pi · Rotom 是历史发现 id，不是已登记的 Agent Profile。
+  it('reads Pi controls under the registered profile reported for that exact agent', () => {
+    const detected = { ...agent('pi:rotom'), agentProfileId: 'pi:0123456789abcdef' }
+    expect(providerContextOf('pi:rotom', '/repo', [agent('claude'), detected]))
+      .toEqual({ providerId: 'pi', agentProfileId: 'pi:0123456789abcdef', cwd: '/repo' })
+    // 另一个启动器的 Profile 不会被借用；历史 id 仍指同一个检测到的启动器，main 能解析它。
+    expect(providerContextOf('pi:rotom', '/repo', [agent('pi:rotom'), { ...agent('pi:other'), agentProfileId: 'pi:fedcba9876543210' }]))
+      .toEqual({ providerId: 'pi', agentProfileId: 'pi:rotom', cwd: '/repo' })
   })
 })
 

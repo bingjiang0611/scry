@@ -22,7 +22,7 @@ Scry 通过 Pi/Rotom RPC 执行命令，不嵌入终端 TUI，也不按 `/goal` 
 ## 最小回归
 
 ```sh
-npm run test:unit -- src/main/providers/pi.test.ts src/main/providers/pi-lifecycle.test.ts src/main/trace-turn-progress.regression.test.ts src/shared/runtime.test.ts src/renderer/components/AskUserQuestionDialog.test.tsx
+npm run test:unit -- src/main/providers/pi-*.test.ts src/main/trace-turn-progress.regression.test.ts src/shared/runtime.test.ts src/renderer/components/AskUserQuestionDialog.test.tsx
 node scripts/session-capability-ui-smoke.mjs
 ```
 
