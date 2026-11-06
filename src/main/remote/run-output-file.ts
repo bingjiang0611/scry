@@ -1,10 +1,11 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import {
   closeSync, constants, fstatSync, fsyncSync, ftruncateSync, lstatSync, openSync,
   readSync, realpathSync, unlinkSync, writeSync
 } from 'node:fs'
 import { join } from 'node:path'
 import type { OutputChunk, RunOutputPage, RunOutputStore } from './run-output-log'
+import { createRemoteLeaseOwner } from './remote-lease-owner'
 
 const INDEX_ENTRY_BYTES = 8
 // 16 KiB of control characters can expand sixfold in JSON, plus bounded event metadata.
@@ -97,7 +98,7 @@ export class RunOutputFileStore implements RunOutputStore {
       0o600
     )
     try {
-      writeSync(this.#leaseFd, JSON.stringify({ pid: process.pid, lease: randomUUID(), createdAt: Date.now() }))
+      writeSync(this.#leaseFd, JSON.stringify(createRemoteLeaseOwner()))
       fsyncSync(this.#leaseFd)
       this.#syncDirectory()
     } catch (error) {
