@@ -37,6 +37,19 @@ describe('performance feedback contract', () => {
     expect(new Set(catalogue.paths.flatMap(path => path.benchmarks))).toEqual(new Set(Object.keys(policy.scenarios)))
   })
 
+  it('keeps the documented sub-10 ms noise floor and still fails a larger drift', () => {
+    const base = benchmark()
+    const head = structuredClone(base)
+    // startup.recovery settles near 1.4 ms; one 5.4 ms batch is the spike seen on the PR runner.
+    base.results['startup.recovery'].durationMs = Array(7).fill(1.4)
+    head.results['startup.recovery'].durationMs = [1.4, 5.4, 1.4, 1.4, 1.4, 1.4, 1.4]
+    const row = comparePerformance(base, head, policy).rows.find(candidate => candidate.scenario === 'startup.recovery' && candidate.metric === 'batchMeanP95Ms')!
+    expect(row.ceiling).toBeCloseTo(11.4, 5)
+    expect(row.status).toBe('pass')
+    head.results['startup.recovery'].durationMs = Array(7).fill(12)
+    expect(comparePerformance(base, head, policy).rows.some(candidate => candidate.scenario === 'startup.recovery' && candidate.metric === 'batchMeanP95Ms' && candidate.status === 'regressed')).toBe(true)
+  })
+
   it('fails on regression, missing metrics, insufficient samples and incompatible fixtures/environments', () => {
     const base = benchmark()
     const head = structuredClone(base)

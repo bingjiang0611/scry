@@ -76,7 +76,9 @@ describe('Node performance diagnostic workflow', () => {
 
   it('writes both diagnostic directions without replacing the failed primary report', () => {
     const { results, artifact, run } = fixture()
-    for (const result of Object.values(artifact.results)) result.durationMs.fill(10)
+    // Candidate is written at 1 ms; the control copy rises to 30 ms, beyond the documented
+    // 10 ms floor, so only the forward direction may fail.
+    for (const result of Object.values(artifact.results)) result.durationMs.fill(30)
     writeFileSync(join(results, 'control.json'), JSON.stringify(artifact))
     const result = run()
     expect(result.status, result.stderr).toBe(1)
