@@ -4,6 +4,7 @@ import type { SessionMeta } from '../env'
 import { relTime } from '../format'
 import { Icon } from './primitives/Icon'
 import { usePresence } from '../hooks/usePresence'
+import { MOTION } from '../motion'
 
 const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
@@ -43,7 +44,7 @@ export function useSessionHoverCard(session: SessionMeta, cwd: string, projectNa
   const timer = useRef<ReturnType<typeof setTimeout>>()
   const frame = useRef<number>()
   const [visible, setOpen] = useState(false)
-  const presence = usePresence({ onClose: () => setOpen(false), exitMs: 100 })
+  const presence = usePresence({ onClose: () => setOpen(false), exitMs: MOTION.durationExitSm })
   const open = visible && owner !== null
   const [position, setPosition] = useState({ left: 0, top: 0, transformOrigin: 'top left' })
   const clear = (): void => {

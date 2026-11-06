@@ -179,7 +179,7 @@
   cursor: pointer;
   opacity: 0;
   pointer-events: none;
-  transition: background-color var(--dur-micro) linear, color var(--dur-micro) linear, opacity var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out), color var(--duration-hover) var(--ease-out), opacity var(--duration-hover) var(--ease-out);
 }
 .agent-option-row:hover .agent-option-remove,
 .agent-option-row:focus-within .agent-option-remove {

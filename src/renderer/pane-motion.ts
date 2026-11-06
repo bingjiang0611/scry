@@ -34,13 +34,17 @@ export function animatePaneChange(commit: () => void): void {
         node.style.setProperty(`--leaving-${property}`, `${value}px`)
       }
     }
+    const entering = oldRect.width === 0
     const distance = node.id === 'sidebar-pane' ? -1 : 1
-    const from = oldRect.width === 0 ? distance * newRect.width : leaving ? 0 : oldRect.left - newRect.left
+    const from = entering ? distance * newRect.width : leaving ? 0 : oldRect.left - newRect.left
     const to = leaving ? distance * oldRect.width : 0
     const animation = node.animate(reduced
       ? [{ opacity: leaving ? 1 : 0 }, { opacity: leaving ? 0 : 1 }]
       : [{ transform: `translateX(${from}px)`, opacity: leaving ? 1 : 0 }, { transform: `translateX(${to}px)`, opacity: leaving ? 0 : 1 }],
-    { duration: reduced ? 120 : MOTION.durSlow, easing: reduced ? 'linear' : MOTION.easeStruct })
+    {
+      duration: reduced ? MOTION.durationReduced : leaving ? MOTION.durationExitMd : MOTION.durationMd,
+      easing: reduced ? MOTION.easeOut : leaving ? MOTION.easeIn : entering ? MOTION.easeOut : MOTION.easeInOut
+    })
     animation.id = 'scry-pane'
     const unsubscribe = subscribeReducedMotion(value => { if (value) cancel() })
     const finish = (): void => {

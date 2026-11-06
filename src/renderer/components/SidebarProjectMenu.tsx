@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react'
 import type { ProjectMeta } from '../env'
 import { SIDEBAR_PROJECT_COPY as copy } from '../constants/copy'
 import { usePresence } from '../hooks/usePresence'
+import { MOTION } from '../motion'
 import { Icon } from './primitives/Icon'
 
 type ProjectMenuTarget = { project: ProjectMeta; left: number; top: number }
@@ -25,7 +26,7 @@ export function SidebarProjectMenu({
   onRemoveProject?: (project: ProjectMeta) => void
 }) {
   const menuRef = useRef<HTMLDivElement | null>(null)
-  const presence = usePresence({ onClose, exitMs: 100 })
+  const presence = usePresence({ onClose, exitMs: MOTION.durationExitSm })
   useEffect(() => {
     if (presence.state === 'exit') return
     const dismissPointer = (event: PointerEvent): void => {

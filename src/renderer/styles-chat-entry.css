@@ -279,5 +279,5 @@
   margin: 0 auto 26px;
   border-radius: var(--r-lg);
   scroll-margin-top: 16px;
-  transition: background-color var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out);
 }

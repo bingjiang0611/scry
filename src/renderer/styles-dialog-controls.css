@@ -7,18 +7,18 @@
   z-index: 100;
 }
 .modal-overlay[data-state='enter'] {
-  animation: modal-backdrop-in 180ms linear backwards;
+  animation: modal-backdrop-in var(--duration-sm) var(--ease-out) backwards;
 }
 .modal-overlay[data-state='exit'] {
   pointer-events: none;
-  animation: modal-backdrop-out 160ms var(--ease-exit) both;
+  animation: modal-backdrop-out var(--duration-exit-sm) var(--ease-in) both;
 }
 .modal-overlay[data-state='enter'] > .modal {
-  animation: modal-dialog-in 260ms var(--ease-struct) backwards;
+  animation: modal-dialog-in var(--duration-md) var(--ease-out) backwards;
 }
 .modal-overlay[data-state='exit'] > .modal {
   pointer-events: none;
-  animation: modal-dialog-out 150ms var(--ease-exit) both;
+  animation: modal-dialog-out var(--duration-exit-sm) var(--ease-in) both;
 }
 @keyframes modal-backdrop-in {
   from { opacity: 0; }
@@ -42,13 +42,13 @@
 .menu[data-state='enter'],
 .ctxmenu[data-state='enter'],
 .session-hover-card[data-state='enter'] {
-  animation: overlay-menu-in 160ms var(--ease-out) backwards;
+  animation: overlay-menu-in var(--duration-sm) var(--ease-out) backwards;
 }
 .menu[data-state='exit'],
 .ctxmenu[data-state='exit'],
 .session-hover-card[data-state='exit'] {
   pointer-events: none;
-  animation: overlay-menu-out 100ms linear both;
+  animation: overlay-menu-out var(--duration-exit-sm) var(--ease-in) both;
 }
 @keyframes overlay-menu-in {
   from { opacity: 0; transform: scale(0.97); }
@@ -159,7 +159,7 @@
   top: 10.5px;
   border-radius: var(--r-pill);
   corner-shape: round;
-  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out), border-color var(--duration-hover) var(--ease-out);
 }
 .switch .slider::before {
   content: '';
@@ -171,7 +171,7 @@
   background: var(--fg);
   border-radius: 50%;
   corner-shape: round;
-  transition: transform var(--dur-fast) var(--ease-struct);
+  transition: transform var(--duration-overshoot) var(--ease-overshoot);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 

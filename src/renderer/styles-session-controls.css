@@ -42,7 +42,7 @@
      就成了盲区，点上去既不进会话也不触发操作。只有真正的按钮才接指针事件。 */
   pointer-events: none;
   background: linear-gradient(90deg, transparent, var(--panel2) 42%);
-  transition: opacity var(--dur-micro) linear;
+  transition: opacity var(--duration-hover) var(--ease-out);
 }
 
 .sb-sess-row:hover .sb-sess-acts,
@@ -66,7 +66,7 @@
   background: transparent;
   color: var(--dim2);
   cursor: pointer;
-  transition: background-color var(--dur-micro) linear, color var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out), color var(--duration-hover) var(--ease-out);
 }
 
 .sb-act:hover {
@@ -130,12 +130,12 @@
 .modal-refresh,
 .send,
 .stop {
-  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear, color var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out), border-color var(--duration-hover) var(--ease-out), color var(--duration-hover) var(--ease-out);
 }
 
 .tb-action {
   min-height: 40px;
-  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear, color var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out), border-color var(--duration-hover) var(--ease-out), color var(--duration-hover) var(--ease-out);
 }
 
 .btn:hover,
@@ -178,7 +178,7 @@
   padding: 0 1px;
   border-radius: 0;
   border-bottom: 2px solid transparent;
-  transition: background-color var(--dur-micro) linear, color var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out), color var(--duration-hover) var(--ease-out);
 }
 
 .vtab.active {
@@ -292,7 +292,7 @@
 
 .sg-card {
   border-color: var(--border3);
-  transition: background-color var(--dur-micro) linear, color var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out), color var(--duration-hover) var(--ease-out);
 }
 
 .sg-card:hover {

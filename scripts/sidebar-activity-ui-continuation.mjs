@@ -132,7 +132,7 @@ export async function exerciseSidebarActivityContinuation({ contents, screenshot
   check(await read("document.querySelectorAll('.sb-activity-item').length === 41"), 'Large activity baseline changed its presentation limit')
   await read(`window.largeActivityRow = document.querySelector(${JSON.stringify(row)}).closest('[data-motion-key]'); window.activityFixture.setPhase('working')`)
   await wait(`${group} === 'working'`)
-  check(await read(`document.querySelector(${JSON.stringify(row)}).closest('[data-motion-key]') === window.largeActivityRow && window.largeActivityRow.getAnimations().some(animation => animation.id === 'scry-list-reorder' && animation.effect.getTiming().duration === 300 && animation.effect.getKeyframes().some(frame => frame.transform && new DOMMatrixReadOnly(frame.transform).m42 !== 0))`), 'Large activity survivor did not retain its 300ms transform')
+  check(await read(`document.querySelector(${JSON.stringify(row)}).closest('[data-motion-key]') === window.largeActivityRow && window.largeActivityRow.getAnimations().some(animation => animation.id === 'scry-list-reorder' && animation.effect.getTiming().duration === 250 && animation.effect.getKeyframes().some(frame => frame.transform && new DOMMatrixReadOnly(frame.transform).m42 !== 0))`), 'Large activity survivor did not retain its 250ms transform')
   await wait(`${layoutAnimations}.length === 0`)
   await read('window.activityFixture.setBulk(false)')
   await wait(`${layoutAnimations}.length === 0`)
@@ -157,7 +157,7 @@ export async function exerciseSidebarActivityContinuation({ contents, screenshot
   return { tabsKeyboard: true, nativeSelection: true, worktreeSelectionAndActions: true, worktreeUnread: true, crossGroupIdentityAndFocus: true, animatedLayout: true,
     conditionalSections: true, movingHeadings: true, flatAppearance: true, honestCompletion: true, inGroupReorder: true,
     stateColumn: true, livePeak: true,
-    pointerHeldTarget: true, pinAndArchive: true, reducedMotion: true, largeActivitySurvivor300: true, boundedHistory: true, searchAndEmpty: true, originalView: true, unmount: true,
+    pointerHeldTarget: true, pinAndArchive: true, reducedMotion: true, largeActivitySurvivor250: true, boundedHistory: true, searchAndEmpty: true, originalView: true, unmount: true,
     sharedTypography: true, workingSweep: true, longTitleSweepContrast: true, staticTerminalTitles: true, forcedColors: true,
     failedVisibleNotCompleted: true }
 }
