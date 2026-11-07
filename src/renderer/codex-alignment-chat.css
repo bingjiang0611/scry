@@ -454,6 +454,7 @@
   background: color-mix(in srgb, var(--panel) 97%, transparent);
   box-shadow: var(--shadow-pop);
   backdrop-filter: blur(18px);
+  transform-origin: bottom left;
 }
 
 .runtime-composer .permission-mode-popover.is-single-option {
@@ -555,6 +556,20 @@
   background: color-mix(in srgb, var(--panel) 97%, transparent);
   box-shadow: var(--shadow-pop);
   backdrop-filter: blur(18px);
+  /* Grows out of the trigger corner; the inner view morphs inside this box. */
+  transform-origin: bottom right;
+  overflow: hidden;
+}
+
+.runtime-composer .model-effort-popover[data-state='enter'],
+.runtime-composer .permission-mode-popover[data-state='enter'] {
+  animation: overlay-menu-in var(--duration-sm) var(--ease-out) backwards;
+}
+
+.runtime-composer .model-effort-popover[data-state='exit'],
+.runtime-composer .permission-mode-popover[data-state='exit'] {
+  pointer-events: none;
+  animation: overlay-menu-out var(--duration-exit-sm) var(--ease-in) both;
 }
 
 .runtime-composer .model-effort-summary {

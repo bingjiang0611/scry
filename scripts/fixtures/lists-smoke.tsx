@@ -200,7 +200,7 @@ function Fixture() {
       </div>
     </div>
     {modal === 'skills' && <SkillsModal skills={skills} onRefresh={actions.refresh} onClose={() => setModal(null)} />}
-    {modal === 'mcp' && <McpModal mcps={mcps} status={{}} live={[]} refreshing={false} onTest={noop} onRefresh={actions.refresh} onClose={() => setModal(null)} />}
+    {modal === 'mcp' && <McpModal mcps={mcps} status={{ 'server-0': { ok: true, toolNames: ['read_file', 'list_dir', 'search'] } }} live={[]} refreshing={false} onTest={noop} onRefresh={actions.refresh} onClose={() => setModal(null)} />}
     <LlmPerformancePanel open={modal === 'llm'} onClose={() => setModal(null)} />
   </>
 }

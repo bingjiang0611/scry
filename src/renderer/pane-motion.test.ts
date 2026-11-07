@@ -46,4 +46,28 @@ describe('pane layout commit', () => {
     animatePaneChange(() => { width = after })
     expect(animate).toHaveBeenCalledWith(expect.any(Array), expect.objectContaining({ duration, easing }))
   })
+  it('never fades a pane that stays on screen; it only shifts', () => {
+    let width = 480
+    const animate = vi.fn(() => ({ id: '', cancel: vi.fn(), finished: new Promise<void>(() => {}) }))
+    const pane = { id: 'right-surface-pane', inert: false, animate,
+      getBoundingClientRect: () => ({ x: 400, left: 400, top: 0, width, height: 800 }) }
+    vi.stubGlobal('Element', class { animate() {} })
+    vi.stubGlobal('document', { hidden: false, querySelectorAll: () => [pane] })
+    vi.stubGlobal('window', { matchMedia: () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }) })
+    animatePaneChange(() => { width = 320 })
+    expect(animate).toHaveBeenCalledOnce()
+    const [frames] = animate.mock.calls[0] as unknown as [Array<Record<string, unknown>>]
+    expect(frames.every(frame => !('opacity' in frame))).toBe(true)
+  })
+  it('does not crossfade a pane that stays on screen when motion is reduced', () => {
+    let width = 480
+    const animate = vi.fn(() => ({ id: '', cancel: vi.fn(), finished: new Promise<void>(() => {}) }))
+    const pane = { id: 'right-surface-pane', inert: false, animate,
+      getBoundingClientRect: () => ({ x: 400, left: 400, top: 0, width, height: 800 }) }
+    vi.stubGlobal('Element', class { animate() {} })
+    vi.stubGlobal('document', { hidden: false, querySelectorAll: () => [pane] })
+    vi.stubGlobal('window', { matchMedia: () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }) })
+    animatePaneChange(() => { width = 320 })
+    expect(animate).not.toHaveBeenCalled()
+  })
 })
