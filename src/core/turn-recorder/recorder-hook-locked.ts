@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
@@ -264,35 +263,6 @@ export async function applyHookLocked(
 
 export function isLockTimeout(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | undefined)?.code === 'ELOCKTIMEOUT'
-}
-
-function hookInbox(dataRoot: string, provider: ProviderId, sessionId: string): string {
-  return join(sessionRoot(dataRoot, provider, sessionId), 'inbox')
-}
-
-export async function queueHook(
-  enablement: Extract<RecorderEnablement, { enabled: true }>,
-  input: RecorderHookInput,
-  sessionId: string,
-  arrivedAt: string
-): Promise<void> {
-  const entry: QueuedHook = {
-    schemaVersion: 1,
-    provider: input.provider,
-    sessionId,
-    event: input.event,
-    payload: input.payload,
-    uploadEnvironment: input.uploadEnvironment,
-    ...(input.managed ? { managed: true } : {}),
-    arrivedAt
-  }
-  // Names sort by arrival; the UUID only separates hooks that arrive in the same millisecond.
-  const name = `${String(Date.parse(arrivedAt)).padStart(15, '0')}-${randomUUID()}.json`
-  await writeJsonAtomic(join(hookInbox(enablement.dataRoot, input.provider, sessionId), name), entry)
-  await appendRotatingLog(
-    join(enablement.dataRoot, 'logs', 'recorder.log'),
-    `${new Date().toISOString()} WARN ${input.queueOnly ? 'daemon delivery uncertain' : 'session lock busy'}; queued ${input.provider} ${input.event} for replay (arrived ${arrivedAt})`
-  ).catch(() => undefined)
 }
 
 /**

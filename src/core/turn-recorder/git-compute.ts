@@ -34,9 +34,8 @@ import {
   type TurnDiffFallbackReason
 } from '../../shared/trace.js'
 import {
-  parseNameStatus,
   captureTurnPatches,
-  parseNumstat
+  parseRawNumstat
 } from './git-patches.js'
 
 import { WORKSPACE_FILE_LIMIT, WORKSPACE_PATCH_BYTES, WorkspaceReadUnavailable } from './git-workspace-limits.js'
@@ -95,11 +94,18 @@ async function writeTargetedSnapshotTree(options: {
   deadline: number
   filterOverrides: string[]
   targetIndex: string
+  /**
+   * `discovery.index` whose content already equals `baseTree` and whose stat cache is warm.
+   * Publishing it as `after.index` skips expanding the whole before-tree again; `add -A` then only
+   * has to hash the candidate paths. Sparsity and reused-index proof stay the caller's decision.
+   */
+  sourceIndex?: string
 }): Promise<string> {
-  const { cwd, baseTree, pathspec, env, deadline, filterOverrides, targetIndex } = options
+  const { cwd, baseTree, pathspec, env, deadline, filterOverrides, targetIndex, sourceIndex } = options
   await rm(targetIndex, { force: true })
   await rm(`${targetIndex}.lock`, { force: true })
-  await gitCommand(snapshotGitArgs(filterOverrides, ['read-tree', baseTree]), { cwd, env, deadline })
+  if (sourceIndex) await copyIndexWithTimestamps(sourceIndex, targetIndex)
+  else await gitCommand(snapshotGitArgs(filterOverrides, ['read-tree', baseTree]), { cwd, env, deadline })
   await gitCommand(snapshotGitArgs(filterOverrides, ['add', '-A', '--', ...pathspec]), { cwd, env, deadline })
   return (await gitCommand(snapshotGitArgs(filterOverrides, ['write-tree']), { cwd, env, deadline })).trim()
 }
@@ -179,6 +185,11 @@ export async function computeGitTurnDiff(
       let fallbackReason: TurnDiffFallbackReason | undefined = forceFull ? 'forced' : undefined
       let candidates = [...(options.structuredPaths ?? [])]
       let targetPathspec: string[] = []
+      let discoveryIndex: string | undefined
+      // Only a discovery index seeded from an index that already equalled beforeTree may be
+      // published as the after index. The `read-tree --reset` seed also handles sparse checkout,
+      // where the skip-worktree marks are rebuilt by read-tree; that case keeps the read-tree build.
+      let discoveryBaseIsBeforeTree = false
       const hasStructuredEvidence = targetedPathspec(capture, options.structuredPaths ?? []).length > 0
 
       if (!fallbackReason) {
@@ -188,7 +199,7 @@ export async function computeGitTurnDiff(
             preFallbackDeadline,
             discoveryStarted + Math.max(250, Math.floor(preFallbackBudget / 2))
           )
-          const discoveryIndex = join(capture.tempDir, 'discovery.index')
+          discoveryIndex = join(capture.tempDir, 'discovery.index')
           const discoveryEnv: NodeJS.ProcessEnv = { ...env, GIT_INDEX_FILE: discoveryIndex }
           await rm(discoveryIndex, { force: true })
           await rm(`${discoveryIndex}.lock`, { force: true })
@@ -200,6 +211,7 @@ export async function computeGitTurnDiff(
           if (reusableBase) {
             copiedBase = await copyIndexWithTimestamps(reusableBase, discoveryIndex).then(() => true, () => false)
           }
+          discoveryBaseIsBeforeTree = copiedBase
           if (!copiedBase) {
             const discoverySource = capture.baselineClean
               ? capture.indexPath ?? join(capture.tempDir, 'missing.index')
@@ -245,7 +257,7 @@ export async function computeGitTurnDiff(
             // With no candidates, rebuilding that same tree cannot add evidence. Retain
             // the discovery index so a paired session still gets an owned after-view.
             afterTree = capture.beforeTree
-            env.GIT_INDEX_FILE = join(capture.tempDir, 'discovery.index')
+            env.GIT_INDEX_FILE = discoveryIndex!
           } else {
             afterTree = await writeTargetedSnapshotTree({
               cwd: capture.repoRoot,
@@ -254,7 +266,10 @@ export async function computeGitTurnDiff(
               env,
               deadline: preFallbackDeadline,
               filterOverrides,
-              targetIndex: afterIndex
+              targetIndex: afterIndex,
+              // Do not mutate discovery.index in place: a shared preview/terminal pair may still
+              // need it, and the zero-candidate branch above publishes it as the after view.
+              ...(discoveryBaseIsBeforeTree && discoveryIndex ? { sourceIndex: discoveryIndex } : {})
             })
           }
         } catch {
@@ -315,43 +330,26 @@ export async function computeGitTurnDiff(
       )
     }
 
-    const [numstat, nameStatus] = await Promise.all([
-      gitCommand(
-        snapshotGitArgs(filterOverrides, [
-          'diff',
-          '--no-renames',
-          '--no-ext-diff',
-          '--no-textconv',
-          '--numstat',
-          '-z',
-          capture.beforeTree,
-          afterTree,
-          '--',
-          ...fullPathspec
-        ]),
-        { cwd: capture.repoRoot, env, deadline }
-      ),
-      gitCommand(
-        snapshotGitArgs(filterOverrides, [
-          'diff',
-          '--no-renames',
-          '--no-ext-diff',
-          '--no-textconv',
-          '--name-status',
-          '-z',
-          capture.beforeTree,
-          afterTree,
-          '--',
-          ...fullPathspec
-        ]),
-        { cwd: capture.repoRoot, env, deadline }
-      )
-    ])
-    const changes = parseNameStatus(nameStatus, capture.repoRoot)
-    files = parseNumstat(numstat, capture.repoRoot).map((file) => {
-      const change = changes.get(file.path)
-      return { ...file, ...(change ? { change } : {}) }
-    })
+    // One tree comparison yields both the change kinds and the line counts: `--raw` and
+    // `--numstat` are independent output sections of the same diff, so a second Git process
+    // cannot produce anything the first one did not already decide.
+    const numstat = await gitCommand(
+      snapshotGitArgs(filterOverrides, [
+        'diff',
+        '--no-renames',
+        '--no-ext-diff',
+        '--no-textconv',
+        '--raw',
+        '--numstat',
+        '-z',
+        capture.beforeTree,
+        afterTree,
+        '--',
+        ...fullPathspec
+      ]),
+      { cwd: capture.repoRoot, env, deadline }
+    )
+    files = parseRawNumstat(numstat, capture.repoRoot)
     if (options.workspaceSnapshot && files.length > WORKSPACE_FILE_LIMIT) {
       throw new WorkspaceReadUnavailable('workspace_limit')
     }

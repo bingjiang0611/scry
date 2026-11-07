@@ -6,6 +6,8 @@ import type { TraceEvent } from '../../shared/trace.js'
 import { available, partial, type Evidence, type TurnEndReason, type TurnEvidence, type TurnTermination } from '../../shared/turn-record.js'
 import { captureToolContent, isFullToolContentPolicy, persistModelEventContent, persistToolEventContent, type ToolContentPolicy } from './tool-content.js'
 import { writeRecorderContent } from './content-store.js'
+import { markSessionAttention, withSessionAttentionLock } from './attention.js'
+import { safeKey } from './store-index.js'
 import { discoverRepositories, type RecorderEnablement } from './config.js'
 import { beginGitTurnDiff } from './git.js'
 import { readJson, writeJsonAtomic } from './io.js'
@@ -78,8 +80,12 @@ export async function beginOpenTurn(
     uploadEnvironment,
     captures: []
   }
-  // Publish the initial identity durably before acknowledging the start hook.
-  await writeJsonAtomic(openPath(root), open)
+  // Publish the marker first and the initial identity durably before acknowledging the start hook.
+  // Cleanup shares this lock, so it cannot strand a new open turn between those writes.
+  await withSessionAttentionLock(enablement.dataRoot, provider, safeKey(sessionId), async () => {
+    await markSessionAttention(enablement.dataRoot, provider, safeKey(sessionId))
+    await writeJsonAtomic(openPath(root), open)
+  })
   await writeJsonAtomic(statePath(root), { ...session, lastGeneration: generation, lastTurnIndex: turnIndex })
   if (!managedByScry && enablement.config.capture.diff) {
     const captureDir = join(turnRoot(root, generation), 'captures')
@@ -262,22 +268,44 @@ export async function persistTurnDiffContent(
   dataRoot: string,
   snapshots: import('../../shared/trace.js').TurnDiffSnapshot[]
 ): Promise<import('../../shared/trace.js').TurnDiffSnapshot[]> {
-  return Promise.all(snapshots.map(async (snapshot) => ({
+  // The same patch text can appear many times in one turn (a file read twice, a repeated snippet).
+  // Publish each distinct payload once, and publish the distinct payloads concurrently: a turn with
+  // 300 different patches must keep the same publish profile it had before, while a turn with 20
+  // copies of one patch stops re-verifying the copies it just wrote.
+  const prepared = snapshots.map((snapshot) => snapshot.files.map((file) => file.patch
+    ? captureToolContent(file.patch, { source: 'git_turn_diff', maxBytes: null, sourceCompleteness: 'complete' })
+    : undefined))
+  const occurrence = new Map<string, number>()
+  const unique: string[] = []
+  const slotOf: number[][] = snapshots.map((snapshot) => snapshot.files.map(() => -1))
+  snapshots.forEach((snapshot, snapshotIndex) => {
+    snapshot.files.forEach((_, fileIndex) => {
+      const content = prepared[snapshotIndex][fileIndex]?.content
+      if (content === undefined) return
+      let slot = occurrence.get(content)
+      if (slot === undefined) {
+        slot = unique.length
+        unique.push(content)
+        occurrence.set(content, slot)
+      }
+      slotOf[snapshotIndex][fileIndex] = slot
+    })
+  })
+  const refs = await Promise.all(unique.map((content) => writeRecorderContent(dataRoot, content, 'utf8')))
+  return snapshots.map((snapshot, snapshotIndex) => ({
     ...snapshot,
-    files: await Promise.all(snapshot.files.map(async (file) => {
-      if (!file.patch) return file
-      const full = captureToolContent(file.patch, {
-        source: 'git_turn_diff', maxBytes: null, sourceCompleteness: 'complete'
-      })
-      if (full.content === undefined) return file
-      const contentRef = await writeRecorderContent(dataRoot, full.content, 'utf8')
-      const patchContent = { ...full, contentRef }
+    files: snapshot.files.map((file, fileIndex) => {
+      const full = prepared[snapshotIndex][fileIndex]
+      if (full === undefined) return file
+      const patchContent = { ...full, contentRef: refs[slotOf[snapshotIndex][fileIndex]] }
+      // Keep the complete inline body in its evidence envelope, not twice in the record.
+      // Do not mutate the Git snapshot: callers may still use its patch field.
+      const { patch: _patch, ...metadata } = file
       return {
-        ...file,
-        patch: patchContent.content,
+        ...metadata,
         patchContent,
         patchStatus: patchContent.storage === 'complete' ? 'captured' as const : 'truncated' as const
       }
-    }))
-  })))
+    })
+  }))
 }

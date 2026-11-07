@@ -9,8 +9,26 @@ function contentPath(dataRoot: string, sha256: string): string {
   return join(dataRoot, 'content', 'sha256', sha256.slice(0, 2), `${sha256}.bin`)
 }
 
-function digest(content: Buffer): string {
+function digest(content: Buffer | string): string {
+  contentStoreCounters.hashes++
   return createHash('sha256').update(content).digest('hex')
+}
+
+/**
+ * Process-local, monotonic counters for the content-addressed writes: how many payloads were
+ * hashed, how many were read back for corruption detection, and how many directory syncs those
+ * verifications issued. Diagnostics only; they never change a publish decision.
+ */
+const contentStoreCounters = { hashes: 0, verifies: 0, directorySyncs: 0 }
+
+export function contentStoreStats(): { hashes: number; verifies: number; directorySyncs: number } {
+  return { ...contentStoreCounters }
+}
+
+export function resetContentStoreStats(): void {
+  contentStoreCounters.hashes = 0
+  contentStoreCounters.verifies = 0
+  contentStoreCounters.directorySyncs = 0
 }
 
 const verifiedContent = new Map<string, string>()
@@ -35,7 +53,9 @@ function assertContentBytes(existing: Buffer, expected: Buffer, sha256: string):
 }
 
 async function verifyAndSyncContent(path: string, existing: Buffer, expected: Buffer, sha256: string): Promise<void> {
+  contentStoreCounters.verifies++
   assertContentBytes(existing, expected, sha256)
+  contentStoreCounters.directorySyncs++
   await syncDirectory(dirname(path))
 }
 
@@ -44,17 +64,19 @@ export async function writeRecorderContent(
   content: string,
   encoding: ToolContentRef['encoding']
 ): Promise<ToolContentRef> {
-  const bytes = Buffer.from(content, 'utf8')
-  const sha256 = digest(bytes)
+  // Hash the string itself: `Buffer.from` would materialize a second full copy of a large patch
+  // before the publish can start, and the publish writes the string in bounded slices.
+  const length = Buffer.byteLength(content, 'utf8')
+  const sha256 = digest(content)
   const path = contentPath(dataRoot, sha256)
-  const ref: ToolContentRef = { storage: 'recorder-content-v1', sha256, bytes: bytes.length, encoding }
+  const ref: ToolContentRef = { storage: 'recorder-content-v1', sha256, bytes: length, encoding }
   let existing: Buffer
   try {
     existing = await readFile(path)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     try {
-      await writeFileAtomicExclusive(path, bytes)
+      await writeFileAtomicExclusive(path, content)
       return ref
     } catch (writeError) {
       if ((writeError as NodeJS.ErrnoException).code !== 'EEXIST') throw writeError
@@ -64,7 +86,7 @@ export async function writeRecorderContent(
   }
   // Incoming bytes already determine the address; compare complete payloads without hashing twice.
   // Reuse must still sync the link: a previous publisher may have failed its final directory sync.
-  await verifyAndSyncContent(path, existing, bytes, sha256)
+  await verifyAndSyncContent(path, existing, Buffer.from(content, 'utf8'), sha256)
   return ref
 }
 
@@ -76,12 +98,22 @@ export async function writeRecorderContentBatch(
 ): Promise<ToolContentRef[]> {
   const refs: ToolContentRef[] = []
   const seen = new Map<string, string>()
+  // Identical payloads in one batch are one address: hash each distinct value once instead of
+  // paying a second SHA-256 over bytes that are already known to be equal.
+  const hashed = new Map<string, ToolContentRef>()
   const missing: Array<{ path: string; content: string; sha256: string }> = []
   for (const content of contents) {
+    const known = hashed.get(content)
+    if (known) {
+      refs.push(known)
+      continue
+    }
     const bytes = Buffer.from(content, 'utf8')
     const sha256 = digest(bytes)
     const path = contentPath(dataRoot, sha256)
-    refs.push({ storage: 'recorder-content-v1', sha256, bytes: bytes.length, encoding })
+    const ref: ToolContentRef = { storage: 'recorder-content-v1', sha256, bytes: bytes.length, encoding }
+    hashed.set(content, ref)
+    refs.push(ref)
     const previous = seen.get(path)
     if (previous !== undefined) {
       assertContentBytes(Buffer.from(previous, 'utf8'), bytes, sha256)

@@ -1,0 +1,538 @@
+{
+ "schema": 1,
+ "generatedAt": "2026-11-05T17:30:00.000Z",
+ "environment": {
+  "host": "colima VM (Lima), Ubuntu 24.04 kernel 6.8.0-117 aarch64",
+  "platform": "linux",
+  "arch": "arm64",
+  "cpuCount": 6,
+  "totalMemBytes": 8307912704,
+  "disk": "ext4 on /dev/root, local to the VM",
+  "node": "v24.22.2",
+  "git": "git version 2.43.0",
+  "note": "quiet guest; the macOS host behind it was busy, so only in-guest A/B is comparable"
+ },
+ "rounds": 3,
+ "runs": {
+  "before": [
+   {
+    "file": "l2-before-1",
+    "loadavg": [
+     0.99,
+     0.37,
+     0.13
+    ],
+    "notes": []
+   },
+   {
+    "file": "l2-before-2",
+    "loadavg": [
+     1.67,
+     1.23,
+     0.66
+    ],
+    "notes": []
+   }
+  ],
+  "after": [
+   {
+    "file": "l2-after-1",
+    "loadavg": [
+     1.36,
+     0.81,
+     0.34
+    ],
+    "notes": []
+   },
+   {
+    "file": "l2-after-2",
+    "loadavg": [
+     1.46,
+     1.06,
+     0.51
+    ],
+    "notes": []
+   }
+  ]
+ },
+ "scenarios": [
+  {
+   "id": "S1",
+   "gitTotal": {
+    "before": [
+     39,
+     39
+    ],
+    "after": [
+     33,
+     33
+    ]
+   },
+   "msP50": {
+    "start": {
+     "before": [
+      24.1,
+      21.9
+     ],
+     "after": [
+      57.9,
+      25.3
+     ]
+    },
+    "end": {
+     "before": [
+      50.9,
+      55.1
+     ],
+     "after": [
+      54.9,
+      59.6
+     ]
+    },
+    "record-visible": {
+     "before": [
+      0.1,
+      0.1
+     ],
+     "after": [
+      0.1,
+      0.1
+     ]
+    }
+   }
+  },
+  {
+   "id": "S2",
+   "gitTotal": {
+    "before": [
+     39,
+     39
+    ],
+    "after": [
+     33,
+     33
+    ]
+   },
+   "msP50": {
+    "start": {
+     "before": [
+      101.5,
+      45.6
+     ],
+     "after": [
+      83.6,
+      118.3
+     ]
+    },
+    "end": {
+     "before": [
+      155.0,
+      138.2
+     ],
+     "after": [
+      137.7,
+      240.4
+     ]
+    },
+    "record-visible": {
+     "before": [
+      0.1,
+      0.1
+     ],
+     "after": [
+      0.1,
+      0.1
+     ]
+    }
+   }
+  },
+  {
+   "id": "S3",
+   "gitTotal": {
+    "before": [
+     54,
+     54
+    ],
+    "after": [
+     48,
+     48
+    ]
+   },
+   "msP50": {
+    "start": {
+     "before": [
+      167.6,
+      117.6
+     ],
+     "after": [
+      114.5,
+      129.1
+     ]
+    },
+    "end": {
+     "before": [
+      207.8,
+      136
+     ],
+     "after": [
+      136.5,
+      173.6
+     ]
+    },
+    "record-visible": {
+     "before": [
+      0.1,
+      0.0
+     ],
+     "after": [
+      0.0,
+      0.1
+     ]
+    }
+   }
+  },
+  {
+   "id": "S4",
+   "gitTotal": {
+    "before": [
+     45,
+     45
+    ],
+    "after": [
+     39,
+     39
+    ]
+   },
+   "msP50": {
+    "start": {
+     "before": [
+      57.2,
+      41.8
+     ],
+     "after": [
+      47.9,
+      60.5
+     ]
+    },
+    "end": {
+     "before": [
+      712.3,
+      693.5
+     ],
+     "after": [
+      734.4,
+      700.6
+     ]
+    },
+    "record-visible": {
+     "before": [
+      0.1,
+      0.0
+     ],
+     "after": [
+      0.0,
+      0.1
+     ]
+    }
+   }
+  },
+  {
+   "id": "S5",
+   "gitTotal": {
+    "before": [
+     39,
+     39
+    ],
+    "after": [
+     33,
+     33
+    ]
+   },
+   "msP50": {
+    "start": {
+     "before": [
+      291.0,
+      302.6
+     ],
+     "after": [
+      295.2,
+      308.1
+     ]
+    },
+    "end": {
+     "before": [
+      13020.5,
+      13707.5
+     ],
+     "after": [
+      14083.5,
+      14276.0
+     ]
+    },
+    "record-visible": {
+     "before": [
+      0.1,
+      0.1
+     ],
+     "after": [
+      0.1,
+      0.1
+     ]
+    }
+   }
+  },
+  {
+   "id": "S6",
+   "gitTotal": {
+    "before": [
+     324,
+     324
+    ],
+    "after": [
+     306,
+     306
+    ]
+   },
+   "msP50": {
+    "start": {
+     "before": [
+      203.3,
+      222.3
+     ],
+     "after": [
+      174.0,
+      230.4
+     ]
+    },
+    "end": {
+     "before": [
+      386.7,
+      506.4
+     ],
+     "after": [
+      290.7,
+      439.3
+     ]
+    },
+    "record-visible": {
+     "before": [
+      0.1,
+      0.1
+     ],
+     "after": [
+      0.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "id": "S7",
+   "gitTotal": {
+    "before": [
+     21,
+     21
+    ],
+    "after": [
+     21,
+     21
+    ]
+   },
+   "msP50": {
+    "start": {
+     "before": [
+      36.0,
+      60
+     ],
+     "after": [
+      34.9,
+      30.7
+     ]
+    },
+    "tool": {
+     "before": [
+      272.2,
+      248.1
+     ],
+     "after": [
+      173.2,
+      219.1
+     ]
+    },
+    "end": {
+     "before": [
+      43.1,
+      75.3
+     ],
+     "after": [
+      35.1,
+      41.4
+     ]
+    }
+   }
+  },
+  {
+   "id": "S8",
+   "gitTotal": {
+    "before": [
+     45,
+     45
+    ],
+    "after": [
+     42,
+     42
+    ]
+   },
+   "msP50": {
+    "start": {
+     "before": [
+      426.2,
+      278.8
+     ],
+     "after": [
+      365.2,
+      284.7
+     ]
+    },
+    "end": {
+     "before": [
+      716.2,
+      496.6
+     ],
+     "after": [
+      486.9,
+      431.4
+     ]
+    }
+   }
+  },
+  {
+   "id": "S12",
+   "gitTotal": {
+    "before": [
+     45,
+     45
+    ],
+    "after": [
+     42,
+     42
+    ]
+   },
+   "msP50": {
+    "start": {
+     "before": [
+      393.5,
+      395.1
+     ],
+     "after": [
+      372.4,
+      378.7
+     ]
+    },
+    "end": {
+     "before": [
+      304.9,
+      342.8
+     ],
+     "after": [
+      390.9,
+      379.9
+     ]
+    }
+   }
+  },
+  {
+   "id": "S9",
+   "gitTotal": {
+    "before": [
+     null,
+     null
+    ],
+    "after": [
+     null,
+     null
+    ]
+   },
+   "msP50": {
+    "commit": {
+     "before": [
+      13.6,
+      3.4,
+      12.0,
+      3.9,
+      3.8,
+      11.2
+     ],
+     "after": [
+      3.4,
+      3.7,
+      9.8,
+      4.7,
+      3.9,
+      8.9
+     ]
+    }
+   }
+  },
+  {
+   "id": "S10",
+   "gitTotal": {
+    "before": [
+     420,
+     420
+    ],
+    "after": [
+     420,
+     420
+    ]
+   },
+   "msP50": {
+    "concurrent": {
+     "before": [
+      1043.6,
+      1196.8
+     ],
+     "after": [
+      1204.6,
+      990.6
+     ]
+    }
+   }
+  },
+  {
+   "id": "S11",
+   "gitTotal": {
+    "before": [
+     12,
+     12
+    ],
+    "after": [
+     12,
+     12
+    ]
+   },
+   "msP50": {
+    "recovery": {
+     "before": [
+      350.6,
+      314.7
+     ],
+     "after": [
+      4.8,
+      10.9
+     ]
+    },
+    "rebuild": {
+     "before": [
+      423.1,
+      338.3
+     ],
+     "after": [
+      284.2,
+      297.1
+     ]
+    }
+   }
+  }
+ ]
+}

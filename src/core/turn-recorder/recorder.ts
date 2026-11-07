@@ -1,5 +1,5 @@
 import { captureUploadEnvironment } from './commit-environment.js'
-import { readdir, stat } from 'node:fs/promises'
+import { stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { appendRotatingLog, readJson, writeJsonAtomic } from './io.js'
@@ -10,9 +10,11 @@ import { commitHookEnv, resolveCommitHookActivation } from './commit-hook-grant.
 import { resolveRecorderEnablement, type RecorderEnablement } from './config.js'
 import { recorderInboxEntries } from './inbox.js'
 import { HOOK_DRAIN_BUDGET_MS, HOOK_DRAIN_MAX_RECORDS, drainCommitNotifications, recordError, updateHealth, safeKey } from './store.js'
-import { withRecorderSessionLock, withRecorderSessionKeyLock, recorderOpenPath as openPath, recorderPendingHealth, type RecorderOpenTurnState as OpenTurnState, HOOK_LOCK_WAIT_MS, SESSION_LOCK_WAIT_MS } from './runtime-state.js'
+import { withRecorderSessionLock, withRecorderSessionKeyLock, recorderOpenPath as openPath, recorderPendingHealth, reconcileAttentionIndex, releaseStaleAttention, type RecorderOpenTurnState as OpenTurnState, HOOK_LOCK_WAIT_MS, SESSION_LOCK_WAIT_MS } from './runtime-state.js'
+import { attentionIndexPresent, markedSessions } from './attention.js'
 import { END_EVENTS, START_EVENTS, DEFERRED_TERMINAL_GRACE_MS, OPEN_TURN_EXPIRY_MS, sessionIdOf, type RecorderHookInput, type RecorderHookResult, type RecorderRecoveryProbe, CODEX_SUBAGENT_MARKER } from './recorder-contracts.js'
-import { applyHookLocked, isLockTimeout, queueHook, replayQueuedHooks } from './recorder-hook-locked.js'
+import { applyHookLocked, isLockTimeout, replayQueuedHooks } from './recorder-hook-locked.js'
+import { queueHook } from './recorder-hook-queue.js'
 import { codexSubagentTranscript, isSynthetic, trustedManagedIdentityPayload, isClaudeTaskNotification } from './recorder-hook-support.js'
 import { finalizeOpenTurn } from './recorder-turn-finalize.js'
 import { stableTranscript } from './recorder-transcript-cache.js'
@@ -20,7 +22,7 @@ import { stableTranscript } from './recorder-transcript-cache.js'
 export type { RecorderHookInput, RecorderHookResult, RecorderRecoveryProbe } from './recorder-contracts.js'
 export { OPEN_TURN_EXPIRY_MS, resolveModelIdentity, subagentScopedPayload } from './recorder-contracts.js'
 export { lifecycleTraceEvents } from './recorder-lifecycle-events.js'
-export { readTranscriptWindow, type TranscriptSnapshotIdentity } from './recorder-transcript-io.js'
+export { readTranscriptWindow, transcriptReadStats, resetTranscriptReadStats, type TranscriptSnapshotIdentity } from './recorder-transcript-io.js'
 export { transcriptSnapshotCacheStats, resetTranscriptSnapshotCache } from './recorder-transcript-cache.js'
 export { mergeTurnTraceEvents } from './recorder-trace-merge.js'
 
@@ -129,19 +131,30 @@ async function activatedCommitHookEnv(
   }
 }
 
-async function runtimeSessions(dataRoot: string): Promise<Array<{ provider: ProviderId; sessionDir: string }>> {
-  const out: Array<{ provider: ProviderId; sessionDir: string }> = []
-  for (const provider of ['claude', 'codex', 'qoder', 'opencode', 'pi'] as ProviderId[]) {
-    const providerRoot = join(dataRoot, 'runtime', provider)
-    let entries
+/**
+ * Recovery passes normally visit only the sessions the attention index names. Rebuilding the index
+ * from the session directories is what makes an absent index recoverable, so it runs whenever the
+ * index is missing (first run, upgrade, deleted data) and periodically afterwards to repair a marker
+ * lost to disk-level corruption rather than a crash.
+ */
+const FULL_INDEX_REBUILD_EVERY = 64
+let recoveryPasses = 0
+
+async function recoverySessions(dataRoot: string): Promise<Array<{ provider: ProviderId; sessionDir: string }>> {
+  recoveryPasses++
+  const initialized = await attentionIndexPresent(dataRoot)
+  if (!initialized || recoveryPasses % FULL_INDEX_REBUILD_EVERY === 0) {
     try {
-      entries = await readdir(providerRoot, { withFileTypes: true })
-    } catch {
-      continue
+      return await reconcileAttentionIndex(dataRoot)
+    } catch (error) {
+      // A partial initial index is never usable. A failed periodic repair must not starve known work.
+      if (!initialized || !await attentionIndexPresent(dataRoot)) throw error
+      await appendRotatingLog(join(dataRoot, 'logs', 'recorder.log'),
+        `${new Date().toISOString()} WARN attention rebuild: ${error instanceof Error ? error.message : String(error)}`
+      ).catch(() => undefined)
     }
-    for (const entry of entries) if (entry.isDirectory()) out.push({ provider, sessionDir: join(providerRoot, entry.name) })
   }
-  return out
+  return markedSessions(dataRoot)
 }
 
 async function pendingHealth(dataRoot: string): Promise<{ pendingCount: number; oldestPendingAgeMs: number }> {
@@ -165,7 +178,7 @@ export async function recoverRecorder(
   let expired = 0
   let managedPresent = false
   try {
-    for (const item of await runtimeSessions(enablement.dataRoot)) {
+    for (const item of await recoverySessions(enablement.dataRoot)) {
       try {
         // Hooks queued behind a busy lock must land before this pass judges the open turn.
         if ((await recorderInboxEntries(item.sessionDir)).length) {
@@ -176,7 +189,12 @@ export async function recoverRecorder(
             () => replayQueuedHooks(enablement, item.provider, sessionKey, true), { waitMs: SESSION_LOCK_WAIT_MS })
         }
         const initial = await readJson<OpenTurnState>(openPath(item.sessionDir))
-        if (!initial) continue
+        if (!initial) {
+          // Nothing to recover here: the marker outlived its turn (abandoned managed turn, crash
+          // between the index write and the open write).
+          await releaseStaleAttention(enablement.dataRoot, item.provider, item.sessionDir).catch(() => undefined)
+          continue
+        }
         // Expiry can degrade evidence only after a real terminal boundary, never create that boundary.
         let forcedExpiry = false
         const result = await withRecorderSessionLock(
@@ -263,6 +281,7 @@ export async function recoverRecorder(
           `${new Date().toISOString()} ${isLockTimeout(error) ? 'WARN' : 'ERROR'} ${message}`
         ).catch(() => undefined)
       }
+      await releaseStaleAttention(enablement.dataRoot, item.provider, item.sessionDir).catch(() => undefined)
     }
     if (managedPresent) {
       const managed = await recoverManagedRecorderTurns(workspace, env)

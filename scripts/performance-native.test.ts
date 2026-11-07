@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { assertSameNativeArtifact, compareNative, composerModes, exportNativeCounters, nativeBuildArtifacts, nativeCounterMetrics, nativeDiagnosticRecords, nativeHarnessFiles, nativeInitialPageTurns, nativeWorkloads, validateNative } from './performance-native.mjs'
+import { combineNativeShards } from './performance-native-run.mjs'
 import { DEFAULT_LOAD_SESSION_TURNS } from '../src/main/bootstrap/history-archive'
 
 const workCounters = (value: number) => Object.fromEntries(nativeCounterMetrics.map(metric => [metric, value]))
@@ -36,11 +37,21 @@ describe('same-artifact diagnostic identity', () => {
   it('accepts a complete repeated artifact and leaves the primary comparison unchanged', () => {
     const first = report()
     const repeated = structuredClone(first)
-    first.results.short.lifecycleSamples[0].startToTerminalMs = 180
+    first.results.short.lifecycleSamples[0].startToTerminalMs = 400
     expect(() => assertSameNativeArtifact(first, repeated)).not.toThrow()
     expect(compareNative(first, repeated).passed).toBe(true)
     expect(compareNative(repeated, first).passed).toBe(false)
-    expect(first.results.short.lifecycleSamples[0].startToTerminalMs).toBe(180)
+    expect(first.results.short.lifecycleSamples[0].startToTerminalMs).toBe(400)
+  })
+
+  it('keeps the documented run-maximum noise allowance and no more', () => {
+    const first = report()
+    const repeated = structuredClone(first)
+    // Fixture value is 50 ms, so 250 ms of fixed noise versus the 1.5x ratio gives a 300 ms ceiling.
+    first.results.short.lifecycleSamples[0].startToTerminalMs = 300
+    expect(compareNative(first, repeated).passed).toBe(true)
+    first.results.short.lifecycleSamples[0].startToTerminalMs = 301
+    expect(compareNative(repeated, first).passed).toBe(false)
   })
 
   it('rejects a different revision, environment, harness, driver or compiled artifact', () => {
@@ -56,6 +67,59 @@ describe('same-artifact diagnostic identity', () => {
       change(repeated)
       expect(() => assertSameNativeArtifact(report(), repeated)).toThrow('same-artifact control changed')
     }
+  })
+})
+
+describe('interleaved scenario shards', () => {
+  const shards = () => {
+    const full = report()
+    return Object.keys(nativeWorkloads).map(scenario => ({ ...structuredClone(full),
+      results: { [scenario]: structuredClone(full.results[scenario]) } }))
+  }
+
+  it('recombines per-scenario shards into the same complete report', () => {
+    const full = report()
+    const combined = combineNativeShards(shards())
+    expect(Object.keys(combined.results).sort()).toEqual(Object.keys(full.results).sort())
+    for (const scenario of Object.keys(nativeWorkloads)) expect(combined.results[scenario]).toEqual(full.results[scenario])
+    expect(() => validateNative(combined)).not.toThrow()
+    expect(exportNativeCounters(combined).observations).toHaveLength(exportNativeCounters(full).observations.length)
+  })
+
+  it('rejects shards from another revision, harness, environment or duplicate lane', () => {
+    const mutations: Array<(value: ReturnType<typeof report>) => void> = [
+      value => { value.revision = 'other' },
+      value => { value.harness = 'd'.repeat(64) },
+      value => { value.environment.node = '20' },
+      value => { value.results.markdown = value.results.short }
+    ]
+    for (const mutate of mutations) {
+      const shard = shards()
+      mutate(shard[3])
+      expect(() => combineNativeShards(shard)).toThrow()
+    }
+  })
+
+  it('rejects shards measured on different builds or runtimes of the same revision', () => {
+    const mutations: Array<(result: Record<string, unknown>) => void> = [
+      result => { result.artifactSha256 = 'd'.repeat(64) },
+      result => { result.electron = '43.0.0' },
+      result => { result.platform = 'linux/x64' },
+      result => { result.node = 'v24.0.0' }
+    ]
+    for (const mutate of mutations) {
+      const shard = shards()
+      mutate(Object.values(shard[2].results)[0])
+      expect(() => combineNativeShards(shard)).toThrow('different builds or runtimes')
+    }
+  })
+
+  it('rejects a missing lane and any shard that recorded a failed lane', () => {
+    const missing = shards().slice(0, 3)
+    expect(() => combineNativeShards(missing)).toThrow('native lane coverage differs')
+    const failed = shards()
+    failed[1].errors.push({ scenario: 'short', message: 'boom' })
+    expect(() => combineNativeShards(failed)).toThrow('failed native lanes cannot pass')
   })
 })
 
@@ -99,7 +163,9 @@ describe('native diagnostic evidence', () => {
 describe('native performance evidence gate', () => {
   it('freezes the smoke adapter and its history-reader dependency together', () => {
     expect(nativeHarnessFiles).toEqual(expect.arrayContaining([
-      'src/main/providers/smoke.ts', 'src/main/providers/smoke-history-reader.ts'
+      'src/main/providers/smoke.ts', 'src/main/providers/smoke-history-reader.ts',
+      '.agents/skills/scry-performance-climb/scripts/timing-run.mjs',
+      '.agents/skills/scry-performance-climb/scripts/timing-observation.mjs'
     ]))
   })
 

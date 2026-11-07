@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { withDirectoryLock, writeFileAtomicExclusive } from './io'
+import { withDirectoryLock, writeFileAtomicExclusive, writeJsonAtomic } from './io'
 
 const tempDir = (): string => mkdtempSync(join(tmpdir(), 'scry-lock-'))
 
@@ -21,6 +21,43 @@ describe('durable archive copy', () => {
       await rm(root, { recursive: true, force: true })
     }
   })
+})
+
+describe('streamed JSON writes', () => {
+  const roundTrip = async (value: unknown): Promise<string> => {
+    const root = tempDir()
+    const target = join(root, 'record.json')
+    try {
+      await writeJsonAtomic(target, value)
+      return await readFile(target, 'utf8')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }
+
+  it('produces exactly JSON.stringify for a payload larger than one slice', async () => {
+    const tabbed = `${'\tcolumn\t"quoted" \\ backslash\n'.repeat(60_000)}end`
+    const value = { schemaVersion: 1, files: [{ path: 'big.txt', patch: tabbed }], count: 2, ok: true, none: null }
+    await expect(roundTrip(value)).resolves.toBe(`${JSON.stringify(value)}\n`)
+  }, 60_000)
+
+  it('keeps a surrogate pair intact across the slice boundary', async () => {
+    // The 4 MB slice would end after the high surrogate of the first emoji; the writer must not
+    // split it, otherwise each half would encode as a replacement character.
+    const value = `${'a'.repeat(4 * 1024 * 1024 - 1)}${'😀'.repeat(8)}`
+    await expect(roundTrip({ patch: value })).resolves.toBe(`${JSON.stringify({ patch: value })}\n`)
+  }, 60_000)
+
+  it('leaves small payloads and sparse arrays identical', async () => {
+    const values = [
+      { a: 1 },
+      { big: 'x'.repeat(1024) },
+      [1, undefined, 'three', null],
+      { dropped: undefined, kept: 'v' },
+      { nested: { list: [{ patch: 'y'.repeat(2 * 1024 * 1024) }] } }
+    ]
+    for (const value of values) await expect(roundTrip(value)).resolves.toBe(`${JSON.stringify(value)}\n`)
+  }, 60_000)
 })
 
 describe('withDirectoryLock', () => {
