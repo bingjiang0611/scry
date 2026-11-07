@@ -21,4 +21,14 @@ jobs:
       - run: npm ci
       - run: npm run build
       - name: Built daemon SIGKILL and exact Linux lease identity
-        run: node scripts/daemon-sigkill-restart.mjs
+        shell: bash
+        run: |
+          set +e
+          output="$(node scripts/daemon-sigkill-restart.mjs 2>&1)"
+          code=$?
+          printf '%s\n' "$output"
+          if [ "$code" -ne 0 ]; then
+            tail="$(printf '%s' "$output" | tail -c 2000 | tr '\n' ' ')"
+            echo "::error title=Linux daemon acceptance failed::$tail"
+          fi
+          exit "$code"
