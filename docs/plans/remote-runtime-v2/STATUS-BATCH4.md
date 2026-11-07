@@ -13,7 +13,7 @@
 | B4-D 设计补全 | 完成（含 D1–D4 补审） | `见 status` | [b4-d](status/b4-d.md)：P3 §13 移到 [P3-batch4-design](P3-batch4-design.md)；矩阵 119 channel：main 24 / split 3 / forward 39 / new-op 53；D1 `scopes` 默认 `local`、D2 每条 forward 写明语义差异、D3 `chooseFolder`/`recentFolders` 改判 split、D4 secret 生命周期与重新入网 |
 | B4-L1 本机入网与 `scope: local` | 完成 | `见 status` | [b4-l1](status/b4-l1.md)：grant 带 `scope`，local grant 只在 unix socket 传输有效；一次性 0600 secret 不按时间过期；首次入网/复用拒绝/撤销不重入均有测试 |
 | B4-L2 main 侧 daemon 客户端与 supervisor | 完成 | `见 status` | [b4-l2](status/b4-l2.md)：`DaemonClient` 入网/探活/版本硬失败/撤销不重入、`ensureDaemon` 探活→接入→拉起→就绪；新 op `daemonInfo` 仅 local |
-| B4-L3 run 经 daemon | 完成（停在维护者核验，1 项待定） | `见 status` | [b4-l3](status/b4-l3.md)：语义层 + 接线层 + run controls + 执行归属 + 真实拉起 + trace 计时均完成；唯一未实现项是「撤销后重新连接本机后台服务」，卡在 UI 归属，需维护者选 (a) 聊天区通知 / (b) 设置页（倾向 b） |
+| B4-L3 run 经 daemon | 完成（M1/M2/M3 已修；S1 已测但**预算未达成**，停在维护者核验） | `45a34630` `f8b2492c` `5f50ae76` `6fa005eb` | [b4-l3](status/b4-l3.md)：语义层 + 接线层 + run controls + 执行归属；M1 只重放可证明未发送的请求，M2 分类表逐条判定，M3 真实 App 端到端全绿；S1 首 token P95 超出 +10 ms 预算，流式更新粒度 daemon 侧为整段一次。撤销后重连入口按维护者答复放在 B4-S 设置页 |
 | B4-L4 其余能力经 daemon | 未开始 | — | |
 | B4-S 切换与删除 | 未开始 | — | |
 | B4-V 验收 | 未开始 | — | |
@@ -36,7 +36,7 @@
 | 新 op 的远程开放 | 本批一个都不向远程开放；`scripts/daemon-ipc-remote-approvals.json` 保持空。要开具体 op 时再单独批准 | [§13.1](P3-batch4-design.md)、D1 |
 | 按 grant scope 选策略 | 接受。除 `agent:start`、`agent:deleteSession` 外，扩到历史、列表、descriptors、detect：本机拿完整结果，远程拿裁剪投影。确认框仍留在 main | [§13.6](P3-batch4-design.md)、D2/G1 |
 | 本机 grant 的空 cwd 会话 | 允许。`scope: local` 完全沿用当前 App 行为，包括空 cwd 会话；`scope: remote` 仍拒绝。方案 (a) 不采用：B4-S 删除进程内路径后该能力会永久消失 | 维护者 2026-11-07 答复第 3 条（[REVIEW-BATCH4-D2](REVIEW-BATCH4-D2.md)）、[REVIEW-BATCH4-L3A](REVIEW-BATCH4-L3A.md) P2；实现见 [b4-l3](status/b4-l3.md) |
-| trace 推送与预算 | 接受 `watch` 长轮询 + `traceDelta`，P95 相对进程内 ≤ +10 ms（同机同负载、≥30 样本、同一 fake provider、串行测量并记录负载）；超预算再单独提 push op | [§13.4](P3-batch4-design.md) |
+| trace 推送与预算 | 接受 `watch` 长轮询 + `traceDelta`，P95 相对进程内 ≤ +10 ms（同机同负载、≥30 样本、同一 fake provider、串行测量并记录负载）；超预算再单独提 push op。**实测未达成**（daemon 首 token P95 177–209 ms，进程内 140.3 ms；daemon 侧每轮只有一次整段文本事件），因此 push op 或增量契约调整需要单独决定 | [§13.4](P3-batch4-design.md)、[b4-l3 §S1](status/b4-l3.md) |
 
 G1（5 条差异补处理方式 + 守卫断言）与 G2（secret 生命周期改口径）已按评审修正，见提交 `5f4d050f` 与本节。
 
