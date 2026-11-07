@@ -121,7 +121,10 @@ describe('DesktopHostListeners', () => {
     const identity = await ensureHostIdentity(join(directory, 'identity'))
     const server = await identity.issueHostServer()
     const host = new InnerMtlsHost({
-      controller: { listProjects: () => [] } as unknown as HostController,
+      // The host asks the authority whether the peer's grant is valid on this
+      // transport on every frame; this double allows it, so the test still covers
+      // byte forwarding only.
+      controller: { listProjects: () => [], authority: { authorizesCertificate: () => true } } as unknown as HostController,
       serverCertPEM: server.certificatePEM,
       serverKeyPEM: server.privateKeyPEM,
       caPEM: identity.caCertificatePEM

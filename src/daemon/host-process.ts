@@ -23,6 +23,7 @@ import type { RemoteHostRuntime } from '../host-runtime/host-runtime-types'
 import type { RemoteHostService, RemoteHostServiceDependencies } from '../main/remote/remote-host-service'
 import { RunOutputWorkerStore } from '../main/remote/run-output-worker'
 import { openLocalChannel, type LocalChannel } from './local-channel'
+import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore, type LocalEnrollSocket } from './local-enrollment'
 
 export interface DaemonHostProcessOptions {
   userDataDir: string
@@ -39,6 +40,7 @@ export interface DaemonHostProcessOptions {
 export interface DaemonHostProcess {
   service: RemoteHostService
   channel: LocalChannel
+  enrollSocket: LocalEnrollSocket
   dispose(): Promise<void>
 }
 
@@ -244,22 +246,38 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   })
   remoteHostService = service
   await service.start()
+  // The App's own endpoint: same controller and TLS materials, marked as the local
+  // transport so a locally enrolled grant cannot be replayed over the network.
+  const localHost = service.createLocalHost()
   const channel = await openLocalChannel({
     directory: options.daemonStateDirectory,
-    serve: (stream) => service.host.serve(stream)
+    serve: (stream) => localHost.serve(stream)
   })
-  log(`daemon.host-ready socket=${channel.socketPath}`)
+  // Enrollment bootstraps the App's grant before it owns any certificate. The secret
+  // exists only while no local grant is live and is consumed by a single enrollment.
+  const enrollment = openLocalEnrollmentStore(options.daemonStateDirectory)
+  enrollment.ensure(service.hasActiveLocalGrant())
+  const enrollSocket = await openLocalEnrollSocket({
+    directory: options.daemonStateDirectory,
+    enroll: localEnrollHandlers(enrollment, {
+      enrollLocal: (input, consumeSecret) => service.enrollLocalDevice(input, consumeSecret)
+    }, service.caCertificatePEM)
+  })
+  log(`daemon.host-ready socket=${channel.socketPath} enroll=${enrollSocket.socketPath}`)
 
   let disposed = false
   return {
     service,
     channel,
+    enrollSocket,
     dispose: async () => {
       if (disposed) return
       disposed = true
       isShuttingDown = true
       startupManagedRecovery = Promise.resolve()
+      await enrollSocket.close()
       await channel.close()
+      await localHost.close()
       await service.dispose()
     }
   }
