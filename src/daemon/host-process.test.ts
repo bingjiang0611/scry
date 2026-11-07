@@ -14,7 +14,6 @@ import { SessionLedger } from '../main/remote/session-ledger'
 import { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
 import { createRecentFoldersStore } from '../main/app-store'
 import { REMOTE_PROTOCOL_VERSION } from '../shared/desktop-remote'
-import { verifyCSR } from '../main/remote/enrollment'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
@@ -42,17 +41,17 @@ class MemoryOutputStore implements RunOutputStore {
   close(): void {}
 }
 
-async function pair(service: Awaited<ReturnType<typeof createDaemonHostProcess>>['service']) {
+// local.sock serves the App's own grant only. A device grant is refused there by the
+// transport rule, so the fixture enrolls the way the App does: present the 0600
+// enrollment secret over the enrollment socket.
+async function enrollLocal(service: Awaited<ReturnType<typeof createDaemonHostProcess>>['service']) {
   const keys = await webcrypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
   const pkcs8 = await webcrypto.subtle.exportKey('pkcs8', keys.privateKey)
   const b64 = Buffer.from(pkcs8).toString('base64').replace(/(.{64})/g, '$1\n').replace(/\n$/, '')
   const keyPEM = `-----BEGIN PRIVATE KEY-----\n${b64}\n-----END PRIVATE KEY-----\n`
   const csr = await Pkcs10CertificateRequestGenerator.create({ name: 'CN=daemon-device', keys, signingAlgorithm: { name: 'ECDSA', hash: 'SHA-256' } })
   const csrPEM = csr.toString('pem')
-  const publicKeySHA256 = (await verifyCSR(csrPEM)).publicKeySHA256
-  const invitation = await service.authority.begin()
-  await service.authority.prove({ pairingId: invitation.pairingId, secret: invitation.secret, csrPEM, deviceLabel: 'daemon fixture' }, publicKeySHA256)
-  const grant = await service.authority.confirmLocal(invitation.pairingId, publicKeySHA256)
+  const grant = await service.enrollLocalDevice({ csrPEM, deviceLabel: 'daemon fixture' }, () => true)
   return { keyPEM, certPEM: grant.certificatePEM }
 }
 
@@ -131,7 +130,7 @@ describe('daemon host process', () => {
       expect(recovered).toContain('run_failed')
       expect(recovered).toContain('host_restarted')
 
-      const device = await pair(host.service)
+      const device = await enrollLocal(host.service)
       const desktop = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'desktop', query: { kind: 'info' }
       })

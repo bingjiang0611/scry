@@ -2,7 +2,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
 import {
   HASH, SECRET, TTL, UUID, base, digest, fail, isTime, text, validatePairingState, validDeviceLabel,
-  type DeviceGrant, type GrantTransport, type PairingDependencies, type PairingRecord, type PairingReceipt, type PairingState
+  type DeviceGrant, type GrantScope, type GrantTransport, type PairingDependencies, type PairingRecord, type PairingReceipt, type PairingState
 } from './pairing-state'
 
 // Re-exported so the persisted-shape names keep one owner (pairing-state) while
@@ -213,15 +213,31 @@ export class PairingAuthority {
    * @param transport how the peer was authenticated. Omitting it means "the caller is
    * trusted code asking whether the grant is live at all" (pairing bookkeeping,
    * gateway internals). A network listener must pass 'network' so a locally-issued
-   * grant cannot be replayed over TCP, the relay or SSH.
+   * grant cannot be replayed over TCP, the relay or SSH; the local socket must pass
+   * 'local' so a device grant cannot pick up the App's semantics by reaching it,
+   * for example through an SSH streamlocal forward. The two rules are symmetric.
    */
   authorizesCertificate(certificateSHA256: string, transport?: GrantTransport): boolean {
-    if (typeof certificateSHA256 !== 'string' || !HASH.test(certificateSHA256)) return false
-    try { this.available() } catch { return false }
+    const scope = this.grantScope(certificateSHA256)
+    if (scope === undefined) return false
+    if (transport === 'local') return scope === 'local'
+    if (transport === 'network') return scope === 'remote'
+    return true
+  }
+
+  /**
+   * The verified grant's scope, or undefined when this certificate is not an active
+   * grant. Policy that differs by scope asks this, never the transport that carried
+   * the frame: the transport says where the bytes came from, not who may use them.
+   */
+  grantScope(certificateSHA256: string): GrantScope | undefined {
+    if (typeof certificateSHA256 !== 'string' || !HASH.test(certificateSHA256)) return undefined
+    try { this.available() } catch { return undefined }
     const now = this.clock()
-    return isTime(now) && this.data.grants.some(g => g.certificateSHA256 === certificateSHA256 && g.revokedAt === null &&
-      !this.deniedDevices.has(g.deviceId) && g.expiresAt > now &&
-      (transport !== 'network' || g.scope === 'remote'))
+    if (!isTime(now)) return undefined
+    const grant = this.data.grants.find(g => g.certificateSHA256 === certificateSHA256 && g.revokedAt === null &&
+      !this.deniedDevices.has(g.deviceId) && g.expiresAt > now)
+    return grant?.scope
   }
 
   close(): void { this.unavailable ??= 'pairing_authority_closed' }

@@ -153,6 +153,20 @@ describe('local grant scope (L1: enrolled over unix socket, useless over the net
     expect(reply.providers).toBeDefined()
   })
 
+  it('refuses a phone grant presented on the local socket', async () => {
+    const { identity, controller, caPEM, socketPath } = await harness()
+    const { keyPEM, csrPEM } = await deviceKeyAndCSR()
+    const verified = await identity.verifyCSR(csrPEM)
+    const pair = await controller.authority.begin()
+    await controller.authority.prove({ pairingId: pair.pairingId, secret: pair.secret, csrPEM, deviceLabel: 'iPhone' }, verified.publicKeySHA256)
+    const phone = await controller.authority.confirmLocal(pair.pairingId, verified.publicKeySHA256)
+    // Symmetric to the network rule: a grant enrolled for a device is not a local
+    // grant, so it cannot pick up the App's semantics by reaching the unix socket
+    // (for example through an SSH streamlocal forward).
+    const reply = await overLocalSocket(socketPath, caPEM, { certPEM: phone.certificatePEM, keyPEM }, { op: 'providers', detail: 'metadata' })
+    expect(reply).toEqual({ error: 'device_not_authorized' })
+  })
+
   it('stops authorizing a revoked App grant on the local socket, with no silent re-enrollment', async () => {
     const { identity, controller, caPEM, socketPath, directory } = await harness()
     const app = await enrollLocal(identity, controller, directory)
