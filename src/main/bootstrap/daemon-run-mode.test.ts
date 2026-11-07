@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DaemonClientError } from '../daemon-client'
-import { createDaemonRunMode, daemonModeEnabled } from './daemon-run-mode'
+import { DaemonRunError } from '../daemon-run-transport'
+import { createDaemonRunMode, daemonModeEnabled, retryAfterReconnect } from './daemon-run-mode'
 
 // The switch has to be boring: absent, the App keeps its in-process pipeline; present,
 // either the daemon is usable and owns the runs, or the reason it is not is returned.
@@ -15,6 +16,25 @@ const cipher = () => ({
 })
 
 const base = { userDataDir: '/tmp/scry-user', daemonStateDirectory: '/tmp/scry-state', appVersion: '1.2.3', send: () => {}, currentCwd: () => '/w' }
+
+describe('daemon reconnect policy', () => {
+  it('retries a replayable read after the daemon it talked to is gone', () => {
+    expect(retryAfterReconnect(new DaemonClientError('daemon_not_running'), true)).toBe(true)
+    // The transport relays the same reason wrapped in its own error type.
+    expect(retryAfterReconnect(new DaemonRunError('daemon_not_running'), true)).toBe(true)
+    expect(retryAfterReconnect(new DaemonRunError('daemon_outcome_unknown'), true)).toBe(true)
+  })
+
+  it('never replays a write, and never retries an answer the daemon gave', () => {
+    // The already-reported reason for M1: a write whose reply was lost may have been
+    // applied, so a retry is a second run, not a recovery.
+    expect(retryAfterReconnect(new DaemonRunError('daemon_outcome_unknown'), false)).toBe(false)
+    expect(retryAfterReconnect(new DaemonClientError('daemon_not_running'), false)).toBe(false)
+    // A refusal or a version mismatch is an answer, not a lost connection.
+    expect(retryAfterReconnect(new DaemonClientError('daemon_device_not_authorized'), true)).toBe(false)
+    expect(retryAfterReconnect(new DaemonClientError('daemon_version_mismatch'), true)).toBe(false)
+  })
+})
 
 describe('daemon run mode', () => {
   it('stays off unless the switch is exactly 1', async () => {

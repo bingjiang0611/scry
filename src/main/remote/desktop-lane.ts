@@ -116,7 +116,15 @@ function laneError(message: string): Error {
 
 // A TLS 1.3 channel over a unix socket (Desktop, SSH `-L`) or a TCP endpoint
 // (tests and the loopback harness). One reply line per request.
-export function connectDesktopLane(endpoint: DesktopLaneEndpoint): Promise<DesktopLaneChannel> {
+// A listener that accepts and never handshakes keeps `secureConnect` pending forever
+// (a daemon killed mid-restart leaves exactly that in the kernel's accept backlog).
+// Nothing is written before the handshake, so this failure is provably "not sent".
+const CONNECT_TIMEOUT_MS = 5_000
+
+export function connectDesktopLane(
+  endpoint: DesktopLaneEndpoint,
+  options: { timeoutMs?: number } = {}
+): Promise<DesktopLaneChannel> {
   return new Promise((resolve, reject) => {
     const hasPath = endpoint.path !== undefined
     let socket: TLSSocket
@@ -139,9 +147,14 @@ export function connectDesktopLane(endpoint: DesktopLaneEndpoint): Promise<Deskt
     let waiter: { resolve(line: string): void; reject(error: Error): void } | undefined
     let closed: Error | undefined
     const closeListeners = new Set<(reason: Error) => void>()
+    let resolved = false
     const fail = (error: Error): void => {
       if (closed) return
       closed = error
+      clearTimeout(connectTimer)
+      // Before the handshake there is no channel to hand back: the caller waits on the
+      // connect promise itself, so that is what has to settle.
+      if (!resolved) { resolved = true; reject(error) }
       const pending = waiter
       waiter = undefined
       socket.destroy()
@@ -158,7 +171,14 @@ export function connectDesktopLane(endpoint: DesktopLaneEndpoint): Promise<Deskt
       waiter = undefined
       pending.resolve(line)
     }
+    const connectTimer = setTimeout(
+      () => fail(laneNotSent(laneError('desktop_lane_connect_timeout'))),
+      options.timeoutMs ?? CONNECT_TIMEOUT_MS
+    )
+    // A rejected handshake is reported by the promise, not as an unhandled rejection.
     socket.once('secureConnect', () => {
+      clearTimeout(connectTimer)
+      resolved = true
       resolve({
         send: frame => new Promise<void>((done, failed) => {
           // Refusing before write is the only provable "not sent": nothing was handed

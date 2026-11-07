@@ -43,6 +43,19 @@ describe('lazy daemon run surface', () => {
     await expect(lazy.activeRun()).rejects.toThrow('daemon_mode_disabled')
   })
 
+  it('asks again after a daemon that was not ready yet', async () => {
+    // A daemon that is still starting is not a decision for the user: the first call
+    // reports it, and the next call must be able to find the daemon it became.
+    let attempts = 0
+    const lazy = createLazyDaemonRunSurface(deps, async () => {
+      attempts += 1
+      return attempts === 1 ? { status: 'unavailable', reason: 'daemon_ready_timeout' } : { status: 'ready', surface: surface() }
+    })
+    await expect(lazy.activeRuns()).rejects.toThrow('daemon_unavailable:daemon_ready_timeout')
+    await expect(lazy.activeRuns()).resolves.toEqual([])
+    expect(attempts).toBe(2)
+  })
+
   it('reconnects once when the daemon is gone, then serves the call', async () => {
     const first = surface({ activeRuns: async () => { throw new DaemonRunError('daemon_not_running') } })
     const dispose = vi.fn()

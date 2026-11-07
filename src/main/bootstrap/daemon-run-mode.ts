@@ -24,6 +24,17 @@ export function daemonModeEnabled(env: NodeJS.ProcessEnv = process.env): boolean
   return env[DAEMON_MODE_ENV] === '1'
 }
 
+/**
+ * Whether a failed request may be retried after the daemon is relaunched. A read the
+ * caller declared replayable can be asked again — it changes nothing. A write cannot:
+ * its reply may have been lost after the daemon already applied it.
+ */
+export function retryAfterReconnect(error: unknown, replayable: boolean): boolean {
+  if (!replayable) return false
+  const reason = (error as { reason?: unknown } | null)?.reason
+  return reason === 'daemon_not_running' || reason === 'daemon_outcome_unknown'
+}
+
 export interface DaemonRunModeResult {
   status: 'disabled' | 'ready' | 'version-mismatch' | 'unavailable' | 'credential-unavailable' | 'device-not-authorized'
   surface?: DaemonRunSurface
@@ -62,7 +73,13 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
     encrypt: cipher.encrypt,
     decrypt: cipher.decrypt
   })
-  const connect = async (): Promise<string | undefined> => (await client.connect()).version
+  // The probe answers "is one there, and may we use it?" without spending the grant:
+  // `connect()` discards a credential when the daemon does not answer, which would
+  // make a daemon that is merely stopped look like a revoked device.
+  const connect = async (): Promise<string | undefined> =>
+    // Before the first grant the only way to learn the daemon is ready is to enroll;
+    // afterwards a stopped daemon must not cost the credential its restart needs.
+    client.hasGrant ? await client.daemonInfo() : (await client.connect()).version
   // A refusal is an answer, not "not there yet". The supervisor treats a thrown probe
   // as absent and would launch a daemon that refuses again, so the refusal is
   // remembered here and short-circuits before any launch.
@@ -91,11 +108,8 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
       : { status: 'unavailable', reason: refused.reason }
   }
 
-  const supervised = await ensureDaemon({
-    probe,
-    launch: deps.launch ?? (async () => ({ status: 'failed' as const, reason: 'daemon_launch_unavailable' })),
-    appVersion: deps.appVersion
-  })
+  const launch: DaemonLaunch = deps.launch ?? (async () => ({ status: 'failed' as const, reason: 'daemon_launch_unavailable' }))
+  const supervised = await ensureDaemon({ probe, launch, appVersion: deps.appVersion })
   if (supervised.status === 'version-mismatch') {
     return {
       status: 'version-mismatch', running: supervised.running, expected: supervised.expected, action: supervised.action,
@@ -119,10 +133,37 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
     return { status: 'unavailable', reason: error instanceof Error ? error.message : 'daemon_connect_failed' }
   }
 
-  const transport = new DaemonRunTransport((request, options) => client.request(
-    laneForRequest(request), request,
-    { replayable: options?.replayable ?? false, ...(options?.signal ? { signal: options.signal } : {}) }
-  ))
+  // A daemon that exited takes its channels with it. The supervisor adopts or launches
+  // one, and the client reconnects against the grant it already holds. Only a request
+  // the caller declared replayable is retried: a write whose outcome is unknown is
+  // reported, never resubmitted (the device lane has the same rule).
+  let reconnecting: Promise<void> | undefined
+  const reconnect = async (): Promise<void> => {
+    reconnecting ??= (async () => {
+      // The channels to the daemon that exited are dead sockets; keeping them would
+      // fail every retried read on a lane that can never answer.
+      client.close()
+      const again = await ensureDaemon({ probe, launch, appVersion: deps.appVersion })
+      if (again.status === 'unavailable' || again.status === 'version-mismatch') {
+        throw new DaemonClientError('daemon_not_running')
+      }
+      await client.connect()
+    })()
+    try { await reconnecting } finally { reconnecting = undefined }
+  }
+  const transport = new DaemonRunTransport(async (request, options) => {
+    const call = async (): Promise<unknown> => await client.request(
+      laneForRequest(request), request,
+      { replayable: options?.replayable ?? false, ...(options?.signal ? { signal: options.signal } : {}) }
+    )
+    try {
+      return await call()
+    } catch (error) {
+      if (!retryAfterReconnect(error, options?.replayable ?? false)) throw error
+      await reconnect()
+      return await call()
+    }
+  })
   const runtime = new DaemonRunRuntime({
     transport,
     send: deps.send,
@@ -158,6 +199,18 @@ export function appDaemonModeDeps(input: {
     daemonStateDirectory,
     appVersion,
     credentialCipher: () => {
+      // Acceptance only. A dev Electron cannot answer the macOS "Safe Storage" Keychain
+      // prompt, and isEncryptionAvailable() blocks on it, so an isolated test instance
+      // would hang before its window loads. This codec keeps the same 0600 file and the
+      // same envelope but stores base64; it needs SCRY_TEST_APP=1 plus an explicit
+      // variable, so a normal install never reaches it.
+      if (process.env.SCRY_TEST_APP === '1' && process.env.SCRY_DAEMON_CREDENTIAL_PLAINTEXT === '1') {
+        return {
+          ok: true as const,
+          encrypt: (value: string) => Buffer.from(value, 'utf8'),
+          decrypt: (value: Buffer) => value.toString('utf8')
+        }
+      }
       const unsafe = unsafeCredentialStorageReason({
         encryptionAvailable: safeStorage.isEncryptionAvailable(),
         storageBackend: process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : undefined
@@ -171,6 +224,11 @@ export function appDaemonModeDeps(input: {
     },
     send: input.send,
     currentCwd: input.currentCwd,
+    // The pump stops on its own after a failure; without this line the reason would be
+    // dropped and the window would just never update.
+    onWarn: (message, detail) => {
+      console.error(`[scry] ${message}`, detail instanceof Error ? `${detail.name}: ${detail.message}` : detail ?? '')
+    },
     launch: async () => {
       const started = spawnDaemonSupervisor({
         target: daemonLaunchTarget({ isPackaged, appPath, execPath: process.execPath }),

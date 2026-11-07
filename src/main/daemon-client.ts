@@ -7,6 +7,15 @@ import { generateDesktopDeviceIdentity } from './remote/desktop-transport'
 import { DesktopLanes, type DesktopLaneName } from './remote/desktop-lane'
 import { REMOTE_PROTOCOL_VERSION } from '../shared/desktop-remote'
 
+// Every run-channel frame declares the protocol it speaks; the daemon refuses one that
+// does not (`protocol_mismatch`), which is how an upgraded daemon rejects an old client
+// instead of guessing. `daemonInfo` is answered before the strict path so the App can
+// still learn the daemon's version and show the restart prompt.
+function framedRequest(request: unknown): unknown {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) return request
+  return { protocol: REMOTE_PROTOCOL_VERSION, ...(request as Record<string, unknown>) }
+}
+
 // The App's connection to its own daemon over `<stateDir>/local.sock`.
 //
 // This is the same inner-mTLS host and the same lane contract the phone uses, so
@@ -127,6 +136,9 @@ export class DaemonClient {
     this.#lanes = options.lanes ?? new DesktopLanes()
   }
 
+  /** Whether a stored grant exists, so a probe may use it instead of enrolling. */
+  get hasGrant(): boolean { return this.#load() !== undefined }
+
   /** The daemon version this client verified, or undefined before connect(). */
   get version(): string | undefined { return this.#version }
 
@@ -166,13 +178,25 @@ export class DaemonClient {
     return { version, enrolled: true }
   }
 
+  /**
+   * The version the daemon answers with the stored grant, or `undefined` when it is
+   * not there. Unlike `connect()`, absence does not discard the grant: a daemon that
+   * was killed is restarted and re-adopted with the same credential, because its
+   * enrollment secret is already spent.
+   */
+  async daemonInfo(): Promise<string | undefined> {
+    const grant = this.#load()
+    if (!grant) return undefined
+    return await this.#probe(grant)
+  }
+
   /** One request on a lane, exactly like the phone's run channel. */
   request(lane: DesktopLaneName, request: unknown, options: { replayable: boolean; signal?: AbortSignal } = { replayable: false }): Promise<unknown> {
     const grant = this.#grant
     if (!grant) return Promise.reject(new DaemonClientError('daemon_not_running'))
     return this.#lanes.request(lane, grant.deviceId, {
       endpoint: { path: this.#options.paths.socketPath, caPEM: grant.caPEM, certPEM: grant.certificatePEM, keyPEM: grant.keyPEM },
-      request, replayable: options.replayable, ...(options.signal ? { signal: options.signal } : {})
+      request: framedRequest(request), replayable: options.replayable, ...(options.signal ? { signal: options.signal } : {})
     })
   }
 

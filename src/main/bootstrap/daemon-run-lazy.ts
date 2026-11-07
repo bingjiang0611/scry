@@ -9,6 +9,11 @@ import { createDaemonRunMode, type DaemonRunModeDeps, type DaemonRunModeResult }
 // not. This surface defers that work to the first run call and keeps one outcome for
 // the whole session: a refused daemon is reported with its reason on every call
 // instead of being retried per keystroke.
+//
+// `unavailable` is the one exception. It means the supervisor could not reach a ready
+// daemon - typically because it was still starting - which is a condition, not a
+// decision, and the App opening before its daemon is ready must not lose the session
+// to it. Nothing was recorded on that path, so asking again cannot duplicate work.
 
 export interface LazyDaemonRunSurface extends DaemonRunSurface {
   /** Resolves once the daemon question is answered; safe to call repeatedly. */
@@ -29,18 +34,23 @@ export function createLazyDaemonRunSurface(
   createMode: (deps: DaemonRunModeDeps) => Promise<DaemonRunModeResult> = createDaemonRunMode
 ): LazyDaemonRunSurface {
   let pending: Promise<DaemonRunModeResult> | undefined
+  const remember = (result: Promise<DaemonRunModeResult>): Promise<DaemonRunModeResult> => {
+    pending = result
+    // A daemon that was not ready yet is asked about again; everything else is a
+    // decision and stays for the session.
+    void result.then((value) => { if (value.status === 'unavailable' && pending === result) pending = undefined })
+    return result
+  }
   const ensure = (reconnect = false): Promise<DaemonRunModeResult> => {
     if (reconnect) {
       // A daemon that stopped answering is replaced, not reused: its socket is gone
       // and its runtime holds cursors into a dead connection.
-      pending = ensure().then((previous) => {
+      return remember(ensure().then((previous) => {
         previous.dispose?.()
         return createMode(deps)
-      })
-      return pending
+      }))
     }
-    pending ??= createMode(deps)
-    return pending
+    return pending ?? remember(createMode(deps))
   }
   const surface = async (reconnect = false): Promise<DaemonRunSurface> => {
     const result = await ensure(reconnect)

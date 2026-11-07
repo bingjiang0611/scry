@@ -146,6 +146,41 @@ describe('daemon client admission (L2: probe, enroll, version)', () => {
     await expect(later.connect()).rejects.toMatchObject({ reason: 'daemon_enrollment_unavailable' })
   })
 
+  it('knows whether it holds a grant before it has connected', async () => {
+    const env = await harness()
+    const fresh = client(env)
+    expect(fresh.hasGrant).toBe(false)
+    await fresh.connect()
+    expect(fresh.hasGrant).toBe(true)
+    fresh.close()
+    // A restarted process reads the same file, so the probe can tell "re-adopt" from
+    // "first launch, so enroll".
+    expect(client(env).hasGrant).toBe(true)
+  })
+
+  it('probes a stopped daemon without discarding the grant it must reconnect with', async () => {
+    const env = await harness()
+    const paths = daemonClientPaths(env.daemonStateDirectory, env.userDataDir)
+    const first = client(env)
+    await first.connect()
+    first.close()
+    // `daemonInfo` is the supervisor's question ("is one there?"). Asking it while the
+    // daemon is down must not spend the grant: the daemon is restarted and re-adopted
+    // with the same credential, not re-enrolled (its secret is already spent).
+    const probing = client(env)
+    expect(await probing.daemonInfo()).toBe(VERSION)
+    probing.close()
+    // Now the daemon is gone: same question, same answer shape, and the credential
+    // survives so the restarted daemon is re-adopted instead of refused.
+    const stopped = client(env, { connectLocal: async () => { throw new Error('daemon is not listening') } })
+    expect(await stopped.daemonInfo()).toBeUndefined()
+    stopped.close()
+    expect(existsSync(paths.statePath)).toBe(true)
+    const restarted = client(env)
+    expect(await restarted.connect()).toEqual({ version: VERSION, enrolled: false })
+    restarted.close()
+  })
+
   it('reports a daemon that is not running instead of inventing a grant', async () => {
     const env = await harness()
     const offline = client(env, { paths: daemonClientPaths(join(env.root, 'absent'), env.userDataDir) })
@@ -163,6 +198,17 @@ describe('daemon client admission (L2: probe, enroll, version)', () => {
     await expect(broken.connect()).rejects.toMatchObject({ reason: 'daemon_local_grant_corrupt' })
     // Still the caller's evidence to inspect: the file was not replaced.
     expect(decrypt(readFileSync(paths.statePath))).toBe('{"version":1}')
+  })
+
+  it('declares the protocol it speaks on every frame', async () => {
+    const env = await harness()
+    const connected = client(env)
+    await connected.connect()
+    // A run-channel op: the host refuses a frame that does not declare its protocol,
+    // so this is the same answer a real daemon gives the App's run surface.
+    await expect(connected.request('control', { op: 'liveRuns', waitMs: 0 }, { replayable: true }))
+      .resolves.toMatchObject({ liveRuns: { runs: [] } })
+    connected.close()
   })
 
   it('sends a request on a lane over the local socket after connecting', async () => {
