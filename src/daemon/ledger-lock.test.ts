@@ -103,6 +103,25 @@ describe('daemon lock L1: PID reuse must not lock the daemon out', () => {
     expect(source).not.toMatch(/process\.kill|signalProcessTree/)
   })
 
+  it('takes over a stale lock whose pid is this live process with a different identity', async () => {
+    const directory = tempDir()
+    // A previous boot left a lock under a pid the OS has since handed to this process.
+    writeFileSync(join(directory, DAEMON_LOCK_NAME), `${JSON.stringify({
+      pid: process.pid,
+      startedAt: 'Mon Jan  1 00:00:00 2026',
+      identityKey: `${process.pid}:Mon Jan  1 00:00:00 2026`,
+      startedBy: 'previous-boot'
+    })}\n`)
+    const next = await acquireDaemonLock({
+      directory,
+      startedBy: 'this-boot',
+      lister: snapshot([[process.pid, 'Tue Feb  2 00:00:00 2026', 'S', '/Applications/Scry.app/Contents/MacOS/Scry']])
+    })
+    expect(next.status).toBe('replaced-stale')
+    expect(next.status === 'replaced-stale' && next.reason).toBe('pid-reused')
+    expect(JSON.parse(readFileSync(join(directory, DAEMON_LOCK_NAME), 'utf8')).startedBy).toBe('this-boot')
+  })
+
   it('refuses to take over when the pid looks like this same daemon entry', async () => {
     const directory = tempDir()
     await acquireDaemonLock({ directory, startedBy: 'first', pid: 5003, lister: snapshot([[5003, 'Mon Jan  1 00:00:00 2026']]) })

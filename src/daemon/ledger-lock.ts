@@ -82,7 +82,7 @@ type HolderCheck =
   | { kind: 'unverifiable'; holder: DaemonLockRecord }
   | { kind: 'stale'; holder?: DaemonLockRecord; reason: TakeoverReason }
 
-function checkHolder(previous: DaemonLockRecord | undefined, row: ProcessRow | undefined, daemonEntry?: string): HolderCheck {
+function checkHolder(previous: DaemonLockRecord | undefined, row: ProcessRow | undefined, daemonEntry: string | undefined, selfPid: number): HolderCheck {
   if (!previous) return { kind: 'stale', reason: 'unreadable-record' }
   if (!row) return { kind: 'stale', holder: previous, reason: 'holder-missing' }
   if (row.status.startsWith('Z')) return { kind: 'stale', holder: previous, reason: 'holder-zombie' }
@@ -90,9 +90,13 @@ function checkHolder(previous: DaemonLockRecord | undefined, row: ProcessRow | u
     ? processIdentityKey(row) === previous.identityKey
     : row.startedAt === previous.startedAt
   if (sameIdentity) return { kind: 'live', holder: previous }
-  // Same pid with a different legacy wall-clock identity is not enough to steal
-  // from a process that still looks like Scry. Exact Linux identities safely prove
-  // reuse, but keeping this refusal also protects old records and macOS drift.
+  // The record names this very process but a different identity: this process cannot
+  // have written it, so the pid was reused (macOS hands out sequential pids, so a
+  // relaunched daemon often gets the pid its crashed predecessor left behind).
+  if (previous.pid === selfPid) return { kind: 'stale', holder: previous, reason: 'pid-reused' }
+  // Someone else's pid with a different legacy wall-clock identity is not enough to
+  // steal from a process that still looks like Scry. Exact Linux identities safely
+  // prove reuse, but keeping this refusal also protects old records.
   const scryCommand = row.command.includes('Scry.app/') || /(?:^|\/)Scry(?:\s|$)/.test(row.command) ||
     /out\/main\/daemon(?:-supervisor)?\.js/.test(row.command)
   const exactLinuxIdentity = previous.identityKey.includes(':linux:') && row.identityKey?.includes(':linux:') === true
@@ -144,7 +148,7 @@ export async function acquireDaemonLock(options: AcquireDaemonLockOptions): Prom
   const evaluate = (): HolderCheck => {
     const previous = readRecord(path)
     const row = previous ? rowOf(previous.pid) : undefined
-    return checkHolder(previous, row, options.daemonEntry)
+    return checkHolder(previous, row, options.daemonEntry, pid)
   }
   const first = evaluate()
   if (first.kind === 'live') return { status: 'already-running', holder: first.holder, reason: 'live-holder' }

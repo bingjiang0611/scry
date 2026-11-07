@@ -59,18 +59,34 @@ describe('trusted remote lease recovery', () => {
     expect(existsSync(path)).toBe(false)
   })
 
-  it('refuses takeover when the same pid start time shifts by one second but command is Scry', () => {
-    const { directory, path, owner } = fixture()
+  it('refuses takeover when another live pid shifts by one second but command is Scry', () => {
+    const { directory, path } = fixture()
+    const pid = 987654
+    const owner = { pid, lease: randomUUID(), createdAt: 0, startedAt: 'Mon Jan  1 00:00:00 2026', identityKey: `${pid}:Mon Jan  1 00:00:00 2026` }
+    writeFileSync(path, JSON.stringify(owner), { mode: 0o600 })
+    vi.spyOn(process, 'kill').mockImplementation(() => true)
     const row: ProcessRow = {
-      pid: owner.pid,
+      pid,
       ppid: 1,
       status: 'S',
-      startedAt: owner.startedAt.replace(/(\d{2}):(\d{2}):(\d{2})/, (_all, h, m, s) => `${h}:${m}:${String(Number(s) + 1).padStart(2, '0')}`),
+      startedAt: 'Mon Jan  1 00:00:01 2026',
+      identityKey: `${pid}:Mon Jan  1 00:00:01 2026`,
       command: '/Applications/Scry.app/Contents/MacOS/Scry --daemon'
     }
-    expect(() => recoverDeadRemoteLease(directory, NAME, { lister: () => new Map([[owner.pid, row]]) }))
+    expect(() => recoverDeadRemoteLease(directory, NAME, { lister: () => new Map([[pid, row]]) }))
       .toThrow('identity_unverifiable')
     expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(owner)
+  })
+
+  it('takes over a stale lease whose pid is this live process with a different identity', () => {
+    const { directory, path } = fixture()
+    // A previous boot left this lease under a pid the OS has since handed to us.
+    const stale = { pid: process.pid, lease: randomUUID(), createdAt: 0, startedAt: 'Mon Jan  1 00:00:00 2026', identityKey: `${process.pid}:Mon Jan  1 00:00:00 2026` }
+    writeFileSync(path, JSON.stringify(stale), { mode: 0o600 })
+    const current = utcRemoteProcessSnapshot().get(process.pid)!
+    const row: ProcessRow = { ...current, command: '/Applications/Scry.app/Contents/MacOS/Scry --daemon' }
+    recoverDeadRemoteLease(directory, NAME, { lister: () => new Map([[process.pid, row]]) })
+    expect(existsSync(path)).toBe(false)
   })
 
   it('refuses takeover when a live PID identity cannot be determined', () => {
