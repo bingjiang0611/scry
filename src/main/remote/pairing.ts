@@ -1,82 +1,17 @@
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
+import {
+  HASH, SECRET, TTL, UUID, base, digest, fail, isTime, text, validatePairingState, validDeviceLabel,
+  type DeviceGrant, type GrantTransport, type PairingDependencies, type PairingRecord, type PairingReceipt, type PairingState
+} from './pairing-state'
 
-export interface VerifiedPairingCSR {
-  csrPEM: string
-  csrSHA256: string
-  publicKeySHA256: string
-}
-export interface IssuedPairingCertificate {
-  certificatePEM: string
-  certificateSHA256: string
-  publicKeySHA256: string
-  deviceId: string
-  expiresAt: number
-}
-interface PairBase {
-  pairingId: string
-  secretVerifier: string
-  createdAt: number
-  expiresAt: number
-  attempts: number
-}
-type DeviceProof = VerifiedPairingCSR & { deviceLabel: string }
-export type PairingRecord = PairBase & (
-  | { state: 'created' }
-  | { state: 'awaiting_local_confirmation'; proof: DeviceProof }
-  | { state: 'paired'; deviceId: string }
-  | { state: 'expired' | 'cancelled' | 'rejected' }
-)
-export interface DeviceGrant extends IssuedPairingCertificate {
-  pairingId: string
-  deviceLabel: string
-  authority: 'owner-device'
-  source: 'local_confirmation'
-  confirmedAt: number
-  revokedAt: number | null
-}
-export interface PairingState {
-  version: 1
-  hostId: string
-  anchorSHA256: string
-  pairings: PairingRecord[]
-  grants: DeviceGrant[]
-}
-export interface PairingPersistence {
-  assertAvailable(): void
-  load(): unknown
-  // Returning means the complete snapshot was durably committed. Never use a
-  // backup fallback: it could restore a consumed secret or a revoked grant.
-  commit(state: PairingState): void
-}
-export interface PairingDependencies {
-  store: PairingPersistence
-  hostId: string
-  anchorSHA256: string
-  verifyCSR(csrPEM: string): Promise<VerifiedPairingCSR>
-  issue(input: VerifiedPairingCSR & { deviceId: string }): Promise<IssuedPairingCertificate>
-  clock?: () => number
-  monotonic?: () => number
-}
-export type PairingReceipt =
-  | { state: 'awaiting_local_confirmation'; pairingId: string; publicKeySHA256: string }
-  | { state: 'paired'; grant: DeviceGrant }
-  | { state: 'revoked'; deviceId: string }
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
-const HASH = /^[0-9a-f]{64}$/
-const SECRET = /^[A-Za-z0-9_-]{43}$/
-const TTL = 120_000
-const digest = (value: string) => createHash('sha256').update(value).digest('hex')
-function fail(code: string): never { throw new Error(code) }
-const isTime = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) >= 0
-const text = (value: unknown, max: number): value is string => typeof value === 'string' && value.length > 0 && Buffer.byteLength(value) <= max
-const validDeviceLabel = (value: unknown): value is string => text(value, 320) && [...value].length <= 80 &&
-  !/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(value)
-const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
-const keys = (value: Record<string, unknown>, expected: string[]) => {
-  if (Object.keys(value).sort().join('\0') !== expected.sort().join('\0')) fail('invalid_pairing_state')
-}
+// Re-exported so the persisted-shape names keep one owner (pairing-state) while
+// callers keep importing them from the authority module they already use.
+export type {
+  DeviceGrant, GrantScope, GrantTransport, IssuedPairingCertificate, PairingDependencies,
+  PairingPersistence, PairingReceipt, PairingRecord, PairingState, VerifiedPairingCSR
+} from './pairing-state'
+export { validatePairingState } from './pairing-state'
 
 // This module has no IPC registration, network listener, Provider or file API.
 // Only a trusted local UI/controller may call begin/confirmLocal/cancel/revoke.
@@ -183,7 +118,7 @@ export class PairingAuthority {
           !isTime(certificate.expiresAt) || certificate.expiresAt <= this.now()) fail('invalid_issued_identity')
       const confirmedAt = this.now()
       const grant: DeviceGrant = { ...certificate, pairingId, deviceLabel: proof.deviceLabel, authority: 'owner-device',
-        source: 'local_confirmation', confirmedAt, revokedAt: null }
+        source: 'local_confirmation', scope: 'remote', confirmedAt, revokedAt: null }
       // Retire an expired grant for this same key in the SAME transaction. State
       // validation intentionally forbids two unrevoked grants for one key; an
       // expired certificate must be renewable without weakening that invariant.
@@ -233,12 +168,60 @@ export class PairingAuthority {
     })
   }
 
-  authorizesCertificate(certificateSHA256: string): boolean {
+  /**
+   * Enroll the App itself. The proof is: the caller could read the 0600 enrollment
+   * secret as this user AND could produce a CSR signed by the key it will present in
+   * mTLS. Both sides are already on the same machine, so there is no second human
+   * confirmation step - the daemon issues the grant inside this transaction.
+   *
+   * `consumeSecret` runs inside the serialized transaction and must return false on
+   * reuse, so a burned secret cannot be turned into a second grant and a bad CSR
+   * cannot burn the secret before it is validated.
+   *
+   * Only one local grant stays active: enrolling again revokes the previous one.
+   */
+  enrollLocal(input: { csrPEM: string; deviceLabel: string }, consumeSecret: () => boolean): Promise<DeviceGrant> {
+    return this.serial(async () => {
+      if (!text(input.csrPEM, 16_384) || !validDeviceLabel(input.deviceLabel)) fail('invalid_device_proof')
+      const proof = await this.dependencies.verifyCSR(input.csrPEM)
+      if (!HASH.test(proof.csrSHA256) || !HASH.test(proof.publicKeySHA256)) fail('invalid_device_proof')
+      if (!consumeSecret()) fail('local_enrollment_secret_invalid')
+      this.available()
+      const now = this.now()
+      if (this.data.pairings.length >= 64 || this.data.grants.length >= 64) fail('pairing_capacity_exceeded')
+      const deviceId = randomUUID()
+      const certificate = await this.dependencies.issue({ ...proof, deviceId })
+      this.available()
+      const confirmedAt = this.now()
+      if (certificate.deviceId !== deviceId || certificate.publicKeySHA256 !== proof.publicKeySHA256 ||
+          !HASH.test(certificate.certificateSHA256) || !text(certificate.certificatePEM, 16_384) ||
+          !isTime(certificate.expiresAt) || certificate.expiresAt <= confirmedAt) fail('invalid_issued_identity')
+      const pairingId = randomUUID()
+      const grant: DeviceGrant = { ...certificate, pairingId, deviceLabel: input.deviceLabel, authority: 'owner-device',
+        source: 'local_socket', scope: 'local', confirmedAt, revokedAt: null }
+      // One local caller at a time: a new enrollment replaces the previous grant.
+      const grants = this.data.grants.map(g =>
+        g.scope === 'local' && g.revokedAt === null ? { ...g, revokedAt: confirmedAt } : g)
+      const pairing: PairingRecord = { pairingId, secretVerifier: digest(`local-enrollment:${deviceId}`), createdAt: now,
+        expiresAt: now + TTL, attempts: 0, state: 'paired', deviceId }
+      this.persist({ ...this.data, grants: [...grants, grant], pairings: [...this.data.pairings, pairing] })
+      return structuredClone(grant)
+    })
+  }
+
+  /**
+   * @param transport how the peer was authenticated. Omitting it means "the caller is
+   * trusted code asking whether the grant is live at all" (pairing bookkeeping,
+   * gateway internals). A network listener must pass 'network' so a locally-issued
+   * grant cannot be replayed over TCP, the relay or SSH.
+   */
+  authorizesCertificate(certificateSHA256: string, transport?: GrantTransport): boolean {
     if (typeof certificateSHA256 !== 'string' || !HASH.test(certificateSHA256)) return false
     try { this.available() } catch { return false }
     const now = this.clock()
     return isTime(now) && this.data.grants.some(g => g.certificateSHA256 === certificateSHA256 && g.revokedAt === null &&
-      !this.deniedDevices.has(g.deviceId) && g.expiresAt > now)
+      !this.deniedDevices.has(g.deviceId) && g.expiresAt > now &&
+      (transport !== 'network' || g.scope === 'remote'))
   }
 
   close(): void { this.unavailable ??= 'pairing_authority_closed' }
@@ -297,52 +280,4 @@ export class PairingAuthority {
     this.tail = result.catch(() => {})
     return result
   }
-}
-
-function base(pairing: PairBase): PairBase {
-  return { pairingId: pairing.pairingId, secretVerifier: pairing.secretVerifier, createdAt: pairing.createdAt, expiresAt: pairing.expiresAt, attempts: pairing.attempts }
-}
-
-export function validatePairingState(value: unknown): PairingState {
-  if (!record(value)) return fail('invalid_pairing_state')
-  keys(value, ['version', 'hostId', 'anchorSHA256', 'pairings', 'grants'])
-  if (value.version !== 1 || typeof value.hostId !== 'string' || !UUID.test(value.hostId) || typeof value.anchorSHA256 !== 'string' || !HASH.test(value.anchorSHA256) ||
-      !Array.isArray(value.pairings) || value.pairings.length > 64 || !Array.isArray(value.grants) || value.grants.length > 64) return fail('invalid_pairing_state')
-  const grants: DeviceGrant[] = value.grants.map((g: unknown) => {
-    if (!record(g)) return fail('invalid_pairing_state')
-    keys(g, ['certificatePEM', 'certificateSHA256', 'publicKeySHA256', 'deviceId', 'expiresAt', 'pairingId', 'deviceLabel', 'authority', 'source', 'confirmedAt', 'revokedAt'])
-    if (g.authority !== 'owner-device' || g.source !== 'local_confirmation' || !text(g.certificatePEM, 16_384) || !validDeviceLabel(g.deviceLabel) ||
-        typeof g.deviceId !== 'string' || !UUID.test(g.deviceId) || typeof g.pairingId !== 'string' || !UUID.test(g.pairingId) ||
-        typeof g.certificateSHA256 !== 'string' || !HASH.test(g.certificateSHA256) || typeof g.publicKeySHA256 !== 'string' || !HASH.test(g.publicKeySHA256) ||
-        !isTime(g.expiresAt) || !isTime(g.confirmedAt) || g.expiresAt <= g.confirmedAt || (g.revokedAt !== null && !isTime(g.revokedAt))) return fail('invalid_pairing_state')
-    return { certificatePEM: g.certificatePEM, certificateSHA256: g.certificateSHA256, publicKeySHA256: g.publicKeySHA256, deviceId: g.deviceId,
-      expiresAt: g.expiresAt, pairingId: g.pairingId, deviceLabel: g.deviceLabel, authority: g.authority, source: g.source, confirmedAt: g.confirmedAt, revokedAt: g.revokedAt }
-  })
-  const pairings: PairingRecord[] = value.pairings.map((p: unknown) => {
-    if (!record(p)) return fail('invalid_pairing_state')
-    const fields = ['pairingId', 'secretVerifier', 'createdAt', 'expiresAt', 'attempts', 'state']
-    keys(p, [...fields, ...(p.state === 'paired' ? ['deviceId'] : p.state === 'awaiting_local_confirmation' ? ['proof'] : [])])
-    if (typeof p.pairingId !== 'string' || !UUID.test(p.pairingId) || typeof p.secretVerifier !== 'string' || !HASH.test(p.secretVerifier) ||
-        !isTime(p.createdAt) || !isTime(p.expiresAt) || p.expiresAt - p.createdAt !== TTL || !isTime(p.attempts) || p.attempts > 5) return fail('invalid_pairing_state')
-    const common: PairBase = { pairingId: p.pairingId, secretVerifier: p.secretVerifier, createdAt: p.createdAt, expiresAt: p.expiresAt, attempts: p.attempts }
-    if (p.state === 'created' || p.state === 'cancelled' || p.state === 'expired' || p.state === 'rejected') return { ...common, state: p.state }
-    if (p.state === 'paired' && typeof p.deviceId === 'string' && grants.some(g => g.deviceId === p.deviceId && g.pairingId === p.pairingId)) return { ...common, state: 'paired', deviceId: p.deviceId }
-    if (p.state === 'awaiting_local_confirmation' && record(p.proof)) {
-      keys(p.proof, ['csrPEM', 'csrSHA256', 'publicKeySHA256', 'deviceLabel'])
-      const proof = p.proof
-      if (text(proof.csrPEM, 16_384) && validDeviceLabel(proof.deviceLabel) && typeof proof.csrSHA256 === 'string' && HASH.test(proof.csrSHA256) && typeof proof.publicKeySHA256 === 'string' && HASH.test(proof.publicKeySHA256)) {
-        return { ...common, state: 'awaiting_local_confirmation', proof: { csrPEM: proof.csrPEM, csrSHA256: proof.csrSHA256, publicKeySHA256: proof.publicKeySHA256, deviceLabel: proof.deviceLabel } }
-      }
-    }
-    return fail('invalid_pairing_state')
-  })
-  // publicKeySHA256 uniqueness applies only to ACTIVE grants: a revoked grant is
-  // retained for audit history and may share a device key with a new active grant
-  // issued after the same device re-pairs. deviceId and certificateSHA256 stay
-  // globally unique (each issuance mints a distinct cert).
-  const activeKeys = grants.filter(g => g.revokedAt === null).map(g => g.publicKeySHA256)
-  if (new Set(pairings.map(p => p.pairingId)).size !== pairings.length || new Set(grants.map(g => g.deviceId)).size !== grants.length ||
-      new Set(activeKeys).size !== activeKeys.length || new Set(grants.map(g => g.certificateSHA256)).size !== grants.length ||
-      grants.some(g => !pairings.some(p => p.state === 'paired' && p.deviceId === g.deviceId && p.pairingId === g.pairingId))) fail('invalid_pairing_state')
-  return { version: 1, hostId: value.hostId, anchorSHA256: value.anchorSHA256, pairings, grants }
 }

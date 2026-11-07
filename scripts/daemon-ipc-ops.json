@@ -170,6 +170,16 @@
       "scopes": [
         "local"
       ]
+    },
+    "daemonInfo": {
+      "path": "lifecycle",
+      "request": "{ op:'daemonInfo' }",
+      "response": "{ op:'daemonInfo', version, protocol }：daemon 进程的 app 版本与协议版本",
+      "authorize": "只在 unix socket 上、且调用方持有 scope: local grant；在 dispatch 之前回答，不进入 controller",
+      "why": "App 要在入网前后判断 daemon 是否由同一套源码构建；版本不一致必须硬失败并提示重启后台服务",
+      "scopes": [
+        "local"
+      ]
     }
   }
 }

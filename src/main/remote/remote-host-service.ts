@@ -44,6 +44,7 @@ export class RemoteHostService {
   #desktopRestoreError: string | undefined
   #desktopChanging: Promise<unknown> | null = null
   #desktopSettingsPath: string
+  #serverCredentials: { certificatePEM: string; privateKeyPEM: string }
   readonly anchorSHA256: string
   readonly caCertificatePEM: string
   readonly hostId: string
@@ -58,8 +59,10 @@ export class RemoteHostService {
     caCertificatePEM: string
     hostId: string
     relayAdvertisement: { host: string; port: number; tls: 'system' | 'plaintext' } | null
+    serverCredentials: { certificatePEM: string; privateKeyPEM: string }
   }) {
     this.#binding = init.binding
+    this.#serverCredentials = init.serverCredentials
     this.#desktopSettingsPath = join(init.stateDirectory, 'desktop-listeners.json')
     this.#host = init.host
     this.#pairing = init.pairing
@@ -107,8 +110,9 @@ export class RemoteHostService {
       ...(deps.readHistoryTurnsPage ? { readHistoryTurnsPage: deps.readHistoryTurnsPage } : {})    })
     let host: InnerMtlsHost
     let pairing: PairingTransport
+    let server: Awaited<ReturnType<typeof identity.issueHostServer>>
     try {
-      const server = await identity.issueHostServer()
+      server = await identity.issueHostServer()
       const executionTargets = deps.desktopRemoteClient
         ? new ExecutionTargetRouter({
           authorizePeer: (peer) => binding.controller.authorizeDevicePeer(peer),
@@ -145,7 +149,8 @@ export class RemoteHostService {
       anchorSHA256: identity.anchorSHA256,
       caCertificatePEM: identity.caCertificatePEM,
       hostId: identity.hostId,
-      relayAdvertisement: deps.relayAdvertisement ?? null
+      relayAdvertisement: deps.relayAdvertisement ?? null,
+      serverCredentials: { certificatePEM: server.certificatePEM, privateKeyPEM: server.privateKeyPEM }
     })
   }
 
@@ -156,6 +161,38 @@ export class RemoteHostService {
   get authority(): PairingAuthority { return this.#binding.controller.authority }
   get controller(): HostController { return this.#binding.controller }
   get host(): InnerMtlsHost { return this.#host }
+
+  /**
+   * A second inner-mTLS endpoint for the daemon's own unix socket, marked as the local
+   * transport. It shares the controller, the pinned CA and the server credential, but a
+   * grant enrolled over that socket is refused here if it ever arrives over a network
+   * transport instead.
+   */
+  createLocalHost(info: { version: string }): InnerMtlsHost {
+    return new InnerMtlsHost({
+      controller: this.#binding.controller,
+      serverCertPEM: this.#serverCredentials.certificatePEM,
+      serverKeyPEM: this.#serverCredentials.privateKeyPEM,
+      caPEM: this.caCertificatePEM,
+      transport: 'local',
+      info
+    })
+  }
+
+  /** True while a non-revoked, unexpired scope:local grant exists. */
+  hasActiveLocalGrant(now = Date.now()): boolean {
+    return this.#binding.controller.authority.inspectLocal().grants.some((grant) =>
+      grant.scope === 'local' && grant.revokedAt === null && grant.expiresAt > now)
+  }
+
+  /**
+   * Issue the App's own grant. The caller has already proven it can read the 0600
+   * enrollment secret on this machine and holds the private key behind the CSR;
+   * `consumeSecret` is invoked inside the authority's transaction so reuse fails.
+   */
+  enrollLocalDevice(input: { csrPEM: string; deviceLabel: string }, consumeSecret: () => boolean) {
+    return this.#binding.controller.authority.enrollLocal(input, consumeSecret)
+  }
   get pairingTransport(): PairingTransport { return this.#pairing }
   get relayConfigured(): boolean { return this.#clients.length > 0 }
 

@@ -2,6 +2,8 @@ import { createServer, type TLSSocket, type Server } from 'node:tls'
 import { constants, createHash } from 'node:crypto'
 import type { Duplex } from 'node:stream'
 import type { HostController } from './host-controller'
+import type { PairingAuthority } from './pairing'
+import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import type { ExecutionTargetRouter } from './execution-targets'
 import { dispatchRemoteRequest } from './inner-mtls-dispatch'
 import { remoteOperationCounters, remoteRequestTrace } from './remote-request-timing'
@@ -32,6 +34,14 @@ export interface InnerMtlsHostOptions {
   maxFrameBytes?: number
   // Optional Mac1 -> Mac2 target route. Local mobile operations never use it.
   executionTargets?: ExecutionTargetRouter
+  // How peers reach this endpoint. 'network' (default) covers TCP listeners, the
+  // relay tunnel and SSH; 'local' is the daemon's 0600 unix socket. A grant issued
+  // over the local socket is refused here when this is 'network', so it cannot be
+  // replayed from another machine even if its certificate leaks.
+  transport?: 'local' | 'network'
+  // Answers `daemonInfo` on this endpoint. The local socket serves it so the App can
+  // check the daemon's version before it enrolls a grant.
+  info?: { version: string }
 }
 
 // Remote prompts may carry a small, explicitly bounded image/text attachment.
@@ -46,6 +56,8 @@ function digest(bytes: Uint8Array): string {
 export class InnerMtlsHost {
   #server: Server
   #maxFrame: number
+  #transport: 'local' | 'network'
+  #info?: { version: string }
   #connections = new Set<TLSSocket>()
   // Open sockets by verified peer fingerprint, so revoking a device closes the
   // tunnels it holds open instead of waiting for their idle timeout.
@@ -53,6 +65,8 @@ export class InnerMtlsHost {
 
   constructor(options: InnerMtlsHostOptions) {
     this.#maxFrame = options.maxFrameBytes ?? DEFAULT_MAX_FRAME
+    this.#transport = options.transport ?? 'network'
+    this.#info = options.info
     this.#server = createServer({
       key: options.serverKeyPEM,
       cert: options.serverCertPEM,
@@ -135,6 +149,27 @@ export class InnerMtlsHost {
       const keepAlive = !!(parsed && typeof parsed === 'object' && (parsed as { keepAlive?: unknown }).keepAlive === true)
       if (kept && !keepAlive) { socket.end(JSON.stringify({ error: 'keep_alive_required' }) + '\n'); return }
       kept ||= keepAlive
+      // The scope rule lives at the transport, not in the request: a grant enrolled
+      // over the local socket is only good on the local socket. Checked per request so
+      // revoking takes effect on the next frame, before any controller work happens.
+      // Fail closed: a controller that cannot answer the transport question cannot
+      // prove the grant belongs on this transport.
+      const authority: PairingAuthority | undefined = controller.authority
+      if (typeof authority?.authorizesCertificate !== 'function' || !authority.authorizesCertificate(fingerprint, this.#transport)) {
+        // Same envelope shape as a controller rejection so clients need no new branch.
+        const denial = { error: 'device_not_authorized' }
+        if (keepAlive) { socket.write(`${JSON.stringify({ keepAlive: true, ...denial })}\n`); armIdleTimeout() }
+        else socket.end(`${JSON.stringify(denial)}\n`)
+        return
+      }
+      // Version handshake: answered here because it describes this endpoint's
+      // process, and it must be reachable before the App owns a run or a catalog.
+      if (this.#info && parsed && typeof parsed === 'object' && (parsed as { op?: unknown }).op === 'daemonInfo') {
+        const info = { op: 'daemonInfo', version: this.#info.version, protocol: REMOTE_PROTOCOL_VERSION }
+        if (keepAlive) { socket.write(`${JSON.stringify({ keepAlive: true, ...info })}\n`); armIdleTimeout() }
+        else socket.end(`${JSON.stringify(info)}\n`)
+        return
+      }
       busy = true
       socket.setTimeout(0)
       const timing = remoteRequestTrace('remote.host.request')

@@ -102,6 +102,14 @@ describe('daemon IPC routing decisions (D1-D4)', () => {
       expect(differences[row.channel], `${row.channel} must state whether the forward is equivalent`).toBeTruthy()
     }
     for (const channel of ['agent:start', 'agent:deleteSession']) expect(differences[channel]).toMatch(/scope/i)
+    // G1: naming a difference is not enough. Every non-equivalent forward must say how
+    // the daemon reconciles it (policy by grant scope, or a separate op), otherwise the
+    // local App silently loses evidence the phone projection trims away.
+    for (const [channel, difference] of Object.entries(differences)) {
+      if (!difference.startsWith('不同')) continue
+      expect(difference, `${channel} states a difference without saying how it is handled`)
+        .toMatch(/scope|op\b/)
+    }
   })
 
   it('D3 splits the channels that would write the daemon authorization input', () => {
