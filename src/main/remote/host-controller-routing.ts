@@ -98,6 +98,12 @@ export function parseRouting(detail: string | undefined, options: { cwdOptional?
     throw new RemoteRunDenied('invalid_target')
   }
   if (routing.attachmentPeer !== undefined && (typeof routing.attachmentPeer !== 'string' || !SHA256.test(routing.attachmentPeer))) throw new RemoteRunDenied('invalid_target')
+  // The App can ask for things routing cannot carry (a turn fork/restart, a workspace
+  // selection). Dropping them would run a different turn than the user asked for, so a
+  // local submit that carries one is refused by name instead of silently downgraded.
+  for (const field of ['workspace', 'forkLastTurn', 'restartLastTurn'] as const) {
+    if (routing[field] !== undefined) throw new RemoteRunDenied(`unsupported_local_request:${field}`)
+  }
   const attachments = parseRemoteAttachments(routing.attachments)
   if (routing.prompt !== undefined && typeof routing.prompt !== 'string') throw new RemoteRunDenied('invalid_target')
   if (routing.prompt === '' && attachments.length === 0) throw new RemoteRunDenied('invalid_target')

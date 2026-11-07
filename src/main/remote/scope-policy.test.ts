@@ -158,4 +158,17 @@ describe('scope policy (L3: submit and sessionDelete read the verified grant)', 
     await new Promise((resolve) => setTimeout(resolve, 100))
     expect(startRun).not.toHaveBeenCalled()
   })
+
+  it('refuses an App-only request instead of running a different turn', async () => {
+    // A turn fork cannot travel in this frame. Running the plain turn instead would
+    // answer a request the user did not make, so the submit is refused by name.
+    const { identity, controller, startRun } = await harness()
+    const local = await enrollLocal(identity, controller)
+    controller.submitIntent(local, {
+      intentId: 'local-fork',
+      detail: JSON.stringify({ providerId: 'claude', cwd: AUTHORIZED, prompt: 'hello', forkLastTurn: { runId: 'run-abc-1', externalSessionId: 's' } })
+    })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(startRun).not.toHaveBeenCalled()
+  })
 })
