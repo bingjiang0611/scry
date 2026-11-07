@@ -51,6 +51,12 @@ export interface RunPipelineInputs {
   remoteRunIds: Set<string>
   remoteRunLedgerIds: Map<string, string>
   mirrorSessionTranscript: Parameters<typeof startRun>[2]['mirrorSessionTranscript']
+  /**
+   * Who executes runs. `'daemon'` means another process owns every run: this assembly
+   * still serves the registry and trace views those channels read, but it must never
+   * reach a Provider, so `startAppRun` refuses by name instead of executing in-process.
+   */
+  execution?: 'in-process' | 'daemon'
 }
 
 export function createRunPipeline(inputs: RunPipelineInputs) {
@@ -80,6 +86,10 @@ export function createRunPipeline(inputs: RunPipelineInputs) {
   function startAppRun(payload: AgentStartRequest, options?: AppRunStartOptions & { origin?: 'local' }): Promise<AgentStartResult>
   function startAppRun(payload: AgentStartRequest, options?: AppRunStartOptions): Promise<AgentStartResult | RemoteRunCompletion>
   async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptions = {}): Promise<AgentStartResult | RemoteRunCompletion> {
+    // DAEMON_OWNS_RUNS: with the daemon switch on, a run started in this process would
+    // be invisible to the daemon's ledger and the App's own view. Refusing by name is
+    // the only honest answer; the caller's channel routes to the daemon instead.
+    if (inputs.execution === 'daemon') throw new Error('daemon_mode_owns_runs')
     if (payload?.workspace !== undefined) return workspaceStart(payload, options, {
       sourceControl, providerRegistry, resolveKnownProjectDirectory,
       getCurrentCwd: inputs.getCurrentCwd, getStartupManagedRecovery: inputs.getStartupManagedRecovery,

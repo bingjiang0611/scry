@@ -61,6 +61,14 @@
 - `remote-run-binding`：`routing.cwd` 为空时不写 `cwd` 字段（写 `''` 会被 App 当成路径），由 App 自己的 `currentCwd` 回落。
 - 测试：`scope-policy.test.ts` 新增 2 条（本机未命名提交放行且 `routing.cwd === ''`；设备同样的请求不启动 run；本机提交到未授权目录仍被拒），`remote-run-binding.test.ts` 新增 1 条。**控制实验**：把三处改动 stash 掉后，「本机未命名提交」这条立即失败。
 
+## 开关打开时「进程内不再执行 run」
+
+`createRunPipeline` 新增 `execution: 'in-process' | 'daemon'`。开关打开时 `index.ts` 传 `'daemon'`：登记表、trace 视图、停止请求这些**其它通道仍在读**的部分照旧组装，但 `startAppRun` 直接以 `daemon_mode_owns_runs` 拒绝，and 不落到 `startRun` / `startWorkspaceRun`（workspace 分支也一样，所以两个入口都断言了）。
+
+护栏：`src/host-runtime/run-pipeline-execution.test.ts`（2 条）——登记表与 trace 视图仍可用；`startAppRun` 拒绝且两个执行入口一次都没被调用。**控制实验**：删掉那行守卫后，测试报「期望 daemon_mode_owns_runs，实际 provider must not start」，且执行入口被调用。
+
+**诚实边界**：这是「执行归属」的构造断言，不是把组装整体删掉——登记表对象仍然存在，因为侧栏/历史/用量等通道还在读它。整体删除与 `SCRY_HOST_DAEMON` 开关一起，属于 B4-S。
+
 ## run controls（steer / 后台任务停止 / adopt）
 
 这三个通道原来在 daemon 模式下仍读 App 进程内的登记表，而 daemon 的 run 根本不在那里：steer 会得到「运行、Provider、目录或会话身份已变化」这种误导性拒绝，adopt 返回 `null`。现在按 ops 表既有定义实现 `runControl` op：

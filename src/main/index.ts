@@ -279,6 +279,7 @@ const remoteRunIds = new Set<string>()
 // scry runId -> durable ledger runId, the key of the remote question broker.
 const remoteRunLedgerIds = new Map<string, string>()
 
+// daemon 拥有执行时，这里只保留其它通道仍读的登记表与 trace 视图。
 const pipeline = createRunPipeline({
   renderer: { send: (channel, payload) => { win?.webContents.send(channel, payload) }, isFocused: () => Boolean(win?.isFocused()) },
   rendererCanReceive, activeRunSessionKey, dockBadge, mainEventId,
@@ -290,7 +291,8 @@ const pipeline = createRunPipeline({
   sessionRevisionByContext, sessionByContext, sessionAliasesByContext, deletingSessions,
   conversationStore, assertLegacyConversationWriteAllowed, recordingBlockedSessions, homeDir,
   sessionDiffBaselines, recordingRecoveryHint, sessionBaselineKey, requestRunStop,
-  bumpSessionRevision, remoteRunIds, remoteRunLedgerIds, mirrorSessionTranscript
+  bumpSessionRevision, remoteRunIds, remoteRunLedgerIds, mirrorSessionTranscript,
+  execution: daemonModeEnabled() ? 'daemon' : 'in-process'
 })
 const {
   runs, runStopLifecycle, userQuestionBroker, traceOutput, boundedLiveRun, runTraces,
