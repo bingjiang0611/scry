@@ -29,7 +29,7 @@ vi.mock('react', () => {
   }
 })
 vi.mock('../motion', () => ({
-  MOTION: { durBase: 220, easeStruct: 'ease' },
+  MOTION: { durationSm: 200, easeInOut: 'ease-in-out' },
   prefersReducedMotion: () => false,
   subscribeReducedMotion: () => () => {}
 }))
@@ -89,7 +89,7 @@ describe('useTabIndicator', () => {
   it('animates selection only; collection changes and resize jump directly', () => {
     render('a')
     render('b')
-    expect(animate).toHaveBeenCalledExactlyOnceWith(expect.any(Array), expect.objectContaining({ duration: 220 }))
+    expect(animate).toHaveBeenCalledExactlyOnceWith(expect.any(Array), expect.objectContaining({ duration: 200, easing: 'ease-in-out' }))
     expect(observers).toHaveLength(1)
     positions.b = 140
     observers[0].callback()

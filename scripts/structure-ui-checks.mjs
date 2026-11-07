@@ -25,7 +25,7 @@ export async function exerciseStructure(contents) {
   await click(row('cache-a'))
   await pending('cache-a')
   await control('resolve-a')
-  await wait(`${entry}?.effect.getTiming().duration === 180`)
+  await wait(`${entry}?.effect.getTiming().duration === 400`)
   await click(`document.querySelector('.runtime-composer textarea')`)
   await read(`new Promise(resolve => requestAnimationFrame(() => resolve(true)))`)
   await contents.insertText('live input during entrance')
@@ -33,7 +33,7 @@ export async function exerciseStructure(contents) {
   await wait(`${entries}.length === 0`)
   check(await read(`(() => { const page = document.querySelector('.main-content'); return page.contains(document.querySelector('.runtime-composer')) && page.getBoundingClientRect().top >= document.querySelector('.topbar').getBoundingClientRect().bottom; })()`), 'Entry excludes composer or includes chrome')
   await click(`document.querySelector('.sb-nav .sb-navitem')`)
-  await wait(`${entry}?.effect.getTiming().duration === 240`)
+  await wait(`${entry}?.effect.getTiming().duration === 400`)
   check(await read(`${entry}.effect.getKeyframes().some(frame => frame.transform?.includes('6px'))`), 'Page entrance has no real 6px translation')
   // Approved catalog-preview contract: the first frame after a cold selection already owns the
   // target page — target selected, previous surface gone, the target's own catalog preview marked
@@ -62,8 +62,8 @@ export async function exerciseStructure(contents) {
   await wait(`${row('cache-b')}?.getAttribute('aria-current') === 'true' && ${body('cache-b')}`)
   check(await read(`(() => {
     const animation = window.structureEntries.filter(item => item.id === 'scry-structure').at(-1)
-    return animation?.effect.getTiming().duration === 180 && animation.effect.getKeyframes().every(frame => !frame.transform || frame.transform === 'none')
-  })()`), 'Session entry lost its 180ms opacity-only animation')
+    return animation?.effect.getTiming().duration === 400 && animation.effect.getKeyframes().every(frame => !frame.transform || frame.transform === 'none')
+  })()`), 'Session entry lost its 400ms opacity-only animation')
   await wait(`${entries}.length === 0`)
 
   await click(row('cache-a'))
@@ -118,7 +118,7 @@ export async function exerciseStructure(contents) {
   try {
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
     await click(`document.querySelector('.sb-nav .sb-navitem')`)
-    await wait(`${entry}?.effect.getTiming().duration === 120`)
+    await wait(`${entry}?.effect.getTiming().duration === 150`)
     check(await read(`${entry}.effect.getKeyframes().every(frame => (!frame.transform || frame.transform === 'none') && frame.width == null && frame.height == null)`), 'Reduced entry is not opacity-only')
     await wait(`${entries}.length === 0`)
     check(await read(`document.querySelector('.usage-page') != null && window.nativeCaptureCalls === 0`), 'Latest navigation failed or used native capture')
@@ -127,8 +127,8 @@ export async function exerciseStructure(contents) {
       { name: 'prefers-reduced-motion', value: 'no-preference' }, { name: 'forced-colors', value: 'none' }
     ] })
   }
-  return { page240: true, belowChromeIncludesComposer: true, firstClickAndInputDuringEntry: true,
-    coldSelectionPresentsTargetPreview: true, session180NoTranslation: true, rapidCancellation: true, staleHistoryRejected: true,
+  return { page400: true, belowChromeIncludesComposer: true, firstClickAndInputDuringEntry: true,
+    coldSelectionPresentsTargetPreview: true, session400NoTranslation: true, rapidCancellation: true, staleHistoryRejected: true,
     cachedNavigationTargetsLivePage: true, staleCacheOnlyOneEntrance: true, sameSessionRefreshNoEntrance: true, sameSessionFocusNoEntrance: true,
-    newConversationResetsIdentity: true, reduced120OpacityOnly: true, nativeCaptureCalls: 0 }
+    newConversationResetsIdentity: true, reduced150OpacityOnly: true, nativeCaptureCalls: 0 }
 }

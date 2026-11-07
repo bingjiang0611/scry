@@ -5,6 +5,7 @@ import { WORKSPACE_EDITOR_COPY } from '../constants/copy'
 import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
 import { usePresence } from '../hooks/usePresence'
+import { MOTION } from '../motion'
 import type { ReadOnlyWorkspaceSource, WorkspaceApi } from '../workbench-api'
 
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error)
@@ -30,7 +31,7 @@ export function WorkspaceContextMenu({
   onRefresh: () => void
 }) {
   const menuRef = useRef<HTMLDivElement | null>(null)
-  const presence = usePresence({ onClose, exitMs: 100 })
+  const presence = usePresence({ onClose, exitMs: MOTION.durationExitSm })
   const close = (): void => presence.requestClose('pointer')
   useEffect(() => {
     if (presence.state === 'exit') return

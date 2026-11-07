@@ -102,6 +102,19 @@ describe('useFlipList', () => {
     expect(currentNodes.every(node => (node.animate as unknown as ReturnType<typeof vi.fn>).mock.calls.length === 0)).toBe(true)
   })
 
+  it('keeps a 150ms opacity arrival under reduced motion', () => {
+    currentNodes = nodes(1, [0], log)
+    render('first')
+    mediaQuery.matches = true
+    currentNodes = nodes(2, [0, 20], log)
+    render('reduced-arrival')
+    expect(currentNodes[0].animate).not.toHaveBeenCalled()
+    expect(currentNodes[1].animate).toHaveBeenCalledExactlyOnceWith(
+      [{ opacity: 0 }, { opacity: 1 }],
+      expect.objectContaining({ id: 'scry-list-arrival', duration: 150, easing: 'cubic-bezier(0, 0, 0.58, 1)' })
+    )
+  })
+
   it('cancels active transforms when the media query changes to reduced motion', () => {
     currentNodes = nodes(2, [0, 20], log)
     render('first')
@@ -121,7 +134,7 @@ describe('useFlipList', () => {
     currentNodes = nodes(123, Array.from({ length: 123 }, (_, index) => (122 - index) * 20), log)
     render('activity-reorder', 123)
     expect(log.filter(entry => entry.startsWith('read:'))).toHaveLength(123)
-    expect(currentNodes[0].animate).toHaveBeenCalledWith(expect.any(Array), expect.objectContaining({ id: 'scry-list-reorder', duration: 300 }))
+    expect(currentNodes[0].animate).toHaveBeenCalledWith(expect.any(Array), expect.objectContaining({ id: 'scry-list-reorder', duration: 250, easing: 'cubic-bezier(0.42, 0, 0.58, 1)' }))
     log.length = 0
     currentNodes = nodes(124, Array.from({ length: 124 }, (_, index) => index), log)
     render('activity-over-budget', 123)

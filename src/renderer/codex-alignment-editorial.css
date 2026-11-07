@@ -51,13 +51,13 @@
 .tb-action,
 .surface-tab,
 .icon-button {
-  transition: color var(--dur-micro) linear, background-color var(--dur-micro) linear, border-color var(--dur-micro) linear;
+  transition: color var(--duration-hover) var(--ease-out), background-color var(--duration-hover) var(--ease-out), border-color var(--duration-hover) var(--ease-out);
 }
 
 /* Tab selection is immediate; a shared moving indicator requires step 04's DOM work. */
 .surface-tab,
 .surface-tab-activate {
-  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out), border-color var(--duration-hover) var(--ease-out);
 }
 
 /* 会话行保持静止：横向位移会扩大滚动区域，并在列表底部反复触发/取消 hover。 */
@@ -141,7 +141,7 @@
   border-radius: var(--r-md);
   background: var(--surface-subtle);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 2%);
-  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
+  transition: border-color var(--duration-hover) var(--ease-out), background-color var(--duration-hover) var(--ease-out);
 }
 
 .welcome-provider:hover {
@@ -172,7 +172,7 @@
   border: 1px solid transparent;
   border-radius: var(--r-md);
   background: var(--surface-subtle);
-  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
+  transition: border-color var(--duration-hover) var(--ease-out), background-color var(--duration-hover) var(--ease-out);
 }
 
 .runtime-composer .composer-context .wdbtn:hover,
@@ -204,7 +204,7 @@
   border-radius: var(--r-lg);
   background: var(--surface-faint);
   box-shadow: none;
-  transition: background-color var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out);
 }
 
 .chat-body .transcript-turn:hover .turn-assistant,
@@ -256,7 +256,7 @@
   border-radius: var(--r-md);
   background: var(--surface-subtle);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 2%);
-  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
+  transition: border-color var(--duration-hover) var(--ease-out), background-color var(--duration-hover) var(--ease-out);
 }
 
 .chat-body .tool-card:hover {
@@ -293,7 +293,7 @@
   color: var(--dim);
   letter-spacing: 0.02em;
   text-transform: none;
-  transition: color var(--dur-micro) linear, background-color var(--dur-micro) linear;
+  transition: color var(--duration-hover) var(--ease-out), background-color var(--duration-hover) var(--ease-out);
 }
 
 .chat-body .turn-hooks-summary > summary:hover,
@@ -358,7 +358,7 @@
   border-radius: var(--r-lg);
   background: color-mix(in srgb, var(--panel) 96%, transparent);
   box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
-  transition: border-color var(--dur-micro) linear;
+  transition: border-color var(--duration-hover) var(--ease-out);
 }
 
 /* 浅色主题的静态阴影必须让位给焦点描边，否则它的更高权重会吃掉 :focus-within。 */
@@ -394,7 +394,7 @@
   border: 0;
   border-radius: var(--r-sm);
   background: transparent;
-  transition: color var(--dur-micro) linear, background-color var(--dur-micro) linear, border-color var(--dur-micro) linear;
+  transition: color var(--duration-hover) var(--ease-out), background-color var(--duration-hover) var(--ease-out), border-color var(--duration-hover) var(--ease-out);
 }
 
 
@@ -406,7 +406,7 @@
 
 .runtime-composer .send {
   box-shadow: none;
-  transition: background-color var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out);
 }
 
 .runtime-composer .send:not(:disabled):hover {
@@ -548,7 +548,7 @@
   height: 38px;
   min-height: 38px;
   border-radius: 0;
-  transition: color var(--dur-micro) linear, background-color var(--dur-micro) linear;
+  transition: color var(--duration-hover) var(--ease-out), background-color var(--duration-hover) var(--ease-out);
 }
 
 .overview-data-tabs button.active {
@@ -581,7 +581,7 @@
   border: 1px solid var(--border3);
   border-radius: var(--r-md);
   background: var(--surface-faint);
-  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
+  transition: border-color var(--duration-hover) var(--ease-out), background-color var(--duration-hover) var(--ease-out);
 }
 
 .overview-dossier .turn-call-row:hover,
@@ -639,7 +639,7 @@
   padding-inline: 10px;
   border: 1px solid transparent;
   border-radius: var(--r-md);
-  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out), border-color var(--duration-hover) var(--ease-out);
 }
 
 button.pinned-summary-row:hover,

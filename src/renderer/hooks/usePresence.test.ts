@@ -131,11 +131,11 @@ describe('overlay presence lifecycle', () => {
     vi.advanceTimersByTime(1)
     expect(p.onClose).toHaveBeenCalledOnce()
   })
-  it('uses 120ms + 40 under reduced motion', () => {
+  it('uses 150ms + 40 under reduced motion', () => {
     media.matches = true
     const p = mount()
     p.requestClose('escape')
-    vi.advanceTimersByTime(159)
+    vi.advanceTimersByTime(189)
     expect(p.onClose).not.toHaveBeenCalled()
     vi.advanceTimersByTime(1)
     expect(p.onClose).toHaveBeenCalledOnce()

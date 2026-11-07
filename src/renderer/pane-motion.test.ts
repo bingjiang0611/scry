@@ -29,7 +29,21 @@ describe('pane layout commit', () => {
     animatePaneChange(() => { expect(flush.active).toBe(true); width = 240 })
     expect(animate).toHaveBeenCalledWith(
       [{ transform: 'translateX(240px)', opacity: 0 }, { transform: 'translateX(0px)', opacity: 1 }],
-      expect.objectContaining({ duration: 300 })
+      expect.objectContaining({ duration: 250, easing: 'cubic-bezier(0, 0, 0.58, 1)' })
     )
+  })
+  it.each([
+    { role: 'exit', before: 240, after: 0, duration: 200, easing: 'cubic-bezier(0.42, 0, 1, 1)' },
+    { role: 'resize', before: 240, after: 320, duration: 250, easing: 'cubic-bezier(0.42, 0, 0.58, 1)' }
+  ])('uses the $role curve instead of sharing the entrance curve', ({ before, after, duration, easing }) => {
+    let width = before
+    const animate = vi.fn(() => ({ id: '', cancel: vi.fn(), finished: new Promise<void>(() => {}) }))
+    const pane = { id: 'right-surface-pane', inert: false, dataset: {}, style: { setProperty: vi.fn(), removeProperty: vi.fn() }, animate,
+      getBoundingClientRect: () => ({ x: 800, left: 800, top: 0, width, height: 800 }) }
+    vi.stubGlobal('Element', class { animate() {} })
+    vi.stubGlobal('document', { hidden: false, querySelectorAll: () => [pane] })
+    vi.stubGlobal('window', { matchMedia: () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }) })
+    animatePaneChange(() => { width = after })
+    expect(animate).toHaveBeenCalledWith(expect.any(Array), expect.objectContaining({ duration, easing }))
   })
 })

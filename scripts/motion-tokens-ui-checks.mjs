@@ -33,10 +33,21 @@ export async function exerciseMotionTokens(contents) {
   contents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, ...toolGroup })
   contents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, ...toolGroup })
   await wait('document.querySelector(".tool-card") != null')
-  // This fixture measures hover, not Step04's newly mounted 240ms disclosure.
+  // This fixture measures hover, not the newly mounted 200ms disclosure.
   await read(`Promise.all(document.querySelector('#motion-tool').getAnimations({ subtree: true }).filter(animation => animation.effect.getTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {})))`)
-  check(await read("getComputedStyle(document.documentElement).getPropertyValue('--dur-slow').trim() === '300ms'"), 'the slow token is not 300ms')
-  check(await read("getComputedStyle(document.documentElement).getPropertyValue('--ease-out').trim() === 'cubic-bezier(0.23, 1, 0.32, 1)'"), 'the shared ease-out token is missing')
+  const ambientReduced = await read("matchMedia('(prefers-reduced-motion: reduce)').matches")
+  await contents.debugger.attach('1.3')
+  await contents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }]
+  })
+  await wait("!matchMedia('(prefers-reduced-motion: reduce)').matches")
+  const tokens = await read(`({
+    large: getComputedStyle(document.documentElement).getPropertyValue('--duration-lg').trim(),
+    entrance: getComputedStyle(document.documentElement).getPropertyValue('--ease-out').trim(),
+    reduced: matchMedia('(prefers-reduced-motion: reduce)').matches
+  })`)
+  check(tokens.large === '400ms', `the large token is not 400ms: ${JSON.stringify(tokens)}`)
+  check(tokens.entrance === 'cubic-bezier(0, 0, 0.58, 1)', `the shared entrance token is missing: ${JSON.stringify(tokens)}`)
 
   for (const theme of ['dark', 'light']) {
     await read(`document.documentElement.dataset.theme = '${theme}'`)
@@ -55,8 +66,6 @@ export async function exerciseMotionTokens(contents) {
     await checkNoTransform(selector, selector)
   }
 
-  const ambientReduced = await read("matchMedia('(prefers-reduced-motion: reduce)').matches")
-  await contents.debugger.attach('1.3')
   try {
     // Establish both media-query controls, regardless of the runner's preference.
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia', {
@@ -87,8 +96,8 @@ export async function exerciseMotionTokens(contents) {
           id: animation.id, duration: animation.effect.getTiming().duration, frames: animation.effect.getKeyframes()
         }))
       })`)
-      check(!normal.reduced && normal.animations.some(animation => animation.duration === 300 && animation.frames.some(frame => frame.transform != null)),
-        `normal reorder did not produce the 300ms FLIP positive control: ${JSON.stringify({ ambientReduced, before, normal })}`)
+      check(!normal.reduced && normal.animations.some(animation => animation.duration === 250 && animation.frames.some(frame => frame.transform != null)),
+        `normal reorder did not produce the 250ms FLIP positive control: ${JSON.stringify({ ambientReduced, before, normal })}`)
     } finally {
       await read('window.__motionReorder.restore(); delete window.__motionReorder')
     }
@@ -140,7 +149,7 @@ export async function exerciseMotionTokens(contents) {
     }
     const micro = colorChanges.at(-1)
     check(micro.animations.length === 1 && micro.animations[0].property === 'background-color' &&
-      micro.animations[0].duration > 0 && micro.animations[0].duration <= 100 && micro.animations[0].easing === 'linear',
+      micro.animations[0].duration === 150 && micro.animations[0].easing === 'cubic-bezier(0, 0, 0.58, 1)',
     `the declared micro color transition changed: ${JSON.stringify(micro)}`)
   } finally {
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] }).catch(() => {})
@@ -155,7 +164,7 @@ export async function exerciseMotionTokens(contents) {
     hoverStates: ['tool-card', 'composer-send', 'sidebar-activity', 'analysis'],
     focusStates: true,
     reducedMotionReorder: true,
-    reducedMotionColorTransition: 'declared duration, at most 100ms linear',
+    reducedMotionColorTransition: 'declared 150ms ease-out',
     noUndeclaredColorTransitions: true,
     reducedMotionTransformAnimation: false
   }

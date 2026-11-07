@@ -138,7 +138,7 @@
   font: 400 10.5px/1.4 var(--font-mono);
   letter-spacing: 0.08em;
   cursor: pointer;
-  transition: color var(--dur-micro) linear;
+  transition: color var(--duration-hover) var(--ease-out);
 }
 .question-raw > summary::-webkit-details-marker {
   display: none;
@@ -153,7 +153,7 @@
 .question-raw > summary .ico {
   width: 10px;
   height: 10px;
-  transition: transform var(--dur-base) var(--ease-struct);
+  transition: transform var(--duration-sm) var(--ease-out-strong);
 }
 .question-raw[open] > summary .ico {
   transform: rotate(90deg);

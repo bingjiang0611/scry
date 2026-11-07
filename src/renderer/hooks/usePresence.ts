@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type RefCallback } from 'react'
 import { flushSync } from 'react-dom'
-import { prefersReducedMotion } from '../motion'
+import { MOTION, prefersReducedMotion } from '../motion'
 
 export type PresenceState = 'enter' | 'exit'
 export type PresenceCloseReason = 'button' | 'escape' | 'backdrop' | 'pointer' | 'replace' | 'confirm'
@@ -79,7 +79,7 @@ export function usePresence({ onClose, exitMs, onExitStart }: PresenceOptions): 
     if (node) { node.dataset.state = 'exit'; node.inert = true }
     setState('exit')
     onExitStartRef.current?.()
-    const fallbackMs = (prefersReducedMotion() ? 120 : exitMs) + 40
+    const fallbackMs = (prefersReducedMotion() ? MOTION.durationReduced : exitMs) + 40
     // An exit that never reports animationend still has to be removed. The ceiling is measured
     // from the close request, so following a late animation start can never postpone removal
     // past it; that keeps slow or frame-starved renderers bounded instead of hanging.

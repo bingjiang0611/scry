@@ -202,7 +202,7 @@
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, var(--accent) 48%, transparent);
   text-underline-offset: 0.14em;
-  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear, color var(--dur-micro) linear;
+  transition: border-color var(--duration-hover) var(--ease-out), background-color var(--duration-hover) var(--ease-out), color var(--duration-hover) var(--ease-out);
 }
 .md-file-ref:hover code {
   border-color: var(--accent);
