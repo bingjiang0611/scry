@@ -83,3 +83,20 @@
 2. **提交者语义 / diff 预览**：本机 grant 的 run 有 diff 预览通道，设备 grant 没有。
 3. **提交者语义 / 提问路由**：本机 grant 的问题进本机 broker，设备 grant 进远程 broker。
 4. **传输与台账**：两种 scope 都有 intent 回执、ledger 事件与 run output 页；本机 grant 的 `onTraceEvent` 仍被调用（daemon 靠它推送 trace）。
+
+## M2：admission / completion / failure / session / startup 的逐行结论
+
+核验指出这些行仍按 `isRemoteRun` 判断。逐行结论如下，**全部改判为「传输与台账」**，理由与替代保护写在一起。
+
+| 行 | 现在的含义 | 结论与理由 | 替代保护与测试 |
+|---|---|---|---|
+| `run-admission.ts:59,64,70,71,72,108,134,138,214,220` | 用 `sessionByContext` / `sessionRevisionByContext` 判断「用户当前在看哪个会话」，并据此复位、比对、拒绝 | **改判**：这两张表是 App 窗口的当前会话镜像。daemon 没有「当前会话」，`daemon_mode_enabled` 下 App 也只是把会话身份显式发出去，所以在这里读 App 侧的镜像只会读到一个过期的值（切成 `appSemantics` 会让每个续接的 daemon run 都被 `expectedSessionMatches` 拒绝） | 替代保护是**显式身份**：`routingDetail` 把 `expectedExternalSessionId` 作为 `resume` 发出，daemon 用它做比对。测试：`run-admission-parallel.test.ts` 新增 2 条（daemon 提交、会话正在删除 → 拒绝；daemon 提交、同一原生会话已有 run → 拒绝），控制实验：把 `expectedExternalSessionId` 去掉后第二条立即失败 |
+| 同上（`deletingSessions`、`runConflictsWithSession`→`waitForCompletedRuns`、`assertSessionNotArchived`） | 会话互斥与删除保护 | 这些检查**本来就不按 scope 分支**，daemon run 也走 | 同上两条测试从 daemon 提交路径证明了它们仍然生效 |
+| `run-completion.ts:172,197,235`、`run-failure.ts:160,184,221`、`run-execution.ts:353,362,388` | 置 `remoteRecordingFailed` | **改判**：这个标记是**台账 run 把录制失败告诉 App 视图**的通道（`RemoteRunCompletion.recording: 'failed'` + `run.error`）。切成 `appSemantics` 会在 daemon 进程里置一个没有窗口渲染的本地标记，等于把失败藏起来 | 测试：`run-remote-state.test.ts`（3 条）——录制失败 → `recording: 'failed'` 且 `run.error` 可见；in-process run 没有 remote completion（对照）；没有标记时不会升级成 failed |
+| `run-session.ts:48` | `onSession` 把原生 session 回给台账 | **传输与台账**：两种 scope 都有台账 run，都要回 | 现有台账/绑定测试覆盖（`remote-run-binding-*.test.ts` 断言 `onSession`/归档键） |
+| `run-session.ts:50` | 用 revision 比较后更新 `sessionByContext` 镜像 | **改判**：写的是 App 窗口镜像；daemon 进程里这张表没有读者 | 同 admission：显式身份即保护；App 自己维护自己的镜像 |
+| `run-startup.ts:183,198` | `remoteRunIds` / `remoteRunLedgerIds` 记账与失败回滚 | **传输与台账**：两种 scope 的 run 都有台账 id | 现有绑定/远程 run 测试覆盖 |
+| `run-startup.ts:189` | 注册时 `focus: false` | **改判**：焦点是每个窗口的 UI 决定，daemon 不拥有窗口；App 在 daemon 模式下用 `runControl.adopt` / `focusRun` 决定 | `daemon-run-surface.test.ts`「adopts a live run and shows it afterwards」 |
+| `run-startup.ts:210,211` | dock badge 与 `agent:focusedRun` 通知 | **改判**：这是 App 进程的 UI；daemon 模式下窗口由 daemon 视图驱动，badge/未读推迟到 L4（§13.5） | 见 [b4-l3](b4-l3.md)「开关打开时不可用」与 STATUS |
+
+`run-startup.ts:142` 的 `requestUserInput` 分支保持不变：设备提问走 broker，本机 grant 的 run 在 daemon 里同样由绑定的 `requestUserInput` 承接，属于传输与台账。

@@ -107,6 +107,8 @@ interface AdmissionRequest {
   conversation?: { conversationId: string; runId: string; target: ConversationTarget; resumeSessionId?: string }
   payload?: AgentStartRequest
   providerId?: ProviderId
+  /** A run that arrived through the daemon ledger; the App's own grant, App semantics. */
+  viaDaemon?: boolean
 }
 
 async function admit(current: Fixture, request: AdmissionRequest = {}) {
@@ -121,7 +123,7 @@ async function admit(current: Fixture, request: AdmissionRequest = {}) {
   }
   const options: AppRunStartOptions = managed
     ? { managedConversation: managedStart(managed.conversationId, managed.runId, managed.target, managed.resumeSessionId) }
-    : {}
+    : request.viaDaemon ? { origin: 'remote', grantScope: 'local' } : {}
   const providerContextKey = (id: ProviderId, cwd: string, profile?: string): string => `${id}\0${profile ?? ''}\0${cwd}`
   const registry = providerRegistry(providerId)
   const appSessionStore = () => createAppSessionStore(current.userData)
@@ -256,5 +258,34 @@ describe('parallel run admission in one workspace', () => {
       conversation: { conversationId: conversation, runId: 'run-codex', target: codexTarget }
     })).rejects.toThrow('Codex Hook')
     expect(current.runs.get('run-codex')).toBeUndefined()
+  })
+
+  // M2: the protections that do NOT depend on the App's own window state must still hold
+  // for a run the App submitted through its daemon. That run has no `sessionByContext`
+  // entry in the daemon, so its session identity is the explicit one it carried, and the
+  // checks that use that identity are not gated by scope.
+  it('still refuses a daemon-submitted run whose named session is being deleted', async () => {
+    const current = await fixture()
+    current.sessionByContext.set(`pi\0${piProfile}\0${current.cwd}`, 'native-delete')
+    current.deleting.add(`pi\0${piProfile}\0${current.cwd}\0native-delete`)
+    await expect(admit(current, {
+      viaDaemon: true,
+      payload: {
+        prompt: 'from the App', providerId: 'pi', agentProfileId: piProfile, cwd: current.cwd,
+        expectedExternalSessionId: 'native-delete'
+      }
+    })).rejects.toThrow('这个会话正在删除')
+  })
+
+  it('still keeps one native session exclusive for a daemon-submitted run', async () => {
+    const current = await fixture()
+    registerRun(current, { runId: 'run-legacy-alias', sessionId: 'native-shared' })
+    await expect(admit(current, {
+      viaDaemon: true,
+      payload: {
+        prompt: 'from the App', providerId: 'pi', agentProfileId: piProfile, cwd: current.cwd,
+        expectedExternalSessionId: 'native-shared'
+      }
+    })).rejects.toThrow('同一会话已有一轮正在运行')
   })
 })
