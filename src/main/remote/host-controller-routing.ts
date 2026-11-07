@@ -2,6 +2,8 @@
 // denied before any Provider run. Split from host-controller.ts by responsibility.
 import { RemoteRunDenied } from './remote-run-policy'
 import { decodedBase64ByteLength, isAgentPermissionMode, isSupportedImageMimeType } from '../../shared/runtime'
+import { normalizeAgentStartRequest } from '../../shared/runtime-provider'
+import type { AgentStartRequest } from '../../shared/runtime'
 import { DESKTOP_ATTACHMENT_MAX_COUNT, DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES, DESKTOP_ATTACHMENT_MAX_BYTES } from './desktop-attachments'
 import type { RemoteIntentAttachment, RemoteIntentRouting } from './host-controller-types'
 
@@ -98,12 +100,24 @@ export function parseRouting(detail: string | undefined, options: { cwdOptional?
     throw new RemoteRunDenied('invalid_target')
   }
   if (routing.attachmentPeer !== undefined && (typeof routing.attachmentPeer !== 'string' || !SHA256.test(routing.attachmentPeer))) throw new RemoteRunDenied('invalid_target')
-  // The App can ask for things routing cannot carry (a turn fork/restart, a workspace
-  // selection). Dropping them would run a different turn than the user asked for, so a
-  // local submit that carries one is refused by name instead of silently downgraded.
-  for (const field of ['workspace', 'forkLastTurn', 'restartLastTurn'] as const) {
-    if (routing[field] !== undefined) throw new RemoteRunDenied(`unsupported_local_request:${field}`)
-  }
+  // A workspace PREPARATION is a different App flow (it needs a command id and an
+  // explicit new session), so it is refused by name rather than dropped: running the
+  // plain turn instead would answer a request the user did not make.
+  if (routing.workspace !== undefined) throw new RemoteRunDenied('unsupported_local_request:workspace')
+  // Turn boundaries (edit-last-message fork / restart) do travel, but only from the
+  // App, and through the App's own schema: the shared normalizer is the single place
+  // that decides whether a boundary is trustworthy.
+  const boundary = options.cwdOptional && (routing.forkLastTurn !== undefined || routing.restartLastTurn !== undefined)
+    ? normalizeAgentStartRequest({
+        prompt: typeof routing.prompt === 'string' ? routing.prompt : '',
+        providerId: routing.providerId as AgentStartRequest['providerId'],
+        ...(typeof routing.agentProfileId === 'string' ? { agentProfileId: routing.agentProfileId } : {}),
+        ...(cwd ? { cwd } : {}),
+        ...(routing.expectedExternalSessionId === undefined ? {} : { expectedExternalSessionId: routing.expectedExternalSessionId as string | null }),
+        ...(routing.forkLastTurn === undefined ? {} : { forkLastTurn: routing.forkLastTurn as never }),
+        ...(routing.restartLastTurn === undefined ? {} : { restartLastTurn: routing.restartLastTurn as never })
+      })
+    : undefined
   const attachments = parseRemoteAttachments(routing.attachments)
   if (routing.prompt !== undefined && typeof routing.prompt !== 'string') throw new RemoteRunDenied('invalid_target')
   if (routing.prompt === '' && attachments.length === 0) throw new RemoteRunDenied('invalid_target')
@@ -118,7 +132,12 @@ export function parseRouting(detail: string | undefined, options: { cwdOptional?
     ...(isAgentPermissionMode(routing.permissionMode) ? { permissionMode: routing.permissionMode } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
     ...(typeof routing.resume === 'string' && routing.resume.length > 0 && routing.resume.length <= 128 ? { resume: routing.resume } : {}),
-    ...(typeof routing.attachmentPeer === 'string' ? { attachmentPeer: routing.attachmentPeer } : {})
+    ...(typeof routing.attachmentPeer === 'string' ? { attachmentPeer: routing.attachmentPeer } : {}),
+    ...(boundary?.forkLastTurn ? { forkLastTurn: boundary.forkLastTurn } : {}),
+    ...(boundary?.restartLastTurn ? { restartLastTurn: boundary.restartLastTurn } : {}),
+    ...(boundary && boundary.expectedExternalSessionId !== undefined && boundary.expectedExternalSessionId !== null
+      ? { expectedExternalSessionId: boundary.expectedExternalSessionId }
+      : {})
   }
 }
 

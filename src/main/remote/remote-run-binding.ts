@@ -202,7 +202,11 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
           // workspace. Sending an empty string would make the App treat it as a path.
           ...(routing.cwd ? { cwd: routing.cwd } : {}),
           ...(routing.agentProfileId ? { agentProfileId: routing.agentProfileId } : {}),
-          ...(resume ? { expectedExternalSessionId: resume } : {}), attachments,
+          ...(resume ? { expectedExternalSessionId: resume } : {}),
+          ...(routing.expectedExternalSessionId ? { expectedExternalSessionId: routing.expectedExternalSessionId } : {}),
+          ...(routing.forkLastTurn ? { forkLastTurn: routing.forkLastTurn } : {}),
+          ...(routing.restartLastTurn ? { restartLastTurn: routing.restartLastTurn } : {}),
+          attachments,
           ...(routing.modelId ? { model: { id: routing.modelId, ...(routing.modelProviderId ? { providerId: routing.modelProviderId } : {}) } } : {}),
           ...(routing.effort ? { effort: routing.effort } : {}), ...(routing.permissionMode ? { permissionMode: routing.permissionMode } : {})
         },

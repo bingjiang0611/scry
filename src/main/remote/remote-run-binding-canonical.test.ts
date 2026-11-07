@@ -42,6 +42,27 @@ describe('remote run binding (canonical App seam: submit -> startAppRun)', () =>
     expect(request.prompt).toBe('go')
   })
 
+  it('forwards an App turn boundary into the canonical run request', async () => {
+    // The App edits its last message by forking that turn. Dropping the boundary would
+    // run a fresh turn in the same session, which is not what the user asked for.
+    const startAppRun = vi.fn(async (input: { request: { forkLastTurn?: unknown } }) => {
+      expect(input.request.forkLastTurn).toEqual({
+        replaceRunId: 'run-a', replaceProviderTurnId: 'turn-a', replaceForkTurnId: 'message-a'
+      })
+      return { status: 'completed' as const, recording: 'committed' as const }
+    })
+    const start = createRemoteRunBinding({ startAppRun, nextScryRunId: () => 'canonical-fork' })
+    await start({
+      runId: 'ledger-fork',
+      routing: {
+        cwd: '', providerId: 'claude', prompt: 'go', expectedExternalSessionId: 'session-1',
+        forkLastTurn: { replaceRunId: 'run-a', replaceProviderTurnId: 'turn-a', replaceForkTurnId: 'message-a' }
+      },
+      progress: () => {}, output: () => {}, grantScope: 'local'
+    })
+    expect(startAppRun).toHaveBeenCalledTimes(1)
+  })
+
   it('propagates canonical startup rejection as a failed remote lifecycle', async () => {
     const progress = vi.fn()
     const startAppRun = vi.fn(async () => { throw new Error('canonical startup failed') })

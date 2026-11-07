@@ -15,21 +15,14 @@
 //   * no Provider runs, so nothing here is a claim about Provider time.
 // Exit 2 when the daemon cannot be reached at all: a missing measurement is not a
 // fast one.
-import 'reflect-metadata'
 import { spawn } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { connect as netConnect } from 'node:net'
-import { connect as tls } from 'node:tls'
-import { webcrypto } from 'node:crypto'
 import { once } from 'node:events'
-import { Pkcs10CertificateRequestGenerator, cryptoProvider } from '@peculiar/x509'
-
-cryptoProvider.set(webcrypto)
+import { enrollLocalDevice, frame, waitForSocket } from './daemon-fixture.mjs'
 
 const SAMPLES = Number(process.env.SCRY_LATENCY_SAMPLES ?? 40)
-const PROTOCOL = 3
 const root = mkdtempSync(join(tmpdir(), 'scry-daemon-latency-'))
 const userDataDir = join(root, 'userData')
 const stateDirectory = join(root, 'state')
@@ -37,52 +30,9 @@ const stateDirectory = join(root, 'state')
 function cleanup() { rmSync(root, { recursive: true, force: true }) }
 process.on('exit', cleanup)
 
-async function deviceKey() {
-  const keys = await webcrypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
-  const pkcs8 = await webcrypto.subtle.exportKey('pkcs8', keys.privateKey)
-  const b64 = Buffer.from(pkcs8).toString('base64').replace(/(.{64})/g, '$1\n').replace(/\n$/, '')
-  const csr = await Pkcs10CertificateRequestGenerator.create({ name: 'CN=scry-latency', keys, signingAlgorithm: { name: 'ECDSA', hash: 'SHA-256' } })
-  return { keyPEM: `-----BEGIN PRIVATE KEY-----\n${b64}\n-----END PRIVATE KEY-----\n`, csrPEM: csr.toString('pem') }
-}
-
-async function enroll(secret, key) {
-  const raw = netConnect(join(stateDirectory, 'enroll.sock'))
-  await once(raw, 'connect')
-  raw.write(`${JSON.stringify({ version: 1, secret, csrPEM: key.csrPEM, deviceLabel: 'latency fixture' })}\n`)
-  let buffer = ''
-  for await (const chunk of raw) { buffer += chunk.toString('utf8'); if (buffer.includes('\n')) break }
-  raw.destroy()
-  const reply = JSON.parse(buffer.split('\n')[0])
-  if (typeof reply.certificatePEM !== 'string') throw new Error(`enroll failed: ${JSON.stringify(reply)}`)
-  return { cert: reply.certificatePEM, ca: reply.caCertificatePEM }
-}
-
-// One frame over the App's own socket, exactly like DaemonClient does it.
-async function frame(credentials, request) {
-  const raw = netConnect(join(stateDirectory, 'local.sock'))
-  await once(raw, 'connect')
-  const socket = tls({ socket: raw, ca: credentials.ca, cert: credentials.cert, key: credentials.key,
-    minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', servername: 'scry-host', rejectUnauthorized: true })
-  await once(socket, 'secureConnect')
-  socket.write(`${JSON.stringify({ protocol: PROTOCOL, ...request })}\n`)
-  let buffer = ''
-  for await (const chunk of socket) { buffer += chunk.toString('utf8'); if (buffer.includes('\n')) break }
-  socket.destroy()
-  return JSON.parse(buffer.split('\n')[0])
-}
-
 function percentile(values, p) {
   const sorted = [...values].sort((a, b) => a - b)
   return sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)]
-}
-
-async function waitForSocket(path, timeoutMs) {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    try { const probe = netConnect(path); await once(probe, 'connect'); probe.destroy(); return true } catch { /* not yet */ }
-    await new Promise((resolveNext) => setTimeout(resolveNext, 50))
-  }
-  return false
 }
 
 const child = spawn(process.execPath, [resolve('out/main/daemon.js')], {
@@ -105,26 +55,24 @@ let stderr = ''
 child.stderr.on('data', (chunk) => { if (stderr.length < 4096) stderr += chunk.toString('utf8').slice(0, 4096) })
 
 try {
-  if (!await waitForSocket(join(stateDirectory, 'local.sock'), 20_000)) {
+  if (!await waitForSocket(join(stateDirectory, 'local.sock'), 20_000, () => child.exitCode === null)) {
     process.stderr.write(`daemon did not listen: ${stderr}\n`)
     process.exit(2)
   }
-  const key = await deviceKey()
-  const secret = JSON.parse(readFileSync(join(stateDirectory, 'local-enrollment.json'), 'utf8')).secret
-  const credentials = { ...(await enroll(secret, key)), key: key.keyPEM }
+  const credentials = await enrollLocalDevice(stateDirectory, 'latency fixture')
 
   const watch = { op: 'watch', runId: 'run-latency-1', cursor: 0, outputCursor: 0, waitMs: 0, output: false }
   const trace = { op: 'desktop', query: { kind: 'trace', context: { cwd: '/tmp', providerId: 'claude' }, runId: 'run-latency-1', images: true, byteChunks: true } }
 
   // Warm both paths once so TLS and JIT costs are not counted as hop latency.
-  await frame(credentials, watch)
-  await frame(credentials, trace)
+  await frame(stateDirectory, credentials, watch)
+  await frame(stateDirectory, credentials, trace)
 
   const socketTimes = []
   for (let index = 0; index < SAMPLES; index++) {
     const started = performance.now()
-    await frame(credentials, watch)
-    await frame(credentials, trace)
+    await frame(stateDirectory, credentials, watch)
+    await frame(stateDirectory, credentials, trace)
     socketTimes.push(performance.now() - started)
   }
 

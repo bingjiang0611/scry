@@ -4,6 +4,7 @@ import type { DesktopDirectoryPage, DesktopDirectoryQuery, DesktopHostRead, Desk
 import type { DeleteSessionResult, McpSnapshot } from '../../shared/provider'
 import type { LlmPerformanceHistory, LlmPerformanceSummary } from '../../shared/llm-performance'
 import type { UsageAnalytics, UsageAnalyticsRangeDays } from '../../shared/trace'
+import type { AgentForkLastTurn, AgentRestartLastTurn } from '../../shared/runtime-types'
 import { type PairingDependencies } from './pairing'
 import { type LedgerStore } from './session-ledger'
 import { type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPreview, type RemoteHistoryVersion, type RemoteHistoryTurnsPage, type RemoteHistoryTurnsPageQuery } from './remote-gateway'
@@ -48,6 +49,11 @@ export interface RemoteIntentRouting extends RemoteRunTarget {
   resume?: string
   // Host-injected owner identity for persisted attachment references.
   attachmentPeer?: string
+  // Edit-last-message boundaries, App submits only: validated by the App's own
+  // normalizer, so the daemon never decides on its own whether a boundary is trusted.
+  forkLastTurn?: AgentForkLastTurn
+  restartLastTurn?: AgentRestartLastTurn
+  expectedExternalSessionId?: string
 }
 
 // A run the owner started in the Mac UI (RunRegistry), as the host proves it

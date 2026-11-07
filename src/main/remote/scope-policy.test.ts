@@ -42,7 +42,7 @@ async function harness() {
   // The owner's device-only override. A local submit must keep the user's own mode.
   const startRun = vi.fn(async (_input: {
     runId: string
-    routing: { permissionMode?: AgentStartRequest['permissionMode']; cwd: string }
+    routing: { permissionMode?: AgentStartRequest['permissionMode']; cwd: string; forkLastTurn?: AgentStartRequest['forkLastTurn'] }
     grantScope?: 'local' | 'remote'
   }) => {})
   const sessionDelete = vi.fn(async (_request: DesktopRemoteDeleteSessionRequest, _authorize: () => void, _grantScope?: 'local' | 'remote'): Promise<DeleteSessionResult> => ({ ok: true, deleted: [], retained: [], failed: [] }))
@@ -159,16 +159,31 @@ describe('scope policy (L3: submit and sessionDelete read the verified grant)', 
     expect(startRun).not.toHaveBeenCalled()
   })
 
-  it('refuses an App-only request instead of running a different turn', async () => {
-    // A turn fork cannot travel in this frame. Running the plain turn instead would
-    // answer a request the user did not make, so the submit is refused by name.
+  it('carries an App turn boundary through, and refuses a request it cannot run', async () => {
+    // Editing the last message is an App flow. The boundary is forwarded through the
+    // App's own normalizer, so the run that executes is the run that was asked for...
     const { identity, controller, startRun } = await harness()
     const local = await enrollLocal(identity, controller)
     controller.submitIntent(local, {
       intentId: 'local-fork',
-      detail: JSON.stringify({ providerId: 'claude', cwd: AUTHORIZED, prompt: 'hello', forkLastTurn: { runId: 'run-abc-1', externalSessionId: 's' } })
+      detail: JSON.stringify({
+        providerId: 'claude', cwd: AUTHORIZED, prompt: 'hello', expectedExternalSessionId: 'session-1',
+        forkLastTurn: { replaceRunId: 'run-a', replaceProviderTurnId: 'turn-a', replaceForkTurnId: 'message-a' }
+      })
+    })
+    await vi.waitFor(() => expect(startRun).toHaveBeenCalledTimes(1))
+    expect(startRun.mock.calls[0]![0].routing.forkLastTurn).toEqual({
+      replaceRunId: 'run-a', replaceProviderTurnId: 'turn-a', replaceForkTurnId: 'message-a'
+    })
+
+    // ...while a workspace PREPARATION still needs a flow this frame does not carry.
+    const second = await harness()
+    const secondLocal = await enrollLocal(second.identity, second.controller)
+    second.controller.submitIntent(secondLocal, {
+      intentId: 'local-workspace',
+      detail: JSON.stringify({ providerId: 'claude', cwd: AUTHORIZED, prompt: 'hello', workspace: { kind: 'worktree' } })
     })
     await new Promise((resolve) => setTimeout(resolve, 100))
-    expect(startRun).not.toHaveBeenCalled()
+    expect(second.startRun).not.toHaveBeenCalled()
   })
 })
