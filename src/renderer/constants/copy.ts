@@ -26,7 +26,7 @@ export const COMPOSER_BLOCKED_COPY = {
   scanning: '正在检测本机 Provider，暂不能发送',
   // App 不能替用户装 CLI；这里只给出可执行的下一步，不假装能自动修好。
   missingCli: (label: string) => `未检测到 ${label}：先在终端安装并登录该 CLI，再重新检测。草稿与附件已保留。`,
-  missingProfile: (label: string) => `未检测到 ${label}：可在 Agent 菜单重新扫描，或选择其他 Provider。草稿与附件已保留。`
+  missingProfile: (profileId: string) => `未检测到 Pi Profile「${profileId}」：在 Agent 菜单重新扫描，或选择其他 Agent。草稿与附件已保留。`
 } as const
 
 export const TURN_FLOW_COPY = {

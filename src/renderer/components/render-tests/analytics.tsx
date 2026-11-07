@@ -274,6 +274,8 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
     expect(trendHtml).toContain('data-missing-days="1"')
     expect(trendHtml.match(/usage-chart-line/g)).toHaveLength(2)
     expect(trendHtml.match(/usage-chart-area/g)).toHaveLength(2)
+    // 两天的连续观测也要有端点，否则只剩一条几乎看不见的细缝。
+    expect(trendHtml.match(/usage-chart-point/g)).toHaveLength(4)
     expect(trendHtml).toContain('没有记录或没有该指标证据的日期不连线，也不按零值绘制')
     // 只有孤立观测日时不画线，用点标记已经看到的那一天。
     expect(isolatedHtml.match(/usage-chart-point/g)).toHaveLength(2)

@@ -304,14 +304,21 @@ export function UsageChart({ analytics, metric }: { analytics: UsageAnalytics; m
           })}
           {chart.series.flatMap((series) => series.segments.map((points, index) => {
             if (points.length === 1) {
-              return <circle key={`${series.provider}:point:${index}`} className={`usage-chart-point is-${series.provider}`} cx={points[0].x} cy={points[0].y} r="2.5" />
+              return <circle key={`${series.provider}:point:${index}`} className={`usage-chart-point is-${series.provider}`} cx={points[0].x} cy={points[0].y} r="3.2" />
             }
             const line = smoothPath(points)
             const area = `${line} L ${points.at(-1)!.x},${chart.baseline} L ${points[0].x},${chart.baseline} Z`
+            // 少于三天的段几乎看不出形状：补上端点，否则两天的观测看起来像一条细缝。
+            const dots = points.length === 2
+              ? points.map((point, dotIndex) => (
+                <circle key={`${series.provider}:dot:${index}:${dotIndex}`} className={`usage-chart-point is-${series.provider}`} cx={point.x} cy={point.y} r="3.2" />
+              ))
+              : null
             return (
               <g key={`${series.provider}:segment:${index}`} data-missing-days={series.missingDays}>
                 <path className={`usage-chart-area is-${series.provider}`} d={area} />
                 <path className={`usage-chart-line is-${series.provider}`} d={line} />
+                {dots}
               </g>
             )
           }))}
