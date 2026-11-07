@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { AgentQuestionResponse, AgentStartRequest, AgentStartResult } from '../../shared/runtime'
 import type { ActiveRun } from '../../shared/trace'
 import type { TraceBatchReceipt } from '../trace-output'
@@ -61,7 +62,13 @@ export function createLazyDaemonRunSurface(
   }
   return {
     ready: ensure,
-    start(payload: AgentStartRequest): Promise<AgentStartResult> { return call((value) => value.start(payload)) },
+    start(payload: AgentStartRequest): Promise<AgentStartResult> {
+      // One intent id per logical start, fixed BEFORE the first attempt: the retry path
+      // below may run the call on a new connection, and a fresh id there would record a
+      // second intent and start a second run.
+      const intentId = payload.commandId?.trim() || randomUUID()
+      return call((value) => value.start(payload, intentId))
+    },
     activeRun(): Promise<ActiveRun | null> { return call((value) => value.activeRun()) },
     activeRuns(): Promise<ActiveRun[]> { return call((value) => value.activeRuns()) },
     focusedRunSnapshot(): Promise<ActiveRun | null> { return call((value) => value.focusedRunSnapshot()) },

@@ -26,6 +26,11 @@ import { remoteOperationCounters, remoteRequestTrace } from './remote-request-ti
 //   - Only a reply starting with `{"keepAlive":true,` proves the host keeps the
 //     tunnel open. Anything else is a protocol mismatch, never a silent fallback
 //     to one-shot requests.
+// What a lane proved about a failed request lives in desktop-lane-phase.ts: the phase
+// decides whether a caller may resend (see the retry rules above).
+import { laneNotSent, laneWasNotSent, laneOutcomeUnknown } from './desktop-lane-phase'
+export { laneNotSent, laneOutcomeUnknown, laneWasNotSent, laneWasWrittenUnknown } from './desktop-lane-phase'
+
 export type DesktopLaneName = 'control' | 'status' | 'watch' | 'bulk'
 
 export interface DesktopLaneEndpoint {
@@ -107,23 +112,6 @@ function isKeepAliveReply(line: string): boolean {
 
 function laneError(message: string): Error {
   return new Error(message)
-}
-
-// A send failure proves the bytes never left this process only when the channel
-// already knew it was closed and refused the frame outright. A write callback
-// error is ambiguous: part of the frame may have reached the host, so a write that
-// fails there keeps its outcome unknown instead of being re-sent. Channels mark
-// the provable case with this helper; everything else counts as possibly written.
-const NOT_SENT = 'desktopLaneNotSent'
-
-/** Bytes provably never left this process: the frame was refused before any write. */
-export function laneNotSent(error: Error): Error {
-  Object.defineProperty(error, NOT_SENT, { value: true, enumerable: false })
-  return error
-}
-
-export function laneWasNotSent(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && (error as Record<string, unknown>)[NOT_SENT] === true
 }
 
 // A TLS 1.3 channel over a unix socket (Desktop, SSH `-L`) or a TCP endpoint
@@ -320,8 +308,9 @@ export class DesktopLanes {
       } catch (error) {
         if (!state.retired && !call.signal?.aborted && notSentRetries++ < MAX_NOT_SENT_RETRIES) continue
         trace?.finish(counters(reused), 'error')
+        // The channel never opened: no request byte was written.
         if (state.retired) throw laneError('desktop_not_connected')
-        throw error instanceof Error ? error : laneError('desktop_lane_connect_failed')
+        throw laneNotSent(error instanceof Error ? error : laneError('desktop_lane_connect_failed'))
       }
       try {
         await channel.send(frame)
@@ -336,7 +325,8 @@ export class DesktopLanes {
         if (!state.retired && !call.signal?.aborted && call.replayable && lostReplays++ < MAX_LOST_REPLAYS) continue
         trace?.finish(counters(reused), 'error')
         if (state.retired) throw laneError('desktop_not_connected')
-        throw error instanceof Error ? error : laneError('desktop_lane_not_sent')
+        // The write itself failed: part of the frame may have reached the host.
+        throw laneOutcomeUnknown(error instanceof Error ? error : laneError('desktop_lane_not_sent'))
       }
       let line: string
       try {
@@ -347,7 +337,8 @@ export class DesktopLanes {
         // read may try once more; a write reports an unproven outcome.
         if (!state.retired && !call.signal?.aborted && call.replayable && lostReplays++ < MAX_LOST_REPLAYS) continue
         trace?.finish(counters(reused), 'error')
-        throw error instanceof Error ? error : laneError('desktop_lane_lost')
+        // Bytes were written and no reply arrived: the outcome is unknown, not a loss.
+        throw laneOutcomeUnknown(error instanceof Error ? error : laneError('desktop_lane_lost'))
       }
       trace?.mark('first_byte')
       if (!isKeepAliveReply(line)) {

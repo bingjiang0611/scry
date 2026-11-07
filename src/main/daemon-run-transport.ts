@@ -1,6 +1,8 @@
 import type { AgentQuestionRequest, AgentQuestionResponse } from '../shared/runtime'
 import type { ActiveRun } from '../shared/trace'
 import type { DesktopTraceCursor, DesktopRemoteTraceRead } from '../shared/desktop-remote'
+import { DaemonClientError } from './daemon-client'
+import { laneWasNotSent, laneWasWrittenUnknown } from './remote/desktop-lane'
 
 // The App's run surface against its own daemon, over the same frames the phone
 // uses. This module only parses and types those frames: it holds no socket, no
@@ -23,6 +25,12 @@ export type DaemonRunFailure =
   | 'daemon_stop_not_confirmed'
   | 'daemon_answer_not_delivered'
   | 'daemon_run_control_unavailable'
+  // The request was written and no reply came back: the daemon may or may not have
+  // acted. Callers reconcile (by intent id) and never resend.
+  | 'daemon_outcome_unknown'
+  // A start was submitted, the reply was lost, and the daemon could not confirm what
+  // it recorded. Reported as unknown so the App never starts the same prompt twice.
+  | 'daemon_submit_unknown'
   | 'invalid_daemon_response'
 
 export class DaemonRunError extends Error {
@@ -59,6 +67,18 @@ export interface DaemonOutputStream {
 }
 
 const MAX_ITEMS = 512
+
+function transportFailure(error: unknown): DaemonRunFailure {
+  if (error instanceof DaemonClientError) {
+    // Raised before any frame is written (no grant) or by the daemon's own answer.
+    if (error.reason === 'daemon_device_not_authorized') return 'daemon_device_not_authorized'
+    return 'daemon_not_running'
+  }
+  if (laneWasNotSent(error)) return 'daemon_not_running'
+  if (laneWasWrittenUnknown(error)) return 'daemon_outcome_unknown'
+  // Unclassified: the write may have landed. Fail closed.
+  return 'daemon_outcome_unknown'
+}
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -231,9 +251,10 @@ export class DaemonRunTransport {
     try {
       reply = await this.#request(request, options)
     } catch (error) {
-      // The transport layer reports "no daemon" and "not authorized" itself; any
-      // other throw is a transport failure, not a business answer.
-      throw error instanceof DaemonRunError ? error : new DaemonRunError('daemon_not_running')
+      // Lanes prove the phase they failed in. Only a provably unsent request may be
+      // replayed by the caller; anything else - including an error this layer cannot
+      // classify - is an unknown outcome, because guessing "not sent" re-runs writes.
+      throw error instanceof DaemonRunError ? error : new DaemonRunError(transportFailure(error))
     }
     if (!record(reply)) throw new DaemonRunError('invalid_daemon_response')
     const error = failure(reply)
