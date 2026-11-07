@@ -1,6 +1,6 @@
 import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { processIdentityKey, readProcessIdentitySync, type ProcessRow } from '../main/process-diagnostics'
+import { processIdentitiesComparable, processIdentityKey, readProcessIdentitySync, type ProcessRow } from '../main/process-diagnostics'
 
 // One daemon per state directory. The lock is the only writer gate for the session
 // ledger, so every decision has to come from evidence: a live holder with the same
@@ -94,13 +94,15 @@ function checkHolder(previous: DaemonLockRecord | undefined, row: ProcessRow | u
   // have written it, so the pid was reused (macOS hands out sequential pids, so a
   // relaunched daemon often gets the pid its crashed predecessor left behind).
   if (previous.pid === selfPid) return { kind: 'stale', holder: previous, reason: 'pid-reused' }
-  // Someone else's pid with a different legacy wall-clock identity is not enough to
-  // steal from a process that still looks like Scry. Exact Linux identities safely
-  // prove reuse, but keeping this refusal also protects old records.
+  // Records written in a format we can interpret (Linux boot/start, macOS lstart) are
+  // exact: a different value is proof the holder is gone. Only legacy records that we
+  // cannot compare fall back to refusing when the command still looks like Scry.
+  if (processIdentitiesComparable(previous.identityKey, processIdentityKey(row))) {
+    return { kind: 'stale', holder: previous, reason: 'pid-reused' }
+  }
   const scryCommand = row.command.includes('Scry.app/') || /(?:^|\/)Scry(?:\s|$)/.test(row.command) ||
     /out\/main\/daemon(?:-supervisor)?\.js/.test(row.command)
-  const exactLinuxIdentity = previous.identityKey.includes(':linux:') && row.identityKey?.includes(':linux:') === true
-  if (!exactLinuxIdentity && (scryCommand || (daemonEntry && row.command.includes(daemonEntry)))) {
+  if (scryCommand || (daemonEntry && row.command.includes(daemonEntry))) {
     return { kind: 'unverifiable', holder: previous }
   }
   return { kind: 'stale', holder: previous, reason: 'pid-reused' }

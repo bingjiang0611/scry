@@ -9,7 +9,7 @@
 |---|---|---|---|
 | B4-F1 renderer UI 门禁 | 完成 | `见 status` | [b4-f1](status/b4-f1.md)：失败原因是 fixture 控件条自身吞掉点击，非产品遮挡；`test:renderer:ui` 已全绿 |
 | B4-F2 supervisor 余项 | 完成 | `见 status` | [b4-f2](status/b4-f2.md)：确定性启动失败改为 exit 4 且不重试；reason 接受 `remote_` 前缀，正文不落盘 |
-| B4-F3 macOS 兜底收窄 | 未开始 | — | 可识别的 UTC `lstart` 记录在 macOS 上视为精确身份 |
+| B4-F3 macOS 兜底收窄 | 完成 | `见 status` | [b4-f3](status/b4-f3.md)：按「身份格式能否比较」判定，可比较差异直接接管；旧格式仍拒绝 |
 | B4-D 设计补全 | 未开始 | — | P3 §13 IPC 矩阵（脚本生成 + 测试守住）、P3b §8 进度表 |
 | B4-L1 本机入网与 `scope: local` | 未开始 | — | B4-D 核验通过后才开始 |
 | B4-L2 main 侧 daemon 客户端与 supervisor | 未开始 | — | |

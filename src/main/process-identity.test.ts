@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { processIdentityKey, readProcessIdentitySync } from './process-diagnostics'
+import { processIdentitiesComparable, processIdentityKey, readProcessIdentitySync } from './process-diagnostics'
 
 function linuxFiles(starttime: string, bootId = '11111111-2222-3333-4444-555555555555') {
   const fields = Array.from({ length: 20 }, () => '0')
@@ -31,6 +31,14 @@ describe('platform process identity', () => {
       platform: 'darwin',
       ps: () => { throw Object.assign(new Error('gone'), { status: 1 }) }
     })).toBeUndefined()
+  })
+
+  it('compares only identities written in a format it can interpret', () => {
+    expect(processIdentitiesComparable('42:linux:boot:999', '42:linux:boot:999')).toBe(true)
+    expect(processIdentitiesComparable('42:linux:boot:999', '42:Tue Feb  2 00:00:00 2026')).toBe(false)
+    expect(processIdentitiesComparable('42:Tue Feb  2 00:00:00 2026', '42:Tue Feb  2 00:00:01 2026')).toBe(true)
+    expect(processIdentitiesComparable('', '42:Tue Feb  2 00:00:00 2026')).toBe(false)
+    expect(processIdentitiesComparable('42:legacy-identity', '42:Tue Feb  2 00:00:00 2026')).toBe(false)
   })
 
   it('changes identity when either Linux boot_id or proc starttime changes', () => {
