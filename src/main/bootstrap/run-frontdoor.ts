@@ -83,15 +83,15 @@ export function prepareRunFrontdoor(payload: AgentStartRequest, options: AppRunS
   // broken shell; the next send may recover without restarting Scry.
   const shellEnvReady = warmShellEnv({ retryFailed: true })
   const cwd = request.cwd
-    ? (isRemoteRun
-      ? deps.resolveRemoteProjectDirectory(request.cwd)
-      : options.workspaceAdmission
+    ? (appSemantics
+      ? options.workspaceAdmission
         ? canonicalExistingDirectory(request.cwd)
-        : deps.resolveKnownProjectDirectory(request.cwd))
+        : deps.resolveKnownProjectDirectory(request.cwd)
+      : deps.resolveRemoteProjectDirectory(request.cwd))
     : deps.currentCwd
-  if (options.workspaceAdmission && (isRemoteRun || cwd !== options.workspaceAdmission.cwd))
+  if (options.workspaceAdmission && (!appSemantics || cwd !== options.workspaceAdmission.cwd))
     throw new Error('工作区预留与真实启动目录不一致')
-  if (!isRemoteRun && !options.workspaceAdmission && request.cwd && deps.currentCwd && cwd !== canonicalExistingDirectory(deps.currentCwd)) {
+  if (appSemantics && !options.workspaceAdmission && request.cwd && deps.currentCwd && cwd !== canonicalExistingDirectory(deps.currentCwd)) {
     throw new AgentRuntimeError('发送请求的工作目录与当前授权目录不一致', {
       provider: runtimeProvider,
       stage: 'frontdoor',
