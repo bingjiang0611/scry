@@ -162,7 +162,7 @@ export function createEvaluate(cdp) {
   }
 }
 
-export function launch({ spawn, executable, devApp, root, port, userDataDir, home, appendLog }) {
+export function launch({ spawn, executable, devApp, root, port, userDataDir, home, appendLog, env = {} }) {
   const child = spawn(executable, [
     ...(devApp ? [root] : []),
     `--remote-debugging-port=${port}`,
@@ -178,7 +178,8 @@ export function launch({ spawn, executable, devApp, root, port, userDataDir, hom
       SCRY_ELECTRON_SMOKE_PROVIDER: '1',
       SCRY_DISABLED_PROVIDERS: 'claude,qoder,opencode,pi',
       SCRY_REMOTE_HOST: '1',
-      SCRY_REMOTE_RELAY_ENABLED: '0'
+      SCRY_REMOTE_RELAY_ENABLED: '0',
+      ...env
     },
     stdio: ['ignore', 'pipe', 'pipe']
   })
