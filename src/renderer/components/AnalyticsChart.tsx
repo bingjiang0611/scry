@@ -81,7 +81,7 @@ export function formatChartCost(value: number | null): string {
 export function formatDay(day: string): string {
   const value = new Date(`${day}T12:00:00`)
   if (Number.isNaN(value.getTime())) return day
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(value)
+  return new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric' }).format(value)
 }
 
 export function providerLabel(provider: BillingProvider): string {
@@ -134,12 +134,14 @@ export function isApproximateCost(row: UsageAnalyticsAggregate): boolean {
 }
 
 export function modelBreakdownRows(analytics: UsageAnalytics): UsageAnalyticsBreakdownRow[] {
-  const rows = analytics.byModel.filter((row) => row.provider !== 'qoder' && row.model && row.costUsd != null)
+  // 有 Token 但没有价格的模型也要列出：隐藏它等于否认已经发生的用量。
+  const rows = analytics.byModel.filter((row) => row.provider !== 'qoder' && row.model && (row.costUsd != null || tokensOf(row) != null))
   const qoder = analytics.byProvider.find((row) => row.provider === 'qoder')
-  if (qoder?.costUsd != null) rows.push(qoder)
+  if (qoder && (qoder.costUsd != null || tokensOf(qoder) != null)) rows.push(qoder)
   return rows.sort((a, b) => {
-    const rank = (row: UsageAnalyticsAggregate): number => row.costUsd || tokensOf(row) || 0
-    return rank(b) - rank(a)
+    // 已知成本优先按金额降序；未知成本排在后面，按已观测 Token 降序。
+    const costDelta = (b.costUsd ?? -1) - (a.costUsd ?? -1)
+    return costDelta !== 0 ? costDelta : (tokensOf(b) ?? 0) - (tokensOf(a) ?? 0)
   })
 }
 
@@ -228,14 +230,23 @@ export function UsageChart({ analytics, metric }: { analytics: UsageAnalytics; m
     const baseline = inset.top + plotHeight
     const y = (value: number): number => inset.top + plotHeight - (value / max) * plotHeight
     const series = samples.map(({ provider, samples: providerSamples }) => {
-      const points = providerSamples.map((sample, index) => ({
-        x: x(index),
-        y: y(sample.value ?? 0)
-      }))
+      // 缺失日与未知成本都没有可绘制的证据：在此断开线段，而不是落到零刻度
+      // 再连起来。单点保留为圆点，让「只观测到这一天」仍然可见。
+      const segments: ChartPoint[][] = []
+      let run: ChartPoint[] = []
+      for (const [index, sample] of providerSamples.entries()) {
+        if (sample.value == null) {
+          if (run.length > 0) segments.push(run)
+          run = []
+          continue
+        }
+        run.push({ x: x(index), y: y(sample.value) })
+      }
+      if (run.length > 0) segments.push(run)
       return {
         provider,
         samples: providerSamples,
-        segments: points.length > 0 ? [points] : [],
+        segments,
         missingDays: providerSamples.filter((sample) => sample.value == null).length
       }
     })

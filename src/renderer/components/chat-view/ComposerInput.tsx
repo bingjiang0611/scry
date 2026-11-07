@@ -1,7 +1,7 @@
 import { useRef } from 'react'
 import type { RefObject } from 'react'
 import type { ChatViewProps } from './types'
-import { WorkdirPicker } from '../Pickers'
+import { WorkdirPicker } from '../WorkdirPicker'
 import { Icon } from '../primitives/Icon'
 import { QUEUE_COPY } from '../../constants/copy'
 import { CONVERSATION_COPY } from '../../constants/conversation-copy'

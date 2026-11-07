@@ -160,8 +160,9 @@
   font: 600 12px/1.2 var(--font-ui);
 }
 .agent-option-copy small {
-  color: var(--dim3);
-  font: 10px/1.2 var(--font-mono);
+  /* 版本与检测来源是给中文界面读的短句，不用等宽字体和小号字号。 */
+  color: var(--dim2);
+  font: 11px/1.35 var(--font-ui);
 }
 .agent-option-remove {
   position: absolute;

@@ -148,6 +148,24 @@ export async function exerciseChatPreviewDom() {
   for (const trigger of document.querySelectorAll('#composer-project .permission-mode-trigger, #composer-project .model-effort-trigger, #composer-project .composer-action-controls .clibtn')) {
     check(trigger.getBoundingClientRect().height === 32, 'Composer controls must share the compact 32px rhythm')
   }
+  // Agent 菜单与工作目录菜单共用同一套键盘语义：焦点进选项、方向键移动、Esc 关闭并退回触发器。
+  // 这些行为只能在实际 DOM 里验证，静态标记看不出焦点去哪了。
+  const agentPicker = document.querySelector('#agent-picker-fixture')
+  const agentTrigger = agentPicker.querySelector('.clibtn')
+  const agentMenu = () => agentPicker.querySelector('.climenu')
+  agentTrigger.focus()
+  agentTrigger.click()
+  await waitFor(() => agentMenu()?.getAttribute('role') === 'menu' && agentMenu().contains(document.activeElement))
+  check(agentMenu().getAttribute('aria-label') === '选择 Agent', 'Agent menu lost its accessible name')
+  const firstItem = document.activeElement
+  check(firstItem.getAttribute('role') === 'menuitem', 'Focused Agent option is not a menu item')
+  firstItem.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+  await waitFor(() => document.activeElement !== firstItem && agentMenu().contains(document.activeElement))
+  check(document.activeElement.getAttribute('role') === 'menuitem', 'ArrowDown left the Agent menu items')
+  document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+  await waitFor(() => !agentMenu())
+  check(document.activeElement === agentTrigger, 'Agent menu did not restore focus to its trigger')
+  check(agentTrigger.getAttribute('aria-expanded') === 'false', 'Agent trigger still reports expanded after Escape')
   input.blur()
   const draft = input.value
   const enter = (options = {}) => {

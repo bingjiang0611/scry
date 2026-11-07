@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import type { SessionAttentionSnapshot } from '@shared/session-attention'
-import type { ProviderId } from '@shared/provider'
-import type { AgentQuestionKind } from '@shared/runtime'
+import { PROVIDER_LABELS, type ProviderId } from '@shared/provider'
+import { providerIdForAgentId, type AgentQuestionKind } from '@shared/runtime'
 import type { ConversationProjection } from './components/ConversationView'
 import type { ConversationSummary } from '@shared/conversation-api'
 import type { WorkspaceOpenRequest } from './components/WorkspacePanel'
@@ -15,6 +15,7 @@ import { useIntegrations } from './hooks/useIntegrations'
 import { createComposerDraftStore, composerDraftKey, readComposerDrafts } from './composer-drafts'
 import { addRunningRunId, updateSessionComposerDraft, updateSessionPromptQueue, sessionComposerDraftKey, shouldReloadProjectsForDataUpdate, MAX_SESSION_COMPOSER_DRAFTS, type DraftAttachment, type QueuedPrompt, type SessionComposerDraft, type SessionEvidenceGap, type SessionPromptQueues } from './app-model'
 import { providerCompatibilityNotice, runControlSendBlockedReason } from './hooks/useIntegrations'
+import { COMPOSER_BLOCKED_COPY } from './constants/copy'
 import { useBackgroundWork } from './hooks/useBackgroundWork'
 import { browserThemeStorage, readStoredTheme, type AppTheme } from './theme'
 
@@ -253,10 +254,14 @@ export function useAppState() {
       attachments: typeof update === 'function' ? update(currentDraft.attachments) : update
     }), releaseDraft))
   }, [draftKey, releaseDraft, setSessionDrafts])
+  const selectedProvider = providerIdForAgentId(integrations.selectedId)
   const providerSendBlockedReason = !integrations.agentsHydrated
-    ? '正在检测本机 Provider，暂不能发送'
+    ? COMPOSER_BLOCKED_COPY.scanning
     : !integrations.selectedAgent
-      ? `未检测到 ${integrations.selectedId}，草稿与附件已保留`
+      // 没装 CLI 和 Pi Profile 失效的下一步不同：前者要装并登录，后者只能换目标。
+      ? selectedProvider === 'pi'
+        ? COMPOSER_BLOCKED_COPY.missingProfile(integrations.selectedId)
+        : COMPOSER_BLOCKED_COPY.missingCli(selectedProvider ? PROVIDER_LABELS[selectedProvider] : integrations.selectedId)
       : integrations.selectedAgent.health?.state === 'unavailable'
         ? integrations.selectedAgent.health.lastError ?? `${integrations.selectedAgent.name} 当前不可用`
         : runControlSendBlockedReason(
