@@ -1,5 +1,6 @@
 import { shell } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
+import { daemonModeEnabled } from './daemon-run-mode'
 import type { ProviderContext, ProviderId } from '../../shared/provider'
 import type { ProviderRegistry } from '../providers/registry'
 import type { McpExecutionOperation, McpExecutionSnapshot } from '../mcp-execution-trust'
@@ -26,6 +27,16 @@ export interface ProviderHandlersDependencies {
   canonicalProviderCwd: (cwd?: string) => string
   providerOperationKey: typeof providerOperationKey
   providerOperationGate: ProviderOperationGate
+}
+
+/**
+ * Under the daemon switch the daemon owns Provider processes and their auth queue.
+ * Running an MCP test or re-auth here would authenticate in THIS process, outside that
+ * queue, and the daemon's runs would not see it. MCP moves into the daemon in B4-L4;
+ * until then the capability is named absent instead of racing it.
+ */
+function assertMcpAuthOwner(): void {
+  if (daemonModeEnabled()) throw new Error('daemon_capability_unavailable:mcp-auth')
 }
 
 export function registerProviderHandlers(deps: ProviderHandlersDependencies): void {
@@ -61,6 +72,7 @@ export function registerProviderHandlers(deps: ProviderHandlersDependencies): vo
     }, p.context.agentProfileId)
   })
   handleTrusted('agent:testMcp', async (_e, p: { context: ProviderContext; targetId: string }) => {
+    assertMcpAuthOwner()
     if (p.context.providerId === 'pi') return providerRegistry.testMcp(p.context, p.targetId)
     return withProviderOperation(p.context.providerId, async () => {
       const snapshot = await ensureMcpExecutionAuthorized(p.context, `test:${p.targetId}`, p.targetId)
@@ -68,6 +80,7 @@ export function registerProviderHandlers(deps: ProviderHandlersDependencies): vo
     }, p.context.agentProfileId)
   })
   handleTrusted('agent:reauthenticateMcp', async (_e, p: { context: ProviderContext; targetId: string }) => {
+    assertMcpAuthOwner()
     const canonicalCwd = canonicalProviderCwd(p.context.cwd)
     const authKey = providerOperationKey(p.context.providerId, p.context.agentProfileId)
     const authLease = providerOperationGate.acquireAuthentication(authKey)

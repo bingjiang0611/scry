@@ -61,6 +61,14 @@
 - `remote-run-binding`：`routing.cwd` 为空时不写 `cwd` 字段（写 `''` 会被 App 当成路径），由 App 自己的 `currentCwd` 回落。
 - 测试：`scope-policy.test.ts` 新增 2 条（本机未命名提交放行且 `routing.cwd === ''`；设备同样的请求不启动 run；本机提交到未授权目录仍被拒），`remote-run-binding.test.ts` 新增 1 条。**控制实验**：把三处改动 stash 掉后，「本机未命名提交」这条立即失败。
 
+## MCP 测试与重新认证：开关打开时不抢跑（诚实缺席）
+
+Provider 的认证队列在 daemon 里（`withProviderOperation` + `providerOperationGate`）。开关打开时若 App 仍在自己的进程里跑 `agent:testMcp` / `agent:reauthenticateMcp`，就是在 daemon 的队列之外做第二次认证，daemon 的 run 看不到结果。
+
+MCP 的 daemon 侧 op 属于 B4-L4，所以这两条通道在开关打开时返回**命名的缺席** `daemon_capability_unavailable:mcp-auth`，不去抢跑。`agent:mcpSnapshot` / `agent:mcpGuardScan` 是读操作，保持原样。测试：`provider-handlers.test.ts`（2 条：开关打开时两个通道都拒绝且 registry 一次都没被调用；开关关闭时走原路径）。
+
+**未迁移**：MCP 的读取与执行仍在 App 进程内（L4），因此「Provider 登录与重认证排队」这一条只做到了「不再出现无排队的第二次认证」，真正搬进 daemon 要等 L4。
+
 ## 开关打开时「进程内不再执行 run」
 
 `createRunPipeline` 新增 `execution: 'in-process' | 'daemon'`。开关打开时 `index.ts` 传 `'daemon'`：登记表、trace 视图、停止请求这些**其它通道仍在读**的部分照旧组装，但 `startAppRun` 直接以 `daemon_mode_owns_runs` 拒绝，and 不落到 `startRun` / `startWorkspaceRun`（workspace 分支也一样，所以两个入口都断言了）。
