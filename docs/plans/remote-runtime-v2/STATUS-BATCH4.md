@@ -13,7 +13,7 @@
 | B4-D 设计补全 | 完成（含 D1–D4 补审） | `见 status` | [b4-d](status/b4-d.md)：P3 §13 移到 [P3-batch4-design](P3-batch4-design.md)；矩阵 119 channel：main 24 / split 3 / forward 39 / new-op 53；D1 `scopes` 默认 `local`、D2 每条 forward 写明语义差异、D3 `chooseFolder`/`recentFolders` 改判 split、D4 secret 生命周期与重新入网 |
 | B4-L1 本机入网与 `scope: local` | 完成 | `见 status` | [b4-l1](status/b4-l1.md)：grant 带 `scope`，local grant 只在 unix socket 传输有效；一次性 0600 secret 不按时间过期；首次入网/复用拒绝/撤销不重入均有测试 |
 | B4-L2 main 侧 daemon 客户端与 supervisor | 完成 | `见 status` | [b4-l2](status/b4-l2.md)：`DaemonClient` 入网/探活/版本硬失败/撤销不重入、`ensureDaemon` 探活→接入→拉起→就绪；新 op `daemonInfo` 仅 local |
-| B4-L3 run 经 daemon | 未开始 | — | |
+| B4-L3 run 经 daemon | 进行中 | `见 status` | [b4-l3](status/b4-l3.md)：按 grant scope 选语义（submit、sessionDelete）已完成并有对照测试；App 侧开关、workbenchOps UI、Linux 凭据后端、真实 launch、重新入网、trace 计时待做 |
 | B4-L4 其余能力经 daemon | 未开始 | — | |
 | B4-S 切换与删除 | 未开始 | — | |
 | B4-V 验收 | 未开始 | — | |

@@ -137,6 +137,10 @@ export interface HostControllerDependencies {
     // binding forwards it to the Provider's own interrupt; the ledger lifecycle
     // still settles from the real Provider result, never from the request.
     stopSignal: AbortSignal
+    // Scope of the grant that submitted this run. Policy that differs by scope reads
+    // this, never the transport: transport says where bytes came from, not who the
+    // caller is.
+    grantScope?: 'local' | 'remote'
   }): Promise<void>
   // Snapshot of host-authorized project directories a device may target. Absent
   // => the device sees an honest empty list (never a fabricated one).
@@ -155,7 +159,7 @@ export interface HostControllerDependencies {
   // Host-owned session metadata writes. The callback must use the host store.
   sessionAction?(context: DesktopRemoteContext, action: DesktopRemoteSessionAction, authorize: () => void): Promise<boolean> | boolean
   sessionFork?(request: DesktopRemoteForkSessionRequest, authorize: () => void): Promise<{ externalSessionId: string }>
-  sessionDelete?(request: DesktopRemoteDeleteSessionRequest, authorize: () => void): Promise<DeleteSessionResult>
+  sessionDelete?(request: DesktopRemoteDeleteSessionRequest, authorize: () => void, grantScope?: 'local' | 'remote'): Promise<DeleteSessionResult>
   // Read-only tool panels for the paired device. Production passes the same
   // aggregations the Mac UI shows; nothing here scans or executes.
   toolPanels?: ToolPanelSources
