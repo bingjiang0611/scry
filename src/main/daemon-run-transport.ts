@@ -1,0 +1,235 @@
+import type { AgentQuestionRequest, AgentQuestionResponse } from '../shared/runtime'
+import type { ActiveRun } from '../shared/trace'
+import type { DesktopTraceCursor, DesktopRemoteTraceRead } from '../shared/desktop-remote'
+
+// The App's run surface against its own daemon, over the same frames the phone
+// uses. This module only parses and types those frames: it holds no socket, no
+// credential and no run state, so a caller can drive it from a test without a
+// daemon and the bootstrap can decide where the frames come from.
+//
+// Failure is explicit: a host error code becomes a named rejection, and a reply
+// that does not carry the expected fields is `invalid_daemon_response` rather
+// than an empty success.
+
+export type DaemonRequest = (
+  request: Record<string, unknown>,
+  options?: { replayable?: boolean; signal?: AbortSignal }
+) => Promise<unknown>
+
+export type DaemonRunFailure =
+  | 'daemon_not_running'
+  | 'daemon_device_not_authorized'
+  | 'daemon_run_unknown'
+  | 'daemon_stop_not_confirmed'
+  | 'daemon_answer_not_delivered'
+  | 'invalid_daemon_response'
+
+export class DaemonRunError extends Error {
+  readonly reason: DaemonRunFailure
+  constructor(reason: DaemonRunFailure) {
+    super(reason)
+    this.name = 'DaemonRunError'
+    this.reason = reason
+  }
+}
+
+export interface DaemonSubmitResult {
+  intentId: string
+  runId: string
+  status: 'recorded' | 'duplicate'
+}
+
+export interface DaemonIntentState {
+  runId: string
+  state: string
+}
+
+export interface DaemonWatchReply {
+  // Lifecycle state as the daemon reports it; `null` means the ledger no longer
+  // holds the run, which is evidence, not "still running".
+  state: string | null
+  cursor: number
+  events: ReadonlyArray<{ runId: string; kind: string; detail?: string }>
+}
+
+export interface DaemonOutputStream {
+  chunks: ReadonlyArray<{ seq: number; text?: string }>
+  cursor: number
+}
+
+const MAX_ITEMS = 512
+
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+// Deliberately narrow: the daemon only ever names runs it created itself.
+export function isDaemonRunId(value: unknown): value is string {
+  return typeof value === 'string' && (
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value) ||
+    /^run-[0-9a-z]{1,16}-[0-9]{1,12}$/.test(value)
+  )
+}
+
+function failure(reply: Record<string, unknown>): DaemonRunError | undefined {
+  const code = reply.error
+  if (code === undefined) return undefined
+  if (code === 'device_not_authorized') return new DaemonRunError('daemon_device_not_authorized')
+  return new DaemonRunError('invalid_daemon_response')
+}
+
+export class DaemonRunTransport {
+  readonly #request: DaemonRequest
+
+  constructor(request: DaemonRequest) {
+    this.#request = request
+  }
+
+  async submit(input: { intentId: string; detail: string }): Promise<DaemonSubmitResult> {
+    const reply = await this.#call({ op: 'submit', intentId: input.intentId, detail: input.detail }, { replayable: true })
+    const runId = reply.runId
+    if (!isDaemonRunId(runId) || (reply.status !== 'recorded' && reply.status !== 'duplicate')) {
+      throw new DaemonRunError('invalid_daemon_response')
+    }
+    return { intentId: input.intentId, runId, status: reply.status }
+  }
+
+  // A recorded intent is not a dispatched run. Recovery asks this after a
+  // reconnect instead of re-submitting the same prompt.
+  async intentState(intentId: string): Promise<DaemonIntentState> {
+    const reply = await this.#call({ op: 'intentStatus', intentId })
+    const intent = reply.intent
+    if (!record(intent) || !isDaemonRunId(intent.runId) || typeof intent.state !== 'string') {
+      throw new DaemonRunError('daemon_run_unknown')
+    }
+    return { runId: intent.runId, state: intent.state }
+  }
+
+  async watch(input: { runId: string; cursor: number; outputCursor: number; waitMs: number; output: boolean }, signal?: AbortSignal): Promise<DaemonWatchReply> {
+    const reply = await this.#call({
+      op: 'watch', runId: input.runId, cursor: input.cursor,
+      outputCursor: input.outputCursor, waitMs: input.waitMs, output: input.output
+    }, signal === undefined ? undefined : { signal })
+    const watch = reply.watch
+    if (!record(watch) || !record(watch.poll) || !Array.isArray(watch.poll.events) ||
+        !Number.isSafeInteger(watch.poll.cursor) || watch.poll.events.length > MAX_ITEMS) {
+      throw new DaemonRunError('invalid_daemon_response')
+    }
+    const poll = watch.poll as { events: unknown[]; cursor: number }
+    const events = poll.events.flatMap((raw) => {
+      if (!record(raw) || typeof raw.runId !== 'string' || typeof raw.kind !== 'string') return []
+      return [{ runId: raw.runId, kind: raw.kind, ...(typeof raw.detail === 'string' ? { detail: raw.detail } : {}) }]
+    })
+    const state = watch.state === undefined || watch.state === null ? null : typeof watch.state === 'string' ? watch.state : fail()
+    return { state, cursor: poll.cursor as number, events }
+  }
+
+  /** One canonical trace read for a live run; the delta cursor is the caller's. */
+  async trace(input: { context: unknown; runId: string; after?: DesktopTraceCursor }): Promise<DesktopRemoteTraceRead> {
+    const reply = await this.#call({
+      op: 'desktop',
+      query: {
+        kind: 'trace', context: input.context, runId: input.runId, images: true, byteChunks: true,
+        ...(input.after ? { after: input.after } : {})
+      }
+    }, { replayable: true })
+    const desktop = reply.desktop
+    if (!record(desktop)) throw new DaemonRunError('invalid_daemon_response')
+    // The wire says `trace`/`trace_delta`; the renderer contract says
+    // snapshot/delta. A wire shape that names neither is refused, not guessed.
+    if (desktop.kind === 'trace') {
+      const run = desktop.run === null ? null : record(desktop.run) && typeof desktop.run.runId === 'string' ? desktop.run as unknown as ActiveRun : fail()
+      const cursor = traceCursor(desktop.cursor)
+      return { kind: 'snapshot', run, ...(cursor ? { cursor } : {}) }
+    }
+    if (desktop.kind === 'trace_delta') {
+      const base = typeof desktop.base === 'string' ? desktop.base : fail()
+      const cursor = traceCursor({ revision: desktop.revision, count: desktop.count })
+      if (!record(desktop.run) || !Array.isArray(desktop.changes)) throw new DaemonRunError('invalid_daemon_response')
+      return {
+        kind: 'delta', run: desktop.run as unknown as Omit<ActiveRun, 'items'>,
+        base, cursor: cursor ?? fail(), changes: desktop.changes as never
+      }
+    }
+    throw new DaemonRunError('invalid_daemon_response')
+  }
+
+  async output(input: { runId: string; cursor: number }): Promise<DaemonOutputStream> {
+    const reply = await this.#call({ op: 'output', runId: input.runId, cursor: input.cursor }, { replayable: true })
+    const output = reply.output
+    if (!record(output) || !Array.isArray(output.chunks) || !Number.isSafeInteger(output.cursor)) {
+      throw new DaemonRunError('invalid_daemon_response')
+    }
+    return output as unknown as DaemonOutputStream
+  }
+
+  async stop(runId: string): Promise<'requested' | 'already_requested'> {
+    const reply = await this.#call({ op: 'stop', runId })
+    const stop = reply.stop
+    if (!record(stop) || (stop.status !== 'requested' && stop.status !== 'already_requested')) {
+      throw new DaemonRunError('daemon_stop_not_confirmed')
+    }
+    return stop.status
+  }
+
+  async questions(runId: string): Promise<AgentQuestionRequest[]> {
+    const reply = await this.#call({ op: 'questions', runId }, { replayable: true })
+    if (!Array.isArray(reply.questions)) throw new DaemonRunError('invalid_daemon_response')
+    return reply.questions as AgentQuestionRequest[]
+  }
+
+  async answerQuestion(input: { runId: string; answerId: string; response: AgentQuestionResponse }): Promise<boolean> {
+    const reply = await this.#call({ op: 'answerQuestion', runId: input.runId, answerId: input.answerId, response: input.response })
+    if (reply.answer !== true) throw new DaemonRunError('daemon_answer_not_delivered')
+    return true
+  }
+
+  async liveRuns(input: { waitMs: number; revision?: string }): Promise<{ revision: string; runs: ReadonlyArray<{ runId: string; state: string; scryRunId?: string }> }> {
+    const reply = await this.#call({ op: 'liveRuns', waitMs: input.waitMs, ...(input.revision ? { revision: input.revision } : {}) })
+    const live = reply.liveRuns
+    if (!record(live) || typeof live.revision !== 'string' || !Array.isArray(live.runs)) throw new DaemonRunError('invalid_daemon_response')
+    const runs = live.runs.flatMap((raw) => {
+      if (!record(raw) || !isDaemonRunId(raw.runId) || typeof raw.state !== 'string') return []
+      return [{ runId: raw.runId, state: raw.state, ...(isDaemonRunId(raw.scryRunId) ? { scryRunId: raw.scryRunId } : {}) }]
+    })
+    return { revision: live.revision, runs }
+  }
+
+  async runState(runId: string): Promise<string | null> {
+    const reply = await this.#call({ op: 'runState', runId }, { replayable: true })
+    if (reply.state === null) return null
+    if (!record(reply.state) || typeof reply.state.state !== 'string') throw new DaemonRunError('invalid_daemon_response')
+    return reply.state.state
+  }
+
+  /** A full run snapshot, used to resynchronise after a gap. */
+  async run(runId: string, context: unknown): Promise<ActiveRun | null> {
+    const read = await this.trace({ context, runId })
+    return read.kind === 'snapshot' ? read.run : fail()
+  }
+
+  async #call(request: Record<string, unknown>, options?: { replayable?: boolean; signal?: AbortSignal }): Promise<Record<string, unknown>> {
+    let reply: unknown
+    try {
+      reply = await this.#request(request, options)
+    } catch (error) {
+      // The transport layer reports "no daemon" and "not authorized" itself; any
+      // other throw is a transport failure, not a business answer.
+      throw error instanceof DaemonRunError ? error : new DaemonRunError('daemon_not_running')
+    }
+    if (!record(reply)) throw new DaemonRunError('invalid_daemon_response')
+    const error = failure(reply)
+    if (error) throw error
+    return reply
+  }
+}
+
+function traceCursor(value: unknown): DesktopTraceCursor | undefined {
+  if (value === undefined) return undefined
+  if (!record(value) || typeof value.revision !== 'string' || !Number.isSafeInteger(value.count)) return undefined
+  return { revision: value.revision, count: value.count as number }
+}
+
+function fail(): never {
+  throw new DaemonRunError('invalid_daemon_response')
+}
