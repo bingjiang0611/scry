@@ -80,10 +80,12 @@
 | 1 | `db.ts` / `app-store.ts` / `remote-history.ts` / `mcp-execution-trust.ts` 的 userData 注入化（不动行为） | Batch 3 · B3-M1 |
 | 2 | `trace-runtime.ts` 拆成「事件源」与「renderer 转发」；run 管线对 `app`/`BrowserWindow`/`webContents` 的依赖改为注入 | Batch 3 · B3-M2 |
 | 3 | daemon 进程承载宿主（`SCRY_HOST_DAEMON=1` 只是开发期开关，台账锁决定单写者） | Batch 3 · B3-P1 |
-| 4 | 本机通道成为 App 的唯一运行入口；main 不再组装宿主 | Batch 4 |
-| 5 | 删除进程内宿主与 App 直连 SQLite | Batch 4 |
+| 4 | 本机通道成为 App 的唯一运行入口；main 不再组装宿主（先本地入网与 `scope: local`，再迁 run，再迁其余 channel） | Batch 4 · L1→L4 |
+| 5 | 删除进程内宿主与 App 直连 SQLite（开关默认打开后删除 `SCRY_HOST_DAEMON` 与旧路径） | Batch 4 · S |
 
-本批（Batch 3）做到第 3 步，且只验证「daemon 能承载远程宿主并真跑 run」；App 仍用进程内宿主，两者不共存于同一 userData（`SCRY_HOST_DAEMON` 决定启动哪一条，默认关闭）。
+Batch 3 做到第 3 步，只验证「daemon 能承载远程宿主并真跑 run」；App 仍用进程内宿主。同一 userData 由 `SCRY_HOST_DAEMON` 决定启动哪一条，默认关闭，两者不并存。
+
+Batch 4 的细化：第 4 步按 channel 矩阵推进（[P3 §13.1](P3-daemon-design.md)），每组 channel 迁移都伴随一组测试；`main` 侧只剩 27 个 channel。第 5 步完成后，`src/main` 的值导入图里不得再出现 Provider spawn、台账 store 或 SQLite 写连接，由静态检查守住。
 
 回滚：Batch 3 之后关掉 `SCRY_HOST_DAEMON` 即回到进程内宿主；Batch 4 合入前删除进程内宿主与 App 直连 SQLite，**不保留兼容版本**（Scry 未对外发布，见 REVIEW-BATCH2 更正 3）。
 
