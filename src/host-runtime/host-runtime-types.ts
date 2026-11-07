@@ -29,6 +29,9 @@ export interface RemoteStartOptions {
   providerPrompt?: string
   onTraceEvent?: (event: TraceEvent) => void
   onSession?: (id: string) => void
+  // The verified submitter's scope. Absent means it could not be proven, and the
+  // pipeline keeps the device semantics rather than guessing "local".
+  grantScope?: 'local' | 'remote'
 }
 export type RemoteRuns = { activeStates: () => ActiveRun[]; get: (runId: string) => { state: ActiveRun } | undefined }
 export type RemoteReceipts = { submit: (key: string, task: () => Promise<RemoteRunCompletion>) => Promise<{ result: RemoteRunCompletion }> }

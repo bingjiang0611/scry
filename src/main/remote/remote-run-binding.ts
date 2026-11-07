@@ -61,6 +61,9 @@ export interface RemoteRunBindingDependencies {
     onTraceEvent(event: TraceEvent): void
     onSession?(externalSessionId: string): void
     permissionModeOverride?: AgentStartRequest['permissionMode']
+    // The verified submitter's scope, forwarded so the pipeline can take the App's
+    // path for a local grant instead of inferring it from `origin`.
+    grantScope?: 'local' | 'remote'
   }): Promise<RemoteRunCompletion>
   // Legacy seam retained for focused binding tests. Production provides startAppRun.
   run?(providerId: string, request: ProviderRunRequest): ProviderRunHandle
@@ -208,7 +211,8 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
         },
         onTraceEvent,
         onSession: (externalSessionId) => progress(marker({ event: 'session', externalSessionId })),
-        permissionModeOverride: grantScope === 'local' ? undefined : deps.permissionModeOverride
+        permissionModeOverride: grantScope === 'local' ? undefined : deps.permissionModeOverride,
+        ...(grantScope ? { grantScope } : {})
       })
       if (completion.recording === 'failed') throw new Error(completion.error ?? 'remote_recording_failed')
       if (completion.status === 'failed') throw new Error(completion.error ?? 'provider_run_failed')
