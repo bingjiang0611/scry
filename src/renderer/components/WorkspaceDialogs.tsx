@@ -26,7 +26,9 @@ export function WorkspaceContextMenu({
   onStartCreate: (kind: WorkspaceEntryKind, parent?: string) => void
   onMove: (entry: WorkspaceEntry) => void
   onRename: (entry: WorkspaceEntry) => void
-  onDelete: (entry: WorkspaceEntry) => void
+  // Absent when the host does not offer the operation: the item is hidden rather
+  // than shown and then failing.
+  onDelete?: (entry: WorkspaceEntry) => void
   onRefresh: () => void
 }) {
   const menuRef = useRef<HTMLDivElement | null>(null)
@@ -59,7 +61,7 @@ export function WorkspaceContextMenu({
         {context.entry && <>
           <button type="button" className="ctxitem" role="menuitem" onClick={() => { onMove(context.entry!); close() }}><Icon name="folder" /> 移动到…</button>
           <button type="button" className="ctxitem" role="menuitem" onClick={() => { onRename(context.entry!); close() }}><Icon name="file" /> 重命名</button>
-          <button type="button" className="ctxitem del" role="menuitem" onClick={() => { onDelete(context.entry!); close() }}><Icon name="x" /> 移入废纸篓</button>
+          {onDelete && <button type="button" className="ctxitem del" role="menuitem" onClick={() => { onDelete(context.entry!); close() }}><Icon name="x" /> 移入废纸篓</button>}
         </>}
         {!context.entry && <button type="button" className="ctxitem" role="menuitem" onClick={() => { onRefresh(); close() }}><Icon name="refresh" /> 刷新</button>}
       </div>
