@@ -28,11 +28,12 @@ jobs:
         shell: bash
         run: |
           set +e
+          export SCRY_DAEMON_SIGKILL_LOG=/tmp/scry-daemon-linux.log
           output="$(node scripts/daemon-sigkill-restart.mjs 2>&1)"
           code=$?
           printf '%s\n' "$output"
           if [ "$code" -ne 0 ]; then
-            tail="$(printf '%s' "$output" | tail -c 2000 | tr '\n' ' ')"
+            tail="$( { printf '%s\n' "$output"; tail -c 3000 "$SCRY_DAEMON_SIGKILL_LOG" 2>/dev/null || true; } | tail -c 4000 | tr '\n' ' ')"
             echo "::error title=Linux daemon acceptance failed::$tail"
           fi
           exit "$code"
