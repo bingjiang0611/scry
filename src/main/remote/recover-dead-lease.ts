@@ -81,7 +81,13 @@ export function recoverDeadRemoteLease(
       const scryCommand = row.command.includes('Scry.app/') || /(?:^|\/)Scry(?:\s|$)/.test(row.command) ||
         /out\/main\/daemon(?:-supervisor)?\.js/.test(row.command)
       const exactLinuxIdentity = owner.identityKey.includes(':linux:') && row.identityKey?.includes(':linux:') === true
-      if (!row.status.startsWith('Z') && scryCommand && !exactLinuxIdentity) throw new Error('remote_lease_identity_unverifiable')
+      // The record names this very process but a different identity: this process
+      // cannot have written it, so the pid was reused. macOS assigns pids in order,
+      // so an App relaunched after an abnormal exit often inherits the stale pid.
+      // The permanent claim fence below still serializes the takeover.
+      if (!row.status.startsWith('Z') && scryCommand && !exactLinuxIdentity && owner.pid !== process.pid) {
+        throw new Error('remote_lease_identity_unverifiable')
+      }
       // A different exact identity proves PID reuse; a zombie cannot own the lease.
       // Both may proceed only through the permanent claim fence below.
     }

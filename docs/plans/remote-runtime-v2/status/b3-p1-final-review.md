@@ -78,3 +78,13 @@ N3 同批：`openPath`/`trashItem` 改为可选 host input，daemon 不再传入
 最终 Linux run `42343454894`（`https://github.com/bingjiang0611/scry/actions/runs/42343454894`）成功，HEAD `15500a22d18bbd9452cb6e422286f6279c10f1f1`。临时 workflow 随最终状态提交删除，不留 branch-only CI 配置。
 
 最终本机复跑：main+daemon+host-runtime 2927 passed（3 skipped）、typecheck、build、macOS 构建产物 SIGKILL/restart、完整 desktop-remote、dev security smoke、`pack:artifact`、packaged recorder smoke 全绿。N1–N4 完成，等待维护者核验。
+
+## M1 macOS 自身 pid 复用误判——完成
+
+失败测试先复现回归：写一条 `pid` 等于当前进程、`startedAt`/`identityKey` 来自上一次启动的旧记录，lister 让该 pid 仍是活着的 Scry 进程。旧实现把 daemon 锁判成 `already-running reason=identity-unverifiable`（退出码 3，supervisor 不会重启），远程 lease 抛 `remote_lease_identity_unverifiable`。
+
+现在两处都在 Scry command 兜底**之前**先判断「记录 pid 就是本进程 pid，但身份不同」：本进程不可能写出那条记录，因此是确定的 pid 复用，按 `pid-reused`/stale 进入原有 takeover 临界区与 claim fence。macOS 按顺序分配 pid，崩溃重启后极易拿到同一个 pid，这是 N1 引入的回归，不是放宽。
+
+对照用例保留：pid 不是当前进程、command 是 Scry、身份不同时仍分别拒绝为 `identity_unverifiable` 与 `already-running/identity-unverifiable`。Linux 精确身份路径不变。
+
+门禁：main+daemon+host-runtime 2929 passed（3 skipped，共 2932）、typecheck、build、macOS 构建产物 SIGKILL/restart、`--dev` security smoke 全部通过。按核验要求未重跑 Linux runner。
