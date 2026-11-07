@@ -43,3 +43,16 @@ D1–D4 都已补齐，可以接受。另有两处小缺口，只涉及文档和
 2. **新 op 的远程开放**：本批一个都不开放。
 3. **按 scope 选策略**：接受，并按 G1 扩展到历史、会话列表、descriptors 和 detect，`scope: local` 完全沿用当前 App 的结果。
 4. **trace 预算**：接受，P95 相对进程内不超过 +10 ms，同一 fake provider、同机串行、≥30 样本、记录负载。
+
+## 维护者答复（2026-11-07）
+
+四项都按核验方的建议确认：
+
+| 决策点 | 答复 |
+|---|---|
+| 1 本机入网 | 接受方案 (a)：secret 加上 unix socket 加上同一 uid 即为证明，daemon 直接签发仅限 unix socket 的 `scope: local` grant，没有额外的确认步骤；不存在有效 grant 时，secret 不按时间过期，只在被使用或 daemon 重启时轮换 |
+| 2 新 op 的远程开放 | 本批一个都不开放；`daemon-ipc-remote-approvals.json` 保持为空 |
+| 3 按 scope 选策略 | 接受。`scope: local` 完全沿用当前 App 的行为，包括用户选择的权限模式（含 `full_access`）、空 cwd 会话、经确认框可删除未归档会话、完整的历史证据、完整的 descriptors 与 detect 结果；远程设备保持现状 |
+| 4 trace 预算 | 接受：P95 相对进程内不超过 +10 ms，使用同一个 fake provider，同机串行测量，样本 ≥30，记录机器负载；超出预算时，再单独提出 push 订阅 |
+
+B4-L1 开工前，先按 G1、G2 和上面的答复更新 §13.2、差异数据与守卫测试，并把 `STATUS-BATCH4.md` 的「需要决定」改为「已决定」。
