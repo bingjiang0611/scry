@@ -34,7 +34,7 @@
 | `agent:clipboardImage` | main | `—` | — | — | 剪贴板 |
 | `agent:deleteArchivedSessions` | new-op | `sessionPurge:deleteArchivedSessions` | navigation | — | 批量删除要重放既有 preview/指纹语义 |
 | `agent:deleteSession` | forward | `sessionDelete` | — | 不同：本机走原生确认框且可删未归档；远程只允许已归档、confirm:false。按 grant scope 选策略；确认框留在 main，daemon 只对 scope: local 接受已确认请求 | 既有 sessionDelete |
-| `agent:detect` | forward | `providers` | — | 不同：远程只给 providerDiscovery 元数据，本机还要 installed 路径与版本。按 scope 选 detail | adapter 在 daemon |
+| `agent:detect` | forward | `providers` | — | 不同：远程只给 providerDiscovery 元数据，本机还要 installed 路径与版本。按 grant scope 选 detail | adapter 在 daemon |
 | `agent:detectFast` | forward | `providers` | — | 不同：快探测只在 scope: local 使用，远程仍走完整探测 | adapter 在 daemon |
 | `agent:focusedRunSnapshot` | forward | `runState` | — | 等价（同一 run 登记表；只是按焦点取一条） | 权威快照在 daemon |
 | `agent:focusRun` | main | `—` | — | — | 窗口级焦点书签 |
@@ -44,16 +44,16 @@
 | `agent:listArchivedSessions` | new-op | `sessionStore:listArchivedSessions` | navigation | — | 会话账本在 daemon |
 | `agent:listCommands` | forward | `commands` | — | 不同：远程按 provider 白名单裁剪命令集，本机保留全部命令。按 scope 选策略 | 既有 commands |
 | `agent:listProjects` | new-op | `projectStore:listProjects` | navigation | — | 项目目录需单一写者 |
-| `agent:listSessions` | forward | `sessionsPage` | — | 不同：远程分页上限更小且不返回归档会话，本机返回全部 | 既有 sessionsPage |
+| `agent:listSessions` | forward | `sessionsPage` | — | 不同：远程分页上限更小且不返回归档会话。按 grant scope 选上限与归档可见性：scope: local 返回全部 | 既有 sessionsPage |
 | `agent:listSkills` | new-op | `skills:listSkills` | providers | — | daemon 才能读 Provider 的 skill 目录 |
 | `agent:llmPerformanceHistory` | new-op | `llmPerformance:llmPerformanceHistory` | analytics | — | usage JSONL 与 run 状态由 daemon 写 |
 | `agent:llmPerformanceSummary` | new-op | `llmPerformance:llmPerformanceSummary` | analytics | — | usage JSONL 与 run 状态由 daemon 写 |
-| `agent:loadSession` | forward | `historyTurnsPage` | — | 不同：远程历史投影裁掉工具原文与文件足迹，本机保留 | 既有 historyTurnsPage |
-| `agent:loadSessionOlder` | forward | `historyPage` | — | 不同：同 loadSession 的投影差异 | 既有 historyPage |
+| `agent:loadSession` | forward | `historyTurnsPage` | — | 不同：远程历史投影裁掉工具原文与文件足迹，本机保留完整证据。按 grant scope 选投影：scope: local 给本机完整结果 | 既有 historyTurnsPage |
+| `agent:loadSessionOlder` | forward | `historyPage` | — | 不同：同 loadSession 的投影差异（分页更早的部分同样被裁剪）。按 grant scope 选投影 | 既有 historyPage |
 | `agent:mcpGuardScan` | new-op | `mcp:mcpGuardScan` | providers | — | MCP 与 trust gate 都在 daemon |
 | `agent:mcpSnapshot` | new-op | `mcp:mcpSnapshot` | providers | — | MCP 与 trust gate 都在 daemon |
 | `agent:newSession` | new-op | `providerContext:newSession` | providers | — | Provider 运行时在 daemon |
-| `agent:providerDescriptors` | forward | `providers` | — | 不同：本机要完整 descriptors（含 controls 与默认模型），远程只取 metadata | 既有 providers |
+| `agent:providerDescriptors` | forward | `providers` | — | 不同：本机要完整 descriptors（含 controls 与默认模型），远程只取 metadata。按 grant scope 选 detail | 既有 providers |
 | `agent:reauthenticateMcp` | new-op | `mcp:reauthenticateMcp` | providers | — | MCP 与 trust gate 都在 daemon |
 | `agent:recentFolders` | split | `projectStore:recentFolders` | navigation | main: 窗口只渲染；列表来自 daemon 的授权输入，main 不打开该 store | 授权输入单一写者 |
 | `agent:recorderContentPage` | new-op | `recorderContent:recorderContentPage` | evidence | — | recorder 记录写在工作区里，由 daemon 读 |
