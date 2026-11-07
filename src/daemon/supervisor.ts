@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { EXIT_DETERMINISTIC_STARTUP } from './startup-failure'
 
 export interface DaemonExit {
   code: number | null
@@ -52,6 +53,11 @@ export async function superviseDaemon(options: SupervisorOptions): Promise<Super
     if (lastExit.code === 3) return { status: 'already-running', attempts }
     if (lastExit.code === 2) {
       const reason = lastExit.reason ?? 'daemon_configuration_failed'
+      atomicJson(join(options.directory, FAILURE_FILE), { version: 1, failedAt: now(), attempts, lastExit: { code: lastExit.code, signal: lastExit.signal }, reason })
+      return { status: 'failed', attempts, reason }
+    }
+    if (lastExit.code === EXIT_DETERMINISTIC_STARTUP) {
+      const reason = lastExit.reason ?? 'daemon_startup_blocked'
       atomicJson(join(options.directory, FAILURE_FILE), { version: 1, failedAt: now(), attempts, lastExit: { code: lastExit.code, signal: lastExit.signal }, reason })
       return { status: 'failed', attempts, reason }
     }
@@ -129,7 +135,7 @@ export function launchDaemonOnce(input: {
       else reject(error)
     })
     child.once('exit', (code, signal) => {
-      const reason = diagnostic.match(/(?:^|\n)(daemon_[a-z0-9_]+)/)?.[1]
+      const reason = diagnostic.match(/(?:^|\n)((?:daemon|remote)_[a-z0-9_]+)/)?.[1]
       resolve({ code, signal, runtimeMs: Date.now() - startedAt, ...(reason ? { reason } : {}) })
     })
   })

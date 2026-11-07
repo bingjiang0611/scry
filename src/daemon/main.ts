@@ -3,6 +3,7 @@ import { startDaemon, exitCodeForStartup } from './lifecycle'
 import { createDaemonHostProcess } from './host-process'
 import { readDaemonProcessConfig } from './daemon-config'
 import { createDaemonSignalShutdown } from './signal-shutdown'
+import { classifyDaemonStartupFailure } from './startup-failure'
 
 // Daemon entry. It runs on the App's Electron binary with ELECTRON_RUN_AS_NODE=1,
 // so it gets the same Node, the same ABI for better-sqlite3 and the same signature;
@@ -39,6 +40,13 @@ const result = await startDaemon({
     appVersion,
     isPackaged
   })
+}).catch((error: unknown) => {
+  // A blocked host (live lease holder, unverifiable owner, missing private CLI) cannot
+  // be fixed by waiting, so it gets its own exit code and the supervisor stops. Only the
+  // machine code is written: stderr may otherwise carry paths or provider detail.
+  const failure = classifyDaemonStartupFailure(error)
+  process.stderr.write(`${failure.reason ?? (error instanceof Error ? error.message : 'daemon_startup_failed')}\n`)
+  process.exit(failure.code)
 })
 if (result.status !== 'started') process.exit(exitCodeForStartup(result))
 shutdown.ready(result.dispose)

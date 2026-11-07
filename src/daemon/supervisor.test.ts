@@ -76,6 +76,30 @@ describe('daemon supervisor', () => {
     expect(JSON.parse(readFileSync(join(directory, 'supervisor-failure.json'), 'utf8')).reason).toBe('daemon_paths_missing')
   })
 
+  it('does not retry a deterministic remote lease failure', async () => {
+    const directory = root()
+    let launches = 0
+    const result = await superviseDaemon({
+      directory,
+      launch: async () => { launches += 1; return { code: 4, signal: null, reason: 'remote_lease_owner_alive', runtimeMs: 5 } }
+    })
+    expect(launches).toBe(1)
+    expect(result).toEqual({ status: 'failed', attempts: 1, reason: 'remote_lease_owner_alive' })
+    const record = JSON.parse(readFileSync(join(directory, 'supervisor-failure.json'), 'utf8'))
+    expect(record.reason).toBe('remote_lease_owner_alive')
+    expect(record.lastExit).toEqual({ code: 4, signal: null })
+  })
+
+  it('captures a bounded remote lease reason from stderr without the body', async () => {
+    const directory = root()
+    const entry = join(directory, 'fail-lease.mjs')
+    writeFileSync(entry, "process.stderr.write('remote_lease_identity_unverifiable: /Users/me/secret body\\n'); process.exit(4)\n")
+    const result = await launchDaemonOnce({ executable: process.execPath, daemonEntry: entry, env: process.env })
+    expect(result).toMatchObject({ code: 4, signal: null, reason: 'remote_lease_identity_unverifiable' })
+    expect(JSON.stringify(result)).not.toContain('secret body')
+    expect(JSON.stringify(result)).not.toContain('/Users/me')
+  })
+
   it('captures only a bounded daemon error code from stderr', async () => {
     const directory = root()
     const entry = join(directory, 'fail.mjs')
