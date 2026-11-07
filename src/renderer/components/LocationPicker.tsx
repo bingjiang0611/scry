@@ -10,7 +10,7 @@ import { DelayedLoadingStatus } from './LoadingStatus'
 import { Icon } from './primitives/Icon'
 import { bridge } from './DesktopRemote'
 import { RemoteDirectoryPicker } from './RemoteDirectoryPicker'
-import { moveMenuFocus, WorkdirMenuItems, WorkdirPicker } from './Pickers'
+import { moveMenuFocus, WorkdirMenuItems, WorkdirPicker } from './WorkdirPicker'
 import './remote-location.css'
 
 export const LOCAL_MACHINE = 'local'

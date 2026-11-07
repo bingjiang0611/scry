@@ -205,7 +205,8 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
       />
     )
 
-    expect(partialHtml).toContain('<dd>1.00K</dd>')
+    // 缺报的指标把“已知下界”写在数值下方，不只留在 title 里。
+    expect(partialHtml).toContain('<dd>1.00K<small class="usage-metric-note">已知下界：部分明细未上报</small></dd>')
     expect(partialHtml).not.toContain('≥1.00K')
     expect(partialHtml).toContain('已知下界 · 2/2 条明细有 Token')
     const providers = partialHtml.slice(partialHtml.indexOf('class="usage-provider-panel"'), partialHtml.indexOf('class="usage-tokens"'))
@@ -214,7 +215,11 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
     expect(partialHtml).not.toContain('/ 活跃日')
   })
 
-  it('稀疏缺失日和显式未知日沿基线连续连接，但保留无记录语义', () => {
+  it('完整明细不上已知下界提示', () => {
+    expect(html).not.toContain('usage-metric-note')
+  })
+
+  it('缺失日与未知成本日不连到零刻度：连续区间各自成段，孤立观测日保留为点', () => {
     const unavailableCost = {
       ...aggregate,
       costUsd: null,
@@ -224,14 +229,35 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
       estimatedCostRows: 0,
       inferredCostRows: 0
     }
-    const gapHtml = renderToStaticMarkup(
+    const trendHtml = renderToStaticMarkup(
+      <AnalyticsView
+        analytics={{
+          ...analytics,
+          days: ['2026-08-05', '2026-08-06', '2026-08-07', '2026-08-08', '2026-08-09'],
+          dailyByProvider: [
+            { day: '2026-08-05', provider: 'codex', ...aggregate },
+            { day: '2026-08-06', provider: 'codex', ...aggregate },
+            // 有记录但没有成本证据：不能当成当天花销为 0。
+            { day: '2026-08-07', provider: 'codex', ...unavailableCost },
+            { day: '2026-08-08', provider: 'codex', ...aggregate },
+            { day: '2026-08-09', provider: 'codex', ...aggregate }
+          ],
+          byProvider: [{ provider: 'codex', model: null, ...aggregate }]
+        }}
+        rangeDays={30}
+        loading={false}
+        error={null}
+        onRangeChange={() => {}}
+        onRefresh={() => {}}
+      />
+    )
+    const isolatedHtml = renderToStaticMarkup(
       <AnalyticsView
         analytics={{
           ...analytics,
           days: ['2026-08-05', '2026-08-06', '2026-08-07', '2026-08-08'],
           dailyByProvider: [
             { day: '2026-08-05', provider: 'codex', ...aggregate },
-            { day: '2026-08-07', provider: 'codex', ...unavailableCost },
             { day: '2026-08-08', provider: 'codex', ...aggregate }
           ],
           byProvider: [{ provider: 'codex', model: null, ...aggregate }]
@@ -244,10 +270,16 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
       />
     )
 
-    expect(gapHtml).toContain('data-missing-days="2"')
-    expect(gapHtml).toContain('usage-chart-line')
-    expect(gapHtml).toContain('usage-chart-area')
-    expect(gapHtml).toContain('无记录日沿基线连接以保持走势连续，但不代表实际值为零')
+    // 一个断点把一条折线拆成两段：旧实现会在断点处落到零刻度继续连线。
+    expect(trendHtml).toContain('data-missing-days="1"')
+    expect(trendHtml.match(/usage-chart-line/g)).toHaveLength(2)
+    expect(trendHtml.match(/usage-chart-area/g)).toHaveLength(2)
+    // 两天的连续观测也要有端点，否则只剩一条几乎看不见的细缝。
+    expect(trendHtml.match(/usage-chart-point/g)).toHaveLength(4)
+    expect(trendHtml).toContain('没有记录或没有该指标证据的日期不连线，也不按零值绘制')
+    // 只有孤立观测日时不画线，用点标记已经看到的那一天。
+    expect(isolatedHtml.match(/usage-chart-point/g)).toHaveLength(2)
+    expect(isolatedHtml).not.toContain('usage-chart-line')
   })
 
   it('未知成本不画成零值趋势，小额非零成本不显示成 $0.00 且单一来源占满构成条', () => {
@@ -298,6 +330,8 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
     expect(smallCostHtml).toContain('&lt;$0.01')
     expect(smallCostHtml).toContain('$0.0010')
     expect(smallCostHtml).toContain('style="flex-basis:100%"')
-    expect(unknownHtml).not.toContain('class="usage-provider-row"')
+    // 成本未知不等于没有用量：Provider 行保留，金额显示“—”。
+    const providerRowHtml = unknownHtml.split('class="usage-provider-row"')[1] ?? ''
+    expect(providerRowHtml).toMatch(/<strong title="[^"]*">—<\/strong>/)
   })
 })

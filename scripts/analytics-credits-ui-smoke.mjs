@@ -30,26 +30,35 @@ async function exercise() {
   check(document.querySelector('.usage-table-wrap').textContent.includes('claude-opus-5'), 'Managed custom-provider Claude usage missing')
   const customRow = [...document.querySelectorAll('.usage-provider-row')].find((row) => row.querySelector('b').textContent === 'cc-switch')
   check(customRow?.querySelector('.usage-provider-main > strong').textContent === '<$0.01', 'Missing official Claude API estimate')
-  check(!document.querySelector('.usage-table-wrap').textContent.includes('—'), 'Unknown detail placeholder is visible')
+  // 没有价格证据的模型仍列出：金额为“—”，不隐藏在明细之外。
+  const unpricedRow = [...document.querySelectorAll('.usage-table-wrap tbody tr')].find((row) => row.textContent.includes('unpriced-model'))
+  check(unpricedRow && unpricedRow.children[1].textContent === '—', 'Unpriced model row lost its unknown-cost placeholder')
   check(document.querySelector('.usage-table-wrap [title*="官方 API 标准价换算"]'), 'Estimate provenance is missing')
-  check(!document.querySelector('.usage-table-wrap').textContent.includes('unpriced-model'), 'Unknown model cost row is visible')
   check(qoderRow.querySelector('strong').title.includes('15.41 Credits') && qoderRow.querySelector('strong').title.includes('已知下界'), 'Missing partial credit evidence')
   check(!document.querySelector('.usage-overview').textContent.includes('Credits'), 'Removed Credits line is visible')
   check(!document.querySelector('.usage-footnote'), 'Removed explanation entry is visible')
-  check(document.querySelectorAll('.usage-metrics dt').length === 5 && !document.querySelector('.usage-metrics small'), 'Metric hierarchy differs from approved design')
-  check(![...document.querySelectorAll('.usage-provider-main b')].some(node => node.textContent === 'unknown'), 'Unknown provider row is visible')
+  // 数值下方允许且只允许一行“已知下界”提示，其余说明仍留在 title 里。
+  const metricNotes = [...document.querySelectorAll('.usage-metrics small')]
+  check(document.querySelectorAll('.usage-metrics dt').length === 5
+    && metricNotes.every((node) => node.classList.contains('usage-metric-note') && node.textContent.includes('已知下界')), 'Metric hierarchy differs from approved design')
+  // 成本未知的 Provider 行保留，金额为“—”，不能写成 0 或凭空消失。
+  const providerAmounts = [...document.querySelectorAll('.usage-provider-main > strong')].map((node) => node.textContent)
+  check(providerAmounts.every((text) => text === '—' || text.startsWith('$') || text.startsWith('<')), 'Provider amount left its evidence form')
   const groupButton = (label, value) => [...document.querySelectorAll(`[aria-label="${label}"] button`)].find((button) => button.textContent === value)
   groupButton('明细维度', '日期').click()
   await waitFor(() => document.querySelector('.usage-table-wrap thead').textContent.includes('日期'))
   check(document.querySelector('.usage-table-wrap').textContent.includes('$1.41'), 'Day breakdown lost API/Qoder equivalents')
-  check(!document.querySelector('.usage-table-wrap').textContent.includes('—'), 'Unknown day placeholder is visible')
+  // 日期明细里未知成本写“—”，不编造 0；已知成本仍保留金额。
+  const dayCosts = [...document.querySelectorAll('.usage-table-wrap tbody tr')].map((row) => row.children[1].textContent)
+  check(dayCosts.every((text) => text === '—' || text.startsWith('$') || text.startsWith('<')), 'Day breakdown fabricated a cost value')
   groupButton('明细维度', '模型').click()
   await waitFor(() => document.querySelector('.usage-table-wrap thead').textContent.includes('模型'))
   check(document.querySelector('.usage-table-wrap').textContent.includes('$0.15'), 'Model breakdown lost Qoder USD equivalent')
-  groupButton('趋势指标', 'TOKEN').click()
+  groupButton('趋势指标', 'Token').click()
   await waitFor(() => document.querySelector('.usage-chart').getAttribute('aria-label').includes('Token'))
-  const customPath = document.querySelector('.usage-chart-line.is-cc-switch')
-  check(customPath && getComputedStyle(customPath).stroke !== 'none', 'Custom provider token series invisible')
+  // 单日观测不再伪造连线，只留数据点；两种标记都算可见。
+  const customSeries = document.querySelector('.usage-chart-line.is-cc-switch, .usage-chart-point.is-cc-switch')
+  check(customSeries && getComputedStyle(customSeries).stroke !== 'none', 'Custom provider token series invisible')
   groupButton('趋势指标', '成本').click()
   await waitFor(() => document.querySelector('.usage-chart').getAttribute('aria-label').includes('成本'))
   check(document.querySelector('.usage-chart .is-qoder'), 'Qoder USD equivalent missing from cost chart')

@@ -47,7 +47,8 @@ export async function exerciseNative(contents, win, query, screenshotDir) {
       circles: document.querySelectorAll('.usage-chart-hover circle').length,
       contained: rect.left >= plot.left && rect.right <= plot.right }
   })
-  const date = day => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(new Date(`${day}T12:00:00`))
+  // 图表日期标签跟随界面语言（zh-CN），日号与工具提示用的是同一份文案。
+  const date = day => new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric' }).format(new Date(`${day}T12:00:00`))
   const data = await query(7)
   await contents.executeJavaScript('window.setCreditsFixture(' + JSON.stringify(data) + ')')
   await frame()
@@ -72,7 +73,7 @@ export async function exerciseNative(contents, win, query, screenshotDir) {
   contents.sendInputEvent({ type: 'mouseMove', x: 5, y: 5 })
   await frame()
   check(await tooltip() === null, 'Pointer leave did not dismiss chart details')
-  await click('[aria-label="趋势指标"] button', 'TOKEN')
+  await click('[aria-label="趋势指标"] button', 'Token')
   check(await read(() => document.querySelector('.usage-chart').getAttribute('aria-label')) === '每日 Token 趋势', 'Native metric switch missed')
   await click('[aria-label="明细维度"] button', '日期')
   check(await read(() => document.querySelector('.usage-table-wrap thead th').textContent) === '日期', 'Native day switch missed')

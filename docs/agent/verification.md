@@ -139,6 +139,8 @@ App 与独立 CLI **分别版本化**；不要默认每次 App 修改都升 CLI�
 npm run pack:artifact
 ```
 
+`run-electron-builder.mjs` 在打包前强制按目标 Electron ABI 重建 `better-sqlite3`/`node-pty`，并在 Electron 里实际建一次库；这步失败就停止打包，避免产出 SQLite 静默降级成 `unavailable` 的包。代价是打包会把 `node_modules` 的原生 ABI 换成 Electron，之后再跑 Node 单测需 `npm rebuild better-sqlite3 node-pty`。
+
 准备桌面 App 可安装版本或正式发布时，必须安装并检查同一产物：
 
 ```bash

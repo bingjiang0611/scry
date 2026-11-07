@@ -4,12 +4,29 @@ import { detectRendererPlatform, shortcutModifierLabel } from '../platform'
 // 处理事件时两个修饰键都接受，所以文案只需跟随平台，不改变行为。
 const shortcutModifier = shortcutModifierLabel(detectRendererPlatform())
 
+export const WORKDIR_PICKER_COPY = {
+  removeRecentTitle: '从最近文件夹中移除',
+  removeRecentLabel: (dir: string) => `从最近文件夹中移除 ${dir}`
+} as const
+
+export const AGENT_PICKER_COPY = {
+  menuLabel: '选择 Agent',
+  empty: '未检测到 agent CLI：先安装并登录一个 Provider CLI，再重新扫描 PATH。'
+} as const
+
 export const PI_PICKER_COPY = {
   nativePi: '原生 Pi',
   detail: (detected: boolean, version?: string) =>
     `${detected ? '系统检测' : '自定义 Profile'} · ${version ?? '版本未知'}`,
   removeTitle: '从 Scry 移除；不会删除启动器文件',
   removeLabel: (name: string) => `移除 Pi Profile：${name}`
+} as const
+
+export const COMPOSER_BLOCKED_COPY = {
+  scanning: '正在检测本机 Provider，暂不能发送',
+  // App 不能替用户装 CLI；这里只给出可执行的下一步，不假装能自动修好。
+  missingCli: (label: string) => `未检测到 ${label}：先在终端安装并登录该 CLI，再重新检测。草稿与附件已保留。`,
+  missingProfile: (profileId: string) => `未检测到 Pi Profile「${profileId}」：在 Agent 菜单重新扫描，或选择其他 Agent。草稿与附件已保留。`
 } as const
 
 export const TURN_FLOW_COPY = {
@@ -63,10 +80,10 @@ export const ANALYTICS_COPY = {
   unavailable: '用量分析暂不可用',
   databaseUnavailable: 'SQLite 尚未初始化，Scry 其他功能不受影响。',
   retry: '重试',
-  noCost: '当前范围没有已知成本',
+  noProviderRecord: '当前范围没有可展示的 Provider 记录',
   noDetails: '当前范围没有可展示的明细',
   cost: '成本',
-  tokenToggle: 'TOKEN',
+  tokenToggle: 'Token',
   dailyCost: '每日成本',
   dailyTokens: '每日 Token',
   costTrend: '每日成本趋势',
@@ -82,10 +99,13 @@ export const ANALYTICS_COPY = {
     if (value > 0 && value < 0.01) return '<0.01 Credits'
     return `${value.toLocaleString('en-US', { maximumFractionDigits: 2 })} Credits`
   },
-  chartInstructions: '聚焦图表后，可使用左右方向键逐日查看证据，Home / End 跳到首尾，Esc 收起详情。无记录日沿基线连接以保持走势连续，但不代表实际值为零。',
+  chartInstructions: '聚焦图表后，可使用左右方向键逐日查看证据，Home / End 跳到首尾，Esc 收起详情。没有记录或没有该指标证据的日期不连线，也不按零值绘制。',
   providerEvidence: (cost: string, tokens: string, tokenEvidence: string) => `${cost}；${tokens} Token；${tokenEvidence}`,
   totalEvidence: (evidence: string, turns: number) => `${evidence}；${turns.toLocaleString()} 轮；不代表实际账单。部分覆盖只表示已知下界。`,
   tokenCoverage: (known: number, total: number) => `${known}/${total} 条明细已上报`,
+  // 摘要数值只在部分明细上报时才带这行，避免把已知下界读成总量。
+  lowerBoundNote: (known: number, total: number) => `已知下界 · ${known}/${total} 条明细已上报`,
+  partialTokenNote: '已知下界：部分明细未上报',
   outputEvidence: (known: number, total: number, reasoning: string) => `${known}/${total} 条明细已上报；推理 ${reasoning}`
 } as const
 

@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { DetectedAgent } from '../env'
-import { CliPicker } from './Pickers'
+import { CliPicker } from './CliPicker'
 
 const detected: DetectedAgent = {
   id: 'pi:rotom', name: 'Pi · Rotom', bin: 'rotom', path: '/runtime/rotom', version: '0.1.26'

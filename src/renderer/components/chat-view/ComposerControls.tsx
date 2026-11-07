@@ -1,6 +1,7 @@
 import type { AgentPermissionMode } from '@shared/runtime'
 import type { ChatViewProps } from './types'
-import { CliPicker, ModelEffortPicker, RunControlSelect } from '../Pickers'
+import { CliPicker } from '../CliPicker'
+import { ModelEffortPicker, RunControlSelect } from '../Pickers'
 import { Icon } from '../primitives/Icon'
 import type { ModelPickerOption } from '../model-picker-options'
 import type { RunControlSelectOption } from '../picker-state'

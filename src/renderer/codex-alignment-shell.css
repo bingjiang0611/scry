@@ -12,8 +12,9 @@
   --border3: #292927;
   --fg: #f1f1ef;
   --dim: #b5b5af;
-  --dim2: #8d8d87;
-  --dim3: #686864;
+  --dim2: #9c9c96;
+  /* 三级文字仍需达到 4.5:1（暗色菜单底最差 4.5+），不能用更浅的灰冒充层级。 */
+  --dim3: #8a8a84;
   --draft-fg: #c7b795;
   --accent: #5b9cff;
   --accent-fg: #ffffff;
@@ -52,8 +53,8 @@
   --border3: #eeeeea;
   --fg: #222220;
   --dim: #62625e;
-  --dim2: #85857f;
-  --dim3: #aaa9a2;
+  --dim2: #6a6a63;
+  --dim3: #707069;
   --draft-fg: #78613a;
   --scrollbar-thumb: #c5c5bf;
   --scrollbar-thumb-hover: #aaa9a2;
