@@ -200,6 +200,7 @@ export function RemoteChatView(props: RemoteChatViewProps) {
             files: workspaceAvailable
               ? catalog?.workbench === 1
                 ? <WorkspacePanel cwd={cwd} api={workbench.workspace} openRequest={fileRequest}
+                    ops={catalog?.workbenchOps}
                     onClose={() => dispatchSurface({ type: 'close', kind: 'files' })}
                     onDirtyChange={(dirty) => { setWorkspaceDirty(dirty); surface.onDirtyChange?.(dirty) }}
                     onAddReference={(entry) => onDraftInput(draftKey, `${input}${input && !input.endsWith(' ') ? ' ' : ''}${workspaceReferenceToken(entry)} `)} />

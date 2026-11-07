@@ -19,6 +19,7 @@ import type { DockBadgeState } from '../dock-badge'
 import type { UserQuestionBroker } from '../user-question'
 import type { TraceOutputBridge, TraceBatchReceipt } from '../trace-output'
 import { registerRunTraceHandlers } from './run-trace-ipc'
+import type { DaemonRunSurface } from './daemon-run-surface'
 import type { RunControl } from './run-control'
 
 export type TrustedRegistrar = <Args extends unknown[], Result>(
@@ -29,7 +30,7 @@ export type TrustedRegistrar = <Args extends unknown[], Result>(
 export function registerAgentRuntimeHandlers({
   handleTrusted, startAppRun, runs, boundedLiveRun, dockBadge, activeRunSessionKey,
   getWindow, getRemoteRunLedgerId, getRemoteHostService, userQuestionBroker,
-  resolveKnownProjectDirectory, getCurrentCwd, traceOutput, requestRunStop, runTraces
+  resolveKnownProjectDirectory, getCurrentCwd, traceOutput, requestRunStop, runTraces, daemon
 }: {
   handleTrusted: TrustedRegistrar
   startAppRun: (payload: AgentStartRequest) => Promise<AgentStartResult>
@@ -46,35 +47,48 @@ export function registerAgentRuntimeHandlers({
   traceOutput: TraceOutputBridge
   requestRunStop: (runId: string) => boolean
   runTraces: RunTraceRouter
+  /**
+   * Daemon mode. When present the daemon owns every run this window shows, so the
+   * run channels answer from its frames and never from the in-process registry.
+   * Absent (the default) keeps the local pipeline exactly as before.
+   */
+  daemon?: DaemonRunSurface
 }): void {
   // Re-delivery returns the original admission receipt, never starts another logical run.
   const agentStartReceipts = new CommandReceipts<AgentStartResult>()
   handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
-    const receipt = await agentStartReceipts.submit(payload?.commandId?.trim() || undefined, () => startAppRun(payload))
+    const receipt = await agentStartReceipts.submit(
+      payload?.commandId?.trim() || undefined,
+      () => daemon ? daemon.start(payload) : startAppRun(payload)
+    )
     return { ...receipt.result, commandStatus: receipt.status, commandSequence: receipt.sequence }
   })
 
   // Renderer 重挂时拉回当前焦点或全部在途 run；焦点只影响显示，不影响后台生命周期。
-  handleTrusted('agent:activeRun', (): ActiveRun | null => {
+  handleTrusted('agent:activeRun', async (): Promise<ActiveRun | null> => {
+    if (daemon) return await daemon.activeRun()
     const state = runs.focusedState()
     return state ? boundedLiveRun(state) : null
   })
   handleTrusted('agent:unreadSessions', () => dockBadge.snapshot())
   // live trace 降级恢复专用：忽略 done，只要 registry 里还有这个 run 就给出权威事件序列。
   // activeRun 会因为 done=true 返回 null，那样终态被跳过的事件永远补不回来。
-  handleTrusted('agent:focusedRunSnapshot', (): ActiveRun | null => {
+  handleTrusted('agent:focusedRunSnapshot', async (): Promise<ActiveRun | null> => {
+    if (daemon) return await daemon.focusedRunSnapshot()
     const state = runs.focusedSnapshot()
     return state ? boundedLiveRun(state) : null
   })
-  handleTrusted('agent:activeRuns', (): ActiveRun[] => runs.activeStates().map(boundedLiveRun))
-  handleTrusted('agent:focusRun', (_event, runId: string | null): boolean => {
+  handleTrusted('agent:activeRuns', async (): Promise<ActiveRun[]> => daemon ? await daemon.activeRuns() : runs.activeStates().map(boundedLiveRun))
+  handleTrusted('agent:focusRun', async (_event, runId: string | null): Promise<boolean> => {
+    if (daemon) return await daemon.focusRun(runId)
     const focused = runs.focus(runId)
     if (!focused || !runId) return focused
     const sessionKey = activeRunSessionKey(runs.get(runId)!.state)
     if (sessionKey) dockBadge.view(sessionKey, Boolean(getWindow()?.isFocused()))
     return true
   })
-  handleTrusted('agent:adoptActiveRun', (_event, runId: string): ActiveRun | null => {
+  handleTrusted('agent:adoptActiveRun', async (_event, runId: string): Promise<ActiveRun | null> => {
+    if (daemon) return await daemon.adopt(runId)
     const entry = runs.get(runId)
     if (!entry || entry.state.done) return null
     entry.control.adoptSession()
@@ -83,7 +97,7 @@ export function registerAgentRuntimeHandlers({
     if (sessionKey) dockBadge.view(sessionKey, Boolean(getWindow()?.isFocused()))
     return boundedLiveRun(entry.state)
   })
-  handleTrusted('agent:answerQuestion', (event, response: unknown) => {
+  handleTrusted('agent:answerQuestion', async (event, response: unknown) => {
     const win = getWindow()
     if (!win || event.sender.id !== win.webContents.id) return false
     const runId = (response as { runId?: unknown } | null)?.runId
@@ -91,6 +105,7 @@ export function registerAgentRuntimeHandlers({
     // A device-started run's question lives on the remote broker; answering it
     // here settles the same question the device sees, exactly once.
     if (ledgerRunId) return getRemoteHostService()?.controller.answerOwnerQuestion(ledgerRunId, response as AgentQuestionResponse) ?? false
+    if (daemon) return daemon.answerQuestion(response as AgentQuestionResponse)
     return userQuestionBroker.answer(response)
   })
 
@@ -142,19 +157,24 @@ export function registerAgentRuntimeHandlers({
 
   // trace live 镜像的消费确认：renderer 完成批量 state commit 后归还精确批次额度。
   // generation + batchId 防止窗口重挂后的迟到/重复 ACK 释放新 renderer 的额度。
-  handleTrusted('agent:traceAck', (_event, request: TraceBatchReceipt) => traceOutput.ack(request))
+  handleTrusted('agent:traceAck', (_event, request: TraceBatchReceipt) => daemon ? daemon.ack(request) : traceOutput.ack(request))
   // renderer 已经用权威快照（activeRun）对齐 live 视图，降级标记可以清除。
   handleTrusted('agent:traceResynchronized', () => {
+    if (daemon) return daemon.resynchronized()
     traceOutput.resynchronized()
     return true as const
   })
 
-  handleTrusted('agent:stopBackgroundTask', (_event, payload: unknown) => stopObservedBackgroundTask(payload, (runId) => runs.get(runId)))
+  handleTrusted('agent:stopBackgroundTask', async (_event, payload: unknown) =>
+    daemon ? await daemon.stopBackgroundTask(payload) : stopObservedBackgroundTask(payload, (runId) => runs.get(runId)))
 
   // 多视图 live 流：每个可见 run 一条自有有界流（上限两个），与 legacy 焦点通道分离。
   registerRunTraceHandlers(handleTrusted, runTraces, runId => runs.isViewed(runId))
 
-  handleTrusted('agent:stop', (_event, runId: string) => requestRunStop(runId))
-  handleTrusted('agent:steer', (_event, payload: unknown) => steerObservedRun(payload, (runId) => runs.get(runId)))
+  handleTrusted('agent:stop', (_event, runId: string) => daemon ? daemon.stop(runId) : requestRunStop(runId))
+  // In daemon mode the registry that owns the run is in the daemon: consulting the
+  // App's own registry would answer "identity changed" about a run it never held.
+  handleTrusted('agent:steer', async (_event, payload: unknown) =>
+    daemon ? await daemon.steer(payload) : steerObservedRun(payload, (runId) => runs.get(runId)))
 
 }

@@ -42,7 +42,7 @@ async function harness() {
   // The owner's device-only override. A local submit must keep the user's own mode.
   const startRun = vi.fn(async (_input: {
     runId: string
-    routing: { permissionMode?: AgentStartRequest['permissionMode']; cwd: string }
+    routing: { permissionMode?: AgentStartRequest['permissionMode']; cwd: string; forkLastTurn?: AgentStartRequest['forkLastTurn'] }
     grantScope?: 'local' | 'remote'
   }) => {})
   const sessionDelete = vi.fn(async (_request: DesktopRemoteDeleteSessionRequest, _authorize: () => void, _grantScope?: 'local' | 'remote'): Promise<DeleteSessionResult> => ({ ok: true, deleted: [], retained: [], failed: [] }))
@@ -125,5 +125,65 @@ describe('scope policy (L3: submit and sessionDelete read the verified grant)', 
     const routing = startRun.mock.calls[0]![0].routing
     expect(routing.permissionMode).toBe('full_access')
     expect(routing.cwd).toBe(AUTHORIZED)
+  })
+
+  it('lets the App submit without naming a directory, and refuses a device that does', async () => {
+    // The App has a current workspace; a phone does not. An unnamed submit from the
+    // App keeps the App's own fallback, while the same request from a device has no
+    // workspace to fall back to and must be refused rather than guessed.
+    const unnamed = JSON.stringify({ providerId: 'claude', prompt: 'hello' })
+    const localRun = await harness()
+    const local = await enrollLocal(localRun.identity, localRun.controller)
+    localRun.controller.submitIntent(local, { intentId: 'local-unnamed', detail: unnamed })
+    await vi.waitFor(() => expect(localRun.startRun).toHaveBeenCalledTimes(1))
+    expect(localRun.startRun.mock.calls[0]![0].routing.cwd).toBe('')
+
+    const deviceRun = await harness()
+    const phone = await pairDevice(deviceRun.identity, deviceRun.controller)
+    deviceRun.controller.submitIntent(phone, { intentId: 'phone-unnamed', detail: unnamed })
+    // Give the dispatcher the same chance it needed for the run above.
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(deviceRun.startRun).not.toHaveBeenCalled()
+  })
+
+  it('still refuses a local submit into a directory the App never authorized', async () => {
+    // An unnamed submit is allowed; an unauthorized name is not. Removing the
+    // directory must not remove the workspace check.
+    const { identity, controller, startRun } = await harness()
+    const local = await enrollLocal(identity, controller)
+    controller.submitIntent(local, {
+      intentId: 'local-unauthorized',
+      detail: JSON.stringify({ providerId: 'claude', cwd: '/not-authorized', prompt: 'hello' })
+    })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
+  it('carries an App turn boundary through, and refuses a request it cannot run', async () => {
+    // Editing the last message is an App flow. The boundary is forwarded through the
+    // App's own normalizer, so the run that executes is the run that was asked for...
+    const { identity, controller, startRun } = await harness()
+    const local = await enrollLocal(identity, controller)
+    controller.submitIntent(local, {
+      intentId: 'local-fork',
+      detail: JSON.stringify({
+        providerId: 'claude', cwd: AUTHORIZED, prompt: 'hello', expectedExternalSessionId: 'session-1',
+        forkLastTurn: { replaceRunId: 'run-a', replaceProviderTurnId: 'turn-a', replaceForkTurnId: 'message-a' }
+      })
+    })
+    await vi.waitFor(() => expect(startRun).toHaveBeenCalledTimes(1))
+    expect(startRun.mock.calls[0]![0].routing.forkLastTurn).toEqual({
+      replaceRunId: 'run-a', replaceProviderTurnId: 'turn-a', replaceForkTurnId: 'message-a'
+    })
+
+    // ...while a workspace PREPARATION still needs a flow this frame does not carry.
+    const second = await harness()
+    const secondLocal = await enrollLocal(second.identity, second.controller)
+    second.controller.submitIntent(secondLocal, {
+      intentId: 'local-workspace',
+      detail: JSON.stringify({ providerId: 'claude', cwd: AUTHORIZED, prompt: 'hello', workspace: { kind: 'worktree' } })
+    })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(second.startRun).not.toHaveBeenCalled()
   })
 })

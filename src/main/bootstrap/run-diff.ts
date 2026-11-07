@@ -15,7 +15,8 @@ export type RunDiffLifecycle = {
   getPairedSessionDiff: () => PairedSessionDiff | undefined
 }
 export type RunDiffDependencies = {
-  isRemoteRun: boolean
+  // Whether the submitter is the App itself, so a view-demand protocol exists.
+  appSemantics: boolean
   diffPreviewer: RunDiffPreviewer
   turnDiffCapture: Promise<GitTurnDiffCapture>
   turnChangeJournal: TurnChangeJournal | null
@@ -39,11 +40,12 @@ export type RunDiffDependencies = {
 export function createRunDiffLifecycle(deps: RunDiffDependencies): RunDiffLifecycle {
   let pairedSessionDiff: PairedSessionDiff | undefined
   const { diffPreviewer, turnDiffCapture, turnChangeJournal, patchExcludeBasenames, cwd, contextKey, runId, providerId, runtimeProvider, runState, sessionDiffBaselines, mainEventId, appendCoalescedTrace, publishTrace } = deps
-  // Remote owners have no view-demand protocol. Missing evidence is not a hidden
-  // view: only local views opt out of previews until they explicitly subscribe.
-  const setDiffPreviewDemand = deps.isRemoteRun ? undefined : (demanded: boolean): void => {
+  // A device submitter has no view-demand protocol, so previews stay off. The App
+  // itself — in-process or through a local grant — keeps the App's own previews.
+  // Missing evidence is not a hidden view: only the App opts out until it subscribes.
+  const setDiffPreviewDemand = deps.appSemantics ? (demanded: boolean): void => {
     void diffPreviewer.setDemanded(demanded)
-  }
+  } : undefined
   setDiffPreviewDemand?.(false)
   let turnDiffPromise: Promise<void> | null = null
   // 并行工作区重叠证据：缺失就是未观测（旧记录/无基线），不能当成独占归因。

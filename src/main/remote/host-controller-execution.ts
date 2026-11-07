@@ -70,7 +70,8 @@ export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway;
   const base: RemoteExecutor = {
     execute: async (executorInput: RemoteExecutorInput) => {
       const stop = new AbortController()
-      const routing = await input.resolveAttachments(parseRouting(executorInput.detail))
+      const scope = gateway.runScope(executorInput.runId)
+      const routing = await input.resolveAttachments(parseRouting(executorInput.detail, { cwdOptional: scope === 'local' }))
       const current: { routing: RemoteIntentRouting; externalSessionId?: string } = { routing }
       stops.set(executorInput.runId, stop)
       live.set(executorInput.runId, current)
@@ -89,7 +90,7 @@ export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway;
           // Policy that differs by scope reads the submitting grant's scope, never the
           // transport. A run recovered after a restart has no recorded scope and gets
           // the stricter device semantics.
-          grantScope: gateway.runScope(executorInput.runId)
+          grantScope: scope
         })
       } finally {
         stops.delete(executorInput.runId)
@@ -99,11 +100,18 @@ export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway;
       }
     }
   }
-  const gated = new GatedExecutor({ policy, resolveTarget: (executorInput) => parseRouting(executorInput.detail), base })
+  const gated = new GatedExecutor({
+    policy,
+    resolveTarget: (executorInput): RemoteIntentRouting & { grantScope: 'local' | 'remote' } => ({
+      ...parseRouting(executorInput.detail, { cwdOptional: gateway.runScope(executorInput.runId) === 'local' }),
+      grantScope: gateway.runScope(executorInput.runId)
+    }),
+    base
+  })
   const dispatcher = new RemoteDispatcher({
     ledger,
     executor: { execute: async (executorInput) => {
-      const routing = parseRouting(executorInput.detail)
+      const routing = parseRouting(executorInput.detail, { cwdOptional: gateway.runScope(executorInput.runId) === 'local' })
       try { await gated.execute(executorInput) }
       finally {
         // Attachments are per-intent scratch: released after the run, whatever it did.

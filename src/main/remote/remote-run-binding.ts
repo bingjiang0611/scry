@@ -61,6 +61,9 @@ export interface RemoteRunBindingDependencies {
     onTraceEvent(event: TraceEvent): void
     onSession?(externalSessionId: string): void
     permissionModeOverride?: AgentStartRequest['permissionMode']
+    // The verified submitter's scope, forwarded so the pipeline can take the App's
+    // path for a local grant instead of inferring it from `origin`.
+    grantScope?: 'local' | 'remote'
   }): Promise<RemoteRunCompletion>
   // Legacy seam retained for focused binding tests. Production provides startAppRun.
   run?(providerId: string, request: ProviderRunRequest): ProviderRunHandle
@@ -194,9 +197,16 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
         runId: scryRunId,
         ledgerRunId,
         request: {
-          prompt, cwd: routing.cwd, providerId: routing.providerId as AgentStartRequest['providerId'],
+          prompt, providerId: routing.providerId as AgentStartRequest['providerId'],
+          // An App submit may name no directory; the App then uses its own current
+          // workspace. Sending an empty string would make the App treat it as a path.
+          ...(routing.cwd ? { cwd: routing.cwd } : {}),
           ...(routing.agentProfileId ? { agentProfileId: routing.agentProfileId } : {}),
-          ...(resume ? { expectedExternalSessionId: resume } : {}), attachments,
+          ...(resume ? { expectedExternalSessionId: resume } : {}),
+          ...(routing.expectedExternalSessionId ? { expectedExternalSessionId: routing.expectedExternalSessionId } : {}),
+          ...(routing.forkLastTurn ? { forkLastTurn: routing.forkLastTurn } : {}),
+          ...(routing.restartLastTurn ? { restartLastTurn: routing.restartLastTurn } : {}),
+          attachments,
           ...(routing.modelId ? { model: { id: routing.modelId, ...(routing.modelProviderId ? { providerId: routing.modelProviderId } : {}) } } : {}),
           ...(routing.effort ? { effort: routing.effort } : {}), ...(routing.permissionMode ? { permissionMode: routing.permissionMode } : {})
         },
@@ -208,7 +218,8 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
         },
         onTraceEvent,
         onSession: (externalSessionId) => progress(marker({ event: 'session', externalSessionId })),
-        permissionModeOverride: grantScope === 'local' ? undefined : deps.permissionModeOverride
+        permissionModeOverride: grantScope === 'local' ? undefined : deps.permissionModeOverride,
+        ...(grantScope ? { grantScope } : {})
       })
       if (completion.recording === 'failed') throw new Error(completion.error ?? 'remote_recording_failed')
       if (completion.status === 'failed') throw new Error(completion.error ?? 'provider_run_failed')

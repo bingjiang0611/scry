@@ -107,7 +107,7 @@ export async function startRun(
     providerRegistry, isShuttingDown: isShuttingDown(), currentCwd: getCurrentCwd(), appSessionStore, resolveRemoteProjectDirectory,
     resolveKnownProjectDirectory, providerOperationGate, providerContextKey
   })
-  const { isRemoteRun, request, providerId, agentProfileId, startPerf, firstTracePerf,
+  const { isRemoteRun, appSemantics, request, providerId, agentProfileId, startPerf, firstTracePerf,
     firstTextPerf, adapter, runtimeProvider, cwd, catalogCwd, startLease, managedConversation,
     admissionKeys, assertSessionNotArchived } = frontdoor
   let remoteResult: Promise<RemoteRunCompletion> | undefined
@@ -161,7 +161,7 @@ export async function startRun(
         onError: (scope, error) => console.warn('[scry] diff preview failed:', runId, scope, error)
       })
       notifyDiffChangeRef.current = () => void diffPreviewer.notifyChange()
-      const diffLifecycle = createRunDiffLifecycle({ isRemoteRun, diffPreviewer, turnDiffCapture, turnChangeJournal, patchExcludeBasenames, cwd, contextKey, runId, providerId, runtimeProvider, runState, sessionDiffBaselines, getDiffContextKey: () => diffContextKey, getObservedSessionId: () => liveRunState.observedSessionId, getResume: () => resume, getContextRevision: () => contextRevision, mainEventId, appendCoalescedTrace, publishTrace })
+      const diffLifecycle = createRunDiffLifecycle({ appSemantics, diffPreviewer, turnDiffCapture, turnChangeJournal, patchExcludeBasenames, cwd, contextKey, runId, providerId, runtimeProvider, runState, sessionDiffBaselines, getDiffContextKey: () => diffContextKey, getObservedSessionId: () => liveRunState.observedSessionId, getResume: () => resume, getContextRevision: () => contextRevision, mainEventId, appendCoalescedTrace, publishTrace })
       const { setDiffPreviewDemand, finalizeTurnDiff, cancelTurnDiff, finalizeSessionDiff } = diffLifecycle
       const publishSessionId = createSessionPublisher({
         runState,
@@ -233,6 +233,7 @@ export async function startRun(
         firstTextPerf,
         mainEventId,
         isRemoteRun,
+        appSemantics,
         mcpExecutionSnapshot,
         conversationStore,
         catalogCwd,

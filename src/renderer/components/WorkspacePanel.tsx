@@ -13,6 +13,27 @@ export function workspaceReferenceToken(entry: Pick<WorkspaceEntry, 'kind' | 'pa
   return /\s/.test(path) ? `@"${path}"` : `@${path}`
 }
 
+/**
+ * What this workspace host actually offers. Only an explicit `false` removes an
+ * action: a host that publishes no capability list predates this field and keeps the
+ * old behaviour, while a host that says it cannot do something is believed. The
+ * notice is the reason shown in the panel, so a removed action is explained instead
+ * of silently absent.
+ */
+export function resolveWorkspaceOps(ops: { openPath: boolean; trashItem: boolean } | undefined): {
+  openPath: boolean
+  trashItem: boolean
+  notice: string | null
+} {
+  const openPath = ops?.openPath !== false
+  const trashItem = ops?.trashItem !== false
+  const missing = [
+    ...(openPath ? [] : ['在系统应用中打开']),
+    ...(trashItem ? [] : ['移入废纸篓'])
+  ]
+  return { openPath, trashItem, notice: missing.length === 0 ? null : `此工作区不支持：${missing.join('、')}` }
+}
+
 export function pathContains(parent: string, child: string): boolean {
   return child === parent || child.startsWith(`${parent}/`)
 }
@@ -42,6 +63,8 @@ interface WorkspacePanelProps {
   onDirtyChange?: (dirty: boolean) => void
   readOnlySource?: ReadOnlyWorkspaceSource
   api?: WorkspaceApi
+  /** Operations the host reports it can perform; absent keeps every action. */
+  ops?: { openPath: boolean; trashItem: boolean }
 }
 
 type ItemDialog =
@@ -49,8 +72,9 @@ type ItemDialog =
   | { kind: 'rename'; entry: WorkspaceEntry; value: string }
   | { kind: 'move'; entry: WorkspaceEntry; value: string }
 
-export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest, onClose, onAddReference, onDirtyChange, readOnlySource, api: injectedApi }: WorkspacePanelProps) {
+export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest, onClose, onAddReference, onDirtyChange, readOnlySource, api: injectedApi, ops }: WorkspacePanelProps) {
   const api = useMemo<WorkspaceApi>(() => injectedApi ?? defaultWorkspaceApi, [injectedApi])
+  const capabilities = useMemo(() => resolveWorkspaceOps(ops), [ops])
   const [children, setChildren] = useState<Record<string, WorkspaceEntry[]>>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState<Set<string>>(new Set())
@@ -153,7 +177,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
   const openFile = (entry: WorkspaceEntry): void => {
     if (entry.kind !== 'file') return
     setContext(null)
-    if (!readOnlySource && canOpenWorkspaceFileExternally(entry.path)) {
+    if (!readOnlySource && capabilities.openPath && canOpenWorkspaceFileExternally(entry.path)) {
       setError(null)
       void api.workspaceOpenExternal({ cwd, path: entry.path }).catch((openError) => setError(errorMessage(openError)))
       return
@@ -326,6 +350,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
 
   return (
     <section className={`workspace-panel${selected ? ' file-open' : ''}`} aria-label="工作区文件">
+      {capabilities.notice && <p className="workspace-node-note" role="note">{capabilities.notice}</p>}
       <header className="workspace-head">
         {selected ? (
           <button type="button" className="iconbtn" onClick={() => confirmLeave() && setSelected(null)} title="返回文件树">
@@ -415,7 +440,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
         onStartCreate={startCreate}
         onMove={(entry) => setItemDialog({ kind: 'move', entry, value: '.' })}
         onRename={(entry) => setItemDialog({ kind: 'rename', entry, value: entry.name })}
-        onDelete={setDeleteTarget}
+        {...(capabilities.trashItem ? { onDelete: setDeleteTarget } : {})}
         onRefresh={refresh}
       />}
 

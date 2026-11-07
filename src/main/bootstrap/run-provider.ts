@@ -43,7 +43,8 @@ export interface RunProviderBootstrapDependencies {
   stopLatch: AbortController
   stopSignal?: AbortSignal
   requestUserInput?: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>
-  isRemoteRun: boolean
+  // The submitter is the App, so questions are answered by the App's own broker.
+  appSemantics: boolean
   permissionModeOverride?: AgentPermissionMode
   mcpExecutionSnapshot: McpExecutionSnapshot | null
   conversationStore: Pick<ConversationStore, 'assertManagedWriteAllowed'>
@@ -99,7 +100,7 @@ export function createRunProvider(deps: RunProviderBootstrapDependencies): () =>
     firstTextPerf,
     mainEventId,
     userQuestionBroker,
-    isRemoteRun,
+    appSemantics,
     permissionModeOverride,
     mcpExecutionSnapshot,
     conversationStore,
@@ -186,7 +187,7 @@ export function createRunProvider(deps: RunProviderBootstrapDependencies): () =>
       },
       onExternalSessionId: publishSessionId,
       requestUserInput: async (question, signal) => {
-        if (!isRemoteRun) return userQuestionBroker.request({ ...question, providerId }, signal)
+        if (appSemantics) return userQuestionBroker.request({ ...question, providerId }, signal)
         if (!requestUserInput) throw new Error('remote_interactive_input_unsupported')
         const openedAtMs = Date.now()
         const remoteQuestion = { ...question, providerId, runId }

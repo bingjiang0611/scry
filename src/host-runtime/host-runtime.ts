@@ -70,7 +70,8 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
         permissionModeOverride: input.permissionModeOverride,
         providerPrompt: input.providerPrompt,
         onTraceEvent: input.onTraceEvent,
-        onSession: input.onSession
+        onSession: input.onSession,
+        grantScope: input.grantScope
       }) as Promise<import('../main/remote/remote-run-binding').RemoteRunCompletion>).then((receipt) => receipt.result)
     }),
     hasCatalogWarmPool: (providerId) => runtime.providerRegistry.hasCatalogWarmPool(providerId),

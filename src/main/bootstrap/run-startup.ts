@@ -35,7 +35,7 @@ export type RunStartupDeps = {
   managedInputTextHash?: string; displayPrompt: string; handle: StartHandle; steering: RunSteering
   userQuestionBroker: UserQuestionBroker; publishSessionId: (sessionId: string | undefined) => void; emit: (event: TraceEvent) => void
   runState: ActiveRun; ingestion: LiveTraceIngestion; firstTracePerf: PerformanceTrace; firstTextPerf: PerformanceTrace
-  mainEventId: (prefix: string, runId: string) => string; isRemoteRun: boolean; permissionModeOverride?: AgentPermissionMode
+  mainEventId: (prefix: string, runId: string) => string; isRemoteRun: boolean; appSemantics: boolean; permissionModeOverride?: AgentPermissionMode
   mcpExecutionSnapshot: McpExecutionSnapshot | null; conversationStore: () => ConversationStore; catalogCwd: string
   assertLegacyConversationWriteAllowed: (scope: NativeSessionScope) => Promise<void>
   publishQuestionOpened: (request: AgentQuestionRequest) => void
@@ -121,7 +121,8 @@ export async function startRunProviderAndRegister(deps: RunStartupDeps) {
     releaseSessionBaseline,
     interruptedState,
     canonicalLifecycle,
-    assertLegacyConversationWriteAllowed
+    assertLegacyConversationWriteAllowed,
+    appSemantics
   } = deps
   let interrupted = interruptedState.value
   const eventLog = openProviderEventWriter(`${providerId}-${runId}`)
@@ -138,7 +139,7 @@ export async function startRunProviderAndRegister(deps: RunStartupDeps) {
   if (options.stopSignal && !options.stopSignal.aborted) options.stopSignal.addEventListener('abort', requestRemoteStop)
   let observedProviderStartedAt: string | undefined
   const runProvider = createRunProvider({
-    providerId, runtimeProvider, providerRegistry, piRunDiagnostics, adapter, request, runtimePrompt, managedConversation, runId, cwd, agentProfileId, resume, attachments, codexHookTrust, openCodePluginTrust, managedRecorderEnabled, managedInputTextHash, displayPrompt, eventLog, handle, steering, interrupted: () => interrupted, requestStop, stopLatch, stopSignal: options.stopSignal, requestUserInput: async (request, signal) => isRemoteRun && options.requestUserInput ? options.requestUserInput(request, signal) : userQuestionBroker.request(request, signal), publishSessionId, emit, runState, ingestion, firstTracePerf, firstTextPerf, mainEventId, userQuestionBroker, isRemoteRun, permissionModeOverride: options.permissionModeOverride, mcpExecutionSnapshot, conversationStore: conversationStore(), catalogCwd, assertLegacyConversationWriteAllowed: (scope) => assertLegacyConversationWriteAllowed(scope as NativeSessionScope), authorizeMcpExecution: (snapshot) => authorizedMcpExecution(snapshot as McpExecutionSnapshot | null), publishQuestionOpened, publishQuestionClosed, setProviderStartedAt: (value) => { observedProviderStartedAt = value }
+    providerId, runtimeProvider, providerRegistry, piRunDiagnostics, adapter, request, runtimePrompt, managedConversation, runId, cwd, agentProfileId, resume, attachments, codexHookTrust, openCodePluginTrust, managedRecorderEnabled, managedInputTextHash, displayPrompt, eventLog, handle, steering, interrupted: () => interrupted, requestStop, stopLatch, stopSignal: options.stopSignal, requestUserInput: async (request, signal) => isRemoteRun && options.requestUserInput ? options.requestUserInput(request, signal) : userQuestionBroker.request(request, signal), publishSessionId, emit, runState, ingestion, firstTracePerf, firstTextPerf, mainEventId, userQuestionBroker, appSemantics, permissionModeOverride: options.permissionModeOverride, mcpExecutionSnapshot, conversationStore: conversationStore(), catalogCwd, assertLegacyConversationWriteAllowed: (scope) => assertLegacyConversationWriteAllowed(scope as NativeSessionScope), authorizeMcpExecution: (snapshot) => authorizedMcpExecution(snapshot as McpExecutionSnapshot | null), publishQuestionOpened, publishQuestionClosed, setProviderStartedAt: (value) => { observedProviderStartedAt = value }
   })
 
   let resolveSettled: (() => void) | undefined

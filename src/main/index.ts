@@ -34,6 +34,8 @@ import type { Conversation } from '../shared/conversation'
 import type { ConversationDeletionPreview } from '../shared/conversation-api'
 import { initializeAppEnvironment, registerAppLifecycle } from './bootstrap/app-lifecycle'
 import { registerAgentRuntimeHandlers } from './bootstrap/agent-runtime-ipc'
+import { appDaemonModeDeps, daemonModeEnabled } from './bootstrap/daemon-run-mode'
+import { createLazyDaemonRunSurface } from './bootstrap/daemon-run-lazy'
 import { createRunPipeline } from '../host-runtime/create-run-pipeline'
 import { deleteConversationHistory } from './conversation-history'
 import { createWindow as createBootstrapWindow } from './bootstrap/window'
@@ -277,6 +279,7 @@ const remoteRunIds = new Set<string>()
 // scry runId -> durable ledger runId, the key of the remote question broker.
 const remoteRunLedgerIds = new Map<string, string>()
 
+// daemon 拥有执行时，这里只保留其它通道仍读的登记表与 trace 视图。
 const pipeline = createRunPipeline({
   renderer: { send: (channel, payload) => { win?.webContents.send(channel, payload) }, isFocused: () => Boolean(win?.isFocused()) },
   rendererCanReceive, activeRunSessionKey, dockBadge, mainEventId,
@@ -288,15 +291,21 @@ const pipeline = createRunPipeline({
   sessionRevisionByContext, sessionByContext, sessionAliasesByContext, deletingSessions,
   conversationStore, assertLegacyConversationWriteAllowed, recordingBlockedSessions, homeDir,
   sessionDiffBaselines, recordingRecoveryHint, sessionBaselineKey, requestRunStop,
-  bumpSessionRevision, remoteRunIds, remoteRunLedgerIds, mirrorSessionTranscript
+  bumpSessionRevision, remoteRunIds, remoteRunLedgerIds, mirrorSessionTranscript,
+  execution: daemonModeEnabled() ? 'daemon' : 'in-process'
 })
 const {
   runs, runStopLifecycle, userQuestionBroker, traceOutput, boundedLiveRun, runTraces,
   startAppRun, remoteStartReceipts
 } = pipeline
+// 开发开关：daemon 持有台账与 run 时，这些通道由 daemon 的帧回答；未开时保持进程内管线。
+const daemonRun = daemonModeEnabled()
+  ? createLazyDaemonRunSurface(appDaemonModeDeps({ send: (channel, payload) => { win?.webContents.send(channel, payload) }, currentCwd: () => currentCwd }))
+  : undefined
 registerAgentRuntimeHandlers({
   handleTrusted, startAppRun, runs, boundedLiveRun, dockBadge, activeRunSessionKey,
   userQuestionBroker, resolveKnownProjectDirectory, traceOutput, requestRunStop, runTraces,
+  ...(daemonRun ? { daemon: daemonRun } : {}),
   getWindow: () => win,
   getCurrentCwd: () => currentCwd,
   getRemoteRunLedgerId: (runId) => remoteRunLedgerIds.get(runId),
