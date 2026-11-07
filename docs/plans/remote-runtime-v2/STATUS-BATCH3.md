@@ -15,14 +15,13 @@
 | B3-M1 核验修复（M1-1、M1-2） | 完成 | `见下` | [b3-m1-review](status/b3-m1-review.md)：counters 收集器与 analytics smoke 注入 storage；`initDb` 对 `storage_not_configured` 直接抛；measure 0 个 unavailable |
 | B3-M1 存储注入化 | 完成 | `见下` | [b3-m1](status/b3-m1.md)：`storage-paths` 注入，db 各子模块与 `remote-history` 不再要 electron；导入图测试先失败后通过 |
 | B3-M2 运行管线去 Electron 化 | 完成（5 段） | `见下` | [b3-m2](status/b3-m2.md)：M2-1 renderer sink、M2-2 存储根注入、M2-3 通知/dock/shell 边界、M2-4 `create-run-pipeline.ts` 组装入口 + 导入图断言；M2-5 管线不再持有窗口（`renderer.send`/`isFocused`） |
-| B3-P1 daemon 承载宿主 | **未完成（N1–N4 实现及 macOS 门禁完成；待 N1 Linux 实机/容器验收）** | `见下` | [REVIEW-BATCH3-P1-R](REVIEW-BATCH3-P1-R.md)；N1 跨平台进程身份、N2 运行时 recorder CLI 待修，N3/N4 可同批 |
+| B3-P1 daemon 承载宿主 | **完成（N1–N4 已处理，等待核验）** | `见下` | [REVIEW-BATCH3-P1-R](REVIEW-BATCH3-P1-R.md)；N1 跨平台进程身份、N2 运行时 recorder CLI 待修，N3/N4 可同批 |
 | B3-V1 security smoke 归属 | 完成（结论：非回归，调用方式错误） | `见下` | [b3-v1](status/b3-v1.md)：无 `--dev` 时脚本跑的是 0.2.220 旧产物，源码 0.2.237；`--dev` 下起点与当前 HEAD 均通过 |
 | 交付前全局验证 | **除 renderer UI 既有失败外完成** | `见下` | test/typecheck/build/CLI/inventory/measure/desktop/security/pack 全绿；renderer performance fixture 在 P1 前 `59fa817` 与 Batch 3 起点 `577995b` 均同样失败 |
 
 ## 剩余任务的执行顺序（不得跳序）
 
-1. **待 Linux 环境执行 N1 构建产物 SIGKILL/restart。** 当前主机没有 Linux 实机、容器 runtime 或 VM；不可用注入测试冒充实机验收。
-2. Linux 门禁通过后更新状态并停止，等待维护者核验。
+1. **停止，等待维护者核验。** N1–N4 已完成；Linux 构建产物验收 run `42343454894` 通过。
 
 ## 阻塞
 

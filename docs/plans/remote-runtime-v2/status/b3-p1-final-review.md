@@ -68,3 +68,13 @@ N2 先删除 `daemon-config.test.ts` 中恒真的纯 join 测试，并在真实 
 N3 同批：`openPath`/`trashItem` 改为可选 host input，daemon 不再传入只会抛错的 stub。desktop info 在操作受限时返回 `workbenchOps: { openPath: false, trashItem: false }`；App 两项都可用时省略该字段以保持旧响应，新的 client 对旧 host 缺字段按两项可用处理。直接调用不可用操作返回 typed `desktop_workbench_operation_unavailable:*`。
 
 最终门禁：main+daemon+host-runtime 2926 passed（3 skipped）、typecheck、build、完整 desktop-remote、dev security smoke、`pack:artifact`、packaged recorder smoke 全绿。第一次完整 desktop-remote 暴露了 App info 多出全 true `workbenchOps` 的兼容回归并失败；修正为仅受限 host 报字段后，focused 与完整门禁均通过，首轮失败未隐藏。
+
+## N1 Linux 构建产物验收——完成
+
+经维护者授权，临时增加 branch-scoped GitHub Actions Ubuntu runner；验收使用 Node 22，执行 `npm ci`、显式准备 Electron binary、`npm run build`、`node scripts/daemon-sigkill-restart.mjs`。脚本在 Linux 强制每个 lease 的 `identityKey` 包含 `:linux:`，再真实 SIGKILL 第一进程、以同一 userData 重启、等待 daemon lock 与三个 lease 全部属于新 pid，最后 SIGTERM 干净退出。
+
+前三次 Linux 尝试保留了失败证据并驱动修正：首次发现 runner 未下载 Electron binary；第二次证明 Unix socket inode 可在重建后复用，验收改为检查新 lock/lease owner；第三次发现 SIGTERM 可落在 socket/lease ready 与 main 安装 signal handler 之间。新增失败单测后，daemon 现在启动前就登记 SIGTERM/SIGINT 请求，并在 host dispose 可用后立即执行，消除该竞态。
+
+最终 Linux run `42343454894`（`https://github.com/bingjiang0611/scry/actions/runs/42343454894`）成功，HEAD `15500a22d18bbd9452cb6e422286f6279c10f1f1`。临时 workflow 随最终状态提交删除，不留 branch-only CI 配置。
+
+最终本机复跑：main+daemon+host-runtime 2927 passed（3 skipped）、typecheck、build、macOS 构建产物 SIGKILL/restart、完整 desktop-remote、dev security smoke、`pack:artifact`、packaged recorder smoke 全绿。N1–N4 完成，等待维护者核验。
