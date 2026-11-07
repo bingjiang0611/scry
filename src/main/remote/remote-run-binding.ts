@@ -197,7 +197,10 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
         runId: scryRunId,
         ledgerRunId,
         request: {
-          prompt, cwd: routing.cwd, providerId: routing.providerId as AgentStartRequest['providerId'],
+          prompt, providerId: routing.providerId as AgentStartRequest['providerId'],
+          // An App submit may name no directory; the App then uses its own current
+          // workspace. Sending an empty string would make the App treat it as a path.
+          ...(routing.cwd ? { cwd: routing.cwd } : {}),
           ...(routing.agentProfileId ? { agentProfileId: routing.agentProfileId } : {}),
           ...(resume ? { expectedExternalSessionId: resume } : {}), attachments,
           ...(routing.modelId ? { model: { id: routing.modelId, ...(routing.modelProviderId ? { providerId: routing.modelProviderId } : {}) } } : {}),

@@ -126,4 +126,36 @@ describe('scope policy (L3: submit and sessionDelete read the verified grant)', 
     expect(routing.permissionMode).toBe('full_access')
     expect(routing.cwd).toBe(AUTHORIZED)
   })
+
+  it('lets the App submit without naming a directory, and refuses a device that does', async () => {
+    // The App has a current workspace; a phone does not. An unnamed submit from the
+    // App keeps the App's own fallback, while the same request from a device has no
+    // workspace to fall back to and must be refused rather than guessed.
+    const unnamed = JSON.stringify({ providerId: 'claude', prompt: 'hello' })
+    const localRun = await harness()
+    const local = await enrollLocal(localRun.identity, localRun.controller)
+    localRun.controller.submitIntent(local, { intentId: 'local-unnamed', detail: unnamed })
+    await vi.waitFor(() => expect(localRun.startRun).toHaveBeenCalledTimes(1))
+    expect(localRun.startRun.mock.calls[0]![0].routing.cwd).toBe('')
+
+    const deviceRun = await harness()
+    const phone = await pairDevice(deviceRun.identity, deviceRun.controller)
+    deviceRun.controller.submitIntent(phone, { intentId: 'phone-unnamed', detail: unnamed })
+    // Give the dispatcher the same chance it needed for the run above.
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(deviceRun.startRun).not.toHaveBeenCalled()
+  })
+
+  it('still refuses a local submit into a directory the App never authorized', async () => {
+    // An unnamed submit is allowed; an unauthorized name is not. Removing the
+    // directory must not remove the workspace check.
+    const { identity, controller, startRun } = await harness()
+    const local = await enrollLocal(identity, controller)
+    controller.submitIntent(local, {
+      intentId: 'local-unauthorized',
+      detail: JSON.stringify({ providerId: 'claude', cwd: '/not-authorized', prompt: 'hello' })
+    })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(startRun).not.toHaveBeenCalled()
+  })
 })

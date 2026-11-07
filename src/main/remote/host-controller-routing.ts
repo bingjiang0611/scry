@@ -62,13 +62,26 @@ export function stampAttachmentPeer(peer: string, detail: string | undefined): {
   } catch { return { detail, referenced: false } }
 }
 
-export function parseRouting(detail: string | undefined): RemoteIntentRouting {
+function unnamedCwd(options: { cwdOptional?: boolean }): string {
+  if (options.cwdOptional) return ''
+  throw new RemoteRunDenied('invalid_target')
+}
+
+/**
+ * `cwdOptional` is for the App's own submits: the App may send into its current
+ * workspace without naming a directory (an empty session, a brand-new project).
+ * A device submit still must name one - there is no App-side current directory to
+ * fall back to, and guessing one would grant a workspace the user never opened.
+ */
+export function parseRouting(detail: string | undefined, options: { cwdOptional?: boolean } = {}): RemoteIntentRouting {
   if (typeof detail !== 'string' || detail.length === 0 || detail.length > MAX_REMOTE_DETAIL_CHARS) throw new RemoteRunDenied('invalid_target')
   let parsed: unknown
   try { parsed = JSON.parse(detail) } catch { throw new RemoteRunDenied('invalid_target') }
   if (!parsed || typeof parsed !== 'object') throw new RemoteRunDenied('invalid_target')
   const routing = parsed as Record<string, unknown>
-  if (typeof routing.cwd !== 'string' || typeof routing.providerId !== 'string') throw new RemoteRunDenied('invalid_target')
+  if (typeof routing.providerId !== 'string') throw new RemoteRunDenied('invalid_target')
+  if (routing.cwd !== undefined && typeof routing.cwd !== 'string') throw new RemoteRunDenied('invalid_target')
+  const cwd = typeof routing.cwd === 'string' ? routing.cwd : unnamedCwd(options)
   if (routing.prompt !== undefined && (typeof routing.prompt !== 'string' || routing.prompt.length > MAX_REMOTE_PROMPT_CHARS)) {
     throw new RemoteRunDenied('invalid_target')
   }
@@ -89,7 +102,7 @@ export function parseRouting(detail: string | undefined): RemoteIntentRouting {
   if (routing.prompt !== undefined && typeof routing.prompt !== 'string') throw new RemoteRunDenied('invalid_target')
   if (routing.prompt === '' && attachments.length === 0) throw new RemoteRunDenied('invalid_target')
   return {
-    cwd: routing.cwd,
+    cwd,
     providerId: routing.providerId,
     ...(typeof routing.agentProfileId === 'string' ? { agentProfileId: routing.agentProfileId } : {}),
     ...(typeof routing.prompt === 'string' ? { prompt: routing.prompt } : {}),
