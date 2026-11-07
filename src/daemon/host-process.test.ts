@@ -69,6 +69,19 @@ async function call(socketPath: string, ca: string, cert: string, key: string, r
 }
 
 describe('daemon host process', () => {
+  it('fails before serving when a packaged daemon has no private recorder CLI', async () => {
+    const root = tempDir()
+    await expect(createDaemonHostProcess({
+      userDataDir: join(root, 'userData'),
+      daemonStateDirectory: join(root, 'state'),
+      appPath: join(root, 'resources', 'app.asar'),
+      resourcesPath: join(root, 'resources'),
+      appVersion: '9.8.7',
+      isPackaged: true
+    })).rejects.toThrow('daemon_recorder_cli_unavailable')
+    expect(existsSync(join(root, 'state', 'local.sock'))).toBe(false)
+  })
+
   it('assembles the run pipeline and host, serves only a unix socket, and disposes it', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
@@ -125,6 +138,7 @@ describe('daemon host process', () => {
       expect(desktop.desktop).not.toHaveProperty('sessionActions')
       expect(desktop.desktop).not.toHaveProperty('sessionFork')
       expect(desktop.desktop).not.toHaveProperty('sessionDelete')
+      expect(desktop.desktop.workbenchOps).toEqual({ openPath: false, trashItem: false })
       const providers = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'providers', detail: 'metadata'
       })

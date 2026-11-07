@@ -8,7 +8,7 @@ import { createSessionCatalog } from '../main/bootstrap/session-catalog'
 import { createPiProfileRuntime } from '../main/bootstrap/pi-profiles'
 import { createProviderRuntime } from '../main/bootstrap/provider-runtime'
 import { runStartupRecovery } from '../main/bootstrap/startup-recovery'
-import { warmShellEnv } from '../main/claude-locate'
+import { configureRecorderCliRuntime, warmShellEnv } from '../main/claude-locate'
 import { daemonPrivateCliPath } from './daemon-config'
 import { startRun } from '../main/bootstrap/run-execution'
 import { startWorkspaceRun } from '../main/bootstrap/workspace-start'
@@ -54,6 +54,7 @@ const unavailable = (capability: string): never => {
  */
 export async function createDaemonHostProcess(options: DaemonHostProcessOptions): Promise<DaemonHostProcess> {
   const log = options.log ?? ((line: string) => { process.stdout.write(`${line}\n`) })
+  configureRecorderCliRuntime({ resourcesPath: options.resourcesPath, requirePrivateCli: options.isPackaged })
   configureStorage({ userDataDir: options.userDataDir, appPath: options.appPath })
   initDb()
 
@@ -229,8 +230,6 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     relay,
     gatewayLabel: options.gatewayLabel ?? 'Scry daemon',
     shellEnvironment: warmShellEnv,
-    openPath: async () => unavailable('open-path'),
-    trashItem: async () => unavailable('trash-item'),
     historyHandlers: createRemoteHistoryHandlers(runtime, options.userDataDir),
     // Omit every source. HostController returns explicit unavailable envelopes with
     // reasons for analytics, LLM performance and MCP trust.

@@ -111,7 +111,7 @@ describe('daemon lock L1: PID reuse must not lock the daemon out', () => {
     const next = await acquireDaemonLock({
       directory, startedBy: 'second', pid: 5004,
       lister: snapshot([
-        [5003, 'Tue Feb  2 00:00:00 2026', 'S', '/Applications/Scry.app/Contents/Resources/daemon/scry-daemon'],
+        [5003, 'Mon Jan  1 00:00:01 2026', 'S', '/Applications/Scry.app/Contents/MacOS/Scry'],
         [5004, 'Tue Feb  2 00:00:01 2026']
       ]),
       daemonEntry: 'scry-daemon'

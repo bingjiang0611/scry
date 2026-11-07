@@ -3,8 +3,7 @@ import {
   openSync, readSync, realpathSync, unlinkSync
 } from 'node:fs'
 import { join } from 'node:path'
-import { processIdentityKey, type ProcessRow } from '../process-diagnostics'
-import { utcRemoteProcessSnapshot } from './remote-lease-owner'
+import { processIdentityKey, readProcessIdentitySync, type ProcessRow } from '../process-diagnostics'
 
 const MAX_LEASE_BYTES = 4096
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
@@ -70,14 +69,21 @@ export function recoverDeadRemoteLease(
         throw new Error('remote_lease_identity_unverifiable')
       }
       let row: ProcessRow | undefined
-      try { row = (options.lister ?? utcRemoteProcessSnapshot)().get(owner.pid) }
+      try { row = options.lister ? options.lister().get(owner.pid) : readProcessIdentitySync(owner.pid) }
       catch { throw new Error('remote_lease_identity_unverifiable') }
       if (!row) throw new Error('remote_lease_identity_unverifiable')
-      if (!row.status.startsWith('Z') && row.startedAt === owner.startedAt && processIdentityKey(row) === owner.identityKey) {
+      if (!row.status.startsWith('Z') && processIdentityKey(row) === owner.identityKey) {
         throw new Error('remote_lease_owner_alive')
       }
-      // A different UTC start identity proves PID reuse; a zombie cannot own the
-      // lease. Both may proceed only through the permanent claim fence below.
+      // On legacy/macOS evidence, a one-second wall-clock shift is not enough to
+      // steal a lease from a process that still identifies as Scry. Linux exact
+      // identities never take this branch because boot_id + proc starttime is stable.
+      const scryCommand = row.command.includes('Scry.app/') || /(?:^|\/)Scry(?:\s|$)/.test(row.command) ||
+        /out\/main\/daemon(?:-supervisor)?\.js/.test(row.command)
+      const exactLinuxIdentity = owner.identityKey.includes(':linux:') && row.identityKey?.includes(':linux:') === true
+      if (!row.status.startsWith('Z') && scryCommand && !exactLinuxIdentity) throw new Error('remote_lease_identity_unverifiable')
+      // A different exact identity proves PID reuse; a zombie cannot own the lease.
+      // Both may proceed only through the permanent claim fence below.
     }
 
     // One permanent claim per old lease prevents two cooperative recoverers from

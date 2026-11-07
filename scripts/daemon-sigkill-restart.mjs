@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { existsSync, lstatSync, mkdtempSync, openSync, closeSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, openSync, closeSync, readFileSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { once } from 'node:events'
 
@@ -47,6 +47,9 @@ async function waitFor(predicate, child, label) {
 function lease(path) {
   const value = JSON.parse(readFileSync(path, 'utf8'))
   if (!value.startedAt || !value.identityKey) throw new Error(`lease identity missing: ${path}`)
+  if (process.platform === 'linux' && !value.identityKey.includes(':linux:')) {
+    throw new Error(`lease exact Linux identity missing: ${path}`)
+  }
   return value
 }
 
@@ -55,7 +58,6 @@ let second
 try {
   first = launch()
   await waitFor(() => existsSync(socket), first, 'first-ready')
-  const firstSocket = lstatSync(socket)
   const leasePaths = [
     join(userData, 'remote', 'pairing', 'pairing-state.lock'),
     join(userData, 'remote', 'ledger', 'session-ledger.lock'),
@@ -69,7 +71,10 @@ try {
   second = launch()
   await waitFor(() => {
     if (!existsSync(socket)) return false
-    try { return lstatSync(socket).ino !== firstSocket.ino } catch { return false }
+    try {
+      return JSON.parse(readFileSync(join(state, 'daemon.lock'), 'utf8')).pid === second.pid &&
+        leasePaths.every((path) => JSON.parse(readFileSync(path, 'utf8')).pid === second.pid)
+    } catch { return false }
   }, second, 'restart-ready')
   const secondLeases = leasePaths.map(lease)
   if (secondLeases.some((value, index) => value.pid === firstLeases[index].pid && value.startedAt === firstLeases[index].startedAt)) {
