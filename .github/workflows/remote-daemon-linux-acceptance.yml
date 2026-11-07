@@ -6,6 +6,9 @@ on:
     paths:
       - .github/workflows/remote-daemon-linux-acceptance.yml
       - scripts/daemon-sigkill-restart.mjs
+      - src/daemon/main.ts
+      - src/daemon/signal-shutdown.ts
+      - src/daemon/signal-shutdown.test.ts
 
 permissions:
   contents: read

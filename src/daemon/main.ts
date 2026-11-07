@@ -2,6 +2,7 @@ import { resolve } from 'node:path'
 import { startDaemon, exitCodeForStartup } from './lifecycle'
 import { createDaemonHostProcess } from './host-process'
 import { readDaemonProcessConfig } from './daemon-config'
+import { createDaemonSignalShutdown } from './signal-shutdown'
 
 // Daemon entry. It runs on the App's Electron binary with ELECTRON_RUN_AS_NODE=1,
 // so it gets the same Node, the same ABI for better-sqlite3 and the same signature;
@@ -16,6 +17,10 @@ try { config = readDaemonProcessConfig(process.env) } catch (error) {
   process.exit(2)
 }
 const { stateDirectory, userDataDir, appPath, resourcesPath, appVersion, isPackaged } = config
+
+const shutdown = createDaemonSignalShutdown()
+process.on('SIGTERM', () => { shutdown.stop() })
+process.on('SIGINT', () => { shutdown.stop() })
 
 const startedBy = process.env.SCRY_DAEMON_STARTED_BY ?? 'unknown'
 // The absolute path of this entry, not a basename: the lock compares it against the
@@ -36,12 +41,4 @@ const result = await startDaemon({
   })
 })
 if (result.status !== 'started') process.exit(exitCodeForStartup(result))
-
-let stopping = false
-const stop = async (): Promise<void> => {
-  if (stopping) return
-  stopping = true
-  try { await result.dispose() } finally { process.exit(0) }
-}
-process.on('SIGTERM', () => { void stop() })
-process.on('SIGINT', () => { void stop() })
+shutdown.ready(result.dispose)
