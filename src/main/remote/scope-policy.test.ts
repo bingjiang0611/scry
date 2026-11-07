@@ -1,0 +1,129 @@
+import 'reflect-metadata'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { webcrypto } from 'node:crypto'
+import { Pkcs10CertificateRequestGenerator, cryptoProvider } from '@peculiar/x509'
+import { ensureHostIdentity } from './host-identity'
+import { createHostController } from './host-controller-factory'
+import { RunOutputFileStore } from './run-output-file'
+import { ProviderOperationGate } from '../provider-operation-gate'
+import { sessionDeleteRequiresArchive } from '../../host-runtime/host-runtime'
+import type { AgentStartRequest } from '../../shared/runtime'
+import type { DeleteSessionResult } from '../../shared/provider'
+import type { DesktopRemoteDeleteSessionRequest } from '../../shared/desktop-remote'
+
+// L3: the same daemon, two grants, two sets of semantics. Every assertion here is
+// about the VERIFIED grant's scope, not about which socket the frame arrived on.
+type PeculiarCrypto = Parameters<typeof cryptoProvider.set>[0]
+cryptoProvider.set(webcrypto as unknown as PeculiarCrypto)
+
+const AUTHORIZED = '/authorized/project'
+const dirs: string[] = []
+const cleanups: Array<() => void | Promise<void>> = []
+afterEach(async () => {
+  for (const cleanup of cleanups.splice(0)) await cleanup()
+  for (const directory of dirs.splice(0)) rmSync(directory, { recursive: true, force: true })
+})
+
+async function deviceKeyAndCSR() {
+  const keys = await webcrypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
+  const pkcs8 = await webcrypto.subtle.exportKey('pkcs8', keys.privateKey)
+  const b64 = Buffer.from(pkcs8).toString('base64').replace(/(.{64})/g, '$1\n').replace(/\n$/, '')
+  const csr = await Pkcs10CertificateRequestGenerator.create({ name: 'CN=scope-policy', keys, signingAlgorithm: { name: 'ECDSA', hash: 'SHA-256' } })
+  return { keyPEM: `-----BEGIN PRIVATE KEY-----\n${b64}\n-----END PRIVATE KEY-----\n`, csrPEM: csr.toString('pem') }
+}
+
+async function harness() {
+  const directory = mkdtempSync(join(tmpdir(), 'scry-scope-policy-'))
+  dirs.push(directory)
+  const identity = await ensureHostIdentity(join(directory, 'identity'))
+  // The owner's device-only override. A local submit must keep the user's own mode.
+  const startRun = vi.fn(async (_input: {
+    runId: string
+    routing: { permissionMode?: AgentStartRequest['permissionMode']; cwd: string }
+    grantScope?: 'local' | 'remote'
+  }) => {})
+  const sessionDelete = vi.fn(async (_request: DesktopRemoteDeleteSessionRequest, _authorize: () => void, _grantScope?: 'local' | 'remote'): Promise<DeleteSessionResult> => ({ ok: true, deleted: [], retained: [], failed: [] }))
+  const binding = await createHostController({
+    stateDirectory: directory,
+    hostId: identity.hostId,
+    anchorSHA256: identity.anchorSHA256,
+    verifyCSR: identity.verifyCSR,
+    issue: identity.issue,
+    authorizeWorkspace: (cwd) => { if (cwd !== AUTHORIZED) throw new Error('not_authorized'); return cwd },
+    startRun,
+    gate: new ProviderOperationGate(),
+    readSessionStatus: () => 'not_observed',
+    createOutputStore: (dir) => new RunOutputFileStore(dir),
+    sessionDelete
+  })
+  cleanups.push(() => binding.close())
+  return { identity, controller: binding.controller, startRun, sessionDelete }
+}
+
+async function enrollLocal(identity: Awaited<ReturnType<typeof harness>>['identity'], controller: Awaited<ReturnType<typeof harness>>['controller']) {
+  const { csrPEM } = await deviceKeyAndCSR()
+  const grant = await controller.authority.enrollLocal({ csrPEM, deviceLabel: 'Scry App' }, () => true)
+  void identity
+  return grant.certificateSHA256
+}
+
+async function pairDevice(identity: Awaited<ReturnType<typeof harness>>['identity'], controller: Awaited<ReturnType<typeof harness>>['controller']) {
+  const { csrPEM } = await deviceKeyAndCSR()
+  const verified = await identity.verifyCSR(csrPEM)
+  const pair = await controller.authority.begin()
+  await controller.authority.prove({ pairingId: pair.pairingId, secret: pair.secret, csrPEM, deviceLabel: 'iPhone' }, verified.publicKeySHA256)
+  const grant = await controller.authority.confirmLocal(pair.pairingId, verified.publicKeySHA256)
+  return grant.certificateSHA256
+}
+
+const detail = JSON.stringify({ providerId: 'claude', cwd: AUTHORIZED, prompt: 'hello', permissionMode: 'full_access' })
+
+describe('scope policy (L3: submit and sessionDelete read the verified grant)', () => {
+  it('records the submitting grant scope for the run and passes it to the run start', async () => {
+    const { identity, controller, startRun } = await harness()
+    const local = await enrollLocal(identity, controller)
+    const phone = await pairDevice(identity, controller)
+
+    controller.submitIntent(local, { intentId: 'local-1', detail })
+    controller.submitIntent(phone, { intentId: 'phone-1', detail })
+    // The dispatcher runs whatever is recorded; the scope it reports back is the
+    // submitter's, so the binding can pick semantics per run.
+    await vi.waitFor(() => expect(startRun).toHaveBeenCalledTimes(2))
+    expect(startRun.mock.calls.map((call) => call[0].grantScope)).toEqual(['local', 'remote'])
+  })
+
+  it('answers the verified scope from the authority, and refuses an unknown certificate', async () => {
+    const { identity, controller } = await harness()
+    const local = await enrollLocal(identity, controller)
+    expect(controller.authority.grantScope(local)).toBe('local')
+    expect(controller.authority.grantScope('e'.repeat(64))).toBeUndefined()
+  })
+
+  it('passes the verified scope to sessionDelete so the archived rule differs by grant', async () => {
+    const { identity, controller, sessionDelete } = await harness()
+    const local = await enrollLocal(identity, controller)
+    const phone = await pairDevice(identity, controller)
+    const input = { confirmed: true, providerId: 'claude', cwd: AUTHORIZED, externalSessionId: 'session-1' }
+
+    await controller.sessionDelete(local, input)
+    await controller.sessionDelete(phone, input)
+    expect(sessionDelete.mock.calls.map((call) => call[2])).toEqual(['local', 'remote'])
+    // The rule itself: an unarchived session is deletable only by the App's grant.
+    expect(sessionDeleteRequiresArchive('local')).toBe(false)
+    expect(sessionDeleteRequiresArchive('remote')).toBe(true)
+    expect(sessionDeleteRequiresArchive(undefined)).toBe(true)
+  })
+
+  it('keeps the local submit request intact instead of the device projection', async () => {
+    const { identity, controller, startRun } = await harness()
+    const local = await enrollLocal(identity, controller)
+    controller.submitIntent(local, { intentId: 'local-2', detail })
+    await vi.waitFor(() => expect(startRun).toHaveBeenCalledTimes(1))
+    const routing = startRun.mock.calls[0]![0].routing
+    expect(routing.permissionMode).toBe('full_access')
+    expect(routing.cwd).toBe(AUTHORIZED)
+  })
+})

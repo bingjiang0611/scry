@@ -101,6 +101,22 @@ describe('local enrollment (L1: secret + unix socket + same uid is the proof)', 
     expect(grant.scope).toBe('local')
   })
 
+  it('answers a grant\'s scope from the verified grant, and only while it is active', async () => {
+    const { authority } = setup()
+    const local = await authority.enrollLocal({ csrPEM: 'CSR local', deviceLabel: 'Scry App' }, () => true)
+    const pair = await authority.begin()
+    await authority.prove({ pairingId: pair.pairingId, secret: pair.secret, csrPEM: 'CSR phone', deviceLabel: 'iPhone' }, PHONE_KEY)
+    const phone = await authority.confirmLocal(pair.pairingId, PHONE_KEY)
+    // Policy that differs by scope reads this, so the narrow accessor must never say
+    // "local" for a device grant or the other way round.
+    expect(authority.grantScope(local.certificateSHA256)).toBe('local')
+    expect(authority.grantScope(phone.certificateSHA256)).toBe('remote')
+    expect(authority.grantScope('f'.repeat(64))).toBeUndefined()
+    expect(authority.grantScope('not-a-hash')).toBeUndefined()
+    await authority.revoke(local.deviceId)
+    expect(authority.grantScope(local.certificateSHA256)).toBeUndefined()
+  })
+
   it('refuses a locally enrolled grant on any network transport', async () => {
     const { authority } = setup()
     const storeless = () => true

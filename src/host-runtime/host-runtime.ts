@@ -17,6 +17,14 @@ import type { HostRuntimeInputs } from './host-runtime-types'
 // inside the daemon. Main passes in the few inputs only it can produce (userData
 // paths, shell environment, history readers, tool panels); everything below is
 // plain data and callbacks.
+/**
+ * Only a device grant is limited to archived sessions. The App's own grant keeps the
+ * App's semantics: main already showed the confirmation dialog before asking.
+ */
+export function sessionDeleteRequiresArchive(grantScope?: 'local' | 'remote'): boolean {
+  return grantScope !== 'local'
+}
+
 export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<RemoteHostService> {
   const { runtime, stateDirectory, relay, gatewayLabel } = inputs
   const remotePermissionMode = runtime.configuredRemotePermissionMode()
@@ -112,11 +120,16 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
     toolPanels: inputs.toolPanels,
     ...(inputs.createOutputStore ? { createOutputStore: inputs.createOutputStore } : {}),
     ...(runtime.sessionRefFromRequest && runtime.deleteOneSession ? {
-      sessionDelete: async (request: DesktopRemoteDeleteSessionRequest, authorize: () => void) => {
+      sessionDelete: async (request: DesktopRemoteDeleteSessionRequest, authorize: () => void, grantScope?: 'local' | 'remote') => {
         const ref = runtime.sessionRefFromRequest!(request)
         if (!ref) throw new Error('无效的远程会话删除请求')
+        // The App's own grant keeps the App's semantics: main already asked the user,
+        // so an unarchived session may be deleted. A device grant may only delete an
+        // archived session, because that is the narrower rule it has always had.
+        const requireArchived = sessionDeleteRequiresArchive(grantScope)
         const authorizeArchived = (): void => {
           authorize()
+          if (!requireArchived) return
           const current = runtime.appSessionStore().load().find((session) =>
             session.providerId === ref.providerId && session.agentProfileId === ref.agentProfileId &&
             session.cwd === ref.cwd && (session.sessionId === ref.externalSessionId || session.externalSessionId === ref.externalSessionId))

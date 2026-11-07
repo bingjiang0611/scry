@@ -7,6 +7,9 @@ import type { RemoteProjectRef, RemoteProviderRef, RemoteProviderQuery, RemoteSe
 export interface DeviceAuthorizer {
   // True only for a non-revoked, non-expired owner-device grant.
   authorizesCertificate(certificateSHA256: string): boolean
+  // That grant's scope, so policy that differs by scope reads the verified grant
+  // instead of guessing from the transport that carried the frame.
+  grantScope?(certificateSHA256: string): 'local' | 'remote' | undefined
 }
 
 // One host-authorized project directory the device may target. `path` is a

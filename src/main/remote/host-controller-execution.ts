@@ -85,7 +85,11 @@ export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway;
           },
           output: executorInput.output,
           requestUserInput: (request, signal) => interactions.request(executorInput.runId, request, signal),
-          stopSignal: stop.signal
+          stopSignal: stop.signal,
+          // Policy that differs by scope reads the submitting grant's scope, never the
+          // transport. A run recovered after a restart has no recorded scope and gets
+          // the stricter device semantics.
+          grantScope: gateway.runScope(executorInput.runId)
         })
       } finally {
         stops.delete(executorInput.runId)

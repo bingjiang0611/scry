@@ -13,7 +13,7 @@
 | B4-D 设计补全 | 完成（含 D1–D4 补审） | `见 status` | [b4-d](status/b4-d.md)：P3 §13 移到 [P3-batch4-design](P3-batch4-design.md)；矩阵 119 channel：main 24 / split 3 / forward 39 / new-op 53；D1 `scopes` 默认 `local`、D2 每条 forward 写明语义差异、D3 `chooseFolder`/`recentFolders` 改判 split、D4 secret 生命周期与重新入网 |
 | B4-L1 本机入网与 `scope: local` | 完成 | `见 status` | [b4-l1](status/b4-l1.md)：grant 带 `scope`，local grant 只在 unix socket 传输有效；一次性 0600 secret 不按时间过期；首次入网/复用拒绝/撤销不重入均有测试 |
 | B4-L2 main 侧 daemon 客户端与 supervisor | 完成 | `见 status` | [b4-l2](status/b4-l2.md)：`DaemonClient` 入网/探活/版本硬失败/撤销不重入、`ensureDaemon` 探活→接入→拉起→就绪；新 op `daemonInfo` 仅 local |
-| B4-L3 run 经 daemon | 未开始 | — | |
+| B4-L3 run 经 daemon | 进行中 | `见 status` | [b4-l3](status/b4-l3.md)：按 grant scope 选语义（submit、sessionDelete）已完成并有对照测试；App 侧开关、workbenchOps UI、Linux 凭据后端、真实 launch、重新入网、trace 计时待做 |
 | B4-L4 其余能力经 daemon | 未开始 | — | |
 | B4-S 切换与删除 | 未开始 | — | |
 | B4-V 验收 | 未开始 | — | |
@@ -41,4 +41,10 @@ G1（5 条差异补处理方式 + 守卫断言）与 G2（secret 生命周期改
 
 ## 需要决定
 
-无。四个决策点已在上方「已决定」记录：本机入网证明方式、新 op 全部仅本机、按 grant scope 分策略、trace 预算。
+L3 进行中，有一个授权语义问题需要维护者定夺（详见 [b4-l3](status/b4-l3.md)）：
+
+1. **本机 grant 是否允许空 cwd 会话。** 设计 §13.6 的「沿用 App 语义」包含不绑定项目的空 cwd 会话，但 daemon 现在对每个 submit 都要求工作区授权。
+   - (a) 保持现状：本机经 daemon 的会话也必须绑定已授权目录；(b) 对 `scope: local` 接受空 cwd，并加测试守住「只有 local 能这样」。
+   - 我的建议是先用 (a)，等 App 侧接线看到真实使用再决定是否放开 (b)。未定之前不实现空 cwd 分支，UI 也不假装支持。
+
+其余四个决策点已在上方「已决定」记录。

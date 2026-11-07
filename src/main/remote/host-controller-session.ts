@@ -12,6 +12,8 @@ export interface SessionActionDeps {
   sessionAction: HostControllerDependencies['sessionAction']
   sessionFork: HostControllerDependencies['sessionFork']
   sessionDelete: HostControllerDependencies['sessionDelete']
+  // Already part of the shared dependency object: it answers the verified scope.
+  gateway: { grantScope(peer: string): 'local' | 'remote' }
 }
 
 export async function runSessionAction(deps: SessionActionDeps, peer: string, input: unknown): Promise<boolean> {
@@ -104,7 +106,9 @@ export async function runSessionDelete(deps: SessionActionDeps, peer: string, in
       deps.authorizeDevice(peer)
       if (deps.workspace.authorize(canonicalCwd) !== canonicalCwd) throw new Error('workspace_context_mismatch')
     }
-    const result = await deps.sessionDelete(request, authorize)
+    // Delete semantics differ by scope: the App may delete an unarchived session
+    // after its own confirmation dialog, a device may only delete archived ones.
+    const result = await deps.sessionDelete(request, authorize, deps.gateway.grantScope(peer))
     authorize()
     return result
 }
