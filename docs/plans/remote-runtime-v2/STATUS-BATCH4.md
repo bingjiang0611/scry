@@ -28,15 +28,17 @@
 
 无。
 
+## 已决定（维护者 2026-11-07，见 [REVIEW-BATCH4-D2](REVIEW-BATCH4-D2.md)）
+
+| 决策 | 结论 | 落地 |
+|---|---|---|
+| 本机入网与 `scope: local` | 接受「同一 uid 的进程凭 `0600` secret 自证为本机设备」。secret + unix socket + 同 uid 就是证明，**不再有额外确认步骤**；无有效 local grant 期间 secret **不按时间过期**，只按「被使用」和「daemon 重启」轮换。撤销后走「重验 `daemon.lock` 身份 → SIGTERM → 重启生成新 secret → 重新入网」，不自动重入 | [§13.2](P3-batch4-design.md)、B4-L1 |
+| 新 op 的远程开放 | 本批一个都不向远程开放；`scripts/daemon-ipc-remote-approvals.json` 保持空。要开具体 op 时再单独批准 | [§13.1](P3-batch4-design.md)、D1 |
+| 按 grant scope 选策略 | 接受。除 `agent:start`、`agent:deleteSession` 外，扩到历史、列表、descriptors、detect：本机拿完整结果，远程拿裁剪投影。确认框仍留在 main | [§13.6](P3-batch4-design.md)、D2/G1 |
+| trace 推送与预算 | 接受 `watch` 长轮询 + `traceDelta`，P95 相对进程内 ≤ +10 ms（同机同负载、≥30 样本、同一 fake provider、串行测量并记录负载）；超预算再单独提 push op | [§13.4](P3-batch4-design.md) |
+
+G1（5 条差异补处理方式 + 守卫断言）与 G2（secret 生命周期改口径）已按评审修正，见提交 `5f4d050f` 与本节。
+
 ## 需要决定
 
-B4-D 的 D1–D4 已按 [REVIEW-BATCH4-FD](REVIEW-BATCH4-FD.md) 补完，以下四个决策点等维护者确认后才能开始 B4-L1。
-
-1. **本机入网与 `scope: local`（[§13.2](P3-batch4-design.md)）**：daemon 在无有效 local grant 时生成一次性 secret（`0600`），App 同 uid 读取后经 unix socket 完成 CSR/proof 换 grant；grant 只对 unix socket 有效，可撤销，撤销后不自动重新入网。核验方认为按现有信任模型（同 uid 并发攻击者不在保证范围）可以接受，前提是补齐 D4 的 secret 生命周期、重新入网与单实例规则——已补齐。
-   - 需要确认：是否接受「同一 uid 的进程凭 `0600` secret 自证为本机设备」；撤销后的重新入网走「重验 `daemon.lock` 身份 → SIGTERM → daemon 重启生成新 secret → 重新入网」是否可以。
-2. **新 op 的远程开放（[§13.1](P3-batch4-design.md)、D1）**：17 个新 op 全部 `scopes: ["local"]`，`scripts/daemon-ipc-remote-approvals.json` 为空。任何含 `remote` 却没进批准清单的 op 会让守卫测试失败。
-   - 需要确认：本批一个都不向远程开放。要开哪个，请指出 op 名，我再改清单。
-3. **按 grant scope 选择策略（[§13.6](P3-batch4-design.md)、D2）**：`agent:start` → `submit` 与 `agent:deleteSession` → `sessionDelete` 与远程语义不等价。方案是 daemon 内按 grant scope 选策略：`scope: local` 完全沿用当前 App 语义（用户权限模式含 `full_access`、允许空 cwd 会话、原生确认框可删未归档），远程设备维持现状（`SCRY_REMOTE_PERMISSION_MODE`、只删已归档、`confirm: false`）。需要确认框的操作确认框留在 main，daemon 只对 `scope: local` 接受已确认的请求。
-   - 需要确认：这个「按 scope 分策略」的授权语义。
-4. **trace 推送方式与预算（[§13.4](P3-batch4-design.md)）**：先沿用 `watch` 长轮询 + `traceDelta`，main 保持 16 ms 合批与背压；预算为 P95 相对进程内不超过 +10 ms（同机同负载、样本 ≥30、两侧同一 fake provider、串行测量并记录负载）。超预算再单独提 push 订阅 op，不默默加。
-   - 需要确认：预算数值与测量条件。
+无。四个决策点已在上方「已决定」记录：本机入网证明方式、新 op 全部仅本机、按 grant scope 分策略、trace 预算。

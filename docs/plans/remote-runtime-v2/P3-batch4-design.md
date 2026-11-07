@@ -24,29 +24,30 @@
 2. **新 op 默认只给本机。** `scopes` 默认 `["local"]`，本批一个都不向远程开放。写 `remote` 等于授权扩大，必须先改 `daemon-ipc-remote-approvals.json`，那需要维护者批准。
 3. **同一份 userData 只能有一个写者。** `knownProjectDirectories = recentStore ∪ projectStore ∪ 会话 cwd`，它就是 daemon 的工作区授权输入。所以 `agent:chooseFolder`、`agent:recentFolders`、`agent:removeRecentFolder` 判为 `split`：选择框留在 main（只有窗口能做），canonical 校验、`rememberProject`、`setCurrentCwd` 与最近列表读写全部走 `workspaceSelection` / `projectStore`。B4-S 的静态检查要加一条：`src/main` 不得出现 `recentStore` / `projectStore` 的写入调用。
 
-## 13.2 本机设备入网与 `scope: local`（**需要维护者确认**）
+## 13.2 本机设备入网与 `scope: local`（维护者 2026-11-07 已确认）
 
-推荐方案：
+方案（维护者 2026-11-07 已确认，见 [REVIEW-BATCH4-D2](REVIEW-BATCH4-D2.md)）：
 
-1. daemon 在 `<userData>/daemon/` 写入一次性入网 secret（`0600`，与 socket 同权限级别）。
-2. App（同一 uid）读取 secret，经 unix socket 完成 CSR 与 proof，得到带 `scope: local` 的 grant。
+1. daemon 在没有有效 local grant 时，往 `<stateDir>/local-enrollment.json` 写入一次性入网 secret（`0600`，目录 `0700`，与 socket 同权限级别）。
+2. App（同一 uid）读取 secret，经 `enroll.sock` 提交 CSR 与 secret，得到带 `scope: local` 的 grant。
 3. `scope: local` 的 grant 只在 unix socket 传输上有效；走 SSH 或 Relay 时返回 `device_not_authorized`。
 4. 设备列表显示为「本机」，可撤销；撤销后 App 显示可操作的错误，不自动重新入网（做法见下文「重新入网」）。
 5. secret 使用一次即作废。
 
-需要确认的点：这等于承认「同一 uid 的进程可以自证为本机设备」。它不放宽任何现有授权（daemon 仍按 cwd/路径/操作重验），但比「每次启动重新配对」少一道人工确认。同一 uid 下的并发攻击者不在信任模型内，与此一致。
+**自证就是这三件事，没有额外确认步骤**：能读 `0600` 的 secret（同一 uid）+ 只有本机能连的 unix socket + 用 CSR 私钥签名。三者同时成立即视为「本机」，daemon 在同一个事务里直接签发 grant，不弹第二次确认。它不放宽任何现有授权（daemon 仍按 cwd/路径/操作重验），也不改变远程设备的配对流程（仍是 secret + proof + 人工确认 + TLS 通道密钥绑定）。同一 uid 下的并发攻击者不在信任模型内，与此一致。
 
 ### secret 生命周期
 
 | 条件 | 行为 |
 |---|---|
-| 启动时不存在有效 local grant | 生成新 secret（覆盖旧文件，`0600`，原子写） |
-| 启动时已存在有效 local grant | 不生成 secret；旧 secret 文件被删除，避免它比 grant 活得更久 |
-| secret 已被使用 | 立即删除文件；同一 secret 第二次出示返回 `pairing_secret_consumed` |
-| secret 过期 | 与 pairing 的既有窗口一致（`PairingAuthority.begin` 的 `expiresAt`），过期即作废并要求重新入网 |
-| secret 文件缺失、损坏或权限宽于 `0600` | fail closed：daemon 以 `daemon_enrollment_secret_*` 拒绝本机入网并记录原因，不回退到「无 secret 也放行」；UI 显示可操作错误 |
+| 启动时不存在有效 local grant | 生成新 secret（覆盖旧文件，`0600`，原子写）；daemon 由模板在登录时拉起也不会因此失效 |
+| 启动时已存在有效 local grant | 不生成 secret，并删除残留的 secret 文件，避免它比 grant 活得更久 |
+| 不按时间过期 | 只按「被使用」与「daemon 重启」轮换。登录时拉起、几小时后才打开 App 是正常路径，不要求重启 daemon |
+| secret 已被使用 | 在同一事务里先消费再签发，文件立即删除；同一 secret 第二次出示返回 `local_enrollment_secret_invalid` |
+| CSR 被拒 | secret 不消耗（先验 CSR 再消费），用户可用同一个 secret 重试 |
+| secret 文件缺失、损坏或权限宽于 `0600` | fail closed：返回可操作错误（`daemon_enrollment_secret_corrupt` / `daemon_enrollment_secret_mode_*`），不回退到「无 secret 也放行」 |
 
-secret 是入网凭据，不是授权：拿到它只能走到「等待本机确认」那一步，grant 仍由 daemon 的现有 pairing 状态机签发，并可被撤销。
+secret 是入网凭据，不是授权：它只证明「本机同一用户」，grant 仍可被撤销，撤销后不再有任何有效 local grant。
 
 ### 重新入网
 
@@ -83,7 +84,7 @@ secret 是入网凭据，不是授权：拿到它只能走到「等待本机确�
 
 daemon 产生事件（run 终态、待答问题、未读变化），App 渲染 badge 与通知。App 未运行时不累积：daemon 只留带上限的环形缓冲加 cursor，重连时取最新一页并标 `partial`，不假装收到过全部事件。
 
-## 13.6 按 grant scope 选策略（**需要维护者确认**）
+## 13.6 按 grant scope 选策略（维护者 2026-11-07 已确认）
 
 `forward` 行里有两处与远程设备的既有语义**不等价**，直接转发会让本机能力缩水，或让远程策略反过来作用到本机：
 
@@ -94,4 +95,6 @@ daemon 产生事件（run 终态、待答问题、未读变化），App 渲染 b
 
 处理方式：daemon 内**按 grant scope 选策略**——`scope: local` 完全沿用当前 App 语义，远程设备保持现状，两者都不缩水。需要原生确认框的操作，确认框留在 main，用户确认后再转发；daemon 只对 `scope: local` 接受「已确认」的请求，远程请求仍按自己那条更严的规则判断。
 
-其余 `forward` 行也逐条记了差异（分页上限、历史投影是否裁掉工具原文与文件足迹、命令集是否按 provider 白名单裁剪、`runControls` 是否受远程权限模式约束等），见矩阵的「差异与分工」列。L3 要补本机与远程的语义对照测试，不能只测转发成功。
+**同一原则覆盖证据类差异**：历史投影、分页上限、`descriptors` 的 detail 也按 grant scope 选，不只限于「写操作」。`loadSession`、`loadSessionOlder`、`listSessions`、`providerDescriptors`、`detect` 都是本机要完整结果、远程要裁剪投影，不能为了照抄远程语义让本机少拿证据。
+
+其余 `forward` 行也逐条记了差异（命令集是否按 provider 白名单裁剪、`runControls` 是否受远程权限模式约束等），见矩阵的「差异与分工」列。守卫要求：以「不同」开头的差异必须写明处理方式（按 scope 或拆到独立 op），只陈述「远程更少」不算决策。L3 要补本机与远程的语义对照测试，不能只测转发成功。
