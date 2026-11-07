@@ -50,3 +50,11 @@ R5 同批：supervisor 的异常重启预算在一次运行达到 60 s 后归零
 | `577995bce9bbcc03d10a5b95e03ae51df8caa072` | `node scripts/session-capability-ui-smoke.mjs --performance-only` | 1 | `/tmp/b3-r6-batch3-start-performance.log` |
 
 两次都是 `Renderer: Uncaught Error: Performance control obscured: #performance-empty`。对应 revision 记录在 `/tmp/b3-r6-pre-p1-revision.log`、`/tmp/b3-r6-batch3-start-revision.log`，exit code 在同名前缀的 `*-exit-code.log`，构建日志在 `*-build.log`。因此该 renderer gate 失败至少从 Batch 3 起点就存在，不由 P1 引入；仍如实标为失败，不宣称门禁通过，也不在本批顺带修改 UI。
+
+## N1 跨平台进程身份 + N4 启动路径——实现完成，Linux 实机门禁待环境
+
+失败测试先证明旧恢复逻辑会在「同一 pid、`lstart` 只差 1 秒、command 是 Scry」时接管仍存活的 lease；daemon 锁也固定了同一用例。现在 Linux 身份使用 `/proc/sys/kernel/random/boot_id` + `/proc/<pid>/stat` 第 22 字段 starttime，command 从 `/proc/<pid>/cmdline` 读取；macOS 保留 `LC_ALL=C`、`TZ=UTC` 的单 pid `ps -p`。remote lease 与 daemon ledger lock 共用同一 reader/key。精确 Linux key 相同即拒绝、boot_id 或 starttime 不同才证明 PID reuse；legacy/macOS 身份漂移但 command 仍是 Scry 时 fail closed 为 `identity_unverifiable`。
+
+N4 同批：本进程身份进程内记忆化，pairing/ledger/output store 不再各自同步 spawn；外部 pid 查询从全表 `ps -axo` 改为 `ps -p <pid>`，Linux 完全不 spawn `ps`。受控定向计时通过 timing-run 锁执行，日志 `/tmp/b3-n4-lease-timing.log`：20 次旧全表 ps 782.39 ms，20 次单 pid 143.71 ms，2000 次 memoized lease owner 2.43 ms。8 核机器，load 2.46→2.46，`highLoad:false`；这是本机 L2 定向数据，不代表所有机器。
+
+本机门禁：main+daemon+host-runtime 2924 passed（3 skipped）、typecheck、build、构建产物真实 SIGKILL/restart、完整 desktop-remote、dev security smoke 均通过。当前 macOS 主机没有 Docker/Podman/Lima/QEMU，也没有可用 Linux 远端，因此核验要求的 Linux 实机/容器构建产物 SIGKILL 尚未执行；Linux `/proc` 身份有注入式单元测试，但不冒充实机验收。

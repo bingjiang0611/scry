@@ -1,7 +1,6 @@
 import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { execFileSync } from 'node:child_process'
-import { parseProcessSnapshot, processIdentityKey, type ProcessRow } from '../main/process-diagnostics'
+import { processIdentityKey, readProcessIdentitySync, type ProcessRow } from '../main/process-diagnostics'
 
 // One daemon per state directory. The lock is the only writer gate for the session
 // ledger, so every decision has to come from evidence: a live holder with the same
@@ -54,22 +53,9 @@ export interface AcquireDaemonLockOptions {
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => { setTimeout(resolve, ms) })
 
-// `lstart` is local time, so the identity must be read under a fixed zone: a daemon
-// that keeps running across a timezone change would otherwise read a different text
-// for itself and mistake its own record for a stale one.
-const utcProcessLister = (): string => execFileSync(
-  '/bin/ps',
-  ['-axo', 'pid=,ppid=,stat=,lstart=,command='],
-  { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } }
-)
-
-function defaultSnapshot(): ReadonlyMap<number, ProcessRow> {
-  return parseProcessSnapshot(utcProcessLister())
-}
-
-/** Identity of one pid as this module reads it; exported so tests can pin the zone. */
+/** Identity of one pid using the shared platform-exact reader. */
 export function readDaemonIdentity(pid: number): DaemonLockRecord | undefined {
-  const row = defaultSnapshot().get(pid)
+  const row = readProcessIdentitySync(pid)
   if (!row) return undefined
   return { pid, startedAt: row.startedAt, identityKey: processIdentityKey(row), startedBy: '' }
 }
@@ -100,9 +86,19 @@ function checkHolder(previous: DaemonLockRecord | undefined, row: ProcessRow | u
   if (!previous) return { kind: 'stale', reason: 'unreadable-record' }
   if (!row) return { kind: 'stale', holder: previous, reason: 'holder-missing' }
   if (row.status.startsWith('Z')) return { kind: 'stale', holder: previous, reason: 'holder-zombie' }
-  if (row.startedAt === previous.startedAt) return { kind: 'live', holder: previous }
-  // Same pid, different start time: the pid was reused, so the writer is gone.
-  if (daemonEntry && row.command.includes(daemonEntry)) return { kind: 'unverifiable', holder: previous }
+  const sameIdentity = previous.identityKey
+    ? processIdentityKey(row) === previous.identityKey
+    : row.startedAt === previous.startedAt
+  if (sameIdentity) return { kind: 'live', holder: previous }
+  // Same pid with a different legacy wall-clock identity is not enough to steal
+  // from a process that still looks like Scry. Exact Linux identities safely prove
+  // reuse, but keeping this refusal also protects old records and macOS drift.
+  const scryCommand = row.command.includes('Scry.app/') || /(?:^|\/)Scry(?:\s|$)/.test(row.command) ||
+    /out\/main\/daemon(?:-supervisor)?\.js/.test(row.command)
+  const exactLinuxIdentity = previous.identityKey.includes(':linux:') && row.identityKey?.includes(':linux:') === true
+  if (!exactLinuxIdentity && (scryCommand || (daemonEntry && row.command.includes(daemonEntry)))) {
+    return { kind: 'unverifiable', holder: previous }
+  }
   return { kind: 'stale', holder: previous, reason: 'pid-reused' }
 }
 
@@ -112,8 +108,10 @@ export async function acquireDaemonLock(options: AcquireDaemonLockOptions): Prom
   const path = join(options.directory, DAEMON_LOCK_NAME)
   const takeoverPath = join(options.directory, TAKEOVER_NAME)
   const pid = options.pid ?? process.pid
-  const snapshotOf = (): ReadonlyMap<number, ProcessRow> => (options.lister ? options.lister() : defaultSnapshot())
-  const self = snapshotOf().get(pid)
+  const rowOf = (target: number): ProcessRow | undefined => options.lister
+    ? options.lister().get(target)
+    : readProcessIdentitySync(target)
+  const self = rowOf(pid)
   const record: DaemonLockRecord = {
     pid,
     // Without a start time the lock could never be verified later, so a caller that
@@ -145,7 +143,7 @@ export async function acquireDaemonLock(options: AcquireDaemonLockOptions): Prom
 
   const evaluate = (): HolderCheck => {
     const previous = readRecord(path)
-    const row = previous ? snapshotOf().get(previous.pid) : undefined
+    const row = previous ? rowOf(previous.pid) : undefined
     return checkHolder(previous, row, options.daemonEntry)
   }
   const first = evaluate()

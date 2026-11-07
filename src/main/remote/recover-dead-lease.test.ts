@@ -59,6 +59,20 @@ describe('trusted remote lease recovery', () => {
     expect(existsSync(path)).toBe(false)
   })
 
+  it('refuses takeover when the same pid start time shifts by one second but command is Scry', () => {
+    const { directory, path, owner } = fixture()
+    const row: ProcessRow = {
+      pid: owner.pid,
+      ppid: 1,
+      status: 'S',
+      startedAt: owner.startedAt.replace(/(\d{2}):(\d{2}):(\d{2})/, (_all, h, m, s) => `${h}:${m}:${String(Number(s) + 1).padStart(2, '0')}`),
+      command: '/Applications/Scry.app/Contents/MacOS/Scry --daemon'
+    }
+    expect(() => recoverDeadRemoteLease(directory, NAME, { lister: () => new Map([[owner.pid, row]]) }))
+      .toThrow('identity_unverifiable')
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(owner)
+  })
+
   it('refuses takeover when a live PID identity cannot be determined', () => {
     const { directory, path, owner } = fixture()
     const recover = recoverDeadRemoteLease as unknown as typeof recoverDeadRemoteLease &
