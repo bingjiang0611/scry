@@ -47,8 +47,11 @@
     },
     {
       "channel": "agent:chooseFolder",
-      "route": "main",
-      "why": "原生目录选择器"
+      "route": "split",
+      "why": "选择框与持久化分开",
+      "main": "原生目录选择框留在 main；选中后由 daemon 校验 canonical 目录、rememberProject 与 setCurrentCwd",
+      "op": "workspaceSelection",
+      "method": "chooseFolder"
     },
     {
       "channel": "agent:clipboardImage",
@@ -204,8 +207,11 @@
     },
     {
       "channel": "agent:recentFolders",
-      "route": "main",
-      "why": "窗口侧最近列表"
+      "route": "split",
+      "why": "授权输入单一写者",
+      "main": "窗口只渲染；列表来自 daemon 的授权输入，main 不打开该 store",
+      "op": "projectStore",
+      "method": "recentFolders"
     },
     {
       "channel": "agent:recorderContentPage",
@@ -228,8 +234,11 @@
     },
     {
       "channel": "agent:removeRecentFolder",
-      "route": "main",
-      "why": "窗口侧最近列表"
+      "route": "split",
+      "why": "授权输入单一写者",
+      "main": "窗口只发请求；删除由 daemon 执行并回新 revision",
+      "op": "projectStore",
+      "method": "removeRecentFolder"
     },
     {
       "channel": "agent:renameProject",
@@ -713,7 +722,8 @@
     {
       "channel": "workspace:openKnownExternal",
       "route": "main",
-      "why": "main 的只读引用表"
+      "why": "main 的只读引用表",
+      "source": "daemon:projectStore+sessionStore"
     },
     {
       "channel": "workspace:read",
@@ -726,7 +736,8 @@
     {
       "channel": "workspace:readKnown",
       "route": "main",
-      "why": "main 的只读引用表"
+      "why": "main 的只读引用表",
+      "source": "daemon:projectStore+sessionStore"
     },
     {
       "channel": "workspace:readPage",
@@ -739,7 +750,8 @@
     {
       "channel": "workspace:readPageKnown",
       "route": "main",
-      "why": "main 的只读引用表"
+      "why": "main 的只读引用表",
+      "source": "daemon:projectStore+sessionStore"
     },
     {
       "channel": "workspace:rename",
@@ -752,7 +764,8 @@
     {
       "channel": "workspace:resolveFile",
       "route": "main",
-      "why": "main 签发只读引用"
+      "why": "main 签发只读引用",
+      "source": "daemon:projectStore+sessionStore"
     },
     {
       "channel": "workspace:trash",

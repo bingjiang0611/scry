@@ -56,3 +56,31 @@
 
 - 矩阵只是判定与协议设计，没有任何 op 被实现；`forward` 行是否真能跑通要等 B4-L3/L4 的对应测试。
 - 文档级路径引用（`P3-ipc-*.md`）已用 `git diff --check` 与生成器 `--check` 校验，未渲染 Markdown 预览。
+## D1–D4 补审（REVIEW-BATCH4-FD）
+
+核验提出四处缺口，全部按「先写一条在当前数据上会失败的守卫断言」补。
+
+| 项 | 缺口 | 修法 | 先失败的断言（当前数据上的实际失败信息） |
+|---|---|---|---|
+| D1 | 17 个新 op 里 14 个只写「已验证 peer + authorize(cwd)」，等于对任何已配对手机开放 | `daemon-ipc-ops.json` 每个 op 加 `scopes`，本批全部 `["local"]`；新增 `daemon-ipc-remote-approvals.json`（`approved: []`）；生成器与测试都检查「含 `remote` 但不在批准清单」即失败 | `conversation must declare scopes: expected undefined to be an instance of Array` |
+| D2 | `forward` 行默认按语义等价处理，`agent:start`→`submit` 与 `agent:deleteSession`→`sessionDelete` 至少两处不成立 | 新增 `scripts/daemon-ipc-differences.json`，39 条 `forward` 行逐条写明差异；矩阵加「差异与分工」列；两处差异写明「按 grant scope 选策略」，确认框留在 main | `agent:activeRun must state whether the forward is equivalent: expected undefined to be truthy` |
+| D3 | `chooseFolder`/`recentFolders`/`removeRecentFolder` 判在 main，但它们写的是 `knownProjectDirectories`（`recentStore ∪ projectStore ∪ 会话 cwd`），即 daemon 的授权输入 | 改判 `split`：选择框留 main，canonical 校验/`rememberProject`/`setCurrentCwd`/最近列表读写走 `workspaceSelection`、`projectStore`；新增 `split` 类别与守卫（必须同时写 main 侧与 daemon op）；`readKnown` 一类加 `source: daemon:projectStore+sessionStore`；B4-S 静态检查加「main 不得写这两个 store」 | `agent:chooseFolder must not stay in main: expected 'main' to be 'split'` |
+| D4 | §13.2 没写撤销后如何重新入网，也没写 secret 生命周期 | 补 `secret 生命周期`、`重新入网`、`单实例` 三节；重新入网走「重验 `daemon.lock` 身份 → SIGTERM → 重启生成新 secret」 | `expected '### 13.2 本机设备入网…' to contain 'secret 生命周期'` |
+
+同时把 §13 正文从 `P3-daemon-design.md` 移到 [P3-batch4-design.md](../P3-batch4-design.md)（新增 D4 内容后 P3 会超过 20 KB 门禁，且 §13 与生成文档属于同一主题）；P3 保留 §13.1–13.6 的编号索引。判定数据按职责拆成四个文件：`daemon-ipc-routing.json`、`daemon-ipc-ops.json`、`daemon-ipc-differences.json`、`daemon-ipc-remote-approvals.json`。
+
+矩阵计数随之变为：main **24** / split **3** / forward **39** / new-op **53**。
+
+### 补审门禁
+
+| 检查 | 结果 |
+|---|---|
+| `npx vitest run scripts/daemon-ipc-matrix.test.ts` | 12 passed（原 7 条 + D1×2、D2、D3、D4） |
+| `npx vitest run scripts/performance-feedback.test.ts` | 通过 |
+| `node scripts/daemon-ipc-matrix.mjs`（`--check`） | `IPC matrix up to date (119 channels)` |
+| `npm run typecheck` | 通过 |
+| `git diff --check` | 通过 |
+
+### 仍未验证
+
+`split` 与 `scopes` 都只是判定，`workspaceSelection:chooseFolder`、`projectStore:recentFolders` 等都还没有实现；「按 grant scope 选策略」也没有代码，L3 要补本机与远程的语义对照测试。

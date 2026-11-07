@@ -74,3 +74,51 @@ describe('daemon IPC routing matrix', () => {
     expect(join(OPS_DOC).endsWith('P3-ipc-ops.md')).toBe(true)
   })
 })
+// Batch 4 D1-D4: the review found gaps that change authorization semantics, so each fix
+// is guarded by an assertion that fails on the data as it stood before the fix.
+describe('daemon IPC routing decisions (D1-D4)', () => {
+  const opsFile = JSON.parse(readFileSync(new URL('./daemon-ipc-ops.json', import.meta.url), 'utf8'))
+  const rowFor = (channel: string) => routing.channels.find((row: { channel: string }) => row.channel === channel)
+
+  it('D1 declares which callers may reach each new op', () => {
+    for (const [name, op] of Object.entries(opsFile.ops as Record<string, { scopes?: string[] }>)) {
+      expect(op.scopes, `${name} must declare scopes`).toBeInstanceOf(Array)
+      expect((op.scopes ?? []).length, `${name} must list at least one scope`).toBeGreaterThan(0)
+      for (const scope of op.scopes ?? []) expect(['local', 'remote']).toContain(scope)
+    }
+  })
+
+  it('D1 keeps every remote-capable new op on an approved list', () => {
+    const approvals = JSON.parse(readFileSync(new URL('./daemon-ipc-remote-approvals.json', import.meta.url), 'utf8'))
+    const approved = new Set(approvals.approved)
+    for (const [name, op] of Object.entries(opsFile.ops as Record<string, { scopes?: string[] }>)) {
+      if ((op.scopes ?? []).includes('remote')) expect(approved, `${name} exposes remote without maintainer approval`).toContain(name)
+    }
+  })
+
+  it('D2 records the semantic difference of every forwarded op', () => {
+    const differences = routing.differences as Record<string, string>
+    for (const row of routing.channels.filter((item: { route: string }) => item.route === 'forward')) {
+      expect(differences[row.channel], `${row.channel} must state whether the forward is equivalent`).toBeTruthy()
+    }
+    for (const channel of ['agent:start', 'agent:deleteSession']) expect(differences[channel]).toMatch(/scope/i)
+  })
+
+  it('D3 splits the channels that would write the daemon authorization input', () => {
+    for (const channel of ['agent:chooseFolder', 'agent:recentFolders', 'agent:removeRecentFolder']) {
+      const row = rowFor(channel)
+      expect(row.route, `${channel} must not stay in main`).toBe('split')
+      expect(row.main, `${channel} must say what stays in main`).toBeTruthy()
+      expect(row.op, `${channel} must name the daemon op`).toBeTruthy()
+    }
+    for (const channel of ['workspace:resolveFile', 'workspace:readKnown', 'workspace:readPageKnown', 'workspace:openKnownExternal']) {
+      expect(rowFor(channel).source, `${channel} must take known projects from the daemon`).toMatch(/^daemon:/)
+    }
+  })
+
+  it('D4 documents how a revoked App enrolls again and when the secret exists', () => {
+    const design = readFileSync(join(__dirname, '../docs/plans/remote-runtime-v2/P3-batch4-design.md'), 'utf8')
+    const section = design.slice(design.indexOf('## 13.2'), design.indexOf('## 13.3'))
+    for (const required of ['secret 生命周期', '重新入网', '单实例']) expect(section).toContain(required)
+  })
+})

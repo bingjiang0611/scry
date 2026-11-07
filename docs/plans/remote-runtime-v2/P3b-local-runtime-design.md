@@ -85,7 +85,7 @@
 
 Batch 3 做到第 3 步，只验证「daemon 能承载远程宿主并真跑 run」；App 仍用进程内宿主。同一 userData 由 `SCRY_HOST_DAEMON` 决定启动哪一条，默认关闭，两者不并存。
 
-Batch 4 的细化：第 4 步按 channel 矩阵推进（[P3 §13.1](P3-daemon-design.md)），每组 channel 迁移都伴随一组测试；`main` 侧只剩 27 个 channel。第 5 步完成后，`src/main` 的值导入图里不得再出现 Provider spawn、台账 store 或 SQLite 写连接，由静态检查守住。
+Batch 4 的细化：第 4 步按 channel 矩阵推进（[P3 §13.1](P3-daemon-design.md)），每组 channel 迁移都伴随一组测试；`main` 侧只剩 27 个 channel。第 5 步完成后，`src/main` 的值导入图里不得再出现 Provider spawn、台账 store 或 SQLite 写连接，也不得调用 `recentStore` / `projectStore` 的写入方法（它们是 daemon 的工作区授权输入），由静态检查守住。
 
 回滚：Batch 3 之后关掉 `SCRY_HOST_DAEMON` 即回到进程内宿主；Batch 4 合入前删除进程内宿主与 App 直连 SQLite，**不保留兼容版本**（Scry 未对外发布，见 REVIEW-BATCH2 更正 3）。
 
