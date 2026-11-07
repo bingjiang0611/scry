@@ -3,7 +3,9 @@ name: Remote daemon Linux acceptance
 on:
   push:
     branches: [claude/remote-runtime-v2]
-    paths: [.github/workflows/remote-daemon-linux-acceptance.yml]
+    paths:
+      - .github/workflows/remote-daemon-linux-acceptance.yml
+      - scripts/daemon-sigkill-restart.mjs
 
 permissions:
   contents: read
