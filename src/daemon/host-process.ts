@@ -248,7 +248,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   await service.start()
   // The App's own endpoint: same controller and TLS materials, marked as the local
   // transport so a locally enrolled grant cannot be replayed over the network.
-  const localHost = service.createLocalHost()
+  const localHost = service.createLocalHost({ version: options.appVersion })
   const channel = await openLocalChannel({
     directory: options.daemonStateDirectory,
     serve: (stream) => localHost.serve(stream)
@@ -261,7 +261,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     directory: options.daemonStateDirectory,
     enroll: localEnrollHandlers(enrollment, {
       enrollLocal: (input, consumeSecret) => service.enrollLocalDevice(input, consumeSecret)
-    }, service.caCertificatePEM)
+    }, service.caCertificatePEM, options.appVersion)
   })
   log(`daemon.host-ready socket=${channel.socketPath} enroll=${enrollSocket.socketPath}`)
 

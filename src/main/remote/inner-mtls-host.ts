@@ -3,6 +3,7 @@ import { constants, createHash } from 'node:crypto'
 import type { Duplex } from 'node:stream'
 import type { HostController } from './host-controller'
 import type { PairingAuthority } from './pairing'
+import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import type { ExecutionTargetRouter } from './execution-targets'
 import { dispatchRemoteRequest } from './inner-mtls-dispatch'
 import { remoteOperationCounters, remoteRequestTrace } from './remote-request-timing'
@@ -38,6 +39,9 @@ export interface InnerMtlsHostOptions {
   // over the local socket is refused here when this is 'network', so it cannot be
   // replayed from another machine even if its certificate leaks.
   transport?: 'local' | 'network'
+  // Answers `daemonInfo` on this endpoint. The local socket serves it so the App can
+  // check the daemon's version before it enrolls a grant.
+  info?: { version: string }
 }
 
 // Remote prompts may carry a small, explicitly bounded image/text attachment.
@@ -53,6 +57,7 @@ export class InnerMtlsHost {
   #server: Server
   #maxFrame: number
   #transport: 'local' | 'network'
+  #info?: { version: string }
   #connections = new Set<TLSSocket>()
   // Open sockets by verified peer fingerprint, so revoking a device closes the
   // tunnels it holds open instead of waiting for their idle timeout.
@@ -61,6 +66,7 @@ export class InnerMtlsHost {
   constructor(options: InnerMtlsHostOptions) {
     this.#maxFrame = options.maxFrameBytes ?? DEFAULT_MAX_FRAME
     this.#transport = options.transport ?? 'network'
+    this.#info = options.info
     this.#server = createServer({
       key: options.serverKeyPEM,
       cert: options.serverCertPEM,
@@ -154,6 +160,14 @@ export class InnerMtlsHost {
         const denial = { error: 'device_not_authorized' }
         if (keepAlive) { socket.write(`${JSON.stringify({ keepAlive: true, ...denial })}\n`); armIdleTimeout() }
         else socket.end(`${JSON.stringify(denial)}\n`)
+        return
+      }
+      // Version handshake: answered here because it describes this endpoint's
+      // process, and it must be reachable before the App owns a run or a catalog.
+      if (this.#info && parsed && typeof parsed === 'object' && (parsed as { op?: unknown }).op === 'daemonInfo') {
+        const info = { op: 'daemonInfo', version: this.#info.version, protocol: REMOTE_PROTOCOL_VERSION }
+        if (keepAlive) { socket.write(`${JSON.stringify({ keepAlive: true, ...info })}\n`); armIdleTimeout() }
+        else socket.end(`${JSON.stringify(info)}\n`)
         return
       }
       busy = true

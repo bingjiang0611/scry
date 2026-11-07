@@ -155,7 +155,7 @@ export function localEnrollHandlers(store: LocalEnrollmentStore, authority: {
     deviceId: string
     expiresAt: number
   }>
-}, caCertificatePEM: string) {
+}, caCertificatePEM: string, daemonVersion: string) {
   return async (request: unknown): Promise<unknown> => {
     if (!request || typeof request !== 'object' || Array.isArray(request)) throw new Error('invalid_local_enrollment_request')
     const input = request as { version?: unknown; secret?: unknown; csrPEM?: unknown; deviceLabel?: unknown }
@@ -169,6 +169,7 @@ export function localEnrollHandlers(store: LocalEnrollmentStore, authority: {
       certificatePEM: grant.certificatePEM,
       certificateSHA256: grant.certificateSHA256,
       caCertificatePEM,
+      daemonVersion,
       deviceId: grant.deviceId,
       expiresAt: grant.expiresAt
     }

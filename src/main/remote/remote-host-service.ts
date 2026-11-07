@@ -168,13 +168,14 @@ export class RemoteHostService {
    * grant enrolled over that socket is refused here if it ever arrives over a network
    * transport instead.
    */
-  createLocalHost(): InnerMtlsHost {
+  createLocalHost(info: { version: string }): InnerMtlsHost {
     return new InnerMtlsHost({
       controller: this.#binding.controller,
       serverCertPEM: this.#serverCredentials.certificatePEM,
       serverKeyPEM: this.#serverCredentials.privateKeyPEM,
       caPEM: this.caCertificatePEM,
-      transport: 'local'
+      transport: 'local',
+      info
     })
   }
 
