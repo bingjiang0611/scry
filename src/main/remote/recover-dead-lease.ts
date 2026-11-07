@@ -3,7 +3,7 @@ import {
   openSync, readSync, realpathSync, unlinkSync
 } from 'node:fs'
 import { join } from 'node:path'
-import { processIdentityKey, readProcessIdentitySync, type ProcessRow } from '../process-diagnostics'
+import { processIdentitiesComparable, processIdentityKey, readProcessIdentitySync, type ProcessRow } from '../process-diagnostics'
 
 const MAX_LEASE_BYTES = 4096
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
@@ -75,17 +75,14 @@ export function recoverDeadRemoteLease(
       if (!row.status.startsWith('Z') && processIdentityKey(row) === owner.identityKey) {
         throw new Error('remote_lease_owner_alive')
       }
-      // On legacy/macOS evidence, a one-second wall-clock shift is not enough to
-      // steal a lease from a process that still identifies as Scry. Linux exact
-      // identities never take this branch because boot_id + proc starttime is stable.
-      const scryCommand = row.command.includes('Scry.app/') || /(?:^|\/)Scry(?:\s|$)/.test(row.command) ||
-        /out\/main\/daemon(?:-supervisor)?\.js/.test(row.command)
-      const exactLinuxIdentity = owner.identityKey.includes(':linux:') && row.identityKey?.includes(':linux:') === true
       // The record names this very process but a different identity: this process
       // cannot have written it, so the pid was reused. macOS assigns pids in order,
       // so an App relaunched after an abnormal exit often inherits the stale pid.
       // The permanent claim fence below still serializes the takeover.
-      if (!row.status.startsWith('Z') && scryCommand && !exactLinuxIdentity && owner.pid !== process.pid) {
+      const scryCommand = row.command.includes('Scry.app/') || /(?:^|\/)Scry(?:\s|$)/.test(row.command) ||
+        /out\/main\/daemon(?:-supervisor)?\.js/.test(row.command)
+      const comparable = processIdentitiesComparable(owner.identityKey, processIdentityKey(row))
+      if (!row.status.startsWith('Z') && scryCommand && !comparable && owner.pid !== process.pid) {
         throw new Error('remote_lease_identity_unverifiable')
       }
       // A different exact identity proves PID reuse; a zombie cannot own the lease.

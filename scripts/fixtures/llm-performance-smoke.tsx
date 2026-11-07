@@ -89,7 +89,10 @@ Object.defineProperty(window, 'scry', { value: {
 } })
 const controls = document.createElement('div')
 controls.id = 'performance-fixture-controls'
-controls.style.cssText = 'position:fixed;left:0;bottom:0;z-index:99999;display:flex;max-width:100vw;height:22px;overflow:auto;background:white;color:black'
+// The strip must never scroll: a macOS overlay scrollbar captures pointer hit-testing
+// right after scrollIntoView, which made the fixture report its own control buttons as
+// obscured. Wrapping keeps every fixture button directly hit-testable.
+controls.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99999;display:flex;flex-wrap:wrap;background:white;color:black;font:11px/1.4 system-ui'
 for (const [id, action] of Object.entries({
   'performance-stream': () => {
     publish('first', { text: 'abc' }, 1000); publish('first', { text: 'def' }, 2000)
@@ -135,6 +138,7 @@ for (const [id, action] of Object.entries({
   const button = document.createElement('button')
   button.id = id
   button.textContent = id
+  button.style.flex = '0 0 auto'
   button.onclick = action
   controls.append(button)
 }

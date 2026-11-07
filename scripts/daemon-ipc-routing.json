@@ -1,0 +1,774 @@
+{
+  "schema": 1,
+  "channels": [
+    {
+      "channel": "agent:activeRun",
+      "route": "forward",
+      "op": "runState",
+      "why": "run 状态在 daemon"
+    },
+    {
+      "channel": "agent:activeRuns",
+      "route": "forward",
+      "op": "liveRuns",
+      "why": "live run 在 daemon"
+    },
+    {
+      "channel": "agent:addPiProfile",
+      "route": "new-op",
+      "op": "piProfile",
+      "method": "addPiProfile"
+    },
+    {
+      "channel": "agent:adoptActiveRun",
+      "route": "new-op",
+      "op": "runControl",
+      "method": "adoptActiveRun",
+      "path": "controls"
+    },
+    {
+      "channel": "agent:answerQuestion",
+      "route": "forward",
+      "op": "answerQuestion",
+      "why": "待答问题在 daemon"
+    },
+    {
+      "channel": "agent:billingState",
+      "route": "new-op",
+      "op": "billing",
+      "method": "billingState"
+    },
+    {
+      "channel": "agent:catalogHealth",
+      "route": "new-op",
+      "op": "sessionStore",
+      "method": "catalogHealth",
+      "why": "会话账本在 daemon"
+    },
+    {
+      "channel": "agent:chooseFolder",
+      "route": "main",
+      "why": "原生目录选择器"
+    },
+    {
+      "channel": "agent:clipboardImage",
+      "route": "main",
+      "why": "剪贴板"
+    },
+    {
+      "channel": "agent:deleteArchivedSessions",
+      "route": "new-op",
+      "op": "sessionPurge",
+      "method": "deleteArchivedSessions"
+    },
+    {
+      "channel": "agent:deleteSession",
+      "route": "forward",
+      "op": "sessionDelete",
+      "why": "既有 sessionDelete"
+    },
+    {
+      "channel": "agent:detect",
+      "route": "forward",
+      "op": "providers",
+      "why": "adapter 在 daemon"
+    },
+    {
+      "channel": "agent:detectFast",
+      "route": "forward",
+      "op": "providers",
+      "why": "adapter 在 daemon"
+    },
+    {
+      "channel": "agent:focusRun",
+      "route": "main",
+      "why": "窗口级焦点书签"
+    },
+    {
+      "channel": "agent:focusedRunSnapshot",
+      "route": "forward",
+      "op": "runState",
+      "why": "权威快照在 daemon"
+    },
+    {
+      "channel": "agent:forkSession",
+      "route": "forward",
+      "op": "sessionFork",
+      "why": "既有 sessionFork"
+    },
+    {
+      "channel": "agent:importBillingFixture",
+      "route": "new-op",
+      "op": "billing",
+      "method": "importBillingFixture"
+    },
+    {
+      "channel": "agent:invalidateProviderContext",
+      "route": "new-op",
+      "op": "providerContext",
+      "method": "invalidateProviderContext",
+      "why": "Provider 运行时在 daemon"
+    },
+    {
+      "channel": "agent:listArchivedSessions",
+      "route": "new-op",
+      "op": "sessionStore",
+      "method": "listArchivedSessions",
+      "why": "会话账本在 daemon"
+    },
+    {
+      "channel": "agent:listCommands",
+      "route": "forward",
+      "op": "commands",
+      "why": "既有 commands"
+    },
+    {
+      "channel": "agent:listProjects",
+      "route": "new-op",
+      "op": "projectStore",
+      "method": "listProjects",
+      "path": "navigation",
+      "why": "项目目录需单一写者"
+    },
+    {
+      "channel": "agent:listSessions",
+      "route": "forward",
+      "op": "sessionsPage",
+      "why": "既有 sessionsPage"
+    },
+    {
+      "channel": "agent:listSkills",
+      "route": "new-op",
+      "op": "skills",
+      "method": "listSkills",
+      "path": "providers"
+    },
+    {
+      "channel": "agent:llmPerformanceHistory",
+      "route": "new-op",
+      "op": "llmPerformance",
+      "method": "llmPerformanceHistory"
+    },
+    {
+      "channel": "agent:llmPerformanceSummary",
+      "route": "new-op",
+      "op": "llmPerformance",
+      "method": "llmPerformanceSummary"
+    },
+    {
+      "channel": "agent:loadSession",
+      "route": "forward",
+      "op": "historyTurnsPage",
+      "why": "既有 historyTurnsPage"
+    },
+    {
+      "channel": "agent:loadSessionOlder",
+      "route": "forward",
+      "op": "historyPage",
+      "why": "既有 historyPage"
+    },
+    {
+      "channel": "agent:mcpGuardScan",
+      "route": "new-op",
+      "op": "mcp",
+      "method": "mcpGuardScan",
+      "path": "providers"
+    },
+    {
+      "channel": "agent:mcpSnapshot",
+      "route": "new-op",
+      "op": "mcp",
+      "method": "mcpSnapshot",
+      "path": "providers"
+    },
+    {
+      "channel": "agent:newSession",
+      "route": "new-op",
+      "op": "providerContext",
+      "method": "newSession",
+      "path": "providers",
+      "why": "Provider 运行时在 daemon"
+    },
+    {
+      "channel": "agent:providerDescriptors",
+      "route": "forward",
+      "op": "providers",
+      "why": "既有 providers"
+    },
+    {
+      "channel": "agent:reauthenticateMcp",
+      "route": "new-op",
+      "op": "mcp",
+      "method": "reauthenticateMcp",
+      "path": "providers"
+    },
+    {
+      "channel": "agent:recentFolders",
+      "route": "main",
+      "why": "窗口侧最近列表"
+    },
+    {
+      "channel": "agent:recorderContentPage",
+      "route": "new-op",
+      "op": "recorderContent",
+      "method": "recorderContentPage"
+    },
+    {
+      "channel": "agent:removePiProfile",
+      "route": "new-op",
+      "op": "piProfile",
+      "method": "removePiProfile"
+    },
+    {
+      "channel": "agent:removeProject",
+      "route": "new-op",
+      "op": "projectStore",
+      "method": "removeProject",
+      "path": "navigation"
+    },
+    {
+      "channel": "agent:removeRecentFolder",
+      "route": "main",
+      "why": "窗口侧最近列表"
+    },
+    {
+      "channel": "agent:renameProject",
+      "route": "new-op",
+      "op": "projectStore",
+      "method": "renameProject",
+      "path": "navigation"
+    },
+    {
+      "channel": "agent:renameSession",
+      "route": "forward",
+      "op": "sessionAction",
+      "why": "既有 sessionAction"
+    },
+    {
+      "channel": "agent:revealProject",
+      "route": "main",
+      "why": "原生 showItemInFolder"
+    },
+    {
+      "channel": "agent:runControls",
+      "route": "forward",
+      "op": "providers",
+      "why": "providers 的 selected"
+    },
+    {
+      "channel": "agent:setCwd",
+      "route": "new-op",
+      "op": "workspaceSelection",
+      "method": "setCwd"
+    },
+    {
+      "channel": "agent:setProjectPinned",
+      "route": "new-op",
+      "op": "projectStore",
+      "method": "setProjectPinned",
+      "path": "navigation"
+    },
+    {
+      "channel": "agent:setSessionArchived",
+      "route": "forward",
+      "op": "sessionAction",
+      "why": "既有 sessionAction"
+    },
+    {
+      "channel": "agent:setSessionPinned",
+      "route": "forward",
+      "op": "sessionAction",
+      "why": "既有 sessionAction"
+    },
+    {
+      "channel": "agent:start",
+      "route": "forward",
+      "op": "submit",
+      "why": "既有 submit（带 intentId）"
+    },
+    {
+      "channel": "agent:stats",
+      "route": "new-op",
+      "op": "usage",
+      "method": "stats",
+      "path": "analytics"
+    },
+    {
+      "channel": "agent:steer",
+      "route": "new-op",
+      "op": "runControl",
+      "method": "steer"
+    },
+    {
+      "channel": "agent:stop",
+      "route": "forward",
+      "op": "stop",
+      "why": "既有 stop"
+    },
+    {
+      "channel": "agent:stopBackgroundTask",
+      "route": "new-op",
+      "op": "runControl",
+      "method": "stopBackgroundTask",
+      "path": "controls"
+    },
+    {
+      "channel": "agent:syncBillingAdmin",
+      "route": "new-op",
+      "op": "billing",
+      "method": "syncBillingAdmin"
+    },
+    {
+      "channel": "agent:testMcp",
+      "route": "new-op",
+      "op": "mcp",
+      "method": "testMcp",
+      "path": "providers"
+    },
+    {
+      "channel": "agent:traceAck",
+      "route": "main",
+      "why": "renderer 消费回执"
+    },
+    {
+      "channel": "agent:traceResynchronized",
+      "route": "main",
+      "why": "main 的投递桥状态"
+    },
+    {
+      "channel": "agent:turnTerminalEvidence",
+      "route": "new-op",
+      "op": "turnEvidence",
+      "method": "turnTerminalEvidence",
+      "path": "evidence"
+    },
+    {
+      "channel": "agent:unreadSessions",
+      "route": "main",
+      "why": "badge 由 main 渲染"
+    },
+    {
+      "channel": "agent:usageAnalytics",
+      "route": "new-op",
+      "op": "usage",
+      "method": "usageAnalytics"
+    },
+    {
+      "channel": "agent:usageCredits",
+      "route": "new-op",
+      "op": "usage",
+      "method": "usageCredits",
+      "path": "analytics"
+    },
+    {
+      "channel": "agent:usageStats",
+      "route": "new-op",
+      "op": "usage",
+      "method": "usageStats"
+    },
+    {
+      "channel": "app:copyText",
+      "route": "main",
+      "why": "剪贴板"
+    },
+    {
+      "channel": "app:performanceDiagnosticsEnabled",
+      "route": "main",
+      "why": "本机性能开关"
+    },
+    {
+      "channel": "app:rendererRestart",
+      "route": "main",
+      "why": "窗口行为"
+    },
+    {
+      "channel": "app:reportRendererPerformance",
+      "route": "main",
+      "why": "renderer 自报指标"
+    },
+    {
+      "channel": "app:setTheme",
+      "route": "main",
+      "why": "窗口主题"
+    },
+    {
+      "channel": "conversation:adopt",
+      "route": "new-op",
+      "op": "conversation",
+      "method": "adopt",
+      "path": "history"
+    },
+    {
+      "channel": "conversation:create",
+      "route": "new-op",
+      "op": "conversation",
+      "method": "create",
+      "path": "compose"
+    },
+    {
+      "channel": "conversation:createSideChat",
+      "route": "new-op",
+      "op": "conversation",
+      "method": "createSideChat",
+      "path": "compose"
+    },
+    {
+      "channel": "conversation:delete",
+      "route": "new-op",
+      "op": "conversation",
+      "method": "delete",
+      "path": "navigation"
+    },
+    {
+      "channel": "conversation:findSideChatCommand",
+      "route": "new-op",
+      "op": "conversation",
+      "method": "findSideChatCommand",
+      "path": "compose"
+    },
+    {
+      "channel": "conversation:fork",
+      "route": "new-op",
+      "op": "conversation",
+      "method": "fork",
+      "path": "navigation"
+    },
+    {
+      "channel": "conversation:list",
+      "route": "new-op",
+      "op": "conversation",
+      "method": "list",
+      "path": "navigation"
+    },
+    {
+      "channel": "conversation:listSideChats",
+      "route": "new-op",
+      "op": "conversation",
+      "method": "listSideChats",
+      "path": "navigation"
+    },
+    {
+      "channel": "conversation:preview",
+      "route": "new-op",
+      "op": "conversation",
+      "method": "preview",
+      "path": "compose"
+    },
+    {
+      "channel": "conversation:previewAdoption",
+      "route": "new-op",
+      "op": "conversation",
+      "method": "previewAdoption",
+      "path": "history"
+    },
+    {
+      "channel": "conversation:previewDeletion",
+      "route": "new-op",
+      "op": "conversation",
+      "method": "previewDeletion",
+      "path": "navigation"
+    },
+    {
+      "channel": "conversation:previewSideChat",
+      "route": "new-op",
+      "op": "conversation",
+      "method": "previewSideChat",
+      "path": "compose"
+    },
+    {
+      "channel": "conversation:read",
+      "route": "new-op",
+      "op": "conversation",
+      "method": "read",
+      "path": "history"
+    },
+    {
+      "channel": "conversation:readItem",
+      "route": "new-op",
+      "op": "conversation",
+      "method": "readItem",
+      "path": "history"
+    },
+    {
+      "channel": "conversation:readSideChatSnapshot",
+      "route": "new-op",
+      "op": "conversation",
+      "method": "readSideChatSnapshot",
+      "path": "history"
+    },
+    {
+      "channel": "conversation:send",
+      "route": "new-op",
+      "op": "conversation",
+      "method": "send",
+      "path": "send"
+    },
+    {
+      "channel": "conversation:update",
+      "route": "new-op",
+      "op": "conversation",
+      "method": "update",
+      "path": "navigation"
+    },
+    {
+      "channel": "remote:desktop:disable",
+      "route": "main",
+      "why": "DesktopRemoteClient"
+    },
+    {
+      "channel": "remote:desktop:invite",
+      "route": "main",
+      "why": "DesktopRemoteClient"
+    },
+    {
+      "channel": "remote:desktop:status",
+      "route": "main",
+      "why": "DesktopRemoteClient"
+    },
+    {
+      "channel": "remote:device:revoke",
+      "route": "new-op",
+      "op": "localPairing",
+      "method": "revoke",
+      "path": "remote"
+    },
+    {
+      "channel": "remote:pairing:begin",
+      "route": "new-op",
+      "op": "localPairing",
+      "method": "begin",
+      "path": "remote"
+    },
+    {
+      "channel": "remote:pairing:cancel",
+      "route": "new-op",
+      "op": "localPairing",
+      "method": "cancel",
+      "path": "remote"
+    },
+    {
+      "channel": "remote:pairing:confirm",
+      "route": "new-op",
+      "op": "localPairing",
+      "method": "confirm",
+      "path": "remote"
+    },
+    {
+      "channel": "remote:status",
+      "route": "new-op",
+      "op": "localHostStatus",
+      "method": "status",
+      "path": "remote"
+    },
+    {
+      "channel": "runTraces:ack",
+      "route": "main",
+      "why": "main 投递桥记账"
+    },
+    {
+      "channel": "runTraces:confirm",
+      "route": "main",
+      "why": "main 订阅状态"
+    },
+    {
+      "channel": "runTraces:resync",
+      "route": "main",
+      "why": "main 订阅状态"
+    },
+    {
+      "channel": "runTraces:setLegacyDemand",
+      "route": "main",
+      "why": "窗口焦点决定"
+    },
+    {
+      "channel": "runTraces:subscribe",
+      "route": "main",
+      "why": "main 拉流后分发"
+    },
+    {
+      "channel": "runTraces:unsubscribe",
+      "route": "main",
+      "why": "main 拉流后分发"
+    },
+    {
+      "channel": "terminal:ack",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "terminal",
+      "method": "terminalAck",
+      "why": "PTY 在 daemon"
+    },
+    {
+      "channel": "terminal:active",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "terminal",
+      "method": "terminalActive",
+      "why": "PTY 在 daemon"
+    },
+    {
+      "channel": "terminal:attach",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "terminal",
+      "method": "terminalAttach",
+      "why": "PTY 在 daemon"
+    },
+    {
+      "channel": "terminal:close",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "terminal",
+      "method": "terminalClose",
+      "why": "PTY 在 daemon"
+    },
+    {
+      "channel": "terminal:ready",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "terminal",
+      "method": "terminalReady",
+      "why": "PTY 在 daemon"
+    },
+    {
+      "channel": "terminal:recordingDelete",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "terminal",
+      "method": "terminalRecordingDelete",
+      "why": "录制在 daemon"
+    },
+    {
+      "channel": "terminal:recordingList",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "terminal",
+      "method": "terminalRecordingList",
+      "why": "录制在 daemon"
+    },
+    {
+      "channel": "terminal:recordingRead",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "terminal",
+      "method": "terminalRecordingRead",
+      "why": "录制在 daemon"
+    },
+    {
+      "channel": "terminal:resize",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "terminal",
+      "method": "terminalResize",
+      "why": "PTY 在 daemon"
+    },
+    {
+      "channel": "terminal:start",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "terminal",
+      "method": "terminalStart",
+      "why": "PTY 在 daemon"
+    },
+    {
+      "channel": "terminal:write",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "terminal",
+      "method": "terminalWrite",
+      "why": "PTY 在 daemon"
+    },
+    {
+      "channel": "workspace:create",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceCreate",
+      "why": "工作区写入归 daemon"
+    },
+    {
+      "channel": "workspace:list",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceList",
+      "why": "工作区读取归 daemon"
+    },
+    {
+      "channel": "workspace:move",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceMove",
+      "why": "工作区写入归 daemon"
+    },
+    {
+      "channel": "workspace:openExternal",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceOpenExternal",
+      "why": "工作区内交给系统打开"
+    },
+    {
+      "channel": "workspace:openKnownExternal",
+      "route": "main",
+      "why": "main 的只读引用表"
+    },
+    {
+      "channel": "workspace:read",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceRead",
+      "why": "工作区读取归 daemon"
+    },
+    {
+      "channel": "workspace:readKnown",
+      "route": "main",
+      "why": "main 的只读引用表"
+    },
+    {
+      "channel": "workspace:readPage",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceReadPage",
+      "why": "工作区读取归 daemon"
+    },
+    {
+      "channel": "workspace:readPageKnown",
+      "route": "main",
+      "why": "main 的只读引用表"
+    },
+    {
+      "channel": "workspace:rename",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceRename",
+      "why": "工作区写入归 daemon"
+    },
+    {
+      "channel": "workspace:resolveFile",
+      "route": "main",
+      "why": "main 签发只读引用"
+    },
+    {
+      "channel": "workspace:trash",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceTrash",
+      "why": "工作区写入归 daemon"
+    },
+    {
+      "channel": "workspace:write",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceWrite",
+      "why": "工作区写入归 daemon"
+    }
+  ]
+}

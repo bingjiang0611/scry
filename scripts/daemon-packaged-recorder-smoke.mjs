@@ -63,8 +63,8 @@ try {
   missing.stderr.setEncoding('utf8')
   missing.stderr.on('data', (chunk) => { stderr = `${stderr}${chunk}`.slice(-4096) })
   const [missingCode] = await once(missing, 'exit')
-  if (missingCode === 0 || !stderr.includes('daemon_recorder_cli_unavailable')) {
-    throw new Error(`packaged daemon did not fail closed: code=${missingCode}`)
+  if (missingCode !== 4 || !stderr.includes('daemon_recorder_cli_unavailable')) {
+    throw new Error(`packaged daemon did not fail closed with exit 4: code=${missingCode}`)
   }
   console.log(JSON.stringify({ privateCli, fakePathIgnored: true, liveCode, missingCode, missingReason: 'daemon_recorder_cli_unavailable' }))
 } finally {

@@ -59,18 +59,36 @@ describe('trusted remote lease recovery', () => {
     expect(existsSync(path)).toBe(false)
   })
 
-  it('refuses takeover when another live pid shifts by one second but command is Scry', () => {
+  it('takes over another live pid whose comparable start identity differs', () => {
     const { directory, path } = fixture()
     const pid = 987654
-    const owner = { pid, lease: randomUUID(), createdAt: 0, startedAt: 'Mon Jan  1 00:00:00 2026', identityKey: `${pid}:Mon Jan  1 00:00:00 2026` }
+    const owner = { pid, lease: randomUUID(), createdAt: 0, startedAt: 'Tue Feb  2 00:00:00 2026', identityKey: `${pid}:Tue Feb  2 00:00:00 2026` }
     writeFileSync(path, JSON.stringify(owner), { mode: 0o600 })
     vi.spyOn(process, 'kill').mockImplementation(() => true)
     const row: ProcessRow = {
       pid,
       ppid: 1,
       status: 'S',
-      startedAt: 'Mon Jan  1 00:00:01 2026',
-      identityKey: `${pid}:Mon Jan  1 00:00:01 2026`,
+      startedAt: 'Tue Feb  2 00:00:01 2026',
+      identityKey: `${pid}:Tue Feb  2 00:00:01 2026`,
+      command: '/Applications/Scry.app/Contents/MacOS/Scry --daemon'
+    }
+    recoverDeadRemoteLease(directory, NAME, { lister: () => new Map([[pid, row]]) })
+    expect(existsSync(path)).toBe(false)
+  })
+
+  it('refuses takeover when another live pid has only a legacy identity', () => {
+    const { directory, path } = fixture()
+    const pid = 987654
+    const owner = { pid, lease: randomUUID(), createdAt: 0, startedAt: 'legacy-start', identityKey: `${pid}:legacy-identity` }
+    writeFileSync(path, JSON.stringify(owner), { mode: 0o600 })
+    vi.spyOn(process, 'kill').mockImplementation(() => true)
+    const row: ProcessRow = {
+      pid,
+      ppid: 1,
+      status: 'S',
+      startedAt: 'Tue Feb  2 00:00:01 2026',
+      identityKey: `${pid}:Tue Feb  2 00:00:01 2026`,
       command: '/Applications/Scry.app/Contents/MacOS/Scry --daemon'
     }
     expect(() => recoverDeadRemoteLease(directory, NAME, { lister: () => new Map([[pid, row]]) }))

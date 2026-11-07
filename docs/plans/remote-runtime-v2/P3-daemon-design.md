@@ -138,3 +138,55 @@ Linux 目标机是 Arch/Omarchy x86_64 + Hyprland/Wayland；容器与 headless �
 3. **升级期版本不一致**：daemon 与 App 版本不一致时，是硬失败（要求一起升级）还是允许「旧 daemon + 新 UI 只读」？推荐硬失败，与「不做协议兼容层」一致。
 4. **Linux 首批托管方式**：只做 `systemd --user`，还是同时支持无 systemd 的启动项？目标机 Omarchy 有 systemd，建议只做 systemd 并显式降级（无 systemd 时提示手动启动）。
 5. **打包方式**：daemon 作为 electron-builder extraResources（同一产物、独立可执行）还是独立包（pacman/.pkg）？涉及发布流水线与 `install:mac:dev` 的改动范围。
+
+## 13. Batch 4 设计补全
+
+本节的四部分回答「开关打开后，App 与 daemon 之间到底怎么分」。矩阵与 op 清单是生成文件，不在这里手写，避免和源码漂移。
+
+### 13.1 IPC channel 矩阵
+
+`src/main` 现有 119 个生产 `handleTrusted` channel 已逐个判定去向：留在 main 27、转发到现有 op 39、需要新增 op 53。
+
+- 完整矩阵：[P3-ipc-matrix.md](P3-ipc-matrix.md)（生成）；新增 op 的请求/响应/授权：[P3-ipc-ops.md](P3-ipc-ops.md)（生成）
+- 判定数据 `scripts/daemon-ipc-routing.json`（去向）与 `scripts/daemon-ipc-ops.json`（新 op schema）；生成 `node scripts/daemon-ipc-matrix.mjs --write`；守卫 `scripts/daemon-ipc-matrix.test.ts`
+
+守卫检查：新增 channel 未判定即失败（报错给出注册文件）；判定里残留已删除 channel 失败；`forward` 的 op 必须真出现在 `inner-mtls-dispatch*.ts` 的 `request.op === '…'` 分支；`desktopWorkbench` 的 surface/method 必须存在于 `DESKTOP_WORKBENCH_METHODS`；`new-op` 的 method 必须等于 channel 最后一段且全局唯一，path 必须在 `scripts/performance-paths.json` 里；两份生成文档与源码不一致即失败。
+
+两条影响实现的结论：
+
+1. **新增 op 用 surface/method 聚合。** 17 个新 op 承载 53 个 channel（如 `conversation:list` → `conversation` + `list`），沿用 `desktopWorkbench` 的既有约定：一个授权边界一个 op。
+2. **同一份 userData 只能有一个写者。** `projectStore`、usage JSONL 与 SQLite 都在 userData 下；开关打开后由 daemon 提供（`projectStore`、`workspaceSelection` 等 op），设备与 App 必须看到同一份目录。`agent:recentFolders` 例外：它是窗口侧最近列表，与 daemon 的目录投影分开存储。
+
+### 13.2 本机设备入网与 `scope: local`（**需要维护者确认**）
+
+推荐方案：
+
+1. daemon 首次启动时在 `<userData>/daemon/` 写入一次性入网 secret（`0600`，与 socket 同权限级别）。
+2. App（同一 uid）读取 secret，经 unix socket 完成 CSR 与 proof，得到带 `scope: local` 的 grant。
+3. `scope: local` 的 grant 只在 unix socket 传输上有效；走 SSH 或 Relay 时返回 `device_not_authorized`。
+4. 设备列表显示为「本机」，可撤销；撤销后 App 显示可操作的错误，**不自动重新入网**。
+5. secret 使用一次即作废。
+
+需要确认的点：这等于承认「同一 uid 的进程可以自证为本机设备」。它不放宽现有授权（daemon 仍按 cwd/路径/操作重验），但比「每次启动重新配对」少一道人工确认。同一 uid 下的并发攻击者不在信任模型内，与此一致。
+
+### 13.3 生命周期
+
+| 时机 | 行为 |
+|---|---|
+| App 启动 | 探活 `local.sock`：先连接，再做带协议版本的 info 握手；版本不一致即硬失败 |
+| 需要拉起 | 沿用 `daemonLaunchEnvironment`，就绪等待上限 10 s，超时显示 `daemon_unavailable`（不重试拉起第二个） |
+| App 退出 | 只关闭自己的连接，daemon 继续服务远程设备与运行中的 run |
+| `daemon.shutdown` | 先停远程设备通道；运行中的 run 等到安全点，否则标 `unknown`，不重放 |
+| 升级后版本不一致 | 硬失败；UI 提供「重启后台服务」（走 shutdown 语义），被打断的 run 记 `host_restarted`，不重放 |
+
+确定性启动失败（`remote_lease_*`、`daemon_recorder_cli_unavailable`）已在 B4-F2 改为不重试的退出码，supervisor 只记机器码。
+
+### 13.4 trace 推送
+
+先沿用现有 `watch` 长轮询加 `traceDelta`：daemon 侧是事件源，main 侧的投递桥保持 16 ms 合批与背压，renderer 看到的通道与回执不变（`runTraces:*` 全部留在 main）。
+
+预算：以本机 unix socket 为传输，首 token 与流式输出的 L2 计时相对「进程内」不得增加 10 ms 以上（P95，同机同负载，样本 ≥30）。超出预算时再单独提出 push 订阅 op，不在本批默默加上。
+
+### 13.5 dock badge、通知、未读会话
+
+daemon 产生事件（run 终态、待答问题、未读变化），App 渲染 badge 与通知。App 未运行时不累积：daemon 只留带上限的环形缓冲加 cursor，重连时取最新一页并标 `partial`，不假装收到过全部事件。

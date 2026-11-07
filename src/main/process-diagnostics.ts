@@ -33,6 +33,19 @@ export function processIdentityKey(row: { pid: number; startedAt: string; identi
   return row.identityKey ?? `${row.pid}:${row.startedAt}`
 }
 
+// Two identity formats are written today: the exact Linux key, and macOS UTC lstart.
+// macOS lstart is the kernel's absolute process start time rendered in a fixed zone, so
+// it does not drift when the clock is corrected. Anything else is a legacy record whose
+// value we cannot interpret; for those a differing identity is not proof of PID reuse.
+const COMPARABLE_IDENTITY_FORMATS = [
+  /^\d+:linux:[^:]+:\d+$/,
+  /^\d+:[A-Z][a-z]{2} [A-Z][a-z]{2} [ 0-9]\d \d{2}:\d{2}:\d{2} \d{4}$/
+]
+
+export function processIdentitiesComparable(recorded: string, observed: string): boolean {
+  return COMPARABLE_IDENTITY_FORMATS.some((format) => format.test(recorded) && format.test(observed))
+}
+
 const PS_ROW = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(\w+\s+\w+\s+\d+\s+[\d:]+\s+\d+)\s+(.*)$/
 
 export function parseProcessSnapshot(output: string): ProcessSnapshot {

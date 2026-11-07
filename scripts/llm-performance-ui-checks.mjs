@@ -40,6 +40,13 @@ export async function exerciseLlmPerformanceFinish(contents, win, screenshot, na
   }
   const modal = `document.querySelector('.llm-perf-modal')`
   const liveRow = `Array.from(${modal}.querySelectorAll('.llm-perf-mrow')).find(node => node.textContent.includes('pi-live-model'))`
+  // Guard the fixture scaffolding itself: a scrollable control strip hides part of its own
+  // buttons behind a macOS overlay scrollbar, which swallows the pointer events this campaign
+  // sends and makes the hit test report a product occlusion that does not exist.
+  if (!await read(`(() => {
+    const strip = document.querySelector('#performance-fixture-controls')
+    return strip.scrollWidth <= strip.clientWidth && strip.scrollHeight <= strip.clientHeight
+  })()`)) throw new Error('Fixture control strip scrolls, so its own buttons are not directly hit-testable')
   await click('#performance-group')
   await wait(`${liveRow}?.textContent.includes('0 + 3*') && ${liveRow}.querySelectorAll('.llm-perf-reading')[0].textContent === '40.0' && ${liveRow}.querySelectorAll('.llm-perf-reading')[1].textContent === '1.5'`)
   if (await read(`${modal}.querySelector('.llm-perf-run') != null`)) throw new Error('Running cards reappeared')

@@ -122,16 +122,40 @@ describe('daemon lock L1: PID reuse must not lock the daemon out', () => {
     expect(JSON.parse(readFileSync(join(directory, DAEMON_LOCK_NAME), 'utf8')).startedBy).toBe('this-boot')
   })
 
-  it('refuses to take over when the pid looks like this same daemon entry', async () => {
+  it('takes over when a comparable start identity proves the previous holder is gone', async () => {
     const directory = tempDir()
-    await acquireDaemonLock({ directory, startedBy: 'first', pid: 5003, lister: snapshot([[5003, 'Mon Jan  1 00:00:00 2026']]) })
-    // Start time differs but the command is our own entry: we cannot prove this is a
-    // different process, and two writers are worse than not starting.
+    // A lock whose recorded identity uses the platform's comparable format: macOS lstart
+    // comes from the kernel's absolute start time, so a different value is real evidence.
+    writeFileSync(join(directory, DAEMON_LOCK_NAME), `${JSON.stringify({
+      pid: 5003,
+      startedAt: 'Tue Feb  2 00:00:00 2026',
+      identityKey: '5003:Tue Feb  2 00:00:00 2026',
+      startedBy: 'previous-boot'
+    })}\n`)
+    const next = await acquireDaemonLock({
+      directory, startedBy: 'this-boot', pid: 5004,
+      lister: snapshot([
+        [5003, 'Tue Feb  2 00:00:01 2026', 'S', '/Applications/Scry.app/Contents/MacOS/Scry'],
+        [5004, 'Tue Feb  2 00:00:02 2026']
+      ])
+    })
+    expect(next.status).toBe('replaced-stale')
+    expect(next.status === 'replaced-stale' && next.reason).toBe('pid-reused')
+  })
+
+  it('refuses to take over a legacy record whose identity format cannot be compared', async () => {
+    const directory = tempDir()
+    writeFileSync(join(directory, DAEMON_LOCK_NAME), `${JSON.stringify({
+      pid: 5003,
+      startedAt: 'Mon Jan  1 00:00:00 2026',
+      identityKey: '',
+      startedBy: 'previous-boot'
+    })}\n`)
     const next = await acquireDaemonLock({
       directory, startedBy: 'second', pid: 5004,
       lister: snapshot([
-        [5003, 'Mon Jan  1 00:00:01 2026', 'S', '/Applications/Scry.app/Contents/MacOS/Scry'],
-        [5004, 'Tue Feb  2 00:00:01 2026']
+        [5003, 'Tue Feb  2 00:00:01 2026', 'S', '/Applications/Scry.app/Contents/MacOS/Scry'],
+        [5004, 'Tue Feb  2 00:00:02 2026']
       ]),
       daemonEntry: 'scry-daemon'
     })
