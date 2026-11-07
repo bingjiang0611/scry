@@ -261,6 +261,7 @@ export async function startRun(
         dockBadge,
         scopedSessionKey,
         renderer,
+        windowCanReceive: rendererCanReceive(),
         boundedLiveRun,
         releaseSessionBaseline,
         interruptedState,

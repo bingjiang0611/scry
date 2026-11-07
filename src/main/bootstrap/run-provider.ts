@@ -44,7 +44,8 @@ export interface RunProviderBootstrapDependencies {
   stopSignal?: AbortSignal
   requestUserInput?: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>
   // The submitter is the App, so questions are answered by the App's own broker.
-  appSemantics: boolean
+  /** Whether this Provider's questions are answered in the App window (see run-startup). */
+  askWindow: boolean
   permissionModeOverride?: AgentPermissionMode
   mcpExecutionSnapshot: McpExecutionSnapshot | null
   conversationStore: Pick<ConversationStore, 'assertManagedWriteAllowed'>
@@ -100,7 +101,7 @@ export function createRunProvider(deps: RunProviderBootstrapDependencies): () =>
     firstTextPerf,
     mainEventId,
     userQuestionBroker,
-    appSemantics,
+    askWindow,
     permissionModeOverride,
     mcpExecutionSnapshot,
     conversationStore,
@@ -187,7 +188,9 @@ export function createRunProvider(deps: RunProviderBootstrapDependencies): () =>
       },
       onExternalSessionId: publishSessionId,
       requestUserInput: async (question, signal) => {
-        if (appSemantics) return userQuestionBroker.request({ ...question, providerId }, signal)
+        // One decision, made where the run's venue is known: the window answers the
+        // App's own run; a daemon has none, so its questions go through the ledger.
+        if (askWindow) return userQuestionBroker.request({ ...question, providerId }, signal)
         if (!requestUserInput) throw new Error('remote_interactive_input_unsupported')
         const openedAtMs = Date.now()
         const remoteQuestion = { ...question, providerId, runId }
