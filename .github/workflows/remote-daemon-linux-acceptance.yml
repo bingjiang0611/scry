@@ -19,6 +19,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Prepare Electron binary
+        run: |
+          node node_modules/electron/install.js
+          test -x node_modules/electron/dist/electron
       - run: npm run build
       - name: Built daemon SIGKILL and exact Linux lease identity
         shell: bash
