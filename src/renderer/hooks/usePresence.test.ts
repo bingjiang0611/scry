@@ -92,6 +92,21 @@ describe('overlay presence lifecycle', () => {
     expect(p.onClose).toHaveBeenCalledOnce()
     expect(vi.getTimerCount()).toBe(0)
   })
+  it('never postpones removal past the ceiling measured from the close request', () => {
+    const p = mount(vi.fn(), 160)
+    p.requestClose('button')
+    // A renderer that keeps reporting animation starts cannot push removal past the ceiling:
+    // closeStart + (exitMs + 40) + 200 = 400ms here.
+    for (let step = 0; step < 3; step++) {
+      vi.advanceTimersByTime(100)
+      p.node.dispatchEvent(new Event('animationstart'))
+    }
+    vi.advanceTimersByTime(99)
+    expect(p.onClose).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    expect(p.onClose).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  })
   it('keeps the fallback bounded when the re-anchored animation end is dropped', () => {
     const p = mount(vi.fn(), 160)
     p.requestClose('button')
