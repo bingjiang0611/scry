@@ -258,8 +258,9 @@ export function useAppState() {
   const providerSendBlockedReason = !integrations.agentsHydrated
     ? COMPOSER_BLOCKED_COPY.scanning
     : !integrations.selectedAgent
-      // 没装 CLI 和 Pi Profile 失效的下一步不同：前者要装并登录，后者只能换目标。
-      ? selectedProvider === 'pi'
+      // 没装 CLI 和 Profile 失效的下一步不同：原生 Pi 缺的是 CLI 本身，
+      // 只有 pi:<profile> 这种 id 才是“Profile 失效”，需要换目标。
+      ? integrations.selectedId.startsWith('pi:')
         ? COMPOSER_BLOCKED_COPY.missingProfile(integrations.selectedId)
         : COMPOSER_BLOCKED_COPY.missingCli(selectedProvider ? PROVIDER_LABELS[selectedProvider] : integrations.selectedId)
       : integrations.selectedAgent.health?.state === 'unavailable'

@@ -331,7 +331,7 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
     expect(smallCostHtml).toContain('$0.0010')
     expect(smallCostHtml).toContain('style="flex-basis:100%"')
     // 成本未知不等于没有用量：Provider 行保留，金额显示“—”。
-    expect(unknownHtml).toContain('class="usage-provider-row"')
-    expect(unknownHtml).toMatch(/<strong title="[^"]*">—<\/strong>/)
+    const providerRowHtml = unknownHtml.split('class="usage-provider-row"')[1] ?? ''
+    expect(providerRowHtml).toMatch(/<strong title="[^"]*">—<\/strong>/)
   })
 })

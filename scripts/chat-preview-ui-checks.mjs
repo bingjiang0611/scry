@@ -166,6 +166,13 @@ export async function exerciseChatPreviewDom() {
   await waitFor(() => !agentMenu())
   check(document.activeElement === agentTrigger, 'Agent menu did not restore focus to its trigger')
   check(agentTrigger.getAttribute('aria-expanded') === 'false', 'Agent trigger still reports expanded after Escape')
+  // 选中一项后菜单会关闭，焦点不能落在被卸载的按钮上（会掉到 body）。
+  agentTrigger.click()
+  await waitFor(() => agentMenu()?.contains(document.activeElement))
+  const pickedItem = agentMenu().querySelector('[role="menuitem"]:not(:disabled)')
+  pickedItem.click()
+  await waitFor(() => !agentMenu())
+  check(document.activeElement === agentTrigger, 'Selecting an Agent option lost focus instead of returning it to the trigger')
   input.blur()
   const draft = input.value
   const enter = (options = {}) => {

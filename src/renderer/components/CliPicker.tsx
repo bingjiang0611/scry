@@ -87,6 +87,11 @@ export function CliPicker({
   useEffect(() => {
     if (disabled) setOpen(false)
   }, [disabled])
+  // 关闭菜单时把焦点从即将卸载的选项退回触发器，避免焦点落到 body。
+  const dismissMenu = (): void => {
+    if (pickerRef.current?.contains(document.activeElement)) buttonRef.current?.focus()
+    setOpen(false)
+  }
   // 与其他下拉菜单一致：打开后焦点进入选项，Esc 关闭并退回触发器。
   useEffect(() => {
     if (!open || disabled) return
@@ -98,8 +103,7 @@ export function CliPicker({
       if (event.key !== 'Escape') return
       event.preventDefault()
       event.stopPropagation()
-      setOpen(false)
-      buttonRef.current?.focus()
+      dismissMenu()
     }
     document.addEventListener('pointerdown', dismissOnOutsidePointer, true)
     document.addEventListener('keydown', dismissOnEscape)
@@ -135,7 +139,7 @@ export function CliPicker({
           className="menu climenu"
           role="menu"
           aria-label={AGENT_PICKER_COPY.menuLabel}
-          onMouseLeave={() => setOpen(false)}
+          onMouseLeave={dismissMenu}
           onKeyDown={(event) => moveMenuFocus(event, menuRef.current)}
         >
           <div className="cltitle" role="none">
@@ -156,7 +160,7 @@ export function CliPicker({
               disabled={unavailableIds?.has(a.id)}
               onClick={() => {
                 onSelect(a.id)
-                setOpen(false)
+                dismissMenu()
               }}
             >
               <span className="agicon">
@@ -179,7 +183,7 @@ export function CliPicker({
                 disabled={unavailableIds?.has(agent.id)}
                 onClick={() => {
                   onSelect(agent.id)
-                  setOpen(false)
+                  dismissMenu()
                 }}
               >
                 <span className="agicon"><ProviderGlyph provider="pi" /></span>
@@ -205,7 +209,7 @@ export function CliPicker({
           ))}
           {(onAddPi || onRescan) && <div className="mdiv" role="separator" />}
           {onAddPi && (
-            <button type="button" role="menuitem" className="mitem" onClick={() => { onAddPi(); setOpen(false) }}>
+            <button type="button" role="menuitem" className="mitem" onClick={() => { onAddPi(); dismissMenu() }}>
               <Icon name="plus" /> 添加 Pi Agent…
             </button>
           )}
