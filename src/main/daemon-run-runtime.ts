@@ -27,7 +27,9 @@ export interface DaemonRunRuntimeDeps {
 
 interface RunCursor {
   runId: string
-  context: DesktopRemoteContext
+  // Unknown until the daemon reports the bind, which is the only place it names the
+  // Provider and directory of a run this window did not start.
+  context?: DesktopRemoteContext
   lifecycle: string | null
   after?: DesktopTraceCursor
   // Canonical run id the daemon bound to this ledger run, once it said so.
@@ -63,11 +65,17 @@ export interface DaemonStartReceipt {
 
 // `bound` is the daemon's own marker, not a client guess; anything else in the
 // progress detail stays opaque.
-function boundRunId(detail: string): string | undefined {
+function boundMarker(detail: string): { scryRunId: string; cwd?: string; providerId?: string; agentProfileId?: string } | undefined {
   try {
-    const marker = JSON.parse(detail) as { event?: unknown; scryRunId?: unknown }
+    const marker = JSON.parse(detail) as Record<string, unknown>
     if (marker.event !== 'bound' || typeof marker.scryRunId !== 'string') return undefined
-    return /^run-[0-9a-z]{1,16}-[0-9]{1,12}$/.test(marker.scryRunId) ? marker.scryRunId : undefined
+    if (!/^run-[0-9a-z]{1,16}-[0-9]{1,12}$/.test(marker.scryRunId)) return undefined
+    return {
+      scryRunId: marker.scryRunId,
+      ...(typeof marker.cwd === 'string' && marker.cwd.length > 0 ? { cwd: marker.cwd } : {}),
+      ...(typeof marker.providerId === 'string' && marker.providerId.length > 0 ? { providerId: marker.providerId } : {}),
+      ...(typeof marker.agentProfileId === 'string' && marker.agentProfileId.length > 0 ? { agentProfileId: marker.agentProfileId } : {})
+    }
   } catch { return undefined }
 }
 
@@ -108,9 +116,32 @@ export class DaemonRunRuntime {
     return { ...receipt, runId: bound ?? receipt.runId, bound: bound !== undefined }
   }
 
+  /** Whether this window is already following the given ledger run. */
+  isTracking(runId: string): boolean { return this.#runs.has(runId) }
+
   /** The latest authoritative run state this window has read, per run id. */
   activeRuns(): ActiveRun[] {
     return [...this.#runs.values()].flatMap((cursor) => cursor.latest && !cursor.latest.done ? [cursor.latest] : [])
+  }
+
+  /**
+   * Subscribe to a run this window did not start (its own daemon restarted, or the
+   * run came from another client). The Provider and directory are learned from the
+   * daemon's bind, so one window is read before the trace can be addressed.
+   */
+  async adopt(runId: string): Promise<ActiveRun | null> {
+    if (!this.#runs.has(runId)) {
+      this.#runs.set(runId, {
+        runId, lifecycle: null, pushedItems: 0, askedQuestions: new Set(),
+        resyncRequired: false, pumping: false, stopped: false
+      })
+    }
+    const cursor = this.#runs.get(runId)!
+    if (cursor.latest) return cursor.latest
+    // One bounded read: the caller is answering a UI request, so it must not wait
+    // for a long poll to find out whether the run is still there.
+    await this.step(runId, { waitMs: 0 })
+    return cursor.latest ?? null
   }
 
   async #awaitBound(runId: string): Promise<string | undefined> {
@@ -181,7 +212,7 @@ export class DaemonRunRuntime {
   async #stepOnce(runId: string, options: { waitMs?: number } = {}): Promise<{ changed: boolean; lifecycle: string | null }> {
     const cursor = this.#runs.get(runId)
     if (!cursor) return { changed: false, lifecycle: null }
-    const trace = new PerformanceTrace('daemon.run.pump', { provider: cursor.context.providerId })
+    const trace = new PerformanceTrace('daemon.run.pump', cursor.context ? { provider: cursor.context.providerId } : {})
     let changed = false
     try {
       const watch = await this.#deps.transport.watch({
@@ -191,9 +222,19 @@ export class DaemonRunRuntime {
       if (watch.state !== cursor.lifecycle) { cursor.lifecycle = watch.state; changed = true }
       for (const entry of watch.events) {
         if (entry.kind !== 'run_progress' || entry.detail === undefined) continue
-        const bound = boundRunId(entry.detail)
-        if (bound !== undefined && cursor.scryRunId === undefined) cursor.scryRunId = bound
+        const bound = boundMarker(entry.detail)
+        if (!bound) continue
+        if (cursor.scryRunId === undefined) cursor.scryRunId = bound.scryRunId
+        // A run this window adopted has no context of its own; the daemon states it
+        // once, and only then can the trace be addressed.
+        if (cursor.context === undefined && bound.cwd !== undefined && bound.providerId !== undefined) {
+          cursor.context = {
+            cwd: bound.cwd, providerId: bound.providerId,
+            ...(bound.agentProfileId ? { agentProfileId: bound.agentProfileId } : {})
+          }
+        }
       }
+      if (cursor.context === undefined) return { changed, lifecycle: cursor.lifecycle }
       const read = await this.#deps.transport.trace({ context: cursor.context, runId, ...(cursor.after ? { after: cursor.after } : {}) })
       if (this.#apply(read, cursor)) changed = true
       await this.#publishQuestions(cursor)

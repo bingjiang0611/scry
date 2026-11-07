@@ -127,6 +127,20 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
     })
   })
 
+  it('adopts a live run this window did not start, using the bind to find its context', async () => {
+    const { runtime, sent } = fixture({
+      watch: [{
+        state: 'dispatched',
+        events: [{ runId: RUN, kind: 'run_progress', detail: JSON.stringify({ event: 'bound', ledgerRunId: RUN, scryRunId: 'run-abc-9', providerId: 'codex', cwd: '/elsewhere' }) }]
+      }],
+      trace: [{ kind: 'trace', run: { ...run([event('adopted')]), runId: 'run-abc-9' }, cursor: { revision: 'r1', count: 1 } }]
+    })
+    // No context is known up front: only the daemon's bind can address the trace.
+    await expect(runtime.adopt(RUN)).resolves.toMatchObject({ runId: 'run-abc-9' })
+    expect(deliveredEvents(sent).map((item) => item.text)).toEqual(['adopted'])
+    expect(runtime.isTracking(RUN)).toBe(true)
+  })
+
   it('stops polling a settled run instead of re-reading it forever', async () => {
     const watch: Array<{ state: string | null }> = [{ state: 'dispatched' }, { state: 'settled' }]
     const { runtime } = fixture({

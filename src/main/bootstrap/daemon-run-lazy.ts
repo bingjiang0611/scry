@@ -23,31 +23,61 @@ const FAILURE_STATUS = {
   unavailable: 'daemon_unavailable'
 } as const
 
-export function createLazyDaemonRunSurface(deps: DaemonRunModeDeps): LazyDaemonRunSurface {
+export function createLazyDaemonRunSurface(
+  deps: DaemonRunModeDeps,
+  createMode: (deps: DaemonRunModeDeps) => Promise<DaemonRunModeResult> = createDaemonRunMode
+): LazyDaemonRunSurface {
   let pending: Promise<DaemonRunModeResult> | undefined
-  const ensure = (): Promise<DaemonRunModeResult> => {
-    pending ??= createDaemonRunMode(deps)
+  const ensure = (reconnect = false): Promise<DaemonRunModeResult> => {
+    if (reconnect) {
+      // A daemon that stopped answering is replaced, not reused: its socket is gone
+      // and its runtime holds cursors into a dead connection.
+      pending = ensure().then((previous) => {
+        previous.dispose?.()
+        return createMode(deps)
+      })
+      return pending
+    }
+    pending ??= createMode(deps)
     return pending
   }
-  const surface = async (): Promise<DaemonRunSurface> => {
-    const result = await ensure()
+  const surface = async (reconnect = false): Promise<DaemonRunSurface> => {
+    const result = await ensure(reconnect)
     if (result.status === 'ready' && result.surface) return result.surface
     // The reason travels as a machine code so the UI can explain it; the daemon's
     // own words are never invented here.
     const code = FAILURE_STATUS[result.status as keyof typeof FAILURE_STATUS] ?? 'daemon_unavailable'
     throw new Error(result.reason ? `${code}:${result.reason}` : code)
   }
+  // One reconnect per call. Re-submitting is safe because an intent id is the
+  // daemon's idempotency key, and a read has no effect to replay at all.
+  const call = async <T>(invoke: (value: DaemonRunSurface) => Promise<T>): Promise<T> => {
+    try {
+      return await invoke(await surface())
+    } catch (error) {
+      if (!isDaemonGone(error)) throw error
+      return await invoke(await surface(true))
+    }
+  }
   return {
     ready: ensure,
-    async start(payload: AgentStartRequest): Promise<AgentStartResult> { return (await surface()).start(payload) },
-    async activeRun(): Promise<ActiveRun | null> { return (await surface()).activeRun() },
-    async activeRuns(): Promise<ActiveRun[]> { return (await surface()).activeRuns() },
-    async focusedRunSnapshot(): Promise<ActiveRun | null> { return (await surface()).focusedRunSnapshot() },
-    async focusRun(runId: string | null): Promise<boolean> { return (await surface()).focusRun(runId) },
-    async stop(runId: string): Promise<boolean> { return (await surface()).stop(runId) },
-    async answerQuestion(response: AgentQuestionResponse): Promise<boolean> { return (await surface()).answerQuestion(response) },
-    async ack(receipt: TraceBatchReceipt): Promise<boolean> { return (await surface()).ack(receipt) },
-    async resynchronized(): Promise<true> { return (await surface()).resynchronized() },
+    start(payload: AgentStartRequest): Promise<AgentStartResult> { return call((value) => value.start(payload)) },
+    activeRun(): Promise<ActiveRun | null> { return call((value) => value.activeRun()) },
+    activeRuns(): Promise<ActiveRun[]> { return call((value) => value.activeRuns()) },
+    focusedRunSnapshot(): Promise<ActiveRun | null> { return call((value) => value.focusedRunSnapshot()) },
+    focusRun(runId: string | null): Promise<boolean> { return call((value) => value.focusRun(runId)) },
+    stop(runId: string): Promise<boolean> { return call((value) => value.stop(runId)) },
+    answerQuestion(response: AgentQuestionResponse): Promise<boolean> { return call((value) => value.answerQuestion(response)) },
+    ack(receipt: TraceBatchReceipt): Promise<boolean> { return call((value) => value.ack(receipt)) },
+    resynchronized(): Promise<true> { return call((value) => value.resynchronized()) },
     dispose(): void { void ensure().then((result) => result.dispose?.(), () => undefined) }
   }
+}
+
+// A daemon that is gone answers nothing: the transport cannot reach the socket, or
+// the daemon says it does not know the run. The former is worth one reconnect; the
+// latter is an answer.
+function isDaemonGone(error: unknown): boolean {
+  const reason = (error as { reason?: unknown } | null)?.reason
+  return reason === 'daemon_not_running'
 }

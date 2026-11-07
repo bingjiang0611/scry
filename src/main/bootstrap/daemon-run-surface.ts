@@ -87,7 +87,16 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
       if (runs.length === 0) return null
       return runs.find((run) => run.runId === focusedRunId) ?? null
     },
-    async activeRuns() { return runtime.activeRuns() },
+    async activeRuns() {
+      // A run this window did not start still belongs on screen: the daemon is the
+      // one authority on what is live, so its list decides, not our bookkeeping.
+      const live = await deps.transport.liveRuns({ waitMs: 0 })
+      for (const entry of live.runs) {
+        if (runtime.isTracking(entry.runId)) continue
+        await runtime.adopt(entry.runId)
+      }
+      return runtime.activeRuns()
+    },
     async focusedRunSnapshot() {
       const runs = runtime.activeRuns()
       return runs.find((run) => run.runId === focusedRunId) ?? null
