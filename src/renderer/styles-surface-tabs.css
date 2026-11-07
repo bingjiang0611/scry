@@ -176,11 +176,11 @@
   background: color-mix(in srgb, var(--panel2) 97%, transparent);
   box-shadow: var(--shadow-pop);
   transform-origin: top right;
-  animation: surface-menu-in var(--dur-fast) var(--ease-out) backwards;
+  animation: surface-menu-in var(--duration-sm) var(--ease-out) backwards;
 }
 .surface-menu[data-state='exit'] {
   pointer-events: none;
-  animation: overlay-menu-out 100ms linear both;
+  animation: overlay-menu-out var(--duration-exit-sm) var(--ease-in) both;
 }
 
 @keyframes surface-menu-in {
@@ -291,7 +291,7 @@
   background: var(--panel2);
   color: var(--fg);
   text-align: left;
-  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
+  transition: border-color var(--duration-hover) var(--ease-out), background-color var(--duration-hover) var(--ease-out);
 }
 
 .surface-card .card-icon {

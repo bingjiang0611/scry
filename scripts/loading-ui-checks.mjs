@@ -80,7 +80,7 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
           state.shifted ||= Math.abs(drift)>1
         }
       }
-      state.replacement ||= document.getAnimations().some(a=>a.id==='scry-structure' && a.effect.getTiming().duration===180 && a.effect.getKeyframes().every(frame=>!('transform' in frame)))
+      state.replacement ||= document.getAnimations().some(a=>a.id==='scry-structure' && a.effect.getTiming().duration===400 && a.effect.getKeyframes().every(frame=>!('transform' in frame)))
     }
     window.__loadingObserver=new MutationObserver(mutations => {
       // Include transient insertions: polling the current DOM cannot disprove a flash.
@@ -122,7 +122,7 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
     return result
   }
   const fast = await measured('cache-b', 60)
-  check(!fast.seen && fast.replacement, `60ms read flashed the session-history status or lost the 180ms replacement: ${JSON.stringify(fast)}`)
+  check(!fast.seen && fast.replacement, `60ms read flashed the session-history status or lost the 400ms replacement: ${JSON.stringify(fast)}`)
   const slow = await measured('cache-a', 1000)
   check(slow.seen, `slow session read never showed the standard loading status: ${JSON.stringify(slow)}`)
   const failed = await measured('cache-b', 1000, true)

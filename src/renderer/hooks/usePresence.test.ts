@@ -78,11 +78,64 @@ describe('overlay presence lifecycle', () => {
     p.node.dispatchEvent(new Event('animationend'))
     expect(p.onClose).toHaveBeenCalledOnce()
   })
-  it('uses 120ms + 40 under reduced motion', () => {
+  it('re-anchors the fallback at the real animation start instead of deleting mid-animation', () => {
+    const p = mount(vi.fn(), 160)
+    p.requestClose('button')
+    // A stalled main thread delivers animationstart long after the state change.
+    vi.advanceTimersByTime(80)
+    p.node.dispatchEvent(new Event('animationstart'))
+    vi.advanceTimersByTime(199)
+    expect(p.onClose).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(1)
+    // animationend still finishes first once the compositor completes the exit.
+    p.node.dispatchEvent(new Event('animationend'))
+    expect(p.onClose).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+  it('never postpones removal past the ceiling measured from the close request', () => {
+    const p = mount(vi.fn(), 160)
+    p.requestClose('button')
+    // A renderer that keeps reporting animation starts cannot push removal past the ceiling:
+    // closeStart + (exitMs + 40) + 200 = 400ms here.
+    for (let step = 0; step < 3; step++) {
+      vi.advanceTimersByTime(100)
+      p.node.dispatchEvent(new Event('animationstart'))
+    }
+    vi.advanceTimersByTime(99)
+    expect(p.onClose).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    expect(p.onClose).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+  it('keeps the fallback bounded when the re-anchored animation end is dropped', () => {
+    const p = mount(vi.fn(), 160)
+    p.requestClose('button')
+    vi.advanceTimersByTime(60)
+    p.node.dispatchEvent(new Event('animationstart'))
+    vi.advanceTimersByTime(199)
+    expect(p.onClose).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    expect(p.onClose).toHaveBeenCalledOnce()
+  })
+  it('ignores a descendant animation start and a repeated parent start', () => {
+    const p = mount(vi.fn(), 160)
+    p.requestClose('button')
+    const descendantStart = new Event('animationstart')
+    Object.defineProperty(descendantStart, 'target', { value: new PresenceNode() })
+    p.node.dispatchEvent(descendantStart)
+    vi.advanceTimersByTime(150)
+    expect(p.onClose).not.toHaveBeenCalled()
+    p.node.dispatchEvent(new Event('animationstart'))
+    vi.advanceTimersByTime(199)
+    expect(p.onClose).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    expect(p.onClose).toHaveBeenCalledOnce()
+  })
+  it('uses 150ms + 40 under reduced motion', () => {
     media.matches = true
     const p = mount()
     p.requestClose('escape')
-    vi.advanceTimersByTime(159)
+    vi.advanceTimersByTime(189)
     expect(p.onClose).not.toHaveBeenCalled()
     vi.advanceTimersByTime(1)
     expect(p.onClose).toHaveBeenCalledOnce()
@@ -94,6 +147,7 @@ describe('overlay presence lifecycle', () => {
     p.requestClose('button'); p.unmount()
     expect(vi.getTimerCount()).toBe(0)
     expect(removeNode).toHaveBeenCalledWith('animationend', expect.any(Function))
+    expect(removeNode).toHaveBeenCalledWith('animationstart', expect.any(Function))
     expect(removeDocument).toHaveBeenCalledWith('pointerdown', expect.any(Function), true)
     expect(removeDocument).toHaveBeenCalledWith('keydown', expect.any(Function), true)
     p.node.dispatchEvent(new Event('animationend'))

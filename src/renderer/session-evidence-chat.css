@@ -196,7 +196,7 @@
   margin: 7px 0 0;
   padding: 6px 8px;
   border: 1px solid var(--border3);
-  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
+  transition: border-color var(--duration-hover) var(--ease-out), background-color var(--duration-hover) var(--ease-out);
 }
 
 .chat-body .tool-card::before { display: none; }

@@ -48,7 +48,7 @@ describe('live structural motion', () => {
     let committed = false
     runStructuralTransition('page', () => { expect(flush.active).toBe(true); committed = true })
     expect(committed).toBe(true)
-    expect(f.timings[0].duration).toBe(240)
+    expect(f.timings[0].duration).toBe(400)
     expect(f.frames[0][0].transform).toBe('translateY(6px)')
   })
   it('cancels the previous animation without undoing either commit; theme is immediate', () => {
@@ -58,7 +58,7 @@ describe('live structural motion', () => {
     runStructuralTransition('session', () => { commits.push('session') })
     expect(f.animations[0].cancel).toHaveBeenCalledOnce()
     expect(f.media.removeEventListener).toHaveBeenCalledOnce()
-    expect(f.timings[1].duration).toBe(180)
+    expect(f.timings[1].duration).toBe(400)
     expect(f.frames[1]).toEqual([{ opacity: 0 }, { opacity: 1 }])
     runStructuralTransition('theme', () => { commits.push('theme') })
     expect(f.animations).toHaveLength(2)
@@ -73,11 +73,11 @@ describe('live structural motion', () => {
     expect(f.animations[0].cancel).toHaveBeenCalledOnce()
     expect(f.media.removeEventListener).toHaveBeenCalledOnce()
   })
-  it('uses only 120ms linear opacity under reduced motion and cleans up after finish', async () => {
+  it('uses only 150ms eased opacity under reduced motion and cleans up after finish', async () => {
     const f = fixture(true)
     runStructuralTransition('page', () => {})
     expect(f.frames[0]).toEqual([{ opacity: 0 }, { opacity: 1 }])
-    expect(f.timings[0]).toEqual({ duration: 120, easing: 'linear' })
+    expect(f.timings[0]).toEqual({ duration: 150, easing: 'cubic-bezier(0, 0, 0.58, 1)' })
     f.animations[0].finish()
     await f.animations[0].finished
     expect(f.media.removeEventListener).toHaveBeenCalledOnce()

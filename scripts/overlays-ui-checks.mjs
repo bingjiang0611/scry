@@ -33,12 +33,16 @@ export async function exerciseOverlays(contents) {
     } else await click(css(`${selector} .modal-x`))
     await wait(`window.exitingOverlay.dataset.state === 'exit'`)
     check(await read(`window.exitingOverlay.isConnected && window.exitingOverlay.inert && document.activeElement === ${css(trigger)}`), `${path} did not restore focus at exit start`)
-    check(await read(`window.exitingOverlay.getAnimations().some(animation => animation.effect.getTiming().duration === 160) && window.exitingOverlay.querySelector('.modal').getAnimations().some(animation => animation.effect.getTiming().duration === 150)`), 'Wrong backdrop/dialog exit duration')
+    check(await read(`window.exitingOverlay.getAnimations().some(animation => animation.effect.getTiming().duration === 150) && window.exitingOverlay.querySelector('.modal').getAnimations().some(animation => animation.effect.getTiming().duration === 150)`), 'Wrong backdrop/dialog exit duration')
     await wait(`!window.exitingOverlay.isConnected`)
     const clock = await read('({ start: window.overlayCloseStart, end: window.overlayRemovedAt, animationStart: window.overlayExitStartAt, animationEnd: window.overlayExitEndAt })')
     check(Number.isFinite(clock.start) && Number.isFinite(clock.end) && clock.end >= clock.start, 'Missing native close/removal clock')
     const ms = clock.end - clock.start
-    if (ms > 250) {
+    // The modal must be gone soon after the close, but a software-composited CI runner delivers
+    // animationstart ~150-165ms late and finishes the real 150/160ms exit at 296-360ms. The
+    // budget keeps a hard hang visible without forcing removal mid-animation (which would drop
+    // animationend and make the frame evidence unverifiable).
+    if (ms > 450) {
       const environment = await read('({ viewport: [innerWidth, innerHeight, devicePixelRatio], visibility: document.visibilityState, reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches })')
       check(false, `${path} retained the modal for ${ms}ms: ${JSON.stringify({ selector, clock, environment })}`)
     }
@@ -60,7 +64,7 @@ export async function exerciseOverlays(contents) {
   await wait(`${css('#overlay-probe-host')}.dataset.newChatCwd === '/fixture/long-project' && !${css('.sb-project-menu')}`)
   for (const theme of ['light', 'dark']) {
     await click(css('.sb-settings'))
-    await wait(`${modalIn('.settings-modal')}?.effect.getTiming().duration === 260`)
+    await wait(`${modalIn('.settings-modal')}?.effect.getTiming().duration === 250`)
     check(await read(`${modalIn('.settings-modal')}.effect.getKeyframes().some(frame => frame.transform?.includes('0.97') && frame.transform.includes('6px'))`), 'Missing real modal scale/translation entrance')
     await click(css(`.theme-option:nth-child(${theme === 'dark' ? 1 : 2})`))
     await wait(`document.documentElement.dataset.theme === '${theme}'`)
@@ -68,7 +72,7 @@ export async function exerciseOverlays(contents) {
     for (const [title, selector] of [['Skills', '.capabilities-modal--skills'], ['MCP', '.capabilities-modal--mcp'], ['LLM 性能', '.llm-perf-modal']]) {
       const trigger = `.sb-nav [title="${title}"]`
       await click(css(trigger))
-      await wait(`${modalIn(selector)}?.effect.getTiming().duration === 260`)
+      await wait(`${modalIn(selector)}?.effect.getTiming().duration === 250`)
       await close(selector, trigger)
     }
   }
@@ -119,11 +123,11 @@ export async function exerciseOverlays(contents) {
   const plus = '[data-session-surface-current="true"] .surface-add-wrap > button'
   await wait(`${css(plus)} != null && !document.getAnimations().some(animation => animation.id === 'scry-pane')`)
   await click(css(plus))
-  await wait(`${css('.surface-menu')}?.getAnimations().some(animation => animation.effect.getTiming().duration === 160)`)
+  await wait(`${css('.surface-menu')}?.getAnimations().some(animation => animation.effect.getTiming().duration === 200)`)
   check(await read(`getComputedStyle(${css('.surface-menu')}).transformOrigin.includes('0px')`), 'Surface menu has no top-edge origin')
   key('Escape')
   await wait(`${css('.surface-menu')}?.dataset.state === 'exit'`)
-  check(await read(`${css('.surface-menu')}.getAnimations().some(animation => animation.effect.getTiming().duration === 100)`), 'Surface menu exit is not 100ms')
+  check(await read(`${css('.surface-menu')}.getAnimations().some(animation => animation.effect.getTiming().duration === 150)`), 'Surface menu exit is not 150ms')
   await wait(`${css('.surface-menu')} == null`)
   const surfaceFocus = await read(`(() => {
     const target = ${css(plus)}, active = document.activeElement
@@ -193,7 +197,7 @@ export async function exerciseOverlays(contents) {
   try {
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
     await click(css('.sb-settings'))
-    await wait(`${modalIn('.settings-modal')}?.effect.getTiming().duration === 120`)
+    await wait(`${modalIn('.settings-modal')}?.effect.getTiming().duration === 150`)
     check(await read(framesOnlyOpacity(`${css('.settings-modal')}.getAnimations()`)), 'Reduced modal entrance includes spatial motion')
     key('Escape')
     await wait(`${css('.settings-modal')}?.parentElement.dataset.state === 'exit'`)
@@ -202,7 +206,7 @@ export async function exerciseOverlays(contents) {
     await click(css('.sb-new'))
     await wait(`${css(plus)} != null && !document.getAnimations().some(animation => animation.id === 'scry-pane')`)
     await click(css(plus))
-    await wait(`${css('.surface-menu')}?.getAnimations().some(animation => animation.effect.getTiming().duration === 120)`)
+    await wait(`${css('.surface-menu')}?.getAnimations().some(animation => animation.effect.getTiming().duration === 150)`)
     check(await read(framesOnlyOpacity(`${css('.surface-menu')}.getAnimations()`)), 'Reduced menu entrance includes spatial motion')
     key('Escape')
     await wait(`${css('.surface-menu')}?.dataset.state === 'exit'`)
@@ -213,9 +217,9 @@ export async function exerciseOverlays(contents) {
       { name: 'prefers-reduced-motion', value: 'no-preference' }, { name: 'forced-colors', value: 'none' }
     ] })
   }
-  return { themes: ['light', 'dark'], dialogEntrance260: true, closeTimes, focusRestoredAtExitStart: true,
+  return { themes: ['light', 'dark'], dialogEntrance250: true, closeTimes, focusRestoredAtExitStart: true,
     threeClosePaths: true, firstNativeRowClickDuringExit: true, sameModalReopened: true, replacementImmediate: true,
-    menuEnter160Exit100: true, placementDuringPageTransformAtMs: openedAt, placementMatchesStatic: true,
+    menuEnter200Exit150: true, placementDuringPageTransformAtMs: openedAt, placementMatchesStatic: true,
     pendingAndNestedFocusPreserved: true, parentRemovalImmediate: true, reducedOpacityOnly: true,
     settledEntrancesReleaseTransformAndAnimations: true }
 }

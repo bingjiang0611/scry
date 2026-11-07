@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { usePresence } from '../hooks/usePresence'
+import { MOTION } from '../motion'
 
 const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
@@ -7,7 +8,7 @@ export function useDisclosurePresence(open: boolean) {
   const [present, setPresent] = useState(open)
   const latestOpen = useRef(open)
   latestOpen.current = open
-  const presence = usePresence({ exitMs: 160, onClose: () => { if (!latestOpen.current) setPresent(false) } })
+  const presence = usePresence({ exitMs: MOTION.durationExitSm, onClose: () => { if (!latestOpen.current) setPresent(false) } })
   useBrowserLayoutEffect(() => {
     if (open) { presence.reset(); setPresent(true) }
     else if (present) presence.requestClose('replace')

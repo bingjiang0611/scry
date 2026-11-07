@@ -30,7 +30,7 @@ export function useTabIndicator(container: RefObject<HTMLElement>, selected: str
     geometry.current = next
     if (animate && !prefersReducedMotion()) {
       animation.current = indicator.animate([{ transform: from }, { transform }], {
-        id: 'scry-tab-indicator', duration: MOTION.durBase, easing: MOTION.easeStruct
+        id: 'scry-tab-indicator', duration: MOTION.durationSm, easing: MOTION.easeInOut
       })
     }
   }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type RefCallback } from 'react'
 import { flushSync } from 'react-dom'
-import { prefersReducedMotion } from '../motion'
+import { MOTION, prefersReducedMotion } from '../motion'
 
 export type PresenceState = 'enter' | 'exit'
 export type PresenceCloseReason = 'button' | 'escape' | 'backdrop' | 'pointer' | 'replace' | 'confirm'
@@ -10,6 +10,11 @@ type PresenceOptions = {
   exitMs: number
   onExitStart?: () => void
 }
+
+// Extra allowance after exitMs + 40 for a late animation start on a frame-starved renderer.
+// The packaged overlay check allows 450ms from close for a 160ms exit, so keep 50ms of slack
+// for the late timer itself instead of spending the whole budget on the ceiling.
+const exitCeilingMs = 200
 
 const pendingExits = new Set<() => void>()
 
@@ -74,15 +79,35 @@ export function usePresence({ onClose, exitMs, onExitStart }: PresenceOptions): 
     if (node) { node.dataset.state = 'exit'; node.inert = true }
     setState('exit')
     onExitStartRef.current?.()
+    const fallbackMs = (prefersReducedMotion() ? MOTION.durationReduced : exitMs) + 40
+    // An exit that never reports animationend still has to be removed. The ceiling is measured
+    // from the close request, so following a late animation start can never postpone removal
+    // past it; that keeps slow or frame-starved renderers bounded instead of hanging.
+    const closeStart = Date.now()
+    const armFallback = (): void => {
+      clearTimeout(timer.current)
+      const remaining = Math.max(0, Math.min(fallbackMs, closeStart + fallbackMs + exitCeilingMs - Date.now()))
+      timer.current = setTimeout(finish, remaining)
+    }
     const onAnimationEnd = (event: AnimationEvent): void => {
       if (event.target === node) finish()
     }
+    // A busy main thread can start the exit animation dozens of milliseconds after the state
+    // change. Re-anchoring the fallback at the real animation start preserves the full exit
+    // duration instead of deleting the node mid-animation, and animationend still wins first.
+    const onAnimationStart = (event: AnimationEvent): void => {
+      if (event.target === node) armFallback()
+    }
     node?.addEventListener('animationend', onAnimationEnd)
-    removeAnimationListener.current = () => node?.removeEventListener('animationend', onAnimationEnd)
-    // The fallback only runs when animationend never arrives (dropped or late
-    // compositor frames). It must leave real headroom inside the 250ms modal
-    // removal budget: at +80 a loaded machine missed it by 1-2ms on every close.
-    timer.current = setTimeout(finish, (prefersReducedMotion() ? 120 : exitMs) + 40)
+    node?.addEventListener('animationstart', onAnimationStart)
+    removeAnimationListener.current = () => {
+      node?.removeEventListener('animationend', onAnimationEnd)
+      node?.removeEventListener('animationstart', onAnimationStart)
+    }
+    // The fallback only runs when animationend never arrives (dropped or late compositor
+    // frames). It has to leave real headroom for the animation itself: a software-composited
+    // CI runner delivered animationstart ~165ms after the close and finished at ~296ms.
+    armFallback()
     if (pendingExits.size === 0) {
       document.addEventListener('pointerdown', onNextInteraction, true)
       document.addEventListener('keydown', onNextInteraction, true)
