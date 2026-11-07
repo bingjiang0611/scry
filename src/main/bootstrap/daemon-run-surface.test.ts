@@ -25,6 +25,7 @@ function surface(overrides: Partial<DaemonRunTransport> & { live?: ActiveRun[] }
   } as unknown as DaemonRunTransport
   const runtime = {
     activeRuns: () => (overrides.live ?? []),
+    runView: (runId: string) => (overrides.live ?? []).find((entry) => entry.runId === runId) ?? null,
     isTracking: () => true,
     adopt: vi.fn(async () => undefined)
   } as unknown as DaemonRunRuntime
@@ -98,6 +99,22 @@ describe('daemon run surface controls', () => {
     expect(frames[0]).toEqual({ method: 'adopt', runId: 'run-abc-1' })
     // Adopting is a view decision: the focused read now answers with that run.
     await expect(value.focusedRunSnapshot()).resolves.toMatchObject({ runId: 'run-abc-1' })
+  })
+
+  it('keeps the focused run readable after it finished', async () => {
+    // `agent:activeRun` answers null for a finished run; `agent:focusedRunSnapshot`
+    // exists precisely to still hand back the whole event list afterwards, so the
+    // renderer can re-align when it skipped the terminal event.
+    const finished = { ...run('remote-run-abc-1'), done: true }
+    const transport = {} as unknown as DaemonRunTransport
+    const runtime = {
+      activeRuns: () => [],
+      runView: (runId: string) => runId === 'remote-run-abc-1' ? finished : null
+    } as unknown as DaemonRunRuntime
+    const value = createDaemonRunSurface({ transport, runtime, currentCwd: () => '/w' })
+    await value.focusRun('remote-run-abc-1')
+    await expect(value.activeRun()).resolves.toBeNull()
+    await expect(value.focusedRunSnapshot()).resolves.toMatchObject({ runId: 'remote-run-abc-1', done: true })
   })
 
   it('reports a run the daemon no longer knows as absent, not as adopted', async () => {

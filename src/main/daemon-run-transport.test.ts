@@ -64,12 +64,34 @@ describe('daemon run transport', () => {
     await expect(value.stop(RUN)).rejects.toMatchObject({ reason: 'daemon_stop_not_confirmed' })
   })
 
+  it('reads the daemon receipt an accepted answer really returns', async () => {
+    // The daemon answers with its ledger receipt ({status}), not a bare `true`.
+    const accepted = transport(() => ({ answer: { status: 'answered' } }))
+    await expect(accepted.value.answerQuestion({
+      runId: RUN, answerId: 'q1',
+      response: { runId: RUN, questionId: 'q1', behavior: 'answered', answers: {} }
+    })).resolves.toBe(true)
+    // A receipt the App cannot read is still not a delivery.
+    const unreadable = transport(() => ({ answer: { status: 'unknown' } })).value
+    await expect(unreadable.answerQuestion({
+      runId: RUN, answerId: 'q1',
+      response: { runId: RUN, questionId: 'q1', behavior: 'answered', answers: {} }
+    })).rejects.toMatchObject({ reason: 'daemon_answer_not_delivered' })
+  })
+
   it('keeps an undelivered answer visible', async () => {
     const { value } = transport(() => ({ answer: false }))
     await expect(value.answerQuestion({
       runId: RUN, answerId: 'q1',
       response: { runId: RUN, questionId: 'q1', behavior: 'answered', answers: {} }
     })).rejects.toMatchObject({ reason: 'daemon_answer_not_delivered' })
+  })
+
+  it('declares its live-run read replayable so a dead daemon can be retried', async () => {
+    const { value, calls } = transport(() => ({ liveRuns: { revision: 'r1', runs: [] } }))
+    await value.liveRuns({ waitMs: 0 })
+    // A read changes nothing; only a write may never be replayed.
+    expect(calls[0]!.options).toEqual({ replayable: true })
   })
 
   it('never reports an empty paged read as complete content', async () => {

@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+import { MAC_RUN_ID } from './remote/desktop-client-validation'
 import { PerformanceTrace } from './performance-timing'
 import { TraceOutputBridge } from './trace-output'
 import type { AgentQuestionResponse } from '../shared/runtime'
@@ -37,6 +39,9 @@ interface RunCursor {
   latest?: ActiveRun
   pushedItems: number
   askedQuestions: Set<string>
+  // The daemon dedupes an answer by its own id, so one is minted per question and
+  // reused when the same answer is retried.
+  answerIds: Map<string, string>
   resyncRequired: boolean
   pumping: boolean
   stopped: boolean
@@ -65,12 +70,16 @@ export interface DaemonStartReceipt {
 
 // `bound` is the daemon's own marker, not a client guess; anything else in the
 // progress detail stays opaque.
-function boundMarker(detail: string): { scryRunId: string; cwd?: string; providerId?: string; agentProfileId?: string } | undefined {
+function boundMarker(detail: string): { ledgerRunId?: string; scryRunId: string; cwd?: string; providerId?: string; agentProfileId?: string } | undefined {
   try {
     const marker = JSON.parse(detail) as Record<string, unknown>
     if (marker.event !== 'bound' || typeof marker.scryRunId !== 'string') return undefined
-    if (!/^run-[0-9a-z]{1,16}-[0-9]{1,12}$/.test(marker.scryRunId)) return undefined
+    // The daemon's canonical id for a run it dispatches itself (a device's, or the
+    // App's) is `remote-run-...`; a locally started one is `run-...`. Both are the
+    // same shape the device client accepts, so that pattern decides here too.
+    if (!MAC_RUN_ID.test(marker.scryRunId)) return undefined
     return {
+      ...(typeof marker.ledgerRunId === 'string' && marker.ledgerRunId.length > 0 ? { ledgerRunId: marker.ledgerRunId } : {}),
       scryRunId: marker.scryRunId,
       ...(typeof marker.cwd === 'string' && marker.cwd.length > 0 ? { cwd: marker.cwd } : {}),
       ...(typeof marker.providerId === 'string' && marker.providerId.length > 0 ? { providerId: marker.providerId } : {}),
@@ -105,7 +114,7 @@ export class DaemonRunRuntime {
     if (!this.#runs.has(receipt.runId)) {
       this.#runs.set(receipt.runId, {
         runId: receipt.runId, context: input.context, lifecycle: 'recorded',
-        pushedItems: 0, askedQuestions: new Set(), resyncRequired: false, pumping: false, stopped: false
+        pushedItems: 0, askedQuestions: new Set(), answerIds: new Map(), resyncRequired: false, pumping: false, stopped: false
       })
     }
     void this.pump(receipt.runId)
@@ -118,6 +127,20 @@ export class DaemonRunRuntime {
 
   /** Whether this window is already following the given ledger run. */
   isTracking(runId: string): boolean { return this.#runs.has(runId) }
+
+  /**
+   * The last authoritative view of one run, finished or not; `null` means unseen.
+   * Accepts either id: the window focuses a run by the canonical id its trace carries,
+   * while this map is keyed by the ledger id the run was submitted under.
+   */
+  runView(runId: string): ActiveRun | null { return this.#cursorFor(runId)?.latest ?? null }
+
+  #cursorFor(runId: string): RunCursor | undefined {
+    for (const cursor of this.#runs.values()) {
+      if (cursor.runId === runId || cursor.scryRunId === runId || cursor.latest?.runId === runId) return cursor
+    }
+    return undefined
+  }
 
   /** The latest authoritative run state this window has read, per run id. */
   activeRuns(): ActiveRun[] {
@@ -132,7 +155,7 @@ export class DaemonRunRuntime {
   async adopt(runId: string): Promise<ActiveRun | null> {
     if (!this.#runs.has(runId)) {
       this.#runs.set(runId, {
-        runId, lifecycle: null, pushedItems: 0, askedQuestions: new Set(),
+        runId, lifecycle: null, pushedItems: 0, askedQuestions: new Set(), answerIds: new Map(),
         resyncRequired: false, pumping: false, stopped: false
       })
     }
@@ -185,8 +208,10 @@ export class DaemonRunRuntime {
   }
 
   async stop(runId: string): Promise<boolean> {
-    await this.#deps.transport.stop(runId)
-    const cursor = this.#runs.get(runId)
+    // The window names the run it shows (the canonical id); the daemon stops and
+    // questions the ledger run that id was dispatched under.
+    const cursor = this.#cursorFor(runId)
+    await this.#deps.transport.stop(cursor?.runId ?? runId)
     if (cursor) cursor.lifecycle = 'stopping'
     return true
   }
@@ -194,8 +219,16 @@ export class DaemonRunRuntime {
   async answerQuestion(response: AgentQuestionResponse): Promise<boolean> {
     // The daemon names a pending question by its own id; the renderer's answer
     // carries exactly that id and never invents one.
-    const answered = await this.#deps.transport.answerQuestion({ runId: response.runId, answerId: response.questionId, response })
-    const cursor = this.#runs.get(response.runId)
+    // The renderer answers with the id it was shown, which is the canonical run id the
+    // Provider used; the daemon names pending questions by its own ledger run.
+    const cursor = this.#cursorFor(response.runId)
+    // The answer travels inside the request, so it speaks the same id the daemon knows:
+    // its broker refuses a response naming a different run.
+    const ledgerRunId = cursor?.runId ?? response.runId
+    const answerId = cursor?.answerIds.get(response.questionId) ?? randomUUID()
+    const answered = await this.#deps.transport.answerQuestion({
+      runId: ledgerRunId, answerId, response: { ...response, runId: ledgerRunId }
+    })
     cursor?.askedQuestions.delete(response.questionId)
     return answered
   }
@@ -224,6 +257,10 @@ export class DaemonRunRuntime {
         if (entry.kind !== 'run_progress' || entry.detail === undefined) continue
         const bound = boundMarker(entry.detail)
         if (!bound) continue
+        // The watch is per context, so it also replays how other runs in this workspace
+        // were bound. A marker decides the binding of the run it names, or the window
+        // ends up showing, answering and stopping a run it never started.
+        if (bound.ledgerRunId !== undefined && bound.ledgerRunId !== cursor.runId) continue
         if (cursor.scryRunId === undefined) cursor.scryRunId = bound.scryRunId
         // A run this window adopted has no context of its own; the daemon states it
         // once, and only then can the trace be addressed.
@@ -235,7 +272,11 @@ export class DaemonRunRuntime {
         }
       }
       if (cursor.context === undefined) return { changed, lifecycle: cursor.lifecycle }
-      const read = await this.#deps.transport.trace({ context: cursor.context, runId, ...(cursor.after ? { after: cursor.after } : {}) })
+      // The trace is addressed by the canonical id its events carry. The ledger id the
+      // watch polls uses is a different id and finds no run there.
+      const read = await this.#deps.transport.trace({
+        context: cursor.context, runId: cursor.scryRunId ?? runId, ...(cursor.after ? { after: cursor.after } : {})
+      })
       if (this.#apply(read, cursor)) changed = true
       await this.#publishQuestions(cursor)
       if (watch.state === 'settled' || watch.state === 'failed' || watch.state === 'cancelled') cursor.stopped = true
@@ -297,12 +338,16 @@ export class DaemonRunRuntime {
     for (const request of pending) {
       if (cursor.askedQuestions.has(request.questionId)) continue
       cursor.askedQuestions.add(request.questionId)
-      this.#deps.send('agent:question', request)
+      if (!cursor.answerIds.has(request.questionId)) cursor.answerIds.set(request.questionId, randomUUID())
+      // The channel the preload subscribes to (`onQuestion` = agent:userQuestion); a
+      // question sent on a name nobody listens for leaves the run waiting forever.
+      this.#deps.send('agent:userQuestion', request)
     }
     for (const asked of [...cursor.askedQuestions]) {
       if (pending.some((request) => request.questionId === asked)) continue
       cursor.askedQuestions.delete(asked)
-      this.#deps.send('agent:questionClosed', { runId: cursor.runId, questionId: asked })
+      cursor.answerIds.delete(asked)
+      this.#deps.send('agent:userQuestionClosed', { runId: cursor.runId, questionId: asked })
     }
   }
 

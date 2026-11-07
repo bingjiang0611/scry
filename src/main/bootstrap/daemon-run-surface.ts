@@ -123,9 +123,10 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
       }
       return runtime.activeRuns()
     },
+    // Ignores `done`, exactly like the in-process handler: the renderer uses this to
+    // recover a terminal event it missed, and a finished run is when that matters most.
     async focusedRunSnapshot() {
-      const runs = runtime.activeRuns()
-      return runs.find((run) => run.runId === focusedRunId) ?? null
+      return focusedRunId === null ? null : runtime.runView(focusedRunId)
     },
     async focusRun(runId) { focusedRunId = runId; return true },
     stop(runId) { return runtime.stop(runId) },

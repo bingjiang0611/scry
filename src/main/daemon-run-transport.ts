@@ -218,12 +218,19 @@ export class DaemonRunTransport {
 
   async answerQuestion(input: { runId: string; answerId: string; response: AgentQuestionResponse }): Promise<boolean> {
     const reply = await this.#call({ op: 'answerQuestion', runId: input.runId, answerId: input.answerId, response: input.response })
-    if (reply.answer !== true) throw new DaemonRunError('daemon_answer_not_delivered')
+    // The daemon answers with its ledger receipt: `answered` and `duplicate` both mean
+    // the broker settled this question with this answer; anything else is not delivery.
+    const receipt = reply.answer
+    const status = record(receipt) ? receipt.status : undefined
+    if (status !== 'answered' && status !== 'duplicate') throw new DaemonRunError('daemon_answer_not_delivered')
     return true
   }
 
   async liveRuns(input: { waitMs: number; revision?: string }): Promise<{ revision: string; runs: ReadonlyArray<{ runId: string; state: string; scryRunId?: string }> }> {
-    const reply = await this.#call({ op: 'liveRuns', waitMs: input.waitMs, ...(input.revision ? { revision: input.revision } : {}) })
+    const reply = await this.#call(
+      { op: 'liveRuns', waitMs: input.waitMs, ...(input.revision ? { revision: input.revision } : {}) },
+      { replayable: true }
+    )
     const live = reply.liveRuns
     if (!record(live) || typeof live.revision !== 'string' || !Array.isArray(live.runs)) throw new DaemonRunError('invalid_daemon_response')
     const runs = live.runs.flatMap((raw) => {

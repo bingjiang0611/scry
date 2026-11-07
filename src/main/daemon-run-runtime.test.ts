@@ -24,9 +24,13 @@ function fixture(frames: {
   watch: Array<{ state: string | null; events?: unknown[] }>
   trace: Array<Record<string, unknown>>
   questions?: unknown[][]
+  answerFails?: boolean[]
+  stickyQuestions?: boolean
 }) {
   const sent: Array<{ channel: string; payload: unknown }> = []
   const traceRequests: Record<string, unknown>[] = []
+  const answerRequests: Record<string, unknown>[] = []
+  const stopRequests: Record<string, unknown>[] = []
   let watchCall = 0
   let traceCall = 0
   let questionCall = 0
@@ -40,9 +44,20 @@ function fixture(frames: {
       traceRequests.push(payload)
       return { desktop: frames.trace[traceCall++] ?? { kind: 'trace', run: null } }
     }
-    if (payload.op === 'questions') return { questions: frames.questions?.[questionCall++] ?? [] }
-    if (payload.op === 'stop') return { stop: { status: 'requested' } }
-    if (payload.op === 'answerQuestion') return { answer: true }
+    if (payload.op === 'questions') {
+      // `stickyQuestions`: the same question stays pending however often it is read,
+      // which is what a question awaiting its answer looks like over the wire.
+      if (frames.stickyQuestions) return { questions: frames.questions?.[0] ?? [] }
+      return { questions: frames.questions?.[questionCall++] ?? [] }
+    }
+    if (payload.op === 'stop') { stopRequests.push(payload); return { stop: { status: 'requested' } } }
+    // The daemon answers with its ledger receipt; a bare `true` is not a shape it sends.
+    if (payload.op === 'answerQuestion') {
+      answerRequests.push(payload)
+      // A lost reply: the request was written, and the App never learned the outcome.
+      if (frames.answerFails?.[answerRequests.length - 1]) throw new Error('lane_lost')
+      return { answer: { status: 'answered' } }
+    }
     if (payload.op === 'liveRuns') return { liveRuns: { revision: 'v1', runs: [] } }
     return { error: 'unknown_op' }
   }
@@ -57,7 +72,7 @@ function fixture(frames: {
     bridge,
     waitMs: 0
   })
-  return { runtime, sent, traceRequests, frames }
+  return { runtime, sent, traceRequests, answerRequests, stopRequests, frames }
 }
 
 function deliveredEvents(sent: Array<{ channel: string; payload: unknown }>): TraceEvent[] {
@@ -108,11 +123,13 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
     await runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })
     await runtime.step(RUN, { waitMs: 0 })
     await runtime.step(RUN, { waitMs: 0 })
-    expect(sent.filter((entry) => entry.channel === 'agent:question')).toHaveLength(1)
+    // The channel names are the ones the preload subscribes to ("userQuestion"), not
+    // names invented here: a question nobody listens for is a question nobody answers.
+    expect(sent.filter((entry) => entry.channel === 'agent:userQuestion')).toHaveLength(1)
     await runtime.answerQuestion({ runId: RUN, questionId: 'q1', behavior: 'answered', answers: {} } as never)
     await runtime.step(RUN, { waitMs: 0 })
-    expect(sent.filter((entry) => entry.channel === 'agent:questionClosed')).toEqual([
-      { channel: 'agent:questionClosed', payload: { runId: RUN, questionId: 'q1' } }
+    expect(sent.filter((entry) => entry.channel === 'agent:userQuestionClosed')).toEqual([
+      { channel: 'agent:userQuestionClosed', payload: { runId: RUN, questionId: 'q1' } }
     ])
   })
 
@@ -125,6 +142,110 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
     await expect(runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })).resolves.toMatchObject({
       runId: 'run-abc-7', status: 'recorded', bound: true
     })
+  })
+
+  it('binds a run whose canonical id starts with remote-', async () => {
+    // A run the daemon starts for a device - or for the App itself - carries a
+    // `remote-run-...` id, which is the same shape the device client accepts.
+    const { runtime } = fixture({
+      watch: [{ state: 'dispatched', events: [{ runId: RUN, kind: 'run_progress', detail: JSON.stringify({ event: 'bound', ledgerRunId: RUN, scryRunId: 'remote-run-mw6osn9o-0', providerId: 'codex', cwd: '/w' }) }] }],
+      trace: [{ kind: 'trace', run: { ...run([]), runId: 'remote-run-mw6osn9o-0' }, cursor: { revision: 'r1', count: 0 } }]
+    })
+    await expect(runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })).resolves.toMatchObject({
+      runId: 'remote-run-mw6osn9o-0', bound: true
+    })
+  })
+
+  it('finds a finished run by the canonical id the window focuses', async () => {
+    const canonical = 'remote-run-mw6osn9o-0'
+    const { runtime, traceRequests } = fixture({
+      watch: [{ state: 'dispatched', events: [{ runId: RUN, kind: 'run_progress', detail: JSON.stringify({ event: 'bound', ledgerRunId: RUN, scryRunId: canonical, providerId: 'codex', cwd: '/w' }) }] }],
+      trace: [{ kind: 'trace', run: { ...run([event('done')], true), runId: canonical }, cursor: { revision: 'r1', count: 1 } }]
+    })
+    await expect(runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })).resolves.toMatchObject({ runId: canonical, bound: true })
+    // The window holds the canonical id; the map is keyed by the ledger id.
+    expect(runtime.runView(canonical)).toMatchObject({ runId: canonical, done: true })
+    // The trace read is addressed by that canonical id, not by the ledger id.
+    expect(traceRequests[0]).toMatchObject({ query: { runId: canonical } })
+    // And a run this window has not read yet is absent, not an empty run.
+    expect(runtime.runView('remote-run-unread-0')).toBeNull()
+  })
+
+  it('answers a question asked about the canonical run id on the ledger run', async () => {
+    const canonical = 'remote-run-mw6osn9o-0'
+    const question = { runId: canonical, questionId: 'q1', providerId: 'codex', questions: [] }
+    const { runtime, answerRequests } = fixture({
+      watch: [{ state: 'dispatched', events: [{ runId: RUN, kind: 'run_progress', detail: JSON.stringify({ event: 'bound', ledgerRunId: RUN, scryRunId: canonical, providerId: 'codex', cwd: '/w' }) }] }],
+      trace: [{ kind: 'trace', run: { ...run([event('hi')]), runId: canonical }, cursor: { revision: 'r1', count: 1 } }],
+      questions: [[question]]
+    })
+    await runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })
+    await runtime.step(RUN, { waitMs: 0 })
+    // The renderer answers with the id it was shown, which is the canonical one; the
+    // daemon names pending questions by its ledger run, so the id is translated here.
+    await expect(runtime.answerQuestion({ runId: canonical, questionId: 'q1', behavior: 'answered', answers: {} } as never)).resolves.toBe(true)
+    // The whole payload speaks the daemon's id: the answer travels inside it. The
+    // daemon's `answerId` is its own idempotency key (a UUID), not the question id.
+    const first = answerRequests[0] as { runId: string; answerId: string; response: Record<string, unknown> }
+    expect(first.runId).toBe(RUN)
+    expect(first.response).toMatchObject({ runId: RUN, questionId: 'q1' })
+    expect(first.answerId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+
+  })
+
+  it('reuses the answer id when the same answer is retried after a lost reply', async () => {
+    const { runtime, answerRequests } = fixture({
+      watch: [{ state: 'dispatched' }],
+      trace: [{ kind: 'trace', run: run([]), cursor: { revision: 'r1', count: 0 } }],
+      // The question is still pending across both reads: an answer that failed to be
+      // delivered did not close it.
+      questions: [[{ runId: RUN, questionId: 'q1', providerId: 'codex', questions: [] }]],
+      stickyQuestions: true,
+      answerFails: [true, false]
+    })
+    await runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })
+    await runtime.step(RUN, { waitMs: 0 })
+    const answer = { runId: RUN, questionId: 'q1', behavior: 'answered', answers: {} } as never
+    // A lost reply is reported as unknown, never retried behind the user's back.
+    await expect(runtime.answerQuestion(answer)).rejects.toMatchObject({ reason: 'daemon_outcome_unknown' })
+    await expect(runtime.answerQuestion(answer)).resolves.toBe(true)
+    // One key per question: a retry must not look like a second answer to the daemon.
+    expect((answerRequests[0] as { answerId: string }).answerId).toBe((answerRequests[1] as { answerId: string }).answerId)
+  })
+
+  it('ignores a bind event another run in the same context left behind', async () => {
+    const mine = 'remote-run-mw6q00aa-1'
+    const theirs = 'remote-run-mw6q00aa-0'
+    const { runtime } = fixture({
+      // The watch is per context, not per run: a second run in the same workspace
+      // replays the first run's binding before its own.
+      watch: [{
+        state: 'dispatched',
+        events: [
+          { runId: 'ledger-a', kind: 'run_progress', detail: JSON.stringify({ event: 'bound', ledgerRunId: 'ledger-a', scryRunId: theirs, providerId: 'codex', cwd: '/w' }) },
+          { runId: RUN, kind: 'run_progress', detail: JSON.stringify({ event: 'bound', ledgerRunId: RUN, scryRunId: mine, providerId: 'codex', cwd: '/w' }) }
+        ]
+      }],
+      trace: [{ kind: 'trace', run: null, cursor: { revision: 'r1', count: 0 } }]
+    })
+    const receipt = await runtime.start({ intentId: 'i-2', detail: '{}', context: CONTEXT })
+    // Handing back the other run's id would make the window show, answer and stop a run
+    // the user did not start.
+    expect(receipt.runId).toBe(mine)
+  })
+
+  it('stops the ledger run the window knows by its canonical id', async () => {
+    const canonical = 'remote-run-mw6osn9o-0'
+    const { runtime, stopRequests } = fixture({
+      // No trace read yet: the user stops a run that has only just been bound, so the
+      // ledger id has to come from the bind, not from a run view.
+      watch: [{ state: 'dispatched', events: [{ runId: RUN, kind: 'run_progress', detail: JSON.stringify({ event: 'bound', ledgerRunId: RUN, scryRunId: canonical, providerId: 'codex', cwd: '/w' }) }] }],
+      trace: [{ kind: 'trace', run: null, cursor: { revision: 'r1', count: 0 } }]
+    })
+    await runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })
+    await runtime.stop(canonical)
+    // The daemon stops runs by the id its own ledger recorded, not the trace's.
+    expect(stopRequests[0]).toMatchObject({ runId: RUN })
   })
 
   it('adopts a live run this window did not start, using the bind to find its context', async () => {
