@@ -64,7 +64,7 @@ async function harness(cwd: string, runId: string, observe: boolean,
   // 生产里 turn 与 session 复用同一时刻的基线，但各有独立清理周期。
   const turnCapture = Promise.resolve(cloneGitTurnDiffCapture(turnBaseline))
   const lifecycle = createRunDiffLifecycle({
-    isRemoteRun: false,
+    appSemantics: true,
     diffPreviewer: new RunDiffPreviewer({
       runId,
       turnCapture,
