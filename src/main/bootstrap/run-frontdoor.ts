@@ -16,6 +16,12 @@ export interface AppRunStartOptions {
   /** Sidebar project root for a run prepared in a separate worktree. */
   projectCwd?: string
   origin?: 'local' | 'remote'
+  /**
+   * Scope of the verified grant that submitted this run. Only meaningful for
+   * `origin: 'remote'` (a submit through the ledger); an in-process App call is
+   * always the App's own grant. Missing means "not proven", never "local".
+   */
+  grantScope?: 'local' | 'remote'
   runId?: string
   stopSignal?: AbortSignal
   requestUserInput?: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>
@@ -38,8 +44,25 @@ type FrontdoorDeps = {
   providerContextKey: (providerId: ProviderId, cwd: string, profile?: string) => string
 }
 
-export function prepareRunFrontdoor(payload: AgentStartRequest, options: AppRunStartOptions, deps: FrontdoorDeps) {
+/**
+ * Two facts, never one boolean:
+ *   isRemoteRun  - this run arrived through the ledger (transport/ledger behaviour);
+ *   appSemantics - the submitter is the App itself, so the pipeline must take the
+ *                  App's own path (workspace rules, diff preview, recording failure,
+ *                  admission, question routing).
+ * An in-process call is always the App. A submitted run is the App only when the
+ * verified grant says local; a missing scope is not proven, so it stays remote.
+ */
+export function runSemantics(options: { origin?: 'local' | 'remote'; grantScope?: 'local' | 'remote' }): {
+  isRemoteRun: boolean
+  appSemantics: boolean
+} {
   const isRemoteRun = options.origin === 'remote'
+  return { isRemoteRun, appSemantics: !isRemoteRun || options.grantScope === 'local' }
+}
+
+export function prepareRunFrontdoor(payload: AgentStartRequest, options: AppRunStartOptions, deps: FrontdoorDeps) {
+  const { isRemoteRun, appSemantics } = runSemantics(options)
   const request = normalizeAgentStartRequest(payload)
   if (request.workspace) throw new Error('工作区选择必须先完成首次发送准备，不能绕过准备入口启动')
   const providerId = request.providerId
@@ -119,5 +142,5 @@ export function prepareRunFrontdoor(payload: AgentStartRequest, options: AppRunS
   const admissionKeys = managedConversation
     ? [admissionKey, `conversation:${managedConversation.conversationId}`]
     : [admissionKey]
-  return { isRemoteRun, request, providerId, agentProfileId, startPerf, firstTracePerf, firstTextPerf, adapter, runtimeProvider, shellEnvReady, cwd, catalogCwd, startLease, managedConversation, admissionKeys, assertSessionNotArchived }
+  return { isRemoteRun, appSemantics, request, providerId, agentProfileId, startPerf, firstTracePerf, firstTextPerf, adapter, runtimeProvider, shellEnvReady, cwd, catalogCwd, startLease, managedConversation, admissionKeys, assertSessionNotArchived }
 }
