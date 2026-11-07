@@ -34,6 +34,8 @@ import type { Conversation } from '../shared/conversation'
 import type { ConversationDeletionPreview } from '../shared/conversation-api'
 import { initializeAppEnvironment, registerAppLifecycle } from './bootstrap/app-lifecycle'
 import { registerAgentRuntimeHandlers } from './bootstrap/agent-runtime-ipc'
+import { appDaemonModeDeps, daemonModeEnabled } from './bootstrap/daemon-run-mode'
+import { createLazyDaemonRunSurface } from './bootstrap/daemon-run-lazy'
 import { createRunPipeline } from '../host-runtime/create-run-pipeline'
 import { deleteConversationHistory } from './conversation-history'
 import { createWindow as createBootstrapWindow } from './bootstrap/window'
@@ -294,9 +296,14 @@ const {
   runs, runStopLifecycle, userQuestionBroker, traceOutput, boundedLiveRun, runTraces,
   startAppRun, remoteStartReceipts
 } = pipeline
+// 开发开关：daemon 持有台账与 run 时，这些通道由 daemon 的帧回答；未开时保持进程内管线。
+const daemonRun = daemonModeEnabled()
+  ? createLazyDaemonRunSurface(appDaemonModeDeps({ send: (channel, payload) => { win?.webContents.send(channel, payload) }, currentCwd: () => currentCwd }))
+  : undefined
 registerAgentRuntimeHandlers({
   handleTrusted, startAppRun, runs, boundedLiveRun, dockBadge, activeRunSessionKey,
   userQuestionBroker, resolveKnownProjectDirectory, traceOutput, requestRunStop, runTraces,
+  ...(daemonRun ? { daemon: daemonRun } : {}),
   getWindow: () => win,
   getCurrentCwd: () => currentCwd,
   getRemoteRunLedgerId: (runId) => remoteRunLedgerIds.get(runId),

@@ -130,7 +130,7 @@ export class DaemonRunTransport {
       op: 'desktop',
       query: {
         kind: 'trace', context: input.context, runId: input.runId, images: true, byteChunks: true,
-        ...(input.after ? { after: input.after } : {})
+        ...(input.after ? { delta: { after: input.after } } : {})
       }
     }, { replayable: true })
     const desktop = reply.desktop
