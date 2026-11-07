@@ -33,7 +33,12 @@ export async function readDesktop(deps: DesktopReadDeps, peerCertSHA256: string,
     ...info,
     ...(deps.providerControls ? { providerDiscovery: 2 as const } : {}),
     ...(deps.desktopDirectories ? { directorySelection: true as const } : {}),
-    ...(deps.desktopWorkbench ? { workbench: 1 as const } : {}),
+    ...(deps.desktopWorkbench ? {
+      workbench: 1 as const,
+      ...(!deps.desktopWorkbench.operations.openPath || !deps.desktopWorkbench.operations.trashItem
+        ? { workbenchOps: deps.desktopWorkbench.operations }
+        : {})
+    } : {}),
     ...(deps.canSessionActions ? { sessionActions: true as const } : {}),
     ...(deps.canSessionFork ? { sessionFork: true as const } : {}),
     ...(deps.canSessionDelete ? { sessionDelete: true as const } : {}),

@@ -1,21 +1,32 @@
 // 扫 PATH 检测本机已安装的 agent CLI（claude code / codex / cursor / …），
 // 供 app 的 CLI 选择器（参考 open-design 的 Local CLI 下拉）。
 
-import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { existsSync, readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { delimiter, join, posix, win32 } from 'node:path'
-import { RECORDER_VERSION } from '../core/turn-recorder/store.js'
+import { join } from 'node:path'
 import type { ProviderHealth, ProviderId } from '../shared/provider.js'
+import { CODEX_APP_BIN, selectClaudeBinCandidate, selectCodexBinCandidate, selectQoderBinCandidate } from './agent-cli-selection'
+import { resolveCommandOnPath } from './command-path'
+import { sanitizeNestedAgentEnv } from './provider-environment'
+import { buildRuntimeCliEnv } from './recorder-cli-runtime'
 
-export const CODEX_APP_BIN = '/Applications/ChatGPT.app/Contents/Resources/codex'
+export { CODEX_APP_BIN, isAcceptedQoderPath, selectClaudeBinCandidate, selectCodexBinCandidate, selectQoderBinCandidate } from './agent-cli-selection'
+export { resolveCommandOnPath } from './command-path'
+export { sanitizeNestedAgentEnv, sanitizeProviderEnv } from './provider-environment'
+export {
+  configureRecorderCliRuntime,
+  packagedRecorderCliPath,
+  resolveRecorderCliPath,
+  resolveRuntimeRecorderCliPath,
+  resolveTrustRecorderCliPath
+} from './recorder-cli-runtime'
 
 // GUI app 从 Finder/Dock 启动走 launchd，PATH 极简（/usr/bin:/bin），不 source 用户的 .zshrc，
 // nvm/cargo 等版本管理器装的工具全找不到（macOS 经典坑）。正解：spawn 用户的「登录+交互」shell
 // 捞它的真实 PATH——nvm 在 .zshrc 里、只有交互 shell 才 source，这样 app 解析 claude 和用户终端
 // 完全一致（优先用户日常那个版本）。sentinel 包裹，过滤 shell 启动打印的 banner 等杂项。缓存一次。
 let shellPathCache: string | null = null
-const verifiedRecorderCliVersions = new Set<string>()
 function shellPath(): string {
   if (shellPathCache === null) void warmShellEnv()
   return shellPathCache ?? ''
@@ -186,63 +197,6 @@ export function warmShellEnv(options: { retryFailed?: boolean } = {}): Promise<R
   return shellEnvPromise
 }
 
-export function sanitizeNestedAgentEnv(input: Record<string, string>): Record<string, string> {
-  const out: Record<string, string> = { ...input }
-  for (const k of Object.keys(out)) {
-    if (
-      k === 'CLAUDECODE' ||
-      k === 'AI_AGENT' ||
-      k === 'CLAUDE_EFFORT' ||
-      k === 'SCRY_CODEX_SOURCE_HOME' ||
-      k === 'CODEX_CI' ||
-      k === 'CODEX_THREAD_ID' ||
-      k.startsWith('CLAUDE_CODE_') ||
-      k.startsWith('CODEX_INTERNAL_')
-    ) {
-      delete out[k]
-    }
-  }
-  return out
-}
-
-const PROVIDER_FORBIDDEN_ENV = new Set([
-  'OPENAI_ADMIN_API_KEY',
-  'ANTHROPIC_ADMIN_API_KEY',
-  'QODER_ADMIN_API_KEY',
-  'QODER_ORGANIZATION_ID',
-  'QODER_MEMBER_ID',
-  'SCRY_RECORDER_COMMIT_HOOK',
-  'SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT'
-])
-
-export function sanitizeProviderEnv(input: Record<string, string>, providerId?: ProviderId): Record<string, string> {
-  const out = sanitizeNestedAgentEnv(input)
-  const explicitlyAllowed = new Set(
-    input.SCRY_PROVIDER_ENV_ALLOW?.split(',')
-      .map((value) => value.trim())
-      .filter((value) => providerId != null && value.startsWith(`${providerId}:`))
-      .map((value) => value.slice(value.indexOf(':') + 1))
-      .filter(Boolean) ?? []
-  )
-  delete out.SCRY_PROVIDER_ENV_ALLOW
-  const forbiddenPrefixes = ['AWS_', 'AZURE_', 'GOOGLE_', 'GCP_']
-  const providerPrefixes: Partial<Record<ProviderId, string[]>> = {
-    claude: ['OPENAI_', 'CODEX_', 'QODER_', 'OPENCODE_'],
-    codex: ['ANTHROPIC_', 'CLAUDE_', 'QODER_', 'OPENCODE_'],
-    qoder: ['ANTHROPIC_', 'CLAUDE_', 'OPENAI_', 'CODEX_', 'OPENCODE_'],
-    opencode: ['ANTHROPIC_', 'CLAUDE_', 'OPENAI_', 'CODEX_', 'QODER_'],
-    pi: ['ANTHROPIC_', 'CLAUDE_', 'OPENAI_', 'CODEX_', 'QODER_', 'OPENCODE_']
-  }
-  for (const key of Object.keys(out)) {
-    if (PROVIDER_FORBIDDEN_ENV.has(key) ||
-      (!explicitlyAllowed.has(key) && forbiddenPrefixes.some((prefix) => key.startsWith(prefix))) ||
-      (!explicitlyAllowed.has(key) && (providerId ? providerPrefixes[providerId] ?? [] : []).some((prefix) => key.startsWith(prefix)))) {
-      delete out[key]
-    }
-  }
-  return out
-}
-
 export function shellEnv(): Record<string, string> {
   if (shellEnvCache) return shellEnvCache
   void warmShellEnv()
@@ -257,43 +211,6 @@ function nvmBins(): string[] {
   } catch {
     return []
   }
-}
-
-function runnableFile(path: string, platform: NodeJS.Platform): boolean {
-  try {
-    const file = statSync(path)
-    return file.isFile() && (platform === 'win32' || (file.mode & 0o111) !== 0)
-  } catch {
-    return false
-  }
-}
-
-export function resolveCommandOnPath(
-  command: string,
-  pathValue: string,
-  options: {
-    platform?: NodeJS.Platform
-    pathExt?: string
-    isRunnable?: (path: string) => boolean
-  } = {}
-): string | undefined {
-  const platform = options.platform ?? process.platform
-  const pathApi = platform === 'win32' ? win32 : posix
-  const extensions =
-    platform === 'win32' && !pathApi.extname(command)
-      ? (options.pathExt ?? process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
-      : ['']
-  const names = platform === 'win32' ? [command, ...extensions.map((extension) => `${command}${extension}`)] : [command]
-  const isRunnable = options.isRunnable ?? ((path: string) => runnableFile(path, platform))
-  for (const rawDir of pathValue.split(pathApi.delimiter)) {
-    const dir = rawDir.replace(/^"(.*)"$/, '$1')
-    if (!dir || !pathApi.isAbsolute(dir)) continue
-    for (const name of names) {
-      const path = pathApi.join(dir, name)
-      if (isRunnable(path)) return path
-    }
-  }
-  return undefined
 }
 
 function executableOnProcessPath(bin: string): string | undefined {
@@ -467,19 +384,6 @@ function qoderPathFromEnv(): string {
   return configured && existsSync(configured) ? configured : ''
 }
 
-export function isAcceptedQoderPath(path: string): boolean {
-  return !!path && path.endsWith('/qodercli')
-}
-
-export function selectQoderBinCandidate(args: {
-  configured?: string
-  onPath?: string
-}): string | undefined {
-  if (args.configured && isAcceptedQoderPath(args.configured)) return args.configured
-  if (args.onPath && isAcceptedQoderPath(args.onPath)) return args.onPath
-  return undefined
-}
-
 function resolveQoderBin(): string | undefined {
   const configured = qoderPathFromEnv()
   const onPath = which('qodercli')
@@ -490,18 +394,6 @@ async function resolveQoderBinAsync(): Promise<string | undefined> {
   const configured = qoderPathFromEnv()
   const onPath = await whichAsync('qodercli')
   return selectQoderBinCandidate({ configured, onPath })
-}
-
-export function selectCodexBinCandidate(args: {
-  configured?: string
-  configuredExists?: boolean
-  onPath?: string
-  appBin?: string
-  appBinExists?: boolean
-}): string | undefined {
-  if (args.configured && args.configuredExists) return args.configured
-  if (args.onPath) return args.onPath
-  return args.appBinExists ? (args.appBin ?? CODEX_APP_BIN) : undefined
 }
 
 function resolveCodexBin(): string | undefined {
@@ -564,18 +456,6 @@ export function detectAgentsFast(): DetectedAgent[] {
 // 否则「显示 2.1.170、实际跑 2.1.150」就成了假状态（违反反假数据规则）。
 // npm 全局 / 官方安装器装的 claude 都是原生 Mach-O 二进制（claude.exe 也是 Mach-O，不是脚本），
 // 直接 spawn 不需要 node。找不到再回退官方安装器位置 ~/.local/bin/claude。
-export function selectClaudeBinCandidate(args: {
-  configured?: string
-  configuredExists?: boolean
-  native: string
-  nativeExists: boolean
-  onPath?: string
-}): string | undefined {
-  if (args.configured && args.configuredExists) return args.configured
-  if (args.nativeExists) return args.native
-  return args.onPath || undefined
-}
-
 export function resolveClaudeBin(): string | undefined {
   const configured = process.env.SCRY_CLAUDE_PATH?.trim()
   const native = `${homedir()}/.local/bin/claude`
@@ -609,49 +489,6 @@ export function resolveRuntimeCliBin(agentId: 'codex' | 'qoder' | 'opencode'): s
   return onPath || firstExisting([`${homedir()}/.opencode/bin/opencode`, '/opt/homebrew/bin/opencode', '/usr/local/bin/opencode'])
 }
 
-function recorderFallbackSearchPath(env: Record<string, string>): string {
-  const npmPrefix = env.npm_config_prefix ?? env.NPM_CONFIG_PREFIX
-  const directories = process.platform === 'win32'
-    ? [
-        env.APPDATA ? join(env.APPDATA, 'npm') : undefined,
-        env.PNPM_HOME,
-        npmPrefix
-      ]
-    : [
-        env.PNPM_HOME,
-        npmPrefix ? join(npmPrefix, 'bin') : undefined,
-        join(homedir(), '.local', 'bin'),
-        join(homedir(), '.npm-global', 'bin'),
-        '/opt/homebrew/bin',
-        '/usr/local/bin'
-      ]
-  return directories.filter((directory): directory is string => !!directory).join(delimiter)
-}
-
-export function packagedRecorderCliPath(resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath): string | undefined {
-  if (!resourcesPath) return undefined
-  const candidate = join(resourcesPath, 'bin', 'scry')
-  return existsSync(candidate) ? candidate : undefined
-}
-
-export function resolveRecorderCliPath(
-  env: Record<string, string>,
-  trustedPath: string,
-  fallbackPath: string = recorderFallbackSearchPath(env),
-  bundledPath: string | undefined = packagedRecorderCliPath()
-): string | undefined {
-  if (Object.prototype.hasOwnProperty.call(env, 'SCRY_CLI_PATH')) {
-    return env.SCRY_CLI_PATH?.trim() ?? ''
-  }
-  if (bundledPath) return bundledPath
-  return resolveCommandOnPath('scry', trustedPath) ?? resolveCommandOnPath('scry', fallbackPath)
-}
-
-function recorderCliVersionKey(path: string): string {
-  const file = statSync(path)
-  return `${path}\0${file.dev}\0${file.ino}\0${file.size}\0${file.mtimeMs}\0${RECORDER_VERSION}`
-}
-
 export function runtimeCliEnv(
   base?: Record<string, string>,
   options: { managedRecorder?: boolean; providerId?: ProviderId } = {}
@@ -660,53 +497,5 @@ export function runtimeCliEnv(
   const originalPath = base
     ? runtimeBase.PATH ?? process.env.PATH ?? ''
     : shellPathCache || process.env.PATH || ''
-  const bundledCliPath = packagedRecorderCliPath()
-  const scryCliPath = resolveRecorderCliPath(
-    runtimeBase,
-    originalPath,
-    recorderFallbackSearchPath(runtimeBase),
-    bundledCliPath
-  )
-  if (options.managedRecorder) {
-    if (!scryCliPath) {
-      throw new Error(`Scry managed recorder requires scry CLI ${RECORDER_VERSION}`)
-    }
-    if (scryCliPath !== bundledCliPath) {
-      let verificationKey = ''
-      let cached = false
-      let actualVersion = ''
-      try {
-        verificationKey = recorderCliVersionKey(scryCliPath)
-        cached = verifiedRecorderCliVersions.has(verificationKey)
-        if (!cached) {
-          actualVersion = execFileSync(scryCliPath, ['--version'], {
-            encoding: 'utf8',
-            timeout: 5_000,
-            env: sanitizeProviderEnv(runtimeBase, options.providerId)
-          }).trim()
-        }
-      } catch {
-        throw new Error(`Scry managed recorder could not verify ${scryCliPath}`)
-      }
-      if (!cached && actualVersion !== RECORDER_VERSION) {
-        // 版本不匹配最常见的原因是“运行中的 Scry 是旧构建，全局 CLI 已升级”，
-        // 所以把可执行的下一步写进错误本身，Provider 日志里看不出这个因果。
-        throw new Error(
-          `Scry managed recorder requires CLI ${RECORDER_VERSION}; ${scryCliPath} reports ${actualVersion || 'unknown'}` +
-          `；重启/重建当前 Scry 构建，或把该 scry CLI 对齐到 ${RECORDER_VERSION}`
-        )
-      }
-      if (!cached) verifiedRecorderCliVersions.add(verificationKey)
-    }
-  }
-  return sanitizeProviderEnv({
-    ...runtimeBase,
-    SCRY_CLI_PATH: scryCliPath ?? '',
-    ...(options.managedRecorder ? {
-      SCRY_RECORDER_MANAGED: '1',
-      SCRY_RECORDER_REQUIRED_VERSION: RECORDER_VERSION,
-      SCRY_RECORDER_VERIFIED_VERSION: RECORDER_VERSION
-    } : {}),
-    PATH: runtimeBase.PATH ?? process.env.PATH ?? ''
-  }, options.providerId)
+  return buildRuntimeCliEnv(runtimeBase, originalPath, options)
 }

@@ -1,5 +1,5 @@
 import { homedir } from 'node:os'
-import { packagedRecorderCliPath, shellEnv } from '../claude-locate'
+import { resolveTrustRecorderCliPath, shellEnv } from '../claude-locate'
 import { AgentRuntimeError } from '../run-outcome'
 import { codexHookFingerprint, hooksRequiringBypass, type CodexHookInspection, type CodexHookTrustGrant, createCodexHookGrantStore } from '../codex-hook-trust'
 import { createOpenCodePluginGrantStore, type OpenCodeProjectPluginAuthorization } from '../opencode-plugin-trust'
@@ -127,7 +127,7 @@ export async function resolveManagedCommitHookEnv(
   if (granted) {
     try {
       const capability = await store.materialize(inspection)
-      const recorderCli = packagedRecorderCliPath() ?? baseEnv.SCRY_CLI_PATH
+      const recorderCli = resolveTrustRecorderCliPath(baseEnv)
       return {
         ...baseEnv,
         ...capability.env,
@@ -151,7 +151,7 @@ export async function resolveManagedCommitHookEnv(
 
   try {
     const capability = await store.materialize(inspection)
-    const recorderCli = packagedRecorderCliPath() ?? baseEnv.SCRY_CLI_PATH
+    const recorderCli = resolveTrustRecorderCliPath(baseEnv)
     return {
       ...baseEnv,
       ...capability.env,
@@ -177,7 +177,7 @@ export async function resolveGrantedManagedCommitHookEnv(cwd: string): Promise<N
       { autoGrant: true }
     )
     if (!capability) return baseEnv
-    const recorderCli = packagedRecorderCliPath() ?? baseEnv.SCRY_CLI_PATH
+    const recorderCli = resolveTrustRecorderCliPath(baseEnv)
     return {
       ...baseEnv,
       ...capability.env,

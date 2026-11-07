@@ -34,7 +34,7 @@
 
 R4 先扩展模板测试：旧 launchd/systemd 文件缺 `APP_PATH/RESOURCES_PATH/APP_VERSION/PACKAGED`，断言失败。新增 `daemon-config.ts` 作为 daemon 与 supervisor 共用的 fail-closed 解析器；STATE、USER_DATA、APP、RESOURCES、VERSION、PACKAGED 任一缺失或 PACKAGED 非 0/1 都在入口 exit 2，不再从 cwd、`process.resourcesPath` 或硬编码 `0.2.237` 猜测。模板写齐所有变量；`daemon-config-smoke.mjs` 用构建后的两个入口逐项删除变量，12/12 均 exit 2 并返回对应机器错误码。
 
-recorder CLI 只由注入的 `resourcesPath` 解析为 `<resources>/bin/scry`，不再回退 PATH/global npm CLI；测试把 PATH 指向 fake scry，结果仍是 private absolute path。Provider shell 环境改为复用 App 的 `warmShellEnv`，不直接使用 launchd/systemd 的贫瘠 `process.env`。`check-packaged-app.mjs` 检查打包 main 运行图含全部必需环境接线和 fail-closed 校验，并继续验证 Resources 私有 CLI 可执行。
+R4 当时只把注入的 `<resources>/bin/scry` 交给 startup recovery；运行时 `runtimeCliEnv`/trust 仍可能使用 `process.resourcesPath` 或 PATH。原 `daemonPrivateCliPath` 测试只验证字符串 join，不能证明 PATH 不会回退。该测试已删除，真实运行时解析由下述 N2 修复和测试覆盖。Provider shell 环境复用 App 的 `warmShellEnv`，这一部分保持成立。
 
 R5 同批：supervisor 的异常重启预算在一次运行达到 60 s 后归零；exit 2 是确定性配置失败，只启动一次并写失败记录。子进程 stderr 改为 bounded pipe，只提取 `daemon_[a-z0-9_]+` 机器码，正文不进入结果或 failure JSON。failure 仍不含路径、prompt、证书或错误正文。
 
@@ -58,3 +58,13 @@ R5 同批：supervisor 的异常重启预算在一次运行达到 60 s 后归零
 N4 同批：本进程身份进程内记忆化，pairing/ledger/output store 不再各自同步 spawn；外部 pid 查询从全表 `ps -axo` 改为 `ps -p <pid>`，Linux 完全不 spawn `ps`。受控定向计时通过 timing-run 锁执行，日志 `/tmp/b3-n4-lease-timing.log`：20 次旧全表 ps 782.39 ms，20 次单 pid 143.71 ms，2000 次 memoized lease owner 2.43 ms。8 核机器，load 2.46→2.46，`highLoad:false`；这是本机 L2 定向数据，不代表所有机器。
 
 本机门禁：main+daemon+host-runtime 2924 passed（3 skipped）、typecheck、build、构建产物真实 SIGKILL/restart、完整 desktop-remote、dev security smoke 均通过。当前 macOS 主机没有 Docker/Podman/Lima/QEMU，也没有可用 Linux 远端，因此核验要求的 Linux 实机/容器构建产物 SIGKILL 尚未执行；Linux `/proc` 身份有注入式单元测试，但不冒充实机验收。
+
+## N2 运行时 recorder CLI + N3 workbench 能力——完成
+
+N2 先删除 `daemon-config.test.ts` 中恒真的纯 join 测试，并在真实 `resolveRecorderCliPath`、`runtimeCliEnv` 上写失败用例。daemon 现在像 storage 一样在进程初始化时配置 recorder runtime source；dev 保留 App 既有 `SCRY_CLI_PATH`/PATH 语义，packaged daemon 则强制 `<resources>/bin/scry`，不存在时在 host/socket 创建前直接以 `daemon_recorder_cli_unavailable` 失败，绝不回退 PATH。Provider runtime 与 commit-hook trust 都从同一配置源解析；App 未配置该 daemon source，继续使用 `process.resourcesPath` 的原行为。
+
+真实测试把 `process.resourcesPath` 不参与解析、PATH 指向 fake scry，验证 `resolveRecorderCliPath`、`runtimeCliEnv` 和 trust 均选中注入 resources 下的 private CLI。`pack:artifact` 后又用 packaged Scry executable + `ELECTRON_RUN_AS_NODE=1` 启动构建 daemon：真实 Resources private CLI 存在时即使 PATH 是 fake scry 也启动并干净退出；换成无 private CLI 的 resources 时 exit 1，reason 为 `daemon_recorder_cli_unavailable`。结果日志 `/tmp/b3-n2n3-packaged-recorder2.log`。
+
+N3 同批：`openPath`/`trashItem` 改为可选 host input，daemon 不再传入只会抛错的 stub。desktop info 在操作受限时返回 `workbenchOps: { openPath: false, trashItem: false }`；App 两项都可用时省略该字段以保持旧响应，新的 client 对旧 host 缺字段按两项可用处理。直接调用不可用操作返回 typed `desktop_workbench_operation_unavailable:*`。
+
+最终门禁：main+daemon+host-runtime 2926 passed（3 skipped）、typecheck、build、完整 desktop-remote、dev security smoke、`pack:artifact`、packaged recorder smoke 全绿。第一次完整 desktop-remote 暴露了 App info 多出全 true `workbenchOps` 的兼容回归并失败；修正为仅受限 host 报字段后，focused 与完整门禁均通过，首轮失败未隐藏。

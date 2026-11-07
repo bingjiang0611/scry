@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { daemonPrivateCliPath, readDaemonProcessConfig } from './daemon-config'
+import { readDaemonProcessConfig } from './daemon-config'
 
 const complete = {
   SCRY_DAEMON_STATE_DIR: '/tmp/state',
@@ -23,10 +23,5 @@ describe('daemon process configuration', () => {
       appPath: '/opt/Scry/resources/app.asar', resourcesPath: '/opt/Scry/resources',
       appVersion: '9.8.7', isPackaged: true
     })
-  })
-
-  it('always selects the App private recorder CLI even when PATH names another scry', () => {
-    process.env.PATH = '/tmp/fake-global-scry'
-    expect(daemonPrivateCliPath('/opt/Scry/resources')).toBe('/opt/Scry/resources/bin/scry')
   })
 })

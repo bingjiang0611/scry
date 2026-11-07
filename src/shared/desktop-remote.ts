@@ -144,6 +144,7 @@ export interface DesktopRemoteCatalog {
   // Absent on older hosts; never imply that arbitrary directory selection works.
   directorySelection?: true
   workbench?: 1
+  workbenchOps?: { openPath: boolean; trashItem: boolean }
   sessionActions?: true
   // Fork and delete are independent because an older host may implement only one.
   sessionFork?: true
@@ -177,7 +178,7 @@ export type DesktopHostRead =
   | { kind: 'trace'; context: DesktopRemoteContext; runId: string; images?: true; delta?: { after?: DesktopTraceCursor }; byteChunks?: true; chunk?: { id: string; offset: number } }
   | { kind: 'image'; context: DesktopRemoteContext; historyScope?: 'session'; runId: string; providerTurnId?: string; index: number; chunk?: { id: string; offset: number } }
 export type DesktopHostReadResult =
-  | { kind: 'info'; protocol: number; hostId: string; execution: 'canonical'; providerDiscovery?: 2; directorySelection?: true; workbench?: 1; sessionActions?: true; sessionFork?: true; sessionDelete?: true; traceDelta?: 1; attachments?: DesktopRemoteAttachmentCapability }
+  | { kind: 'info'; protocol: number; hostId: string; execution: 'canonical'; providerDiscovery?: 2; directorySelection?: true; workbench?: 1; workbenchOps?: { openPath: boolean; trashItem: boolean }; sessionActions?: true; sessionFork?: true; sessionDelete?: true; traceDelta?: 1; attachments?: DesktopRemoteAttachmentCapability }
   | { kind: 'history'; history: DesktopRemoteHistory }
   | { kind: 'history_chunk'; id: string; offset: number; totalBytes: number; data: string }
   // `revision` is present only when the query asked for `delta`; with it the

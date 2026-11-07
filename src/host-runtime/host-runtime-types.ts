@@ -85,8 +85,8 @@ export interface HostRuntimeInputs {
   gatewayLabel: string
   // Lazily resolved login-shell environment for Provider processes.
   shellEnvironment: () => Promise<Record<string, string | undefined>>
-  openPath: (path: string) => Promise<void>
-  trashItem: (path: string) => Promise<void>
+  openPath?: (path: string) => Promise<void>
+  trashItem?: (path: string) => Promise<void>
   // History readers over the app's transcript archive and SQLite projections.
   historyHandlers: Pick<RemoteHostServiceDependencies, 'readHistory' | 'readHistoryPreview' | 'readHistoryVersion' | 'readHistoryTurnsPage'>
   // Analytics / LLM performance / MCP trust panels.
