@@ -7,6 +7,7 @@ import type { ProviderAdapter } from './types'
 import { runtimeProviderForProviderId, type AgentSteerInput } from '../../shared/runtime'
 import { HistoricalInput } from './historical-input'
 import { smokeHistoryReaderFacet, smokeReaderRead } from './smoke-history-reader'
+import { emitLongStream, emitPacedStream, isLongStreamPrompt, isPacedStreamPrompt } from './smoke-paced-stream'
 import { handleRecorderHook } from '../../core/turn-recorder/recorder'
 
 /** Providers the packaged fixture can impersonate. Order is irrelevant; the gate is not. */
@@ -227,22 +228,13 @@ export function createSmokeProviderAdapter(providerId: SmokeFixtureProviderId = 
             text: `验收总表：\`rotom-team/docs/NATIVE-DELIVERY.md\`\n\n[encoded report](generated/2026-10-18%20AI%20%E5%AD%A6%E4%B9%A0%E8%B5%84%E6%BA%90%E6%8E%A8%E8%8D%90%E6%B8%85%E5%8D%95%E5%9B%9E%E6%A3%80.md) [absolute](${absolute}) [license](../LICENSE) [binary](../asset.custom) [outside](escaped.md) \`missing.md\`\n\n[interactive-mode.ts:1252](packages/coding-agent/src/modes/interactive/interactive-mode.ts#L1252)\n\n\`packages/coding-agent/src/modes/interactive/interactive-mode.ts:1252:3\`\n\n截图留在 \`${join(request.cwd, 'screens')}/\`（\`remote-workspace.png\`、\`remote-hosts.png\`、\`remote-settings.png\`、\`asset.custom\`、\`fail.custom\`）。`
           })
         }
-        if (request.prompt === 'performance long stream') {
-          // Packaged soak-only pressure path: exercise batching, renderer ACK and the large-stream
-          // lightweight Markdown transition without any external Provider or user content.
-          for (let index = 0; index < 80; index++) {
-            if (stopped) break
-            request.emit({
-              id: `${request.runId}:delta:${index}`,
-              runId: request.runId,
-              ts: new Date().toISOString(),
-              kind: 'model',
-              stage: 'text_delta',
-              messageId: `${request.runId}:message`,
-              text: `${index % 8 === 0 ? `\n\n## Section ${index}\n\n` : ''}${'stream '.repeat(160)}`
-            })
-            await new Promise((resolve) => setTimeout(resolve, 5))
-          }
+        if (isPacedStreamPrompt(request.prompt)) {
+          // The measurement fixture lives in its own file: both timing modes drive it.
+          await emitPacedStream({ runId: request.runId, emit: request.emit, stopped: () => stopped })
+        }
+        if (isLongStreamPrompt(request.prompt)) {
+          // The soak-only pressure path lives with the other stream fixtures.
+          await emitLongStream({ runId: request.runId, emit: request.emit, stopped: () => stopped })
         }
         if (request.prompt.startsWith('desktop remote ')) {
           // Canonical recorder fixtures need actual assistant evidence, not the

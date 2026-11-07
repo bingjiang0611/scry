@@ -31,12 +31,14 @@ function fixture(frames: {
   const traceRequests: Record<string, unknown>[] = []
   const answerRequests: Record<string, unknown>[] = []
   const stopRequests: Record<string, unknown>[] = []
+  const watchRequests: Record<string, unknown>[] = []
   let watchCall = 0
   let traceCall = 0
   let questionCall = 0
   const request = async (payload: Record<string, unknown>): Promise<unknown> => {
     if (payload.op === 'submit') return { runId: RUN, status: 'recorded' }
     if (payload.op === 'watch') {
+      watchRequests.push(payload)
       const frame = frames.watch[watchCall++] ?? { state: 'settled' }
       return { watch: { state: frame.state, poll: { cursor: watchCall, events: frame.events ?? [] } } }
     }
@@ -72,7 +74,7 @@ function fixture(frames: {
     bridge,
     waitMs: 0
   })
-  return { runtime, sent, traceRequests, answerRequests, stopRequests, frames }
+  return { runtime, sent, traceRequests, answerRequests, stopRequests, watchRequests, frames }
 }
 
 function deliveredEvents(sent: Array<{ channel: string; payload: unknown }>): TraceEvent[] {
@@ -93,6 +95,44 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
     await runtime.step(RUN, { waitMs: 0 })
     await runtime.step(RUN, { waitMs: 0 })
     expect(deliveredEvents(sent).map((item) => item.text)).toEqual(['one', 'two'])
+  })
+
+  it('does not deliver the same items again when a poll adopts a run it already follows', async () => {
+    const canonical = 'remote-run-mw6osn9o-3'
+    const { runtime, sent } = fixture({
+      watch: [{ state: 'dispatched', events: [{ runId: RUN, kind: 'run_dispatched' }] }],
+      trace: [{ kind: 'trace', run: { ...run([event('hi')]), runId: canonical }, cursor: { revision: 'r1', count: 1 } }]
+    })
+    await runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })
+    await runtime.step(RUN, { waitMs: 0 })
+    const delivered = deliveredEvents(sent).length
+    // The live-run list names the canonical id; adopting it must resolve to the run this
+    // window is already following, not start a second cursor over the same items.
+    expect(runtime.isTracking(canonical)).toBe(true)
+    await runtime.adopt(canonical)
+    expect(deliveredEvents(sent).length).toBe(delivered)
+  })
+
+  it('streams a text block that grows in place as its own deltas', async () => {
+    // The daemon's run view keeps one text block per message and rewrites it as the
+    // Provider streams. Treating that as a rewrite would show the first few characters
+    // and then nothing until the run ended.
+    const growing = (text: string): TraceEvent => ({ id: 'e-text', ts: '2024-01-01T00:00:00.000Z', runId: RUN, kind: 'model', stage: 'text_delta', messageId: 'm1', text })
+    const { runtime, sent } = fixture({
+      watch: [{ state: 'dispatched' }, { state: 'dispatched' }, { state: 'dispatched' }],
+      trace: [
+        { kind: 'trace', run: run([growing('chunk 1\n')]), cursor: { revision: 'r1', count: 1 } },
+        { kind: 'trace_delta', run: run([]), base: 'r1', revision: 'r2', count: 1, changes: [{ index: 0, item: growing('chunk 1\nchunk 2\n') }] },
+        { kind: 'trace_delta', run: run([]), base: 'r2', revision: 'r3', count: 1, changes: [{ index: 0, item: growing('chunk 1\nchunk 2\nchunk 3\n') }] }
+      ]
+    })
+    await runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })
+    await runtime.step(RUN, { waitMs: 0 })
+    await runtime.step(RUN, { waitMs: 0 })
+    await runtime.step(RUN, { waitMs: 0 })
+    expect(deliveredEvents(sent).map((item) => item.text)).toEqual(['chunk 1\n', 'chunk 2\n', 'chunk 3\n'])
+    // An append is not a resynchronisation: the renderer keeps its single message.
+    expect(sent.some((entry) => entry.channel === 'agent:traceHealth')).toBe(false)
   })
 
   it('never replays a rewrite as an append', async () => {
