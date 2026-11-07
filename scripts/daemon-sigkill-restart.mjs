@@ -47,6 +47,9 @@ async function waitFor(predicate, child, label) {
 function lease(path) {
   const value = JSON.parse(readFileSync(path, 'utf8'))
   if (!value.startedAt || !value.identityKey) throw new Error(`lease identity missing: ${path}`)
+  if (process.platform === 'linux' && !value.identityKey.includes(':linux:')) {
+    throw new Error(`lease exact Linux identity missing: ${path}`)
+  }
   return value
 }
 
