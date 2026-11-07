@@ -68,6 +68,9 @@ export function createLazyDaemonRunSurface(
     focusRun(runId: string | null): Promise<boolean> { return call((value) => value.focusRun(runId)) },
     stop(runId: string): Promise<boolean> { return call((value) => value.stop(runId)) },
     answerQuestion(response: AgentQuestionResponse): Promise<boolean> { return call((value) => value.answerQuestion(response)) },
+    steer(payload: unknown) { return call((value) => value.steer(payload)) },
+    stopBackgroundTask(payload: unknown) { return call((value) => value.stopBackgroundTask(payload)) },
+    adopt(runId: string) { return call((value) => value.adopt(runId)) },
     ack(receipt: TraceBatchReceipt): Promise<boolean> { return call((value) => value.ack(receipt)) },
     resynchronized(): Promise<true> { return call((value) => value.resynchronized()) },
     dispose(): void { void ensure().then((result) => result.dispose?.(), () => undefined) }

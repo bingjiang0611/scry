@@ -22,6 +22,9 @@ function surface(overrides: Partial<DaemonRunSurface> = {}): DaemonRunSurface {
     answerQuestion: async () => true,
     ack: async () => true,
     resynchronized: async () => true as const,
+    steer: async () => ({ status: 'accepted' as const }),
+    stopBackgroundTask: async () => ({ status: 'requested' as const, message: '' }),
+    adopt: async () => null,
     ...overrides
   }
 }

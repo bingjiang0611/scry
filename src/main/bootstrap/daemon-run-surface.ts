@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import type { AgentQuestionResponse, AgentStartRequest, AgentStartResult } from '../../shared/runtime'
+import type { AgentQuestionResponse, AgentStartRequest, AgentStartResult, AgentSteerResult } from '../../shared/runtime'
+import type { BackgroundTaskStopResult } from '../../shared/background-work'
 import type { ActiveRun } from '../../shared/trace'
 import type { DesktopRemoteContext } from '../../shared/desktop-remote'
 import { DaemonRunRuntime } from '../daemon-run-runtime'
@@ -31,6 +32,11 @@ export interface DaemonRunSurface {
   answerQuestion(response: AgentQuestionResponse): Promise<boolean>
   ack(receipt: TraceBatchReceipt): Promise<boolean>
   resynchronized(): Promise<true>
+  // App-only controls. The daemon answers from the registry that owns the run; the
+  // App's own memory has no entry for a daemon run.
+  steer(payload: unknown): Promise<AgentSteerResult>
+  stopBackgroundTask(payload: unknown): Promise<BackgroundTaskStopResult>
+  adopt(runId: string): Promise<ActiveRun | null>
 }
 
 // The intent detail is the daemon's routing contract, so only fields the App
@@ -60,6 +66,10 @@ export function runContext(payload: AgentStartRequest, currentCwd: string | unde
     ...(payload.agentProfileId ? { agentProfileId: payload.agentProfileId } : {}),
     ...(payload.expectedExternalSessionId ? { externalSessionId: payload.expectedExternalSessionId } : {})
   }
+}
+
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSurface {
@@ -104,6 +114,24 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
     async focusRun(runId) { focusedRunId = runId; return true },
     stop(runId) { return runtime.stop(runId) },
     answerQuestion(response) { return runtime.answerQuestion(response) },
+    async steer(payload) {
+      const reply = await deps.transport.runControl({ method: 'steer', payload })
+      if (!record(reply.steer) || typeof reply.steer.status !== 'string') throw new Error('daemon_run_control_unavailable')
+      return reply.steer as unknown as AgentSteerResult
+    },
+    async stopBackgroundTask(payload) {
+      const reply = await deps.transport.runControl({ method: 'stopBackgroundTask', payload })
+      if (!record(reply.backgroundTask) || typeof reply.backgroundTask.status !== 'string') throw new Error('daemon_run_control_unavailable')
+      return reply.backgroundTask as unknown as BackgroundTaskStopResult
+    },
+    async adopt(runId) {
+      const reply = await deps.transport.runControl({ method: 'adopt', runId })
+      if (reply.run === null) return null
+      if (!record(reply.run) || typeof reply.run.runId !== 'string') throw new Error('daemon_run_control_unavailable')
+      // Adopting means this window now shows the run, so the next activeRun() agrees.
+      focusedRunId = runId
+      return reply.run as unknown as ActiveRun
+    },
     async ack(receipt) { return runtime.bridge.ack(receipt) },
     async resynchronized() { runtime.bridge.resynchronized(); return true as const }
   }

@@ -6,6 +6,7 @@ import type { PairingAuthority } from './pairing'
 import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import type { ExecutionTargetRouter } from './execution-targets'
 import { dispatchRemoteRequest } from './inner-mtls-dispatch'
+import type { RunControlHandlers } from './host-run-control'
 import { remoteOperationCounters, remoteRequestTrace } from './remote-request-timing'
 
 // Production inner-mTLS host: the TLS 1.3 mutually-authenticated endpoint that a
@@ -42,6 +43,10 @@ export interface InnerMtlsHostOptions {
   // Answers `daemonInfo` on this endpoint. The local socket serves it so the App can
   // check the daemon's version before it enrolls a grant.
   info?: { version: string }
+  // App-only run controls over the daemon's own registry. Supplied on the local
+  // endpoint only: a device has no business steering the user's Mac run, and the op
+  // is absent (not merely refused) on the network endpoint.
+  runControl?: RunControlHandlers
 }
 
 // Remote prompts may carry a small, explicitly bounded image/text attachment.
@@ -76,7 +81,7 @@ export class InnerMtlsHost {
       minVersion: 'TLSv1.3',
       maxVersion: 'TLSv1.3',
       secureOptions: constants.SSL_OP_NO_TICKET
-    }, (socket) => this.#onConnection(socket as TLSSocket, options.controller, options.executionTargets))
+    }, (socket) => this.#onConnection(socket as TLSSocket, options.controller, options.executionTargets, options.runControl))
     this.#server.on('tlsClientError', (err) => {
       // Rejected handshakes are not host errors. Optional diagnostics only.
       if (process.env.SCRY_INNER_MTLS_DEBUG) console.log(`[inner-mtls] tlsClientError: ${(err as Error)?.message}`)
@@ -91,7 +96,7 @@ export class InnerMtlsHost {
     this.#server.emit('connection', stream)
   }
 
-  #onConnection(socket: TLSSocket, controller: HostController, executionTargets?: ExecutionTargetRouter): void {
+  #onConnection(socket: TLSSocket, controller: HostController, executionTargets?: ExecutionTargetRouter, runControl?: RunControlHandlers): void {
     // Fail closed on anything but a fresh, fully-verified TLS 1.3 session.
     if (process.env.SCRY_INNER_MTLS_DEBUG) console.log(`[inner-mtls] onConnection authorized=${socket.authorized} authErr=${socket.authorizationError} proto=${socket.getProtocol()} reused=${socket.isSessionReused()}`)
     if (!socket.authorized || socket.getProtocol() !== 'TLSv1.3' || socket.isSessionReused()) { socket.destroy(); return }
@@ -174,7 +179,7 @@ export class InnerMtlsHost {
       socket.setTimeout(0)
       const timing = remoteRequestTrace('remote.host.request')
       timing?.mark('frame_received')
-      void dispatchRemoteRequest(controller, fingerprint, parsed, executionTargets)
+      void dispatchRemoteRequest(controller, fingerprint, parsed, executionTargets, runControl)
         .then((res) => {
           busy = false
           timing?.mark('dispatch_settled', remoteOperationCounters(parsed))

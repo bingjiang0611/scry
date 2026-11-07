@@ -61,6 +61,16 @@
 - `remote-run-binding`：`routing.cwd` 为空时不写 `cwd` 字段（写 `''` 会被 App 当成路径），由 App 自己的 `currentCwd` 回落。
 - 测试：`scope-policy.test.ts` 新增 2 条（本机未命名提交放行且 `routing.cwd === ''`；设备同样的请求不启动 run；本机提交到未授权目录仍被拒），`remote-run-binding.test.ts` 新增 1 条。**控制实验**：把三处改动 stash 掉后，「本机未命名提交」这条立即失败。
 
+## run controls（steer / 后台任务停止 / adopt）
+
+这三个通道原来在 daemon 模式下仍读 App 进程内的登记表，而 daemon 的 run 根本不在那里：steer 会得到「运行、Provider、目录或会话身份已变化」这种误导性拒绝，adopt 返回 `null`。现在按 ops 表既有定义实现 `runControl` op：
+
+- daemon：`host-run-control.ts` 按 `method: steer | stopBackgroundTask | adopt` 分派，复用 `run-steering.ts` 与 `background-task-control.ts`（同一套校验，不另写）；`host-process` 用 daemon 自己的 `pipeline.runs` 构造处理器。
+- **只在本地端点存在**：`InnerMtlsHost` 的 `runControl` 只在 `createLocalHost` 传入；网络端点没有处理器时该 op 返回 `unsupported_op`，不是从别的进程内存里编答案。旧 daemon 同样返回 `unsupported_op`，App 映射为 `daemon_run_control_unavailable`（命名缺席，不是空成功）。
+- App：`DaemonRunTransport.runControl` 发一帧；`DaemonRunSurface` 的 `steer`/`stopBackgroundTask`/`adopt` 解析结果，读不懂就报错；`agent:steer`、`agent:stopBackgroundTask`、`agent:adoptActiveRun` 在开关打开时走 daemon，adopt 成功后把该 run 设为当前聚焦。
+
+测试：`host-run-control.test.ts`（5 条：未知 method、分派、adopt 的 runId 校验、有/无处理器、多余字段被拒）、`daemon-run-transport.test.ts`（+3 条）、`daemon-run-surface.test.ts`（5 条）。
+
 ## 编辑最后一条消息（turn 边界）
 
 App 的「编辑并重发」是 `forkLastTurn` / `restartLastTurn`，`workspace` 准备是另一条流程。routing 不吞字段：

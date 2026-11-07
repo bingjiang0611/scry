@@ -8,6 +8,7 @@ import type { HostController } from './host-controller'
 import { InnerMtlsHost } from './inner-mtls-host'
 import { ExecutionTargetRouter } from './execution-targets'
 import { PairingTransport } from './pairing-transport'
+import type { RunControlHandlers } from './host-run-control'
 import { RelayClient, type RelayDiagnostics } from './relay-client'
 import type { RemoteHostServiceDependencies } from './remote-host-service-deps'
 import type { PairingAuthority } from './pairing'
@@ -36,6 +37,7 @@ export class RemoteHostService {
   #pairing: PairingTransport
   #clients: RelayClient[]
   #relayAdvertisement: { host: string; port: number; tls: 'system' | 'plaintext' } | null
+  #runControl: RunControlHandlers | undefined
   #starting: Promise<void> | null = null
   #disposing: Promise<void> | null = null
   #disposed = false
@@ -60,6 +62,7 @@ export class RemoteHostService {
     hostId: string
     relayAdvertisement: { host: string; port: number; tls: 'system' | 'plaintext' } | null
     serverCredentials: { certificatePEM: string; privateKeyPEM: string }
+    runControl?: RunControlHandlers
   }) {
     this.#binding = init.binding
     this.#serverCredentials = init.serverCredentials
@@ -71,6 +74,7 @@ export class RemoteHostService {
     this.caCertificatePEM = init.caCertificatePEM
     this.hostId = init.hostId
     this.#relayAdvertisement = init.relayAdvertisement ?? null
+    this.#runControl = init.runControl
   }
 
   static async create(deps: RemoteHostServiceDependencies): Promise<RemoteHostService> {
@@ -150,7 +154,8 @@ export class RemoteHostService {
       caCertificatePEM: identity.caCertificatePEM,
       hostId: identity.hostId,
       relayAdvertisement: deps.relayAdvertisement ?? null,
-      serverCredentials: { certificatePEM: server.certificatePEM, privateKeyPEM: server.privateKeyPEM }
+      serverCredentials: { certificatePEM: server.certificatePEM, privateKeyPEM: server.privateKeyPEM },
+      ...(deps.runControl ? { runControl: deps.runControl } : {})
     })
   }
 
@@ -175,7 +180,8 @@ export class RemoteHostService {
       serverKeyPEM: this.#serverCredentials.privateKeyPEM,
       caPEM: this.caCertificatePEM,
       transport: 'local',
-      info
+      info,
+      ...(this.#runControl ? { runControl: this.#runControl } : {})
     })
   }
 

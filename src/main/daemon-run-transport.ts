@@ -22,6 +22,7 @@ export type DaemonRunFailure =
   | 'daemon_run_unknown'
   | 'daemon_stop_not_confirmed'
   | 'daemon_answer_not_delivered'
+  | 'daemon_run_control_unavailable'
   | 'invalid_daemon_response'
 
 export class DaemonRunError extends Error {
@@ -75,6 +76,8 @@ function failure(reply: Record<string, unknown>): DaemonRunError | undefined {
   const code = reply.error
   if (code === undefined) return undefined
   if (code === 'device_not_authorized') return new DaemonRunError('daemon_device_not_authorized')
+  // An older daemon has no run controls at all: a named absence, not an empty success.
+  if (code === 'unsupported_op') return new DaemonRunError('daemon_run_control_unavailable')
   return new DaemonRunError('invalid_daemon_response')
 }
 
@@ -161,6 +164,21 @@ export class DaemonRunTransport {
       throw new DaemonRunError('invalid_daemon_response')
     }
     return output as unknown as DaemonOutputStream
+  }
+
+  /**
+   * App-only run controls, answered by the daemon's own registry. Kept as raw frames:
+   * the reply is the renderer's existing result shape, and inventing one here would
+   * be a second answer to the same question.
+   */
+  async runControl(request: { method: 'steer' | 'stopBackgroundTask'; payload: unknown } | { method: 'adopt'; runId: string }): Promise<Record<string, unknown>> {
+    // #call turns `unsupported_op` into a named absence; every other error code stays
+    // the one the daemon sent.
+    return await this.#call({
+      op: 'runControl',
+      method: request.method,
+      ...(request.method === 'adopt' ? { runId: request.runId } : { payload: request.payload })
+    })
   }
 
   async stop(runId: string): Promise<'requested' | 'already_requested'> {

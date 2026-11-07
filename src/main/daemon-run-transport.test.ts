@@ -87,4 +87,23 @@ describe('daemon run transport', () => {
     const value = new DaemonRunTransport(vi.fn(async () => { throw new Error('socket closed') }))
     await expect(value.runState(RUN)).rejects.toMatchObject({ reason: 'daemon_not_running' })
   })
+
+  it('sends a run control as one frame and keeps the daemon answer', async () => {
+    const { value, calls } = transport(() => ({ steer: { status: 'accepted', messageId: 'm-1' } }))
+    await expect(value.runControl({ method: 'steer', payload: { runId: RUN, messageId: 'm-1', prompt: 'go' } }))
+      .resolves.toEqual({ steer: { status: 'accepted', messageId: 'm-1' } })
+    expect(calls[0]!.request).toEqual({ op: 'runControl', method: 'steer', payload: { runId: RUN, messageId: 'm-1', prompt: 'go' } })
+  })
+
+  it('names a daemon that does not serve run controls at all', async () => {
+    // An older daemon answers unsupported_op. That is an absence, not an empty success:
+    // the App must not show "sent" for a steer that never reached a run.
+    const { value } = transport(() => ({ error: 'unsupported_op' }))
+    await expect(value.runControl({ method: 'adopt', runId: RUN })).rejects.toMatchObject({ reason: 'daemon_run_control_unavailable' })
+  })
+
+  it('keeps a revoked grant a revoked grant, not an unavailable control', async () => {
+    const { value } = transport(() => ({ error: 'device_not_authorized' }))
+    await expect(value.runControl({ method: 'adopt', runId: RUN })).rejects.toMatchObject({ reason: 'daemon_device_not_authorized' })
+  })
 })

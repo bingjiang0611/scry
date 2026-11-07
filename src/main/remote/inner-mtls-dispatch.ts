@@ -1,3 +1,4 @@
+import { handleRunControl, type RunControlHandlers } from './host-run-control'
 import type { HostController } from './host-controller'
 import { executionTargetError, type ExecutionTargetRouter } from './execution-targets'
 import { historyProfileSelection } from './remote-gateway'
@@ -52,7 +53,13 @@ export interface RemoteRequestEnvelope {
   totalCount?: number
 }
 
-export async function dispatchRemoteRequest(controller: HostController, fingerprint: string, parsed: unknown, executionTargets?: ExecutionTargetRouter): Promise<unknown> {
+export async function dispatchRemoteRequest(
+  controller: HostController,
+  fingerprint: string,
+  parsed: unknown,
+  executionTargets?: ExecutionTargetRouter,
+  runControl?: RunControlHandlers
+): Promise<unknown> {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { error: 'invalid_request' }
   const request = parsed as RemoteRequestEnvelope
   // Version gate before any op runs: a request that does not declare this host's
@@ -128,6 +135,14 @@ export async function dispatchRemoteRequest(controller: HostController, fingerpr
         ...(request.revision !== undefined ? { revision: request.revision } : {}),
         ...(history ? { history } : {})
       }) }
+    }
+    if (request.op === 'runControl') {
+      // App-only: absent on the network endpoint, where the op is refused rather than
+      // silently answered from another process's memory.
+      if (!runControl) return { error: 'unsupported_op' }
+      const keys = Object.keys(request)
+      if (keys.some((key) => !['op', 'keepAlive', 'protocol', 'method', 'runId', 'payload'].includes(key))) return { error: 'invalid_request' }
+      return await handleRunControl(runControl, request)
     }
     if (request.op === 'stop') {
       if (typeof request.runId !== 'string') return { error: 'invalid_request' }

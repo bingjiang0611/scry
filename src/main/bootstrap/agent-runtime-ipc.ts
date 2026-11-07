@@ -87,7 +87,8 @@ export function registerAgentRuntimeHandlers({
     if (sessionKey) dockBadge.view(sessionKey, Boolean(getWindow()?.isFocused()))
     return true
   })
-  handleTrusted('agent:adoptActiveRun', (_event, runId: string): ActiveRun | null => {
+  handleTrusted('agent:adoptActiveRun', async (_event, runId: string): Promise<ActiveRun | null> => {
+    if (daemon) return await daemon.adopt(runId)
     const entry = runs.get(runId)
     if (!entry || entry.state.done) return null
     entry.control.adoptSession()
@@ -164,12 +165,16 @@ export function registerAgentRuntimeHandlers({
     return true as const
   })
 
-  handleTrusted('agent:stopBackgroundTask', (_event, payload: unknown) => stopObservedBackgroundTask(payload, (runId) => runs.get(runId)))
+  handleTrusted('agent:stopBackgroundTask', async (_event, payload: unknown) =>
+    daemon ? await daemon.stopBackgroundTask(payload) : stopObservedBackgroundTask(payload, (runId) => runs.get(runId)))
 
   // 多视图 live 流：每个可见 run 一条自有有界流（上限两个），与 legacy 焦点通道分离。
   registerRunTraceHandlers(handleTrusted, runTraces, runId => runs.isViewed(runId))
 
   handleTrusted('agent:stop', (_event, runId: string) => daemon ? daemon.stop(runId) : requestRunStop(runId))
-  handleTrusted('agent:steer', (_event, payload: unknown) => steerObservedRun(payload, (runId) => runs.get(runId)))
+  // In daemon mode the registry that owns the run is in the daemon: consulting the
+  // App's own registry would answer "identity changed" about a run it never held.
+  handleTrusted('agent:steer', async (_event, payload: unknown) =>
+    daemon ? await daemon.steer(payload) : steerObservedRun(payload, (runId) => runs.get(runId)))
 
 }

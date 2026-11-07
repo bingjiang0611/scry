@@ -12,6 +12,8 @@ import { configureRecorderCliRuntime, warmShellEnv } from '../main/claude-locate
 import { daemonPrivateCliPath } from './daemon-config'
 import { startRun } from '../main/bootstrap/run-execution'
 import { startWorkspaceRun } from '../main/bootstrap/workspace-start'
+import { steerObservedRun } from '../main/run-steering'
+import { stopObservedBackgroundTask } from '../main/background-task-control'
 import { SourceControlService } from '../main/source-control/service'
 import { createProviderDiscovery } from '../main/remote/provider-discovery'
 import { listRemoteDirectories, resolveCanonicalRemoteProjectDirectory } from '../main/remote/remote-directory-browser'
@@ -222,6 +224,14 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     get isShuttingDown() { return isShuttingDown }
   }
 
+  // App run controls answer from this process's registry: steering and background-task
+  // stops are bound to the live run, so they cannot be replayed from another process.
+  const runControl = {
+    steer: (payload: unknown) => steerObservedRun(payload, (runId) => pipeline.runs.get(runId)),
+    stopBackgroundTask: (payload: unknown) => stopObservedBackgroundTask(payload, (runId) => pipeline.runs.get(runId)),
+    adopt: (runId: string) => pipeline.runs.get(runId)?.state ?? null
+  }
+
   await refreshRemoteProviderSnapshot()
   const remoteStateDirectory = join(options.userDataDir, 'remote')
   const relay = await resolveRemoteRelay(remoteStateDirectory)
@@ -236,6 +246,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     // Omit every source. HostController returns explicit unavailable envelopes with
     // reasons for analytics, LLM performance and MCP trust.
     toolPanels: undefined,
+    runControl,
     createOutputStore: options.createOutputStore ?? ((directory) => RunOutputWorkerStore.create(
       directory,
       // This expression stays in the daemon entry (out/main/daemon.js), while the
