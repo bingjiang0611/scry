@@ -21,6 +21,40 @@ export async function exerciseListStructure({ read, check, wait, click, settle, 
       await click(`#list-${modal}`)
       await wait("document.querySelector('.modal-overlay .motion-stagger')")
       await settle()
+      if (modal === 'mcp') {
+        // The tool drawer lives in its own table row: opening it must animate the row's
+        // height (moving the servers below) and closing must retire it inert, not vanish.
+        const drawer = await read(`(async () => {
+          const disclosure = () => document.querySelector('.modal-overlay .mcp-tools-row .motion-disclosure')
+          const serverRowTop = () => [...document.querySelectorAll('.modal-overlay .mcp-fleet tbody tr')]
+            .find(row => row.textContent.startsWith('server-1'))?.getBoundingClientRect().top ?? null
+          const button = document.querySelector('.modal-overlay .mcp-tools-toggle')
+          const secondRowTop = serverRowTop
+          const contractOf = node => {
+            const style = getComputedStyle(node)
+            return { name: style.animationName, duration: style.animationDuration, state: node.dataset.state, inert: node.inert }
+          }
+          const closed = { present: disclosure() != null, secondRowTop: secondRowTop() }
+          button.click()
+          await new Promise(resolve => setTimeout(resolve, 20))
+          const entering = contractOf(disclosure())
+          await new Promise(resolve => setTimeout(resolve, 320))
+          const opened = { height: disclosure().getBoundingClientRect().height, secondRowTop: secondRowTop(), expanded: button.getAttribute('aria-expanded') }
+          button.click()
+          await new Promise(resolve => setTimeout(resolve, 20))
+          const exiting = contractOf(disclosure())
+          await new Promise(resolve => setTimeout(resolve, 320))
+          return { closed, entering, opened, exiting, gone: disclosure() == null }
+        })()`)
+        check(!drawer.closed.present, `${theme}: MCP tool drawer mounted before opening`)
+        check(drawer.entering.name === 'disclosure-in' && drawer.entering.duration === '0.2s' && drawer.entering.state === 'enter',
+          `${theme}: MCP tool drawer did not animate its row height: ${JSON.stringify(drawer.entering)}`)
+        check(drawer.opened.expanded === 'true' && drawer.opened.height > 0, `${theme}: MCP tool drawer did not open: ${JSON.stringify(drawer.opened)}`)
+        check(drawer.opened.secondRowTop - drawer.closed.secondRowTop >= drawer.opened.height - 1,
+          `${theme}: MCP tool drawer did not move the servers below it: ${JSON.stringify(drawer)}`)
+        check(drawer.exiting.name === 'disclosure-out' && drawer.exiting.state === 'exit' && drawer.exiting.inert === true && drawer.gone,
+          `${theme}: MCP tool drawer exit was not retired: ${JSON.stringify(drawer)}`)
+      }
       await screenshot(`${theme}-${modal}`)
       contents.sendInputEvent({ type: 'keyDown', keyCode: 'ESC' }); contents.sendInputEvent({ type: 'keyUp', keyCode: 'ESC' })
       await wait("!document.querySelector('.modal-overlay')")

@@ -35,12 +35,25 @@ export function animatePaneChange(commit: () => void): void {
       }
     }
     const entering = oldRect.width === 0
+    // Reduced motion asks for no travel and no crossfade, so a pane that merely
+    // changes width has nothing left to animate; only the enter/leave edges fade.
+    if (reduced && !entering && !leaving) return
     const distance = node.id === 'sidebar-pane' ? -1 : 1
     const from = entering ? distance * newRect.width : leaving ? 0 : oldRect.left - newRect.left
     const to = leaving ? distance * oldRect.width : 0
+    // A pane that stays on screen keeps its pixels: fading the whole transcript reads
+    // as a crossfade of the content, not as the layout making room for the panel.
+    // Only the enter/leave edges, which have no owner on screen yet, fade.
+    const fromTransform = `translateX(${from}px)`
+    const toTransform = `translateX(${to}px)`
+    const frames = leaving
+      ? [{ transform: fromTransform, opacity: 1 }, { transform: toTransform, opacity: 0 }]
+      : entering
+        ? [{ transform: fromTransform, opacity: 0 }, { transform: toTransform, opacity: 1 }]
+        : [{ transform: fromTransform }, { transform: toTransform }]
     const animation = node.animate(reduced
       ? [{ opacity: leaving ? 1 : 0 }, { opacity: leaving ? 0 : 1 }]
-      : [{ transform: `translateX(${from}px)`, opacity: leaving ? 1 : 0 }, { transform: `translateX(${to}px)`, opacity: leaving ? 0 : 1 }],
+      : frames,
     {
       duration: reduced ? MOTION.durationReduced : leaving ? MOTION.durationExitMd : MOTION.durationMd,
       easing: reduced ? MOTION.easeOut : leaving ? MOTION.easeIn : entering ? MOTION.easeOut : MOTION.easeInOut

@@ -8,7 +8,8 @@ vi.mock('react', () => ({
   useRef: (current: unknown) => ({ current }),
   useState: (initial: string) => [initial, (next: string) => { harness.state = next }],
   useCallback: (callback: unknown) => callback,
-  useEffect: (effect: () => (() => void)) => { harness.cleanups.push(effect()) }
+  useEffect: (effect: () => (() => void)) => { harness.cleanups.push(effect()) },
+  useLayoutEffect: (effect: () => (() => void)) => { harness.cleanups.push(effect()) }
 }))
 vi.mock('react-dom', () => ({ flushSync: (callback: () => void) => { harness.flushes++; callback() } }))
 

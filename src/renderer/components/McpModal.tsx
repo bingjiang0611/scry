@@ -17,8 +17,40 @@ import './archived-sessions.css'
 
 
 
+import { useOpenPresence } from '../hooks/usePresence'
 import { ModalFrame, requestModalClose } from './ModalFrame'
 import { EvidenceState, type EvidenceValue, scopeClass, scopeShortLabel, InventoryContext, useReadStarted, MCP_SCOPE_LABEL, evidenceForRuntime, shortTestLabel, McpEvidenceCell } from './CapabilityEvidence'
+/**
+ * The tool list lives inside `<td>`, so the animated box cannot be the shared
+ * `Disclosure` (it renders a plain div wrapper); it keeps the same `.motion-disclosure`
+ * contract so the row height grows and shrinks with the rows below it.
+ */
+function McpToolsRow({ open, toolsId, toolNames }: { open: boolean; toolsId: string; toolNames: readonly string[] }) {
+  const presence = useOpenPresence(open)
+  if (!presence.present) return null
+  return (
+    <tr className="mcp-tools-row">
+      <td colSpan={4}>
+        <div
+          className="motion-disclosure"
+          data-state={open ? 'enter' : 'exit'}
+          aria-hidden={!open || undefined}
+          ref={node => { presence.ref(node); if (node) node.inert = !open }}
+        >
+          <div className="motion-disclosure-inner">
+            <div id={toolsId} className="mcp-tools-drawer">
+              <div><strong>本次测试返回的工具</strong><small>来自 initialize / tools/list</small></div>
+              <div className="mcp-tools-drawer__list">
+                {toolNames.map((tool) => <code key={tool}>{tool}</code>)}
+              </div>
+            </div>
+          </div>
+        </div>
+      </td>
+    </tr>
+  )
+}
+
 export function McpModal({
   mcps,
   status,
@@ -244,17 +276,8 @@ export function McpModal({
                         ) : null}
                       </td>
                     </tr>
-                    {open && currentStatus?.toolNames && (
-                      <tr className="mcp-tools-row">
-                        <td colSpan={4}>
-                          <div id={toolsId} className="mcp-tools-drawer">
-                            <div><strong>本次测试返回的工具</strong><small>来自 initialize / tools/list</small></div>
-                            <div className="mcp-tools-drawer__list">
-                              {currentStatus.toolNames.map((tool) => <code key={tool}>{tool}</code>)}
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
+                    {currentStatus?.toolNames && (
+                      <McpToolsRow open={open} toolsId={toolsId} toolNames={currentStatus.toolNames} />
                     )}
                   </tbody>
                 )

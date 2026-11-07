@@ -90,6 +90,20 @@
 .motion-disclosure[data-immediate='true'][data-state='enter'] { animation: none; }
 .motion-chevron { transition: transform var(--duration-sm) var(--ease-out-strong); }
 .motion-chevron.is-open { transform: rotate(90deg); }
+
+/* Popover layers travel the way the user moved: drilling into the model list goes
+   right, coming back to the summary comes from the left. The container box is
+   morphed separately, so the hand-over reads as one move instead of a swap. */
+@keyframes popover-view-forward {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes popover-view-back {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: none; }
+}
+.model-effort-view[data-view-motion='list'] { animation: popover-view-forward var(--duration-sm) var(--ease-out-strong) backwards; }
+.model-effort-view[data-view-motion='summary'] { animation: popover-view-back var(--duration-sm) var(--ease-out-strong) backwards; }
 .sb-project-chevron { position: absolute; left: -9px; width: 8px; height: 8px; color: var(--dim2); pointer-events: none; }
 
 .thinking { interpolate-size: allow-keywords; }
@@ -107,6 +121,22 @@
 }
 .thinking[data-long='true']::details-content { height: auto; transition: opacity var(--duration-exit-sm) var(--ease-in), content-visibility var(--duration-exit-sm) allow-discrete; }
 .thinking[data-long='true'][open]::details-content { transition-duration: var(--duration-sm); transition-timing-function: var(--ease-out); }
+
+/* Native disclosure in the turn footer: the same settle as `.thinking`, so the rows
+   below move with it instead of appearing in one frame. */
+.files-summary { interpolate-size: allow-keywords; }
+.files-summary::details-content {
+  height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: height var(--duration-exit-sm) var(--ease-in), opacity var(--duration-exit-sm) var(--ease-in), content-visibility var(--duration-exit-sm) allow-discrete;
+}
+.files-summary[open]::details-content {
+  height: auto;
+  opacity: 1;
+  transition-duration: var(--duration-sm);
+  transition-timing-function: var(--ease-out);
+}
 
 .surface-tabs { position: relative; }
 .motion-tab-indicator {
@@ -143,11 +173,15 @@
   @keyframes stream-arrival { from { opacity: 0; } to { opacity: 1; } }
   @keyframes disclosure-in { from { opacity: 0; } to { opacity: 1; } }
   @keyframes disclosure-out { from { opacity: 1; } to { opacity: 0; } }
+  @keyframes popover-view-forward { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes popover-view-back { from { opacity: 0; } to { opacity: 1; } }
   .stream-arrival, .motion-disclosure[data-state],
   .motion-disclosure[data-long='true'][data-state] { animation-duration: var(--duration-reduced); }
   .motion-chevron { transition: none; }
+  .model-effort-view[data-view-motion] { animation-duration: var(--duration-reduced); }
   .thinking::details-content,
   .thinking[data-long='true']::details-content { transition: opacity var(--duration-reduced) var(--ease-out), content-visibility var(--duration-reduced) allow-discrete; }
+  .files-summary::details-content { transition: opacity var(--duration-reduced) var(--ease-out), content-visibility var(--duration-reduced) allow-discrete; }
   .motion-stagger { animation: list-fade-in var(--duration-reduced) var(--ease-out) backwards; }
   .motion-stagger .motion-stagger-item { animation: none; }
 }

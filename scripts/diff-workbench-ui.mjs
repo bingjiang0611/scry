@@ -7,6 +7,13 @@ export const contextFixture = (changed = false, dirty = false) => Array.from({ l
 
 /** Same production App, real immutable Git data and native pointer/keyboard events. */
 export async function exerciseDiffWorkbench({ target, git, click, wait, evaluate, screenshot, cdp }) {
+  // The pane motion assertions measure the normal path; CI runners report
+  // `prefers-reduced-motion: reduce`, where a stationary pane deliberately does not
+  // animate. Pin the media feature instead of inheriting the host setting. The reduced
+  // path is covered by src/renderer/pane-motion.test.ts.
+  await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] })
+  assert.equal(await evaluate(`matchMedia('(prefers-reduced-motion: reduce)').matches`), false,
+    'pane motion must be measured with motion enabled')
   const path = join(target, 'workbench-context.ts')
   writeFileSync(path, contextFixture(true))
   git(target, 'add', '--', 'workbench-context.ts')
@@ -85,6 +92,20 @@ export async function exerciseDiffWorkbench({ target, git, click, wait, evaluate
   await click('.diff-virtual-files [role="option"]', 'workbench-context.ts')
   await wait(() => evaluate(`document.querySelector('.diff-virtual-code')?.textContent.includes('DIRTY-MUST-NOT-ENTER-COMMIT')`), 'branch view includes live edits from its captured snapshot')
 
+  // Record the pane animations the App actually creates: the 250ms window is too
+  // short to sample `getAnimations()` after a pointer round trip, and a loaded
+  // runner would read an empty list for reasons unrelated to the fix.
+  await evaluate(`(() => {
+    window.__paneMotions = []
+    const original = Element.prototype.animate
+    window.__restorePaneAnimate = () => { Element.prototype.animate = original }
+    Element.prototype.animate = function (keyframes, options) {
+      if (/^(sidebar-pane|right-surface-pane|remote-right-surface-pane)$/.test(this.id ?? '')) {
+        window.__paneMotions.push({ pane: this.id, frames: Array.isArray(keyframes) ? keyframes : null })
+      }
+      return original.call(this, keyframes, options)
+    }
+  })()`)
   const before = await evaluate(`document.querySelector('#right-surface-pane').getBoundingClientRect().width`)
   const point = await evaluate(`(() => { const box = document.querySelector('.panel-resizer[aria-controls="right-surface-pane"]').getBoundingClientRect(); return { x: box.x + box.width / 2, y: box.y + box.height / 2 } })()`)
   await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point })
@@ -92,6 +113,20 @@ export async function exerciseDiffWorkbench({ target, git, click, wait, evaluate
   await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, x: point.x - 100, y: point.y })
   await wait(() => evaluate(`document.querySelector('#right-surface-pane').getBoundingClientRect().width > ${before + 50}`), 'native sidebar resize')
   await click('[data-session-surface-current="true"] button[aria-label="最大化右侧工作区"]')
+  // Both panes stay on screen when the workbench maximizes, so they must shift without
+  // fading: a whole-pane opacity ramp reads as a crossfade of the transcript.
+  const paneFrames = await evaluate(`(async () => {
+    const deadline = Date.now() + 3000
+    while (Date.now() < deadline && (window.__paneMotions ?? []).length === 0) {
+      await new Promise(resolve => requestAnimationFrame(resolve))
+    }
+    const recorded = (window.__paneMotions ?? []).slice()
+    window.__restorePaneAnimate()
+    return recorded
+  })()`)
+  assert.ok(paneFrames.length > 0, 'maximize did not animate the panes')
+  assert.deepEqual(paneFrames.filter(entry => entry.frames.some(frame => 'opacity' in frame)).map(entry => entry.pane), [],
+    'a pane that stays on screen faded instead of shifting')
   await wait(() => evaluate(`document.querySelector('[data-session-surface-current="true"] .right-surface-panel[data-maximized="true"]') != null`), 'maximize review')
   await screenshot('diff-workbench-maximized')
   await click('[data-session-surface-current="true"] button[aria-label="恢复右侧工作区"]')

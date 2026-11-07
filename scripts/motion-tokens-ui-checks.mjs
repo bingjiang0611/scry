@@ -49,6 +49,56 @@ export async function exerciseMotionTokens(contents) {
   check(tokens.large === '400ms', `the large token is not 400ms: ${JSON.stringify(tokens)}`)
   check(tokens.entrance === 'cubic-bezier(0, 0, 0.58, 1)', `the shared entrance token is missing: ${JSON.stringify(tokens)}`)
 
+  // The native files disclosure must grow its content, moving the rows below it,
+  // instead of revealing them in one frame. Chromium exposes no transition events for
+  // `::details-content`, so the interpolated pseudo-element height is the evidence.
+  const filesDisclosure = await read(`(() => {
+    const details = document.querySelector('#motion-tool .files-summary:not(.diff)')
+    if (!details) return { missing: true }
+    const contract = getComputedStyle(details, '::details-content')
+    return { missing: false, open: details.open, property: contract.transitionProperty, duration: contract.transitionDuration }
+  })()`)
+  check(!filesDisclosure.missing, 'The motion fixture no longer renders a files disclosure')
+  check(!filesDisclosure.open, `Files disclosure should start collapsed: ${JSON.stringify(filesDisclosure)}`)
+  check(filesDisclosure.property.includes('height') && parseFloat(filesDisclosure.duration) === 0.15,
+    `Files disclosure lost its height transition: ${JSON.stringify(filesDisclosure)}`)
+  const filesRun = await read(`(async () => {
+    const details = document.querySelector('#motion-tool .files-summary:not(.diff)')
+    const summary = details.querySelector('summary')
+    // The host box is what the rows below actually move with, and it is a layout value
+    // that stays readable on every frame; the pseudo-element string can be auto.
+    const boxHeight = () => details.getBoundingClientRect().height
+    const frames = duration => new Promise(resolve => {
+      const started = performance.now()
+      const samples = []
+      const tick = () => {
+        samples.push({ at: Math.round(performance.now() - started), height: Number(boxHeight().toFixed(1)) })
+        if (performance.now() - started < duration) requestAnimationFrame(tick)
+        else resolve(samples)
+      }
+      requestAnimationFrame(tick)
+    })
+    const collapsed = { open: details.open, height: boxHeight() }
+    summary.click()
+    const opening = await frames(260)
+    const opened = { open: details.open, height: boxHeight(), rows: details.querySelector('.files-body')?.getBoundingClientRect().height ?? 0 }
+    summary.click()
+    const closing = await frames(260)
+    const closed = { open: details.open, height: boxHeight() }
+    return { collapsed, opening, opened, closing, closed }
+  })()`)
+  const midFlight = (samples, from, to) => samples.some(entry =>
+    entry.height > Math.min(from, to) + 1 && entry.height < Math.max(from, to) - 1)
+  check(!filesRun.collapsed.open && filesRun.opened.open && filesRun.opened.rows > 0,
+    `Files disclosure did not toggle: ${JSON.stringify({ collapsed: filesRun.collapsed, opened: filesRun.opened })}`)
+  check(filesRun.opened.height > filesRun.collapsed.height + 4,
+    `Open files disclosure does not take more room: ${JSON.stringify({ collapsed: filesRun.collapsed, opened: filesRun.opened })}`)
+  check(midFlight(filesRun.opening, filesRun.collapsed.height, filesRun.opened.height),
+    `Files disclosure popped open instead of growing: ${JSON.stringify(filesRun.opening)}`)
+  check(!filesRun.closed.open, `Files disclosure stayed open: ${JSON.stringify(filesRun.closed)}`)
+  check(midFlight(filesRun.closing, filesRun.closed.height, filesRun.opened.height),
+    `Files disclosure snapped closed: ${JSON.stringify(filesRun.closing)}`)
+
   for (const theme of ['dark', 'light']) {
     await read(`document.documentElement.dataset.theme = '${theme}'`)
     await hover('.tool-card')
@@ -166,7 +216,8 @@ export async function exerciseMotionTokens(contents) {
     reducedMotionReorder: true,
     reducedMotionColorTransition: 'declared 150ms ease-out',
     noUndeclaredColorTransitions: true,
-    reducedMotionTransformAnimation: false
+    reducedMotionTransformAnimation: false,
+    filesDisclosure: 'height transition on ::details-content'
   }
 }
 

@@ -3,6 +3,7 @@ import { useEffect, useId, useRef } from 'react'
 import { usePickerOpen, type PickerOpenProps, type RunControlSelectOption } from './picker-state'
 export { ModelEffortPicker } from './ModelEffortPicker'
 export type { RunControlSelectOption } from './picker-state'
+import { useOpenPresence } from '../hooks/usePresence'
 import { Icon } from './primitives/Icon'
 
 export function RunControlSelect({
@@ -27,10 +28,11 @@ export function RunControlSelect({
   tone?: 'warning' | 'danger'
 } & PickerOpenProps) {
   const [open, setOpen] = usePickerOpen(controlledOpen, onOpenChange)
+  const presence = useOpenPresence(open)
   const selected = options.find((option) => option.value === value)
   const pickerRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
-  const optionListRef = useRef<HTMLDivElement>(null)
+  const optionListRef = useRef<HTMLDivElement | null>(null)
   const popoverId = useId()
   const selectedIcon = value === 'full_access' ? 'alert' : value === 'auto_review' ? 'settings' : 'lock'
   const singleAvailableOption = options.filter((option) => !option.disabled).length === 1
@@ -93,10 +95,11 @@ export function RunControlSelect({
         <span className="rc-value" aria-hidden="true">{selected?.label ?? ''}</span>
         <Icon name={singleAvailableOption ? 'info' : 'chevronDown'} className="chev" />
       </button>
-      {open && (
+      {presence.present && (
         <div
           id={popoverId}
-          ref={optionListRef}
+          ref={node => { optionListRef.current = node; presence.ref(node); if (node) node.inert = !open }}
+          data-state={presence.state}
           className={`permission-mode-popover${singleAvailableOption ? ' is-single-option' : ''}`}
           role="listbox"
           aria-label="Agent 操作审批方式"

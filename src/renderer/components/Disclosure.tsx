@@ -1,20 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { usePresence } from '../hooks/usePresence'
-import { MOTION } from '../motion'
-
-const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
-
-export function useDisclosurePresence(open: boolean) {
-  const [present, setPresent] = useState(open)
-  const latestOpen = useRef(open)
-  latestOpen.current = open
-  const presence = usePresence({ exitMs: MOTION.durationExitSm, onClose: () => { if (!latestOpen.current) setPresent(false) } })
-  useBrowserLayoutEffect(() => {
-    if (open) { presence.reset(); setPresent(true) }
-    else if (present) presence.requestClose('replace')
-  }, [open])
-  return { ...presence, present }
-}
+import { useRef, useState, type ReactNode } from 'react'
+import { useBrowserLayoutEffect, useOpenPresence } from '../hooks/usePresence'
 
 export function disclosureIsLong(node: HTMLElement): boolean {
   const style = getComputedStyle(node)
@@ -30,7 +15,7 @@ export function Disclosure({ open, long = false, immediate = false, children }: 
   immediate?: boolean
   children: () => ReactNode
 }) {
-  const presence = useDisclosurePresence(open)
+  const presence = useOpenPresence(open)
   const initiallyOpen = useRef(open)
   const immediateEntrance = useRef(immediate)
   if (!open) {
