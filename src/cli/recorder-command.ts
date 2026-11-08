@@ -77,8 +77,9 @@ export async function recorderCommand(args: ParsedArgs): Promise<number> {
       if (!sessionId.trim()) throw new Error('--session-id must not be empty')
       scope = { provider, sessionId }
     }
-    print(await recoverRecorder(workspaceOf(args), process.env, undefined, scope))
-    return 0
+    const result = await recoverRecorder(workspaceOf(args), process.env, undefined, scope)
+    print(result)
+    return scope && result.pending > 0 ? 3 : 0
   }
   if (action === 'notify-drain' || action === 'notify-retry') {
     const sequence = intFlag(args, 'sequence')
