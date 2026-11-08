@@ -1,5 +1,7 @@
 import { spawnSync } from 'node:child_process'
-import { join } from 'node:path'
+import { constants, cpSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, join } from 'node:path'
 import electronPath from 'electron'
 import { releaseBuildEnvironment } from './release-policy.mjs'
 
@@ -67,8 +69,23 @@ const args = releaseBuild && process.platform === 'linux'
   ? ['--linux', 'pacman']
   : ['--dir', ...(releaseBuild && process.platform === 'darwin' ? ['--config.mac.notarize=true'] : [])]
 rebuildNativeModules()
-// This wrapper creates local artifacts; CI/default-branch detection must never
-// turn packaging into a network publication or require a publishing token.
-const result = spawnSync(builder, [...args, '--publish', 'never'], { env, stdio: 'inherit' })
-if (result.error) throw result.error
-if (result.status !== 0) throw new Error(`electron-builder failed with exit ${result.status ?? 'unknown'}`)
+// This host-only wrapper just probed the installed SDK. Reuse it instead of
+// downloading the same Electron archive/checksums again through electron-builder.
+// A private copy avoids modifying the installed SDK. Custom distributions skip
+// builder's stock cleanup, so omit exactly its default app and version marker.
+const installedDist = join(process.cwd(), 'node_modules', 'electron', 'dist')
+const electronDist = mkdtempSync(join(tmpdir(), 'electron-packaging-'))
+try {
+  cpSync(installedDist, electronDist, {
+    recursive: true,
+    mode: constants.COPYFILE_FICLONE,
+    verbatimSymlinks: true,
+    filter: source => basename(source) !== 'default_app.asar' && source !== join(installedDist, 'version')
+  })
+  // Packaging is not authorization to publish, even on CI's default branch.
+  const result = spawnSync(builder, [...args, `--config.electronDist=${electronDist}`, '--publish', 'never'], { env, stdio: 'inherit' })
+  if (result.error) throw result.error
+  if (result.status !== 0) throw new Error(`electron-builder failed with exit ${result.status ?? 'unknown'}`)
+} finally {
+  rmSync(electronDist, { recursive: true, force: true })
+}
