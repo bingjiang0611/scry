@@ -158,7 +158,10 @@ describe('ported label workflows', () => {
     })
     expect([...api.labels].sort()).toEqual([...unrelated, 'bug', testOnly ? 'size:L' : 'size:S'].sort())
     expect(git('rev-parse', 'HEAD')).toBe(base)
-    for (const args of commands.filter(args => args[0] === 'diff')) {
+    const diffCommands = commands.filter(args => args[0] === 'diff')
+    // Without this the loop below would pass on a workflow that stopped calling git diff.
+    expect(diffCommands.length).toBeGreaterThan(0)
+    for (const args of diffCommands) {
       expect(args).toContain('--no-ext-diff')
       expect(args).toContain('--no-textconv')
     }

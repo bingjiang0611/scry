@@ -23,7 +23,7 @@ const children: Record<string, WorkspaceEntry[]> = {
 const query = '  FILE-01 '
 const matched = Array.from({ length: 10 }, (_, index) => `dir-00/file-${String(10 + index).padStart(3, '0')}.ts`)
 
-interface Counts { childrenReads: number; nameReads: number }
+interface Counts { childrenReads: number; entriesIndexed: number; nameReads: number }
 
 function instrument(record: Record<string, WorkspaceEntry[]>, counts: Counts) {
   const instrumentEntry = (entry: WorkspaceEntry): WorkspaceEntry => new Proxy(entry, {
@@ -36,13 +36,16 @@ function instrument(record: Record<string, WorkspaceEntry[]>, counts: Counts) {
     get(target, property, receiver) {
       counts.childrenReads += 1
       const value = Reflect.get(target, property, receiver) as WorkspaceEntry[] | undefined
+      // Count the entries the projection actually walks, not the map's final size:
+      // a repeated index pass re-walks every entry and must show up here.
+      counts.entriesIndexed += value?.length ?? 0
       return value?.map(instrumentEntry)
     }
   })
 }
 
 function update() {
-  const counts: Counts = { childrenReads: 0, nameReads: 0 }
+  const counts: Counts = { childrenReads: 0, entriesIndexed: 0, nameReads: 0 }
   const entries = workspaceTreeEntries(instrument(children, counts))
   const initial = filterWorkspaceTreePaths(entries, '')
   const filtered = filterWorkspaceTreePaths(entries, query)
@@ -53,7 +56,7 @@ function update() {
   expect(ancestors).toEqual(Array.from({ length: 10 }, () => 'dir-00/'))
   return {
     childrenReads: counts.childrenReads,
-    entriesIndexed: entries.size,
+    entriesIndexed: counts.entriesIndexed,
     nameReads: counts.nameReads,
     pathsPublished: initial.length + filtered.length,
     ancestorsRevealed: ancestors.length
@@ -69,11 +72,11 @@ describe('workspace tree projection counters', () => {
 
   it('is sensitive to a second unchanged index pass', () => {
     const once = update()
-    const counts: Counts = { childrenReads: 0, nameReads: 0 }
+    const counts: Counts = { childrenReads: 0, entriesIndexed: 0, nameReads: 0 }
     workspaceTreeEntries(instrument(children, counts))
-    const twice = workspaceTreeEntries(instrument(children, counts))
+    workspaceTreeEntries(instrument(children, counts))
     expect(counts.childrenReads).toBeGreaterThan(2 * once.childrenReads - 1)
-    expect(twice.size * 2).toBeGreaterThan(once.entriesIndexed)
+    expect(counts.entriesIndexed).toBeGreaterThan(once.entriesIndexed)
   })
 
   it('is sensitive to a filter that stops filtering', () => {
@@ -86,7 +89,7 @@ describe('workspace tree projection counters', () => {
   })
 
   it('reads every entry name exactly once for the keystroke and none for the initial publish', () => {
-    const counts: Counts = { childrenReads: 0, nameReads: 0 }
+    const counts: Counts = { childrenReads: 0, entriesIndexed: 0, nameReads: 0 }
     const entries = workspaceTreeEntries(instrument(children, counts))
     filterWorkspaceTreePaths(entries, '')
     expect(counts.nameReads).toBe(0)
@@ -95,7 +98,8 @@ describe('workspace tree projection counters', () => {
   })
 
   afterAll(async () => {
-    expect(samples).toHaveLength(defaultRepeats)
+    // A focused run (or a failing repeat) must not publish a partial collector artifact.
+    if (samples.length !== defaultRepeats) return
     const runs = await repeatCounters(defaultRepeats, index => Promise.resolve(samples[index]))
     const meta = {
       scenario: 'workspace.tree',
