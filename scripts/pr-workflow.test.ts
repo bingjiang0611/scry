@@ -101,11 +101,20 @@ describe('required PR checks', () => {
     expect(remote.jobs.transport.steps.some(step => step.run?.includes('xcodebuild'))).toBe(false)
     const commands = remote.jobs.ios.steps.filter(step => step.run).map(step => step.run!.trim())
     expect(commands).toEqual([
-      ['ScryRemoteG0', 'build-for-testing', 'scry-g0-ios'],
-      ['ScryRemote', 'build', 'scry-remote-ui']
+      ['ScryRemoteG0', 'build-for-testing', 'scry-ios'],
+      ['ScryRemote', 'build', 'scry-ios']
     ].map(([project, action, derived]) =>
       `xcodebuild -project apps/ios/${project}.xcodeproj -scheme ${project} -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/${derived}" ARCHS=arm64 CODE_SIGNING_ALLOWED=NO ${action}`
     ))
+    const caches = remote.jobs.ios.steps.filter(step => step.uses === 'actions/cache@v4')
+    expect(caches).toHaveLength(1)
+    expect(caches[0].with?.path).toBe('${{ runner.temp }}/scry-ios/SourcePackages')
+    for (const project of ['ScryRemoteG0', 'ScryRemote']) {
+      expect(caches[0].with?.key).toContain(`apps/ios/${project}.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`)
+      const xcode = readFileSync(join(root, `apps/ios/${project}.xcodeproj/project.pbxproj`), 'utf8')
+      expect(xcode).toContain('productName = ScryG0Transport')
+      expect(xcode).toContain('relativePath = "../../experiments/remote-g0/swift"')
+    }
     expect(remote.jobs.transport.steps.some(step => step.run === 'npm --prefix experiments/remote-g0 run smoke:g1')).toBe(true)
     const remotePackage = JSON.parse(readFileSync(join(root, 'experiments/remote-g0/package.json'), 'utf8')) as { scripts: Record<string, string>; engines: { node: string } }
     expect(remotePackage.engines.node).toBe('^22.7.0 || ^24.0.0')

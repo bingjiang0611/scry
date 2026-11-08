@@ -85,31 +85,27 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
-      # 只缓存 SwiftPM 源码下载（约 1.5 分钟），不缓存编译产物。
-      - name: Cache ScryRemoteG0 Swift package checkouts
+      # Both projects use ScryG0Transport and the same SDK/configuration. Share
+      # this job's DerivedData so dependency products compile once. Persist only
+      # package downloads, not DerivedData/Build or a second copy of the sources.
+      - name: Cache shared iOS Swift package checkouts
         uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}/scry-g0-ios/SourcePackages
-          key: spm-sources-scry-g0-ios-${{ hashFiles('apps/ios/ScryRemoteG0.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          path: ${{ runner.temp }}/scry-ios/SourcePackages
+          key: spm-sources-ios-${{ runner.os }}-${{ hashFiles('apps/ios/ScryRemoteG0.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved', 'apps/ios/ScryRemote.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
       - name: Compile native iOS app and tests (not a device gate)
         run: >-
           xcodebuild -project apps/ios/ScryRemoteG0.xcodeproj
           -scheme ScryRemoteG0 -configuration Debug -sdk iphonesimulator
           -destination 'generic/platform=iOS Simulator'
-          -derivedDataPath "$RUNNER_TEMP/scry-g0-ios"
+          -derivedDataPath "$RUNNER_TEMP/scry-ios"
           ARCHS=arm64 CODE_SIGNING_ALLOWED=NO build-for-testing
-      # 只缓存 SwiftPM 源码下载（约 1.5 分钟），不缓存编译产物。
-      - name: Cache ScryRemote Swift package checkouts
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/scry-remote-ui/SourcePackages
-          key: spm-sources-scry-remote-ui-${{ hashFiles('apps/ios/ScryRemote.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
       - name: Compile ScryRemote product UI (design v2, unsigned)
         run: >-
           xcodebuild -project apps/ios/ScryRemote.xcodeproj
           -scheme ScryRemote -configuration Debug -sdk iphonesimulator
           -destination 'generic/platform=iOS Simulator'
-          -derivedDataPath "$RUNNER_TEMP/scry-remote-ui"
+          -derivedDataPath "$RUNNER_TEMP/scry-ios"
           ARCHS=arm64 CODE_SIGNING_ALLOWED=NO build
 
   check:
