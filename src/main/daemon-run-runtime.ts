@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { appendedText, boundMarker } from './daemon-run-evidence'
+import { boundMarker } from './daemon-run-evidence'
+import { planDelivery } from './daemon-run-delivery'
 import { PerformanceTrace } from './performance-timing'
 import { TraceOutputBridge } from './trace-output'
 import type { AgentQuestionResponse } from '../shared/runtime'
@@ -55,6 +56,10 @@ interface RunCursor {
   resyncRequired: boolean
   pumping: boolean
   stopped: boolean
+  // Where the wait before the first token actually goes. Only recorded when perf
+  // logging is on; it answers "which hop?" instead of guessing.
+  stamp?: PerformanceTrace
+  sawText: boolean
 }
 
 const DEFAULT_WAIT_MS = 15_000
@@ -110,13 +115,16 @@ export class DaemonRunRuntime {
   get bridge(): TraceOutputBridge { return this.#bridge }
 
   async start(input: DaemonStartInput): Promise<DaemonStartReceipt> {
+    const stamp = new PerformanceTrace('daemon.run.firstText', input.context ? { provider: input.context.providerId } : {})
     const receipt = await this.#deps.transport.submit({ intentId: input.intentId, detail: input.detail })
+    stamp.mark('submitted')
     // A duplicate submit is the same logical run: keep its existing cursor rather
     // than restarting the trace from zero.
     if (!this.#runs.has(receipt.runId)) {
       this.#runs.set(receipt.runId, {
         runId: receipt.runId, context: input.context, lifecycle: 'recorded', watch: 0, output: 0,
-        pushed: [], askedQuestions: new Set(), answerIds: new Map(), resyncRequired: false, pumping: false, stopped: false
+        pushed: [], askedQuestions: new Set(), answerIds: new Map(), resyncRequired: false, pumping: false, stopped: false,
+        stamp, sawText: false
       })
     }
     void this.pump(receipt.runId)
@@ -166,7 +174,7 @@ export class DaemonRunRuntime {
     const cursor = this.#cursorFor(runId) ?? (() => {
       const created: RunCursor = {
         runId, lifecycle: null, watch: 0, output: 0, pushed: [], askedQuestions: new Set(), answerIds: new Map(),
-        resyncRequired: false, pumping: false, stopped: false
+        resyncRequired: false, pumping: false, stopped: false, sawText: false
       }
       this.#runs.set(runId, created)
       return created
@@ -281,7 +289,10 @@ export class DaemonRunRuntime {
         // were bound. A marker decides the binding of the run it names, or the window
         // ends up showing, answering and stopping a run it never started.
         if (bound.ledgerRunId !== undefined && bound.ledgerRunId !== cursor.runId) continue
-        if (cursor.scryRunId === undefined) cursor.scryRunId = bound.scryRunId
+        if (cursor.scryRunId === undefined) {
+          cursor.scryRunId = bound.scryRunId
+          cursor.stamp?.mark('bound')
+        }
         // A run this window adopted has no context of its own; the daemon states it
         // once, and only then can the trace be addressed.
         if (cursor.context === undefined && bound.cwd !== undefined && bound.providerId !== undefined) {
@@ -297,6 +308,7 @@ export class DaemonRunRuntime {
       const read = await this.#deps.transport.trace({
         context: cursor.context, runId: cursor.scryRunId ?? runId, ...(cursor.after ? { after: cursor.after } : {})
       })
+      if (cursor.stamp && cursor.latest === undefined && read.kind === 'snapshot' && read.run) cursor.stamp.mark('firstTrace')
       if (this.#apply(read, cursor)) changed = true
       await this.#publishQuestions(cursor)
       if (watch.state === 'settled' || watch.state === 'failed' || watch.state === 'cancelled') cursor.stopped = true
@@ -329,55 +341,32 @@ export class DaemonRunRuntime {
     }
   }
 
+  // The stamp ends when text first reaches the renderer; that is the number the user
+  // waits for, and the stages before it say which hop spent the time.
+  #delivered(cursor: RunCursor, event: TraceEvent): void {
+    this.#bridge.push(event)
+    if (cursor.sawText || cursor.stamp === undefined) return
+    if (event.stage !== 'text' && event.stage !== 'text_delta') return
+    cursor.sawText = true
+    cursor.stamp.mark('firstText')
+    cursor.stamp.finish()
+  }
+
   #apply(read: Awaited<ReturnType<DaemonRunTransport['trace']>>, cursor: RunCursor): boolean {
-    if (read.kind === 'snapshot') {
-      cursor.after = read.cursor
-      if (read.run) cursor.latest = read.run
-      const items = read.run?.items ?? []
-      // The first snapshot of a run this window just started is the whole history:
-      // deliver it, then only the appended tail from then on.
-      const fresh = items.slice(cursor.pushed.length)
-      // A snapshot can also carry growth of an item the renderer already holds - the
-      // first read after a quiet poll often is one - and replacing it silently would
-      // drop the rest of the message. Deliver the growth first, then the new items.
-      const grown: TraceEvent[] = []
-      for (let index = 0; index < cursor.pushed.length && index < items.length; index++) {
-        const item = items[index]
-        const tail = item ? appendedText(cursor.pushed[index], item) : undefined
-        if (tail === undefined) continue
-        grown.push({ ...item, id: `${item.id}#${tail.at}`, stage: 'text_delta', text: tail.text })
-        cursor.pushed[index] = item
-      }
-      for (const event of grown) this.#bridge.push(event)
-      for (const event of fresh) this.#bridge.push(event)
-      cursor.pushed = [...items]
-      return fresh.length > 0 || grown.length > 0
-    }
-    // A delta only appends when every change lands at or after what the renderer
-    // already holds. Anything else rewrites history and must not be replayed as an
-    // append: mark the run for resynchronisation instead.
-    let changed = false
-    for (const change of [...read.changes].sort((a, b) => a.index - b.index)) {
-      const tail = appendedText(cursor.pushed[change.index], change.item)
-      if (tail !== undefined) {
-        // Same event, longer text: the renderer appends the tail to the block it holds.
-        this.#bridge.push({ ...change.item, id: `${change.item.id}#${tail.at}`, stage: 'text_delta', text: tail.text })
-        cursor.pushed[change.index] = change.item
-        changed = true
-        continue
-      }
-      if (change.index < cursor.pushed.length) {
-        // A different event at an index the renderer already has: its copy is stale.
-        cursor.resyncRequired = true
-        continue
-      }
-      this.#bridge.push(change.item)
-      cursor.pushed[change.index] = change.item
-      changed = true
-    }
+    if (read.kind === 'snapshot' && read.run) cursor.latest = read.run
+    const plan = planDelivery(cursor.pushed, read)
+    for (const event of plan.events) this.#delivered(cursor, event)
+    cursor.pushed = plan.pushed
     cursor.after = read.cursor
-    if (cursor.resyncRequired) this.#deps.send('agent:traceHealth', this.#bridge.snapshot())
-    return changed
+    if (plan.resyncRequired) {
+      // One health note per divergence, not one per poll: the renderer answers by
+      // re-reading a snapshot, which clears it.
+      if (!cursor.resyncRequired) this.#deps.send('agent:traceHealth', this.#bridge.snapshot())
+      cursor.resyncRequired = true
+      return plan.events.length > 0
+    }
+    cursor.resyncRequired = false
+    return plan.events.length > 0
   }
 
   async #publishQuestions(cursor: RunCursor): Promise<void> {

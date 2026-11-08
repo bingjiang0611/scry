@@ -79,6 +79,30 @@ const electron = process.platform === 'darwin'
 
 const perInstance = Number(option('per-instance', '15'))
 const log = []
+// `[scry:perf]` lines from the App's main process: each finished `daemon.run.firstText`
+// trace carries the elapsed time of every stage it marked, so the first-token wait is
+// split by hop instead of guessed at.
+let pendingStages = {}
+let perfScanned = 0
+const takeStages = () => {
+  const taken = pendingStages
+  pendingStages = {}
+  return taken
+}
+const readPerfLines = () => {
+  const text = log.join('')
+  const fresh = text.slice(perfScanned)
+  perfScanned = text.length
+  for (const line of fresh.split('\n')) {
+    if (!line.startsWith('[scry:perf] ')) continue
+    let sample
+    try { sample = JSON.parse(line.slice('[scry:perf] '.length)) } catch { continue }
+    if (sample.name !== 'daemon.run.firstText') continue
+    const marks = {}
+    for (const checkpoint of sample.checkpoints ?? []) marks[checkpoint.stage] = checkpoint.elapsedMs
+    pendingStages = marks
+  }
+}
 const results = { mode, samples, perInstance, prompt: PROMPT, loadBefore: load(), runs: [], loadAfter: null }
 
 // One App per chunk: daemon mode slows down as one window accumulates settled runs
@@ -94,7 +118,9 @@ const measure = async (count) => {
       appendLog: (chunk) => { log.push(chunk); if (log.length > 4000) log.splice(0, 2000) }, env: {
         // An isolated instance for either mode; the daemon switch is the only difference.
         ...(mode === 'daemon' ? { SCRY_HOST_DAEMON: '1', SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1' } : {}),
-        SCRY_REMOTE_HOST: '0'
+        SCRY_REMOTE_HOST: '0',
+        // Stage marks from the App's own main process; off by default everywhere else.
+        SCRY_PERF_LOG: '1'
       }
     })
     const target = await waitForTarget(port)
@@ -146,6 +172,7 @@ const measure = async (count) => {
         if (done === true) break
         await sleep(100)
       }
+      readPerfLines()
       const sample = await evaluate(`(() => {
         const timing = window.__timing
         const text = timing.events.filter((event) => event.stage === 'text' || event.stage === 'text_delta')
@@ -161,7 +188,7 @@ const measure = async (count) => {
           settledMs: timing.done === null ? null : timing.done - timing.submittedAt
         }
       })()`)
-      results.runs.push({ index: results.runs.length, runId, ...sample })
+      results.runs.push({ index: results.runs.length, runId, ...sample, stages: takeStages() })
     }
   } finally {
     try { if (cdp) cdp.close() } catch { /* a dead socket is fine */ }
@@ -173,10 +200,10 @@ const measure = async (count) => {
 
 try {
   for (let done = 0; done < samples; done += perInstance) {
-    // A fresh daemon per chunk. Daemon mode slows down as one daemon's ledger grows: in
-    // two earlier runs of this script the 30th start in the same state directory missed
-    // its bind budget (`daemon_run_not_bound`). That is a separate finding, and measuring
-    // it would only report a degraded tail as if it were the normal cost.
+    // A fresh daemon per chunk isolates the measurement from one daemon's history. The
+    // 30th start in one state directory used to miss its bind budget
+    // (`daemon_run_not_bound`) because the watch re-read the ledger's first page; that is
+    // fixed, so a single chunk of thirty now measures one daemon's steady state.
     if (mode === 'daemon' && done > 0) {
       // The supervisor is a separate process and outlives the App; a new state directory
       // under a live supervisor only produces `daemon_ready_timeout`.
@@ -190,6 +217,13 @@ try {
   const intervals = results.runs.flatMap((run) => run.intervals)
   const settled = results.runs.map((run) => run.settledMs).filter((value) => typeof value === 'number')
   const lag = results.runs.flatMap((run) => run.lag)
+  const stageValues = {}
+  for (const run of results.runs) {
+    for (const [stage, ms] of Object.entries(run.stages ?? {})) (stageValues[stage] ??= []).push(ms)
+  }
+  results.stages = Object.fromEntries(Object.entries(stageValues).map(([stage, values]) => [stage, {
+    samples: values.length, p50: percentile(values, 0.5), p95: percentile(values, 0.95)
+  }]))
   results.summary = {
     runs: results.runs.length,
     runsWithFirstText: firstText.length,
