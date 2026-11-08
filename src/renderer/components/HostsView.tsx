@@ -13,7 +13,7 @@ import { ModalCloseButton } from './primitives/ModalCloseButton'
 import './hosts-view.css'
 
 function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  return copy.errorText(error)
 }
 
 export function RemoteConnectionsSettings({ onNewSession }: { onNewSession: (connectionId: string, cwd: string) => void }) {

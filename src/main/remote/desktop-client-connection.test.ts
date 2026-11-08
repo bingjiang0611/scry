@@ -56,6 +56,34 @@ describe('DesktopRemoteClient connection and receipt lifecycle', () => {
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
 
+  it.each([
+    ['target_unreachable', 'desktop_ssh_target_unreachable'],
+    ['forwarding_denied', 'desktop_ssh_forwarding_denied']
+  ] as const)('reports a proven SSH forwarding failure instead of a generic TLS EOF: %s', async (failure, expected) => {
+    const fixture = await setup()
+    try {
+      const pending = await fixture.client.pair({ label: 'Forward failure', ssh, invitation: fixture.invitation })
+      await fixture.client.finishPairing(pending.connection.id)
+      fixture.tlsRequest.mockImplementationOnce(async () => {
+        fixture.setTunnelFailure(failure)
+        throw new Error('desktop_tls_request_eof')
+      })
+      await expect(fixture.client.connect(pending.connection.id)).rejects.toThrow(expected)
+      expect((await fixture.client.list())[0].state).toBe('disconnected')
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
+  it('does not reuse a stale SSH forwarding failure for a later TLS EOF', async () => {
+    const fixture = await setup()
+    try {
+      const pending = await fixture.client.pair({ label: 'Stale forward failure', ssh, invitation: fixture.invitation })
+      await fixture.client.finishPairing(pending.connection.id)
+      fixture.setTunnelFailure('target_unreachable')
+      fixture.tlsRequest.mockRejectedValueOnce(new Error('desktop_tls_request_eof'))
+      await expect(fixture.client.connect(pending.connection.id)).rejects.toThrow('desktop_tls_request_eof')
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
   it('keeps an otherwise valid connection available when its attention baseline cannot be read', async () => {
     const baseline = vi.fn()
     const fixture = await setup({

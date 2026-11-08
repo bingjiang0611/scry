@@ -10,6 +10,14 @@ import type { RemoteAttentionTracker } from './remote-attention'
 import type { WorkspaceStartSelection } from '../../shared/workspace-selection'
 import { parseWorkspaceStartSelection } from '../../shared/workspace-selection-input'
 
+function desktopSshRequestError(error: unknown, tunnel: DesktopSshTunnel | undefined, failureSequence: number): unknown {
+  const failure = tunnel?.failure
+  if (!(error instanceof Error) || !failure || failure.sequence <= failureSequence) return error
+  const code = (error as NodeJS.ErrnoException).code
+  if (error.message !== 'desktop_tls_request_eof' && code !== 'ECONNRESET' && code !== 'EPIPE') return error
+  return new Error(`desktop_ssh_${failure.reason}`)
+}
+
 export abstract class DesktopRemoteClientBase {
   protected abstract intentStatus(connectionIdValue: string, intentId: string): Promise<DesktopRemoteIntent>
   protected readonly directory: string
@@ -105,7 +113,7 @@ export abstract class DesktopRemoteClientBase {
       const requestId = randomUUID(); const request = operation === 'pair.prove'
         ? { protocolMajor: 1, requestId, operation, pairingId: invitation.pairingId, secret: invitation.secret, csrPEM: state.identity.csrPEM, deviceLabel: item.label }
         : { protocolMajor: 1, requestId, operation, pairingId: invitation.pairingId, secret: invitation.secret }
-      const response = await this.request(tunnel.pairPath, item, request)
+      const response = await this.request(tunnel.pairPath, item, request, { tunnel, classifySshFailure: true })
       return validatePairingResponse(response, requestId, invitation.pairingId)
     } finally { await tunnel.close() }
   }
@@ -128,25 +136,28 @@ export abstract class DesktopRemoteClientBase {
   }
   protected pairPort(item: StoredConnection): number { return item.pairPort }
   protected runPort(item: StoredConnection): number { return item.runPort }
-  protected async requestForConnection(id: string, request: unknown, authorizePeer?: () => void): Promise<Record<string, unknown>> { const state = await this.state(); const item = this.connection(state, id); const active = this.active.get(id); if (!active?.tunnel.alive) fail('desktop_not_connected'); return await this.request(active.tunnel.runPath, item, request, authorizePeer) as Record<string, unknown> }
+  protected async requestForConnection(id: string, request: unknown, authorizePeer?: () => void): Promise<Record<string, unknown>> { const state = await this.state(); const item = this.connection(state, id); const active = this.active.get(id); if (!active?.tunnel.alive) fail('desktop_not_connected'); return await this.request(active.tunnel.runPath, item, request, { authorizePeer }) as Record<string, unknown> }
   protected async desktop(id: string, query: DesktopHostRead): Promise<Record<string, unknown>> {
     const response = await this.requestForConnection(id, { op: 'desktop', query })
     if (!record(response) || !record(response.desktop) || !['info', 'workspaceChoices', 'validateWorkspaceBranch', 'history', 'history_chunk', 'trace', 'trace_delta', 'image_chunk'].includes(String(response.desktop.kind))) fail('invalid_desktop_response')
     return response.desktop
   }
   async catalogRequest<T>(id: string, request: unknown, key: string): Promise<T> { const response = await this.requestForConnection(id, request); if (!record(response) || !(key in response)) fail('invalid_catalog_response'); return response[key] as T }
-  protected async request(path: string, item: StoredConnection, request: unknown, authorizePeer?: () => void): Promise<unknown> {
+  protected async request(path: string, item: StoredConnection, request: unknown, options: { authorizePeer?: () => void; tunnel?: DesktopSshTunnel; classifySshFailure?: boolean } = {}): Promise<unknown> {
     const controller = new AbortController()
     const identity = (await this.state()).identity
     // Check after all awaited state/lock work and immediately before dispatch.
-    authorizePeer?.()
+    options.authorizePeer?.()
     this.controllers.add(controller)
+    const failureSequence = options.classifySshFailure ? options.tunnel?.failure?.sequence ?? 0 : 0
     const promise = this.transport.tlsRequest({ path, caPEM: item.anchorPEM, certPEM: item.certificatePEM ?? identity.bootstrapCertPEM, keyPEM: identity.keyPEM, request, signal: controller.signal })
     this.requests.add(promise)
     try {
       const response = await promise
       if (record(response) && typeof response.error === 'string' && response.error.length > 0 && response.error.length <= 128) fail(`desktop_remote_${response.error}`)
       return response
+    } catch (error) {
+      throw desktopSshRequestError(error, options.classifySshFailure ? options.tunnel : undefined, failureSequence)
     } finally { this.requests.delete(promise); this.controllers.delete(controller) }
   }
   protected async disconnectActive(connectionIdValue: string): Promise<void> {

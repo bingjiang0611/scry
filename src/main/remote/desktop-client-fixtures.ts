@@ -20,12 +20,14 @@ export async function setup(setupOptions: { submitResponse?: () => unknown; inte
   const invitation = `scry-desktop1:${Buffer.from(JSON.stringify({ version: 1, hostId: host.hostId, anchorPEM: host.caCertificatePEM, pairPort: 2201, runPort: 2202, pairingId, secret: 'pairing-secret', expiresAt: Date.now() + 60_000 })).toString('base64url')}`
   let phase: 'prove' | 'status' = 'prove'
   let tunnelCount = 0
+  let tunnelFailureSequence = 0
+  let tunnelFailure: DesktopSshTunnel['failure']
   const tunnelShutdowns: Array<() => void> = []
   const tunnel = (): DesktopSshTunnel => {
     let alive = true
     const stop = (): void => { alive = false }
     tunnelShutdowns.push(stop)
-    return { pairPath: `pair-${++tunnelCount}`, runPath: `run-${tunnelCount}`, get alive() { return alive }, close: async () => { stop() } }
+    return { pairPath: `pair-${++tunnelCount}`, runPath: `run-${tunnelCount}`, get alive() { return alive }, get failure() { return tunnelFailure }, close: async () => { stop() } }
   }
   const tlsRequest = vi.fn(async (options: { path: string; request: unknown }): Promise<unknown> => {
     const request = options.request as { operation?: string; requestId?: string; pairingId?: string }
@@ -54,5 +56,7 @@ export async function setup(setupOptions: { submitResponse?: () => unknown; inte
   })
   const openTunnel = vi.fn(async (_options: { username: string; hostname: string; port: number; pairPort: number; runPort: number }) => tunnel())
   const client = new DesktopRemoteClient({ directory, encrypt: setupOptions.encrypt ?? encrypt, decrypt, attention: setupOptions.attention }, { generateIdentity: async () => identity, openTunnel, tlsRequest })
-  return { directory, host, invitation, client, openTunnel, tlsRequest, phase: () => phase, tunnelCount: () => tunnelCount, dropTunnel: () => tunnelShutdowns.at(-1)!() }
+  return { directory, host, invitation, client, openTunnel, tlsRequest, phase: () => phase, tunnelCount: () => tunnelCount,
+    setTunnelFailure: (reason: NonNullable<DesktopSshTunnel['failure']>['reason']) => { tunnelFailure = { sequence: ++tunnelFailureSequence, reason } },
+    dropTunnel: () => tunnelShutdowns.at(-1)!() }
 }
