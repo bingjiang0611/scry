@@ -33,6 +33,49 @@ describe('DesktopRemoteClient receipt and mobile delivery', () => {
     } finally { await restored?.dispose(); await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
 
+  it('keeps a submit unknown when a concurrent SSH channel failure cannot be attributed to that request', async () => {
+    const fixture = await setup()
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    let readStarted!: () => void
+    const reading = new Promise<void>((resolve) => { readStarted = resolve })
+    let submitStarted!: () => void
+    const submitting = new Promise<void>((resolve) => { submitStarted = resolve })
+    try {
+      const paired = await fixture.client.pair({ label: 'remote', ssh, invitation: fixture.invitation })
+      const id = paired.connection.id
+      await fixture.client.finishPairing(id)
+      await fixture.client.connect(id)
+      fixture.tlsRequest.mockImplementation(async (options) => {
+        const request = options.request as { op?: string }
+        if (request.op === 'runState') {
+          readStarted()
+          await gate
+          fixture.setTunnelFailure('target_unreachable')
+          throw new Error('desktop_tls_request_eof')
+        }
+        if (request.op === 'submit') {
+          submitStarted()
+          await gate
+          await Promise.resolve()
+          throw new Error('desktop_tls_request_eof')
+        }
+        throw new Error('unexpected_request')
+      })
+      const read = fixture.client.runStatus(id, randomUUID()).then(() => undefined, (error: unknown) => error)
+      await reading
+      const submit = fixture.client.submit(id, { context: { cwd: '/project-a', providerId: 'pi' }, prompt: 'possibly sent' })
+      await submitting
+      release()
+      await expect(read).resolves.toMatchObject({ message: 'desktop_tls_request_eof' })
+      await expect(submit).resolves.toMatchObject({ status: 'unknown', failure: 'desktop_tls_request_eof' })
+      await expect(fixture.client.intents(id)).resolves.toMatchObject([{ status: 'unknown', failure: 'desktop_tls_request_eof' }])
+    } finally {
+      release?.()
+      await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true })
+    }
+  })
+
   it.each([
     { response: () => ({ error: 'unknown_op' }), error: 'desktop_remote_unknown_op' },
     { response: () => { throw new Error('reply_lost') }, error: 'reply_lost' },

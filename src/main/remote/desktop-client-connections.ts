@@ -85,12 +85,12 @@ export abstract class DesktopRemoteClientConnections extends DesktopRemoteClient
     this.attention?.disconnect(item.id)
     const tunnel = await this.transport.openTunnel({ ...item.ssh, pairPort: item.pairPort, runPort: item.runPort })
     try {
-      const response = await this.request(tunnel.runPath, item, { op: 'desktop', query: { kind: 'info' } })
+      const response = await this.request(tunnel.runPath, item, { op: 'desktop', query: { kind: 'info' } }, { tunnel, classifySshFailure: true })
       const capabilities = validateInfo(response, item.hostId)
       if (this.disposed) fail('desktop_client_disposed')
       try {
         const baseline = await readRemoteSessionPages(async (request) => {
-          const response = await this.request(tunnel.runPath, item, request)
+          const response = await this.request(tunnel.runPath, item, request, { tunnel, classifySshFailure: true })
           if (!record(response)) fail('invalid_catalog_response')
           return response
         })

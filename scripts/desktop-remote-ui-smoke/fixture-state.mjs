@@ -13,7 +13,7 @@ export function fixtureState(options) {
   localNewSessions: 0, localStarts: 0, listFailure: false, hideProvider: false, catalogRevision: 0,
   catalogFailure: false, sessionActive: false, sessionPendingQuestions: 0, sessionTs: 1700000000000, sessionLastRunId: null, sessionLastRunOutcome: null, hostRunArchived: false, liveRunCalls: 0,
   attentionInitialized: false, attentionFingerprint: null, unreadRemote: false,
-  updateSshCalls: [], connectCalls: 0, updateFailure: false, holdAddressUpdate: false,
+  updateSshCalls: [], connectCalls: 0, connectFailure: false, updateFailure: false, holdAddressUpdate: false,
   directoryReads: [], directorySelectCalls: [], directoryGrants: [], oldDirectoryHost: false, selectDirectoryFailure: false, holdDirectorySelection: false,
   phoneEnabled: true, relayConfigured: true, phoneStatusFailure: false, phonePairingCalls: 0,
   clipboardImageCalls: 0, forks: [], deletions: [], deleteFailure: false,

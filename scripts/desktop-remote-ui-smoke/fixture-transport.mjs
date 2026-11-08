@@ -11,7 +11,11 @@ export function fixtureTransport(options) {
     connection.ssh = { ...ssh }
     state.connected = false
   },
-  async connect() { state.connectCalls++; state.connected = true },
+  async connect() {
+    state.connectCalls++
+    if (state.connectFailure) throw new Error("Error invoking remote method 'desktopRemote:connect': Error: desktop_ssh_target_unreachable")
+    state.connected = true
+  },
   async disconnect() { state.connected = false; state.unreadRemote = false },
   async forget() {},
   async catalog() {

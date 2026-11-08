@@ -44,10 +44,18 @@ export interface DesktopSshTunnelOptions {
   runPort: number
 }
 
+export type DesktopSshTunnelFailureReason = 'target_unreachable' | 'forwarding_denied'
+
+export interface DesktopSshTunnelFailure {
+  sequence: number
+  reason: DesktopSshTunnelFailureReason
+}
+
 export interface DesktopSshTunnel {
   pairPath: string
   runPath: string
   readonly alive: boolean
+  readonly failure?: DesktopSshTunnelFailure
   close(): Promise<void>
 }
 
@@ -121,6 +129,12 @@ function validateTunnelOptions(options: DesktopSshTunnelOptions): DesktopSshTunn
     pairPort: validatePort(options.pairPort, 'pair_port'),
     runPort: validatePort(options.runPort, 'run_port')
   }
+}
+
+function sshTunnelFailure(stderr: string): DesktopSshTunnelFailureReason | undefined {
+  if (/open failed: administratively prohibited/i.test(stderr)) return 'forwarding_denied'
+  if (/open failed: connect failed/i.test(stderr)) return 'target_unreachable'
+  return undefined
 }
 
 function sshArguments(options: DesktopSshTunnelOptions, pairPath: string, runPath: string): string[] {
@@ -214,11 +228,20 @@ export async function openDesktopSshTunnel(options: DesktopSshTunnelOptions): Pr
   try {
     child = spawn(SSH_PATH, sshArguments(validated, pairPath, runPath), { stdio: ['ignore', 'ignore', 'pipe'] })
     let stderr = ''
+    let failureLine = ''
+    let failureSequence = 0
+    let latestFailure: DesktopSshTunnelFailure | undefined
     child.stderr!.setEncoding('utf8')
     child.stderr!.on('data', (chunk: string) => {
       // Drain continuously, including after readiness, without retaining banners
       // or diagnostics beyond this bounded tail. Never persist raw SSH stderr.
       stderr = `${stderr}${chunk}`.slice(-8_192)
+      const lines = `${failureLine}${chunk}`.split('\n')
+      failureLine = lines.pop()!.slice(-512)
+      for (const line of lines) {
+        const reason = sshTunnelFailure(line)
+        if (reason) latestFailure = { sequence: ++failureSequence, reason }
+      }
     })
     // An error listener is required even after readiness: a failed owned child
     // must not become an uncaught EventEmitter error before close() is called.
@@ -232,7 +255,13 @@ export async function openDesktopSshTunnel(options: DesktopSshTunnelOptions): Pr
       await removePrivateDirectory(directory)
     }
     const sshProcess = child
-    return { pairPath, runPath, get alive() { return !closed && sshProcess.exitCode === null && sshProcess.signalCode === null }, close }
+    return {
+      pairPath,
+      runPath,
+      get alive() { return !closed && sshProcess.exitCode === null && sshProcess.signalCode === null },
+      get failure() { return latestFailure },
+      close
+    }
   } catch (error) {
     if (child && child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
     if (child) await childExited(child)

@@ -54,7 +54,7 @@ export function bridge(): DesktopRemoteAPI {
 }
 
 export function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  return copy.errorText(error)
 }
 
 export function defaultOption(options: readonly RemoteControlOption[] | undefined): string | undefined {
