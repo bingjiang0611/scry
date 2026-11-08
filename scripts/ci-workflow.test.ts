@@ -117,10 +117,31 @@ describe('required PR checks', () => {
     const job = workflow('ci.yml').jobs.node
     expect(job.steps.filter(step => step.run).map(step => step.run)).toEqual([
       'npm ci --ignore-scripts', 'npm run typecheck', 'npm run check:harness-bindings',
-      'npm run test:shell', 'npm run build', 'npm run build:cli'
+      'npm run test:shell', 'npm run build', 'npm run build:cli',
+      source(job, 'Package unpublished recorder with source provenance').run
     ])
     // Actual runtime jobs still prepare Electron and its Linux sandbox.
     expect(source(workflow('ci.yml').jobs.unit, 'Prepare Electron executable').run).toContain('sudo chmod 4755')
+  })
+
+  it('retains an unpublished recorder with its exact source commit and archive digest', () => {
+    const job = workflow('ci.yml').jobs.node
+    const pack = source(job, 'Package unpublished recorder with source provenance')
+    expect(pack.if).toBeUndefined()
+    expect(pack['continue-on-error']).toBeUndefined()
+    expect(pack.run).toContain('npm pack ./packages/turn-recorder-cli --ignore-scripts --json --pack-destination "$ARTIFACT_DIR"')
+    expect(pack.run).toContain("['rev-parse', 'HEAD']")
+    expect(pack.run).toContain("createHash('sha256')")
+    expect(pack.run).toContain('JSON.stringify({ commit, filename, sha256 }')
+    expect(pack.run).not.toMatch(/npm (publish|install|ci|rebuild)\b|electron-builder|chmod 4755/)
+    const upload = source(job, 'Retain recorder for exact-commit validation without publishing')
+    expect(upload.uses).toBe('actions/upload-artifact@v4')
+    expect(upload.with).toEqual({
+      name: 'recorder-cli-${{ github.sha }}',
+      path: '${{ runner.temp }}/recorder-artifact/',
+      'if-no-files-found': 'error',
+      'retention-days': 7
+    })
   })
 
   it('pins the packaged macOS gate to a supported standard runner image', () => {

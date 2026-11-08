@@ -6,7 +6,7 @@ import { isAgentTurnRecord, type TurnEvidence, type AgentTurnRecord } from '../.
 import { resolveRecorderEnablement } from './config.js'
 import { readJson, listFiles, writeJsonAtomic } from './io.js'
 import { recorderTurnRoot, recorderSessionRoot, withRecorderSessionLock, type RecorderOpenTurnState, recorderOpenPath, SESSION_LOCK_WAIT_MS, recorderPendingHealth, recorderQuarantinedOpenTurns, type RecorderSessionState, recorderStatePath } from './runtime-state.js'
-import { clearRuntimeTurn, updateHealth, commitRecord, drainCommitNotifications, HOOK_DRAIN_MAX_RECORDS, HOOK_DRAIN_BUDGET_MS } from './store.js'
+import { clearRuntimeTurn, updateHealth, commitRecord, drainCommitNotifications, HOOK_DRAIN_MAX_RECORDS, HOOK_DRAIN_BUDGET_MS, type CommitNotificationScope } from './store.js'
 import { type ManagedRecorderProviderId, type ManagedTurnCancellationResult, type ManagedTurnHandoff, type EnabledRecorder, assertStrictCapture, type PrepareManagedTurnInput, type ManagedTurnResult, assertProtectedToolEvidence, applyCapturePolicy, CONTENT_MISSING_REASON, assertExactText, assertOptionalAssistantText, assertTiming, assertDuplicateMatchesInput, managedProvisionalMatches, managedRecorderAllowsMissingProviderTurnId, recordDraft, assertCommittedRecordMatchesHandoff, type ManagedTurnTiming } from './managed-evidence.js'
 import { recordById, recordByProviderTurnId, advanceProviderTurnIndex } from './managed-index.js'
 import { reserveCanonicalJournalRecovery } from './managed-recovery.js'
@@ -306,11 +306,13 @@ export type CommitNotificationDelivery = 'await' | 'detach'
 export async function deliverCommitNotifications(
   dataRoot: string,
   env: NodeJS.ProcessEnv | undefined,
-  delivery: CommitNotificationDelivery
+  delivery: CommitNotificationDelivery,
+  scope?: CommitNotificationScope
 ): Promise<void> {
   const drain = (): Promise<unknown> => drainCommitNotifications(dataRoot, env, {
     maxRecords: HOOK_DRAIN_MAX_RECORDS,
-    budgetMs: HOOK_DRAIN_BUDGET_MS
+    budgetMs: HOOK_DRAIN_BUDGET_MS,
+    ...(scope ? { scope } : {})
   })
   if (delivery === 'detach') {
     void drain().catch(() => undefined)

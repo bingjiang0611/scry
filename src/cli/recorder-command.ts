@@ -1,6 +1,6 @@
 import { type ParsedArgs, workspaceOf, readStdin, flag, intFlag, providerOf, print } from './command-args.js'
 import { sendRecorderDaemonHook, startRecorderDaemon, serveRecorderDaemon, recorderDaemonStatus, stopRecorderDaemon } from '../core/turn-recorder/daemon.js'
-import { handleRecorderHook, recorderEnablement, recoverRecorder, refreshRecorderPendingHealth } from '../core/turn-recorder/recorder.js'
+import { handleRecorderHook, recorderEnablement, recoverRecorder, refreshRecorderPendingHealth, type RecorderRecoveryScope } from '../core/turn-recorder/recorder.js'
 import { recordError, drainCommitNotifications, retryCommitNotifications, RECORDER_VERSION, readHealth, commitNotificationStatus } from '../core/turn-recorder/store.js'
 import { resolveCommitHookActivation, commitHookEnv, revokeCommitHookGrant, inspectCommitHookBundle, writeCommitHookGrant } from '../core/turn-recorder/commit-hook-grant.js'
 import { runIdleAutoUpdate } from './update.js'
@@ -65,8 +65,29 @@ export async function recorderCommand(args: ParsedArgs): Promise<number> {
   const action = args.positionals[1]
   if (action === 'hook') return hookCommand(args)
   if (action === 'recover') {
-    print(await recoverRecorder(workspaceOf(args)))
-    return 0
+    const providerFlag = flag(args, 'provider')
+    const sessionId = flag(args, 'session-id')
+    if ((providerFlag === undefined) !== (sessionId === undefined)) {
+      throw new Error('--provider and --session-id must be provided together for scoped recovery')
+    }
+    let scope: RecorderRecoveryScope | undefined
+    if (providerFlag !== undefined && sessionId !== undefined) {
+      const provider = providerOf(args)
+      if (provider !== 'qoder') throw new Error('scoped recorder recovery is only supported for qoder')
+      if (!sessionId.trim()) throw new Error('--session-id must not be empty')
+      scope = { provider, sessionId }
+    }
+    const workspace = workspaceOf(args)
+    if (scope) {
+      const enablement = await recorderEnablement(workspace)
+      if (!enablement.enabled) {
+        print({ action, workspace, status: 'disabled', reason: enablement.reason })
+        return 2
+      }
+    }
+    const result = await recoverRecorder(workspace, process.env, undefined, scope)
+    print(result)
+    return scope && result.pending > 0 ? 3 : 0
   }
   if (action === 'notify-drain' || action === 'notify-retry') {
     const sequence = intFlag(args, 'sequence')

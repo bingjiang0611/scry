@@ -9,7 +9,7 @@ export interface ParsedArgs {
   flags: Map<string, string | true>
 }
 
-export const VALUE_FLAGS = new Set(['workspace', 'providers', 'provider', 'event', 'socket', 'after', 'limit', 'offset', 'snapshot', 'before', 'out', 'sequence'])
+export const VALUE_FLAGS = new Set(['workspace', 'providers', 'provider', 'session-id', 'event', 'socket', 'after', 'limit', 'offset', 'snapshot', 'before', 'out', 'sequence'])
 export const BOOLEAN_FLAGS = new Set(['all', 'all-dead', 'apply', 'check', 'help', 'json', 'managed', 'no-update-check', 'force', 'quiet', 'start-daemon', 'stdin', 'verbose', 'version', 'yes'])
 
 export function parseArgs(argv: string[]): ParsedArgs {

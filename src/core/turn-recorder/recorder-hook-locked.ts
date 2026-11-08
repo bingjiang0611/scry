@@ -274,9 +274,16 @@ export async function replayQueuedHooks(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   provider: ProviderId,
   sessionKey: string,
-  includeFailed = false
+  includeFailed = false,
+  expectedSessionId?: string
 ): Promise<number> {
   const root = join(enablement.dataRoot, 'runtime', provider, sessionKey)
+  if (expectedSessionId !== undefined) {
+    const open = await readJson<OpenTurnState>(openPath(root))
+    if (open && (open.provider !== provider || open.sessionId !== expectedSessionId)) {
+      throw new Error(`scoped recorder recovery open identity differs from requested ${provider}/${expectedSessionId}`)
+    }
+  }
   const warn = (name: string, error: unknown) => appendRotatingLog(
     join(enablement.dataRoot, 'logs', 'recorder.log'),
     `${new Date().toISOString()} WARN inbox ${provider}/${sessionKey}/${name}: ${error instanceof Error ? error.message : String(error)}`
@@ -299,9 +306,13 @@ export async function replayQueuedHooks(
       if (queued === null) continue // ENOENT only: another completed cleanup, not a lost event.
       if (queued.schemaVersion !== 1 || queued.provider !== provider ||
         typeof queued.sessionId !== 'string' || safeKey(queued.sessionId) !== sessionKey ||
+        (expectedSessionId !== undefined && queued.sessionId !== expectedSessionId) ||
         typeof queued.event !== 'string' || !queued.payload || typeof queued.payload !== 'object' ||
         Array.isArray(queued.payload) || typeof queued.arrivedAt !== 'string' ||
         !Number.isFinite(Date.parse(queued.arrivedAt))) {
+        if (expectedSessionId !== undefined && (queued.provider !== provider || queued.sessionId !== expectedSessionId)) {
+          throw new Error(`scoped recorder inbox identity differs from requested session: ${entry.name}`)
+        }
         throw new Error(`invalid queued recorder hook: ${entry.name}`)
       }
       await hookArrival.run(queued.arrivedAt, () => applyHookLocked(enablement, {
@@ -313,6 +324,9 @@ export async function replayQueuedHooks(
         uploadEnvironment: queued.uploadEnvironment
       }, queued.sessionId))
     } catch (error) {
+      if (expectedSessionId !== undefined && error instanceof Error && error.message.startsWith('scoped recorder inbox identity')) {
+        throw error
+      }
       try {
         await quarantineInboxEntry(entry, attempts + 1, error)
         if (attempts + 1 === INBOX_MAX_ATTEMPTS) {

@@ -97,7 +97,14 @@ export async function readCommitHookAck(dataRoot: string, fingerprint: string) {
     (await readDeadLetters(dataRoot, fingerprint)).deadLetterCount === 0) {
     throw new Error('commit notification state is missing dead-letter evidence')
   }
-  return { ackedThrough, isolatedAck, processedThrough, failure, queueVersion: isolated?.queueVersion }
+  return {
+    ackedThrough,
+    isolatedAck,
+    legacyAck,
+    processedThrough,
+    failure,
+    queueVersion: isolated?.queueVersion
+  }
 }
 
 export async function pendingCommitFiles(dataRoot: string, state: { processedThrough: number; failure?: CommitNotificationFailure }) {
