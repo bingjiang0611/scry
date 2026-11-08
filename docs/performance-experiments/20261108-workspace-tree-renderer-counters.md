@@ -72,4 +72,5 @@ DOM 计数：1,000 个已加载路径下挂载 **29 行**、树 shadow root 内 
 
 - 生产重构与 measure 工具分开提交：重构在上，计数/台账/受控 L2 工具在下。
 - 未改 workload 口径、未改任何门限、未放宽 tolerance。
-- 已安装的 App 不含本轮重构（版本号未变），需按交付说明重新构建安装后生效。
+- 两个提交：`f3fd84ad`（投影重构）、`d88bc66c`（计数/台账/受控 L2）。版本号未变。
+- 已按本机约定重新构建并安装到 `/Applications/Scry.app`（0.2.247，旧包备份在 `/Applications/.Scry.app.backup`）；安装包检查、隔离安全冒烟、打包后的 workspace 文件与 source-control（含本地 diff worker）冒烟均通过。日常实例需用户自行重启才加载新版本。
