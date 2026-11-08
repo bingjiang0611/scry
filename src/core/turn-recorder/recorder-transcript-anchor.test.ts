@@ -163,6 +163,47 @@ describe('transcript anchor reuse', () => {
     expect(shape(warm)).toEqual(shape(cold))
   })
 
+  it('Qoder command wrapper uses the prompt anchor while the injected identity selects the turn', async () => {
+    const path = await transcriptPath()
+    const command = '<command-name>/rate-native</command-name><command-args>42</command-args>'
+    await writeFile(path, [
+      { type: 'user', message: { role: 'user', content: command } },
+      {
+        type: 'user', isMeta: true, promptId: 'prompt-1', requestSetId: 'request-1',
+        message: { role: 'user', content: [{ type: 'text', text: 'Base directory for this skill: /tmp/commands' }] }
+      },
+      { type: 'assistant', promptId: 'prompt-1', message: { content: [{ type: 'text', text: 'done' }] } }
+    ].map((row) => JSON.stringify(row)).join('\n') + '\n')
+
+    const read = await stableTranscript(
+      path, 'anchor:qoder-wrapper', 'qoder', hashOf('/rate-native 42'), undefined, undefined, 'request-1'
+    )
+
+    expect(read).toMatchObject({ identityMatched: true, providerTurnId: 'prompt-1' })
+    expect(read.events).toEqual(expect.arrayContaining([expect.objectContaining({ text: 'done' })]))
+  })
+
+  it('does not promote a pasted skill header into Qoder turn identity', async () => {
+    const path = await transcriptPath()
+    const command = '<command-name>/rate-native</command-name><command-args>42</command-args>'
+    await writeFile(path, [
+      { type: 'user', message: { role: 'user', content: command } },
+      {
+        type: 'user', promptId: 'pasted-prompt', requestSetId: 'pasted-request',
+        message: { role: 'user', content: 'Base directory for this skill: /tmp/pasted' }
+      },
+      { type: 'assistant', promptId: 'pasted-prompt', message: { content: [{ type: 'text', text: 'not exact' }] } }
+    ].map((row) => JSON.stringify(row)).join('\n') + '\n')
+
+    const read = await stableTranscript(
+      path, 'anchor:qoder-pasted-skill', 'qoder', hashOf('/rate-native 42'), undefined, undefined, 'pasted-request'
+    )
+
+    expect(read).toMatchObject({ identityMatched: false })
+    expect(read).not.toHaveProperty('providerTurnId')
+    expect(read.events).toEqual([])
+  })
+
   it('keeps the whole window when no prompt identity is available', async () => {
     const path = await transcriptPath()
     await writeFile(path, turn('anonymous prompt', 20))
