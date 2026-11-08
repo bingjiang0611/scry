@@ -36,7 +36,7 @@
 | 新 op 的远程开放 | 本批一个都不向远程开放；`scripts/daemon-ipc-remote-approvals.json` 保持空。要开具体 op 时再单独批准 | [§13.1](P3-batch4-design.md)、D1 |
 | 按 grant scope 选策略 | 接受。除 `agent:start`、`agent:deleteSession` 外，扩到历史、列表、descriptors、detect：本机拿完整结果，远程拿裁剪投影。确认框仍留在 main | [§13.6](P3-batch4-design.md)、D2/G1 |
 | 本机 grant 的空 cwd 会话 | 允许。`scope: local` 完全沿用当前 App 行为，包括空 cwd 会话；`scope: remote` 仍拒绝。方案 (a) 不采用：B4-S 删除进程内路径后该能力会永久消失 | 维护者 2026-11-07 答复第 3 条（[REVIEW-BATCH4-D2](REVIEW-BATCH4-D2.md)）、[REVIEW-BATCH4-L3A](REVIEW-BATCH4-L3A.md) P2；实现见 [b4-l3](status/b4-l3.md) |
-| trace 推送与预算 | 接受 `watch` 长轮询 + `traceDelta`，P95 相对进程内 ≤ +10 ms（同机同负载、≥30 样本、同一 fake provider、串行测量并记录负载）；超预算再单独提 push op。**实测未达成**（daemon 首 token P95 177–209 ms，进程内 140.3 ms；daemon 侧每轮只有一次整段文本事件），因此 push op 或增量契约调整需要单独决定 | [§13.4](P3-batch4-design.md)、[b4-l3 §S1](status/b4-l3.md) |
+| trace 推送与预算 | 接受 `watch` 长轮询 + `traceDelta`，P95 相对进程内 ≤ +10 ms（同机同负载、≥30 样本、同一 fake provider、串行测量并记录负载）；超预算再单独提 push op。**实测未达成**（30 样本：daemon 首 token P95 198.6 ms，进程内 120.2 ms；流式粒度已一致，20 事件/样本）。分段显示约 40 ms 是两次必要往返，其余落在首段文本的唤醒读取，因此按「超预算再单独提 push op」改为推送订阅提案 [P3e](P3e-first-token-push-proposal.md)，等维护者选择 | [§13.4](P3-batch4-design.md)、[b4-l3 §S1](status/b4-l3.md) |
 
 G1（5 条差异补处理方式 + 守卫断言）与 G2（secret 生命周期改口径）已按评审修正，见提交 `5f4d050f` 与本节。
 
