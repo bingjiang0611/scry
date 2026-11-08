@@ -29,6 +29,7 @@ export interface CustodyReceipt {
   recordId: string
   sequence: number
   sha256: string
+  contentSha256?: string
   provider?: string
   sessionId?: string
   status: 'pending' | 'skipped_disabled' | 'uploaded' | 'dead_letter'

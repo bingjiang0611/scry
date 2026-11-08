@@ -1,12 +1,13 @@
 {
   "schemaVersion": 1,
   "kind": "sanitized-review-snapshot",
-  "sourceVersion": "0.2.7",
-  "sourceRevision": "77d45ecccae8b1a9cc927ed6e4a9380efdbdaf72",
-  "sourceTrackedFiles": 58,
-  "exportedSourceFiles": 58,
+  "sourceVersion": "0.2.8",
+  "sourceRevision": "271ab07d8d34d664fd983d78df5a8c598e793075",
+  "sourceTrackedFiles": 64,
+  "exportedSourceFiles": 64,
   "additionalFiles": [
     "README.md",
+    "HISTORY.md",
     "SNAPSHOT.json"
   ],
   "sourceUrl": "[REDACTED]",
@@ -18,9 +19,7 @@
       "skipped": 0
     },
     "sanitizedTests": {
-      "passed": 118,
-      "failed": 0,
-      "skipped": 0
+      "status": "pending"
     },
     "recorderDependencyVersion": "0.2.53",
     "realRemoteUploadVerified": false,
@@ -45,24 +44,28 @@
       "sha256": "74d2ad42f2cfe74e70c62a2091a5b530a4fb2fa29798e59ea8e6a8cfb7ae9862"
     },
     {
+      "path": "HISTORY.md",
+      "sha256": "700c5fca2987e5a8d8444dffa97193066adcbdba7b44fb9ef7a0c13305ee6e09"
+    },
+    {
       "path": "LICENSE",
       "sha256": "49b99bf2d8a45f60208fdaf58aad39477e3a75755d9af5c4386d07741d96b8ab"
     },
     {
       "path": "README.md",
-      "sha256": "eba74e3c026e983f4e36f5d018bf49092d9ec71d3da74f1523844f06b5f1c983"
+      "sha256": "cac079bb01d9135a47498ac428dffe3f8d33643be6e557b2769dca552948fd0b"
     },
     {
       "path": "UPSTREAM-README.md",
-      "sha256": "5a0f7c55aac5d01d14b4583a0f05e977af544ec0e501039b400396dde455a0b3"
+      "sha256": "3c1ec1fd2890963556eb54e7fb350aaca4964e204e58b92067aff44ddf21372a"
     },
     {
       "path": "package-lock.json",
-      "sha256": "7b927ed82157109227548dae6a4cab4f06bdd3d09210968035a7b2d064557a99"
+      "sha256": "cc7a2ebec12deeb7334af21ee3f1a53bea2dd8387849e20dfddf29b4c7f7998c"
     },
     {
       "path": "package.json",
-      "sha256": "258730ef051bea313db921896b80011a387a557ed07a067c43fb93f8176e63d8"
+      "sha256": "3641d4e4a08dae605b7fe89184e0f7753688b7e29335143916fb230bc8cc4c06"
     },
     {
       "path": "src/admission.ts",
@@ -74,15 +77,19 @@
     },
     {
       "path": "src/constants.ts",
-      "sha256": "c9fef8ef51721b5c1baae4d36c9bd7c98f34bbedee6a12348d6c056c7a6ec49f"
+      "sha256": "84d98ea1a3879e47b5361cb8f027230968c436c9c5236591f3355f9592edc09a"
+    },
+    {
+      "path": "src/content.ts",
+      "sha256": "7813d1f9ac13560a1e449d1d83d1dc841b490e168881957d8f631f65a3355660"
     },
     {
       "path": "src/custody/index.ts",
-      "sha256": "e78d188b1fbccbcf540597b480412fd8cb23d4fcc728dcae28ff789b563003e2"
+      "sha256": "a7f36e613a4ec1422a2c98cb2bc667efd3feb8e2cfbcfb9ad83cf67599230954"
     },
     {
       "path": "src/custody/receipts.ts",
-      "sha256": "ae4566857b7c1512e059564c991e08c883cc8969e443c5e2caa67ea31eaccff3"
+      "sha256": "dbf2f7a98def5a361d9e590dec55e3bf5e401dc19fc8e7b6b5c864f387469135"
     },
     {
       "path": "src/envelope.ts",
@@ -122,15 +129,15 @@
     },
     {
       "path": "src/storage.ts",
-      "sha256": "3724a48c53be249d5e43c45665fd59c9a6c96066cf6e89a7fc2f2f21b1cdb188"
+      "sha256": "cdc00c3497e7b5cdc8652d6c067e86aa9bfc310f830957fd68d304b4edf49f21"
     },
     {
       "path": "src/transport.ts",
-      "sha256": "08f2f2ae2200fb3f64652163018773d5c1c1782df33718b43b2071e6cbeece93"
+      "sha256": "79b5990ae7cabb9685466865d1505e0e46cd39b834dcd649272db3181c581607"
     },
     {
       "path": "src/types.ts",
-      "sha256": "7b446ed97e59ae7d4394d9fc7a528a4eddf781285d5da4b7d9282eca463f3918"
+      "sha256": "30be995f21d48744b5299c86a8bcb239ead99baf3456e335d3dcc0527e3d0941"
     },
     {
       "path": "src/uploader-batch.ts",
@@ -146,7 +153,7 @@
     },
     {
       "path": "src/uploader-worker.ts",
-      "sha256": "7ed803225cb568971343f051b033d701190655edf9ab2be4e781abcba3c20226"
+      "sha256": "19d6bfc7310d45d5319f3b427b9fd7599d6d33fba7ea93eb5726afddaa4c78db"
     },
     {
       "path": "src/uploader.ts",
@@ -161,8 +168,20 @@
       "sha256": "80389eea09341d3b43e1e8e65338acbc899ef6008ed1f15bf3abe8f5ae22cb00"
     },
     {
+      "path": "test/content-custody.test.mjs",
+      "sha256": "d47dd006d0447c3518c33777db19cf89c618ac8738dc024b4e24a5ce4e48f776"
+    },
+    {
+      "path": "test/content.test.mjs",
+      "sha256": "07122d63078995257e48335fe68707c5a9016464a1c76fca6b2b0ff15b2d56a8"
+    },
+    {
       "path": "test/contracts.test.mjs",
       "sha256": "dffd5297c22eb4ea1aea6ea98af60862af2002746b71f44e0d6add66437ff220"
+    },
+    {
+      "path": "test/custody-integrity.test.mjs",
+      "sha256": "efbb105289a0070c107e1c046015bdf05b2536c16bf87f40d1a6ab4173c45a3c"
     },
     {
       "path": "test/custody/index.test.mjs",
@@ -177,8 +196,12 @@
       "sha256": "9a240f6fafba7ec2672ee734b555b0dbe2eae55d2c513d66fbc286c6e93401c7"
     },
     {
+      "path": "test/fixtures/content-v1.json",
+      "sha256": "c4b56011b5bac256fc8faeaa5aa4ce71dde8e8b9d921d190b840e4495aebda73"
+    },
+    {
       "path": "test/fixtures/fake-transport.mjs",
-      "sha256": "dfc8be2370eaa088e28273bcc135e9232f23dd79fed6a149c76879933cb45c5c"
+      "sha256": "d50279ed64e2067fdbb25a5a5064c4fa2444ad9ab42feac830d0fda659562cd8"
     },
     {
       "path": "test/fixtures/integration-fixture.mjs",
@@ -201,6 +224,10 @@
       "sha256": "24305ae6b7dc1d3f06c45306608bb1f8aac80e3bac32900072a083d56c3b1aef"
     },
     {
+      "path": "test/fixtures/reliability-helpers.mjs",
+      "sha256": "d29757ab6b52d0519ba263cc2aa511329b87258aea14533646367911f789da0a"
+    },
+    {
       "path": "test/gate-fixture.test.mjs",
       "sha256": "912b498595f075be08c813096eef02a821a58b4cb843c1dab496f5f2ff47007f"
     },
@@ -218,7 +245,7 @@
     },
     {
       "path": "test/integration.test.mjs",
-      "sha256": "afd550298d282ed5d65507e3a4fd7565f39ccf519006cc37ae722e5c7e7beba0"
+      "sha256": "320ae32151b61e818008b721847de4d7d1c059ac3883678a7eabeef9e8d598f8"
     },
     {
       "path": "test/locks-lifecycle.test.mjs",
@@ -246,7 +273,7 @@
     },
     {
       "path": "test/reliability.test.mjs",
-      "sha256": "a8a277afefa826951bb7dfaf9a68b70460a9f81defd40784210240279d694ff9"
+      "sha256": "8b23c52d8be2ff32c65c592a7a7c42794b8428c4abe4ef9fdd0156b43140dd67"
     },
     {
       "path": "test/scheduler-boundaries.test.mjs",
