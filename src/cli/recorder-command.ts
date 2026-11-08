@@ -77,7 +77,15 @@ export async function recorderCommand(args: ParsedArgs): Promise<number> {
       if (!sessionId.trim()) throw new Error('--session-id must not be empty')
       scope = { provider, sessionId }
     }
-    const result = await recoverRecorder(workspaceOf(args), process.env, undefined, scope)
+    const workspace = workspaceOf(args)
+    if (scope) {
+      const enablement = await recorderEnablement(workspace)
+      if (!enablement.enabled) {
+        print({ action, workspace, status: 'disabled', reason: enablement.reason })
+        return 2
+      }
+    }
+    const result = await recoverRecorder(workspace, process.env, undefined, scope)
     print(result)
     return scope && result.pending > 0 ? 3 : 0
   }

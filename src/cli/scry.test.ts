@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -32,6 +32,22 @@ describe('Scry CLI arguments', () => {
       .rejects.toThrow('only supported for qoder')
     await expect(runScryCli(['recorder', 'recover', '--provider', 'qoder', '--session-id', '']))
       .rejects.toThrow('missing value for --session-id')
+  })
+
+  it.each(['missing_config', 'invalid_config', 'config_disabled', 'environment'] as const)('scoped recovery reports disabled reason %s', async (reason) => {
+    const root = await workspace()
+    const configPath = join(root, 'scry.config.json')
+    if (reason === 'missing_config') await rm(configPath)
+    else if (reason === 'invalid_config') await writeFile(configPath, '{invalid')
+    else if (reason === 'environment') vi.stubEnv('SCRY_RECORDER_ENABLED', '0')
+    else {
+      const config = JSON.parse(await readFile(configPath, 'utf8'))
+      await writeFile(configPath, JSON.stringify({ ...config, enabled: false }))
+    }
+    const stdout = captureStdout()
+    await expect(runScryCli(['recorder', 'recover', '--workspace', root, '--provider', 'qoder', '--session-id', 'retained-session']))
+      .resolves.toBe(2)
+    expect(JSON.parse(stdout.text())).toEqual({ action: 'recover', workspace: root, status: 'disabled', reason })
   })
 
   it.each([
