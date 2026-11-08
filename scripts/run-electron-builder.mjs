@@ -67,6 +67,8 @@ const args = releaseBuild && process.platform === 'linux'
   ? ['--linux', 'pacman']
   : ['--dir', ...(releaseBuild && process.platform === 'darwin' ? ['--config.mac.notarize=true'] : [])]
 rebuildNativeModules()
-const result = spawnSync(builder, args, { env, stdio: 'inherit' })
+// This wrapper creates local artifacts; CI/default-branch detection must never
+// turn packaging into a network publication or require a publishing token.
+const result = spawnSync(builder, [...args, '--publish', 'never'], { env, stdio: 'inherit' })
 if (result.error) throw result.error
 if (result.status !== 0) throw new Error(`electron-builder failed with exit ${result.status ?? 'unknown'}`)
