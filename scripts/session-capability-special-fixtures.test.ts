@@ -48,7 +48,8 @@ describe('special UI fixture campaign ownership', () => {
     expect(runner).toContain('const offscreen = overlaysOnly || listsOnly || loadingOnly || sidebarActivityOnly')
     const exercise = exerciseSidebarActivity.toString()
     const samples = exercise.slice(exercise.indexOf('for (const time of [1100, 2100])'))
-    expect(samples).toMatch(/contents\.invalidate\(\)[\s\S]*?requestAnimationFrame[\s\S]*?contents\.capturePage\(rect\)/)
+    expect(samples).toMatch(/contents\.once\('paint'[\s\S]*?frame\.crop\(rect\)[\s\S]*?contents\.invalidate\(\)/)
+    expect(samples).not.toContain('contents.capturePage(rect)')
   })
 
   it('continues the default campaign after motion without destroying its main window', async () => {

@@ -84,11 +84,16 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
         const bounds = title.getBoundingClientRect();
         return { x: Math.floor(bounds.x), y: Math.floor(bounds.y), width: Math.ceil(bounds.width), height: Math.ceil(bounds.height) };
       })()`)
-      // Like the loading/credits fixtures, invalidate the offscreen surface so
-      // capturePage cannot reuse the previous paused-animation sample.
-      contents.invalidate()
       await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
-      const image = await contents.capturePage(rect)
+      // capturePage can return the preceding paused sample even after invalidation.
+      // Subscribe before requesting a fresh paint, and copy its bitmap while the
+      // paint callback owns it instead of reading the screenshot cache again.
+      const image = await new Promise((resolve, reject) => {
+        contents.once('paint', (_event, _dirty, frame) => {
+          try { resolve(frame.crop(rect)) } catch (error) { reject(error) }
+        })
+        contents.invalidate()
+      })
       sweepImages.push(image.toBitmap())
       sweepFrames.push({ time, image })
     }
