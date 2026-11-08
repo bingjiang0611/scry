@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { chatBottomStickinessAfterScroll, scrollChatToBottomIfNeeded, transcriptGrowthAboveEdge } from './chat-scroll'
 
@@ -10,6 +11,12 @@ function scrollBox() {
 }
 
 describe('automatic bottom scroll events', () => {
+  it('uses the same element identity when remote chat consumes its pin event', () => {
+    const remote = readFileSync(new URL('./components/RemoteChatPresentation.tsx', import.meta.url), 'utf8')
+    expect(remote).toContain('chatBottomStickinessAfterScroll(history, openingLatest.current)')
+    expect(remote).not.toContain('chatBottomStickinessAfterScroll(position, openingLatest.current)')
+  })
+
   it('keeps following when a queued pin arrives after the viewport shrinks', () => {
     const element = scrollBox()
     scrollChatToBottomIfNeeded(element, true)

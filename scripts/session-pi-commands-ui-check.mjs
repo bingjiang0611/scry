@@ -144,7 +144,9 @@ export async function exercisePiCommands(contents) {
   await wait(`document.querySelector('#pi-command textarea')?.value === 'Existing objective'`)
   for (const cancelInput of [false, true]) {
     await click('#pi-command-restart')
-    await wait(`document.querySelectorAll('#pi-command .question-option').length === 2`)
+    // Confirm also has two options. Wait for the reset menu, not the preceding
+    // question that can still be mounted while the native click is in flight.
+    await wait(`document.querySelectorAll('#pi-command .question-option').length === 2 && document.querySelector('#pi-command .question-other') != null && JSON.parse(document.querySelector('#pi-command-answers').textContent).length === 0`)
     await click('#pi-command .question-other')
     await wait(`document.querySelector('#pi-command .question-other-input') != null`)
     if (!await contents.executeJavaScript(`document.activeElement === document.querySelector('#pi-command .question-other-input')`)) throw new Error('Native custom-answer input did not receive focus')
