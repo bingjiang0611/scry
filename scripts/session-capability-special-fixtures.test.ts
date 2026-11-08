@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { runSpecialFixtures, withFixtureMedia } from './session-capability-special-fixtures.mjs'
+import { exerciseSidebarActivity } from './sidebar-activity-ui-checks.mjs'
 
 class FixtureWindow {
   static windows: FixtureWindow[] = []
@@ -41,6 +43,14 @@ function fixture(flags: Record<string, boolean>) {
 beforeEach(() => { FixtureWindow.windows = [] })
 
 describe('special UI fixture campaign ownership', () => {
+  it('uses an invalidated offscreen surface for the sidebar pixel samples', () => {
+    const runner = readFileSync(new URL('./session-capability-ui-smoke.mjs', import.meta.url), 'utf8')
+    expect(runner).toContain('const offscreen = overlaysOnly || listsOnly || loadingOnly || sidebarActivityOnly')
+    const exercise = exerciseSidebarActivity.toString()
+    const samples = exercise.slice(exercise.indexOf('for (const time of [1100, 2100])'))
+    expect(samples).toMatch(/contents\.invalidate\(\)[\s\S]*?requestAnimationFrame[\s\S]*?contents\.capturePage\(rect\)/)
+  })
+
   it('continues the default campaign after motion without destroying its main window', async () => {
     const args = fixture({ motion: true, motionOnly: false })
     expect(await runSpecialFixtures(args)).toEqual({ done: false, result: { motionTokens: { checked: true } } })

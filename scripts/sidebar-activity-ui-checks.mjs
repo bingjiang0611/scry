@@ -84,6 +84,9 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
         const bounds = title.getBoundingClientRect();
         return { x: Math.floor(bounds.x), y: Math.floor(bounds.y), width: Math.ceil(bounds.width), height: Math.ceil(bounds.height) };
       })()`)
+      // Like the loading/credits fixtures, invalidate the offscreen surface so
+      // capturePage cannot reuse the previous paused-animation sample.
+      contents.invalidate()
       await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
       const image = await contents.capturePage(rect)
       sweepImages.push(image.toBitmap())
