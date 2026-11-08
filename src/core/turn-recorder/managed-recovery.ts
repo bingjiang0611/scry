@@ -2,7 +2,7 @@ import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { readJson, listFiles, writeJsonAtomic } from './io.js'
 import { type RecorderOpenTurnState, type RecorderSessionState, recorderStatePath, recorderOpenPath, recorderTurnRoot, recorderQuarantinedOpenTurns, withRecorderSessionLock, SESSION_LOCK_WAIT_MS } from './runtime-state.js'
-import { listRecords, stableHash, clearRuntimeTurn } from './store.js'
+import { listRecords, stableHash, clearRuntimeTurn, safeKey, type CommitNotificationScope } from './store.js'
 import { canonicalPath, type CommitNotificationDelivery, managedRecorderMode, handoffs, commitHandoff, deliverCommitNotifications } from './managed.js'
 import { type PrepareManagedTurnInput, rawTextHash, type ManagedTurnHandoff, type ManagedRecorderProviderId } from './managed-evidence.js'
 
@@ -101,6 +101,7 @@ export async function recoverManagedRecorderTurns(
     isLiveManagedRun?: (runId: string | undefined, nativeIdentity?: Pick<RecorderOpenTurnState, 'provider' | 'sessionId' | 'providerTurnId'>) => boolean
     // 常驻 App 走 'detach'：恢复检查在“发送前”跑，不能被仓库回调积压拖住发送。
     commitNotifications?: CommitNotificationDelivery
+    commitNotificationScope?: CommitNotificationScope
   } = {}
 ): Promise<{ recovered: number; pending: number }> {
   const mode = await managedRecorderMode(workspace, env)
@@ -113,7 +114,8 @@ export async function recoverManagedRecorderTurns(
     : ['claude', 'codex', 'qoder', 'opencode', 'pi']
   for (const provider of providers) {
     const providerRoot = join(enablement.dataRoot, 'runtime', provider)
-    for (const sessionDir of await listFiles(providerRoot)) {
+    const sessionDirs = options.sessionId ? [safeKey(options.sessionId)] : await listFiles(providerRoot)
+    for (const sessionDir of sessionDirs) {
       const root = join(providerRoot, sessionDir)
       const open = await readJson<RecorderOpenTurnState>(recorderOpenPath(root))
       const quarantined = await recorderQuarantinedOpenTurns(root)
@@ -181,6 +183,6 @@ export async function recoverManagedRecorderTurns(
     }
   }
   // agent:start 每一轮都会跑到这里；同步投递会把发送卡在“正在启动”。
-  await deliverCommitNotifications(enablement.dataRoot, env, options.commitNotifications ?? 'await')
+  await deliverCommitNotifications(enablement.dataRoot, env, options.commitNotifications ?? 'await', options.commitNotificationScope)
   return { recovered, pending }
 }

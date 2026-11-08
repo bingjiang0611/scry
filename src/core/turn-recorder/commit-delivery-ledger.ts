@@ -193,6 +193,26 @@ export async function loadDeliveryState(dataRoot: string, fingerprint: string): 
 }
 
 /**
+ * Scoped recovery cannot migrate the shared legacy queue or merge its ACK into the isolated
+ * checkpoint. An operator must first run an unscoped drain, which is the only path authorized to
+ * create v2 receipts and advance the shared cursor.
+ */
+export async function loadScopedDeliveryState(dataRoot: string, fingerprint: string): Promise<CommitHookState> {
+  const old = await readCommitHookAck(dataRoot, fingerprint)
+  const legacyNeedsMerge = old.legacyAck !== null && (old.isolatedAck === null || old.legacyAck > old.isolatedAck)
+  if (legacyNeedsMerge || (old.isolatedAck !== null && old.queueVersion !== 2)) {
+    throw new Error('scoped commit notification recovery requires manual unscoped migration of legacy delivery state')
+  }
+  return {
+    schemaVersion: 1,
+    hookFingerprint: fingerprint,
+    ackedThrough: old.isolatedAck ?? 0,
+    processedThrough: old.processedThrough,
+    queueVersion: 2
+  }
+}
+
+/**
  * The store is readable, but the ACK cannot prove a sequence whose record file still exists.
  * This is the one delivery failure a drain may report softly: retrying cannot help, and letting
  * it escape as a thrown promise made every later drain and status query fail.

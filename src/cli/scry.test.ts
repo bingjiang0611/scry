@@ -23,10 +23,22 @@ describe('Scry CLI arguments', () => {
     expect(() => parseArgs(['doctor', '--workspace'])).toThrow('missing value')
   })
 
+  it('scoped recorder recovery fails closed on unpaired or unsupported scope', async () => {
+    await expect(runScryCli(['recorder', 'recover', '--provider', 'qoder']))
+      .rejects.toThrow('--provider and --session-id must be provided together')
+    await expect(runScryCli(['recorder', 'recover', '--session-id', 'session-1']))
+      .rejects.toThrow('--provider and --session-id must be provided together')
+    await expect(runScryCli(['recorder', 'recover', '--provider', 'claude', '--session-id', 'session-1']))
+      .rejects.toThrow('only supported for qoder')
+    await expect(runScryCli(['recorder', 'recover', '--provider', 'qoder', '--session-id', '']))
+      .rejects.toThrow('missing value for --session-id')
+  })
+
   it('help 使用 stdout 并成功退出', async () => {
     const stdout = captureStdout()
     await expect(runScryCli(['--help'])).resolves.toBe(0)
     expect(stdout.text()).toContain('Usage:')
+    expect(stdout.text()).toContain('recorder recover --provider qoder --session-id <id>')
   })
 
   it('--version 不会被空 positional 误判成 help', async () => {

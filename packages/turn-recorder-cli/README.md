@@ -108,6 +108,7 @@ scry recorder notify-retry --all-dead --workspace "$PWD"
 ## 详细参考
 
 - [轮次生命周期、恢复与版本记录](docs/lifecycle.md)
+- [按会话恢复：隔离范围与历史证据限制](docs/scoped-recovery.md)
 - [工具正文、存储容量、归档与性能](docs/storage-and-performance.md)
 - [Commit hook、managed 模式、更新与环境变量](docs/integrations-and-updates.md)
 
