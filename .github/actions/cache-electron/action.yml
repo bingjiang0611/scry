@@ -4,6 +4,13 @@ inputs:
   lockfiles:
     description: Lockfiles for the one or two source revisions built by this job
     default: package-lock.json
+outputs:
+  key:
+    description: Exact key for saving the validated downloads
+    value: ${{ steps.restore.outputs.cache-primary-key }}
+  hit:
+    description: Whether that exact download cache was restored
+    value: ${{ steps.restore.outputs.cache-hit }}
 runs:
   using: composite
   steps:
@@ -25,7 +32,8 @@ runs:
         const cache = path.join(process.env.RUNNER_TEMP, 'electron-downloads')
         fs.appendFileSync(process.env.GITHUB_ENV, `electron_config_cache=${cache}\n`)
         JS
-    - uses: actions/cache@v4
+    - id: restore
+      uses: actions/cache/restore@v4
       with:
         path: ${{ runner.temp }}/electron-downloads
         key: electron-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.versions.outputs.versions }}

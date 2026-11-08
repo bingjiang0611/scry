@@ -79,7 +79,9 @@ Compiled Xcode output is not uploaded to the repository cache.
   Remote retain SHA-specific groups with cancellation disabled.
 - Required workflows are not filtered by `paths-ignore`: GitHub would leave their
   required contexts pending. A shared, fail-closed Git diff skips heavy jobs only
-  for README.md/docs/**/*.md and still emits all three required summaries. Code,
+  for `**/README.md` or `docs/**/*.md` and still emits all three required summaries.
+  This includes the CLI, iOS and remote experiment READMEs; remote detection also
+  excludes README-only changes, but keeps mixed code changes mandatory. Code,
   configuration, Agent instructions and mixed diffs are not excluded.
 - All 29 ordered top-level renderer smoke invocations remain, including their
   nested scenarios and negative controls. No assertions, deadlines, coverage
@@ -104,6 +106,9 @@ Compiled Xcode output is not uploaded to the repository cache.
   The installer still validates cached downloads through @electron/get's SHA256
   manifest path. One or two source lockfiles bound a native comparison to its
   actual versions; no broad restore prefix accumulates unrelated versions.
+  Restore and save are separate: only a successful real installer check can
+  publish the cache, immediately before unrelated builds/tests. A later failing
+  assertion stays red but no longer discards an already-validated download.
   The current macOS/Linux ZIPs total 246,419,973 bytes (about 235 MiB), against
   9,571,443,179 bytes of measured repository cache use before this addition.
   First cache fill still requires a working official download endpoint; there is
@@ -148,6 +153,14 @@ one worker. No test or deadline changed. This narrows the failure but is not an
 Ubuntu x64 reproduction or proof of the original runner's load. Logs:
 `/tmp/scry-actions-linux-probe/{environment.txt,focused.log}`. The container was
 removed after collecting evidence; its official Node image remains cached.
+
+The first cold-cache CI run `42468753947` still saw official download HTTP 504.
+One macOS shard installed Electron, then failed the existing `scrollable transcript
+follows the bottom` assertion; its default job-success-only cache save did not
+publish an entry. This motivated the explicit early save above. The scroll
+assertion and its deadline remain unchanged; its failure now prints bounded
+numeric geometry to distinguish insufficient overflow from lost bottom-follow.
+Neither the cache revision nor that UI scenario has final hosted acceptance yet.
 
 The final run IDs, timing comparison and remote verification limits are recorded
 in the PR description after the second experiment. Historical/controlled workloads

@@ -168,6 +168,24 @@ function gitFixture() {
 }
 
 describe('remote change detection', () => {
+  it.each(['apps/ios/README.md', 'experiments/remote-g0/cf-relay/README.md'])('skips nested README only, not mixed code changes: %s', path => {
+    const { cwd, env, git, base } = gitFixture()
+    const script = source(workflow('remote-g0.yml').jobs.changes, 'Detect remote changes').run!
+    const output = join(temp(), 'outputs')
+    const detect = () => {
+      writeFileSync(output, '')
+      const result = shell(script, { ...env, BASE_SHA: base, GITHUB_OUTPUT: output }, cwd)
+      return { status: result.status, output: readFileSync(output, 'utf8') }
+    }
+    mkdirSync(join(cwd, path, '..'), { recursive: true })
+    writeFileSync(join(cwd, path), 'docs only\n')
+    git('add', '.'); git('commit', '-m', 'nested docs')
+    expect(detect()).toEqual({ status: 0, output: 'required=false\n' })
+    writeFileSync(join(cwd, path, '..', 'changed.ts'), 'code change\n')
+    git('add', '.'); git('commit', '-m', 'mixed code')
+    expect(detect()).toEqual({ status: 0, output: 'required=true\n' })
+  })
+
   it('uses real git diffs for ordinary, remote, iOS and workflow changes; rejects unreadable bases', () => {
     const { cwd, env, git, base } = gitFixture()
     const script = source(workflow('remote-g0.yml').jobs.changes, 'Detect remote changes').run!

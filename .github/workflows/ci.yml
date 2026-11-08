@@ -64,6 +64,7 @@ jobs:
           node-version: 22
           cache: npm
       - uses: ./.github/actions/cache-electron
+        id: electron-cache
       - run: npm ci
       - name: Prepare Electron executable
         run: |
@@ -72,6 +73,12 @@ jobs:
           sandbox="$(dirname "${electron_bin}")/chrome-sandbox"
           sudo chown root:root "${sandbox}"
           sudo chmod 4755 "${sandbox}"
+      # Save the validated download before unrelated tests/builds can fail.
+      - uses: actions/cache/save@v4
+        if: ${{ steps.electron-cache.outputs.hit != 'true' }}
+        with:
+          path: ${{ runner.temp }}/electron-downloads
+          key: ${{ steps.electron-cache.outputs.key }}
       - name: Unit, contract tests and coverage shard
         run: xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24' npm run test:coverage -- --maxWorkers=1 --shard=${{ matrix.shard }}/4 --reporter=default --reporter=blob --outputFile.blob=.vitest-reports/blob-${{ matrix.shard }}.json
       - name: Keep shard results for the merged coverage report
@@ -158,9 +165,16 @@ jobs:
           node-version: 22
           cache: npm
       - uses: ./.github/actions/cache-electron
+        id: electron-cache
       - run: npm ci
       - name: Prepare Electron executable
         run: node -e "require('node:fs').accessSync(require('electron'))"
+      # Save the validated download before unrelated tests/builds can fail.
+      - uses: actions/cache/save@v4
+        if: ${{ steps.electron-cache.outputs.hit != 'true' }}
+        with:
+          path: ${{ runner.temp }}/electron-downloads
+          key: ${{ steps.electron-cache.outputs.key }}
       - name: Prepare Electron native dependencies
         run: ./node_modules/.bin/electron-builder install-app-deps
       - name: Isolated renderer DOM smoke tests
@@ -216,9 +230,16 @@ jobs:
           node-version: 22
           cache: npm
       - uses: ./.github/actions/cache-electron
+        id: electron-cache
       - run: npm ci
       - name: Prepare Electron executable
         run: node -e "require('node:fs').accessSync(require('electron'))"
+      # Save the validated download before unrelated tests/builds can fail.
+      - uses: actions/cache/save@v4
+        if: ${{ steps.electron-cache.outputs.hit != 'true' }}
+        with:
+          path: ${{ runner.temp }}/electron-downloads
+          key: ${{ steps.electron-cache.outputs.key }}
       # run-electron-builder performs the authoritative forced ABI rebuild and
       # real native-load probe; no Electron tests precede it in this job.
       - name: Build desktop app and private CLI

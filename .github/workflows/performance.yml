@@ -165,6 +165,7 @@ jobs:
           cache: npm
           cache-dependency-path: candidate/package-lock.json
       - uses: ./candidate/.github/actions/cache-electron
+        id: electron-cache
         with:
           lockfiles: |
             candidate/package-lock.json
@@ -180,13 +181,22 @@ jobs:
           for file in $(node --input-type=module -e "import { nativeHarnessFiles } from './candidate/scripts/performance-native.mjs'; console.log(nativeHarnessFiles.join(' '))"); do
             cp "candidate/$file" "baseline/$file"
           done
+      - name: Prepare Electron executables
+        run: |
+          set -o pipefail
+          (cd baseline && node -e "require('node:fs').accessSync(require('electron'))") 2>&1 | tee native-results/baseline-electron-ready.log
+          (cd candidate && node -e "require('node:fs').accessSync(require('electron'))") 2>&1 | tee native-results/candidate-electron-ready.log
+      # Save the validated download before unrelated tests/builds can fail.
+      - uses: actions/cache/save@v4
+        if: ${{ steps.electron-cache.outputs.hit != 'true' }}
+        with:
+          path: ${{ runner.temp }}/electron-downloads
+          key: ${{ steps.electron-cache.outputs.key }}
       - name: Prepare Electron ABI and build both source revisions
         run: |
           set -o pipefail
           (cd baseline && ./node_modules/.bin/electron-builder install-app-deps) 2>&1 | tee native-results/baseline-native-deps.log
           (cd candidate && ./node_modules/.bin/electron-builder install-app-deps) 2>&1 | tee native-results/candidate-native-deps.log
-          (cd baseline && node -e "require('node:fs').accessSync(require('electron'))") 2>&1 | tee native-results/baseline-electron-ready.log
-          (cd candidate && node -e "require('node:fs').accessSync(require('electron'))") 2>&1 | tee native-results/candidate-electron-ready.log
           (cd baseline && npm run build) 2>&1 | tee native-results/baseline-build.log
           (cd candidate && npm run build) 2>&1 | tee native-results/candidate-build.log
       - name: Measure baseline then candidate, retaining failures

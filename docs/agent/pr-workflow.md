@@ -58,9 +58,9 @@
 | --- | --- | --- |
 | `ci.yml` | changes 后并行执行 Node/typecheck、`check:harness-bindings`、shell/App build、4 片 coverage（合并报告）、Node 20/22/24 CLI 编译与运行/包校验、3 片 macOS 15 renderer UI（第 2 片打包，第 3 片共享一次新鲜 App 构建）、Linux App / pacman 检查；桌面 typecheck 仅在 node 执行，独立 CLI 发布命令仍包含它 | `Check` 汇总全部 jobs（含 changes 与 `packaged-linux`）；仅明确纯文档时允许全部验证 job 跳过，其余失败、取消、缺失或意外跳过均拒绝 |
 | `performance.yml` | changes 后并行执行现有 compare 与 native 测量，不更改计时顺序、负载或预算 | `Performance Check` 汇总 changes 与两个测量 jobs；仅明确纯文档时允许跳过，评论发布不属于正确性门禁 |
-| `validation-changes.yml` | CI/Performance 共用的只读 diff；仅 README.md 与 docs/**/*.md 可跳过重型验证，docs 下的代码/配置、Agent 指导、混合改动仍全验；无法读取 diff 时失败，手动 dispatch 总是全验 | 不在触发器上过滤 required workflow，三个原有必需检查名不变 |
+| `validation-changes.yml` | CI/Performance 共用的只读 diff；仅各目录 README.md 与 docs/**/*.md 可跳过重型验证，docs 下的代码/配置、Agent 指导、混合改动仍全验；无法读取 diff 时失败，手动 dispatch 总是全验 | 不在触发器上过滤 required workflow，三个原有必需检查名不变 |
 | `.github/actions/cache-electron/action.yml` | 仅 Electron runtime jobs 使用；按 OS/架构/锁定 Electron 版本缓存 ZIP 与校验文件，原安装器继续校验 SHA256；不缓存 node_modules、App 或编译输出，不使用宽泛 restore prefix | 不替代运行时校验，首次下载失败仍失败 |
-| `remote-g0.yml` | 每个 PR 发出检查，仅 remote/iOS/工作流变化并行运行 transport 与 ios（同一 runner、共享 DerivedData/一份 Swift 包源码缓存，依次编译 ScryRemoteG0、ScryRemote；普通 PR 共用 4 个 macOS slot，remote/iOS 变化时最多 6 个 job 竞争 GitHub Free 的 5 个 slot，可能有一个排队）；transport 限 20 分钟、ios 限 30 分钟 | `Remote Check` 要求两项全部成功，或 changes 明确判定无影响且两项全部跳过；检测失败、结果缺失或任一项取消均拒绝 |
+| `remote-g0.yml` | 每个 PR 发出检查，仅 remote/iOS/工作流的非 README 改动并行运行 transport 与 ios（同一 runner、共享 DerivedData/一份 Swift 包源码缓存，依次编译 ScryRemoteG0、ScryRemote；普通 PR 共用 4 个 macOS slot，remote/iOS 变化时最多 6 个 job 竞争 GitHub Free 的 5 个 slot，可能有一个排队）；transport 限 20 分钟、ios 限 30 分钟 | `Remote Check` 要求两项全部成功，或 changes 明确判定无影响且两项全部跳过；检测失败、结果缺失或任一项取消均拒绝 |
 | `pr-vouch.yml` | 使用默认分支的 VOUCHED 配置，自动同步 `vouch:*` | 仅上下文，不是准入或门禁 |
 | `pr-size.yml` | 基础仓库代码读取 PR git diff，不运行 PR 内容；混合 PR 排除测试行 | 仅上下文，不按大小拒绝 PR |
 
@@ -91,7 +91,7 @@ size 采用上游阈值 XS <10、S <30、M <100、L <500、XL <1000、XXL ≥100
 | 场景 | 必须观察到的结果 |
 | --- | --- |
 | 任一 CI/性能任务失败、取消或无理由跳过 | 汇总失败，启用 ruleset 后不能合并 |
-| 仅 README.md 或 docs/**/*.md | changes 明确输出 false；重型 CI/性能任务跳过，`Check`、`Performance Check`、`Remote Check` 仍产生成功结果，不悬挂 required context |
+| 仅各目录 README.md 或 docs/**/*.md | changes 明确输出 false；重型 CI/性能任务跳过，`Check`、`Performance Check`、`Remote Check` 仍产生成功结果，不悬挂 required context |
 | 文档混有代码、配置或不可读 diff | 不按纯文档放行；前两者完整验证，后者检测失败、汇总失败 |
 | remote/iOS 未改动 | changes 输出 false，transport、ios 全部跳过，Remote Check 成功 |
 | remote/iOS/工作流有改动 | 两项并行验证必须全部成功；失败、取消、跳过或缺失结果不能被汇总隐藏 |

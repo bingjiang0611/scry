@@ -155,8 +155,17 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
   // The bottom-follow policy includes 32px of slack. The original viewport only
   // overflowed by 13px, so its top was still inside that zone, not older output.
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 700, deviceScaleFactor: 1, mobile: false })
+  let initialScrollState
   try {
-    await wait(() => evaluate(`${atLatest} && (() => { const el=document.querySelector('.conversation-chat .chat'); return el.scrollHeight-el.clientHeight > 32 })()`), 'scrollable transcript follows the bottom')
+    await wait(async () => {
+      initialScrollState = await evaluate(`(() => { const el=document.querySelector('.conversation-chat .chat'); return {
+        atLatest: ${atLatest}, scrollHeight: el?.scrollHeight ?? null,
+        clientHeight: el?.clientHeight ?? null, scrollTop: el?.scrollTop ?? null,
+        viewportWidth: innerWidth, viewportHeight: innerHeight, deviceScaleFactor: devicePixelRatio,
+        turns: document.querySelectorAll('.conversation-chat .turn').length
+      } })()`)
+      return initialScrollState.atLatest && initialScrollState.scrollHeight - initialScrollState.clientHeight > 32
+    }, 'scrollable transcript follows the bottom')
     const wheelPoint = await evaluate(`(() => {const rect=document.querySelector('.conversation-chat .chat').getBoundingClientRect();return {x:rect.left+10,y:rect.top+30}})()`)
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...wheelPoint, deltaX: 0, deltaY: -10000 })
     await wait(() => evaluate(`document.querySelector('.conversation-chat .chat').scrollTop === 0 && !${atLatest}`), 'user scroll leaves bottom following')
@@ -166,6 +175,10 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
       const position = await evaluate(`(() => { const el=document.querySelector('.conversation-chat .chat'); return { top: el.scrollTop, height: el.scrollHeight, client: el.clientHeight } })()`)
       assert.equal(position.top, 0, `layout changes must preserve the user reading older output: ${JSON.stringify(position)}`)
     }
+  } catch (error) {
+    // Keep the first failure and distinguish no overflow from lost bottom-follow.
+    console.error('[scry] initial transcript scroll geometry', initialScrollState)
+    throw error
   } finally { await cdp.send('Emulation.clearDeviceMetricsOverride') }
 
   const aPreview = await preview(evaluate, id, 'claude')

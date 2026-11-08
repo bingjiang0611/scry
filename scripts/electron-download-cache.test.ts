@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 const { load } = createRequire(import.meta.url)('js-yaml') as { load: (text: string) => unknown }
 const root = resolve(import.meta.dirname, '..')
 interface Step {
+  name?: string
+  if?: string
   id?: string
   uses?: string
   run?: string
@@ -17,6 +19,7 @@ interface Workflow { jobs: Record<string, { steps?: Step[] }> }
 const yaml = (path: string) => load(readFileSync(join(root, path), 'utf8'))
 const action = yaml('.github/actions/cache-electron/action.yml') as {
   inputs: { lockfiles: { default: string } }
+  outputs: { key: { value: string }; hit: { value: string } }
   runs: { using: string; steps: Step[] }
 }
 const script = action.runs.steps.find(step => step.id === 'versions')!.run!
@@ -61,7 +64,9 @@ describe('Electron download cache', () => {
   it('persists only version/OS/architecture-specific downloads with no broad restore prefix', () => {
     expect(action.runs.using).toBe('composite')
     expect(action.inputs.lockfiles.default).toBe('package-lock.json')
-    const cache = action.runs.steps.find(step => step.uses === 'actions/cache@v4')!
+    expect(action.outputs.key.value).toBe('${{ steps.restore.outputs.cache-primary-key }}')
+    expect(action.outputs.hit.value).toBe('${{ steps.restore.outputs.cache-hit }}')
+    const cache = action.runs.steps.find(step => step.uses === 'actions/cache/restore@v4')!
     expect(cache.with).toEqual({
       path: '${{ runner.temp }}/electron-downloads',
       key: 'electron-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.versions.outputs.versions }}'
@@ -77,7 +82,15 @@ describe('Electron download cache', () => {
       const caches = steps.filter(step => step.uses === './.github/actions/cache-electron')
       if (['unit', 'packaged-electron', 'packaged-linux'].includes(name)) {
         expect(caches).toHaveLength(1)
+        expect(caches[0].id).toBe('electron-cache')
         expect(steps.indexOf(caches[0])).toBeLessThan(steps.findIndex(step => step.run === 'npm ci'))
+        const ready = steps.findIndex(step => step.name === 'Prepare Electron executable')
+        const save = steps.find(step => step.uses === 'actions/cache/save@v4')!
+        // Save only after the real installer checks, before a later test failure
+        // can discard a valid download. Failed preparation must never save a key.
+        expect(steps.indexOf(save)).toBe(ready + 1)
+        expect(save.if).toBe("${{ steps.electron-cache.outputs.hit != 'true' }}")
+        expect(save.with).toEqual({ path: '${{ runner.temp }}/electron-downloads', key: '${{ steps.electron-cache.outputs.key }}' })
       } else expect(caches).toHaveLength(0)
     }
     const performance = yaml('.github/workflows/performance.yml') as Workflow
@@ -86,5 +99,12 @@ describe('Electron download cache', () => {
     const cache = native.find(step => step.uses === './candidate/.github/actions/cache-electron')!
     expect(cache.with?.lockfiles.trim().split(/\s+/)).toEqual(['candidate/package-lock.json', 'baseline/package-lock.json'])
     expect(native.indexOf(cache)).toBeLessThan(native.findIndex(step => step.run?.includes('(cd baseline && npm ci)')))
+    const ready = native.findIndex(step => step.name === 'Prepare Electron executables')
+    expect(native[ready].run).toContain("(cd baseline && node -e \"require('node:fs').accessSync(require('electron'))\")")
+    expect(native[ready].run).toContain("(cd candidate && node -e \"require('node:fs').accessSync(require('electron'))\")")
+    const save = native[ready + 1]
+    expect(save.uses).toBe('actions/cache/save@v4')
+    expect(save.if).toBe("${{ steps.electron-cache.outputs.hit != 'true' }}")
+    expect(native[ready + 2].name).toBe('Prepare Electron ABI and build both source revisions')
   })
 })

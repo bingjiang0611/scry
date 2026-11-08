@@ -30,7 +30,9 @@ jobs:
         run: |
           if [[ "$BASE_SHA" =~ ^0+$ ]]; then
             echo 'required=true' >> "$GITHUB_OUTPUT"
-          elif git diff --quiet --no-ext-diff --no-textconv "$BASE_SHA" HEAD -- experiments/remote-g0 apps/ios .github/workflows; then
+          elif git diff --quiet --no-ext-diff --no-textconv "$BASE_SHA" HEAD -- \
+            experiments/remote-g0 apps/ios .github/workflows \
+            ':(top,glob,exclude)**/README.md'; then
             echo 'required=false' >> "$GITHUB_OUTPUT"
           else
             status=$?

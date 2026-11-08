@@ -31,7 +31,7 @@ jobs:
           if [ "$EVENT_NAME" = workflow_dispatch ] || [[ "$BASE_SHA" =~ ^0+$ ]]; then
             echo 'required=true' >> "$GITHUB_OUTPUT"
           elif git diff --quiet --no-ext-diff --no-textconv "$BASE_SHA" HEAD -- . \
-            ':(top,exclude)README.md' \
+            ':(top,glob,exclude)**/README.md' \
             ':(top,glob,exclude)docs/**/*.md'; then
             echo 'required=false' >> "$GITHUB_OUTPUT"
           else

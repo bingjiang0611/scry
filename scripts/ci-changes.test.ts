@@ -52,7 +52,11 @@ function fixture() {
 // Real Git pathspecs, including renames/deletions, not a second matcher.
 // Separate cases keep subprocess-heavy fixtures under the ordinary test deadline.
 describe('documentation-only validation skips', () => {
-  it.each(['README.md', 'docs/guide.md', 'docs/nested/guide.md'])('skips only documentation: %s', path => {
+  it.each([
+    'README.md', 'docs/guide.md', 'docs/nested/guide.md', 'apps/ios/README.md',
+    'packages/turn-recorder-cli/README.md', 'experiments/remote-g0/README.md',
+    'experiments/remote-g0/cf-relay/README.md'
+  ])('skips only documentation: %s', path => {
     const { write, commit, detect } = fixture()
     write(path); commit()
     expect(detect()).toEqual({ status: 0, output: 'required=false\n' })
