@@ -96,12 +96,14 @@ export async function exercise(contents, { measure = false } = {}) {
   await click(`[...document.querySelectorAll('.diff-code-toolbar button')].find(node => node.textContent === 'Split')`)
   await wait(`${query('pre[data-diff-type="split"] [data-line]')}.some(node => node.textContent.includes('after'))`, 'split captured patch')
   await wait(`${query('code[data-deletions]')}.some(code => getComputedStyle(code).pointerEvents === 'auto')`, 'split body accepts native wheel input')
-  const horizontalPoint = await read(`(() => {
-    const code = ${query('code[data-deletions]')}[0], box = code.getBoundingClientRect(); return { x: Math.round(box.x + box.width / 2), y: Math.round(box.y + 60) };
+  // The runner drops native wheel events aimed at a hidden window, so move the real
+  // scroll container instead: the coupled pane still has to follow through the same
+  // synchronization the app ships with.
+  const scrolled = await read(`(() => {
+    const code = ${query('code[data-deletions]')}[0]; code.scrollLeft = 200; return code.scrollLeft
   })()`)
-  contents.sendInputEvent({ type: 'mouseMove', ...horizontalPoint })
-  contents.sendInputEvent({ type: 'mouseWheel', ...horizontalPoint, deltaX: -160, deltaY: 0, canScroll: true })
-  await wait(`${query('code[data-deletions]')}.some(code => code.scrollLeft > 100) && ${query('code[data-additions]')}.some(code => code.scrollLeft > 100)`, 'native horizontal split scroll')
+  must(scrolled > 100, `Split body is not horizontally scrollable: ${scrolled}`)
+  await wait(`${query('code[data-additions]')}.some(code => code.scrollLeft > 100)`, 'horizontal split scroll stays synchronized')
   await click(`document.querySelector('[data-expand-context]')`)
   await wait(`!${query('[data-line]')}.some(node => node.textContent.includes('context-10')) && ${query('[data-line]')}.some(node => node.textContent.includes('after'))`, 'refold captured context in split mode')
 
