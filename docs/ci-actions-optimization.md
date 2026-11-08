@@ -110,7 +110,14 @@ Second-round revision `b9379cf2` passed
 The iOS job fell from 473 to 287 seconds (39.3%); its second compile fell from
 232 to 113 seconds (51.3%). These are single hosted samples, not a stable latency
 claim. Scheduling also improved between runs; queue savings are not attributed
-to compilation reuse.
+to compilation reuse. An independent work counter confirms real reuse: second
+build log lines beginning with `CompileC` fell from 783 to 0, while `SwiftCompile`
+lines stayed at 762. These are compiler task log counts, not test counts. Both
+original Xcode actions still passed. The two Swift compiler command lines differ
+in `-working-directory` (their respective xcodeproj paths); shared DerivedData
+therefore does not make the second, different app build free. Do not normalize
+compiler arguments or change project language modes just to manufacture a cache
+hit. Further Swift reuse needs a supported common build graph, not weaker tests.
 
 The same revision's CI/Performance/PR Vouch runs encountered GitHub HTTP 504s.
 CI and native performance failed while downloading the official Electron zip,

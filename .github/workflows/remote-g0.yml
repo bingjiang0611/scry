@@ -86,7 +86,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # Both projects use ScryG0Transport and the same SDK/configuration. Share
-      # this job's DerivedData so dependency products compile once. Persist only
+      # this job's DerivedData to reuse eligible dependency products. Persist only
       # package downloads, not DerivedData/Build or a second copy of the sources.
       - name: Cache shared iOS Swift package checkouts
         uses: actions/cache@v4
