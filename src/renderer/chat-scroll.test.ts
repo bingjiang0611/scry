@@ -1,5 +1,41 @@
 import { describe, expect, it } from 'vitest'
-import { transcriptGrowthAboveEdge } from './chat-scroll'
+import { chatBottomStickinessAfterScroll, scrollChatToBottomIfNeeded, transcriptGrowthAboveEdge } from './chat-scroll'
+
+function scrollBox() {
+  const element = {
+    scrollHeight: 687, clientHeight: 545, scrollTop: 0,
+    scrollTo: ({ top }: { top: number }) => { element.scrollTop = Math.min(top, element.scrollHeight - element.clientHeight) }
+  }
+  return element
+}
+
+describe('automatic bottom scroll events', () => {
+  it('keeps following when a queued pin arrives after the viewport shrinks', () => {
+    const element = scrollBox()
+    scrollChatToBottomIfNeeded(element, true)
+    expect(element.scrollTop).toBe(142)
+    element.clientHeight = 365
+    expect(chatBottomStickinessAfterScroll(element, false)).toBe(true)
+  })
+
+  it('lets a real move away cancel following and consumes the pending pin', () => {
+    const element = scrollBox()
+    scrollChatToBottomIfNeeded(element, true)
+    element.clientHeight = 365
+    element.scrollTop = 0
+    expect(chatBottomStickinessAfterScroll(element, false)).toBe(false)
+    element.scrollTop = 142
+    expect(chatBottomStickinessAfterScroll(element, false)).toBe(false)
+  })
+
+  it('does not claim an event when a pin did not change the offset', () => {
+    const element = scrollBox()
+    element.scrollTop = 142
+    scrollChatToBottomIfNeeded(element, true)
+    element.clientHeight = 365
+    expect(chatBottomStickinessAfterScroll(element, false)).toBe(false)
+  })
+})
 
 describe('transcriptGrowthAboveEdge', () => {
   it('compensates a materialized turn whose top is above the edge', () => {
