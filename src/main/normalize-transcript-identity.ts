@@ -48,4 +48,3 @@ export function mergeInjectedTranscriptIdentity(cur: ParsedTurn, line: Record<st
   }
   if (transcriptIdentityContradictory(line)) cur.identityContradictory = true
 }
-
