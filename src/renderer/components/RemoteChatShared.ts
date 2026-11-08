@@ -1,6 +1,6 @@
 import type { AgentPermissionMode, AgentRunControlCatalog, AgentRunControls } from '@shared/runtime'
 import type { DesktopRemoteContext, DesktopRemoteIntent, RemoteProviderRef } from '@shared/desktop-remote'
-import { REMOTE_SESSION_COPY } from '../constants/copy'
+import { REMOTE_ACCESS_COPY, REMOTE_SESSION_COPY } from '../constants/copy'
 
 export const POLL_MS = 1500
 export const QUIET_POLL_MAX_MS = 5000
@@ -60,6 +60,6 @@ export function remoteControlsValid(provider: RemoteProviderRef | undefined, con
 }
 
 export function errorText(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error)
+  const message = REMOTE_ACCESS_COPY.errorText(error)
   return message.includes('desktop_session_operation_unknown') ? REMOTE_SESSION_COPY.operationUnknown : message
 }
