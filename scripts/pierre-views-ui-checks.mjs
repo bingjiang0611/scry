@@ -38,15 +38,18 @@ export async function exercise(contents, { measure = false } = {}) {
     contents.sendInputEvent({ type: 'mouseUp', ...point, button, clickCount: 1 })
     await frames()
   }
-  const fill = async (expression, value) => {
+  // Type through native key events, one character at a time: a hidden window on a
+  // busy runner can drop a single insertText batch, and the check needs the input
+  // value to be observable, not assumed.
+  const typeInto = async (expression, value) => {
     await click(expression)
-    // Hidden fixtures have no app menu/Command-A accelerator. Use Electron's
-    // native edit command; value changes still enter through native input.
     contents.selectAll()
     contents.sendInputEvent({ type: 'keyDown', keyCode: 'Backspace' })
     contents.sendInputEvent({ type: 'keyUp', keyCode: 'Backspace' })
-    if (value) await contents.insertText(value)
+    for (const char of value) contents.sendInputEvent({ type: 'char', keyCode: char })
+    await wait(`(${expression}).value === ${JSON.stringify(value)}`, 'native input value')
   }
+  const fill = typeInto
   const mode = async value => { console.log('Pierre mode: ' + value); await click(`document.getElementById('mode-${value}')`) }
   const gutter = line => `${query(`[data-column-number="${line}"]`)}.find(node => node.getBoundingClientRect().height > 0)`
   await wait(`${query('[data-line] span[style]')}.length > 0`, 'offline TypeScript highlighting')
@@ -60,8 +63,7 @@ export async function exercise(contents, { measure = false } = {}) {
   must(JSON.stringify(comments) === JSON.stringify([{ side: 'LEFT', line: 4 }, { side: 'RIGHT', line: 8 }]), `Incorrect comment mapping: ${JSON.stringify(comments)}`)
 
   await mode('patch')
-  await click(`document.querySelector('input[aria-label="评论行号"]')`)
-  await contents.insertText('9')
+  await typeInto(`document.querySelector('input[aria-label="评论行号"]')`, '9')
   await wait(`document.querySelector('.pierre-comment-target button')?.disabled === false`, 'captured keyboard comment target')
   contents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab' })
   contents.sendInputEvent({ type: 'keyUp', keyCode: 'Tab' })
