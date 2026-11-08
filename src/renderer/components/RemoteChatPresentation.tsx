@@ -65,7 +65,7 @@ export function useRemoteChatPresentation(foundation: FoundationState, controlPr
     const onScroll = (): void => {
       if (chatNavigation.active.current) return
       const position = { scrollTop: history.scrollTop, scrollHeight: history.scrollHeight, clientHeight: history.clientHeight }
-      const nearLatest = chatBottomStickinessAfterScroll(position, openingLatest.current)
+      const nearLatest = chatBottomStickinessAfterScroll(history, openingLatest.current)
       // Removing a notice can grow the viewport and clamp scrollTop upward.
       // Content may then grow before that scroll event arrives. That exact
       // viewport clamp is not a reader scrolling away from the latest message.

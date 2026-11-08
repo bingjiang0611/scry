@@ -69,6 +69,12 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
   await read('window.activityFixture.setLongTitle(true)')
   await wait(`document.querySelector(${JSON.stringify(row)}).textContent.includes('/design-loop ios')`)
   check(await read(`(() => { const title = document.querySelector(${JSON.stringify(row)}).querySelector('.sb-sesstext'); return title.scrollWidth > title.clientWidth && getComputedStyle(title).textOverflow === 'ellipsis'; })()`), 'Long running title does not truncate')
+  await read(`(() => {
+    const marker = document.createElement('i');
+    marker.id = 'sidebar-paint-fence';
+    marker.style.cssText = 'position:fixed;left:0;top:0;width:4px;height:4px;z-index:2147483647;pointer-events:none;forced-color-adjust:none';
+    document.body.append(marker);
+  })()`)
   for (const theme of ['dark', 'light']) {
     await read(`document.documentElement.dataset.theme = '${theme}'`)
     await wait(`document.querySelector('.sidebar').getAnimations({ subtree: true }).every(animation => animation.effect.getComputedTiming().endTime === Infinity)`)
@@ -84,13 +90,34 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
         const bounds = title.getBoundingClientRect();
         return { x: Math.floor(bounds.x), y: Math.floor(bounds.y), width: Math.ceil(bounds.width), height: Math.ceil(bounds.height) };
       })()`)
-      // Like the loading/credits fixtures, invalidate the offscreen surface so
-      // capturePage cannot reuse the previous paused-animation sample.
-      contents.invalidate()
       await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
-      const image = await contents.capturePage(rect)
-      sweepImages.push(image.toBitmap())
-      sweepFrames.push({ time, image })
+      // A queued paint can precede the requested animation update. A unique
+      // marker commits after that update; only its acknowledged frame is a
+      // sample. The pixel assertion still runs exactly once, without retries.
+      const color = [time === 1100 ? 17 : 19, theme === 'dark' ? 29 : 31, 43]
+      let onPaint
+      const painted = new Promise((resolve, reject) => {
+        onPaint = (_event, _dirty, frame) => {
+          try {
+            const pixel = frame.crop({ x: 1, y: 1, width: 1, height: 1 }).toBitmap()
+            if (pixel[0] !== color[2] || pixel[1] !== color[1] || pixel[2] !== color[0] || pixel[3] !== 255) return
+            const image = frame.crop(rect)
+            resolve({ image, bitmap: Buffer.from(image.toBitmap()) })
+          } catch (error) {
+            reject(error)
+          }
+        }
+        contents.on('paint', onPaint)
+      })
+      try {
+        await read(`document.querySelector('#sidebar-paint-fence').style.backgroundColor = 'rgb(${color.join(',')})'`)
+        contents.invalidate()
+        const { image, bitmap } = await painted
+        sweepImages.push(bitmap)
+        sweepFrames.push({ time, image })
+      } finally {
+        contents.off('paint', onPaint)
+      }
     }
     // A different PNG alone accepted an imperceptible shimmer. Require a visible
     // channel change on multiple glyph pixels, not just a single changed byte.
@@ -116,7 +143,7 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
     })()`) : undefined
     check(visiblePixels >= 20, `Long ${theme} working title sweep is too faint: ${visiblePixels} pixels changed by >=40/255; maxDelta=${maxDelta}; sizes=${JSON.stringify(sweepFrames.map(frame => frame.image.getSize()))}; ${JSON.stringify(diagnostic)}`)
   }
-  await read(`${titleAnimations}.find(animation => animation.animationName === 'sb-activity-sweep').play(); window.activityFixture.setLongTitle(false); document.documentElement.dataset.theme = 'dark'`)
+  await read(`document.querySelector('#sidebar-paint-fence').remove(); ${titleAnimations}.find(animation => animation.animationName === 'sb-activity-sweep').play(); window.activityFixture.setLongTitle(false); document.documentElement.dataset.theme = 'dark'`)
   await wait(`document.querySelector(${JSON.stringify(row)}).textContent.includes('Retry failed webhook delivery')`)
   check(await read(`document.querySelectorAll('.sb-activity-heading').length === 2 && !document.querySelector('.sb-activity-project') && !document.querySelector('.sb-activity-heading span')`), 'Empty groups, project subtitles or counts leaked into the flat list')
   return exerciseSidebarActivityContinuation({ contents, screenshotPrefix, read, wait, point, click, check, row, group, layoutAnimations, titleAnimations, projectTypography })

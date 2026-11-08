@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -43,12 +44,41 @@ function fixture(flags: Record<string, boolean>) {
 beforeEach(() => { FixtureWindow.windows = [] })
 
 describe('special UI fixture campaign ownership', () => {
-  it('uses an invalidated offscreen surface for the sidebar pixel samples', () => {
+  it('uses an acknowledged offscreen surface for the sidebar pixel samples', () => {
     const runner = readFileSync(new URL('./session-capability-ui-smoke.mjs', import.meta.url), 'utf8')
     expect(runner).toContain('const offscreen = overlaysOnly || listsOnly || loadingOnly || sidebarActivityOnly')
     const exercise = exerciseSidebarActivity.toString()
     const samples = exercise.slice(exercise.indexOf('for (const time of [1100, 2100])'))
-    expect(samples).toMatch(/contents\.invalidate\(\)[\s\S]*?requestAnimationFrame[\s\S]*?contents\.capturePage\(rect\)/)
+    expect(samples).toMatch(/contents\.on\('paint'[\s\S]*?contents\.invalidate\(\)[\s\S]*?contents\.off\('paint'/)
+    expect(samples).not.toContain('contents.capturePage(rect)')
+  })
+
+  it('ignores queued frames and copies acknowledged pixels before their buffer is reused', async () => {
+    const source = exerciseSidebarActivity.toString()
+    const start = source.indexOf('const color = [')
+    const cleanup = "contents.off('paint', onPaint)\n      }"
+    const end = source.indexOf(cleanup, start) + cleanup.length
+    expect(start).toBeGreaterThan(0)
+    expect(end).toBeGreaterThan(start)
+    const capture = new Function('contents', 'read', 'time', 'theme', 'rect', 'sweepImages', 'sweepFrames', `return (async () => { ${source.slice(start, end)} })()`)
+    const borrowed = Buffer.from([80, 90, 100, 255])
+    const image = { toBitmap: () => borrowed }
+    const staleCrop = vi.fn(() => { throw new Error('A queued frame was accepted as the sample') })
+    const frame = (marker: number[], crop: () => typeof image) => ({
+      crop: (rect: { width: number }) => rect.width === 1 ? { toBitmap: () => Buffer.from(marker) } : crop()
+    })
+    const contents = Object.assign(new EventEmitter(), {
+      invalidate: () => {
+        contents.emit('paint', {}, {}, frame([0, 0, 0, 255], staleCrop))
+        contents.emit('paint', {}, {}, frame([43, 29, 17, 255], () => image))
+        borrowed.fill(0)
+      }
+    })
+    const bitmaps: Buffer[] = []
+    await capture(contents, vi.fn().mockResolvedValue(undefined), 1100, 'dark', { width: 178 }, bitmaps, [])
+    expect(staleCrop).not.toHaveBeenCalled()
+    expect(bitmaps).toEqual([Buffer.from([80, 90, 100, 255])])
+    expect(contents.listenerCount('paint')).toBe(0)
   })
 
   it('continues the default campaign after motion without destroying its main window', async () => {
