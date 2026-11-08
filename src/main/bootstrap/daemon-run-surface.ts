@@ -4,7 +4,7 @@ import type { BackgroundTaskStopResult } from '../../shared/background-work'
 import type { ActiveRun } from '../../shared/trace'
 import type { DesktopRemoteContext } from '../../shared/desktop-remote'
 import { DaemonRunRuntime } from '../daemon-run-runtime'
-import type { DaemonRunTransport } from '../daemon-run-transport'
+import { DaemonRunError, type DaemonRunTransport } from '../daemon-run-transport'
 import type { TraceBatchReceipt } from '../trace-output'
 
 // The run half of the daemon-mode App: the renderer keeps sending the same IPC
@@ -21,7 +21,9 @@ export interface DaemonRunSurfaceDeps {
 }
 
 export interface DaemonRunSurface {
-  start(payload: AgentStartRequest): Promise<AgentStartResult>
+  // `intentId` is the caller's idempotency key: fixed before the first attempt so a
+  // retry after a connection failure cannot record a second intent.
+  start(payload: AgentStartRequest, intentId?: string): Promise<AgentStartResult>
   // Async on purpose: in daemon mode the run state lives behind a socket, and the
   // IPC handlers await both this surface and the in-process registry uniformly.
   activeRun(): Promise<ActiveRun | null>
@@ -76,16 +78,30 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
   let focusedRunId: string | null = null
   const { runtime } = deps
   return {
-    async start(payload) {
+    async start(payload, intentId) {
       const context = runContext(payload, deps.currentCwd())
       if (!context) throw new Error('daemon_run_workspace_required')
-      // The App's commandId is its own idempotency key; the daemon needs one per
-      // intent, and a retry must reuse it rather than record a second intent.
-      const receipt = await runtime.start({
-        intentId: payload.commandId?.trim() || randomUUID(),
-        detail: routingDetail(payload, deps.currentCwd()),
-        context
-      })
+      // The intent id is fixed by the caller BEFORE the first attempt, so a retry after
+      // a connection failure records one intent, not two. The App's commandId is its
+      // own idempotency key and wins when present.
+      const intent = payload.commandId?.trim() || intentId || randomUUID()
+      let receipt: { runId: string; bound: boolean }
+      try {
+        receipt = await runtime.start({ intentId: intent, detail: routingDetail(payload, deps.currentCwd()), context })
+      } catch (error) {
+        if (!(error instanceof DaemonRunError) || error.reason !== 'daemon_outcome_unknown') throw error
+        // The submit was written and the reply never arrived. Re-submitting would be a
+        // second run, so the daemon is asked what it recorded for THIS intent.
+        let recorded: { runId: string }
+        try {
+          recorded = await deps.transport.intentState(intent)
+        } catch {
+          throw new DaemonRunError('daemon_submit_unknown')
+        }
+        await runtime.adopt(recorded.runId)
+        focusedRunId = recorded.runId
+        return { runId: recorded.runId, ...(context.externalSessionId ? { externalSessionId: context.externalSessionId } : {}) }
+      }
       // `bound: false` means the trace will not carry this id yet. Say so instead
       // of handing the view an id it cannot match.
       if (!receipt.bound) throw new Error('daemon_run_not_bound')
@@ -107,9 +123,10 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
       }
       return runtime.activeRuns()
     },
+    // Ignores `done`, exactly like the in-process handler: the renderer uses this to
+    // recover a terminal event it missed, and a finished run is when that matters most.
     async focusedRunSnapshot() {
-      const runs = runtime.activeRuns()
-      return runs.find((run) => run.runId === focusedRunId) ?? null
+      return focusedRunId === null ? null : runtime.runView(focusedRunId)
     },
     async focusRun(runId) { focusedRunId = runId; return true },
     stop(runId) { return runtime.stop(runId) },

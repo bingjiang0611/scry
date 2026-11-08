@@ -54,6 +54,8 @@ export interface RemoteRunBindingDependencies {
   startAppRun?(input: {
     runId: string
     ledgerRunId: string
+    /** Always `'remote'`: this run arrived through the ledger. */
+    origin: 'remote'
     request: AgentStartRequest
     providerPrompt?: string
     stopSignal: AbortSignal
@@ -196,6 +198,9 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
       const completion = await deps.startAppRun!({
         runId: scryRunId,
         ledgerRunId,
+        // Arrived through the ledger, whatever the grant's scope: semantics that differ
+        // by scope read `grantScope`, never this.
+        origin: 'remote',
         request: {
           prompt, providerId: routing.providerId as AgentStartRequest['providerId'],
           // An App submit may name no directory; the App then uses its own current

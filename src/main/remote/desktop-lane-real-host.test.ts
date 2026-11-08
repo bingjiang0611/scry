@@ -1,6 +1,7 @@
 import 'reflect-metadata'
 import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
+import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { webcrypto } from 'node:crypto'
@@ -8,7 +9,7 @@ import { Pkcs10CertificateRequestGenerator, cryptoProvider } from '@peculiar/x50
 import { RemoteHostService } from './remote-host-service'
 import { requestOn } from './desktop-host-fixtures'
 import { RunOutputFileStore } from './run-output-file'
-import { connectDesktopLane, DesktopLanes, type DesktopLaneChannel, type DesktopLaneEndpoint } from './desktop-lane'
+import { connectDesktopLane, DesktopLanes, laneWasNotSent, type DesktopLaneChannel, type DesktopLaneEndpoint } from './desktop-lane'
 import { verifyCSR } from './enrollment'
 import { ProviderOperationGate } from '../provider-operation-gate'
 import { setPerformanceRecordingSink, type PerformanceSample } from '../performance-timing'
@@ -53,6 +54,29 @@ async function pendingLiveRuns(lanes: DesktopLanes, lane: 'status' | 'bulk', end
   // Wrapped: an async function would otherwise wait for the whole poll.
   return { pending: requestOn(lanes, lane, 'c1', { endpoint, request: { op: 'liveRuns', waitMs: 20_000, revision: first.liveRuns.revision }, replayable: false, ...(signal ? { signal } : {}) }) }
 }
+
+describe('desktop lane connection bounds', () => {
+  it('gives up on a silent listener instead of waiting forever', async () => {
+    // A daemon that was killed mid-restart can still have its socket in the kernel's
+    // accept backlog: connect succeeds, the handshake never starts. Nothing has been
+    // written, so the request must fail fast and be retried, not hang the window.
+    const dir = mkdtempSync(join(tmpdir(), 'scry-lane-silent-')); dirs.push(dir)
+    const path = join(dir, 'silent.sock')
+    const accepted = new Set<import('node:net').Socket>()
+    const server = createServer((socket) => { accepted.add(socket); socket.on('error', () => undefined) })
+    await new Promise<void>((resolve) => server.listen(path, resolve))
+    cleanups.push(async () => {
+      for (const socket of accepted) socket.destroy()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    })
+    const started = Date.now()
+    const failure = await connectDesktopLane({
+      path, caPEM: '', certPEM: '', keyPEM: ''
+    }, { timeoutMs: 300 }).catch((error: unknown) => error)
+    expect(Date.now() - started).toBeLessThan(5_000)
+    expect(laneWasNotSent(failure)).toBe(true)
+  })
+})
 
 describe('desktop lanes over the real inner-mTLS host', () => {
   it('serves consecutive requests on one verified TLS connection', async () => {

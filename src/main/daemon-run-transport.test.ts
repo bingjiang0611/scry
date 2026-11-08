@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { DaemonRunError, DaemonRunTransport } from './daemon-run-transport'
+import { laneNotSent, laneOutcomeUnknown } from './remote/desktop-lane'
 
 const RUN = '7b0b4f2c-1c4d-4a3f-9a2e-2f2c1a4b5d6e'
 
@@ -63,12 +64,34 @@ describe('daemon run transport', () => {
     await expect(value.stop(RUN)).rejects.toMatchObject({ reason: 'daemon_stop_not_confirmed' })
   })
 
+  it('reads the daemon receipt an accepted answer really returns', async () => {
+    // The daemon answers with its ledger receipt ({status}), not a bare `true`.
+    const accepted = transport(() => ({ answer: { status: 'answered' } }))
+    await expect(accepted.value.answerQuestion({
+      runId: RUN, answerId: 'q1',
+      response: { runId: RUN, questionId: 'q1', behavior: 'answered', answers: {} }
+    })).resolves.toBe(true)
+    // A receipt the App cannot read is still not a delivery.
+    const unreadable = transport(() => ({ answer: { status: 'unknown' } })).value
+    await expect(unreadable.answerQuestion({
+      runId: RUN, answerId: 'q1',
+      response: { runId: RUN, questionId: 'q1', behavior: 'answered', answers: {} }
+    })).rejects.toMatchObject({ reason: 'daemon_answer_not_delivered' })
+  })
+
   it('keeps an undelivered answer visible', async () => {
     const { value } = transport(() => ({ answer: false }))
     await expect(value.answerQuestion({
       runId: RUN, answerId: 'q1',
       response: { runId: RUN, questionId: 'q1', behavior: 'answered', answers: {} }
     })).rejects.toMatchObject({ reason: 'daemon_answer_not_delivered' })
+  })
+
+  it('declares its live-run read replayable so a dead daemon can be retried', async () => {
+    const { value, calls } = transport(() => ({ liveRuns: { revision: 'r1', runs: [] } }))
+    await value.liveRuns({ waitMs: 0 })
+    // A read changes nothing; only a write may never be replayed.
+    expect(calls[0]!.options).toEqual({ replayable: true })
   })
 
   it('never reports an empty paged read as complete content', async () => {
@@ -83,8 +106,11 @@ describe('daemon run transport', () => {
     await expect(value.liveRuns({ waitMs: 15_000 })).resolves.toEqual({ revision: 'v7', runs: [{ runId: RUN, state: 'running', scryRunId: 'run-abc-1' }] })
   })
 
-  it('turns a transport throw into a named failure', async () => {
-    const value = new DaemonRunTransport(vi.fn(async () => { throw new Error('socket closed') }))
+  it('turns a provably unsent transport throw into a named failure', async () => {
+    // Previously any throw was "not running", which let the caller replay a write whose
+    // reply was merely lost. The phase is now part of the error, and only the provable
+    // "nothing was written" case stays retryable.
+    const value = new DaemonRunTransport(vi.fn(async () => { throw laneNotSent(new Error('desktop_not_connected')) }))
     await expect(value.runState(RUN)).rejects.toMatchObject({ reason: 'daemon_not_running' })
   })
 
@@ -105,5 +131,24 @@ describe('daemon run transport', () => {
   it('keeps a revoked grant a revoked grant, not an unavailable control', async () => {
     const { value } = transport(() => ({ error: 'device_not_authorized' }))
     await expect(value.runControl({ method: 'adopt', runId: RUN })).rejects.toMatchObject({ reason: 'daemon_device_not_authorized' })
+  })
+
+  // A write whose bytes may have reached the daemon must never look like "nothing was
+  // sent": that is what made the App replay a start and create a second run.
+  it('keeps a provably unsent request retryable', async () => {
+    const value = new DaemonRunTransport(vi.fn(async () => { throw laneNotSent(new Error('desktop_lane_not_sent')) }))
+    await expect(value.stop(RUN)).rejects.toMatchObject({ reason: 'daemon_not_running' })
+  })
+
+  it('reports a written request with a lost reply as an unknown outcome', async () => {
+    const value = new DaemonRunTransport(vi.fn(async () => { throw laneOutcomeUnknown(new Error('desktop_lane_closed')) }))
+    await expect(value.stop(RUN)).rejects.toMatchObject({ reason: 'daemon_outcome_unknown' })
+  })
+
+  it('fails closed on a transport error it cannot classify', async () => {
+    // Guessing "not sent" here would replay a write. An unclassified failure is an
+    // unknown outcome, which the caller must reconcile, never resend.
+    const value = new DaemonRunTransport(vi.fn(async () => { throw new Error('socket hang up') }))
+    await expect(value.stop(RUN)).rejects.toMatchObject({ reason: 'daemon_outcome_unknown' })
   })
 })

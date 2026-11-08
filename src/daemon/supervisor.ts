@@ -83,7 +83,11 @@ const FORWARDED_ENV = [
   'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'XDG_RUNTIME_DIR',
   'SCRY_REMOTE_HOST', 'SCRY_REMOTE_PERMISSION_MODE', 'SCRY_REMOTE_RELAY_ENABLED',
   'SCRY_REMOTE_RELAY_WS', 'SCRY_REMOTE_RELAY_SSH', 'SCRY_DISABLED_PROVIDERS',
-  'SCRY_RUN_CONTROLS', 'SCRY_PROVIDER_MANIFEST_URL'
+  'SCRY_RUN_CONTROLS', 'SCRY_PROVIDER_MANIFEST_URL',
+  // Acceptance only: lets the daemon serve the packaged smoke Provider fixture. The
+  // fixture still requires this explicit variable AND a daemon process (see
+  // provider-runtime), so a normal install can never enable it by inheriting an env.
+  'SCRY_DAEMON_SMOKE_PROVIDER'
 ] as const
 
 export function daemonLaunchEnvironment(input: {

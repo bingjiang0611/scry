@@ -25,6 +25,22 @@ describe('remote run binding (canonical App seam: submit -> startAppRun)', () =>
     expect(output).toHaveBeenCalledWith({ kind: 'output', text: 'canonical output' })
   })
 
+  it('tells the App this run arrived through the ledger', async () => {
+    // `origin: 'remote'` is what makes the run keep ledger semantics (and, with a
+    // device grant, the stricter ones). Without it the App treats a submitted run as
+    // its own: it would register the Provider's question on the window's broker, which
+    // a daemon does not have, and no client could ever answer it.
+    const startAppRun = vi.fn(async (_input: { origin: 'remote'; grantScope?: 'local' | 'remote' }) => ({
+      status: 'completed' as const, recording: 'committed' as const
+    }))
+    const start = createRemoteRunBinding({ startAppRun, nextScryRunId: () => 'canonical-origin' })
+    await start({
+      runId: 'ledger-origin', routing: { cwd: '/w', providerId: 'codex', prompt: 'go' },
+      progress: () => {}, output: () => {}, grantScope: 'remote'
+    })
+    expect(startAppRun.mock.calls[0]![0]).toMatchObject({ origin: 'remote', grantScope: 'remote' })
+  })
+
   it('passes an unnamed App submit through without inventing a directory', async () => {
     const startAppRun = vi.fn(async (input: Parameters<NonNullable<import('./remote-run-binding').RemoteRunBindingDependencies['startAppRun']>>[0]) => {
       input.onTraceEvent(textEvent('ok'))

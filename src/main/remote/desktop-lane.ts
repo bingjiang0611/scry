@@ -26,6 +26,11 @@ import { remoteOperationCounters, remoteRequestTrace } from './remote-request-ti
 //   - Only a reply starting with `{"keepAlive":true,` proves the host keeps the
 //     tunnel open. Anything else is a protocol mismatch, never a silent fallback
 //     to one-shot requests.
+// What a lane proved about a failed request lives in desktop-lane-phase.ts: the phase
+// decides whether a caller may resend (see the retry rules above).
+import { laneNotSent, laneWasNotSent, laneOutcomeUnknown } from './desktop-lane-phase'
+export { laneNotSent, laneOutcomeUnknown, laneWasNotSent, laneWasWrittenUnknown } from './desktop-lane-phase'
+
 export type DesktopLaneName = 'control' | 'status' | 'watch' | 'bulk'
 
 export interface DesktopLaneEndpoint {
@@ -109,26 +114,17 @@ function laneError(message: string): Error {
   return new Error(message)
 }
 
-// A send failure proves the bytes never left this process only when the channel
-// already knew it was closed and refused the frame outright. A write callback
-// error is ambiguous: part of the frame may have reached the host, so a write that
-// fails there keeps its outcome unknown instead of being re-sent. Channels mark
-// the provable case with this helper; everything else counts as possibly written.
-const NOT_SENT = 'desktopLaneNotSent'
-
-/** Bytes provably never left this process: the frame was refused before any write. */
-export function laneNotSent(error: Error): Error {
-  Object.defineProperty(error, NOT_SENT, { value: true, enumerable: false })
-  return error
-}
-
-export function laneWasNotSent(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && (error as Record<string, unknown>)[NOT_SENT] === true
-}
-
 // A TLS 1.3 channel over a unix socket (Desktop, SSH `-L`) or a TCP endpoint
 // (tests and the loopback harness). One reply line per request.
-export function connectDesktopLane(endpoint: DesktopLaneEndpoint): Promise<DesktopLaneChannel> {
+// A listener that accepts and never handshakes keeps `secureConnect` pending forever
+// (a daemon killed mid-restart leaves exactly that in the kernel's accept backlog).
+// Nothing is written before the handshake, so this failure is provably "not sent".
+const CONNECT_TIMEOUT_MS = 5_000
+
+export function connectDesktopLane(
+  endpoint: DesktopLaneEndpoint,
+  options: { timeoutMs?: number } = {}
+): Promise<DesktopLaneChannel> {
   return new Promise((resolve, reject) => {
     const hasPath = endpoint.path !== undefined
     let socket: TLSSocket
@@ -151,9 +147,14 @@ export function connectDesktopLane(endpoint: DesktopLaneEndpoint): Promise<Deskt
     let waiter: { resolve(line: string): void; reject(error: Error): void } | undefined
     let closed: Error | undefined
     const closeListeners = new Set<(reason: Error) => void>()
+    let resolved = false
     const fail = (error: Error): void => {
       if (closed) return
       closed = error
+      clearTimeout(connectTimer)
+      // Before the handshake there is no channel to hand back: the caller waits on the
+      // connect promise itself, so that is what has to settle.
+      if (!resolved) { resolved = true; reject(error) }
       const pending = waiter
       waiter = undefined
       socket.destroy()
@@ -170,7 +171,14 @@ export function connectDesktopLane(endpoint: DesktopLaneEndpoint): Promise<Deskt
       waiter = undefined
       pending.resolve(line)
     }
+    const connectTimer = setTimeout(
+      () => fail(laneNotSent(laneError('desktop_lane_connect_timeout'))),
+      options.timeoutMs ?? CONNECT_TIMEOUT_MS
+    )
+    // A rejected handshake is reported by the promise, not as an unhandled rejection.
     socket.once('secureConnect', () => {
+      clearTimeout(connectTimer)
+      resolved = true
       resolve({
         send: frame => new Promise<void>((done, failed) => {
           // Refusing before write is the only provable "not sent": nothing was handed
@@ -320,8 +328,9 @@ export class DesktopLanes {
       } catch (error) {
         if (!state.retired && !call.signal?.aborted && notSentRetries++ < MAX_NOT_SENT_RETRIES) continue
         trace?.finish(counters(reused), 'error')
+        // The channel never opened: no request byte was written.
         if (state.retired) throw laneError('desktop_not_connected')
-        throw error instanceof Error ? error : laneError('desktop_lane_connect_failed')
+        throw laneNotSent(error instanceof Error ? error : laneError('desktop_lane_connect_failed'))
       }
       try {
         await channel.send(frame)
@@ -336,7 +345,8 @@ export class DesktopLanes {
         if (!state.retired && !call.signal?.aborted && call.replayable && lostReplays++ < MAX_LOST_REPLAYS) continue
         trace?.finish(counters(reused), 'error')
         if (state.retired) throw laneError('desktop_not_connected')
-        throw error instanceof Error ? error : laneError('desktop_lane_not_sent')
+        // The write itself failed: part of the frame may have reached the host.
+        throw laneOutcomeUnknown(error instanceof Error ? error : laneError('desktop_lane_not_sent'))
       }
       let line: string
       try {
@@ -347,7 +357,8 @@ export class DesktopLanes {
         // read may try once more; a write reports an unproven outcome.
         if (!state.retired && !call.signal?.aborted && call.replayable && lostReplays++ < MAX_LOST_REPLAYS) continue
         trace?.finish(counters(reused), 'error')
-        throw error instanceof Error ? error : laneError('desktop_lane_lost')
+        // Bytes were written and no reply arrived: the outcome is unknown, not a loss.
+        throw laneOutcomeUnknown(error instanceof Error ? error : laneError('desktop_lane_lost'))
       }
       trace?.mark('first_byte')
       if (!isKeepAliveReply(line)) {

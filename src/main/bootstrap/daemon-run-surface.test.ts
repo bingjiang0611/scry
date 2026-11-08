@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { DaemonRunTransport } from '../daemon-run-transport'
 import type { DaemonRunRuntime } from '../daemon-run-runtime'
 import { createDaemonRunSurface } from './daemon-run-surface'
+import { DaemonRunError } from '../daemon-run-transport'
 import type { ActiveRun } from '../../shared/trace'
 
 // The App's run controls in daemon mode. The registry is in the daemon, so these must
@@ -24,11 +25,58 @@ function surface(overrides: Partial<DaemonRunTransport> & { live?: ActiveRun[] }
   } as unknown as DaemonRunTransport
   const runtime = {
     activeRuns: () => (overrides.live ?? []),
+    runView: (runId: string) => (overrides.live ?? []).find((entry) => entry.runId === runId) ?? null,
     isTracking: () => true,
     adopt: vi.fn(async () => undefined)
   } as unknown as DaemonRunRuntime
   return { value: createDaemonRunSurface({ transport, runtime, currentCwd: () => '/w' }), frames }
 }
+
+describe('daemon run surface start reconciliation', () => {
+  it('reconciles a start whose reply was lost by intent id, without a second submit', async () => {
+    // The submit was written and the reply never arrived. Submitting again would create
+    // a second run; the daemon is asked what it recorded for THIS intent instead.
+    const transport = {
+      intentState: vi.fn(async () => ({ runId: 'run-abc-1', state: 'dispatched' }))
+    } as unknown as DaemonRunTransport
+    const runtime = {
+      start: vi.fn(async () => { throw new DaemonRunError('daemon_outcome_unknown') }),
+      adopt: vi.fn(async () => null), activeRuns: () => [], isTracking: () => true
+    } as unknown as DaemonRunRuntime
+    const value = createDaemonRunSurface({ transport, runtime, currentCwd: () => '/w' })
+    await expect(value.start({ prompt: 'go', providerId: 'claude', cwd: '/w' }, 'intent-fixed-1'))
+      .resolves.toEqual({ runId: 'run-abc-1' })
+    expect(runtime.start).toHaveBeenCalledTimes(1)
+    expect(transport.intentState).toHaveBeenCalledWith('intent-fixed-1')
+    expect(runtime.adopt).toHaveBeenCalledWith('run-abc-1')
+  })
+
+  it('reports an unprovable start as unknown instead of starting a second run', async () => {
+    const transport = {
+      intentState: vi.fn(async () => { throw new DaemonRunError('daemon_run_unknown') })
+    } as unknown as DaemonRunTransport
+    const runtime = {
+      start: vi.fn(async () => { throw new DaemonRunError('daemon_outcome_unknown') }),
+      adopt: vi.fn(), activeRuns: () => [], isTracking: () => true
+    } as unknown as DaemonRunRuntime
+    const value = createDaemonRunSurface({ transport, runtime, currentCwd: () => '/w' })
+    await expect(value.start({ prompt: 'go', providerId: 'claude', cwd: '/w' }, 'intent-fixed-2'))
+      .rejects.toMatchObject({ reason: 'daemon_submit_unknown' })
+    // Never a second submit: an unprovable start stays unknown.
+    expect(runtime.start).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the caller-provided intent id instead of minting a new one on retry', async () => {
+    const transport = { submit: vi.fn(async () => ({ intentId: 'fixed', runId: 'run-abc-1', status: 'recorded' as const })) } as unknown as DaemonRunTransport
+    const runtime = {
+      start: vi.fn(async (input: { intentId: string }) => ({ intentId: input.intentId, runId: 'run-abc-1', bound: true })),
+      adopt: vi.fn(), activeRuns: () => [], isTracking: () => true
+    } as unknown as DaemonRunRuntime
+    const value = createDaemonRunSurface({ transport, runtime, currentCwd: () => '/w' })
+    await value.start({ prompt: 'go', providerId: 'claude', cwd: '/w' }, 'fixed-intent')
+    expect(runtime.start).toHaveBeenCalledWith(expect.objectContaining({ intentId: 'fixed-intent' }))
+  })
+})
 
 describe('daemon run surface controls', () => {
   it('forwards a steer to the daemon that owns the run', async () => {
@@ -51,6 +99,22 @@ describe('daemon run surface controls', () => {
     expect(frames[0]).toEqual({ method: 'adopt', runId: 'run-abc-1' })
     // Adopting is a view decision: the focused read now answers with that run.
     await expect(value.focusedRunSnapshot()).resolves.toMatchObject({ runId: 'run-abc-1' })
+  })
+
+  it('keeps the focused run readable after it finished', async () => {
+    // `agent:activeRun` answers null for a finished run; `agent:focusedRunSnapshot`
+    // exists precisely to still hand back the whole event list afterwards, so the
+    // renderer can re-align when it skipped the terminal event.
+    const finished = { ...run('remote-run-abc-1'), done: true }
+    const transport = {} as unknown as DaemonRunTransport
+    const runtime = {
+      activeRuns: () => [],
+      runView: (runId: string) => runId === 'remote-run-abc-1' ? finished : null
+    } as unknown as DaemonRunRuntime
+    const value = createDaemonRunSurface({ transport, runtime, currentCwd: () => '/w' })
+    await value.focusRun('remote-run-abc-1')
+    await expect(value.activeRun()).resolves.toBeNull()
+    await expect(value.focusedRunSnapshot()).resolves.toMatchObject({ runId: 'remote-run-abc-1', done: true })
   })
 
   it('reports a run the daemon no longer knows as absent, not as adopted', async () => {

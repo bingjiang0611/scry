@@ -77,6 +77,24 @@ MCP 的 daemon 侧 op 属于 B4-L4，所以这两条通道在开关打开时返�
 
 **诚实边界**：这是「执行归属」的构造断言，不是把组装整体删掉——登记表对象仍然存在，因为侧栏/历史/用量等通道还在读它。整体删除与 `SCRY_HOST_DAEMON` 开关一起，属于 B4-S。
 
+## M1：断线后不再重放写操作
+
+核验指出：`daemon-run-lazy` 遇到 `daemon_not_running` 会把调用再执行一次，而传输层把**任何**异常都归成 `daemon_not_running`，包括「已写出、回执丢失」。于是 `start` 会重新生成 intentId 并产生第二个 run，`stop`/`answer` 会被重发。
+
+- **传输层保留 lane 的相位**：`desktop-lane.ts` 现在给「连接阶段失败」打 `laneNotSent`（可证明没写出），给「写出后失败」打 `laneOutcomeUnknown`。`daemon-run-transport` 只把前者映射成 `daemon_not_running`；后者与**无法分类**的异常一律 `daemon_outcome_unknown`（fail closed，猜「没发出」就等于允许重放）。
+- **重连策略**：读可以在重连后重读一次；写只有在 `daemon_not_running`（可证明没写出）时才在新连接上重发；`daemon_outcome_unknown` 直接冒泡成 unknown。
+- **start 的 intentId**：由 `daemon-run-lazy.start` 在**首次尝试之前**固定（`payload.commandId` 优先，否则 `randomUUID()`）并传给 `surface.start(payload, intentId)`；连接阶段失败后的重发复用同一个 id。
+- **未知结果的核对**：`surface.start` 拿到 `daemon_outcome_unknown` 时不再提交，改为 `transport.intentState(intentId)` 核对；查到就 adopt 该 run 并返回它的 id，查不到（或 daemon 仍不可达）报 `daemon_submit_unknown`。
+
+测试（先写、先失败）：`daemon-run-transport.test.ts`（可证明未发送 → `daemon_not_running`；已写出 → `daemon_outcome_unknown`；无法分类 → unknown）、`daemon-run-surface.test.ts`（丢失回执的 start 只提交一次并核对出结果；核对不出 → `daemon_submit_unknown`；intentId 由调用方固定）、`daemon-run-lazy.test.ts`（unknown 不重连不重放；`stop`/`answer` 各只调用一次；连接阶段失败的 start 用同一个 intentId 重发一次）。
+
+**控制实验**（各做一次，改回后恢复）：
+1. 把 `daemon_outcome_unknown` 也当成可重连 → `never replays a write whose outcome is unknown` 与 `does not replay a start whose outcome is unknown` 失败。
+2. 每次尝试重新生成 intentId → `replays a start only when nothing was sent, with the same intent id` 失败。
+3. 去掉 start 的意图核对 → 两条核对测试失败。
+
+**一处既有测试预期被改**：`turns a transport throw into a named failure` 原来用未标记的 `Error('socket closed')` 期望 `daemon_not_running`。那正是「无法分类也当作没发出」的旧行为，现在该错误按 fail closed 归为 unknown，所以这条测试改用 `laneNotSent` 标记，保留它原本要守的「可证明未发送 → 可重试」。
+
 ## run controls（steer / 后台任务停止 / adopt）
 
 这三个通道原来在 daemon 模式下仍读 App 进程内的登记表，而 daemon 的 run 根本不在那里：steer 会得到「运行、Provider、目录或会话身份已变化」这种误导性拒绝，adopt 返回 `null`。现在按 ops 表既有定义实现 `runControl` op：

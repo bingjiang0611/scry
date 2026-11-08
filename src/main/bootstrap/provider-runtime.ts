@@ -18,9 +18,15 @@ export function createProviderRuntime(deps: {
 }) {
   const { homeDir, userDataDir, appPath, resourcesPath, appVersion, isPackaged, listPiProfiles, resolvePiProfile } = deps
   const piRunDiagnostics = new PiRunDiagnostics(join(userDataDir, 'pi-run-diagnostics.json'))
-  const smokeProviderEnabled = process.env.SCRY_ELECTRON_SMOKE_PROVIDER === '1' &&
+  // Two explicit gates. The App's packaged fixture keeps its original requirements; the
+  // daemon is a plain Node process with no debug port, so an acceptance run asks for the
+  // fixture by name instead, and only inside a daemon (SCRY_DAEMON_STATE_DIR is set by
+  // daemonLaunchEnvironment alone). Neither gate can be reached by inheriting a normal
+  // user environment.
+  const smokeProviderEnabled = (process.env.SCRY_ELECTRON_SMOKE_PROVIDER === '1' &&
     process.env.ELECTRON_ENABLE_LOGGING === '1' &&
-    process.argv.some((arg) => arg.startsWith('--remote-debugging-port='))
+    process.argv.some((arg) => arg.startsWith('--remote-debugging-port='))) ||
+    (process.env.SCRY_DAEMON_SMOKE_PROVIDER === '1' && process.env.SCRY_DAEMON_STATE_DIR !== undefined)
   // Two explicit fixture sets: the historical conversation set stays Claude/Codex/Pi, and
   // the side-chat set covers every shipped target so one acceptance run can drive all five.
   // Nothing here changes the default: without the gate the list is Codex only.

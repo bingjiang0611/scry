@@ -48,9 +48,20 @@ export type RunStartupDeps = {
   remoteRunIds: Set<string>; remoteRunLedgerIds: Map<string, string>
   deleteRunAttachments: (userDataDir: string, runId: string) => void; turnDiffCapture: Promise<GitTurnDiffCapture>; sessionBaselineReady: Promise<unknown>
   startPerf: PerformanceTrace; dockBadge: { view: (key: string, focused: boolean) => void }; scopedSessionKey: (id: string) => string
-  renderer: RunRendererSink; boundedLiveRun: (run: ActiveRun) => ActiveRun
+  renderer: RunRendererSink; windowCanReceive: boolean; boundedLiveRun: (run: ActiveRun) => ActiveRun
   releaseSessionBaseline?: () => void; interruptedState: { value: boolean }
 }
+/**
+ * Where a Provider question is answered. The App's own run asks in its window, but a
+ * daemon has no window: for a run it executes, the question travels through the ledger
+ * and whoever submits the run answers it - even when the grant is the App's own local
+ * one. The window stays the only option when no ledger seam exists at all.
+ */
+export function questionsGoToWindow(input: { appSemantics: boolean; windowCanReceive: boolean; hasLedgerInput: boolean }): boolean {
+  if (!input.appSemantics) return false
+  return input.windowCanReceive || !input.hasLedgerInput
+}
+
 export function startProviderAfterBaseline<T>(deps: { turnDiffCapture: Promise<unknown>; sessionBaselineReady: Promise<unknown>; markReady: () => void; runProvider: () => Promise<T> }): Promise<T> {
   return Promise.all([deps.turnDiffCapture, deps.sessionBaselineReady]).then(() => {
     deps.markReady()
@@ -88,6 +99,7 @@ export async function startRunProviderAndRegister(deps: RunStartupDeps) {
     ingestion,
     firstTracePerf,
     firstTextPerf,
+    windowCanReceive,
     mainEventId,
     isRemoteRun,
     mcpExecutionSnapshot,
@@ -139,7 +151,7 @@ export async function startRunProviderAndRegister(deps: RunStartupDeps) {
   if (options.stopSignal && !options.stopSignal.aborted) options.stopSignal.addEventListener('abort', requestRemoteStop)
   let observedProviderStartedAt: string | undefined
   const runProvider = createRunProvider({
-    providerId, runtimeProvider, providerRegistry, piRunDiagnostics, adapter, request, runtimePrompt, managedConversation, runId, cwd, agentProfileId, resume, attachments, codexHookTrust, openCodePluginTrust, managedRecorderEnabled, managedInputTextHash, displayPrompt, eventLog, handle, steering, interrupted: () => interrupted, requestStop, stopLatch, stopSignal: options.stopSignal, requestUserInput: async (request, signal) => isRemoteRun && options.requestUserInput ? options.requestUserInput(request, signal) : userQuestionBroker.request(request, signal), publishSessionId, emit, runState, ingestion, firstTracePerf, firstTextPerf, mainEventId, userQuestionBroker, appSemantics, permissionModeOverride: options.permissionModeOverride, mcpExecutionSnapshot, conversationStore: conversationStore(), catalogCwd, assertLegacyConversationWriteAllowed: (scope) => assertLegacyConversationWriteAllowed(scope as NativeSessionScope), authorizeMcpExecution: (snapshot) => authorizedMcpExecution(snapshot as McpExecutionSnapshot | null), publishQuestionOpened, publishQuestionClosed, setProviderStartedAt: (value) => { observedProviderStartedAt = value }
+    providerId, runtimeProvider, providerRegistry, piRunDiagnostics, adapter, request, runtimePrompt, managedConversation, runId, cwd, agentProfileId, resume, attachments, codexHookTrust, openCodePluginTrust, managedRecorderEnabled, managedInputTextHash, displayPrompt, eventLog, handle, steering, interrupted: () => interrupted, requestStop, stopLatch, stopSignal: options.stopSignal, requestUserInput: options.requestUserInput ?? (async (request, signal) => userQuestionBroker.request(request, signal)), askWindow: questionsGoToWindow({ appSemantics, windowCanReceive, hasLedgerInput: Boolean(options.requestUserInput) }), publishSessionId, emit, runState, ingestion, firstTracePerf, firstTextPerf, mainEventId, userQuestionBroker, permissionModeOverride: options.permissionModeOverride, mcpExecutionSnapshot, conversationStore: conversationStore(), catalogCwd, assertLegacyConversationWriteAllowed: (scope) => assertLegacyConversationWriteAllowed(scope as NativeSessionScope), authorizeMcpExecution: (snapshot) => authorizedMcpExecution(snapshot as McpExecutionSnapshot | null), publishQuestionOpened, publishQuestionClosed, setProviderStartedAt: (value) => { observedProviderStartedAt = value }
   })
 
   let resolveSettled: (() => void) | undefined

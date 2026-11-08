@@ -43,6 +43,19 @@ describe('lazy daemon run surface', () => {
     await expect(lazy.activeRun()).rejects.toThrow('daemon_mode_disabled')
   })
 
+  it('asks again after a daemon that was not ready yet', async () => {
+    // A daemon that is still starting is not a decision for the user: the first call
+    // reports it, and the next call must be able to find the daemon it became.
+    let attempts = 0
+    const lazy = createLazyDaemonRunSurface(deps, async () => {
+      attempts += 1
+      return attempts === 1 ? { status: 'unavailable', reason: 'daemon_ready_timeout' } : { status: 'ready', surface: surface() }
+    })
+    await expect(lazy.activeRuns()).rejects.toThrow('daemon_unavailable:daemon_ready_timeout')
+    await expect(lazy.activeRuns()).resolves.toEqual([])
+    expect(attempts).toBe(2)
+  })
+
   it('reconnects once when the daemon is gone, then serves the call', async () => {
     const first = surface({ activeRuns: async () => { throw new DaemonRunError('daemon_not_running') } })
     const dispose = vi.fn()
@@ -63,5 +76,54 @@ describe('lazy daemon run surface', () => {
     const lazy = createLazyDaemonRunSurface(deps, createMode)
     await expect(lazy.stop('run-abc-1')).rejects.toMatchObject({ reason: 'daemon_stop_not_confirmed' })
     expect(createMode).toHaveBeenCalledTimes(1)
+  })
+
+  // M1: a write whose reply was lost may have run. Reconnecting and re-invoking it is
+  // how a start produced a second run and a stop could be issued twice.
+  it('never replays a write whose outcome is unknown', async () => {
+    const stop = vi.fn(async () => { throw new DaemonRunError('daemon_outcome_unknown') })
+    const createMode = vi.fn(async () => ({ status: 'ready' as const, surface: surface({ stop }) }))
+    const lazy = createLazyDaemonRunSurface(deps, createMode)
+    await expect(lazy.stop('run-abc-1')).rejects.toMatchObject({ reason: 'daemon_outcome_unknown' })
+    expect(stop).toHaveBeenCalledTimes(1)
+    expect(createMode).toHaveBeenCalledTimes(1)
+  })
+
+  it('replays a start only when nothing was sent, with the same intent id', async () => {
+    // First attempt provably never reached the daemon; the retry must reuse the intent
+    // id, otherwise the daemon records a second intent and the user gets two runs.
+    const seen: Array<string | undefined> = []
+    let attempt = 0
+    const start = vi.fn(async (_payload: unknown, intentId?: string) => {
+      seen.push(intentId)
+      attempt += 1
+      if (attempt === 1) throw new DaemonRunError('daemon_not_running')
+      return { runId: 'run-abc-1' }
+    })
+    const first = surface({ start })
+    const second = surface({ start })
+    const createMode = vi.fn(async () => ({ status: 'ready' as const, surface: attempt === 0 ? first : second }))
+    const lazy = createLazyDaemonRunSurface(deps, createMode)
+    await expect(lazy.start({ prompt: 'go', providerId: 'claude' })).resolves.toEqual({ runId: 'run-abc-1' })
+    expect(seen).toHaveLength(2)
+    expect(seen[0]).toBeTruthy()
+    expect(seen[1]).toBe(seen[0])
+  })
+
+  it('does not replay a start whose outcome is unknown', async () => {
+    const start = vi.fn(async () => { throw new DaemonRunError('daemon_outcome_unknown') })
+    const createMode = vi.fn(async () => ({ status: 'ready' as const, surface: surface({ start }) }))
+    const lazy = createLazyDaemonRunSurface(deps, createMode)
+    await expect(lazy.start({ prompt: 'go', providerId: 'claude' })).rejects.toMatchObject({ reason: 'daemon_outcome_unknown' })
+    expect(start).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports an answer whose reply was lost as unknown, without a second delivery', async () => {
+    const answerQuestion = vi.fn(async () => { throw new DaemonRunError('daemon_outcome_unknown') })
+    const createMode = vi.fn(async () => ({ status: 'ready' as const, surface: surface({ answerQuestion }) }))
+    const lazy = createLazyDaemonRunSurface(deps, createMode)
+    await expect(lazy.answerQuestion({ runId: 'run-abc-1', answerId: 'a-1', response: {} } as never))
+      .rejects.toMatchObject({ reason: 'daemon_outcome_unknown' })
+    expect(answerQuestion).toHaveBeenCalledTimes(1)
   })
 })
