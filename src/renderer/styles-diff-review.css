@@ -223,57 +223,6 @@
   height: 14px;
 }
 
-.unified-diff {
-  min-width: max-content;
-  padding: 8px 0 18px;
-  color: var(--dim);
-  font: 11.5px/1.55 var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.diff-line {
-  min-height: 20px;
-  display: grid;
-  grid-template-columns: 44px 44px minmax(max-content, 1fr);
-}
-
-.diff-line .diff-ln {
-  padding: 0 8px;
-  border-right: 1px solid var(--border3);
-  color: var(--dim3);
-  text-align: right;
-  user-select: none;
-}
-
-.diff-line code {
-  display: block;
-  padding: 0 12px;
-  color: inherit;
-  font: inherit;
-  white-space: pre;
-}
-
-.diff-line.meta {
-  color: var(--dim2);
-}
-
-.diff-line.hunk {
-  border-top: 1px solid rgba(59, 130, 246, 0.16);
-  border-bottom: 1px solid rgba(59, 130, 246, 0.16);
-  background: rgba(59, 130, 246, 0.09);
-  color: var(--read);
-}
-
-.diff-line.add {
-  background: rgba(84, 201, 138, 0.11);
-  color: var(--diff-add-fg);
-}
-
-.diff-line.del {
-  background: rgba(242, 100, 95, 0.11);
-  color: var(--diff-del-fg);
-}
-
 .diff-review-empty {
   min-height: 240px;
   display: flex;

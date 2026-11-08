@@ -51,7 +51,29 @@ for (const packageFile of packageFiles) {
     runtimeDependencies += 1
   }
 }
+const pierreNotices = [
+  '/third-party/pierre/README.md',
+  '/third-party/pierre/diff-license.txt',
+  '/third-party/pierre/hast-util-to-html-license.txt',
+  '/third-party/pierre/html-void-elements-license.txt',
+  '/third-party/pierre/lru_map-license.txt',
+  '/third-party/pierre/oniguruma-parser-license.txt',
+  '/third-party/pierre/oniguruma-to-es-license.txt',
+  '/third-party/pierre/pierre-apache-2.0-license.txt',
+  '/third-party/pierre/pierre-highlights-notice.txt',
+  '/third-party/pierre/pierre-theme-notice.txt',
+  '/third-party/pierre/pierre-trees-notice.txt',
+  '/third-party/pierre/preact-license.txt',
+  '/third-party/pierre/preact-render-to-string-license.txt',
+  '/third-party/pierre/regex-recursion-license.txt',
+  '/third-party/pierre/regex-utilities-license.txt',
+  '/third-party/pierre/shikijs-core-license.txt',
+  '/third-party/pierre/shikijs-vscode-textmate-license.txt'
+]
 const exactRuntimeFiles = new Set([
+  '/third-party',
+  '/third-party/pierre',
+  ...pierreNotices,
   '/package.json',
   '/LICENSE',
   '/THIRD_PARTY_NOTICES.md',
@@ -69,7 +91,7 @@ const unexpected = entries.filter((entry) =>
 if (unexpected.length > 0) {
   throw new Error(`packaged app 包含 allowlist 外文件：${unexpected.slice(0, 10).join(', ')}`)
 }
-for (const required of ['/package.json', '/LICENSE', '/THIRD_PARTY_NOTICES.md']) {
+for (const required of ['/package.json', '/LICENSE', '/THIRD_PARTY_NOTICES.md', ...pierreNotices]) {
   if (!entries.includes(required)) throw new Error(`packaged app 缺少发布文件：${required}`)
 }
 for (const forbiddenRoot of ['/.claude', '/.local', '/src', '/docs', '/scripts', '/out/cli', '/audit-report-scry-2026-07-31.md']) {

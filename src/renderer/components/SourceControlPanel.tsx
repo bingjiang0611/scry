@@ -260,7 +260,7 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
                   <button aria-pressed={!selection.staged} onClick={() => void inspectFile(selection.path, false)}>未暂存余量</button>
                   <button disabled={disabled || !!repo.actionBlockers.stage} onClick={() => confirm({ ...expected, action: 'stage', paths: [selection.path], allowStagedOverwrite: true }, `${selection.path} 已有部分暂存。继续会用完整工作区版本替换此文件的 index 选择；其他文件的暂存保持不变。`)}>暂存整个文件…</button>
                 </div>}
-                {!diff ? <p role="status">读取差异…</p> : diff.status === 'available' ? <Patch diff={diff.data} /> : <p role="alert">{diff.reason}</p>}
+                {!diff ? <p role="status">读取差异…</p> : diff.status === 'available' ? <Patch diff={diff.data} path={selection.path} /> : <p role="alert">{diff.reason}</p>}
               </div> : <p className="sc-empty">点击文件名，检查实际 Git 差异。</p>}
             </section>
           </div>

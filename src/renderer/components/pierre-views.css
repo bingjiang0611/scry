@@ -1,0 +1,86 @@
+.pierre-file-tree {
+  display: block;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  --trees-font-family-override: var(--font-ui);
+  --trees-font-size-override: 12px;
+  --trees-bg-override: var(--panel);
+  --trees-bg-muted-override: var(--panel2);
+  --trees-fg-override: var(--fg);
+  --trees-fg-muted-override: var(--dim);
+  --trees-accent-override: var(--accent);
+  --trees-border-color-override: var(--border);
+  --trees-indent-guide-bg-override: var(--border);
+  --trees-selected-bg-override: var(--accent-soft);
+  --trees-selected-fg-override: var(--fg);
+  --trees-focus-ring-color-override: var(--accent);
+  --trees-status-added-override: var(--ok);
+  --trees-status-deleted-override: var(--bad);
+}
+.pierre-file-tree > file-tree-container { display: block; height: 100%; }
+.pierre-file-nav { display: flex; flex-direction: column; overflow: hidden; }
+.pierre-workspace-nodes { display: flex; flex-direction: column; overflow: hidden; }
+.pierre-workspace-nodes > .workspace-node-note { flex: none; padding: 4px 8px; }
+.pierre-workspace-nodes .workspace-load-more { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pierre-code-view {
+  overflow: auto;
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  --diffs-font-family: var(--font-mono);
+  --diffs-header-font-family: var(--font-ui);
+  --diffs-font-size: 12px;
+  --diffs-line-height: 24px;
+  --diffs-bg-context-override: var(--bg);
+  --diffs-bg-context-gutter-override: var(--panel);
+  --diffs-bg-separator-override: var(--panel2);
+  --diffs-bg-buffer-override: var(--bg);
+  --diffs-fg-number-override: var(--dim);
+  --diffs-bg-addition-override: var(--ok-soft);
+  --diffs-bg-deletion-override: var(--bad-soft);
+  --diffs-addition-color-override: var(--ok);
+  --diffs-deletion-color-override: var(--bad);
+  --diffs-bg-selection-override: var(--accent-soft);
+}
+/* CodeView's sticky-header layer disables pointer events on empty space. */
+.pierre-file-header { pointer-events: auto; display: flex; align-items: center; width: 100%; height: 32px; overflow: hidden; background: var(--panel2); color: var(--fg); }
+.pierre-file-header > button {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  gap: 8px;
+  padding: 4px 10px;
+  border: 0;
+  border-block: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: 12px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.pierre-file-header > button:hover { background: var(--panel3); }
+.pierre-file-header svg { flex: none; width: 13px; height: 13px; }
+.pierre-file-header .diff-add { color: var(--ok); }
+.pierre-file-header .diff-del { color: var(--bad); }
+.pierre-file-header > button > span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pierre-file-header > button[data-expand-context] { display: block; flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pierre-file-header .diff-review-notice { flex: 1; max-width: 40%; min-width: 0; margin: 0; padding: 4px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11px/18px var(--font-ui); }
+.sc-patch.pierre-patch { display: flex; flex-direction: column; flex: 1; height: min(420px, 60vh); min-height: 0; overflow: hidden; }
+.sc-diff-scroll > .pierre-patch { height: auto; }
+.sc-patch.pierre-patch > p { flex: none; }
+.pierre-comment-target { display: flex; flex: none; flex-wrap: wrap; gap: 6px; padding: 8px; border-bottom: 1px solid var(--border); }
+.pierre-comment-target input { width: 90px; }
+.pierre-comment-target select, .pierre-comment-target input, .pierre-comment-target button {
+  min-height: 28px; border: 1px solid var(--border); border-radius: var(--r-xs);
+  padding: 4px 7px; background: var(--panel); color: var(--fg); font: 12px var(--font-ui);
+}
+.pierre-comment-target button:disabled { opacity: .45; }
+.pierre-comment-target :focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pierre-file-header button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

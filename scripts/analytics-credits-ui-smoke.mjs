@@ -80,11 +80,12 @@ try {
   await bundle({ entryPoints: [join(root, 'src/main/db.ts'), join(root, 'src/main/transcript-archive.ts'), join(root, 'src/core/turn-recorder/aggregate.ts'), join(root, 'src/shared/credit-usage.ts')], outdir: temp, entryNames: '[name]', outExtension: { '.js': '.mjs' }, bundle: true, platform: 'node', format: 'esm', packages: 'external' })
   await build({
     configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
+    worker: { format: 'es' },
     resolve: { alias: { '@shared': join(root, 'src/shared') } }, define: { 'process.env.NODE_ENV': '"production"' },
     build: { outDir: temp, emptyOutDir: false, copyPublicDir: false, minify: false,
       lib: { entry: join(root, 'scripts/fixtures/analytics-credits-smoke.tsx'), formats: ['iife'], name: 'CreditsFixture', fileName: () => 'fixture.js', cssFileName: 'fixture' } }
   })
-  await writeFile(join(temp, 'index.html'), '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'; img-src \'self\' data:"><link rel="stylesheet" href="fixture.css"><div id="root"></div><script src="fixture.js"></script>')
+  await writeFile(join(temp, 'index.html'), '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; worker-src \'self\'; style-src \'self\' \'unsafe-inline\'; img-src \'self\' data:"><link rel="stylesheet" href="fixture.css"><div id="root"></div><script src="fixture.js"></script>')
   await writeFile(join(temp, 'main.cjs'), `
     const { app, BrowserWindow } = require('electron')
     const { writeFileSync } = require('node:fs')

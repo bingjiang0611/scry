@@ -222,10 +222,11 @@ it('本轮 patch 可渲染右侧 Review，并正确计算 unified diff 行号', 
       />
     )
     expect(reviewHtml).toContain('Review')
-    expect(reviewHtml).toContain('src/a.ts')
-    expect(reviewHtml).not.toContain('diff-file-head')
-    expect(reviewHtml).toContain('unified-diff')
-    expect(reviewHtml).toContain('+new')
+    expect(reviewHtml).toContain('修改 a.ts')
+    expect(reviewHtml).toContain('+2')
+    expect(reviewHtml).toContain('−1')
+    // Native shadow-row contents and old/new positions are exercised in test:pierre:ui.
+    expect(reviewHtml).toContain('正在加载差异视图…')
   })
 it('新轮 capture timeout 时保留旧文件足迹并诚实标记行数不可用', () => {
     const timeoutTurn: Turn = {

@@ -28,6 +28,7 @@ files:
   - package.json
   - LICENSE
   - THIRD_PARTY_NOTICES.md
+  - third-party/pierre/**
   - fixtures/billing/anthropic-gateway-response.json
   - node_modules/**
   # 选 B：不内嵌 SDK 自带的平台原生 claude 二进制(每个 ~216MB)，app 驱动本机已装的 claude。

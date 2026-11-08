@@ -19,10 +19,12 @@ function history(overrides: Partial<DiffCommitHistory> = {}): DiffCommitHistory 
 const render = (value?: DiffCommitHistory) => renderToStaticMarkup(<TurnDiffReviewPanel review={source} history={value} onClose={() => {}} embedded />)
 
 describe('commit and stacked review evidence', () => {
-  it('renders saved patches for multiple files instead of only the selected file', () => {
+  it('retains the multi-file summary while the client loads saved patches', () => {
     const html = render()
-    expect(html).toContain('WORKING BRANCH BODY')
-    expect(html).toContain('SECOND SAVED BODY')
+    // Shadow rows and both captured bodies are checked by test:pierre:ui.
+    expect(html).toContain('2 files')
+    expect(html).toContain('+2')
+    expect(html).toContain('正在加载差异视图…')
     expect(html.indexOf('diff-navigation')).toBeLessThan(html.indexOf('diff-review-content'))
   })
   it.each([true, false])('never substitutes branch bodies or zero counts while a selected commit is pending=%s', pending => {

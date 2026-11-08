@@ -6,6 +6,8 @@ import { defaultWorkspaceApi, type ReadOnlyWorkspaceSource, type WorkspaceApi } 
 export type { ReadOnlyWorkspaceSource } from '../workbench-api'
 
 import { Icon } from './primitives/Icon'
+import { WorkspaceFileTree } from './WorkspaceFileTree'
+import { workspaceCopy as copy } from '../constants/workspace-copy'
 
 
 export function workspaceReferenceToken(entry: Pick<WorkspaceEntry, 'kind' | 'path'>): string {
@@ -133,7 +135,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
   }, [dirty])
 
   const confirmLeave = useCallback(
-    (): boolean => !dirty || window.confirm('当前文件有未保存修改。放弃修改并继续吗？'),
+    (): boolean => !dirty || window.confirm(copy.discardFile),
     [dirty]
   )
 
@@ -162,14 +164,13 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
     setSelected(entry)
   }
 
-  const toggleDirectory = async (entry: WorkspaceEntry): Promise<void> => {
-    const open = expanded.has(entry.path)
-    setExpanded((current) => {
+  const setDirectoryExpanded = (entry: WorkspaceEntry, open: boolean): void => {
+    setExpanded(current => {
       const next = new Set(current)
-      open ? next.delete(entry.path) : next.add(entry.path)
+      open ? next.add(entry.path) : next.delete(entry.path)
       return next
     })
-    if (!open && !children[entry.path]) await loadDirectory(entry.path)
+    if (open && !children[entry.path] && !loading.has(entry.path)) void loadDirectory(entry.path)
   }
 
   const requestClose = (): void => {
@@ -244,67 +245,6 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
   const entries = children[''] ?? []
   const normalizedQuery = query.trim().toLowerCase()
 
-  const entryMatchesQuery = (entry: WorkspaceEntry): boolean =>
-    !normalizedQuery ||
-    entry.name.toLowerCase().includes(normalizedQuery) ||
-    (entry.kind === 'directory' && (children[entry.path] ?? []).some(entryMatchesQuery))
-
-  const renderEntries = (nodes: WorkspaceEntry[], depth = 0) =>
-    nodes.map((entry) => {
-      const open = entry.kind === 'directory' && expanded.has(entry.path)
-      const matches = entryMatchesQuery(entry)
-      const loadedChildren = children[entry.path] ?? []
-      const showChildren =
-        entry.kind === 'directory' &&
-        (open || Boolean(normalizedQuery && loadedChildren.some(entryMatchesQuery)))
-      return (
-        <div key={entry.path}>
-          {matches && (
-            <button
-              type="button"
-              className={`workspace-node ${selected?.path === entry.path ? 'active' : ''}`}
-              style={{ paddingLeft: 10 + depth * 14 }}
-              title={entry.path}
-              data-workspace-path={entry.path}
-              aria-expanded={entry.kind === 'directory' ? showChildren : undefined}
-              onClick={() => (entry.kind === 'directory' ? void toggleDirectory(entry) : openFile(entry))}
-              onContextMenu={(event) => openContext(event, entry)}
-              onKeyDown={(event) => {
-                if (!readOnlySource && event.key === 'F2') {
-                  event.preventDefault()
-                  setItemDialog({ kind: 'rename', entry, value: entry.name })
-                }
-              }}
-            >
-              {entry.kind === 'directory' ? (
-                <Icon name={open ? 'chevronDown' : 'chevronRight'} />
-              ) : (
-                <Icon name="file" />
-              )}
-              <span>{entry.name}</span>
-            </button>
-          )}
-          {showChildren && (
-            <div>
-              {loading.has(entry.path) && <div className="workspace-node-note" style={{ paddingLeft: 28 + depth * 14 }}>读取中…</div>}
-              {renderEntries(loadedChildren, depth + 1)}
-              {nextCursors[entry.path] && (
-                <button
-                  type="button"
-                  className="workspace-node-note workspace-load-more"
-                  style={{ paddingLeft: 28 + depth * 14 }}
-                  disabled={loading.has(entry.path)}
-                  onClick={() => void loadDirectory(entry.path, nextCursors[entry.path])}
-                >
-                  {loading.has(entry.path) ? '读取中…' : '加载更多'}
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      )
-    })
-
   const openContext = (event: MouseEvent, entry?: WorkspaceEntry): void => {
     event.preventDefault()
     event.stopPropagation()
@@ -325,32 +265,32 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
   const selectedReadOnly = Boolean(readOnlySource) || selectedCwd !== cwd
 
   return (
-    <section className={`workspace-panel${selected ? ' file-open' : ''}`} aria-label="工作区文件">
+    <section className={`workspace-panel${selected ? ' file-open' : ''}`} aria-label={copy.filesLabel}>
       <header className="workspace-head">
         {selected ? (
-          <button type="button" className="iconbtn" onClick={() => confirmLeave() && setSelected(null)} title="返回文件树">
+          <button type="button" className="iconbtn" onClick={() => confirmLeave() && setSelected(null)} title={copy.backToFiles}>
             <Icon name="chevronRight" className="workspace-back" />
           </button>
         ) : (
           <Icon name="folder" />
         )}
         <div className="workspace-title">
-          <b>{selected?.name ?? '文件'}</b>
+          <b>{selected?.name ?? copy.filesTitle}</b>
           <span title={selected ? `${selectedCwd}/${selected.path}` : cwd}>
             {selected ? `${selectedReadOnly ? `${selectedCwd}/` : ''}${selected.path}` : cwd}
           </span>
         </div>
         {!selected && (
           <>
-            {!readOnlySource && <button type="button" className="iconbtn" onClick={() => startCreate('file')} title="新建文件">
+            {!readOnlySource && <button type="button" className="iconbtn" onClick={() => startCreate('file')} title={copy.createFile}>
               <Icon name="plus" />
             </button>}
-            <button type="button" className="iconbtn" onClick={refresh} title="刷新文件树">
+            <button type="button" className="iconbtn" onClick={refresh} title={copy.refreshFiles}>
               <Icon name="refresh" />
             </button>
           </>
         )}
-        <button type="button" className="iconbtn" onClick={requestClose} title="关闭文件面板">
+        <button type="button" className="iconbtn" onClick={requestClose} title={copy.closeFiles}>
           <Icon name="x" />
         </button>
       </header>
@@ -358,7 +298,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
       {error && (
         <div className="workspace-error" role="alert">
           <Icon name="alert" /> {error}
-          <button type="button" onClick={() => setError(null)} title="关闭错误">
+          <button type="button" onClick={() => setError(null)} title={copy.closeError}>
             <Icon name="x" />
           </button>
         </div>
@@ -384,15 +324,19 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onContextMenu={(event) => event.stopPropagation()}
-              placeholder="筛选已展开的文件…"
+              placeholder={copy.filterFiles}
             />
           </div>
           {loading.has('') && entries.length === 0 ? (
-            <div className="workspace-empty">读取文件树…</div>
+            <div className="workspace-empty">{copy.loadingFiles}</div>
           ) : entries.length === 0 ? (
-            <div className="workspace-empty">{normalizedQuery ? '没有匹配文件' : '工作区为空'}</div>
+            <div className="workspace-empty">{normalizedQuery ? copy.noFilesMatch : copy.emptyFiles}</div>
           ) : (
-            <div className="workspace-nodes">{renderEntries(entries)}</div>
+            <WorkspaceFileTree key={cwd} children={children} expanded={expanded} query={query}
+              loading={loading} nextCursors={nextCursors} onExpand={setDirectoryExpanded}
+              onOpen={openFile} onContext={openContext}
+              onRename={readOnlySource ? undefined : entry => setItemDialog({ kind: 'rename', entry, value: entry.name })}
+              onMore={(path, cursor) => void loadDirectory(path, cursor)} />
           )}
           {nextCursors[''] && (
             <button
@@ -401,7 +345,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
               disabled={loading.has('')}
               onClick={() => void loadDirectory('', nextCursors[''])}
             >
-              {loading.has('') ? '读取中…' : '加载更多'}
+              {loading.has('') ? copy.loadingDirectory : copy.moreFiles}
             </button>
           )}
         </div>
@@ -423,12 +367,12 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
         <WorkspaceDialog
           title={
             itemDialog.kind === 'rename'
-              ? '重命名'
+              ? copy.renameFile
               : itemDialog.kind === 'move'
-                ? '移动到文件夹（相对工作区，根目录填 .）'
+                ? copy.moveFile
               : itemDialog.entryKind === 'directory'
-                ? '新建文件夹'
-                : '新建文件'
+                ? copy.createDirectory
+                : copy.createFile
           }
           value={itemDialog.value}
           busy={mutating}
@@ -440,15 +384,15 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
 
       {deleteTarget && (
         <div className="workspace-dialog-backdrop">
-          <div className="workspace-dialog" role="dialog" aria-modal="true" aria-label="移入系统废纸篓">
-            <h3>移入系统废纸篓？</h3>
+          <div className="workspace-dialog" role="dialog" aria-modal="true" aria-label={copy.trashFile}>
+            <h3>{copy.confirmTrash}</h3>
             <p>
-              <b>{deleteTarget.name}</b> 将移入系统废纸篓，可从 Finder 恢复。
+              {copy.trashDescription(deleteTarget.name)}
             </p>
             <div className="workspace-dialog-actions">
-              <button type="button" className="btn" disabled={mutating} onClick={() => setDeleteTarget(null)}>取消</button>
+              <button type="button" className="btn" disabled={mutating} onClick={() => setDeleteTarget(null)}>{copy.cancelFileOperation}</button>
               <button type="button" className="btn danger" disabled={mutating} onClick={() => void trash()}>
-                {mutating ? '处理中…' : '移入废纸篓'}
+                {mutating ? copy.processingFile : copy.moveToTrash}
               </button>
             </div>
           </div>
