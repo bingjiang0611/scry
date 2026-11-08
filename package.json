@@ -1,6 +1,6 @@
 {
   "name": "scry",
-  "version": "0.2.246",
+  "version": "0.2.247",
   "description": "本地桌面 app：通过原生 Provider adapter 驱动 AI coding agent，把执行过程实时画成 trace 树（可观测/可控制/可恢复）",
   "desktopName": "scry.desktop",
   "private": true,
@@ -39,7 +39,7 @@
     "test:regressions": "vitest run src/renderer/session-archive-effects.test.ts src/main/app-store.test.ts src/renderer/skill-load-evidence.test.ts src/renderer/session-capability-contract.test.tsx src/renderer/session-capability-calls.test.ts src/renderer/components/PinnedSummary.test.tsx src/renderer/components/render.test.tsx src/renderer/dock-badge-permission.test.ts src/main/context-admission.test.ts src/main/trace-turn-progress.test.ts src/main/trace-turn-progress.regression.test.ts src/main/commit-hook-trust.test.ts src/main/commit-hook-trust.regression.test.ts src/main/managed-turn-notifications.test.ts && npm run test:renderer:ui",
     "test:renderer:ui": "npm run test:renderer:ui:1 && npm run test:renderer:ui:2 && npm run test:renderer:ui:3",
     "test:renderer:ui:1": "node scripts/desktop-remote-ui-smoke.mjs --session-opening-only && node scripts/desktop-remote-ui-smoke.mjs --structure-only && node scripts/desktop-remote-ui-smoke.mjs --conversation-navigation-only && node scripts/desktop-remote-ui-smoke.mjs --unknown-receipt-only && node scripts/desktop-remote-ui-smoke.mjs --unknown-receipt-only --negative-unknown-receipt-control && node scripts/session-capability-ui-smoke.mjs && node scripts/session-capability-ui-smoke.mjs --structure-only && node scripts/session-capability-ui-smoke.mjs --overlays-only && node scripts/session-capability-ui-smoke.mjs --lists-only && node scripts/session-capability-ui-smoke.mjs --loading-only && node scripts/session-capability-ui-smoke.mjs --turn-refs-only",
-    "test:renderer:ui:2": "node scripts/session-capability-ui-smoke.mjs --sidebar-activity-only && node scripts/model-picker-ui-smoke.mjs && node scripts/analytics-credits-ui-smoke.mjs && node scripts/chat-preview-ui-smoke.mjs && node scripts/session-performance-ui-smoke.mjs && npm run test:background-ui && npm run test:steer-ui && npm run test:remote-queue-ui && node scripts/desktop-remote-ui-smoke.mjs && node scripts/desktop-remote-ui-smoke.mjs --session-parity-only && node scripts/desktop-remote-ui-smoke.mjs --composer-history-only && node scripts/desktop-remote-ui-smoke.mjs --remote-settings-only && node scripts/desktop-remote-ui-smoke.mjs --session-lifecycle-only",
+    "test:renderer:ui:2": "node scripts/session-capability-ui-smoke.mjs --sidebar-activity-only && node scripts/model-picker-ui-smoke.mjs && node scripts/analytics-credits-ui-smoke.mjs && node scripts/chat-preview-ui-smoke.mjs && node scripts/session-performance-ui-smoke.mjs && npm run test:background-ui && npm run test:steer-ui && npm run test:remote-queue-ui && node scripts/desktop-remote-ui-smoke.mjs && node scripts/desktop-remote-ui-smoke.mjs --session-parity-only && node scripts/desktop-remote-ui-smoke.mjs --composer-history-only && node scripts/desktop-remote-ui-smoke.mjs --remote-settings-only && node scripts/desktop-remote-ui-smoke.mjs --session-lifecycle-only && npm run test:pierre:ui",
     "test:renderer:ui:3": "npm run build && npm run test:source-control:ui:prebuilt && npm run test:workspace:ui:prebuilt && npm run test:side-chat:ui:prebuilt && npm run test:conversation:ipc:prebuilt && node scripts/electron-security-smoke.mjs --dev-pi-history-only",
     "test:side-chat:ui": "npm run build && npm run test:side-chat:ui:prebuilt",
     "test:side-chat:ui:prebuilt": "node scripts/side-chat-snapshot-ui-smoke.mjs && node scripts/side-chat-snapshot-ui-smoke.mjs --identical-text-only && node scripts/side-chat-workspace-races-smoke.mjs && node scripts/electron-security-smoke.mjs --dev-side-chat-only && node scripts/electron-security-smoke.mjs --dev-side-chat-large-history-only",
@@ -47,6 +47,7 @@
     "test:workspace:ui:prebuilt": "node scripts/electron-security-smoke.mjs --dev-unified-conversation-only --workspace-start",
     "test:source-control:ui": "npm run build && npm run test:source-control:ui:prebuilt",
     "test:source-control:ui:prebuilt": "node scripts/electron-security-smoke.mjs --dev-source-control-only",
+    "test:pierre:ui": "node scripts/pierre-views-ui-smoke.mjs",
     "test:conversation:ipc": "npm run build && npm run test:conversation:ipc:prebuilt",
     "test:conversation:ipc:prebuilt": "node scripts/electron-security-smoke.mjs --dev-conversation-ownership-only && node scripts/electron-security-smoke.mjs --dev-unified-conversation-only",
     "test:background-ui": "node scripts/background-work-ui-smoke.mjs",
@@ -95,6 +96,8 @@
   "devDependencies": {
     "@electron/asar": "^3.4.1",
     "@electron/rebuild": "^4.2.0",
+    "@pierre/diffs": "1.6.4",
+    "@pierre/trees": "1.0.0-beta.6",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.0",
     "@types/qrcode": "^1.5.6",

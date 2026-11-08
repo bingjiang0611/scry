@@ -11,6 +11,7 @@ it('shows bounded session hover cards and renames via the real sidebar DOM with 
   try {
     await build({
       configFile: false, logLevel: 'silent',
+      worker: { format: 'es' },
       define: { 'process.env.NODE_ENV': JSON.stringify('production') },
       resolve: { alias: { '@shared': resolve('src/shared') } },
       esbuild: { jsx: 'automatic', jsxDev: false },
@@ -19,7 +20,7 @@ it('shows bounded session hover cards and renames via the real sidebar DOM with 
         lib: { entry: resolve('src/renderer/components/fixtures/session-rename.tsx'), name: 'RenameTest', formats: ['iife'], fileName: () => 'fixture.js', cssFileName: 'fixture' }
       }
     })
-    await writeFile(join(dir, 'index.html'), `<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'"><link rel="stylesheet" href="./bundle/fixture.css"><div id="root"></div><script src="./bundle/fixture.js"></script>`)
+    await writeFile(join(dir, 'index.html'), `<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'"><link rel="stylesheet" href="./bundle/fixture.css"><div id="root"></div><script src="./bundle/fixture.js"></script>`)
     const main = join(dir, 'main.cjs')
     await writeFile(main, `
       const { app, BrowserWindow } = require('electron')

@@ -72,45 +72,10 @@
   overflow: hidden;
 }
 
-.diff-review-panel .diff-virtual-code {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: 0;
-}
-
-.diff-review-panel .diff-virtual-code .diff-line {
-  height: 22px;
-  min-height: 22px;
-  line-height: 22px;
-  box-sizing: border-box;
-}
-
-.diff-review-panel .diff-virtual-code .diff-line code {
-  white-space: pre;
-  overflow-wrap: normal;
-  padding-top: 0;
-  padding-bottom: 0;
-  line-height: 22px;
-}
-
 .diff-review-panel .diff-file-nav {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-
-.diff-review-panel .diff-virtual-files {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-}
-
-.diff-review-panel .diff-virtual-files button {
-  height: 38px;
-  min-height: 38px;
-  box-sizing: border-box;
-  margin: 0;
 }
 
 .diff-review-panel .diff-review-empty {

@@ -8,6 +8,7 @@ import {
 import type { Turn } from './format'
 import {
   displayDiffPath,
+  diffTreePath,
   editActionLineCounts,
   resolveTurnDiffReview,
   sessionDiffOf,
@@ -18,6 +19,14 @@ import {
   turnDiffOf,
   turnDiffViewOf
 } from './turn-diff'
+
+it('keeps tree file identities distinct when a historical repo root is missing or a path is outside it', () => {
+  expect(diffTreePath('/repo/src/a.ts')).toBe('repo/src/a.ts')
+  expect(diffTreePath('/repo/test/a.ts')).toBe('repo/test/a.ts')
+  expect(diffTreePath('/repo/src/a.ts', '/repo')).toBe('src/a.ts')
+  expect(diffTreePath('/other/src/a.ts', '/repo')).toBe('other/src/a.ts')
+  expect(diffTreePath('C:\\repo\\src\\a.ts', 'C:\\repo')).toBe('src/a.ts')
+})
 
 function snapshot(overrides: Partial<TurnDiffSnapshot> = {}): TurnDiffSnapshot {
   return {

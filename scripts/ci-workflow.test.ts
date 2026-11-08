@@ -76,6 +76,7 @@ const SERIAL_RENDERER_UI_ORDER = [
   'node scripts/desktop-remote-ui-smoke.mjs --composer-history-only',
   'node scripts/desktop-remote-ui-smoke.mjs --remote-settings-only',
   'node scripts/desktop-remote-ui-smoke.mjs --session-lifecycle-only',
+  'npm run test:pierre:ui',
   'npm run test:source-control:ui',
   'npm run test:workspace:ui',
   'npm run test:side-chat:ui',

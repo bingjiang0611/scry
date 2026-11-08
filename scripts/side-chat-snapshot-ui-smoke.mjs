@@ -62,6 +62,7 @@ async function run() {
   const lastPageRows = served[served.length - 1].items.length
   await build({
     configFile: false, root: temp, envDir: temp, logLevel: 'error',
+    worker: { format: 'es' },
     esbuild: { jsx: 'automatic' },
     resolve: { alias: { '@shared': join(root, 'src/shared') } },
     define: { 'process.env.NODE_ENV': '"production"' },
@@ -70,7 +71,7 @@ async function run() {
         name: 'ScrySnapshotFixture', fileName: () => 'fixture.js', cssFileName: 'fixture' } }
   })
   await writeFile(join(temp, 'index.html'), '<!doctype html><meta charset="utf-8">' +
-    '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'; img-src data:">' +
+    '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; worker-src \'self\'; style-src \'self\' \'unsafe-inline\'; img-src data:">' +
     '<link rel="stylesheet" href="fixture.css"><div id="root"></div><script src="fixture.js"></script>')
   await writeFile(join(temp, 'main.cjs'), `
     const { app, BrowserWindow } = require('electron')

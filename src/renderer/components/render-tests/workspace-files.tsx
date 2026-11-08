@@ -8,7 +8,7 @@ describe('工作区文件面板', () => {
     )
 
     expect(html).toContain('aria-label="工作区文件"')
-    expect(html).toContain('筛选已展开的文件')
+    expect(html).toContain('筛选已加载的文件')
     expect(html).toContain('新建文件')
     expect(html).toContain('刷新文件树')
   })

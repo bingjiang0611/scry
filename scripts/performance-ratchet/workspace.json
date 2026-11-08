@@ -1,0 +1,75 @@
+{
+  "schema": 1,
+  "metrics": {
+    "workspace.tree/childrenReads": {
+      "scenario": "workspace.tree",
+      "metric": "childrenReads",
+      "layer": "ui",
+      "unit": "count",
+      "workload": "directories=40;files=1000;query=file-01;index=1;filter=2",
+      "source": "loaded-directory reads during the production workspace tree index (pass-through proxy on the children record); one index per children change, none per keystroke",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 41
+      }
+    },
+    "workspace.tree/entriesIndexed": {
+      "scenario": "workspace.tree",
+      "metric": "entriesIndexed",
+      "layer": "ui",
+      "unit": "count",
+      "workload": "directories=40;files=1000;query=file-01;index=1;filter=2",
+      "source": "entries published by the production workspace tree index; repeated identical values across keystrokes would prove the index is rebuilt",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 1040
+      }
+    },
+    "workspace.tree/nameReads": {
+      "scenario": "workspace.tree",
+      "metric": "nameReads",
+      "layer": "ui",
+      "unit": "count",
+      "workload": "directories=40;files=1000;query=file-01;index=1;filter=2",
+      "source": "entry.name reads in production filterWorkspaceTreePaths during the initial publish and one keystroke (pass-through proxy)",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 1040
+      }
+    },
+    "workspace.tree/pathsPublished": {
+      "scenario": "workspace.tree",
+      "metric": "pathsPublished",
+      "layer": "ui",
+      "unit": "count",
+      "workload": "directories=40;files=1000;query=file-01;index=1;filter=2",
+      "source": "model paths handed to Pierre resetPaths for the initial publish and one keystroke; a filter that stops filtering republishes every loaded path",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 1050
+      }
+    },
+    "workspace.tree/ancestorsRevealed": {
+      "scenario": "workspace.tree",
+      "metric": "ancestorsRevealed",
+      "layer": "ui",
+      "unit": "count",
+      "workload": "directories=40;files=1000;query=file-01;index=1;filter=2",
+      "source": "expansion paths produced by production workspaceTreeAncestors for the filtered list; one entry per match, as production emits",
+      "status": "candidate",
+      "ceiling": null,
+      "tolerance": 0,
+      "baselines": {
+        "darwin-arm64": 10
+      }
+    }
+  }
+}

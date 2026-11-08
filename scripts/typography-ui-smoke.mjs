@@ -112,6 +112,7 @@ try {
   await symlink(join(root, 'node_modules'), join(temp, 'node_modules'), 'dir')
   await build({
     configFile: false,
+    worker: { format: 'es' },
     root: temp,
     envDir: temp,
     logLevel: 'error',
@@ -132,7 +133,7 @@ try {
       }
     }
   })
-  await writeFile(join(temp, 'index.html'), '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'"><link rel="stylesheet" href="fixture.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>')
+  await writeFile(join(temp, 'index.html'), '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; worker-src \'self\'; style-src \'self\' \'unsafe-inline\'"><link rel="stylesheet" href="fixture.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>')
   if (screenshotPath) await mkdir(dirname(screenshotPath), { recursive: true })
   await writeFile(join(temp, 'main.cjs'), `
     const { app, BrowserWindow } = require('electron')

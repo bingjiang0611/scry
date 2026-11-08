@@ -4,7 +4,7 @@
 
 ## 路径地图和覆盖边界
 
-权威清单是 [`scripts/performance-paths.json`](../scripts/performance-paths.json)，可运行 `npm run performance:inventory` 检查引用和注册入口。新增未归类的 main IPC channel / named trace 会使检查失败。namespace 下新增方法自动归属该组，但仍需人工更新相应的具体场景、数据规模和验收。
+权威清单入口是 [`scripts/performance-paths.json`](../scripts/performance-paths.json)，其中 `include` 按领域展开片段；文件与 Git diff 映射位于 [`workbench.json`](../scripts/performance-paths/workbench.json)。可运行 `npm run performance:inventory` 检查引用和注册入口。新增未归类的 main IPC channel / named trace 会使检查失败。namespace 下新增方法自动归属该组，但仍需人工更新相应的具体场景、数据规模和验收。
 
 | 路径 ID | 用户操作 | 并行责任组 |
 |---|---|---|

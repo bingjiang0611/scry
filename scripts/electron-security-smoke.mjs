@@ -34,7 +34,7 @@ import { defaultPackagedAppPath, electronDevLayout, packagedAppLayout } from './
 const structureOnly = process.argv[2] === '--dev-structure-only'
 const sideChatOnly = process.argv[2] === '--dev-side-chat-only'
 const largeHistoryOnly = process.argv[2] === '--dev-side-chat-large-history-only'
-const sourceControlOnly = process.argv[2] === '--dev-source-control-only'
+const sourceControlOnly = ['--dev-source-control-only', '--source-control-only'].includes(process.argv[2])
 const conversationOwnershipOnly = process.argv[2] === '--dev-conversation-ownership-only'
 const unifiedConversationOnly = process.argv[2] === '--dev-unified-conversation-only'
 const performanceOnly = ['--dev-performance-only', '--performance-only'].includes(process.argv[2])
@@ -53,8 +53,8 @@ if (devQuestionOnly && !foreground) {
 }
 const devFilesOnly = process.argv[2] === '--dev-files-only'
 const filesOnly = devFilesOnly || process.argv[2] === '--files-only'
-const devApp = sideChatOnly || largeHistoryOnly || structureOnly || unifiedConversationOnly || conversationOwnershipOnly || sourceControlOnly || devMetaPromptsOnly || nativeHistoryOnly || process.argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
-const packagedAppArgument = ['--files-only', '--performance-only', '--file-history-only'].includes(process.argv[2]) ? undefined : process.argv[2]
+const devApp = sideChatOnly || largeHistoryOnly || structureOnly || unifiedConversationOnly || conversationOwnershipOnly || process.argv[2] === '--dev-source-control-only' || devMetaPromptsOnly || nativeHistoryOnly || process.argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
+const packagedAppArgument = ['--files-only', '--performance-only', '--file-history-only', '--source-control-only'].includes(process.argv[2]) ? undefined : process.argv[2]
 const dev = devApp ? electronDevLayout() : null
 const appPath = resolve(dev?.appPath || packagedAppArgument || defaultPackagedAppPath())
 const executable = dev ? resolve(dev.executable) : packagedAppLayout(appPath).executable

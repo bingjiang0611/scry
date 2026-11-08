@@ -25,6 +25,7 @@ async function run() {
   await Promise.all(['home', 'userData', 'sessionData'].map((name) => mkdir(join(temp, name))))
   await build({
     configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
+    worker: { format: 'es' },
     resolve: { alias: { '@shared': join(root, 'src/shared') } },
     define: { 'process.env.NODE_ENV': '"production"' },
     build: { outDir: temp, emptyOutDir: false, copyPublicDir: false, minify: false,
@@ -32,7 +33,7 @@ async function run() {
         name: 'ScryRacesFixture', fileName: () => 'fixture.js' } }
   })
   await writeFile(join(temp, 'index.html'), '<!doctype html><meta charset="utf-8">' +
-    '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'">' +
+    '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; worker-src \'self\'; style-src \'self\' \'unsafe-inline\'">' +
     '<div id="root"></div><script src="fixture.js"></script>')
   await writeFile(join(temp, 'main.cjs'), `
     const { app, BrowserWindow } = require('electron')

@@ -45,6 +45,7 @@ const temp = await mkdtemp(join(tmpdir(), 'scry-capability-ui-'))
 try {
   await Promise.all(['home', 'userData', 'sessionData'].map((name) => mkdir(join(temp, name))))
   for (const fixture of fixtures) await build({
+    worker: { format: 'es' },
     configFile: false, root: temp, envDir: temp, logLevel: 'error',
     esbuild: { jsx: 'automatic' },
     resolve: { alias: { '@shared': join(root, 'src/shared') } },
@@ -72,7 +73,7 @@ try {
       })
     }
   }
-  for (const fixture of fixtures) await writeFile(join(temp, `${fixture}.html`), `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'${['sidebar-activity', 'motion-tokens', 'session-cache', 'overlays', 'lists', 'loading'].includes(fixture) ? '; img-src data:' : ''}"><link rel="stylesheet" href="${fixture}.css"><div id="root"></div><script src="${fixture}.js"></script>`)
+  for (const fixture of fixtures) await writeFile(join(temp, `${fixture}.html`), `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'${['sidebar-activity', 'motion-tokens', 'session-cache', 'overlays', 'lists', 'loading'].includes(fixture) ? '; img-src data:' : ''}"><link rel="stylesheet" href="${fixture}.css"><div id="root"></div><script src="${fixture}.js"></script>`)
 
   const mainScript = (campaignName) => {
     const terminalScoped = campaignName === 'terminals', skipTerminals = campaignName === 'core'

@@ -92,8 +92,10 @@ describe('TurnDiffReviewPanel 会话基线文案', () => {
     const turnDiff = snapshot()
     turnDiff.files[0].patchStatus = 'truncated'
     const html = markup({ turnDiff, preview: true })
-    expect(html).toContain('该文件 patch 已按本轮预算截断')
-    expect(html).toContain('diff-review-notice warn')
+    // File-body warnings render in Pierre's mounted shadow tree. The shell must
+    // expose partial evidence even before its lazy renderer has loaded.
+    expect(html).toContain('部分正文不可用')
+    expect(html).toContain('class="diff-partial"')
   })
 
   it('文件导航显式显示完整条目数，避免窄栏只露出前三项时被误认成缺数据', () => {
@@ -106,9 +108,9 @@ describe('TurnDiffReviewPanel 会话基线文案', () => {
 
     const html = markup({ turnDiff })
     expect(html).toContain('<span>Files</span><span>17</span>')
-    // Stacked code now has its own file headers. Count the navigation entries, not both regions.
-    const navigation = html.match(/<nav class="diff-file-nav"[\s\S]*?<\/nav>/)?.[0] ?? ''
-    expect((navigation.match(/title="\/repo\/file-/g) ?? []).length).toBe(17)
-    expect(html).toContain('/repo/file-17.ts')
+    // Pierre mounts virtualized rows on the client, not in static Node markup.
+    // The real 1,000-file navigation/End/selection checks live in workspace-session-ui-stress.mjs.
+    expect(html).toContain('file-tree-container')
+    expect(html).toContain('aria-label="本轮改动文件"')
   })
 })

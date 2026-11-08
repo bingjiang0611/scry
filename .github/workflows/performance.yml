@@ -179,6 +179,7 @@ jobs:
           (cd baseline && npm ci) 2>&1 | tee native-results/baseline-install.log
           (cd candidate && npm ci) 2>&1 | tee native-results/candidate-install.log
           for file in $(node --input-type=module -e "import { nativeHarnessFiles } from './candidate/scripts/performance-native.mjs'; console.log(nativeHarnessFiles.join(' '))"); do
+            mkdir -p "baseline/$(dirname "$file")"
             cp "candidate/$file" "baseline/$file"
           done
       - name: Prepare Electron executables
