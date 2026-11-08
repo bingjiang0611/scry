@@ -77,6 +77,16 @@ export interface DaemonStartReceipt {
 
 // `bound` is the daemon's own marker, not a client guess; anything else in the
 // progress detail stays opaque.
+// The trace only reports `done` when a snapshot happens to be the read that carries
+// it; after the first snapshot every read is a delta, so a run that stops would look
+// alive forever. The ledger's terminal state is the authority on whether a daemon run
+// finished, and it is what the window's stop control waits for.
+function view(cursor: RunCursor): ActiveRun | null {
+  if (!cursor.latest) return null
+  const terminal = cursor.lifecycle === 'settled' || cursor.lifecycle === 'failed' || cursor.lifecycle === 'cancelled'
+  return terminal && !cursor.latest.done ? { ...cursor.latest, done: true } : cursor.latest
+}
+
 function boundMarker(detail: string): { ledgerRunId?: string; scryRunId: string; cwd?: string; providerId?: string; agentProfileId?: string } | undefined {
   try {
     const marker = JSON.parse(detail) as Record<string, unknown>
@@ -154,7 +164,10 @@ export class DaemonRunRuntime {
    * Accepts either id: the window focuses a run by the canonical id its trace carries,
    * while this map is keyed by the ledger id the run was submitted under.
    */
-  runView(runId: string): ActiveRun | null { return this.#cursorFor(runId)?.latest ?? null }
+  runView(runId: string): ActiveRun | null {
+    const cursor = this.#cursorFor(runId)
+    return cursor ? view(cursor) : null
+  }
 
   #cursorFor(runId: string): RunCursor | undefined {
     for (const cursor of this.#runs.values()) {
@@ -165,7 +178,10 @@ export class DaemonRunRuntime {
 
   /** The latest authoritative run state this window has read, per run id. */
   activeRuns(): ActiveRun[] {
-    return [...this.#runs.values()].flatMap((cursor) => cursor.latest && !cursor.latest.done ? [cursor.latest] : [])
+    return [...this.#runs.values()].flatMap((cursor) => {
+      const current = view(cursor)
+      return current && !current.done ? [current] : []
+    })
   }
 
   /**
