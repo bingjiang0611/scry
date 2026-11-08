@@ -90,6 +90,11 @@ Compiled Xcode output is not uploaded to the repository cache.
 - Full desktop typechecking runs in the Node gate, not three more times in the
   compatibility matrix. Every Node 20/22/24 lane still compiles both CLI outputs,
   runs its full former runtime selection, and installs/tests a clean tarball.
+- A third, clean-install experiment ran every build-only Node job command after
+  `npm ci --ignore-scripts`, with no electron/path.txt or Electron executable:
+  typecheck, harness binding checks (including missing-binding controls), shell
+  tests, desktop build and both CLI builds all passed. That job now omits the
+  unused Electron download/sandbox preparation; runtime jobs retain it.
 - Linux packaging drops only the earlier duplicate native preparation. The
   authoritative forced Electron ABI rebuild and actual SQLite/node-pty load
   probe in run-electron-builder remain unchanged.
@@ -99,6 +104,27 @@ Compiled Xcode output is not uploaded to the repository cache.
 - Three renderer shards plus native performance use four macOS slots normally.
   Remote changes add two jobs, so one may queue at the five-slot cap; unrelated
   PRs/workflows can increase waiting. No runner concurrency quota is bypassed.
+
+Second-round revision `b9379cf2` passed
+[Remote run 42464864565](https://github.com/bingjiang0611/scry/actions/runs/42464864565).
+The iOS job fell from 473 to 287 seconds (39.3%); its second compile fell from
+232 to 113 seconds (51.3%). These are single hosted samples, not a stable latency
+claim. Scheduling also improved between runs; queue savings are not attributed
+to compilation reuse.
+
+The same revision's CI/Performance/PR Vouch runs encountered GitHub HTTP 504s.
+CI and native performance failed while downloading the official Electron zip,
+before affected tests ran. The failures remain failures, not faster passes.
+Direct endpoint probes also returned 504; GitHub's status page did not declare an
+incident. No retries, mirrors, alternate binaries or relaxed checks were added.
+
+Supersession was exercised on `68c7a7af` → `b9379cf2`: all three older validation
+workflows were automatically cancelled. The documentation-only
+[probe PR #42](https://github.com/bingjiang0611/scry/pull/42), based on the optimized
+branch, produced successful Check/Performance Check/Remote Check and skipped all
+heavy jobs (runs 42465093982 / 42465094099 / 42465093951). It was closed and its
+remote/local temporary branch cleaned up after verification. No main branch or
+ruleset settings were changed for these experiments.
 
 The final run IDs, timing comparison and remote verification limits are recorded
 in the PR description after the second experiment. Historical/controlled workloads

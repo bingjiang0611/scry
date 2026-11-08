@@ -29,17 +29,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - name: Prepare Electron executable
-        run: |
-          node -e "require('node:fs').accessSync(require('electron'))"
-          electron_bin="$(node -e "process.stdout.write(require('electron'))")"
-          echo "Electron executable: ${electron_bin}"
-          sandbox="$(dirname "${electron_bin}")/chrome-sandbox"
-          if [ "${RUNNER_OS}" = "Linux" ]; then
-            sudo chown root:root "${sandbox}"
-            sudo chmod 4755 "${sandbox}"
-          fi
+      # This job compiles but never launches Electron or loads native modules.
+      # A clean --ignore-scripts install covers every command below; do not
+      # download an unused Electron executable or prepare its runtime sandbox.
+      - run: npm ci --ignore-scripts
       - name: Typecheck
         run: npm run typecheck
       - name: Harness binding checks

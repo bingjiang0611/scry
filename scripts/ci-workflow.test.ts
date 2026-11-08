@@ -113,6 +113,16 @@ describe('required PR checks', () => {
     })
   }
 
+  it('does not install or launch an unused Electron runtime in the build-only job', () => {
+    const job = workflow('ci.yml').jobs.node
+    expect(job.steps.filter(step => step.run).map(step => step.run)).toEqual([
+      'npm ci --ignore-scripts', 'npm run typecheck', 'npm run check:harness-bindings',
+      'npm run test:shell', 'npm run build', 'npm run build:cli'
+    ])
+    // Actual runtime jobs still prepare Electron and its Linux sandbox.
+    expect(source(workflow('ci.yml').jobs.unit, 'Prepare Electron executable').run).toContain('sudo chmod 4755')
+  })
+
   it('pins the packaged macOS gate to a supported standard runner image', () => {
     expect(workflow('ci.yml').jobs['packaged-electron']['runs-on']).toBe('macos-15')
   })
