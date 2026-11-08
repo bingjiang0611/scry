@@ -11,6 +11,7 @@ import { exercise } from './pierre-views-ui-checks.mjs'
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const temp = await realpath(await mkdtemp(join(tmpdir(), 'scry-pierre-ui-')))
 const negative = process.argv.includes('--negative-comment-control')
+const measure = process.argv.includes('--measure')
 let passed = false
 try {
   await Promise.all(['home', 'userData', 'sessionData'].map(name => mkdir(join(temp, name))))
@@ -50,7 +51,7 @@ try {
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       try {
         await win.loadFile(${JSON.stringify(join(temp, 'dist/index.html'))})
-        const result = await (${exercise.toString()})(win.webContents)
+        const result = await (${exercise.toString()})(win.webContents, { measure: ${measure} })
         if (errors.length) throw new Error('Renderer errors: ' + JSON.stringify(errors))
         if (blocked.length) throw new Error('Unexpected network requests: ' + JSON.stringify(blocked))
         const workers = result.workerUrls

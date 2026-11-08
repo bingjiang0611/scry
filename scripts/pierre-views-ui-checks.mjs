@@ -1,4 +1,4 @@
-export async function exercise(contents) {
+export async function exercise(contents, { measure = false } = {}) {
   const read = expression => contents.executeJavaScript(expression)
   const frames = () => read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))')
   const wait = async (expression, label) => {
@@ -9,6 +9,15 @@ export async function exercise(contents) {
     }
   }
   const must = (condition, message) => { if (!condition) throw new Error(message) }
+  // Opt-in renderer timing for the workspace tree. A page-side mark keeps the two CDP
+  // crossings out of the elapsed value; the fixture's own frame polling stays inside it.
+  // Reported, never gated: hidden-window condition-observed timing is not paint evidence.
+  const timings = {}
+  const mark = async () => { if (measure) await read('window.__treeBenchMark = performance.now()') }
+  const record = async name => {
+    if (!measure) return
+    timings[name] = Math.round(await read('performance.now() - window.__treeBenchMark'))
+  }
   const query = selector => `(() => {
     const roots = [document];
     for (let i = 0; i < roots.length; i++) for (const node of roots[i].querySelectorAll('*')) if (node.shadowRoot) roots.push(node.shadowRoot);
@@ -129,11 +138,16 @@ export async function exercise(contents) {
   await wait(`${query('[data-item-path="pressure-0999.txt"][aria-selected="true"]')}.length === 1`, 'diff tree End selects last file')
   await wait(`[...document.querySelectorAll('.pierre-file-header')].some(header => header.textContent.includes('pressure-0999.txt'))`, 'diff tree selection scrolls code')
 
+  await mark()
   await mode('workspace')
   await wait(`${query('[data-item-path="src/"]')}.length > 0`, 'workspace root')
+  await record('workspaceMount')
   must(await read(`JSON.parse(document.querySelector('#reads').textContent).length === 1`), 'Workspace eagerly scanned unopened directories')
+  await mark()
   await click(`${query('[data-item-path="src/"]')}[0]`)
   await wait(`JSON.parse(document.querySelector('#reads').textContent).length === 2`, 'directory loads on expansion')
+  await wait(`${query('[data-item-path="src/file-0000.ts"]')}.length > 0`, 'expanded directory rows')
+  await record('directoryExpand')
   await wait(`document.querySelector('.workspace-load-more')?.textContent.includes('src')`, 'directory pagination')
   await click(`document.querySelector('.workspace-load-more')`)
   await wait(`JSON.parse(document.querySelector('#reads').textContent).length === 3`, 'next page read')
@@ -141,25 +155,38 @@ export async function exercise(contents) {
   must(requests[2].cursor === 'page-2', 'Directory cursor not preserved')
   const nodes = await read(`${query('[role="treeitem"]')}.length`)
   must(nodes > 0 && nodes < 100, `Unbounded tree DOM: ${nodes}`)
+  const shadowElements = await read(`(() => {
+    const host = document.querySelector('.pierre-workspace-nodes file-tree-container')
+    return host?.shadowRoot ? host.shadowRoot.querySelectorAll('*').length : 0
+  })()`)
+  must(shadowElements > 0, 'Workspace tree shadow DOM is empty')
+  await mark()
   await fill(`document.querySelector('.workspace-search input')`, 'absent-file-match')
   await wait(`${query('[data-item-path]')}.length === 0 && document.querySelector('.workspace-empty')?.textContent.includes('没有匹配文件')`, 'no matches hide unrelated tree files')
+  await record('searchNoMatch')
+  await mark()
   await fill(`document.querySelector('.workspace-search input')`, ' FILE-0999 ')
   await wait(`${query('[data-item-path="src/file-0999.ts"]')}.length === 1 && ${query('[role="treeitem"]')}.length < 5`, 'case-insensitive loaded-file search')
+  await record('searchMatch')
   must(await read(`JSON.parse(document.querySelector('#reads').textContent).length === 3`), 'Filtering scanned directories')
+  await mark()
   await fill(`document.querySelector('.workspace-search input')`, '')
   contents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab' })
   contents.sendInputEvent({ type: 'keyUp', keyCode: 'Tab' })
   contents.sendInputEvent({ type: 'keyDown', keyCode: 'Home' })
   contents.sendInputEvent({ type: 'keyUp', keyCode: 'Home' })
   await wait(`${query('[data-item-path="src/"]')}.length > 0`, 'clearing search restores the loaded tree')
+  await record('searchClear')
   await click(`${query('[data-item-path="src/"]')}[0]`)
   contents.sendInputEvent({ type: 'keyDown', keyCode: 'End' })
   contents.sendInputEvent({ type: 'keyUp', keyCode: 'End' })
   // Re-open after the collapse; End must reach the final loaded file without scanning again.
+  await mark()
   await click(`${query('[data-item-path="src/"]')}[0]`)
   contents.sendInputEvent({ type: 'keyDown', keyCode: 'End' })
   contents.sendInputEvent({ type: 'keyUp', keyCode: 'End' })
   await wait(`${query('[data-item-path="src/file-0999.ts"]')}.length > 0`, 'large tree End navigation')
+  await record('keyboardEndAfterReopen')
   must(await read(`JSON.parse(document.querySelector('#reads').textContent).length === 3`), 'Keyboard navigation rescanned the directory')
   contents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' })
   contents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' })
@@ -175,6 +202,6 @@ export async function exercise(contents) {
   await wait(`JSON.parse(document.getElementById('tree-events').textContent).some(event => event.kind === 'context')`, 'native context-menu routing')
   const treeEvents = await read(`JSON.parse(document.getElementById('tree-events').textContent)`)
   must(JSON.stringify(treeEvents) === JSON.stringify(['open', 'rename', 'context'].map(kind => ({ kind, path: 'document.ts' }))), 'Tree action routing changed: ' + JSON.stringify(treeEvents))
-  return { workerUrls, treeEvents, commentMapping: comments, keyboardComment: true, sameFileRefresh: true, capturedContextExpansion: true, capturedContextSplit: true, horizontalSplitScroll: true, collapseFocus: true, stackedRows, thousandFileKeyboard: true, multipleCapturedBodies: true, historicalFileIdentity: true, truncatedCommentsBlocked: true, rawEvidence: true, binaryEvidence: true,
+  return { workerUrls, timings, workspaceDom: { mountedRows: nodes, shadowElements }, treeEvents, commentMapping: comments, keyboardComment: true, sameFileRefresh: true, capturedContextExpansion: true, capturedContextSplit: true, horizontalSplitScroll: true, collapseFocus: true, stackedRows, thousandFileKeyboard: true, multipleCapturedBodies: true, historicalFileIdentity: true, truncatedCommentsBlocked: true, rawEvidence: true, binaryEvidence: true,
     lazyDirectoryReads: requests, boundedTreeNodes: nodes, loadedFileFiltering: true, lastLoadedFileReachable: true, keyboardReadOnlyOpen: true }
 }
