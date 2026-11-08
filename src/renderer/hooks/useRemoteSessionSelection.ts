@@ -52,7 +52,7 @@ closeOverlays: () => void) {
       cwd, providerId: session.providerId, agentProfileId: session.agentProfileId,
       externalSessionId: session.externalSessionId
     }, undefined, undefined).then(history => finish({ status: 'ready', history }),
-      error => finish({ status: 'error', error: error instanceof Error ? error.message : String(error) }))
+      error => finish({ status: 'error', error: REMOTE_ACCESS_COPY.errorText(error) }))
       .finally(() => { if (pendingSelection.current === request) pendingSelection.current = null })
   }
 }
