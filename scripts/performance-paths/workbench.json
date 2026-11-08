@@ -1,0 +1,79 @@
+[
+  {
+    "id": "workspace",
+    "title": "文件浏览、预览、写入和外部打开",
+    "owner": "workspace-source-control",
+    "operations": [
+      "ipc.workspace:"
+    ],
+    "sources": [
+      "src/main/index.ts",
+      "src/renderer/components/WorkspacePanel.tsx",
+      "src/renderer/components/WorkspaceFileTree.tsx"
+    ],
+    "benchmarks": [
+      "workspace.files"
+    ],
+    "gap": "已测 122 项目录、1MiB 文件与实际内容变更写回；保存到屏幕可见、外部应用是否打开不在 handler/文件基准证据范围内。"
+  },
+  {
+    "id": "source-control",
+    "title": "Git、diff、PR 与 review",
+    "owner": "workspace-source-control",
+    "operations": [
+      "ipc.sourceControl:",
+      "ipc.workspaceSelection:",
+      "ipc.agent:gitDiff",
+      "ipc.agent:gitDiffSnapshot",
+      "ipc.agent:gitDiffCommits",
+      "ipc.agent:gitCommitDiffSnapshot"
+    ],
+    "sources": [
+      "src/main/source-control/ipc.ts",
+      "src/main/source-control/workspace-ipc.ts",
+      "src/main/source-control/workspace-choices.ts",
+      "src/renderer/hooks/useWorkspaceSelection.ts",
+      "src/renderer/components/WorkspacePicker.tsx",
+      "src/renderer/hooks/useDiffInspector.ts",
+      "src/renderer/hooks/useFixedVirtualRows.ts",
+      "src/renderer/components/DiffInspector.tsx",
+      "src/renderer/components/TurnDiffReviewPanel.tsx",
+      "src/renderer/components/DiffNavigation.tsx",
+      "src/renderer/components/DiffFiles.tsx",
+      "src/renderer/components/StackedDiff.tsx",
+      "src/renderer/components/SourceControlPatch.tsx",
+      "src/renderer/components/PierrePatch.tsx",
+      "src/renderer/components/PierreDiffRuntime.tsx",
+      "src/renderer/pierre-diff.ts",
+      "src/renderer/pierre-context.ts",
+      "src/renderer/pierre-diff.worker.ts",
+      "src/renderer/hooks/useDiffCommitHistory.ts",
+      "src/renderer/diff-stack.ts",
+      "src/renderer/diff-lines.ts",
+      "src/main/source-control/service.ts",
+      "src/main/source-control/store.ts",
+      "src/main/source-control/git.ts",
+      "src/main/source-control/process.ts",
+      "src/main/source-control/mutation.ts",
+      "src/main/git.ts",
+      "src/main/session-diff.ts",
+      "src/main/run-diff-previewer.ts",
+      "src/core/turn-recorder/git-workspace-snapshot.ts",
+      "src/core/turn-recorder/git-branch-base.ts",
+      "src/core/turn-recorder/git-diff-history.ts",
+      "src/main/git-diff-history.ts",
+      "src/core/turn-recorder/git-workspace-limits.ts",
+      "src/core/turn-recorder/git-workspace.ts",
+      "src/core/turn-recorder/git-capture.ts",
+      "src/core/turn-recorder/git-compute.ts",
+      "src/core/turn-recorder/git-patches.ts",
+      "src/core/turn-recorder/git-command.ts",
+      "src/core/turn-recorder/git-lifecycle.ts",
+      "scripts/git-turn-diff-bench.mjs"
+    ],
+    "benchmarks": [
+      "source-control.diff"
+    ],
+    "gap": "已测临时 Git 仓库真实 diff；提交历史、单提交快照与堆叠 Diff 渲染暂无专用计数门禁。日常 read/mutate handler 尚未细分所有操作；远程 push、PR、review 及网络授权另验。"
+  }
+]

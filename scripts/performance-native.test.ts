@@ -164,6 +164,8 @@ describe('native performance evidence gate', () => {
   it('freezes the smoke adapter and its history-reader dependency together', () => {
     expect(nativeHarnessFiles).toEqual(expect.arrayContaining([
       'src/main/providers/smoke.ts', 'src/main/providers/smoke-history-reader.ts',
+      'scripts/performance-journal.mjs', 'scripts/performance-path-catalogue.mjs',
+      'scripts/performance-paths.json', 'scripts/performance-paths/workbench.json',
       '.agents/skills/scry-performance-climb/scripts/timing-run.mjs',
       '.agents/skills/scry-performance-climb/scripts/timing-observation.mjs'
     ]))
