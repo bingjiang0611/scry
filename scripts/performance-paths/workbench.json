@@ -9,7 +9,8 @@
     "sources": [
       "src/main/index.ts",
       "src/renderer/components/WorkspacePanel.tsx",
-      "src/renderer/components/WorkspaceFileTree.tsx"
+      "src/renderer/components/WorkspaceFileTree.tsx",
+      "src/renderer/workspace-tree.ts"
     ],
     "benchmarks": [
       "workspace.files"

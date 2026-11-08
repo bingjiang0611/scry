@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { FileTree, useFileTree } from '@pierre/trees/react'
 import type { WorkspaceEntry } from '@shared/workspace'
 import { workspaceCopy as copy } from '../constants/workspace-copy'
+import {
+  filterWorkspaceTreePaths, normalizeWorkspaceTreeQuery, workspaceTreeAncestors, workspaceTreeEntries
+} from '../workspace-tree'
 import './pierre-views.css'
 
 export function WorkspaceFileTree({ children, expanded, query, loading, nextCursors, onExpand, onOpen, onContext, onRename, onMore }: {
@@ -16,21 +19,9 @@ export function WorkspaceFileTree({ children, expanded, query, loading, nextCurs
   onRename?: (entry: WorkspaceEntry) => void
   onMore: (path: string, cursor: string) => void
 }) {
-  const entries = useMemo(() => {
-    const result = new Map<string, WorkspaceEntry>()
-    const visit = (path: string): void => {
-      for (const entry of children[path] ?? []) {
-        result.set(entry.kind === 'directory' ? `${entry.path}/` : entry.path, entry)
-        if (entry.kind === 'directory') visit(entry.path)
-      }
-    }
-    visit('')
-    return result
-  }, [children])
-  const normalizedQuery = query.trim().toLowerCase()
-  const paths = useMemo(() => [...entries]
-    .filter(([, entry]) => !normalizedQuery || entry.name.toLowerCase().includes(normalizedQuery))
-    .map(([path]) => path), [entries, normalizedQuery])
+  const entries = useMemo(() => workspaceTreeEntries(children), [children])
+  const normalizedQuery = normalizeWorkspaceTreeQuery(query)
+  const paths = useMemo(() => filterWorkspaceTreePaths(entries, normalizedQuery), [entries, normalizedQuery])
   const resetting = useRef(false)
   const [pagePath, setPagePath] = useState<string | null>(null)
   const latest = useRef({ entries, expanded, onExpand, onOpen, onRename })
@@ -38,10 +29,7 @@ export function WorkspaceFileTree({ children, expanded, query, loading, nextCurs
   const { model } = useFileTree({ paths, initialExpandedPaths: [...expanded].map(path => `${path}/`),
     flattenEmptyDirectories: false, search: false, itemHeight: 30 })
   useEffect(() => {
-    const matchingParents = normalizedQuery ? paths.flatMap(path => {
-      const parts = path.replace(/\/$/, '').split('/').slice(0, -1)
-      return parts.map((_, index) => `${parts.slice(0, index + 1).join('/')}/`)
-    }) : []
+    const matchingParents = normalizedQuery ? workspaceTreeAncestors(paths) : []
     resetting.current = true
     model.resetPaths(paths, { initialExpandedPaths: [...latest.current.expanded].map(path => `${path}/`).concat(matchingParents) })
     resetting.current = false
