@@ -89,3 +89,7 @@ S1 记录了：连续第 30 次 `start` 会以 `daemon_run_not_bound` 失败（b
 ## 下一步
 
 按 L2、L1、L3、L4 的顺序完成。L2 的 bind 失败可能和 L1 的流式问题有关联，最好一起排查。然后做首 token 的分阶段计时。全部完成后停下等核验。
+
+## 维护者答复（2026-11-08）
+
+首 token 超出预算：按核验方建议，**先做分阶段计时再决定**。拆出 submit → recorded → dispatched → bound → 首次 watch 返回 → 首次 trace 读取 → renderer 收到 各段的 P50/P95，优先在现有协议内修；修完仍超出 +10 ms 预算，再写 push 订阅设计提案交维护者决定。预算本身不放宽。
