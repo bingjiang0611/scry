@@ -45,6 +45,32 @@ export async function runOpeningMeasurement({ driver, options }) {
       await wait(bottom, 'delayed history opens at bottom')
       await wait('document.querySelector(".model-effort-model")?.textContent === "qoder / Beta Default" && !document.querySelector(".composer-notice")', 'controls settled before the resize control')
       await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+      // Let the mounted component issue its own bottom pin, then shrink the
+      // viewport synchronously before the browser delivers that scroll event.
+      await read(`(() => {
+        const history = document.querySelector('.chat')
+        const scrollTo = history.scrollTo
+        const height = history.clientHeight
+        window.openingQueuedPin = false
+        history.scrollTo = function (...args) {
+          scrollTo.apply(this, args)
+          delete this.scrollTo
+          this.style.maxHeight = (height - 48) + 'px'
+          this.getBoundingClientRect()
+          window.openingQueuedPin = true
+        }
+        const extra = document.createElement('div')
+        extra.dataset.openingQueuedPin = 'true'
+        extra.style.height = '900px'
+        history.append(extra)
+      })()`)
+      await wait('window.openingQueuedPin', 'remote component pins before the queued-event viewport shrink')
+      await wait(bottom, 'queued automatic pin preserves remote bottom following')
+      await read('document.querySelector("[data-opening-queued-pin]").style.height = "1200px"')
+      await wait(bottom, 'later content still follows after the queued pin')
+      await read('document.querySelector("[data-opening-queued-pin]").remove(); document.querySelector(".chat").style.maxHeight = ""')
+      await wait(bottom, 'queued-pin control restores the original viewport')
+      await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
       // A Provider notice disappearing grows the viewport. Force that native
       // clamp before content grows, while the browser's scroll event is queued.
       await read(`(() => {
