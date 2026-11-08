@@ -36,6 +36,11 @@ interface RunCursor {
   after?: DesktopTraceCursor
   // Canonical run id the daemon bound to this ledger run, once it said so.
   scryRunId?: string
+  // Last ledger position this run's watch has read. The ledger answers with one page
+  // at a time from a global sequence, so a watch that keeps asking from 0 only ever
+  // re-reads the session's first page; this is what lets it walk forward to its own
+  // evidence (and past a page boundary at all).
+  watch: number
   latest?: ActiveRun
   // The item last delivered at each index: a text block the daemon rewrites as it
   // streams is an append of that item, not a rewrite of history.
@@ -129,7 +134,7 @@ export class DaemonRunRuntime {
     // than restarting the trace from zero.
     if (!this.#runs.has(receipt.runId)) {
       this.#runs.set(receipt.runId, {
-        runId: receipt.runId, context: input.context, lifecycle: 'recorded',
+        runId: receipt.runId, context: input.context, lifecycle: 'recorded', watch: 0,
         pushed: [], askedQuestions: new Set(), answerIds: new Map(), resyncRequired: false, pumping: false, stopped: false
       })
     }
@@ -173,7 +178,7 @@ export class DaemonRunRuntime {
     // already follows: that is the same run, not a second one over the same items.
     const cursor = this.#cursorFor(runId) ?? (() => {
       const created: RunCursor = {
-        runId, lifecycle: null, pushed: [], askedQuestions: new Set(), answerIds: new Map(),
+        runId, lifecycle: null, watch: 0, pushed: [], askedQuestions: new Set(), answerIds: new Map(),
         resyncRequired: false, pumping: false, stopped: false
       }
       this.#runs.set(runId, created)
@@ -268,9 +273,10 @@ export class DaemonRunRuntime {
     let changed = false
     try {
       const watch = await this.#deps.transport.watch({
-        runId, cursor: 0, outputCursor: 0,
+        runId, cursor: cursor.watch, outputCursor: 0,
         waitMs: options.waitMs ?? this.#deps.waitMs ?? DEFAULT_WAIT_MS, output: false
       })
+      cursor.watch = Math.max(cursor.watch, watch.cursor)
       if (watch.state !== cursor.lifecycle) { cursor.lifecycle = watch.state; changed = true }
       for (const entry of watch.events) {
         if (entry.kind !== 'run_progress' || entry.detail === undefined) continue
