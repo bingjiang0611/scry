@@ -59,6 +59,7 @@
 | `ci.yml` | changes 后并行执行 Node/typecheck、`check:harness-bindings`、shell/App build、4 片 coverage（合并报告）、Node 20/22/24 CLI 编译与运行/包校验、3 片 macOS 15 renderer UI（第 2 片打包，第 3 片共享一次新鲜 App 构建）、Linux App / pacman 检查；桌面 typecheck 仅在 node 执行，独立 CLI 发布命令仍包含它 | `Check` 汇总全部 jobs（含 changes 与 `packaged-linux`）；仅明确纯文档时允许全部验证 job 跳过，其余失败、取消、缺失或意外跳过均拒绝 |
 | `performance.yml` | changes 后并行执行现有 compare 与 native 测量，不更改计时顺序、负载或预算 | `Performance Check` 汇总 changes 与两个测量 jobs；仅明确纯文档时允许跳过，评论发布不属于正确性门禁 |
 | `validation-changes.yml` | CI/Performance 共用的只读 diff；仅 README.md 与 docs/**/*.md 可跳过重型验证，docs 下的代码/配置、Agent 指导、混合改动仍全验；无法读取 diff 时失败，手动 dispatch 总是全验 | 不在触发器上过滤 required workflow，三个原有必需检查名不变 |
+| `.github/actions/cache-electron/action.yml` | 仅 Electron runtime jobs 使用；按 OS/架构/锁定 Electron 版本缓存 ZIP 与校验文件，原安装器继续校验 SHA256；不缓存 node_modules、App 或编译输出，不使用宽泛 restore prefix | 不替代运行时校验，首次下载失败仍失败 |
 | `remote-g0.yml` | 每个 PR 发出检查，仅 remote/iOS/工作流变化并行运行 transport 与 ios（同一 runner、共享 DerivedData/一份 Swift 包源码缓存，依次编译 ScryRemoteG0、ScryRemote；普通 PR 共用 4 个 macOS slot，remote/iOS 变化时最多 6 个 job 竞争 GitHub Free 的 5 个 slot，可能有一个排队）；transport 限 20 分钟、ios 限 30 分钟 | `Remote Check` 要求两项全部成功，或 changes 明确判定无影响且两项全部跳过；检测失败、结果缺失或任一项取消均拒绝 |
 | `pr-vouch.yml` | 使用默认分支的 VOUCHED 配置，自动同步 `vouch:*` | 仅上下文，不是准入或门禁 |
 | `pr-size.yml` | 基础仓库代码读取 PR git diff，不运行 PR 内容；混合 PR 排除测试行 | 仅上下文，不按大小拒绝 PR |
@@ -101,7 +102,7 @@ size 采用上游阈值 XS <10、S <30、M <100、L <500、XL <1000、XXL ≥100
 | 维护者介入/keep-open/旧 head 更新/写结果未知 | 保护不误关、重新评估、写后读取，不盲目重放 |
 | Reviewer 未安装或标签接线未验证 | 评审未完成；不能凭配置文件或标签宣称已评审 |
 
-本地合同检查：`npm run test:unit -- scripts/pr-workflow.test.ts scripts/ci-workflow.test.ts scripts/ci-changes.test.ts`。它执行 workflow 的汇总脚本和标签逻辑、用临时 Git 仓库验证路径判断，并核对可信写入边界；不证明 GitHub 后台权限、真实 fork 或第三方 App 接线。分诊语义案例位于 [.agents/skills/contribution-triage/evals/cases.json](../../.agents/skills/contribution-triage/evals/cases.json)，需由新的 Agent 会话按本地政策快照只读复核，不冒充机械断言能证明模型判断。
+本地合同检查：`npm run test:unit -- scripts/pr-workflow.test.ts scripts/ci-workflow.test.ts scripts/ci-changes.test.ts scripts/electron-download-cache.test.ts`。它执行 workflow 的汇总脚本和标签逻辑、用临时 Git 仓库验证路径判断，并核对可信写入边界；不证明 GitHub 后台权限、真实 fork 或第三方 App 接线。分诊语义案例位于 [.agents/skills/contribution-triage/evals/cases.json](../../.agents/skills/contribution-triage/evals/cases.json)，需由新的 Agent 会话按本地政策快照只读复核，不冒充机械断言能证明模型判断。
 
 <a id="workflow-maintenance"></a>
 
@@ -128,7 +129,7 @@ size 采用上游阈值 XS <10、S <30、M <100、L <500、XL <1000、XXL ≥100
 2. **最小修改与同步**：只改受影响的层和引用，不为一个问题重写整套流程。同步上表关联项，避免手册宣称的检查与实际执行不一致。
 3. **按范围验证**：
    - 纯文档或模板文案：检查 diff、引用、锚点和需要的 YAML 格式，不触发 App 构建或全套测试。
-   - 工作流逻辑：运行 `npm run test:unit -- scripts/pr-workflow.test.ts scripts/ci-workflow.test.ts scripts/ci-changes.test.ts` 及受影响检查；关键拒绝路径应有能证明保护失效时失败的负对照。
+   - 工作流逻辑：运行 `npm run test:unit -- scripts/pr-workflow.test.ts scripts/ci-workflow.test.ts scripts/ci-changes.test.ts scripts/electron-download-cache.test.ts` 及受影响检查；关键拒绝路径应有能证明保护失效时失败的负对照。
    - Skill：用 `npm run test:unit -- scripts/agent-skills-sync.test.ts` 检查同步；行为变化还须按分诊案例复核判断，机械测试不代替语义评估。
    - 平台或性能行为：按验证指南和性能闭环执行，保留失败、测量环境和未验证项；配置存在不等于对应平台已验收。
 4. **自查与提审**：按[本地自查](#local-preflight)核对最终 diff、范围和证据。获得授权后才推送、开 PR 或操作后台；PR 说明规则变化、风险和验证结果，维护者负责合并决定。

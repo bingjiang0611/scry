@@ -98,7 +98,16 @@ Compiled Xcode output is not uploaded to the repository cache.
 - Linux packaging drops only the earlier duplicate native preparation. The
   authoritative forced Electron ABI rebuild and actual SQLite/node-pty load
   probe in run-electron-builder remain unchanged.
-- npm setup caches were already enabled. No node_modules/output caches or new
+- npm setup caches were already enabled, but do not include Electron's release
+  ZIPs. Runtime jobs now share a precise OS/architecture/Electron-version download
+  cache through `.github/actions/cache-electron`; Node-only jobs do not use it.
+  The installer still validates cached downloads through @electron/get's SHA256
+  manifest path. One or two source lockfiles bound a native comparison to its
+  actual versions; no broad restore prefix accumulates unrelated versions.
+  The current macOS/Linux ZIPs total 246,419,973 bytes (about 235 MiB), against
+  9,571,443,179 bytes of measured repository cache use before this addition.
+  First cache fill still requires a working official download endpoint; there is
+  no mirror, retry loop or success fallback. No node_modules/output caches or new
   Go/Rust caches are added. The existing workflows have no go/cargo source tool
   installs to replace. The local actionlint check uses prebuilt version 1.7.12.
 - Three renderer shards plus native performance use four macOS slots normally.
@@ -132,6 +141,13 @@ branch, produced successful Check/Performance Check/Remote Check and skipped all
 heavy jobs (runs 42465093982 / 42465094099 / 42465093951). It was closed and its
 remote/local temporary branch cleaned up after verification. No main branch or
 ruleset settings were changed for these experiments.
+
+Continuation: a clean Node 22.23.4 Linux ARM64 container, limited to 2 CPUs and
+3 GiB, passed all 29 cases from the three timeout-related files with coverage and
+one worker. No test or deadline changed. This narrows the failure but is not an
+Ubuntu x64 reproduction or proof of the original runner's load. Logs:
+`/tmp/scry-actions-linux-probe/{environment.txt,focused.log}`. The container was
+removed after collecting evidence; its official Node image remains cached.
 
 The final run IDs, timing comparison and remote verification limits are recorded
 in the PR description after the second experiment. Historical/controlled workloads

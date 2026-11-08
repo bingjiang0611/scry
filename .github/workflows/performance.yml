@@ -164,6 +164,11 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: candidate/package-lock.json
+      - uses: ./candidate/.github/actions/cache-electron
+        with:
+          lockfiles: |
+            candidate/package-lock.json
+            baseline/package-lock.json
       - name: Install dependencies and freeze native harness
         run: |
           set -o pipefail

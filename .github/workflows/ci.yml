@@ -63,6 +63,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - uses: ./.github/actions/cache-electron
       - run: npm ci
       - name: Prepare Electron executable
         run: |
@@ -156,6 +157,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - uses: ./.github/actions/cache-electron
       - run: npm ci
       - name: Prepare Electron executable
         run: node -e "require('node:fs').accessSync(require('electron'))"
@@ -213,6 +215,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - uses: ./.github/actions/cache-electron
       - run: npm ci
       - name: Prepare Electron executable
         run: node -e "require('node:fs').accessSync(require('electron'))"
