@@ -13,7 +13,12 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    uses: ./.github/workflows/validation-changes.yml
+
   node:
+    needs: changes
+    if: ${{ needs.changes.outputs.required == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -24,17 +29,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - name: Prepare Electron executable
-        run: |
-          node -e "require('node:fs').accessSync(require('electron'))"
-          electron_bin="$(node -e "process.stdout.write(require('electron'))")"
-          echo "Electron executable: ${electron_bin}"
-          sandbox="$(dirname "${electron_bin}")/chrome-sandbox"
-          if [ "${RUNNER_OS}" = "Linux" ]; then
-            sudo chown root:root "${sandbox}"
-            sudo chmod 4755 "${sandbox}"
-          fi
+      # This job compiles but never launches Electron or loads native modules.
+      # A clean --ignore-scripts install covers every command below; do not
+      # download an unused Electron executable or prepare its runtime sandbox.
+      - run: npm ci --ignore-scripts
       - name: Typecheck
         run: npm run typecheck
       - name: Harness binding checks
@@ -49,6 +47,8 @@ jobs:
   # 全量 Vitest 按文件分成 4 片并行。每片仍只用一个 worker，
   # 50k-trace 等 CPU 密集契约不会互相争抢，超时保持不变；不过滤任何测试。
   unit:
+    needs: changes
+    if: ${{ needs.changes.outputs.required == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -63,6 +63,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - uses: ./.github/actions/cache-electron
+        id: electron-cache
       - run: npm ci
       - name: Prepare Electron executable
         run: |
@@ -71,6 +73,12 @@ jobs:
           sandbox="$(dirname "${electron_bin}")/chrome-sandbox"
           sudo chown root:root "${sandbox}"
           sudo chmod 4755 "${sandbox}"
+      # Save the validated download before unrelated tests/builds can fail.
+      - uses: actions/cache/save@v4
+        if: ${{ steps.electron-cache.outputs.hit != 'true' }}
+        with:
+          path: ${{ runner.temp }}/electron-downloads
+          key: ${{ steps.electron-cache.outputs.key }}
       - name: Unit, contract tests and coverage shard
         run: xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24' npm run test:coverage -- --maxWorkers=1 --shard=${{ matrix.shard }}/4 --reporter=default --reporter=blob --outputFile.blob=.vitest-reports/blob-${{ matrix.shard }}.json
       - name: Keep shard results for the merged coverage report
@@ -85,8 +93,8 @@ jobs:
 
   # 任一分片失败时仍合并已完成分片并上传覆盖率，便于排查；Check 仍因 unit 失败而失败。
   unit-coverage:
-    needs: unit
-    if: ${{ !cancelled() }}
+    needs: [changes, unit]
+    if: ${{ !cancelled() && needs.changes.outputs.required == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -114,6 +122,8 @@ jobs:
           if-no-files-found: ignore
 
   cli-compat:
+    needs: changes
+    if: ${{ needs.changes.outputs.required == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -130,19 +140,22 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - name: CLI tests and clean tarball smoke
-        run: npm run check:cli-release
+        # Full desktop typechecking runs in node; CLI compilation and all runtime
+        # tests/tarball checks still execute on every supported Node version.
+        run: npm run check:cli-runtime
 
-  # 不再等待 node/cli-compat：最终 Check 仍要求全部 job 成功，只是并行跑。
-  # renderer UI smoke 按原串行顺序连续切成 2 片（部分 fixture 对前序脚本敏感，不跨片重排），打包只在第 1 片执行一次。
-  # 只拆 2 片：GitHub Free 同时最多 5 个 macOS job，需与 Performance native、
-  # Remote transport/ios 同时运行而不排队。
+  # Preserve the serial smoke order in three contiguous slices. Packaging runs
+  # with the shortest slice. Normal PRs use four macOS slots including native
+  # performance; remote/iOS changes may queue one of the six jobs at the five-slot cap.
   packaged-electron:
+    needs: changes
+    if: ${{ needs.changes.outputs.required == 'true' }}
     runs-on: macos-15
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
     env:
       QODER_SKIP_DOWNLOAD: "1"
     steps:
@@ -151,9 +164,17 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - uses: ./.github/actions/cache-electron
+        id: electron-cache
       - run: npm ci
       - name: Prepare Electron executable
         run: node -e "require('node:fs').accessSync(require('electron'))"
+      # Save the validated download before unrelated tests/builds can fail.
+      - uses: actions/cache/save@v4
+        if: ${{ steps.electron-cache.outputs.hit != 'true' }}
+        with:
+          path: ${{ runner.temp }}/electron-downloads
+          key: ${{ steps.electron-cache.outputs.key }}
       - name: Prepare Electron native dependencies
         run: ./node_modules/.bin/electron-builder install-app-deps
       - name: Isolated renderer DOM smoke tests
@@ -169,13 +190,13 @@ jobs:
           path: ${{ runner.temp }}/scry-sidebar-*.png
           if-no-files-found: ignore
       - name: Package and smoke the macOS app
-        if: ${{ matrix.shard == 1 }}
+        if: ${{ matrix.shard == 2 }}
         run: npm run pack:artifact
 
   check:
     name: Check
     if: ${{ always() }}
-    needs: [node, unit, unit-coverage, cli-compat, packaged-electron, packaged-linux]
+    needs: [changes, node, unit, unit-coverage, cli-compat, packaged-electron, packaged-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -184,12 +205,20 @@ jobs:
           RESULTS: ${{ toJSON(needs) }}
         run: |
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
-          echo "$RESULTS" | jq -e 'length > 0 and all(.[]; .result == "success")' > /dev/null
+          echo "$RESULTS" | jq -e '
+            length == 7 and .changes.result == "success" and (
+              (.changes.outputs.required == "true" and
+                (del(.changes) | all(.[]; .result == "success"))) or
+              (.changes.outputs.required == "false" and
+                (del(.changes) | all(.[]; .result == "skipped")))
+            )' > /dev/null
 
   # Linux 打包门禁：只验证产物布局、原生模块、私有 CLI、locale 裁剪与资源 allowlist。
   # GUI smoke（pack:artifact 里的 smoke:electron）需要可用的 Chromium sandbox setuid 和显示环境，
   # 本 job 不伪造这两者；界面与 Wayland 行为在目标 Omarchy 机器上验收。
   packaged-linux:
+    needs: changes
+    if: ${{ needs.changes.outputs.required == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -200,11 +229,19 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - uses: ./.github/actions/cache-electron
+        id: electron-cache
       - run: npm ci
       - name: Prepare Electron executable
         run: node -e "require('node:fs').accessSync(require('electron'))"
-      - name: Prepare Electron native dependencies
-        run: ./node_modules/.bin/electron-builder install-app-deps
+      # Save the validated download before unrelated tests/builds can fail.
+      - uses: actions/cache/save@v4
+        if: ${{ steps.electron-cache.outputs.hit != 'true' }}
+        with:
+          path: ${{ runner.temp }}/electron-downloads
+          key: ${{ steps.electron-cache.outputs.key }}
+      # run-electron-builder performs the authoritative forced ABI rebuild and
+      # real native-load probe; no Electron tests precede it in this job.
       - name: Build desktop app and private CLI
         run: |
           npm run build

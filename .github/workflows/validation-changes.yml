@@ -1,0 +1,41 @@
+name: Validation changes
+
+on:
+  workflow_call:
+    outputs:
+      required:
+        description: Whether executable inputs changed (unknown diffs fail closed)
+        value: ${{ jobs.changes.outputs.required }}
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      required: ${{ steps.diff.outputs.required }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: diff
+        name: Detect executable changes
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          # Dispatch always validates. A new branch has no readable before commit.
+          if [ "$EVENT_NAME" = workflow_dispatch ] || [[ "$BASE_SHA" =~ ^0+$ ]]; then
+            echo 'required=true' >> "$GITHUB_OUTPUT"
+          elif git diff --quiet --no-ext-diff --no-textconv "$BASE_SHA" HEAD -- . \
+            ':(top,glob,exclude)**/README.md' \
+            ':(top,glob,exclude)docs/**/*.md'; then
+            echo 'required=false' >> "$GITHUB_OUTPUT"
+          else
+            status=$?
+            if [ "$status" -ne 1 ]; then exit "$status"; fi
+            echo 'required=true' >> "$GITHUB_OUTPUT"
+          fi

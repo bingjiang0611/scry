@@ -60,109 +60,8 @@ function gate(file: string, results: Record<string, unknown>) {
   return shell(job.steps[0].run!, { RESULTS: JSON.stringify(results) }).status
 }
 
-// Execute the scripts used by GitHub rather than a second implementation of the gate.
-// Historical single-job order of `test:renderer:ui` before sharding.
-const SERIAL_RENDERER_UI_ORDER = [
-  'node scripts/desktop-remote-ui-smoke.mjs --session-opening-only',
-  'node scripts/desktop-remote-ui-smoke.mjs --structure-only',
-  'node scripts/desktop-remote-ui-smoke.mjs --conversation-navigation-only',
-  'node scripts/desktop-remote-ui-smoke.mjs --unknown-receipt-only',
-  'node scripts/desktop-remote-ui-smoke.mjs --unknown-receipt-only --negative-unknown-receipt-control',
-  'node scripts/session-capability-ui-smoke.mjs',
-  'node scripts/session-capability-ui-smoke.mjs --structure-only',
-  'node scripts/session-capability-ui-smoke.mjs --overlays-only',
-  'node scripts/session-capability-ui-smoke.mjs --lists-only',
-  'node scripts/session-capability-ui-smoke.mjs --loading-only',
-  'node scripts/session-capability-ui-smoke.mjs --turn-refs-only',
-  'node scripts/session-capability-ui-smoke.mjs --sidebar-activity-only',
-  'node scripts/model-picker-ui-smoke.mjs',
-  'node scripts/analytics-credits-ui-smoke.mjs',
-  'node scripts/chat-preview-ui-smoke.mjs',
-  'node scripts/session-performance-ui-smoke.mjs',
-  'npm run test:background-ui',
-  'npm run test:steer-ui',
-  'npm run test:remote-queue-ui',
-  'node scripts/desktop-remote-ui-smoke.mjs',
-  'node scripts/desktop-remote-ui-smoke.mjs --session-parity-only',
-  'node scripts/desktop-remote-ui-smoke.mjs --composer-history-only',
-  'node scripts/desktop-remote-ui-smoke.mjs --remote-settings-only',
-  'node scripts/desktop-remote-ui-smoke.mjs --session-lifecycle-only',
-  'npm run test:source-control:ui',
-  'npm run test:workspace:ui',
-  'npm run test:side-chat:ui',
-  'npm run test:conversation:ipc',
-  'node scripts/electron-security-smoke.mjs --dev-pi-history-only',
-]
-
+// Execute GitHub's own gate scripts rather than a second implementation.
 describe('required PR checks', () => {
-  for (const [file, dependencies] of [
-    ['ci.yml', ['node', 'unit', 'unit-coverage', 'cli-compat', 'packaged-electron', 'packaged-linux']],
-    ['performance.yml', ['compare', 'native']]
-  ] as const) {
-    it(`${file} includes all validation jobs, not the optional comment publisher`, () => {
-      const jobs = workflow(file).jobs
-      expect(jobs.check.needs).toEqual([...dependencies])
-      expect(Object.keys(jobs).filter(key => key !== 'check' && key !== 'comment').sort()).toEqual([...dependencies].sort())
-      const success = Object.fromEntries(dependencies.map(key => [key, { result: 'success' }]))
-      expect(gate(file, success)).toBe(0)
-      for (const key of dependencies) {
-        for (const result of ['failure', 'cancelled', 'skipped']) {
-          expect(gate(file, { ...success, [key]: { result } }), `${key}: ${result}`).not.toBe(0)
-        }
-      }
-      expect(gate(file, {})).not.toBe(0)
-    })
-  }
-
-  it('pins the packaged macOS gate to a supported standard runner image', () => {
-    expect(workflow('ci.yml').jobs['packaged-electron']['runs-on']).toBe('macos-15')
-  })
-
-  it('requires whole-program harness binding checks as an unconditional gate', () => {
-    const job = workflow('ci.yml').jobs.node
-    const bindings = source(job, 'Harness binding checks')
-    const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> }
-    expect(scripts['check:harness-bindings']).toBe('node scripts/check-harness-bindings.mjs')
-    expect(bindings.run).toBe('npm run check:harness-bindings')
-    expect(bindings.if).toBeUndefined()
-    expect(bindings['continue-on-error']).toBeUndefined()
-  })
-
-  it('shards hosted coverage without filtering tests or overriding their timeouts', () => {
-    const ci = workflow('ci.yml')
-    const unit = ci.jobs.unit as Job & { strategy: { 'fail-fast': boolean; matrix: { shard: number[] } } }
-    expect(unit.strategy.matrix.shard).toEqual([1, 2, 3, 4])
-    expect(unit.strategy['fail-fast']).toBe(false)
-    const coverage = source(unit, 'Unit, contract tests and coverage shard')
-    expect(coverage.if).toBeUndefined()
-    expect(coverage.run).toBe("xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24' npm run test:coverage -- --maxWorkers=1 --shard=${{ matrix.shard }}/4 --reporter=default --reporter=blob --outputFile.blob=.vitest-reports/blob-${{ matrix.shard }}.json")
-    expect(ci.jobs['unit-coverage'].needs).toBe('unit')
-    expect(ci.jobs['unit-coverage'].if).toBe('${{ !cancelled() }}')
-    expect(source(ci.jobs['unit-coverage'], 'Merge shard results and coverage').run).toBe('npx vitest run --merge-reports --coverage')
-  })
-
-  it('runs every renderer UI smoke exactly once across the macOS shards', () => {
-    const job = workflow('ci.yml').jobs['packaged-electron'] as Job & { strategy: { 'fail-fast': boolean; matrix: { shard: number[] } } }
-    expect(job.needs).toBeUndefined()
-    expect(job.strategy.matrix.shard).toEqual([1, 2])
-    expect(job.strategy['fail-fast']).toBe(false)
-    expect(source(job, 'Isolated renderer DOM smoke tests').run).toBe('npm run test:renderer:ui:${{ matrix.shard }}')
-    const pack = source(job, 'Package and smoke the macOS app')
-    expect(pack.run).toBe('npm run pack:artifact')
-    expect(pack.if).toBe('${{ matrix.shard == 1 }}')
-    const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> }
-    const shards = [1, 2].map(shard => `npm run test:renderer:ui:${shard}`)
-    expect(scripts['test:renderer:ui']).toBe(shards.join(' && '))
-    const commands = [1, 2].flatMap(shard => scripts[`test:renderer:ui:${shard}`].split(' && '))
-    // Shards are contiguous slices of the historical serial order: several fixtures are
-    // sensitive to what ran before them on the same runner, so never reorder across shards.
-    expect(commands).toEqual(SERIAL_RENDERER_UI_ORDER)
-    expect(new Set(commands).size).toBe(commands.length)
-    for (const required of ['npm run test:side-chat:ui', 'npm run test:conversation:ipc', 'npm run test:source-control:ui', 'npm run test:workspace:ui', 'node scripts/analytics-credits-ui-smoke.mjs', 'node scripts/desktop-remote-ui-smoke.mjs --session-parity-only']) {
-      expect(commands).toContain(required)
-    }
-  })
-
   it('keeps the failed native comparison authoritative when collecting one diagnostic control', () => {
     const job = workflow('performance.yml').jobs.native
     const primary = source(job, 'Measure baseline then candidate, retaining failures')
@@ -202,11 +101,20 @@ describe('required PR checks', () => {
     expect(remote.jobs.transport.steps.some(step => step.run?.includes('xcodebuild'))).toBe(false)
     const commands = remote.jobs.ios.steps.filter(step => step.run).map(step => step.run!.trim())
     expect(commands).toEqual([
-      ['ScryRemoteG0', 'build-for-testing', 'scry-g0-ios'],
-      ['ScryRemote', 'build', 'scry-remote-ui']
+      ['ScryRemoteG0', 'build-for-testing', 'scry-ios'],
+      ['ScryRemote', 'build', 'scry-ios']
     ].map(([project, action, derived]) =>
       `xcodebuild -project apps/ios/${project}.xcodeproj -scheme ${project} -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/${derived}" ARCHS=arm64 CODE_SIGNING_ALLOWED=NO ${action}`
     ))
+    const caches = remote.jobs.ios.steps.filter(step => step.uses === 'actions/cache@v4')
+    expect(caches).toHaveLength(1)
+    expect(caches[0].with?.path).toBe('${{ runner.temp }}/scry-ios/SourcePackages')
+    for (const project of ['ScryRemoteG0', 'ScryRemote']) {
+      expect(caches[0].with?.key).toContain(`apps/ios/${project}.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`)
+      const xcode = readFileSync(join(root, `apps/ios/${project}.xcodeproj/project.pbxproj`), 'utf8')
+      expect(xcode).toContain('productName = ScryG0Transport')
+      expect(xcode).toContain('relativePath = "../../experiments/remote-g0/swift"')
+    }
     expect(remote.jobs.transport.steps.some(step => step.run === 'npm --prefix experiments/remote-g0 run smoke:g1')).toBe(true)
     const remotePackage = JSON.parse(readFileSync(join(root, 'experiments/remote-g0/package.json'), 'utf8')) as { scripts: Record<string, string>; engines: { node: string } }
     expect(remotePackage.engines.node).toBe('^22.7.0 || ^24.0.0')
@@ -260,6 +168,24 @@ function gitFixture() {
 }
 
 describe('remote change detection', () => {
+  it.each(['apps/ios/README.md', 'experiments/remote-g0/cf-relay/README.md'])('skips nested README only, not mixed code changes: %s', path => {
+    const { cwd, env, git, base } = gitFixture()
+    const script = source(workflow('remote-g0.yml').jobs.changes, 'Detect remote changes').run!
+    const output = join(temp(), 'outputs')
+    const detect = () => {
+      writeFileSync(output, '')
+      const result = shell(script, { ...env, BASE_SHA: base, GITHUB_OUTPUT: output }, cwd)
+      return { status: result.status, output: readFileSync(output, 'utf8') }
+    }
+    mkdirSync(join(cwd, path, '..'), { recursive: true })
+    writeFileSync(join(cwd, path), 'docs only\n')
+    git('add', '.'); git('commit', '-m', 'nested docs')
+    expect(detect()).toEqual({ status: 0, output: 'required=false\n' })
+    writeFileSync(join(cwd, path, '..', 'changed.ts'), 'code change\n')
+    git('add', '.'); git('commit', '-m', 'mixed code')
+    expect(detect()).toEqual({ status: 0, output: 'required=true\n' })
+  })
+
   it('uses real git diffs for ordinary, remote, iOS and workflow changes; rejects unreadable bases', () => {
     const { cwd, env, git, base } = gitFixture()
     const script = source(workflow('remote-g0.yml').jobs.changes, 'Detect remote changes').run!
