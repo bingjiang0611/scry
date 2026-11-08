@@ -13,11 +13,16 @@ permissions:
   contents: read
 
 concurrency:
-  group: performance-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: performance-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    uses: ./.github/workflows/validation-changes.yml
+
   compare:
+    needs: changes
+    if: ${{ needs.changes.outputs.required == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -137,6 +142,8 @@ jobs:
           retention-days: 30
 
   native:
+    needs: changes
+    if: ${{ needs.changes.outputs.required == 'true' }}
     # Same frozen driver, two real source builds, one runner, serial measurements.
     runs-on: macos-latest
     timeout-minutes: 30
@@ -251,7 +258,7 @@ jobs:
   check:
     name: Performance Check
     if: ${{ always() }}
-    needs: [compare, native]
+    needs: [changes, compare, native]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -260,12 +267,18 @@ jobs:
           RESULTS: ${{ toJSON(needs) }}
         run: |
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
-          echo "$RESULTS" | jq -e 'length > 0 and all(.[]; .result == "success")' > /dev/null
+          echo "$RESULTS" | jq -e '
+            length == 3 and .changes.result == "success" and (
+              (.changes.outputs.required == "true" and
+                (del(.changes) | all(.[]; .result == "success"))) or
+              (.changes.outputs.required == "false" and
+                (del(.changes) | all(.[]; .result == "skipped")))
+            )' > /dev/null
 
   comment:
     # Fork PRs retain a read-only summary/artifact. Never run PR code with a write token.
-    if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    needs: [compare, native]
+    if: always() && needs.changes.outputs.required == 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: [changes, compare, native]
     runs-on: ubuntu-latest
     permissions:
       actions: read

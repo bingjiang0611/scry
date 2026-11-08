@@ -56,9 +56,10 @@
 
 | 文件 | 行为 | 门禁身份 |
 | --- | --- | --- |
-| `ci.yml` | Node/typecheck、`check:harness-bindings` 静态检查、shell/App build、4 片并行 coverage（合并报告）、Node 20/22/24 CLI、2 片并行 macOS 15 renderer UI（第 1 片打包）、Linux 解包 App / pacman 检查；顶层验证 job 并行运行，只有 `unit-coverage` 等待 4 个 `unit` 分片、`Check` 等待全部 job | `Check` 汇总全部 jobs（含 `packaged-linux`）；失败、取消或跳过均拒绝 |
-| `performance.yml` | 现有 compare 与 native 测量 | `Performance Check` 汇总两个 jobs；评论发布不属于正确性门禁 |
-| `remote-g0.yml` | 每个 PR 发出检查，仅 remote/iOS/工作流变化并行运行 transport 与 ios（同一 runner 依次编译 ScryRemoteG0、ScryRemote；macOS job 总数控制在 GitHub Free 并发上限 5 内）；transport 限 20 分钟、ios 限 30 分钟 | `Remote Check` 要求两项全部成功，或 changes 明确判定无影响且两项全部跳过；检测失败、结果缺失或任一项取消均拒绝 |
+| `ci.yml` | changes 后并行执行 Node/typecheck、`check:harness-bindings`、shell/App build、4 片 coverage（合并报告）、Node 20/22/24 CLI 编译与运行/包校验、3 片 macOS 15 renderer UI（第 2 片打包，第 3 片共享一次新鲜 App 构建）、Linux App / pacman 检查；桌面 typecheck 仅在 node 执行，独立 CLI 发布命令仍包含它 | `Check` 汇总全部 jobs（含 changes 与 `packaged-linux`）；仅明确纯文档时允许全部验证 job 跳过，其余失败、取消、缺失或意外跳过均拒绝 |
+| `performance.yml` | changes 后并行执行现有 compare 与 native 测量，不更改计时顺序、负载或预算 | `Performance Check` 汇总 changes 与两个测量 jobs；仅明确纯文档时允许跳过，评论发布不属于正确性门禁 |
+| `validation-changes.yml` | CI/Performance 共用的只读 diff；仅 README.md 与 docs/**/*.md 可跳过重型验证，docs 下的代码/配置、Agent 指导、混合改动仍全验；无法读取 diff 时失败，手动 dispatch 总是全验 | 不在触发器上过滤 required workflow，三个原有必需检查名不变 |
+| `remote-g0.yml` | 每个 PR 发出检查，仅 remote/iOS/工作流变化并行运行 transport 与 ios（同一 runner 依次编译 ScryRemoteG0、ScryRemote；普通 PR 共用 4 个 macOS slot，remote/iOS 变化时最多 6 个 job 竞争 GitHub Free 的 5 个 slot，可能有一个排队）；transport 限 20 分钟、ios 限 30 分钟 | `Remote Check` 要求两项全部成功，或 changes 明确判定无影响且两项全部跳过；检测失败、结果缺失或任一项取消均拒绝 |
 | `pr-vouch.yml` | 使用默认分支的 VOUCHED 配置，自动同步 `vouch:*` | 仅上下文，不是准入或门禁 |
 | `pr-size.yml` | 基础仓库代码读取 PR git diff，不运行 PR 内容；混合 PR 排除测试行 | 仅上下文，不按大小拒绝 PR |
 
@@ -89,6 +90,8 @@ size 采用上游阈值 XS <10、S <30、M <100、L <500、XL <1000、XXL ≥100
 | 场景 | 必须观察到的结果 |
 | --- | --- |
 | 任一 CI/性能任务失败、取消或无理由跳过 | 汇总失败，启用 ruleset 后不能合并 |
+| 仅 README.md 或 docs/**/*.md | changes 明确输出 false；重型 CI/性能任务跳过，`Check`、`Performance Check`、`Remote Check` 仍产生成功结果，不悬挂 required context |
+| 文档混有代码、配置或不可读 diff | 不按纯文档放行；前两者完整验证，后者检测失败、汇总失败 |
 | remote/iOS 未改动 | changes 输出 false，transport、ios 全部跳过，Remote Check 成功 |
 | remote/iOS/工作流有改动 | 两项并行验证必须全部成功；失败、取消、跳过或缺失结果不能被汇总隐藏 |
 | remote diff 不可读取 | 检测失败，Remote Check 失败；不能按无影响处理 |
@@ -98,7 +101,7 @@ size 采用上游阈值 XS <10、S <30、M <100、L <500、XL <1000、XXL ≥100
 | 维护者介入/keep-open/旧 head 更新/写结果未知 | 保护不误关、重新评估、写后读取，不盲目重放 |
 | Reviewer 未安装或标签接线未验证 | 评审未完成；不能凭配置文件或标签宣称已评审 |
 
-本地合同检查：`npm run test:unit -- scripts/pr-workflow.test.ts`。它执行 workflow 的汇总脚本和标签逻辑、用临时 Git 仓库验证路径判断，并核对可信写入边界；不证明 GitHub 后台权限、真实 fork 或第三方 App 接线。分诊语义案例位于 [.agents/skills/contribution-triage/evals/cases.json](../../.agents/skills/contribution-triage/evals/cases.json)，需由新的 Agent 会话按本地政策快照只读复核，不冒充机械断言能证明模型判断。
+本地合同检查：`npm run test:unit -- scripts/pr-workflow.test.ts scripts/ci-workflow.test.ts scripts/ci-changes.test.ts`。它执行 workflow 的汇总脚本和标签逻辑、用临时 Git 仓库验证路径判断，并核对可信写入边界；不证明 GitHub 后台权限、真实 fork 或第三方 App 接线。分诊语义案例位于 [.agents/skills/contribution-triage/evals/cases.json](../../.agents/skills/contribution-triage/evals/cases.json)，需由新的 Agent 会话按本地政策快照只读复核，不冒充机械断言能证明模型判断。
 
 <a id="workflow-maintenance"></a>
 
@@ -125,7 +128,7 @@ size 采用上游阈值 XS <10、S <30、M <100、L <500、XL <1000、XXL ≥100
 2. **最小修改与同步**：只改受影响的层和引用，不为一个问题重写整套流程。同步上表关联项，避免手册宣称的检查与实际执行不一致。
 3. **按范围验证**：
    - 纯文档或模板文案：检查 diff、引用、锚点和需要的 YAML 格式，不触发 App 构建或全套测试。
-   - 工作流逻辑：运行 `npm run test:unit -- scripts/pr-workflow.test.ts` 及受影响检查；关键拒绝路径应有能证明保护失效时失败的负对照。
+   - 工作流逻辑：运行 `npm run test:unit -- scripts/pr-workflow.test.ts scripts/ci-workflow.test.ts scripts/ci-changes.test.ts` 及受影响检查；关键拒绝路径应有能证明保护失效时失败的负对照。
    - Skill：用 `npm run test:unit -- scripts/agent-skills-sync.test.ts` 检查同步；行为变化还须按分诊案例复核判断，机械测试不代替语义评估。
    - 平台或性能行为：按验证指南和性能闭环执行，保留失败、测量环境和未验证项；配置存在不等于对应平台已验收。
 4. **自查与提审**：按[本地自查](#local-preflight)核对最终 diff、范围和证据。获得授权后才推送、开 PR 或操作后台；PR 说明规则变化、风险和验证结果，维护者负责合并决定。
