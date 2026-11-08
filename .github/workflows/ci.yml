@@ -43,6 +43,30 @@ jobs:
         run: npm run build
       - name: Build recorder CLI
         run: npm run build:cli
+      - name: Package unpublished recorder with source provenance
+        env:
+          ARTIFACT_DIR: ${{ runner.temp }}/recorder-artifact
+        run: |
+          mkdir -p "$ARTIFACT_DIR"
+          npm pack ./packages/turn-recorder-cli --ignore-scripts --json --pack-destination "$ARTIFACT_DIR" > "$ARTIFACT_DIR/pack.json"
+          node --input-type=module <<'NODE'
+          import { execFileSync } from 'node:child_process'
+          import { createHash } from 'node:crypto'
+          import { readFileSync, writeFileSync } from 'node:fs'
+          import { join } from 'node:path'
+          const directory = process.env.ARTIFACT_DIR
+          const [{ filename }] = JSON.parse(readFileSync(join(directory, 'pack.json'), 'utf8'))
+          const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+          const sha256 = createHash('sha256').update(readFileSync(join(directory, filename))).digest('hex')
+          writeFileSync(join(directory, 'provenance.json'), JSON.stringify({ commit, filename, sha256 }, null, 2) + '\n')
+          NODE
+      - name: Retain recorder for exact-commit validation without publishing
+        uses: actions/upload-artifact@v4
+        with:
+          name: recorder-cli-${{ github.sha }}
+          path: ${{ runner.temp }}/recorder-artifact/
+          if-no-files-found: error
+          retention-days: 7
 
   # 全量 Vitest 按文件分成 4 片并行。每片仍只用一个 worker，
   # 50k-trace 等 CPU 密集契约不会互相争抢，超时保持不变；不过滤任何测试。
