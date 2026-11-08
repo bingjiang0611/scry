@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { MAC_RUN_ID } from './remote/desktop-client-validation'
+import { appendedText, boundMarker } from './daemon-run-evidence'
 import { PerformanceTrace } from './performance-timing'
 import { TraceOutputBridge } from './trace-output'
 import type { AgentQuestionResponse } from '../shared/runtime'
@@ -41,6 +41,9 @@ interface RunCursor {
   // re-reads the session's first page; this is what lets it walk forward to its own
   // evidence (and past a page boundary at all).
   watch: number
+  // How much run content this watch has seen. Content is what actually moves while the
+  // Provider streams; the ledger only moves at lifecycle points.
+  output: number
   latest?: ActiveRun
   // The item last delivered at each index: a text block the daemon rewrites as it
   // streams is an append of that item, not a rewrite of history.
@@ -87,38 +90,6 @@ function view(cursor: RunCursor): ActiveRun | null {
   return terminal && !cursor.latest.done ? { ...cursor.latest, done: true } : cursor.latest
 }
 
-function boundMarker(detail: string): { ledgerRunId?: string; scryRunId: string; cwd?: string; providerId?: string; agentProfileId?: string } | undefined {
-  try {
-    const marker = JSON.parse(detail) as Record<string, unknown>
-    if (marker.event !== 'bound' || typeof marker.scryRunId !== 'string') return undefined
-    // The daemon's canonical id for a run it dispatches itself (a device's, or the
-    // App's) is `remote-run-...`; a locally started one is `run-...`. Both are the
-    // same shape the device client accepts, so that pattern decides here too.
-    if (!MAC_RUN_ID.test(marker.scryRunId)) return undefined
-    return {
-      ...(typeof marker.ledgerRunId === 'string' && marker.ledgerRunId.length > 0 ? { ledgerRunId: marker.ledgerRunId } : {}),
-      scryRunId: marker.scryRunId,
-      ...(typeof marker.cwd === 'string' && marker.cwd.length > 0 ? { cwd: marker.cwd } : {}),
-      ...(typeof marker.providerId === 'string' && marker.providerId.length > 0 ? { providerId: marker.providerId } : {}),
-      ...(typeof marker.agentProfileId === 'string' && marker.agentProfileId.length > 0 ? { agentProfileId: marker.agentProfileId } : {})
-    }
-  } catch { return undefined }
-}
-
-/**
- * The text a run-view item appended since the copy that was delivered, when the item is
- * the same event and the new text only extends it. `undefined` means "not an append":
- * a different event, a shorter text, or a stage that does not grow.
- */
-function appendedText(previous: TraceEvent | undefined, next: TraceEvent): { text: string; at: number } | undefined {
-  if (!previous || previous.id !== next.id) return undefined
-  if (previous.stage !== 'text_delta' && previous.stage !== 'text') return undefined
-  const before = previous.text ?? ''
-  const after = next.text ?? ''
-  if (after.length <= before.length || !after.startsWith(before)) return undefined
-  return { text: after.slice(before.length), at: after.length }
-}
-
 export class DaemonRunRuntime {
   readonly #deps: DaemonRunRuntimeDeps
   readonly #runs = new Map<string, RunCursor>()
@@ -144,7 +115,7 @@ export class DaemonRunRuntime {
     // than restarting the trace from zero.
     if (!this.#runs.has(receipt.runId)) {
       this.#runs.set(receipt.runId, {
-        runId: receipt.runId, context: input.context, lifecycle: 'recorded', watch: 0,
+        runId: receipt.runId, context: input.context, lifecycle: 'recorded', watch: 0, output: 0,
         pushed: [], askedQuestions: new Set(), answerIds: new Map(), resyncRequired: false, pumping: false, stopped: false
       })
     }
@@ -194,7 +165,7 @@ export class DaemonRunRuntime {
     // already follows: that is the same run, not a second one over the same items.
     const cursor = this.#cursorFor(runId) ?? (() => {
       const created: RunCursor = {
-        runId, lifecycle: null, watch: 0, pushed: [], askedQuestions: new Set(), answerIds: new Map(),
+        runId, lifecycle: null, watch: 0, output: 0, pushed: [], askedQuestions: new Set(), answerIds: new Map(),
         resyncRequired: false, pumping: false, stopped: false
       }
       this.#runs.set(runId, created)
@@ -288,11 +259,19 @@ export class DaemonRunRuntime {
     const trace = new PerformanceTrace('daemon.run.pump', cursor.context ? { provider: cursor.context.providerId } : {})
     let changed = false
     try {
+      // `output: true` is the wake, not the delivery: the text still arrives on the
+      // trace, but the daemon only answers this long poll early when the run produced
+      // something. Without it a fifteen second poll is a fifteen second freeze between
+      // the first chunk and the end of the message.
       const watch = await this.#deps.transport.watch({
-        runId, cursor: cursor.watch, outputCursor: 0,
-        waitMs: options.waitMs ?? this.#deps.waitMs ?? DEFAULT_WAIT_MS, output: false
+        runId, cursor: cursor.watch, outputCursor: cursor.output,
+        waitMs: options.waitMs ?? this.#deps.waitMs ?? DEFAULT_WAIT_MS, output: true
       })
       cursor.watch = Math.max(cursor.watch, watch.cursor)
+      if (watch.output.count > 0) {
+        cursor.output = Math.max(cursor.output, watch.output.cursor)
+        changed = true
+      }
       if (watch.state !== cursor.lifecycle) { cursor.lifecycle = watch.state; changed = true }
       for (const entry of watch.events) {
         if (entry.kind !== 'run_progress' || entry.detail === undefined) continue
@@ -358,9 +337,21 @@ export class DaemonRunRuntime {
       // The first snapshot of a run this window just started is the whole history:
       // deliver it, then only the appended tail from then on.
       const fresh = items.slice(cursor.pushed.length)
+      // A snapshot can also carry growth of an item the renderer already holds - the
+      // first read after a quiet poll often is one - and replacing it silently would
+      // drop the rest of the message. Deliver the growth first, then the new items.
+      const grown: TraceEvent[] = []
+      for (let index = 0; index < cursor.pushed.length && index < items.length; index++) {
+        const item = items[index]
+        const tail = item ? appendedText(cursor.pushed[index], item) : undefined
+        if (tail === undefined) continue
+        grown.push({ ...item, id: `${item.id}#${tail.at}`, stage: 'text_delta', text: tail.text })
+        cursor.pushed[index] = item
+      }
+      for (const event of grown) this.#bridge.push(event)
       for (const event of fresh) this.#bridge.push(event)
       cursor.pushed = [...items]
-      return fresh.length > 0
+      return fresh.length > 0 || grown.length > 0
     }
     // A delta only appends when every change lands at or after what the renderer
     // already holds. Anything else rewrites history and must not be replayed as an
