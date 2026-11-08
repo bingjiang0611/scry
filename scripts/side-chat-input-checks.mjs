@@ -2,7 +2,7 @@ import { CHILD_COMPOSER, CHILD_PANEL, json } from './side-chat-driving.mjs'
 
 /** Native composition and untrusted Provider text acceptance for the selected child. */
 export async function exerciseSideChatInput({ cdp, evaluate, check, childId, controls, showChild }) {
-  const { driver, capture, click, clearDraft, keyStroke, wait, conversation, inputs } = controls
+  const { capture, click, clearDraft, keyStroke, wait, conversation, inputs } = controls
   // 6. Real IME composition must not send, and committing it must not lose the text.
   // End activates the last tab, which need not be the conversation under test.
   await showChild()
@@ -33,8 +33,16 @@ export async function exerciseSideChatInput({ cdp, evaluate, check, childId, con
   await wait(`window.scry.conversations.read(${json(childId)}).then(page => page.turns.length === ${turnsBeforeInjection + 1}
     && page.turns.at(-1)?.delivery.outcome === 'completed')`, 40000)
   // The child transcript is windowed, so the newest turn is reached by a real scroll.
-  const bodyPoint = await driver.pointerAt(`document.querySelector('${CHILD_PANEL} .chat-body')`)
   for (let wheel = 0; wheel < 8; wheel += 1) {
+    // Target the transcript gutter itself. The padded wrapper's center can hit
+    // a nested scrollable tool result, which consumes the wheel instead.
+    const bodyPoint = await evaluate(`(() => {
+      const scroller = document.querySelector('${CHILD_PANEL} .chat-body .chat-transcript');
+      const rect = scroller.getBoundingClientRect();
+      const point = { x: rect.left + 4, y: rect.top + rect.height / 2 };
+      if (document.elementFromPoint(point.x, point.y) !== scroller) throw new Error('Transcript scroll gutter is obscured');
+      return point;
+    })()`)
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...bodyPoint, deltaX: 0, deltaY: 1200 })
     await new Promise(resolve => setTimeout(resolve, 120))
   }
@@ -44,8 +52,13 @@ export async function exerciseSideChatInput({ cdp, evaluate, check, childId, con
     const body = document.querySelector('${CHILD_PANEL} .chat-body')
     const text = body.textContent ?? ''
     const start = text.indexOf('side chat reply')
+    const scroller = body.querySelector('.chat-transcript');
     return { img: body.querySelectorAll('img').length, script: body.querySelectorAll('script').length,
-      text: text.includes('<img src=x onerror=alert(1)>'), context: start < 0 ? text.slice(-200) : text.slice(start, start + 160) }
+      text: text.includes('<img src=x onerror=alert(1)>'), context: start < 0 ? text.slice(-200) : text.slice(start, start + 160),
+      childId: body.closest('[data-side-chat-id]')?.dataset.sideChatId,
+      scroll: { top: scroller.scrollTop, height: scroller.scrollHeight, client: scroller.clientHeight },
+      renderedRuns: [...body.querySelectorAll('[data-run-id]')].slice(-5).map(node => node.dataset.runId),
+      olderPage: [...document.querySelector('${CHILD_PANEL}').querySelectorAll('.unified-pagination button')].some(node => node.textContent === '最近记录' && !node.disabled) }
   })()`)
   check(injected.img === 0 && injected.script === 0, `Provider text was rendered as markup: ${json(injected)}`)
   check(injected.text, `Provider text was not shown verbatim: ${json(injected)}`)
