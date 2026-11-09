@@ -187,6 +187,7 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
       stop: (runId) => runtime.requestRunStop(runId),
       answer: (response) => runtime.userQuestionBroker.answer(response)
     },
-    ...inputs.historyHandlers
+    ...inputs.historyHandlers,
+    ...(inputs.runControl ? { runControl: inputs.runControl } : {})
   })
 }

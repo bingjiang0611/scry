@@ -96,6 +96,9 @@ export interface HostRuntimeInputs {
   toolPanels: HostControllerFactoryDependencies['toolPanels']
   // Test/embedding seam. Production omits it and uses the bounded worker-backed store.
   createOutputStore?: RemoteHostServiceDependencies['createOutputStore']
+  // App-only run controls (steer, stop one background task, adopt). The daemon supplies
+  // them; the service serves them on its local endpoint only.
+  runControl?: RemoteHostServiceDependencies['runControl']
 }
 
 export type { UsageAnalyticsRangeDays, ProviderContext }

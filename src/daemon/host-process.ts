@@ -167,7 +167,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   startupManagedRecovery = runStartupRecovery({
     userDataDir: options.userDataDir,
     recorderCli: daemonPrivateCliPath(options.resourcesPath),
-    startupPerf: { mark: () => undefined, finish: () => undefined },
+    startupPerf: { mark: () => undefined, finish: () => null },
     conversationStore: catalog.conversationStore,
     runs: pipeline.runs,
     deferMs: 0

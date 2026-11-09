@@ -138,6 +138,13 @@ describe('daemon host process', () => {
       expect(desktop.desktop).not.toHaveProperty('sessionFork')
       expect(desktop.desktop).not.toHaveProperty('sessionDelete')
       expect(desktop.desktop.workbenchOps).toEqual({ openPath: false, trashItem: false })
+      // The App's run controls are served on the local endpoint only. The daemon used to
+      // build them and then drop them before the host, so every steer, background-task stop
+      // and adopt answered unsupported_op in a real daemon.
+      const adopted = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'runControl', method: 'adopt', runId: 'run-not-here'
+      })
+      expect(adopted.error).toBeUndefined()
       const providers = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'providers', detail: 'metadata'
       })
