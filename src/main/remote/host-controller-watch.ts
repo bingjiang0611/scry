@@ -6,6 +6,7 @@ import type { RemoteGateway } from './remote-gateway'
 import type { RemoteInteractionBroker } from './remote-interaction-broker'
 import type { RunOutputPage } from './run-output-log'
 import { MAC_RUN_ID } from './host-controller-routing'
+import { recordRunStage } from '../run-stage-timing'
 import type { RemoteIntentRouting, MacRunSource, LiveRunRef } from './host-controller-types'
 
 // Long polls over one run and over every live run: the device waits here instead
@@ -112,6 +113,7 @@ export class LiveWatchers {
         ? (output as RunOutputPage).chunks.length > 0
         : (output as { count: number }).count > 0
       if (poll.events.length > 0 || poll.reset || hasContent || terminal || remaining <= 0) {
+        if (hasContent) recordRunStage(input.runId, 'watchReply')
         return {
           poll, questions, state,
           ...(output === undefined ? {} : {

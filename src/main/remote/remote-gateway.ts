@@ -1,4 +1,5 @@
 import { SessionLedger, type RunLifecycle } from './session-ledger'
+import { recordRunStage } from '../run-stage-timing'
 import { createHash } from 'node:crypto'
 import type { RunOutputPage } from './run-output-log'
 import { parseRemoteWorkspaceQuery, type RemoteWorkspaceResult } from './remote-workspace'
@@ -189,6 +190,9 @@ export class RemoteGateway {
   submitIntent(peerCertSHA256: string, input: SubmitIntentInput): SubmitIntentResult {
     this.#authorize(peerCertSHA256)
     const candidateRunId = SessionLedger.newRunId()
+    // Arrival, before anything durable: the segment to `intentDurable` is the ledger's
+    // own cost, not the caller's.
+    recordRunStage(candidateRunId, 'submit')
     const receipt = this.#ledger.recordIntent({
       intentId: scopedIntentId(peerCertSHA256, input.intentId),
       runId: candidateRunId,
@@ -198,6 +202,9 @@ export class RemoteGateway {
     // scope without re-reading the frame's transport. In-memory on purpose: an intent
     // dispatched after a restart belongs to nobody the daemon can still prove, so it
     // falls back to the device semantics below.
+    // `recordIntent` appends and fsyncs synchronously, so its return is the durable
+    // boundary: the segment from `submit` is the ledger's own price.
+    recordRunStage(receipt.event.runId, 'intentDurable')
     this.#runScopes.set(receipt.event.runId, this.grantScope(peerCertSHA256))
     return { runId: receipt.event.runId, status: receipt.status, seq: receipt.event.seq }
   }

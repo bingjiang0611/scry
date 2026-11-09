@@ -87,7 +87,10 @@ const FORWARDED_ENV = [
   // Acceptance only: lets the daemon serve the packaged smoke Provider fixture. The
   // fixture still requires this explicit variable AND a daemon process (see
   // provider-runtime), so a normal install can never enable it by inheriting an env.
-  'SCRY_DAEMON_SMOKE_PROVIDER'
+  'SCRY_DAEMON_SMOKE_PROVIDER',
+  // Measurement only: writes per-stage wall-clock marks that the timing script folds
+  // into one timeline. Off unless the variable is set; no product behavior changes.
+  'SCRY_RUN_TIMING'
 ] as const
 
 export function daemonLaunchEnvironment(input: {

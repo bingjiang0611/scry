@@ -1,4 +1,5 @@
 import { SessionLedger } from './session-ledger'
+import { recordRunStage } from '../run-stage-timing'
 
 // G1->G2 bridge: turns a durably-recorded remote intent into exactly one
 // executor invocation and maps its outcome back to truthful ledger lifecycle
@@ -103,6 +104,7 @@ export class RemoteDispatcher {
     // Invoke synchronously so the dispatch is observably in flight when pump()
     // returns; a synchronous throw is mapped to failure like a rejection.
     let pending: Promise<void>
+    recordRunStage(runId, 'dispatch')
     try {
       pending = this.#executor.execute({ runId, detail, progress, output })
     } catch (error) {

@@ -1,4 +1,5 @@
 import type { ActiveRun, TraceEvent } from '../../shared/trace'
+import { recordRunStage } from '../run-stage-timing'
 import type { AgentQuestionRequest, AgentIntervention } from '../../shared/runtime'
 import { appendCoalescedTrace, consumeTraceMutations, stampProjection, traceMutationState, type TraceMutationState } from '../live-trace'
 import { sanitizeToolEvent, sanitizeToolEvents, toolContentTurnBudget } from '../../core/turn-recorder/tool-content'
@@ -165,6 +166,9 @@ export function createTraceRuntime({
    * scoped 通道把同一事件交给拥有该 run 的视图；没有人订阅时直接丢弃，不缓冲。
    */
   function publishTrace(ev: TraceEvent): void {
+    // The first token's evidence, at the seam both modes share: daemon runs travel
+    // on to the ledger, in-process runs go to the window, but this line is the same.
+    if (ev.kind === 'model') recordRunStage(ev.runId, 'firstOutput')
     runTraces.route(ev)
     if (runs.isViewed(ev.runId)) queueTrace(ev)
   }

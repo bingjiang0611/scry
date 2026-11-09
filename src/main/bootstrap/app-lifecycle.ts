@@ -6,6 +6,7 @@ import type { ActiveRun } from '../../shared/trace'
 import type { ProviderId } from '../../shared/provider'
 import { initDb, setBillingEnvProvider } from '../db'
 import { configureStorage } from '../storage-paths'
+import { configureRunStageTiming } from '../run-stage-timing'
 import { packagedRecorderCliPath, warmShellEnv, shellEnv } from '../claude-locate'
 import { ensureShellEnv } from '../shell'
 import { configureProviderEventLog } from '../provider-event-log'
@@ -122,6 +123,9 @@ export function registerAppLifecycle({
     startupPerf.mark('performance_recording_ready')
     // 双流事件日志按环境变量装配；未设置时 openProviderEventWriter() 返回 undefined。
     configureProviderEventLog(process.env, app.getPath('userData'))
+    // 首 token 分段计时（SCRY_RUN_TIMING=1 时开启）；与 daemon 写同一目录下的 NDJSON，
+    // 两条链路因此可以用同一把墙钟对齐。
+    configureRunStageTiming(app.getPath('userData'))
     dockBadge.sync()
     void warmShellEnv()
     // SQLite 是 turn 分析事实的写入前置条件；在 renderer 可发送前完成初始化，

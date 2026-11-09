@@ -18,7 +18,7 @@
 // lock and reports the load; the script also records load itself.
 import { spawn } from 'node:child_process'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { cpus, loadavg } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -103,6 +103,40 @@ const readPerfLines = () => {
     pendingStages = marks
   }
 }
+// Per-stage wall-clock marks written by both processes of this mode (App main and, in
+// daemon mode, the daemon) into one NDJSON: `performance.timeOrigin + performance.now()`
+// is epoch milliseconds in either process, so the marks are directly subtractable.
+const timingFile = join(userDataDir, 'diagnostics', 'run-timing.ndjson')
+let timingScanned = 0
+const newRunMarks = () => {
+  if (!existsSync(timingFile)) return []
+  const text = readFileSync(timingFile, 'utf8')
+  const fresh = text.slice(timingScanned)
+  timingScanned = text.length
+  const marks = []
+  for (const line of fresh.split('\n')) {
+    if (line.length === 0) continue
+    try { marks.push(JSON.parse(line)) } catch { /* a torn tail is not a mark */ }
+  }
+  return marks
+}
+// One timeline per sample, not per run id: a daemon run has a ledger id and a runtime
+// id, and its marks are written by two processes, so the sample window is what ties them
+// together. A stage keeps its earliest mark inside the window; a missing stage stays
+// missing instead of being filled with a neighbour.
+const selectTimeline = (marks, submittedWall, until) => {
+  const stages = {}
+  const runIds = new Set()
+  for (const mark of marks) {
+    if (typeof mark?.runId !== 'string' || typeof mark?.at !== 'number') continue
+    // Anything before the submit belongs to the previous sample.
+    if (mark.at < submittedWall - 200 || mark.at > until + 2_000) continue
+    runIds.add(mark.runId)
+    if (stages[mark.stage] === undefined || mark.at < stages[mark.stage]) stages[mark.stage] = mark.at
+  }
+  return [...runIds].length === 0 ? null : { ...stages, runIds: [...runIds] }
+}
+
 const results = { mode, samples, perInstance, prompt: PROMPT, loadBefore: load(), runs: [], loadAfter: null }
 
 // One App per chunk: daemon mode slows down as one window accumulates settled runs
@@ -120,7 +154,9 @@ const measure = async (count) => {
         ...(mode === 'daemon' ? { SCRY_HOST_DAEMON: '1', SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1' } : {}),
         SCRY_REMOTE_HOST: '0',
         // Stage marks from the App's own main process; off by default everywhere else.
-        SCRY_PERF_LOG: '1'
+        SCRY_PERF_LOG: '1',
+        // Per-stage wall clock, written by the App and (in daemon mode) the daemon itself.
+        SCRY_RUN_TIMING: '1'
       }
     })
     const target = await waitForTarget(port)
@@ -160,7 +196,13 @@ const measure = async (count) => {
     }
     for (let index = 0; index < count; index++) {
       process.stderr.write(`[timing] ${mode} sample ${results.runs.length + 1}\n`)
-      await evaluate('window.__timing = { events: [], done: null }; true')
+      await evaluate(`(() => {
+        window.__timing = { events: [], done: null }
+        window.__timing.submittedAtWall = performance.timeOrigin + performance.now()
+        return true
+      })()`)
+      const submittedWall = await evaluate('window.__timing.submittedAtWall')
+      newRunMarks()
       const runId = await evaluate(`(() => {
         const started = performance.now()
         window.__timing.submittedAt = started
@@ -173,6 +215,7 @@ const measure = async (count) => {
         await sleep(100)
       }
       readPerfLines()
+      const timeline = selectTimeline(newRunMarks(), submittedWall, Date.now())
       const sample = await evaluate(`(() => {
         const timing = window.__timing
         const text = timing.events.filter((event) => event.stage === 'text' || event.stage === 'text_delta')
@@ -181,6 +224,8 @@ const measure = async (count) => {
         // modes measure it the same way.
         const lag = text.map((event) => event.receivedAt - event.emittedAt).filter((value) => Number.isFinite(value))
         return {
+          submittedWall: timing.submittedAtWall,
+          firstTextReceivedAt: text.length > 0 ? text[0].receivedAt : null,
           firstTextMs: text.length > 0 ? text[0].t - timing.submittedAt : null,
           textEvents: text.length,
           intervals,
@@ -188,7 +233,7 @@ const measure = async (count) => {
           settledMs: timing.done === null ? null : timing.done - timing.submittedAt
         }
       })()`)
-      results.runs.push({ index: results.runs.length, runId, ...sample, stages: takeStages() })
+      results.runs.push({ index: results.runs.length, runId, ...sample, stages: takeStages(), timeline })
     }
   } finally {
     try { if (cdp) cdp.close() } catch { /* a dead socket is fine */ }
@@ -224,6 +269,41 @@ try {
   results.stages = Object.fromEntries(Object.entries(stageValues).map(([stage, values]) => [stage, {
     samples: values.length, p50: percentile(values, 0.5), p95: percentile(values, 0.95)
   }]))
+  // The first token, split at the Provider's own first output: what the host spends
+  // before the model says anything, and what the delivery adds after. Absolute marks
+  // from both processes make each segment a subtraction, not an estimate.
+  // A segment reads (timeline, run): both ends must have been measured, and the closures
+  // that compare against the renderer also need the run's own arrival stamp.
+  const segments = {
+    submittedToFirstText: (t) => t.firstTextReceivedAt - t.submittedWall,
+    // The App's own preparation before the Provider starts, measured identically in both
+    // modes: this is the one pre-Provider segment that is not daemon-specific.
+    submittedToProvider: (t) => t.providerStart - t.submittedWall,
+    submitToDurable: (t) => t.intentDurable - t.submit,
+    durableToDispatch: (t) => t.dispatch - t.intentDurable,
+    dispatchToProvider: (t) => t.providerStart - t.dispatch,
+    providerToFirstOutput: (t) => t.firstOutput - t.providerStart,
+    firstOutputToTraceRead: (t) => t.traceRead - t.firstOutput,
+    traceReadToWatchReply: (t) => t.watchReply - t.traceRead,
+    watchReplyToAppPush: (t) => t.rendererPush - t.watchReply,
+    appPushToRenderer: (t, run) => run.firstTextReceivedAt - t.rendererPush,
+    firstOutputToRenderer: (t, run) => run.firstTextReceivedAt - t.firstOutput,
+    providerToRenderer: (t, run) => run.firstTextReceivedAt - t.providerStart,
+    submitToFirstText: (t, run) => run.firstTextReceivedAt - t.submit
+  }
+  results.segments = Object.fromEntries(Object.entries(segments).map(([name, read]) => {
+    const values = []
+    for (const run of results.runs) {
+      if (!run.timeline || typeof run.firstTextReceivedAt !== 'number') continue
+      // A segment only counts when both of its ends were actually measured; a missing
+      // mark is a gap in the evidence, never a zero.
+      const timeline = { ...run.timeline, firstTextReceivedAt: run.firstTextReceivedAt, submittedWall: run.submittedWall }
+      let value
+      try { value = read(timeline, run) } catch { continue }
+      if (typeof value === 'number' && Number.isFinite(value)) values.push(Number(value.toFixed(2)))
+    }
+    return [name, { samples: values.length, p50: percentile(values, 0.5), p95: percentile(values, 0.95) }]
+  }))
   results.summary = {
     runs: results.runs.length,
     runsWithFirstText: firstText.length,
