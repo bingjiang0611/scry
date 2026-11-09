@@ -97,10 +97,17 @@ export async function measureHistory({ evaluate, wait, click, cdp, beginCounters
   assert.ok(nativeInput.frameReadyMs >= 0)
   assert.equal(await evaluate(`document.querySelector('textarea').value`), 'draft stays editable')
   const currentSession = sessions[(iterations + 1) % 2]
+  // Candidate loads the previous page as soon as the timeline reaches the top; the baseline
+  // still needs the explicit button. Both paths are the real user path for their build, and the
+  // measured work (one older page) is identical. `.history-window-range` is the marker: the
+  // baseline markup wrapped the range in <b>, so only the newer build renders that span.
+  const autoloadsOlderTurns = await evaluate(`!!document.querySelector('.history-window-range')`)
   for (let loaded = pageTurns; loaded < turnCount; loaded += 40) {
     await evaluate(`document.querySelector('.chat-transcript').scrollTop = 0`)
-    await wait(`document.querySelector('.history-window-more') && !document.querySelector('.history-window-more').disabled`)
-    await click(`document.querySelector('.history-window-more')`)
+    if (!autoloadsOlderTurns) {
+      await wait(`document.querySelector('.history-window-more') && !document.querySelector('.history-window-more').disabled`)
+      await click(`document.querySelector('.history-window-more')`)
+    }
     await wait(`document.querySelectorAll('.transcript-turn').length === ${Math.min(loaded + 40, turnCount)}`)
   }
   await evaluate(`document.querySelector('.chat-transcript').scrollTop = 0`)
