@@ -17,6 +17,8 @@ function Paged({ id }: { id: string }) {
   const [offset, setOffset] = useState(TOTAL - PAGE)
   const [loading, setLoading] = useState(false)
   const [loads, setLoads] = useState(0)
+  // 正在流式输出的实时轮次：取页在途时它可能出现在末尾。
+  const [live, setLive] = useState(0)
   const hasOlder = offset > 0
   const turns = Array.from({ length: TOTAL - offset }, (_, index) => offset + index)
   const startLoad = (): void => {
@@ -29,7 +31,7 @@ function Paged({ id }: { id: string }) {
       setLoads((count) => count + 1)
     }, 60)
   }
-  useHistoryAutoload({ scrollRef: scrollerRef, turnsLength: turns.length, hasOlder, loading, onLoadOlder: startLoad })
+  useHistoryAutoload({ scrollRef: scrollerRef, turnsLength: turns.length + live, hasOlder, loading, onLoadOlder: startLoad })
   return (
     <section
       className="fixture"
@@ -37,7 +39,9 @@ function Paged({ id }: { id: string }) {
       data-count={turns.length}
       data-loads={loads}
       data-has-older={String(hasOlder)}
+      data-live={live}
     >
+      <button type="button" className="append-live" onClick={() => setLive((count) => count + 1)}>append live turn</button>
       <div
         className="chat-transcript scroller"
         ref={scrollerRef}
@@ -47,6 +51,11 @@ function Paged({ id }: { id: string }) {
           {turns.map((index) => (
             <article key={index} className="transcript-turn" data-run-id={`turn-${index}`} style={{ height: rowHeight(index) }}>
               第 {index + 1} 轮
+            </article>
+          ))}
+          {Array.from({ length: live }, (_, index) => (
+            <article key={`live-${index}`} className="transcript-turn" data-run-id={`live-${index}`} style={{ height: ROW_BASE }}>
+              实时第 {index + 1} 轮
             </article>
           ))}
         </div>

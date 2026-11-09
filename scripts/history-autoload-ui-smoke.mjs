@@ -61,6 +61,22 @@ async function exerciseHistoryAutoload(PAGE, TOTAL) {
     if (inserted <= 0) throw new Error(id + ': expected inserted content above the viewport, height delta ' + inserted)
     if (Math.abs(drift) > 1) throw new Error(id + ': visible turn moved by ' + drift + 'px after prepending ' + inserted + 'px')
 
+    // 取页在途时末尾追加实时轮次：阅读位置不能动，随后到达的上一页也不能再补偿一次。
+    scroller.scrollTop = 200
+    await frame()
+    const liveAnchor = firstVisible(id)
+    const liveAnchorTop = liveAnchor.getBoundingClientRect().top
+    const loadsBeforeLive = loadsOf(id)
+    fixture(id).querySelector('.append-live').click()
+    await frame()
+    if (fixture(id).dataset.live !== '1') throw new Error(id + ': live turn was not appended')
+    const appendDrift = liveAnchor.getBoundingClientRect().top - liveAnchorTop
+    if (Math.abs(appendDrift) > 1) throw new Error(id + ': appending a live turn moved the view by ' + appendDrift + 'px')
+    await waitFor(() => loadsOf(id) === loadsBeforeLive + 1, id + ': page arrives after the live append')
+    await frame()
+    const afterPageDrift = liveAnchor.getBoundingClientRect().top - liveAnchorTop
+    if (Math.abs(afterPageDrift) > 1) throw new Error(id + ': prepend after a live append moved the view by ' + afterPageDrift + 'px')
+
     // 加载期间用户继续滚动：补偿加在当前可见内容上，不把视图拉回请求时的位置。
     scroller.scrollTop = 200
     await frame()
@@ -89,7 +105,7 @@ async function exerciseHistoryAutoload(PAGE, TOTAL) {
     await frame()
     await new Promise((resolve) => setTimeout(resolve, 200))
     if (loadsOf(id) !== settled) throw new Error(id + ': kept loading after reaching the first turn')
-    return { id, turns: countOf(id), loads: settled, insertedAbove: inserted, anchorDriftPx: Math.round(drift * 100) / 100 }
+    return { id, turns: countOf(id), loads: settled, insertedAbove: inserted, anchorDriftPx: Math.round(drift * 100) / 100, liveAppendDriftPx: Math.round(appendDrift * 100) / 100 }
   }
 
   const reading = await run('fixture-reading')

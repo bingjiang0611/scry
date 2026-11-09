@@ -6,26 +6,45 @@ const useLayoutEffectCompat = typeof window === 'undefined' ? useEffect : useLay
 
 interface HistoryAutoloadInput {
   scrollRef: RefObject<HTMLElement>
-  /** 已挂载轮次数量；变化说明上一页已经拼上，需要放回阅读位置。 */
+  /** 已挂载轮次数量（含正在流式输出的那一轮）；变化说明视图内容变了，需要重新对齐阅读位置。 */
   turnsLength: number
   hasOlder: boolean
   loading: boolean
   onLoadOlder?: () => void
 }
 
+/** 取页前的定位锚：第一个可见轮次，以及它在内容坐标系里的位置。 */
+interface Anchor {
+  node: Element
+  contentTop: number
+}
+
+// 内容坐标系：滚动不影响该值，插入/移除上方内容才会改变它。
+function contentTopOf(el: HTMLElement, node: Element): number {
+  return node.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop
+}
+
+function firstVisibleTurn(el: HTMLElement): Element | null {
+  const edge = el.getBoundingClientRect().top
+  for (const node of el.querySelectorAll('[data-run-id]')) {
+    if (node.getBoundingClientRect().bottom > edge + 1) return node
+  }
+  return null
+}
+
 /**
  * 时间线滚到接近顶部时自动取上一页，并把可见轮次放回原位。
  *
  * 触发只发生在两种明确条件下：用户滚动到预取距离内，或内容不足一屏（没有滚动事件可等）。
- * 位置补偿按插入高度做：`.chat` 关闭了浏览器滚动锚定（见 styles-chat-entry.css），
- * 所以必须由这里抵消 prepend 造成的内容位移，否则视口会跳到更早的轮次。
- * 加载期间用户继续滚动时，补偿仍加在当前 scrollTop 上，不把视图拉回旧位置。
+ * 位置补偿按锚点轮次在内容坐标系里的位移做：`.chat` 关闭了浏览器滚动锚定
+ * （见 styles-chat-entry.css），prepend 会把正文整体下移，必须由这里抵消，
+ * 否则视口会跳到更早的轮次。用锚点而不是总高度，是因为取页在途时末尾可能同时
+ * 追加新的实时轮次——那会改变总高度，却不该改变阅读位置。
  */
 export function useHistoryAutoload({ scrollRef, turnsLength, hasOlder, loading, onLoadOlder }: HistoryAutoloadInput): void {
   const latest = useRef({ hasOlder, loading, onLoadOlder })
   latest.current = { hasOlder, loading, onLoadOlder }
-  // 取页前的内容高度：拼上后用它算出上方插入了多少像素。
-  const heightBefore = useRef<number | null>(null)
+  const anchor = useRef<Anchor | null>(null)
 
   const request = (reason: 'scroll' | 'fill'): void => {
     const el = scrollRef.current
@@ -40,7 +59,8 @@ export function useHistoryAutoload({ scrollRef, turnsLength, hasOlder, loading, 
       loading: state.loading,
       viewportShort
     })) return
-    heightBefore.current = el.scrollHeight
+    const node = firstVisibleTurn(el)
+    anchor.current = node ? { node, contentTop: contentTopOf(el, node) } : null
     state.onLoadOlder()
   }
 
@@ -58,13 +78,19 @@ export function useHistoryAutoload({ scrollRef, turnsLength, hasOlder, loading, 
     request('fill')
   }, [turnsLength, hasOlder, loading])
 
-  // 追加历史会把已读内容推到下方：补回同样的位移，当前轮次留在原位。
+  // 上方插入内容后把阅读位置放回原位；只是末尾追加时位移为 0，不做任何调整。
   useLayoutEffectCompat(() => {
     const el = scrollRef.current
-    const before = heightBefore.current
-    heightBefore.current = null
-    if (!el || before === null) return
-    const inserted = el.scrollHeight - before
-    if (inserted > 0) el.scrollTop += inserted
+    const captured = anchor.current
+    if (!el || !captured) return
+    // 轮次被整体替换（切换会话）时锚点已不在文档里，位置由会话恢复逻辑负责。
+    if (!captured.node.isConnected) {
+      anchor.current = null
+      return
+    }
+    const inserted = contentTopOf(el, captured.node) - captured.contentTop
+    if (inserted <= 1) return
+    anchor.current = null
+    el.scrollTop += inserted
   }, [turnsLength, scrollRef])
 }
