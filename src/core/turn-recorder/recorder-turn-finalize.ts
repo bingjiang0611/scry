@@ -43,7 +43,8 @@ export async function finalizeOpenTurn(
         open.transcriptStartOffset,
         open.requestSetId,
         open.sessionId,
-        enablement.workspaceRoot
+        enablement.workspaceRoot,
+        open.piTranscriptAnchor
       )
     : {
         stable: true,

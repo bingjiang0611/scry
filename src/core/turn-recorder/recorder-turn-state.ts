@@ -14,7 +14,7 @@ import { readJson, writeJsonAtomic } from './io.js'
 import { listRecords, stableHash, updateHealth } from './store.js'
 import { recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
 import { lifecycleTraceEvents } from './recorder-lifecycle-events.js'
-import { type StoredLifecycleEvent, observedNow, promptOf, startFingerprintOf, stringAt, subagentScopedPayload, timestampOf, transcriptPathOf, providerTurnIdOf, TERMINAL_CLOCK_SKEW_MS } from './recorder-contracts.js'
+import { type StoredLifecycleEvent, observedNow, piTranscriptAnchorOf, promptOf, startFingerprintOf, stringAt, subagentScopedPayload, timestampOf, transcriptPathOf, providerTurnIdOf, TERMINAL_CLOCK_SKEW_MS } from './recorder-contracts.js'
 
 export async function nextSessionState(dataRoot: string, root: string, provider: ProviderId, sessionId: string): Promise<SessionState> {
   const cached = await readJson<SessionState>(statePath(root))
@@ -53,6 +53,7 @@ export async function beginOpenTurn(
   const requestSetId = provider === 'qoder' ? stringAt(payload, 'request_set_id', 'requestSetId') : undefined
   const transcriptPath = transcriptPathOf(payload)
   const transcriptOffset = transcriptPath ? 0 : undefined
+  const piTranscriptAnchor = provider === 'pi' ? piTranscriptAnchorOf(payload) : undefined
   const open: OpenTurnState = {
     ...(isFullToolContentPolicy(enablement.config.capture) ? { toolContentPolicy: {
       toolOutput: 'full' as const,
@@ -73,6 +74,7 @@ export async function beginOpenTurn(
     ...(managedPromptHash ? { managedPromptHash } : {}),
     ...(transcriptPath ? { transcriptPath } : {}),
     ...(transcriptOffset != null ? { transcriptStartOffset: transcriptOffset } : {}),
+    ...(piTranscriptAnchor ? { piTranscriptAnchor } : {}),
     ...(providerTurnId ? { providerTurnId } : {}),
     ...(requestSetId ? { requestSetId } : {}),
     ...(managedByScry ? { managedByScry: true } : {}),
@@ -92,7 +94,8 @@ export async function beginOpenTurn(
     const discovery = await discoverRepositories(enablement.workspaceRoot, enablement.config)
     open.repositoryDiscovery = {
       maxDepth: discovery.maxDepth,
-      depthLimitedDirectories: discovery.depthLimitedDirectories
+      depthLimitedDirectories: discovery.depthLimitedDirectories,
+      ...(discovery.worktreeDiscovery ? { worktreeDiscovery: discovery.worktreeDiscovery } : {})
     }
     open.captures = await Promise.all(discovery.repositories.map(async (repository) => ({
       repository,
@@ -216,6 +219,11 @@ export async function storeLifecycleEvent(
   await writeJsonAtomic(join(turnRoot(root, open.generation), 'events', `${id}.json`), stored, { sync: false })
   // 子 agent 线程有自己的 transcript；顶层轮的 transcript 锚点不能被它改写，否则整轮证据会读错文件。
   const transcriptPath = subagentScopedPayload(payload) ? undefined : transcriptPathOf(payload)
+  const piTranscriptAnchor = open.provider === 'pi' ? piTranscriptAnchorOf(payload) : undefined
+  if (piTranscriptAnchor) {
+    open.piTranscriptAnchor = { ...open.piTranscriptAnchor, ...piTranscriptAnchor }
+    await writeJsonAtomic(openPath(root), open, { sync: false })
+  }
   if (transcriptPath && transcriptPath !== open.transcriptPath) {
     open.transcriptPath = transcriptPath
     open.transcriptStartOffset = 0

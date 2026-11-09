@@ -2,7 +2,8 @@ import { type TraceEvent, classifyTool, fileOpOf, parseMcp } from '../../shared/
 import { type CodexRolloutIdentity, type ParsedTranscriptTurn, stringAt, nestedRecord, timestampOf, epochSecondsAt, terminalStatus, inferredSkillEvents, summarize } from './recorder-contracts.js'
 import { classifyDanger } from '../../main/danger.js'
 import { stableHash } from './store.js'
-import { appendCodexPatchResult, finalizeCodexTurns, callInput, codexHookEvent, explicitSkillEvent, indexedToolOutputs, normalizedCodexCalls, outputFailed, outputText, rejectedBeforeExecution, runningCellId, skillInjection, textContent } from './recorder-codex-calls.js'
+import { appendCodexPatchResult, finalizeCodexTurns, callInput, codexHookEvent, indexedToolOutputs, normalizedCodexCalls, outputFailed, outputText, rejectedBeforeExecution, runningCellId, textContent } from './recorder-codex-calls.js'
+import { recordCodexUserInput, type CodexUserInputState } from './recorder-codex-user-input.js'
 import { CodexUsageDeltaFilter } from '../../shared/usage-dedupe.js'
 import { codexIdentityFromSessionMeta, recordCodexItemCompleted, recordCodexSubAgentActivity } from './recorder-codex-rollout-children.js'
 
@@ -43,6 +44,9 @@ export function parseCodexRollout(content: string, runId: string, sessionIdentit
   let injectedSkill: string | undefined
   let logicalIdsByOuterCall = new Map<string, string[]>()
   let toolById = new Map<string, string>()
+  let completedToolOutputs = new Set<string>()
+  let completedItems = new Set<string>()
+  let userInputState: CodexUserInputState = { seenIds: new Set() }
   let asyncOuterCallByCell = new Map<string, string>()
   let transportCellByOuterCall = new Map<string, string>()
   let lastAt: string | undefined
@@ -101,6 +105,7 @@ export function parseCodexRollout(content: string, runId: string, sessionIdentit
   const addToolCall = (payload: Record<string, unknown>, at: string): void => {
     if (!current) return
     const outerId = stringAt(payload, 'call_id', 'callId', 'id') ?? `call-${stableHash([payload, at]).slice(0, 16)}`
+    if (logicalIdsByOuterCall.has(outerId)) return
     const name = stringAt(payload, 'name') ?? ''
     if (name === 'wait' || name === 'write_stdin') {
       const input = callInput(payload)
@@ -146,10 +151,17 @@ export function parseCodexRollout(content: string, runId: string, sessionIdentit
     }
   }
 
+  const recordUserInput = (text: string, at: string, nativeId?: string): void => {
+    if (!current) return
+    const skill = recordCodexUserInput(current, text, at, nativeId, runId, userInputState)
+    if (skill) injectedSkill = skill
+  }
+
   const addToolOutput = (payload: Record<string, unknown>, at: string): void => {
     if (!current) return
     const outerId = stringAt(payload, 'call_id', 'callId', 'id')
-    if (!outerId) return
+    if (!outerId || completedToolOutputs.has(outerId)) return
+    completedToolOutputs.add(outerId)
     const rawOutput = payload.output ?? payload.result ?? payload.tools ?? payload.error
     const output = outputText(rawOutput)
     const transportCell = transportCellByOuterCall.get(outerId)
@@ -247,6 +259,9 @@ export function parseCodexRollout(content: string, runId: string, sessionIdentit
       injectedSkill = undefined
       logicalIdsByOuterCall = new Map()
       toolById = new Map()
+      completedToolOutputs = new Set()
+      completedItems = new Set()
+      userInputState = { seenIds: new Set() }
       asyncOuterCallByCell = new Map()
       transportCellByOuterCall = new Map()
       continue
@@ -267,10 +282,15 @@ export function parseCodexRollout(content: string, runId: string, sessionIdentit
     }
 
     if (type === 'event_msg' && payload.type === 'user_message') {
-      current.userText = stringAt(payload, 'message', 'text', 'prompt') ?? textContent(payload.content) ?? current.userText
+      const text = stringAt(payload, 'message', 'text', 'prompt') ?? textContent(payload.content)
+      recordUserInput(text ?? '', at, stringAt(payload, 'id', 'message_id', 'messageId'))
       continue
     }
     if (type === 'event_msg' && payload.type === 'item_completed') {
+      const item = nestedRecord(payload, 'item')
+      const itemId = stringAt(item ?? {}, 'id', 'event_id', 'eventId')
+      if (itemId && completedItems.has(itemId)) continue
+      if (itemId) completedItems.add(itemId)
       recordCodexItemCompleted(payload, identity, current, toolById, runId, at)
       continue
     }
@@ -386,19 +406,7 @@ export function parseCodexRollout(content: string, runId: string, sessionIdentit
 
     const itemType = stringAt(payload, 'type')
     if (itemType === 'message' && stringAt(payload, 'role') === 'user') {
-      const text = textContent(payload.content)
-      const skill = skillInjection(text)
-      if (skill) {
-        injectedSkill = skill
-        current.events.push(explicitSkillEvent(skill, runId, at))
-        current.observable.skills = true
-      } else if (
-        text &&
-        !/^\s*(?:<recommended_plugins>|# AGENTS\.md instructions|<environment_context>)/.test(text) &&
-        !current.userText
-      ) {
-        current.userText = text
-      }
+      recordUserInput(textContent(payload.content) ?? '', at, stringAt(payload, 'id', 'message_id', 'messageId'))
       continue
     }
     if (itemType === 'message' && stringAt(payload, 'role') === 'assistant') {

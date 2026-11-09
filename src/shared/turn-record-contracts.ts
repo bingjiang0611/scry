@@ -181,6 +181,12 @@ export interface TurnRepositoryDiscovery {
   requestedRoots: string[]
   maxDepth: number
   depthLimitedDirectories: number
+  worktreeDiscovery?: {
+    probedRepositories: number
+    skippedRepositories: number
+    discoveredWorktrees: number
+    incomplete: boolean
+  }
 }
 
 export interface TurnEvidence {

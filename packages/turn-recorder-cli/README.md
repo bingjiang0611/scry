@@ -9,7 +9,7 @@ Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,�
 ## 安装与接入
 
 ```bash
-npm install -g scry-turn-recorder@0.2.60
+npm install -g scry-turn-recorder@0.2.62
 
 cd /path/to/project      # 必须是 Git 仓库根目录
 scry init                # 自动检测 claude / codex / qoder / opencode
@@ -118,6 +118,7 @@ scry recorder notify-retry --all-dead --workspace "$PWD"
 
 - `diff.discovery.requestedRoots`：本轮发现并请求采集的目录清单，数组长度是该清单的数量，不是磁盘上的全部仓库数，也不保证每个目录已解析出有效 Git root。仅在发现阶段有证据时出现。
 - `diff.discovery.maxDepth` 与 `depthLimitedDirectories`：本轮使用的深度上限、因该上限未继续下探的目录数。后者不是“漏掉的仓库数”。默认深度仍为 2，上限 5；排除目录及目录符号链接仍不下探。
+- `diff.discovery.worktreeDiscovery`：所有者或结果触及上限、Git 查询失败时出现；`incomplete: true` 不代表工作区没有其他 worktree。查询最多 32 个已发现仓库，按排序分批、每批最多 4 个 Git 进程；每个所有者最多接纳 128 条工作区内结果，Git 查询共享 5 秒预算。越界和排除目录不进入采集范围。超过上限时应先将关键仓库作为独立 workspace；扩大预算前须测量完整 turn-start，而不是仅看目录扫描时间。
 - `diff.value[]`：逐项查看 `status`（`captured` / `timeout` / `failed` / `unavailable`）及可用的 `reason`。`requestedRoot` 是已知请求目录；`repoRoot` 只在 Git 解析到它时提供。不同仓库即使同时结束也保留独立结果。
 - 深度边界只作为 `discovery` 元数据保留，不单独改变 diff 的 status/quality 或增加 `omissionReason`。`available` 表示已纳入清单的快照可用，不证明磁盘上所有仓库都已采集。真实缺失证据仍按原规则降级并写原因；恢复时无法可信归因 diff，仍为 `unavailable`，不补造快照、耗时或成功状态。没有 `diff.value` 不等于发现了零个仓库。
 

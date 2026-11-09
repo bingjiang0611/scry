@@ -1,5 +1,6 @@
-import { lstat, opendir, readFile, readdir } from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { lstat, opendir, readFile, readdir, realpath } from 'node:fs/promises'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { gitCommand, TURN_DIFF_BEGIN_DEADLINE_MS } from './git-command.js'
 
 export interface RecorderConfig {
   schemaVersion: 1
@@ -215,12 +216,67 @@ async function isGitRepository(path: string): Promise<boolean> {
   return exists(join(path, '.git'))
 }
 
+async function linkedWorktreeRepositories(
+  repository: string,
+  workspaceRoot: string,
+  excluded: Set<string>,
+  deadline: number
+): Promise<{ repositories: string[]; truncated: boolean }> {
+  worktreeDiscoveryCommands++
+  let output: string
+  try {
+    output = await gitCommand(['--no-optional-locks', 'worktree', 'list', '--porcelain', '-z'], {
+      cwd: repository, deadline: Math.min(deadline, Date.now() + 1_000)
+    })
+  } catch {
+    return { repositories: [], truncated: true }
+  }
+  const found: string[] = []
+  let truncated = false
+  for (const line of output.split('\0')) {
+    if (!line.startsWith('worktree ')) continue
+    const candidate = line.slice('worktree '.length)
+    if (!candidate) continue
+    if (found.length >= WORKTREE_DISCOVERY_MAX_RESULTS) {
+      truncated = true
+      break
+    }
+    let canonical: string
+    try { canonical = await realpath(candidate) } catch { continue }
+    const fromRoot = relative(workspaceRoot, canonical)
+    if (fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) continue
+    if (fromRoot.split(/[\\/]/).some(segment => excluded.has(segment))) continue
+    if (await isGitRepository(canonical)) found.push(canonical)
+  }
+  return { repositories: found, truncated }
+}
+
 export interface RepositoryDiscovery {
   repositories: string[]
   maxDepth: number
   /** Directories not entered because of the configured depth, not a count of missing repos. */
   depthLimitedDirectories: number
+  worktreeDiscovery?: {
+    probedRepositories: number
+    skippedRepositories: number
+    discoveredWorktrees: number
+    incomplete: boolean
+  }
   nextDepth?: { repositories: string[]; incomplete: boolean }
+}
+
+// Covers the measured 20-repository workspace without unbounded process fan-out.
+export const WORKTREE_DISCOVERY_MAX_REPOSITORIES = 32
+export const WORKTREE_DISCOVERY_MAX_RESULTS = 128
+export const WORKTREE_DISCOVERY_MAX_CONCURRENCY = 4
+let worktreeDiscoveryCommands = 0
+
+export function resetRepositoryDiscoveryStats(): void {
+  worktreeDiscoveryCommands = 0
+}
+
+export function repositoryDiscoveryStats(): { worktreeCommands: number } {
+  return { worktreeCommands: worktreeDiscoveryCommands }
 }
 
 export async function discoverRepositories(
@@ -261,7 +317,33 @@ export async function discoverRepositories(
     }))
   }
   await walk(root, 1)
-  const result: RepositoryDiscovery = { repositories: [...repositories].sort(), maxDepth, depthLimitedDirectories }
+  // A linked worktree is a real repository even when its `.git` file sits below the
+  // configured traversal depth. Ask Git only for worktrees owned by repositories we
+  // already discovered; canonical containment and excludes keep this bounded expansion
+  // inside the authorized workspace. Batches cap child Git concurrency on the start path.
+  const workspaceRoot = await realpath(root).catch(() => resolve(root))
+  const candidates = [...repositories].sort()
+  const probed = candidates.slice(0, WORKTREE_DISCOVERY_MAX_REPOSITORIES)
+  const deadline = Date.now() + TURN_DIFF_BEGIN_DEADLINE_MS
+  const skippedRepositories = Math.max(0, candidates.length - probed.length)
+  const linked: Array<{ repositories: string[]; truncated: boolean }> = []
+  for (let offset = 0; offset < probed.length; offset += WORKTREE_DISCOVERY_MAX_CONCURRENCY) {
+    linked.push(...await Promise.all(probed.slice(offset, offset + WORKTREE_DISCOVERY_MAX_CONCURRENCY).map(repository =>
+      linkedWorktreeRepositories(repository, workspaceRoot, excluded, deadline)
+    )))
+  }
+  for (const result of linked) for (const candidate of result.repositories) repositories.add(candidate)
+  const discoveredWorktrees = repositories.size - candidates.length
+  const worktreeTruncated = skippedRepositories > 0 || linked.some(result => result.truncated)
+  const result: RepositoryDiscovery = {
+    repositories: [...repositories].sort(), maxDepth, depthLimitedDirectories,
+    ...(worktreeTruncated ? { worktreeDiscovery: {
+      probedRepositories: probed.length,
+      skippedRepositories,
+      discoveredWorktrees,
+      incomplete: true
+    } } : {})
+  }
   if (probeNextDepth) {
     const nextDepth = { repositories: [] as string[], incomplete: frontier.length < depthLimitedDirectories }
     let examinedEntries = 0

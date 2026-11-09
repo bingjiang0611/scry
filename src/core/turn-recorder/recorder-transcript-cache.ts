@@ -3,7 +3,8 @@ import { open as openFile, stat } from 'node:fs/promises'
 import { basename, join, sep } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { parseTranscriptSnapshot } from './recorder-transcript-parse.js'
-import { nestedRecord, stringAt, type TranscriptRead } from './recorder-contracts.js'
+import { piTranscriptOffsets } from './recorder-pi-transcript.js'
+import { nestedRecord, stringAt, type PiTranscriptAnchor, type TranscriptRead } from './recorder-contracts.js'
 import { textContent } from './recorder-codex-calls.js'
 import { recordTranscriptAnchorBytes, type TranscriptSnapshotIdentity } from './recorder-transcript-io.js'
 
@@ -39,12 +40,15 @@ function transcriptSnapshotCacheKey(args: {
   requestSetId?: string
   sessionId?: string
   cwd?: string
+  piTranscriptAnchor?: PiTranscriptAnchor
+  endOffset?: number
   identity: TranscriptSnapshotIdentity
 }): string {
   return JSON.stringify([
     args.path, args.startOffset ?? 0, args.stable, args.runId, args.provider,
     args.promptHash ?? '', args.providerTurnId ?? '', args.requestSetId ?? '', args.sessionId ?? '', args.cwd ?? '', args.identity.dev, args.identity.ino,
-    args.identity.size, args.identity.mtimeMs, args.identity.ctimeMs
+    args.identity.size, args.identity.mtimeMs, args.identity.ctimeMs,
+    args.piTranscriptAnchor?.beforeEntryId ?? '', args.piTranscriptAnchor?.afterEntryId ?? '', args.endOffset ?? args.identity.size
   ])
 }
 
@@ -335,6 +339,8 @@ async function transcriptAnchorOffset(
   }
 }
 
+/** Scan Pi JSONL only for native IDs; the subsequent snapshot is bounded to this turn's entry range. */
+
 async function cachedTranscriptSnapshot(args: {
   path: string
   startOffset?: number
@@ -346,6 +352,8 @@ async function cachedTranscriptSnapshot(args: {
   requestSetId?: string
   sessionId?: string
   cwd?: string
+  piTranscriptAnchor?: PiTranscriptAnchor
+  endOffset?: number
   identity: TranscriptSnapshotIdentity
 }): Promise<TranscriptRead> {
   const key = transcriptSnapshotCacheKey(args)
@@ -357,7 +365,7 @@ async function cachedTranscriptSnapshot(args: {
     return cached.read
   }
   transcriptSnapshotCacheMisses++
-  const read = await parseTranscriptSnapshot({ ...args, endOffset: args.identity.size })
+  const read = await parseTranscriptSnapshot({ ...args, endOffset: args.endOffset ?? args.identity.size })
   // A read that raced truncation/rotation must be retried; caching it under the stable identity
   // would otherwise keep a recoverable turn pending for the lifetime of this process.
   // Agent sidecars have identities independent of the root log. Do not cache a
@@ -381,9 +389,15 @@ export async function stableTranscript(
   startOffset?: number,
   requestSetId?: string,
   sessionId?: string,
-  cwd?: string
+  cwd?: string,
+  piTranscriptAnchor?: PiTranscriptAnchor
 ): Promise<TranscriptRead> {
   path = await readableTranscriptPath(path, provider)
+  if (provider === 'pi' && !piTranscriptAnchor) {
+    return { stable: true, observed: false, complete: false, events: [], observable: {
+      tools: false, skills: false, mcps: false, hooks: false, usage: false, files: false, errors: false
+    } }
+  }
   // Recompute an exact JSONL turn anchor. Older persisted offsets were heuristic
   // byte rewinds and may begin inside a large prompt, so they are never evidence.
   startOffset = 0
@@ -420,13 +434,27 @@ export async function stableTranscript(
     }
     latestIdentity = identity
     if (identity.size === previous) {
-      startOffset = await anchorOffsetFor(path, identity.size, provider, promptHash, providerTurnId)
-      return cachedTranscriptSnapshot({ path, startOffset, stable: true, runId, provider, promptHash, providerTurnId, requestSetId, sessionId, cwd, identity })
+      let endOffset = identity.size
+      if (provider === 'pi' && piTranscriptAnchor) {
+        const offsets = await piTranscriptOffsets(path, identity.size, piTranscriptAnchor)
+        startOffset = offsets.startOffset
+        endOffset = offsets.endOffset
+      } else {
+        startOffset = await anchorOffsetFor(path, identity.size, provider, promptHash, providerTurnId)
+      }
+      return cachedTranscriptSnapshot({ path, startOffset, stable: true, runId, provider, promptHash, providerTurnId, requestSetId, sessionId, cwd, piTranscriptAnchor, endOffset, identity })
     }
     previous = identity.size
     await new Promise((resolve) => setTimeout(resolve, 25))
   }
-  if (latestIdentity) startOffset = await anchorOffsetFor(path, latestIdentity.size, provider, promptHash, providerTurnId)
+  let endOffset = latestIdentity?.size
+  if (latestIdentity && provider === 'pi' && piTranscriptAnchor) {
+    const offsets = await piTranscriptOffsets(path, latestIdentity.size, piTranscriptAnchor)
+    startOffset = offsets.startOffset
+    endOffset = offsets.endOffset
+  } else if (latestIdentity) {
+    startOffset = await anchorOffsetFor(path, latestIdentity.size, provider, promptHash, providerTurnId)
+  }
   return latestIdentity
     ? cachedTranscriptSnapshot({
         path,
@@ -439,6 +467,8 @@ export async function stableTranscript(
         requestSetId,
         sessionId,
         cwd,
+        piTranscriptAnchor,
+        endOffset,
         identity: latestIdentity
       })
     : parseTranscriptSnapshot({

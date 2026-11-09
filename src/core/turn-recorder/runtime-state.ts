@@ -46,6 +46,7 @@ export interface RecorderOpenTurnState {
   startFingerprint: string
   transcriptPath?: string
   transcriptStartOffset?: number
+  piTranscriptAnchor?: import('./recorder-contracts.js').PiTranscriptAnchor
   providerTurnId?: string
   /** Qoder hook identity; it must be mapped to a native promptId before use. */
   requestSetId?: string
@@ -57,7 +58,7 @@ export interface RecorderOpenTurnState {
   deferredTerminalEventId?: string
   /** SessionEnd proved that a deferred unidentified terminal belongs to the final open turn. */
   terminalIdentityConfirmedBySessionEnd?: boolean
-  repositoryDiscovery?: Pick<RepositoryDiscovery, 'maxDepth' | 'depthLimitedDirectories'>
+  repositoryDiscovery?: Pick<RepositoryDiscovery, 'maxDepth' | 'depthLimitedDirectories' | 'worktreeDiscovery'>
   captures: Array<{ repository: string; capture: GitTurnDiffCapture }>
 }
 

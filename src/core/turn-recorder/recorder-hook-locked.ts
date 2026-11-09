@@ -9,7 +9,7 @@ import type { RecorderEnablement } from './config.js'
 import { END_EVENTS, SESSION_END_EVENTS, START_EVENTS, hookArrival, type RecorderHookInput, type RecorderHookResult, type QueuedHook, explicitTimestampOf, providerTurnIdOf, promptOf, stringAt, subagentScopedPayload, terminalStatus, timestampOf, startFingerprintOf, STALE_TERMINAL_PROVIDERS, STOP_HOOK_ACTIVE_PROVIDERS, STALE_TERMINAL_WINDOW_MS } from './recorder-contracts.js'
 import { beginOpenTurn, quarantineOpenTurn, storeLifecycleEvent } from './recorder-turn-state.js'
 import { finalizeOpenTurn } from './recorder-turn-finalize.js'
-import { isClaudeTaskNotification, isCommittedProviderTurn, isContinuationProviderTurn, rememberContinuationProviderTurn, storeOrphanEvent, continuationProviderTurnIds } from './recorder-hook-support.js'
+import { isClaudeTaskNotification, isCommittedProviderTurn, isContinuationProviderTurn, isLateQoderTerminalDuplicate, recordClaudeTaskNotification, storeOrphanEvent, continuationProviderTurnIds } from './recorder-hook-support.js'
 import { snapshotSessionNetDiff } from './git.js'
 import { terminalSnapshot } from './git-capture.js'
 
@@ -24,15 +24,11 @@ export async function applyHookLocked(
   const root = sessionRoot(enablement.dataRoot, input.provider, sessionId)
   let open = await readJson<OpenTurnState>(openPath(root))
   const incomingProviderTurnId = providerTurnIdOf(input.payload, input.provider)
-  if (taskNotification) {
-    if (!open) return { status: 'ignored' as const, reason: 'task notification has no real user turn' }
-    if (open.managedByScry) {
-      return { status: 'recorded' as const, reason: 'managed task continuation kept in canonical Scry turn' }
-    }
-    await rememberContinuationProviderTurn(root, open, incomingProviderTurnId)
-    await storeLifecycleEvent(enablement, open, input.event, input.payload)
-    return { status: 'recorded' as const, reason: 'task notification continued the current Claude turn' }
+  if (input.provider === 'qoder' && input.event === 'Stop' &&
+    await isLateQoderTerminalDuplicate(enablement.dataRoot, root, sessionId, input.payload, open)) {
+    return { status: 'duplicate' as const, reason: 'late Qoder terminal matches the last completed assistant' }
   }
+  if (taskNotification) return recordClaudeTaskNotification(enablement, root, open, input, incomingProviderTurnId)
   if (START_EVENTS.has(input.event) && subagentScopedPayload(input.payload)) {
     // A sub-agent prompt is not a new user turn: superseding the open parent turn here would end
     // it early and orphan every later parent event.
@@ -43,7 +39,11 @@ export async function applyHookLocked(
   if (START_EVENTS.has(input.event)) {
     const providerTurnId = incomingProviderTurnId
     const startFingerprint = startFingerprintOf(input.provider, input.event, input.payload)
-    let protectNextStart = input.managed !== true && STALE_TERMINAL_PROVIDERS.has(input.provider) && !providerTurnId
+    // Qoder can emit an old ID-less Stop after a new native prompt id exists. Keep the
+    // stale-terminal fence armed for that provider even when this start has an id; the
+    // identified Stop path still bypasses the fence and can prove the new turn directly.
+    let protectNextStart = input.managed !== true && STALE_TERMINAL_PROVIDERS.has(input.provider) &&
+      (!providerTurnId || input.provider === 'qoder')
     const incomingManagedRunId = stringAt(input.payload, 'scry_managed_run_id')
     const incomingManagedPromptHash = stringAt(input.payload, 'scry_managed_prompt_hash')
     const hasManagedIdentity = !!(
@@ -166,7 +166,7 @@ export async function applyHookLocked(
   const sessionEndEvent = SESSION_END_EVENTS.has(input.event)
   const endEvent = END_EVENTS.has(input.event) || sessionEndEvent
   if (open.deferredTerminalEventId) {
-    if (endEvent && !sessionEndEvent) {
+    if (endEvent && !sessionEndEvent && incomingProviderTurnId !== open.providerTurnId) {
       return { status: 'pending' as const, reason: 'unidentified terminal is already deferred' }
     }
     if (sessionEndEvent && open.terminalFallbackStatus === 'interrupted') {
