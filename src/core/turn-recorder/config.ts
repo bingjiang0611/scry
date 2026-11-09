@@ -260,7 +260,7 @@ export interface RepositoryDiscovery {
     probedRepositories: number
     skippedRepositories: number
     discoveredWorktrees: number
-    incomplete: boolean
+    incomplete: true
   }
   nextDepth?: { repositories: string[]; incomplete: boolean }
 }
@@ -322,7 +322,16 @@ export async function discoverRepositories(
   // already discovered; canonical containment and excludes keep this bounded expansion
   // inside the authorized workspace. Batches cap child Git concurrency on the start path.
   const workspaceRoot = await realpath(root).catch(() => resolve(root))
-  const candidates = [...repositories].sort()
+  // Keep the first requested spelling for an already discovered repository. Git reports
+  // canonical worktree paths, while a workspace can be entered through a portable alias
+  // such as /var -> /private/var; those paths must share one repository identity without
+  // rewriting the user's requested roots.
+  const repositoryByIdentity = new Map<string, string>()
+  for (const repository of repositories) {
+    const identity = await realpath(repository).catch(() => resolve(repository))
+    if (!repositoryByIdentity.has(identity)) repositoryByIdentity.set(identity, repository)
+  }
+  const candidates = [...repositoryByIdentity.values()].sort()
   const probed = candidates.slice(0, WORKTREE_DISCOVERY_MAX_REPOSITORIES)
   const deadline = Date.now() + TURN_DIFF_BEGIN_DEADLINE_MS
   const skippedRepositories = Math.max(0, candidates.length - probed.length)
@@ -332,11 +341,16 @@ export async function discoverRepositories(
       linkedWorktreeRepositories(repository, workspaceRoot, excluded, deadline)
     )))
   }
-  for (const result of linked) for (const candidate of result.repositories) repositories.add(candidate)
-  const discoveredWorktrees = repositories.size - candidates.length
+  let discoveredWorktrees = 0
+  for (const result of linked) for (const candidate of result.repositories) {
+    const identity = await realpath(candidate).catch(() => resolve(candidate))
+    if (repositoryByIdentity.has(identity)) continue
+    repositoryByIdentity.set(identity, candidate)
+    discoveredWorktrees++
+  }
   const worktreeTruncated = skippedRepositories > 0 || linked.some(result => result.truncated)
   const result: RepositoryDiscovery = {
-    repositories: [...repositories].sort(), maxDepth, depthLimitedDirectories,
+    repositories: [...repositoryByIdentity.values()].sort(), maxDepth, depthLimitedDirectories,
     ...(worktreeTruncated ? { worktreeDiscovery: {
       probedRepositories: probed.length,
       skippedRepositories,

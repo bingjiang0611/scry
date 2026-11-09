@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, expect, it, vi } from 'vitest'
 import { runScryCli } from '../../cli/scry.js'
@@ -90,6 +90,23 @@ it('discovers bounded linked worktrees without widening traversal or escaping wo
   } finally {
     await rm(outsideParent, { recursive: true, force: true })
   }
+}, 15_000)
+
+it.each([2, 3])('deduplicates a symlinked workspace against canonical worktree output at depth %s', async depth => {
+  const root = await workspace(false)
+  const aliasParent = await mkdtemp(join(tmpdir(), 'scry-repository-alias-'))
+  roots.push(aliasParent)
+  const alias = join(aliasParent, 'workspace-alias')
+  await symlink(root, alias)
+  const segments = depth === 2 ? ['.worktrees', 'alias-check'] : ['.worktrees', 'project', 'alias-check']
+  const linked = join(root, ...segments)
+  await mkdir(dirname(linked), { recursive: true })
+  await exec('git', ['worktree', 'add', '--detach', linked], { cwd: root })
+  const discovery = await discoverRepositories(alias, config)
+  expect(discovery.repositories).toContain(alias)
+  expect(discovery.repositories).toContain(depth === 2 ? join(alias, ...segments) : await realpath(linked))
+  expect(discovery.repositories).not.toContain(await realpath(root))
+  expect(discovery.repositories).toHaveLength(2)
 }, 15_000)
 
 it('probes all owners in the measured 20-repository shape, including the last owner', async () => {

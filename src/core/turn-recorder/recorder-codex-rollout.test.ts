@@ -11,7 +11,8 @@ describe('Codex rollout user boundaries', () => {
       row('event_msg', { type: 'user_message', id: 'user-1', message: 'initial prompt' }, '2026-10-24T10:00:00.010Z'),
       row('response_item', { type: 'message', id: 'user-1', role: 'user', content: [{ type: 'input_text', text: 'initial prompt' }] }, '2026-10-24T10:00:00.011Z'),
       row('response_item', { type: 'message', id: 'steer-1', role: 'user', content: [{ type: 'input_text', text: 'repeat intentionally' }] }, '2026-10-24T10:00:00.020Z'),
-      row('event_msg', { type: 'user_message', id: 'steer-2', message: 'repeat intentionally' }, '2026-10-24T10:00:00.030Z'),
+      row('response_item', { type: 'message', id: 'steer-2', role: 'user', content: [{ type: 'input_text', text: 'repeat intentionally' }] }, '2026-10-24T10:00:00.030Z'),
+      row('response_item', { type: 'message', id: 'steer-1', role: 'user', content: [{ type: 'input_text', text: 'repeat intentionally' }] }, '2026-10-24T10:00:00.031Z'),
       row('response_item', { type: 'function_call', id: 'call-1', call_id: 'call-1', name: 'exec', arguments: '{}' }, '2026-10-24T10:00:00.040Z'),
       row('event_msg', { type: 'task_complete', turn_id: 'turn-1', last_agent_message: 'done' }, '2026-10-24T10:00:00.050Z')
     ].join('\n') + '\n'
@@ -21,5 +22,106 @@ describe('Codex rollout user boundaries', () => {
     expect(parsed.turns[0].userText).toBe('initial prompt')
     expect(parsed.turns[0].events.filter(event => event.kind === 'human' && event.stage === 'steer')).toHaveLength(2)
     expect(parsed.turns[0].events.filter(event => event.kind === 'tool' && event.stage !== 'tool_result')).toHaveLength(1)
+  })
+
+  it('uses canonical ID-less inputs despite legacy notifications interleaving tools and repeated identical prompts', () => {
+    const content = [
+      row('event_msg', { type: 'task_started', turn_id: 'turn-2' }, '2026-10-24T10:01:00.000Z'),
+      row('response_item', { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'initial prompt' }] }, '2026-10-24T10:01:00.010Z'),
+      row('turn_context', { model: 'gpt-5' }, '2026-10-24T10:01:00.011Z'),
+      row('event_msg', { type: 'user_message', message: 'initial prompt' }, '2026-10-24T10:01:00.012Z'),
+      row('response_item', { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'repeat' }] }, '2026-10-24T10:01:00.020Z'),
+      row('response_item', { type: 'function_call', call_id: 'tool-1', name: 'exec', arguments: '{}' }, '2026-10-24T10:01:00.030Z'),
+      row('event_msg', { type: 'user_message', message: 'repeat' }, '2026-10-24T10:01:00.040Z'),
+      row('event_msg', { type: 'user_message', message: 'repeat' }, '2026-10-24T10:01:00.050Z'),
+      row('response_item', { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'repeat' }] }, '2026-10-24T10:01:00.060Z'),
+      row('event_msg', { type: 'task_complete', turn_id: 'turn-2' }, '2026-10-24T10:01:00.070Z')
+    ].join('\n') + '\n'
+
+    const parsed = parseCodexRollout(content, 'run-2')
+    expect(parsed.turns[0].userText).toBe('initial prompt')
+    expect(parsed.turns[0].events.filter(event => event.kind === 'human' && event.stage === 'steer').map(event => event.steer?.prompt))
+      .toEqual(['repeat', 'repeat'])
+  })
+
+  it.each([
+    { eventId: undefined, responseId: 'msg-only', reverse: false },
+    { eventId: 'event-only', responseId: undefined, reverse: false },
+    { eventId: undefined, responseId: 'msg-only', reverse: true },
+    { eventId: 'event-only', responseId: undefined, reverse: true }
+  ])('uses the canonical stream with one-sided IDs and reverse=$reverse, eventId=$eventId', ({ eventId, responseId, reverse }) => {
+    const inputs = [
+      row('event_msg', { type: 'user_message', id: eventId, message: 'display representation' }, '2026-10-24T10:02:00.010Z'),
+      row('response_item', { type: 'message', id: responseId, role: 'user', content: [{ type: 'input_text', text: 'canonical prompt' }] }, '2026-10-24T10:02:00.020Z')
+    ]
+    const content = [
+      row('event_msg', { type: 'task_started', turn_id: 'turn-3' }, '2026-10-24T10:02:00.000Z'),
+      ...(reverse ? inputs.reverse() : inputs),
+      row('event_msg', { type: 'task_complete', turn_id: 'turn-3' }, '2026-10-24T10:02:00.030Z')
+    ].join('\n') + '\n'
+
+    const parsed = parseCodexRollout(content, 'run-3')
+    expect(parsed.turns[0].userText).toBe('canonical prompt')
+    expect(parsed.turns[0].events.filter(event => event.kind === 'human' && event.stage === 'steer')).toHaveLength(0)
+  })
+
+  it.each([false, true])('retains repeated real inputs in an event-only legacy stream with IDs=%s', withIds => {
+    const content = [
+      row('event_msg', { type: 'task_started', turn_id: 'turn-legacy' }, '2026-10-24T10:03:00.000Z'),
+      ...['initial', 'repeat', 'repeat'].map((message, index) => row('event_msg', {
+        type: 'user_message', message, ...(withIds ? { id: `legacy-${index}` } : {})
+      }, '2026-10-24T10:03:00.010Z')),
+      row('event_msg', { type: 'task_complete', turn_id: 'turn-legacy' }, '2026-10-24T10:03:00.030Z')
+    ].join('\n') + '\n'
+    const parsed = parseCodexRollout(content, 'run-legacy')
+    expect(parsed.turns[0].userText).toBe('initial')
+    const steers = parsed.turns[0].events.filter(event => event.kind === 'human' && event.stage === 'steer')
+    expect(steers.map(event => event.steer?.prompt)).toEqual(['repeat', 'repeat'])
+    expect(new Set(steers.map(event => event.steer?.messageId)).size).toBe(2)
+  })
+
+  it('retains canonical steering that has no legacy notification instead of requiring equal source counts', () => {
+    const content = [
+      row('event_msg', { type: 'task_started', turn_id: 'turn-asymmetric' }, '2026-10-24T10:04:00.000Z'),
+      row('response_item', { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'initial' }] }, '2026-10-24T10:04:00.010Z'),
+      row('event_msg', { type: 'user_message', message: 'initial' }, '2026-10-24T10:04:00.011Z'),
+      row('response_item', { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'steer' }] }, '2026-10-24T10:04:00.020Z'),
+      row('event_msg', { type: 'task_complete', turn_id: 'turn-asymmetric' }, '2026-10-24T10:04:00.030Z')
+    ].join('\n') + '\n'
+    const parsed = parseCodexRollout(content, 'run-asymmetric')
+    expect(parsed.turns[0].userText).toBe('initial')
+    expect(parsed.turns[0].events.filter(event => event.kind === 'human').map(event => event.steer?.prompt)).toEqual(['steer'])
+  })
+
+  it.each([
+    { input: '<skill><name>fixture-skill</name></skill>', expected: '/fixture-skill initial' },
+    { input: '# AGENTS.md instructions\ncontext', expected: 'initial' },
+    { input: '<environment_context>context</environment_context>', expected: 'initial' },
+    { input: '<recommended_plugins>context</recommended_plugins>', expected: 'initial' }
+  ])('does not mistake injected context for the canonical human-input stream: $input', ({ input, expected }) => {
+    const content = [
+      row('event_msg', { type: 'task_started', turn_id: 'turn-context' }, '2026-10-24T10:06:00.000Z'),
+      row('event_msg', { type: 'user_message', message: 'initial' }, '2026-10-24T10:06:00.010Z'),
+      row('response_item', { type: 'message', role: 'user', content: [{ type: 'input_text', text: input }] }, '2026-10-24T10:06:00.020Z'),
+      row('event_msg', { type: 'task_complete', turn_id: 'turn-context' }, '2026-10-24T10:06:00.030Z')
+    ].join('\n') + '\n'
+    const turn = parseCodexRollout(content, 'run-context').turns[0]
+    expect(turn.userText).toBe(expected)
+    expect(turn.events.filter(event => event.kind === 'human')).toHaveLength(0)
+  })
+
+  it('derives ID-less steering identity from the native input ordinal, not later tool activity', () => {
+    const inputs = [
+      row('event_msg', { type: 'task_started', turn_id: 'turn-stable' }, '2026-10-24T10:05:00.000Z'),
+      ...['initial', 'steer'].map(text => row('response_item', {
+        type: 'message', role: 'user', content: [{ type: 'input_text', text }]
+      }, '2026-10-24T10:05:00.010Z'))
+    ]
+    const end = row('event_msg', { type: 'task_complete', turn_id: 'turn-stable' }, '2026-10-24T10:05:00.030Z')
+    const tool = row('response_item', { type: 'function_call', call_id: 'later-tool', name: 'exec', arguments: '{}' }, '2026-10-24T10:05:00.020Z')
+    const id = (rows: string[]) => parseCodexRollout(rows.join('\n') + '\n', 'run-stable').turns[0]
+      .events.find(event => event.kind === 'human')?.steer?.messageId
+    expect(id([...inputs, end])).toBeDefined()
+    expect(id([...inputs, end])).toBe(id([...inputs, tool, end]))
   })
 })

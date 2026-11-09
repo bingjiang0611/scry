@@ -120,6 +120,25 @@ it('Qoder late ID-less Stop requires an unchanged native snapshot and never clos
     .toMatchObject({ providerTurnId: 'third-prompt', status: 'closing', deferredTerminalEventId: expect.any(String) })
 })
 
+it.each([
+  { provider: 'qoder' as const, startEvent: 'UserPromptSubmit', endEvent: 'Stop' },
+  { provider: 'opencode' as const, startEvent: 'chat.message', endEvent: 'session.idle' }
+])('%s keeps a second unidentified terminal pending without discarding the frozen boundary', async ({ provider, startEvent, endEvent }) => {
+  const root = await workspace()
+  const payload = { session_id: `deferred-${provider}`, cwd: root, prompt: 'hold open' }
+  await handleRecorderHook({ provider, workspace: root, event: startEvent, env: {}, payload })
+  await expect(handleRecorderHook({ provider, workspace: root, event: endEvent, env: {}, payload }))
+    .resolves.toMatchObject({ status: 'pending', reason: expect.stringContaining('deferred') })
+  const first = JSON.parse(await readFile(join(recorderSessionRoot(join(root, '.scry'), provider, payload.session_id), 'open.json'), 'utf8'))
+  expect(first).toMatchObject({ status: 'closing', deferredTerminalEventId: expect.any(String) })
+  const frozenDiffs = JSON.stringify(first.terminalDiffs)
+  await expect(handleRecorderHook({ provider, workspace: root, event: endEvent, env: {}, payload }))
+    .resolves.toMatchObject({ status: 'pending', reason: 'unidentified terminal is already deferred' })
+  const second = JSON.parse(await readFile(join(recorderSessionRoot(join(root, '.scry'), provider, payload.session_id), 'open.json'), 'utf8'))
+  expect(second.deferredTerminalEventId).toBe(first.deferredTerminalEventId)
+  expect(JSON.stringify(second.terminalDiffs)).toBe(frozenDiffs)
+})
+
 it.each(['claude', 'codex', 'qoder', 'opencode'] as const)('V1 genuine missing-start %s Stop without timestamp still leaves an orphan', async (provider) => {
   const root = await workspace()
   expect(await handleRecorderHook({ provider, workspace: root, event: 'Stop', env: {}, payload: {

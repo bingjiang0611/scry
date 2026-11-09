@@ -3,7 +3,7 @@ import { type CodexRolloutIdentity, type ParsedTranscriptTurn, stringAt, nestedR
 import { classifyDanger } from '../../main/danger.js'
 import { stableHash } from './store.js'
 import { appendCodexPatchResult, finalizeCodexTurns, callInput, codexHookEvent, indexedToolOutputs, normalizedCodexCalls, outputFailed, outputText, rejectedBeforeExecution, runningCellId, textContent } from './recorder-codex-calls.js'
-import { recordCodexUserInput, type CodexUserInputState } from './recorder-codex-user-input.js'
+import { flushCodexUserInputs, recordCodexUserInput, type CodexUserInputState } from './recorder-codex-user-input.js'
 import { CodexUsageDeltaFilter } from '../../shared/usage-dedupe.js'
 import { codexIdentityFromSessionMeta, recordCodexItemCompleted, recordCodexSubAgentActivity } from './recorder-codex-rollout-children.js'
 
@@ -41,12 +41,11 @@ export function parseCodexRollout(content: string, runId: string, sessionIdentit
   let contextWindow: number | undefined
   let lastRequestInputTokens: number | undefined
   let lastAssistant: string | undefined
-  let injectedSkill: string | undefined
   let logicalIdsByOuterCall = new Map<string, string[]>()
   let toolById = new Map<string, string>()
   let completedToolOutputs = new Set<string>()
   let completedItems = new Set<string>()
-  let userInputState: CodexUserInputState = { seenIds: new Set() }
+  let userInputState: CodexUserInputState = { seenIds: new Set(), pendingInputs: [] }
   let asyncOuterCallByCell = new Map<string, string>()
   let transportCellByOuterCall = new Map<string, string>()
   let lastAt: string | undefined
@@ -151,12 +150,6 @@ export function parseCodexRollout(content: string, runId: string, sessionIdentit
     }
   }
 
-  const recordUserInput = (text: string, at: string, nativeId?: string): void => {
-    if (!current) return
-    const skill = recordCodexUserInput(current, text, at, nativeId, runId, userInputState)
-    if (skill) injectedSkill = skill
-  }
-
   const addToolOutput = (payload: Record<string, unknown>, at: string): void => {
     if (!current) return
     const outerId = stringAt(payload, 'call_id', 'callId', 'id')
@@ -225,6 +218,7 @@ export function parseCodexRollout(content: string, runId: string, sessionIdentit
       continue
     }
     if (type === 'event_msg' && payload.type === 'task_started') {
+      if (current) flushCodexUserInputs(current, runId, userInputState)
       finishUsage(at)
       const attribution = nestedRecord(payload, 'turn_attribution')
       current = {
@@ -256,12 +250,11 @@ export function parseCodexRollout(content: string, runId: string, sessionIdentit
       turnModels = new Set()
       lastRequestInputTokens = undefined
       lastAssistant = undefined
-      injectedSkill = undefined
       logicalIdsByOuterCall = new Map()
       toolById = new Map()
       completedToolOutputs = new Set()
       completedItems = new Set()
-      userInputState = { seenIds: new Set() }
+      userInputState = { seenIds: new Set(), pendingInputs: [] }
       asyncOuterCallByCell = new Map()
       transportCellByOuterCall = new Map()
       continue
@@ -283,7 +276,7 @@ export function parseCodexRollout(content: string, runId: string, sessionIdentit
 
     if (type === 'event_msg' && payload.type === 'user_message') {
       const text = stringAt(payload, 'message', 'text', 'prompt') ?? textContent(payload.content)
-      recordUserInput(text ?? '', at, stringAt(payload, 'id', 'message_id', 'messageId'))
+      recordCodexUserInput(text ?? '', at, stringAt(payload, 'id', 'message_id', 'messageId'), userInputState, 'event_msg_user_message')
       continue
     }
     if (type === 'event_msg' && payload.type === 'item_completed') {
@@ -406,7 +399,7 @@ export function parseCodexRollout(content: string, runId: string, sessionIdentit
 
     const itemType = stringAt(payload, 'type')
     if (itemType === 'message' && stringAt(payload, 'role') === 'user') {
-      recordUserInput(textContent(payload.content) ?? '', at, stringAt(payload, 'id', 'message_id', 'messageId'))
+      recordCodexUserInput(textContent(payload.content) ?? '', at, stringAt(payload, 'id', 'message_id', 'messageId'), userInputState, 'response_item_user')
       continue
     }
     if (itemType === 'message' && stringAt(payload, 'role') === 'assistant') {
@@ -444,6 +437,7 @@ export function parseCodexRollout(content: string, runId: string, sessionIdentit
       addToolOutput(payload, at)
     }
   }
+  const injectedSkill = current ? flushCodexUserInputs(current, runId, userInputState) : undefined
   if (lastAt) finishUsage(lastAt)
   return {
     recognized: sawCodexLine && turns.length > 0,

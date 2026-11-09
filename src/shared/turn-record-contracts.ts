@@ -185,7 +185,7 @@ export interface TurnRepositoryDiscovery {
     probedRepositories: number
     skippedRepositories: number
     discoveredWorktrees: number
-    incomplete: boolean
+    incomplete: true
   }
 }
 

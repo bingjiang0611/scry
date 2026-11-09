@@ -166,7 +166,8 @@ export async function applyHookLocked(
   const sessionEndEvent = SESSION_END_EVENTS.has(input.event)
   const endEvent = END_EVENTS.has(input.event) || sessionEndEvent
   if (open.deferredTerminalEventId) {
-    if (endEvent && !sessionEndEvent && incomingProviderTurnId !== open.providerTurnId) {
+    const identifiedForOpen = !!incomingProviderTurnId && incomingProviderTurnId === open.providerTurnId
+    if (endEvent && !sessionEndEvent && !identifiedForOpen) {
       return { status: 'pending' as const, reason: 'unidentified terminal is already deferred' }
     }
     if (sessionEndEvent && open.terminalFallbackStatus === 'interrupted') {
