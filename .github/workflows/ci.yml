@@ -169,10 +169,9 @@ jobs:
         # tests/tarball checks still execute on every supported Node version.
         run: npm run check:cli-runtime
 
-  # Preserve the serial smoke order in three contiguous slices. Packaging has its
-  # own macOS slot so build+pack+smoke time no longer extends the slowest shard.
-  # Normal PRs use five macOS slots including native performance, which is the
-  # five-slot cap; remote/iOS changes may queue one of the seven jobs.
+  # Preserve the serial smoke order in three contiguous slices. Packaging runs
+  # with the shortest slice. Normal PRs use four macOS slots including native
+  # performance; remote/iOS changes may queue one of the six jobs at the five-slot cap.
   packaged-electron:
     needs: changes
     if: ${{ needs.changes.outputs.required == 'true' }}
@@ -216,39 +215,11 @@ jobs:
           path: ${{ runner.temp }}/scry-sidebar-*.png
           if-no-files-found: ignore
 
-  # Packaging needs a build, a forced native rebuild and a packaged-app smoke; on
-  # a smoke shard it would add ~1 min to an already ~6 min job. Run it in a
-  # parallel slot instead.
-  packaged-macos:
-    needs: changes
-    if: ${{ needs.changes.outputs.required == 'true' }}
-    runs-on: macos-15
-    timeout-minutes: 30
-    env:
-      QODER_SKIP_DOWNLOAD: "1"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - uses: ./.github/actions/cache-electron
-        id: electron-cache
-      - run: npm ci
-      - name: Prepare Electron executable
-        run: node -e "require('node:fs').accessSync(require('electron'))"
-      # Save the validated download before unrelated tests/builds can fail.
-      - uses: actions/cache/save@v4
-        if: ${{ steps.electron-cache.outputs.hit != 'true' }}
-        with:
-          path: ${{ runner.temp }}/electron-downloads
-          key: ${{ steps.electron-cache.outputs.key }}
-      - name: Prepare Electron native dependencies
-        run: ./node_modules/.bin/electron-builder install-app-deps
       - name: Package and smoke the macOS app
+        if: ${{ matrix.shard == 2 }}
         run: npm run pack:artifact
       - name: Archive the verified macOS app for manual installation
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && matrix.shard == 2 }}
         run: |
           APP_PATH="$(node --input-type=module -e "import { defaultPackagedAppPath } from './scripts/packaged-app-layout.mjs'; console.log(defaultPackagedAppPath())")"
           mkdir -p release-artifacts
@@ -272,7 +243,7 @@ jobs:
           writeFileSync('release-artifacts/provenance.json', JSON.stringify(provenance, null, 2) + '\n')
           NODE
       - name: Upload the verified macOS app
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && matrix.shard == 2 }}
         uses: actions/upload-artifact@v4
         with:
           name: macos-app-${{ github.sha }}
@@ -284,7 +255,7 @@ jobs:
   check:
     name: Check
     if: ${{ always() }}
-    needs: [changes, node, unit, unit-coverage, cli-compat, packaged-electron, packaged-macos, packaged-linux]
+    needs: [changes, node, unit, unit-coverage, cli-compat, packaged-electron, packaged-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -294,7 +265,7 @@ jobs:
         run: |
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
           echo "$RESULTS" | jq -e '
-            length == 8 and .changes.result == "success" and (
+            length == 7 and .changes.result == "success" and (
               (.changes.outputs.required == "true" and
                 (del(.changes) | all(.[]; .result == "success"))) or
               (.changes.outputs.required == "false" and

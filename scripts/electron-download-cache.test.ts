@@ -102,7 +102,7 @@ describe('Electron download cache', () => {
     for (const [name, job] of Object.entries(ci.jobs)) {
       const steps = job.steps ?? []
       const caches = steps.filter(step => step.uses === './.github/actions/cache-electron')
-      if (['unit', 'packaged-electron', 'packaged-macos', 'packaged-linux'].includes(name)) {
+      if (['unit', 'packaged-electron', 'packaged-linux'].includes(name)) {
         expect(caches).toHaveLength(1)
         expect(caches[0].id).toBe('electron-cache')
         expect(steps.indexOf(caches[0])).toBeLessThan(steps.findIndex(step => step.run === 'npm ci'))
