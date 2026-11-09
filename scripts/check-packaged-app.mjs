@@ -113,6 +113,15 @@ const sdkIndexInAsar = entries.includes(`/${qoderIndexRelative.replaceAll('\\', 
 const sdkIndexUnpacked = existsSync(join(unpacked, qoderIndexRelative))
 if (!sdkIndexInAsar && !sdkIndexUnpacked) throw new Error('排除 Qoder CLI 时误删了 Qoder SDK JavaScript adapter')
 
+const sqliteBinding = join(unpacked, 'node_modules/better-sqlite3/build/Release/better_sqlite3.node')
+if (!existsSync(sqliteBinding)) throw new Error(`packaged app 缺少 better-sqlite3 native binding：${sqliteBinding}`)
+for (const directory of ['obj', 'obj.target']) {
+  const intermediate = `node_modules/better-sqlite3/build/Release/${directory}`
+  if (entries.some(entry => entry.startsWith(`/${intermediate}/`))) {
+    throw new Error(`packaged app 包含 SQLite 编译中间产物：${intermediate}`)
+  }
+}
+
 // node-pty 在 macOS 用随包分发的 prebuilds + spawn-helper（posix_spawn）；
 // Linux 走 node-gyp 的 build/Release forkpty binding，没有 spawn-helper。
 if (process.platform === 'darwin') {
