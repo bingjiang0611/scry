@@ -115,6 +115,7 @@ describe('required PR checks', () => {
   }
 
   it('exports the verified macOS app only on the manual packaging shard', () => {
+    expect(workflow('ci.yml').on).toHaveProperty('workflow_dispatch')
     const job = workflow('ci.yml').jobs['packaged-electron']
     const archive = source(job, 'Archive the verified macOS app for manual installation')
     const upload = source(job, 'Upload the verified macOS app')
