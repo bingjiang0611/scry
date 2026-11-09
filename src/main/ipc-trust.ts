@@ -1,6 +1,7 @@
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
 import { isTrustedRendererUrl } from './renderer-security'
 import { PerformanceTrace, performanceRecordingEnabled } from './performance-timing'
+import { gateDaemonChannel } from './daemon-channel-gate'
 
 export function assertTrustedIpcEvent(event: IpcMainInvokeEvent, win: BrowserWindow | null, rendererEntryUrl: string): void {
   if (
@@ -19,8 +20,11 @@ export function registerTrustedIpcHandler<TArgs extends unknown[], TResult>(
   channel: string,
   getWindow: () => BrowserWindow | null,
   rendererEntryUrl: string,
-  listener: (event: IpcMainInvokeEvent, ...args: TArgs) => TResult
+  privilegedListener: (event: IpcMainInvokeEvent, ...args: TArgs) => TResult
 ): void {
+  // Every privileged channel passes here, so this is where daemon mode refuses the ones
+  // it has not migrated; the trust gate below still runs first on every call.
+  const listener = gateDaemonChannel(channel, privilegedListener)
   ipcMain.handle(channel, (event, ...args) => {
     assertTrustedIpcEvent(event, getWindow(), rendererEntryUrl)
     // Measure privileged work only after the existing trust gate. Never inspect IPC payloads or

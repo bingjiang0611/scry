@@ -14,7 +14,7 @@
 | B4-L1 本机入网与 `scope: local` | 完成 | `见 status` | [b4-l1](status/b4-l1.md)：grant 带 `scope`，local grant 只在 unix socket 传输有效；一次性 0600 secret 不按时间过期；首次入网/复用拒绝/撤销不重入均有测试 |
 | B4-L2 main 侧 daemon 客户端与 supervisor | 完成 | `见 status` | [b4-l2](status/b4-l2.md)：`DaemonClient` 入网/探活/版本硬失败/撤销不重入、`ensureDaemon` 探活→接入→拉起→就绪；新 op `daemonInfo` 仅 local |
 | B4-L3 run 经 daemon | 功能部分完成，等核验（G1 已修：admission 的无上限等待改为有界并带原因；首 token 仍 +41…+58 ms P50，S1 未达成） | `b0260e41` `d9f7aaed` `见 b4-l3g` | [b4-l3](status/b4-l3.md)：语义层 + 接线层 + run controls + 执行归属；M1 只重放可证明未发送的请求，M2 分类表逐条判定，M3 真实 App 端到端全绿；流式粒度已与进程内一致（20 事件/样本、间隔 152 ms）。[b4-l3g](status/b4-l3g.md)：卡死 run 未复现（300 次启动、10 s 看门狗），审计出两处 `providerStart` 之前的无上限等待并改为 20 s 有界（`run_admission_timeout` / 既有「同一会话已有一轮正在运行」），经 dispatcher 记为带原因的 `run_failed`；H1 把上限收回到只作用于启动 run（`admitRun`），会话账本、删除与 fork 恢复无上限排队；20 s 为暂定值。S1 未达成，按维护者答复转为 B4-S 前置门禁（[REVIEW-BATCH4-L3G](REVIEW-BATCH4-L3G.md)）。撤销后重连入口按维护者答复放在 B4-S 设置页 |
-| B4-L4 其余能力经 daemon | 未开始 | — | |
+| B4-L4 其余能力经 daemon | 进行中（L4-0 完成） | `见 status` | [b4-l4](status/b4-l4.md)：矩阵补漏到 134 通道；开关打开时未迁移通道一律以 `daemon_capability_unavailable:<channel>` 拒绝（挂在 `registerTrustedIpcHandler`）；开关打开时 App 不再启动进程内远程宿主。能力迁移按 b4-l4「迁移顺序」进行 |
 | B4-S 切换与删除 | 未开始 | — | |
 | B4-V 验收 | 未开始 | — | |
 

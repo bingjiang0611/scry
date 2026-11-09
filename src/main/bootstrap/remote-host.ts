@@ -12,7 +12,7 @@ import { summarizeRunningLlmSessions } from '../../shared/llm-performance'
 import { resolveRemoteRelay } from './remote-relay'
 import { createRemoteHistoryHandlers } from './remote-history'
 import { RunOutputWorkerStore } from '../remote/run-output-worker'
-import { remoteHostEnabled } from '../remote/remote-defaults'
+import { inProcessRemoteHostEnabled } from '../remote/remote-defaults'
 import type { IpcMainInvokeEvent } from 'electron'
 import type { RemoteStatus } from '../../shared/remote'
 
@@ -22,7 +22,7 @@ import type { RemoteHostRuntime, RemoteRuns, RemoteReceipts, DeleteOptions, Remo
 export type { RemoteHostRuntime, RemoteRuns, RemoteReceipts, DeleteOptions, RemoteStartOptions }
 export async function startRemoteHostIfEnabled(runtime: RemoteHostRuntime): Promise<void> {
 
-  if (runtime.remoteHostService || !remoteHostEnabled(process.env.SCRY_REMOTE_HOST, app.isPackaged)) return
+  if (runtime.remoteHostService || !inProcessRemoteHostEnabled(process.env, app.isPackaged)) return
   try {
     const stateDirectory = join(app.getPath('userData'), 'remote')
     const relay = await resolveRemoteRelay(stateDirectory)

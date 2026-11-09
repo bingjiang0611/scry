@@ -18,11 +18,9 @@ import { createDaemonRunSurface, type DaemonRunSurface } from './daemon-run-surf
 // the daemon revoked is reported as such; unsafe credential storage refuses before
 // a credential is written.
 
-export const DAEMON_MODE_ENV = 'SCRY_HOST_DAEMON'
-
-export function daemonModeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env[DAEMON_MODE_ENV] === '1'
-}
+// The switch itself lives beside the IPC gate, which must not import this assembly.
+import { DAEMON_MODE_ENV, daemonModeEnabled } from '../daemon-channel-gate'
+export { DAEMON_MODE_ENV, daemonModeEnabled }
 
 /**
  * Whether a failed request may be retried after the daemon is relaunched. A read the

@@ -77,4 +77,24 @@ describe('trusted main IPC registration', () => {
     await expect(invoke({ sender: trustedWebContents, senderFrame: mainFrame })).rejects.toThrow('非可信 renderer')
     expect(listener).not.toHaveBeenCalled()
   })
+
+  it('refuses an unmigrated channel in daemon mode through the production wrapper, after the trust gate', () => {
+    const previous = process.env.SCRY_HOST_DAEMON
+    process.env.SCRY_HOST_DAEMON = '1'
+    try {
+      const mainFrame = { url: 'file:///app/renderer/index.html' }
+      const sender = { mainFrame }
+      const win = { webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow
+      const event = { sender, senderFrame: mainFrame } as unknown as IpcMainInvokeEvent
+      let handler: Handler = () => { throw new Error('unregistered') }
+      const privileged = vi.fn(() => 'in-process answer')
+      registerTrustedIpcHandler({ handle: (_channel, listener) => { handler = listener } }, 'conversation:send', () => win, mainFrame.url, privileged)
+      expect(() => handler({ ...event, sender: {} } as IpcMainInvokeEvent)).toThrow('非可信 renderer')
+      expect(() => handler(event)).toThrow('daemon_capability_unavailable:conversation:send')
+      expect(privileged).not.toHaveBeenCalled()
+    } finally {
+      if (previous === undefined) delete process.env.SCRY_HOST_DAEMON
+      else process.env.SCRY_HOST_DAEMON = previous
+    }
+  })
 })
