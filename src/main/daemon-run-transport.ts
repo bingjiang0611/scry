@@ -272,6 +272,27 @@ export class DaemonRunTransport {
     return read.kind === 'snapshot' ? read.run : fail()
   }
 
+  /**
+   * One App channel the daemon answers for this App (B4-L4). Transport failures keep the
+   * lane's phase rule; the daemon's own error text is kept as the handler's message, so
+   * the renderer sees what main's handler would have thrown. An older daemon without the
+   * op is a named absence.
+   */
+  async localOp(input: { op: string; method: string; args: unknown[]; read: boolean }): Promise<unknown> {
+    let reply: unknown
+    try {
+      reply = await this.#request({ op: input.op, method: input.method, args: input.args }, { replayable: input.read })
+    } catch (error) {
+      throw error instanceof DaemonRunError ? error : new DaemonRunError(transportFailure(error))
+    }
+    if (!record(reply)) throw new DaemonRunError('invalid_daemon_response')
+    if (reply.error === 'device_not_authorized') throw new DaemonRunError('daemon_device_not_authorized')
+    if (reply.error === 'unsupported_op') throw new Error(`daemon_capability_unavailable:${input.op}:${input.method}`)
+    if (typeof reply.error === 'string') throw new Error(reply.error)
+    if (!('result' in reply)) throw new DaemonRunError('invalid_daemon_response')
+    return reply.result
+  }
+
   async #call(request: Record<string, unknown>, options?: { replayable?: boolean; signal?: AbortSignal }): Promise<Record<string, unknown>> {
     let reply: unknown
     try {

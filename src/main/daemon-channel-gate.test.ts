@@ -1,13 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
-import { DAEMON_MODE_IN_PROCESS_CHANNELS, DAEMON_MODE_SERVED_CHANNELS, gateDaemonChannel } from './daemon-channel-gate'
+import { DAEMON_LOCAL_OP_CHANNELS, DAEMON_MODE_IN_PROCESS_CHANNELS, DAEMON_MODE_SERVED_CHANNELS, gateDaemonChannel, installDaemonChannelForwarder } from './daemon-channel-gate'
 
 const on = { SCRY_HOST_DAEMON: '1' } as NodeJS.ProcessEnv
 const off = {} as NodeJS.ProcessEnv
 const routing = [
   ...JSON.parse(readFileSync(new URL('../../scripts/daemon-ipc-routing.json', import.meta.url), 'utf8')).channels,
   ...JSON.parse(readFileSync(new URL('../../scripts/daemon-ipc-routing-workbench.json', import.meta.url), 'utf8')).channels
-] as Array<{ channel: string; route: string }>
+] as Array<{ channel: string; route: string; op?: string; method?: string }>
 const routeOf = (channel: string) => routing.find((row) => row.channel === channel)?.route
 
 // With the switch on the daemon owns the run pipeline, the ledger and (by B4-S) SQLite.
@@ -54,6 +54,36 @@ describe('daemon mode channel gate', () => {
     for (const channel of DAEMON_MODE_SERVED_CHANNELS) {
       expect(routeOf(channel), `${channel} is answered by the daemon but is not in the matrix`).toBeDefined()
       expect(routeOf(channel)).not.toBe('main')
+    }
+  })
+
+  it('forwards a migrated channel to the daemon with the renderer arguments, not to main', async () => {
+    const listener = vi.fn(() => 'in-process answer')
+    const forwarded = vi.fn(async (_call: unknown) => ['from-daemon'])
+    const uninstall = installDaemonChannelForwarder(forwarded)
+    try {
+      const gated = gateDaemonChannel('agent:listSessions', listener, on) as unknown as (event: unknown, ...args: unknown[]) => Promise<unknown>
+      await expect(gated({}, { providerId: 'codex', cwd: '/w' })).resolves.toEqual(['from-daemon'])
+      expect(forwarded).toHaveBeenCalledWith({ op: 'sessionStore', method: 'listSessions', args: [{ providerId: 'codex', cwd: '/w' }], read: true })
+      expect(listener).not.toHaveBeenCalled()
+    } finally {
+      uninstall()
+    }
+  })
+
+  it('reports a migrated channel as unavailable until the daemon client is ready', async () => {
+    const listener = vi.fn()
+    const gated = gateDaemonChannel('agent:listProjects', listener, on) as unknown as (event: unknown) => Promise<unknown>
+    await expect(gated({})).rejects.toThrow('daemon_capability_unavailable:agent:listProjects')
+    expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('records every migrated channel under the op and method the matrix names', () => {
+    for (const [channel, { op, method }] of Object.entries(DAEMON_LOCAL_OP_CHANNELS)) {
+      const row = routing.find((entry) => entry.channel === channel)
+      expect(row?.op, channel).toBe(op)
+      expect(row?.method, channel).toBe(method)
+      expect(method).toBe(channel.slice(channel.lastIndexOf(':') + 1))
     }
   })
 })

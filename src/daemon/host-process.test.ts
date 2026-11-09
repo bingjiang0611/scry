@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { afterEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, realpathSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID, webcrypto } from 'node:crypto'
@@ -145,6 +145,21 @@ describe('daemon host process', () => {
         op: 'runControl', method: 'adopt', runId: 'run-not-here'
       })
       expect(adopted.error).toBeUndefined()
+      // App channels the daemon answers for its App (B4-L4), over the same local socket and
+      // grant; the answers come from the handlers main registers, run against daemon state.
+      const recent = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'projectStore', method: 'recentFolders', args: []
+      })
+      expect(recent.result).toContain(realpathSync(workspace))
+      const health = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'sessionStore', method: 'catalogHealth', args: []
+      })
+      expect(health.error).toBeUndefined()
+      expect(health.result).toBeTruthy()
+      const descriptors = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'providerCatalog', method: 'providerDescriptors', args: []
+      })
+      expect((descriptors.result as Array<{ id: string }>).map((descriptor) => descriptor.id)).toContain('codex')
       const providers = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'providers', detail: 'metadata'
       })

@@ -3,7 +3,7 @@
 本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑；改 `scripts/daemon-ipc-routing.json` 后重新生成。
 
 - 生产特权 IPC channel：134 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
-- 留在 main：24，一半 main 一半 daemon（`split`）：3，转发到现有 op：51，需要新增 op：56
+- 留在 main：24，一半 main 一半 daemon（`split`）：3，转发到现有 op：46，需要新增 op：61
 - 新增 op 的请求、响应、授权与调用方范围见 [P3-ipc-ops](P3-ipc-ops.md)；设计正文见 [P3 §13](P3-batch4-design.md)
 - `desktopWorkbench` 转发行（workspace / terminal / sourceControl，共 32 行）见 [P3-ipc-matrix-workbench](P3-ipc-matrix-workbench.md)
 
@@ -35,8 +35,8 @@
 | `agent:clipboardImage` | main | `—` | — | — | 剪贴板 |
 | `agent:deleteArchivedSessions` | new-op | `sessionPurge:deleteArchivedSessions` | navigation | — | 批量删除要重放既有 preview/指纹语义 |
 | `agent:deleteSession` | forward | `sessionDelete` | — | 不同：本机走原生确认框且可删未归档；远程只允许已归档、confirm:false。按 grant scope 选策略；确认框留在 main，daemon 只对 scope: local 接受已确认请求 | 既有 sessionDelete |
-| `agent:detect` | forward | `providers` | — | 不同：远程只给 providerDiscovery 元数据，本机还要 installed 路径与版本。按 grant scope 选 detail | adapter 在 daemon |
-| `agent:detectFast` | forward | `providers` | — | 不同：快探测只在 scope: local 使用，远程仍走完整探测 | adapter 在 daemon |
+| `agent:detect` | new-op | `providerCatalog:detect` | providers | — | 本机要安装路径、版本与兼容判定；远程设备的 providers 元数据不变 |
+| `agent:detectFast` | new-op | `providerCatalog:detectFast` | providers | — | 快探测只给本机 |
 | `agent:focusedRunSnapshot` | forward | `runState` | — | 等价（同一 run 登记表；只是按焦点取一条） | 权威快照在 daemon |
 | `agent:focusRun` | main | `—` | — | — | 窗口级焦点书签 |
 | `agent:forkSession` | forward | `sessionFork` | — | 等价 | 既有 sessionFork |
@@ -45,7 +45,7 @@
 | `agent:listArchivedSessions` | new-op | `sessionStore:listArchivedSessions` | navigation | — | 会话账本在 daemon |
 | `agent:listCommands` | forward | `commands` | — | 不同：远程按 provider 白名单裁剪命令集，本机保留全部命令。按 scope 选策略 | 既有 commands |
 | `agent:listProjects` | new-op | `projectStore:listProjects` | navigation | — | 项目目录需单一写者 |
-| `agent:listSessions` | forward | `sessionsPage` | — | 不同：远程分页上限更小且不返回归档会话。按 grant scope 选上限与归档可见性：scope: local 返回全部 | 既有 sessionsPage |
+| `agent:listSessions` | new-op | `sessionStore:listSessions` | navigation | — | 本机拿 App 自己的完整会话目录；远程设备的 sessionsPage 投影不变 |
 | `agent:listSkills` | new-op | `skills:listSkills` | providers | — | daemon 才能读 Provider 的 skill 目录 |
 | `agent:llmPerformanceHistory` | new-op | `llmPerformance:llmPerformanceHistory` | analytics | — | usage JSONL 与 run 状态由 daemon 写 |
 | `agent:llmPerformanceSummary` | new-op | `llmPerformance:llmPerformanceSummary` | analytics | — | usage JSONL 与 run 状态由 daemon 写 |
@@ -54,7 +54,7 @@
 | `agent:mcpGuardScan` | new-op | `mcp:mcpGuardScan` | providers | — | MCP 与 trust gate 都在 daemon |
 | `agent:mcpSnapshot` | new-op | `mcp:mcpSnapshot` | providers | — | MCP 与 trust gate 都在 daemon |
 | `agent:newSession` | new-op | `providerContext:newSession` | providers | — | Provider 运行时在 daemon |
-| `agent:providerDescriptors` | forward | `providers` | — | 不同：本机要完整 descriptors（含 controls 与默认模型），远程只取 metadata。按 grant scope 选 detail | 既有 providers |
+| `agent:providerDescriptors` | new-op | `providerCatalog:providerDescriptors` | providers | — | 本机要完整 descriptors（含 controls 与默认模型） |
 | `agent:reauthenticateMcp` | new-op | `mcp:reauthenticateMcp` | providers | — | MCP 与 trust gate 都在 daemon |
 | `agent:recentFolders` | split | `projectStore:recentFolders` | navigation | main: 窗口只渲染；列表来自 daemon 的授权输入，main 不打开该 store | 授权输入单一写者 |
 | `agent:recorderContentPage` | new-op | `recorderContent:recorderContentPage` | evidence | — | recorder 记录写在工作区里，由 daemon 读 |
@@ -64,7 +64,7 @@
 | `agent:renameProject` | new-op | `projectStore:renameProject` | navigation | — | 设备也读项目目录，必须单一写者 |
 | `agent:renameSession` | forward | `sessionAction` | — | 等价 | 既有 sessionAction |
 | `agent:revealProject` | main | `—` | — | — | 原生 showItemInFolder |
-| `agent:runControls` | forward | `providers` | — | 不同：远程受 SCRY_REMOTE_PERMISSION_MODE 约束，本机用用户选择的权限模式（含 full_access）。按 grant scope 选策略 | providers 的 selected |
+| `agent:runControls` | new-op | `providerCatalog:runControls` | providers | — | 本机按用户权限模式取 run controls；远程设备受 SCRY_REMOTE_PERMISSION_MODE 约束的路径不变 |
 | `agent:setCwd` | new-op | `workspaceSelection:setCwd` | navigation | — | 当前工作区是 daemon 授权上下文的一部分 |
 | `agent:setProjectPinned` | new-op | `projectStore:setProjectPinned` | navigation | — | 设备也读项目目录，必须单一写者 |
 | `agent:setSessionArchived` | forward | `sessionAction` | — | 等价 | 既有 sessionAction |

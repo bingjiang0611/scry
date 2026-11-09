@@ -44,13 +44,13 @@ describe('daemon run control op', () => {
     const request = { protocol: 2, op: 'runControl', method: 'adopt', runId: 'run-abc-1' }
     expect(await dispatchRemoteRequest(controller, 'a'.repeat(64), request)).toEqual({ error: 'unsupported_op' })
     const handlers = { ...empty, adopt: vi.fn(() => null) }
-    expect(await dispatchRemoteRequest(controller, 'a'.repeat(64), request, undefined, handlers)).toEqual({ run: null })
+    expect(await dispatchRemoteRequest(controller, 'a'.repeat(64), request, undefined, { runControl: handlers })).toEqual({ run: null })
   })
 
   it('rejects a frame carrying fields this op does not define', async () => {
     const controller = {} as unknown as HostController
     const handlers = { ...empty }
-    expect(await dispatchRemoteRequest(controller, 'a'.repeat(64), { protocol: 2, op: 'runControl', method: 'adopt', runId: 'run-abc-1', cwd: '/etc' }, undefined, handlers))
+    expect(await dispatchRemoteRequest(controller, 'a'.repeat(64), { protocol: 2, op: 'runControl', method: 'adopt', runId: 'run-abc-1', cwd: '/etc' }, undefined, { runControl: handlers }))
       .toEqual({ error: 'invalid_request' })
     expect(handlers.adopt).not.toHaveBeenCalled()
   })

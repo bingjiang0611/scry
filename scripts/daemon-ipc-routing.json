@@ -72,15 +72,17 @@
     },
     {
       "channel": "agent:detect",
-      "route": "forward",
-      "op": "providers",
-      "why": "adapter 在 daemon"
+      "route": "new-op",
+      "op": "providerCatalog",
+      "method": "detect",
+      "why": "本机要安装路径、版本与兼容判定；远程设备的 providers 元数据不变"
     },
     {
       "channel": "agent:detectFast",
-      "route": "forward",
-      "op": "providers",
-      "why": "adapter 在 daemon"
+      "route": "new-op",
+      "op": "providerCatalog",
+      "method": "detectFast",
+      "why": "快探测只给本机"
     },
     {
       "channel": "agent:focusRun",
@@ -135,9 +137,10 @@
     },
     {
       "channel": "agent:listSessions",
-      "route": "forward",
-      "op": "sessionsPage",
-      "why": "既有 sessionsPage"
+      "route": "new-op",
+      "op": "sessionStore",
+      "method": "listSessions",
+      "why": "本机拿 App 自己的完整会话目录；远程设备的 sessionsPage 投影不变"
     },
     {
       "channel": "agent:listSkills",
@@ -194,9 +197,10 @@
     },
     {
       "channel": "agent:providerDescriptors",
-      "route": "forward",
-      "op": "providers",
-      "why": "既有 providers"
+      "route": "new-op",
+      "op": "providerCatalog",
+      "method": "providerDescriptors",
+      "why": "本机要完整 descriptors（含 controls 与默认模型）"
     },
     {
       "channel": "agent:reauthenticateMcp",
@@ -260,9 +264,10 @@
     },
     {
       "channel": "agent:runControls",
-      "route": "forward",
-      "op": "providers",
-      "why": "providers 的 selected"
+      "route": "new-op",
+      "op": "providerCatalog",
+      "method": "runControls",
+      "why": "本机按用户权限模式取 run controls；远程设备受 SCRY_REMOTE_PERMISSION_MODE 约束的路径不变"
     },
     {
       "channel": "agent:setCwd",

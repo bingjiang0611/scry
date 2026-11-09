@@ -153,4 +153,23 @@ describe('daemon run transport', () => {
     const value = new DaemonRunTransport(vi.fn(async () => { throw new Error('socket hang up') }))
     await expect(value.stop(RUN)).rejects.toMatchObject({ reason: 'daemon_outcome_unknown' })
   })
+
+  it('sends an App channel as a local op and returns the handler result', async () => {
+    const { value, calls } = transport(() => ({ result: ['/w'] }))
+    await expect(value.localOp({ op: 'projectStore', method: 'recentFolders', args: [], read: true })).resolves.toEqual(['/w'])
+    expect(calls[0]!.request).toEqual({ op: 'projectStore', method: 'recentFolders', args: [] })
+    expect(calls[0]!.options).toEqual({ replayable: true })
+  })
+
+  it('keeps the daemon handler message and names an older daemon without the op', async () => {
+    await expect(transport(() => ({ error: '工作区未授权' })).value.localOp({ op: 'sessionStore', method: 'listSessions', args: [], read: true }))
+      .rejects.toThrow('工作区未授权')
+    await expect(transport(() => ({ error: 'unsupported_op' })).value.localOp({ op: 'sessionStore', method: 'listSessions', args: [], read: true }))
+      .rejects.toThrow('daemon_capability_unavailable:sessionStore:listSessions')
+    await expect(transport(() => ({ error: 'device_not_authorized' })).value.localOp({ op: 'sessionStore', method: 'listSessions', args: [], read: true }))
+      .rejects.toThrow(DaemonRunError)
+    // An answer without a result is not an empty success.
+    await expect(transport(() => ({})).value.localOp({ op: 'sessionStore', method: 'listSessions', args: [], read: true }))
+      .rejects.toThrow('invalid_daemon_response')
+  })
 })

@@ -4,6 +4,7 @@ import type { ActiveRun } from '../../shared/trace'
 import type { TraceBatchReceipt } from '../trace-output'
 import type { DaemonRunSurface } from './daemon-run-surface'
 import { createDaemonRunMode, type DaemonRunModeDeps, type DaemonRunModeResult } from './daemon-run-mode'
+import { installDaemonChannelForwarder } from '../daemon-channel-gate'
 
 // The run channels are registered synchronously at startup, but finding a daemon is
 // not. This surface defers that work to the first run call and keeps one outcome for
@@ -70,7 +71,7 @@ export function createLazyDaemonRunSurface(
       return await invoke(await surface(true))
     }
   }
-  return {
+  const lazy: LazyDaemonRunSurface = {
     ready: ensure,
     start(payload: AgentStartRequest): Promise<AgentStartResult> {
       // One intent id per logical start, fixed BEFORE the first attempt: the retry path
@@ -90,8 +91,17 @@ export function createLazyDaemonRunSurface(
     adopt(runId: string) { return call((value) => value.adopt(runId)) },
     ack(receipt: TraceBatchReceipt): Promise<boolean> { return call((value) => value.ack(receipt)) },
     resynchronized(): Promise<true> { return call((value) => value.resynchronized()) },
-    dispose(): void { void ensure().then((result) => result.dispose?.(), () => undefined) }
+    // A local op is retried after a reconnect only when its request provably never left
+    // (daemon_not_running), which `call` already enforces for reads and writes alike.
+    localOp(request) { return call((value) => value.localOp(request)) },
+    dispose(): void {
+      uninstallForwarder()
+      void ensure().then((result) => result.dispose?.(), () => undefined)
+    }
   }
+  // The gated App channels that the daemon answers reach it through this surface.
+  const uninstallForwarder = installDaemonChannelForwarder((request) => lazy.localOp(request))
+  return lazy
 }
 
 // A daemon that is gone answers nothing: the transport cannot reach the socket, or

@@ -39,6 +39,8 @@ export interface DaemonRunSurface {
   steer(payload: unknown): Promise<AgentSteerResult>
   stopBackgroundTask(payload: unknown): Promise<BackgroundTaskStopResult>
   adopt(runId: string): Promise<ActiveRun | null>
+  // An App channel the daemon answers through a local op (B4-L4).
+  localOp(call: { op: string; method: string; args: unknown[]; read: boolean }): Promise<unknown>
 }
 
 // The intent detail is the daemon's routing contract, so only fields the App
@@ -149,6 +151,7 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
       focusedRunId = runId
       return reply.run as unknown as ActiveRun
     },
+    localOp(call) { return deps.transport.localOp(call) },
     async ack(receipt) { return runtime.bridge.ack(receipt) },
     async resynchronized() { runtime.bridge.resynchronized(); return true as const }
   }

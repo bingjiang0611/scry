@@ -67,6 +67,17 @@ describe('daemon IPC routing matrix', () => {
     expect(workbenchMethods().get('workspace')?.has('workspaceTrash')).toBe(true)
   })
 
+  it('counts a shared handler table only when main registers it', () => {
+    // The scan reads channel keys from `satisfies ChannelHandlers` tables; that is only
+    // honest if every exported factory is actually registered in main.
+    const tables = readFileSync(new URL('../src/main/bootstrap/startup-channels.ts', import.meta.url), 'utf8')
+    const factories = [...tables.matchAll(/^export function (\w+ChannelHandlers)\(/gm)].map(([, name]) => name).filter((name) => name !== 'registerChannelHandlers')
+    expect(factories.length).toBeGreaterThan(0)
+    const registrations = collectChannels().map((entry) => entry.file)
+    const sources = [...new Set(registrations)].map((file) => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')).join('\n')
+    for (const factory of factories) expect(sources, `${factory} is never registered in main`).toMatch(new RegExp(`registerChannelHandlers\\(handleTrusted, ${factory}\\(`))
+  })
+
   it('keeps both generated documents up to date', () => {
     expect(readFileSync(MATRIX_DOC, 'utf8')).toBe(renderMatrix(matrix))
     expect(readFileSync(WORKBENCH_MATRIX_DOC, 'utf8')).toBe(renderWorkbenchMatrix(matrix))
@@ -76,7 +87,7 @@ describe('daemon IPC routing matrix', () => {
   it('documents every new op next to its channels', () => {
     const ops = readFileSync(OPS_DOC, 'utf8')
     const used = new Set(matrix.rows.filter((row: { route: string }) => row.route === 'new-op').map((row: { target: string }) => row.target.slice(0, row.target.lastIndexOf(':'))))
-    expect(used.size).toBe(17)
+    expect(used.size).toBe(18)
     for (const op of used) expect(ops).toContain(`| \`${op}\` |`)
     expect(join(OPS_DOC).endsWith('P3-ipc-ops.md')).toBe(true)
   })

@@ -26,6 +26,8 @@ import type { RemoteHostRuntime } from '../host-runtime/host-runtime-types'
 import type { RemoteHostService, RemoteHostServiceDependencies } from '../main/remote/remote-host-service'
 import { RunOutputWorkerStore } from '../main/remote/run-output-worker'
 import { openLocalChannel, type LocalChannel } from './local-channel'
+import { localOpHandlersFor, type LocalOpHandler } from '../main/remote/host-local-ops'
+import { catalogChannelHandlers, providerControlChannelHandlers, providerDetectionChannelHandlers } from '../main/bootstrap/startup-channels'
 import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore, type LocalEnrollSocket } from './local-enrollment'
 
 export interface DaemonHostProcessOptions {
@@ -250,7 +252,27 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     // Omit every source. HostController returns explicit unavailable envelopes with
     // reasons for analytics, LLM performance and MCP trust.
     toolPanels: undefined,
-    runControl,
+    localEndpoint: {
+      runControl,
+      // The App channels this daemon answers for the App whose runs it owns. Built from
+      // the same handler factories Electron main registers, so both answer alike.
+      localOps: localOpHandlersFor({
+        ...catalogChannelHandlers({
+          appSessionStore: catalog.appSessionStore,
+          listProjectCatalog: catalog.listProjectCatalog,
+          recentStore: workspace.recentStore
+        }),
+        ...providerDetectionChannelHandlers({
+          smokeProviderEnabled: providers.smokeProviderEnabled,
+          smokeDetectedAgents: providers.smokeDetectedAgents,
+          storedPiProfilesNotDetected: pi.storedPiProfilesNotDetected,
+          providerCompatibility: providers.providerCompatibility,
+          detectInstalledAgents: pi.detectInstalledAgents,
+          providerRegistry: providers.providerRegistry
+        }),
+        ...providerControlChannelHandlers({ providerRegistry: providers.providerRegistry, withProviderOperation: session.withProviderOperation })
+      } as Record<string, LocalOpHandler>)
+    },
     createOutputStore: options.createOutputStore ?? ((directory) => RunOutputWorkerStore.create(
       directory,
       // This expression stays in the daemon entry (out/main/daemon.js), while the

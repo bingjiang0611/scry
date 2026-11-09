@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ActiveRun } from '../../shared/trace'
 import { DaemonRunError } from '../daemon-run-transport'
 import type { DaemonRunSurface } from './daemon-run-surface'
+import { gateDaemonChannel } from '../daemon-channel-gate'
 import { createLazyDaemonRunSurface } from './daemon-run-lazy'
 import type { DaemonRunModeDeps, DaemonRunModeResult } from './daemon-run-mode'
 
@@ -25,6 +26,7 @@ function surface(overrides: Partial<DaemonRunSurface> = {}): DaemonRunSurface {
     steer: async () => ({ status: 'accepted' as const }),
     stopBackgroundTask: async () => ({ status: 'requested' as const, message: '' }),
     adopt: async () => null,
+    localOp: async () => null,
     ...overrides
   }
 }
@@ -125,5 +127,15 @@ describe('lazy daemon run surface', () => {
     await expect(lazy.answerQuestion({ runId: 'run-abc-1', answerId: 'a-1', response: {} } as never))
       .rejects.toMatchObject({ reason: 'daemon_outcome_unknown' })
     expect(answerQuestion).toHaveBeenCalledTimes(1)
+  })
+
+  it('carries gated App channels to the daemon and stops when disposed', async () => {
+    const localOp = vi.fn(async () => ['/w'])
+    const lazy = createLazyDaemonRunSurface(deps, async () => ({ status: 'ready', surface: surface({ localOp }) }))
+    const gated = gateDaemonChannel('agent:recentFolders', vi.fn(), { SCRY_HOST_DAEMON: '1' }) as unknown as (event: unknown) => Promise<unknown>
+    await expect(gated({})).resolves.toEqual(['/w'])
+    expect(localOp).toHaveBeenCalledWith({ op: 'projectStore', method: 'recentFolders', args: [], read: true })
+    lazy.dispose()
+    await expect(gated({})).rejects.toThrow('daemon_capability_unavailable:agent:recentFolders')
   })
 })
