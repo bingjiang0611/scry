@@ -42,8 +42,11 @@ describe('RemoteLanListener', () => {
       await once(client, 'close')
       expect(text).toBe('hi')
       expect(served).toHaveLength(1)
-      // A held connection must not block shutdown.
+      // A held connection must not block shutdown. Shutdown destroys the server
+      // side of it, so the client sees ECONNRESET; swallow it instead of letting
+      // an unhandled 'error' fail the run.
       const held = connect(port, '127.0.0.1')
+      held.on('error', () => {})
       await once(held, 'connect')
     } finally {
       await listener.close()
