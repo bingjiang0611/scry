@@ -1,5 +1,7 @@
 # iOS 远程连接：改动、部署顺序与本机测量手册
 
+执行本机验证请直接看任务书 [handoff/ios-remote-verification/TASK.md](handoff/ios-remote-verification/TASK.md)：一键脚本、自动判定与交回格式都在那里。
+
 本文写给在 macOS 宿主上工作的本机 Agent 与维护者：说明分支 `claude/ios-remote-connection-issues-o7oj6x` 改了什么、按什么顺序部署、如何用真机测量并验收。云端开发环境没有 Swift 工具链，Swift/iOS 改动**未编译、未在真机运行**；以下每一步的结果都必须在本机重新取得，不能沿用本文的预期值冒充实测。
 
 ## 1. 改了什么（按层）
