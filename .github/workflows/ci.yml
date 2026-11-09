@@ -311,7 +311,6 @@ jobs:
     timeout-minutes: 30
     env:
       QODER_SKIP_DOWNLOAD: "1"
-      ELECTRON_BUILDER_CACHE: ${{ runner.temp }}/electron-builder-cache
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -351,6 +350,8 @@ jobs:
       # 发布构建同时产出 dist/linux-unpacked 和 dist/*.pacman；
       # pacman 的 pkgdesc 曾经静默变空，所以打包产物必须过 check:pacman-package。
       - name: Package Linux app directory and pacman package
+        env:
+          ELECTRON_BUILDER_CACHE: ${{ runner.temp }}/electron-builder-cache
         run: SCRY_RELEASE_BUILD=1 node scripts/run-electron-builder.mjs
       - name: Check packaged Linux app
         run: npm run check:packaged-app

@@ -13,6 +13,7 @@ interface Step {
   id?: string
   uses?: string
   run?: string
+  env?: Record<string, string>
   with?: Record<string, string>
 }
 interface Workflow { jobs: Record<string, { steps?: Step[] }> }
@@ -80,7 +81,12 @@ describe('Electron download cache', () => {
     const job = ci.jobs['packaged-linux']
     // electron-builder reads ELECTRON_BUILDER_CACHE for its own toolset root and
     // stores downloads under <root>/downloads; the cache must cover that root.
-    expect(job.env?.ELECTRON_BUILDER_CACHE).toBe('${{ runner.temp }}/electron-builder-cache')
+    // The runner context is only available on steps, never in job-level env.
+    const pack = job.steps.find(step => step.name === 'Package Linux app directory and pacman package')!
+    expect(pack.env?.ELECTRON_BUILDER_CACHE).toBe('${{ runner.temp }}/electron-builder-cache')
+    for (const [name, other] of Object.entries(ci.jobs)) {
+      for (const [key, value] of Object.entries(other.env ?? {})) expect(value, name + '/' + key).not.toContain('${{ runner.')
+    }
     const key = job.steps.find(step => step.id === 'builder-toolsets')!
     expect(key.run).toContain("require('./node_modules/electron-builder/package.json').version")
     const index = job.steps.findIndex(step => step.uses === 'actions/cache@v4')
