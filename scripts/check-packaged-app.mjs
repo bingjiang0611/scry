@@ -1,7 +1,7 @@
 import { accessSync, constants, existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { join, resolve, posix } from 'node:path'
+import { join, resolve, relative, posix } from 'node:path'
 import { extractFile, listPackage } from '@electron/asar'
 import { defaultPackagedAppPath, packagedAppLayout } from './packaged-app-layout.mjs'
 
@@ -156,14 +156,22 @@ if (actualCliVersion !== expectedCliVersion) {
 }
 
 const bytes = directoryBytes(appPath)
-if (bytes > maxBytes) {
-  throw new Error(`packaged app 超过体积预算：${bytes} > ${maxBytes} bytes`)
-}
 const sizeBreakdown = {
   ...(process.platform === 'darwin' ? { frameworks: directoryBytes(join(appPath, 'Contents', 'Frameworks')) } : {}),
   asar: directoryBytes(asarPath),
   unpacked: directoryBytes(unpacked),
   privateCli: directoryBytes(join(resources, 'scry-cli'))
+}
+if (bytes > maxBytes) {
+  const largestFiles = readdirSync(appPath, { recursive: true, withFileTypes: true })
+    .filter(entry => entry.isFile())
+    .map(entry => {
+      const path = join(entry.parentPath, entry.name)
+      return { path: relative(appPath, path), bytes: lstatSync(path).size }
+    })
+    .sort((left, right) => right.bytes - left.bytes)
+    .slice(0, 10)
+  throw new Error(`packaged app 超过体积预算：${bytes} > ${maxBytes} bytes; ${JSON.stringify({ sizeBreakdown, largestFiles })}`)
 }
 console.log(JSON.stringify({
   appPath,
