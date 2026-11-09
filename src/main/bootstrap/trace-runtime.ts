@@ -85,7 +85,7 @@ export function createTraceRuntime({
       const sessionKey = activeRunSessionKey(run)
       if (sessionKey) dockBadge.markAttention(sessionKey, {
         windowFocused: Boolean(getWindow()?.isFocused()),
-        sessionViewed: runs.isViewed(run.runId),
+        sessionViewed: run.conversationId ? dockBadge.isViewed(sessionKey) : runs.isViewed(run.runId),
         needsAttention: true
       })
     }

@@ -1,5 +1,5 @@
 import type { ConversationSummary } from '@shared/conversation-api'
-import { sessionAttentionKey } from '@shared/session-attention'
+import { conversationAttentionKey, sessionAttentionKey } from '@shared/session-attention'
 import type { ProjectMeta, SessionMeta } from './env'
 import type { RemoteSessionRef } from '@shared/desktop-remote'
 import type { RemoteProjectGroup } from './components/SidebarRemoteProjects'
@@ -91,7 +91,8 @@ export function sidebarActivity(
         blocked: Boolean(conversation.deletion) ||
           (conversation.fork !== undefined && conversation.fork.status !== 'accepted') ||
           (!active && conversation.blockedReason !== undefined),
-        outcome: conversation.lastRunOutcome
+        outcome: conversation.lastRunOutcome,
+        unread: unreadSessionKeys.has(conversationAttentionKey(conversation.id))
       })
       if (!status) continue
       // A child's own run is background activity of its parent, so it is listed here with

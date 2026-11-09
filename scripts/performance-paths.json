@@ -152,12 +152,14 @@
         "ipc.agent:loadSessionOlder",
         "ipc.agent:turnTerminalEvidence",
         "ipc.conversation:read",
+        "ipc.conversation:setViewed",
         "ipc.conversation:readItem",
         "ipc.conversation:readSideChatSnapshot"
       ],
       "sources": [
         "src/main/session-history.ts",
         "src/main/conversation-read.ts",
+        "src/main/bootstrap/conversation-attention.ts",
         "src/main/conversation-turn-history.ts",
         "src/main/bootstrap/history-load.ts",
         "src/main/bootstrap/history-project-recency.ts",

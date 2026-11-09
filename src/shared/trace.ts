@@ -76,6 +76,8 @@ export interface McpCallRef {
 // 与 renderer 的 Turn 结构一致（结构化类型，可互赋）。
 export interface ActiveRun {
   runId: string
+  /** Stable owner for managed-conversation attention, independent of Provider bindings. */
+  conversationId?: string
   providerId?: ProviderId
   agentProfileId?: string
   cwd?: string

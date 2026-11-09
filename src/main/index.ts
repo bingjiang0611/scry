@@ -47,6 +47,7 @@ import { ensureMcpExecutionAuthorized, authorizedMcpExecution } from './bootstra
 import { registerWorkspaceHandlers } from './bootstrap/workspace'
 import { registerAppAgentHandlers } from './bootstrap/app-agent'
 import { registerConversationHandlers } from './bootstrap/conversation'
+import { registerConversationAttention } from './bootstrap/conversation-attention'
 import { createProviderRuntime } from './bootstrap/provider-runtime'
 import { createWorkspaceRuntime } from './bootstrap/workspace-runtime'
 import { createPiProfileRuntime } from './bootstrap/pi-profiles'
@@ -119,6 +120,7 @@ const createWindow = (): void => createBootstrapWindow({
   traceOutput,
   runTraces,
   dockBadge,
+  resetSessionAttention: () => resetConversationAttention(),
   isShuttingDown: () => isShuttingDown,
   rendererAutoReloadCooldownMs,
   rendererRestart
@@ -224,6 +226,10 @@ const sessionDeletion = registerSessionDeletionHandlers({
 })
 const { deleteOneSession, sessionRefFromRequest, changeLegacySessionMetadata } = sessionDeletion
 
+const resetConversationAttention = registerConversationAttention({
+  handleTrusted, conversationStore, resolveKnownProjectDirectory, getWindow: () => win,
+  clearLegacyFocus: () => { runs.focus(null) }, invalidateSessionHistoryLoad, dockBadge
+})
 const { prepareConversationDeletion } = registerConversationHandlers({
   handleTrusted, resolveKnownProjectDirectory, providerContextKey, contextAdmission, getStartupManagedRecovery: () => startupManagedRecovery,
   appSessionStore, conversationStore, getRuns: () => runs, providerRegistry, deletingSessions, adoptingSessionKeys,

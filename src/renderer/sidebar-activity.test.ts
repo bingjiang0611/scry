@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { activityGroups, sidebarActivity } from './sidebar-activity'
 import type { ProjectMeta } from './env'
-import { sessionAttentionKey } from '@shared/session-attention'
+import { conversationAttentionKey, sessionAttentionKey } from '@shared/session-attention'
 
 const remoteProject = {
   key: '["mac2","/remote/rotom-team"]',
@@ -28,6 +28,15 @@ const projects: ProjectMeta[] = [{
 
 const empty = new Set<string>()
 describe('sidebar activity projection', () => {
+  it('keeps unread managed conversations discoverable after the run has settled', () => {
+    const project = { ...projects[0], sessions: [], conversations: [
+      { ...projects[0].conversations![0], activeRunId: undefined }
+    ] }
+    const unread = new Set([conversationAttentionKey('logical')])
+    expect(sidebarActivity([project], empty, empty, '', [], unread).map(row => row.group)).toEqual(['updates'])
+    expect(sidebarActivity([project], empty, empty, '', [], empty)).toEqual([])
+  })
+
   it('uses live run evidence, gives questions precedence, and does not call inactive history completed', () => {
     const rows = sidebarActivity(projects, new Set(['run-a']), new Set(['run-a', 'run-b']), '')
     expect(rows.map((row) => [row.kind, row.group])).toEqual([

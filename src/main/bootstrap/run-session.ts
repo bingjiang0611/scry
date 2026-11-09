@@ -52,7 +52,7 @@ export function createSessionPublisher(deps: {
     const previousSessionKey = deps.scopedSessionKey(deps.runState.externalSessionId ?? deps.runState.sessionId ?? deps.runId)
     deps.runState.sessionId = sessionId
     deps.runState.externalSessionId = sessionId
-    deps.dockBadge.rekey(previousSessionKey, deps.scopedSessionKey(sessionId))
+    if (!deps.managedConversation) deps.dockBadge.rekey(previousSessionKey, deps.scopedSessionKey(sessionId))
     if (deps.cwd) {
       try { updateRunAttachmentOwner(app.getPath('userData'), deps.runId, { providerId: deps.providerId, cwd: deps.cwd, sessionId }) } catch (error) {
         console.warn('[scry] attachment ownership update deferred:', deps.runId, error)
@@ -73,7 +73,7 @@ export function createSessionPublisher(deps: {
         console.warn('[scry] native session catalog update deferred:', deps.runId, error)
       }
     }
-    if (deps.runs.isViewed(deps.runId)) {
+    if (!deps.managedConversation && deps.runs.isViewed(deps.runId)) {
       deps.dockBadge.view(deps.scopedSessionKey(sessionId), Boolean(deps.getWindow()?.isFocused()))
     }
     if (notifiedSessionId === sessionId) return

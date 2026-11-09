@@ -226,6 +226,18 @@ describe('DockBadgeState', () => {
     expect(setCount).not.toHaveBeenCalled()
   })
 
+  it('释放问题提醒不丢失当前查看身份，切走旧视图不影响新的视图', () => {
+    const badge = new DockBadgeState(() => {})
+    badge.view('conversation-a', true)
+    badge.releaseQuestionAttention('conversation-a', 0)
+    expect(badge.isViewed('conversation-a')).toBe(true)
+    badge.view('conversation-b', true)
+    badge.unview('conversation-a')
+    expect(badge.isViewed('conversation-b')).toBe(true)
+    badge.unview('conversation-b')
+    expect(badge.isViewed('conversation-b')).toBe(false)
+  })
+
   it('问题关闭后释放该会话的未读 badge，仍有待答问题则保留', () => {
     const setCount = vi.fn()
     const badge = new DockBadgeState(setCount)
