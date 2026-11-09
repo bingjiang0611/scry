@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
-import { isViewportShort, shouldLoadOlder } from '../history-autoload'
+import { isViewportShort, shouldLoadOlder, canFill, initialFillRetryState, settleFillRetry, type FillRetryState } from '../history-autoload'
 
 // 静态渲染（测试/SSR）没有布局阶段；此时退回 useEffect，避免 React 的 useLayoutEffect 警告。
 const useLayoutEffectCompat = typeof window === 'undefined' ? useEffect : useLayoutEffect
@@ -45,37 +45,44 @@ export function useHistoryAutoload({ scrollRef, turnsLength, hasOlder, loading, 
   const latest = useRef({ hasOlder, loading, onLoadOlder })
   latest.current = { hasOlder, loading, onLoadOlder }
   const anchor = useRef<Anchor | null>(null)
+  const fillRetry = useRef<FillRetryState>(initialFillRetryState)
 
-  const request = (reason: 'scroll' | 'fill'): void => {
+  const request = (reason: 'scroll' | 'fill'): boolean => {
     const el = scrollRef.current
     const state = latest.current
-    if (!el || !state.onLoadOlder) return
+    if (!el || !state.onLoadOlder) return false
     const viewportShort = isViewportShort(el.scrollHeight, el.clientHeight)
     // 只有用户滚动到位、或内容不足一屏时才取页；否则交给滚动监听。
-    if (reason === 'fill' && !viewportShort) return
+    if (reason === 'fill' && !viewportShort) return false
     if (!shouldLoadOlder({
       scrollTop: el.scrollTop,
       hasOlder: state.hasOlder,
       loading: state.loading,
       viewportShort
-    })) return
+    })) return false
     const node = firstVisibleTurn(el)
     anchor.current = node ? { node, contentTop: contentTopOf(el, node) } : null
     state.onLoadOlder()
+    return true
   }
 
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
-    const onScroll = (): void => request('scroll')
+    const onScroll = (): void => {
+      request('scroll')
+    }
     el.addEventListener('scroll', onScroll, { passive: true })
     return () => el.removeEventListener('scroll', onScroll)
     // request 每次渲染重建，但只读 ref 里的最新状态；监听器只跟随滚动容器绑定一次。
   }, [scrollRef])
 
   // 内容不足一屏时没有滚动事件：每拼上一页后检查是否还需要继续补。
+  // 失败（请求结束却没有新轮次）只阻断自动重试，手动加载与滚动路径不受影响。
   useEffect(() => {
-    request('fill')
+    fillRetry.current = settleFillRetry(fillRetry.current, turnsLength, loading)
+    if (!canFill(fillRetry.current, turnsLength)) return
+    if (request('fill')) fillRetry.current = { ...fillRetry.current, pendingTurns: turnsLength }
   }, [turnsLength, hasOlder, loading])
 
   // 上方插入内容后把阅读位置放回原位；只是末尾追加时位移为 0，不做任何调整。

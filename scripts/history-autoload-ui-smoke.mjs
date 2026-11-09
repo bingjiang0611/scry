@@ -109,7 +109,11 @@ async function exerciseHistoryAutoload(PAGE, TOTAL) {
   }
 
   const reading = await run('fixture-reading')
-  return { reading }
+  // 持续失败时只允许一次自动补页；重试要靠用户自己滚动或点按钮。
+  await new Promise((resolve) => setTimeout(resolve, 400))
+  const attempts = Number(fixture('fixture-failing').dataset.attempts)
+  if (attempts !== 1) throw new Error('fixture-failing: auto-retried a failed page ' + attempts + ' times')
+  return { reading, failedPageAttempts: attempts }
 }
 
 try {

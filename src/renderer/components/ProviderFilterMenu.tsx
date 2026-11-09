@@ -34,7 +34,12 @@ export function ProviderFilterMenu({
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
-  const close = (): void => setOpen(false)
+  // 关闭前把焦点退回触发器：选中一项后菜单就卸载了，否则焦点会掉到 body。
+  // 外部点击时焦点不在根节点内，这里不动焦点，避免抢走用户刚点的地方。
+  const close = (): void => {
+    if (rootRef.current?.contains(document.activeElement)) triggerRef.current?.focus()
+    setOpen(false)
+  }
   useMenuDismiss({ open, close, rootRef, triggerRef, menuRef })
   const pick = (provider: string): void => {
     onChange(provider)

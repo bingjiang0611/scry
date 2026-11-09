@@ -108,6 +108,8 @@ async function exerciseProviderMenus() {
   await frame()
   if (picker.querySelector('[role="menu"]')) throw new Error('selecting a provider did not close the menu')
   if (picker.querySelector('button[aria-label], button').textContent.includes('Rotom')) throw new Error('trigger still shows the previous provider')
+  // 选中即关闭：焦点不能掉到 body，要回到触发按钮（与 Esc 路径一致）。
+  if (document.activeElement !== trigger) throw new Error('picking a provider lost focus instead of returning it to the trigger')
 
   // 归档筛选：同一套单选语义，触发按钮显示当前值。
   stage = 'filter'
@@ -133,6 +135,8 @@ async function exerciseProviderMenus() {
   await frame()
   if (filter.querySelector('[role="menu"]')) throw new Error('filter menu stayed open after picking a provider')
   if (filterTrigger.textContent.trim() !== 'Codex') throw new Error('filter trigger label after picking: ' + filterTrigger.textContent.trim())
+  if (document.activeElement !== filterTrigger) throw new Error('picking a filter option lost focus instead of returning it to the trigger')
+  if (filterTrigger.getAttribute('aria-expanded') !== 'false') throw new Error('filter trigger still reports expanded after picking')
 
   return {
     metrics,

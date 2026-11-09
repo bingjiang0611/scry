@@ -64,8 +64,45 @@ function Paged({ id }: { id: string }) {
   )
 }
 
+/**
+ * 取页一直失败、内容又不足一屏：没有滚动事件可等，自动补页不能每结算一次就再试一次。
+ * 真实失败路径由 main 的取页错误产生，这里只复现“请求结束但轮次没增加”的形态。
+ */
+function Failing({ id }: { id: string }) {
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const [loading, setLoading] = useState(false)
+  const [attempts, setAttempts] = useState(0)
+  const startLoad = (): void => {
+    if (loading) return
+    setLoading(true)
+    window.setTimeout(() => {
+      setAttempts((count) => count + 1)
+      setLoading(false)
+    }, 20)
+  }
+  useHistoryAutoload({ scrollRef: scrollerRef, turnsLength: 3, hasOlder: true, loading, onLoadOlder: startLoad })
+  return (
+    <section className="fixture" id={id} data-attempts={attempts}>
+      <div
+        className="chat-transcript scroller"
+        ref={scrollerRef}
+        style={{ height: 240, overflowY: 'auto', overflowAnchor: 'none', border: '1px solid #333', width: 520 }}
+      >
+        <div className="chat-transcript-content">
+          {[0, 1, 2].map((index) => (
+            <article key={index} className="transcript-turn" data-run-id={`failing-${index}`} style={{ height: ROW_BASE }}>
+              第 {index + 1} 轮
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 createRoot(document.querySelector('#root')!).render(
   <main style={{ display: 'flex', gap: 24, padding: 24 }}>
     <Paged id="fixture-reading" />
+    <Failing id="fixture-failing" />
   </main>
 )

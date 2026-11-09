@@ -1,7 +1,14 @@
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { readCssManifest } from './css-test-reader'
-import { HISTORY_AUTOLOAD_THRESHOLD_PX, isViewportShort, shouldLoadOlder } from './history-autoload'
+import {
+  HISTORY_AUTOLOAD_THRESHOLD_PX,
+  canFill,
+  initialFillRetryState,
+  isViewportShort,
+  settleFillRetry,
+  shouldLoadOlder
+} from './history-autoload'
 
 const css = readCssManifest(join(__dirname, 'styles.css'))
 
@@ -30,6 +37,33 @@ describe('时间线自动续读的触发条件', () => {
     expect(isViewportShort(400, 400)).toBe(true)
     expect(isViewportShort(400 + HISTORY_AUTOLOAD_THRESHOLD_PX, 400)).toBe(true)
     expect(isViewportShort(400 + HISTORY_AUTOLOAD_THRESHOLD_PX + 1, 400)).toBe(false)
+  })
+})
+
+describe('主动补页失败后不自动重试', () => {
+  it('在途请求不结算，仍允许结算后的下一次判断', () => {
+    const pending = { pendingTurns: 10, blockedTurns: null }
+    expect(settleFillRetry(pending, 20, true)).toBe(pending)
+    expect(canFill(pending, 10)).toBe(false)
+  })
+
+  it('请求结束且轮次没增加时，同一批轮次不再自动补页', () => {
+    // 短视口没有滚动事件可等：不阻断就会在 loading 回到 false 后立刻再发一次，持续失败即无限重试。
+    const failed = settleFillRetry({ pendingTurns: 10, blockedTurns: null }, 10, false)
+    expect(failed.blockedTurns).toBe(10)
+    expect(canFill(failed, 10)).toBe(false)
+  })
+
+  it('补页成功或会话内容变化后重新允许自动补页', () => {
+    const loaded = settleFillRetry({ pendingTurns: 10, blockedTurns: null }, 30, false)
+    expect(loaded.blockedTurns).toBeNull()
+    expect(canFill(loaded, 30)).toBe(true)
+    const blocked = settleFillRetry({ pendingTurns: 10, blockedTurns: null }, 10, false)
+    expect(canFill(blocked, 30)).toBe(true)
+  })
+
+  it('初始状态允许补页', () => {
+    expect(canFill(initialFillRetryState, 10)).toBe(true)
   })
 })
 
