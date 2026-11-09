@@ -18,37 +18,34 @@ extension G0Transport {
 
   static func withRelayChannel<T: Sendable>(endpoint: RelayEndpoint, mode: String, identity: G0ProbeIdentity,
     body: @Sendable (Channel, NIOSSLContext) async throws -> T) async throws -> T {
-    let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+    // One-shot tunnels share the process-wide loop: creating and tearing down a
+    // thread per request only added latency.
+    let (channel, innerContext, tunnel) = try await connectRelayChannel(endpoint: endpoint, mode: mode, identity: identity,
+                                                                         group: MultiThreadedEventLoopGroup.singleton)
+    // Cancel an established tunnel immediately. Bootstrap retains its
+    // bounded 10-second deadline, rather than leaving a detached connection.
+    let reply: T
     do {
-      let (channel, innerContext, tunnel) = try await connectRelayChannel(endpoint: endpoint, mode: mode, identity: identity, group: group)
-      // Cancel an established tunnel immediately. Bootstrap retains its
-      // bounded 10-second deadline, rather than leaving a detached connection.
-      let reply: T
-      do {
-        reply = try await withTaskCancellationHandler {
-          try Task.checkCancellation()
-          return try await body(channel, innerContext)
-        } onCancel: { channel.close(promise: nil) }
-      } catch {
-        let failure = try await channel.eventLoop.submit { tunnel.retainingCloseCause(for: error) }.get()
-        try? await channel.close()
-        throw RelayTransportError.identifyingHandshake(failure, layer: .host)
-      }
-      try? await channel.close()
-      try await group.shutdownGracefully()
-      return reply
+      reply = try await withTaskCancellationHandler {
+        try Task.checkCancellation()
+        return try await body(channel, innerContext)
+      } onCancel: { channel.close(promise: nil) }
     } catch {
-      try? await group.shutdownGracefully()
-      throw error
+      let failure = try await channel.eventLoop.submit { tunnel.retainingCloseCause(for: error) }.get()
+      try? await channel.close()
+      throw RelayTransportError.identifyingHandshake(failure, layer: .host)
     }
+    try? await channel.close()
+    return reply
   }
 
   // Dials the relay and completes the outer WebSocket upgrade. Returns the
   // channel (TunnelCodec installed, no inner TLS yet) and the inner mTLS context
   // pinned to the host anchor. Retain the codec to recover an early close cause
-  // after pipeline teardown. The caller owns the channel and the group.
+  // after pipeline teardown. The caller owns the channel. `group` is used only
+  // by the POSIX path; Apple platforms dial through Network.framework.
   static func connectRelayChannel(endpoint: RelayEndpoint, mode: String, identity: G0ProbeIdentity,
-                                  group: EventLoopGroup) async throws -> (Channel, NIOSSLContext, TunnelCodec) {
+                                  group: EventLoopGroup, recorder: ConnectTimingRecorder? = nil) async throws -> (Channel, NIOSSLContext, TunnelCodec) {
     guard (1...65535).contains(endpoint.port), ["pair", "run"].contains(mode),
           !endpoint.hostId.isEmpty, endpoint.hostId.count <= 64 else { throw ProbeError.invalidArguments }
     do {
@@ -76,50 +73,42 @@ extension G0Transport {
         outer.certificateVerification = .fullVerification
         outerContext = try NIOSSLContext(configuration: outer)
       }
-      var inner = TLSConfiguration.makeClientConfiguration()
-      inner.minimumTLSVersion = .tlsv13
-      inner.maximumTLSVersion = .tlsv13
-      inner.trustRoots = .certificates(try NIOSSLCertificate.fromPEMBytes(Array(identity.innerCA)))
-      // Chain-to-anchor is the trust decision; the per-launch host leaf has no SAN.
-      inner.certificateVerification = .noHostnameVerification
-      if let certificate = identity.certificate, let privateKey = identity.privateKey {
-        inner.certificateChain = try NIOSSLCertificate.fromPEMBytes(Array(certificate)).map { .certificate($0) }
-        inner.privateKey = .privateKey(try NIOSSLPrivateKey(bytes: Array(privateKey), format: .pem))
-      } else if mode != "pair" {
-        // Only the pairing bootstrap may omit the client certificate.
-        throw ProbeError.invalidArguments
-      }
-      let innerContext = try NIOSSLContext(configuration: inner)
+      let innerContext = try innerTLSContext(identity: identity, mode: mode)
       let tunnel = TunnelCodec()
       let uri = "/?host=\(endpoint.hostId)&mode=\(mode)"
       let hostHeader = endpoint.relayServerName ?? endpoint.host
-      let upgrade: EventLoopFuture<Channel> = try await ClientBootstrap(group: group)
-        .connectTimeout(.seconds(10))
-        .channelOption(ChannelOptions.writeBufferWaterMark, value: ChannelOptions.Types.WriteBufferWaterMark(low: 262_144, high: 524_288))
-        .connect(host: endpoint.host, port: endpoint.port) { channel in
-          channel.eventLoop.makeCompletedFuture {
-            let pipeline = channel.pipeline.syncOperations
-            if let outerContext {
-              try pipeline.addHandler(NIOSSLClientHandler(context: outerContext, serverHostname: endpoint.relayServerName ?? endpoint.host))
-            }
-            let upgrader = NIOTypedWebSocketClientUpgrader<Channel>(maxFrameSize: 1_572_864, upgradePipelineHandler: { channel, _ in
-              channel.eventLoop.makeCompletedFuture {
-                try channel.pipeline.syncOperations.addHandler(tunnel)
-                return channel
-              }
-            })
-            let headers = HTTPHeaders([("Host", hostHeader), ("Content-Length", "0")])
-            let head = HTTPRequestHead(version: .http1_1, method: .GET, uri: uri, headers: headers)
-            let configuration = NIOTypedHTTPClientUpgradeConfiguration(upgradeRequestHead: head, upgraders: [upgrader], notUpgradingCompletionHandler: { channel in
-              channel.eventLoop.makeFailedFuture(ProbeError.invalidFrame)
-            })
-            let timeout = channel.eventLoop.scheduleTask(in: .seconds(10)) { channel.close(promise: nil) }
-            let upgraded = try configureWebSocketUpgrade(pipeline, configuration: configuration)
-            upgraded.whenComplete { _ in timeout.cancel() }
-            return upgraded
-          }
+      let serverName = endpoint.relayServerName ?? endpoint.host
+      let channel = try await RemoteBootstrap.connect(host: endpoint.host, port: endpoint.port, timeout: .seconds(10),
+                                                      posixGroup: group) { channel -> EventLoopFuture<Channel> in
+        let pipeline = channel.pipeline.syncOperations
+        if let outerContext {
+          try pipeline.addHandler(NIOSSLClientHandler(context: outerContext, serverHostname: serverName))
         }
-      let channel = try await upgrade.get()
+        if let recorder {
+          try pipeline.addHandler(ConnectTimingHandler(recorder: recorder, observesOuterTLS: outerContext != nil))
+        }
+        let upgrader = NIOTypedWebSocketClientUpgrader<Channel>(maxFrameSize: 1_572_864, upgradePipelineHandler: { channel, response in
+          // Untrusted diagnostics from the relay's 101 response.
+          recorder?.mark(\.upgradeMs)
+          recorder?.update { timing in
+            timing.colo = ConnectTimingRecorder.colo(fromRay: response.headers.first(name: "cf-ray"))
+            timing.relayWaitMs = response.headers.first(name: "x-scry-relay-wait-ms").flatMap { Int($0) }
+          }
+          return channel.eventLoop.makeCompletedFuture {
+            try channel.pipeline.syncOperations.addHandler(tunnel)
+            return channel
+          }
+        })
+        let headers = HTTPHeaders([("Host", hostHeader), ("Content-Length", "0")])
+        let head = HTTPRequestHead(version: .http1_1, method: .GET, uri: uri, headers: headers)
+        let configuration = NIOTypedHTTPClientUpgradeConfiguration(upgradeRequestHead: head, upgraders: [upgrader], notUpgradingCompletionHandler: { channel in
+          channel.eventLoop.makeFailedFuture(ProbeError.invalidFrame)
+        })
+        let timeout = channel.eventLoop.scheduleTask(in: .seconds(10)) { channel.close(promise: nil) }
+        let upgraded = try configureWebSocketUpgrade(pipeline, configuration: configuration)
+        upgraded.whenComplete { _ in timeout.cancel() }
+        return upgraded
+      }
       return (channel, innerContext, tunnel)
     } catch {
       // An HTTP WebSocket upgrade cannot complete before outer TLS succeeds.

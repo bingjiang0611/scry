@@ -36,9 +36,23 @@ public enum RelayTransportError: Error, Sendable {
     case RelayTransportError.timedOut: return true
     case let RelayTransportError.closed(code, _):
       guard let code else { return true }
-      return [1000, 1001, 1006, 1011, 1012, 1013].contains(code)
+      // 4001: the relay saw no live leg from the Mac. It may wake or reconnect,
+      // so a bounded read recovery is still worthwhile.
+      return [1000, 1001, 1006, 1011, 1012, 1013, Self.hostOfflineCloseCode].contains(code)
     default: return false
     }
+  }
+
+  // The relay closes with this code when the Mac has no live leg at all (asleep,
+  // offline, or Scry not running) rather than merely no free one (1013).
+  public static let hostOfflineCloseCode: UInt16 = 4001
+  public static let noHostLegCloseCode: UInt16 = 1013
+
+  public static func isHostOffline(_ error: Error) -> Bool {
+    if case let RelayTransportError.closed(code, _) = error { return code == hostOfflineCloseCode }
+    if case let LaneFailure.notSent(inner) = error { return isHostOffline(inner) }
+    if case let LaneFailure.lost(inner) = error { return isHostOffline(inner) }
+    return false
   }
 
   // Only handshake failures acquire a layer. Preserve other errors and the
@@ -50,8 +64,9 @@ public enum RelayTransportError: Error, Sendable {
 }
 
 // Converts the outer WebSocket's binary frames into the inner TLS byte stream.
-// Text, fragmentation and overflow terminate the stream; never skip bytes and
-// continue an allegedly reliable TLS connection after a gap.
+// Fragmentation and overflow terminate the stream; never skip bytes and
+// continue an allegedly reliable TLS connection after a gap. Whole text frames
+// are relay control and are dropped: they never carry tunnel bytes.
 // All mutable state is confined to this connection's channel event loop.
 final class TunnelCodec: ChannelDuplexHandler, @unchecked Sendable {
   typealias InboundIn = WebSocketFrame
@@ -86,6 +101,10 @@ final class TunnelCodec: ChannelDuplexHandler, @unchecked Sendable {
     case .ping:
       context.writeAndFlush(wrapOutboundOut(WebSocketFrame(fin: true, opcode: .pong, maskKey: .random(), data: frame.unmaskedData)), promise: nil)
     case .pong: break
+    // Relay control text (e.g. a heartbeat an older relay forwarded from the
+    // Mac) is never tunnel data: inner TLS is binary only. Dropping it cannot
+    // skip a byte of the TLS stream.
+    case .text: break
     case .connectionClose:
       var payload = frame.unmaskedData
       let code = payload.readInteger(as: UInt16.self)

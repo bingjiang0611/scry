@@ -44,6 +44,7 @@ extension G0Transport {
     let op = "sessionsPage"; let cursor: Int; let limit: Int; let snapshot: String?
     var includeArchived: Bool? = nil
     var keepAlive: Bool? = nil
+    var known: String? = nil
   }
   struct RunHistoryRequest: Encodable { let op = "history"; let historyScope: String = "session"; let providerId: String; let cwd: String; let externalSessionId: String; var agentProfileId = HistoryProfileValue(value: nil) }
   struct RunHistoryVersionRequest: Encodable { let op = "historyVersion"; let historyScope: String = "session"; let providerId: String; let cwd: String; let externalSessionId: String; var agentProfileId = HistoryProfileValue(value: nil) }
@@ -63,9 +64,11 @@ extension G0Transport {
     let op = "historyPage"; let historyScope: String = "session"; let providerId: String; let cwd: String; let externalSessionId: String
     let cursor: Int; let limit: Int?; let snapshot: String?
     var keepAlive: Bool? = nil
+    var encoding: String? = nil
   }
   struct RunOutputRequest: Encodable { let op = "output"; let runId: String; let cursor: Int }
   struct RunWatchRequest: Encodable { let op = "watch"; let runId: String; let cursor: Int; let outputCursor: Int; let waitMs: Int }
+  struct RunWatchStreamRequest: Encodable { let op = "watchStream"; let runId: String; let cursor: Int; let outputCursor: Int }
   struct RunStopRequest: Encodable { let op = "stop"; let runId: String }
   public struct SessionActionContext: Encodable, Sendable {
     public let cwd: String; public let providerId: String; public let externalSessionId: String; public let agentProfileId: String?

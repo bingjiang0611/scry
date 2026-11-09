@@ -33,17 +33,26 @@ extension G0Transport {
       guard let page = reply.historyTurnsPage else { throw ProbeError.unexpectedReply }
       return try page.validated(before: before, limit: limit, expectedSnapshot: snapshot)
     }
-    public func page(providerId: String, cwd: String, externalSessionId: String, cursor: Int, snapshot: String?, agentProfileId: String? = nil) async throws -> RunHistoryPage {
+    // `compressed` asks for DEFLATE pages. Older hosts ignore it and send raw
+    // pages (encoding nil). An execution-target route validates exact keys, so
+    // it is never asked there.
+    public func page(providerId: String, cwd: String, externalSessionId: String, cursor: Int, snapshot: String?, agentProfileId: String? = nil,
+                     compressed: Bool = false) async throws -> RunHistoryPage {
       var query = RunHistoryPageRequest(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, cursor: cursor, limit: 256 * 1_024, snapshot: snapshot, keepAlive: true)
       query.agentProfileId = HistoryProfileValue(value: agentProfileId)
+      if compressed && expectedTarget == nil { query.encoding = "deflate" }
       let request = try JSONEncoder().encode(query)
       let reply = try await response(request, limit: 512 * 1_024, expectedHistoryScope: "session")
       guard let page = reply.historyPage else { throw ProbeError.unexpectedReply }
       return page
     }
-    public func sessionsPage(cursor: Int, snapshot: String?, includeArchived: Bool = false) async throws -> RunSessionPage {
+    // `known`: first page only, the snapshot already held; an unchanged
+    // catalog then answers with `unchanged` and no rows. Not sent on an
+    // execution-target route, which validates exact keys.
+    public func sessionsPage(cursor: Int, snapshot: String?, includeArchived: Bool = false, known: String? = nil) async throws -> RunSessionPage {
       var query = RunSessionsPageRequest(cursor: cursor, limit: 100, snapshot: snapshot, keepAlive: true)
       if includeArchived { query.includeArchived = true }
+      if let known, cursor == 0, snapshot == nil, expectedTarget == nil { query.known = known }
       let request = try JSONEncoder().encode(query)
       let reply = try await response(request, limit: 2 * 1_024 * 1_024)
       guard let page = reply.sessionsPage else { throw ProbeError.unexpectedReply }
@@ -150,6 +159,50 @@ extension G0Transport {
                            questions: watch.questions,
                            output: RunOutputPage(chunks: watch.output.chunks, cursor: watch.output.cursor),
                            state: watch.state)
+  }
+
+  static func decodeWatch(_ line: Data, expectedTarget: ExecutionTargetBinding?) throws -> RunWatchOutcome {
+    let response = try decodeRun(line, expectedTarget: expectedTarget)
+    guard let watch = response.watch else { throw ProbeError.unexpectedReply }
+    return RunWatchOutcome(poll: RunPollOutcome(events: watch.poll.events, cursor: watch.poll.cursor),
+                           questions: watch.questions,
+                           output: RunOutputPage(chunks: watch.output.chunks, cursor: watch.output.cursor),
+                           state: watch.state)
+  }
+
+  // Pushed run observation: the host sends an update as soon as anything
+  // changes (and a heartbeat at least every 15 s) on the multiplexed tunnel,
+  // instead of the phone asking again after each reply. Updates arrive in
+  // order; the stream finishes after the update carrying a terminal state, or
+  // when the host ends it, and then the caller subscribes again from its
+  // cursors. Unavailable (older host, serial tunnel, execution target) throws
+  // `RunError.host("watch_stream_unavailable")` so the caller long-polls.
+  public static func relayRunWatchUpdates(endpoint: RelayEndpoint, runId: String, cursor: Int,
+                                          outputCursor: Int) -> AsyncThrowingStream<RunWatchOutcome, Error> {
+    AsyncThrowingStream { continuation in
+      let task = Task {
+        do {
+          guard endpoint.executionTarget == nil, let session = endpoint.session, session.supportsWatchStream else {
+            throw RunError.host(code: "watch_stream_unavailable")
+          }
+          let request = try JSONEncoder().encode(RunWatchStreamRequest(runId: runId, cursor: cursor, outputCursor: outputCursor))
+          let ending: Data
+          do {
+            ending = try await session.stream(request, lane: .watch, limit: 8 * 1_024 * 1_024) { line in
+              do { continuation.yield(try G0Transport.decodeWatch(line, expectedTarget: nil)) }
+              catch { continuation.finish(throwing: error) }
+            }
+          } catch is StreamUnavailable {
+            throw RunError.host(code: "watch_stream_unavailable")
+          }
+          continuation.yield(try G0Transport.decodeWatch(ending, expectedTarget: nil))
+          continuation.finish()
+        } catch {
+          continuation.finish(throwing: error)
+        }
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
   }
 
   // Long-poll for the live-run list (and optionally one session's history
