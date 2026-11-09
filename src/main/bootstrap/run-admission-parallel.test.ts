@@ -60,7 +60,11 @@ async function fixture(): Promise<Fixture> {
 }
 
 /** 注册一个「仍在运行」的 run，等价于生产里已经登记但尚未收口的一轮。 */
-function registerRun(current: Fixture, input: { runId: string; providerId?: ProviderId; sessionId?: string }): void {
+function registerRun(current: Fixture, input: {
+  runId: string; providerId?: ProviderId; sessionId?: string
+  /** 已对 UI 报完成（done）但收尾 Promise 尚未 resolve 的形态。 */
+  done?: boolean; settled?: Promise<void>
+}): void {
   const providerId = input.providerId ?? 'pi'
   const runtimeProvider = providerId === 'codex' ? 'codex_cli' : 'pi_rpc'
   const state: ActiveRun = {
@@ -71,14 +75,14 @@ function registerRun(current: Fixture, input: { runId: string; providerId?: Prov
     ...(input.sessionId ? { externalSessionId: input.sessionId, sessionId: input.sessionId } : {}),
     userText: input.runId,
     items: [],
-    done: false,
+    done: input.done ?? false,
     providerSettled: false
   }
   const control = {
     runId: input.runId, providerId, runtimeProvider, runState: state,
     interrupt: () => undefined, forceKill: () => undefined,
     getExternalSessionId: () => input.sessionId, getProviderTurnId: () => undefined,
-    settled: Promise.resolve()
+    settled: input.settled ?? Promise.resolve()
   } as unknown as RunControl
   current.runs.register(state, control)
 }
@@ -109,6 +113,8 @@ interface AdmissionRequest {
   providerId?: ProviderId
   /** A run that arrived through the daemon ledger; the App's own grant, App semantics. */
   viaDaemon?: boolean
+  /** 覆盖「等上一轮收尾」的上限，测试里用毫秒级边界，不必等生产的 20 s。 */
+  settleDeadlineMs?: number
 }
 
 async function admit(current: Fixture, request: AdmissionRequest = {}) {
@@ -152,7 +158,8 @@ async function admit(current: Fixture, request: AdmissionRequest = {}) {
     deletingSessions: current.deleting,
     conversationStore: () => current.store,
     assertLegacyConversationWriteAllowed: (scope) => current.store.assertLegacyWriteAllowed(scope),
-    recordingBlockedSessions: new Map()
+    recordingBlockedSessions: new Map(),
+    ...(request.settleDeadlineMs === undefined ? {} : { settleDeadlineMs: request.settleDeadlineMs })
   })
 }
 
@@ -212,6 +219,24 @@ describe('parallel run admission in one workspace', () => {
     await expect(admit(current, {
       conversation: { conversationId: conversation, runId: 'run-second', target: piTarget, resumeSessionId: 'native-shared' }
     })).rejects.toThrow('同一会话已有一轮正在运行')
+  })
+
+  // G1：上一轮已对 UI 报完成、但收尾 Promise 永不 resolve 时，新一轮曾无限等待。
+  // 有界等待把「看不见的等待」换成用户读得懂的拒绝原因。
+  it('stops waiting for a completed run whose teardown never settles', async () => {
+    const conversation = (await current.store.create(current.cwd)).id
+    await acceptedTurn(current, conversation, 'run-first')
+    await beginTurn(current, conversation, 'run-second')
+    registerRun(current, {
+      runId: 'run-first', sessionId: 'native-shared',
+      done: true, settled: new Promise<void>(() => {})
+    })
+    const started = Date.now()
+    await expect(admit(current, {
+      conversation: { conversationId: conversation, runId: 'run-second', target: piTarget, resumeSessionId: 'native-shared' },
+      settleDeadlineMs: 30
+    })).rejects.toThrow('同一会话已有一轮正在运行')
+    expect(Date.now() - started).toBeLessThan(2_000)
   })
 
   it('keeps a native session alias exclusive for a different owner', async () => {

@@ -2,7 +2,7 @@ import type { ActiveRun } from '../../shared/trace'
 import type { ProviderId } from '../../shared/provider'
 import { AgentRuntimeError } from '../run-outcome'
 import {
-  expectedRestartSourceMatches, expectedSessionMatches,
+  ADMISSION_DEADLINE_MS, expectedRestartSourceMatches, expectedSessionMatches,
   runConflictsWithSession, waitForCompletedRuns
 } from '../context-admission'
 import type { RunRegistry } from '../run-registry'
@@ -23,7 +23,7 @@ export async function prepareRunAdmission(
     getStartupManagedRecovery, isShuttingDown, providerRegistry, providerContextKey, providerSessionKey,
     resetSessionContext, sessionRevisionByContext, sessionByContext, sessionAliasesByContext,
     runs, appSessionStore, deletingSessions, conversationStore,
-    assertLegacyConversationWriteAllowed, recordingBlockedSessions
+    assertLegacyConversationWriteAllowed, recordingBlockedSessions, settleDeadlineMs
   }: {
     providerRegistry: ProviderRegistry
     getStartupManagedRecovery: () => Promise<void>
@@ -40,6 +40,8 @@ export async function prepareRunAdmission(
     conversationStore: () => ConversationStore
     assertLegacyConversationWriteAllowed: (scope: NativeSessionScope) => Promise<void>
     recordingBlockedSessions: Map<string, string>
+    /** 覆盖「等上一轮收尾」的上限；默认 ADMISSION_DEADLINE_MS。 */
+    settleDeadlineMs?: number
   }
 ) {
   const {
@@ -122,7 +124,7 @@ export async function prepareRunAdmission(
     const entry = runs.get(run.runId)
     return entry ? [{ done: run.done, settled: entry.control.settled }] : []
   })
-  if (!(await waitForCompletedRuns(conflictingEntries))) {
+  if (!(await waitForCompletedRuns(conflictingEntries, { admitDeadlineMs: settleDeadlineMs ?? ADMISSION_DEADLINE_MS }))) {
     throw new AgentRuntimeError('同一会话已有一轮正在运行', {
       provider: runtimeProvider,
       stage: 'frontdoor',

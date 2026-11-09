@@ -94,6 +94,47 @@ describe('context admission', () => {
     expect(action).not.toHaveBeenCalled()
   })
 
+  // G1：一个永不释放的持有者曾让后续每一轮都停在 admission 里，App 既看不到错误也无法停止。
+  // 有界等待把「永远等待」变成带原因的失败，并且不留下幽灵排队位。
+  it('gives up waiting for a holder that never releases instead of queueing forever', async () => {
+    const admission = new ContextAdmission({ admitDeadlineMs: 30 })
+    let releaseHolder!: () => void
+    const held = new Promise<void>((resolve) => { releaseHolder = resolve })
+    const holder = admission.run('a', () => held)
+    const started = Date.now()
+    await expect(admission.run('a', async () => 'next')).rejects.toThrow('run_admission_timeout')
+    expect(Date.now() - started).toBeLessThan(2_000)
+    // 超时那一轮释放自己的占位：持有者一结束，后续 run 立即通过，而不是排在空气后面。
+    releaseHolder()
+    await holder
+    await expect(admission.run('a', async () => 'after')).resolves.toBe('after')
+  })
+
+  it('keeps waiting without a deadline, so the bound is an explicit choice', async () => {
+    const admission = new ContextAdmission({ admitDeadlineMs: Number.POSITIVE_INFINITY })
+    let releaseHolder!: () => void
+    const held = new Promise<void>((resolve) => { releaseHolder = resolve })
+    const holder = admission.run('a', () => held)
+    const queued = admission.run('a', async () => 'next')
+    await new Promise((resolve) => { setTimeout(resolve, 60) })
+    releaseHolder()
+    await holder
+    await expect(queued).resolves.toBe('next')
+  })
+
+  it('reports a UI-complete run that never settles as no longer waitable', async () => {
+    const never = new Promise<void>(() => {})
+    const started = Date.now()
+    await expect(waitForCompletedRuns([{ done: true, settled: never }], { admitDeadlineMs: 30 })).resolves.toBe(false)
+    expect(Date.now() - started).toBeLessThan(2_000)
+    // 控制组：没有 deadline 时同一个输入仍在等待，说明上面的 false 来自边界而不是恰好完成。
+    let finished = false
+    const unbounded = waitForCompletedRuns([{ done: true, settled: never }]).then(() => { finished = true })
+    await new Promise((resolve) => { setTimeout(resolve, 60) })
+    expect(finished).toBe(false)
+    void unbounded
+  })
+
   it('waits for a UI-complete run to settle before admitting the queued turn', async () => {
     let releasePipeline!: () => void
     const settled = new Promise<void>((resolve) => { releasePipeline = resolve })
