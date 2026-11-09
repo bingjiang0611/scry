@@ -49,7 +49,19 @@ export const DAEMON_LOCAL_OP_CHANNELS: Readonly<Record<string, { op: string; met
   'agent:detect': { op: 'providerCatalog', method: 'detect', read: true },
   'agent:detectFast': { op: 'providerCatalog', method: 'detectFast', read: true },
   'agent:providerDescriptors': { op: 'providerCatalog', method: 'providerDescriptors', read: true },
-  'agent:runControls': { op: 'providerCatalog', method: 'runControls', read: true }
+  'agent:runControls': { op: 'providerCatalog', method: 'runControls', read: true },
+  // Conversation ledger reads (B4-L4-2a). previewSideChat streams the source prefix into
+  // a capture manifest, so it is not replayed after a lost reply.
+  'conversation:list': { op: 'conversation', method: 'list', read: true },
+  'conversation:read': { op: 'conversation', method: 'read', read: true },
+  'conversation:readItem': { op: 'conversation', method: 'readItem', read: true },
+  'conversation:preview': { op: 'conversation', method: 'preview', read: true },
+  'conversation:previewAdoption': { op: 'conversation', method: 'previewAdoption', read: true },
+  'conversation:previewDeletion': { op: 'conversation', method: 'previewDeletion', read: true },
+  'conversation:previewSideChat': { op: 'conversation', method: 'previewSideChat', read: false },
+  'conversation:listSideChats': { op: 'conversation', method: 'listSideChats', read: true },
+  'conversation:findSideChatCommand': { op: 'conversation', method: 'findSideChatCommand', read: true },
+  'conversation:readSideChatSnapshot': { op: 'conversation', method: 'readSideChatSnapshot', read: true }
 }
 
 /** Op names served only on the App's local endpoint; the network endpoint refuses them. */

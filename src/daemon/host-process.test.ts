@@ -160,6 +160,17 @@ describe('daemon host process', () => {
         op: 'providerCatalog', method: 'providerDescriptors', args: []
       })
       expect((descriptors.result as Array<{ id: string }>).map((descriptor) => descriptor.id)).toContain('codex')
+      // Conversation ledger reads are served from the daemon's own store; a write that is
+      // not migrated yet stays refused rather than answered from part of the table.
+      const conversations = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'conversation', method: 'list', args: [workspace]
+      })
+      expect(conversations.error).toBeUndefined()
+      expect(Array.isArray(conversations.result)).toBe(true)
+      const create = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'conversation', method: 'create', args: [workspace]
+      })
+      expect(create.error).toBe('unsupported_op')
       const providers = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'providers', detail: 'metadata'
       })
