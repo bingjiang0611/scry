@@ -1,4 +1,5 @@
 import { shell } from 'electron'
+import { providerControlChannelHandlers, registerChannelHandlers } from './startup-channels'
 import type { IpcMainInvokeEvent } from 'electron'
 import { daemonModeEnabled } from './daemon-run-mode'
 import type { ProviderContext, ProviderId } from '../../shared/provider'
@@ -166,9 +167,7 @@ export function registerProviderHandlers(deps: ProviderHandlersDependencies): vo
   handleTrusted('agent:listCommands', (_e, context: ProviderContext) =>
     withProviderOperation(context.providerId, () => providerRegistry.listCommands(context), context.agentProfileId)
   )
-  handleTrusted('agent:runControls', (_e, context: ProviderContext) =>
-    withProviderOperation(context.providerId, () => providerRegistry.runControls(context), context.agentProfileId)
-  )
+  registerChannelHandlers(handleTrusted, providerControlChannelHandlers({ providerRegistry, withProviderOperation }))
 
 
 }

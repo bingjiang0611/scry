@@ -56,6 +56,12 @@ export function collectChannels(dir = MAIN_DIR) {
     // `handle(` is the parameter name registerWorkspaceSelectionIpc gives the same trusted
     // registrar; both spellings reach registerTrustedIpcHandler.
     for (const match of source.matchAll(/\b(?:handleTrusted|handle)\(\s*'([a-zA-Z0-9:_-]+)'/g)) add(match[1], file)
+    // Handler tables shared by main and the daemon (bootstrap/startup-channels.ts): each
+    // `return { 'channel': … } satisfies ChannelHandlers` is registered through
+    // registerChannelHandlers, so its keys are production channels.
+    for (const table of source.matchAll(/return \{([\s\S]*?)\} satisfies ChannelHandlers/g)) {
+      for (const key of table[1].matchAll(/^\s+'([a-zA-Z]+:[a-zA-Z:]+)':/gm)) add(key[1], file)
+    }
     for (const match of source.matchAll(/\b(?:handleTrusted|handle|register)\(\s*`([a-zA-Z]+):\$\{\w+\}`/g)) {
       const expand = TEMPLATED[match[1]]
       if (!expand) throw new Error(`templated registration ${match[1]}:\${...} in ${relative(root, file)} has no expander`)

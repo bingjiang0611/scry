@@ -8,13 +8,12 @@ import { isRendererPerformanceSample } from '../../shared/performance'
 import { performanceRecordingEnabled } from '../performance-timing'
 import { recordRendererPerformance } from '../performance-recording'
 import { windowBackgroundColor } from '../window-chrome'
-import { canonicalizePiAgentPaths, resolvePiLauncherExecutable, piProfileForExecutable, createPiAgentProfileStore, type PiAgentProfile } from '../pi-agent-profiles'
-import { detectAgentsFast, probeCliVersion, PI_VERSION_PROBE_TIMEOUT_MS, type DetectedAgent } from '../claude-locate'
-import { providerIdForAgentId } from '../../shared/runtime'
+import { resolvePiLauncherExecutable, piProfileForExecutable, createPiAgentProfileStore, type PiAgentProfile } from '../pi-agent-profiles'
+import { probeCliVersion, PI_VERSION_PROBE_TIMEOUT_MS, type DetectedAgent } from '../claude-locate'
 import { piRpcEnvironment, probePiAgent } from '../providers/pi'
 import type { ProviderRegistry } from '../providers/registry'
 import type { ProviderCompatibilityStore } from '../provider-compatibility-manifest'
-import { composeProviderDetectionResults } from '../provider-detection'
+import { providerDetectionChannelHandlers, registerChannelHandlers } from './startup-channels'
 
 export interface AppAgentBootstrapDependencies {
   handleTrusted: <TArgs extends unknown[], TResult>(channel: string, listener: (event: IpcMainInvokeEvent, ...args: TArgs) => TResult) => void
@@ -55,52 +54,9 @@ export function registerAppAgentHandlers(deps: AppAgentBootstrapDependencies): v
     return true
   })
 
-  handleTrusted('agent:detectFast', async () => {
-    if (smokeProviderEnabled) return smokeDetectedAgents
-    const detected = (await canonicalizePiAgentPaths(detectAgentsFast())).flatMap((agent) => {
-      const providerId = providerIdForAgentId(agent.id)
-      if (!providerId) return []
-      return [{
-        ...agent,
-        ...(providerId === 'pi'
-          ? { agentProfileId: agent.id, runtimeProvider: 'pi_rpc' as const, transport: 'JSONL RPC subprocess' }
-          : {})
-      }]
-    })
-    return [
-      ...detected,
-      ...storedPiProfilesNotDetected(detected).map((profile) => ({
-        id: profile.id,
-        name: profile.label,
-        bin: basename(profile.executable),
-        path: profile.executable,
-        agentProfileId: profile.id,
-        runtimeProvider: 'pi_rpc' as const,
-        transport: 'JSONL RPC subprocess'
-      }))
-    ]
-  })
-
-  handleTrusted('agent:detect', async () => {
-    // 让这次描述用上最新策略；hydrate/refresh 自己吞掉所有失败，不会阻断探测。
-    await providerCompatibility.hydrate()
-    await providerCompatibility.refresh()
-    // 先异步完成 PATH/版本探测，让 descriptor 的同步 fallback 命中已知路径，避免阻塞主进程。
-    // Capability disabling alone does not disable discovery's real --version subprocesses.
-    const detected = smokeProviderEnabled ? smokeDetectedAgents : await detectInstalledAgents()
-    const descriptors = await providerRegistry.describe()
-    return composeProviderDetectionResults({
-      detected,
-      descriptors,
-      storedPiProfiles: smokeProviderEnabled ? [] : storedPiProfilesNotDetected(detected),
-      probeStoredPiProfile: async (profile) => probeCliVersion(profile.executable, ['--version'], {
-        env: await piRpcEnvironment(profile),
-        timeout: PI_VERSION_PROBE_TIMEOUT_MS
-      }),
-      // adapter 自述的版本经常是空，本机真实版本来自 CLI 探测；用最终生效的版本重算判定。
-      compatibility: (providerId, version) => providerCompatibility.advisory(providerId, version)
-    })
-  })
+  registerChannelHandlers(handleTrusted, providerDetectionChannelHandlers({
+    smokeProviderEnabled, smokeDetectedAgents, storedPiProfilesNotDetected, providerCompatibility, detectInstalledAgents, providerRegistry
+  }))
 
   handleTrusted('agent:addPiProfile', async () => {
     const result = await dialog.showOpenDialog({ title: '选择 Pi Agent 启动器', properties: ['openFile'] })
@@ -148,9 +104,7 @@ export function registerAppAgentHandlers(deps: AppAgentBootstrapDependencies): v
     return true as const
   })
 
-  handleTrusted('agent:providerDescriptors', () => providerRegistry.describe())
 
-  handleTrusted('agent:recentFolders', () => recentStore().load())
   handleTrusted('agent:removeRecentFolder', (_event, dir: string) => recentStore().remove(dir))
 
   handleTrusted('agent:chooseFolder', async () => {

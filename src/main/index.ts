@@ -43,6 +43,7 @@ import { createRendererRestartLog } from './bootstrap/renderer-restart'
 import { ensureMcpExecutionAuthorized, authorizedMcpExecution } from './bootstrap/trust'
 import { registerWorkspaceHandlers } from './bootstrap/workspace'
 import { registerAppAgentHandlers } from './bootstrap/app-agent'
+import { catalogChannelHandlers, registerChannelHandlers } from './bootstrap/startup-channels'
 import { registerConversationHandlers } from './bootstrap/conversation'
 import { createProviderRuntime } from './bootstrap/provider-runtime'
 import { createWorkspaceRuntime } from './bootstrap/workspace-runtime'
@@ -229,14 +230,7 @@ registerProviderHandlers({
   providerOperationKey, providerOperationGate
 })
 
-// 单目录会话列表（当前工作目录）：只列 app 自己起过的会话
-handleTrusted('agent:listSessions', (_e, context: ProviderContext) => {
-  return appSessionStore().listSessions(context.cwd ?? '', context.providerId, context.agentProfileId)
-})
-
-// 左侧栏项目目录独立于会话保留；老数据从 recent folders 与 app 会话 catalog 一次性补齐。
-handleTrusted('agent:listProjects', () => listProjectCatalog())
-handleTrusted('agent:catalogHealth', () => appSessionStore().health())
+registerChannelHandlers(handleTrusted, catalogChannelHandlers({ appSessionStore, listProjectCatalog, recentStore }))
 
 const conversationDeletion = { prepare: undefined as ((conversation: Conversation) => Promise<ConversationDeletionPreview>) | undefined }
 const sessionDeletion = registerSessionDeletionHandlers({
