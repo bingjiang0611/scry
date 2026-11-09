@@ -216,6 +216,39 @@ jobs:
       - name: Package and smoke the macOS app
         if: ${{ matrix.shard == 2 }}
         run: npm run pack:artifact
+      - name: Archive the verified macOS app for manual installation
+        if: ${{ github.event_name == 'workflow_dispatch' && matrix.shard == 2 }}
+        run: |
+          APP_PATH="$(node --input-type=module -e "import { defaultPackagedAppPath } from './scripts/packaged-app-layout.mjs'; console.log(defaultPackagedAppPath())")"
+          mkdir -p release-artifacts
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" release-artifacts/Scry.app.zip
+          node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto'
+          import { readFileSync, writeFileSync } from 'node:fs'
+          import { join } from 'node:path'
+          import { defaultPackagedAppPath, packagedAppLayout } from './scripts/packaged-app-layout.mjs'
+          const file = 'Scry.app.zip'
+          const { resources } = packagedAppLayout(defaultPackagedAppPath())
+          const { version } = JSON.parse(readFileSync(join(resources, 'scry-cli/package.json'), 'utf8'))
+          const sha256 = createHash('sha256').update(readFileSync(join('release-artifacts', file))).digest('hex')
+          const provenance = {
+            sourceCommit: process.env.GITHUB_SHA,
+            arch: process.arch,
+            recorderVersion: version,
+            file,
+            sha256
+          }
+          writeFileSync('release-artifacts/provenance.json', JSON.stringify(provenance, null, 2) + '\n')
+          NODE
+      - name: Upload the verified macOS app
+        if: ${{ github.event_name == 'workflow_dispatch' && matrix.shard == 2 }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-app-${{ github.sha }}
+          path: release-artifacts/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
 
   check:
     name: Check
