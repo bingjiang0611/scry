@@ -13,7 +13,7 @@
 | B4-D 设计补全 | 完成（含 D1–D4 补审） | `见 status` | [b4-d](status/b4-d.md)：P3 §13 移到 [P3-batch4-design](P3-batch4-design.md)；矩阵 119 channel：main 24 / split 3 / forward 39 / new-op 53；D1 `scopes` 默认 `local`、D2 每条 forward 写明语义差异、D3 `chooseFolder`/`recentFolders` 改判 split、D4 secret 生命周期与重新入网 |
 | B4-L1 本机入网与 `scope: local` | 完成 | `见 status` | [b4-l1](status/b4-l1.md)：grant 带 `scope`，local grant 只在 unix socket 传输有效；一次性 0600 secret 不按时间过期；首次入网/复用拒绝/撤销不重入均有测试 |
 | B4-L2 main 侧 daemon 客户端与 supervisor | 完成 | `见 status` | [b4-l2](status/b4-l2.md)：`DaemonClient` 入网/探活/版本硬失败/撤销不重入、`ensureDaemon` 探活→接入→拉起→就绪；新 op `daemonInfo` 仅 local |
-| B4-L3 run 经 daemon | 进行中（L3E 的 E1/E2 已修；daemon 侧分段已测：首 token 仍 +80.9 ms P50，等维护者选 A/B/C） | `04a208fc` `298eff50` `a8cecbee` | [b4-l3](status/b4-l3.md)：语义层 + 接线层 + run controls + 执行归属；M1 只重放可证明未发送的请求，M2 分类表逐条判定，M3 真实 App 端到端全绿；S1 首 token P95 超出 +10 ms 预算（+78.4 ms），流式粒度已与进程内一致（20 事件/样本、间隔 152 ms）；同一 daemon 连续 30 次 start 的上限已修。首 token 的推送订阅提案等维护者选择（A/B/C）。撤销后重连入口按维护者答复放在 B4-S 设置页 |
+| B4-L3 run 经 daemon | 进行中（L3F 的 F1 已修、E2 应修项已修；首 token 仍 +41…+58 ms P50，剩下在准备阶段，等维护者选 A/B/C） | `b0260e41` `d9f7aaed` | [b4-l3](status/b4-l3.md)：语义层 + 接线层 + run controls + 执行归属；M1 只重放可证明未发送的请求，M2 分类表逐条判定，M3 真实 App 端到端全绿；S1 首 token P95 超出 +10 ms 预算（+78.4 ms），流式粒度已与进程内一致（20 事件/样本、间隔 152 ms）；同一 daemon 连续 30 次 start 的上限已修。首 token 的推送订阅提案等维护者选择（A/B/C）。撤销后重连入口按维护者答复放在 B4-S 设置页 |
 | B4-L4 其余能力经 daemon | 未开始 | — | |
 | B4-S 切换与删除 | 未开始 | — | |
 | B4-V 验收 | 未开始 | — | |
