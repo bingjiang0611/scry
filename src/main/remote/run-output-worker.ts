@@ -1,7 +1,7 @@
 import { Worker } from 'node:worker_threads'
 import type { OutputChunk, RunOutputPage, RunOutputStore } from './run-output-log'
 
-interface Request { requestId: number; op: 'appendBatch' | 'since' | 'close'; value: unknown }
+interface Request { requestId: number; op: 'appendBatch' | 'since' | 'countSince' | 'close'; value: unknown }
 interface Reply { requestId: number; ok: boolean; value?: unknown; error?: string }
 type Message = Reply | { event: 'ready' }
 interface WorkerLike {
@@ -52,6 +52,11 @@ export class RunOutputWorkerStore implements RunOutputStore {
   }
   since(runId: string, cursor: number, pageSize?: number): Promise<RunOutputPage> {
     return this.call('since', { runId, cursor, pageSize }) as Promise<RunOutputPage>
+  }
+  // The wake crosses the same single-request boundary, but the worker reads only the
+  // index: no chunk text is copied into this thread for a count.
+  countSince(runId: string, cursor: number): Promise<{ count: number; cursor: number }> {
+    return this.call('countSince', { runId, cursor }) as Promise<{ count: number; cursor: number }>
   }
   async close(): Promise<void> {
     if (this.closing) return
