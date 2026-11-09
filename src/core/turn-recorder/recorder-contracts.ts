@@ -43,6 +43,23 @@ export interface StoredLifecycleEvent {
   transcriptPath?: string
 }
 
+export interface PiTranscriptAnchor {
+  beforeEntryId: string | null
+  afterEntryId?: string
+}
+
+export function piTranscriptAnchorOf(payload: Record<string, unknown>): PiTranscriptAnchor | undefined {
+  const raw = payload.pi_transcript_anchor
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const anchor = raw as Record<string, unknown>
+  if (!Object.prototype.hasOwnProperty.call(anchor, 'before_entry_id')) return undefined
+  const before = anchor.before_entry_id
+  if (before !== null && (typeof before !== 'string' || !before.trim())) return undefined
+  const after = anchor.after_entry_id
+  if (after !== undefined && (typeof after !== 'string' || !after.trim())) return undefined
+  return { beforeEntryId: before === null ? null : before, ...(typeof after === 'string' ? { afterEntryId: after } : {}) }
+}
+
 export interface TranscriptRead {
   stable: boolean
   source?: {

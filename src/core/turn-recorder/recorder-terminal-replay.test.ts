@@ -83,6 +83,62 @@ it.each(['claude', 'codex', 'qoder'] as const)('V1 %s declares stop_hook_active 
   expect(await listRecords(join(root, '.scry'))).toHaveLength(1)
 })
 
+it('Qoder late ID-less Stop requires an unchanged native snapshot and never closes an ambiguous newer turn', async () => {
+  const root = await workspace()
+  const transcript = join(root, 'qoder-session.jsonl')
+  const base = { provider: 'qoder' as const, workspace: root, env: {} }
+  const native = { session_id: 'late-qoder', cwd: root, transcript_path: transcript }
+  const writeSession = (answer: string, includeNew = false) => writeFile(transcript, [
+    { type: 'user', promptId: 'old-prompt', message: { role: 'user', content: 'old prompt' } },
+    { type: 'assistant', promptId: 'old-prompt', message: { role: 'assistant', content: [{ type: 'text', text: 'old answer' }] } },
+    ...(includeNew ? [
+      { type: 'user', promptId: 'new-prompt', message: { role: 'user', content: 'new prompt' } },
+      { type: 'assistant', promptId: 'new-prompt', message: { role: 'assistant', content: [{ type: 'text', text: answer }] } }
+    ] : [])
+  ].map(row => JSON.stringify(row)).join('\n') + '\n')
+
+  await writeSession('old answer')
+  await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: { ...native, prompt: 'old prompt', promptId: 'old-prompt' } })
+  await handleRecorderHook({ ...base, event: 'Stop', payload: { ...native, assistant_response: 'old answer', promptId: 'old-prompt' } })
+  await recoverRecorder(root)
+
+  // No open turn: duplicate is accepted only while the native transcript identity is unchanged.
+  await expect(handleRecorderHook({ ...base, event: 'Stop', payload: { ...native, last_assistant_message: 'old answer' } }))
+    .resolves.toMatchObject({ status: 'duplicate' })
+
+  // A new identified Stop repeating the previous answer is not a duplicate of the old record.
+  await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: { ...native, prompt: 'new prompt', promptId: 'new-prompt' } })
+  await writeSession('old answer', true)
+  await expect(handleRecorderHook({ ...base, event: 'Stop', payload: { ...native, promptId: 'new-prompt', last_assistant_message: 'old answer' } }))
+    .resolves.not.toMatchObject({ status: 'duplicate' })
+
+  // A new ID-less Stop with the same text is ambiguous and must use the stale-terminal fence.
+  await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: { ...native, prompt: 'third prompt', promptId: 'third-prompt' } })
+  await expect(handleRecorderHook({ ...base, event: 'Stop', payload: { ...native, last_assistant_message: 'old answer' } }))
+    .resolves.toMatchObject({ status: 'pending', reason: expect.stringContaining('deferred') })
+  expect(JSON.parse(await readFile(join(recorderSessionRoot(join(root, '.scry'), 'qoder', 'late-qoder'), 'open.json'), 'utf8')))
+    .toMatchObject({ providerTurnId: 'third-prompt', status: 'closing', deferredTerminalEventId: expect.any(String) })
+})
+
+it.each([
+  { provider: 'qoder' as const, startEvent: 'UserPromptSubmit', endEvent: 'Stop' },
+  { provider: 'opencode' as const, startEvent: 'chat.message', endEvent: 'session.idle' }
+])('%s keeps a second unidentified terminal pending without discarding the frozen boundary', async ({ provider, startEvent, endEvent }) => {
+  const root = await workspace()
+  const payload = { session_id: `deferred-${provider}`, cwd: root, prompt: 'hold open' }
+  await handleRecorderHook({ provider, workspace: root, event: startEvent, env: {}, payload })
+  await expect(handleRecorderHook({ provider, workspace: root, event: endEvent, env: {}, payload }))
+    .resolves.toMatchObject({ status: 'pending', reason: expect.stringContaining('deferred') })
+  const first = JSON.parse(await readFile(join(recorderSessionRoot(join(root, '.scry'), provider, payload.session_id), 'open.json'), 'utf8'))
+  expect(first).toMatchObject({ status: 'closing', deferredTerminalEventId: expect.any(String) })
+  const frozenDiffs = JSON.stringify(first.terminalDiffs)
+  await expect(handleRecorderHook({ provider, workspace: root, event: endEvent, env: {}, payload }))
+    .resolves.toMatchObject({ status: 'pending', reason: 'unidentified terminal is already deferred' })
+  const second = JSON.parse(await readFile(join(recorderSessionRoot(join(root, '.scry'), provider, payload.session_id), 'open.json'), 'utf8'))
+  expect(second.deferredTerminalEventId).toBe(first.deferredTerminalEventId)
+  expect(JSON.stringify(second.terminalDiffs)).toBe(frozenDiffs)
+})
+
 it.each(['claude', 'codex', 'qoder', 'opencode'] as const)('V1 genuine missing-start %s Stop without timestamp still leaves an orphan', async (provider) => {
   const root = await workspace()
   expect(await handleRecorderHook({ provider, workspace: root, event: 'Stop', env: {}, payload: {

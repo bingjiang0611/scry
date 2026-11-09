@@ -10,6 +10,7 @@ import { parseCodexRollout } from './recorder-codex-rollout.js'
 import { qoderSidecarEvents } from './recorder-qoder-sidecars.js'
 import { type CodexRolloutIdentity, type ParsedTranscriptTurn, type TranscriptRead, overlapsTurn } from './recorder-contracts.js'
 import { readTranscriptWindow, transcriptIdentity, type TranscriptSnapshotIdentity } from './recorder-transcript-io.js'
+import { parsePiTranscript } from './recorder-pi-transcript.js'
 
 
 async function codexChildRollout(parentPath: string, sessionId: string): Promise<string | undefined> {
@@ -146,6 +147,7 @@ export async function parseTranscriptSnapshot(args: {
   requestSetId?: string
   sessionId?: string
   cwd?: string
+  piTranscriptAnchor?: import('./recorder-contracts.js').PiTranscriptAnchor
   identity?: TranscriptSnapshotIdentity
 }): Promise<TranscriptRead> {
   const snapshot = await readTranscriptWindow(args.path, args.endOffset, args.startOffset, args.identity)
@@ -158,6 +160,26 @@ export async function parseTranscriptSnapshot(args: {
     identity: snapshot.identity,
     sourceCompleteness: snapshot.truncated ? 'partial' as const : 'complete' as const
   } : undefined
+  if (args.provider === 'pi') {
+    // The bounded turn window excludes the session header. Check it against the
+    // same file identity before trusting native entry IDs from that window.
+    let content = snapshot.content
+    if (snapshot.startOffset > 0 && snapshot.identity) {
+      const header = await readTranscriptWindow(args.path, Math.min(snapshot.identity.size, 256 * 1024), 0, snapshot.identity)
+      const newline = header.content.indexOf('\n')
+      content = header.consistent && newline >= 0 ? header.content.slice(0, newline + 1) + content : ''
+    }
+    const parsed = parsePiTranscript(content, args.runId, args.piTranscriptAnchor, {
+      sessionId: args.sessionId,
+      cwd: args.cwd
+    })
+    return {
+      ...parsed,
+      stable,
+      ...(source ? { source } : {}),
+      complete: stable && !snapshot.truncated && parsed.complete === true
+    }
+  }
   if (args.provider === 'codex') {
     let sessionIdentity: CodexRolloutIdentity | undefined
     // Turn anchoring excludes the session header. Child activity needs that identity;

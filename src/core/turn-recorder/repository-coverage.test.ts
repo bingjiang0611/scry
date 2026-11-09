@@ -1,11 +1,11 @@
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, expect, it, vi } from 'vitest'
 import { runScryCli } from '../../cli/scry.js'
-import { discoverRepositories, type RecorderConfig } from './config.js'
+import { discoverRepositories, repositoryDiscoveryStats, resetRepositoryDiscoveryStats, type RecorderConfig } from './config.js'
 import { handleRecorderHook, recoverRecorder } from './recorder.js'
 import { recorderSessionRoot, type RecorderOpenTurnState } from './runtime-state.js'
 import { listRecords } from './store.js'
@@ -65,6 +65,67 @@ it('reports the depth boundary without silently increasing the default discovery
   expect(await discoverRepositories(root, config)).toMatchObject({
     repositories: [root], maxDepth: 2, depthLimitedDirectories: 1
   })
+}, 15_000)
+
+it('discovers bounded linked worktrees without widening traversal or escaping workspace', async () => {
+  const root = await workspace(false)
+  const linked = join(root, '.worktrees', 'project', 'REQ-42\nquoted" ')
+  await mkdir(join(root, '.worktrees', 'project'), { recursive: true })
+  await exec('git', ['worktree', 'add', '--detach', linked], { cwd: root })
+  expect((await stat(join(linked, '.git'))).isFile()).toBe(true)
+  expect(await discoverRepositories(root, config)).toMatchObject({
+    maxDepth: 2,
+    repositories: [root, await realpath(linked)]
+  })
+  const parallel = await Promise.all(Array.from({ length: 3 }, () => discoverRepositories(root, config)))
+  for (const result of parallel.slice(1)) expect(result.repositories).toEqual(parallel[0].repositories)
+  expect(await discoverRepositories(root, { ...config, repositories: { mode: 'discover-nested-git', exclude: ['.worktrees'] } })).toMatchObject({
+    repositories: [root]
+  })
+  const outsideParent = await mkdtemp(join(tmpdir(), 'scry-worktree-outside-'))
+  const outside = join(outsideParent, 'external')
+  try {
+    await exec('git', ['worktree', 'add', '--detach', outside], { cwd: root })
+    expect(await discoverRepositories(root, config)).toMatchObject({ repositories: [root, await realpath(linked)] })
+  } finally {
+    await rm(outsideParent, { recursive: true, force: true })
+  }
+}, 15_000)
+
+it.each([2, 3])('deduplicates a symlinked workspace against canonical worktree output at depth %s', async depth => {
+  const root = await workspace(false)
+  const aliasParent = await mkdtemp(join(tmpdir(), 'scry-repository-alias-'))
+  roots.push(aliasParent)
+  const alias = join(aliasParent, 'workspace-alias')
+  await symlink(root, alias)
+  const segments = depth === 2 ? ['.worktrees', 'alias-check'] : ['.worktrees', 'project', 'alias-check']
+  const linked = join(root, ...segments)
+  await mkdir(dirname(linked), { recursive: true })
+  await exec('git', ['worktree', 'add', '--detach', linked], { cwd: root })
+  const discovery = await discoverRepositories(alias, config)
+  expect(discovery.repositories).toContain(alias)
+  expect(discovery.repositories).toContain(depth === 2 ? join(alias, ...segments) : await realpath(linked))
+  expect(discovery.repositories).not.toContain(await realpath(root))
+  expect(discovery.repositories).toHaveLength(2)
+}, 15_000)
+
+it('probes all owners in the measured 20-repository shape, including the last owner', async () => {
+  const root = await workspace(false)
+  for (let index = 0; index < 18; index++) {
+    await exec('git', ['init', '-q', join(root, `repo-${String(index).padStart(2, '0')}`)])
+  }
+  const owner = join(root, 'z-business')
+  await exec('git', ['init', '-q', owner])
+  await exec('git', ['-C', owner, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-qm', 'fixture'])
+  const linked = join(root, '.worktrees/project/REQ-last-owner')
+  await mkdir(join(root, '.worktrees/project'), { recursive: true })
+  await exec('git', ['-C', owner, 'worktree', 'add', '--detach', linked])
+  resetRepositoryDiscoveryStats()
+  const discovery = await discoverRepositories(root, config)
+  expect(discovery.repositories).toContain(await realpath(linked))
+  expect(discovery.repositories).toHaveLength(21)
+  expect(repositoryDiscoveryStats().worktreeCommands).toBe(20)
+  expect(discovery).not.toHaveProperty('worktreeDiscovery')
 }, 15_000)
 
 it('honors explicit depth, exclusions and symlink boundaries without following the diagnostic probe', async () => {

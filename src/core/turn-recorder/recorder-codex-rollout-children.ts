@@ -42,7 +42,8 @@ export function recordCodexItemCompleted(
   if (sessionId && sameSession && trustedParent && !current.childThreads.some((child) => child.sessionId === sessionId)) {
     current.childThreads.push({ sessionId, parentToolUseId, parentTurnId, name })
   }
-  if (item.kind === 'started' && sessionId && sameSession && trustedParent) {
+  if (item.kind === 'started' && sessionId && sameSession && trustedParent &&
+    !current.events.some(event => event.kind === 'agent' && event.toolUseId === parentToolUseId)) {
     current.events.push({
       id: `codex-agent-${stableHash([sessionId, parentToolUseId, at]).slice(0, 16)}`,
       ts: at,

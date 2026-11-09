@@ -1,17 +1,32 @@
-import { open as openFile } from 'node:fs/promises'
+import { open as openFile, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { captureToolContent, isFullToolContentPolicy } from './tool-content.js'
 import { appendRotatingLog, readJson, writeJsonAtomic } from './io.js'
-import { listRecords, updateHealth, stableHash } from './store.js'
+import { findRecordById, listRecords, updateHealth, stableHash } from './store.js'
 import { recorderOpenPath as openPath, recorderStatePath as statePath, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
 import type { RecorderEnablement } from './config.js'
-import { CODEX_SUBAGENT_MARKER, nestedRecord, promptOf, stringAt, type RecorderHookInput, transcriptPathOf, observedNow } from './recorder-contracts.js'
+import { storeLifecycleEvent } from './recorder-turn-state.js'
+import { CODEX_SUBAGENT_MARKER, nestedRecord, promptOf, providerTurnIdOf, stringAt, type RecorderHookInput, type RecorderHookResult, transcriptPathOf, observedNow } from './recorder-contracts.js'
 
 export function isClaudeTaskNotification(payload: Record<string, unknown>): boolean {
   const origin = nestedRecord(payload, 'origin')
   return stringAt(origin ?? {}, 'kind') === 'task-notification' ||
     (promptOf(payload)?.trimStart().startsWith('<task-notification>') ?? false)
+}
+
+export async function recordClaudeTaskNotification(
+  enablement: Extract<RecorderEnablement, { enabled: true }>,
+  root: string,
+  open: OpenTurnState | null,
+  input: RecorderHookInput,
+  providerTurnId: string | undefined
+): Promise<RecorderHookResult> {
+  if (!open) return { status: 'ignored', reason: 'task notification has no real user turn' }
+  if (open.managedByScry) return { status: 'recorded', reason: 'managed task continuation kept in canonical Scry turn' }
+  await rememberContinuationProviderTurn(root, open, providerTurnId)
+  await storeLifecycleEvent(enablement, open, input.event, input.payload)
+  return { status: 'recorded', reason: 'task notification continued the current Claude turn' }
 }
 
 export function continuationProviderTurnIds(open: OpenTurnState): string[] {
@@ -107,6 +122,39 @@ export async function isCommittedProviderTurn(
     record.sessionId === sessionId &&
     record.providerTurnId === providerTurnId
   )
+}
+
+/**
+ * Qoder can deliver a Stop several seconds after its completed record and omit every native
+ * identity. Text equality is not turn identity. The only no-open fast path is an unchanged,
+ * authoritative transcript snapshot for the last record; otherwise the event stays an orphan.
+ * Any open turn remains ambiguous and is handled by stale-terminal protection instead.
+ */
+export async function isLateQoderTerminalDuplicate(
+  dataRoot: string,
+  root: string,
+  sessionId: string,
+  payload: Record<string, unknown>,
+  open: OpenTurnState | null
+): Promise<boolean> {
+  if (open || payload.stop_hook_active === true || providerTurnIdOf(payload, 'qoder')) return false
+  const assistant = stringAt(payload, 'last_assistant_message', 'lastAssistantMessage')
+  const transcriptPath = transcriptPathOf(payload)
+  if (!assistant || !transcriptPath) return false
+  const state = await readJson<SessionState>(statePath(root))
+  if (!state?.lastCommittedRecordId) return false
+  const record = await findRecordById(dataRoot, state.lastCommittedRecordId)
+  const source = record?.transcript?.status === 'available' ? record.transcript.value : undefined
+  if (!record || record.provider.id !== 'qoder' || record.sessionId !== sessionId || record.status !== 'completed' ||
+    record.assistant.status !== 'available' || record.assistant.value?.text !== assistant ||
+    !source || source.sourcePath !== transcriptPath) return false
+  try {
+    const current = await stat(transcriptPath)
+    return current.dev === source.identity.dev && current.ino === source.identity.ino &&
+      current.size === source.identity.size && current.mtimeMs === source.identity.mtimeMs && current.ctimeMs === source.identity.ctimeMs
+  } catch {
+    return false
+  }
 }
 
 export async function storeOrphanEvent(
