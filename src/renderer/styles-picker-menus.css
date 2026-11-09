@@ -131,6 +131,25 @@
 .climenu .mitem {
   min-width: 0;
 }
+
+/* 单选菜单的对勾列：未选中也占位，名称从同一列开始（agent / provider 筛选共用）。 */
+.menu-check {
+  width: 18px;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  color: var(--fg);
+}
+
+.menu-check .ico {
+  width: 14px;
+  height: 14px;
+}
+
+.climenu .mitem,
+.arch-provider-menu .mitem {
+  gap: 10px;
+}
 .agent-option-name {
   min-width: 0;
   overflow: hidden;

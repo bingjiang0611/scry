@@ -6,7 +6,8 @@ import type { ChatViewProps, SessionChatViewProps } from './chat-view/types'
 import { Icon } from './primitives/Icon'
 import { WorkspaceFileLinkProvider } from './MarkdownImpl'
 import { DelayedLoadingStatus } from './LoadingStatus'
-import { LOADING_COPY } from '../constants/copy'
+import { HISTORY_WINDOW_COPY, LOADING_COPY } from '../constants/copy'
+import { useHistoryAutoload } from '../hooks/useHistoryAutoload'
 import { ChineseHeadingText } from '../typography'
 
 const NO_PENDING_QUESTIONS: AgentQuestionRequest[] = []
@@ -65,11 +66,19 @@ export function ChatView(props: ChatViewProps) {
     if (!ownerReady || lastLive.current.scope !== composerScopeKey) lastLive.current = { scope: composerScopeKey, runId: liveRunId }
     else if (liveRunId) lastLive.current.runId = liveRunId
   }, [ownerReady, composerScopeKey, liveRunId])
+  // 滚到接近顶部就续读；收起的状态卡不改变取页语义，仍由 historyWindow/loading 决定。
+  useHistoryAutoload({
+    scrollRef,
+    turnsLength: displayedTurns.length,
+    hasOlder: historyWindow?.hasOlder ?? false,
+    loading: historyOlderLoading,
+    onLoadOlder: onLoadOlderTurns
+  })
   return (
     <>
       <WorkspaceFileLinkProvider workspaces={workspaceRoots} onOpen={onOpenFile}>
         <div className="body chat-body" data-screen-label="对话 · 真实 Turn transcript">
-          <div className="chat chat-transcript" ref={scrollRef} tabIndex={-1} aria-label="执行时间线" aria-busy={sessionLoading && !sessionCacheVisible} data-history-source={sessionCacheVisible ? 'preview' : 'authoritative'}>
+          <div className="chat chat-transcript" ref={scrollRef} tabIndex={-1} aria-label="执行时间线" aria-busy={sessionLoading && !sessionCacheVisible} data-history-autoload="scroll" data-history-source={sessionCacheVisible ? 'preview' : 'authoritative'}>
             {turns.length === 0 && !sessionLoading && sessionEvidenceGap && (
               <div className="chat-session-evidence-gap" role="status" data-status={sessionEvidenceGap.status}>
                 <b>{sessionEvidenceGap.status === 'error' ? '会话历史加载失败' : sessionEvidenceGap.status === 'unavailable' ? (remote ? `这条会话没有可读的 ${remoteHost} 证据` : '这条会话没有可读的本机证据') : '这条会话的归档里没有轮次'}</b>
@@ -94,10 +103,17 @@ export function ChatView(props: ChatViewProps) {
               </div>
             )}
             {!sessionLoading && historyWindow?.hasOlder && (
-              <div className="history-window-note" role="note" aria-label="历史轮次范围">
-                {remote ? <span>时间线已加载最近 <b>{turns.length}</b> 轮·更早轮次仍在 {remoteHost} 的归档中，未丢弃</span> : <span>时间线已加载最近 <b>{historyWindow.totalTurns - historyWindow.offset}</b> / {historyWindow.totalTurns} 轮·更早轮次仍在本机归档中，未丢弃</span>}
-                <button type="button" className="history-window-more" onClick={() => onLoadOlderTurns?.()} disabled={historyOlderLoading || !onLoadOlderTurns}>{historyOlderLoading ? '加载中…' : '加载更早轮次'}</button>
+              <div className="history-window-note" role="note" aria-label={HISTORY_WINDOW_COPY.rangeLabel} aria-busy={historyOlderLoading}>
+                <span className="history-window-range">
+                  {remote
+                    ? HISTORY_WINDOW_COPY.rangeRemote(turns.length, remoteHost ?? '')
+                    : HISTORY_WINDOW_COPY.rangeLocal(historyWindow.totalTurns - historyWindow.offset, historyWindow.totalTurns)}
+                </span>
+                <button type="button" className="history-window-more" onClick={() => onLoadOlderTurns?.()} disabled={historyOlderLoading || !onLoadOlderTurns}>{historyOlderLoading ? HISTORY_WINDOW_COPY.loadingShort : HISTORY_WINDOW_COPY.loadOlder}</button>
               </div>
+            )}
+            {!sessionLoading && historyWindow?.pagedOlder && !historyWindow.hasOlder && turns.length > 0 && (
+              <p className="history-window-start" role="note">{HISTORY_WINDOW_COPY.exhausted(historyWindow.totalTurns)}</p>
             )}
             {(sessionLoading || sessionCacheVisible) && (
               <DelayedLoadingStatus loading title={LOADING_COPY.sessionHistory} detail={LOADING_COPY.sessionHistoryDetail} />
