@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { join, resolve, posix, sep } from 'node:path'
 import { extractFile, listPackage } from '@electron/asar'
+import { reachableMainSources } from './packaged-main-graph.mjs'
 import { defaultPackagedAppPath, packagedAppLayout } from './packaged-app-layout.mjs'
 
 const layout = packagedAppLayout(resolve(process.argv[2] || defaultPackagedAppPath()))
@@ -85,9 +86,11 @@ if (!entries.includes('/out/preload/index.cjs')) {
 for (const daemonEntry of ['/out/main/daemon.js', '/out/main/daemon-supervisor.js']) {
   if (!entries.includes(daemonEntry)) throw new Error(`packaged app 缺少 daemon 入口：${daemonEntry}`)
 }
-const supervisorSource = extractFile(asarPath, 'out/main/daemon-supervisor.js').toString('utf8')
+// The supervisor's own module graph (entry + the chunks it imports): the bundler moves
+// shared code into chunks, so the entry file alone may hold only imports.
+const supervisorSources = [...reachableMainSources((path) => entries.includes(`/${path}`) ? extractFile(asarPath, path).toString('utf8') : undefined, 'out/main/daemon-supervisor.js').values()]
 if (!packagedMainSources.some((source) => source.includes('SCRY_DAEMON_USER_DATA_DIR'))) throw new Error('packaged daemon 缺少显式 userData 接线')
-if (!supervisorSource.includes('ELECTRON_RUN_AS_NODE')) throw new Error('packaged daemon supervisor 未使用 Electron Node 模式')
+if (!supervisorSources.some((source) => source.includes('ELECTRON_RUN_AS_NODE'))) throw new Error('packaged daemon supervisor 未使用 Electron Node 模式')
 for (const key of ['SCRY_DAEMON_APP_PATH', 'SCRY_DAEMON_RESOURCES_PATH', 'SCRY_DAEMON_APP_VERSION', 'SCRY_DAEMON_PACKAGED']) {
   if (!packagedMainSources.some((source) => source.includes(key))) throw new Error(`packaged daemon 缺少必需环境接线：${key}`)
 }
