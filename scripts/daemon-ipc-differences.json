@@ -8,8 +8,6 @@
     "agent:focusedRunSnapshot": "等价（同一 run 登记表；只是按焦点取一条）",
     "agent:forkSession": "等价",
     "agent:listCommands": "不同：远程按 provider 白名单裁剪命令集，本机保留全部命令。按 scope 选策略",
-    "agent:loadSession": "不同：远程历史投影裁掉工具原文与文件足迹，本机保留完整证据。按 grant scope 选投影：scope: local 给本机完整结果",
-    "agent:loadSessionOlder": "不同：同 loadSession 的投影差异（分页更早的部分同样被裁剪）。按 grant scope 选投影",
     "agent:renameSession": "等价",
     "agent:setSessionArchived": "等价",
     "agent:setSessionPinned": "等价",

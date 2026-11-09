@@ -5,7 +5,7 @@ import type { ProviderContext, ProviderId } from '../../shared/provider'
 import type { ActiveRun } from '../../shared/trace'
 import type { createAppSessionStore } from '../app-store'
 import type { ProviderRegistry } from '../providers/registry'
-import type { DockBadgeState } from '../dock-badge'
+import type { SessionSelection } from './session-selection'
 import type { SessionHistoryPageRequest, SessionHistoryPage, LoadedSessionTurn } from '../session-history'
 import type { TraceArchive } from '../transcript-archive'
 import type { PiNativeHistorySnapshot } from '../pi-native-history'
@@ -33,21 +33,18 @@ export interface LoadSessionDependencies {
   getLoadSessionRevision: () => number
   getSessionHistoryCache: () => SessionHistoryCache | null
   setSessionHistoryCache: (cache: SessionHistoryCache | null) => void
-  sessionByContext: Map<string, string>
-  sessionAliasesByContext: Map<string, Map<string, string>>
   providerContextKey: (providerId: ProviderId, cwd: string, agentProfileId?: string) => string
-  providerSessionKey: (providerId: ProviderId, cwd: string, sessionId: string, agentProfileId?: string) => string
   resolveKnownProjectDirectory: (cwd: string) => string
   providerRegistry: Pick<ProviderRegistry, 'enrichSession'>
   getRuns: () => { unsettledStates: () => ActiveRun[]; get: (runId: string) => { control: { settled: Promise<void> } } | undefined }
-  dockBadge: Pick<DockBadgeState, 'view'>
-  setCurrentCwd: (cwd: string | undefined) => void
   rememberProject: (cwd: string) => void
   homeDir: string
   userDataDir: string
   isShuttingDown: () => boolean
-  getWindow: () => { isFocused: () => boolean } | null
-  bumpSessionRevision: (key: string) => void
+  // The window's session selection: applied in process, or reported with the page when
+  // the daemon loads it for an App that applies it itself (`reportSelection`).
+  applySelection: (selection: SessionSelection) => void
+  reportSelection?: boolean
   pageWithHookCommands: (page: SessionHistoryPage, hookConfig: ReturnType<typeof loadClaudeHookConfig> | null) => SessionHistoryPage
   markIncompleteArchivePage: (page: SessionHistoryPage, issue: string | undefined) => SessionHistoryPage
   sessionHistoryCacheKey: (payload: ProviderContext, cwd: string) => string
@@ -63,24 +60,19 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
     getLoadSessionRevision,
     getSessionHistoryCache,
     setSessionHistoryCache,
-    sessionByContext,
-    sessionAliasesByContext,
     providerContextKey,
-    providerSessionKey,
     resolveKnownProjectDirectory,
     providerRegistry,
     getRuns,
-    dockBadge,
-    setCurrentCwd,
     rememberProject,
     homeDir,
     userDataDir,
     isShuttingDown,
-    getWindow,
-    bumpSessionRevision,
     pageWithHookCommands,
     markIncompleteArchivePage,
-    sessionHistoryCacheKey
+    sessionHistoryCacheKey,
+    applySelection,
+    reportSelection
   } = deps
   handleTrusted('agent:loadSession', async (_e, payload: ProviderContext, request?: SessionHistoryPageRequest) => {
     if (!payload.externalSessionId) return null
@@ -220,24 +212,20 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
         perf.finish({ returnedTurns: 0 })
         return null
       }
-      dockBadge.view(
-        providerSessionKey(payload.providerId, cwd, payload.externalSessionId, payload.agentProfileId),
-        Boolean(getWindow()?.isFocused())
-      )
-      setCurrentCwd(cwd || undefined)
-      const key = providerContextKey(payload.providerId, cwd, payload.agentProfileId)
-      const loadingUnsettledRun = getRuns().unsettledStates().some((run) => sessionLoadMatchesRun(run, {
+      const selection: SessionSelection = {
         providerId: payload.providerId,
-        agentProfileId: payload.agentProfileId,
+        ...(payload.agentProfileId !== undefined ? { agentProfileId: payload.agentProfileId } : {}),
         cwd,
-        externalSessionId: payload.externalSessionId
-      }))
-      if (!loadingUnsettledRun) {
-        bumpSessionRevision(key)
-        sessionAliasesByContext.delete(key)
+        externalSessionId: payload.externalSessionId,
+        canResume: appSessionCanResume(catalogSession),
+        loadingUnsettledRun: getRuns().unsettledStates().some((run) => sessionLoadMatchesRun(run, {
+          providerId: payload.providerId,
+          agentProfileId: payload.agentProfileId,
+          cwd,
+          externalSessionId: payload.externalSessionId
+        }))
       }
-      if (appSessionCanResume(catalogSession)) sessionByContext.set(key, payload.externalSessionId)
-      else sessionByContext.delete(key)
+      applySelection(selection)
       perf.mark('selection')
       const historyContext = { userDataDir }
       const mergedHistory = nativeTurns ?? mergeSessionTurns(turns, archived, historyContext, { hydrateAttachments: false })
@@ -386,7 +374,7 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
       const result = pageWithHookCommands(page, hookConfig)
       perf.finish({ totalTurns: page.totalTurns, returnedTurns: result.turns.length })
       if (cwd) rememberSessionProjectAfterLoad(payload.providerId, cwd, rememberProject)
-      return result
+      return reportSelection ? { page: result, selection } : result
     } catch (error) {
       perf.finish(undefined, signal.aborted ? 'cancelled' : 'error')
       throw error

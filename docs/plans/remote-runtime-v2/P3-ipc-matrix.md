@@ -3,7 +3,7 @@
 本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑；改 `scripts/daemon-ipc-routing.json` 后重新生成。
 
 - 生产特权 IPC channel：134 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
-- 留在 main：24，一半 main 一半 daemon（`split`）：3，转发到现有 op：46，需要新增 op：61
+- 留在 main：24，一半 main 一半 daemon（`split`）：4，转发到现有 op：44，需要新增 op：62
 - 新增 op 的请求、响应、授权与调用方范围见 [P3-ipc-ops](P3-ipc-ops.md)；设计正文见 [P3 §13](P3-batch4-design.md)
 - `desktopWorkbench` 转发行（workspace / terminal / sourceControl，共 32 行）见 [P3-ipc-matrix-workbench](P3-ipc-matrix-workbench.md)
 
@@ -49,8 +49,8 @@
 | `agent:listSkills` | new-op | `skills:listSkills` | providers | — | daemon 才能读 Provider 的 skill 目录 |
 | `agent:llmPerformanceHistory` | new-op | `llmPerformance:llmPerformanceHistory` | analytics | — | usage JSONL 与 run 状态由 daemon 写 |
 | `agent:llmPerformanceSummary` | new-op | `llmPerformance:llmPerformanceSummary` | analytics | — | usage JSONL 与 run 状态由 daemon 写 |
-| `agent:loadSession` | forward | `historyTurnsPage` | — | 不同：远程历史投影裁掉工具原文与文件足迹，本机保留完整证据。按 grant scope 选投影：scope: local 给本机完整结果 | 既有 historyTurnsPage |
-| `agent:loadSessionOlder` | forward | `historyPage` | — | 不同：同 loadSession 的投影差异（分页更早的部分同样被裁剪）。按 grant scope 选投影 | 既有 historyPage |
+| `agent:loadSession` | split | `sessionHistory:loadSession` | history | main: 应用 daemon 回报的窗口会话选择（setCurrentCwd、会话镜像、角标）后把页交给 renderer | 读页与窗口选择分开 |
+| `agent:loadSessionOlder` | new-op | `sessionHistory:loadSessionOlder` | history | — | 翻页读 daemon 自己的历史缓存（由 loadSession 建立） |
 | `agent:mcpGuardScan` | new-op | `mcp:mcpGuardScan` | providers | — | MCP 与 trust gate 都在 daemon |
 | `agent:mcpSnapshot` | new-op | `mcp:mcpSnapshot` | providers | — | MCP 与 trust gate 都在 daemon |
 | `agent:newSession` | new-op | `providerContext:newSession` | providers | — | Provider 运行时在 daemon |

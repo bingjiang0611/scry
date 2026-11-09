@@ -131,6 +131,16 @@
         "local"
       ]
     },
+    "sessionHistory": {
+      "path": "history",
+      "request": "{ op:'sessionHistory', method:'loadSession'|'loadSessionOlder', args }",
+      "response": "loadSession：{ page, selection }（App 应用 selection 后把 page 交给 renderer）；loadSessionOlder：与 main 同一 handler 的页",
+      "authorize": "已验证 peer + scope: local（只在本机端点存在）；会话须属于 daemon 的 App catalog，cwd 经 resolveKnownProjectDirectory 重验",
+      "why": "历史页与其分页缓存在 daemon；窗口当前会话的状态在 App",
+      "scopes": [
+        "local"
+      ]
+    },
     "sessionPurge": {
       "path": "navigation",
       "request": "{ op:'sessionPurge', method, request }",

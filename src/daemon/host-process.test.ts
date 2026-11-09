@@ -171,6 +171,12 @@ describe('daemon host process', () => {
         op: 'conversation', method: 'create', args: [workspace]
       })
       expect(create.error).toBe('unsupported_op')
+      // History pages are loaded by the daemon against its own catalog: a session it does
+      // not know is refused by the same check the App ran in process.
+      const history = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'sessionHistory', method: 'loadSession', args: [{ providerId: 'codex', cwd: workspace, externalSessionId: 'not-in-catalog' }]
+      })
+      expect(history.error).toContain('会话不属于当前 Scry catalog')
       const providers = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'providers', detail: 'metadata'
       })

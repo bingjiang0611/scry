@@ -163,15 +163,18 @@
     },
     {
       "channel": "agent:loadSession",
-      "route": "forward",
-      "op": "historyTurnsPage",
-      "why": "既有 historyTurnsPage"
+      "route": "split",
+      "why": "读页与窗口选择分开",
+      "main": "应用 daemon 回报的窗口会话选择（setCurrentCwd、会话镜像、角标）后把页交给 renderer",
+      "op": "sessionHistory",
+      "method": "loadSession"
     },
     {
       "channel": "agent:loadSessionOlder",
-      "route": "forward",
-      "op": "historyPage",
-      "why": "既有 historyPage"
+      "route": "new-op",
+      "op": "sessionHistory",
+      "method": "loadSessionOlder",
+      "why": "翻页读 daemon 自己的历史缓存（由 loadSession 建立）"
     },
     {
       "channel": "agent:mcpGuardScan",

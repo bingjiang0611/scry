@@ -29,6 +29,7 @@ import { openLocalChannel, type LocalChannel } from './local-channel'
 import { localOpHandlersFor, type LocalOpHandler } from '../main/remote/host-local-ops'
 import { catalogChannelHandlers, providerControlChannelHandlers, providerDetectionChannelHandlers } from '../main/bootstrap/startup-channels'
 import { conversationChannelTable } from '../main/bootstrap/conversation'
+import { createHistoryRuntime } from '../main/bootstrap/history-runtime'
 import { resolveSessionRunIds } from '../main/db'
 import { deleteConversationHistory } from '../main/conversation-history'
 import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore, type LocalEnrollSocket } from './local-enrollment'
@@ -236,6 +237,25 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   // The conversation ledger table main registers, built over this process's stores.
   // Only the channels DAEMON_LOCAL_OP_CHANNELS lists are served; the rest of the table
   // (writes that need App-side deletion and run tracking) stays refused until migrated.
+  // Session history pages, loaded and cached in this process (the cache backs older-page
+  // reads). The window's session selection is reported with the page for the App to apply.
+  const historyChannels: Record<string, (event: unknown, ...args: never[]) => unknown> = {}
+  const history = createHistoryRuntime()
+  history.register({
+    handleTrusted: (channel, listener) => { historyChannels[channel] = listener as unknown as (event: unknown, ...args: never[]) => unknown },
+    appSessionStore: catalog.appSessionStore,
+    providerContextKey: session.providerContextKey,
+    resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory,
+    providerRegistry: providers.providerRegistry,
+    getRuns: () => pipeline.runs,
+    rememberProject: workspace.rememberProject,
+    homeDir: workspace.homeDir,
+    userDataDir: options.userDataDir,
+    isShuttingDown: () => isShuttingDown,
+    applySelection: () => undefined,
+    reportSelection: true
+  })
+
   const conversationTable = conversationChannelTable({
     resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory,
     providerContextKey: session.providerContextKey,
@@ -251,16 +271,16 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     rememberProject: workspace.rememberProject,
     deletingSessions: session.deletingSessions,
     adoptingSessionKeys: session.adoptingSessionKeys,
-    // The daemon keeps no window history cache, and announcing changes to the App is
-    // not built yet (§13.5); both are no-ops here, never a silent success elsewhere.
-    invalidateSessionHistoryLoad: () => undefined,
+    // Announcing changes to the App is not built yet (§13.5): a no-op here, never a
+    // silent success elsewhere. The history cache invalidated is this daemon's own.
+    invalidateSessionHistoryLoad: history.invalidateSessionHistoryLoad,
     publishDataUpdated: () => undefined,
     deleteOneSession: async () => { throw new Error('daemon_capability_unavailable:session-delete') },
     resolveSessionRunIds,
     deleteConversationHistory,
     appUserDataDir: options.userDataDir
   })
-  const conversationLocalOps = Object.fromEntries(Object.entries(conversationTable.handlers)
+  const conversationLocalOps = Object.fromEntries(Object.entries({ ...conversationTable.handlers, ...historyChannels })
     .map(([channel, listener]) => [channel, (...args: unknown[]) => (listener as (event: unknown, ...values: unknown[]) => unknown)(undefined, ...args)]))
 
   // App run controls answer from this process's registry: steering and background-task

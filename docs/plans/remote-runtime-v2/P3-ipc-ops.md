@@ -20,6 +20,7 @@
 | `providerContext` | local | providers | { op:'providerContext', method, context } | context 归一化或 invalidation 结果 | 已验证 peer + authorize(context.cwd) + provider 白名单 |
 | `recorderContent` | local | evidence | { op:'recorderContent', method, cwd, cursor } | 现有 recorder content page | 已验证 peer + authorize(cwd) + `.scry` 路径校验 |
 | `runControl` | local | controls | { op:'runControl', method, runId, payload } | 现有 run 控制结果 | 已验证 peer + run 归属 + authorize(cwd) |
+| `sessionHistory` | local | history | { op:'sessionHistory', method:'loadSession'|'loadSessionOlder', args } | loadSession：{ page, selection }（App 应用 selection 后把 page 交给 renderer）；loadSessionOlder：与 main 同一 handler 的页 | 已验证 peer + scope: local（只在本机端点存在）；会话须属于 daemon 的 App catalog，cwd 经 resolveKnownProjectDirectory 重验 |
 | `sessionPurge` | local | navigation | { op:'sessionPurge', method, request } | 现有批量删除结果（逐条 preview 与指纹） | 已验证 peer + authorize(cwd) + 指纹确认与逐条预览 |
 | `sessionStore` | local | navigation | { op:'sessionStore', method:'listSessions'|'catalogHealth'|'listArchivedSessions', args } | 现有 appSessionStore 结果（健康、归档列表） | 已验证 peer + authorize(context.cwd) + provider/profile |
 | `skills` | local | providers | { op:'skills', method, context } | 现有 skill 列表 envelope | 已验证 peer + authorize(context.cwd) + provider 白名单 |
