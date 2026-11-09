@@ -152,20 +152,24 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
 
   const atLatest = `(() => { const el=document.querySelector('.conversation-chat .chat'); return el && el.scrollHeight-el.clientHeight-el.scrollTop < 2 })()`
   await wait(() => evaluate(`document.querySelectorAll('.conversation-chat .turn').length === 2 && ${atLatest}`), 'new output follows the transcript bottom')
-  // The bottom-follow policy includes 32px of slack. The original viewport only
-  // overflowed by 13px, so its top was still inside that zone, not older output.
-  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 700, deviceScaleFactor: 1, mobile: false })
+  // The bottom-follow policy allows 32px of slack, so this check only means something when the
+  // transcript really scrolls: two turns do not overflow every viewport, so shrink until they do.
+  const geometry = () => evaluate(`(() => { const el=document.querySelector('.conversation-chat .chat'); return {
+    atLatest: ${atLatest}, scrollHeight: el?.scrollHeight ?? null,
+    clientHeight: el?.clientHeight ?? null, scrollTop: el?.scrollTop ?? null,
+    viewportWidth: innerWidth, viewportHeight: innerHeight, deviceScaleFactor: devicePixelRatio,
+    turns: document.querySelectorAll('.conversation-chat .turn').length
+  } })()`)
+  const overflowing = (state) => Boolean(state.atLatest) && state.scrollHeight - state.clientHeight > 32
   let initialScrollState
   try {
-    await wait(async () => {
-      initialScrollState = await evaluate(`(() => { const el=document.querySelector('.conversation-chat .chat'); return {
-        atLatest: ${atLatest}, scrollHeight: el?.scrollHeight ?? null,
-        clientHeight: el?.clientHeight ?? null, scrollTop: el?.scrollTop ?? null,
-        viewportWidth: innerWidth, viewportHeight: innerHeight, deviceScaleFactor: devicePixelRatio,
-        turns: document.querySelectorAll('.conversation-chat .turn').length
-      } })()`)
-      return initialScrollState.atLatest && initialScrollState.scrollHeight - initialScrollState.clientHeight > 32
-    }, 'scrollable transcript follows the bottom')
+    for (const height of [700, 640, 560]) {
+      await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1100, height, deviceScaleFactor: 1, mobile: false })
+      await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+      initialScrollState = await geometry()
+      if (overflowing(initialScrollState)) break
+    }
+    assert.ok(overflowing(initialScrollState), `scrollable transcript follows the bottom: ${JSON.stringify(initialScrollState)}`)
     const wheelPoint = await evaluate(`(() => {const rect=document.querySelector('.conversation-chat .chat').getBoundingClientRect();return {x:rect.left+10,y:rect.top+30}})()`)
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...wheelPoint, deltaX: 0, deltaY: -10000 })
     await wait(() => evaluate(`document.querySelector('.conversation-chat .chat').scrollTop === 0 && !${atLatest}`), 'user scroll leaves bottom following')
