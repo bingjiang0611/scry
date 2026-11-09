@@ -9,6 +9,7 @@ import type { ActiveRun } from '../../shared/trace'
 import type { ContextAdmission } from '../context-admission'
 import { parseConversationTarget } from '../conversation-request'
 import { registerSideChatChannels } from './conversation-side-chat-channels'
+import { daemonModeEnabled, installDaemonChannelResultHandler } from '../daemon-channel-gate'
 import { parseConversationLegacySource, prepareConversationAdoption } from '../conversation-adoption'
 import { deleteConversationHistory } from '../conversation-history'
 import { liveConversationDeletionCatalog, planConversationDeletion, resolveConversationDeletionRuns } from '../conversation-deletion'
@@ -245,11 +246,32 @@ export interface ConversationBootstrapDependencies extends Omit<ConversationTabl
   getWindow: () => BrowserWindow | null
 }
 
+// Which conversation each daemon-served write changed, read from its answer or arguments.
+const DAEMON_WRITE_TARGETS: Record<string, (value: unknown, args: unknown[]) => unknown> = {
+  'conversation:create': (value) => (value as { id?: unknown } | null)?.id,
+  'conversation:createSideChat': (value) => (value as { id?: unknown } | null)?.id,
+  'conversation:adopt': (value) => (value as { id?: unknown } | null)?.id,
+  'conversation:update': (_value, args) => args[0]
+}
+
+/**
+ * Daemon mode: the daemon writes the ledger but cannot reach this window yet (§13.5). A
+ * write this App made still refreshes the window as the in-process handler did, once the
+ * daemon has answered; a refused write announces nothing. An adoption preview (no id)
+ * changed nothing and is not announced.
+ */
+export function announceDaemonConversationWrites(publish: (event: AgentDataUpdated) => void): Array<() => void> {
+  return Object.entries(DAEMON_WRITE_TARGETS).map(([channel, target]) => installDaemonChannelResultHandler(channel, (value, args) => {
+    const conversationId = target(value, args)
+    if (typeof conversationId === 'string') publish({ kind: 'conversation_changed', conversationId })
+    return value
+  }))
+}
+
 export function registerConversationHandlers(deps: ConversationBootstrapDependencies) {
-  const { handlers, prepareConversationDeletion } = conversationChannelTable({
-    ...deps,
-    publishDataUpdated: (event) => { deps.getWindow()?.webContents.send('agent:dataUpdated', event) }
-  })
+  const publishDataUpdated = (event: AgentDataUpdated): void => { deps.getWindow()?.webContents.send('agent:dataUpdated', event) }
+  if (daemonModeEnabled()) announceDaemonConversationWrites(publishDataUpdated)
+  const { handlers, prepareConversationDeletion } = conversationChannelTable({ ...deps, publishDataUpdated })
   for (const [channel, listener] of Object.entries(handlers)) deps.handleTrusted(channel, listener)
   return { prepareConversationDeletion }
 }

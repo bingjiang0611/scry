@@ -62,6 +62,13 @@ export const DAEMON_LOCAL_OP_CHANNELS: Readonly<Record<string, { op: string; met
   'conversation:listSideChats': { op: 'conversation', method: 'listSideChats', read: true },
   'conversation:findSideChatCommand': { op: 'conversation', method: 'findSideChatCommand', read: true },
   'conversation:readSideChatSnapshot': { op: 'conversation', method: 'readSideChatSnapshot', read: true },
+  // Conversation ledger writes the daemon makes on its own (B4-L4-2b). Never replayed after
+  // a lost reply. delete (App session deletion), fork (Provider fork) and send (run
+  // tracking) stay refused until those move.
+  'conversation:create': { op: 'conversation', method: 'create', read: false },
+  'conversation:update': { op: 'conversation', method: 'update', read: false },
+  'conversation:adopt': { op: 'conversation', method: 'adopt', read: false },
+  'conversation:createSideChat': { op: 'conversation', method: 'createSideChat', read: false },
   // Session history pages (B4-L4-2a). Loading persists tool content and remembers the
   // project, so the two loads are not replayed after a lost reply.
   'agent:loadSession': { op: 'sessionHistory', method: 'loadSession', read: false },
@@ -75,13 +82,13 @@ export const DAEMON_LOCAL_OP_NAMES: ReadonlySet<string> = new Set(Object.values(
 export type DaemonChannelForwarder = (call: { op: string; method: string; args: unknown[]; read: boolean }) => Promise<unknown>
 
 let forwarder: DaemonChannelForwarder | undefined
-const resultHandlers = new Map<string, (value: unknown) => unknown>()
+const resultHandlers = new Map<string, (value: unknown, args: unknown[]) => unknown>()
 
 /**
  * A split channel: the daemon answers, then the App applies its own part of the result
  * (for agent:loadSession, the window's session selection) and hands the renderer the rest.
  */
-export function installDaemonChannelResultHandler(channel: string, handle: (value: unknown) => unknown): () => void {
+export function installDaemonChannelResultHandler(channel: string, handle: (value: unknown, args: unknown[]) => unknown): () => void {
   resultHandlers.set(channel, handle)
   return () => { if (resultHandlers.get(channel) === handle) resultHandlers.delete(channel) }
 }
@@ -116,7 +123,7 @@ export function gateDaemonChannel<TListener extends (...args: never[]) => unknow
       if (!forwarder) throw new Error(`daemon_capability_unavailable:${channel}`)
       const value = await forwarder({ op: local.op, method: local.method, args, read: local.read })
       const after = resultHandlers.get(channel)
-      return after ? after(value) : value
+      return after ? after(value, args) : value
     }) as unknown) as TListener
   }
   return ((() => { throw new Error(`daemon_capability_unavailable:${channel}`) }) as unknown) as TListener

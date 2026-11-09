@@ -167,10 +167,28 @@ describe('daemon host process', () => {
       })
       expect(conversations.error).toBeUndefined()
       expect(Array.isArray(conversations.result)).toBe(true)
+      // Ledger writes the daemon can make on its own (B4-L4-2b): create, then read it back
+      // and rename it, all against the daemon's store.
       const create = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'conversation', method: 'create', args: [workspace]
       })
-      expect(create.error).toBe('unsupported_op')
+      expect(create.error).toBeUndefined()
+      const created = create.result as { id: string; revision: number }
+      const listed = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'conversation', method: 'list', args: [workspace]
+      })
+      expect((listed.result as Array<{ id: string }>).map((item) => item.id)).toContain(created.id)
+      const renamed = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'conversation', method: 'update', args: [created.id, created.revision, { kind: 'rename', title: 'from the App' }]
+      })
+      expect(renamed.error).toBeUndefined()
+      // Deletion needs the App's session deletion and send needs run tracking: not yet served.
+      for (const method of ['delete', 'fork', 'send']) {
+        const refused = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+          op: 'conversation', method, args: [created.id]
+        })
+        expect(refused.error).toBe('unsupported_op')
+      }
       // History pages are loaded by the daemon against its own catalog: a session it does
       // not know is refused by the same check the App ran in process.
       const history = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
