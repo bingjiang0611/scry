@@ -182,15 +182,13 @@ final class LaneConnection: Sendable {
     do {
       if case let .supported(set) = capabilities, set.contains("mux") {
         let handler = MuxHandler(ready: channel.eventLoop.makePromise(of: Void.self), handshakeTimeout: handshakeTimeout)
-        try await install(handler, innerContext: innerContext, on: channel)
-        try await awaitReady(handler.ready, channel: channel)
+        try await installAndAwaitReady(handler, ready: handler.ready, innerContext: innerContext, on: channel)
         recorder.mark(\.innerTLSMs)
         recorder.update { $0.multiplexed = true }
         return LaneConnection(channel: channel, kind: .multiplexed(handler), route: route)
       }
       let handler = LaneHandler(ready: channel.eventLoop.makePromise(of: Void.self), handshakeTimeout: handshakeTimeout)
-      try await install(handler, innerContext: innerContext, on: channel)
-      try await awaitReady(handler.ready, channel: channel)
+      try await installAndAwaitReady(handler, ready: handler.ready, innerContext: innerContext, on: channel)
       recorder.mark(\.innerTLSMs)
       if capabilities == .legacy {
         recorder.update { $0.multiplexed = false }
@@ -219,8 +217,14 @@ final class LaneConnection: Sendable {
       }
       let mux = try await channel.eventLoop.flatSubmit { [handler, channel] in
         channel.pipeline.removeHandler(handler).flatMapThrowing { _ -> MuxHandler in
-          let mux = MuxHandler(ready: channel.eventLoop.makePromise(of: Void.self), handshaken: true)
-          try channel.pipeline.syncOperations.addHandler(mux)
+          let ready = channel.eventLoop.makePromise(of: Void.self)
+          let mux = MuxHandler(ready: ready, handshaken: true)
+          do { try channel.pipeline.syncOperations.addHandler(mux) }
+          catch {
+            // Never leave the promise unfulfilled: NIO traps on a leaked one.
+            ready.fail(error)
+            throw error
+          }
           return mux
         }
       }.get()
@@ -234,23 +238,22 @@ final class LaneConnection: Sendable {
     }
   }
 
-  private static func install(_ handler: ChannelHandler & Sendable, innerContext: NIOSSLContext, on channel: Channel) async throws {
-    try await channel.eventLoop.submit {
-      try channel.pipeline.syncOperations.addHandler(NIOSSLClientHandler(context: innerContext, serverHostname: nil))
-      try channel.pipeline.syncOperations.addHandler(handler)
-    }.get()
-  }
-
-  private static func awaitReady(_ ready: EventLoopPromise<Void>, channel: Channel) async throws {
+  // Adds inner TLS and the lane handler, then waits for the handshake. Any
+  // failure, including a relay that closed right after the upgrade so the
+  // handlers cannot even be added, fails `ready`: an unfulfilled promise is a
+  // NIO precondition failure, not just a leak.
+  private static func installAndAwaitReady(_ handler: ChannelHandler & Sendable, ready: EventLoopPromise<Void>,
+                                           innerContext: NIOSSLContext, on channel: Channel) async throws {
     do {
+      try await channel.eventLoop.submit {
+        try channel.pipeline.syncOperations.addHandler(NIOSSLClientHandler(context: innerContext, serverHostname: nil))
+        try channel.pipeline.syncOperations.addHandler(handler)
+      }.get()
       try await withTaskCancellationHandler {
         try await ready.futureResult.get()
       } onCancel: { channel.close(promise: nil) }
     } catch {
-      // A lane that failed to become ready never fulfils this promise; leaving
-      // it unfulfilled makes NIO report a leaked promise (a fatal error in
-      // debug builds) instead of the real handshake failure. A second
-      // completion of an already failed promise is ignored by NIO.
+      // A second completion of an already failed promise is ignored by NIO.
       channel.eventLoop.execute { ready.fail(error) }
       throw error
     }
