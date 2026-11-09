@@ -16,7 +16,7 @@ export interface SubmitDeps {
   scopedIntentId: typeof ScopedIntentId
 }
 
-export interface SubmitResult { runId: string; status: 'recorded' | 'duplicate' }
+export interface SubmitResult { runId: string; status: 'recorded' | 'duplicate'; seq: number }
 
 // Called before the peer is authorized: an attachment-bearing intent only arrives
 // through the validated submit path, where the peer is known.

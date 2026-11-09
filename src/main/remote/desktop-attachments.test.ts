@@ -78,7 +78,7 @@ describe('desktop attachment transport storage', () => {
       if (state !== 'settled') throw new Error(JSON.stringify(controller.poll(peer, { cursor: 0 })))
       expect(Buffer.from(seen!.attachments![0]!.dataBase64, 'base64')).toEqual(bytes)
       await expect(store.read(reference)).rejects.toThrow('attachment_reference_missing')
-      await expect(controller.submitReceivedIntent(peer, request)).resolves.toEqual({ runId: accepted.runId, status: 'duplicate' })
+      await expect(controller.submitReceivedIntent(peer, request)).resolves.toEqual({ runId: accepted.runId, status: 'duplicate', seq: accepted.seq })
     } finally { await rm(root, { recursive: true, force: true }) }
   })
 

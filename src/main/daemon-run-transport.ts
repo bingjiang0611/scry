@@ -46,6 +46,8 @@ export interface DaemonSubmitResult {
   intentId: string
   runId: string
   status: 'recorded' | 'duplicate'
+  /** The intent's ledger position, when this daemon reports one. */
+  seq?: number
 }
 
 export interface DaemonIntentState {
@@ -119,7 +121,10 @@ export class DaemonRunTransport {
     if (!isDaemonRunId(runId) || (reply.status !== 'recorded' && reply.status !== 'duplicate')) {
       throw new DaemonRunError('invalid_daemon_response')
     }
-    return { intentId: input.intentId, runId, status: reply.status }
+    // An older daemon does not report the intent's position; the caller then falls back
+    // to the newest cursor this connection has seen.
+    const seq = Number.isSafeInteger(reply.seq) && (reply.seq as number) > 0 ? reply.seq as number : undefined
+    return { intentId: input.intentId, runId, status: reply.status, ...(seq !== undefined ? { seq } : {}) }
   }
 
   // A recorded intent is not a dispatched run. Recovery asks this after a

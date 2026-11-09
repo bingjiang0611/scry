@@ -199,7 +199,7 @@ export class RemoteGateway {
     // dispatched after a restart belongs to nobody the daemon can still prove, so it
     // falls back to the device semantics below.
     this.#runScopes.set(receipt.event.runId, this.grantScope(peerCertSHA256))
-    return { runId: receipt.event.runId, status: receipt.status }
+    return { runId: receipt.event.runId, status: receipt.status, seq: receipt.event.seq }
   }
 
   /** The verified grant's scope; unknown becomes the stricter device semantics. */

@@ -131,7 +131,7 @@ export class HostController {
 
   // Device-facing (inner-mTLS): submit a durable intent, then drive the
   // dispatcher so the gated executor picks it up exactly once.
-  submitIntent(peerCertSHA256: string, input: { intentId: string; detail?: string }): { runId: string; status: 'recorded' | 'duplicate' } {
+  submitIntent(peerCertSHA256: string, input: { intentId: string; detail?: string }): { runId: string; status: 'recorded' | 'duplicate'; seq: number } {
     return submitIntent(this.#deps(), peerCertSHA256, input)
   }
 

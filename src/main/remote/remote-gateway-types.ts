@@ -237,6 +237,10 @@ export interface SubmitIntentInput {
 export interface SubmitIntentResult {
   runId: string
   status: 'recorded' | 'duplicate'
+  // Position of this intent in the ledger's global sequence. A window that starts
+  // watching here reads its own evidence immediately instead of walking the session's
+  // history page by page.
+  seq: number
 }
 
 export class RemoteGatewayError extends Error {
