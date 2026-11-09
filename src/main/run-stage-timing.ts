@@ -26,6 +26,11 @@ export type RunStage =
   | 'traceRead'
   | 'watchReply'
   | 'rendererPush'
+  // F1: where a text-bearing read goes between the daemon's answer and the window.
+  | 'apply'
+  | 'applyDeliver'
+  | 'bridgeQueue'
+  | 'bridgeFlush'
 
 let target: string | null = null
 let recorded = new Set<string>()

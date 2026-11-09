@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { boundMarker } from './daemon-run-evidence'
 import { planDelivery } from './daemon-run-delivery'
+import { recordRunStage, runStageTimingEnabled } from './run-stage-timing'
 import { PerformanceTrace } from './performance-timing'
 import { TraceOutputBridge } from './trace-output'
 import type { AgentQuestionResponse } from '../shared/runtime'
 import type { ActiveRun, TraceEvent } from '../shared/trace'
-import type { DesktopRemoteContext, DesktopTraceCursor } from '../shared/desktop-remote'
+import type { DesktopRemoteContext } from '../shared/desktop-remote'
+import { view, type RunCursor } from './daemon-run-cursor'
 import { DaemonRunTransport } from './daemon-run-transport'
 
 // The App's own run view, driven by the daemon instead of by an in-process
@@ -17,50 +19,6 @@ import { DaemonRunTransport } from './daemon-run-transport'
 // expressed as an append, so the run is marked for resynchronisation and the
 // renderer re-reads the authoritative snapshot; a run whose lifecycle the daemon
 // no longer knows is reported as unknown, not as finished.
-
-export interface DaemonRunRuntimeDeps {
-  transport: DaemonRunTransport
-  send: (channel: string, payload: unknown) => void
-  // Long-poll window. The daemon answers earlier when something changes.
-  waitMs?: number
-  bindBudgetMs?: number
-  bridge?: TraceOutputBridge
-  onWarn?: (message: string, detail?: unknown) => void
-}
-
-interface RunCursor {
-  runId: string
-  // Unknown until the daemon reports the bind, which is the only place it names the
-  // Provider and directory of a run this window did not start.
-  context?: DesktopRemoteContext
-  lifecycle: string | null
-  after?: DesktopTraceCursor
-  // Canonical run id the daemon bound to this ledger run, once it said so.
-  scryRunId?: string
-  // Last ledger position this run's watch has read. The ledger answers with one page
-  // at a time from a global sequence, so a watch that keeps asking from 0 only ever
-  // re-reads the session's first page; this is what lets it walk forward to its own
-  // evidence (and past a page boundary at all).
-  watch: number
-  // How much run content this watch has seen. Content is what actually moves while the
-  // Provider streams; the ledger only moves at lifecycle points.
-  output: number
-  latest?: ActiveRun
-  // The item last delivered at each index: a text block the daemon rewrites as it
-  // streams is an append of that item, not a rewrite of history.
-  pushed: TraceEvent[]
-  askedQuestions: Set<string>
-  // The daemon dedupes an answer by its own id, so one is minted per question and
-  // reused when the same answer is retried.
-  answerIds: Map<string, string>
-  resyncRequired: boolean
-  pumping: boolean
-  stopped: boolean
-  // Where the wait before the first token actually goes. Only recorded when perf
-  // logging is on; it answers "which hop?" instead of guessing.
-  stamp?: PerformanceTrace
-  sawText: boolean
-}
 
 const DEFAULT_WAIT_MS = 15_000
 // How long a start waits for the daemon to bind a canonical run id. A run that has
@@ -83,16 +41,14 @@ export interface DaemonStartReceipt {
   bound: boolean
 }
 
-// `bound` is the daemon's own marker, not a client guess; anything else in the
-// progress detail stays opaque.
-// The trace only reports `done` when a snapshot happens to be the read that carries
-// it; after the first snapshot every read is a delta, so a run that stops would look
-// alive forever. The ledger's terminal state is the authority on whether a daemon run
-// finished, and it is what the window's stop control waits for.
-function view(cursor: RunCursor): ActiveRun | null {
-  if (!cursor.latest) return null
-  const terminal = cursor.lifecycle === 'settled' || cursor.lifecycle === 'failed' || cursor.lifecycle === 'cancelled'
-  return terminal && !cursor.latest.done ? { ...cursor.latest, done: true } : cursor.latest
+export interface DaemonRunRuntimeDeps {
+  transport: DaemonRunTransport
+  send: (channel: string, payload: unknown) => void
+  // Long-poll window. The daemon answers earlier when something changes.
+  waitMs?: number
+  bindBudgetMs?: number
+  bridge?: TraceOutputBridge
+  onWarn?: (message: string, detail?: unknown) => void
 }
 
 export class DaemonRunRuntime {
@@ -110,6 +66,9 @@ export class DaemonRunRuntime {
     this.#deps = deps
     this.#bridge = deps.bridge ?? new TraceOutputBridge({
       canSend: () => true,
+      // The same batching window the in-process pipeline uses; the difference is only
+      // what flushes it early (see the step boundary below).
+      flushMs: 16,
       send: (payload) => this.#deps.send('agent:trace', payload),
       publishHealth: (state) => this.#deps.send('agent:traceHealth', state)
     })
@@ -320,6 +279,11 @@ export class DaemonRunRuntime {
       if (cursor.stamp && cursor.latest === undefined && read.kind === 'snapshot' && read.run) cursor.stamp.mark('firstTrace')
       if (this.#apply(read, cursor)) changed = true
       await this.#publishQuestions(cursor)
+      // The step boundary is where the App knows it has the whole read, so the batch
+      // built from it is handed over here instead of waiting for the batching timer.
+      // Batching still applies - every event of one step travels in one batch - and
+      // backpressure still applies, because flush() respects the same high water.
+      if (changed) this.#bridge.flush()
       if (watch.state === 'settled' || watch.state === 'failed' || watch.state === 'cancelled') cursor.stopped = true
       return { changed, lifecycle: cursor.lifecycle }
     } finally {
@@ -353,6 +317,7 @@ export class DaemonRunRuntime {
   // The stamp ends when text first reaches the renderer; that is the number the user
   // waits for, and the stages before it say which hop spent the time.
   #delivered(cursor: RunCursor, event: TraceEvent): void {
+    if (runStageTimingEnabled()) recordRunStage(cursor.runId, 'applyDeliver')
     this.#bridge.push(event)
     if (cursor.sawText || cursor.stamp === undefined) return
     if (event.stage !== 'text' && event.stage !== 'text_delta') return
@@ -362,6 +327,7 @@ export class DaemonRunRuntime {
   }
 
   #apply(read: Awaited<ReturnType<DaemonRunTransport['trace']>>, cursor: RunCursor): boolean {
+    if (runStageTimingEnabled()) recordRunStage(cursor.runId, 'apply')
     if (read.kind === 'snapshot' && read.run) cursor.latest = read.run
     const plan = planDelivery(cursor.pushed, read)
     for (const event of plan.events) this.#delivered(cursor, event)
