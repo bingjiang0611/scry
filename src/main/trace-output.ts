@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer'
 import type { TraceEvent } from '../shared/trace'
-import { recordRunStage } from './run-stage-timing'
+import { recordRunStage, runStageTimingEnabled } from './run-stage-timing'
 
 /**
  * 序列化失败（循环引用、BigInt 等）时使用的保守回退大小。刻意取单批上限量级，
@@ -324,8 +324,10 @@ export class TraceOutputBridge {
     // The App main's hand-off to the window. Both modes send through here - the App's own
     // pipeline and a daemon run's bridge - so this is the same hop in either mode, and what
     // follows it is the renderer's own arrival stamp.
-    const model = events.find((event) => event.kind === 'model')
-    if (model) recordRunStage(model.runId, 'rendererPush')
+    if (runStageTimingEnabled()) {
+      const model = events.find((event) => event.kind === 'model')
+      if (model) recordRunStage(model.runId, 'rendererPush')
+    }
     this.options.send({ events, bytes, generation: this.deliveryGeneration, batchId })
     return true
   }

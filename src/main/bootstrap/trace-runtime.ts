@@ -1,5 +1,5 @@
 import type { ActiveRun, TraceEvent } from '../../shared/trace'
-import { recordRunStage } from '../run-stage-timing'
+import { recordRunStage, runStageTimingEnabled } from '../run-stage-timing'
 import type { AgentQuestionRequest, AgentIntervention } from '../../shared/runtime'
 import { appendCoalescedTrace, consumeTraceMutations, stampProjection, traceMutationState, type TraceMutationState } from '../live-trace'
 import { sanitizeToolEvent, sanitizeToolEvents, toolContentTurnBudget } from '../../core/turn-recorder/tool-content'
@@ -168,7 +168,7 @@ export function createTraceRuntime({
   function publishTrace(ev: TraceEvent): void {
     // The first token's evidence, at the seam both modes share: daemon runs travel
     // on to the ledger, in-process runs go to the window, but this line is the same.
-    if (ev.kind === 'model') recordRunStage(ev.runId, 'firstOutput')
+    if (runStageTimingEnabled() && ev.kind === 'model') recordRunStage(ev.runId, 'firstOutput')
     runTraces.route(ev)
     if (runs.isViewed(ev.runId)) queueTrace(ev)
   }
