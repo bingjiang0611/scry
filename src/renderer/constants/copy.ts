@@ -259,6 +259,16 @@ export const SLASH_COMMAND_COPY = {
   noMatches: '无匹配命令'
 } as const
 
+// 时间线分页提示。更早轮次仍在归档里——加载只是收起，不是丢弃，文案必须说清楚。
+export const HISTORY_WINDOW_COPY = {
+  rangeLabel: '历史轮次范围',
+  rangeLocal: (loaded: number, total: number) => `已加载 ${loaded} / ${total} 轮·更早轮次仍在本机归档中，未丢弃`,
+  rangeRemote: (loaded: number, host: string) => `已加载最近 ${loaded} 轮·更早轮次仍在 ${host} 的归档中，未丢弃`,
+  loadOlder: '加载更早轮次',
+  loadingShort: '加载中…',
+  exhausted: (total: number) => `已到最早一轮 · 共 ${total} 轮`
+} as const
+
 export const ARCHIVED_SESSIONS_COPY = {
   localTitle: '本机已存档会话',
   deleteAllLocal: '删除全部本机会话',
