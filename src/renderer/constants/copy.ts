@@ -275,6 +275,13 @@ export const ARCHIVED_SESSIONS_COPY = {
   localEmpty: '没有本机已存档会话'
 } as const
 
+// 归档列表的 Provider 筛选：Provider id 不给人读，未知来源也不能冒充某个 Provider。
+export const PROVIDER_FILTER_COPY = {
+  label: '按 Provider 筛选',
+  all: '全部 Provider',
+  unknown: 'Provider 未知'
+} as const
+
 export const QUESTIONNAIRE_COPY = {
   pending: (count: number) => `还有 ${count} 题待回答`,
   review: '可修改任意答案，确认后提交',

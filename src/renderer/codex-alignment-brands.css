@@ -1,7 +1,8 @@
 /* ===== Provider 品牌标志 =====
-   图形取自 provider-brand-marks.ts 的真实品牌标；颜色按品牌固定，不跟 --provider-* 语义色走：
-   语义色仍用于归属/风险等提示，品牌标必须保持原色，否则 Claude 会变成粉色。
-   例外是分析面板：图表用 series 颜色标识数据系列，品牌色在那里让位。 */
+   图形取自 provider-brand-marks.ts 的真实品牌标；默认颜色按品牌固定（Claude 的橙、其余近白），
+   不跟 --provider-* 语义色走，否则 Claude 会变成粉色。
+   两处例外是有意的：分析面板用 series 颜色标识数据系列；侧边栏会话行沿用行内的语义色与
+   dim/选中态（.sb-provider 规则更具体），因为那里颜色表达归属与状态，不只是品牌。 */
 .provider-glyph {
   width: 15px;
   height: 15px;

@@ -3,6 +3,8 @@ import { useId, useRef } from 'react'
 
 import { PROVIDER_LABELS, type ProviderId } from '@shared/provider'
 
+import { PROVIDER_FILTER_COPY } from '../constants/copy'
+
 import { Icon } from './primitives/Icon'
 import { ProviderGlyph } from './ProviderGlyph'
 import { MenuCheck } from './menu-parts'
@@ -11,8 +13,8 @@ import { moveMenuFocus } from './WorkdirPicker'
 
 /** Provider id 不是给人读的；未知来源单独说明，不冒充成某个 Provider。 */
 export function providerFilterLabel(provider: string): string {
-  if (provider === 'all') return '全部 Provider'
-  if (provider === 'legacy_unknown') return 'Provider 未知'
+  if (provider === 'all') return PROVIDER_FILTER_COPY.all
+  if (provider === 'legacy_unknown') return PROVIDER_FILTER_COPY.unknown
   return PROVIDER_LABELS[provider as ProviderId] ?? provider
 }
 
@@ -45,11 +47,11 @@ export function ProviderFilterMenu({
         type="button"
         ref={triggerRef}
         className="arch-provider-trigger"
-        aria-label="按 Provider 筛选"
+        aria-label={PROVIDER_FILTER_COPY.label}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={menuId}
-        title="按 Provider 筛选"
+        title={PROVIDER_FILTER_COPY.label}
         onClick={() => setOpen((current) => !current)}
       >
         {providerFilterLabel(value)}
@@ -61,7 +63,7 @@ export function ProviderFilterMenu({
           ref={menuRef}
           className="menu arch-provider-menu"
           role="menu"
-          aria-label="按 Provider 筛选"
+          aria-label={PROVIDER_FILTER_COPY.label}
           onKeyDown={(event) => moveMenuFocus(event, menuRef.current)}
         >
           <button
