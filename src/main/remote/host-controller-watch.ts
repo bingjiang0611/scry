@@ -6,6 +6,7 @@ import type { RemoteGateway } from './remote-gateway'
 import type { RemoteInteractionBroker } from './remote-interaction-broker'
 import type { RunOutputPage } from './run-output-log'
 import { MAC_RUN_ID } from './host-controller-routing'
+import { recordRunStage } from '../run-stage-timing'
 import type { RemoteIntentRouting, MacRunSource, LiveRunRef } from './host-controller-types'
 
 // Long polls over one run and over every live run: the device waits here instead
@@ -36,9 +37,20 @@ export interface LiveWatcherDeps {
   poll(peer: string, input: { cursor: number }): ReturnType<SessionLedger['since']>
   pendingQuestions(peer: string, input: { runId: string }): AgentQuestionRequest[]
   runOutput(peer: string, input: { runId: string; cursor: number }): Promise<RunOutputPage>
+  // Count-only read of the same spool: a watcher that only needs "there is more" must
+  // not download the text it is not going to use.
+  runOutputWake(peer: string, input: { runId: string; cursor: number }): Promise<{ count: number; cursor: number }>
 }
 
-export interface WatchInput { runId: string; cursor: number; outputCursor: number; waitMs: number }
+export interface WatchInput {
+  runId: string
+  cursor: number
+  outputCursor: number
+  waitMs: number
+  // false: lifecycle only. true: include the output page. 'wake': report that content
+  // exists without its text.
+  output?: boolean | 'wake'
+}
 // Ledger evidence, pending questions and lifecycle. No shadow output: a device
 // that reads content from canonical traces never depends on the output spool.
 export interface WatchLifecycle {
@@ -72,22 +84,24 @@ export class LiveWatchers {
   }
 
   async watchRun(peerCertSHA256: string, input: WatchInput): Promise<WatchResult> {
-    return await this.#watch(peerCertSHA256, input, true) as WatchResult
+    return await this.#watch(peerCertSHA256, input, input.output === 'wake' ? 'wake' : 'full') as WatchResult
   }
 
   async watchLifecycle(peerCertSHA256: string, input: WatchInput): Promise<WatchLifecycle> {
-    return await this.#watch(peerCertSHA256, input, false)
+    return await this.#watch(peerCertSHA256, input, 'none')
   }
 
   // One long poll, read output only when the caller wants it. Its overflow or
   // I/O failure must not block authoritative lifecycle, so content reads stay
   // separate (the device uses canonical trace reads).
-  async #watch(peerCertSHA256: string, input: WatchInput, includeOutput: boolean): Promise<WatchResult | WatchLifecycle> {
+  async #watch(peerCertSHA256: string, input: WatchInput, mode: 'none' | 'full' | 'wake'): Promise<WatchResult | WatchLifecycle> {
     const waitMs = Math.min(Math.max(0, input.waitMs), WATCH_MAX_WAIT_MS)
     const deadline = Date.now() + waitMs
     while (true) {
       const seen = this.#seq
-      const output = includeOutput ? await this.#deps.runOutput(peerCertSHA256, { runId: input.runId, cursor: input.outputCursor }) : undefined
+      const output = mode === 'none' ? undefined : mode === 'wake'
+        ? await this.#deps.runOutputWake(peerCertSHA256, { runId: input.runId, cursor: input.outputCursor })
+        : await this.#deps.runOutput(peerCertSHA256, { runId: input.runId, cursor: input.outputCursor })
       // Read lifecycle and its ledger evidence together after the async output
       // read. Otherwise a newly terminal state can omit its failure/result event.
       const poll = this.#deps.poll(peerCertSHA256, { cursor: input.cursor })
@@ -95,8 +109,19 @@ export class LiveWatchers {
       const state = this.#deps.ledger.runState(input.runId) ?? null
       const terminal = state === 'settled' || state === 'failed' || state === 'cancelled'
       const remaining = deadline - Date.now()
-      if (poll.events.length > 0 || poll.reset || (output?.chunks.length ?? 0) > 0 || terminal || remaining <= 0) {
-        return { poll, questions, ...(output ? { output } : {}), state }
+      const hasContent = output === undefined ? false : (output as RunOutputPage).chunks !== undefined
+        ? (output as RunOutputPage).chunks.length > 0
+        : (output as { count: number }).count > 0
+      if (poll.events.length > 0 || poll.reset || hasContent || terminal || remaining <= 0) {
+        if (hasContent) recordRunStage(input.runId, 'watchReply')
+        return {
+          poll, questions, state,
+          ...(output === undefined ? {} : {
+            output: (output as RunOutputPage).chunks !== undefined
+              ? output
+              : { chunks: [], cursor: (output as { cursor: number }).cursor, count: (output as { count: number }).count }
+          })
+        }
       }
       if (seen === this.#seq) await this.#waitForChange(remaining)
     }

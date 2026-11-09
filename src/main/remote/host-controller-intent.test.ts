@@ -120,7 +120,9 @@ describe('HostController intent execution (routing, workspaces, providers, proje
     await controller.idle()
     const retry = controller.submitIntent(CERT, { intentId, detail: routing() })
     await controller.idle()
-    expect(retry).toEqual({ runId: first.runId, status: 'duplicate' })
+    // A retry answers with the original intent: same run, same ledger position, so the
+    // window can watch from where that intent sits instead of the session's first page.
+    expect(retry).toEqual({ runId: first.runId, status: 'duplicate', seq: first.seq })
     expect(runProvider).toHaveBeenCalledTimes(1)
   })
 

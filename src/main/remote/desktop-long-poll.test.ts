@@ -61,7 +61,8 @@ describe('long polling instead of ticking', () => {
       macRuns: { list: () => runs as never, stop: () => true, answer: () => true },
       poll: () => ({ cursor: 0, minCursor: 0, events: [] }) as never,
       pendingQuestions: () => [],
-      runOutput: async () => { throw new Error('lifecycle watch must not read output') }
+      runOutput: async () => { throw new Error('lifecycle watch must not read output') },
+      runOutputWake: async () => { throw new Error('lifecycle watch must not read output') }
     })
     const first = await watchers.liveRuns('peer', { waitMs: 0 })
     expect(first.runs).toEqual([])
@@ -77,6 +78,28 @@ describe('long polling instead of ticking', () => {
     expect(Date.now() - started).toBeLessThanOrEqual(1_100)
     expect(answered.runs).toHaveLength(1)
     expect(answered.revision).not.toBe(first.revision)
+  })
+
+  it('wakes on content without sending it when the caller only asked to know', async () => {
+    let readText = 0
+    const watchers = new LiveWatchers({
+      authorizeDevice: () => {},
+      authorizedCwd: (cwd: string) => cwd,
+      ledger: { runState: () => 'dispatched' } as never,
+      gateway: {} as never,
+      interactions: { list: () => [] } as never,
+      stops: new Map(),
+      live: new Map(),
+      poll: () => ({ cursor: 3, events: [] }) as never,
+      pendingQuestions: () => [],
+      runOutput: async () => { readText++; return { chunks: [{ seq: 4, at: 1, runId: 'run-abc-1', kind: 'output' as const, text: 'secret body' }], cursor: 4 } },
+      runOutputWake: async () => ({ count: 1, cursor: 4 })
+    })
+    const reply = await watchers.watchRun('peer', { runId: 'run-abc-1', cursor: 0, outputCursor: 3, waitMs: 0, output: 'wake' })
+    // The count travels; the text does not, and the spool is never read for it.
+    expect(reply.output).toEqual({ chunks: [], cursor: 4, count: 1 })
+    expect(readText).toBe(0)
+    expect(JSON.stringify(reply)).not.toContain('secret body')
   })
 
   it('refuses a lifecycle watch for an unknown run without returning output', async () => {

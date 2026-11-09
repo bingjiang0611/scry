@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { recordRunStage, runStageTimingEnabled } from '../run-stage-timing'
 import type { AgentInputAttachment } from '../../shared/runtime'
 import { readStoredAttachmentBytes } from '../attachment-store'
 import { DESKTOP_ATTACHMENT_MAX_BYTES, DESKTOP_ATTACHMENT_MAX_COUNT } from './desktop-attachments'
@@ -183,6 +184,12 @@ export function createDesktopHostReader(deps: {
       if (!run) traceRevisions.forget(query.runId)
       const images = query.images && run ? { imageCount: run.attachments?.length ?? 0 } : {}
       const shown = query.images && run ? { ...run, attachments: undefined } : run
+      // Only an answer that carries the model's own text is the delivery: an empty poll
+      // answered before the Provider said anything is not part of the first token's wait.
+      if (shown && runStageTimingEnabled() &&
+          shown.items.some((item) => typeof item.text === 'string' && item.text.trim().length > 0)) {
+        recordRunStage(query.runId, 'traceRead')
+      }
       if (!query.delta || !shown) result = { kind: 'trace', run: shown, ...images }
       else {
         // Same authorization as a full read above; only the response shape differs.

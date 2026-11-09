@@ -9,6 +9,7 @@ import { createPiProfileRuntime } from '../main/bootstrap/pi-profiles'
 import { createProviderRuntime } from '../main/bootstrap/provider-runtime'
 import { runStartupRecovery } from '../main/bootstrap/startup-recovery'
 import { configureRecorderCliRuntime, warmShellEnv } from '../main/claude-locate'
+import { configureRunStageTiming } from '../main/run-stage-timing'
 import { daemonPrivateCliPath } from './daemon-config'
 import { startRun } from '../main/bootstrap/run-execution'
 import { startWorkspaceRun } from '../main/bootstrap/workspace-start'
@@ -60,6 +61,9 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   const log = options.log ?? ((line: string) => { process.stdout.write(`${line}\n`) })
   configureRecorderCliRuntime({ resourcesPath: options.resourcesPath, requirePrivateCli: options.isPackaged })
   configureStorage({ userDataDir: options.userDataDir, appPath: options.appPath })
+  // Same file the App writes: the two clocks are aligned by performance.timeOrigin,
+  // so one run's stages can be read back across both processes.
+  configureRunStageTiming(options.userDataDir)
   initDb()
 
   let isShuttingDown = false

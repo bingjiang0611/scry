@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { recordRunStage } from '../run-stage-timing'
 import { AgentRuntimeError } from '../run-outcome'
 import type { AgentInputAttachment, AgentQuestionRequest, AgentQuestionResponse, AgentStartRequest, AgentPermissionMode, RuntimeProvider } from '../../shared/runtime'
 import type { ProviderId } from '../../shared/provider'
@@ -122,6 +123,7 @@ export function createRunProvider(deps: RunProviderBootstrapDependencies): () =>
   }> => {
     if (interrupted()) return { stopped: true }
     setProviderStartedAt(new Date().toISOString())
+    recordRunStage(runId, 'providerStart')
     firstTracePerf.mark('provider_launch')
     firstTextPerf.mark('provider_launch')
     // Re-hash executable bytes at the actual Provider launch boundary, after all

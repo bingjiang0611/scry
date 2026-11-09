@@ -29,6 +29,10 @@ export interface OutputChunk {
 export interface RunOutputPage {
   chunks: OutputChunk[]
   cursor: number
+  // How many chunks are newer than the requested cursor. A wake-only read reports the
+  // count without the text, so a watcher can learn "there is more" without the body
+  // crossing the socket.
+  count?: number
 }
 
 export interface RunOutputStore {
@@ -174,6 +178,20 @@ export class RunOutputLog {
       this.#persistenceErrors.delete(runId)
       throw failure
     }
+  }
+
+  // Wake-only: is there content after this cursor, and where does it end. No chunk text
+  // is copied, so a long poll can use it purely as a signal.
+  async countSince(runId: string, cursor: number): Promise<{ count: number; cursor: number }> {
+    const start = Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : 0
+    if (this.#store) {
+      const page = await this.#store.since(runId, start, DEFAULT_PAGE)
+      return { count: page.chunks.length, cursor: page.cursor }
+    }
+    const buffer = this.#runs.get(runId)
+    if (!buffer) return { count: 0, cursor: start }
+    const chunks = buffer.chunks.filter((chunk) => chunk.seq > start)
+    return { count: chunks.length, cursor: chunks.length > 0 ? chunks[chunks.length - 1]!.seq : start }
   }
 
   async since(runId: string, cursor: number, pageSize = DEFAULT_PAGE): Promise<RunOutputPage> {

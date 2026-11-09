@@ -100,6 +100,10 @@ export class DaemonRunRuntime {
   readonly #runs = new Map<string, RunCursor>()
   readonly #locks = new Map<string, Promise<void>>()
   readonly #bridge: TraceOutputBridge
+  // The newest ledger position any watch on this connection has read. A run this window
+  // did not submit can only start from the session's beginning, but a run it did submit
+  // starts at its own intent.
+  #seen = 0
   #disposed = false
 
   constructor(deps: DaemonRunRuntimeDeps) {
@@ -122,7 +126,10 @@ export class DaemonRunRuntime {
     // than restarting the trace from zero.
     if (!this.#runs.has(receipt.runId)) {
       this.#runs.set(receipt.runId, {
-        runId: receipt.runId, context: input.context, lifecycle: 'recorded', watch: 0, output: 0,
+        // A run's own evidence cannot predate its submit, so its watch starts at the
+        // intent instead of the session's first page.
+        runId: receipt.runId, context: input.context, lifecycle: 'recorded',
+        watch: receipt.seq !== undefined ? Math.max(0, receipt.seq - 1) : this.#seen, output: 0,
         pushed: [], askedQuestions: new Set(), answerIds: new Map(), resyncRequired: false, pumping: false, stopped: false,
         stamp, sawText: false
       })
@@ -267,15 +274,17 @@ export class DaemonRunRuntime {
     const trace = new PerformanceTrace('daemon.run.pump', cursor.context ? { provider: cursor.context.providerId } : {})
     let changed = false
     try {
-      // `output: true` is the wake, not the delivery: the text still arrives on the
-      // trace, but the daemon only answers this long poll early when the run produced
-      // something. Without it a fifteen second poll is a fifteen second freeze between
-      // the first chunk and the end of the message.
+      // `output: 'wake'` is the wake, not the delivery: the daemon reports that the run
+      // produced something without sending that content, and the text still arrives on
+      // the trace. Without a content wake a fifteen second poll is a fifteen second
+      // freeze between the first chunk and the end of the message; with the page itself
+      // every chunk would cross the socket twice.
       const watch = await this.#deps.transport.watch({
         runId, cursor: cursor.watch, outputCursor: cursor.output,
-        waitMs: options.waitMs ?? this.#deps.waitMs ?? DEFAULT_WAIT_MS, output: true
+        waitMs: options.waitMs ?? this.#deps.waitMs ?? DEFAULT_WAIT_MS, output: 'wake'
       })
       cursor.watch = Math.max(cursor.watch, watch.cursor)
+      this.#seen = Math.max(this.#seen, watch.cursor)
       if (watch.output.count > 0) {
         cursor.output = Math.max(cursor.output, watch.output.cursor)
         changed = true

@@ -1,4 +1,5 @@
 import { SessionLedger, type RunLifecycle } from './session-ledger'
+import { recordRunStage } from '../run-stage-timing'
 import { createHash } from 'node:crypto'
 import type { RunOutputPage } from './run-output-log'
 import { parseRemoteWorkspaceQuery, type RemoteWorkspaceResult } from './remote-workspace'
@@ -189,6 +190,9 @@ export class RemoteGateway {
   submitIntent(peerCertSHA256: string, input: SubmitIntentInput): SubmitIntentResult {
     this.#authorize(peerCertSHA256)
     const candidateRunId = SessionLedger.newRunId()
+    // Arrival, before anything durable: the segment to `intentDurable` is the ledger's
+    // own cost, not the caller's.
+    recordRunStage(candidateRunId, 'submit')
     const receipt = this.#ledger.recordIntent({
       intentId: scopedIntentId(peerCertSHA256, input.intentId),
       runId: candidateRunId,
@@ -198,8 +202,11 @@ export class RemoteGateway {
     // scope without re-reading the frame's transport. In-memory on purpose: an intent
     // dispatched after a restart belongs to nobody the daemon can still prove, so it
     // falls back to the device semantics below.
+    // `recordIntent` appends and fsyncs synchronously, so its return is the durable
+    // boundary: the segment from `submit` is the ledger's own price.
+    recordRunStage(receipt.event.runId, 'intentDurable')
     this.#runScopes.set(receipt.event.runId, this.grantScope(peerCertSHA256))
-    return { runId: receipt.event.runId, status: receipt.status }
+    return { runId: receipt.event.runId, status: receipt.status, seq: receipt.event.seq }
   }
 
   /** The verified grant's scope; unknown becomes the stricter device semantics. */
@@ -377,5 +384,13 @@ export class RemoteGateway {
     const cursor = Number.isSafeInteger(input.cursor) && input.cursor >= 0 ? input.cursor : 0
     if (typeof input.runId !== 'string' || input.runId.length === 0 || input.runId.length > 128) return { chunks: [], cursor }
     return this.#output?.since(input.runId, cursor) ?? { chunks: [], cursor }
+  }
+
+  /** How much output is newer than this cursor, without the text. */
+  async countOutput(peerCertSHA256: string, input: { runId: string; cursor: number }): Promise<{ count: number; cursor: number }> {
+    this.#authorize(peerCertSHA256)
+    const cursor = Number.isSafeInteger(input.cursor) && input.cursor >= 0 ? input.cursor : 0
+    if (typeof input.runId !== 'string' || input.runId.length === 0 || input.runId.length > 128) return { count: 0, cursor }
+    return this.#output?.countSince(input.runId, cursor) ?? { count: 0, cursor }
   }
 }

@@ -20,8 +20,9 @@ export interface RemoteRequestEnvelope {
   cursor?: number
   outputCursor?: number
   waitMs?: number
-  // watch only: false asks for lifecycle evidence without the shadow output spool.
-  output?: boolean
+  // watch only: false asks for lifecycle evidence without the shadow output spool,
+  // 'wake' asks whether content exists without transferring it.
+  output?: boolean | 'wake'
   before?: number
   limit?: number
   snapshot?: string
@@ -115,9 +116,11 @@ export async function dispatchRemoteRequest(
     }
     if (request.op === 'watch') {
       if (typeof request.runId !== 'string' || !Number.isSafeInteger(request.cursor) || !Number.isSafeInteger(request.outputCursor) ||
-          !Number.isSafeInteger(request.waitMs) || (request.output !== undefined && typeof request.output !== 'boolean')) return { error: 'invalid_request' }
+          !Number.isSafeInteger(request.waitMs) ||
+          (request.output !== undefined && typeof request.output !== 'boolean' && request.output !== 'wake')) return { error: 'invalid_request' }
       const watch = {
-        runId: request.runId, cursor: request.cursor as number, outputCursor: request.outputCursor as number, waitMs: request.waitMs as number
+        runId: request.runId, cursor: request.cursor as number, outputCursor: request.outputCursor as number, waitMs: request.waitMs as number,
+        ...(request.output === 'wake' ? { output: 'wake' as const } : {})
       }
       // `output: false` skips the shadow output spool; the reply then carries no
       // output page at all, rather than an empty one that could read as "no content".

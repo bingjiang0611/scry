@@ -27,7 +27,8 @@ function fixture(frames: { watch: Array<{ state: string; events?: unknown[]; out
   const request = async (payload: Record<string, unknown>): Promise<unknown> => {
     if (payload.op === 'submit') return { runId: RUN, status: 'recorded' }
     if (payload.op === 'watch') {
-      expect(payload.output).toBe(true)
+      // Wake only: the daemon reports that content exists, never its text.
+      expect(payload.output).toBe('wake')
       const frame = frames.watch[watchCall++] ?? { state: 'settled' }
       const count = frame.output ?? 0
       outputCursor += count
