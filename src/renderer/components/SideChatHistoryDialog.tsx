@@ -28,7 +28,7 @@ export function SideChatHistoryDialog({ history, onClose }: {
         <h3 id={titleId}>{SIDE_CHAT_COPY.historyTitle}</h3>
         {history.total !== undefined && <p data-side-chat-history-total>{SIDE_CHAT_COPY.historyTotal(history.total)}</p>}
       </div>
-      <button ref={closeRef} type="button" className="btn" onClick={onClose}>{SIDE_CHAT_COPY.snapshotClose}</button>
+      <button ref={closeRef} type="button" className="btn" onClick={onClose}>{SIDE_CHAT_COPY.historyClose}</button>
     </header>
     {history.error && <p role="alert" className="side-chat-history-error">{history.error}</p>}
     <ol className="side-chat-history-items" data-side-chat-history>

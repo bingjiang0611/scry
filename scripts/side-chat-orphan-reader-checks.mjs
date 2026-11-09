@@ -4,58 +4,38 @@ import { json, sideChatDriver } from './side-chat-driving.mjs'
  * What a source-less child can still prove about its frozen body and its own controls.
  *
  * This runs after the source parent was really deleted, on the child opened as the main
- * view. Every page comes from the child's sealed artifact, so a page that renders after
- * the delete is evidence the body is child-owned rather than a leftover source read. The
- * prefix is long in messages and short in bytes, so it spans real viewer pages without
- * weakening the single-message handoff budget, which is proven separately at the body API.
+ * view. The page comes from the child's sealed artifact, so a page that reads after the
+ * delete is evidence the body is child-owned rather than a leftover source read. The
+ * surface itself no longer offers a reader dialog (owner decision 2026-11-09), so this
+ * reads the same sealed page through the typed API instead of a removed control.
  */
 export async function exerciseSideChatOrphanReader({ cdp, evaluate, check, ipcCountsPath, inputsPath, callsPath,
   rendererFailures = [], orphanChild, hostAgent, draft, expectedMessages }) {
-  const { driver, capture, click, clickAt, idle, wait, counts, since } = sideChatDriver({ cdp, evaluate, check,
+  const { driver, click, clickAt, idle, wait, counts, since } = sideChatDriver({ cdp, evaluate, check,
     ipcCountsPath, inputsPath, callsPath, rendererFailures, label: 'Side-chat orphan reader' })
   const readCounts = () => counts()
 
-  // The frozen body is read from the child's own sealed artifact, paged, after the source is gone.
+  // The frozen body is still read from the child's own sealed artifact after the source is gone.
   const beforeRead = readCounts()
-  await clickAt(`[...document.querySelectorAll('#main-pane [data-side-chat-variant="main"] .side-chat-surface-actions button')].find(node => node.textContent.includes('查看来源快照'))`)
-  await wait(`document.querySelector('[data-side-chat-snapshot]') != null`, 20000)
-  await wait(`document.querySelectorAll('[data-side-chat-snapshot] li[data-snapshot-role]').length > 0`, 20000)
-  await idle()
-  const page = await evaluate(`(() => {
-    const rows = [...document.querySelectorAll('[data-side-chat-snapshot] li[data-snapshot-role]')]
-    const button = label => [...document.querySelectorAll('[data-side-chat-snapshot] button')].find(node => node.textContent.trim() === label)
-    return { rows: rows.length, state: document.querySelector('[data-side-chat-snapshot] [data-snapshot-state]')?.dataset.snapshotState ?? null,
-      cursor: document.querySelector('[data-side-chat-snapshot]')?.dataset.sideChatSnapshotCursor ?? null,
-      older: button('上一页')?.disabled, newer: button('下一页')?.disabled,
-      text: rows.map(node => node.textContent).join(String.fromCharCode(10)) }
-  })()`)
+  const page = await evaluate(`window.scry.conversations.readSideChatSnapshot(${json(orphanChild)}).then(page => ({
+    rows: page.items.length, next: page.nextCursor ?? null,
+    text: page.items.map(item => item.text).join(String.fromCharCode(10))
+  }))`)
   const reads = since(beforeRead)
-  // The whole frozen prefix is inline (a readerless Provider cannot freeze more), so the
-  // reader must show every frozen message on one page and offer no page it cannot produce.
-  check(page.rows === expectedMessages, `the reader must show every frozen message: ${json({ page, expectedMessages })}`)
-  check(page.rows <= 40, `the reader rendered more than one bounded page: ${json({ page })}`)
-  check(page.state === 'complete', `a fully inline body must report a complete page: ${json({ page })}`)
-  check(page.older === true && page.newer === true, `a single page must not offer paging: ${json({ page })}`)
+  // The whole frozen prefix is inline (a readerless Provider cannot freeze more), so one
+  // read must return every frozen message and promise no page it cannot produce.
+  check(page.rows === expectedMessages, `the frozen body must keep every message: ${json({ page, expectedMessages })}`)
+  check(page.rows <= 40, `one read returned more than one bounded page: ${json({ page })}`)
+  check(page.next === null, `a fully inline body must be one complete page: ${json({ page })}`)
   check(page.text.includes('冻结正文'), `the frozen page lost its text: ${json(page.text.slice(0, 200))}`)
   check(!page.text.includes('\uFFFD'), 'the frozen body lost a character')
   check(page.text.includes('🀄️'), 'the frozen body lost its astral-plane emoji')
   check((reads['conversation:readSideChatSnapshot'] ?? 0) === 1,
     `one page must cost one artifact read: ${json(reads)}`)
-  check((reads['conversation:read'] ?? 0) === 0, `the viewer read the source conversation: ${json(reads)}`)
-  await capture('orphan-snapshot-page')
-  // Escape closes the modal and returns focus to the action that opened it.
-  await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
-  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
-  await wait(`document.querySelector('[data-side-chat-snapshot]') == null`, 10000)
-  const afterEscape = await evaluate(`(() => ({
-    open: document.querySelector('[data-side-chat-snapshot]') != null,
-    focused: document.activeElement?.textContent?.trim() ?? null,
-    draft: document.querySelector('#main-pane .runtime-composer textarea')?.value ?? null
-  }))()`)
-  check(afterEscape.open === false, 'Escape did not close the snapshot reader')
-  check(afterEscape.focused != null && afterEscape.focused.includes('查看来源快照'),
-    `focus did not return to the snapshot action: ${json(afterEscape)}`)
-  check(afterEscape.draft === draft, `the child draft was lost after reading its source: ${json(afterEscape)}`)
+  check((reads['conversation:read'] ?? 0) === 0,
+    `reading a frozen body must not read the source conversation: ${json(reads)}`)
+  const afterRead = await evaluate(`document.querySelector('#main-pane .runtime-composer textarea')?.value ?? null`)
+  check(afterRead === draft, `the child draft was lost after reading its source: ${json({ afterRead, draft })}`)
 
   // The child's own runtime control is a child-owned preference, not the host's selection:
   // changing it here must not leak into another conversation, and it comes back with the
@@ -94,9 +74,8 @@ export async function exerciseSideChatOrphanReader({ cdp, evaluate, check, ipcCo
   check(reopenedChild.provider === ownAgent, `the child lost its own saved provider: ${json({ reopenedChild, ownAgent })}`)
   check(reopenedChild.draft === draft, `the child lost its own draft: ${json(reopenedChild)}`)
   return {
-    childId: orphanChild, snapshot: { rows: page.rows, expectedMessages, state: page.state,
-      olderDisabled: page.older, newerDisabled: page.newer,
-      reads: reads['conversation:readSideChatSnapshot'] ?? 0, afterEscape },
+    childId: orphanChild, frozenBody: { rows: page.rows, expectedMessages, next: page.next,
+      reads: reads['conversation:readSideChatSnapshot'] ?? 0 },
     hostAgent, ownAgent, reopenedChild
   }
 }

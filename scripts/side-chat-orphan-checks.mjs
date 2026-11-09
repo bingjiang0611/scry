@@ -4,7 +4,6 @@ import { json, sideChatDriver } from './side-chat-driving.mjs'
  * The largest frozen prefix a readerless Provider can really deliver: 13 turns x 2 messages,
  * well inside the 16 kB handoff budget. A longer prefix needs a verified history reader, so
  * a multi-page body cannot be created by the App at all; the reader's paging is proven in
- * `scripts/side-chat-snapshot-ui-smoke.mjs` against real pages instead of faking a reader.
  */
 const PARENT_TURNS = 13
 /** More children than one orphan group renders by default. */
@@ -22,7 +21,7 @@ const unicodePrompt = (ordinal) => `side chat note 第 ${ordinal} 轮🙂🀄️
  * The source parent is archived and deleted through the shipped fingerprint-preview dialog.
  * Afterwards the child must still be a real record with a readable frozen body, still be
  * discoverable under its captured parent title, and open as the main view with its own
- * runtime controls and its own snapshot reader instead of the host's global chat props.
+ * runtime controls of its own instead of the host's global chat props.
  * The frozen prefix is long in message count and short in bytes, so it really spans two
  * viewer pages; the single-message body budget is proven separately at the body API.
  */
@@ -221,7 +220,7 @@ export async function exerciseSideChatOrphan({ cdp, evaluate, check, ipcCountsPa
   await idle()
   const orphanChild = hiddenTarget
 
-  // Open it as the MAIN view: its own snapshot reader and its own runtime controls.
+  // Open it as the MAIN view: its own runtime controls and no actions of its own.
   await clickAt(`[...document.querySelectorAll('[data-orphan-side-chat-id]')].find(node => node.dataset.orphanSideChatId === ${json(orphanChild)})`)
   await wait(`document.querySelector('#main-pane [data-side-chat-variant="main"]') != null`, 20000)
   await idle()
@@ -230,7 +229,7 @@ export async function exerciseSideChatOrphan({ cdp, evaluate, check, ipcCountsPa
     return {
       id: surface?.dataset.sideChatId ?? null,
       parent: surface?.querySelector('[data-side-chat-parent-title]')?.textContent ?? null,
-      snapshotAction: [...surface.querySelectorAll('.side-chat-surface-actions button')].map(node => node.textContent.trim()),
+      actions: surface?.querySelectorAll('.side-chat-surface-header button').length ?? -1,
       closeAction: surface?.querySelector('[aria-label="关闭侧聊"]') != null,
       provider: surface?.querySelector('.runtime-composer .clibtn')?.dataset.agentId ?? null,
       composer: surface?.querySelector('.runtime-composer textarea') != null,
@@ -240,7 +239,7 @@ export async function exerciseSideChatOrphan({ cdp, evaluate, check, ipcCountsPa
   })()`)
   check(mainView.id === orphanChild, `the orphan opened as another conversation: ${json(mainView)}`)
   check(mainView.parent != null && mainView.parent.length > 0, `the main view lost the captured parent title: ${json(mainView)}`)
-  check(mainView.snapshotAction.includes('查看来源快照'), `the main view has no snapshot reader: ${json(mainView)}`)
+  check(mainView.actions === 0, `the side chat surface must not carry actions of its own: ${json(mainView)}`)
   check(mainView.closeAction === false, `the main view offered a tab-close action: ${json(mainView)}`)
   check(mainView.provider != null && mainView.composer === true, `the main view lost its own runtime controls: ${json(mainView)}`)
   check(mainView.workspaceLabel != null && mainView.workspaceLabel.includes('共用工作区'),

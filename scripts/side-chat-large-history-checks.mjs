@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { json, readJsonLines, sideChatDriver } from './side-chat-driving.mjs'
-import { exerciseLargeHistoryDialog } from './side-chat-large-history-ui.mjs'
 
 const MiB = 1024 * 1024
 /** Paged viewer reads must finish inside this budget, or the check fails as incomplete. */
@@ -177,12 +176,9 @@ export async function exerciseSideChatLargeHistory({ cdp, evaluate, check, ipcCo
     check(sourceHashes.has(after.hash),
       `the surviving body no longer matches the source: ${json({ id: entry.id, after: after.hash })}`)
   }
-  // The bodies are reachable over IPC above; this proves a user can open the dialog on the
-  // same child, read it and page it with real pointer input.
-  const dialog = await exerciseLargeHistoryDialog({ driver, evaluate, check, seed, childId, ipcCountsPath })
-  return { parentId: seed.conversationId, childId, dialog, parentTurns: seed.turnCount, messageCount: seed.messageCount,
-    archiveBytes: seed.archiveBytes, hugeMessageBytes: seed.hugeMessageBytes, viewerRows: sealed.pages.length,
-    viewerElapsedMs: sealed.elapsedMs, planItems: planShape.missingItems, providerReads: read.reads.length,
+  return { parentId: seed.conversationId, childId, parentTurns: seed.turnCount, messageCount: seed.messageCount,
+    archiveBytes: seed.archiveBytes, hugeMessageBytes: seed.hugeMessageBytes, bodyRows: sealed.pages.length,
+    bodyReadMs: sealed.elapsedMs, planItems: planShape.missingItems, providerReads: read.reads.length,
     readsAfterDelete: afterDelete.pages.length, coverage: preview.coverage }
 }
 
