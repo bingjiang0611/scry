@@ -1,7 +1,14 @@
 /**
- * 等待对端收口的上限。持有者永不释放时，后续每一轮都会停在 admission 里：App 看不到错误、
- * 也停不掉那一轮。有界等待把「永远等」变成带原因的失败（run_admission_timeout / 同一会话
- * 已有一轮正在运行），前提是该轮真的没有开始。
+ * 启动一轮 run 时等待同身份持有者让位的上限。持有者永不释放时，后续启动会停在 admission
+ * 里：App 看不到错误、也停不掉那一轮。有界等待把「永远等」变成带原因的失败
+ * （run_admission_timeout / 同一会话已有一轮正在运行），前提是该轮真的没有开始。
+ *
+ * 只用于启动 run（admitRun 与 waitForCompletedRuns 的调用处显式传入）。同一个类还承载会话
+ * 账本的 'ownership' 队列、会话删除与 fork：那些排队的是写入，超时拒绝会让一次并未失败的
+ * 写入（例如 turn 结算）落不了盘，所以它们保持默认的无上限等待。
+ *
+ * 20 s 是暂定值：依据是 fixture（300 次启动 p50 263 ms、最长 3.3 s）与 commit hook 自身
+ * 10 s 上限；真实大仓库的轮次结束 diff 分布尚未取证。
  */
 export const ADMISSION_DEADLINE_MS = 20_000
 
@@ -32,7 +39,7 @@ export class ContextAdmission {
   private readonly admitDeadlineMs: number
 
   constructor(options: AdmissionOptions = {}) {
-    this.admitDeadlineMs = options.admitDeadlineMs ?? ADMISSION_DEADLINE_MS
+    this.admitDeadlineMs = options.admitDeadlineMs ?? Number.POSITIVE_INFINITY
   }
 
   run<T>(key: string, action: () => Promise<T>): Promise<T> {
@@ -64,6 +71,11 @@ export class ContextAdmission {
       }
     }
   }
+}
+
+/** 启动一轮 run 的准入：与 runMany 相同，但等待持有者让位有 ADMISSION_DEADLINE_MS 上限。 */
+export function admitRun<T>(admission: ContextAdmission, keys: readonly string[], action: () => Promise<T>): Promise<T> {
+  return admission.runMany(keys, action, { admitDeadlineMs: ADMISSION_DEADLINE_MS })
 }
 
 export async function waitForCompletedRuns(

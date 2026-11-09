@@ -6,7 +6,7 @@ import type { ProviderRunHandle } from '../providers/types'
 import type { ProviderRegistry } from '../providers/registry'
 import type { PiRunDiagnostics } from '../providers/pi-run-diagnostics'
 import type { ProviderOperationGate } from '../provider-operation-gate'
-import type { ContextAdmission } from '../context-admission'
+import { admitRun, type ContextAdmission } from '../context-admission'
 import type { ConversationStore, NativeSessionScope } from '../conversation-store'
 import type { createAppSessionStore } from '../app-store'
 import type { RunRegistry } from '../run-registry'
@@ -112,7 +112,7 @@ export async function startRun(
     admissionKeys, assertSessionNotArchived } = frontdoor
   let remoteResult: Promise<RemoteRunCompletion> | undefined
   try {
-    const started = await contextAdmission.runMany(admissionKeys, async () => {
+    const started = await admitRun(contextAdmission, admissionKeys, async () => {
       const admitted = await prepareRunAdmission(frontdoor, options, {
         providerRegistry, getStartupManagedRecovery,
         isShuttingDown,

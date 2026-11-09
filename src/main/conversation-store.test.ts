@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as io from '../core/turn-recorder/io'
+import { ADMISSION_DEADLINE_MS } from './context-admission'
 import { ConversationStore, decodeConversation, type BeginConversationTurn } from './conversation-store'
 import { upsertTraceArchiveTurn } from './transcript-archive'
 import { planConversationContinuation, type Conversation, type ConversationItemRef, type ConversationTarget } from '../shared/conversation'
@@ -290,5 +291,30 @@ describe('unified conversation identity and durable coverage', () => {
     invalid.turns[0].bindingId = randomUUID()
     await writeFile(file(), JSON.stringify(invalid))
     await expect(store.read(initial.id)).rejects.toThrow('未知原生绑定')
+  })
+})
+
+describe('conversation ledger ownership queue', () => {
+  // Turn writes, settlement and lifecycle changes all queue on 'ownership'. A slow holder
+  // (a large deletion plan) must delay them, never turn them into refusals: a refused
+  // settlement would leave the turn's evidence unwritten (H1).
+  it('waits past the run-admission deadline instead of refusing a queued write', async () => {
+    vi.useFakeTimers()
+    try {
+      let releaseHolder!: () => void
+      const holder = store.admission.run('ownership', () => new Promise<void>((resolve) => { releaseHolder = resolve }))
+      const queuedWrite = vi.fn(async () => 'written')
+      const queued = store.admission.run('ownership', queuedWrite)
+      let outcome: 'pending' | 'resolved' | 'rejected' = 'pending'
+      queued.then(() => { outcome = 'resolved' }, () => { outcome = 'rejected' })
+      await vi.advanceTimersByTimeAsync(ADMISSION_DEADLINE_MS + 5_000)
+      expect(outcome).toBe('pending')
+      expect(queuedWrite).not.toHaveBeenCalled()
+      releaseHolder()
+      await holder
+      await expect(queued).resolves.toBe('written')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ContextAdmission, canRestartInterruptedLocalOnlySession, expectedRestartSourceMatches, expectedSessionMatches, runConflictsWithSession, waitForCompletedRuns } from './context-admission'
+import { ADMISSION_DEADLINE_MS, ContextAdmission, admitRun, canRestartInterruptedLocalOnlySession, expectedRestartSourceMatches, expectedSessionMatches, runConflictsWithSession, waitForCompletedRuns } from './context-admission'
 
 describe('context admission', () => {
   it('admits an explicit new session while another first turn has no Provider session ID', async () => {
@@ -120,6 +120,51 @@ describe('context admission', () => {
     releaseHolder()
     await holder
     await expect(queued).resolves.toBe('next')
+  })
+
+  // The run-admission deadline is a property of starting a run, not of every queue built
+  // on this class: the conversation ledger, deletion and fork serialize on it too, and a
+  // timeout there would refuse a write that has not failed (H1).
+  it('keeps a default admission queued past the run-admission deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      const admission = new ContextAdmission()
+      let releaseHolder!: () => void
+      const holder = admission.run('a', () => new Promise<void>((resolve) => { releaseHolder = resolve }))
+      const queuedAction = vi.fn(async () => 'next')
+      const queued = admission.run('a', queuedAction)
+      let outcome: 'pending' | 'resolved' | 'rejected' = 'pending'
+      queued.then(() => { outcome = 'resolved' }, () => { outcome = 'rejected' })
+      await vi.advanceTimersByTimeAsync(ADMISSION_DEADLINE_MS + 5_000)
+      expect(outcome).toBe('pending')
+      expect(queuedAction).not.toHaveBeenCalled()
+      releaseHolder()
+      await holder
+      await expect(queued).resolves.toBe('next')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('bounds a run start that waits behind a holder at the run-admission deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      const admission = new ContextAdmission()
+      let releaseHolder!: () => void
+      const holder = admission.runMany(['a'], () => new Promise<void>((resolve) => { releaseHolder = resolve }))
+      const action = vi.fn(async () => 'started')
+      const start = admitRun(admission, ['a'], action)
+      const rejected = expect(start).rejects.toThrow('run_admission_timeout')
+      await vi.advanceTimersByTimeAsync(ADMISSION_DEADLINE_MS + 1)
+      await rejected
+      expect(action).not.toHaveBeenCalled()
+      releaseHolder()
+      await holder
+      // The timed-out start released its own place, so the next one is not stuck behind it.
+      await expect(admitRun(admission, ['a'], async () => 'after')).resolves.toBe('after')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('reports a UI-complete run that never settles as no longer waitable', async () => {
