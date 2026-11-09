@@ -12,7 +12,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 0
+        "darwin-arm64": 0,
+        "linux-x64": 0
       }
     },
     "providers.discovery/selected.controlReads": {
@@ -26,7 +27,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1
+        "darwin-arm64": 1,
+        "linux-x64": 1
       }
     },
     "providers.discovery/legacy.controlReads": {
@@ -40,7 +42,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 3
+        "darwin-arm64": 3,
+        "linux-x64": 3
       }
     },
     "providers.pi-probe/subprocess.rpc": {
@@ -96,7 +99,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1
+        "darwin-arm64": 1,
+        "linux-x64": 1
       }
     },
     "providers.pi-probe-parked/subprocess.rpc": {
@@ -110,7 +114,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1
+        "darwin-arm64": 1,
+        "linux-x64": 1
       }
     },
     "providers.pi-probe-parked/rpc.responses": {
@@ -124,7 +129,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 8
+        "darwin-arm64": 8,
+        "linux-x64": 8
       }
     },
     "providers.pi-probe-parked/shutdown.grace-expiries": {
@@ -138,7 +144,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 0
+        "darwin-arm64": 0,
+        "linux-x64": 0
       }
     },
     "providers.pi-probe-isolated-invalidation/subprocess.rpc": {
@@ -152,7 +159,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 2
+        "darwin-arm64": 2,
+        "linux-x64": 2
       }
     }
   }
