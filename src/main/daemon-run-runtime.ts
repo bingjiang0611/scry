@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { boundMarker } from './daemon-run-evidence'
 import { planDelivery } from './daemon-run-delivery'
-import { recordRunStage, runStageTimingEnabled } from './run-stage-timing'
 import { PerformanceTrace } from './performance-timing'
 import { TraceOutputBridge } from './trace-output'
 import type { AgentQuestionResponse } from '../shared/runtime'
@@ -317,7 +316,6 @@ export class DaemonRunRuntime {
   // The stamp ends when text first reaches the renderer; that is the number the user
   // waits for, and the stages before it say which hop spent the time.
   #delivered(cursor: RunCursor, event: TraceEvent): void {
-    if (runStageTimingEnabled()) recordRunStage(cursor.runId, 'applyDeliver')
     this.#bridge.push(event)
     if (cursor.sawText || cursor.stamp === undefined) return
     if (event.stage !== 'text' && event.stage !== 'text_delta') return
@@ -327,7 +325,6 @@ export class DaemonRunRuntime {
   }
 
   #apply(read: Awaited<ReturnType<DaemonRunTransport['trace']>>, cursor: RunCursor): boolean {
-    if (runStageTimingEnabled()) recordRunStage(cursor.runId, 'apply')
     if (read.kind === 'snapshot' && read.run) cursor.latest = read.run
     const plan = planDelivery(cursor.pushed, read)
     for (const event of plan.events) this.#delivered(cursor, event)

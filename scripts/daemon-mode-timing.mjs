@@ -284,12 +284,10 @@ try {
     dispatchToProvider: (t) => t.providerStart - t.dispatch,
     providerToFirstOutput: (t) => t.firstOutput - t.providerStart,
     firstOutputToTraceRead: (t) => t.traceRead - t.firstOutput,
-    // F1: from the daemon's text-bearing answer to the App handing the batch over.
-    traceReadToApply: (t) => t.apply - t.traceRead,
-    applyToDeliver: (t) => t.applyDeliver - t.apply,
-    applyToBridgeQueue: (t) => t.bridgeQueue - t.apply,
+    // F1: the daemon's text-bearing answer is queued at `traceRead`, and the batch leaves
+    // for the window at `bridgeFlush`; this is the hold that used to be a batching timer.
+    traceReadToBridgeQueue: (t) => t.bridgeQueue - t.traceRead,
     bridgeQueueToFlush: (t) => t.bridgeFlush - t.bridgeQueue,
-    firstOutputToApply: (t) => t.apply - t.firstOutput,
     traceReadToWatchReply: (t) => t.watchReply - t.traceRead,
     watchReplyToAppPush: (t) => t.rendererPush - t.watchReply,
     appPushToRenderer: (t, run) => run.firstTextReceivedAt - t.rendererPush,
