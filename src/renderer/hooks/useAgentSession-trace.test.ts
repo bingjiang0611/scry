@@ -152,7 +152,8 @@ describe('paged session history projection', () => {
       completeness: 'partial'
     })
     expect(applied?.turns.map((turn) => turn.runId)).toEqual(['s1-38', 's1-39', 's1-40', 's1-41'])
-    expect(applied?.window).toEqual({ sessionId: 's1', offset: 38, totalTurns: 100, hasOlder: true, completeness: 'partial' })
+    // pagedOlder 记录“时间线确实往前翻过页”，首个窗口没有它，空转录也不会被当成翻到最早。
+    expect(applied?.window).toEqual({ sessionId: 's1', offset: 38, totalTurns: 100, hasOlder: true, completeness: 'partial', pagedOlder: true })
 
     const complete = prependOlderSessionTurns(prev, { ...window, offset: 2 }, 's1', {
       turns: parsed(0, 2),
@@ -163,6 +164,7 @@ describe('paged session history projection', () => {
     })
     expect(complete?.window.completeness).toBe('complete')
     expect(complete?.window.hasOlder).toBe(false)
+    expect(complete?.window.pagedOlder).toBe(true)
   })
 
   it('丢弃过期、错位或跨会话的更早页响应', () => {

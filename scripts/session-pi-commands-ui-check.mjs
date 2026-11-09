@@ -38,7 +38,7 @@ export async function exercisePiCommands(contents) {
   await wait(`document.querySelector('${agentTrigger}').dataset.agentId === 'pi:564f7a994e4e34da' && !document.querySelector('#model-effort .climenu')`)
   await click(agentTrigger)
   await wait(`document.querySelectorAll('#model-effort .agent-option-pick').length === 2`)
-  if (!await contents.executeJavaScript(`document.querySelector(${JSON.stringify(piChoice('pi:564f7a994e4e34da'))})?.textContent.includes('当前') && !document.querySelector(${JSON.stringify(piChoice('pi:rotom'))})`)) throw new Error('Historical Profile identity was silently switched')
+  if (!await contents.executeJavaScript(`document.querySelector(${JSON.stringify(piChoice('pi:564f7a994e4e34da'))})?.getAttribute('aria-checked') === 'true' && document.querySelector(${JSON.stringify(piChoice('pi:rotom'))})?.getAttribute('aria-checked') === 'false'`)) throw new Error('Historical Profile identity was silently switched')
   await click(piChoice('pi:1234567890abcdef'))
   await wait(`document.querySelector('${agentTrigger}').dataset.agentId === 'pi:1234567890abcdef' && !document.querySelector('#model-effort .climenu')`)
   await click(agentTrigger)

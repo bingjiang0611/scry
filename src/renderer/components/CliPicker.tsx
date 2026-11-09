@@ -1,12 +1,13 @@
 // Composer Agent 选择器：本机检测到的 Provider，以及 Pi Profile 的增删。
 import { useEffect, useId, useRef } from 'react'
-import { usePickerOpen, type PickerOpenProps } from './picker-state'
+import { useMenuDismiss, usePickerOpen, type PickerOpenProps } from './picker-state'
 import { providerIdForAgentId } from '@shared/runtime'
 import { AGENT_PICKER_COPY, PI_PICKER_COPY } from '../constants/copy'
 import { basename } from '../format'
 import type { DetectedAgent } from '../env'
 import { Icon } from './primitives/Icon'
 import { ProviderGlyph } from './ProviderGlyph'
+import { MenuCheck } from './menu-parts'
 import { moveMenuFocus } from './WorkdirPicker'
 
 export interface AgentProviderGroup {
@@ -92,27 +93,7 @@ export function CliPicker({
     if (pickerRef.current?.contains(document.activeElement)) buttonRef.current?.focus()
     setOpen(false)
   }
-  // 与其他下拉菜单一致：打开后焦点进入选项，Esc 关闭并退回触发器。
-  useEffect(() => {
-    if (!open || disabled) return
-    const focusTimer = window.setTimeout(() => menuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus(), 0)
-    const dismissOnOutsidePointer = (event: PointerEvent): void => {
-      if (event.target instanceof Node && !pickerRef.current?.contains(event.target)) setOpen(false)
-    }
-    const dismissOnEscape = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      event.stopPropagation()
-      dismissMenu()
-    }
-    document.addEventListener('pointerdown', dismissOnOutsidePointer, true)
-    document.addEventListener('keydown', dismissOnEscape)
-    return () => {
-      window.clearTimeout(focusTimer)
-      document.removeEventListener('pointerdown', dismissOnOutsidePointer, true)
-      document.removeEventListener('keydown', dismissOnEscape)
-    }
-  }, [open, disabled])
+  useMenuDismiss({ open: open && !disabled, close: dismissMenu, rootRef: pickerRef, triggerRef: buttonRef, menuRef })
   return (
     <div className="clipick" ref={pickerRef}>
       <button
@@ -151,11 +132,11 @@ export function CliPicker({
           {codeAgents.map((a) => (
             <button
               type="button"
-              role="menuitem"
+              role="menuitemradio"
               key={a.id}
               className="mitem"
               data-agent-id={a.id}
-              aria-current={a.id === selectedId ? 'true' : undefined}
+              aria-checked={a.id === selectedId}
               title={`${a.path}${a.version ? ' · ' + a.version : ''}`}
               disabled={unavailableIds?.has(a.id)}
               onClick={() => {
@@ -163,11 +144,11 @@ export function CliPicker({
                 dismissMenu()
               }}
             >
+              <MenuCheck selected={a.id === selectedId} />
               <span className="agicon">
                 <ProviderGlyph provider={agentGlyphProvider(a.id) ?? 'claude'} />
-              </span>{' '}
+              </span>
               <span className="agent-option-name">{a.name}{unavailableIds?.has(a.id) && a.id !== selectedId ? ' · 不可用' : ''}</span>
-              {a.id === selectedId && <span className="ck"><Icon name="check" /> 当前</span>}
             </button>
           ))}
           {piAgents.length > 0 && <div className="mhdr" role="none">Pi · Profiles</div>}
@@ -175,10 +156,10 @@ export function CliPicker({
             <div className="agent-option-row" key={agent.id} role="none">
               <button
                 type="button"
-                role="menuitem"
+                role="menuitemradio"
                 className="mitem agent-option-pick"
                 data-agent-id={agent.id}
-                aria-current={agent.id === selectedId ? 'true' : undefined}
+                aria-checked={agent.id === selectedId}
                 title={agent.path}
                 disabled={unavailableIds?.has(agent.id)}
                 onClick={() => {
@@ -186,12 +167,12 @@ export function CliPicker({
                   dismissMenu()
                 }}
               >
+                <MenuCheck selected={agent.id === selectedId} />
                 <span className="agicon"><ProviderGlyph provider="pi" /></span>
                 <span className="agent-option-copy">
                   <b>{piProfileName(agent)}</b>
                   <small>{PI_PICKER_COPY.detail(isDetectedPiProfile(agent.id), agent.version)}</small>
                 </span>
-                {agent.id === selectedId && <span className="ck"><Icon name="check" /> 当前</span>}
               </button>
               {!isDetectedPiProfile(agent.id) && onRemovePi && (
                 <button
