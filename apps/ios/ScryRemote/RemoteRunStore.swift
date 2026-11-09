@@ -2546,7 +2546,7 @@ final class RemoteRunStore {
       var useStream = true
       var failures = 0
       // One observation, however it arrived (push, long-poll or legacy reads).
-      func observe(_ page: G0Transport.RunPollOutcome, _ questions: [G0Transport.RunQuestionRequest],
+      @MainActor func observe(_ page: G0Transport.RunPollOutcome, _ questions: [G0Transport.RunQuestionRequest],
                    _ out: G0Transport.RunOutputPage, _ state: String?) {
         ledgerCursor = page.cursor
         for ev in page.events where ev.runId == runId {
