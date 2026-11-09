@@ -99,9 +99,12 @@ export async function measureHistory({ evaluate, wait, click, cdp, beginCounters
   const currentSession = sessions[(iterations + 1) % 2]
   // Candidate loads the previous page as soon as the timeline reaches the top; the baseline
   // still needs the explicit button. Both paths are the real user path for their build, and the
-  // measured work (one older page) is identical. `.history-window-range` is the marker: the
-  // baseline markup wrapped the range in <b>, so only the newer build renders that span.
-  const autoloadsOlderTurns = await evaluate(`!!document.querySelector('.history-window-range')`)
+  // measured work (one older page) is identical. The capability is an unconditional attribute on
+  // the scroller, not a conditional row: the note disappears once history is exhausted, so
+  // probing it would misread the candidate as the baseline.
+  const autoloadsOlderTurns = await evaluate(
+    `document.querySelector('.chat-transcript')?.getAttribute('data-history-autoload') === 'scroll'`
+  )
   for (let loaded = pageTurns; loaded < turnCount; loaded += 40) {
     await evaluate(`document.querySelector('.chat-transcript').scrollTop = 0`)
     if (!autoloadsOlderTurns) {

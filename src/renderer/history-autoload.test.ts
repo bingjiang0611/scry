@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { readCssManifest } from './css-test-reader'
@@ -11,6 +12,13 @@ import {
 } from './history-autoload'
 
 const css = readCssManifest(join(__dirname, 'styles.css'))
+
+it('时间线容器声明自动续读能力', () => {
+  // 性能基准用这个无条件属性区分「滚到顶自动取页」与「点按钮取页」两种构建；
+  // 用条件渲染的提示行判断会在历史取尽后丢失，把新构建误判成旧构建。
+  const source = readFileSync(join(__dirname, 'components/ChatView.tsx'), 'utf8')
+  expect(source).toContain('data-history-autoload="scroll"')
+})
 
 describe('时间线自动续读的触发条件', () => {
   const base = { scrollTop: 900, hasOlder: true, loading: false, viewportShort: false }
