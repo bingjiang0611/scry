@@ -47,7 +47,9 @@ describe('daemon run transport', () => {
       watch: { state: 'dispatched', poll: { cursor: 12, events: [{ runId: RUN, kind: 'run_dispatched' }, { runId: RUN, kind: 'run_progress', detail: '{"event":"bound"}' }] } }
     }))
     await expect(value.watch({ runId: RUN, cursor: 10, outputCursor: 0, waitMs: 15_000, output: false })).resolves.toEqual({
-      state: 'dispatched', cursor: 12, events: [{ runId: RUN, kind: 'run_dispatched' }, { runId: RUN, kind: 'run_progress', detail: '{"event":"bound"}' }]
+      state: 'dispatched', cursor: 12, events: [{ runId: RUN, kind: 'run_dispatched' }, { runId: RUN, kind: 'run_progress', detail: '{"event":"bound"}' }],
+      // A daemon that answers without an output page has produced nothing yet.
+      output: { count: 0, cursor: 0 }
     })
     expect(calls[0]!.request).toEqual({ op: 'watch', runId: RUN, cursor: 10, outputCursor: 0, waitMs: 15_000, output: false })
   })

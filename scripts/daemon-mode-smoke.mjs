@@ -110,6 +110,35 @@ try {
     (value) => value && value.done === true)
   results.steps.settled = { ok: settled.error === null, textEvents: settled.text }
 
+  // 1b. streaming: a paced fixture must reach the renderer as it grows. One lump at
+  // the end is what a watch that only waits on ledger events produces: the ledger does
+  // not move while the Provider writes text.
+  await evaluate(`(() => {
+    window.__m3Stream = []
+    window.scry.onTrace((events) => {
+      for (const event of events) {
+        if (event.kind === 'model' && (event.stage === 'text' || event.stage === 'text_delta')) {
+          window.__m3Stream.push({ t: Math.round(performance.now()), len: (event.text ?? '').length })
+        }
+      }
+    })
+    return true
+  })()`)
+  const paced = await evaluate(`window.scry.start({ prompt: 'performance paced stream', providerId: 'codex', cwd: ${JSON.stringify(workspace)} })`)
+  if (!paced || typeof paced.runId !== 'string') fail('stream-start', JSON.stringify(paced))
+  const streamSettled = await until('stream-settled', evaluate,
+    `window.scry.focusedRunSnapshot().then(run => run && run.done ? { done: true, text: run.items.filter(i => i.stage === 'text_delta' || i.stage === 'text').reduce((sum, i) => sum + (i.text ?? '').length, 0) } : null)`,
+    (value) => value && value.done === true)
+  const stream = await evaluate('window.__m3Stream.slice()')
+  const streamGaps = stream.slice(1).map((event, index) => event.t - stream[index].t).sort((a, b) => a - b)
+  const medianGap = streamGaps.length === 0 ? 0 : streamGaps[Math.floor(streamGaps.length / 2)]
+  results.steps.streaming = {
+    // The fixture writes 20 chunks 150 ms apart. Fewer arrivals than that means the
+    // message reached the window as fewer, larger pieces.
+    ok: stream.length >= 8 && medianGap >= 80 && medianGap <= 250,
+    arrivals: stream.length, medianGap, viewText: streamSettled.text
+  }
+
   // 2. question -> answer (twice) -> settled
   // Questions arrive on their own channel, exactly as the chat view receives them; the
   // script answers with the id it was shown, like a user clicking a choice.

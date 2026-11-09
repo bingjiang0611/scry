@@ -59,6 +59,11 @@ export interface DaemonWatchReply {
   state: string | null
   cursor: number
   events: ReadonlyArray<{ runId: string; kind: string; detail?: string }>
+  // How much content the daemon has for this run. The text itself travels on the
+  // trace, but the count is what tells a live run apart from an idle one: the ledger
+  // only moves at lifecycle points, so a watch that waits on it alone hears nothing
+  // while the Provider is streaming.
+  output: { count: number; cursor: number }
 }
 
 export interface DaemonOutputStream {
@@ -144,7 +149,13 @@ export class DaemonRunTransport {
       return [{ runId: raw.runId, kind: raw.kind, ...(typeof raw.detail === 'string' ? { detail: raw.detail } : {}) }]
     })
     const state = watch.state === undefined || watch.state === null ? null : typeof watch.state === 'string' ? watch.state : fail()
-    return { state, cursor: poll.cursor as number, events }
+    const page = record(watch.output) ? watch.output : undefined
+    const chunks = page && Array.isArray(page.chunks) ? page.chunks : []
+    const output = {
+      count: chunks.length,
+      cursor: page && Number.isSafeInteger(page.cursor) ? page.cursor as number : input.outputCursor
+    }
+    return { state, cursor: poll.cursor as number, events, output }
   }
 
   /** One canonical trace read for a live run; the delta cursor is the caller's. */
