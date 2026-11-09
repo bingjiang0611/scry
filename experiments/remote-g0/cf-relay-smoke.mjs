@@ -98,13 +98,13 @@ try {
     cases.push({ name: 'per-host room enrollment is stable and rejects takeover', passed: true })
   }
 
-  // No warm leg -> device is rejected 1013 (not left hanging).
+  // No leg at all -> the host is reported offline (4001), not left hanging.
   {
     const hostId = randomUUID()
     const device = openWS(`${base}/?host=${hostId}&mode=run`)
     await once(device, 'open')
-    assert.equal(await nextClose(device), 1013)
-    cases.push({ name: 'no host leg -> device 1013', passed: true })
+    assert.equal(await nextClose(device), 4001)
+    cases.push({ name: 'no host leg -> device 4001 host_offline', passed: true })
   }
 
   // Pool separation: only a PAIR leg is warm; a RUN device must not get it.

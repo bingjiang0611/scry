@@ -26,8 +26,37 @@
 // Workers Free plan (SQLite-backed Durable Objects are free-tier eligible).
 
 const HOST_ID = /^[0-9a-f-]{36}$/i
+const LOCATION_HINTS = new Set(['wnam', 'enam', 'sam', 'weur', 'eeur', 'apac', 'oc', 'afr', 'me'])
 const MODES = new Set(['run', 'pair'])
 let COUNTER = 0
+
+// Leg liveness. (Module-local: workerd treats every named export of the main
+// module as an entrypoint, so constants must not be exported.)
+// A hibernated relay cannot see a host TCP connection die (Mac
+// sleep, Wi-Fi change, proxy idle drop): the socket stays OPEN here and a device
+// glued to it waits for an inner handshake that never answers. Current hosts
+// send HOST_PING as a text frame on every leg; the runtime answers it with
+// HOST_PONG without waking this object and records the time, which survives
+// hibernation (getWebSocketAutoResponseTimestamp). Inner TLS is always binary,
+// so a text frame never collides with tunnel bytes.
+const HOST_PING = '{"t":"ping"}'
+const HOST_PONG = '{"t":"pong"}'
+// A pinging leg silent for this long is presumed dead. Hosts ping every 10 s.
+const LEG_FRESH_MS = 30_000
+// A device that arrives while every live leg is busy waits this long for the
+// host to dial a replacement instead of failing at once.
+const LEG_WAIT_MS = 2_000
+// With no live leg at all, wait only long enough to cover a host replacing a
+// recycled leg, then report the host offline.
+const OFFLINE_GRACE_MS = 600
+const LEG_WAIT_STEP_MS = 50
+// Application close codes. 1013 keeps its meaning (host reachable, no free
+// leg). 4001 means no live leg at all: the host is offline or asleep, so the
+// phone can say so immediately instead of retrying into a timeout.
+const CLOSE_NO_HOST_LEG = 1013
+const CLOSE_HOST_OFFLINE = 4001
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 export default {
   async fetch(request, env) {
@@ -37,8 +66,12 @@ export default {
     if (!hostId || !HOST_ID.test(hostId) || !MODES.has(mode)) return new Response('bad_request', { status: 400 })
     if ((request.headers.get('Upgrade') || '').toLowerCase() !== 'websocket') return new Response('upgrade_required', { status: 426 })
     // Route every connection for a hostId to the same Durable Object instance so
-    // the host's warm legs and the device rendezvous share state.
-    const stub = env.RELAY.get(env.RELAY.idFromName(hostId))
+    // the host's warm legs and the device rendezvous share state. A room is
+    // placed near its FIRST request and never moves; RELAY_LOCATION_HINT (e.g.
+    // "apac") places new rooms in a region instead, so a Mac whose relay
+    // traffic exits through a distant proxy does not pin its room there.
+    const hint = LOCATION_HINTS.has(env.RELAY_LOCATION_HINT) ? { locationHint: env.RELAY_LOCATION_HINT } : undefined
+    const stub = env.RELAY.get(env.RELAY.idFromName(hostId), hint)
     return stub.fetch(request)
   }
 }
@@ -47,6 +80,14 @@ export class RelayRoom {
   constructor(state, env) {
     this.state = state
     this.env = env
+    // id -> WebSocket. Lost on hibernation and rebuilt lazily on a miss, so
+    // forwarding a frame no longer deserializes every socket in the room.
+    this.byId = new Map()
+    // Instance copies so a local fixture can shorten the windows.
+    this.limits = { freshMs: LEG_FRESH_MS, waitMs: LEG_WAIT_MS, offlineGraceMs: OFFLINE_GRACE_MS }
+    try {
+      state.setWebSocketAutoResponse(new WebSocketRequestResponsePair(HOST_PING, HOST_PONG))
+    } catch { /* older runtime: hosts fall back to the manual reply below */ }
   }
 
   async fetch(request) {
@@ -60,58 +101,119 @@ export class RelayRoom {
     if (isHost) {
       // Warm leg: accept for hibernation, tag by role, await the first-frame auth.
       this.state.acceptWebSocket(server, ['host'])
-      server.serializeAttachment({ role: 'host', mode, authed: false, id: newId(), deviceId: null })
+      const id = newId()
+      server.serializeAttachment({ role: 'host', mode, authed: false, id, deviceId: null, openedAt: Date.now() })
+      this.byId.set(id, server)
       return new Response(null, { status: 101, webSocket: client })
     }
 
-    // Device: glue to one warm, authenticated, unpaired host leg for this mode.
-    const host = this.#popWarmHost(mode)
-    try {
-      const hosts = this.state.getWebSockets('host')
-      const available = hosts.filter((ws) => ws.readyState === WebSocket.OPEN)
-        .map((ws) => ws.deserializeAttachment())
-        .filter((att) => att && att.authed && !att.deviceId)
-      console.log(`[relay] device mode=${mode} hostLeg=${host ? 'FOUND' : 'MISSING'} warm{run:${available.filter((att) => att.mode === 'run').length},pair:${available.filter((att) => att.mode === 'pair').length}} total=${hosts.length}`)
-    } catch {}
+    // Device: glue to the freshest warm, authenticated, unpaired host leg. When
+    // none is free, wait briefly: a live host replaces a consumed leg within a
+    // round trip, and yielding here lets that leg's admission frame run.
+    const started = Date.now()
+    let host = this.#popWarmHost(mode)
+    // Judge liveness on arrival: the wait itself must not age the evidence.
+    const alive = host ? true : this.#hostAlive()
+    const budget = host ? 0 : alive ? this.limits.waitMs : this.limits.offlineGraceMs
+    while (!host && Date.now() - started < budget) {
+      await sleep(LEG_WAIT_STEP_MS)
+      host = this.#popWarmHost(mode)
+    }
+    const waitedMs = Date.now() - started
+    console.log(`[relay] device mode=${mode} hostLeg=${host ? 'FOUND' : alive ? 'BUSY' : 'OFFLINE'} waitedMs=${waitedMs}`)
     this.state.acceptWebSocket(server, ['device'])
     if (!host) {
-      try { server.close(1013, 'no_host_leg') } catch { /* closing */ }
-      return new Response(null, { status: 101, webSocket: client })
+      try {
+        if (alive) server.close(CLOSE_NO_HOST_LEG, 'no_host_leg')
+        else server.close(CLOSE_HOST_OFFLINE, 'host_offline')
+      } catch { /* closing */ }
+      return new Response(null, { status: 101, webSocket: client, headers: { 'x-scry-relay-wait-ms': String(waitedMs) } })
     }
     const deviceId = newId()
     server.serializeAttachment({ role: 'device', mode, id: deviceId, hostId: idOf(host) })
+    this.byId.set(deviceId, server)
     const hostAtt = host.deserializeAttachment()
     hostAtt.deviceId = deviceId
     host.serializeAttachment(hostAtt)
-    return new Response(null, { status: 101, webSocket: client })
+    return new Response(null, { status: 101, webSocket: client, headers: { 'x-scry-relay-wait-ms': String(waitedMs) } })
   }
 
-  // First open, authenticated, unpaired host leg for the mode. DO execution is
+  // Most recent liveness evidence for a host leg: its last auto-answered ping,
+  // or its admission time. `pinging` distinguishes current hosts from older
+  // ones that never ping, whose liveness is unknown rather than stale.
+  #liveness(ws, att) {
+    let pong = null
+    try { pong = this.state.getWebSocketAutoResponseTimestamp(ws) } catch { pong = null }
+    const manual = typeof att.pingedAt === 'number' ? att.pingedAt : 0
+    const pinged = Math.max(pong ? pong.getTime() : 0, manual)
+    return { pinging: pinged > 0, last: Math.max(pinged, att.openedAt ?? 0) }
+  }
+
+  // Freshest open, authenticated, unpaired leg for the mode. Pinging legs that
+  // went silent are closed here so their host notices. DO execution is
   // serialized, so this pop is race-free.
   #popWarmHost(mode) {
+    const now = Date.now()
+    let best = null
+    let bestRank = -Infinity
     for (const ws of this.state.getWebSockets('host')) {
       // Hibernatable sockets remain listed while their close handshake runs.
       // Their old admission attachment is not proof they can accept a device.
       if (ws.readyState !== WebSocket.OPEN) continue
       const att = ws.deserializeAttachment()
-      if (att && att.mode === mode && att.authed && !att.deviceId) return ws
+      if (!att || att.mode !== mode || !att.authed || att.deviceId) continue
+      const { pinging, last } = this.#liveness(ws, att)
+      if (pinging && now - last > this.limits.freshMs) {
+        try { ws.close(1011, 'stale_leg') } catch { /* closing */ }
+        continue
+      }
+      // Proven-live legs first, newest evidence first; legacy legs keep
+      // working but rank below them, newest first instead of oldest first.
+      const rank = (pinging ? 1e15 : 0) + last
+      if (rank > bestRank) { best = ws; bestRank = rank }
     }
-    return null
+    return best
+  }
+
+  // Any open, authenticated leg (of either mode, busy or not) with recent
+  // evidence means the host process is reachable. Legacy legs count as alive:
+  // without pings their state is unknown, never proof of absence.
+  #hostAlive() {
+    const now = Date.now()
+    for (const ws of this.state.getWebSockets('host')) {
+      if (ws.readyState !== WebSocket.OPEN) continue
+      const att = ws.deserializeAttachment()
+      if (!att || !att.authed) continue
+      const { pinging, last } = this.#liveness(ws, att)
+      if (!pinging || now - last <= this.limits.freshMs) return true
+    }
+    return false
   }
 
   #find(id) {
     if (!id) return null
+    const cached = this.byId.get(id)
+    if (cached) return cached
+    // Miss: first frame after hibernation, or the peer is gone. Rebuild once.
+    this.byId.clear()
     for (const ws of this.state.getWebSockets()) {
       const att = ws.deserializeAttachment()
-      if (att && att.id === id) return ws
+      if (att && att.id) this.byId.set(att.id, ws)
     }
-    return null
+    return this.byId.get(id) ?? null
   }
 
   async webSocketMessage(ws, message) {
     const att = ws.deserializeAttachment()
     if (!att) { try { ws.close(1011, 'no_state') } catch { /* closing */ } return }
     if (att.role === 'host') {
+      // Runtimes without auto-response deliver the ping here. Never forward
+      // it: the device side carries only inner-TLS bytes.
+      if (typeof message === 'string' && message === HOST_PING) {
+        if (att.authed) { att.pingedAt = Date.now(); ws.serializeAttachment(att) }
+        try { ws.send(HOST_PONG) } catch { /* closing */ }
+        return
+      }
       if (!att.authed) {
         let ok = false
         try {
@@ -142,6 +244,7 @@ export class RelayRoom {
   #teardown(ws) {
     const att = ws.deserializeAttachment()
     if (att) {
+      this.byId.delete(att.id)
       const peerId = att.role === 'host' ? att.deviceId : att.hostId
       const peer = this.#find(peerId)
       if (peer) { try { peer.close(1000, 'peer_closed') } catch { /* closing */ } }
