@@ -15,6 +15,7 @@ struct ScryRemoteApp: App {
     RemoteSelfTest.runDirectoryAttachmentProbeIfRequested()
     RemoteSelfTest.runSessionReadProbeIfRequested()
     RemoteSelfTest.runHistoryContractProbeIfRequested()
+    RemoteSelfTest.runNetBenchIfRequested()
     RemoteRunStore.runOpenFlowProbeIfRequested()
     #endif
   }
@@ -144,8 +145,13 @@ struct RootView: View {
       switch phase {
       case .background:
         targets.backgrounded()
-        Task { await RemoteSessionRegistry.shared.resetAll() }
-      case .active: if model.canShowWorkspace { targets.foregrounded() }
+        Task {
+          await RemoteSessionRegistry.shared.setForeground(false)
+          await RemoteSessionRegistry.shared.resetAll()
+        }
+      case .active:
+        Task { await RemoteSessionRegistry.shared.setForeground(true) }
+        if model.canShowWorkspace { targets.foregrounded() }
       default: break
       }
     }
@@ -154,6 +160,9 @@ struct RootView: View {
       if paired { resumeRecoveredRun(); targets.foregrounded() } else { targets.backgrounded() }
     }
     .onAppear {
+      // onChange(of: scenePhase) does not fire for the launch phase.
+      let launchedActive = scenePhase == .active
+      Task { await RemoteSessionRegistry.shared.setForeground(launchedActive) }
       #if DEBUG
       model.applyUIPreviewArguments(runStore: run)
       run.applyUIPreviewArguments()

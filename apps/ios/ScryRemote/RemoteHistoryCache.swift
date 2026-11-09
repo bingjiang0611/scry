@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import RemoteTransport
+import UniformTypeIdentifiers
 
 struct RemoteHistorySnapshot: Codable, Sendable {
   let turns: [G0Transport.RunHistoryTurn]
@@ -237,5 +238,146 @@ actor RemoteHistoryCache {
     epoch += 1
     guard FileManager.default.fileExists(atPath: directory.path) else { return }
     try FileManager.default.removeItem(at: directory)
+  }
+}
+
+// Disk IO stays off the UI actor. Each view owns a private directory containing
+// only its downloaded file; WebKit never receives access to shared app storage.
+actor RemoteFileDownloadSink {
+  private var directory: URL?
+  private var url: URL?
+  private var handle: FileHandle?
+
+  func start(name: String, mimeType: String? = nil) throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("scry-download-" + UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+    self.directory = directory
+    var url = directory.appendingPathComponent(name, isDirectory: false)
+    if url.pathExtension.isEmpty, let mimeType, let ext = UTType(mimeType: mimeType)?.preferredFilenameExtension {
+      url.appendPathExtension(ext)
+    }
+    guard FileManager.default.createFile(atPath: url.path, contents: nil) else { throw CocoaError(.fileWriteUnknown) }
+    self.url = url
+    handle = try FileHandle(forWritingTo: url)
+  }
+  func write(_ data: Data) throws {
+    guard let handle else { throw RemoteRunClient.ClientError.invalidFileDownload }
+    try handle.write(contentsOf: data)
+  }
+  func finish() throws -> URL {
+    guard let url, let handle else { throw RemoteRunClient.ClientError.invalidFileDownload }
+    try handle.close()
+    self.handle = nil
+    return url
+  }
+  func remove() {
+    try? handle?.close()
+    handle = nil
+    if let directory { try? FileManager.default.removeItem(at: directory) }
+    directory = nil; url = nil
+  }
+}
+
+// Complete history download: paging, optional DEFLATE, snapshot verification.
+extension RemoteRunClient {
+  // Complete, restart-stable history. No turn/item/text is clipped to a frame.
+  // A currently running Mac conversation can change between pages; restart the
+  // bounded read from cursor zero instead of surfacing a stale-snapshot error.
+  func history(providerId: String, cwd: String, externalSessionId: String, agentProfileId: String? = nil) async throws -> [G0Transport.RunHistoryTurn] {
+    try await historySnapshot(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, agentProfileId: agentProfileId).turns
+  }
+
+  func historySnapshot(providerId: String, cwd: String, externalSessionId: String,
+                       cached: RemoteHistorySnapshot? = nil,
+                       connection: G0Transport.HistoryConnection? = nil,
+                       agentProfileId: String? = nil,
+                       progress: @escaping @Sendable (Int, Int) async -> Void = { _, _ in }) async throws -> RemoteHistorySnapshot {
+    for attempt in 0..<3 {
+      do {
+        return try await Self.downloadHistory(cached: cached, pageSize: connection == nil ? 64 * 1024 : 256 * 1024, fetch: { cursor, snapshot in
+          if let connection {
+            return try await connection.page(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, cursor: cursor, snapshot: snapshot,
+                                             agentProfileId: agentProfileId, compressed: true)
+          }
+          return try await historyPage(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId,
+                                      cursor: cursor, snapshot: snapshot, agentProfileId: agentProfileId)
+        }, progress: progress)
+      }
+      catch G0Transport.RunError.host(let code) where code == "history_snapshot_changed" && attempt < 2 {
+        try await Task.sleep(nanoseconds: UInt64(120 + attempt * 180) * 1_000_000)
+      }
+    }
+    throw NSError(domain: "ScryRemote.History", code: 4,
+                  userInfo: [NSLocalizedDescriptionKey: "History kept changing while it was read"])
+  }
+
+  // Larger pages share the transfer's tunnel; keep assembly/digest/JSON work
+  // off the UI actor. Legacy isolated fixtures retain their 64 KiB page contract.
+  @concurrent static func downloadHistory(cached: RemoteHistorySnapshot?, pageSize: Int = 64 * 1024,
+    fetch: @escaping @Sendable (Int, String?) async throws -> G0Transport.RunHistoryPage,
+    progress: @escaping @Sendable (Int, Int) async -> Void = { _, _ in }) async throws -> RemoteHistorySnapshot {
+    try Task.checkCancellation()
+    let first = try await fetch(0, nil)
+    try Task.checkCancellation()
+    let total = first.totalBytes
+    let fingerprint = first.snapshot
+    func chunk(_ page: G0Transport.RunHistoryPage, at cursor: Int) throws -> Data {
+      guard total >= 0, total <= 256 * 1024 * 1024,
+            page.snapshot == fingerprint, page.totalBytes == total,
+            let data = Data(base64Encoded: page.dataBase64),
+            data.count == min(pageSize, total - cursor),
+            page.encoding == first.encoding, page.rawBytes == first.rawBytes,
+            page.cursor == cursor + data.count, page.hasMore == (page.cursor < total) else {
+        throw NSError(domain: "ScryRemote.History", code: 2,
+          userInfo: [NSLocalizedDescriptionKey: "History snapshot, cursor or size changed"])
+      }
+      return data
+    }
+    var bytes = try chunk(first, at: 0)
+    if let cached, cached.fingerprint == fingerprint {
+      await progress(total, total)
+      return RemoteHistorySnapshot(turns: cached.turns, fingerprint: fingerprint, fetchedAt: Date())
+    }
+    bytes.reserveCapacity(total)
+    await progress(bytes.count, total)
+    while bytes.count < total {
+      try Task.checkCancellation()
+      let start = bytes.count
+      let pages = try await withThrowingTaskGroup(of: (Int, G0Transport.RunHistoryPage).self) { group in
+        for cursor in stride(from: start, to: min(total, start + 2 * pageSize), by: pageSize) {
+          group.addTask { (cursor, try await fetch(cursor, fingerprint)) }
+        }
+        var result: [(Int, G0Transport.RunHistoryPage)] = []
+        for try await page in group { result.append(page) }
+        return result.sorted { $0.0 < $1.0 }
+      }
+      for (cursor, page) in pages { bytes.append(try chunk(page, at: cursor)) }
+      await progress(bytes.count, total)
+    }
+    try Task.checkCancellation()
+    await progress(total, total)
+    // Compressed pages inflate to exactly the bytes the snapshot hash covers;
+    // anything else fails verification rather than rendering a partial copy.
+    var raw = bytes
+    switch first.encoding {
+    case nil: break
+    case "deflate"?:
+      guard let expected = first.rawBytes, (0...(256 * 1024 * 1024)).contains(expected),
+            let inflated = try? (bytes as NSData).decompressed(using: .zlib) as Data, inflated.count == expected else {
+        throw NSError(domain: "ScryRemote.History", code: 5,
+          userInfo: [NSLocalizedDescriptionKey: "History decompression failed"])
+      }
+      raw = inflated
+    default:
+      throw NSError(domain: "ScryRemote.History", code: 6,
+        userInfo: [NSLocalizedDescriptionKey: "History page encoding is not supported"])
+    }
+    let digest = SHA256.hash(data: raw).map { String(format: "%02x", $0) }.joined()
+    guard digest == fingerprint else {
+      throw NSError(domain: "ScryRemote.History", code: 3,
+        userInfo: [NSLocalizedDescriptionKey: "History snapshot verification failed"])
+    }
+    return RemoteHistorySnapshot(turns: try JSONDecoder().decode([G0Transport.RunHistoryTurn].self, from: raw),
+                                 fingerprint: fingerprint, fetchedAt: Date())
   }
 }

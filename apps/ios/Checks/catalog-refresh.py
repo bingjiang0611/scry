@@ -29,7 +29,7 @@ for path in [
     'swift-atomics/Sources/_AtomicsShims/include/module.modulemap',
 ]:
     module_maps.append(package / '.build/checkouts' / path)
-sources = ['RemoteRunStore', 'RemoteRunClient', 'RemoteHistoryCache', 'RemoteConnection',
+sources = ['RemoteRunStore', 'RemoteRunClient', 'RemoteSessionRegistry', 'RemoteHistoryCache', 'RemoteConnection',
            'RemoteKeychain', 'RemotePairingClient', 'PairingCode', 'AppModel', 'ConnectionCopy',
            'ExecutionTargetCoordinator', 'ConversationCopy']
 with tempfile.TemporaryDirectory(prefix='scry-catalog-binary-') as temporary:
