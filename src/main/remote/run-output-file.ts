@@ -175,6 +175,29 @@ export class RunOutputFileStore implements RunOutputStore {
     }
   }
 
+  // Count only: the index is a fixed-length entry per committed chunk, so the answer is
+  // its length. The data file is never opened, and its bodies never read or parsed - a
+  // wake is not evidence, the text always comes from the trace.
+  countSince(runId: string, cursor: number): { count: number; cursor: number } {
+    this.#assertLease()
+    const start = Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : 0
+    const key = keyOf(runId)
+    let indexFd: number
+    try {
+      indexFd = openSync(join(this.#directory, `${key}.idx`), constants.O_RDONLY | constants.O_NOFOLLOW)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      return { count: 0, cursor: start }
+    }
+    try {
+      assertPrivateFile(indexFd)
+      const committed = Math.floor(fstatSync(indexFd).size / INDEX_ENTRY_BYTES)
+      return { count: Math.max(0, committed - start), cursor: Math.max(start, committed) }
+    } finally {
+      closeSync(indexFd)
+    }
+  }
+
   since(runId: string, cursor: number, pageSize = DEFAULT_PAGE): RunOutputPage {
     this.#assertLease()
     const start = Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : 0

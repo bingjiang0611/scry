@@ -39,6 +39,9 @@ export interface RunOutputStore {
   append(chunk: Omit<OutputChunk, 'seq'>): OutputChunk | Promise<OutputChunk>
   appendBatch?(chunks: Array<Omit<OutputChunk, 'seq'>>): OutputChunk[] | Promise<OutputChunk[]>
   since(runId: string, cursor: number, pageSize?: number): RunOutputPage | Promise<RunOutputPage>
+  // How many chunks are newer than `cursor`, without their text. The file store answers
+  // this from its fixed-length index, so a wake does not read output bodies at all.
+  countSince?(runId: string, cursor: number): { count: number; cursor: number } | Promise<{ count: number; cursor: number }>
   close(): void | Promise<void>
 }
 
@@ -185,6 +188,9 @@ export class RunOutputLog {
   async countSince(runId: string, cursor: number): Promise<{ count: number; cursor: number }> {
     const start = Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : 0
     if (this.#store) {
+      // Never page the chunks for a count: the store's index already knows how many
+      // there are, and reading them here would defeat the wake-only mode.
+      if (this.#store.countSince) return await this.#store.countSince(runId, start)
       const page = await this.#store.since(runId, start, DEFAULT_PAGE)
       return { count: page.chunks.length, cursor: page.cursor }
     }

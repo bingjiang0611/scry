@@ -143,6 +143,7 @@ export class TraceOutputBridge {
       this.publishHealth()
       return
     }
+    if (runStageTimingEnabled() && event.kind === 'model') recordRunStage(event.runId, 'bridgeQueue')
     this.buffer.push(event)
     this.bufferedBytes += bytes
     if (this.bufferedBytes >= this.maxBatchBytes || this.buffer.length >= this.maxBatchEvents) {
@@ -326,7 +327,10 @@ export class TraceOutputBridge {
     // follows it is the renderer's own arrival stamp.
     if (runStageTimingEnabled()) {
       const model = events.find((event) => event.kind === 'model')
-      if (model) recordRunStage(model.runId, 'rendererPush')
+      if (model) {
+        recordRunStage(model.runId, 'bridgeFlush')
+        recordRunStage(model.runId, 'rendererPush')
+      }
     }
     this.options.send({ events, bytes, generation: this.deliveryGeneration, batchId })
     return true

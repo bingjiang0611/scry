@@ -26,6 +26,11 @@ export type RunStage =
   | 'traceRead'
   | 'watchReply'
   | 'rendererPush'
+  // F1: where a read goes between the daemon's answer and the window. The first of each
+  // is what matters: the queue is when the bridge accepted the text, the flush is when
+  // the batch left for the renderer.
+  | 'bridgeQueue'
+  | 'bridgeFlush'
 
 let target: string | null = null
 let recorded = new Set<string>()
