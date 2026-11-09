@@ -42,7 +42,7 @@ export function AppShell(props: AppShellProps) {
     workspaceOpenRequests, setScopeDirty, addWorkspaceReference, showLlmPerformance, setShowLlmPerformance,
     showSkills, showMcp, openSkills, openMcp, settingsTab, setSettingsTab, theme, changeTheme, archiveUndo,
     setArchiveUndo, workspace, runningRunIds, waitingQuestionRunIds, unreadSessionKeys, backgroundWorkByRun,
-    catalogHealth, summary, sidebarMin, sidebarMax, panelMin, panelMax, rightPanelMounted, mountedSurfaces,
+    catalogHealth, catalogHealthError, projectsError, summary, sidebarMin, sidebarMax, panelMin, panelMax, rightPanelMounted, mountedSurfaces,
     setRemoteWorkspaceDirty, toggleOverviewPanel, changeView, openRemoteLocation, setShowSkills, setShowMcp,
     draftKey, questionKindsByRun
   } = props
@@ -92,7 +92,8 @@ export function AppShell(props: AppShellProps) {
         runningRunIds={runningRunIds} waitingQuestionRunIds={waitingQuestionRunIds} unreadSessionKeys={unreadSessionKeys}
         sideChatCatalog={sideChatCatalog}
         backgroundWorkByRun={backgroundWorkByRun} archiveUndo={archiveUndo}
-        analyticsActive={view === 'analytics'} metaPromptsActive={view === 'meta-prompts'} catalogHealth={catalogHealth} />
+        analyticsActive={view === 'analytics'} metaPromptsActive={view === 'meta-prompts'} catalogHealth={catalogHealth}
+        catalogHealthError={catalogHealthError} projectsError={projectsError} />
       <PaneSplitter className="sidebar-resizer" label="调整左侧栏宽度" controls="sidebar-pane" min={sidebarMin} max={sidebarMax}
         value={sidebarPane.width} collapsed={sidebarPane.collapsed} active={sidebarPane.resizing} onPointerDown={sidebarPane.startResize} onKeyDown={sidebarPane.onKeyDown} />
       <div className="main-area has-main-content" id="main-pane" aria-hidden={shellPanelMaximized || undefined} {...(shellPanelMaximized ? { inert: '' } : {})}>

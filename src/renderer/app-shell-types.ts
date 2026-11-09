@@ -98,6 +98,8 @@ export interface AppShellProps {
   unreadSessionKeys: ReadonlySet<string>
   backgroundWorkByRun: ReturnType<typeof import('./hooks/useBackgroundWork').useBackgroundWork>
   catalogHealth: ReturnType<typeof useWorkspaceState>['catalogHealth']
+  catalogHealthError: ReturnType<typeof useWorkspaceState>['catalogHealthError']
+  projectsError: ReturnType<typeof useWorkspaceState>['projectsError']
   summary: ReturnType<typeof import('./components/PinnedSummary').usePinnedSummaryVisibility>
   sidebarMin: number
   sidebarMax: number

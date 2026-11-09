@@ -21,6 +21,8 @@ export const SIDEBAR_PROJECT_COPY = {
   pinned: '置顶',
   projects: '项目',
   noProjects: '暂无项目',
+  projectsReadFailed: (reason: string) => `无法读取项目列表：${reason}`,
+  catalogReadFailed: (reason: string) => `无法读取会话索引状态：${reason}`,
   noMatches: '无匹配项目或会话',
   noSessions: '暂无会话',
   noSessionMatches: '无匹配会话',

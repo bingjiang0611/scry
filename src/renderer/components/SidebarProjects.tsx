@@ -14,10 +14,12 @@ function SessionMotionList({ revision, children, className = 'sb-sess-list' }: {
 }
 
 export function SidebarProjects({
-  projects, q, remoteGroups, showRemote, activeCwd, activeSessionId, collapsed, toggle,
+  projects, projectsError = null, q, remoteGroups, showRemote, activeCwd, activeSessionId, collapsed, toggle,
   onNewProjectChat, openProjectMenu, renderSession, renderConversation, renderRemoteProject
 }: {
   projects: ProjectMeta[]
+  // The project read failed: say so instead of showing the empty catalog.
+  projectsError?: string | null
   q: string
   remoteGroups: RemoteProjectGroup[]
   showRemote: boolean
@@ -89,7 +91,9 @@ export function SidebarProjects({
     )}
     <div className="sb-section sb-project-section">{copy.projects}</div>
     {filtered.length === 0 && pinned.length === 0 && !showRemote && (
-      <div className="sb-empty">{projects.length === 0 ? copy.noProjects : copy.noMatches}</div>
+      <div className="sb-empty" {...(projectsError ? { role: 'status', 'data-projects-read-error': '' } : {})}>
+        {projectsError ? copy.projectsReadFailed(projectsError) : projects.length === 0 ? copy.noProjects : copy.noMatches}
+      </div>
     )}
     {projectGroups.map((group) => {
       if (group.kind === 'remote') return renderRemoteProject(group.project)

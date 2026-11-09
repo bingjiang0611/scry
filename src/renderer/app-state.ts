@@ -43,7 +43,9 @@ export function useAppState() {
     loadProjects,
     chooseFolder,
     removeRecentFolder,
-    catalogHealth
+    catalogHealth,
+    catalogHealthError,
+    projectsError
   } = workspace
   const workspaceRoots = useMemo(
     () => [...new Set([cwd, ...projects.map((project) => project.cwd)].filter((root): root is string => !!root))],
@@ -295,6 +297,8 @@ export function useAppState() {
     chooseFolder,
     removeRecentFolder,
     catalogHealth,
+    catalogHealthError,
+    projectsError,
     workspaceRoots,
     backgroundWorkByRun,
     runningRunIds,
