@@ -75,12 +75,28 @@ describe('Electron download cache', () => {
     expect(script).not.toContain('ELECTRON_MIRROR')
   })
 
+  it('restores electron-builder toolset downloads for the Linux packaging gate', () => {
+    const ci = yaml('.github/workflows/ci.yml') as { jobs: Record<string, { env?: Record<string, string>; steps: Step[] }> }
+    const job = ci.jobs['packaged-linux']
+    // electron-builder reads ELECTRON_BUILDER_CACHE for its own toolset root and
+    // stores downloads under <root>/downloads; the cache must cover that root.
+    expect(job.env?.ELECTRON_BUILDER_CACHE).toBe('${{ runner.temp }}/electron-builder-cache')
+    const key = job.steps.find(step => step.id === 'builder-toolsets')!
+    expect(key.run).toContain("require('./node_modules/electron-builder/package.json').version")
+    const index = job.steps.findIndex(step => step.uses === 'actions/cache@v4')
+    expect(job.steps[index].with).toEqual({
+      path: '${{ runner.temp }}/electron-builder-cache',
+      key: '${{ steps.builder-toolsets.outputs.key }}'
+    })
+    expect(index).toBeLessThan(job.steps.findIndex(step => step.name === 'Package Linux app directory and pacman package'))
+  })
+
   it('prepares only jobs that actually launch Electron, before installation', () => {
     const ci = yaml('.github/workflows/ci.yml') as Workflow
     for (const [name, job] of Object.entries(ci.jobs)) {
       const steps = job.steps ?? []
       const caches = steps.filter(step => step.uses === './.github/actions/cache-electron')
-      if (['unit', 'packaged-electron', 'packaged-linux'].includes(name)) {
+      if (['unit', 'packaged-electron', 'packaged-macos', 'packaged-linux'].includes(name)) {
         expect(caches).toHaveLength(1)
         expect(caches[0].id).toBe('electron-cache')
         expect(steps.indexOf(caches[0])).toBeLessThan(steps.findIndex(step => step.run === 'npm ci'))

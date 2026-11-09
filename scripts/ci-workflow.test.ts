@@ -86,7 +86,7 @@ const SERIAL_RENDERER_UI_ORDER = [
 
 describe('required PR checks', () => {
   for (const [file, dependencies] of [
-    ['ci.yml', ['changes', 'node', 'unit', 'unit-coverage', 'cli-compat', 'packaged-electron', 'packaged-linux']],
+    ['ci.yml', ['changes', 'node', 'unit', 'unit-coverage', 'cli-compat', 'packaged-electron', 'packaged-macos', 'packaged-linux']],
     ['performance.yml', ['changes', 'compare', 'native']]
   ] as const) {
     const success = Object.fromEntries(dependencies.map(key => [key, key === 'changes' ? { result: 'success', outputs: { required: 'true' } } : { result: 'success' }]))
@@ -114,15 +114,18 @@ describe('required PR checks', () => {
     })
   }
 
-  it('exports the verified macOS app only on the manual packaging shard', () => {
+  it('exports the verified macOS app only on a manual dispatch', () => {
     expect(workflow('ci.yml').on).toHaveProperty('workflow_dispatch')
-    const job = workflow('ci.yml').jobs['packaged-electron']
+    const job = workflow('ci.yml').jobs['packaged-macos']
+    const pack = source(job, 'Package and smoke the macOS app')
     const archive = source(job, 'Archive the verified macOS app for manual installation')
     const upload = source(job, 'Upload the verified macOS app')
-    const manualShard = "${{ github.event_name == 'workflow_dispatch' && matrix.shard == 2 }}"
-    expect(archive.if).toBe(manualShard)
-    expect(upload.if).toBe(manualShard)
-    expect(job.steps.indexOf(archive)).toBeGreaterThan(job.steps.indexOf(source(job, 'Package and smoke the macOS app')))
+    const manualDispatch = "${{ github.event_name == 'workflow_dispatch' }}"
+    expect(pack.run).toBe('npm run pack:artifact')
+    expect(pack.if).toBeUndefined()
+    expect(archive.if).toBe(manualDispatch)
+    expect(upload.if).toBe(manualDispatch)
+    expect(job.steps.indexOf(archive)).toBeGreaterThan(job.steps.indexOf(pack))
     expect(job.steps.indexOf(upload)).toBeGreaterThan(job.steps.indexOf(archive))
     expect(upload.with?.['if-no-files-found']).toBe('error')
     expect(upload.with?.path).toBe('release-artifacts/')
@@ -163,8 +166,9 @@ describe('required PR checks', () => {
     })
   })
 
-  it('pins the packaged macOS gate to a supported standard runner image', () => {
+  it('pins the packaged macOS gates to a supported standard runner image', () => {
     expect(workflow('ci.yml').jobs['packaged-electron']['runs-on']).toBe('macos-15')
+    expect(workflow('ci.yml').jobs['packaged-macos']['runs-on']).toBe('macos-15')
   })
 
   it('requires whole-program harness binding checks as an unconditional gate', () => {
@@ -196,9 +200,8 @@ describe('required PR checks', () => {
     expect(job.strategy.matrix.shard).toEqual([1, 2, 3])
     expect(job.strategy['fail-fast']).toBe(false)
     expect(source(job, 'Isolated renderer DOM smoke tests').run).toBe('npm run test:renderer:ui:${{ matrix.shard }}')
-    const pack = source(job, 'Package and smoke the macOS app')
-    expect(pack.run).toBe('npm run pack:artifact')
-    expect(pack.if).toBe('${{ matrix.shard == 2 }}')
+    // Packaging owns its own slot; a shard that also packed was the slowest job.
+    expect(job.steps.some(step => step.run === 'npm run pack:artifact')).toBe(false)
     const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> }
     const shards = [1, 2, 3].map(shard => `npm run test:renderer:ui:${shard}`)
     expect(scripts['test:renderer:ui']).toBe(shards.join(' && '))
