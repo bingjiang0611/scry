@@ -138,7 +138,7 @@ export class DaemonRunTransport {
     return { runId: intent.runId, state: intent.state }
   }
 
-  async watch(input: { runId: string; cursor: number; outputCursor: number; waitMs: number; output: boolean }, signal?: AbortSignal): Promise<DaemonWatchReply> {
+  async watch(input: { runId: string; cursor: number; outputCursor: number; waitMs: number; output: boolean | 'wake' }, signal?: AbortSignal): Promise<DaemonWatchReply> {
     const reply = await this.#call({
       op: 'watch', runId: input.runId, cursor: input.cursor,
       outputCursor: input.outputCursor, waitMs: input.waitMs, output: input.output
@@ -156,8 +156,11 @@ export class DaemonRunTransport {
     const state = watch.state === undefined || watch.state === null ? null : typeof watch.state === 'string' ? watch.state : fail()
     const page = record(watch.output) ? watch.output : undefined
     const chunks = page && Array.isArray(page.chunks) ? page.chunks : []
+    // A wake-only reply reports the count and no text: that is the whole point of the
+    // mode, so the count is what says whether there is content.
+    const reported = page && Number.isSafeInteger(page.count) ? page.count as number : chunks.length
     const output = {
-      count: chunks.length,
+      count: reported,
       cursor: page && Number.isSafeInteger(page.cursor) ? page.cursor as number : input.outputCursor
     }
     return { state, cursor: poll.cursor as number, events, output }

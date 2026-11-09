@@ -378,4 +378,12 @@ export class RemoteGateway {
     if (typeof input.runId !== 'string' || input.runId.length === 0 || input.runId.length > 128) return { chunks: [], cursor }
     return this.#output?.since(input.runId, cursor) ?? { chunks: [], cursor }
   }
+
+  /** How much output is newer than this cursor, without the text. */
+  async countOutput(peerCertSHA256: string, input: { runId: string; cursor: number }): Promise<{ count: number; cursor: number }> {
+    this.#authorize(peerCertSHA256)
+    const cursor = Number.isSafeInteger(input.cursor) && input.cursor >= 0 ? input.cursor : 0
+    if (typeof input.runId !== 'string' || input.runId.length === 0 || input.runId.length > 128) return { count: 0, cursor }
+    return this.#output?.countSince(input.runId, cursor) ?? { count: 0, cursor }
+  }
 }

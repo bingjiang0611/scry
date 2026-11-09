@@ -203,6 +203,8 @@ export interface RemoteHistorySource {
 export interface RemoteOutputReader {
   // Chunks strictly after `cursor` for a run (bounded page) + the next cursor.
   since(runId: string, cursor: number): RunOutputPage | Promise<RunOutputPage>
+  // The same question without the text: how much is newer, and where it ends.
+  countSince(runId: string, cursor: number): { count: number; cursor: number } | Promise<{ count: number; cursor: number }>
 }
 
 export interface RemoteGatewayDependencies {

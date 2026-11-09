@@ -21,7 +21,7 @@ import { readDesktop, readDesktopDirectory, readDesktopWorkbench, type DesktopRe
 import { catalogSnapshot, type CatalogSnapshotReply } from './host-controller-catalog-snapshot'
 import { readToolPanel, type ToolPanelDeps } from './host-controller-tool-panel'
 import { runSessionAction, runSessionDelete, runSessionFork, type SessionActionDeps } from './host-controller-session'
-import { submitIntent, submitReceivedIntent, type SubmitDeps } from './host-controller-submit'
+import { submitIntent, submitReceivedIntent, type SubmitDeps, type SubmitResult } from './host-controller-submit'
 import { type AgentQuestionRequest, type AgentQuestionResponse } from '../../shared/runtime'
 import { type ToolPanelPayload } from '../../shared/tool-panel'
 
@@ -99,7 +99,8 @@ export class HostController {
       stops: this.#stops, live: this.#live, ...(this.#macRuns ? { macRuns: this.#macRuns } : {}),
       poll: (peer, input) => this.poll(peer, input),
       pendingQuestions: (peer, input) => this.pendingQuestions(peer, input),
-      runOutput: (peer, input) => this.runOutput(peer, input)
+      runOutput: (peer, input) => this.runOutput(peer, input),
+      runOutputWake: (peer, input) => this.runOutputWake(peer, input)
     })
   }
 
@@ -131,11 +132,11 @@ export class HostController {
 
   // Device-facing (inner-mTLS): submit a durable intent, then drive the
   // dispatcher so the gated executor picks it up exactly once.
-  submitIntent(peerCertSHA256: string, input: { intentId: string; detail?: string }): { runId: string; status: 'recorded' | 'duplicate'; seq: number } {
+  submitIntent(peerCertSHA256: string, input: { intentId: string; detail?: string }): SubmitResult {
     return submitIntent(this.#deps(), peerCertSHA256, input)
   }
 
-  async submitReceivedIntent(peer: string, input: { intentId: string; detail?: string }): Promise<{ runId: string; status: 'recorded' | 'duplicate' }> {
+  async submitReceivedIntent(peer: string, input: { intentId: string; detail?: string }): Promise<SubmitResult> {
     return await submitReceivedIntent(this.#deps(), peer, input)
   }
 
@@ -187,8 +188,7 @@ export class HostController {
     return await readDesktopWorkbench(this.#deps(), peer, input)
   }
 
-  // Separate from the project-scoped mobile browser. Selecting is an explicit
-  // workspace grant by an authenticated owner, never a browse side effect.
+  // Selecting is an explicit workspace grant, never a browse side effect.
   desktopDirectory(peerCertSHA256: string, input: unknown): DesktopDirectoryResult {
     return readDesktopDirectory(this.#deps(), peerCertSHA256, input)
   }
@@ -203,14 +203,14 @@ export class HostController {
   // mobile operation. It deliberately exposes no pairing or workspace state.
   authorizeDevicePeer(peerCertSHA256: string): void { this.authorizeDevice(peerCertSHA256) }
 
-  // Device-facing: the host-authorized project directories this device may
-  // target, authorized by the same verified peer certificate as every method.
+  // Device-facing reads below: each one authorizes the same verified peer as every
+  // other method, and none of them grants anything - a listed project still goes
+  // through the workspace authorizer when a run targets it.
   listProjects(peerCertSHA256: string): RemoteProjectRef[] {
     return this.#gateway.listProjects(peerCertSHA256)
   }
 
-  // Device-facing: browse within a host-authorized project without granting the
-  // phone access to any parent or sibling outside that project's canonical root.
+  // Browsing stays inside a host-authorized project: no parent, no sibling.
   listDirectories(peerCertSHA256: string, input: { path?: string }): RemoteDirectoryListing {
     return this.#gateway.listDirectories(peerCertSHA256, input)
   }
@@ -219,8 +219,6 @@ export class HostController {
     return this.#gateway.listDirectoriesPage(peerCertSHA256, input)
   }
 
-  // Device-facing: the Providers this device may target, authorized by the same
-  // verified peer certificate as every method.
   listProviders(peerCertSHA256: string): RemoteProviderRef[] {
     return this.#gateway.listProviders(peerCertSHA256)
   }
@@ -233,7 +231,6 @@ export class HostController {
     return this.#gateway.listProviderControls(peerCertSHA256, query)
   }
 
-  // Device-facing: Provider-native slash commands for this exact workspace.
   listCommands(peerCertSHA256: string, query: RemoteCommandQuery): Promise<RemoteCommandCatalog> {
     return this.#gateway.listCommands(peerCertSHA256, query)
   }
@@ -333,6 +330,11 @@ export class HostController {
   // strictly after the caller's cursor, authorized by the verified peer cert.
   runOutput(peerCertSHA256: string, input: { runId: string; cursor: number }): Promise<RunOutputPage> {
     return this.#gateway.pollOutput(peerCertSHA256, input)
+  }
+
+  // Count only: the same authorization and the same spool, without its text.
+  runOutputWake(peerCertSHA256: string, input: { runId: string; cursor: number }): Promise<{ count: number; cursor: number }> {
+    return this.#gateway.countOutput(peerCertSHA256, input)
   }
 
   // Device-facing: ask the Provider running this remote intent to stop. This is

@@ -274,13 +274,14 @@ export class DaemonRunRuntime {
     const trace = new PerformanceTrace('daemon.run.pump', cursor.context ? { provider: cursor.context.providerId } : {})
     let changed = false
     try {
-      // `output: true` is the wake, not the delivery: the text still arrives on the
-      // trace, but the daemon only answers this long poll early when the run produced
-      // something. Without it a fifteen second poll is a fifteen second freeze between
-      // the first chunk and the end of the message.
+      // `output: 'wake'` is the wake, not the delivery: the daemon reports that the run
+      // produced something without sending that content, and the text still arrives on
+      // the trace. Without a content wake a fifteen second poll is a fifteen second
+      // freeze between the first chunk and the end of the message; with the page itself
+      // every chunk would cross the socket twice.
       const watch = await this.#deps.transport.watch({
         runId, cursor: cursor.watch, outputCursor: cursor.output,
-        waitMs: options.waitMs ?? this.#deps.waitMs ?? DEFAULT_WAIT_MS, output: true
+        waitMs: options.waitMs ?? this.#deps.waitMs ?? DEFAULT_WAIT_MS, output: 'wake'
       })
       cursor.watch = Math.max(cursor.watch, watch.cursor)
       this.#seen = Math.max(this.#seen, watch.cursor)
