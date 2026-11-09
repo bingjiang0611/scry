@@ -123,9 +123,9 @@
     },
     "workspaceSelection": {
       "path": "navigation",
-      "request": "{ op:'workspaceSelection', method:'setCwd', cwd }",
-      "response": "归一化后的 cwd",
-      "authorize": "已验证 peer + scope: local；按 canonical 目录重验（chooseFolder 由 daemon 校验真实目录并持久化，setCwd 只接受已知项目根或用户目录）",
+      "request": "{ op:'workspaceSelection', method:'setCwd'|'chooseFolder'|'read'|'inspectStart'|'validateBranch', … }",
+      "response": "setCwd/chooseFolder：归一化后的 cwd；read/inspectStart/validateBranch：现有 SourceControlService 的 worktree 选择、准备检查与分支校验结果",
+      "authorize": "已验证 peer + scope: local；按 canonical 目录重验（chooseFolder 由 daemon 校验真实目录并持久化，setCwd 只接受已知项目根或用户目录；read/inspectStart/validateBranch 按 repositoryId 归属已授权工作区）",
       "why": "当前工作区是 daemon 授权上下文的一部分",
       "scopes": [
         "local"

@@ -1,0 +1,262 @@
+{
+  "schema": 1,
+  "note": "desktopWorkbench 转发行（workspace / terminal / sourceControl）。与 daemon-ipc-routing.json 合并读取；按 surface 拆出以守 20 KB 门禁。",
+  "channels": [
+    {
+      "channel": "sourceControl:acknowledge",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "acknowledge",
+      "why": "git 与 workspace 授权归 daemon"
+    },
+    {
+      "channel": "sourceControl:diff",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "diff",
+      "why": "git 与 workspace 授权归 daemon"
+    },
+    {
+      "channel": "sourceControl:loadCommitDraft",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "loadCommitDraft",
+      "why": "git 与 workspace 授权归 daemon"
+    },
+    {
+      "channel": "sourceControl:loadDraft",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "loadDraft",
+      "why": "git 与 workspace 授权归 daemon"
+    },
+    {
+      "channel": "sourceControl:mutate",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "mutate",
+      "why": "git 与 workspace 授权归 daemon"
+    },
+    {
+      "channel": "sourceControl:operations",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "operations",
+      "why": "git 与 workspace 授权归 daemon"
+    },
+    {
+      "channel": "sourceControl:pullRequest",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "pullRequest",
+      "why": "git 与 workspace 授权归 daemon"
+    },
+    {
+      "channel": "sourceControl:pullRequests",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "pullRequests",
+      "why": "git 与 workspace 授权归 daemon"
+    },
+    {
+      "channel": "sourceControl:read",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "read",
+      "why": "git 与 workspace 授权归 daemon"
+    },
+    {
+      "channel": "sourceControl:reconcile",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "reconcile",
+      "why": "git 与 workspace 授权归 daemon"
+    },
+    {
+      "channel": "sourceControl:saveCommitDraft",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "saveCommitDraft",
+      "why": "git 与 workspace 授权归 daemon"
+    },
+    {
+      "channel": "sourceControl:saveDraft",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "saveDraft",
+      "why": "git 与 workspace 授权归 daemon"
+    },
+    {
+      "channel": "terminal:ack",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "terminal",
+      "method": "terminalAck",
+      "why": "PTY 在 daemon"
+    },
+    {
+      "channel": "terminal:active",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "terminal",
+      "method": "terminalActive",
+      "why": "PTY 在 daemon"
+    },
+    {
+      "channel": "terminal:attach",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "terminal",
+      "method": "terminalAttach",
+      "why": "PTY 在 daemon"
+    },
+    {
+      "channel": "terminal:close",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "terminal",
+      "method": "terminalClose",
+      "why": "PTY 在 daemon"
+    },
+    {
+      "channel": "terminal:ready",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "terminal",
+      "method": "terminalReady",
+      "why": "PTY 在 daemon"
+    },
+    {
+      "channel": "terminal:recordingDelete",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "terminal",
+      "method": "terminalRecordingDelete",
+      "why": "录制在 daemon"
+    },
+    {
+      "channel": "terminal:recordingList",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "terminal",
+      "method": "terminalRecordingList",
+      "why": "录制在 daemon"
+    },
+    {
+      "channel": "terminal:recordingRead",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "terminal",
+      "method": "terminalRecordingRead",
+      "why": "录制在 daemon"
+    },
+    {
+      "channel": "terminal:resize",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "terminal",
+      "method": "terminalResize",
+      "why": "PTY 在 daemon"
+    },
+    {
+      "channel": "terminal:start",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "terminal",
+      "method": "terminalStart",
+      "why": "PTY 在 daemon"
+    },
+    {
+      "channel": "terminal:write",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "terminal",
+      "method": "terminalWrite",
+      "why": "PTY 在 daemon"
+    },
+    {
+      "channel": "workspace:create",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceCreate",
+      "why": "工作区写入归 daemon"
+    },
+    {
+      "channel": "workspace:list",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceList",
+      "why": "工作区读取归 daemon"
+    },
+    {
+      "channel": "workspace:move",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceMove",
+      "why": "工作区写入归 daemon"
+    },
+    {
+      "channel": "workspace:openExternal",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceOpenExternal",
+      "why": "工作区内交给系统打开"
+    },
+    {
+      "channel": "workspace:read",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceRead",
+      "why": "工作区读取归 daemon"
+    },
+    {
+      "channel": "workspace:readPage",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceReadPage",
+      "why": "工作区读取归 daemon"
+    },
+    {
+      "channel": "workspace:rename",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceRename",
+      "why": "工作区写入归 daemon"
+    },
+    {
+      "channel": "workspace:trash",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceTrash",
+      "why": "工作区写入归 daemon"
+    },
+    {
+      "channel": "workspace:write",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceWrite",
+      "why": "工作区写入归 daemon"
+    }
+  ]
+}

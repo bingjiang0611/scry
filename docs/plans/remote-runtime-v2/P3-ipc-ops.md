@@ -20,7 +20,7 @@
 | `sessionStore` | local | navigation | { op:'sessionStore', method, context } | 现有 appSessionStore 结果（健康、归档列表） | 已验证 peer + authorize(context.cwd) + provider/profile |
 | `sessionPurge` | local | navigation | { op:'sessionPurge', method, request } | 现有批量删除结果（逐条 preview 与指纹） | 已验证 peer + authorize(cwd) + 指纹确认与逐条预览 |
 | `runControl` | local | controls | { op:'runControl', method, runId, payload } | 现有 run 控制结果 | 已验证 peer + run 归属 + authorize(cwd) |
-| `workspaceSelection` | local | navigation | { op:'workspaceSelection', method:'setCwd', cwd } | 归一化后的 cwd | 已验证 peer + scope: local；按 canonical 目录重验（chooseFolder 由 daemon 校验真实目录并持久化，setCwd 只接受已知项目根或用户目录） |
+| `workspaceSelection` | local | navigation | { op:'workspaceSelection', method:'setCwd'|'chooseFolder'|'read'|'inspectStart'|'validateBranch', … } | setCwd/chooseFolder：归一化后的 cwd；read/inspectStart/validateBranch：现有 SourceControlService 的 worktree 选择、准备检查与分支校验结果 | 已验证 peer + scope: local；按 canonical 目录重验（chooseFolder 由 daemon 校验真实目录并持久化，setCwd 只接受已知项目根或用户目录；read/inspectStart/validateBranch 按 repositoryId 归属已授权工作区） |
 | `recorderContent` | local | evidence | { op:'recorderContent', method, cwd, cursor } | 现有 recorder content page | 已验证 peer + authorize(cwd) + `.scry` 路径校验 |
 | `turnEvidence` | local | evidence | { op:'turnEvidence', method, context, runId } | 现有终态证据数组 | 已验证 peer + 先过 catalog 校验 cwd/sessionId + run 归属 |
 | `localPairing` | local | remote | { op:'localPairing', method:'begin'|'confirm'|'cancel'|'revoke', payload } | 现有 PairingAuthority 结果 | 只在 unix socket 上、且调用方持有 scope: local grant（见 P3 §13.2） |

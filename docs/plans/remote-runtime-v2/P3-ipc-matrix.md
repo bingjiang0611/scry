@@ -2,9 +2,10 @@
 
 本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑；改 `scripts/daemon-ipc-routing.json` 后重新生成。
 
-- 生产 `handleTrusted` channel：119 个（`src/main/**`，不含测试）
-- 留在 main：24，一半 main 一半 daemon（`split`）：3，转发到现有 op：39，需要新增 op：53
+- 生产特权 IPC channel：134 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
+- 留在 main：24，一半 main 一半 daemon（`split`）：3，转发到现有 op：51，需要新增 op：56
 - 新增 op 的请求、响应、授权与调用方范围见 [P3-ipc-ops](P3-ipc-ops.md)；设计正文见 [P3 §13](P3-batch4-design.md)
+- `desktopWorkbench` 转发行（workspace / terminal / sourceControl，共 32 行）见 [P3-ipc-matrix-workbench](P3-ipc-matrix-workbench.md)
 
 ## 判定规则
 
@@ -118,27 +119,10 @@
 | `runTraces:setLegacyDemand` | main | `—` | — | — | 窗口焦点决定 |
 | `runTraces:subscribe` | main | `—` | — | — | main 拉流后分发 |
 | `runTraces:unsubscribe` | main | `—` | — | — | main 拉流后分发 |
-| `terminal:ack` | forward | `desktopWorkbench:terminalAck` | — | 等价（同一 workbench terminal surface，ownershipEpoch 与 ack 语义不变） | PTY 在 daemon |
-| `terminal:active` | forward | `desktopWorkbench:terminalActive` | — | 等价（同一 workbench terminal surface，ownershipEpoch 与 ack 语义不变） | PTY 在 daemon |
-| `terminal:attach` | forward | `desktopWorkbench:terminalAttach` | — | 等价（同一 workbench terminal surface，ownershipEpoch 与 ack 语义不变） | PTY 在 daemon |
-| `terminal:close` | forward | `desktopWorkbench:terminalClose` | — | 等价（同一 workbench terminal surface，ownershipEpoch 与 ack 语义不变） | PTY 在 daemon |
-| `terminal:ready` | forward | `desktopWorkbench:terminalReady` | — | 等价（同一 workbench terminal surface，ownershipEpoch 与 ack 语义不变） | PTY 在 daemon |
-| `terminal:recordingDelete` | forward | `desktopWorkbench:terminalRecordingDelete` | — | 等价（同一 workbench terminal surface，ownershipEpoch 与 ack 语义不变） | 录制在 daemon |
-| `terminal:recordingList` | forward | `desktopWorkbench:terminalRecordingList` | — | 等价（同一 workbench terminal surface，ownershipEpoch 与 ack 语义不变） | 录制在 daemon |
-| `terminal:recordingRead` | forward | `desktopWorkbench:terminalRecordingRead` | — | 等价（同一 workbench terminal surface，ownershipEpoch 与 ack 语义不变） | 录制在 daemon |
-| `terminal:resize` | forward | `desktopWorkbench:terminalResize` | — | 等价（同一 workbench terminal surface，ownershipEpoch 与 ack 语义不变） | PTY 在 daemon |
-| `terminal:start` | forward | `desktopWorkbench:terminalStart` | — | 等价（同一 workbench terminal surface，ownershipEpoch 与 ack 语义不变） | PTY 在 daemon |
-| `terminal:write` | forward | `desktopWorkbench:terminalWrite` | — | 等价（同一 workbench terminal surface，ownershipEpoch 与 ack 语义不变） | PTY 在 daemon |
-| `workspace:create` | forward | `desktopWorkbench:workspaceCreate` | — | 等价（同上；写入带 expectedRevision，受限宿主按 typed 错误降级） | 工作区写入归 daemon |
-| `workspace:list` | forward | `desktopWorkbench:workspaceList` | — | 等价（同一 desktopWorkbench workspace surface，每次重验 cwd） | 工作区读取归 daemon |
-| `workspace:move` | forward | `desktopWorkbench:workspaceMove` | — | 等价（同上；写入带 expectedRevision，受限宿主按 typed 错误降级） | 工作区写入归 daemon |
-| `workspace:openExternal` | forward | `desktopWorkbench:workspaceOpenExternal` | — | 等价（同一 desktopWorkbench workspace surface，每次重验 cwd） | 工作区内交给系统打开 |
 | `workspace:openKnownExternal` | main | `—` | — | daemon:projectStore+sessionStore | main 的只读引用表 |
-| `workspace:read` | forward | `desktopWorkbench:workspaceRead` | — | 等价（同一 desktopWorkbench workspace surface，每次重验 cwd） | 工作区读取归 daemon |
 | `workspace:readKnown` | main | `—` | — | daemon:projectStore+sessionStore | main 的只读引用表 |
-| `workspace:readPage` | forward | `desktopWorkbench:workspaceReadPage` | — | 等价（同一 desktopWorkbench workspace surface，每次重验 cwd） | 工作区读取归 daemon |
 | `workspace:readPageKnown` | main | `—` | — | daemon:projectStore+sessionStore | main 的只读引用表 |
-| `workspace:rename` | forward | `desktopWorkbench:workspaceRename` | — | 等价（同上；写入带 expectedRevision，受限宿主按 typed 错误降级） | 工作区写入归 daemon |
 | `workspace:resolveFile` | main | `—` | — | daemon:projectStore+sessionStore | main 签发只读引用 |
-| `workspace:trash` | forward | `desktopWorkbench:workspaceTrash` | — | 等价（同上；写入带 expectedRevision，受限宿主按 typed 错误降级） | 工作区写入归 daemon |
-| `workspace:write` | forward | `desktopWorkbench:workspaceWrite` | — | 等价（同上；写入带 expectedRevision，受限宿主按 typed 错误降级） | 工作区写入归 daemon |
+| `workspaceSelection:inspectStart` | new-op | `workspaceSelection:inspectStart` | navigation | — | 准备工作区前检查仓库 |
+| `workspaceSelection:read` | new-op | `workspaceSelection:read` | navigation | — | worktree 选择读取 git 状态 |
+| `workspaceSelection:validateBranch` | new-op | `workspaceSelection:validateBranch` | navigation | — | 校验新分支名 |

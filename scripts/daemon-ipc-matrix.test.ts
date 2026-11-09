@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { MATRIX_DOC, OPS_DOC, buildMatrix, collectChannels, loadRouting, protocolOps, renderMatrix, renderOps, workbenchMethods } from './daemon-ipc-matrix.mjs'
+import { MATRIX_DOC, OPS_DOC, WORKBENCH_MATRIX_DOC, buildMatrix, collectChannels, loadRouting, protocolOps, renderMatrix, renderOps, renderWorkbenchMatrix, workbenchMethods } from './daemon-ipc-matrix.mjs'
 
 const routing = loadRouting()
 const matrix = buildMatrix(routing)
 
 describe('daemon IPC routing matrix', () => {
   it('classifies every privileged channel and only privileged channels', () => {
-    expect(matrix.channels).toBe(119)
+    expect(matrix.channels).toBe(134)
     expect(matrix.defects).toEqual([])
     expect(matrix.rows.filter((row) => row.route === 'main').length).toBeGreaterThan(0)
     expect(matrix.rows.filter((row) => row.route === 'forward').length).toBeGreaterThan(0)
@@ -53,7 +53,13 @@ describe('daemon IPC routing matrix', () => {
   })
 
   it('reads its own inputs instead of trusting an empty scan', () => {
-    expect(collectChannels().length).toBe(119)
+    const channels = collectChannels().map((entry) => entry.channel)
+    expect(channels.length).toBe(134)
+    // Registered through a handler table and through the `handle(` parameter name; both
+    // were missing from the first scan, which only matched handleTrusted('literal').
+    expect(channels).toContain('sourceControl:read')
+    expect(channels).toContain('sourceControl:loadDraft')
+    expect(channels).toContain('workspaceSelection:validateBranch')
     expect(protocolOps().has('submit')).toBe(true)
     // steer has no device-facing op today, which is exactly why the matrix records a new one.
     expect(protocolOps().has('steer')).toBe(false)
@@ -63,6 +69,7 @@ describe('daemon IPC routing matrix', () => {
 
   it('keeps both generated documents up to date', () => {
     expect(readFileSync(MATRIX_DOC, 'utf8')).toBe(renderMatrix(matrix))
+    expect(readFileSync(WORKBENCH_MATRIX_DOC, 'utf8')).toBe(renderWorkbenchMatrix(matrix))
     expect(readFileSync(OPS_DOC, 'utf8')).toBe(renderOps(matrix, routing))
   })
 

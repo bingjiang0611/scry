@@ -10,7 +10,9 @@ import { fileURLToPath } from 'node:url'
 // decision, and a rename cannot drift away from the recorded op/method.
 const root = fileURLToPath(new URL('..', import.meta.url))
 export const MATRIX_DOC = join(root, 'docs/plans/remote-runtime-v2/P3-ipc-matrix.md')
+export const WORKBENCH_MATRIX_DOC = join(root, 'docs/plans/remote-runtime-v2/P3-ipc-matrix-workbench.md')
 const ROUTING = join(root, 'scripts/daemon-ipc-routing.json')
+const ROUTING_WORKBENCH = join(root, 'scripts/daemon-ipc-routing-workbench.json')
 const OPS = join(root, 'scripts/daemon-ipc-ops.json')
 const DIFFERENCES = join(root, 'scripts/daemon-ipc-differences.json')
 const APPROVALS = join(root, 'scripts/daemon-ipc-remote-approvals.json')
@@ -29,13 +31,35 @@ function sourceFiles(directory) {
 }
 
 /** Every privileged channel in production source, with the file that registers it. */
+// Registrations whose channel is built from a handler table, e.g. `sourceControl:${method}`.
+// Each prefix names how to read its method list from source; an unknown templated
+// registration fails the scan instead of silently dropping channels.
+const TEMPLATED = {
+  sourceControl: () => {
+    const source = readFileSync(join(root, 'src/main/source-control/ipc.ts'), 'utf8')
+    const start = source.indexOf('export function sourceControlHandlers')
+    const body = source.slice(start, source.indexOf('satisfies Record', start))
+    const methods = [...body.matchAll(/^\s{4}(\w+):/gm)].map(([, name]) => name)
+    if (start < 0 || methods.length === 0) throw new Error('cannot read sourceControlHandlers')
+    return methods
+  }
+}
+
 export function collectChannels(dir = MAIN_DIR) {
   const found = new Map()
+  const add = (channel, file) => {
+    if (found.has(channel)) throw new Error(`duplicate registration: ${channel} in ${relative(root, file)} and ${relative(root, found.get(channel))}`)
+    found.set(channel, file)
+  }
   for (const file of sourceFiles(dir)) {
-    for (const match of readFileSync(file, 'utf8').matchAll(/handleTrusted\(\s*'([a-zA-Z0-9:_-]+)'/g)) {
-      const channel = match[1]
-      if (found.has(channel)) throw new Error(`duplicate registration: ${channel} in ${relative(root, file)} and ${relative(root, found.get(channel))}`)
-      found.set(channel, file)
+    const source = readFileSync(file, 'utf8')
+    // `handle(` is the parameter name registerWorkspaceSelectionIpc gives the same trusted
+    // registrar; both spellings reach registerTrustedIpcHandler.
+    for (const match of source.matchAll(/\b(?:handleTrusted|handle)\(\s*'([a-zA-Z0-9:_-]+)'/g)) add(match[1], file)
+    for (const match of source.matchAll(/\b(?:handleTrusted|handle|register)\(\s*`([a-zA-Z]+):\$\{\w+\}`/g)) {
+      const expand = TEMPLATED[match[1]]
+      if (!expand) throw new Error(`templated registration ${match[1]}:\${...} in ${relative(root, file)} has no expander`)
+      for (const method of expand()) add(`${match[1]}:${method}`, file)
     }
   }
   return [...found.entries()].map(([channel, file]) => ({ channel, file: relative(root, file) })).sort((a, b) => a.channel.localeCompare(b.channel))
@@ -71,18 +95,19 @@ export function performancePaths() {
  * new op looks like, how each forwarded op differs from the device protocol, and which
  * new ops a remote device may reach. Each file stays under the staged size budget.
  */
-export function loadRouting(routingPath = ROUTING, opsPath = OPS, differencesPath = DIFFERENCES, approvalsPath = APPROVALS) {
+export function loadRouting(routingPath = ROUTING, opsPath = OPS, differencesPath = DIFFERENCES, approvalsPath = APPROVALS, workbenchPath = ROUTING_WORKBENCH) {
   const routing = JSON.parse(readFileSync(routingPath, 'utf8'))
+  const workbench = JSON.parse(readFileSync(workbenchPath, 'utf8'))
   const ops = JSON.parse(readFileSync(opsPath, 'utf8'))
   const differences = JSON.parse(readFileSync(differencesPath, 'utf8'))
   const approvals = JSON.parse(readFileSync(approvalsPath, 'utf8'))
-  for (const [name, data] of [['routing', routing], ['ops', ops], ['differences', differences], ['approvals', approvals]]) {
+  for (const [name, data] of [['routing', routing], ['workbench routing', workbench], ['ops', ops], ['differences', differences], ['approvals', approvals]]) {
     if (data.schema !== 1) throw new Error(`${name} schema must be 1`)
   }
-  if (!Array.isArray(routing.channels) || !ops.ops || !differences.differences || !Array.isArray(approvals.approved)) {
+  if (!Array.isArray(routing.channels) || !Array.isArray(workbench.channels) || !ops.ops || !differences.differences || !Array.isArray(approvals.approved)) {
     throw new Error('routing inputs are incomplete')
   }
-  return { schema: 1, channels: routing.channels, ops: ops.ops, differences: differences.differences, approved: new Set(approvals.approved) }
+  return { schema: 1, channels: [...routing.channels, ...workbench.channels], ops: ops.ops, differences: differences.differences, approved: new Set(approvals.approved) }
 }
 
 /**
@@ -164,6 +189,10 @@ export function buildMatrix(routing = loadRouting(), dir = MAIN_DIR) {
 
 export const OPS_DOC = join(root, 'docs/plans/remote-runtime-v2/P3-ipc-ops.md')
 
+const isWorkbenchRow = (row) => row.target.startsWith('desktopWorkbench:')
+const matrixRow = (row) => `| \`${row.channel}\` | ${row.route} | \`${row.target}\` | ${row.path} | ${row.note} | ${row.why} |`
+const MATRIX_HEADER = ['| channel | 去向 | op(method) | 用户路径 | 差异与分工 | 依据 |', '|---|---|---|---|---|---|']
+
 export function renderMatrix({ rows, defects, channels }) {
   const count = (route) => rows.filter((row) => row.route === route).length
   const lines = [
@@ -171,9 +200,10 @@ export function renderMatrix({ rows, defects, channels }) {
     '',
     '本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑；改 `scripts/daemon-ipc-routing.json` 后重新生成。',
     '',
-    `- 生产 \`handleTrusted\` channel：${channels} 个（\`src/main/**\`，不含测试）`,
+    `- 生产特权 IPC channel：${channels} 个（\`src/main/**\` 经 \`handleTrusted\` 注册，不含测试；含 \`handle(\` 参数名与 \`sourceControl:\${method}\` 这类按表展开的注册）`,
     `- 留在 main：${count('main')}，一半 main 一半 daemon（\`split\`）：${count('split')}，转发到现有 op：${count('forward')}，需要新增 op：${count('new-op')}`,
     '- 新增 op 的请求、响应、授权与调用方范围见 [P3-ipc-ops](P3-ipc-ops.md)；设计正文见 [P3 §13](P3-batch4-design.md)',
+    `- \`desktopWorkbench\` 转发行（workspace / terminal / sourceControl，共 ${rows.filter(isWorkbenchRow).length} 行）见 [P3-ipc-matrix-workbench](P3-ipc-matrix-workbench.md)`,
     '',
     '## 判定规则',
     '',
@@ -190,14 +220,25 @@ export function renderMatrix({ rows, defects, channels }) {
     '',
     '「差异与分工」列：`forward` 行写与设备协议的语义差异（等价也要写），`split` 行写 main 侧做什么，`main` 行写它依赖的 daemon 数据来源。',
     '',
-    '| channel | 去向 | op(method) | 用户路径 | 差异与分工 | 依据 |',
-    '|---|---|---|---|---|---|'
+    ...MATRIX_HEADER
   ]
-  for (const row of rows) lines.push(`| \`${row.channel}\` | ${row.route} | \`${row.target}\` | ${row.path} | ${row.note} | ${row.why} |`)
+  for (const row of rows) if (!isWorkbenchRow(row)) lines.push(matrixRow(row))
   if (defects.length > 0) {
     lines.push('', '## 未分类', '')
     for (const defect of defects) lines.push(`- \`${defect.channel}\`：${defect.problem}`)
   }
+  return `${lines.join('\n')}\n`
+}
+
+export function renderWorkbenchMatrix({ rows }) {
+  const lines = [
+    '# P3 附录 · IPC 路由矩阵：desktopWorkbench 转发（生成文件）',
+    '',
+    '本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑；改 `scripts/daemon-ipc-routing-workbench.json` 后重新生成。判定规则与其余 channel 见 [P3-ipc-matrix](P3-ipc-matrix.md)。',
+    '',
+    ...MATRIX_HEADER
+  ]
+  for (const row of rows) if (isWorkbenchRow(row)) lines.push(matrixRow(row))
   return `${lines.join('\n')}\n`
 }
 
@@ -223,6 +264,7 @@ export function renderOps({ rows }, routing = loadRouting()) {
 
 const DOCS = [
   [MATRIX_DOC, renderMatrix],
+  [WORKBENCH_MATRIX_DOC, renderWorkbenchMatrix],
   [OPS_DOC, renderOps]
 ]
 
