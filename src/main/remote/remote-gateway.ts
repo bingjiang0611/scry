@@ -141,7 +141,7 @@ export class RemoteGateway {
   #output?: RemoteOutputReader
   #workspace?: RemoteGatewayDependencies['workspace']
   #fileDownloads?: RemoteFileDownloads
-  #historySnapshots = new Map<string, { bytes: Buffer; expiresAt: number }>()
+  #historySnapshots = new Map<string, { bytes: Buffer; expiresAt: number; deflated?: Promise<Buffer> }>()
   #historyBuilds = new Map<string, Promise<{ bytes: Buffer; snapshot: string }>>()
   // A catalog page is a frozen view. Keep the materialized source only for the
   // short lifetime of a page walk; authorization is still checked on every
@@ -300,6 +300,8 @@ export class RemoteGateway {
     if (!Number.isSafeInteger(cursor) || cursor < 0) throw new RemoteGatewayError('invalid_session_cursor')
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_CATALOG_PAGE) throw new RemoteGatewayError('invalid_session_limit')
     if (input.includeArchived !== undefined && typeof input.includeArchived !== 'boolean') throw new RemoteGatewayError('invalid_session_query')
+    if (input.known !== undefined && (typeof input.known !== 'string' || !/^[a-f0-9]{64}$/.test(input.known) ||
+        cursor !== 0 || input.snapshot !== undefined)) throw new RemoteGatewayError('invalid_session_query')
     const filter = input.includeArchived === true
     const baseKey = `${peerCertSHA256}:${filter}`
     const now = Date.now()
@@ -340,6 +342,11 @@ export class RemoteGateway {
     }
 
     if (cursor > cached.sessions.length) throw new RemoteGatewayError('invalid_session_cursor')
+    // The phone's copy is the current catalog: confirm it instead of resending
+    // every page. The snapshot is the same content hash a full walk returns.
+    if (input.known !== undefined && input.known === cached.snapshot) {
+      return { sessions: [], cursor: cached.sessions.length, total: cached.sessions.length, hasMore: false, snapshot: cached.snapshot, unchanged: true }
+    }
     const end = Math.min(cached.sessions.length, cursor + limit)
     return {
       sessions: cached.sessions.slice(cursor, end),

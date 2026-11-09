@@ -171,6 +171,31 @@ describe('RelayClient (device -> relay -> host reverse tunnel, loopback)', () =>
     }
   })
 
+  it('refresh replaces idle legs, and with includeActive also legs carrying phone lanes', async () => {
+    const legs: PassThrough[] = []
+    const transport = new ReverseTunnelTransport({ readyEvent: 'relaySession', poolSize: 2, connect: () => {
+      const leg = new PassThrough(); legs.push(leg); return leg
+    } })
+    await transport.start(() => {})
+    try {
+      for (const leg of [...legs]) leg.emit('connect')
+      legs[0].emit('relaySession')
+      // One active (legs[0]), two waiting (legs[1], legs[2]).
+      expect(transport.diagnostics()).toMatchObject({ active: 1, waiting: 1, opening: 1 })
+      transport.refresh()
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(legs[0].destroyed).toBe(false)
+      expect(legs[1].destroyed).toBe(true)
+      expect(legs[2].destroyed).toBe(true)
+      expect(transport.diagnostics()).toMatchObject({ active: 1, opening: 2 })
+      transport.refresh({ includeActive: true })
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(legs[0].destroyed).toBe(true)
+      expect(transport.diagnostics()).toMatchObject({ active: 0, waiting: 0, opening: 2 })
+      expect(legs.filter((leg) => !leg.destroyed)).toHaveLength(2)
+    } finally { await transport.close() }
+  })
+
   it('bridges relay-delivered device sessions into the inner-mTLS host end-to-end', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'scry-relay-')); dirs.push(dir)
     const identity = await ensureHostIdentity(join(dir, 'identity'))

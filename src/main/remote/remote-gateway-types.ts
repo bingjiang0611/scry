@@ -91,6 +91,10 @@ export interface RemoteSessionPageQuery {
   cursor?: number
   limit?: number
   snapshot?: string
+  // First page only: the snapshot the phone already holds. When the current
+  // catalog hashes to the same value the reply carries no rows and
+  // `unchanged: true`, so an unchanged catalog costs one round trip.
+  known?: string
 }
 
 export interface RemoteSessionPage {
@@ -99,6 +103,7 @@ export interface RemoteSessionPage {
   total: number
   hasMore: boolean
   snapshot: string
+  unchanged?: true
 }
 
 // One turn of a session's REAL conversation content, replayed for the device.
@@ -159,14 +164,21 @@ export interface RemoteHistoryPageQuery extends RemoteHistoryQuery {
   cursor?: number
   limit?: number
   snapshot?: string
+  // 'deflate': page over the raw-DEFLATE form of the same snapshot bytes.
+  // Transcripts compress several-fold; `snapshot` stays the hash of the raw
+  // bytes, so the phone verifies exactly what it would have received raw.
+  encoding?: 'deflate'
 }
 
 export interface RemoteHistoryPage {
   dataBase64: string
   cursor: number
+  // Length of the paged bytes (compressed when `encoding` is set).
   totalBytes: number
   hasMore: boolean
   snapshot: string
+  encoding?: 'deflate'
+  rawBytes?: number
 }
 
 export interface RemoteHistoryTurnsPageQuery extends RemoteHistoryQuery {
