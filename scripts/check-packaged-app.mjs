@@ -85,7 +85,27 @@ if (!entries.includes('/out/preload/index.cjs')) {
 for (const daemonEntry of ['/out/main/daemon.js', '/out/main/daemon-supervisor.js']) {
   if (!entries.includes(daemonEntry)) throw new Error(`packaged app 缺少 daemon 入口：${daemonEntry}`)
 }
-const supervisorSource = extractFile(asarPath, 'out/main/daemon-supervisor.js').toString('utf8')
+// The daemon entry is not necessarily one file: rollup moves shared modules into
+// /out/main/chunks and leaves the entry as a re-export. Follow this entry's own relative
+// imports so the supervisor assertion still reads the code that will actually run.
+function entryBundle(entryFile) {
+  const seen = new Set()
+  const pending = [entryFile]
+  const parts = []
+  while (pending.length > 0) {
+    const file = pending.pop()
+    if (seen.has(file)) continue
+    seen.add(file)
+    const source = extractFile(asarPath, file).toString('utf8')
+    parts.push(source)
+    for (const match of source.matchAll(/(?:from|import)\s*["'](\.\/[^"']+)["']/g)) {
+      const target = posix.normalize(posix.join(posix.dirname(file), match[1]))
+      if (target.startsWith('out/main/') && entrySet.has(`/${target}`)) pending.push(target)
+    }
+  }
+  return parts.join('\n')
+}
+const supervisorSource = entryBundle('out/main/daemon-supervisor.js')
 if (!packagedMainSources.some((source) => source.includes('SCRY_DAEMON_USER_DATA_DIR'))) throw new Error('packaged daemon 缺少显式 userData 接线')
 if (!supervisorSource.includes('ELECTRON_RUN_AS_NODE')) throw new Error('packaged daemon supervisor 未使用 Electron Node 模式')
 for (const key of ['SCRY_DAEMON_APP_PATH', 'SCRY_DAEMON_RESOURCES_PATH', 'SCRY_DAEMON_APP_VERSION', 'SCRY_DAEMON_PACKAGED']) {
