@@ -85,6 +85,44 @@ G1 把 20 s 写成了 `ContextAdmission` 构造的**默认值**，于是所有�
 
 控制实验：默认值改回 20 s → 前两条失败；`admitRun` 去掉上限 → 第三条失败；恢复后全部通过。
 
-20 s 的依据：**暂定值**。现有依据只有 fixture（300 次启动 p50 约 263 ms、最长约 3.3 s）与 commit hook 自身 10 s 上限（`COMMIT_HOOK_TIMEOUT_MS`）；`waitForCompletedRuns` 等的收尾还包括轮次结束 diff，真实大仓库的分布尚未取证（需要读维护者本机 `userData/performance`，只读、先快照）。
+## H1.1 20 s 的依据（本机日常记录）
 
-门禁（本次，Linux 容器，root 用户）：`npx tsc -p tsconfig.node.json --noEmit` 通过；`npx vitest run src/main src/daemon src/host-runtime` 3097 passed / 2 failed / 3 skipped。两条失败（`db-outbox`「fails closed when the outbox directory cannot be read」、`desktop-directory-picker`「rejects unreadable directories before a grant」）在不含本次改动的基线上同样失败：容器以 root 运行，chmod 不可读对 root 不生效，属环境原因。第一次全量运行中 `daemon-run-lazy.test.ts` 出现过一次文件级加载失败（报错文本未保留），单独运行与第二次全量运行均通过，与本次改动无关但如实记录。
+方法：只读。先把 `<userData>/performance` 整目录 `cp -p` 到 `/tmp/perf-snap`（123 个文件、34 MB），再离线解压解析；不上传、不打印提示词/路径/正文，只取操作名、阶段名与毫秒数。数据是本机真实 App（packaged）的日常记录，10 个 session，2026-10-19 → 2026-11-09，build 0.2.206…0.2.239。
+
+`waitForCompletedRuns` 等的是「已对 UI 报 done 的 run 收尾」，最接近的测量是 `agent.terminal_finalize`（`provider_terminal → database_projected`，含轮次结束 diff 与 archive/recorder 提交）。单位 ms：
+
+| 指标 | n | P50 | P95 | P99 | 最大 |
+|---|---|---|---|---|---|
+| 轮次收尾合计 `agent.terminal_finalize` | 131 | 733.2 | 2911.0 | 4326.2 | 5149.9 |
+| 同一指标，仅最新 build 0.2.239 | 37 | 1096.1 | 1963.9 | 2494.8 | 2556.9 |
+| 其中轮次结束 diff（`diff_complete` 段） | 131 | 349.5 | 2790.5 | 3582.1 | 4569.3 |
+| 其中 recorder/archive 提交（`archive_committed` 段） | 131 | 20.3 | 739.8 | 1367.4 | 1397.3 |
+| `ipc.agent:gitDiff`（diff 读取 IPC） | 127 | 303.3 | 844.3 | 1087.1 | 3429 |
+
+同一收尾里的其它段（只有较新的 39 条样本有打点）：`catalog_settled` P50 27.7 / P95 32.8，`renderer_terminal` P50 68.5 / P95 116.6，`terminal_progress_settled` P50 20.0 / P95 52.3，`turn_diff_joined` P50 370.0 / P95 583.7。
+
+结论：观测到的最长收尾是 5.15 s，P99 是 4.33 s；20 s 是观测最大值的约 **3.9 倍**、P99 的约 **4.6 倍**。轮次收尾的大头确实是轮次结束 diff（最大 4.57 s），其次是 archive/recorder 提交（最大 1.40 s）。**P99 与最大值都远离 20 s，不需要停下或调整上限。**
+
+限制：样本全部来自本机这几个仓库，不代表超大 monorepo 或网络文件系统；`agent.terminal_finalize` 只有 `completed` 记录（131/131），失败或中断轮次的收尾尾巴没有被这组数据覆盖；总量混了多个 build，因此另列了最新一版。`control.settled` 与 `database_projected` 不是同一个对象，这里是代理指标，不宣称完全等价。
+
+门禁（维护者侧，Linux 容器，root 用户）：`npx tsc -p tsconfig.node.json --noEmit` 通过；`npx vitest run src/main src/daemon src/host-runtime` 3097 passed / 2 failed / 3 skipped。两条失败（`db-outbox`「fails closed when the outbox directory cannot be read」、`desktop-directory-picker`「rejects unreadable directories before a grant」）在不含本次改动的基线上同样失败：容器以 root 运行，chmod 不可读对 root 不生效，属环境原因。第一次全量运行中 `daemon-run-lazy.test.ts` 出现过一次文件级加载失败（报错文本未保留），单独运行与第二次全量运行均通过，与本次改动无关但如实记录。
+
+复核（本轮，macOS 15 / arm64，非 root，cherry-pick `cb14dbd` + `a2fe168` 之后）：
+
+| 检查 | 结果 |
+|---|---|
+| `npx vitest run src/main/context-admission.test.ts src/main/conversation-store.test.ts src/main/bootstrap/run-admission-deadline.test.ts src/main/bootstrap/run-admission-parallel.test.ts` | 4 文件 / 52 通过，退出码 0 |
+| `npm run typecheck` | node + web 两套均通过，退出码 0 |
+| `npx vitest run src/main src/daemon src/host-runtime` | 345 通过 / 3 skipped（P0/P1/BILLING 探针），3099 通过、退出码 0；`db-outbox`「fails closed when the outbox directory cannot be read」与 `desktop-directory-picker`「rejects unreadable directories before a grant」在非 root 下通过 |
+| `npm run build` + `node scripts/daemon-mode-smoke.mjs` | 构建退出码 0；12 步全 `ok: true`（`streaming` 20 次到达、间隔中位数 152 ms） |
+| `npm run test:desktop-remote` | 退出码 0（会话打开、host、session parity、composer、settings、lifecycle 各组全 true） |
+| `npm run install:mac:dev` | 退出码 0：全量 `npm test` 621 文件 / 5659 通过 / 4 skipped，打包、`check:packaged-app`、`smoke:electron` 全过，已装到 `/Applications/Scry.app`（0.2.237，原 App 备份为 `/Applications/.Scry.app.backup`），未重启用户正在使用的实例 |
+
+附带修了两条**本次改动无关的既有门禁红灯**（都会挡住宿主验证与安装）：
+
+| 红灯 | 引入提交 | 原因 | 修法 |
+|---|---|---|---|
+| `scripts/session-concurrency-bench.test.ts`「names scenarios that exist in the offline fixture」 | `118dbf6e` | 断言在 `smoke.ts` 里找场景 prompt 字面量，而 `'performance long stream'` 随 paced/long stream 抽取搬到了 `smoke-paced-stream.ts` | 把该模块并入被扫描的 fixture 源，断言强度不变（仍要求每个场景 prompt 真实存在） |
+| `check-packaged-app`「packaged daemon supervisor 未使用 Electron Node 模式」 | `6fa005eb` | 入口被 rollup 拆成 `chunks/supervisor-*.js` 再 re-export，守卫只读了 `out/main/daemon-supervisor.js` 一个文件 | 守卫顺着入口自己的相对 import 收集同一打包目录内的 chunk 再断言；控制实验：改回只读入口后立刻再次失败 |
+
+两条都用“回到出问题的输入 → 失败、修复后 → 通过”验证，未删断言、未放宽范围。
