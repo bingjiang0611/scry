@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { AgentInputAttachment, AgentQuestionResponse } from '@shared/runtime'
 import { resolveTurnDiffReview, sessionNetDiffReview } from '../turn-diff'
 import type { DesktopRemoteIntent } from '@shared/desktop-remote'
@@ -181,11 +181,15 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
     setPollInterval(POLL_MS)
     try { await api.answer(connectionId, runId, response); setStatus('已发送回答。') } catch (reason) { setError(errorText(reason)); throw reason }
   }
+  // 取页请求自身的递增令牌：切换会话/Provider 会让 generation 失效，但「谁在途」只由
+  // 这个令牌决定，所以旧请求收尾时不会把新上下文的加载状态卡住。
+  const olderRequest = useRef(0)
   const loadOlderHistory = async (): Promise<void> => {
     if (!connected || !historyEvidence?.hasOlder || historyEvidence.before === undefined || !sessionId) return
     // 同一游标只允许一个在途请求。滚动会连续触发自动续读，重复请求不会更早拿到结果。
     if (historyOlderLoading) return
     setHistoryOlderLoading(true)
+    const request = ++olderRequest.current
     const sequence = ++generation.current
     try {
       const history = await api.history(connectionId, context, historyEvidence.before, historyEvidence.snapshot)
@@ -194,7 +198,7 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
       setHistoryError(null)
       setHistoryEvidence({ status: history.status, reason: history.reason, hasOlder: history.hasOlder, before: history.before, snapshot: history.snapshot })
     } catch (reason) { if (sequence === generation.current) setHistoryError(errorText(reason)) }
-    finally { if (sequence === generation.current) setHistoryOlderLoading(false) }
+    finally { if (request === olderRequest.current) setHistoryOlderLoading(false) }
   }
   const connect = useCallback(async (): Promise<void> => {
     setConnecting(true); setError(null)
