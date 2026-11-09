@@ -14,8 +14,13 @@ import RemoteTransport
 //   tunnels        per-tunnel phase timings, Cloudflare colo, relay leg wait,
 //                  multiplexing and direct routes as the transport recorded them
 // Options: -netBenchRounds=N (1...20, default 5), -netBenchRoute=auto|relay
-// (relay disables direct routes for this run), -netBenchSession=<external id>.
+// (relay disables direct routes for this run), -netBenchSession=<external id>,
+// -netBenchLabel=<scenario name, recorded in every line>.
 // Every line is `NETBENCH <json>`; the last is {"event":"done","failures":n}.
+// The same JSON lines (without the prefix) are also written to the app
+// container at Documents/netbench/latest.jsonl, truncated at start, so a
+// harness can copy them off the device without attaching a console
+// (`xcrun devicectl device copy from --domain-type appDataContainer`).
 // Durations are client wall-clock milliseconds on this device and network;
 // nothing here is written to the host or uploaded.
 extension RemoteSelfTest {
@@ -28,14 +33,26 @@ extension RemoteSelfTest {
     let rounds = max(1, min(20, Int(value("-netBenchRounds") ?? "") ?? 5))
     let route = value("-netBenchRoute") ?? "auto"
     let sessionFilter = value("-netBenchSession")
+    let label = value("-netBenchLabel") ?? "unlabeled"
+    let outputDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+      .appendingPathComponent("netbench", isDirectory: true)
+    let outputFile = outputDirectory.appendingPathComponent("latest.jsonl")
+    try? FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+    FileManager.default.createFile(atPath: outputFile.path, contents: Data())
     Task { @MainActor in
       func emit(_ event: String, _ fields: [String: Any] = [:]) {
         var object = fields
         object["event"] = event
+        object["label"] = label
         guard JSONSerialization.isValidJSONObject(object),
               let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
               let line = String(data: data, encoding: .utf8) else { print("NETBENCH {\"event\":\"\(event)\",\"error\":\"unencodable\"}"); return }
         print("NETBENCH \(line)")
+        if let handle = try? FileHandle(forWritingTo: outputFile) {
+          handle.seekToEndOfFile()
+          handle.write(Data((line + "\n").utf8))
+          try? handle.close()
+        }
       }
       func elapsed(_ start: Date) -> Double { (Date().timeIntervalSince(start) * 10_000).rounded() / 10 }
       func percentile(_ values: [Double], _ p: Double) -> Any {
