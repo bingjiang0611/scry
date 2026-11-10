@@ -4,7 +4,7 @@ Verdict: **incomplete**
 
 | Rule | Required | Status | Detail |
 |---|---|---|---|
-| R1-checks | yes | pass | all ran stages passed; known-baseline: ios-checks (logs/control-base-ios-checks.tail.txt) |
+| R1-checks | yes | pass | no failure introduced by this branch; known-baseline: ios-checks (logs/control-base-ios-checks.tail.txt) (fails on the base too, not a pass) |
 | R2-netbench-clean:wifi-auto | yes | pass | failures=0 |
 | R2-netbench-clean:wifi-relay | yes | pass | failures=0 |
 | R3-transport:wifi-auto | yes | pass | multiplexed, all capabilities |
@@ -15,7 +15,7 @@ Verdict: **incomplete**
 | R5b-no-blocking-unproven-route:wifi-relay | yes | pass | failed direct attempts on the open path=0 |
 | R6-catalog:wifi-auto | yes | pass | confirmed 3/3; full=1232.8ms (33 sessions) refresh median=818ms of 3 |
 | R6-catalog:wifi-relay | yes | pass | confirmed 3/3; full=592.9ms (33 sessions) refresh median=634.9ms of 3 |
-| R7-offline-fast | yes | pass | samples=2 allHostOffline=true slowestMs=1855.4 sample={"error":"Mac 当前不在线（中继未看到它的连接）：可能已休眠、断网或 Scry 未运行。唤醒 Mac 后会自动重连。","event":"offline-probe","hostOffline":true,"label":"wifi-auto","ms":1855.4} |
+| R7-offline-fast | yes | pass | samples=2 timed=2 allHostOffline=true slowestMs=1855.4 sample={"error":"Mac 当前不在线（中继未看到它的连接）：可能已休眠、断网或 Scry 未运行。唤醒 Mac 后会自动重连。","event":"offline-probe","hostOffline":true,"label":"wifi-auto","ms":1855.4} |
 | I1-direct-vs-relay | no | info | warm median relay=1095ms direct=923.3ms; cold median relay=1716.6ms auto=1958.4ms |
 | I3-relay-path:mac | no | info | colos=PIT,EWR,ORD generations=heartbeat-aware median={"dns":1.9,"tcp":5.7,"tls":536.2,"upgrade":941.7,"upgradeExcludingWait":941.7,"close":941.8,"total":941.9} |
 

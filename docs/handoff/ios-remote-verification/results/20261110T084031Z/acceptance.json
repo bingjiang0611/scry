@@ -5,7 +5,7 @@
       "id": "R1-checks",
       "required": true,
       "status": "pass",
-      "detail": "all ran stages passed; known-baseline: ios-checks (logs/control-base-ios-checks.tail.txt)"
+      "detail": "no failure introduced by this branch; known-baseline: ios-checks (logs/control-base-ios-checks.tail.txt) (fails on the base too, not a pass)"
     },
     {
       "id": "R2-netbench-clean:wifi-auto",
@@ -71,7 +71,7 @@
       "id": "R7-offline-fast",
       "required": true,
       "status": "pass",
-      "detail": "samples=2 allHostOffline=true slowestMs=1855.4 sample={\"error\":\"Mac 当前不在线（中继未看到它的连接）：可能已休眠、断网或 Scry 未运行。唤醒 Mac 后会自动重连。\",\"event\":\"offline-probe\",\"hostOffline\":true,\"label\":\"wifi-auto\",\"ms\":1855.4}"
+      "detail": "samples=2 timed=2 allHostOffline=true slowestMs=1855.4 sample={\"error\":\"Mac 当前不在线（中继未看到它的连接）：可能已休眠、断网或 Scry 未运行。唤醒 Mac 后会自动重连。\",\"event\":\"offline-probe\",\"hostOffline\":true,\"label\":\"wifi-auto\",\"ms\":1855.4}"
     },
     {
       "id": "I1-direct-vs-relay",
