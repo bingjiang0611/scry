@@ -50,12 +50,14 @@ final class PrewarmSettleTests: XCTestCase {
 
   func testCancellingTheCallerCancelsTheLanes() async throws {
     let started = ContinuousClock.now
-    let caller = Task {
-      try await RelaySession.settle([
-        { try await Task.sleep(nanoseconds: 5_000_000_000) },
-        { try await Task.sleep(nanoseconds: 5_000_000_000) }
-      ], decisive: Self.decisive)
-    }
+    // Built outside the Task: Swift 6.3's region checker cannot analyze a
+    // closure array literal written inside the Task body.
+    let jobs: [@Sendable () async throws -> Void] = [
+      { try await Task.sleep(nanoseconds: 5_000_000_000) },
+      { try await Task.sleep(nanoseconds: 5_000_000_000) }
+    ]
+    let decisive = Self.decisive
+    let caller = Task { try await RelaySession.settle(jobs, decisive: decisive) }
     try await Task.sleep(nanoseconds: 50_000_000)
     caller.cancel()
     do {
