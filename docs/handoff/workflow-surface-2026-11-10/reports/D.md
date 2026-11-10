@@ -46,6 +46,8 @@ relaunch 已完成 ['scan','edit','verify'] 6
 | `evidence/screens/workflow-archive-surface.png` | 点聊天卡片后打开右侧 Workflow，三个阶段、6 个 agent、终态与归档一致 |
 | `evidence/screens/workflow-archive-reloaded.png` | 渲染进程 reload 后重新打开，阶段数/agent 数/终态与 reload 前一致 |
 | `evidence/screens/workflow-archive-relaunch.png` | 完全退出 App、用同一 userData 重新启动、不写任何测试数据，仍打开同一阶段/agent/终态 |
+| `evidence/screens/workflow-archive-layout-{pane-min,narrow,wide}.png` | 面板拖到最小、窗口 900px、窗口 1600px：三档都重跑同一套 `verify()`，横向溢出 0 |
+| `evidence/screens/workflow-archive-plain-session.png` | 同一归档但删掉 Workflow 活动行的会话：`状态未知`、0 阶段、0 agent，切回原会话后重新验证 |
 
 ## 负对照
 

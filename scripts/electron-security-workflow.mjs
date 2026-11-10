@@ -15,9 +15,29 @@ import { join } from 'node:path'
 // that appears proves the App read it back from disk after a real quit and restart.
 export const workflowArchiveReuse = process.argv[5] === '--reuse'
 
+/** Preview text of the second replayed session: same archive, no workflow rows. */
+export const PLAIN_SESSION_PREVIEW = 'Plain replay'
+
 /** Seed the archived turn and its Provider transcript for the first launch of the replay. */
 export function prepareWorkflowArchive({ userDataDir, home, source, nativePath }) {
   seedArchivedTurn({ userDataDir, source, preview: 'Archived workflow replay', rewrite: !workflowArchiveReuse })
+  // A second session without workflow rows: switching to it must not keep showing the first
+  // session's run, and switching back must restore it.
+  seedArchivedTurn({
+    userDataDir,
+    source: {
+      ...source,
+      sessionId: 'plain-replay',
+      externalSessionId: 'plain-replay',
+      turns: [{
+        ...source.turns[0],
+        runId: 'plain-replay',
+        items: source.turns[0].items.filter((item) => item.stage !== 'workflow_activity')
+      }]
+    },
+    preview: PLAIN_SESSION_PREVIEW,
+    rewrite: !workflowArchiveReuse
+  })
   // On a relaunch the transcript must already be on disk from the previous process.
   if (workflowArchiveReuse) return
   const rows = readFileSync(nativePath, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line))
@@ -72,9 +92,9 @@ export async function exerciseWorkflowArchive(context) {
     const shot = await cdp.send('Page.captureScreenshot', { format: 'png' })
     writeFileSync(join(screenshotDir, `${name}.png`), Buffer.from(shot.data, 'base64'))
   }
-  const openSession = async () => {
-    await wait(`Array.from(document.querySelectorAll('.sb-sess')).some(button => button.textContent.includes('Archived workflow replay'))`)
-    await click(`Array.from(document.querySelectorAll('.sb-sess')).find(button => button.textContent.includes('Archived workflow replay'))`)
+  const openSession = async (preview = 'Archived workflow replay') => {
+    await wait(`Array.from(document.querySelectorAll('.sb-sess')).some(button => button.textContent.includes(${JSON.stringify(preview)}))`)
+    await click(`Array.from(document.querySelectorAll('.sb-sess')).find(button => button.textContent.includes(${JSON.stringify(preview)}))`)
     // Completed turns fold consecutive tool calls into one disclosure; open it to reach the card.
     await wait(`document.querySelector('#main-pane .tool-group-row, #main-pane .tool-card') != null`)
     if (await evaluate(`document.querySelector('#main-pane .tool-card') == null`)) {
@@ -91,9 +111,17 @@ export async function exerciseWorkflowArchive(context) {
     }
     if (await evaluate(`document.querySelector('[data-surface-tab="workflow"] [role="tab"]') != null`)) {
       await click(`document.querySelector('[data-surface-tab="workflow"] [role="tab"]')`)
-    } else {
-      await wait(`document.querySelector('[data-surface-chooser]') != null`)
+    } else if (await evaluate(`document.querySelector('[data-surface-chooser]') != null`)) {
       await click(`Array.from(document.querySelectorAll('[data-surface-chooser] .surface-card')).find(card => card.textContent.includes('Workflow'))`)
+    } else {
+      // A session that already shows another surface adds one from the tab-strip menu.
+      // The remote panel keeps its own hidden tab strip, so scope to the visible panel.
+      // An inert copy of the panel exists for the remote view; only the painted strip is real.
+      const painted = `Array.from(document.querySelectorAll('[aria-label="添加 Surface"]')).find(node => node.getBoundingClientRect().width > 0)`
+      await click(painted)
+      await wait(`Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).some(item => item.getBoundingClientRect().width > 0)`)
+      await click(`Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]'))
+        .find(item => item.getBoundingClientRect().width > 0 && item.textContent.includes('Workflow'))`)
     }
     await wait(`document.querySelector('#right-surface-pane [data-session-surface-current="true"] .workflow-surface') != null`)
   }
@@ -207,6 +235,81 @@ export async function exerciseWorkflowArchive(context) {
   verify(reloaded, { label: 'after reloading the session from the archive' })
   await capture('workflow-archive-reloaded')
 
+  // Layout: the pane is user-resizable and the window is user-sizable. Drive the real splitter
+  // to its minimum, then emulate the window widths a user gets by resizing the window, and read
+  // the layout the user would see at each size.
+  const splitter = `document.querySelector('.panel-resizer')`
+  const layout = []
+  if (await evaluate(`${splitter} != null`)) {
+    await waitClickable(splitter)
+    await click(splitter)
+    for (let step = 0; step < 30; step += 1) {
+      await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37 })
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37 })
+    }
+    const state = await renderedState()
+    verify(state, { label: 'pane at its minimum width' })
+    layout.push({ name: 'pane-min', width: await evaluate(`document.querySelector('#right-surface-pane').clientWidth`), phases: state.phases.length, overflow: state.overflow.pane })
+    await capture('workflow-archive-layout-pane-min')
+    for (let step = 0; step < 30; step += 1) {
+      await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39 })
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39 })
+    }
+  }
+  for (const [name, width, height] of [['narrow', 900, 700], ['wide', 1600, 1000]]) {
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
+    await evaluate(`(async () => { await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))) })()`)
+    const state = await renderedState()
+    verify(state, { label: `window ${name} (${width}px)` })
+    layout.push({ name, width: await evaluate('window.innerWidth'), phases: state.phases.length, overflow: state.overflow })
+    await capture(`workflow-archive-layout-${name}`)
+  }
+  await cdp.send('Emulation.clearDeviceMetricsOverride')
+  await wait(`document.querySelectorAll('#right-surface-pane .workflow-phase').length > 0`)
+
+  // Adjacent paths: another tab and another session must not inherit this run.
+  const agentsTab = `document.querySelector('[data-surface-tab="agents"] [role="tab"]')`
+  if (await evaluate(`${agentsTab} != null`)) {
+    await click(agentsTab)
+    await wait(`document.querySelector('[data-surface-tab="agents"] [role="tab"]').getAttribute('aria-selected') === 'true'`)
+    const agentsText = await evaluate(`document.querySelector('#right-surface-pane')?.innerText ?? ''`)
+    for (const agent of run.phases.flatMap((phase) => phase.agents)) {
+      const label = agent.row.label
+      if (!label || label.length < 5) continue
+      assert.ok(!agentsText.includes(label), `the Agents tab must not list the workflow agent ${label}`)
+    }
+    await click(`document.querySelector('[data-surface-tab="workflow"] [role="tab"]')`)
+    await wait(`document.querySelector('[data-surface-tab="workflow"] [role="tab"]').getAttribute('aria-selected') === 'true'`)
+    verify(await renderedState(), { label: 'after returning from the Agents tab' })
+  }
+
+  await openSession(PLAIN_SESSION_PREVIEW)
+  try {
+    await openWorkflowSurface()
+  } catch (error) {
+    await capture('workflow-archive-plain-failure')
+    console.error('Plain session surface:', JSON.stringify(await evaluate(`({
+      pane: document.querySelector('#right-surface-pane')?.innerText.slice(0, 800) ?? null,
+      tabs: [...document.querySelectorAll('[data-surface-tab]')].map(node => node.dataset.surfaceTab + ':' + node.getAttribute('aria-selected')),
+      chooser: document.querySelectorAll('[data-surface-chooser]').length,
+      hidden: document.querySelector('.app.right-panel-hidden') != null,
+      active: document.querySelector('.sb-sess.active, .sb-sess[aria-current]')?.textContent ?? null
+    })`)))
+    throw error
+  }
+  const plainSurface = await renderedState()
+  const plainAgents = plainSurface?.phases.reduce((total, phase) => total + phase.agents.length, 0) ?? 0
+  assert.equal(plainAgents, 0, 'a session without workflow rows must not show the other run\'s agents')
+  for (const phase of run.phases) {
+    const leaked = await evaluate(`Array.from(document.querySelectorAll('#right-surface-pane .workflow-phase-head strong')).some(node => node.textContent === ${JSON.stringify(phase.title)})`)
+    assert.ok(!leaked, `a session without workflow rows must not show phase ${phase.title}`)
+  }
+  await capture('workflow-archive-plain-session')
+  await openSession()
+  await openWorkflowSurface()
+  await wait(`document.querySelectorAll('#right-surface-pane .workflow-phase').length > 0`)
+  verify(await renderedState(), { label: 'after switching back from a session without workflow rows' })
+
   return {
     relaunch,
     archivedWorkflow: {
@@ -222,6 +325,8 @@ export async function exerciseWorkflowArchive(context) {
       scriptLines: first.scriptLines,
       notices: first.notices,
       reloaded: { status: reloaded.status, phases: reloaded.phases.length, logEntries: reloaded.log },
+      layout: layout.map((row) => [row.name, row.width, row.phases, row.overflow]),
+      plainSession: { status: plainSurface?.status ?? null, phases: plainSurface?.phases.length ?? 0, agents: plainAgents },
       noProviderRuns: true,
       isolatedUserData: true
     }

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
@@ -10,12 +10,6 @@ import { join } from 'node:path'
  * a replay that reads a bespoke location proves nothing about the real one.
  */
 export function seedArchivedTurn({ userDataDir, source, preview, rewrite = true }) {
-  // On a relaunch the archive must already be on disk from the previous process; skipping the
-  // write is what makes "the session came back" mean something.
-  if (!rewrite) {
-    writeFileSync(join(userDataDir, 'recent-folders.json'), JSON.stringify([source.cwd]))
-    return
-  }
   if (source.turns.length !== 1) throw new Error('replay exactly one archived turn')
   const hash = (value) => createHash('sha256').update(value).digest('hex')
   const turn = source.turns[0]
@@ -28,7 +22,11 @@ export function seedArchivedTurn({ userDataDir, source, preview, rewrite = true 
     mkdirSync(archiveDir, { recursive: true })
     writeFileSync(join(archiveDir, `turn-${hash(identity)}.json`), JSON.stringify(source))
   }
-  writeFileSync(join(userDataDir, 'app-sessions.json'), JSON.stringify([{
+  // Keep other replayed sessions: the smoke switches between them.
+  const catalogPath = join(userDataDir, 'app-sessions.json')
+  const existing = existsSync(catalogPath) ? JSON.parse(readFileSync(catalogPath, 'utf8')) : []
+  const rows = existing.filter((row) => row.sessionId !== source.sessionId)
+  rows.push({
     sessionId: source.sessionId,
     externalSessionId: source.externalSessionId,
     runId: turn.runId,
@@ -37,7 +35,8 @@ export function seedArchivedTurn({ userDataDir, source, preview, rewrite = true 
     cwd: source.cwd,
     preview,
     ts: Date.now()
-  }]))
+  })
+  writeFileSync(catalogPath, JSON.stringify(rows))
   writeFileSync(join(userDataDir, 'recent-folders.json'), JSON.stringify([source.cwd]))
 }
 
