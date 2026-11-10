@@ -19,7 +19,7 @@
 
 ### 第三轮步骤（新时间戳；前两轮结果目录保持原样）
 
-开始前只问用户一次：**是否授权重新部署线上 relay**（`wrangler deploy`，外部写操作，和第一轮相同的 Worker）。不授权时，只有手机侧修复生效，照常执行并在 REPORT 里注明 relay 未部署；R7 仍以实测为准，不改门限。
+**用户已于 2026-11-10 在会话中授权重新部署线上 relay**（`wrangler deploy`，与第一轮相同的 Worker），本轮不用再问。部署失败（例如 Cloudflare 未登录）时，只有手机侧修复生效，照常执行并在 REPORT 里注明 relay 未部署；R7 仍以实测为准，不改门限。
 
 ```bash
 git pull --ff-only
@@ -29,7 +29,7 @@ git pull --ff-only
 export SCRY_IOS_BUNDLE_ID=com.scry.remote.local SCRY_VERIFY_STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 ```
 
-授权部署时：
+部署 relay：
 
 ```bash
 (cd experiments/remote-g0/cf-relay && npx --prefix .. wrangler deploy)
