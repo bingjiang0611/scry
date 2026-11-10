@@ -13,6 +13,7 @@
 // (with the reason), never "pass": absent evidence is not success.
 import { readFileSync, readdirSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 export const REQUIRED_CAPABILITIES = ['ping', 'mux', 'watchStream', 'sessionsKnown', 'historyDeflate']
 
@@ -178,7 +179,10 @@ export function run(dir) {
   return acceptance
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// pathToFileURL: a checkout path with spaces is percent-encoded in
+// import.meta.url, so a raw `file://${argv[1]}` comparison never matches and
+// the whole summary silently became a no-op.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const dir = process.argv[2]
   if (!dir) { console.error('usage: summarize.mjs <results-dir>'); process.exit(2) }
   const acceptance = run(dir)
