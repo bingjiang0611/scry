@@ -4,6 +4,7 @@ import { DaemonClient, DaemonClientError, daemonClientPaths } from '../daemon-cl
 import { daemonLaunchTarget, spawnDaemonSupervisor } from './daemon-launch'
 import { unsafeCredentialStorageReason } from './remote-connections'
 import { ensureDaemon, type DaemonLaunch, type DaemonProbe } from '../daemon-supervisor'
+import { readDaemonLaunchFailure } from '../daemon-launch-failure'
 import { DaemonRunRuntime, type DaemonRunRuntimeDeps } from '../daemon-run-runtime'
 import type { RunTraceRouter } from '../run-trace-router'
 import { startDaemonRunEvents } from '../daemon-run-events'
@@ -58,6 +59,7 @@ export interface DaemonRunModeDeps {
   /** Client-level probe: a thrown DaemonClientError is a refusal, `undefined` is absence. */
   probe?: () => Promise<{ version: string } | undefined>
   launch?: DaemonLaunch
+  launchFailure?: () => Promise<string | undefined>
   waitMs?: number
   onWarn?: (message: string, detail?: unknown) => void
   // E1b: this window's badge mirrors the daemon's unread set and decides what was viewed.
@@ -115,7 +117,7 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   }
 
   const launch: DaemonLaunch = deps.launch ?? (async () => ({ status: 'failed' as const, reason: 'daemon_launch_unavailable' }))
-  const supervised = await ensureDaemon({ probe, launch, appVersion: deps.appVersion })
+  const supervised = await ensureDaemon({ probe, launch, appVersion: deps.appVersion, launchFailure: deps.launchFailure })
   if (supervised.status === 'version-mismatch') {
     return {
       status: 'version-mismatch', running: supervised.running, expected: supervised.expected, action: supervised.action,
@@ -149,7 +151,7 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
       // The channels to the daemon that exited are dead sockets; keeping them would
       // fail every retried read on a lane that can never answer.
       client.close()
-      const again = await ensureDaemon({ probe, launch, appVersion: deps.appVersion })
+      const again = await ensureDaemon({ probe, launch, appVersion: deps.appVersion, launchFailure: deps.launchFailure })
       if (again.status === 'unavailable' || again.status === 'version-mismatch') {
         throw new DaemonClientError('daemon_not_running')
       }
@@ -214,6 +216,7 @@ export function appDaemonModeDeps(input: {
   const appVersion = app.getVersion()
   const appPath = app.getAppPath()
   const isPackaged = app.isPackaged
+  let launchedAt = Number.POSITIVE_INFINITY
   return {
     userDataDir,
     daemonStateDirectory,
@@ -252,7 +255,9 @@ export function appDaemonModeDeps(input: {
     onWarn: (message, detail) => {
       console.error(`[scry] ${message}`, detail instanceof Error ? `${detail.name}: ${detail.message}` : detail ?? '')
     },
+    launchFailure: () => readDaemonLaunchFailure(daemonStateDirectory, launchedAt),
     launch: async () => {
+      launchedAt = Date.now()
       const started = spawnDaemonSupervisor({
         target: daemonLaunchTarget({ isPackaged, appPath, execPath: process.execPath }),
         stateDirectory: daemonStateDirectory,

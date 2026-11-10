@@ -11,6 +11,12 @@ export interface DaemonSupervisorOptions {
   probe: DaemonProbe
   launch: DaemonLaunch
   appVersion: string
+  /**
+   * The named reason this launch already gave up with, if any (daemon-launch-failure.ts).
+   * A refusal such as `daemon_userdata_owned` is final; waiting out the timeout would
+   * only replace its name with `daemon_ready_timeout`.
+   */
+  launchFailure?: () => Promise<string | undefined>
   readyTimeoutMs?: number
   pollMs?: number
   sleep?: (ms: number) => Promise<void>
@@ -50,6 +56,8 @@ export async function ensureDaemon(options: DaemonSupervisorOptions): Promise<Da
       const adopted = adopt(probed, options.appVersion)
       return adopted.status === 'adopted' ? { status: 'started', version: adopted.version } : adopted
     }
+    const refused = await options.launchFailure?.()
+    if (refused) return { status: 'unavailable', reason: refused }
     await sleep(pollMs)
   }
   return { status: 'unavailable', reason: 'daemon_ready_timeout' }
