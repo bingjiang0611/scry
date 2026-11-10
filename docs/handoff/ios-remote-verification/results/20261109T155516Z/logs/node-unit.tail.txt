@@ -1,5 +1,5 @@
 
- RUN  v3.2.7 /Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746>
+ RUN  v3.2.7 /Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>
 
  ✓ src/main/bootstrap/run-diff-overlap.test.ts (4 tests) 3351ms
    ✓ parallel workspace diff evidence > records overlapping runs on the turn and session snapshots it actually publishes  1239ms
@@ -42,14 +42,14 @@
  ✓ src/main/remote/desktop-client-catalog.test.ts (10 tests) 439ms
 stderr | src/main/bootstrap/run-settlement.test.ts > run settlement > finalizes and reports a completion handler that throws instead of leaving the run open
 [scry] run completion handler failed: Error: completion handler failed
-    at Object.onCompleted [90m(/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746>/[39msrc/main/bootstrap/run-settlement.test.ts:127:40[90m)[39m
-    at [90m/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746>/[39msrc/main/bootstrap/run-settlement.test.ts:98:21
-    at [90m/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746>/[39msrc/main/bootstrap/run-settlement.ts:128:54
+    at Object.onCompleted [90m(/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>/[39msrc/main/bootstrap/run-settlement.test.ts:127:40[90m)[39m
+    at [90m/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>/[39msrc/main/bootstrap/run-settlement.test.ts:98:21
+    at [90m/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>/[39msrc/main/bootstrap/run-settlement.ts:128:54
 
 stderr | src/main/bootstrap/run-settlement.test.ts > run settlement > keeps a throwing Provider settle inside the handled chain
 [scry] run completion handler failed: Error: settle bookkeeping failed
-    at Object.run.deps.onProviderSettled [90m(/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746>/[39msrc/main/bootstrap/run-settlement.test.ts:151:15[90m)[39m
-    at [90m/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746>/[39msrc/main/bootstrap/run-settlement.ts:128:26
+    at Object.run.deps.onProviderSettled [90m(/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>/[39msrc/main/bootstrap/run-settlement.test.ts:151:15[90m)[39m
+    at [90m/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>/[39msrc/main/bootstrap/run-settlement.ts:128:26
 
  ✓ src/main/bootstrap/run-settlement.test.ts (8 tests) 614ms
  ✓ src/main/bootstrap/run-admission-parallel.test.ts (8 tests) 544ms

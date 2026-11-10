@@ -76,7 +76,7 @@
         "event": "history",
         "label": "wifi-auto",
         "ms": 2679.3,
-        "session": "<id:7ededcec>",
+        "session": "<id:deb87053>",
         "turns": 8
       },
       "routes": [
@@ -184,7 +184,7 @@
         "event": "history",
         "label": "wifi-relay",
         "ms": 2587.9,
-        "session": "<id:7ededcec>",
+        "session": "<id:deb87053>",
         "turns": 8
       },
       "routes": [

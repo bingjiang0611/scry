@@ -2,7 +2,7 @@
 
 执行本机验证请直接看任务书 [handoff/ios-remote-verification/TASK.md](handoff/ios-remote-verification/TASK.md)：一键脚本、自动判定与交回格式都在那里。
 
-本文写给在 macOS 宿主上工作的本机 Agent 与维护者：说明分支 `claude/ios-remote-connection-issues-o7oj6x` 改了什么、按什么顺序部署、如何用真机测量并验收。云端开发环境没有 Swift 工具链，Swift/iOS 改动**未编译、未在真机运行**；以下每一步的结果都必须在本机重新取得，不能沿用本文的预期值冒充实测。
+本文写给在 macOS 宿主上工作的本机 Agent 与维护者：说明分支 `claude/ios-remote-connection-issues-o7oj6x` 改了什么、按什么顺序部署、如何用真机测量并验收。Swift/iOS 改动已由 macOS CI 编译并通过 `swift test`，并在一台 iPhone 13 上做了三轮本机验证（最终一轮 `handoff/ios-remote-verification/results/20261110T084031Z`，L2：只代表那台机器、那条出境 relay 路径和当时的负载）。以下每一步在新的环境里仍须重新取得结果，不能沿用本文的预期值或旧轮次的数字冒充实测。
 
 ## 1. 改了什么（按层）
 
@@ -134,7 +134,7 @@ RELAY_TOKEN='<随机长串>' node experiments/remote-g0/ws-relay-server.mjs --po
 
 ## 7. 已知限制与未验证项
 
-- Swift 与 iOS 代码未编译、未上真机；Network.framework 路径、复用切换、推送、直连、保活均待本机验证。
+- 已在真机验证（L2，Mac 不在手机所在 Wi-Fi，全部走 relay）：Network.framework 路径、复用切换与 5 项能力、离线快速答复、会话列表确认未变化、打开路径上无失败直连。仍未验证：局域网直连（R5，需要同一 Wi-Fi）、蜂窝、Mac 合盖唤醒、大会话历史、Linux 宿主上的真实连接。验证中两次出现"冷开 5/5 约 31 s 失败"后自行恢复，卡在哪一段尚无证据（见 TASK.md 第三轮核验结论）。
 - 未检查 Cloudflare 免费额度（每天 10 万请求）是否是失败原因；请查看 Cloudflare 后台按日的请求数和报错时段。新的心跳会让每条 leg 每 10 s 多一条消息，但自动应答不唤醒 DO；leg 的 55 s 回收频率未改。
 - 推送只覆盖当前聚焦的运行；"动态"列表等其他长轮询仍是原方式。
 - 直连只使用 IPv4 私网和 100.64/10 地址；企业网络的客户端隔离、防火墙拒绝都会退回 relay，并对该路由冷却 60 s。

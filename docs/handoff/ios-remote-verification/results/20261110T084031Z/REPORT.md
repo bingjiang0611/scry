@@ -6,7 +6,7 @@
 - Mac：macOS 27.3 / arm64 / Xcode 26.6 (17F113) / Swift 6.3.3 / Node v24.18.0。Mac 侧代码 `git diff 7ccd437 -- src` 为空，按 TASK 未跑 `install-mac`、未重装或重启 Scry（运行中的 Scry 仍是第二轮装的构建，PID 87295 一直持有 47820）。
 - iPhone：iPhone 13（UDID `<device-udid>`），iOS 26.5.2，USB；本轮重新安装了 App（`build-ios` 后 `install-ios`），首次启动需要在手机上手动信任开发者，之后正常。
 - 网络：Mac 仍未接入 Wi-Fi（`en0` = `<public-ip>/19`），手机 `localNetwork: true`；所有隧道走 relay，出口 `PIT / EWR / ORD`。
-- Relay：**已按用户授权重新部署**（`wrangler deploy`，Worker `scry-relay`），Current Version ID `<id:27f1ce20>`，生效证据见下（`relayWaitMs` 600 → 0）。
+- Relay：**已按用户授权重新部署**（`wrangler deploy`，Worker `scry-relay`），Current Version ID `<id:b8c1540d>`，生效证据见下（`relayWaitMs` 600 → 0）。
 - 本机负载：验证期间机器多次被无关工作占满（`load average` 57–168），其中一次 `sleep` 被 SIGKILL；下面的现象里有一段与设备/USB 反复掉线、负载过高有关，均已注明。
 
 ## 判定
@@ -63,6 +63,7 @@
 1. **`wifi-relay` 阶段前两次尝试，5/5 冷开都失败**：错误都是 `I/O on closed channel`、耗时约 31.1 s（≈ 内层握手 30 s 超时），而同一次运行的 catalog（15.2 s / 33 会话）、三次 confirmed 刷新、history（945 ms）都正常，`done.failures=5`。第一次的原始输出保留在 `logs/attempt1-netbench-wifi-relay.tail.txt`；第二次（09:15Z）行为完全相同，其文件随后被成功那次覆盖，数量记在 `logs/attempt2-note.tail.txt`。
    - 期间的旁证：`wrangler tail scry-relay` 在同一窗口出现 8 次 `[relay] host leg authed mode=run`，说明 Mac 的 host leg 在反复重连；relay 对设备侧报的是 `hostLeg=FOUND waitedMs=0`，即 relay 认为 host 在线并把字节转发出去，而手机的内层握手没有回应，直到 30 s 超时。这与"host leg 陈旧、relay 仍判活"的现象一致，是 relay/host 存活判定的覆盖空白，不是本轮三处改动能引入的行为（本轮 phone 侧只改了 `settle`，relay 侧只改了宽限预算）。
    - 同一构建、同一 relay 在 08:58Z、09:17Z、09:20Z 三次手工 `--console` 运行全部 `failures=0`（`logs/diag-netbench-console.tail.txt`），随后两个正式阶段也 `failures=0`。因此我把它记为**未定位的间歇问题**，没有改代码：现有证据不足以区分"host leg 陈旧"与"设备侧握手在特定时序下不推进"，需要在 relay 侧记录 leg 的打开/关闭与转发失败。
+   - **核验者更正（见 `TASK.md`「第三轮核验结论」）**：上面"约 31 s ≈ 内层握手 30 s 超时"和"host leg 陈旧"的归因不成立，已撤回。内层握手超时在手机上报 `timedOut(lane-handshake)`，这里报的却是 `I/O on closed channel`，与外层建连（TCP + 外层 TLS + WebSocket 升级）的 10 s 看门狗一致；31.1 s 也等于 3 次 × 10 s 加 0.25 s + 0.8 s 重试间隔。这是**推断**：失败那次的分阶段计时没有留下，卡在外层哪一段、是否另有原因都未证实。结论是**未定位的间歇性失败**，不是已修复。验证脚本已改为保留失败运行的计时，下次复现即可定位。
 2. **设备与负载**：iPhone 两次从 USB 上消失（`devicectl` 报 `unavailable`，`system_profiler` 看不到 iOS 设备），一次 `devicectl` 启动被拒（`invalid code signature … profile has not been explicitly trusted`，重新在手机上信任后恢复）；同一时段 `load average` 一度到 168，一次从设备拷结果的循环卡住超过 15 分钟，直到我 `kill -9` 卡住的阶段。这些都需要人工插入 USB 或解锁，不是代码问题。
 
 ## 未验证项与原因

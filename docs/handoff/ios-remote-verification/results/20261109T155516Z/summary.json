@@ -44,7 +44,7 @@
         "event": "history",
         "label": "diag-order",
         "ms": 1601.8,
-        "session": "<id:a00589f4>",
+        "session": "<id:4eb97040>",
         "turns": 10
       },
       "routes": [
@@ -168,7 +168,7 @@
         "event": "history",
         "label": "wifi-auto",
         "ms": 1769.8,
-        "session": "<id:a00589f4>",
+        "session": "<id:4eb97040>",
         "turns": 10
       },
       "routes": [
@@ -292,7 +292,7 @@
         "event": "history",
         "label": "wifi-relay",
         "ms": 1776.5,
-        "session": "<id:a00589f4>",
+        "session": "<id:4eb97040>",
         "turns": 10
       },
       "routes": [

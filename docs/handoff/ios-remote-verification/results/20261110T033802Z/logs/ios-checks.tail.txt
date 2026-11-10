@@ -1,7 +1,7 @@
 cur within 'try' expression
 56 |                         certificate: material.bootstrapPEM, privateKey: material.privateKeyPEM)
 57 |   }
-/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746>/apps/ios/ScryRemote/AppModel.swift:316:13: warning: no 'async' operations occur within 'await' expression
+/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>/apps/ios/ScryRemote/AppModel.swift:316:13: warning: no 'async' operations occur within 'await' expression
 314 |           switch progress {
 315 |           case let .awaitingConfirmation(fingerprint):
 316 |             await self?.setPairing(.awaitingConfirmation(fingerprint: fingerprint))
@@ -9,7 +9,7 @@ cur within 'try' expression
 317 |             try await Task.sleep(nanoseconds: 2_000_000_000)
 318 |             progress = try await client.refresh(code: code, deviceLabel: label)
 
-/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746>/apps/ios/ScryRemote/AppModel.swift:324:17: warning: no 'async' operations occur within 'await' expression
+/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>/apps/ios/ScryRemote/AppModel.swift:324:17: warning: no 'async' operations occur within 'await' expression
 322 |             let connection = RemoteConnection(relayHost: code.relayHost, relayPort: code.relayPort,
 323 |               relayTLS: code.relayTLS.rawValue, hostId: code.hostId, anchorPEM: code.anchorPEM, deviceId: deviceId)
 324 |             try await self?.setPaired(deviceId: deviceId, host: code.relayHost, connection: connection, runStore: runStore)
@@ -17,7 +17,7 @@ cur within 'try' expression
 325 |             return
 326 |           case let .denied(reason):
 
-/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746>/apps/ios/ScryRemote/AppModel.swift:338:19: warning: no 'async' operations occur within 'await' expression
+/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>/apps/ios/ScryRemote/AppModel.swift:338:19: warning: no 'async' operations occur within 'await' expression
 336 |                 relayTLS: code.relayTLS.rawValue, hostId: existing.hostId,
 337 |                 anchorPEM: existing.anchorPEM, deviceId: existing.deviceId)
 338 |               try await self?.setPaired(deviceId: existing.deviceId, host: code.relayHost, connection: migrated, runStore: runStore)
@@ -25,7 +25,7 @@ cur within 'try' expression
 339 |               return
 340 |             }
 
-/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746>/apps/ios/ScryRemote/AppModel.swift:341:13: warning: no 'async' operations occur within 'await' expression
+/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>/apps/ios/ScryRemote/AppModel.swift:341:13: warning: no 'async' operations occur within 'await' expression
 339 |               return
 340 |             }
 341 |             await self?.setPairing(.failed(Self.pairingDeniedFailure(reason)))
@@ -33,7 +33,7 @@ cur within 'try' expression
 342 |             return
 343 |           case let .revoked(deviceId):
 
-/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746>/apps/ios/ScryRemote/AppModel.swift:344:13: warning: no 'async' operations occur within 'await' expression
+/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>/apps/ios/ScryRemote/AppModel.swift:344:13: warning: no 'async' operations occur within 'await' expression
 342 |             return
 343 |           case let .revoked(deviceId):
 344 |             await self?.setPairing(.failed(.init(message: ConnectionCopy.pairingRevoked,
@@ -41,7 +41,7 @@ cur within 'try' expression
 345 |                                                   technicalDetail: "deviceId=\(deviceId)")))
 346 |             return
 
-/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746>/apps/ios/ScryRemote/AppModel.swift:349:9: warning: no 'async' operations occur within 'await' expression
+/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>/apps/ios/ScryRemote/AppModel.swift:349:9: warning: no 'async' operations occur within 'await' expression
 347 |           }
 348 |         }
 349 |         await self?.setPairing(.failed(.init(message: ConnectionCopy.pairingTimeout)))
@@ -49,7 +49,7 @@ cur within 'try' expression
 350 |       } catch {
 351 |         if Task.isCancelled { return }
 
-/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746>/apps/ios/ScryRemote/AppModel.swift:352:9: warning: no 'async' operations occur within 'await' expression
+/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>/apps/ios/ScryRemote/AppModel.swift:352:9: warning: no 'async' operations occur within 'await' expression
 350 |       } catch {
 351 |         if Task.isCancelled { return }
 352 |         await self?.setPairing(.failed(.init(message: ConnectionCopy.pairingConnectionFailed,

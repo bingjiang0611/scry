@@ -5,3 +5,5 @@
 # A second attempt (09:15Z) behaved identically; its file was later overwritten by the
 # passing run, so only the counts are recorded here: 5 x cold-open ~31.1 s,
 # catalog full 15.2 s (33 sessions) then 3 confirmed refreshes, history 945 ms, failures=5.
+# Reviewer note: these counts are a hand-written recollection, not verifiable
+# against a raw file. Treat them as unconfirmed; only attempt 1 has raw output.

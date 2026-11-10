@@ -1,11 +1,11 @@
 # round-2 manual pack (npm run build && npm run build:cli && node scripts/run-electron-builder.mjs)
 verified
   • electron-builder  version=26.15.3 os=27.3.0
-  • loaded configuration  file=/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746>/electron-builder.yml
+  • loaded configuration  file=/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>/electron-builder.yml
   • @electron/rebuild already used by electron-builder, please consider to remove excess dependency from devDependencies
 
 To ensure your native dependencies are always matched electron version, simply add script `"postinstall": "electron-builder install-app-deps" to your `package.json`
-  • executing @electron/rebuild  electronVersion=42.10.1 arch=arm64 buildFromSource=false workspaceRoot=/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746> projectDir=./ appDir=./
+  • executing @electron/rebuild  electronVersion=42.10.1 arch=arm64 buildFromSource=false workspaceRoot=/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70> projectDir=./ appDir=./
   • installing native dependencies  arch=arm64
   • preparing       moduleName=better-sqlite3 arch=arm64
   • finished        moduleName=better-sqlite3 arch=arm64
@@ -14,9 +14,9 @@ To ensure your native dependencies are always matched electron version, simply a
   • completed installing native dependencies
   • packaging       platform=darwin arch=arm64 electron=42.10.1 appOutDir=dist/mac-arm64
   • using custom unpacked Electron distribution  electronDist=/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/electron-packaging-o9DDtG
-  • copying unpacked Electron  source=/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/electron-packaging-o9DDtG/Electron.app destination=/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746>/dist/mac-arm64/Electron.app
-  • searching for node modules  pm=npm searchDir=/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746>
-  • searching for node modules  pm=traversal searchDir=/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746>
+  • copying unpacked Electron  source=/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/electron-packaging-o9DDtG/Electron.app destination=/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>/dist/mac-arm64/Electron.app
+  • searching for node modules  pm=npm searchDir=/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>
+  • searching for node modules  pm=traversal searchDir=/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>
   • using manual traversal of node_modules to build dependency tree
   • missing optional dependencies  dependencies=["@anthropic-ai/claude-agent-sdk-linux-x64@0.3.251","@anthropic-ai/claude-agent-sdk-linux-arm64@0.3.251","@anthropic-ai/claude-agent-sdk-linux-x64-musl@0.3.251","@anthropic-ai/claude-agent-sdk-linux-arm64-musl@0.3.251","@anthropic-ai/claude-agent-sdk-darwin-x64@0.3.251","@anthropic-ai/claude-agent-sdk-win32-x64@0.3.251","@anthropic-ai/claude-agent-sdk-win32-arm64@0.3.251"]
   • signing         file=dist/mac-arm64/Scry.app platform=darwin type=distribution identityName=Apple Development: <signing-identity> (<team>) identityHash=<redacted> provisioningProfile=none

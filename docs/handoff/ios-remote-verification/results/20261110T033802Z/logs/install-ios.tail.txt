@@ -1,7 +1,7 @@
 App installed:
 • bundleID: com.scry.remote.local
-• installationURL: file:///private/var/containers/Bundle/Application/<id:e7f6b26c>/ScryRemote.app/
+• installationURL: file:///private/var/containers/Bundle/Application/<id:b4f11a7f>/ScryRemote.app/
 • launchServicesIdentifier: unknown
-• databaseUUID: <id:1dc2119a>
+• databaseUUID: <id:de2e8487>
 • databaseSequenceNumber: 4620
 • options: 
