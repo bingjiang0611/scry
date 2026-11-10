@@ -45,16 +45,21 @@ export async function exerciseLargeHistoryDialog({ driver, evaluate, check, seed
   }
   const countsBefore = counts()
 
-  // The parent is gone by now, so the shipped way back to this child is its orphan row: the
-  // sidebar groups it under the captured source and opening it mounts a real main surface.
-  await wait(`[...document.querySelectorAll('[data-orphan-side-chat-id]')].some(node => node.dataset.orphanSideChatId === ${json(childId)})`, 30000)
-  await driver.clickAt(`[...document.querySelectorAll('[data-orphan-side-chat-id]')].find(node => node.dataset.orphanSideChatId === ${json(childId)})`)
-  await wait(`document.querySelector('#main-pane [data-side-chat-variant="main"]') != null`, 20000)
+  // A side chat is never a sidebar row: the shipped way to it is its parent's right panel.
+  // Open the parent by its own row, then the child through the panel's history action.
+  const parentRow = `[...document.querySelectorAll('#sidebar-pane .sb-sess')].find(node => node.dataset.conversationId === ${json(seed.conversationId)})`
+  await wait(`${parentRow} != null`, 30000)
+  check(await evaluate(`[...document.querySelectorAll('#sidebar-pane [data-conversation-id]')].every(node => node.dataset.conversationId !== ${json(childId)})`),
+    'the large child was listed as a sidebar row of its own')
+  await driver.clickAt(parentRow)
+  await wait(`document.querySelector('#main-pane .chat-body') != null`, 30000)
   await driver.idle()
-  check(await evaluate(`document.querySelector('#main-pane [data-side-chat-id="${childId}"]') != null`),
-    'the large child never opened as a real side-chat surface')
+  await driver.showPanel()
+  await driver.openChildById(childId)
+  check(await evaluate(`document.querySelector('#right-surface-pane .side-chat-surface[data-side-chat-id="${childId}"][data-side-chat-variant="frame"]') != null`),
+    'the large child never opened as a tab of its parent')
   // The toggle is the shipped control; it is the only way into the dialog.
-  const toggle = `#main-pane .side-chat-surface[data-side-chat-id="${childId}"] .side-chat-surface-actions button[aria-expanded]`
+  const toggle = `#right-surface-pane .side-chat-surface[data-side-chat-id="${childId}"] .side-chat-surface-actions button[aria-expanded]`
   check(await evaluate(`document.querySelector('${toggle}') != null`), 'the side-chat header has no snapshot toggle')
   await click(toggle)
   await wait(loadedIs('0:0'), 30000)

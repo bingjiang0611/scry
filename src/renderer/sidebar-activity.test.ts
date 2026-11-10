@@ -203,28 +203,55 @@ describe('sidebar activity projection', () => {
     expect(group({ fork: { status: 'accepted' }, activeRunId: 'run-scoped' })).toEqual(['working'])
   })
 
-  it('keeps a background child run visible without flattening it into a root row', () => {
+  it('never lists a side chat as its own row; its live run lifts the parent row instead', () => {
     const parent = '主会话：重构侧边栏'
-    const withChild: ProjectMeta[] = [{
+    const child = (extra: Partial<NonNullable<ProjectMeta['conversations']>[number]> = {}): NonNullable<ProjectMeta['conversations']>[number] => ({
+      id: 'child', cwd: '/work/store', title: '侧聊：查一下这段 diff', revision: 1, turnCount: 1,
+      sideChat: {
+        source: { kind: 'conversation', conversationId: 'parent' }, parentTitleAtCapture: parent,
+        initialTarget: { providerId: 'claude', permissionMode: 'default' },
+        throughOrdinal: 2, throughRunId: 'parent-run', capturedAt: 1,
+        prefixFingerprint: 'a'.repeat(64), messageCount: 3
+      },
+      ...extra
+    })
+    const rows = (childExtra: Parameters<typeof child>[0], waiting: ReadonlySet<string> = empty,
+      parentExtra: Partial<NonNullable<ProjectMeta['conversations']>[number]> = {}) => sidebarActivity([{
       ...projects[0], sessions: [],
-      conversations: [
-        { id: 'parent', cwd: '/work/store', title: parent, revision: 1, turnCount: 3 },
-        {
-          id: 'child', cwd: '/work/store', title: '侧聊：查一下这段 diff', revision: 1, turnCount: 1, activeRunId: 'child-run',
-          sideChat: {
-            source: { kind: 'conversation', conversationId: 'parent' }, parentTitleAtCapture: parent,
-            initialTarget: { providerId: 'claude', permissionMode: 'default' },
-            throughOrdinal: 2, throughRunId: 'parent-run', capturedAt: 1,
-            prefixFingerprint: 'a'.repeat(64), messageCount: 3
-          }
-        }
-      ]
-    }]
-    const rows = sidebarActivity(withChild, new Set(['child-run']), empty, '')
-    expect(rows.map((row) => [row.kind, row.group, row.kind === 'conversation' ? row.sideChatParent : null]))
-      .toEqual([['conversation', 'working', parent]])
-    // The child keeps its own identity instead of borrowing the parent row.
-    expect(rows[0].kind === 'conversation' && rows[0].conversation.id).toBe('child')
+      conversations: [{ id: 'parent', cwd: '/work/store', title: parent, revision: 1, turnCount: 3, ...parentExtra }, child(childExtra)]
+    }], new Set(['child-run']), waiting, '')
+      .map((row) => [row.kind === 'conversation' ? row.conversation.id : row.kind, row.group])
+    // A running child is background work of its parent: one row, the parent's.
+    expect(rows({ activeRunId: 'child-run' })).toEqual([['parent', 'working']])
+    // A child waiting for an answer needs the user even when the parent itself finished.
+    expect(rows({ activeRunId: 'child-run' }, new Set(['child-run']), { lastRunOutcome: 'completed' }))
+      .toEqual([['parent', 'attention']])
+    // A finished or idle child is read in the parent's panel and adds no row at all.
+    expect(rows({ lastRunOutcome: 'completed' })).toEqual([])
+    expect(rows({ lastRunOutcome: 'failed' })).toEqual([])
+    // The parent's own waiting state is never lowered by a merely running child.
+    expect(rows({ activeRunId: 'child-run' }, new Set(['parent-live']), { activeRunId: 'parent-live' }))
+      .toEqual([['parent', 'attention']])
+  })
+
+  it('lifts a native session row for its own side chat and drops a child whose source is not listed', () => {
+    const session = projects[0].sessions[0]
+    const nativeChild = (nativeSessionId: string): NonNullable<ProjectMeta['conversations']>[number] => ({
+      id: `child-${nativeSessionId}`, cwd: projects[0].cwd, title: '侧聊', revision: 1, turnCount: 1, activeRunId: 'child-run',
+      sideChat: {
+        source: { kind: 'native-session', providerId: 'claude', cwd: projects[0].cwd, nativeSessionId },
+        parentTitleAtCapture: '原主会话', initialTarget: { providerId: 'claude', permissionMode: 'default' },
+        throughOrdinal: 1, throughRunId: 'r', capturedAt: 1, prefixFingerprint: 'a'.repeat(64), messageCount: 2
+      }
+    })
+    const idle = { ...session, runId: undefined, lastRunOutcome: undefined }
+    const own = sidebarActivity([{ ...projects[0], sessions: [idle],
+      conversations: [nativeChild(session.externalSessionId ?? session.sessionId)] }], empty, empty, '')
+    expect(own.map((row) => [row.kind, row.group])).toEqual([['session', 'working']])
+    // A source that is not in the loaded list has no row to lift, and the child is not
+    // promoted into one.
+    expect(sidebarActivity([{ ...projects[0], sessions: [idle], conversations: [nativeChild('gone-native')] }],
+      empty, empty, '')).toEqual([])
   })
 
   it('surfaces a host-reported blocked remote run as attention and keeps its terminal failures visible', () => {

@@ -57,56 +57,23 @@ describe('one-pass side-chat catalog', () => {
     expect(catalog.counts.get(conversationSourceKey(parentId))?.attention).toBe(0)
   })
 
-  it('keeps children of a vanished source in their own group keyed by that source', () => {
+  it('never surfaces a child whose source left the loaded list as a row or a group', () => {
+    const goneKey = conversationSourceKey('99999999-2222-4333-8444-555555555555')
     const catalog = indexSideChatCatalog({
       projects: [{ ...project, conversations: [
-        child('orphan', { kind: 'conversation', conversationId: '99999999-2222-4333-8444-555555555555' })
+        { id: parentId, cwd: '/repo', title: '父', revision: 1, turnCount: 8 },
+        child('gone', { kind: 'conversation', conversationId: '99999999-2222-4333-8444-555555555555' })
       ] }],
       runningRunIds: new Set(),
       waitingQuestionRunIds: new Set(),
       questionKindsByRun: new Map()
     })
-    expect(catalog.counts.size).toBe(0)
-    expect(catalog.orphans).toEqual([
-      { key: 'conversation:99999999-2222-4333-8444-555555555555', parentTitleAtCapture: '原主会话',
-        items: [expect.objectContaining({ id: 'orphan' })], total: 1 }
-    ])
-    // Never flattened into the main root list: nothing is counted for any parent row.
-    expect(sideChatCountLabel(undefined)).toBeUndefined()
-  })
-
-  it('keeps two unrelated sources with the same captured title apart', () => {
-    // A title is what a row prints, not identity: two deleted parents can be called the
-    // same thing, and merging them would show a child under another conversation's name.
-    const catalog = indexSideChatCatalog({
-      projects: [{ ...project, conversations: [
-        child('a', { kind: 'conversation', conversationId: '99999999-2222-4333-8444-555555555555' }),
-        child('b', { kind: 'conversation', conversationId: '88888888-2222-4333-8444-555555555555' }),
-        child('c', { kind: 'native-session', providerId: 'claude', cwd: '/repo', nativeSessionId: 'gone-native' })
-      ] }],
-      runningRunIds: new Set(),
-      waitingQuestionRunIds: new Set(),
-      questionKindsByRun: new Map()
-    })
-    expect(catalog.orphans.map(group => [group.key, group.items.map(item => item.id), group.total])).toEqual([
-      ['conversation:88888888-2222-4333-8444-555555555555', ['b'], 1],
-      ['conversation:99999999-2222-4333-8444-555555555555', ['a'], 1],
-      [`native:${JSON.stringify(['claude', null, '/repo', 'gone-native'])}`, ['c'], 1]
-    ])
-    // Every group still prints the captured title it really has.
-    expect(catalog.orphans.every(group => group.parentTitleAtCapture === '原主会话')).toBe(true)
-  })
-
-  it('treats a parent known from another loaded list as present', () => {
-    const catalog = indexSideChatCatalog({
-      projects: [{ ...project, conversations: [child('kept', { kind: 'conversation', conversationId: parentId })] }],
-      runningRunIds: new Set(),
-      waitingQuestionRunIds: new Set(),
-      questionKindsByRun: new Map(),
-      extraParentKeys: [conversationSourceKey(parentId)]
-    })
-    expect(catalog.orphans).toEqual([])
-    expect(catalog.counts.get(conversationSourceKey(parentId))?.total).toBe(1)
+    // The catalog has nothing but per-source counters: there is no list of children a
+    // sidebar could print, and the loaded parent row is not credited with another
+    // source's child.
+    expect(Object.keys(catalog)).toEqual(['counts'])
+    expect([...catalog.counts.keys()]).toEqual([goneKey])
+    expect(sideChatCountLabel(catalog.counts.get(conversationSourceKey(parentId)))).toBeUndefined()
   })
 
   it('reports no counter for a row without children', () => {

@@ -154,6 +154,11 @@ export async function exerciseSideChatLargeHistory({ cdp, evaluate, check, ipcCo
     check(entry.pages > 0, `a read body never completed: ${json({ id: entry.id, pages: entry.pages })}`)
   }
 
+  // The bodies are reachable over IPC above; this proves a user can open the dialog on the
+  // same child from its parent's panel, read it and page it with real pointer input. It runs
+  // while the parent still exists, because the parent's panel is the only way to a side chat.
+  const dialog = await exerciseLargeHistoryDialog({ driver, evaluate, check, seed, childId, ipcCountsPath })
+
   // Deleting the parent must not take the child's own frozen bodies with it.
   await evaluate(`(async () => {
     const id = ${json(seed.conversationId)}
@@ -177,9 +182,6 @@ export async function exerciseSideChatLargeHistory({ cdp, evaluate, check, ipcCo
     check(sourceHashes.has(after.hash),
       `the surviving body no longer matches the source: ${json({ id: entry.id, after: after.hash })}`)
   }
-  // The bodies are reachable over IPC above; this proves a user can open the dialog on the
-  // same child, read it and page it with real pointer input.
-  const dialog = await exerciseLargeHistoryDialog({ driver, evaluate, check, seed, childId, ipcCountsPath })
   return { parentId: seed.conversationId, childId, dialog, parentTurns: seed.turnCount, messageCount: seed.messageCount,
     archiveBytes: seed.archiveBytes, hugeMessageBytes: seed.hugeMessageBytes, viewerRows: sealed.pages.length,
     viewerElapsedMs: sealed.elapsedMs, planItems: planShape.missingItems, providerReads: read.reads.length,

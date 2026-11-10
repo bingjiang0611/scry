@@ -4,6 +4,7 @@ import type { ProjectMeta, SessionMeta } from './env'
 import type { RemoteSessionRef } from '@shared/desktop-remote'
 import type { RemoteProjectGroup } from './components/SidebarRemoteProjects'
 import { SIDEBAR_ACTIVITY_COPY as copy } from './constants/copy'
+import { conversationSourceKey, nativeSourceKey, parentKeyOf } from './side-chat-index'
 
 export type ActivityGroup = 'attention' | 'working' | 'updates' | 'completed'
 export type ActivityEntry = {
@@ -11,13 +12,7 @@ export type ActivityEntry = {
   group: ActivityGroup
 } & (
   | { kind: 'session'; project: ProjectMeta; session: SessionMeta }
-  | {
-    kind: 'conversation'
-    project: ProjectMeta
-    conversation: ConversationSummary
-    /** Set for a side-chat child: its own run is real activity, but not a root row. */
-    sideChatParent?: string
-  }
+  | { kind: 'conversation'; project: ProjectMeta; conversation: ConversationSummary }
   | { kind: 'remote'; project: RemoteProjectGroup; session: RemoteSessionRef }
 )
 
@@ -76,30 +71,45 @@ export function sidebarActivity(
     outcome: evidence.outcome,
     unread: evidence.unread
   })
+  // A side chat is never a row here: it lives in its parent's right panel. Its live run is
+  // still activity the user may have to act on, so a child that is waiting or running
+  // lifts the row of the session it belongs to instead of adding a second one. A finished
+  // child adds nothing; its result is read in the parent's panel.
+  const childActivity = new Map<string, 'attention' | 'working'>()
+  for (const project of projects) {
+    for (const conversation of project.conversations ?? []) {
+      const runId = conversation.activeRunId
+      if (!conversation.sideChat || conversation.archivedAt || !runId) continue
+      const key = parentKeyOf(conversation.sideChat.source)
+      if (waitingQuestionRunIds.has(runId)) childActivity.set(key, 'attention')
+      else if (!childActivity.has(key)) childActivity.set(key, 'working')
+    }
+  }
+  /** Waiting outranks running, and a parent's own waiting state is never lowered. */
+  const lifted = (own: ActivityGroup | undefined, parentKey: string): ActivityGroup | undefined => {
+    const child = childActivity.get(parentKey)
+    if (!child || own === 'attention') return own
+    return child
+  }
   for (const project of projects) {
     const matches = (title: string): boolean => !needle || `${project.name} ${project.cwd} ${title}`.toLocaleLowerCase().includes(needle)
     for (const conversation of project.conversations ?? []) {
-      if (conversation.archivedAt || !matches(conversation.title)) continue
+      if (conversation.sideChat || conversation.archivedAt || !matches(conversation.title)) continue
       // A conversation's active run id is its own liveness evidence. Only a durable block
       // outranks it: deletion, an unaccepted native fork, or a delivery whose outcome is
       // unresolved with no live run to watch. `blockedReason` alone cannot decide this —
       // it also carries the ordinary "request still in flight" note, which is progress.
       const active = Boolean(conversation.activeRunId)
-      const status = group({
+      const status = lifted(group({
         active,
         runId: conversation.activeRunId,
         blocked: Boolean(conversation.deletion) ||
           (conversation.fork !== undefined && conversation.fork.status !== 'accepted') ||
           (!active && conversation.blockedReason !== undefined),
         outcome: conversation.lastRunOutcome
-      })
+      }), conversationSourceKey(conversation.id))
       if (!status) continue
-      // A child's own run is background activity of its parent, so it is listed here with
-      // that parent named instead of being flattened into the root conversation list.
-      entries.push({
-        key: `conversation:${conversation.id}`, kind: 'conversation', project, conversation, group: status,
-        ...(conversation.sideChat ? { sideChatParent: conversation.sideChat.parentTitleAtCapture } : {})
-      })
+      entries.push({ key: `conversation:${conversation.id}`, kind: 'conversation', project, conversation, group: status })
     }
     for (const session of project.sessions) {
       if (session.archivedAt || !matches(session.preview)) continue
@@ -108,8 +118,10 @@ export function sidebarActivity(
       // result needs review, not success: older catalogs can lack an outcome.
       const unread = unreadSessionKeys.has(sessionAttentionKey({ providerId: session.providerId,
         agentProfileId: session.agentProfileId, cwd, sessionId: session.externalSessionId ?? session.sessionId }))
-      const status = group({ active: Boolean(session.runId && runningRunIds.has(session.runId)),
-        runId: session.runId, outcome: session.lastRunOutcome, unread })
+      const status = lifted(group({ active: Boolean(session.runId && runningRunIds.has(session.runId)),
+        runId: session.runId, outcome: session.lastRunOutcome, unread }),
+      nativeSourceKey({ providerId: session.providerId, agentProfileId: session.agentProfileId, cwd,
+        nativeSessionId: session.externalSessionId ?? session.sessionId }))
       if (status) entries.push({ key: `session:${JSON.stringify([cwd, session.providerId, session.agentProfileId, session.sessionId])}`,
         kind: 'session', project, session, group: status })
     }

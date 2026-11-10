@@ -104,7 +104,7 @@ export function AppShell(props: AppShellProps) {
             {logicalConversation ? <>
               <ViewChrome cwd={logicalConversation.cwd} showSummary={summaryVisible} showPanel={panelVisible} onToggleSummary={summary.toggle} onTogglePanel={toggleOverviewPanel} />
               <div className="main-content main-content--single">
-                {/* A child opened from the sidebar keeps its own controls and snapshot reader. */}                {logicalConversation.sideChat
+                {/* The sidebar never lists a side chat; a child handed here by another host action still keeps its own controls and snapshot reader. */}                {logicalConversation.sideChat
                   ? <SideChatSurface liveVisible={mainLiveVisible} key={logicalConversation.id} variant="main" conversation={logicalConversation} draftStore={draftStore}
                     agents={chatProps.agents} onOpenConversation={pickConversation} onChanged={() => { void loadProjects() }}
                     onProjection={setConversationProjection} {...(chatProps.onOpenFile ? { onOpenFile: chatProps.onOpenFile } : {})} />

@@ -4,8 +4,6 @@ import { memo, useCallback, useMemo, useRef, useState, type MouseEvent as ReactM
 import { relTime } from '../format'
 import { sidebarActivity } from '../sidebar-activity'
 import { SIDEBAR_ACTIVITY_COPY as activityCopy, SIDEBAR_PROJECT_COPY as projectCopy } from '../constants/copy'
-import { SIDE_CHAT_COPY } from '../constants/side-chat-copy'
-import { SideChatOrphanGroup } from './SideChatOrphanGroup'
 import { SidebarActivity } from './SidebarActivity'
 import { conversationSourceKey, nativeSourceKey, sideChatCountLabel, type SideChatCatalog } from '../side-chat-index'
 import { SessionRow } from './SidebarSessionRow'
@@ -281,12 +279,7 @@ export const Sidebar = memo(function Sidebar({
         )}
         {view === 'activity' ? <>
           <SidebarActivity entries={activity} renderEntry={(entry) => entry.kind === 'conversation'
-            ? entry.sideChatParent
-              ? <div className="sb-activity-child" data-side-chat-activity-child>
-                <span className="sb-activity-child-label">{SIDE_CHAT_COPY.activityChild(entry.sideChatParent)}</span>
-                {renderConversation(entry.conversation)}
-              </div>
-              : renderConversation(entry.conversation)
+            ? renderConversation(entry.conversation)
             : entry.kind === 'remote' ? <SidebarRemoteProjects groups={[{ ...entry.project, sessions: [entry.session] }]}
               draftStore={draftStore} layout="activity" active={activeRemote} collapsed={collapsed} onToggle={toggle}
               onPickSession={onPickRemoteSession!} onNewProjectChat={onNewRemoteProjectChat!}
@@ -302,7 +295,6 @@ export const Sidebar = memo(function Sidebar({
               draftStore={draftStore} active={activeRemote} collapsed={collapsed} onToggle={toggle}
               onPickSession={onPickRemoteSession!} onNewProjectChat={onNewRemoteProjectChat!}
               onArchiveSession={onArchiveRemoteSession} onArchivedSession={onArchivedRemoteSession} />} />
-          {sideChatCatalog && <SideChatOrphanGroup groups={sideChatCatalog.orphans} onPick={onPickConversation} />}
         </>}
       </div></SessionHoverProvider>
 

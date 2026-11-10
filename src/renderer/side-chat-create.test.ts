@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ConversationSummary, SideChatCommandReceipt, SideChatList, SideChatListRequest, SideChatPreview } from '@shared/conversation-api'
 import {
   MAX_CREATE_COMMANDS, clearCreateCommand, commandFromPreview, createRequestOf, createdOutcome, findCreatedSideChat,
-  canRecordCreateCommand, listSideChatPage, lookupSideChatSummaries, lossOutcome, readCreateCommands,
+  listSideChatPage, lookupSideChatSummaries, lossOutcome, readCreateCommands,
   resolveCreateReceipt, restoreTabOutcome, writeCreateCommand
 } from './side-chat-create'
 
@@ -62,27 +62,21 @@ describe('durable side-chat creation commands', () => {
     expect(writeCreateCommand(command, undefined)).toBe(false)
   })
 
-  it('refuses a full ledger instead of evicting an unresolved command', () => {
+  it('stays bounded by dropping the oldest command instead of refusing every later create', () => {
     const storage = new MemoryStorage()
     for (let index = 0; index < MAX_CREATE_COMMANDS; index++) {
       expect(writeCreateCommand(commandFromPreview({ preview: preview(), scopeKey: `scope-${index}`,
         commandId: `command-${index}0`, createdAt: 1_700_000_000_000 + index }), storage)).toBe(true)
     }
-    // The ledger is the only proof that a create might have been dispatched. Making room
-    // by dropping the oldest unresolved row would lose exactly that proof.
-    expect(canRecordCreateCommand(storage)).toBe(false)
-    expect(writeCreateCommand(commandFromPreview({ preview: preview(), scopeKey: 'scope-extra',
-      commandId: 'command-9990', createdAt: 1_700_000_000_999 }), storage)).toBe(false)
-    const rows = readCreateCommands(storage)
-    expect(rows).toHaveLength(MAX_CREATE_COMMANDS)
-    expect(rows[0]?.commandId).toBe('command-00')
-    expect(rows.some((row) => row.commandId === 'command-9990')).toBe(false)
-
-    // Clearing one settled command frees exactly one slot.
-    clearCreateCommand(rows[0].commandId, storage)
-    expect(canRecordCreateCommand(storage)).toBe(true)
+    // A full ledger once refused every later creation in every parent, including behind
+    // commands of parents that no longer exist. A really created child is still listed in
+    // its source's history, so the oldest row can leave.
     expect(writeCreateCommand(commandFromPreview({ preview: preview(), scopeKey: 'scope-extra',
       commandId: 'command-9990', createdAt: 1_700_000_000_999 }), storage)).toBe(true)
+    const rows = readCreateCommands(storage)
+    expect(rows).toHaveLength(MAX_CREATE_COMMANDS)
+    expect(rows[0]?.commandId).toBe('command-10')
+    expect(rows.at(-1)?.commandId).toBe('command-9990')
   })
 
   it('drops malformed rows instead of guessing', () => {
@@ -119,20 +113,24 @@ describe('create result honesty', () => {
       .toEqual({ kind: 'elsewhere', conversation: summary('child-1'), notice: 'scope-changed' })
   })
 
-  it('keeps an unknown command after a lost reply and never re-dispatches', async () => {
+  it('settles a conclusive not-found as refused, so the parent can create again', async () => {
     const api = { findSideChatCommand: vi.fn(async (): Promise<SideChatCommandReceipt> => ({ commandId: command.commandId, status: 'not-found' })) }
     const resolution = await findCreatedSideChat(api, command)
-    expect(resolveCreateReceipt({ commandId: command.commandId, status: 'not-found' })).toEqual({ kind: 'unknown' })
-    const loss = lossOutcome(command, resolution, 'scope-1', notice)
-    expect(loss).toEqual({ keepCommand: true })
+    // The host answered: no child owns this command id. Keeping it as "unknown" turned one
+    // ordinary refusal into a parent that only ever re-checked the same dead command.
+    expect(resolution).toEqual({ kind: 'not-created' })
+    expect(resolveCreateReceipt({ commandId: command.commandId, status: 'not-found' })).toEqual({ kind: 'not-created' })
+    expect(lossOutcome(command, resolution, 'scope-1', notice)).toEqual({ keepCommand: false, refused: true })
     expect(api.findSideChatCommand).toHaveBeenCalledTimes(1)
     // The lookup is the only operation; nothing in this module can dispatch.
     expect('createSideChat' in api).toBe(false)
   })
 
-  it('treats an unreadable lookup as unknown, not as absence', async () => {
+  it('treats an unreadable lookup as unknown, not as absence, and keeps the command', async () => {
     const api = { findSideChatCommand: vi.fn(async () => { throw new Error('ipc down') }) }
-    await expect(findCreatedSideChat(api, command)).resolves.toEqual({ kind: 'unknown' })
+    const resolution = await findCreatedSideChat(api, command)
+    expect(resolution).toEqual({ kind: 'unknown' })
+    expect(lossOutcome(command, resolution, 'scope-1', notice)).toEqual({ keepCommand: true })
   })
 
   it('opens the found child of a lost reply when the scope still matches', async () => {

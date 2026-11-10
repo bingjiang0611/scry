@@ -4,7 +4,7 @@ import type { SideChatInitialTarget, SideChatSource } from '@shared/conversation
 import { SIDE_CHAT_COPY } from '../constants/side-chat-copy'
 import type { SideChatEntry, SideChatTabView } from '../components/RightSurfacePanel'
 import {
-  canRecordCreateCommand, clearCreateCommand, commandFromPreview, createRequestOf, createdOutcome, findCreatedSideChat,
+  clearCreateCommand, commandFromPreview, createRequestOf, createdOutcome, findCreatedSideChat,
   lookupSideChatSummaries, lossOutcome, readCreateCommands, restoreTabOutcome, writeCreateCommand,
   type SideChatCreateCommand, type SideChatRestoreAnswer
 } from '../side-chat-create'
@@ -225,14 +225,6 @@ export function useSideChatWorkspace({
       preview, scopeKey: pinned.scopeKey, commandId,
       ...(pinned.target ?? preview.target ? { initialTarget: pinned.target ?? preview.target } : {})
     })
-    if (!canRecordCreateCommand()) {
-      // An unresolved command would be lost if the ledger evicted it. Refuse before
-      // dispatch instead of creating a child nobody can prove afterwards.
-      setNotice(SIDE_CHAT_COPY.createRefused(SIDE_CHAT_COPY.createLedgerFull))
-      setCreating(false)
-      busy.current = false
-      return
-    }
     if (!writeCreateCommand(command)) {
       setNotice(SIDE_CHAT_COPY.createRefused(SIDE_CHAT_COPY.createDurableUnavailable))
       setCreating(false)
@@ -257,9 +249,11 @@ export function useSideChatWorkspace({
       setNotice(preview.firstSendBlockedReason
         ? `${outcome.notice} ${SIDE_CHAT_COPY.previewBlocked(preview.firstSendBlockedReason)}`
         : outcome.notice)
-    } catch {
-      // The reply was lost or the host refused after the ledger entry existed. Read the
-      // same command id back; a not-found answer stays unknown and never re-dispatches.
+    } catch (error) {
+      // The host refused, or its reply was lost after the ledger entry existed. Read the
+      // same command id back: a found child is opened, a conclusive not-found is the
+      // host's refusal and is shown with its real reason, and only an unreadable lookup
+      // stays unknown.
       const resolution = await findCreatedSideChat(pinned.api, command)
       const loss = lossOutcome(command, resolution, latest.current.scopeKey, CREATE_NOTICE)
       if (loss.keepCommand) {
@@ -272,6 +266,15 @@ export function useSideChatWorkspace({
         return
       }
       clearCreateCommand(command.commandId)
+      if (loss.refused) {
+        // Nothing was created. The next click is an ordinary create with a fresh preview,
+        // not a check of this settled command.
+        if (mine()) {
+          setUnknownCommand(undefined)
+          setNotice(SIDE_CHAT_COPY.createRefused(message(error)))
+        }
+        return
+      }
       if (loss.outcome?.kind === 'open') {
         setCreatedId(loss.outcome.conversation.id)
         latest.current.onOpen(loss.outcome.conversation.id, command.scopeKey)
@@ -298,6 +301,15 @@ export function useSideChatWorkspace({
     const resolution = await findCreatedSideChat(current.api, command)
     busy.current = false
     setCreating(false)
+    if (resolution.kind === 'not-created') {
+      // The earlier command published nothing, so it no longer stands between the user
+      // and a side chat: settle it and carry this same click through as a new create.
+      clearCreateCommand(command.commandId)
+      if (!mine()) return
+      setUnknownCommand(undefined)
+      await runCreate()
+      return
+    }
     if (resolution.kind === 'created') {
       clearCreateCommand(command.commandId)
       // The child belongs to the command's own scope, which may no longer be visible.
@@ -308,8 +320,8 @@ export function useSideChatWorkspace({
       setNotice(SIDE_CHAT_COPY.createRecovered)
       return
     }
-    if (mine()) setNotice(SIDE_CHAT_COPY.createNotFoundUnknown)
-  }, [fenceHolds, mergeRecords, unknownCommand])
+    if (mine()) setNotice(SIDE_CHAT_COPY.createUnknown)
+  }, [fenceHolds, mergeRecords, runCreate, unknownCommand])
 
   const history = useSideChatHistory({
     ...(api ? { api } : {}), ...(source ? { source } : {}), scopeKey, fenceHolds,

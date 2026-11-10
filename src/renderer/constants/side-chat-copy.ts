@@ -90,12 +90,10 @@ export const SIDE_CHAT_COPY = {
     return reason || SIDE_CHAT_COPY.unknownReason
   },
   unknownReason: '未知原因；没有确认任何结果。',
-  createUnknown: '创建结果尚未确认。可以只读核对同一个创建命令，不会重复创建。',
+  createUnknown: '创建结果暂时读不到。再点一次会先只读核对同一个创建命令，不会重复创建。',
   createDurableUnavailable: '本地存储不可用，创建命令无法保存，因此没有创建。',
   createCheck: '核对创建结果',
-  createLedgerFull: '本地还有未确认的创建命令，先核对它们再创建新的侧边会话。',
   layoutUnsaved: '布局未保存到本地；本次打开状态在重启后可能丢失。',
-  createNotFoundUnknown: '没有查到这条创建命令；这不代表没有创建。可稍后在历史里确认。',
   createRecovered: '已找回这次创建的侧边会话。',
   previewBlocked: (reason: string): string => `创建后首次发送会被拒绝：${reason}`,
   creationScopeChanged: '主会话已切换，本次创建结果没有写入当前布局；它仍属于原来的主会话。',
@@ -116,15 +114,5 @@ export const SIDE_CHAT_COPY = {
   // 侧栏父行计数：只报真实记录算得出的数量。
   parentCount: (total: number): string => `${total} 侧聊`,
   parentRunning: (running: number): string => `${running} 运行中`,
-  parentNeedsAttention: (needs: number): string => `${needs} 需处理`,
-  orphanGroup: '来源不在当前项目列表中的侧边会话',
-  orphanGroupHint: (parentTitle: string): string => `原主会话：${parentTitle}；当前列表读不到它，这不代表已删除`,
-  // 分页替换，不是增量展开：每页最多 6 个来源分组、每组最多 20 行。
-  orphanPagePrevious: '上一页',
-  orphanPageNext: '下一页',
-  orphanRowRange: ({ first, last, total }: { first: number; last: number; total: number }): string =>
-    `第 ${first}–${last} 个 / 共 ${total} 个`,
-  orphanGroupRange: ({ first, last, total }: { first: number; last: number; total: number }): string =>
-    `第 ${first}–${last} 个来源 / 共 ${total} 个`,
-  activityChild: (parentTitle: string): string => `侧聊 · ${parentTitle}`
+  parentNeedsAttention: (needs: number): string => `${needs} 需处理`
 }
