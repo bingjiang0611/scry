@@ -341,7 +341,8 @@
   margin: 0 0 6px 30px;
   padding: 3px 8px;
   border: 1px solid var(--border3);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
+  corner-shape: round;
   background: var(--overview-surface);
   color: var(--text2);
   font: inherit;
