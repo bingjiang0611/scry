@@ -1,0 +1,353 @@
+{
+ "codex": [
+  {
+   "thread": "codex-run-mwarkpo9-0",
+   "lines": 225,
+   "workflowActivity": 0,
+   "canonical": [
+    [
+     "hook/hook_started",
+     29
+    ],
+    [
+     "hook/hook_response",
+     29
+    ],
+    [
+     "tool/tool_result",
+     7
+    ],
+    [
+     "harness/runtime:llm_call",
+     5
+    ],
+    [
+     "model/response_completed",
+     4
+    ],
+    [
+     "tool/tool:Bash",
+     3
+    ],
+    [
+     "harness/runtime:input_receipt",
+     2
+    ],
+    [
+     "tool/tool:collaboration:wait",
+     2
+    ],
+    [
+     "harness/agent_activity",
+     2
+    ],
+    [
+     "harness/runtime:steer_capability",
+     1
+    ],
+    [
+     "agent/agent:count_files",
+     1
+    ],
+    [
+     "agent/agent:read_readme",
+     1
+    ]
+   ],
+   "native": [
+    [
+     "hook/started",
+     29
+    ],
+    [
+     "hook/completed",
+     29
+    ],
+    [
+     "item/started",
+     15
+    ],
+    [
+     "item/completed",
+     15
+    ],
+    [
+     "mcpServer/startupStatus/updated",
+     12
+    ],
+    [
+     "turn/moderationMetadata",
+     10
+    ],
+    [
+     "thread/tokenUsage/updated",
+     10
+    ],
+    [
+     "thread/status/changed",
+     8
+    ],
+    [
+     "turn/started",
+     3
+    ],
+    [
+     "turn/completed",
+     3
+    ],
+    [
+     "item/commandExecution/outputDelta",
+     2
+    ],
+    [
+     "thread/readState/changed",
+     1
+    ]
+   ],
+   "taskEvents": []
+  }
+ ],
+ "codex-main": [
+  {
+   "thread": "codex-run-mwas56uv-0",
+   "lines": 251,
+   "workflowActivity": 0,
+   "canonical": [
+    [
+     "hook/hook_started",
+     33
+    ],
+    [
+     "hook/hook_response",
+     33
+    ],
+    [
+     "tool/tool_result",
+     9
+    ],
+    [
+     "harness/runtime:llm_call",
+     6
+    ],
+    [
+     "model/response_completed",
+     4
+    ],
+    [
+     "tool/tool:Bash",
+     4
+    ],
+    [
+     "tool/tool:collaboration:wait",
+     3
+    ],
+    [
+     "harness/runtime:input_receipt",
+     2
+    ],
+    [
+     "harness/agent_activity",
+     2
+    ],
+    [
+     "harness/runtime:steer_capability",
+     1
+    ],
+    [
+     "agent/agent:count_files",
+     1
+    ],
+    [
+     "agent/agent:read_readme",
+     1
+    ]
+   ],
+   "native": [
+    [
+     "hook/started",
+     33
+    ],
+    [
+     "hook/completed",
+     33
+    ],
+    [
+     "item/started",
+     16
+    ],
+    [
+     "item/completed",
+     16
+    ],
+    [
+     "mcpServer/startupStatus/updated",
+     12
+    ],
+    [
+     "turn/moderationMetadata",
+     11
+    ],
+    [
+     "thread/tokenUsage/updated",
+     11
+    ],
+    [
+     "thread/status/changed",
+     8
+    ],
+    [
+     "turn/started",
+     3
+    ],
+    [
+     "item/commandExecution/outputDelta",
+     3
+    ],
+    [
+     "turn/completed",
+     3
+    ],
+    [
+     "thread/readState/changed",
+     1
+    ]
+   ],
+   "taskEvents": []
+  }
+ ],
+ "pi-default": [
+  {
+   "thread": "pi-run-mwarylks-0",
+   "lines": 20,
+   "workflowActivity": 0,
+   "canonical": [
+    [
+     "harness/runtime:input_receipt",
+     2
+    ],
+    [
+     "harness/runtime:init",
+     1
+    ],
+    [
+     "harness/runtime:steer_capability",
+     1
+    ],
+    [
+     "harness/context_usage",
+     1
+    ],
+    [
+     "harness/usage_snapshot",
+     1
+    ],
+    [
+     "harness/runtime:llm_stream_end",
+     1
+    ],
+    [
+     "harness/result",
+     1
+    ],
+    [
+     "summary",
+     1
+    ]
+   ],
+   "native": [
+    [
+     "message_start",
+     3
+    ],
+    [
+     "message_end",
+     3
+    ],
+    [
+     "agent_start",
+     1
+    ],
+    [
+     "turn_start",
+     1
+    ],
+    [
+     "turn_end",
+     1
+    ],
+    [
+     "agent_end",
+     1
+    ],
+    [
+     "agent_settled",
+     1
+    ]
+   ],
+   "taskEvents": []
+  }
+ ],
+ "pi-rotom": {
+  "threads": 0,
+  "note": "no event log: the run never started"
+ },
+ "qoder": [
+  {
+   "thread": "qoder-run-mwarmbkn-0",
+   "lines": 13,
+   "workflowActivity": 0,
+   "canonical": [
+    [
+     "hook/hook_started",
+     5
+    ],
+    [
+     "hook/hook_response",
+     5
+    ],
+    [
+     "harness/runtime:input_receipt",
+     1
+    ],
+    [
+     "harness/credit_usage",
+     1
+    ],
+    [
+     "summary",
+     1
+    ]
+   ],
+   "native": [],
+   "taskEvents": []
+  }
+ ],
+ "opencode": [
+  {
+   "thread": "opencode-run-mwaq301x-0",
+   "lines": 1,
+   "workflowActivity": 0,
+   "canonical": [
+    [
+     "summary",
+     1
+    ]
+   ],
+   "native": [],
+   "taskEvents": []
+  },
+  {
+   "thread": "opencode-run-mwaq4c6f-0",
+   "lines": 1,
+   "workflowActivity": 0,
+   "canonical": [
+    [
+     "summary",
+     1
+    ]
+   ],
+   "native": [],
+   "taskEvents": []
+  }
+ ]
+}

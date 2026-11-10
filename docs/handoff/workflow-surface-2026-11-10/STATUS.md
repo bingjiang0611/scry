@@ -22,7 +22,7 @@
 
 | 包 | 条目 | 状态 | 报告 |
 |---|---|---|---|
-| G1 | 四个 Provider 的真实事件负对照，含与 main 的对照 | 未开始 | |
+| G1 | 四个 Provider 的真实事件负对照，含与 main 的对照 | 部分完成 | [reports/G1.md](reports/G1.md) | Codex 真实跑通两个子 Agent，与 main 逐项一致、`workflow_activity` 为 0；Pi 原生空态正确；Qoder（exit 42，仓库外同 SDK 复现）、OpenCode（405，版本超出支持范围）、Pi rotom（rotom 安装缺 `model-catalog.mjs`）三个 Provider 阻塞，均有归因证据 |
 | G2 | 运行选择被拉回的组件级回归与负对照 | 未开始 | |
 | G3 | 在最新 HEAD 上重跑门禁 | 未开始 | |
 | G4 | C7 与相邻路径收尾 | 未开始 | |
