@@ -6,6 +6,58 @@
 - 背景与协议说明：`docs/remote-network-measurement.md`。本文只写怎么执行、怎么判定、交回什么。
 - 已有证据（不必重复证明）：macOS CI 在 `edd56b9` 上已通过 `swift test`、Swift 构建和 iOS 产品 App 编译；Linux 上已通过 Node 单测和 relay smoke。
 
+## 第三轮（2026-11-10，基于第二轮结果 `results/20261110T033802Z`）
+
+第二轮的核验结论：报告与数据一致；3 个本机修复（`a6b2b68`、`bbfbf39`、`8d6c104`）都正确，各有回滚即失败的测试，没有放宽任何规则。R3、R5b、R6 的规则缺陷和 host 广播缺陷都已消除。唯一失败的 R7 是真实的时延问题（不是规则问题），本轮代码已修复两处，3000 ms 门限不变：
+
+| 第二轮现象 | 根因 | 本轮改动 |
+|---|---|---|
+| 每个离线样本都带 `relayWaitMs=600`，包括从没有 host 进过的随机房间 | relay 对"没有存活 leg"一律先等 600 ms 宽限 | `ce3f5fe`：只有 10 s 内有 host leg 打开、认证或关闭时才等宽限，否则立即 `4001`。**需要重新部署 relay 才生效** |
+| 离线答复取两条 lane 中较慢的那条（例：2.45 s 与 3.27 s） | `prewarm()` 等两条 lane 都结束；task group 的 `cancelAll` 也要等子任务，所以第二轮那次尝试无效 | `d3ee35a`：任一 lane 收到 `4001` 就立即返回，另一条在后台自行结束；其他错误仍等两条都结束 |
+
+预期：离线探测约等于一条 lane 的"外层 TLS + 升级 + 关闭帧"，不再含 600 ms 宽限，按第二轮的路径数据约 1.2–2.3 s。Mac 侧代码本轮没有改动（`git diff 7ccd437 -- src` 为空），**不需要重装或重启 Scry**，只要 Scry 在运行。
+
+### 第三轮步骤（新时间戳；前两轮结果目录保持原样）
+
+开始前只问用户一次：**是否授权重新部署线上 relay**（`wrangler deploy`，外部写操作，和第一轮相同的 Worker）。不授权时，只有手机侧修复生效，照常执行并在 REPORT 里注明 relay 未部署；R7 仍以实测为准，不改门限。
+
+```bash
+git pull --ff-only
+```
+
+```bash
+export SCRY_IOS_BUNDLE_ID=com.scry.remote.local SCRY_VERIFY_STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+```
+
+授权部署时：
+
+```bash
+(cd experiments/remote-g0/cf-relay && npx --prefix .. wrangler deploy)
+```
+
+```bash
+experiments/remote-g0/verify/local-verify.sh env && experiments/remote-g0/verify/local-verify.sh checks
+```
+
+- `ios-checks` 如果和第二轮一样失败：把 `results/20261110T033802Z/logs/control-base-ios-checks.tail.txt` 复制到本轮 `logs/`，再执行 `local-verify.sh mark-baseline ios-checks logs/control-base-ios-checks.tail.txt`。失败内容不同则按 §4 处理。
+- 本轮不跑 `install-mac`（Mac 产物没有变化）。
+
+```bash
+experiments/remote-g0/verify/local-verify.sh build-ios && experiments/remote-g0/verify/local-verify.sh install-ios
+```
+
+```bash
+experiments/remote-g0/verify/local-verify.sh relay-probe mac && experiments/remote-g0/verify/local-verify.sh netbench wifi-relay -netBenchRoute=relay -netBenchRounds=5 && experiments/remote-g0/verify/local-verify.sh netbench wifi-auto -netBenchRounds=5 && experiments/remote-g0/verify/local-verify.sh summarize
+```
+
+预期结果：
+
+- R1、R2、R3、R4、R5b、R6、R7 通过；R5 在 Mac 不在手机所在 Wi-Fi 时为 blocked。
+- 部署生效的证据：`relay-probe-mac.jsonl` 的 `relayWaitMs` 为 0（第二轮是 600；探针连的也是没有 host 的房间）。
+- R7 仍失败时，不要改门限，也不要改 lane 生命周期；在 REPORT 里给出每个 `offline-probe` 样本的耗时、同一时段 relay 探针的 `tls`/`upgrade`/`upgradeExcludingWait`/`relayWaitMs` 中位数，以及 relay 是否已部署，由核验者决定下一步。
+
+交回内容同 §6，REPORT 额外写一节"与第二轮的对照"：`offline-probe` 每个样本耗时、relay 探针的 `relayWaitMs`，以及冷开 P90。
+
 ## 第二轮（2026-11-10，基于第一轮结果 `results/20261109T155516Z`）
 
 第一轮的核验结论：报告与数据一致，5 个修复提交都正确，没有放宽任何规则。原始数据还暴露了一个真实缺陷，另外有两条规则本身有缺陷。本轮代码已修复：
