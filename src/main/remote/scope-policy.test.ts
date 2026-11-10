@@ -35,7 +35,7 @@ async function deviceKeyAndCSR() {
   return { keyPEM: `-----BEGIN PRIVATE KEY-----\n${b64}\n-----END PRIVATE KEY-----\n`, csrPEM: csr.toString('pem') }
 }
 
-async function harness(onDispatchRefused?: (input: { detail?: string; grantScope: 'local' | 'remote'; error: unknown }) => void) {
+async function harness(onDispatchRefused?: (input: { detail?: string; grantScope: 'local' | 'remote'; error: unknown }) => void, onRunActivity?: (runId: string) => void) {
   const directory = mkdtempSync(join(tmpdir(), 'scry-scope-policy-'))
   dirs.push(directory)
   const identity = await ensureHostIdentity(join(directory, 'identity'))
@@ -58,7 +58,8 @@ async function harness(onDispatchRefused?: (input: { detail?: string; grantScope
     readSessionStatus: () => 'not_observed',
     createOutputStore: (dir) => new RunOutputFileStore(dir),
     sessionDelete,
-    ...(onDispatchRefused ? { onDispatchRefused } : {})
+    ...(onDispatchRefused ? { onDispatchRefused } : {}),
+    ...(onRunActivity ? { onRunActivity } : {})
   })
   cleanups.push(() => binding.close())
   return { identity, controller: binding.controller, startRun, sessionDelete }
@@ -234,5 +235,21 @@ describe('scope policy (L3: submit and sessionDelete read the verified grant)', 
     await vi.waitFor(() => expect(startRun).toHaveBeenCalledTimes(1))
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(refused).toHaveBeenCalledTimes(1)
+  })
+
+  it('names the run whose ledger events or output changed, for the App event feed', async () => {
+    // P3f E2: the App reads a run when the daemon says it changed. A global "something
+    // changed" would make every run re-read on every chunk of every other run.
+    const activity = vi.fn()
+    const { identity, controller, startRun } = await harness(undefined, activity)
+    startRun.mockImplementationOnce(async (input) => {
+      (input as unknown as { output(chunk: { kind: 'output'; text: string }): void }).output({ kind: 'output', text: 'hello' })
+    })
+    const local = await enrollLocal(identity, controller)
+    const { runId } = controller.submitIntent(local, { intentId: 'local-activity', detail })
+    await vi.waitFor(() => expect(startRun).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(activity.mock.calls.length).toBeGreaterThanOrEqual(3))
+    // Intent, dispatch and output all name this run, and only this run.
+    expect(new Set(activity.mock.calls.map(([id]) => id))).toEqual(new Set([runId]))
   })
 })

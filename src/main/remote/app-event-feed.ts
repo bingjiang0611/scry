@@ -7,7 +7,10 @@ import type { AgentDataUpdated } from '../../shared/runtime'
 // so a client resynchronizes instead of silently missing a change (t3code's
 // replay-or-snapshot rule, on the App's existing long-poll lanes).
 
-export type AppEvent = { kind: 'data'; event: AgentDataUpdated }
+export type AppEvent =
+  | { kind: 'data'; event: AgentDataUpdated }
+  // A ledger run's events or output changed (E2); the App reads that run, nothing else.
+  | { kind: 'run'; runId: string }
 
 export interface AppEventsReply {
   epoch: string
@@ -25,6 +28,7 @@ interface Entry { seq: number; event: AppEvent; key?: string; bytes: number }
 
 // One notice per subject is enough: a newer one says everything an older one did.
 function coalesceKey(event: AppEvent): string | undefined {
+  if (event.kind === 'run') return `run:${event.runId}`
   const data = event.event
   if ('kind' in data && data.kind === 'conversation_changed') return `conversation:${data.conversationId}`
   if ('kind' in data && data.kind === 'catalog_recovered') return 'catalog'

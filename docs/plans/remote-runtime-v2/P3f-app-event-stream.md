@@ -1,6 +1,6 @@
 # P3f · daemon → App 事件流
 
-状态：维护者 2026-11-10 批准做推送流（新增流式 op 只在本机端点、`scope: local`，见 [STATUS-BATCH4](STATUS-BATCH4.md)）。按 E0–E3 分段实现，E0、E1 已完成，见 [b4-l4-events](status/b4-l4-events.md)。
+状态：维护者 2026-11-10 批准做推送流（新增流式 op 只在本机端点、`scope: local`，见 [STATUS-BATCH4](STATUS-BATCH4.md)）。按 E0–E3 分段实现，E0、E1、E2 已完成，见 [b4-l4-events](status/b4-l4-events.md)。
 
 ## 现在缺什么
 

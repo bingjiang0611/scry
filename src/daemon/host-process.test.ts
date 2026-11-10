@@ -246,6 +246,8 @@ describe('daemon host process', () => {
       const afterRun = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'appEvents', epoch: handshake.events.epoch, cursor: changed.events.cursor, waitMs: 0
       })
+      // E2: the run that changed is named, under the ledger id the App follows.
+      expect(afterRun.events.items).toContainEqual({ kind: 'run', runId: sent.result.ledger.runId })
       // The run pipeline's own notice, which the daemon's window sink used to drop.
       expect(afterRun.events.items).toContainEqual({ kind: 'data', event: { runId: sent.result.runId, kind: 'turn_recorded' } })
       // The rename above is announced by the daemon itself; the App no longer stands in.

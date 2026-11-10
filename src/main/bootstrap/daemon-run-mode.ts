@@ -171,7 +171,12 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   })
   const surface = createDaemonRunSurface({ transport, runtime, currentCwd: deps.currentCwd })
   // What the daemon changes outside any run read (P3f): one long poll on its own lane.
-  const events = new DaemonEventPump({ source: transport, send: deps.send, ...(deps.onWarn ? { onWarn: deps.onWarn } : {}) })
+  // Run notices wake the run they name, so runs read on change instead of each holding
+  // a long poll on the shared watch lane (E2).
+  const events = new DaemonEventPump({
+    source: transport, send: deps.send, ...(deps.onWarn ? { onWarn: deps.onWarn } : {}),
+    onRun: (runId) => runtime.wake(runId), onResync: () => runtime.wakeAll(), onLive: (live) => runtime.setWakesLive(live)
+  })
   events.start()
   return {
     status: 'ready',

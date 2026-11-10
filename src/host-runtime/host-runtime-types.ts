@@ -100,6 +100,8 @@ export interface HostRuntimeInputs {
   // them on its local endpoint only.
   localEndpoint?: RemoteHostServiceDependencies['localEndpoint']
   // Daemon mode: conversation sends prepared in memory, claimed by their dispatch.
+  // The App event feed's run notices (P3f E2): which ledger run changed.
+  onRunActivity?: (runId: string) => void
   managedLaunches?: Pick<import('../main/remote/managed-launches').ManagedLaunches<import('../main/conversation-service-deps').ManagedConversationStart>, 'take' | 'abandon'>
 }
 

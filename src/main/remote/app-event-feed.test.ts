@@ -70,4 +70,14 @@ describe('App event feed', () => {
     feed.close()
     await expect(waiting).resolves.toEqual({ epoch: 'e1', cursor: 0, items: [] })
   })
+
+  it('keeps one wake per run, so a streaming run cannot crowd others out of the buffer', async () => {
+    const feed = new AppEventFeed({ epoch: 'e1', maxItems: 3 })
+    for (let index = 0; index < 50; index++) feed.append({ kind: 'run', runId: 'streaming' })
+    feed.append({ kind: 'run', runId: 'quiet' })
+    feed.append({ kind: 'run', runId: 'streaming' })
+    const reply = await feed.read({ epoch: 'e1', cursor: 0, waitMs: 0 })
+    expect(reply).toMatchObject({ items: [{ kind: 'run', runId: 'quiet' }, { kind: 'run', runId: 'streaming' }] })
+    expect(reply.reset).toBeUndefined()
+  })
 })

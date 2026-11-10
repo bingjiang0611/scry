@@ -25,6 +25,7 @@ export interface RemoteHostServiceDependencies {
     output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
   }): Promise<void>
   onDispatchRefused?: HostControllerFactoryDependencies['onDispatchRefused']
+  onRunActivity?: HostControllerFactoryDependencies['onRunActivity']
   // Snapshot of the host's already directory-picker-authorized project dirs, so
   // the phone's new-session picker chooses only among real authorized targets.
   // Absent => the device sees an honest empty list.

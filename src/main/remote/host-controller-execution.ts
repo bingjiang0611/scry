@@ -41,6 +41,16 @@ export interface ExecutionDeps {
   notify(): void
 }
 
+/** Tell the App event feed which run changed; observation only, never fails the run. */
+export function runActivity(deps: Pick<HostControllerDependencies, 'onRunActivity'>, runId: string): void {
+  try { deps.onRunActivity?.(runId) } catch (error) { console.warn('[scry] run activity notice failed:', error) }
+}
+
+/** A ledger event wakes parked watchers and names its run for the App event feed. */
+export function ledgerEventObserver(deps: Pick<HostControllerDependencies, 'onRunActivity'>, notify: () => void): (event: { runId: string }) => void {
+  return (event) => { notify(); runActivity(deps, event.runId) }
+}
+
 export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway; dispatcher: RemoteDispatcher } {
   const { deps, ledger, output, fileDownloads, interactions, stops, live, notify } = input
   const gateway = new RemoteGateway({
@@ -133,7 +143,7 @@ export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway;
       }
     } },
     outputSink: {
-      append: (runId, chunk) => { output.append(runId, chunk); notify() },
+      append: (runId, chunk) => { output.append(runId, chunk); notify(); runActivity(deps, runId) },
       flush: (runId) => output.flush(runId)
     }
   })

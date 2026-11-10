@@ -9,7 +9,7 @@ import { DaemonRunError } from './daemon-run-transport'
 export interface DaemonEventReply {
   epoch: string
   cursor: number
-  items: Array<{ kind: 'data'; event: AgentDataUpdated }>
+  items: Array<{ kind: 'data'; event: AgentDataUpdated } | { kind: 'run'; runId: string }>
   reset: boolean
 }
 
@@ -24,6 +24,12 @@ export interface DaemonEventPumpDeps {
   retry?: { initialMs: number; maxMs: number }
   sleep?: (ms: number) => Promise<void>
   onWarn?: (message: string, detail?: unknown) => void
+  // E2: a ledger run changed; read it.
+  onRun?: (runId: string) => void
+  // Notices may have been lost; every run re-reads.
+  onResync?: () => void
+  // Whether runs can rely on wakes, or must long-poll on their own.
+  onLive?: (live: boolean) => void
 }
 
 const DEFAULT_WAIT_MS = 20_000
@@ -67,8 +73,10 @@ export class DaemonEventPump {
           // An older daemon has no feed: a named absence, not something to poll for.
           if (error instanceof DaemonRunError && error.reason === 'daemon_run_control_unavailable') {
             this.#deps.onWarn?.('daemon event feed unavailable', error)
+            this.#setLive(false)
             return
           }
+          this.#setLive(false)
           // A notice may have been in that reply; the views re-read once it is back.
           if (epoch !== undefined) missed = true
           await sleep(pause)
@@ -77,14 +85,29 @@ export class DaemonEventPump {
         }
         if (this.#abort.signal.aborted) return
         pause = retry.initialMs
-        if (reply.reset || missed) send('agent:dataUpdated', RESYNCHRONIZE)
+        this.#setLive(true)
+        if (reply.reset || missed) {
+          send('agent:dataUpdated', RESYNCHRONIZE)
+          this.#deps.onResync?.()
+        }
         missed = false
-        for (const item of reply.items) send('agent:dataUpdated', item.event)
+        for (const item of reply.items) {
+          if (item.kind === 'data') send('agent:dataUpdated', item.event)
+          else this.#deps.onRun?.(item.runId)
+        }
         epoch = reply.epoch
         cursor = reply.cursor
       }
     } finally {
       this.#running = false
+      this.#setLive(false)
     }
+  }
+
+  #live = false
+  #setLive(live: boolean): void {
+    if (this.#live === live) return
+    this.#live = live
+    this.#deps.onLive?.(live)
   }
 }

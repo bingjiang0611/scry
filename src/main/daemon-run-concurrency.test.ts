@@ -3,6 +3,7 @@ import { DaemonRunRuntime } from './daemon-run-runtime'
 import { DaemonRunTransport } from './daemon-run-transport'
 import { TraceOutputBridge, type TraceBatch } from './trace-output'
 import { laneForRequest } from './remote/desktop-lane'
+import { DaemonEventPump } from './daemon-event-pump'
 
 // P3f E0: two runs on one daemon connection.
 //
@@ -24,6 +25,10 @@ function daemon() {
   const bound = new Set<string>()
   const output = new Map<string, number>()
   const text = new Map<string, string>()
+  // The daemon's App event feed: run notices, answered at once or on the next one.
+  const notices: Array<{ kind: 'run'; runId: string }> = []
+  const noticeWaiters: Array<() => void> = []
+  const notice = (runId: string) => { notices.push({ kind: 'run', runId }); for (const wake of noticeWaiters.splice(0)) wake() }
   const answer = async (payload: Record<string, unknown>): Promise<unknown> => {
     if (payload.op === 'submit') {
       const runId = submits++ === 0 ? RUN_A : RUN_B
@@ -56,6 +61,17 @@ function daemon() {
       return { desktop: { kind: 'trace', run: { runId: query.runId, providerId: 'codex', cwd: '/w', userText: 'hi', items, done: false }, cursor: { revision: `r${items.length}`, count: items.length } } }
     }
     if (payload.op === 'questions') return { questions: [] }
+    if (payload.op === 'appEvents') {
+      if (payload.epoch === undefined) return { events: { epoch: 'e1', cursor: notices.length, items: [] } }
+      const cursor = Number(payload.cursor)
+      if (notices.length <= cursor) {
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, Number(payload.waitMs))
+          noticeWaiters.push(() => { clearTimeout(timer); resolve() })
+        })
+      }
+      return { events: { epoch: 'e1', cursor: notices.length, items: notices.slice(cursor) } }
+    }
     return { error: 'unknown_op' }
   }
   // The production rule: one request at a time per lane, the lane chosen from the op.
@@ -67,8 +83,9 @@ function daemon() {
     return next
   }
   const delivered: string[] = []
+  const transport = new DaemonRunTransport(request)
   const runtime = new DaemonRunRuntime({
-    transport: new DaemonRunTransport(request),
+    transport,
     send: () => {},
     bridge: new TraceOutputBridge({
       canSend: () => true,
@@ -78,10 +95,17 @@ function daemon() {
     waitMs: 15_000,
     bindBudgetMs: 300
   })
+  // The App's event pump, as daemon mode wires it (daemon-run-mode.ts).
+  let live = false
+  const events = new DaemonEventPump({
+    source: transport, send: () => {}, waitMs: 5_000,
+    onRun: (runId) => runtime.wake(runId), onResync: () => runtime.wakeAll(),
+    onLive: (value) => { live = value; runtime.setWakesLive(value) }
+  })
   return {
-    runtime, delivered,
-    write: (runId: string, value: string) => { text.set(runId, value); output.set(runId, (output.get(runId) ?? 0) + 1) },
-    endQuietPoll: () => { for (const resolve of quietA.splice(0)) resolve() }
+    runtime, delivered, events, isLive: () => live,
+    write: (runId: string, value: string) => { text.set(runId, value); output.set(runId, (output.get(runId) ?? 0) + 1); notice(runId) },
+    endQuietPoll: () => { for (const resolve of quietA.splice(0)) resolve(); for (const wake of noticeWaiters.splice(0)) wake() }
   }
 }
 
@@ -93,9 +117,11 @@ const start = (runtime: DaemonRunRuntime, intentId: string) =>
   runtime.start({ intentId, detail: '{}', context: { cwd: '/w', providerId: 'codex' } })
 
 describe('concurrent daemon runs (P3f E0)', () => {
-  it.fails('binds and streams a second run while the first one is quiet', async () => {
-    const { runtime, delivered, write, endQuietPoll } = daemon()
+  it('binds and streams a second run while the first one is quiet', async () => {
+    const { runtime, delivered, events, isLive, write, endQuietPoll } = daemon()
+    events.start()
     try {
+      await expect.poll(isLive).toBe(true)
       expect((await start(runtime, 'intent-a')).bound).toBe(true)
       // The bind budget is 300 ms; the start must not outlive it waiting on A.
       const second = await within(1_000, start(runtime, 'intent-b'))
@@ -103,6 +129,7 @@ describe('concurrent daemon runs (P3f E0)', () => {
       write(RUN_B, 'from B')
       await expect.poll(() => delivered, { timeout: 500 }).toContain(`${CANONICAL[RUN_B]}:from B`)
     } finally {
+      events.dispose()
       endQuietPoll()
       runtime.dispose()
       endQuietPoll()

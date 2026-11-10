@@ -91,6 +91,7 @@ export class RemoteHostService {
       authorizeWorkspace: deps.authorizeWorkspace,
       startRun: deps.startRun,
       ...(deps.onDispatchRefused ? { onDispatchRefused: deps.onDispatchRefused } : {}),
+      ...(deps.onRunActivity ? { onRunActivity: deps.onRunActivity } : {}),
       gate: deps.gate,
       attachmentDirectory: join(deps.stateDirectory, 'attachments'),
       ...(deps.createOutputStore ? { createOutputStore: deps.createOutputStore } : {}),

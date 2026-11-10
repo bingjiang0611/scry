@@ -57,6 +57,7 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
     relayAdvertisement: relay.relayAdvertisement,
     ...(runtime.desktopRemoteClient ? { desktopRemoteClient: runtime.desktopRemoteClient } : {}),
     gatewayLabel,
+    ...(inputs.onRunActivity ? { onRunActivity: inputs.onRunActivity } : {}),
     ...(inputs.managedLaunches ? { onDispatchRefused: (refused) => abandonRefusedLaunch(inputs.managedLaunches!, refused) } : {}),
     startRun: createRemoteRunBinding<ManagedConversationStart>({
       permissionModeOverride: remotePermissionMode,

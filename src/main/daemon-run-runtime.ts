@@ -8,6 +8,7 @@ import type { ActiveRun, TraceEvent } from '../shared/trace'
 import type { DesktopRemoteContext } from '../shared/desktop-remote'
 import { view, type RunCursor } from './daemon-run-cursor'
 import { DaemonRunTransport } from './daemon-run-transport'
+import { RunWakes } from './daemon-run-wakes'
 
 // The App's own run view, driven by the daemon instead of by an in-process
 // pipeline. The daemon owns execution, the ledger and the canonical run state;
@@ -72,6 +73,13 @@ export class DaemonRunRuntime {
       publishHealth: (state) => this.#deps.send('agent:traceHealth', state)
     })
   }
+
+  // P3f E2: the App event feed's run notices. While it is live a run reads when woken
+  // instead of holding a long poll on the one watch lane other runs need too.
+  readonly #wakes = new RunWakes()
+  wake(runId: string): void { this.#wakes.wake(runId) }
+  wakeAll(): void { this.#wakes.wakeAll() }
+  setWakesLive(live: boolean): void { this.#wakes.setLive(live) }
 
   /** The batching bridge, so `agent:traceAck` credits the same delivery state. */
   get bridge(): TraceOutputBridge { return this.#bridge }
@@ -177,7 +185,11 @@ export class DaemonRunRuntime {
       if (cursor.scryRunId) return cursor.scryRunId
       if (cursor.stopped || Date.now() >= deadline) return undefined
       try {
-        await this.step(runId, { waitMs: Math.min(BIND_WAIT_MS, Math.max(0, deadline - Date.now())) })
+        const wait = Math.min(BIND_WAIT_MS, Math.max(0, deadline - Date.now()))
+        const live = this.#wakes.live
+        if (live) this.#wakes.consume(runId)
+        await this.step(runId, { waitMs: live ? 0 : wait })
+        if (live && !this.#runs.get(runId)?.scryRunId) await this.#wakes.wait(runId, wait)
       } catch {
         // The intent is already recorded. A denied or broken read must not turn a
         // recorded submit into a failed start; the pump reports the reason.
@@ -313,11 +325,16 @@ export class DaemonRunRuntime {
     cursor.pumping = true
     try {
       while (!cursor.stopped && !this.#disposed) {
-        const result = await this.step(runId)
+        // With the event feed live, read without waiting at the daemon and then wait
+        // here for this run's own notice; the fallback bounds a notice that was lost.
+        // Without it, the daemon's long poll is the wait.
+        const live = this.#wakes.live
+        if (live) this.#wakes.consume(runId)
+        const result = await this.step(runId, live ? { waitMs: 0 } : {})
         // A lifecycle the daemon no longer reports and a settled run both end the
         // loop; the renderer re-reads the snapshot to learn the terminal state.
         if (result.lifecycle === null) break
-        if (!cursor.stopped && !result.changed) continue
+        if (live && !cursor.stopped && !result.changed) await this.#wakes.wait(runId, this.#deps.waitMs ?? DEFAULT_WAIT_MS)
       }
     } catch (error) {
       // A revoked grant or a dead daemon is not a run outcome. Keep the reason and
@@ -380,11 +397,13 @@ export class DaemonRunRuntime {
   release(runId: string): void {
     const cursor = this.#runs.get(runId)
     if (cursor) cursor.stopped = true
+    this.#wakes.wake(runId)
   }
 
   dispose(): void {
     this.#disposed = true
     for (const cursor of this.#runs.values()) cursor.stopped = true
+    this.#wakes.wakeAll()
     this.#bridge.close()
   }
 }

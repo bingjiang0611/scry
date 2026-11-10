@@ -276,8 +276,12 @@ export class DaemonRunTransport {
     const events = reply.events
     if (!record(events) || typeof events.epoch !== 'string' || !Number.isSafeInteger(events.cursor) ||
         !Array.isArray(events.items) || events.items.length > MAX_ITEMS) throw new DaemonRunError('invalid_daemon_response')
-    const items = events.items.flatMap((raw) => record(raw) && raw.kind === 'data' && isDataUpdated(raw.event)
-      ? [{ kind: 'data' as const, event: raw.event }] : [])
+    const items = events.items.flatMap((raw): DaemonEventReply['items'] => {
+      if (!record(raw)) return []
+      if (raw.kind === 'data' && isDataUpdated(raw.event)) return [{ kind: 'data', event: raw.event }]
+      if (raw.kind === 'run' && isDaemonRunId(raw.runId)) return [{ kind: 'run', runId: raw.runId }]
+      return []
+    })
     return { epoch: events.epoch, cursor: events.cursor as number, items, reset: events.reset === true }
   }
 

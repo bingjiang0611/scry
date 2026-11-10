@@ -1,4 +1,4 @@
-# P3f daemon → App 事件流：E0、E1
+# P3f daemon → App 事件流：E0、E1、E2
 
 设计见 [P3f](../P3f-app-event-stream.md)。上级状态见 [b4-l4](b4-l4.md)。
 
@@ -11,7 +11,7 @@
 
 结果是 B 的 `start` 超过 1 s 还没返回，它自己的 300 ms 绑定预算也没有生效。原因是预算只在两次 watch 之间检查，而 B 的 watch 排在 A 的长轮询后面。
 
-问题比设计时预计的更重：不只是 B 的文本被推迟，`agent:start` 本身也会被别的 run 的长轮询拖住，最长 15 s。这条测试以 `it.fails` 提交，E2 修复后改为普通测试。
+问题比设计时预计的更重：不只是 B 的文本被推迟，`agent:start` 本身也会被别的 run 的长轮询拖住，最长 15 s。这条测试以 `it.fails` 提交；E2 修复后已改为普通测试（见下）。
 
 ## E1：数据通知
 
@@ -53,7 +53,43 @@
   - 两条 Electron fixture：root 下拒绝在不加 `--no-sandbox` 的情况下运行，按约定不加。
 - 改动的文件都不在 `performance-paths.json` 的 `sources` 里，没有跑 `performance:measure`。
 
+## E2：run 由通知唤醒
+
+| 层 | 改动 |
+|---|---|
+| daemon | 台账事件（意图、派发、进度、问题、终态）和输出追加都按 run 发通知，交给 `onRunActivity`；daemon 在事件流里写入 `{ kind: 'run', runId }`，同一个 run 只保留最新一项，持续流式输出的 run 不会把别的通知挤出缓冲。只用于观测，抛错不影响 run |
+| App | `DaemonEventPump` 把 `run` 交给运行时，第一次回答后报告「事件流可用」，轮询失败时报告「不可用」，丢失通知时唤醒所有 run。`DaemonRunRuntime` 在事件流可用时，读取不在 daemon 等待（`waitMs: 0`），读完没有变化就等本 run 的唤醒，最多等 15 s；绑定等待同样如此，最多 250 ms。事件流不可用时恢复原来的长轮询 |
+| 唤醒记账 | `RunWakes`：读取期间到达的唤醒会保留下来，下一次等待立即返回；每次等待都有上限；退出可用状态时唤醒所有等待中的 run，让它们回到长轮询 |
+
+效果：run 不再在共用的 `watch` lane 上各占一个长轮询，一个安静的 run 不会再拖住另一个 run 的启动和文本。
+
+测试：
+
+- `daemon-run-concurrency.test.ts`（E0）改为普通测试。夹具同时提供 `appEvents`，并接上真实的 `DaemonEventPump`：第二个 run 在绑定预算内绑定，文本在第一个 run 的长轮询结束前到达；
+- `daemon-run-wakes.test.ts`：只唤醒被点名的 run；读取期间的唤醒不丢；等待有上限；全部唤醒；退出可用状态时释放等待；
+- `daemon-event-pump.test.ts`：`run` 唤醒对应的 run；可用状态依次为可用、失败时不可用、恢复后可用；恢复后唤醒全部 run；
+- `daemon-run-transport.test.ts`：解析 `run` 通知，拒绝非法 run id；
+- `app-event-feed.test.ts`：同一 run 只保留一项；
+- `scope-policy.test.ts`：意图、派发和输出都点名这个 run，而且只点名它；
+- 真实 daemon：会话发送之后，事件流里有该台账 run 的通知。
+
+控制实验：
+
+- 只加唤醒方法、不改 pump → E0 仍失败（第二个 run 1 s 后仍在等待）；
+- 去掉 daemon 的 `onRunActivity` 接线 → 真实 daemon 测试失败；
+- 恢复后全部通过。
+
+门禁（Linux 容器，root）：
+
+- `npm run typecheck` 通过；
+- 同上范围的 vitest：4515 passed / 4 failed / 3 skipped，四条失败与 E1 相同，都是 root 环境原因；
+- `npm run build` 通过；
+- `daemon-mode-smoke.mjs` 在 root 下无法启动 Electron（同样的 sandbox 原因），未运行；
+- 改动的文件都不在性能路径的 `sources` 里。
+
+E2 改变了流式文本到达 App 的方式，所以 macOS 上需要按 S1 的方法复测首 token 与流式间隔，确认不比原来差。在复测结果出来之前，不对 E2 做性能结论。
+
 ## 未做
 
-- E1b 角标，E2 run 唤醒（修复 E0），E3 run 集合。
-- 未在 macOS 与真实 App 中验证。
+- E1b 角标，E3 run 集合。
+- 未在 macOS 与真实 App 中验证；E2 的毫秒影响未测。
