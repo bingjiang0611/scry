@@ -61,16 +61,23 @@ export class ConversationService {
    * Sidebar rows and the alias filter must agree, so they are derived from the same list
    * instead of two independent reads of the same store file.
    */
-  async listCatalog(cwd: string): Promise<{ conversations: ConversationSummary[]; ownedNativeAliases: Set<string> }> {
+  async listCatalog(cwd: string): Promise<{ conversations: ConversationSummary[]; ownedNativeAliases: Set<string>; ownedRunIds: Set<string> }> {
     const stored = await this.deps.store.list(cwd)
     const ownedNativeAliases = new Set(stored.flatMap((conversation) => conversation.bindings.flatMap((binding) =>
       binding.nativeSessionId
         ? [`${binding.providerId}\0${binding.agentProfileId ?? ''}\0${conversation.cwd}\0${binding.nativeSessionId}`]
         : [])))
+    // A conversation's own run is catalogued under that run id before its binding learns
+    // the native session id: a first turn that is still running, or one that never got a
+    // receipt. Without this, a side chat's running turn showed up as a Provider row.
+    const ownedRunIds = new Set(stored.flatMap((conversation) => conversation.turns.flatMap((turn) => {
+      const binding = conversation.bindings.find((candidate) => candidate.id === turn.bindingId)
+      return binding ? [`${binding.providerId}\0${conversation.cwd}\0${turn.runId}`] : []
+    })))
     const conversations = stored
       .filter(conversation => conversation.deletion?.status !== 'complete' || conversation.deletion.retainedCopies)
       .map((conversation) => conversationSummary(conversation, this.active))
-    return { conversations, ownedNativeAliases }
+    return { conversations, ownedNativeAliases, ownedRunIds }
   }
 
   async read(id: string, beforeOrdinal?: number): Promise<ConversationPage> {
