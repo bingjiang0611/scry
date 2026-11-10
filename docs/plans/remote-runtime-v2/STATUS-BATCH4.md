@@ -46,11 +46,30 @@ G1（5 条差异补处理方式 + 守卫断言）与 G2（secret 生命周期改
 |---|---|---|
 | `conversation:send` | 经台账派发，run 只用会话 turn 的 `runId` 一个 id；能落盘的从落盘读取并校验，进程内交接只保留到派发为止，daemon 重启后不重建、不重发 | [P3-conversation-send](P3-conversation-send.md) |
 | daemon → App 推送流 | 排在 L4 剩余各组之前做。新增的流式 op 只在本机端点、`scope: local`，不向远程开放；维护者确认这不违反“协议版本不变” | [P3f](P3f-app-event-stream.md)；E0–E3（含 E1b）见 [b4-l4-events](status/b4-l4-events.md) |
-| userData 独占锁 | 现在做，只在开关打开时生效；不属于 B4-S 的删除工作 | 待设计 |
+| userData 独占锁 | 现在做，只在开关打开时生效；不属于 B4-S 的删除工作 | 开关打开部分已实现，设计见 [P3-userdata-lock](P3-userdata-lock.md)；开关关闭时的情形待决定（下节 1） |
 | S1 门禁 | 改为首 token 的绝对值上限。数值由执行方以数据提出、维护者批准；批准之前沿用现有 S1 门禁，开关仍不得默认打开 | 待提出 |
 | 两本账（远程台账、会话账本）合并 | 不在 B4 做，B4-S 之后再议 | — |
 | 维护者机器上的孤儿 daemon | 维护者自行清理（进程 20198、20201，`/tmp/scry-g1-stuck-*`） | — |
 
-## 需要决定
+## 需要决定（B4-L4 并行一轮之后，2026-11-10）
 
-无。
+各组状态见 [b4-l4-queries](status/b4-l4-queries.md)、[b4-l4-workbench](status/b4-l4-workbench.md)、[b4-l4-session-lifecycle](status/b4-l4-session-lifecycle.md)。
+
+1. **关闭开关的 App 与残留 daemon 同时写 userData**：只靠开关打开一侧堵不住。方案：
+   - A：关闭开关的 App 启动时先读 `scry-userdata.lock`，确认有活着的 daemon 时拒绝写入，弹窗让用户选择「停止后台服务」或「退出」；
+   - B：关闭开关的 App 运行期间自己也持有这把锁；
+   - C：维持现状，只在文档里写明风险。
+
+   执行方建议 A + B。两者都要改开关关闭时的启动路径。
+2. **`workspace:openExternal`、`workspace:trash`**：daemon 没有 `shell`。方案：
+   - A：在矩阵里把路由改成留在 main；
+   - B：daemon 新增一个本机方法，只做校验并返回解析后的路径，再由 App 调 `shell`；
+   - 或者保持拒绝。
+3. **终端（11 个通道）**：要决定三件事：
+   - 输出怎么送到 App：App 端轮询后转发给窗口，还是走事件流；
+   - shell 是否允许活过 App 的退出或崩溃，以及何时回收；
+   - 三处语义差异：`active` 不带 cwd，ack 是增量还是累计，`ready` 的前缀校验。
+4. **长时间的 Git 写操作占用 control lane**：push、fetch、合并等最长 30 秒，这期间停止和回答会排在它后面。是否给长写操作单独开一条 lane？
+5. **`agent:recorderContentPage`**：需要窗口当前的 cwd。可以让闸门替本机 op 补上 cwd，再由 daemon 重新校验；也可以让渲染端请求自带 cwd。
+6. **`agent:listCommands`**：现成的 `commands` op 会丢掉 CapabilityEnvelope，还把不可用显示成空列表。可以让它对 `scope: local` 返回完整 envelope，也可以把这一行改成新的本机 op。
+7. **会话改名、置顶、存档、删除走本机 op 而不是转发**：已实现。设备的 `sessionAction`/`sessionDelete` 规则不同，用了会改变 App 现在的行为。请确认这次路由调整。
