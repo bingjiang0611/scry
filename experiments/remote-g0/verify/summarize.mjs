@@ -172,9 +172,18 @@ export function evaluate({ checks, scenarios, probes }) {
   if (!generations.includes('heartbeat-aware')) rule('R7-offline-fast', false, 'blocked', `relay not redeployed (probe generations: ${generations.join(',') || 'no probe'}); old relay answers 1013 after retries`)
   else if (offlineSamples.length === 0) rule('R7-offline-fast', true, 'blocked', 'no offline-probe event and no host-quit scenario')
   else {
-    const slowest = Math.max(...offlineSamples.map((sample) => sample.ms))
-    const ok = offlineSamples.every((sample) => sample.hostOffline === true) && slowest <= 3000
-    rule('R7-offline-fast', true, ok ? 'pass' : 'fail', `samples=${offlineSamples.length} allHostOffline=${offlineSamples.every((sample) => sample.hostOffline === true)} slowestMs=${slowest} sample=${JSON.stringify(offlineSamples[0])}`)
+    // A sample without a measured duration is missing evidence, not a slow
+    // answer: judge only timed samples, and block when none is timed.
+    const timed = offlineSamples.filter((sample) => Number.isFinite(sample.ms))
+    const untimed = offlineSamples.length - timed.length
+    if (timed.length === 0) rule('R7-offline-fast', true, 'blocked', `samples=${offlineSamples.length} but none has a measured duration`)
+    else {
+      const slowest = Math.max(...timed.map((sample) => sample.ms))
+      // The classification needs no timing: every sample must say offline.
+      const allOffline = offlineSamples.every((sample) => sample.hostOffline === true)
+      const ok = allOffline && slowest <= 3000
+      rule('R7-offline-fast', true, ok ? 'pass' : 'fail', `samples=${timed.length}${untimed ? ` (untimed ignored: ${untimed})` : ''} allHostOffline=${allOffline} slowestMs=${slowest} sample=${JSON.stringify(timed[0])}`)
+    }
   }
 
   // Informational comparisons (never fail the run).

@@ -111,3 +111,16 @@ test('an unproven direct route on the open path fails R5b; a known-baseline chec
     assert.match(status['R1-checks'].detail, /install-mac \(known-baseline without baselineEvidence\)/)
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
+
+test('an offline sample without a duration is missing evidence, never a slow failure', () => {
+  const dir = results({
+    'checks.json': checksPass,
+    'netbench-wifi-relay.jsonl': scenario('wifi-relay', { offline: { hostOffline: true } }),
+    'relay-probe-mac.jsonl': probe(4001)
+  })
+  try {
+    const r7 = run(dir).rules.find((r) => r.id === 'R7-offline-fast')
+    assert.equal(r7.status, 'blocked')
+    assert.match(r7.detail, /none has a measured duration/)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
