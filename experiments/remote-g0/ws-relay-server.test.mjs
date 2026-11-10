@@ -84,10 +84,20 @@ test('shuttles binary both ways, answers pings without forwarding them, and pick
 
 test('reports an offline host fast, waits for a busy live host, and closes silent legs', async (t) => {
   const { leg, ping, device } = await harness(t)
+  // A room no host has touched answers at once: no grace to pay.
   const absent = await device(randomUUID())
   assert.deepEqual(absent.result, { code: 4001, reason: 'host_offline' })
   assert.ok(absent.elapsedMs < 1_200)
-  assert.ok(Number(absent.waitHeader) >= 250)
+  assert.equal(Number(absent.waitHeader), 0)
+
+  // A host whose only leg just closed may be replacing it: grace first.
+  const recycling = randomUUID()
+  const only = await leg(recycling)
+  only.socket.close()
+  await once(only.socket, 'close')
+  const recent = await device(recycling)
+  assert.deepEqual(recent.result, { code: 4001, reason: 'host_offline' })
+  assert.ok(Number(recent.waitHeader) >= 250, `grace waited ${recent.waitHeader} ms`)
 
   const busy = randomUUID()
   const first = await leg(busy)

@@ -8,7 +8,7 @@
 
 | 层 | 改动 | 解决的现象 |
 |---|---|---|
-| Relay（CF Worker/DO） | Mac leg 发文本 ping，运行时自动回 pong 并记录时间（休眠期间也保留）；选证据最新的 leg；无存活 leg 时 600 ms 宽限后关闭 `4001 host_offline`；host 在线但 leg 全忙时最多等 2 s 补位再 `1013`；O(1) 查找；拒绝时也返回等待时长头 | 手机被粘到 Mac 睡眠/断网后残留的死 leg 上，连等 3×8 s 握手超时 |
+| Relay（CF Worker/DO） | Mac leg 发文本 ping，运行时自动回 pong 并记录时间（休眠期间也保留）；选证据最新的 leg；无存活 leg 时关闭 `4001 host_offline`（只有 10 s 内有 host leg 打开、认证或关闭时才先等 600 ms 宽限，覆盖 leg 轮换）；host 在线但 leg 全忙时最多等 2 s 补位再 `1013`；O(1) 查找；拒绝时也返回等待时长头 | 手机被粘到 Mac 睡眠/断网后残留的死 leg 上，连等 3×8 s 握手超时 |
 | Mac host | 每条 WSS leg 10 s ping、30 s 无 pong 判死、检测进程挂起；`powerMonitor` 唤醒/解锁时重建全部 leg；`ping` 操作返回能力集；空闲超时 75 s | 唤醒后长时间不可用、死 leg 不回收 |
 | Mac host | 复用协议：带数字 `id` 的请求并发执行、按 id 乱序回复（每连接最多 32 个） | 4 条隧道 = 4 次冷握手 + 4 条 leg；长轮询占住通道 |
 | Mac host | `watchStream` 推送：运行事件/输出/状态有变化即推送（至少每 15 s 心跳一次），终态或 10 分钟后收尾；`cancel` | 流式输出每批多付一个往返，显得卡顿 |

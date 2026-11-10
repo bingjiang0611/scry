@@ -49,6 +49,13 @@ const LEG_WAIT_MS = 2_000
 // With no live leg at all, wait only long enough to cover a host replacing a
 // recycled leg, then report the host offline.
 const OFFLINE_GRACE_MS = 600
+// That grace is only worth paying when a host leg was opened, admitted or
+// closed this recently. A room with no host activity (a quit or long-asleep
+// Mac, an unused room) answers 4001 at once. The evidence is in memory and is
+// lost if the room hibernates, which needs about this long without events; the
+// worst case is one 4001 near the window's edge, which the phone shows as
+// "Mac offline" and recovers from on its next open.
+const RECENT_HOST_MS = 10_000
 const LEG_WAIT_STEP_MS = 50
 // Application close codes. 1013 keeps its meaning (host reachable, no free
 // leg). 4001 means no live leg at all: the host is offline or asleep, so the
@@ -84,7 +91,9 @@ export class RelayRoom {
     // forwarding a frame no longer deserializes every socket in the room.
     this.byId = new Map()
     // Instance copies so a local fixture can shorten the windows.
-    this.limits = { freshMs: LEG_FRESH_MS, waitMs: LEG_WAIT_MS, offlineGraceMs: OFFLINE_GRACE_MS }
+    this.limits = { freshMs: LEG_FRESH_MS, waitMs: LEG_WAIT_MS, offlineGraceMs: OFFLINE_GRACE_MS, recentHostMs: RECENT_HOST_MS }
+    // Last time a host leg opened, authenticated or closed (in-memory only).
+    this.hostActivityAt = 0
     try {
       state.setWebSocketAutoResponse(new WebSocketRequestResponsePair(HOST_PING, HOST_PONG))
     } catch { /* older runtime: hosts fall back to the manual reply below */ }
@@ -104,6 +113,7 @@ export class RelayRoom {
       const id = newId()
       server.serializeAttachment({ role: 'host', mode, authed: false, id, deviceId: null, openedAt: Date.now() })
       this.byId.set(id, server)
+      this.hostActivityAt = Date.now()
       return new Response(null, { status: 101, webSocket: client })
     }
 
@@ -114,7 +124,8 @@ export class RelayRoom {
     let host = this.#popWarmHost(mode)
     // Judge liveness on arrival: the wait itself must not age the evidence.
     const alive = host ? true : this.#hostAlive()
-    const budget = host ? 0 : alive ? this.limits.waitMs : this.limits.offlineGraceMs
+    const recent = started - this.hostActivityAt <= this.limits.recentHostMs
+    const budget = host ? 0 : alive ? this.limits.waitMs : recent ? this.limits.offlineGraceMs : 0
     while (!host && Date.now() - started < budget) {
       await sleep(LEG_WAIT_STEP_MS)
       host = this.#popWarmHost(mode)
@@ -225,6 +236,7 @@ export class RelayRoom {
         if (!ok) { try { ws.close(1008, 'host_unauthorized') } catch { /* closing */ } return }
         att.authed = true
         ws.serializeAttachment(att)
+        this.hostActivityAt = Date.now()
         console.log(`[relay] host leg authed mode=${att.mode}`)
         return
       }
@@ -245,6 +257,7 @@ export class RelayRoom {
     const att = ws.deserializeAttachment()
     if (att) {
       this.byId.delete(att.id)
+      if (att.role === 'host') this.hostActivityAt = Date.now()
       const peerId = att.role === 'host' ? att.deviceId : att.hostId
       const peer = this.#find(peerId)
       if (peer) { try { peer.close(1000, 'peer_closed') } catch { /* closing */ } }

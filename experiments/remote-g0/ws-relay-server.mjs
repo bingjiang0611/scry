@@ -23,7 +23,8 @@ import { WebSocketServer } from 'ws'
 //   Phones     /?host=<uuid>&mode=run|pair, binary frames only.
 //   A phone is glued to the freshest live leg; with none free it waits up to
 //   2 s for a live host to dial one (1013 no_host_leg), and with no live leg
-//   at all it is closed 4001 host_offline after a 600 ms grace.
+//   at all it is closed 4001 host_offline: after a 600 ms grace when a host leg
+//   opened, authenticated or closed in the last 10 s, otherwise at once.
 
 const HOST_ID = /^[0-9a-f-]{36}$/i
 const MODES = new Set(['run', 'pair'])
@@ -41,7 +42,7 @@ function digestEqual(a, b) {
 
 export function createWsRelayServer({
   adminToken = '', storePath, tls,
-  freshMs = 30_000, waitMs = 2_000, offlineGraceMs = 600, log = () => {}
+  freshMs = 30_000, waitMs = 2_000, offlineGraceMs = 600, recentHostMs = 10_000, log = () => {}
 } = {}) {
   // hostId -> SHA-256 of the room's enrolled token. Persisted atomically.
   const enrolled = new Map(storePath && existsSync(storePath)
@@ -68,6 +69,16 @@ export function createWsRelayServer({
 
   // hostId -> Set of legs { ws, mode, authed, openedAt, lastPingAt, device }
   const rooms = new Map()
+  // hostId -> last time a host leg opened, authenticated or closed. Only rooms
+  // within the window matter, so stale entries are pruned as rooms empty.
+  const hostActivity = new Map()
+  const touchHost = (hostId) => {
+    const now = Date.now()
+    hostActivity.set(hostId, now)
+    if (hostActivity.size > 1024) {
+      for (const [id, at] of hostActivity) if (now - at > recentHostMs) hostActivity.delete(id)
+    }
+  }
   const room = (hostId) => {
     let legs = rooms.get(hostId)
     if (!legs) { legs = new Set(); rooms.set(hostId, legs) }
@@ -121,7 +132,9 @@ export function createWsRelayServer({
   function acceptHost(ws, hostId, mode) {
     const leg = { ws, mode, authed: false, openedAt: Date.now(), lastPingAt: undefined, device: null }
     room(hostId).add(leg)
+    touchHost(hostId)
     const teardown = () => {
+      touchHost(hostId)
       room(hostId).delete(leg)
       if (rooms.get(hostId)?.size === 0) rooms.delete(hostId)
       if (leg.device && leg.device.readyState === OPEN) leg.device.close(1000, 'peer_closed')
@@ -137,6 +150,7 @@ export function createWsRelayServer({
         try { credentials = JSON.parse(text) } catch { credentials = null }
         if (!credentials || !tokenOk(hostId, credentials.token, credentials.enroll === true)) { ws.close(1008, 'host_unauthorized'); return }
         leg.authed = true
+        touchHost(hostId)
         return
       }
       if (leg.device && leg.device.readyState === OPEN) leg.device.send(data, { binary: true })
@@ -147,7 +161,8 @@ export function createWsRelayServer({
     const started = Date.now()
     let leg = pop(hostId, mode)
     const live = leg ? true : alive(hostId)
-    const budget = leg ? 0 : live ? waitMs : offlineGraceMs
+    const recent = started - (hostActivity.get(hostId) ?? 0) <= recentHostMs
+    const budget = leg ? 0 : live ? waitMs : recent ? offlineGraceMs : 0
     while (!leg && Date.now() - started < budget && !socket.destroyed) {
       await new Promise((resolve) => setTimeout(resolve, 50))
       leg = pop(hostId, mode)

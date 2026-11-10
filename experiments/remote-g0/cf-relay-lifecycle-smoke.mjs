@@ -26,7 +26,7 @@ export class RelayRoom extends ProductionRoom {
   constructor(state, env) {
     super(state, env)
     // Short windows so staleness and waiting are observable in seconds.
-    this.limits = { freshMs: 600, waitMs: 1500, offlineGraceMs: 300 }
+    this.limits = { freshMs: 600, waitMs: 1500, offlineGraceMs: 300, recentHostMs: 5000 }
   }
   async fetch(request) {
     const url = new URL(request.url)
@@ -106,7 +106,8 @@ try {
   const rejected = new WebSocket(`${base}/?host=${unavailable}&mode=run`, { closeTimeout: 250 })
   sockets.push(rejected)
   const rejectionEvents = []
-  rejected.on('upgrade', () => rejectionEvents.push('upgrade'))
+  let rejectedWait = null
+  rejected.on('upgrade', (response) => { rejectionEvents.push('upgrade'); rejectedWait = Number(response.headers['x-scry-relay-wait-ms']) })
   rejected.on('open', () => rejectionEvents.push('open'))
   const closed = new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -117,7 +118,9 @@ try {
     rejected.once('error', error => { clearTimeout(timeout); reject(error) })
   })
   assert.deepEqual(await closed, {code: 4001, reason: 'host_offline'})
-  cases.push({ name: 'only closing hosts fails closed as host_offline', passed: true })
+  // Its leg was just opened and recycled, so the room paid the replacement grace.
+  assert.ok(rejectedWait >= 300, `recently active host waited ${rejectedWait} ms`)
+  cases.push({ name: 'only closing hosts fails closed as host_offline after the grace', waitedMs: rejectedWait })
 
   // Current hosts authenticate themselves and ping as text frames.
   async function liveLeg(hostId) {
@@ -140,6 +143,8 @@ try {
     const socket = new WebSocket(`${base}/?host=${hostId}&mode=run`, { closeTimeout: 250 })
     sockets.push(socket)
     const started = Date.now()
+    let waitedMs = null
+    socket.once('upgrade', (response) => { waitedMs = Number(response.headers['x-scry-relay-wait-ms']) })
     const result = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('device outcome timeout')), timeoutMs)
       socket.once('open', () => {
@@ -149,7 +154,7 @@ try {
       socket.once('close', (code, reason) => { clearTimeout(timer); resolve({ code, reason: String(reason) }) })
       socket.once('error', error => { clearTimeout(timer); reject(error) })
     })
-    return { socket, result, elapsedMs: Date.now() - started }
+    return { socket, result, elapsedMs: Date.now() - started, waitedMs }
   }
 
   const pinged = randomUUID()
@@ -204,7 +209,9 @@ try {
   const absent = await dial(randomUUID())
   assert.deepEqual(absent.result, { code: 4001, reason: 'host_offline' })
   assert.ok(absent.elapsedMs < 1500, `offline answer took ${absent.elapsedMs} ms`)
-  cases.push({ name: 'host with no legs reported offline promptly', elapsedMs: absent.elapsedMs })
+  // No host ever touched this room: nothing to wait for.
+  assert.equal(absent.waitedMs, 0)
+  cases.push({ name: 'host with no legs reported offline without a grace', elapsedMs: absent.elapsedMs, waitedMs: absent.waitedMs })
   console.log(JSON.stringify({scope: 'real local workerd + production selection; no deploy/spend', cases}, null, 2))
 } finally {
   for (const socket of sockets) { socket.resume(); socket.terminate() }
