@@ -23,6 +23,9 @@ public struct RelayConnectTiming: Codable, Equatable, Sendable {
   // Time the relay held the phone waiting for a free host leg.
   public var relayWaitMs: Int?
   public var multiplexed: Bool?
+  // "open": on a request's path (the caller waited for it); "upgrade": a
+  // background attempt to move an open relay tunnel onto a direct route.
+  public var phase: String?
   public var error: String?
 
   public init(lane: String, route: String, target: String? = nil, at: Date = Date()) {
@@ -60,8 +63,9 @@ final class ConnectTimingRecorder: @unchecked Sendable {
   private let start = MonotonicClock.nowNanos()
   private var value: RelayConnectTiming
 
-  init(lane: String, route: String, target: String? = nil) {
+  init(lane: String, route: String, target: String? = nil, phase: String = "open") {
     value = RelayConnectTiming(lane: lane, route: route, target: target)
+    value.phase = phase
   }
 
   // First observation wins; a phase is not re-timed by a later event.

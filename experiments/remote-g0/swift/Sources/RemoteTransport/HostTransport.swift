@@ -52,9 +52,16 @@ public final class HostTransportState: @unchecked Sendable {
   private var capabilitiesValue: Capabilities = .unknown
   private var routesValue: [DirectRoute] = []
   private var cooldownUntil: [DirectRoute: UInt64] = [:]
+  // Routes that completed inner mTLS on the current network. Only these are
+  // dialed before the relay; an unproven route is tried in the background
+  // after the relay tunnel is up, so an unreachable advertised address can
+  // never delay an open (measured: 2 x 900 ms per lane without this).
+  private var confirmedAt: [DirectRoute: UInt64] = [:]
 
   // A failed direct route is not retried for this long; the relay serves.
   static let routeCooldownNanos: UInt64 = 60_000_000_000
+  // A confirmation older than this is re-proven in the background first.
+  static let routeConfirmationNanos: UInt64 = 600_000_000_000
 
   private static let registryLock = NSLock()
   nonisolated(unsafe) private static var registry: [String: HostTransportState] = [:]
@@ -129,12 +136,17 @@ public final class HostTransportState: @unchecked Sendable {
 
   // Routes worth dialing now, best first: private LAN only on a local network,
   // overlay addresses always, neither while cooling down after a failure.
-  func candidateRoutes(now: UInt64 = MonotonicClock.nowNanos()) -> [DirectRoute] {
+  // `confirmedOnly` limits the list to routes proven on this network recently:
+  // the only ones allowed on the blocking open path.
+  func candidateRoutes(confirmedOnly: Bool = false, now: UInt64 = MonotonicClock.nowNanos()) -> [DirectRoute] {
     guard Self.directRoutesEnabled.value else { return [] }
     let local = Self.localNetworkAvailable.value
     lock.lock(); defer { lock.unlock() }
     return routesValue.filter { route in
       if let until = cooldownUntil[route], until > now { return false }
+      if confirmedOnly {
+        guard let at = confirmedAt[route], now &- at <= Self.routeConfirmationNanos else { return false }
+      }
       switch route.kind {
       case .localNetwork: return local
       case .overlay: return true
@@ -146,11 +158,28 @@ public final class HostTransportState: @unchecked Sendable {
   func coolDown(_ route: DirectRoute, now: UInt64 = MonotonicClock.nowNanos()) {
     lock.lock(); defer { lock.unlock() }
     cooldownUntil[route] = now &+ Self.routeCooldownNanos
+    confirmedAt[route] = nil
   }
 
-  func confirm(_ route: DirectRoute) {
+  func confirm(_ route: DirectRoute, now: UInt64 = MonotonicClock.nowNanos()) {
     lock.lock(); defer { lock.unlock() }
     cooldownUntil[route] = nil
+    confirmedAt[route] = now
+  }
+
+  // The phone changed networks: what was reachable (or not) before proves
+  // nothing now.
+  func forgetRouteEvidence() {
+    lock.lock(); defer { lock.unlock() }
+    cooldownUntil.removeAll()
+    confirmedAt.removeAll()
+  }
+
+  public static func networkChanged() {
+    registryLock.lock()
+    let states = Array(registry.values)
+    registryLock.unlock()
+    for state in states { state.forgetRouteEvidence() }
   }
 
   private func save() {

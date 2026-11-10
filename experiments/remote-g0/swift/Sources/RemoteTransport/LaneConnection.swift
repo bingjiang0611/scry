@@ -108,10 +108,12 @@ final class LaneConnection: Sendable {
   static func open(endpoint: G0Transport.RelayEndpoint, identity: @Sendable () throws -> G0ProbeIdentity,
                    context: LaneOpenContext) async throws -> LaneConnection {
     let material = try identity()
-    // Direct first: when the phone shares a network (or an overlay) with the
-    // Mac, this skips the relay round trips entirely. Failures cool the route
-    // down and fall through to the relay at once.
-    for route in context.transport.candidateRoutes().prefix(2) {
+    // Direct first, but only over a route already proven on this network:
+    // it skips the relay round trips entirely. Unproven routes are tried in
+    // the background once the relay tunnel is up (RelayLane), so an
+    // unreachable advertised address never delays an open. Failures cool the
+    // route down and fall through to the relay at once.
+    for route in context.transport.candidateRoutes(confirmedOnly: true).prefix(2) {
       try Task.checkCancellation()
       do { return try await openDirect(route: route, material: material, context: context) }
       catch { context.transport.coolDown(route) }
@@ -139,8 +141,9 @@ final class LaneConnection: Sendable {
     return false
   }
 
-  static func openDirect(route: DirectRoute, material: G0ProbeIdentity, context: LaneOpenContext) async throws -> LaneConnection {
-    let recorder = ConnectTimingRecorder(lane: context.lane, route: "direct", target: context.target)
+  static func openDirect(route: DirectRoute, material: G0ProbeIdentity, context: LaneOpenContext,
+                         phase: String = "open") async throws -> LaneConnection {
+    let recorder = ConnectTimingRecorder(lane: context.lane, route: "direct", target: context.target, phase: phase)
     do {
       let innerContext = try G0Transport.innerTLSContext(identity: material, mode: "run")
       let channel = try await G0Transport.connectDirectChannel(route: route, recorder: recorder)

@@ -198,6 +198,25 @@ final class HostTransportStateTests: XCTestCase {
     XCTAssertEqual(state.candidateRoutes(), [])
   }
 
+  func testOnlyProvenRoutesMayBlockAnOpen() {
+    HostTransportState.localNetworkAvailable.value = true
+    let state = HostTransportState(hostId: UUID().uuidString)
+    let lan = DirectRoute(host: "192.168.1.20", port: 4100)
+    let overlay = DirectRoute(host: "100.80.1.2", port: 4100)
+    state.learn(capabilities: ["ping", "mux", "lan"], routes: [lan, overlay])
+    XCTAssertEqual(state.candidateRoutes(confirmedOnly: true), [], "advertised but unproven routes stay off the open path")
+    XCTAssertEqual(state.candidateRoutes(), [lan, overlay], "they remain background upgrade candidates")
+    state.confirm(lan, now: 1_000)
+    XCTAssertEqual(state.candidateRoutes(confirmedOnly: true, now: 2_000), [lan])
+    XCTAssertEqual(state.candidateRoutes(confirmedOnly: true, now: 1_000 + HostTransportState.routeConfirmationNanos + 1), [], "stale proof is re-checked in the background")
+    state.confirm(lan, now: 5_000)
+    state.coolDown(lan, now: 6_000)
+    XCTAssertEqual(state.candidateRoutes(confirmedOnly: true, now: 7_000), [], "a failure withdraws the proof")
+    state.confirm(overlay, now: 8_000)
+    state.forgetRouteEvidence()
+    XCTAssertEqual(state.candidateRoutes(confirmedOnly: true, now: 9_000), [], "a network change withdraws every proof")
+  }
+
   func testLegacyAndForgottenCapabilities() {
     let state = HostTransportState(hostId: UUID().uuidString)
     XCTAssertEqual(state.capabilities, .unknown)

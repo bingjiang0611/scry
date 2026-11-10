@@ -137,7 +137,7 @@ actor RelayLane {
     upgrading = Task { [weak self, identity, context] in
       var direct: LaneConnection?
       do {
-        direct = try await LaneConnection.openDirect(route: route, material: try identity(), context: context)
+        direct = try await LaneConnection.openDirect(route: route, material: try identity(), context: context, phase: "upgrade")
       } catch {
         context.transport.coolDown(route)
       }
