@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'vite'
 import electron from 'electron'
-import { exerciseWorkflowDetail, exerciseWorkflowSurface } from './workflow-surface-ui-checks.mjs'
+import { exerciseWorkflowDetail, exerciseWorkflowFocus, exerciseWorkflowSurface } from './workflow-surface-ui-checks.mjs'
 
 // Workflow surface in a sandboxed Electron renderer at a wide and a narrow pane width.
 // SCRY_WORKFLOW_UI_SCREENSHOT=<dir> also writes one PNG per mode/width for review.
@@ -39,7 +39,13 @@ try {
       try {
         for (const [width, height] of [[1180, 900], [460, 900]]) {
           win.setContentSize(width, height)
-          for (const mode of ['complete', 'running', 'unknown', 'unavailable', 'empty']) {
+          for (const mode of ['complete', 'running', 'unknown', 'unavailable', 'empty', 'focus']) {
+            if (mode === 'focus') {
+              await win.loadFile(${JSON.stringify(join(temp, 'index.html'))}, { query: { mode } })
+              const focus = await win.webContents.executeJavaScript('(' + ${JSON.stringify(exerciseWorkflowFocus.toString())} + ')()')
+              results.push({ width, mode, ...focus })
+              continue
+            }
             await win.loadFile(${JSON.stringify(join(temp, 'index.html'))}, { query: { mode } })
             const result = await win.webContents.executeJavaScript('(' + ${JSON.stringify(exerciseWorkflowSurface.toString())} + ')(' + JSON.stringify(mode) + ')')
             if (result.click) {

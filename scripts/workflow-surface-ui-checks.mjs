@@ -83,3 +83,36 @@ export async function exerciseWorkflowDetail(mode) {
   check(!document.querySelector('.workflow-agent-detail'), 'detail did not close')
   return true
 }
+
+/**
+ * The chat card asked for the first run. The user then picks the second one, and the next
+ * streaming snapshot of the first must not drag the surface back.
+ *
+ * The option list of a `<select>` is an OS-level popup that cannot be driven headlessly, so the
+ * pick dispatches the same `change` a real selection produces. What this check owns is the state
+ * after the pick; the pointer path into the surface is covered by the archive replay smoke.
+ */
+export async function exerciseWorkflowFocus() {
+  const deadline = performance.now() + 5000
+  while (!document.querySelector('.workflow-run-picker')) {
+    if (performance.now() > deadline) throw new Error('[focus] run picker did not render')
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+  }
+  const select = document.querySelector('.workflow-run-picker')
+  const values = [...select.options].map((option) => option.value)
+  if (values.length !== 2) throw new Error(`[focus] expected two runs, got ${values.length}`)
+  if (select.value !== values[0]) throw new Error(`[focus] the requested run must be selected first, got ${select.value}`)
+  const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+  setter.call(select, values[1])
+  select.dispatchEvent(new Event('change', { bubbles: true }))
+  for (let frame = 0; frame < 3; frame += 1) await new Promise((resolve) => requestAnimationFrame(resolve))
+  if (select.value !== values[1]) throw new Error(`[focus] picking the second run did not take: ${select.value}`)
+  const streamNext = window.streamNext
+  if (typeof streamNext !== 'function') throw new Error('[focus] the fixture cannot emit a stream update')
+  streamNext()
+  for (let frame = 0; frame < 3; frame += 1) await new Promise((resolve) => requestAnimationFrame(resolve))
+  if (select.value !== values[1]) throw new Error(`[focus] a stream update dragged the selection back to ${select.value}`)
+  const surface = document.querySelector('.workflow-surface')
+  if (!surface.innerText.includes('agents 6/6')) throw new Error('[focus] the picked run is not the one rendered')
+  return { runs: values.length, selected: select.value }
+}
