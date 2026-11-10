@@ -14,6 +14,7 @@ actor RelayLane {
   private var foreground = false
   private var inFlight = 0
   private var idleClose: Task<Void, Never>?
+  private var refreshing = false
 
   // The host closes an idle serial tunnel after 30 s (75 s for current hosts);
   // close first so a request is never written into a tunnel about to drop.
@@ -128,6 +129,47 @@ actor RelayLane {
     connection = opened
     if foreground { startKeepAlive() }
     if opened.route == "relay" { scheduleDirectUpgrade() }
+    scheduleAdvertisementRefresh(opened)
+  }
+
+  // Remembered capabilities skip the ping that carries the host's current LAN
+  // advertisement, so a Mac that joins Wi-Fi (or moves) stays unreachable
+  // directly for as long as the cache lives. The evidence is on the phone:
+  // `scry.remote.transport.<hostId>` held `routes: []` with a full capability
+  // list while the host advertised 192.168.0.100:47820 and the phone went
+  // through the relay every time. Re-read it once per adopted tunnel, in the
+  // background: the open path never waits for this, and a failed refresh keeps
+  // the old routes instead of failing the lane.
+  private func scheduleAdvertisementRefresh(_ opened: LaneConnection) {
+    guard !refreshing, opened.multiplexed else { return }
+    refreshing = true
+    Task { [weak self, context] in
+      if let reply = try? await Self.advertisement(opened, deviceLabel: context.deviceLabel) {
+        Self.applyAdvertisement(reply, transport: context.transport)
+      }
+      await self?.finishAdvertisementRefresh()
+    }
+  }
+
+  static func advertisement(_ opened: LaneConnection, deviceLabel: String?) async throws -> Data {
+    let request = try RelaySession.keepAliveRequest(Data(#"{"op":"ping"}"#.utf8), deviceLabel: deviceLabel)
+    return try await opened.send(request, limit: 64 * 1_024, timeout: .seconds(10), abortOnCancel: false)
+  }
+
+  // The host's answer is diagnostic only (routes it is willing to serve), and
+  // it never outranks the pinned inner TLS or the device authorization.
+  @discardableResult
+  static func applyAdvertisement(_ reply: Data, transport: HostTransportState) -> [DirectRoute]? {
+    guard let decoded = try? JSONDecoder().decode(PingReply.self, from: reply),
+          let pong = decoded.pong, let capabilities = pong.capabilities else { return nil }
+    transport.learn(capabilities: capabilities, routes: decoded.routes)
+    return transport.routes
+  }
+
+  private func finishAdvertisementRefresh() {
+    refreshing = false
+    // New routes are only useful if the tunnel that found them can move over.
+    if connection?.route == "relay" { scheduleDirectUpgrade() }
   }
 
   // A tunnel through the relay that could go direct: try once in the

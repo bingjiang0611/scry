@@ -231,6 +231,27 @@ final class HostTransportStateTests: XCTestCase {
     XCTAssertEqual(state.candidateRoutes(confirmedOnly: true, now: 9_000), [], "a network change withdraws every proof")
   }
 
+  // A host that starts advertising a LAN address must be noticed by a phone
+  // that already learned its capabilities: the open path skips the ping, so the
+  // advertisement has to come from a refresh. This is the state the phone had
+  // (routes empty, capabilities complete) while the Mac advertised
+  // 192.168.0.100:47820 and every tunnel still went through the relay.
+  func testAdvertisementRefreshLearnsRoutesAfterCapabilitiesWereRemembered() {
+    let state = HostTransportState(hostId: UUID().uuidString)
+    state.learn(capabilities: ["ping", "mux"], routes: [])
+    XCTAssertEqual(state.candidateRoutes(), [], "nothing advertised yet")
+    let reply = Data(#"{"keepAlive":true,"pong":{"serverTime":1,"idleTimeoutMs":75000,"capabilities":["ping","mux","lan"],"lan":{"port":47820,"addresses":["192.168.0.100"]}}}"#.utf8)
+    HostTransportState.localNetworkAvailable.value = true
+    let routes = RelayLane.applyAdvertisement(reply, transport: state)
+    XCTAssertEqual(routes, [DirectRoute(host: "192.168.0.100", port: 47820)])
+    XCTAssertEqual(state.candidateRoutes(), [DirectRoute(host: "192.168.0.100", port: 47820)])
+    // An answer without capabilities is not evidence of anything: keep the old
+    // routes instead of silently emptying them.
+    let stale = Data(#"{"keepAlive":true,"error":"invalid_request"}"#.utf8)
+    XCTAssertNil(RelayLane.applyAdvertisement(stale, transport: state))
+    XCTAssertEqual(state.candidateRoutes(), [DirectRoute(host: "192.168.0.100", port: 47820)])
+  }
+
   func testLegacyAndForgottenCapabilities() {
     let state = HostTransportState(hostId: UUID().uuidString)
     XCTAssertEqual(state.capabilities, .unknown)
