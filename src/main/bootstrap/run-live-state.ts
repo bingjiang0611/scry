@@ -124,6 +124,7 @@ export async function createLiveRunState(deps: {
   let observedSessionId = resume
   const runState: ActiveRun = {
     runId,
+    ...(managedConversation ? { conversationId: managedConversation.conversationId } : {}),
     providerId,
     agentProfileId,
     cwd,

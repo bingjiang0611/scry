@@ -13,7 +13,6 @@ export interface SideChatTabBodyProps {
   onOpenFile?: (target: WorkspaceFileTarget) => void
   onOpenConversation: (conversation: ConversationSummary) => void
   onChanged: () => void
-  onClose: () => void
   /** This body belongs to the child that was just created here. */
   autoFocusComposer?: boolean
   /** The body is mounted; the workspace can forget its one-shot creation marker. */
@@ -44,7 +43,6 @@ export function SideChatTabBody({ summary, onMounted, ...rest }: SideChatTabBody
     onOpenFile={rest.onOpenFile}
     onOpenConversation={rest.onOpenConversation}
     onChanged={rest.onChanged}
-    onClose={rest.onClose}
     {...(rest.autoFocusComposer ? { autoFocusComposer: true } : {})}
   />
 }

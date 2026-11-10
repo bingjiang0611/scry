@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { json, readJsonLines, sideChatDriver } from './side-chat-driving.mjs'
-import { exerciseLargeHistoryDialog } from './side-chat-large-history-ui.mjs'
 
 const MiB = 1024 * 1024
 /** Paged viewer reads must finish inside this budget, or the check fails as incomplete. */
@@ -154,11 +153,6 @@ export async function exerciseSideChatLargeHistory({ cdp, evaluate, check, ipcCo
     check(entry.pages > 0, `a read body never completed: ${json({ id: entry.id, pages: entry.pages })}`)
   }
 
-  // The bodies are reachable over IPC above; this proves a user can open the dialog on the
-  // same child from its parent's panel, read it and page it with real pointer input. It runs
-  // while the parent still exists, because the parent's panel is the only way to a side chat.
-  const dialog = await exerciseLargeHistoryDialog({ driver, evaluate, check, seed, childId, ipcCountsPath })
-
   // A side chat has no entry outside its parent's panel, so deleting the parent deletes it:
   // the previewed scope names it, and its frozen bodies are gone afterwards.
   // A side chat that is still running refuses its parent's delete, so the child's own first
@@ -184,9 +178,9 @@ export async function exerciseSideChatLargeHistory({ cdp, evaluate, check, ipcCo
   }))()`)
   check(afterDelete.status === 'complete' && afterDelete.body === 'refused',
     `the side chat outlived its deleted parent: ${json(afterDelete)}`)
-  return { parentId: seed.conversationId, childId, dialog, parentTurns: seed.turnCount, messageCount: seed.messageCount,
-    archiveBytes: seed.archiveBytes, hugeMessageBytes: seed.hugeMessageBytes, viewerRows: sealed.pages.length,
-    viewerElapsedMs: sealed.elapsedMs, planItems: planShape.missingItems, providerReads: read.reads.length,
+  return { parentId: seed.conversationId, childId, parentTurns: seed.turnCount, messageCount: seed.messageCount,
+    archiveBytes: seed.archiveBytes, hugeMessageBytes: seed.hugeMessageBytes, bodyRows: sealed.pages.length,
+    bodyReadMs: sealed.elapsedMs, planItems: planShape.missingItems, providerReads: read.reads.length,
     childAfterDelete: afterDelete, coverage: preview.coverage }
 }
 

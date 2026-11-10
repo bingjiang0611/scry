@@ -26,6 +26,14 @@ export class DockBadgeState {
     this.clear(this.viewedSessionKey)
   }
 
+  isViewed(sessionKey: string): boolean {
+    return this.viewedSessionKey === sessionKey
+  }
+
+  unview(sessionKey: string): void {
+    if (this.viewedSessionKey === sessionKey) this.viewedSessionKey = null
+  }
+
   markAttention(sessionKey: string, state: DockBadgeAttentionState): void {
     if (!state.needsAttention) return
     if (state.sessionViewed) this.viewedSessionKey = sessionKey
@@ -57,7 +65,7 @@ export class DockBadgeState {
   // 清掉；这是维护者明确接受的取舍，换来不会留下一个永远消不掉的假未读。
   releaseQuestionAttention(sessionKey: string | null, remainingPending: number): void {
     if (!sessionKey || remainingPending > 0) return
-    this.remove(sessionKey)
+    this.clear(sessionKey)
   }
 
   /**

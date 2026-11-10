@@ -1,5 +1,7 @@
 # 侧聊大历史：验证范围与证据（HEAD `66fc489a` 起）
 
+> 后续变更（2026-11-09）：侧聊表面的「查看来源快照」入口、页签名重复标题、关闭按钮与刷新/管理工具条已按 owner 要求移除。本文记录的读取器交互（对话框翻页、Escape 返回焦点）因此不再可复现；冻结正文改由 typed API 读取，相关 UI fixture 与对话框 smoke 已删除，孤儿子会话的正文归属仍由 `side-chat-orphan-reader-checks.mjs` 经 API 验证。历史结论保留原文，不回写。
+
 本文只写“哪一层被证明了、证据在哪、还剩什么”，不重复实现说明。实现与取舍见
 [large-history-fix.md](large-history-fix.md)。当前版本、安装产物与门禁结果见
 [large-history-delivery.md](large-history-delivery.md)；本文保留的是源码冻结时的验证现场。

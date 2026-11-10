@@ -3,14 +3,14 @@
 import { memo, useCallback, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { relTime } from '../format'
 import { sidebarActivity } from '../sidebar-activity'
-import { SIDEBAR_ACTIVITY_COPY as activityCopy, SIDEBAR_PROJECT_COPY as projectCopy } from '../constants/copy'
+import { SIDEBAR_ACTIVITY_COPY as activityCopy, SIDEBAR_PROJECT_COPY as projectCopy, SIDEBAR_SESSION_COPY as sessionCopy } from '../constants/copy'
 import { SidebarActivity } from './SidebarActivity'
 import { SessionRow } from './SidebarSessionRow'
 import { SidebarProjects } from './SidebarProjects'
 import { ProjectDialog } from './SidebarProjectDialog'
 import type { BackgroundWork } from '@shared/background-work'
 import type { ConversationSummary } from '@shared/conversation-api'
-import { sessionAttentionKey } from '@shared/session-attention'
+import { conversationAttentionKey, sessionAttentionKey } from '@shared/session-attention'
 import { Icon } from './primitives/Icon'
 import type { ProjectMeta, SessionMeta } from '../env'
 import type { SessionProviderId } from '@shared/provider'
@@ -182,7 +182,10 @@ export const Sidebar = memo(function Sidebar({
         {draftStore && <SessionDraftIndicator store={draftStore} draftKey={composerDraftKey({ providerId: 'conversation', cwd: conversation.cwd, sessionId: conversation.id })} />}
         <span className="sb-sesstext" title={conversation.cwd}>{conversation.title}</span>
       </span>
-      <span className="sb-session-meta">{conversation.activeRunId ? waitingQuestionRunIds.has(conversation.activeRunId) ? '需回答' : '运行中' : conversation.deletion ? conversation.deletion.status === 'complete' ? '副本待核对' : '删除未完成' : conversation.blockedReason ? '需核对' : `${conversation.turnCount} 轮`}</span>
+      <span className="sb-session-meta">
+        {unreadSessionKeys.has(conversationAttentionKey(conversation.id)) && <span className="sb-unread" role="status" aria-label={sessionCopy.unread} title={sessionCopy.unread} />}
+        {conversation.activeRunId ? waitingQuestionRunIds.has(conversation.activeRunId) ? '需回答' : '运行中' : conversation.deletion ? conversation.deletion.status === 'complete' ? '副本待核对' : '删除未完成' : conversation.blockedReason ? '需核对' : `${conversation.turnCount} 轮`}
+      </span>
     </button>
   </div>
   return (

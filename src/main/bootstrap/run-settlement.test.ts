@@ -39,7 +39,7 @@ function harness(options: {
     runState,
     getObservedSessionId: () => undefined,
     getWindow: () => null,
-    dockBadge: { markAttention: () => undefined },
+    dockBadge: { markAttention: () => undefined, isViewed: () => false },
     scopedSessionKey: (sessionId) => `key:${sessionId}`,
     runs: { isViewed: () => false }
   })

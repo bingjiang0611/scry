@@ -285,6 +285,7 @@ export interface ConversationApi {
   update(id: string, expectedRevision: number, change: ConversationMetadataChange): Promise<ConversationSummary>
   list(cwd: string): Promise<ConversationSummary[]>
   read(id: string, beforeOrdinal?: number): Promise<ConversationPage>
+  setViewed(id: string | null): Promise<void>
   readSideChatSnapshot(id: string, cursor?: string): Promise<SideChatSnapshotBodyPage>
   readItem(id: string, ref: ConversationItemRef): Promise<string>
   preview(id: string, target: ConversationTargetRequest): Promise<ConversationPreview>
