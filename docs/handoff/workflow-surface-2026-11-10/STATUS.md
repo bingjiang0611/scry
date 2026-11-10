@@ -16,6 +16,18 @@
 | E5 | 用量不重复计算 | 已核验（真实语义待 B） | [reports/E.md](reports/E.md) | 总量/分析/落盘只认 `harness/result`；面板任务级用量单独展示，测试用 26,600 vs 1,200 证明不双计 |
 | F | macOS 全量门禁与总结 | 部分完成 | [reports/F.md](reports/F.md) | `test:renderer:ui` 通过；`pack:artifact`（打包+产物校验+Electron 冒烟）通过；`pack` 整体因本机 5,000ms 超时用例为 1，已用 `origin/main` 对照证明与本次改动无关；未安装到 /Applications |
 
+## 第二轮（不用 Claude）
+
+维护者决定先用 OpenCode、Codex、Qoder、Pi `rotom` 验证。做法见 [R2.md](R2.md)。这一轮不能回答 Q1 到 Q11，B 仍阻塞。
+
+| 包 | 条目 | 状态 | 报告 |
+|---|---|---|---|
+| G1 | 四个 Provider 的真实事件负对照，含与 main 的对照 | 未开始 | |
+| G2 | 运行选择被拉回的组件级回归与负对照 | 未开始 | |
+| G3 | 在最新 HEAD 上重跑门禁 | 未开始 | |
+| G4 | C7 与相邻路径收尾 | 未开始 | |
+| G5 | 其他 Provider 接入的设计说明（不实现） | 未开始 | |
+
 ## 审查方核验结论（2026-11-10，Linux x64 容器，Xvfb，非 root，Chromium 沙箱开启）
 
 核验对象：执行方推送的 `c8e47425..aad84eff`（13 个提交，身份均符合 CLAUDE.md）。
