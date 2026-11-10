@@ -178,7 +178,10 @@ stage_netbench() {
   xcrun devicectl device process launch --device "$id" --terminate-existing "$BUNDLE_ID" \
     -- -netBench "-netBenchLabel=$label" "$@" > "$RESULTS/logs/netbench-$label.launch.log" 2>&1 || {
       record "netbench-$label" fail 1 $((SECONDS - started)) "logs/netbench-$label.launch.log"; log "launch failed (device locked?)"; return 1; }
-  rm -f "$raw"
+  # A rerun must not erase a failed attempt: its per-tunnel timings (which
+  # phase stalled, relay wait, colo) are the only evidence of an intermittent
+  # failure. Keep the previous raw file under an attempt name.
+  [ -f "$raw" ] && mv "$raw" "$RESULTS/raw/netbench-$label.attempt-$(date -u +%H%M%SZ).jsonl"
   for _ in $(seq 1 72); do
     sleep 5
     xcrun devicectl device copy from --device "$id" --domain-type appDataContainer --domain-identifier "$BUNDLE_ID" \
@@ -187,6 +190,9 @@ stage_netbench() {
       trim_for_commit "$raw" "$RESULTS/netbench-$label.jsonl"
       local failures; failures="$(grep '"event":"done"' "$raw" | sed -E 's/.*"failures":([0-9]+).*/\1/')"
       local status=pass; [ "$failures" = 0 ] || status=fail
+      # Committed copy of a failed run, including its tunnel timings, so a
+      # passing rerun of the same label cannot overwrite the evidence.
+      [ "$failures" = 0 ] || trim_for_commit "$raw" "$RESULTS/logs/netbench-$label.failed-$(date -u +%H%M%SZ).tail.txt"
       [ "$label" = host-quit ] && status=pass   # expected to fail requests; judged by summarize
       record "netbench-$label" "$status" "$failures" $((SECONDS - started)) "netbench-$label.jsonl"
       log "netbench $label: done, failures=$failures"
