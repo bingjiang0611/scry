@@ -160,16 +160,19 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
     viewportWidth: innerWidth, viewportHeight: innerHeight, deviceScaleFactor: devicePixelRatio,
     turns: document.querySelectorAll('.conversation-chat .turn').length
   } })()`)
-  const overflowing = (state) => Boolean(state.atLatest) && state.scrollHeight - state.clientHeight > 32
+  const overflowing = (state) => state.scrollHeight - state.clientHeight > 32
   let initialScrollState
   try {
+    // Shrink only while the transcript cannot scroll. A viewport that already scrolls is the
+    // one this check is about, so a lost bottom-follow there must fail instead of shrinking on.
     for (const height of [700, 640, 560]) {
       await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1100, height, deviceScaleFactor: 1, mobile: false })
       await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
       initialScrollState = await geometry()
       if (overflowing(initialScrollState)) break
     }
-    assert.ok(overflowing(initialScrollState), `scrollable transcript follows the bottom: ${JSON.stringify(initialScrollState)}`)
+    assert.ok(overflowing(initialScrollState), `the transcript must overflow to test bottom following: ${JSON.stringify(initialScrollState)}`)
+    assert.ok(initialScrollState.atLatest, `scrollable transcript follows the bottom: ${JSON.stringify(initialScrollState)}`)
     const wheelPoint = await evaluate(`(() => {const rect=document.querySelector('.conversation-chat .chat').getBoundingClientRect();return {x:rect.left+10,y:rect.top+30}})()`)
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...wheelPoint, deltaX: 0, deltaY: -10000 })
     await wait(() => evaluate(`document.querySelector('.conversation-chat .chat').scrollTop === 0 && !${atLatest}`), 'user scroll leaves bottom following')
