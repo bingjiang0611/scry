@@ -24,6 +24,18 @@ export function subscribeWorkflowRunRequest(listener: () => void): () => void {
   return () => { listeners.delete(listener) }
 }
 
+/**
+ * Applies a pending request once: returns the requested run when it is loaded and clears the
+ * request, so later stream updates cannot override a run the user picked by hand. A request
+ * for a run that is not loaded yet stays pending until it appears.
+ */
+export function takeWorkflowRunRequest<T extends { id: string; toolUseId?: string }>(runs: readonly T[]): T | undefined {
+  if (!requested) return undefined
+  const run = runs.find((candidate) => candidate.toolUseId === requested)
+  if (run) requestWorkflowRun(undefined)
+  return run
+}
+
 export function useWorkflowRunRequest(): string | null {
   return useSyncExternalStore(subscribeWorkflowRunRequest, workflowRunRequest, workflowRunRequest)
 }
