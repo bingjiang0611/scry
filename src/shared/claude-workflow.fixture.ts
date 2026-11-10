@@ -128,3 +128,53 @@ export function workflowFixtureMessages(options: WorkflowFixtureOptions = {}): W
   }
   return messages
 }
+
+/**
+ * A large fan-out run: `agentCount` agents across two phases, delivered as `snapshots`
+ * full provider snapshots so the normalizer sees the same delta pattern as a real stream.
+ * Used to check the caps (128 rows per event, 2,048 rows, 48 chips) instead of trusting them.
+ */
+export function workflowFixtureLargeMessages({ agentCount, snapshots = 6 }: {
+  agentCount: number
+  snapshots?: number
+}): Wire[] {
+  const taskId = 'wtask-large'
+  const toolUseId = 'toolu_workflow_large'
+  const phases = [
+    { type: 'workflow_phase', index: 1, title: 'scan' },
+    { type: 'workflow_phase', index: 2, title: 'fan' }
+  ]
+  const rows = (settled: number): Wire[] => Array.from({ length: agentCount }, (_, index) => agent(
+    index + 1, (index % 2) + 1, `file-${index}.ts`, 'claude-haiku-4-5',
+    index < settled
+      ? { state: 'done', startedAt: 1_100 + index, agentId: `a-${index}`, tokens: 1_200, toolCalls: 3, durationMs: 4_000 }
+      : { state: 'progress', startedAt: 1_100 + index, agentId: `a-${index}`, lastToolName: 'Read', tokens: 900, toolCalls: 2 }
+  ))
+  const messages: Wire[] = [
+    { type: 'assistant', message: { id: 'msg-large', content: [{ type: 'tool_use', id: toolUseId, name: 'Workflow', input: { script: WORKFLOW_FIXTURE_SCRIPT } }] } },
+    {
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: toolUseId, content: 'Workflow launched in background' }] },
+      tool_use_result: { status: 'async_launched', taskId, taskType: 'local_workflow', workflowName: 'large-fan' }
+    },
+    {
+      type: 'system', subtype: 'task_started', task_id: taskId, tool_use_id: toolUseId, run_id: 'wf_run_large',
+      task_type: 'local_workflow', workflow_name: 'large-fan', description: 'large fan-out', prompt: WORKFLOW_FIXTURE_SCRIPT
+    }
+  ]
+  for (let step = 0; step < snapshots; step++) {
+    const settled = Math.round((agentCount * step) / snapshots)
+    messages.push({
+      type: 'system', subtype: 'task_progress', task_id: taskId, tool_use_id: toolUseId, run_id: 'wf_run_large',
+      description: 'large-fan', last_tool_name: 'Read',
+      usage: { total_tokens: 12_000 * (step + 1), tool_uses: 40 * (step + 1), duration_ms: 30_000 * (step + 1) },
+      workflow_progress: [...phases, ...rows(settled)]
+    })
+  }
+  messages.push({
+    type: 'system', subtype: 'task_notification', task_id: taskId, tool_use_id: toolUseId,
+    status: 'completed', output_file: '/tmp/fixture/tasks/wtask-large.output', summary: 'Dynamic workflow "large-fan" completed',
+    usage: { total_tokens: 900_000, tool_uses: 3_000, duration_ms: 600_000 }
+  })
+  return messages
+}

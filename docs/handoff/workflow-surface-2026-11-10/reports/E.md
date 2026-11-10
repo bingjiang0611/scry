@@ -32,13 +32,38 @@
 
 依赖 Q9（按名称运行、内置 workflow 两种情况）。现有 `script.source`（`tool_input` / `task_started`）与 `phase N` 兜底已能显示，但缺少“标题被 Provider 隐去”的说明文案；B 实测后再补，避免凭猜测写提示语。
 
-## E4 大规模运行的上限与耗时：未开始
+## E4 大规模运行的上限与耗时：完成
 
-计划：用 200–1000 个 agent 的合成快照断言主进程行数上限（128/批、2048 行）、renderer 每阶段节点上限（48）、日志条数上限；再测 `deriveWorkflowRuns` 在流式更新下的耗时，明显时改增量折叠，并按 CLAUDE.md 报告测不到的项为 unavailable。
+新增夹具 `workflowFixtureLargeMessages({ agentCount, snapshots })`（`src/shared/claude-workflow.fixture.ts`）：把 N 个 agent 摊到两个阶段，按真实 `system/task_progress` 全量快照下发，让归一化器走真实的增量分片路径。
 
-## E5 用量诚实：未开始
+| 测试 | 断言 |
+|---|---|
+| `src/main/normalize-workflow.large.test.ts`「1,000 个 agent…」 | 每个 canonical 事件 `rows ≤ 128`；`seq` 从 1 连续；`rowTotal` = 1,002（1,000 agent + 2 阶段行，此处按真实语义计入阶段行）；1,000 个 agent 各只投递一次；`rowsUnrecognized` = 0 |
+| 同上「3,000 个 agent…」 | 跟踪行数封顶 2,048（含 2 行阶段 → 2,046 个 agent）；超出部分记进 `rowsOmitted`，不是静默丢弃 |
+| 同上「归一化耗时」 | 1,000 个 agent × 6 份快照：**8–9 ms** |
+| `src/renderer/workflow-runs.large.test.ts`「1,000 个 agent 折叠」 | 一次运行、2 个阶段各 500 个 agent、终态 completed、日志 ≤ 300 |
+| 同上「每阶段最多渲染 48 个 chip」 | 渲染 chip 96 个（48×2），并显示“还有 452 个” |
+| 同上「超出上限的运行…」 | `agentCount` 2,046、`rowsOmitted > 0`、`logDropped > 0`，面板显示“被省略”说明 |
+| 同上「流式更新耗时」 | 40 次全量重折叠（每次处理 1,000 agent 的历史）：**合计 24–42 ms**，约 0.6–1 ms/次 |
 
-计划：核对 `workflow_usage` 与总览/分析/账单的聚合是否重复计入，重复则修掉并说明数字来源变化。
+结论：不需要改增量折叠。按 CLAUDE.md 的级别说明，这是 L2 级别的**单测内耗时**（同机、单次、无并发），不是 App 端到端毫秒；机器为 macOS 27.3 arm64，测试时本机另有 Electron 冒烟负载，未做空载对照，因此只用于“有没有明显回归”，不作为性能承诺。
+
+节点数上限来自 `WorkflowFlow` 的 `MAX_AGENT_CHIPS = 48`（保留 running/failed 优先），日志上限 `MAX_LOG_ENTRIES = 300`，主进程上限 `MAX_TRACKED_ROWS = 2_048`、`MAX_TRACKED_TASKS = 64`、`WORKFLOW_ROWS_PER_EVENT = 128`。
+
+## E5 用量诚实：完成，没有发现重复计数
+
+核对结论：
+
+- turn 总量、总览、分析、账单都只读 `harness/result` 事件（`resultOf` / `analyzeBilling`）；`workflow_activity` 上的任务级 `usage` 不进任何聚合。
+- 落盘路径同样只认 result：`src/main/bootstrap/run-live-state.ts` 里只有 `ev.kind === 'harness' && ev.stage === 'result'` 才 `appendUsage`（`usage.jsonl` 与 SQLite 同源），workflow 事件不会写第二份。
+- 面板把任务级用量单独呈现，并带“由 Claude Code 上报，是估算值，不是账单”的说明。
+
+测试 `src/renderer/components/workflow-usage.test.tsx`（2 个用例）：
+
+- 同一轮里 workflow 事件上报 26,600 tokens、provider result 上报 1,000/200，`analyzeBilling` 的 `totalTokens` 必须是 **1,200**（若任务级用量漏进总量会是 27,800）。
+- 面板显示 `26.6k` 与 `WORKFLOW_COPY.usageNote`，且不会把本轮 1.2k 当成任务级用量。
+
+未验证：真实 workflow 运行时 provider 的 result 是否已经把 workflow 子 agent 的 token 计入（这属于 provider 语义，需要 B 的真实数据才能确认）。若真实数据表明 result 已含子 agent 用量，面板与总量仍然不会双计，但“任务级用量”与“本轮总量”会有重叠解释，需要在 B 报告里写清。
 
 ## E6 停止控制：不做独立按钮
 
