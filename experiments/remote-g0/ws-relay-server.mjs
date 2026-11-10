@@ -170,10 +170,22 @@ export function createWsRelayServer({
     if (socket.destroyed) return
     // Claim before the async upgrade so a concurrent phone cannot take it.
     const claimed = leg
-    if (claimed) claimed.device = {}
+    const placeholder = {}
+    if (claimed) claimed.device = placeholder
     const waited = Date.now() - started
-    wss.once('headers', (headers) => headers.push(`x-scry-relay-wait-ms: ${waited}`))
+    // Bound to this request: a handshake ws aborts (bad Sec-WebSocket-Key, a
+    // socket closed mid-upgrade) never emits 'headers' or runs the callback,
+    // so neither the header nor the claim may outlive it.
+    const onHeaders = (headers, req) => { if (req === request) headers.push(`x-scry-relay-wait-ms: ${waited}`) }
+    wss.on('headers', onHeaders)
+    let upgraded = false
+    socket.once('close', () => {
+      wss.off('headers', onHeaders)
+      if (!upgraded && claimed && claimed.device === placeholder) claimed.device = null
+    })
     wss.handleUpgrade(request, socket, head, (device) => {
+      upgraded = true
+      wss.off('headers', onHeaders)
       log(`device mode=${mode} leg=${claimed ? 'FOUND' : live ? 'BUSY' : 'OFFLINE'} waitedMs=${waited}`)
       if (!claimed || claimed.ws.readyState !== OPEN) {
         if (claimed) claimed.device = null

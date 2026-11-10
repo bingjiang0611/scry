@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
+import { connect } from 'node:net'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -50,7 +51,7 @@ async function harness(t, options = {}) {
     })
     return { socket, result, elapsedMs: Date.now() - started, waitHeader }
   }
-  return { dir, leg, ping, device }
+  return { dir, leg, ping, device, port }
 }
 
 test('shuttles binary both ways, answers pings without forwarding them, and picks the freshest leg', async (t) => {
@@ -88,7 +89,8 @@ test('reports an offline host fast, waits for a busy live host, and closes silen
   const absent = await device(randomUUID())
   assert.deepEqual(absent.result, { code: 4001, reason: 'host_offline' })
   assert.ok(absent.elapsedMs < 1_200)
-  assert.equal(Number(absent.waitHeader), 0)
+  // No grace: well under the 300 ms window (the header is wall-clock, so 0-2 ms).
+  assert.ok(Number(absent.waitHeader) < 50, `untouched room waited ${absent.waitHeader} ms`)
 
   // A host whose only leg just closed may be replacing it: grace first.
   const recycling = randomUUID()
@@ -120,6 +122,24 @@ test('reports an offline host fast, waits for a busy live host, and closes silen
   assert.deepEqual((await device(stale)).result, { code: 4001, reason: 'host_offline' })
   const [code] = await closed
   assert.equal(code, 1011)
+})
+
+test('an aborted phone handshake does not keep the leg it claimed', async (t) => {
+  const { leg, ping, device, port } = await harness(t)
+  const hostId = randomUUID()
+  const only = await leg(hostId)
+  await ping(only)
+  // No Sec-WebSocket-Key: ws refuses the handshake without running the callback.
+  const raw = connect(port, '127.0.0.1')
+  await once(raw, 'connect')
+  raw.write(`GET /?host=${hostId}&mode=run HTTP/1.1\r\nHost: relay\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n\r\n`)
+  let answer = ''
+  raw.on('data', (chunk) => { answer += chunk })
+  await once(raw, 'close')
+  assert.match(answer, /^HTTP\/1\.1 400/)
+  const phone = await device(hostId)
+  assert.deepEqual(phone.result, { open: true }, 'the leg was released, not left claimed by the aborted request')
+  assert.ok(Number(phone.waitHeader) < 50, `free leg waited ${phone.waitHeader} ms`)
 })
 
 test('enrolls a room token once, persists only its digest, and refuses a takeover', async (t) => {
