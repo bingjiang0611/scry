@@ -149,14 +149,18 @@ export function conversationChannelTable(deps: ConversationTableDependencies) {
         if (original.deletion.fingerprint === fingerprint) return original.deletion.result!
         if (!original.deletion.retainedCopies) throw new Error('对话已删除，没有待核对的保留副本')
       }
-      const { conversation, plan } = await contextAdmission.runMany(original.bindings.map(binding => providerContextKey(binding.providerId, original.cwd, binding.agentProfileId)), async () => {
+      const begin = async () => {
         const conversation = (await conversationStore().read(id))!
         assertConversationDeletionIdle(conversation)
         const plan = await prepareConversationDeletion(conversation)
         if (plan.fingerprint !== fingerprint) throw new Error('删除范围已变化，请重新预览；本次请求未执行清理')
         await conversationStore().beginDeletion(id, plan.revision, fingerprint, plan.reclaim === true)
         return { conversation, plan }
-      })
+      }
+      // A draft that never sent has no Provider context to fence; this call's own
+      // admission above already serializes it.
+      const contexts = original.bindings.map(binding => providerContextKey(binding.providerId, original.cwd, binding.agentProfileId))
+      const { conversation, plan } = contexts.length > 0 ? await contextAdmission.runMany(contexts, begin) : await begin()
       const result: ConversationDeletionResult = {
         ok: false, deleted: [], retained: [
           'workspace .scry/ canonical turn evidence', 'Provider-native session transcript/history',

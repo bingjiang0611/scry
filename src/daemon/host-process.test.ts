@@ -146,13 +146,12 @@ describe('daemon host process', () => {
         op: 'providerContext', method: 'newSession', args: [{ providerId: 'codex', cwd: workspace }]
       })
       expect(newSession).toEqual({ result: true })
-      // Deletion needs the App's session deletion, fork the Provider fork: not yet served.
-      for (const method of ['delete', 'fork']) {
-        const refused = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
-          op: 'conversation', method, args: [created.id]
-        })
-        expect(refused.error).toBe('unsupported_op')
-      }
+      // Fork needs the Provider fork in the daemon: not yet served. (Deletion is served;
+      // see host-process-session-lifecycle.test.ts.)
+      const refused = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'conversation', method: 'fork', args: [created.id]
+      })
+      expect(refused.error).toBe('unsupported_op')
       // A send runs through this daemon's ledger under the caller's grant, with the
       // conversation turn's own run id, so the App can follow it like its own runs.
       const preview = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {

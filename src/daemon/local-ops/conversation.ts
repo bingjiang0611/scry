@@ -25,11 +25,16 @@ export const conversationLocalOps: DaemonLocalOpGroup = (deps) => {
     // through the event feed.
     invalidateSessionHistoryLoad: history.invalidateSessionHistoryLoad,
     publishDataUpdated: (event) => events.append({ kind: 'data', event }),
-    deleteOneSession: async () => { throw new Error('daemon_capability_unavailable:session-delete') },
+    // Session deletion is the session-lifecycle group's; resolved per call.
+    deleteOneSession: async (request, options) => {
+      if (!deps.links.deleteOneSession) throw new Error('daemon_capability_unavailable:session-delete')
+      return await deps.links.deleteOneSession(request, options)
+    },
     resolveSessionRunIds,
     deleteConversationHistory,
     appUserDataDir: deps.userDataDir
   })
+  deps.links.prepareConversationDeletion = table.prepareConversationDeletion
   const ops = withoutEvent(table.handlers)
   ops['conversation:send'] = conversationSend.answer(ops['conversation:send'] as (request: unknown) => Promise<unknown>)
   return ops

@@ -3,7 +3,7 @@
 本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑；改 `scripts/daemon-ipc-routing.json` 后重新生成。
 
 - 生产特权 IPC channel：168 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
-- 留在 main：54，一半 main 一半 daemon（`split`）：4，转发到现有 op：44，需要新增 op：66
+- 留在 main：54，一半 main 一半 daemon（`split`）：4，转发到现有 op：40，需要新增 op：70
 - 新增 op 的请求、响应、授权与调用方范围见 [P3-ipc-ops](P3-ipc-ops.md)；设计正文见 [P3 §13](P3-batch4-design.md)
 - `desktopWorkbench` 转发行（workspace / terminal / sourceControl，共 32 行）见 [P3-ipc-matrix-workbench](P3-ipc-matrix-workbench.md)
 
@@ -34,7 +34,7 @@
 | `agent:chooseFolder` | split | `workspaceSelection:chooseFolder` | navigation | main: 原生目录选择框留在 main；选中后由 daemon 校验 canonical 目录、rememberProject 与 setCurrentCwd | 选择框与持久化分开 |
 | `agent:clipboardImage` | main | `—` | — | — | 剪贴板 |
 | `agent:deleteArchivedSessions` | new-op | `sessionPurge:deleteArchivedSessions` | navigation | — | 批量删除要重放既有 preview/指纹语义 |
-| `agent:deleteSession` | forward | `sessionDelete` | — | 不同：本机走原生确认框且可删未归档；远程只允许已归档、confirm:false。按 grant scope 选策略；确认框留在 main，daemon 只对 scope: local 接受已确认请求 | 既有 sessionDelete |
+| `agent:deleteSession` | new-op | `sessionLifecycle:deleteSession` | navigation | — | App 语义：空 cwd 会话、确认后可删未存档会话、确认框在 App；设备的 sessionAction/sessionDelete 规则不同，不复用 |
 | `agent:detect` | new-op | `providerCatalog:detect` | providers | — | 本机要安装路径、版本与兼容判定；远程设备的 providers 元数据不变 |
 | `agent:detectFast` | new-op | `providerCatalog:detectFast` | providers | — | 快探测只给本机 |
 | `agent:focusedRunSnapshot` | forward | `runState` | — | 等价（同一 run 登记表；只是按焦点取一条） | 权威快照在 daemon |
@@ -66,13 +66,13 @@
 | `agent:removeProject` | new-op | `projectStore:removeProject` | navigation | — | 设备也读项目目录，必须单一写者 |
 | `agent:removeRecentFolder` | split | `projectStore:removeRecentFolder` | navigation | main: 窗口只发请求；删除由 daemon 执行并回新 revision | 授权输入单一写者 |
 | `agent:renameProject` | new-op | `projectStore:renameProject` | navigation | — | 设备也读项目目录，必须单一写者 |
-| `agent:renameSession` | forward | `sessionAction` | — | 等价 | 既有 sessionAction |
+| `agent:renameSession` | new-op | `sessionLifecycle:renameSession` | navigation | — | App 语义：空 cwd 会话、确认后可删未存档会话、确认框在 App；设备的 sessionAction/sessionDelete 规则不同，不复用 |
 | `agent:revealProject` | main | `—` | — | — | 原生 showItemInFolder |
 | `agent:runControls` | new-op | `providerCatalog:runControls` | providers | — | 本机按用户权限模式取 run controls；远程设备受 SCRY_REMOTE_PERMISSION_MODE 约束的路径不变 |
 | `agent:setCwd` | new-op | `workspaceSelection:setCwd` | navigation | — | 当前工作区是 daemon 授权上下文的一部分 |
 | `agent:setProjectPinned` | new-op | `projectStore:setProjectPinned` | navigation | — | 设备也读项目目录，必须单一写者 |
-| `agent:setSessionArchived` | forward | `sessionAction` | — | 等价 | 既有 sessionAction |
-| `agent:setSessionPinned` | forward | `sessionAction` | — | 等价 | 既有 sessionAction |
+| `agent:setSessionArchived` | new-op | `sessionLifecycle:setSessionArchived` | navigation | — | App 语义：空 cwd 会话、确认后可删未存档会话、确认框在 App；设备的 sessionAction/sessionDelete 规则不同，不复用 |
+| `agent:setSessionPinned` | new-op | `sessionLifecycle:setSessionPinned` | navigation | — | App 语义：空 cwd 会话、确认后可删未存档会话、确认框在 App；设备的 sessionAction/sessionDelete 规则不同，不复用 |
 | `agent:start` | forward | `submit` | — | 不同：远程用 SCRY_REMOTE_PERMISSION_MODE、走 resolveRemoteProjectDirectory、detail 字段更少；本机用用户权限模式（含 full_access）并允许空 cwd 会话。按 grant scope 选策略，两者都不缩水 | 既有 submit（带 intentId） |
 | `agent:stats` | new-op | `usage:stats` | analytics | — | usage 来自 daemon 持有的 SQLite 与 usage JSONL |
 | `agent:steer` | new-op | `runControl:steer` | controls | — | run 登记表在 daemon |

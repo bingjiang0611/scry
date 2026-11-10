@@ -21,6 +21,7 @@
 | `recorderContent` | local | evidence | { op:'recorderContent', method, cwd, cursor } | 现有 recorder content page | 已验证 peer + authorize(cwd) + `.scry` 路径校验 |
 | `runControl` | local | controls | { op:'runControl', method, runId, payload } | 现有 run 控制结果 | 已验证 peer + run 归属 + authorize(cwd) |
 | `sessionHistory` | local | history | { op:'sessionHistory', method:'loadSession'|'loadSessionOlder', args } | loadSession：{ page, selection }（App 应用 selection 后把 page 交给 renderer）；loadSessionOlder：与 main 同一 handler 的页 | 已验证 peer + scope: local（只在本机端点存在）；会话须属于 daemon 的 App catalog，cwd 经 resolveKnownProjectDirectory 重验 |
+| `sessionLifecycle` | local | navigation | { op:'sessionLifecycle', method, args }（App 渲染端参数原样） | main 同一处理函数的返回值（DeleteSessionResult / boolean） | 本机 grant；daemon 内与进程内相同的 contextAdmission、统一对话写入校验与运行中会话判定；删除确认框由 App 在发送前弹出 |
 | `sessionPurge` | local | navigation | { op:'sessionPurge', method, request } | 现有批量删除结果（逐条 preview 与指纹） | 已验证 peer + authorize(cwd) + 指纹确认与逐条预览 |
 | `sessionStore` | local | navigation | { op:'sessionStore', method:'listSessions'|'catalogHealth'|'listArchivedSessions', args } | 现有 appSessionStore 结果（健康、归档列表） | 已验证 peer + authorize(context.cwd) + provider/profile |
 | `skills` | local | providers | { op:'skills', method, context } | 现有 skill 列表 envelope | 已验证 peer + authorize(context.cwd) + provider 白名单 |

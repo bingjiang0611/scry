@@ -88,9 +88,9 @@ describe('trusted main IPC registration', () => {
       const event = { sender, senderFrame: mainFrame } as unknown as IpcMainInvokeEvent
       let handler: Handler = () => { throw new Error('unregistered') }
       const privileged = vi.fn(() => 'in-process answer')
-      registerTrustedIpcHandler({ handle: (_channel, listener) => { handler = listener } }, 'conversation:delete', () => win, mainFrame.url, privileged)
+      registerTrustedIpcHandler({ handle: (_channel, listener) => { handler = listener } }, 'remote:pairing:cancel', () => win, mainFrame.url, privileged)
       expect(() => handler({ ...event, sender: {} } as IpcMainInvokeEvent)).toThrow('非可信 renderer')
-      expect(() => handler(event)).toThrow('daemon_capability_unavailable:conversation:delete')
+      expect(() => handler(event)).toThrow('daemon_capability_unavailable:remote:pairing:cancel')
       expect(privileged).not.toHaveBeenCalled()
     } finally {
       if (previous === undefined) delete process.env.SCRY_HOST_DAEMON

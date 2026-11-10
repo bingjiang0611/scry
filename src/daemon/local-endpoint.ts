@@ -16,7 +16,8 @@ export type { DaemonLocalEndpointDeps } from './local-ops/deps'
 // run controls bound to its live runs, and the App event feed. A paired device on the
 // network endpoint reaches none of it. Each group of channels lives in local-ops/.
 
-export function daemonLocalEndpoint(deps: DaemonLocalEndpointDeps): LocalEndpointHandlers {
+export function daemonLocalEndpoint(endpointDeps: DaemonLocalEndpointDeps): LocalEndpointHandlers {
+  const deps = { ...endpointDeps, links: {} }
   return {
     // Steering and background-task stops are bound to the live run, so they answer from
     // this process's registry and cannot be replayed from another process.

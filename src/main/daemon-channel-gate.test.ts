@@ -18,13 +18,13 @@ const routeOf = (channel: string) => routing.find((row) => row.channel === chann
 describe('daemon mode channel gate', () => {
   it('leaves every handler untouched while the switch is off', () => {
     const listener = vi.fn()
-    expect(gateDaemonChannel('conversation:delete', listener, off)).toBe(listener)
+    expect(gateDaemonChannel('remote:pairing:cancel', listener, off)).toBe(listener)
   })
 
   it('refuses a channel that has not been migrated without running its handler', () => {
     const listener = vi.fn(() => 'in-process answer')
-    const gated = gateDaemonChannel('conversation:delete', listener, on)
-    expect(() => gated()).toThrow('daemon_capability_unavailable:conversation:delete')
+    const gated = gateDaemonChannel('remote:pairing:cancel', listener, on)
+    expect(() => gated()).toThrow('daemon_capability_unavailable:remote:pairing:cancel')
     expect(listener).not.toHaveBeenCalled()
   })
 

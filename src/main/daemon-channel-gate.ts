@@ -92,6 +92,36 @@ export function installDaemonChannelResultHandler(channel: string, handle: (valu
   return () => { if (resultHandlers.get(channel) === handle) resultHandlers.delete(channel) }
 }
 
+/** What the App does before the daemon is asked: go ahead (maybe with other arguments), or answer itself. */
+export type DaemonChannelGuardOutcome = { args: unknown[] } | { result: unknown }
+
+const guards = new Map<string, (args: unknown[]) => Promise<DaemonChannelGuardOutcome>>()
+
+/**
+ * A channel whose App part comes first: a confirmation dialog the daemon cannot show
+ * (decided: dialogs stay in main). Answering `result` means the daemon is never asked.
+ */
+export function installDaemonChannelGuard(channel: string, guard: (args: unknown[]) => Promise<DaemonChannelGuardOutcome>): () => void {
+  guards.set(channel, guard)
+  return () => { if (guards.get(channel) === guard) guards.delete(channel) }
+}
+
+async function guarded(channel: string, args: unknown[], ask: (args: unknown[]) => Promise<unknown>): Promise<unknown> {
+  const guard = guards.get(channel)
+  const outcome = guard ? await guard(args) : { args }
+  if ('result' in outcome) return outcome.result
+  const value = await ask(outcome.args)
+  const after = resultHandlers.get(channel)
+  return after ? after(value, outcome.args) : value
+}
+
+/** Ask the daemon for one local-op channel directly, without its guard: for a guard's own reads. */
+export async function callDaemonChannel(channel: string, args: unknown[]): Promise<unknown> {
+  const local = DAEMON_LOCAL_OP_CHANNELS[channel]
+  if (!local || !forwarder) throw new Error(`daemon_capability_unavailable:${channel}`)
+  return await forwarder({ op: local.op, method: local.method, args, read: local.read })
+}
+
 export type DaemonRunFollower = (ledger: { runId: string; seq?: number }) => Promise<{ runId: string; bound: boolean }>
 
 let follower: DaemonRunFollower | undefined
@@ -138,19 +168,17 @@ export function gateDaemonChannel<TListener extends (...args: never[]) => unknow
     // main would have run, so its own validation applies unchanged.
     return ((async (_event: unknown, ...args: unknown[]) => {
       if (!forwarder) throw new Error(`daemon_capability_unavailable:${channel}`)
-      const value = await forwarder({ op: local.op, method: local.method, args, read: local.read })
-      const after = resultHandlers.get(channel)
-      return after ? after(value, args) : value
+      return await guarded(channel, args, (sent) => forwarder!({ op: local.op, method: local.method, args: sent, read: local.read }))
     }) as unknown) as TListener
   }
   const forward = DAEMON_FORWARD_CHANNELS[channel]
   if (forward) {
     return ((async (_event: unknown, ...args: unknown[]) => {
       if (!requestForwarder) throw new Error(`daemon_capability_unavailable:${channel}`)
-      const reply = await requestForwarder(forward.request(args), forward.read)
-      const value = forward.result ? forward.result(reply, args) : reply
-      const after = resultHandlers.get(channel)
-      return after ? after(value, args) : value
+      return await guarded(channel, args, async (sent) => {
+        const reply = await requestForwarder!(forward.request(sent), forward.read)
+        return forward.result ? forward.result(reply, sent) : reply
+      })
     }) as unknown) as TListener
   }
   return ((() => { throw new Error(`daemon_capability_unavailable:${channel}`) }) as unknown) as TListener

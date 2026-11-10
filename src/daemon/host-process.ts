@@ -296,6 +296,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     localEndpoint: daemonLocalEndpoint({
       catalog, workspace, providers, pi, session, history, historyChannels, conversationSend, events,
       runs: () => pipeline.runs,
+      requestRunStop,
       startupManagedRecovery: () => startupManagedRecovery,
       userDataDir: options.userDataDir
     }),

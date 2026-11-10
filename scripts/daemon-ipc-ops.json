@@ -141,6 +141,16 @@
         "local"
       ]
     },
+    "sessionLifecycle": {
+      "path": "navigation",
+      "request": "{ op:'sessionLifecycle', method, args }（App 渲染端参数原样）",
+      "response": "main 同一处理函数的返回值（DeleteSessionResult / boolean）",
+      "authorize": "本机 grant；daemon 内与进程内相同的 contextAdmission、统一对话写入校验与运行中会话判定；删除确认框由 App 在发送前弹出",
+      "why": "App 自己的会话语义（空 cwd、确认后删除未存档会话）与设备 sessionAction/sessionDelete 不同，不能复用设备 op",
+      "scopes": [
+        "local"
+      ]
+    },
     "sessionPurge": {
       "path": "navigation",
       "request": "{ op:'sessionPurge', method, request }",

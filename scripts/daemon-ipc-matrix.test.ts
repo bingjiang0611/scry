@@ -100,7 +100,7 @@ describe('daemon IPC routing matrix', () => {
   it('documents every new op next to its channels', () => {
     const ops = readFileSync(OPS_DOC, 'utf8')
     const used = new Set(matrix.rows.filter((row: { route: string }) => row.route === 'new-op').map((row: { target: string }) => row.target.slice(0, row.target.lastIndexOf(':'))))
-    expect(used.size).toBe(20)
+    expect(used.size).toBe(21)
     for (const op of used) expect(ops).toContain(`| \`${op}\` |`)
     expect(join(OPS_DOC).endsWith('P3-ipc-ops.md')).toBe(true)
   })
