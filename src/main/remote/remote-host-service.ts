@@ -280,9 +280,12 @@ export class RemoteHostService {
   // The Mac woke or its network changed: outbound relay legs from before are
   // presumed dead. Replace every leg, including ones carrying phone lanes, so
   // the relay stops gluing phones to sockets that no longer reach this host.
-  refreshRelay(): void {
+  // `includeActive` also drops legs carrying phone lanes: right after a wake
+  // they are presumed dead. Without it only idle legs are replaced, which
+  // never interrupts a phone that is using the Mac.
+  refreshRelay(options: { includeActive?: boolean } = { includeActive: true }): void {
     if (this.#disposed) return
-    for (const client of this.#clients) client.refresh({ includeActive: true })
+    for (const client of this.#clients) client.refresh({ includeActive: options.includeActive === true })
   }
 
   // Display-safe snapshot for the pairing screen.
