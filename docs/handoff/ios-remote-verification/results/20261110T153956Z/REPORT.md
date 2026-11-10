@@ -34,6 +34,11 @@
 | R5-direct | 手机确实学到 Mac 的局域网地址：`capabilities` 含 `lan`，`directRoutes=[{192.168.0.100, 47820}]`（`netbench-wifi-auto.jsonl` / `netbench-wifi-relay.jsonl` 的 `tunnels` 事件）；但两条 lane 的直连升级都 `Connect timeout (900 ms)`。证据：`logs/evidence-mac-lan-interfaces.txt`。 | 环境限制：这台 Mac 的 `en0` 是合成网卡（`ether 02:00:00:00:00:00`；网关 192.168.0.1 能 ping 通 2.6 ms，但 `arp -an` 全程为空），手机在物理 Wi-Fi 上无法到达 192.168.0.100。逐项核对任务给的 5 条：①Scry 在听 `*:47820`（`lsof` 见证据文件）；②macOS 防火墙已关闭（`State = 0`）；③iOS 本地网络权限未单独验证（见未验证项）；④`directRoutes` 见上；⑤同一网段假设不成立——Mac 这一侧不是物理局域网。 | 本轮真正的修复是**让手机学到地址**（提交 `8ec746a5`）：修之前手机持久化的状态是 `{"routes":[],"capabilities":[...,"mux",...]}`（`logs/evidence-phone-transport-state.before-fix.txt`），带 `mux` 就跳过 ping，而 ping 是唯一读局域网广播的地方，所以永远学不到。修之后 `capabilities` 含 `lan`、`directRoutes` 非空，两条 lane 都发起了直连升级。 | R5 的「直连可用」需要在真机上重测：把 Scry 跑在**物理 Wi-Fi 网卡**的 Mac 上（`en0` 有真实 MAC、`arp` 能解析网关），手机同一网段。本工作树所在宿主是合成网卡，无法验收这一条。 |
 | R7-offline-fast | 三个场景的 offline probe 分别 2354.3 / 3277.6 / 1842.1 ms，全部 `hostOffline=true`；最慢 3277.6 ms 超 3000 ms 门槛。证据：三个 `netbench-*.jsonl` 的 `offline-probe`。 | **未定位**。所有样本都正确判定「Mac 不在线」，只是其中一个样本多花了约 1 s（≈ 一次重试或一次额外 TLS 往返）。relay 侧 `relayWaitMs=0`、`4001 host_offline` 已确认（`relay-probe-mac.jsonl`），第三轮同样条件下曾 1371.6 / 1855.4 ms 通过，说明这里是抖动而不是回归。 | 未改代码。`summarize.mjs` 的门槛按要求未动。 | 需要在网络安静时重测一次；若稳定超门槛，再查 `openRelayOnce` 里 250/800 ms 重试序列是否被 uncleanShutdown 类错误触发。 |
 
+## 核验者更正（见 `TASK.md`「第四轮核验结论与第五轮」）
+
+- R2 的 31 s 卡顿：失败记录的 31 次打开尝试都没有 `tcpMs`，说明手机到 Cloudflare 的 TCP 都没连上，relay 根本没收到连接。上文"同一设备的旧中继腿还没消失就重连"的归因因此不成立，撤回。"强制结束后立即重启会触发"这个触发条件仍然成立。
+- R5：上文"en0 是合成网卡"是推断，未证实；iOS 本地网络权限也还没核实，所以失败原因暂时不能定为环境限制。第五轮将用 `waitingReason` 来判断。
+
 ## 修复提交
 
 | 提交 | 现象 | 根因 | 验证方式 |

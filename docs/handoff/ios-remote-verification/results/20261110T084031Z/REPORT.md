@@ -13,7 +13,7 @@
 
 - Verdict：**incomplete**（`SUMMARY.md` / `acceptance.json`，**只覆盖每个阶段的最后一次运行**）。按最后一次运行，没有必需规则失败；`R5-direct` 是 blocked（Mac 不在手机所在局域网），因此判定为 incomplete 而不是 pass。
 - 通过：`R1-checks`（`ios-checks` 的四项失败记为已知基线：它们在 main 基线上同样复现；"基线复现即豁免"原是核验者定的规则，**维护者 2026-11-10 确认保留**，因此 R1 记为通过）、`R2-netbench-clean` ×2、`R3-transport` ×2（mux + 5 项能力）、`R4-relay-only`、`R5b` ×2（`phase=open` 失败直连 0 次）、`R6-catalog` ×2（3/3 confirmed）、**`R7-offline-fast` 通过**（样本 1371.6 ms 与 1855.4 ms，都 ≤3000 ms）。
-- **单列、不被重跑抵消**：`wifi-relay` 前两次尝试冷开全部失败（`I/O on closed channel`，约 31.1 s，原因未定位，见下文「现象」第 1 条与核验者更正），第三次重跑通过。第一次有原始日志支持（`logs/attempt1-netbench-wifi-relay.tail.txt`，5/5 失败）；**第二次的数量只是事后手写记录**（`logs/attempt2-note.tail.txt`，原始文件已被覆盖），未经核实。`SUMMARY.md` / `acceptance.json` 只反映最后一次运行，因此 `R2-netbench-clean` 显示为通过；**维护者 2026-11-10 决定：只记录，不计入本轮验收**；再次复现时按 `TASK.md` 第三轮核验结论保留失败那次的分阶段计时，再定位。
+- **单列、不被重跑抵消**：`wifi-relay` 前两次尝试冷开全部失败（`I/O on closed channel`，约 31.1 s，原因未定位，见下文「现象」第 1 条与核验者更正），第三次重跑通过。第一次有原始日志支持（`logs/attempt1-netbench-wifi-relay.tail.txt`，5/5 失败）；**第二次的数量只是事后手写记录**（`logs/attempt2-note.tail.txt`，原始文件已被覆盖），未经核实。`SUMMARY.md` / `acceptance.json` 只反映最后一次运行，因此 `R2-netbench-clean` 显示为通过；**维护者 2026-11-10 决定：只记录，不计入本轮验收**；再次复现时按 `ROUNDS.md` 第三轮核验结论保留失败那次的分阶段计时，再定位。
 
 ## 本轮改动的验证
 
@@ -64,7 +64,7 @@
 1. **`wifi-relay` 阶段前两次尝试，冷开都失败**（第一次 5/5，有原始日志；第二次的数量是事后手写记录，**未经核实**）：错误都是 `I/O on closed channel`、约 31.1 s 后报错（原因未定位；"≈ 内层握手 30 s 超时"的归因已由核验者撤回，见下方更正），而同一次运行的 catalog（15.2 s / 33 会话）、三次 confirmed 刷新、history（945 ms）都正常，`done.failures=5`。第一次的原始输出保留在 `logs/attempt1-netbench-wifi-relay.tail.txt`；第二次（09:15Z）据手写记录表现相同，其文件随后被成功那次覆盖，数量只记在 `logs/attempt2-note.tail.txt`（无法与原始输出核对）。
    - 期间的旁证：`wrangler tail scry-relay` 在同一窗口出现 8 次 `[relay] host leg authed mode=run`，说明 Mac 的 host leg 在反复重连；relay 对设备侧报的是 `hostLeg=FOUND waitedMs=0`，即 relay 认为 host 在线并把字节转发出去，而手机的内层握手没有回应，直到 30 s 超时。这与"host leg 陈旧、relay 仍判活"的现象一致，是 relay/host 存活判定的覆盖空白，不是本轮三处改动能引入的行为（本轮 phone 侧只改了 `settle`，relay 侧只改了宽限预算）。
    - 同一构建、同一 relay 在 08:58Z、09:17Z、09:20Z 三次手工 `--console` 运行全部 `failures=0`（`logs/diag-netbench-console.tail.txt`），随后两个正式阶段也 `failures=0`。因此我把它记为**未定位的间歇问题**，没有改代码：现有证据不足以区分"host leg 陈旧"与"设备侧握手在特定时序下不推进"，需要在 relay 侧记录 leg 的打开/关闭与转发失败。
-   - **核验者更正（见 `TASK.md`「第三轮核验结论」）**：上面"约 31 s ≈ 内层握手 30 s 超时"和"host leg 陈旧"的归因不成立，已撤回。内层握手超时在手机上报 `timedOut(lane-handshake)`，这里报的却是 `I/O on closed channel`，与外层建连（TCP + 外层 TLS + WebSocket 升级）的 10 s 看门狗一致；31.1 s 也等于 3 次 × 10 s 加 0.25 s + 0.8 s 重试间隔。这是**推断**：失败那次的分阶段计时没有留下，卡在外层哪一段、是否另有原因都未证实。结论是**未定位的间歇性失败**，不是已修复。验证脚本已改为保留失败运行的计时，下次复现即可定位。
+   - **核验者更正（见 `ROUNDS.md`「第三轮核验结论」）**：上面"约 31 s ≈ 内层握手 30 s 超时"和"host leg 陈旧"的归因不成立，已撤回。内层握手超时在手机上报 `timedOut(lane-handshake)`，这里报的却是 `I/O on closed channel`，与外层建连（TCP + 外层 TLS + WebSocket 升级）的 10 s 看门狗一致；31.1 s 也等于 3 次 × 10 s 加 0.25 s + 0.8 s 重试间隔。这是**推断**：失败那次的分阶段计时没有留下，卡在外层哪一段、是否另有原因都未证实。结论是**未定位的间歇性失败**，不是已修复。验证脚本已改为保留失败运行的计时，下次复现即可定位。
 2. **设备与负载**：iPhone 两次从 USB 上消失（`devicectl` 报 `unavailable`，`system_profiler` 看不到 iOS 设备），一次 `devicectl` 启动被拒（`invalid code signature … profile has not been explicitly trusted`，重新在手机上信任后恢复）；同一时段 `load average` 一度到 168，一次从设备拷结果的循环卡住超过 15 分钟，直到我 `kill -9` 卡住的阶段。这些都需要人工插入 USB 或解锁，不是代码问题。
 
 ## 未验证项与原因
@@ -76,4 +76,4 @@
 ## 最终判定
 
 - `summarize.mjs` Verdict：**incomplete**。按每个阶段的最后一次运行，必需规则里没有失败项（`wifi-relay` 前两次失败不在其中，见上文「判定」）；`R5-direct` blocked（Mac 不在手机所在局域网），`R7-offline-fast` 已通过。规则表全文见同目录 `SUMMARY.md`。
-- 一句话：第三轮的两处修复都按预期生效——relay 立即回 `4001`（`relayWaitMs` 600 → 0），手机只等一条 lane，离线答复 1.37–1.86 s，R7 通过且门限未动；冷开 P90 同时从 3742.8 ms 降到 3060.4 ms。唯一遗留是过程中两次冷开全部失败的间歇现象（约 31 s 后报 `I/O on closed channel`，原因未定位；第一次 5/5 有原始日志，第二次的数量未经核实），定位需要失败那次的分阶段计时（见 `TASK.md` 第三轮核验结论）；维护者决定只记录、不计入本轮验收。
+- 一句话：第三轮的两处修复都按预期生效——relay 立即回 `4001`（`relayWaitMs` 600 → 0），手机只等一条 lane，离线答复 1.37–1.86 s，R7 通过且门限未动；冷开 P90 同时从 3742.8 ms 降到 3060.4 ms。唯一遗留是过程中两次冷开全部失败的间歇现象（约 31 s 后报 `I/O on closed channel`，原因未定位；第一次 5/5 有原始日志，第二次的数量未经核实），定位需要失败那次的分阶段计时（见 `ROUNDS.md` 第三轮核验结论）；维护者决定只记录、不计入本轮验收。
