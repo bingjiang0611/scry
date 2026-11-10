@@ -21,7 +21,9 @@ const UDID = /\b[0-9A-F]{8}-[0-9A-F]{16}\b/g
 const HOME = /(\/Users|\/home)\/(?!<user>)[^/\s"'\\]+/g
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g
 const SIGNING = /(Apple (?:Development|Distribution)|iPhone (?:Developer|Distribution)|Developer ID Application): [^"\n)]*\(([A-Z0-9]{10})\)/g
-const CERT_HASH = /(identityHash=)[0-9A-F]{40}/g
+// A signing certificate's SHA-1 appears as identityHash=… (electron-builder)
+// and as `--sign <hash>` (codesign, swift-stdlib-tool in xcodebuild logs).
+const CERT_HASH = /(identityHash=|--sign\s+)[0-9A-F]{40}\b/g
 // Not part of a longer dotted/word token (keeps versions like swiftlang-6.3.3.1.3).
 const IPV4 = /(?<![\w.-])(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?![\w.])/g
 
