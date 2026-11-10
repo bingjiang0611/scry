@@ -138,9 +138,22 @@ stage_restart_mac() {
   step restart-mac bash -c "HOST_APP='$HOST_APP'; $(declare -f log host_running quit_scry open_scry); quit_scry && open_scry"
 }
 
+# The app built here is installed on the phone, so its build directory must be
+# one only this user controls, even when SCRY_VERIFY_RESULTS points somewhere
+# shared: refuse a symlink or a directory owned by someone else, and keep it
+# mode 700. install-ios re-checks before installing what is inside.
+private_build_dir() {
+  local dir="$IOS_BUILD_DIR"
+  if [ -L "$dir" ]; then log "refusing $dir: it is a symlink"; return 1; fi
+  if [ -e "$dir" ] && [ ! -O "$dir" ]; then log "refusing $dir: not owned by $(id -un)"; return 1; fi
+  mkdir -p "$dir" && chmod 700 "$dir" || { log "cannot create private $dir"; return 1; }
+  [ -O "$dir" ] && [ ! -L "$dir" ] || { log "refusing $dir after creation"; return 1; }
+}
+
 stage_build_ios() {
   local id; id="$(device_id)" || { skip build-ios "no device id"; return 1; }
   if [ -z "${SCRY_IOS_DEVELOPMENT_TEAM:-}" ]; then skip build-ios "SCRY_IOS_DEVELOPMENT_TEAM not set"; return 1; fi
+  private_build_dir || { record build-ios fail 1 0 "-"; return 1; }
   step build-ios xcodebuild -project apps/ios/ScryRemote.xcodeproj -scheme ScryRemote -configuration Debug \
     -sdk iphoneos -destination "id=$id" -derivedDataPath "$IOS_BUILD_DIR" \
     DEVELOPMENT_TEAM="$SCRY_IOS_DEVELOPMENT_TEAM" PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
@@ -149,6 +162,7 @@ stage_build_ios() {
 
 stage_install_ios() {
   local id; id="$(device_id)" || { skip install-ios "no device id"; return 1; }
+  private_build_dir || { record install-ios fail 1 0 "-"; return 1; }
   step install-ios xcrun devicectl device install app --device "$id" "$APP_PATH"
 }
 
