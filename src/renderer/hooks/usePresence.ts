@@ -93,8 +93,14 @@ export function usePresence({ onClose, exitMs, onExitStart }: PresenceOptions): 
       const remaining = Math.max(0, Math.min(fallbackMs, closeStart + fallbackMs + exitCeilingMs - Date.now()))
       timer.current = setTimeout(finish, remaining)
     }
+    const exitAnimationRunning = (): boolean => node?.getAnimations().some(animation => {
+      const endTime = animation.effect?.getComputedTiming().endTime
+      return Number.isFinite(endTime) && animation.playState === 'running'
+    }) ?? false
     const onAnimationEnd = (event: AnimationEvent): void => {
-      if (event.target === node) finish()
+      // One node can carry several exit animations. Finishing on the shortest one deleted the
+      // node 53ms after its animation start on CI while a longer animation still ran.
+      if (event.target === node && !exitAnimationRunning()) finish()
     }
     // A busy main thread can start the exit animation dozens of milliseconds after the state
     // change. Re-anchoring the fallback at the real animation start preserves the full exit

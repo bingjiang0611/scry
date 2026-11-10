@@ -143,6 +143,9 @@ export async function exerciseSideChatRuntime({ cdp, evaluate, check, ipcCountsP
   await wait(`document.querySelector('.app.right-panel-hidden') == null`)
   await wait(`document.querySelector('${CHILD_PANEL} .side-chat-surface') != null`)
   await wait(`document.querySelector('${CHILD_PANEL} .runtime-composer .run-status') != null`, 20000)
+  // The surface resubscribes on mount, so the transcript replays after the run status appears;
+  // a same-tick read raced that replay on CI.
+  await wait(`document.querySelector('${CHILD_PANEL} .chat-body')?.textContent.includes('holding hidden') ?? false`, 10000)
   const reopened = await evaluate(`(() => ({
     childId: document.querySelector('${CHILD_PANEL} .side-chat-surface')?.dataset.sideChatId ?? null,
     running: document.querySelector('${CHILD_PANEL} .runtime-composer .run-status') != null,
@@ -155,7 +158,6 @@ export async function exerciseSideChatRuntime({ cdp, evaluate, check, ipcCountsP
   check((reopenedCounts['runTraces:subscribe'] ?? 0) >= 1,
     `reopening must resubscribe the visible child's run: ${json(reopenedCounts)}`)
   check(await activeChildRun() === hiddenRun, 'reopening showed another run than the one that kept going')
-  check(reopened.text, `the reopened child must show its own streamed text: ${json({ reopened })}`)
   await stopChild()
   await settleTurn('side chat hold hidden')
 

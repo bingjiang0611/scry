@@ -13,9 +13,12 @@ vi.mock('react', () => ({
 }))
 vi.mock('react-dom', () => ({ flushSync: (callback: () => void) => { harness.flushes++; callback() } }))
 
+type StubAnimation = { playState: string; effect: { getComputedTiming: () => { endTime: number } } }
 class PresenceNode extends EventTarget {
   dataset = { state: 'enter' }
   inert = false
+  animations: StubAnimation[] = []
+  getAnimations() { return this.animations }
 }
 let documentEvents: EventTarget
 let media: { matches: boolean }
@@ -68,6 +71,26 @@ describe('overlay presence lifecycle', () => {
     expect(p.onClose).toHaveBeenCalledOnce()
     expect(p.onClose).toHaveBeenCalledWith('escape')
     expect(p.onExitStart).toHaveBeenCalledOnce()
+  })
+  it('waits for every finite exit animation before closing', () => {
+    const p = mount()
+    const longer: StubAnimation = { playState: 'running', effect: { getComputedTiming: () => ({ endTime: 320 }) } }
+    p.node.animations = [longer]
+    p.requestClose('button')
+    // CI removed one node 53ms after its animation start because a shorter animation ended first.
+    p.node.dispatchEvent(new Event('animationend'))
+    expect(p.onClose).not.toHaveBeenCalled()
+    longer.playState = 'finished'
+    p.node.dispatchEvent(new Event('animationend'))
+    expect(p.onClose).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+  it('ignores an endless ambient animation when the exit finishes', () => {
+    const p = mount()
+    p.node.animations = [{ playState: 'running', effect: { getComputedTiming: () => ({ endTime: Infinity }) } }]
+    p.requestClose('button')
+    p.node.dispatchEvent(new Event('animationend'))
+    expect(p.onClose).toHaveBeenCalledOnce()
   })
   it('uses exitMs + 40 when animationend is missing', () => {
     const p = mount()
