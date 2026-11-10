@@ -14,6 +14,15 @@
 
 第 3 次是为了把 `pack` 因单测超时没能走到的打包段单独跑出来：`pack` 本身仍是退出码 1，但打包、产物校验与 Electron 冒烟都真实执行并通过（产物 `dist/mac-arm64/Scry.app`，未安装到 `/Applications`）。
 
+打包段这次的实测结果与旧笔记相反，值得记录：`check:packaged-app` 与 `smoke:electron` 都是直接对 `dist/mac-arm64/Scry.app` 跑的，没有出现 `local.md` 里写的 `Killed: 9` 路径拦截（`reports/A.md` 也沿用了那条旧结论）。这次产物用 `Apple Development` 身份签名后可以运行；`check:packaged-app` 输出的 `appPath` 就是 `dist/`。
+
+补跑（按 `~/.config/agent-config/local.md` 建议的串行方式）：
+
+| 命令 | 结果 | 日志 |
+|---|---|---|
+| `npm run test:unit -- --maxWorkers=1` | `Tests 5 failed \| 5751 passed \| 4 skipped (5760)`，失败仍是那 5 个 spawn 型超时（pacman ×4、concurrency ×1） | `/tmp/scry-f-logs/unit-serial.log` |
+| `npx vitest run scripts/check-pacman-package.test.mjs scripts/concurrency-trace-launcher.test.ts --testTimeout=60000` | **11 passed**，说明这 5 个用例的代码路径没问题，只是本机 load average 10–15 时单次 spawn 超过仓库的 5,000ms | 同上（诊断，不改变门禁） |
+
 第 1 次的 10 个失败逐个判定：
 
 | 失败 | 判定 | 依据 |

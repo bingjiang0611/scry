@@ -15,7 +15,7 @@
 | E3 脚本 / 阶段不可得 | **部分完成** | `reports/E.md`：脚本不可得的两种说明已有测试；阶段没有独立声明时原来把合成标题说成已声明，已修并改成正文可见提示 |
 | E4 大规模运行 | **完成，待核验** | `reports/E.md`：1,000/3,000 agent 夹具；行数 / chip / 日志 / 上限都有断言；归一化 8–9ms、40 次重折叠 24–42ms，不需要增量折叠 |
 | E5 用量诚实 | **完成，待核验** | `reports/E.md`：任务级 26,600 tokens 不进 `analyzeBilling`（只 1,200），面板单独展示并带说明 |
-| F 门禁与总结 | **部分完成** | `reports/F.md`：`test:renderer:ui` 通过；`pack:artifact` 通过；`pack` 整体因本机 5,000ms 超时用例拿不到 0，已用未改动 `origin/main` 对照证明与本次改动无关 |
+| F 门禁与总结 | **部分完成** | `reports/F.md`：`test:renderer:ui` 通过；`pack:artifact`（含 `check:packaged-app` 与 `smoke:electron`）通过；`pack` 整体因本机 5,000ms spawn 超时拿不到 0，已用未改动 `origin/main` 对照 + 放大超时后 11/11 通过证明与本次改动无关 |
 
 ## Q1–Q11 的一句话答案
 
@@ -35,12 +35,12 @@
 
 - **所有真实 Provider 行为**：Q1–Q11、运行中/失败/停止截图、真实按名称运行、用量是否与真实账单一致、停止按钮对运行中 workflow 的真实效果。
 - **其他 Provider 空态**（C7）：本机装了 pi/codex/opencode/qoder，但冒烟用的临时 userData 没有注册，未在测试实例里打开过。
-- **`npm run pack` 整体退出码**：本机超时用例导致 1；打包段单独通过。
+- **`npm run pack` 整体退出码**：本机超时用例导致 1（串行也一样 5 个）；打包段单独通过，放大超时后这 5 个用例 11/11 通过。
 - **`test:renderer:ui` 与 `pack` 的证据版本**是 `db5b07be`，之后 `ccb9ea40` 的 renderer 改动只跑了 typecheck / build / 受影响单测 / 归档回放。
 - **真实重启恢复的真实运行版本**：归档回放证明了「从磁盘读回」，但真实运行中还涉及未收敛的运行时状态。
 
 ## 建议维护者决定
 
 1. **给这台机器一个可用 Claude 通道**（官方 key / 网关容量 / 指定其他合规模型），B 与 C 的运行态、E2 就能收尾。这是唯一的外部阻塞。
-2. **`npm run pack` 在本机的 5,000ms 超时**：是否要把这批 spawn 型测试的超时按机器能力显式调高（属于放宽门禁，需要你批准），还是接受本机只能拿到「单测段超时 + 打包段通过」的证据。
+2. **`npm run pack` 在本机的 5,000ms 超时**：这 5 个 spawn 型用例（`check-pacman-package` ×4、`concurrency-trace-launcher` ×1）在 load average 10–15 时稳定超时，放大到 60s 后 11/11 通过，未改动 `origin/main` 上同样超时。是否按机器能力显式调高这几个用例的超时（属于放宽门禁，需要你批准），还是接受本机只能拿到「单测段 5 个超时 + 打包段通过」的证据。
 3. **`docs/cli-team-rollout-readme-drafts/`** 未跟踪文件不是本轮产物，按约定没有动。
