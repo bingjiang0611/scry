@@ -1,4 +1,4 @@
-# P3f daemon → App 事件流：E0、E1、E1b、E2
+# P3f daemon → App 事件流：E0、E1、E1b、E2、E3
 
 设计见 [P3f](../P3f-app-event-stream.md)。上级状态见 [b4-l4](b4-l4.md)。
 
@@ -124,7 +124,34 @@ E2 改变了流式文本到达 App 的方式，所以 macOS 上需要按 S1 的�
 - 同上范围的 vitest：4527 passed / 4 failed / 3 skipped，四条失败与之前相同，都是 root 环境原因；
 - `index.ts` 在性能路径里，跑了 `npm run performance:measure`：Ratchet 通过，没有 `worse`。
 
+## E3：别处发起的 run 自动出现
+
+进程内，手机发起的 run 能出现在窗口里，是因为每个 run 的 trace 都会送到窗口。daemon 模式下，窗口只收到它在跟随的 run 的事件，所以别处发起的 run 只有在 renderer 调用 `agent:activeRuns` 时才会出现。
+
+E2 的 run 通知已经会点名每个变化的台账 run。所以 E3 不新增通知种类，只补两件事：
+
+| 层 | 改动 |
+|---|---|
+| daemon | 台账在发出事件时一并给出该 run 的意图序号；run 通知带上 `intentSeq`，表示这个 run 的证据从哪里开始 |
+| App | `DaemonRunDiscovery`：收到一个本窗口没在跟随的 run 的通知，就查一次 daemon 的 live 列表（与 `agent:activeRuns` 依据相同），跟随列表里每个还没跟随的 run，有意图序号的从那里开始 watch，不从台账开头翻页。同一时刻只查一次；查询期间又来了通知，就再查一次。已结束的 run 不跟随。丢失通知后的重新同步也会查一次 |
+| 整理 | 事件流的接线（数据通知、run 唤醒、发现、角标）集中到 `daemon-run-events.ts`。daemon 模式和集成测试用同一份接线，测试测的就是生产接法 |
+
+测试：
+
+- `daemon-run-discovery.test.ts`：从意图序号开始跟随；一串通知只查一次，期间来的通知再查一次；已结束和已跟随的不跟随；live 列表里没被通知点名但无人跟随的也跟随；查询失败后能继续；
+- `daemon-run-concurrency.test.ts` 新增 E3：手机发起的 run 不经 renderer 调用就被跟随，文本到达窗口，只查了一次 live 列表；
+- `scope-policy.test.ts`：每条 run 通知都带该 run 的意图序号；
+- 真实 daemon：会话发送产生的 run 通知带有 `intentSeq`，且等于提交回执的序号。
+
+控制实验：run 通知不交给发现 → E3 测试失败；恢复后通过。
+
+门禁（Linux 容器，root）：
+
+- `npm run typecheck` 通过；
+- 同上范围的 vitest：4532 passed / 4 failed / 3 skipped，四条失败与之前相同；
+- 改动的文件都不在性能路径的 `sources` 里。
+
 ## 未做
 
-- E3 run 集合。
+- 未在 macOS 与真实 App 中验证 E1b、E3。
 - 未在 macOS 与真实 App 中验证；E2 的毫秒影响未测。

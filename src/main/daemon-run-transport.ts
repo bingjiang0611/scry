@@ -280,7 +280,10 @@ export class DaemonRunTransport {
     const items = events.items.flatMap((raw): DaemonEventReply['items'] => {
       if (!record(raw)) return []
       if (raw.kind === 'data' && isDataUpdated(raw.event)) return [{ kind: 'data', event: raw.event }]
-      if (raw.kind === 'run' && isDaemonRunId(raw.runId)) return [{ kind: 'run', runId: raw.runId }]
+      if (raw.kind === 'run' && isDaemonRunId(raw.runId)) {
+        const intentSeq = Number.isSafeInteger(raw.intentSeq) && (raw.intentSeq as number) > 0 ? raw.intentSeq as number : undefined
+        return [{ kind: 'run', runId: raw.runId, ...(intentSeq !== undefined ? { intentSeq } : {}) }]
+      }
       if (raw.kind === 'attention' && isAttentionSnapshot(raw.snapshot)) return [{ kind: 'attention', snapshot: raw.snapshot }]
       return []
     })

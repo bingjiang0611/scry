@@ -285,7 +285,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     // reasons for analytics, LLM performance and MCP trust.
     toolPanels: undefined,
     managedLaunches: conversationSend.launches,
-    onRunActivity: (runId) => events.append({ kind: 'run', runId }),
+    onRunActivity: (runId, intentSeq) => events.append({ kind: 'run', runId, ...(intentSeq !== undefined ? { intentSeq } : {}) }),
     localEndpoint: daemonLocalEndpoint({
       catalog, workspace, providers, pi, session, history, historyChannels, conversationSend, events,
       runs: () => pipeline.runs,

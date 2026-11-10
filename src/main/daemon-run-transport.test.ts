@@ -177,7 +177,7 @@ describe('daemon run transport', () => {
     const { value, calls } = transport(() => ({ events: { epoch: 'e1', cursor: 3, items: [
       { kind: 'data', event: { kind: 'conversation_changed', conversationId: 'c1' } },
       { kind: 'data', event: { runId: RUN, kind: 'turn_recorded' } },
-      { kind: 'run', runId: RUN },
+      { kind: 'run', runId: RUN, intentSeq: 12 },
       // A newer daemon's notice this App does not know yet is skipped, not guessed at.
       { kind: 'attention', snapshot: {} },
       { kind: 'run', runId: 7 },
@@ -187,7 +187,7 @@ describe('daemon run transport', () => {
       epoch: 'e1', cursor: 3, reset: false, items: [
         { kind: 'data', event: { kind: 'conversation_changed', conversationId: 'c1' } },
         { kind: 'data', event: { runId: RUN, kind: 'turn_recorded' } },
-        { kind: 'run', runId: RUN }
+        { kind: 'run', runId: RUN, intentSeq: 12 }
       ]
     })
     expect(calls[0]).toEqual({ request: { op: 'appEvents', epoch: 'e1', cursor: 1, waitMs: 20_000 }, options: { replayable: true } })

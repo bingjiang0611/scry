@@ -248,7 +248,8 @@ describe('daemon host process', () => {
         op: 'appEvents', epoch: handshake.events.epoch, cursor: changed.events.cursor, waitMs: 0
       })
       // E2: the run that changed is named, under the ledger id the App follows.
-      expect(afterRun.events.items).toContainEqual({ kind: 'run', runId: sent.result.ledger.runId })
+      // E3: with where its evidence starts, so a window that never saw it can follow it.
+      expect(afterRun.events.items).toContainEqual({ kind: 'run', runId: sent.result.ledger.runId, intentSeq: sent.result.ledger.seq })
       // The run pipeline's own notice, which the daemon's window sink used to drop.
       expect(afterRun.events.items).toContainEqual({ kind: 'data', event: { runId: sent.result.runId, kind: 'turn_recorded' } })
       // E1b: a finished run that nobody viewed is unread in the daemon. This daemon cannot

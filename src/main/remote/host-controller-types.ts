@@ -157,7 +157,8 @@ export interface HostControllerDependencies {
   onDispatchRefused?(input: { detail?: string; grantScope: 'local' | 'remote'; error: unknown }): void
   // A run's ledger events or output changed (P3f E2): the App's event feed names the
   // run so only that run re-reads. Observation only; it never fails the run.
-  onRunActivity?(runId: string): void
+  // `intentSeq` is where the run's ledger evidence starts (E3).
+  onRunActivity?(runId: string, intentSeq?: number): void
   // Snapshot of host-authorized project directories a device may target. Absent
   // => the device sees an honest empty list (never a fabricated one).
   listProjects?(): RemoteProjectRef[]

@@ -113,7 +113,7 @@ describe('daemon event pump', () => {
     const live: boolean[] = []
     const { source: events, requests } = source([
       { epoch: 'e1', cursor: 1, items: [], reset: false },
-      { epoch: 'e1', cursor: 2, items: [{ kind: 'run', runId: 'ledger-1' }], reset: false },
+      { epoch: 'e1', cursor: 2, items: [{ kind: 'run', runId: 'ledger-1', intentSeq: 5 }], reset: false },
       new DaemonRunError('daemon_not_running'),
       { epoch: 'e1', cursor: 2, items: [], reset: false }
     ])
@@ -123,7 +123,7 @@ describe('daemon event pump', () => {
     pump.start()
     await vi.waitFor(() => expect(requests.length).toBe(5))
     pump.dispose()
-    expect(onRun).toHaveBeenCalledWith('ledger-1')
+    expect(onRun).toHaveBeenCalledWith('ledger-1', 5)
     // Live after the first answer; not while the feed is failing, so runs long-poll
     // on their own; live again once it answers, and every run re-reads what it missed.
     expect(live.slice(0, 3)).toEqual([true, false, true])

@@ -35,7 +35,7 @@ async function deviceKeyAndCSR() {
   return { keyPEM: `-----BEGIN PRIVATE KEY-----\n${b64}\n-----END PRIVATE KEY-----\n`, csrPEM: csr.toString('pem') }
 }
 
-async function harness(onDispatchRefused?: (input: { detail?: string; grantScope: 'local' | 'remote'; error: unknown }) => void, onRunActivity?: (runId: string) => void) {
+async function harness(onDispatchRefused?: (input: { detail?: string; grantScope: 'local' | 'remote'; error: unknown }) => void, onRunActivity?: (runId: string, intentSeq?: number) => void) {
   const directory = mkdtempSync(join(tmpdir(), 'scry-scope-policy-'))
   dirs.push(directory)
   const identity = await ensureHostIdentity(join(directory, 'identity'))
@@ -251,5 +251,9 @@ describe('scope policy (L3: submit and sessionDelete read the verified grant)', 
     await vi.waitFor(() => expect(activity.mock.calls.length).toBeGreaterThanOrEqual(3))
     // Intent, dispatch and output all name this run, and only this run.
     expect(new Set(activity.mock.calls.map(([id]) => id))).toEqual(new Set([runId]))
+    // E3: every notice carries where the run's evidence starts, so a client that never
+    // saw it can follow it from its intent instead of walking the ledger from 0.
+    const { seq } = controller.submitIntent(local, { intentId: 'local-activity', detail })
+    expect(new Set(activity.mock.calls.map(([, intentSeq]) => intentSeq))).toEqual(new Set([seq]))
   })
 })

@@ -1,6 +1,6 @@
 # P3f · daemon → App 事件流
 
-状态：维护者 2026-11-10 批准做推送流（新增流式 op 只在本机端点、`scope: local`，见 [STATUS-BATCH4](STATUS-BATCH4.md)）。按 E0–E3 分段实现，E0、E1、E1b、E2 已完成，见 [b4-l4-events](status/b4-l4-events.md)。
+状态：维护者 2026-11-10 批准做推送流（新增流式 op 只在本机端点、`scope: local`，见 [STATUS-BATCH4](STATUS-BATCH4.md)）。按 E0–E3 分段实现，E0、E1、E1b、E2、E3 已完成，见 [b4-l4-events](status/b4-l4-events.md)。
 
 ## 现在缺什么
 
@@ -84,7 +84,7 @@ type AppEvent =
 | E1 | 事件缓冲、`appEvents` op、`events` lane、App 侧事件 pump；承载 `data`；删除 App 替 daemon 发 `conversation_changed` 的绕行 | daemon 真实 socket 测试：一个 turn 记录后窗口收到 `turn_recorded`；`reset` 路径测试 |
 | E1b | 未读角标：`attention` 事件，加上 App → daemon 的「已查看」op，闸门放行 `agent:unreadSessions` | 角标与进程内一致：daemon 里结束的 run 标为未读，在 App 里查看后清除 |
 | E2 | `run` 唤醒；`DaemonRunRuntime` 改为按唤醒读取 | E0 的测试通过；单 run 的流式粒度与 S1 的计时脚本相比不变差（毫秒测量串行持锁，标明负载） |
-| E3 | `runs` 事件；`activeRuns` 不再每次都轮询 `liveRuns` | 手机发起的 run 不经过 renderer 调用也会出现在窗口 |
+| E3 | 不新增 `runs` 事件：E2 的 run 通知加上意图序号，App 收到不认识的 run 就查一次 live 列表并跟随（实现时的修正，见 status） | 手机发起的 run 不经过 renderer 调用也会出现在窗口 |
 
 ## E1 实现时的修正
 

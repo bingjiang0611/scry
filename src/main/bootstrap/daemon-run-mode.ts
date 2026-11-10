@@ -5,7 +5,7 @@ import { daemonLaunchTarget, spawnDaemonSupervisor } from './daemon-launch'
 import { unsafeCredentialStorageReason } from './remote-connections'
 import { ensureDaemon, type DaemonLaunch, type DaemonProbe } from '../daemon-supervisor'
 import { DaemonRunRuntime } from '../daemon-run-runtime'
-import { DaemonEventPump } from '../daemon-event-pump'
+import { startDaemonRunEvents } from '../daemon-run-events'
 import type { DockBadgeState } from '../dock-badge'
 import { DaemonRunTransport } from '../daemon-run-transport'
 import { laneForRequest } from '../remote/desktop-lane'
@@ -174,24 +174,17 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
     ...(deps.onWarn ? { onWarn: deps.onWarn } : {})
   })
   const surface = createDaemonRunSurface({ transport, runtime, currentCwd: deps.currentCwd })
-  // What the daemon changes outside any run read (P3f): one long poll on its own lane.
-  // Run notices wake the run they name, so runs read on change instead of each holding
-  // a long poll on the shared watch lane (E2).
-  const events = new DaemonEventPump({
-    source: transport, send: deps.send, ...(deps.onWarn ? { onWarn: deps.onWarn } : {}),
-    onRun: (runId) => runtime.wake(runId), onResync: () => runtime.wakeAll(), onLive: (live) => runtime.setWakesLive(live),
-    onAttention: (snapshot) => deps.dockBadge?.setDaemon(snapshot, deps.isWindowFocused?.() ?? false)
+  const events = startDaemonRunEvents({
+    transport, runtime, send: deps.send,
+    ...(deps.dockBadge ? { dockBadge: deps.dockBadge } : {}),
+    ...(deps.isWindowFocused ? { isWindowFocused: deps.isWindowFocused } : {}),
+    ...(deps.onWarn ? { onWarn: deps.onWarn } : {})
   })
-  // Viewing is idempotent: a lost report is repaired by the next snapshot and view.
-  deps.dockBadge?.bindDaemon((sessionKey) => {
-    void transport.attentionViewed(sessionKey).catch((error) => deps.onWarn?.('daemon attention viewed failed', error))
-  })
-  events.start()
   return {
     status: 'ready',
     version,
     surface,
-    dispose: () => { events.dispose(); deps.dockBadge?.forgetDaemon(); runtime.dispose(); client.close() }
+    dispose: () => { events.dispose(); runtime.dispose(); client.close() }
   }
 }
 

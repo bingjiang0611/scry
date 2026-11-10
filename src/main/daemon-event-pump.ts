@@ -10,7 +10,7 @@ import { DaemonRunError } from './daemon-run-transport'
 export interface DaemonEventReply {
   epoch: string
   cursor: number
-  items: Array<{ kind: 'data'; event: AgentDataUpdated } | { kind: 'run'; runId: string } | { kind: 'attention'; snapshot: SessionAttentionSnapshot }>
+  items: Array<{ kind: 'data'; event: AgentDataUpdated } | { kind: 'run'; runId: string; intentSeq?: number } | { kind: 'attention'; snapshot: SessionAttentionSnapshot }>
   reset: boolean
 }
 
@@ -25,8 +25,8 @@ export interface DaemonEventPumpDeps {
   retry?: { initialMs: number; maxMs: number }
   sleep?: (ms: number) => Promise<void>
   onWarn?: (message: string, detail?: unknown) => void
-  // E2: a ledger run changed; read it.
-  onRun?: (runId: string) => void
+  // E2: a ledger run changed; read it. `intentSeq` is where its evidence starts (E3).
+  onRun?: (runId: string, intentSeq?: number) => void
   // Notices may have been lost; every run re-reads.
   onResync?: () => void
   // Whether runs can rely on wakes, or must long-poll on their own.
@@ -96,7 +96,7 @@ export class DaemonEventPump {
         missed = false
         for (const item of reply.items) {
           if (item.kind === 'data') send('agent:dataUpdated', item.event)
-          else if (item.kind === 'run') this.#deps.onRun?.(item.runId)
+          else if (item.kind === 'run') this.#deps.onRun?.(item.runId, item.intentSeq)
           else this.#deps.onAttention?.(item.snapshot)
         }
         epoch = reply.epoch

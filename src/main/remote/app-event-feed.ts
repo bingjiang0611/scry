@@ -11,7 +11,7 @@ import type { SessionAttentionSnapshot } from '../../shared/session-attention'
 export type AppEvent =
   | { kind: 'data'; event: AgentDataUpdated }
   // A ledger run's events or output changed (E2); the App reads that run, nothing else.
-  | { kind: 'run'; runId: string }
+  | { kind: 'run'; runId: string; intentSeq?: number }
   // The daemon's whole unread set (E1b): state, so only the newest one matters.
   | { kind: 'attention'; snapshot: SessionAttentionSnapshot }
 

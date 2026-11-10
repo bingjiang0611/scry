@@ -3,7 +3,7 @@ import { DaemonRunRuntime } from './daemon-run-runtime'
 import { DaemonRunTransport } from './daemon-run-transport'
 import { TraceOutputBridge, type TraceBatch } from './trace-output'
 import { laneForRequest } from './remote/desktop-lane'
-import { DaemonEventPump } from './daemon-event-pump'
+import { startDaemonRunEvents } from './daemon-run-events'
 
 // P3f E0: two runs on one daemon connection.
 //
@@ -16,7 +16,9 @@ import { DaemonEventPump } from './daemon-event-pump'
 
 const RUN_A = '1a2b3c4d-1111-4a3f-9a2e-2f2c1a4b5d6e'
 const RUN_B = '1a2b3c4d-2222-4a3f-9a2e-2f2c1a4b5d6e'
-const CANONICAL: Record<string, string> = { [RUN_A]: 'remote-run-aaaa-0', [RUN_B]: 'remote-run-bbbb-0' }
+// Started by a phone: this window never submitted it.
+const RUN_PHONE = '1a2b3c4d-3333-4a3f-9a2e-2f2c1a4b5d6e'
+const CANONICAL: Record<string, string> = { [RUN_A]: 'remote-run-aaaa-0', [RUN_B]: 'remote-run-bbbb-0', [RUN_PHONE]: 'remote-run-cccc-0' }
 
 function daemon() {
   const lanes = new Map<string, Promise<unknown>>()
@@ -26,9 +28,14 @@ function daemon() {
   const output = new Map<string, number>()
   const text = new Map<string, string>()
   // The daemon's App event feed: run notices, answered at once or on the next one.
-  const notices: Array<{ kind: 'run'; runId: string }> = []
+  const notices: Array<{ kind: 'run'; runId: string; intentSeq?: number }> = []
+  const live = new Set<string>()
+  const liveRequests: number[] = []
   const noticeWaiters: Array<() => void> = []
-  const notice = (runId: string) => { notices.push({ kind: 'run', runId }); for (const wake of noticeWaiters.splice(0)) wake() }
+  const notice = (runId: string, intentSeq?: number) => {
+    notices.push({ kind: 'run', runId, ...(intentSeq !== undefined ? { intentSeq } : {}) })
+    for (const wake of noticeWaiters.splice(0)) wake()
+  }
   const answer = async (payload: Record<string, unknown>): Promise<unknown> => {
     if (payload.op === 'submit') {
       const runId = submits++ === 0 ? RUN_A : RUN_B
@@ -61,6 +68,10 @@ function daemon() {
       return { desktop: { kind: 'trace', run: { runId: query.runId, providerId: 'codex', cwd: '/w', userText: 'hi', items, done: false }, cursor: { revision: `r${items.length}`, count: items.length } } }
     }
     if (payload.op === 'questions') return { questions: [] }
+    if (payload.op === 'liveRuns') {
+      liveRequests.push(Date.now())
+      return { liveRuns: { revision: String(live.size), runs: [...live].map((runId) => ({ runId, state: 'running' })) } }
+    }
     if (payload.op === 'appEvents') {
       if (payload.epoch === undefined) return { events: { epoch: 'e1', cursor: notices.length, items: [] } }
       const cursor = Number(payload.cursor)
@@ -95,16 +106,19 @@ function daemon() {
     waitMs: 15_000,
     bindBudgetMs: 300
   })
-  // The App's event pump, as daemon mode wires it (daemon-run-mode.ts).
-  let live = false
-  const events = new DaemonEventPump({
-    source: transport, send: () => {}, waitMs: 5_000,
-    onRun: (runId) => runtime.wake(runId), onResync: () => runtime.wakeAll(),
-    onLive: (value) => { live = value; runtime.setWakesLive(value) }
+  // The App's event wiring, exactly as daemon mode starts it (daemon-run-mode.ts).
+  let isLive = false
+  const start = () => startDaemonRunEvents({
+    transport, send: () => {}, waitMs: 5_000,
+    runtime: {
+      wake: (runId) => runtime.wake(runId), wakeAll: () => runtime.wakeAll(), isTracking: (runId) => runtime.isTracking(runId),
+      follow: (input) => runtime.follow(input), setWakesLive: (value) => { isLive = value; runtime.setWakesLive(value) }
+    }
   })
   return {
-    runtime, delivered, events, isLive: () => live,
+    runtime, delivered, start, isLive: () => isLive, liveRequests,
     write: (runId: string, value: string) => { text.set(runId, value); output.set(runId, (output.get(runId) ?? 0) + 1); notice(runId) },
+    phone: (runId: string) => { live.add(runId); notice(runId, 1) },
     endQuietPoll: () => { for (const resolve of quietA.splice(0)) resolve(); for (const wake of noticeWaiters.splice(0)) wake() }
   }
 }
@@ -118,8 +132,8 @@ const start = (runtime: DaemonRunRuntime, intentId: string) =>
 
 describe('concurrent daemon runs (P3f E0)', () => {
   it('binds and streams a second run while the first one is quiet', async () => {
-    const { runtime, delivered, events, isLive, write, endQuietPoll } = daemon()
-    events.start()
+    const { runtime, delivered, start: startEvents, isLive, write, endQuietPoll } = daemon()
+    const events = startEvents()
     try {
       await expect.poll(isLive).toBe(true)
       expect((await start(runtime, 'intent-a')).bound).toBe(true)
@@ -133,6 +147,23 @@ describe('concurrent daemon runs (P3f E0)', () => {
       endQuietPoll()
       runtime.dispose()
       endQuietPoll()
+    }
+  })
+
+  it('shows a run another client started without the renderer asking (E3)', async () => {
+    const { runtime, delivered, start: startEvents, isLive, write, phone, liveRequests, endQuietPoll } = daemon()
+    const events = startEvents()
+    try {
+      await expect.poll(isLive).toBe(true)
+      phone(RUN_PHONE)
+      await expect.poll(() => runtime.isTracking(RUN_PHONE)).toBe(true)
+      write(RUN_PHONE, 'from the phone')
+      await expect.poll(() => delivered, { timeout: 1_000 }).toContain(`${CANONICAL[RUN_PHONE]}:from the phone`)
+      expect(liveRequests).toHaveLength(1)
+    } finally {
+      events.dispose()
+      endQuietPoll()
+      runtime.dispose()
     }
   })
 })

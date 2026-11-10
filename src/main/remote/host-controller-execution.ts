@@ -42,13 +42,13 @@ export interface ExecutionDeps {
 }
 
 /** Tell the App event feed which run changed; observation only, never fails the run. */
-export function runActivity(deps: Pick<HostControllerDependencies, 'onRunActivity'>, runId: string): void {
-  try { deps.onRunActivity?.(runId) } catch (error) { console.warn('[scry] run activity notice failed:', error) }
+export function runActivity(deps: Pick<HostControllerDependencies, 'onRunActivity'>, runId: string, ledger: Pick<SessionLedger, 'intentSeq'>): void {
+  try { deps.onRunActivity?.(runId, ledger.intentSeq(runId)) } catch (error) { console.warn('[scry] run activity notice failed:', error) }
 }
 
 /** A ledger event wakes parked watchers and names its run for the App event feed. */
-export function ledgerEventObserver(deps: Pick<HostControllerDependencies, 'onRunActivity'>, notify: () => void): (event: { runId: string }) => void {
-  return (event) => { notify(); runActivity(deps, event.runId) }
+export function ledgerEventObserver(deps: Pick<HostControllerDependencies, 'onRunActivity'>, notify: () => void): (event: { runId: string }, intentSeq?: number) => void {
+  return (event, intentSeq) => { notify(); runActivity(deps, event.runId, { intentSeq: () => intentSeq }) }
 }
 
 export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway; dispatcher: RemoteDispatcher } {
@@ -143,7 +143,7 @@ export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway;
       }
     } },
     outputSink: {
-      append: (runId, chunk) => { output.append(runId, chunk); notify(); runActivity(deps, runId) },
+      append: (runId, chunk) => { output.append(runId, chunk); notify(); runActivity(deps, runId, ledger) },
       flush: (runId) => output.flush(runId)
     }
   })
