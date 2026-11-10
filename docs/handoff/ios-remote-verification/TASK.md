@@ -184,7 +184,7 @@ cd experiments/remote-g0/cf-relay && npx --prefix .. wrangler deploy
 
 | 规则 | 含义 |
 |---|---|
-| R1-checks | 所有执行过的检查阶段都通过；用 `mark-baseline` 记为已知基线的阶段不算失败（这条豁免由核验者制定，待维护者确认） |
+| R1-checks | 所有执行过的检查阶段都通过；用 `mark-baseline` 记为已知基线的阶段不算失败（**维护者 2026-11-10 确认保留**；只适用于附了基线对照日志、在 main 基线上同样失败的阶段，REPORT 仍须列出这些失败） |
 | R2-netbench-clean:\<场景\> | 场景跑完（有 `done` 事件）且 failures=0 |
 | R3-transport:\<场景\> | 手机已切到复用模式，host 声明了 ping、mux、watchStream、sessionsKnown、historyDeflate。不通过通常说明 host 没在新版本上重启 |
 | R4-relay-only | `wifi-relay` 场景全部走 relay |
