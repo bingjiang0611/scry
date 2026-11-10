@@ -65,7 +65,7 @@ cd experiments/remote-g0 && node cf-relay-smoke.mjs && node cf-relay-lifecycle-s
 
 若有 HTTP(S) 代理，先对这些本地 workerd 命令取消代理环境变量。lifecycle smoke 共 8 个用例，覆盖：ping 回 pong 且不转发、选最近 ping 的 leg、静默 leg 被关闭并报离线、忙时等待补位、无补位时 `1013`、无 leg 时快速 `4001`。
 
-### 4.3 Swift 包（未在云端编译过，预计需要修编译问题）
+### 4.3 Swift 包（macOS CI 已编译并通过 `swift test`，真机已跑过三轮；换新环境仍须重新运行）
 
 ```bash
 swift test --package-path experiments/remote-g0/swift

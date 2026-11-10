@@ -12,7 +12,8 @@
 ## 判定
 
 - Verdict：**incomplete**（`SUMMARY.md` / `acceptance.json`）。没有任何必需规则失败；`R5-direct` 是 blocked（Mac 不在手机所在局域网），因此判定为 incomplete 而不是 pass。
-- 通过：`R1-checks`（`ios-checks` 记为已知基线）、`R2-netbench-clean` ×2、`R3-transport` ×2（mux + 5 项能力）、`R4-relay-only`、`R5b` ×2（`phase=open` 失败直连 0 次）、`R6-catalog` ×2（3/3 confirmed）、**`R7-offline-fast` 通过**（样本 1371.6 ms 与 1855.4 ms，都 ≤3000 ms）。
+- 通过：`R1-checks`（`ios-checks` 的四项失败记为已知基线：它们在 main 基线上同样复现；**但"基线复现即豁免"是核验者定的规则，尚未经维护者确认**，确认之前 R1 的通过只在这个前提下成立）、`R2-netbench-clean` ×2、`R3-transport` ×2（mux + 5 项能力）、`R4-relay-only`、`R5b` ×2（`phase=open` 失败直连 0 次）、`R6-catalog` ×2（3/3 confirmed）、**`R7-offline-fast` 通过**（样本 1371.6 ms 与 1855.4 ms，都 ≤3000 ms）。
+- **单列、不被重跑抵消**：`wifi-relay` 前两次尝试 5/5 冷开全部失败（`I/O on closed channel`，约 31.1 s，原因未定位，见下文「现象」第 1 条与核验者更正），第三次重跑通过。`SUMMARY.md` / `acceptance.json` 只反映最后一次运行，因此 `R2-netbench-clean` 显示为通过；这次未定位失败如何计入，留待维护者决定。
 
 ## 本轮改动的验证
 
@@ -20,7 +21,7 @@
 |---|---|---|
 | `ce3f5fe` relay 在没有近期 host leg 时立即 `4001` | `relay-probe-mac.jsonl` 的 `relayWaitMs` 为 0 | 10 个样本全部 `relayWaitMs=0`（第二轮是 600），关闭码仍 `4001 host_offline`，中位 `total` 941.9 ms、`upgrade` 941.7 ms、`tls` 536.2 ms |
 | 同上 | 设备侧离线答复不再含 600 ms 宽限 | `hostLeg=OFFLINE waitedMs=0`（`wrangler tail scry-relay`），offline-probe 从第二轮的 2.77–3.48 s 降到 1.37–1.86 s |
-| `d3ee35a` 任一 lane 收到 4001 即返回 | offline-probe 不再取两条 lane 中较慢的那条 | offline-probe 两个场景分别为 1371.6 ms、1855.4 ms；同一时段单条 lane 的 `totalMs` 中位 1711–1937 ms，说明探测值已经落在单条 lane 的量级上 |
+| `d3ee35a` 任一 lane 收到 4001 即返回 | offline-probe 不再取两条 lane 中较慢的那条 | offline-probe 两个场景分别为 1371.6 ms、1855.4 ms；同一时段单条 lane 的 `totalMs` 中位 1711–1937 ms，**推断**探测在第一条 lane 返回 4001 时就结束了（只是耗时接近，未记录同一次探测中两条 lane 各自的完成时间，不是直接证据） |
 | 3000 ms 门限未改动 | — | 两轮都未修改 `summarize.mjs` 或阈值；`git diff 7ccd437 -- experiments/remote-g0/verify` 为空 |
 
 ## 测量结果（L2：仅代表这台机器、这个网络、当下的情况）

@@ -8,7 +8,9 @@ import type { ProviderOperationGate } from '../provider-operation-gate'
 // Everything the remote host subsystem needs from the app. Re-exported by
 // remote-host-service.ts, which composes it.
 export interface RemoteHostServiceDependencies {
-  // Direct route for paired phones on the same network. Off unless given.
+  // Direct route for paired phones on the same network. Bootstrap passes it by
+  // default (maintainer decision on bingjiang0611/scry#52; SCRY_REMOTE_LAN=0
+  // turns it off); absent here means no listener, e.g. in tests.
   lan?: { port?: number; host?: string }
   readDesktop?: HostControllerFactoryDependencies['readDesktop']
   desktopWorkbench?: import('./desktop-workbench').DesktopWorkbenchHost
