@@ -1,4 +1,6 @@
+import type { AgentStopState } from '../shared/runtime'
 import type { DockBadgeState } from './dock-badge'
+import type { RunTraceRouter } from './run-trace-router'
 import { DaemonEventPump } from './daemon-event-pump'
 import { DaemonRunDiscovery } from './daemon-run-discovery'
 import type { DaemonRunRuntime } from './daemon-run-runtime'
@@ -11,12 +13,14 @@ import type { DaemonRunTransport } from './daemon-run-transport'
 
 export interface DaemonRunEventsDeps {
   transport: Pick<DaemonRunTransport, 'appEvents' | 'liveRuns' | 'attentionViewed'>
-  runtime: Pick<DaemonRunRuntime, 'wake' | 'wakeAll' | 'setWakesLive' | 'isTracking' | 'follow'>
+  runtime: Pick<DaemonRunRuntime, 'wake' | 'wakeAll' | 'setWakesLive' | 'isTracking' | 'follow' | 'deliverAfterRead'>
   send: (channel: string, payload: unknown) => void
   dockBadge?: Pick<DockBadgeState, 'setDaemon' | 'bindDaemon' | 'forgetDaemon'>
   isWindowFocused?: () => boolean
   onWarn?: (message: string, detail?: unknown) => void
   waitMs?: number
+  // W2: stop progress also goes to the run's own subscription, as in process.
+  runTraces?: Pick<RunTraceRouter, 'publishStopState'>
 }
 
 export function startDaemonRunEvents(deps: DaemonRunEventsDeps): { dispose(): void } {
@@ -34,7 +38,15 @@ export function startDaemonRunEvents(deps: DaemonRunEventsDeps): { dispose(): vo
     // Lost notices may include a new run's: look at the live list as well.
     onResync: () => { runtime.wakeAll(); discovery.resynchronize() },
     onLive: (live) => runtime.setWakesLive(live),
-    onAttention: (snapshot) => dockBadge?.setDaemon(snapshot, deps.isWindowFocused?.() ?? false)
+    onAttention: (snapshot) => dockBadge?.setDaemon(snapshot, deps.isWindowFocused?.() ?? false),
+    // W1: the pipeline's own notices, each after the run text it follows.
+    onWindow: (channel, payload) => runtime.deliverAfterRead(
+      typeof payload.runId === 'string' ? payload.runId : undefined,
+      () => {
+        if (channel === 'agent:stopState') deps.runTraces?.publishStopState(payload as unknown as AgentStopState)
+        deps.send(channel, payload)
+      }
+    )
   })
   // Viewing is idempotent: a lost report is repaired by the next snapshot and view.
   dockBadge?.bindDaemon((sessionKey) => {

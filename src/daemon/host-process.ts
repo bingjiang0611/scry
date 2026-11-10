@@ -26,7 +26,7 @@ import { RunOutputWorkerStore } from '../main/remote/run-output-worker'
 import { openLocalChannel, type LocalChannel } from './local-channel'
 import { createDaemonConversationSend } from './conversation-send'
 import { daemonLocalEndpoint } from './local-endpoint'
-import { AppEventFeed } from '../main/remote/app-event-feed'
+import { AppEventFeed, DAEMON_WINDOW_NOTICES } from '../main/remote/app-event-feed'
 import { createHistoryRuntime } from '../main/bootstrap/history-runtime'
 import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore, type LocalEnrollSocket } from './local-enrollment'
 
@@ -139,9 +139,16 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   const remoteRunLedgerIds = new Map<string, string>()
   const requestRunStop = (runId: string): boolean => pipeline.requestRunStop(runId)
   pipeline = createRunPipeline({
-    // The pipeline's window notices: the trace, questions and run state reach the App
-    // through its run reads, so only data changes travel on the event feed.
-    renderer: { send: (channel, payload) => { if (channel === 'agent:dataUpdated') publishData(payload as AgentDataUpdated) }, isFocused: () => false },
+    // The pipeline's window notices travel on the App event feed. The trace and questions
+    // reach the App through its own run reads, so they are not sent twice (W1).
+    renderer: {
+      send: (channel, payload) => {
+        if (channel === 'agent:dataUpdated') publishData(payload as AgentDataUpdated)
+        else if (DAEMON_WINDOW_NOTICES.has(channel)) events.append({ kind: 'window', channel, payload })
+      },
+      isFocused: () => false,
+      acceptsNotices: () => true
+    },
     rendererCanReceive: () => false,
     activeRunSessionKey: session.activeRunSessionKey,
     dockBadge: session.dockBadge,

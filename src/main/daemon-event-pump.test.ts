@@ -142,4 +142,32 @@ describe('daemon event pump', () => {
     expect(onAttention).toHaveBeenCalledWith(snapshot)
     expect(send).not.toHaveBeenCalled()
   })
+
+  it('hands window notices over one at a time, in order, and to the window when nobody else takes them', async () => {
+    const seen: string[] = []
+    let finishFirst: (() => void) | undefined
+    const onWindow = vi.fn(async (channel: string) => {
+      if (channel === 'agent:session') await new Promise<void>((resolve) => { finishFirst = resolve })
+      seen.push(channel)
+    })
+    const { source: events, requests } = source([{ epoch: 'e1', cursor: 2, items: [
+      { kind: 'window', channel: 'agent:session', payload: { runId: 'r1' } },
+      { kind: 'window', channel: 'agent:turnDone', payload: { runId: 'r1' } }
+    ], reset: false }])
+    const pump = new DaemonEventPump({ source: events, send: vi.fn(), sleep, onWindow })
+    pump.start()
+    await vi.waitFor(() => expect(onWindow).toHaveBeenCalledTimes(1))
+    expect(seen).toEqual([])
+    finishFirst?.()
+    await vi.waitFor(() => expect(requests.length).toBe(2))
+    pump.dispose()
+    expect(seen).toEqual(['agent:session', 'agent:turnDone'])
+
+    const send = vi.fn()
+    const plain = source([{ epoch: 'e1', cursor: 1, items: [{ kind: 'window', channel: 'agent:turnDone', payload: { runId: 'r2' } }], reset: false }])
+    const direct = new DaemonEventPump({ source: plain.source, send, sleep })
+    direct.start()
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith('agent:turnDone', { runId: 'r2' }))
+    direct.dispose()
+  })
 })

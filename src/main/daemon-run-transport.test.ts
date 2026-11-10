@@ -224,4 +224,16 @@ describe('daemon run transport', () => {
     const refused = transport(() => ({ error: 'invalid_request' }))
     await expect(refused.value.attentionViewed('k')).rejects.toMatchObject({ reason: 'invalid_daemon_response' })
   })
+
+  it('passes on only the window notices a daemon is meant to forward (W1)', async () => {
+    const { value } = transport(() => ({ events: { epoch: 'e1', cursor: 3, items: [
+      { kind: 'window', channel: 'agent:turnDone', payload: { runId: 'r1', stopped: false } },
+      // A channel outside the list, or a payload that is not an object, is not passed on.
+      { kind: 'window', channel: 'workspace:openKnownExternal', payload: { path: '/etc' } },
+      { kind: 'window', channel: 'agent:error', payload: 'boom' }
+    ] } }))
+    await expect(value.appEvents({ epoch: 'e1', cursor: 0, waitMs: 0 })).resolves.toMatchObject({
+      items: [{ kind: 'window', channel: 'agent:turnDone', payload: { runId: 'r1', stopped: false } }]
+    })
+  })
 })

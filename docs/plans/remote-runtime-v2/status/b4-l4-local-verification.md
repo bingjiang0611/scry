@@ -87,3 +87,19 @@
 - 被中断的一轮在界面上如何显示；
 - 开发实例里 `better-sqlite3` 仍是 Node 的 ABI，DB 相关面板降级，这是已知的环境问题；
 - `test:renderer:ui`、完整 `npm test` 与 Linux 未运行。
+
+## E2（worktree `bfd38da`）与 E1b（`a525d9b`）
+
+| 项 | 结果 |
+|---|---|
+| typecheck、build、`daemon-mode-smoke.mjs` | 通过；smoke 12 步全 ok，流式 20 次到达、间隔中位数 153 ms（b4-l3g 为 152 ms） |
+| vitest（7 个目标） | 906 条测试 905 通过。1 条失败：`host-process.test.ts` 的等待循环按回复次数计上限，并行时被进度事件用完；父提交上同样失败，已由 `ecd2579` 改为按时间计上限 |
+| 首 token（warm，P50，30 样本） | 两组干净的计时：daemon 124.7 / 120.2 ms，进程内 107.6 / 89.0 ms，差 +17 到 +31 ms（b4-l3f 为 +41 到 +58 ms）。第 1 组与另一个验证重叠且 highLoad，不计 |
+| 更新间隔 | 两种模式一致：daemon 152 ms，进程内 151 ms |
+| `eventLag` 指标 | daemon 约 1.5 s。这是统计方法造成的：daemon 把流式文本合成一个不断变长的条目，时间戳沿用第一段；实际到达间隔仍是 152 ms |
+| 并发（A 停在提问，B 运行） | B 的 start 51 ms，首 token 70 ms，20 次到达，间隔 149 ms，与 B 单独运行一致；A 回答两次提问后正常结束 |
+| 会话视图、停止、侧栏 | daemon 模式下不显示文字、停在「运行中」「记录收口中」，侧栏不刷新；父提交上相同。原因与修复见 [b4-l4-window](b4-l4-window.md) |
+| 角标（a525d9b） | 窗口在后台时，一轮结束后角标从 0 变为 1，renderer 收到 `{revision: 2, keys: 1}`。「切回 App 后清除」和「窗口获得焦点时不闪」未验证：那台 Mac 停在登录界面，没有程序能获得焦点 |
+| `agent:unreadSessions` 被拒 1 次 | 启动后、daemon 的第一份快照到达之前，按设计以命名缺席拒绝；之后正常返回。验证步骤里写的「不应再出现」是我写错了 |
+
+环境注记：`better-sqlite3` 按 Node 的 ABI 编译，DB 相关面板降级，这是已知的环境问题。所有界面操作都是通过 CDP 输入到一个不可见、未获焦点的窗口完成的。

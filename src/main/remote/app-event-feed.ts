@@ -12,6 +12,9 @@ export type AppEvent =
   | { kind: 'data'; event: AgentDataUpdated }
   // A ledger run's events or output changed (E2); the App reads that run, nothing else.
   | { kind: 'run'; runId: string; intentSeq?: number }
+  // One of the run pipeline's own window notices, as in process (W1): a turn ended, a
+  // session became known, a stop progressed. Ordered and never coalesced.
+  | { kind: 'window'; channel: string; payload: unknown }
   // The daemon's whole unread set (E1b): state, so only the newest one matters.
   | { kind: 'attention'; snapshot: SessionAttentionSnapshot }
 
@@ -23,6 +26,14 @@ export interface AppEventsReply {
   reset?: true
 }
 
+/**
+ * The run pipeline's window notices a daemon forwards to its App (W1). The trace stream,
+ * trace health and questions are not here: the App reads those per run, with backpressure.
+ */
+export const DAEMON_WINDOW_NOTICES: ReadonlySet<string> = new Set([
+  'agent:turnDone', 'agent:error', 'agent:session', 'agent:stopState', 'agent:backgroundWork', 'agent:questionAttention'
+])
+
 export const APP_EVENTS_MAX_WAIT_MS = 25_000
 const DEFAULT_MAX_ITEMS = 512
 const DEFAULT_MAX_BYTES = 256 * 1024
@@ -33,6 +44,7 @@ interface Entry { seq: number; event: AppEvent; key?: string; bytes: number }
 function coalesceKey(event: AppEvent): string | undefined {
   if (event.kind === 'run') return `run:${event.runId}`
   if (event.kind === 'attention') return 'attention'
+  if (event.kind === 'window') return undefined
   const data = event.event
   if ('kind' in data && data.kind === 'conversation_changed') return `conversation:${data.conversationId}`
   if ('kind' in data && data.kind === 'catalog_recovered') return 'catalog'

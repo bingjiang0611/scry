@@ -295,7 +295,7 @@ const {
 // 开发开关：daemon 持有台账与 run 时，这些通道由 daemon 的帧回答；未开时保持进程内管线。
 const daemonRun = daemonModeEnabled()
   ? createLazyDaemonRunSurface(appDaemonModeDeps({ send: (channel, payload) => { win?.webContents.send(channel, payload) }, currentCwd: () => currentCwd,
-    dockBadge, isWindowFocused: () => Boolean(win?.isFocused()) }))
+    dockBadge, isWindowFocused: () => Boolean(win?.isFocused()), runTraces }))
   : undefined
 registerAgentRuntimeHandlers({
   handleTrusted, startAppRun, runs, boundedLiveRun, dockBadge, activeRunSessionKey,

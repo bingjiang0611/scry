@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { boundMarker } from './daemon-run-evidence'
 import { planDelivery } from './daemon-run-delivery'
 import { PerformanceTrace } from './performance-timing'
@@ -9,6 +8,8 @@ import type { DesktopRemoteContext } from '../shared/desktop-remote'
 import { view, type RunCursor } from './daemon-run-cursor'
 import { DaemonRunTransport } from './daemon-run-transport'
 import { RunWakes } from './daemon-run-wakes'
+import { answerQuestion, publishQuestions, type QuestionSinks } from './daemon-run-questions'
+import type { RunTraceRouter } from './run-trace-router'
 
 // The App's own run view, driven by the daemon instead of by an in-process
 // pipeline. The daemon owns execution, the ledger and the canonical run state;
@@ -26,6 +27,7 @@ const DEFAULT_WAIT_MS = 15_000
 // false`, and the window resynchronises from `agent:activeRun`.
 const DEFAULT_BIND_BUDGET_MS = 3_000
 const BIND_WAIT_MS = 250
+const TERMINAL = new Set(['settled', 'failed', 'cancelled'])
 
 export interface DaemonStartInput {
   intentId: string
@@ -49,6 +51,9 @@ export interface DaemonRunRuntimeDeps {
   bindBudgetMs?: number
   bridge?: TraceOutputBridge
   onWarn?: (message: string, detail?: unknown) => void
+  // P3f W2: the App's run-level subscriptions (RunTraceRouter). A view that subscribes to
+  // one run (the conversation view) reads this, not the window-wide trace stream.
+  runTraces?: Pick<RunTraceRouter, 'route' | 'settle'> & NonNullable<QuestionSinks['subscription']>
 }
 
 export class DaemonRunRuntime {
@@ -123,6 +128,21 @@ export class DaemonRunRuntime {
       })
     }
     void this.pump(runId)
+  }
+
+  /**
+   * W1: deliver one of the daemon pipeline's notices for a run only after the text the
+   * daemon held when it sent it, as in process the trace is flushed before "turn done".
+   * One read without waiting, then a full flush; a run this window does not follow, or
+   * one whose pump already ended (and flushed), is delivered at once.
+   */
+  async deliverAfterRead(runId: string | undefined, deliver: () => void): Promise<void> {
+    const cursor = runId === undefined ? undefined : this.#cursorFor(runId)
+    if (cursor && !cursor.stopped && !this.#disposed) {
+      try { await this.step(cursor.runId, { waitMs: 0 }) } catch (error) { this.#deps.onWarn?.('daemon run read before notice failed', error) }
+      this.#bridge.flushAll()
+    }
+    deliver()
   }
 
   /** Whether this window already follows this run, named by either id. */
@@ -230,20 +250,9 @@ export class DaemonRunRuntime {
   }
 
   async answerQuestion(response: AgentQuestionResponse): Promise<boolean> {
-    // The daemon names a pending question by its own id; the renderer's answer
-    // carries exactly that id and never invents one.
     // The renderer answers with the id it was shown, which is the canonical run id the
     // Provider used; the daemon names pending questions by its own ledger run.
-    const cursor = this.#cursorFor(response.runId)
-    // The answer travels inside the request, so it speaks the same id the daemon knows:
-    // its broker refuses a response naming a different run.
-    const ledgerRunId = cursor?.runId ?? response.runId
-    const answerId = cursor?.answerIds.get(response.questionId) ?? randomUUID()
-    const answered = await this.#deps.transport.answerQuestion({
-      runId: ledgerRunId, answerId, response: { ...response, runId: ledgerRunId }
-    })
-    cursor?.askedQuestions.delete(response.questionId)
-    return answered
+    return await answerQuestion(this.#cursorFor(response.runId), response, this.#deps.transport)
   }
 
   // One window at a time per run. The pump and an explicit read share the same
@@ -344,6 +353,8 @@ export class DaemonRunRuntime {
     } finally {
       cursor.pumping = false
       if (cursor.stopped) this.#bridge.flushAll()
+      // The run ended: its subscription gets its end after the last text, as in process.
+      if (cursor.stopped && TERMINAL.has(cursor.lifecycle ?? '')) this.#deps.runTraces?.settle(cursor.scryRunId ?? runId)
     }
   }
 
@@ -351,6 +362,7 @@ export class DaemonRunRuntime {
   // waits for, and the stages before it say which hop spent the time.
   #delivered(cursor: RunCursor, event: TraceEvent): void {
     this.#bridge.push(event)
+    this.#deps.runTraces?.route(event)
     if (cursor.sawText || cursor.stamp === undefined) return
     if (event.stage !== 'text' && event.stage !== 'text_delta') return
     cursor.sawText = true
@@ -375,22 +387,10 @@ export class DaemonRunRuntime {
     return plan.events.length > 0
   }
 
-  async #publishQuestions(cursor: RunCursor): Promise<void> {
-    const pending = await this.#deps.transport.questions(cursor.runId)
-    for (const request of pending) {
-      if (cursor.askedQuestions.has(request.questionId)) continue
-      cursor.askedQuestions.add(request.questionId)
-      if (!cursor.answerIds.has(request.questionId)) cursor.answerIds.set(request.questionId, randomUUID())
-      // The channel the preload subscribes to (`onQuestion` = agent:userQuestion); a
-      // question sent on a name nobody listens for leaves the run waiting forever.
-      this.#deps.send('agent:userQuestion', request)
-    }
-    for (const asked of [...cursor.askedQuestions]) {
-      if (pending.some((request) => request.questionId === asked)) continue
-      cursor.askedQuestions.delete(asked)
-      cursor.answerIds.delete(asked)
-      this.#deps.send('agent:userQuestionClosed', { runId: cursor.runId, questionId: asked })
-    }
+  #publishQuestions(cursor: RunCursor): Promise<void> {
+    return publishQuestions(cursor, this.#deps.transport, {
+      send: this.#deps.send, ...(this.#deps.runTraces ? { subscription: this.#deps.runTraces } : {})
+    })
   }
 
   /** Forget one run's cursor, e.g. after the view moved to another session. */

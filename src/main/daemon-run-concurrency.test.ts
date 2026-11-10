@@ -27,8 +27,9 @@ function daemon() {
   const bound = new Set<string>()
   const output = new Map<string, number>()
   const text = new Map<string, string>()
+  const settled = new Set<string>()
   // The daemon's App event feed: run notices, answered at once or on the next one.
-  const notices: Array<{ kind: 'run'; runId: string; intentSeq?: number }> = []
+  const notices: Array<{ kind: 'run'; runId: string; intentSeq?: number } | { kind: 'window'; channel: string; payload: unknown }> = []
   const live = new Set<string>()
   const liveRequests: number[] = []
   const noticeWaiters: Array<() => void> = []
@@ -58,7 +59,7 @@ function daemon() {
       }
       const count = output.get(runId) ?? 0
       output.set(runId, 0)
-      return { watch: { state: 'dispatched', poll: { cursor: 1, events: [] }, output: { chunks: [], cursor: count, count } } }
+      return { watch: { state: settled.has(runId) ? 'settled' : 'dispatched', poll: { cursor: 1, events: [] }, output: { chunks: [], cursor: count, count } } }
     }
     if (payload.op === 'desktop') {
       const query = payload.query as { runId: string }
@@ -95,8 +96,17 @@ function daemon() {
   }
   const delivered: string[] = []
   const transport = new DaemonRunTransport(request)
+  // Not wrapped: the event wiring receives the runtime itself, as daemon mode passes it.
+  // What a run-level subscription receives (W2), in order.
+  const subscription: string[] = []
+  const runTraces = {
+    route: (event: { runId: string; text?: string }) => { if (event.text) subscription.push(`${event.runId}:${event.text}`) },
+    settle: (runId: string) => { subscription.push(`settled:${runId}`) },
+    publishQuestion: () => {}, publishQuestionClosed: () => {}
+  }
   const runtime = new DaemonRunRuntime({
     transport,
+    runTraces,
     send: () => {},
     bridge: new TraceOutputBridge({
       canSend: () => true,
@@ -108,17 +118,26 @@ function daemon() {
   })
   // The App's event wiring, exactly as daemon mode starts it (daemon-run-mode.ts).
   let isLive = false
+  const setWakesLive = runtime.setWakesLive.bind(runtime)
+  runtime.setWakesLive = (value: boolean) => { isLive = value; setWakesLive(value) }
   const start = () => startDaemonRunEvents({
-    transport, send: () => {}, waitMs: 5_000,
-    runtime: {
-      wake: (runId) => runtime.wake(runId), wakeAll: () => runtime.wakeAll(), isTracking: (runId) => runtime.isTracking(runId),
-      follow: (input) => runtime.follow(input), setWakesLive: (value) => { isLive = value; runtime.setWakesLive(value) }
-    }
+    transport, waitMs: 5_000,
+    send: (channel, payload) => delivered.push(`notice:${channel}:${(payload as { runId?: string }).runId}`),
+    runtime
   })
   return {
-    runtime, delivered, start, isLive: () => isLive, liveRequests,
+    runtime, delivered, start, isLive: () => isLive, liveRequests, subscription,
+    settle: (runId: string) => { settled.add(runId); notice(runId) },
     write: (runId: string, value: string) => { text.set(runId, value); output.set(runId, (output.get(runId) ?? 0) + 1); notice(runId) },
     phone: (runId: string) => { live.add(runId); notice(runId, 1) },
+    // The daemon's text grew and its pipeline said the turn is done, with no run notice
+    // in between: what a window must not do is show "done" before that text.
+    finish: (runId: string, value: string) => {
+      text.set(runId, value)
+      output.set(runId, (output.get(runId) ?? 0) + 1)
+      notices.push({ kind: 'window', channel: 'agent:turnDone', payload: { runId: CANONICAL[runId] } })
+      for (const wake of noticeWaiters.splice(0)) wake()
+    },
     endQuietPoll: () => { for (const resolve of quietA.splice(0)) resolve(); for (const wake of noticeWaiters.splice(0)) wake() }
   }
 }
@@ -160,6 +179,44 @@ describe('concurrent daemon runs (P3f E0)', () => {
       write(RUN_PHONE, 'from the phone')
       await expect.poll(() => delivered, { timeout: 1_000 }).toContain(`${CANONICAL[RUN_PHONE]}:from the phone`)
       expect(liveRequests).toHaveLength(1)
+    } finally {
+      events.dispose()
+      endQuietPoll()
+      runtime.dispose()
+    }
+  })
+
+  it('delivers a run notice only after the text the daemon had when it sent it (W1)', async () => {
+    const { runtime, delivered, start: startEvents, isLive, finish, endQuietPoll } = daemon()
+    const events = startEvents()
+    try {
+      await expect.poll(isLive).toBe(true)
+      expect((await start(runtime, 'intent-a')).bound).toBe(true)
+      finish(RUN_A, 'last words')
+      await expect.poll(() => delivered).toContain(`notice:agent:turnDone:${CANONICAL[RUN_A]}`)
+      const text = delivered.indexOf(`${CANONICAL[RUN_A]}:last words`)
+      expect(text).toBeGreaterThanOrEqual(0)
+      expect(text).toBeLessThan(delivered.indexOf(`notice:agent:turnDone:${CANONICAL[RUN_A]}`))
+    } finally {
+      events.dispose()
+      endQuietPoll()
+      runtime.dispose()
+    }
+  })
+
+  it('feeds a run-level subscription the run text, then its end (W2)', async () => {
+    const { runtime, subscription, start: startEvents, isLive, write, settle, endQuietPoll } = daemon()
+    const events = startEvents()
+    try {
+      await expect.poll(isLive).toBe(true)
+      expect((await start(runtime, 'intent-a')).bound).toBe(true)
+      write(RUN_A, 'for the conversation view')
+      await expect.poll(() => subscription).toContain(`${CANONICAL[RUN_A]}:for the conversation view`)
+      settle(RUN_A)
+      await expect.poll(() => subscription).toContain(`settled:${CANONICAL[RUN_A]}`)
+      // The end comes after the text, once, under the id the view subscribed with.
+      expect(subscription.filter((item) => item.startsWith('settled:'))).toHaveLength(1)
+      expect(subscription.indexOf(`settled:${CANONICAL[RUN_A]}`)).toBe(subscription.length - 1)
     } finally {
       events.dispose()
       endQuietPoll()

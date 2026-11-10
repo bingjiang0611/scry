@@ -5,6 +5,7 @@ import { DaemonClientError } from './daemon-client'
 import { laneWasNotSent, laneWasWrittenUnknown } from './remote/desktop-lane'
 import type { DaemonEventReply } from './daemon-event-pump'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
+import { DAEMON_WINDOW_NOTICES } from './remote/app-event-feed'
 
 // The App's run surface against its own daemon, over the same frames the phone
 // uses. This module only parses and types those frames: it holds no socket, no
@@ -285,6 +286,10 @@ export class DaemonRunTransport {
         return [{ kind: 'run', runId: raw.runId, ...(intentSeq !== undefined ? { intentSeq } : {}) }]
       }
       if (raw.kind === 'attention' && isAttentionSnapshot(raw.snapshot)) return [{ kind: 'attention', snapshot: raw.snapshot }]
+      // Only the notices the daemon is meant to forward, never a channel it names freely.
+      if (raw.kind === 'window' && typeof raw.channel === 'string' && DAEMON_WINDOW_NOTICES.has(raw.channel) && record(raw.payload)) {
+        return [{ kind: 'window', channel: raw.channel, payload: raw.payload }]
+      }
       return []
     })
     return { epoch: events.epoch, cursor: events.cursor as number, items, reset: events.reset === true }

@@ -4,7 +4,8 @@ import { DaemonClient, DaemonClientError, daemonClientPaths } from '../daemon-cl
 import { daemonLaunchTarget, spawnDaemonSupervisor } from './daemon-launch'
 import { unsafeCredentialStorageReason } from './remote-connections'
 import { ensureDaemon, type DaemonLaunch, type DaemonProbe } from '../daemon-supervisor'
-import { DaemonRunRuntime } from '../daemon-run-runtime'
+import { DaemonRunRuntime, type DaemonRunRuntimeDeps } from '../daemon-run-runtime'
+import type { RunTraceRouter } from '../run-trace-router'
 import { startDaemonRunEvents } from '../daemon-run-events'
 import type { DockBadgeState } from '../dock-badge'
 import { DaemonRunTransport } from '../daemon-run-transport'
@@ -62,6 +63,8 @@ export interface DaemonRunModeDeps {
   // E1b: this window's badge mirrors the daemon's unread set and decides what was viewed.
   dockBadge?: Pick<DockBadgeState, 'setDaemon' | 'bindDaemon' | 'forgetDaemon'>
   isWindowFocused?: () => boolean
+  // P3f W2: this window's run-level subscriptions also see the runs it follows here.
+  runTraces?: NonNullable<DaemonRunRuntimeDeps['runTraces']> & Pick<RunTraceRouter, 'attachRuns' | 'publishStopState'>
 }
 
 export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<DaemonRunModeResult> {
@@ -171,20 +174,25 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
     transport,
     send: deps.send,
     ...(deps.waitMs === undefined ? {} : { waitMs: deps.waitMs }),
-    ...(deps.onWarn ? { onWarn: deps.onWarn } : {})
+    ...(deps.onWarn ? { onWarn: deps.onWarn } : {}),
+    ...(deps.runTraces ? { runTraces: deps.runTraces } : {})
+  })
+  const detachRuns = deps.runTraces?.attachRuns({
+    get: (runId) => { const run = runtime.runView(runId); return run ? { state: run } : undefined }
   })
   const surface = createDaemonRunSurface({ transport, runtime, currentCwd: deps.currentCwd })
   const events = startDaemonRunEvents({
     transport, runtime, send: deps.send,
     ...(deps.dockBadge ? { dockBadge: deps.dockBadge } : {}),
     ...(deps.isWindowFocused ? { isWindowFocused: deps.isWindowFocused } : {}),
-    ...(deps.onWarn ? { onWarn: deps.onWarn } : {})
+    ...(deps.onWarn ? { onWarn: deps.onWarn } : {}),
+    ...(deps.runTraces ? { runTraces: deps.runTraces } : {})
   })
   return {
     status: 'ready',
     version,
     surface,
-    dispose: () => { events.dispose(); runtime.dispose(); client.close() }
+    dispose: () => { events.dispose(); detachRuns?.(); runtime.dispose(); client.close() }
   }
 }
 
@@ -198,6 +206,7 @@ export function appDaemonModeDeps(input: {
   currentCwd: () => string | undefined
   dockBadge?: DaemonRunModeDeps['dockBadge']
   isWindowFocused?: () => boolean
+  runTraces?: DaemonRunModeDeps['runTraces']
   env?: NodeJS.ProcessEnv
 }): DaemonRunModeDeps {
   const userDataDir = app.getPath('userData')
@@ -237,6 +246,7 @@ export function appDaemonModeDeps(input: {
     currentCwd: input.currentCwd,
     ...(input.dockBadge ? { dockBadge: input.dockBadge } : {}),
     ...(input.isWindowFocused ? { isWindowFocused: input.isWindowFocused } : {}),
+    ...(input.runTraces ? { runTraces: input.runTraces } : {}),
     // The pump stops on its own after a failure; without this line the reason would be
     // dropped and the window would just never update.
     onWarn: (message, detail) => {

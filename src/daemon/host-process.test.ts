@@ -1,71 +1,18 @@
 import 'reflect-metadata'
 import { afterEach, describe, expect, it } from 'vitest'
-import { existsSync, realpathSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, realpathSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID, webcrypto } from 'node:crypto'
-import { connect as netConnect, type Socket } from 'node:net'
-import { connect as tlsConnect, type TLSSocket } from 'node:tls'
-import { once } from 'node:events'
-import { Pkcs10CertificateRequestGenerator, cryptoProvider } from '@peculiar/x509'
+import { cryptoProvider } from '@peculiar/x509'
 import { createDaemonHostProcess } from './host-process'
-import type { OutputChunk, RunOutputStore } from '../main/remote/run-output-log'
+import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir } from './host-process.fixtures'
 import { SessionLedger } from '../main/remote/session-ledger'
 import { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
 import { createRecentFoldersStore } from '../main/app-store'
-import { REMOTE_PROTOCOL_VERSION } from '../shared/desktop-remote'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
-const dirs: string[] = []
-function tempDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'scry-daemon-host-'))
-  dirs.push(dir)
-  return dir
-}
-afterEach(() => {
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
-})
-
-class MemoryOutputStore implements RunOutputStore {
-  private readonly chunks: OutputChunk[] = []
-  append(chunk: Omit<OutputChunk, 'seq'>): OutputChunk {
-    const next = { ...chunk, seq: (this.chunks.at(-1)?.seq ?? 0) + 1 }
-    this.chunks.push(next)
-    return next
-  }
-  since(runId: string, cursor: number) {
-    const chunks = this.chunks.filter((chunk) => chunk.runId === runId && chunk.seq > cursor)
-    return { chunks, cursor: chunks.at(-1)?.seq ?? cursor }
-  }
-  close(): void {}
-}
-
-// local.sock serves the App's own grant only. A device grant is refused there by the
-// transport rule, so the fixture enrolls the way the App does: present the 0600
-// enrollment secret over the enrollment socket.
-async function enrollLocal(service: Awaited<ReturnType<typeof createDaemonHostProcess>>['service']) {
-  const keys = await webcrypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
-  const pkcs8 = await webcrypto.subtle.exportKey('pkcs8', keys.privateKey)
-  const b64 = Buffer.from(pkcs8).toString('base64').replace(/(.{64})/g, '$1\n').replace(/\n$/, '')
-  const keyPEM = `-----BEGIN PRIVATE KEY-----\n${b64}\n-----END PRIVATE KEY-----\n`
-  const csr = await Pkcs10CertificateRequestGenerator.create({ name: 'CN=daemon-device', keys, signingAlgorithm: { name: 'ECDSA', hash: 'SHA-256' } })
-  const csrPEM = csr.toString('pem')
-  const grant = await service.enrollLocalDevice({ csrPEM, deviceLabel: 'daemon fixture' }, () => true)
-  return { keyPEM, certPEM: grant.certificatePEM }
-}
-
-async function call(socketPath: string, ca: string, cert: string, key: string, request: Record<string, unknown>) {
-  const raw: Socket = netConnect(socketPath)
-  await once(raw, 'connect')
-  const socket: TLSSocket = tlsConnect({ socket: raw, ca, cert, key, minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined })
-  await once(socket, 'secureConnect')
-  socket.write(`${JSON.stringify({ protocol: REMOTE_PROTOCOL_VERSION, ...request })}\n`)
-  let buffer = ''
-  for await (const chunk of socket) { buffer += (chunk as Buffer).toString('utf8'); if (buffer.includes('\n')) break }
-  socket.destroy()
-  return JSON.parse(buffer.split('\n')[0]) as Record<string, any>
-}
+afterEach(cleanupTempDirs)
 
 describe('daemon host process', () => {
   it('fails before serving when a packaged daemon has no private recorder CLI', async () => {
@@ -252,6 +199,11 @@ describe('daemon host process', () => {
       // E2: the run that changed is named, under the ledger id the App follows.
       // E3: with where its evidence starts, so a window that never saw it can follow it.
       expect(afterRun.events.items).toContainEqual({ kind: 'run', runId: sent.result.ledger.runId, intentSeq: sent.result.ledger.seq })
+      // W1: the pipeline's own window notices for this run, with the in-process payloads,
+      // which the daemon's window sink used to drop: the turn ended, the session is known.
+      const windowNotices = afterRun.events.items.filter((item: { kind: string }) => item.kind === 'window')
+      expect(windowNotices).toContainEqual({ kind: 'window', channel: 'agent:turnDone', payload: expect.objectContaining({ runId: sent.result.runId, providerId: 'codex' }) })
+      expect(windowNotices).toContainEqual({ kind: 'window', channel: 'agent:session', payload: expect.objectContaining({ runId: sent.result.runId }) })
       // The run pipeline's own notice, which the daemon's window sink used to drop.
       expect(afterRun.events.items).toContainEqual({ kind: 'data', event: { runId: sent.result.runId, kind: 'turn_recorded' } })
       // E1b: a finished run that nobody viewed is unread in the daemon. This daemon cannot
