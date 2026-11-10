@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -36,6 +36,18 @@ test('refuses a symlinked ancestor of the build directory', { skip: process.getu
   mkdirSync(join(root, 'real', 'raw'), { recursive: true })
   symlinkSync(join(root, 'real'), join(root, 'results'))
   assert.throws(() => ensurePrivateDir(join(root, 'results', 'raw', 'ios-build')), /symlink/)
+})
+
+test('refuses . and .. instead of trimming them from the text', (t) => {
+  const root = scratch(); t.after(() => rmSync(root, { recursive: true, force: true }))
+  // Lexically `link/../run` is `<root>/run`; the kernel follows `link` first
+  // and lands in the parent of wherever it points.
+  mkdirSync(join(root, 'elsewhere', 'deep'), { recursive: true })
+  symlinkSync(join(root, 'elsewhere', 'deep'), join(root, 'link'))
+  assert.throws(() => ensurePrivateDir(`${root}/link/../run`), /contains \. or \.\. components/)
+  assert.throws(() => ensurePrivateDir(`${root}/./run`), /contains \. or \.\. components/)
+  assert.throws(() => ensurePrivateDir('../run'), /contains \. or \.\. components/)
+  assert.ok(!existsSync(join(root, 'run')) && !existsSync(join(root, 'elsewhere', 'run')), 'nothing created')
 })
 
 test('refuses an ancestor other accounts can write, sticky or not, unless root owns it', (t) => {

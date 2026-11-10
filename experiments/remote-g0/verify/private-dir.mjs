@@ -17,7 +17,7 @@
 // check before writing is enough. Same-account attackers are outside the trust
 // model, as in CLAUDE.md.
 import { chmodSync, lstatSync, mkdirSync, readlinkSync } from 'node:fs'
-import { join, resolve, sep } from 'node:path'
+import { dirname, isAbsolute, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const GROUP_OTHER_WRITE = 0o022
@@ -41,17 +41,24 @@ function checkOwn(path, stat, uid) {
   if (stat.mode & GROUP_OTHER_WRITE) throw new UnsafePathError(`${path} is writable by other accounts`)
 }
 
-// Walks an existing absolute path; returns its resolved form.
-function walk(path, uid, links = 0) {
-  if (links > MAX_LINKS) throw new UnsafePathError(`${path}: too many symlinks`)
+// Walks an existing path, given as absolute components, the way the kernel
+// resolves it: a link is followed before any later `..` applies, so `..` is
+// taken from the directory actually reached (its real parent), never by
+// trimming the text. Returns the real path reached.
+function walk(parts, uid, links = 0) {
+  if (links > MAX_LINKS) throw new UnsafePathError(`${parts.join(sep)}: too many symlinks`)
   let current = sep
   checkAncestor(current, lstatSync(current), uid)
-  for (const name of path.split(sep).filter(Boolean)) {
+  for (const name of parts) {
+    if (name === '.') continue
+    if (name === '..') { current = dirname(current); continue }
     const next = join(current, name)
     const stat = lstatSync(next)
     if (stat.isSymbolicLink()) {
       if (stat.uid !== 0) throw new UnsafePathError(`${next} is a symlink owned by uid ${stat.uid}`)
-      current = walk(resolve(current, readlinkSync(next)), uid, links + 1)
+      const target = readlinkSync(next)
+      const base = isAbsolute(target) ? [] : components(current)
+      current = walk([...base, ...components(target)], uid, links + 1)
       continue
     }
     checkAncestor(next, stat, uid)
@@ -59,6 +66,8 @@ function walk(path, uid, links = 0) {
   }
   return current
 }
+
+const components = (path) => path.split(sep).filter(Boolean)
 
 function exists(path) {
   try { lstatSync(path); return true } catch (error) {
@@ -70,15 +79,22 @@ function exists(path) {
 // Ensures `dir` exists, is this account's own and is reached only through
 // trusted ancestors. `mode` (e.g. 0o700) is applied after the checks pass.
 export function ensurePrivateDir(dir, { uid = process.getuid(), mode } = {}) {
-  const target = resolve(dir)
-  const parts = target.split(sep).filter(Boolean)
+  // No lexical normalization (path.resolve would turn `link/../run` into
+  // `run` while the kernel follows `link` first). The script keeps using the
+  // text it passed, so refuse `.`/`..` outright: then the checked walk below
+  // and every later open resolve the same components the same way.
+  const target = isAbsolute(dir) ? dir : `${process.cwd()}${sep}${dir}`
+  const parts = components(target)
+  if (parts.some((name) => name === '.' || name === '..')) {
+    throw new UnsafePathError(`${dir} contains . or .. components`)
+  }
   let existing = parts.length
   while (existing > 0 && !exists(sep + parts.slice(0, existing).join(sep))) existing -= 1
   // The directory asked for is never reached through a link, even root's.
   if (existing === parts.length && lstatSync(target).isSymbolicLink()) {
     throw new UnsafePathError(`${target} is a symlink`)
   }
-  let current = walk(sep + parts.slice(0, existing).join(sep), uid)
+  let current = walk(parts.slice(0, existing), uid)
   for (const name of parts.slice(existing)) {
     current = join(current, name)
     try { mkdirSync(current, { mode: 0o700 }) } catch (error) { if (error.code !== 'EEXIST') throw error }

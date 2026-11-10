@@ -18,7 +18,9 @@
 #   SCRY_RELAY_URL              relay origin for the probe (default wss://scry-relay-pages.pages.dev)
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+# Physical path: the default results dir must not run through a link (see
+# private-dir.mjs), even one this account made to reach its checkout.
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd -P)"
 cd "$ROOT"
 STAMP="${SCRY_VERIFY_STAMP:-$(date -u +%Y%m%dT%H%M%SZ)}"
 RESULTS="${SCRY_VERIFY_RESULTS:-$ROOT/docs/handoff/ios-remote-verification/results/$STAMP}"
