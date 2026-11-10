@@ -83,6 +83,13 @@ final class TunnelCodec: ChannelDuplexHandler, @unchecked Sendable {
     switch error {
     case ProbeError.disconnected, ChannelError.ioOnClosedChannel:
       return closeCause
+    // The relay never speaks inner TLS, so the tunnel ending reaches NIOSSL as
+    // a stream truncated without close_notify. That is the same anonymous EOF
+    // the cases above name, and the outer close code is the only statement of
+    // why it ended: without this, the device sees "uncleanShutdown" instead of
+    // 4001 host_offline and retries a room no host serves.
+    case let tls as NIOSSLError where tls == .uncleanShutdown:
+      return closeCause
     default:
       return error
     }
