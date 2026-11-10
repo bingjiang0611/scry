@@ -9,7 +9,7 @@
 - **安装产物的构建提交是 `18326f4c`**（工作区干净，`dist/`、`out/` 均为 gitignore 产物）。
 - App `0.2.231`，bundle id `com.scry.app`；私有 CLI `0.2.53`（`RECORDER_VERSION` 与 CLI 包版本由 `version.test.ts` 锁定）。
 - `Contents/Resources/app.asar` SHA-256 `5711c0599fcb925fc33a48077ccfb8770eb1d6a25310849b8a74019e73a2ae1c`，与本次构建产物 `dist/mac-arm64/Scry.app/Contents/Resources/app.asar` 相同；08:57:49 重装后这个文件就在 `/Applications/Scry.app` 里（08:44:55 曾被另一份构建替换，见下节）。
-- 签名：Apple Development `baobingjiang@icloud.com (8Y6KR78CP7)`，`TeamIdentifier=7USHN8Q8JL`。**未公证**：`install:mac:dev` 是开发安装路径（`verifyReleaseBundle` 仅在 `--require-release` 下执行），不是签名/公证正式发布。
+- 签名：Apple Development `<apple-id> (<team>)`，`TeamIdentifier=7USHN8Q8JL`。**未公证**：`install:mac:dev` 是开发安装路径（`verifyReleaseBundle` 仅在 `--require-release` 下执行），不是签名/公证正式发布。
 
 版本决策：CLI 升 `0.2.53` 不是形式动作——`normalizeTurnDiffSnapshot` 现在保留 `workspaceOverlap`，属于内置 CLI 对外可见的运行合同；App 只升一次 `0.2.231`。根 README 的两行 npm 安装示例与 CLI README 的安装行已同步到 `0.2.53`（此前分别停留在 `0.2.51`、`0.2.52`）。
 

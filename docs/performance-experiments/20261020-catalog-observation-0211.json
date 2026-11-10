@@ -20,7 +20,7 @@
     "unchanged": ["cold SDK discovery", "in-flight probe sharing", "model/permission semantics", "Owner and trust checks", "process close barriers", "journal schema and retention", "production refresh strategy"]
   },
   "sourceIdentity": {
-    "repository": "/Users/baobingjiang/IdeaProjects/vibecoding/scry",
+    "repository": "/Users/<user>/IdeaProjects/vibecoding/scry",
     "baseCommit": "be907effbc202a3c54537571952037cfa4c816f1",
     "preexistingWipSourceBuild": "b1df508aea922c396bc63f9adba0249543b6db144bcf50c80b8096c27c06845a",
     "installedSourceBuild": "f6c2a4d279d7a731369907876e52976cd717638cdd7cf541d6d75fd340e00dc1",
@@ -89,6 +89,6 @@
     "fullColdFirstRequestAndRelayLatency": "unavailable",
     "liveProviderLatencyOrSpeedupClaimed": false
   },
-  "evidenceDirectory": "/Users/baobingjiang/.local/state/scry-catalog-current-8GWCgkE7/evidence/remote-catalog-reconcile-kyTEY1J1",
+  "evidenceDirectory": "/Users/<user>/.local/state/scry-catalog-current-8GWCgkE7/evidence/remote-catalog-reconcile-kyTEY1J1",
   "next": "User manually quits and reopens Scry, then tells the assistant it has restarted. Assistant verifies runtime f6c2a4d2… and paired gateway identity, replays the authorized iPhone 13 read-only Mac2 directory/Provider/model path, then resumes complete lifecycle measurement under the timing lock when machine load permits. No new pairing, phone installation, paid Provider task or refresh-policy implementation is implied."
 }

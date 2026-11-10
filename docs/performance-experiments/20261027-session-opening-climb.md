@@ -4,7 +4,7 @@
 
 用户反馈：点击历史会话后几秒才切换，长会话更明显。
 
-只读日常记录快照：`/Users/baobingjiang/scry-performance-archive/20261027-092934-session-open`。
+只读日常记录快照：`/Users/<user>/scry-performance-archive/20261027-092934-session-open`。
 当前 packaged build 的 `session_history.load` 共 26 次，p50 486.6 ms、p95 3054.8 ms、最大 3119.8 ms。两次 116 轮冷切换为 2747.1 / 3119.8 ms，其中 `archive_read` 为 2583.4 / 3027.7 ms。现场还有一个 1 轮、289 事件、约 6.6 MiB 的巨型 Turn。
 
 实验分支：`perf/session-opening-20261027`，基线 `8a23f508`。所有毫秒实验均通过 `.agents/skills/scry-performance-climb/scripts/timing-run.mjs`；机器持续高负载，因此这些毫秒只作受控方向证据，不升级为可信 L2 或日常 L3。

@@ -16,7 +16,7 @@
 每个临时仓库都执行了以下真实 CLI 命令；init/repair 均退出 0，首次 repair 的 rewritten=[]。下文用变量缩写绝对路径；请求正文通过本地变量/标准输入传递，不在报告中回传。
 
 ```sh
-NODE=/Users/baobingjiang/.nvm/versions/node/v24.18.0/bin/node
+NODE=/Users/<user>/.nvm/versions/node/v24.18.0/bin/node
 CLI=/tmp/scry-A-manual.dx5bmD/source/packages/turn-recorder-cli/dist/cli/scry.js
 # cwd 为各自临时 workspace；进程环境来自上述 allowlist
 git init -q
@@ -24,12 +24,12 @@ git init -q
 "$NODE" "$CLI" integrations repair --yes
 
 # OpenCode：每次 run 都是新会话，没有 --continue / --auto / --pure
-/Users/baobingjiang/.opencode/bin/opencode run --format json "$SCRY_A_PROMPT"
+/Users/<user>/.opencode/bin/opencode run --format json "$SCRY_A_PROMPT"
 # Qoder：每次新会话，未跳过权限
-"$NODE" /Users/baobingjiang/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js \
+"$NODE" /Users/<user>/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js \
   -p --output-format json --max-model-request-retries 0 "$SCRY_A_PROMPT"
 # Codex：请求从 stdin 输入；使用已由原生 UI 信任的临时配置
-/Users/baobingjiang/.local/bin/codex exec --json --sandbox read-only -
+/Users/<user>/.local/bin/codex exec --json --sandbox read-only -
 
 "$NODE" "$CLI" recorder recover
 "$NODE" "$CLI" turns list
