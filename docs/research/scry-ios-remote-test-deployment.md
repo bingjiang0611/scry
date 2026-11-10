@@ -43,7 +43,7 @@
 
 ### 真机已验证（物理 iPhone，真实网络）
 
-物理 iPhone `00008150-001A29A926D8401C`（iOS 27，Personal Team `7USHN8Q8JL` 签名安装 `com.scry.remote`）：
+物理 iPhone `<device-udid>`（iOS 27，Personal Team `<team>` 签名安装 `com.scry.remote`）：
 
 - **On-device self-test 15/15 PASS**（`-selfTest`）：enrollment（真实 P-256 CSR + 自签 bootstrap + 指纹 + 恢复）、PairingCode 解析（含新增 `code.tlsDefaultSystem` / `code.tlsPlaintext` / `code.badTLS`）、以及**真实 Keychain 往返**（`keychain.deviceKey/insertOnly/grant/grantRenew`）。Keychain 这几项在未签名模拟器上是 SKIP，只有真机签名能测——真机上全部 PASS。
 - **`.system` 外层 TLS 对真实 Cloudflare Pages 证书 PASS**（`-relayTLSProbe scry-relay-pages.pages.dev`）：`SELFTEST relayTLS.systemTrust PASS negotiated=tls`。

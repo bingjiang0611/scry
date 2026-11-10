@@ -22,16 +22,17 @@ test('removes identifiers but keeps timings, versions and route evidence', () =>
     'Signing Identity: "Apple Development: someone@icloud.com (ABCDE12345)"',
     'identityHash=0123456789ABCDEF0123456789ABCDEF01234567',
     '/usr/bin/codesign --force --sign 0123456789ABCDEF0123456789ABCDEF89ABCDEF --timestamp=none',
+    'TeamIdentifier=FGHIJ67890',
     '/Users/someone/work/scry/src/a.ts',
     'en0 = 203.0.113.7/19, overlay 100.101.1.2',
     'swift=Apple Swift version 6.3.3 (swiftlang-6.3.3.1.3)',
     'Co-Authored-By: x <307659028+bingjiang0611@users.noreply.github.com>'
   ].join('\n')
   const clean = redact(text)
-  for (const secret of ['00008110-0001112233445566', 'someone', 'ABCDE12345', '01234567', '89ABCDEF', '203.0.113.7']) {
+  for (const secret of ['00008110-0001112233445566', 'someone', 'ABCDE12345', 'FGHIJ67890', '01234567', '89ABCDEF', '203.0.113.7']) {
     assert.ok(!clean.includes(secret), secret)
   }
-  for (const kept of ['100.101.1.2', 'swiftlang-6.3.3.1.3', 'users.noreply.github.com', '/Users/<user>/work/scry']) {
+  for (const kept of ['TeamIdentifier=<team>', '100.101.1.2', 'swiftlang-6.3.3.1.3', 'users.noreply.github.com', '/Users/<user>/work/scry']) {
     assert.ok(clean.includes(kept), kept)
   }
   assert.equal(redact(clean), clean, 'idempotent')

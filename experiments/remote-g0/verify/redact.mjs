@@ -24,6 +24,8 @@ const SIGNING = /(Apple (?:Development|Distribution)|iPhone (?:Developer|Distrib
 // A signing certificate's SHA-1 appears as identityHash=… (electron-builder)
 // and as `--sign <hash>` (codesign, swift-stdlib-tool in xcodebuild logs).
 const CERT_HASH = /(identityHash=|--sign\s+)[0-9A-F]{40}\b/g
+// `codesign -dv` prints the signing team bare, outside an identity string.
+const TEAM_ID = /\b(TeamIdentifier=)[A-Z0-9]{10}\b/g
 // Not part of a longer dotted/word token (keeps versions like swiftlang-6.3.3.1.3).
 const IPV4 = /(?<![\w.-])(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?![\w.])/g
 
@@ -37,6 +39,7 @@ export function createRedactor(salt = randomBytes(16)) {
   return (text) => text
     .replace(SIGNING, (_, kind) => `${kind}: <signing-identity> (<team>)`)
     .replace(CERT_HASH, '$1<redacted>')
+    .replace(TEAM_ID, '$1<team>')
     .replace(UDID, '<device-udid>')
     .replace(UUID, (id) => `<id:${alias(id)}>`)
     .replace(HOME, '$1/<user>')
