@@ -2,8 +2,8 @@
 
 本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑；改 `scripts/daemon-ipc-routing.json` 后重新生成。
 
-- 生产特权 IPC channel：134 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
-- 留在 main：24，一半 main 一半 daemon（`split`）：4，转发到现有 op：44，需要新增 op：62
+- 生产特权 IPC channel：167 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
+- 留在 main：53，一半 main 一半 daemon（`split`）：4，转发到现有 op：44，需要新增 op：66
 - 新增 op 的请求、响应、授权与调用方范围见 [P3-ipc-ops](P3-ipc-ops.md)；设计正文见 [P3 §13](P3-batch4-design.md)
 - `desktopWorkbench` 转发行（workspace / terminal / sourceControl，共 32 行）见 [P3-ipc-matrix-workbench](P3-ipc-matrix-workbench.md)
 
@@ -40,6 +40,10 @@
 | `agent:focusedRunSnapshot` | forward | `runState` | — | 等价（同一 run 登记表；只是按焦点取一条） | 权威快照在 daemon |
 | `agent:focusRun` | main | `—` | — | — | 窗口级焦点书签 |
 | `agent:forkSession` | forward | `sessionFork` | — | 等价 | 既有 sessionFork |
+| `agent:gitCommitDiffSnapshot` | new-op | `workspaceDiff:gitCommitDiffSnapshot` | source-control | — | 项目授权归 daemon；git 读取跟随授权 |
+| `agent:gitDiff` | new-op | `workspaceDiff:gitDiff` | source-control | — | 项目授权归 daemon；git 读取跟随授权 |
+| `agent:gitDiffCommits` | new-op | `workspaceDiff:gitDiffCommits` | source-control | — | 项目授权归 daemon；git 读取跟随授权 |
+| `agent:gitDiffSnapshot` | new-op | `workspaceDiff:gitDiffSnapshot` | source-control | — | 项目授权归 daemon；git 读取跟随授权 |
 | `agent:importBillingFixture` | new-op | `billing:importBillingFixture` | analytics | — | 账本与 transcript 在 daemon 侧 |
 | `agent:invalidateProviderContext` | new-op | `providerContext:invalidateProviderContext` | providers | — | Provider 运行时在 daemon |
 | `agent:listArchivedSessions` | new-op | `sessionStore:listArchivedSessions` | navigation | — | 会话账本在 daemon |
@@ -105,6 +109,35 @@
 | `conversation:readSideChatSnapshot` | new-op | `conversation:readSideChatSnapshot` | history | — | 对话账本在 daemon 的 SQLite 里 |
 | `conversation:send` | new-op | `conversation:send` | send | — | 对话账本在 daemon 的 SQLite 里 |
 | `conversation:update` | new-op | `conversation:update` | navigation | — | 对话账本在 daemon 的 SQLite 里 |
+| `desktopRemote:answer` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:catalog` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:commands` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:connect` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:deleteSession` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:directories` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:disconnect` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:file` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:files` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:finishPairing` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:forget` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:forkSession` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:history` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:intents` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:intentStatus` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:list` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:liveRun` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:pair` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:providerControls` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:resolveIntent` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:runStatus` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:selectDirectory` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:sessionAction` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:stop` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:submit` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:trace` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:traceDelta` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:updateSsh` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:workbench` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
 | `remote:desktop:disable` | main | `—` | — | — | DesktopRemoteClient |
 | `remote:desktop:invite` | main | `—` | — | — | DesktopRemoteClient |
 | `remote:desktop:status` | main | `—` | — | — | DesktopRemoteClient |

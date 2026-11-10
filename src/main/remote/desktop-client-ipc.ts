@@ -2,7 +2,7 @@ import type { DesktopRemoteAPI, DesktopRemoteCatalog, DesktopRemoteContext } fro
 
 // Deliberately enumerate business operations. Neither the renderer nor a
 // remote peer can choose a raw protocol op, URL, SSH option or shell command.
-const METHODS = [
+export const DESKTOP_REMOTE_CLIENT_METHODS = [
   'list', 'pair', 'finishPairing', 'updateSsh', 'connect', 'disconnect', 'forget',
   'catalog', 'providerControls', 'commands', 'sessionAction', 'forkSession', 'deleteSession', 'directories', 'selectDirectory', 'history', 'trace', 'traceDelta', 'intents', 'submit', 'intentStatus', 'resolveIntent',
   'runStatus', 'liveRun', 'stop', 'answer', 'files', 'file', 'workbench'
@@ -16,7 +16,7 @@ export function registerDesktopClientIpc<Event>(
   // A catalog answer and an opened session are the only remote signals the Dock
   // badge needs; both already cross this authorized boundary.
   const observed = new Set<string>(['catalog', 'history', 'trace', 'traceDelta'])
-  for (const method of METHODS) {
+  for (const method of DESKTOP_REMOTE_CLIENT_METHODS) {
     registerTrusted(`desktopRemote:${method}`, (_event, ...args) => {
       if (args.length > 5) throw new Error('invalid_desktop_request')
       const service = client()

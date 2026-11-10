@@ -1,0 +1,151 @@
+{
+  "schema": 1,
+  "note": "本 App 作为客户端连接其他宿主的 channel（remote/desktop-client-ipc.ts）。连接、配对和保存的宿主属于 App 自己，不属于 daemon，开关打开时仍在 main 处理。与 daemon-ipc-routing.json 合并读取。",
+  "channels": [
+    {
+      "channel": "desktopRemote:answer",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:catalog",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:commands",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:connect",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:deleteSession",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:directories",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:disconnect",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:file",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:files",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:finishPairing",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:forget",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:forkSession",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:history",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:intents",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:intentStatus",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:list",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:liveRun",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:pair",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:providerControls",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:resolveIntent",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:runStatus",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:selectDirectory",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:sessionAction",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:stop",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:submit",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:trace",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:traceDelta",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:updateSsh",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:workbench",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    }
+  ]
+}

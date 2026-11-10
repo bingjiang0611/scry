@@ -100,7 +100,8 @@ describe('daemon host process', () => {
 
     const workspace = join(root, 'workspace')
     mkdirSync(workspace, { mode: 0o700 })
-    createRecentFoldersStore(userDataDir).push(workspace)
+    // The picker stores canonical paths; on macOS tmpdir is /var → /private/var.
+    createRecentFoldersStore(userDataDir).push(realpathSync(workspace))
     const staleAtomicTemp = join(userDataDir, 'app-sessions.json.tmp')
     writeFileSync(staleAtomicTemp, 'stale', { mode: 0o600 })
     const oldRelay = process.env.SCRY_REMOTE_RELAY_ENABLED

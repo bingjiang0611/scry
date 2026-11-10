@@ -1,3 +1,5 @@
+import { DESKTOP_REMOTE_CLIENT_METHODS } from './remote/desktop-client-ipc'
+
 // Development switch for "the daemon owns runs". Kept here, free of Electron, so the IPC
 // registrar can consult it without importing the daemon client assembly.
 export const DAEMON_MODE_ENV = 'SCRY_HOST_DAEMON'
@@ -10,7 +12,8 @@ export function daemonModeEnabled(env: NodeJS.ProcessEnv = process.env): boolean
  * Channels whose in-process handler stays correct while the daemon owns runs: window,
  * menu, clipboard and theme work, the renderer delivery bridge, main's single-file read
  * references, and the client this App uses to reach other hosts (route `main` in
- * scripts/daemon-ipc-routing.json).
+ * scripts/daemon-ipc-routing*.json). The hosts that client saves are the App's own state,
+ * not the daemon's.
  *
  * `agent:setCwd` is the one non-`main` entry. It only sets this window's selection, which
  * the App sends with each daemon submit (daemon-run-surface fills `cwd` from it); it
@@ -26,7 +29,8 @@ export const DAEMON_MODE_IN_PROCESS_CHANNELS: ReadonlySet<string> = new Set([
   'remote:desktop:disable', 'remote:desktop:invite', 'remote:desktop:status',
   'runTraces:ack', 'runTraces:confirm', 'runTraces:resync', 'runTraces:setLegacyDemand',
   'runTraces:subscribe', 'runTraces:unsubscribe',
-  'workspace:openKnownExternal', 'workspace:readKnown', 'workspace:readPageKnown', 'workspace:resolveFile'
+  'workspace:openKnownExternal', 'workspace:readKnown', 'workspace:readPageKnown', 'workspace:resolveFile',
+  ...DESKTOP_REMOTE_CLIENT_METHODS.map((method) => `desktopRemote:${method}`)
 ])
 
 /** Channels whose handler already asks the daemon when the switch is on (B4-L3). */

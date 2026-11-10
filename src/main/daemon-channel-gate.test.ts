@@ -6,7 +6,8 @@ const on = { SCRY_HOST_DAEMON: '1' } as NodeJS.ProcessEnv
 const off = {} as NodeJS.ProcessEnv
 const routing = [
   ...JSON.parse(readFileSync(new URL('../../scripts/daemon-ipc-routing.json', import.meta.url), 'utf8')).channels,
-  ...JSON.parse(readFileSync(new URL('../../scripts/daemon-ipc-routing-workbench.json', import.meta.url), 'utf8')).channels
+  ...JSON.parse(readFileSync(new URL('../../scripts/daemon-ipc-routing-workbench.json', import.meta.url), 'utf8')).channels,
+  ...JSON.parse(readFileSync(new URL('../../scripts/daemon-ipc-routing-client.json', import.meta.url), 'utf8')).channels
 ] as Array<{ channel: string; route: string; op?: string; method?: string }>
 const routeOf = (channel: string) => routing.find((row) => row.channel === channel)?.route
 
@@ -55,6 +56,16 @@ describe('daemon mode channel gate', () => {
       expect(routeOf(channel), `${channel} is answered by the daemon but is not in the matrix`).toBeDefined()
       expect(routeOf(channel)).not.toBe('main')
     }
+  })
+
+  it('runs every main-routed channel in-process, so window and client work is not refused', () => {
+    // desktopRemote:list is polled every second by the remote-hosts view; refusing it
+    // filled the main log and showed the App's own saved hosts as unavailable.
+    const refused = routing
+      .filter((row) => row.route === 'main' && !DAEMON_MODE_IN_PROCESS_CHANNELS.has(row.channel))
+      .map((row) => row.channel)
+    expect(refused).toEqual(['agent:unreadSessions'])
+    expect(gateDaemonChannel('desktopRemote:list', vi.fn(), on)).not.toThrow()
   })
 
   it('forwards a migrated channel to the daemon with the renderer arguments, not to main', async () => {

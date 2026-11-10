@@ -102,6 +102,30 @@
       "why": "既有 sessionFork"
     },
     {
+      "channel": "agent:gitCommitDiffSnapshot",
+      "route": "new-op",
+      "op": "workspaceDiff",
+      "method": "gitCommitDiffSnapshot"
+    },
+    {
+      "channel": "agent:gitDiff",
+      "route": "new-op",
+      "op": "workspaceDiff",
+      "method": "gitDiff"
+    },
+    {
+      "channel": "agent:gitDiffCommits",
+      "route": "new-op",
+      "op": "workspaceDiff",
+      "method": "gitDiffCommits"
+    },
+    {
+      "channel": "agent:gitDiffSnapshot",
+      "route": "new-op",
+      "op": "workspaceDiff",
+      "method": "gitDiffSnapshot"
+    },
+    {
       "channel": "agent:importBillingFixture",
       "route": "new-op",
       "op": "billing",

@@ -191,6 +191,16 @@
         "local"
       ]
     },
+    "workspaceDiff": {
+      "path": "source-control",
+      "request": "{ op:'workspaceDiff', method:'gitDiff'|'gitDiffSnapshot'|'gitDiffCommits'|'gitCommitDiffSnapshot', args }",
+      "response": "现有 WorkspaceDiffResult / WorkspaceDiffSnapshotResult / 提交列表与提交 diff 快照",
+      "authorize": "已验证 peer + scope: local；按 canonical cwd 重验项目授权（与 main 的 authorizeDirectory 相同）",
+      "why": "项目授权归 daemon；git 读取跟随授权",
+      "scopes": [
+        "local"
+      ]
+    },
     "workspaceSelection": {
       "path": "navigation",
       "request": "{ op:'workspaceSelection', method:'setCwd'|'chooseFolder'|'read'|'inspectStart'|'validateBranch', … }",

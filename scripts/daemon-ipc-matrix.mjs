@@ -13,6 +13,7 @@ export const MATRIX_DOC = join(root, 'docs/plans/remote-runtime-v2/P3-ipc-matrix
 export const WORKBENCH_MATRIX_DOC = join(root, 'docs/plans/remote-runtime-v2/P3-ipc-matrix-workbench.md')
 const ROUTING = join(root, 'scripts/daemon-ipc-routing.json')
 const ROUTING_WORKBENCH = join(root, 'scripts/daemon-ipc-routing-workbench.json')
+const ROUTING_CLIENT = join(root, 'scripts/daemon-ipc-routing-client.json')
 const OPS = join(root, 'scripts/daemon-ipc-ops.json')
 const DIFFERENCES = join(root, 'scripts/daemon-ipc-differences.json')
 const APPROVALS = join(root, 'scripts/daemon-ipc-remote-approvals.json')
@@ -42,6 +43,15 @@ const TEMPLATED = {
     const methods = [...body.matchAll(/^\s{4}(\w+):/gm)].map(([, name]) => name)
     if (start < 0 || methods.length === 0) throw new Error('cannot read sourceControlHandlers')
     return methods
+  },
+  // The App's client to other hosts (remote/desktop-client-ipc.ts) enumerates its methods.
+  desktopRemote: () => {
+    const source = readFileSync(join(root, 'src/main/remote/desktop-client-ipc.ts'), 'utf8')
+    const start = source.indexOf('export const DESKTOP_REMOTE_CLIENT_METHODS = [')
+    const body = source.slice(start, source.indexOf('] as const', start))
+    const methods = [...body.matchAll(/'([a-zA-Z]+)'/g)].map(([, name]) => name)
+    if (start < 0 || methods.length === 0) throw new Error('cannot read DESKTOP_REMOTE_CLIENT_METHODS')
+    return methods
   }
 }
 
@@ -53,22 +63,40 @@ export function collectChannels(dir = MAIN_DIR) {
   }
   for (const file of sourceFiles(dir)) {
     const source = readFileSync(file, 'utf8')
-    // `handle(` is the parameter name registerWorkspaceSelectionIpc gives the same trusted
-    // registrar; both spellings reach registerTrustedIpcHandler.
-    for (const match of source.matchAll(/\b(?:handleTrusted|handle)\(\s*'([a-zA-Z0-9:_-]+)'/g)) add(match[1], file)
+    // `handle(`, `register(` and `registerTrusted(` are the parameter names the per-area
+    // registrars (workspace selection, git diff, desktop client) give the same trusted
+    // registrar; every spelling reaches registerTrustedIpcHandler.
+    for (const match of source.matchAll(/\b(?:handleTrusted|handle|register|registerTrusted)\(\s*'([a-zA-Z0-9:_-]+)'/g)) add(match[1], file)
     // Handler tables shared by main and the daemon (bootstrap/startup-channels.ts): each
     // `return { 'channel': … } satisfies ChannelHandlers` is registered through
     // registerChannelHandlers, so its keys are production channels.
     for (const table of source.matchAll(/return \{([\s\S]*?)\} satisfies ChannelHandlers/g)) {
       for (const key of table[1].matchAll(/^\s+'([a-zA-Z]+:[a-zA-Z:]+)':/gm)) add(key[1], file)
     }
-    for (const match of source.matchAll(/\b(?:handleTrusted|handle|register)\(\s*`([a-zA-Z]+):\$\{\w+\}`/g)) {
+    for (const match of source.matchAll(/\b(?:handleTrusted|handle|register|registerTrusted)\(\s*`([a-zA-Z]+):\$\{\w+\}`/g)) {
       const expand = TEMPLATED[match[1]]
       if (!expand) throw new Error(`templated registration ${match[1]}:\${...} in ${relative(root, file)} has no expander`)
       for (const method of expand()) add(`${match[1]}:${method}`, file)
     }
   }
   return [...found.entries()].map(([channel, file]) => ({ channel, file: relative(root, file) })).sort((a, b) => a.channel.localeCompare(b.channel))
+}
+
+const PRELOAD_DIR = join(root, 'src/preload')
+
+/**
+ * Every channel the preload invokes. The registration scan reads several spellings; this
+ * independent list catches a spelling it does not know yet, which would otherwise leave
+ * a channel without a decision and refused by the daemon gate.
+ */
+export function preloadChannels(dir = PRELOAD_DIR) {
+  const channels = new Set()
+  for (const file of sourceFiles(dir)) {
+    const source = readFileSync(file, 'utf8')
+    if (/invoke\(\s*`/.test(source)) throw new Error(`templated invoke in ${relative(root, file)}: list preload channels literally`)
+    for (const match of source.matchAll(/\binvoke\(\s*'([a-zA-Z0-9:_-]+)'/g)) channels.add(match[1])
+  }
+  return channels
 }
 
 /** The device-facing op vocabulary, read from the dispatch chain that serves it. */
@@ -101,26 +129,27 @@ export function performancePaths() {
  * new op looks like, how each forwarded op differs from the device protocol, and which
  * new ops a remote device may reach. Each file stays under the staged size budget.
  */
-export function loadRouting(routingPath = ROUTING, opsPath = OPS, differencesPath = DIFFERENCES, approvalsPath = APPROVALS, workbenchPath = ROUTING_WORKBENCH) {
+export function loadRouting(routingPath = ROUTING, opsPath = OPS, differencesPath = DIFFERENCES, approvalsPath = APPROVALS, workbenchPath = ROUTING_WORKBENCH, clientPath = ROUTING_CLIENT) {
   const routing = JSON.parse(readFileSync(routingPath, 'utf8'))
   const workbench = JSON.parse(readFileSync(workbenchPath, 'utf8'))
+  const client = JSON.parse(readFileSync(clientPath, 'utf8'))
   const ops = JSON.parse(readFileSync(opsPath, 'utf8'))
   const differences = JSON.parse(readFileSync(differencesPath, 'utf8'))
   const approvals = JSON.parse(readFileSync(approvalsPath, 'utf8'))
-  for (const [name, data] of [['routing', routing], ['workbench routing', workbench], ['ops', ops], ['differences', differences], ['approvals', approvals]]) {
+  for (const [name, data] of [['routing', routing], ['workbench routing', workbench], ['client routing', client], ['ops', ops], ['differences', differences], ['approvals', approvals]]) {
     if (data.schema !== 1) throw new Error(`${name} schema must be 1`)
   }
-  if (!Array.isArray(routing.channels) || !Array.isArray(workbench.channels) || !ops.ops || !differences.differences || !Array.isArray(approvals.approved)) {
+  if (!Array.isArray(routing.channels) || !Array.isArray(workbench.channels) || !Array.isArray(client.channels) || !ops.ops || !differences.differences || !Array.isArray(approvals.approved)) {
     throw new Error('routing inputs are incomplete')
   }
-  return { schema: 1, channels: [...routing.channels, ...workbench.channels], ops: ops.ops, differences: differences.differences, approved: new Set(approvals.approved) }
+  return { schema: 1, channels: [...routing.channels, ...workbench.channels, ...client.channels], ops: ops.ops, differences: differences.differences, approved: new Set(approvals.approved) }
 }
 
 /**
  * Join source channels with the recorded decision. Returns rows plus every defect, so
  * the generator and its test report the same reasons instead of throwing on row one.
  */
-export function buildMatrix(routing = loadRouting(), dir = MAIN_DIR) {
+export function buildMatrix(routing = loadRouting(), dir = MAIN_DIR, invoked = dir === MAIN_DIR ? preloadChannels() : new Set()) {
   const channels = collectChannels(dir)
   const ops = protocolOps()
   const surfaces = workbenchMethods()
@@ -190,6 +219,10 @@ export function buildMatrix(routing = loadRouting(), dir = MAIN_DIR) {
     if (!channels.some((entry) => entry.channel === row)) defects.push({ channel: row, problem: 'difference recorded for a channel that is not forwarded' })
   }
   for (const row of recorded.values()) defects.push({ channel: row.channel, problem: 'routed but no longer registered in src/main' })
+  const registered = new Set(channels.map((entry) => entry.channel))
+  for (const channel of invoked) {
+    if (!registered.has(channel)) defects.push({ channel, problem: 'invoked by the preload but the registration scan did not find it' })
+  }
   return { rows, defects, channels: channels.length }
 }
 
