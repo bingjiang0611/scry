@@ -25,7 +25,16 @@ RESULTS="${SCRY_VERIFY_RESULTS:-$ROOT/docs/handoff/ios-remote-verification/resul
 mkdir -p "$RESULTS/logs" "$RESULTS/raw"
 CHECKS="$RESULTS/checks.json"
 [ -f "$CHECKS" ] || echo '{"stages":[]}' > "$CHECKS"
-BUNDLE_ID="com.scry.remote"
+# The phone's installed app is com.scry.remote.local (a free developer profile
+# allows three apps per device, so a new bundle id cannot be installed). Override
+# only when the device already holds that bundle, so the install updates it in
+# place and keeps the existing pairing and Keychain access group.
+BUNDLE_ID="${SCRY_IOS_BUNDLE_ID:-com.scry.remote}"
+# The host under test is the installed bundle, matched by path: other checkouts
+# keep their own Scry processes alive and a name-only match would quit or wait
+# on them instead.
+HOST_APP="/Applications/Scry.app"
+HOST_PROC_PATTERN='^/Applications/Scry\.app/Contents/MacOS/Scry'
 APP_PATH="/tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app"
 NO_PROXY_ENV=(env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy)
 
@@ -81,7 +90,7 @@ stage_env() {
     echo "swift=$(swift --version 2>/dev/null | head -1)"
     echo "node=$(node --version)"
     echo "device=$(device_id 2>&1)"
-    echo "scry_running=$(pgrep -x Scry >/dev/null && echo yes || echo no)"
+    echo "scry_running=$(pgrep -f "$HOST_PROC_PATTERN" >/dev/null && echo yes || echo no)"
   } > "$RESULTS/env.txt"
   cat "$RESULTS/env.txt" >&2
 }
@@ -101,12 +110,12 @@ stage_install_mac() { step install-mac npm run install:mac:dev; }
 
 quit_scry() {
   osascript -e 'tell application "Scry" to quit' >/dev/null 2>&1 || true
-  for _ in $(seq 1 30); do pgrep -x Scry >/dev/null || return 0; sleep 1; done
+  for _ in $(seq 1 30); do pgrep -f "$HOST_PROC_PATTERN" >/dev/null || return 0; sleep 1; done
   log "Scry did not quit within 30 s"; return 1
 }
 
 open_scry() {
-  open -a /Applications/Scry.app || return 1
+  open -a "$HOST_APP" || return 1
   # Relay legs and the LAN listener come up after start; give them time.
   sleep "${SCRY_VERIFY_HOST_WARMUP:-20}"
 }
@@ -121,7 +130,8 @@ stage_build_ios() {
   if [ -z "${SCRY_IOS_DEVELOPMENT_TEAM:-}" ]; then skip build-ios "SCRY_IOS_DEVELOPMENT_TEAM not set"; return 1; fi
   step build-ios xcodebuild -project apps/ios/ScryRemote.xcodeproj -scheme ScryRemote -configuration Debug \
     -sdk iphoneos -destination "id=$id" -derivedDataPath /tmp/scry-remote-device-build \
-    DEVELOPMENT_TEAM="$SCRY_IOS_DEVELOPMENT_TEAM" CODE_SIGN_STYLE=Automatic -allowProvisioningUpdates build
+    DEVELOPMENT_TEAM="$SCRY_IOS_DEVELOPMENT_TEAM" PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+    CODE_SIGN_STYLE=Automatic -allowProvisioningUpdates build
 }
 
 stage_install_ios() {
@@ -157,7 +167,7 @@ stage_netbench() {
   local started=$SECONDS
   log "netbench $label: launching on $id with $*"
   xcrun devicectl device process launch --device "$id" --terminate-existing "$BUNDLE_ID" \
-    -netBench "-netBenchLabel=$label" "$@" > "$RESULTS/logs/netbench-$label.launch.log" 2>&1 || {
+    -- -netBench "-netBenchLabel=$label" "$@" > "$RESULTS/logs/netbench-$label.launch.log" 2>&1 || {
       record "netbench-$label" fail 1 $((SECONDS - started)) "logs/netbench-$label.launch.log"; log "launch failed (device locked?)"; return 1; }
   rm -f "$raw"
   for _ in $(seq 1 72); do
