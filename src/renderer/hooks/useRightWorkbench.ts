@@ -8,28 +8,25 @@ import type { ComposerDraftStore } from '../composer-drafts'
 import type { ConversationHostChatProps } from '../conversation-chat-props'
 import { useMeasuredNarrow } from './useMeasuredNarrow'
 import { useSideChatPanel } from './useSideChatPanel'
-import { indexSideChatCatalog } from '../side-chat-index'
 
 /** Chat width that still fits the conversation and a 55/45 workbench side by side. */
 const SIDE_BY_SIDE_MIN_CHAT = 880
 const RESIZER = 6
 
 /**
- * State of the right workbench of the active session: measured narrow layout, the
- * one-pass side-chat catalog for the sidebar, and the side-chat tab workspace.
+ * State of the right workbench of the active session: measured narrow layout and the
+ * side-chat tab workspace.
  *
  * Kept in one place so the shell states only what it renders. Nothing here polls: the
- * narrow flag comes from a ResizeObserver on the main pane, and the catalog is a single
- * pass over the project list the shell already loaded.
+ * narrow flag comes from a ResizeObserver on the main pane.
  */
 export function useRightWorkbench({
-  sidebarWidth, projects, runningRunIds, waitingQuestionRunIds, questionKindsByRun,
+  sidebarWidth, runningRunIds, waitingQuestionRunIds, questionKindsByRun,
   draftKey, view, conversation, cwd, activeSessionId, selectedProviderSessionId, providerId, agentProfileId,
   runControls, terminalTurns, draftStore, chatProps, pickConversation, loadProjects, openIds, dispatch,
   dispatchForScope, restorePane, layoutSaved
 }: {
   sidebarWidth: number
-  projects: readonly Parameters<typeof indexSideChatCatalog>[0]['projects'][number][]
   runningRunIds: ReadonlySet<string>
   waitingQuestionRunIds: ReadonlySet<string>
   questionKindsByRun: ReadonlyMap<string, AgentQuestionKind>
@@ -59,7 +56,6 @@ export function useRightWorkbench({
   // which would then hide the panel that caused the measurement.
   const shellRef = useRef<HTMLDivElement>(null)
   const narrowSingleColumn = useMeasuredNarrow(shellRef, SIDE_BY_SIDE_MIN_CHAT + sidebarWidth + RESIZER)
-  const catalog = indexSideChatCatalog({ projects, runningRunIds, waitingQuestionRunIds, questionKindsByRun })
   const panel = useSideChatPanel({
     draftKey, view,
     ...(conversation ? { conversation } : {}),
@@ -68,5 +64,5 @@ export function useRightWorkbench({
     runControls, terminalTurns, draftStore, chatProps, pickConversation, loadProjects, openIds, dispatch,
     dispatchForScope, restorePane, runningRunIds, waitingQuestionRunIds, questionKindsByRun
   })
-  return { shellRef, narrowSingleColumn, catalog, panel, layoutSaved }
+  return { shellRef, narrowSingleColumn, panel, layoutSaved }
 }

@@ -11,15 +11,15 @@ const unicodePrompt = (ordinal) => `side chat note 第 ${ordinal} 轮🙂🀄️
 /**
  * What deleting the source does to its side chats, in the isolated production App.
  *
- * A side chat lives in its parent's right panel and is never a sidebar row of its own. The
- * source parent is archived and deleted through the shipped fingerprint-preview dialog;
- * afterwards its children must still be real, readable records (deleting a parent is not a
- * silent cascade), and the sidebar must show none of them: no group, no row, no counter,
- * in either sidebar tab.
+ * A side chat lives in its parent's right panel and is never a sidebar row of its own, so
+ * deleting the parent takes its side chats along instead of leaving records nobody can
+ * reach. The source parent is archived and deleted through the shipped fingerprint-preview
+ * dialog: the preview must say how many side chats go with it, the delete must remove
+ * every one of them, and the sidebar must show none of them in either tab.
  */
 export async function exerciseSideChatSourceDeleted({ cdp, evaluate, check, ipcCountsPath, inputsPath, callsPath, workspace, rendererFailures = [] }) {
   const {
-    capture, click, clickAt, idle, wait, counts, since, conversation, seedTurns
+    capture, click, clickAt, idle, wait, counts, since, seedTurns
   } = sideChatDriver({ cdp, evaluate, check, ipcCountsPath, inputsPath, callsPath, rendererFailures, label: 'Side-chat source deleted' })
 
   // A second parent with a short completed transcript of its own.
@@ -81,6 +81,9 @@ export async function exerciseSideChatSourceDeleted({ cdp, evaluate, check, ipcC
   check(preview.targets.length > 0, `the delete preview showed no fingerprint scope: ${json(preview)}`)
   check(preview.targets.every(target => target.length > 0), `the delete preview lost its provider scope: ${json(preview)}`)
   check(preview.confirm.some(label => label.includes('确认删除')), `the preview never offered a confirmed delete: ${json(preview)}`)
+  // The scope the user confirms names the side chats that go with the parent.
+  const announced = await evaluate(`Number(document.querySelector('.unified-delete [data-delete-side-chats]')?.dataset.deleteSideChats ?? 0)`)
+  check(announced === CHILDREN, `the delete preview must announce every side chat it takes along: ${json({ announced, expected: CHILDREN })}`)
   await capture('source-delete-preview')
   await clickAt(`[...document.querySelectorAll('.unified-delete .unified-actions button')].find(node => node.textContent.includes('确认删除'))`)
   await wait(`document.querySelector('.unified-delete')?.textContent.includes('逻辑入口已删除') || document.querySelector('.unified-delete')?.textContent.includes('未完整删除')`, 30000)
@@ -102,12 +105,19 @@ export async function exerciseSideChatSourceDeleted({ cdp, evaluate, check, ipcC
     `the deleted source must be a deleted record with no body: ${json(sourceAfterDelete)}`)
   const sourceListed = await evaluate(`[...document.querySelectorAll('.sb-sess')].some(row => row.dataset.conversationId === ${json(parentId)})`)
   check(sourceListed === false, 'the deleted source is still listed as a conversation')
-  // Deleting the parent is not a silent cascade: every child is still its own record.
+  // Every side chat went with its parent: a deleted record with no body left to read.
   for (const id of created.ids) {
-    const child = await conversation(id)
-    check(child.summary.id === id && child.summary.deletion === undefined,
-      `a child record did not survive its source: ${json({ id, deletion: child.summary.deletion ?? null })}`)
+    const child = await evaluate(`window.scry.conversations.read(${json(id)}).then(
+      page => ({ status: page.summary.deletion?.status ?? null, turns: page.turns.length }),
+      error => ({ status: 'unreadable', error: String(error) }))`)
+    check(child.status === 'complete' && child.turns === 0,
+      `a side chat was left behind by its deleted source: ${json({ id, child })}`)
+    const body = await evaluate(`window.scry.conversations.readSideChatSnapshot(${json(id)}).then(() => 'readable', () => 'refused')`)
+    check(body === 'refused', `a deleted side chat still served its frozen body: ${json({ id })}`)
   }
+  const listed = await evaluate(`window.scry.conversations.listSideChats({ source: { kind: 'conversation', conversationId: ${json(parentId)} } })
+    .then(list => list.total, () => 0)`)
+  check(listed === 0, `the deleted source still lists side chats: ${json({ listed })}`)
 
   // None of them is a sidebar row, in either tab: a side chat belongs to its parent's panel.
   const sidebarEvidence = () => evaluate(`(() => {

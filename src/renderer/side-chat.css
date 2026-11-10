@@ -415,14 +415,6 @@
   color: var(--dim2);
 }
 
-/* Compact parent-row counter. It is text inside the existing row button, not a control. */
-.sb-side-chat-count {
-  margin-left: 6px;
-  color: var(--dim2);
-  font-size: 10.5px;
-  white-space: nowrap;
-}
-
 /* Narrow window: one column; both panes stay mounted and the panel keeps its own
    hide control, so the shown pane is always escapable. The selectors repeat the shape of
    the docking rule they replace (`.app.right-panel-surface:not(...)` in

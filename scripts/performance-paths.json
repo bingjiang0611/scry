@@ -233,6 +233,9 @@
         "src/renderer/workspace-drafts.ts",
         "src/main/conversation-adoption.ts",
         "src/main/conversation-deletion.ts",
+        "src/main/conversation-deletion-cascade.ts",
+        "src/main/bootstrap/conversation-delete.ts",
+        "src/main/bootstrap/session-side-chats.ts",
         "src/renderer/components/ConversationDeleteDialog.tsx",
         "src/renderer/components/ConversationAdoptionDialog.tsx",
         "src/renderer/components/ConversationView.tsx"

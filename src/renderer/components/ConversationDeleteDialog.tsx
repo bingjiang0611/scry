@@ -50,6 +50,13 @@ export function ConversationDeleteDialog({ id, onChanged, onClose }: {
         {target.providerId} · {target.externalSessionId} · {target.sharedWith.length ? `保留：仍被 ${target.sharedWith.join(', ')} 引用` : '清理独占副本'}
       </li>)}
     </ul></details>}
+    {preview?.sideChats && preview.sideChats.length > 0 && <details data-delete-side-chats={preview.sideChats.length}>
+      <summary>同时删除这个对话的 {preview.sideChats.length} 个侧边会话</summary>
+      <p>侧边会话只存在于这个对话的右侧面板，删除后没有其他入口，因此一并删除它们的记录、冻结快照和独占副本。</p>
+      {/* Bounded list: the count above is the whole scope, the rows are a readable sample. */}
+      <ul>{preview.sideChats.slice(0, 20).map(child => <li key={child.conversationId}>{child.title}</li>)}</ul>
+      {preview.sideChats.length > 20 && <p>另有 {preview.sideChats.length - 20} 个未列出，同样会被删除。</p>}
+    </details>}
     {preview?.targets.some(target => target.sharedWith.length > 0) && <p role="note">本次仍被引用的整组副本会继续保留。引用消失后，可在已存档对话中重新预览并明确确认回收；不会自动清理。</p>}
     {!preview && !error && <p role="status">正在核对全部绑定、尝试和共享引用…</p>}
     {error && <p role="alert">{error}</p>}

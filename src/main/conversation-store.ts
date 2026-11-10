@@ -301,8 +301,8 @@ export class ConversationStore implements ConversationLedger {
     return finishFork(this, id, result)
   }
 
-  beginDeletion(id: string, revision: number, fingerprint: string, reclaim = false) {
-    return beginDeletion(this, id, revision, fingerprint, reclaim)
+  beginDeletion(id: string, revision: number, fingerprint: string, reclaim = false, cascade = false) {
+    return beginDeletion(this, id, revision, fingerprint, reclaim, cascade)
   }
 
   finishDeletion(id: string, fingerprint: string, result: ConversationDeletionResult, retainedCopies = false) {

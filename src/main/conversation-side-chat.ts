@@ -239,7 +239,7 @@ const bindingNames = (owner: Conversation, binding: Conversation['bindings'][num
  * Unrelated owners are never inspected, so a page scan does not grow with history size,
  * and the fence stays one exact provider/profile/workspace/session tuple.
  */
-function childNamesSource(child: Conversation, owners: ReadonlyMap<string, Conversation>,
+export function childNamesSource(child: Conversation, owners: ReadonlyMap<string, Conversation>,
   source: SideChatSource): boolean {
   const origin = child.sideChat?.source
   if (!origin) return false

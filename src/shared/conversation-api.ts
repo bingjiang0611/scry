@@ -165,12 +165,24 @@ export interface ConversationDeletionTarget {
   sharedWith: string[]
 }
 
+/** One side chat a parent deletion takes along; it is deleted by its own plan. */
+export interface SideChatDeletionPreview {
+  conversationId: string
+  title: string
+  revision: number
+  fingerprint: string
+  targets: ConversationDeletionTarget[]
+}
+
 export interface ConversationDeletionPreview {
   reclaim?: true
   conversationId: string
   revision: number
+  /** Covers `sideChats` too: a child that appears, leaves or changes needs a new preview. */
   fingerprint: string
   targets: ConversationDeletionTarget[]
+  /** Side chats of this conversation; a side chat has no entry outside its parent. */
+  sideChats?: SideChatDeletionPreview[]
 }
 
 /**

@@ -47,6 +47,7 @@ import { ensureMcpExecutionAuthorized, authorizedMcpExecution } from './bootstra
 import { registerWorkspaceHandlers } from './bootstrap/workspace'
 import { registerAppAgentHandlers } from './bootstrap/app-agent'
 import { registerConversationHandlers } from './bootstrap/conversation'
+import type { SideChatCascade } from './bootstrap/conversation-delete'
 import { createProviderRuntime } from './bootstrap/provider-runtime'
 import { createWorkspaceRuntime } from './bootstrap/workspace-runtime'
 import { createPiProfileRuntime } from './bootstrap/pi-profiles'
@@ -214,17 +215,19 @@ handleTrusted('agent:listSessions', (_e, context: ProviderContext) => {
 handleTrusted('agent:listProjects', () => listProjectCatalog())
 handleTrusted('agent:catalogHealth', () => appSessionStore().health())
 
-const conversationDeletion = { prepare: undefined as ((conversation: Conversation) => Promise<ConversationDeletionPreview>) | undefined }
+const conversationDeletion = { prepare: undefined as ((conversation: Conversation) => Promise<ConversationDeletionPreview>) | undefined,
+  sideChatCascade: undefined as SideChatCascade | undefined }
 const sessionDeletion = registerSessionDeletionHandlers({
   handleTrusted, getRuns: () => runs, appSessionStore, conversationStore, contextAdmission, getStartupManagedRecovery: () => startupManagedRecovery,
   providerContextKey, providerSessionKey, deletingSessions, sessionDiffBaselines, sessionBaselineKey, recordingBlockedSessions,
   getWindow: () => win, rendererCanReceive, appUserDataDir: app.getPath('userData'), isOwnedTestApp, requestRunStop,
   assertLegacyConversationWriteAllowed, sessionByContext, adoptingSessionKeys, dockBadge,
-  prepareConversationDeletion: (conversation) => conversationDeletion.prepare!(conversation)
+  prepareConversationDeletion: (conversation) => conversationDeletion.prepare!(conversation),
+  sideChatCascade: { count: scope => conversationDeletion.sideChatCascade!.count(scope), run: scope => conversationDeletion.sideChatCascade!.run(scope) }
 })
 const { deleteOneSession, sessionRefFromRequest, changeLegacySessionMetadata } = sessionDeletion
 
-const { prepareConversationDeletion } = registerConversationHandlers({
+const { prepareConversationDeletion, sideChatCascade } = registerConversationHandlers({
   handleTrusted, resolveKnownProjectDirectory, providerContextKey, contextAdmission, getStartupManagedRecovery: () => startupManagedRecovery,
   appSessionStore, conversationStore, getRuns: () => runs, providerRegistry, deletingSessions, adoptingSessionKeys,
   conversationService, invalidateSessionHistoryLoad, getWindow: () => win,
@@ -234,6 +237,7 @@ const { prepareConversationDeletion } = registerConversationHandlers({
 })
 
 conversationDeletion.prepare = prepareConversationDeletion
+conversationDeletion.sideChatCascade = sideChatCascade
 
 registerProjectHandlers({ handleTrusted, projectStore, recentStore })
 

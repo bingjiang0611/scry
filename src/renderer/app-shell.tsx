@@ -47,11 +47,11 @@ export function AppShell(props: AppShellProps) {
     setRemoteWorkspaceDirty, toggleOverviewPanel, changeView, openRemoteLocation, setShowSkills, setShowMcp,
     draftKey, questionKindsByRun
   } = props
-  // Measured narrow layout, one-pass child catalog and the side-chat tabs of this
-  // session. No child transcript is read and no per-child IPC is issued here.
+  // Measured narrow layout and the side-chat tabs of this session. No child transcript
+  // is read and no per-child IPC is issued here.
   const workbench = useRightWorkbench({
     sidebarWidth: sidebarPane.collapsed ? 0 : sidebarPane.visibleWidth,
-    projects, runningRunIds, waitingQuestionRunIds, questionKindsByRun,
+    runningRunIds, waitingQuestionRunIds, questionKindsByRun,
     draftKey, view,
     ...(logicalConversation ? { conversation: logicalConversation } : {}),
     cwd, activeSessionId, selectedProviderSessionId,
@@ -67,7 +67,7 @@ export function AppShell(props: AppShellProps) {
     layoutSaved: rightSurfaces.layoutSaved,
     restorePane: surfacePane.restore
   })
-  const { shellRef, narrowSingleColumn, catalog: sideChatCatalog, panel: sideChatPanel, layoutSaved } = workbench
+  const { shellRef, narrowSingleColumn, panel: sideChatPanel, layoutSaved } = workbench
   const primaryPaneVisible = !shellPanelMaximized && !(narrowSingleColumn && shellPanelVisible)
   const revealTurnInChat = useCallback<AppShellProps['openTurnInChat']>((...args) => {
     // A hidden timeline has no layout box for the navigation anchor.
@@ -91,7 +91,6 @@ export function AppShell(props: AppShellProps) {
         activeRemote={view === 'remote' && remoteTarget ? { connectionId: remoteTarget.connectionId, cwd: remoteTarget.cwd, externalSessionId: remoteAdoptedSession } : null}
         activeProviderId={integrations.selectedProviderId} activeAgentProfileId={integrations.providerContext.agentProfileId}
         runningRunIds={runningRunIds} waitingQuestionRunIds={waitingQuestionRunIds} unreadSessionKeys={unreadSessionKeys}
-        sideChatCatalog={sideChatCatalog}
         backgroundWorkByRun={backgroundWorkByRun} archiveUndo={archiveUndo}
         analyticsActive={view === 'analytics'} metaPromptsActive={view === 'meta-prompts'} catalogHealth={catalogHealth} />
       <PaneSplitter className="sidebar-resizer" label="调整左侧栏宽度" controls="sidebar-pane" min={sidebarMin} max={sidebarMax}

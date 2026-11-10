@@ -227,12 +227,12 @@ export async function verifySideChatRestart({ cdp, evaluate, check, documentEpoc
   await wait(`document.querySelectorAll('.sb-sess').length > 0`)
   await idle()
   const rows = await evaluate(`[...document.querySelectorAll('.sb-sess')].map(row => ({ text: row.textContent, active: row.classList.contains('active') }))`)
-  check(rows.length >= 2, `the restart must still list the parent and its child: ${json(rows)}`)
+  check(rows.length >= 2, `the restart must still list its parents: ${json(rows)}`)
   // Reopening the source conversation is what a user does after a restart; the child tab
   // and its own record must come back without replaying a send.
   const parentIndex = rows.findIndex(row => row.text.includes('side chat parent turn'))
   check(parentIndex >= 0, `the restarted sidebar lost the parent conversation: ${json(rows)}`)
-  check(rows[parentIndex].text.includes('侧聊'), `the parent row must still count its side chat: ${json(rows[parentIndex])}`)
+  check(!rows.some(row => row.text.includes('侧聊')), `the sidebar must print nothing about side chats: ${json(rows)}`)
   await clickAt(`[...document.querySelectorAll('.sb-sess')][${parentIndex}]`)
   await wait(`[...document.querySelectorAll('.sb-sess')][${parentIndex}].classList.contains('active') === true`)
   await idle()

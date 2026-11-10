@@ -110,9 +110,5 @@ export const SIDE_CHAT_COPY = {
     `完整带入 ${inline} / ${total} 条${retrievable > 0 ? `，仅可检索 ${retrievable} 条` : ''}`,
   sharedWorkspaceNote: '对话隔离，文件共用',
   childDiffLabel: (title: string): string => `${title} · 侧聊自己的本轮差异`,
-  childDiffHint: '这里是侧聊自己的差异；主会话选中的轮次不会被替换。',
-  // 侧栏父行计数：只报真实记录算得出的数量。
-  parentCount: (total: number): string => `${total} 侧聊`,
-  parentRunning: (running: number): string => `${running} 运行中`,
-  parentNeedsAttention: (needs: number): string => `${needs} 需处理`
+  childDiffHint: '这里是侧聊自己的差异；主会话选中的轮次不会被替换。'
 }

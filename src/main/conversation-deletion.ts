@@ -30,8 +30,14 @@ export function liveConversationDeletionCatalog(conversations: Conversation[], c
     alias && released.has(JSON.stringify([session.cwd, session.providerId, session.agentProfileId ?? null, alias]))))
 }
 
-export function planConversationDeletion(conversation: Conversation, others: Conversation[], catalog: AppSession[] = []): ConversationDeletionPreview {
-  if (!conversation.archivedAt) throw new Error('请先存档统一对话，再预览删除')
+/**
+ * `cascade` plans a side chat that is deleted together with its parent. The archive step is
+ * the user's deliberate act on the parent; a child has no row of its own to archive, so
+ * only that one precondition is waived. Every evidence precondition below still applies.
+ */
+export function planConversationDeletion(conversation: Conversation, others: Conversation[], catalog: AppSession[] = [],
+  options: { cascade?: boolean } = {}): ConversationDeletionPreview {
+  if (!conversation.archivedAt && !(options.cascade && conversation.sideChat)) throw new Error('请先存档统一对话，再预览删除')
   if (conversation.fork && ['pending', 'unknown'].includes(conversation.fork.status)) throw new Error('原生分支尚未确认，不能删除恢复证据')
   if (conversation.turns.some(turn => turn.origin === 'dispatch' && (turn.delivery.status === 'pending' || turn.delivery.status === 'unknown'))) {
     throw new Error('投递仍未收敛，不能删除其归属和恢复证据')

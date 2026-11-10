@@ -92,7 +92,7 @@ async function exerciseSideChatMode({ cdp, evaluate, check, lifecycle, options, 
   const sourceDeleted = await exerciseSideChatSourceDeleted({ cdp, evaluate, check, rendererFailures, ...options })
   // The delete pass leaves the window on the deleted source; the restart below must
   // resume from the original parent with its own child tab open, as a user would. The
-  // parent is found by the row that owns the side-chat count, never by a title alone.
+  // parent is the one sidebar row of that source.
   step('restore')
   const restore = await exerciseSideChatRestore({ cdp, evaluate, check, rendererFailures,
     childId: first.childId, ...options })

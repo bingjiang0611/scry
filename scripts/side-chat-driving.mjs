@@ -283,7 +283,6 @@ export function sideChatDriver({ cdp, evaluate, check, ipcCountsPath, inputsPath
           : null
         return { row: { conversationId: active?.dataset.conversationId ?? null,
           provider: active?.dataset.provider ?? null,
-          count: active?.querySelector('[data-side-chat-count]')?.dataset.sideChatCount ?? null,
           text: active?.textContent?.slice(0, 60) ?? null }, child, parent }
       })()`)
       throw new Error(`the history dialog listed no side chat: ${json({ ...evidence, chooser,
