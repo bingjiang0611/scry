@@ -194,4 +194,18 @@ describe('daemon run transport', () => {
     const broken = transport(() => ({ events: { cursor: 'x' } }))
     await expect(broken.value.appEvents({ cursor: 0, waitMs: 0 })).rejects.toMatchObject({ reason: 'invalid_daemon_response' })
   })
+
+  it('names the arguments the renderer left out, which JSON would turn into null', async () => {
+    // The preload always passes its optional parameters; an omitted one is undefined,
+    // which a JSON array carries as null. The daemon must see what main would have seen.
+    const { value, calls } = transport(() => ({ result: { ok: true } }))
+    await value.localOp({ op: 'conversation', method: 'read', args: ['conv-1', undefined], read: true })
+    // In memory the array still holds undefined; the lane's JSON makes it null.
+    expect(calls[0]!.request).toStrictEqual({ op: 'conversation', method: 'read', args: ['conv-1', undefined], absent: [1] })
+    await value.localOp({ op: 'conversation', method: 'read', args: ['conv-1', 5], read: true })
+    expect(calls[1]!.request).toStrictEqual({ op: 'conversation', method: 'read', args: ['conv-1', 5] })
+    // A real null is the renderer's own value and travels as one.
+    await value.localOp({ op: 'conversation', method: 'read', args: ['conv-1', null], read: true })
+    expect(calls[2]!.request).toStrictEqual({ op: 'conversation', method: 'read', args: ['conv-1', null] })
+  })
 })

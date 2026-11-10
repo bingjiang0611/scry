@@ -296,7 +296,11 @@ export class DaemonRunTransport {
   async localOp(input: { op: string; method: string; args: unknown[]; read: boolean }): Promise<unknown> {
     let reply: unknown
     try {
-      reply = await this.#request({ op: input.op, method: input.method, args: input.args }, { replayable: input.read })
+      // JSON carries an omitted (undefined) argument as null. The renderer's own null and
+      // a parameter it left out are different inputs to main's handler, so the positions
+      // left out are named and the daemon restores them.
+      const absent = input.args.flatMap((value, index) => value === undefined ? [index] : [])
+      reply = await this.#request({ op: input.op, method: input.method, args: input.args, ...(absent.length > 0 ? { absent } : {}) }, { replayable: input.read })
     } catch (error) {
       throw error instanceof DaemonRunError ? error : new DaemonRunError(transportFailure(error))
     }

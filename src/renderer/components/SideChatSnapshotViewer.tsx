@@ -2,8 +2,10 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import type { SideChatSnapshotBodyPage, SideChatSummary } from '@shared/conversation-api'
 import { SIDE_CHAT_COPY } from '../constants/side-chat-copy'
 import { ModalFrame } from './ModalFrame'
+import { ipcErrorMessage } from '../constants/ipc-error-copy'
 
-const message = (error: unknown): string => error instanceof Error ? error.message : String(error)
+// Readable copy for a failed IPC call, without Electron's wrapper (daemon refusals included).
+const message = ipcErrorMessage
 
 const capturedAtText = (value: number): string => new Date(value).toLocaleString('zh-CN', {
   year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'

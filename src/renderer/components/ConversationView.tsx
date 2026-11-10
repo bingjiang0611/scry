@@ -16,8 +16,10 @@ import { useRunTraceStream } from '../hooks/useRunTraceStream'
 
 import '../conversation.css'
 import { ConversationViewBody } from './ConversationViewBody'
+import { ipcErrorMessage } from '../constants/ipc-error-copy'
 
-const message = (error: unknown): string => error instanceof Error ? error.message : String(error)
+// Readable copy for a failed IPC call, without Electron's wrapper (daemon refusals included).
+const message = ipcErrorMessage
 /** No turn of a side chat can create a native fork; the backend refuses it as well. */
 const NO_FORKABLE_RUNS: ReadonlySet<string> = new Set()
 

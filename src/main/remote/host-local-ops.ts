@@ -64,9 +64,14 @@ export function localOpCaller(): string | undefined {
 
 export async function handleLocalOp(handlers: LocalOpHandlers | undefined, request: Record<string, unknown>, peer: string): Promise<Record<string, unknown>> {
   if (!handlers) return { error: 'unsupported_op' }
-  if (Object.keys(request).some((key) => !['op', 'keepAlive', 'protocol', 'method', 'args'].includes(key))) return { error: 'invalid_request' }
+  if (Object.keys(request).some((key) => !['op', 'keepAlive', 'protocol', 'method', 'args', 'absent'].includes(key))) return { error: 'invalid_request' }
   const args = request.args ?? []
   if (typeof request.method !== 'string' || !Array.isArray(args) || args.length > MAX_ARGS) return { error: 'invalid_request' }
+  // Positions the caller left out (undefined), which JSON could only carry as null.
+  const absent = request.absent ?? []
+  if (!Array.isArray(absent) || absent.length > args.length || new Set(absent).size !== absent.length ||
+    absent.some((index) => !Number.isSafeInteger(index) || index < 0 || index >= args.length)) return { error: 'invalid_request' }
+  for (const index of absent as number[]) args[index] = undefined
   const handler = handlers.get(`${request.op as string}:${request.method}`)
   if (!handler) return { error: 'unsupported_op' }
   // JSON has no undefined; a handler that returns nothing answers null.

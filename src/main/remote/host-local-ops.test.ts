@@ -36,6 +36,22 @@ describe('local ops on the App endpoint', () => {
     expect(localOpCaller()).toBeUndefined()
   })
 
+  it('gives the handler back the arguments the caller left out, exactly as main would', async () => {
+    const read = vi.fn((...args: unknown[]) => args)
+    const handlers = localOpHandlersFor({ ...everyChannel(() => undefined), 'conversation:read': read })
+    // As the frame arrives: JSON already turned the omitted argument into null.
+    await handleLocalOp(handlers, JSON.parse(JSON.stringify({ op: 'conversation', method: 'read', args: ['conv-1', undefined], absent: [1] })), PEER)
+    expect(read).toHaveBeenLastCalledWith('conv-1', undefined)
+    expect(read.mock.lastCall).toHaveLength(2)
+    // Without the marker a null stays the caller's null.
+    await handleLocalOp(handlers, { op: 'conversation', method: 'read', args: ['conv-1', null] }, PEER)
+    expect(read).toHaveBeenLastCalledWith('conv-1', null)
+    for (const absent of [[2], [-1], [1.5], [1, 1], 'x', [0, 1, 2, 3, 4]]) {
+      await expect(handleLocalOp(handlers, { op: 'conversation', method: 'read', args: ['conv-1', null], absent }, PEER))
+        .resolves.toEqual({ error: 'invalid_request' })
+    }
+  })
+
   it('refuses malformed requests and methods it does not serve', async () => {
     const handlers = localOpHandlersFor(everyChannel(() => 'ok'))
     await expect(handleLocalOp(handlers, { op: 'sessionStore', method: 'listSessions', cwd: '/etc' }, PEER)).resolves.toEqual({ error: 'invalid_request' })

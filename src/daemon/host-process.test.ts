@@ -230,9 +230,17 @@ describe('daemon host process', () => {
       expect(conversationState).toBe('settled')
       const bound = conversationEvents.map((event) => event.detail ?? '').find((detail) => detail.includes('"event":"bound"'))
       expect(JSON.parse(bound!)).toMatchObject({ ledgerRunId: sent.result.ledger.runId, scryRunId: sent.result.runId })
-      const afterSend = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
-        op: 'conversation', method: 'read', args: [created.id]
+      // The renderer's read(id) leaves its cursor out; over JSON that arrives as null.
+      // Named as absent, the daemon's handler sees what main's does; unnamed, the null
+      // is refused, which is the page read that stalled the daemon-mode conversation view.
+      const unnamed = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'conversation', method: 'read', args: [created.id, null]
       })
+      expect(unnamed.error).toContain('统一对话分页游标无效')
+      const afterSend = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'conversation', method: 'read', args: [created.id, null], absent: [1]
+      })
+      expect(afterSend.error).toBeUndefined()
       const turn = afterSend.result.turns.find((candidate: { runId: string }) => candidate.runId === sent.result.runId)
       expect(turn.delivery.status).toBe('accepted')
       const afterRun = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {

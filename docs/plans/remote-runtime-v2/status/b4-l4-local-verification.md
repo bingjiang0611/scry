@@ -46,3 +46,44 @@
 - 控制实验：把扫描器恢复成只认 `handleTrusted|handle` 后，preload 核对立刻报出 4 个 `agent:git*` 通道。`desktopRemote:*` 这次是靠新增的模板展开找到的，不依赖这个正则。
 
 还没处理的拒绝：`agent:listCommands`、`agent:usageStats`、`workspaceSelection:read`、`agent:gitDiff` 系列，以及按设计保持缺席的 `agent:unreadSessions`。它们都在后续迁移组里。
+
+## `8a85351` + L4-2c `conversation:send`（worktree `292811f`）
+
+| 项 | 结果 |
+|---|---|
+| `npm run typecheck` | 通过 |
+| 7 个目标的 vitest（含 `src/main/remote`、`src/main/bootstrap`） | 127 个文件、814 条测试通过，0 失败 |
+| `host-process.test.ts` | 2/2 通过。recentFolders 的规范路径断言在 macOS 上成立；实例中经 daemon 返回 `/private/tmp/...` |
+| `npm run build`、`daemon-mode-smoke.mjs` | 通过：流式 20 次到达，间隔中位数 152 ms；提问回答两次；停止被接受；daemon 被 SIGKILL 后重启，新 run 正常结束 |
+| 会话视图 | **打不开**：`conversation:read` 返回「统一对话分页游标无效」，视图停在「正在读取对话…」，发送按钮与 Agent 选择器都不可用 |
+| 经同一 IPC 通道直接调用 | 第一次发送：20 段流式文本在 2.9 s 内到达，turn 为 `accepted`、`completed`；第二次发送后停止：`stop` 返回 true，turn 为 `accepted`、`interrupted` |
+| 主进程日志中的命名缺席 | `agent:listCommands` 3、`agent:usageStats` 2、`agent:unreadSessions` 1、`agent:gitDiff` 1、`workspaceSelection:read` 1、`agent:usageAnalytics` 1；`conversation:send` 与 `desktopRemote:*` 为 0 |
+| 分析面板 | 显示可读文案「后台服务尚未提供这项功能（agent:usageAnalytics）」，不再有 IPC 包装文本 |
+
+### 会话视图打不开的原因与修复
+
+原因：preload 调用时总会把可省略的参数一起传过去，`read(id)` 实际调用的是 `invoke('conversation:read', id, undefined)`。经 daemon 转发时，参数数组被序列化成 JSON，`undefined` 变成了 `null`。daemon 上运行的是 main 的同一个处理函数，它对 `beforeOrdinal !== undefined && !Number.isSafeInteger(beforeOrdinal)` 抛错。
+
+这不只影响 `conversation:read`：所有转发给 daemon、且 renderer 省略了可选参数的通道都会这样。真实 daemon 测试没发现它，是因为测试里只传了一个参数，没有末尾的 `undefined`。问题从 L4-2a 起就存在。
+
+修复：
+
+- App 侧在转发时记下哪些位置是 `undefined`（`absent`）；
+- daemon 在调用处理函数前把这些位置恢复成 `undefined`；
+- renderer 自己传的 `null` 仍然是 `null`；
+- `absent` 逐项校验：越界、重复、非整数都拒绝。
+
+测试：
+
+- transport 与本机 op 各加一条测试；
+- 真实 daemon socket 用 renderer 实际发出的帧读取：不带标记时复现「统一对话分页游标无效」，带标记时读取成功；
+- 控制实验：去掉 daemon 侧恢复，或去掉 App 侧标记，各自的测试都会失败。
+
+同时，会话视图、会话正文、侧聊快照与发送 hook 的错误文案改用 `ipcErrorMessage`，不再显示 Electron 的 IPC 包装文本。
+
+未覆盖：
+
+- 通过输入框、Agent 选择器与停止按钮操作的完整 UI 路径（会话视图打不开，未能执行）；
+- 被中断的一轮在界面上如何显示；
+- 开发实例里 `better-sqlite3` 仍是 Node 的 ABI，DB 相关面板降级，这是已知的环境问题；
+- `test:renderer:ui`、完整 `npm test` 与 Linux 未运行。

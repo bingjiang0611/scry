@@ -4,12 +4,14 @@ import type { AgentInputAttachment } from '@shared/runtime'
 import { CONVERSATION_COPY } from '../constants/conversation-copy'
 import { updateComposerDraft, type ComposerDraftAttachment, type ComposerDraftStore,
   type ComposerPendingSubmission } from '../composer-drafts'
+import { ipcErrorMessage } from '../constants/ipc-error-copy'
 import {
   clearPendingSubmission, resolvePendingSubmission, runSubmission, settleOwnedPending,
   type PendingResolution
 } from '../composer-pending'
 
-const message = (error: unknown): string => error instanceof Error ? error.message : String(error)
+// Readable copy for a failed IPC call, without Electron's wrapper (daemon refusals included).
+const message = ipcErrorMessage
 
 export interface ConversationSubmission {
   /** Matching pending receipt of this draft, if any. Its content is the durable copy. */
