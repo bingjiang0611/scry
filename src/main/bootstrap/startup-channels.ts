@@ -1,6 +1,7 @@
 import { basename } from 'node:path'
 import type { IpcMainInvokeEvent } from 'electron'
 import type { ProviderContext } from '../../shared/provider'
+import { installDaemonChannelResultHandler } from '../daemon-channel-gate'
 import { providerIdForAgentId } from '../../shared/runtime'
 import { canonicalizePiAgentPaths, type PiAgentProfile } from '../pi-agent-profiles'
 import { detectAgentsFast, probeCliVersion, PI_VERSION_PROBE_TIMEOUT_MS, type DetectedAgent } from '../claude-locate'
@@ -114,4 +115,31 @@ export function providerControlChannelHandlers(deps: {
     'agent:runControls': (context: ProviderContext) =>
       deps.withProviderOperation(context.providerId, () => deps.providerRegistry.runControls(context), context.agentProfileId)
   } satisfies ChannelHandlers
+}
+
+/**
+ * `agent:newSession` without the window's part: forget this context's current session and
+ * the Provider's warm state for it. Main adds the badge (nothing is viewed now); in daemon
+ * mode the daemon runs this and main applies the badge once it answered.
+ */
+export async function resetProviderSession(deps: {
+  providerRegistry: { invalidateContext: (context: ProviderContext) => void | Promise<void> }
+  providerContextKey: (providerId: ProviderContext['providerId'], cwd: string, agentProfileId?: string) => string
+  resetSessionContext: (key: string) => void
+  currentCwd: () => string | undefined
+}, context: ProviderContext | undefined): Promise<true> {
+  const cwd = context?.cwd ?? deps.currentCwd()
+  if (context?.providerId) {
+    deps.resetSessionContext(deps.providerContextKey(context.providerId, cwd ?? '', context.agentProfileId))
+    await deps.providerRegistry.invalidateContext({ ...context, cwd })
+  }
+  return true
+}
+
+/** Daemon mode: once the daemon reset the context, this window views no session. */
+export function viewNothingAfterDaemonNewSession(dockBadge: { view: (key: string | null, focused: boolean) => void }, isFocused: () => boolean): () => void {
+  return installDaemonChannelResultHandler('agent:newSession', (value) => {
+    dockBadge.view(null, isFocused())
+    return value
+  })
 }

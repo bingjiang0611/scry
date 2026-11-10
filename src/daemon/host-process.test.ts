@@ -141,6 +141,11 @@ describe('daemon host process', () => {
         op: 'conversation', method: 'update', args: [created.id, created.revision, { kind: 'rename', title: 'from the App' }]
       })
       expect(renamed.error).toBeUndefined()
+      // The sidebar's "new session": the daemon forgets the context it runs.
+      const newSession = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'providerContext', method: 'newSession', args: [{ providerId: 'codex', cwd: workspace }]
+      })
+      expect(newSession).toEqual({ result: true })
       // Deletion needs the App's session deletion, fork the Provider fork: not yet served.
       for (const method of ['delete', 'fork']) {
         const refused = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {

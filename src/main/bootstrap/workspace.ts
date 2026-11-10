@@ -4,6 +4,8 @@ import type { IpcMainInvokeEvent } from 'electron'
 import type { BrowserWindow } from 'electron'
 import type { WorkspaceCreateRequest, WorkspaceFilePageRequest, WorkspaceListRequest, WorkspaceMoveRequest, WorkspacePathRequest, WorkspaceRenameRequest, WorkspaceWriteRequest } from '../../shared/workspace'
 import type { ProviderContext } from '../../shared/provider'
+import { resetProviderSession, viewNothingAfterDaemonNewSession } from './startup-channels'
+import { daemonModeEnabled } from '../daemon-channel-gate'
 import type { TerminalCloseRequest, TerminalRecordingRequest, TerminalRecordingListRequest, TerminalResizeRequest, TerminalStartRequest, TerminalOwnershipRequest, TerminalWriteRequest } from '../../shared/terminal'
 import { authorizedWorkspaceRequest } from '../workspace-authorization'
 import { createWorkspaceEntry, listWorkspace, moveWorkspaceEntry, openWorkspaceFileExternally, readWorkspaceFile, readWorkspaceFilePage, resolveWorkspaceFileOpenTarget, renameWorkspaceEntry, trashWorkspaceEntry, writeWorkspaceFile } from '../workspace-files'
@@ -204,14 +206,9 @@ export function registerWorkspaceHandlers(deps: WorkspaceBootstrapDependencies):
 
   handleTrusted('agent:newSession', async (_event, context: ProviderContext) => {
     dockBadge.view(null, Boolean(getWindow()?.isFocused()))
-    const cwd = context?.cwd ?? getCurrentCwd()
-    if (context?.providerId) {
-      const normalizedContext = { ...context, cwd }
-      const key = providerContextKey(context.providerId, cwd ?? '', context.agentProfileId)
-      resetSessionContext(key)
-      await providerRegistry.invalidateContext(normalizedContext)
-    }
-    return true
+    return await resetProviderSession({ providerRegistry, providerContextKey, resetSessionContext, currentCwd: getCurrentCwd }, context)
   })
+  // Daemon mode: the daemon resets the context it runs; the badge part stays here.
+  if (daemonModeEnabled()) viewNothingAfterDaemonNewSession(dockBadge, () => Boolean(getWindow()?.isFocused()))
 
 }

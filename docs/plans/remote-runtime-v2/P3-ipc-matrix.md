@@ -2,8 +2,8 @@
 
 本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑；改 `scripts/daemon-ipc-routing.json` 后重新生成。
 
-- 生产特权 IPC channel：167 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
-- 留在 main：53，一半 main 一半 daemon（`split`）：4，转发到现有 op：44，需要新增 op：66
+- 生产特权 IPC channel：168 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
+- 留在 main：54，一半 main 一半 daemon（`split`）：4，转发到现有 op：44，需要新增 op：66
 - 新增 op 的请求、响应、授权与调用方范围见 [P3-ipc-ops](P3-ipc-ops.md)；设计正文见 [P3 §13](P3-batch4-design.md)
 - `desktopWorkbench` 转发行（workspace / terminal / sourceControl，共 32 行）见 [P3-ipc-matrix-workbench](P3-ipc-matrix-workbench.md)
 
@@ -87,6 +87,7 @@
 | `agent:usageAnalytics` | new-op | `usage:usageAnalytics` | analytics | — | usage 来自 daemon 持有的 SQLite 与 usage JSONL |
 | `agent:usageCredits` | new-op | `usage:usageCredits` | analytics | — | usage 来自 daemon 持有的 SQLite 与 usage JSONL |
 | `agent:usageStats` | new-op | `usage:usageStats` | analytics | — | usage 来自 daemon 持有的 SQLite 与 usage JSONL |
+| `agent:viewSessions` | main | `—` | — | — | badge 由 main 渲染 |
 | `app:copyText` | main | `—` | — | — | 剪贴板 |
 | `app:performanceDiagnosticsEnabled` | main | `—` | — | — | 本机性能开关 |
 | `app:rendererRestart` | main | `—` | — | — | 窗口行为 |

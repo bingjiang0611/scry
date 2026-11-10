@@ -49,6 +49,7 @@ type OptionalBridgeMethod =
   | 'traceResynchronized'
   | 'focusedRunSnapshot'
   | 'unreadSessions'
+  | 'viewSessions'
   | 'onUnreadSessions'
 type RendererScryApi = Omit<ScryApi, OptionalBridgeMethod> & Partial<Pick<ScryApi, OptionalBridgeMethod>> & {
   /** Added by the native Steer bridge; optional keeps stale dev preload failures explicit in the UI. */

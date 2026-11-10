@@ -17,6 +17,7 @@ import { useRunTraceStream } from '../hooks/useRunTraceStream'
 import '../conversation.css'
 import { ConversationViewBody } from './ConversationViewBody'
 import { ipcErrorMessage } from '../constants/ipc-error-copy'
+import { useConversationSessionsViewed } from '../conversation-viewed-sessions'
 
 // Readable copy for a failed IPC call, without Electron's wrapper (daemon refusals included).
 const message = ipcErrorMessage
@@ -133,6 +134,7 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
     void refresh().catch(error => { if (mounted.current) setError(`读取本轮最终记录失败：${message(error)}`) })
   })
   const live = stream.run
+  useConversationSessionsViewed(conversation.id, !embedded, page)
   useEffect(() => {
     if (stream.status === 'limit') setNotice(CONVERSATION_COPY.liveStreamLimited)
   }, [stream.status, setNotice])

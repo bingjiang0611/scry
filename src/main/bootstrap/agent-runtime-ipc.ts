@@ -71,6 +71,18 @@ export function registerAgentRuntimeHandlers({
     return state ? boundedLiveRun(state) : null
   })
   handleTrusted('agent:unreadSessions', () => unreadSessionsAnswer(dockBadge, Boolean(daemon)))
+  // A unified conversation shows one native session per Provider binding; none of its
+  // runs is the focused run, so the view names them. Keys only: no session is read here.
+  handleTrusted('agent:viewSessions', (_event, request: unknown): boolean => {
+    const { viewId, main, sessionKeys } = (request ?? {}) as Record<string, unknown>
+    if (typeof viewId !== 'string' || viewId.length === 0 || viewId.length > 256 || typeof main !== 'boolean' ||
+      !Array.isArray(sessionKeys) || sessionKeys.length > 16 ||
+      !sessionKeys.every((key) => typeof key === 'string' && key.length > 0 && key.length <= 4096)) {
+      throw new Error('invalid_viewed_sessions')
+    }
+    dockBadge.viewSessions({ id: viewId, main }, sessionKeys as string[], Boolean(getWindow()?.isFocused()))
+    return true
+  })
   // live trace 降级恢复专用：忽略 done，只要 registry 里还有这个 run 就给出权威事件序列。
   // activeRun 会因为 done=true 返回 null，那样终态被跳过的事件永远补不回来。
   handleTrusted('agent:focusedRunSnapshot', async (): Promise<ActiveRun | null> => {

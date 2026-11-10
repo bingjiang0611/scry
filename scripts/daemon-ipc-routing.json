@@ -389,6 +389,11 @@
       "why": "badge 由 main 渲染"
     },
     {
+      "channel": "agent:viewSessions",
+      "route": "main",
+      "why": "badge 由 main 渲染"
+    },
+    {
       "channel": "agent:usageAnalytics",
       "route": "new-op",
       "op": "usage",

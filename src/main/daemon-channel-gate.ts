@@ -22,7 +22,7 @@ export function daemonModeEnabled(env: NodeJS.ProcessEnv = process.env): boolean
  */
 export const DAEMON_MODE_IN_PROCESS_CHANNELS: ReadonlySet<string> = new Set([
   'agent:clipboardImage', 'agent:focusRun', 'agent:revealProject', 'agent:setCwd',
-  'agent:traceAck', 'agent:traceResynchronized', 'agent:unreadSessions',
+  'agent:traceAck', 'agent:traceResynchronized', 'agent:unreadSessions', 'agent:viewSessions',
   'app:copyText', 'app:performanceDiagnosticsEnabled', 'app:rendererRestart',
   'app:reportRendererPerformance', 'app:setTheme',
   'remote:desktop:disable', 'remote:desktop:invite', 'remote:desktop:status',
@@ -53,6 +53,9 @@ export const DAEMON_LOCAL_OP_CHANNELS: Readonly<Record<string, { op: string; met
   'agent:detectFast': { op: 'providerCatalog', method: 'detectFast', read: true },
   'agent:providerDescriptors': { op: 'providerCatalog', method: 'providerDescriptors', read: true },
   'agent:runControls': { op: 'providerCatalog', method: 'runControls', read: true },
+  // The daemon forgets the context's session and warm Provider state; main keeps the
+  // badge part (workspace.ts). Not replayed after a lost reply.
+  'agent:newSession': { op: 'providerContext', method: 'newSession', read: false },
   // Conversation ledger reads (B4-L4-2a). previewSideChat streams the source prefix into
   // a capture manifest, so it is not replayed after a lost reply.
   'conversation:list': { op: 'conversation', method: 'list', read: true },

@@ -15,6 +15,9 @@ export class DockBadgeState {
   private daemonSessionKeys: Set<string> | undefined
   private daemonViewed?: (sessionKey: string) => void
   private viewedSessionKey: string | null = null
+  // A conversation shows several native sessions at once (one per Provider binding), and a
+  // side chat can show one beside the main pane: one group per view on screen.
+  private readonly viewedGroups = new Map<string, ReadonlySet<string>>()
   private revision = 0
 
   constructor(
@@ -27,14 +30,39 @@ export class DockBadgeState {
     if (windowFocused) this.clear(sessionKey)
   }
 
+  /**
+   * A conversation view shows these native sessions; an empty list means it closed. The
+   * main pane's conversation replaces the single viewed session; a side chat beside a
+   * session does not.
+   */
+  viewSessions(view: { id: string; main: boolean }, sessionKeys: readonly string[], windowFocused: boolean): void {
+    if (sessionKeys.length === 0) {
+      this.viewedGroups.delete(view.id)
+      return
+    }
+    if (view.main) this.viewedSessionKey = null
+    this.viewedGroups.set(view.id, new Set(sessionKeys))
+    if (windowFocused) for (const key of sessionKeys) this.clear(key)
+  }
+
   focusWindow(): void {
     this.clear(this.viewedSessionKey)
+    for (const group of this.viewedGroups.values()) for (const key of group) this.clear(key)
+  }
+
+  // What the window shows right now, whichever way it came to show it.
+  private shows(sessionKey: string): boolean {
+    if (sessionKey === this.viewedSessionKey) return true
+    for (const group of this.viewedGroups.values()) if (group.has(sessionKey)) return true
+    return false
   }
 
   markAttention(sessionKey: string, state: DockBadgeAttentionState): void {
     if (!state.needsAttention) return
     if (state.sessionViewed) this.viewedSessionKey = sessionKey
-    if (state.windowFocused && state.sessionViewed) {
+    // A run that is not the focused one can still finish in the session on screen (a
+    // conversation's run, a phone's run): the user is looking at it all the same.
+    if (state.windowFocused && (state.sessionViewed || this.shows(sessionKey))) {
       this.clear(sessionKey)
       return
     }
@@ -99,7 +127,7 @@ export class DockBadgeState {
   setDaemon(snapshot: SessionAttentionSnapshot, windowFocused: boolean): void {
     const next = new Set<string>()
     for (const key of snapshot.unreadSessionKeys) {
-      if (windowFocused && key === this.viewedSessionKey) this.daemonViewed?.(key)
+      if (windowFocused && this.shows(key)) this.daemonViewed?.(key)
       else next.add(key)
     }
     const same = this.daemonSessionKeys !== undefined && next.size === this.daemonSessionKeys.size &&

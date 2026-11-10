@@ -1,5 +1,6 @@
 import { localOpHandlersFor, type LocalEndpointHandlers, type LocalOpHandler } from '../main/remote/host-local-ops'
-import { catalogChannelHandlers, providerControlChannelHandlers, providerDetectionChannelHandlers } from '../main/bootstrap/startup-channels'
+import { catalogChannelHandlers, providerControlChannelHandlers, providerDetectionChannelHandlers, resetProviderSession } from '../main/bootstrap/startup-channels'
+import type { ProviderContext } from '../shared/provider'
 import { conversationChannelTable } from '../main/bootstrap/conversation'
 import { resolveSessionRunIds } from '../main/db'
 import { deleteConversationHistory } from '../main/conversation-history'
@@ -89,6 +90,10 @@ export function daemonLocalEndpoint(deps: DaemonLocalEndpointDeps): LocalEndpoin
         providerRegistry: providers.providerRegistry
       }),
       ...providerControlChannelHandlers({ providerRegistry: providers.providerRegistry, withProviderOperation: session.withProviderOperation }),
+      'agent:newSession': (context) => resetProviderSession({
+        providerRegistry: providers.providerRegistry, providerContextKey: session.providerContextKey,
+        resetSessionContext: session.resetSessionContext, currentCwd: () => undefined
+      }, context as ProviderContext | undefined),
       ...conversationLocalOps
     } as Record<string, LocalOpHandler>),
     events,

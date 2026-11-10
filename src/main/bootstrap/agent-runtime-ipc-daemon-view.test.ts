@@ -61,3 +61,19 @@ describe('daemon mode: showing a run views its session', () => {
     expect(badge.count).toBe(1)
   })
 })
+
+describe('agent:viewSessions: a conversation names the sessions it shows', () => {
+  it('views them, and refuses anything but a bounded list of keys', () => {
+    const { handlers, viewed, badge } = register(true)
+    const view = handlers.get('agent:viewSessions')!
+    expect(view({}, { viewId: 'main:c1', main: true, sessionKeys: ['key:native-1'] })).toBe(true)
+    expect(viewed).toHaveBeenCalledWith('key:native-1')
+    expect(badge.count).toBe(0)
+    for (const bad of [
+      undefined, ['key'], { viewId: 'main:c1', main: true, sessionKeys: 'key' },
+      { viewId: '', main: true, sessionKeys: [] }, { viewId: 'main:c1', sessionKeys: [] },
+      { viewId: 'main:c1', main: true, sessionKeys: [''] },
+      { viewId: 'main:c1', main: true, sessionKeys: Array.from({ length: 17 }, (_, index) => `k${index}`) }
+    ]) expect(() => view({}, bad)).toThrow('invalid_viewed_sessions')
+  })
+})

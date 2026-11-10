@@ -61,7 +61,7 @@ export interface DaemonRunModeDeps {
   waitMs?: number
   onWarn?: (message: string, detail?: unknown) => void
   // E1b: this window's badge mirrors the daemon's unread set and decides what was viewed.
-  dockBadge?: Pick<DockBadgeState, 'setDaemon' | 'bindDaemon' | 'forgetDaemon'>
+  dockBadge?: Pick<DockBadgeState, 'setDaemon' | 'bindDaemon' | 'forgetDaemon' | 'view'>
   isWindowFocused?: () => boolean
   // P3f W2: this window's run-level subscriptions also see the runs it follows here.
   runTraces?: NonNullable<DaemonRunRuntimeDeps['runTraces']> & Pick<RunTraceRouter, 'attachRuns' | 'publishStopState'>
@@ -182,7 +182,7 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   })
   const surface = createDaemonRunSurface({ transport, runtime, currentCwd: deps.currentCwd })
   const events = startDaemonRunEvents({
-    transport, runtime, send: deps.send,
+    transport, runtime, send: deps.send, focusedRun: () => surface.focusedRunSnapshot(),
     ...(deps.dockBadge ? { dockBadge: deps.dockBadge } : {}),
     ...(deps.isWindowFocused ? { isWindowFocused: deps.isWindowFocused } : {}),
     ...(deps.onWarn ? { onWarn: deps.onWarn } : {}),
