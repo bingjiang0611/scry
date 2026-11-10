@@ -26,6 +26,7 @@ function surface(overrides: Partial<DaemonRunSurface> = {}): DaemonRunSurface {
     steer: async () => ({ status: 'accepted' as const }),
     stopBackgroundTask: async () => ({ status: 'requested' as const, message: '' }),
     adopt: async () => null,
+    follow: async (ledger) => ({ runId: ledger.runId, bound: false }),
     localOp: async () => null,
     ...overrides
   }

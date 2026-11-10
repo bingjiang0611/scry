@@ -29,6 +29,7 @@ import { openLocalChannel, type LocalChannel } from './local-channel'
 import { localOpHandlersFor, type LocalOpHandler } from '../main/remote/host-local-ops'
 import { catalogChannelHandlers, providerControlChannelHandlers, providerDetectionChannelHandlers } from '../main/bootstrap/startup-channels'
 import { conversationChannelTable } from '../main/bootstrap/conversation'
+import { createDaemonConversationSend } from './conversation-send'
 import { createHistoryRuntime } from '../main/bootstrap/history-runtime'
 import { resolveSessionRunIds } from '../main/db'
 import { deleteConversationHistory } from '../main/conversation-history'
@@ -102,6 +103,15 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     resolvePiProfile: pi.resolvePiProfile
   })
 
+  // The conversation service records its sends as ledger intents (P3-conversation-send.md);
+  // the host service exists only later, so the submit resolves it per call.
+  const conversationSend = createDaemonConversationSend({
+    submit: (peer, input) => {
+      if (!remoteHostService) throw new Error('daemon_host_not_ready')
+      return remoteHostService.controller.submitIntent(peer, input)
+    },
+    liveLedgerRunId: (runId) => remoteRunLedgerIds.get(runId)
+  })
   const catalog = createSessionCatalog({
     recentStore: workspace.recentStore,
     projectStore: workspace.projectStore,
@@ -110,7 +120,10 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     unsettledRuns: () => pipeline.runs.unsettledStates(),
     getProviderRegistry: () => providers.providerRegistry,
     forkManagedConversation: async () => unavailable('fork-session'),
-    startAppRun: (request, startOptions) => pipeline.startAppRun(request, startOptions),
+    // Only the conversation service starts runs from the catalog, always with a launch.
+    startAppRun: (request, startOptions) => startOptions?.managedConversation
+      ? conversationSend.startAppRun(request, { managedConversation: startOptions.managedConversation })
+      : Promise.reject(new Error('daemon_catalog_start_requires_conversation')),
     homeDir: workspace.homeDir,
     resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory
   })
@@ -282,6 +295,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   })
   const conversationLocalOps = Object.fromEntries(Object.entries({ ...conversationTable.handlers, ...historyChannels })
     .map(([channel, listener]) => [channel, (...args: unknown[]) => (listener as (event: unknown, ...values: unknown[]) => unknown)(undefined, ...args)]))
+  conversationLocalOps['conversation:send'] = conversationSend.answer(conversationLocalOps['conversation:send'] as (request: unknown) => Promise<unknown>)
 
   // App run controls answer from this process's registry: steering and background-task
   // stops are bound to the live run, so they cannot be replayed from another process.
@@ -305,6 +319,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     // Omit every source. HostController returns explicit unavailable envelopes with
     // reasons for analytics, LLM performance and MCP trust.
     toolPanels: undefined,
+    managedLaunches: conversationSend.launches,
     localEndpoint: {
       runControl,
       // The App channels this daemon answers for the App whose runs it owns. Built from

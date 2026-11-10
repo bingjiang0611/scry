@@ -99,6 +99,8 @@ export interface HostRuntimeInputs {
   // App-only run controls and local ops. The daemon supplies them; the service serves
   // them on its local endpoint only.
   localEndpoint?: RemoteHostServiceDependencies['localEndpoint']
+  // Daemon mode: conversation sends prepared in memory, claimed by their dispatch.
+  managedLaunches?: Pick<import('../main/remote/managed-launches').ManagedLaunches<import('../main/conversation-service-deps').ManagedConversationStart>, 'take' | 'abandon'>
 }
 
 export type { UsageAnalyticsRangeDays, ProviderContext }

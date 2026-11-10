@@ -8,6 +8,8 @@ import { createDesktopHostReader } from '../main/remote/desktop-host-reader'
 import { createDesktopWorkbench } from '../main/remote/desktop-workbench'
 import { listDesktopDirectories, selectDesktopDirectory } from '../main/remote/desktop-directory-picker'
 import { createRemoteRunBinding } from '../main/remote/remote-run-binding'
+import { abandonRefusedLaunch } from '../main/remote/managed-launches'
+import type { ManagedConversationStart } from '../main/conversation-service-deps'
 import { canonicalRemoteProjectRoots } from '../main/remote/remote-directory-browser'
 import { observeSessionStatus } from '../main/remote/remote-workspace'
 import { archiveSessionAndStop } from '../main/session-archive'
@@ -55,8 +57,10 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
     relayAdvertisement: relay.relayAdvertisement,
     ...(runtime.desktopRemoteClient ? { desktopRemoteClient: runtime.desktopRemoteClient } : {}),
     gatewayLabel,
-    startRun: createRemoteRunBinding({
+    ...(inputs.managedLaunches ? { onDispatchRefused: (refused) => abandonRefusedLaunch(inputs.managedLaunches!, refused) } : {}),
+    startRun: createRemoteRunBinding<ManagedConversationStart>({
       permissionModeOverride: remotePermissionMode,
+      ...(inputs.managedLaunches ? { managedLaunch: (runId) => inputs.managedLaunches!.take(runId) } : {}),
       startAppRun: (input) => runtime.remoteStartReceipts.submit(`remote-${input.ledgerRunId}`, () => runtime.startAppRun({
         ...input.request,
         backend: 'local',
@@ -71,7 +75,9 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
         providerPrompt: input.providerPrompt,
         onTraceEvent: input.onTraceEvent,
         onSession: input.onSession,
-        grantScope: input.grantScope
+        grantScope: input.grantScope,
+        ...(input.managedConversation ? { managedConversation: input.managedConversation } : {}),
+        ...(input.onStarted ? { onStarted: input.onStarted } : {})
       }) as Promise<import('../main/remote/remote-run-binding').RemoteRunCompletion>).then((receipt) => receipt.result)
     }),
     hasCatalogWarmPool: (providerId) => runtime.providerRegistry.hasCatalogWarmPool(providerId),

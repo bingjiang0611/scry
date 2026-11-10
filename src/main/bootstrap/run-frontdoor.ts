@@ -31,6 +31,12 @@ export interface AppRunStartOptions {
   onSession?: (externalSessionId: string) => void
   ledgerRunId?: string
   managedConversation?: ManagedConversationStart
+  /**
+   * A ledger run resolves only at completion. This reports the moment an in-process
+   * start would have answered (registered and admitted), so a daemon conversation send
+   * can answer then, and settle from the error when the run never got that far.
+   */
+  onStarted?: (runId: string) => void
 }
 
 type FrontdoorDeps = {

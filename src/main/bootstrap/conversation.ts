@@ -1,5 +1,6 @@
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentDataUpdated } from '../../shared/runtime'
+import { installDaemonConversationSend } from './conversation-daemon-send'
 import type { Conversation, ConversationDeletionResult } from '../../shared/conversation'
 import type { ProviderContext } from '../../shared/provider'
 import type { createAppSessionStore } from '../app-store'
@@ -270,7 +271,10 @@ export function announceDaemonConversationWrites(publish: (event: AgentDataUpdat
 
 export function registerConversationHandlers(deps: ConversationBootstrapDependencies) {
   const publishDataUpdated = (event: AgentDataUpdated): void => { deps.getWindow()?.webContents.send('agent:dataUpdated', event) }
-  if (daemonModeEnabled()) announceDaemonConversationWrites(publishDataUpdated)
+  if (daemonModeEnabled()) {
+    announceDaemonConversationWrites(publishDataUpdated)
+    installDaemonConversationSend(publishDataUpdated)
+  }
   const { handlers, prepareConversationDeletion } = conversationChannelTable({ ...deps, publishDataUpdated })
   for (const [channel, listener] of Object.entries(handlers)) deps.handleTrusted(channel, listener)
   return { prepareConversationDeletion }

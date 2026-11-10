@@ -64,6 +64,23 @@ export function stampAttachmentPeer(peer: string, detail: string | undefined): {
   } catch { return { detail, referenced: false } }
 }
 
+const CONVERSATION_ID = /^[A-Za-z0-9._:-]{1,128}$/
+
+/**
+ * A conversation run (daemon mode `conversation:send`) names the turn whose launch the
+ * daemon holds in memory. Only the App's own grant may carry it: a device naming one
+ * would claim another client's prepared history and run id.
+ */
+function parseConversationMarker(value: unknown, options: { cwdOptional?: boolean }): RemoteIntentRouting['conversation'] {
+  if (value === undefined) return undefined
+  if (!options.cwdOptional || !value || typeof value !== 'object' || Array.isArray(value)) throw new RemoteRunDenied('invalid_target')
+  const marker = value as Record<string, unknown>
+  if (Object.keys(marker).some((key) => key !== 'conversationId' && key !== 'runId') ||
+    typeof marker.conversationId !== 'string' || !CONVERSATION_ID.test(marker.conversationId) ||
+    typeof marker.runId !== 'string' || !CONVERSATION_ID.test(marker.runId)) throw new RemoteRunDenied('invalid_target')
+  return { conversationId: marker.conversationId, runId: marker.runId }
+}
+
 function unnamedCwd(options: { cwdOptional?: boolean }): string {
   if (options.cwdOptional) return ''
   throw new RemoteRunDenied('invalid_target')
@@ -118,6 +135,7 @@ export function parseRouting(detail: string | undefined, options: { cwdOptional?
         ...(routing.restartLastTurn === undefined ? {} : { restartLastTurn: routing.restartLastTurn as never })
       })
     : undefined
+  const conversation = parseConversationMarker(routing.conversation, options)
   const attachments = parseRemoteAttachments(routing.attachments)
   if (routing.prompt !== undefined && typeof routing.prompt !== 'string') throw new RemoteRunDenied('invalid_target')
   if (routing.prompt === '' && attachments.length === 0) throw new RemoteRunDenied('invalid_target')
@@ -133,6 +151,7 @@ export function parseRouting(detail: string | undefined, options: { cwdOptional?
     ...(attachments.length > 0 ? { attachments } : {}),
     ...(typeof routing.resume === 'string' && routing.resume.length > 0 && routing.resume.length <= 128 ? { resume: routing.resume } : {}),
     ...(typeof routing.attachmentPeer === 'string' ? { attachmentPeer: routing.attachmentPeer } : {}),
+    ...(conversation ? { conversation } : {}),
     ...(boundary?.forkLastTurn ? { forkLastTurn: boundary.forkLastTurn } : {}),
     ...(boundary?.restartLastTurn ? { restartLastTurn: boundary.restartLastTurn } : {}),
     ...(boundary && boundary.expectedExternalSessionId !== undefined && boundary.expectedExternalSessionId !== null

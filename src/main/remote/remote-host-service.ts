@@ -90,6 +90,7 @@ export class RemoteHostService {
       issue: identity.issue,
       authorizeWorkspace: deps.authorizeWorkspace,
       startRun: deps.startRun,
+      ...(deps.onDispatchRefused ? { onDispatchRefused: deps.onDispatchRefused } : {}),
       gate: deps.gate,
       attachmentDirectory: join(deps.stateDirectory, 'attachments'),
       ...(deps.createOutputStore ? { createOutputStore: deps.createOutputStore } : {}),

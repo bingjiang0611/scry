@@ -54,6 +54,9 @@ export interface RemoteIntentRouting extends RemoteRunTarget {
   forkLastTurn?: AgentForkLastTurn
   restartLastTurn?: AgentRestartLastTurn
   expectedExternalSessionId?: string
+  // App submits only: a conversation run whose launch the daemon holds in memory
+  // (managed-launches.ts). The run id is the conversation turn's own.
+  conversation?: { conversationId: string; runId: string }
 }
 
 // A run the owner started in the Mac UI (RunRegistry), as the host proves it
@@ -148,6 +151,10 @@ export interface HostControllerDependencies {
     // caller is.
     grantScope?: 'local' | 'remote'
   }): Promise<void>
+  // The ledger refused a run before it reached the run start (policy, routing or
+  // attachments). A daemon conversation send waits on that start, so it learns the
+  // refusal here instead of waiting forever.
+  onDispatchRefused?(input: { detail?: string; grantScope: 'local' | 'remote'; error: unknown }): void
   // Snapshot of host-authorized project directories a device may target. Absent
   // => the device sees an honest empty list (never a fabricated one).
   listProjects?(): RemoteProjectRef[]

@@ -39,6 +39,9 @@ export interface DaemonRunSurface {
   steer(payload: unknown): Promise<AgentSteerResult>
   stopBackgroundTask(payload: unknown): Promise<BackgroundTaskStopResult>
   adopt(runId: string): Promise<ActiveRun | null>
+  // Follow a run the daemon recorded for this window (a conversation send). Unlike
+  // adopt it does not take focus: in process a conversation run never does either.
+  follow(ledger: { runId: string; seq?: number }): Promise<{ runId: string; bound: boolean }>
   // An App channel the daemon answers through a local op (B4-L4).
   localOp(call: { op: string; method: string; args: unknown[]; read: boolean }): Promise<unknown>
 }
@@ -151,6 +154,7 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
       focusedRunId = runId
       return reply.run as unknown as ActiveRun
     },
+    follow(ledger) { return runtime.follow(ledger) },
     localOp(call) { return deps.transport.localOp(call) },
     async ack(receipt) { return runtime.bridge.ack(receipt) },
     async resynchronized() { runtime.bridge.resynchronized(); return true as const }

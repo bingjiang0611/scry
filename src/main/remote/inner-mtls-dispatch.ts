@@ -150,7 +150,7 @@ export async function dispatchRemoteRequest(
     }
     if (isLocalOp(request.op)) {
       // App channels the daemon answers for its own App; absent on the network endpoint.
-      return await handleLocalOp(localEndpoint?.localOps, request as unknown as Record<string, unknown>)
+      return await handleLocalOp(localEndpoint?.localOps, request as unknown as Record<string, unknown>, fingerprint)
     }
     if (request.op === 'stop') {
       if (typeof request.runId !== 'string') return { error: 'invalid_request' }

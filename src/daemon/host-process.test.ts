@@ -183,13 +183,48 @@ describe('daemon host process', () => {
         op: 'conversation', method: 'update', args: [created.id, created.revision, { kind: 'rename', title: 'from the App' }]
       })
       expect(renamed.error).toBeUndefined()
-      // Deletion needs the App's session deletion and send needs run tracking: not yet served.
-      for (const method of ['delete', 'fork', 'send']) {
+      // Deletion needs the App's session deletion, fork the Provider fork: not yet served.
+      for (const method of ['delete', 'fork']) {
         const refused = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
           op: 'conversation', method, args: [created.id]
         })
         expect(refused.error).toBe('unsupported_op')
       }
+      // A send runs through this daemon's ledger under the caller's grant, with the
+      // conversation turn's own run id, so the App can follow it like its own runs.
+      const preview = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'conversation', method: 'preview', args: [created.id, { providerId: 'codex' }]
+      })
+      expect(preview.error).toBeUndefined()
+      const sent = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'conversation', method: 'send', args: [{
+          providerId: 'codex', conversationId: created.id, expectedRevision: preview.result.revision,
+          expectedContinuationKey: preview.result.target.continuationKey, commandId: randomUUID(),
+          prompt: 'from the conversation', selectedItems: [], confirmFresh: true
+        }]
+      })
+      expect(sent.error).toBeUndefined()
+      expect(sent.result).toMatchObject({ disposition: 'created', ledger: { runId: expect.any(String) } })
+      const conversationEvents: Array<{ kind: string; detail?: string }> = []
+      let conversationState = 'dispatched'
+      let conversationCursor = 0
+      // Each progress marker wakes the watch, so the bound counts replies, not seconds.
+      for (let attempt = 0; attempt < 60 && !['settled', 'failed'].includes(conversationState); attempt += 1) {
+        const watched = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+          op: 'watch', runId: sent.result.ledger.runId, cursor: conversationCursor, outputCursor: 0, waitMs: 5_000
+        })
+        conversationState = watched.watch.state
+        conversationCursor = watched.watch.poll.cursor
+        conversationEvents.push(...watched.watch.poll.events)
+      }
+      expect(conversationState).toBe('settled')
+      const bound = conversationEvents.map((event) => event.detail ?? '').find((detail) => detail.includes('"event":"bound"'))
+      expect(JSON.parse(bound!)).toMatchObject({ ledgerRunId: sent.result.ledger.runId, scryRunId: sent.result.runId })
+      const afterSend = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'conversation', method: 'read', args: [created.id]
+      })
+      const turn = afterSend.result.turns.find((candidate: { runId: string }) => candidate.runId === sent.result.runId)
+      expect(turn.delivery.status).toBe('accepted')
       // History pages are loaded by the daemon against its own catalog: a session it does
       // not know is refused by the same check the App ran in process.
       const history = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {

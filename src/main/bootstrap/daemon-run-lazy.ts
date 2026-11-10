@@ -4,7 +4,7 @@ import type { ActiveRun } from '../../shared/trace'
 import type { TraceBatchReceipt } from '../trace-output'
 import type { DaemonRunSurface } from './daemon-run-surface'
 import { createDaemonRunMode, type DaemonRunModeDeps, type DaemonRunModeResult } from './daemon-run-mode'
-import { installDaemonChannelForwarder } from '../daemon-channel-gate'
+import { installDaemonChannelForwarder, installDaemonRunFollower } from '../daemon-channel-gate'
 
 // The run channels are registered synchronously at startup, but finding a daemon is
 // not. This surface defers that work to the first run call and keeps one outcome for
@@ -89,6 +89,7 @@ export function createLazyDaemonRunSurface(
     steer(payload: unknown) { return call((value) => value.steer(payload)) },
     stopBackgroundTask(payload: unknown) { return call((value) => value.stopBackgroundTask(payload)) },
     adopt(runId: string) { return call((value) => value.adopt(runId)) },
+    follow(ledger: { runId: string; seq?: number }) { return call((value) => value.follow(ledger)) },
     ack(receipt: TraceBatchReceipt): Promise<boolean> { return call((value) => value.ack(receipt)) },
     resynchronized(): Promise<true> { return call((value) => value.resynchronized()) },
     // A local op is retried after a reconnect only when its request provably never left
@@ -96,11 +97,14 @@ export function createLazyDaemonRunSurface(
     localOp(request) { return call((value) => value.localOp(request)) },
     dispose(): void {
       uninstallForwarder()
+      uninstallFollower()
       void ensure().then((result) => result.dispose?.(), () => undefined)
     }
   }
   // The gated App channels that the daemon answers reach it through this surface.
   const uninstallForwarder = installDaemonChannelForwarder((request) => lazy.localOp(request))
+  // A conversation send answers with the ledger run that carries it; this window follows it.
+  const uninstallFollower = installDaemonRunFollower((ledger) => lazy.follow(ledger))
   return lazy
 }
 

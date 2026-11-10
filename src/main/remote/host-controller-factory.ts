@@ -61,6 +61,7 @@ export interface HostControllerFactoryDependencies {
     stopSignal: AbortSignal
     grantScope?: 'local' | 'remote'
   }): Promise<void>
+  onDispatchRefused?: HostControllerDependencies['onDispatchRefused']
   gate: ProviderOperationGate
   // Tests and embedded hosts may inject an equivalent store. Production omits this
   // and always owns the file store inside the dedicated worker.
@@ -187,6 +188,7 @@ export async function createHostController(deps: HostControllerFactoryDependenci
     ...(deps.attachmentStore ? { attachmentStore: deps.attachmentStore } : {}),
     ...(deps.attachmentDirectory ? { attachmentDirectory: deps.attachmentDirectory } : {}),
     runProvider: deps.startRun,
+    ...(deps.onDispatchRefused ? { onDispatchRefused: deps.onDispatchRefused } : {}),
     ...(deps.listProjects ? { listProjects: deps.listProjects } : {}),
     ...(deps.listDirectories ? { listDirectories: deps.listDirectories } : {}),
     ...(deps.listProviders ? { listProviders: deps.listProviders } : {}),

@@ -1,89 +1,49 @@
-# P3 附录 · `conversation:send` 在 daemon 模式下的 run 跟踪（方案，待批准）
+# P3 附录 · `conversation:send` 在 daemon 模式下的 run 跟踪
 
-状态：方案，未实现。`conversation:send` 目前仍被闸门拒绝（见 [b4-l4](status/b4-l4.md) L4-2b）。
+状态：维护者 2026-11-10 批准（参照 t3code，见 [STATUS-BATCH4](STATUS-BATCH4.md)），实现中。
 
 ## 问题
 
-进程内的 `conversation:send` 由 `ConversationService.send` 完成，步骤如下：
+进程内的 `conversation:send` 由 `ConversationService.send` 完成：校验接续计划、准备交接历史、在会话账本里 `begin` 一个 turn，再调 `startAppRun(request, { managedConversation })` 启动一轮 run。
 
-1. 校验接续计划并准备交接历史；
-2. 在会话账本里 `begin` 一个 turn；
-3. 调用 `startAppRun(request, { managedConversation })` 直接启动一轮 run。
+开关打开时，App 只能跟踪经过台账提交的 run（台账 `watch` → `bound` 标记 → 按规范 id 读 trace）。如果 daemon 直接调 `pipeline.startAppRun`，这一轮 run 不经过台账：App 看不到输出，停止和回答提问也到不了它。
 
-`managedConversation` 中有若干只能存在于内存的东西：
+## t3code 的做法，以及哪些能照搬
 
-- `prepareInput`、`onProviderDispatchAttempt`、`onTerminal` 三个闭包；
-- 打开着的 `historyReader` 连接；
-- 冻结的 `historicalContext`。
+t3code 的发送是一条命令：先在一个事务里落盘意图，副作用队列里只存 `{ type: 'provider-turn.start', runId }`，worker 再从落盘状态重建输入。进程丢失后，这类与进程绑定的启动**直接取消**，不重建也不重发（`EffectOutbox.ts` 的 `PROCESS_BOUND_EFFECT_TYPES` 与 `reconcileAfterProcessLoss`）。
 
-`onTerminal` 负责把 Provider 回执与归档结算回会话账本（accepted / not_sent / unknown）。
+Scry 的交接有两样东西不在磁盘上：
 
-开关打开时，App 只会跟踪经过台账提交的 run，路径是：
+- 被省略历史的读取源（`memoryHistoryReaderSource`）：选择历史时已经读进内存的正文；
+- 交接预算（`contextUsage`、`modelContextWindow`）：同一次读取顺带得到。
 
-- App submit → 台账 intent → `createRemoteRunBinding` 派发 → `bound` 标记；
-- App 的 `DaemonRunRuntime` 用台账的 `watch` 等到 `bound`，再用规范 id 读 trace。
+要在重启后重建，就得把被省略的正文重新读一遍，这正是 t3code 自己也不做的事。所以照搬它的规则：**同一进程内，启动所需的内容从落盘读取并校验；跨进程丢失，启动取消。**
 
-如果在 daemon 里照原样调用 `pipeline.startAppRun`，这一轮 run 不会经过台账。App 拿不到台账 run id，所以：
+## 设计
 
-- `adopt` 找不到它；
-- 窗口没有流式输出；
-- 停止和回答提问都到不了它。
+1. **daemon 的 `startAppRun` 依赖改为提交台账。** `ConversationService` 本身不改。daemon 给它的 `startAppRun` 依赖做三件事：
+   - 把 `{ request, managedConversation }` 登记到进程内的 `ManagedLaunches`，键是会话 turn 的 `runId`；
+   - 以调用方（App 的本机 grant）身份提交台账 intent，`intentId` 是 `conversation-run:<runId>`。`detail` 只放可序列化的路由：cwd、provider、profile、显示用 prompt、`conversation: { conversationId, runId }`；附件不重复写进台账；
+   - 返回的 Promise 在 run 真正注册后才 resolve，失败时 reject。这样 `send` 原有的 not_sent / unknown 结算逻辑原样生效。
+2. **派发时取回。** `createRemoteRunBinding` 看到 `conversation` 标记时：
+   - 从 `ManagedLaunches` 取出登记项（只能取一次）；取不到（daemon 重启过）就在启动 Provider 之前失败，原因 `conversation_start_unavailable`；
+   - 规范 run id 用会话 turn 的 `runId`。运行管线本来就要求两者相等（`run-provider.ts`：「统一对话 runId 与 Provider 投递 runId 不一致」）；
+   - 请求与附件用登记项里的原件，不走台账路径把文本附件内联进 prompt 的做法，否则输入 hash 会与回执对不上；
+   - 台账路由里的 cwd、provider、profile 必须与登记项一致，不一致就拒绝。
+3. **派发前被拒也要结算。** 台账在到达 binding 之前就可能拒绝这次 run（例如策略拒绝）。此时登记项还在，执行层把它标为失败，`send` 随之 reject，会话 turn 结算为 not_sent。
+4. **本机 op 带上调用方。** `handleLocalOp` 把已验证的 peer 放进本次调用的上下文，台账提交用它，所以 run 的 scope 是 `local`，幂等也按 peer 区分。
+5. **App 侧。** 闸门把 `conversation:send` 转给 daemon。daemon 的回答比进程内多一个 `ledger: { runId, seq }`；App 用它直接跟上这一轮 run（从 intent 的序号开始 watch，不从台账开头翻页），发 `conversation_changed`，再把 `{ runId, disposition }` 交给 renderer。重复命令且该轮仍在运行时，daemon 回答它当前的台账 run id。
 
-结果就是一轮看不见、也停不下来的 run，这正是 G1 要杜绝的情况。
+## 重启的语义
 
-## 方案 A（推荐）：会话发送也走台账，内存里的部分按台账 run id 交接
+- intent 已记录、尚未派发、daemon 重启：重启后的派发找不到登记项，台账记为带原因的 `run_failed`，Provider 没有被调用。会话 turn 由已有的启动恢复记为 `unknown`。严格说这一轮可以证明是 not_sent，但要让恢复区分它，需要在恢复前读取台账；这一精度改进记为后续项，当前结果不说谎，只是不够精确。
+- 已派发、未结束、daemon 重启：与现有规则相同，台账与会话账本都是 `unknown`，不自动重发。
 
-1. **daemon 侧的 `startAppRun` 依赖改为提交台账。** daemon 里 `ConversationService` 的 `startAppRun` 不再直接启动 run，而是：
-   - 先登记一个台账 intent，与 App submit 走同一个 `submit`，`scope: local`；
-   - intent 的 `detail` 里只放可以序列化的路由信息：cwd、provider、profile、model、effort、permissionMode、resume，以及 `managedConversation: { conversationId, runId }` 标记；
-   - 闭包、reader 和历史上下文放进进程内的 `ManagedHandoffs` 表，键是台账 run id；
-   - `send` 的回答比进程内多一个字段 `ledgerRunId`，其余不变。
-2. **派发时取回交接。** `createRemoteRunBinding` 发现 intent 带有 `managedConversation` 标记时，从 `ManagedHandoffs` 取出对应项并原样传给 `startAppRun`：
-   - 规范 run id 使用会话 turn 的 `runId`，不再新生成。renderer、会话账本与 trace 必须是同一个 id；
-   - 附件按进程内的 `prepareInput` 处理，不走台账路径上把文本文件内联的做法。否则输入正文的 hash 会与回执对不上。
-3. **取不到交接时按失败处理（fail closed）。** 例如 daemon 在 intent 与派发之间重启过：
-   - 不启动 Provider；
-   - 写 `run_failed`，原因 `managed_handoff_lost`；
-   - 会话 turn 由已有的启动恢复（`getStartupManagedRecovery`）结算为 `not_sent`，因为输入确实没有投递。
-   - 不按普通提示词重跑：那样会丢掉历史交接，而且回执 hash 必然对不上。
-4. **App 侧拆成 split。** 闸门把 `conversation:send` 转给 daemon，结果处理器依次：
-   - 用 `ledgerRunId` 调 `DaemonRunRuntime.adopt` 并启动 pump，与 `agent:start` 共用同一套跟踪；
-   - 发 `conversation_changed`；
-   - 把 `{ runId, disposition }` 交给 renderer。
-5. **重复命令。** `disposition: 'duplicate'` 时，daemon 按会话 turn 的 `runId` 去查台账：
-   - 这轮 run 仍在运行，就回传它的 `ledgerRunId`，App 照常 adopt；
-   - 已经结束，就不回传，窗口从会话账本读结果。
+## 测试
 
-停止、回答提问和结果未知的语义，都沿用台账已有的规则，不新增 op。
-
-### 需要先核实的三点（写代码前做，结果记入 status）
-
-- 台账派发路径上 `origin: 'remote'` 与 `grantScope: 'local'` 的组合：确认 managed recorder、证据、权限都按本机语义处理。`permissionModeOverride` 已经按 `grantScope` 区分，但 `origin` 还被其他地方读取，需要逐个列出。
-- 规范 run id 能否由调用方指定。`nextScryRunId()` 目前在 binding 内部生成，`bound` 标记依赖它。
-- 进程内 `send` 的 `active` 集合与 `settle` 在 daemon 中照常运行，结算由 daemon 完成；App 不再参与结算。
-
-### 测试（先写失败测试）
-
-- daemon 真实本机 socket：send 后台账里有 intent，并出现 `bound`，其 `scryRunId` 等于会话 turn 的 `runId`；App 的 `DaemonRunRuntime` 能 adopt 并读到文本；停止后会话 turn 结算为终态。
-- 交接丢失：先登记 intent，清空 `ManagedHandoffs` 后再派发，结果是 `run_failed: managed_handoff_lost`，Provider 未启动，turn 结算为 `not_sent`。
-- 重复命令：运行中的重复发送回传同一个 `ledgerRunId`，结束后的重复发送不回传。
-- 控制实验：去掉 binding 里取交接的逻辑，第一条测试失败（run 以普通提示词启动，回执 hash 不匹配）。
-
-## 方案 B（不推荐）：不经台账，App 按规范 id 直接读 trace
-
-daemon 直接启动 run，把规范 id 回给 App，App 只靠 trace 跟踪。问题：
-
-- 生命周期要从 trace 里推断；
-- 停止和回答提问需要新增本机 op；
-- App 里会出现第二套 run 跟踪；
-- daemon 重启后，App 无法区分“run 丢了”和“结果未知”。
-
-这与“优先扩展现有 contract，不建立第二套同义状态”相冲突。
-
-## 方案 C：在 B4-S 之前保持拒绝
-
-开关默认关闭，用户不受影响。代价是开关打开时统一对话无法发送，L4 的覆盖也就不完整。
-
-## 需要维护者决定
-
-是否按方案 A 实现。批准后先做上面三点核实；如果核实结果推翻了方案中的前提，会先停下来报告，不直接改方案。
+- `ManagedLaunches`：登记、只取一次、派发前失败使 `send` reject、容量上限、取不到时失败。
+- 路由：只有本机 scope 的 intent 能带 `conversation` 标记，设备提交带它会被拒。
+- binding：带标记时用登记项的 run id、请求与 `managedConversation`；取不到时不调用 `startAppRun`。
+- daemon 真实本机 socket：`conversation:send` 之后台账里有 intent，`bound` 的 `scryRunId` 等于会话 turn 的 `runId`，回答带 `ledger`。
+- App：结果处理器按 `ledger` 跟上 run，再通知窗口；daemon 拒绝时不通知。
+- 控制实验：binding 不取登记项时第三条失败。

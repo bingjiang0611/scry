@@ -12,6 +12,8 @@ import { TraceOutputBridge } from './trace-output'
 // the receipt's sequence number is where its watch belongs.
 
 const PAGE = 256
+// A conversation run keeps its conversation turn's run id.
+const TURN_RUN = '3f2b8c1d-5e6a-4b7c-8d9e-0f1a2b3c4d5e'
 const HISTORY = 12_000
 
 interface LedgerEvent { seq: number; runId: string; kind: string; detail?: string }
@@ -30,6 +32,20 @@ function daemon(options: { receiptSeq: boolean }) {
     append({ runId: `run-old-${index}`, kind: 'run_progress', detail: JSON.stringify({ event: 'started' }) })
   }
   let bound = 0
+
+  // What the daemon writes for one run; a conversation send records it on the daemon's
+  // side, with no submit from this window.
+  const record = (runId: string, scryRunId: string) => {
+    const intent = append({ runId, kind: 'intent_recorded' })
+    append({ runId, kind: 'run_dispatched' })
+    states.set(runId, 'dispatched')
+    append({ runId, kind: 'run_progress', detail: JSON.stringify({ event: 'started' }) })
+    append({
+      runId, kind: 'run_progress',
+      detail: JSON.stringify({ event: 'bound', ledgerRunId: runId, scryRunId, cwd: '/w', providerId: 'codex' })
+    })
+    return { runId, seq: intent.seq }
+  }
 
   const request = async (payload: Record<string, unknown>): Promise<unknown> => {
     if (payload.op === 'submit') {
@@ -69,7 +85,7 @@ function daemon(options: { receiptSeq: boolean }) {
     waitMs: 0,
     bindBudgetMs: 200
   })
-  return { runtime, watches, session: () => ({ bound: bound === 1, events: events.length }) }
+  return { runtime, watches, record, session: () => ({ bound: bound === 1, events: events.length }) }
 }
 
 const start = (runtime: DaemonRunRuntime) => runtime.start({
@@ -98,5 +114,18 @@ describe('new run watch start (E1: a long session must not cost a page walk)', (
     expect(receipt.bound).toBe(true)
     expect(watches.length).toBeGreaterThan(2)
     expect(watches[0]).toBe(0)
+  })
+
+  it('follows a run the daemon recorded for this window from its intent, under its canonical id', async () => {
+    // A conversation send answers with the ledger run and its intent position. The
+    // window follows that run like its own: same bind, same short watch.
+    const { runtime, watches, record } = daemon({ receiptSeq: true })
+    const recorded = record('run-conversation-1', TURN_RUN)
+    const followed = await runtime.follow(recorded)
+    runtime.dispose()
+    expect(followed).toEqual({ runId: TURN_RUN, bound: true })
+    expect(watches.length).toBeLessThanOrEqual(2)
+    expect(watches[0]).toBe(recorded.seq - 1)
+    expect(runtime.isTracking(TURN_RUN)).toBe(true)
   })
 })

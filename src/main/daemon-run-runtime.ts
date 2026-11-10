@@ -80,24 +80,41 @@ export class DaemonRunRuntime {
     const stamp = new PerformanceTrace('daemon.run.firstText', input.context ? { provider: input.context.providerId } : {})
     const receipt = await this.#deps.transport.submit({ intentId: input.intentId, detail: input.detail })
     stamp.mark('submitted')
-    // A duplicate submit is the same logical run: keep its existing cursor rather
-    // than restarting the trace from zero.
-    if (!this.#runs.has(receipt.runId)) {
-      this.#runs.set(receipt.runId, {
-        // A run's own evidence cannot predate its submit, so its watch starts at the
-        // intent instead of the session's first page.
-        runId: receipt.runId, context: input.context, lifecycle: 'recorded',
-        watch: receipt.seq !== undefined ? Math.max(0, receipt.seq - 1) : this.#seen, output: 0,
-        pushed: [], askedQuestions: new Set(), answerIds: new Map(), resyncRequired: false, pumping: false, stopped: false,
-        stamp, sawText: false
-      })
-    }
-    void this.pump(receipt.runId)
+    this.#track(receipt.runId, input.context, receipt.seq, stamp)
     // The window identifies a run by the canonical id its trace events carry, not
     // by the ledger id it submitted. Wait for the daemon's bind, and say so when it
     // did not arrive instead of handing back an id the trace will never match.
     const bound = await this.#awaitBound(receipt.runId)
     return { ...receipt, runId: bound ?? receipt.runId, bound: bound !== undefined }
+  }
+
+  /**
+   * Follow a run the daemon recorded on this window's behalf (a conversation send): the
+   * same cursor, pump and bind as a run this window submitted. Its context is learned
+   * from the daemon's bind.
+   */
+  async follow(input: { runId: string; seq?: number }): Promise<{ runId: string; bound: boolean }> {
+    this.#track(input.runId, undefined, input.seq)
+    const bound = await this.#awaitBound(input.runId)
+    return { runId: bound ?? input.runId, bound: bound !== undefined }
+  }
+
+  // Synchronous on purpose: a start answers right after its bind, exactly as before
+  // this was shared, so nothing it awaits moves.
+  #track(runId: string, context: DesktopRemoteContext | undefined, seq: number | undefined, stamp?: PerformanceTrace): void {
+    // A duplicate submit is the same logical run: keep its existing cursor rather
+    // than restarting the trace from zero.
+    if (!this.#runs.has(runId)) {
+      this.#runs.set(runId, {
+        // A run's own evidence cannot predate its intent, so its watch starts there
+        // instead of at the session's first page.
+        runId, context, lifecycle: 'recorded',
+        watch: seq !== undefined ? Math.max(0, seq - 1) : this.#seen, output: 0,
+        pushed: [], askedQuestions: new Set(), answerIds: new Map(), resyncRequired: false, pumping: false, stopped: false,
+        ...(stamp ? { stamp } : {}), sawText: false
+      })
+    }
+    void this.pump(runId)
   }
 
   /** Whether this window already follows this run, named by either id. */

@@ -67,12 +67,16 @@ export const DAEMON_LOCAL_OP_CHANNELS: Readonly<Record<string, { op: string; met
   'conversation:findSideChatCommand': { op: 'conversation', method: 'findSideChatCommand', read: true },
   'conversation:readSideChatSnapshot': { op: 'conversation', method: 'readSideChatSnapshot', read: true },
   // Conversation ledger writes the daemon makes on its own (B4-L4-2b). Never replayed after
-  // a lost reply. delete (App session deletion), fork (Provider fork) and send (run
-  // tracking) stay refused until those move.
+  // a lost reply. delete (App session deletion) and fork (Provider fork) stay refused
+  // until those move.
   'conversation:create': { op: 'conversation', method: 'create', read: false },
   'conversation:update': { op: 'conversation', method: 'update', read: false },
   'conversation:adopt': { op: 'conversation', method: 'adopt', read: false },
   'conversation:createSideChat': { op: 'conversation', method: 'createSideChat', read: false },
+  // The send runs through the daemon's ledger so the App follows it like its own runs
+  // (P3-conversation-send.md). Its commandId makes a retry safe, but a lost reply is
+  // still not replayed: the App asks the conversation instead.
+  'conversation:send': { op: 'conversation', method: 'send', read: false },
   // Session history pages (B4-L4-2a). Loading persists tool content and remembers the
   // project, so the two loads are not replayed after a lost reply.
   'agent:loadSession': { op: 'sessionHistory', method: 'loadSession', read: false },
@@ -95,6 +99,24 @@ const resultHandlers = new Map<string, (value: unknown, args: unknown[]) => unkn
 export function installDaemonChannelResultHandler(channel: string, handle: (value: unknown, args: unknown[]) => unknown): () => void {
   resultHandlers.set(channel, handle)
   return () => { if (resultHandlers.get(channel) === handle) resultHandlers.delete(channel) }
+}
+
+export type DaemonRunFollower = (ledger: { runId: string; seq?: number }) => Promise<{ runId: string; bound: boolean }>
+
+let follower: DaemonRunFollower | undefined
+
+/**
+ * Follow a run the daemon recorded for this window (a conversation send) like one it
+ * submitted. Registered with the client, resolved per call like the forwarder.
+ */
+export function installDaemonRunFollower(next: DaemonRunFollower): () => void {
+  follower = next
+  return () => { if (follower === next) follower = undefined }
+}
+
+export function followDaemonRun(ledger: { runId: string; seq?: number }): Promise<{ runId: string; bound: boolean }> {
+  if (!follower) return Promise.reject(new Error('daemon_capability_unavailable:follow'))
+  return follower(ledger)
 }
 
 /**

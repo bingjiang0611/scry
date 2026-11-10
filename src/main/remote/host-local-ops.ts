@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import type { RunControlHandlers } from './host-run-control'
 import { DAEMON_LOCAL_OP_CHANNELS, DAEMON_LOCAL_OP_NAMES } from '../daemon-channel-gate'
 
@@ -36,7 +37,17 @@ export function localOpHandlersFor(channels: Readonly<Record<string, LocalOpHand
   return table
 }
 
-export async function handleLocalOp(handlers: LocalOpHandlers | undefined, request: Record<string, unknown>): Promise<Record<string, unknown>> {
+// The verified grant behind the local op being served. A handler that writes on the
+// caller's behalf (a conversation send records a ledger intent) needs the caller's own
+// identity, not a guess at "the App": the local endpoint may hold more than one grant.
+const caller = new AsyncLocalStorage<{ peer: string }>()
+
+/** The peer whose local op is running, or undefined outside one. */
+export function localOpCaller(): string | undefined {
+  return caller.getStore()?.peer
+}
+
+export async function handleLocalOp(handlers: LocalOpHandlers | undefined, request: Record<string, unknown>, peer: string): Promise<Record<string, unknown>> {
   if (!handlers) return { error: 'unsupported_op' }
   if (Object.keys(request).some((key) => !['op', 'keepAlive', 'protocol', 'method', 'args'].includes(key))) return { error: 'invalid_request' }
   const args = request.args ?? []
@@ -44,5 +55,5 @@ export async function handleLocalOp(handlers: LocalOpHandlers | undefined, reque
   const handler = handlers.get(`${request.op as string}:${request.method}`)
   if (!handler) return { error: 'unsupported_op' }
   // JSON has no undefined; a handler that returns nothing answers null.
-  return { result: (await handler(...args)) ?? null }
+  return { result: (await caller.run({ peer }, () => handler(...args))) ?? null }
 }
