@@ -78,6 +78,8 @@ export interface WorkflowRun {
   error?: string
   /** `observed`: rows arrived. `unavailable`: task events arrived without rows. */
   progress: 'observed' | 'unavailable' | 'pending'
+  /** True once the `Workflow` tool call itself was seen, even if its rows arrived first. */
+  toolCallObserved: boolean
   /** Earlier events of this task are not in the loaded history; counts below are a lower bound. */
   partial: boolean
   rowsOmitted: number
@@ -189,6 +191,7 @@ function createRun(turn: Turn, id: string, event: TraceEvent): Accumulator {
     taskEvents: 0,
     run: {
       id, turnRunId: turn.runId, status: 'launching', statusSource: 'tool_use', progress: 'pending', partial: false,
+      toolCallObserved: false,
       rowsOmitted: 0, rowsUnrecognized: 0, phases: [], agentCount: 0, log: [], logDropped: 0,
       ...(event.ts ? { startedAt: event.ts, updatedAt: event.ts } : {})
     }
@@ -199,6 +202,7 @@ function applyToolUse(acc: Accumulator, event: TraceEvent): void {
   const input = record(event.input)
   const { run } = acc
   run.toolUseId = event.toolUseId
+  run.toolCallObserved = true
   if (typeof input.script === 'string' && input.script.trim()) run.script = scriptOf(input.script, 'tool_input', false)
   const ref = typeof input.name === 'string' && input.name ? input.name
     : typeof input.scriptPath === 'string' && input.scriptPath ? input.scriptPath : undefined

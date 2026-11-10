@@ -70,12 +70,18 @@ const nativePath = join(temp, 'native-transcript.jsonl')
 writeFileSync(nativePath, nativeRows.map((message) => JSON.stringify(message)).join('\n') + '\n')
 writeFileSync(archivePath, JSON.stringify(source))
 
-const child = spawn(process.execPath, [join(root, 'scripts/electron-security-smoke.mjs'), '--dev-workflow-only', archivePath, nativePath], {
-  cwd: root,
-  stdio: 'inherit',
-  env: { ...process.env }
-})
-const code = await new Promise((resolve) => child.once('exit', (exitCode) => resolve(exitCode ?? 1)))
+// Run the App twice against the same temporary userData/HOME. The second run seeds nothing,
+// so it verifies what a real quit-and-relaunch of the installed App would see on disk.
+const run = (extra, env = {}) => {
+  const child = spawn(process.execPath,
+    [join(root, 'scripts/electron-security-smoke.mjs'), '--dev-workflow-only', archivePath, nativePath, ...extra],
+    { cwd: root, stdio: 'inherit', env: { ...process.env, ...env } })
+  return new Promise((resolve) => child.once('exit', (exitCode) => resolve(exitCode ?? 1)))
+}
+const smokeTemp = join(temp, 'smoke')
+const first = await run([], { SCRY_SMOKE_TEMP: smokeTemp })
+const second = first === 0 ? await run(['--reuse'], { SCRY_SMOKE_TEMP: smokeTemp }) : first
+const code = second
 if (args.includes('--keep')) console.log(JSON.stringify({ kept: temp, archive: archivePath, native: nativePath, workflowEvents: workflowEvents.length }))
 else rmSync(temp, { recursive: true, force: true })
 process.exitCode = code

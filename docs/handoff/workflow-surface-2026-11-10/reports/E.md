@@ -74,4 +74,5 @@
 | 问题 | 处理 |
 |---|---|
 | 活动行先于 `tool_use` 到达时出现第二个“状态未知”运行 | 已修，见 `reports/D.md`「顺带修掉的缺陷」 |
+| 同一次运行被任务行先建出来时，面板仍写“已加载的历史里没有对应的 Workflow 工具调用”，与聊天卡片矛盾 | 已修：运行自己记录 `toolCallObserved`，由 `applyToolUse` 置真，`WorkflowFlow` 不再用 `id !== task:<id>` 猜。测试 `workflow-runs.test.ts`「活动行先于 tool_use…」与 `WorkflowSurface.test.tsx`「活动行先于 tool_use 到达时仍显示“调用了 Workflow 工具”」；后者在修复前失败 |
 | `ChatView` 未把 `onOpenWorkflow` 透传给对话流 | 已修（E1 负对照） |

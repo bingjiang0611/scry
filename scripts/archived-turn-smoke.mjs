@@ -9,15 +9,25 @@ import { join } from 'node:path'
  * The archive path, the session row and the recent folder must match production layout;
  * a replay that reads a bespoke location proves nothing about the real one.
  */
-export function seedArchivedTurn({ userDataDir, source, preview }) {
+export function seedArchivedTurn({ userDataDir, source, preview, rewrite = true }) {
+  // On a relaunch the archive must already be on disk from the previous process; skipping the
+  // write is what makes "the session came back" mean something.
+  if (!rewrite) {
+    writeFileSync(join(userDataDir, 'recent-folders.json'), JSON.stringify([source.cwd]))
+    return
+  }
   if (source.turns.length !== 1) throw new Error('replay exactly one archived turn')
   const hash = (value) => createHash('sha256').update(value).digest('hex')
   const turn = source.turns[0]
   const archiveDir = join(userDataDir, 'trace-archive-turns-v1', source.providerId,
     `cwd-${hash(source.cwd)}`, `sid-${hash(source.sessionId)}`)
-  mkdirSync(archiveDir, { recursive: true })
   const identity = turn.providerTurnId ? `provider\0${turn.providerTurnId}` : `run\0${turn.runId}`
-  writeFileSync(join(archiveDir, `turn-${hash(identity)}.json`), JSON.stringify(source))
+  // On a relaunch the archive must already be on disk from the previous process; skipping this
+  // write is what makes "the session came back" mean something.
+  if (rewrite) {
+    mkdirSync(archiveDir, { recursive: true })
+    writeFileSync(join(archiveDir, `turn-${hash(identity)}.json`), JSON.stringify(source))
+  }
   writeFileSync(join(userDataDir, 'app-sessions.json'), JSON.stringify([{
     sessionId: source.sessionId,
     externalSessionId: source.externalSessionId,

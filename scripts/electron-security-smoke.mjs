@@ -13,8 +13,8 @@ import { exerciseSourceControlApp } from './source-control-ui-checks.mjs'
 import { exerciseWorkspaceSessions } from './workspace-session-ui-checks.mjs'
 import { seedConversationOwnership } from './conversation-ownership-smoke.mjs'
 import { exerciseFileHistory } from './electron-security-file-history.mjs'
-import { seedArchivedTurn, seedNativeTranscript } from './archived-turn-smoke.mjs'
-import { exerciseWorkflowArchive } from './electron-security-workflow.mjs'
+import { seedArchivedTurn } from './archived-turn-smoke.mjs'
+import { exerciseWorkflowArchive, prepareWorkflowArchive, workflowArchiveReuse } from './electron-security-workflow.mjs'
 import { exerciseNativeHistory } from './electron-security-native-history.mjs'
 import { exerciseProductionPerformance } from './electron-security-performance.mjs'
 import { exerciseFiles } from './electron-security-files.mjs'
@@ -43,6 +43,7 @@ const nativeHistoryPerformanceOnly = process.argv[2] === '--dev-pi-history-perf-
 const nativeHistoryOnly = process.argv[2] === '--dev-pi-history-only' || nativeHistoryPerformanceOnly
 const fileHistoryOnly = ['--dev-file-history-only', '--file-history-only'].includes(process.argv[2])
 const workflowOnly = process.argv[2] === '--dev-workflow-only'
+const workflowReuse = workflowArchiveReuse
 const sourceFileHistory = fileHistoryOnly || workflowOnly ? JSON.parse(readFileSync(resolve(process.argv[3]), 'utf8')) : null
 const devMetaPromptsOnly = process.argv[2] === '--dev-meta-prompts-only'
 const devTerminalOnly = process.argv[2] === '--dev-terminal-only'
@@ -60,7 +61,8 @@ const packagedAppArgument = ['--files-only', '--performance-only', '--file-histo
 const dev = devApp ? electronDevLayout() : null
 const appPath = resolve(dev?.appPath || packagedAppArgument || defaultPackagedAppPath())
 const executable = dev ? resolve(dev.executable) : packagedAppLayout(appPath).executable
-const temp = mkdtempSync(join(tmpdir(), 'scry-electron-smoke-'))
+// A relaunch must reuse the previous process's directory; everything else gets a fresh one.
+const temp = process.env.SCRY_SMOKE_TEMP ? (mkdirSync(process.env.SCRY_SMOKE_TEMP, { recursive: true }), process.env.SCRY_SMOKE_TEMP) : mkdtempSync(join(tmpdir(), 'scry-electron-smoke-'))
 let child
 let stderr = ''
 let smokeIdentity = 'default'
@@ -82,7 +84,8 @@ async function main() {
     mkdirSync(secondWorkspace, { recursive: true })
     writeFileSync(join(userDataDir, 'recent-folders.json'), JSON.stringify([canonicalWorkspace, realpathSync(secondWorkspace)]))
   }
-  writeFileSync(join(userDataDir, 'app-sessions.json'), JSON.stringify([{
+  // A relaunch reads the catalog the previous process actually wrote, not a fresh fixture.
+  if (!(workflowOnly && workflowReuse)) writeFileSync(join(userDataDir, 'app-sessions.json'), JSON.stringify([{
     sessionId: 'smoke-run',
     runId: 'smoke-run',
     providerId: 'codex',
@@ -117,14 +120,10 @@ async function main() {
       preview: '手机会话恢复测试', ts: Date.now()
     }]))
   }
-  if (fileHistoryOnly || workflowOnly) seedArchivedTurn({ userDataDir, source: sourceFileHistory,
-    preview: workflowOnly ? 'Archived workflow replay' : 'Archived file-link replay' })
-  if (workflowOnly) {
-    // Same run, Provider-native side: exercises the transcript↔archive merge the App uses for
-    // real sessions. Rows come from the fixture, never hand-written.
-    const rows = readFileSync(resolve(process.argv[4]), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line))
-    seedNativeTranscript({ home, cwd: sourceFileHistory.cwd, sessionId: 'workflow-archive-replay', messages: rows })
-  }
+  if (fileHistoryOnly) seedArchivedTurn({ userDataDir, source: sourceFileHistory, preview: 'Archived file-link replay' })
+  // Seeds the archive turn and the Provider transcript of the same run; the transcript is why
+  // the replay exercises the merge the App uses for real sessions.
+  if (workflowOnly) prepareWorkflowArchive({ userDataDir, home, source: sourceFileHistory, nativePath: process.argv[4] })
   const ownershipFixture = conversationOwnershipOnly ? seedConversationOwnership({
     userData: userDataDir, cwd: canonicalWorkspace, otherCwd: realpathSync(secondWorkspace)
   }) : undefined
@@ -302,9 +301,10 @@ try {
   throw error
 } finally {
   await stopOwnedApp(child)
-  // A failed run keeps its fixture as evidence; only clean runs delete it.
+  // A failed run keeps its fixture as evidence; only clean runs delete it. A caller that owns
+  // the directory (relaunch against the same data) keeps it in both cases.
   if (failed) console.warn(`[scry] smoke fixture kept for diagnosis: ${temp}`)
-  else try {
+  else if (!process.env.SCRY_SMOKE_TEMP) try {
     rmSync(temp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
   } catch (error) {
     console.warn(`[scry] smoke temp cleanup failed: ${error.message}`)

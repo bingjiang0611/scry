@@ -72,6 +72,14 @@ describe('WorkflowSurface', () => {
     expect(html).not.toContain('workflow-phase')
   })
 
+  it('活动行先于 tool_use 到达时仍显示“调用了 Workflow 工具”，不是“没有对应的调用”', () => {
+    const all = events(workflowFixtureMessages())
+    const reordered = [...all.filter((event) => event.kind !== 'tool'), ...all.filter((event) => event.kind === 'tool')]
+    const html = render(reordered)
+    expect(html).toContain(WORKFLOW_COPY.mainSessionAction)
+    expect(html).not.toContain(WORKFLOW_COPY.mainSessionUnobserved)
+  })
+
   it('历史不完整时给出 partial 提示', () => {
     const all = events(workflowFixtureMessages())
     const firstRows = all.findIndex((event) => event.stage === 'workflow_activity' && (event.input as { rows?: unknown[] }).rows)

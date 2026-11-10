@@ -138,7 +138,9 @@ export function WorkflowFlow({ run }: { run: WorkflowRun }) {
     return undefined
   }, [run.phases, selected])
   const ended = run.status === 'completed' || run.status === 'failed' || run.status === 'stopped'
-  const callObserved = run.id !== `task:${run.taskId}`
+  // The call can arrive after its rows; the run id stays task-based in that case, so the run
+  // itself records whether the call was seen instead of inferring it from the id.
+  const callObserved = run.toolCallObserved
   const usage = [
     run.usage?.totalTokens !== undefined ? `${fmtTok(run.usage.totalTokens)} ${WORKFLOW_COPY.usageTokens}` : undefined,
     run.usage?.toolUses !== undefined ? `${run.usage.toolUses} ${WORKFLOW_COPY.usageTools}` : undefined,

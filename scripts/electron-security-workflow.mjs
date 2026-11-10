@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { seedArchivedTurn, seedNativeTranscript } from './archived-turn-smoke.mjs'
 import { join } from 'node:path'
 
 /**
@@ -10,12 +11,27 @@ import { join } from 'node:path'
  * from wire messages, so this is the regression for history recovery, the projection and
  * the surface together.
  */
+// Second launch of the same temporary userData/HOME: nothing is seeded again, so a session
+// that appears proves the App read it back from disk after a real quit and restart.
+export const workflowArchiveReuse = process.argv[5] === '--reuse'
+
+/** Seed the archived turn and its Provider transcript for the first launch of the replay. */
+export function prepareWorkflowArchive({ userDataDir, home, source, nativePath }) {
+  seedArchivedTurn({ userDataDir, source, preview: 'Archived workflow replay', rewrite: !workflowArchiveReuse })
+  // On a relaunch the transcript must already be on disk from the previous process.
+  if (workflowArchiveReuse) return
+  const rows = readFileSync(nativePath, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line))
+  seedNativeTranscript({ home, cwd: source.cwd, sessionId: 'workflow-archive-replay', messages: rows })
+}
+
 export async function exerciseWorkflowArchive(context) {
   const { evaluate, cdp } = context
   const source = context.sourceFileHistory
   const turn = source.turns[0]
   const screenshotDir = process.env.SCRY_WORKFLOW_ARCHIVE_SCREENSHOT?.trim()
   const workflowItems = turn.items.filter((event) => event.stage === 'workflow_activity')
+  // Set by the wrapper's second launch: same userData/HOME, nothing re-seeded (see --reuse).
+  const relaunch = workflowArchiveReuse
   assert.ok(workflowItems.length > 0, 'the archived turn must contain workflow_activity events')
 
   const wait = (expression, timeoutMs = 20000) => evaluate(`(async () => {
@@ -97,6 +113,8 @@ export async function exerciseWorkflowArchive(context) {
         }))
       })),
       log: surface.querySelectorAll('.workflow-log li').length,
+      // The chat card proves the tool call exists, so the surface must not claim it is missing.
+      callObserved: surface.querySelector('.workflow-node.main')?.dataset.observed ?? null,
       // A clipped surface is a layout bug the user sees, so the replay checks it too.
       overflow: {
         pane: surface.scrollWidth - surface.clientWidth,
@@ -129,6 +147,7 @@ export async function exerciseWorkflowArchive(context) {
       }
     }
     assert.equal(rendered.scriptLines, Math.min(run.script?.text.split('\n').length ?? 0, 800), `${label}: script lines`)
+    assert.equal(rendered.callObserved, 'true', `${label}: the observed Workflow tool call must be shown as observed`)
     assert.ok(rendered.overflow.pane <= 0, `${label}: the workflow surface must not scroll horizontally (${rendered.overflow.pane}px)`)
     assert.ok(rendered.overflow.document <= 0, `${label}: the window must not scroll horizontally (${rendered.overflow.document}px)`)
   }
@@ -165,6 +184,7 @@ export async function exerciseWorkflowArchive(context) {
   const first = await renderedState()
   verify(first, { label: 'after opening from the chat card' })
   await capture('workflow-archive-surface')
+  if (relaunch) await capture('workflow-archive-relaunch')
 
   // A full renderer reload re-reads the turn from the archive, which is the restart path
   // without touching the archive on disk.
@@ -188,6 +208,7 @@ export async function exerciseWorkflowArchive(context) {
   await capture('workflow-archive-reloaded')
 
   return {
+    relaunch,
     archivedWorkflow: {
       runId: turn.runId,
       events: workflowItems.length,

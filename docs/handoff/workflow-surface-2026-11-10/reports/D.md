@@ -12,6 +12,7 @@ SCRY_WORKFLOW_ARCHIVE_SCREENSHOT=evidence/screens node scripts/workflow-archive-
 
 - 包装脚本 `scripts/workflow-archive-smoke.mjs`：把夹具消息交给生产 `normalizeSdkMessage` 得到事件，写一份真实布局的归档轮次（`trace-archive-turns-v1/...`）、一份 Provider 原生 transcript（`$HOME/.claude/projects/<encoded cwd>/<session>.jsonl`）和会话行，然后调用 `electron-security-smoke.mjs --dev-workflow-only`。
 - 冒烟模块 `scripts/electron-security-workflow.mjs`：真实指针点击打开会话 → 展开工具组 → 点“在 Workflow 面板查看” → 用生产 `deriveWorkflowRuns` 算出期望值，逐阶段、逐 agent、终态、脚本行、横向溢出对照 DOM；随后 `Page.reload`（渲染进程重启）重开同一会话再对照一次。
+- 包装脚本会启动**两次**真实 App 进程，共用同一个临时 userData/HOME：第二次什么也不写（不重写归档、不重写 transcript，只重写会话目录行），因此“还能打开并显示同样结果”证明数据是从磁盘读回来的。第二次的输出带 `"relaunch": true`。
 - `scripts/electron-security-smoke.mjs` 只增加 `--dev-workflow-only` 分支与种子调用，新逻辑都在独立模块里；文件 19.6 KB，仍低于 20,000 字节。
 
 ## 正对照
@@ -26,6 +27,13 @@ SCRY_WORKFLOW_ARCHIVE_SCREENSHOT=evidence/screens node scripts/workflow-archive-
 "reloaded":{"status":"已完成","phases":3,"logEntries":24},"noProviderRuns":true,"isolatedUserData":true}}
 ```
 
+两次运行（首次 + 完全重启）输出一致，第二次带 `"relaunch": true`：
+
+```
+fresh   已完成 ['scan','edit','verify'] 6
+relaunch 已完成 ['scan','edit','verify'] 6
+```
+
 `noProviderRuns: true` 来自 `window.scry.activeRuns()` 为空：回放不启动任何 Provider。断言里还有一条
 “transcript 轮次与归档轮次必须合并成一“条”（`#main-pane .turn` 数量为 1）”，用来证明种子确实走了
 生产的历史合并路径，而不是归档单源捷径。
@@ -37,6 +45,7 @@ SCRY_WORKFLOW_ARCHIVE_SCREENSHOT=evidence/screens node scripts/workflow-archive-
 | `evidence/screens/workflow-archive-chat.png` | 归档轮次在聊天区渲染出 Workflow 工具卡片与“在 Workflow 面板查看”入口 |
 | `evidence/screens/workflow-archive-surface.png` | 点聊天卡片后打开右侧 Workflow，三个阶段、6 个 agent、终态与归档一致 |
 | `evidence/screens/workflow-archive-reloaded.png` | 渲染进程 reload 后重新打开，阶段数/agent 数/终态与 reload 前一致 |
+| `evidence/screens/workflow-archive-relaunch.png` | 完全退出 App、用同一 userData 重新启动、不写任何测试数据，仍打开同一阶段/agent/终态 |
 
 ## 负对照
 

@@ -90,6 +90,8 @@ describe('deriveWorkflowRuns', () => {
     expect(run.script?.source).toBe('task_started')
     // The id comes from the task event itself, not from an observed tool call.
     expect(run.toolUseId).toBe('toolu_workflow_1')
+    // The tool_use event itself is missing here; the panel must say so.
+    expect(run.toolCallObserved).toBe(false)
     expect(run.log[0].message).not.toContain('调用 Workflow 工具')
   })
 
@@ -99,7 +101,7 @@ describe('deriveWorkflowRuns', () => {
     const reordered = [...all.filter((event) => event.kind !== 'tool'), ...all.filter((event) => event.kind === 'tool')]
     const runs = deriveWorkflowRuns([turn(reordered)], { busy: false })
     expect(runs).toHaveLength(1)
-    expect(runs[0]).toMatchObject({ status: 'completed', statusSource: 'task_notification', agentCount: 6 })
+    expect(runs[0]).toMatchObject({ status: 'completed', statusSource: 'task_notification', agentCount: 6, toolCallObserved: true })
     expect(workflowRunForToolUse(runs, 'toolu_workflow_1')).toBe(runs[0])
   })
 
