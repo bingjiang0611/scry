@@ -219,8 +219,10 @@ describe('daemon host process', () => {
       const conversationEvents: Array<{ kind: string; detail?: string }> = []
       let conversationState = 'dispatched'
       let conversationCursor = 0
-      // Each progress marker wakes the watch, so the bound counts replies, not seconds.
-      for (let attempt = 0; attempt < 60 && !['settled', 'failed'].includes(conversationState); attempt += 1) {
+      // Bounded by time, not by replies: each progress marker wakes the watch, and under
+      // a parallel suite the markers can spend any reply budget before the run settles.
+      const conversationDeadline = Date.now() + 10_000
+      while (Date.now() < conversationDeadline && !['settled', 'failed'].includes(conversationState)) {
         const watched = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
           op: 'watch', runId: sent.result.ledger.runId, cursor: conversationCursor, outputCursor: 0, waitMs: 5_000
         })
@@ -297,7 +299,8 @@ describe('daemon host process', () => {
       const events: Array<{ kind: string }> = []
       const chunks: unknown[] = []
       let state = 'dispatched'
-      for (let attempt = 0; attempt < 10 && state === 'dispatched'; attempt += 1) {
+      const deadline = Date.now() + 10_000
+      while (Date.now() < deadline && state === 'dispatched') {
         const watched = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
           op: 'watch', runId, cursor, outputCursor, waitMs: 5_000
         })
