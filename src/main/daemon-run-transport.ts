@@ -4,6 +4,7 @@ import type { DesktopTraceCursor, DesktopRemoteTraceRead } from '../shared/deskt
 import { DaemonClientError } from './daemon-client'
 import { laneWasNotSent, laneWasWrittenUnknown } from './remote/desktop-lane'
 import type { DaemonEventReply } from './daemon-event-pump'
+import type { SessionAttentionSnapshot } from '../shared/session-attention'
 
 // The App's run surface against its own daemon, over the same frames the phone
 // uses. This module only parses and types those frames: it holds no socket, no
@@ -280,9 +281,16 @@ export class DaemonRunTransport {
       if (!record(raw)) return []
       if (raw.kind === 'data' && isDataUpdated(raw.event)) return [{ kind: 'data', event: raw.event }]
       if (raw.kind === 'run' && isDaemonRunId(raw.runId)) return [{ kind: 'run', runId: raw.runId }]
+      if (raw.kind === 'attention' && isAttentionSnapshot(raw.snapshot)) return [{ kind: 'attention', snapshot: raw.snapshot }]
       return []
     })
     return { epoch: events.epoch, cursor: events.cursor as number, items, reset: events.reset === true }
+  }
+
+  /** The App viewed one of the daemon's unread sessions (E1b). Idempotent. */
+  async attentionViewed(sessionKey: string): Promise<void> {
+    const reply = await this.#call({ op: 'attentionViewed', sessionKey }, { replayable: true })
+    if (reply.viewed !== true) throw new DaemonRunError('invalid_daemon_response')
   }
 
   /** A full run snapshot, used to resynchronise after a gap. */
@@ -350,4 +358,11 @@ function isDataUpdated(value: unknown): value is AgentDataUpdated {
   if (value.kind === 'conversation_changed') return typeof value.conversationId === 'string'
   if (value.kind === 'catalog_recovered' || value.kind === 'resynchronize') return true
   return typeof value.runId === 'string' && (value.kind === undefined || value.kind === 'turn_recorded' || value.kind === 'session_deleted')
+}
+
+const MAX_UNREAD_SESSIONS = 10_000
+
+function isAttentionSnapshot(value: unknown): value is SessionAttentionSnapshot {
+  return record(value) && Number.isSafeInteger(value.revision) && Array.isArray(value.unreadSessionKeys) &&
+    value.unreadSessionKeys.length <= MAX_UNREAD_SESSIONS && value.unreadSessionKeys.every((key) => typeof key === 'string')
 }

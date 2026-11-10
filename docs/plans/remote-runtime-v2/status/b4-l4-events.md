@@ -1,4 +1,4 @@
-# P3f daemon → App 事件流：E0、E1、E2
+# P3f daemon → App 事件流：E0、E1、E1b、E2
 
 设计见 [P3f](../P3f-app-event-stream.md)。上级状态见 [b4-l4](b4-l4.md)。
 
@@ -89,7 +89,42 @@
 
 E2 改变了流式文本到达 App 的方式，所以 macOS 上需要按 S1 的方法复测首 token 与流式间隔，确认不比原来差。在复测结果出来之前，不对 E2 做性能结论。
 
+## E1b：未读角标
+
+设计见 [P3f §E1b](../P3f-app-event-stream.md)。daemon 保存未读集合，App 决定什么算「已查看」。
+
+| 层 | 改动 |
+|---|---|
+| daemon | 会话状态的未读发布写入事件流 `{ kind: 'attention', snapshot }`，只保留最新一份；握手回答和 `reset` 回答都附带当前快照。本机端点新增 `attentionViewed(sessionKey)`，幂等，参数逐项校验，网络端点回答 `unsupported_op`。App 报告已查看后，daemon 从未读集合中移除该会话 |
+| lane | `attentionViewed` 走 control lane，可以重放 |
+| App 角标 | `DockBadgeState` 镜像 daemon 的集合，作为第三个集合计数，并提供给 renderer。App 本会清除的会话如果在 daemon 集合里，就报告给 daemon。快照中正被获得焦点的窗口查看的会话直接按已查看处理，不会闪一下。daemon 连接释放时忘记这个集合（变回未知，不是空） |
+| 查看 run | 进程内，聚焦或领养一个 run 会把它的会话标为已查看；daemon 模式下这两个处理函数原来直接返回，现在也会标记 |
+| `agent:unreadSessions` | 闸门改为放行，由镜像回答；收到第一份快照之前以命名缺席拒绝 |
+
+测试（均先失败）：
+
+- `dock-badge.test.ts`：计数与快照包含 daemon 集合；新快照替换旧集合；获得焦点的窗口查看时报告给 daemon；正在看的会话不闪；daemon 离开后变回未知；`agent:unreadSessions` 在未知时拒绝，进程内照常回答；
+- `app-event-feed.test.ts`：握手与 `reset` 回答带当前状态，同类状态只保留最新一份；
+- `host-local-ops.test.ts`：`attentionViewed` 只在本机端点提供，参数校验；
+- `desktop-lane.test.ts`、`daemon-run-transport.test.ts`、`daemon-event-pump.test.ts`：lane、解析与转交；
+- `agent-runtime-ipc-daemon-view.test.ts`：daemon 模式下聚焦或领养 run，获得焦点时清除 daemon 的未读，未获焦点时保留；
+- 真实 daemon：会话发送结束后，握手快照里的未读正好是这一轮的原生会话；逐个报告已查看后，事件流里的快照变为空；
+- `daemon-channel-gate.test.ts`：路由为 main 的通道全部放行，不再有例外。
+
+控制实验：
+
+- 角标清除时不报告给 daemon → 「获得焦点时报告」失败；
+- daemon 本机端点不提供 `attention` → 真实 daemon 测试失败；
+- daemon 模式下聚焦 run 时不标记 → 聚焦测试失败；
+- 恢复后全部通过。
+
+门禁（Linux 容器，root）：
+
+- `npm run typecheck` 通过；
+- 同上范围的 vitest：4527 passed / 4 failed / 3 skipped，四条失败与之前相同，都是 root 环境原因；
+- `index.ts` 在性能路径里，跑了 `npm run performance:measure`：Ratchet 通过，没有 `worse`。
+
 ## 未做
 
-- E1b 角标，E3 run 集合。
+- E3 run 集合。
 - 未在 macOS 与真实 App 中验证；E2 的毫秒影响未测。

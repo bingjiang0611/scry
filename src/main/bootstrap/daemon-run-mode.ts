@@ -6,6 +6,7 @@ import { unsafeCredentialStorageReason } from './remote-connections'
 import { ensureDaemon, type DaemonLaunch, type DaemonProbe } from '../daemon-supervisor'
 import { DaemonRunRuntime } from '../daemon-run-runtime'
 import { DaemonEventPump } from '../daemon-event-pump'
+import type { DockBadgeState } from '../dock-badge'
 import { DaemonRunTransport } from '../daemon-run-transport'
 import { laneForRequest } from '../remote/desktop-lane'
 import { createDaemonRunSurface, type DaemonRunSurface } from './daemon-run-surface'
@@ -58,6 +59,9 @@ export interface DaemonRunModeDeps {
   launch?: DaemonLaunch
   waitMs?: number
   onWarn?: (message: string, detail?: unknown) => void
+  // E1b: this window's badge mirrors the daemon's unread set and decides what was viewed.
+  dockBadge?: Pick<DockBadgeState, 'setDaemon' | 'bindDaemon' | 'forgetDaemon'>
+  isWindowFocused?: () => boolean
 }
 
 export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<DaemonRunModeResult> {
@@ -175,14 +179,19 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   // a long poll on the shared watch lane (E2).
   const events = new DaemonEventPump({
     source: transport, send: deps.send, ...(deps.onWarn ? { onWarn: deps.onWarn } : {}),
-    onRun: (runId) => runtime.wake(runId), onResync: () => runtime.wakeAll(), onLive: (live) => runtime.setWakesLive(live)
+    onRun: (runId) => runtime.wake(runId), onResync: () => runtime.wakeAll(), onLive: (live) => runtime.setWakesLive(live),
+    onAttention: (snapshot) => deps.dockBadge?.setDaemon(snapshot, deps.isWindowFocused?.() ?? false)
+  })
+  // Viewing is idempotent: a lost report is repaired by the next snapshot and view.
+  deps.dockBadge?.bindDaemon((sessionKey) => {
+    void transport.attentionViewed(sessionKey).catch((error) => deps.onWarn?.('daemon attention viewed failed', error))
   })
   events.start()
   return {
     status: 'ready',
     version,
     surface,
-    dispose: () => { events.dispose(); runtime.dispose(); client.close() }
+    dispose: () => { events.dispose(); deps.dockBadge?.forgetDaemon(); runtime.dispose(); client.close() }
   }
 }
 
@@ -194,6 +203,8 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
 export function appDaemonModeDeps(input: {
   send: (channel: string, payload: unknown) => void
   currentCwd: () => string | undefined
+  dockBadge?: DaemonRunModeDeps['dockBadge']
+  isWindowFocused?: () => boolean
   env?: NodeJS.ProcessEnv
 }): DaemonRunModeDeps {
   const userDataDir = app.getPath('userData')
@@ -231,6 +242,8 @@ export function appDaemonModeDeps(input: {
     },
     send: input.send,
     currentCwd: input.currentCwd,
+    ...(input.dockBadge ? { dockBadge: input.dockBadge } : {}),
+    ...(input.isWindowFocused ? { isWindowFocused: input.isWindowFocused } : {}),
     // The pump stops on its own after a failure; without this line the reason would be
     // dropped and the window would just never update.
     onWarn: (message, detail) => {

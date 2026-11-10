@@ -211,4 +211,17 @@ describe('daemon run transport', () => {
     await value.localOp({ op: 'conversation', method: 'read', args: ['conv-1', null], read: true })
     expect(calls[2]!.request).toStrictEqual({ op: 'conversation', method: 'read', args: ['conv-1', null] })
   })
+
+  it('reads the daemon unread set and reports a viewed session (E1b)', async () => {
+    const snapshot = { revision: 4, unreadSessionKeys: ['codex\u0000\u0000/w\u0000s1'] }
+    const { value, calls } = transport((request) => request.op === 'attentionViewed'
+      ? { viewed: true }
+      : { events: { epoch: 'e1', cursor: 1, items: [{ kind: 'attention', snapshot }, { kind: 'attention', snapshot: { revision: 'x' } }] } })
+    await expect(value.appEvents({ cursor: 0, waitMs: 0 })).resolves.toMatchObject({ items: [{ kind: 'attention', snapshot }] })
+    await value.attentionViewed('codex\u0000\u0000/w\u0000s1')
+    // Viewing is idempotent, so a lost reply may be asked again.
+    expect(calls[1]).toEqual({ request: { op: 'attentionViewed', sessionKey: 'codex\u0000\u0000/w\u0000s1' }, options: { replayable: true } })
+    const refused = transport(() => ({ error: 'invalid_request' }))
+    await expect(refused.value.attentionViewed('k')).rejects.toMatchObject({ reason: 'invalid_daemon_response' })
+  })
 })

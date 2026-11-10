@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { DockBadgeState } from './dock-badge'
+import { DockBadgeState, unreadSessionsAnswer } from './dock-badge'
 
 describe('DockBadgeState', () => {
   it('启动同步清除系统残留角标，不制造未读状态变化', () => {
@@ -262,5 +262,63 @@ describe('DockBadgeState', () => {
     badge.setRemote([])
     expect(badge.count).toBe(1)
     expect(counts.at(-1)).toBe(1)
+  })
+
+  describe('daemon mode: the daemon owns the unread set, this window decides what was viewed', () => {
+    const daemonSnapshot = (keys: string[], revision = 1) => ({ revision, unreadSessionKeys: keys })
+
+    it('counts the daemon set beside its own, and reports it to the renderer', () => {
+      const setCount = vi.fn()
+      const badge = new DockBadgeState(setCount)
+      expect(badge.daemonAttentionKnown).toBe(false)
+      badge.setDaemon(daemonSnapshot(['session-a', 'session-b']), false)
+      expect(badge.daemonAttentionKnown).toBe(true)
+      expect(setCount).toHaveBeenLastCalledWith(2)
+      expect(badge.snapshot().unreadSessionKeys).toEqual(['session-a', 'session-b'])
+      // A newer snapshot replaces the set; it is state, not a list of changes.
+      badge.setDaemon(daemonSnapshot(['session-b'], 2), false)
+      expect(badge.count).toBe(1)
+    })
+
+    it('tells the daemon when this window views one of its sessions, while focused', () => {
+      const viewed = vi.fn()
+      const badge = new DockBadgeState(vi.fn())
+      badge.bindDaemon(viewed)
+      badge.setDaemon(daemonSnapshot(['session-a']), false)
+      badge.view('session-a', false)
+      expect(viewed).not.toHaveBeenCalled()
+      badge.focusWindow()
+      expect(viewed).toHaveBeenCalledWith('session-a')
+      expect(badge.count).toBe(0)
+    })
+
+    it('does not flash a session the focused window is already looking at', () => {
+      const viewed = vi.fn()
+      const setCount = vi.fn()
+      const badge = new DockBadgeState(setCount)
+      badge.bindDaemon(viewed)
+      badge.view('session-a', true)
+      setCount.mockClear()
+      badge.setDaemon(daemonSnapshot(['session-a', 'session-b']), true)
+      expect(viewed).toHaveBeenCalledWith('session-a')
+      expect(badge.snapshot().unreadSessionKeys).toEqual(['session-b'])
+      expect(setCount.mock.calls.every(([count]) => count === 1)).toBe(true)
+    })
+
+    it('answers the renderer only once the daemon set is known; in process, always', () => {
+      const badge = new DockBadgeState(vi.fn())
+      expect(unreadSessionsAnswer(badge, false)).toEqual({ revision: 0, unreadSessionKeys: [] })
+      expect(() => unreadSessionsAnswer(badge, true)).toThrow('daemon_capability_unavailable:agent:unreadSessions')
+      badge.setDaemon(daemonSnapshot(['session-a']), false)
+      expect(unreadSessionsAnswer(badge, true).unreadSessionKeys).toEqual(['session-a'])
+    })
+
+    it('forgets the daemon set when the daemon is gone, so it is unknown rather than empty', () => {
+      const badge = new DockBadgeState(vi.fn())
+      badge.setDaemon(daemonSnapshot(['session-a']), false)
+      badge.forgetDaemon()
+      expect(badge.daemonAttentionKnown).toBe(false)
+      expect(badge.count).toBe(0)
+    })
   })
 })

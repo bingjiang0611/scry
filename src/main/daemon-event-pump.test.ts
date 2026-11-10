@@ -129,4 +129,17 @@ describe('daemon event pump', () => {
     expect(live.slice(0, 3)).toEqual([true, false, true])
     expect(onResync).toHaveBeenCalledTimes(1)
   })
+
+  it('hands the daemon unread set to the badge, never to the window as data', async () => {
+    const onAttention = vi.fn()
+    const send = vi.fn()
+    const snapshot = { revision: 2, unreadSessionKeys: ['k'] }
+    const { source: events, requests } = source([{ epoch: 'e1', cursor: 0, items: [{ kind: 'attention', snapshot }], reset: false }])
+    const pump = new DaemonEventPump({ source: events, send, sleep, onAttention })
+    pump.start()
+    await vi.waitFor(() => expect(requests.length).toBe(2))
+    pump.dispose()
+    expect(onAttention).toHaveBeenCalledWith(snapshot)
+    expect(send).not.toHaveBeenCalled()
+  })
 })

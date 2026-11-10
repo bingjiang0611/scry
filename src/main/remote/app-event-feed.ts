@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentDataUpdated } from '../../shared/runtime'
+import type { SessionAttentionSnapshot } from '../../shared/session-attention'
 
 // P3f: what the daemon tells its own App that no run read carries. Notices only, never
 // bodies: the App re-reads through the authorized readers it already uses. Bounded and
@@ -11,6 +12,8 @@ export type AppEvent =
   | { kind: 'data'; event: AgentDataUpdated }
   // A ledger run's events or output changed (E2); the App reads that run, nothing else.
   | { kind: 'run'; runId: string }
+  // The daemon's whole unread set (E1b): state, so only the newest one matters.
+  | { kind: 'attention'; snapshot: SessionAttentionSnapshot }
 
 export interface AppEventsReply {
   epoch: string
@@ -29,6 +32,7 @@ interface Entry { seq: number; event: AppEvent; key?: string; bytes: number }
 // One notice per subject is enough: a newer one says everything an older one did.
 function coalesceKey(event: AppEvent): string | undefined {
   if (event.kind === 'run') return `run:${event.runId}`
+  if (event.kind === 'attention') return 'attention'
   const data = event.event
   if ('kind' in data && data.kind === 'conversation_changed') return `conversation:${data.conversationId}`
   if ('kind' in data && data.kind === 'catalog_recovered') return 'catalog'
@@ -47,9 +51,13 @@ export class AppEventFeed {
   #lost = 0
   #waiters = new Set<() => void>()
   #closed = false
+  // State a client cannot rebuild from changes it never saw (the unread set): handed to
+  // a new client and to one told to resynchronize, instead of replaying history.
+  readonly #state: () => AppEvent[]
 
-  constructor(options: { epoch?: string; maxItems?: number; maxBytes?: number } = {}) {
+  constructor(options: { epoch?: string; maxItems?: number; maxBytes?: number; state?: () => AppEvent[] } = {}) {
     this.epoch = options.epoch ?? randomUUID()
+    this.#state = options.state ?? (() => [])
     this.#maxItems = options.maxItems ?? DEFAULT_MAX_ITEMS
     this.#maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES
   }
@@ -74,9 +82,9 @@ export class AppEventFeed {
 
   async read(input: { epoch?: string; cursor: number; waitMs: number }): Promise<AppEventsReply> {
     // A client without an epoch is new: it reads current state itself, so it starts here.
-    if (input.epoch === undefined) return { epoch: this.epoch, cursor: this.#seq, items: [] }
+    if (input.epoch === undefined) return { epoch: this.epoch, cursor: this.#seq, items: this.#state() }
     if (input.epoch !== this.epoch || input.cursor > this.#seq || input.cursor < this.#lost) {
-      return { epoch: this.epoch, cursor: this.#seq, items: [], reset: true }
+      return { epoch: this.epoch, cursor: this.#seq, items: this.#state(), reset: true }
     }
     const pending = this.#after(input.cursor)
     if (pending.length > 0 || this.#closed || input.waitMs <= 0) return { epoch: this.epoch, cursor: this.#seq, items: pending }

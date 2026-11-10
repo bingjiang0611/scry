@@ -12,6 +12,8 @@ const writeOperations = new Set([
 const watchOperations = new Set(['watch'])
 const statusOperations = new Set(['liveRuns'])
 const eventOperations = new Set(['appEvents'])
+// Short and idempotent: on the control lane, and replayable because it changes nothing twice.
+const idempotentControlOperations = new Set(['attentionViewed'])
 // `desktop` carries its own kind; history/trace/image reads are the large ones.
 const bulkDesktopKinds = new Set(['history', 'trace', 'trace_delta', 'image_chunk'])
 
@@ -19,6 +21,7 @@ export function laneForRequest(request: unknown): DesktopLaneName {
   const op = request && typeof request === 'object' ? (request as { op?: unknown }).op : undefined
   if (typeof op !== 'string') return 'control'
   if (writeOperations.has(op)) return 'control'
+  if (idempotentControlOperations.has(op)) return 'control'
   if (watchOperations.has(op)) return 'watch'
   if (statusOperations.has(op)) return 'status'
   if (eventOperations.has(op)) return 'events'

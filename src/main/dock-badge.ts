@@ -9,6 +9,11 @@ export interface DockBadgeAttentionState {
 export class DockBadgeState {
   private readonly unreadSessionKeys = new Set<string>()
   private readonly remoteSessionKeys = new Set<string>()
+  // Daemon mode: the daemon's unread set, mirrored. The daemon cannot see this window's
+  // focus or the session it shows, so this window decides what counts as viewed and
+  // tells the daemon. `undefined` until the daemon's first snapshot: unknown, not empty.
+  private daemonSessionKeys: Set<string> | undefined
+  private daemonViewed?: (sessionKey: string) => void
   private viewedSessionKey: string | null = null
   private revision = 0
 
@@ -79,19 +84,49 @@ export class DockBadgeState {
   }
 
   get count(): number {
-    return this.unreadSessionKeys.size + this.remoteSessionKeys.size
+    return this.unreadSessionKeys.size + this.remoteSessionKeys.size + (this.daemonSessionKeys?.size ?? 0)
+  }
+
+  get daemonAttentionKnown(): boolean {
+    return this.daemonSessionKeys !== undefined
+  }
+
+  bindDaemon(viewed: (sessionKey: string) => void): void {
+    this.daemonViewed = viewed
+  }
+
+  /** The daemon's whole unread set; a session this focused window shows is viewed now. */
+  setDaemon(snapshot: SessionAttentionSnapshot, windowFocused: boolean): void {
+    const next = new Set<string>()
+    for (const key of snapshot.unreadSessionKeys) {
+      if (windowFocused && key === this.viewedSessionKey) this.daemonViewed?.(key)
+      else next.add(key)
+    }
+    const same = this.daemonSessionKeys !== undefined && next.size === this.daemonSessionKeys.size &&
+      [...next].every((key) => this.daemonSessionKeys!.has(key))
+    this.daemonSessionKeys = next
+    if (!same) this.publish()
+  }
+
+  /** The daemon is gone: its set is unknown again, and no longer counted. */
+  forgetDaemon(): void {
+    if (this.daemonSessionKeys === undefined) return
+    this.daemonSessionKeys = undefined
+    this.publish()
   }
 
   // Local keys only: the renderer owns the remote set and reads it per connection.
   snapshot(): SessionAttentionSnapshot {
     return {
       revision: this.revision,
-      unreadSessionKeys: [...this.unreadSessionKeys]
+      unreadSessionKeys: [...this.unreadSessionKeys, ...(this.daemonSessionKeys ?? [])]
     }
   }
 
   private clear(sessionKey: string | null): void {
-    if (!sessionKey || !this.unreadSessionKeys.delete(sessionKey)) {
+    const daemon = sessionKey !== null && this.daemonSessionKeys?.delete(sessionKey) === true
+    if (daemon) this.daemonViewed?.(sessionKey)
+    if (!sessionKey || (!this.unreadSessionKeys.delete(sessionKey) && !daemon)) {
       // Viewing an already-read session must still reconcile a stale native badge.
       this.sync()
       return
@@ -104,4 +139,14 @@ export class DockBadgeState {
     this.sync()
     this.onChange?.(this.snapshot())
   }
+}
+
+/**
+ * `agent:unreadSessions`. In daemon mode the set is the daemon's, mirrored here; until its
+ * first snapshot it is unknown, which is a named absence, never an empty list that reads
+ * as "nothing unread".
+ */
+export function unreadSessionsAnswer(badge: DockBadgeState, daemonMode: boolean): SessionAttentionSnapshot {
+  if (daemonMode && !badge.daemonAttentionKnown) throw new Error('daemon_capability_unavailable:agent:unreadSessions')
+  return badge.snapshot()
 }

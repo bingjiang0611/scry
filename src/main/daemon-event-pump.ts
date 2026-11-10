@@ -1,4 +1,5 @@
 import type { AgentDataUpdated } from '../shared/runtime'
+import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import { DaemonRunError } from './daemon-run-transport'
 
 // P3f: the App side of the daemon's event feed. One long poll per daemon connection, on
@@ -9,7 +10,7 @@ import { DaemonRunError } from './daemon-run-transport'
 export interface DaemonEventReply {
   epoch: string
   cursor: number
-  items: Array<{ kind: 'data'; event: AgentDataUpdated } | { kind: 'run'; runId: string }>
+  items: Array<{ kind: 'data'; event: AgentDataUpdated } | { kind: 'run'; runId: string } | { kind: 'attention'; snapshot: SessionAttentionSnapshot }>
   reset: boolean
 }
 
@@ -30,6 +31,8 @@ export interface DaemonEventPumpDeps {
   onResync?: () => void
   // Whether runs can rely on wakes, or must long-poll on their own.
   onLive?: (live: boolean) => void
+  // E1b: the daemon's whole unread set.
+  onAttention?: (snapshot: SessionAttentionSnapshot) => void
 }
 
 const DEFAULT_WAIT_MS = 20_000
@@ -93,7 +96,8 @@ export class DaemonEventPump {
         missed = false
         for (const item of reply.items) {
           if (item.kind === 'data') send('agent:dataUpdated', item.event)
-          else this.#deps.onRun?.(item.runId)
+          else if (item.kind === 'run') this.#deps.onRun?.(item.runId)
+          else this.#deps.onAttention?.(item.snapshot)
         }
         epoch = reply.epoch
         cursor = reply.cursor

@@ -77,11 +77,12 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
 
   const mirrorSessionTranscript = createMirrorSessionTranscript(options.userDataDir)
   // What this daemon tells its App that no run read carries (P3f).
-  const events = new AppEventFeed()
+  // Its unread set is state: a new or resynchronizing App gets it whole (E1b).
+  const events = new AppEventFeed({ state: () => [{ kind: 'attention', snapshot: session.dockBadge.snapshot() }] })
   const publishData = (event: AgentDataUpdated): void => events.append({ kind: 'data', event })
   const session = createSessionState({
     setBadgeCount: () => true,
-    publishUnreadSessions: () => undefined
+    publishUnreadSessions: (snapshot) => events.append({ kind: 'attention', snapshot })
   })
 
   let loadSessions = (): Array<{ cwd?: string }> => []

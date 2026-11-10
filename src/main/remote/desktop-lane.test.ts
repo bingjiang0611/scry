@@ -44,6 +44,9 @@ describe('desktop lane routing', () => {
     expect(laneForRequest({ op: 'liveRuns' })).toBe('status')
     // The App's event feed holds a long poll of its own; nothing may queue behind it.
     expect(laneForRequest({ op: 'appEvents' })).toBe('events')
+    // Marking a session viewed is short and must not queue behind a bulk read.
+    expect(laneForRequest({ op: 'attentionViewed' })).toBe('control')
+    expect(replayableRequest({ op: 'attentionViewed' })).toBe(true)
     expect(laneForRequest({ op: 'desktop', query: { kind: 'info' } })).toBe('control')
     expect(laneForRequest({ op: 'desktop', query: { kind: 'trace' } })).toBe('bulk')
     expect(laneForRequest({ op: 'historyPage' })).toBe('bulk')

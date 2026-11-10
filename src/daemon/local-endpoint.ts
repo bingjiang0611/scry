@@ -91,6 +91,8 @@ export function daemonLocalEndpoint(deps: DaemonLocalEndpointDeps): LocalEndpoin
       ...providerControlChannelHandlers({ providerRegistry: providers.providerRegistry, withProviderOperation: session.withProviderOperation }),
       ...conversationLocalOps
     } as Record<string, LocalOpHandler>),
-    events
+    events,
+    // This daemon cannot see the App's window; the App says what the user viewed (E1b).
+    attention: { viewed: (sessionKey) => session.dockBadge.remove(sessionKey) }
   }
 }

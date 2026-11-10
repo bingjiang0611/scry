@@ -92,4 +92,21 @@ describe('local ops on the App endpoint', () => {
         .resolves.toEqual({ error: 'invalid_request' })
     }
   })
+
+  it('lets the App mark a daemon session viewed on the local endpoint only', async () => {
+    const controller = {} as HostController
+    const peer = 'a'.repeat(64)
+    await expect(dispatchRemoteRequest(controller, peer, { protocol: 2, op: 'attentionViewed', sessionKey: 'k' }))
+      .resolves.toEqual({ error: 'unsupported_op' })
+    const viewed = vi.fn()
+    const local = { attention: { viewed } }
+    await expect(dispatchRemoteRequest(controller, peer, { protocol: 2, op: 'attentionViewed', sessionKey: 'claude\u0000\u0000/w\u0000s1' }, undefined, local))
+      .resolves.toEqual({ viewed: true })
+    expect(viewed).toHaveBeenCalledWith('claude\u0000\u0000/w\u0000s1')
+    for (const bad of [{}, { sessionKey: '' }, { sessionKey: 7 }, { sessionKey: 'x'.repeat(4097) }, { sessionKey: 'k', extra: 1 }]) {
+      await expect(dispatchRemoteRequest(controller, peer, { protocol: 2, op: 'attentionViewed', ...bad }, undefined, local))
+        .resolves.toEqual({ error: 'invalid_request' })
+    }
+    expect(viewed).toHaveBeenCalledTimes(1)
+  })
 })

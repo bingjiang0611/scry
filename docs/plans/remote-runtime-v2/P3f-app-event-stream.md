@@ -1,6 +1,6 @@
 # P3f · daemon → App 事件流
 
-状态：维护者 2026-11-10 批准做推送流（新增流式 op 只在本机端点、`scope: local`，见 [STATUS-BATCH4](STATUS-BATCH4.md)）。按 E0–E3 分段实现，E0、E1、E2 已完成，见 [b4-l4-events](status/b4-l4-events.md)。
+状态：维护者 2026-11-10 批准做推送流（新增流式 op 只在本机端点、`scope: local`，见 [STATUS-BATCH4](STATUS-BATCH4.md)）。按 E0–E3 分段实现，E0、E1、E1b、E2 已完成，见 [b4-l4-events](status/b4-l4-events.md)。
 
 ## 现在缺什么
 
@@ -91,6 +91,15 @@ type AppEvent =
 - **角标拆成 E1b。** 角标不是单向的：数量由 daemon 侧的未读会话与 App 自己连接其他宿主产生的未读会话相加（`DockBadgeState.count`），而「已查看」发生在 App 窗口里。只把 daemon 的快照推过来，查看后角标不会清除。所以 E1b 需要一个 App → daemon 的「已查看」op，单独做。
 - **`reset` 的含义要让 renderer 能执行。** 原有的通知种类不能表达「任何东西都可能变了」：`catalog_recovered` 只让列表重读，打开着的会话视图只认自己 id 的 `conversation_changed`。新增 `{ kind: 'resynchronize' }`，列表与打开着的会话视图都会重读。轮询失败后恢复时也发一次，因为失败的那次回答里可能有通知。
 - **新客户端从「现在」开始。** 不带 `epoch` 的第一次读取返回当前游标、不补发历史；App 刚连上时本来就会读取当前状态。
+
+## E1b 设计：未读角标
+
+进程内，是否标为未读由运行管线决定，依据两件窗口侧的事：窗口是否获得焦点，以及窗口正在看哪个会话（`DockBadgeState.markAttention`）。daemon 两者都不知道：它的窗口实现总是报告未获焦点，它的 run 登记表也从不知道 App 在看哪个会话。照搬的话，每一轮结束都会被标为未读。所以分工如下：
+
+- **daemon 保存未读集合，发送的是状态而不是指令。** daemon 的 `DockBadgeState` 照常标记（需要注意的会话都记下），每次变化把快照 `{ kind: 'attention', snapshot }` 写入事件流，只保留最新一份。握手回答和 `reset` 回答都附带当前快照，所以丢失通知后可以按快照恢复，不会留下永远清不掉的未读。
+- **App 镜像这个集合，并决定什么算「已查看」。** App 自己的角标本来就知道焦点和正在看的会话（选择会话、窗口获得焦点时都会通知它）。daemon 的未读作为第三个集合计入数量，与 App 本地的、其他宿主的并列。App 本会清除的会话如果在 daemon 集合里，就调用 `attentionViewed(sessionKey)` 让 daemon 清除。快照到达时，如果其中的会话正被获得焦点的窗口查看，就直接按已查看处理，角标不会闪一下。
+- **`attentionViewed`** 是本机端点上的幂等操作，走 control lane，丢失回复时可以重放；参数是会话键字符串，长度有上限。
+- **`agent:unreadSessions`** 改为放行，由 App 的镜像回答。收到 daemon 的第一份快照之前仍然以命名缺席拒绝，不会把「还不知道」答成「没有未读」。
 
 ## 不做
 

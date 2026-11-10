@@ -17,13 +17,12 @@ export function daemonModeEnabled(env: NodeJS.ProcessEnv = process.env): boolean
  *
  * `agent:setCwd` is the one non-`main` entry. It only sets this window's selection, which
  * the App sends with each daemon submit (daemon-run-surface fills `cwd` from it); it
- * persists nothing. `agent:unreadSessions` is deliberately absent: its source moved with
- * the runs, and an in-process answer would be an empty list that reads as "nothing
- * unread" instead of "not available".
+ * persists nothing. `agent:unreadSessions` answers from this window's mirror of the
+ * daemon's unread set (P3f E1b), and refuses by name until the first snapshot arrives.
  */
 export const DAEMON_MODE_IN_PROCESS_CHANNELS: ReadonlySet<string> = new Set([
   'agent:clipboardImage', 'agent:focusRun', 'agent:revealProject', 'agent:setCwd',
-  'agent:traceAck', 'agent:traceResynchronized',
+  'agent:traceAck', 'agent:traceResynchronized', 'agent:unreadSessions',
   'app:copyText', 'app:performanceDiagnosticsEnabled', 'app:rendererRestart',
   'app:reportRendererPerformance', 'app:setTheme',
   'remote:desktop:disable', 'remote:desktop:invite', 'remote:desktop:status',

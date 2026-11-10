@@ -175,7 +175,8 @@ describe('daemon host process', () => {
       const handshake = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'appEvents', cursor: 0, waitMs: 0
       })
-      expect(handshake.events).toMatchObject({ items: [] })
+      // It carries the current unread set as state (E1b); nothing is unread yet.
+      expect(handshake.events.items).toEqual([{ kind: 'attention', snapshot: expect.objectContaining({ unreadSessionKeys: [] }) }])
       const create = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'conversation', method: 'create', args: [workspace]
       })
@@ -250,6 +251,26 @@ describe('daemon host process', () => {
       expect(afterRun.events.items).toContainEqual({ kind: 'run', runId: sent.result.ledger.runId })
       // The run pipeline's own notice, which the daemon's window sink used to drop.
       expect(afterRun.events.items).toContainEqual({ kind: 'data', event: { runId: sent.result.runId, kind: 'turn_recorded' } })
+      // E1b: a finished run that nobody viewed is unread in the daemon. This daemon cannot
+      // see the App's window, so the App says when the user viewed it, and the set clears.
+      const fresh = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'appEvents', cursor: 0, waitMs: 0
+      })
+      const unread = fresh.events.items.find((item: { kind: string }) => item.kind === 'attention')?.snapshot.unreadSessionKeys as string[]
+      // The conversation turn's native session; the directory part may be canonicalized.
+      expect(unread).toHaveLength(1)
+      expect(unread[0]!.startsWith('codex\u0000\u0000')).toBe(true)
+      expect(unread[0]!.endsWith(`\u0000${turn.delivery.nativeSessionId}`)).toBe(true)
+      for (const sessionKey of unread) {
+        const viewed = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+          op: 'attentionViewed', sessionKey
+        })
+        expect(viewed).toEqual({ viewed: true })
+      }
+      const cleared = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'appEvents', epoch: fresh.events.epoch, cursor: fresh.events.cursor, waitMs: 1_000
+      })
+      expect(cleared.events.items).toContainEqual({ kind: 'attention', snapshot: expect.objectContaining({ unreadSessionKeys: [] }) })
       // The rename above is announced by the daemon itself; the App no longer stands in.
       expect(afterRun.events.items).toContainEqual({ kind: 'data', event: { kind: 'conversation_changed', conversationId: created.id } })
       // History pages are loaded by the daemon against its own catalog: a session it does

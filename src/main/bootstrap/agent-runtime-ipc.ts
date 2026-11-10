@@ -15,7 +15,7 @@ import { CommandReceipts } from '../command-receipts'
 import type { RemoteHostService } from '../remote/remote-host-service'
 import type { RunRegistry } from '../run-registry'
 import type { RunTraceRouter } from '../run-trace-router'
-import type { DockBadgeState } from '../dock-badge'
+import { unreadSessionsAnswer, type DockBadgeState } from '../dock-badge'
 import type { UserQuestionBroker } from '../user-question'
 import type { TraceOutputBridge, TraceBatchReceipt } from '../trace-output'
 import { registerRunTraceHandlers } from './run-trace-ipc'
@@ -70,7 +70,7 @@ export function registerAgentRuntimeHandlers({
     const state = runs.focusedState()
     return state ? boundedLiveRun(state) : null
   })
-  handleTrusted('agent:unreadSessions', () => dockBadge.snapshot())
+  handleTrusted('agent:unreadSessions', () => unreadSessionsAnswer(dockBadge, Boolean(daemon)))
   // live trace 降级恢复专用：忽略 done，只要 registry 里还有这个 run 就给出权威事件序列。
   // activeRun 会因为 done=true 返回 null，那样终态被跳过的事件永远补不回来。
   handleTrusted('agent:focusedRunSnapshot', async (): Promise<ActiveRun | null> => {
@@ -79,8 +79,18 @@ export function registerAgentRuntimeHandlers({
     return state ? boundedLiveRun(state) : null
   })
   handleTrusted('agent:activeRuns', async (): Promise<ActiveRun[]> => daemon ? await daemon.activeRuns() : runs.activeStates().map(boundedLiveRun))
+  // As in process, showing a run views its session; in daemon mode that is what clears
+  // the daemon's unread entry for it (E1b).
+  const viewRunSession = (run: ActiveRun | null): void => {
+    const sessionKey = run && activeRunSessionKey(run)
+    if (sessionKey) dockBadge.view(sessionKey, Boolean(getWindow()?.isFocused()))
+  }
   handleTrusted('agent:focusRun', async (_event, runId: string | null): Promise<boolean> => {
-    if (daemon) return await daemon.focusRun(runId)
+    if (daemon) {
+      const focused = await daemon.focusRun(runId)
+      if (focused && runId) viewRunSession(await daemon.focusedRunSnapshot())
+      return focused
+    }
     const focused = runs.focus(runId)
     if (!focused || !runId) return focused
     const sessionKey = activeRunSessionKey(runs.get(runId)!.state)
@@ -88,7 +98,11 @@ export function registerAgentRuntimeHandlers({
     return true
   })
   handleTrusted('agent:adoptActiveRun', async (_event, runId: string): Promise<ActiveRun | null> => {
-    if (daemon) return await daemon.adopt(runId)
+    if (daemon) {
+      const adopted = await daemon.adopt(runId)
+      viewRunSession(adopted)
+      return adopted
+    }
     const entry = runs.get(runId)
     if (!entry || entry.state.done) return null
     entry.control.adoptSession()

@@ -80,4 +80,20 @@ describe('App event feed', () => {
     expect(reply).toMatchObject({ items: [{ kind: 'run', runId: 'quiet' }, { kind: 'run', runId: 'streaming' }] })
     expect(reply.reset).toBeUndefined()
   })
+
+  it('hands a new or resynchronizing client the current state, and keeps only the newest change', async () => {
+    // E1b: the unread set is state. A client that starts, or that lost notices, needs it
+    // as it is now, not the changes it missed.
+    let current = { revision: 1, unreadSessionKeys: ['s1'] }
+    const attention = () => ({ kind: 'attention' as const, snapshot: current })
+    const feed = new AppEventFeed({ epoch: 'e1', maxItems: 2, state: () => [attention()] })
+    await expect(feed.read({ cursor: 0, waitMs: 0 })).resolves.toEqual({ epoch: 'e1', cursor: 0, items: [attention()] })
+    current = { revision: 2, unreadSessionKeys: [] }
+    feed.append(attention())
+    current = { revision: 3, unreadSessionKeys: ['s2'] }
+    feed.append(attention())
+    await expect(feed.read({ epoch: 'e1', cursor: 0, waitMs: 0 })).resolves.toMatchObject({ items: [attention()] })
+    for (const runId of ['a', 'b', 'c']) feed.append({ kind: 'run', runId })
+    await expect(feed.read({ epoch: 'e1', cursor: 1, waitMs: 0 })).resolves.toEqual({ epoch: 'e1', cursor: 5, items: [attention()], reset: true })
+  })
 })

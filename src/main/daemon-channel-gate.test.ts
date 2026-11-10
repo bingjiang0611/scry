@@ -41,10 +41,10 @@ describe('daemon mode channel gate', () => {
     }
   })
 
-  it('keeps the unread badge absent instead of reporting nothing unread', () => {
-    // The badge source moved with the runs; an in-process answer would be an empty list,
-    // which reads as "nothing unread" rather than "not available".
-    expect(DAEMON_MODE_IN_PROCESS_CHANNELS.has('agent:unreadSessions')).toBe(false)
+  it('answers the unread badge in process, from the mirror of the daemon set (E1b)', () => {
+    // The handler itself refuses until the daemon's first snapshot (dock-badge.test.ts),
+    // so "not known yet" never reads as "nothing unread".
+    expect(DAEMON_MODE_IN_PROCESS_CHANNELS.has('agent:unreadSessions')).toBe(true)
   })
 
   it('agrees with the routing matrix', () => {
@@ -64,7 +64,7 @@ describe('daemon mode channel gate', () => {
     const refused = routing
       .filter((row) => row.route === 'main' && !DAEMON_MODE_IN_PROCESS_CHANNELS.has(row.channel))
       .map((row) => row.channel)
-    expect(refused).toEqual(['agent:unreadSessions'])
+    expect(refused).toEqual([])
     expect(gateDaemonChannel('desktopRemote:list', vi.fn(), on)).not.toThrow()
   })
 

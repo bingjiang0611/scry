@@ -17,6 +17,20 @@ export interface LocalEndpointHandlers {
   localOps?: LocalOpHandlers
   // What the daemon tells its App that no run read carries (P3f).
   events?: Pick<AppEventFeed, 'read'>
+  // The App viewed one of the daemon's unread sessions (E1b).
+  attention?: { viewed(sessionKey: string): void }
+}
+
+const MAX_SESSION_KEY = 4096
+
+/** Idempotent: viewing a session that is not unread changes nothing. */
+export function handleAttentionViewed(attention: LocalEndpointHandlers['attention'], request: Record<string, unknown>): Record<string, unknown> {
+  if (!attention) return { error: 'unsupported_op' }
+  const { sessionKey } = request
+  if (Object.keys(request).some((key) => !['op', 'keepAlive', 'protocol', 'sessionKey'].includes(key)) ||
+    typeof sessionKey !== 'string' || sessionKey.length === 0 || sessionKey.length > MAX_SESSION_KEY) return { error: 'invalid_request' }
+  attention.viewed(sessionKey)
+  return { viewed: true }
 }
 
 const EVENT_KEYS = ['op', 'keepAlive', 'protocol', 'epoch', 'cursor', 'waitMs']
