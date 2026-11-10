@@ -13,6 +13,7 @@ import { remoteOperationCounters, remoteRequestTrace } from './remote-request-ti
 //   control: submit, answers, stop, catalogs, run state (short)
 //   watch:   one run's long-poll
 //   status:  the live-run long-poll
+//   events:  the App's event-feed long-poll (daemon mode only)
 //   bulk:    history pages, trace pages, attachments (large)
 //
 // Retry rules are explicit, not error-string guesses:
@@ -31,7 +32,9 @@ import { remoteOperationCounters, remoteRequestTrace } from './remote-request-ti
 import { laneNotSent, laneWasNotSent, laneOutcomeUnknown } from './desktop-lane-phase'
 export { laneNotSent, laneOutcomeUnknown, laneWasNotSent, laneWasWrittenUnknown } from './desktop-lane-phase'
 
-export type DesktopLaneName = 'control' | 'status' | 'watch' | 'bulk'
+export type DesktopLaneName = 'control' | 'status' | 'watch' | 'bulk' | 'events'
+// Which lane a request takes, and whether it may be replayed (desktop-lane-routing.ts).
+export { laneForRequest, replayableRequest } from './desktop-lane-routing'
 
 export interface DesktopLaneEndpoint {
   path?: string
@@ -69,37 +72,8 @@ const LANE_POLICY: Record<DesktopLaneName, { responseTimeoutMs: number; abortOnC
   control: { responseTimeoutMs: 30_000, abortOnCancel: false },
   watch: { responseTimeoutMs: 40_000, abortOnCancel: true },
   status: { responseTimeoutMs: 40_000, abortOnCancel: true },
+  events: { responseTimeoutMs: 40_000, abortOnCancel: true },
   bulk: { responseTimeoutMs: 30_000, abortOnCancel: true }
-}
-
-// Writes stay on the control lane: cancelling a large read must never tear down an
-// in-flight write, and a write is never replayed after its bytes were written.
-const writeOperations = new Set([
-  'answerQuestion', 'attachmentChunk', 'attachmentCommit', 'attachmentStart',
-  'resolveIntent', 'sessionAction', 'sessionDelete', 'sessionFork', 'stop', 'submit'
-])
-const watchOperations = new Set(['watch'])
-const statusOperations = new Set(['liveRuns'])
-// `desktop` carries its own kind; history/trace/image reads are the large ones.
-const bulkDesktopKinds = new Set(['history', 'trace', 'trace_delta', 'image_chunk'])
-
-export function laneForRequest(request: unknown): DesktopLaneName {
-  const op = request && typeof request === 'object' ? (request as { op?: unknown }).op : undefined
-  if (typeof op !== 'string') return 'control'
-  if (writeOperations.has(op)) return 'control'
-  if (watchOperations.has(op)) return 'watch'
-  if (statusOperations.has(op)) return 'status'
-  if (op === 'desktop') {
-    const kind = (request as { query?: { kind?: unknown } }).query?.kind
-    return typeof kind === 'string' && bulkDesktopKinds.has(kind) ? 'bulk' : 'control'
-  }
-  // Long reads and paged payloads: history, trace pages, downloads, file reads.
-  return 'bulk'
-}
-
-export function replayableRequest(request: unknown): boolean {
-  const op = request && typeof request === 'object' ? (request as { op?: unknown }).op : undefined
-  return !(typeof op === 'string' && writeOperations.has(op))
 }
 
 // Only a host that keeps the tunnel open marks its reply with `keepAlive` first.

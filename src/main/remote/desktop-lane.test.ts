@@ -42,6 +42,8 @@ describe('desktop lane routing', () => {
     }
     expect(laneForRequest({ op: 'watch' })).toBe('watch')
     expect(laneForRequest({ op: 'liveRuns' })).toBe('status')
+    // The App's event feed holds a long poll of its own; nothing may queue behind it.
+    expect(laneForRequest({ op: 'appEvents' })).toBe('events')
     expect(laneForRequest({ op: 'desktop', query: { kind: 'info' } })).toBe('control')
     expect(laneForRequest({ op: 'desktop', query: { kind: 'trace' } })).toBe('bulk')
     expect(laneForRequest({ op: 'historyPage' })).toBe('bulk')

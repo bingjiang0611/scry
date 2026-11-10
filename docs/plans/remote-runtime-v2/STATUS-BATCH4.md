@@ -45,7 +45,7 @@ G1（5 条差异补处理方式 + 守卫断言）与 G2（secret 生命周期改
 | 决策 | 结论 | 落地 |
 |---|---|---|
 | `conversation:send` | 经台账派发，run 只用会话 turn 的 `runId` 一个 id；能落盘的从落盘读取并校验，进程内交接只保留到派发为止，daemon 重启后不重建、不重发 | [P3-conversation-send](P3-conversation-send.md) |
-| daemon → App 推送流 | 排在 L4 剩余各组之前做。新增的流式 op 只在本机端点、`scope: local`，不向远程开放；维护者确认这不违反“协议版本不变” | 待设计 |
+| daemon → App 推送流 | 排在 L4 剩余各组之前做。新增的流式 op 只在本机端点、`scope: local`，不向远程开放；维护者确认这不违反“协议版本不变” | [P3f](P3f-app-event-stream.md)；E0、E1 见 [b4-l4-events](status/b4-l4-events.md) |
 | userData 独占锁 | 现在做，只在开关打开时生效；不属于 B4-S 的删除工作 | 待设计 |
 | S1 门禁 | 改为首 token 的绝对值上限。数值由执行方以数据提出、维护者批准；批准之前沿用现有 S1 门禁，开关仍不得默认打开 | 待提出 |
 | 两本账（远程台账、会话账本）合并 | 不在 B4 做，B4-S 之后再议 | — |

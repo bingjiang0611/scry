@@ -170,11 +170,21 @@ describe('daemon host process', () => {
       expect(Array.isArray(conversations.result)).toBe(true)
       // Ledger writes the daemon can make on its own (B4-L4-2b): create, then read it back
       // and rename it, all against the daemon's store.
+      // The App's event feed (P3f): a new client starts at the present, then hears of
+      // the daemon's own data changes, which used to be dropped.
+      const handshake = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'appEvents', cursor: 0, waitMs: 0
+      })
+      expect(handshake.events).toMatchObject({ items: [] })
       const create = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'conversation', method: 'create', args: [workspace]
       })
       expect(create.error).toBeUndefined()
       const created = create.result as { id: string; revision: number }
+      const changed = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'appEvents', epoch: handshake.events.epoch, cursor: handshake.events.cursor, waitMs: 1_000
+      })
+      expect(changed.events.items).toContainEqual({ kind: 'data', event: { kind: 'conversation_changed', conversationId: created.id } })
       const listed = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'conversation', method: 'list', args: [workspace]
       })
@@ -225,6 +235,13 @@ describe('daemon host process', () => {
       })
       const turn = afterSend.result.turns.find((candidate: { runId: string }) => candidate.runId === sent.result.runId)
       expect(turn.delivery.status).toBe('accepted')
+      const afterRun = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'appEvents', epoch: handshake.events.epoch, cursor: changed.events.cursor, waitMs: 0
+      })
+      // The run pipeline's own notice, which the daemon's window sink used to drop.
+      expect(afterRun.events.items).toContainEqual({ kind: 'data', event: { runId: sent.result.runId, kind: 'turn_recorded' } })
+      // The rename above is announced by the daemon itself; the App no longer stands in.
+      expect(afterRun.events.items).toContainEqual({ kind: 'data', event: { kind: 'conversation_changed', conversationId: created.id } })
       // History pages are loaded by the daemon against its own catalog: a session it does
       // not know is refused by the same check the App ran in process.
       const history = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {

@@ -1,8 +1,9 @@
-import type { AgentQuestionRequest, AgentQuestionResponse } from '../shared/runtime'
+import type { AgentDataUpdated, AgentQuestionRequest, AgentQuestionResponse } from '../shared/runtime'
 import type { ActiveRun } from '../shared/trace'
 import type { DesktopTraceCursor, DesktopRemoteTraceRead } from '../shared/desktop-remote'
 import { DaemonClientError } from './daemon-client'
 import { laneWasNotSent, laneWasWrittenUnknown } from './remote/desktop-lane'
+import type { DaemonEventReply } from './daemon-event-pump'
 
 // The App's run surface against its own daemon, over the same frames the phone
 // uses. This module only parses and types those frames: it holds no socket, no
@@ -266,6 +267,20 @@ export class DaemonRunTransport {
     return reply.state.state
   }
 
+  /** The App's event feed (P3f): a long poll answered by the daemon on its own lane. */
+  async appEvents(input: { epoch?: string; cursor: number; waitMs: number }, signal?: AbortSignal): Promise<DaemonEventReply> {
+    const reply = await this.#call(
+      { op: 'appEvents', ...(input.epoch !== undefined ? { epoch: input.epoch } : {}), cursor: input.cursor, waitMs: input.waitMs },
+      { replayable: true, ...(signal ? { signal } : {}) }
+    )
+    const events = reply.events
+    if (!record(events) || typeof events.epoch !== 'string' || !Number.isSafeInteger(events.cursor) ||
+        !Array.isArray(events.items) || events.items.length > MAX_ITEMS) throw new DaemonRunError('invalid_daemon_response')
+    const items = events.items.flatMap((raw) => record(raw) && raw.kind === 'data' && isDataUpdated(raw.event)
+      ? [{ kind: 'data' as const, event: raw.event }] : [])
+    return { epoch: events.epoch, cursor: events.cursor as number, items, reset: events.reset === true }
+  }
+
   /** A full run snapshot, used to resynchronise after a gap. */
   async run(runId: string, context: unknown): Promise<ActiveRun | null> {
     const read = await this.trace({ context, runId })
@@ -318,4 +333,13 @@ function traceCursor(value: unknown): DesktopTraceCursor | undefined {
 
 function fail(): never {
   throw new DaemonRunError('invalid_daemon_response')
+}
+
+// The notices this App renders. Anything else (a newer daemon's kind) is skipped by the
+// caller rather than passed to the window as a shape it does not know.
+function isDataUpdated(value: unknown): value is AgentDataUpdated {
+  if (!record(value)) return false
+  if (value.kind === 'conversation_changed') return typeof value.conversationId === 'string'
+  if (value.kind === 'catalog_recovered' || value.kind === 'resynchronize') return true
+  return typeof value.runId === 'string' && (value.kind === undefined || value.kind === 'turn_recorded' || value.kind === 'session_deleted')
 }

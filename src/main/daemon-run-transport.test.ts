@@ -172,4 +172,26 @@ describe('daemon run transport', () => {
     await expect(transport(() => ({})).value.localOp({ op: 'sessionStore', method: 'listSessions', args: [], read: true }))
       .rejects.toThrow('invalid_daemon_response')
   })
+
+  it('reads the App event feed, keeping only notices it can name', async () => {
+    const { value, calls } = transport(() => ({ events: { epoch: 'e1', cursor: 3, items: [
+      { kind: 'data', event: { kind: 'conversation_changed', conversationId: 'c1' } },
+      { kind: 'data', event: { runId: RUN, kind: 'turn_recorded' } },
+      // A newer daemon's notice this App does not know yet is skipped, not guessed at.
+      { kind: 'run', runId: RUN },
+      { kind: 'data', event: { kind: 'conversation_changed', conversationId: 7 } }
+    ] } }))
+    await expect(value.appEvents({ epoch: 'e1', cursor: 1, waitMs: 20_000 })).resolves.toEqual({
+      epoch: 'e1', cursor: 3, reset: false, items: [
+        { kind: 'data', event: { kind: 'conversation_changed', conversationId: 'c1' } },
+        { kind: 'data', event: { runId: RUN, kind: 'turn_recorded' } }
+      ]
+    })
+    expect(calls[0]).toEqual({ request: { op: 'appEvents', epoch: 'e1', cursor: 1, waitMs: 20_000 }, options: { replayable: true } })
+    const reset = transport(() => ({ events: { epoch: 'e2', cursor: 0, items: [], reset: true } }))
+    await expect(reset.value.appEvents({ cursor: 0, waitMs: 0 })).resolves.toMatchObject({ reset: true })
+    expect(reset.calls[0]!.request).toEqual({ op: 'appEvents', cursor: 0, waitMs: 0 })
+    const broken = transport(() => ({ events: { cursor: 'x' } }))
+    await expect(broken.value.appEvents({ cursor: 0, waitMs: 0 })).rejects.toMatchObject({ reason: 'invalid_daemon_response' })
+  })
 })

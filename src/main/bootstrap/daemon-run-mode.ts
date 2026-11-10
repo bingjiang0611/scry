@@ -5,6 +5,7 @@ import { daemonLaunchTarget, spawnDaemonSupervisor } from './daemon-launch'
 import { unsafeCredentialStorageReason } from './remote-connections'
 import { ensureDaemon, type DaemonLaunch, type DaemonProbe } from '../daemon-supervisor'
 import { DaemonRunRuntime } from '../daemon-run-runtime'
+import { DaemonEventPump } from '../daemon-event-pump'
 import { DaemonRunTransport } from '../daemon-run-transport'
 import { laneForRequest } from '../remote/desktop-lane'
 import { createDaemonRunSurface, type DaemonRunSurface } from './daemon-run-surface'
@@ -169,11 +170,14 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
     ...(deps.onWarn ? { onWarn: deps.onWarn } : {})
   })
   const surface = createDaemonRunSurface({ transport, runtime, currentCwd: deps.currentCwd })
+  // What the daemon changes outside any run read (P3f): one long poll on its own lane.
+  const events = new DaemonEventPump({ source: transport, send: deps.send, ...(deps.onWarn ? { onWarn: deps.onWarn } : {}) })
+  events.start()
   return {
     status: 'ready',
     version,
     surface,
-    dispose: () => { runtime.dispose(); client.close() }
+    dispose: () => { events.dispose(); runtime.dispose(); client.close() }
   }
 }
 

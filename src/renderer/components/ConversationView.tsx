@@ -140,7 +140,8 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
     void refresh().catch(error => { if (!disposed) setError(message(error)) })
     const resume = (): void => { if (!document.hidden) void refresh().catch(() => undefined) }
     const off = window.scry.onDataUpdated?.(event => {
-      if (event?.kind === 'conversation_changed' && event.conversationId === conversation.id) {
+      // A resynchronization means notices were lost, possibly about this conversation.
+      if ((event?.kind === 'conversation_changed' && event.conversationId === conversation.id) || event?.kind === 'resynchronize') {
         void refresh().catch(error => { if (!disposed) setError(message(error)) })
       }
       // 本轮记录真的落库后（turn_recorded）才刷新：没有写记录就不会有这条事件。

@@ -1,5 +1,5 @@
 import { handleRunControl } from './host-run-control'
-import { handleLocalOp, isLocalOp, type LocalEndpointHandlers } from './host-local-ops'
+import { handleAppEvents, handleLocalOp, isLocalOp, type LocalEndpointHandlers } from './host-local-ops'
 import type { HostController } from './host-controller'
 import { executionTargetError, type ExecutionTargetRouter } from './execution-targets'
 import { historyProfileSelection } from './remote-gateway'
@@ -147,6 +147,10 @@ export async function dispatchRemoteRequest(
       const keys = Object.keys(request)
       if (keys.some((key) => !['op', 'keepAlive', 'protocol', 'method', 'runId', 'payload'].includes(key))) return { error: 'invalid_request' }
       return await handleRunControl(localEndpoint.runControl, request)
+    }
+    if (request.op === 'appEvents') {
+      // The App's own event feed (P3f); absent on the network endpoint.
+      return await handleAppEvents(localEndpoint?.events, request as unknown as Record<string, unknown>)
     }
     if (isLocalOp(request.op)) {
       // App channels the daemon answers for its own App; absent on the network endpoint.
