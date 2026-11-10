@@ -129,7 +129,18 @@ Provider 是内置 fixture，未加 `--no-sandbox`。
 4. **`test:unit` 里 `check-pacman-package` / `concurrency-trace-launcher` 两个文件的 5s 上限**：
    main 与分支同样超标，属于既有问题，按范围外只记录。
 
-## 7. 现场
+## 7. 安装（`npm run install:mac:dev`）
+
+**失败，未安装。** 退出码 1，耗时 717s（`/tmp/lv/06-install-mac.meta`）。
+
+`install:mac:dev` = `npm run pack && node scripts/install-macos.mjs`，而 `pack` = `typecheck && npm test && pack:artifact`。
+typecheck 通过，停在 `npm test`：仍然只有 `scripts/check-pacman-package.test.mjs`（4 个）和
+`scripts/concurrency-trace-launcher.test.ts`（1 个）这 5 个 5s 超时（`2 failed | 616 passed`，`5719` 个用例通过），
+与第 2 节 A2″ 同两个文件、同 5 个用例。按规矩没有绕过打包校验去单独跑 `pack:artifact`，
+所以这次没有产出安装包，`/Applications/Scry.app` 没有被这次验证更新。
+“已安装，需用户自行重启才会加载”不成立：用户当前运行的 Scry 仍是旧版本。
+
+## 8. 现场
 
 - test 实例临时目录（保留）：
   - 场景 01–13 首次：`/private/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-local-verify-gjCAvr`
