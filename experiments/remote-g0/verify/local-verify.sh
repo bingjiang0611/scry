@@ -22,7 +22,11 @@ ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 cd "$ROOT"
 STAMP="${SCRY_VERIFY_STAMP:-$(date -u +%Y%m%dT%H%M%SZ)}"
 RESULTS="${SCRY_VERIFY_RESULTS:-$ROOT/docs/handoff/ios-remote-verification/results/$STAMP}"
-mkdir -p "$RESULTS/logs" "$RESULTS/raw"
+# Logs and the phone build are written under $RESULTS, which may be anywhere:
+# refuse a tree another account could swap or plant symlinks in (every
+# ancestor walked, see private-dir.mjs) before writing anything there.
+PRIVATE_DIR=(node "$ROOT/experiments/remote-g0/verify/private-dir.mjs")
+"${PRIVATE_DIR[@]}" "$RESULTS" "$RESULTS/logs" "$RESULTS/raw" || exit 1
 CHECKS="$RESULTS/checks.json"
 [ -f "$CHECKS" ] || echo '{"stages":[]}' > "$CHECKS"
 # The phone's installed app is com.scry.remote.local (a free developer profile
@@ -69,9 +73,16 @@ step() {
   local logfile="$RESULTS/logs/$name.log"
   local started=$SECONDS
   log "stage $name: $*"
+  local tailfile="$RESULTS/logs/$name.tail.txt"
+  # logs/ passed private-dir.mjs, so only this account can put a link here;
+  # still never write through one.
+  if [ -L "$logfile" ] || [ -L "$tailfile" ]; then
+    log "stage $name: refusing to write through a symlinked log"
+    record "$name" fail 1 0 "-"; return 1
+  fi
   "$@" > "$logfile" 2>&1
   local code=$?
-  tail -c 12000 "$logfile" > "$RESULTS/logs/$name.tail.txt"
+  tail -c 12000 "$logfile" > "$tailfile"
   local status=pass; [ $code -eq 0 ] || status=fail
   record "$name" "$status" "$code" "$((SECONDS - started))" "logs/$name.tail.txt"
   log "stage $name: $status (exit $code, $((SECONDS - started)) s)"
@@ -140,14 +151,11 @@ stage_restart_mac() {
 
 # The app built here is installed on the phone, so its build directory must be
 # one only this user controls, even when SCRY_VERIFY_RESULTS points somewhere
-# shared: refuse a symlink or a directory owned by someone else, and keep it
-# mode 700. install-ios re-checks before installing what is inside.
+# shared: the directory and every ancestor pass private-dir.mjs (no foreign
+# owner, no symlink but root's, nothing others can write), and it is kept mode
+# 700. install-ios re-checks before installing what is inside.
 private_build_dir() {
-  local dir="$IOS_BUILD_DIR"
-  if [ -L "$dir" ]; then log "refusing $dir: it is a symlink"; return 1; fi
-  if [ -e "$dir" ] && [ ! -O "$dir" ]; then log "refusing $dir: not owned by $(id -un)"; return 1; fi
-  mkdir -p "$dir" && chmod 700 "$dir" || { log "cannot create private $dir"; return 1; }
-  [ -O "$dir" ] && [ ! -L "$dir" ] || { log "refusing $dir after creation"; return 1; }
+  "${PRIVATE_DIR[@]}" --mode 700 "$IOS_BUILD_DIR" || { log "refusing build directory $IOS_BUILD_DIR"; return 1; }
 }
 
 stage_build_ios() {
