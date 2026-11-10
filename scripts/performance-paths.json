@@ -157,6 +157,7 @@
       ],
       "sources": [
         "src/main/session-history.ts",
+        "src/main/session-history-trace-merge.ts",
         "src/main/conversation-read.ts",
         "src/main/conversation-turn-history.ts",
         "src/main/bootstrap/history-load.ts",
