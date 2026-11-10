@@ -12,10 +12,10 @@ import { recorderInboxEntries } from './inbox.js'
 import { HOOK_DRAIN_BUDGET_MS, HOOK_DRAIN_MAX_RECORDS, drainCommitNotifications, recordError, updateHealth, safeKey } from './store.js'
 import { withRecorderSessionLock, withRecorderSessionKeyLock, recorderOpenPath as openPath, recorderPendingHealth, reconcileAttentionIndex, releaseStaleAttention, recorderSessionRoot, type RecorderOpenTurnState as OpenTurnState, HOOK_LOCK_WAIT_MS, SESSION_LOCK_WAIT_MS } from './runtime-state.js'
 import { attentionIndexPresent, markedSessions } from './attention.js'
-import { END_EVENTS, START_EVENTS, DEFERRED_TERMINAL_GRACE_MS, OPEN_TURN_EXPIRY_MS, sessionIdOf, type RecorderHookInput, type RecorderHookResult, type RecorderRecoveryProbe, CODEX_SUBAGENT_MARKER } from './recorder-contracts.js'
+import { END_EVENTS, START_EVENTS, DEFERRED_TERMINAL_GRACE_MS, OPEN_TURN_EXPIRY_MS, sessionIdOf, providerTurnIdOf, type RecorderHookInput, type RecorderHookResult, type RecorderRecoveryProbe, CODEX_SUBAGENT_MARKER } from './recorder-contracts.js'
 import { applyHookLocked, isLockTimeout, replayQueuedHooks } from './recorder-hook-locked.js'
 import { queueHook } from './recorder-hook-queue.js'
-import { codexSubagentTranscript, isSynthetic, trustedManagedIdentityPayload, isClaudeTaskNotification } from './recorder-hook-support.js'
+import { codexSubagentTranscript, isSynthetic, isCodexInternalPrompt, markCodexInternalTurn, trustedManagedIdentityPayload, isClaudeTaskNotification } from './recorder-hook-support.js'
 import { finalizeOpenTurn } from './recorder-turn-finalize.js'
 import { stableTranscript } from './recorder-transcript-cache.js'
 
@@ -51,6 +51,11 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
     START_EVENTS.has(input.event) &&
     isClaudeTaskNotification(input.payload)
   if (isSynthetic(input.payload) && !taskNotification) return { status: 'ignored', reason: 'synthetic/meta prompt' }
+  if (input.provider === 'codex' && START_EVENTS.has(input.event) && isCodexInternalPrompt(input.payload)) {
+    const turnId = providerTurnIdOf(input.payload, input.provider)
+    if (turnId) await markCodexInternalTurn(enablement.dataRoot, input.provider, sessionId, turnId)
+    return { status: 'ignored', reason: 'codex internal title prompt' }
+  }
   if (input.provider === 'codex' && await codexSubagentTranscript(input.payload, sessionId)) {
     input = { ...input, payload: { ...input.payload, [CODEX_SUBAGENT_MARKER]: true } }
   }
