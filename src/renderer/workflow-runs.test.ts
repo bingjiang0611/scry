@@ -134,4 +134,15 @@ describe('deriveWorkflowRuns', () => {
     expect(run.log.some((entry) => entry.tone === 'error' && entry.message.includes('billing.ts 失败'))).toBe(true)
     expect(WORKFLOW_FIXTURE_SNAPSHOTS.length).toBeGreaterThan(0)
   })
+
+  it('其他 Provider 的后台 Agent 事件折不出 Workflow 运行', () => {
+    // Qoder-shaped background agent task (fields from the SDK's task message types) and a
+    // Codex-style collab agent call: both must leave the surface empty rather than guess.
+    const qoder = events([
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'q-agent-1', name: 'Agent', input: { description: 'x', prompt: 'x' } }] } },
+      { type: 'system', subtype: 'task_started', task_id: 'q-task', tool_use_id: 'q-agent-1', task_type: 'background_agent', workflow_name: 'qoder-task', description: 'x' },
+      { type: 'system', subtype: 'task_progress', task_id: 'q-task', tool_use_id: 'q-agent-1', summary: 'reading' }
+    ])
+    expect(deriveWorkflowRuns([turn(qoder)], { busy: true })).toEqual([])
+  })
 })

@@ -149,6 +149,27 @@ describe('Claude Code workflow task normalization', () => {
     expect(events[0].toolUseId).toBeUndefined()
   })
 
+  // Field names and optionality come from `@qoder-ai/qoder-agent-sdk`'s
+  // `SDKTaskStartedMessage` / `SDKTaskProgressMessage`: a background agent task can carry
+  // `task_type` and `workflow_name`, and its progress events never carry `workflow_progress`.
+  // No real Qoder event could be captured on this machine, so the values are chosen here.
+  it('Qoder 的后台 Agent 任务带着 workflow_name 也不进 workflow 通道', () => {
+    const c = ctx()
+    const events = run([
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'q-agent-1', name: 'Agent', input: { description: 'x', prompt: 'x' } }] } },
+      { type: 'system', subtype: 'task_started', task_id: 'q-task', tool_use_id: 'q-agent-1', task_type: 'background_agent', workflow_name: 'qoder-task', description: 'x' },
+      { type: 'system', subtype: 'task_progress', task_id: 'q-task', tool_use_id: 'q-agent-1', summary: 'reading', usage: { total_tokens: 900, tool_uses: 2, duration_ms: 3_000 } },
+      { type: 'system', subtype: 'task_notification', task_id: 'q-task', status: 'completed', summary: 'done', output_file: '/tmp/x' }
+    ], c)
+    expect(activities(events)).toEqual([])
+    // The task stays a background agent: progress rows and a terminal Agent tool_result.
+    expect(events.filter((event) => event.stage === 'agent_activity').map((event) => (event.input as { activity: string }).activity))
+      .toEqual(['task_started', 'task_progress'])
+    expect(events.find((event) => event.stage === 'tool_result')).toMatchObject({
+      tool: 'Agent', toolUseId: 'q-agent-1', isError: false, runtimeMetadata: { agentStatus: 'completed' }
+    })
+  })
+
   it('复制归一化状态后，两份上下文的行增量互不影响', () => {
     const c = ctx()
     run(workflowFixtureMessages({ progressSteps: 1 }), c)
