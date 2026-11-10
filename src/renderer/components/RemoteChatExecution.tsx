@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { AgentInputAttachment, AgentQuestionResponse } from '@shared/runtime'
 import { resolveTurnDiffReview, sessionNetDiffReview } from '../turn-diff'
 import type { DesktopRemoteIntent } from '@shared/desktop-remote'
@@ -25,7 +25,7 @@ import { consumeWorkspaceDraft, type WorkspaceDraftSelection } from '../workspac
 const POLL_MS = 1500
 
 export function useRemoteChatExecution(foundation: FoundationState, presentation: PresentationState, { connectionId, draftStore, queueStore }: Pick<RemoteChatProps, 'connectionId' | 'draftStore' | 'queueStore'>) {
-  const { api, connectionRefreshing, readError, connection, connected, host, catalogEntry, catalog, catalogReady, providerSelection, sessionId, setTurns, historyEvidence, setHistoryEvidence, setPollInterval, intents, setIntents, status, setStatus, error, setError, pollError, pollFresh, historyError, setHistoryError, submitting, setSubmitting, connecting, setConnecting, resolvingIntentId, setResolvingIntentId, unknownReceiptError, setUnknownReceiptError, generation, followLatest, provider, context, contextGeneration, draftKey, releaseAttachments, updateDraft, queueKey, queue, editingMessageId, setEditingMessageId, movedMessageId, setMovedMessageId, submissionInFlight } = foundation
+  const { api, connectionRefreshing, readError, connection, connected, host, catalogEntry, catalog, catalogReady, providerSelection, sessionId, setTurns, historyEvidence, setHistoryEvidence, setPollInterval, intents, setIntents, status, setStatus, error, setError, pollError, pollFresh, historyError, setHistoryError, historyOlderLoading, setHistoryOlderLoading, submitting, setSubmitting, connecting, setConnecting, resolvingIntentId, setResolvingIntentId, unknownReceiptError, setUnknownReceiptError, generation, followLatest, provider, context, contextGeneration, draftKey, releaseAttachments, updateDraft, queueKey, queue, editingMessageId, setEditingMessageId, movedMessageId, setMovedMessageId, submissionInFlight } = foundation
   const { chosenModel, validEffort, validPermissionMode, displayTurns, chatNavigation, currentIntent, unknownReceiptBlocked, currentRunStatus, runActive, controlRunId, projectAvailable, contextAvailable } = presentation
   const submission = (text: string, attachments: AgentInputAttachment[] = [], workspace?: WorkspaceDraftSelection) => ({
     context, prompt: text,
@@ -181,8 +181,15 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
     setPollInterval(POLL_MS)
     try { await api.answer(connectionId, runId, response); setStatus('已发送回答。') } catch (reason) { setError(errorText(reason)); throw reason }
   }
+  // 取页请求自身的递增令牌：切换会话/Provider 会让 generation 失效，但「谁在途」只由
+  // 这个令牌决定，所以旧请求收尾时不会把新上下文的加载状态卡住。
+  const olderRequest = useRef(0)
   const loadOlderHistory = async (): Promise<void> => {
     if (!connected || !historyEvidence?.hasOlder || historyEvidence.before === undefined || !sessionId) return
+    // 同一游标只允许一个在途请求。滚动会连续触发自动续读，重复请求不会更早拿到结果。
+    if (historyOlderLoading) return
+    setHistoryOlderLoading(true)
+    const request = ++olderRequest.current
     const sequence = ++generation.current
     try {
       const history = await api.history(connectionId, context, historyEvidence.before, historyEvidence.snapshot)
@@ -191,6 +198,7 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
       setHistoryError(null)
       setHistoryEvidence({ status: history.status, reason: history.reason, hasOlder: history.hasOlder, before: history.before, snapshot: history.snapshot })
     } catch (reason) { if (sequence === generation.current) setHistoryError(errorText(reason)) }
+    finally { if (request === olderRequest.current) setHistoryOlderLoading(false) }
   }
   const connect = useCallback(async (): Promise<void> => {
     setConnecting(true); setError(null)
@@ -262,6 +270,6 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
   const diffReview = sessionNetDiffReview(displayTurns) ?? resolveTurnDiffReview(displayTurns)
   const workspaceAvailable = projectAvailable
   const upgradeWorkbench = <div className="surface-unavailable"><b>需要更新远端 Scry</b><span>请更新 {host}，以启用文件编辑、源代码管理和终端。</span></div>
-  return { submission, execute, attachmentBytes, attachmentError, submit, resolveUnknown, stop, answer, loadOlderHistory, connect, missingAgentId, agents, unavailableAgentIds, selectedAgentId, unknownIntent, noticeError, notice, diffReview, workspaceAvailable, upgradeWorkbench }
+  return { submission, execute, attachmentBytes, attachmentError, submit, resolveUnknown, stop, answer, loadOlderHistory, historyOlderLoading, connect, missingAgentId, agents, unavailableAgentIds, selectedAgentId, unknownIntent, noticeError, notice, diffReview, workspaceAvailable, upgradeWorkbench }
 }
 export type ExecutionState = ReturnType<typeof useRemoteChatExecution>

@@ -4,6 +4,7 @@ import type { ProjectMeta, SessionMeta } from '../env'
 
 import type { DeleteArchivedSessionsResult } from '@shared/provider'
 import { Icon } from './primitives/Icon'
+import { ProviderFilterMenu } from './ProviderFilterMenu'
 
 
 
@@ -163,15 +164,7 @@ export function ArchivedChatsPanel({
             aria-label="搜索已存档会话"
           />
         </label>
-        <label className="arch-filter">
-          <Icon name="filter" />
-          <select value={providerFilter} onChange={(event) => setProviderFilter(event.target.value)} aria-label="按 Provider 筛选">
-            <option value="all">全部 Provider</option>
-            {providers.map((provider) => (
-              <option key={provider} value={provider}>{provider === 'legacy_unknown' ? '历史?' : provider}</option>
-            ))}
-          </select>
-        </label>
+        <ProviderFilterMenu providers={providers} value={providerFilter} onChange={setProviderFilter} />
         <label className="arch-filter">
           <Icon name="folder" />
           <select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)} aria-label="按项目筛选">

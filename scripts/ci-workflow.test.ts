@@ -63,6 +63,8 @@ const SERIAL_RENDERER_UI_ORDER = [
   'node scripts/session-capability-ui-smoke.mjs --lists-only',
   'node scripts/session-capability-ui-smoke.mjs --loading-only',
   'node scripts/session-capability-ui-smoke.mjs --turn-refs-only',
+  'npm run test:history-autoload:ui',
+  'npm run test:provider-menu:ui',
   'node scripts/session-capability-ui-smoke.mjs --sidebar-activity-only',
   'node scripts/model-picker-ui-smoke.mjs',
   'node scripts/analytics-credits-ui-smoke.mjs',
