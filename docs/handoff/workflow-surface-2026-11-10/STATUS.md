@@ -1,4 +1,8 @@
-# 全部待核验
+# 第二轮待核验
+
+第二轮（G1–G5，不用 Claude，改用 OpenCode / Codex / Qoder / Pi `rotom`）已在本机完成并 push，总结见 [reports/SUMMARY-R2.md](reports/SUMMARY-R2.md)。G1 的四个 Provider 里 Codex、Pi 原生、OpenCode 有真实运行证据，Qoder 与 Pi `rotom` 标为阻塞；G2、G3、G5 完成；G4 部分完成（缺一个带真实 workflow 行的会话）。第一轮的「全部待核验」结论保留在下方。
+
+## 第一轮
 
 执行方已在 macOS 本机完成本轮能做的部分并 push。**B 被外部 Provider 阻塞**（公司网关持续 429），因此 C 的运行态截图、E2 文案核对、Q1–Q11 未完成。下面的「待核验」表示执行方已做完并 push，等审查方核验；「阻塞」「部分完成」「未开始」都是未完成项，不要当成通过。总结见 [reports/SUMMARY.md](reports/SUMMARY.md)。
 
@@ -24,9 +28,9 @@
 |---|---|---|---|
 | G1 | 四个 Provider 的真实事件负对照，含与 main 的对照 | 完成（两处阻塞） | [G1](reports/G1.md) · [Qoder 部分](reports/G1-qoder.md) · [OpenCode 部分](reports/G1-opencode.md) | Codex 真实两个子 Agent，与 `origin/main` 逐项一致、`workflow_activity` 0；Pi 原生空态正确；OpenCode 换到支持范围内 1.18.31 后跑通真实一轮、空态正确。**阻塞**：Qoder 在分支与 main 上同样 exit 42（仓库外同 SDK 复现），本机 2.2.6 的 OpenCode 405，Pi rotom 安装缺 `model-catalog.mjs` |
 | G2 | 运行选择被拉回的组件级回归与负对照 | 完成 | [G2](reports/G2.md) | `test:workflow-ui` 新增 `focus` 模式，两个宽度通过；删掉清空请求那一行后真的失败 |
-| G3 | 在最新 HEAD 上重跑门禁 | 未开始 | | |
-| G4 | C7 与相邻路径收尾 | 未开始 | | |
-| G5 | 其他 Provider 接入的设计说明（不实现） | 未开始 | | |
+| G3 | 在最新 HEAD 上重跑门禁 | 完成（两处环境失败） | [G3](reports/G3.md) | `typecheck`/`build`/`test:workflow-ui`/`test:workflow-archive`/`test:renderer:ui` 在 `1e41d87c` 上 EXIT=0；`pack:artifact` 失败但 `origin/main` 同样失败（共享 `node_modules` 被别的进程改动）；`test:unit --maxWorkers=1` 7 个失败全是压力下 spawn 超时，两个文件单独跑都通过 | |
+| G4 | C7 与相邻路径收尾 | 部分完成 | [G4](reports/G4.md) | 一个实例里 Codex（2 子 Agent）与 OpenCode（0 工具）来回切，Workflow 标签一直开着：切到 B 空态无残留，Agents 按会话分开，切回 A 两个子 Agent 恢复。带真实 workflow 行的会话无法在同一实例里造出来（Claude 阻塞），运行态残留未验证 | |
+| G5 | 其他 Provider 接入的设计说明（不实现） | 完成（仅设计） | [G5](reports/G5.md) | Pi `kind: workflow` 能撑「运行 + 步骤 + 终态」，撑不起「阶段 + 每 agent 用量」；Qoder 缺真实事件不能开工；列出三条不许做的事与成本估计，未改代码 | |
 
 ## 审查方核验结论（2026-11-10，Linux x64 容器，Xvfb，非 root，Chromium 沙箱开启）
 
