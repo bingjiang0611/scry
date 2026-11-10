@@ -10,7 +10,7 @@ import { processIdentitiesComparable, processIdentityKey, readProcessIdentitySyn
 export const DAEMON_LOCK_NAME = 'daemon.lock'
 // Short-lived mutex around takeover. Two daemons can both decide the lock is stale;
 // only the one that creates this file may rewrite it.
-const TAKEOVER_NAME = 'daemon.lock.takeover'
+const TAKEOVER_SUFFIX = '.takeover'
 const TAKEOVER_STALE_MS = 10_000
 const TAKEOVER_ATTEMPTS = 200
 const TAKEOVER_WAIT_MS = 5
@@ -22,6 +22,8 @@ export interface DaemonLockRecord {
   identityKey: string
   /** Who started the daemon; free text, never used for trust. */
   startedBy: string
+  /** What kind of owner wrote the record, when the lock is shared by more than one kind. */
+  role?: string
 }
 
 export type TakeoverReason = 'holder-missing' | 'holder-zombie' | 'unreadable-record' | 'pid-reused'
@@ -39,6 +41,14 @@ export type DaemonLockOutcome =
 export interface AcquireDaemonLockOptions {
   /** Directory that holds the lock; created 0700 and never widened. */
   directory: string
+  /** Lock file name; its takeover mutex is `<name>.takeover`. Defaults to `daemon.lock`. */
+  name?: string
+  /**
+   * Whether to force an existing directory to 0700. Defaults to true. The userData lock
+   * passes false: that directory is Electron's, and the lock must not change its mode.
+   */
+  restrictDirectory?: boolean
+  role?: string
   startedBy: string
   pid?: number
   lister?: () => ReadonlyMap<number, ProcessRow>
@@ -68,7 +78,8 @@ function readRecord(path: string): DaemonLockRecord | undefined {
       pid: parsed.pid,
       startedAt: parsed.startedAt,
       identityKey: typeof parsed.identityKey === 'string' ? parsed.identityKey : '',
-      startedBy: typeof parsed.startedBy === 'string' ? parsed.startedBy : ''
+      startedBy: typeof parsed.startedBy === 'string' ? parsed.startedBy : '',
+      ...(typeof parsed.role === 'string' ? { role: parsed.role } : {})
     }
   } catch {
     // An unreadable lock cannot describe a live holder, so it is stale rather than a
@@ -110,9 +121,10 @@ function checkHolder(previous: DaemonLockRecord | undefined, row: ProcessRow | u
 
 export async function acquireDaemonLock(options: AcquireDaemonLockOptions): Promise<DaemonLockOutcome> {
   mkdirSync(options.directory, { recursive: true, mode: 0o700 })
-  chmodSync(options.directory, 0o700)
-  const path = join(options.directory, DAEMON_LOCK_NAME)
-  const takeoverPath = join(options.directory, TAKEOVER_NAME)
+  if (options.restrictDirectory ?? true) chmodSync(options.directory, 0o700)
+  const name = options.name ?? DAEMON_LOCK_NAME
+  const path = join(options.directory, name)
+  const takeoverPath = join(options.directory, `${name}${TAKEOVER_SUFFIX}`)
   const pid = options.pid ?? process.pid
   const rowOf = (target: number): ProcessRow | undefined => options.lister
     ? options.lister().get(target)
@@ -124,7 +136,8 @@ export async function acquireDaemonLock(options: AcquireDaemonLockOptions): Prom
     // cannot read its own identity fails instead of writing a weak record.
     startedAt: self?.startedAt ?? '',
     identityKey: self ? processIdentityKey(self) : '',
-    startedBy: options.startedBy
+    startedBy: options.startedBy,
+    ...(options.role ? { role: options.role } : {})
   }
   if (!record.startedAt) throw new Error('daemon_lock_identity_unavailable')
 
