@@ -151,9 +151,9 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
       onLoadOlderTurns: () => {}
     })
     expect(html).toContain('history-window-note')
-    expect(html).toContain('时间线已加载最近')
+    expect(html).toContain('已加载 40 / 500 轮')
     expect(html).not.toContain('仅挂载最近')
-    expect(html).toContain('<b>40</b> / 500 轮')
+    expect(html).not.toContain('时间线已加载最近')
     expect(html).toContain('更早轮次仍在本机归档中，未丢弃')
     expect(html).toContain('加载更早轮次')
   })

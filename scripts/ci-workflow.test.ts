@@ -63,6 +63,8 @@ const SERIAL_RENDERER_UI_ORDER = [
   'node scripts/session-capability-ui-smoke.mjs --lists-only',
   'node scripts/session-capability-ui-smoke.mjs --loading-only',
   'node scripts/session-capability-ui-smoke.mjs --turn-refs-only',
+  'npm run test:history-autoload:ui',
+  'npm run test:provider-menu:ui',
   'node scripts/session-capability-ui-smoke.mjs --sidebar-activity-only',
   'node scripts/model-picker-ui-smoke.mjs',
   'node scripts/analytics-credits-ui-smoke.mjs',
@@ -113,6 +115,24 @@ describe('required PR checks', () => {
       }
     })
   }
+
+  it('exports the verified macOS app only on the manual packaging shard', () => {
+    expect(workflow('ci.yml').on).toHaveProperty('workflow_dispatch')
+    const job = workflow('ci.yml').jobs['packaged-electron']
+    const archive = source(job, 'Archive the verified macOS app for manual installation')
+    const upload = source(job, 'Upload the verified macOS app')
+    const manualShard = "${{ github.event_name == 'workflow_dispatch' && matrix.shard == 2 }}"
+    expect(archive.if).toBe(manualShard)
+    expect(upload.if).toBe(manualShard)
+    expect(job.steps.indexOf(archive)).toBeGreaterThan(job.steps.indexOf(source(job, 'Package and smoke the macOS app')))
+    expect(job.steps.indexOf(upload)).toBeGreaterThan(job.steps.indexOf(archive))
+    expect(upload.with?.['if-no-files-found']).toBe('error')
+    expect(upload.with?.path).toBe('release-artifacts/')
+    expect(archive.run).toContain('sourceCommit: process.env.GITHUB_SHA')
+    expect(spawnSync('bash', ['-n'], { input: archive.run, encoding: 'utf8' }).status).toBe(0)
+    const module = archive.run!.split("node --input-type=module <<'NODE'\n")[1].split('\nNODE')[0]
+    expect(spawnSync(process.execPath, ['--check', '--input-type=module'], { input: module, encoding: 'utf8' }).status).toBe(0)
+  })
 
   it('does not install or launch an unused Electron runtime in the build-only job', () => {
     const job = workflow('ci.yml').jobs.node

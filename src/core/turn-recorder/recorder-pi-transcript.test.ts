@@ -98,6 +98,21 @@ describe('Pi recorder transcript anchoring', () => {
     expect(read.events.filter(event => event.kind === 'human')).toHaveLength(0)
   })
 
+  it('projects a native compaction that happened inside the anchored ancestry', () => {
+    const content = [
+      row({ type: 'session', version: 3, id: 'session-1', cwd: '/fixture' }),
+      row({ type: 'message', id: 'before', parentId: null, timestamp: '2026-10-24T10:00:01.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'old answer' }] } }),
+      row({ type: 'message', id: 'user-1', parentId: 'before', timestamp: '2026-10-24T10:00:02.000Z', message: { role: 'user', content: 'root prompt' } }),
+      row({ type: 'compaction', id: 'compact-1', parentId: 'user-1', timestamp: '2026-10-24T10:00:03.000Z', summary: 'goal', tokensBefore: 245574 }),
+      row({ type: 'message', id: 'assistant-1', parentId: 'compact-1', timestamp: '2026-10-24T10:00:04.000Z', message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: 'done' }] } })
+    ].join('\n') + '\n'
+    const read = parsePiTranscript(content, 'run', { beforeEntryId: 'before', afterEntryId: 'assistant-1' })
+    expect(read.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'harness', stage: 'context_compaction', ts: '2026-10-24T10:00:03.000Z', compaction: { preTokens: 245574 } })
+    ]))
+    expect(read.userText).toBe('root prompt')
+  })
+
   it('does not claim a turn when the ending native entry is unavailable', () => {
     const read = parsePiTranscript(row({ type: 'session', version: 3, id: 'session-1', cwd: '/fixture' }), 'run', {
       beforeEntryId: null,

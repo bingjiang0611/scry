@@ -32,7 +32,9 @@ describe('Pi picker launcher aliases', () => {
     expect(choices(markup)).toEqual([saved.id])
     expect(markup).toContain('自定义 Profile · 0.1.26')
     expect(markup).toContain('agent-option-remove')
-    expect(markup).toContain('当前')
+    // 选中态由单选菜单语义表达；名称右侧不再重复「当前」。
+    expect(markup).toMatch(new RegExp(`role="menuitemradio"[^>]*data-agent-id="${saved.id}"[^>]*aria-checked="true"`))
+    expect(markup).not.toContain('当前')
   })
 
   it('keeps same-name/version profiles that launch different executables', () => {

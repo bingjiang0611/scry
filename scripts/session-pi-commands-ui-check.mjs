@@ -38,7 +38,12 @@ export async function exercisePiCommands(contents) {
   await wait(`document.querySelector('${agentTrigger}').dataset.agentId === 'pi:564f7a994e4e34da' && !document.querySelector('#model-effort .climenu')`)
   await click(agentTrigger)
   await wait(`document.querySelectorAll('#model-effort .agent-option-pick').length === 2`)
-  if (!await contents.executeJavaScript(`document.querySelector(${JSON.stringify(piChoice('pi:564f7a994e4e34da'))})?.textContent.includes('当前') && !document.querySelector(${JSON.stringify(piChoice('pi:rotom'))})`)) throw new Error('Historical Profile identity was silently switched')
+  // 选中态由菜单的单选语义表达；同时确认历史 Profile 仍被单独列出，没有被并进 Rotom 那一行。
+  const profileIdentity = await contents.executeJavaScript(`(() => ({
+    checked: document.querySelector(${JSON.stringify(piChoice('pi:564f7a994e4e34da'))})?.getAttribute('aria-checked') === 'true',
+    rotomListed: document.querySelector(${JSON.stringify(piChoice('pi:rotom'))}) != null
+  }))()`)
+  if (!profileIdentity.checked || profileIdentity.rotomListed) throw new Error('Historical Profile identity was silently switched: ' + JSON.stringify(profileIdentity))
   await click(piChoice('pi:1234567890abcdef'))
   await wait(`document.querySelector('${agentTrigger}').dataset.agentId === 'pi:1234567890abcdef' && !document.querySelector('#model-effort .climenu')`)
   await click(agentTrigger)
