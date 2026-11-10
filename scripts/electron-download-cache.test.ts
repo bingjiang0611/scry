@@ -13,6 +13,7 @@ interface Step {
   id?: string
   uses?: string
   run?: string
+  env?: Record<string, string>
   with?: Record<string, string>
 }
 interface Workflow { jobs: Record<string, { steps?: Step[] }> }
@@ -73,6 +74,27 @@ describe('Electron download cache', () => {
     })
     expect(script).not.toContain('ELECTRON_SKIP_BINARY_DOWNLOAD')
     expect(script).not.toContain('ELECTRON_MIRROR')
+  })
+
+  it('restores electron-builder toolset downloads for the Linux packaging gate', () => {
+    const ci = yaml('.github/workflows/ci.yml') as { jobs: Record<string, { env?: Record<string, string>; steps: Step[] }> }
+    const job = ci.jobs['packaged-linux']
+    // electron-builder reads ELECTRON_BUILDER_CACHE for its own toolset root and
+    // stores downloads under <root>/downloads; the cache must cover that root.
+    // The runner context is only available on steps, never in job-level env.
+    const pack = job.steps.find(step => step.name === 'Package Linux app directory and pacman package')!
+    expect(pack.env?.ELECTRON_BUILDER_CACHE).toBe('${{ runner.temp }}/electron-builder-cache')
+    for (const [name, other] of Object.entries(ci.jobs)) {
+      for (const [key, value] of Object.entries(other.env ?? {})) expect(value, name + '/' + key).not.toContain('${{ runner.')
+    }
+    const key = job.steps.find(step => step.id === 'builder-toolsets')!
+    expect(key.run).toContain("require('./node_modules/electron-builder/package.json').version")
+    const index = job.steps.findIndex(step => step.uses === 'actions/cache@v4')
+    expect(job.steps[index].with).toEqual({
+      path: '${{ runner.temp }}/electron-builder-cache',
+      key: '${{ steps.builder-toolsets.outputs.key }}'
+    })
+    expect(index).toBeLessThan(job.steps.findIndex(step => step.name === 'Package Linux app directory and pacman package'))
   })
 
   it('prepares only jobs that actually launch Electron, before installation', () => {

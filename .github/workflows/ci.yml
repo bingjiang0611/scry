@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches: [main]
@@ -25,6 +26,8 @@ jobs:
       QODER_SKIP_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -83,6 +86,8 @@ jobs:
       QODER_SKIP_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -125,6 +130,8 @@ jobs:
       QODER_SKIP_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -158,6 +165,8 @@ jobs:
       QODER_SKIP_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
@@ -184,6 +193,8 @@ jobs:
       QODER_SKIP_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -213,9 +224,43 @@ jobs:
           name: sidebar-paint-diagnostics-${{ matrix.shard }}
           path: ${{ runner.temp }}/scry-sidebar-*.png
           if-no-files-found: ignore
+
       - name: Package and smoke the macOS app
         if: ${{ matrix.shard == 2 }}
         run: npm run pack:artifact
+      - name: Archive the verified macOS app for manual installation
+        if: ${{ github.event_name == 'workflow_dispatch' && matrix.shard == 2 }}
+        run: |
+          APP_PATH="$(node --input-type=module -e "import { defaultPackagedAppPath } from './scripts/packaged-app-layout.mjs'; console.log(defaultPackagedAppPath())")"
+          mkdir -p release-artifacts
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" release-artifacts/Scry.app.zip
+          node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto'
+          import { readFileSync, writeFileSync } from 'node:fs'
+          import { join } from 'node:path'
+          import { defaultPackagedAppPath, packagedAppLayout } from './scripts/packaged-app-layout.mjs'
+          const file = 'Scry.app.zip'
+          const { resources } = packagedAppLayout(defaultPackagedAppPath())
+          const { version } = JSON.parse(readFileSync(join(resources, 'scry-cli/package.json'), 'utf8'))
+          const sha256 = createHash('sha256').update(readFileSync(join('release-artifacts', file))).digest('hex')
+          const provenance = {
+            sourceCommit: process.env.GITHUB_SHA,
+            arch: process.arch,
+            recorderVersion: version,
+            file,
+            sha256
+          }
+          writeFileSync('release-artifacts/provenance.json', JSON.stringify(provenance, null, 2) + '\n')
+          NODE
+      - name: Upload the verified macOS app
+        if: ${{ github.event_name == 'workflow_dispatch' && matrix.shard == 2 }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-app-${{ github.sha }}
+          path: release-artifacts/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
 
   check:
     name: Check
@@ -249,6 +294,8 @@ jobs:
       QODER_SKIP_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -264,6 +311,17 @@ jobs:
         with:
           path: ${{ runner.temp }}/electron-downloads
           key: ${{ steps.electron-cache.outputs.key }}
+      # electron-builder pulls fpm/7zip from GitHub releases; a cached toolset
+      # keeps the packaging gate independent of that CDN's availability.
+      - name: Resolve packaging toolset cache key
+        id: builder-toolsets
+        run: |
+          version="$(node -p "require('./node_modules/electron-builder/package.json').version")"
+          echo "key=electron-builder-toolsets-v1-${RUNNER_OS}-${version}" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/electron-builder-cache
+          key: ${{ steps.builder-toolsets.outputs.key }}
       # run-electron-builder performs the authoritative forced ABI rebuild and
       # real native-load probe; no Electron tests precede it in this job.
       - name: Build desktop app and private CLI
@@ -275,6 +333,8 @@ jobs:
       # 发布构建同时产出 dist/linux-unpacked 和 dist/*.pacman；
       # pacman 的 pkgdesc 曾经静默变空，所以打包产物必须过 check:pacman-package。
       - name: Package Linux app directory and pacman package
+        env:
+          ELECTRON_BUILDER_CACHE: ${{ runner.temp }}/electron-builder-cache
         run: SCRY_RELEASE_BUILD=1 node scripts/run-electron-builder.mjs
       - name: Check packaged Linux app
         run: npm run check:packaged-app
