@@ -34,12 +34,29 @@ export function advertisableAddress(address: string): boolean {
   return a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31) || (a === 100 && b >= 64 && b <= 127)
 }
 
+// Interfaces whose private addresses a phone on the same Wi-Fi cannot reach:
+// VPN and point-to-point tunnels (utun/ppp/ipsec/tun/wg...), container and VM
+// bridges, Apple's peer-to-peer links. A phone that dials one of these waits
+// out a connect timeout on every tunnel open (measured: 2 x 900 ms per lane
+// on a Mac whose only private addresses were corporate VPN tunnels).
+const TUNNEL_OR_VIRTUAL = /^(utun|tun|tap|ppp|ipsec|gif|stf|awdl|llw|wg|zt|docker|br-|veth|virbr|vmnet|vboxnet|bridge1\d\d|anpi)/i
+
+function overlayAddress(address: string): boolean {
+  const [a, b] = address.split('.').map(Number)
+  return a === 100 && b >= 64 && b <= 127
+}
+
 export function lanAddresses(table: InterfaceTable): string[] {
   const out = new Set<string>()
-  for (const entries of Object.values(table)) {
+  for (const [name, entries] of Object.entries(table)) {
     for (const entry of entries ?? []) {
-      if (entry.internal || entry.family !== 'IPv4') continue
-      if (advertisableAddress(entry.address)) out.add(entry.address)
+      if (entry.internal || entry.family !== 'IPv4' || !advertisableAddress(entry.address)) continue
+      // Overlay networks (Tailscale and similar, 100.64/10) live on tunnel
+      // interfaces by design and are reachable from a phone inside the same
+      // overlay. Private LAN addresses count only on a real network interface
+      // with a real subnet: a /32 is a point-to-point endpoint, not a LAN.
+      if (!overlayAddress(entry.address) && (TUNNEL_OR_VIRTUAL.test(name) || entry.netmask === '255.255.255.255')) continue
+      out.add(entry.address)
     }
   }
   // LAN before overlay, deterministic order, bounded.
