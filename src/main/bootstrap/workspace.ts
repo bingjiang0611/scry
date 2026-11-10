@@ -6,6 +6,7 @@ import type { WorkspaceCreateRequest, WorkspaceFilePageRequest, WorkspaceListReq
 import type { ProviderContext } from '../../shared/provider'
 import { resetProviderSession, viewNothingAfterDaemonNewSession } from './startup-channels'
 import { daemonModeEnabled } from '../daemon-channel-gate'
+import { installWorkbenchWindowCwd } from '../daemon-local-ops/workbench'
 import type { TerminalCloseRequest, TerminalRecordingRequest, TerminalRecordingListRequest, TerminalResizeRequest, TerminalStartRequest, TerminalOwnershipRequest, TerminalWriteRequest } from '../../shared/terminal'
 import { authorizedWorkspaceRequest } from '../workspace-authorization'
 import { createWorkspaceEntry, listWorkspace, moveWorkspaceEntry, openWorkspaceFileExternally, readWorkspaceFile, readWorkspaceFilePage, resolveWorkspaceFileOpenTarget, renameWorkspaceEntry, trashWorkspaceEntry, writeWorkspaceFile } from '../workspace-files'
@@ -210,5 +211,8 @@ export function registerWorkspaceHandlers(deps: WorkspaceBootstrapDependencies):
   })
   // Daemon mode: the daemon resets the context it runs; the badge part stays here.
   if (daemonModeEnabled()) viewNothingAfterDaemonNewSession(dockBadge, () => Boolean(getWindow()?.isFocused()))
+  // Daemon mode: the forwarded workspace channels stay bound to this window's selection,
+  // as the handlers above are; the daemon checks the request against it.
+  if (daemonModeEnabled()) installWorkbenchWindowCwd(getCurrentCwd)
 
 }
