@@ -151,6 +151,7 @@ export function createWsRelayServer({
         if (!credentials || !tokenOk(hostId, credentials.token, credentials.enroll === true)) { ws.close(1008, 'host_unauthorized'); return }
         leg.authed = true
         touchHost(hostId)
+        log(`host leg authenticated mode=${mode}`)
         return
       }
       if (leg.device && leg.device.readyState === OPEN) leg.device.send(data, { binary: true })
@@ -158,6 +159,11 @@ export function createWsRelayServer({
   }
 
   async function acceptDevice(request, socket, head, hostId, mode) {
+    // After 'upgrade' the raw socket is ours until handleUpgrade takes it: a
+    // phone that resets it while waiting for a leg would otherwise raise an
+    // unhandled 'error' and take every room down with the process.
+    const onSocketError = () => socket.destroy()
+    socket.on('error', onSocketError)
     const started = Date.now()
     let leg = pop(hostId, mode)
     const live = leg ? true : alive(hostId)
@@ -167,7 +173,7 @@ export function createWsRelayServer({
       await new Promise((resolve) => setTimeout(resolve, 50))
       leg = pop(hostId, mode)
     }
-    if (socket.destroyed) return
+    if (socket.destroyed) { socket.off('error', onSocketError); return }
     // Claim before the async upgrade so a concurrent phone cannot take it.
     const claimed = leg
     const placeholder = {}
@@ -183,6 +189,7 @@ export function createWsRelayServer({
       wss.off('headers', onHeaders)
       if (!upgraded && claimed && claimed.device === placeholder) claimed.device = null
     })
+    socket.off('error', onSocketError) // ws installs its own from here on
     wss.handleUpgrade(request, socket, head, (device) => {
       upgraded = true
       wss.off('headers', onHeaders)

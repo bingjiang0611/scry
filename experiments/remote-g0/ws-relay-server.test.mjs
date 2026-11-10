@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { once } from 'node:events'
+import { EventEmitter, once } from 'node:events'
 import { connect } from 'node:net'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -13,7 +13,11 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 async function harness(t, options = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'scry-ws-relay-'))
-  const relay = createWsRelayServer({ storePath: join(dir, 'rooms.json'), adminToken: 'admin-token', freshMs: 600, waitMs: 1_500, offlineGraceMs: 300, ...options })
+  // The relay logs each accepted host credential; leg() waits for that line
+  // (or the refusal's close) instead of sleeping past the auth.
+  const events = new EventEmitter()
+  const log = (line) => { if (line.startsWith('host leg authenticated')) events.emit('authenticated') }
+  const relay = createWsRelayServer({ storePath: join(dir, 'rooms.json'), adminToken: 'admin-token', freshMs: 600, waitMs: 1_500, offlineGraceMs: 300, log, ...options })
   const port = await relay.listen(0)
   const sockets = []
   t.after(async () => {
@@ -28,8 +32,10 @@ async function harness(t, options = {}) {
     const received = []
     socket.on('message', (data, isBinary) => received.push({ data: Buffer.from(data), isBinary }))
     await once(socket, 'open')
+    // Legs are opened one at a time, so the next authentication is this one.
+    const settled = Promise.race([once(events, 'authenticated'), once(socket, 'close')])
     socket.send(JSON.stringify({ token, ...extra }))
-    await wait(30)
+    await settled
     return { socket, received }
   }
   async function ping(host) {
@@ -140,6 +146,25 @@ test('an aborted phone handshake does not keep the leg it claimed', async (t) =>
   const phone = await device(hostId)
   assert.deepEqual(phone.result, { open: true }, 'the leg was released, not left claimed by the aborted request')
   assert.ok(Number(phone.waitHeader) < 50, `free leg waited ${phone.waitHeader} ms`)
+})
+
+test('a phone that resets its connection while waiting for a leg does not take the relay down', async (t) => {
+  const { leg, ping, device, port } = await harness(t)
+  const hostId = randomUUID()
+  const only = await leg(hostId)
+  await ping(only)
+  assert.deepEqual((await device(hostId)).result, { open: true }, 'holds the only leg')
+  // Live host, no free leg: this request waits (waitMs) with nobody but the
+  // relay owning the raw socket, then the peer resets it.
+  const raw = connect(port, '127.0.0.1')
+  await once(raw, 'connect')
+  raw.write(`GET /?host=${hostId}&mode=run HTTP/1.1\r\nHost: relay\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: ${randomBytes(16).toString('base64')}\r\n\r\n`)
+  await wait(150)
+  raw.resetAndDestroy()
+  await wait(300)
+  const other = randomUUID()
+  await ping(await leg(other))
+  assert.deepEqual((await device(other)).result, { open: true }, 'the relay still serves other rooms')
 })
 
 test('enrolls a room token once, persists only its digest, and refuses a takeover', async (t) => {
