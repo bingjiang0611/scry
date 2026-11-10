@@ -3,7 +3,7 @@ import type { TraceEvent } from '@shared/trace'
 import { WORKFLOW_FIXTURE_SNAPSHOTS, workflowFixtureMessages } from '@shared/claude-workflow.fixture'
 import { type NormalizeCtx, normalizeSdkMessage } from '../main/normalize'
 import type { Turn } from './format-types'
-import { deriveWorkflowRuns } from './workflow-runs'
+import { deriveWorkflowRuns, workflowRunForToolUse } from './workflow-runs'
 
 function events(messages: Array<Record<string, unknown>>): TraceEvent[] {
   let n = 0
@@ -105,5 +105,20 @@ describe('deriveWorkflowRuns', () => {
     expect(run.log.at(-1)).toMatchObject({ actor: 'runtime', tone: 'ok' })
     expect(run.log.some((entry) => entry.tone === 'error' && entry.message.includes('billing.ts 失败'))).toBe(true)
     expect(WORKFLOW_FIXTURE_SNAPSHOTS.length).toBeGreaterThan(0)
+  })
+  it('聊天卡片按 tool_use id 找到自己的运行，同会话两次运行不互相顶替', () => {
+    const first = events(workflowFixtureMessages({ taskId: 'wtask-1', toolUseId: 'toolu_workflow_1' }))
+    const second = events(workflowFixtureMessages({ taskId: 'wtask-2', toolUseId: 'toolu_workflow_2' }))
+    const turns: Turn[] = [
+      { runId: 'run-1', userText: 'first', items: first, done: true },
+      { runId: 'run-2', userText: 'second', items: second, done: true }
+    ]
+    const runs = deriveWorkflowRuns(turns, { busy: false })
+    expect(runs).toHaveLength(2)
+    expect(workflowRunForToolUse(runs, 'toolu_workflow_1')?.taskId).toBe('wtask-1')
+    expect(workflowRunForToolUse(runs, 'toolu_workflow_2')?.taskId).toBe('wtask-2')
+    // An unloaded or foreign tool call selects nothing instead of the newest run.
+    expect(workflowRunForToolUse(runs, 'toolu_missing')).toBeUndefined()
+    expect(workflowRunForToolUse(runs, null)).toBeUndefined()
   })
 })

@@ -17,6 +17,7 @@ import { AskUserQuestionInline, AskUserQuestionResult } from './AskUserQuestionD
 
 
 import { toolArg, toolDisplayName, toolMeta } from '../format'
+import { WORKFLOW_COPY } from '../constants/workflow-copy'
 
 import { editActionLineCounts } from '../turn-diff'
 
@@ -34,6 +35,7 @@ export function ToolItem({
   queuedQuestionCount = 0,
   onAnswerQuestion,
   onOpenFileDiff,
+  onOpenWorkflow,
   turnDone = false,
   remote = false,
   liveArrival = false
@@ -47,6 +49,8 @@ export function ToolItem({
   queuedQuestionCount?: number
   onAnswerQuestion?: (response: AgentQuestionResponse) => Promise<void>
   onOpenFileDiff?: () => void
+  /** Opens the Workflow surface on the run this tool call started. Absent = no entry. */
+  onOpenWorkflow?: () => void
   turnDone?: boolean
   remote?: boolean
   liveArrival?: boolean
@@ -139,6 +143,12 @@ export function ToolItem({
         </span>
         {hasDetail && !lockedOpen && <Icon name="chevronRight" className={`chev motion-chevron ${shownOpen ? 'is-open' : ''}`} />}
       </button>
+      {onOpenWorkflow && ev.tool === 'Workflow' && (
+        <button type="button" className="tool-workflow-open" onClick={onOpenWorkflow}>
+          <Icon name="workflow" />
+          <span>{WORKFLOW_COPY.openFromChat}</span>
+        </button>
+      )}
       {hasDetail && <Disclosure open={shownOpen} long={detailLong} immediate={lockedOpen}>{() => (
         <div id={detailId} className="tool-detail-region">
         {waitingForAnswer && questionRequest && onAnswerQuestion ? (

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Turn } from '../format'
-import { deriveWorkflowRuns, type WorkflowRun } from '../workflow-runs'
+import { deriveWorkflowRuns, workflowRunForToolUse, type WorkflowRun } from '../workflow-runs'
 import {
   WORKFLOW_COPY,
   WORKFLOW_RUN_STATUS_LABEL,
@@ -8,6 +8,7 @@ import {
 } from '../constants/workflow-copy'
 import { Icon } from './primitives/Icon'
 import { WorkflowFlow } from './WorkflowFlow'
+import { useWorkflowRunRequest } from '../workflow-focus'
 import './workflow-surface.css'
 
 /** Script lines rendered; the stored text is already capped by main. */
@@ -123,6 +124,13 @@ export function WorkflowSurface({ turns, busy }: { turns: Turn[]; busy: boolean 
   const [pickedId, setPickedId] = useState<string | null>(null)
   // Follow the newest run unless the user picked one that still exists.
   const run = runs.find((candidate) => candidate.id === pickedId) ?? runs.at(-1)
+  // A chat tool card asks for its own run; an unloaded run (trimmed history) is not invented.
+  const requestedToolUseId = useWorkflowRunRequest()
+  useEffect(() => {
+    if (!requestedToolUseId) return
+    const requested = workflowRunForToolUse(runs, requestedToolUseId)
+    if (requested) setPickedId(requested.id)
+  }, [requestedToolUseId, runs])
   useEffect(() => {
     if (pickedId && !runs.some((candidate) => candidate.id === pickedId)) setPickedId(null)
   }, [pickedId, runs])

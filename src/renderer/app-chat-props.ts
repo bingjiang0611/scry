@@ -56,6 +56,7 @@ export interface AppChatPropsContext {
   openTurnDiffReview: (turn: { runId: string; userText: string }, diff: import('@shared/trace').TurnDiffSnapshot, path?: string) => void
   forkConversationTurn: (turn: Turn) => Promise<void>
   openWorkspaceFile: (target: import('./workspace-links').WorkspaceFileTarget) => void
+  openWorkflowRun: (toolUseId: string | undefined) => void
   selectChatAgent: (id: string) => void
   setInput: Dispatch<SetStateAction<string>>
   setComposerError: Dispatch<SetStateAction<string | null>>
@@ -82,7 +83,7 @@ export function createAppChatProps(context: AppChatPropsContext): ComponentProps
     providerCompatibilityIssue, sessionCacheVisible, activeEvidenceGap, draftAttachments, queuedPrompts, steerCapability,
     steerEvidenceByMessageId, editingQueuedPromptId, movedQueuedPromptId, slashOpen, slashLoading,
     slashCmds, slashReason, slashSel, focusedTurnRunId, chatNavigation, addPastedImages, addClipboardImage, pickSlash, send,
-    stopRun, loadOlderTurns, historyOlderLoading, openTurnDiffReview, forkConversationTurn, openWorkspaceFile, selectChatAgent,
+    stopRun, loadOlderTurns, historyOlderLoading, openTurnDiffReview, forkConversationTurn, openWorkspaceFile, openWorkflowRun, selectChatAgent,
     setInput, setComposerError, setSlashHidden, setSlashSel, chooseFolder, unbindProject, pickRecent, removeRecentFolder,
     renderLocationPicker, retrySlash, steerInFlightRef, steerQueuedPrompt, editQueuedPrompt, cancelQueuedPromptEdit,
     removeDraftAttachment, removeQueuedPrompt, slashHidden } = context
@@ -143,6 +144,7 @@ export function createAppChatProps(context: AppChatPropsContext): ComponentProps
     onOpenDiff: openTurnDiffReview,
     onForkTurn: forkConversationTurn,
     onOpenFile: openWorkspaceFile,
+    onOpenWorkflow: openWorkflowRun,
     onAnswerQuestion: session.answerQuestion,
     onInput: value => {
       setInput(value)

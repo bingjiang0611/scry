@@ -82,6 +82,8 @@ export interface ChatViewProps {
   onForkTurn?: (turn: Turn) => Promise<void>
   forkableRunIds?: ReadonlySet<string>
   onOpenFile?: (target: WorkspaceFileTarget) => void
+  /** Opens the Workflow surface on the run a chat tool card started. */
+  onOpenWorkflow?: (toolUseId: string | undefined) => void
   onAnswerQuestion?: (response: AgentQuestionResponse) => Promise<void>
   onInput: (value: string) => void
   onChooseFolder: () => void

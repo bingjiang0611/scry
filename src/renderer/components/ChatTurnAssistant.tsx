@@ -9,6 +9,7 @@ import { providerHasEnded } from '../run-stop-status'
 
 
 import { useLiveArrivalKeys } from '../hooks/useLiveArrivalKeys'
+import { useTurnFork } from '../hooks/useTurnFork'
 import Markdown from './MarkdownImpl'
 
 import type { TraceEvent, TurnDiffSnapshot } from '@shared/trace'
@@ -38,6 +39,7 @@ function AssistantTurnImpl({
   selectedId,
   onSelect,
   onOpenDiff,
+  onOpenWorkflow,
   onForkTurn,
   pendingQuestions = [],
   onAnswerQuestion,
@@ -50,6 +52,7 @@ function AssistantTurnImpl({
   selectedId: string | null
   onSelect: (ev: TraceEvent) => void
   onOpenDiff?: (turn: Turn, turnDiff: TurnDiffSnapshot, initialPath?: string) => void
+  onOpenWorkflow?: (toolUseId: string | undefined) => void
   onForkTurn?: (turn: Turn) => Promise<void>
   pendingQuestions?: AgentQuestionRequest[]
   onAnswerQuestion?: (response: AgentQuestionResponse) => Promise<void>
@@ -58,8 +61,6 @@ function AssistantTurnImpl({
   footerArrivalEligible?: boolean
   liveArrivalResetKey?: unknown
 }) {
-  const [forking, setForking] = useState(false)
-  const [forkError, setForkError] = useState<string | null>(null)
   const [flowExpanded, setFlowExpanded] = useState(false)
   // 长轮次流式期把「还在增长的尾部文本」与结构化事件分开：只有结构真的变了才重算
   // 下面这些 O(全部事件) 的投影，纯 token 增量只更新一个字符串。
@@ -115,26 +116,8 @@ function AssistantTurnImpl({
   const footerKnown = turn.done && result != null && [result.tokensIn, result.tokensOut, result.durationMs, result.durationApiMs].some(value => value != null)
   const footerKeys = useMemo(() => footerKnown ? ['footer'] : [], [footerKnown])
   const footerArrival = useLiveArrivalKeys(footerKeys, footerArrivalEligible, liveArrivalResetKey).has('footer')
-  // Failed provider turns can still have an authoritative native boundary. Exposing that
-  // boundary lets Pi/Rotom recover exactly as its terminal tree navigation does, instead
-  // of trapping the user on a repeatedly failing session leaf.
-  const canFork = Boolean(
-    onForkTurn && turn.done && turn.providerTurnId && (turn.forkTurnId ?? turn.providerTurnId)
-  )
-  const forkLabel = turn.error ? '从失败处恢复' : '在新会话中分支'
-  const forkTitle = turn.error ? '从失败轮次创建恢复分支' : '从此轮创建分支会话'
-  const forkAtTurn = async (): Promise<void> => {
-    if (!onForkTurn || forking) return
-    setForking(true)
-    setForkError(null)
-    try {
-      await onForkTurn(turn)
-    } catch (error) {
-      setForkError(error instanceof Error ? error.message : String(error))
-    } finally {
-      setForking(false)
-    }
-  }
+  // 有权威轮次边界才允许分支；失败轮次也必须真的报过边界，否则会从错误位置分支。
+  const { canFork, forkLabel, forkTitle, forkAtTurn, forking, forkError } = useTurnFork({ turn, onForkTurn })
   const turnDiffView = turnDiffViewOf(items)
   const turnDiff = turnDiffView?.turnDiff
   const turnDiffPreview = turnDiffView?.preview === true
@@ -370,6 +353,7 @@ function AssistantTurnImpl({
                 queuedQuestionCount={pendingQuestions.length}
                 onAnswerQuestion={onAnswerQuestion}
                 onOpenFileDiff={openFileDiffFor(ev)}
+                onOpenWorkflow={onOpenWorkflow && ev.tool === 'Workflow' ? () => onOpenWorkflow(ev.toolUseId) : undefined}
                 turnDone={turn.done}
                 remote={remote}
                 liveArrival={liveArrivalKeys.has(ev.id)}
@@ -384,6 +368,7 @@ function AssistantTurnImpl({
                   interventions={interventions}
                   onAnswerQuestion={onAnswerQuestion}
                   turnDone={turn.done}
+                  onOpenWorkflow={onOpenWorkflow}
                   liveText={childLiveText}
                   liveThinking={childLiveThinking}
                   liveKey={nestedLiveKey}

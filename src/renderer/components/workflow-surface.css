@@ -331,3 +331,23 @@
   .workflow-node { justify-self: center; min-width: min(420px, 100%); }
   .workflow-log li { grid-template-columns: 62px minmax(0, 150px) minmax(0, 1fr); }
 }
+
+/* Entry from a Workflow tool card in the chat. It sits under the tool row, so the row
+   button keeps its expand/collapse behaviour and the two actions stay distinguishable. */
+.tool-card .tool-workflow-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px 30px;
+  padding: 3px 8px;
+  border: 1px solid var(--border3);
+  border-radius: 999px;
+  background: var(--overview-surface);
+  color: var(--text2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tool-card .tool-workflow-open:hover { color: var(--text1); border-color: var(--agent); }
+.tool-card .tool-workflow-open .ico { width: 13px; height: 13px; color: var(--agent); }

@@ -47,6 +47,7 @@ export function ChatView(props: ChatViewProps) {
     onTurnRef,
     onSelect,
     onOpenDiff,
+    onOpenWorkflow,
     onForkTurn,
     forkableRunIds,
     onOpenFile,
@@ -119,7 +120,7 @@ export function ChatView(props: ChatViewProps) {
               <DelayedLoadingStatus loading title={LOADING_COPY.sessionHistory} detail={LOADING_COPY.sessionHistoryDetail} />
             )}
             <div className="chat-transcript-content">
-              <ChatTranscriptTurns turns={displayedTurns} selectedId={selectedId} focusedTurnRunId={focusedTurnRunId} onTurnRef={onTurnRef} onSelect={onSelect} onOpenDiff={onOpenDiff} forkableRunIds={forkableRunIds} onForkTurn={!sessionLoading && !busy && queuedPrompts.length === 0 && pendingQuestions.length === 0 ? onForkTurn : undefined} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote}
+              <ChatTranscriptTurns turns={displayedTurns} selectedId={selectedId} focusedTurnRunId={focusedTurnRunId} onTurnRef={onTurnRef} onSelect={onSelect} onOpenDiff={onOpenDiff} onOpenWorkflow={onOpenWorkflow} forkableRunIds={forkableRunIds} onForkTurn={!sessionLoading && !busy && queuedPrompts.length === 0 && pendingQuestions.length === 0 ? onForkTurn : undefined} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote}
                 liveRunId={liveRunId} completedLiveRunId={completedLiveRunId} liveArrivalResetKey={liveArrivalResetKey} />
             </div>
           </div>

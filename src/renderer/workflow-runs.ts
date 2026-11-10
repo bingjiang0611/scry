@@ -332,6 +332,12 @@ function finish(acc: Accumulator, busy: boolean, lastTurn: Turn | undefined): Wo
   return run
 }
 
+/** The run a `Workflow` tool call started, when the loaded history still holds it. */
+export function workflowRunForToolUse(runs: readonly WorkflowRun[], toolUseId: string | null | undefined): WorkflowRun | undefined {
+  if (!toolUseId) return undefined
+  return runs.find((run) => run.toolUseId === toolUseId)
+}
+
 /** Workflow runs observed in the loaded turns, oldest first. */
 export function deriveWorkflowRuns(turns: readonly Turn[], options: DeriveWorkflowRunsOptions): WorkflowRun[] {
   const byTool = new Map<string, Accumulator>()

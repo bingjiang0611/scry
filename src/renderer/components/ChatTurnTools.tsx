@@ -95,6 +95,7 @@ export function SubagentBlock({
   pendingQuestions = [],
   interventions = [],
   onAnswerQuestion,
+  onOpenWorkflow,
   turnDone = false,
   liveText = '',
   liveThinking = '',
@@ -108,6 +109,7 @@ export function SubagentBlock({
   pendingQuestions?: AgentQuestionRequest[]
   interventions?: AgentIntervention[]
   onAnswerQuestion?: (response: AgentQuestionResponse) => Promise<void>
+  onOpenWorkflow?: (toolUseId: string | undefined) => void
   turnDone?: boolean
   liveText?: string
   liveThinking?: string
@@ -189,6 +191,7 @@ export function SubagentBlock({
                   intervention={interventions.find((item) => item.request.questionId === ev.toolUseId)}
                   queuedQuestionCount={pendingQuestions.length}
                   onAnswerQuestion={onAnswerQuestion}
+                  onOpenWorkflow={onOpenWorkflow && ev.tool === 'Workflow' ? () => onOpenWorkflow(ev.toolUseId) : undefined}
                   turnDone={turnDone}
                   remote={remote}
                 />

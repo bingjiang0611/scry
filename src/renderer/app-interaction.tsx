@@ -11,6 +11,7 @@ import { createAppChatProps } from './app-chat-props'
 import { useAppSlashCommands } from './hooks/useAppSlashCommands'
 import { createSessionActions } from './app-session-actions'
 import { useChatNavigation } from './hooks/useChatNavigation'
+import { requestWorkflowRun } from './workflow-focus'
 import { useRemoteWorkbench } from './hooks/useRemoteWorkbench'
 import type { SessionRef } from './env'
 import type { SettingsTab } from './components/Modals'
@@ -197,6 +198,13 @@ export function useAppInteraction(context: AppInteractionContext) {
   const { openLlmPerformance, openSkills, openMcp, changeView, pickConversation,
     selectChatAgent, openRemoteLocation, startNewConversation, renderLocationPicker, openMetaPrompts, openTurnDiffReview,
     pinnedSummary, activeEvidenceGap } = appView
+  // The chat tool card owns the entry point; the surface itself is mounted by the shell,
+  // so the request goes through the shared focus store instead of shell state.
+  const openWorkflowRun = useCallback((toolUseId: string | undefined) => {
+    requestWorkflowRun(toolUseId)
+    surfacePane.restore()
+    appView.handleRightSurfaceAction({ type: 'open', kind: 'workflow' })
+  }, [appView, surfacePane])
   const queueActions = useAppQueueActions({
     session, integrations, cwd, selectedProviderSessionId, activeSessionIdRef, sessionPromptQueues, setSessionPromptQueues,
     steerEvidenceByMessageId, steerInFlightRef, queuedStartInFlightRef, queuedStartPendingRef, pausedQueuedPromptsRef, queuedPrompts,
@@ -213,7 +221,7 @@ export function useAppInteraction(context: AppInteractionContext) {
     sessionCacheVisible, activeEvidenceGap, draftAttachments, queuedPrompts, steerCapability, steerEvidenceByMessageId,
     steerInFlightRef: steerInFlightRef.current, editingQueuedPromptId, movedQueuedPromptId, slashOpen, slashLoading,
     slashCmds, slashReason, slashSel, focusedTurnRunId, chatNavigation, addPastedImages, addClipboardImage, pickSlash, send,
-    stopRun, loadOlderTurns, historyOlderLoading, openTurnDiffReview, forkConversationTurn, openWorkspaceFile, selectChatAgent,
+    stopRun, loadOlderTurns, historyOlderLoading, openTurnDiffReview, forkConversationTurn, openWorkspaceFile, openWorkflowRun, selectChatAgent,
     setInput, setComposerError, setSlashHidden, setSlashSel, chooseFolder, unbindProject, pickRecent, removeRecentFolder,
     renderLocationPicker, retrySlash, steerQueuedPrompt, editQueuedPrompt, cancelQueuedPromptEdit, removeDraftAttachment,
     removeQueuedPrompt, slashHidden

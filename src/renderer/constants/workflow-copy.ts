@@ -34,6 +34,7 @@ export const WORKFLOW_AGENT_STATUS_LABEL: Record<WorkflowAgentStatus, string> = 
 export const WORKFLOW_COPY = {
   surfaceLabel: 'Claude Code Workflow',
   title: 'Workflow',
+  openFromChat: '在 Workflow 面板查看',
   emptyTitle: '本会话尚未观测到 Workflow',
   emptyBody: 'Claude Code 调用 Workflow 工具（例如提示词里包含 ultracode，或运行 /deep-research）后，脚本、阶段与 agent 进度会按真实事件显示在这里。其他 Provider 没有这项能力。',
   runPickerLabel: '选择 workflow 运行',

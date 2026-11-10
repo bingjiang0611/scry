@@ -5,7 +5,7 @@ import { AssistantTurn, UserMessage } from '../ChatTurn'
 import type { ChatViewProps } from './types'
 
 type TranscriptProps = Pick<ChatViewProps, 'turns' | 'selectedId' | 'focusedTurnRunId' | 'onTurnRef' | 'onSelect' |
-  'onOpenDiff' | 'onForkTurn' | 'forkableRunIds' | 'pendingQuestions' | 'onAnswerQuestion'> & {
+  'onOpenDiff' | 'onOpenWorkflow' | 'onForkTurn' | 'forkableRunIds' | 'pendingQuestions' | 'onAnswerQuestion'> & {
   remote?: boolean
   liveRunId?: string | null
   completedLiveRunId?: string | null
@@ -73,7 +73,7 @@ export const ChatTranscriptTurns = memo(function ChatTranscriptTurns({ turns, fo
 
 const TranscriptTurn = memo(function TranscriptTurn({
   turn, index, total, windowed, initiallyVisible, focused, observeVisibility, observeSelection,
-  selectedId, onTurnRef, onSelect, onOpenDiff, onForkTurn, forkableRunIds, pendingQuestions = [], onAnswerQuestion, remote = false,
+  selectedId, onTurnRef, onSelect, onOpenDiff, onOpenWorkflow, onForkTurn, forkableRunIds, pendingQuestions = [], onAnswerQuestion, remote = false,
   liveRunId, completedLiveRunId, liveArrivalResetKey
 }: Omit<TranscriptProps, 'turns' | 'focusedTurnRunId'> & {
   turn: Turn; index: number; total: number; windowed: boolean; initiallyVisible: boolean; focused: boolean
@@ -178,7 +178,7 @@ const TranscriptTurn = memo(function TranscriptTurn({
   >
     {mounted && <>
       <UserMessage text={turn.userText} attachments={turn.attachments} />
-      <AssistantTurn turn={turn} selectedId={selectedId} onSelect={onSelect} onOpenDiff={onOpenDiff}
+      <AssistantTurn turn={turn} selectedId={selectedId} onSelect={onSelect} onOpenDiff={onOpenDiff} onOpenWorkflow={onOpenWorkflow}
         onForkTurn={!forkableRunIds || forkableRunIds.has(turn.runId) ? onForkTurn : undefined} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote}
         liveArrivalEligible={turn.runId === liveRunId}
         footerArrivalEligible={turn.runId === liveRunId || turn.runId === completedLiveRunId} liveArrivalResetKey={liveArrivalResetKey} />
