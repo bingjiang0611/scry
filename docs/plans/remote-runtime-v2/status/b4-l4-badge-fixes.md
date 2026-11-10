@@ -25,11 +25,24 @@
 - 全量 vitest：5763 passed / 9 failed / 5 skipped。修复后 `daemon-ipc-matrix` 已通过（通道数 167 → 168，矩阵文档已重新生成）；剩余失败都是已知的 root/Chromium 环境原因（chmod 不生效、无头 Chromium、进程回收）；
 - `ConversationView.tsx`、`ConversationDeleteDialog.tsx` 在性能路径 sources 里，跑了 `npm run performance:measure`：Ratchet 通过，没有 `worse`。
 
+## c0e009e 本机验证（macOS，临时 userData，codex smoke fixture）
+
+报告在分支 `claude/scry-verify-c0e009e` 的 `docs/verify/c0e009e-verification/`。A1–A5、B、C、E3 两种模式都通过；D 在 daemon 模式通过，进程内删除会成功，走不到失败分支，未执行。焦点由 fixture 模拟（宿主前台是 loginwindow），daemon 窗口是隐藏的。
+
+后续修复：
+
+- **A5 角标闪一下（1 → 0，约 16 ms，两种模式都有）**：IPC 时间线显示，这次闪烁来自侧边会话的**第一轮**。`agent:session` 在 `agent:turnDone` 前 120 ms 到达，但页面要等重新读取后才知道新 binding 的原生会话，于是轮次结束时先计了未读，`viewSessions` 到了才清掉。新建统一会话的第一轮在主窗格里也会这样。修复：视图收到属于本会话 run 的 `agent:session` 时，立即把这个会话加入已查看列表（`ViewedSessions` 控制器，只在列表变化时发送，卸载时撤回）。测试先失败；对照实验中忽略这条通知会让测试失败。
+- A2 要求的 daemon `attentionViewed` 日志在代码里不存在，是验证提示词写错了；报告用未读集合清空作为替代证据。
+
+结论与说明：
+
+- **E1 头部按钮被盖住**：两种模式都没有复现，`elementsFromPoint` 的结果栈顶都是按钮本身。`<details>` 关闭时，面板里的按钮仍有非零的 `getBoundingClientRect`，但不参与绘制和命中测试；原来的复现很可能是这种假阳性。侧边会话的工具栏未测。结案，除非再次复现。
+- **E2「本轮已中断」**：这句提示只由 `session-history.ts` 在读取归档后的会话历史时生成，运行中的视图本来就不显示，两种模式一致，归档里 run 的状态是 `interrupted`。不是 daemon 回归，产品上要不要在运行中也显示，另行决定。
+- **E3 运行中再发**：两种模式都是按钮禁用，但状态条写着「新消息将加入队列」。这是已有的文案不一致，不是 daemon 回归。
+- daemon 日志里的 `daemon_capability_unavailable`（`workspaceSelection:read` 31 次、`agent:usageStats`、`agent:gitDiff`、`agent:listCommands`）来自尚未迁移的 L4 组，不只是握手前的空窗，排在后续 L4 分组里处理。
+
 ## 未处理、待证据
 
-- 会话头部按钮被 `.chat-transcript` 盖住：原因未知，需要 macOS 上 `document.elementsFromPoint` 与祖先的 `z-index`/`position`/`overflow` 计算值；
-- 普通会话停止后「本轮已中断」有时不出现（daemon 模式）：需要进程内对照；
-- 统一会话运行中「再发」按钮禁用，但提示文案说会排队：可能是两种模式都有的文案不一致，需要进程内对照；
 - 真实 Pi 走不通：统一会话要求 `pi:<16 位十六进制>` 的 profile id，内置的 `pi:rotom` 被拒绝，是已有的产品限制；
 - L4-2 的验证 agent 用了真实 userData，在真实 `scry.db` 里留下统一会话 9e469a6a（「草稿 L4-2 改名验证」）。关掉 daemon 开关后可在进程内删除。之后的验证提示词强制使用临时 userData。
 - 未在 macOS 与真实 App 中验证。
