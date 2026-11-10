@@ -11,9 +11,9 @@
 
 ## 判定
 
-- Verdict：**incomplete**（`SUMMARY.md` / `acceptance.json`）。没有任何必需规则失败；`R5-direct` 是 blocked（Mac 不在手机所在局域网），因此判定为 incomplete 而不是 pass。
+- Verdict：**incomplete**（`SUMMARY.md` / `acceptance.json`，**只覆盖每个阶段的最后一次运行**）。按最后一次运行，没有必需规则失败；`R5-direct` 是 blocked（Mac 不在手机所在局域网），因此判定为 incomplete 而不是 pass。
 - 通过：`R1-checks`（`ios-checks` 的四项失败记为已知基线：它们在 main 基线上同样复现；**但"基线复现即豁免"是核验者定的规则，尚未经维护者确认**，确认之前 R1 的通过只在这个前提下成立）、`R2-netbench-clean` ×2、`R3-transport` ×2（mux + 5 项能力）、`R4-relay-only`、`R5b` ×2（`phase=open` 失败直连 0 次）、`R6-catalog` ×2（3/3 confirmed）、**`R7-offline-fast` 通过**（样本 1371.6 ms 与 1855.4 ms，都 ≤3000 ms）。
-- **单列、不被重跑抵消**：`wifi-relay` 前两次尝试 5/5 冷开全部失败（`I/O on closed channel`，约 31.1 s，原因未定位，见下文「现象」第 1 条与核验者更正），第三次重跑通过。`SUMMARY.md` / `acceptance.json` 只反映最后一次运行，因此 `R2-netbench-clean` 显示为通过；这次未定位失败如何计入，留待维护者决定。
+- **单列、不被重跑抵消**：`wifi-relay` 前两次尝试冷开全部失败（`I/O on closed channel`，约 31.1 s，原因未定位，见下文「现象」第 1 条与核验者更正），第三次重跑通过。第一次有原始日志支持（`logs/attempt1-netbench-wifi-relay.tail.txt`，5/5 失败）；**第二次的数量只是事后手写记录**（`logs/attempt2-note.tail.txt`，原始文件已被覆盖），未经核实。`SUMMARY.md` / `acceptance.json` 只反映最后一次运行，因此 `R2-netbench-clean` 显示为通过；这次未定位失败如何计入，留待维护者决定。
 
 ## 本轮改动的验证
 
@@ -75,5 +75,5 @@
 
 ## 最终判定
 
-- `summarize.mjs` Verdict：**incomplete**。必需规则里没有失败项；`R5-direct` blocked（Mac 不在手机所在局域网），`R7-offline-fast` 已通过。规则表全文见同目录 `SUMMARY.md`。
+- `summarize.mjs` Verdict：**incomplete**。按每个阶段的最后一次运行，必需规则里没有失败项（`wifi-relay` 前两次失败不在其中，见上文「判定」）；`R5-direct` blocked（Mac 不在手机所在局域网），`R7-offline-fast` 已通过。规则表全文见同目录 `SUMMARY.md`。
 - 一句话：第三轮的两处修复都按预期生效——relay 立即回 `4001`（`relayWaitMs` 600 → 0），手机只等一条 lane，离线答复 1.37–1.86 s，R7 通过且门限未动；冷开 P90 同时从 3742.8 ms 降到 3060.4 ms。唯一遗留是过程中两次 `5/5 冷开 30 s 超时` 的间歇现象，已如实记录，需要 relay 侧 leg 存活证据才能定位。
