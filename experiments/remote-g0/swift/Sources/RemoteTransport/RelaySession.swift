@@ -107,19 +107,41 @@ public final class RelaySession: Sendable {
   // open concurrently. Errors are returned to the caller; a failed prewarm is
   // not evidence that the host is offline (unless the relay said so), and one
   // tunnel's failure must not cancel the other.
+  //
+  // The relay's 4001 is the exception: both tunnels reach the same room, so the
+  // first one to hear "Mac offline" is the answer and the caller gets it at
+  // once instead of waiting for the slower tunnel to repeat it (measured: the
+  // slower lane added 0.5-1.2 s to the offline answer on a long relay path).
   public func prewarm() async throws {
-    var firstError: Error?
-    await withTaskGroup(of: Error?.self) { group in
-      for lane in [Lane.control, Lane.bulk] {
-        let lane = lanes[lane]!
-        group.addTask {
-          do { try await lane.prewarm(); return nil }
-          catch { return error }
+    let jobs: [@Sendable () async throws -> Void] = [Lane.control, Lane.bulk].map { name -> @Sendable () async throws -> Void in
+      let lane = lanes[name]!
+      return { try await lane.prewarm() }
+    }
+    try await Self.settle(jobs, decisive: { RelayTransportError.isHostOffline($0) })
+  }
+
+  // Runs every job concurrently and returns once all have finished, throwing
+  // the first error. A decisive error is returned as soon as it happens; the
+  // other jobs are not abandoned mid-open but finish in the background (a lane
+  // open is shared by later requests, and cancelling it would not stop it).
+  // Cancelling the caller cancels the jobs, as a task group would.
+  static func settle(_ jobs: [@Sendable () async throws -> Void],
+                     decisive: @escaping @Sendable (Error) -> Bool) async throws {
+    guard !jobs.isEmpty else { return }
+    let gate = SettleGate(remaining: jobs.count)
+    try await withTaskCancellationHandler {
+      try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        gate.install(continuation)
+        for job in jobs {
+          gate.add(Task {
+            do { try await job(); gate.finish(nil, decisive: false) }
+            catch { gate.finish(error, decisive: decisive(error)) }
+          })
         }
       }
-      for await error in group where firstError == nil { firstError = error }
+    } onCancel: {
+      gate.cancel()
     }
-    if let firstError { throw firstError }
   }
 
   // Drops every tunnel (app backgrounded, network path changed). In-flight
@@ -211,4 +233,54 @@ struct LaneOpenContext: Sendable {
   let transport: HostTransportState
   let deviceLabel: String?
   let record: @Sendable (RelayConnectTiming) -> Void
+}
+
+// Completion state for RelaySession.settle. The continuation is installed
+// before any job starts, so every finish sees it; it is resumed exactly once.
+private final class SettleGate: @unchecked Sendable {
+  private let lock = NSLock()
+  private var remaining: Int
+  private var firstError: Error?
+  private var continuation: CheckedContinuation<Void, Error>?
+  private var tasks: [Task<Void, Never>] = []
+  private var cancelled = false
+
+  init(remaining: Int) { self.remaining = remaining }
+
+  func install(_ continuation: CheckedContinuation<Void, Error>) {
+    lock.lock(); defer { lock.unlock() }
+    self.continuation = continuation
+  }
+
+  func add(_ task: Task<Void, Never>) {
+    lock.lock()
+    let cancelNow = cancelled
+    if !cancelNow { tasks.append(task) }
+    lock.unlock()
+    if cancelNow { task.cancel() }
+  }
+
+  func cancel() {
+    lock.lock()
+    cancelled = true
+    let running = tasks
+    lock.unlock()
+    for task in running { task.cancel() }
+  }
+
+  func finish(_ error: Error?, decisive: Bool) {
+    lock.lock()
+    remaining -= 1
+    if let error, firstError == nil { firstError = error }
+    var resume: CheckedContinuation<Void, Error>?
+    var outcome: Error?
+    if let pending = continuation, decisive || remaining == 0 {
+      continuation = nil
+      resume = pending
+      outcome = decisive ? error : firstError
+    }
+    lock.unlock()
+    guard let resume else { return }
+    if let outcome { resume.resume(throwing: outcome) } else { resume.resume() }
+  }
 }
