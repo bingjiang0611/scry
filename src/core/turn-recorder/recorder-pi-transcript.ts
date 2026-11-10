@@ -13,6 +13,7 @@ interface PiEntry {
   timestamp?: string
   cwd?: string
   version?: number
+  tokensBefore?: number
   message?: {
     role?: string
     content?: string | Array<Record<string, unknown>>
@@ -120,7 +121,10 @@ export function parsePiTranscript(
     // Pi compacts in place on the ancestry chain; the anchored range already proves this
     // event belongs to the turn, so project it instead of reconstructing one from hooks.
     if (entry.type === 'compaction') {
-      add(entry, 0, { kind: 'harness', stage: 'context_compaction', compaction: {} })
+      const preTokens = typeof entry.tokensBefore === 'number' && Number.isFinite(entry.tokensBefore) && entry.tokensBefore >= 0
+        ? { preTokens: entry.tokensBefore }
+        : {}
+      add(entry, 0, { kind: 'harness', stage: 'context_compaction', compaction: preTokens })
       return
     }
     if (entry.type !== 'message' || !entry.message) return

@@ -1,9 +1,9 @@
-import { open as openFile, stat } from 'node:fs/promises'
+import { open as openFile, rm, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { captureToolContent, isFullToolContentPolicy } from './tool-content.js'
 import { appendRotatingLog, readJson, writeJsonAtomic } from './io.js'
-import { findRecordById, listRecords, updateHealth, stableHash } from './store.js'
+import { findRecordById, listRecords, updateHealth, safeKey, stableHash } from './store.js'
 import { recorderOpenPath as openPath, recorderStatePath as statePath, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
 import type { RecorderEnablement } from './config.js'
 import { storeLifecycleEvent } from './recorder-turn-state.js'
@@ -52,18 +52,56 @@ export function isSynthetic(payload: Record<string, unknown>): boolean {
   return payload.isMeta === true || payload.synthetic === true || stringAt(payload, 'source') === 'synthetic'
 }
 
+const CODEX_TITLE_INSTRUCTION = 'Generate a concise, single-line task title of at most 36 characters'
+const CODEX_TITLE_PROMPT_SEPARATOR = '\n\nUser prompt:\n'
+
 /**
  * Codex asks the model for a short UI title in a throwaway session before the real turn.
  * That request carries the fixed title instruction plus the captured user prompt, so the
- * lifecycle hooks cannot reuse an origin marker; keep the instruction-specific prefix and
- * the embedded prompt marker so a normal user prompt is never dropped by a fuzzy match.
+ * lifecycle hooks cannot reuse an origin marker. Require the instruction opening, the exact
+ * blank-line separator and the instruction's closing sentence together: a real prompt that
+ * merely shares the opening words, or mentions "User prompt:" inline, is never ignored.
  */
 export function isCodexInternalPrompt(payload: Record<string, unknown>): boolean {
   const prompt = stringAt(payload, 'prompt', 'user_prompt', 'userPrompt')
   if (!prompt) return false
   const normalized = prompt.replace(/^\s+/, '')
-  return normalized.startsWith('Generate a concise, single-line task title of at most 36 characters') &&
-    normalized.includes('User prompt:')
+  if (!normalized.startsWith(CODEX_TITLE_INSTRUCTION)) return false
+  const separator = normalized.indexOf(CODEX_TITLE_PROMPT_SEPARATOR)
+  if (separator < 0) return false
+  return normalized.slice(0, separator).trimEnd().endsWith('Do not answer the request.')
+}
+
+/**
+ * The title session has no evidence of its own, but its paired terminal still arrives. Remember
+ * the ignored identity so the terminal is ignored too instead of becoming an orphan event that
+ * raises `missingStartTerminals` and `lastError` in health.
+ */
+export async function markCodexInternalTurn(
+  dataRoot: string,
+  provider: ProviderId,
+  sessionId: string,
+  turnId: string
+): Promise<void> {
+  await writeJsonAtomic(internalTurnPath(dataRoot, provider, sessionId, turnId), {
+    schemaVersion: 1, sessionId, turnId, at: observedNow()
+  })
+}
+
+export async function consumeCodexInternalTurn(
+  dataRoot: string,
+  provider: ProviderId,
+  sessionId: string,
+  turnId: string
+): Promise<boolean> {
+  const path = internalTurnPath(dataRoot, provider, sessionId, turnId)
+  if (!await readJson(path)) return false
+  await rm(path, { force: true })
+  return true
+}
+
+function internalTurnPath(dataRoot: string, provider: ProviderId, sessionId: string, turnId: string): string {
+  return join(dataRoot, 'runtime', provider, 'internal-turns', `${safeKey(sessionId)}-${safeKey(turnId)}.json`)
 }
 
 /**

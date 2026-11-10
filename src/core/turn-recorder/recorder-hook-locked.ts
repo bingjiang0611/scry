@@ -9,7 +9,7 @@ import type { RecorderEnablement } from './config.js'
 import { END_EVENTS, SESSION_END_EVENTS, START_EVENTS, hookArrival, type RecorderHookInput, type RecorderHookResult, type QueuedHook, explicitTimestampOf, providerTurnIdOf, promptOf, stringAt, subagentScopedPayload, terminalStatus, timestampOf, startFingerprintOf, STALE_TERMINAL_PROVIDERS, STOP_HOOK_ACTIVE_PROVIDERS, STALE_TERMINAL_WINDOW_MS } from './recorder-contracts.js'
 import { beginOpenTurn, quarantineOpenTurn, storeLifecycleEvent } from './recorder-turn-state.js'
 import { finalizeOpenTurn } from './recorder-turn-finalize.js'
-import { isClaudeTaskNotification, isCommittedProviderTurn, isContinuationProviderTurn, isLateQoderTerminalDuplicate, recordClaudeTaskNotification, storeOrphanEvent, continuationProviderTurnIds } from './recorder-hook-support.js'
+import { isClaudeTaskNotification, isCommittedProviderTurn, isContinuationProviderTurn, isLateQoderTerminalDuplicate, recordClaudeTaskNotification, storeOrphanEvent, continuationProviderTurnIds, consumeCodexInternalTurn } from './recorder-hook-support.js'
 import { snapshotSessionNetDiff } from './git.js'
 import { terminalSnapshot } from './git-capture.js'
 
@@ -136,6 +136,10 @@ export async function applyHookLocked(
       }
     }
     if (input.managed && !terminal) return { status: 'ignored' as const, reason: 'managed turn has no open identity' }
+    if (input.provider === 'codex' && terminal && incomingProviderTurnId &&
+      await consumeCodexInternalTurn(enablement.dataRoot, input.provider, sessionId, incomingProviderTurnId)) {
+      return { status: 'ignored' as const, reason: 'codex internal title turn' }
+    }
     return storeOrphanEvent(enablement, root, input, terminal)
   }
   if (open.managedByScry) {
