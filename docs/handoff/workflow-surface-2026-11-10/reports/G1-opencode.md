@@ -1,10 +1,12 @@
-# G4 · OpenCode 空状态：整轮测量 + 真实指针切换回来仍是空态
+# G1 · OpenCode 部分：真实一轮 + 面板空态
+
+> R2 的工作包 G1 要求四个 Provider 都做；本文件是其中 OpenCode 一份。总览见 [G1](G1.md)。
 
 **结论**：用 Scry 自己声明的支持版本（`opencode` 1.18.31）在真实 App 里跑通了一整轮 OpenCode 会话。Workflow 面板是空态，文案不与 OpenCode 的能力冲突；用真实指针切到「总览」再切回来，面板仍是同一个空态，没有出现「状态未知」的零行运行。canonical 流 71 行，`workflow_activity` 为 0，没有任何 `task_*` 事件。
 
 ## 先解决一个环境前提
 
-本机装的 `opencode` 是 2.2.6，发送后 `POST /session → HTTP 405`（见 [G1](G1.md)）。用手工起的服务复现：2.2.6 的 `POST /session` 就是 405，`@opencode-ai/sdk` 1.18.25 打不通它。
+本机装的 `opencode` 是 2.2.6，发送后 `POST /session → HTTP 405`（见 [G1](G1.md) 的 OpenCode 小节）。用手工起的服务复现：2.2.6 的 `POST /session` 就是 405，`@opencode-ai/sdk` 1.18.25 打不通它。
 
 于是我装了仓库兼容性清单里的版本，用 Scry 自己的覆盖变量指过去：
 

@@ -22,11 +22,11 @@
 
 | 包 | 条目 | 状态 | 报告 |
 |---|---|---|---|
-| G1 | 四个 Provider 的真实事件负对照，含与 main 的对照 | 部分完成 | [reports/G1.md](reports/G1.md) | Codex 真实跑通两个子 Agent，与 main 逐项一致、`workflow_activity` 为 0；Pi 原生空态正确；Qoder（exit 42，仓库外同 SDK 复现）、OpenCode（405，版本超出支持范围）、Pi rotom（rotom 安装缺 `model-catalog.mjs`）三个 Provider 阻塞，均有归因证据 |
-| G2 | 运行选择被拉回的组件级回归与负对照 | 未开始 | |
-| G3 | 在最新 HEAD 上重跑门禁 | 未开始 | |
-| G4 | C7 与相邻路径收尾 | 未开始 | |
-| G5 | 其他 Provider 接入的设计说明（不实现） | 未开始 | |
+| G1 | 四个 Provider 的真实事件负对照，含与 main 的对照 | 完成（两处阻塞） | [G1](reports/G1.md) · [Qoder 部分](reports/G1-qoder.md) · [OpenCode 部分](reports/G1-opencode.md) | Codex 真实两个子 Agent，与 `origin/main` 逐项一致、`workflow_activity` 0；Pi 原生空态正确；OpenCode 换到支持范围内 1.18.31 后跑通真实一轮、空态正确。**阻塞**：Qoder 在分支与 main 上同样 exit 42（仓库外同 SDK 复现），本机 2.2.6 的 OpenCode 405，Pi rotom 安装缺 `model-catalog.mjs` |
+| G2 | 运行选择被拉回的组件级回归与负对照 | 完成 | [G2](reports/G2.md) | `test:workflow-ui` 新增 `focus` 模式，两个宽度通过；删掉清空请求那一行后真的失败 |
+| G3 | 在最新 HEAD 上重跑门禁 | 未开始 | | |
+| G4 | C7 与相邻路径收尾 | 未开始 | | |
+| G5 | 其他 Provider 接入的设计说明（不实现） | 未开始 | | |
 
 ## 审查方核验结论（2026-11-10，Linux x64 容器，Xvfb，非 root，Chromium 沙箱开启）
 

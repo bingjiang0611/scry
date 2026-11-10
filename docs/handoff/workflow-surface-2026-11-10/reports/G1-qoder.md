@@ -1,4 +1,6 @@
-# G3 · Qoder 桌面 Agent 的真实事件、canonical 事件与面板表现
+# G1 · Qoder 部分：真实事件、canonical 事件与面板表现
+
+> R2 的工作包 G1 要求四个 Provider 都做；本文件是其中 Qoder 一份。总览见 [G1](G1.md)。
 
 **结论**：Qoder 在本机跑不起来（`Qoder CLI process exited with code 42`），`origin/main` 上同样如此，所以这不是本分支的回归。真实事件拿不到，因此「Qoder 的后台 Agent 不会显示成 Workflow」这一条**改用 SDK 声明的字段形状**验证，并做了负对照。Qoder 有没有 Workflow 能力：SDK 的 `SDK_DEFAULT_TOOLS` 里没有 `Workflow`，任务消息里没有 `workflow_progress`。
 
@@ -13,7 +15,7 @@
 | Workflow 面板 | 空态（main 没有这个 Surface） | — |
 | 事件日志 | 13 行：`hook_started`、`hook_response`、`input_receipt`、`credit_usage`、`summary`，无 `task_*` | 同样无 `task_*` |
 
-归因见 [G1](G1.md)：用同一个 `@qoder-ai/qoder-agent-sdk@1.0.17` 在仓库外直接调用本机 `qodercli` 也是 exit 42；同机 `qodercli -p` 命令行正常。所以问题在 SDK 双向流路径，不在 Scry。
+归因见 [G1](G1.md) 的 Qoder 小节：用同一个 `@qoder-ai/qoder-agent-sdk@1.0.17` 在仓库外直接调用本机 `qodercli` 也是 exit 42；同机 `qodercli -p` 命令行正常。所以问题在 SDK 双向流路径，不在 Scry。
 
 证据：`evidence/screens/g1-qoder-blocked.png`（分支）、`evidence/screens/g3-main-qoder-blocked.png`（main）。
 
