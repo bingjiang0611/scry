@@ -93,9 +93,7 @@ final class RemoteSessionRegistry: @unchecked Sendable {
                executionTarget: G0Transport.ExecutionTargetBinding?,
                identity: @escaping @Sendable () throws -> G0ProbeIdentity,
                endpoint: () -> G0Transport.RelayEndpoint) -> RelaySession {
-    let targetKey = executionTarget.map { "\($0.id):\($0.binding)" } ?? "local"
-    let wanted = [connection.relayHost, String(connection.relayPort), connection.relayTLS, connection.hostId,
-                  connection.deviceId, keychainService, connection.anchorPEM, targetKey].joined(separator: "\u{1f}")
+    let wanted = Self.key(for: connection, keychainService: keychainService, executionTarget: executionTarget)
     return lock.withLock {
       recentKeys.removeAll { $0 == wanted }
       recentKeys.append(wanted)
@@ -113,6 +111,26 @@ final class RemoteSessionRegistry: @unchecked Sendable {
       if foreground { Task { await session.setForeground(true) } }
       return session
     }
+  }
+
+  // Drops the cached session for one connection. The offline probe dials a room
+  // no host serves, and that throwaway session is not a Mac this phone can use:
+  // left behind, it reports itself as this phone's transport evidence forever.
+  func discard(connection: RemoteConnection, keychainService: String,
+               executionTarget: G0Transport.ExecutionTargetBinding?) async {
+    let wanted = Self.key(for: connection, keychainService: keychainService, executionTarget: executionTarget)
+    let dropped = lock.withLock { () -> RelaySession? in
+      recentKeys.removeAll { $0 == wanted }
+      return sessions.removeValue(forKey: wanted)
+    }
+    if let dropped { await dropped.reset() }
+  }
+
+  private static func key(for connection: RemoteConnection, keychainService: String,
+                          executionTarget: G0Transport.ExecutionTargetBinding?) -> String {
+    let targetKey = executionTarget.map { "\($0.id):\($0.binding)" } ?? "local"
+    return [connection.relayHost, String(connection.relayPort), connection.relayTLS, connection.hostId,
+            connection.deviceId, keychainService, connection.anchorPEM, targetKey].joined(separator: "\u{1f}")
   }
 
   // Foreground keeps multiplexed tunnels warm with pings when they go silent;

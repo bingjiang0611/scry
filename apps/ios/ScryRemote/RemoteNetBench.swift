@@ -125,14 +125,19 @@ extension RemoteSelfTest {
       // phone stops at once instead of retrying.
       var absent = connection
       absent.hostId = UUID().uuidString.lowercased()
+      let offline = RemoteRunClient(connection: absent)
       let offlineStart = Date()
       do {
-        try await RemoteRunClient(connection: absent).prewarm()
+        try await offline.prewarm()
         emit("offline-probe", ["ms": elapsed(offlineStart), "unexpected": "connected to an unused room"])
       } catch {
         emit("offline-probe", ["ms": elapsed(offlineStart), "hostOffline": RelayTransportError.isHostOffline(error),
                                "error": RemoteRunStore.describe(error)])
       }
+      // The probe's room has no host, so its session is not a Mac this phone can
+      // use; leaving it registered would report it as transport evidence.
+      await RemoteSessionRegistry.shared.discard(connection: absent, keychainService: offline.keychain.service,
+                                                 executionTarget: offline.executionTarget)
       let target = catalog.first { ($0.externalSessionId ?? $0.sessionId) == sessionFilter } ??
         (sessionFilter == nil ? catalog.first { $0.externalSessionId != nil } : nil)
       if let target, let external = target.externalSessionId {
