@@ -6,6 +6,13 @@
 - 背景与协议说明：`docs/remote-network-measurement.md`。本文只写怎么执行、怎么判定、交回什么。
 - 已有证据（不必重复证明）：macOS CI 在 `edd56b9` 上已通过 `swift test`、Swift 构建和 iOS 产品 App 编译；Linux 上已通过 Node 单测和 relay smoke。
 
+## 第三轮核验结论（核验者，2026-11-10）
+
+- 结果 `results/20261110T084031Z` 与原始数据一致，没有本机修复，规则和门限未动。R7 通过（1371.6 / 1855.4 ms），两处修复在真机上都生效（relay 探针 `relayWaitMs` 600 → 0）。除 R5 外所有必需规则通过；R5 blocked 是环境前提（Mac 不在手机所在 Wi-Fi），不是缺陷。
+- **对两次"5/5 冷开约 31 s 失败"的诊断需要更正**：REPORT 把它归因为 host leg 陈旧、内层握手无应答，但数值和错误类型不支持这个结论。内层握手超时在手机上报的是 `timedOut(lane-handshake)`，显示为超时文案；而这两次报的是 `I/O on closed channel`。后者来自外层建连的 10 s 看门狗（`TransportConnection.swift`：TCP + 外层 TLS + WebSocket 升级必须在 10 s 内完成，否则关闭通道）。每轮 31.1 s 恰好等于 3 次 × 10 s 加 0.25 s + 0.8 s 的重试间隔。所以卡住的是**手机到 Cloudflare 的外层建连**（TCP、外层 TLS 或升级三者之一），不是 Mac 的 leg。当时 relay 日志里的 `hostLeg=FOUND` 来自其他成功的连接。
+- 卡在外层哪一段，需要失败那次的分阶段计时；这次被成功的重跑覆盖了。`local-verify.sh` 已改为：重跑前把旧的原始输出改名保留，失败的运行另存一份带隧道计时的 `logs/netbench-<场景>.failed-<时间>.tail.txt`。
+- 以后再复现时，交回这份文件即可：看失败记录里 `tcpMs`、`outerTLSMs`、`upgradeMs` 停在哪一段，再决定改手机网络层（Network.framework 等待策略）还是查 relay 入口。在拿到这份证据之前，不改超时，也不改重试次数。
+
 ## 第三轮（2026-11-10，基于第二轮结果 `results/20261110T033802Z`）
 
 第二轮的核验结论：报告与数据一致；3 个本机修复（`a6b2b68`、`bbfbf39`、`8d6c104`）都正确，各有回滚即失败的测试，没有放宽任何规则。R3、R5b、R6 的规则缺陷和 host 广播缺陷都已消除。唯一失败的 R7 是真实的时延问题（不是规则问题），本轮代码已修复两处，3000 ms 门限不变：
