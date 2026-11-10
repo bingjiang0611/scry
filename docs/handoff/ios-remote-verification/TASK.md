@@ -6,6 +6,23 @@
 - 背景与协议说明：`docs/remote-network-measurement.md`。本文只写怎么执行、怎么判定、交回什么。
 - 已有证据（不必重复证明）：macOS CI 在 `edd56b9` 上已通过 `swift test`、Swift 构建和 iOS 产品 App 编译；Linux 上已通过 Node 单测和 relay smoke。
 
+## 第四轮（2026-11-10，Mac 与手机同一 Wi-Fi，判定 R5）
+
+维护者确认 Mac 和手机现在在同一个 Wi-Fi 上。本轮目标是拿到 R5 的判定；其余规则在当前代码上复核一遍。
+
+- **先同步分支**：分支历史为清除个人标识重写过（强推）。开始前执行 `git fetch origin claude/ios-remote-connection-issues-o7oj6x && git reset --hard origin/claude/ios-remote-connection-issues-o7oj6x`。本地如有未推送的改动，先另存再重置。
+- **跑全量** `all`，用新的时间戳。第三轮之后 App、iOS 和 Swift 传输层的代码都有改动（main 的合入、`RelaySession.settle`、`mux_busy` 退避、唤醒后刷新 relay），所以 `install-mac`、`build-ios`、`install-ios` 都要重新执行，不能沿用旧产物。relay（`cf-relay/`）自第三轮以来没有改动，**不需要重新部署**。
+- 结果目录现在会先做安全检查（`verify/private-dir.mjs`）：从 `/` 到结果目录的每一层只能属于当前用户或 root，并且其他账户不能写；路径里不能有 `.`、`..`，也不能经过非 root 的符号链接。默认路径在仓库内，一般不会触发。如果被拒绝，按错误信息修正 `SCRY_VERIFY_RESULTS`，不要绕过检查。
+- **R5 的预期**：`wifi-auto` 的 `environment.localNetwork=true`，Mac 广播了至少一个局域网地址，并且至少有一条隧道走 `direct`；从第二轮冷开起应当走直连。
+- **R5 不通过时**，依次检查以下几项，并把证据写进 REPORT：
+  1. `lsof -nP -iTCP:47820 -sTCP:LISTEN` 是否有 Scry 在监听；如果设置了 `SCRY_REMOTE_LAN=0`，监听会被关闭。
+  2. macOS 防火墙是否放行 Scry。
+  3. iOS「设置 → 隐私与安全性 → 本地网络」里是否允许了 ScryRemote。
+  4. `wifi-auto` 原始输出中的 `directRoutes`，以及每次直连尝试的错误。
+  5. 两台设备是否真在同一网段。注意访客网络或开了「AP 隔离」的 Wi-Fi 会阻止设备互访，这种情况记为环境限制，判 blocked，不算缺陷。
+- 同时记录 R5b：打开连接的路径上（`phase=open`）不应出现失败的直连尝试。
+- 其余要求不变，按下文执行：不改门限，不跳过规则；同一个失败修两次仍不行就停下，把证据写进 REPORT；结果和 REPORT 推送到本分支。
+
 ## 第三轮核验结论（核验者，2026-11-10）
 
 - 结果 `results/20261110T084031Z` 与原始数据一致，没有本机修复，规则和门限未动。R7 通过（1371.6 / 1855.4 ms），两处修复在真机上都生效（relay 探针 `relayWaitMs` 600 → 0）。除 R5 外所有必需规则通过；R5 blocked 是环境前提（Mac 不在手机所在 Wi-Fi），不是缺陷。
