@@ -121,6 +121,28 @@ test('an offline sample without a duration is missing evidence, never a slow fai
   try {
     const r7 = run(dir).rules.find((r) => r.id === 'R7-offline-fast')
     assert.equal(r7.status, 'blocked')
-    assert.match(r7.detail, /none has a measured duration/)
+    assert.match(r7.detail, /without a measured duration/)
   } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('a fast timed sample does not let an untimed one pass R7; a slow or wrong sample still fails', () => {
+  const run7 = (files) => {
+    const dir = results({ 'checks.json': checksPass, 'relay-probe-mac.jsonl': probe(4001), ...files })
+    try { return run(dir).rules.find((r) => r.id === 'R7-offline-fast') } finally { rmSync(dir, { recursive: true, force: true }) }
+  }
+  const mixed = run7({
+    'netbench-wifi-relay.jsonl': scenario('wifi-relay', { offline: { ms: 1400, hostOffline: true } }),
+    'netbench-wifi-auto.jsonl': scenario('wifi-auto', { offline: { hostOffline: true } })
+  })
+  assert.equal(mixed.status, 'blocked', mixed.detail)
+  const slow = run7({
+    'netbench-wifi-relay.jsonl': scenario('wifi-relay', { offline: { ms: 5200, hostOffline: true } }),
+    'netbench-wifi-auto.jsonl': scenario('wifi-auto', { offline: { hostOffline: true } })
+  })
+  assert.equal(slow.status, 'fail', slow.detail)
+  const wrong = run7({
+    'netbench-wifi-relay.jsonl': scenario('wifi-relay', { offline: { ms: 1400, hostOffline: true } }),
+    'netbench-wifi-auto.jsonl': scenario('wifi-auto', { offline: { hostOffline: false } })
+  })
+  assert.equal(wrong.status, 'fail', wrong.detail)
 })

@@ -173,17 +173,18 @@ export function evaluate({ checks, scenarios, probes }) {
   else if (offlineSamples.length === 0) rule('R7-offline-fast', true, 'blocked', 'no offline-probe event and no host-quit scenario')
   else {
     // A sample without a measured duration is missing evidence, not a slow
-    // answer: judge only timed samples, and block when none is timed.
+    // answer: it can never make R7 pass (blocked), and alone it never makes
+    // R7 fail. Definite failures still fail: a wrong classification (every
+    // sample must say offline; that needs no timing) or a timed answer over
+    // the budget.
     const timed = offlineSamples.filter((sample) => Number.isFinite(sample.ms))
     const untimed = offlineSamples.length - timed.length
-    if (timed.length === 0) rule('R7-offline-fast', true, 'blocked', `samples=${offlineSamples.length} but none has a measured duration`)
-    else {
-      const slowest = Math.max(...timed.map((sample) => sample.ms))
-      // The classification needs no timing: every sample must say offline.
-      const allOffline = offlineSamples.every((sample) => sample.hostOffline === true)
-      const ok = allOffline && slowest <= 3000
-      rule('R7-offline-fast', true, ok ? 'pass' : 'fail', `samples=${timed.length}${untimed ? ` (untimed ignored: ${untimed})` : ''} allHostOffline=${allOffline} slowestMs=${slowest} sample=${JSON.stringify(timed[0])}`)
-    }
+    const allOffline = offlineSamples.every((sample) => sample.hostOffline === true)
+    const slowest = timed.length ? Math.max(...timed.map((sample) => sample.ms)) : null
+    const detail = `samples=${offlineSamples.length} timed=${timed.length} allHostOffline=${allOffline} slowestMs=${slowest ?? 'unavailable'} sample=${JSON.stringify(timed[0] ?? offlineSamples[0])}`
+    if (!allOffline || (slowest !== null && slowest > 3000)) rule('R7-offline-fast', true, 'fail', detail)
+    else if (untimed > 0) rule('R7-offline-fast', true, 'blocked', `${untimed} sample(s) without a measured duration; ${detail}`)
+    else rule('R7-offline-fast', true, 'pass', detail)
   }
 
   // Informational comparisons (never fail the run).
