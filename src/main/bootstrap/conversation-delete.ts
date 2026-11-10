@@ -76,11 +76,15 @@ export function registerConversationDeletionHandlers(deps: DeletionDependencies)
   /** The plan a user confirms for one conversation: its own scope plus its side chats. */
   async function previewWithSideChats(conversation: Conversation): Promise<ConversationDeletionPreview> {
     const evidence = await workspaceEvidence(conversation.cwd)
-    const plan = await prepareConversationDeletion(conversation, { evidence })
     // A side chat is never a parent, and nesting is refused at creation.
-    if (conversation.sideChat) return plan
+    if (conversation.sideChat) return prepareConversationDeletion(conversation, { evidence })
+    // Children are planned before the parent. A child that is running or whose first
+    // delivery never settled is also what the parent's cross-conversation scope guard
+    // rejects, and that guard can only say the Provider storage is unproven; planning the
+    // child first keeps the refusal that names it, which is the only one the user can act on.
     const children = sideChatsOf([{ kind: 'conversation', conversationId: conversation.id }], evidence.others)
-    return withSideChats(plan, await planSideChats(children, evidence))
+    const sideChats = await planSideChats(children, evidence)
+    return withSideChats(await prepareConversationDeletion(conversation, { evidence }), sideChats)
   }
 
   /** Runs one deletion whose authorization is already persisted, down to its receipt. */

@@ -143,6 +143,23 @@ describe('deleting a conversation takes its side chats along', () => {
     expect(await status(running.id)).toBeNull()
   })
 
+  it('names a side chat whose first send has not settled instead of the parent scope guard', async () => {
+    const { current, invoke, child, archivedParent, archive, status } = await setup()
+    const parent = await archivedParent()
+    const running = await child({ kind: 'conversation', conversationId: parent.id }, 'cascade-first-send-unsettled')
+    // A just-started side chat: its first dispatch is recorded but no native session id is,
+    // which is the same evidence the parent's cross-conversation scope guard rejects. The
+    // user still has to be told which child holds the delete, not that some Provider
+    // storage is unproven.
+    current.pending = true
+    await sendTurn(current, running.id, 'cascade-first-send-unsettled-turn', 'child question')
+    current.pending = false
+    await archive(parent.id)
+    await expect(invoke('conversation:previewDeletion', parent.id)).rejects.toThrow(/侧边会话「.+」不能随主会话删除/)
+    expect(await status(parent.id)).toBeNull()
+    expect(await status(running.id)).toBeNull()
+  })
+
   it('leaves the parent pending for another preview when a side chat could not be cleaned', async () => {
     const { current, invoke, child, archivedParent, archive, status, failing } = await setup()
     const parent = await archivedParent()
