@@ -51,6 +51,7 @@
     "test:conversation:ipc": "npm run build && npm run test:conversation:ipc:prebuilt",
     "test:conversation:ipc:prebuilt": "node scripts/electron-security-smoke.mjs --dev-conversation-ownership-only && node scripts/electron-security-smoke.mjs --dev-unified-conversation-only",
     "test:background-ui": "node scripts/background-work-ui-smoke.mjs",
+    "test:workflow-ui": "node scripts/workflow-surface-ui-smoke.mjs",
     "test:steer-ui": "node scripts/steer-ui-smoke.mjs",
     "test:remote-queue-ui": "node scripts/remote-prompt-queue-ui-smoke.mjs",
     "test:desktop-remote": "npm run build && npm run build:cli && node scripts/desktop-remote-ui-smoke.mjs --session-opening-only && node scripts/desktop-remote-host-smoke.mjs --dev && node scripts/desktop-remote-ui-smoke.mjs && node scripts/desktop-remote-ui-smoke.mjs --session-parity-only && node scripts/desktop-remote-ui-smoke.mjs --composer-history-only && node scripts/desktop-remote-ui-smoke.mjs --remote-settings-only && node scripts/desktop-remote-ui-smoke.mjs --session-lifecycle-only",

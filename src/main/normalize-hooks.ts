@@ -3,6 +3,7 @@
 
 import type { TraceEvent } from '../shared/trace.js'
 import { base, stringValue, type NormalizeCtx } from './normalize-core.js'
+import { normalizeWorkflowTaskMessage } from './normalize-workflow.js'
 
 function agentTaskToolUseId(
   message: Record<string, unknown>,
@@ -87,8 +88,11 @@ function normalizeAgentTaskMessage(
 
 export function normalizeHookMessage(m: Record<string, unknown>, ctx: NormalizeCtx): TraceEvent[] {
   const subtype = typeof m.subtype === 'string' ? m.subtype : ''
-  if (subtype === 'task_started' || subtype === 'task_progress' || subtype === 'task_notification') {
-    return normalizeAgentTaskMessage(m, ctx, subtype)
+  if (subtype === 'task_started' || subtype === 'task_progress' || subtype === 'task_updated' || subtype === 'task_notification') {
+    // Workflow tasks are a separate lifecycle; they must not be folded into Agent rows.
+    const workflow = normalizeWorkflowTaskMessage(m, ctx, subtype)
+    if (workflow) return workflow
+    return subtype === 'task_updated' ? [] : normalizeAgentTaskMessage(m, ctx, subtype)
   }
   if (subtype === 'compact_boundary') {
     const rawMetadata = m.compact_metadata ?? m.compactMetadata

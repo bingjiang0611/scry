@@ -1,4 +1,4 @@
-export const RIGHT_SURFACE_KINDS = ['overview', 'files', 'diff', 'source-control', 'terminal', 'agents'] as const
+export const RIGHT_SURFACE_KINDS = ['overview', 'files', 'diff', 'source-control', 'terminal', 'agents', 'workflow'] as const
 
 export type RightSurfaceKind = (typeof RIGHT_SURFACE_KINDS)[number]
 
@@ -6,7 +6,7 @@ export interface RightSurfaceDefinition {
   kind: RightSurfaceKind
   label: string
   description: string
-  icon: 'overview' | 'folder' | 'diff' | 'terminal' | 'agents'
+  icon: 'overview' | 'folder' | 'diff' | 'terminal' | 'agents' | 'workflow'
 }
 
 export const RIGHT_SURFACE_DEFINITIONS: readonly RightSurfaceDefinition[] = [
@@ -45,6 +45,12 @@ export const RIGHT_SURFACE_DEFINITIONS: readonly RightSurfaceDefinition[] = [
     label: 'Agents',
     description: '查看子 Agent 的状态、活动与工具调用。',
     icon: 'agents'
+  },
+  {
+    kind: 'workflow',
+    label: 'Workflow',
+    description: '查看 Claude Code workflow 的脚本、阶段与 agent 进度。',
+    icon: 'workflow'
   }
 ]
 

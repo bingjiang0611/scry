@@ -130,14 +130,15 @@ describe('right surface state', () => {
 })
 
 describe('right surface catalog', () => {
-  it('完整且无重复地声明六种 Surface', () => {
+  it('完整且无重复地声明七种 Surface', () => {
     expect(RIGHT_SURFACE_DEFINITIONS.map((surface) => surface.kind)).toEqual([
       'overview',
       'files',
       'diff',
       'source-control',
       'terminal',
-      'agents'
+      'agents',
+      'workflow'
     ])
   })
 

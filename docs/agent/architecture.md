@@ -60,6 +60,7 @@ React renderer
 - `src/main/providers/{claude,codex,qoder,opencode,pi}.ts`：transport-specific adapter。
 - `src/shared/{provider,runtime,trace,turn-record,workspace,terminal}.ts`：跨进程与持久合同。
 - `src/main/{agent-runner,run-registry,run-outcome}.ts`：执行、活动 run 与结局。
+- `src/shared/claude-workflow.ts`、`src/main/normalize-workflow.ts`、`src/renderer/workflow-runs.ts`：Claude Code 原生 workflow 的观测合同、任务事件行增量归一化与 Workflow 面板投影。只观测不调度；阶段/agent 明细来自未公开的 `workflow_progress` 字段，缺失时为 unavailable。
 - `src/main/{renderer-security,workspace-authorization}.ts`：renderer 与 workspace 文件信任边界。
 - `src/main/{mcp-execution-trust,commit-hook-trust,codex-hook-trust,opencode-plugin-trust}.ts`：仓库控制执行的指纹授权。
 - `src/main/{db,db-migrations,db-outbox,span-ledger,billing-ledger}.ts`：SQLite、分析与账单。

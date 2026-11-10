@@ -62,6 +62,11 @@ export async function exerciseSurfaces(smokeContext) {
     await new Promise((resolve) => setTimeout(resolve, 50))
     const panel = current('.right-surface-panel')
     const terminal = panel ? await openSurface('终端', '.terminal-surface') : null
+    // A fixture session never ran a Claude Code workflow: the tab must open and say so,
+    // not render zero-count phases.
+    const workflow = terminal ? await openSurface('Workflow', '.workflow-surface') : null
+    const workflowEmpty = workflow?.textContent?.includes('本会话尚未观测到 Workflow') === true
+      && !workflow.querySelector('.workflow-phase')
     const agents = terminal ? await openSurface('Agents', '.agents-surface') : null
     const activeTab = current('[role="tab"][aria-selected="true"]')
     const terminalPanel = current('.surface-content-terminal')
@@ -92,6 +97,8 @@ export async function exerciseSurfaces(smokeContext) {
       scopedSelection,
       panel: !!panel,
       terminal: !!terminal,
+      workflow: !!workflow,
+      workflowEmpty,
       agents: !!agents,
       agentsActive: activeTab?.textContent?.includes('Agents') === true,
       terminalHiddenButMounted: terminalPanel?.hidden === true && terminalRetained,
@@ -112,6 +119,8 @@ export async function exerciseSurfaces(smokeContext) {
     scopedSelection: true,
     panel: true,
     terminal: true,
+    workflow: true,
+    workflowEmpty: true,
     agents: true,
     agentsActive: true,
     terminalHiddenButMounted: true,

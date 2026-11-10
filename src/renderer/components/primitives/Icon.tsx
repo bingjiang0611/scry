@@ -6,7 +6,7 @@ export type IconName =
   | 'plus' | 'minus' | 'search' | 'folder' | 'file' | 'box' | 'cube' | 'tool' | 'bulb' | 'message'
   | 'chart' | 'grid' | 'refresh' | 'filter' | 'check' | 'x' | 'copy'
   | 'chevronRight' | 'chevronDown' | 'chevronUp' | 'alert' | 'info' | 'clock' | 'lock' | 'square'
-  | 'image' | 'send' | 'arrowUp' | 'settings' | 'overview' | 'summary' | 'diff' | 'terminal' | 'agents' | 'panel'
+  | 'image' | 'send' | 'arrowUp' | 'settings' | 'overview' | 'summary' | 'diff' | 'terminal' | 'agents' | 'workflow' | 'panel'
   | 'globe' | 'laptop' | 'server' | 'plug' | 'expand' | 'collapse' | 'trash' | 'pin' | 'archive' | 'undo' | 'edit' | 'compose' | 'branch'
 
 const PATHS: Record<IconName, ReactNode> = {
@@ -127,6 +127,14 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <rect x="5" y="7" width="14" height="11" rx="3" />
       <path d="M12 3v4M8 12h.01M16 12h.01M9 16h6M3 11H1m22 0h-2" />
+    </>
+  ),
+  workflow: (
+    <>
+      <rect x="9" y="3" width="6" height="5" rx="1.5" />
+      <rect x="3" y="16" width="6" height="5" rx="1.5" />
+      <rect x="15" y="16" width="6" height="5" rx="1.5" />
+      <path d="M12 8v4M6 16v-2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2" />
     </>
   ),
   panel: (

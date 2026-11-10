@@ -1,6 +1,7 @@
 import { randomUUID, createHash } from 'node:crypto'
 import { open, stat } from 'node:fs/promises'
 import { serialize } from 'node:v8'
+import { cloneWorkflowNormalizeState } from './normalize-workflow.js'
 import {
   appendTranscriptToTurns, createTranscriptParseState,
   type NormalizeCtx, type ParsedTurn, type TranscriptParseState
@@ -63,6 +64,7 @@ function forkCheckpoint(previous: Checkpoint): Checkpoint {
   if (context.agentToolUseIds) context.agentToolUseIds = new Set(context.agentToolUseIds)
   if (context.agentTaskToolUseById) context.agentTaskToolUseById = new Map(context.agentTaskToolUseById)
   if (context.streamMessageIds) context.streamMessageIds = new Map(context.streamMessageIds)
+  if (context.workflow) context.workflow = cloneWorkflowNormalizeState(context.workflow)
   return { ...previous, parser, context }
 }
 

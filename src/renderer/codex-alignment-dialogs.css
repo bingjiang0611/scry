@@ -72,7 +72,8 @@
 .surface-content,
 .surface-content > .panel,
 .surface-content > .workspace-panel,
-.surface-content > .agents-surface {
+.surface-content > .agents-surface,
+.surface-content > .workflow-surface {
   background: transparent;
 }
 

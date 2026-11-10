@@ -21,6 +21,7 @@ import { useLegacyDiffPreviewDemand } from './hooks/useLegacyDiffPreviewDemand'
 import { SIDE_CHAT_COPY } from './constants/side-chat-copy'
 import { SourceControlPanel } from './components/SourceControlPanel'
 import { AgentsSurface } from './components/AgentsSurface'
+import { WorkflowSurface } from './components/WorkflowSurface'
 import { PinnedSummaryHost } from './components/PinnedSummary'
 import { EmptySessionOverview } from './app-model'
 import packageJson from '../../package.json'
@@ -79,7 +80,7 @@ export function AppShell(props: AppShellProps) {
   }, [primaryPaneVisible, handleRightSurfaceAction, openTurnInChat, scrollRef])
   // These surfaces share the primary run projection even when its transcript is hidden.
   const evidenceSurfaceVisible = panelVisible && !rightSurface.activeSideChatId
-    && (rightSurface.activeId === 'overview' || rightSurface.activeId === 'diff' || rightSurface.activeId === 'agents')
+    && (rightSurface.activeId === 'overview' || rightSurface.activeId === 'diff' || rightSurface.activeId === 'agents' || rightSurface.activeId === 'workflow')
   const mainLiveVisible = primaryPaneVisible || evidenceSurfaceVisible
   useLegacyDiffPreviewDemand(session.currentRunId, view === 'chat' && mainLiveVisible)
   return (
@@ -171,7 +172,8 @@ export function AppShell(props: AppShellProps) {
                       history={view === 'chat' && chatProps.onLoadOlderTurns ? { hasOlder: chatProps.historyWindow?.hasOlder ?? false,
                         loading: chatProps.historyOlderLoading ?? false, load: chatProps.onLoadOlderTurns } : undefined} />,
                     terminal: <Suspense fallback={<div className="surface-unavailable"><span>正在加载终端…</span></div>}><TerminalSurface cwd={surface.cwd} scopeId={surface.id} active={current && panelVisible && surface.state.activeId === 'terminal'} /></Suspense>,
-                    agents: current ? <AgentsSurface turns={displayedTurns} busy={displayedBusy} /> : null
+                    agents: current ? <AgentsSurface turns={displayedTurns} busy={displayedBusy} /> : null,
+                    workflow: current ? <WorkflowSurface turns={displayedTurns} busy={displayedBusy} /> : null
                   }}
                 />
               </div>

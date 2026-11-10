@@ -10,8 +10,8 @@ function state(overrides: Partial<RightSurfaceState> = {}): RightSurfaceState {
 }
 
 describe('flat right-surface tabs', () => {
-  it('keeps all six tool identities, their order and the terminal retention rule', () => {
-    expect([...RIGHT_SURFACE_KINDS]).toEqual(['overview', 'files', 'diff', 'source-control', 'terminal', 'agents'])
+  it('keeps all seven tool identities, their order and the terminal retention rule', () => {
+    expect([...RIGHT_SURFACE_KINDS]).toEqual(['overview', 'files', 'diff', 'source-control', 'terminal', 'agents', 'workflow'])
     let current = createRightSurfaceState({ openIds: [] })
     for (const kind of [...RIGHT_SURFACE_KINDS, 'files' as const]) {
       current = reduceRightSurfaceState(current, { type: 'open', kind })

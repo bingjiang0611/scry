@@ -17,6 +17,7 @@ import {
   transcriptUsageResult
 } from './normalize-core.js'
 import { normalizeHookAttachment, normalizeHookMessage } from './normalize-hooks.js'
+import { workflowLaunchMetadata } from './normalize-workflow.js'
 import {
   mergeInjectedTranscriptIdentity,
   transcriptIdentityContradictory,
@@ -77,6 +78,7 @@ export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent
             )
             if (taskId) (ctx.agentTaskToolUseById ??= new Map()).set(taskId, toolUseId)
           }
+          const workflowMetadata = workflowLaunchMetadata(ctx, started, toolUseId, resultMetadataApplies ? outerResult : undefined)
           out.push(
             base(ctx, {
               kind: 'tool',
@@ -101,7 +103,8 @@ export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent
                 (started?.isMcp === true && mcpPayloadFailed(output)),
               ...(agentResultStatus ? {
                 runtimeMetadata: { source: 'provider_agent_result', agentStatus: agentResultStatus }
-              } : {})
+              } : {}),
+              ...(workflowMetadata ? { runtimeMetadata: workflowMetadata } : {})
             })
           )
         }

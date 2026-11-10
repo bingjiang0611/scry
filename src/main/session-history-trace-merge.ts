@@ -4,10 +4,17 @@
 
 import { fileOpOf, mcpCallsForEvent, mcpPayloadFailed, type TraceEvent } from '../shared/trace'
 import { sanitizeToolEvents } from '../core/turn-recorder/tool-content'
+import { WORKFLOW_ACTIVITY_STAGE, readWorkflowActivity } from '../shared/claude-workflow'
 
 function traceEventKey(event: TraceEvent): string {
   if (event.kind === 'harness' && event.stage === 'turn_diff') return `turn_diff:${event.runId}`
   if (event.kind === 'harness' && event.stage === 'session_diff') return `session_diff:${event.runId}`
+  // Workflow progress is a per-task delta chain that shares one tool_use_id; keying it like a
+  // tool lifecycle would keep only the first link and silently drop every later row update.
+  if (event.kind === 'harness' && event.stage === WORKFLOW_ACTIVITY_STAGE) {
+    const activity = readWorkflowActivity(event.input)
+    if (activity) return `workflow:${event.runId}:${activity.taskId}:${activity.seq}`
+  }
   if (event.toolUseId) return `tool:${event.kind}:${event.stage}:${event.toolUseId}`
   if (event.messageId) return `message:${event.kind}:${event.stage}:${event.messageId}`
   if (event.kind === 'hook' && event.hookId) {

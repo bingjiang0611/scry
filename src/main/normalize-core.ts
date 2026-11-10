@@ -4,6 +4,7 @@
 import type { ModelUsageRow, TraceEvent, TraceKind } from '../shared/trace.js'
 import { classifyTool, fileOpOf, parseMcp } from '../shared/trace.js'
 import { classifyDanger } from './danger.js'
+import type { WorkflowNormalizeState } from './normalize-workflow.js'
 
 export interface NormalizeCtx {
   runId: string
@@ -18,6 +19,7 @@ export interface NormalizeCtx {
   toolUseById?: Map<string, TraceEvent> // SDK tool_result 不重复携带工具身份时，用对应 tool_use 补全
   agentToolUseIds?: Set<string> // task_* 只回指已观测的 Agent tool_use，不把其他后台任务混进来
   agentTaskToolUseById?: Map<string, string> // 仅保留由 Agent tool_use 建立的 task_id 别名
+  workflow?: WorkflowNormalizeState // Workflow tool_use / local_workflow task 的行增量状态
   streamMessageIds?: Map<string, string>
 }
 
@@ -166,6 +168,8 @@ export function normalizeBlocks(
       if (b.id) {
         (ctx.toolUseById ??= new Map()).set(b.id, event)
         if (cls.kind === 'agent') (ctx.agentToolUseIds ??= new Set()).add(b.id)
+        // Type-only dependency on normalize-workflow keeps this module cycle-free.
+        if (b.name === 'Workflow') (ctx.workflow ??= { toolUseIds: new Set(), tasks: new Map() }).toolUseIds.add(b.id)
       }
       out.push(event)
     }
