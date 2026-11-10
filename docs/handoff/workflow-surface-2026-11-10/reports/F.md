@@ -9,8 +9,8 @@
 | 次 | 命令 | 结果 | 日志 |
 |---|---|---|---|
 | 1 | `npm run pack`（`9681c98b`） | 10 个失败：1 个真实回归 + 9 个超时，`Tests 10 failed \| 5745 passed \| 4 skipped (5759)`；`pack` 停在 `npm test`，未到打包段 | `/tmp/scry-f-logs/pack.log` |
-| 2 | `npm run pack`（`db5b07be`，修完回归后重跑） | 14 个失败，全部是 `Test timed out in 5000ms`，`Tests 14 failed \| 5741 passed \| 4 skipped (5759)` | `/tmp/scry-f-logs/pack2.log` |
-| 3 | `npm run pack:artifact` | **通过（`EXIT=0`）**：`build` → `build:cli` → `electron-builder` → `check:packaged-app` → `smoke:electron` 全跑完 | `/tmp/scry-f-logs/artifact.log` |
+| 2 | `npm run pack`（`db5b07be`，修完回归后重跑，03:55:15–04:10:55） | 14 个失败，全部是 `Test timed out in 5000ms`，`Tests 14 failed \| 5741 passed \| 4 skipped (5759)` | `/tmp/scry-f-logs/pack2.log` |
+| 3 | `npm run pack:artifact` | **通过（`EXIT=0`，04:13:01–04:15:27）**：`build` → `build:cli` → `electron-builder` → `check:packaged-app` → `smoke:electron` 全跑完 | `/tmp/scry-f-logs/artifact.log` |
 
 第 3 次是为了把 `pack` 因单测超时没能走到的打包段单独跑出来：`pack` 本身仍是退出码 1，但打包、产物校验与 Electron 冒烟都真实执行并通过（产物 `dist/mac-arm64/Scry.app`，未安装到 `/Applications`）。
 
@@ -31,7 +31,7 @@
 | 次 | 结果 | 说明 |
 |---|---|---|
 | 1 | 通过（`EXIT=0`） | **作废**：跑到一半时仓库被外部切到 `main`（`git reflog`：`03:23:41 checkout: moving from claude/sweet-ptolemy-qxysuh to main`，随后 `pull --ff-only`），因此这一轮跑的是 main 的代码，不是本分支 |
-| 2 | 通过（`EXIT=0`，无 `AssertionError`、无 `smoke failure`） | 在本分支 `db5b07be` 上重跑；日志 `/tmp/scry-f-logs/ui-branch.log`，03:38–03:51 |
+| 2 | 通过（`EXIT=0`，无 `AssertionError`、无 `smoke failure`） | 在本分支 `db5b07be` 上重跑；日志 `/tmp/scry-f-logs/ui-branch.log`，03:37:10 起跑，03:51:56 结束（约 15 分钟） |
 
 第一轮暴露的是一个环境事实，不是代码事实：执行期间不要在同一检出上切分支。第二轮才是本分支的证据。
 
