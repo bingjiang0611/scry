@@ -1,0 +1,23 @@
+# Control: the six test files behind the round-1 install-mac failure, at branch base 5760dd71
+# (worktree /tmp/scry-baseline, npx vitest run <files>), same host and same load window.
+ FAIL  scripts/check-pacman-package.test.mjs > pacman raw description contract > accepts one nonempty description and preserves equals signs in its value
+ FAIL  scripts/check-pacman-package.test.mjs > pacman raw description contract > rejects a continuation even when the first description line is nonempty
+ FAIL  scripts/check-pacman-package.test.mjs > pacman raw description contract > rejects multiple description records instead of silently choosing the last
+ FAIL  scripts/check-pacman-package.test.mjs > pacman raw description contract > still rejects an empty description
+ FAIL  scripts/concurrency-trace-launcher.test.ts > concurrency trace launcher contract > rejects unknown flags, extra positionals and illegal values with exit code 2
+ FAIL  scripts/concurrency-trace-launcher.test.ts > concurrency trace launcher contract > touches no filesystem entry and starts no process for --help or an invalid flag
+ FAIL  scripts/performance-baseline.test.ts > fixed production-path performance harness > covers every user-path group with correct, measured local work
+ FAIL  src/core/turn-recorder/commit-environment.test.ts > shell fast path pins the starting session env, including absence, not the daemon or Stop env
+ FAIL  src/core/turn-recorder/commit-environment.test.ts > Node transport preserves upload values with quotes, Unicode and newlines outside the record body
+ FAIL  src/main/providers/pi-probe-lifecycle.test.ts > Pi capability probe lifecycle > shares concurrent capability probes and answers later reads on the same live child
+ FAIL  src/main/providers/pi-probe-lifecycle.test.ts > Pi capability probe lifecycle > invalidates one workspace without restarting an unrelated warm probe
+ FAIL  src/main/providers/pi-probe-lifecycle.test.ts > Pi capability probe lifecycle > does not share probe evidence across workspaces, profile ids or executables
+ FAIL  src/main/providers/pi-probe-lifecycle.test.ts > Pi capability probe lifecycle > keeps a parked read-only probe owned until exit when TERM is ignored
+ FAIL  src/main/providers/pi-probe-lifecycle.test.ts > Pi capability probe lifecycle > releases a failed flight so a later probe can recover
+ FAIL  src/main/providers/pi-probe-lifecycle.test.ts > Pi capability probe lifecycle > rejects non-JSON output, confirms process exit and allows a fresh probe
+ FAIL  src/main/providers/pi-probe-lifecycle.test.ts > Pi capability probe lifecycle > rejects null response, confirms process exit and allows a fresh probe
+ FAIL  src/main/providers/pi-probe-lifecycle.test.ts > Pi capability probe lifecycle > rejects array response, confirms process exit and allows a fresh probe
+ FAIL  src/main/providers/pi-probe-lifecycle.test.ts > Pi capability probe lifecycle > rejects unfinished frame, confirms process exit and allows a fresh probe
+ FAIL  src/main/providers/pi-probe-lifecycle.test.ts > Pi capability probe lifecycle > rejects exit without evidence, confirms process exit and allows a fresh probe
+ Test Files  5 failed | 1 passed (6)
+      Tests  19 failed | 12 passed (31)
