@@ -43,7 +43,11 @@ host_running() {
   table="$(ps -Ao command=)"
   grep -q -x -F "$HOST_APP/Contents/MacOS/Scry" <<<"$table"
 }
-APP_PATH="/tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app"
+# Per-run build directory inside this run's gitignored raw/: private to the
+# user (no shared /tmp path another account could pre-create) and the same for
+# separately run build-ios and install-ios stages of one stamp.
+IOS_BUILD_DIR="$RESULTS/raw/ios-build"
+APP_PATH="$IOS_BUILD_DIR/Build/Products/Debug-iphoneos/ScryRemote.app"
 NO_PROXY_ENV=(env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy)
 
 log() { printf '[verify %s] %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; }
@@ -138,7 +142,7 @@ stage_build_ios() {
   local id; id="$(device_id)" || { skip build-ios "no device id"; return 1; }
   if [ -z "${SCRY_IOS_DEVELOPMENT_TEAM:-}" ]; then skip build-ios "SCRY_IOS_DEVELOPMENT_TEAM not set"; return 1; fi
   step build-ios xcodebuild -project apps/ios/ScryRemote.xcodeproj -scheme ScryRemote -configuration Debug \
-    -sdk iphoneos -destination "id=$id" -derivedDataPath /tmp/scry-remote-device-build \
+    -sdk iphoneos -destination "id=$id" -derivedDataPath "$IOS_BUILD_DIR" \
     DEVELOPMENT_TEAM="$SCRY_IOS_DEVELOPMENT_TEAM" PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
     CODE_SIGN_STYLE=Automatic -allowProvisioningUpdates build
 }
@@ -193,7 +197,9 @@ stage_netbench() {
       # Committed copy of a failed run, including its tunnel timings, so a
       # passing rerun of the same label cannot overwrite the evidence.
       [ "$failures" = 0 ] || trim_for_commit "$raw" "$RESULTS/logs/netbench-$label.failed-$(date -u +%H%M%SZ).tail.txt"
-      [ "$label" = host-quit ] && status=pass   # expected to fail requests; judged by summarize
+      # host-quit is expected to fail its requests: record what happened as
+      # "info" (neither pass nor fail); summarize R7 judges it.
+      [ "$label" = host-quit ] && status=info
       record "netbench-$label" "$status" "$failures" $((SECONDS - started)) "netbench-$label.jsonl"
       log "netbench $label: done, failures=$failures"
       return 0
@@ -230,7 +236,11 @@ stage_mark_baseline() {
     fs.writeFileSync(file, JSON.stringify(data, null, 2))' "$CHECKS" "$name" "$evidence"
 }
 
+# Summarize is the last stage before a commit: redact identifiers (device
+# UDID, relay room and session ids, account paths, signing identity, public
+# IPs) from every committed file first. raw/ and *.log stay local, unredacted.
 stage_summarize() {
+  node experiments/remote-g0/verify/redact.mjs "$RESULTS" >&2
   node experiments/remote-g0/verify/summarize.mjs "$RESULTS"
 }
 

@@ -89,7 +89,8 @@ extension RemoteSelfTest {
           emit("cold-open", ["round": round, "ms": elapsed(start)])
         } catch {
           failures += 1
-          emit("cold-open", ["round": round, "ms": elapsed(start), "error": RemoteRunStore.describe(error)])
+          emit("cold-open", ["round": round, "ms": elapsed(start), "error": RemoteRunStore.describe(error),
+                             "hostOffline": RelayTransportError.isHostOffline(error)])
           continue
         }
         for _ in 0..<3 {

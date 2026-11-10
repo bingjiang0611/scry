@@ -39,7 +39,8 @@ function closeCode(buffer) {
     let length = buffer[offset + 1] & 0x7f
     let header = 2
     if (length === 126) { if (buffer.length - offset < 4) return undefined; length = buffer.readUInt16BE(offset + 2); header = 4 }
-    else if (length === 127) return undefined
+    // A 64-bit length never frames a close; say so instead of waiting for one.
+    else if (length === 127) return { code: null, reason: 'unexpected_large_frame' }
     if (buffer.length - offset < header + length) return undefined
     if (opcode === 0x8) {
       const payload = buffer.subarray(offset + header, offset + header + length)

@@ -60,7 +60,7 @@ export function summarizeNetbench(events) {
     environment,
     coldOpen: {
       okMs: cold.filter((event) => !event.error).map((event) => event.ms),
-      errors: cold.filter((event) => event.error).map((event) => ({ ms: event.ms, error: event.error })),
+      errors: cold.filter((event) => event.error).map((event) => ({ ms: event.ms, error: event.error, hostOffline: event.hostOffline })),
       medianMs: summary?.coldMedianMs ?? null,
       p90Ms: summary?.coldP90Ms ?? null
     },
@@ -104,7 +104,7 @@ export function evaluate({ checks, scenarios, probes }) {
     const unproven = baseline.filter((stage) => !stage.baselineEvidence).map((stage) => stage.name)
     const notes = [skipped.length ? `skipped: ${skipped.join(', ')}` : '', baseline.length ? `known-baseline: ${baseline.map((stage) => `${stage.name} (${stage.baselineEvidence ?? 'NO EVIDENCE'})`).join(', ')}` : ''].filter(Boolean).join('; ')
     if (failed.length || unproven.length) rule('R1-checks', true, 'fail', `failed: ${[...failed, ...unproven.map((name) => `${name} (known-baseline without baselineEvidence)`)].join(', ')}`)
-    else rule('R1-checks', true, 'pass', `all ran stages passed${notes ? `; ${notes}` : ''}`)
+    else rule('R1-checks', true, 'pass', baseline.length ? `no failure introduced by this branch; ${notes} (fails on the base too, not a pass)` : `all ran stages passed${notes ? `; ${notes}` : ''}`)
   }
 
   const normal = Object.entries(scenarios).filter(([label]) => label !== 'host-quit' && !label.startsWith('baseline'))
@@ -165,7 +165,9 @@ export function evaluate({ checks, scenarios, probes }) {
   const generations = Object.values(probes).flatMap((probe) => probe?.generations ?? [])
   const offlineSamples = [
     ...Object.values(scenarios).map((s) => s.offlineProbe).filter(Boolean),
-    ...(scenarios['host-quit']?.coldOpen.errors ?? []).map((error) => ({ ms: error.ms, hostOffline: /不在线|host_offline|4001/.test(error.error), error: error.error }))
+    // Current netBench states hostOffline per failed cold open; older runs only
+    // carry the localized text, matched as a fallback.
+    ...(scenarios['host-quit']?.coldOpen.errors ?? []).map((error) => ({ ms: error.ms, hostOffline: typeof error.hostOffline === 'boolean' ? error.hostOffline : /不在线|host_offline|4001/.test(error.error), error: error.error }))
   ]
   if (!generations.includes('heartbeat-aware')) rule('R7-offline-fast', false, 'blocked', `relay not redeployed (probe generations: ${generations.join(',') || 'no probe'}); old relay answers 1013 after retries`)
   else if (offlineSamples.length === 0) rule('R7-offline-fast', true, 'blocked', 'no offline-probe event and no host-quit scenario')
