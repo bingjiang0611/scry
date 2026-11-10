@@ -1,0 +1,17 @@
+# Mac LAN facts, captured 2026-11-10 after the phone could not reach 192.168.0.100:47820
+$ /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate
+Firewall is disabled. (State = 0)
+$ lsof -nP -iTCP:47820 -sTCP:LISTEN
+Scry    8492 baobingjiang   80u  IPv4 0x519ae558581f5c1c      0t0  TCP *:47820 (LISTEN)
+$ ifconfig en0
+en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
+	options=6460<TSO4,TSO6,CHANNEL_IO,PARTIAL_CSUM,ZEROINVERT_CSUM>
+	ether 02:00:00:00:00:00
+	inet 192.168.0.100 netmask 0xffffff00 broadcast 192.168.0.255
+	media: autoselect
+	status: active
+$ ping -c 2 192.168.0.1   # gateway answers in 2.6 ms
+2 packets transmitted, 2 packets received, 0.0% packet loss
+round-trip min/avg/max/stddev = 2.461/2.591/2.720/0.130 ms
+$ arp -an | head   # empty: the peer MACs are never resolved, en0 is synthetic
+# python3 socket connect from the Mac to its own listener succeeds (not shown: the phone is the failing side)

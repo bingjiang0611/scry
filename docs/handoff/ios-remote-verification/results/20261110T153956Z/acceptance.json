@@ -1,0 +1,113 @@
+{
+  "verdict": "fail",
+  "rules": [
+    {
+      "id": "R1-checks",
+      "required": true,
+      "status": "fail",
+      "detail": "failed: install-mac, netbench-wifi-relay"
+    },
+    {
+      "id": "R2-netbench-clean:wifi-auto",
+      "required": true,
+      "status": "pass",
+      "detail": "failures=0"
+    },
+    {
+      "id": "R2-netbench-clean:wifi-relay",
+      "required": true,
+      "status": "fail",
+      "detail": "failures=1"
+    },
+    {
+      "id": "R2-netbench-clean:wifi-relay2",
+      "required": true,
+      "status": "pass",
+      "detail": "failures=0"
+    },
+    {
+      "id": "R3-transport:wifi-auto",
+      "required": true,
+      "status": "pass",
+      "detail": "multiplexed, all capabilities"
+    },
+    {
+      "id": "R3-transport:wifi-relay",
+      "required": true,
+      "status": "pass",
+      "detail": "multiplexed, all capabilities"
+    },
+    {
+      "id": "R3-transport:wifi-relay2",
+      "required": true,
+      "status": "pass",
+      "detail": "multiplexed, all capabilities"
+    },
+    {
+      "id": "R4-relay-only",
+      "required": true,
+      "status": "pass",
+      "detail": "routes=relay"
+    },
+    {
+      "id": "R5-direct",
+      "required": true,
+      "status": "fail",
+      "detail": "routes=relay advertised=192.168.0.100:47820 openErrors=[{\"lane\":\"control\",\"route\":\"direct\",\"phase\":\"upgrade\",\"error\":\"Connect timeout (900 ms)\"},{\"lane\":\"bulk\",\"route\":\"direct\",\"phase\":\"upgrade\",\"error\":\"Connect timeout (900 ms)\"}]"
+    },
+    {
+      "id": "R5b-no-blocking-unproven-route:wifi-auto",
+      "required": true,
+      "status": "pass",
+      "detail": "failed direct attempts on the open path=0"
+    },
+    {
+      "id": "R5b-no-blocking-unproven-route:wifi-relay",
+      "required": true,
+      "status": "pass",
+      "detail": "failed direct attempts on the open path=0"
+    },
+    {
+      "id": "R5b-no-blocking-unproven-route:wifi-relay2",
+      "required": true,
+      "status": "pass",
+      "detail": "failed direct attempts on the open path=0"
+    },
+    {
+      "id": "R6-catalog:wifi-auto",
+      "required": true,
+      "status": "pass",
+      "detail": "confirmed 3/3; full=1293.8ms (28 sessions) refresh median=1331.6ms of 3"
+    },
+    {
+      "id": "R6-catalog:wifi-relay",
+      "required": true,
+      "status": "pass",
+      "detail": "confirmed 3/3; full=1538.8ms (28 sessions) refresh median=816.6ms of 3"
+    },
+    {
+      "id": "R6-catalog:wifi-relay2",
+      "required": true,
+      "status": "pass",
+      "detail": "confirmed 3/3; full=720.7ms (28 sessions) refresh median=715.7ms of 3"
+    },
+    {
+      "id": "R7-offline-fast",
+      "required": true,
+      "status": "fail",
+      "detail": "samples=3 timed=3 allHostOffline=true slowestMs=3277.6 sample={\"error\":\"Mac 当前不在线（中继未看到它的连接）：可能已休眠、断网或 Scry 未运行。唤醒 Mac 后会自动重连。\",\"event\":\"offline-probe\",\"hostOffline\":true,\"label\":\"wifi-auto\",\"ms\":2354.3}"
+    },
+    {
+      "id": "I1-direct-vs-relay",
+      "required": false,
+      "status": "info",
+      "detail": "warm median relay=1435.5ms direct=1121.4ms; cold median relay=2771.3ms auto=3383.3ms"
+    },
+    {
+      "id": "I3-relay-path:mac",
+      "required": false,
+      "status": "info",
+      "detail": "colos=ORD,PIT generations=heartbeat-aware median={\"dns\":2.1,\"tcp\":7.4,\"tls\":713,\"upgrade\":1156.9,\"upgradeExcludingWait\":1156.9,\"close\":1157,\"total\":1157.1}"
+    }
+  ]
+}
