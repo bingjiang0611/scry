@@ -41,6 +41,19 @@
 - **E3 运行中再发**：两种模式都是按钮禁用，但状态条写着「新消息将加入队列」。这是已有的文案不一致，不是 daemon 回归。
 - daemon 日志里的 `daemon_capability_unavailable`（`workspaceSelection:read` 31 次、`agent:usageStats`、`agent:gitDiff`、`agent:listCommands`）来自尚未迁移的 L4 组，不只是握手前的空窗，排在后续 L4 分组里处理。
 
+## 321df83 本机验证（macOS，临时 userData，codex smoke fixture）
+
+两种模式都通过以下两个场景：主窗格停在普通会话、新开侧边会话发第一条消息；主窗格新建统一会话发第一条消息。整轮的 `setBadgeCount` 全部为 0（进程内 11 次，daemon 8 次），`unreadSessionKeys` 始终为空，`agent:unreadSessions` 一次也没有发布。
+
+四组运行的时间顺序都是：`agent:session`（run 级 id）→ `agent:session`（原生会话 id）→ 同一毫秒内的 `agent:viewSessions`（侧边会话 `main=false`，主窗格会话 `main=true`）→ 30–45 ms 后 `agent:turnDone`。
+
+限制：
+
+- 焦点由 fixture 模拟，daemon 窗口是隐藏的；
+- smoke 回复只有约 100–300 ms，长回复、一个会话多个 binding、跨 Provider 切换都没有覆盖。
+
+验证 harness 首轮漏杀了两个 daemon 进程，已人工终止并修正脚本，最终结果来自修正后的完整一轮。
+
 ## 未处理、待证据
 
 - 真实 Pi 走不通：统一会话要求 `pi:<16 位十六进制>` 的 profile id，内置的 `pi:rotom` 被拒绝，是已有的产品限制；
