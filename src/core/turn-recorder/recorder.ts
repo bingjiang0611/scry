@@ -15,7 +15,7 @@ import { attentionIndexPresent, markedSessions } from './attention.js'
 import { END_EVENTS, START_EVENTS, DEFERRED_TERMINAL_GRACE_MS, OPEN_TURN_EXPIRY_MS, sessionIdOf, type RecorderHookInput, type RecorderHookResult, type RecorderRecoveryProbe, CODEX_SUBAGENT_MARKER } from './recorder-contracts.js'
 import { applyHookLocked, isLockTimeout, replayQueuedHooks } from './recorder-hook-locked.js'
 import { queueHook } from './recorder-hook-queue.js'
-import { codexSubagentTranscript, isSynthetic, trustedManagedIdentityPayload, isClaudeTaskNotification } from './recorder-hook-support.js'
+import { codexSubagentTranscript, isSynthetic, isCodexInternalPrompt, trustedManagedIdentityPayload, isClaudeTaskNotification } from './recorder-hook-support.js'
 import { finalizeOpenTurn } from './recorder-turn-finalize.js'
 import { stableTranscript } from './recorder-transcript-cache.js'
 
@@ -51,6 +51,8 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
     START_EVENTS.has(input.event) &&
     isClaudeTaskNotification(input.payload)
   if (isSynthetic(input.payload) && !taskNotification) return { status: 'ignored', reason: 'synthetic/meta prompt' }
+  if (input.provider === 'codex' && START_EVENTS.has(input.event) && isCodexInternalPrompt(input.payload))
+    return { status: 'ignored', reason: 'codex internal title prompt' }
   if (input.provider === 'codex' && await codexSubagentTranscript(input.payload, sessionId)) {
     input = { ...input, payload: { ...input.payload, [CODEX_SUBAGENT_MARKER]: true } }
   }

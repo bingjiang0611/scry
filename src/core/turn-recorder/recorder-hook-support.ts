@@ -53,6 +53,20 @@ export function isSynthetic(payload: Record<string, unknown>): boolean {
 }
 
 /**
+ * Codex asks the model for a short UI title in a throwaway session before the real turn.
+ * That request carries the fixed title instruction plus the captured user prompt, so the
+ * lifecycle hooks cannot reuse an origin marker; keep the instruction-specific prefix and
+ * the embedded prompt marker so a normal user prompt is never dropped by a fuzzy match.
+ */
+export function isCodexInternalPrompt(payload: Record<string, unknown>): boolean {
+  const prompt = stringAt(payload, 'prompt', 'user_prompt', 'userPrompt')
+  if (!prompt) return false
+  const normalized = prompt.replace(/^\s+/, '')
+  return normalized.startsWith('Generate a concise, single-line task title of at most 36 characters') &&
+    normalized.includes('User prompt:')
+}
+
+/**
  * Codex guardian (auto-review) subagents reuse the parent session_id and carry no agent_id,
  * but their transcript_path is the child's own rollout, whose first `session_meta` row
  * declares `source.subagent`. A rollout named after the session itself is the main thread

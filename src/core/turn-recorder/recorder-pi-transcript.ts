@@ -117,6 +117,12 @@ export function parsePiTranscript(
   }
   let userSeen = false
   chain.forEach((entry) => {
+    // Pi compacts in place on the ancestry chain; the anchored range already proves this
+    // event belongs to the turn, so project it instead of reconstructing one from hooks.
+    if (entry.type === 'compaction') {
+      add(entry, 0, { kind: 'harness', stage: 'context_compaction', compaction: {} })
+      return
+    }
     if (entry.type !== 'message' || !entry.message) return
     const message = entry.message
     if (message.role === 'user') {
