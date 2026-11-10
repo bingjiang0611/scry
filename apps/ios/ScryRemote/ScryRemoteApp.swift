@@ -23,7 +23,9 @@ struct ScryRemoteApp: App {
     WindowGroup {
       Group {
         #if DEBUG
-        if let mode = SheetPreview.requestedMode {
+        if RemoteSelfTest.netBenchRequested {
+          Text("netBench running").font(.footnote).foregroundStyle(.secondary)
+        } else if let mode = SheetPreview.requestedMode {
           SheetPreview(mode: mode)
         } else {
           RootView()

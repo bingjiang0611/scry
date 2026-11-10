@@ -252,6 +252,7 @@ struct RemoteRunClient {
         let page = try await reader.sessionsPage(cursor: cursor, snapshot: snapshot, includeArchived: includeArchived,
                                                  known: cursor == 0 ? known?.snapshot : nil)
         if cursor == 0, page.unchanged == true, let known, page.snapshot == known.snapshot, page.total == known.sessions.count {
+          SessionCatalogMemo.shared.noteConfirmed()
           await progress(known.sessions)
           return known.sessions
         }

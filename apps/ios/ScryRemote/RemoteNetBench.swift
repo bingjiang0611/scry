@@ -24,6 +24,11 @@ import RemoteTransport
 // Durations are client wall-clock milliseconds on this device and network;
 // nothing here is written to the host or uploaded.
 extension RemoteSelfTest {
+  // While benchmarking, the app does not mount its normal UI: the home screen
+  // would load the catalog and open its own tunnels concurrently, and the
+  // benchmark's tunnel resets would cut those, so both sets of numbers lie.
+  static var netBenchRequested: Bool { ProcessInfo.processInfo.arguments.contains("-netBench") }
+
   static func runNetBenchIfRequested() {
     let args = ProcessInfo.processInfo.arguments
     guard args.contains("-netBench") else { return }
@@ -98,16 +103,35 @@ extension RemoteSelfTest {
           }
         }
       }
+      // One full walk, then three refreshes. `confirmed` is whether the host
+      // answered the refresh with "unchanged" (one page, no rows) and the copy
+      // was reused: the behavior itself, independent of round-trip jitter.
       var catalog: [G0Transport.RunSessionRef] = []
-      for pass in ["full", "refresh"] {
+      for pass in ["full", "refresh", "refresh", "refresh"] {
         let start = Date()
+        let confirmationsBefore = SessionCatalogMemo.shared.confirmations
         do {
           catalog = try await client.sessions()
-          emit("catalog", ["pass": pass, "ms": elapsed(start), "sessions": catalog.count])
+          emit("catalog", ["pass": pass, "ms": elapsed(start), "sessions": catalog.count,
+                           "confirmed": SessionCatalogMemo.shared.confirmations > confirmationsBefore])
         } catch {
           failures += 1
           emit("catalog", ["pass": pass, "ms": elapsed(start), "error": RemoteRunStore.describe(error)])
         }
+      }
+      // What the phone sees when its Mac is not connected to the relay at all,
+      // without quitting Scry: the same paired credentials against a room no
+      // host serves. A heartbeat-aware relay answers 4001 host_offline and the
+      // phone stops at once instead of retrying.
+      var absent = connection
+      absent.hostId = UUID().uuidString.lowercased()
+      let offlineStart = Date()
+      do {
+        try await RemoteRunClient(connection: absent).prewarm()
+        emit("offline-probe", ["ms": elapsed(offlineStart), "unexpected": "connected to an unused room"])
+      } catch {
+        emit("offline-probe", ["ms": elapsed(offlineStart), "hostOffline": RelayTransportError.isHostOffline(error),
+                               "error": RemoteRunStore.describe(error)])
       }
       let target = catalog.first { ($0.externalSessionId ?? $0.sessionId) == sessionFilter } ??
         (sessionFilter == nil ? catalog.first { $0.externalSessionId != nil } : nil)

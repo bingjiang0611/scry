@@ -17,6 +17,11 @@ final class SessionCatalogMemo: @unchecked Sendable {
 
   func get(_ key: String) -> Entry? { lock.withLock { entries[key] } }
 
+  // How many refreshes the host has confirmed unchanged (diagnostics only).
+  private var confirmedCount = 0
+  var confirmations: Int { lock.withLock { confirmedCount } }
+  func noteConfirmed() { lock.withLock { confirmedCount += 1 } }
+
   func set(_ key: String, _ entry: Entry) {
     lock.withLock {
       entries[key] = entry
@@ -70,6 +75,9 @@ final class RemoteSessionRegistry: @unchecked Sendable {
       }
       if changed {
         let satisfied = path.status == .satisfied
+        // Direct-route reachability proven (or refuted) on the old network
+        // says nothing about the new one.
+        HostTransportState.networkChanged()
         Task {
           guard satisfied else { await self.resetAll(); return }
           let intact = await self.probeAll()
