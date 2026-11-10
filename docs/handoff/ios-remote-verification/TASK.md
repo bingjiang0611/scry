@@ -6,6 +6,59 @@
 - 背景与协议说明：`docs/remote-network-measurement.md`。本文只写怎么执行、怎么判定、交回什么。
 - 已有证据（不必重复证明）：macOS CI 在 `edd56b9` 上已通过 `swift test`、Swift 构建和 iOS 产品 App 编译；Linux 上已通过 Node 单测和 relay smoke。
 
+## 第二轮（2026-11-10，基于第一轮结果 `results/20261109T155516Z`）
+
+第一轮的核验结论：报告与数据一致，5 个修复提交都正确，没有放宽任何规则。原始数据还暴露了一个真实缺陷，另外有两条规则本身有缺陷。本轮代码已修复：
+
+| 第一轮现象 | 核验结论 | 本轮改动 |
+|---|---|---|
+| R5 失败：Mac 广播了 `172.18.0.1`（utun13）和 `192.168.255.254`（utun5，/32），手机每条隧道先等 2×900 ms 才走 relay；`wifi-auto` 第 1 轮冷开 3420 ms，`diag-order` 3720 ms | **产品缺陷**：VPN 和点对点隧道的地址不该广播；没有确认过的直连地址也不该挡在打开连接的路径上 | host 不再广播 VPN、隧道、虚拟网卡上的私网地址，也不广播 /32 地址；100.64/10 的 overlay 地址照常广播。手机只在路由已经在当前网络确认过时才先试直连，没确认的只在后台升级时尝试；切换网络后清空确认记录 |
+| R6 失败：刷新比全量慢 | **规则缺陷**：链路往返约 620 ms、抖动大，每项只测 1 次，无法区分；测量时 App 自己的首页也在并发请求（诊断里出现了第二个 RelaySession） | `-netBench` 运行时不加载 App 主界面；刷新测 3 次，并记录 host 是否确认"未变化"（`confirmed`）。R6 改为判定 3 次刷新都被确认，耗时只作参考 |
+| R7 blocked：Agent 运行在 Scry 里，没法退出 Scry | 只是测量方式的限制 | `-netBench` 增加离线探测：用同一套配对凭据连接一个没有 host 的房间，不用退出 Scry；R7 以此为证据 |
+| ios-checks、install-mac 失败，都能在基线上复现 | 不是本分支引入的 | 新增 `local-verify.sh mark-baseline <阶段> <对照日志>`：必须提供基线对照日志，R1 才会把它列为已知基线问题，而不是判为失败 |
+
+新增规则 **R5b**：任何场景下都不能出现"在打开路径上（`phase=open`）失败的直连尝试"。这条直接验证上面的缺陷已修复。
+
+### 第二轮步骤（时间戳用新的；第一轮结果目录保持原样）
+
+开始前只问用户一次，内容如下：
+
+1. 新的 Mac 构建装好后，请用户**手动退出并重新打开 Scry**（Agent 运行在 Scry 里，不能自己重启）。
+2. （可选，用于判定 R5）能否让 Mac 和手机连同一个 Wi-Fi？不能的话，R5 判为 blocked 即可，不算失败。
+
+然后依次执行：
+
+```bash
+git pull --ff-only
+```
+
+```bash
+export SCRY_IOS_BUNDLE_ID=com.scry.remote.local SCRY_VERIFY_STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+```
+
+```bash
+experiments/remote-g0/verify/local-verify.sh env && experiments/remote-g0/verify/local-verify.sh checks
+```
+
+- `ios-checks`、`install-mac` 如果和第一轮一样失败，先在基线 worktree（`5760dd7`）上复现，把对照日志放进本轮结果目录的 `logs/`，再执行 `local-verify.sh mark-baseline <阶段> logs/<对照日志>`。如果失败内容和第一轮不同，按 §4 处理。
+- install-mac：用和第一轮相同的手工 pack 步骤装到 `/Applications/Scry.app`，然后请用户重启 Scry。重启后的确认方式：`lsof -iTCP:47820 -sTCP:LISTEN` 显示由 `/Applications/Scry.app` 持有。
+
+```bash
+experiments/remote-g0/verify/local-verify.sh build-ios && experiments/remote-g0/verify/local-verify.sh install-ios
+```
+
+```bash
+experiments/remote-g0/verify/local-verify.sh relay-probe mac && experiments/remote-g0/verify/local-verify.sh netbench wifi-relay -netBenchRoute=relay -netBenchRounds=5 && experiments/remote-g0/verify/local-verify.sh netbench wifi-auto -netBenchRounds=5 && experiments/remote-g0/verify/local-verify.sh summarize
+```
+
+预期结果：
+
+- R2、R3、R4、R5b、R6、R7 都通过。R7 依据 `offline-probe`：`hostOffline=true` 且耗时 ≤3000 ms。
+- R5：Mac 不在手机所在的 Wi-Fi 时为 blocked（Mac 没有可广播的地址）；同一 Wi-Fi 时应通过，并且第二轮以后的冷开走直连。
+- 任何一条与预期不符，先按 §4 自主处理，再写进 REPORT。
+
+交回内容同 §6，REPORT 额外写一节"与第一轮的对照"：冷开 P90，以及 `wifi-auto` 和 `wifi-relay` 的差距是否消失。
+
 ## 1. 完成定义
 
 `experiments/remote-g0/verify/summarize.mjs` 对你的结果目录给出 `Verdict: pass`；或者给出 `incomplete`/`fail`，但每一条未通过的规则都在 `REPORT.md` 里写明了根因、你做过的尝试，以及需要谁做什么决定。规则的含义见 §5。

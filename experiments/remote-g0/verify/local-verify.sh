@@ -209,6 +209,21 @@ stage_host_quit() {
   return $code
 }
 
+# A check that fails identically on the branch base (5760dd7) is not this
+# change's. Mark it so R1 lists it instead of failing, only with the control
+# log that proves the reproduction (path relative to the results dir).
+stage_mark_baseline() {
+  local name="$1" evidence="$2"
+  [ -n "$name" ] && [ -f "$RESULTS/$evidence" ] || { log "usage: mark-baseline <stage> <control log relative to $RESULTS>"; return 2; }
+  node -e '
+    const fs = require("fs"); const [file, name, evidence] = process.argv.slice(1)
+    const data = JSON.parse(fs.readFileSync(file, "utf8"))
+    const stage = data.stages.find((s) => s.name === name)
+    if (!stage || stage.status !== "fail") { console.error(`stage ${name} is not a recorded failure`); process.exit(1) }
+    stage.status = "known-baseline"; stage.baselineEvidence = evidence
+    fs.writeFileSync(file, JSON.stringify(data, null, 2))' "$CHECKS" "$name" "$evidence"
+}
+
 stage_summarize() {
   node experiments/remote-g0/verify/summarize.mjs "$RESULTS"
 }
@@ -225,6 +240,7 @@ case "$stage" in
   netbench) stage_netbench "$@" ;;
   host-quit) stage_host_quit ;;
   summarize) stage_summarize ;;
+  mark-baseline) stage_mark_baseline "$@" ;;
   all)
     stage_env
     stage_checks
