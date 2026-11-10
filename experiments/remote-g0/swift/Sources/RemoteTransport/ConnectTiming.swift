@@ -1,6 +1,9 @@
 import Foundation
 import NIOCore
 import NIOTLS
+#if canImport(Network)
+import NIOTransportServices
+#endif
 
 // Phase timing for one tunnel open. These are client-observed durations from
 // the start of the open, not server-side facts: `tcpMs` includes DNS, and a
@@ -27,6 +30,13 @@ public struct RelayConnectTiming: Codable, Equatable, Sendable {
   // background attempt to move an open relay tunnel onto a direct route.
   public var phase: String?
   public var error: String?
+  // Network.framework held the connect back because it had no usable path
+  // (interface down, no route, local network not permitted, ...): when it
+  // first said so, and its latest reason. A failed open with no `tcpMs` and no
+  // `waitingReason` never got a path verdict at all; with a reason, the stall
+  // was on the phone's side before any byte reached the relay or the host.
+  public var waitingMs: Double?
+  public var waitingReason: String?
 
   public init(lane: String, route: String, target: String? = nil, at: Date = Date()) {
     self.lane = lane
@@ -82,6 +92,16 @@ final class ConnectTimingRecorder: @unchecked Sendable {
     body(&value)
   }
 
+  // First waiting time wins (when the stall began); the reason is the latest,
+  // since Network.framework re-evaluates the path while it waits.
+  func markWaiting(_ reason: String) {
+    let elapsed = MonotonicClock.millis(from: start)
+    lock.lock()
+    defer { lock.unlock() }
+    if value.waitingMs == nil { value.waitingMs = elapsed }
+    value.waitingReason = String(reason.prefix(200))
+  }
+
   func finish(error: Error? = nil) -> RelayConnectTiming {
     let elapsed = MonotonicClock.millis(from: start)
     lock.lock()
@@ -127,6 +147,11 @@ final class ConnectTimingHandler: ChannelInboundHandler, RemovableChannelHandler
     if observesOuterTLS, let tls = event as? TLSUserEvent, case .handshakeCompleted = tls {
       recorder.mark(\.outerTLSMs)
     }
+    #if canImport(Network)
+    if let waiting = event as? NIOTSNetworkEvents.WaitingForConnectivity {
+      recorder.markWaiting(String(describing: waiting.transientError))
+    }
+    #endif
     context.fireUserInboundEventTriggered(event)
   }
 }
