@@ -1,0 +1,125 @@
+{
+  "id": "E2",
+  "mode": "inprocess",
+  "expected": "stop during a normal session, 5 runs: record the notice and the stopState/turnDone order",
+  "actual": {
+    "attempts": [
+      {
+        "attempt": 1,
+        "runId": "run-mwav6hkf-4",
+        "beforeClick": "运行中\n可继续输入，新消息将加入队列\n00:00\n停止本轮",
+        "statusLabels": [
+          "运行中 可继续输入，新消息将加入队列 00:00 停止本轮"
+        ],
+        "idleAfterMs": 61,
+        "liveTurnInterruptedHint": false,
+        "liveTurnTail": "performance paced stream\n\nC\nCodex\nrun · run-mwav6hkf-4\ntok\n—\ntools\n0",
+        "reloadedTurnInterruptedHint": true,
+        "reloadedTurnTail": "performance paced stream\n\nC\nCodex\nrun · run-mwav6hkf-4\ntok\n—\ntools\n0\n本轮已中断，不代表任务完成。",
+        "mainSendOrder": [
+          "agent:session",
+          "agent:focusedRun",
+          "agent:stopState(interrupt_requested)",
+          "agent:dataUpdated",
+          "agent:turnDone",
+          "agent:stopState(settled)"
+        ],
+        "turnDoneBeforeSettledStopState": true
+      },
+      {
+        "attempt": 2,
+        "runId": "run-mwav6pa7-5",
+        "beforeClick": "运行中\n可继续输入，新消息将加入队列\n00:00\n停止本轮",
+        "statusLabels": [
+          "运行中 可继续输入，新消息将加入队列 00:00 停止本轮",
+          "停止中 已请求 codex 取消当前轮次，等待 Provider 收口 00:00 停止本轮"
+        ],
+        "idleAfterMs": 302,
+        "liveTurnInterruptedHint": false,
+        "liveTurnTail": "performance paced stream\n\nC\nCodex\nrun · run-mwav6pa7-5\ntok\n16\ntools\n1\n1\nRead README.md\n\nchunk 1\n\n本轮文件（工具证据）\nR · 1\n非 Git 目录\n1\nin\n12\nout\n4\ndur\n0.0s\ntools\n1\nfiles\n1 r · 0 w\n在新会话中分支",
+        "reloadedTurnInterruptedHint": true,
+        "reloadedTurnTail": "performance paced stream\n\nC\nCodex\nrun · run-mwav6pa7-5\ntok\n16\ntools\n1\n1\nRead README.md\n\nchunk 1\n\n本轮已中断，不代表任务完成。\n本轮文件（工具证据）\nR · 1\n非 Git 目录\n1\nin\n12\nout\n4\ndur\n0.0s\ntools\n1\nfiles\n1 r · 0 w\n在新会话中分支",
+        "mainSendOrder": [
+          "agent:session",
+          "agent:focusedRun",
+          "agent:stopState(interrupt_requested)",
+          "agent:dataUpdated",
+          "agent:turnDone",
+          "agent:stopState(settled)"
+        ],
+        "turnDoneBeforeSettledStopState": true
+      },
+      {
+        "attempt": 3,
+        "runId": "run-mwav6x5z-6",
+        "beforeClick": "运行中\n可继续输入，新消息将加入队列\n00:00\n停止本轮",
+        "statusLabels": [
+          "运行中 可继续输入，新消息将加入队列 00:00 停止本轮",
+          "停止中 已请求 codex 取消当前轮次，等待 Provider 收口 00:00 停止本轮"
+        ],
+        "idleAfterMs": 299,
+        "liveTurnInterruptedHint": false,
+        "liveTurnTail": "performance paced stream\n\nC\nCodex\nrun · run-mwav6x5z-6\ntok\n16\ntools\n1\n1\nRead README.md\n\nchunk 1\n\n本轮文件（工具证据）\nR · 1\n非 Git 目录\n1\nin\n12\nout\n4\ndur\n0.0s\ntools\n1\nfiles\n1 r · 0 w\n在新会话中分支",
+        "reloadedTurnInterruptedHint": true,
+        "reloadedTurnTail": "performance paced stream\n\nC\nCodex\nrun · run-mwav6x5z-6\ntok\n16\ntools\n1\n1\nRead README.md\n\nchunk 1\n\n本轮已中断，不代表任务完成。\n本轮文件（工具证据）\nR · 1\n非 Git 目录\n1\nin\n12\nout\n4\ndur\n0.0s\ntools\n1\nfiles\n1 r · 0 w\n在新会话中分支",
+        "mainSendOrder": [
+          "agent:session",
+          "agent:focusedRun",
+          "agent:stopState(interrupt_requested)",
+          "agent:dataUpdated",
+          "agent:turnDone",
+          "agent:stopState(settled)"
+        ],
+        "turnDoneBeforeSettledStopState": false
+      },
+      {
+        "attempt": 4,
+        "runId": "run-mwav752s-7",
+        "beforeClick": "运行中\n可继续输入，新消息将加入队列\n00:00\n停止本轮",
+        "statusLabels": [
+          "运行中 可继续输入，新消息将加入队列 00:00 停止本轮",
+          "停止中 已请求 codex 取消当前轮次，等待 Provider 收口 00:00 停止本轮"
+        ],
+        "idleAfterMs": 301,
+        "liveTurnInterruptedHint": false,
+        "liveTurnTail": "performance paced stream\n\nC\nCodex\nrun · run-mwav752s-7\ntok\n16\ntools\n1\n1\nRead README.md\n\nchunk 1\n\n本轮文件（工具证据）\nR · 1\n非 Git 目录\n1\nin\n12\nout\n4\ndur\n0.0s\ntools\n1\nfiles\n1 r · 0 w\n在新会话中分支",
+        "reloadedTurnInterruptedHint": true,
+        "reloadedTurnTail": "performance paced stream\n\nC\nCodex\nrun · run-mwav752s-7\ntok\n16\ntools\n1\n1\nRead README.md\n\nchunk 1\n\n本轮已中断，不代表任务完成。\n本轮文件（工具证据）\nR · 1\n非 Git 目录\n1\nin\n12\nout\n4\ndur\n0.0s\ntools\n1\nfiles\n1 r · 0 w\n在新会话中分支",
+        "mainSendOrder": [
+          "agent:session",
+          "agent:focusedRun",
+          "agent:stopState(interrupt_requested)",
+          "agent:dataUpdated",
+          "agent:turnDone",
+          "agent:stopState(settled)"
+        ],
+        "turnDoneBeforeSettledStopState": false
+      },
+      {
+        "attempt": 5,
+        "runId": "run-mwav7czv-8",
+        "beforeClick": "运行中\n可继续输入，新消息将加入队列\n00:00\n停止本轮",
+        "statusLabels": [
+          "运行中 可继续输入，新消息将加入队列 00:00 停止本轮"
+        ],
+        "idleAfterMs": 58,
+        "liveTurnInterruptedHint": false,
+        "liveTurnTail": "performance paced stream\n\nC\nCodex\nrun · run-mwav7czv-8\ntok\n—\ntools\n0",
+        "reloadedTurnInterruptedHint": true,
+        "reloadedTurnTail": "performance paced stream\n\nC\nCodex\nrun · run-mwav7czv-8\ntok\n—\ntools\n0\n本轮已中断，不代表任务完成。",
+        "mainSendOrder": [
+          "agent:session",
+          "agent:focusedRun",
+          "agent:stopState(interrupt_requested)",
+          "agent:dataUpdated",
+          "agent:turnDone",
+          "agent:stopState(settled)"
+        ],
+        "turnDoneBeforeSettledStopState": true
+      }
+    ],
+    "liveRunsWithoutHint": 5,
+    "reloadedRunsWithoutHint": 0
+  },
+  "pass": true
+}

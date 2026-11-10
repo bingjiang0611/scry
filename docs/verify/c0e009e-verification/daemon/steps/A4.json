@@ -1,0 +1,41 @@
+{
+  "id": "A4",
+  "mode": "daemon",
+  "expected": "background reply on the same conversation: badge +1, refocus clears it",
+  "actual": {
+    "settled": {
+      "turns": 4,
+      "outcome": "completed"
+    },
+    "background": {
+      "revision": 6,
+      "unreadSessionKeys": [
+        "codex\u0000\u0000/private/tmp/scry-verify-c0e009e/verify-daemon-qmGtmh/home/workspace\u0000smoke-session-2774c35a-3de8-4b6c-bad0-c3c2e0c85141"
+      ]
+    },
+    "badgeBackground": 1,
+    "foreground": {
+      "revision": 7,
+      "unreadSessionKeys": []
+    },
+    "badgeAfterRefocus": 0,
+    "badgeSeq": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      1,
+      1,
+      0
+    ]
+  },
+  "pass": true
+}

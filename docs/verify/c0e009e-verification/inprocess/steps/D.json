@@ -1,0 +1,9 @@
+{
+  "id": "D",
+  "mode": "inprocess",
+  "expected": "failed conversation delete shows readable copy, not the raw IPC error",
+  "actual": {
+    "skipped": "in-process delete succeeds; copy path exercised in daemon mode only"
+  },
+  "pass": null
+}

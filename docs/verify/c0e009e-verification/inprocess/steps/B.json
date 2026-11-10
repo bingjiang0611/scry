@@ -1,0 +1,12 @@
+{
+  "id": "B",
+  "mode": "inprocess",
+  "expected": "ordinary session reply with the window focused adds no unread badge or dot",
+  "actual": {
+    "before": 0,
+    "after": [],
+    "dots": 0,
+    "badgeCount": 0
+  },
+  "pass": true
+}

@@ -1,0 +1,50 @@
+{
+  "id": "isolation",
+  "mode": "daemon",
+  "expected": "scry.db and daemon state live under the temporary userData",
+  "actual": {
+    "userDataDir": "/tmp/scry-verify-c0e009e/verify-daemon-qmGtmh/userData",
+    "dbHandles": [
+      "/private/tmp/scry-verify-c0e009e/verify-daemon-qmGtmh/userData/scry.db-shm",
+      "/private/tmp/scry-verify-c0e009e/verify-daemon-qmGtmh/userData/scry.db",
+      "/private/tmp/scry-verify-c0e009e/verify-daemon-qmGtmh/userData/scry.db-wal",
+      "/private/tmp/scry-verify-c0e009e/verify-daemon-qmGtmh/userData/scry.db-shm"
+    ],
+    "dbInsideTemp": true,
+    "realUserDataLeaked": [],
+    "outsideHandles": [],
+    "daemonInfo": {
+      "dir": "/tmp/scry-verify-c0e009e/verify-daemon-qmGtmh/userData/daemon",
+      "exists": true,
+      "entries": [
+        "daemon.lock",
+        "enroll.sock",
+        "local.sock"
+      ],
+      "lock": {
+        "pid": 82721,
+        "startedAt": "Tue Nov 10 15:49:22 2026",
+        "identityKey": "82721:Tue Nov 10 15:49:22 2026",
+        "startedBy": "supervisor:82720"
+      }
+    },
+    "daemonLsof": [
+      "/private/tmp/scry-verify-c0e009e/verify-daemon-qmGtmh/userData/scry.db-shm",
+      "/private/tmp/scry-verify-c0e009e/verify-daemon-qmGtmh/userData/scry.db",
+      "/private/tmp/scry-verify-c0e009e/verify-daemon-qmGtmh/userData/scry.db-wal",
+      "/private/tmp/scry-verify-c0e009e/verify-daemon-qmGtmh/userData/scry.db-shm",
+      "/private/tmp/scry-verify-c0e009e/verify-daemon-qmGtmh/userData/remote/pairing/pairing-state.lock",
+      "/private/tmp/scry-verify-c0e009e/verify-daemon-qmGtmh/userData/remote/ledger/session-ledger.lock",
+      "/private/tmp/scry-verify-c0e009e/verify-daemon-qmGtmh/userData/remote/output/run-output.lock",
+      "/private/tmp/scry-verify-c0e009e/verify-daemon-qmGtmh/userData/daemon/local.sock",
+      "/private/tmp/scry-verify-c0e009e/verify-daemon-qmGtmh/userData/daemon/enroll.sock",
+      "/private/tmp/scry-verify-c0e009e/verify-daemon-qmGtmh/userData/daemon/local.sock",
+      "/private/tmp/scry-verify-c0e009e/verify-daemon-qmGtmh/userData/daemon/local.sock",
+      "/private/tmp/scry-verify-c0e009e/verify-daemon-qmGtmh/userData/daemon/local.sock",
+      "/private/tmp/scry-verify-c0e009e/verify-daemon-qmGtmh/userData/daemon/local.sock",
+      "/private/tmp/scry-verify-c0e009e/verify-daemon-qmGtmh/userData/daemon/local.sock"
+    ],
+    "daemonPathsInside": true
+  },
+  "pass": true
+}

@@ -1,0 +1,757 @@
+{
+  "note": "Filtered from report.json receipts: run lifecycle sends, viewSessions/newSession/unreadSessions IPC receipts, smoke provider inputs. Other channels (agent:trace, runTraces:event, dataUpdated) omitted for size.",
+  "sends": [
+    {
+      "at": 1794325641009,
+      "channel": "agent:session",
+      "runId": "run-mwav5pg9-0",
+      "stopped": null
+    },
+    {
+      "at": 1794325641013,
+      "channel": "agent:focusedRun",
+      "runId": "run-mwav5pg9-0",
+      "stopped": null
+    },
+    {
+      "at": 1794325641112,
+      "channel": "agent:session",
+      "runId": "run-mwav5pg9-0",
+      "stopped": null
+    },
+    {
+      "at": 1794325641256,
+      "channel": "agent:turnDone",
+      "runId": "run-mwav5pg9-0",
+      "stopped": false
+    },
+    {
+      "at": 1794325646404,
+      "channel": "agent:session",
+      "runId": "92a7b196-9df3-42d3-b904-34de431341d1",
+      "stopped": null
+    },
+    {
+      "at": 1794325646455,
+      "channel": "agent:session",
+      "runId": "92a7b196-9df3-42d3-b904-34de431341d1",
+      "stopped": null
+    },
+    {
+      "at": 1794325646502,
+      "channel": "agent:turnDone",
+      "runId": "92a7b196-9df3-42d3-b904-34de431341d1",
+      "stopped": false
+    },
+    {
+      "at": 1794325646503,
+      "channel": "agent:unreadSessions",
+      "runId": null,
+      "stopped": null
+    },
+    {
+      "at": 1794325646519,
+      "channel": "agent:unreadSessions",
+      "runId": null,
+      "stopped": null
+    },
+    {
+      "at": 1794325647623,
+      "channel": "agent:session",
+      "runId": "0e8bd009-54b9-4a25-8fbf-266646c4b673",
+      "stopped": null
+    },
+    {
+      "at": 1794325650765,
+      "channel": "agent:turnDone",
+      "runId": "0e8bd009-54b9-4a25-8fbf-266646c4b673",
+      "stopped": false
+    },
+    {
+      "at": 1794325650766,
+      "channel": "agent:unreadSessions",
+      "runId": null,
+      "stopped": null
+    },
+    {
+      "at": 1794325651922,
+      "channel": "agent:unreadSessions",
+      "runId": null,
+      "stopped": null
+    },
+    {
+      "at": 1794325653674,
+      "channel": "agent:session",
+      "runId": "8acca047-5e42-4317-8579-3685bd650b34",
+      "stopped": null
+    },
+    {
+      "at": 1794325653801,
+      "channel": "agent:turnDone",
+      "runId": "8acca047-5e42-4317-8579-3685bd650b34",
+      "stopped": false
+    },
+    {
+      "at": 1794325655293,
+      "channel": "agent:session",
+      "runId": "913ddb52-91cf-4bb7-a8b7-db35d3b02170",
+      "stopped": null
+    },
+    {
+      "at": 1794325658433,
+      "channel": "agent:turnDone",
+      "runId": "913ddb52-91cf-4bb7-a8b7-db35d3b02170",
+      "stopped": false
+    },
+    {
+      "at": 1794325658434,
+      "channel": "agent:unreadSessions",
+      "runId": null,
+      "stopped": null
+    },
+    {
+      "at": 1794325659872,
+      "channel": "agent:unreadSessions",
+      "runId": null,
+      "stopped": null
+    },
+    {
+      "at": 1794325664259,
+      "channel": "agent:session",
+      "runId": "run-mwav67eb-1",
+      "stopped": null
+    },
+    {
+      "at": 1794325664261,
+      "channel": "agent:focusedRun",
+      "runId": "run-mwav67eb-1",
+      "stopped": null
+    },
+    {
+      "at": 1794325664390,
+      "channel": "agent:turnDone",
+      "runId": "run-mwav67eb-1",
+      "stopped": false
+    },
+    {
+      "at": 1794325666036,
+      "channel": "agent:session",
+      "runId": "e5c270e2-3378-4470-80ca-6261684d16e1",
+      "stopped": null
+    },
+    {
+      "at": 1794325666100,
+      "channel": "agent:session",
+      "runId": "e5c270e2-3378-4470-80ca-6261684d16e1",
+      "stopped": null
+    },
+    {
+      "at": 1794325666156,
+      "channel": "agent:turnDone",
+      "runId": "e5c270e2-3378-4470-80ca-6261684d16e1",
+      "stopped": false
+    },
+    {
+      "at": 1794325666156,
+      "channel": "agent:unreadSessions",
+      "runId": null,
+      "stopped": null
+    },
+    {
+      "at": 1794325666173,
+      "channel": "agent:unreadSessions",
+      "runId": null,
+      "stopped": null
+    },
+    {
+      "at": 1794325668562,
+      "channel": "agent:session",
+      "runId": "run-mwav6apn-2",
+      "stopped": null
+    },
+    {
+      "at": 1794325668563,
+      "channel": "agent:focusedRun",
+      "runId": "run-mwav6apn-2",
+      "stopped": null
+    },
+    {
+      "at": 1794325668647,
+      "channel": "agent:turnDone",
+      "runId": "run-mwav6apn-2",
+      "stopped": false
+    },
+    {
+      "at": 1794325672727,
+      "channel": "agent:session",
+      "runId": "run-mwav6dxe-3",
+      "stopped": null
+    },
+    {
+      "at": 1794325672728,
+      "channel": "agent:focusedRun",
+      "runId": "run-mwav6dxe-3",
+      "stopped": null
+    },
+    {
+      "at": 1794325672780,
+      "channel": "agent:session",
+      "runId": "run-mwav6dxe-3",
+      "stopped": null
+    },
+    {
+      "at": 1794325672826,
+      "channel": "agent:turnDone",
+      "runId": "run-mwav6dxe-3",
+      "stopped": false
+    },
+    {
+      "at": 1794325677442,
+      "channel": "agent:session",
+      "runId": "run-mwav6hkf-4",
+      "stopped": null
+    },
+    {
+      "at": 1794325677443,
+      "channel": "agent:focusedRun",
+      "runId": "run-mwav6hkf-4",
+      "stopped": null
+    },
+    {
+      "at": 1794325677488,
+      "channel": "agent:stopState",
+      "runId": "run-mwav6hkf-4",
+      "stopped": null,
+      "phase": "interrupt_requested"
+    },
+    {
+      "at": 1794325677522,
+      "channel": "agent:turnDone",
+      "runId": "run-mwav6hkf-4",
+      "stopped": true
+    },
+    {
+      "at": 1794325677523,
+      "channel": "agent:stopState",
+      "runId": "run-mwav6hkf-4",
+      "stopped": null,
+      "phase": "settled"
+    },
+    {
+      "at": 1794325687445,
+      "channel": "agent:session",
+      "runId": "run-mwav6pa7-5",
+      "stopped": null
+    },
+    {
+      "at": 1794325687446,
+      "channel": "agent:focusedRun",
+      "runId": "run-mwav6pa7-5",
+      "stopped": null
+    },
+    {
+      "at": 1794325687509,
+      "channel": "agent:stopState",
+      "runId": "run-mwav6pa7-5",
+      "stopped": null,
+      "phase": "interrupt_requested"
+    },
+    {
+      "at": 1794325687689,
+      "channel": "agent:turnDone",
+      "runId": "run-mwav6pa7-5",
+      "stopped": true
+    },
+    {
+      "at": 1794325687690,
+      "channel": "agent:stopState",
+      "runId": "run-mwav6pa7-5",
+      "stopped": null,
+      "phase": "settled"
+    },
+    {
+      "at": 1794325697662,
+      "channel": "agent:session",
+      "runId": "run-mwav6x5z-6",
+      "stopped": null
+    },
+    {
+      "at": 1794325697663,
+      "channel": "agent:focusedRun",
+      "runId": "run-mwav6x5z-6",
+      "stopped": null
+    },
+    {
+      "at": 1794325697727,
+      "channel": "agent:stopState",
+      "runId": "run-mwav6x5z-6",
+      "stopped": null,
+      "phase": "interrupt_requested"
+    },
+    {
+      "at": 1794325697904,
+      "channel": "agent:turnDone",
+      "runId": "run-mwav6x5z-6",
+      "stopped": true
+    },
+    {
+      "at": 1794325697904,
+      "channel": "agent:stopState",
+      "runId": "run-mwav6x5z-6",
+      "stopped": null,
+      "phase": "settled"
+    },
+    {
+      "at": 1794325707914,
+      "channel": "agent:session",
+      "runId": "run-mwav752s-7",
+      "stopped": null
+    },
+    {
+      "at": 1794325707914,
+      "channel": "agent:focusedRun",
+      "runId": "run-mwav752s-7",
+      "stopped": null
+    },
+    {
+      "at": 1794325707977,
+      "channel": "agent:stopState",
+      "runId": "run-mwav752s-7",
+      "stopped": null,
+      "phase": "interrupt_requested"
+    },
+    {
+      "at": 1794325708159,
+      "channel": "agent:turnDone",
+      "runId": "run-mwav752s-7",
+      "stopped": true
+    },
+    {
+      "at": 1794325708159,
+      "channel": "agent:stopState",
+      "runId": "run-mwav752s-7",
+      "stopped": null,
+      "phase": "settled"
+    },
+    {
+      "at": 1794325718178,
+      "channel": "agent:session",
+      "runId": "run-mwav7czv-8",
+      "stopped": null
+    },
+    {
+      "at": 1794325718179,
+      "channel": "agent:focusedRun",
+      "runId": "run-mwav7czv-8",
+      "stopped": null
+    },
+    {
+      "at": 1794325718222,
+      "channel": "agent:stopState",
+      "runId": "run-mwav7czv-8",
+      "stopped": null,
+      "phase": "interrupt_requested"
+    },
+    {
+      "at": 1794325718256,
+      "channel": "agent:turnDone",
+      "runId": "run-mwav7czv-8",
+      "stopped": true
+    },
+    {
+      "at": 1794325718257,
+      "channel": "agent:stopState",
+      "runId": "run-mwav7czv-8",
+      "stopped": null,
+      "phase": "settled"
+    },
+    {
+      "at": 1794325728265,
+      "channel": "agent:session",
+      "runId": "d8a69d32-cf5f-4214-9110-7be23d883ee5",
+      "stopped": null
+    },
+    {
+      "at": 1794325729388,
+      "channel": "agent:stopState",
+      "runId": "d8a69d32-cf5f-4214-9110-7be23d883ee5",
+      "stopped": null,
+      "phase": "interrupt_requested"
+    },
+    {
+      "at": 1794325729454,
+      "channel": "agent:turnDone",
+      "runId": "d8a69d32-cf5f-4214-9110-7be23d883ee5",
+      "stopped": true
+    },
+    {
+      "at": 1794325729455,
+      "channel": "agent:stopState",
+      "runId": "d8a69d32-cf5f-4214-9110-7be23d883ee5",
+      "stopped": null,
+      "phase": "settled"
+    }
+  ],
+  "views": [
+    {
+      "at": 1794325640689,
+      "channel": "agent:unreadSessions",
+      "ok": true,
+      "value": {
+        "revision": 0,
+        "unreadSessionKeys": []
+      }
+    },
+    {
+      "at": 1794325646518,
+      "channel": "agent:viewSessions",
+      "ok": true,
+      "viewId": "main:95b8e02a-47ee-4908-",
+      "main": true,
+      "sessionKeys": [
+        "smoke-session-92a7b196-9df3-42d3-b904-34de431341d1"
+      ]
+    },
+    {
+      "at": 1794325647460,
+      "channel": "agent:viewSessions",
+      "ok": true,
+      "viewId": "main:95b8e02a-47ee-4908-",
+      "main": true,
+      "sessionKeys": []
+    },
+    {
+      "at": 1794325647468,
+      "channel": "agent:unreadSessions",
+      "ok": true,
+      "value": {
+        "revision": 2,
+        "unreadSessionKeys": []
+      }
+    },
+    {
+      "at": 1794325647515,
+      "channel": "agent:viewSessions",
+      "ok": true,
+      "viewId": "main:95b8e02a-47ee-4908-",
+      "main": true,
+      "sessionKeys": [
+        "smoke-session-92a7b196-9df3-42d3-b904-34de431341d1"
+      ]
+    },
+    {
+      "at": 1794325647695,
+      "channel": "agent:viewSessions",
+      "ok": true,
+      "viewId": "main:95b8e02a-47ee-4908-",
+      "main": true,
+      "sessionKeys": []
+    },
+    {
+      "at": 1794325651701,
+      "channel": "agent:unreadSessions",
+      "ok": true,
+      "value": {
+        "revision": 3,
+        "unreadSessionKeys": [
+          "codex\u0000\u0000/private/tmp/scry-verify-c0e009e/verify-inprocess-9izhhi/home/workspace\u0000smoke-session-92a7b196-9df3-42d3-b904-34de431341d1"
+        ]
+      }
+    },
+    {
+      "at": 1794325651921,
+      "channel": "agent:viewSessions",
+      "ok": true,
+      "viewId": "main:95b8e02a-47ee-4908-",
+      "main": true,
+      "sessionKeys": [
+        "smoke-session-92a7b196-9df3-42d3-b904-34de431341d1"
+      ]
+    },
+    {
+      "at": 1794325653118,
+      "channel": "agent:unreadSessions",
+      "ok": true,
+      "value": {
+        "revision": 4,
+        "unreadSessionKeys": []
+      }
+    },
+    {
+      "at": 1794325653325,
+      "channel": "agent:unreadSessions",
+      "ok": true,
+      "value": {
+        "revision": 4,
+        "unreadSessionKeys": []
+      }
+    },
+    {
+      "at": 1794325654741,
+      "channel": "agent:unreadSessions",
+      "ok": true,
+      "value": {
+        "revision": 4,
+        "unreadSessionKeys": []
+      }
+    },
+    {
+      "at": 1794325659689,
+      "channel": "agent:unreadSessions",
+      "ok": true,
+      "value": {
+        "revision": 5,
+        "unreadSessionKeys": [
+          "codex\u0000\u0000/private/tmp/scry-verify-c0e009e/verify-inprocess-9izhhi/home/workspace\u0000smoke-session-92a7b196-9df3-42d3-b904-34de431341d1"
+        ]
+      }
+    },
+    {
+      "at": 1794325661280,
+      "channel": "agent:unreadSessions",
+      "ok": true,
+      "value": {
+        "revision": 6,
+        "unreadSessionKeys": []
+      }
+    },
+    {
+      "at": 1794325661705,
+      "channel": "agent:viewSessions",
+      "ok": true,
+      "viewId": "main:95b8e02a-47ee-4908-",
+      "main": true,
+      "sessionKeys": []
+    },
+    {
+      "at": 1794325664177,
+      "channel": "agent:unreadSessions",
+      "ok": true,
+      "value": {
+        "revision": 6,
+        "unreadSessionKeys": []
+      }
+    },
+    {
+      "at": 1794325665884,
+      "channel": "agent:unreadSessions",
+      "ok": true,
+      "value": {
+        "revision": 6,
+        "unreadSessionKeys": []
+      }
+    },
+    {
+      "at": 1794325666172,
+      "channel": "agent:viewSessions",
+      "ok": true,
+      "viewId": "side:04b288c1-28c1-4360-",
+      "main": false,
+      "sessionKeys": [
+        "smoke-session-e5c270e2-3378-4470-80ca-6261684d16e1"
+      ]
+    },
+    {
+      "at": 1794325667981,
+      "channel": "agent:unreadSessions",
+      "ok": true,
+      "value": {
+        "revision": 8,
+        "unreadSessionKeys": []
+      }
+    },
+    {
+      "at": 1794325668458,
+      "channel": "agent:unreadSessions",
+      "ok": true,
+      "value": {
+        "revision": 8,
+        "unreadSessionKeys": []
+      }
+    },
+    {
+      "at": 1794325670443,
+      "channel": "agent:unreadSessions",
+      "ok": true,
+      "value": {
+        "revision": 8,
+        "unreadSessionKeys": []
+      }
+    },
+    {
+      "at": 1794325670694,
+      "channel": "agent:viewSessions",
+      "ok": true,
+      "viewId": "side:04b288c1-28c1-4360-",
+      "main": false,
+      "sessionKeys": []
+    },
+    {
+      "at": 1794325670695,
+      "channel": "agent:newSession",
+      "ok": true,
+      "providerId": "codex"
+    },
+    {
+      "at": 1794325674889,
+      "channel": "agent:viewSessions",
+      "ok": true,
+      "viewId": "main:95b8e02a-47ee-4908-",
+      "main": true,
+      "sessionKeys": [
+        "smoke-session-92a7b196-9df3-42d3-b904-34de431341d1"
+      ]
+    },
+    {
+      "at": 1794325677351,
+      "channel": "agent:viewSessions",
+      "ok": true,
+      "viewId": "main:95b8e02a-47ee-4908-",
+      "main": true,
+      "sessionKeys": []
+    },
+    {
+      "at": 1794325685618,
+      "channel": "agent:viewSessions",
+      "ok": true,
+      "viewId": "main:95b8e02a-47ee-4908-",
+      "main": true,
+      "sessionKeys": [
+        "smoke-session-92a7b196-9df3-42d3-b904-34de431341d1"
+      ]
+    },
+    {
+      "at": 1794325686253,
+      "channel": "agent:viewSessions",
+      "ok": true,
+      "viewId": "main:95b8e02a-47ee-4908-",
+      "main": true,
+      "sessionKeys": []
+    },
+    {
+      "at": 1794325695841,
+      "channel": "agent:viewSessions",
+      "ok": true,
+      "viewId": "main:95b8e02a-47ee-4908-",
+      "main": true,
+      "sessionKeys": [
+        "smoke-session-92a7b196-9df3-42d3-b904-34de431341d1"
+      ]
+    },
+    {
+      "at": 1794325696482,
+      "channel": "agent:viewSessions",
+      "ok": true,
+      "viewId": "main:95b8e02a-47ee-4908-",
+      "main": true,
+      "sessionKeys": []
+    },
+    {
+      "at": 1794325706061,
+      "channel": "agent:viewSessions",
+      "ok": true,
+      "viewId": "main:95b8e02a-47ee-4908-",
+      "main": true,
+      "sessionKeys": [
+        "smoke-session-92a7b196-9df3-42d3-b904-34de431341d1"
+      ]
+    },
+    {
+      "at": 1794325706709,
+      "channel": "agent:viewSessions",
+      "ok": true,
+      "viewId": "main:95b8e02a-47ee-4908-",
+      "main": true,
+      "sessionKeys": []
+    },
+    {
+      "at": 1794325716332,
+      "channel": "agent:viewSessions",
+      "ok": true,
+      "viewId": "main:95b8e02a-47ee-4908-",
+      "main": true,
+      "sessionKeys": [
+        "smoke-session-92a7b196-9df3-42d3-b904-34de431341d1"
+      ]
+    },
+    {
+      "at": 1794325716969,
+      "channel": "agent:viewSessions",
+      "ok": true,
+      "viewId": "main:95b8e02a-47ee-4908-",
+      "main": true,
+      "sessionKeys": []
+    },
+    {
+      "at": 1794325726349,
+      "channel": "agent:viewSessions",
+      "ok": true,
+      "viewId": "main:95b8e02a-47ee-4908-",
+      "main": true,
+      "sessionKeys": [
+        "smoke-session-92a7b196-9df3-42d3-b904-34de431341d1"
+      ]
+    },
+    {
+      "at": 1794325726989,
+      "channel": "agent:viewSessions",
+      "ok": true,
+      "viewId": "main:95b8e02a-47ee-4908-",
+      "main": true,
+      "sessionKeys": []
+    },
+    {
+      "at": 1794325728121,
+      "channel": "agent:viewSessions",
+      "ok": true,
+      "viewId": "main:95b8e02a-47ee-4908-",
+      "main": true,
+      "sessionKeys": [
+        "smoke-session-92a7b196-9df3-42d3-b904-34de431341d1"
+      ]
+    }
+  ],
+  "inputs": [
+    {
+      "providerId": "codex",
+      "cwd": "/private/tmp/scry-verify-c0e009e/verify-inprocess-9izhhi/home/workspace",
+      "runId": "run-mwav6dxe-3",
+      "prompt": "desktop remote write one",
+      "resume": null,
+      "sessionId": "smoke-session-run-mwav6dxe-3",
+      "historicalContext": null,
+      "outgoingPrompt": "desktop remote write one"
+    },
+    {
+      "providerId": "codex",
+      "cwd": "/private/tmp/scry-verify-c0e009e/verify-inprocess-9izhhi/home/workspace",
+      "runId": "run-mwav6pa7-5",
+      "prompt": "performance paced stream",
+      "resume": "smoke-session-run-mwav6dxe-3",
+      "sessionId": "smoke-session-run-mwav6dxe-3",
+      "historicalContext": null,
+      "outgoingPrompt": "performance paced stream"
+    },
+    {
+      "providerId": "codex",
+      "cwd": "/private/tmp/scry-verify-c0e009e/verify-inprocess-9izhhi/home/workspace",
+      "runId": "run-mwav6x5z-6",
+      "prompt": "performance paced stream",
+      "resume": "smoke-session-run-mwav6dxe-3",
+      "sessionId": "smoke-session-run-mwav6dxe-3",
+      "historicalContext": null,
+      "outgoingPrompt": "performance paced stream"
+    },
+    {
+      "providerId": "codex",
+      "cwd": "/private/tmp/scry-verify-c0e009e/verify-inprocess-9izhhi/home/workspace",
+      "runId": "run-mwav752s-7",
+      "prompt": "performance paced stream",
+      "resume": "smoke-session-run-mwav6dxe-3",
+      "sessionId": "smoke-session-run-mwav6dxe-3",
+      "historicalContext": null,
+      "outgoingPrompt": "performance paced stream"
+    }
+  ],
+  "inputsNote": "smoke provider input lines for the C run only"
+}

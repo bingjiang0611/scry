@@ -1,0 +1,55 @@
+{
+  "seedSessionId": "smoke-session-remote-run-mwav8bmp-0",
+  "newRun": "remote-run-mwav93zc-3",
+  "runSession": "smoke-session-remote-run-mwav93zc-3",
+  "seedTurns": 3,
+  "sessions": {
+    "smoke-session-745208c9-57da-4fab-a1e5-d339ed4d86d0": {
+      "external": "smoke-session-745208c9-57da-4fab-a1e5-d339ed4d86d0",
+      "turns": 1,
+      "statuses": {
+        "745208c9-57da-4fab-a1e5-d339ed4d86d0": "completed"
+      }
+    },
+    "smoke-session-remote-run-mwav93zc-3": {
+      "external": "smoke-session-remote-run-mwav93zc-3",
+      "turns": 6,
+      "statuses": {
+        "remote-run-mwava6s4-8": "interrupted",
+        "remote-run-mwav93zc-3": "completed",
+        "remote-run-mwav9qwd-6": "interrupted",
+        "remote-run-mwav9yuc-7": "interrupted",
+        "remote-run-mwav9axa-4": "interrupted",
+        "remote-run-mwav9iyc-5": "interrupted"
+      }
+    },
+    "smoke-session-59b5e1d3-6cc8-4fe4-97bf-5b03e51650fe": {
+      "external": "smoke-session-59b5e1d3-6cc8-4fe4-97bf-5b03e51650fe",
+      "turns": 1,
+      "statuses": {
+        "59b5e1d3-6cc8-4fe4-97bf-5b03e51650fe": "completed"
+      }
+    },
+    "smoke-session-remote-run-mwav8bmp-0": {
+      "external": "smoke-session-remote-run-mwav8bmp-0",
+      "turns": 3,
+      "statuses": {
+        "remote-run-mwav90ml-2": "completed",
+        "remote-run-mwav8xak-1": "completed",
+        "remote-run-mwav8bmp-0": "completed"
+      }
+    },
+    "smoke-session-2774c35a-3de8-4b6c-bad0-c3c2e0c85141": {
+      "external": "smoke-session-2774c35a-3de8-4b6c-bad0-c3c2e0c85141",
+      "turns": 5,
+      "statuses": {
+        "8ee74cfb-5660-4a42-af63-972981528eef": "completed",
+        "bac05ff5-e6d5-4251-afcc-6730b59c5b46": "interrupted",
+        "29b1d3f4-6d36-4100-9a05-541053e444ca": "completed",
+        "0fcacede-3655-4afd-b5d8-a75f247c4608": "completed",
+        "2774c35a-3de8-4b6c-bad0-c3c2e0c85141": "completed"
+      }
+    }
+  },
+  "newProviderSessionConfirmed": true
+}

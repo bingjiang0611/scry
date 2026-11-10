@@ -1,0 +1,120 @@
+{
+  "id": "A5",
+  "mode": "inprocess",
+  "expected": "main pane on ordinary session X with a side chat open: neither reply counts as unread",
+  "actual": {
+    "sideChat": {
+      "id": "04b288c1-28c1-4360-82df-f364e1df19c1",
+      "variant": "frame"
+    },
+    "xRun": "run-mwav67eb-1",
+    "phases": [
+      {
+        "at": 1794325664175,
+        "unread": {
+          "revision": 6,
+          "unreadSessionKeys": []
+        },
+        "badge": 0
+      },
+      {
+        "at": 1794325665883,
+        "unread": {
+          "revision": 6,
+          "unreadSessionKeys": []
+        },
+        "badge": 0,
+        "badgeEvents": [
+          {
+            "at": 1794325664260,
+            "count": 0,
+            "ok": true,
+            "nativeCount": 0,
+            "dockBadge": ""
+          },
+          {
+            "at": 1794325664272,
+            "count": 0,
+            "ok": true,
+            "nativeCount": 0,
+            "dockBadge": ""
+          },
+          {
+            "at": 1794325664328,
+            "count": 0,
+            "ok": true,
+            "nativeCount": 0,
+            "dockBadge": ""
+          },
+          {
+            "at": 1794325664360,
+            "count": 0,
+            "ok": true,
+            "nativeCount": 0,
+            "dockBadge": ""
+          },
+          {
+            "at": 1794325664390,
+            "count": 0,
+            "ok": true,
+            "nativeCount": 0,
+            "dockBadge": ""
+          }
+        ]
+      },
+      {
+        "at": 1794325668177,
+        "unread": {
+          "revision": 8,
+          "unreadSessionKeys": []
+        },
+        "badge": 0
+      }
+    ],
+    "unreadAfter": {
+      "revision": 8,
+      "unreadSessionKeys": []
+    },
+    "dots": 0,
+    "badgeCount": 0,
+    "focusedAndTurnDoneOrder": [
+      "agent:turnDone:0e8bd009-54b9-4a25-8fbf-266646c4b673",
+      "agent:turnDone:8acca047-5e42-4317-8579-3685bd650b34",
+      "agent:turnDone:913ddb52-91cf-4bb7-a8b7-db35d3b02170",
+      "agent:focusedRun:run-mwav67eb-1",
+      "agent:turnDone:run-mwav67eb-1",
+      "agent:turnDone:e5c270e2-3378-4470-80ca-6261684d16e1"
+    ],
+    "badgeEventsAfterPhase0": [
+      {
+        "at": 1794325664260,
+        "count": 0
+      },
+      {
+        "at": 1794325664272,
+        "count": 0
+      },
+      {
+        "at": 1794325664328,
+        "count": 0
+      },
+      {
+        "at": 1794325664360,
+        "count": 0
+      },
+      {
+        "at": 1794325664390,
+        "count": 0
+      },
+      {
+        "at": 1794325666156,
+        "count": 1
+      },
+      {
+        "at": 1794325666173,
+        "count": 0
+      }
+    ]
+  },
+  "pass": true
+}

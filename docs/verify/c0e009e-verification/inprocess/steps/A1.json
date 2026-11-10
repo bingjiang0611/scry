@@ -1,0 +1,35 @@
+{
+  "id": "A1",
+  "mode": "inprocess",
+  "expected": "unified conversation reply after switching to another session makes the badge +1",
+  "actual": {
+    "before": 0,
+    "switchedAway": true,
+    "settled": {
+      "turns": 2,
+      "outcome": "completed"
+    },
+    "unreadAfter": {
+      "revision": 3,
+      "unreadSessionKeys": [
+        "codex\u0000\u0000/private/tmp/scry-verify-c0e009e/verify-inprocess-9izhhi/home/workspace\u0000smoke-session-92a7b196-9df3-42d3-b904-34de431341d1"
+      ]
+    },
+    "badgeCount": 1,
+    "badgeSeq": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+    ]
+  },
+  "pass": true
+}

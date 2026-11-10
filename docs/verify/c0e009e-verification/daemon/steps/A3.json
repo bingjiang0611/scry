@@ -1,0 +1,18 @@
+{
+  "id": "A3",
+  "mode": "daemon",
+  "expected": "focused window on the conversation: its reply does not add unread",
+  "actual": {
+    "before": 0,
+    "settled": {
+      "turns": 3,
+      "outcome": "completed"
+    },
+    "unreadAfter": {
+      "revision": 5,
+      "unreadSessionKeys": []
+    },
+    "badgeCount": 0
+  },
+  "pass": true
+}

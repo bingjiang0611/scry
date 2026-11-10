@@ -1,0 +1,62 @@
+{
+  "id": "A2",
+  "mode": "daemon",
+  "expected": "opening the conversation clears the badge and (daemon) reports it viewed",
+  "actual": {
+    "unreadAfter": {
+      "revision": 5,
+      "unreadSessionKeys": []
+    },
+    "badgeCount": 0,
+    "viewSessions": [
+      {
+        "at": 1794325774111,
+        "channel": "agent:viewSessions",
+        "args": [
+          {
+            "viewId": "main:9c2430f9-bf2c-4789-979f-b56afbc186bb",
+            "main": true,
+            "sessionKeys": [
+              "codex\u0000\u0000/private/tmp/scry-verify-c0e009e/verify-daemon-qmGtmh/home/workspace\u0000smoke-session-2774c35a-3de8-4b6c-bad0-c3c2e0c85141"
+            ]
+          }
+        ],
+        "ok": true,
+        "value": true
+      },
+      {
+        "at": 1794325774263,
+        "channel": "agent:viewSessions",
+        "args": [
+          {
+            "viewId": "main:9c2430f9-bf2c-4789-979f-b56afbc186bb",
+            "main": true,
+            "sessionKeys": []
+          }
+        ],
+        "ok": true,
+        "value": true
+      },
+      {
+        "at": 1794325778568,
+        "channel": "agent:viewSessions",
+        "args": [
+          {
+            "viewId": "main:9c2430f9-bf2c-4789-979f-b56afbc186bb",
+            "main": true,
+            "sessionKeys": [
+              "codex\u0000\u0000/private/tmp/scry-verify-c0e009e/verify-daemon-qmGtmh/home/workspace\u0000smoke-session-2774c35a-3de8-4b6c-bad0-c3c2e0c85141"
+            ]
+          }
+        ],
+        "ok": true,
+        "value": true
+      }
+    ],
+    "daemonLogEvidence": {
+      "note": "daemon writes no per-op log (host-process/lifecycle only log startup lines); see A4 cross-check",
+      "attentionViewedLog": false
+    }
+  },
+  "pass": true
+}

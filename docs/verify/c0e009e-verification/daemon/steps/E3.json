@@ -1,0 +1,24 @@
+{
+  "id": "E3",
+  "mode": "daemon",
+  "expected": "unified conversation running: is the send action disabled and what does the notice say",
+  "actual": {
+    "idleState": {
+      "disabled": true,
+      "label": "",
+      "title": "发送",
+      "ariaDisabled": null,
+      "describedBy": null,
+      "composerStatus": null,
+      "runStatus": "运行中 可继续输入，新消息将加入队列 00:00 停止本轮",
+      "notice": null,
+      "textareaValue": ""
+    },
+    "withText": {
+      "disabled": true,
+      "label": "",
+      "title": "当前轮仍在投递"
+    }
+  },
+  "pass": true
+}

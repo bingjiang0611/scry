@@ -1,0 +1,53 @@
+{
+  "id": "C",
+  "mode": "inprocess",
+  "expected": "sidebar new session opens a blank session with no raw IPC error, then sends a new Provider session",
+  "actual": {
+    "rawErrorVisible": false,
+    "rawMatches": null,
+    "blank": {
+      "main": "本机\nworkspace\n今天想在 workspace 中构建什么？\nworkspace\n默认审批\ncodex Smoke Fixture\n自动模型\n默认\n当前工作区\n工作区选择不可用",
+      "turns": 0,
+      "composer": true
+    },
+    "newRun": "run-mwav6dxe-3",
+    "seedSessionId": "smoke-session-run-mwav5pg9-0",
+    "seedTurnsBefore": 3,
+    "seedTurnsAfter": 3,
+    "sessionRowsBefore": 0,
+    "sessionRowsAfter": 0,
+    "newSessionsAdded": [],
+    "continuedSeed": true,
+    "sidebarRowsBefore": [
+      "对话 95b8e02a",
+      "对话 258ccf35",
+      "desktop remote write one"
+    ],
+    "sidebarRowsAfter": [
+      "对话 95b8e02a",
+      "对话 258ccf35",
+      "desktop remote write one",
+      "desktop remote write one"
+    ],
+    "providerInput": {
+      "runId": "run-mwav6dxe-3",
+      "resume": null,
+      "sessionId": "smoke-session-run-mwav6dxe-3"
+    },
+    "newSessionReceipt": [
+      {
+        "at": 1794325670695,
+        "channel": "agent:newSession",
+        "args": [
+          {
+            "providerId": "codex",
+            "cwd": "/private/tmp/scry-verify-c0e009e/verify-inprocess-9izhhi/home/workspace"
+          }
+        ],
+        "ok": true,
+        "value": true
+      }
+    ]
+  },
+  "pass": true
+}

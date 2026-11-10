@@ -1,0 +1,38 @@
+# daemon 模式 main 进程日志摘录（非全文）
+# 原因：原始 app.log 共 443 行 / 36469 字节，超过仓库 scripts/check-staged-file-size.mjs 的 20KB/文件提交预算。
+# 摘录范围：文件开头 12 行 + 全部 "Error occurred in handler for ..." 行（按其 TypeError 文案去重后逐条列出）+ handler 错误计数表。
+# 原始全文留在本次运行的临时目录（已随实例清理，不可再取回）。
+
+## 开头 12 行
+
+DevTools listening on ws://127.0.0.1:58076/devtools/browser/18105116-2675-4508-9a12-b00215fdd497
+Error occurred in handler for 'agent:unreadSessions': Error: daemon_capability_unavailable:agent:unreadSessions
+    at unreadSessionsAnswer (file:///private/tmp/scry-verify-c0e009e/wt/out/main/chunks/history-runtime-jQkRYW44.js:9440:56)
+    at file:///private/tmp/scry-verify-c0e009e/wt/out/main/index.js:3991:48
+    at file:///private/tmp/scry-verify-c0e009e/wt/out/main/index.js:3170:22
+    at file:///private/tmp/scry-verify-c0e009e/verify-daemon-qmGtmh/instrumented-main.mjs:55:33
+    at Session.<anonymous> (node:electron/js2c/browser_init:2:118404)
+    at Session.emit (node:events:509:28)
+Error occurred in handler for 'agent:listCommands': Error: daemon_capability_unavailable:agent:listCommands
+    at file:///private/tmp/scry-verify-c0e009e/wt/out/main/chunks/history-runtime-jQkRYW44.js:46215:11
+    at file:///private/tmp/scry-verify-c0e009e/wt/out/main/index.js:3170:22
+
+## handler 错误计数（按通道）
+ 31  workspaceSelection:read
+ 18  agent:usageStats
+ 16  agent:gitDiff
+  4  agent:listCommands
+  1  agent:unreadSessions
+  1  agent:runControls
+  1  agent:invalidateProviderContext
+  1  conversation:delete
+
+## 每条错误原文（去重）
+Error occurred in handler for 'agent:unreadSessions': Error: daemon_capability_unavailable:agent:unreadSessions
+Error occurred in handler for 'agent:listCommands': Error: daemon_capability_unavailable:agent:listCommands
+Error occurred in handler for 'agent:usageStats': Error: daemon_capability_unavailable:agent:usageStats
+Error occurred in handler for 'agent:runControls': Error: provider adapter not registered: claude
+Error occurred in handler for 'agent:gitDiff': Error: daemon_capability_unavailable:agent:gitDiff
+Error occurred in handler for 'workspaceSelection:read': Error: daemon_capability_unavailable:workspaceSelection:read
+Error occurred in handler for 'agent:invalidateProviderContext': Error: daemon_capability_unavailable:agent:invalidateProviderContext
+Error occurred in handler for 'conversation:delete': Error: daemon_capability_unavailable:conversation:delete

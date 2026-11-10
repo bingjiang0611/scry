@@ -1,0 +1,76 @@
+{
+  "id": "A5",
+  "mode": "daemon",
+  "expected": "main pane on ordinary session X with a side chat open: neither reply counts as unread",
+  "actual": {
+    "sideChat": {
+      "id": "4ec346e7-1ab8-42f8-ac8f-da67f9c70c0e",
+      "variant": "frame"
+    },
+    "xRun": "remote-run-mwav8xak-1",
+    "phases": [
+      {
+        "at": 1794325791036,
+        "unread": {
+          "revision": 7,
+          "unreadSessionKeys": []
+        },
+        "badge": 0
+      },
+      {
+        "at": 1794325792793,
+        "unread": {
+          "revision": 7,
+          "unreadSessionKeys": []
+        },
+        "badge": 0,
+        "badgeEvents": [
+          {
+            "at": 1794325791154,
+            "count": 0,
+            "ok": true,
+            "nativeCount": 0,
+            "dockBadge": ""
+          }
+        ]
+      },
+      {
+        "at": 1794325795099,
+        "unread": {
+          "revision": 9,
+          "unreadSessionKeys": []
+        },
+        "badge": 0
+      }
+    ],
+    "unreadAfter": {
+      "revision": 9,
+      "unreadSessionKeys": []
+    },
+    "dots": 0,
+    "badgeCount": 0,
+    "focusedAndTurnDoneOrder": [
+      "agent:turnDone:2774c35a-3de8-4b6c-bad0-c3c2e0c85141",
+      "agent:turnDone:29b1d3f4-6d36-4100-9a05-541053e444ca",
+      "agent:turnDone:0fcacede-3655-4afd-b5d8-a75f247c4608",
+      "agent:turnDone:8ee74cfb-5660-4a42-af63-972981528eef",
+      "agent:turnDone:remote-run-mwav8xak-1",
+      "agent:turnDone:745208c9-57da-4fab-a1e5-d339ed4d86d0"
+    ],
+    "badgeEventsAfterPhase0": [
+      {
+        "at": 1794325791154,
+        "count": 0
+      },
+      {
+        "at": 1794325793091,
+        "count": 1
+      },
+      {
+        "at": 1794325793093,
+        "count": 0
+      }
+    ]
+  },
+  "pass": true
+}

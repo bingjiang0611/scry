@@ -1,0 +1,59 @@
+{
+  "id": "A2",
+  "mode": "inprocess",
+  "expected": "opening the conversation clears the badge and (daemon) reports it viewed",
+  "actual": {
+    "unreadAfter": {
+      "revision": 4,
+      "unreadSessionKeys": []
+    },
+    "badgeCount": 0,
+    "viewSessions": [
+      {
+        "at": 1794325647515,
+        "channel": "agent:viewSessions",
+        "args": [
+          {
+            "viewId": "main:95b8e02a-47ee-4908-8755-298af0166c04",
+            "main": true,
+            "sessionKeys": [
+              "codex\u0000\u0000/private/tmp/scry-verify-c0e009e/verify-inprocess-9izhhi/home/workspace\u0000smoke-session-92a7b196-9df3-42d3-b904-34de431341d1"
+            ]
+          }
+        ],
+        "ok": true,
+        "value": true
+      },
+      {
+        "at": 1794325647695,
+        "channel": "agent:viewSessions",
+        "args": [
+          {
+            "viewId": "main:95b8e02a-47ee-4908-8755-298af0166c04",
+            "main": true,
+            "sessionKeys": []
+          }
+        ],
+        "ok": true,
+        "value": true
+      },
+      {
+        "at": 1794325651921,
+        "channel": "agent:viewSessions",
+        "args": [
+          {
+            "viewId": "main:95b8e02a-47ee-4908-8755-298af0166c04",
+            "main": true,
+            "sessionKeys": [
+              "codex\u0000\u0000/private/tmp/scry-verify-c0e009e/verify-inprocess-9izhhi/home/workspace\u0000smoke-session-92a7b196-9df3-42d3-b904-34de431341d1"
+            ]
+          }
+        ],
+        "ok": true,
+        "value": true
+      }
+    ],
+    "daemonLogEvidence": null
+  },
+  "pass": true
+}

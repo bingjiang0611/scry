@@ -1,0 +1,546 @@
+{
+  "id": "E1",
+  "mode": "inprocess",
+  "expected": "conversation header buttons: hit stack and computed styles (evidence only, both modes)",
+  "actual": {
+    "closed": [
+      {
+        "owner": {
+          "mainPane": "95b8e02a-47ee-4908-8755-298af0166c04"
+        },
+        "optionsOpen": false,
+        "toolbar": {
+          "tag": "DIV",
+          "id": null,
+          "cls": "conversation-toolbar",
+          "text": "对话 95b8e02a刷新状态对话选项重命名置顶存档缺失文字",
+          "zIndex": "auto",
+          "position": "static",
+          "overflow": "visible",
+          "transform": "none",
+          "isolation": "auto",
+          "display": "flex",
+          "opacity": "1",
+          "pointerEvents": "auto",
+          "visible": true,
+          "rect": {
+            "x": 238,
+            "y": 52,
+            "w": 1042,
+            "h": 53
+          }
+        },
+        "transcript": {
+          "tag": "DIV",
+          "id": null,
+          "cls": "chat chat-transcript",
+          "text": "desktop remote write oneC Code",
+          "zIndex": "auto",
+          "position": "static",
+          "overflow": "hidden auto",
+          "transform": "none",
+          "isolation": "auto",
+          "display": "block",
+          "opacity": "1",
+          "pointerEvents": "auto",
+          "visible": true,
+          "rect": {
+            "x": 238,
+            "y": 105,
+            "w": 1042,
+            "h": 465
+          }
+        },
+        "renderedButtons": 2,
+        "coveredCount": 0,
+        "covered": [],
+        "buttons": [
+          {
+            "text": "刷新状态",
+            "cls": "btn",
+            "rect": {
+              "x": 1112,
+              "y": 58,
+              "w": 66,
+              "h": 40
+            },
+            "visible": true,
+            "skipped": null,
+            "covered": false,
+            "style": {
+              "zIndex": "auto",
+              "position": "static",
+              "overflow": "visible",
+              "transform": "none",
+              "isolation": "auto"
+            },
+            "hitStack": [
+              {
+                "cls": "btn",
+                "tag": "BUTTON",
+                "zIndex": "auto",
+                "position": "static"
+              },
+              {
+                "cls": "conversation-toolbar",
+                "tag": "DIV",
+                "zIndex": "auto",
+                "position": "static"
+              },
+              {
+                "cls": "unified-conversation conversation-chat",
+                "tag": "MAIN",
+                "zIndex": "auto",
+                "position": "static"
+              },
+              {
+                "cls": "main-content main-content--single",
+                "tag": "DIV",
+                "zIndex": "auto",
+                "position": "static"
+              },
+              {
+                "cls": "main-area has-main-content",
+                "tag": "DIV",
+                "zIndex": "auto",
+                "position": "static"
+              }
+            ]
+          },
+          {
+            "text": "对话选项",
+            "cls": "",
+            "rect": {
+              "x": 1186,
+              "y": 63,
+              "w": 70,
+              "h": 31
+            },
+            "visible": true,
+            "skipped": null,
+            "covered": false,
+            "style": {
+              "zIndex": "auto",
+              "position": "static",
+              "overflow": "visible",
+              "transform": "none",
+              "isolation": "auto"
+            },
+            "hitStack": [
+              {
+                "cls": "",
+                "tag": "SUMMARY",
+                "zIndex": "auto",
+                "position": "static"
+              },
+              {
+                "cls": "conversation-options",
+                "tag": "DETAILS",
+                "zIndex": "auto",
+                "position": "relative"
+              },
+              {
+                "cls": "conversation-toolbar",
+                "tag": "DIV",
+                "zIndex": "auto",
+                "position": "static"
+              },
+              {
+                "cls": "unified-conversation conversation-chat",
+                "tag": "MAIN",
+                "zIndex": "auto",
+                "position": "static"
+              },
+              {
+                "cls": "main-content main-content--single",
+                "tag": "DIV",
+                "zIndex": "auto",
+                "position": "static"
+              }
+            ]
+          },
+          {
+            "text": "重命名",
+            "cls": "btn",
+            "rect": {
+              "x": 969,
+              "y": 106,
+              "w": 54,
+              "h": 40
+            },
+            "visible": false,
+            "skipped": "not rendered",
+            "covered": false,
+            "style": {
+              "zIndex": "auto",
+              "position": "static",
+              "overflow": "visible",
+              "transform": "none",
+              "isolation": "auto"
+            },
+            "hitStack": []
+          },
+          {
+            "text": "置顶",
+            "cls": "btn",
+            "rect": {
+              "x": 1031,
+              "y": 106,
+              "w": 42,
+              "h": 40
+            },
+            "visible": false,
+            "skipped": "not rendered",
+            "covered": false,
+            "style": {
+              "zIndex": "auto",
+              "position": "static",
+              "overflow": "visible",
+              "transform": "none",
+              "isolation": "auto"
+            },
+            "hitStack": []
+          },
+          {
+            "text": "存档",
+            "cls": "btn",
+            "rect": {
+              "x": 1081,
+              "y": 106,
+              "w": 42,
+              "h": 40
+            },
+            "visible": false,
+            "skipped": "not rendered",
+            "covered": false,
+            "style": {
+              "zIndex": "auto",
+              "position": "static",
+              "overflow": "visible",
+              "transform": "none",
+              "isolation": "auto"
+            },
+            "hitStack": []
+          }
+        ]
+      }
+    ],
+    "open": [
+      {
+        "owner": {
+          "mainPane": "95b8e02a-47ee-4908-8755-298af0166c04"
+        },
+        "optionsOpen": true,
+        "toolbar": {
+          "tag": "DIV",
+          "id": null,
+          "cls": "conversation-toolbar",
+          "text": "对话 95b8e02a刷新状态对话选项重命名置顶存档缺失文字",
+          "zIndex": "auto",
+          "position": "static",
+          "overflow": "visible",
+          "transform": "none",
+          "isolation": "auto",
+          "display": "flex",
+          "opacity": "1",
+          "pointerEvents": "auto",
+          "visible": true,
+          "rect": {
+            "x": 238,
+            "y": 52,
+            "w": 1042,
+            "h": 53
+          }
+        },
+        "transcript": {
+          "tag": "DIV",
+          "id": null,
+          "cls": "chat chat-transcript",
+          "text": "desktop remote write oneC Code",
+          "zIndex": "auto",
+          "position": "static",
+          "overflow": "hidden auto",
+          "transform": "none",
+          "isolation": "auto",
+          "display": "block",
+          "opacity": "1",
+          "pointerEvents": "auto",
+          "visible": true,
+          "rect": {
+            "x": 238,
+            "y": 105,
+            "w": 1042,
+            "h": 465
+          }
+        },
+        "renderedButtons": 5,
+        "coveredCount": 0,
+        "covered": [],
+        "buttons": [
+          {
+            "text": "刷新状态",
+            "cls": "btn",
+            "rect": {
+              "x": 1112,
+              "y": 58,
+              "w": 66,
+              "h": 40
+            },
+            "visible": true,
+            "skipped": null,
+            "covered": false,
+            "style": {
+              "zIndex": "auto",
+              "position": "static",
+              "overflow": "visible",
+              "transform": "none",
+              "isolation": "auto"
+            },
+            "hitStack": [
+              {
+                "cls": "btn",
+                "tag": "BUTTON",
+                "zIndex": "auto",
+                "position": "static"
+              },
+              {
+                "cls": "conversation-toolbar",
+                "tag": "DIV",
+                "zIndex": "auto",
+                "position": "static"
+              },
+              {
+                "cls": "unified-conversation conversation-chat",
+                "tag": "MAIN",
+                "zIndex": "auto",
+                "position": "static"
+              },
+              {
+                "cls": "main-content main-content--single",
+                "tag": "DIV",
+                "zIndex": "auto",
+                "position": "static"
+              },
+              {
+                "cls": "main-area has-main-content",
+                "tag": "DIV",
+                "zIndex": "auto",
+                "position": "static"
+              }
+            ]
+          },
+          {
+            "text": "对话选项",
+            "cls": "",
+            "rect": {
+              "x": 1186,
+              "y": 63,
+              "w": 70,
+              "h": 31
+            },
+            "visible": true,
+            "skipped": null,
+            "covered": false,
+            "style": {
+              "zIndex": "auto",
+              "position": "static",
+              "overflow": "visible",
+              "transform": "none",
+              "isolation": "auto"
+            },
+            "hitStack": [
+              {
+                "cls": "",
+                "tag": "SUMMARY",
+                "zIndex": "auto",
+                "position": "static"
+              },
+              {
+                "cls": "conversation-options",
+                "tag": "DETAILS",
+                "zIndex": "auto",
+                "position": "relative"
+              },
+              {
+                "cls": "conversation-toolbar",
+                "tag": "DIV",
+                "zIndex": "auto",
+                "position": "static"
+              },
+              {
+                "cls": "unified-conversation conversation-chat",
+                "tag": "MAIN",
+                "zIndex": "auto",
+                "position": "static"
+              },
+              {
+                "cls": "main-content main-content--single",
+                "tag": "DIV",
+                "zIndex": "auto",
+                "position": "static"
+              }
+            ]
+          },
+          {
+            "text": "重命名",
+            "cls": "btn",
+            "rect": {
+              "x": 969,
+              "y": 106,
+              "w": 54,
+              "h": 40
+            },
+            "visible": true,
+            "skipped": null,
+            "covered": false,
+            "style": {
+              "zIndex": "auto",
+              "position": "static",
+              "overflow": "visible",
+              "transform": "none",
+              "isolation": "auto"
+            },
+            "hitStack": [
+              {
+                "cls": "btn",
+                "tag": "BUTTON",
+                "zIndex": "auto",
+                "position": "static"
+              },
+              {
+                "cls": "unified-management",
+                "tag": "DIV",
+                "zIndex": "20",
+                "position": "absolute"
+              },
+              {
+                "cls": "turn-footer",
+                "tag": "DIV",
+                "zIndex": "auto",
+                "position": "static"
+              },
+              {
+                "cls": "turn-tail",
+                "tag": "DIV",
+                "zIndex": "auto",
+                "position": "static"
+              },
+              {
+                "cls": "turn-assistant",
+                "tag": "DIV",
+                "zIndex": "auto",
+                "position": "static"
+              }
+            ]
+          },
+          {
+            "text": "置顶",
+            "cls": "btn",
+            "rect": {
+              "x": 1031,
+              "y": 106,
+              "w": 42,
+              "h": 40
+            },
+            "visible": true,
+            "skipped": null,
+            "covered": false,
+            "style": {
+              "zIndex": "auto",
+              "position": "static",
+              "overflow": "visible",
+              "transform": "none",
+              "isolation": "auto"
+            },
+            "hitStack": [
+              {
+                "cls": "btn",
+                "tag": "BUTTON",
+                "zIndex": "auto",
+                "position": "static"
+              },
+              {
+                "cls": "unified-management",
+                "tag": "DIV",
+                "zIndex": "20",
+                "position": "absolute"
+              },
+              {
+                "cls": "turn-footer",
+                "tag": "DIV",
+                "zIndex": "auto",
+                "position": "static"
+              },
+              {
+                "cls": "turn-tail",
+                "tag": "DIV",
+                "zIndex": "auto",
+                "position": "static"
+              },
+              {
+                "cls": "turn-assistant",
+                "tag": "DIV",
+                "zIndex": "auto",
+                "position": "static"
+              }
+            ]
+          },
+          {
+            "text": "存档",
+            "cls": "btn",
+            "rect": {
+              "x": 1081,
+              "y": 106,
+              "w": 42,
+              "h": 40
+            },
+            "visible": true,
+            "skipped": null,
+            "covered": false,
+            "style": {
+              "zIndex": "auto",
+              "position": "static",
+              "overflow": "visible",
+              "transform": "none",
+              "isolation": "auto"
+            },
+            "hitStack": [
+              {
+                "cls": "btn",
+                "tag": "BUTTON",
+                "zIndex": "auto",
+                "position": "static"
+              },
+              {
+                "cls": "unified-management",
+                "tag": "DIV",
+                "zIndex": "20",
+                "position": "absolute"
+              },
+              {
+                "cls": "turn-branch-btn",
+                "tag": "BUTTON",
+                "zIndex": "auto",
+                "position": "static"
+              },
+              {
+                "cls": "turn-branch-row",
+                "tag": "DIV",
+                "zIndex": "auto",
+                "position": "static"
+              },
+              {
+                "cls": "turn-tail",
+                "tag": "DIV",
+                "zIndex": "auto",
+                "position": "static"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "reproduced": false
+  },
+  "pass": true
+}

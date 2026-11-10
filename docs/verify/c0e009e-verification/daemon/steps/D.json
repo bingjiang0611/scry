@@ -1,0 +1,10 @@
+{
+  "id": "D",
+  "mode": "daemon",
+  "expected": "failed conversation delete shows readable copy, not the raw IPC error",
+  "actual": {
+    "alert": "后台服务尚未提供这项功能（conversation:delete）。结果不能假定为未删除，请关闭后刷新证据核对；不会自动重试。",
+    "rawWrapper": false
+  },
+  "pass": true
+}

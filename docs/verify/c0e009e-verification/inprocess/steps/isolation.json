@@ -1,0 +1,21 @@
+{
+  "id": "isolation",
+  "mode": "inprocess",
+  "expected": "scry.db and daemon state live under the temporary userData",
+  "actual": {
+    "userDataDir": "/tmp/scry-verify-c0e009e/verify-inprocess-9izhhi/userData",
+    "dbHandles": [
+      "/private/tmp/scry-verify-c0e009e/verify-inprocess-9izhhi/userData/scry.db-shm",
+      "/private/tmp/scry-verify-c0e009e/verify-inprocess-9izhhi/userData/scry.db",
+      "/private/tmp/scry-verify-c0e009e/verify-inprocess-9izhhi/userData/scry.db-wal",
+      "/private/tmp/scry-verify-c0e009e/verify-inprocess-9izhhi/userData/scry.db-shm"
+    ],
+    "dbInsideTemp": true,
+    "realUserDataLeaked": [],
+    "outsideHandles": [],
+    "daemonInfo": null,
+    "daemonLsof": [],
+    "daemonPathsInside": true
+  },
+  "pass": true
+}
