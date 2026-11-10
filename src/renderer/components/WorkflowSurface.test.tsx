@@ -80,6 +80,22 @@ describe('WorkflowSurface', () => {
     expect(html).not.toContain(WORKFLOW_COPY.mainSessionUnobserved)
   })
 
+  it('没有独立阶段声明时明说 phase N 不是真实标题', () => {
+    // Drop `phaseTitle` from the agent rows: the projection then has to synthesize `phase N`.
+    const stripped = events(workflowFixtureMessages()).map((event) => {
+      const rows = (event.input as { rows?: Array<Record<string, unknown>> })?.rows
+      if (!rows) return event
+      const undeclared = rows.map((row) => {
+        const { phaseTitle: _agentTitle, title: _phaseTitle, ...rest } = row
+        return rest
+      })
+      return { ...event, input: { ...(event.input as object), rows: undeclared } }
+    })
+    const html = render(stripped)
+    expect(html).toContain(WORKFLOW_COPY.phaseUndeclared)
+    expect(html).toMatch(/phase \d+/)
+  })
+
   it('历史不完整时给出 partial 提示', () => {
     const all = events(workflowFixtureMessages())
     const firstRows = all.findIndex((event) => event.stage === 'workflow_activity' && (event.input as { rows?: unknown[] }).rows)

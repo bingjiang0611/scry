@@ -45,6 +45,8 @@ function PhaseCard({ phase, selected, onSelect }: {
     <article className="workflow-phase" data-status={phase.status} role="listitem" aria-label={`阶段 ${phase.title}`}>
       <header className="workflow-phase-head">
         <strong title={phase.declared ? undefined : WORKFLOW_COPY.phaseUndeclared}>{phase.title}</strong>
+        {/* A synthesized `phase N` title must not pass for a real one. */}
+        {!phase.declared && <span className="workflow-phase-undeclared">{WORKFLOW_COPY.phaseUndeclared}</span>}
         {phase.models.map((model) => <code key={model}>{model}</code>)}
       </header>
       {total === 0 ? (

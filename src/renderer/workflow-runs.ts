@@ -311,7 +311,8 @@ function finish(acc: Accumulator, busy: boolean, lastTurn: Turn | undefined): Wo
     return phase
   }
   for (const row of [...acc.phaseRows.values()].sort((left, right) => left.index - right.index)) {
-    group(`phase:${row.index}`, row.index, row.title ?? `phase ${row.index}`, true)
+    // A declaration without a title still leaves us guessing the name, so it is not declared.
+    group(`phase:${row.index}`, row.index, row.title ?? `phase ${row.index}`, row.title !== undefined)
   }
   for (const row of [...acc.agentRows.values()].sort((left, right) => left.index - right.index)) {
     const phase = row.phaseIndex === undefined

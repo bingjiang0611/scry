@@ -223,6 +223,8 @@
 .workflow-phase[data-status='unsettled'] { border-style: dashed; border-color: var(--warn); }
 
 .workflow-phase-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+
+.workflow-phase-undeclared { color: var(--dim); font-size: 11px; }
 .workflow-phase-head strong { font-size: 13px; }
 .workflow-phase-head code { color: var(--dim2); font: 10px/1.3 var(--font-mono); overflow-wrap: anywhere; }
 .workflow-phase-empty,
