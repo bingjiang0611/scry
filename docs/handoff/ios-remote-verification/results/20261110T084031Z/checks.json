@@ -1,0 +1,82 @@
+{
+  "stages": [
+    {
+      "name": "typecheck-node",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 8,
+      "log": "logs/typecheck-node.tail.txt"
+    },
+    {
+      "name": "node-unit",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 29,
+      "log": "logs/node-unit.tail.txt"
+    },
+    {
+      "name": "g0-node-tests",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 9,
+      "log": "logs/g0-node-tests.tail.txt"
+    },
+    {
+      "name": "cf-relay-smokes",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 34,
+      "log": "logs/cf-relay-smokes.tail.txt"
+    },
+    {
+      "name": "swift-test",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 43,
+      "log": "logs/swift-test.tail.txt"
+    },
+    {
+      "name": "ios-checks",
+      "status": "known-baseline",
+      "exitCode": 1,
+      "seconds": 48,
+      "log": "logs/ios-checks.tail.txt",
+      "baselineEvidence": "logs/control-base-ios-checks.tail.txt"
+    },
+    {
+      "name": "build-ios",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 32,
+      "log": "logs/build-ios.tail.txt"
+    },
+    {
+      "name": "install-ios",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 20,
+      "log": "logs/install-ios.tail.txt"
+    },
+    {
+      "name": "relay-probe-mac",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 10,
+      "log": "logs/relay-probe-mac.tail.txt"
+    },
+    {
+      "name": "netbench-wifi-relay",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 42,
+      "log": "netbench-wifi-relay.jsonl"
+    },
+    {
+      "name": "netbench-wifi-auto",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 41,
+      "log": "netbench-wifi-auto.jsonl"
+    }
+  ]
+}
