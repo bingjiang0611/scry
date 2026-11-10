@@ -1,4 +1,11 @@
 import { DESKTOP_REMOTE_CLIENT_METHODS } from './remote/desktop-client-ipc'
+import type { DaemonLocalOpTable } from './daemon-local-ops/types'
+import { CATALOG_LOCAL_OPS } from './daemon-local-ops/catalog'
+import { CONVERSATION_LOCAL_OPS } from './daemon-local-ops/conversation'
+import { SESSION_LIFECYCLE_LOCAL_OPS } from './daemon-local-ops/session-lifecycle'
+import { QUERY_LOCAL_OPS } from './daemon-local-ops/queries'
+import { WORKBENCH_LOCAL_OPS } from './daemon-local-ops/workbench'
+import { PROJECT_LOCAL_OPS } from './daemon-local-ops/project'
 
 // Development switch for "the daemon owns runs". Kept here, free of Electron, so the IPC
 // registrar can consult it without importing the daemon client assembly.
@@ -39,51 +46,17 @@ export const DAEMON_MODE_SERVED_CHANNELS: ReadonlySet<string> = new Set([
 ])
 
 /**
- * Channels the daemon answers through a local-only op (B4-L4). Each entry is the op and
- * method the matrix records (method = the channel's last segment); the daemon builds the
- * same handler table main registers, so both run one implementation. `read` marks calls
- * that change nothing and may be asked again after a reconnect.
+ * Channels the daemon answers through a local-only op (B4-L4), one table per group
+ * (daemon-local-ops/). The daemon builds the same handler table main registers, so both
+ * run one implementation.
  */
-export const DAEMON_LOCAL_OP_CHANNELS: Readonly<Record<string, { op: string; method: string; read: boolean }>> = {
-  'agent:listSessions': { op: 'sessionStore', method: 'listSessions', read: true },
-  'agent:catalogHealth': { op: 'sessionStore', method: 'catalogHealth', read: true },
-  'agent:listProjects': { op: 'projectStore', method: 'listProjects', read: true },
-  'agent:recentFolders': { op: 'projectStore', method: 'recentFolders', read: true },
-  'agent:detect': { op: 'providerCatalog', method: 'detect', read: true },
-  'agent:detectFast': { op: 'providerCatalog', method: 'detectFast', read: true },
-  'agent:providerDescriptors': { op: 'providerCatalog', method: 'providerDescriptors', read: true },
-  'agent:runControls': { op: 'providerCatalog', method: 'runControls', read: true },
-  // The daemon forgets the context's session and warm Provider state; main keeps the
-  // badge part (workspace.ts). Not replayed after a lost reply.
-  'agent:newSession': { op: 'providerContext', method: 'newSession', read: false },
-  // Conversation ledger reads (B4-L4-2a). previewSideChat streams the source prefix into
-  // a capture manifest, so it is not replayed after a lost reply.
-  'conversation:list': { op: 'conversation', method: 'list', read: true },
-  'conversation:read': { op: 'conversation', method: 'read', read: true },
-  'conversation:readItem': { op: 'conversation', method: 'readItem', read: true },
-  'conversation:preview': { op: 'conversation', method: 'preview', read: true },
-  'conversation:previewAdoption': { op: 'conversation', method: 'previewAdoption', read: true },
-  'conversation:previewDeletion': { op: 'conversation', method: 'previewDeletion', read: true },
-  'conversation:previewSideChat': { op: 'conversation', method: 'previewSideChat', read: false },
-  'conversation:listSideChats': { op: 'conversation', method: 'listSideChats', read: true },
-  'conversation:findSideChatCommand': { op: 'conversation', method: 'findSideChatCommand', read: true },
-  'conversation:readSideChatSnapshot': { op: 'conversation', method: 'readSideChatSnapshot', read: true },
-  // Conversation ledger writes the daemon makes on its own (B4-L4-2b). Never replayed after
-  // a lost reply. delete (App session deletion) and fork (Provider fork) stay refused
-  // until those move.
-  'conversation:create': { op: 'conversation', method: 'create', read: false },
-  'conversation:update': { op: 'conversation', method: 'update', read: false },
-  'conversation:adopt': { op: 'conversation', method: 'adopt', read: false },
-  'conversation:createSideChat': { op: 'conversation', method: 'createSideChat', read: false },
-  // The send runs through the daemon's ledger so the App follows it like its own runs
-  // (P3-conversation-send.md). Its commandId makes a retry safe, but a lost reply is
-  // still not replayed: the App asks the conversation instead.
-  'conversation:send': { op: 'conversation', method: 'send', read: false },
-  // Session history pages (B4-L4-2a). Loading persists tool content and remembers the
-  // project, so the two loads are not replayed after a lost reply.
-  'agent:loadSession': { op: 'sessionHistory', method: 'loadSession', read: false },
-  'agent:loadSessionOlder': { op: 'sessionHistory', method: 'loadSessionOlder', read: false },
-  'agent:turnTerminalEvidence': { op: 'turnEvidence', method: 'turnTerminalEvidence', read: true }
+export const DAEMON_LOCAL_OP_CHANNELS: DaemonLocalOpTable = {
+  ...CATALOG_LOCAL_OPS,
+  ...CONVERSATION_LOCAL_OPS,
+  ...SESSION_LIFECYCLE_LOCAL_OPS,
+  ...QUERY_LOCAL_OPS,
+  ...WORKBENCH_LOCAL_OPS,
+  ...PROJECT_LOCAL_OPS
 }
 
 /** Op names served only on the App's local endpoint; the network endpoint refuses them. */
