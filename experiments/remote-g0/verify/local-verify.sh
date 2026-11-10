@@ -32,9 +32,17 @@ CHECKS="$RESULTS/checks.json"
 BUNDLE_ID="${SCRY_IOS_BUNDLE_ID:-com.scry.remote}"
 # The host under test is the installed bundle, matched by path: other checkouts
 # keep their own Scry processes alive and a name-only match would quit or wait
-# on them instead.
+# on them instead. `pgrep -f` reads argv, which is empty for a LaunchServices
+# launch, so match the ps command line of the main process exactly (helpers
+# carry extra arguments and do not match).
 HOST_APP="/Applications/Scry.app"
-HOST_PROC_PATTERN='^/Applications/Scry\.app/Contents/MacOS/Scry'
+# `set -o pipefail` would turn grep -q's early exit (SIGPIPE on ps) into a
+# failure, so compare against a captured list instead of a pipeline.
+host_running() {
+  local table
+  table="$(ps -Ao command=)"
+  grep -q -x -F "$HOST_APP/Contents/MacOS/Scry" <<<"$table"
+}
 APP_PATH="/tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app"
 NO_PROXY_ENV=(env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy)
 
@@ -90,7 +98,7 @@ stage_env() {
     echo "swift=$(swift --version 2>/dev/null | head -1)"
     echo "node=$(node --version)"
     echo "device=$(device_id 2>&1)"
-    echo "scry_running=$(pgrep -f "$HOST_PROC_PATTERN" >/dev/null && echo yes || echo no)"
+    echo "scry_running=$(host_running && echo yes || echo no)"
   } > "$RESULTS/env.txt"
   cat "$RESULTS/env.txt" >&2
 }
@@ -110,7 +118,7 @@ stage_install_mac() { step install-mac npm run install:mac:dev; }
 
 quit_scry() {
   osascript -e 'tell application "Scry" to quit' >/dev/null 2>&1 || true
-  for _ in $(seq 1 30); do pgrep -f "$HOST_PROC_PATTERN" >/dev/null || return 0; sleep 1; done
+  for _ in $(seq 1 30); do host_running || return 0; sleep 1; done
   log "Scry did not quit within 30 s"; return 1
 }
 
@@ -122,7 +130,8 @@ open_scry() {
 
 stage_restart_mac() {
   if [ "${SCRY_VERIFY_ALLOW_RESTART:-0}" != 1 ]; then skip restart-mac "SCRY_VERIFY_ALLOW_RESTART is not 1; ask the user to quit and reopen Scry"; return 0; fi
-  step restart-mac bash -c "$(declare -f log quit_scry open_scry); quit_scry && open_scry"
+  # The functions travel into the subshell, so the path they use must too.
+  step restart-mac bash -c "HOST_APP='$HOST_APP'; $(declare -f log host_running quit_scry open_scry); quit_scry && open_scry"
 }
 
 stage_build_ios() {
