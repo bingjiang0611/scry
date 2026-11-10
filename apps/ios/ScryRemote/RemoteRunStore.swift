@@ -2626,10 +2626,11 @@ final class RemoteRunStore {
           self.recordFailure(error, since: requestConnectionRevision)
           failures += 1
           // Host-rejected reads (revoked device, unknown run) cannot heal by
-          // retrying. Transport loss can: keep observing with capped backoff for
-          // as long as it takes; the status row says it is reconnecting and the
-          // Provider may still be running, so nothing is assumed.
-          if error is G0Transport.RunError {
+          // retrying. Transport loss and a full tunnel (`mux_busy`) can: keep
+          // observing with capped backoff for as long as it takes; the status
+          // row says it is reconnecting and the Provider may still be running,
+          // so nothing is assumed.
+          if let refusal = error as? G0Transport.RunError, !refusal.isCapacityRefusal {
             self.observationReconnecting = false
             self.observationInterrupted = true
             self.submitError = Self.observationFailure(error, lifecycle: self.lifecycle, operation: operation)

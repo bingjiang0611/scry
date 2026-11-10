@@ -146,6 +146,20 @@ final class MuxHandlerTests: XCTestCase {
     XCTAssertTrue(handler.acceptsRequests.value)
   }
 
+  func testATimedOutPushedStreamIsStoppedOnTheHost() throws {
+    let (handler, channel) = try mux(handshaken: true)
+    defer { _ = try? channel.finish(acceptAlreadyClosed: true) }
+    let stream = handler.request(id: handler.nextId(), Data(#"{"keepAlive":true,"op":"watchStream"}"#.utf8), limit: 4_096,
+                                 timeout: .seconds(40), onItem: { _ in }, on: channel)
+    _ = try XCTUnwrap(channel.readOutbound(as: ByteBuffer.self))
+    channel.embeddedEventLoop.advanceTime(by: .seconds(41))
+    XCTAssertEqual(phase(stream), "lost")
+    // Without this the host keeps the stream (and its slot) while the phone resubscribes.
+    let cancel = try XCTUnwrap(channel.readOutbound(as: ByteBuffer.self))
+    XCTAssertEqual(String(buffer: cancel), "{\"keepAlive\":true,\"id\":2,\"op\":\"cancel\",\"target\":1}\n")
+    XCTAssertTrue(handler.acceptsRequests.value)
+  }
+
   func testInboundProgressReArmsEveryWaiter() throws {
     let (handler, channel) = try mux(handshaken: true)
     defer { _ = try? channel.finish(acceptAlreadyClosed: true) }

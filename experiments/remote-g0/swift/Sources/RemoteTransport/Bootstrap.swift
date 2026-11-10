@@ -49,7 +49,14 @@ enum RemoteBootstrap {
       channel.close(promise: nil)
       throw ProbeError.disconnected
     }
-    return try await future.get()
+    do {
+      return try await future.get()
+    } catch {
+      // A failed upgrade (e.g. a non-101 answer on a kept-alive connection)
+      // hands the caller no channel, so nothing else would ever close it.
+      channel.close(promise: nil)
+      throw error
+    }
   }
 
   // Plain connected channel with handlers installed before connect.

@@ -195,7 +195,12 @@ extension G0Transport {
           } catch is StreamUnavailable {
             throw RunError.host(code: "watch_stream_unavailable")
           }
-          continuation.yield(try G0Transport.decodeWatch(ending, expectedTarget: nil))
+          do {
+            continuation.yield(try G0Transport.decodeWatch(ending, expectedTarget: nil))
+          } catch let refusal as RunError where refusal.isCapacityRefusal {
+            // The tunnel is at its stream cap: long-poll instead of giving up.
+            throw RunError.host(code: "watch_stream_unavailable")
+          }
           continuation.finish()
         } catch {
           continuation.finish(throwing: error)

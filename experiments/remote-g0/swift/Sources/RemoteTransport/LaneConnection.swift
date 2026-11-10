@@ -136,7 +136,9 @@ final class LaneConnection: Sendable {
   }
 
   static func isNonRetryableOpenError(_ error: Error) -> Bool {
-    if error is NIOSSLError { return true }
+    // A connection dropped without close_notify while opening is a network
+    // event, not a trust decision: no request byte has been written yet.
+    if let tls = error as? NIOSSLError { return tls != .uncleanShutdown }
     if case RelayTransportError.tlsHandshake = error { return true }
     return false
   }

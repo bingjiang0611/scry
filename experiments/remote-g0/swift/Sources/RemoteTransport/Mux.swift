@@ -151,12 +151,16 @@ final class MuxHandler: ChannelInboundHandler, RemovableChannelHandler, @uncheck
     entry.deadline?.cancel()
     queued.removeAll { $0.id == id }
     entry.result.fail(CancellationError())
-    // A pushed stream would keep arriving: ask the host to stop it. The reply
-    // has an untracked id and is dropped like any other unknown id.
-    if entry.onItem != nil, entry.written, handshaken, let context, acceptsRequests.value {
-      let bytes = Data("{\"keepAlive\":true,\"id\":\(nextId()),\"op\":\"cancel\",\"target\":\(id)}\n".utf8)
-      context.writeAndFlush(wrapOutboundOut(ByteBuffer(bytes: bytes)), promise: nil)
-    }
+    stopStream(entry, id: id)
+  }
+
+  // A pushed stream the phone no longer tracks would keep running on the host
+  // and hold one of its per-tunnel stream slots: ask the host to stop it. The
+  // reply has an untracked id and is dropped like any other unknown id.
+  private func stopStream(_ entry: Pending, id: Int) {
+    guard entry.onItem != nil, entry.written, handshaken, let context, acceptsRequests.value else { return }
+    let bytes = Data("{\"keepAlive\":true,\"id\":\(nextId()),\"op\":\"cancel\",\"target\":\(id)}\n".utf8)
+    context.writeAndFlush(wrapOutboundOut(ByteBuffer(bytes: bytes)), promise: nil)
   }
 
   private func write(id: Int, _ framed: Data, context: ChannelHandlerContext) {
@@ -186,7 +190,11 @@ final class MuxHandler: ChannelInboundHandler, RemovableChannelHandler, @uncheck
       // Not even a ping came back: the tunnel is dead, not merely busy.
       fail(error)
       channel.close(promise: nil)
+      return
     }
+    // The tunnel stays open, so a timed-out push stream must be stopped too:
+    // the caller resubscribes, and the old one would otherwise keep running.
+    stopStream(entry, id: id)
   }
 
   func channelRead(context: ChannelHandlerContext, data: NIOAny) {

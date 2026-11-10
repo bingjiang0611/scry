@@ -13,6 +13,14 @@ final class WireTests: XCTestCase {
     XCTAssertFalse(RelayTransportError.permitsReadRecovery(ProbeError.unexpectedReply))
   }
 
+  func testOnlyAFullTunnelIsARetryableHostRefusal() {
+    // mux_busy: the host ran nothing because the tunnel was at its cap.
+    XCTAssertTrue(G0Transport.RunError.host(code: "mux_busy").isCapacityRefusal)
+    for code in ["device_revoked", "unknown_run", "watch_stream_unavailable", "unknown_op"] {
+      XCTAssertFalse(G0Transport.RunError.host(code: code).isCapacityRefusal, code)
+    }
+  }
+
   func testDiscoveryRollingUpgradeOnlyFallsBackOnExplicitSchemaRejection() async throws {
     let valid = Data(#"{"executionTargets":{"version":1,"gateway":{"hostId":"mac1","label":"Mac1"},"targets":[]}}"#.utf8)
     var requests: [Bool] = []
