@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { createHash } from 'node:crypto'
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { freePort, waitForTarget, connectCdp, rendererEvaluator } from './electron-security-cdp.mjs'
 import { tmpdir } from 'node:os'
@@ -14,6 +13,8 @@ import { exerciseSourceControlApp } from './source-control-ui-checks.mjs'
 import { exerciseWorkspaceSessions } from './workspace-session-ui-checks.mjs'
 import { seedConversationOwnership } from './conversation-ownership-smoke.mjs'
 import { exerciseFileHistory } from './electron-security-file-history.mjs'
+import { seedArchivedTurn, seedNativeTranscript } from './archived-turn-smoke.mjs'
+import { exerciseWorkflowArchive } from './electron-security-workflow.mjs'
 import { exerciseNativeHistory } from './electron-security-native-history.mjs'
 import { exerciseProductionPerformance } from './electron-security-performance.mjs'
 import { exerciseFiles } from './electron-security-files.mjs'
@@ -41,7 +42,8 @@ const performanceOnly = ['--dev-performance-only', '--performance-only'].include
 const nativeHistoryPerformanceOnly = process.argv[2] === '--dev-pi-history-perf-only'
 const nativeHistoryOnly = process.argv[2] === '--dev-pi-history-only' || nativeHistoryPerformanceOnly
 const fileHistoryOnly = ['--dev-file-history-only', '--file-history-only'].includes(process.argv[2])
-const sourceFileHistory = fileHistoryOnly ? JSON.parse(readFileSync(resolve(process.argv[3]), 'utf8')) : null
+const workflowOnly = process.argv[2] === '--dev-workflow-only'
+const sourceFileHistory = fileHistoryOnly || workflowOnly ? JSON.parse(readFileSync(resolve(process.argv[3]), 'utf8')) : null
 const devMetaPromptsOnly = process.argv[2] === '--dev-meta-prompts-only'
 const devTerminalOnly = process.argv[2] === '--dev-terminal-only'
 const devQuestionOnly = process.argv[2] === '--dev-question-only'
@@ -53,7 +55,7 @@ if (devQuestionOnly && !foreground) {
 }
 const devFilesOnly = process.argv[2] === '--dev-files-only'
 const filesOnly = devFilesOnly || process.argv[2] === '--files-only'
-const devApp = sideChatOnly || largeHistoryOnly || structureOnly || unifiedConversationOnly || conversationOwnershipOnly || process.argv[2] === '--dev-source-control-only' || devMetaPromptsOnly || nativeHistoryOnly || process.argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
+const devApp = sideChatOnly || largeHistoryOnly || structureOnly || unifiedConversationOnly || conversationOwnershipOnly || process.argv[2] === '--dev-source-control-only' || devMetaPromptsOnly || nativeHistoryOnly || process.argv[2] === '--dev-file-history-only' || workflowOnly || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
 const packagedAppArgument = ['--files-only', '--performance-only', '--file-history-only', '--source-control-only'].includes(process.argv[2]) ? undefined : process.argv[2]
 const dev = devApp ? electronDevLayout() : null
 const appPath = resolve(dev?.appPath || packagedAppArgument || defaultPackagedAppPath())
@@ -115,21 +117,13 @@ async function main() {
       preview: '手机会话恢复测试', ts: Date.now()
     }]))
   }
-  if (fileHistoryOnly) {
-    assert.equal(sourceFileHistory.turns.length, 1, 'replay one exact archived turn')
-    const source = sourceFileHistory
-    const hash = value => createHash('sha256').update(value).digest('hex')
-    const turn = source.turns[0]
-    const archiveDir = join(userDataDir, 'trace-archive-turns-v1', source.providerId, `cwd-${hash(source.cwd)}`, `sid-${hash(source.sessionId)}`)
-    mkdirSync(archiveDir, { recursive: true })
-    const identity = turn.providerTurnId ? `provider\0${turn.providerTurnId}` : `run\0${turn.runId}`
-    writeFileSync(join(archiveDir, `turn-${hash(identity)}.json`), JSON.stringify(source))
-    writeFileSync(join(userDataDir, 'app-sessions.json'), JSON.stringify([{
-      sessionId: source.sessionId, externalSessionId: source.externalSessionId, runId: turn.runId,
-      providerId: source.providerId, runtimeProvider: source.runtimeProvider,
-      cwd: source.cwd, preview: 'Archived file-link replay', ts: Date.now()
-    }]))
-    writeFileSync(join(userDataDir, 'recent-folders.json'), JSON.stringify([source.cwd]))
+  if (fileHistoryOnly || workflowOnly) seedArchivedTurn({ userDataDir, source: sourceFileHistory,
+    preview: workflowOnly ? 'Archived workflow replay' : 'Archived file-link replay' })
+  if (workflowOnly) {
+    // Same run, Provider-native side: exercises the transcript↔archive merge the App uses for
+    // real sessions. Rows come from the fixture, never hand-written.
+    const rows = readFileSync(resolve(process.argv[4]), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line))
+    seedNativeTranscript({ home, cwd: sourceFileHistory.cwd, sessionId: 'workflow-archive-replay', messages: rows })
   }
   const ownershipFixture = conversationOwnershipOnly ? seedConversationOwnership({
     userData: userDataDir, cwd: canonicalWorkspace, otherCwd: realpathSync(secondWorkspace)
@@ -224,6 +218,7 @@ async function main() {
     return
   }
   if (sideChatOnly || largeHistoryOnly) return sideChatMode.run({ cdp, evaluate, check, lifecycle: { port, launch: launchApp, child: () => child, stop: stopOwnedApp, waitTarget: waitForTarget, connect: connectCdp } })
+  if (workflowOnly) { const result = await exerciseWorkflowArchive(context()); cdp.close(); console.log(JSON.stringify(result)); return }
   if (ownershipFixture) return exerciseOwnership(context())
   if (sourceControlOnly) {
     const result = await exerciseSourceControlApp(cdp, evaluate, { workspace: canonicalWorkspace, remote: realpathSync(secondWorkspace), home })

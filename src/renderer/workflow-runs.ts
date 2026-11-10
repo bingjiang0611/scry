@@ -349,13 +349,19 @@ export function deriveWorkflowRuns(turns: readonly Turn[], options: DeriveWorkfl
       if (event.tool !== WORKFLOW_TOOL_NAME) continue
       if (event.kind === 'tool' && event.toolUseId) {
         const key = toolKey(turn, event.toolUseId)
-        let acc = byTool.get(key)
+        const acc = byTool.get(key)
         if (event.stage !== 'tool_result') {
-          if (acc) continue
-          acc = createRun(turn, key, event)
-          byTool.set(key, acc)
-          order.push(acc)
-          applyToolUse(acc, event)
+          if (acc) {
+            // Task rows can arrive before their tool call when history is merged by timestamp.
+            // The run they created is the same run; adopt it instead of starting a second one
+            // that would show "unknown" with no rows.
+            applyToolUse(acc, event)
+            continue
+          }
+          const created = createRun(turn, key, event)
+          byTool.set(key, created)
+          order.push(created)
+          applyToolUse(created, event)
         } else if (acc) {
           applyToolResult(acc, event)
           if (acc.run.taskId) byTask.set(acc.run.taskId, acc)
@@ -365,13 +371,16 @@ export function deriveWorkflowRuns(turns: readonly Turn[], options: DeriveWorkfl
       if (event.kind !== 'harness' || event.stage !== WORKFLOW_ACTIVITY_STAGE) continue
       const taskId = readWorkflowActivity(event.input)?.taskId
       if (!taskId) continue
-      let acc = byTask.get(taskId) ?? (event.toolUseId ? byTool.get(toolKey(turn, event.toolUseId)) : undefined)
+      const tool = event.toolUseId ? toolKey(turn, event.toolUseId) : undefined
+      let acc = byTask.get(taskId) ?? (tool ? byTool.get(tool) : undefined)
       if (!acc) {
         // Task events without an observed tool call (resumed session, trimmed history).
         acc = createRun(turn, `task:${taskId}`, event)
         order.push(acc)
       }
       byTask.set(taskId, acc)
+      // Remember the tool call this run belongs to, so a tool_use arriving later adopts it.
+      if (tool) byTool.set(tool, acc)
       applyActivity(acc, event)
     }
   }

@@ -93,19 +93,16 @@ describe('deriveWorkflowRuns', () => {
     expect(run.log[0].message).not.toContain('调用 Workflow 工具')
   })
 
-  it('日志按状态转换生成且有上限，不为纯用量心跳刷屏', () => {
-    const [run] = deriveWorkflowRuns([turn(events(workflowFixtureMessages()))], { busy: false })
-    expect(run.logDropped).toBe(0)
-    const messages = run.log.map((entry) => entry.message)
-    expect(messages[0]).toBe('调用 Workflow 工具')
-    expect(messages.filter((message) => message.includes('auth.ts'))).toEqual([
-      'scan · auth.ts 排队', 'scan · auth.ts 开始', 'scan · auth.ts 完成 · auth.ts: 1 finding',
-      'edit · auth.ts 排队', 'edit · auth.ts 开始', 'edit · auth.ts 完成 · patched'
-    ])
-    expect(run.log.at(-1)).toMatchObject({ actor: 'runtime', tone: 'ok' })
-    expect(run.log.some((entry) => entry.tone === 'error' && entry.message.includes('billing.ts 失败'))).toBe(true)
-    expect(WORKFLOW_FIXTURE_SNAPSHOTS.length).toBeGreaterThan(0)
+  it('活动行先于 tool_use 到达时仍是一次运行，不出现“状态未知”的第二个运行', () => {
+    // History merge can order rows by timestamp, so the task rows may precede the tool call.
+    const all = events(workflowFixtureMessages())
+    const reordered = [...all.filter((event) => event.kind !== 'tool'), ...all.filter((event) => event.kind === 'tool')]
+    const runs = deriveWorkflowRuns([turn(reordered)], { busy: false })
+    expect(runs).toHaveLength(1)
+    expect(runs[0]).toMatchObject({ status: 'completed', statusSource: 'task_notification', agentCount: 6 })
+    expect(workflowRunForToolUse(runs, 'toolu_workflow_1')).toBe(runs[0])
   })
+
   it('聊天卡片按 tool_use id 找到自己的运行，同会话两次运行不互相顶替', () => {
     const first = events(workflowFixtureMessages({ taskId: 'wtask-1', toolUseId: 'toolu_workflow_1' }))
     const second = events(workflowFixtureMessages({ taskId: 'wtask-2', toolUseId: 'toolu_workflow_2' }))
@@ -120,5 +117,19 @@ describe('deriveWorkflowRuns', () => {
     // An unloaded or foreign tool call selects nothing instead of the newest run.
     expect(workflowRunForToolUse(runs, 'toolu_missing')).toBeUndefined()
     expect(workflowRunForToolUse(runs, null)).toBeUndefined()
+  })
+
+  it('日志按状态转换生成且有上限，不为纯用量心跳刷屏', () => {
+    const [run] = deriveWorkflowRuns([turn(events(workflowFixtureMessages()))], { busy: false })
+    expect(run.logDropped).toBe(0)
+    const messages = run.log.map((entry) => entry.message)
+    expect(messages[0]).toBe('调用 Workflow 工具')
+    expect(messages.filter((message) => message.includes('auth.ts'))).toEqual([
+      'scan · auth.ts 排队', 'scan · auth.ts 开始', 'scan · auth.ts 完成 · auth.ts: 1 finding',
+      'edit · auth.ts 排队', 'edit · auth.ts 开始', 'edit · auth.ts 完成 · patched'
+    ])
+    expect(run.log.at(-1)).toMatchObject({ actor: 'runtime', tone: 'ok' })
+    expect(run.log.some((entry) => entry.tone === 'error' && entry.message.includes('billing.ts 失败'))).toBe(true)
+    expect(WORKFLOW_FIXTURE_SNAPSHOTS.length).toBeGreaterThan(0)
   })
 })
