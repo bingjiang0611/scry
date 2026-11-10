@@ -13,12 +13,11 @@ import { resolveSessionRunIds } from './db'
 import { SourceControlService } from './source-control/service'
 import { registerSourceControlIpc } from './source-control/ipc'
 import { registerWorkspaceSelectionIpc } from './source-control/workspace-ipc'
-import { readUsageStats } from './usage-jsonl'
 import {
   normalizeAgentForkSessionRequest,
   type AgentForkSessionResult
 } from '../shared/runtime'
-import { type ProviderContext, type ProviderId } from '../shared/provider'
+import { type ProviderId } from '../shared/provider'
 import { providerOperationKey } from './provider-operation-gate'
 import { RemoteHostService } from './remote/remote-host-service'
 import { registerDesktopClientIpc } from './remote/desktop-client-ipc'
@@ -311,15 +310,6 @@ registerAgentRuntimeHandlers({
 function requestRunStop(runId: string): boolean {
   return pipeline.requestRunStop(runId)
 }
-
-// B2-lite：累计用量统计（读 usage.jsonl 聚合）
-handleTrusted('agent:usageStats', (_event, context?: ProviderContext) =>
-  readUsageStats(app.getPath('userData'), context ? {
-    providerId: context.providerId,
-    agentProfileId: context.agentProfileId,
-    cwd: context.cwd ?? ''
-  } : {})
-)
 
 // Remote-access subsystem (iOS control client). Packaged builds start it against
 // the official public relay; development remains opt-in and SCRY_REMOTE_HOST=0

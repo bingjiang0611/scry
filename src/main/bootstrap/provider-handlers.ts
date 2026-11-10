@@ -1,5 +1,6 @@
 import { shell } from 'electron'
 import { providerControlChannelHandlers, registerChannelHandlers } from './startup-channels'
+import { skillChannelHandlers } from './query-channels'
 import type { IpcMainInvokeEvent } from 'electron'
 import { daemonModeEnabled } from './daemon-run-mode'
 import type { ProviderContext, ProviderId } from '../../shared/provider'
@@ -55,9 +56,7 @@ export function registerProviderHandlers(deps: ProviderHandlersDependencies): vo
     }, normalizedContext.agentProfileId)
     return true
   })
-  handleTrusted('agent:listSkills', (_e, context: ProviderContext) =>
-    withProviderOperation(context.providerId, () => providerRegistry.listSkills(context), context.agentProfileId)
-  )
+  registerChannelHandlers(handleTrusted, skillChannelHandlers({ providerRegistry, withProviderOperation }))
   handleTrusted('agent:mcpSnapshot', async (_e, p: { context: ProviderContext; refresh?: boolean }) => {
     if (p.context.providerId === 'pi') {
       return withProviderOperation(

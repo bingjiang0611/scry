@@ -1,13 +1,10 @@
 import { app, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
-import type { ActiveRun, UsageAnalyticsRangeDays } from '../../shared/trace'
+import type { ActiveRun } from '../../shared/trace'
 import type { AgentQuestionResponse, AgentStartRequest, AgentStartResult } from '../../shared/runtime'
-import { summarizeRunningLlmSessions } from '../../shared/llm-performance'
-import { billingStateQuery, importBillingFixture, statsQuery, syncBillingAdmin, usageAnalyticsQuery, usageAnalyticsWithCreditsQuery } from '../db'
+import { billingStateQuery, importBillingFixture, syncBillingAdmin } from '../db'
 import { warmShellEnv } from '../claude-locate'
-import { readLlmPerformanceHistory } from '../llm-performance-history'
 import { stopObservedBackgroundTask } from '../background-task-control'
 import { steerObservedRun } from '../run-steering'
-import { registerGitDiffIpc } from '../git'
 import { readAppTraceContentPage } from '../trace-tool-content'
 import { resolveRecorderLocation } from '../../core/turn-recorder/config'
 import { readAuthorizedRecorderContentPage } from '../recorder-content-access'
@@ -19,6 +16,8 @@ import { unreadSessionsAnswer, type DockBadgeState } from '../dock-badge'
 import type { UserQuestionBroker } from '../user-question'
 import type { TraceOutputBridge, TraceBatchReceipt } from '../trace-output'
 import { registerRunTraceHandlers } from './run-trace-ipc'
+import { registerChannelHandlers } from './startup-channels'
+import { llmPerformanceChannelHandlers, usageChannelHandlers, workspaceDiffChannelHandlers } from './query-channels'
 import type { DaemonRunSurface } from './daemon-run-surface'
 import type { RunControl } from './run-control'
 
@@ -135,19 +134,11 @@ export function registerAgentRuntimeHandlers({
     return userQuestionBroker.answer(response)
   })
 
-  // B2：sqlite 跨会话分析（工具频率 / 按目录花费），纯文件做不到的结构化查询
-  handleTrusted('agent:stats', () => statsQuery())
-  handleTrusted('agent:llmPerformanceHistory', () => readLlmPerformanceHistory(app.getPath('userData')))
-  handleTrusted('agent:llmPerformanceSummary', () => summarizeRunningLlmSessions(runs.activeStates()))
-
-  // 两段返回：SQLite 账本先回到页面（毫秒级），Credit 投影需要读原生 transcript，
-  // 单次可达数秒，由 renderer 后取后刷新，不阻塞首屏。
-  const usageRange = (rangeDays: unknown): UsageAnalyticsRangeDays => {
-    if (rangeDays !== 7 && rangeDays !== 30 && rangeDays !== 90) throw new Error('分析时间范围无效')
-    return rangeDays
-  }
-  handleTrusted('agent:usageAnalytics', (_event, rangeDays: unknown) => usageAnalyticsQuery(usageRange(rangeDays)))
-  handleTrusted('agent:usageCredits', (_event, rangeDays: unknown) => usageAnalyticsWithCreditsQuery(usageRange(rangeDays)))
+  // Usage (usage JSONL + SQLite ledger) and LLM performance: the tables the daemon also
+  // serves as local ops (query-channels.ts), so both answer from one implementation.
+  const userDataDir = (): string => app.getPath('userData')
+  registerChannelHandlers(handleTrusted, usageChannelHandlers({ userDataDir }))
+  registerChannelHandlers(handleTrusted, llmPerformanceChannelHandlers({ userDataDir, activeRuns: () => runs.activeStates() }))
   handleTrusted('agent:billingState', async () => {
     await warmShellEnv()
     return billingStateQuery()
@@ -162,7 +153,7 @@ export function registerAgentRuntimeHandlers({
   })
 
   // P2 Files & Diff：cwd 的最终 git diff（vs HEAD 增删），与工具足迹对照
-  registerGitDiffIpc(handleTrusted, resolveKnownProjectDirectory)
+  registerChannelHandlers(handleTrusted, workspaceDiffChannelHandlers(resolveKnownProjectDirectory))
   handleTrusted('agent:recorderContentPage', async (_event, request: unknown) => {
     const cwd = getCurrentCwd() ?? ''
     if (request && typeof request === 'object' && 'source' in request) {
