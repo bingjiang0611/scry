@@ -17,8 +17,14 @@
 | 相邻路径：Agents 标签页 | 切到 Agents，断言没有列出该 Workflow 的任何 agent，再切回并重验 | 冒烟断言（无截图） |
 | 相邻路径：另一个会话 | 切到同一归档但删掉 Workflow 活动行的会话：`状态未知`、0 阶段、0 agent，再切回并重验 | `workflow-archive-plain-session.png` |
 | 从聊天卡片进入 | 先展开工具组，再点「在 Workflow 面板查看」 | `workflow-archive-chat.png` |
+| 证据语义（终态） | 断言状态 chip 的 tooltip 等于 `WORKFLOW_STATUS_EVIDENCE[run.statusSource]`，即界面上写「已完成」时必须同时说明它来自 `task_notification` | 冒烟断言 |
+| 证据语义（未知） | 只有脚本、没有活动行的会话显示「状态未知」，0 阶段 0 agent，不推断成功 | `workflow-archive-plain-session.png` |
 
 每个宽度都跑同一套 `verify()`：阶段数、每阶段 agent 名与状态、脚本行数、终态、`data-observed`、面板与窗口横向溢出必须 ≤ 0。
+
+| 检查项 | 状态 | 原因 |
+|---|---|---|
+| C7 其他 Provider 空态 | 未验证 | 本机装有 `pi`/`codex`/`opencode`/`qoder`，但冒烟用的临时 userData 没有注册任何非 Claude Provider 简历；在临时实例里注册 Pi（`添加 Pi Agent…` 菜单项）没有打开任何可交互界面，继续要改 Provider 配置链路，超出本轮范围。日常 App 的 Pi/Codex 会话没有被测试实例读取，以免把真实会话带进临时实例。 |
 
 ## 尚未覆盖（等 B 解除阻塞）
 

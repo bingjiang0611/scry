@@ -25,6 +25,8 @@ export async function loadWorkflowModules() {
     `export { deriveWorkflowRuns, workflowAgentStatus } from ${JSON.stringify(join(root, 'src/renderer/workflow-runs.ts'))}`,
     `export { readWorkflowActivity } from ${JSON.stringify(join(root, 'src/shared/claude-workflow.ts'))}`,
     `export { workflowFixtureMessages } from ${JSON.stringify(join(root, 'src/shared/claude-workflow.fixture.ts'))}`,
+    // The copy the user reads is an assertion subject: a status must name its evidence.
+    `export { WORKFLOW_STATUS_EVIDENCE, WORKFLOW_RUN_STATUS_LABEL } from ${JSON.stringify(join(root, 'src/renderer/constants/workflow-copy.ts'))}`,
     ''
   ].join('\n'))
   await build({

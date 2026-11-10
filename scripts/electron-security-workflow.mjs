@@ -1,49 +1,15 @@
 import assert from 'node:assert/strict'
-import { readFileSync, writeFileSync } from 'node:fs'
-import { seedArchivedTurn, seedNativeTranscript } from './archived-turn-smoke.mjs'
+import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { PLAIN_SESSION_PREVIEW, workflowArchiveReuse } from './workflow-archive-fixture.mjs'
 
 /**
  * Replay an archived workflow turn in the real App: open the session, open the Workflow
- * surface, and require the rendered phases and agents to match the archived evidence.
+ * surface, and require the rendered phases, agents and status evidence to match the archive.
  *
- * Nothing here talks to a Provider. The archive was produced by the production normalizer
- * from wire messages, so this is the regression for history recovery, the projection and
- * the surface together.
+ * Nothing here talks to a Provider. The archive came from the production normalizer, so this
+ * is the regression for history recovery, the projection and the surface together.
  */
-// Second launch of the same temporary userData/HOME: nothing is seeded again, so a session
-// that appears proves the App read it back from disk after a real quit and restart.
-export const workflowArchiveReuse = process.argv[5] === '--reuse'
-
-/** Preview text of the second replayed session: same archive, no workflow rows. */
-export const PLAIN_SESSION_PREVIEW = 'Plain replay'
-
-/** Seed the archived turn and its Provider transcript for the first launch of the replay. */
-export function prepareWorkflowArchive({ userDataDir, home, source, nativePath }) {
-  seedArchivedTurn({ userDataDir, source, preview: 'Archived workflow replay', rewrite: !workflowArchiveReuse })
-  // A second session without workflow rows: switching to it must not keep showing the first
-  // session's run, and switching back must restore it.
-  seedArchivedTurn({
-    userDataDir,
-    source: {
-      ...source,
-      sessionId: 'plain-replay',
-      externalSessionId: 'plain-replay',
-      turns: [{
-        ...source.turns[0],
-        runId: 'plain-replay',
-        items: source.turns[0].items.filter((item) => item.stage !== 'workflow_activity')
-      }]
-    },
-    preview: PLAIN_SESSION_PREVIEW,
-    rewrite: !workflowArchiveReuse
-  })
-  // On a relaunch the transcript must already be on disk from the previous process.
-  if (workflowArchiveReuse) return
-  const rows = readFileSync(nativePath, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line))
-  seedNativeTranscript({ home, cwd: source.cwd, sessionId: 'workflow-archive-replay', messages: rows })
-}
-
 export async function exerciseWorkflowArchive(context) {
   const { evaluate, cdp } = context
   const source = context.sourceFileHistory
@@ -152,17 +118,18 @@ export async function exerciseWorkflowArchive(context) {
     }
   })()`)
 
-  const { deriveWorkflowRuns } = await import('./workflow-wire-modules.mjs').then((module) => module.loadWorkflowModules())
+  const { deriveWorkflowRuns, WORKFLOW_STATUS_EVIDENCE, WORKFLOW_RUN_STATUS_LABEL } =
+    await import('./workflow-wire-modules.mjs').then((module) => module.loadWorkflowModules())
   const [run] = deriveWorkflowRuns([{ runId: turn.runId, userText: turn.userText, items: turn.items, done: turn.done }], { busy: false })
   assert.ok(run, 'the archived turn must fold into one workflow run')
-  const RUN_STATUS_LABEL = {
-    launching: '启动中', running: '运行中', paused: '已暂停',
-    completed: '已完成', failed: '失败', stopped: '已停止', unknown: '状态未知'
-  }
+  // The chip tooltip names the event the status came from; showing the label without it
+  // would claim a completion nobody reported.
+  const statusEvidence = WORKFLOW_STATUS_EVIDENCE[run.statusSource]
 
-  const verify = (rendered, { label }) => {
+  const verify = (rendered, { label, evidence = statusEvidence }) => {
+    assert.equal(rendered.statusTitle, evidence, `${label}: the status must name its evidence`)
     assert.equal(rendered.phases.length, run.phases.length, `${label}: phase count must match the archive`)
-    assert.equal(rendered.status, RUN_STATUS_LABEL[run.status], `${label}: run status must match the archive`)
+    assert.equal(rendered.status, WORKFLOW_RUN_STATUS_LABEL[run.status], `${label}: run status must match the archive`)
     for (const phase of run.phases) {
       const card = rendered.phases.find((candidate) => candidate.title === phase.title)
       assert.ok(card, `${label}: missing phase ${phase.title}`)
