@@ -32,6 +32,7 @@ import type { DesktopRemoteClient } from '../remote/desktop-client'
 import { startRemoteHostIfEnabled, type RemoteHostRuntime } from './remote-host'
 import type { RunControl } from './run-control'
 import { runStartupRecovery } from './startup-recovery'
+import { appStartupWriters } from './app-startup-writers'
 
 export function initializeAppEnvironment(__dirname: string, getWindow: () => BrowserWindow | null) {
   // scry 开发期可能从一个父 Claude Code 会话内启动，继承了 CLAUDECODE / CLAUDE_CODE_* /
@@ -118,6 +119,7 @@ export function registerAppLifecycle({
 
   app.whenReady().then(async () => {
     if (!primaryInstance) return
+    const writers = appStartupWriters()
     const startupPerf = new PerformanceTrace('app.startup', { platform: process.platform }, recordStartupPerformance)
     await startPerformanceRecording(app.getPath('userData'), app.getVersion(), app.isPackaged, useDevelopmentRenderer)
     startupPerf.mark('performance_recording_ready')
@@ -132,8 +134,9 @@ export function registerAppLifecycle({
     // 避免快速完成的首轮落过 archive 却永久缺少 spans/usage/intervention。
     // Storage 的路径由这里注入一次：数据库层不再问 Electron 要 userData。
     configureStorage({ userDataDir: app.getPath('userData'), appPath: app.getAppPath() })
-    initDb()
-    startupPerf.mark('database_ready')
+    // With the switch on the daemon owns scry.db; its channels are answered there.
+    if (writers.database) initDb()
+    startupPerf.mark(writers.database ? 'database_ready' : 'database_owned_by_daemon')
     createWindow()
     performanceResourceMonitor = startPerformanceResourceMonitor({
       enabled: performanceRecordingEnabled(),
@@ -159,13 +162,21 @@ export function registerAppLifecycle({
     void requireDesktopRemoteClient().restoreConnections().catch((error) => {
       console.warn('[scry] desktop connection startup recovery failed:', error)
     })
-    setStartupManagedRecovery(runStartupRecovery({
-      userDataDir: app.getPath('userData'),
-      recorderCli: packagedRecorderCliPath() ?? process.env.SCRY_CLI_PATH,
-      startupPerf,
-      conversationStore,
-      runs
-    }))
+    if (writers.startupRecovery) {
+      setStartupManagedRecovery(runStartupRecovery({
+        userDataDir: app.getPath('userData'),
+        recorderCli: packagedRecorderCliPath() ?? process.env.SCRY_CLI_PATH,
+        startupPerf,
+        conversationStore,
+        runs
+      }))
+    } else {
+      // The daemon recovers its own userData. Record that instead of recovery stages
+      // main never ran, so the startup trace does not claim them.
+      startupPerf.mark('recovery_owned_by_daemon')
+      startupPerf.finish()
+      setStartupManagedRecovery(Promise.resolve())
+    }
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
