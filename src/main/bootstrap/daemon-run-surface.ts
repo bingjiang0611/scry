@@ -44,6 +44,8 @@ export interface DaemonRunSurface {
   follow(ledger: { runId: string; seq?: number }): Promise<{ runId: string; bound: boolean }>
   // An App channel the daemon answers through a local op (B4-L4).
   localOp(call: { op: string; method: string; args: unknown[]; read: boolean }): Promise<unknown>
+  // An existing op the daemon serves paired devices, sent for an App channel (route `forward`).
+  forward(request: Record<string, unknown>, read: boolean): Promise<Record<string, unknown>>
 }
 
 // The intent detail is the daemon's routing contract, so only fields the App
@@ -156,6 +158,7 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
     },
     follow(ledger) { return runtime.follow(ledger) },
     localOp(call) { return deps.transport.localOp(call) },
+    forward(request, read) { return deps.transport.forward(request, read) },
     async ack(receipt) { return runtime.bridge.ack(receipt) },
     async resynchronized() { runtime.bridge.resynchronized(); return true as const }
   }

@@ -314,22 +314,33 @@ export class DaemonRunTransport {
    * op is a named absence.
    */
   async localOp(input: { op: string; method: string; args: unknown[]; read: boolean }): Promise<unknown> {
+    // JSON carries an omitted (undefined) argument as null. The renderer's own null and
+    // a parameter it left out are different inputs to main's handler, so the positions
+    // left out are named and the daemon restores them.
+    const absent = input.args.flatMap((value, index) => value === undefined ? [index] : [])
+    const reply = await this.forward({ op: input.op, method: input.method, args: input.args, ...(absent.length > 0 ? { absent } : {}) }, input.read)
+    if (!('result' in reply)) throw new DaemonRunError('invalid_daemon_response')
+    return reply.result
+  }
+
+  /**
+   * One request for an op the daemon serves (route `forward` reuses the ops paired
+   * devices use). Errors map as described for localOp; the reply is the caller's to read.
+   */
+  async forward(request: Record<string, unknown>, read: boolean): Promise<Record<string, unknown>> {
     let reply: unknown
     try {
-      // JSON carries an omitted (undefined) argument as null. The renderer's own null and
-      // a parameter it left out are different inputs to main's handler, so the positions
-      // left out are named and the daemon restores them.
-      const absent = input.args.flatMap((value, index) => value === undefined ? [index] : [])
-      reply = await this.#request({ op: input.op, method: input.method, args: input.args, ...(absent.length > 0 ? { absent } : {}) }, { replayable: input.read })
+      reply = await this.#request(request, { replayable: read })
     } catch (error) {
       throw error instanceof DaemonRunError ? error : new DaemonRunError(transportFailure(error))
     }
     if (!record(reply)) throw new DaemonRunError('invalid_daemon_response')
     if (reply.error === 'device_not_authorized') throw new DaemonRunError('daemon_device_not_authorized')
-    if (reply.error === 'unsupported_op') throw new Error(`daemon_capability_unavailable:${input.op}:${input.method}`)
+    if (reply.error === 'unsupported_op') {
+      throw new Error(`daemon_capability_unavailable:${String(request.op)}${typeof request.method === 'string' ? `:${request.method}` : ''}`)
+    }
     if (typeof reply.error === 'string') throw new Error(reply.error)
-    if (!('result' in reply)) throw new DaemonRunError('invalid_daemon_response')
-    return reply.result
+    return reply
   }
 
   async #call(request: Record<string, unknown>, options?: { replayable?: boolean; signal?: AbortSignal }): Promise<Record<string, unknown>> {

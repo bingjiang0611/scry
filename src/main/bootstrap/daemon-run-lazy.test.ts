@@ -28,6 +28,7 @@ function surface(overrides: Partial<DaemonRunSurface> = {}): DaemonRunSurface {
     adopt: async () => null,
     follow: async (ledger) => ({ runId: ledger.runId, bound: false }),
     localOp: async () => null,
+    forward: async () => ({}),
     ...overrides
   }
 }

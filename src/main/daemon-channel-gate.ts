@@ -1,10 +1,10 @@
 import { DESKTOP_REMOTE_CLIENT_METHODS } from './remote/desktop-client-ipc'
-import type { DaemonLocalOpTable } from './daemon-local-ops/types'
+import type { DaemonForwardTable, DaemonLocalOpTable } from './daemon-local-ops/types'
 import { CATALOG_LOCAL_OPS } from './daemon-local-ops/catalog'
 import { CONVERSATION_LOCAL_OPS } from './daemon-local-ops/conversation'
-import { SESSION_LIFECYCLE_LOCAL_OPS } from './daemon-local-ops/session-lifecycle'
-import { QUERY_LOCAL_OPS } from './daemon-local-ops/queries'
-import { WORKBENCH_LOCAL_OPS } from './daemon-local-ops/workbench'
+import { SESSION_LIFECYCLE_FORWARDS, SESSION_LIFECYCLE_LOCAL_OPS } from './daemon-local-ops/session-lifecycle'
+import { QUERY_FORWARDS, QUERY_LOCAL_OPS } from './daemon-local-ops/queries'
+import { WORKBENCH_FORWARDS, WORKBENCH_LOCAL_OPS } from './daemon-local-ops/workbench'
 import { PROJECT_LOCAL_OPS } from './daemon-local-ops/project'
 
 // Development switch for "the daemon owns runs". Kept here, free of Electron, so the IPC
@@ -59,12 +59,28 @@ export const DAEMON_LOCAL_OP_CHANNELS: DaemonLocalOpTable = {
   ...PROJECT_LOCAL_OPS
 }
 
+/** Channels the daemon answers through an op it already serves paired devices (route `forward`). */
+export const DAEMON_FORWARD_CHANNELS: DaemonForwardTable = {
+  ...SESSION_LIFECYCLE_FORWARDS,
+  ...QUERY_FORWARDS,
+  ...WORKBENCH_FORWARDS
+}
+
 /** Op names served only on the App's local endpoint; the network endpoint refuses them. */
 export const DAEMON_LOCAL_OP_NAMES: ReadonlySet<string> = new Set(Object.values(DAEMON_LOCAL_OP_CHANNELS).map((entry) => entry.op))
 
 export type DaemonChannelForwarder = (call: { op: string; method: string; args: unknown[]; read: boolean }) => Promise<unknown>
 
+/** Sends one existing-op request to the daemon; answers its reply once errors are mapped. */
+export type DaemonRequestForwarder = (request: Record<string, unknown>, read: boolean) => Promise<Record<string, unknown>>
+
 let forwarder: DaemonChannelForwarder | undefined
+let requestForwarder: DaemonRequestForwarder | undefined
+
+export function installDaemonRequestForwarder(next: DaemonRequestForwarder): () => void {
+  requestForwarder = next
+  return () => { if (requestForwarder === next) requestForwarder = undefined }
+}
 const resultHandlers = new Map<string, (value: unknown, args: unknown[]) => unknown>()
 
 /**
@@ -123,6 +139,16 @@ export function gateDaemonChannel<TListener extends (...args: never[]) => unknow
     return ((async (_event: unknown, ...args: unknown[]) => {
       if (!forwarder) throw new Error(`daemon_capability_unavailable:${channel}`)
       const value = await forwarder({ op: local.op, method: local.method, args, read: local.read })
+      const after = resultHandlers.get(channel)
+      return after ? after(value, args) : value
+    }) as unknown) as TListener
+  }
+  const forward = DAEMON_FORWARD_CHANNELS[channel]
+  if (forward) {
+    return ((async (_event: unknown, ...args: unknown[]) => {
+      if (!requestForwarder) throw new Error(`daemon_capability_unavailable:${channel}`)
+      const reply = await requestForwarder(forward.request(args), forward.read)
+      const value = forward.result ? forward.result(reply, args) : reply
       const after = resultHandlers.get(channel)
       return after ? after(value, args) : value
     }) as unknown) as TListener

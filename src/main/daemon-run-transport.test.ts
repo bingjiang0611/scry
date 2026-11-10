@@ -173,6 +173,16 @@ describe('daemon run transport', () => {
       .rejects.toThrow('invalid_daemon_response')
   })
 
+  it('forwards an existing op for an App channel and maps its errors the same way', async () => {
+    const { value, calls } = transport(() => ({ commands: [] }))
+    await expect(value.forward({ op: 'commands', cwd: '/w' }, true)).resolves.toEqual({ commands: [] })
+    expect(calls.at(-1)).toMatchObject({ request: { op: 'commands', cwd: '/w' } })
+    await expect(transport(() => ({ error: 'unsupported_op' })).value.forward({ op: 'sessionDelete' }, false))
+      .rejects.toThrow('daemon_capability_unavailable:sessionDelete')
+    await expect(transport(() => ({ error: '会话正在运行' })).value.forward({ op: 'sessionDelete' }, false)).rejects.toThrow('会话正在运行')
+    await expect(transport(() => ({ error: 'device_not_authorized' })).value.forward({ op: 'commands' }, true)).rejects.toThrow(DaemonRunError)
+  })
+
   it('reads the App event feed, keeping only notices it can name', async () => {
     const { value, calls } = transport(() => ({ events: { epoch: 'e1', cursor: 3, items: [
       { kind: 'data', event: { kind: 'conversation_changed', conversationId: 'c1' } },
