@@ -229,6 +229,28 @@ final class HostTransportStateTests: XCTestCase {
     XCTAssertEqual(state.capabilities, .unknown)
   }
 
+  // A launched app used to restore a remembered "legacy" verdict, so one ping
+  // that went unanswered (host asleep, restarting, upgraded since) left the
+  // phone on the serial fallback forever: no mux, no streaming, no compressed
+  // history, and the host's real capabilities never re-read.
+  func testRelaunchReprobesALegacyHostButKeepsLearnedCapabilities() {
+    let previous = HostTransportState.persistence.value
+    HostTransportState.persistence.value = true
+    defer { HostTransportState.persistence.value = previous }
+    let hostId = UUID().uuidString
+    defer { UserDefaults.standard.removeObject(forKey: "scry.remote.transport.\(hostId)") }
+    let legacy = HostTransportState(hostId: hostId)
+    legacy.markLegacy()
+    XCTAssertEqual(HostTransportState(hostId: hostId).capabilities, .unknown,
+                   "a remembered legacy verdict must not survive a relaunch")
+    let current = HostTransportState(hostId: hostId)
+    current.learn(capabilities: ["ping", "mux", "sessionsKnown"], routes: [])
+    let relaunched = HostTransportState(hostId: hostId)
+    XCTAssertEqual(relaunched.capabilities, .supported(["ping", "mux", "sessionsKnown"]),
+                   "learned capabilities still skip the first probe")
+    XCTAssertTrue(relaunched.multiplexed)
+  }
+
   func testPingReplyDecodesCapabilitiesAndRoutes() throws {
     let reply = try JSONDecoder().decode(PingReply.self, from: Data(#"{"keepAlive":true,"pong":{"serverTime":1,"idleTimeoutMs":75000,"capabilities":["ping","mux","lan"],"lan":{"port":4100,"addresses":["192.168.1.20"]}}}"#.utf8))
     XCTAssertEqual(reply.pong?.capabilities, ["ping", "mux", "lan"])

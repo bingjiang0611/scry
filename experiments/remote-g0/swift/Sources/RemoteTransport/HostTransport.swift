@@ -43,7 +43,6 @@ public final class HostTransportState: @unchecked Sendable {
 
   private struct Persisted: Codable {
     var capabilities: [String]?
-    var legacy: Bool?
     var routes: [DirectRoute]
   }
 
@@ -87,8 +86,13 @@ public final class HostTransportState: @unchecked Sendable {
     self.hostId = hostId
     guard Self.persistence.value, let data = UserDefaults.standard.data(forKey: defaultsKey),
           let saved = try? JSONDecoder().decode(Persisted.self, from: data) else { return }
-    if saved.legacy == true { capabilitiesValue = .legacy }
-    else if let capabilities = saved.capabilities { capabilitiesValue = .supported(Set(capabilities)) }
+    // Only learned capabilities are remembered, and only because a host that
+    // advertised them keeps speaking them. "Legacy" is deliberately not
+    // remembered: it also comes from one unanswered or unparsable ping, so a
+    // host upgrade (or a transient failure) would keep the phone on the serial
+    // fallback forever, without mux, streaming or compressed history. A legacy
+    // host costs one ping per launch to rediscover.
+    if let capabilities = saved.capabilities { capabilitiesValue = .supported(Set(capabilities)) }
     routesValue = saved.routes.filter(\.isUsable)
   }
 
@@ -187,9 +191,8 @@ public final class HostTransportState: @unchecked Sendable {
     lock.lock()
     let saved: Persisted
     switch capabilitiesValue {
-    case .unknown: saved = Persisted(capabilities: nil, legacy: nil, routes: routesValue)
-    case .legacy: saved = Persisted(capabilities: nil, legacy: true, routes: [])
-    case let .supported(set): saved = Persisted(capabilities: set.sorted(), legacy: nil, routes: routesValue)
+    case .unknown, .legacy: saved = Persisted(capabilities: nil, routes: routesValue)
+    case let .supported(set): saved = Persisted(capabilities: set.sorted(), routes: routesValue)
     }
     lock.unlock()
     if let data = try? JSONEncoder().encode(saved) { UserDefaults.standard.set(data, forKey: defaultsKey) }
