@@ -1,0 +1,505 @@
+{
+  "scenarios": {
+    "diag-order": {
+      "complete": true,
+      "failures": 0,
+      "environment": {
+        "event": "environment",
+        "label": "diag-order",
+        "localNetwork": true,
+        "relayHost": "scry-relay-pages.pages.dev",
+        "rounds": 1,
+        "route": "auto"
+      },
+      "coldOpen": {
+        "okMs": [
+          3720.3
+        ],
+        "errors": [],
+        "medianMs": 3720.3,
+        "p90Ms": 3720.3
+      },
+      "warm": {
+        "medianMs": 695,
+        "p90Ms": 930,
+        "samples": 3
+      },
+      "catalog": {
+        "full": {
+          "event": "catalog",
+          "label": "diag-order",
+          "ms": 561.4,
+          "pass": "full",
+          "sessions": 31
+        },
+        "refresh": {
+          "event": "catalog",
+          "label": "diag-order",
+          "ms": 618,
+          "pass": "refresh",
+          "sessions": 31
+        }
+      },
+      "history": {
+        "event": "history",
+        "label": "diag-order",
+        "ms": 1601.8,
+        "session": "<id:a00589f4>",
+        "turns": 10
+      },
+      "routes": [
+        "relay"
+      ],
+      "multiplexed": true,
+      "capabilities": [
+        "historyDeflate",
+        "lan",
+        "mux",
+        "ping",
+        "sessionsKnown",
+        "watchStream"
+      ],
+      "legacyHost": false,
+      "directRoutes": [
+        {
+          "host": "172.18.0.1",
+          "port": 47820
+        },
+        {
+          "host": "192.168.255.254",
+          "port": 47820
+        }
+      ],
+      "colos": [
+        "PIT",
+        "ORD"
+      ],
+      "phasesMedianMs": {
+        "tcpMs": 136.79125,
+        "outerTLSMs": 814.929625,
+        "upgradeMs": 1134.799834,
+        "innerTLSMs": 1879.958083,
+        "pingMs": null,
+        "totalMs": 1879.968833
+      },
+      "openErrors": [
+        {
+          "lane": "bulk",
+          "route": "direct",
+          "error": "Connect timeout (900 ms)"
+        },
+        {
+          "lane": "bulk",
+          "route": "direct",
+          "error": "Connect timeout (900 ms)"
+        },
+        {
+          "lane": "control",
+          "route": "direct",
+          "error": "Connect timeout (900 ms)"
+        },
+        {
+          "lane": "control",
+          "route": "direct",
+          "error": "Connect timeout (900 ms)"
+        },
+        {
+          "lane": "bulk",
+          "route": "direct",
+          "error": "Connect timeout (900 ms)"
+        },
+        {
+          "lane": "bulk",
+          "route": "direct",
+          "error": "Connect timeout (900 ms)"
+        },
+        {
+          "lane": "control",
+          "route": "direct",
+          "error": "Connect timeout (900 ms)"
+        }
+      ]
+    },
+    "wifi-auto": {
+      "complete": true,
+      "failures": 0,
+      "environment": {
+        "event": "environment",
+        "label": "wifi-auto",
+        "localNetwork": true,
+        "relayHost": "scry-relay-pages.pages.dev",
+        "rounds": 5,
+        "route": "auto"
+      },
+      "coldOpen": {
+        "okMs": [
+          3419.9,
+          1298.8,
+          1265.4,
+          1437,
+          1337.5
+        ],
+        "errors": [],
+        "medianMs": 1337.5,
+        "p90Ms": 3419.9
+      },
+      "warm": {
+        "medianMs": 663.6,
+        "p90Ms": 1017.2,
+        "samples": 15
+      },
+      "catalog": {
+        "full": {
+          "event": "catalog",
+          "label": "wifi-auto",
+          "ms": 612.7,
+          "pass": "full",
+          "sessions": 31
+        },
+        "refresh": {
+          "event": "catalog",
+          "label": "wifi-auto",
+          "ms": 819.8,
+          "pass": "refresh",
+          "sessions": 31
+        }
+      },
+      "history": {
+        "event": "history",
+        "label": "wifi-auto",
+        "ms": 1769.8,
+        "session": "<id:a00589f4>",
+        "turns": 10
+      },
+      "routes": [
+        "relay"
+      ],
+      "multiplexed": true,
+      "capabilities": [
+        "historyDeflate",
+        "lan",
+        "mux",
+        "ping",
+        "sessionsKnown",
+        "watchStream"
+      ],
+      "legacyHost": false,
+      "directRoutes": [
+        {
+          "host": "172.18.0.1",
+          "port": 47820
+        },
+        {
+          "host": "192.168.255.254",
+          "port": 47820
+        }
+      ],
+      "colos": [
+        "PIT",
+        "ORD"
+      ],
+      "phasesMedianMs": {
+        "tcpMs": 7.840833,
+        "outerTLSMs": 374.490667,
+        "upgradeMs": 777.053708,
+        "innerTLSMs": 1308.645125,
+        "pingMs": null,
+        "totalMs": 1308.659125
+      },
+      "openErrors": [
+        {
+          "lane": "bulk",
+          "route": "direct",
+          "error": "Connect timeout (900 ms)"
+        },
+        {
+          "lane": "bulk",
+          "route": "direct",
+          "error": "Connect timeout (900 ms)"
+        },
+        {
+          "lane": "control",
+          "route": "direct",
+          "error": "Connect timeout (900 ms)"
+        },
+        {
+          "lane": "control",
+          "route": "direct",
+          "error": "Connect timeout (900 ms)"
+        },
+        {
+          "lane": "bulk",
+          "route": "direct",
+          "error": "Connect timeout (900 ms)"
+        },
+        {
+          "lane": "bulk",
+          "route": "direct",
+          "error": "Connect timeout (900 ms)"
+        },
+        {
+          "lane": "control",
+          "route": "direct",
+          "error": "Connect timeout (900 ms)"
+        }
+      ]
+    },
+    "wifi-relay": {
+      "complete": true,
+      "failures": 0,
+      "environment": {
+        "event": "environment",
+        "label": "wifi-relay",
+        "localNetwork": true,
+        "relayHost": "scry-relay-pages.pages.dev",
+        "rounds": 5,
+        "route": "relay"
+      },
+      "coldOpen": {
+        "okMs": [
+          1677.5,
+          1292.4,
+          1378.9,
+          1337.1,
+          1287
+        ],
+        "errors": [],
+        "medianMs": 1337.1,
+        "p90Ms": 1677.5
+      },
+      "warm": {
+        "medianMs": 623.5,
+        "p90Ms": 795.9,
+        "samples": 15
+      },
+      "catalog": {
+        "full": {
+          "event": "catalog",
+          "label": "wifi-relay",
+          "ms": 592.1,
+          "pass": "full",
+          "sessions": 31
+        },
+        "refresh": {
+          "event": "catalog",
+          "label": "wifi-relay",
+          "ms": 1666.7,
+          "pass": "refresh",
+          "sessions": 31
+        }
+      },
+      "history": {
+        "event": "history",
+        "label": "wifi-relay",
+        "ms": 1776.5,
+        "session": "<id:a00589f4>",
+        "turns": 10
+      },
+      "routes": [
+        "relay"
+      ],
+      "multiplexed": true,
+      "capabilities": [
+        "historyDeflate",
+        "lan",
+        "mux",
+        "ping",
+        "sessionsKnown",
+        "watchStream"
+      ],
+      "legacyHost": false,
+      "directRoutes": [
+        {
+          "host": "172.18.0.1",
+          "port": 47820
+        },
+        {
+          "host": "192.168.255.254",
+          "port": 47820
+        }
+      ],
+      "colos": [
+        "PIT",
+        "ORD"
+      ],
+      "phasesMedianMs": {
+        "tcpMs": 7.38875,
+        "outerTLSMs": 388.816167,
+        "upgradeMs": 738.206792,
+        "innerTLSMs": 1327.889792,
+        "pingMs": null,
+        "totalMs": 1327.900542
+      },
+      "openErrors": [
+        {
+          "lane": "control",
+          "route": "relay",
+          "error": "uncleanShutdown"
+        },
+        {
+          "lane": "bulk",
+          "route": "relay",
+          "error": "uncleanShutdown"
+        }
+      ]
+    }
+  },
+  "probes": {
+    "mac-after-deploy": {
+      "ok": 10,
+      "failed": 0,
+      "colos": [
+        "PIT",
+        "ORD"
+      ],
+      "generations": [
+        "heartbeat-aware"
+      ],
+      "medianMs": {
+        "dns": 2.8,
+        "tcp": 6,
+        "tls": 374.1,
+        "upgrade": 1564,
+        "upgradeExcludingWait": 964,
+        "close": 1564,
+        "total": 1564.1
+      }
+    },
+    "mac": {
+      "ok": 10,
+      "failed": 0,
+      "colos": [
+        "ORD",
+        "PIT"
+      ],
+      "generations": [
+        "pre-heartbeat"
+      ],
+      "medianMs": {
+        "dns": 2,
+        "tcp": 5,
+        "tls": 361.1,
+        "upgrade": 853.6,
+        "upgradeExcludingWait": null,
+        "close": 853.7,
+        "total": 853.8
+      }
+    }
+  },
+  "checks": {
+    "stages": [
+      {
+        "name": "npm-ci",
+        "status": "pass",
+        "exitCode": 0,
+        "seconds": 16,
+        "log": "logs/npm-ci.tail.txt"
+      },
+      {
+        "name": "g0-npm-ci",
+        "status": "pass",
+        "exitCode": 0,
+        "seconds": 7,
+        "log": "logs/g0-npm-ci.tail.txt"
+      },
+      {
+        "name": "typecheck-node",
+        "status": "pass",
+        "exitCode": 0,
+        "seconds": 12,
+        "log": "logs/typecheck-node.tail.txt"
+      },
+      {
+        "name": "node-unit",
+        "status": "pass",
+        "exitCode": 0,
+        "seconds": 38,
+        "log": "logs/node-unit.tail.txt"
+      },
+      {
+        "name": "g0-node-tests",
+        "status": "pass",
+        "exitCode": 0,
+        "seconds": 17,
+        "log": "logs/g0-node-tests.tail.txt"
+      },
+      {
+        "name": "cf-relay-smokes",
+        "status": "pass",
+        "exitCode": 0,
+        "seconds": 37,
+        "log": "logs/cf-relay-smokes.tail.txt"
+      },
+      {
+        "name": "swift-test",
+        "status": "pass",
+        "exitCode": 0,
+        "seconds": 31,
+        "log": "logs/swift-test.tail.txt"
+      },
+      {
+        "name": "ios-checks",
+        "status": "fail",
+        "exitCode": 1,
+        "seconds": 41,
+        "log": "logs/ios-checks.tail.txt"
+      },
+      {
+        "name": "install-mac",
+        "status": "fail",
+        "exitCode": 1,
+        "seconds": 1080,
+        "log": "logs/install-mac.tail.txt"
+      },
+      {
+        "name": "build-ios",
+        "status": "pass",
+        "exitCode": 0,
+        "seconds": 22,
+        "log": "logs/build-ios.tail.txt"
+      },
+      {
+        "name": "install-ios",
+        "status": "pass",
+        "exitCode": 0,
+        "seconds": 18,
+        "log": "logs/install-ios.tail.txt"
+      },
+      {
+        "name": "relay-probe-mac",
+        "status": "pass",
+        "exitCode": 0,
+        "seconds": 10,
+        "log": "logs/relay-probe-mac.tail.txt"
+      },
+      {
+        "name": "netbench-wifi-relay",
+        "status": "pass",
+        "exitCode": 0,
+        "seconds": 24,
+        "log": "netbench-wifi-relay.jsonl"
+      },
+      {
+        "name": "netbench-wifi-auto",
+        "status": "pass",
+        "exitCode": 0,
+        "seconds": 29,
+        "log": "netbench-wifi-auto.jsonl"
+      },
+      {
+        "name": "netbench-diag-order",
+        "status": "pass",
+        "exitCode": 0,
+        "seconds": 14,
+        "log": "netbench-diag-order.jsonl"
+      },
+      {
+        "name": "relay-probe-mac-after-deploy",
+        "status": "pass",
+        "exitCode": 0,
+        "seconds": 16,
+        "log": "logs/relay-probe-mac-after-deploy.tail.txt"
+      }
+    ]
+  }
+}

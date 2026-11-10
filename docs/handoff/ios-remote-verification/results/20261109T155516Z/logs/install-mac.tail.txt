@@ -1,0 +1,211 @@
+loor and sequence allocation > target link 的目录 fsync 失败后重试仍先完成 durability barrier 再删 source  633ms
+   ✓ archive floor and sequence allocation > 归档全部记录后新轮次从 floor+1 继续，store 仍连续  762ms
+   ✓ archive floor and sequence allocation > 未记录 floor 的手动删除仍然报 sequence gap  691ms
+   ✓ allocates above an acknowledged sequence whose record file was deleted, and still delivers it  1579ms
+   ✓ keeps allocating above the acknowledged floor when every record file is gone  1248ms
+   ✓ initializes the issued floor from an existing delivery checkpoint (workspace written before the watermark)  1430ms
+   ✓ doctor warns about records deleted outside archive instead of reporting healthy  1140ms
+   ✓ crosses the sequence reserved before a crash and keeps delivering after the retry succeeds  2062ms
+   ✓ crosses a record deleted outside archive while an earlier sequence is retrying  2725ms
+   ✓ stays fail closed when a record file exists but its delivery outcome is missing  2146ms
+   ✓ keeps corrupt delivery evidence a loud rejection instead of reporting an unknown backlog  1896ms
+   ✓ recovers a lost delivery outcome through an explicit notify-retry of that sequence  2113ms
+   ✓ doctor shows the absent sequences the ACK crossed  2501ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 17 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/check-pacman-package.test.mjs > pacman raw description contract > accepts one nonempty description and preserves equals signs in its value
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ scripts/check-pacman-package.test.mjs:66:5
+     64| 
+     65| describe('pacman raw description contract', () => {
+     66|   it('accepts one nonempty description and preserves equals signs in i…
+       |     ^
+     67|     const result = check('pkgdesc = Scry = desktop')
+     68|     expect(result.status, result.stderr).toBe(0)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/17]⎯
+
+ FAIL  scripts/check-pacman-package.test.mjs > pacman raw description contract > rejects a continuation even when the first description line is nonempty
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ scripts/check-pacman-package.test.mjs:72:5
+     70|   })
+     71| 
+     72|   it('rejects a continuation even when the first description line is n…
+       |     ^
+     73|     const result = check('pkgdesc = Scry\n continued description')
+     74|     expect(result.status).not.toBe(0)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/17]⎯
+
+ FAIL  scripts/check-pacman-package.test.mjs > pacman raw description contract > rejects multiple description records instead of silently choosing the last
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ scripts/check-pacman-package.test.mjs:78:5
+     76|   })
+     77| 
+     78|   it('rejects multiple description records instead of silently choosin…
+       |     ^
+     79|     const result = check('pkgdesc = first\npkgdesc = second')
+     80|     expect(result.status).not.toBe(0)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/17]⎯
+
+ FAIL  scripts/check-pacman-package.test.mjs > pacman raw description contract > still rejects an empty description
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ scripts/check-pacman-package.test.mjs:84:5
+     82|   })
+     83| 
+     84|   it('still rejects an empty description', () => {
+       |     ^
+     85|     const result = check('pkgdesc = ')
+     86|     expect(result.status).not.toBe(0)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/17]⎯
+
+ FAIL  scripts/concurrency-trace-launcher.test.ts > concurrency trace launcher contract > rejects unknown flags, extra positionals and illegal values with exit code 2
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ scripts/concurrency-trace-launcher.test.ts:78:3
+     76|   })
+     77| 
+     78|   it('rejects unknown flags, extra positionals and illegal values with…
+       |   ^
+     79|     const cases: Array<{ args: string[], pattern: RegExp }> = [
+     80|       { args: ['--concurrency', '4'], pattern: /unknown option/i },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/17]⎯
+
+ FAIL  scripts/performance-baseline.test.ts > fixed production-path performance harness > covers every user-path group with correct, measured local work
+AssertionError: expected { stdout: '', exitCode: null, …(2) } to deeply equal { stdout: 'shell-fixed\n', …(3) }
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  {[22m
+[32m-   "exitCode": 0,[39m
+[32m-   "signal": null,[39m
+[32m-   "stdout": "shell-fixed[39m
+[32m- ",[39m
+[32m-   "timedOut": false,[39m
+[31m+   "exitCode": null,[39m
+[31m+   "signal": "SIGKILL",[39m
+[31m+   "stdout": "",[39m
+[31m+   "timedOut": true,[39m
+[2m  }[22m
+
+ ❯ Object.run scripts/performance-baseline.test.ts:406:24
+    404|       run: async () => {
+    405|         const result = await execFileOutcome(process.execPath, ['-e', …
+    406|         expect(result).toEqual({ stdout: 'shell-fixed\n', exitCode: 0,…
+       |                        ^
+    407|         const output = result.stdout
+    408|         const usage = process.resourceUsage()
+ ❯ scripts/performance-baseline.test.ts:438:128
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/17]⎯
+
+ FAIL  src/core/turn-recorder/commit-environment.test.ts > shell fast path pins the starting session env, including absence, not the daemon or Stop env
+Error: ENOENT: no such file or directory, open '/private/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-env-BThfd9/delivered.jsonl'
+ ❯ Object.delivered src/core/turn-recorder/commit-environment.test.ts:33:34
+     31|   await writeFile(script, providerHookSource(), { mode: 0o700 })
+     32|   const env = { PATH: process.env.PATH, HOME: root, SCRY_RECORDER_COMM…
+     33|   const delivered = async () => (await readFile(output, 'utf8')).trim(…
+       |                                  ^
+     34|   return { root, script, env, delivered }
+     35| }
+ ❯ src/core/turn-recorder/commit-environment.test.ts:57:10
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/17]⎯
+
+ FAIL  src/core/turn-recorder/recorder-attention-process.test.ts > serializes a separate queue writer and cleanup through publish
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/core/turn-recorder/recorder-attention-process.test.ts:32:60
+     30| })
+     31| 
+     32| it.each(['publish', 'crash-before', 'crash-after'] as const)(
+       |                                                            ^
+     33|   'serializes a separate queue writer and cleanup through %s', async (…
+     34|     const root = await mkdtemp(join(tmpdir(), 'scry-attention-process-…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/17]⎯
+
+ FAIL  src/main/providers/pi-probe-lifecycle.test.ts > Pi capability probe lifecycle > invalidates one workspace without restarting an unrelated warm probe
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/main/providers/pi-probe-lifecycle.test.ts:28:3
+     26|   })
+     27| 
+     28|   it('invalidates one workspace without restarting an unrelated warm p…
+       |   ^
+     29|     await withProbeFixture(async (profile, cwd, starts) => {
+     30|       const otherCwd = join(cwd, 'other')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/17]⎯
+
+ FAIL  src/main/providers/pi-probe-lifecycle.test.ts > Pi capability probe lifecycle > does not share probe evidence across workspaces, profile ids or executables
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/main/providers/pi-probe-lifecycle.test.ts:51:3
+     49|   })
+     50| 
+     51|   it('does not share probe evidence across workspaces, profile ids or …
+       |   ^
+     52|     await withProbeFixture(async (profile, cwd, starts) => {
+     53|       const otherCwd = join(cwd, 'other')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/17]⎯
+
+ FAIL  src/main/providers/pi-probe-lifecycle.test.ts > Pi capability probe lifecycle > keeps a parked read-only probe owned until exit when TERM is ignored
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/main/providers/pi-probe-lifecycle.test.ts:68:3
+     66|   })
+     67| 
+     68|   it('keeps a parked read-only probe owned until exit when TERM is ign…
+       |   ^
+     69|     await withProbeFixture(async (profile, cwd) => {
+     70|       writeFileSync(join(cwd, 'stubborn'), '')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/17]⎯
+
+ FAIL  src/main/providers/pi-probe-lifecycle.test.ts > Pi capability probe lifecycle > releases a failed flight so a later probe can recover
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/main/providers/pi-probe-lifecycle.test.ts:88:3
+     86|   })
+     87| 
+     88|   it('releases a failed flight so a later probe can recover', async ()…
+       |   ^
+     89|     await withProbeFixture(async (profile, cwd, starts) => {
+     90|       writeFileSync(join(cwd, 'fail-probe'), '')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/17]⎯
+
+ FAIL  src/main/providers/pi-probe-lifecycle.test.ts > Pi capability probe lifecycle > rejects non-JSON output, confirms process exit and allows a fresh probe
+ FAIL  src/main/providers/pi-probe-lifecycle.test.ts > Pi capability probe lifecycle > rejects null response, confirms process exit and allows a fresh probe
+ FAIL  src/main/providers/pi-probe-lifecycle.test.ts > Pi capability probe lifecycle > rejects array response, confirms process exit and allows a fresh probe
+ FAIL  src/main/providers/pi-probe-lifecycle.test.ts > Pi capability probe lifecycle > rejects unfinished frame, confirms process exit and allows a fresh probe
+ FAIL  src/main/providers/pi-probe-lifecycle.test.ts > Pi capability probe lifecycle > rejects exit without evidence, confirms process exit and allows a fresh probe
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/main/providers/pi-probe-lifecycle.test.ts:106:13
+    104|     ['unfinished frame', '{"type":', /JSONL 解码失败.*expected a value/],
+    105|     ['exit without evidence', '', /提前退出/]
+    106|   ] as const)('rejects %s, confirms process exit and allows a fresh pr…
+       |             ^
+    107|     await withProbeFixture(async (profile, cwd, starts) => {
+    108|       writeFileSync(join(cwd, 'startup-wire'), wire)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/17]⎯
+
+
+ Test Files  6 failed | 609 passed | 4 skipped (619)
+      Tests  17 failed | 5682 passed | 4 skipped (5703)
+   Start at  08:16:47
+   Duration  1042.20s (transform 10.56s, setup 0ms, collect 62.94s, tests 1746.21s, environment 58ms, prepare 31.15s)
+

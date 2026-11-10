@@ -1,0 +1,5 @@
+FAIL catalog.followUp.routingDoesNotResumeAnotherProfile
+FAIL catalog.recovery.explicitModelChoice
+FAIL catalog.model.explicitAutoIsRemembered
+FAIL catalog.model.catalogRecoveryRestoresReadiness
+Catalog checks: 146, failures: 4

@@ -1,0 +1,206 @@
+cur within 'try' expression
+56 |                         certificate: material.bootstrapPEM, privateKey: material.privateKeyPEM)
+57 |   }
+/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746>/apps/ios/ScryRemote/AppModel.swift:316:13: warning: no 'async' operations occur within 'await' expression
+314 |           switch progress {
+315 |           case let .awaitingConfirmation(fingerprint):
+316 |             await self?.setPairing(.awaitingConfirmation(fingerprint: fingerprint))
+    |             `- warning: no 'async' operations occur within 'await' expression
+317 |             try await Task.sleep(nanoseconds: 2_000_000_000)
+318 |             progress = try await client.refresh(code: code, deviceLabel: label)
+
+/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746>/apps/ios/ScryRemote/AppModel.swift:324:17: warning: no 'async' operations occur within 'await' expression
+322 |             let connection = RemoteConnection(relayHost: code.relayHost, relayPort: code.relayPort,
+323 |               relayTLS: code.relayTLS.rawValue, hostId: code.hostId, anchorPEM: code.anchorPEM, deviceId: deviceId)
+324 |             try await self?.setPaired(deviceId: deviceId, host: code.relayHost, connection: connection, runStore: runStore)
+    |                 `- warning: no 'async' operations occur within 'await' expression
+325 |             return
+326 |           case let .denied(reason):
+
+/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746>/apps/ios/ScryRemote/AppModel.swift:338:19: warning: no 'async' operations occur within 'await' expression
+336 |                 relayTLS: code.relayTLS.rawValue, hostId: existing.hostId,
+337 |                 anchorPEM: existing.anchorPEM, deviceId: existing.deviceId)
+338 |               try await self?.setPaired(deviceId: existing.deviceId, host: code.relayHost, connection: migrated, runStore: runStore)
+    |                   `- warning: no 'async' operations occur within 'await' expression
+339 |               return
+340 |             }
+
+/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746>/apps/ios/ScryRemote/AppModel.swift:341:13: warning: no 'async' operations occur within 'await' expression
+339 |               return
+340 |             }
+341 |             await self?.setPairing(.failed(Self.pairingDeniedFailure(reason)))
+    |             `- warning: no 'async' operations occur within 'await' expression
+342 |             return
+343 |           case let .revoked(deviceId):
+
+/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746>/apps/ios/ScryRemote/AppModel.swift:344:13: warning: no 'async' operations occur within 'await' expression
+342 |             return
+343 |           case let .revoked(deviceId):
+344 |             await self?.setPairing(.failed(.init(message: ConnectionCopy.pairingRevoked,
+    |             `- warning: no 'async' operations occur within 'await' expression
+345 |                                                   technicalDetail: "deviceId=\(deviceId)")))
+346 |             return
+
+/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746>/apps/ios/ScryRemote/AppModel.swift:349:9: warning: no 'async' operations occur within 'await' expression
+347 |           }
+348 |         }
+349 |         await self?.setPairing(.failed(.init(message: ConnectionCopy.pairingTimeout)))
+    |         `- warning: no 'async' operations occur within 'await' expression
+350 |       } catch {
+351 |         if Task.isCancelled { return }
+
+/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:81cb5746>/apps/ios/ScryRemote/AppModel.swift:352:9: warning: no 'async' operations occur within 'await' expression
+350 |       } catch {
+351 |         if Task.isCancelled { return }
+352 |         await self?.setPairing(.failed(.init(message: ConnectionCopy.pairingConnectionFailed,
+    |         `- warning: no 'async' operations occur within 'await' expression
+353 |                                              technicalDetail: String(reflecting: error))))
+354 |       }
+/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-catalog-binary-p3m8aujw/catalog-refresh-checks: replacing existing signature
+PASS catalog.completePersisted
+PASS catalog.partialRetainsCompleteList
+PASS catalog.partialFailureNotSuccess
+PASS catalog.coldPageReadableButUnverified
+PASS catalog.cacheFalseNotSuccess
+PASS catalog.cacheThrowNotTransportFailure
+PASS catalog.cacheTechnicalDetailNotInSummary
+PASS catalog.revocationNeedsPairing
+PASS catalog.inFlightRequestCoalesced
+PASS catalog.coalescedRequestCompletes
+PASS catalog.staleReplyCannotPublishOrPersist
+PASS catalog.notSuccessfulBeforePersistence
+PASS catalog.lateJoinObservesCompletion
+PASS catalog.oldTimestampIncludesDate
+PASS catalog.restoredTimeIsNotCurrentReachability
+PASS catalog.legacyTimeRemainsUnknown
+PASS catalog.selection.doesNotMoveConversation
+PASS catalog.draft.staysOnOriginalTarget
+PASS catalog.draft.renewedGrantIsSeparate
+PASS catalog.catalog.aggregatesIdenticalSessionIdsWithoutCollision
+PASS catalog.catalog.filterKeepsOriginalScope
+PASS catalog.selection.requiresFreshProjectAndProvider
+PASS catalog.draft.profilesIsolated
+PASS catalog.followUp.doesNotReuseAnotherProfile
+PASS catalog.identity.restoresFinalHostNotGateway
+FAIL catalog.followUp.routingDoesNotResumeAnotherProfile
+PASS catalog.workspace.browserAndReadonlyRetainTargetBinding
+PASS catalog.workspace.changedGrantCannotPublishFile
+PASS catalog.cache.profilesIsolated
+PASS catalog.cache.localLegacyNamespacePreserved
+PASS catalog.catalog.targetAuthDoesNotRequestPhonePairing
+PASS catalog.history.keepsProfile
+PASS catalog.question.identicalRunAndQuestionIdsStayOnTheirTarget
+PASS catalog.question.profileChangeDoesNotReuseAnswerState
+PASS catalog.delivery.target_delivery_unknownPausesWithoutResend
+PASS catalog.delivery.device_not_authorizedPausesWithoutResend
+PASS catalog.delivery.grant_expiredPausesWithoutResend
+PASS catalog.delivery.grant_revokedPausesWithoutResend
+PASS catalog.delivery.execution_target_binding_changedPausesWithoutResend
+PASS catalog.delivery.unknown_connectionPausesWithoutResend
+PASS catalog.delivery.unknown_opPausesWithoutResend
+PASS catalog.delivery.localAuthorityLossDoesNotClaimNonexecution
+PASS catalog.delivery.localMissingCredentialsKeepsUnconfirmedIntent
+PASS catalog.delivery.unknownRetainsIntentAndRecovery
+PASS catalog.delivery.restartKeepsPausedOriginalBinding
+PASS catalog.delivery.firstOutboxPersistenceFailurePreventsSubmission
+PASS catalog.delivery.attemptMarkerPersistenceFailurePreventsSubmission
+PASS catalog.delivery.failedAttemptPersistenceCannotBeBypassedOnRetry
+PASS catalog.delivery.foregroundWakeRestartsAttemptedBackoff
+PASS catalog.delivery.multipleItemsRetainAttemptMarkerAcrossLaterPersistence
+PASS catalog.delivery.failedFinalPersistenceRestoresPausedIntent
+PASS catalog.delivery.legacyUnknownAttemptIsPaused
+PASS catalog.delivery.neverAttemptedQueueStillStarts
+PASS catalog.delivery.attemptMarkersReleasedWithOutbox
+PASS catalog.delivery.changedGrantDoesNotAdoptOldIntent
+PASS catalog.pairing.pendingOnAnyTargetBlocksReplacement
+PASS catalog.catalog.detailsFixtureRequiresMockIsolation
+PASS catalog.catalog.localContentDoesNotWaitForDiscovery
+PASS catalog.catalog.localRefreshNotDuplicatedAfterDiscovery
+PASS catalog.catalog.discoveryPreservesUnsupportedOperation
+PASS catalog.catalog.discoveryDiagnostic.target-discovery-upgrade
+PASS catalog.catalog.discoveryDiagnostic.1006 fixture-close
+PASS catalog.catalog.discoverySuccessClearsDiagnostic
+PASS catalog.catalog.failedDiscoveryDoesNotAdvanceCompleteTimestamp
+PASS catalog.catalog.initialLivePollingWaitsForForeground
+PASS catalog.catalog.backgroundedDiscoveryCannotStartLivePolling
+PASS catalog.catalog.foregroundedResumesLivePollingEligibility
+PASS catalog.catalog.foregroundHistoryChangeRestartsPolling
+PASS catalog.catalog.foregroundCancellationCanRestartPolling
+PASS catalog.recovery.unreadableIndexBlocksAuthorityChanges
+PASS catalog.recovery.discoveryDoesNotEraseUnreadableIndex
+PASS catalog.draft.localAliasFindsOriginalGrantDraft
+PASS catalog.draft.localGrantChangeDoesNotMoveOrDiscardDraft
+PASS catalog.delivery.phoneGrantChangeCannotReuseStore
+PASS catalog.recovery.initialFailureIsVisible
+PASS catalog.recovery.localFilterSkipsDiscovery
+PASS catalog.recovery.diagnosticHasHostAndStage
+PASS catalog.recovery.transientReadRecoversWithoutTap
+PASS catalog.recovery.authorizationNotRetried
+PASS catalog.recovery.filterCannotRetryAuthorization
+PASS catalog.recovery.filterCannotRetryTLS
+PASS catalog.recovery.boundedBurst
+PASS catalog.recovery.backgroundStopsRetries
+PASS catalog.recovery.failedHostDoesNotInvalidateHealthyHost
+PASS catalog.recovery.targetAuthNotAutomatic
+PASS catalog.recovery.backgroundDuringDiscoveryStartsNoTargetRead
+PASS catalog.pending.resetRejected
+PASS catalog.pending.submitRejected
+PASS catalog.pending.detachDoesNotBlock
+PASS catalog.pending.detachKeepsOutbox
+PASS catalog.pending.unansweredSendNotDiscardable
+PASS catalog.pending.rejectedSendDiscardable
+PASS catalog.outbox.roundTrip
+PASS catalog.connection.uncertainty.grant_revoked
+PASS catalog.connection.uncertainty.missing_credentials
+PASS catalog.drain.blocksReset
+PASS catalog.completed.noDuplicate
+PASS catalog.completed.resetAccepted
+PASS catalog.completed.tailRetained
+PASS catalog.completed.repeatedPromptPreserved
+PASS catalog.completed.archiveReplacesLocal
+PASS catalog.completed.chatKeepsReconciledLocal
+PASS catalog.detached.promptAloneCannotHideOutput
+PASS catalog.detached.differentRunPreserved
+PASS catalog.detached.sameRunDeduplicated
+PASS catalog.recovery.permissionCannotReplaceModel
+PASS catalog.recovery.effortCannotReplaceModel
+FAIL catalog.recovery.explicitModelChoice
+PASS catalog.status.submitting
+PASS catalog.status.recorded
+PASS catalog.status.dispatched
+PASS catalog.status.running
+PASS catalog.status.failedStopRetainsConfirmation
+PASS catalog.status.reconnectingRetainsStop
+PASS catalog.status.stopping
+PASS catalog.status.settledIsSilent
+PASS catalog.outcome.normalFinishSilent
+PASS catalog.outcome.settledMissingOutput
+PASS catalog.outcome.failedMissingOutput
+PASS catalog.outcome.cancelledMissingOutput
+PASS catalog.outcome.truncationVisible
+PASS catalog.model.newSessionDoesNotInheritDraft
+PASS catalog.model.otherSessionStartsIndependently
+PASS catalog.model.runningRoutingIsFrozen
+PASS catalog.model.sessionRestoresModelAndEffort
+PASS catalog.model.reloadKeepsSelection
+PASS catalog.model.secondSessionUnaffected
+FAIL catalog.model.explicitAutoIsRemembered
+PASS catalog.model.newTaskPreferenceIsSeparate
+PASS catalog.model.returnFromNewTaskRestoresSameSession
+PASS catalog.model.catalogLossCannotSelectAuto
+FAIL catalog.model.catalogRecoveryRestoresReadiness
+PASS catalog.model.effortLossCannotSelectDefault
+PASS catalog.model.modelChangeResetsEffort
+PASS catalog.model.profileIsolation
+PASS catalog.model.originalProfileRetained
+PASS catalog.model.recoveryCannotOverwriteExplicitAuto
+PASS catalog.model.providerSessionIDKeepsSelection
+PASS catalog.model.relaunchKeepsSelection
+PASS catalog.model.hostIsolation
+PASS catalog.model.originalHostRetained
+PASS catalog.details.failureSurvivesBackgroundRecovery
+PASS catalog.details.metadataStaysWithOriginalRequest
+PASS catalog.details.presentationIdentityIsStable
+PASS catalog.tls.outerLayerVisible
+PASS catalog.tls.innerLayerVisible
+Catalog checks: 146, failures: 4
