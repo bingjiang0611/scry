@@ -224,7 +224,7 @@ jobs:
           name: sidebar-paint-diagnostics-${{ matrix.shard }}
           path: |
             ${{ runner.temp }}/scry-sidebar-*.png
-            /var/folders/*/*/T/scry-workspace-session-ui-*/failure.json
+            ${{ runner.temp }}/scry-workspace-session-ui-*/failure.json
           if-no-files-found: ignore
 
       - name: Package and smoke the macOS app
@@ -332,14 +332,10 @@ jobs:
           npm run build:cli
       - name: Install archive tools
         run: |
-          # Diagnose the observed archive-host resolution failure without masking apt's result.
-          resolvectl status || true
-          for host in github.com archive.ubuntu.com azure.archive.ubuntu.com; do
-            echo "DNS runner: $host"
-            getent ahostsv4 "$host" || true
-            echo "DNS apt sandbox: $host"
-            sudo -u _apt getent ahostsv4 "$host" || true
-          done
+          # The default Ubuntu archive hosts failed DNS on both runner images.
+          # Use the HTTPS kernel.org mirror; apt still verifies Ubuntu's signed metadata.
+          test -f /etc/apt/apt-mirrors.txt
+          printf '%s\n' 'https://mirrors.edge.kernel.org/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt
           sudo apt-get update && sudo apt-get install -y libarchive-tools
       # 发布构建同时产出 dist/linux-unpacked 和 dist/*.pacman；
       # pacman 的 pkgdesc 曾经静默变空，所以打包产物必须过 check:pacman-package。

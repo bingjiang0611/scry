@@ -216,6 +216,16 @@ describe('required PR checks', () => {
     }
   })
 
+  it('collects synthetic workspace failures only from the runner temporary directory', () => {
+    const step = source(workflow('ci.yml').jobs['packaged-electron'], 'Preserve synthetic sidebar pixel diagnostics on failure')
+    expect(step.if).toBe("${{ failure() && steps.renderer-ui.outcome == 'failure' }}")
+    expect(step.with?.path).toContain('${{ runner.temp }}/scry-sidebar-*.png')
+    expect(step.with?.path).toContain('${{ runner.temp }}/scry-workspace-session-ui-*/failure.json')
+    expect(step.with?.path).not.toContain('/var/folders/')
+    const fixture = readFileSync(join(root, 'scripts/workspace-session-ui-checks.mjs'), 'utf8')
+    expect(fixture).toContain("join(process.env.RUNNER_TEMP ?? tmpdir(), 'scry-workspace-session-ui-')")
+  })
+
   it('cancels obsolete PR runs but never coalesces main commits', () => {
     for (const file of ['ci.yml', 'performance.yml', 'remote-g0.yml']) {
       const ci = workflow(file)

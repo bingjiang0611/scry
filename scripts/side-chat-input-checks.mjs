@@ -55,7 +55,7 @@ export async function exerciseSideChatInput({ cdp, evaluate, check, childId, con
     const scroller = body.querySelector('.chat-transcript');
     return { img: body.querySelectorAll('img').length, script: body.querySelectorAll('script').length,
       text: text.includes('<img src=x onerror=alert(1)>'), context: start < 0 ? text.slice(-200) : text.slice(start, start + 160),
-      childId: body.closest('[data-side-chat-id]')?.dataset.sideChatId,
+      childId: body.closest('[data-side-chat-id]')?.dataset.sideChatId, expectedChildId: ${json(childId)},
       scroll: { top: scroller.scrollTop, height: scroller.scrollHeight, client: scroller.clientHeight },
       renderedRuns: [...body.querySelectorAll('[data-run-id]')].slice(-5).map(node => node.dataset.runId),
       olderPage: [...document.querySelector('${CHILD_PANEL}').querySelectorAll('.unified-pagination button')].some(node => node.textContent === '最近记录' && !node.disabled) }
