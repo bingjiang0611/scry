@@ -72,4 +72,18 @@ describe('side-chat attention owner', () => {
     expect((await current.service.findSideChatCommand(source, 'inflight-command')).status).toBe('found')
     expect(await current.service.findSideChatCommand(source, 'never-sent-command')).toEqual({ commandId: 'never-sent-command', status: 'not-found' })
   })
+
+  it('keeps a command in flight until every concurrent submission of it has settled', async () => {
+    const current = await sideChatFixture()
+    fixtures.push(current)
+    const source = { kind: 'conversation' as const, conversationId: '11111111-2222-4333-8444-555555555555' }
+    let releaseSecond!: () => void
+    const second = current.service.trackSideChatCreate('shared-command', () => new Promise<void>(resolve => { releaseSecond = resolve }))
+    // The first submission fails before publishing anything; the second is still running.
+    await expect(current.service.trackSideChatCreate('shared-command', async () => { throw new Error('refused') })).rejects.toThrow('refused')
+    expect((await current.service.findSideChatCommand(source, 'shared-command')).status).toBe('in-flight')
+    releaseSecond()
+    await second
+    expect((await current.service.findSideChatCommand(source, 'shared-command')).status).toBe('not-found')
+  })
 })

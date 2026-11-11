@@ -27,8 +27,11 @@ export { parseConversationTarget }
 
 export class ConversationService {
   private readonly active = new Set<string>()
-  /** Side-chat create commands this host is executing right now. */
-  private readonly creatingSideChats = new Set<string>()
+  /**
+   * Side-chat create commands this host is executing right now, counted, so a second
+   * concurrent submission of the same id cannot clear the first one's in-flight mark.
+   */
+  private readonly creatingSideChats = new Map<string, number>()
 
   constructor(private readonly deps: ConversationServiceDeps) {}
 
@@ -153,13 +156,28 @@ export class ConversationService {
     return previewSideChat(this.deps, input, options)
   }
 
+  /**
+   * Marks one create command as in flight for the whole of `run`, so a read-back from a
+   * reloaded renderer can tell "still creating" from "created nothing" instead of guessing.
+   * Callers that authorize or wait before creating wrap that work too.
+   */
+  async trackSideChatCreate<T>(commandId: string | undefined, run: () => Promise<T>): Promise<T> {
+    if (commandId) this.creatingSideChats.set(commandId, (this.creatingSideChats.get(commandId) ?? 0) + 1)
+    try {
+      return await run()
+    } finally {
+      if (commandId) {
+        const left = (this.creatingSideChats.get(commandId) ?? 1) - 1
+        if (left > 0) this.creatingSideChats.set(commandId, left)
+        else this.creatingSideChats.delete(commandId)
+      }
+    }
+  }
+
   createSideChat(input: unknown) {
-    // The command id is tracked while it runs, so a read-back from a reloaded renderer can
-    // tell "still creating" from "created nothing" instead of guessing.
     const commandId = typeof input === 'object' && input !== null && typeof (input as { commandId?: unknown }).commandId === 'string'
       ? (input as { commandId: string }).commandId : undefined
-    if (commandId) this.creatingSideChats.add(commandId)
-    return createSideChat(this.deps, this.active, input).finally(() => { if (commandId) this.creatingSideChats.delete(commandId) })
+    return this.trackSideChatCreate(commandId, () => createSideChat(this.deps, this.active, input))
   }
 
   listSideChats(input: unknown) {

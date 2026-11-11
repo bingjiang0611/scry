@@ -88,11 +88,11 @@ export function readCreateCommands(
 /**
  * Returns whether the command is durable; dispatch must not start otherwise.
  *
- * The ledger is bounded by dropping its oldest row. Refusing instead once blocked every
- * later creation in every parent behind commands nobody could reach any more (their
- * parent was deleted, or their lookup never found a child). Dropping a row loses only the
- * "check this create" shortcut: a child that was really created is still listed in its
- * source's history, and the host keeps deduplicating by command id.
+ * The ledger stays bounded. Callers first settle what a full ledger can prove with
+ * `settleFullLedger`; only a row that is still unresolved after that is dropped, oldest
+ * first. Refusing instead once blocked every later creation in every parent behind
+ * commands nobody could reach any more. A dropped row loses only the "check this create"
+ * shortcut: a child that was really created is still listed in its source's history.
  */
 export function writeCreateCommand(
   command: SideChatCreateCommand,
@@ -236,6 +236,29 @@ export async function findCreatedSideChat(
     // An unreadable lookup proves nothing about the command.
     return { kind: 'unknown' }
   }
+}
+
+/**
+ * Frees ledger rows whose outcome the host can now prove, before a new command needs room.
+ *
+ * Only a full ledger is read back, one bounded lookup per row: a found child or a
+ * conclusive not-created settles its row. An in-flight or unreadable row stays, so the
+ * eviction that may follow can only ever drop a command nobody can resolve right now.
+ */
+export async function settleFullLedger(
+  api: { findSideChatCommand: (source: SideChatSource, commandId: string) => Promise<SideChatCommandReceipt> },
+  storage: Pick<Storage, 'getItem' | 'setItem'> | undefined = defaultStorage()
+): Promise<number> {
+  const rows = readCreateCommands(storage)
+  if (rows.length < MAX_CREATE_COMMANDS) return 0
+  let settled = 0
+  for (const row of rows) {
+    const resolution = await findCreatedSideChat(api, row)
+    if (resolution.kind === 'unknown') continue
+    clearCreateCommand(row.commandId, storage)
+    settled += 1
+  }
+  return settled
 }
 
 /** One page of the child history of this source. */

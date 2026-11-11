@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ConversationSummary, SideChatCommandReceipt, SideChatList, SideChatListRequest, SideChatPreview } from '@shared/conversation-api'
 import {
   MAX_CREATE_COMMANDS, clearCreateCommand, commandFromPreview, createRequestOf, createdOutcome, findCreatedSideChat,
-  listSideChatPage, lookupSideChatSummaries, lossOutcome, readCreateCommands,
+  listSideChatPage, lookupSideChatSummaries, lossOutcome, readCreateCommands, settleFullLedger,
   resolveCreateReceipt, restoreTabOutcome, writeCreateCommand
 } from './side-chat-create'
 
@@ -77,6 +77,27 @@ describe('durable side-chat creation commands', () => {
     expect(rows).toHaveLength(MAX_CREATE_COMMANDS)
     expect(rows[0]?.commandId).toBe('command-10')
     expect(rows.at(-1)?.commandId).toBe('command-9990')
+  })
+
+  it('settles what a full ledger can prove before anything is dropped', async () => {
+    const storage = new MemoryStorage()
+    for (let index = 0; index < MAX_CREATE_COMMANDS; index++) {
+      writeCreateCommand(commandFromPreview({ preview: preview(), scopeKey: `scope-${index}`,
+        commandId: `command-${index}0`, createdAt: 1_700_000_000_000 + index }), storage)
+    }
+    const statuses: Record<string, SideChatCommandReceipt['status']> = { 'command-00': 'in-flight', 'command-10': 'not-found' }
+    const api = { findSideChatCommand: vi.fn(async (_source: unknown, commandId: string): Promise<SideChatCommandReceipt> => {
+      if (commandId === 'command-20') throw new Error('unreadable')
+      const status = statuses[commandId] ?? 'found'
+      return status === 'found' ? { commandId, status, conversation: summary(commandId) } : { commandId, status } as SideChatCommandReceipt
+    }) }
+    // The oldest is still in flight and one lookup fails: both stay. Everything else settles.
+    expect(await settleFullLedger(api, storage)).toBe(MAX_CREATE_COMMANDS - 2)
+    expect(readCreateCommands(storage).map(row => row.commandId)).toEqual(['command-00', 'command-20'])
+    // Below the bound nothing is read back.
+    api.findSideChatCommand.mockClear()
+    expect(await settleFullLedger(api, storage)).toBe(0)
+    expect(api.findSideChatCommand).not.toHaveBeenCalled()
   })
 
   it('drops malformed rows instead of guessing', () => {

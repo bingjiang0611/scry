@@ -4,7 +4,7 @@ import type { SideChatInitialTarget, SideChatSource } from '@shared/conversation
 import { SIDE_CHAT_COPY } from '../constants/side-chat-copy'
 import type { SideChatEntry, SideChatTabView } from '../components/RightSurfacePanel'
 import {
-  clearCreateCommand, commandFromPreview, createRequestOf, createdOutcome, findCreatedSideChat,
+  clearCreateCommand, commandFromPreview, settleFullLedger, createRequestOf, createdOutcome, findCreatedSideChat,
   lookupSideChatSummaries, lossOutcome, readCreateCommands, restoreTabOutcome, writeCreateCommand,
   type SideChatCreateCommand, type SideChatRestoreAnswer
 } from '../side-chat-create'
@@ -225,6 +225,8 @@ export function useSideChatWorkspace({
       preview, scopeKey: pinned.scopeKey, commandId,
       ...(pinned.target ?? preview.target ? { initialTarget: pinned.target ?? preview.target } : {})
     })
+    // A full ledger is read back first, so only a command nobody can resolve is ever dropped.
+    await settleFullLedger(pinned.api).catch(() => 0)
     if (!writeCreateCommand(command)) {
       setNotice(SIDE_CHAT_COPY.createRefused(SIDE_CHAT_COPY.createDurableUnavailable))
       setCreating(false)

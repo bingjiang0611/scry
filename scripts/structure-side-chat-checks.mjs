@@ -182,8 +182,9 @@ export async function exerciseSideChatApp({ cdp, evaluate, capture, check, click
     'A recovered create command stayed in the durable ledger')
   await capture('side-chat-recovered')
 
-  // A ledger full of other parents' unresolved commands no longer blocks this parent: the
-  // oldest row leaves, the create goes through once, and the ledger stays bounded.
+  // A ledger full of other parents' commands no longer blocks this parent: the full ledger
+  // is read back first, rows the host can prove (here: never created) are settled, the
+  // create goes through once, and nothing unresolved is left behind.
   const otherScopeRow = (index) => ({
     commandId: `structure-ledger-row-${index}`, scopeKey: 'other-scope',
     source: { kind: 'conversation', conversationId: 'structure-ledger-parent' },
@@ -198,10 +199,9 @@ export async function exerciseSideChatApp({ cdp, evaluate, capture, check, click
   await wait(`document.querySelectorAll('${currentSurface} [data-side-chat-tab-id]').length === 1`)
   const full = since(beforeFull)
   check(full['conversation:createSideChat'] === 1, `A full ledger did not let exactly one create through: ${JSON.stringify(full)}`)
-  check(await evaluate(`(() => {
-    const rows = JSON.parse(localStorage.getItem('scry.side-chat-create-commands.v1') ?? '[]')
-    return rows.length === 7 && rows.every(row => row.scopeKey === 'other-scope') && rows[0].commandId === 'structure-ledger-row-1'
-  })()`), 'A full ledger was not bounded by dropping only its oldest row')
+  check((full['conversation:findSideChatCommand'] ?? 0) >= 8, `A full ledger was not read back before making room: ${JSON.stringify(full)}`)
+  check(await evaluate(`JSON.parse(localStorage.getItem('scry.side-chat-create-commands.v1') ?? '[]').length === 0`),
+    'Settled ledger rows or the created command stayed in the durable ledger')
   await capture('side-chat-ledger-full')
 
   // A create the host refuses publishes nothing. The parent is told the host's own reason,

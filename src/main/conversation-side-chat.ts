@@ -334,7 +334,7 @@ export async function findSideChatCommand(
   active: ReadonlySet<string>,
   sourceInput: unknown,
   commandIdInput: unknown,
-  creating: ReadonlySet<string> = new Set()
+  creating: Pick<ReadonlyMap<string, number>, 'has'> = new Map()
 ): Promise<SideChatCommandReceipt> {
   const source = parseSideChatSource(sourceInput)
   if (typeof commandIdInput !== 'string' || !isCommandId(commandIdInput)) throw new Error('侧聊创建命令无效')

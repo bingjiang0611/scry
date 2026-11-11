@@ -186,11 +186,15 @@ export function registerConversationHandlers(deps: ConversationBootstrapDependen
   handleTrusted('conversation:createSideChat', async (_event, request: unknown) => {
     // Shape first, then source authorization: an untyped request never reads the ledger.
     const parsed = parseSideChatCreate(request)
-    const authorized = await authorizeSideChatSource(parsed.source)
-    await getStartupManagedRecovery()
-    const created = await conversationService().createSideChat({ ...parsed, source: authorized })
-    getWindow()?.webContents.send('agent:dataUpdated', { kind: 'conversation_changed', conversationId: created.id })
-    return created
+    // In flight from before the first wait: a read-back during authorization or startup
+    // recovery must not answer not-found for a create that is about to publish.
+    return conversationService().trackSideChatCreate(parsed.commandId, async () => {
+      const authorized = await authorizeSideChatSource(parsed.source)
+      await getStartupManagedRecovery()
+      const created = await conversationService().createSideChat({ ...parsed, source: authorized })
+      getWindow()?.webContents.send('agent:dataUpdated', { kind: 'conversation_changed', conversationId: created.id })
+      return created
+    })
   })
   handleTrusted('conversation:listSideChats', async (_event, request: unknown) => {
     const parsed = parseSideChatListRequest(request)
