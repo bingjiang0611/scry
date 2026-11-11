@@ -432,9 +432,9 @@ export function parseCodexRollout(content: string, runId: string, sessionIdentit
       addToolOutput(payload, at)
     }
   }
-  attachCodexCompactions(turns, compactionMarkers, runId)
   const injectedSkill = current ? flushCodexUserInputs(current, runId, userInputState) : undefined
   if (lastAt) finishUsage(lastAt)
+  attachCodexCompactions(turns, compactionMarkers, runId)
   return {
     recognized: sawCodexLine && turns.length > 0,
     turns: finalizeCodexTurns(turns, current, injectedSkill),

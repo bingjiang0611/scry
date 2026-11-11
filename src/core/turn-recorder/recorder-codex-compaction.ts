@@ -1,15 +1,19 @@
 import type { TraceEvent } from '../../shared/trace.js'
-import type { ParsedTranscriptTurn } from './recorder-contracts.js'
+import { nestedRecord, type ParsedTranscriptTurn } from './recorder-contracts.js'
 import { stableHash } from './store.js'
 
 /**
  * Codex reports one context compaction through the rollout row that its version writes:
  * the legacy `event_msg/context_compacted` notification, the current top-level `compacted`
  * snapshot (which carries the replacement history, so it can be tens of kilobytes), and the
- * `response_item/compaction` item it snapshots. Any subset can appear; none is optional for
- * detection, and a rollout that writes one form must still yield exactly one compaction.
+ * `response_item/compaction` item it snapshots, or `event_msg/item_completed` with a
+ * `ContextCompaction` item. Any subset can appear; each form must detect a compaction.
  */
-export type CodexCompactionSource = 'codex_rollout_context_compacted' | 'codex_rollout_compacted' | 'codex_rollout_compaction_item'
+export type CodexCompactionSource =
+  | 'codex_rollout_context_compacted'
+  | 'codex_rollout_compacted'
+  | 'codex_rollout_compaction_item'
+  | 'codex_rollout_item_completed_context_compaction'
 
 export interface CodexCompactionMarker {
   at: string
@@ -33,6 +37,9 @@ export function codexCompactionMarker(
   if (type === 'compacted') return { at, source: 'codex_rollout_compacted' }
   if (type === 'event_msg' && payload.type === 'context_compacted') return { at, source: 'codex_rollout_context_compacted' }
   if (type === 'response_item' && payload.type === 'compaction') return { at, source: 'codex_rollout_compaction_item' }
+  if (type === 'event_msg' && payload.type === 'item_completed' && nestedRecord(payload, 'item')?.type === 'ContextCompaction') {
+    return { at, source: 'codex_rollout_item_completed_context_compaction' }
+  }
   return undefined
 }
 
@@ -77,6 +84,9 @@ export function attachCodexCompactions(
       input: {},
       runtimeMetadata: { source: marker.source }
     }
-    turn.events.push(event)
+    // Merge and timeline projections preserve array order; they do not sort by ts.
+    // Insert after existing equal-time events without reordering the native event stream.
+    const index = turn.events.findIndex(candidate => Date.parse(candidate.ts) > time)
+    turn.events.splice(index < 0 ? turn.events.length : index, 0, event)
   }
 }

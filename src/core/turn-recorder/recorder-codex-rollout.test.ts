@@ -144,18 +144,69 @@ describe('Codex rollout context compactions', () => {
     ])
   })
 
-  it('records one compaction when compacted, context_compacted and a compaction item describe it', () => {
+  it('records one compaction when all four markers describe it', () => {
     const content = [
       row('event_msg', { type: 'task_started', turn_id: 'turn-paired' }, '2026-11-10T15:48:09.904Z'),
       compacted('2026-11-10T16:00:16.138Z'),
       row('event_msg', { type: 'context_compacted' }, '2026-11-10T16:00:16.140Z'),
       row('response_item', { type: 'compaction', encrypted_content: 'opaque' }, '2026-11-10T16:00:16.141Z'),
+      row('event_msg', { type: 'item_completed', item: { type: 'ContextCompaction' } }, '2026-11-10T16:00:16.155Z'),
       row('event_msg', { type: 'task_complete', turn_id: 'turn-paired' }, '2026-11-10T16:00:20.000Z')
     ].join('\n') + '\n'
 
     expect(compactions(content)).toEqual([
       expect.objectContaining({ ts: '2026-11-10T16:00:16.138Z', runtimeMetadata: { source: 'codex_rollout_compacted' } })
     ])
+  })
+
+  it('records a completed ContextCompaction item without any other marker', () => {
+    const content = [
+      row('event_msg', { type: 'task_started', turn_id: 'turn-item' }, '2026-11-10T15:48:09.904Z'),
+      row('event_msg', { type: 'item_started', item: { type: 'ContextCompaction', id: 'compact-1' } }, '2026-11-10T16:00:10.000Z'),
+      row('event_msg', { type: 'item_completed', item: { type: 'ContextCompaction', id: 'compact-1' } }, '2026-11-10T16:00:16.155Z'),
+      row('event_msg', { type: 'task_complete', turn_id: 'turn-item' }, '2026-11-10T16:00:20.000Z')
+    ].join('\n')
+
+    expect(compactions(content)).toEqual([
+      expect.objectContaining({ ts: '2026-11-10T16:00:16.155Z', runtimeMetadata: { source: 'codex_rollout_item_completed_context_compaction' } })
+    ])
+  })
+
+  it.each([false, true])('pairs ContextCompaction with compacted regardless of row order (reverse=%s)', reverse => {
+    const markers = [
+      compacted('2026-11-10T16:00:16.138Z'),
+      row('event_msg', { type: 'item_completed', item: { type: 'ContextCompaction', id: 'compact-1' } }, '2026-11-10T16:00:16.155Z')
+    ]
+    const content = [
+      row('event_msg', { type: 'task_started', turn_id: 'turn-item-paired' }, '2026-11-10T15:48:09.904Z'),
+      ...(reverse ? markers.reverse() : markers),
+      row('event_msg', { type: 'task_complete', turn_id: 'turn-item-paired' }, '2026-11-10T16:00:20.000Z')
+    ].join('\n')
+
+    expect(compactions(content)).toEqual([
+      expect.objectContaining({ ts: '2026-11-10T16:00:16.138Z', runtimeMetadata: { source: 'codex_rollout_compacted' } })
+    ])
+  })
+
+  it('inserts compactions by timestamp and preserves existing equal-time event order', () => {
+    const content = [
+      row('event_msg', { type: 'task_started', turn_id: 'turn-ordered' }, '2026-11-10T16:00:00.000Z'),
+      compacted('2026-11-10T16:00:01.000Z'),
+      row('event_msg', { type: 'agent_message', message: 'before' }, '2026-11-10T16:00:10.000Z'),
+      row('event_msg', { type: 'agent_message', message: 'equal-first' }, '2026-11-10T16:00:16.138Z'),
+      compacted('2026-11-10T16:00:16.138Z'),
+      row('event_msg', { type: 'agent_message', message: 'equal-second' }, '2026-11-10T16:00:16.138Z'),
+      row('event_msg', { type: 'agent_message', message: 'after' }, '2026-11-10T16:00:20.000Z'),
+      row('event_msg', { type: 'item_completed', item: { type: 'ContextCompaction' } }, '2026-11-10T16:00:30.000Z'),
+      row('event_msg', { type: 'task_complete', turn_id: 'turn-ordered' }, '2026-11-10T16:00:40.000Z')
+    ].join('\n')
+
+    const events = parseCodexRollout(content, 'run-ordered').turns[0].events
+    expect(events.map(event => event.text ?? event.stage)).toEqual([
+      'context_compaction', 'before', 'equal-first', 'equal-second', 'context_compaction', 'after', 'context_compaction'
+    ])
+    const timestamps = events.map(event => Date.parse(event.ts))
+    expect(timestamps).toEqual([...timestamps].sort((a, b) => a - b))
   })
 
   it('keeps two compactions that are minutes apart', () => {
