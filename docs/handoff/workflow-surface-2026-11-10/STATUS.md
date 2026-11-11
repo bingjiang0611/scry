@@ -1,4 +1,4 @@
-# 第三轮待核验
+# 第三轮已核验（审查方 2026-11-11）
 
 第三轮（Q1–Q4，验证 Qoder SDK 1.0.17 → 1.0.57 的真机效果并补跑 Qoder 与 rotom）已在 macOS 本机完成并 push，做法见 [R3.md](R3.md)。四个包的报告：[Q1](reports/Q1.md)、[Q2](reports/Q2.md)、[Q3](reports/Q3.md)、[Q4](reports/Q4.md)。
 
@@ -53,6 +53,24 @@
 | Q2 | 升级后的 Qoder 日常路径回归 | 完成（认证失效未验证） | [Q2](reports/Q2.md) | 读写文件与 Bash、审批允许与拒绝、停止（无残留进程）、重启后恢复、分支会话、后台子 Agent、`TaskCreate/TaskUpdate/UpdateGoal`、MCP 全部有真实证据。两处如实说明：Provider 对失败子 Agent 也报 `completed`；登录失效提示未验证 |
 | Q3 | 补跑 G1 的 Qoder 与 rotom，加真实 Qoder 夹具 | 完成 | [Q3](reports/Q3.md) | Qoder 8 轮真实运行 `workflow_activity` 全为 0，Agents 面板与后台卡片正确；真实脱敏事件做成夹具 `src/main/workflow-wire-fixtures/qoder-background-agent.ts` 并加回放测试（4 条，负对照放宽判据后 3 条失败）。rotom `0.1.27-main.655c35f2` 跑出 `kind: subagent` 与 `kind: workflow` 两种异步运行，后台卡片都显示、Workflow 面板空态、`workflow_activity` 0 |
 | Q4 | 干净依赖上的门禁，含 `pack:artifact` | 完成（一条证据问题待定） | [Q4](reports/Q4.md) | 干净 `npm ci` 后在 `45b15893` 上 `build`/`typecheck`/`test:workflow-ui`/`test:workflow-archive`/`test:renderer:ui`/`pack:artifact` 全部 EXIT=0；产物含 Qoder SDK 与 `cross-spawn`，证实 G3 的 `pack:artifact` 失败是共享 `node_modules` 所致。**未改代码的证据问题**：兼容性清单把 Qoder CLI `1.1.81–1.1.86` 也算「受支持」，但 SDK 1.0.57 下它们都 `exit 42`，建议收窄到 `<=1.1.80`，需维护者确认 |
+
+## 审查方对第三轮的核验（2026-11-11，Linux x64 容器）
+
+核验对象：`eeda801f..08490a23`（5 个提交，身份符合 CLAUDE.md）。
+
+| 检查 | 结果 |
+|---|---|
+| `npm run typecheck` | 0 个错误 |
+| 真实 Qoder 回放测试与 Qoder 适配器测试 | 10 个文件 185 项通过 |
+| 回放负对照：任何 `task_type` 都算 workflow | 3 项失败，恢复后通过 |
+| 真实夹具与报告中的个人路径、账号、令牌 | 未发现 |
+
+审查方修正：
+
+- **回放没走 Qoder 的生产入口。** 原测试直接调 `normalizeSdkMessage`，而 Qoder 在生产中先经过 `normalizeQoderMessage`，后者把 `task_updated` 改写成终态。改走生产入口后，每个后台 Agent 在启动回执之后有两条终态结果（`qoder_task_updated` 与 `provider_task_notification`），都是 `completed`。这段改写在 main 上就是如此，不是本分支引入的。测试已按生产路径如实断言。
+- **一条恒真断言。** `event.stage === 'harness'` 永远不成立，改为 `event.kind === 'harness'`。
+
+结论：Q1 到 Q4 已核验。Q1 的关键事实是 CLI 1.1.81 起拒绝“每轮一个子进程”的 SDK 会话（`sdk_worker_removed`），所以 SDK 1.0.57 只能配 CLI 1.1.80 及更早；R3 写的“配套 1.1.81”是按 SDK 包里的字段推的，以 CLI 报错为准。兼容性清单是否收窄、是否迁移到守护进程模式，等维护者决定。
 
 ## 审查方对第二轮的核验（2026-11-11，Linux x64 容器，Xvfb，非 root，Chromium 沙箱开启）
 
