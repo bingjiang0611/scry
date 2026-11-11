@@ -13,6 +13,7 @@ import { resendContent, useConversationSubmission } from '../hooks/useConversati
 import { pendingRecovery } from '../composer-pending'
 import { runStructuralTransition } from '../structural-motion'
 import { useRunTraceStream } from '../hooks/useRunTraceStream'
+import { missingConversationTurns, projectConversationTurns } from '../conversation-turn-projection'
 
 
 import '../conversation.css'
@@ -196,15 +197,6 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
   }, [page, live, before, latestRequest, historyRef, chatProps.focusedTurnRunId, navigation?.active,
     initialViewPosition, conversation.id])
 
-  // live 只覆盖「本轮仍在运行」的那一格；一旦分页不再报告 activeRunId，归档后的正式轮次接管，
-  // 不会把有界的 live 投影当成已完成轮次的正文。
-  const turns = useMemo<Turn[]>(() => (page?.turns ?? []).flatMap(turn => {
-    const liveTurn = activeRunId === turn.runId ? live : undefined
-    const history = liveTurn?.runId === turn.runId ? liveTurn : turn.history
-    return history ? [{ ...history, runId: turn.runId, ordinal: turn.ordinal, done: history.done === true,
-      providerId: turn.providerId, cwd: conversation.cwd }] : []
-  }), [page, live, activeRunId, conversation.cwd])
-  useEffect(() => { onProjection({ conversationId: conversation.id, turns, busy: Boolean(activeRunId), atNewest: before === undefined }) }, [conversation.id, turns, activeRunId, before, onProjection])
 
   const showLatest = (): void => {
     navigation?.cancel()
@@ -241,6 +233,12 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
     }
   })
   const { pending, pendingHealth, working: submitting, checkPending, settlePending } = submission
+  // live 只覆盖「本轮仍在运行」的那一格；一旦分页不再报告 activeRunId，归档后的正式轮次接管，
+  // 不会把有界的 live 投影当成已完成轮次的正文。
+  const turns = useMemo<Turn[]>(() => projectConversationTurns({ pageTurns: page?.turns ?? [], activeRunId, live,
+    cwd: conversation.cwd, ...(pending ? { pending: { commandId: pending.commandId, prompt: pending.prompt } } : {}) }),
+  [page, live, activeRunId, conversation.cwd, pending])
+  useEffect(() => { onProjection({ conversationId: conversation.id, turns, busy: Boolean(activeRunId), atNewest: before === undefined }) }, [conversation.id, turns, activeRunId, before, onProjection])
   // Mount, restart and every authoritative page settle the exact command id read-only.
   // A page that predates the submission cannot answer it, and a page read while the
   // start reply is still in flight must not report a false "missing record".
@@ -297,7 +295,7 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
       if (mounted.current) setError(`分支结果尚未确认：${message(error)}。不会自动重建；核对 / 继续使用同一条请求，宿主若尚未收到则可能首次执行。`)
     } finally { busyRef.current = false; if (mounted.current) setWorking(false) }
   }
-  const missing = page?.turns.filter(turn => !turn.history && live?.runId !== turn.runId) ?? []
+  const missing = missingConversationTurns(page?.turns ?? [], activeRunId, live)
   const inherited = page?.bindings.some(binding => binding.retiredReason && binding.continuationKey.startsWith('unverified-legacy:'))
   const firstHandoff = inherited && page?.turns.every(turn => turn.delivery.status === 'imported')
   const limitation = CONVERSATION_COPY.handoffScope

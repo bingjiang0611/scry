@@ -15,6 +15,7 @@ import { dispatchPayloadHash, targetRequest } from './conversation-summary'
 import { parseSend } from './conversation-request'
 import { ConversationTurnBeginUncertainError } from './conversation-turns'
 import { sideChatPlanRefs } from './conversation-side-chat-snapshot'
+import { sideChatAttentionKey } from './conversation-side-chat-attention'
 
 const hash = (value: string): string => createHash('sha256').update(value, 'utf8').digest('hex')
 const reasonOf = (error: unknown): string => String((error as Error)?.message ?? error)
@@ -204,6 +205,16 @@ export async function sendConversationMessage(
   // A new command on a deleting conversation is a concurrent-state refusal proven before
   // dispatch, so it answers like a stale revision instead of an unknown outcome.
   if (conversation.deletion) return { status: 'not_sent', reason: '统一对话正在删除或已删除，不能发送' }
+  // Resolved before any durable intent and before the run registers, so its first question
+  // already lands on the right row. A side chat whose owner row cannot be read is refused
+  // here, while nothing has been written: guessing the native row could park its attention
+  // on a row that adoption has already hidden, leaving a Dock badge nothing can clear.
+  let attentionKey: string | undefined
+  try {
+    attentionKey = await sideChatAttentionKey(conversation, cwd => deps.store.list(cwd))
+  } catch (error) {
+    return { status: 'not_sent', reason: `侧边会话的来源归属读取失败，未发送：${reasonOf(error)}` }
+  }
   let plan: DispatchPlan
   try {
     plan = await prepareDispatch(deps, conversation, request)
@@ -266,6 +277,7 @@ export async function sendConversationMessage(
       permissionMode: request.permissionMode
     }, { managedConversation: {
       conversationId: request.conversationId,
+      ...(attentionKey ? { attentionKey } : {}),
       runId,
       target,
       resumeSessionId: begun.turn.resumeSessionId,

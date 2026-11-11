@@ -78,6 +78,13 @@ export interface McpCallRef {
 // 与 renderer 的 Turn 结构一致（结构化类型，可互赋）。
 export interface ActiveRun {
   runId: string
+  /** Stable owner for managed-conversation attention, independent of Provider bindings. */
+  conversationId?: string
+  /**
+   * Attention owner when it is not this conversation: a side chat has no sidebar row of its
+   * own, so its unread result and questions belong to the row of the session it came from.
+   */
+  attentionKey?: string
   providerId?: ProviderId
   agentProfileId?: string
   cwd?: string

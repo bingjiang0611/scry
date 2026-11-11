@@ -48,8 +48,11 @@ export function ConversationViewBody({
       : `${SIDE_CHAT_COPY.pendingStates.unresolved}${recoveryState.reason ? `（${recoveryState.reason}）` : ''}`
   } : undefined
   return <main className="unified-conversation conversation-chat" aria-label="对话" data-conversation-id={conversation.id}>
-    <div className={embedded ? 'conversation-toolbar conversation-toolbar-embedded' : 'conversation-toolbar'}>
-      {!embedded && <strong className="conversation-title" title={conversation.cwd}>{page?.summary.title ?? conversation.title}</strong>}
+    {/* A side chat renders inside its own frame: the tab prints the title, and refresh or
+        conversation management stay in the tab strip and the main pane instead of a second,
+        cramped copy of that chrome inside the child. */}
+    {!embedded && <div className="conversation-toolbar">
+      <strong className="conversation-title" title={conversation.cwd}>{page?.summary.title ?? conversation.title}</strong>
       <button ref={refreshButton} className="btn" onClick={() => { setError(undefined); setReload(value => value + 1) }}>刷新状态</button>
       <details className="conversation-options"><summary>对话选项</summary><div className="unified-management">
         <button className="btn" aria-label="重命名统一对话" disabled={!page || managing || working || Boolean(page?.summary.deletion)} onClick={() => setRenaming(true)}>重命名</button>
@@ -62,7 +65,7 @@ export function ConversationViewBody({
           : <p>从轮次创建原生分支不发送消息，也不回退文件。共享历史仅供查看；再次从这些轮次分支，请回到源对话。</p>}
         {inherited && <p>旧原生会话未记录可验证的接续身份。迁入保留已捕获的文字，不证明恢复了旧原生上下文。</p>}
       </div></details>
-    </div>
+    </div>}
     {(page?.nextBeforeOrdinal !== undefined || before !== undefined) && <nav className="unified-pagination" aria-label="历史分页">
       <button className="btn" disabled={page?.nextBeforeOrdinal === undefined} onClick={() => setBefore(page?.nextBeforeOrdinal)}>更早记录</button>
       <span>每页最多 40 轮</span><button className="btn" disabled={before === undefined} onClick={showLatest}>最近记录</button>

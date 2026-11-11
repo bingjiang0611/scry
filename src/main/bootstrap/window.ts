@@ -20,6 +20,7 @@ export interface WindowBootstrapDependencies {
   traceOutput: TraceOutputBridge
   runTraces: RunTraceRouter
   dockBadge: DockBadgeState
+  resetSessionAttention: () => void
   isShuttingDown: () => boolean
   rendererAutoReloadCooldownMs: number
   rendererRestart: RendererRestartLog
@@ -28,7 +29,7 @@ export interface WindowBootstrapDependencies {
 export function createWindow(deps: WindowBootstrapDependencies): void {
   const {
     __dirname, rendererEntryUrl, useDevelopmentRenderer, isOwnedTestApp, getWindow, setWindow,
-    terminalOutput, traceOutput, runTraces, dockBadge, isShuttingDown, rendererAutoReloadCooldownMs, rendererRestart
+    terminalOutput, traceOutput, runTraces, dockBadge, resetSessionAttention, isShuttingDown, rendererAutoReloadCooldownMs, rendererRestart
   } = deps
   setWindow(new BrowserWindow({
     width: 1280,
@@ -55,6 +56,7 @@ export function createWindow(deps: WindowBootstrapDependencies): void {
     dockBadge.focusWindow()
   })
   createdWindow.on('closed', () => {
+    resetSessionAttention()
     terminalOutput.detachRenderer()
     // renderer 消失后没人再 ACK 在途 trace 字节；不清零会让下一个窗口永久卡在 high-water。
     traceOutput.reset()
@@ -63,6 +65,7 @@ export function createWindow(deps: WindowBootstrapDependencies): void {
   })
   createdWindow.webContents.on('did-start-navigation', (details) => {
     if (!details.isMainFrame || details.isSameDocument) return
+    resetSessionAttention()
     terminalOutput.detachRenderer()
     traceOutput.reset()
     runTraces.reset()
@@ -71,6 +74,7 @@ export function createWindow(deps: WindowBootstrapDependencies): void {
   // 可能是确定性崩溃，改为询问用户，避免无限重载循环。重载后 app:rendererReady 会重新驱动 trace 投递。
   let lastRendererAutoReloadAt = Number.NEGATIVE_INFINITY
   createdWindow.webContents.on('render-process-gone', (_event, details) => {
+    resetSessionAttention()
     terminalOutput.detachRenderer()
     traceOutput.reset()
     runTraces.reset()

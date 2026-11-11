@@ -18,6 +18,7 @@ import { SideChatSurface } from './components/SideChatSurface'
 import { useRightWorkbench } from './hooks/useRightWorkbench'
 import { terminalTurnCount } from './side-chat-scope'
 import { useLegacyDiffPreviewDemand } from './hooks/useLegacyDiffPreviewDemand'
+import { useConversationAttention } from './hooks/useConversationAttention'
 import { SIDE_CHAT_COPY } from './constants/side-chat-copy'
 import { SourceControlPanel } from './components/SourceControlPanel'
 import { AgentsSurface } from './components/AgentsSurface'
@@ -47,11 +48,11 @@ export function AppShell(props: AppShellProps) {
     setRemoteWorkspaceDirty, toggleOverviewPanel, changeView, openRemoteLocation, setShowSkills, setShowMcp,
     draftKey, questionKindsByRun
   } = props
-  // Measured narrow layout, one-pass child catalog and the side-chat tabs of this
-  // session. No child transcript is read and no per-child IPC is issued here.
+  // Measured narrow layout and the side-chat tabs of this session. No child transcript
+  // is read and no per-child IPC is issued here.
   const workbench = useRightWorkbench({
     sidebarWidth: sidebarPane.collapsed ? 0 : sidebarPane.visibleWidth,
-    projects, runningRunIds, waitingQuestionRunIds, questionKindsByRun,
+    runningRunIds, waitingQuestionRunIds, questionKindsByRun,
     draftKey, view,
     ...(logicalConversation ? { conversation: logicalConversation } : {}),
     cwd, activeSessionId, selectedProviderSessionId,
@@ -67,7 +68,7 @@ export function AppShell(props: AppShellProps) {
     layoutSaved: rightSurfaces.layoutSaved,
     restorePane: surfacePane.restore
   })
-  const { shellRef, narrowSingleColumn, catalog: sideChatCatalog, panel: sideChatPanel, layoutSaved } = workbench
+  const { shellRef, narrowSingleColumn, panel: sideChatPanel, layoutSaved } = workbench
   const primaryPaneVisible = !shellPanelMaximized && !(narrowSingleColumn && shellPanelVisible)
   const revealTurnInChat = useCallback<AppShellProps['openTurnInChat']>((...args) => {
     // A hidden timeline has no layout box for the navigation anchor.
@@ -82,6 +83,7 @@ export function AppShell(props: AppShellProps) {
     && (rightSurface.activeId === 'overview' || rightSurface.activeId === 'diff' || rightSurface.activeId === 'agents')
   const mainLiveVisible = primaryPaneVisible || evidenceSurfaceVisible
   useLegacyDiffPreviewDemand(session.currentRunId, view === 'chat' && mainLiveVisible)
+  useConversationAttention(view === 'conversation' && mainLiveVisible ? logicalConversation?.id : undefined)
   return (
     <div ref={shellRef} className={`app app-shell${shellPanelMounted ? ` has-right-panel right-panel-surface${shellPanelMaximized ? ' right-panel-maximized' : ''}${!shellPanelVisible ? ' right-panel-hidden' : ''}` : ''}${narrowSingleColumn ? ' narrow-single-column' : ''}${summaryVisible ? ' pinned-summary-visible' : ''}${summaryVisible && summaryPersistent ? ' pinned-summary-persistent' : ''}${sidebarPane.collapsed ? ' sidebar-collapsed' : ''}`} data-narrow-pane={narrowSingleColumn ? (shellPanelVisible ? 'panel' : 'main') : undefined} style={appStyle}>
       <Sidebar {...(sidebarActions as ComponentProps<typeof Sidebar>)} id="sidebar-pane" draftStore={draftStore} version={packageJson.version} projects={projects}
@@ -91,7 +93,6 @@ export function AppShell(props: AppShellProps) {
         activeRemote={view === 'remote' && remoteTarget ? { connectionId: remoteTarget.connectionId, cwd: remoteTarget.cwd, externalSessionId: remoteAdoptedSession } : null}
         activeProviderId={integrations.selectedProviderId} activeAgentProfileId={integrations.providerContext.agentProfileId}
         runningRunIds={runningRunIds} waitingQuestionRunIds={waitingQuestionRunIds} unreadSessionKeys={unreadSessionKeys}
-        sideChatCatalog={sideChatCatalog}
         backgroundWorkByRun={backgroundWorkByRun} archiveUndo={archiveUndo}
         analyticsActive={view === 'analytics'} metaPromptsActive={view === 'meta-prompts'} catalogHealth={catalogHealth} />
       <PaneSplitter className="sidebar-resizer" label="调整左侧栏宽度" controls="sidebar-pane" min={sidebarMin} max={sidebarMax}
@@ -104,7 +105,7 @@ export function AppShell(props: AppShellProps) {
             {logicalConversation ? <>
               <ViewChrome cwd={logicalConversation.cwd} showSummary={summaryVisible} showPanel={panelVisible} onToggleSummary={summary.toggle} onTogglePanel={toggleOverviewPanel} />
               <div className="main-content main-content--single">
-                {/* A child opened from the sidebar keeps its own controls and snapshot reader. */}                {logicalConversation.sideChat
+                {/* The sidebar never lists a side chat; a child handed here by another host action still keeps its own controls and snapshot reader. */}                {logicalConversation.sideChat
                   ? <SideChatSurface liveVisible={mainLiveVisible} key={logicalConversation.id} variant="main" conversation={logicalConversation} draftStore={draftStore}
                     agents={chatProps.agents} onOpenConversation={pickConversation} onChanged={() => { void loadProjects() }}
                     onProjection={setConversationProjection} {...(chatProps.onOpenFile ? { onOpenFile: chatProps.onOpenFile } : {})} />

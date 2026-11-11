@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { activityGroups, sidebarActivity } from './sidebar-activity'
 import type { ProjectMeta } from './env'
-import { sessionAttentionKey } from '@shared/session-attention'
+import { conversationAttentionKey, sessionAttentionKey } from '@shared/session-attention'
 
 const remoteProject = {
   key: '["mac2","/remote/rotom-team"]',
@@ -28,6 +28,15 @@ const projects: ProjectMeta[] = [{
 
 const empty = new Set<string>()
 describe('sidebar activity projection', () => {
+  it('keeps unread managed conversations discoverable after the run has settled', () => {
+    const project = { ...projects[0], sessions: [], conversations: [
+      { ...projects[0].conversations![0], activeRunId: undefined }
+    ] }
+    const unread = new Set([conversationAttentionKey('logical')])
+    expect(sidebarActivity([project], empty, empty, '', [], unread).map(row => row.group)).toEqual(['updates'])
+    expect(sidebarActivity([project], empty, empty, '', [], empty)).toEqual([])
+  })
+
   it('uses live run evidence, gives questions precedence, and does not call inactive history completed', () => {
     const rows = sidebarActivity(projects, new Set(['run-a']), new Set(['run-a', 'run-b']), '')
     expect(rows.map((row) => [row.kind, row.group])).toEqual([
@@ -201,30 +210,6 @@ describe('sidebar activity projection', () => {
     // An unresolved delivery with no live run is a block the user has to clear.
     expect(group({ blockedReason: '投递结果尚未确认，且没有可关联的运行；请重启核查' })).toEqual(['attention'])
     expect(group({ fork: { status: 'accepted' }, activeRunId: 'run-scoped' })).toEqual(['working'])
-  })
-
-  it('keeps a background child run visible without flattening it into a root row', () => {
-    const parent = '主会话：重构侧边栏'
-    const withChild: ProjectMeta[] = [{
-      ...projects[0], sessions: [],
-      conversations: [
-        { id: 'parent', cwd: '/work/store', title: parent, revision: 1, turnCount: 3 },
-        {
-          id: 'child', cwd: '/work/store', title: '侧聊：查一下这段 diff', revision: 1, turnCount: 1, activeRunId: 'child-run',
-          sideChat: {
-            source: { kind: 'conversation', conversationId: 'parent' }, parentTitleAtCapture: parent,
-            initialTarget: { providerId: 'claude', permissionMode: 'default' },
-            throughOrdinal: 2, throughRunId: 'parent-run', capturedAt: 1,
-            prefixFingerprint: 'a'.repeat(64), messageCount: 3
-          }
-        }
-      ]
-    }]
-    const rows = sidebarActivity(withChild, new Set(['child-run']), empty, '')
-    expect(rows.map((row) => [row.kind, row.group, row.kind === 'conversation' ? row.sideChatParent : null]))
-      .toEqual([['conversation', 'working', parent]])
-    // The child keeps its own identity instead of borrowing the parent row.
-    expect(rows[0].kind === 'conversation' && rows[0].conversation.id).toBe('child')
   })
 
   it('surfaces a host-reported blocked remote run as attention and keeps its terminal failures visible', () => {

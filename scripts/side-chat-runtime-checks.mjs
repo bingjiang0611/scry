@@ -1,4 +1,5 @@
 import { CHILD_COMPOSER, CHILD_PANEL, MAIN_COMPOSER, json, sideChatDriver } from './side-chat-driving.mjs'
+import { expectHiddenChildLiftsParent } from './side-chat-sidebar-checks.mjs'
 
 /**
  * Side-chat runtime independence in the isolated production App.
@@ -134,9 +135,7 @@ export async function exerciseSideChatRuntime({ cdp, evaluate, check, ipcCountsP
     `hiding must leave no child subscription behind: ${json(hiddenCounts)}`)
   const hiddenRun = await activeChildRun()
   check(hiddenRun != null, `a hidden child must keep its run: ${json({ hidden, hiddenRun })}`)
-  const parentLabel = hidden.sidebarCounts.find(label => label.includes('侧聊'))
-  check(parentLabel != null && (parentLabel.includes('运行中') || parentLabel.includes('需处理')),
-    `a hidden running child must still be visible in the sidebar: ${json(hidden)}`)
+  await expectHiddenChildLiftsParent({ evaluate, check, clickAt, wait, childId, hidden })
   await capture('runtime-child-hidden')
   const showCounts = counts()
   await click('.panel-pill:not(.summary-pill)')

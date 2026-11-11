@@ -91,6 +91,9 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
     await wait(() => evaluate(`Boolean(document.querySelector(${json(entry)}))`), 'seeded draft in sidebar')
     await click(entry)
     await wait(() => evaluate(`document.querySelector('.conversation-chat')?.dataset.conversationId === ${json(created.id)}`), 'draft opens in normal chat')
+    const attentionLog = join(fixture.userData, 'conversation-attention.jsonl')
+    await wait(() => existsSync(attentionLog) && readFileSync(attentionLog, 'utf8').trim().split('\n')
+      .some(line => JSON.parse(line).id === created.id), 'visible draft dispatches production attention IPC')
     return created.id
   }
   const id = await openDraft()
@@ -130,6 +133,12 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
   const first = await settled(evaluate, id, 1)
   assert.equal(first.turns[0].providerId, 'claude')
   assert.equal(first.summary.lastRunOutcome, 'completed', 'logical completion comes from the real settled receipt')
+  if (!await evaluate('document.hasFocus()')) {
+    await wait(async () => (await evaluate('window.scry.unreadSessions()')).unreadSessionKeys.includes(`conversation\0${id}`),
+      'background completion owns a stable logical-conversation reminder')
+    await wait(() => evaluate(`Boolean(document.querySelector(${json(originalEntry)})?.querySelector('.sb-unread'))`),
+      'unread logical conversation remains discoverable in the sidebar')
+  }
   await click('.sb-view-tabs [role="tab"][id$="-activity"]')
   await wait(() => evaluate(`document.querySelector('.sb-activity [data-conversation-id="${id}"]')?.closest('[data-activity-group]')?.dataset.activityGroup === 'completed'`), 'real logical result appears in completed')
   await click('.sb-view-tabs [role="tab"][id$="-projects"]')

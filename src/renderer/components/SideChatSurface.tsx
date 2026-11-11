@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import type { ConversationSummary } from '@shared/conversation-api'
 import { SIDE_CHAT_DEFAULT_TITLE } from '@shared/conversation'
 import type { ComposerDraftStore } from '../composer-drafts'
@@ -8,60 +7,43 @@ import type { WorkspaceFileTarget } from '../workspace-links'
 import { useSideChatInstance } from '../hooks/useSideChatInstance'
 import { ConversationView, type ConversationProjection } from './ConversationView'
 import { DiffInspector } from './DiffInspector'
-import { SideChatSnapshotViewer } from './SideChatSnapshotViewer'
 
 import '../side-chat.css'
 
 /** Readonly replacement for the folder picker: a side chat cannot move its workspace. */
 export function SideChatWorkspaceLabel({ cwd }: { cwd: string }) {
-  const name = cwd.split('/').filter(Boolean).at(-1) ?? cwd
+  // The shared workspace is the parent's directory. Printing its last path segment added a
+  // UUID or a folder name the user never picked here; the full path stays on the tooltip.
   return <span className="side-chat-workspace" data-side-chat-workspace={cwd} title={cwd}>
-    {SIDE_CHAT_COPY.workspaceReadonly(name)}
+    {SIDE_CHAT_COPY.sharedWorkspace}
   </span>
 }
 
 /**
- * Frame of one side chat: the single title of this surface, one compact line of
- * provenance, and two actions.
+ * Frame of one side chat: one captured source line and the frozen boundary, nothing else.
  *
- * The title lives here and nowhere else in the workbench: the conversation body below is
- * the same view the main pane uses, so it is told not to repeat a second heading. The
- * source line keeps only what the body cannot say — which parent it was frozen from and
- * how far it was carried — because the workspace already has its own readonly label.
+ * The child's own title is not repeated here: a workbench tab already prints it, and the
+ * main pane prints it in the conversation toolbar. This frame carries no actions either;
+ * closing, refreshing and conversation management belong to the tab strip and the main
+ * pane, so the side chat cannot offer a second, half-working copy of that chrome.
  */
-export function SideChatHeader({ title, summary, cwd, snapshotOpen, onToggleSnapshot, onClose, variant = 'frame' }: {
-  title?: string
+export function SideChatHeader({ summary, cwd }: {
   summary: ConversationSummary['sideChat']
   cwd: string
-  snapshotOpen: boolean
-  onToggleSnapshot: () => void
-  /** Absent when this surface is the main view: a conversation has no tab to close. */
-  onClose?: () => void
-  /** `main` drops the title row, because the main conversation body already prints it. */
-  variant?: 'frame' | 'main'
 }) {
-  const name = title ?? SIDE_CHAT_DEFAULT_TITLE
   return <header className="side-chat-surface-header">
-    <div className="side-chat-surface-heading">
-      {variant === 'frame' && <h2 className="side-chat-surface-title" title={name}>{name}</h2>}
-      {/* The workspace is already named by the composer's readonly location label; keeping
-          it here only truncated the captured parent title at narrow widths. */}
-      <p className="side-chat-surface-provenance" data-side-chat-provenance data-side-chat-workspace={cwd}>
-        {summary
-          ? <>
+    <p className="side-chat-surface-provenance" data-side-chat-provenance data-side-chat-workspace={cwd}>
+      {summary
+        ? <>
+          <span className="side-chat-surface-source">
+            <span className="side-chat-surface-source-label">{SIDE_CHAT_COPY.sourceLabel}</span>
             <span className="side-chat-surface-parent" title={summary.parentTitleAtCapture}
               data-side-chat-parent-title>{summary.parentTitleAtCapture}</span>
-            <span className="side-chat-surface-sep" aria-hidden="true">·</span>
-            <span>{SIDE_CHAT_COPY.snapshotLine(summary.throughOrdinal)}</span>
-          </>
-          : <span>{SIDE_CHAT_COPY.surfaceSubtitle}</span>}
-      </p>
-    </div>
-    <div className="side-chat-surface-actions">
-      {summary && <button type="button" className="btn" onClick={onToggleSnapshot}
-        aria-expanded={snapshotOpen}>{SIDE_CHAT_COPY.snapshotDetail}</button>}
-      {onClose && <button type="button" className="btn" onClick={onClose} aria-label={SIDE_CHAT_COPY.surfaceClose}>{SIDE_CHAT_COPY.surfaceClose}</button>}
-    </div>
+          </span>
+          <span className="side-chat-surface-boundary">{SIDE_CHAT_COPY.snapshotLine(summary.throughOrdinal)}</span>
+        </>
+        : <span>{SIDE_CHAT_COPY.surfaceSubtitle}</span>}
+    </p>
   </header>
 }
 
@@ -75,7 +57,7 @@ export function SideChatHeader({ title, summary, cwd, snapshotOpen, onToggleSnap
  * detection belong to the host view and are not offered here, so a child cannot mutate
  * the host's global agent selection.
  */
-export function SideChatSurface({ conversation, draftStore, agents, onOpenFile, onOpenConversation, onChanged, onProjection, onClose, autoFocusComposer, variant = 'frame', liveVisible = true }: {
+export function SideChatSurface({ conversation, draftStore, agents, onOpenFile, onOpenConversation, onChanged, onProjection, autoFocusComposer, variant = 'frame', liveVisible = true }: {
   conversation: ConversationSummary
   draftStore: ComposerDraftStore
   agents: ConversationHostChatProps['agents']
@@ -86,8 +68,6 @@ export function SideChatSurface({ conversation, draftStore, agents, onOpenFile, 
   onChanged: () => void
   /** The main host also needs the projection for its overview; a tab does not. */
   onProjection?: (projection: ConversationProjection) => void
-  /** Only a workbench tab has a close affordance; the main view leaves by navigation. */
-  onClose?: () => void
   /** Only a just-created child takes composer focus; a tab switch does not. */
   autoFocusComposer?: boolean
   /**
@@ -103,7 +83,6 @@ export function SideChatSurface({ conversation, draftStore, agents, onOpenFile, 
     ...(autoFocusComposer ? { autoFocusComposer: true } : {}),
     renderLocationPicker: () => <SideChatWorkspaceLabel cwd={conversation.cwd} />
   })
-  const [snapshotOpen, setSnapshotOpen] = useState(false)
   const summary = conversation.sideChat
   const status = instance.blockedReason ?? instance.notice
 
@@ -111,8 +90,7 @@ export function SideChatSurface({ conversation, draftStore, agents, onOpenFile, 
     aria-label={SIDE_CHAT_COPY.surfaceLabel}
     data-side-chat-id={conversation.id} data-side-chat-variant={variant}
     data-side-chat-send-blocked={instance.blockedReason ? 'true' : undefined}>
-    <SideChatHeader title={conversation.title} summary={summary} cwd={conversation.cwd} snapshotOpen={snapshotOpen}
-      variant={variant} onToggleSnapshot={() => setSnapshotOpen(value => !value)} {...(onClose ? { onClose } : {})} />
+    <SideChatHeader summary={summary} cwd={conversation.cwd} />
     {status && <p className="side-chat-surface-notice" role="status" data-side-chat-notice>{status}</p>}
     <ConversationView
       liveVisible={liveVisible} embedded={variant === 'frame'} conversation={conversation} draftStore={draftStore} chatProps={instance.chatProps}
@@ -121,8 +99,6 @@ export function SideChatSurface({ conversation, draftStore, agents, onOpenFile, 
       onOpenConversation={onOpenConversation}
       {...(instance.initialViewPosition ? { initialViewPosition: instance.initialViewPosition } : {})}
     />
-    {snapshotOpen && summary && <SideChatSnapshotViewer conversationId={conversation.id} summary={summary}
-      onClose={() => setSnapshotOpen(false)} />}
     {instance.diffSelection && <div className="side-chat-diff-panel" data-side-chat-diff>
       <p className="side-chat-diff-header" data-side-chat-diff-title>
         {SIDE_CHAT_COPY.diffScope(conversation.title ?? SIDE_CHAT_DEFAULT_TITLE)}

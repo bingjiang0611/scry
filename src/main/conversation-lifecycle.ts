@@ -169,11 +169,15 @@ export async function beginDeletion(
   id: string,
   revision: number,
   fingerprint: string,
-  reclaim = false
+  reclaim = false,
+  cascade = false
 ): Promise<Conversation> {
   return ledger.admission.run('ownership', async () => {
     const conversation = await ledger.required(id)
     requireValue(conversation.revision === revision && (conversation.deletion?.status !== 'complete' || (reclaim && conversation.deletion.retainedCopies)), '对话已变化，请重新预览删除')
+    // A side chat deleted with its parent is archived in the same write: the user archived
+    // the parent, and a child has no row of its own to archive first.
+    if (cascade && conversation.sideChat) conversation.archivedAt ??= Date.now()
     requireValue(!conversation.fork || !['pending', 'unknown'].includes(conversation.fork.status), '原生分支尚未收敛，不能删除')
     requireValue(Boolean(conversation.archivedAt), '请先存档统一对话')
     requireValue(!conversation.turns.some(turn => turn.origin === 'dispatch' && ['pending', 'unknown'].includes(turn.delivery.status)), '投递未收敛，不能删除')
