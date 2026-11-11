@@ -72,7 +72,7 @@ describe('workbench forwards', () => {
     expect(() => built('sourceControl:read', [42])).toThrow()
   })
 
-  it('marks only calls that change nothing as replayable, and sends writes on the control lane', () => {
+  it('marks only calls that change nothing as replayable, and sends writes on the workbench write lane', () => {
     undo.push(installWorkbenchWindowCwd(() => WINDOW))
     WORKBENCH_FORWARDS['sourceControl:read']!.result!({ workbench: REPOSITORY }, [WINDOW])
     for (const [channel, entry] of Object.entries(WORKBENCH_FORWARDS)) {
@@ -80,7 +80,7 @@ describe('workbench forwards', () => {
       const read = DESKTOP_WORKBENCH_READ_METHODS.has(request.query.method)
       expect(entry.read, channel).toBe(read)
       expect(replayableRequest(request), channel).toBe(read)
-      expect(laneForRequest(request), channel).toBe(read ? 'bulk' : 'control')
+      expect(laneForRequest(request), channel).toBe(read ? 'bulk' : 'workbench')
     }
     expect(WORKBENCH_FORWARDS['workspace:write']!.read).toBe(false)
     expect(WORKBENCH_FORWARDS['sourceControl:mutate']!.read).toBe(false)

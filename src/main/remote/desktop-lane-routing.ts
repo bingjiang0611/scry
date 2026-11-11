@@ -19,7 +19,9 @@ const idempotentControlOperations = new Set(['attentionViewed'])
 const bulkDesktopKinds = new Set(['history', 'trace', 'trace_delta', 'image_chunk'])
 
 // `desktopWorkbench` carries its own method: file writes, Git/PR mutations, drafts and
-// PTY input are writes like the ones above, whichever device or App sends them.
+// PTY input are writes like the ones above, whichever device or App sends them. They take
+// their own lane: a push or merge can last the whole timeout, and stop/answer on control
+// must not queue behind it.
 function workbenchWrite(op: string, request: unknown): boolean {
   if (op !== 'desktopWorkbench') return false
   const method = (request as { query?: { method?: unknown } }).query?.method
@@ -29,7 +31,8 @@ function workbenchWrite(op: string, request: unknown): boolean {
 export function laneForRequest(request: unknown): DesktopLaneName {
   const op = request && typeof request === 'object' ? (request as { op?: unknown }).op : undefined
   if (typeof op !== 'string') return 'control'
-  if (writeOperations.has(op) || workbenchWrite(op, request)) return 'control'
+  if (workbenchWrite(op, request)) return 'workbench'
+  if (writeOperations.has(op)) return 'control'
   if (idempotentControlOperations.has(op)) return 'control'
   if (watchOperations.has(op)) return 'watch'
   if (statusOperations.has(op)) return 'status'

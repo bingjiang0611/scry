@@ -55,12 +55,16 @@ describe('desktop lane routing', () => {
 
   it('treats a workbench write as a write, whichever surface carries it', () => {
     // A lost reply to PTY input, a file write or a Git mutation must not send it again:
-    // the host may already have typed, written or pushed.
+    // the host may already have typed, written or pushed. A push or merge can hold its
+    // lane for the whole 30 s timeout, so workbench writes have a lane of their own and
+    // a stop or an answer on control never waits behind one.
     for (const [surface, method] of [['terminal', 'terminalWrite'], ['terminal', 'terminalClose'], ['workspace', 'workspaceWrite'], ['sourceControl', 'mutate']]) {
       const request = { op: 'desktopWorkbench', query: { surface, cwd: '/w', method, args: [] } }
       expect(replayableRequest(request), method).toBe(false)
-      expect(laneForRequest(request), method).toBe('control')
+      expect(laneForRequest(request), method).toBe('workbench')
     }
+    expect(laneForRequest({ op: 'desktopWorkbench' })).toBe('workbench')
+    for (const op of ['stop', 'answerQuestion']) expect(laneForRequest({ op })).toBe('control')
     // A request without a method is not proven to be a read.
     expect(replayableRequest({ op: 'desktopWorkbench' })).toBe(false)
     for (const [surface, method] of [['terminal', 'terminalEvents'], ['workspace', 'workspaceReadPage'], ['sourceControl', 'read']]) {

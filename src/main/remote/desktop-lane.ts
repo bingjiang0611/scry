@@ -11,6 +11,8 @@ import { remoteOperationCounters, remoteRequestTrace } from './remote-request-ti
 //
 // Separate lanes keep slow work from blocking interactive work:
 //   control: submit, answers, stop, catalogs, run state (short)
+//   workbench: file writes, Git/PR mutations, PTY input (a push may take 30 s; a stop
+//            or an answer must not wait behind it)
 //   watch:   one run's long-poll
 //   status:  the live-run long-poll
 //   events:  the App's event-feed long-poll (daemon mode only)
@@ -32,7 +34,7 @@ import { remoteOperationCounters, remoteRequestTrace } from './remote-request-ti
 import { laneNotSent, laneWasNotSent, laneOutcomeUnknown } from './desktop-lane-phase'
 export { laneNotSent, laneOutcomeUnknown, laneWasNotSent, laneWasWrittenUnknown } from './desktop-lane-phase'
 
-export type DesktopLaneName = 'control' | 'status' | 'watch' | 'bulk' | 'events'
+export type DesktopLaneName = 'control' | 'workbench' | 'status' | 'watch' | 'bulk' | 'events'
 // Which lane a request takes, and whether it may be replayed (desktop-lane-routing.ts).
 export { laneForRequest, replayableRequest } from './desktop-lane-routing'
 
@@ -70,6 +72,8 @@ const MAX_NOT_SENT_RETRIES = 2
 const MAX_LOST_REPLAYS = 1
 const LANE_POLICY: Record<DesktopLaneName, { responseTimeoutMs: number; abortOnCancel: boolean }> = {
   control: { responseTimeoutMs: 30_000, abortOnCancel: false },
+  // A write: cancelling the caller must not tear down a write whose bytes may have landed.
+  workbench: { responseTimeoutMs: 30_000, abortOnCancel: false },
   watch: { responseTimeoutMs: 40_000, abortOnCancel: true },
   status: { responseTimeoutMs: 40_000, abortOnCancel: true },
   events: { responseTimeoutMs: 40_000, abortOnCancel: true },

@@ -63,7 +63,7 @@ daemon 侧不需要改：`host-process.ts` 已经把 `createHostRuntime` 的 `de
    - 输出：进程内用 `terminal:data/exit/recordingError` 推给窗口；workbench 是轮询 `terminalEvents`（游标、150 ms）。要么 App 主进程起一个轮询泵再推给 renderer，要么在 App 事件流（`appEvents`）里加终端事件——后者是新的推送通道。
    - 生命周期：workbench 的 PTY 按 (peer, cwd) 存在 daemon 里，只在 peer 被释放时关闭。App 退出或崩溃后，本机 grant 的 shell 会一直留在 daemon 里，需要决定是否允许、何时回收。
    - 语义：`terminal:active` 进程内没有 cwd，workbench 按 cwd 分组；ack 进程内是增量字节，workbench 是累计值（renderer 的远程适配器在做换算）；`terminal:ready` 的前缀校验在 workbench 里没有。
-3. **lane。** 按「写入走 control」实现。git push/fetch/createPr/merge 等耗网络的 `mutate` 会在 control lane 上占住，最长到 30 s 超时，期间同一连接的 stop/answer 排在它后面。若不接受，可给长写入单独一条 lane。
+3. **lane。** 已解决（维护者 2026-11-11 同意）：工作台写入改走单独的 `workbench` lane，不重放、取消时不拆连接。push/merge 再长，同一连接的 stop/answer 也不会排在它后面。连其他宿主的客户端与 daemon 模式共用这条规则。
 4. 本次改动的 lane 路由同时作用于配对设备客户端（远程工作台的写入不再被 lane 重放，并从 bulk 换到 control）。
 
 ## 未验证
