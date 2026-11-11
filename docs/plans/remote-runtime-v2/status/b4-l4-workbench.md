@@ -78,3 +78,10 @@ daemon 侧不需要改：`host-process.ts` 已经把 `createHostRuntime` 的 `de
 - 与进程内的差异：这份并集比进程内窄——已移除项目下的会话目录、managed worktree 不在 `listProjects` 里——只会少给候选。`listProjects` 在 daemon 侧会做一次与侧栏刷新相同的 seed 与对话目录读取，只在回退路径上发生。
 - 测试：`src/main/bootstrap/workspace-daemon.test.ts`（经生产闸门包装）——两个 channel 在进程内执行且不发给 daemon；仍绑定窗口选择；回退从 daemon 的项目里找到文件并打开，进程内的 `knownProjectDirectories` / `resolveKnownProjectDirectory` 一次都没被调用；daemon 不可用时拒绝。`workbench.test.ts` 改为只数 forward 行，并断言这两个 channel 不在转发表、闸门原样放行。首次运行 4 条全部失败（闸门拒绝）。控制实验：把 daemon 模式判断写死为 false → 3 条失败；把两项移出进程内集合 → 2 条失败。
 - 未验证：macOS 与真实 App 中以 `SCRY_HOST_DAEMON=1` 点击文件链接与移到废纸篓。
+
+## f2df3d0 本机 UI 验证
+
+- 文件面板：读、写、新建、改名、移动、移到废纸篓、系统打开，在 daemon 模式下都执行成功；系统打开后实际启动的进程没有单独观测。
+- 源代码管理：读取、diff、提交草稿的保存与回读都通过。
+- **推送被拒**（「工作目录尚未通过 Scry 目录选择器授权」）：推送到本地路径 remote 时，这个路径本身必须是已授权的目录（`authorizeLocalRemote` 走 `resolveKnownProjectDirectory`），两种模式一致，属于已有的安全规则。补测时，在启动前把 bare remote 的路径写进临时 userData 的 `recent-folders.json` 即可，不需要原生选择器。
+- 「推送中途点停止」要测的是 **Agent 运行的停止按钮**，不是源代码管理里的取消：用来确认工作台写操作走单独的 lane 之后，一次慢推送不会让运行的停止排队。尚未测。

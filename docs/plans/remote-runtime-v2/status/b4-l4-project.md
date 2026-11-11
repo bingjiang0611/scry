@@ -71,3 +71,11 @@ App 端在 `src/main/bootstrap/project-daemon.ts`，用 `installDaemonChannelGua
 
 - 已有的进程内行为：Pi 握手成功、写入 profile 之后如果 Pi Provider 未注册，会弹失败框，但 profile 已写入。两种模式相同，这次没有改；
 - 未在 macOS 与真实 App 中验证。
+
+## f2df3d0 本机 UI 验证
+
+- 项目菜单的置顶、改名、移除都由 daemon 回答，并写入成功。
+- 「移除后侧栏 1 秒内没刷新」：界面上的移除菜单调用后会自己 `refreshRecent()` 和 `loadProjects()`（`app-session-actions.ts`）。直接调用 preload API 时不会触发刷新，这是预期的，不是缺陷。
+- 最近目录的增删要走原生目录选择器，本次没有验证。
+- 不可用的面板显示「暂不可用」或「没有可用的接口」，没有显示成 0。
+- 录制内容浏览需要 managed-recorder 轮次，smoke 不产生，归入真实 Provider 验收。daemon 侧的读取与目录校验已有真实 daemon 测试覆盖。

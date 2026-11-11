@@ -80,3 +80,17 @@
 
 - 带真实归档轮次的完整分支，只能在 macOS 用真实 App 验证。
 - 未在 macOS 与真实 App 中验证。
+
+## f2df3d0 本机 UI 验证（macOS，daemon 模式，smoke Provider，临时 userData/HOME）
+
+| 项 | 结论 |
+|---|---|
+| 侧栏改名、置顶、存档、恢复 | 通过 |
+| 单条删除（先取消，再确认） | 通过。取消时文件和行都在；确认后删除 |
+| 已存档会话全部删除 | 通过。catalog、面板行数和确认框里的条数一致（1），删除后为 0 |
+| 删除未发送的已存档统一对话草稿 | 通过（顺带修复的那个缺陷不再出现） |
+| 统一对话按轮分支 | 通过。磁盘记录写着 `status: not_sent`，原因是「该轮的 Provider 不支持原生分支」，符合 smoke 的能力 |
+| 侧栏「在新会话中分支」 | 被拒：「当前轮次缺少可验证的 Provider 会话边界」。smoke fixture 不提供 `providerTurnId`；进程内用的是同一个边界校验，也会这样拒绝。属于 fixture 限制，归入真实 Provider 验收 |
+| 数据目录锁（开关关闭） | 5 项都符合预期：退出时不写入；停止后台服务后 App 持锁（role=app）；App 运行期间再起 daemon 被拒（`daemon_userdata_owned`，exit 4） |
+
+工作台与项目相关的结论记在 [b4-l4-workbench](b4-l4-workbench.md) 与 [b4-l4-project](b4-l4-project.md)。
