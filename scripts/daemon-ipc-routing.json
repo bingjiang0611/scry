@@ -15,7 +15,9 @@
     },
     {
       "channel": "agent:addPiProfile",
-      "route": "new-op",
+      "route": "split",
+      "why": "Provider 配置随 adapter 一起迁移",
+      "main": "启动器文件选择框与握手失败提示留在 main；daemon 解析启动器、在已知项目目录里做 Pi RPC 握手并写入 profile",
       "op": "piProfile",
       "method": "addPiProfile"
     },
@@ -49,7 +51,7 @@
       "channel": "agent:chooseFolder",
       "route": "split",
       "why": "选择框与持久化分开",
-      "main": "原生目录选择框留在 main；选中后由 daemon 校验 canonical 目录、rememberProject 与 setCurrentCwd",
+      "main": "原生目录选择框与窗口的当前工作区（同 agent:setCwd）留在 main；daemon 只收选择框给出的路径，校验 canonical 目录并 rememberProject，App 在 daemon 回答后再选中该目录",
       "op": "workspaceSelection",
       "method": "chooseFolder"
     },
@@ -270,7 +272,7 @@
       "channel": "agent:removeRecentFolder",
       "route": "split",
       "why": "授权输入单一写者",
-      "main": "窗口只发请求；删除由 daemon 执行并回新 revision",
+      "main": "窗口只发请求；删除由 daemon 执行并回新的最近目录列表",
       "op": "projectStore",
       "method": "removeRecentFolder"
     },

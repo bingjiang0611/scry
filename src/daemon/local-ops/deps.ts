@@ -15,6 +15,8 @@ import type { DesktopRemoteForkSessionRequest } from '../../shared/desktop-remot
 import type { AgentForkSessionResult } from '../../shared/runtime'
 import type { Conversation } from '../../shared/conversation'
 import type { ConversationDeletionPreview } from '../../shared/conversation-api'
+import type { SourceControlService } from '../../main/source-control/service'
+import type { createProviderDiscovery } from '../../main/remote/provider-discovery'
 
 // What the daemon's local-op groups are built from: the same runtime objects Electron
 // main builds its handlers from, owned here by the daemon.
@@ -34,6 +36,10 @@ export interface DaemonLocalEndpointDeps {
   requestRunStop: (runId: string) => boolean
   forkSessionWithAuthority: (request: DesktopRemoteForkSessionRequest) => Promise<AgentForkSessionResult>
   userDataDir: string
+  // Worktree selection reads, and the repository ids they hand out, live in this one service.
+  sourceControl: SourceControlService
+  // The metadata paired devices see; Provider context and Pi profile changes invalidate it.
+  providerDiscovery: Pick<ReturnType<typeof createProviderDiscovery>, 'invalidate' | 'refreshMetadata'>
 }
 
 /**

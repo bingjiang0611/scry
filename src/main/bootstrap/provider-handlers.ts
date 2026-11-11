@@ -1,6 +1,8 @@
 import { shell } from 'electron'
 import { providerControlChannelHandlers, registerChannelHandlers } from './startup-channels'
 import { providerCommandChannelHandlers, skillChannelHandlers } from './query-channels'
+import { providerContextChannelHandlers } from './project-channels'
+import { installProviderContextWindowCwd } from './project-daemon'
 import type { IpcMainInvokeEvent } from 'electron'
 import { daemonModeEnabled } from './daemon-run-mode'
 import type { ProviderContext, ProviderId } from '../../shared/provider'
@@ -43,19 +45,15 @@ function assertMcpAuthOwner(): void {
 
 export function registerProviderHandlers(deps: ProviderHandlersDependencies): void {
   const { handleTrusted, providerRegistry, withProviderOperation, getRemoteProviderDiscovery, refreshInvalidatedRemoteProviderMetadata, ensureMcpExecutionAuthorized, authorizedMcpExecution, homeDir, getCurrentCwd, getRuns, canonicalProviderCwd, providerOperationKey, providerOperationGate } = deps
-  handleTrusted('agent:invalidateProviderContext', async (_event, context: ProviderContext) => {
-    const normalizedContext = { ...context, cwd: context.cwd ?? getCurrentCwd() }
-    providerRegistry.get(normalizedContext.providerId)
-    await withProviderOperation(normalizedContext.providerId, async () => {
-      getRemoteProviderDiscovery().invalidate(normalizedContext.providerId)
-      try {
-        await providerRegistry.invalidateContext(normalizedContext)
-      } finally {
-        refreshInvalidatedRemoteProviderMetadata()
-      }
-    }, normalizedContext.agentProfileId)
-    return true
-  })
+  // Shared with the daemon (B4-L4). In daemon mode the App fills a missing cwd with this
+  // window's selection before the call, as the handler does here.
+  registerChannelHandlers(handleTrusted, providerContextChannelHandlers({
+    providerRegistry, withProviderOperation,
+    invalidateDiscovery: (providerId) => getRemoteProviderDiscovery().invalidate(providerId),
+    refreshInvalidatedMetadata: refreshInvalidatedRemoteProviderMetadata,
+    currentCwd: getCurrentCwd
+  }))
+  if (daemonModeEnabled()) installProviderContextWindowCwd(getCurrentCwd)
   registerChannelHandlers(handleTrusted, skillChannelHandlers({ providerRegistry, withProviderOperation }))
   handleTrusted('agent:mcpSnapshot', async (_e, p: { context: ProviderContext; refresh?: boolean }) => {
     if (p.context.providerId === 'pi') {

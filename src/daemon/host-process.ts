@@ -324,7 +324,9 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       requestRunStop,
       forkSessionWithAuthority: (request) => forkOperations!.forkSessionWithAuthority(request),
       startupManagedRecovery: () => startupManagedRecovery,
-      userDataDir: options.userDataDir
+      userDataDir: options.userDataDir,
+      sourceControl,
+      providerDiscovery
     }),
     createOutputStore: options.createOutputStore ?? ((directory) => RunOutputWorkerStore.create(
       directory,

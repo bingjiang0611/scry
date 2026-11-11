@@ -3,7 +3,7 @@
 本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑；改 `scripts/daemon-ipc-routing.json` 后重新生成。
 
 - 生产特权 IPC channel：168 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
-- 留在 main：56，一半 main 一半 daemon（`split`）：4，转发到现有 op：36，需要新增 op：72
+- 留在 main：56，一半 main 一半 daemon（`split`）：5，转发到现有 op：36，需要新增 op：71
 - 新增 op 的请求、响应、授权与调用方范围见 [P3-ipc-ops](P3-ipc-ops.md)；设计正文见 [P3 §13](P3-batch4-design.md)
 - `desktopWorkbench` 转发行（workspace / terminal / sourceControl，共 30 行）见 [P3-ipc-matrix-workbench](P3-ipc-matrix-workbench.md)
 
@@ -26,12 +26,12 @@
 |---|---|---|---|---|---|
 | `agent:activeRun` | forward | `runState` | — | 等价（同一 run 登记表） | run 状态在 daemon |
 | `agent:activeRuns` | forward | `liveRuns` | — | 等价；远程长轮询 waitMs 由 daemon 决定，本机传 0 | live run 在 daemon |
-| `agent:addPiProfile` | new-op | `piProfile:addPiProfile` | providers | — | Provider 配置随 adapter 一起迁移 |
+| `agent:addPiProfile` | split | `piProfile:addPiProfile` | providers | main: 启动器文件选择框与握手失败提示留在 main；daemon 解析启动器、在已知项目目录里做 Pi RPC 握手并写入 profile | Provider 配置随 adapter 一起迁移 |
 | `agent:adoptActiveRun` | new-op | `runControl:adoptActiveRun` | controls | — | run 登记表在 daemon |
 | `agent:answerQuestion` | forward | `answerQuestion` | — | 等价 | 待答问题在 daemon |
 | `agent:billingState` | new-op | `billing:billingState` | analytics | — | 账本与 transcript 在 daemon 侧 |
 | `agent:catalogHealth` | new-op | `sessionStore:catalogHealth` | navigation | — | 会话账本在 daemon |
-| `agent:chooseFolder` | split | `workspaceSelection:chooseFolder` | navigation | main: 原生目录选择框留在 main；选中后由 daemon 校验 canonical 目录、rememberProject 与 setCurrentCwd | 选择框与持久化分开 |
+| `agent:chooseFolder` | split | `workspaceSelection:chooseFolder` | navigation | main: 原生目录选择框与窗口的当前工作区（同 agent:setCwd）留在 main；daemon 只收选择框给出的路径，校验 canonical 目录并 rememberProject，App 在 daemon 回答后再选中该目录 | 选择框与持久化分开 |
 | `agent:clipboardImage` | main | `—` | — | — | 剪贴板 |
 | `agent:deleteArchivedSessions` | new-op | `sessionPurge:deleteArchivedSessions` | navigation | — | 批量删除要重放既有 preview/指纹语义 |
 | `agent:deleteSession` | new-op | `sessionLifecycle:deleteSession` | navigation | — | App 语义：空 cwd 会话、确认后可删未存档会话、确认框在 App；设备的 sessionAction/sessionDelete 规则不同，不复用 |
@@ -64,7 +64,7 @@
 | `agent:recorderContentPage` | new-op | `recorderContent:recorderContentPage` | evidence | — | recorder 记录写在工作区里，由 daemon 读 |
 | `agent:removePiProfile` | new-op | `piProfile:removePiProfile` | providers | — | Provider 配置随 adapter 一起迁移 |
 | `agent:removeProject` | new-op | `projectStore:removeProject` | navigation | — | 设备也读项目目录，必须单一写者 |
-| `agent:removeRecentFolder` | split | `projectStore:removeRecentFolder` | navigation | main: 窗口只发请求；删除由 daemon 执行并回新 revision | 授权输入单一写者 |
+| `agent:removeRecentFolder` | split | `projectStore:removeRecentFolder` | navigation | main: 窗口只发请求；删除由 daemon 执行并回新的最近目录列表 | 授权输入单一写者 |
 | `agent:renameProject` | new-op | `projectStore:renameProject` | navigation | — | 设备也读项目目录，必须单一写者 |
 | `agent:renameSession` | new-op | `sessionLifecycle:renameSession` | navigation | — | App 语义：空 cwd 会话、确认后可删未存档会话、确认框在 App；设备的 sessionAction/sessionDelete 规则不同，不复用 |
 | `agent:revealProject` | main | `—` | — | — | 原生 showItemInFolder |

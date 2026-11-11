@@ -73,9 +73,9 @@
     },
     "piProfile": {
       "path": "providers",
-      "request": "{ op:'piProfile', method, profile }",
-      "response": "pi profile 列表或错误 envelope",
-      "authorize": "已验证 peer + profile 形状校验（配置文件属 daemon 的 userData）",
+      "request": "{ op:'piProfile', method:'addPiProfile'|'removePiProfile', args }：addPiProfile 的 args 是 App 选择框给出的启动器路径与窗口工作区（可为 null），不是渲染端参数",
+      "response": "removePiProfile：true；addPiProfile：{ status:'added', agent } 或 { status:'failed', message }（失败由 App 弹窗）",
+      "authorize": "已验证 peer + scope: local；profile id 形状校验；握手目录须是 daemon 已知项目（resolveKnownProjectDirectory），否则按失败回答；配置文件属 daemon 的 userData，不含密钥",
       "why": "Provider 配置随 adapter 一起迁移",
       "scopes": [
         "local"
@@ -83,9 +83,9 @@
     },
     "projectStore": {
       "path": "navigation",
-      "request": "{ op:'projectStore', method, cwd, label?, pinned? }",
-      "response": "现有 project store 结果",
-      "authorize": "已验证 peer + scope: local + authorize(cwd)；recentFolders/removeRecentFolder 读写的就是 daemon 的授权输入（knownProjectDirectories），main 不得自己写",
+      "request": "{ op:'projectStore', method, args }（App 渲染端参数原样）",
+      "response": "与 main 同一 handler 的结果（project-channels.ts / startup-channels.ts）：项目列表、最近目录、boolean，removeRecentFolder 回新的最近目录列表",
+      "authorize": "已验证 peer + scope: local；项目目录须为绝对路径（与 main 相同，不要求已授权：只改列表元数据或收窄授权）；recentFolders/removeRecentFolder 读写的就是 daemon 的授权输入（knownProjectDirectories），daemon 模式下 main 不写",
       "why": "设备也读项目目录，必须单一写者",
       "scopes": [
         "local"
@@ -103,9 +103,9 @@
     },
     "providerContext": {
       "path": "providers",
-      "request": "{ op:'providerContext', method, context }",
-      "response": "context 归一化或 invalidation 结果",
-      "authorize": "已验证 peer + authorize(context.cwd) + provider 白名单",
+      "request": "{ op:'providerContext', method, args }（App 渲染端参数原样；invalidateProviderContext 缺 cwd 时由 App 先填窗口工作区）",
+      "response": "true",
+      "authorize": "已验证 peer + scope: local；Provider 须已注册（registry.get），与该 Provider 的认证操作同队列；只清会话选择与 Provider 缓存，不执行仓库代码",
       "why": "Provider 运行时不复存在",
       "scopes": [
         "local"
@@ -223,9 +223,9 @@
     },
     "workspaceSelection": {
       "path": "navigation",
-      "request": "{ op:'workspaceSelection', method:'setCwd'|'chooseFolder'|'read'|'inspectStart'|'validateBranch', … }",
-      "response": "setCwd/chooseFolder：归一化后的 cwd；read/inspectStart/validateBranch：现有 SourceControlService 的 worktree 选择、准备检查与分支校验结果",
-      "authorize": "已验证 peer + scope: local；按 canonical 目录重验（chooseFolder 由 daemon 校验真实目录并持久化，setCwd 只接受已知项目根或用户目录；read/inspectStart/validateBranch 按 repositoryId 归属已授权工作区）",
+      "request": "{ op:'workspaceSelection', method:'chooseFolder'|'read'|'inspectStart'|'validateBranch', args }：chooseFolder 的 args 是 App 目录选择框给出的路径，不是渲染端参数；其余为渲染端参数原样",
+      "response": "chooseFolder：daemon 记住的 canonical 目录（App 随后选中）；read/inspectStart/validateBranch：现有 SourceControlService 的 worktree 选择、准备检查与分支校验结果",
+      "authorize": "已验证 peer + scope: local；按 canonical 目录重验（chooseFolder 由 daemon 校验真实目录并持久化；read 只读 daemon 已知项目；inspectStart/validateBranch 只认 daemon 自己读过的 repositoryId，并重验其根目录授权与仓库身份）。窗口当前工作区（setCwd）留在 App",
       "why": "当前工作区是 daemon 授权上下文的一部分",
       "scopes": [
         "local"
