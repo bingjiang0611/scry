@@ -116,11 +116,26 @@ export interface NewTurnWorktreeQuery {
 }
 
 /**
+ * 没有 reflog 创建记录时的粗判依据：`<common>/worktrees/<name>` 目录由 `git worktree add` 建立，
+ * 它的创建/修改时间不早于回合开始，才可能是本轮新建。取 birthtime/ctime/mtime 中最新的那个：
+ * 误差只会让「可能是老的」被判成「可能本轮新建」（多一条 partial 说明），不会反过来把
+ * 老 worktree 说成本轮新建，也不会漏掉真正新建的 worktree。
+ */
+async function worktreeDirActivityMs(gitDir: string): Promise<number | undefined> {
+  const info = await stat(gitDir).catch(() => undefined)
+  if (!info) return undefined
+  const times = [info.birthtimeMs, info.ctimeMs, info.mtimeMs]
+    .filter((value) => Number.isFinite(value) && value > 0)
+  return times.length > 0 ? Math.max(...times) : undefined
+}
+
+/**
  * 收尾时发现「本轮新建的 worktree」。全部通过文件系统完成（读 `.git/worktrees/*`、reflog、
  * index 是否存在），hook 热路径不新增任何调用。
  *
- * 只有 reflog 证明本轮新建的 worktree 才可能有基线；拿不到可信基线的照样上报一条
- * unavailable 计划（带原因），但绝不生成 diff。
+ * 能证明「不是本轮新建」的（创建时间整秒都早于回合开始）静默跳过，不产出任何快照：
+ * 采集范围内本来就有一些老 worktree 没进回合开始的基线，它们不该让每一轮 diff 都降级成 partial。
+ * 只有可能是本轮新建、但拿不到可信基线的，才上报一条 unavailable 计划（带原因），且绝不生成 diff。
  */
 export async function findNewTurnWorktrees(query: NewTurnWorktreeQuery): Promise<NewWorktreeBaselinePlan[]> {
   const captured = new Set(await Promise.all(query.captures.map(async (root) =>
@@ -145,12 +160,17 @@ export async function findNewTurnWorktrees(query: NewTurnWorktreeQuery): Promise
     if (!withinCaptureScope(canonical, query.workspaceRoot, query.excluded)) continue
     const reflog = await readWorktreeCreation(candidate.gitDir)
     if ('problem' in reflog) {
+      // 没有创建记录时只能用目录自身时间粗判：更早的活动时间就证明它在本轮开始前就存在。
+      const activityMs = await worktreeDirActivityMs(candidate.gitDir)
+      if (activityMs !== undefined && activityMs < windowStart) continue
       plans.push({ kind: 'unavailable', requestedRoot: canonical, reason: reflog.problem })
       continue
     }
     const { creation } = reflog
-    // 毫秒精度的回合开始时间 vs 秒精度的 reflog：只有两个区间完全不相交才否定「本轮新建」。
-    if (creation.createdMs + REFLOG_SECOND_MS - 1 < windowStart || creation.createdMs > query.ceilingMs) {
+    // 毫秒精度的回合开始时间 vs 秒精度的 reflog：创建那一整秒都早于窗口开始，就证明不是本轮新建。
+    if (creation.createdMs + REFLOG_SECOND_MS - 1 < windowStart) continue
+    // 创建时间晚于收尾上限只可能来自时钟异常：可能是本轮新建，保留原因，不编造 diff。
+    if (creation.createdMs > query.ceilingMs) {
       plans.push({ kind: 'unavailable', requestedRoot: canonical, reason: 'reflog_outside_turn' })
       continue
     }

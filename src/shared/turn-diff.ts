@@ -55,6 +55,11 @@ export type TurnDiffBaselineOrigin = 'session_start' | 'resumed'
  * 本轮新建 worktree 的基线来源：`worktree-creation-reflog` 表示基线取自该 worktree 自己的
  * HEAD reflog 第一条（旧值全 0 的创建记录），而不是回合开始时的仓库快照。
  * 没有可信基线时只能记 partial 并写明原因，files 必须为空——不得用猜测的基线补出 diff。
+ * 能确认不是本轮新建的老 worktree 不产生任何记录，因此不会出现对应原因。
+ *
+ * - `reflog_missing` / `reflog_creation_not_first`：拿不到创建记录，且目录时间不早于回合开始。
+ * - `reflog_outside_turn`：创建时间晚于收尾上限（时钟异常）；更早的早已静默跳过。
+ * - `worktree_deleted` / `no_checkout` / `per_turn_limit`：创建可信，但拿不到 worktree 现在的内容。
  */
 export type WorktreeBaselineReason =
   | 'reflog_missing'
