@@ -72,7 +72,7 @@ export function sideChatDriver({ cdp, evaluate, check, ipcCountsPath, inputsPath
     })
   }
   const showPanel = async () => {
-    if (await evaluate(`document.querySelector('.panel-pill:not(.summary-pill)').getAttribute('aria-pressed') !== 'true'`)) {
+    if (await evaluate(`document.querySelector('.app.right-panel-hidden') != null`)) {
       await click('.panel-pill:not(.summary-pill)')
       await wait(`document.querySelector('.app.right-panel-hidden') == null`)
     }

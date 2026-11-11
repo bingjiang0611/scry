@@ -7,6 +7,23 @@ import { CHILD_PANEL, sideChatDriver } from './side-chat-driving.mjs'
 const ready = `document.querySelector('${CHILD_PANEL} .chat-transcript[aria-busy="false"][data-history-source="authoritative"]') != null`
 beforeEach(() => vi.resetAllMocks())
 
+it('does not toggle a visible panel because a header reports it unpressed', async () => {
+  const { showPanel } = sideChatDriver({
+    evaluate: async (expression: string) => expression.includes('getAttribute')
+  })
+  await showPanel()
+  expect(driver.click).not.toHaveBeenCalled()
+})
+
+it('reveals the hidden app panel and waits for its visible state', async () => {
+  const { showPanel } = sideChatDriver({
+    evaluate: async (expression: string) => expression.includes('.app.right-panel-hidden')
+  })
+  await showPanel()
+  expect(driver.click).toHaveBeenCalledWith('.panel-pill:not(.summary-pill)')
+  expect(driver.wait).toHaveBeenCalledWith("document.querySelector('.app.right-panel-hidden') == null")
+})
+
 it('does not finish opening a child while its transcript is still loading', async () => {
   let release!: () => void
   const loaded = new Promise<void>(resolve => { release = resolve })

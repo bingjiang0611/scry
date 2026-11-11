@@ -20,17 +20,11 @@ export async function exerciseSideChatLayout({ cdp, evaluate, check, ipcCountsPa
    * use this separately from selecting and waiting for the tested child.
    */
   const revealPanel = async () => {
-    if (await evaluate(`document.querySelector('.app.right-panel-hidden') == null`)) return
-    await click('.panel-pill:not(.summary-pill)')
-    await wait(`document.querySelector('.app.right-panel-hidden') == null`)
+    await controls.showPanel()
     await idle()
-    await wait(`document.querySelector('${CHILD_PANEL} .side-chat-surface')?.dataset.sideChatId === ${json(childId)}`)
   }
   const showChild = async () => {
-    if (await evaluate(`document.querySelector('.panel-pill:not(.summary-pill)').getAttribute('aria-pressed') !== 'true'`)) {
-      await click('.panel-pill:not(.summary-pill)')
-    }
-    if (await evaluate(`document.querySelector('#right-surface-pane [data-session-surface-current="true"]') == null`)) return
+    await controls.showPanel()
     await controls.openChildById(childId)
   }
 

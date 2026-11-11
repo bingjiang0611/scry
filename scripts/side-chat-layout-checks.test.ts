@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs'
 import { expect, it, vi } from 'vitest'
 
-const openChildById = vi.hoisted(() => vi.fn())
+const { openChildById, showPanel } = vi.hoisted(() => ({ openChildById: vi.fn(), showPanel: vi.fn() }))
 vi.mock('./side-chat-driving.mjs', async importOriginal => ({
   ...await importOriginal<typeof import('./side-chat-driving.mjs')>(),
-  sideChatDriver: () => ({ openChildById })
+  sideChatDriver: () => ({ openChildById, showPanel })
 }))
 vi.mock('./side-chat-window-control.mjs', () => ({
   createWindowResize: () => ({ resize: async () => undefined })
@@ -22,9 +22,12 @@ it('restores the tested child after keyboard tab activation before composition a
   expect(input).not.toContain("driver.pointerAt(`document.querySelector('${CHILD_PANEL} .chat-body')`)")
 })
 
-it('waits for transcript readiness even when the tested child is already selected', async () => {
+it('awaits the visible panel and loaded transcript even when the child is already selected', async () => {
+  let reveal!: () => void
   let release!: () => void
+  const visible = new Promise<void>(resolve => { reveal = resolve })
   const ready = new Promise<void>(resolve => { release = resolve })
+  showPanel.mockImplementation(() => visible)
   openChildById.mockImplementation(() => ready)
   const measured = vi.fn()
   const evaluate = async (expression: string) => {
@@ -37,9 +40,13 @@ it('waits for transcript readiness even when the tested child is already selecte
   }
   const run = exerciseSideChatLayout({ evaluate, childId: 'child' }).catch((error: Error) => error)
   try {
+    await vi.waitFor(() => expect(showPanel).toHaveBeenCalledOnce())
+    expect(openChildById).not.toHaveBeenCalled()
+    reveal()
     await vi.waitFor(() => expect(openChildById).toHaveBeenCalledWith('child'))
     expect(measured).not.toHaveBeenCalled()
   } finally {
+    reveal()
     release()
   }
   expect((await run).message).toBe('layout measurement reached')
