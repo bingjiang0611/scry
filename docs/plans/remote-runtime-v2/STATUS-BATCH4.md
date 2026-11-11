@@ -61,9 +61,13 @@ G1（5 条差异补处理方式 + 守卫断言）与 G2（secret 生命周期改
 6. `agent:listCommands` 改为本机 op `providerCommands`，已实现。
 7. 会话改名、置顶、存档、删除、分支走本机 op `sessionLifecycle`，已确认。
 
-## 需要决定（第二轮之后，2026-11-11）
+## 已决定（维护者 2026-11-11，第二轮之后）
 
-1. `agent:addPiProfile`：daemon 模式下，握手目录必须是 daemon 已知的项目，否则返回失败；进程内用的是窗口当前的选择。这比进程内严格，请确认可以接受。
-2. 配对设备经 daemon 宿主仍不能分支会话（`supportsForkSession` 为 false）。要不要开放？
-3. daemon 模式下，main 的 `resolveKnownProjectDirectory` 仍读 App 自己的 userData：`agent:setCwd`、`workspace:readKnown`、`readPageKnown`、`openKnownExternal`、`resolveFile` 都用到它。这是第二个读取者，建议下一轮改为向 daemon 询问。
-4. openExternal 在 daemon 模式下的候选项目只有 daemon 的项目列表与最近目录的并集，不含已移除项目的会话目录和 worktree，比进程内少。可以接受吗？还是新增一个本机方法，直接返回 `knownProjectDirectories()`？
+1. `agent:addPiProfile` 在 daemon 模式下要求握手目录是 daemon 已知的项目：接受。
+2. 配对设备经 daemon 宿主分支会话：先保持关闭，等 macOS 验证过本机分支再议。
+3. main 的 `resolveKnownProjectDirectory` 在 daemon 模式下改为向 daemon 询问：下一轮做。
+4. openExternal 在 daemon 模式下的候选项目范围变窄：接受。
+
+## 需要决定
+
+无。
