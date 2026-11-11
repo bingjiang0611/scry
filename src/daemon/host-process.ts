@@ -29,6 +29,7 @@ import { daemonLocalEndpoint } from './local-endpoint'
 import { AppEventFeed, DAEMON_WINDOW_NOTICES } from '../main/remote/app-event-feed'
 import { createHistoryRuntime } from '../main/bootstrap/history-runtime'
 import { createForkOperations } from '../main/bootstrap/run-fork'
+import { createDaemonTerminalService, type DaemonTerminalServiceDeps } from './terminal-service'
 import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore, type LocalEnrollSocket } from './local-enrollment'
 
 export interface DaemonHostProcessOptions {
@@ -41,6 +42,8 @@ export interface DaemonHostProcessOptions {
   gatewayLabel?: string
   createOutputStore?: RemoteHostServiceDependencies['createOutputStore']
   log?: (line: string) => void
+  /** Tests: a fake PTY, recordings in this process, a fixed shell environment, a short reclaim. */
+  terminal?: Pick<DaemonTerminalServiceDeps, 'pty' | 'inlineRecording' | 'environment' | 'reclaimAfterMs' | 'checkEveryMs'>
 }
 
 export interface DaemonHostProcess {
@@ -90,6 +93,18 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   const workspace = createWorkspaceRuntime({
     appUserDataDir: options.userDataDir,
     loadSessions: () => loadSessions()
+  })
+  // The App's terminals (P3-terminal.md). The recording worker sits beside this entry in
+  // out/main, like the run output worker below.
+  const terminal = createDaemonTerminalService({
+    userDataDir: options.userDataDir,
+    homeDir: workspace.homeDir,
+    recordingWorkerUrl: new URL('./terminal-recording-worker.js', import.meta.url),
+    resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory,
+    notify: () => events.append({ kind: 'terminal' }),
+    idleMs: () => events.idleMs(),
+    log,
+    ...options.terminal
   })
   const pi = createPiProfileRuntime({ userDataDir: options.userDataDir })
   const providers = createProviderRuntime({
@@ -319,7 +334,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     managedLaunches: conversationSend.launches,
     onRunActivity: (runId, intentSeq) => events.append({ kind: 'run', runId, ...(intentSeq !== undefined ? { intentSeq } : {}) }),
     localEndpoint: daemonLocalEndpoint({
-      catalog, workspace, providers, pi, session, history, historyChannels, conversationSend, events,
+      catalog, workspace, providers, pi, session, history, historyChannels, conversationSend, events, terminal,
       runs: () => pipeline.runs,
       requestRunStop,
       forkSessionWithAuthority: (request) => forkOperations!.forkSessionWithAuthority(request),
@@ -369,6 +384,8 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       startupManagedRecovery = Promise.resolve()
       // A parked App long poll answers now instead of holding the channel open.
       events.close()
+      // Shells end with the daemon too; their recordings are finished on the way.
+      await terminal.dispose()
       await enrollSocket.close()
       await channel.close()
       await localHost.close()

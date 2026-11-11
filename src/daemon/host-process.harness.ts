@@ -3,7 +3,7 @@ import { mkdirSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { webcrypto } from 'node:crypto'
 import { cryptoProvider } from '@peculiar/x509'
-import { createDaemonHostProcess } from './host-process'
+import { createDaemonHostProcess, type DaemonHostProcessOptions } from './host-process'
 import { MemoryOutputStore, call, enrollLocal, tempDir } from './host-process.fixtures'
 import { createRecentFoldersStore } from '../main/app-store'
 
@@ -30,7 +30,7 @@ export interface TestDaemon {
 const ENV = { SCRY_REMOTE_RELAY_ENABLED: '0', SCRY_ELECTRON_SMOKE_PROVIDER: '1', ELECTRON_ENABLE_LOGGING: '1' }
 const DEBUG_PORT = '--remote-debugging-port=0'
 
-export async function startTestDaemon(): Promise<TestDaemon> {
+export async function startTestDaemon(options: Pick<DaemonHostProcessOptions, 'terminal'> = {}): Promise<TestDaemon> {
   const root = tempDir()
   const userDataDir = join(root, 'userData')
   mkdirSync(join(userDataDir, 'remote', 'ledger'), { recursive: true, mode: 0o700 })
@@ -58,7 +58,8 @@ export async function startTestDaemon(): Promise<TestDaemon> {
       appVersion: 'test',
       isPackaged: false,
       createOutputStore: () => new MemoryOutputStore(),
-      log: () => undefined
+      log: () => undefined,
+      ...options
     })
   } catch (error) {
     restore()

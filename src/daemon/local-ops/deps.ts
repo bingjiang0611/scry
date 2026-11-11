@@ -10,6 +10,7 @@ import type { createPiProfileRuntime } from '../../main/bootstrap/pi-profiles'
 import type { createSessionState } from '../../main/bootstrap/session-state'
 import type { createHistoryRuntime } from '../../main/bootstrap/history-runtime'
 import type { createDaemonConversationSend } from '../conversation-send'
+import type { createDaemonTerminalService } from '../terminal-service'
 import type { DeleteSessionResult } from '../../shared/provider'
 import type { DesktopRemoteForkSessionRequest } from '../../shared/desktop-remote'
 import type { AgentForkSessionResult } from '../../shared/runtime'
@@ -31,6 +32,7 @@ export interface DaemonLocalEndpointDeps {
   historyChannels: Record<string, (event: unknown, ...args: never[]) => unknown>
   conversationSend: ReturnType<typeof createDaemonConversationSend>
   events: AppEventFeed
+  terminal: ReturnType<typeof createDaemonTerminalService>
   runs: () => RunRegistry<ActiveRun, RunControl>
   startupManagedRecovery: () => Promise<void>
   requestRunStop: (runId: string) => boolean

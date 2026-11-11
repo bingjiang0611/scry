@@ -8,6 +8,7 @@ import { resetProviderSession, viewNothingAfterDaemonNewSession } from './startu
 import { callDaemonChannel, daemonModeEnabled } from '../daemon-channel-gate'
 import { installWorkbenchWindowCwd } from '../daemon-local-ops/workbench'
 import { terminalChannelHandlers } from './terminal-channels'
+import { installTerminalDaemonWindow } from './terminal-daemon'
 import { authorizedWorkspaceRequest, knownProjectDirectory } from '../workspace-authorization'
 import { createWorkspaceEntry, listWorkspace, moveWorkspaceEntry, openWorkspaceFileExternally, readWorkspaceFile, readWorkspaceFilePage, resolveWorkspaceFileOpenTarget, renameWorkspaceEntry, trashWorkspaceEntry, writeWorkspaceFile } from '../workspace-files'
 import type { HomeFileAccess } from '../home-file-access'
@@ -129,7 +130,11 @@ export function registerWorkspaceHandlers(deps: WorkspaceBootstrapDependencies):
   if (daemonModeEnabled()) viewNothingAfterDaemonNewSession(dockBadge, () => Boolean(getWindow()?.isFocused()))
   // Daemon mode: the forwarded workspace channels stay bound to this window's selection,
   // as the handlers above are; the daemon checks the request against it.
-  if (daemonModeEnabled()) installWorkbenchWindowCwd(getCurrentCwd)
+  if (daemonModeEnabled()) {
+    installWorkbenchWindowCwd(getCurrentCwd)
+    // The terminal runs in the daemon; this window names its workspace and its state.
+    installTerminalDaemonWindow({ windowCwd: getCurrentCwd, rendererCanReceive, isShuttingDown })
+  }
 
 }
 

@@ -10,7 +10,7 @@ import { DaemonRunError } from './daemon-run-transport'
 export interface DaemonEventReply {
   epoch: string
   cursor: number
-  items: Array<{ kind: 'data'; event: AgentDataUpdated } | { kind: 'run'; runId: string; intentSeq?: number } | { kind: 'attention'; snapshot: SessionAttentionSnapshot } | { kind: 'window'; channel: string; payload: Record<string, unknown> }>
+  items: Array<{ kind: 'data'; event: AgentDataUpdated } | { kind: 'run'; runId: string; intentSeq?: number } | { kind: 'attention'; snapshot: SessionAttentionSnapshot } | { kind: 'window'; channel: string; payload: Record<string, unknown> } | { kind: 'terminal' }>
   reset: boolean
 }
 
@@ -33,6 +33,8 @@ export interface DaemonEventPumpDeps {
   onLive?: (live: boolean) => void
   // E1b: the daemon's whole unread set.
   onAttention?: (snapshot: SessionAttentionSnapshot) => void
+  // Terminal output is waiting (P3-terminal.md); read it by cursor.
+  onTerminal?: () => void
   // W1: one of the run pipeline's window notices. Awaited, so notices keep their order;
   // without a handler it goes to the window as it came.
   onWindow?: (channel: string, payload: Record<string, unknown>) => Promise<void> | void
@@ -101,6 +103,7 @@ export class DaemonEventPump {
           if (item.kind === 'data') send('agent:dataUpdated', item.event)
           else if (item.kind === 'run') this.#deps.onRun?.(item.runId, item.intentSeq)
           else if (item.kind === 'attention') this.#deps.onAttention?.(item.snapshot)
+          else if (item.kind === 'terminal') this.#deps.onTerminal?.()
           else if (this.#deps.onWindow) await this.#deps.onWindow(item.channel, item.payload)
           else send(item.channel, item.payload)
         }

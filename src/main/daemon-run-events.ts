@@ -5,6 +5,8 @@ import type { DockBadgeState } from './dock-badge'
 import type { RunTraceRouter } from './run-trace-router'
 import { DaemonEventPump } from './daemon-event-pump'
 import { DaemonRunDiscovery } from './daemon-run-discovery'
+import { DaemonTerminalReader } from './daemon-terminal-reader'
+import type { DesktopTerminalEvents } from '../shared/desktop-workbench'
 import type { DaemonRunRuntime } from './daemon-run-runtime'
 import type { DaemonRunTransport } from './daemon-run-transport'
 
@@ -14,7 +16,7 @@ import type { DaemonRunTransport } from './daemon-run-transport'
 // the daemon's unread set feeds this window's badge, which says what was viewed (E1b).
 
 export interface DaemonRunEventsDeps {
-  transport: Pick<DaemonRunTransport, 'appEvents' | 'liveRuns' | 'attentionViewed'>
+  transport: Pick<DaemonRunTransport, 'appEvents' | 'liveRuns' | 'attentionViewed' | 'forward'>
   runtime: Pick<DaemonRunRuntime, 'wake' | 'wakeAll' | 'setWakesLive' | 'isTracking' | 'follow' | 'deliverAfterRead'>
   send: (channel: string, payload: unknown) => void
   dockBadge?: Pick<DockBadgeState, 'setDaemon' | 'bindDaemon' | 'forgetDaemon' | 'view'>
@@ -25,6 +27,8 @@ export interface DaemonRunEventsDeps {
   waitMs?: number
   // W2: stop progress also goes to the run's own subscription, as in process.
   runTraces?: Pick<RunTraceRouter, 'publishStopState'>
+  // Whether the window can take terminal output now (P3-terminal.md).
+  rendererCanReceive?: () => boolean
 }
 
 export function startDaemonRunEvents(deps: DaemonRunEventsDeps): { dispose(): void } {
@@ -50,11 +54,25 @@ export function startDaemonRunEvents(deps: DaemonRunEventsDeps): { dispose(): vo
       dockBadge.view(sessionAttentionKey({ providerId, agentProfileId, cwd: run.cwd ?? '', sessionId }), deps.isWindowFocused?.() ?? false)
     }).catch((error) => deps.onWarn?.('daemon focused session view failed', error))
   }
+  // Terminal output waits in the daemon's queue; a notice (or a resync, which may have
+  // lost one) drains it onto the window's terminal channels.
+  const terminals = new DaemonTerminalReader({
+    read: async (cursor) => {
+      const reply = await transport.forward({ op: 'terminalFeed', method: 'read', ...(cursor ? { cursor } : {}) }, true)
+      const page = reply.terminal as DesktopTerminalEvents | undefined
+      if (!page || typeof page.cursor !== 'string' || !Array.isArray(page.events)) throw new Error('invalid_daemon_response')
+      return page
+    },
+    send: deps.send,
+    canSend: deps.rendererCanReceive ?? (() => true),
+    ...warn
+  })
   const pump = new DaemonEventPump({
     source: transport, send: deps.send, ...warn, ...(deps.waitMs !== undefined ? { waitMs: deps.waitMs } : {}),
     onRun: (runId, intentSeq) => { runtime.wake(runId); discovery.notice(runId, intentSeq) },
     // Lost notices may include a new run's: look at the live list as well.
-    onResync: () => { runtime.wakeAll(); discovery.resynchronize() },
+    onResync: () => { runtime.wakeAll(); discovery.resynchronize(); terminals.notice() },
+    onTerminal: () => terminals.notice(),
     onLive: (live) => runtime.setWakesLive(live),
     onAttention: (snapshot) => dockBadge?.setDaemon(snapshot, deps.isWindowFocused?.() ?? false),
     // W1: the pipeline's own notices, each after the run text it follows.
@@ -72,5 +90,5 @@ export function startDaemonRunEvents(deps: DaemonRunEventsDeps): { dispose(): vo
     void transport.attentionViewed(sessionKey).catch((error) => deps.onWarn?.('daemon attention viewed failed', error))
   })
   pump.start()
-  return { dispose: () => { pump.dispose(); dockBadge?.forgetDaemon() } }
+  return { dispose: () => { pump.dispose(); terminals.dispose(); dockBadge?.forgetDaemon() } }
 }

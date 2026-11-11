@@ -75,6 +75,20 @@ describe('desktop lane routing', () => {
   })
 })
 
+describe('terminal lane (P3-terminal)', () => {
+  it('keeps typing and terminal output off the lanes long reads and pushes hold', () => {
+    for (const method of ['start', 'write', 'resize', 'ready', 'ack', 'close', 'attach', 'active']) {
+      expect(laneForRequest({ op: 'terminal', method }), method).toBe('terminal')
+    }
+    expect(laneForRequest({ op: 'terminalFeed', method: 'read' })).toBe('terminal')
+    // A recording page can be 512 KiB: it reads on bulk, behind nothing a keystroke waits for.
+    for (const method of ['recordingList', 'recordingRead']) expect(laneForRequest({ op: 'terminal', method })).toBe('bulk')
+    // Input is never replayed; reading the feed again from the same cursor is harmless.
+    expect(replayableRequest({ op: 'terminal', method: 'write' })).toBe(false)
+    expect(replayableRequest({ op: 'terminalFeed', method: 'read' })).toBe(true)
+  })
+})
+
 describe('DesktopLanes send failures', () => {
   // A channel whose writes fail the way `socket.write` does: the callback reports an
   // error, so the bytes may or may not have reached the host.

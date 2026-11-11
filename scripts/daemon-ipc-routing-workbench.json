@@ -100,91 +100,80 @@
     },
     {
       "channel": "terminal:ack",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "terminal",
-      "method": "terminalAck",
-      "why": "PTY 在 daemon"
+      "route": "new-op",
+      "op": "terminal",
+      "method": "ack",
+      "why": "App 终端：main 的同一份处理与录制目录，见 P3-terminal.md"
     },
     {
       "channel": "terminal:active",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "terminal",
-      "method": "terminalActive",
-      "why": "PTY 在 daemon"
+      "route": "new-op",
+      "op": "terminal",
+      "method": "active",
+      "why": "App 终端：main 的同一份处理与录制目录，见 P3-terminal.md"
     },
     {
       "channel": "terminal:attach",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "terminal",
-      "method": "terminalAttach",
-      "why": "PTY 在 daemon"
+      "route": "new-op",
+      "op": "terminal",
+      "method": "attach",
+      "why": "App 终端：main 的同一份处理与录制目录，见 P3-terminal.md"
     },
     {
       "channel": "terminal:close",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "terminal",
-      "method": "terminalClose",
-      "why": "PTY 在 daemon"
+      "route": "new-op",
+      "op": "terminal",
+      "method": "close",
+      "why": "App 终端：main 的同一份处理与录制目录，见 P3-terminal.md"
     },
     {
       "channel": "terminal:ready",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "terminal",
-      "method": "terminalReady",
-      "why": "PTY 在 daemon"
+      "route": "new-op",
+      "op": "terminal",
+      "method": "ready",
+      "why": "App 终端：main 的同一份处理与录制目录，见 P3-terminal.md"
     },
     {
       "channel": "terminal:recordingDelete",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "terminal",
-      "method": "terminalRecordingDelete",
-      "why": "录制在 daemon"
+      "route": "new-op",
+      "op": "terminal",
+      "method": "recordingDelete",
+      "why": "App 终端：main 的同一份处理与录制目录，见 P3-terminal.md"
     },
     {
       "channel": "terminal:recordingList",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "terminal",
-      "method": "terminalRecordingList",
-      "why": "录制在 daemon"
+      "route": "new-op",
+      "op": "terminal",
+      "method": "recordingList",
+      "why": "App 终端：main 的同一份处理与录制目录，见 P3-terminal.md"
     },
     {
       "channel": "terminal:recordingRead",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "terminal",
-      "method": "terminalRecordingRead",
-      "why": "录制在 daemon"
+      "route": "new-op",
+      "op": "terminal",
+      "method": "recordingRead",
+      "why": "App 终端：main 的同一份处理与录制目录，见 P3-terminal.md"
     },
     {
       "channel": "terminal:resize",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "terminal",
-      "method": "terminalResize",
-      "why": "PTY 在 daemon"
+      "route": "new-op",
+      "op": "terminal",
+      "method": "resize",
+      "why": "App 终端：main 的同一份处理与录制目录，见 P3-terminal.md"
     },
     {
       "channel": "terminal:start",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "terminal",
-      "method": "terminalStart",
-      "why": "PTY 在 daemon"
+      "route": "new-op",
+      "op": "terminal",
+      "method": "start",
+      "why": "App 终端：main 的同一份处理与录制目录，见 P3-terminal.md"
     },
     {
       "channel": "terminal:write",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "terminal",
-      "method": "terminalWrite",
-      "why": "PTY 在 daemon"
+      "route": "new-op",
+      "op": "terminal",
+      "method": "write",
+      "why": "App 终端：main 的同一份处理与录制目录，见 P3-terminal.md"
     },
     {
       "channel": "workspace:create",

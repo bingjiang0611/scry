@@ -19,6 +19,29 @@ export interface LocalEndpointHandlers {
   events?: Pick<AppEventFeed, 'read'>
   // The App viewed one of the daemon's unread sessions (E1b).
   attention?: { viewed(sessionKey: string): void }
+  // The App's terminal output and lifetime (P3-terminal.md).
+  terminal?: {
+    read(cursor?: string): unknown
+    detachRenderer(): void
+    shutdown(): Promise<void>
+  }
+}
+
+const TERMINAL_FEED_KEYS = ['op', 'keepAlive', 'protocol', 'method', 'cursor']
+
+/** The App reads its terminal output by cursor, detaches its window, or quits; absent on the network endpoint. */
+export async function handleTerminalFeed(terminal: LocalEndpointHandlers['terminal'], request: Record<string, unknown>): Promise<Record<string, unknown>> {
+  if (!terminal) return { error: 'unsupported_op' }
+  const { method, cursor } = request
+  if (Object.keys(request).some((key) => !TERMINAL_FEED_KEYS.includes(key))) return { error: 'invalid_request' }
+  if (method === 'read') {
+    if (cursor !== undefined && (typeof cursor !== 'string' || cursor.length === 0 || cursor.length > 128)) return { error: 'invalid_request' }
+    return { terminal: terminal.read(cursor as string | undefined) }
+  }
+  if (cursor !== undefined) return { error: 'invalid_request' }
+  if (method === 'detachRenderer') { terminal.detachRenderer(); return { terminal: true } }
+  if (method === 'shutdown') { await terminal.shutdown(); return { terminal: true } }
+  return { error: 'invalid_request' }
 }
 
 const MAX_SESSION_KEY = 4096

@@ -33,6 +33,7 @@ import { startRemoteHostIfEnabled, type RemoteHostRuntime } from './remote-host'
 import type { RunControl } from './run-control'
 import { runStartupRecovery } from './startup-recovery'
 import { appStartupWriters } from './app-startup-writers'
+import { shutdownDaemonTerminals } from './terminal-daemon'
 import { claimAppUserDataWithDialog } from './userdata-owner-dialog'
 
 export function initializeAppEnvironment(__dirname: string, getWindow: () => BrowserWindow | null) {
@@ -221,9 +222,13 @@ export function registerAppLifecycle({
     // replays any recorded-but-undispatched intents.
     const remoteCleanup = Promise.all([getRemoteHostService()?.dispose(), getDesktopRemoteClient()?.dispose()]).then(() => undefined)
     terminalOutput.close()
-    const terminalCleanup = getTerminalManagerInstance()?.shutdown().catch((error) => {
-      console.warn('[scry] terminal shutdown failed:', (error as Error)?.message)
-    }) ?? Promise.resolve()
+    const terminalCleanup = Promise.all([
+      getTerminalManagerInstance()?.shutdown().catch((error) => {
+        console.warn('[scry] terminal shutdown failed:', (error as Error)?.message)
+      }),
+      // Daemon mode: the App's shells live in the daemon and end with the App (bounded).
+      shutdownDaemonTerminals()
+    ]).then(() => undefined)
     runStopLifecycle.close()
     traceOutput.close()
     // scoped 流与 legacy 桥一同关闭：订阅、额度与定时器都不留到下一个进程。

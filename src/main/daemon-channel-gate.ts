@@ -6,6 +6,7 @@ import { SESSION_LIFECYCLE_FORWARDS, SESSION_LIFECYCLE_LOCAL_OPS } from './daemo
 import { QUERY_FORWARDS, QUERY_LOCAL_OPS } from './daemon-local-ops/queries'
 import { WORKBENCH_FORWARDS, WORKBENCH_LOCAL_OPS } from './daemon-local-ops/workbench'
 import { PROJECT_LOCAL_OPS } from './daemon-local-ops/project'
+import { TERMINAL_LOCAL_OPS } from './daemon-local-ops/terminal'
 
 // Development switch for "the daemon owns runs". Kept here, free of Electron, so the IPC
 // registrar can consult it without importing the daemon client assembly.
@@ -61,7 +62,8 @@ export const DAEMON_LOCAL_OP_CHANNELS: DaemonLocalOpTable = {
   ...SESSION_LIFECYCLE_LOCAL_OPS,
   ...QUERY_LOCAL_OPS,
   ...WORKBENCH_LOCAL_OPS,
-  ...PROJECT_LOCAL_OPS
+  ...PROJECT_LOCAL_OPS,
+  ...TERMINAL_LOCAL_OPS
 }
 
 /** Channels the daemon answers through an op it already serves paired devices (route `forward`). */
@@ -118,6 +120,12 @@ async function guarded(channel: string, args: unknown[], ask: (args: unknown[]) 
   const value = await ask(outcome.args)
   const after = resultHandlers.get(channel)
   return after ? after(value, outcome.args) : value
+}
+
+/** One request for an op the daemon serves its App outside any channel (e.g. terminalFeed). */
+export async function requestDaemon(request: Record<string, unknown>, read: boolean): Promise<Record<string, unknown>> {
+  if (!requestForwarder) throw new Error(`daemon_capability_unavailable:${String(request.op)}`)
+  return await requestForwarder(request, read)
 }
 
 /** Ask the daemon for one local-op channel directly, without its guard: for a guard's own reads. */

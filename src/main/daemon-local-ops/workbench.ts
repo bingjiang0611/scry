@@ -13,9 +13,8 @@ import { object, text } from '../source-control/ipc'
 // (its host reports workbenchOps openPath/trashItem false), so they run in the App
 // (DAEMON_MODE_IN_PROCESS_CHANNELS).
 //
-// Left out on purpose, so the gate refuses them by name:
-//   terminal:* - output is pushed to the window in process but polled on this op, and the
-//     PTYs would live in the daemon past the window. Both need a design decision.
+// terminal:* are not forwarded either: they are the daemon's App terminal service
+// (daemon-local-ops/terminal.ts, P3-terminal.md), not this device op.
 export const WORKBENCH_LOCAL_OPS: DaemonLocalOpTable = {}
 
 let windowCwd: () => string | undefined = () => undefined

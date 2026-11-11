@@ -32,9 +32,11 @@ export function daemonLocalEndpoint(endpointDeps: DaemonLocalEndpointDeps): Loca
       ...sessionLifecycleLocalOps(deps),
       ...queryLocalOps(deps),
       ...workbenchLocalOps(deps),
-      ...projectLocalOps(deps)
+      ...projectLocalOps(deps),
+      ...deps.terminal.localOps
     }),
     events: deps.events,
+    terminal: deps.terminal.feed,
     // This daemon cannot see the App's window; the App says what the user viewed (E1b).
     attention: { viewed: (sessionKey) => deps.session.dockBadge.remove(sessionKey) }
   }

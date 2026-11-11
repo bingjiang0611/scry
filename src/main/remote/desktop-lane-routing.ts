@@ -28,9 +28,22 @@ function workbenchWrite(op: string, request: unknown): boolean {
   return typeof method !== 'string' || !DESKTOP_WORKBENCH_READ_METHODS.has(method)
 }
 
+// The daemon App's terminal (P3-terminal.md): typing and output on their own lane;
+// recording pages, up to 512 KiB, read on bulk.
+const terminalBulkMethods = new Set(['recordingList', 'recordingRead'])
+const terminalReadMethods = new Set(['active', 'recordingList', 'recordingRead'])
+function terminalLane(op: string, request: unknown): DesktopLaneName | undefined {
+  if (op === 'terminalFeed') return 'terminal'
+  if (op !== 'terminal') return undefined
+  const method = (request as { method?: unknown }).method
+  return typeof method === 'string' && terminalBulkMethods.has(method) ? 'bulk' : 'terminal'
+}
+
 export function laneForRequest(request: unknown): DesktopLaneName {
   const op = request && typeof request === 'object' ? (request as { op?: unknown }).op : undefined
   if (typeof op !== 'string') return 'control'
+  const terminal = terminalLane(op, request)
+  if (terminal) return terminal
   if (workbenchWrite(op, request)) return 'workbench'
   if (writeOperations.has(op)) return 'control'
   if (idempotentControlOperations.has(op)) return 'control'
@@ -47,5 +60,9 @@ export function laneForRequest(request: unknown): DesktopLaneName {
 
 export function replayableRequest(request: unknown): boolean {
   const op = request && typeof request === 'object' ? (request as { op?: unknown }).op : undefined
+  if (op === 'terminal') {
+    const method = (request as { method?: unknown }).method
+    return typeof method === 'string' && terminalReadMethods.has(method)
+  }
   return !(typeof op === 'string' && (writeOperations.has(op) || workbenchWrite(op, request)))
 }

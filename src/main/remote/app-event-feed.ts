@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { performance } from 'node:perf_hooks'
 import type { AgentDataUpdated } from '../../shared/runtime'
 import type { SessionAttentionSnapshot } from '../../shared/session-attention'
 
@@ -17,6 +18,8 @@ export type AppEvent =
   | { kind: 'window'; channel: string; payload: unknown }
   // The daemon's whole unread set (E1b): state, so only the newest one matters.
   | { kind: 'attention'; snapshot: SessionAttentionSnapshot }
+  // Terminal output is waiting for the App (P3-terminal.md); it reads it by its own cursor.
+  | { kind: 'terminal' }
 
 export interface AppEventsReply {
   epoch: string
@@ -44,6 +47,7 @@ interface Entry { seq: number; event: AppEvent; key?: string; bytes: number }
 function coalesceKey(event: AppEvent): string | undefined {
   if (event.kind === 'run') return `run:${event.runId}`
   if (event.kind === 'attention') return 'attention'
+  if (event.kind === 'terminal') return 'terminal'
   if (event.kind === 'window') return undefined
   const data = event.event
   if ('kind' in data && data.kind === 'conversation_changed') return `conversation:${data.conversationId}`
@@ -66,9 +70,15 @@ export class AppEventFeed {
   // State a client cannot rebuild from changes it never saw (the unread set): handed to
   // a new client and to one told to resynchronize, instead of replaying history.
   readonly #state: () => AppEvent[]
+  // Monotonic, so a sleeping machine does not count as an App that went away.
+  readonly #now: () => number
+  #lastRead: number
+  #reading = 0
 
-  constructor(options: { epoch?: string; maxItems?: number; maxBytes?: number; state?: () => AppEvent[] } = {}) {
+  constructor(options: { epoch?: string; maxItems?: number; maxBytes?: number; state?: () => AppEvent[]; now?: () => number } = {}) {
     this.epoch = options.epoch ?? randomUUID()
+    this.#now = options.now ?? (() => performance.now())
+    this.#lastRead = this.#now()
     this.#state = options.state ?? (() => [])
     this.#maxItems = options.maxItems ?? DEFAULT_MAX_ITEMS
     this.#maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES
@@ -92,7 +102,22 @@ export class AppEventFeed {
     this.#wake()
   }
 
+  /** How long nobody has read the feed. A read still waiting counts as reading. */
+  idleMs(): number {
+    return this.#reading > 0 ? 0 : Math.max(0, this.#now() - this.#lastRead)
+  }
+
   async read(input: { epoch?: string; cursor: number; waitMs: number }): Promise<AppEventsReply> {
+    this.#reading += 1
+    try {
+      return await this.#read(input)
+    } finally {
+      this.#reading -= 1
+      this.#lastRead = this.#now()
+    }
+  }
+
+  async #read(input: { epoch?: string; cursor: number; waitMs: number }): Promise<AppEventsReply> {
     // A client without an epoch is new: it reads current state itself, so it starts here.
     if (input.epoch === undefined) return { epoch: this.epoch, cursor: this.#seq, items: this.#state() }
     if (input.epoch !== this.epoch || input.cursor > this.#seq || input.cursor < this.#lost) {
@@ -101,7 +126,7 @@ export class AppEventFeed {
     const pending = this.#after(input.cursor)
     if (pending.length > 0 || this.#closed || input.waitMs <= 0) return { epoch: this.epoch, cursor: this.#seq, items: pending }
     await this.#waitForChange(Math.min(input.waitMs, APP_EVENTS_MAX_WAIT_MS))
-    return await this.read({ ...input, waitMs: 0 })
+    return await this.#read({ ...input, waitMs: 0 })
   }
 
   close(): void {

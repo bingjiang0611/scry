@@ -228,7 +228,9 @@ export function buildMatrix(routing = loadRouting(), dir = MAIN_DIR, invoked = d
 
 export const OPS_DOC = join(root, 'docs/plans/remote-runtime-v2/P3-ipc-ops.md')
 
-const isWorkbenchRow = (row) => row.target.startsWith('desktopWorkbench:')
+// The workbench surfaces: device forwards, and the App terminal op that replaced the
+// terminal forwards (P3-terminal.md). Kept apart so each generated file stays small.
+const isWorkbenchRow = (row) => row.target.startsWith('desktopWorkbench:') || row.target.startsWith('terminal:')
 const matrixRow = (row) => `| \`${row.channel}\` | ${row.route} | \`${row.target}\` | ${row.path} | ${row.note} | ${row.why} |`
 const MATRIX_HEADER = ['| channel | 去向 | op(method) | 用户路径 | 差异与分工 | 依据 |', '|---|---|---|---|---|---|']
 
@@ -242,7 +244,7 @@ export function renderMatrix({ rows, defects, channels }) {
     `- 生产特权 IPC channel：${channels} 个（\`src/main/**\` 经 \`handleTrusted\` 注册，不含测试；含 \`handle(\` 参数名与 \`sourceControl:\${method}\` 这类按表展开的注册）`,
     `- 留在 main：${count('main')}，一半 main 一半 daemon（\`split\`）：${count('split')}，转发到现有 op：${count('forward')}，需要新增 op：${count('new-op')}`,
     '- 新增 op 的请求、响应、授权与调用方范围见 [P3-ipc-ops](P3-ipc-ops.md)；设计正文见 [P3 §13](P3-batch4-design.md)',
-    `- \`desktopWorkbench\` 转发行（workspace / terminal / sourceControl，共 ${rows.filter(isWorkbenchRow).length} 行）见 [P3-ipc-matrix-workbench](P3-ipc-matrix-workbench.md)`,
+    `- 工作台行（\`desktopWorkbench\` 转发的 workspace / sourceControl，与 App 终端 op \`terminal\`，共 ${rows.filter(isWorkbenchRow).length} 行）见 [P3-ipc-matrix-workbench](P3-ipc-matrix-workbench.md)`,
     '',
     '## 判定规则',
     '',
@@ -271,7 +273,7 @@ export function renderMatrix({ rows, defects, channels }) {
 
 export function renderWorkbenchMatrix({ rows }) {
   const lines = [
-    '# P3 附录 · IPC 路由矩阵：desktopWorkbench 转发（生成文件）',
+    '# P3 附录 · IPC 路由矩阵：工作台（生成文件）',
     '',
     '本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑；改 `scripts/daemon-ipc-routing-workbench.json` 后重新生成。判定规则与其余 channel 见 [P3-ipc-matrix](P3-ipc-matrix.md)。',
     '',

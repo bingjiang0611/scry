@@ -151,6 +151,16 @@
         "local"
       ]
     },
+    "terminal": {
+      "path": "terminal",
+      "request": "{ op:'terminal', method, args }（渲染端参数原样，末尾附 App 窗口当前 cwd 或 null）；输出另由 { op:'terminalFeed', method:'read', cursor } 按游标读取",
+      "response": "main 同一处理函数的返回值；terminalFeed.read 返回 { cursor, events }（每页不超过 512 KiB）",
+      "authorize": "本机 grant；daemon 用 resolveKnownProjectDirectory 重新解析 App 附上的 cwd，未知目录拒绝；ownership epoch 与 ready/ack 流控和进程内相同",
+      "why": "设备的 desktopWorkbench 终端按证书与工作区分开，列不出全部终端，录制跟着证书走；App 的终端要与进程内同一管理器、同一录制目录（P3-terminal.md）",
+      "scopes": [
+        "local"
+      ]
+    },
     "sessionLifecycle": {
       "path": "navigation",
       "request": "{ op:'sessionLifecycle', method, args }（App 渲染端参数原样）",

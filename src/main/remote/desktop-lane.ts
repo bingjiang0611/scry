@@ -13,6 +13,8 @@ import { remoteOperationCounters, remoteRequestTrace } from './remote-request-ti
 //   control: submit, answers, stop, catalogs, run state (short)
 //   workbench: file writes, Git/PR mutations, PTY input (a push may take 30 s; a stop
 //            or an answer must not wait behind it)
+//   terminal: the daemon App's terminal input and output (a keystroke must not wait
+//            behind a history page)
 //   watch:   one run's long-poll
 //   status:  the live-run long-poll
 //   events:  the App's event-feed long-poll (daemon mode only)
@@ -34,7 +36,7 @@ import { remoteOperationCounters, remoteRequestTrace } from './remote-request-ti
 import { laneNotSent, laneWasNotSent, laneOutcomeUnknown } from './desktop-lane-phase'
 export { laneNotSent, laneOutcomeUnknown, laneWasNotSent, laneWasWrittenUnknown } from './desktop-lane-phase'
 
-export type DesktopLaneName = 'control' | 'workbench' | 'status' | 'watch' | 'bulk' | 'events'
+export type DesktopLaneName = 'control' | 'workbench' | 'terminal' | 'status' | 'watch' | 'bulk' | 'events'
 // Which lane a request takes, and whether it may be replayed (desktop-lane-routing.ts).
 export { laneForRequest, replayableRequest } from './desktop-lane-routing'
 
@@ -74,6 +76,8 @@ const LANE_POLICY: Record<DesktopLaneName, { responseTimeoutMs: number; abortOnC
   control: { responseTimeoutMs: 30_000, abortOnCancel: false },
   // A write: cancelling the caller must not tear down a write whose bytes may have landed.
   workbench: { responseTimeoutMs: 30_000, abortOnCancel: false },
+  // Input is a write: cancelling must not tear down a keystroke that may have landed.
+  terminal: { responseTimeoutMs: 30_000, abortOnCancel: false },
   watch: { responseTimeoutMs: 40_000, abortOnCancel: true },
   status: { responseTimeoutMs: 40_000, abortOnCancel: true },
   events: { responseTimeoutMs: 40_000, abortOnCancel: true },

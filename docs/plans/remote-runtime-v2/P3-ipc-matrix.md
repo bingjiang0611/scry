@@ -3,9 +3,9 @@
 本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑；改 `scripts/daemon-ipc-routing.json` 后重新生成。
 
 - 生产特权 IPC channel：168 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
-- 留在 main：56，一半 main 一半 daemon（`split`）：5，转发到现有 op：36，需要新增 op：71
+- 留在 main：56，一半 main 一半 daemon（`split`）：5，转发到现有 op：25，需要新增 op：82
 - 新增 op 的请求、响应、授权与调用方范围见 [P3-ipc-ops](P3-ipc-ops.md)；设计正文见 [P3 §13](P3-batch4-design.md)
-- `desktopWorkbench` 转发行（workspace / terminal / sourceControl，共 30 行）见 [P3-ipc-matrix-workbench](P3-ipc-matrix-workbench.md)
+- 工作台行（`desktopWorkbench` 转发的 workspace / sourceControl，与 App 终端 op `terminal`，共 30 行）见 [P3-ipc-matrix-workbench](P3-ipc-matrix-workbench.md)
 
 ## 判定规则
 

@@ -65,6 +65,7 @@ export interface DaemonRunModeDeps {
   // E1b: this window's badge mirrors the daemon's unread set and decides what was viewed.
   dockBadge?: Pick<DockBadgeState, 'setDaemon' | 'bindDaemon' | 'forgetDaemon' | 'view'>
   isWindowFocused?: () => boolean
+  rendererCanReceive?: () => boolean
   // P3f W2: this window's run-level subscriptions also see the runs it follows here.
   runTraces?: NonNullable<DaemonRunRuntimeDeps['runTraces']> & Pick<RunTraceRouter, 'attachRuns' | 'publishStopState'>
 }
@@ -187,6 +188,7 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
     transport, runtime, send: deps.send, focusedRun: () => surface.focusedRunSnapshot(),
     ...(deps.dockBadge ? { dockBadge: deps.dockBadge } : {}),
     ...(deps.isWindowFocused ? { isWindowFocused: deps.isWindowFocused } : {}),
+    ...(deps.rendererCanReceive ? { rendererCanReceive: deps.rendererCanReceive } : {}),
     ...(deps.onWarn ? { onWarn: deps.onWarn } : {}),
     ...(deps.runTraces ? { runTraces: deps.runTraces } : {})
   })
@@ -208,6 +210,7 @@ export function appDaemonModeDeps(input: {
   currentCwd: () => string | undefined
   dockBadge?: DaemonRunModeDeps['dockBadge']
   isWindowFocused?: () => boolean
+  rendererCanReceive?: () => boolean
   runTraces?: DaemonRunModeDeps['runTraces']
   env?: NodeJS.ProcessEnv
 }): DaemonRunModeDeps {
@@ -249,6 +252,7 @@ export function appDaemonModeDeps(input: {
     currentCwd: input.currentCwd,
     ...(input.dockBadge ? { dockBadge: input.dockBadge } : {}),
     ...(input.isWindowFocused ? { isWindowFocused: input.isWindowFocused } : {}),
+    ...(input.rendererCanReceive ? { rendererCanReceive: input.rendererCanReceive } : {}),
     ...(input.runTraces ? { runTraces: input.runTraces } : {}),
     // The pump stops on its own after a failure; without this line the reason would be
     // dropped and the window would just never update.
