@@ -136,10 +136,14 @@ export function registerAppLifecycle({
         app.exit(claim.reason === 'user-quit' ? 0 : 1)
         return
       }
-      // Held until the process ends: `quit` fires after before-quit cleanup has settled,
-      // and `exit` covers paths that skip it. Release only removes this process's record.
-      app.once('quit', claim.release)
-      process.once('exit', claim.release)
+      if (claim.status === 'unlocked') {
+        console.warn('[scry] userData lock unavailable; starting without it (no other owner recorded)')
+      } else {
+        // Held until the process ends: `quit` fires after before-quit cleanup has settled,
+        // and `exit` covers paths that skip it. Release only removes this process's record.
+        app.once('quit', claim.release)
+        process.once('exit', claim.release)
+      }
       // Time spent reading the dialog is the user's, not startup's.
       if (claim.asked) startupPerf = startupTrace()
       startupPerf.mark('userdata_owned')

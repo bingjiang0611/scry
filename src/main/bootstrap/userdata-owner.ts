@@ -103,6 +103,10 @@ export type AppUserDataClaim =
     stopped?: DaemonLockRecord
   }
   | { status: 'quit'; reason: UserDataQuitReason; asked: boolean; holder?: DaemonLockRecord }
+  // Nobody holds the lock, but this App could not take it (unwritable userData, no
+  // readable identity of its own). Nothing is writing next to it, so it starts as it did
+  // before the lock existed; only the guard against a later daemon (B) is missing.
+  | { status: 'unlocked'; asked: false }
 
 export interface ClaimAppUserDataOptions {
   userDataDir: string
@@ -133,7 +137,13 @@ async function acquireForApp(userDataDir: string): Promise<UserDataLockOutcome |
 
 export async function claimAppUserData(options: ClaimAppUserDataOptions): Promise<AppUserDataClaim> {
   const first = await acquireForApp(options.userDataDir)
-  if (!first) return { status: 'quit', reason: 'lock-error', asked: false }
+  if (!first) {
+    // A record we could not evaluate may be a live daemon: fail closed. No record at all
+    // means no other writer is known, and refusing to start would only lock the user out.
+    let record: DaemonLockRecord | undefined | 'unreadable'
+    try { record = readUserDataLockRecord(options.userDataDir) } catch { record = 'unreadable' }
+    return record === undefined ? { status: 'unlocked', asked: false } : { status: 'quit', reason: 'lock-error', asked: false }
+  }
   if (first.status === 'acquired') return owned(first, false)
 
   const decision = decideUserDataHolder(first)
