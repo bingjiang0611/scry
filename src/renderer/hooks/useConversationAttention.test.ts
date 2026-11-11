@@ -34,3 +34,13 @@ it('releases a previous renderer view on initial mount outside a visible convers
   expect(effects.current!()).toBeUndefined()
   expect(setViewed.mock.calls).toEqual([[null]])
 })
+
+it('does nothing, instead of throwing, when the bridge has no conversation attention', () => {
+  // The shell mounts this hook on every view. A renderer without the method must keep
+  // rendering; before this guard the desktop-remote UI smoke blanked on a TypeError.
+  for (const scry of [undefined, {}, { conversations: {} }]) {
+    vi.stubGlobal('window', { scry })
+    useConversationAttention(undefined)
+    expect(() => effects.current!()).not.toThrow()
+  }
+})
