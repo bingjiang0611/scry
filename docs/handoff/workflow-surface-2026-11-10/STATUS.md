@@ -42,8 +42,8 @@
 
 | 包 | 条目 | 状态 | 报告 |
 |---|---|---|---|
-| Q1 | Qoder 能否跑起来，失败则抓 stderr 并试 CLI 1.1.81 | 未开始 | |
-| Q2 | 升级后的 Qoder 日常路径回归 | 未开始 | |
+| Q1 | Qoder 能否跑起来，失败则抓 stderr 并试 CLI 1.1.81 | 完成 | [Q1](reports/Q1.md) | 只升 SDK 不够：CLI 1.1.86 与 1.1.81 都报 `sdk_worker_removed`、`exit 42`；换 CLI 1.1.80 后真实一轮跑通（29.8k in / 3 out / 6.3s），`workflow_activity` 0 |
+| Q2 | 升级后的 Qoder 日常路径回归 | 完成（认证失效未验证） | [Q2](reports/Q2.md) | 读写文件与 Bash、审批允许与拒绝、停止（无残留进程）、重启后恢复、分支会话、后台子 Agent、`TaskCreate/TaskUpdate/UpdateGoal`、MCP 全部有真实证据。两处如实说明：Provider 对失败子 Agent 也报 `completed`；登录失效提示未验证 |
 | Q3 | 补跑 G1 的 Qoder 与 rotom，加真实 Qoder 夹具 | 未开始 | |
 | Q4 | 干净依赖上的门禁，含 `pack:artifact` | 未开始 | |
 
