@@ -216,7 +216,13 @@ async function isGitRepository(path: string): Promise<boolean> {
   return exists(join(path, '.git'))
 }
 
-/** Excluded directory names under the capture scope; start-hook and finalize worktree discovery share one rule. */
+/**
+ * Excluded directory names under the capture scope; start-hook and finalize worktree discovery share one rule.
+ *
+ * Scope is the only rule shared here. `repositories.mode` governs which repositories the start hook
+ * baselines; finalize additionally covers worktrees created during the turn, so `workspace-only`
+ * turns can still report one new-worktree snapshot even though start capture never listed it.
+ */
 export function captureExcludedNames(config: RecorderConfig): Set<string> {
   return new Set(['.git', '.scry', 'node_modules', 'target', 'dist', 'build', ...(config.repositories.exclude ?? [])])
 }

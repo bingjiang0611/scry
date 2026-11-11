@@ -1,4 +1,4 @@
-import { readFile, readdir, realpath, stat } from 'node:fs/promises'
+import { open, readdir, readFile, realpath, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { TraceEvent, TurnDiffSnapshot, WorktreeBaselineReason } from '../../shared/trace.js'
 import { withinCaptureScope } from './config.js'
@@ -16,8 +16,12 @@ export const MAX_NEW_WORKTREE_BASELINES = 8
 /** 单轮最多上报的候选条目；防止异常回合把记录撑大。超出部分不再逐条上报。 */
 const MAX_NEW_WORKTREE_CANDIDATES = 32
 
-/** 与现有 turn diff 一致的上限：每个新 worktree 的 begin + finish 共用 5 秒。 */
-const NEW_WORKTREE_DEADLINE_MS = TURN_DIFF_TARGETED_DEADLINE_MS
+/**
+ * begin 用回合开始的 5 秒上限（与 start hook 一致），finish 沿用现有 20 秒 finish 预算。
+ * 所有新 worktree 与已有仓库并发采集，所以给足 finish 不会拉长收尾墙钟时间；
+ * 反而能避免「在 worktree 里跑过构建」这种可归因的回合被 5 秒截断成 timeout。
+ */
+const NEW_WORKTREE_BEGIN_DEADLINE_MS = TURN_DIFF_TARGETED_DEADLINE_MS
 
 const ZERO_OBJECT_ID = '0'.repeat(40)
 
@@ -79,6 +83,24 @@ export async function linkedWorktreesOfRepository(repository: string): Promise<L
 }
 
 /**
+ * 只读 reflog 的第一行：`logs/HEAD` 会随 checkout 历史无上限增长，而创建记录永远是第一条。
+ * 单行上限 1KB，足够容纳 `<old> <new> <ident> <ts> <tz>`；更长的行会被当成不合约形态。
+ */
+async function readReflogFirstLine(path: string): Promise<string | undefined> {
+  const handle = await open(path, 'r').catch(() => undefined)
+  if (!handle) return undefined
+  try {
+    const buffer = Buffer.allocUnsafe(1_024)
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
+    const text = buffer.subarray(0, bytesRead).toString('utf8')
+    const newline = text.indexOf('\n')
+    return (newline === -1 ? text : text.slice(0, newline)).trim()
+  } finally {
+    await handle.close()
+  }
+}
+
+/**
  * worktree 自己的 HEAD reflog 第一条：旧值全 0、新值 = 创建时检出的提交，并带秒级时间戳。
  * `git worktree add` 从该提交干净检出，创建前目录不存在，所以这条记录就是确定的基线。
  * 只有能证明「这一条就是创建记录」时才返回 creation，否则返回拿不到基线的原因。
@@ -86,9 +108,7 @@ export async function linkedWorktreesOfRepository(repository: string): Promise<L
 export async function readWorktreeCreation(
   gitDir: string
 ): Promise<{ creation: WorktreeCreation } | { problem: WorktreeBaselineReason }> {
-  const log = await readText(join(gitDir, 'logs', 'HEAD'))
-  if (log == null) return { problem: 'reflog_missing' }
-  const first = log.split('\n')[0]?.trim()
+  const first = await readReflogFirstLine(join(gitDir, 'logs', 'HEAD'))
   if (!first) return { problem: 'reflog_missing' }
   const meta = first.split('\t')[0].trim().split(' ')
   if (meta.length < 5) return { problem: 'reflog_creation_not_first' }
@@ -178,6 +198,12 @@ export async function findNewTurnWorktrees(query: NewTurnWorktreeQuery): Promise
       plans.push({ kind: 'unavailable', requestedRoot: canonical, reason: 'worktree_deleted' })
       continue
     }
+    // `<root>/.git` 必须还指向本 worktree：缺了它就等于不再是一个独立仓库，Git 会向上解析到
+    // 外层仓库，把整个 worktree 的文件算成新增。那种 diff 是编造出来的，只能记 partial。
+    if (!(await stat(join(candidate.root, '.git')).catch(() => undefined))) {
+      plans.push({ kind: 'unavailable', requestedRoot: canonical, reason: 'worktree_deleted' })
+      continue
+    }
     // `git worktree add --no-checkout` 不写 index，工作树因此没有确定的检出内容；
     // 把创建提交当成基线会把「未检出」说成「全部删除」。
     if (!(await stat(join(candidate.gitDir, 'index')).catch(() => undefined))) {
@@ -191,7 +217,11 @@ export async function findNewTurnWorktrees(query: NewTurnWorktreeQuery): Promise
       baseline: { commit: creation.commit, at: creation.createdAt }
     })
   }
-  plans.sort((left, right) => left.requestedRoot.localeCompare(right.requestedRoot))
+  // 排序时把基线条目放在前面：后面的 32 条上报上限只会截掉「本来就没基线」的噪音，
+  // 不能把一个已确认可采集的 worktree 连快照带原因一起丢掉。
+  plans.sort((left, right) => left.kind === right.kind
+    ? left.requestedRoot.localeCompare(right.requestedRoot)
+    : left.kind === 'baseline' ? -1 : 1)
   const baselines = plans.filter((plan) => plan.kind === 'baseline')
   const overLimit = new Set(baselines.slice(MAX_NEW_WORKTREE_BASELINES).map((plan) => plan.requestedRoot))
   return plans
@@ -207,7 +237,10 @@ export interface NewWorktreeBaselineOptions {
   excludedPaths: string[]
   events: TraceEvent[]
   patchExcludeBasenames?: string[]
+  /** begin 阶段的 5 秒上限（保留给测试缩短）。 */
   deadlineMs?: number
+  /** finish 阶段上限；缺省时沿用现有 finish 预算。 */
+  finishDeadlineMs?: number
 }
 
 function unavailableSnapshot(
@@ -241,19 +274,19 @@ export async function finishNewWorktreeBaseline(
   options: NewWorktreeBaselineOptions
 ): Promise<TurnDiffSnapshot> {
   const started = Date.now()
-  const deadline = started + (options.deadlineMs ?? NEW_WORKTREE_DEADLINE_MS)
   if (plan.kind === 'unavailable') {
     return unavailableSnapshot(plan.requestedRoot, plan.reason, new Date(started).toISOString(), 0)
   }
   const capture = await beginGitTurnDiff(
     plan.root,
-    Math.max(1, deadline - Date.now()),
+    Math.max(1, started + (options.deadlineMs ?? NEW_WORKTREE_BEGIN_DEADLINE_MS) - Date.now()),
     options.captureRoot,
     options.excludedPaths,
     false,
     plan.baseline
+
   )
-  const snapshot = await finishGitTurnDiff(capture, Math.max(1, deadline - Date.now()), {
+  const snapshot = await finishGitTurnDiff(capture, options.finishDeadlineMs, {
     ...turnChangeHints(plan.root, options.events),
     patchExcludeBasenames: options.patchExcludeBasenames,
     completePatches: true

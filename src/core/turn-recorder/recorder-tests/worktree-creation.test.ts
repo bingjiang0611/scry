@@ -78,6 +78,26 @@ describe('本回合新建 worktree 的 diff 基线', () => {
     expect(record.diff.status).toBe('partial')
   }, 35_000)
 
+  it('worktree 的 .git 链接被删掉：partial，不把整个目录算成新增文件', async () => {
+    // 少了 `<root>/.git`，Git 会向上解析到外层仓库，把 worktree 里每个文件都当成新增。
+    const root = await gitWorkspace()
+    await startTurn(root, 'wt-link-gone')
+    const worktree = await addWorktree(root, 'link-gone')
+    await writeFile(join(worktree, 'kept.txt'), 'left behind\n')
+    await rm(join(worktree, '.git'), { force: true })
+    const record = await endTurn(root, 'wt-link-gone')
+
+    const snapshot = diffAt(record, await realpath(worktree))
+    expect(snapshot).toMatchObject({
+      status: 'unavailable',
+      baselineSource: 'worktree-creation-reflog',
+      baselineStatus: 'partial',
+      baselineReason: 'worktree_deleted',
+      files: []
+    })
+    expect(record.diff.status).toBe('partial')
+  }, 35_000)
+
   it('--no-checkout 创建：partial 并写明没有确定的检出内容', async () => {
     const root = await gitWorkspace()
     await startTurn(root, 'wt-no-checkout')
