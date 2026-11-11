@@ -1,6 +1,13 @@
-# 第三轮进行中
+# 第三轮待核验
 
-第三轮（Q1–Q4，验证 Qoder SDK 1.0.17 → 1.0.57 的真机效果并补跑 Qoder 与 rotom）进行中，做法见 [R3.md](R3.md)。Q1 结论：只升 SDK 不够——本机 CLI 1.1.86 与 1.1.81 都要求 SDK ≥ 1.0.58（`sdk_worker_removed`），换 CLI 1.1.80 后 Qoder 在真实 App 里跑通。
+第三轮（Q1–Q4，验证 Qoder SDK 1.0.17 → 1.0.57 的真机效果并补跑 Qoder 与 rotom）已在 macOS 本机完成并 push，做法见 [R3.md](R3.md)。四个包的报告：[Q1](reports/Q1.md)、[Q2](reports/Q2.md)、[Q3](reports/Q3.md)、[Q4](reports/Q4.md)。
+
+- **Q1**：只升 SDK 不够。本机 CLI 1.1.86 与 1.1.81 都报 `sdk_worker_removed`、`exit 42`；换 CLI 1.1.80 后 Qoder 在真实 App 里跑通（29.8k in / 3 out / 6.3s，`workflow_activity` 0）。这与 R3 表格里「1.0.57 配套 CLI 1.1.81」不一致，CLI 自己给出的上界是 1.1.80 或更早。
+- **Q2**：升级后的日常路径逐项通过——读写文件与 Bash、审批允许与拒绝、停止（无残留进程、显示「本轮已中断」）、重启后恢复、分支会话、`TaskCreate/TaskUpdate/UpdateGoal`、MCP。两处如实说明：Provider 对失败的子 Agent 也报 `completed`；登录失效提示未验证。
+- **Q3**：Qoder 8 轮真实运行的 `workflow_activity` 全为 0；真实脱敏事件做成夹具 `src/main/workflow-wire-fixtures/qoder-background-agent.ts` 并带回放测试（负对照放宽判据后 3 条失败）。rotom `0.1.27-main.655c35f2` 跑出 `kind: subagent` 与 `kind: workflow` 两种异步运行，后台卡片都显示、Workflow 面板空态。
+- **Q4**：干净 `npm ci` 后五道门禁全部 EXIT=0，`pack:artifact` 的产物含 Qoder SDK 与 `cross-spawn`，证实上一轮那次失败是共享 `node_modules` 所致。
+
+**待维护者决定的一条**：兼容性清单仍把 Qoder CLI `>=1.1.60 <1.2.0` 标为受支持，但 SDK 1.0.57 下 1.1.81 与 1.1.86 都 `exit 42`。建议收窄到 `<=1.1.80`；本轮没有改，因为这是产品对外声明的支持范围。
 
 ## 第二轮已核验（审查方 2026-11-11）
 
