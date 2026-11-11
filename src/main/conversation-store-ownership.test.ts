@@ -24,22 +24,39 @@ describe('conversation ownership cache', () => {
 
     const store = new ConversationStore(userData)
     const required = store.required.bind(store)
+    const loadOwnership = store.loadOwnership.bind(store)
+    const loads: Array<ReturnType<typeof store.loadOwnership>> = []
+    let publicationLoading!: () => void
+    const publicationReachedScan = new Promise<void>((resolve) => { publicationLoading = resolve })
+    vi.spyOn(store, 'loadOwnership').mockImplementation(() => {
+      const load = loadOwnership()
+      loads.push(load)
+      if (loads.length === 2) publicationLoading()
+      return load
+    })
     let release!: () => void
     const gate = new Promise<void>((resolve) => { release = resolve })
+    let scanStarted!: () => void
+    const scanReading = new Promise<void>((resolve) => { scanStarted = resolve })
     let calls = 0
     vi.spyOn(store, 'required').mockImplementation(async (id: string) => {
-      // Only the first cold scan's read waits, so it is the one that finishes last.
-      if (calls++ === 0) await gate
+      // Hold the first cold scan mid-read until the publication has asked for ownership.
+      if (calls++ === 0) {
+        scanStarted()
+        await gate
+      }
       return required(id)
     })
 
     const slowList = store.list(cwd)
+    await scanReading
     const published = store.create(cwd)
-    // Let the publication run as far as it can before the old scan is allowed to finish.
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await publicationReachedScan
     release()
     const [listed, created] = await Promise.all([slowList, published])
 
+    // Both waited on one scan, so the publication registered itself in the cached map.
+    expect(await loads[1]).toBe(await loads[0])
     expect(listed.map(conversation => conversation.id)).toContain(existing.id)
     const after = (await store.list(cwd)).map(conversation => conversation.id)
     expect(after).toEqual(expect.arrayContaining([existing.id, created.id]))

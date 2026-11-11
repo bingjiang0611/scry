@@ -175,6 +175,14 @@ export function registerConversationHandlers(deps: ConversationBootstrapDependen
    * Listing keeps working from the children's own frozen provenance after the
    * original source record is gone.
    */
+  function nativeSourceDeleting(source: Extract<SideChatSource, { kind: 'native-session' }>): boolean {
+    // A delete reserves the alias it was asked for; the source may name either alias.
+    const row = appSessionStore().load().find(session => session.providerId === source.providerId &&
+      session.agentProfileId === source.agentProfileId && session.cwd === source.cwd &&
+      (session.externalSessionId === source.nativeSessionId || session.sessionId === source.nativeSessionId))
+    return [source.nativeSessionId, row?.externalSessionId, row?.sessionId, row?.runId]
+      .some(id => id && deletingSessions.has(providerSessionKey(source.providerId, source.cwd, id, source.agentProfileId)))
+  }
   async function authorizeSideChatSource(input: unknown, options: { requireSource?: boolean } = {}): Promise<SideChatSource> {
     const source = parseSideChatSource(input)
     if (source.kind === 'native-session') return { ...source, cwd: resolveKnownProjectDirectory(source.cwd) }
@@ -200,7 +208,16 @@ export function registerConversationHandlers(deps: ConversationBootstrapDependen
     return conversationService().trackSideChatCreate(parsed.commandId, async () => {
       const authorized = await authorizeSideChatSource(parsed.source)
       await getStartupManagedRecovery()
-      const created = await conversationService().createSideChat({ ...parsed, source: authorized })
+      const publish = () => conversationService().createSideChat({ ...parsed, source: authorized })
+      // A Provider session's delete reserves itself and counts its side chats under this
+      // admission. Publishing under it too means a child is either counted by that delete
+      // or refused here, never left behind with no source panel to open it from.
+      const created = authorized.kind === 'native-session'
+        ? await contextAdmission.run(providerContextKey(authorized.providerId, authorized.cwd, authorized.agentProfileId), async () => {
+          if (nativeSourceDeleting(authorized)) throw new Error('侧聊来源会话正在删除，不能创建侧边会话')
+          return publish()
+        })
+        : await publish()
       getWindow()?.webContents.send('agent:dataUpdated', { kind: 'conversation_changed', conversationId: created.id })
       return created
     })
