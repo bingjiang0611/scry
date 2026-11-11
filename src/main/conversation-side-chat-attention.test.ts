@@ -47,6 +47,12 @@ describe('side-chat attention owner', () => {
     const catalog = await current.service.listCatalog(current.cwd)
     expect(catalog.conversations.find(item => item.id === nativeChild.id)?.sideChat?.parentConversationId).toBe(adopted.id)
     expect(catalog.conversations.find(item => item.id === managedChild.id)?.sideChat?.parentConversationId).toBeUndefined()
+
+    // An unreadable workspace list falls back to the native source row, never to the child.
+    const unreadable = async (): Promise<never> => { throw new Error('store unavailable') }
+    expect(await sideChatAttentionKey(nativeChild, unreadable))
+      .toBe(sessionAttentionKey({ providerId: 'codex', cwd: current.cwd, sessionId: 'native-parent' }))
+    expect(await sideChatAttentionKey(nativeChild, unreadable)).not.toBe(conversationAttentionKey(nativeChild.id))
   })
 
   it('reports a create the host is still executing as in-flight, not as not-found', async () => {

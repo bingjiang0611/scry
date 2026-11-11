@@ -223,7 +223,7 @@ export async function sendConversationMessage(
     historyHash: context?.contentHash ?? null
   }))
   // Resolved before the run registers, so its first question already lands on the right row.
-  const attentionKey = await sideChatAttentionKey(conversation, cwd => deps.store.list(cwd)).catch(() => undefined)
+  const attentionKey = await sideChatAttentionKey(conversation, cwd => deps.store.list(cwd))
   active.add(runId)
   let dispatched = false
   /** The runner answered, so this request is no longer provably undelivered. */

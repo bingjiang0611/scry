@@ -16,8 +16,11 @@ export async function sideChatAttentionKey(conversation: Conversation,
   const source = conversation.sideChat?.source
   if (!source) return undefined
   if (source.kind === 'conversation') return conversationAttentionKey(source.conversationId)
-  const adopted = adoptingConversationOf(source, await listWorkspace(source.cwd))
-  if (adopted) return conversationAttentionKey(adopted.id)
-  return sessionAttentionKey({ providerId: source.providerId, agentProfileId: source.agentProfileId,
+  const native = sessionAttentionKey({ providerId: source.providerId, agentProfileId: source.agentProfileId,
     cwd: source.cwd, sessionId: source.nativeSessionId })
+  // An unreadable workspace list only hides whether the session was adopted. It never sends
+  // attention back to the child, whose key no row can show or clear.
+  const conversations = await listWorkspace(source.cwd).catch(() => undefined)
+  const adopted = conversations && adoptingConversationOf(source, conversations)
+  return adopted ? conversationAttentionKey(adopted.id) : native
 }
