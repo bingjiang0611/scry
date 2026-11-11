@@ -1,4 +1,4 @@
-# 第三轮已核验（审查方 2026-11-11）
+# 第四轮未开始（Qoder 守护进程迁移的真机验证，见 R4.md）
 
 > **维护者决定（2026-11-11）：本机不使用 Claude CLI，所有依赖 Claude 真实运行的条目不再推进。** 受影响：B（Q1 到 Q11、真实夹具）、C 的运行中 / 失败 / 停止截图、E2、E3 的“按名称运行”、G4 的“带真实 workflow 行的会话”。它们保持未验证，不是阻塞待解除。执行方不要再为它们探测网关、找凭据或想办法启动 Claude。
 
@@ -47,6 +47,17 @@
 | G3 | 在最新 HEAD 上重跑门禁 | 完成（两处环境失败） | [G3](reports/G3.md) | `typecheck`/`build`/`test:workflow-ui`/`test:workflow-archive`/`test:renderer:ui` 在 `1e41d87c` 上 EXIT=0；`pack:artifact` 失败但 `origin/main` 同样失败（共享 `node_modules` 被别的进程改动）；`test:unit --maxWorkers=1` 7 个失败全是压力下 spawn 超时，两个文件单独跑都通过 | |
 | G4 | C7 与相邻路径收尾 | 部分完成 | [G4](reports/G4.md) | 一个实例里 Codex（2 子 Agent）与 OpenCode（0 工具）来回切，Workflow 标签一直开着：切到 B 空态无残留，Agents 按会话分开，切回 A 两个子 Agent 恢复。带真实 workflow 行的会话无法在同一实例里造出来（Claude 阻塞），运行态残留未验证 | |
 | G5 | 其他 Provider 接入的设计说明（不实现） | 完成（仅设计） | [G5](reports/G5.md) | Pi `kind: workflow` 能撑「运行 + 步骤 + 终态」，撑不起「阶段 + 每 agent 用量」；Qoder 缺真实事件不能开工；列出三条不许做的事与成本估计，未改代码 | |
+
+## 第四轮（Qoder 守护进程迁移的真机验证）
+
+审查方已把 Qoder SDK 升到 1.0.59，每次运行使用专属守护进程（提交 `e50d776c`）。分支历史已改写，执行方开工前必须重置本地分支，见 [R4.md](R4.md)。
+
+| 包 | 条目 | 状态 | 报告 |
+|---|---|---|---|
+| D1 | CLI 1.1.86 已登录的真实轮次，含停止、并发、managed recorder | 未开始 | |
+| D2 | 发送延迟与 Qoder 日志增长 | 未开始 | |
+| D3 | 通过后把兼容性清单改为 supported | 未开始 | |
+| D4 | 干净依赖上的门禁，含 `pack:artifact` | 未开始 | |
 
 ## 第三轮（Qoder SDK 升级的真机验证）
 
