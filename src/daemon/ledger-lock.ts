@@ -70,7 +70,8 @@ export function readDaemonIdentity(pid: number): DaemonLockRecord | undefined {
   return { pid, startedAt: row.startedAt, identityKey: processIdentityKey(row), startedBy: '' }
 }
 
-function readRecord(path: string): DaemonLockRecord | undefined {
+/** Parse one lock file; undefined when it is absent or does not describe a holder. */
+export function readDaemonLockRecord(path: string): DaemonLockRecord | undefined {
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<DaemonLockRecord>
     if (typeof parsed.pid !== 'number' || typeof parsed.startedAt !== 'string') return undefined
@@ -148,7 +149,7 @@ export async function acquireDaemonLock(options: AcquireDaemonLockOptions): Prom
   const release = (): void => {
     // Only remove a lock that still describes this process; a successor that already
     // took over must keep its own record.
-    const current = readRecord(path)
+    const current = readDaemonLockRecord(path)
     if (current?.pid === record.pid && current.startedAt === record.startedAt) rmSync(path, { force: true })
   }
 
@@ -161,7 +162,7 @@ export async function acquireDaemonLock(options: AcquireDaemonLockOptions): Prom
   }
 
   const evaluate = (): HolderCheck => {
-    const previous = readRecord(path)
+    const previous = readDaemonLockRecord(path)
     const row = previous ? rowOf(previous.pid) : undefined
     return checkHolder(previous, row, options.daemonEntry, pid)
   }
@@ -189,7 +190,7 @@ export async function acquireDaemonLock(options: AcquireDaemonLockOptions): Prom
       await wait(TAKEOVER_WAIT_MS)
     }
   }
-  if (!takenOver) return { status: 'already-running', holder: readRecord(path) ?? record, reason: 'identity-unverifiable' }
+  if (!takenOver) return { status: 'already-running', holder: readDaemonLockRecord(path) ?? record, reason: 'identity-unverifiable' }
 
   try {
     await options.afterValidate?.()

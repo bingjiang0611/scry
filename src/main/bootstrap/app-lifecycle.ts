@@ -33,6 +33,7 @@ import { startRemoteHostIfEnabled, type RemoteHostRuntime } from './remote-host'
 import type { RunControl } from './run-control'
 import { runStartupRecovery } from './startup-recovery'
 import { appStartupWriters } from './app-startup-writers'
+import { claimAppUserDataWithDialog } from './userdata-owner-dialog'
 
 export function initializeAppEnvironment(__dirname: string, getWindow: () => BrowserWindow | null) {
   // scry 开发期可能从一个父 Claude Code 会话内启动，继承了 CLAUDECODE / CLAUDE_CODE_* /
@@ -120,7 +121,29 @@ export function registerAppLifecycle({
   app.whenReady().then(async () => {
     if (!primaryInstance) return
     const writers = appStartupWriters()
-    const startupPerf = new PerformanceTrace('app.startup', { platform: process.platform }, recordStartupPerformance)
+    const startupTrace = (): PerformanceTrace => new PerformanceTrace('app.startup', { platform: process.platform }, recordStartupPerformance)
+    let startupPerf = startupTrace()
+    if (writers.userDataLock) {
+      // First, before every userData writer below, including performance recording: a
+      // daemon left from a switch-on session may still own this userData (P3 case 1). The
+      // single-instance lock already ran in initializeAppEnvironment, so a second App never
+      // gets here. Cost: one lock read/write and one identity read (/proc on Linux, one
+      // `ps` on macOS), synchronous like the initDb that follows; never on an IPC path.
+      const claim = await claimAppUserDataWithDialog(app.getPath('userData'))
+      if (claim.status === 'quit') {
+        // app.exit, not app.quit: before-quit cleanup would flush stores this App never
+        // opened. Nothing was written, and the lock (if any) belongs to someone else.
+        app.exit(claim.reason === 'user-quit' ? 0 : 1)
+        return
+      }
+      // Held until the process ends: `quit` fires after before-quit cleanup has settled,
+      // and `exit` covers paths that skip it. Release only removes this process's record.
+      app.once('quit', claim.release)
+      process.once('exit', claim.release)
+      // Time spent reading the dialog is the user's, not startup's.
+      if (claim.asked) startupPerf = startupTrace()
+      startupPerf.mark('userdata_owned')
+    }
     await startPerformanceRecording(app.getPath('userData'), app.getVersion(), app.isPackaged, useDevelopmentRenderer)
     startupPerf.mark('performance_recording_ready')
     // 双流事件日志按环境变量装配；未设置时 openProviderEventWriter() 返回 undefined。

@@ -34,6 +34,11 @@ vi.mock('../provider-event-log', () => ({ configureProviderEventLog: vi.fn() }))
 vi.mock('../run-stage-timing', () => ({ configureRunStageTiming: vi.fn() }))
 vi.mock('../claude-locate', () => ({ packagedRecorderCliPath: () => undefined, warmShellEnv: vi.fn(async () => undefined), shellEnv: vi.fn() }))
 vi.mock('./remote-host', () => ({ startRemoteHostIfEnabled: vi.fn(async () => undefined) }))
+// The userData claim has its own test against a real temp userData (app-userdata-owner.test.ts);
+// here getPath is a fake path, so the claim must not touch the filesystem.
+vi.mock('./userdata-owner-dialog', () => ({
+  claimAppUserDataWithDialog: vi.fn(async () => ({ status: 'owned', asked: false, release: vi.fn(), record: {} }))
+}))
 
 const { registerAppLifecycle } = await import('./app-lifecycle')
 const { DAEMON_MODE_ENV } = await import('../daemon-channel-gate')

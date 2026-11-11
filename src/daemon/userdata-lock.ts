@@ -1,4 +1,5 @@
-import { acquireDaemonLock, type AcquireDaemonLockOptions, type DaemonLockRecord } from './ledger-lock'
+import { join } from 'node:path'
+import { acquireDaemonLock, readDaemonLockRecord, type AcquireDaemonLockOptions, type DaemonLockRecord } from './ledger-lock'
 
 // One writer per userData directory (P3-userdata-lock.md). `daemon.lock` only says "one
 // daemon per state directory", and the state directory and userData are two separate
@@ -11,8 +12,12 @@ export const USERDATA_LOCK_NAME = 'scry-userdata.lock'
 /** Machine code a refused daemon exits with; the supervisor treats it as deterministic. */
 export const USERDATA_OWNED_ERROR = 'daemon_userdata_owned'
 
-/** `app` is reserved for the switch-off App (option B in the design); nothing writes it yet. */
-export type UserDataOwnerRole = 'daemon'
+/**
+ * `daemon`: the host process with the switch on. `app`: the switch-off App, which holds the
+ * lock for its whole life (option B in the design). The daemon refuses any live holder,
+ * whatever its role; the role only tells the App whether a holder is one it may offer to stop.
+ */
+export type UserDataOwnerRole = 'daemon' | 'app'
 
 export type UserDataLockOutcome =
   | { status: 'acquired'; record: DaemonLockRecord; previous?: DaemonLockRecord; release: () => void }
@@ -45,4 +50,9 @@ export async function acquireUserDataLock(options: AcquireUserDataLockOptions): 
     ...(outcome.status === 'replaced-stale' && outcome.previous ? { previous: outcome.previous } : {}),
     release: outcome.release
   }
+}
+
+/** The current record, read once; the App re-checks it right before it signals a holder. */
+export function readUserDataLockRecord(userDataDir: string): DaemonLockRecord | undefined {
+  return readDaemonLockRecord(join(userDataDir, USERDATA_LOCK_NAME))
 }
