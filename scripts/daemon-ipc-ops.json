@@ -3,10 +3,10 @@
   "ops": {
     "billing": {
       "path": "analytics",
-      "request": "{ op:'billing', method, context? }",
-      "response": "现有 billingState / admin 同步结果",
-      "authorize": "已验证 peer + authorize(context.cwd)；fixture 导入额外要求开发开关",
-      "why": "账本与 transcript 在 daemon 侧",
+      "request": "{ op:'billing', method, args: [] }（三个通道都没有参数）；同步走 long lane（分页，每页 20 秒）",
+      "response": "main 同一处理函数的 billingState / 同步 / fixture 导入结果",
+      "authorize": "本机 grant；与进程内相同：无额外开关（进程内 fixture 导入也没有开发开关，原文档写错了）；admin key 只从 daemon 的 shell 环境读取",
+      "why": "计费账本在 daemon 持有的 scry.db 里",
       "scopes": [
         "local"
       ]
@@ -63,7 +63,7 @@
     },
     "mcp": {
       "path": "providers",
-      "request": "{ op:'mcp', method, args }（渲染端参数原样）；走单独的 mcp lane（5 分钟超时，容得下 OAuth 登录与首次 npx 安装）",
+      "request": "{ op:'mcp', method, args }（渲染端参数原样）；走单独的 long lane（5 分钟超时，容得下 OAuth 登录与首次 npx 安装）",
       "response": "main 同一处理函数的 envelope（含 unavailable/unsupported）；重认证的 OAuth 页面经事件流 { kind:'oauth', url } 交给 App",
       "authorize": "本机 grant；与进程内相同：实时快照、探测、重认证每次重建并核对 MCP 执行快照与指纹，失败即拒绝；daemon 先用 isSafeOAuthAuthorizationUrl 校验 OAuth 地址，App 再校验，且只在自己发出的重认证进行中才打开",
       "why": "MCP 与 trust gate 都在 daemon；Provider 认证队列也在 daemon，App 不能在自己进程里另行认证",

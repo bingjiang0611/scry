@@ -44,8 +44,9 @@ export function laneForRequest(request: unknown): DesktopLaneName {
   if (typeof op !== 'string') return 'control'
   const terminal = terminalLane(op, request)
   if (terminal) return terminal
-  // MCP starts servers and may wait for a browser sign-in: its own long lane.
-  if (op === 'mcp') return 'mcp'
+  // MCP starts servers and may wait for a browser sign-in; a billing sync reads pages.
+  if (op === 'mcp') return 'long'
+  if (op === 'billing' && (request as { method?: unknown }).method === 'syncBillingAdmin') return 'long'
   if (workbenchWrite(op, request)) return 'workbench'
   if (writeOperations.has(op)) return 'control'
   if (idempotentControlOperations.has(op)) return 'control'

@@ -30,7 +30,7 @@
 | `agent:addPiProfile` | split | `piProfile:addPiProfile` | providers | main: 启动器文件选择框与握手失败提示留在 main；daemon 解析启动器、在已知项目目录里做 Pi RPC 握手并写入 profile | Provider 配置随 adapter 一起迁移 |
 | `agent:adoptActiveRun` | new-op | `runControl:adoptActiveRun` | controls | — | run 登记表在 daemon |
 | `agent:answerQuestion` | forward | `answerQuestion` | — | 等价 | 待答问题在 daemon |
-| `agent:billingState` | new-op | `billing:billingState` | analytics | — | 账本与 transcript 在 daemon 侧 |
+| `agent:billingState` | new-op | `billing:billingState` | analytics | — | 计费账本在 daemon 持有的 scry.db 里 |
 | `agent:catalogHealth` | new-op | `sessionStore:catalogHealth` | navigation | — | 会话账本在 daemon |
 | `agent:chooseFolder` | split | `workspaceSelection:chooseFolder` | navigation | main: 原生目录选择框与窗口的当前工作区（同 agent:setCwd）留在 main；daemon 只收选择框给出的路径，校验 canonical 目录并 rememberProject，App 在 daemon 回答后再选中该目录 | 选择框与持久化分开 |
 | `agent:clipboardImage` | main | `—` | — | — | 剪贴板 |
@@ -45,7 +45,7 @@
 | `agent:gitDiff` | new-op | `workspaceDiff:gitDiff` | source-control | — | 项目授权归 daemon；git 读取跟随授权 |
 | `agent:gitDiffCommits` | new-op | `workspaceDiff:gitDiffCommits` | source-control | — | 项目授权归 daemon；git 读取跟随授权 |
 | `agent:gitDiffSnapshot` | new-op | `workspaceDiff:gitDiffSnapshot` | source-control | — | 项目授权归 daemon；git 读取跟随授权 |
-| `agent:importBillingFixture` | new-op | `billing:importBillingFixture` | analytics | — | 账本与 transcript 在 daemon 侧 |
+| `agent:importBillingFixture` | new-op | `billing:importBillingFixture` | analytics | — | 计费账本在 daemon 持有的 scry.db 里 |
 | `agent:invalidateProviderContext` | new-op | `providerContext:invalidateProviderContext` | providers | — | Provider 运行时在 daemon |
 | `agent:listArchivedSessions` | new-op | `sessionStore:listArchivedSessions` | navigation | — | 会话账本在 daemon |
 | `agent:listCommands` | new-op | `providerCommands:listCommands` | providers | — | 设备 op commands 丢掉 CapabilityEnvelope（unavailable 会变成空列表）；本机要完整 envelope |
@@ -79,7 +79,7 @@
 | `agent:steer` | new-op | `runControl:steer` | controls | — | run 登记表在 daemon |
 | `agent:stop` | forward | `stop` | — | 等价 | 既有 stop |
 | `agent:stopBackgroundTask` | new-op | `runControl:stopBackgroundTask` | controls | — | run 登记表在 daemon |
-| `agent:syncBillingAdmin` | new-op | `billing:syncBillingAdmin` | analytics | — | 账本与 transcript 在 daemon 侧 |
+| `agent:syncBillingAdmin` | new-op | `billing:syncBillingAdmin` | analytics | — | 计费账本在 daemon 持有的 scry.db 里 |
 | `agent:testMcp` | new-op | `mcp:testMcp` | providers | — | MCP 与 trust gate 都在 daemon；Provider 认证队列也在 daemon，App 不能在自己进程里另行认证 |
 | `agent:traceAck` | main | `—` | — | — | renderer 消费回执 |
 | `agent:traceResynchronized` | main | `—` | — | — | main 的投递桥状态 |

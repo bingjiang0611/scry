@@ -10,7 +10,7 @@
   1. daemon 不能打开浏览器。
   2. daemon 先用 `isSafeOAuthAuthorizationUrl` 校验授权地址，不安全的直接报错，不会离开 daemon；安全的作为不合并的事件 `{ kind: 'oauth', url }` 交给 App。
   3. App 只在自己发出的重认证仍在进行时打开（闸门守卫新增 `settled` 回调，成功、失败都会递减计数），并再校验一次地址。只凭事件流里的一条消息，永远不会打开浏览器。
-- **单独的 `mcp` lane。** 超时 5 分钟：OAuth 回调最多等 2 分钟，测试连接时可能要先首次安装 MCP server。其余 lane 仍是 30 秒。只有 guard scan 可以重放，其余三个会启动 MCP server，不重放。
+- **单独的 `long` lane（原名 mcp，后来计费同步也用它）。** 超时 5 分钟：OAuth 回调最多等 2 分钟，测试连接时可能要先首次安装 MCP server。其余 lane 仍是 30 秒。只有 guard scan 可以重放，其余三个会启动 MCP server，不重放。
 - **矩阵文档拆分。** 主矩阵超过 20 KB，`conversation:*` 拆到 `P3-ipc-matrix-conversation.md`。生成器脚本本身也超过 20 KB，渲染部分拆到 `scripts/daemon-ipc-matrix-render.mjs`。
 
 ## 测试（均先失败）
@@ -22,7 +22,7 @@
   - 不检查是否有进行中的重认证 → 2 条失败；
   - 不校验地址 → 1 条失败；
   - 闸门不调用 `settled` → 2 条失败。
-- lane：四个方法都走 `mcp`，只有 guard scan 可以重放。
+- lane：四个方法都走 `long`，只有 guard scan 可以重放。
 
 ## 门禁（Linux 容器，root）
 

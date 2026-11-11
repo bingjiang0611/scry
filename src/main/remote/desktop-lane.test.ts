@@ -89,11 +89,16 @@ describe('terminal lane (P3-terminal)', () => {
   })
 })
 
-describe('mcp lane', () => {
-  it('gives MCP its own long lane, and replays only the guard scan', () => {
-    for (const method of ['mcpSnapshot', 'testMcp', 'reauthenticateMcp', 'mcpGuardScan']) expect(laneForRequest({ op: 'mcp', method }), method).toBe('mcp')
+describe('long lane', () => {
+  it('gives MCP the long lane, and replays only the guard scan', () => {
+    for (const method of ['mcpSnapshot', 'testMcp', 'reauthenticateMcp', 'mcpGuardScan']) expect(laneForRequest({ op: 'mcp', method }), method).toBe('long')
     expect(replayableRequest({ op: 'mcp', method: 'mcpGuardScan' })).toBe(true)
     for (const method of ['mcpSnapshot', 'testMcp', 'reauthenticateMcp']) expect(replayableRequest({ op: 'mcp', method }), method).toBe(false)
+  })
+
+  it('takes the billing sync there too, and leaves the quick billing reads on bulk', () => {
+    expect(laneForRequest({ op: 'billing', method: 'syncBillingAdmin' })).toBe('long')
+    for (const method of ['billingState', 'importBillingFixture']) expect(laneForRequest({ op: 'billing', method }), method).toBe('bulk')
   })
 })
 

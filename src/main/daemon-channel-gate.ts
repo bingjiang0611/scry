@@ -8,6 +8,7 @@ import { WORKBENCH_FORWARDS, WORKBENCH_LOCAL_OPS } from './daemon-local-ops/work
 import { PROJECT_LOCAL_OPS } from './daemon-local-ops/project'
 import { TERMINAL_LOCAL_OPS } from './daemon-local-ops/terminal'
 import { MCP_LOCAL_OPS } from './daemon-local-ops/mcp'
+import { BILLING_LOCAL_OPS } from './daemon-local-ops/billing'
 
 // Development switch for "the daemon owns runs". Kept here, free of Electron, so the IPC
 // registrar can consult it without importing the daemon client assembly.
@@ -68,7 +69,8 @@ export const DAEMON_LOCAL_OP_CHANNELS: DaemonLocalOpTable = {
   ...WORKBENCH_LOCAL_OPS,
   ...PROJECT_LOCAL_OPS,
   ...TERMINAL_LOCAL_OPS,
-  ...MCP_LOCAL_OPS
+  ...MCP_LOCAL_OPS,
+  ...BILLING_LOCAL_OPS
 }
 
 /** Channels the daemon answers through an op it already serves paired devices (route `forward`). */

@@ -3,6 +3,7 @@ import type { ActiveRun } from '../../shared/trace'
 import type { AgentQuestionResponse, AgentStartRequest, AgentStartResult } from '../../shared/runtime'
 import { billingStateQuery, importBillingFixture, syncBillingAdmin } from '../db'
 import { warmShellEnv } from '../claude-locate'
+import { billingChannelHandlers } from './billing-channels'
 import { stopObservedBackgroundTask } from '../background-task-control'
 import { steerObservedRun } from '../run-steering'
 import { CommandReceipts } from '../command-receipts'
@@ -137,18 +138,8 @@ export function registerAgentRuntimeHandlers({
   const userDataDir = (): string => app.getPath('userData')
   registerChannelHandlers(handleTrusted, usageChannelHandlers({ userDataDir }))
   registerChannelHandlers(handleTrusted, llmPerformanceChannelHandlers({ userDataDir, activeRuns: () => runs.activeStates() }))
-  handleTrusted('agent:billingState', async () => {
-    await warmShellEnv()
-    return billingStateQuery()
-  })
-  handleTrusted('agent:syncBillingAdmin', async () => {
-    await warmShellEnv()
-    return syncBillingAdmin()
-  })
-  handleTrusted('agent:importBillingFixture', async () => {
-    await warmShellEnv()
-    return importBillingFixture()
-  })
+  // Billing: the table the daemon also serves (billing-channels.ts).
+  registerChannelHandlers(handleTrusted, billingChannelHandlers({ warmShellEnv, billingStateQuery, syncBillingAdmin, importBillingFixture }))
 
   // P2 Files & Diff：cwd 的最终 git diff（vs HEAD 增删），与工具足迹对照
   registerChannelHandlers(handleTrusted, workspaceDiffChannelHandlers(resolveKnownProjectDirectory))

@@ -9,6 +9,7 @@ import { queryLocalOps } from './local-ops/queries'
 import { workbenchLocalOps } from './local-ops/workbench'
 import { projectLocalOps } from './local-ops/project'
 import { mcpLocalOps } from './local-ops/mcp'
+import { billingLocalOps } from './local-ops/billing'
 
 export type { DaemonLocalEndpointDeps } from './local-ops/deps'
 
@@ -35,6 +36,7 @@ export function daemonLocalEndpoint(endpointDeps: DaemonLocalEndpointDeps): Loca
       ...workbenchLocalOps(deps),
       ...projectLocalOps(deps),
       ...mcpLocalOps(deps),
+      ...billingLocalOps(deps),
       ...deps.terminal.localOps
     }),
     events: deps.events,
