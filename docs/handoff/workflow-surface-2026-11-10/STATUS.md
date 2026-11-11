@@ -1,4 +1,8 @@
-# 第二轮已核验（审查方 2026-11-11）
+# 第三轮进行中
+
+第三轮（Q1–Q4，验证 Qoder SDK 1.0.17 → 1.0.57 的真机效果并补跑 Qoder 与 rotom）进行中，做法见 [R3.md](R3.md)。Q1 结论：只升 SDK 不够——本机 CLI 1.1.86 与 1.1.81 都要求 SDK ≥ 1.0.58（`sdk_worker_removed`），换 CLI 1.1.80 后 Qoder 在真实 App 里跑通。
+
+## 第二轮已核验（审查方 2026-11-11）
 
 第二轮（G1–G5，不用 Claude，改用 OpenCode / Codex / Qoder / Pi `rotom`）已在本机完成并 push，总结见 [reports/SUMMARY-R2.md](reports/SUMMARY-R2.md)。G1 的四个 Provider 里 Codex、Pi 原生、OpenCode 有真实运行证据，Qoder 与 Pi `rotom` 标为阻塞；G2、G3、G5 完成；G4 部分完成（缺一个带真实 workflow 行的会话）。第一轮的「全部待核验」结论保留在下方。
 
