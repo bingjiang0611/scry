@@ -216,6 +216,18 @@ async function isGitRepository(path: string): Promise<boolean> {
   return exists(join(path, '.git'))
 }
 
+/** Excluded directory names under the capture scope; start-hook and finalize worktree discovery share one rule. */
+export function captureExcludedNames(config: RecorderConfig): Set<string> {
+  return new Set(['.git', '.scry', 'node_modules', 'target', 'dist', 'build', ...(config.repositories.exclude ?? [])])
+}
+
+/** A path is in capture scope only when it is canonically inside the workspace and outside excluded directories. */
+export function withinCaptureScope(canonical: string, workspaceRoot: string, excluded: Set<string>): boolean {
+  const fromRoot = relative(workspaceRoot, canonical)
+  if (fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) return false
+  return !fromRoot.split(/[\\/]/).some((segment) => excluded.has(segment))
+}
+
 async function linkedWorktreeRepositories(
   repository: string,
   workspaceRoot: string,
@@ -243,9 +255,7 @@ async function linkedWorktreeRepositories(
     }
     let canonical: string
     try { canonical = await realpath(candidate) } catch { continue }
-    const fromRoot = relative(workspaceRoot, canonical)
-    if (fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) continue
-    if (fromRoot.split(/[\\/]/).some(segment => excluded.has(segment))) continue
+    if (!withinCaptureScope(canonical, workspaceRoot, excluded)) continue
     if (await isGitRepository(canonical)) found.push(canonical)
   }
   return { repositories: found, truncated }
@@ -290,7 +300,7 @@ export async function discoverRepositories(
   if (config.repositories.mode !== 'discover-nested-git') {
     return { repositories: [...repositories], maxDepth, depthLimitedDirectories: 0 }
   }
-  const excluded = new Set(['.git', '.scry', 'node_modules', 'target', 'dist', 'build', ...(config.repositories.exclude ?? [])])
+  const excluded = captureExcludedNames(config)
   let depthLimitedDirectories = 0
   const frontier: string[] = []
   const walk = async (dir: string, depth: number): Promise<void> => {

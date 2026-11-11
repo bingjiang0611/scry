@@ -34,6 +34,8 @@ export {
   isDiffSnapshotStage,
   isDiffPreviewStage,
   type TurnDiffBaselineOrigin,
+  type WorktreeBaselineReason,
+  WORKTREE_BASELINE_REASONS,
   type TurnDiffPatchStatus,
   type TurnDiffPatchReason,
   type TurnDiffFallbackReason,

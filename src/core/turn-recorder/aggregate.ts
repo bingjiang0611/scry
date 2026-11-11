@@ -179,6 +179,8 @@ export function aggregateTurnEvidence(args: {
         ? [file.patchReason ?? 'unknown']
         : []
   )))
+  // 新建 worktree 拿不到可信基线时，记清楚是哪一种原因，不把「无法归因」退化成一句泛化文案。
+  const worktreeBaselineReasons = new Set(diffs.flatMap((diff) => diff.baselineReason ? [diff.baselineReason] : []))
   const dangers = starts.flatMap((event) =>
     event.danger ? [{ ...event.danger, tool: event.tool, toolUseId: event.toolUseId }] : []
   )
@@ -326,7 +328,9 @@ export function aggregateTurnEvidence(args: {
                 diffs,
                 [source],
                 capturedDiffs.length < diffs.length
-                  ? 'one or more repository snapshots were unavailable'
+                  ? worktreeBaselineReasons.size > 0
+                    ? `one or more repository snapshots were unavailable: new worktree baselines were untrustworthy (${[...worktreeBaselineReasons].join(', ')})`
+                    : 'one or more repository snapshots were unavailable'
                   : `one or more file patches were omitted or truncated: ${[...incompletePatchReasons].join(', ')}`,
                 'exact'
               )
