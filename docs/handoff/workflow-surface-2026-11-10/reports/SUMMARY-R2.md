@@ -6,6 +6,8 @@
 
 Codex、Pi（原生）、OpenCode 在本机的真实轮次里，Workflow 面板都是空态，canonical 流里 `workflow_activity` 为 0；`origin/main` 的对照没有差异。Qoder 与 Pi `rotom` 在本机跑不起来，各有可归因证据并标为阻塞。
 
+> **审查方更正（2026-11-11）**：Codex、Pi、OpenCode 的事件不经过本分支改动的 `normalize-hooks.ts` / `normalize-workflow.ts`。仓库里只有 Claude 的 `agent-runner.ts` 和 Qoder 的 `qoder-messages.ts` 调用 `normalizeSdkMessage`。所以 Codex 与 `origin/main` 一致证明的是“新增 Workflow 标签没有影响 Agents 面板”，**不能**证明共享归一化入口的改动对其他 Provider 无害。这个入口的回归目前只有合成数据证据：既有的 5 个 Qoder 适配器测试文件（148 项，覆盖 `local_agent` 改名和 `task_updated` 改写）与本轮新增的两条用例，审查方已在容器里重跑通过。真实 Qoder 事件仍缺。
+
 ## 逐包
 
 | 包 | 结果 | 关键证据 |

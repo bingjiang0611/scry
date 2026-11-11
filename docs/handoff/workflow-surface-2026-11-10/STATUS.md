@@ -1,4 +1,4 @@
-# 第二轮待核验
+# 第二轮已核验（审查方 2026-11-11）
 
 第二轮（G1–G5，不用 Claude，改用 OpenCode / Codex / Qoder / Pi `rotom`）已在本机完成并 push，总结见 [reports/SUMMARY-R2.md](reports/SUMMARY-R2.md)。G1 的四个 Provider 里 Codex、Pi 原生、OpenCode 有真实运行证据，Qoder 与 Pi `rotom` 标为阻塞；G2、G3、G5 完成；G4 部分完成（缺一个带真实 workflow 行的会话）。第一轮的「全部待核验」结论保留在下方。
 
@@ -31,6 +31,27 @@
 | G3 | 在最新 HEAD 上重跑门禁 | 完成（两处环境失败） | [G3](reports/G3.md) | `typecheck`/`build`/`test:workflow-ui`/`test:workflow-archive`/`test:renderer:ui` 在 `1e41d87c` 上 EXIT=0；`pack:artifact` 失败但 `origin/main` 同样失败（共享 `node_modules` 被别的进程改动）；`test:unit --maxWorkers=1` 7 个失败全是压力下 spawn 超时，两个文件单独跑都通过 | |
 | G4 | C7 与相邻路径收尾 | 部分完成 | [G4](reports/G4.md) | 一个实例里 Codex（2 子 Agent）与 OpenCode（0 工具）来回切，Workflow 标签一直开着：切到 B 空态无残留，Agents 按会话分开，切回 A 两个子 Agent 恢复。带真实 workflow 行的会话无法在同一实例里造出来（Claude 阻塞），运行态残留未验证 | |
 | G5 | 其他 Provider 接入的设计说明（不实现） | 完成（仅设计） | [G5](reports/G5.md) | Pi `kind: workflow` 能撑「运行 + 步骤 + 终态」，撑不起「阶段 + 每 agent 用量」；Qoder 缺真实事件不能开工；列出三条不许做的事与成本估计，未改代码 | |
+
+## 审查方对第二轮的核验（2026-11-11，Linux x64 容器，Xvfb，非 root，Chromium 沙箱开启）
+
+核验对象：`0425137a..e77c8ee8`（6 个提交，身份符合 CLAUDE.md）。
+
+| 检查 | 结果 |
+|---|---|
+| `npm run typecheck` | 0 个错误 |
+| 本轮新增的两条用例与 focus store 测试 | 26 项通过 |
+| 既有 Qoder 适配器测试 5 个文件 | 148 项通过 |
+| `scripts/workflow-surface-ui-smoke.mjs`，含新的 focus 模式 | 通过 |
+| focus 模式负对照：保留未消费的请求 | 失败，报“流式更新把选择拉回”，恢复后通过 |
+| 报告与证据中的内部地址、账号、个人路径 | 未发现 |
+
+审查方更正：
+
+- **G1 结论过度**：Codex、Pi、OpenCode 不经过本分支改动的归一化代码，只有 Claude 和 Qoder 经过。共享入口的回归只有合成证据，真实 Qoder 事件仍缺。已在 G1 与 SUMMARY-R2 加注。
+- **G5 能力矩阵**：后台任务卡片只有 Qoder 和 Pi，原表写成五个 Provider 都有。已改。
+- **证据目录**：两轮的截图和事件统计都提交到了仓库根目录 `evidence/`。已移到本交接目录下，报告里的相对路径因此变为正确。
+
+结论：G2、G3 已核验。G1 对 Codex、Pi 原生、OpenCode 1.18.31 的空态结论成立，对共享入口的结论按上面更正。G4 部分完成，G5 设计说明可用。Qoder、Pi `rotom`、OpenCode 2.2.6 的阻塞都有归因，不是本分支引入的。
 
 ## 审查方核验结论（2026-11-10，Linux x64 容器，Xvfb，非 root，Chromium 沙箱开启）
 
