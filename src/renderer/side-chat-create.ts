@@ -86,30 +86,23 @@ export function readCreateCommands(
 }
 
 /**
- * Whether one more command fits the ledger.
+ * Returns whether the command is durable; dispatch must not start otherwise.
  *
- * The ledger is the only durable proof that a create might have been dispatched. Evicting
- * an unresolved row to make room would lose exactly that proof, so a full ledger refuses
- * the next creation before dispatch instead.
+ * The ledger stays bounded. Callers first settle what a full ledger can prove with
+ * `settleFullLedger`; only a row that is still unresolved after that is dropped, oldest
+ * first. Refusing instead once blocked every later creation in every parent behind
+ * commands nobody could reach any more. A dropped row loses only the "check this create"
+ * shortcut: a child that was really created is still listed in its source's history.
  */
-export function canRecordCreateCommand(
-  storage: Pick<Storage, 'getItem'> | undefined = defaultStorage()
-): boolean {
-  return readCreateCommands(storage).length < MAX_CREATE_COMMANDS
-}
-
-/** Returns whether the command is durable; dispatch must not start otherwise. */
 export function writeCreateCommand(
   command: SideChatCreateCommand,
   storage: Pick<Storage, 'getItem' | 'setItem'> | undefined = defaultStorage()
 ): boolean {
   try {
     if (!storage) return false
-    const existing = readCreateCommands(storage)
-    const rows = existing.filter((row) => row.commandId !== command.commandId)
-    if (rows.length >= MAX_CREATE_COMMANDS) return false
+    const rows = readCreateCommands(storage).filter((row) => row.commandId !== command.commandId)
     rows.push(command)
-    storage.setItem(STORAGE_KEY, JSON.stringify(rows))
+    storage.setItem(STORAGE_KEY, JSON.stringify(rows.slice(-MAX_CREATE_COMMANDS)))
     return true
   } catch {
     return false
@@ -171,15 +164,25 @@ export function commandFromPreview({
 
 export type CreationResolution =
   | { kind: 'created'; conversation: ConversationSummary }
-  /** A reply was lost and the read-back did not find the child: still unknown. */
+  /** The host answered and no child owns this command id. */
+  | { kind: 'not-created' }
+  /** The lookup itself could not be read; nothing is known about the command. */
   | { kind: 'unknown' }
-  | { kind: 'not-attempted' }
 
-/** `not-found` is not proof of non-dispatch; only a found receipt may open a tab. */
+/**
+ * What a read-back receipt proves about one create command.
+ *
+ * Creation is a local host write keyed by the command id. The host reports a command it is
+ * still executing as `in-flight` (a renderer reloaded mid-create), which stays unknown. A
+ * `not-found` answer therefore means the command published nothing. It used to be kept as
+ * "unknown" forever, which turned every ordinary host refusal into a parent that could
+ * never create a side chat again.
+ */
 export function resolveCreateReceipt(receipt: SideChatCommandReceipt): CreationResolution {
-  return receipt.status === 'found'
-    ? { kind: 'created', conversation: receipt.conversation }
-    : { kind: 'unknown' }
+  if (receipt.status === 'found') return { kind: 'created', conversation: receipt.conversation }
+  // The host is still running that create: its result is not known, so the command stays.
+  if (receipt.status === 'in-flight') return { kind: 'unknown' }
+  return { kind: 'not-created' }
 }
 
 /**
@@ -205,18 +208,20 @@ export function createdOutcome(
 }
 
 /**
- * What a lost create reply proves.
+ * What the read-back of a failed create proves.
  *
- * A found receipt may open that child. A `not-found` answer proves nothing, so the
- * durable command stays and the next attempt is a read-only check, never a dispatch.
+ * A found receipt may open that child. A conclusive `not-created` settles the command as
+ * refused, so the next click is an ordinary create. Only an unreadable lookup keeps the
+ * durable command for a later read-only check.
  */
 export function lossOutcome(
   command: Pick<SideChatCreateCommand, 'scopeKey'>,
   resolution: CreationResolution,
   currentScopeKey: string,
   notice: { opened: string; elsewhere: string }
-): { keepCommand: boolean; outcome?: CreateOutcome } {
-  if (resolution.kind !== 'created') return { keepCommand: true }
+): { keepCommand: boolean; refused?: true; outcome?: CreateOutcome } {
+  if (resolution.kind === 'unknown') return { keepCommand: true }
+  if (resolution.kind === 'not-created') return { keepCommand: false, refused: true }
   return { keepCommand: false, outcome: createdOutcome(command, currentScopeKey, resolution.conversation, notice) }
 }
 
@@ -231,6 +236,29 @@ export async function findCreatedSideChat(
     // An unreadable lookup proves nothing about the command.
     return { kind: 'unknown' }
   }
+}
+
+/**
+ * Frees ledger rows whose outcome the host can now prove, before a new command needs room.
+ *
+ * Only a full ledger is read back, one bounded lookup per row: a found child or a
+ * conclusive not-created settles its row. An in-flight or unreadable row stays, so the
+ * eviction that may follow can only ever drop a command nobody can resolve right now.
+ */
+export async function settleFullLedger(
+  api: { findSideChatCommand: (source: SideChatSource, commandId: string) => Promise<SideChatCommandReceipt> },
+  storage: Pick<Storage, 'getItem' | 'setItem'> | undefined = defaultStorage()
+): Promise<number> {
+  const rows = readCreateCommands(storage)
+  if (rows.length < MAX_CREATE_COMMANDS) return 0
+  let settled = 0
+  for (const row of rows) {
+    const resolution = await findCreatedSideChat(api, row)
+    if (resolution.kind === 'unknown') continue
+    clearCreateCommand(row.commandId, storage)
+    settled += 1
+  }
+  return settled
 }
 
 /** One page of the child history of this source. */

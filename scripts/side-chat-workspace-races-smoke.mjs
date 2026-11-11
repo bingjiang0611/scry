@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'vite'
 import electron from 'electron'
+import { exerciseCreateSettlement } from './side-chat-workspace-settle-checks.mjs'
 
 /**
  * Mounted-race acceptance for the side-chat workspace.
@@ -49,6 +50,7 @@ async function run() {
       try {
         await win.loadFile(${JSON.stringify(join(temp, 'index.html'))})
         await win.webContents.executeJavaScript('window.ScryRacesFixture.mountSideChatWorkspaceRaces(); true')
+        const exerciseCreateSettlement = ${exerciseCreateSettlement.toString()}
         const result = await (${exercise.toString()})(win.webContents)
         console.log('SCRY_WORKSPACE_RACES_RESULT=' + JSON.stringify(result))
         app.exit(0)
@@ -214,39 +216,9 @@ async function exercise(contents) {
     `another parent inherited a refusal notice: ${JSON.stringify(afterRefusal)}`)
   evidence.refusalAfterSwitch = { refusedIn: refused.notice, noticeInOther: afterRefusal.notice }
 
-  // 6. A lost create reply answered after the switch keeps its durable command for its own
-  //    parent: no notice here, and the later read-only check never dispatches a second create.
-  await switchTo('scope-A', ['tab-A'])
-  await settleList(['tab-A'], ['tab-A'])
-  await click('[data-races-create]')
-  await wait(`window.__scryRaces.pending.some(entry => entry.kind === 'preview')`, 'lost-reply preview')
-  await answer('preview', preview('scope-A'))
-  await wait(`window.__scryRaces.pending.some(entry => entry.kind === 'create')`, 'lost-reply create')
-  await switchTo('scope-B', ['tab-B'])
-  await answer('create', JSON.stringify('send reply lost'), { failed: true })
-  await wait(`window.__scryRaces.pending.some(entry => entry.kind === 'find')`, 'receipt lookup')
-  await answer('find', "({ commandId: 'fixture', status: 'not-found' })")
-  await settleList(['tab-B'], ['tab-B'])
-  const afterLost = await state()
-  must(afterLost.notice === '' && afterLost.tabs === 'tab-B',
-    `a lost create reply wrote its unknown notice into another parent: ${JSON.stringify(afterLost)}`)
-  const createsBefore = (await requests()).filter((entry) => entry.kind === 'create').length
-  await switchTo('scope-A', ['tab-A'])
-  await settleList(['tab-A'], ['tab-A'])
-  await click('[data-races-create]')
-  // The durable command of this parent turns the click into a read-only check: a preview
-  // would mean a second creation was starting.
-  await wait(`window.__scryRaces.pending.some(entry => entry.kind === 'find')`, 'read-only receipt check')
-  must(!(await pending()).some((entry) => entry.kind === 'preview'), 'checking an unknown command restarted a create')
-  await answer('find', "({ commandId: 'fixture', status: 'not-found' })")
-  await wait(`document.querySelector('[data-races-notice]').textContent.includes('没有查到')`, 'unknown receipt notice')
-  const createsAfter = (await requests()).filter((entry) => entry.kind === 'create').length
-  must(createsAfter === createsBefore,
-    `checking an unknown command replayed the create: ${JSON.stringify({ createsBefore, createsAfter })}`)
-  const sources = (await requests()).filter((entry) => entry.kind === 'create').map((entry) => JSON.parse(entry.source))
-  must(sources.every((source) => source.nativeSessionId === 'native-A' && source.providerId === 'codex'),
-    `every create must keep its own parent's exact source tuple: ${JSON.stringify(sources)}`)
-  evidence.unknownReceipt = { createsBefore, createsAfter, notice: (await state()).notice, sources }
+  // 6-7. What a failed create leaves behind: see side-chat-workspace-settle-checks.mjs.
+  await exerciseCreateSettlement({ read, wait, must, click, state, pending, requests, switchTo, answer,
+    settleList, preview, summary, evidence })
   return { ...evidence, answeredRequests: (await requests()).length, openCalls: (await calls()).open.length }
 }
 

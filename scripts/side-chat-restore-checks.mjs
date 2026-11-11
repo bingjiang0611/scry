@@ -1,8 +1,8 @@
 import { CHILD_PANEL, json, sideChatDriver } from './side-chat-driving.mjs'
 
-/** The row a user selects to go back to the parent: the one that owns the side-chat count. */
+/** The row a user selects to go back to the parent. The sidebar prints nothing about its side chats. */
 const PARENT_ROW = `[...document.querySelectorAll('.sb-sess')].filter(node =>
-  node.textContent.includes('side chat parent turn') && node.querySelector('[data-side-chat-count]') != null)`
+  node.textContent.includes('side chat parent turn'))`
 
 /** Exact native provenance: provider, profile, workspace and native session together. */
 const sameNativeSource = (left, right) => left != null && right != null &&
@@ -13,8 +13,8 @@ const sameNativeSource = (left, right) => left != null && right != null &&
  * Re-navigation after other parents and a deleted source were used.
  *
  * The parent can be shown as a Provider session row or as the managed conversation that
- * owns that native session; either way the user selects the row that owns the side-chat
- * count and expects the shipped history dialog to list the child. The scope the dialog
+ * owns that native session; either way the user selects that one row and expects the
+ * shipped history dialog to list the child. The scope the dialog
  * really asks for is read from the host's own IPC log, and the child is only accepted
  * under an identity that really owns its frozen source: the exact
  * provider/profile/workspace/native-session tuple, or the conversation that owns that
@@ -29,12 +29,11 @@ export async function exerciseSideChatRestore({ cdp, evaluate, check, ipcCountsP
     `[...document.querySelectorAll('.sb-sess')].map(node => [node.dataset.conversationId ?? null, node.textContent.slice(0, 40)])`)
   const parentRows = await evaluate(`(() => ${PARENT_ROW}.map(node => ({
     conversationId: node.dataset.conversationId ?? null, provider: node.dataset.provider ?? null,
-    count: node.querySelector('[data-side-chat-count]')?.dataset.sideChatCount ?? null,
     text: node.textContent.slice(0, 60) })))()`)
   // Two rows claiming the same source would make "the parent row" ambiguous; zero means the
   // user cannot get back to this parent at all. Both are findings, not something to skip.
   check(parentRows.length === 1,
-    `exactly one sidebar row must own the parent side-chat count: ${json({ parentRows, rows: await allRows() })}`)
+    `exactly one sidebar row must be the parent: ${json({ parentRows, rows: await allRows() })}`)
   await clickAt(`${PARENT_ROW}[0]`)
   await wait(`${PARENT_ROW}[0]?.classList.contains('active') === true`)
   await idle()

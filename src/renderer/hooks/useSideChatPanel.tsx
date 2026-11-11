@@ -106,7 +106,6 @@ export function useSideChatPanel({
     {...(chatProps.onOpenFile ? { onOpenFile: chatProps.onOpenFile as (target: WorkspaceFileTarget) => void } : {})}
     onOpenConversation={pickConversation}
     onChanged={() => { workspace.refresh(); void loadProjects() }}
-    onClose={() => dispatch({ type: 'close-side-chat', conversationId })}
   />
   return {
     tabs: workspace.tabs,

@@ -3,6 +3,11 @@ import type { ConversationDeletionPreview } from '@shared/conversation-api'
 import type { ConversationDeletionResult } from '@shared/conversation'
 import { ModalFrame, requestModalClose } from './Modals'
 
+/** The IPC wrapper main adds to a rejected handler; the channel name is not user copy. */
+const IPC_WRAPPER = /^(?:Error:\s*)?Error invoking remote method '[^']+':\s*(?:Error:\s*)?/
+/** The host's own reason, e.g. which side chat holds the delete, without transport noise. */
+const reasonOf = (error: unknown): string => (error instanceof Error ? error.message : String(error)).replace(IPC_WRAPPER, '')
+
 export function ConversationDeleteDialog({ id, onChanged, onClose }: {
   id: string
   onChanged: () => void
@@ -19,7 +24,7 @@ export function ConversationDeleteDialog({ id, onChanged, onClose }: {
     let cancelled = false
     void window.scry.conversations.previewDeletion(id).then(
       preview => { if (!cancelled) setPreview(preview) },
-      error => { if (!cancelled) setError(String(error)) }
+      error => { if (!cancelled) setError(reasonOf(error)) }
     )
     return () => { cancelled = true }
   }, [id])
@@ -37,7 +42,7 @@ export function ConversationDeleteDialog({ id, onChanged, onClose }: {
       setResult(await window.scry.conversations.delete(id, preview.fingerprint))
       onChanged()
     } catch (error) {
-      setError(`${String(error)}。结果不能假定为未删除，请关闭后刷新证据核对；不会自动重试。`)
+      setError(`${reasonOf(error)}。结果不能假定为未删除，请关闭后刷新证据核对；不会自动重试。`)
       onChanged()
     } finally { pending.current = false; setWorking(false) }
   }
@@ -50,6 +55,13 @@ export function ConversationDeleteDialog({ id, onChanged, onClose }: {
         {target.providerId} · {target.externalSessionId} · {target.sharedWith.length ? `保留：仍被 ${target.sharedWith.join(', ')} 引用` : '清理独占副本'}
       </li>)}
     </ul></details>}
+    {preview?.sideChats && preview.sideChats.length > 0 && <details data-delete-side-chats={preview.sideChats.length}>
+      <summary>同时删除这个对话的 {preview.sideChats.length} 个侧边会话</summary>
+      <p>侧边会话只存在于这个对话的右侧面板，删除后没有其他入口，因此一并删除它们的记录、冻结快照和独占副本。</p>
+      {/* Bounded list: the count above is the whole scope, the rows are a readable sample. */}
+      <ul>{preview.sideChats.slice(0, 20).map(child => <li key={child.conversationId}>{child.title}</li>)}</ul>
+      {preview.sideChats.length > 20 && <p>另有 {preview.sideChats.length - 20} 个未列出，同样会被删除。</p>}
+    </details>}
     {preview?.targets.some(target => target.sharedWith.length > 0) && <p role="note">本次仍被引用的整组副本会继续保留。引用消失后，可在已存档对话中重新预览并明确确认回收；不会自动清理。</p>}
     {!preview && !error && <p role="status">正在核对全部绑定、尝试和共享引用…</p>}
     {error && <p role="alert">{error}</p>}

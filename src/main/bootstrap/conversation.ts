@@ -1,6 +1,5 @@
 import type { BrowserWindow } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
-import type { Conversation, ConversationDeletionResult } from '../../shared/conversation'
 import type { ProviderContext } from '../../shared/provider'
 import type { createAppSessionStore } from '../app-store'
 import type { ConversationStore, NativeSessionScope } from '../conversation-store'
@@ -12,8 +11,10 @@ import { parseSideChatCreate, parseSideChatListRequest, parseSideChatSource } fr
 import type { SideChatSource } from '../../shared/conversation'
 import { parseConversationLegacySource, prepareConversationAdoption } from '../conversation-adoption'
 import { deleteConversationHistory } from '../conversation-history'
-import { liveConversationDeletionCatalog, planConversationDeletion, resolveConversationDeletionRuns } from '../conversation-deletion'
+import { registerConversationDeletionHandlers } from './conversation-delete'
 import { resolveSessionRunIds } from '../db'
+import type { DockBadgeState } from '../dock-badge'
+import { conversationAttentionKey, sessionAttentionKey } from '../../shared/session-attention'
 
 export interface ConversationBootstrapDependencies {
   handleTrusted: <TArgs extends unknown[], TResult>(channel: string, listener: (event: IpcMainInvokeEvent, ...args: TArgs) => TResult) => void
@@ -37,6 +38,7 @@ export interface ConversationBootstrapDependencies {
   resolveSessionRunIds: typeof resolveSessionRunIds
   deleteConversationHistory: typeof deleteConversationHistory
   appUserDataDir: string
+  dockBadge: Pick<DockBadgeState, 'adopt'>
 }
 
 export function registerConversationHandlers(deps: ConversationBootstrapDependencies) {
@@ -80,6 +82,12 @@ export function registerConversationHandlers(deps: ConversationBootstrapDependen
         if (fingerprint === undefined) return prepared.preview
         if (prepared.preview.fingerprint !== fingerprint) throw new Error('迁移源已变化，请重新预览；旧入口保留')
         const conversation = await conversationStore().create(source.cwd, prepared.seed)
+        // The native row is hidden from now on, including under its app alias; a side chat
+        // of it that is still running reports to the conversation's row instead.
+        for (const sessionId of new Set([source.externalSessionId, catalog.sessionId])) {
+          deps.dockBadge.adopt(sessionAttentionKey({ providerId: source.providerId, agentProfileId: source.agentProfileId,
+            cwd: source.cwd, sessionId }), conversationAttentionKey(conversation.id))
+        }
         invalidateSessionHistoryLoad('session adopted into logical conversation')
         getWindow()?.webContents.send('agent:dataUpdated', { kind: 'conversation_changed', conversationId: conversation.id })
         return (await conversationService().list(source.cwd)).find(item => item.id === conversation.id)!
@@ -111,79 +119,10 @@ export function registerConversationHandlers(deps: ConversationBootstrapDependen
     if (typeof fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(fingerprint)) throw new Error('迁移确认指纹无效')
     return adoptLegacyConversation(source, fingerprint)
   })
-  function assertConversationDeletionIdle(conversation: Conversation): void {
-    const runIds = new Set(conversation.turns.map(turn => turn.runId))
-    if (getRuns().unsettledStates().some(run => runIds.has(run.runId))) throw new Error('对话仍有运行或证据保存未收敛，不能删除')
-  }
-
-  async function prepareConversationDeletion(conversation: Conversation) {
-    const others = await conversationStore().list(conversation.cwd)
-    const catalog = liveConversationDeletionCatalog(others, appSessionStore().load().filter(session => session.cwd === conversation.cwd))
-    return resolveConversationDeletionRuns(planConversationDeletion(conversation, others, catalog), target =>
-      resolveSessionRunIds({ providerId: target.providerId, cwd: conversation.cwd, externalSessionId: target.externalSessionId, runIds: new Set() }), others, catalog)
-  }
-
-  handleTrusted('conversation:previewDeletion', async (_event, id: unknown) => {
-    if (typeof id !== 'string') throw new Error('对话删除请求无效')
-    await getStartupManagedRecovery()
-    const conversation = await conversationStore().read(id)
-    if (!conversation || (conversation.deletion?.status === 'complete' && !conversation.deletion.retainedCopies)) throw new Error('对话不存在或没有待核对的保留副本')
-    assertConversationDeletionIdle(conversation)
-    return prepareConversationDeletion(conversation)
-  })
-  handleTrusted('conversation:delete', async (_event, id: unknown, fingerprint: unknown): Promise<ConversationDeletionResult> => {
-    if (typeof id !== 'string' || typeof fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(fingerprint)) throw new Error('对话删除确认无效')
-    return contextAdmission.run(`conversation-delete:${id}`, async () => {
-      await getStartupManagedRecovery()
-      const original = await conversationStore().read(id)
-      if (!original) throw new Error('找不到统一对话')
-      if (original.deletion?.status === 'complete') {
-        if (original.deletion.fingerprint === fingerprint) return original.deletion.result!
-        if (!original.deletion.retainedCopies) throw new Error('对话已删除，没有待核对的保留副本')
-      }
-      const { conversation, plan } = await contextAdmission.runMany(original.bindings.map(binding => providerContextKey(binding.providerId, original.cwd, binding.agentProfileId)), async () => {
-        const conversation = (await conversationStore().read(id))!
-        assertConversationDeletionIdle(conversation)
-        const plan = await prepareConversationDeletion(conversation)
-        if (plan.fingerprint !== fingerprint) throw new Error('删除范围已变化，请重新预览；本次请求未执行清理')
-        await conversationStore().beginDeletion(id, plan.revision, fingerprint, plan.reclaim === true)
-        return { conversation, plan }
-      })
-      const result: ConversationDeletionResult = {
-        ok: false, deleted: [], retained: [
-          'workspace .scry/ canonical turn evidence', 'Provider-native session transcript/history',
-          'unattributed provider billing aggregates', 'unsent renderer composer drafts',
-          'logical ownership tombstone (IDs, hashes and deletion receipt)'
-        ], failed: []
-      }
-      for (const target of plan.targets) {
-        const scope = `${target.providerId}/${target.agentProfileId ?? 'default'}/${target.externalSessionId}`
-        if (target.sharedWith.length) {
-          result.retained.push(`shared Scry copies: ${scope} (${target.sharedWith.join(', ')})`)
-          continue
-        }
-        try {
-          const receipt = await deleteOneSession({ ...target, cwd: conversation.cwd }, {
-            confirm: false, notifyFailure: false, conversationId: id, runIds: target.runIds
-          })
-          result.deleted.push(...receipt.deleted.map(store => `${scope}: ${store}`))
-          result.retained.push(...receipt.retained)
-          result.failed.push(...receipt.failed.map(failure => ({ ...failure, store: `${scope}: ${failure.store}` })))
-          if (!receipt.ok && !receipt.failed.length) result.failed.push({ store: scope, error: receipt.reason ?? '删除结果未确认' })
-        } catch (error) { result.failed.push({ store: scope, error: error instanceof Error ? error.message : String(error) }) }
-      }
-      try {
-        await deleteConversationHistory(appUserDataDir, conversation)
-        result.deleted.push('frozen handoff bodies')
-      } catch (error) { result.failed.push({ store: 'frozen handoff bodies', error: error instanceof Error ? error.message : String(error) }) }
-      result.retained = [...new Set(result.retained)]
-      result.ok = result.failed.length === 0
-      if (!result.ok) result.reason = 'partial_failure'
-      await conversationStore().finishDeletion(id, fingerprint, result, plan.targets.some(target => target.sharedWith.length > 0))
-      invalidateSessionHistoryLoad('logical conversation deletion')
-      getWindow()?.webContents.send('agent:dataUpdated', { kind: 'conversation_changed', conversationId: id })
-      return result
-    })
+  const { prepareConversationDeletion, sideChatCascade } = registerConversationDeletionHandlers({
+    handleTrusted, providerContextKey, contextAdmission, getStartupManagedRecovery, appSessionStore, conversationStore,
+    getRuns, invalidateSessionHistoryLoad, getWindow, deleteOneSession, resolveSessionRunIds, deleteConversationHistory,
+    appUserDataDir
   })
   handleTrusted('conversation:update', async (_event, id: unknown, revision: unknown, change: unknown) => {
     if (typeof id !== 'string' || typeof revision !== 'number') throw new Error('对话管理请求无效')
@@ -236,6 +175,14 @@ export function registerConversationHandlers(deps: ConversationBootstrapDependen
    * Listing keeps working from the children's own frozen provenance after the
    * original source record is gone.
    */
+  function nativeSourceDeleting(source: Extract<SideChatSource, { kind: 'native-session' }>): boolean {
+    // A delete reserves the alias it was asked for; the source may name either alias.
+    const row = appSessionStore().load().find(session => session.providerId === source.providerId &&
+      session.agentProfileId === source.agentProfileId && session.cwd === source.cwd &&
+      (session.externalSessionId === source.nativeSessionId || session.sessionId === source.nativeSessionId))
+    return [source.nativeSessionId, row?.externalSessionId, row?.sessionId, row?.runId]
+      .some(id => id && deletingSessions.has(providerSessionKey(source.providerId, source.cwd, id, source.agentProfileId)))
+  }
   async function authorizeSideChatSource(input: unknown, options: { requireSource?: boolean } = {}): Promise<SideChatSource> {
     const source = parseSideChatSource(input)
     if (source.kind === 'native-session') return { ...source, cwd: resolveKnownProjectDirectory(source.cwd) }
@@ -256,11 +203,24 @@ export function registerConversationHandlers(deps: ConversationBootstrapDependen
   handleTrusted('conversation:createSideChat', async (_event, request: unknown) => {
     // Shape first, then source authorization: an untyped request never reads the ledger.
     const parsed = parseSideChatCreate(request)
-    const authorized = await authorizeSideChatSource(parsed.source)
-    await getStartupManagedRecovery()
-    const created = await conversationService().createSideChat({ ...parsed, source: authorized })
-    getWindow()?.webContents.send('agent:dataUpdated', { kind: 'conversation_changed', conversationId: created.id })
-    return created
+    // In flight from before the first wait: a read-back during authorization or startup
+    // recovery must not answer not-found for a create that is about to publish.
+    return conversationService().trackSideChatCreate(parsed.commandId, async () => {
+      const authorized = await authorizeSideChatSource(parsed.source)
+      await getStartupManagedRecovery()
+      const publish = () => conversationService().createSideChat({ ...parsed, source: authorized })
+      // A Provider session's delete reserves itself and counts its side chats under this
+      // admission. Publishing under it too means a child is either counted by that delete
+      // or refused here, never left behind with no source panel to open it from.
+      const created = authorized.kind === 'native-session'
+        ? await contextAdmission.run(providerContextKey(authorized.providerId, authorized.cwd, authorized.agentProfileId), async () => {
+          if (nativeSourceDeleting(authorized)) throw new Error('侧聊来源会话正在删除，不能创建侧边会话')
+          return publish()
+        })
+        : await publish()
+      getWindow()?.webContents.send('agent:dataUpdated', { kind: 'conversation_changed', conversationId: created.id })
+      return created
+    })
   })
   handleTrusted('conversation:listSideChats', async (_event, request: unknown) => {
     const parsed = parseSideChatListRequest(request)
@@ -285,5 +245,5 @@ export function registerConversationHandlers(deps: ConversationBootstrapDependen
     return conversationService().readSideChatSnapshot(id, cursor)
   })
 
-  return { prepareConversationDeletion }
+  return { prepareConversationDeletion, sideChatCascade }
 }

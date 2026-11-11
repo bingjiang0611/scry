@@ -17,7 +17,7 @@ describe('conversation preload boundary', () => {
   it('exposes only fixed conversation operations with their scoped arguments', async () => {
     expect(Object.keys(conversationsApi).sort()).toEqual(['adopt', 'create', 'createSideChat', 'delete', 'findSideChatCommand', 'fork',
       'list', 'listSideChats', 'preview', 'previewAdoption', 'previewDeletion', 'previewSideChat', 'read', 'readItem', 'readSideChatSnapshot',
-      'send', 'update'])
+      'send', 'setViewed', 'update'])
     await conversationsApi.create('/workspace')
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:create', '/workspace')
     const fork = { conversationId: 'conversation-id', expectedRevision: 2, sourceRunId: 'run-1', commandId: 'fork-1' }
@@ -27,6 +27,10 @@ describe('conversation preload boundary', () => {
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:list', '/workspace')
     await conversationsApi.read('conversation-id', 40)
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:read', 'conversation-id', 40)
+    await conversationsApi.setViewed('conversation-id')
+    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:setViewed', 'conversation-id')
+    await conversationsApi.setViewed(null)
+    expect(electron.invoke).toHaveBeenLastCalledWith('conversation:setViewed', null)
     const ref = { runId: 'run-id', itemId: 'assistant', contentHash: 'a'.repeat(64) }
     await conversationsApi.readItem('conversation-id', ref)
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:readItem', 'conversation-id', ref)
@@ -50,7 +54,7 @@ describe('conversation preload boundary', () => {
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:previewDeletion', 'conversation-id')
     await conversationsApi.delete('conversation-id', 'fingerprint')
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:delete', 'conversation-id', 'fingerprint')
-    expect(electron.invoke).toHaveBeenCalledTimes(13)
+    expect(electron.invoke).toHaveBeenCalledTimes(15)
   })
 
   it('forwards side-chat source reads and local-only creation with their scoped arguments', async () => {

@@ -8,7 +8,6 @@ import { CONVERSATION_COPY } from './constants/conversation-copy'
 import { providerContextOf, requestedAgentId, useSideChatInstance } from './hooks/useSideChatInstance'
 import { readSideChatPreferences, writeSideChatPreference } from './side-chat-preferences'
 import { SideChatHeader, SideChatSurface } from './components/SideChatSurface'
-import { SideChatSnapshotViewer } from './components/SideChatSnapshotViewer'
 
 const memoryStorage = () => {
   const rows = new Map<string, string>()
@@ -183,54 +182,31 @@ describe('side chat instance control surface', () => {
 })
 
 describe('side chat surface copy and provenance', () => {
-  it('shows the default title, the captured source title and the frozen boundary', () => {
-    const html = renderToStaticMarkup(<SideChatHeader title={SIDE_CHAT_DEFAULT_TITLE} summary={summary().sideChat} cwd="/repo"
-      snapshotOpen={false} onToggleSnapshot={() => undefined} onClose={() => undefined} />)
-    expect(html).toContain(SIDE_CHAT_DEFAULT_TITLE)
+  it('names the captured source and the frozen boundary without repeating the child title', () => {
+    const html = renderToStaticMarkup(<SideChatHeader summary={summary().sideChat} cwd="/repo" />)
+    expect(html).toContain(SIDE_CHAT_COPY.sourceLabel)
     expect(html).toContain('主会话标题')
     expect(html).toContain(SIDE_CHAT_COPY.snapshotLine(7))
-    expect(html).toContain(SIDE_CHAT_COPY.snapshotDetail)
-    // The workspace moved to the composer's readonly label: keeping it in this row truncated
-    // the captured parent title to a couple of characters in a narrow pane.
-    expect(html).toContain('data-side-chat-workspace="/repo"')
-    expect(html).not.toContain(SIDE_CHAT_COPY.workspaceReadonly('repo'))
-  })
-
-  it('gives the captured parent the row instead of a shrunken workspace', () => {
-    const html = renderToStaticMarkup(<SideChatHeader title={SIDE_CHAT_DEFAULT_TITLE} summary={summary().sideChat} cwd="/repo"
-      snapshotOpen onToggleSnapshot={() => undefined} onClose={() => undefined} />)
-    expect(html).toContain('data-side-chat-parent-title="true">主会话标题')
-    expect(html).toContain('aria-expanded="true"')
-  })
-
-  it('renders the main view without a second title or a tab close action', () => {
-    // The main pane already prints the conversation title and leaves by navigation, so the
-    // header keeps only what the body cannot say: the captured source and the snapshot action.
-    const html = renderToStaticMarkup(<SideChatHeader title="我自己起的名字" summary={summary().sideChat} cwd="/repo"
-      variant="main" snapshotOpen={false} onToggleSnapshot={() => undefined} />)
-    expect(html).not.toContain('我自己起的名字')
-    expect(html).not.toContain(SIDE_CHAT_COPY.surfaceClose)
-    expect(html).toContain('主会话标题')
-    expect(html).toContain(SIDE_CHAT_COPY.snapshotDetail)
-  })
-
-  it('never reuses the source title as the child title', () => {
-    const html = renderToStaticMarkup(<SideChatHeader title="我自己起的名字" summary={summary().sideChat} cwd="/repo"
-      snapshotOpen={false} onToggleSnapshot={() => undefined} onClose={() => undefined} />)
-    expect(html).toContain('我自己起的名字')
+    // The tab strip prints the child's own title; a second one only squeezed this row.
     expect(html).not.toContain(`>${SIDE_CHAT_DEFAULT_TITLE}<`)
+    // The workspace stays a tooltip on the composer's readonly label, not a second row here.
+    expect(html).toContain('data-side-chat-workspace="/repo"')
+    expect(html).not.toContain(SIDE_CHAT_COPY.sharedWorkspace)
   })
-})
 
-describe('snapshot viewer frame', () => {
-  it('labels the frozen source with capture time and message count before any page arrives', () => {
-    const html = renderToStaticMarkup(<SideChatSnapshotViewer conversationId="child-1" summary={summary().sideChat!}
-      onClose={() => undefined} />)
-    expect(html).toContain('主会话标题')
-    expect(html).toContain(SIDE_CHAT_COPY.snapshotMessageCount(12))
-    expect(html).toContain(SIDE_CHAT_COPY.snapshotLine(7))
-    expect(html).toContain('data-side-chat-snapshot="child-1"')
-    expect(html).not.toContain('data-snapshot-state="complete"')
+  it('offers no action of its own', () => {
+    // Owner decision 2026-11-09: this surface carries no snapshot reader, no duplicate
+    // tab-close button and no refresh/management toolbar; closing stays in the tab strip.
+    const html = renderToStaticMarkup(<SideChatHeader summary={summary().sideChat} cwd="/repo" />)
+    expect(html).not.toContain('<button')
+    expect(html).not.toContain('查看来源快照')
+    expect(html).not.toContain('关闭侧聊')
+  })
+
+  it('falls back to the surface subtitle before a frozen summary is readable', () => {
+    const html = renderToStaticMarkup(<SideChatHeader summary={undefined} cwd="/repo" />)
+    expect(html).toContain(SIDE_CHAT_COPY.surfaceSubtitle)
+    expect(html).not.toContain('data-side-chat-parent-title')
   })
 })
 

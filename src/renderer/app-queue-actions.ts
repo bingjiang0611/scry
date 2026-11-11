@@ -6,6 +6,7 @@ import type { useAgentSession } from './hooks/useAgentSession'
 import type { useIntegrations } from './hooks/useIntegrations'
 import type { useSessionRightSurfaces } from './hooks/useSessionRightSurfaces'
 import type { WorkspaceOpenRequest } from './components/WorkspacePanel'
+import { focusComposerUnlessFocusMoved } from './composer-focus'
 import type { DraftAttachment, QueuedPrompt, SessionPromptQueues } from './app-model'
 import { appendWorkspaceReference } from './app-model'
 import { QUEUE_COPY } from './constants/copy'
@@ -198,13 +199,13 @@ export function useAppQueueActions(context: AppQueueContext) {
     setMovedQueuedPromptId(null)
     setInput(prompt.text)
     setSlashHidden(true)
-    window.setTimeout(() => taRef.current?.focus(), 0)
+    focusComposerUnlessFocusMoved(taRef, document.activeElement)
   }
   const cancelQueuedPromptEdit = (): void => {
     setEditingQueuedPromptId(null)
     setInput('')
     setSlashHidden(true)
-    window.setTimeout(() => taRef.current?.focus(), 0)
+    focusComposerUnlessFocusMoved(taRef, document.activeElement)
   }
   const removeDraftAttachment = (id: string): void => {
     setDraftAttachments((prev) => {
@@ -235,7 +236,7 @@ export function useAppQueueActions(context: AppQueueContext) {
   }, [cwd, surfacePane.restore, currentSurface.id, dispatchRightSurface])
   const addWorkspaceReference = useCallback((entry: WorkspaceEntry): void => {
     setInput((current) => appendWorkspaceReference(current, workspaceReferenceToken(entry)))
-    window.setTimeout(() => taRef.current?.focus(), 0)
+    focusComposerUnlessFocusMoved(taRef, document.activeElement)
   }, [setInput])
   const stopRun = async (): Promise<void> => {
     clearSessionPromptQueue()

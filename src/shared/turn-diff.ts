@@ -51,6 +51,35 @@ export function isDiffPreviewStage(stage: string): boolean {
  * 净 diff 只覆盖「自重锚以来」，UI 必须照实说明，不得冒充整段会话。
  */
 export type TurnDiffBaselineOrigin = 'session_start' | 'resumed'
+/**
+ * 本轮新建 worktree 的基线来源：`worktree-creation-reflog` 表示基线取自该 worktree 自己的
+ * HEAD reflog 第一条（旧值全 0 的创建记录），而不是回合开始时的仓库快照。
+ * 没有可信基线时只能记 partial 并写明原因，files 必须为空——不得用猜测的基线补出 diff。
+ * 能确认不是本轮新建的老 worktree 不产生任何记录，因此不会出现对应原因。
+ *
+ * - `reflog_missing` / `reflog_creation_not_first`：拿不到创建记录，且目录时间不早于回合开始。
+ * - `reflog_outside_turn`：创建时间晚于收尾上限（时钟异常）；更早的早已静默跳过。
+ * - `worktree_deleted`：收尾时目录或它的 `.git` 链接已不在（不再是一个独立仓库）。
+ * - `capture_failed`：基线可信，但建树/收尾失败或超时，量不到 worktree 现在的内容。
+ * - `no_checkout` / `per_turn_limit`：创建可信，但拿不到 worktree 现在的内容或已超出每轮上限。
+ */
+export type WorktreeBaselineReason =
+  | 'reflog_missing'
+  | 'reflog_creation_not_first'
+  | 'reflog_outside_turn'
+  | 'worktree_deleted'
+  | 'no_checkout'
+  | 'capture_failed'
+  | 'per_turn_limit'
+export const WORKTREE_BASELINE_REASONS: readonly WorktreeBaselineReason[] = [
+  'reflog_missing',
+  'reflog_creation_not_first',
+  'reflog_outside_turn',
+  'worktree_deleted',
+  'no_checkout',
+  'capture_failed',
+  'per_turn_limit'
+]
 export type TurnDiffPatchStatus = 'captured' | 'truncated' | 'binary' | 'unavailable'
 export type TurnDiffPatchReason = 'deadline' | 'git_error' | 'budget' | 'policy'
 export type TurnDiffFallbackReason = 'forced' | 'discovery_failed' | 'candidate_limit' | 'git_semantics' | 'targeted_failed'
@@ -134,6 +163,18 @@ export interface TurnDiffSnapshot {
   collection?: TurnDiffCollection
   /** 仅 session_diff / session_diff_preview 携带：净 diff 的基线是会话首轮前还是恢复后重锚。 */
   baseline?: TurnDiffBaselineOrigin
+  /**
+   * 本轮新建 worktree 的 diff 才携带：基线来自创建该 worktree 的提交（reflog 记录），
+   * 与普通「回合开始快照」基线不同，下游必须能区分。
+   */
+  baselineSource?: 'worktree-creation-reflog'
+  baselineStatus?: 'available' | 'partial'
+  /** `available` 时必有：worktree 创建时检出的提交，即本 snapshot 的基线树。 */
+  baselineCommit?: string
+  /** `available` 时必有：reflog 记录的创建时间（ISO）。 */
+  baselineCreatedAt?: string
+  /** `partial` 时必有：拿不到可信基线的原因。 */
+  baselineReason?: WorktreeBaselineReason
   /** 并行工作区重叠证据；缺失 = 旧记录或未观测，不能读成「独占归因」。 */
   workspaceOverlap?: WorkspaceOverlapEvidence
 }
@@ -219,6 +260,20 @@ export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | un
   const baseline = raw.baseline === 'session_start' || raw.baseline === 'resumed'
     ? (raw.baseline as TurnDiffBaselineOrigin)
     : undefined
+  // 新建 worktree 基线只能整体保留：来源、状态与对应证据必须配套，缺一项就不能声称有基线。
+  const baselineCommit = typeof raw.baselineCommit === 'string' && /^[0-9a-f]{40}$/.test(raw.baselineCommit)
+    ? raw.baselineCommit
+    : undefined
+  const baselineCreatedMs = typeof raw.baselineCreatedAt === 'string' ? Date.parse(raw.baselineCreatedAt) : NaN
+  const baselineCreatedAt = Number.isFinite(baselineCreatedMs) ? new Date(baselineCreatedMs).toISOString() : undefined
+  const baselineReason = WORKTREE_BASELINE_REASONS.find((reason) => reason === raw.baselineReason)
+  const worktreeBaseline = raw.baselineSource !== 'worktree-creation-reflog'
+    ? undefined
+    : raw.baselineStatus === 'available' && baselineCommit && baselineCreatedAt
+      ? { baselineStatus: 'available' as const, baselineCommit, baselineCreatedAt }
+      : raw.baselineStatus === 'partial' && baselineReason
+        ? { baselineStatus: 'partial' as const, baselineReason }
+        : undefined
   const workspaceOverlap = normalizeWorkspaceOverlap(raw.workspaceOverlap)
   return {
     version: 1,
@@ -234,6 +289,7 @@ export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | un
     cleanup: raw.cleanup,
     ...(collection ? { collection } : {}),
     ...(baseline ? { baseline } : {}),
+    ...(worktreeBaseline ? { baselineSource: 'worktree-creation-reflog' as const, ...worktreeBaseline } : {}),
     ...(workspaceOverlap ? { workspaceOverlap } : {})
   }
 }

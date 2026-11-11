@@ -1,3 +1,4 @@
+import { adoptingConversationOf } from './conversation-side-chat'
 import type { ConversationContinuation, ConversationTarget } from '../shared/conversation'
 import { conversationItemKey, planConversationContinuation, sideChatSnapshotIndexOf } from '../shared/conversation'
 import type {
@@ -26,6 +27,11 @@ export { parseConversationTarget }
 
 export class ConversationService {
   private readonly active = new Set<string>()
+  /**
+   * Side-chat create commands this host is executing right now, counted, so a second
+   * concurrent submission of the same id cannot clear the first one's in-flight mark.
+   */
+  private readonly creatingSideChats = new Map<string, number>()
 
   constructor(private readonly deps: ConversationServiceDeps) {}
 
@@ -61,16 +67,28 @@ export class ConversationService {
    * Sidebar rows and the alias filter must agree, so they are derived from the same list
    * instead of two independent reads of the same store file.
    */
-  async listCatalog(cwd: string): Promise<{ conversations: ConversationSummary[]; ownedNativeAliases: Set<string> }> {
+  async listCatalog(cwd: string): Promise<{ conversations: ConversationSummary[]; ownedNativeAliases: Set<string>; ownedRunIds: Set<string> }> {
     const stored = await this.deps.store.list(cwd)
     const ownedNativeAliases = new Set(stored.flatMap((conversation) => conversation.bindings.flatMap((binding) =>
       binding.nativeSessionId
         ? [`${binding.providerId}\0${binding.agentProfileId ?? ''}\0${conversation.cwd}\0${binding.nativeSessionId}`]
         : [])))
+    // A conversation's own run is catalogued under that run id before its binding learns
+    // the native session id: a first turn that is still running, or one that never got a
+    // receipt. Without this, a side chat's running turn showed up as a Provider row.
+    const ownedRunIds = new Set(stored.flatMap((conversation) => conversation.turns.flatMap((turn) => {
+      const binding = conversation.bindings.find((candidate) => candidate.id === turn.bindingId)
+      return binding ? [`${binding.providerId}\0${conversation.cwd}\0${turn.runId}`] : []
+    })))
     const conversations = stored
       .filter(conversation => conversation.deletion?.status !== 'complete' || conversation.deletion.retainedCopies)
-      .map((conversation) => conversationSummary(conversation, this.active))
-    return { conversations, ownedNativeAliases }
+      .map((conversation) => {
+        const summary = conversationSummary(conversation, this.active)
+        // A side chat of an adopted Provider session belongs to the adopting conversation's row.
+        const adopted = summary.sideChat && adoptingConversationOf(summary.sideChat.source, stored)
+        return adopted && summary.sideChat ? { ...summary, sideChat: { ...summary.sideChat, parentConversationId: adopted.id } } : summary
+      })
+    return { conversations, ownedNativeAliases, ownedRunIds }
   }
 
   async read(id: string, beforeOrdinal?: number): Promise<ConversationPage> {
@@ -138,8 +156,28 @@ export class ConversationService {
     return previewSideChat(this.deps, input, options)
   }
 
+  /**
+   * Marks one create command as in flight for the whole of `run`, so a read-back from a
+   * reloaded renderer can tell "still creating" from "created nothing" instead of guessing.
+   * Callers that authorize or wait before creating wrap that work too.
+   */
+  async trackSideChatCreate<T>(commandId: string | undefined, run: () => Promise<T>): Promise<T> {
+    if (commandId) this.creatingSideChats.set(commandId, (this.creatingSideChats.get(commandId) ?? 0) + 1)
+    try {
+      return await run()
+    } finally {
+      if (commandId) {
+        const left = (this.creatingSideChats.get(commandId) ?? 1) - 1
+        if (left > 0) this.creatingSideChats.set(commandId, left)
+        else this.creatingSideChats.delete(commandId)
+      }
+    }
+  }
+
   createSideChat(input: unknown) {
-    return createSideChat(this.deps, this.active, input)
+    const commandId = typeof input === 'object' && input !== null && typeof (input as { commandId?: unknown }).commandId === 'string'
+      ? (input as { commandId: string }).commandId : undefined
+    return this.trackSideChatCreate(commandId, () => createSideChat(this.deps, this.active, input))
   }
 
   listSideChats(input: unknown) {
@@ -148,7 +186,7 @@ export class ConversationService {
 
   /** Read-only receipt lookup; never creates, adopts or starts a Provider. */
   findSideChatCommand(source: unknown, commandId: unknown) {
-    return findSideChatCommand(this.deps, this.active, source, commandId)
+    return findSideChatCommand(this.deps, this.active, source, commandId, this.creatingSideChats)
   }
 
   /** Bounded real bodies of this child's own frozen snapshot; a source is never read. */

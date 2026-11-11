@@ -1,4 +1,4 @@
-/* Side-chat surface: its own frame, evidence panel and snapshot reader. */
+/* Side-chat surface: its own frame, evidence panel and diff panel. */
 .side-chat-surface {
   display: flex;
   flex-direction: column;
@@ -16,52 +16,47 @@
 .side-chat-surface-header {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
   gap: 12px;
-  padding: 10px 14px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--line);
   flex: none;
 }
 
-.side-chat-surface-heading {
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.side-chat-surface-title {
-  font-size: 13px;
-  font-weight: 600;
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* One compact line: source title, frozen boundary and the workspace's last segment.
-   The absolute path is a tooltip; it used to wrap across three rows at this width. */
+/* Two rows: who this chat was frozen from, then how far it was carried. The child's own
+   title is printed by the tab strip (or the main pane's toolbar), never twice here. */
 .side-chat-surface-provenance {
   display: flex;
-  align-items: center;
-  gap: 5px;
-  margin: 2px 0 0;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
   min-width: 0;
   font-size: 11px;
   color: var(--muted);
+}
+
+.side-chat-surface-source {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
   white-space: nowrap;
-  overflow: hidden;
+}
+
+.side-chat-surface-source-label {
+  flex: none;
+  color: var(--dim2);
 }
 
 .side-chat-surface-parent {
   min-width: 0;
-  /* The workspace no longer competes for this row, so the captured parent keeps the room. */
-  max-width: 62%;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.side-chat-surface-sep {
-  flex: none;
-  color: var(--dim3);
+.side-chat-surface-boundary {
+  color: var(--dim2);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 /* The main pane already supplies the frame, the title and the workspace chrome. */
@@ -73,18 +68,7 @@
 }
 
 .side-chat-surface-main .side-chat-surface-header {
-  padding: 6px 12px;
-}
-
-/* The embedded conversation keeps its management controls but not a second title. */
-.side-chat-surface .conversation-toolbar-embedded {
-  justify-content: flex-end;
-  padding: 4px 12px;
-  gap: 6px;
-}
-
-.side-chat-surface .conversation-toolbar-embedded .conversation-options > summary {
-  padding: 4px 6px;
+  padding: 8px 12px;
 }
 
 .side-chat-surface-notice {
@@ -93,12 +77,6 @@
   font-size: 11px;
   color: var(--muted);
   border-bottom: 1px solid var(--line);
-  flex: none;
-}
-
-.side-chat-surface-actions {
-  display: flex;
-  gap: 6px;
   flex: none;
 }
 
@@ -136,110 +114,21 @@
   min-width: 0;
 }
 
-.side-chat-snapshot {
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-  background: var(--panel);
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.side-chat-snapshot-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--line);
-  flex: none;
-}
-
-.side-chat-snapshot-header h3 {
-  font-size: 13px;
-  margin: 0;
-}
-
-.side-chat-snapshot-header p {
-  margin: 2px 0 0;
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.side-chat-snapshot-items {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
-  list-style: none;
-  margin: 0;
-  padding: 8px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.side-chat-snapshot-item {
-  border-left: 2px solid var(--line);
-  padding-left: 10px;
-}
-
-.side-chat-snapshot-item[data-snapshot-role='user'] {
-  border-left-color: var(--accent, var(--line));
-}
-
-.side-chat-snapshot-meta {
-  margin: 0 0 4px;
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.side-chat-snapshot-text {
-  margin: 0;
-  font-family: inherit;
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.side-chat-snapshot-footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  border-top: 1px solid var(--line);
-  flex: none;
-}
-
-.side-chat-snapshot-footer p {
-  margin: 0;
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.side-chat-snapshot-error,
-.side-chat-snapshot-loading,
-.side-chat-snapshot-empty {
-  padding: 14px;
-  margin: 0;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.side-chat-snapshot-error {
-  color: var(--danger, var(--muted));
-}
-
 .side-chat-workspace {
   display: inline-flex;
   align-items: center;
   font-size: 11px;
   color: var(--muted);
-  padding: 2px 8px;
-  border: 1px dashed var(--line);
-  border-radius: var(--r-pill);
-  corner-shape: round;
+}
+
+/* A just-created side chat has nothing to scroll: keep its short prompt next to the
+   composer instead of centering it in an almost empty transcript. */
+.side-chat-surface .chat-session-evidence-gap[data-status='new-side-chat'] {
+  min-height: 100%;
+  align-content: end;
+  justify-items: start;
+  text-align: left;
+  padding: 24px 24px 16px;
 }
 
 /* C2: the approved entry card, one flat tab strip for tools and child instances. */
@@ -413,82 +302,6 @@
   margin: 0;
   font-size: 11px;
   color: var(--dim2);
-}
-
-/* Compact parent-row counter. It is text inside the existing row button, not a control. */
-.sb-side-chat-count {
-  margin-left: 6px;
-  color: var(--dim2);
-  font-size: 10.5px;
-  white-space: nowrap;
-}
-
-/* Children whose source left the catalog: their own group, never the main list. */
-.sb-orphan-group {
-  margin: 10px 8px 0;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-}
-
-.sb-orphan-title {
-  margin: 0 0 6px;
-  font-size: 10.5px;
-  letter-spacing: 0.02em;
-  color: var(--dim2);
-}
-
-/* Page navigation for the bounded orphan list: it replaces a page instead of growing it. */
-.sb-orphan-pager {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 4px 0 2px;
-}
-
-.sb-orphan-pager .sb-orphan-page {
-  flex: none;
-  padding: 2px 6px;
-  font-size: 10.5px;
-}
-
-.sb-orphan-range {
-  flex: 1 1 auto;
-  min-width: 0;
-  color: var(--dim2);
-  font-size: 10.5px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sb-orphan-parent-title {
-  margin: 6px 0 2px;
-  font-size: 10.5px;
-  color: var(--dim2);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Orphan rows carry a whole provenance line, not the sidebar's short counter. The child
-   title keeps its own row so a long snapshot boundary cannot squeeze it down to one glyph,
-   and the metadata stays subordinate underneath instead of competing for the same row. */
-.sb-orphan-group .sb-sess {
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-areas:
-    'main'
-    'meta';
-  height: auto;
-  min-height: 38px;
-  padding: 5px 8px 5px 27px;
-  align-content: center;
-  row-gap: 1px;
-}
-
-.sb-orphan-group .sb-session-meta {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* Narrow window: one column; both panes stay mounted and the panel keeps its own

@@ -1,9 +1,5 @@
 import { CHILD_COMPOSER, CHILD_PANEL, json, sideChatDriver } from './side-chat-driving.mjs'
 
-/** The row a user selects to go back to the parent: the one that owns the side-chat count. */
-const PARENT_ROW = `[...document.querySelectorAll('.sb-sess')].filter(node =>
-  node.textContent.includes('side chat parent turn') && node.querySelector('[data-side-chat-count]') != null)`
-
 /**
  * A user-driven Provider switch of the parent, with the child still open and running.
  *
@@ -47,8 +43,7 @@ export async function exerciseSideChatAdoption({ cdp, evaluate, check, ipcCounts
         .find(node => node.querySelector('[role="tab"][aria-selected="true"]'))?.dataset.sideChatTabId ?? null,
       surface: document.querySelector('${CHILD_PANEL} .side-chat-surface')?.dataset.sideChatId ?? null,
       bodies: document.querySelectorAll('[data-side-chat-id]').length,
-      composers: document.querySelectorAll('${CHILD_PANEL} .runtime-composer').length,
-      sidebarCount: ${PARENT_ROW}[0]?.querySelector('[data-side-chat-count]')?.dataset.sideChatCount ?? null }
+      composers: document.querySelectorAll('${CHILD_PANEL} .runtime-composer').length }
   })()`)
   const runBefore = (await conversation(runChildId)).summary.activeRunId ?? null
   check(runBefore != null, `the child run never became active before the switch: ${json(before)}`)
@@ -87,7 +82,6 @@ export async function exerciseSideChatAdoption({ cdp, evaluate, check, ipcCounts
       running: document.querySelector('${CHILD_PANEL} .runtime-composer .run-status') != null,
       bodies: document.querySelectorAll('[data-side-chat-id]').length,
       composers: document.querySelectorAll('${CHILD_PANEL} .runtime-composer').length,
-      sidebarCount: ${PARENT_ROW}[0]?.querySelector('[data-side-chat-count]')?.dataset.sideChatCount ?? null,
       provider: document.querySelector('#main-pane .runtime-composer .clibtn')?.dataset.agentId ?? null,
       mainView: document.querySelector('.sb-sess.active')?.dataset.conversationId ?? null }
   })()`)
