@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { MATRIX_DOC, OPS_DOC, WORKBENCH_MATRIX_DOC, buildMatrix, collectChannels, loadRouting, protocolOps, renderMatrix, renderOps, preloadChannels, renderWorkbenchMatrix, workbenchMethods } from './daemon-ipc-matrix.mjs'
 
@@ -86,8 +86,14 @@ describe('daemon IPC routing matrix', () => {
     const tables = readFileSync(new URL('../src/main/bootstrap/startup-channels.ts', import.meta.url), 'utf8')
     const factories = [...tables.matchAll(/^export function (\w+ChannelHandlers)\(/gm)].map(([, name]) => name).filter((name) => name !== 'registerChannelHandlers')
     expect(factories.length).toBeGreaterThan(0)
-    const registrations = collectChannels().map((entry) => entry.file)
-    const sources = [...new Set(registrations)].map((file) => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')).join('\n')
+    // Every production main source, not only files that register a channel literally: a
+    // bootstrap module may now register nothing but shared tables.
+    const mainSources = (directory: string): string[] => readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(directory, entry.name)
+      if (entry.isDirectory()) return mainSources(path)
+      return entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts') ? [readFileSync(path, 'utf8')] : []
+    })
+    const sources = mainSources(join(process.cwd(), 'src/main')).join('\n')
     for (const factory of factories) expect(sources, `${factory} is never registered in main`).toMatch(new RegExp(`registerChannelHandlers\\(handleTrusted, ${factory}\\(`))
   })
 
