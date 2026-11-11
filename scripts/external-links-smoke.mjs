@@ -108,7 +108,8 @@ try {
       window.webContents.once('did-finish-load', async () => {
         try {
           await (${exercise.toString()})(window, shell, dialog)
-          app.exit(0)
+          // The parent captures and closes the owned process tree after the
+          // success marker, before any child can outlive temporary data cleanup.
         } catch (error) { console.error(error); app.exit(1) }
       })
     })
@@ -127,15 +128,21 @@ try {
         error => reject(new Error(`External links fixture cleanup unknown; retained at ${temp}`, { cause: error }))
       )
     }, 30_000)
-    child.stdout.on('data', (chunk) => { output += chunk.toString() })
+    child.stdout.on('data', (chunk) => {
+      output += chunk.toString()
+      if (cleanup || !output.includes('SCRY_EXTERNAL_LINKS_SMOKE=passed')) return
+      clearTimeout(timer)
+      cleanup = stopOwnedApp(child).then(() => {
+        console.log('Background startup: no display or native focus (renderer ready, second instance, fallback); external links: native clicks open directly; unsafe URLs and renderer navigation remain blocked')
+        resolve()
+      }, error => reject(new Error(`External links fixture cleanup unknown; retained at ${temp}`, { cause: error })))
+    })
     child.stderr.on('data', (chunk) => { output += chunk.toString() })
     child.once('error', (error) => { clearTimeout(timer); reject(error) })
     child.once('close', (code, signal) => {
       clearTimeout(timer)
       if (cleanup) return
-      if (code !== 0 || !output.includes('SCRY_EXTERNAL_LINKS_SMOKE=passed')) {
-        reject(new Error(`External links fixture failed (${code ?? signal}):\n${output.slice(-8000)}`))
-      } else { console.log('Background startup: no display or native focus (renderer ready, second instance, fallback); external links: native clicks open directly; unsafe URLs and renderer navigation remain blocked'); resolve() }
+      reject(new Error(`External links fixture exited before owned cleanup (${code ?? signal}):\n${output.slice(-8000)}`))
     })
   })
 } catch (error) {
