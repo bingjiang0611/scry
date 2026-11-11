@@ -24,6 +24,8 @@ export async function exerciseSideChatLayout({ cdp, evaluate, check, ipcCountsPa
     await idle()
   }
   const showChild = async () => {
+    // Reload mounts the sidebar before restoring the parent and its workbench.
+    await wait(`document.querySelector('${SIDE_CHAT_SURFACE} [data-side-chat-tab-id="${childId}"]') != null`, 30000)
     await controls.showPanel()
     await controls.openChildById(childId)
   }
