@@ -222,7 +222,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sidebar-paint-diagnostics-${{ matrix.shard }}
-          path: ${{ runner.temp }}/scry-sidebar-*.png
+          path: |
+            ${{ runner.temp }}/scry-sidebar-*.png
+            /var/folders/*/*/T/scry-workspace-session-ui-*/failure.json
           if-no-files-found: ignore
 
       - name: Package and smoke the macOS app
@@ -288,8 +290,7 @@ jobs:
   packaged-linux:
     needs: changes
     if: ${{ needs.changes.outputs.required == 'true' }}
-    # Keep packaging on a deliberate LTS image rather than a moving OS label.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       QODER_SKIP_DOWNLOAD: "1"
@@ -330,7 +331,16 @@ jobs:
           npm run build
           npm run build:cli
       - name: Install archive tools
-        run: sudo apt-get update && sudo apt-get install -y libarchive-tools
+        run: |
+          # Diagnose the observed archive-host resolution failure without masking apt's result.
+          resolvectl status || true
+          for host in github.com archive.ubuntu.com azure.archive.ubuntu.com; do
+            echo "DNS runner: $host"
+            getent ahostsv4 "$host" || true
+            echo "DNS apt sandbox: $host"
+            sudo -u _apt getent ahostsv4 "$host" || true
+          done
+          sudo apt-get update && sudo apt-get install -y libarchive-tools
       # 发布构建同时产出 dist/linux-unpacked 和 dist/*.pacman；
       # pacman 的 pkgdesc 曾经静默变空，所以打包产物必须过 check:pacman-package。
       - name: Package Linux app directory and pacman package

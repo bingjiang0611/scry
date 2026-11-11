@@ -53,7 +53,9 @@ export async function exerciseWorkspaceSessions(context) {
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
     await click(selector)
     await wait(() => evaluate(`document.querySelector('.workspace-context-strip button')?.disabled === false &&
-      document.querySelector('textarea') && !document.querySelector('.workspace-picker')`), 'fresh native draft')
+      [${json(cwd)}, ${json(realpathSync(cwd))}].some(path =>
+        document.querySelector('[data-workspace-menu="workspace"]')?.title.endsWith(path)) &&
+      document.querySelector('textarea') && !document.querySelector('.workspace-picker')`), 'fresh native draft for selected workspace')
   }
   const openPicker = async () => {
     await click('[data-workspace-menu="refs"]')
