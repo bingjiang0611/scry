@@ -216,6 +216,14 @@ describe('required PR checks', () => {
     }
   })
 
+  it('prefers the signed Ubuntu mirror without removing native fallbacks', () => {
+    const install = source(workflow('ci.yml').jobs['packaged-linux'], 'Install archive tools').run!
+    expect(install).toContain("printf 'https://mirrors.edge.kernel.org/ubuntu/\\tpriority:0\\n'")
+    expect(install).toContain('sudo tee -a /etc/apt/apt-mirrors.txt')
+    expect(install).toContain('sudo apt-get update && sudo apt-get install -y libarchive-tools')
+    expect(install).not.toMatch(/allow-unauthenticated|trusted=yes/)
+  })
+
   it('collects synthetic workspace failures only from the runner temporary directory', () => {
     const step = source(workflow('ci.yml').jobs['packaged-electron'], 'Preserve synthetic sidebar pixel diagnostics on failure')
     expect(step.if).toBe("${{ failure() && steps.renderer-ui.outcome == 'failure' }}")
