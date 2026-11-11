@@ -69,3 +69,12 @@ daemon 侧不需要改：`host-process.ts` 已经把 `createHostRuntime` 的 `de
 ## 未验证
 
 - 未在 macOS、未在真实 App 中以 `SCRY_HOST_DAEMON=1` 操作文件面板与源代码管理面板。
+
+## 第二轮：openExternal / trash 留在 App（维护者选 A）
+
+- 路由：两行改为 `main`（`scripts/daemon-ipc-routing-workbench.json`，原因写明 daemon 没有 shell），加入 `DAEMON_MODE_IN_PROCESS_CHANNELS`；从 `daemon-local-ops/workbench.ts` 的「故意留空」注释里移除。`daemon-ipc-differences.json` 里这两行的 forward 差异记录随之删除。
+- 授权不变：两个 handler 仍是 `authorizedWorkspaceRequest(getCurrentCwd(), request)`，请求目录必须是窗口选择。
+- 不读 daemon 拥有的文件：trash 本来只碰工作区与 `shell.trashItem`。openExternal 的跨项目回退原来调用 `knownProjectDirectories()`（读 App 自己 userData 里的 recent folders、project store、会话目录）；daemon 模式下改为向 daemon 取 `agent:listProjects` 的 cwd 与 `agent:recentFolders` 的并集，所选候选也用这份列表经 `knownProjectDirectory` 重验，而不是 `resolveKnownProjectDirectory`。只在当前工作区没有该文件时才问 daemon（`openWorkspaceFileExternally` 的 `roots` 可传异步函数，进程内行为不变）。daemon 不可用或回答形状不对时拒绝（`daemon_capability_unavailable:agent:listProjects` / `invalid_daemon_known_projects`），不弹窗、不打开。
+- 与进程内的差异：这份并集比进程内窄——已移除项目下的会话目录、managed worktree 不在 `listProjects` 里——只会少给候选。`listProjects` 在 daemon 侧会做一次与侧栏刷新相同的 seed 与对话目录读取，只在回退路径上发生。
+- 测试：`src/main/bootstrap/workspace-daemon.test.ts`（经生产闸门包装）——两个 channel 在进程内执行且不发给 daemon；仍绑定窗口选择；回退从 daemon 的项目里找到文件并打开，进程内的 `knownProjectDirectories` / `resolveKnownProjectDirectory` 一次都没被调用；daemon 不可用时拒绝。`workbench.test.ts` 改为只数 forward 行，并断言这两个 channel 不在转发表、闸门原样放行。首次运行 4 条全部失败（闸门拒绝）。控制实验：把 daemon 模式判断写死为 false → 3 条失败；把两项移出进程内集合 → 2 条失败。
+- 未验证：macOS 与真实 App 中以 `SCRY_HOST_DAEMON=1` 点击文件链接与移到废纸篓。

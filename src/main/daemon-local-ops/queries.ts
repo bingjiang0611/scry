@@ -2,13 +2,6 @@ import type { DaemonForwardTable, DaemonLocalOpTable } from './types'
 
 // Read-only queries: usage, LLM performance, git diff, recorder content, skills, commands.
 // Every entry here changes nothing, so a read lost to a reconnect may be asked again.
-// Not served yet, each refused by name:
-// - agent:recorderContentPage reads the content of the window's current workspace (main's
-//   currentCwd, set by agent:setCwd). The daemon never learns that selection and the
-//   renderer's request does not carry it, so the daemon cannot authorize the read.
-// - agent:listCommands (forward `commands`): that op answers paired devices with a
-//   sanitized `{ commands, reason }`, not main's CapabilityEnvelope; an unavailable
-//   catalog would reach the renderer as an empty list. Needs the scope: local answer.
 export const QUERY_LOCAL_OPS: DaemonLocalOpTable = {
   'agent:usageStats': { op: 'usage', method: 'usageStats', read: true },
   'agent:usageAnalytics': { op: 'usage', method: 'usageAnalytics', read: true },
@@ -21,7 +14,13 @@ export const QUERY_LOCAL_OPS: DaemonLocalOpTable = {
   'agent:gitDiffCommits': { op: 'workspaceDiff', method: 'gitDiffCommits', read: true },
   'agent:gitCommitDiffSnapshot': { op: 'workspaceDiff', method: 'gitCommitDiffSnapshot', read: true },
   // Queued with the Provider's auth operations as in main; listing starts no run.
-  'agent:listSkills': { op: 'skills', method: 'listSkills', read: true }
+  'agent:listSkills': { op: 'skills', method: 'listSkills', read: true },
+  // Main's CapabilityEnvelope as it is. Not the device op `commands`: that answers a
+  // sanitized `{ commands, reason }` in which an unavailable catalog is an empty list.
+  'agent:listCommands': { op: 'providerCommands', method: 'listCommands', read: true },
+  // Read for this window's workspace (main's agent:setCwd): the App appends it after the
+  // request (recorder-content-daemon.ts) and the daemon re-validates it.
+  'agent:recorderContentPage': { op: 'recorderContent', method: 'recorderContentPage', read: true }
 }
 
 export const QUERY_FORWARDS: DaemonForwardTable = {}

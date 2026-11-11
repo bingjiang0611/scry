@@ -212,11 +212,9 @@
     },
     {
       "channel": "workspace:openExternal",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "workspace",
-      "method": "workspaceOpenExternal",
-      "why": "工作区内交给系统打开"
+      "route": "main",
+      "why": "daemon 没有 shell：留在 App，仍按窗口工作区授权；跨项目回退的已知项目列表向 daemon 取",
+      "source": "daemon:projectStore（listProjects + recentFolders）"
     },
     {
       "channel": "workspace:read",
@@ -244,11 +242,8 @@
     },
     {
       "channel": "workspace:trash",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "workspace",
-      "method": "workspaceTrash",
-      "why": "工作区写入归 daemon"
+      "route": "main",
+      "why": "daemon 没有 shell：留在 App，按窗口工作区授权后交给系统废纸篓"
     },
     {
       "channel": "workspace:write",

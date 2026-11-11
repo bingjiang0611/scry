@@ -7,7 +7,6 @@
     "agent:deleteSession": "不同：本机走原生确认框且可删未归档；远程只允许已归档、confirm:false。按 grant scope 选策略；确认框留在 main，daemon 只对 scope: local 接受已确认请求",
     "agent:focusedRunSnapshot": "等价（同一 run 登记表；只是按焦点取一条）",
     "agent:forkSession": "等价",
-    "agent:listCommands": "不同：远程按 provider 白名单裁剪命令集，本机保留全部命令。按 scope 选策略",
     "agent:renameSession": "等价",
     "agent:setSessionArchived": "等价",
     "agent:setSessionPinned": "等价",
@@ -39,11 +38,9 @@
     "workspace:create": "等价（同上；写入带 expectedRevision，受限宿主按 typed 错误降级）",
     "workspace:list": "等价（同一 desktopWorkbench workspace surface，每次重验 cwd）",
     "workspace:move": "等价（同上；写入带 expectedRevision，受限宿主按 typed 错误降级）",
-    "workspace:openExternal": "等价（同一 desktopWorkbench workspace surface，每次重验 cwd）",
     "workspace:read": "等价（同一 desktopWorkbench workspace surface，每次重验 cwd）",
     "workspace:readPage": "等价（同一 desktopWorkbench workspace surface，每次重验 cwd）",
     "workspace:rename": "等价（同上；写入带 expectedRevision，受限宿主按 typed 错误降级）",
-    "workspace:trash": "等价（同上；写入带 expectedRevision，受限宿主按 typed 错误降级）",
     "workspace:write": "等价（同上；写入带 expectedRevision，受限宿主按 typed 错误降级）"
   }
 }

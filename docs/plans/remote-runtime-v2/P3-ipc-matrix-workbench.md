@@ -30,9 +30,7 @@
 | `workspace:create` | forward | `desktopWorkbench:workspaceCreate` | — | 等价（同上；写入带 expectedRevision，受限宿主按 typed 错误降级） | 工作区写入归 daemon |
 | `workspace:list` | forward | `desktopWorkbench:workspaceList` | — | 等价（同一 desktopWorkbench workspace surface，每次重验 cwd） | 工作区读取归 daemon |
 | `workspace:move` | forward | `desktopWorkbench:workspaceMove` | — | 等价（同上；写入带 expectedRevision，受限宿主按 typed 错误降级） | 工作区写入归 daemon |
-| `workspace:openExternal` | forward | `desktopWorkbench:workspaceOpenExternal` | — | 等价（同一 desktopWorkbench workspace surface，每次重验 cwd） | 工作区内交给系统打开 |
 | `workspace:read` | forward | `desktopWorkbench:workspaceRead` | — | 等价（同一 desktopWorkbench workspace surface，每次重验 cwd） | 工作区读取归 daemon |
 | `workspace:readPage` | forward | `desktopWorkbench:workspaceReadPage` | — | 等价（同一 desktopWorkbench workspace surface，每次重验 cwd） | 工作区读取归 daemon |
 | `workspace:rename` | forward | `desktopWorkbench:workspaceRename` | — | 等价（同上；写入带 expectedRevision，受限宿主按 typed 错误降级） | 工作区写入归 daemon |
-| `workspace:trash` | forward | `desktopWorkbench:workspaceTrash` | — | 等价（同上；写入带 expectedRevision，受限宿主按 typed 错误降级） | 工作区写入归 daemon |
 | `workspace:write` | forward | `desktopWorkbench:workspaceWrite` | — | 等价（同上；写入带 expectedRevision，受限宿主按 typed 错误降级） | 工作区写入归 daemon |

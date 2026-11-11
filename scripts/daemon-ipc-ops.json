@@ -111,11 +111,21 @@
         "local"
       ]
     },
+    "providerCommands": {
+      "path": "providers",
+      "request": "{ op:'providerCommands', method, args:[context] }",
+      "response": "现有 CapabilityEnvelope<ProviderCommand[]>（state/mode/observedAt 原样；不可用时 data: null + reason）",
+      "authorize": "已验证 peer + scope: local；在该 Provider 的操作队列内读取，与 main 同一份实现",
+      "why": "Provider registry 在 daemon；设备 op commands 是清洗后的投影，不保留 envelope",
+      "scopes": [
+        "local"
+      ]
+    },
     "recorderContent": {
       "path": "evidence",
-      "request": "{ op:'recorderContent', method, cwd, cursor }",
+      "request": "{ op:'recorderContent', method, args:[request, cwd] }：request 为 renderer 原样请求，cwd 由 App 追加（窗口当前工作区，无选择时为空串）",
       "response": "现有 recorder content page",
-      "authorize": "已验证 peer + authorize(cwd) + `.scry` 路径校验",
+      "authorize": "已验证 peer + scope: local；daemon 用自己的 resolveKnownProjectDirectory 重验 cwd（未知即 recorder_workspace_unavailable）+ `.scry` 路径与记录引用校验；App 在回复后再比对窗口选择",
       "why": "recorder 记录写在工作区里，由 daemon 读",
       "scopes": [
         "local"

@@ -5,10 +5,10 @@ import type { BrowserWindow } from 'electron'
 import type { WorkspaceCreateRequest, WorkspaceFilePageRequest, WorkspaceListRequest, WorkspaceMoveRequest, WorkspacePathRequest, WorkspaceRenameRequest, WorkspaceWriteRequest } from '../../shared/workspace'
 import type { ProviderContext } from '../../shared/provider'
 import { resetProviderSession, viewNothingAfterDaemonNewSession } from './startup-channels'
-import { daemonModeEnabled } from '../daemon-channel-gate'
+import { callDaemonChannel, daemonModeEnabled } from '../daemon-channel-gate'
 import { installWorkbenchWindowCwd } from '../daemon-local-ops/workbench'
 import type { TerminalCloseRequest, TerminalRecordingRequest, TerminalRecordingListRequest, TerminalResizeRequest, TerminalStartRequest, TerminalOwnershipRequest, TerminalWriteRequest } from '../../shared/terminal'
-import { authorizedWorkspaceRequest } from '../workspace-authorization'
+import { authorizedWorkspaceRequest, knownProjectDirectory } from '../workspace-authorization'
 import { createWorkspaceEntry, listWorkspace, moveWorkspaceEntry, openWorkspaceFileExternally, readWorkspaceFile, readWorkspaceFilePage, resolveWorkspaceFileOpenTarget, renameWorkspaceEntry, trashWorkspaceEntry, writeWorkspaceFile } from '../workspace-files'
 import type { HomeFileAccess } from '../home-file-access'
 import type { TerminalManager } from '../terminal-manager'
@@ -57,12 +57,19 @@ export function registerWorkspaceHandlers(deps: WorkspaceBootstrapDependencies):
     readWorkspaceFilePage(homeFileAccess.isReadOnlyTarget(request.cwd)
       ? await homeFileAccess.authorize(request)
       : { ...request, cwd: resolveKnownProjectDirectory(request.cwd) }))
-  handleTrusted('workspace:openExternal', (_event, request: WorkspacePathRequest) =>
-    openWorkspaceFileExternally(
-      authorizedWorkspaceRequest(getCurrentCwd(), request),
+  // Runs in the App in daemon mode too (the daemon has no shell), bound to this window's
+  // selection as always. Only the cross-project fallback differs: the known projects are
+  // the daemon's stores then, asked for when the window's workspace lacks the file.
+  const daemonKnownProjects = daemonModeEnabled()
+  handleTrusted('workspace:openExternal', (_event, request: WorkspacePathRequest) => {
+    const authorized = authorizedWorkspaceRequest(getCurrentCwd(), request)
+    let daemonRoots: readonly string[] = []
+    const resolveChosen = (cwd: string): string => daemonKnownProjects ? knownProjectDirectory(cwd, daemonRoots) : resolveKnownProjectDirectory(cwd)
+    return openWorkspaceFileExternally(
+      authorized,
       openLocalPath,
       {
-        roots: [...knownProjectDirectories()],
+        roots: daemonKnownProjects ? async () => (daemonRoots = await daemonKnownProjectDirectories()) : [...knownProjectDirectories()],
         choose: async (candidates) => {
           const selectable = candidates.length > 0 && candidates.length <= 5
           const options = {
@@ -81,10 +88,11 @@ export function registerWorkspaceHandlers(deps: WorkspaceBootstrapDependencies):
             ? await dialog.showMessageBox(getWindow()!, options)
             : await dialog.showMessageBox(options)
           const selected = selectable ? candidates[result.response - 1] : undefined
-          return selected ? { ...selected, cwd: resolveKnownProjectDirectory(selected.cwd) } : null
+          return selected ? { ...selected, cwd: resolveChosen(selected.cwd) } : null
         }
       }
-    ))
+    )
+  })
   handleTrusted('workspace:openKnownExternal', async (_event, request: WorkspacePathRequest) =>
     openWorkspaceFileExternally(
       homeFileAccess.isReadOnlyTarget(request.cwd)
@@ -215,4 +223,18 @@ export function registerWorkspaceHandlers(deps: WorkspaceBootstrapDependencies):
   // as the handlers above are; the daemon checks the request against it.
   if (daemonModeEnabled()) installWorkbenchWindowCwd(getCurrentCwd)
 
+}
+
+/**
+ * What the in-process knownProjectDirectories() reads from the App's own stores (recent
+ * folders, project records, session catalog), asked of the daemon that owns them: its
+ * project list (records and session projects, removed ones left out) and its recent
+ * folders. Narrower than in process at most (sessions of a removed project, managed
+ * worktrees), which only offers fewer candidates. An answer of the wrong shape refuses.
+ */
+async function daemonKnownProjectDirectories(): Promise<string[]> {
+  const [projects, recent] = await Promise.all([callDaemonChannel('agent:listProjects', []), callDaemonChannel('agent:recentFolders', [])])
+  if (!Array.isArray(projects) || !Array.isArray(recent)) throw new Error('invalid_daemon_known_projects')
+  const cwds = [...projects.map((project) => (project as { cwd?: unknown } | null)?.cwd), ...recent]
+  return cwds.filter((cwd): cwd is string => typeof cwd === 'string' && cwd.length > 0)
 }

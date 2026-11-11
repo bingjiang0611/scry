@@ -3,9 +3,9 @@
 本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑；改 `scripts/daemon-ipc-routing.json` 后重新生成。
 
 - 生产特权 IPC channel：168 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
-- 留在 main：54，一半 main 一半 daemon（`split`）：4，转发到现有 op：39，需要新增 op：71
+- 留在 main：56，一半 main 一半 daemon（`split`）：4，转发到现有 op：36，需要新增 op：72
 - 新增 op 的请求、响应、授权与调用方范围见 [P3-ipc-ops](P3-ipc-ops.md)；设计正文见 [P3 §13](P3-batch4-design.md)
-- `desktopWorkbench` 转发行（workspace / terminal / sourceControl，共 32 行）见 [P3-ipc-matrix-workbench](P3-ipc-matrix-workbench.md)
+- `desktopWorkbench` 转发行（workspace / terminal / sourceControl，共 30 行）见 [P3-ipc-matrix-workbench](P3-ipc-matrix-workbench.md)
 
 ## 判定规则
 
@@ -47,7 +47,7 @@
 | `agent:importBillingFixture` | new-op | `billing:importBillingFixture` | analytics | — | 账本与 transcript 在 daemon 侧 |
 | `agent:invalidateProviderContext` | new-op | `providerContext:invalidateProviderContext` | providers | — | Provider 运行时在 daemon |
 | `agent:listArchivedSessions` | new-op | `sessionStore:listArchivedSessions` | navigation | — | 会话账本在 daemon |
-| `agent:listCommands` | forward | `commands` | — | 不同：远程按 provider 白名单裁剪命令集，本机保留全部命令。按 scope 选策略 | 既有 commands |
+| `agent:listCommands` | new-op | `providerCommands:listCommands` | providers | — | 设备 op commands 丢掉 CapabilityEnvelope（unavailable 会变成空列表）；本机要完整 envelope |
 | `agent:listProjects` | new-op | `projectStore:listProjects` | navigation | — | 项目目录需单一写者 |
 | `agent:listSessions` | new-op | `sessionStore:listSessions` | navigation | — | 本机拿 App 自己的完整会话目录；远程设备的 sessionsPage 投影不变 |
 | `agent:listSkills` | new-op | `skills:listSkills` | providers | — | daemon 才能读 Provider 的 skill 目录 |
@@ -153,10 +153,12 @@
 | `runTraces:setLegacyDemand` | main | `—` | — | — | 窗口焦点决定 |
 | `runTraces:subscribe` | main | `—` | — | — | main 拉流后分发 |
 | `runTraces:unsubscribe` | main | `—` | — | — | main 拉流后分发 |
+| `workspace:openExternal` | main | `—` | — | daemon:projectStore（listProjects + recentFolders） | daemon 没有 shell：留在 App，仍按窗口工作区授权；跨项目回退的已知项目列表向 daemon 取 |
 | `workspace:openKnownExternal` | main | `—` | — | daemon:projectStore+sessionStore | main 的只读引用表 |
 | `workspace:readKnown` | main | `—` | — | daemon:projectStore+sessionStore | main 的只读引用表 |
 | `workspace:readPageKnown` | main | `—` | — | daemon:projectStore+sessionStore | main 的只读引用表 |
 | `workspace:resolveFile` | main | `—` | — | daemon:projectStore+sessionStore | main 签发只读引用 |
+| `workspace:trash` | main | `—` | — | — | daemon 没有 shell：留在 App，按窗口工作区授权后交给系统废纸篓 |
 | `workspaceSelection:inspectStart` | new-op | `workspaceSelection:inspectStart` | navigation | — | 准备工作区前检查仓库 |
 | `workspaceSelection:read` | new-op | `workspaceSelection:read` | navigation | — | worktree 选择读取 git 状态 |
 | `workspaceSelection:validateBranch` | new-op | `workspaceSelection:validateBranch` | navigation | — | 校验新分支名 |

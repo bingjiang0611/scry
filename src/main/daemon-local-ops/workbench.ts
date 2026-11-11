@@ -9,9 +9,11 @@ import { object, text } from '../source-control/ipc'
 // each request to what main's in-process handler was bound to, so the forward is never
 // wider than that handler.
 //
+// workspace:openExternal and workspace:trash are not forwarded: the daemon has no shell
+// (its host reports workbenchOps openPath/trashItem false), so they run in the App
+// (DAEMON_MODE_IN_PROCESS_CHANNELS).
+//
 // Left out on purpose, so the gate refuses them by name:
-//   workspace:openExternal, workspace:trash - the daemon has no shell to open or trash
-//     with (its host reports workbenchOps openPath/trashItem false);
 //   terminal:* - output is pushed to the window in process but polled on this op, and the
 //     PTYs would live in the daemon past the window. Both need a design decision.
 export const WORKBENCH_LOCAL_OPS: DaemonLocalOpTable = {}

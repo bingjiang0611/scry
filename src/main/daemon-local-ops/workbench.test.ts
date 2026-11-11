@@ -13,19 +13,17 @@ import { WORKBENCH_FORWARDS, installWorkbenchWindowCwd } from './workbench'
 
 const ON = { SCRY_HOST_DAEMON: '1' } as NodeJS.ProcessEnv
 const rows = (JSON.parse(readFileSync(join(process.cwd(), 'scripts', 'daemon-ipc-routing-workbench.json'), 'utf8')) as {
-  channels: Array<{ channel: string; op: string; surface: string; method: string }>
-}).channels
+  channels: Array<{ channel: string; route: string; op: string; surface: string; method: string }>
+}).channels.filter((row) => row.route === 'forward')
 const WINDOW = '/projects/app'
 const REPO = 'a'.repeat(64)
 const OPERATION = { id: 'op-1', repositoryId: REPO, action: 'stage', status: 'succeeded', startedAt: 1, message: 'ok' }
 const REPOSITORY = { status: 'available', data: { id: REPO, root: WINDOW, revision: 'r', files: [], remotes: [], actionBlockers: {}, writeBlocker: null } }
 
-// Channels this lane leaves refused: the daemon has no shell to open or trash with, and
-// the terminal needs a push design (see the B4-L4 workbench status note).
-const REFUSED = new Set([
-  'workspace:openExternal', 'workspace:trash',
-  ...rows.filter((row) => row.surface === 'terminal').map((row) => row.channel)
-])
+// Channels this lane leaves refused: the terminal needs a push design (see the B4-L4
+// workbench status note). openExternal and trash are routed `main` (the daemon has no
+// shell) and run in process; bootstrap/workspace-daemon.test.ts covers them.
+const REFUSED = new Set(rows.filter((row) => row.surface === 'terminal').map((row) => row.channel))
 
 type Query = { surface: string; cwd: string; method: string; args: unknown[] }
 function built(channel: string, args: unknown[]): { op: string; query: Query } {
@@ -115,13 +113,18 @@ describe('workbench forwards', () => {
     expect(listener).not.toHaveBeenCalled()
   })
 
-  it('keeps the shell operations and the terminal a named absence', async () => {
+  it('keeps the terminal a named absence and the shell operations in process', async () => {
     undo.push(installDaemonRequestForwarder(vi.fn(async () => ({ workbench: true }))))
     for (const channel of REFUSED) {
       const listener = vi.fn()
       const gated = gateDaemonChannel(channel, listener, ON) as unknown as (event: unknown, ...args: unknown[]) => unknown
       expect(() => gated({}, { cwd: WINDOW, path: 'a.txt' })).toThrow(`daemon_capability_unavailable:${channel}`)
       expect(listener).not.toHaveBeenCalled()
+    }
+    for (const channel of ['workspace:openExternal', 'workspace:trash']) {
+      expect(WORKBENCH_FORWARDS[channel], channel).toBeUndefined()
+      const listener = vi.fn()
+      expect(gateDaemonChannel(channel, listener, ON)).toBe(listener)
     }
   })
 })

@@ -26,6 +26,10 @@ export function daemonModeEnabled(env: NodeJS.ProcessEnv = process.env): boolean
  * the App sends with each daemon submit (daemon-run-surface fills `cwd` from it); it
  * persists nothing. `agent:unreadSessions` answers from this window's mirror of the
  * daemon's unread set (P3f E1b), and refuses by name until the first snapshot arrives.
+ *
+ * `workspace:openExternal` and `workspace:trash` stay here because the daemon has no
+ * shell. They keep main's binding to this window's selection; the cross-project fallback
+ * of openExternal takes its known projects from the daemon (bootstrap/workspace.ts).
  */
 export const DAEMON_MODE_IN_PROCESS_CHANNELS: ReadonlySet<string> = new Set([
   'agent:clipboardImage', 'agent:focusRun', 'agent:revealProject', 'agent:setCwd',
@@ -35,7 +39,8 @@ export const DAEMON_MODE_IN_PROCESS_CHANNELS: ReadonlySet<string> = new Set([
   'remote:desktop:disable', 'remote:desktop:invite', 'remote:desktop:status',
   'runTraces:ack', 'runTraces:confirm', 'runTraces:resync', 'runTraces:setLegacyDemand',
   'runTraces:subscribe', 'runTraces:unsubscribe',
-  'workspace:openKnownExternal', 'workspace:readKnown', 'workspace:readPageKnown', 'workspace:resolveFile',
+  'workspace:openExternal', 'workspace:openKnownExternal', 'workspace:readKnown', 'workspace:readPageKnown',
+  'workspace:resolveFile', 'workspace:trash',
   ...DESKTOP_REMOTE_CLIENT_METHODS.map((method) => `desktopRemote:${method}`)
 ])
 

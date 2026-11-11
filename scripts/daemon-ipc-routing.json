@@ -149,9 +149,10 @@
     },
     {
       "channel": "agent:listCommands",
-      "route": "forward",
-      "op": "commands",
-      "why": "既有 commands"
+      "route": "new-op",
+      "op": "providerCommands",
+      "method": "listCommands",
+      "why": "设备 op commands 丢掉 CapabilityEnvelope（unavailable 会变成空列表）；本机要完整 envelope"
     },
     {
       "channel": "agent:listProjects",

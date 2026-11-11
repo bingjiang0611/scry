@@ -5,9 +5,6 @@ import { billingStateQuery, importBillingFixture, syncBillingAdmin } from '../db
 import { warmShellEnv } from '../claude-locate'
 import { stopObservedBackgroundTask } from '../background-task-control'
 import { steerObservedRun } from '../run-steering'
-import { readAppTraceContentPage } from '../trace-tool-content'
-import { resolveRecorderLocation } from '../../core/turn-recorder/config'
-import { readAuthorizedRecorderContentPage } from '../recorder-content-access'
 import { CommandReceipts } from '../command-receipts'
 import type { RemoteHostService } from '../remote/remote-host-service'
 import type { RunRegistry } from '../run-registry'
@@ -17,7 +14,8 @@ import type { UserQuestionBroker } from '../user-question'
 import type { TraceOutputBridge, TraceBatchReceipt } from '../trace-output'
 import { registerRunTraceHandlers } from './run-trace-ipc'
 import { registerChannelHandlers } from './startup-channels'
-import { llmPerformanceChannelHandlers, usageChannelHandlers, workspaceDiffChannelHandlers } from './query-channels'
+import { llmPerformanceChannelHandlers, recorderContentChannelHandlers, usageChannelHandlers, workspaceDiffChannelHandlers } from './query-channels'
+import { installRecorderContentWindowCwd } from './recorder-content-daemon'
 import type { DaemonRunSurface } from './daemon-run-surface'
 import type { RunControl } from './run-control'
 
@@ -154,23 +152,14 @@ export function registerAgentRuntimeHandlers({
 
   // P2 Files & Diff：cwd 的最终 git diff（vs HEAD 增删），与工具足迹对照
   registerChannelHandlers(handleTrusted, workspaceDiffChannelHandlers(resolveKnownProjectDirectory))
-  handleTrusted('agent:recorderContentPage', async (_event, request: unknown) => {
-    const cwd = getCurrentCwd() ?? ''
-    if (request && typeof request === 'object' && 'source' in request) {
-      if (request.source !== 'app-trace') throw new Error('invalid_content_source')
-      const page = await readAppTraceContentPage(app.getPath('userData'), cwd, request)
-      if ((getCurrentCwd() ?? '') !== cwd) throw new Error('recorder_workspace_changed')
-      return page
-    }
-    if (!cwd) throw new Error('recorder_workspace_unavailable')
-    // Reading is authorized by the selected workspace's validated recorder location and record
-    // references, not by the current enablement flag. Existing evidence remains inspectable when
-    // capture is disabled or a sentinel is present; no path supplied by the renderer is opened.
-    const location = await resolveRecorderLocation(cwd)
-    if (getCurrentCwd() !== cwd) throw new Error('recorder_workspace_changed')
-    if (!location.valid) throw new Error(`recorder_unavailable:${location.reason}`)
-    return readAuthorizedRecorderContentPage(location.dataRoot, request)
-  })
+  // Recorder content for this window's selection: the table the daemon also serves; in
+  // daemon mode the App appends the selection and checks it again after the reply.
+  registerChannelHandlers(handleTrusted, recorderContentChannelHandlers({
+    userDataDir,
+    workspace: () => getCurrentCwd() ?? '',
+    stillCurrent: (cwd) => (getCurrentCwd() ?? '') === cwd
+  }))
+  if (daemon) installRecorderContentWindowCwd(getCurrentCwd)
 
   // trace live 镜像的消费确认：renderer 完成批量 state commit 后归还精确批次额度。
   // generation + batchId 防止窗口重挂后的迟到/重复 ACK 释放新 renderer 的额度。

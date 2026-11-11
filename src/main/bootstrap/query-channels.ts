@@ -6,6 +6,9 @@ import { statsQuery, usageAnalyticsQuery, usageAnalyticsWithCreditsQuery } from 
 import { readUsageStats } from '../usage-jsonl'
 import { readLlmPerformanceHistory } from '../llm-performance-history'
 import { registerGitDiffIpc } from '../git'
+import { readAppTraceContentPage } from '../trace-tool-content'
+import { resolveRecorderLocation } from '../../core/turn-recorder/config'
+import { readAuthorizedRecorderContentPage } from '../recorder-content-access'
 import type { ProviderRegistry } from '../providers/registry'
 import type { ChannelHandler, ChannelHandlers } from './startup-channels'
 
@@ -73,5 +76,52 @@ export function skillChannelHandlers(deps: {
   return {
     'agent:listSkills': (context: ProviderContext) =>
       deps.withProviderOperation(context.providerId, () => deps.providerRegistry.listSkills(context), context.agentProfileId)
+  } satisfies ChannelHandlers
+}
+
+/** The Provider's command catalog, queued like Skills; its envelope travels whole. */
+export function providerCommandChannelHandlers(deps: {
+  providerRegistry: Pick<ProviderRegistry, 'listCommands'>
+  withProviderOperation: <T>(providerId: ProviderContext['providerId'], operation: () => T | Promise<T>, agentProfileId?: string) => Promise<T>
+}) {
+  return {
+    // An unavailable catalog stays `data: null` with its reason, never an empty list.
+    'agent:listCommands': (context: ProviderContext) =>
+      deps.withProviderOperation(context.providerId, () => deps.providerRegistry.listCommands(context), context.agentProfileId)
+  } satisfies ChannelHandlers
+}
+
+/**
+ * Recorder and App trace content pages for the window's workspace. The renderer never
+ * names that workspace: main reads its own selection (agent:setCwd) and ignores any extra
+ * argument; the daemon takes the one its App appended and re-validates it against its own
+ * project authority. `''` is "no workspace", which app-trace bodies of runs without a cwd
+ * still allow, as main always did.
+ */
+export function recorderContentChannelHandlers(deps: {
+  userDataDir: () => string
+  /** The workspace to read for; given the argument after the request, which only the daemon trusts. */
+  workspace: (appended: unknown) => string
+  /** Whether that workspace is still selected. The daemon answers true; its App checks after the reply. */
+  stillCurrent: (cwd: string) => boolean
+}) {
+  return {
+    'agent:recorderContentPage': async (request: unknown, appended?: unknown) => {
+      const cwd = deps.workspace(appended)
+      if (request && typeof request === 'object' && 'source' in request) {
+        if (request.source !== 'app-trace') throw new Error('invalid_content_source')
+        const page = await readAppTraceContentPage(deps.userDataDir(), cwd, request)
+        if (!deps.stillCurrent(cwd)) throw new Error('recorder_workspace_changed')
+        return page
+      }
+      if (!cwd) throw new Error('recorder_workspace_unavailable')
+      // Reading is authorized by the selected workspace's validated recorder location and record
+      // references, not by the current enablement flag. Existing evidence remains inspectable when
+      // capture is disabled or a sentinel is present; no path supplied by the renderer is opened.
+      const location = await resolveRecorderLocation(cwd)
+      if (!deps.stillCurrent(cwd)) throw new Error('recorder_workspace_changed')
+      if (!location.valid) throw new Error(`recorder_unavailable:${location.reason}`)
+      return readAuthorizedRecorderContentPage(location.dataRoot, request)
+    }
   } satisfies ChannelHandlers
 }
