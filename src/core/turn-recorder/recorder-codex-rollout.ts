@@ -6,6 +6,7 @@ import { appendCodexPatchResult, finalizeCodexTurns, callInput, codexHookEvent, 
 import { flushCodexUserInputs, recordCodexUserInput, type CodexUserInputState } from './recorder-codex-user-input.js'
 import { CodexUsageDeltaFilter } from '../../shared/usage-dedupe.js'
 import { codexIdentityFromSessionMeta, recordCodexItemCompleted, recordCodexSubAgentActivity } from './recorder-codex-rollout-children.js'
+import { attachCodexCompactions, codexCompactionMarker, type CodexCompactionMarker } from './recorder-codex-compaction.js'
 
 export function parseCodexRollout(content: string, runId: string, sessionIdentity?: CodexRolloutIdentity): { recognized: boolean; turns: ParsedTranscriptTurn[]; identity: CodexRolloutIdentity } {
   const turns: ParsedTranscriptTurn[] = []
@@ -49,6 +50,7 @@ export function parseCodexRollout(content: string, runId: string, sessionIdentit
   let asyncOuterCallByCell = new Map<string, string>()
   let transportCellByOuterCall = new Map<string, string>()
   let lastAt: string | undefined
+  const compactionMarkers: CodexCompactionMarker[] = []
 
   const addAssistant = (text: string, at: string, messageId?: string, dedupeLastModel = false): void => {
     if (!current) return
@@ -261,6 +263,12 @@ export function parseCodexRollout(content: string, runId: string, sessionIdentit
     }
     if (!current) continue
 
+    const compaction = codexCompactionMarker(type, payload, at)
+    if (compaction) {
+      compactionMarkers.push(compaction)
+      continue
+    }
+
     if (type === 'turn_context') {
       const model = stringAt(payload, 'model')
       if (model) turnModels.add(model)
@@ -332,19 +340,6 @@ export function parseCodexRollout(content: string, runId: string, sessionIdentit
     if (type === 'event_msg' && payload.type === 'agent_message') {
       const assistant = stringAt(payload, 'message', 'text') ?? textContent(payload.content)
       if (assistant) addAssistant(assistant, at, stringAt(payload, 'id'))
-      continue
-    }
-    if (type === 'event_msg' && payload.type === 'context_compacted') {
-      current.events.push({
-        id: `codex-compaction-${stableHash([current.providerTurnId, at]).slice(0, 16)}`,
-        ts: at,
-        runId,
-        kind: 'harness',
-        stage: 'context_compaction',
-        compaction: {},
-        input: {},
-        runtimeMetadata: { source: 'codex_rollout_context_compacted' }
-      })
       continue
     }
     if (type === 'event_msg' && payload.type === 'task_complete') {
@@ -437,6 +432,7 @@ export function parseCodexRollout(content: string, runId: string, sessionIdentit
       addToolOutput(payload, at)
     }
   }
+  attachCodexCompactions(turns, compactionMarkers, runId)
   const injectedSkill = current ? flushCodexUserInputs(current, runId, userInputState) : undefined
   if (lastAt) finishUsage(lastAt)
   return {

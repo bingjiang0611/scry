@@ -125,3 +125,67 @@ describe('Codex rollout user boundaries', () => {
     expect(id([...inputs, end])).toBe(id([...inputs, tool, end]))
   })
 })
+
+describe('Codex rollout context compactions', () => {
+  const compacted = (timestamp: string, replacement: Record<string, unknown> = {}): string =>
+    JSON.stringify({ type: 'compacted', timestamp, payload: { message: '', replacement_history: [], ...replacement } })
+  const compactions = (content: string) => parseCodexRollout(content, 'run-compaction').turns
+    .flatMap(turn => turn.events.filter(event => event.kind === 'harness' && event.stage === 'context_compaction'))
+
+  it('records a top-level compacted row that has no context_compacted notification', () => {
+    const content = [
+      row('event_msg', { type: 'task_started', turn_id: 'turn-compacted' }, '2026-11-10T15:48:09.904Z'),
+      compacted('2026-11-10T16:00:16.138Z'),
+      row('event_msg', { type: 'task_complete', turn_id: 'turn-compacted' }, '2026-11-10T16:00:20.000Z')
+    ].join('\n') + '\n'
+
+    expect(compactions(content)).toEqual([
+      expect.objectContaining({ ts: '2026-11-10T16:00:16.138Z', runtimeMetadata: { source: 'codex_rollout_compacted' } })
+    ])
+  })
+
+  it('records one compaction when compacted, context_compacted and a compaction item describe it', () => {
+    const content = [
+      row('event_msg', { type: 'task_started', turn_id: 'turn-paired' }, '2026-11-10T15:48:09.904Z'),
+      compacted('2026-11-10T16:00:16.138Z'),
+      row('event_msg', { type: 'context_compacted' }, '2026-11-10T16:00:16.140Z'),
+      row('response_item', { type: 'compaction', encrypted_content: 'opaque' }, '2026-11-10T16:00:16.141Z'),
+      row('event_msg', { type: 'task_complete', turn_id: 'turn-paired' }, '2026-11-10T16:00:20.000Z')
+    ].join('\n') + '\n'
+
+    expect(compactions(content)).toEqual([
+      expect.objectContaining({ ts: '2026-11-10T16:00:16.138Z', runtimeMetadata: { source: 'codex_rollout_compacted' } })
+    ])
+  })
+
+  it('keeps two compactions that are minutes apart', () => {
+    const content = [
+      row('event_msg', { type: 'task_started', turn_id: 'turn-twice' }, '2026-11-10T15:48:09.904Z'),
+      compacted('2026-11-10T16:00:16.138Z'),
+      row('event_msg', { type: 'context_compacted' }, '2026-11-10T16:10:16.138Z'),
+      row('event_msg', { type: 'task_complete', turn_id: 'turn-twice' }, '2026-11-10T16:11:00.000Z')
+    ].join('\n') + '\n'
+
+    expect(compactions(content).map(event => [event.ts, (event.runtimeMetadata as Record<string, unknown>).source])).toEqual([
+      ['2026-11-10T16:00:16.138Z', 'codex_rollout_compacted'],
+      ['2026-11-10T16:10:16.138Z', 'codex_rollout_context_compacted']
+    ])
+  })
+
+  it('keeps a re-read compaction row with the turn whose window owns it', () => {
+    const content = [
+      row('event_msg', { type: 'task_started', turn_id: 'turn-owner' }, '2026-11-10T15:48:09.904Z'),
+      compacted('2026-11-10T16:00:16.138Z'),
+      row('event_msg', { type: 'task_started', turn_id: 'turn-later' }, '2026-11-10T16:17:13.503Z'),
+      row('event_msg', { type: 'task_complete', turn_id: 'turn-later' }, '2026-11-10T16:23:28.181Z')
+    ].join('\n') + '\n'
+
+    const parsed = parseCodexRollout(content, 'run-overlap')
+    const count = (turnId: string) => parsed.turns
+      .filter(turn => turn.providerTurnId === turnId)
+      .flatMap(turn => turn.events)
+      .filter(event => event.stage === 'context_compaction')
+      .length
+    expect([count('turn-owner'), count('turn-later')]).toEqual([1, 0])
+  })
+})
