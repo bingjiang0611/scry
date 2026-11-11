@@ -8,7 +8,7 @@
   失败：**停止（或在 Provider 给出 session id 前取消/`/plugins reload`）之后，同一工作区的后续轮次被 `Scry trace 仍有 1 轮待恢复` 永久拦住**，重启也不能恢复（`d1n`），因为 pending 记录是 `missing_provider_session_id` 且带着 22 条 hook 证据，`trace-turn-progress.ts` 的 `isProviderlessTerminalTurn` 永远判为可恢复却无法恢复；`/plugins reload` 在 Provider 侧成功（5 个插件、84 条命令）但 recorder 报 `requires an authoritative Provider session id`；两个会话不能真正同时跑，切到新会话会丢掉前一轮的证据。停止本身会先等 4 秒再强制结束，守护进程在 8–13 秒内退出。
   未验证：审批拒绝、分支、后台子 Agent（`Task×2` 启动后 `Operation aborted`）、MCP OAuth。
 - **D2（对照缺一半）**：[reports/D2.md](reports/D2.md)。本分支 10 轮真实发送，点击到第一个回答 token 中位数 16.1 秒（14.2–31.8 秒，1 分钟负载 30–60，串行）。`origin/main` 对照没测成：配 CLI 1.1.86 直接 `exited with code 42`；配 CLI 1.1.80 时版本探测 5 秒超时、发送按钮禁用（当时负载 111）。`~/.qoder/logs` 10 轮增长：`runs/` +21 目录、`sdk-daemon-*.log` +11 个 / +13,752 B。按 CLAUDE.md 属 L2，不是 L3。
-- **D3**：D1 未通过，按 R4 的规定不改兼容性清单，本轮无产品代码改动。
+- **D3（不改）**：[reports/D3.md](reports/D3.md)。D1 未通过，按 R4 的规定不改兼容性清单，`src/main/provider-compatibility-manifest.ts` 本轮零改动（`git diff` 行数 0），也没有产品代码改动。
 - **D4**：见下方报告。
 
 
