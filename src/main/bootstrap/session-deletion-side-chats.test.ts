@@ -118,4 +118,28 @@ describe('a Provider session takes its side chats along when it is deleted', () 
     expect(sideChatCascade.count).not.toHaveBeenCalled()
     expect(sideChatCascade.run).not.toHaveBeenCalled()
   })
+  it('keeps the session reserved until its destructive phase has finished', async () => {
+    // Side-chat creation and session starts are refused while the reservation exists, so it
+    // must not be dropped while the destructive phase is still running.
+    const deletingSessions = new Set<string>()
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    let entered!: () => void
+    const inDestructivePhase = new Promise<void>((resolve) => { entered = resolve })
+    let checks = 0
+    const { deleteOneSession, request } = setup({ count: async () => 0 }, {
+      deletingSessions,
+      assertLegacyConversationWriteAllowed: async () => {
+        // The first check reserves; the second runs inside the destructive phase.
+        if (++checks === 2) { entered(); await gate; throw new Error('stopped inside the destructive phase') }
+      }
+    })
+    const deleting = deleteOneSession(request, { confirm: false, notifyFailure: false })
+    await inDestructivePhase
+    await Promise.resolve()
+    expect(deletingSessions.size).toBe(1)
+    release()
+    await expect(deleting).rejects.toThrow('stopped inside the destructive phase')
+    expect(deletingSessions.size).toBe(0)
+  })
 })

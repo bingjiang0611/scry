@@ -137,7 +137,8 @@ export function registerSessionDeletionHandlers(deps: SessionDeletionDependencie
         const failed = await sessionSideChats.remove(sideChats.scope)
         if (failed.length > 0) return sessionSideChats.kept(failed, options.notifyFailure, empty())
       }
-      return contextAdmission.run(admissionKey, async () => {
+      // Awaited: the finally below drops the reservation, which must outlive this phase.
+      return await contextAdmission.run(admissionKey, async () => {
         // Matching starts are fenced by deletionKey. The context admission is reacquired
         // only for the destructive phase so broad managed recovery in another session
         // cannot resurrect this session while unrelated work is deleted.

@@ -76,10 +76,19 @@ describe('side-chat creation from a Provider session that is being deleted', () 
     const holding = new Promise<void>((resolve) => { entered = resolve })
     const held = current.contextAdmission.run(contextKey, async () => { entered(); await gate })
     await holding
+    // Prove the create really queues on the delete's admission rather than bypassing it.
+    const run = current.contextAdmission.run.bind(current.contextAdmission)
+    let queued!: (key: string) => void
+    const createQueued = new Promise<string>((resolve) => { queued = resolve })
+    vi.spyOn(current.contextAdmission, 'run').mockImplementation((key, action) => {
+      queued(key)
+      return run(key, action)
+    })
     const creating = current.create('native-1')
+    expect(await createQueued).toBe(contextKey)
+    expect(current.createSideChat).not.toHaveBeenCalled()
     // The delete reserves inside its admission; the create cannot publish in between.
     current.deletingSessions.add(sessionKey('native-1'))
-    expect(current.createSideChat).not.toHaveBeenCalled()
     release()
     await held
     await expect(creating).rejects.toThrow('侧聊来源会话正在删除')
