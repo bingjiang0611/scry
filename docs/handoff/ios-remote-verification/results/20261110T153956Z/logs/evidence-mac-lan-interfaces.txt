@@ -2,7 +2,7 @@
 $ /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate
 Firewall is disabled. (State = 0)
 $ lsof -nP -iTCP:47820 -sTCP:LISTEN
-Scry    8492 baobingjiang   80u  IPv4 0x519ae558581f5c1c      0t0  TCP *:47820 (LISTEN)
+Scry    8492 <user>   80u  IPv4 0x519ae558581f5c1c      0t0  TCP *:47820 (LISTEN)
 $ ifconfig en0
 en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
 	options=6460<TSO4,TSO6,CHANNEL_IO,PARTIAL_CSUM,ZEROINVERT_CSUM>

@@ -26,6 +26,9 @@ const SIGNING = /(Apple (?:Development|Distribution)|iPhone (?:Developer|Distrib
 const CERT_HASH = /(identityHash=|--sign\s+)[0-9A-F]{40}\b/g
 // `codesign -dv` prints the signing team bare, outside an identity string.
 const TEAM_ID = /\b(TeamIdentifier=)[A-Z0-9]{10}\b/g
+// `lsof -i` rows name the owning account bare (COMMAND PID USER FD TYPE ...),
+// with no path around it; keep the command, PID and socket, drop the user.
+const LSOF_USER = /^(\S+[ \t]+\d+[ \t]+)(?!<user>)\S+([ \t]+\d+[urw]?[ \t]+IPv[46]\b)/gm
 // Not part of a longer dotted/word token (keeps versions like swiftlang-6.3.3.1.3).
 const IPV4 = /(?<![\w.-])(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?![\w.])/g
 
@@ -40,6 +43,7 @@ export function createRedactor(salt = randomBytes(16)) {
     .replace(SIGNING, (_, kind) => `${kind}: <signing-identity> (<team>)`)
     .replace(CERT_HASH, '$1<redacted>')
     .replace(TEAM_ID, '$1<team>')
+    .replace(LSOF_USER, '$1<user>$2')
     .replace(UDID, '<device-udid>')
     .replace(UUID, (id) => `<id:${alias(id)}>`)
     .replace(HOME, '$1/<user>')

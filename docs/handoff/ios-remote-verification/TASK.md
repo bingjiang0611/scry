@@ -16,7 +16,7 @@
 
 新增诊断（本提交）：连接卡住时，Network.framework 会报告它在等待什么（没有可用路径、接口断开、本地网络权限被拒等）。现在每次打开尝试的计时里会记录 `waitingMs`（何时开始等待）和 `waitingReason`（最近一次的原因），失败记录里也有。卡顿和直连失败都可以靠这两个字段判断原因。
 
-### 第五轮执行要求
+### 第五轮执行要求（维护者 2026-11-11 决定：暂不执行，PR 带着下列遗留风险合并）
 
 - **同步分支**：`git fetch origin claude/ios-remote-connection-issues-o7oj6x && git reset --hard origin/claude/ios-remote-connection-issues-o7oj6x`。
 - **先确认机器空闲**：`uptime` 的 load average 低于 10 再开始，并把开始时的 `uptime` 写进 REPORT。机器忙的话等它空下来，不要在过载状态下测。
@@ -93,6 +93,7 @@ cd experiments/remote-g0/cf-relay && npx --prefix .. wrangler deploy
 1. 结果目录 `docs/handoff/ios-remote-verification/results/<时间戳>/`：`env.txt`、`checks.json`、`logs/*.tail.txt`、`netbench-*.jsonl`、`relay-probe-*.jsonl`、`summary.json`、`acceptance.json`、`SUMMARY.md`。
 2. 同一目录下的 `REPORT.md`，按 `REPORT-TEMPLATE.md` 填写。
 3. 你做的修复提交（与结果提交分开）。
+   - 手工加进结果目录的证据文件（`logs/evidence-*.txt` 等）必须在**最后一次 `summarize` 之前**放进去，因为 `summarize` 会先运行 `redact.mjs` 脱敏。提交前再执行一次 `node experiments/remote-g0/verify/redact.mjs <结果目录>`，并用 `git grep` 确认没有账户名、Apple ID、团队 ID 或证书哈希。第四轮的证据文件就是因为漏了这一步，带着账户名和签名身份被提交了。
 4. 推送完成后，在会话里只需告诉用户一句："本机验证已推送到分支，时间戳 X，判定 Y"。核验者会从分支读取全部内容。
 
 ## 7. 注意

@@ -1,4 +1,4 @@
 # Phone-side transport state as persisted before the fix (read-only copy)
 # command: xcrun devicectl device copy from --device <udid> --domain-type appDataContainer --domain-identifier com.scry.remote.local --source Library/Preferences --destination /tmp/ios-prefs
-# key: scry.remote.transport.76ad8031-c811-4789-bc53-2ac867f82543
+# key: scry.remote.transport.<id:08a5785b>
 {"routes":[],"capabilities":["historyDeflate","mux","ping","sessionsKnown","watchStream"]}
