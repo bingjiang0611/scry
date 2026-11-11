@@ -5,6 +5,13 @@ import { stableHash } from './store.js'
 export type CodexUserInputSource = 'event_msg_user_message' | 'response_item_user'
 
 const CONTEXT_INPUT = /^\s*(?:<recommended_plugins>|# AGENTS\.md instructions|<environment_context>)/
+const EMPTY_APP_PAGE_INPUT = '<external_codex_apps_open_page>{"page_id":null}</external_codex_apps_open_page>'
+
+function isContextInput(text: string): boolean {
+  // Only the observed null-page packet is excluded. Other payload shapes stay
+  // visible until native evidence establishes their meaning; never drop the turn.
+  return CONTEXT_INPUT.test(text) || text.trim() === EMPTY_APP_PAGE_INPUT
+}
 
 type PendingCodexUserInput = {
   text: string
@@ -34,7 +41,7 @@ function appendCodexUserInput(
     turn.observable.skills = true
     return skill
   }
-  if (CONTEXT_INPUT.test(text)) return
+  if (isContextInput(text)) return
   if (!turn.userText) {
     turn.userText = text
     return
@@ -84,7 +91,7 @@ export function flushCodexUserInputs(
   // human-input stream, not skill/context injections, without text/clock/count pairing.
   // Producer: openai/codex rust-v0.62.0, record_input_and_rollout_usermsg.
   const conversationInputs = pending.filter(input => input.source === 'response_item_user')
-  const hasConversationInput = conversationInputs.some(input => !CONTEXT_INPUT.test(input.text) && !skillInjection(input.text))
+  const hasConversationInput = conversationInputs.some(input => !isContextInput(input.text) && !skillInjection(input.text))
   const inputs = hasConversationInput ? conversationInputs : pending
   let skill: string | undefined
   for (const input of inputs) {

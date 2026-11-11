@@ -349,7 +349,7 @@ export function runningCellId(output: string | undefined): string | undefined {
 
 export function skillInjection(text: string | undefined): string | undefined {
   if (!text) return undefined
-  return /<skill>\s*<name>([A-Za-z0-9_-]+)<\/name>/i.exec(text)?.[1]
+  return /^\s*<skill>\s*<name>([A-Za-z0-9_-]+(?::[A-Za-z0-9_-]+)?)<\/name>[\s\S]*<\/skill>\s*$/i.exec(text)?.[1]
 }
 
 export function explicitSkillEvent(name: string, runId: string, at: string): TraceEvent {
