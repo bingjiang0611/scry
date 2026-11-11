@@ -1,6 +1,7 @@
 import { shell } from 'electron'
 import { providerControlChannelHandlers, registerChannelHandlers } from './startup-channels'
 import { mcpChannelHandlers } from './mcp-channels'
+import { installMcpDaemonWindow } from './mcp-daemon'
 import { providerCommandChannelHandlers, skillChannelHandlers } from './query-channels'
 import { providerContextChannelHandlers } from './project-channels'
 import { installProviderContextWindowCwd } from './project-daemon'
@@ -49,7 +50,11 @@ export function registerProviderHandlers(deps: ProviderHandlersDependencies): vo
     refreshInvalidatedMetadata: refreshInvalidatedRemoteProviderMetadata,
     currentCwd: getCurrentCwd
   }))
-  if (daemonModeEnabled()) installProviderContextWindowCwd(getCurrentCwd)
+  if (daemonModeEnabled()) {
+    installProviderContextWindowCwd(getCurrentCwd)
+    // MCP runs in the daemon; its OAuth page opens here, for this window's own re-auth.
+    installMcpDaemonWindow({ openExternal: (url) => shell.openExternal(url) })
+  }
   registerChannelHandlers(handleTrusted, skillChannelHandlers({ providerRegistry, withProviderOperation }))
   registerChannelHandlers(handleTrusted, mcpChannelHandlers({
     providerRegistry, withProviderOperation, ensureMcpExecutionAuthorized, authorizedMcpExecution, homeDir, getRuns,

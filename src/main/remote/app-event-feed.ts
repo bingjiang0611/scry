@@ -20,6 +20,9 @@ export type AppEvent =
   | { kind: 'attention'; snapshot: SessionAttentionSnapshot }
   // Terminal output is waiting for the App (P3-terminal.md); it reads it by its own cursor.
   | { kind: 'terminal' }
+  // An MCP OAuth page for the App to open in a browser, already checked as safe here. Each
+  // one matters, so it is never coalesced; the App opens it only for its own re-auth.
+  | { kind: 'oauth'; url: string }
 
 export interface AppEventsReply {
   epoch: string
@@ -48,6 +51,7 @@ function coalesceKey(event: AppEvent): string | undefined {
   if (event.kind === 'run') return `run:${event.runId}`
   if (event.kind === 'attention') return 'attention'
   if (event.kind === 'terminal') return 'terminal'
+  if (event.kind === 'oauth') return undefined
   if (event.kind === 'window') return undefined
   const data = event.event
   if ('kind' in data && data.kind === 'conversation_changed') return `conversation:${data.conversationId}`

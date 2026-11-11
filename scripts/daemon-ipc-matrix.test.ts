@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { MATRIX_DOC, OPS_DOC, WORKBENCH_MATRIX_DOC, buildMatrix, collectChannels, loadRouting, protocolOps, renderMatrix, renderOps, preloadChannels, renderWorkbenchMatrix, workbenchMethods } from './daemon-ipc-matrix.mjs'
+import { CONVERSATION_MATRIX_DOC, MATRIX_DOC, OPS_DOC, WORKBENCH_MATRIX_DOC, buildMatrix, collectChannels, loadRouting, protocolOps, renderConversationMatrix, renderMatrix, renderOps, preloadChannels, renderWorkbenchMatrix, workbenchMethods } from './daemon-ipc-matrix.mjs'
 
 const routing = loadRouting()
 const matrix = buildMatrix(routing)
@@ -100,6 +100,7 @@ describe('daemon IPC routing matrix', () => {
   it('keeps both generated documents up to date', () => {
     expect(readFileSync(MATRIX_DOC, 'utf8')).toBe(renderMatrix(matrix))
     expect(readFileSync(WORKBENCH_MATRIX_DOC, 'utf8')).toBe(renderWorkbenchMatrix(matrix))
+    expect(readFileSync(CONVERSATION_MATRIX_DOC, 'utf8')).toBe(renderConversationMatrix(matrix))
     expect(readFileSync(OPS_DOC, 'utf8')).toBe(renderOps(matrix, routing))
   })
 

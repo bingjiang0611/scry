@@ -287,6 +287,7 @@ export class DaemonRunTransport {
       }
       if (raw.kind === 'attention' && isAttentionSnapshot(raw.snapshot)) return [{ kind: 'attention', snapshot: raw.snapshot }]
       if (raw.kind === 'terminal') return [{ kind: 'terminal' }]
+      if (raw.kind === 'oauth' && typeof raw.url === 'string' && raw.url.length <= 8192) return [{ kind: 'oauth', url: raw.url }]
       // Only the notices the daemon is meant to forward, never a channel it names freely.
       if (raw.kind === 'window' && typeof raw.channel === 'string' && DAEMON_WINDOW_NOTICES.has(raw.channel) && record(raw.payload)) {
         return [{ kind: 'window', channel: raw.channel, payload: raw.payload }]

@@ -63,10 +63,10 @@
     },
     "mcp": {
       "path": "providers",
-      "request": "{ op:'mcp', method, context, targetId? }",
-      "response": "现有 MCP 快照/探测/重认证 envelope（含 unavailable）",
-      "authorize": "已验证 peer + authorize(context.cwd) + 每次重验仓库 trust 与指纹",
-      "why": "MCP 与 trust gate 都在 daemon",
+      "request": "{ op:'mcp', method, args }（渲染端参数原样）；走单独的 mcp lane（5 分钟超时，容得下 OAuth 登录与首次 npx 安装）",
+      "response": "main 同一处理函数的 envelope（含 unavailable/unsupported）；重认证的 OAuth 页面经事件流 { kind:'oauth', url } 交给 App",
+      "authorize": "本机 grant；与进程内相同：实时快照、探测、重认证每次重建并核对 MCP 执行快照与指纹，失败即拒绝；daemon 先用 isSafeOAuthAuthorizationUrl 校验 OAuth 地址，App 再校验，且只在自己发出的重认证进行中才打开",
+      "why": "MCP 与 trust gate 都在 daemon；Provider 认证队列也在 daemon，App 不能在自己进程里另行认证",
       "scopes": [
         "local"
       ]

@@ -5,6 +5,7 @@
 - 生产特权 IPC channel：168 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
 - 留在 main：56，一半 main 一半 daemon（`split`）：6，转发到现有 op：25，需要新增 op：81
 - 新增 op 的请求、响应、授权与调用方范围见 [P3-ipc-ops](P3-ipc-ops.md)；设计正文见 [P3 §13](P3-batch4-design.md)
+- 统一对话（`conversation:*`，共 17 行）见 [P3-ipc-matrix-conversation](P3-ipc-matrix-conversation.md)
 - 工作台行（`desktopWorkbench` 转发的 workspace / sourceControl，与 App 终端 op `terminal`，共 30 行）见 [P3-ipc-matrix-workbench](P3-ipc-matrix-workbench.md)
 
 ## 判定规则
@@ -55,11 +56,11 @@
 | `agent:llmPerformanceSummary` | new-op | `llmPerformance:llmPerformanceSummary` | analytics | — | usage JSONL 与 run 状态由 daemon 写 |
 | `agent:loadSession` | split | `sessionHistory:loadSession` | history | main: 应用 daemon 回报的窗口会话选择（setCurrentCwd、会话镜像、角标）后把页交给 renderer | 读页与窗口选择分开 |
 | `agent:loadSessionOlder` | new-op | `sessionHistory:loadSessionOlder` | history | — | 翻页读 daemon 自己的历史缓存（由 loadSession 建立） |
-| `agent:mcpGuardScan` | new-op | `mcp:mcpGuardScan` | providers | — | MCP 与 trust gate 都在 daemon |
-| `agent:mcpSnapshot` | new-op | `mcp:mcpSnapshot` | providers | — | MCP 与 trust gate 都在 daemon |
+| `agent:mcpGuardScan` | new-op | `mcp:mcpGuardScan` | providers | — | MCP 与 trust gate 都在 daemon；Provider 认证队列也在 daemon，App 不能在自己进程里另行认证 |
+| `agent:mcpSnapshot` | new-op | `mcp:mcpSnapshot` | providers | — | MCP 与 trust gate 都在 daemon；Provider 认证队列也在 daemon，App 不能在自己进程里另行认证 |
 | `agent:newSession` | new-op | `providerContext:newSession` | providers | — | Provider 运行时在 daemon |
 | `agent:providerDescriptors` | new-op | `providerCatalog:providerDescriptors` | providers | — | 本机要完整 descriptors（含 controls 与默认模型） |
-| `agent:reauthenticateMcp` | new-op | `mcp:reauthenticateMcp` | providers | — | MCP 与 trust gate 都在 daemon |
+| `agent:reauthenticateMcp` | new-op | `mcp:reauthenticateMcp` | providers | — | MCP 与 trust gate 都在 daemon；Provider 认证队列也在 daemon，App 不能在自己进程里另行认证 |
 | `agent:recentFolders` | split | `projectStore:recentFolders` | navigation | main: 窗口只渲染；列表来自 daemon 的授权输入，main 不打开该 store | 授权输入单一写者 |
 | `agent:recorderContentPage` | new-op | `recorderContent:recorderContentPage` | evidence | — | recorder 记录写在工作区里，由 daemon 读 |
 | `agent:removePiProfile` | new-op | `piProfile:removePiProfile` | providers | — | Provider 配置随 adapter 一起迁移 |
@@ -79,7 +80,7 @@
 | `agent:stop` | forward | `stop` | — | 等价 | 既有 stop |
 | `agent:stopBackgroundTask` | new-op | `runControl:stopBackgroundTask` | controls | — | run 登记表在 daemon |
 | `agent:syncBillingAdmin` | new-op | `billing:syncBillingAdmin` | analytics | — | 账本与 transcript 在 daemon 侧 |
-| `agent:testMcp` | new-op | `mcp:testMcp` | providers | — | MCP 与 trust gate 都在 daemon |
+| `agent:testMcp` | new-op | `mcp:testMcp` | providers | — | MCP 与 trust gate 都在 daemon；Provider 认证队列也在 daemon，App 不能在自己进程里另行认证 |
 | `agent:traceAck` | main | `—` | — | — | renderer 消费回执 |
 | `agent:traceResynchronized` | main | `—` | — | — | main 的投递桥状态 |
 | `agent:turnTerminalEvidence` | new-op | `turnEvidence:turnTerminalEvidence` | evidence | — | 归档终态由 daemon 写 |
@@ -93,23 +94,6 @@
 | `app:rendererRestart` | main | `—` | — | — | 窗口行为 |
 | `app:reportRendererPerformance` | main | `—` | — | — | renderer 自报指标 |
 | `app:setTheme` | main | `—` | — | — | 窗口主题 |
-| `conversation:adopt` | new-op | `conversation:adopt` | history | — | 对话账本在 daemon 的 SQLite 里 |
-| `conversation:create` | new-op | `conversation:create` | compose | — | 对话账本在 daemon 的 SQLite 里 |
-| `conversation:createSideChat` | new-op | `conversation:createSideChat` | compose | — | 对话账本在 daemon 的 SQLite 里 |
-| `conversation:delete` | new-op | `conversation:delete` | navigation | — | 对话账本在 daemon 的 SQLite 里 |
-| `conversation:findSideChatCommand` | new-op | `conversation:findSideChatCommand` | compose | — | 对话账本在 daemon 的 SQLite 里 |
-| `conversation:fork` | new-op | `conversation:fork` | navigation | — | 对话账本在 daemon 的 SQLite 里 |
-| `conversation:list` | new-op | `conversation:list` | navigation | — | 对话账本在 daemon 的 SQLite 里 |
-| `conversation:listSideChats` | new-op | `conversation:listSideChats` | navigation | — | 对话账本在 daemon 的 SQLite 里 |
-| `conversation:preview` | new-op | `conversation:preview` | compose | — | 对话账本在 daemon 的 SQLite 里 |
-| `conversation:previewAdoption` | new-op | `conversation:previewAdoption` | history | — | 对话账本在 daemon 的 SQLite 里 |
-| `conversation:previewDeletion` | new-op | `conversation:previewDeletion` | navigation | — | 对话账本在 daemon 的 SQLite 里 |
-| `conversation:previewSideChat` | new-op | `conversation:previewSideChat` | compose | — | 对话账本在 daemon 的 SQLite 里 |
-| `conversation:read` | new-op | `conversation:read` | history | — | 对话账本在 daemon 的 SQLite 里 |
-| `conversation:readItem` | new-op | `conversation:readItem` | history | — | 对话账本在 daemon 的 SQLite 里 |
-| `conversation:readSideChatSnapshot` | new-op | `conversation:readSideChatSnapshot` | history | — | 对话账本在 daemon 的 SQLite 里 |
-| `conversation:send` | new-op | `conversation:send` | send | — | 对话账本在 daemon 的 SQLite 里 |
-| `conversation:update` | new-op | `conversation:update` | navigation | — | 对话账本在 daemon 的 SQLite 里 |
 | `desktopRemote:answer` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
 | `desktopRemote:catalog` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
 | `desktopRemote:commands` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |

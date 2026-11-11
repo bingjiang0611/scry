@@ -7,6 +7,7 @@ import { QUERY_FORWARDS, QUERY_LOCAL_OPS } from './daemon-local-ops/queries'
 import { WORKBENCH_FORWARDS, WORKBENCH_LOCAL_OPS } from './daemon-local-ops/workbench'
 import { PROJECT_LOCAL_OPS } from './daemon-local-ops/project'
 import { TERMINAL_LOCAL_OPS } from './daemon-local-ops/terminal'
+import { MCP_LOCAL_OPS } from './daemon-local-ops/mcp'
 
 // Development switch for "the daemon owns runs". Kept here, free of Electron, so the IPC
 // registrar can consult it without importing the daemon client assembly.
@@ -66,7 +67,8 @@ export const DAEMON_LOCAL_OP_CHANNELS: DaemonLocalOpTable = {
   ...QUERY_LOCAL_OPS,
   ...WORKBENCH_LOCAL_OPS,
   ...PROJECT_LOCAL_OPS,
-  ...TERMINAL_LOCAL_OPS
+  ...TERMINAL_LOCAL_OPS,
+  ...MCP_LOCAL_OPS
 }
 
 /** Channels the daemon answers through an op it already serves paired devices (route `forward`). */
@@ -102,8 +104,11 @@ export function installDaemonChannelResultHandler(channel: string, handle: (valu
   return () => { if (resultHandlers.get(channel) === handle) resultHandlers.delete(channel) }
 }
 
-/** What the App does before the daemon is asked: go ahead (maybe with other arguments), or answer itself. */
-export type DaemonChannelGuardOutcome = { args: unknown[] } | { result: unknown }
+/**
+ * What the App does before the daemon is asked: go ahead (maybe with other arguments), or
+ * answer itself. `settled` runs once the call ends, whether it answered or failed.
+ */
+export type DaemonChannelGuardOutcome = { args: unknown[]; settled?: () => void } | { result: unknown }
 
 const guards = new Map<string, (args: unknown[]) => Promise<DaemonChannelGuardOutcome>>()
 
@@ -120,9 +125,13 @@ async function guarded(channel: string, args: unknown[], ask: (args: unknown[]) 
   const guard = guards.get(channel)
   const outcome = guard ? await guard(args) : { args }
   if ('result' in outcome) return outcome.result
-  const value = await ask(outcome.args)
-  const after = resultHandlers.get(channel)
-  return after ? after(value, outcome.args) : value
+  try {
+    const value = await ask(outcome.args)
+    const after = resultHandlers.get(channel)
+    return after ? await after(value, outcome.args) : value
+  } finally {
+    outcome.settled?.()
+  }
 }
 
 /** One request for an op the daemon serves its App outside any channel (e.g. terminalFeed). */

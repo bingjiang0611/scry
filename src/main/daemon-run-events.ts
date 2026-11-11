@@ -6,6 +6,7 @@ import type { RunTraceRouter } from './run-trace-router'
 import { DaemonEventPump } from './daemon-event-pump'
 import { DaemonRunDiscovery } from './daemon-run-discovery'
 import { DaemonTerminalReader } from './daemon-terminal-reader'
+import { deliverDaemonOAuthUrl } from './bootstrap/mcp-daemon'
 import type { DesktopTerminalEvents } from '../shared/desktop-workbench'
 import type { DaemonRunRuntime } from './daemon-run-runtime'
 import type { DaemonRunTransport } from './daemon-run-transport'
@@ -73,6 +74,7 @@ export function startDaemonRunEvents(deps: DaemonRunEventsDeps): { dispose(): vo
     // Lost notices may include a new run's: look at the live list as well.
     onResync: () => { runtime.wakeAll(); discovery.resynchronize(); terminals.notice() },
     onTerminal: () => terminals.notice(),
+    onOAuth: (url) => deliverDaemonOAuthUrl(url),
     onLive: (live) => runtime.setWakesLive(live),
     onAttention: (snapshot) => dockBadge?.setDaemon(snapshot, deps.isWindowFocused?.() ?? false),
     // W1: the pipeline's own notices, each after the run text it follows.

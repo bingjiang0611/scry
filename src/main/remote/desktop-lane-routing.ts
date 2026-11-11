@@ -44,6 +44,8 @@ export function laneForRequest(request: unknown): DesktopLaneName {
   if (typeof op !== 'string') return 'control'
   const terminal = terminalLane(op, request)
   if (terminal) return terminal
+  // MCP starts servers and may wait for a browser sign-in: its own long lane.
+  if (op === 'mcp') return 'mcp'
   if (workbenchWrite(op, request)) return 'workbench'
   if (writeOperations.has(op)) return 'control'
   if (idempotentControlOperations.has(op)) return 'control'
@@ -60,6 +62,7 @@ export function laneForRequest(request: unknown): DesktopLaneName {
 
 export function replayableRequest(request: unknown): boolean {
   const op = request && typeof request === 'object' ? (request as { op?: unknown }).op : undefined
+  if (op === 'mcp') return (request as { method?: unknown }).method === 'mcpGuardScan'
   if (op === 'terminal') {
     const method = (request as { method?: unknown }).method
     return typeof method === 'string' && terminalReadMethods.has(method)

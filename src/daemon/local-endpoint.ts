@@ -8,6 +8,7 @@ import { sessionLifecycleLocalOps } from './local-ops/session-lifecycle'
 import { queryLocalOps } from './local-ops/queries'
 import { workbenchLocalOps } from './local-ops/workbench'
 import { projectLocalOps } from './local-ops/project'
+import { mcpLocalOps } from './local-ops/mcp'
 
 export type { DaemonLocalEndpointDeps } from './local-ops/deps'
 
@@ -33,6 +34,7 @@ export function daemonLocalEndpoint(endpointDeps: DaemonLocalEndpointDeps): Loca
       ...queryLocalOps(deps),
       ...workbenchLocalOps(deps),
       ...projectLocalOps(deps),
+      ...mcpLocalOps(deps),
       ...deps.terminal.localOps
     }),
     events: deps.events,
