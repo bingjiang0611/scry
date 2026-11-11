@@ -72,7 +72,8 @@ describe('Codex app controls and namespaced skill input', () => {
     '<external_codex_apps_open_page>{"page_id":"unverified-shape"}</external_codex_apps_open_page>',
     '<external_codex_apps_open_page>{broken json}</external_codex_apps_open_page>',
     `Explain this skill declaration: ${skill}`,
-    `${skill}\nIs this declaration correct?`
+    `${skill}\nIs this declaration correct?`,
+    '<skill><name>team:first</name></skill>\nCompare these skills.\n<skill><name>team:second</name></skill>'
   ])('retains ordinary questions, quoted markup and unverified packet shapes: %s', text => {
     const { turns } = parseCodexRollout(rollout([user(text, 'question')]), 'ordinary-input-run')
     expect(turns[0].userText).toBe(text)
