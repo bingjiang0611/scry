@@ -222,7 +222,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sidebar-paint-diagnostics-${{ matrix.shard }}
-          path: ${{ runner.temp }}/scry-sidebar-*.png
+          path: |
+            ${{ runner.temp }}/scry-sidebar-*.png
+            ${{ runner.temp }}/scry-workspace-session-ui-*/failure.json
           if-no-files-found: ignore
 
       - name: Package and smoke the macOS app
@@ -329,7 +331,12 @@ jobs:
           npm run build
           npm run build:cli
       - name: Install archive tools
-        run: sudo apt-get update && sudo apt-get install -y libarchive-tools
+        run: |
+          # The default Ubuntu archive hosts failed DNS on both runner images.
+          # Prefer the HTTPS kernel.org mirror, retaining native fallbacks and signature checks.
+          test -f /etc/apt/apt-mirrors.txt
+          printf 'https://mirrors.edge.kernel.org/ubuntu/\tpriority:0\n' | sudo tee -a /etc/apt/apt-mirrors.txt
+          sudo apt-get update && sudo apt-get install -y libarchive-tools
       # 发布构建同时产出 dist/linux-unpacked 和 dist/*.pacman；
       # pacman 的 pkgdesc 曾经静默变空，所以打包产物必须过 check:pacman-package。
       - name: Package Linux app directory and pacman package

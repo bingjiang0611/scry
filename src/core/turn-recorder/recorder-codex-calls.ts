@@ -349,7 +349,9 @@ export function runningCellId(output: string | undefined): string | undefined {
 
 export function skillInjection(text: string | undefined): string | undefined {
   if (!text) return undefined
-  return /<skill>\s*<name>([A-Za-z0-9_-]+)<\/name>/i.exec(text)?.[1]
+  // Stop at the first closing tag, then reject any text outside that block.
+  const match = /^\s*<skill>\s*<name>([A-Za-z0-9_-]+(?::[A-Za-z0-9_-]+)?)<\/name>[\s\S]*?<\/skill>\s*/i.exec(text)
+  return match && match[0].length === text.length ? match[1] : undefined
 }
 
 export function explicitSkillEvent(name: string, runId: string, at: string): TraceEvent {

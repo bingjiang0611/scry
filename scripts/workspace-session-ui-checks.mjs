@@ -19,7 +19,7 @@ const json = JSON.stringify
 /** Production App + preload + native Git, with the existing isolated, non-network Provider fixture. */
 export async function exerciseWorkspaceSessions(context) {
   const { cdp, evaluate, workspace, canonicalWorkspace, conversationInputs, userDataDir, temp, secondWorkspace } = context
-  const evidence = mkdtempSync(join(tmpdir(), 'scry-workspace-session-ui-'))
+  const evidence = mkdtempSync(join(process.env.RUNNER_TEMP ?? tmpdir(), 'scry-workspace-session-ui-'))
   const git = (cwd, ...args) => execFileSync('git', ['-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null',
     '-c', 'user.name=bingjiang0611', '-c', 'user.email=307659028+bingjiang0611@users.noreply.github.com', ...args],
   { cwd, encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }).trim()
@@ -53,7 +53,9 @@ export async function exerciseWorkspaceSessions(context) {
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
     await click(selector)
     await wait(() => evaluate(`document.querySelector('.workspace-context-strip button')?.disabled === false &&
-      document.querySelector('textarea') && !document.querySelector('.workspace-picker')`), 'fresh native draft')
+      [${json(cwd)}, ${json(realpathSync(cwd))}].some(path =>
+        document.querySelector('[data-workspace-menu="workspace"]')?.title.endsWith(path)) &&
+      document.querySelector('textarea') && !document.querySelector('.workspace-picker')`), 'fresh native draft for selected workspace')
   }
   const openPicker = async () => {
     await click('[data-workspace-menu="refs"]')

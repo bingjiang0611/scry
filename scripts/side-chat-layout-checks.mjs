@@ -16,27 +16,18 @@ export async function exerciseSideChatLayout({ cdp, evaluate, check, ipcCountsPa
   // A real window resize, not an emulated viewport: see side-chat-window-control.mjs.
   const { resize, applied: windowSizes } = createWindowResize({ wait, idle, check, windowControlPath, json })
   /**
-   * Show the workbench itself. `showChild` returns early when the child surface is still
-   * mounted from a hidden panel, so the narrow sections reveal the panel explicitly.
+   * Show the workbench itself without switching the selected child; narrow sections
+   * use this separately from selecting and waiting for the tested child.
    */
   const revealPanel = async () => {
-    if (await evaluate(`document.querySelector('.app.right-panel-hidden') == null`)) return
-    await click('.panel-pill:not(.summary-pill)')
-    await wait(`document.querySelector('.app.right-panel-hidden') == null`)
+    await controls.showPanel()
     await idle()
-    await wait(`document.querySelector('${CHILD_PANEL} .side-chat-surface')?.dataset.sideChatId === ${json(childId)}`)
   }
   const showChild = async () => {
-    const current = await evaluate(`document.querySelector('${CHILD_PANEL} .side-chat-surface')?.dataset.sideChatId ?? null`)
-    if (current === childId) return
-    if (await evaluate(`document.querySelector('.panel-pill:not(.summary-pill)').getAttribute('aria-pressed') !== 'true'`)) {
-      await click('.panel-pill:not(.summary-pill)')
-    }
-    if (await evaluate(`document.querySelector('#right-surface-pane [data-session-surface-current="true"]') == null`)) return
-    const tab = `[data-side-chat-tab-id="${childId}"] [role="tab"]`
-    if (await evaluate(`document.querySelector('${tab}') != null`)) await click(tab)
-    await wait(`document.querySelector('${CHILD_PANEL} .side-chat-surface')?.dataset.sideChatId === ${json(childId)}`, 20000)
-    await idle()
+    // Reload mounts the sidebar before restoring the parent and its workbench.
+    await wait(`document.querySelector('${SIDE_CHAT_SURFACE} [data-side-chat-tab-id="${childId}"]') != null`, 30000)
+    await controls.showPanel()
+    await controls.openChildById(childId)
   }
 
   // Measurements the panel and the chip must keep at every supported width.
