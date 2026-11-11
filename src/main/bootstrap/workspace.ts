@@ -7,7 +7,7 @@ import type { ProviderContext } from '../../shared/provider'
 import { resetProviderSession, viewNothingAfterDaemonNewSession } from './startup-channels'
 import { callDaemonChannel, daemonModeEnabled } from '../daemon-channel-gate'
 import { installWorkbenchWindowCwd } from '../daemon-local-ops/workbench'
-import type { TerminalCloseRequest, TerminalRecordingRequest, TerminalRecordingListRequest, TerminalResizeRequest, TerminalStartRequest, TerminalOwnershipRequest, TerminalWriteRequest } from '../../shared/terminal'
+import { terminalChannelHandlers } from './terminal-channels'
 import { authorizedWorkspaceRequest, knownProjectDirectory } from '../workspace-authorization'
 import { createWorkspaceEntry, listWorkspace, moveWorkspaceEntry, openWorkspaceFileExternally, readWorkspaceFile, readWorkspaceFilePage, resolveWorkspaceFileOpenTarget, renameWorkspaceEntry, trashWorkspaceEntry, writeWorkspaceFile } from '../workspace-files'
 import type { HomeFileAccess } from '../home-file-access'
@@ -111,100 +111,8 @@ export function registerWorkspaceHandlers(deps: WorkspaceBootstrapDependencies):
   handleTrusted('workspace:trash', (_event, request: WorkspacePathRequest) =>
     trashWorkspaceEntry(authorizedWorkspaceRequest(getCurrentCwd(), request), (path) => shell.trashItem(path)))
 
-  handleTrusted('terminal:start', async (event, request: TerminalStartRequest) => {
-    const manager = await getTerminalManager()
-    if (isShuttingDown() || !rendererCanReceive()) throw new Error('终端窗口已关闭')
-    assertTrustedIpcEvent(event)
-    const session = manager.start(request)
-    const ownershipEpoch = terminalOutput.started(session.id)
-    try {
-      assertTrustedIpcEvent(event)
-      if (!rendererCanReceive()) throw new Error('终端窗口已关闭')
-    } catch (error) {
-      terminalOutput.detach(session.id)
-      throw error
-    }
-    if (isShuttingDown()) {
-      terminalOutput.terminalClosed(session.id)
-      manager.close({ id: session.id })
-      throw new Error('终端窗口已关闭')
-    }
-    return { ...session, ownershipEpoch }
-  })
-  handleTrusted('terminal:active', async (event) => {
-    const manager = await getTerminalManager()
-    assertTrustedIpcEvent(event)
-    return manager.activeSessions()
-  })
-  handleTrusted('terminal:attach', async (event, request: { id: string }) => {
-    const manager = await getTerminalManager()
-    assertTrustedIpcEvent(event)
-    const session = manager.session(request?.id)
-    const ownershipEpoch = terminalOutput.attach(session.id)
-    const catchUp = await manager.recordingCheckpoint(session.id)
-    try {
-      assertTrustedIpcEvent(event)
-      if (!rendererCanReceive()) throw new Error('终端窗口已关闭')
-    } catch (error) {
-      terminalOutput.detach(session.id)
-      throw error
-    }
-    return { ...session, ownershipEpoch, catchUp }
-  })
-  handleTrusted('terminal:write', async (event, request: TerminalWriteRequest) => {
-    const manager = await getTerminalManager()
-    if (!rendererCanReceive()) throw new Error('终端窗口已关闭')
-    assertTrustedIpcEvent(event)
-    if (!terminalOutput.owns(request?.id, request?.ownershipEpoch)) return false as const
-    manager.write(request)
-    return true as const
-  })
-  handleTrusted('terminal:resize', async (event, request: TerminalResizeRequest) => {
-    const manager = await getTerminalManager()
-    if (!rendererCanReceive()) throw new Error('终端窗口已关闭')
-    assertTrustedIpcEvent(event)
-    if (!terminalOutput.owns(request?.id, request?.ownershipEpoch)) return false as const
-    manager.resize(request)
-    return true as const
-  })
-  handleTrusted('terminal:recordingList', async (event, request: TerminalRecordingListRequest) => {
-    const manager = await getTerminalManager()
-    assertTrustedIpcEvent(event)
-    const cwd = getCurrentCwd()
-    const page = await manager.listRecordings(request)
-    assertTrustedIpcEvent(event)
-    if (cwd !== getCurrentCwd()) throw new Error('terminal_recording_workspace_changed')
-    return page
-  })
-  handleTrusted('terminal:recordingRead', async (event, request: TerminalRecordingRequest) => {
-    const manager = await getTerminalManager()
-    assertTrustedIpcEvent(event)
-    return manager.readRecording(request)
-  })
-  handleTrusted('terminal:recordingDelete', async (event, request: TerminalCloseRequest) => {
-    const manager = await getTerminalManager()
-    assertTrustedIpcEvent(event)
-    await manager.deleteRecording(request?.id)
-    assertTrustedIpcEvent(event)
-    return true as const
-  })
-  handleTrusted('terminal:ready', (_event, request: TerminalOwnershipRequest) => {
-    if (!request || typeof request.id !== 'string' || !request.id.startsWith('terminal-')) throw new Error('终端 ready 无效')
-    return terminalOutput.ready(request.id, request.ownershipEpoch)
-  })
-  handleTrusted('terminal:ack', (_event, request: TerminalOwnershipRequest & { bytes: number }) => {
-    if (!request || typeof request.id !== 'string') throw new Error('终端输出确认无效')
-    return terminalOutput.ack(request.id, request.ownershipEpoch, request.bytes)
-  })
-  handleTrusted('terminal:close', async (event, request: TerminalOwnershipRequest) => {
-    const manager = await getTerminalManager()
-    if (!rendererCanReceive()) throw new Error('终端窗口已关闭')
-    assertTrustedIpcEvent(event)
-    if (!terminalOutput.owns(request?.id, request?.ownershipEpoch)) return false as const
-    terminalOutput.terminalClosed(request.id)
-    manager.close(request)
-    return true as const
-  })
+  const terminal = terminalChannelHandlers<IpcMainInvokeEvent>({ getTerminalManager, terminalOutput, isShuttingDown, rendererCanReceive, assertCaller: assertTrustedIpcEvent, getCurrentCwd })
+  for (const [channel, listener] of Object.entries(terminal)) handleTrusted(channel, listener as (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown)
 
   handleTrusted('agent:setCwd', (_e, dir: string | null) => {
     const cwd = typeof dir === 'string' && dir.trim() ? resolveKnownProjectDirectory(dir) : undefined
