@@ -1,10 +1,15 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { open, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
 import { creditUsageEvidence, isCreditUsageEvidence } from '../shared/credit-usage'
 import type { LoadedSessionTurn } from '../shared/session-history'
 import { enrichPiHistoryCredits, readPiCreditUsage } from './pi-credit-projection'
+import { readPiCreditRequests } from './pi-credit-reader'
+import { piCreditRequests } from './pi-credit-usage'
+import { readQoderCreditRows } from './qoder-credits'
+import { upsertTraceArchiveTurn } from './transcript-archive'
 
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
@@ -68,6 +73,63 @@ describe('Pi Credit delivery and historical projection', () => {
     const link = join(f.sessionRoot, 'link.jsonl')
     symlinkSync(f.sessionFile, link)
     expect((await readPiCreditUsage({ ...f, sessionFile: link, turns })).get('run-1')!.status).toBe('unavailable')
+  })
+
+  it('meters >64 MiB through live receipt, history and analytics without counting discarded payloads', async () => {
+    const f = fixture()
+    const file = await open(f.sessionFile, 'w')
+    try {
+      await file.writeFile(f.entries.slice(0, 2).map((entry) => JSON.stringify(entry)).join('\n') + '\n')
+      const payload = 'x'.repeat(1024 * 1024)
+      for (let i = 0; i < 65; i++) await file.writeFile(JSON.stringify({
+        type: 'message', id: `tool-${i}`, parentId: 'u1', message: { role: 'toolResult', content: payload }
+      }) + '\n')
+      await file.writeFile(f.entries.slice(2).map((entry) => JSON.stringify(entry)).join('\n'))
+    } finally { await file.close() }
+    expect((await stat(f.sessionFile)).size).toBeGreaterThan(64 * 1024 * 1024)
+    const turns = [{ runId: 'run-1', providerTurnId: 'u1' }]
+    const live = await readPiCreditUsage({ ...f, turns })
+    const history = await readPiCreditUsage({ cwd: f.cwd, sessionId: f.sessionId, sessionRoot: f.sessionRoot, turns })
+    expect(history).toEqual(live)
+    expect(history.get('run-1')!.value).toMatchObject({ amount: 2.5, knownRequests: 1, missingRequests: 0 })
+    const userDataDir = join(f.sessionRoot, 'app')
+    expect(upsertTraceArchiveTurn({ ...f, userDataDir, providerId: 'pi', runtimeProvider: 'pi_rpc', turn: { ...f.turn, runId: 'run-1', done: true } })).toBe(true)
+    const [row] = await readQoderCreditRows({ userDataDir, projectsDir: join(f.sessionRoot, 'absent'), piSessionRoot: f.sessionRoot,
+      scopes: [{ providerId: 'pi', runId: 'run-1', sessionId: f.sessionId, cwd: f.cwd, tsStart: 1 }] })
+    expect(row.evidence).toMatchObject({ credits: 2.5, knownRequests: 1, missingRequests: 0 })
+  })
+
+  it('preserves forward ancestry, abandoned branches, fork exclusion and permanent request conflicts while streaming', async () => {
+    const f = fixture()
+    const observation = f.entries[2]
+    const entries = [f.entries[0], observation, f.entries[1], f.entries[3],
+      { ...observation, id: 'foreign', data: { ...observation.data, sessionId: 'fork-parent' } },
+      { ...observation, id: 'abandoned', data: { ...observation.data, requestId: 'second', credits: 5 } },
+      { ...observation, id: 'duplicate', data: { ...observation.data, requestId: 'second', credits: 5 } },
+      { ...observation, id: 'conflict', data: { ...observation.data, credits: 6 } },
+      { ...observation, id: 'copy' },
+      { ...observation, id: 'free', data: { ...observation.data, requestId: 'free', billable: false } },
+      { type: 'message', id: 'external', parentId: 'a1', message: { role: 'user' } },
+      { ...observation, id: 'untracked', parentId: 'external', data: { ...observation.data, requestId: 'external' } }]
+    const source = entries.map((entry) => JSON.stringify(entry)).join('\r\n')
+    writeFileSync(f.sessionFile, source)
+    const turns = [{ runId: 'run-1', providerTurnId: 'u1' }]
+    const result = await readPiCreditRequests({ ...f, turns })
+    expect(result).toEqual(piCreditRequests(source, f, turns))
+    expect(result.requests.map((request) => request.credits)).toEqual([null, 5, 0])
+    writeFileSync(f.sessionFile, source + '\n' + JSON.stringify(observation))
+    await expect(readPiCreditRequests({ ...f, turns })).rejects.toThrow('duplicated')
+  })
+
+  it('rejects interior corruption even when the final record is unfinished, and enforces an entry budget', async () => {
+    const f = fixture()
+    const turns = [{ runId: 'run-1', providerTurnId: 'u1' }]
+    const source = f.entries.map((entry) => JSON.stringify(entry)).join('\r\n')
+    const streamed = await readPiCreditRequests({ ...f, turns })
+    expect(streamed).toEqual(piCreditRequests(source, f, turns))
+    await expect(readPiCreditRequests({ ...f, turns, budget: { remainingEntries: 2 } })).rejects.toThrow('entry budget')
+    writeFileSync(f.sessionFile, source + '\n{broken}\n{"type":')
+    expect((await readPiCreditUsage({ ...f, turns })).get('run-1')!.status).toBe('unavailable')
   })
 
   it('preserves a complete prefix with an explicitly incomplete tail', async () => {
