@@ -216,6 +216,15 @@ describe('required PR checks', () => {
     }
   })
 
+  it('pins Linux packaging to an LTS image without dropping archive or package checks', () => {
+    const job = workflow('ci.yml').jobs['packaged-linux']
+    expect(job['runs-on']).toBe('ubuntu-24.04')
+    expect(source(job, 'Install archive tools').run).toBe('sudo apt-get update && sudo apt-get install -y libarchive-tools')
+    expect(source(job, 'Package Linux app directory and pacman package').run).toBe('SCRY_RELEASE_BUILD=1 node scripts/run-electron-builder.mjs')
+    expect(source(job, 'Check packaged Linux app').run).toBe('npm run check:packaged-app')
+    expect(source(job, 'Check pacman package metadata').run).toBe('npm run check:pacman-package')
+  })
+
   it('cancels obsolete PR runs but never coalesces main commits', () => {
     for (const file of ['ci.yml', 'performance.yml', 'remote-g0.yml']) {
       const ci = workflow(file)

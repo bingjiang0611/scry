@@ -157,7 +157,7 @@ export async function prepareSideChatDrafts({ cdp, evaluate, check, ipcCountsPat
  */
 export async function verifySideChatDrafts({ cdp, evaluate, check, ipcCountsPath, inputsPath, callsPath,
   childId, prepared, windowControlPath, rendererFailures = [] }) {
-  const { driver, capture, click, clickAt, idle, wait, counts, inputs, type, openChildById } = sideChatDriver({
+  const { driver, capture, click, clickAt, idle, wait, counts, inputs, type, openChildById: openChild } = sideChatDriver({
     cdp, evaluate, check, ipcCountsPath, inputsPath, callsPath, rendererFailures, label: 'Side-chat drafts restart' })
   // A dialog captured mid-entrance is not evidence of what the user reads.
   const settleModal = (selector) => wait(`(() => { const node = document.querySelector(${json(selector)})
@@ -168,11 +168,6 @@ export async function verifySideChatDrafts({ cdp, evaluate, check, ipcCountsPath
    * kept one, or the history dialog when it did not. Neither path may be skipped, and the
    * draft assertions below never depend on which of the two the window happened to keep.
    */
-  const openChild = async (id) => {
-    const current = await evaluate(`document.querySelector('${CHILD_PANEL} .side-chat-surface')?.dataset.sideChatId ?? null`)
-    if (current === id) return
-    await openChildById(id)
-  }
   await openChild(childId)
   const draft = await readComposer(evaluate)
   check(draft.value === prepared.draftText,

@@ -230,6 +230,8 @@ export function sideChatDriver({ cdp, evaluate, check, ipcCountsPath, inputsPath
     if (await evaluate(`document.querySelector(${json(tab)}) != null`)) await click(`${tab} [role="tab"]`)
     else await openChildFromHistory(id)
     await wait(`document.querySelector('${CHILD_PANEL} .side-chat-surface')?.dataset.sideChatId === ${json(id)}`, 30000)
+    // The tab and composer can mount before the asynchronous transcript read completes.
+    await wait(`document.querySelector('${CHILD_PANEL} .chat-transcript[aria-busy="false"][data-history-source="authoritative"]') != null`, 30000)
     await idle()
   }
   /**

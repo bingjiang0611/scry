@@ -288,7 +288,8 @@ jobs:
   packaged-linux:
     needs: changes
     if: ${{ needs.changes.outputs.required == 'true' }}
-    runs-on: ubuntu-latest
+    # Keep packaging on a deliberate LTS image rather than a moving OS label.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       QODER_SKIP_DOWNLOAD: "1"
