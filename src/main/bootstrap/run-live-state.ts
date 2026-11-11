@@ -125,6 +125,7 @@ export async function createLiveRunState(deps: {
   const runState: ActiveRun = {
     runId,
     ...(managedConversation ? { conversationId: managedConversation.conversationId } : {}),
+    ...(managedConversation?.attentionKey ? { attentionKey: managedConversation.attentionKey } : {}),
     providerId,
     agentProfileId,
     cwd,

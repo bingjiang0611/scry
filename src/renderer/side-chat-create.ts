@@ -172,16 +172,17 @@ export type CreationResolution =
 /**
  * What a read-back receipt proves about one create command.
  *
- * Creation is a local, idempotent host write keyed by the command id, and this lookup runs
- * only after that create call has already settled (it rejected) or its renderer is gone.
- * A `not-found` answer therefore means the command published nothing. It used to be kept
- * as "unknown" forever, which turned every ordinary host refusal into a parent that could
+ * Creation is a local host write keyed by the command id. The host reports a command it is
+ * still executing as `in-flight` (a renderer reloaded mid-create), which stays unknown. A
+ * `not-found` answer therefore means the command published nothing. It used to be kept as
+ * "unknown" forever, which turned every ordinary host refusal into a parent that could
  * never create a side chat again.
  */
 export function resolveCreateReceipt(receipt: SideChatCommandReceipt): CreationResolution {
-  return receipt.status === 'found'
-    ? { kind: 'created', conversation: receipt.conversation }
-    : { kind: 'not-created' }
+  if (receipt.status === 'found') return { kind: 'created', conversation: receipt.conversation }
+  // The host is still running that create: its result is not known, so the command stays.
+  if (receipt.status === 'in-flight') return { kind: 'unknown' }
+  return { kind: 'not-created' }
 }
 
 /**

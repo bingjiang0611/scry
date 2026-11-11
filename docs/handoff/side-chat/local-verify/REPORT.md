@@ -58,9 +58,9 @@ Provider 是内置 fixture，未加 `--no-sandbox`。
 |---|---|---|---|
 | 01 | 通过 | `01-main-reply.png` | 主会话有 `codex side chat reply: parent`；侧栏 `.sb-list` 只有 `side chat reply parent`、`seed session` 两行；`侧聊` 出现 0 次；`[data-conversation-id]` 0 个 |
 | 02 | 通过 | `02-side-chat-created.png` | 页签 `侧边会话`；面板空态 `开始侧聊 / 已带入主会话最近完成的消息`；侧栏无 `侧聊`/`侧边会话` 字样，行数仍 2 |
-| 03 | 通过 | `03-side-chat-running.png` | 页签 `side chat hold v1|运行中`；侧栏文本仍只有两行，不含 `侧聊`，不含 `side chat hold v1` |
+| 03 | 通过 | `03-side-chat-running.png` | 页签 `side chat hold v1 · 运行中`；侧栏文本仍只有两行，不含 `侧聊`，不含 `side chat hold v1` |
 | 04 | 通过 | `04-activity-running.png` | 动态页签 1 行：`data-activity-group=working`、行文本 `side chat reply parent`（主会话行），没有侧聊自己的行 |
-| 05 | 通过 | `05-activity-after-stop.png`、`05b-projects-after-stop.png` | 停止后页签回到 `side chat hold v1`（无状态词）；动态 1 行 `completed|side chat reply parent`（仍是主会话行，数量没增加）；项目页签 2 行，`[data-conversation-id]` 0 个 |
+| 05 | 通过 | `05-activity-after-stop.png`、`05b-projects-after-stop.png` | 停止后页签回到 `side chat hold v1`（无状态词）；动态 1 行 `completed · side chat reply parent`（仍是主会话行，数量没增加）；项目页签 2 行，`[data-conversation-id]` 0 个 |
 | 06 | 通过 | `06-history-dialog.png`、`06b-reopened-tab.png` | 历史对话框 `共 2 个侧边会话`，列出 `side chat reply second`、`side chat hold v1`；点回后页签恢复，面板内含 `codex side chat reply: second` |
 | 07 | 通过 | `07-after-restart.png` | 重启后页签 `side chat hold v1`、`side chat reply second` 原样恢复；侧栏 2 行无 `侧聊`；再发 `side chat reply after restart` 收到 `codex side chat reply: after restart` |
 | 08 | 通过 | `08-unified-with-side-chats.png` | 统一对话 1 行（`对话 d96b08b5/1 轮`）；两个侧聊页签 `side chat reply child`、`侧边会话`；侧栏 `侧聊` 出现 0 次，`[data-conversation-id]` 1 个 |
@@ -68,7 +68,7 @@ Provider 是内置 fixture，未加 `--no-sandbox`。
 | 10 | 通过 | `10-delete-result.png` | 结果 `逻辑入口已删除`；两个子会话 `read(id).summary.deletion.status = complete`，`readSideChatSnapshot(id)` 被拒绝 |
 | 11 | 修复后通过 | `11-refused-delete.png` | 修复前：`Error: …同一 Provider 的物理存储仍有未确认投递，不能证明删除范围安全`（不点名）。修复后：`…侧边会话「side chat hold busy」不能随主会话删除：对话仍有运行或证据保存未收敛，不能删除。请先在主会话的右侧面板处理它`；两边 `deletion.status` 都是 `null`，子会话仍在运行 |
 | 12 | 未执行 | — | 见第 5 节：系统原生 sheet 截不到，也没有脚本化回答它的合法入口 |
-| 13 | 通过 | `13-light-theme-running.png`、`13-narrow-running.png` | 浅色主题下页签 `side chat reply second|运行中`，侧栏 2 行无 `侧聊`，`scrollWidth == clientWidth`（无横向溢出）；窗口宽 900px（`window.resizeTo`，真实窗口，非 deviceMetrics 模拟）时 `innerWidth=900`，侧栏 230 / 右侧 662 / 主区 0（单列布局），无横向溢出，侧栏仍干净 |
+| 13 | 通过 | `13-light-theme-running.png`、`13-narrow-running.png` | 浅色主题下页签 `side chat reply second · 运行中`，侧栏 2 行无 `侧聊`，`scrollWidth == clientWidth`（无横向溢出）；窗口宽 900px（`window.resizeTo`，真实窗口，非 deviceMetrics 模拟）时 `innerWidth=900`，侧栏 230 / 右侧 662 / 主区 0（单列布局），无横向溢出，侧栏仍干净 |
 
 补充：场景 03 的侧聊在首条消息运行期间，面板正文显示“首条消息的发送结果还没有确认”，看不到正在生成的这一轮；
 停止后才显示该轮。合规性不在本任务书的产品规则里，只记录现象（见第 6 节）。

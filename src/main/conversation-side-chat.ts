@@ -255,6 +255,16 @@ export function childNamesSource(child: Conversation, owners: ReadonlyMap<string
     bindingNames(owner, binding, source)) ?? false
 }
 
+/**
+ * The managed conversation that adopted a native source, if any. The adopted session's own
+ * catalog row is hidden behind that conversation, so it is the row that stands for the source.
+ */
+export function adoptingConversationOf(source: SideChatSource, conversations: readonly Conversation[]): Conversation | undefined {
+  if (source.kind !== 'native-session') return undefined
+  return conversations.find(owner => !owner.sideChat && owner.deletion?.status !== 'complete' &&
+    owner.bindings.some(binding => binding.nativeSessionId !== undefined && bindingNames(owner, binding, source)))
+}
+
 function parsedCursor(value: string | undefined): { capturedAt: number; id: string } | undefined {
   if (value === undefined) return undefined
   const match = /^(\d{1,16}):([a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})$/i.exec(value)
@@ -323,13 +333,14 @@ export async function findSideChatCommand(
   deps: SideChatServiceDeps,
   active: ReadonlySet<string>,
   sourceInput: unknown,
-  commandIdInput: unknown
+  commandIdInput: unknown,
+  creating: ReadonlySet<string> = new Set()
 ): Promise<SideChatCommandReceipt> {
   const source = parseSideChatSource(sourceInput)
   if (typeof commandIdInput !== 'string' || !isCommandId(commandIdInput)) throw new Error('侧聊创建命令无效')
   const commandId = commandIdInput
   const child = await deps.store.findSideChat(commandId)
-  if (!child?.sideChat) return { commandId, status: 'not-found' }
+  if (!child?.sideChat) return { commandId, status: creating.has(commandId) ? 'in-flight' : 'not-found' }
   requireValue(sameSourceIdentity(child.sideChat.source, source), '该侧聊创建命令不属于此来源')
   if (source.kind === 'native-session') requireValue(child.cwd === source.cwd, '侧聊工作区与冻结来源不一致')
   requireValue(child.deletion?.status !== 'complete', '侧聊已删除')

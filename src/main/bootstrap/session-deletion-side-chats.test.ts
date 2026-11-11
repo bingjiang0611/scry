@@ -18,7 +18,7 @@ const row: AppSession = { sessionId: 'app-session', externalSessionId: 'native-s
  * session's own stores. Everything before that point is real; the stores behind it are
  * never reached in these cases, which is exactly what each case proves.
  */
-function setup(cascade: Partial<SideChatCascade>) {
+function setup(cascade: Partial<SideChatCascade>, overrides: Record<string, unknown> = {}) {
   const order: string[] = []
   const removed = vi.fn()
   const sideChatCascade: SideChatCascade = {
@@ -49,7 +49,8 @@ function setup(cascade: Partial<SideChatCascade>) {
     assertLegacyConversationWriteAllowed: async () => {},
     sessionByContext: new Map(),
     adoptingSessionKeys: new Set(),
-    dockBadge: { remove: unexpected }
+    dockBadge: { remove: unexpected },
+    ...overrides
   } as unknown as Parameters<typeof registerSessionDeletionHandlers>[0])
   const request = { providerId: 'claude' as const, cwd, externalSessionId: 'native-session' }
   return { deleteOneSession, sideChatCascade, order, removed, request, event: {} as IpcMainInvokeEvent }
@@ -96,10 +97,24 @@ describe('a Provider session takes its side chats along when it is deleted', () 
   })
 
   it('does not look for side chats when a conversation deletes one of its own native targets', async () => {
-    const { deleteOneSession, sideChatCascade, request } = setup({ count: async () => 3 })
-    // That delete is authorized by its conversation, which owns its own children; with no
-    // such owner in this case it is refused before any side-chat lookup.
-    await expect(deleteOneSession(request, { confirm: false, notifyFailure: false, conversationId: 'owner' })).rejects.toThrow()
+    // That delete is authorized by its conversation, which owns its own children. The owner
+    // and its plan are real enough to pass the reservation, so the run goes past the point
+    // where a Provider session would plan its side chats; the next authorization check then
+    // stops it before any store is touched.
+    const owner = { id: 'owner', cwd, deletion: { status: 'pending' } }
+    const target = { providerId: 'claude', externalSessionId: 'native-session', runIds: [], sharedWith: [] }
+    let plans = 0
+    const { deleteOneSession, sideChatCascade, request } = setup({ count: async () => 3 }, {
+      conversationStore: () => ({ read: async () => owner }),
+      prepareConversationDeletion: async () => {
+        plans += 1
+        if (plans > 1) throw new Error('stopped after the side-chat branch')
+        return { conversationId: 'owner', revision: 1, fingerprint: 'f'.repeat(64), targets: [target] }
+      }
+    })
+    await expect(deleteOneSession(request, { confirm: false, notifyFailure: false, conversationId: 'owner' }))
+      .rejects.toThrow('stopped after the side-chat branch')
+    expect(plans).toBe(2)
     expect(sideChatCascade.count).not.toHaveBeenCalled()
     expect(sideChatCascade.run).not.toHaveBeenCalled()
   })

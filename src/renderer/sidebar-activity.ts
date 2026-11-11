@@ -80,9 +80,14 @@ export function sidebarActivity(
     for (const conversation of project.conversations ?? []) {
       const runId = conversation.activeRunId
       if (!conversation.sideChat || conversation.archivedAt || !runId) continue
-      const key = parentKeyOf(conversation.sideChat.source)
-      if (waitingQuestionRunIds.has(runId)) childActivity.set(key, 'attention')
-      else if (!childActivity.has(key)) childActivity.set(key, 'working')
+      // An adopted Provider session is shown by its adopting conversation's row instead.
+      const parentConversationId = conversation.sideChat.parentConversationId
+      const keys = parentConversationId ? [parentKeyOf(conversation.sideChat.source), conversationSourceKey(parentConversationId)]
+        : [parentKeyOf(conversation.sideChat.source)]
+      for (const key of keys) {
+        if (waitingQuestionRunIds.has(runId)) childActivity.set(key, 'attention')
+        else if (!childActivity.has(key)) childActivity.set(key, 'working')
+      }
     }
   }
   /** Waiting outranks running, and a parent's own waiting state is never lowered. */

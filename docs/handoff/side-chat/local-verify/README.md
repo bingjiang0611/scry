@@ -3,7 +3,7 @@
 - 分支：`claude/gracious-feynman-nlrtdp`。验证、修复、截图和报告都推到这个分支，不开 PR，不合入 main。
 - 协作方式：你（本地 Agent）尽量一次做完全部验证和范围内修复，自己判定通过或失败，把证据推上来。云端 Agent 只读你推上来的提交和报告做核验。不要中途停下来问“要不要继续”；只有遇到下文“必须停下”的情况才停。
 - 先读仓库根目录的 `CLAUDE.md`，再读本文件。两者冲突时以 `CLAUDE.md` 为准。
-- 本任务书已随 PR 合入 main。以后再用它验证时，截图写到本地 `evidence/`（已加入 `.gitignore`），附件上传到 PR，不提交进仓库。
+- **截图一律不提交进仓库**：写到本地 `docs/handoff/side-chat/local-verify/evidence/`（已加入 `.gitignore`），作为附件上传到 PR，报告里写文件名。下文所有“截图放进 `evidence/…`”都指这个本地目录。前两轮的截图是在这条规则之前提交的，只保留在分支提交 `8173a086` 里。
 
 ## 1. 这个分支改了什么
 
@@ -152,8 +152,8 @@ S  = #right-surface-pane [data-session-surface-current="true"]
 
 ## 7. 第五步：报告和推送
 
-1. 截图放进 `docs/handoff/side-chat/local-verify/evidence/`（自动化截图放 `evidence/auto/`）。
-2. 第二轮把结果写进新文件 `docs/handoff/side-chat/local-verify/REPORT-2.md`（不要改第一轮的 `REPORT.md`），截图放 `evidence/round-2/`。格式与第一轮相同，按顺序写：
+1. 截图写进本地 `docs/handoff/side-chat/local-verify/evidence/`（自动化截图放 `evidence/auto/`），不提交，上传为 PR 附件。
+2. 第二轮把结果写进新文件 `docs/handoff/side-chat/local-verify/REPORT-2.md`（不要改第一轮的 `REPORT.md`），截图写进本地 `evidence/round-N/`，同样不提交。格式与第一轮相同，按顺序写：
    - 环境：revision、系统和版本、Node、机器负载说明。
    - 自动化检查表：命令、退出码、耗时、日志路径、结论（通过 / 失败 / 既有问题，附 main 对照结果）。
    - 手动场景表：编号、结论、截图文件名、DOM 读数摘要。

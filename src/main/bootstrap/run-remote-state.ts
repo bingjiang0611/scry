@@ -57,8 +57,8 @@ export function createRemoteRunState(deps: {
     if (error) deps.runState.error = error
   }
   const markTerminalAttention = (sessionId: string, needsAttention: boolean): void => {
-    const key = deps.runState.conversationId
-      ? conversationAttentionKey(deps.runState.conversationId) : deps.scopedSessionKey(sessionId)
+    const key = deps.runState.attentionKey ?? (deps.runState.conversationId
+      ? conversationAttentionKey(deps.runState.conversationId) : deps.scopedSessionKey(sessionId))
     deps.dockBadge.markAttention(key, {
       windowFocused: Boolean(deps.getWindow()?.isFocused()),
       sessionViewed: deps.runState.conversationId ? deps.dockBadge.isViewed(key) : deps.runs.isViewed(deps.runId),

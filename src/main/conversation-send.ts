@@ -15,6 +15,7 @@ import { dispatchPayloadHash, targetRequest } from './conversation-summary'
 import { parseSend } from './conversation-request'
 import { ConversationTurnBeginUncertainError } from './conversation-turns'
 import { sideChatPlanRefs } from './conversation-side-chat-snapshot'
+import { sideChatAttentionKey } from './conversation-side-chat-attention'
 
 const hash = (value: string): string => createHash('sha256').update(value, 'utf8').digest('hex')
 const reasonOf = (error: unknown): string => String((error as Error)?.message ?? error)
@@ -221,6 +222,8 @@ export async function sendConversationMessage(
     scope: 'plain-text-local-managed-v1', payloadHash: payload,
     historyHash: context?.contentHash ?? null
   }))
+  // Resolved before the run registers, so its first question already lands on the right row.
+  const attentionKey = await sideChatAttentionKey(conversation, cwd => deps.store.list(cwd)).catch(() => undefined)
   active.add(runId)
   let dispatched = false
   /** The runner answered, so this request is no longer provably undelivered. */
@@ -266,6 +269,7 @@ export async function sendConversationMessage(
       permissionMode: request.permissionMode
     }, { managedConversation: {
       conversationId: request.conversationId,
+      ...(attentionKey ? { attentionKey } : {}),
       runId,
       target,
       resumeSessionId: begun.turn.resumeSessionId,

@@ -1,3 +1,4 @@
+import { adoptingConversationOf } from './conversation-side-chat'
 import type { ConversationContinuation, ConversationTarget } from '../shared/conversation'
 import { conversationItemKey, planConversationContinuation, sideChatSnapshotIndexOf } from '../shared/conversation'
 import type {
@@ -26,6 +27,8 @@ export { parseConversationTarget }
 
 export class ConversationService {
   private readonly active = new Set<string>()
+  /** Side-chat create commands this host is executing right now. */
+  private readonly creatingSideChats = new Set<string>()
 
   constructor(private readonly deps: ConversationServiceDeps) {}
 
@@ -76,7 +79,12 @@ export class ConversationService {
     })))
     const conversations = stored
       .filter(conversation => conversation.deletion?.status !== 'complete' || conversation.deletion.retainedCopies)
-      .map((conversation) => conversationSummary(conversation, this.active))
+      .map((conversation) => {
+        const summary = conversationSummary(conversation, this.active)
+        // A side chat of an adopted Provider session belongs to the adopting conversation's row.
+        const adopted = summary.sideChat && adoptingConversationOf(summary.sideChat.source, stored)
+        return adopted && summary.sideChat ? { ...summary, sideChat: { ...summary.sideChat, parentConversationId: adopted.id } } : summary
+      })
     return { conversations, ownedNativeAliases, ownedRunIds }
   }
 
@@ -146,7 +154,12 @@ export class ConversationService {
   }
 
   createSideChat(input: unknown) {
-    return createSideChat(this.deps, this.active, input)
+    // The command id is tracked while it runs, so a read-back from a reloaded renderer can
+    // tell "still creating" from "created nothing" instead of guessing.
+    const commandId = typeof input === 'object' && input !== null && typeof (input as { commandId?: unknown }).commandId === 'string'
+      ? (input as { commandId: string }).commandId : undefined
+    if (commandId) this.creatingSideChats.add(commandId)
+    return createSideChat(this.deps, this.active, input).finally(() => { if (commandId) this.creatingSideChats.delete(commandId) })
   }
 
   listSideChats(input: unknown) {
@@ -155,7 +168,7 @@ export class ConversationService {
 
   /** Read-only receipt lookup; never creates, adopts or starts a Provider. */
   findSideChatCommand(source: unknown, commandId: unknown) {
-    return findSideChatCommand(this.deps, this.active, source, commandId)
+    return findSideChatCommand(this.deps, this.active, source, commandId, this.creatingSideChats)
   }
 
   /** Bounded real bodies of this child's own frozen snapshot; a source is never read. */

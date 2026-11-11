@@ -126,6 +126,13 @@ describe('create result honesty', () => {
     expect('createSideChat' in api).toBe(false)
   })
 
+  it('keeps a command the host reports as still in flight', () => {
+    // A renderer that reloaded mid-create must not settle a create that may still publish.
+    const resolution = resolveCreateReceipt({ commandId: command.commandId, status: 'in-flight' })
+    expect(resolution).toEqual({ kind: 'unknown' })
+    expect(lossOutcome(command, resolution, 'scope-1', notice)).toEqual({ keepCommand: true })
+  })
+
   it('treats an unreadable lookup as unknown, not as absence, and keeps the command', async () => {
     const api = { findSideChatCommand: vi.fn(async () => { throw new Error('ipc down') }) }
     const resolution = await findCreatedSideChat(api, command)

@@ -71,6 +71,7 @@ export function createSessionState(getWindow: () => BrowserWindow | null) {
     }
   })
   const activeRunSessionKey = (run: ActiveRun): string | null => {
+    if (run.attentionKey) return run.attentionKey
     if (run.conversationId) return conversationAttentionKey(run.conversationId)
     if (!run.providerId) return null
     return providerSessionKey(
