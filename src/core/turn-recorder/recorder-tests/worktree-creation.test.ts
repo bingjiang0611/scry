@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import { handleRecorderHook } from '../recorder'
 import { listRecords } from '../store'
-import { readWorktreeCreation } from '../git-worktree-baseline'
+import { finishNewWorktreeBaseline, readWorktreeCreation } from '../git-worktree-baseline'
 import type { AgentTurnRecord } from '../../../shared/turn-record'
 import { workspace, pexecFile, payload, roots } from './fixture.test'
 import { addWorktree, diffAt, endTurn, gitWorkspace, startTurn, summaries, worktreePath } from './worktree-fixture'
@@ -321,6 +321,27 @@ describe('worktree reflog 创建记录解析', () => {
       }
     })
   })
+
+  it('基线提交解析不出来时记 partial（capture_failed），不冒充可用基线', async () => {
+    const root = await gitWorkspace()
+    const captureRoot = await mkdtemp(join(tmpdir(), 'scry-capture-'))
+    roots.push(captureRoot)
+    const snapshot = await finishNewWorktreeBaseline({
+      kind: 'baseline',
+      requestedRoot: root,
+      root,
+      baseline: { commit: '0'.repeat(40), at: new Date().toISOString() }
+    }, { captureRoot, excludedPaths: [], events: [] })
+
+    // 快照自己的失败状态照实保留；只有基线标记降级成 partial，不再冒充可用。
+    expect(snapshot.status).not.toBe('captured')
+    expect(snapshot).toMatchObject({
+      files: [],
+      baselineSource: 'worktree-creation-reflog',
+      baselineStatus: 'partial',
+      baselineReason: 'capture_failed'
+    })
+  }, 35_000)
 
   it('reflog 缺失或第一条不是创建记录时不给基线', async () => {
     const missing = await mkdtemp(join(tmpdir(), 'scry-reflog-'))

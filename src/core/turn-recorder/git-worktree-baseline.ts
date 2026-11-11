@@ -117,8 +117,16 @@ export async function readWorktreeCreation(
   if (oldId !== ZERO_OBJECT_ID) return { problem: 'reflog_creation_not_first' }
   // `<old> <new> <ident...> <unix-ts> <tz>`；ident 里可能有空格，时间戳永远是倒数第二个字段。
   const seconds = Number(meta[meta.length - 2])
-  if (!Number.isSafeInteger(seconds) || seconds <= 0) return { problem: 'reflog_creation_not_first' }
+  // 时间戳必须能构造成合法 Date：坏 reflog 不能把整轮收尾一起弄挂。
+  if (!Number.isSafeInteger(seconds) || seconds <= 0 || seconds * 1_000 > 8.64e15) {
+    return { problem: 'reflog_creation_not_first' }
+  }
   return { creation: { commit: newId, createdAt: new Date(seconds * 1_000).toISOString(), createdMs: seconds * 1_000 } }
+}
+
+/** 路径排序必须与运行时 locale 无关：它决定哪 8 个 worktree 拿到 diff（以及截断时丢掉谁）。 */
+function comparePaths(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0
 }
 
 export type NewWorktreeBaselinePlan =
@@ -220,7 +228,7 @@ export async function findNewTurnWorktrees(query: NewTurnWorktreeQuery): Promise
   // 排序时把基线条目放在前面：后面的 32 条上报上限只会截掉「本来就没基线」的噪音，
   // 不能把一个已确认可采集的 worktree 连快照带原因一起丢掉。
   plans.sort((left, right) => left.kind === right.kind
-    ? left.requestedRoot.localeCompare(right.requestedRoot)
+    ? comparePaths(left.requestedRoot, right.requestedRoot)
     : left.kind === 'baseline' ? -1 : 1)
   const baselines = plans.filter((plan) => plan.kind === 'baseline')
   const overLimit = new Set(baselines.slice(MAX_NEW_WORKTREE_BASELINES).map((plan) => plan.requestedRoot))
@@ -267,7 +275,11 @@ function unavailableSnapshot(
 
 /**
  * 一个新建 worktree 的 diff：创建提交的树 → worktree 现在的状态（新提交 + 未提交改动 +
- * 未跟踪文件）。超时按现有 deadline 语义记 timeout，不拖住整轮收尾。
+ * 未跟踪文件）。
+ *
+ * 只有当真的产出了 diff（`captured`）时才算基线可用：创建树解析失败、超时或 git 报错时
+ * 基线只证明得了「创建时检出了哪个提交」，量不到现在的内容，记 partial + `capture_failed`。
+ * 任何异常都在这层收成一条带原因的 partial，不让收尾因为一个坏 worktree 抛错。
  */
 export async function finishNewWorktreeBaseline(
   plan: NewWorktreeBaselinePlan,
@@ -277,26 +289,39 @@ export async function finishNewWorktreeBaseline(
   if (plan.kind === 'unavailable') {
     return unavailableSnapshot(plan.requestedRoot, plan.reason, new Date(started).toISOString(), 0)
   }
-  const capture = await beginGitTurnDiff(
-    plan.root,
-    Math.max(1, started + (options.deadlineMs ?? NEW_WORKTREE_BEGIN_DEADLINE_MS) - Date.now()),
-    options.captureRoot,
-    options.excludedPaths,
-    false,
-    plan.baseline
-
-  )
-  const snapshot = await finishGitTurnDiff(capture, options.finishDeadlineMs, {
-    ...turnChangeHints(plan.root, options.events),
-    patchExcludeBasenames: options.patchExcludeBasenames,
-    completePatches: true
-  })
-  return {
-    ...snapshot,
-    requestedRoot: snapshot.requestedRoot ?? plan.requestedRoot,
-    baselineSource: 'worktree-creation-reflog',
-    baselineStatus: 'available',
-    baselineCommit: plan.baseline.commit,
-    baselineCreatedAt: plan.baseline.at
+  try {
+    const capture = await beginGitTurnDiff(
+      plan.root,
+      Math.max(1, started + (options.deadlineMs ?? NEW_WORKTREE_BEGIN_DEADLINE_MS) - Date.now()),
+      options.captureRoot,
+      options.excludedPaths,
+      false,
+      plan.baseline
+    )
+    const snapshot = await finishGitTurnDiff(capture, options.finishDeadlineMs, {
+      ...turnChangeHints(plan.root, options.events),
+      patchExcludeBasenames: options.patchExcludeBasenames,
+      completePatches: true
+    })
+    if (snapshot.status !== 'captured') {
+      // 快照自己的 status/reason 已经被传下去，这里只把基线标成 partial，不冒充可用。
+      return {
+        ...snapshot,
+        requestedRoot: snapshot.requestedRoot ?? plan.requestedRoot,
+        baselineSource: 'worktree-creation-reflog',
+        baselineStatus: 'partial',
+        baselineReason: 'capture_failed'
+      }
+    }
+    return {
+      ...snapshot,
+      requestedRoot: snapshot.requestedRoot ?? plan.requestedRoot,
+      baselineSource: 'worktree-creation-reflog',
+      baselineStatus: 'available',
+      baselineCommit: plan.baseline.commit,
+      baselineCreatedAt: plan.baseline.at
+    }
+  } catch {
+    return unavailableSnapshot(plan.requestedRoot, 'capture_failed', new Date().toISOString(), Date.now() - started)
   }
 }

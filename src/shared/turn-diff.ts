@@ -60,6 +60,7 @@ export type TurnDiffBaselineOrigin = 'session_start' | 'resumed'
  * - `reflog_missing` / `reflog_creation_not_first`：拿不到创建记录，且目录时间不早于回合开始。
  * - `reflog_outside_turn`：创建时间晚于收尾上限（时钟异常）；更早的早已静默跳过。
  * - `worktree_deleted`：收尾时目录或它的 `.git` 链接已不在（不再是一个独立仓库）。
+ * - `capture_failed`：基线可信，但建树/收尾失败或超时，量不到 worktree 现在的内容。
  * - `no_checkout` / `per_turn_limit`：创建可信，但拿不到 worktree 现在的内容或已超出每轮上限。
  */
 export type WorktreeBaselineReason =
@@ -68,6 +69,7 @@ export type WorktreeBaselineReason =
   | 'reflog_outside_turn'
   | 'worktree_deleted'
   | 'no_checkout'
+  | 'capture_failed'
   | 'per_turn_limit'
 export const WORKTREE_BASELINE_REASONS: readonly WorktreeBaselineReason[] = [
   'reflog_missing',
@@ -75,6 +77,7 @@ export const WORKTREE_BASELINE_REASONS: readonly WorktreeBaselineReason[] = [
   'reflog_outside_turn',
   'worktree_deleted',
   'no_checkout',
+  'capture_failed',
   'per_turn_limit'
 ]
 export type TurnDiffPatchStatus = 'captured' | 'truncated' | 'binary' | 'unavailable'
