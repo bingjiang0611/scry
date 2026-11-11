@@ -23,6 +23,8 @@ import { registerSuite20 } from './recorder-tests/archive.test'
 import { registerSuite21 } from './recorder-tests/sequence-reuse.test'
 import { registerSuite22 } from './recorder-tests/delivery-hole.test'
 import { registerSuite23 } from './recorder-tests/codex-compaction.test'
+import { registerSuite24 } from './recorder-tests/worktree-creation.test'
+import { registerSuite25 } from './recorder-tests/worktree-creation-old.test'
 
 // Keep the original single-suite worker, registration order and shared cleanup.
 describe('turn recorder state machine', () => {
@@ -63,3 +65,5 @@ registerSuite20()
 registerSuite21()
 registerSuite22()
 registerSuite23()
+registerSuite24()
+registerSuite25()

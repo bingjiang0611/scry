@@ -1,5 +1,5 @@
 import type { CreditUsageEvidence } from './credit-usage.js'
-import type { TurnDiffStatus, TurnDiffReason, DiffFile, TurnDiffCollection, DangerLevel, CompactionTrigger, WorkspaceOverlapEvidence } from './trace.js'
+import type { TurnDiffStatus, TurnDiffReason, DiffFile, TurnDiffCollection, DangerLevel, CompactionTrigger, WorkspaceOverlapEvidence, WorktreeBaselineReason } from './trace.js'
 import type { AgentSteerEvidence, AgentImageMimeType, AgentIntervention } from './runtime.js'
 import type { ProviderId } from './provider.js'
 
@@ -146,6 +146,12 @@ export interface TurnDiffSnapshotRecord {
   collection?: TurnDiffCollection
   /** 同工作区并行运行的观测证据；缺失 = 旧记录或未观测，不能读成独占归因。 */
   workspaceOverlap?: WorkspaceOverlapEvidence
+  /** 本轮新建 worktree 的基线来源；缺失 = 普通回合基线或旧记录。 */
+  baselineSource?: 'worktree-creation-reflog'
+  baselineStatus?: 'available' | 'partial'
+  baselineCommit?: string
+  baselineCreatedAt?: string
+  baselineReason?: WorktreeBaselineReason
 }
 
 export interface TurnDanger {

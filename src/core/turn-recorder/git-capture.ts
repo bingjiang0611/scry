@@ -71,6 +71,16 @@ export interface GitTurnDiffCapture {
   opChain?: Promise<void>
 }
 
+/**
+ * 显式基线：diff 的 before-tree 是 `commit` 当时的树，不是本次 begin 时刻的工作树。
+ * 只用于可证明的基线（本轮新建 worktree 的创建提交），调用方必须先证明来源。
+ */
+export interface GitTurnDiffBaseline {
+  commit: string
+  /** 基线观测时间（ISO），写入 snapshot.beforeAt。 */
+  at: string
+}
+
 export interface GitTurnDiffFinishOptions {
   structuredPaths?: string[]
   forceFull?: boolean
@@ -224,7 +234,8 @@ export async function beginGitTurnDiff(
   deadlineMs = TURN_DIFF_BEGIN_DEADLINE_MS,
   captureRoot?: string,
   excludedPaths: string[] = [],
-  workspaceSnapshot = false
+  workspaceSnapshot = false,
+  baseline?: GitTurnDiffBaseline
 ): Promise<GitTurnDiffCapture> {
   const started = Date.now()
   const beforeAt = new Date(started).toISOString()
@@ -314,6 +325,32 @@ export async function beginGitTurnDiff(
     // linked worktree 的规则文件在自己的 git 目录（`<common>/worktrees/<id>/info/...`），
     // 所以路径必须由 `--git-path` 解析，不能拼 commonDir。
     const sparsePath = isAbsolute(sparsePathRaw) ? sparsePathRaw : resolve(canonicalCwd, sparsePathRaw)
+    if (baseline) {
+      // 显式基线的仓库不需要工作树快照：基线树就是创建提交的树。仍要先建立本 capture 自己的
+      // object store，after 快照只能写进这里，不能污染真实仓库。
+      const baselineTree = (await gitCommand(
+        ['rev-parse', '--verify', '--end-of-options', `${baseline.commit}^{tree}`],
+        { cwd: repoRoot, env: readEnv, deadline }
+      )).trim()
+      return {
+        beforeAt: baseline.at,
+        captureMs: Date.now() - started,
+        status: 'ready',
+        repoRoot,
+        scope,
+        requestedRoot,
+        beforeTree: baselineTree,
+        head: baseline.commit,
+        branch,
+        baselineClean: false,
+        indexPath,
+        tempDir,
+        objectDir,
+        alternateObjectDirs,
+        pathspec,
+        excludedPaths: canonicalExcludedPaths
+      }
+    }
     const [indexState, sparseCheckout] = await Promise.all([
       stat(indexPath).then(
         (value) => ({ mtimeMs: value.mtimeMs, ctimeMs: value.ctimeMs, size: value.size, ino: value.ino }),

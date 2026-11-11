@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import type { TraceEvent } from '../../shared/trace.js'
+import type { TraceEvent, TurnDiffSnapshot } from '../../shared/trace.js'
 import { available, disabled, partial, unavailable, type AgentTurnRecord, type TurnEvidence } from '../../shared/turn-record.js'
 import { aggregateTurnEvidence } from './aggregate.js'
 import { isFullToolContentPolicy } from './tool-content.js'
@@ -14,6 +14,7 @@ import { readStoredEvents, mergeTurnTraceEvents, dedupeTraceEvents } from './rec
 import { stableTranscript } from './recorder-transcript-cache.js'
 import { degradeEvidenceSections, persistRecorderEventContent, persistTurnDiffContent, resolveTurnEnd, nextSessionState } from './recorder-turn-state.js'
 import { turnChangeHints } from './change-journal.js'
+import { newWorktreeTurnDiffs } from './recorder-worktree-diff.js'
 import { rm } from 'node:fs/promises'
 
 export async function finalizeOpenTurn(
@@ -107,11 +108,18 @@ export async function finalizeOpenTurn(
       }
     }))
   }
+  // 回合中途 `git worktree add` 新建的工作树在回合开始时没有基线。它的基线只能来自 git 自己的
+  // 创建记录（reflog 第一条）；拿不到就不计。发现放在收尾，hook 热路径不新增调用。
+  // deferred-terminal 轮的基线已冻结在 Provider 边界（terminalDiffs），不再叠加工作树 view。
+  const worktreeDiffs: Promise<TurnDiffSnapshot[]> = !enablement.config.capture.diff || options.forcedReason ||
+    identityUnmatched || open.terminalDiffs
+    ? Promise.resolve([])
+    : newWorktreeTurnDiffs(enablement, open, mergedEvents)
   const diffs = options.forcedReason || identityUnmatched
     ? []
     : limitTurnDiffPatchBytes(await persistTurnDiffContent(
         enablement.dataRoot,
-        open.terminalDiffs
+        [...(open.terminalDiffs
           ? open.terminalDiffs.map(({ repository, snapshot }) => ({ ...snapshot, requestedRoot: repository }))
           : await Promise.all(open.captures.map(async ({ repository, capture }) => ({
               ...await finishGitTurnDiff(capture, undefined, {
@@ -122,7 +130,8 @@ export async function finalizeOpenTurn(
               // A failed Git baseline may not resolve repoRoot. Preserve the known request
               // directory separately, without inventing a successful Git-root observation.
               requestedRoot: repository
-            })))
+            })))),
+          ...await worktreeDiffs]
       ))
   const diffEvents: TraceEvent[] = diffs.map((turnDiff, index) => ({
     id: `diff-${open.generation}-${index}`,
