@@ -9,7 +9,7 @@ import { adoptingConversationOf } from './conversation-side-chat'
  * seen or cleared: the Dock badge stayed on with nothing to open. It belongs to the row of the
  * session it was frozen from — a managed parent's conversation key, a native parent's session
  * key, or the conversation that has since adopted that native session. Any other conversation
- * keeps its own key (`undefined`).
+ * keeps its own key (`undefined`). Rejects when the workspace list cannot be read.
  */
 export async function sideChatAttentionKey(conversation: Conversation,
   listWorkspace: (cwd: string) => Promise<Conversation[]>): Promise<string | undefined> {
@@ -18,9 +18,8 @@ export async function sideChatAttentionKey(conversation: Conversation,
   if (source.kind === 'conversation') return conversationAttentionKey(source.conversationId)
   const native = sessionAttentionKey({ providerId: source.providerId, agentProfileId: source.agentProfileId,
     cwd: source.cwd, sessionId: source.nativeSessionId })
-  // An unreadable workspace list only hides whether the session was adopted. It never sends
-  // attention back to the child, whose key no row can show or clear.
-  const conversations = await listWorkspace(source.cwd).catch(() => undefined)
-  const adopted = conversations && adoptingConversationOf(source, conversations)
+  // An unreadable workspace list throws: whether the session was adopted is unknown, and the
+  // native row is hidden once it is, so neither guess is a row the user can always clear.
+  const adopted = adoptingConversationOf(source, await listWorkspace(source.cwd))
   return adopted ? conversationAttentionKey(adopted.id) : native
 }

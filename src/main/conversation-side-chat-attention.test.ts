@@ -48,11 +48,35 @@ describe('side-chat attention owner', () => {
     expect(catalog.conversations.find(item => item.id === nativeChild.id)?.sideChat?.parentConversationId).toBe(adopted.id)
     expect(catalog.conversations.find(item => item.id === managedChild.id)?.sideChat?.parentConversationId).toBeUndefined()
 
-    // An unreadable workspace list falls back to the native source row, never to the child.
+    // An unreadable workspace list cannot say whether the session was adopted. The native row
+    // may already be hidden, so no key is guessed; the managed parent needs no list at all.
     const unreadable = async (): Promise<never> => { throw new Error('store unavailable') }
-    expect(await sideChatAttentionKey(nativeChild, unreadable))
-      .toBe(sessionAttentionKey({ providerId: 'codex', cwd: current.cwd, sessionId: 'native-parent' }))
-    expect(await sideChatAttentionKey(nativeChild, unreadable)).not.toBe(conversationAttentionKey(nativeChild.id))
+    await expect(sideChatAttentionKey(nativeChild, unreadable)).rejects.toThrow('store unavailable')
+    expect(await sideChatAttentionKey(managedChild, unreadable)).toBe(conversationAttentionKey(parent.id))
+  })
+
+  it('refuses a side-chat send whose owner row cannot be read, before anything is written', async () => {
+    const current = await sideChatFixture()
+    fixtures.push(current)
+    upsertTraceArchiveTurn({ userDataDir: current.userData, cwd: current.cwd, sessionId: 'native-parent', providerId: 'codex',
+      turn: { runId: 'native-run', userText: 'native question', items: [modelEvent('native-run', 'native answer')],
+        done: true, status: 'completed', ts: Date.now() } })
+    const child = await childOf(current, { kind: 'native-session', providerId: 'codex', cwd: current.cwd,
+      nativeSessionId: 'native-parent' }, 'attention-child-unreadable')
+    const preview = await current.service.preview(child.id, { providerId: 'codex' })
+    if (preview.continuation.kind === 'blocked') throw new Error(preview.continuation.reason)
+    const before = (await current.store.read(child.id))!
+    const list = current.store.list.bind(current.store)
+    current.store.list = async () => { throw new Error('store unavailable') }
+    const result = await current.service.send({ conversationId: child.id, providerId: 'codex',
+      expectedRevision: before.revision, expectedContinuationKey: preview.target.continuationKey,
+      commandId: 'attention-unreadable-send', prompt: 'child question', selectedItems: preview.continuation.missingItems,
+      confirmFresh: true, permissionMode: 'default' })
+    current.store.list = list
+    expect(result).toMatchObject({ status: 'not_sent', reason: expect.stringContaining('store unavailable') })
+    const after = (await current.store.read(child.id))!
+    expect(after.revision).toBe(before.revision)
+    expect(after.turns).toHaveLength(before.turns.length)
   })
 
   it('reports a create the host is still executing as in-flight, not as not-found', async () => {

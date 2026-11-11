@@ -205,6 +205,16 @@ export async function sendConversationMessage(
   // A new command on a deleting conversation is a concurrent-state refusal proven before
   // dispatch, so it answers like a stale revision instead of an unknown outcome.
   if (conversation.deletion) return { status: 'not_sent', reason: '统一对话正在删除或已删除，不能发送' }
+  // Resolved before any durable intent and before the run registers, so its first question
+  // already lands on the right row. A side chat whose owner row cannot be read is refused
+  // here, while nothing has been written: guessing the native row could park its attention
+  // on a row that adoption has already hidden, leaving a Dock badge nothing can clear.
+  let attentionKey: string | undefined
+  try {
+    attentionKey = await sideChatAttentionKey(conversation, cwd => deps.store.list(cwd))
+  } catch (error) {
+    return { status: 'not_sent', reason: `侧边会话的来源归属读取失败，未发送：${reasonOf(error)}` }
+  }
   let plan: DispatchPlan
   try {
     plan = await prepareDispatch(deps, conversation, request)
@@ -222,8 +232,6 @@ export async function sendConversationMessage(
     scope: 'plain-text-local-managed-v1', payloadHash: payload,
     historyHash: context?.contentHash ?? null
   }))
-  // Resolved before the run registers, so its first question already lands on the right row.
-  const attentionKey = await sideChatAttentionKey(conversation, cwd => deps.store.list(cwd))
   active.add(runId)
   let dispatched = false
   /** The runner answered, so this request is no longer provably undelivered. */
