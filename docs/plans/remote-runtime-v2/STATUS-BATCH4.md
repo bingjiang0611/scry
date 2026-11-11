@@ -55,7 +55,7 @@ G1（5 条差异补处理方式 + 守卫断言）与 G2（secret 生命周期改
 
 1. 开关关闭侧的 userData 锁做 A + B，已实现。合入时做了一处调整：没有任何进程持有锁、但 App 自己拿不到锁时，照常启动并记录警告，不再直接退出（见 P3-userdata-lock 末节）。
 2. `workspace:openExternal`、`workspace:trash` 留在 App，已实现。
-3. 终端放到最后单独做。输出改为「事件流只发通知，App 再按需读取」；shell 不活过 App，断开连接后宽限期内回收；三处语义差异由 App 一侧适配。尚未实现。
+3. 终端：已实现，见 [P3-terminal](P3-terminal.md) 与 [b4-l4-terminal](status/b4-l4-terminal.md)。没有转发到设备的 `desktopWorkbench`，而是 daemon 为 App 单独开一套，跑 main 的同一份终端处理，三处语义差异因此不存在。
 4. 工作台写操作走单独的 `workbench` lane，已实现。
 5. `agent:recorderContentPage` 由 App 补上窗口 cwd，daemon 重新校验，已实现。
 6. `agent:listCommands` 改为本机 op `providerCommands`，已实现。
@@ -65,7 +65,7 @@ G1（5 条差异补处理方式 + 守卫断言）与 G2（secret 生命周期改
 
 1. `agent:addPiProfile` 在 daemon 模式下要求握手目录是 daemon 已知的项目：接受。
 2. 配对设备经 daemon 宿主分支会话：先保持关闭，等 macOS 验证过本机分支再议。
-3. main 的 `resolveKnownProjectDirectory` 在 daemon 模式下改为向 daemon 询问：下一轮做。
+3. main 的 `resolveKnownProjectDirectory` 在 daemon 模式下改为向 daemon 询问：已实现，见 [b4-l4-known-projects](status/b4-l4-known-projects.md)。
 4. openExternal 在 daemon 模式下的候选项目范围变窄：接受。
 
 ## 需要决定
