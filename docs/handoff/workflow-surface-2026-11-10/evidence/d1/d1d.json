@@ -1,0 +1,39 @@
+{
+  "tag": "d1d",
+  "workspace": "/tmp/scry-d1/d1d/workspace",
+  "steps": {
+    "stop": {
+      "sent": "running",
+      "daemonsDuring": [
+        13229,
+        13634,
+        15144
+      ],
+      "daemonsGoneAfterSec": 8,
+      "paneAfterStop": " 数到 3000000，每 20 万打印一行进度，全部数完再总结。 | Q | Qoder | run · run-mwc4jgsz-0 | tok | — | tools | 0 | Operation was aborted | 本轮 Hook | 1 个周期 · 11 个处理器实例 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+      "nextSent": "unknown",
+      "nextIdle": "timeout",
+      "nextPane": "orkspace | 用 bash 从 1 数到 3000000，每 20 万打印一行进度，全部数完再总结。 | Q | Qoder | run · run-mwc4jgsz-0 | tok | — | tools | 0 | Operation was aborted | 本轮 Hook | 1 个周期 · 11 个处理器实例 | Error invoking remote method 'agent:start': AgentRuntimeError: Scry trace 仍有 1 轮待恢复 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main"
+    },
+    "denial": {
+      "sent": "unknown",
+      "formSeen": false,
+      "formText": null,
+      "idle": "timeout",
+      "fileWritten": false,
+      "pane": "本机 | workspace | 用 bash 从 1 数到 3000000，每 20 万打印一行进度，全部数完再总结。 | Q | Qoder | run · run-mwc4jgsz-0 | tok | — | tools | 0 | Operation was aborted | 本轮 Hook | 1 个周期 · 11 个处理器实例 | Error invoking remote method 'agent:start': AgentRuntimeError: Scry trace 仍有 1 轮待恢复 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main"
+    },
+    "fork": {
+      "buttonFound": false
+    }
+  },
+  "readyAtStart": false,
+  "daemonsAtClose": [],
+  "daemonsAfterAppClose": [],
+  "logs": {
+    "qoder-run-mwc4jgsz-0": {
+      "lines": 25,
+      "workflowActivity": 0
+    }
+  }
+}

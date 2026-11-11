@@ -1,0 +1,136 @@
+{
+  "tag": "d1j",
+  "workspace": "/tmp/scry-d1/d1j/workspace",
+  "bound": true,
+  "dumpBeforeA": {
+    "textareas": [
+      {
+        "cls": "input",
+        "visible": true,
+        "len": 0,
+        "disabled": false
+      }
+    ],
+    "send": {
+      "disabled": true,
+      "visible": true
+    },
+    "status": "Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1",
+    "sessions": [],
+    "workdir": "workspace"
+  },
+  "sessionA": {
+    "drafted": "drafted",
+    "sent": "running",
+    "pids": [
+      28959,
+      29346,
+      30281
+    ],
+    "runningAfterSwitch": true,
+    "dumpAfterSwitch": {
+      "textareas": [
+        {
+          "cls": "input",
+          "visible": true,
+          "len": 0,
+          "disabled": false
+        }
+      ],
+      "send": {
+        "disabled": true,
+        "visible": true
+      },
+      "status": "Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1",
+      "sessions": [
+        "写一篇 3000 字的长文，分 30 段，每段至"
+      ],
+      "workdir": null
+    },
+    "paneAfterSwitch": "-mwc6l162-0 | 运行中 | 本轮 Hook | 1 个周期 · 3 个处理器实例 | 运行中 | 可继续输入，新消息将加入队列 | 01:07 | 停止本轮 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+    "stopClicked": true,
+    "allGoneAfterSec": 9,
+    "paneAfterStop": "要用任何工具。 | Q | Qoder | run · run-mwc6l162-0 | tok | — | tools | 0 | 本轮 Hook | 4 个周期 · 19 个处理器实例 | 在新会话中分支 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main"
+  },
+  "dumpDuringA": {
+    "textareas": [
+      {
+        "cls": "input",
+        "visible": true,
+        "len": 0,
+        "disabled": false
+      }
+    ],
+    "send": {
+      "disabled": true,
+      "visible": true
+    },
+    "status": "Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1",
+    "sessions": [
+      "写一篇 3000 字的长文，分 30 段，每段至"
+    ],
+    "workdir": null
+  },
+  "dumpAfterNew": {
+    "textareas": [
+      {
+        "cls": "input",
+        "visible": true,
+        "len": 0,
+        "disabled": false
+      }
+    ],
+    "send": {
+      "disabled": true,
+      "visible": true
+    },
+    "status": "Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1",
+    "sessions": [
+      "写一篇 3000 字的长文，分 30 段，每段至"
+    ],
+    "workdir": "workspace"
+  },
+  "sessionB": {
+    "drafted": "drafted",
+    "sent": "unknown",
+    "pids": [
+      31941
+    ],
+    "stopClicked": false,
+    "gone": []
+  },
+  "dumpBeforeSendB": {
+    "textareas": [
+      {
+        "cls": "input",
+        "visible": true,
+        "len": 53,
+        "disabled": false
+      }
+    ],
+    "send": {
+      "disabled": true,
+      "visible": true
+    },
+    "status": "Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1",
+    "sessions": [
+      "写一篇 3000 字的长文，分 30 段，每段至"
+    ],
+    "workdir": "workspace"
+  },
+  "concurrentCount": 1,
+  "sessionsAtBoth": 1,
+  "afterStopB": {
+    "pids": [
+      31941
+    ],
+    "pane": "orkspace | 今天想在 workspace 中构建什么？ | workspace | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main"
+  },
+  "switchToA": true,
+  "pidsAtClose": [],
+  "pidsAfterClose": {
+    "1000ms": [],
+    "3000ms": [],
+    "10000ms": []
+  }
+}

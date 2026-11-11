@@ -1,0 +1,41 @@
+{
+  "tag": "d1o",
+  "workspace": "/tmp/scry-d1/d1o/workspace",
+  "bound": true,
+  "psBefore": [
+    74925,
+    75356
+  ],
+  "plugins": {
+    "drafted": true,
+    "psDuring": [
+      74925,
+      75356,
+      76262
+    ],
+    "idle": false,
+    "pane": "anaged recorder requires an authoritative Provider session id | → 不要开始下一轮；保留 userData/trace-turn-progress、managed-turn-progress、managed-turn-commits 与 workspace/.scry 后重试恢复 | tools | 0 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+    "psAfter": []
+  },
+  "mcp": {
+    "opener": " MCP|MCP|MCP",
+    "psBefore": [],
+    "text": "Capabilities | Skills | MCP | 刷新 | 全部 | 项目 | 用户 | 配置已读取；刷新后才会启动已授权 MCP 并读取 Qoder 原生运行状态 | 当前来源没有 MCP",
+    "psDuring": [],
+    "psAfter": []
+  },
+  "tools": {
+    "drafted": true,
+    "psDuring": [],
+    "idle": false,
+    "pane": "本机 | workspace | /plugins reload | Q | Qoder | run · run-mwc717ny-0 | tok | 0 | tools | 0 | 插件已重载：5 个插件，84 条命令 | 模型已完成，但 Scry 精确记录提交失败：managed recorder requires an authoritative Provider session id | → 不要开始下一轮；保留 userData/trace-turn-progress、managed-turn-progress、managed-turn-commits 与 workspace/.scry 后重试恢复 | tools | 0 | Error invoking remote method 'agent:start': AgentRuntimeError: Scry trace 仍有 1 轮待恢复 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+    "fileExists": "missing",
+    "psAfter": []
+  },
+  "psAtClose": [],
+  "psAfterClose": {
+    "1000ms": [],
+    "3000ms": [],
+    "10000ms": []
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "tag": "d1i",
+  "workspace": "/tmp/scry-d1/d1i/workspace",
+  "bound": true,
+  "sessionA": {
+    "sent": "running",
+    "pids": [
+      20767,
+      21154,
+      22023
+    ],
+    "paneAfterSwitch": "本轮 Hook | 1 个周期 · 3 个处理器实例 | 运行中 | 可继续输入，新消息将加入队列 | 00:40 | 停止本轮 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+    "runningAfterSwitch": true,
+    "pidsAfterSwitch": [
+      23762
+    ],
+    "stopClicked": true,
+    "allGoneAfterSec": 12,
+    "paneAfterStop": "c6iqgm-0 | 记录收口中 | 本轮 Hook | 4 个周期 · 19 个处理器实例 | 记录收口中 | Provider 已结束，正在保存文件差异与记录；新消息继续排队 | 00:54 | 停止本轮 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main"
+  },
+  "sessionB": {
+    "composer": "workspace",
+    "sent": "unknown",
+    "pids": [
+      23762,
+      25225
+    ],
+    "stopClicked": false,
+    "gone": [
+      25225
+    ]
+  },
+  "concurrent": {
+    "all": [
+      23762,
+      25225
+    ],
+    "count": 2,
+    "sessions": 1
+  },
+  "afterStopB": {
+    "pids": [
+      23762
+    ],
+    "pane": "orkspace | 今天想在 workspace 中构建什么？ | workspace | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main"
+  },
+  "switchToA": {
+    "found": true,
+    "titles": [
+      "写一篇 3000 字的长文，分 30 段，每段至"
+    ]
+  },
+  "pidsAtClose": [],
+  "pidsAfterClose": {
+    "1000ms": [],
+    "3000ms": [],
+    "10000ms": []
+  },
+  "pendingProgress": []
+}

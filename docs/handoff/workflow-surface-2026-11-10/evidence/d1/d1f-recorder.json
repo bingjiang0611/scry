@@ -1,0 +1,32 @@
+{
+  "tag": "d1f-recorder",
+  "mode": "recorder",
+  "workspace": "/tmp/scry-d1/d1f-recorder/workspace",
+  "boundEntry": "/tmp/scry-d1/d1f-recorder/workspace",
+  "composerWorkdir": "workspace",
+  "sent": "running",
+  "daemonsDuring": [
+    74792,
+    75263,
+    76173,
+    77699
+  ],
+  "stopClicked": true,
+  "daemonsGoneAfterSec": 13,
+  "paneAfterStop": "本机 | workspace | 用 bash 从 1 数到 3000000，每 20 万打印一行进度，全部数完再总结。 | Q | Qoder | run · run-mwc594ck-0 | tok | — | tools | 0 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+  "nextSent": "running",
+  "nextPane": "本机 | workspace | 只回复两个字：收到。不要用工具。 | Q | Qoder | run · run-mwc59nll-1 | 运行中 | 收到。 | 本轮 Hook | 1 个周期 · 3 个处理器实例 | 运行中 | 可继续输入，新消息将加入队列 | 00:20 | 停止本轮 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+  "pendingProgress": [],
+  "scryTurns": null,
+  "daemonsAfterClose": {
+    "after_close_1000ms": [
+      {
+        "pid": 79507,
+        "command": "der-ai/qodercli/bundle/qodercli.js --sdk"
+      }
+    ],
+    "after_close_3000ms": [],
+    "after_close_10000ms": [],
+    "after_close_30000ms": []
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "tag": "d1h",
+  "workspace": "/tmp/scry-d1/d1h/workspace",
+  "bound": true,
+  "lastDraft": "用 bash 从 5000000 倒数到 1，每 20 万打印一行进度，全部数完",
+  "sessionA": {
+    "sent": "running",
+    "approval": {
+      "form": null
+    },
+    "paneRunning": " | 0 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+    "pids": [],
+    "stillRunning": true,
+    "paneAfterSwitch": "会话仍在列表里；Provider 侧可能还有历史，但 Scry 没有可校验的归档可展示。 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+    "stillRunningAfterSwitch": false,
+    "stopClicked": false,
+    "allGoneAfterSec": 1,
+    "paneAfterStop": "据：Provider transcript 与 Scry 归档都没有记录。 | 会话仍在列表里；Provider 侧可能还有历史，但 Scry 没有可校验的归档可展示。 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main"
+  },
+  "sessionB": {
+    "composer": "workspace",
+    "sent": "running",
+    "approval": {
+      "form": "Qoder 需要你的选择 | start=$SECONDS; count=0; for ((i=5000000; i>=1; i--)); do count=$((count+1)); if ((i % 200000 == 0)); then echo \"进度: 当前 $i，已数 $count\"; fi; done; echo \"完成: 最后一个数 $((i",
+      "options": [
+        "允许一次",
+        "拒绝",
+        "其他"
+      ],
+      "clicked": "允许一次"
+    },
+    "paneRunning": "停止本轮 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+    "pids": [
+      15961
+    ],
+    "stopClicked": true,
+    "stoppedPids": [
+      15961
+    ]
+  },
+  "afterBoth": {
+    "pids": [
+      15961
+    ],
+    "sessions": 2
+  },
+  "afterStopB": {
+    "pids": [],
+    "pane": "个周期 · 26 个处理器实例 | tools | 1 | human | 1 · 1q | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main"
+  },
+  "switchToA": {
+    "found": true
+  },
+  "pidsAtClose": [],
+  "pidsAfterClose": {
+    "1000ms": [],
+    "3000ms": [],
+    "10000ms": []
+  },
+  "pendingProgress": [],
+  "records": null,
+  "paneFinal": null
+}

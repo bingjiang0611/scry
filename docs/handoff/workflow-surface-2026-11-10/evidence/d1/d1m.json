@@ -1,0 +1,94 @@
+{
+  "tag": "d1m",
+  "workspace": "/tmp/scry-d1/d1m/workspace",
+  "dump0": {
+    "send": true,
+    "status": "Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与",
+    "workdir": "workspace",
+    "sessions": 0
+  },
+  "sessionA": {
+    "drafted": true,
+    "sent": "running",
+    "pane": " | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 检测中… | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | 工作区选择不可用",
+    "dirs": [
+      {
+        "pid": 48024,
+        "name": "2026-11-11T05-59-30-528-"
+      },
+      {
+        "pid": 49095,
+        "name": "2026-11-11T05-59-33-454-"
+      }
+    ],
+    "alivePids": [
+      48024,
+      49095
+    ],
+    "runningAfterSwitch": false,
+    "paneAfterSwitch": "据：Provider transcript 与 Scry 归档都没有记录。 | 会话仍在列表里；Provider 侧可能还有历史，但 Scry 没有可校验的归档可展示。 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+    "stopClicked": false,
+    "allGoneAfterSec": 1,
+    "paneAfterStop": "机证据 | 本机没有命中这条会话的可读证据：Provider transcript 与 Scry 归档都没有记录。 | 会话仍在列表里；Provider 侧可能还有历史，但 Scry 没有可校验的归档可展示。 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main"
+  },
+  "dumpB": {
+    "send": true,
+    "status": "Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与",
+    "workdir": "workspace",
+    "sessions": 1
+  },
+  "sessionB": {
+    "drafted": true,
+    "sent": "running",
+    "pane": "停止本轮 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 检测中… | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+    "dirs": [
+      {
+        "pid": 51658,
+        "name": "2026-11-11T05-59-49-799-"
+      },
+      {
+        "pid": 52225,
+        "name": "2026-11-11T05-59-52-201-"
+      }
+    ],
+    "alivePids": [
+      51658,
+      52225
+    ],
+    "stopClicked": true
+  },
+  "concurrent": {
+    "sessions": 2,
+    "allSdk": [
+      51658,
+      52225
+    ],
+    "aAlive": [],
+    "bAlive": [
+      51658,
+      52225
+    ]
+  },
+  "afterStopB": {
+    "allSdk": [],
+    "aAlive": [],
+    "bAlive": [],
+    "pane": "on was aborted | 本轮 Hook | 1 个周期 · 11 个处理器实例 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main"
+  },
+  "switchToA": true,
+  "denial": {
+    "drafted": true,
+    "sent": "unknown",
+    "formSeen": false,
+    "options": [],
+    "pane": "本机 | workspace | 这条会话没有可读的本机证据 | 本机没有命中这条会话的可读证据：Provider transcript 与 Scry 归档都没有记录。 | 会话仍在列表里；Provider 侧可能还有历史，但 Scry 没有可校验的归档可展示。 | Error invoking remote method 'agent:start': AgentRuntimeError: Scry trace 仍有 1 轮待恢复 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+    "fileWritten": "no"
+  },
+  "pidsAtClose": [],
+  "pidsAfterClose": {
+    "1000ms": [],
+    "3000ms": [],
+    "10000ms": [],
+    "20000ms": []
+  }
+}

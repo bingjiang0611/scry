@@ -1,0 +1,52 @@
+{
+  "tag": "d1p",
+  "workspace": "/tmp/scry-d1/d1p/workspace",
+  "workdirButton": "不绑定项目",
+  "tools": {
+    "sent": "running",
+    "answers": [],
+    "idle": "form",
+    "pane": "reate documentation files (*.md) or README files unless explicitly requested by the User. - Only use emojis if the user explicitly requests it. Avoid writing emojis to files unless asked. | 拒绝 | 拒绝本次操作并让 Agent 继续处理结果 | 其他 | 输入一个不在上述选项中的回答 | 选择后即可继续 | 取消 | 提交并继续 | ⌘↵ | 本轮 Hook | 1 个周期 · 3 个处理器实例 | 本轮文件（工具证据） | W · 1 | 1 | 需回答 1 个问题 | 本轮在等你的选择，回答后继续 | 00:37 | 停止本轮 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+    "file": "missing"
+  },
+  "denial": {
+    "sent": "approval",
+    "formSeen": true,
+    "options": [
+      "允许一次",
+      "拒绝",
+      "其他"
+    ],
+    "picked": "拒绝",
+    "idle": "form",
+    "pane": " emojis if the user explicitly requests it. Avoid writing emojis to files unless asked. | 拒绝 | 拒绝本次操作并让 Agent 继续处理结果 | 其他 | 输入一个不在上述选项中的回答 | 选择后即可继续 | 取消 | 提交并继续 | ⌘↵ | 本轮 Hook | 1 个周期 · 2 个处理器实例 | 本轮文件（工具证据） | W · 1 | 1 | 需回答 1 个问题 | 本轮在等你的选择，回答后继续 | 00:14 | 停止本轮 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+    "file": "absent"
+  },
+  "fork": {
+    "buttonFound": false
+  },
+  "agents": {
+    "sent": "approval",
+    "answers": [
+      {
+        "options": [
+          "允许一次",
+          "拒绝",
+          "其他"
+        ],
+        "picked": "允许一次"
+      }
+    ],
+    "idle": "idle",
+    "pane": " Task×2 | 思考过程 | I should wait for actual notifications rather than making anything up. | 两个后台子 Agent 已经启动，一个算 21*2，一个算 20+22。它们还在运行，完成后我会告诉你各自返回的数字。 | Operation aborted | → 检查该轮 Provider 结果与日志后重试 | 本轮 Hook | 7 个周期 · 27 个处理器实例 | dur | 0.0s | api | 0.0s | tools | 2 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+    "panel": "总览总览总览4 次调用上下文占用—暂无上下文数据1 轮失败输入+输出+缓存≥223.7k缓存命中率 · 部分43.5%Credit—会话Compact仅统计当前已加载记录中确认完成的压缩；不代表原生会话的全部历史0IDc5960e54…66087421c5960e54-4f80-4890-8b27-773c66087421轮次数据会话数据每轮调用3 轮T01在工作区创建 d1p.txt 写入 hello，读回它，再运行 wc -c d1p.txt，最后报错1耗时2 项结构化介入1MCP0Skill0子Agent0Hooks21文件0WriteThe user doesn't want to p",
+    "cards": [],
+    "states": []
+  },
+  "psAtClose": [],
+  "psAfterClose": {
+    "1000ms": [],
+    "3000ms": [],
+    "10000ms": []
+  }
+}

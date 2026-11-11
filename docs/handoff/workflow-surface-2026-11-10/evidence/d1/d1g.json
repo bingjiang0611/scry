@@ -1,0 +1,59 @@
+{
+  "tag": "d1g",
+  "workspace": "/tmp/scry-d1/d1g/workspace",
+  "bound": true,
+  "sessionA": {
+    "sent": "running",
+    "pids": [
+      84183,
+      84600,
+      85566
+    ],
+    "title": null,
+    "aliveAfterStopB": [],
+    "paneBeforeStop": " | 需回答 1 个问题 | 本轮在等你的选择，回答后继续 | 00:53 | 停止本轮 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+    "stopClicked": true,
+    "allGoneAfterSec": 10,
+    "paneAfterStop": "轮 Hook | 5 个周期 · 22 个处理器实例 | 记录收口中 | Provider 已结束，正在保存文件差异与记录；新消息继续排队 | 01:05 | 停止本轮 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main"
+  },
+  "sessionB": {
+    "sent": "unknown",
+    "pids": [
+      87170
+    ],
+    "stopClicked": false,
+    "goneAfterStopB": []
+  },
+  "bothPids": {
+    "a": [
+      84183,
+      84600,
+      85566
+    ],
+    "b": [
+      87170
+    ]
+  },
+  "distinctDaemons": 4,
+  "afterStopB": {
+    "pids": [
+      87170
+    ],
+    "paneB": "本机 | workspace | 今天想在 workspace 中构建什么？ | workspace | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main"
+  },
+  "sessionCount": 1,
+  "denial": {
+    "sent": "unknown",
+    "formSeen": false,
+    "formText": null,
+    "pane": "; for ((i=1; i<=3000000; i++)); do i | 运行已中断，但 Scry 精确记录提交失败：managed recorder produced an invalid canonical record | → 不要开始下一轮；保留 userData/trace-turn-progress、managed-turn-progress、managed-turn-commits 与 workspace/.scry 后重试恢复 | 本轮 Hook | 5 个周期 · 22 个处理器实例 | tools | 1 | Error invoking remote method 'agent:start': AgentRuntimeError: Scry 精确记录仍有 1 轮待恢复 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+    "fileWritten": false
+  },
+  "pidsAtClose": [],
+  "pidsAfterClose": {
+    "1000ms": [],
+    "3000ms": [],
+    "10000ms": []
+  },
+  "records": null
+}

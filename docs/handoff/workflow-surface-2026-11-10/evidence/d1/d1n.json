@@ -1,0 +1,17 @@
+{
+  "tag": "d1n",
+  "workspace": "/tmp/scry-d1/d1m/workspace",
+  "workdirButton": null,
+  "conversations": [
+    "草稿 写一篇 3000 字的长文，分 3",
+    "写一篇 3000 字的长文，分 30 段"
+  ],
+  "opened": true,
+  "composerWorkdir": null,
+  "draft": "创建 denied-m.txt 写入 nope，只做这一步。只回复两个字：收到。不要用工具。",
+  "pane": "本机 | workspace | 这条会话没有可读的本机证据 | 本机没有命中这条会话的可读证据：Provider transcript 与 Scry 归档都没有记录。 | 会话仍在列表里；Provider 侧可能还有历史，但 Scry 没有可校验的归档可展示。 | Error invoking remote method 'agent:start': AgentRuntimeError: Scry trace 仍有 1 轮待恢复 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+  "stillPending": 1,
+  "successfulReply": false,
+  "pidsAtClose": [],
+  "pidsAfterClose": []
+}

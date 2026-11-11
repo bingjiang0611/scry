@@ -1,0 +1,255 @@
+{
+  "tag": "d1c",
+  "workspace": "/tmp/scry-d1/d1c/workspace",
+  "timeline": [
+    {
+      "atMs": 2509,
+      "pids": []
+    },
+    {
+      "atMs": 13945,
+      "pids": [
+        {
+          "pid": 77706,
+          "ppid": 76813,
+          "started": "Wed Nov 11 04:48:19 2026"
+        }
+      ]
+    },
+    {
+      "atMs": 16952,
+      "pids": [
+        {
+          "pid": 77706,
+          "ppid": 76813,
+          "started": "Wed Nov 11 04:48:19 2026"
+        },
+        {
+          "pid": 78128,
+          "ppid": 76813,
+          "started": "Wed Nov 11 04:48:22 2026"
+        }
+      ]
+    },
+    {
+      "atMs": 29374,
+      "pids": [
+        {
+          "pid": 78128,
+          "ppid": 76813,
+          "started": "Wed Nov 11 04:48:22 2026"
+        }
+      ]
+    },
+    {
+      "atMs": 34480,
+      "pids": []
+    },
+    {
+      "atMs": 55517,
+      "pids": [
+        {
+          "pid": 80631,
+          "ppid": 76813,
+          "started": "Wed Nov 11 04:49:00 2026"
+        }
+      ]
+    },
+    {
+      "atMs": 68180,
+      "pids": []
+    },
+    {
+      "atMs": 94122,
+      "pids": [
+        {
+          "pid": 82966,
+          "ppid": 76813,
+          "started": "Wed Nov 11 04:49:39 2026"
+        }
+      ]
+    },
+    {
+      "atMs": 110577,
+      "pids": []
+    },
+    {
+      "atMs": 134336,
+      "pids": [
+        {
+          "pid": 84640,
+          "ppid": 76813,
+          "started": "Wed Nov 11 04:50:19 2026"
+        }
+      ]
+    },
+    {
+      "atMs": 138060,
+      "marker": "send"
+    },
+    {
+      "atMs": 139022,
+      "pids": [
+        {
+          "pid": 84640,
+          "ppid": 76813,
+          "started": "Wed Nov 11 04:50:19 2026"
+        },
+        {
+          "pid": 85693,
+          "ppid": 76813,
+          "started": "Wed Nov 11 04:50:24 2026"
+        }
+      ]
+    },
+    {
+      "atMs": 144079,
+      "pids": [
+        {
+          "pid": 84640,
+          "ppid": 76813,
+          "started": "Wed Nov 11 04:50:19 2026"
+        },
+        {
+          "pid": 85693,
+          "ppid": 76813,
+          "started": "Wed Nov 11 04:50:24 2026"
+        },
+        {
+          "pid": 86567,
+          "ppid": 76813,
+          "started": "Wed Nov 11 04:50:29 2026"
+        }
+      ]
+    },
+    {
+      "atMs": 145190,
+      "marker": "before-stop"
+    },
+    {
+      "atMs": 145191,
+      "marker": "stop-clicked"
+    },
+    {
+      "atMs": 147293,
+      "marker": "after-stop-2000ms"
+    },
+    {
+      "atMs": 149587,
+      "marker": "after-stop-4000ms"
+    },
+    {
+      "atMs": 151321,
+      "pids": [
+        {
+          "pid": 85693,
+          "ppid": 76813,
+          "started": "Wed Nov 11 04:50:24 2026"
+        }
+      ]
+    },
+    {
+      "atMs": 153717,
+      "marker": "after-stop-8000ms"
+    },
+    {
+      "atMs": 158626,
+      "pids": []
+    },
+    {
+      "atMs": 160774,
+      "marker": "after-stop-15000ms"
+    },
+    {
+      "atMs": 170834,
+      "marker": "after-stop-25000ms"
+    }
+  ],
+  "appPid": null,
+  "readyAtMs": 138060,
+  "daemonsBeforeStop": [
+    {
+      "pid": 84640,
+      "ppid": 76813,
+      "started": "Wed Nov 11 04:50:19 2026",
+      "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+      "sdk": true
+    },
+    {
+      "pid": 85693,
+      "ppid": 76813,
+      "started": "Wed Nov 11 04:50:24 2026",
+      "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+      "sdk": true
+    },
+    {
+      "pid": 86567,
+      "ppid": 76813,
+      "started": "Wed Nov 11 04:50:29 2026",
+      "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+      "sdk": true
+    }
+  ],
+  "stopButtonFound": true,
+  "daemonsAfterStop_2000ms": [
+    {
+      "pid": 84640,
+      "ppid": 76813,
+      "started": "Wed Nov 11 04:50:19 2026",
+      "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+      "sdk": true
+    },
+    {
+      "pid": 85693,
+      "ppid": 76813,
+      "started": "Wed Nov 11 04:50:24 2026",
+      "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+      "sdk": true
+    },
+    {
+      "pid": 86567,
+      "ppid": 76813,
+      "started": "Wed Nov 11 04:50:29 2026",
+      "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+      "sdk": true
+    }
+  ],
+  "daemonsAfterStop_4000ms": [
+    {
+      "pid": 84640,
+      "ppid": 76813,
+      "started": "Wed Nov 11 04:50:19 2026",
+      "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+      "sdk": true
+    },
+    {
+      "pid": 85693,
+      "ppid": 76813,
+      "started": "Wed Nov 11 04:50:24 2026",
+      "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+      "sdk": true
+    },
+    {
+      "pid": 86567,
+      "ppid": 76813,
+      "started": "Wed Nov 11 04:50:29 2026",
+      "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+      "sdk": true
+    }
+  ],
+  "daemonsAfterStop_8000ms": [
+    {
+      "pid": 85693,
+      "ppid": 76813,
+      "started": "Wed Nov 11 04:50:24 2026",
+      "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+      "sdk": true
+    }
+  ],
+  "daemonsAfterStop_15000ms": [],
+  "daemonsAfterStop_25000ms": [],
+  "paneAfterStop": "本机 | workspace | 用 bash 从 1 数到 3000000，每 20 万打印一行进度，全部数完再总结。 | Q | Qoder | run · run-mwc4a05n-0 | tok | — | tools | 0 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+  "daemonsAtClose": [],
+  "daemonsAfterAppClose": [],
+  "qoderRunLogs": null
+}

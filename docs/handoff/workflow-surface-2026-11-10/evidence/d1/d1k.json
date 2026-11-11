@@ -1,0 +1,171 @@
+{
+  "tag": "d1k",
+  "workspace": "/tmp/scry-d1/d1k/workspace",
+  "bound": true,
+  "dumpBeforeA": {
+    "textareas": [
+      {
+        "cls": "input",
+        "visible": true,
+        "len": 0,
+        "disabled": false
+      }
+    ],
+    "send": {
+      "disabled": true,
+      "visible": true
+    },
+    "status": "Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1",
+    "sessions": [],
+    "workdir": "workspace"
+  },
+  "sessionA": {
+    "drafted": "drafted",
+    "sent": "running",
+    "pids": [
+      38163,
+      38560,
+      39499
+    ],
+    "runningAfterSwitch": false,
+    "dumpAfterSwitch": {
+      "textareas": [
+        {
+          "cls": "input",
+          "visible": true,
+          "len": 0,
+          "disabled": false
+        }
+      ],
+      "send": {
+        "disabled": true,
+        "visible": true
+      },
+      "status": "Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1",
+      "sessions": [
+        "写一篇 3000 字的长文，分 30 段，每段至",
+        "写一篇 3000 字的长文，分 30 段，每段至"
+      ],
+      "workdir": null
+    },
+    "paneAfterSwitch": "据：Provider transcript 与 Scry 归档都没有记录。 | 会话仍在列表里；Provider 侧可能还有历史，但 Scry 没有可校验的归档可展示。 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+    "stopClicked": false,
+    "paneAfterStop": "机证据 | 本机没有命中这条会话的可读证据：Provider transcript 与 Scry 归档都没有记录。 | 会话仍在列表里；Provider 侧可能还有历史，但 Scry 没有可校验的归档可展示。 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main"
+  },
+  "dumpDuringA": {
+    "textareas": [
+      {
+        "cls": "input",
+        "visible": true,
+        "len": 0,
+        "disabled": false
+      }
+    ],
+    "send": {
+      "disabled": true,
+      "visible": true
+    },
+    "status": "Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1",
+    "sessions": [
+      "写一篇 3000 字的长文，分 30 段，每段至"
+    ],
+    "workdir": null
+  },
+  "dumpAfterNew": {
+    "textareas": [
+      {
+        "cls": "input",
+        "visible": true,
+        "len": 0,
+        "disabled": false
+      }
+    ],
+    "send": {
+      "disabled": true,
+      "visible": true
+    },
+    "status": "Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1",
+    "sessions": [
+      "写一篇 3000 字的长文，分 30 段，每段至"
+    ],
+    "workdir": "workspace"
+  },
+  "dumpAfterBind": {
+    "textareas": [
+      {
+        "cls": "input",
+        "visible": true,
+        "len": 0,
+        "disabled": false
+      }
+    ],
+    "send": {
+      "disabled": true,
+      "visible": true
+    },
+    "status": "Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1",
+    "sessions": [
+      "写一篇 3000 字的长文，分 30 段，每段至"
+    ],
+    "workdir": "workspace"
+  },
+  "sessionB": {
+    "drafted": "drafted",
+    "sent": "running",
+    "pids": [
+      38163,
+      38560,
+      39499,
+      41011,
+      42722
+    ],
+    "stopClicked": true,
+    "gone": [
+      38163,
+      38560,
+      39499,
+      42722
+    ]
+  },
+  "dumpBeforeSendB": {
+    "textareas": [
+      {
+        "cls": "input",
+        "visible": true,
+        "len": 53,
+        "disabled": false
+      }
+    ],
+    "send": {
+      "disabled": false,
+      "visible": true
+    },
+    "status": "Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1",
+    "sessions": [
+      "写一篇 3000 字的长文，分 30 段，每段至"
+    ],
+    "workdir": "workspace"
+  },
+  "concurrentCount": 5,
+  "sessionsAtBoth": 2,
+  "afterStopB": {
+    "pids": [
+      41011,
+      43210
+    ],
+    "pane": "| run · run-mwc6o030-1 | tok | — | tools | 0 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main"
+  },
+  "switchToA": true,
+  "pidsAtClose": [
+    41011
+  ],
+  "pidsAfterClose": {
+    "1000ms": [
+      41011
+    ],
+    "3000ms": [
+      41011
+    ],
+    "10000ms": []
+  }
+}

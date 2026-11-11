@@ -1,0 +1,47 @@
+{
+  "tag": "d1e",
+  "workspaceWithRecorder": "/tmp/scry-d1/d1e/ws-recorder",
+  "workspacePlain": "/tmp/scry-d1/d1e/ws-plain",
+  "runs": {
+    "plainWorkspace": {
+      "sent": "running",
+      "daemonsDuring": [
+        63568,
+        63831
+      ],
+      "stopClicked": true,
+      "daemonsGoneAfterSec": 7,
+      "paneAfterStop": " 1 数到 3000000，每 20 万打印一行进度，全部数完再总结。 | Q | Qoder | run · run-mwc55tuq-0 | tok | — | tools | 0 | 本轮 Hook | 3 个周期 · 16 个处理器实例 | 在新会话中分支 | 不绑定项目 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | 工作区选择不可用",
+      "nextSent": "running",
+      "nextPane": "— | tools | 0 | 本轮已中断，不代表任务完成。 | 本轮 Hook | 3 个周期 · 16 个处理器实例 | 只回复两个字：收到。不要用工具。 | Q | Qoder | run · run-mwc5689m-1 | 运行中 | 收到 | 本轮 Hook | 1 个周期 · 2 个处理器实例 | 不绑定项目 | 运行中 | 可继续输入，新消息将加入队列 | 00:15 | 停止本轮 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | 工作区选择不可用",
+      "pendingProgress": 0,
+      "scryState": null
+    },
+    "recorderWorkspace": {
+      "sent": "running",
+      "daemonsDuring": [
+        67586,
+        68486
+      ],
+      "stopClicked": true,
+      "daemonsGoneAfterSec": 7,
+      "paneAfterStop": " 1 数到 3000000，每 20 万打印一行进度，全部数完再总结。 | Q | Qoder | run · run-mwc56nj5-2 | tok | — | tools | 0 | 本轮 Hook | 3 个周期 · 17 个处理器实例 | 在新会话中分支 | 不绑定项目 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | 工作区选择不可用",
+      "nextSent": "running",
+      "nextPane": "— | tools | 0 | 本轮已中断，不代表任务完成。 | 本轮 Hook | 3 个周期 · 17 个处理器实例 | 只回复两个字：收到。不要用工具。 | Q | Qoder | run · run-mwc571ia-3 | 运行中 | 收到 | 本轮 Hook | 1 个周期 · 2 个处理器实例 | 不绑定项目 | 运行中 | 可继续输入，新消息将加入队列 | 00:15 | 停止本轮 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | 工作区选择不可用",
+      "pendingProgress": 0,
+      "scryState": [
+        "cli-path",
+        "health.json",
+        "locks",
+        "node-bin-dir",
+        "provider-hook.sh",
+        "runtime"
+      ]
+    }
+  },
+  "boundPlain": "不绑定项目",
+  "boundRecorder": "不绑定项目",
+  "daemonsAfterAppClose": [
+    70852
+  ]
+}

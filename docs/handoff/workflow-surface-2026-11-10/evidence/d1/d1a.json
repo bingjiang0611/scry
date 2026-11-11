@@ -1,0 +1,171 @@
+{
+  "tag": "d1a",
+  "workspace": "/tmp/scry-d1/d1a/workspace",
+  "steps": {
+    "normalTurn": {
+      "settled": false,
+      "ps": {
+        "before": [
+          {
+            "pid": 59669,
+            "ppid": 58921,
+            "started": "Wed Nov 11 03:57:44 2026",
+            "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+            "sdk": true
+          },
+          {
+            "pid": 60115,
+            "ppid": 58921,
+            "started": "Wed Nov 11 03:57:47 2026",
+            "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+            "sdk": true
+          }
+        ],
+        "after": [],
+        "added": [],
+        "removed": [
+          {
+            "pid": 59669,
+            "ppid": 58921,
+            "started": "Wed Nov 11 03:57:44 2026",
+            "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+            "sdk": true
+          },
+          {
+            "pid": 60115,
+            "ppid": 58921,
+            "started": "Wed Nov 11 03:57:47 2026",
+            "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+            "sdk": true
+          }
+        ],
+        "beforeCount": 2,
+        "afterCount": 0
+      },
+      "psDuringRun": [
+        {
+          "pid": 59669,
+          "ppid": 58921,
+          "started": "Wed Nov 11 03:57:44 2026",
+          "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+          "sdk": true
+        },
+        {
+          "pid": 60115,
+          "ppid": 58921,
+          "started": "Wed Nov 11 03:57:47 2026",
+          "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+          "sdk": true
+        },
+        {
+          "pid": 61180,
+          "ppid": 58921,
+          "started": "Wed Nov 11 03:57:49 2026",
+          "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+          "sdk": true
+        }
+      ],
+      "pane": "本机 | workspace | 在工作区里创建 d1.txt 写入 hello，读回它，然后运行 wc -c d1.txt，最后一句话总结。 | Q | Qoder | run · run-mwc2edih-0 | tok | 288.8k | tools | 5 | 显示更早的 128 条活动 | 模型已完成，但 Scry 精确记录提交失败：managed recorder produced an invalid canonical record | → 不要开始下一轮；保留 userData/trace-turn-progress、managed-turn-progress、managed-turn-commits 与 workspace/.scry 后重试恢复 | 本轮 Hook | 7 个周期 · 56 个处理器实例 | 本轮改动 | 1 files | +1 | −0 | Review | in | 158.6k | out | 1.2k | cache·r | 129.1k | dur | 66.4s | api | 38.5s | tools | 5 | files | 0 r · 1 w | human | 2 · 2q | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+      "file": "hello",
+      "filesSurface": "总览 | 文件 | 文件 | /private/tmp/scry-d1/d1a/workspace"
+    },
+    "denialFormText": null,
+    "denial": {
+      "denyFormSeen": false,
+      "denySettled": false,
+      "ps": {
+        "before": [],
+        "after": [],
+        "added": [],
+        "removed": [],
+        "beforeCount": 0,
+        "afterCount": 0
+      },
+      "fileWritten": false,
+      "pane": " 本轮 Hook | 7 个周期 · 56 个处理器实例 | 本轮改动 | 1 files | +1 | −0 | Review | in | 158.6k | out | 1.2k | cache·r | 129.1k | dur | 66.4s | api | 38.5s | tools | 5 | files | 0 r · 1 w | human | 2 · 2q | Error invoking remote method 'agent:start': AgentRuntimeError: Scry 精确记录仍有 1 轮待恢复 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main"
+    }
+  },
+  "pickedRecent": "/tmp/scry-d1/d1a/workspace",
+  "composerWorkdir": "workspace",
+  "cli": "Qoder",
+  "usedSend": true,
+  "psAfterAppClose": [],
+  "recorder": {
+    "files": [
+      ".scry/cli-path",
+      ".scry/content/sha256/23/23a01fff6221784c9b8f21c54c00881642af84833beb328867fff02fc71648d8.bin",
+      ".scry/content/sha256/2b/2bbabbc1305fb89f03a5c1b845379960d7ec9cee8aa9c894ad3f750088efc8b2.bin",
+      ".scry/content/sha256/30/303dc99f96406772bf5ccd642f63d2177499ea1a760d3a693b3c4da27b7f1294.bin",
+      ".scry/content/sha256/3c/3c54e31f7ab1be5a11165acf44b1c14a86a06724b58d840517358fb2961917d7.bin",
+      ".scry/content/sha256/46/461b6d1b9ee4a6c2ab3d15a0fc9c58952eac326162e4e5533db2d3a27cd8da7e.bin",
+      ".scry/content/sha256/47/472c0fabdcad6c060b2934ae16f48080a89a0b869493c09e5697a7e2079d7449.bin",
+      ".scry/content/sha256/57/57d280f1d4e3f911b6da830a6e9d31e83ec3db4cc972ebf8b1809189cd3954e2.bin",
+      ".scry/content/sha256/5d/5dad81728697cd69a71a274f301fa4feebd1d42677964f2352aeee4f06785f7d.bin",
+      ".scry/content/sha256/72/7284ade86adecfc751e2d57a37a6380ce916977f23388c810dcc8eb6052e84ad.bin",
+      ".scry/content/sha256/7d/7dee61f36a80c5d8955aad677ef04cd16f18e8763ef56b6b8b203f725bdc361f.bin",
+      ".scry/content/sha256/85/85fe05892e85115b8dca39cd2006f9fd599173850b35f06cd482eaf2e6378521.bin",
+      ".scry/content/sha256/8d/8ddeba12d5cb46da2fd1d76c2a8eddfaffebab23d7222d126c27dfaa24ea9852.bin",
+      ".scry/content/sha256/92/923d594b3492d816f06baca032a9436c6f89e0bb31e73168616e10ea9e821a84.bin",
+      ".scry/content/sha256/b3/b393d81c09afd27cca766aafe1c57ec06451a4e95d3ce6bad5c6916777649847.bin",
+      ".scry/content/sha256/be/bef50ad06b7c90a86baf77cc3745e03c34d834a9e4e0422646988993a2dee8b1.bin",
+      ".scry/content/sha256/c8/c8c0ec4676d09ed67247f58ae2db855e36e4a65feb86bccffc62dfd239180a58.bin",
+      ".scry/health.json",
+      ".scry/node-bin-dir",
+      ".scry/provider-hook.sh",
+      ".scry/recorder-socket-path",
+      ".scry/recorder-v1.sock",
+      ".scry/recorder-v1.sock.owner.json",
+      ".scry/runtime/attention/initialized",
+      ".scry/runtime/attention/qoder__d99d1998-4310-42a4-89c5-667741890c81-83b058a771fd",
+      ".scry/runtime/qoder/d99d1998-4310-42a4-89c5-667741890c81-83b058a771fd/open.json",
+      ".scry/runtime/qoder/d99d1998-4310-42a4-89c5-667741890c81-83b058a771fd/provider-turn-index.json",
+      ".scry/runtime/qoder/d99d1998-4310-42a4-89c5-667741890c81-83b058a771fd/session.json",
+      ".scry/state/provider-activity.json"
+    ],
+    "runIds": [],
+    "workspaceId": null
+  },
+  "uiRunIds": [
+    "run-mwc2edih-0"
+  ],
+  "logs": {
+    "qoder-run-mwc2edih-0": {
+      "lines": 174,
+      "workflowActivity": 0,
+      "canonicalTop": [
+        [
+          "hook/hook_started",
+          56
+        ],
+        [
+          "hook/hook_response",
+          56
+        ],
+        [
+          "harness/runtime:llm_stream_end",
+          5
+        ],
+        [
+          "tool/tool_result",
+          5
+        ],
+        [
+          "model/thinking",
+          3
+        ],
+        [
+          "tool/tool:Bash",
+          3
+        ],
+        [
+          "harness/runtime:input_receipt",
+          2
+        ],
+        [
+          "hook/hook_progress",
+          2
+        ]
+      ]
+    }
+  }
+}
