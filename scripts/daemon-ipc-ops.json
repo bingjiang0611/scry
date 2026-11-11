@@ -233,9 +233,9 @@
     },
     "workspaceSelection": {
       "path": "navigation",
-      "request": "{ op:'workspaceSelection', method:'chooseFolder'|'read'|'inspectStart'|'validateBranch', args }：chooseFolder 的 args 是 App 目录选择框给出的路径，不是渲染端参数；其余为渲染端参数原样",
-      "response": "chooseFolder：daemon 记住的 canonical 目录（App 随后选中）；read/inspectStart/validateBranch：现有 SourceControlService 的 worktree 选择、准备检查与分支校验结果",
-      "authorize": "已验证 peer + scope: local；按 canonical 目录重验（chooseFolder 由 daemon 校验真实目录并持久化；read 只读 daemon 已知项目；inspectStart/validateBranch 只认 daemon 自己读过的 repositoryId，并重验其根目录授权与仓库身份）。窗口当前工作区（setCwd）留在 App",
+      "request": "{ op:'workspaceSelection', method:'chooseFolder'|'setCwd'|'read'|'inspectStart'|'validateBranch', args }：chooseFolder 的 args 是 App 目录选择框给出的路径，不是渲染端参数；setCwd 的 args 是窗口要选中或已知项目文件通道请求里的目录；其余为渲染端参数原样",
+      "response": "chooseFolder：daemon 记住的 canonical 目录（App 随后选中）；setCwd：daemon 已知项目的 canonical 目录（目录参数为空时 null），不落盘；read/inspectStart/validateBranch：现有 SourceControlService 的 worktree 选择、准备检查与分支校验结果",
+      "authorize": "已验证 peer + scope: local；按 canonical 目录重验（chooseFolder 由 daemon 校验真实目录并持久化；read 只读 daemon 已知项目；inspectStart/validateBranch 只认 daemon 自己读过的 repositoryId，并重验其根目录授权与仓库身份）；setCwd 用 daemon 自己的 resolveKnownProjectDirectory（最近目录、未移除的项目、会话 cwd）。窗口当前工作区留在 App",
       "why": "当前工作区是 daemon 授权上下文的一部分",
       "scopes": [
         "local"

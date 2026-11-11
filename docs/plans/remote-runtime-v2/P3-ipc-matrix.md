@@ -3,7 +3,7 @@
 本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑；改 `scripts/daemon-ipc-routing.json` 后重新生成。
 
 - 生产特权 IPC channel：168 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
-- 留在 main：56，一半 main 一半 daemon（`split`）：5，转发到现有 op：25，需要新增 op：82
+- 留在 main：56，一半 main 一半 daemon（`split`）：6，转发到现有 op：25，需要新增 op：81
 - 新增 op 的请求、响应、授权与调用方范围见 [P3-ipc-ops](P3-ipc-ops.md)；设计正文见 [P3 §13](P3-batch4-design.md)
 - 工作台行（`desktopWorkbench` 转发的 workspace / sourceControl，与 App 终端 op `terminal`，共 30 行）见 [P3-ipc-matrix-workbench](P3-ipc-matrix-workbench.md)
 
@@ -69,7 +69,7 @@
 | `agent:renameSession` | new-op | `sessionLifecycle:renameSession` | navigation | — | App 语义：空 cwd 会话、确认后可删未存档会话、确认框在 App；设备的 sessionAction/sessionDelete 规则不同，不复用 |
 | `agent:revealProject` | main | `—` | — | — | 原生 showItemInFolder |
 | `agent:runControls` | new-op | `providerCatalog:runControls` | providers | — | 本机按用户权限模式取 run controls；远程设备受 SCRY_REMOTE_PERMISSION_MODE 约束的路径不变 |
-| `agent:setCwd` | new-op | `workspaceSelection:setCwd` | navigation | — | 当前工作区是 daemon 授权上下文的一部分 |
+| `agent:setCwd` | split | `workspaceSelection:setCwd` | navigation | main: 窗口选择留在 main，按发出顺序生效；daemon 按自己的已知项目校验目录、回 canonical 路径，不落盘 | 窗口选择与已知项目授权分开 |
 | `agent:setProjectPinned` | new-op | `projectStore:setProjectPinned` | navigation | — | 设备也读项目目录，必须单一写者 |
 | `agent:setSessionArchived` | new-op | `sessionLifecycle:setSessionArchived` | navigation | — | App 语义：空 cwd 会话、确认后可删未存档会话、确认框在 App；设备的 sessionAction/sessionDelete 规则不同，不复用 |
 | `agent:setSessionPinned` | new-op | `sessionLifecycle:setSessionPinned` | navigation | — | App 语义：空 cwd 会话、确认后可删未存档会话、确认框在 App；设备的 sessionAction/sessionDelete 规则不同，不复用 |
@@ -154,10 +154,10 @@
 | `runTraces:subscribe` | main | `—` | — | — | main 拉流后分发 |
 | `runTraces:unsubscribe` | main | `—` | — | — | main 拉流后分发 |
 | `workspace:openExternal` | main | `—` | — | daemon:projectStore（listProjects + recentFolders） | daemon 没有 shell：留在 App，仍按窗口工作区授权；跨项目回退的已知项目列表向 daemon 取 |
-| `workspace:openKnownExternal` | main | `—` | — | daemon:projectStore+sessionStore | main 的只读引用表 |
-| `workspace:readKnown` | main | `—` | — | daemon:projectStore+sessionStore | main 的只读引用表 |
-| `workspace:readPageKnown` | main | `—` | — | daemon:projectStore+sessionStore | main 的只读引用表 |
-| `workspace:resolveFile` | main | `—` | — | daemon:projectStore+sessionStore | main 签发只读引用 |
+| `workspace:openKnownExternal` | main | `—` | — | daemon:workspaceSelection:setCwd（每次问 daemon） | main 的只读引用表 |
+| `workspace:readKnown` | main | `—` | — | daemon:workspaceSelection:setCwd（每次问 daemon） | main 的只读引用表 |
+| `workspace:readPageKnown` | main | `—` | — | daemon:workspaceSelection:setCwd（每次问 daemon） | main 的只读引用表 |
+| `workspace:resolveFile` | main | `—` | — | daemon:workspaceSelection:setCwd（每次问 daemon） | main 签发只读引用 |
 | `workspace:trash` | main | `—` | — | — | daemon 没有 shell：留在 App，按窗口工作区授权后交给系统废纸篓 |
 | `workspaceSelection:inspectStart` | new-op | `workspaceSelection:inspectStart` | navigation | — | 准备工作区前检查仓库 |
 | `workspaceSelection:read` | new-op | `workspaceSelection:read` | navigation | — | worktree 选择读取 git 状态 |

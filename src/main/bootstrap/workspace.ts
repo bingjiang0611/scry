@@ -9,6 +9,7 @@ import { callDaemonChannel, daemonModeEnabled } from '../daemon-channel-gate'
 import { installWorkbenchWindowCwd } from '../daemon-local-ops/workbench'
 import { terminalChannelHandlers } from './terminal-channels'
 import { installTerminalDaemonWindow } from './terminal-daemon'
+import { daemonKnownProjectDirectory, daemonSetCwdHandler } from './known-project-daemon'
 import { authorizedWorkspaceRequest, knownProjectDirectory } from '../workspace-authorization'
 import { createWorkspaceEntry, listWorkspace, moveWorkspaceEntry, openWorkspaceFileExternally, readWorkspaceFile, readWorkspaceFilePage, resolveWorkspaceFileOpenTarget, renameWorkspaceEntry, trashWorkspaceEntry, writeWorkspaceFile } from '../workspace-files'
 import type { HomeFileAccess } from '../home-file-access'
@@ -40,12 +41,16 @@ export interface WorkspaceBootstrapDependencies {
 
 export function registerWorkspaceHandlers(deps: WorkspaceBootstrapDependencies): void {
   const { handleTrusted, getCurrentCwd, setCurrentCwd, invalidateSessionHistoryLoad, resolveKnownProjectDirectory, homeFileAccess, knownProjectDirectories, openLocalPath, shell, dialog, getWindow, getTerminalManager, isShuttingDown, rendererCanReceive, assertTrustedIpcEvent, terminalOutput, providerRegistry, providerContextKey, resetSessionContext, dockBadge } = deps
+  // Daemon mode: the known projects are the daemon's stores, so these channels ask the
+  // daemon each call (known-project-daemon.ts) and never read the App's copy of them.
+  const daemonKnownProjects = daemonModeEnabled()
+  const knownDirectory: (cwd: string) => string | Promise<string> = daemonKnownProjects ? daemonKnownProjectDirectory : resolveKnownProjectDirectory
   handleTrusted('workspace:list', (_event, request: WorkspaceListRequest) =>
     listWorkspace(authorizedWorkspaceRequest(getCurrentCwd(), request)))
   handleTrusted('workspace:resolveFile', async (_event, request: WorkspacePathRequest) =>
     resolveWorkspaceFileOpenTarget(request.cwd === '~'
       ? request
-      : { ...request, cwd: resolveKnownProjectDirectory(request.cwd) }, homeFileAccess))
+      : { ...request, cwd: await knownDirectory(request.cwd) }, homeFileAccess))
   handleTrusted('workspace:read', (_event, request: WorkspacePathRequest) =>
     readWorkspaceFile(authorizedWorkspaceRequest(getCurrentCwd(), request)))
   handleTrusted('workspace:readPage', (_event, request: WorkspaceFilePageRequest) =>
@@ -53,15 +58,14 @@ export function registerWorkspaceHandlers(deps: WorkspaceBootstrapDependencies):
   handleTrusted('workspace:readKnown', async (_event, request: WorkspacePathRequest) =>
     readWorkspaceFile(homeFileAccess.isReadOnlyTarget(request.cwd)
       ? await homeFileAccess.authorize(request)
-      : { ...request, cwd: resolveKnownProjectDirectory(request.cwd) }))
+      : { ...request, cwd: await knownDirectory(request.cwd) }))
   handleTrusted('workspace:readPageKnown', async (_event, request: WorkspaceFilePageRequest) =>
     readWorkspaceFilePage(homeFileAccess.isReadOnlyTarget(request.cwd)
       ? await homeFileAccess.authorize(request)
-      : { ...request, cwd: resolveKnownProjectDirectory(request.cwd) }))
+      : { ...request, cwd: await knownDirectory(request.cwd) }))
   // Runs in the App in daemon mode too (the daemon has no shell), bound to this window's
   // selection as always. Only the cross-project fallback differs: the known projects are
   // the daemon's stores then, asked for when the window's workspace lacks the file.
-  const daemonKnownProjects = daemonModeEnabled()
   handleTrusted('workspace:openExternal', (_event, request: WorkspacePathRequest) => {
     const authorized = authorizedWorkspaceRequest(getCurrentCwd(), request)
     let daemonRoots: readonly string[] = []
@@ -98,7 +102,7 @@ export function registerWorkspaceHandlers(deps: WorkspaceBootstrapDependencies):
     openWorkspaceFileExternally(
       homeFileAccess.isReadOnlyTarget(request.cwd)
         ? await homeFileAccess.authorize(request)
-        : { ...request, cwd: resolveKnownProjectDirectory(request.cwd) },
+        : { ...request, cwd: await knownDirectory(request.cwd) },
       openLocalPath
     ))
   handleTrusted('workspace:write', (_event, request: WorkspaceWriteRequest) =>
@@ -115,12 +119,16 @@ export function registerWorkspaceHandlers(deps: WorkspaceBootstrapDependencies):
   const terminal = terminalChannelHandlers<IpcMainInvokeEvent>({ getTerminalManager, terminalOutput, isShuttingDown, rendererCanReceive, assertCaller: assertTrustedIpcEvent, getCurrentCwd })
   for (const [channel, listener] of Object.entries(terminal)) handleTrusted(channel, listener as (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown)
 
-  handleTrusted('agent:setCwd', (_e, dir: string | null) => {
-    const cwd = typeof dir === 'string' && dir.trim() ? resolveKnownProjectDirectory(dir) : undefined
-    if (cwd !== getCurrentCwd()) invalidateSessionHistoryLoad('workspace changed')
-    setCurrentCwd(cwd)
-    return cwd ?? null
-  })
+  // The selection stays this window's; in daemon mode the daemon validates the directory.
+  const setCwd: (event: IpcMainInvokeEvent, dir: string | null) => string | null | Promise<string | null> = daemonKnownProjects
+    ? daemonSetCwdHandler({ getCurrentCwd, setCurrentCwd, invalidateSessionHistoryLoad })
+    : (_e, dir) => {
+      const cwd = typeof dir === 'string' && dir.trim() ? resolveKnownProjectDirectory(dir) : undefined
+      if (cwd !== getCurrentCwd()) invalidateSessionHistoryLoad('workspace changed')
+      setCurrentCwd(cwd)
+      return cwd ?? null
+    }
+  handleTrusted('agent:setCwd', setCwd)
 
   handleTrusted('agent:newSession', async (_event, context: ProviderContext) => {
     dockBadge.view(null, Boolean(getWindow()?.isFocused()))

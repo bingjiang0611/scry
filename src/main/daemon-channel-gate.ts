@@ -25,8 +25,11 @@ export function daemonModeEnabled(env: NodeJS.ProcessEnv = process.env): boolean
  *
  * `agent:setCwd` is the one non-`main` entry. It only sets this window's selection, which
  * the App sends with each daemon submit (daemon-run-surface fills `cwd` from it); it
- * persists nothing. `agent:unreadSessions` answers from this window's mirror of the
- * daemon's unread set (P3f E1b), and refuses by name until the first snapshot arrives.
+ * persists nothing. Its handler, like the known-project file channels below, asks the
+ * daemon whether the directory is a known project (its local op, through
+ * callDaemonChannel); none of them reads the App's copy of those stores.
+ * `agent:unreadSessions` answers from this window's mirror of the daemon's unread set
+ * (P3f E1b), and refuses by name until the first snapshot arrives.
  *
  * `workspace:openExternal` and `workspace:trash` stay here because the daemon has no
  * shell. They keep main's binding to this window's selection; the cross-project fallback

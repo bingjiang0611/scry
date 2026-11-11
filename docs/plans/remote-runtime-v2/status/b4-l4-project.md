@@ -36,7 +36,7 @@ App 端在 `src/main/bootstrap/project-daemon.ts`，用 `installDaemonChannelGua
 ## App 如何得知变化
 
 - 渲染端在每次写之后自己重读项目列表与最近目录（`loadProjects`、`refreshRecent`，或直接用 `removeRecentFolder` 的返回值），读请求也走 daemon；
-- App 进程内的 `agent:setCwd` 与 `workspace:*Known` 用 App 自己的 workspace runtime 判断已知项目。它读同一份文件，缓存键是 `dev:ino:size:mtime`，daemon 的原子写会换 inode，所以下一次读取就能看到。真实 daemon 测试里，App 的读取器在 daemon 写之前先读一次，写之后能认出新项目；
+- App 进程内的 `agent:setCwd` 与 `workspace:*Known` 当时用 App 自己的 workspace runtime 判断已知项目；现已改为每次问 daemon，App 不再读这些文件，见 [b4-l4-known-projects](b4-l4-known-projects.md)；
 - 窗口工作区：选择目录由结果处理函数在 App 里设置；
 - 进程内的这些写都不发 `agent:dataUpdated`，daemon 也不发，没有新增事件。
 

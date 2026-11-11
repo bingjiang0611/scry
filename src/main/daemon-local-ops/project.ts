@@ -14,6 +14,10 @@ export const PROJECT_LOCAL_OPS: DaemonLocalOpTable = {
   'workspaceSelection:read': { op: 'workspaceSelection', method: 'read', read: true },
   'workspaceSelection:validateBranch': { op: 'workspaceSelection', method: 'validateBranch', read: true },
   'workspaceSelection:inspectStart': { op: 'workspaceSelection', method: 'inspectStart', read: false },
+  // The window's selection and the known-project file channels stay in the App, which
+  // asks here whether a directory is a project the daemon knows (bootstrap/known-project-daemon.ts).
+  // Persists nothing: safe to ask again after a reconnect.
+  'agent:setCwd': { op: 'workspaceSelection', method: 'setCwd', read: true },
   // The App's folder picker answers first; the daemon gets the picked path, never the renderer's.
   'agent:chooseFolder': { op: 'workspaceSelection', method: 'chooseFolder', read: false },
   // The App fills a missing cwd with the window's selection, as main did.

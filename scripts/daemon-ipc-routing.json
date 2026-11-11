@@ -304,7 +304,9 @@
     },
     {
       "channel": "agent:setCwd",
-      "route": "new-op",
+      "route": "split",
+      "why": "窗口选择与已知项目授权分开",
+      "main": "窗口选择留在 main，按发出顺序生效；daemon 按自己的已知项目校验目录、回 canonical 路径，不落盘",
       "op": "workspaceSelection",
       "method": "setCwd"
     },
@@ -648,25 +650,25 @@
       "channel": "workspace:openKnownExternal",
       "route": "main",
       "why": "main 的只读引用表",
-      "source": "daemon:projectStore+sessionStore"
+      "source": "daemon:workspaceSelection:setCwd（每次问 daemon）"
     },
     {
       "channel": "workspace:readKnown",
       "route": "main",
       "why": "main 的只读引用表",
-      "source": "daemon:projectStore+sessionStore"
+      "source": "daemon:workspaceSelection:setCwd（每次问 daemon）"
     },
     {
       "channel": "workspace:readPageKnown",
       "route": "main",
       "why": "main 的只读引用表",
-      "source": "daemon:projectStore+sessionStore"
+      "source": "daemon:workspaceSelection:setCwd（每次问 daemon）"
     },
     {
       "channel": "workspace:resolveFile",
       "route": "main",
       "why": "main 签发只读引用",
-      "source": "daemon:projectStore+sessionStore"
+      "source": "daemon:workspaceSelection:setCwd（每次问 daemon）"
     },
     {
       "channel": "workspaceSelection:inspectStart",
