@@ -2,7 +2,6 @@ import { app, shell } from 'electron'
 import type { ProviderId } from '../../shared/provider'
 import type { UsageAnalyticsRangeDays } from '../../shared/trace'
 import { join } from 'node:path'
-import type { RemoteHostService } from '../remote/remote-host-service'
 import { shellEnv, warmShellEnv } from '../claude-locate'
 import { buildMcpExecutionSnapshot } from '../mcp-execution-trust'
 import { isMcpGuardReport } from '../../shared/mcpguard-report'
@@ -97,14 +96,6 @@ export async function startRemoteHostIfEnabled(runtime: RemoteHostRuntime): Prom
 type TrustedHandler = <TArgs extends unknown[], TResult>(channel: string, listener: (event: IpcMainInvokeEvent, ...args: TArgs) => TResult) => void
 
 export function registerRemoteHostHandlers(handleTrusted: TrustedHandler, runtime: RemoteHostRuntime): void {
-  const requireRemoteHost = (): RemoteHostService => {
-    const service = runtime.remoteHostService
-    if (!service) throw new Error('远程访问未启用')
-    return service
-  }
   // Shared with the daemon, which hosts paired devices in daemon mode (pairing-channels.ts).
   registerChannelHandlers(handleTrusted, pairingChannelHandlers({ host: () => runtime.remoteHostService }))
-  handleTrusted('remote:desktop:status', () => runtime.remoteHostService?.desktopStatus() ?? { enabled: false })
-  handleTrusted('remote:desktop:invite', () => requireRemoteHost().beginDesktopPairing())
-  handleTrusted('remote:desktop:disable', () => requireRemoteHost().disableDesktop())
 }

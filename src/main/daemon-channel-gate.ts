@@ -43,7 +43,6 @@ export const DAEMON_MODE_IN_PROCESS_CHANNELS: ReadonlySet<string> = new Set([
   'agent:traceAck', 'agent:traceResynchronized', 'agent:unreadSessions', 'agent:viewSessions',
   'app:copyText', 'app:performanceDiagnosticsEnabled', 'app:rendererRestart',
   'app:reportRendererPerformance', 'app:setTheme',
-  'remote:desktop:disable', 'remote:desktop:invite', 'remote:desktop:status',
   'runTraces:ack', 'runTraces:confirm', 'runTraces:resync', 'runTraces:setLegacyDemand',
   'runTraces:subscribe', 'runTraces:unsubscribe',
   'workspace:openExternal', 'workspace:openKnownExternal', 'workspace:readKnown', 'workspace:readPageKnown',

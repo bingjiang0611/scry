@@ -568,18 +568,27 @@
     },
     {
       "channel": "remote:desktop:disable",
-      "route": "main",
-      "why": "DesktopRemoteClient"
+      "route": "new-op",
+      "op": "localDesktopHost",
+      "method": "disable",
+      "path": "remote",
+      "why": "本机宿主的桌面接入：daemon 模式下宿主在 daemon"
     },
     {
       "channel": "remote:desktop:invite",
-      "route": "main",
-      "why": "DesktopRemoteClient"
+      "route": "new-op",
+      "op": "localDesktopHost",
+      "method": "invite",
+      "path": "remote",
+      "why": "本机宿主的桌面接入：daemon 模式下宿主在 daemon"
     },
     {
       "channel": "remote:desktop:status",
-      "route": "main",
-      "why": "DesktopRemoteClient"
+      "route": "new-op",
+      "op": "localDesktopHost",
+      "method": "status",
+      "path": "remote",
+      "why": "本机宿主的桌面接入：daemon 模式下宿主在 daemon"
     },
     {
       "channel": "remote:device:revoke",

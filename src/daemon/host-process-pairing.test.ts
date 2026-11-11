@@ -16,6 +16,8 @@ describe('daemon pairing and host status', () => {
     try {
       expect((await daemon.localOp('localHostStatus', 'status', [])).result).toEqual({ enabled: false })
       expect((await daemon.localOp('localPairing', 'begin', [])).error).toBe('远程访问未启用')
+      expect((await daemon.localOp('localDesktopHost', 'status', [])).result).toEqual({ enabled: false })
+      expect((await daemon.localOp('localDesktopHost', 'invite', [])).error).toBe('远程访问未启用')
     } finally {
       await daemon.dispose()
       if (saved !== undefined) process.env.SCRY_REMOTE_HOST = saved
@@ -46,6 +48,15 @@ describe('daemon pairing and host status', () => {
       expect((await daemon.localOp('localPairing', 'cancel', [pairingId])).error).toBeUndefined()
       // A confirmation must name the key the user compared; a made-up one is refused.
       expect((await daemon.localOp('localPairing', 'confirm', [pairingId, 'a'.repeat(64)])).error).toBeTruthy()
+
+      // Desktop access (another desktop App pairs with this host) is the daemon host's too.
+      expect((await daemon.localOp('localDesktopHost', 'status', [])).result).toMatchObject({ enabled: false })
+      const invite = await daemon.localOp('localDesktopHost', 'invite', [])
+      expect(invite.error).toBeUndefined()
+      expect(invite.result).toMatch(/^scry-desktop1:/)
+      expect((await daemon.localOp('localDesktopHost', 'status', [])).result).toMatchObject({ enabled: true })
+      expect((await daemon.localOp('localDesktopHost', 'disable', [])).error).toBeUndefined()
+      expect((await daemon.localOp('localDesktopHost', 'status', [])).result).toMatchObject({ enabled: false })
     } finally {
       await daemon.dispose()
       if (saved === undefined) delete process.env.SCRY_REMOTE_HOST

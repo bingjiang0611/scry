@@ -8,7 +8,8 @@ import type { ChannelHandlers } from './startup-channels'
 // App reaches its daemon, not a device, and revoking it here would cut the App off. In
 // process no such grant exists, so filtering it keeps both modes alike.
 
-export type PairingHost = Pick<RemoteHostService, 'status' | 'beginPairing' | 'confirmPairing' | 'cancelPairing' | 'revokeDevice' | 'authority'>
+export type PairingHost = Pick<RemoteHostService, 'status' | 'beginPairing' | 'confirmPairing' | 'cancelPairing' | 'revokeDevice' | 'authority' |
+  'desktopStatus' | 'beginDesktopPairing' | 'disableDesktop'>
 
 function localDeviceIds(host: PairingHost): Set<string> {
   return new Set(host.authority.inspectLocal().grants.filter((grant) => grant.scope === 'local').map((grant) => grant.deviceId))
@@ -43,6 +44,10 @@ export function pairingChannelHandlers(deps: { host: () => PairingHost | null })
       const host = requireHost()
       if (localDeviceIds(host).has(deviceId)) throw new Error('这是本机 App 与后台服务的连接，不是已配对设备，不能在这里撤销')
       return host.revokeDevice(deviceId)
-    }
+    },
+    // Desktop access: another desktop App pairing with this host, over its own listeners.
+    'remote:desktop:status': () => deps.host()?.desktopStatus() ?? { enabled: false },
+    'remote:desktop:invite': () => requireHost().beginDesktopPairing(),
+    'remote:desktop:disable': () => requireHost().disableDesktop()
   } satisfies ChannelHandlers
 }

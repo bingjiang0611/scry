@@ -51,6 +51,16 @@
         "local"
       ]
     },
+    "localDesktopHost": {
+      "path": "remote",
+      "request": "{ op:'localDesktopHost', method:'status'|'invite'|'disable', args: [] }",
+      "response": "main 同一处理的 DesktopHostAccess / scry-desktop1 邀请码 / 无",
+      "authorize": "只在 unix socket 上、且调用方持有 scope: local grant；远程访问按 main 的规则（remoteHostEnabled）未启用时回答未启用",
+      "why": "让另一台桌面 App 配对到本机：监听与配对 authority 都在 daemon 的宿主上",
+      "scopes": [
+        "local"
+      ]
+    },
     "localPairing": {
       "path": "remote",
       "request": "{ op:'localPairing', method:'begin'|'confirm'|'cancel'|'revoke', args }（渲染端参数原样）",

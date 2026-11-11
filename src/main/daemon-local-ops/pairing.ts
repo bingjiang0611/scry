@@ -9,5 +9,9 @@ export const PAIRING_LOCAL_OPS: DaemonLocalOpTable = {
   'remote:pairing:begin': { op: 'localPairing', method: 'begin', read: false },
   'remote:pairing:confirm': { op: 'localPairing', method: 'confirm', read: false },
   'remote:pairing:cancel': { op: 'localPairing', method: 'cancel', read: false },
-  'remote:device:revoke': { op: 'localPairing', method: 'revoke', read: false }
+  'remote:device:revoke': { op: 'localPairing', method: 'revoke', read: false },
+  // Desktop access opens or closes listeners on the daemon's host: not replayed.
+  'remote:desktop:status': { op: 'localDesktopHost', method: 'status', read: true },
+  'remote:desktop:invite': { op: 'localDesktopHost', method: 'invite', read: false },
+  'remote:desktop:disable': { op: 'localDesktopHost', method: 'disable', read: false }
 }

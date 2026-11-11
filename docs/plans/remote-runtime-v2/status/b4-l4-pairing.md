@@ -35,4 +35,4 @@
 
 - 未在 macOS 与真实 App 中验证，也没有和真实手机走完整配对（需要 relay；按规定用 iCTRL 操作真实手机）。
 - daemon 的 `SCRY_REMOTE_HOST` 取自 daemon 自己的环境。如果 supervisor 启动 daemon 时清洗掉了这个变量，开发版里显式设置的开关在 daemon 侧不生效，会回落到按是否打包判断。未核实。
-- `remote:desktop:*`（把另一台桌面 App 配对到本机宿主）路由仍是 `main`。daemon 模式下 App 自己没有宿主，这三个通道回答「未启用」。要不要也交给 daemon，另行决定。
+- `remote:desktop:*`（让另一台桌面 App 配对到本机宿主）：维护者 2026-11-11 同意交给 daemon，已实现。新增本机 op `localDesktopHost`（status / invite / disable），在共用的 `pairing-channels.ts` 里，启用规则相同。真实 daemon 测试覆盖：未启用时拒绝；开启后能生成 `scry-desktop1:` 邀请码、状态变为已启用；关闭后状态变回未启用。对照实验：不按启用规则判断时测试失败。

@@ -3,7 +3,7 @@
 本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑；改 `scripts/daemon-ipc-routing.json` 后重新生成。
 
 - 生产特权 IPC channel：168 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
-- 留在 main：56，一半 main 一半 daemon（`split`）：6，转发到现有 op：25，需要新增 op：81
+- 留在 main：53，一半 main 一半 daemon（`split`）：6，转发到现有 op：25，需要新增 op：84
 - 新增 op 的请求、响应、授权与调用方范围见 [P3-ipc-ops](P3-ipc-ops.md)；设计正文见 [P3 §13](P3-batch4-design.md)
 - 统一对话（`conversation:*`，共 17 行）见 [P3-ipc-matrix-conversation](P3-ipc-matrix-conversation.md)
 - 工作台行（`desktopWorkbench` 转发的 workspace / sourceControl，与 App 终端 op `terminal`，共 30 行）见 [P3-ipc-matrix-workbench](P3-ipc-matrix-workbench.md)
@@ -123,9 +123,9 @@
 | `desktopRemote:traceDelta` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
 | `desktopRemote:updateSsh` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
 | `desktopRemote:workbench` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
-| `remote:desktop:disable` | main | `—` | — | — | DesktopRemoteClient |
-| `remote:desktop:invite` | main | `—` | — | — | DesktopRemoteClient |
-| `remote:desktop:status` | main | `—` | — | — | DesktopRemoteClient |
+| `remote:desktop:disable` | new-op | `localDesktopHost:disable` | remote | — | 本机宿主的桌面接入：daemon 模式下宿主在 daemon |
+| `remote:desktop:invite` | new-op | `localDesktopHost:invite` | remote | — | 本机宿主的桌面接入：daemon 模式下宿主在 daemon |
+| `remote:desktop:status` | new-op | `localDesktopHost:status` | remote | — | 本机宿主的桌面接入：daemon 模式下宿主在 daemon |
 | `remote:device:revoke` | new-op | `localPairing:revoke` | remote | — | 配对权威随 daemon 迁移 |
 | `remote:pairing:begin` | new-op | `localPairing:begin` | remote | — | 配对权威随 daemon 迁移 |
 | `remote:pairing:cancel` | new-op | `localPairing:cancel` | remote | — | 配对权威随 daemon 迁移 |
