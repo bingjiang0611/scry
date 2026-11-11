@@ -47,7 +47,7 @@ G1（5 条差异补处理方式 + 守卫断言）与 G2（secret 生命周期改
 | `conversation:send` | 经台账派发，run 只用会话 turn 的 `runId` 一个 id；能落盘的从落盘读取并校验，进程内交接只保留到派发为止，daemon 重启后不重建、不重发 | [P3-conversation-send](P3-conversation-send.md) |
 | daemon → App 推送流 | 排在 L4 剩余各组之前做。新增的流式 op 只在本机端点、`scope: local`，不向远程开放；维护者确认这不违反“协议版本不变” | [P3f](P3f-app-event-stream.md)；E0–E3（含 E1b）见 [b4-l4-events](status/b4-l4-events.md) |
 | userData 独占锁 | 现在做，只在开关打开时生效；不属于 B4-S 的删除工作 | 已实现，开关打开、关闭两侧都有（关闭侧按维护者 2026-11-11 选的 A + B）。设计见 [P3-userdata-lock](P3-userdata-lock.md) |
-| S1 门禁 | 改为首 token 的绝对值上限。数值由执行方以数据提出、维护者批准；批准之前沿用现有 S1 门禁，开关仍不得默认打开 | 待提出 |
+| S1 门禁 | 改为首 token 的绝对值上限。数值由执行方以数据提出、维护者批准；批准之前沿用现有 S1 门禁，开关仍不得默认打开 | 已提出，待补测与批准：[P3-s1-absolute-cap](P3-s1-absolute-cap.md) |
 | 两本账（远程台账、会话账本）合并 | 不在 B4 做，B4-S 之后再议 | — |
 | 维护者机器上的孤儿 daemon | 维护者自行清理（进程 20198、20201，`/tmp/scry-g1-stuck-*`） | — |
 
@@ -79,4 +79,4 @@ B4-L4 迁移完成：168 个特权通道全部有了去处（留在 main、本�
 
 ## 需要决定
 
-无。下一项：S1 门禁的绝对值上限，由执行方用数据提出，交维护者批准。
+S1 门禁的数值与规则，见 [P3-s1-absolute-cap](P3-s1-absolute-cap.md)「维护者要决定的」。需要先在当前提交上补测两轮。
