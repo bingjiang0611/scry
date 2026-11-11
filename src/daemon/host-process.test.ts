@@ -146,12 +146,11 @@ describe('daemon host process', () => {
         op: 'providerContext', method: 'newSession', args: [{ providerId: 'codex', cwd: workspace }]
       })
       expect(newSession).toEqual({ result: true })
-      // Fork needs the Provider fork in the daemon: not yet served. (Deletion is served;
-      // see host-process-session-lifecycle.test.ts.)
+      // Fork is served now: main's own validation answers a malformed request.
       const refused = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'conversation', method: 'fork', args: [created.id]
       })
-      expect(refused.error).toBe('unsupported_op')
+      expect(refused.error).toBe('统一对话请求格式或字段不受支持；仅支持普通文本和主进程派生的历史引用')
       // A send runs through this daemon's ledger under the caller's grant, with the
       // conversation turn's own run id, so the App can follow it like its own runs.
       const preview = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {

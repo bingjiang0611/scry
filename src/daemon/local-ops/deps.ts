@@ -11,6 +11,8 @@ import type { createSessionState } from '../../main/bootstrap/session-state'
 import type { createHistoryRuntime } from '../../main/bootstrap/history-runtime'
 import type { createDaemonConversationSend } from '../conversation-send'
 import type { DeleteSessionResult } from '../../shared/provider'
+import type { DesktopRemoteForkSessionRequest } from '../../shared/desktop-remote'
+import type { AgentForkSessionResult } from '../../shared/runtime'
 import type { Conversation } from '../../shared/conversation'
 import type { ConversationDeletionPreview } from '../../shared/conversation-api'
 
@@ -30,6 +32,7 @@ export interface DaemonLocalEndpointDeps {
   runs: () => RunRegistry<ActiveRun, RunControl>
   startupManagedRecovery: () => Promise<void>
   requestRunStop: (runId: string) => boolean
+  forkSessionWithAuthority: (request: DesktopRemoteForkSessionRequest) => Promise<AgentForkSessionResult>
   userDataDir: string
 }
 

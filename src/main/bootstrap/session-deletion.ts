@@ -16,6 +16,7 @@ export interface SessionDeletionDependencies extends Omit<SessionLifecycleDepend
   getWindow: () => BrowserWindow | null
   rendererCanReceive: () => boolean
   isOwnedTestApp: boolean
+  getCurrentCwd?: () => string | undefined
 }
 
 export async function showSessionDialog(getWindow: () => BrowserWindow | null, options: MessageBoxOptions): Promise<number> {
@@ -57,7 +58,10 @@ export function registerSessionDeletionHandlers(deps: SessionDeletionDependencie
   handleTrusted('agent:deleteArchivedSessions', () => lifecycle.deleteArchivedSessions())
   // Daemon mode answers these channels from the daemon; the dialogs stay in this window.
   if (daemonModeEnabled()) {
-    installSessionLifecycleDialogs({ confirm: confirmWithDialog(getWindow), notifyFailure: notifyWithDialog(getWindow), confirmSingle: !isOwnedTestApp })
+    installSessionLifecycleDialogs({
+      confirm: confirmWithDialog(getWindow), notifyFailure: notifyWithDialog(getWindow), confirmSingle: !isOwnedTestApp,
+      ...(deps.getCurrentCwd ? { windowCwd: deps.getCurrentCwd } : {})
+    })
   }
   return { deleteOneSession: lifecycle.deleteOneSession, sessionRefFromRequest: lifecycle.sessionRefFromRequest, changeLegacySessionMetadata: lifecycle.changeLegacySessionMetadata }
 }

@@ -28,6 +28,7 @@ import { createDaemonConversationSend } from './conversation-send'
 import { daemonLocalEndpoint } from './local-endpoint'
 import { AppEventFeed, DAEMON_WINDOW_NOTICES } from '../main/remote/app-event-feed'
 import { createHistoryRuntime } from '../main/bootstrap/history-runtime'
+import { createForkOperations } from '../main/bootstrap/run-fork'
 import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore, type LocalEnrollSocket } from './local-enrollment'
 
 export interface DaemonHostProcessOptions {
@@ -111,6 +112,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     },
     liveLedgerRunId: (runId) => remoteRunLedgerIds.get(runId)
   })
+  let forkOperations: ReturnType<typeof createForkOperations> | undefined
   const catalog = createSessionCatalog({
     recentStore: workspace.recentStore,
     projectStore: workspace.projectStore,
@@ -118,7 +120,11 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     publishDataUpdated: publishData,
     unsettledRuns: () => pipeline.runs.unsettledStates(),
     getProviderRegistry: () => providers.providerRegistry,
-    forkManagedConversation: async () => unavailable('fork-session'),
+    // Built below, once the history cache it invalidates exists; resolved per call.
+    forkManagedConversation: (input) => {
+      if (!forkOperations) throw new Error('daemon_capability_unavailable:fork-session')
+      return forkOperations.forkManagedConversation(input)
+    },
     // Only the conversation service starts runs from the catalog, always with a launch.
     startAppRun: (request, startOptions) => startOptions?.managedConversation
       ? conversationSend.startAppRun(request, { managedConversation: startOptions.managedConversation })
@@ -276,6 +282,25 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     applySelection: () => undefined,
     reportSelection: true
   })
+  // Native fork, as main builds it (index.ts). The daemon has no window selection: a
+  // request without a cwd is filled by the App with the window's (session-lifecycle-
+  // daemon.ts) and re-resolved here, so getCurrentCwd stays empty on purpose.
+  forkOperations = createForkOperations({
+    resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory,
+    providerRegistry: providers.providerRegistry,
+    providerOperationGate: session.providerOperationGate,
+    contextAdmission: session.contextAdmission,
+    providerContextKey: session.providerContextKey,
+    unsettledRuns: () => pipeline.runs.unsettledStates(),
+    getCurrentCwd: () => undefined,
+    getStartupManagedRecovery: () => startupManagedRecovery,
+    assertLegacyConversationWriteAllowed: catalog.assertLegacyConversationWriteAllowed,
+    resetSessionContext: session.resetSessionContext,
+    sessionByContext: session.sessionByContext,
+    invalidateSessionHistoryLoad: history.invalidateSessionHistoryLoad,
+    appSessionStore: catalog.appSessionStore,
+    rememberProject: workspace.rememberProject
+  })
 
   await refreshRemoteProviderSnapshot()
   const remoteStateDirectory = join(options.userDataDir, 'remote')
@@ -297,6 +322,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       catalog, workspace, providers, pi, session, history, historyChannels, conversationSend, events,
       runs: () => pipeline.runs,
       requestRunStop,
+      forkSessionWithAuthority: (request) => forkOperations!.forkSessionWithAuthority(request),
       startupManagedRecovery: () => startupManagedRecovery,
       userDataDir: options.userDataDir
     }),

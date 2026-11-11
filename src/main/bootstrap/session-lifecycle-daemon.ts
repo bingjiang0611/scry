@@ -11,12 +11,22 @@ export interface SessionLifecycleDialogs {
   notifyFailure(notice: { message: string; detail: string }): Promise<void>
   /** The owned test App deletes a single session without asking, as in process. */
   confirmSingle: boolean
+  /** The window's workspace selection (agent:setCwd), kept in main. */
+  windowCwd?: () => string | undefined
 }
 
 interface ArchivedProject { sessions?: unknown[] }
 
 export function installSessionLifecycleDialogs(dialogs: SessionLifecycleDialogs): () => void {
   const undo = [
+    // In process a fork without a cwd uses the window's selection; the daemon has none, so
+    // the App names it and the daemon resolves it as a known project (fail closed).
+    installDaemonChannelGuard('agent:forkSession', async ([payload, ...rest]) => {
+      const cwd = dialogs.windowCwd?.()
+      const request = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload as Record<string, unknown> : undefined
+      if (!request || !cwd || (typeof request.cwd === 'string' && request.cwd.trim())) return { args: [payload, ...rest] }
+      return { args: [{ ...request, cwd }, ...rest] }
+    }),
     installDaemonChannelGuard('agent:deleteSession', async (args) => {
       if (!dialogs.confirmSingle || await dialogs.confirm(SESSION_DELETION_PROMPT)) return { args }
       const cancelled: DeleteSessionResult = { ok: false, cancelled: true, reason: 'user_cancelled', ...untouchedDeletion() }

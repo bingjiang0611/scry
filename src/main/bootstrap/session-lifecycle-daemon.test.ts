@@ -8,9 +8,9 @@ import { installSessionLifecycleDialogs } from './session-lifecycle-daemon'
 const ON = { SCRY_HOST_DAEMON: '1' } as NodeJS.ProcessEnv
 type Call = { op: string; method: string; args: unknown[]; read: boolean }
 
-function wire(answers: { confirm: boolean; confirmSingle?: boolean }, reply: (call: Call) => unknown) {
+function wire(answers: { confirm: boolean; confirmSingle?: boolean; windowCwd?: string }, reply: (call: Call) => unknown) {
   const undo: Array<() => void> = []
-  const dialogs = { confirm: vi.fn(async () => answers.confirm), notifyFailure: vi.fn(async () => undefined), confirmSingle: answers.confirmSingle ?? true }
+  const dialogs = { confirm: vi.fn(async () => answers.confirm), notifyFailure: vi.fn(async () => undefined), confirmSingle: answers.confirmSingle ?? true, windowCwd: () => answers.windowCwd }
   undo.push(installSessionLifecycleDialogs(dialogs))
   const forwarder = vi.fn(async (call: Call) => reply(call))
   undo.push(installDaemonChannelForwarder(forwarder))
@@ -70,5 +70,22 @@ describe('session lifecycle dialogs in daemon mode', () => {
     dispose = changed.dispose
     await expect(changed.channel('agent:deleteArchivedSessions')({})).resolves.toMatchObject({ reason: 'catalog_changed' })
     expect(changed.dialogs.notifyFailure).toHaveBeenCalledWith(expect.objectContaining({ message: '已存档会话在确认后有变化，没有删除任何会话' }))
+  })
+
+  it('names the window workspace for a fork that has none, and never overrides one', async () => {
+    const fork = { providerId: 'codex', sourceSessionId: 'native-1', sourceRunId: 'r', sourceProviderTurnId: 't', sourceForkTurnId: 't' }
+    const window = wire({ confirm: true, windowCwd: '/window' }, () => ({ externalSessionId: 'forked' }))
+    dispose = window.dispose
+    await expect(window.channel('agent:forkSession')({}, fork)).resolves.toEqual({ externalSessionId: 'forked' })
+    expect(window.forwarder).toHaveBeenLastCalledWith({ op: 'sessionLifecycle', method: 'forkSession', args: [{ ...fork, cwd: '/window' }], read: false })
+    await window.channel('agent:forkSession')({}, { ...fork, cwd: '/explicit' })
+    expect(window.forwarder).toHaveBeenLastCalledWith(expect.objectContaining({ args: [{ ...fork, cwd: '/explicit' }] }))
+    window.dispose()
+
+    // No selection: sent as it came, as main's handler would have received it.
+    const none = wire({ confirm: true }, () => ({ externalSessionId: 'forked' }))
+    dispose = none.dispose
+    await none.channel('agent:forkSession')({}, fork)
+    expect(none.forwarder).toHaveBeenLastCalledWith(expect.objectContaining({ args: [fork] }))
   })
 })

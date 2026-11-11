@@ -1,4 +1,5 @@
 import { createSessionLifecycle, type SessionDeletionRequest } from '../../main/bootstrap/session-lifecycle'
+import { normalizeAgentForkSessionRequest } from '../../shared/runtime'
 import type { DaemonLocalOpGroup } from './deps'
 
 // Session delete, rename/pin/archive and the archived list and purge, from the lifecycle
@@ -38,6 +39,8 @@ export const sessionLifecycleLocalOps: DaemonLocalOpGroup = (deps) => {
     'agent:setSessionPinned': (request: unknown, pinned: unknown) => lifecycle.setSessionPinned(request, pinned),
     'agent:setSessionArchived': (request: unknown, archived: unknown) => lifecycle.setSessionArchived(request, archived),
     'agent:listArchivedSessions': () => lifecycle.listArchivedSessions(),
+    // The App filled a missing cwd with the window's; the fork re-resolves it as a known project.
+    'agent:forkSession': (payload: unknown) => deps.forkSessionWithAuthority(normalizeAgentForkSessionRequest(payload)),
     // The count the App asked the user about; without it nothing is deleted.
     'agent:deleteArchivedSessions': (confirmedCount: unknown) => {
       if (typeof confirmedCount !== 'number' || !Number.isSafeInteger(confirmedCount) || confirmedCount < 0) throw new Error('已存档会话删除未经确认')

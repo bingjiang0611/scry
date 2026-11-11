@@ -3,7 +3,7 @@
 本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑；改 `scripts/daemon-ipc-routing.json` 后重新生成。
 
 - 生产特权 IPC channel：168 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
-- 留在 main：54，一半 main 一半 daemon（`split`）：4，转发到现有 op：40，需要新增 op：70
+- 留在 main：54，一半 main 一半 daemon（`split`）：4，转发到现有 op：39，需要新增 op：71
 - 新增 op 的请求、响应、授权与调用方范围见 [P3-ipc-ops](P3-ipc-ops.md)；设计正文见 [P3 §13](P3-batch4-design.md)
 - `desktopWorkbench` 转发行（workspace / terminal / sourceControl，共 32 行）见 [P3-ipc-matrix-workbench](P3-ipc-matrix-workbench.md)
 
@@ -39,7 +39,7 @@
 | `agent:detectFast` | new-op | `providerCatalog:detectFast` | providers | — | 快探测只给本机 |
 | `agent:focusedRunSnapshot` | forward | `runState` | — | 等价（同一 run 登记表；只是按焦点取一条） | 权威快照在 daemon |
 | `agent:focusRun` | main | `—` | — | — | 窗口级焦点书签 |
-| `agent:forkSession` | forward | `sessionFork` | — | 等价 | 既有 sessionFork |
+| `agent:forkSession` | new-op | `sessionLifecycle:forkSession` | navigation | — | App 语义：没有 cwd 时用窗口当前工作区，空 cwd 会话照旧；设备的 sessionFork 要求非空 cwd，不复用 |
 | `agent:gitCommitDiffSnapshot` | new-op | `workspaceDiff:gitCommitDiffSnapshot` | source-control | — | 项目授权归 daemon；git 读取跟随授权 |
 | `agent:gitDiff` | new-op | `workspaceDiff:gitDiff` | source-control | — | 项目授权归 daemon；git 读取跟随授权 |
 | `agent:gitDiffCommits` | new-op | `workspaceDiff:gitDiffCommits` | source-control | — | 项目授权归 daemon；git 读取跟随授权 |

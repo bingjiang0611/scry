@@ -1,6 +1,8 @@
 import 'reflect-metadata'
 import { afterEach, describe, expect, it } from 'vitest'
-import { cleanupTempDirs } from './host-process.fixtures'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { cleanupTempDirs, tempDir } from './host-process.fixtures'
 import { startTestDaemon } from './host-process.harness'
 import { createAppSessionStore } from '../main/app-store'
 
@@ -49,6 +51,30 @@ describe('daemon session lifecycle', () => {
       expect(notices.events.items).toContainEqual({ kind: 'data', event: expect.objectContaining({ kind: 'session_deleted' }) })
     } finally {
       await daemon.dispose()
+    }
+  }, 30_000)
+
+  it('forks through the daemon, which checks the archived boundary before the Provider is asked', async () => {
+    // The smoke Provider forks only with a calls file, which also proves whether it was asked.
+    const calls = join(tempDir(), 'calls.jsonl')
+    const saved = process.env.SCRY_ELECTRON_SMOKE_CALLS
+    process.env.SCRY_ELECTRON_SMOKE_CALLS = calls
+    const daemon = await startTestDaemon()
+    try {
+      const request = (cwd: string) => ({
+        providerId: 'codex', cwd, sourceSessionId: 'native-a', sourceRunId: 'run-1',
+        sourceProviderTurnId: 'turn-1', sourceForkTurnId: 'turn-1'
+      })
+      const outside = await daemon.localOp('sessionLifecycle', 'forkSession', [request(join(daemon.root, 'not-a-project'))])
+      expect(outside.error).toBeTruthy()
+      expect(outside.error).not.toBe('unsupported_op')
+      const noArchive = await daemon.localOp('sessionLifecycle', 'forkSession', [request(daemon.workspace)])
+      expect(noArchive.error).toBe('找不到可分支的已结束轮次')
+      expect(existsSync(calls) && readFileSync(calls, 'utf8').includes('"fork"')).toBe(false)
+    } finally {
+      await daemon.dispose()
+      if (saved === undefined) delete process.env.SCRY_ELECTRON_SMOKE_CALLS
+      else process.env.SCRY_ELECTRON_SMOKE_CALLS = saved
     }
   }, 30_000)
 

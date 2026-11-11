@@ -15,7 +15,7 @@ export const CONVERSATION_LOCAL_OPS: DaemonLocalOpTable = {
   'conversation:findSideChatCommand': { op: 'conversation', method: 'findSideChatCommand', read: true },
   'conversation:readSideChatSnapshot': { op: 'conversation', method: 'readSideChatSnapshot', read: true },
   // Conversation ledger writes the daemon makes on its own (B4-L4-2b). Never replayed after
-  // a lost reply. fork (Provider fork) stays refused until session fork moves.
+  // a lost reply.
   'conversation:create': { op: 'conversation', method: 'create', read: false },
   'conversation:update': { op: 'conversation', method: 'update', read: false },
   'conversation:adopt': { op: 'conversation', method: 'adopt', read: false },
@@ -27,5 +27,7 @@ export const CONVERSATION_LOCAL_OPS: DaemonLocalOpTable = {
   // Deletes the conversation's sessions through the daemon's session lifecycle. The
   // renderer previews and confirms (ConversationDeleteDialog); the fingerprint it confirmed
   // must still match, or nothing is cleaned.
-  'conversation:delete': { op: 'conversation', method: 'delete', read: false }
+  'conversation:delete': { op: 'conversation', method: 'delete', read: false },
+  // A native fork of one turn, through the daemon's fork operations (as main's).
+  'conversation:fork': { op: 'conversation', method: 'fork', read: false }
 }

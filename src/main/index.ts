@@ -236,7 +236,7 @@ const sessionDeletion = registerSessionDeletionHandlers({
   handleTrusted, getRuns: () => runs, appSessionStore, conversationStore, contextAdmission, getStartupManagedRecovery: () => startupManagedRecovery,
   providerContextKey, providerSessionKey, deletingSessions, sessionDiffBaselines, sessionBaselineKey, recordingBlockedSessions,
   getWindow: () => win, rendererCanReceive, appUserDataDir: app.getPath('userData'), isOwnedTestApp, requestRunStop,
-  assertLegacyConversationWriteAllowed, sessionByContext, adoptingSessionKeys, dockBadge,
+  assertLegacyConversationWriteAllowed, sessionByContext, adoptingSessionKeys, dockBadge, getCurrentCwd: () => currentCwd,
   prepareConversationDeletion: (conversation) => conversationDeletion.prepare!(conversation)
 })
 const { deleteOneSession, sessionRefFromRequest, changeLegacySessionMetadata } = sessionDeletion

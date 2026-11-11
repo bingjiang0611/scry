@@ -9,6 +9,8 @@ export const SESSION_LIFECYCLE_LOCAL_OPS: DaemonLocalOpTable = {
   'agent:setSessionPinned': { op: 'sessionLifecycle', method: 'setSessionPinned', read: false },
   'agent:setSessionArchived': { op: 'sessionLifecycle', method: 'setSessionArchived', read: false },
   'agent:deleteSession': { op: 'sessionLifecycle', method: 'deleteSession', read: false },
+  // Starts the Provider's native fork; the App fills a missing cwd with the window's.
+  'agent:forkSession': { op: 'sessionLifecycle', method: 'forkSession', read: false },
   'agent:listArchivedSessions': { op: 'sessionStore', method: 'listArchivedSessions', read: true },
   // The App asks first and sends the count it asked about (session-lifecycle-daemon.ts).
   'agent:deleteArchivedSessions': { op: 'sessionPurge', method: 'deleteArchivedSessions', read: false }

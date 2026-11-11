@@ -98,9 +98,10 @@
     },
     {
       "channel": "agent:forkSession",
-      "route": "forward",
-      "op": "sessionFork",
-      "why": "既有 sessionFork"
+      "route": "new-op",
+      "op": "sessionLifecycle",
+      "method": "forkSession",
+      "why": "App 语义：没有 cwd 时用窗口当前工作区，空 cwd 会话照旧；设备的 sessionFork 要求非空 cwd，不复用"
     },
     {
       "channel": "agent:gitCommitDiffSnapshot",

@@ -49,7 +49,34 @@
   - 去掉确认 → 失败；
   - 恢复旧的准入写法 → 草稿删除失败。
 
+## 分支（第二轮）
+
+| 通道 | 路由 | 说明 |
+|---|---|---|
+| `agent:forkSession` | 本机 op `sessionLifecycle` | 原计划转发到设备 op `sessionFork`。设备 op 要求非空 cwd；进程内没有 cwd 时用窗口当前工作区，所以改为本机 op |
+| `conversation:fork` | 本机 op `conversation` | 统一会话按轮分支，走 daemon 的同一套分支逻辑 |
+
+实现：
+
+- daemon 按 main 的方式（`index.ts`）构建 `createForkOperations`。会话目录在启动时就需要分支函数，此时还没有它，所以按调用时解析。
+- daemon 没有窗口选择。分支请求不带 cwd 时，App 在发送前补上窗口的 cwd；daemon 用 `resolveKnownProjectDirectory` 重新解析，未知目录拒绝。请求自带 cwd 时 App 不覆盖。窗口没有选择时，请求原样发出，与进程内一致（空 cwd 会话）。
+- 配对设备通过 daemon 宿主仍拿不到分支：`supportsForkSession` 仍是 false，runtime 也没有加 `forkSessionWithAuthority`。要不要向设备开放，另行决定。
+
+测试：
+
+- 真实 daemon：
+  - 未知目录被拒绝；
+  - 没有归档边界时拒绝（`找不到可分支的已结束轮次`），Provider 没有被调用（以 smoke calls 文件为证）；
+  - 统一会话分支走到 main 自己的请求校验。
+- App 端：
+  - 不带 cwd 时补上窗口的 cwd；
+  - 自带 cwd 时不覆盖；
+  - 窗口没有选择时原样发出。
+- 对照实验：
+  - 去掉补 cwd → 失败；
+  - daemon 端分支改回不可用 → 失败。
+
 ## 未做
 
-- `agent:forkSession`、`conversation:fork`：daemon 还没有 Provider 分支（`supportsForkSession: () => false`），下一步做。
+- 带真实归档轮次的完整分支，只能在 macOS 用真实 App 验证。
 - 未在 macOS 与真实 App 中验证。
