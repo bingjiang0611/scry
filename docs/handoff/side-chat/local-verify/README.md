@@ -11,7 +11,9 @@
 | `195ca18` | 侧栏不再列出侧聊（删掉“来源不在当前项目列表中的侧边会话”分组和动态页签里的侧聊行）；宿主拒绝的创建不再把入口卡成“只能核对旧命令” |
 | `21aa559` | 删除主会话时级联删除它的侧聊（统一对话和原生会话两条路径）；去掉主会话行上的 `N 侧聊` 计数 |
 | `d4a5527` | 合入 `scry/612438d3`：统一对话的 Dock/未读提醒，以及侧聊界面简化（去掉快照阅读器和重复的关闭/刷新按钮） |
-| 本文件所在提交 | 侧聊首轮运行期间，它的 Provider 会话行漏进侧栏（实测发现，已修）；新增本任务书和测试实例工具 |
+| `ab8ea74` | 侧聊首轮运行期间，它的 Provider 会话行漏进侧栏（实测发现，已修）；新增本任务书和测试实例工具 |
+| `dc213c0`（第一轮本地验证） | 删除被首条消息未收敛的侧聊挡住时，拒绝信息改为点名该侧聊 |
+| 第二轮修复 | ① 运行中的一轮在实时流还没接上时（窗口隐藏、还在连接）不再显示成“首条消息的发送结果还没有确认 / 历史正文需从其权威归档读取”，而是显示“运行中”和用户发出的原文——第一轮报告 6.3 的现象，也是用户说“用不了”的来源之一；② 删除对话框的报错去掉 `Error invoking remote method …` 前缀（第一轮报告 6.2） |
 
 产品规则（已由维护者确认，验证时以此为准，不要“修回去”）：
 
@@ -29,6 +31,8 @@
 - 提交身份固定为 `bingjiang0611 <307659028+bingjiang0611@users.noreply.github.com>`：`git -c user.name=bingjiang0611 -c user.email=307659028+bingjiang0611@users.noreply.github.com commit ...`。不要改全局 `user.email`。
 - 推送前 `git fetch origin claude/gracious-feynman-nlrtdp && git rebase origin/claude/gracious-feynman-nlrtdp`，不 force push。
 - 单个文件不超过 20,000 字节（`npm run check:staged-file-size` 会拦）。截图 PNG 不受这个限制，但每张控制在 1 MB 以内。
+
+**第二轮重点**：场景 03、11、14，以及第 4 节的自动化检查（`--dev-side-chat-only`、`test:conversation:ipc:prebuilt`、三层 `performance:measure`）。第一轮已通过且这次没有改到的场景可以只抽查 01、07、09、10。第一轮报告里的既有问题（Step03 的 250ms 上限、`check-pacman-package`、`concurrency-trace-launcher`）不要再花时间排查，只记录结果是否与 main 一致。
 
 **必须停下并在报告里说明的情况**：需要真实 Provider 或花钱；需要改上面第 1 节的产品规则；需要改权限、trust、删除范围这类安全边界；同一个失败两次修复后仍不明。
 
@@ -129,9 +133,10 @@ S  = #right-surface-pane [data-session-surface-current="true"]
 | 08 | 统一对话的级联删除，准备：先 `node $V state` 取 `workspace` 路径，再 `node $V eval "window.scry.conversations.create('<workspace 路径>').then(c => c.id)"` 建一个统一对话；在侧栏点它（`[data-conversation-id="<id>"]`），在主输入框发送 `side chat reply cascade parent`；给它建 2 个侧聊，一个发 `side chat reply child`，另一个保持空白 | 侧栏里只有这个统一对话一行 |
 | 09 | 在这个统一对话里点 `#main-pane .conversation-options > summary`，等 `#main-pane [aria-label="存档统一对话"]` 可点后点它（按钮文字“存档”），再点 `#main-pane [aria-label="删除统一对话"]`（按钮文字“删除副本…”） | 删除对话框里有 `[data-delete-side-chats]`，值为 2，文案写明一并删除 |
 | 10 | 点“确认删除 Scry 副本” | 结果为“逻辑入口已删除”；两个侧聊 `window.scry.conversations.read(id)` 的 `summary.deletion.status` 都是 `complete`，`readSideChatSnapshot(id)` 被拒绝 |
-| 11 | 运行中拒绝删除：再建一个统一对话加一个侧聊，侧聊发送 `side chat hold busy`，然后存档并尝试删除主会话 | 删除对话框报错，并指名那个侧聊“不能随主会话删除”；停掉侧聊之前，主会话和侧聊都没有被删 |
+| 11 | 运行中拒绝删除：再建一个统一对话加一个侧聊，侧聊发送 `side chat hold busy`，然后存档并尝试删除主会话 | 删除对话框报错，并指名那个侧聊“不能随主会话删除”；报错文字里**没有** `Error invoking remote method`；停掉侧聊之前，主会话和侧聊都没有被删 |
 | 12（可选） | 原生会话的级联删除：对 01 的主会话做存档再删除。确认框是系统原生弹窗，`eval` 截不到 | 有截屏和点击能力（例如 computer use，或已授予屏幕录制权限的 `screencapture -x`）时，截图确认框里有“个侧边会话会一并删除”；做不到就在报告里标“未执行”，不要冒充通过 |
 | 13 | 浅色主题和窄窗口各截一张 03 的状态（设置里切主题；窗口宽度拖到约 900px） | 侧栏同样干净，没有布局溢出 |
+| 14 | 侧聊运行中窗口被隐藏：侧聊发送 `side chat hold hidden`，确认正文出现 `holding hidden` 后，执行 `node $V eval "(() => { Object.defineProperty(document, 'hidden', { get: () => true, configurable: true }); document.dispatchEvent(new Event('visibilitychange')); return document.hidden })()"`，等 2 秒截图；再执行 `node $V eval "(() => { delete document.hidden; document.dispatchEvent(new Event('visibilitychange')); return document.hidden })()"`，等 2 秒截图。另外真实地把窗口最小化或切到别的 App 再切回来，各截一张 | 隐藏期间：侧聊正文里**没有** `[data-status="pending-first-send"]`、没有“首条消息的发送结果还没有确认”、没有“历史正文需从其权威归档读取”；仍能看到用户原文 `side chat hold hidden` 和“运行中”。恢复后 `holding hidden` 回来。修复前（`git stash` 或用 `e4b5ea9` 构建）同一步会出现上述错误提示，做一次负对照并截图 |
 
 做完 `node $V stop`。临时目录保留，路径写进报告。
 
@@ -147,7 +152,7 @@ S  = #right-surface-pane [data-session-surface-current="true"]
 ## 7. 第五步：报告和推送
 
 1. 截图放进 `docs/handoff/side-chat/local-verify/evidence/`（自动化截图放 `evidence/auto/`）。
-2. 新建 `docs/handoff/side-chat/local-verify/REPORT.md`，按顺序写：
+2. 第二轮把结果写进新文件 `docs/handoff/side-chat/local-verify/REPORT-2.md`（不要改第一轮的 `REPORT.md`），截图放 `evidence/round-2/`。格式与第一轮相同，按顺序写：
    - 环境：revision、系统和版本、Node、机器负载说明。
    - 自动化检查表：命令、退出码、耗时、日志路径、结论（通过 / 失败 / 既有问题，附 main 对照结果）。
    - 手动场景表：编号、结论、截图文件名、DOM 读数摘要。

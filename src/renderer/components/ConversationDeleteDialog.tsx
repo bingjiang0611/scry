@@ -3,6 +3,11 @@ import type { ConversationDeletionPreview } from '@shared/conversation-api'
 import type { ConversationDeletionResult } from '@shared/conversation'
 import { ModalFrame, requestModalClose } from './Modals'
 
+/** The IPC wrapper main adds to a rejected handler; the channel name is not user copy. */
+const IPC_WRAPPER = /^(?:Error:\s*)?Error invoking remote method '[^']+':\s*(?:Error:\s*)?/
+/** The host's own reason, e.g. which side chat holds the delete, without transport noise. */
+const reasonOf = (error: unknown): string => (error instanceof Error ? error.message : String(error)).replace(IPC_WRAPPER, '')
+
 export function ConversationDeleteDialog({ id, onChanged, onClose }: {
   id: string
   onChanged: () => void
@@ -19,7 +24,7 @@ export function ConversationDeleteDialog({ id, onChanged, onClose }: {
     let cancelled = false
     void window.scry.conversations.previewDeletion(id).then(
       preview => { if (!cancelled) setPreview(preview) },
-      error => { if (!cancelled) setError(String(error)) }
+      error => { if (!cancelled) setError(reasonOf(error)) }
     )
     return () => { cancelled = true }
   }, [id])
@@ -37,7 +42,7 @@ export function ConversationDeleteDialog({ id, onChanged, onClose }: {
       setResult(await window.scry.conversations.delete(id, preview.fingerprint))
       onChanged()
     } catch (error) {
-      setError(`${String(error)}。结果不能假定为未删除，请关闭后刷新证据核对；不会自动重试。`)
+      setError(`${reasonOf(error)}。结果不能假定为未删除，请关闭后刷新证据核对；不会自动重试。`)
       onChanged()
     } finally { pending.current = false; setWorking(false) }
   }
