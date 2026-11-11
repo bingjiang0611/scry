@@ -104,6 +104,10 @@ describe('project and workspace selection in daemon mode', () => {
     expect(filled.forwarder).toHaveBeenLastCalledWith({ op: 'providerContext', method: 'invalidateProviderContext', args: [{ providerId: 'codex', cwd: '/w' }], read: false })
     await filled.channel('agent:invalidateProviderContext')({}, { providerId: 'codex', cwd: '/other' })
     expect(filled.forwarder).toHaveBeenLastCalledWith(expect.objectContaining({ args: [{ providerId: 'codex', cwd: '/other' }] }))
+    // A new session without a cwd resets the window's context in main too
+    // (resetProviderSession falls back to currentCwd); the daemon has no selection.
+    await filled.channel('agent:newSession')({}, { providerId: 'codex' })
+    expect(filled.forwarder).toHaveBeenLastCalledWith({ op: 'providerContext', method: 'newSession', args: [{ providerId: 'codex', cwd: '/w' }], read: false })
   })
 
   it('forwards project store writes with the renderer arguments and never replays them', async () => {

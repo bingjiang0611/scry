@@ -64,10 +64,14 @@ export function installProjectDaemonWindow(window: ProjectDaemonWindow): () => v
  * learns that selection, so the App fills it before the call, exactly as main did.
  */
 export function installProviderContextWindowCwd(windowCwd: () => string | undefined): () => void {
-  return installDaemonChannelGuard('agent:invalidateProviderContext', async (args) => {
-    const [context, ...rest] = args
-    if (!context || typeof context !== 'object' || Array.isArray(context)) return { args }
-    const value = context as { cwd?: unknown }
-    return { args: [{ ...value, cwd: value.cwd ?? windowCwd() }, ...rest] }
-  })
+  // Both fall back to main's currentCwd in process (resetProviderSession too); the daemon
+  // has no window selection, so the App names it.
+  const undo = ['agent:invalidateProviderContext', 'agent:newSession'].map((channel) =>
+    installDaemonChannelGuard(channel, async (args) => {
+      const [context, ...rest] = args
+      if (!context || typeof context !== 'object' || Array.isArray(context)) return { args }
+      const value = context as { cwd?: unknown }
+      return { args: [{ ...value, cwd: value.cwd ?? windowCwd() }, ...rest] }
+    }))
+  return () => { for (const step of undo) step() }
 }
