@@ -115,6 +115,22 @@ export class DockBadgeState {
     return this.unreadSessionKeys.size + this.remoteSessionKeys.size + (this.daemonSessionKeys?.size ?? 0)
   }
 
+  // Callers waiting for the daemon's first unread snapshot (whenDaemonKnown).
+  private daemonWaiters: Array<() => void> = []
+
+  /** Resolves true once the daemon's set is known, false if it is not within `timeoutMs`. */
+  whenDaemonKnown(timeoutMs: number): Promise<boolean> {
+    if (this.daemonSessionKeys !== undefined) return Promise.resolve(true)
+    return new Promise((resolve) => {
+      const done = (): void => { clearTimeout(timer); resolve(true) }
+      const timer = setTimeout(() => {
+        this.daemonWaiters = this.daemonWaiters.filter((waiter) => waiter !== done)
+        resolve(false)
+      }, timeoutMs)
+      this.daemonWaiters.push(done)
+    })
+  }
+
   get daemonAttentionKnown(): boolean {
     return this.daemonSessionKeys !== undefined
   }
@@ -133,6 +149,7 @@ export class DockBadgeState {
     const same = this.daemonSessionKeys !== undefined && next.size === this.daemonSessionKeys.size &&
       [...next].every((key) => this.daemonSessionKeys!.has(key))
     this.daemonSessionKeys = next
+    for (const wake of this.daemonWaiters.splice(0)) wake()
     if (!same) this.publish()
   }
 
@@ -177,4 +194,13 @@ export class DockBadgeState {
 export function unreadSessionsAnswer(badge: DockBadgeState, daemonMode: boolean): SessionAttentionSnapshot {
   if (daemonMode && !badge.daemonAttentionKnown) throw new Error('daemon_capability_unavailable:agent:unreadSessions')
   return badge.snapshot()
+}
+
+/**
+ * As unreadSessionsAnswer, but at daemon-mode start the renderer asks before the daemon's
+ * first snapshot arrives: wait for it briefly instead of failing every start.
+ */
+export async function unreadSessionsAnswerWhenKnown(badge: DockBadgeState, daemonMode: boolean, waitMs = 5_000): Promise<SessionAttentionSnapshot> {
+  if (daemonMode && !badge.daemonAttentionKnown) await badge.whenDaemonKnown(waitMs)
+  return unreadSessionsAnswer(badge, daemonMode)
 }

@@ -10,7 +10,7 @@ import { CommandReceipts } from '../command-receipts'
 import type { RemoteHostService } from '../remote/remote-host-service'
 import type { RunRegistry } from '../run-registry'
 import type { RunTraceRouter } from '../run-trace-router'
-import { unreadSessionsAnswer, type DockBadgeState } from '../dock-badge'
+import { unreadSessionsAnswerWhenKnown, type DockBadgeState } from '../dock-badge'
 import type { UserQuestionBroker } from '../user-question'
 import type { TraceOutputBridge, TraceBatchReceipt } from '../trace-output'
 import { registerRunTraceHandlers } from './run-trace-ipc'
@@ -68,7 +68,7 @@ export function registerAgentRuntimeHandlers({
     const state = runs.focusedState()
     return state ? boundedLiveRun(state) : null
   })
-  handleTrusted('agent:unreadSessions', () => unreadSessionsAnswer(dockBadge, Boolean(daemon)))
+  handleTrusted('agent:unreadSessions', () => unreadSessionsAnswerWhenKnown(dockBadge, Boolean(daemon)))
   // A unified conversation shows one native session per Provider binding; none of its
   // runs is the focused run, so the view names them. Keys only: no session is read here.
   handleTrusted('agent:viewSessions', (_event, request: unknown): boolean => {

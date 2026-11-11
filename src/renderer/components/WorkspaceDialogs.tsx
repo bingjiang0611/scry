@@ -5,9 +5,12 @@ import { WORKSPACE_EDITOR_COPY } from '../constants/copy'
 import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
 import { usePresence } from '../hooks/usePresence'
+import { ipcErrorMessage } from '../constants/ipc-error-copy'
 import type { ReadOnlyWorkspaceSource, WorkspaceApi } from '../workbench-api'
 
-const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error)
+// Readable IPC errors (daemon mode names its absences); the checks below still match
+// the handler's own message, which this keeps.
+const errorMessage = (error: unknown): string => ipcErrorMessage(error)
 export function WorkspaceContextMenu({
   context,
   onClose,

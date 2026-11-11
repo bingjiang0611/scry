@@ -16,8 +16,12 @@ import type { DesktopTerminalEvent, DesktopTerminalEvents } from '../shared/desk
 // unread for longer than any live App leaves it.
 
 const PAGE_BYTES = 512 * 1024
-const RECLAIM_AFTER_MS = 90_000
-const CHECK_EVERY_MS = 15_000
+// A crashed App's last event poll stays parked here until its own wait ends (at most
+// APP_EVENTS_MAX_WAIT_MS), and only then does idle time start. So the end-to-end bound
+// after a crash is that wait + RECLAIM_AFTER_MS + CHECK_EVERY_MS; keep it within 90 s
+// (measured 117.8 s with 90 s idle and 15 s checks: be81d57 verification, A6).
+export const RECLAIM_AFTER_MS = 60_000
+export const CHECK_EVERY_MS = 5_000
 
 export interface DaemonTerminalServiceDeps extends Pick<TerminalRuntimeDependencies, 'userDataDir' | 'recordingWorkerUrl' | 'pty' | 'inlineRecording' | 'environment'> {
   homeDir: string
