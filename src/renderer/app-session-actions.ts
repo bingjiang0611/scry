@@ -19,6 +19,7 @@ import {
   buildForkSessionRequest, sessionEvidenceGapAfterLoad, sessionComposerDraftKey,
   type SessionEvidenceGap, type SessionPromptQueues
 } from './app-model'
+import { focusComposerUnlessFocusMoved } from './composer-focus'
 
 export function createSessionActions({
   workspace, session, integrations, setSessionLoading, sessionSelectionSeqRef, sessionNavigationSeqRef,
@@ -85,6 +86,7 @@ export function createSessionActions({
 
   const unbindProject = async (): Promise<void> => {
     if (!cwd) return
+    const focusBefore = document.activeElement
     setSessionLoading(false)
     const seq = ++sessionSelectionSeqRef.current
     const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
@@ -99,10 +101,12 @@ export function createSessionActions({
     selectSessionId(null)
     setView('chat')
     persistSessionSelection(null, browserStorage())
-    window.setTimeout(() => taRef.current?.focus(), 0)
+    focusComposerUnlessFocusMoved(taRef, focusBefore)
   }
 
   const newConversation = async (): Promise<void> => {
+    // Caret intent is the click: focus that a menu or the user moves later is newer.
+    const focusBefore = document.activeElement
     const seq = ++sessionSelectionSeqRef.current
     const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
     resetPromptQueueControl()
@@ -134,7 +138,7 @@ export function createSessionActions({
         refreshProviderCatalogs,
         setActiveSessionId: selectSessionId,
         setView,
-        focusComposer: () => window.setTimeout(() => taRef.current?.focus(), 0),
+        focusComposer: () => focusComposerUnlessFocusMoved(taRef, focusBefore),
         isCurrent
       })
     } catch (error) {
@@ -142,7 +146,7 @@ export function createSessionActions({
     } finally {
       if (isCurrent()) {
         setSessionLoading(false)
-        window.setTimeout(() => taRef.current?.focus(), 0)
+        focusComposerUnlessFocusMoved(taRef, focusBefore)
       }
     }
   }

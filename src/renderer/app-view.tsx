@@ -7,6 +7,7 @@ import type { ExecutionLocation } from './components/LocationPicker'
 import type { RightSurfaceAction } from './right-surface'
 import { appendMetaPrompt } from './meta-prompts'
 import { composerDraftKey } from './composer-drafts'
+import { focusComposerUnlessFocusMoved } from './composer-focus'
 import { usePinnedSummaryVisibility } from './components/PinnedSummary'
 import { LocationPicker } from './components/LocationPicker'
 import { remoteDraftKey } from './components/RemoteChat'
@@ -272,7 +273,7 @@ export function useAppView(context: AppViewContext) {
   }
   const returnFromMetaPrompts = (): void => {
     changeView(metaPromptTarget.current.view)
-    window.setTimeout(() => taRef.current?.focus(), 0)
+    focusComposerUnlessFocusMoved(taRef, document.activeElement)
   }
   const insertMetaPrompt = (body: string): void => {
     const target = metaPromptTarget.current
