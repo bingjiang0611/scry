@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { TraceEvent } from '../shared/trace'
 import type { WorkflowActivity } from '../shared/claude-workflow'
-import { type NormalizeCtx, normalizeSdkMessage } from './normalize'
-import { QoderBackgroundTasks } from './providers/qoder-messages'
+import type { NormalizeCtx } from './normalize'
+import { QoderBackgroundTasks, normalizeQoderMessage } from './providers/qoder-messages'
 import { QODER_BACKGROUND_AGENT_MESSAGES } from './workflow-wire-fixtures/qoder-background-agent'
 
 function ctx(): NormalizeCtx {
@@ -12,10 +12,12 @@ function ctx(): NormalizeCtx {
 
 // These messages are a real Qoder run (see the fixture header), so the assertions below
 // pin what the shared normalization must keep doing with actual wire data from a Provider
-// other than Claude, instead of with shapes chosen inside the test.
+// other than Claude, instead of with shapes chosen inside the test. They go through the
+// Qoder adapter's own entry, which rewrites task_updated and text notifications before
+// the shared normalizer, exactly as the production run loop does.
 function replay(): TraceEvent[] {
   const c = ctx()
-  return QODER_BACKGROUND_AGENT_MESSAGES.flatMap((message) => normalizeSdkMessage(message, c))
+  return QODER_BACKGROUND_AGENT_MESSAGES.flatMap((message) => normalizeQoderMessage(message, c))
 }
 
 describe('real Qoder background Agent wire', () => {
@@ -24,7 +26,7 @@ describe('real Qoder background Agent wire', () => {
     const workflow = events.filter((event) => event.stage === 'workflow_activity').map((event) => event.input as WorkflowActivity)
     expect(workflow).toEqual([])
     // Qoder's task lifecycle is `local_agent`, and it carries no `workflow_progress`.
-    expect(events.some((event) => event.stage === 'harness' && event.tool === 'Workflow')).toBe(false)
+    expect(events.some((event) => event.kind === 'harness' && event.tool === 'Workflow')).toBe(false)
   })
 
   it('Agent tool_use 与 lifecycle 事件按 tool_use_id 对上', () => {
@@ -42,14 +44,22 @@ describe('real Qoder background Agent wire', () => {
       .toEqual([undefined, undefined, 'Bash', 'Read', 'Bash'])
   })
 
-  it('启动回执与终态回执是两条 tool_result，终态只说 Provider 报的 completed', () => {
+  it('启动回执之后，每个 Agent 的终态只说 Provider 报的 completed', () => {
     const events = replay()
     const results = events.filter((event) => event.stage === 'tool_result' && event.tool === 'Agent')
-    expect(results).toHaveLength(4)
-    expect(results.map((event) => event.runtimeMetadata?.agentStatus ?? null))
-      .toEqual([null, null, 'completed', 'completed'])
+    // Production entry: Qoder sends task_updated and then task_notification for each Agent,
+    // and the adapter rewrites task_updated into a terminal (unchanged from main), so each
+    // Agent carries two terminal results after its launch receipt. Both say `completed`.
+    expect(results.map((event) => [event.toolUseId?.slice(-6), event.runtimeMetadata?.source ?? 'launch']))
+      .toEqual([
+        ['9cM53V', 'launch'], ['Vp7nZv', 'launch'],
+        ['Vp7nZv', 'qoder_task_updated'], ['Vp7nZv', 'provider_task_notification'],
+        ['9cM53V', 'qoder_task_updated'], ['9cM53V', 'provider_task_notification']
+      ])
+    expect(results.filter((event) => event.runtimeMetadata?.agentStatus).every((event) =>
+      event.runtimeMetadata?.agentStatus === 'completed')).toBe(true)
     expect(results.every((event) => event.isError === false)).toBe(true)
-    // `task_updated` 带 patch 时只是补状态，不得凭它单独编造一条 Agent 行。
+    // The shared normalizer never sees a raw task_updated from Qoder; it is rewritten first.
     const patched = events.filter((event) => event.runtimeMetadata?.source === 'provider_task_updated')
     expect(patched).toEqual([])
   })
