@@ -32,6 +32,17 @@
 | G4 | C7 与相邻路径收尾 | 部分完成 | [G4](reports/G4.md) | 一个实例里 Codex（2 子 Agent）与 OpenCode（0 工具）来回切，Workflow 标签一直开着：切到 B 空态无残留，Agents 按会话分开，切回 A 两个子 Agent 恢复。带真实 workflow 行的会话无法在同一实例里造出来（Claude 阻塞），运行态残留未验证 | |
 | G5 | 其他 Provider 接入的设计说明（不实现） | 完成（仅设计） | [G5](reports/G5.md) | Pi `kind: workflow` 能撑「运行 + 步骤 + 终态」，撑不起「阶段 + 每 agent 用量」；Qoder 缺真实事件不能开工；列出三条不许做的事与成本估计，未改代码 | |
 
+## 第三轮（Qoder SDK 升级的真机验证）
+
+审查方已把 `@qoder-ai/qoder-agent-sdk` 从 1.0.17 升到 1.0.57（最后一个“每轮一个子进程”的版本），理由与边界见 [R3.md](R3.md)。容器里没有真实 Qoder 运行。
+
+| 包 | 条目 | 状态 | 报告 |
+|---|---|---|---|
+| Q1 | Qoder 能否跑起来，失败则抓 stderr 并试 CLI 1.1.81 | 未开始 | |
+| Q2 | 升级后的 Qoder 日常路径回归 | 未开始 | |
+| Q3 | 补跑 G1 的 Qoder 与 rotom，加真实 Qoder 夹具 | 未开始 | |
+| Q4 | 干净依赖上的门禁，含 `pack:artifact` | 未开始 | |
+
 ## 审查方对第二轮的核验（2026-11-11，Linux x64 容器，Xvfb，非 root，Chromium 沙箱开启）
 
 核验对象：`0425137a..e77c8ee8`（6 个提交，身份符合 CLAUDE.md）。
