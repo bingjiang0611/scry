@@ -1,5 +1,7 @@
 # 侧聊 · 本地验证报告（第二轮）
 
+> 截图与 `verification-summary.json` 是本 PR 的验证素材，按 PR 模板不进入 main。它们保存在分支 `claude/gracious-feynman-nlrtdp` 的提交 `8173a086` 中：`git show 8173a086:docs/handoff/side-chat/local-verify/evidence/<文件名>`。
+
 - 分支：`claude/gracious-feynman-nlrtdp`
 - 本轮验证的提交：`8089195a`（`fix(side-chat): show a running turn as running before its live stream answers`）
 - 上一轮报告：`REPORT.md`（未修改）。本轮写入 `REPORT-2.md` 与 `evidence/round-2/`。

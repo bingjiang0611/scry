@@ -1,5 +1,7 @@
 # 侧聊 · 本地验证报告
 
+> 截图与 `verification-summary.json` 是本 PR 的验证素材，按 PR 模板不进入 main。它们保存在分支 `claude/gracious-feynman-nlrtdp` 的提交 `8173a086` 中：`git show 8173a086:docs/handoff/side-chat/local-verify/evidence/<文件名>`。
+
 - 结论：13 个场景里 12 个通过（11 修好后通过），1 个未执行（12，原生弹窗无法截图）。
   自动化检查 8 项通过，2 项失败，失败项在未改动的 `origin/main` 上同样失败（既有问题）。
 - 本次修复 1 处：删除统一对话时，被一个刚发出首条消息、尚未收敛的侧聊挡住时，拒绝信息不点名侧聊。
