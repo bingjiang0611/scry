@@ -2654,7 +2654,7 @@ describe('Codex provider adapter', () => {
       status: 'running',
       statusMessage: 'Checking tool',
       source: 'project',
-      sourcePath: '/Users/baobingjiang/IdeaProjects/rate-native/.codex/hooks.json',
+      sourcePath: '/Users/example/IdeaProjects/rate-native/.codex/hooks.json',
       scope: 'turn',
       durationMs: null,
       entries: []
@@ -2687,7 +2687,7 @@ describe('Codex provider adapter', () => {
           isError: false,
           input: expect.objectContaining({
             sourcePath: '/isolated-copy/.codex/hooks.json',
-            originalSourcePath: '/Users/baobingjiang/IdeaProjects/rate-native/.codex/hooks.json'
+            originalSourcePath: '/Users/example/IdeaProjects/rate-native/.codex/hooks.json'
           })
         })
       ])

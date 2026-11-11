@@ -1,4 +1,8 @@
 import { createHash } from 'node:crypto'
+import { promisify } from 'node:util'
+import { deflateRaw } from 'node:zlib'
+
+const deflateRawAsync = promisify(deflateRaw)
 import type {
   RemoteHistoryPage,
   RemoteHistoryPageQuery,
@@ -36,7 +40,7 @@ export interface RemoteGatewayHistoryContext {
   historyPreview?: RemoteHistoryPreviewSource
   historyVersion?: RemoteHistoryVersionSource
   historyTurnsPage?: RemoteHistoryTurnsPageSource
-  historySnapshots: Map<string, { bytes: Buffer; expiresAt: number }>
+  historySnapshots: Map<string, { bytes: Buffer; expiresAt: number; deflated?: Promise<Buffer> }>
   historyBuilds: Map<string, Promise<{ bytes: Buffer; snapshot: string }>>
 }
 
@@ -195,6 +199,7 @@ export async function readHistoryPage(context: RemoteGatewayHistoryContext, peer
   const limit = query?.limit ?? 64 * 1024
   if (!Number.isSafeInteger(cursor) || cursor < 0) throw new RemoteGatewayError('invalid_history_cursor')
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_HISTORY_PAGE_BYTES) throw new RemoteGatewayError('invalid_history_limit')
+  if (query?.encoding !== undefined && query.encoding !== 'deflate') throw new RemoteGatewayError('invalid_history_query')
   if (!query || typeof query.providerId !== 'string' || typeof query.externalSessionId !== 'string') {
     throw new RemoteGatewayError('invalid_history_query')
   }
@@ -210,9 +215,11 @@ export async function readHistoryPage(context: RemoteGatewayHistoryContext, peer
   }
   let bytes: Buffer
   let snapshot: string
+  let entry: { bytes: Buffer; expiresAt: number; deflated?: Promise<Buffer> } | undefined
   const cacheKey = query.snapshot ? `${scope}\0${query.snapshot}` : undefined
   const cached = cacheKey ? context.historySnapshots.get(cacheKey) : undefined
   if (cached && cached.expiresAt > now) {
+    entry = cached
     bytes = cached.bytes
     snapshot = query.snapshot!
     cached.expiresAt = now + 30_000
@@ -227,7 +234,8 @@ export async function readHistoryPage(context: RemoteGatewayHistoryContext, peer
     try { ({ bytes, snapshot } = await build) }
     finally { if (context.historyBuilds.get(scope) === build) context.historyBuilds.delete(scope) }
     if (query.snapshot !== undefined && query.snapshot !== snapshot) throw new RemoteGatewayError('history_snapshot_changed')
-    context.historySnapshots.set(`${scope}\0${snapshot}`, { bytes, expiresAt: Date.now() + 30_000 })
+    entry = { bytes, expiresAt: Date.now() + 30_000 }
+    context.historySnapshots.set(`${scope}\0${snapshot}`, entry)
     let total = [...context.historySnapshots.values()].reduce((sum, value) => sum + value.bytes.length, 0)
     while (context.historySnapshots.size > 4 || total > MAX_HISTORY_SNAPSHOT_BYTES) {
       const oldest = context.historySnapshots.keys().next().value!
@@ -235,14 +243,23 @@ export async function readHistoryPage(context: RemoteGatewayHistoryContext, peer
       context.historySnapshots.delete(oldest)
     }
   }
-  if (cursor > bytes.length) throw new RemoteGatewayError('invalid_history_cursor')
-  const end = Math.min(bytes.length, cursor + limit)
+  // Compressed once per snapshot, off the main thread (zlib thread pool), and
+  // shared by every page of the walk.
+  let paged = bytes
+  if (query.encoding === 'deflate') {
+    const target = entry!
+    target.deflated ??= deflateRawAsync(bytes)
+    paged = await target.deflated
+  }
+  if (cursor > paged.length) throw new RemoteGatewayError('invalid_history_cursor')
+  const end = Math.min(paged.length, cursor + limit)
   return {
-    dataBase64: bytes.subarray(cursor, end).toString('base64'),
+    dataBase64: paged.subarray(cursor, end).toString('base64'),
     cursor: end,
-    totalBytes: bytes.length,
-    hasMore: end < bytes.length,
-    snapshot
+    totalBytes: paged.length,
+    hasMore: end < paged.length,
+    snapshot,
+    ...(query.encoding === 'deflate' ? { encoding: 'deflate' as const, rawBytes: bytes.length } : {})
   }
 }
 

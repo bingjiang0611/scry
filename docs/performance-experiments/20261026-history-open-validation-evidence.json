@@ -464,7 +464,7 @@
     ]
   },
   "logs": {
-    "localRoot": "/Users/baobingjiang/.local/state/scry-history-content-validation-20261026.h0PV3n",
+    "localRoot": "/Users/<user>/.local/state/scry-history-content-validation-20261026.h0PV3n",
     "remoteRoot": "/Users/test/scry-performance-climb-mac2.cO3N5W/logs/history-content-validation-20261026",
     "files": [
       {

@@ -1,0 +1,7 @@
+# Control: apps/ios/Checks/catalog-refresh.py at branch base 5760dd71 (worktree /tmp/scry-baseline),
+# run with this branch's script (only the branch-only RemoteSessionRegistry source removed).
+FAIL catalog.followUp.routingDoesNotResumeAnotherProfile
+FAIL catalog.recovery.explicitModelChoice
+FAIL catalog.model.explicitAutoIsRemembered
+FAIL catalog.model.catalogRecoveryRestoresReadiness
+Catalog checks: 146, failures: 4

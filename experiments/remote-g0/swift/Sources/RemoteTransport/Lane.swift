@@ -1,285 +1,10 @@
 import Foundation
 import NIOCore
-import NIOPosix
-import NIOSSL
 import NIOTLS
-
-// Persistent inner-mTLS lanes for the post-pairing run channel.
-//
-// A one-shot exchange pays DNS + TCP + outer TLS + WebSocket upgrade + relay
-// rendezvous + inner TLS 1.3 mTLS for every request (measured ~2 s on a phone).
-// A lane keeps one authenticated tunnel open and sends further requests on it,
-// one outstanding request at a time (the host never pipelines). The host still
-// re-authorizes every request against the verified peer certificate.
-//
-// Separate lanes keep slow work from blocking interactive work:
-//   control: submit, answers, stop, catalogs, run state (short)
-//   watch:   the live run long-poll (holds the lane up to ~20 s)
-//   bulk:    session catalog, history and workspace pages (large)
-//
-// Retry rules are explicit, not error-string guesses:
-//   - Opening a lane may retry: no request byte has been sent yet, so a relay
-//     close (e.g. no warm host leg) or a stale leg cannot have run anything.
-//   - A request that failed before its bytes were written is re-sent on a new
-//     tunnel. A request whose bytes were written is re-sent once only when the
-//     caller marks it replayable (reads). Writes surface the error so the UI
-//     keeps the outcome "unknown" and reconciles by intent/answer id.
-//   - Older hosts close after each reply. Only a reply starting with
-//     `{"keepAlive":true,` proves the host keeps the tunnel open.
-public final class RelaySession: Sendable {
-  // `status` carries the live-run/history long-poll so it never queues behind
-  // the focused run's watch or a large history page.
-  public enum Lane: Sendable, CaseIterable { case control, watch, status, bulk }
-
-  private let lanes: [Lane: RelayLane]
-  private let deviceLabel: String?
-
-  // `identity` is read when a tunnel opens, so Keychain material is loaded once
-  // per tunnel instead of once per request.
-  public init(endpoint: G0Transport.RelayEndpoint, identity: @escaping @Sendable () throws -> G0ProbeIdentity,
-              deviceLabel: String? = nil) {
-    self.deviceLabel = deviceLabel
-    let base = G0Transport.RelayEndpoint(host: endpoint.host, port: endpoint.port, hostId: endpoint.hostId,
-                                         relayServerName: endpoint.relayServerName, outerTLS: endpoint.outerTLS,
-                                         executionTarget: endpoint.executionTarget)
-    var lanes: [Lane: RelayLane] = [:]
-    for lane in Lane.allCases {
-      lanes[lane] = RelayLane(endpoint: base, identity: identity, abortOnCancel: lane != .control,
-                              responseTimeout: lane == .watch || lane == .status ? .seconds(40) : .seconds(30))
-    }
-    self.lanes = lanes
-  }
-
-  func exchange(_ request: Data, lane: Lane, limit: Int, replayable: Bool) async throws -> Data {
-    try await lanes[lane]!.exchange(Self.keepAliveRequest(request, deviceLabel: deviceLabel), limit: limit, replayable: replayable)
-  }
-
-  // Opens the lanes a first user action needs before it is taken: the control
-  // lane for commands, and the bulk lane because opening a session reads history
-  // there. Paying DNS + TCP + outer TLS + rendezvous + inner mTLS at tap time is
-  // the difference between an instant first screen and a multi-second one. Both
-  // lanes open concurrently — serially they doubled the warm-up for no reason.
-  // Errors are returned to the caller; a failed prewarm is not evidence that the
-  // host is offline, and one lane's failure must not cancel the other.
-  public func prewarm() async throws {
-    var firstError: Error?
-    await withTaskGroup(of: Error?.self) { group in
-      for lane in [Lane.control, Lane.bulk] {
-        let lane = lanes[lane]!
-        group.addTask {
-          do { try await lane.prewarm(); return nil }
-          catch { return error }
-        }
-      }
-      for await error in group where firstError == nil { firstError = error }
-    }
-    if let firstError { throw firstError }
-  }
-
-  // Drops every tunnel (app backgrounded, network path changed). In-flight
-  // replayable reads reconnect on their own; writes report an unknown outcome.
-  public func reset() async {
-    for lane in lanes.values { await lane.reset() }
-  }
-
-  // Every run request is a JSONEncoder object starting with `{`. Prefixing keeps
-  // its fields intact; history structs that already carry keepAlive:true only
-  // repeat the same value (the host's JSON.parse keeps the last duplicate).
-  static func keepAliveRequest(_ request: Data, deviceLabel: String? = nil) throws -> Data {
-    precondition(request.first == UInt8(ascii: "{") && request.count >= 2)
-    var prefix = Data("{\"keepAlive\":true".utf8)
-    if let deviceLabel {
-      prefix += Data(",\"deviceLabel\":".utf8)
-      prefix += try JSONEncoder().encode(deviceLabel)
-    }
-    if request.count == 2 { return prefix + Data("}".utf8) }
-    return prefix + Data(",".utf8) + request.dropFirst()
-  }
-}
-
-enum LaneFailure: Error {
-  // Nothing was written for this request; resending cannot duplicate it.
-  case notSent(Error)
-  // The request bytes were written; the host may have acted on them.
-  case lost(Error)
-}
-
-actor RelayLane {
-  private let endpoint: G0Transport.RelayEndpoint
-  private let identity: @Sendable () throws -> G0ProbeIdentity
-  private let abortOnCancel: Bool
-  private let responseTimeout: TimeAmount
-  private var connection: LaneConnection?
-  private var opening: Task<LaneConnection, Error>?
-  private var inFlight = 0
-  private var idleClose: Task<Void, Never>?
-
-  // The host closes an idle tunnel after 30 s; close first so a request is
-  // never written into a tunnel the host is about to drop.
-  private static let idleSeconds: UInt64 = 20
-
-  init(endpoint: G0Transport.RelayEndpoint, identity: @escaping @Sendable () throws -> G0ProbeIdentity,
-       abortOnCancel: Bool, responseTimeout: TimeAmount) {
-    self.endpoint = endpoint
-    self.identity = identity
-    self.abortOnCancel = abortOnCancel
-    self.responseTimeout = responseTimeout
-  }
-
-  func exchange(_ request: Data, limit: Int, replayable: Bool) async throws -> Data {
-    inFlight += 1
-    idleClose?.cancel(); idleClose = nil
-    defer { inFlight -= 1; scheduleIdleClose() }
-    var resends = 0
-    var replayed = false
-    while true {
-      try Task.checkCancellation()
-      let current = try await usableConnection()
-      do {
-        return try await current.send(request, limit: limit, timeout: responseTimeout, abortOnCancel: abortOnCancel)
-      } catch LaneFailure.notSent(let error) {
-        discard(current)
-        resends += 1
-        if resends > 2 || Task.isCancelled { throw error }
-      } catch LaneFailure.lost(let error) {
-        discard(current)
-        if !replayable || replayed || Task.isCancelled { throw error }
-        replayed = true
-      }
-    }
-  }
-
-  func prewarm() async throws {
-    inFlight += 1
-    defer { inFlight -= 1; scheduleIdleClose() }
-    _ = try await usableConnection()
-  }
-
-  func reset() {
-    idleClose?.cancel(); idleClose = nil
-    opening?.cancel(); opening = nil
-    connection?.close()
-    connection = nil
-  }
-
-  private func usableConnection() async throws -> LaneConnection {
-    if let connection, connection.reusable { return connection }
-    if let opening { return try await opening.value }
-    let task = Task { [endpoint, identity] in try await LaneConnection.open(endpoint: endpoint, identity: identity) }
-    opening = task
-    do {
-      let opened = try await task.value
-      if opening == task { opening = nil; connection = opened }
-      return opened
-    } catch {
-      if opening == task { opening = nil }
-      throw error
-    }
-  }
-
-  private func discard(_ failed: LaneConnection) {
-    failed.close()
-    if connection === failed { connection = nil }
-  }
-
-  private func scheduleIdleClose() {
-    guard inFlight == 0, connection != nil else { return }
-    idleClose?.cancel()
-    idleClose = Task { [weak self] in
-      try? await Task.sleep(nanoseconds: Self.idleSeconds * 1_000_000_000)
-      guard !Task.isCancelled else { return }
-      await self?.closeIfIdle()
-    }
-  }
-
-  private func closeIfIdle() {
-    guard inFlight == 0 else { return }
-    connection?.close()
-    connection = nil
-  }
-}
-
-// One open tunnel: outer WebSocket + inner mTLS, owned by a lane.
-final class LaneConnection: Sendable {
-  private let channel: Channel
-  private let handler: LaneHandler
-
-  private init(channel: Channel, handler: LaneHandler) {
-    self.channel = channel
-    self.handler = handler
-  }
-
-  // Read off the event loop as a hint; a stale `true` only means the next send
-  // fails as notSent and moves to a fresh tunnel.
-  var reusable: Bool { channel.isActive && handler.acceptsRequests.value }
-
-  func close() { channel.close(promise: nil) }
-
-  func send(_ request: Data, limit: Int, timeout: TimeAmount, abortOnCancel: Bool) async throws -> Data {
-    let future = channel.eventLoop.flatSubmit { [handler, channel] in
-      handler.request(request, limit: limit, timeout: timeout, on: channel)
-    }
-    if !abortOnCancel { return try await future.get() }
-    return try await withTaskCancellationHandler {
-      try await future.get()
-    } onCancel: { [channel] in
-      // A superseded long-poll or large page must not keep streaming.
-      channel.close(promise: nil)
-    }
-  }
-
-  static func open(endpoint: G0Transport.RelayEndpoint, identity: @Sendable () throws -> G0ProbeIdentity) async throws -> LaneConnection {
-    let material = try identity()
-    var attempt = 0
-    while true {
-      do {
-        return try await openOnce(endpoint: endpoint, identity: material)
-      } catch {
-        attempt += 1
-        // A rejected certificate/anchor is not transient; everything else here
-        // happened before any request byte was written and is safe to retry.
-        if isNonRetryableOpenError(error) || attempt >= 3 || Task.isCancelled { throw error }
-        try await Task.sleep(nanoseconds: attempt == 1 ? 250_000_000 : 800_000_000)
-      }
-    }
-  }
-
-  static func isNonRetryableOpenError(_ error: Error) -> Bool {
-    if error is NIOSSLError { return true }
-    if case RelayTransportError.tlsHandshake = error { return true }
-    return false
-  }
-
-  private static func openOnce(endpoint: G0Transport.RelayEndpoint, identity: G0ProbeIdentity) async throws -> LaneConnection {
-    let (channel, innerContext, tunnel) = try await G0Transport.connectRelayChannel(
-      endpoint: endpoint, mode: "run", identity: identity, group: MultiThreadedEventLoopGroup.singleton)
-    let handler = LaneHandler(ready: channel.eventLoop.makePromise(of: Void.self))
-    do {
-      try await channel.eventLoop.submit {
-        try channel.pipeline.syncOperations.addHandler(NIOSSLClientHandler(context: innerContext, serverHostname: nil))
-        try channel.pipeline.syncOperations.addHandler(handler)
-      }.get()
-      try await withTaskCancellationHandler {
-        try await handler.ready.futureResult.get()
-      } onCancel: { channel.close(promise: nil) }
-      return LaneConnection(channel: channel, handler: handler)
-    } catch {
-      let failure = try await channel.eventLoop.submit {
-        // A lane that failed to become ready never fulfils this promise; leaving
-        // it unfulfilled makes NIO report a leaked promise (a fatal error in
-        // debug builds) instead of the real handshake failure.
-        handler.ready.fail(error)
-        return tunnel.retainingCloseCause(for: error)
-      }.get()
-      channel.close(promise: nil)
-      throw RelayTransportError.identifyingHandshake(failure, layer: .host)
-    }
-  }
-}
 
 // Event-loop confined. Queues requests until the inner handshake completes and
 // sends them strictly one at a time.
-final class LaneHandler: ChannelInboundHandler, @unchecked Sendable {
+final class LaneHandler: ChannelInboundHandler, RemovableChannelHandler, @unchecked Sendable {
   typealias InboundIn = ByteBuffer
   typealias OutboundOut = ByteBuffer
   private struct Pending {
@@ -303,12 +28,17 @@ final class LaneHandler: ChannelInboundHandler, @unchecked Sendable {
   // Cleared on failure or when the host shows it closes after each reply.
   let acceptsRequests = LockedFlag(true)
 
-  init(ready: EventLoopPromise<Void>) { self.ready = ready }
+  private let handshakeTimeout: TimeAmount
+
+  init(ready: EventLoopPromise<Void>, handshakeTimeout: TimeAmount = .seconds(8)) {
+    self.ready = ready
+    self.handshakeTimeout = handshakeTimeout
+  }
 
   func handlerAdded(context: ChannelHandlerContext) {
     self.context = context
     // A relay leg that died silently never answers the ClientHello.
-    deadline = context.eventLoop.scheduleTask(in: .seconds(8)) { [self, channel = context.channel] in
+    deadline = context.eventLoop.scheduleTask(in: handshakeTimeout) { [self, channel = context.channel] in
       fail(RelayTransportError.timedOut(stage: "lane-handshake"))
       channel.close(promise: nil)
     }
@@ -411,11 +141,11 @@ final class LaneHandler: ChannelInboundHandler, @unchecked Sendable {
   }
 }
 
-final class LockedFlag: @unchecked Sendable {
+public final class LockedFlag: @unchecked Sendable {
   private let lock = NSLock()
   private var stored: Bool
-  init(_ value: Bool) { stored = value }
-  var value: Bool {
+  public init(_ value: Bool) { stored = value }
+  public var value: Bool {
     get { lock.withLock { stored } }
     set { lock.withLock { stored = newValue } }
   }

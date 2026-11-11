@@ -15,43 +15,6 @@ import UniformTypeIdentifiers
 // records it, the dispatcher drives exactly-once execution through the gated
 // executor, and the device learns the real lifecycle only by polling the ledger.
 // This client never fabricates a lifecycle; it surfaces host/transport errors.
-// Disk IO stays off the UI actor. Each view owns a private directory containing
-// only its downloaded file; WebKit never receives access to shared app storage.
-actor RemoteFileDownloadSink {
-  private var directory: URL?
-  private var url: URL?
-  private var handle: FileHandle?
-
-  func start(name: String, mimeType: String? = nil) throws {
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("scry-download-" + UUID().uuidString, isDirectory: true)
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
-    self.directory = directory
-    var url = directory.appendingPathComponent(name, isDirectory: false)
-    if url.pathExtension.isEmpty, let mimeType, let ext = UTType(mimeType: mimeType)?.preferredFilenameExtension {
-      url.appendPathExtension(ext)
-    }
-    guard FileManager.default.createFile(atPath: url.path, contents: nil) else { throw CocoaError(.fileWriteUnknown) }
-    self.url = url
-    handle = try FileHandle(forWritingTo: url)
-  }
-  func write(_ data: Data) throws {
-    guard let handle else { throw RemoteRunClient.ClientError.invalidFileDownload }
-    try handle.write(contentsOf: data)
-  }
-  func finish() throws -> URL {
-    guard let url, let handle else { throw RemoteRunClient.ClientError.invalidFileDownload }
-    try handle.close()
-    self.handle = nil
-    return url
-  }
-  func remove() {
-    try? handle?.close()
-    handle = nil
-    if let directory { try? FileManager.default.removeItem(at: directory) }
-    directory = nil; url = nil
-  }
-}
-
 struct RemoteRunClient {
   let keychain: RemoteKeychain
   let connection: RemoteConnection
@@ -138,6 +101,13 @@ struct RemoteRunClient {
 
   // Long-poll one run: returns as soon as the host has new ledger events,
   // output or a terminal lifecycle after the cursors, or after `waitMs`.
+  // Pushed observation of one run on the shared tunnel (current hosts). Throws
+  // RunError.host("watch_stream_unavailable") when the host or route cannot
+  // push; callers then use `watch` long-polls.
+  func watchUpdates(runId: String, cursor: Int, outputCursor: Int) -> AsyncThrowingStream<G0Transport.RunWatchOutcome, Error> {
+    G0Transport.relayRunWatchUpdates(endpoint: endpoint(), runId: runId, cursor: cursor, outputCursor: outputCursor)
+  }
+
   func watch(runId: String, cursor: Int, outputCursor: Int, waitMs: Int = 15_000) async throws -> G0Transport.RunWatchOutcome {
     try await G0Transport.relayRunWatch(endpoint: endpoint(), identity: try identity(), runId: runId,
                                         cursor: cursor, outputCursor: outputCursor, waitMs: waitMs)
@@ -267,13 +237,25 @@ struct RemoteRunClient {
   // may browse. Display metadata only; the host re-authorizes any content read.
   func sessions(includeArchived: Bool = false,
                 progress: @escaping @Sendable ([G0Transport.RunSessionRef]) async -> Void = { _ in }) async throws -> [G0Transport.RunSessionRef] {
-    try await withHistoryConnection { reader in
+    // The last complete walk of this exact catalog. Offered to the host as
+    // `known`: when it still hashes the same, one page confirms it instead of
+    // re-sending every page. Only a host confirmation reuses it.
+    let memoKey = [connection.relayHost, connection.hostId, connection.deviceId,
+                   executionTarget.map { "\($0.id):\($0.binding)" } ?? "local", includeArchived ? "archived" : "active"].joined(separator: "\u{1f}")
+    let known = executionTarget == nil ? SessionCatalogMemo.shared.get(memoKey) : nil
+    return try await withHistoryConnection { reader in
       var cursor = 0
       var snapshot: String?
       var total: Int?
       var sessions: [G0Transport.RunSessionRef] = []
       repeat {
-        let page = try await reader.sessionsPage(cursor: cursor, snapshot: snapshot, includeArchived: includeArchived)
+        let page = try await reader.sessionsPage(cursor: cursor, snapshot: snapshot, includeArchived: includeArchived,
+                                                 known: cursor == 0 ? known?.snapshot : nil)
+        if cursor == 0, page.unchanged == true, let known, page.snapshot == known.snapshot, page.total == known.sessions.count {
+          SessionCatalogMemo.shared.noteConfirmed()
+          await progress(known.sessions)
+          return known.sessions
+        }
         let previous = cursor
         if snapshot == nil { snapshot = page.snapshot; total = page.total }
         guard snapshot == page.snapshot, total == page.total, page.total <= 100_000,
@@ -287,6 +269,7 @@ struct RemoteRunClient {
         cursor = page.cursor
         if !page.hasMore { break }
       } while true
+      if let snapshot { SessionCatalogMemo.shared.set(memoKey, SessionCatalogMemo.Entry(snapshot: snapshot, sessions: sessions)) }
       return sessions
     }
   }
@@ -339,169 +322,10 @@ struct RemoteRunClient {
     )
   }
 
-  // Complete, restart-stable history. No turn/item/text is clipped to a frame.
-  // A currently running Mac conversation can change between pages; restart the
-  // bounded read from cursor zero instead of surfacing a stale-snapshot error.
-  func history(providerId: String, cwd: String, externalSessionId: String, agentProfileId: String? = nil) async throws -> [G0Transport.RunHistoryTurn] {
-    try await historySnapshot(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, agentProfileId: agentProfileId).turns
-  }
-
-  func historySnapshot(providerId: String, cwd: String, externalSessionId: String,
-                       cached: RemoteHistorySnapshot? = nil,
-                       connection: G0Transport.HistoryConnection? = nil,
-                       agentProfileId: String? = nil,
-                       progress: @escaping @Sendable (Int, Int) async -> Void = { _, _ in }) async throws -> RemoteHistorySnapshot {
-    for attempt in 0..<3 {
-      do {
-        return try await Self.downloadHistory(cached: cached, pageSize: connection == nil ? 64 * 1024 : 256 * 1024, fetch: { cursor, snapshot in
-          if let connection {
-            return try await connection.page(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, cursor: cursor, snapshot: snapshot, agentProfileId: agentProfileId)
-          }
-          return try await historyPage(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId,
-                                      cursor: cursor, snapshot: snapshot, agentProfileId: agentProfileId)
-        }, progress: progress)
-      }
-      catch G0Transport.RunError.host(let code) where code == "history_snapshot_changed" && attempt < 2 {
-        try await Task.sleep(nanoseconds: UInt64(120 + attempt * 180) * 1_000_000)
-      }
-    }
-    throw NSError(domain: "ScryRemote.History", code: 4,
-                  userInfo: [NSLocalizedDescriptionKey: "History kept changing while it was read"])
-  }
-
-  // Larger pages share the transfer's tunnel; keep assembly/digest/JSON work
-  // off the UI actor. Legacy isolated fixtures retain their 64 KiB page contract.
-  @concurrent static func downloadHistory(cached: RemoteHistorySnapshot?, pageSize: Int = 64 * 1024,
-    fetch: @escaping @Sendable (Int, String?) async throws -> G0Transport.RunHistoryPage,
-    progress: @escaping @Sendable (Int, Int) async -> Void = { _, _ in }) async throws -> RemoteHistorySnapshot {
-    try Task.checkCancellation()
-    let first = try await fetch(0, nil)
-    try Task.checkCancellation()
-    let total = first.totalBytes
-    let fingerprint = first.snapshot
-    func chunk(_ page: G0Transport.RunHistoryPage, at cursor: Int) throws -> Data {
-      guard total >= 0, total <= 256 * 1024 * 1024,
-            page.snapshot == fingerprint, page.totalBytes == total,
-            let data = Data(base64Encoded: page.dataBase64),
-            data.count == min(pageSize, total - cursor),
-            page.cursor == cursor + data.count, page.hasMore == (page.cursor < total) else {
-        throw NSError(domain: "ScryRemote.History", code: 2,
-          userInfo: [NSLocalizedDescriptionKey: "History snapshot, cursor or size changed"])
-      }
-      return data
-    }
-    var bytes = try chunk(first, at: 0)
-    if let cached, cached.fingerprint == fingerprint {
-      await progress(total, total)
-      return RemoteHistorySnapshot(turns: cached.turns, fingerprint: fingerprint, fetchedAt: Date())
-    }
-    bytes.reserveCapacity(total)
-    await progress(bytes.count, total)
-    while bytes.count < total {
-      try Task.checkCancellation()
-      let start = bytes.count
-      let pages = try await withThrowingTaskGroup(of: (Int, G0Transport.RunHistoryPage).self) { group in
-        for cursor in stride(from: start, to: min(total, start + 2 * pageSize), by: pageSize) {
-          group.addTask { (cursor, try await fetch(cursor, fingerprint)) }
-        }
-        var result: [(Int, G0Transport.RunHistoryPage)] = []
-        for try await page in group { result.append(page) }
-        return result.sorted { $0.0 < $1.0 }
-      }
-      for (cursor, page) in pages { bytes.append(try chunk(page, at: cursor)) }
-      await progress(bytes.count, total)
-    }
-    try Task.checkCancellation()
-    await progress(total, total)
-    let digest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
-    guard digest == fingerprint else {
-      throw NSError(domain: "ScryRemote.History", code: 3,
-        userInfo: [NSLocalizedDescriptionKey: "History snapshot verification failed"])
-    }
-    return RemoteHistorySnapshot(turns: try JSONDecoder().decode([G0Transport.RunHistoryTurn].self, from: bytes),
-                                 fingerprint: fingerprint, fetchedAt: Date())
-  }
-
   // The assistant's real streamed output content for one run, strictly after
   // `cursor`. This is the trace-derived CONTENT the chat view renders; tokens/
   // cost still come only from the ledger `result` event, never from here.
   func output(runId: String, cursor: Int) async throws -> G0Transport.RunOutputPage {
     try await G0Transport.relayRunOutput(endpoint: endpoint(), identity: try identity(), runId: runId, cursor: cursor)
-  }
-}
-
-// One persistent RelaySession per paired connection + credential store, shared
-// by every RemoteRunClient value. A different descriptor (re-pair, clear) gets a
-// fresh session; the old one's tunnels are closed.
-final class RemoteSessionRegistry: @unchecked Sendable {
-  static let shared = RemoteSessionRegistry()
-  static let pathChangedNotification = Notification.Name("ScryRemoteNetworkPathChanged")
-  private let lock = NSLock()
-  private var sessions: [String: RelaySession] = [:]
-  private var recentKeys: [String] = []
-  private static let sessionLimit = 67
-  private let pathMonitor = NWPathMonitor()
-  private var lastPath: String?
-
-  private init() {
-    // Wi-Fi <-> cellular leaves old sockets silently dead; a lane would wait for
-    // its response deadline. Reset on a real interface change instead.
-    pathMonitor.pathUpdateHandler = { [weak self] path in
-      guard let self else { return }
-      let interfaceTypes: [(NWInterface.InterfaceType, String)] = [
-        (.wifi, "wifi"), (.cellular, "cellular"), (.wiredEthernet, "wired"),
-        (.loopback, "loopback"), (.other, "other")
-      ]
-      let usedInterfaces = interfaceTypes.compactMap { path.usesInterfaceType($0.0) ? $0.1 : nil }
-      let signature = RelayPathSignature.make(
-        status: String(describing: path.status), isExpensive: path.isExpensive, isConstrained: path.isConstrained,
-        supportsDNS: path.supportsDNS, supportsIPv4: path.supportsIPv4, supportsIPv6: path.supportsIPv6,
-        usedInterfaceTypes: usedInterfaces
-      )
-      let changed = self.lock.withLock {
-        defer { self.lastPath = signature }
-        return self.lastPath != nil && self.lastPath != signature
-      }
-      if changed {
-        let satisfied = path.status == .satisfied
-        Task {
-          await self.resetAll()
-          if satisfied { NotificationCenter.default.post(name: Self.pathChangedNotification, object: nil) }
-        }
-      }
-    }
-    pathMonitor.start(queue: DispatchQueue(label: "com.scry.remote.path"))
-  }
-
-  func session(for connection: RemoteConnection, keychainService: String,
-               executionTarget: G0Transport.ExecutionTargetBinding?,
-               identity: @escaping @Sendable () throws -> G0ProbeIdentity,
-               endpoint: () -> G0Transport.RelayEndpoint) -> RelaySession {
-    let targetKey = executionTarget.map { "\($0.id):\($0.binding)" } ?? "local"
-    let wanted = [connection.relayHost, String(connection.relayPort), connection.relayTLS, connection.hostId,
-                  connection.deviceId, keychainService, connection.anchorPEM, targetKey].joined(separator: "\u{1f}")
-    return lock.withLock {
-      recentKeys.removeAll { $0 == wanted }
-      recentKeys.append(wanted)
-      if let existing = sessions[wanted] { return existing }
-      if sessions.count >= Self.sessionLimit {
-        let oldest = recentKeys.removeFirst()
-        if let evicted = sessions.removeValue(forKey: oldest) {
-          // Close cached tunnels only. Host tasks and their durable intents are
-          // not cancelled; a later request reopens under the same binding.
-          Task { await evicted.reset() }
-        }
-      }
-      let session = RelaySession(endpoint: endpoint(), identity: identity, deviceLabel: RemoteDeviceModel.currentLabel)
-      sessions[wanted] = session
-      return session
-    }
-  }
-
-  // Background / network path change: drop every lane; the next request reopens.
-  // Target switches must not reset another target's live lane.
-  func resetAll() async {
-    let current = lock.withLock { Array(sessions.values) }
-    for session in current { await session.reset() }
   }
 }

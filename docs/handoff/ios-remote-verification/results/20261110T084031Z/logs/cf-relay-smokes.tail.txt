@@ -1,0 +1,64 @@
+{
+  "scope": "Cloudflare relay Worker + Durable Object under local workerd (wrangler dev); no account/deploy/spend",
+  "cases": [
+    {
+      "name": "authenticated host leg <-> device raw byte shuttle both ways",
+      "passed": true
+    },
+    {
+      "name": "wrong token -> 1008, no warm leg",
+      "passed": true
+    },
+    {
+      "name": "per-host room enrollment is stable and rejects takeover",
+      "passed": true
+    },
+    {
+      "name": "no host leg -> device 4001 host_offline",
+      "passed": true
+    },
+    {
+      "name": "run device never gets a pair leg (pool separation)",
+      "passed": true
+    }
+  ]
+}
+{"name":"closing host skipped while an authenticated open host exists","selectedReadyState":1}
+{
+  "scope": "real local workerd + production selection; no deploy/spend",
+  "cases": [
+    {
+      "name": "closing host skipped while an authenticated open host exists",
+      "selectedReadyState": 1
+    },
+    {
+      "name": "only closing hosts fails closed as host_offline after the grace",
+      "waitedMs": 301
+    },
+    {
+      "name": "host ping answered with pong, never forwarded",
+      "passed": true
+    },
+    {
+      "name": "device glued to the most recently pinged leg",
+      "passed": true
+    },
+    {
+      "name": "silent pinging leg is closed and the host reported offline",
+      "elapsedMs": 556
+    },
+    {
+      "name": "busy live host: device waits for the replacement leg",
+      "elapsedMs": 756
+    },
+    {
+      "name": "busy live host without replacement fails as no_host_leg",
+      "elapsedMs": 1758
+    },
+    {
+      "name": "host with no legs reported offline without a grace",
+      "elapsedMs": 257,
+      "waitedMs": 0
+    }
+  ]
+}

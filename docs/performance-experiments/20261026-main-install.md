@@ -5,7 +5,7 @@
 用户要求把`reliability/collection`合入`main`并安装。验证期间开发分支新增`c4eb154f`；用户随后明确选择**安装已验证版本**，因此本次冻结在`6e2012e7`，不纳入该并行提交。
 
 - 合并：`7a1c4a60ce1a850c1c7357c236f5f19dd36b5163`，父提交为`ab721af5`与`6e2012e7`；tree为`720efd31150a43468b8fc57f7de84df0d721e105`。
-- `main`工作区：`/Users/baobingjiang/IdeaProjects/vibecoding/scry-main-diff-integration`。已通过正常快进更新，没有强制重置、覆盖开发分支或复制WIP。
+- `main`工作区：`/Users/<user>/IdeaProjects/vibecoding/scry-main-diff-integration`。已通过正常快进更新，没有强制重置、覆盖开发分支或复制WIP。
 - 已安装：`/Applications/Scry.app`，App **0.2.226**，内置CLI **0.2.51**。没有更新全局npm CLI。
 - build：`25eb32d09e460c642056f6061a799e1fd01744507d2b917f9b934b405812fda3`。从打包的asar提取，并用合并提交的冻结源码重新计算匹配。
 - 回滚备份：`/Applications/.Scry.app.backup`，确认版本0.2.225。

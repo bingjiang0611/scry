@@ -122,7 +122,7 @@ status, settled: entry.done && status === 'completed', messages
 | 安装结果 | App `0.2.238`，`com.scry.app`，`CFBundleVersion 0.2.238`，私有 CLI（`Resources/bin/scry` 与 `Resources/scry-cli`）都是 `0.2.56` |
 | 字节一致 | 构建与安装的 `app.asar` SHA-256 都是 `aeab87b8ae6bf74a8c9ab38d80dc1c6218ed8767383bcae5896a19ddf2a69a2c` |
 | 备份 | `/Applications/.Scry.app.backup`（仍是 `0.2.237`），未手工替换 bundle |
-| 签名/公证 | `codesign -dv`：`Apple Development: baobingjiang@icloud.com (8Y6KR78CP7)`；`spctl -a -t exec` 结果为 rejected；`xcrun stapler validate`：「does not have a ticket stapled to it」。**没有 Developer ID 签名，也没有公证**，这是开发安装 |
+| 签名/公证 | `codesign -dv`：`Apple Development: <apple-id> (<team>)`；`spctl -a -t exec` 结果为 rejected；`xcrun stapler validate`：「does not have a ticket stapled to it」。**没有 Developer ID 签名，也没有公证**，这是开发安装 |
 
 安装后复核：
 

@@ -61,7 +61,7 @@ SCRY_SC_DIAGNOSTICS="$PWD/diagnostics/alone.jsonl" npm run test:unit -- \
 - 仅修改 `src/main/source-control/service.test.ts` 的真实 Git suite 为 `{ timeout: 15_000 }`。原因是单用例串行 55–78 次实际 Git 启动，5 秒单位测试预算与真实集成流程不匹配；不是因为某条失败断言需要跳过。
 - 当前源码 `npm test`：**254 文件通过、3 跳过；3193 测试通过、3 跳过；shell PASS**。未改变生产 `ScProcess`、信任复验、默认并发或增加自动重试。早先失败保留为诊断证据，不由此宣称 OS 启动长尾根因解决。
 - 当前完整 `test:renderer:ui`、`check:cli-release`（32 文件 / 586 测试）及无发布凭据的 `pack:artifact` 最终通过。开发 artifact 没有正式签名、公证或安装。
-- 全量 unit/首轮 UI 日志：`/Users/baobingjiang/.pi/agent/sessions/--Users-baobingjiang-IdeaProjects-vibecoding-scry--/sol-pi/01a13b2e-413e-714c-92ef-a38e81c32f5c/evidence-preserving-reducer/objects/43/43d9a67af99a6eddde4be967238cba1531c31c993c517721e5a5870b26449580.txt`。
+- 全量 unit/首轮 UI 日志：`/Users/<user>/.pi/agent/sessions/--Users-<user>-IdeaProjects-vibecoding-scry--/sol-pi/01a13b2e-413e-714c-92ef-a38e81c32f5c/evidence-preserving-reducer/objects/43/43d9a67af99a6eddde4be967238cba1531c31c993c517721e5a5870b26449580.txt`。
 - 最终 UI/CLI/artifact 日志：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-7de9e98b4acfcb81.log`。首轮 UI cache fixture 有一次未定位的泛化执行异常；补充异常透传后定向与完整运行通过，不把它算作 Git 超时或已修复问题。
 - 若还需消除宿主启动长尾，由维护者安排可控负载的宿主测量，继续分离调度/装载/安全检查阶段；不删除执行前权限或 fingerprint 校验来降低进程次数。
 

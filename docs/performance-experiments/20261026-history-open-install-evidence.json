@@ -66,7 +66,7 @@
   "transfer": {
     "localManifest": {
       "operation": "verify",
-      "root": "/Users/baobingjiang/.local/state/scry-history-install-20261026.IubVGb/source/dist/mac-arm64/Scry.app",
+      "root": "/Users/<user>/.local/state/scry-history-install-20261026.IubVGb/source/dist/mac-arm64/Scry.app",
       "entries": 478,
       "files": 369,
       "bytes": 287354997,
@@ -74,7 +74,7 @@
       "matched": true
     },
     "localCheck": {
-      "appPath": "/Users/baobingjiang/.local/state/scry-history-install-20261026.IubVGb/source/dist/mac-arm64/Scry.app",
+      "appPath": "/Users/<user>/.local/state/scry-history-install-20261026.IubVGb/source/dist/mac-arm64/Scry.app",
       "bytes": 287354997,
       "maxBytes": 346030080,
       "sizeBreakdown": {
@@ -247,7 +247,7 @@
         "screenshotPersisted": false
       },
       "journal": {
-        "source": "/Users/baobingjiang/Library/Application Support/Scry/performance/performance-0.jsonl",
+        "source": "/Users/<user>/Library/Application Support/Scry/performance/performance-0.jsonl",
         "session": "24cb8b65-eb25-4826-aa81-61e147f4c4e6",
         "version": "0.2.226",
         "build": "b251f32389930f388231f010006166c4d64d2ec623c8ae20bf6bb813e03d9cf6",
@@ -300,7 +300,7 @@
     "one restarted packaged-App session is a short acceptance, not L3; no real paid Provider acceptance"
   ],
   "logs": {
-    "root": "/Users/baobingjiang/.local/state/scry-history-install-20261026.IubVGb",
+    "root": "/Users/<user>/.local/state/scry-history-install-20261026.IubVGb",
     "remote": "/Users/test/scry-performance-climb-mac2.cO3N5W/logs/history-install-20261026",
     "files": [
       {

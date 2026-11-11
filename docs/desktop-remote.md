@@ -113,7 +113,7 @@ TLS 1.3 固定宿主 CA，运行请求还要求获批的设备证书。CA 变化
 - **安装 / 身份**：本机 `/Applications/Scry.app` 与 mac2 原宿主路径均升级为同一 0.2.189，`app.asar` SHA-256 `a94d0824ddf6252271153fa9974f70c18a9b458afc55ae2566c7a4829f6ebc86`，两端严格 codesign 校验通过，开发签名、非公证发布。客户端沿用当前保存的 mac2 与 `test@30.7.226.226:22`，host ID、connection ID、固定 CA 和设备授权不变；没有迁移凭据、新配对、放松 SSH 校验或重发旧请求。0.2.188 仅为 hover 候选，未安装；本次由 0.2.189 一并交付。冻结包不含共享主目录中其他任务的后续提交，不能把后续 main 验证与本包来源混为一谈。
 - **真实交互**：安装版原生鼠标交替悬停本机/mac2 五次，菜单和机器行各维度偏移均 <0.5 CSS px，未改变当前位置；mac2 主目录真实返回 38 个文件夹。浏览/取消时 catalog 项目不变，关闭恢复入口焦点与草稿。经路径输入与原生 Enter，选择用户目录外的 `/private/tmp/scry-directory-picker-189-OGBbRe/project with space `（含尾空格）；只有点击「选择此目录」后才出现在 catalog，新草稿位置准确更新但没有发送或启动 Agent。宿主重启后该 canonical 授权仍可读，原设备继续通过 SSH+mTLS 连接。
 - **清理 / 无新增执行**：先把客户端新草稿恢复为原 workspace，再通过宿主可信 renderer 的正常 `window.scry.removeProject` API 只移除空验收项目；最终重启后 catalog 仅剩原 workspace，自定义入口仍 available。空临时目录已用 rmdir 删除，没有直接改授权文件或数据库。原会话重新打开仍显示 `5587`，机器/目录通过静态顶栏锁定（不是可编辑选择器）；archive 为 1 turn / 原 Scry run。原 JSONL 账本仍 36 行，SHA-256 `9892306b714fa47e3de6dc3ca888940b70c254b13c1caf9c46f6dd85ee2bb44a` 完全不变；canonical records 仍 4 个、CLI verify 0 errors / 0 open turns，Git clean。SQLite 按原 run 过滤仍只有一条 usage（10952/6、cost NULL）；全表另有两条既有历史用量，验收助手最初把「对应一条」误断言为「全表一条」，已读回并按正确范围核对，没有删改数据。无新增意图、会话或模型请求。
-- **现场 / 限制**：私有回执、首轮失败、后续 gate、真实 modal/hover 截图及辅助脚本存于 `/Users/baobingjiang/Downloads/Scry-0.2.189-directory-acceptance/`，未保存凭据备份。验收助手还曾误把既有会话的静态顶栏当作 disabled picker；读回确认旧结果已打开后只完成后续检查，没有重发业务动作。客户端已显式断开并关闭；SIGTERM 未使其退出，随后按精确 PID/包路径用 NSRunningApplication 正常终止。mac2 最终宿主 PID 4020 保持运行，仅监听 127.0.0.1:64050/64051，临时调试进程/端口已关闭；原包备份和冻结构建现场保留。功能与上述双机场景已验证，用户视觉认可待确认。
+- **现场 / 限制**：私有回执、首轮失败、后续 gate、真实 modal/hover 截图及辅助脚本存于 `/Users/<user>/Downloads/Scry-0.2.189-directory-acceptance/`，未保存凭据备份。验收助手还曾误把既有会话的静态顶栏当作 disabled picker；读回确认旧结果已打开后只完成后续检查，没有重发业务动作。客户端已显式断开并关闭；SIGTERM 未使其退出，随后按精确 PID/包路径用 NSRunningApplication 正常终止。mac2 最终宿主 PID 4020 保持运行，仅监听 127.0.0.1:64050/64051，临时调试进程/端口已关闭；原包备份和冻结构建现场保留。功能与上述双机场景已验证，用户视觉认可待确认。
 
 ## D-20261015-location-hover：执行位置菜单悬停稳定性
 
@@ -140,7 +140,7 @@ TLS 1.3 固定宿主 CA，运行请求还要求获批的设备证书。CA 变化
 - **真实改地址**：当前客户端配置已有 `mac2`，与原验收连接的 ID、host ID 和 CA SHA-256 完全一致。直接在该已保存主机的编辑表单中，用原生输入改为 `test@30.7.226.226:22` 并保存；公开连接字段除 hostname 外逐项相同，意图列表不变且状态为 disconnected。随后手动「连接」，原有 SSH 校验和已固定 CA 的 mTLS 均通过，catalog 返回 1 项目 / 4 会话，没有新配对、迁移凭据或本机 run。
 - **重启后**：使用同一已安装 hash、同一 userData 重启，地址/连接 ID/CA 指纹/证书有效期保持一致，仍是 disconnected，不自动重连。手动连接后从侧栏重开原生 session `01a13a7d-339c-741a-a1e2-5031ab3df8da`，真实界面显示 5587；history 为 available / trace_archive / 1 轮，Provider 锁定且不显示位置切换。本次未再次发送模型请求。
 - **最终持久化核对**：远端 JSONL 账本完整解析 36 个事件，原意图 `ae934709-dd4e-4414-a040-fc453843ffbc` 只派发/结束各一次；ledger run UUID `91172fec-5407-4b8a-bd8f-0fbeef66564a` 映射 Scry run `remote-run-mv8476or-0`，最后事件仍是原请求的 run_settled。SQLite `usage_ledger` 恰有 1 条对应行，input/output 10952/6、cost NULL，与归档一致；其 session_id 是 Scry 聚合键，不冒充 Provider 原生 session。旧式 `sessions/turns` 表为空，不作为远程账本或 canonical record 的替代证据。`turns verify` 再次通过（4 records / 0 errors / 0 open turns），远端 Git 仍 clean，记录文件仍只有原先 3 个加已授权的第 4 个。
-- **验收记录与边界**：私有证据保存在 `/Users/baobingjiang/Downloads/Scry-0.2.187-remote-acceptance/`，含 manifest、gate 原始日志、实际表单/重开会话截图、公开状态读回、账本/SQLite/CLI 收据。旧临时客户端目录已不存在，因此没有伪称复用旧临时 profile；本次原位修改当前已保存且同身份的 mac2。首次重启调试进程在检查前退出，最终另一次已完整验证，不用旧端点失败推断业务结果。验收助手曾因输入选择与 DOM selector 假设错误超时，读回确认未保存/已打开后才修正检查，没有重发业务请求。已断开并退出本次调试 App，未停止 mac2 宿主，临时密文备份已删除。用户视觉验收仍待确认；开发签名版本，不是公证发布版。
+- **验收记录与边界**：私有证据保存在 `/Users/<user>/Downloads/Scry-0.2.187-remote-acceptance/`，含 manifest、gate 原始日志、实际表单/重开会话截图、公开状态读回、账本/SQLite/CLI 收据。旧临时客户端目录已不存在，因此没有伪称复用旧临时 profile；本次原位修改当前已保存且同身份的 mac2。首次重启调试进程在检查前退出，最终另一次已完整验证，不用旧端点失败推断业务结果。验收助手曾因输入选择与 DOM selector 假设错误超时，读回确认未保存/已打开后才修正检查，没有重发业务请求。已断开并退出本次调试 App，未停止 mac2 宿主，临时密文备份已删除。用户视觉验收仍待确认；开发签名版本，不是公证发布版。
 - **下次复用**：已配对主机仅网络位置变化 → 原位编辑路由、保存后显式连接 → 检查身份/回执不变、重启地址保留、无自动重发。身份或证书确实改变时不套用此流程，仍按配对/trust 合同处理。本条是项目级需求确认与实现证据，不提升为全局审美偏好。
 - **设计库回执**：原有 `P-SCRY-DESKTOP-REMOTE` 来源已更新；`library.py build` 与 `search '编辑连接地址'` 均退出 0，命中本文件的新内容。全库 `check` 仍退出 1：5 个既有缺失来源（`P-PI-MODEL-SELECTOR`、`D-20260912-scry-ios-remote`、`D-20261008-scry-ios-continuity`、`P-SCRY-SESSION-HISTORY`、`D-20261010-scry-llm-sidebar`），未为凑通过删除来源。
 
@@ -160,7 +160,7 @@ TLS 1.3 固定宿主 CA，运行请求还要求获批的设备证书。CA 变化
 - 新回归：`desktop-client.test.ts` 检查上述空读取、失败前拒绝联网和密文读取失败；外链 fixture 对意外钥匙串访问直接抛错，旧实现明确失败。原始、不替换存储结果的诊断在修复后也完成了全部外链检查。fixture 超时现使用既有 `stopOwnedApp` 按身份收敛进程，并保留失败目录，不加大其 30 秒限时。
 - 冻结产物：App **0.2.183**，私有 CLI **0.2.49**，`app.asar` SHA-256 **`07bf7d339ceca352b7f465d5e227450fb20f6f88da96dbfb8c6062724be6c2cc`**。Apple Development 签名，非公证发布版。
 - 最终 gate：Node 22.22.1；typecheck、218 文件 / 2735 单测、shell、完整 renderer UI、CLI release 581 测试与 package smoke、打包体积/资源检查、packaged Electron 安全/文件/远程宿主 smoke 全部通过。3 个真实探针跳过，没有新发真实模型请求。
-- 安装交接：冻结包与一次性安装入口在 `/Users/baobingjiang/Downloads/Scry-0.2.183-install-7EwEFn/`。`install.command` 复用原子安装器，校验版本、签名及上述 hash，保留旧 App 备份，启动后观察 20 秒。已实测运行中拒绝安装：现有 0.2.182 的 hash 未变，未产生安装完成回执。
+- 安装交接：冻结包与一次性安装入口在 `/Users/<user>/Downloads/Scry-0.2.183-install-7EwEFn/`。`install.command` 复用原子安装器，校验版本、签名及上述 hash，保留旧 App 备份，启动后观察 20 秒。已实测运行中拒绝安装：现有 0.2.182 的 hash 未变，未产生安装完成回执。
 - **安装更新**：用户随后明确要求“直接帮我安装好，我负责重启”。2026-10-14 18:55 已通过仓库 `scripts/install-macos.mjs` 原子安装到 `/Applications/Scry.app`，未退出、停止或启动 App。安装后版本 0.2.183、签名及上述 hash 核对通过；旧进程 PID 56237 仍在运行，重启后的运行版本尚未验收。
 - **安装回执与备份**：实际回执是上述目录的 `install-only-result.json`，日志 `install-only.log`；不再运行旧的安装入口。0.2.182 备份在 `/Applications/.Scry.app.backup`，此前已有备份另存为 `/Applications/.Scry.app.backup-preserved-61334a9d-9515-45d6-b57a-4d62ffdec45c`。mac2 的 0.2.182 宿主未改动；日常客户端正式配对仍待完成。
 
@@ -327,7 +327,7 @@ SSH 下正常 AppleEvent quit 成功，随后 LaunchServices `open` 返回 0，�
 
 - 本地：`/tmp/scry-billing-acceptance-Gzn1Bo/`，含 `manifest.json`、`verified-evidence.json`、`verify-evidence.mjs`、history、receipt、`host-evidence/` 和 `cleanup.json`。
 - 宿主：`/Users/test/scry-remote-acceptance-0.2.181-kwEx9g/`，含安装/启动日志、`running-host.json`、`billing-sqlite.json`、canonical record 副本、CLI 输出、`remote-ledger-selection.json` 和 `final-host-state.json`；原始 DB 与 records 仍在正常宿主数据目录及工作区。
-- 完整门禁日志：`/Users/baobingjiang/.pi/agent/sessions/--Users-baobingjiang-IdeaProjects-vibecoding-scry--/sol-pi/01a13631-477e-74cf-8324-a004d6063f2c/evidence-preserving-reducer/objects/1f/1f225c55e143f1993934b20edd22118bc664da23b3c3a4d645aa06e158e02f1c.txt`。
+- 完整门禁日志：`/Users/<user>/.pi/agent/sessions/--Users-<user>-IdeaProjects-vibecoding-scry--/sol-pi/01a13631-477e-74cf-8324-a004d6063f2c/evidence-preserving-reducer/objects/1f/1f225c55e143f1993934b20edd22118bc664da23b3c3a4d645aa06e158e02f1c.txt`。
 
 源方案与历史基线见 [调研记录](research/scry-desktop-remote-host-feasibility.md)。
 

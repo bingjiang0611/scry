@@ -1,0 +1,101 @@
+{
+  "verdict": "fail",
+  "rules": [
+    {
+      "id": "R1-checks",
+      "required": true,
+      "status": "fail",
+      "detail": "failed: ios-checks, install-mac"
+    },
+    {
+      "id": "R2-netbench-clean:diag-order",
+      "required": true,
+      "status": "pass",
+      "detail": "failures=0"
+    },
+    {
+      "id": "R2-netbench-clean:wifi-auto",
+      "required": true,
+      "status": "pass",
+      "detail": "failures=0"
+    },
+    {
+      "id": "R2-netbench-clean:wifi-relay",
+      "required": true,
+      "status": "pass",
+      "detail": "failures=0"
+    },
+    {
+      "id": "R3-transport:diag-order",
+      "required": true,
+      "status": "pass",
+      "detail": "multiplexed, all capabilities"
+    },
+    {
+      "id": "R3-transport:wifi-auto",
+      "required": true,
+      "status": "pass",
+      "detail": "multiplexed, all capabilities"
+    },
+    {
+      "id": "R3-transport:wifi-relay",
+      "required": true,
+      "status": "pass",
+      "detail": "multiplexed, all capabilities"
+    },
+    {
+      "id": "R4-relay-only",
+      "required": true,
+      "status": "pass",
+      "detail": "routes=relay"
+    },
+    {
+      "id": "R5-direct",
+      "required": true,
+      "status": "fail",
+      "detail": "routes=relay advertised=172.18.0.1:47820,192.168.255.254:47820 openErrors=[{\"lane\":\"bulk\",\"route\":\"direct\",\"error\":\"Connect timeout (900 ms)\"},{\"lane\":\"bulk\",\"route\":\"direct\",\"error\":\"Connect timeout (900 ms)\"},{\"lane\":\"control\",\"route\":\"direct\",\"error\":\"Connect timeout (900 ms)\"}]"
+    },
+    {
+      "id": "R6-catalog:diag-order",
+      "required": true,
+      "status": "pass",
+      "detail": "full=561.4ms (31 sessions) refresh=618ms"
+    },
+    {
+      "id": "R6-catalog:wifi-auto",
+      "required": true,
+      "status": "fail",
+      "detail": "full=612.7ms (31 sessions) refresh=819.8ms"
+    },
+    {
+      "id": "R6-catalog:wifi-relay",
+      "required": true,
+      "status": "fail",
+      "detail": "full=592.1ms (31 sessions) refresh=1666.7ms"
+    },
+    {
+      "id": "R7-offline-fast",
+      "required": true,
+      "status": "blocked",
+      "detail": "scenario host-quit not run"
+    },
+    {
+      "id": "I1-direct-vs-relay",
+      "required": false,
+      "status": "info",
+      "detail": "warm median relay=623.5ms direct=663.6ms; cold median relay=1337.1ms auto=1337.5ms"
+    },
+    {
+      "id": "I3-relay-path:mac-after-deploy",
+      "required": false,
+      "status": "info",
+      "detail": "colos=PIT,ORD generations=heartbeat-aware median={\"dns\":2.8,\"tcp\":6,\"tls\":374.1,\"upgrade\":1564,\"upgradeExcludingWait\":964,\"close\":1564,\"total\":1564.1}"
+    },
+    {
+      "id": "I3-relay-path:mac",
+      "required": false,
+      "status": "info",
+      "detail": "colos=ORD,PIT generations=pre-heartbeat median={\"dns\":2,\"tcp\":5,\"tls\":361.1,\"upgrade\":853.6,\"upgradeExcludingWait\":null,\"close\":853.7,\"total\":853.8}"
+    }
+  ]
+}

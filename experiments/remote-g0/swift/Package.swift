@@ -13,7 +13,10 @@ let package = Package(
     .package(url: "https://github.com/apple/swift-nio.git", exact: "2.90.1"),
     .package(url: "https://github.com/apple/swift-nio-ssl.git", exact: "2.36.1"),
     .package(url: "https://github.com/apple/swift-certificates.git", exact: "1.20.0"),
-    .package(url: "https://github.com/apple/swift-crypto.git", exact: "4.5.2")
+    .package(url: "https://github.com/apple/swift-crypto.git", exact: "4.5.2"),
+    // Network.framework sockets on Apple platforms: activate the cellular radio
+    // and on-demand VPN, and wait for connectivity, which BSD sockets do not.
+    .package(url: "https://github.com/apple/swift-nio-transport-services.git", exact: "1.28.0")
   ],
   targets: [
     .executableTarget(name: "RemoteProbe", dependencies: ["RemoteTransport"]),
@@ -25,6 +28,7 @@ let package = Package(
       .product(name: "NIOHTTP1", package: "swift-nio"),
       .product(name: "NIOWebSocket", package: "swift-nio"),
       .product(name: "NIOSSL", package: "swift-nio-ssl"),
+      .product(name: "NIOTransportServices", package: "swift-nio-transport-services"),
       .product(name: "X509", package: "swift-certificates"),
       .product(name: "Crypto", package: "swift-crypto")
     ]),

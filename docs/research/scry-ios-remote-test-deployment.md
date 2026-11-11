@@ -43,13 +43,13 @@
 
 ### 真机已验证（物理 iPhone，真实网络）
 
-物理 iPhone `00008150-001A29A926D8401C`（iOS 27，Personal Team `7USHN8Q8JL` 签名安装 `com.scry.remote`）：
+物理 iPhone `<device-udid>`（iOS 27，Personal Team `<team>` 签名安装 `com.scry.remote`）：
 
 - **On-device self-test 15/15 PASS**（`-selfTest`）：enrollment（真实 P-256 CSR + 自签 bootstrap + 指纹 + 恢复）、PairingCode 解析（含新增 `code.tlsDefaultSystem` / `code.tlsPlaintext` / `code.badTLS`）、以及**真实 Keychain 往返**（`keychain.deviceKey/insertOnly/grant/grantRenew`）。Keychain 这几项在未签名模拟器上是 SKIP，只有真机签名能测——真机上全部 PASS。
 - **`.system` 外层 TLS 对真实 Cloudflare Pages 证书 PASS**（`-relayTLSProbe scry-relay-pages.pages.dev`）：`SELFTEST relayTLS.systemTrust PASS negotiated=tls`。
 - **5G 真机完整配对 PASS**：物理 iPhone 经公网 WSS → Pages service binding → Worker/DO → Mac warm leg，完成内层 TLS 1.3 密钥证明；手机与 Mac 均显示匹配指纹 `BF7FD884A7F7B96E…`，Mac 确认后签发新 grant。
 - **授权/策略链路 PASS**（`-runProbe`）：公网 mTLS run channel 得到 `intent_recorded → run_dispatched → run_failed(workspace_not_authorized)`，证明未知目录在 Provider 启动前 fail closed。
-- **真实 Provider run PASS**（`-liveProviderProbe`）：手机经 5G 选择已授权项目 `/Users/baobingjiang/IdeaProjects/vibecoding` 与可用 Codex，得到 `recorded → dispatched → bound → session → result → settled`；真实 session id `01a09e90-8d75-75e2-8dc2-12cd70945584`，用量 `tokensIn=17533, tokensOut=8`，最终 `run_settled`。
+- **真实 Provider run PASS**（`-liveProviderProbe`）：手机经 5G 选择已授权项目 `/Users/<user>/IdeaProjects/vibecoding` 与可用 Codex，得到 `recorded → dispatched → bound → session → result → settled`；真实 session id `01a09e90-8d75-75e2-8dc2-12cd70945584`，用量 `tokensIn=17533, tokensOut=8`，最终 `run_settled`。
   - 注：免费 Personal Team 单设备最多 3 个 App，为腾出名额移除了旧的 `com.scry.remote.g0` 诊断 App（可重装）。每次重签安装后系统可能要求重新信任开发者描述文件。
 
 ### 沙箱内已验证（`smoke:cf-pair`）

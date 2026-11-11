@@ -1,0 +1,120 @@
+HandlerTests testSuccessfulReplyIsNotOverwrittenByCloseOrDeadline]' started.
+Test Case '-[RemoteProbeTests.ProbeHandlerTests testSuccessfulReplyIsNotOverwrittenByCloseOrDeadline]' passed (0.000 seconds).
+Test Suite 'ProbeHandlerTests' passed at 2026-11-10 00:42:19.494.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.001 (0.002) seconds
+Test Suite 'ProviderDiscoveryTests' started at 2026-11-10 00:42:19.494.
+Test Case '-[RemoteProbeTests.ProviderDiscoveryTests testAuthorizationErrorsRemainErrorsInsteadOfLegacyFallback]' started.
+Test Case '-[RemoteProbeTests.ProviderDiscoveryTests testAuthorizationErrorsRemainErrorsInsteadOfLegacyFallback]' passed (0.000 seconds).
+Test Case '-[RemoteProbeTests.ProviderDiscoveryTests testMissingCapabilityIsLegacyNotSelectedSupport]' started.
+Test Case '-[RemoteProbeTests.ProviderDiscoveryTests testMissingCapabilityIsLegacyNotSelectedSupport]' passed (0.000 seconds).
+Test Case '-[RemoteProbeTests.ProviderDiscoveryTests testNegotiationUsesTheExistingInfoOperationBeforeProviderQueries]' started.
+Test Case '-[RemoteProbeTests.ProviderDiscoveryTests testNegotiationUsesTheExistingInfoOperationBeforeProviderQueries]' passed (0.000 seconds).
+Test Case '-[RemoteProbeTests.ProviderDiscoveryTests testObservationTimeIsPreservedAndInvalidTimesAreRejected]' started.
+Test Case '-[RemoteProbeTests.ProviderDiscoveryTests testObservationTimeIsPreservedAndInvalidTimesAreRejected]' passed (0.000 seconds).
+Test Case '-[RemoteProbeTests.ProviderDiscoveryTests testSelectedReplyRequiresTheNegotiatedMarker]' started.
+Test Case '-[RemoteProbeTests.ProviderDiscoveryTests testSelectedReplyRequiresTheNegotiatedMarker]' passed (0.000 seconds).
+Test Suite 'ProviderDiscoveryTests' passed at 2026-11-10 00:42:19.496.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.001 (0.002) seconds
+Test Suite 'RelayCloseDeliveryTests' started at 2026-11-10 00:42:19.496.
+Test Case '-[RemoteProbeTests.RelayCloseDeliveryTests testAuthenticatedReplyIsDeliveredBeforeCoalescedRelayClose]' started.
+Test Case '-[RemoteProbeTests.RelayCloseDeliveryTests testAuthenticatedReplyIsDeliveredBeforeCoalescedRelayClose]' passed (0.005 seconds).
+Test Case '-[RemoteProbeTests.RelayCloseDeliveryTests testCorruptedTLSRecordCannotBecomeSuccessOnRelayClose]' started.
+Test Case '-[RemoteProbeTests.RelayCloseDeliveryTests testCorruptedTLSRecordCannotBecomeSuccessOnRelayClose]' passed (0.004 seconds).
+Test Case '-[RemoteProbeTests.RelayCloseDeliveryTests testPartialAuthenticatedReplyStillFailsOnRelayClose]' started.
+Test Case '-[RemoteProbeTests.RelayCloseDeliveryTests testPartialAuthenticatedReplyStillFailsOnRelayClose]' passed (0.004 seconds).
+Test Suite 'RelayCloseDeliveryTests' passed at 2026-11-10 00:42:19.508.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.012 (0.013) seconds
+Test Suite 'SessionActionWireTests' started at 2026-11-10 00:42:19.508.
+Test Case '-[RemoteProbeTests.SessionActionWireTests testArchiveCarriesAgentProfileWhenKnown]' started.
+Test Case '-[RemoteProbeTests.SessionActionWireTests testArchiveCarriesAgentProfileWhenKnown]' passed (0.000 seconds).
+Test Case '-[RemoteProbeTests.SessionActionWireTests testArchivedPageRequestOnlyAddsTheFlagWhenAsked]' started.
+Test Case '-[RemoteProbeTests.SessionActionWireTests testArchivedPageRequestOnlyAddsTheFlagWhenAsked]' passed (0.001 seconds).
+Test Case '-[RemoteProbeTests.SessionActionWireTests testDeleteRequiresConfirmationFlag]' started.
+Test Case '-[RemoteProbeTests.SessionActionWireTests testDeleteRequiresConfirmationFlag]' passed (0.000 seconds).
+Test Case '-[RemoteProbeTests.SessionActionWireTests testPinAndArchiveSendTheirBoolean]' started.
+Test Case '-[RemoteProbeTests.SessionActionWireTests testPinAndArchiveSendTheirBoolean]' passed (0.000 seconds).
+Test Case '-[RemoteProbeTests.SessionActionWireTests testRenameSendsOnlyTitle]' started.
+Test Case '-[RemoteProbeTests.SessionActionWireTests testRenameSendsOnlyTitle]' passed (0.000 seconds).
+Test Suite 'SessionActionWireTests' passed at 2026-11-10 00:42:19.510.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+Test Suite 'SessionCatalogOutcomeTests' started at 2026-11-10 00:42:19.510.
+Test Case '-[RemoteProbeTests.SessionCatalogOutcomeTests testHostOutcomeDecodesForEveryWireValue]' started.
+Test Case '-[RemoteProbeTests.SessionCatalogOutcomeTests testHostOutcomeDecodesForEveryWireValue]' passed (0.000 seconds).
+Test Case '-[RemoteProbeTests.SessionCatalogOutcomeTests testOlderHostWithoutOutcomeIsUnknownNotEmpty]' started.
+Test Case '-[RemoteProbeTests.SessionCatalogOutcomeTests testOlderHostWithoutOutcomeIsUnknownNotEmpty]' passed (0.000 seconds).
+Test Case '-[RemoteProbeTests.SessionCatalogOutcomeTests testUnrecognizedOutcomeIsUnknown]' started.
+Test Case '-[RemoteProbeTests.SessionCatalogOutcomeTests testUnrecognizedOutcomeIsUnknown]' passed (0.000 seconds).
+Test Suite 'SessionCatalogOutcomeTests' passed at 2026-11-10 00:42:19.511.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'TLSLayerTests' started at 2026-11-10 00:42:19.511.
+Test Case '-[RemoteProbeTests.TLSLayerTests testHandshakeFailureRetainsItsLayerAndOriginalDiagnostic]' started.
+Test Case '-[RemoteProbeTests.TLSLayerTests testHandshakeFailureRetainsItsLayerAndOriginalDiagnostic]' passed (0.001 seconds).
+Test Case '-[RemoteProbeTests.TLSLayerTests testLayerAnnotationCannotEnableTLSOpenRetries]' started.
+Test Case '-[RemoteProbeTests.TLSLayerTests testLayerAnnotationCannotEnableTLSOpenRetries]' passed (0.000 seconds).
+Test Case '-[RemoteProbeTests.TLSLayerTests testNoHostCloseAfterWebSocketUpgradeRetainsItsCause]' started.
+Test Case '-[RemoteProbeTests.TLSLayerTests testNoHostCloseAfterWebSocketUpgradeRetainsItsCause]' passed (22.025 seconds).
+Test Case '-[RemoteProbeTests.TLSLayerTests testNonHandshakeTLSFailureRemainsUnchanged]' started.
+Test Case '-[RemoteProbeTests.TLSLayerTests testNonHandshakeTLSFailureRemainsUnchanged]' passed (0.000 seconds).
+Test Case '-[RemoteProbeTests.TLSLayerTests testOuterHandshakeEOFIsTaggedByProductionConnector]' started.
+Test Case '-[RemoteProbeTests.TLSLayerTests testOuterHandshakeEOFIsTaggedByProductionConnector]' passed (0.004 seconds).
+Test Case '-[RemoteProbeTests.TLSLayerTests testRelayCloseCauseIsNotRelabeledAsTLSFailure]' started.
+Test Case '-[RemoteProbeTests.TLSLayerTests testRelayCloseCauseIsNotRelabeledAsTLSFailure]' passed (0.000 seconds).
+Test Suite 'TLSLayerTests' passed at 2026-11-10 00:42:41.542.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 22.030 (22.031) seconds
+Test Suite 'TunnelCodecTests' started at 2026-11-10 00:42:41.542.
+Test Case '-[RemoteProbeTests.TunnelCodecTests testCloseDrainCannotEmitNewCiphertext]' started.
+Test Case '-[RemoteProbeTests.TunnelCodecTests testCloseDrainCannotEmitNewCiphertext]' passed (0.001 seconds).
+Test Case '-[RemoteProbeTests.TunnelCodecTests testCoalescedUpgradePreservesFirstWebSocketClose]' started.
+Test Case '-[RemoteProbeTests.TunnelCodecTests testCoalescedUpgradePreservesFirstWebSocketClose]' passed (0.001 seconds).
+Test Case '-[RemoteProbeTests.TunnelCodecTests testEarlyCloseSurvivesTeardownWithoutReplacingTLSFailures]' started.
+Test Case '-[RemoteProbeTests.TunnelCodecTests testEarlyCloseSurvivesTeardownWithoutReplacingTLSFailures]' passed (0.000 seconds).
+Test Case '-[RemoteProbeTests.TunnelCodecTests testHostOfflineCloseSurvivesInnerTLSUncleanShutdown]' started.
+Test Case '-[RemoteProbeTests.TunnelCodecTests testHostOfflineCloseSurvivesInnerTLSUncleanShutdown]' passed (0.000 seconds).
+Test Case '-[RemoteProbeTests.TunnelCodecTests testOversizedFrameBecomesFrameTooLarge]' started.
+Test Case '-[RemoteProbeTests.TunnelCodecTests testOversizedFrameBecomesFrameTooLarge]' passed (0.000 seconds).
+Test Suite 'TunnelCodecTests' passed at 2026-11-10 00:42:41.544.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+Test Suite 'WireTests' started at 2026-11-10 00:42:41.544.
+Test Case '-[RemoteProbeTests.WireTests testDiscoveryRollingUpgradeOnlyFallsBackOnExplicitSchemaRejection]' started.
+Test Case '-[RemoteProbeTests.WireTests testDiscoveryRollingUpgradeOnlyFallsBackOnExplicitSchemaRejection]' passed (0.000 seconds).
+Test Case '-[RemoteProbeTests.WireTests testExecutionTargetCatalogAndWrapperWire]' started.
+Test Case '-[RemoteProbeTests.WireTests testExecutionTargetCatalogAndWrapperWire]' passed (0.001 seconds).
+Test Case '-[RemoteProbeTests.WireTests testExecutionTargetDiscoveryBindsToPairedGatewayIdentity]' started.
+Test Case '-[RemoteProbeTests.WireTests testExecutionTargetDiscoveryBindsToPairedGatewayIdentity]' passed (0.000 seconds).
+Test Case '-[RemoteProbeTests.WireTests testExecutionTargetDiscoveryRejectsUnsupportedOrMalformedCatalogs]' started.
+Test Case '-[RemoteProbeTests.WireTests testExecutionTargetDiscoveryRejectsUnsupportedOrMalformedCatalogs]' passed (0.001 seconds).
+Test Case '-[RemoteProbeTests.WireTests testExecutionTargetResponseStampIsRequiredAndMatched]' started.
+Test Case '-[RemoteProbeTests.WireTests testExecutionTargetResponseStampIsRequiredAndMatched]' passed (0.000 seconds).
+Test Case '-[RemoteProbeTests.WireTests testExecutionTargetWrapperPreservesJSONScalarTypes]' started.
+Test Case '-[RemoteProbeTests.WireTests testExecutionTargetWrapperPreservesJSONScalarTypes]' passed (0.000 seconds).
+Test Case '-[RemoteProbeTests.WireTests testHistoryPageLimitUsesHostDefaultOrExplicitOverride]' started.
+Test Case '-[RemoteProbeTests.WireTests testHistoryPageLimitUsesHostDefaultOrExplicitOverride]' passed (0.000 seconds).
+Test Case '-[RemoteProbeTests.WireTests testHistoryProfileResponseRequiresExactSourceProof]' started.
+Test Case '-[RemoteProbeTests.WireTests testHistoryProfileResponseRequiresExactSourceProof]' passed (0.000 seconds).
+Test Case '-[RemoteProbeTests.WireTests testProviderContextPreservesProfileAndFullModelCatalog]' started.
+Test Case '-[RemoteProbeTests.WireTests testProviderContextPreservesProfileAndFullModelCatalog]' passed (0.000 seconds).
+Test Case '-[RemoteProbeTests.WireTests testReadRecoveryDoesNotRetrySecurityOrProtocolErrors]' started.
+Test Case '-[RemoteProbeTests.WireTests testReadRecoveryDoesNotRetrySecurityOrProtocolErrors]' passed (0.000 seconds).
+Test Case '-[RemoteProbeTests.WireTests testRelayPathSignatureContainsOnlyTheSelectedRoute]' started.
+Test Case '-[RemoteProbeTests.WireTests testRelayPathSignatureContainsOnlyTheSelectedRoute]' passed (0.000 seconds).
+Test Case '-[RemoteProbeTests.WireTests testScalarBoundsAndConstruction]' started.
+Test Case '-[RemoteProbeTests.WireTests testScalarBoundsAndConstruction]' passed (0.001 seconds).
+Test Case '-[RemoteProbeTests.WireTests testSharedCorpus]' started.
+Test Case '-[RemoteProbeTests.WireTests testSharedCorpus]' passed (0.002 seconds).
+Test Suite 'WireTests' passed at 2026-11-10 00:42:41.552.
+	 Executed 13 tests, with 0 failures (0 unexpected) in 0.007 (0.008) seconds
+Test Suite 'WorkspaceTests' started at 2026-11-10 00:42:41.552.
+Test Case '-[RemoteProbeTests.WorkspaceTests testWorkspaceEvidenceIsDiscriminated]' started.
+Test Case '-[RemoteProbeTests.WorkspaceTests testWorkspaceEvidenceIsDiscriminated]' passed (0.000 seconds).
+Test Case '-[RemoteProbeTests.WorkspaceTests testWorkspaceQueryPreservesScopeAndPagination]' started.
+Test Case '-[RemoteProbeTests.WorkspaceTests testWorkspaceQueryPreservesScopeAndPagination]' passed (0.000 seconds).
+Test Suite 'WorkspaceTests' passed at 2026-11-10 00:42:41.553.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'ScryRemoteG0PackageTests.xctest' passed at 2026-11-10 00:42:41.553.
+	 Executed 93 tests, with 0 failures (0 unexpected) in 22.518 (22.525) seconds
+Test Suite 'All tests' passed at 2026-11-10 00:42:41.553.
+	 Executed 93 tests, with 0 failures (0 unexpected) in 22.518 (22.528) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

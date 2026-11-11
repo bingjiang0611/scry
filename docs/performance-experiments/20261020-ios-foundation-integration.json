@@ -1,7 +1,7 @@
 {
   "date": "2026-10-20",
   "authorization": "Maintainer approved integration of the existing iOS/Swift foundation and readiness fix, then confirmed sole source-lane handoff. Mac2 deployment was subsequently explicitly paused.",
-  "evidenceDirectory": "/Users/baobingjiang/.local/state/scry-ios-catalog-ready-XJLKiSYZ/evidence",
+  "evidenceDirectory": "/Users/<user>/.local/state/scry-ios-catalog-ready-XJLKiSYZ/evidence",
   "source": {
     "mainBaseObserved": "af190c6",
     "preservedNewerFoundation": "Adopted the handed-over build19 source, including newer Home/UITest/catalog checks and outer-versus-inner TLS diagnostics, rather than overwriting it with isolated build17",
@@ -41,7 +41,7 @@
     "version": "0.1.15",
     "build": "20",
     "bundle": "com.scry.remote.local",
-    "device": "iPhone13, USB forwarding verified for00008110-000808180E8B801E",
+    "device": "iPhone13, USB forwarding verified for<device-udid>",
     "mainExecutableSha256": "c89dc7353ffa189a076d486c880e91c4addcca6caa45bc5fc2c312a90fc374e6",
     "debugCodeSha256": "502cf4dba27b6dd476ca088c7637384d694d84f2720c2157d57a808fc3d26570"
   },

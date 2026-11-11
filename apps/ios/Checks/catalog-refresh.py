@@ -29,7 +29,7 @@ for path in [
     'swift-atomics/Sources/_AtomicsShims/include/module.modulemap',
 ]:
     module_maps.append(package / '.build/checkouts' / path)
-sources = ['RemoteRunStore', 'RemoteRunClient', 'RemoteHistoryCache', 'RemoteConnection',
+sources = ['RemoteRunStore', 'RemoteRunClient', 'RemoteSessionRegistry', 'RemoteHistoryCache', 'RemoteConnection',
            'RemoteKeychain', 'RemotePairingClient', 'PairingCode', 'AppModel', 'ConnectionCopy',
            'ExecutionTargetCoordinator', 'ConversationCopy']
 with tempfile.TemporaryDirectory(prefix='scry-catalog-binary-') as temporary:
@@ -42,10 +42,13 @@ with tempfile.TemporaryDirectory(prefix='scry-catalog-binary-') as temporary:
         assert module_map.is_file(), module_map
         command += ['-Xcc', '-fmodule-map-file=' + str(module_map)]
     # Compile the exact turn/status declarations used by existing self-tests.
+    # TurnOutcomeNote lives in Components.swift (it is a view); SessionStatusLine
+    # stays in ConversationTurns.swift next to the turn model it renders.
     components = (root / 'apps/ios/ScryRemote/ConversationTurns.swift').read_text()
+    views = (root / 'apps/ios/ScryRemote/Components.swift').read_text()
     view_models = Path(temporary) / 'ReferencedViewModels.swift'
     view_models.write_text('import SwiftUI\n' +
-        components[components.index('struct TurnOutcomeNote:'):components.index('extension ConversationTurn {')] +
+        views[views.index('struct TurnOutcomeNote:'):views.index('struct TurnUserBubble:')] +
         components[components.index('struct SessionStatusLine {'):])
     home = (root / 'apps/ios/ScryRemote/CatalogRefreshFeedback.swift').read_text()
     details_snapshot = Path(temporary) / 'CatalogRefreshDetailsSnapshot.swift'

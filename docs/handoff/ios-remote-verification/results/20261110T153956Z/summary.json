@@ -1,0 +1,516 @@
+{
+  "scenarios": {
+    "wifi-auto": {
+      "complete": true,
+      "failures": 0,
+      "environment": {
+        "event": "environment",
+        "label": "wifi-auto",
+        "localNetwork": true,
+        "relayHost": "scry-relay-pages.pages.dev",
+        "rounds": 5,
+        "route": "auto"
+      },
+      "coldOpen": {
+        "okMs": [
+          2705.9,
+          4612.8,
+          3383.3,
+          4760,
+          2360.8
+        ],
+        "errors": [],
+        "medianMs": 3383.3,
+        "p90Ms": 4760
+      },
+      "warm": {
+        "medianMs": 1121.4,
+        "p90Ms": 3377.7,
+        "samples": 15
+      },
+      "catalog": {
+        "full": {
+          "confirmed": false,
+          "event": "catalog",
+          "label": "wifi-auto",
+          "ms": 1293.8,
+          "pass": "full",
+          "sessions": 28
+        },
+        "refreshes": [
+          {
+            "confirmed": true,
+            "event": "catalog",
+            "label": "wifi-auto",
+            "ms": 749,
+            "pass": "refresh",
+            "sessions": 28
+          },
+          {
+            "confirmed": true,
+            "event": "catalog",
+            "label": "wifi-auto",
+            "ms": 1331.6,
+            "pass": "refresh",
+            "sessions": 28
+          },
+          {
+            "confirmed": true,
+            "event": "catalog",
+            "label": "wifi-auto",
+            "ms": 2046,
+            "pass": "refresh",
+            "sessions": 28
+          }
+        ],
+        "refreshMedianMs": 1331.6
+      },
+      "offlineProbe": {
+        "error": "Mac 当前不在线（中继未看到它的连接）：可能已休眠、断网或 Scry 未运行。唤醒 Mac 后会自动重连。",
+        "event": "offline-probe",
+        "hostOffline": true,
+        "label": "wifi-auto",
+        "ms": 2354.3
+      },
+      "history": {
+        "event": "history",
+        "label": "wifi-auto",
+        "ms": 11024.3,
+        "session": "<id:44a1831f>",
+        "turns": 52
+      },
+      "routes": [
+        "relay"
+      ],
+      "multiplexed": true,
+      "capabilities": [
+        "historyDeflate",
+        "lan",
+        "mux",
+        "ping",
+        "sessionsKnown",
+        "watchStream"
+      ],
+      "legacyHost": false,
+      "directRoutes": [
+        {
+          "host": "192.168.0.100",
+          "port": 47820
+        }
+      ],
+      "colos": [
+        "ORD",
+        "PIT"
+      ],
+      "phasesMedianMs": {
+        "tcpMs": 8.741917,
+        "outerTLSMs": 978.488916,
+        "upgradeMs": 1626.333416,
+        "innerTLSMs": 2695.942542,
+        "pingMs": null,
+        "totalMs": 2695.95675
+      },
+      "openErrors": [
+        {
+          "lane": "control",
+          "route": "direct",
+          "phase": "upgrade",
+          "error": "Connect timeout (900 ms)"
+        },
+        {
+          "lane": "bulk",
+          "route": "direct",
+          "phase": "upgrade",
+          "error": "Connect timeout (900 ms)"
+        }
+      ],
+      "blockingDirectFailures": 0
+    },
+    "wifi-relay": {
+      "complete": true,
+      "failures": 1,
+      "environment": {
+        "event": "environment",
+        "label": "wifi-relay",
+        "localNetwork": true,
+        "relayHost": "scry-relay-pages.pages.dev",
+        "rounds": 5,
+        "route": "relay"
+      },
+      "coldOpen": {
+        "okMs": [
+          4064.3,
+          2770,
+          2731.5,
+          2771.3
+        ],
+        "errors": [
+          {
+            "ms": 31136.1,
+            "error": "I/O on closed channel",
+            "hostOffline": false
+          }
+        ],
+        "medianMs": 2771.3,
+        "p90Ms": 4064.3
+      },
+      "warm": {
+        "medianMs": 1435.5,
+        "p90Ms": 2967.5,
+        "samples": 12
+      },
+      "catalog": {
+        "full": {
+          "confirmed": false,
+          "event": "catalog",
+          "label": "wifi-relay",
+          "ms": 1538.8,
+          "pass": "full",
+          "sessions": 28
+        },
+        "refreshes": [
+          {
+            "confirmed": true,
+            "event": "catalog",
+            "label": "wifi-relay",
+            "ms": 813,
+            "pass": "refresh",
+            "sessions": 28
+          },
+          {
+            "confirmed": true,
+            "event": "catalog",
+            "label": "wifi-relay",
+            "ms": 818.7,
+            "pass": "refresh",
+            "sessions": 28
+          },
+          {
+            "confirmed": true,
+            "event": "catalog",
+            "label": "wifi-relay",
+            "ms": 816.6,
+            "pass": "refresh",
+            "sessions": 28
+          }
+        ],
+        "refreshMedianMs": 816.6
+      },
+      "offlineProbe": {
+        "error": "Mac 当前不在线（中继未看到它的连接）：可能已休眠、断网或 Scry 未运行。唤醒 Mac 后会自动重连。",
+        "event": "offline-probe",
+        "hostOffline": true,
+        "label": "wifi-relay",
+        "ms": 3277.6
+      },
+      "history": {
+        "event": "history",
+        "label": "wifi-relay",
+        "ms": 19770.6,
+        "session": "<id:44a1831f>",
+        "turns": 52
+      },
+      "routes": [
+        "relay"
+      ],
+      "multiplexed": true,
+      "capabilities": [
+        "historyDeflate",
+        "lan",
+        "mux",
+        "ping",
+        "sessionsKnown",
+        "watchStream"
+      ],
+      "legacyHost": false,
+      "directRoutes": [
+        {
+          "host": "192.168.0.100",
+          "port": 47820
+        }
+      ],
+      "colos": [
+        "ORD",
+        "PIT"
+      ],
+      "phasesMedianMs": {
+        "tcpMs": 8.717417,
+        "outerTLSMs": 634.662584,
+        "upgradeMs": 1833.571958,
+        "innerTLSMs": 2761.60925,
+        "pingMs": null,
+        "totalMs": 2761.619208
+      },
+      "openErrors": [
+        {
+          "lane": "control",
+          "route": "relay",
+          "phase": "open",
+          "error": "I/O on closed channel"
+        },
+        {
+          "lane": "bulk",
+          "route": "relay",
+          "phase": "open",
+          "error": "I/O on closed channel"
+        },
+        {
+          "lane": "bulk",
+          "route": "relay",
+          "phase": "open",
+          "error": "I/O on closed channel"
+        },
+        {
+          "lane": "control",
+          "route": "relay",
+          "phase": "open",
+          "error": "I/O on closed channel"
+        },
+        {
+          "lane": "bulk",
+          "route": "relay",
+          "phase": "open",
+          "error": "I/O on closed channel"
+        },
+        {
+          "lane": "control",
+          "route": "relay",
+          "phase": "open",
+          "error": "I/O on closed channel"
+        }
+      ],
+      "blockingDirectFailures": 0
+    },
+    "wifi-relay2": {
+      "complete": true,
+      "failures": 0,
+      "environment": {
+        "event": "environment",
+        "label": "wifi-relay2",
+        "localNetwork": true,
+        "relayHost": "scry-relay-pages.pages.dev",
+        "rounds": 5,
+        "route": "relay"
+      },
+      "coldOpen": {
+        "okMs": [
+          1802.9,
+          1474.8,
+          1887.4,
+          2565,
+          1769
+        ],
+        "errors": [],
+        "medianMs": 1802.9,
+        "p90Ms": 2565
+      },
+      "warm": {
+        "medianMs": 1024.1,
+        "p90Ms": 1365.2,
+        "samples": 15
+      },
+      "catalog": {
+        "full": {
+          "confirmed": false,
+          "event": "catalog",
+          "label": "wifi-relay2",
+          "ms": 720.7,
+          "pass": "full",
+          "sessions": 28
+        },
+        "refreshes": [
+          {
+            "confirmed": true,
+            "event": "catalog",
+            "label": "wifi-relay2",
+            "ms": 708.1,
+            "pass": "refresh",
+            "sessions": 28
+          },
+          {
+            "confirmed": true,
+            "event": "catalog",
+            "label": "wifi-relay2",
+            "ms": 715.7,
+            "pass": "refresh",
+            "sessions": 28
+          },
+          {
+            "confirmed": true,
+            "event": "catalog",
+            "label": "wifi-relay2",
+            "ms": 715.7,
+            "pass": "refresh",
+            "sessions": 28
+          }
+        ],
+        "refreshMedianMs": 715.7
+      },
+      "offlineProbe": {
+        "error": "Mac 当前不在线（中继未看到它的连接）：可能已休眠、断网或 Scry 未运行。唤醒 Mac 后会自动重连。",
+        "event": "offline-probe",
+        "hostOffline": true,
+        "label": "wifi-relay2",
+        "ms": 1842.1
+      },
+      "history": {
+        "event": "history",
+        "label": "wifi-relay2",
+        "ms": 10807,
+        "session": "<id:70c8e86c>",
+        "turns": 75
+      },
+      "routes": [
+        "relay"
+      ],
+      "multiplexed": true,
+      "capabilities": [
+        "historyDeflate",
+        "lan",
+        "mux",
+        "ping",
+        "sessionsKnown",
+        "watchStream"
+      ],
+      "legacyHost": false,
+      "directRoutes": [
+        {
+          "host": "192.168.0.100",
+          "port": 47820
+        }
+      ],
+      "colos": [
+        "ORD",
+        "PIT"
+      ],
+      "phasesMedianMs": {
+        "tcpMs": 8.897583,
+        "outerTLSMs": 420.866834,
+        "upgradeMs": 1097.050209,
+        "innerTLSMs": 1759.982042,
+        "pingMs": null,
+        "totalMs": 1759.994167
+      },
+      "openErrors": [],
+      "blockingDirectFailures": 0
+    }
+  },
+  "probes": {
+    "mac": {
+      "ok": 10,
+      "failed": 0,
+      "colos": [
+        "ORD",
+        "PIT"
+      ],
+      "generations": [
+        "heartbeat-aware"
+      ],
+      "medianMs": {
+        "dns": 2.1,
+        "tcp": 7.4,
+        "tls": 713,
+        "upgrade": 1156.9,
+        "upgradeExcludingWait": 1156.9,
+        "close": 1157,
+        "total": 1157.1
+      }
+    }
+  },
+  "checks": {
+    "stages": [
+      {
+        "name": "install-mac",
+        "status": "fail",
+        "exitCode": 143,
+        "seconds": 1070,
+        "log": "logs/install-mac.tail.txt"
+      },
+      {
+        "name": "relay-probe-mac",
+        "status": "pass",
+        "exitCode": 0,
+        "seconds": 11,
+        "log": "logs/relay-probe-mac.tail.txt"
+      },
+      {
+        "name": "build-ios",
+        "status": "pass",
+        "exitCode": 0,
+        "seconds": 18,
+        "log": "logs/build-ios.tail.txt"
+      },
+      {
+        "name": "install-ios",
+        "status": "pass",
+        "exitCode": 0,
+        "seconds": 18,
+        "log": "logs/install-ios.tail.txt"
+      },
+      {
+        "name": "netbench-wifi-relay",
+        "status": "fail",
+        "exitCode": 1,
+        "seconds": 97,
+        "log": "netbench-wifi-relay.jsonl"
+      },
+      {
+        "name": "netbench-wifi-auto",
+        "status": "pass",
+        "exitCode": 0,
+        "seconds": 61,
+        "log": "netbench-wifi-auto.jsonl"
+      },
+      {
+        "name": "netbench-wifi-relay2",
+        "status": "pass",
+        "exitCode": 0,
+        "seconds": 47,
+        "log": "netbench-wifi-relay2.jsonl"
+      },
+      {
+        "name": "typecheck-node",
+        "status": "pass",
+        "exitCode": 0,
+        "seconds": 12,
+        "log": "logs/typecheck-node.tail.txt"
+      },
+      {
+        "name": "node-unit",
+        "status": "pass",
+        "exitCode": 0,
+        "seconds": 49,
+        "log": "logs/node-unit.tail.txt"
+      },
+      {
+        "name": "g0-node-tests",
+        "status": "pass",
+        "exitCode": 0,
+        "seconds": 5,
+        "log": "logs/g0-node-tests.tail.txt"
+      },
+      {
+        "name": "cf-relay-smokes",
+        "status": "pass",
+        "exitCode": 0,
+        "seconds": 33,
+        "log": "logs/cf-relay-smokes.tail.txt"
+      },
+      {
+        "name": "swift-test",
+        "status": "pass",
+        "exitCode": 0,
+        "seconds": 28,
+        "log": "logs/swift-test.tail.txt"
+      },
+      {
+        "name": "ios-checks",
+        "status": "known-baseline",
+        "exitCode": 247,
+        "seconds": 49,
+        "log": "logs/ios-checks.tail.txt",
+        "baselineEvidence": "logs/ios-checks.tail.txt"
+      }
+    ]
+  }
+}

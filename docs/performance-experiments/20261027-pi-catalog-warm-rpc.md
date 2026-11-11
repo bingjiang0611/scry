@@ -91,7 +91,7 @@
 尝试用真实 CLI 测「冷启动 vs 复用」，受阻：
 
 ```
-$ pi --version            # /Users/baobingjiang/.local/bin/pi
+$ pi --version            # /Users/<user>/.local/bin/pi
 1.2.0                     # 包装脚本 exec IdeaProjects/vibecoding/pi/.../dist/bundle/cli.js
 $ (echo '{"type":"get_state","id":"a"}'; sleep 3) | pi --mode rpc --no-session --offline
 Warning: No models match pattern "qoder/ultimate" ...   # 三行警告后没有任何 response 帧

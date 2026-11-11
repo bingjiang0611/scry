@@ -18,3 +18,8 @@ new_sqlite_classes = ["RelayRoom"]
 # When legacy/admin access is needed, RELAY_TOKEN is supplied as a secret in
 # production and via .dev.vars or explicit `vars` for local `wrangler dev`. It is
 # intentionally NOT declared here so a deploy never writes a plaintext value.
+
+# Optional placement for NEW relay rooms (existing rooms never move), e.g. for
+# users in East Asia:
+# [vars]
+# RELAY_LOCATION_HINT = "apac"

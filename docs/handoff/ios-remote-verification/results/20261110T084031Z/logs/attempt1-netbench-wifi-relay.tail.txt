@@ -1,0 +1,8 @@
+# First wifi-relay attempt at 08:49-08:54: every cold-open failed after ~31 s.
+# Re-run at 08:56 with the same build and relay succeeded (see netbench-wifi-relay.jsonl).
+{"error":"I\/O on closed channel","event":"cold-open","label":"wifi-relay","ms":31134,"round":1}
+{"error":"I\/O on closed channel","event":"cold-open","label":"wifi-relay","ms":31122,"round":2}
+{"error":"I\/O on closed channel","event":"cold-open","label":"wifi-relay","ms":31107,"round":3}
+{"error":"I\/O on closed channel","event":"cold-open","label":"wifi-relay","ms":31099.599999999999,"round":4}
+{"error":"I\/O on closed channel","event":"cold-open","label":"wifi-relay","ms":31115.099999999999,"round":5}
+{"event":"done","failures":5,"label":"wifi-relay"}

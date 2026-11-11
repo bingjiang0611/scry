@@ -17,6 +17,7 @@ import type { RemoteRunCompletion } from '../remote/remote-run-binding'
 import type { RemoteWorkspaceRunStart } from './workspace-start'
 import type { SessionDeletionRequest } from './session-deletion'
 import { RemoteHostService as RemoteHostServiceImpl } from '../remote/remote-host-service'
+import { remoteLanConfig, watchRemoteRelayPower } from './remote-host-network'
 import { createDesktopHostReader } from '../remote/desktop-host-reader'
 import { createDesktopWorkbench } from '../remote/desktop-workbench'
 import { listDesktopDirectories, selectDesktopDirectory } from '../remote/desktop-directory-picker'
@@ -93,6 +94,7 @@ export async function startRemoteHostIfEnabled(runtime: RemoteHostRuntime): Prom
       bindRemoteHistoryContext(input, runtime.appSessionStore().load(), runtime.resolveRemoteProjectDirectory)
     runtime.remoteHostService = await RemoteHostServiceImpl.create({
       stateDirectory,
+      ...remoteLanConfig(process.env),
       desktopWorkbench: createDesktopWorkbench({
         directory: join(app.getPath('userData'), 'desktop-terminal-recordings'),
         authorizeWorkspace: runtime.resolveRemoteProjectDirectory,
@@ -235,10 +237,16 @@ export async function startRemoteHostIfEnabled(runtime: RemoteHostRuntime): Prom
         const roots = canonicalRemoteProjectRoots(runtime.knownProjectDirectories())
         const activeRuns = runtime.runs.activeStates()
         const out: RemoteSessionRef[] = []
+        // Sync realpath once per distinct cwd in this call (never stale).
+        const resolved = new Map<string, string | null>()
         for (const s of runtime.appSessionStore().load()) {
           if (!s.cwd) continue
-          let canonical: string
-          try { canonical = runtime.resolveCanonicalRemoteProjectDirectory(s.cwd, roots) } catch { continue }
+          let canonical = resolved.get(s.cwd)
+          if (canonical === undefined) {
+            try { canonical = runtime.resolveCanonicalRemoteProjectDirectory(s.cwd, roots) } catch { canonical = null }
+            resolved.set(s.cwd, canonical)
+          }
+          if (canonical === null) continue
           const activeRun = activeRuns.find((run) =>
             run.providerId === s.providerId && run.cwd === canonical &&
             (run.runId === s.runId || Boolean(s.externalSessionId && run.externalSessionId === s.externalSessionId)))
@@ -279,6 +287,7 @@ export async function startRemoteHostIfEnabled(runtime: RemoteHostRuntime): Prom
       ...createRemoteHistoryHandlers(runtime),
     })
     await runtime.remoteHostService.start()
+    watchRemoteRelayPower(runtime)
     console.warn(`[scry] remote host subsystem started (${relay.createTransport ? 'relay transport configured' : 'dormant: no relay transport configured'})`)
   } catch (error) {
     console.warn('[scry] remote host subsystem failed to start:', error)

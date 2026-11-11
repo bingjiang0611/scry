@@ -1,0 +1,4 @@
+# Full logs and untrimmed device output stay local; committed tails and
+# trimmed copies sit next to them.
+results/*/raw/
+results/*/logs/*.log

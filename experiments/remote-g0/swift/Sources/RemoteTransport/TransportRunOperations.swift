@@ -240,3 +240,10 @@ extension G0Transport {
   // run. It closes and settles its queued reads when the scope ends/cancels.
 
 }
+
+extension G0Transport.RunError {
+  // The host refused only because this tunnel is at its request/stream cap
+  // (`mux_busy`): the request did not run, so retrying after a backoff is safe.
+  // Every other host refusal (revoked device, unknown run) cannot heal by retry.
+  public var isCapacityRefusal: Bool { self == .host(code: "mux_busy") }
+}

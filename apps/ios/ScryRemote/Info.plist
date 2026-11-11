@@ -7,6 +7,7 @@
   <key>CFBundleName</key><string>Scry</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>NSCameraUsageDescription</key><string>扫描 Mac 上显示的配对二维码以连接你的 Mac。</string>
+  <key>NSLocalNetworkUsageDescription</key><string>与 Mac 在同一网络时直接连接它，跳过公网中继，连接更快更稳。连接仍使用配对证书加密认证。</string>
   <key>CFBundleShortVersionString</key><string>0.1.15</string>
   <key>CFBundleVersion</key><string>25</string>
   <key>LSRequiresIPhoneOS</key><true/>

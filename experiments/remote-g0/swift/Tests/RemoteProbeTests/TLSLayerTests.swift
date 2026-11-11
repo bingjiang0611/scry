@@ -136,5 +136,7 @@ final class TLSLayerTests: XCTestCase {
     }
     XCTAssertFalse(LaneConnection.isNonRetryableOpenError(
       RelayTransportError.closed(code: 1013, reason: "fixture busy")))
+    // A truncated connection while opening is transient, not a trust failure.
+    XCTAssertFalse(LaneConnection.isNonRetryableOpenError(NIOSSLError.uncleanShutdown))
   }
 }

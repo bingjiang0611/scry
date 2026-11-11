@@ -1,18 +1,17 @@
 import { join } from 'node:path'
 import { readFileSync, writeFileSync, renameSync, rmSync } from 'node:fs'
 import { DesktopHostListeners, type DesktopHostListenerPorts } from './desktop-host-listeners'
-import type { DesktopHostAccess, DesktopHostInvitation, DesktopRemoteContext, DesktopRemoteSessionAction } from '../../shared/desktop-remote'
+import type { DesktopHostAccess, DesktopHostInvitation } from '../../shared/desktop-remote'
 import { ensureHostIdentity } from './host-identity'
-import { createHostController, type HostControllerBinding, type HostControllerFactoryDependencies } from './host-controller-factory'
-import { HostController, type RemoteIntentRouting, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPreview } from './host-controller'
+import { createHostController, type HostControllerBinding } from './host-controller-factory'
+import { HostController } from './host-controller'
 import { InnerMtlsHost } from './inner-mtls-host'
 import { ExecutionTargetRouter } from './execution-targets'
-import type { DesktopRemoteTargetAPI } from '../../shared/desktop-remote'
 import { PairingTransport } from './pairing-transport'
-import { RelayClient, type RelayDiagnostics, type RelayTransport } from './relay-client'
+import { RelayClient, type RelayDiagnostics } from './relay-client'
+import { RemoteLanListener, type LanAdvertisement } from './remote-lan-listener'
 import type { PairingAuthority } from './pairing'
-import type { RunOutputStore } from './run-output-log'
-import type { ProviderOperationGate } from '../provider-operation-gate'
+import type { RemoteHostServiceDependencies } from './remote-host-service-deps'
 import type { RemotePairingCode, RemotePendingPairing, RemoteDevice, RemoteRelayDiagnostics, RemoteStatus } from '../../shared/remote'
 
 // The single object Electron main owns for the remote-access subsystem. It
@@ -30,61 +29,7 @@ import type { RemotePairingCode, RemotePendingPairing, RemoteDevice, RemoteRelay
 // confirmation (begin/confirmLocal/cancel/revoke) is exposed for the trusted
 // LOCAL Scry UI only; it is never reachable from a device.
 
-export interface RemoteHostServiceDependencies {
-  readDesktop?: HostControllerFactoryDependencies['readDesktop']
-  desktopWorkbench?: import('./desktop-workbench').DesktopWorkbenchHost
-  desktopDirectories?: HostControllerFactoryDependencies['desktopDirectories']
-  // Directory under Scry userData; identity/pairing/ledger subdirs live here.
-  stateDirectory: string
-  // Maps a device-requested cwd to an already directory-picker-authorized
-  // workspace, or throws. A device can never smuggle an unlisted path.
-  authorizeWorkspace(cwd: string): string
-  // Delegates a fully-authorized remote intent to the live run-start path.
-  startRun(input: {
-    runId: string
-    routing: RemoteIntentRouting
-    progress(detail?: string): void
-    output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
-  }): Promise<void>
-  // Snapshot of the host's already directory-picker-authorized project dirs, so
-  // the phone's new-session picker chooses only among real authorized targets.
-  // Absent => the device sees an honest empty list.
-  listProjects?(): RemoteProjectRef[]
-  listDirectories?(path?: string): RemoteDirectoryListing
-  listProviders?(): RemoteProviderRef[]
-  listProvidersFull?(): Promise<RemoteProviderRef[]>
-  listProviderControls?(query: Extract<import('../../shared/desktop-remote').RemoteProviderQuery, { detail: 'selected' }>): Promise<RemoteProviderRef>
-  listCommands?(query: RemoteCommandQuery): Promise<RemoteCommandCatalog>
-  sessionAction?: (context: DesktopRemoteContext, action: DesktopRemoteSessionAction, authorize: () => void) => Promise<boolean> | boolean
-  sessionFork?: HostControllerFactoryDependencies['sessionFork']
-  sessionDelete?: HostControllerFactoryDependencies['sessionDelete']
-  toolPanels?: HostControllerFactoryDependencies['toolPanels']
-  listSessions?(): RemoteSessionRef[]
-  sessionCatalogRevision?(): string
-  readSessionStatus?: HostControllerFactoryDependencies['readSessionStatus']
-  macRuns?: HostControllerFactoryDependencies['macRuns']
-  readHistory?(query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]>
-  readHistoryPreview?(query: RemoteHistoryQuery): Promise<RemoteHistoryPreview>
-  readHistoryVersion?(query: RemoteHistoryQuery): Promise<import('./remote-gateway').RemoteHistoryVersion>
-  readHistoryTurnsPage?(query: import('./remote-gateway').RemoteHistoryTurnsPageQuery): Promise<import('./remote-gateway').RemoteHistoryTurnsPage>
-  // The app-wide gate, so remote runs share auth-vs-run mutual exclusion.
-  gate: ProviderOperationGate
-  createOutputStore?(directory: string): RunOutputStore | Promise<RunOutputStore>
-  // Lazy access keeps the existing desktop client composition dormant until a
-  // target request actually needs it.
-  desktopRemoteClient?: () => DesktopRemoteTargetAPI
-  gatewayLabel?: string
-  // How to reach the relay (deployed ws/net connector). Absent => dormant. Called
-  // once per mode ('run' for the granted-device mTLS host, 'pair' for the pairing
-  // prove endpoint), so the relay keeps a separate warm pool per mode. The
-  // context carries the stable hostId + anchor the relay routes/authenticates by.
-  createTransport?: (ctx: { hostId: string; anchorSHA256: string; mode: 'run' | 'pair' }) => RelayTransport
-  // The device-facing coordinates of the SAME relay, embedded in the scannable
-  // pairing code so the phone can reach this host. For a public wss relay
-  // (Cloudflare) this is { host: '<name>.workers.dev', port: 443, tls: 'system' };
-  // a local dev relay uses tls: 'plaintext'. Absent => no device code is emitted.
-  relayAdvertisement?: { host: string; port: number; tls: 'system' | 'plaintext' }
-}
+export type { RemoteHostServiceDependencies } from './remote-host-service-deps'
 
 export class RemoteHostService {
   #binding: HostControllerBinding
@@ -100,6 +45,9 @@ export class RemoteHostService {
   #desktopRestoreError: string | undefined
   #desktopChanging: Promise<unknown> | null = null
   #desktopSettingsPath: string
+  #lanConfig: { port?: number; host?: string } | null
+  #lan: RemoteLanListener | null = null
+  #lanError: string | undefined
   readonly anchorSHA256: string
   readonly caCertificatePEM: string
   readonly hostId: string
@@ -114,6 +62,7 @@ export class RemoteHostService {
     caCertificatePEM: string
     hostId: string
     relayAdvertisement: { host: string; port: number; tls: 'system' | 'plaintext' } | null
+    lan?: { port?: number; host?: string }
   }) {
     this.#binding = init.binding
     this.#desktopSettingsPath = join(init.stateDirectory, 'desktop-listeners.json')
@@ -124,6 +73,7 @@ export class RemoteHostService {
     this.caCertificatePEM = init.caCertificatePEM
     this.hostId = init.hostId
     this.#relayAdvertisement = init.relayAdvertisement ?? null
+    this.#lanConfig = init.lan ?? null
   }
 
   static async create(deps: RemoteHostServiceDependencies): Promise<RemoteHostService> {
@@ -200,7 +150,8 @@ export class RemoteHostService {
       anchorSHA256: identity.anchorSHA256,
       caCertificatePEM: identity.caCertificatePEM,
       hostId: identity.hostId,
-      relayAdvertisement: deps.relayAdvertisement ?? null
+      relayAdvertisement: deps.relayAdvertisement ?? null,
+      ...(deps.lan ? { lan: deps.lan } : {})
     })
   }
 
@@ -326,6 +277,17 @@ export class RemoteHostService {
     await Promise.all(peers.map((peer) => this.#binding.controller.releaseDesktopPeer(peer)))
   }
 
+  // The Mac woke or its network changed: outbound relay legs from before are
+  // presumed dead. Replace every leg, including ones carrying phone lanes, so
+  // the relay stops gluing phones to sockets that no longer reach this host.
+  // `includeActive` also drops legs carrying phone lanes: right after a wake
+  // they are presumed dead. Without it only idle legs are replaced, which
+  // never interrupts a phone that is using the Mac.
+  refreshRelay(options: { includeActive?: boolean } = { includeActive: true }): void {
+    if (this.#disposed) return
+    for (const client of this.#clients) client.refresh({ includeActive: options.includeActive === true })
+  }
+
   // Display-safe snapshot for the pairing screen.
   status(): RemoteStatus {
     const state = this.authority.inspectLocal()
@@ -379,6 +341,31 @@ export class RemoteHostService {
       if (this.#disposed) throw new Error('remote_host_service_disposed')
       await client.start()
     }
+    await this.#startLan()
+  }
+
+  // Optional direct route. A failure (port refused, firewall) never affects
+  // the relay or existing grants; it is kept for diagnostics only.
+  async #startLan(): Promise<void> {
+    if (!this.#lanConfig || this.#disposed) return
+    const listener = new RemoteLanListener((socket) => this.#host.serve(socket))
+    try {
+      await listener.listen(this.#lanConfig.port, this.#lanConfig.host)
+      if (this.#disposed) { await listener.close(); return }
+      this.#lan = listener
+      this.#lanError = undefined
+      this.#host.setLanAdvertisement(() => this.#lan?.advertisement())
+    } catch (error) {
+      await listener.close().catch(() => undefined)
+      this.#lanError = String(error instanceof Error ? error.message : error).slice(0, 200)
+    }
+  }
+
+  // Display/diagnostic view of the direct route: what an authorized phone is
+  // told, or why there is none.
+  lanStatus(): { advertisement?: LanAdvertisement; error?: string } {
+    const advertisement = this.#lan?.advertisement()
+    return { ...(advertisement ? { advertisement } : {}), ...(this.#lanError ? { error: this.#lanError } : {}) }
   }
 
   async dispose(): Promise<void> {
@@ -387,6 +374,9 @@ export class RemoteHostService {
   }
 
   async #dispose(): Promise<void> {
+    this.#host.setLanAdvertisement(() => undefined)
+    await this.#lan?.close().catch(() => undefined)
+    this.#lan = null
     try { await this.#desktopListeners?.close() } finally {
       this.#desktopListeners = null
       this.#desktopPorts = null

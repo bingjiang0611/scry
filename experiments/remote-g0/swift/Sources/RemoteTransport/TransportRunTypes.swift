@@ -152,6 +152,8 @@ extension G0Transport {
   public struct RunSessionPage: Sendable, Equatable, Codable {
     public let sessions: [RunSessionRef]
     public let cursor: Int; public let total: Int; public let hasMore: Bool; public let snapshot: String
+    // The host confirmed the `known` snapshot is still current (no rows sent).
+    public let unchanged: Bool?
   }
   // One content chunk of a replayed session turn (same kinds a live run streams).
   public struct RunHistoryChunk: Sendable, Equatable, Codable {
@@ -179,6 +181,10 @@ extension G0Transport {
   public struct RunHistoryPage: Sendable, Equatable, Codable {
     public let dataBase64: String; public let cursor: Int; public let totalBytes: Int
     public let hasMore: Bool; public let snapshot: String
+    // "deflate": pages are raw DEFLATE of the snapshot bytes (`rawBytes` long
+    // once inflated); `snapshot` still hashes the inflated bytes.
+    public let encoding: String?
+    public let rawBytes: Int?
   }
   public struct RunHistoryTurnsPage: Sendable, Equatable, Codable {
     // The host's snapshot is a signed source-version token, not a display id:

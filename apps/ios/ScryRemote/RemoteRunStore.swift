@@ -2541,7 +2541,35 @@ final class RemoteRunStore {
       var ledgerCursor = 0
       var outputCursor = 0
       var useWatch = true
+      // Pushed updates first; any host or route that cannot push falls back to
+      // the long-poll below for the rest of this run.
+      var useStream = true
       var failures = 0
+      // One observation, however it arrived (push, long-poll or legacy reads).
+      @MainActor func observe(_ page: G0Transport.RunPollOutcome, _ questions: [G0Transport.RunQuestionRequest],
+                   _ out: G0Transport.RunOutputPage, _ state: String?) {
+        ledgerCursor = page.cursor
+        for ev in page.events where ev.runId == runId {
+          self.apply(event: ev, generation: generation, identity: identity)
+        }
+        if let state { self.apply(runState: state, generation: generation, identity: identity) }
+        if self.pendingQuestions.first?.questionId != questions.first?.questionId {
+          self.pendingQuestionAnswerId = nil
+          self.questionAnswering = false
+          self.questionError = nil
+        }
+        self.pendingQuestions = questions
+        outputCursor = out.cursor
+        for chunk in out.chunks {
+          self.append(chunk: chunk, generation: generation, identity: identity)
+        }
+        self.recordSuccess()
+        if failures > 0 || self.observationReconnecting {
+          failures = 0
+          self.observationReconnecting = false
+        }
+        self.observationInterrupted = false
+      }
       // Compacted ledgers may no longer retain the event that established an
       // older recovered run's current lifecycle. Reconcile the authoritative
       // run projection once, then continue from the server's resettable tail.
@@ -2552,60 +2580,57 @@ final class RemoteRunStore {
         let requestConnectionRevision = self.connectionSuccessRevision
         var operation = "实时观察"
         do {
-          let page: G0Transport.RunPollOutcome
-          let questions: [G0Transport.RunQuestionRequest]
-          let out: G0Transport.RunOutputPage
-          var state: String?
-          if useWatch {
+          if useWatch && useStream {
             do {
-              // One long-poll returns as soon as anything changes on the host,
-              // instead of four sequential reads plus a fixed sleep.
-              let watch = try await client.watch(runId: runId, cursor: ledgerCursor, outputCursor: outputCursor)
-              page = watch.poll; questions = watch.questions; out = watch.output; state = watch.state
-            } catch G0Transport.RunError.host(code: "unknown_op") {
-              // Older Mac host: keep the legacy read sequence, still honest.
-              useWatch = false
+              // Each update is applied as it is pushed; the stream ends after a
+              // terminal state or when the host closes it, and the loop below
+              // either drains or subscribes again from the applied cursors.
+              for try await watch in client.watchUpdates(runId: runId, cursor: ledgerCursor, outputCursor: outputCursor) {
+                guard self.isCurrent(generation, identity: identity) else { return }
+                observe(watch.poll, watch.questions, watch.output, watch.state)
+                if self.isTerminal(generation: generation, identity: identity) { break }
+              }
+            } catch G0Transport.RunError.host(code: "watch_stream_unavailable") {
+              useStream = false
               continue
             }
           } else {
-            operation = "事件读取"
-            page = try await client.poll(cursor: ledgerCursor)
-            operation = "问题读取"
-            questions = try await client.questions(runId: runId)
-            operation = "输出读取"
-            out = try await client.output(runId: runId, cursor: outputCursor)
+            let page: G0Transport.RunPollOutcome
+            let questions: [G0Transport.RunQuestionRequest]
+            let out: G0Transport.RunOutputPage
+            var state: String?
+            if useWatch {
+              do {
+                // One long-poll returns as soon as anything changes on the host,
+                // instead of four sequential reads plus a fixed sleep.
+                let watch = try await client.watch(runId: runId, cursor: ledgerCursor, outputCursor: outputCursor)
+                page = watch.poll; questions = watch.questions; out = watch.output; state = watch.state
+              } catch G0Transport.RunError.host(code: "unknown_op") {
+                // Older Mac host: keep the legacy read sequence, still honest.
+                useWatch = false
+                continue
+              }
+            } else {
+              operation = "事件读取"
+              page = try await client.poll(cursor: ledgerCursor)
+              operation = "问题读取"
+              questions = try await client.questions(runId: runId)
+              operation = "输出读取"
+              out = try await client.output(runId: runId, cursor: outputCursor)
+            }
+            guard self.isCurrent(generation, identity: identity) else { return }
+            observe(page, questions, out, state)
           }
-          guard self.isCurrent(generation, identity: identity) else { return }
-          ledgerCursor = page.cursor
-          for ev in page.events where ev.runId == runId {
-            self.apply(event: ev, generation: generation, identity: identity)
-          }
-          if let state { self.apply(runState: state, generation: generation, identity: identity) }
-          if self.pendingQuestions.first?.questionId != questions.first?.questionId {
-            self.pendingQuestionAnswerId = nil
-            self.questionAnswering = false
-            self.questionError = nil
-          }
-          self.pendingQuestions = questions
-          outputCursor = out.cursor
-          for chunk in out.chunks {
-            self.append(chunk: chunk, generation: generation, identity: identity)
-          }
-          self.recordSuccess()
-          if failures > 0 || self.observationReconnecting {
-            failures = 0
-            self.observationReconnecting = false
-          }
-          self.observationInterrupted = false
         } catch {
           guard self.isCurrent(generation, identity: identity), !Task.isCancelled else { return }
           self.recordFailure(error, since: requestConnectionRevision)
           failures += 1
           // Host-rejected reads (revoked device, unknown run) cannot heal by
-          // retrying. Transport loss can: keep observing with capped backoff for
-          // as long as it takes; the status row says it is reconnecting and the
-          // Provider may still be running, so nothing is assumed.
-          if error is G0Transport.RunError {
+          // retrying. Transport loss and a full tunnel (`mux_busy`) can: keep
+          // observing with capped backoff for as long as it takes; the status
+          // row says it is reconnecting and the Provider may still be running,
+          // so nothing is assumed.
+          if let refusal = error as? G0Transport.RunError, !refusal.isCapacityRefusal {
             self.observationReconnecting = false
             self.observationInterrupted = true
             self.submitError = Self.observationFailure(error, lifecycle: self.lifecycle, operation: operation)
@@ -4757,6 +4782,12 @@ final class RemoteRunStore {
         case .relay: return ConnectionCopy.relayTLSHandshakeFailure(detail)
         case .host: return ConnectionCopy.hostTLSHandshakeFailure(detail)
         }
+      case let .closed(code, _) where code == RelayTransportError.hostOfflineCloseCode:
+        // The relay saw no live connection from the Mac at all; retrying now
+        // cannot reach it. This is the relay's observation, not proof.
+        return "Mac 当前不在线（中继未看到它的连接）：可能已休眠、断网或 Scry 未运行。唤醒 Mac 后会自动重连。"
+      case let .closed(code, _) where code == RelayTransportError.noHostLegCloseCode:
+        return "Mac 在线但暂时没有空闲中继通道（no_host_leg），请稍后重试。"
       case let .closed(code, reason):
         return "中继连接已关闭（\(code.map(String.init) ?? "无关闭码")\(reason.isEmpty ? "" : " \(reason)")）"
       case let .timedOut(stage):

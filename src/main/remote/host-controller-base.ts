@@ -157,6 +157,13 @@ export abstract class HostControllerBase {
 
   async cleanupAttachments(): Promise<void> { await this.attachmentStore?.cleanup() }
 
+  // Transport liveness for a paired phone's lane. Still re-authorizes the
+  // verified peer, so a revoked device cannot keep a tunnel warm.
+  ping(peer: string): { serverTime: number } {
+    this.authorizeDevice(peer)
+    return { serverTime: Date.now() }
+  }
+
   attachmentStart(peer: string, input: unknown): Promise<{ status: 'ready' }> {
     this.authorizeDevice(peer)
     if (!this.attachmentStore || !input || typeof input !== 'object') throw new Error('desktop_remote_attachments_unsupported')
