@@ -1,0 +1,45 @@
+{
+  "tag": "d2-main",
+  "repo": "/tmp/scry-main",
+  "turns": 6,
+  "qoderCli": null,
+  "samples": [
+    {
+      "index": 0,
+      "clickedAt": "2026-11-11T14:46:17.102Z",
+      "clickToFirstTokenMs": null,
+      "idle": false,
+      "loadAfter": [
+        161.43,
+        75.62,
+        49.12
+      ],
+      "daemonsAfter": []
+    }
+  ],
+  "load": [
+    {
+      "index": 0,
+      "before": [
+        23.07,
+        27.58,
+        31
+      ]
+    }
+  ],
+  "workspace": "/tmp/scry-d1/d2-main/workspace",
+  "bound": true,
+  "logsBefore": {
+    "runs": 14776,
+    "sdkLogFiles": 167,
+    "sdkLogBytes": 197219,
+    "at": "2026-11-11T14:46:16.287Z"
+  },
+  "logsAfter": {
+    "runs": 14780,
+    "sdkLogFiles": 167,
+    "sdkLogBytes": 197219,
+    "at": "2026-11-11T14:49:50.010Z"
+  },
+  "psAfterClose": []
+}

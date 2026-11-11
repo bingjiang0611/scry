@@ -1,0 +1,225 @@
+{
+  "tag": "d2-branch",
+  "repo": "/tmp/scry-b2",
+  "turns": 10,
+  "qoderCli": null,
+  "samples": [
+    {
+      "index": 0,
+      "clickedAt": "2026-11-11T14:30:45.794Z",
+      "clickToFirstTokenMs": 27723,
+      "idle": true,
+      "loadAfter": [
+        39.72,
+        38.69,
+        34.76
+      ],
+      "daemonsAfter": []
+    },
+    {
+      "index": 1,
+      "clickedAt": "2026-11-11T14:31:34.057Z",
+      "clickToFirstTokenMs": 16467,
+      "idle": true,
+      "loadAfter": [
+        34.54,
+        37.76,
+        34.59
+      ],
+      "daemonsAfter": []
+    },
+    {
+      "index": 2,
+      "clickedAt": "2026-11-11T14:32:05.987Z",
+      "clickToFirstTokenMs": 31823,
+      "idle": true,
+      "loadAfter": [
+        29.4,
+        35.85,
+        34.04
+      ],
+      "daemonsAfter": []
+    },
+    {
+      "index": 3,
+      "clickedAt": "2026-11-11T14:32:55.807Z",
+      "clickToFirstTokenMs": 16067,
+      "idle": true,
+      "loadAfter": [
+        43.23,
+        38.38,
+        35.03
+      ],
+      "daemonsAfter": []
+    },
+    {
+      "index": 4,
+      "clickedAt": "2026-11-11T14:33:30.328Z",
+      "clickToFirstTokenMs": 14228,
+      "idle": true,
+      "loadAfter": [
+        57.19,
+        42.12,
+        36.51
+      ],
+      "daemonsAfter": []
+    },
+    {
+      "index": 5,
+      "clickedAt": "2026-11-11T14:34:04.031Z",
+      "clickToFirstTokenMs": 14500,
+      "idle": true,
+      "loadAfter": [
+        51.87,
+        42.56,
+        36.88
+      ],
+      "daemonsAfter": []
+    },
+    {
+      "index": 6,
+      "clickedAt": "2026-11-11T14:34:34.452Z",
+      "clickToFirstTokenMs": 17182,
+      "idle": true,
+      "loadAfter": [
+        38.16,
+        40.15,
+        36.22
+      ],
+      "daemonsAfter": []
+    },
+    {
+      "index": 7,
+      "clickedAt": "2026-11-11T14:35:06.558Z",
+      "clickToFirstTokenMs": 15132,
+      "idle": true,
+      "loadAfter": [
+        42.36,
+        40.92,
+        36.64
+      ],
+      "daemonsAfter": []
+    },
+    {
+      "index": 8,
+      "clickedAt": "2026-11-11T14:35:38.120Z",
+      "clickToFirstTokenMs": 15472,
+      "idle": true,
+      "loadAfter": [
+        35,
+        39.17,
+        36.17
+      ],
+      "daemonsAfter": []
+    },
+    {
+      "index": 9,
+      "clickedAt": "2026-11-11T14:36:13.038Z",
+      "clickToFirstTokenMs": 16205,
+      "idle": true,
+      "loadAfter": [
+        30.29,
+        37.65,
+        35.72
+      ],
+      "daemonsAfter": []
+    }
+  ],
+  "load": [
+    {
+      "index": 0,
+      "before": [
+        31.91,
+        37.62,
+        34.21
+      ]
+    },
+    {
+      "index": 1,
+      "before": [
+        40.78,
+        38.93,
+        34.87
+      ]
+    },
+    {
+      "index": 2,
+      "before": [
+        34.54,
+        37.76,
+        34.59
+      ]
+    },
+    {
+      "index": 3,
+      "before": [
+        29.69,
+        35.8,
+        34.04
+      ]
+    },
+    {
+      "index": 4,
+      "before": [
+        44.33,
+        38.69,
+        35.15
+      ]
+    },
+    {
+      "index": 5,
+      "before": [
+        59.17,
+        42.78,
+        36.77
+      ]
+    },
+    {
+      "index": 6,
+      "before": [
+        49,
+        42.12,
+        36.75
+      ]
+    },
+    {
+      "index": 7,
+      "before": [
+        38.16,
+        40.15,
+        36.22
+      ]
+    },
+    {
+      "index": 8,
+      "before": [
+        39.92,
+        40.44,
+        36.49
+      ]
+    },
+    {
+      "index": 9,
+      "before": [
+        32.91,
+        38.67,
+        36.01
+      ]
+    }
+  ],
+  "workspace": "/tmp/scry-d1/d2-branch/workspace",
+  "bound": true,
+  "logsBefore": {
+    "runs": 14749,
+    "sdkLogFiles": 154,
+    "sdkLogBytes": 181014,
+    "at": "2026-11-11T14:30:44.973Z"
+  },
+  "logsAfter": {
+    "runs": 14770,
+    "sdkLogFiles": 165,
+    "sdkLogBytes": 194766,
+    "at": "2026-11-11T14:36:43.916Z"
+  },
+  "psAfterClose": []
+}

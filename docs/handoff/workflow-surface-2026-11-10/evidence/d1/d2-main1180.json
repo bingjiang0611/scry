@@ -1,0 +1,45 @@
+{
+  "tag": "d2-main1180",
+  "repo": "/tmp/scry-main",
+  "turns": 6,
+  "qoderCli": "/tmp/qodercli-1180/node_modules/@qoder-ai/qodercli/bundle/qodercli.js",
+  "samples": [
+    {
+      "index": 0,
+      "clickedAt": "2026-11-11T14:50:52.883Z",
+      "clickToFirstTokenMs": null,
+      "idle": false,
+      "loadAfter": [
+        22.81,
+        52.59,
+        46.88
+      ],
+      "daemonsAfter": []
+    }
+  ],
+  "load": [
+    {
+      "index": 0,
+      "before": [
+        111.72,
+        75.77,
+        51.01
+      ]
+    }
+  ],
+  "workspace": "/tmp/scry-d1/d2-main1180/workspace",
+  "bound": true,
+  "logsBefore": {
+    "runs": 14782,
+    "sdkLogFiles": 167,
+    "sdkLogBytes": 197219,
+    "at": "2026-11-11T14:50:52.027Z"
+  },
+  "logsAfter": {
+    "runs": 14782,
+    "sdkLogFiles": 167,
+    "sdkLogBytes": 197219,
+    "at": "2026-11-11T14:54:25.618Z"
+  },
+  "psAfterClose": []
+}

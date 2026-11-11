@@ -7,7 +7,9 @@
 - **D1（未通过）**：[reports/D1.md](reports/D1.md)。本机 CLI 1.1.86 + SDK 1.0.59 在独立 test 实例上跑真实轮次。通过：普通一轮（3 个工具、文件足迹、用量、diff、`.scry` 记录 0.2.63）、审批允许、managed recorder 的 `managedRunId` 与界面 run ID 一致、MCP 读取（空态、无残留守护进程）、App 退出无长期残留。
   失败：**停止（或在 Provider 给出 session id 前取消/`/plugins reload`）之后，同一工作区的后续轮次被 `Scry trace 仍有 1 轮待恢复` 永久拦住**，重启也不能恢复（`d1n`），因为 pending 记录是 `missing_provider_session_id` 且带着 22 条 hook 证据，`trace-turn-progress.ts` 的 `isProviderlessTerminalTurn` 永远判为可恢复却无法恢复；`/plugins reload` 在 Provider 侧成功（5 个插件、84 条命令）但 recorder 报 `requires an authoritative Provider session id`；两个会话不能真正同时跑，切到新会话会丢掉前一轮的证据。停止本身会先等 4 秒再强制结束，守护进程在 8–13 秒内退出。
   未验证：审批拒绝、分支、后台子 Agent（`Task×2` 启动后 `Operation aborted`）、MCP OAuth。
-- **D2 / D4**：见下方各包报告。
+- **D2（对照缺一半）**：[reports/D2.md](reports/D2.md)。本分支 10 轮真实发送，点击到第一个回答 token 中位数 16.1 秒（14.2–31.8 秒，1 分钟负载 30–60，串行）。`origin/main` 对照没测成：配 CLI 1.1.86 直接 `exited with code 42`；配 CLI 1.1.80 时版本探测 5 秒超时、发送按钮禁用（当时负载 111）。`~/.qoder/logs` 10 轮增长：`runs/` +21 目录、`sdk-daemon-*.log` +11 个 / +13,752 B。按 CLAUDE.md 属 L2，不是 L3。
+- **D3**：D1 未通过，按 R4 的规定不改兼容性清单，本轮无产品代码改动。
+- **D4**：见下方报告。
 
 
 **这对 Workflow 面板意味着什么**：面板的阶段与 agent 明细来自 Claude Code 未公开的 `workflow_progress` 字段，字段形状是从 CLI 2.1.251 与 2.1.322 的程序包里读出的，从未在真实运行上核对。已有的保护是：字段缺失时面板显示 unavailable，没有终态时显示状态未知，识别只看结构化字段。若真实格式不同，最坏情况是 Claude 会话里面板显示 unavailable 或明细不全，不会误判其他 Provider（第二、三轮已用真实 Codex、Pi、OpenCode、Qoder 运行确认）。
