@@ -13,6 +13,8 @@ import { parseConversationLegacySource, prepareConversationAdoption } from '../c
 import { deleteConversationHistory } from '../conversation-history'
 import { registerConversationDeletionHandlers } from './conversation-delete'
 import { resolveSessionRunIds } from '../db'
+import type { DockBadgeState } from '../dock-badge'
+import { conversationAttentionKey, sessionAttentionKey } from '../../shared/session-attention'
 
 export interface ConversationBootstrapDependencies {
   handleTrusted: <TArgs extends unknown[], TResult>(channel: string, listener: (event: IpcMainInvokeEvent, ...args: TArgs) => TResult) => void
@@ -36,6 +38,7 @@ export interface ConversationBootstrapDependencies {
   resolveSessionRunIds: typeof resolveSessionRunIds
   deleteConversationHistory: typeof deleteConversationHistory
   appUserDataDir: string
+  dockBadge: Pick<DockBadgeState, 'adopt'>
 }
 
 export function registerConversationHandlers(deps: ConversationBootstrapDependencies) {
@@ -79,6 +82,12 @@ export function registerConversationHandlers(deps: ConversationBootstrapDependen
         if (fingerprint === undefined) return prepared.preview
         if (prepared.preview.fingerprint !== fingerprint) throw new Error('迁移源已变化，请重新预览；旧入口保留')
         const conversation = await conversationStore().create(source.cwd, prepared.seed)
+        // The native row is hidden from now on, including under its app alias; a side chat
+        // of it that is still running reports to the conversation's row instead.
+        for (const sessionId of new Set([source.externalSessionId, catalog.sessionId])) {
+          deps.dockBadge.adopt(sessionAttentionKey({ providerId: source.providerId, agentProfileId: source.agentProfileId,
+            cwd: source.cwd, sessionId }), conversationAttentionKey(conversation.id))
+        }
         invalidateSessionHistoryLoad('session adopted into logical conversation')
         getWindow()?.webContents.send('agent:dataUpdated', { kind: 'conversation_changed', conversationId: conversation.id })
         return (await conversationService().list(source.cwd)).find(item => item.id === conversation.id)!

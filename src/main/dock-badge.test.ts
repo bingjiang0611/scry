@@ -275,4 +275,31 @@ describe('DockBadgeState', () => {
     expect(badge.count).toBe(1)
     expect(counts.at(-1)).toBe(1)
   })
+  it('接管后的原生会话把未读和之后到达的提醒交给接管它的对话行', () => {
+    const setCount = vi.fn()
+    const badge = new DockBadgeState(setCount)
+    const background = { windowFocused: false, sessionViewed: false, needsAttention: true }
+    badge.markAttention('native-session', background)
+
+    badge.adopt('native-session', 'conversation\0adopter')
+    // The native row is hidden now; its unread state is shown on the conversation row instead.
+    expect(badge.snapshot().unreadSessionKeys).toEqual(['conversation\0adopter'])
+
+    badge.view('conversation\0adopter', true)
+    expect(badge.count).toBe(0)
+    // A side chat that started before the adoption still reports the native key: the row the
+    // user is viewing is its owner, so a focused window reads it at once.
+    expect(badge.isViewed('native-session')).toBe(true)
+    badge.markAttention('native-session', { windowFocused: true, sessionViewed: badge.isViewed('native-session'), needsAttention: true })
+    expect(badge.count).toBe(0)
+
+    badge.view(null, false)
+    badge.markAttention('native-session', background)
+    expect(badge.snapshot().unreadSessionKeys).toEqual(['conversation\0adopter'])
+    badge.releaseQuestionAttention('native-session', 0)
+    expect(badge.count).toBe(0)
+    // Other sessions keep their own rows.
+    badge.markAttention('other-session', background)
+    expect(badge.snapshot().unreadSessionKeys).toEqual(['other-session'])
+  })
 })

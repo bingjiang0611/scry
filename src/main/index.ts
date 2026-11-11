@@ -239,7 +239,7 @@ const { prepareConversationDeletion, sideChatCascade } = registerConversationHan
   conversationService, invalidateSessionHistoryLoad, getWindow: () => win,
   deleteOneSession: (request, options) => deleteOneSession(request as SessionDeletionRequest, options as Parameters<typeof deleteOneSession>[1]),
   resolveSessionRunIds, deleteConversationHistory, appUserDataDir: app.getPath('userData'),
-  providerSessionKey, assertLegacyConversationWriteAllowed, rememberProject
+  providerSessionKey, assertLegacyConversationWriteAllowed, rememberProject, dockBadge
 })
 
 conversationDeletion.prepare = prepareConversationDeletion

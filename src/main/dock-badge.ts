@@ -6,8 +6,13 @@ export interface DockBadgeAttentionState {
   needsAttention: boolean
 }
 
+/** Bounds the adoption map; a process adopts far fewer sessions than this. */
+const MAX_ADOPTED_SESSIONS = 512
+
 export class DockBadgeState {
   private readonly unreadSessionKeys = new Set<string>()
+  /** Native session key → the key of the conversation that adopted it. */
+  private readonly adoptedBy = new Map<string, string>()
   private readonly remoteSessionKeys = new Set<string>()
   private viewedSessionKey: string | null = null
   private revision = 0
@@ -27,15 +32,29 @@ export class DockBadgeState {
   }
 
   isViewed(sessionKey: string): boolean {
-    return this.viewedSessionKey === sessionKey
+    return this.viewedSessionKey === this.owner(sessionKey)
+  }
+
+  /**
+   * An adopted native session has no sidebar row of its own any more. Its unread state, and
+   * attention a run that started before the adoption reports later, belong to the adopting
+   * conversation's row. Process-local like the unread set: no run outlives this process.
+   */
+  adopt(sessionKey: string, conversationKey: string): void {
+    if (sessionKey === conversationKey) return
+    this.adoptedBy.delete(sessionKey)
+    this.adoptedBy.set(sessionKey, conversationKey)
+    if (this.adoptedBy.size > MAX_ADOPTED_SESSIONS) this.adoptedBy.delete(this.adoptedBy.keys().next().value!)
+    this.rekey(sessionKey, conversationKey)
   }
 
   unview(sessionKey: string): void {
     if (this.viewedSessionKey === sessionKey) this.viewedSessionKey = null
   }
 
-  markAttention(sessionKey: string, state: DockBadgeAttentionState): void {
+  markAttention(attentionKey: string, state: DockBadgeAttentionState): void {
     if (!state.needsAttention) return
+    const sessionKey = this.owner(attentionKey)
     if (state.sessionViewed) this.viewedSessionKey = sessionKey
     if (state.windowFocused && state.sessionViewed) {
       this.clear(sessionKey)
@@ -47,7 +66,8 @@ export class DockBadgeState {
   }
 
   // Questions can arrive before the Provider supplies a native session ID.
-  rekey(previousSessionKey: string, sessionKey: string): void {
+  rekey(previousSessionKey: string, nextSessionKey: string): void {
+    const sessionKey = this.owner(nextSessionKey)
     if (previousSessionKey === sessionKey) return
     if (this.viewedSessionKey === previousSessionKey) this.viewedSessionKey = sessionKey
     if (!this.unreadSessionKeys.delete(previousSessionKey)) return
@@ -65,7 +85,7 @@ export class DockBadgeState {
   // 清掉；这是维护者明确接受的取舍，换来不会留下一个永远消不掉的假未读。
   releaseQuestionAttention(sessionKey: string | null, remainingPending: number): void {
     if (!sessionKey || remainingPending > 0) return
-    this.clear(sessionKey)
+    this.clear(this.owner(sessionKey))
   }
 
   /**
@@ -96,6 +116,10 @@ export class DockBadgeState {
       revision: this.revision,
       unreadSessionKeys: [...this.unreadSessionKeys]
     }
+  }
+
+  private owner(sessionKey: string): string {
+    return this.adoptedBy.get(sessionKey) ?? sessionKey
   }
 
   private clear(sessionKey: string | null): void {

@@ -54,7 +54,8 @@ function fixture() {
     deleteOneSession: unexpected,
     resolveSessionRunIds: unexpected,
     deleteConversationHistory: unexpected,
-    appUserDataDir: '/unused-by-this-test'
+    appUserDataDir: '/unused-by-this-test',
+    dockBadge: { adopt: () => {} }
   })
   const invoke = (channel: string, ...args: unknown[]): unknown => handlers.get(channel)!(event, ...args)
   return { invoke, conversations, conversationStore, event, webContents, mainFrame, handlers }
