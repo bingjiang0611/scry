@@ -68,6 +68,11 @@ G1（5 条差异补处理方式 + 守卫断言）与 G2（secret 生命周期改
 3. main 的 `resolveKnownProjectDirectory` 在 daemon 模式下改为向 daemon 询问：已实现，见 [b4-l4-known-projects](status/b4-l4-known-projects.md)。
 4. openExternal 在 daemon 模式下的候选项目范围变窄：接受。
 
+## 进度（2026-11-11）
+
+B4-L4 迁移完成：168 个特权通道全部有了去处（留在 main、本机 op、转发或拆分）。各组见 `status/b4-l4-*.md`；最后一组是 [b4-l4-pairing](status/b4-l4-pairing.md)。
+
 ## 需要决定
 
-无。
+1. `remote:desktop:*`（把另一台桌面 App 配对到本机宿主）：daemon 模式下 App 自己没有宿主，这三个通道回答「未启用」。要不要交给 daemon？
+2. 撤销 App 自己的本机连接：配对界面不列、也不允许撤销它。如果需要一个撤销入口，按 2026-11-07 的决定，撤销之后应走「重验 daemon.lock 身份 → SIGTERM → 重启生成新 secret → 重新入网」，需要另行设计。

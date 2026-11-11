@@ -36,6 +36,8 @@ export interface DaemonLocalEndpointDeps {
   runs: () => RunRegistry<ActiveRun, RunControl>
   startupManagedRecovery: () => Promise<void>
   requestRunStop: (runId: string) => boolean
+  // This daemon's host when remote access is enabled on main's rule, else null.
+  remoteHost: () => import('../../main/bootstrap/pairing-channels').PairingHost | null
   forkSessionWithAuthority: (request: DesktopRemoteForkSessionRequest) => Promise<AgentForkSessionResult>
   userDataDir: string
   // Worktree selection reads, and the repository ids they hand out, live in this one service.

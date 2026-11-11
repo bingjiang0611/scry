@@ -10,11 +10,12 @@ import { usageAnalyticsWithCreditsQuery } from '../db'
 import { readLlmPerformanceHistory } from '../llm-performance-history'
 import { summarizeRunningLlmSessions } from '../../shared/llm-performance'
 import { resolveRemoteRelay } from './remote-relay'
+import { pairingChannelHandlers } from './pairing-channels'
+import { registerChannelHandlers } from './startup-channels'
 import { createRemoteHistoryHandlers } from './remote-history'
 import { RunOutputWorkerStore } from '../remote/run-output-worker'
 import { inProcessRemoteHostEnabled } from '../remote/remote-defaults'
 import type { IpcMainInvokeEvent } from 'electron'
-import type { RemoteStatus } from '../../shared/remote'
 
 import { createHostRuntime } from '../../host-runtime/host-runtime'
 import type { RemoteHostRuntime, RemoteRuns, RemoteReceipts, DeleteOptions, RemoteStartOptions } from '../../host-runtime/host-runtime-types'
@@ -101,21 +102,9 @@ export function registerRemoteHostHandlers(handleTrusted: TrustedHandler, runtim
     if (!service) throw new Error('远程访问未启用')
     return service
   }
-  handleTrusted('remote:status', (): RemoteStatus => runtime.remoteHostService ? runtime.remoteHostService.status() : { enabled: false })
+  // Shared with the daemon, which hosts paired devices in daemon mode (pairing-channels.ts).
+  registerChannelHandlers(handleTrusted, pairingChannelHandlers({ host: () => runtime.remoteHostService }))
   handleTrusted('remote:desktop:status', () => runtime.remoteHostService?.desktopStatus() ?? { enabled: false })
   handleTrusted('remote:desktop:invite', () => requireRemoteHost().beginDesktopPairing())
   handleTrusted('remote:desktop:disable', () => requireRemoteHost().disableDesktop())
-  handleTrusted('remote:pairing:begin', () => requireRemoteHost().beginPairing())
-  handleTrusted('remote:pairing:confirm', (_event, pairingId: unknown, expectedPublicKeySHA256: unknown) => {
-    if (typeof pairingId !== 'string' || typeof expectedPublicKeySHA256 !== 'string') throw new Error('无效的配对确认参数')
-    return requireRemoteHost().confirmPairing(pairingId, expectedPublicKeySHA256)
-  })
-  handleTrusted('remote:pairing:cancel', (_event, pairingId: unknown) => {
-    if (typeof pairingId !== 'string') throw new Error('无效的配对标识')
-    return requireRemoteHost().cancelPairing(pairingId)
-  })
-  handleTrusted('remote:device:revoke', (_event, deviceId: unknown) => {
-    if (typeof deviceId !== 'string') throw new Error('无效的设备标识')
-    return requireRemoteHost().revokeDevice(deviceId)
-  })
 }

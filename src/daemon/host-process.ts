@@ -29,6 +29,7 @@ import { daemonLocalEndpoint } from './local-endpoint'
 import { AppEventFeed, DAEMON_WINDOW_NOTICES } from '../main/remote/app-event-feed'
 import { createHistoryRuntime } from '../main/bootstrap/history-runtime'
 import { createForkOperations } from '../main/bootstrap/run-fork'
+import { remoteHostEnabled } from '../main/remote/remote-defaults'
 import { createDaemonTerminalService, type DaemonTerminalServiceDeps } from './terminal-service'
 import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore, type LocalEnrollSocket } from './local-enrollment'
 
@@ -338,6 +339,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       runs: () => pipeline.runs,
       requestRunStop,
       forkSessionWithAuthority: (request) => forkOperations!.forkSessionWithAuthority(request),
+      remoteHost: () => remoteHostEnabled(process.env.SCRY_REMOTE_HOST, options.isPackaged) ? remoteHostService : null,
       startupManagedRecovery: () => startupManagedRecovery,
       userDataDir: options.userDataDir,
       sourceControl,

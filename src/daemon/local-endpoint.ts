@@ -10,6 +10,7 @@ import { workbenchLocalOps } from './local-ops/workbench'
 import { projectLocalOps } from './local-ops/project'
 import { mcpLocalOps } from './local-ops/mcp'
 import { billingLocalOps } from './local-ops/billing'
+import { pairingLocalOps } from './local-ops/pairing'
 
 export type { DaemonLocalEndpointDeps } from './local-ops/deps'
 
@@ -37,6 +38,7 @@ export function daemonLocalEndpoint(endpointDeps: DaemonLocalEndpointDeps): Loca
       ...projectLocalOps(deps),
       ...mcpLocalOps(deps),
       ...billingLocalOps(deps),
+      ...pairingLocalOps(deps),
       ...deps.terminal.localOps
     }),
     events: deps.events,

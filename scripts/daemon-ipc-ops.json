@@ -43,8 +43,8 @@
     },
     "localHostStatus": {
       "path": "remote",
-      "request": "{ op:'localHostStatus', method:'status' }",
-      "response": "现有 host 状态（hostId、监听、租约、设备数）",
+      "request": "{ op:'localHostStatus', method:'status', args: [] }",
+      "response": "main 同一处理的 RemoteStatus；设备列表不含 App 自己的本机连接（scope: local），与进程内一致；远程访问按 main 的规则（remoteHostEnabled）未启用时为 { enabled: false }",
       "authorize": "只在 unix socket 上、且调用方持有 scope: local grant",
       "why": "宿主状态由 daemon 持有",
       "scopes": [
@@ -53,9 +53,9 @@
     },
     "localPairing": {
       "path": "remote",
-      "request": "{ op:'localPairing', method:'begin'|'confirm'|'cancel'|'revoke', payload }",
-      "response": "现有 PairingAuthority 结果",
-      "authorize": "只在 unix socket 上、且调用方持有 scope: local grant（见 P3 §13.2）",
+      "request": "{ op:'localPairing', method:'begin'|'confirm'|'cancel'|'revoke', args }（渲染端参数原样）",
+      "response": "main 同一处理的 PairingAuthority 结果",
+      "authorize": "只在 unix socket 上、且调用方持有 scope: local grant（见 P3 §13.2）；确认须带用户比对过的公钥指纹，由 authority 校验，失败即拒绝；撤销拒绝 App 自己的本机连接",
       "why": "配对权威随 daemon 迁移",
       "scopes": [
         "local"
