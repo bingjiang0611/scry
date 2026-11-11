@@ -1,8 +1,8 @@
-import { query, type Query } from '@qoder-ai/qoder-agent-sdk'
+import type { Query } from '@qoder-ai/qoder-agent-sdk'
 import type { NormalizeCtx } from '../normalize-core'
-import type { ProcessIdentity } from '../process-diagnostics'
 import { normalizeQoderMessage } from './qoder-messages'
-import { heldPrompt, qoderOptions, signalProcessTree } from './qoder-launch'
+import { heldPrompt, qoderSessionOptions, signalProcessTree } from './qoder-launch'
+import { qoderQuery, startQoderDaemon, type QoderDaemonLease } from './qoder-daemon'
 import { qoderMcpSnapshot } from './qoder-mcp'
 import { newId } from './qoder-shared'
 import { qoderContextTokensFromUsage, qoderTrace } from './qoder-evidence'
@@ -21,7 +21,7 @@ export function runQoderPluginReload(
     let stopped = false
     let externalSessionId = request.resume
     let q: Query | undefined
-    let qoderIdentityPromise: Promise<ProcessIdentity | undefined> | undefined
+    let lease: QoderDaemonLease | undefined
     const ctx: NormalizeCtx = {
       runId: request.runId,
       cwd: request.cwd,
@@ -30,21 +30,20 @@ export function runQoderPluginReload(
       contextTokensFromUsage: qoderContextTokensFromUsage
     }
     const promise: Promise<ProviderRunResult> = (async () => {
-      q = query({
+      lease = await startQoderDaemon({
+        managedRecorder: request.managedRecorder === true,
+        managedIdentity: request.managedRecorderIdentity
+      })
+      if (stopped) {
+        await lease.stop()
+        return { stopped: true, status: 'interrupted', externalSessionId }
+      }
+      q = qoderQuery(lease, {
         prompt: prompt.stream,
         options: {
-          ...qoderOptions(
-            request.cwd,
-            request.resume,
-            (_pid, identityPromise) => { qoderIdentityPromise = identityPromise },
-            undefined,
-            request.permissionMode,
-            request.managedRecorder === true,
-            request.mcpExecution,
-            request.managedRecorderIdentity
-          ),
+          ...qoderSessionOptions(request.cwd, request.resume, request.permissionMode, request.mcpExecution),
           abortController: controller
-        } as never
+        }
       })
       const events = (async () => {
         for await (const message of q!) {
@@ -86,6 +85,7 @@ export function runQoderPluginReload(
         prompt.release()
         await q.close().catch(() => {})
         await events
+        await lease.stop()
       }
       return { ...providerResult, externalSessionId }
     })()
@@ -96,8 +96,11 @@ export function runQoderPluginReload(
         controller.abort()
         void q?.interrupt().catch(() => {})
       },
-      forceKill: () => signalProcessTree(qoderIdentityPromise, 'SIGKILL'),
-      // qoderPid 是本轮 spawn 的 CLI 进程树：硬杀不会波及其他 run。
+      forceKill: () => {
+        signalProcessTree(lease?.identity ? Promise.resolve(lease.identity) : undefined, 'SIGKILL')
+        void lease?.stop()
+      },
+      // lease 是本轮专属的 Qoder 守护进程：硬杀不会波及其他 run。
       forceKillScope: 'run_scoped',
       getExternalSessionId: () => externalSessionId,
       getProviderTurnId: () => undefined

@@ -13,6 +13,17 @@ vi.mock('@qoder-ai/qoder-agent-sdk', async (importOriginal) => {
     })
   }
 })
+// The real SDK query runs on the fake transport above; no daemon process is started.
+vi.mock('./qoder-daemon', async () => {
+  const actual = await vi.importActual<typeof import('./qoder-daemon')>('./qoder-daemon')
+  const sdk = await import('@qoder-ai/qoder-agent-sdk')
+  return {
+    ...actual,
+    startQoderDaemon: async () => ({ daemon: {}, stderrTail: () => '', onFailure: () => () => {}, stop: async () => {} }),
+    qoderQuery: (_lease: unknown, params: Parameters<typeof sdk.query>[0]) =>
+      sdk.query({ ...params, options: { ...params.options, auth: sdk.qodercliAuth() } })
+  }
+})
 vi.mock('../claude-locate', () => ({
   resolveRuntimeCliBin: () => '/unused/qodercli', runtimeCliEnv: () => ({}), shellEnv: () => ({})
 }))

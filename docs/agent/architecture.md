@@ -58,6 +58,7 @@ React renderer
 - `src/main/index.ts`：Electron composition root、IPC 与生命周期热点；优先提取 focused module，不继续堆叠无关 policy。
 - `src/main/providers/types.ts`、`registry.ts`：Provider adapter/facet/capability 主接缝。
 - `src/main/providers/{claude,codex,qoder,opencode,pi}.ts`：transport-specific adapter。
+- `src/main/providers/qoder-daemon.ts`：Qoder SDK 1.0.58+ 只走 qodercli 守护进程。Scry 每次运行或控制查询启动专属守护进程并在结束时停止，以保留按运行注入的环境、可核验身份的进程和只停本轮进程树；不得使用 SDK 默认的进程级共享守护进程。
 - `src/shared/{provider,runtime,trace,turn-record,workspace,terminal}.ts`：跨进程与持久合同。
 - `src/main/{agent-runner,run-registry,run-outcome}.ts`：执行、活动 run 与结局。
 - `src/shared/claude-workflow.ts`、`src/main/normalize-workflow.ts`、`src/renderer/workflow-runs.ts`：Claude Code 原生 workflow 的观测合同、任务事件行增量归一化与 Workflow 面板投影。只观测不调度；阶段/agent 明细来自未公开的 `workflow_progress` 字段，缺失时为 unavailable。

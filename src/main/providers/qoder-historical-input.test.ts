@@ -22,6 +22,8 @@ vi.mock('../process-diagnostics', async () => {
 })
 vi.mock('@qoder-ai/qoder-agent-sdk', () => ({
   qodercliAuth: () => ({ type: 'qodercli' }),
+  // Each run starts its own daemon; this suite only needs one that stops cleanly.
+  startDaemon: vi.fn(async () => ({ onFailure: () => () => {}, stop: async () => {} })),
   query: sdk.query,
   getSessionMessages: sdk.getSessionMessages,
   forkSession: sdk.forkSession

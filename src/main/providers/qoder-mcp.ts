@@ -1,4 +1,4 @@
-import { query, type McpServerStatus } from '@qoder-ai/qoder-agent-sdk'
+import type { McpServerStatus } from '@qoder-ai/qoder-agent-sdk'
 import {
   capabilityReady,
   capabilityUnknown,
@@ -12,7 +12,8 @@ import { shellEnv } from '../claude-locate'
 import { isRemoteMcpConfig, listProviderMcp } from '../mcp-config'
 import { isSafeOAuthAuthorizationUrl } from '../oauth-loopback'
 import { sanitizeMcpAuthError } from './mcp-auth-security'
-import { heldPrompt, qoderOptions } from './qoder-launch'
+import { heldPrompt, qoderSessionOptions } from './qoder-launch'
+import { qoderQuery, startQoderDaemon, type QoderDaemonLease } from './qoder-daemon'
 import type { AuthorizedMcpExecution, McpAuthInteraction } from './types'
 
 const QODER_MCP_AUTH_TIMEOUT_MS = 120_000
@@ -75,15 +76,19 @@ export async function readQoderMcpSnapshot(
     return capabilityUnknown<McpSnapshot>(context, 'read', '缺少已确认的 Qoder MCP 执行快照')
   }
   const prompt = heldPrompt()
-  const q = query({ prompt: prompt.stream, options: qoderOptions(context.cwd, undefined, undefined, undefined, 'default', false, execution) as never })
+  let lease: QoderDaemonLease | undefined
+  let q: ReturnType<typeof qoderQuery> | undefined
   try {
+    lease = await startQoderDaemon()
+    q = qoderQuery(lease, { prompt: prompt.stream, options: qoderSessionOptions(context.cwd, undefined, 'default', execution) })
     await q.initializationResult()
     return capabilityReady(context, 'read', qoderMcpSnapshot(await q.mcpServerStatus(), configured))
   } catch (error) {
     return capabilityUnknown<McpSnapshot>(context, 'read', sanitizeMcpAuthError(error))
   } finally {
     prompt.release()
-    await Promise.resolve(q.close()).catch(() => {})
+    if (q) await Promise.resolve(q.close()).catch(() => {})
+    await lease?.stop()
   }
 }
 
@@ -116,15 +121,19 @@ export async function reauthenticateQoderMcp(
   }
 
   const prompt = heldPrompt()
-  const q = query({
+  let lease: QoderDaemonLease
+  try {
+    lease = await startQoderDaemon()
+  } catch (error) {
+    loopback.close()
+    return failed(error)
+  }
+  const q = qoderQuery(lease, {
     prompt: prompt.stream,
     options: {
-      ...qoderOptions(context.cwd, undefined, undefined, undefined, 'default', false, {
-        ...execution,
-        targets: [target]
-      }),
+      ...qoderSessionOptions(context.cwd, undefined, 'default', { ...execution, targets: [target] }),
       persistSession: false
-    } as never
+    }
   })
   let authenticated = false
   let timedOut = false
@@ -171,7 +180,8 @@ export async function reauthenticateQoderMcp(
       loopback.close()
     } finally {
       prompt.release()
-      const close = Promise.resolve(q.close()).catch(() => {})
+      // The daemon is this call's own: stopping it also ends a stuck browser-auth session.
+      const close = Promise.resolve(q.close()).catch(() => {}).then(() => lease.stop())
       if (timedOut) void close
       else await close
     }

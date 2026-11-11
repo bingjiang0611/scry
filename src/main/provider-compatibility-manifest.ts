@@ -31,7 +31,7 @@ export const MANIFEST_MAX_BYTES = 256 * 1024
  */
 export const BUNDLED_PROVIDER_COMPATIBILITY: ProviderCompatibilityManifest = {
   schemaVersion: 1,
-  updatedAt: '2026-10-15T00:00:00.000Z',
+  updatedAt: '2026-11-11T00:00:00.000Z',
   policies: [
     {
       provider: 'codex',
@@ -51,9 +51,12 @@ export const BUNDLED_PROVIDER_COMPATIBILITY: ProviderCompatibilityManifest = {
     },
     {
       provider: 'qoder',
-      recommendedRange: '>=1.1.60 <1.2.0',
+      // Scry now drives Qoder through the SDK 1.0.59 daemon (one daemon per run). The
+      // old per-query process, last verified on CLI 1.1.60–1.1.80, is refused by
+      // CLI 1.1.81+ and no longer exists in this SDK, so those results do not carry over.
+      recommendedRange: '>=1.1.80 <1.2.0',
       rules: [
-        { range: '>=1.1.60 <1.2.0', status: 'supported', note: 'qodercli 1.1.60：已在本机真实轮次中验证 native/canonical 双流、工具写入与 hook 证据采集' },
+        { range: '>=1.1.80 <1.2.0', status: 'unsupported', note: 'Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证' },
         { range: '>=1.2.0', status: 'unsupported', note: '高于已探测版本线；未验证证据完整性' }
       ]
     },

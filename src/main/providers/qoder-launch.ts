@@ -1,11 +1,10 @@
-import { spawn } from 'node:child_process'
 import { realpathSync } from 'node:fs'
-import { qodercliAuth, type SDKUserMessage } from '@qoder-ai/qoder-agent-sdk'
+import type { SDKUserMessage } from '@qoder-ai/qoder-agent-sdk'
 import type { AgentPermissionMode } from '../../shared/runtime'
-import { resolveRuntimeCliBin, runtimeCliEnv } from '../claude-locate'
+import { resolveRuntimeCliBin } from '../claude-locate'
 import { authorizedMcpServers } from '../mcp-config'
-import { captureProcessIdentity, signalProcessTreeWithIdentity, type ProcessIdentity } from '../process-diagnostics'
-import type { AuthorizedMcpExecution, ProviderRunRequest } from './types'
+import { signalProcessTreeWithIdentity, type ProcessIdentity } from '../process-diagnostics'
+import type { AuthorizedMcpExecution } from './types'
 
 export function heldPrompt(): { stream: AsyncIterable<never>; release: () => void } {
   let release = (): void => {}
@@ -78,33 +77,27 @@ export function resolveQoderSdkExecutable(executable: string): string {
   }
 }
 
-/** The exact CLI entry the SDK launches; identity checks must hash this same path. */
+/**
+ * The exact CLI entry the SDK launches; identity checks must hash this same path.
+ * Corporate EDR blocks the qodercli symlink entry from reading ~/.qoder/.auth/user.
+ * Resolving the same signed CLI to its JavaScript bundle lets the SDK launch it
+ * through Node, preserving the original config/auth/session paths.
+ */
 export function qoderExecutable(): string | undefined {
   const detected = process.env.SCRY_QODERCLI_PATH?.trim() || resolveRuntimeCliBin('qoder')
   return detected ? resolveQoderSdkExecutable(detected) : undefined
 }
 
-export function qoderOptions(
+/**
+ * Session-level options for a query bound to a Scry-owned daemon. Process-level settings
+ * (executable, env, auth) belong to the daemon; see `qoder-daemon.ts`.
+ */
+export function qoderSessionOptions(
   cwd: string | undefined,
   resume?: string,
-  onPid?: (pid: number, identity: Promise<ProcessIdentity | undefined>) => void,
-  onExit?: (code: number | null, signal: NodeJS.Signals | null) => void,
   permissionMode: AgentPermissionMode = 'default',
-  managedRecorder = false,
-  mcpExecution?: AuthorizedMcpExecution,
-  managedIdentity?: ProviderRunRequest['managedRecorderIdentity']
+  mcpExecution?: AuthorizedMcpExecution
 ): Record<string, unknown> {
-  const executable = qoderExecutable()
-  if (!executable) throw new Error('Qoder CLI 未找到')
-  // Corporate EDR blocks the qodercli symlink entry from reading ~/.qoder/.auth/user.
-  // Resolving the same signed CLI to its JavaScript bundle lets the SDK launch it
-  // through Node, preserving the original config/auth/session paths.
-  const runtimeEnv = runtimeCliEnv(
-    undefined,
-    managedRecorder ? { managedRecorder: true, providerId: 'qoder' } : { providerId: 'qoder' }
-  )
-  delete runtimeEnv.SCRY_MANAGED_RUN_ID
-  delete runtimeEnv.SCRY_MANAGED_PROMPT_HASH
   const permissions = permissionMode === 'full_access'
     ? { permissionMode: 'bypassPermissions', allowDangerouslySkipPermissions: true }
     : {
@@ -114,20 +107,8 @@ export function qoderOptions(
           : permissionMode === 'auto_accept_edits' ? 'acceptEdits' : 'default'
       }
   return {
-    auth: qodercliAuth(),
     cwd,
     resume,
-    pathToQoderCLIExecutable: executable,
-    env: {
-      ...runtimeEnv,
-      ...(managedRecorder && managedIdentity ? {
-        SCRY_MANAGED_RUN_ID: managedIdentity.runId,
-        SCRY_MANAGED_PROMPT_HASH: managedIdentity.promptHash
-      } : {}),
-      // Waiting is visible in Scry, with explicit user-controlled cancellation.
-      // Silence must not trigger the CLI's destructive background wait ceiling.
-      QODERCLI_PRINT_BG_WAIT_CEILING_MS: '0'
-    },
     ...permissions,
     includePartialMessages: true,
     includeHookEvents: true,
@@ -139,24 +120,6 @@ export function qoderOptions(
     // fingerprinted configs that passed Scry's Guard and execution checks.
     strictMcpConfig: true,
     mcpServers: authorizedMcpServers(mcpExecution),
-    controlRequestTimeoutMs: 30_000,
-    ...(onPid
-      ? {
-          spawnQoderCLIProcess: (options: { command: string; args: string[]; cwd?: string; env: Record<string, string | undefined>; signal: AbortSignal }) => {
-            const child = spawn(options.command, options.args, {
-              cwd: options.cwd,
-              env: options.env as NodeJS.ProcessEnv,
-              detached: process.platform !== 'win32',
-              stdio: ['pipe', 'pipe', 'pipe']
-            })
-            // 立刻发起身份采集；进程还活着时采到的启动时间才能作为后续核对基准。
-            const identityPromise = captureProcessIdentity(child.pid)
-            if (child.pid) onPid(child.pid, identityPromise)
-            child.once('exit', (code, signal) => onExit?.(code, signal))
-            options.signal.addEventListener('abort', () => signalProcessTree(identityPromise, 'SIGTERM'), { once: true })
-            return child
-          }
-        }
-      : {})
+    controlRequestTimeoutMs: 30_000
   }
 }

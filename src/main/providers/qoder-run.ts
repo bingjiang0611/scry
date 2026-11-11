@@ -1,19 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import {
-  ProcessTransport,
-  getSessionMessages,
-  query,
-  type McpServerStatus,
-  type Query,
-  type QueryTransportCreateOptions
-} from '@qoder-ai/qoder-agent-sdk'
+import { getSessionMessages, type McpServerStatus, type Query } from '@qoder-ai/qoder-agent-sdk'
 import type { TraceEvent } from '../../shared/trace'
 import type { NormalizeCtx } from '../normalize-core'
-import type { ProcessIdentity } from '../process-diagnostics'
 import { QoderCreditCollector } from '../../shared/credit-usage'
 import { QoderBackgroundMonitor } from './qoder-background-work'
 import { normalizeQoderMessage, QoderBackgroundTasks } from './qoder-messages'
-import { QoderTaskControlTransport } from './qoder-task-control'
 import { HistoricalInput } from './historical-input'
 import { isTranscriptUserPrompt } from './session-fork-boundary'
 import { settleQoderInputReceipt, type QoderTranscriptMessage } from './qoder-input-receipt'
@@ -36,7 +27,8 @@ import {
   isAgentTerminalStatus,
   observedAgentStatus
 } from './qoder-hooks'
-import { livePrompt, qoderExecutable, qoderOptions, signalProcessTree } from './qoder-launch'
+import { livePrompt, qoderExecutable, qoderSessionOptions, signalProcessTree } from './qoder-launch'
+import { qoderQuery, startQoderDaemon, type QoderDaemonLease } from './qoder-daemon'
 import { expandQoderProjectCommand, projectCommandMatch } from './qoder-commands'
 import { qoderMcpSnapshot } from './qoder-mcp'
 import { qoderCanUseTool } from './qoder-run-permissions'
@@ -67,10 +59,9 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
   }
   const currentProviderTurnId = (): string | undefined => providerTurnIdAmbiguous ? undefined : providerTurnId
   let q: Query | undefined
-  let qoderPid: number | undefined
-  let qoderIdentityPromise: Promise<ProcessIdentity | undefined> | undefined
+  // This run's own Qoder daemon: its pid names the hook log and bounds force-kill.
+  let lease: QoderDaemonLease | undefined
   let streamSettled = false
-  let exitTimer: ReturnType<typeof setTimeout> | undefined
   let rejectUnexpectedExit: (error: Error) => void = () => {}
   const unexpectedExit = new Promise<never>((_resolve, reject) => {
     rejectUnexpectedExit = reject
@@ -83,8 +74,9 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
   const activeAgentCalls = new Set<string>()
   const terminalAgentCalls = new Set<string>()
   const backgroundTasks = new QoderBackgroundTasks()
-  let taskControl: QoderTaskControlTransport | undefined
-  const backgroundMonitor = new QoderBackgroundMonitor(backgroundTasks, () => !stopped && !streamSettled && taskControl?.canStopTask === true, (backgroundWork) => {
+  // Single-task stop was verified only on the per-query transport of CLI 1.1.45. The daemon
+  // SDK's Query.stopTask() has not been verified against a real CLI, so it stays unavailable.
+  const backgroundMonitor = new QoderBackgroundMonitor(backgroundTasks, () => false, (backgroundWork) => {
     request.emit({
       id: newId(), runId: request.runId, ts: new Date().toISOString(), kind: 'harness',
       stage: 'runtime:background_work', backgroundWork,
@@ -167,6 +159,21 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
     const providerPrompt = request.cwd && projectCommandMatch(request.prompt)
       ? await expandQoderProjectCommand(request.prompt, request.cwd)
       : request.prompt
+    // Start this run's daemon before any input is attempted: a start failure leaves the
+    // prompt unsent, exactly like a missing CLI.
+    lease = await startQoderDaemon({
+      managedRecorder: request.managedRecorder === true,
+      managedIdentity: request.managedRecorderIdentity
+    })
+    lease.onFailure((error) => {
+      if (stopped || streamSettled) return
+      rejectUnexpectedExit(new Error(`Qoder 守护进程已失效，但 SDK 事件流未结束：${error.message}`))
+    })
+    if (stopped) {
+      await lease.stop()
+      return { externalSessionId: request.resume, providerTurnId: undefined, forkTurnId: undefined,
+        stopped: true, status: 'interrupted', mcp: undefined }
+    }
     // The run-owned UUID is the only user identity Scry can later match in the
     // native transcript; it is not a receipt by itself.
     const outgoingText = history.text(providerPrompt)
@@ -175,32 +182,12 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
     // The CLI consumes this stream as soon as the transport starts, so the
     // attempt observation must precede query(), not the transcript read.
     history.attempting(outgoingText)
-    q = query({
-      // Keep control-response stdin open while Qoder-owned Agents or Bash
+    q = qoderQuery(lease, {
+      // Keep the session input open while Qoder-owned Agents or Bash
       // tasks are active, including model-policy requests on notification turns.
       prompt: prompt.stream,
       options: {
-        transport: {
-          create(options: QueryTransportCreateOptions) {
-            taskControl = new QoderTaskControlTransport(new ProcessTransport(options))
-            return taskControl
-          }
-        },
-        ...qoderOptions(
-          request.cwd,
-          request.resume,
-          (pid, identityPromise) => { qoderPid = pid; qoderIdentityPromise = identityPromise },
-          (code, signal) => {
-            if (stopped || streamSettled) return
-            exitTimer = setTimeout(() => {
-              rejectUnexpectedExit(new Error(`Qoder CLI 已退出，但 SDK 事件流未结束（code=${code ?? 'null'}, signal=${signal ?? 'null'}）`))
-            }, 1000)
-          },
-          request.permissionMode,
-          request.managedRecorder === true,
-          request.mcpExecution,
-          request.managedRecorderIdentity
-        ),
+        ...qoderSessionOptions(request.cwd, request.resume, request.permissionMode, request.mcpExecution),
         ...(request.model && !request.effort ? { model: request.model.id } : {}),
         ...(request.model && request.effort
           ? {
@@ -212,7 +199,7 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
           : {}),
         ...(request.requestUserInput ? { canUseTool: qoderCanUseTool(request, waitForUser) } : {}),
         abortController: controller
-      } as never
+      }
     })
     let statuses: McpServerStatus[] | undefined
     let terminalError: unknown
@@ -288,17 +275,18 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
       // publishing the final snapshot. Host interruption is not task evidence.
       backgroundMonitor.pause()
       releaseProviderPrompt()
-      if (exitTimer) clearTimeout(exitTimer)
       try {
         await q.close()
       } catch (error) {
         if (!providerFailureSeen && terminalError == null) terminalError = error
       }
+      // The daemon flushes and closes its run log on exit; read it only afterwards.
+      await lease.stop()
     }
     const logHooksEnabled = process.env.SCRY_QODER_LOG_HOOKS?.trim() !== '0'
-    if ((request.managedRecorder === true || logHooksEnabled) && qoderPid) {
+    if ((request.managedRecorder === true || logHooksEnabled) && lease.pid) {
       try {
-        const log = await qoderHookLog(qoderPid)
+        const log = await qoderHookLog(lease.pid)
         observeProviderTurnId(qoderProviderTurnIdFromLog(log, externalSessionId))
         const backgroundFailures = parseQoderBackgroundTaskFailures(request.runId, log, externalSessionId)
         for (const event of backgroundFailures) {
@@ -328,8 +316,8 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
           runtimeMetadata: { source: 'qoder_cli_log', capability: 'hooks' }
         })
       }
-    } else if ((request.managedRecorder === true || logHooksEnabled) && !qoderPid) {
-      deps.hookFallback.error = 'Qoder log fallback could not identify the current CLI process'
+    } else if ((request.managedRecorder === true || logHooksEnabled) && !lease.pid) {
+      deps.hookFallback.error = 'Qoder log fallback could not identify this run\'s daemon process'
     }
     if (backgroundTasks.pending && !stopped) {
       providerStatus = 'failed'
@@ -376,7 +364,14 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
         }
       }
     }
-    if (terminalError != null) throw terminalError
+    if (terminalError != null) {
+      // A CLI that rejects the session explains why only on stderr; keep that reason.
+      const tail = lease.stderrTail()
+      if (tail && terminalError instanceof Error && !terminalError.message.includes(tail)) {
+        throw new Error(`${terminalError.message}\n${tail}`)
+      }
+      throw terminalError
+    }
     return {
       externalSessionId,
       providerTurnId: currentProviderTurnId(),
@@ -400,17 +395,14 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
       if (stopped || streamSettled || !task || task.stopState) {
         return { status: 'rejected', message: '该任务不属于当前活动轮次、已结束或已请求停止。' }
       }
-      if (!taskControl?.canStopTask) return { status: 'unavailable', message: '当前 Qoder 版本不支持已验证的单任务停止，请使用停止本轮。' }
-      backgroundTasks.markStop(taskId, 'requested')
-      backgroundMonitor.refresh()
-      const result = await taskControl.stopTask(taskId)
-      backgroundTasks.markStop(taskId, result.status === 'unknown' ? 'unconfirmed' : result.status === 'requested' ? 'requested' : undefined)
-      backgroundMonitor.refresh()
-      return result
+      return { status: 'unavailable', message: '当前 Qoder 版本不支持已验证的单任务停止，请使用停止本轮。' }
     },
     interrupt,
-    forceKill: () => signalProcessTree(qoderIdentityPromise, 'SIGKILL'),
-    // qoderPid 是本轮 spawn 的 CLI 进程树：硬杀不会波及其他 run。
+    forceKill: () => {
+      signalProcessTree(lease?.identity ? Promise.resolve(lease.identity) : undefined, 'SIGKILL')
+      void lease?.stop()
+    },
+    // lease 是本轮专属的 Qoder 守护进程：硬杀不会波及其他 run。
     forceKillScope: 'run_scoped',
     getExternalSessionId: () => externalSessionId,
     getProviderTurnId: currentProviderTurnId,

@@ -1,7 +1,8 @@
-import { query, type Query } from '@qoder-ai/qoder-agent-sdk'
+import type { Query } from '@qoder-ai/qoder-agent-sdk'
 import type { ProviderContext } from '../../shared/provider'
 import { sanitizeMcpAuthError } from './mcp-auth-security'
-import { heldPrompt, qoderOptions } from './qoder-launch'
+import { heldPrompt, qoderSessionOptions } from './qoder-launch'
+import { qoderQuery, startQoderDaemon, type QoderDaemonLease } from './qoder-daemon'
 
 type QoderInitialization = Awaited<ReturnType<Query['initializationResult']>>
 
@@ -18,7 +19,8 @@ interface QoderControlRead<T> {
 
 interface QoderControlSession {
   key: string
-  query: Query
+  /** The control query on its own daemon; created asynchronously because the daemon is. */
+  opened: Promise<{ query: Query; lease: QoderDaemonLease }>
   releasePrompt: () => void
   ready: Promise<QoderInitializationEvidence>
   active: number
@@ -44,7 +46,7 @@ const CONTROL_CONTEXT_INVALIDATED_REASON = 'Qoder control context invalidated'
 
 /**
  * Qoder 的 cwd 级控制会话池：只服务 skills / commands / runControls 读取，
- * 不承载模型执行。执行 run 每轮自建 transport 与 query。
+ * 不承载模型执行。执行 run 每轮自建守护进程与 query。
  */
 export interface QoderControlPool {
   withControl<T>(
@@ -89,7 +91,11 @@ export function createQoderControls(): QoderControlPool {
         if (session.closeStarted) return
         session.closeStarted = true
         session.releasePrompt()
-        void Promise.resolve().then(() => session.query.close()).then(
+        // A session whose daemon never started has nothing to close.
+        void session.opened.then(
+          ({ query: q, lease }) => Promise.resolve(q.close()).finally(() => lease.stop()),
+          () => undefined
+        ).then(
           () => {
             ownedControls.delete(session)
             if (closingControls.get(key) === closePromise) closingControls.delete(key)
@@ -122,16 +128,16 @@ export function createQoderControls(): QoderControlPool {
     if (existing && !existing.retired) return existing
     if (disposed) throw new Error('Qoder adapter 已释放')
     const prompt = heldPrompt()
-    const q = query({
-      prompt: prompt.stream,
-      options: { ...qoderOptions(context.cwd), persistSession: false } as never
-    })
+    const opened = startQoderDaemon().then((lease) => ({
+      lease,
+      query: qoderQuery(lease, { prompt: prompt.stream, options: { ...qoderSessionOptions(context.cwd), persistSession: false } })
+    }))
     let resolveQuiesced!: () => void
     const quiesced = new Promise<void>((resolve) => { resolveQuiesced = resolve })
-    const ready = Promise.resolve(q.initializationResult()).then((value) => ({ value, observedAt: Date.now() }))
+    const ready = opened.then(({ query: q }) => q.initializationResult()).then((value) => ({ value, observedAt: Date.now() }))
     const session: QoderControlSession = {
       key,
-      query: q,
+      opened,
       releasePrompt: prompt.release,
       ready,
       active: 0,
@@ -224,10 +230,10 @@ export function createQoderControls(): QoderControlPool {
         initializedAt = initialization.observedAt
         refresh = session.retired || controls.get(currentKey) !== session || disposed ||
           (requireFreshInitialization && Date.now() - initialization.observedAt >= PROBE_TTL_MS)
-        if (!refresh) result = await read(session.query, initialization.value)
+        if (!refresh) result = await read((await session.opened).query, initialization.value)
       } catch (error) {
         const message = String((error as Error).message)
-        if (message === CONTROL_READY_TIMEOUT_REASON || /transport|closed|process|broken pipe/i.test(message)) {
+        if (message === CONTROL_READY_TIMEOUT_REASON || /transport|closed|process|broken pipe|守护进程/i.test(message)) {
           void closeControl(currentKey, session, 'cancel').catch(recordControlCloseFailure)
         }
         throw error
