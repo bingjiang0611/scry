@@ -60,3 +60,19 @@
 - 文件面板和 IPC 错误文案：`daemon_unavailable:*`、`daemon_not_running` 改为中文说明，并保留原因码；
 - 选择器切换工作区失败时，在输入框上方显示原因，原来只打到 Console；
 - 每次 daemon 模式启动日志里都有一条 `agent:unreadSessions` 错误：改为最多等 5 秒 daemon 的第一份未读快照，等不到才报不可用。
+
+## adeb887 补充验证（macOS arm64，dev 构建，smoke Provider，临时 userData/HOME）
+
+| 项 | 结论 |
+|---|---|
+| A3 重载后重新接上 | 通过。daemon 中位 172 ms（171/175/172），关闭模式 118 ms；没有超过 1 秒的调用。上次的 15 秒没有复现。多出的约 54 ms 主要在 `terminal:recordingRead`：daemon 54 ms，进程内 13 ms（走 bulk lane、多一次本机往返）。只在重新接上时发生一次，暂不调整 |
+| A6 崩溃后回收 | 通过：两次都是 82.7 s，上界 90 s |
+| 启动日志 | 通过：3 次启动都没有 `agent:unreadSessions` 错误；首次回答 369–655 ms，等的是 daemon 的第一份快照 |
+| 错误文案 | 通过：文件面板显示「后台服务无法启动：这个数据目录正被另一个 Scry 进程使用（daemon_userdata_owned）」 |
+| 选择器拒绝提示 | 通过：提示出现在输入区状态行（`#composer-status`，role=alert），也就是 `setComposerError` 一贯的位置，在输入框下方。验证提示词里写的「上方」是用词不准，不是缺陷 |
+
+附带观察（都是已有行为，不在本次范围）：
+
+- 最近目录里的目录即使对应的项目已移除，也算已知项目，两种模式一致。正常 UI 移除项目时会同时删掉最近目录里的那一项。
+- worktree 中的 better-sqlite3 需要先按 Electron ABI 重建，否则 daemon 的 `initDb` 降级、不生成 `scry.db`。
+- supervisor 丢弃了 daemon 的 stdout，daemon 侧的分阶段耗时看不到，只能看 daemon 自己的日志文件。
