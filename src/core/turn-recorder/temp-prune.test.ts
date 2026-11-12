@@ -90,6 +90,8 @@ describe('recorder stale temp files', () => {
 
     expect(result).toMatchObject({ removed: 0, scanned: true })
     await expect(stat(stray)).resolves.toBeTruthy()
+    // 标记文件也不能穿过同一条链接：外部目录里不能多出任何东西。
+    expect(await readdir(outside)).toEqual(['stray.tmp'])
   })
 
   it('cleans leftovers at commit time, where every writer converges', async () => {

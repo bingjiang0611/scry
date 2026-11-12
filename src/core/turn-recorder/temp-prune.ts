@@ -53,6 +53,12 @@ async function pruneDir(
   }
 }
 
+/** 入口必须是真实目录：沿符号链接清理会跑到工作区外，且那不是 recorder 写的字节。 */
+async function realDir(path: string): Promise<string | undefined> {
+  const info = await lstat(path).catch(() => null)
+  return info?.isDirectory() === true ? path : undefined
+}
+
 /**
  * 按天清理过期的 `.tmp`。提交是唯一已知的收敛点（App 托管路径与独立 CLI 都走 `commitRecord`），
  * 所以它负责这件事；标记文件让目录遍历最多每天发生一次，而不是加在每条记录的关键路径上。
@@ -64,7 +70,9 @@ export async function pruneStaleTemps(
 ): Promise<StaleTempPruneResult> {
   const now = options.now ?? Date.now()
   const ageMs = options.olderThanMs ?? STALE_TEMP_AGE_MS
-  const markerPath = join(dataRoot, 'runtime', MARKER)
+  // 标记文件也不能穿过符号链接写出去：`runtime` 不是真实目录时退到数据根，仍然只在 `.scry/` 里。
+  const runtime = await realDir(join(dataRoot, 'runtime'))
+  const markerPath = runtime ? join(runtime, MARKER) : join(dataRoot, MARKER)
   const marker = await readJson<{ at?: unknown }>(markerPath)
   if (typeof marker?.at === 'string' && now - Date.parse(marker.at) < ageMs) return { removed: 0, bytes: 0, scanned: false }
   const result: StaleTempPruneResult = { removed: 0, bytes: 0, scanned: true }
@@ -73,10 +81,8 @@ export async function pruneStaleTemps(
   // （历史证据），既不产生这类临时文件，也不该为了清理临时文件去遍历。
   await pruneDir(dataRoot, cutoff, 0, result, false)
   for (const dir of SCAN_DIRS) {
-    // 入口必须是真实目录：沿符号链接清理会跑到工作区外，且那不是 recorder 写的字节。
-    const path = join(dataRoot, dir)
-    const info = await lstat(path).catch(() => null)
-    if (info?.isDirectory() !== true) continue
+    const path = await realDir(join(dataRoot, dir))
+    if (path === undefined) continue
     await pruneDir(path, cutoff, 0, result)
   }
   await writeJsonAtomic(markerPath, { at: new Date(now).toISOString() })

@@ -137,7 +137,8 @@ scry recorder content repair --record-id <recordId> --apply            # 只修�
 `writeJsonAtomic` 先写 `<path>.<pid>.<uuid>.tmp` 再 `rename` 上屏。进程被杀会留下永不生效的
 `.tmp`（可能 0 字节）。recorder 在日常路径上自动清理**超过一天**的这类文件：每次提交（App 托管与
 独立 CLI 共用 `commitRecord`）检查一次，标记文件 `runtime/stale-temp-prune.json` 保证目录遍历最多
-每天发生一次，daemon 启动时也做一次。更短命的文件可能属于正在写盘的进程，绝不会被碰；清理失败只
+每天发生一次，daemon 启动时也做一次。`runtime` 不是真实目录（例如被换成指向别处的符号链接）时，
+清理跳过这个入口，标记文件改写到数据根，不会沿链接在工作区外创建文件。更短命的文件可能属于正在写盘的进程，绝不会被碰；清理失败只
 影响这次卫生，不阻断提交。`scry records maintain --apply` 仍然是显式、可审计的那条路径。
 
 可选的 `storage` 配置提供软 quota、retention 候选和孤立文件宽限期：
