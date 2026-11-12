@@ -61,6 +61,65 @@
 - `npm run performance:measure`：Ratchet 通过，没有 `worse`。这次改了 `index.ts`，它在 `sources` 里，所以跑了这一项。`analytics.sqlite` 在本容器记为 unavailable（better-sqlite3 的 ABI 不匹配），与本次改动无关。
 - `node scripts/daemon-ipc-matrix.mjs`：172 个通道，生成文档已是最新。
 
+## 维护者决定（2026-11-12）
+
+- **启动时版本不一致：弹一次系统对话框**（批准）。做法见下一节。之前只在分区里说明并把重启设为主按钮，分区的行为不变。
+- **「退出 Scry 与后台服务」不加菜单项**（决定不加）。它只在设置页里：App 没有自定义应用菜单，加一项就要替换整个默认菜单。
+- **通道名 `remote:backgroundService:{status,restart,quit,reconnect}` 接受**，不改名。
+
+## 启动时版本不一致提示
+
+App 进程里第一次得知后台服务是另一个版本时，弹一次原生对话框（有主窗口时挂在主窗口上）。
+
+- **触发**：沿用已有的检测，不加探测。懒连接面（`daemon-run-lazy.ts`）新增 `onOutcome(listener)`：它自己连接得到的每个结果（首次使用、`unavailable` 后再问、daemon 消失后的重连）都告诉观察者；`restart()` 的结果不告诉，那是用户发起的动作，由动作自己报告。观察者抛错不影响运行调用。渲染端启动时 `useBackgroundWork` 会调 `activeRuns()`，所以实际上窗口加载后就会弹；不阻塞窗口创建，主进程不等用户回答，没有同步 I/O。开关关闭时没有懒连接面，也就不订阅。
+- **对话框**：标题「后台服务版本不一致」，写出两边的版本；daemon 在报出版本之前就拒绝时（App 没有已保存的凭据、走入网时被拒），写「版本未知」，不猜。说明运行任务和终端需要版本一致的后台服务。按钮「重启后台服务」（默认）和「稍后」（取消）。文案在 `background-service-copy.ts`（`versionMismatchPrompt`、`restartFailedNotice`）。
+- **「重启后台服务」**：调用设置页的同一个重启动作（同一个 `exclusive` 包装，`busy` 共用），身份复核、二次确认、停止期间不拉起、失败原因都是同一份代码。版本不一致时问不到 daemon 有没有运行中的任务，所以一定还会出现第二个确认框「重启后台服务会中断正在运行的任务」。用户在第二个框里取消，就什么也不做。
+- **失败**：用已有的失败原因文案（`reasonMessage`）再弹一个说明框，不自动重试。重启动作抛错时记为 `background_service_restart_error`，同样弹说明框。
+- **「稍后」**：什么也不做；设置页仍提供重启。
+- **只弹一次**：守卫在第一次 `await` 之前就置位，所以对话框开着时再来的检测、任何回答之后，都不会再弹。检测到时如果设置页的某个动作正在进行，不弹，也算用掉了这一次（用户正在处理后台服务）。新的 App 进程会重新判断。
+- **判断逻辑**在纯模块 `src/main/background-service-mismatch-prompt.ts`（对话框、重启、失败说明都由外部注入）；`bootstrap/background-service.ts` 只接线。`src/main/index.ts` 没有改。没有新增通道。
+
+测试（都先失败，再做对照实验）：
+
+- `background-service-mismatch-prompt.test.ts`（10）：重启、稍后、并发两次检测只弹一次、失败只报一次不重试、抛错也报、第二个确认框取消时不弹失败、其他连接状态和开关关闭不弹、动作进行中不弹、文案（两个版本、版本未知、默认按钮与取消按钮）。
+- `daemon-run-lazy-restart.test.ts`（+1）：自己连接的结果告诉观察者，`restart()` 的结果不告诉，观察者抛错不影响。
+- `bootstrap/background-service.test.ts`（+2）：经生产注册，检测到不一致时在主窗口上弹一次，点「重启后台服务」走重启动作；「稍后」不调用重启、不持有拉起；相同版本不弹。
+- 真实 daemon：`src/daemon/host-process-version-mismatch.test.ts`，用 `startTestDaemon()`（版本 `test`）。先用同版本客户端入网并保存凭据（模拟升级前的 App），再用版本 `2.0.0` 的懒连接面、同一 userData 调两次 `activeRuns()`：两次都是 `daemon_version_mismatch`，观察者只收到一次结果（`running: 'test'`），只弹一次，「稍后」之后旧凭据仍能连上同一个 daemon。真实的重启（SIGTERM 与重新拉起）这里没有覆盖：harness 的 daemon 在测试进程内，没有 `daemon.lock` 持有者可停，这部分由 S0-1 的真实子进程测试和 macOS 重放覆盖。
+- 对照实验：去掉一次性守卫（4 项失败）；「稍后」也重启（2 项失败）；守卫在 `await` 之后置位（2 项失败）；`restart()` 也通知观察者（1 项失败）；懒连接面不通知（真实 daemon 测试失败）。
+
+门禁（Linux 容器，root）：
+
+- `npm run typecheck` 通过。
+- 受影响的 13 个测试文件（`background-service-*`、`bootstrap/background-service`、`daemon-run-lazy*`、`daemon-run-mode`、`daemon-run-surface`、`host-process-background-service`、`host-process-version-mismatch`、`daemon-ipc-matrix`）：102 通过。
+- `npx vitest run src/daemon src/main src/renderer src/preload scripts/daemon-ipc-matrix.test.ts scripts/performance-feedback.test.ts`：4662 通过、3 跳过、4 失败，失败的就是上面「门禁」一节里同样的 4 项本容器环境问题（`desktop-directory-picker`、`db-outbox`、`MarkdownLayout`、`SessionRename`）。
+- `node scripts/daemon-ipc-matrix.mjs`：172 个通道，已是最新（没有新增通道）。
+- 没有跑 `npm run performance:measure`：改动的文件都不在 `scripts/performance-paths.json` 的 `sources` 里（`index.ts` 没改）。
+
+对 B4-V 场景脚本的影响：`upgrade` 场景现在会在新 App 上看到这个对话框（macOS 上是挂在窗口上的 sheet）。脚本经 `window.scry` 调用重启时，它的二次确认框会排在这个对话框后面；原来这一步就要等人点确认（脚本有 30 秒超时，写着「a native confirmation may be waiting」），无人值守时结果不变。有人值守时，先在提示框点「稍后」，再处理确认框。
+
+### macOS 重放步骤（验证人执行）
+
+准备两个 worktree：`OLD` 检出本提交之前的 `0bf3e97`，`NEW` 检出本分支。两边都 `npm ci && npm run build && npx @electron/rebuild -f -w better-sqlite3`。两边的 `package.json` 版本相同，所以在 `OLD` 里把 `version` 临时改成 `0.2.236` 再 `npm run build`（不提交）。
+
+```sh
+T=$(mktemp -d /tmp/scry-mismatch-XXXX); mkdir -p "$T/home" "$T/userData"
+export HOME="$T/home" SCRY_TEST_APP=1 SCRY_HOST_DAEMON=1 SCRY_DAEMON_CREDENTIAL_PLAINTEXT=1 SCRY_REMOTE_HOST=0
+"$OLD/node_modules/.bin/electron" "$OLD" --user-data-dir="$T/userData"   # 旧 App 拉起 0.2.236 的后台服务并入网
+# 窗口出来后正常退出旧 App（Cmd+Q）；后台服务继续运行
+cat "$T/userData/daemon/daemon.lock"; ps -o pid,lstart,command -p <锁里的 pid>
+"$NEW/node_modules/.bin/electron" "$NEW" --user-data-dir="$T/userData"
+```
+
+1. 新 App 窗口加载后，主窗口上出现一个对话框：标题「后台服务版本不一致」，写「正在运行的后台服务版本是 0.2.236，本 App 的版本是 0.2.237」，按钮「重启后台服务」（默认，回车）和「稍后」（Esc）。记录截图。
+2. 点「稍后」：没有别的框；`daemon.lock` 的 pid 与 `ps` 的身份不变；设置 →「后台服务」显示版本不一致、重启是主按钮；新建会话发一条消息、切换会话、打开设置几次，都不再弹。
+3. 退出新 App 再启动（新进程）：对话框再出现一次。点「重启后台服务」→ 出现第二个确认框「重启后台服务会中断正在运行的任务」（写「无法确认后台服务里是否有正在运行的任务」）。先点「取消」：什么也不发生，`daemon.lock` 不变，也不再弹。
+4. 再退出、启动一次，点「重启后台服务」→ 确认：旧 pid 消失，`daemon.lock` 换成新的 pid，`ps` 里没有 0.2.236 的 daemon 和监护进程残留；设置页显示已连接、版本 0.2.237；发一条消息能跑完。
+5. 版本未知：换一个新的 `$T`，不经旧 App，直接按 `scripts/b4v/scenarios/upgrade.mjs` 的 `oldDaemonEnv` 启动旧 daemon（`ELECTRON_RUN_AS_NODE=1 SCRY_DAEMON_APP_VERSION=0.0.0-b4v-old … electron $OLD/out/main/daemon.js`），再启动新 App：对话框写「正在运行的后台服务版本未知」，不写任何猜测的版本号。
+6. 开关关闭对照：旧后台服务仍在运行时，不设 `SCRY_HOST_DAEMON` 启动新 App：不弹任何框。
+7. 失败说明框（例如重启后 15 秒内旧进程没退出）在 macOS 上不容易人为制造，可以不做；单测已覆盖。
+
+结束后按 `daemon.lock` 的 pid 核对身份后停止残留进程，再删除 `$T`。
+
 ## 未验证与待定
 
 - **未在 macOS 上验证（必须做）**：
@@ -70,6 +129,5 @@
   - 退出后 `ps` 中没有 daemon 和监护进程，`daemon.lock`、`scry-userdata.lock`、socket 和 lease 文件都不在；
   - `ps -o lstart` 的身份与 `daemon.lock` 记录一致，不会因为身份不一致而误拒。
   - 本容器是 Linux（root），只跑了单测、真实子进程和真实 daemon 测试。
-- 「退出 Scry 与后台服务」只在设置页里，没有加到菜单：App 没有自定义应用菜单，加一项就要替换整个默认菜单。是否需要菜单项，请维护者决定。
-- 「版本不一致时主动提示」目前是在分区里给出说明并把重启设为主按钮。App 启动时检测到版本不一致，不会弹窗，也不会跳到设置页。如果要弹系统对话框，请维护者决定。
+  - 启动时版本不一致提示：对话框的样子、挂在主窗口上、默认按钮与 Esc、「稍后」后不再弹、「重启后台服务」接第二个确认框后真实重启，都没有在真实 App 里看过（按上面的 macOS 重放步骤做）。Linux 真实 App 也没有跑；版本未知那一种只有单测和步骤 5 覆盖。
 - 运行中的任务数来自 daemon 的未结算 run（`unsettledStates`）。真实 daemon 测试只覆盖了 0 的情况，有运行中 run 时的计数没有用真实 run 验证。
