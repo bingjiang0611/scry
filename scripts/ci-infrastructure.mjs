@@ -68,13 +68,36 @@ export async function observeInfrastructure({ github, context, core }) {
     histories.set(job.name, history)
   }
   const rows = []
+  const attemptStarts = new Map([[run.run_attempt, Date.parse(current.data.run_started_at)]])
   let retryJob
   for (const history of histories.values()) {
     history.sort((left, right) => right.run_attempt - left.run_attempt || right.id - left.id)
-    const job = history[0]
+    const latest = history[0]
     // Hosted allocation failures can be reported as cancelled without a runner.
-    const unassignedCancellation = job.conclusion === 'cancelled' && !job.runner_id
-    if (job.conclusion !== 'failure' && job.conclusion !== 'startup_failure' && !unassignedCancellation) continue
+    const unassignedCancellation = latest.conclusion === 'cancelled' && !latest.runner_id
+    if (latest.conclusion !== 'failure' && latest.conclusion !== 'startup_failure' && !unassignedCancellation) continue
+    // GitHub copies untouched jobs into later attempts with new IDs but their
+    // original execution timestamps. Count only executions within their attempt.
+    const executions = []
+    let historyKnown = true
+    for (const record of history) {
+      if (!attemptStarts.has(record.run_attempt)) {
+        const { data } = await github.rest.actions.getWorkflowRunAttempt({ ...repo, run_id: run.id, attempt_number: record.run_attempt })
+        attemptStarts.set(record.run_attempt, Date.parse(data.run_started_at))
+      }
+      const started = Date.parse(record.started_at)
+      const attemptStarted = attemptStarts.get(record.run_attempt)
+      if (!Number.isFinite(started) || !Number.isFinite(attemptStarted)) {
+        historyKnown = false
+        break
+      }
+      if (started >= attemptStarted) executions.push(record)
+    }
+    const job = executions[0]
+    if (!historyKnown || !job) {
+      rows.push([latest.name, 'unknown', 'execution history cannot be established', 'no retry'])
+      continue
+    }
     let annotations = []
     if (job.check_run_url) {
       const checkRunId = Number(job.check_run_url.split('/').at(-1))
@@ -87,11 +110,11 @@ export async function observeInfrastructure({ github, context, core }) {
       log = typeof response.data === 'string' ? response.data : Buffer.from(response.data).toString('utf8')
     }
     const result = classifyFailure(job, log, annotations)
-    const eligible = result.category === 'infrastructure' && history.length === 1 && job.run_attempt === 1
+    const eligible = result.category === 'infrastructure' && executions.length === 1
     let action = 'no retry'
     if (eligible) {
       action = retryJob ? 'queued until the next completion' : 'selected for retry (1/1)'
-      retryJob ??= job
+      retryJob ??= latest
     }
     rows.push([job.name, result.category, result.reason, action])
   }

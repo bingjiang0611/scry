@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs'
 import { classifyFailure, failedStepLog, observeInfrastructure } from './ci-infrastructure.mjs'
 
 const failedStep = { started_at: '2026-01-01T00:01:00Z', completed_at: '2026-01-01T00:01:10Z', conclusion: 'failure' }
-const setup = { runner_id: 42, steps: [{ ...failedStep, name: 'Install archive tools' }] }
+const setup = { runner_id: 42, started_at: failedStep.started_at, completed_at: failedStep.completed_at,
+  steps: [{ ...failedStep, name: 'Install archive tools' }] }
 describe('CI failure classification', () => {
   it.each(['Temporary failure resolving archive.ubuntu.com', 'EAI_AGAIN', 'ENOTFOUND registry.npmjs.org',
     'E: Failed to fetch https://mirror/ubuntu.deb', 'npm error code ECONNRESET'])(
@@ -23,17 +24,20 @@ describe('CI failure classification', () => {
   })
 })
 
+const attemptStart = (attempt: number) => new Date(Date.UTC(2026, 0, 1, 0, (attempt - 1) * 2)).toISOString()
+
 function fixture(attempt = 1, annotations: Array<{ message: string }> = []) {
   const jobs = [
     { ...setup, id: 1, name: 'packaged-linux', run_attempt: 1, conclusion: 'failure' },
-    { id: 2, name: 'unit', runner_id: 43, run_attempt: 1, conclusion: 'failure', steps: [{ ...failedStep, name: 'Unit tests' }] }
+    { ...setup, id: 2, name: 'unit', runner_id: 43, run_attempt: 1, conclusion: 'failure', steps: [{ ...failedStep, name: 'Unit tests' }] }
   ]
   const listAnnotations = vi.fn()
   const github = {
     paginate: vi.fn(async (method: unknown) => method === listAnnotations ? annotations : jobs),
     rest: {
       actions: {
-        getWorkflowRun: vi.fn(async () => ({ data: { status: 'completed', run_attempt: attempt } })),
+        getWorkflowRun: vi.fn(async () => ({ data: { status: 'completed', run_attempt: attempt, run_started_at: attemptStart(attempt) } })),
+        getWorkflowRunAttempt: vi.fn(async ({ attempt_number }: { attempt_number: number }) => ({ data: { run_started_at: attemptStart(attempt_number) } })),
         listJobsForWorkflowRun: vi.fn(),
         downloadJobLogsForWorkflowRun: vi.fn(async ({ job_id }: { job_id: number }) => ({ data: `2026-01-01T00:01:05.1234567Z ${job_id === 2 ? 'AssertionError' : 'Temporary failure resolving archive.ubuntu.com'}` })),
         reRunJobForWorkflowRun: vi.fn(async () => ({}))
@@ -83,10 +87,43 @@ it('does not treat a cancellation after runner assignment as a runner-start fail
 
 it('classifies a second attempt but does not retry it', async () => {
   const options = fixture(2)
-  options.jobs.push({ ...options.jobs[0], id: 3, run_attempt: 2 })
+  options.jobs.push({ ...options.jobs[0], id: 3, run_attempt: 2, started_at: '2026-01-01T00:03:00Z', completed_at: '2026-01-01T00:03:10Z' })
   await observeInfrastructure(options)
   expect(options.github.rest.actions.reRunJobForWorkflowRun).not.toHaveBeenCalled()
   expect(options.core.summary.write).toHaveBeenCalledOnce()
+})
+
+it('does not spend a job retry budget on a carried-forward record from another attempt', async () => {
+  const options = fixture(2)
+  options.jobs.push({ ...options.jobs[0], id: 3, run_attempt: 2 }) // new ID, original execution timestamps
+  await observeInfrastructure(options)
+  expect(options.github.rest.actions.reRunJobForWorkflowRun).toHaveBeenCalledExactlyOnceWith({ owner: 'example', repo: 'test', job_id: 3 })
+  expect(options.github.rest.actions.downloadJobLogsForWorkflowRun).toHaveBeenCalledWith({ owner: 'example', repo: 'test', job_id: 1 })
+  expect(options.github.rest.actions.getWorkflowRunAttempt).toHaveBeenCalledExactlyOnceWith({ owner: 'example', repo: 'test', run_id: 99, attempt_number: 1 })
+})
+
+it('does not retry when execution history cannot be established', async () => {
+  const options = fixture()
+  options.jobs[0].started_at = ''
+  await observeInfrastructure(options)
+  expect(options.github.rest.actions.reRunJobForWorkflowRun).not.toHaveBeenCalled()
+  expect(options.core.summary.addTable).toHaveBeenCalledWith(expect.arrayContaining([
+    ['packaged-linux', 'unknown', 'execution history cannot be established', 'no retry']
+  ]))
+})
+
+it.each(['job-start', 'attempt-start', 'past-attempt-start'])('rejects mixed valid and unknown history: %s', async missing => {
+  const options = fixture(2)
+  const latest = { ...options.jobs[0], id: 3, run_attempt: 2, started_at: '2026-01-01T00:03:00Z', completed_at: '2026-01-01T00:03:10Z' }
+  options.jobs.push(latest)
+  if (missing === 'job-start') latest.started_at = ''
+  else if (missing === 'attempt-start') options.github.rest.actions.getWorkflowRun.mockResolvedValue({ data: { status: 'completed', run_attempt: 2, run_started_at: '' } })
+  else options.github.rest.actions.getWorkflowRunAttempt.mockResolvedValue({ data: { run_started_at: '' } })
+  await observeInfrastructure(options)
+  expect(options.github.rest.actions.reRunJobForWorkflowRun).not.toHaveBeenCalled()
+  expect(options.core.summary.addTable).toHaveBeenCalledWith(expect.arrayContaining([
+    ['packaged-linux', 'unknown', 'execution history cannot be established', 'no retry']
+  ]))
 })
 
 it('serializes multiple infrastructure retries across completion events without rerunning assertions', async () => {
@@ -96,21 +133,21 @@ it('serializes multiple infrastructure retries across completion events without 
   expect(options.github.rest.actions.reRunJobForWorkflowRun).toHaveBeenCalledExactlyOnceWith({ owner: 'example', repo: 'test', job_id: 1 })
   options.github.rest.actions.reRunJobForWorkflowRun.mockClear()
   options.context.payload.workflow_run.run_attempt = 2
-  options.github.rest.actions.getWorkflowRun.mockResolvedValue({ data: { status: 'completed', run_attempt: 2 } })
-  options.jobs.push({ ...options.jobs[0], id: 4, run_attempt: 2, conclusion: 'success' })
+  options.github.rest.actions.getWorkflowRun.mockResolvedValue({ data: { status: 'completed', run_attempt: 2, run_started_at: attemptStart(2) } })
+  options.jobs.push({ ...options.jobs[0], id: 4, run_attempt: 2, conclusion: 'success', started_at: '2026-01-01T00:03:00Z', completed_at: '2026-01-01T00:03:10Z' })
   await observeInfrastructure(options)
   expect(options.github.rest.actions.reRunJobForWorkflowRun).toHaveBeenCalledExactlyOnceWith({ owner: 'example', repo: 'test', job_id: 3 })
   options.github.rest.actions.reRunJobForWorkflowRun.mockClear()
   options.context.payload.workflow_run.run_attempt = 3
-  options.github.rest.actions.getWorkflowRun.mockResolvedValue({ data: { status: 'completed', run_attempt: 3 } })
-  options.jobs.push({ ...options.jobs[2], id: 5, run_attempt: 3 }) // the one retry still fails
+  options.github.rest.actions.getWorkflowRun.mockResolvedValue({ data: { status: 'completed', run_attempt: 3, run_started_at: attemptStart(3) } })
+  options.jobs.push({ ...options.jobs[2], id: 5, run_attempt: 3, started_at: '2026-01-01T00:05:00Z', completed_at: '2026-01-01T00:05:10Z' }) // the one retry still fails
   await observeInfrastructure(options)
   expect(options.github.rest.actions.reRunJobForWorkflowRun).not.toHaveBeenCalled()
 })
 
 it('ignores stale completion events rather than racing an active attempt', async () => {
   const options = fixture()
-  options.github.rest.actions.getWorkflowRun.mockResolvedValue({ data: { status: 'in_progress', run_attempt: 2 } })
+  options.github.rest.actions.getWorkflowRun.mockResolvedValue({ data: { status: 'in_progress', run_attempt: 2, run_started_at: attemptStart(2) } })
   await observeInfrastructure(options)
   expect(options.github.paginate).not.toHaveBeenCalled()
   expect(options.github.rest.actions.reRunJobForWorkflowRun).not.toHaveBeenCalled()

@@ -33,7 +33,7 @@ CI 已监听 `push.branches: [main]`。任何可执行改动推入 main（包括
 - 软件源下载或 DNS 失败：必须发生在依赖安装/runner 准备步骤，并匹配明确的网络失败证据。日志按 GitHub step 起止时间归属，只用唯一属于失败步骤的日志秒；共享边界秒、缺失时间或无时间戳时不猜测，避免成功步骤的 DNS 负对照污染后续错误。
 - 测试断言、测试步骤中的 DNS 负对照、依赖合同错误及未知失败：不自动重试，保留原始失败，先调查。整份日志中的断言证据始终否决自动重试，即使断言出现在不能唯一归属的 step 边界秒。
 
-只调用失败的基础设施 job 的 rerun API（及 GitHub 自动安排的依赖聚合 job），不用重跑全部失败 job 的 API，因此不顺带重跑失败断言。每个完成事件最多请求一个 job；下一次完成后继续处理尚未重试的基础设施 job，避免并发 rerun 冲突。读取所有历史 attempts，按本 CI 唯一的 job 名（含 matrix 坐标）限制每个 job 最多一次；人工先行重跑也消耗额度。重复/过期事件、重名有歧义时不重试。不取消或覆盖首轮日志。
+只调用失败的基础设施 job 的 rerun API（及 GitHub 自动安排的依赖聚合 job），不用重跑全部失败 job 的 API，因此不顺带重跑失败断言。每个完成事件最多请求一个 job；下一次完成后继续处理尚未重试的基础设施 job，避免并发 rerun 冲突。读取所有历史 attempts，按唯一 job 名（含 matrix 坐标）限制每个 job 最多一次。GitHub 会复制未重跑 job 到后续 attempt，生成新 ID 却保留原执行时间；以各 attempt 的 `run_started_at` 排除这些副本，读取真实执行的日志/annotation，向最新 job ID 请求重试。人工真正重跑同一 job 也消耗额度；执行历史不能确认时标为 unknown、不重试。重复/过期事件、重名有歧义时不重试。不取消或覆盖首轮日志。
 
 观察工作流仅在合入默认分支后自动生效。它固定 checkout **默认分支**，从不执行 PR head 代码或下载 PR artifact；token 只有 `contents:read`、`checks:read`、`actions:write`。观察工作流本身或 GitHub API 不可用时不能保证自动恢复，应由维护者查看原始结果；不会伪装成功。
 
