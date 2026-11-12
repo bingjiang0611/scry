@@ -186,9 +186,10 @@ jobs:
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
           echo "$RESULTS" | jq -e 'length > 0 and all(.[]; .result == "success")' > /dev/null
 
-  # Linux 打包门禁：只验证产物布局、原生模块、私有 CLI、locale 裁剪与资源 allowlist。
-  # GUI smoke（pack:artifact 里的 smoke:electron）需要可用的 Chromium sandbox setuid 和显示环境，
-  # 本 job 不伪造这两者；界面与 Wayland 行为在目标 Omarchy 机器上验收。
+  # Linux 打包门禁：验证产物布局、原生模块、私有 CLI、locale 裁剪与资源 allowlist，
+  # 再在 Xvfb 下用真实 Electron（开发布局、setuid chrome-sandbox，不关 sandbox）跑 daemon 模式 smoke。
+  # pack:artifact 里的整套 smoke:electron 仍按 macOS 布局取可执行文件，不在这里运行；
+  # Xvfb 不是目标桌面，界面、Wayland 与真实密钥环行为在目标 Omarchy 机器上验收。
   packaged-linux:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -219,3 +220,25 @@ jobs:
         run: npm run check:packaged-app
       - name: Check pacman package metadata
         run: npm run check:pacman-package
+      # Ubuntu 24.04 runner 用 AppArmor 限制非特权 user namespace，Chromium 需要 setuid sandbox helper；与 unit job 相同，不用 --no-sandbox。
+      - name: Enable the Chromium setuid sandbox helper
+        run: |
+          electron_bin="$(node -e "process.stdout.write(require('electron'))")"
+          sandbox="$(dirname "${electron_bin}")/chrome-sandbox"
+          sudo chown root:root "${sandbox}"
+          sudo chmod 4755 "${sandbox}"
+      - name: Daemon entry configuration smoke
+        run: node scripts/daemon-config-smoke.mjs
+      # 真实 Electron 以 ELECTRON_RUN_AS_NODE 拉起 supervisor 与 daemon，经本机 mTLS unix socket 跑完
+      # 发送、流式、提问、停止、SIGKILL 后重启；凭据用 smoke 专用编码（需 SCRY_TEST_APP=1），不是密钥环验收。
+      - name: Daemon mode smoke in the real Electron
+        id: daemon-smoke
+        run: xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24' node scripts/daemon-mode-smoke.mjs
+      - name: Keep the daemon smoke log on failure
+        if: ${{ failure() && steps.daemon-smoke.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-mode-smoke-linux
+          path: daemon-mode-smoke.log
+          if-no-files-found: ignore
+          retention-days: 3
