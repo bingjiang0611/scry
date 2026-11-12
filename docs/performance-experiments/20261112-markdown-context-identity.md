@@ -49,10 +49,12 @@ node .agents/skills/scry-performance-climb/scripts/timing-run.mjs pr63-short-hea
 ## 验证与交付
 
 - 已验证 L1 及真实 Chromium 文件链接、选择/复制、键盘交互合同。
-- L2：当前修改的稳定 Native 毫秒收益尚未验证；需要新 head 的原始正式比较。上述带 profiler 的高负载结果不用于声称提速。
+- PR head `46aa78b9` 的正式 run `43256174937` 完整 Performance 通过：Native 132/132，四个场景每侧仍为 2 warmups + 12 samples，Node 61/61。报告使用 baseline `73c1cd99` 与 CI merge `421214861d9635faecef755d5d0a1fff6fdd032d`，不是将 PR head 冒充 merge artifact。Native short-heavy open 251.10→242.80 ms，script 172.115→191.244 ms；markdown stop-visible max 794.20→497.00 ms。三项均按各自原预算通过，但 script 点值上升，且全部 8 份 Native 锁仍为高负载；**不能声称稳定 Native 毫秒收益或已证明旧失败的唯一根因**。Node 低负载，workspace P95 18.421→17.211 ms。
+- 同 head Remote G0 通过；CI 的两片 macOS 在 runner_id=0、0 steps 时 cancelled，官方 annotation 明确 hosted runner 未取得及 arm64 capacity constraints。聚合 Check 正确拒绝。随后 main 合入 #69/#70，必须同步并验收新 head；不在过期 head 消耗 retry，不用旧绿绕过保护。原报告保留于 `/tmp/scry-pr63-{native,node}-46-dir.txt` 所指目录。
 - 当前候选的 `npm run typecheck`、`npm run build` 通过。`npm run test:renderer:ui` 三段完整通过，包括生产 Workspace、侧聊、conversation ownership、unified conversation 和 Pi native history；Electron 42.10.1 / arm64，SQLite ABI 146 加载已核对。
-- 当前 `npm run test:unit -- --maxWorkers=2` 完整结束：639 文件 / 5940 tests 通过，4 文件 / 5 tests 失败，5 个既有 skip（本改动未新增 skip）。3 个 launcher 断言因 stderr 多出环境注入的 `[UNDICI-EHPA]` warning 失败；managed hooks 与 recorder delivery-hole 各有一个原 5000 ms 超时。相关 Markdown 3 文件 / 34 tests 在此次全量中仍通过。不改断言、不屏蔽 stderr、不延长 deadline，也不原样重跑；超时的精确原因尚未确定。
-- 日志：`/tmp/scry-pr63-markdown-context-typecheck.log`、`/tmp/scry-pr63-markdown-context-build.log`、`/tmp/scry-pr63-markdown-full-unit.log`、`/tmp/scry-pr63-markdown-renderer-ui.log`。最新提交的远端全量验收仍待完成，旧 head 成功不替代当前提交验收。
+- 同步 #69/#70 前，`npm run test:unit -- --maxWorkers=2` 完整结束：639 文件 / 5940 tests 通过，4 文件 / 5 tests 失败，5 个既有 skip（本改动未新增 skip）。3 个 launcher 断言因 stderr 多出环境注入的 `[UNDICI-EHPA]` warning 失败；managed hooks 与 recorder delivery-hole 各有一个原 5000 ms 超时。相关 Markdown 3 文件 / 34 tests 在此次全量中仍通过。不改断言、不屏蔽 stderr、不延长 deadline，也不原样重跑；超时的精确原因尚未确定。
+- 同步 main `436c4e26`（#69/#70）无冲突；20 个已有提交的 range-diff 全为 `=`。再次 typecheck/build、SQLite ABI146 实载及完整 renderer UI 三段通过。再次完整 unit：658 文件中 647 pass / 6 fail / 5 skip；5997 tests 中 5984 pass / 8 fail / 5 skip。3 项为同类环境 stderr warning，5 项为原 5000/15000 ms deadline 超时（CI detector 2、archive index、recorder journal、workspace first-send 各 1），另有 recorder 超时后的 ENOTEMPTY 清理错误。没有修改期限、断言或重跑这些用例；精确超时原因未确定。Markdown 34 项仍全部通过。
+- 日志：`/tmp/scry-pr63-markdown-{context-typecheck,context-build,full-unit,renderer-ui}.log`、`/tmp/scry-pr63-main70-{full-unit,typecheck,build,renderer-ui}.log`。最新提交的远端全量验收仍待完成，旧 head 成功不替代当前提交验收。
 - 优化提交：本文件首次引入提交，与生产修改同提交；可用 `git log --diff-filter=A --format=%H -- docs/performance-experiments/20261112-markdown-context-identity.md` 定位。测量提交先于优化。
 - 合入、发布、安装：未完成。日常 App 未替换；L3 未验证，需要用户以后安装并收集同场景 ≥30 样本、≥2 会话。
 - 不新增或提升 gate，不修改 Native 工作量、样本、oracle、预算、runner 或 timeout。失败记录不能由后续成功抹掉。
