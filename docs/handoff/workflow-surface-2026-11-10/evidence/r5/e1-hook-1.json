@@ -1,0 +1,88 @@
+{
+  "tag": "e1-hook-1",
+  "mode": "hook",
+  "sentAt": "2026-11-12T11:37:32.098Z",
+  "stopElapsedMs": 19329,
+  "clickedStop": true,
+  "afterClick": "本机 | workspace | 请写一篇至少 3000 字的长文，分 30 段讲城市排水系统，不要用任何工具。 | Q | Qoder | run · run-mwdh472i-0 | 运行中 | 本轮 Hook | 1 个周期 · 4 个处理器实例 | 停止中 | 已请求 qoder 取消当前轮次，等待 Provider 收口 | 00:17 | 停止本轮 | 版本探测超时（5s） | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | 工作区选择不可用",
+  "twoSecondsAfterClick": "本机 | workspace | 请写一篇至少 3000 字的长文，分 30 段讲城市排水系统，不要用任何工具。 | Q | Qoder | run · run-mwdh472i-0 | 运行中 | 本轮 Hook | 1 个周期 · 4 个处理器实例 | 停止中 | 已请求 qoder 取消当前轮次，等待 Provider 收口 | 00:19 | 停止本轮 | 版本探测超时（5s） | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+  "settled": true,
+  "paneAfterStop": "本机 | workspace | 请写一篇至少 3000 字的长文，分 30 段讲城市排水系统，不要用任何工具。 | Q | Qoder | run · run-mwdh472i-0 | tok | — | tools | 0 | 运行已中断，但 Scry 精确记录提交失败：managed recorder open identity is not available yet | → 不要开始下一轮；保留 userData/trace-turn-progress、managed-turn-progress、managed-turn-commits 与 workspace/.scry 后重试恢复 | 本轮 Hook | 3 个周期 · 20 个处理器实例 | 版本探测超时（5s） | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+  "followUpSettled": null,
+  "followUpPane": null,
+  "progressAfterStop": [],
+  "progressAfterFollowUp": null,
+  "ps": {
+    "before": [
+      {
+        "pid": 71366,
+        "ppid": 68338,
+        "started": "Thu Nov 12 03:37:31 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      }
+    ],
+    "atStop": [
+      {
+        "pid": 71366,
+        "ppid": 68338,
+        "started": "Thu Nov 12 03:37:31 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      },
+      {
+        "pid": 73147,
+        "ppid": 68338,
+        "started": "Thu Nov 12 03:37:35 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      },
+      {
+        "pid": 75042,
+        "ppid": 68338,
+        "started": "Thu Nov 12 03:37:38 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      },
+      {
+        "pid": 78157,
+        "ppid": 68338,
+        "started": "Thu Nov 12 03:37:44 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      }
+    ],
+    "twoSecondsAfterClick": [
+      {
+        "pid": 73147,
+        "ppid": 68338,
+        "started": "Thu Nov 12 03:37:35 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      },
+      {
+        "pid": 75042,
+        "ppid": 68338,
+        "started": "Thu Nov 12 03:37:38 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      },
+      {
+        "pid": 78157,
+        "ppid": 68338,
+        "started": "Thu Nov 12 03:37:44 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      }
+    ],
+    "afterStop": [],
+    "atClose": [],
+    "afterClose": []
+  },
+  "appStopLog": [],
+  "error": "Error: send disabled: 本机 | workspace | 请写一篇至少 3000 字的长文，分 30 段讲城市排水系统，不要用任何工具。 | Q | Qoder | run · run-mwdh472i-0 | tok | — | tools | 0 | 运行已中断，但 Scry 精确记录提交失败：managed recorder open identity is not available yet | → 不要开始下一轮；保留 userData/trace-turn-progress、managed-turn-progress、managed-turn-commits 与 workspace/.scry 后重试恢复 | 本轮 Hook | 3 个周期 · 20 个处理器实例 | 版本探测超时（5s） | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main\n    at input (file:///private/tmp/scry-r5/e1.mjs:49:23)\n    at async file:///private/tmp/scry-r5/e1.mjs:104:3",
+  "nativeHookSessionIdCounts": {
+    "present": 7
+  },
+  "nativeHookDistinctIds": 1
+}

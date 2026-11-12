@@ -1,0 +1,35 @@
+{
+  "tag": "e1-hook-2",
+  "mode": "hook",
+  "sentAt": "2026-11-12T11:38:27.258Z",
+  "stopElapsedMs": 60171,
+  "clickedStop": false,
+  "afterClick": "本机 | workspace | 请写一篇至少 3000 字的长文，分 30 段讲城市排水系统，不要用任何工具。 | Q | Qoder | run · run-mwdh5bv1-0 | tok | 0 | tools | 0 | Qoder 守护进程启动失败：Scry managed recorder could not verify /tmp/scry-b2/packages/turn-recorder-cli/dist/cli/scry.js | tools | 0 | 版本探测超时（5s） | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+  "twoSecondsAfterClick": "本机 | workspace | 请写一篇至少 3000 字的长文，分 30 段讲城市排水系统，不要用任何工具。 | Q | Qoder | run · run-mwdh5bv1-0 | tok | 0 | tools | 0 | Qoder 守护进程启动失败：Scry managed recorder could not verify /tmp/scry-b2/packages/turn-recorder-cli/dist/cli/scry.js | tools | 0 | 版本探测超时（5s） | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+  "settled": true,
+  "paneAfterStop": "本机 | workspace | 请写一篇至少 3000 字的长文，分 30 段讲城市排水系统，不要用任何工具。 | Q | Qoder | run · run-mwdh5bv1-0 | tok | 0 | tools | 0 | Qoder 守护进程启动失败：Scry managed recorder could not verify /tmp/scry-b2/packages/turn-recorder-cli/dist/cli/scry.js | tools | 0 | 版本探测超时（5s） | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+  "followUpSettled": null,
+  "followUpPane": null,
+  "progressAfterStop": [],
+  "progressAfterFollowUp": null,
+  "ps": {
+    "before": [
+      {
+        "pid": 94294,
+        "ppid": 93502,
+        "started": "Thu Nov 12 03:38:26 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      }
+    ],
+    "atStop": [],
+    "twoSecondsAfterClick": [],
+    "afterStop": [],
+    "atClose": [],
+    "afterClose": []
+  },
+  "appStopLog": [],
+  "error": "Error: send disabled: 本机 | workspace | 请写一篇至少 3000 字的长文，分 30 段讲城市排水系统，不要用任何工具。 | Q | Qoder | run · run-mwdh5bv1-0 | tok | 0 | tools | 0 | Qoder 守护进程启动失败：Scry managed recorder could not verify /tmp/scry-b2/packages/turn-recorder-cli/dist/cli/scry.js | tools | 0 | 版本探测超时（5s） | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main\n    at input (file:///private/tmp/scry-r5/e1.mjs:49:23)\n    at async file:///private/tmp/scry-r5/e1.mjs:104:3",
+  "nativeHookSessionIdCounts": {},
+  "nativeHookDistinctIds": 0
+}

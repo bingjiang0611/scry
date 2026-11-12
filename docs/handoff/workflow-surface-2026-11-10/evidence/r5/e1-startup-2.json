@@ -1,0 +1,60 @@
+{
+  "tag": "e1-startup-2",
+  "mode": "startup",
+  "sentAt": "2026-11-12T11:28:45.340Z",
+  "stopElapsedMs": 227,
+  "clickedStop": true,
+  "afterClick": "本机 | workspace | 请用几句话解释城市排水系统的维护，不要用任何工具。 | A | Agent | run · run-mwdgsuvh-0 | 运行中 | 运行中 | 可继续输入，新消息将加入队列 | 00:00 | 停止本轮 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | 工作区选择不可用",
+  "twoSecondsAfterClick": "本机 | workspace | 请用几句话解释城市排水系统的维护，不要用任何工具。 | A | Agent | run · run-mwdgsuvh-0 | 运行中 | 停止中 | 已请求 qoder 取消当前轮次，等待 Provider 收口 | 00:02 | 停止本轮 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | 工作区选择不可用",
+  "settled": true,
+  "paneAfterStop": "本机 | workspace | 请用几句话解释城市排水系统的维护，不要用任何工具。 | Q | Qoder | run · run-mwdgsuvh-0 | tok | — | tools | 0 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+  "followUpSettled": null,
+  "followUpPane": "本机 | workspace | 只回复：收到。不要用工具。 | Q | Qoder | run · run-mwdgsy3o-1 | tok | 0 | tools | 0 | Qoder 守护进程启动失败：Scry managed recorder could not verify /tmp/scry-b2/packages/turn-recorder-cli/dist/cli/scry.js | tools | 0 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+  "progressAfterStop": [],
+  "progressAfterFollowUp": [],
+  "ps": {
+    "before": [
+      {
+        "pid": 31711,
+        "ppid": 30801,
+        "started": "Thu Nov 12 03:28:44 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      }
+    ],
+    "atStop": [
+      {
+        "pid": 31711,
+        "ppid": 30801,
+        "started": "Thu Nov 12 03:28:44 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      }
+    ],
+    "twoSecondsAfterClick": [
+      {
+        "pid": 31711,
+        "ppid": 30801,
+        "started": "Thu Nov 12 03:28:44 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      }
+    ],
+    "afterStop": [
+      {
+        "pid": 31711,
+        "ppid": 30801,
+        "started": "Thu Nov 12 03:28:44 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      }
+    ],
+    "afterFollowUp": [],
+    "atClose": [],
+    "afterClose": []
+  },
+  "appStopLog": [],
+  "error": null,
+  "nativeHookSessionIdCounts": {},
+  "nativeHookDistinctIds": 0
+}
