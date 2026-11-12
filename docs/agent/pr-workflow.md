@@ -57,7 +57,7 @@
 | 文件 | 行为 | 门禁身份 |
 | --- | --- | --- |
 | `ci.yml` | changes 后并行执行 Node/typecheck、`check:harness-bindings`、shell/App build、4 片 coverage（合并报告）、Node 20/22/24 CLI 编译与运行/包校验、3 片 macOS 15 renderer UI（第 2 片打包，第 3 片共享一次新鲜 App 构建）、Linux App / pacman 检查；桌面 typecheck 仅在 node 执行，独立 CLI 发布命令仍包含它 | `Check` 汇总全部 jobs（含 changes 与 `packaged-linux`）；仅明确纯文档时允许全部验证 job 跳过，其余失败、取消、缺失或意外跳过均拒绝 |
-| `performance.yml` | changes 后并行执行现有 compare 与 native 测量，不更改计时顺序、负载或预算 | `Performance Check` 汇总 changes 与两个测量 jobs；仅明确纯文档时允许跳过，评论发布不属于正确性门禁 |
+| `performance.yml` | changes 后并行执行 compare 与 native；Node 在同一 runner 按 A1/B1…A20/B20 交替采样并记录阶段耗时，counter 随后执行；native 顺序、各场景负载与预算不变 | `Performance Check` 汇总 changes 与两个测量 jobs；仅明确纯文档时允许跳过，评论发布不属于正确性门禁 |
 | `validation-changes.yml` | CI/Performance 共用的只读 diff；仅各目录 README.md 与 docs/**/*.md 可跳过重型验证，docs 下的代码/配置、Agent 指导、混合改动仍全验；无法读取 diff 时失败，手动 dispatch 总是全验 | 不在触发器上过滤 required workflow，三个原有必需检查名不变 |
 | `.github/actions/cache-electron/action.yml` | 仅 Electron runtime jobs 使用；按 OS/架构/锁定 Electron 版本缓存 ZIP 与校验文件，原安装器继续校验 SHA256；不缓存 node_modules、App 或编译输出，不使用宽泛 restore prefix | 不替代运行时校验，首次下载失败仍失败 |
 | `remote-g0.yml` | 每个 PR 发出检查，仅 remote/iOS/工作流的非 README 改动并行运行 transport 与 ios（同一 runner、共享 DerivedData/一份 Swift 包源码缓存，依次编译 ScryRemoteG0、ScryRemote；普通 PR 共用 4 个 macOS slot，remote/iOS 变化时最多 6 个 job 竞争 GitHub Free 的 5 个 slot，可能有一个排队）；transport 限 20 分钟、ios 限 30 分钟 | `Remote Check` 要求两项全部成功，或 changes 明确判定无影响且两项全部跳过；检测失败、结果缺失或任一项取消均拒绝 |
