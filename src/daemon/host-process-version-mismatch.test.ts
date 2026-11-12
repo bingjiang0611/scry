@@ -76,4 +76,30 @@ describe('version mismatch prompt against a real daemon', () => {
       await daemon.dispose()
     }
   }, 60_000)
+
+  it('names the running version when a fresh userData meets an older daemon at enrollment', async () => {
+    const daemon = await startTestDaemon()
+    process.env.SCRY_HOST_DAEMON = '1'
+    // No stored grant: the App enrolls, and the daemon's enrollment reply carries its
+    // version. That reply is the only place the App learns it; it must not be dropped.
+    const lazy = createLazyDaemonRunSurface({
+      userDataDir: daemon.userDataDir,
+      daemonStateDirectory: join(daemon.userDataDir, 'daemon'),
+      appVersion: '2.0.0',
+      credentialCipher: () => ({ ok: true, encrypt, decrypt }),
+      send: () => undefined,
+      currentCwd: () => daemon.workspace
+    })
+    const outcomes: DaemonRunModeResult[] = []
+    lazy.onOutcome((result) => { outcomes.push(result) })
+    try {
+      await expect(lazy.activeRuns()).rejects.toThrow('daemon_version_mismatch')
+      expect(outcomes).toHaveLength(1)
+      expect(outcomes[0]).toMatchObject({ status: 'version-mismatch', running: 'test', expected: '2.0.0' })
+      expect(connectionFromMode(outcomes[0]!, '2.0.0')).toEqual({ state: 'version-mismatch', running: 'test', expected: '2.0.0' })
+    } finally {
+      lazy.dispose()
+      await daemon.dispose()
+    }
+  }, 60_000)
 })

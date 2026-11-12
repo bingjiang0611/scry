@@ -72,7 +72,7 @@
 App 进程里第一次得知后台服务是另一个版本时，弹一次原生对话框（有主窗口时挂在主窗口上）。
 
 - **触发**：沿用已有的检测，不加探测。懒连接面（`daemon-run-lazy.ts`）新增 `onOutcome(listener)`：它自己连接得到的每个结果（首次使用、`unavailable` 后再问、daemon 消失后的重连）都告诉观察者；`restart()` 的结果不告诉，那是用户发起的动作，由动作自己报告。观察者抛错不影响运行调用。渲染端启动时 `useBackgroundWork` 会调 `activeRuns()`，所以实际上窗口加载后就会弹；不阻塞窗口创建，主进程不等用户回答，没有同步 I/O。开关关闭时没有懒连接面，也就不订阅。
-- **对话框**：标题「后台服务版本不一致」，写出两边的版本；daemon 在报出版本之前就拒绝时（App 没有已保存的凭据、走入网时被拒），写「版本未知」，不猜。说明运行任务和终端需要版本一致的后台服务。按钮「重启后台服务」（默认）和「稍后」（取消）。文案在 `background-service-copy.ts`（`versionMismatchPrompt`、`restartFailedNotice`）。
+- **对话框**：标题「后台服务版本不一致」，写出两边的版本；没有已保存凭据、在入网时被拒的情况，用入网回复里 daemon 自报的版本（2026-11-12 补上）；daemon 没有报出、或报的不像版本号（`DaemonClientError` 只接受 ≤ 64 字符的版本形字符串）时写「版本未知」，不猜。说明运行任务和终端需要版本一致的后台服务。按钮「重启后台服务」（默认）和「稍后」（取消）。文案在 `background-service-copy.ts`（`versionMismatchPrompt`、`restartFailedNotice`）。
 - **「重启后台服务」**：调用设置页的同一个重启动作（同一个 `exclusive` 包装，`busy` 共用），身份复核、二次确认、停止期间不拉起、失败原因都是同一份代码。版本不一致时问不到 daemon 有没有运行中的任务，所以一定还会出现第二个确认框「重启后台服务会中断正在运行的任务」。用户在第二个框里取消，就什么也不做。
 - **失败**：用已有的失败原因文案（`reasonMessage`）再弹一个说明框，不自动重试。重启动作抛错时记为 `background_service_restart_error`，同样弹说明框。
 - **「稍后」**：什么也不做；设置页仍提供重启。
@@ -114,7 +114,7 @@ cat "$T/userData/daemon/daemon.lock"; ps -o pid,lstart,command -p <锁里的 pid
 2. 点「稍后」：没有别的框；`daemon.lock` 的 pid 与 `ps` 的身份不变；设置 →「后台服务」显示版本不一致、重启是主按钮；新建会话发一条消息、切换会话、打开设置几次，都不再弹。
 3. 退出新 App 再启动（新进程）：对话框再出现一次。点「重启后台服务」→ 出现第二个确认框「重启后台服务会中断正在运行的任务」（写「无法确认后台服务里是否有正在运行的任务」）。先点「取消」：什么也不发生，`daemon.lock` 不变，也不再弹。
 4. 再退出、启动一次，点「重启后台服务」→ 确认：旧 pid 消失，`daemon.lock` 换成新的 pid，`ps` 里没有 0.2.236 的 daemon 和监护进程残留；设置页显示已连接、版本 0.2.237；发一条消息能跑完。
-5. 版本未知：换一个新的 `$T`，不经旧 App，直接按 `scripts/b4v/scenarios/upgrade.mjs` 的 `oldDaemonEnv` 启动旧 daemon（`ELECTRON_RUN_AS_NODE=1 SCRY_DAEMON_APP_VERSION=0.0.0-b4v-old … electron $OLD/out/main/daemon.js`），再启动新 App：对话框写「正在运行的后台服务版本未知」，不写任何猜测的版本号。
+5. 版本未知：换一个新的 `$T`，不经旧 App，直接按 `scripts/b4v/scenarios/upgrade.mjs` 的 `oldDaemonEnv` 启动旧 daemon（`ELECTRON_RUN_AS_NODE=1 SCRY_DAEMON_APP_VERSION=0.0.0-b4v-old … electron $OLD/out/main/daemon.js`），再启动新 App：对话框写出旧 daemon 自报的版本 `0.0.0-b4v-old`（取自入网回复），不是「版本未知」。
 6. 开关关闭对照：旧后台服务仍在运行时，不设 `SCRY_HOST_DAEMON` 启动新 App：不弹任何框。
 7. 失败说明框（例如重启后 15 秒内旧进程没退出）在 macOS 上不容易人为制造，可以不做；单测已覆盖。
 
@@ -129,5 +129,5 @@ cat "$T/userData/daemon/daemon.lock"; ps -o pid,lstart,command -p <锁里的 pid
   - 退出后 `ps` 中没有 daemon 和监护进程，`daemon.lock`、`scry-userdata.lock`、socket 和 lease 文件都不在；
   - `ps -o lstart` 的身份与 `daemon.lock` 记录一致，不会因为身份不一致而误拒。
   - 本容器是 Linux（root），只跑了单测、真实子进程和真实 daemon 测试。
-  - 启动时版本不一致提示：对话框的样子、挂在主窗口上、默认按钮与 Esc、「稍后」后不再弹、「重启后台服务」接第二个确认框后真实重启，都没有在真实 App 里看过（按上面的 macOS 重放步骤做）。Linux 真实 App 也没有跑；版本未知那一种只有单测和步骤 5 覆盖。
+  - 启动时版本不一致提示：对话框的样子、挂在主窗口上、默认按钮与 Esc、「稍后」后不再弹、「重启后台服务」接第二个确认框后真实重启，都没有在真实 App 里看过（按上面的 macOS 重放步骤做）。Linux 真实 App 也没有跑；入网被拒时显示 daemon 自报版本：真实 daemon 测试 `host-process-version-mismatch.test.ts` 第二项覆盖（改动前得到 `unknown`，先失败），真实 App 里按步骤 5 看。
 - 运行中的任务数来自 daemon 的未结算 run（`unsettledStates`）。真实 daemon 测试只覆盖了 0 的情况，有运行中 run 时的计数没有用真实 run 验证。

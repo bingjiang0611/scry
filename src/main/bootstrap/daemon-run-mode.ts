@@ -110,7 +110,9 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   if (refused) {
     client.close()
     if (refused.reason === 'daemon_version_mismatch') {
-      return { status: 'version-mismatch', running: 'unknown', expected: deps.appVersion, action: 'restart_daemon' }
+      // Before the first grant the enrollment reply is the only place the daemon says
+      // which version it is; without it the version stays unknown, never guessed.
+      return { status: 'version-mismatch', running: refused.running ?? 'unknown', expected: deps.appVersion, action: 'restart_daemon' }
     }
     return refused.reason === 'daemon_device_not_authorized'
       ? { status: 'device-not-authorized', reason: refused.reason }
@@ -137,7 +139,7 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   } catch (error) {
     client.close()
     if (error instanceof DaemonClientError && error.reason === 'daemon_version_mismatch') {
-      return { status: 'version-mismatch', running: supervised.version, expected: deps.appVersion, action: 'restart_daemon' }
+      return { status: 'version-mismatch', running: error.running ?? supervised.version, expected: deps.appVersion, action: 'restart_daemon' }
     }
     return { status: 'unavailable', reason: error instanceof Error ? error.message : 'daemon_connect_failed' }
   }

@@ -120,9 +120,17 @@ describe('daemon client admission (L2: probe, enroll, version)', () => {
   it('reports the daemon version and refuses a daemon built from other sources', async () => {
     const env = await harness({ version: '0.2.199' })
     const mismatch = client(env)
-    await expect(mismatch.connect()).rejects.toMatchObject({ reason: 'daemon_version_mismatch' })
+    await expect(mismatch.connect()).rejects.toMatchObject({ reason: 'daemon_version_mismatch', running: '0.2.199' })
     // Nothing was persisted: a version mismatch must not leave a usable grant behind.
     expect(existsSync(daemonClientPaths(env.daemonStateDirectory, env.userDataDir).statePath)).toBe(false)
+  })
+
+  it('names the running version only when it is version-shaped', () => {
+    expect(new DaemonClientError('daemon_version_mismatch', { running: '0.2.199-beta.1+b7' }).running).toBe('0.2.199-beta.1+b7')
+    for (const shown of ['', ' 1.0', '1.0\n请点这里', '<b>1</b>', 'x'.repeat(65)]) {
+      expect(new DaemonClientError('daemon_version_mismatch', { running: shown }).running).toBeUndefined()
+    }
+    expect(new DaemonClientError('daemon_version_mismatch').running).toBeUndefined()
   })
 
   it('does not re-enroll after the grant is revoked, and clears the stored file', async () => {

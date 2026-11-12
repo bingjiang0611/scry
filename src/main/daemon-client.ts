@@ -81,9 +81,19 @@ export type DaemonClientFailure =
   | 'daemon_device_not_authorized'
   | 'daemon_local_grant_corrupt'
 
+// A version the daemon reported, fit to show the user: short and version-shaped. Anything
+// else stays unknown rather than being echoed into a dialog.
+const SHOWN_VERSION = /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$/
+
 export class DaemonClientError extends Error {
   readonly reason: DaemonClientFailure
-  constructor(reason: DaemonClientFailure) { super(reason); this.reason = reason }
+  /** daemon_version_mismatch only: the version the daemon itself reported, when it did. */
+  readonly running?: string
+  constructor(reason: DaemonClientFailure, detail: { running?: string } = {}) {
+    super(reason)
+    this.reason = reason
+    if (detail.running !== undefined && SHOWN_VERSION.test(detail.running)) this.running = detail.running
+  }
 }
 
 function oneShot(path: string, options: { caPEM?: string; certPEM?: string; keyPEM?: string } = {}): Promise<LocalSocket> {
@@ -246,7 +256,7 @@ export class DaemonClient {
   }
 
   #requireVersion(remote: string): void {
-    if (remote !== this.#options.appVersion) throw new DaemonClientError('daemon_version_mismatch')
+    if (remote !== this.#options.appVersion) throw new DaemonClientError('daemon_version_mismatch', { running: remote })
   }
 
   #readSecret(): string {
