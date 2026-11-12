@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createUiReady, reloadUi } from './ui-ready.mjs'
 import { pierreDiffEval, pierreTreeHasText } from './pierre-ui.mjs'
 import { createHash } from 'node:crypto'
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
@@ -12,6 +13,7 @@ export async function selectDiffScope({ click, wait, evaluate }, scope) {
 }
 
 async function reloadReferenceOnlyTurn({ click, wait, evaluate, firstRunId, cdp, userDataDir }) {
+  const ready = createUiReady((expression, timeoutMs) => wait(() => evaluate(expression), 'archive renderer ready', timeoutMs))
   // Reproduce legacy reference-only turn patches in the isolated App archive. Reuse the
   // canonical stored body, not today's workspace contents or a fabricated renderer patch.
   const root = join(userDataDir, 'trace-archive-turns-v1')
@@ -37,11 +39,12 @@ async function reloadReferenceOnlyTurn({ click, wait, evaluate, firstRunId, cdp,
     writeFileSync(path, JSON.stringify(archive))
   }
   assert.ok(restoredFiles > 0, 'fixture contains a real recorded turn patch')
-  await cdp.send('Page.reload')
-  await wait(() => evaluate(`Boolean(document.querySelector('[data-pinned-summary-toggle]'))`), 'App renderer restored after archive reload')
+  const documentEpoch = await evaluate('performance.timeOrigin')
+  await reloadUi(cdp, ready, { documentEpoch, panel: '.app',
+    body: `Boolean(document.querySelector('[data-pinned-summary-toggle]'))` })
   if (!await evaluate(`Boolean(document.querySelector('button.pinned-summary-row'))`)) await click('[data-pinned-summary-toggle]')
   await click('button.pinned-summary-row', 'Changes')
-  await wait(() => evaluate(`Boolean(document.querySelector('.diff-scope-trigger'))`), 'Diff reopened from persisted history')
+  await ready({ documentEpoch, panel: '.diff-inspector', body: `Boolean(document.querySelector('.diff-scope-trigger'))` })
 }
 
 export async function exerciseTurnMenu({ click, key, wait, evaluate, screenshot, target, firstRunId, latestRunId, cdp, userDataDir, inputs, evidence }) {

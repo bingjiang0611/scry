@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createUiReady, reloadUi } from './ui-ready.mjs'
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -12,10 +13,10 @@ export async function exerciseActivityHistory({ evaluate, cdp, userDataDir, home
   session.projectCwd = realpathSync(home)
   session.lastRunOutcome = 'completed'
   writeFileSync(catalogPath, JSON.stringify(catalog))
-  await cdp.send('Page.reload')
+  const documentEpoch = await evaluate('performance.timeOrigin')
 
-  const wait = expression => evaluate(`(async () => {
-    const deadline = performance.now() + 10000;
+  const wait = (expression, timeoutMs = 10000) => evaluate(`(async () => {
+    const deadline = performance.now() + ${timeoutMs};
     while (!(${expression})) {
       if (performance.now() > deadline) throw new Error('Activity history UI timed out: ' + ${JSON.stringify(expression)});
       await new Promise(requestAnimationFrame);
@@ -34,13 +35,17 @@ export async function exerciseActivityHistory({ evaluate, cdp, userDataDir, home
     await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point })
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point })
   }
-  await wait(`document.querySelector('.sb-sess[data-provider="pi"]') != null`)
+  const ready = createUiReady(wait)
+  await reloadUi(cdp, ready, { documentEpoch, timeoutMs: 10000,
+    body: `document.querySelector('.sb-sess[data-provider="pi"]') != null` })
   await click('.sb-new')
   await wait(`!document.body.textContent.includes('主机重启前已有的原生回复')`)
   await click('[role="tab"][id$="-view-activity"]')
   const row = '.sb-activity .sb-sess[data-provider="pi"]'
   await click(row)
-  await wait(`document.body.textContent.includes('主机重启前已有的原生回复')`)
+  await ready({ documentEpoch, timeoutMs: 10000, panel: '.sb-activity',
+    body: `document.body.textContent.includes('主机重启前已有的原生回复')`,
+    target: `document.querySelector(${JSON.stringify(row)})?.getAttribute('aria-current') === 'true'` })
   assert.equal(await evaluate(`document.querySelector(${JSON.stringify(row)}).getAttribute('aria-current')`), 'true')
   assert.equal(await evaluate(`document.body.textContent.includes('会话历史加载失败')`), false)
   assert.deepEqual(await evaluate('window.scry.activeRuns()'), [])

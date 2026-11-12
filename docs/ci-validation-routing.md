@@ -45,6 +45,8 @@ Ubuntu 保持 `ubuntu-latest`。`packaged-linux` 已优先加入 kernel.org Ubun
 
 桌面远程场景统一从该等待进入；正文历史、右面板与 host reload，以及本机 side-chat 的面板、正文、theme reload、restart/workbench 和统一对话的进入、reload、正文底部跟随共用此函数。缩放后的滚动就绪检查等待实际底部位置，不用固定帧数，不代替产品执行滚动；原有 overflow/底部跟随/用户滚离后的定位断言保留。专门验证 loading/preview 的用例不强制等到 authoritative，以免跳过要测试的中间状态。恢复检查在读持久化状态前不打开 child/history 来“修复”现场。
 
+Workspace/picker、reference-only diff、diff pressure、activity history 和 terminal adoption 的旧 reload 路径也共用此函数。所有托管 CDP reload 只由 `reloadUi` 发出，源码回归禁止其他 `.mjs` 绕过它。Activity 保留 10 秒、terminal 保留 15 秒，其余保留原 20 秒预算；workspace 的 wait 接收 reload 剩余预算。Terminal 不再吞掉所有求值异常，崩溃和 API 失败会保留为原始失败；就绪后仍独立断言原 PTY 存活。
+
 现有 Node/Electron 子进程失败仍输出退出码或 signal 与 stderr 尾部；回归测试覆盖 `-11`、`SIGSEGV` 与 Python 栈文本不会被改成成功或重试。CI 设置 `PYTHONFAULTHANDLER=1`，让 Python 子进程在 signal 11 崩溃时输出栈。仓库中没有找到旧的 Python `-11` 专用诊断实现，因此不能声称已验证某个 Python 调用链；不删除或替换已有诊断。
 
 ## 单 PR 的 recorder-only 计时

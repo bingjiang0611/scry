@@ -1,6 +1,29 @@
 import { runInNewContext } from 'node:vm'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { expect, it, vi } from 'vitest'
 import { createUiReady, reloadUi } from './ui-ready.mjs'
+
+it('routes every managed desktop reload through the shared readiness helper', () => {
+  const bypasses = readdirSync(import.meta.dirname, { recursive: true })
+    .filter(name => name.endsWith('.mjs') && name !== 'ui-ready.mjs')
+    .filter(name => /\.send\(\s*['"]Page\.reload['"]/.test(readFileSync(join(import.meta.dirname, name), 'utf8')))
+  expect(bypasses).toEqual([])
+})
+
+it('checks an awaited runtime identity in the same async readiness predicate', async () => {
+  const sessions = [{ id: 'other' }]
+  const wait = (expression: string) => runInNewContext(`(async () => (${expression}))()`, {
+    document: { readyState: 'complete', body: {} },
+    window: { scry: { terminalActive: async () => sessions } }
+  })
+  const ready = createUiReady(wait)
+  const target = { body: 'Boolean(window.scry?.terminalActive)',
+    target: `(await window.scry.terminalActive()).some(session => session.id === 'expected')` }
+  expect(await ready(target)).toBe(false)
+  sessions[0].id = 'expected'
+  expect(await ready(target)).toBe(true)
+})
 
 it('requires a new document, loaded body, visible panel and the exact target together', async () => {
   const state = { epoch: 1, mounted: false, authoritative: false, visible: false, target: 'other' }

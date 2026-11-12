@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createUiReady, reloadUi } from './ui-ready.mjs'
 import { pierreDiffEval, pierreDiffHasText, pierreDiffLineCount, pierreTreeAttribute, pierreTreeVisibleCount } from './pierre-ui.mjs'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -7,6 +8,7 @@ import { join } from 'node:path'
 // openWorkspace(cwd) must reach the real workspace whose execution cwd is cwd: the project draft for a
 // project root, the nested session for a managed worktree (a worktree is never a project group).
 export async function exerciseWorkspaceDiffBounds({ target, openWorkspace, click, evaluate, key, wait, screenshot, cdp }) {
+  const ready = createUiReady((expression, timeoutMs) => wait(() => evaluate(expression), 'diff renderer ready', timeoutMs))
   for (let index = 0; index < 1000; index++) {
     const text = index === 0
       ? Array.from({ length: 2000 }, (_, line) => `pressure-line-${String(line).padStart(4, '0')}\n`).join('') : 'one\n'
@@ -53,10 +55,11 @@ export async function exerciseWorkspaceDiffBounds({ target, openWorkspace, click
 
   // Exercise the real persisted preference through a renderer restart, not a CSS-only class override.
   await evaluate(`localStorage.setItem('scry.theme', 'light')`)
-  await cdp.send('Page.reload')
-  await wait(() => evaluate(`document.documentElement?.dataset.theme === 'light' && Boolean(document.querySelector('[data-pinned-summary-toggle]'))`), 'light preference after reload')
+  const documentEpoch = await evaluate('performance.timeOrigin')
+  await reloadUi(cdp, ready, { documentEpoch, panel: '.app',
+    body: `document.documentElement?.dataset.theme === 'light' && Boolean(document.querySelector('[data-pinned-summary-toggle]'))` })
   await openWorkspace(target)
-  await wait(() => evaluate(`document.querySelector('.tb-thread')?.title === ${JSON.stringify(target)}`), 'pressure workspace restored')
+  await ready({ documentEpoch, panel: '.workspace-context-strip', target: `document.querySelector('.tb-thread')?.title === ${JSON.stringify(target)}` })
   await open()
   await screenshot('inspector-pressure-light')
   await click('.diff-scope-trigger')

@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import { realpathSync } from 'node:fs'
 import { assertPendingDraft } from './workspace-session-ui-picker.mjs'
 const json = JSON.stringify
-export const wait = async (probe, label) => {
-  const deadline = Date.now() + 20_000
+export const wait = async (probe, label, timeoutMs = 20_000) => {
+  const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     const value = await probe()
     if (value) return value
