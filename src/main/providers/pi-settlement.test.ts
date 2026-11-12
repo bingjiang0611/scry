@@ -234,6 +234,23 @@ describe('Pi RPC Provider', () => {
     })
   })
 
+  it('keeps transport recovery alongside a Qoder account binding failure', async () => {
+    await withFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const handle = adapter.run({
+        runId: 'run-account-transport', prompt: 'provider-account-changed-transport', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: () => undefined
+      })
+      await expect(handle.promise).rejects.toMatchObject({
+        message: 'Qoder: account_changed_start_new_session (WebSocket error)',
+        brief: { nextAction: expect.stringContaining('请新建会话') }
+      })
+      await expect(handle.promise).rejects.toMatchObject({
+        brief: { nextAction: expect.stringContaining('WebSocket 与 SSE') }
+      })
+    })
+  })
+
   it('classifies Qoder 413 and points to the failed-turn recovery branch', async () => {
     await withFixture(async (profile, cwd) => {
       const events: TraceEvent[] = []

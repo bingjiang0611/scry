@@ -48,6 +48,26 @@ describe('Steer renderer evidence', () => {
     expect(turn.errorHint).toContain('继续当前会话重试')
   })
 
+  it.each([false, true])('preserves account and transport recovery for old/new hints: %s', current => {
+    const accountHint = 'Qoder 登录身份与会话绑定不一致。请新建会话后发送；在当前会话重试不会解除绑定。'
+    const transportHint = '检查上游服务或代理是否同时支持 WebSocket 与 SSE'
+    const turn = { runId: 'old-run', userText: 'continue', done: true, items: [],
+      error: 'Qoder: account_changed_start_new_session (WebSocket error)',
+      errorHint: current ? `${accountHint} ${transportHint}` : transportHint }
+    const html = renderToStaticMarkup(<AssistantTurn turn={turn} selectedId={null} onSelect={() => {}} />)
+    expect(html).toContain('请新建会话')
+    expect(html).toContain(transportHint)
+  })
+
+  it('does not replace input-overflow recovery with an account hint', () => {
+    const hint = '从失败处恢复：移除或压缩大图'
+    const turn = { runId: 'old-run', userText: 'continue', done: true, items: [],
+      error: 'Qoder: http_413 account_changed_start_new_session', errorHint: hint }
+    const html = renderToStaticMarkup(<AssistantTurn turn={turn} selectedId={null} onSelect={() => {}} />)
+    expect(html).toContain(hint)
+    expect(html).not.toContain('当前会话重试不会解除绑定')
+  })
+
   it('shows native acknowledgement and the original message without claiming model compliance', () => {
     const html = renderToStaticMarkup(
       <SteerEvidenceMessage evidence={{

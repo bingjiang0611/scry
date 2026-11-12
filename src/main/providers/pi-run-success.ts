@@ -319,6 +319,7 @@ export async function runPiAgentSuccess(ctx: PiRunSuccessContext): Promise<Provi
       const transportFailure = Boolean(
         ctx.usage.lastTransportError || ctx.usage.lastError?.toLowerCase().includes('fetch failed')
       )
+      const transportHint = ctx.launchShellEnvError ?? piRuntimeCopy.transportFailure
       throw new AgentRuntimeError(failureText ?? 'Pi Provider 未正常完成本轮', {
         provider: 'pi_rpc',
         stage: 'runtime',
@@ -328,10 +329,10 @@ export async function runPiAgentSuccess(ctx: PiRunSuccessContext): Promise<Provi
           : terminationReason === 'input_context_overflow'
             ? '点击失败卡片的“从失败处恢复”，在新分支中移除或压缩大图后重试；也可以新建会话'
             : ctx.usage.lastError?.includes('account_changed_start_new_session')
-              ? piRuntimeCopy.qoderAccountChanged
+              ? piRuntimeCopy.qoderAccountChangedHint(transportFailure ? transportHint : undefined)
               : transportFailure
-                ? ctx.launchShellEnvError ?? '检查上游服务和代理连接（WebSocket 与 SSE）；若修改了 shell 代理配置，请重启 Scry 后重试'
-                : '继续当前会话重试；若再次中止，请检查上游 Provider 状态与 Rotom 日志'
+                ? transportHint
+                : piRuntimeCopy.retryFailure
       })
     }
     return {
