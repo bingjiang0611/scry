@@ -126,6 +126,15 @@ export async function observeInfrastructure({ github, context, core }) {
       ...rows
     ]).write()
   if (retryJob) {
+    // A rerun joins the original concurrency group. Check the trusted current tip
+    // immediately before dispatch so an obsolete push does not cancel newer main CI.
+    if (current.data.event === 'push') {
+      const { data: ref } = await github.rest.git.getRef({ ...repo, ref: `heads/${current.data.head_branch}` })
+      if (ref.object.sha !== current.data.head_sha) {
+        core.notice('Superseded push run; no retry requested')
+        return
+      }
+    }
     // One request per completion avoids racing multiple reruns. The next completed
     // attempt drains another eligible job, never an unrelated failed assertion.
     await github.rest.actions.reRunJobForWorkflowRun({ ...repo, job_id: retryJob.id })

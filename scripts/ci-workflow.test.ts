@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
+import vitestConfig from '../vitest.config'
 
 // js-yaml is already installed by the build toolchain; no second YAML parser/config format.
 const { load } = createRequire(import.meta.url)('js-yaml') as { load: (text: string) => unknown }
@@ -29,6 +30,7 @@ interface Job {
 interface Workflow {
   on: Record<string, unknown>
   permissions: Record<string, string>
+  env?: Record<string, string>
   concurrency: { group: string; 'cancel-in-progress': string }
   jobs: Record<string, Job>
 }
@@ -87,6 +89,31 @@ const SERIAL_RENDERER_UI_ORDER = [
 ]
 
 describe('required PR checks', () => {
+  it.each(['pull_request', 'push', 'workflow_dispatch'])('retains the ordinary Check context for %s', event => {
+    const ci = workflow('ci.yml')
+    expect(ci.on).toHaveProperty(event)
+    expect(ci.jobs.check.name).toBe('Check')
+    expect(ci.on.workflow_dispatch ?? {}).not.toHaveProperty('inputs.recorder_base')
+  })
+
+  it('retains Python subprocess fault diagnostics', () => {
+    expect(workflow('ci.yml').env?.PYTHONFAULTHANDLER).toBe('1')
+  })
+
+  it('keeps all main and renderer unit/coverage suites regardless of App routing', () => {
+    const unit = workflow('ci.yml').jobs.unit
+    expect(unit.if).toBe("${{ needs.changes.outputs.required == 'true' }}")
+    const command = source(unit, 'Unit, contract tests and coverage shard').run!
+    expect(command).toContain('npm run test:coverage -- --maxWorkers=1 --shard=${{ matrix.shard }}/4')
+    expect(command).not.toMatch(/--(?:exclude|dir|project|testNamePattern)\b/)
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+    expect(pkg.scripts['test:coverage']).toBe('vitest run --coverage')
+    expect(vitestConfig.test?.include).toBeUndefined()
+    expect(vitestConfig.test?.exclude).not.toContain('src/main/**')
+    expect(vitestConfig.test?.exclude).not.toContain('src/renderer/**')
+    expect(vitestConfig.test?.coverage?.include).toEqual(['src/**/*.{ts,tsx}'])
+  })
+
   for (const [file, dependencies, desktopJobs] of [
     ['ci.yml', ['changes', 'node', 'unit', 'unit-coverage', 'cli-compat', 'packaged-electron', 'packaged-linux'], ['packaged-electron']],
     ['performance.yml', ['changes', 'compare', 'native'], ['native']]

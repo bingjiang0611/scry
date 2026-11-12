@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
 
+env:
+  PYTHONFAULTHANDLER: "1"
+
 # PR pushes and main pushes each keep only their newest run; manual dispatch is never
 # coalesced. Main runs validate fully because a cancelled run's commits are not re-diffed.
 concurrency:

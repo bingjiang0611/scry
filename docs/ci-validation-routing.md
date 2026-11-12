@@ -1,5 +1,7 @@
 # CI 验证分流与故障恢复
 
+维护者在 main 合入 #77 后明确选择沿用 main 的分流合同。PR #63 不再提供 recorder-only 特殊分流或 `recorder_base` 计时 dispatch；保留基础设施恢复、共享 UI readiness 和其他验收链修复。下述路径规则以 main 的 `validation-changes.yml` 为准。
+
 ## 路径与必跑检查
 
 `validation-changes.yml` 用真实 Git diff（包括删除与重命名两端）输出 `required`、`desktop`。不在工作流触发器上加 path filter，避免必需的 `Check` 永久 pending。未知路径走完整验证，无法读取 diff 则失败。
@@ -7,23 +9,23 @@
 | PR / 手动运行的改动范围 | CI 必跑 | 桌面产物 / macOS UI |
 | --- | --- | --- |
 | 仅 `**/README.md`、`docs/**/*.md` | 路径检测、聚合 Check | 不触发 |
-| 仅 `src/core/turn-recorder/**`、`src/cli/**`、`packages/turn-recorder-cli/**`，可混合上述文档 | node 检查、全部 unit/contract/coverage 分片及合并、CLI Node 20/22/24 回归、clean tarball 打包冒烟 | 不触发 |
-| 其他路径，或与 recorder 混合 | 上述全部检查；桌面 build、macOS 三个 UI 分片及打包冒烟、Linux App/pacman 打包检查 | 必跑 |
+| main 的 App-free 白名单：`*.test.ts(x)`、指定 Agent 指导/PR 模板、`apps/ios/**` 等 | Ubuntu node/build、全部 unit/contract/coverage、CLI Node 20/22/24、clean tarball、Linux App/pacman 均保留 | 仅跳过 macOS 三片与 Performance Native；不冒充已测量 |
+| recorder 生产源码、共享合同、workflow、脚本、依赖/锁文件、App 输入及未知路径 | 完整矩阵，包含上述检查及 macOS 三片 UI/打包 | 必跑 |
 | 未限定范围的 `workflow_dispatch`（含桌面发布验证） | 完整检查 | 必跑 |
 
-共享合同（如 `src/shared/turn-record.ts`）、依赖/锁文件、构建配置、CI 与 UI 脚本不列入 recorder 白名单。白名单只允许 recorder 自有目录；若以后移出共享运行代码，先重新审查依赖边界再改规则。没有删除测试或缩小 unit/coverage 范围。`check:cli-runtime` 保留 recorder 单测、CLI 合同、CLI build 和 clean tarball 安装/运行冒烟。Performance、Remote G0 继续沿用原有 `required` 规则，本次不放宽其门禁。
+不把 recorder 目录视为独立于 App 的生产边界。App-free 判定沿用 #77：测试后缀和指定非 App 输入可免 macOS，但测试 helper、workflow/action、测量脚本、fixture 和打包输入仍走完整矩阵。没有删除已有测试或缩小 unit/coverage；本 PR 原 recorder-only 场景改为断言 main 的完整验证。`check:cli-runtime` 保留 recorder 单测、CLI 合同、CLI build 和 clean tarball 安装/运行冒烟。Performance 的 Native 条件沿用 main 的 `desktop`；Remote G0 使用其自身分流，不由本 PR 扩大豁免。
 
 聚合 `Check` 根据两个输出逐项核对 success/skipped；需要的检查跳过、取消、失败、缺失或出现未知输出均不通过。
 
-## Recorder-only 保留桌面消费者单测
+## 所有可执行改动保留桌面消费者单测
 
-“全部 unit/coverage”不是 recorder 目录子集。`unit` job 只依赖 `required=true`，不依赖 `desktop`；四个分片统一执行 `npm run test:coverage`（`vitest run --coverage`），只按文件分片，没有 recorder 路径过滤。`src/main` 和 `src/renderer` 的单测与覆盖率都保留，包括 managed-turn、conversation-history、transcript-archive、db、git-diff-history 等消费者。`vitest.config.ts` 的 coverage include 为 `src/**/*.{ts,tsx}`；排除的测试文件、声明和 fixture/helper 不是桌面消费者业务源码。它不等于真实桌面 UI 验证，后者仍由桌面矩阵承担。
+“全部 unit/coverage”不是路径子集。`unit` job 只依赖 `required=true`，不依赖 `desktop`；四个分片统一执行 `npm run test:coverage`（`vitest run --coverage`），只按文件分片，没有 recorder 路径过滤。`src/main` 和 `src/renderer` 的单测与覆盖率都保留，包括 managed-turn、conversation-history、transcript-archive、db、git-diff-history 等消费者。`vitest.config.ts` 的 coverage include 为 `src/**/*.{ts,tsx}`；排除的测试文件、声明和 fixture/helper 不是桌面消费者业务源码。它不等于真实桌面 UI 验证，后者仍由桌面矩阵承担。
 
 ## 合并 main 后的完整矩阵兜底
 
-CI 已监听 `push.branches: [main]`。任何可执行改动推入 main（包括仅 recorder 自有路径），路径检测都会强制 `desktop=true`，立即运行完整矩阵：全部 unit/coverage、CLI、桌面 build、macOS 三个 UI/打包分片、Linux App/pacman 检查。Performance 与 Remote G0 仍按原有 `required` 门禁运行。这样 recorder 对桌面消费者的影响不必等到下一次桌面路径 PR 或夜间任务才接受 UI 检查。
+CI 监听 `push.branches: [main]`。按 #77，main pushes 共用并发组，新 run 可取消旧 run；PR pushes 各自合并为最新一轮，手动运行不合并。为覆盖被取消 run 的提交，所有 main push（包括文档）与默认手动运行均强制完整验证；不使用 `recorder_base`，不按 PR 路径免除 App 检查。发版若依赖某次提交的 CI 产物，应等该 run 完成再合下一 PR，见 `CONTRIBUTING.md`。
 
-仅文档的 main push 仍跳过验证；普通 recorder-only PR 仍走轻量通道；默认手动运行仍为完整验证。主分支完整矩阵由 merge 后的真实 push 触发，不使用 `recorder_base`，不因 PR 路径分类而省略桌面检查。触发不代表执行一定成功或按时完成；排队、平台/API 故障仍需维护者处理失败与延迟。
+CI 的完整矩阵包含全部 unit/coverage、CLI、桌面 build、macOS 三片和 Linux 打包。Performance 依其现有工作流消费相同的完整输出；Remote G0 不改变。触发不代表取得 runner 或执行成功；排队、平台/API 故障仍须按下节证据分类，不把并发策略取消自动视为基础设施故障。
 
 ## 基础设施分类与一次重试
 
@@ -33,7 +35,7 @@ CI 已监听 `push.branches: [main]`。任何可执行改动推入 main（包括
 - 软件源下载或 DNS 失败：必须发生在依赖安装/runner 准备步骤，并匹配明确的网络失败证据。日志按 GitHub step 起止时间归属，只用唯一属于失败步骤的日志秒；共享边界秒、缺失时间或无时间戳时不猜测，避免成功步骤的 DNS 负对照污染后续错误。
 - 测试断言、测试步骤中的 DNS 负对照、依赖合同错误及未知失败：不自动重试，保留原始失败，先调查。整份日志中的断言证据始终否决自动重试，即使断言出现在不能唯一归属的 step 边界秒。
 
-只调用失败的基础设施 job 的 rerun API（及 GitHub 自动安排的依赖聚合 job），不用重跑全部失败 job 的 API，因此不顺带重跑失败断言。每个完成事件最多请求一个 job；下一次完成后继续处理尚未重试的基础设施 job，避免并发 rerun 冲突。读取所有历史 attempts，按唯一 job 名（含 matrix 坐标）限制每个 job 最多一次。GitHub 会复制未重跑 job 到后续 attempt，生成新 ID 却保留原执行时间；以各 attempt 的 `run_started_at` 排除这些副本，读取真实执行的日志/annotation，向最新 job ID 请求重试。人工真正重跑同一 job 也消耗额度；执行历史不能确认时标为 unknown、不重试。重复/过期事件、重名有歧义时不重试。不取消或覆盖首轮日志。
+只调用失败的基础设施 job 的 rerun API（及 GitHub 自动安排的依赖聚合 job），不用重跑全部失败 job 的 API，因此不顺带重跑失败断言。每个完成事件最多请求一个 job；下一次完成后继续处理尚未重试的基础设施 job，避免并发 rerun 冲突。读取所有历史 attempts，按唯一 job 名（含 matrix 坐标）限制每个 job 最多一次。GitHub 会复制未重跑 job 到后续 attempt，生成新 ID 却保留原执行时间；以各 attempt 的 `run_started_at` 排除这些副本，读取真实执行的日志/annotation，向最新 job ID 请求重试。人工真正重跑同一 job 也消耗额度；执行历史不能确认时标为 unknown、不重试。重复/过期事件、重名有歧义时不重试。对 push run，在 rerun 前读取可信的当前 branch ref，与原 run 的 head SHA 比较；已被新 push 替代则不重试，避免旧 main run 取消新 run。ref 查询失败则不发起 mutation；查询与 rerun 不是原子操作，不能保证两次 API 之间没有新 push。不取消或覆盖首轮日志。
 
 观察工作流仅在合入默认分支后自动生效。它固定 checkout **默认分支**，从不执行 PR head 代码或下载 PR artifact；token 只有 `contents:read`、`checks:read`、`actions:write`。观察工作流本身或 GitHub API 不可用时不能保证自动恢复，应由维护者查看原始结果；不会伪装成功。
 
@@ -49,14 +51,8 @@ Workspace/picker、reference-only diff、diff pressure、activity history 和 te
 
 现有 Node/Electron 子进程失败仍输出退出码或 signal 与 stderr 尾部；回归测试覆盖 `-11`、`SIGSEGV` 与 Python 栈文本不会被改成成功或重试。CI 设置 `PYTHONFAULTHANDLER=1`，让 Python 子进程在 signal 11 崩溃时输出栈。仓库中没有找到旧的 Python `-11` 专用诊断实现，因此不能声称已验证某个 Python 调用链；不删除或替换已有诊断。
 
-## 单 PR 的 recorder-only 计时
+## 历史计时与当前验收
 
-完整 PR diff 包含 CI/UI 改动，本来就应跑桌面门禁，不能把其末次 recorder commit 冒充 recorder-only PR。可在同一任务分支提交完整实现，再提交一个 recorder 自有路径的独立改动，然后显式 dispatch：
+先前 recorder-only 试验 run `43182723761` 成功，墙钟 290 秒；其严格 base/head、原工作量和各 job 结果保留于 PR #63。维护者随后选择 main #77 的分流方案，因此撤回该特殊通道和计时输入。这个数字只描述历史 artifact，不代表当前 recorder 生产改动的 CI 耗时，也不能代替最新完整门禁。
 
-```bash
-gh workflow run ci.yml --ref <task-branch> -f recorder_base=<implementation-commit-sha>
-```
-
-计时 dispatch 使用独立的 `Recorder timing Check` 聚合 context，不与正常 PR/push/默认手动验证的必需 `Check` 同名。避免同一 SHA 的缩窄计时与完整验收发布同名、不同范围的结果；计时成功不能作为完整 PR 验收通过的替代。
-
-`recorder_base` 只能用于手动计时：必须是 HEAD 的严格祖先、40 位 SHA，且到 HEAD 的 diff 必须非空并仅触及 recorder 白名单/文档；包含任何桌面/未知路径则失败。PR/push 忽略该输入，默认手动/桌面发布验证也不使用它。报告比较 base/head、运行链接、结果、`created_at → completed_at` 墙钟耗时及各必跑 job 时间；排队算在墙钟内，不把并行 job 时长相加当作耗时。
+当前所有普通事件使用必需 `Check`；没有发布相同 SHA、同名但不同范围的计时结果。报告最新运行的 head、base、链接与墙钟时间；保留排队时间，不把并行 job 时长相加。

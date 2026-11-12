@@ -36,13 +36,14 @@ function fixture(attempt = 1, annotations: Array<{ message: string }> = []) {
     paginate: vi.fn(async (method: unknown) => method === listAnnotations ? annotations : jobs),
     rest: {
       actions: {
-        getWorkflowRun: vi.fn(async () => ({ data: { status: 'completed', run_attempt: attempt, run_started_at: attemptStart(attempt) } })),
+        getWorkflowRun: vi.fn(async () => ({ data: { status: 'completed', run_attempt: attempt, run_started_at: attemptStart(attempt), event: 'pull_request', head_branch: 'feature', head_sha: 'a'.repeat(40) } })),
         getWorkflowRunAttempt: vi.fn(async ({ attempt_number }: { attempt_number: number }) => ({ data: { run_started_at: attemptStart(attempt_number) } })),
         listJobsForWorkflowRun: vi.fn(),
         downloadJobLogsForWorkflowRun: vi.fn(async ({ job_id }: { job_id: number }) => ({ data: `2026-01-01T00:01:05.1234567Z ${job_id === 2 ? 'AssertionError' : 'Temporary failure resolving archive.ubuntu.com'}` })),
         reRunJobForWorkflowRun: vi.fn(async () => ({}))
       },
-      checks: { listAnnotations }
+      checks: { listAnnotations },
+      git: { getRef: vi.fn(async () => ({ data: { object: { sha: 'a'.repeat(40) } } })) }
     }
   }
   const summary = { addHeading: vi.fn().mockReturnThis(), addLink: vi.fn().mockReturnThis(), addTable: vi.fn().mockReturnThis(), write: vi.fn() }
@@ -61,9 +62,28 @@ it('reruns only the infrastructure job once, never the failed test job', async (
   ]))
 })
 
+it.each([false, true])('checks the trusted push head before retry (superseded: %s)', async superseded => {
+  const options = fixture()
+  options.github.rest.actions.getWorkflowRun.mockResolvedValue({ data: {
+    status: 'completed', run_attempt: 1, run_started_at: attemptStart(1),
+    event: 'push', head_branch: 'main', head_sha: 'a'.repeat(40)
+  } })
+  options.github.rest.git.getRef.mockResolvedValue({ data: { object: { sha: (superseded ? 'b' : 'a').repeat(40) } } })
+  await observeInfrastructure(options)
+  if (superseded) {
+    expect(options.github.rest.actions.reRunJobForWorkflowRun).not.toHaveBeenCalled()
+    expect(options.core.notice).toHaveBeenCalledWith('Superseded push run; no retry requested')
+  } else {
+    expect(options.github.rest.actions.reRunJobForWorkflowRun).toHaveBeenCalledExactlyOnceWith({ owner: 'example', repo: 'test', job_id: 1 })
+  }
+  expect(options.github.rest.git.getRef).toHaveBeenCalledExactlyOnceWith({ owner: 'example', repo: 'test', ref: 'heads/main' })
+  expect(options.core.summary.write).toHaveBeenCalledOnce()
+})
+
 it.each([
   { message: 'The job was not acquired by Runner of type hosted even after multiple attempts', retry: true },
-  { message: 'The operation was canceled.', retry: false }
+  { message: 'The operation was canceled.', retry: false },
+  { message: 'The operation was canceled. Due to capacity constraints, jobs targeting macOS arm64 runners may experience longer queue times.', retry: false }
 ])('handles an unassigned cancelled job only with explicit runner evidence: $retry', async ({ message, retry }) => {
   const options = fixture(1, [{ message }])
   Object.assign(options.jobs[0], { runner_id: 0, conclusion: 'cancelled', steps: [],
