@@ -16,7 +16,9 @@ export function configuredRemotePermissionMode(): AgentPermissionMode | undefine
 // Linux 的 safeStorage 在没有可用密钥环时会退回 `basic_text`（用固定明文口令加密），
 // isEncryptionAvailable() 仍返回 true。把弱后端当成安全存储会把远程设备凭据
 // 写成“看起来已加密”的伪保护，所以在这里 fail closed。
-// 纯本地项目不经过这条路径，密钥环不可用不应阻断它。
+// daemon 模式下本机 run 也经过这条路径：App 连本机后台服务的 grant 同样存在 safeStorage，
+// 所以密钥环不可用时本机 run 一样被拒（B4-S F2）。Linux 上 Hyprland 或未命名桌面会先
+// 追加 password-store=gnome-libsecret（linux-password-store.ts），但从不退回明文。
 export function unsafeCredentialStorageReason(input: {
   platform?: NodeJS.Platform
   encryptionAvailable: boolean
