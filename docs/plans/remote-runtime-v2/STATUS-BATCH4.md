@@ -15,7 +15,7 @@
 | B4-L2 main 侧 daemon 客户端与 supervisor | 完成 | `见 status` | [b4-l2](status/b4-l2.md)：`DaemonClient` 入网/探活/版本硬失败/撤销不重入、`ensureDaemon` 探活→接入→拉起→就绪；新 op `daemonInfo` 仅 local |
 | B4-L3 run 经 daemon | 功能部分完成，等核验（G1 已修：admission 的无上限等待改为有界并带原因；首 token 仍 +41…+58 ms P50，S1 未达成） | `b0260e41` `d9f7aaed` `见 b4-l3g` | [b4-l3](status/b4-l3.md)：语义层 + 接线层 + run controls + 执行归属；M1 只重放可证明未发送的请求，M2 分类表逐条判定，M3 真实 App 端到端全绿；流式粒度已与进程内一致（20 事件/样本、间隔 152 ms）。[b4-l3g](status/b4-l3g.md)：卡死 run 未复现（300 次启动、10 s 看门狗），审计出两处 `providerStart` 之前的无上限等待并改为 20 s 有界（`run_admission_timeout` / 既有「同一会话已有一轮正在运行」），经 dispatcher 记为带原因的 `run_failed`；H1 把上限收回到只作用于启动 run（`admitRun`），会话账本、删除与 fork 恢复无上限排队；20 s 为暂定值。S1 未达成，按维护者答复转为 B4-S 前置门禁（[REVIEW-BATCH4-L3G](REVIEW-BATCH4-L3G.md)）。撤销后重连入口按维护者答复放在 B4-S 设置页 |
 | B4-L4 其余能力经 daemon | 进行中（L4-0 完成） | `见 status` | [b4-l4](status/b4-l4.md)：矩阵补漏到 134 通道；开关打开时未迁移通道一律以 `daemon_capability_unavailable:<channel>` 拒绝（挂在 `registerTrustedIpcHandler`）；开关打开时 App 不再启动进程内远程宿主。能力迁移按 b4-l4「迁移顺序」进行 |
-| B4-S 切换与删除 | 未开始 | — | |
+| B4-S 切换与删除 | 方案待审 | — | [P3-b4s-plan](P3-b4s-plan.md) |
 | B4-V 验收 | 未开始 | — | |
 
 ## 执行顺序
@@ -47,7 +47,7 @@ G1（5 条差异补处理方式 + 守卫断言）与 G2（secret 生命周期改
 | `conversation:send` | 经台账派发，run 只用会话 turn 的 `runId` 一个 id；能落盘的从落盘读取并校验，进程内交接只保留到派发为止，daemon 重启后不重建、不重发 | [P3-conversation-send](P3-conversation-send.md) |
 | daemon → App 推送流 | 排在 L4 剩余各组之前做。新增的流式 op 只在本机端点、`scope: local`，不向远程开放；维护者确认这不违反“协议版本不变” | [P3f](P3f-app-event-stream.md)；E0–E3（含 E1b）见 [b4-l4-events](status/b4-l4-events.md) |
 | userData 独占锁 | 现在做，只在开关打开时生效；不属于 B4-S 的删除工作 | 已实现，开关打开、关闭两侧都有（关闭侧按维护者 2026-11-11 选的 A + B）。设计见 [P3-userdata-lock](P3-userdata-lock.md) |
-| S1 门禁 | 改为首 token 的绝对值上限。数值由执行方以数据提出、维护者批准；批准之前沿用现有 S1 门禁，开关仍不得默认打开 | 已提出并补测（daemon 热启动 P95 157.5 / 146.0 ms，P50 128.3 / 133.8 ms），待批准：[P3-s1-absolute-cap](P3-s1-absolute-cap.md) |
+| S1 门禁 | 改为首 token 的绝对值上限。数值由执行方以数据提出、维护者批准；批准之前沿用现有 S1 门禁，开关仍不得默认打开 | 维护者 2026-11-12 批准，已满足（`3b04ee8`：daemon 热启动 P95 157.5 / 146.0 ms，P50 128.3 / 133.8 ms）：[P3-s1-absolute-cap](P3-s1-absolute-cap.md) |
 | 两本账（远程台账、会话账本）合并 | 不在 B4 做，B4-S 之后再议 | — |
 | 维护者机器上的孤儿 daemon | 维护者自行清理（进程 20198、20201，`/tmp/scry-g1-stuck-*`） | — |
 
@@ -79,4 +79,4 @@ B4-L4 迁移完成：168 个特权通道全部有了去处（留在 main、本�
 
 ## 需要决定
 
-S1 门禁的数值与规则，见 [P3-s1-absolute-cap](P3-s1-absolute-cap.md)「维护者要决定的」。补测已完成，两轮都满足提案规则。
+无。S1 已批准并满足；B4-S 方案见 [P3-b4s-plan](P3-b4s-plan.md)，待维护者审阅。
