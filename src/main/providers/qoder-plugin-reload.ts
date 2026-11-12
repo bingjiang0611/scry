@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { Query } from '@qoder-ai/qoder-agent-sdk'
 import type { NormalizeCtx } from '../normalize-core'
 import { normalizeQoderMessage } from './qoder-messages'
@@ -20,6 +21,15 @@ export function runQoderPluginReload(
     const prompt = heldPrompt()
     let stopped = false
     let externalSessionId = request.resume
+    // `/plugins reload` sends no prompt, so no message may ever carry the session id.
+    // Scry names the new session itself (the daemon honors it) and adopts that id once
+    // the Provider has answered.
+    const requestedSessionId = request.resume ? undefined : randomUUID()
+    const adoptSessionId = (id: string): void => {
+      if (id === externalSessionId) return
+      externalSessionId = id
+      request.onExternalSessionId?.(id)
+    }
     let q: Query | undefined
     let lease: QoderDaemonLease | undefined
     const ctx: NormalizeCtx = {
@@ -42,6 +52,7 @@ export function runQoderPluginReload(
         prompt: prompt.stream,
         options: {
           ...qoderSessionOptions(request.cwd, request.resume, request.permissionMode, request.mcpExecution),
+          ...(requestedSessionId ? { sessionId: requestedSessionId } : {}),
           abortController: controller
         }
       })
@@ -49,16 +60,16 @@ export function runQoderPluginReload(
         for await (const message of q!) {
           const raw = message as unknown as Record<string, unknown>
           request.recordNative?.(typeof raw.type === 'string' ? raw.type : 'unknown', raw)
-          if (typeof raw.session_id === 'string' && raw.session_id !== externalSessionId) {
-            externalSessionId = raw.session_id
-            request.onExternalSessionId?.(raw.session_id)
-          }
+          const reported = typeof raw.session_id === 'string' && raw.session_id.trim() ? raw.session_id : undefined
+          if (reported) adoptSessionId(reported)
+          else if (!externalSessionId && requestedSessionId) adoptSessionId(requestedSessionId)
           for (const event of normalizeQoderMessage(message, ctx)) request.emit(qoderTrace(event))
         }
       })()
       let providerResult: ProviderRunResult
       try {
         const result = await q.reloadPlugins()
+        if (!externalSessionId && requestedSessionId) adoptSessionId(requestedSessionId)
         onPluginsReloaded()
         const errorCount = Number(result.error_count ?? 0)
         const text = `插件已重载：${result.plugins.length} 个插件，${result.commands.length} 条命令${errorCount > 0 ? `，${errorCount} 个错误` : ''}`

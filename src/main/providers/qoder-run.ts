@@ -15,18 +15,13 @@ import {
   type QoderContextEvidence
 } from './qoder-evidence'
 import {
-  parseQoderBackgroundTaskFailures,
-  parseQoderHookLog,
-  parseQoderSubagentTerminals,
-  qoderHookFallbackOnly,
-  qoderHookLog,
   qoderProviderTurnId,
-  qoderProviderTurnIdFromLog,
   type QoderHookFallbackState,
   isAgentLaunchStatus,
   isAgentTerminalStatus,
   observedAgentStatus
 } from './qoder-hooks'
+import { reconcileQoderRunLog } from './qoder-run-log'
 import { livePrompt, qoderExecutable, qoderSessionOptions, signalProcessTree } from './qoder-launch'
 import { qoderQuery, startQoderDaemon, type QoderDaemonLease } from './qoder-daemon'
 import { expandQoderProjectCommand, projectCommandMatch } from './qoder-commands'
@@ -48,6 +43,20 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
   const controller = new AbortController()
   let stopped = false
   let externalSessionId = request.resume
+  // A new session gets its native id from Scry, which the daemon honors. Hooks can run
+  // before any message carries the id, so a stop in that window would otherwise leave
+  // Provider evidence with no session to recover it under.
+  const requestedSessionId = request.resume ? undefined : randomUUID()
+  const adoptSessionId = (id: string): void => {
+    if (id === externalSessionId) return
+    externalSessionId = id
+    // A resumed run must never accept input into a different native session.
+    history.verifySession(id)
+    request.onExternalSessionId?.(id)
+  }
+  // Settles the run as soon as it is stopped while its daemon is still starting.
+  let signalStopped = (): void => {}
+  const stoppedEarly = new Promise<'stopped'>((resolve) => { signalStopped = () => resolve('stopped') })
   let providerTurnId: string | undefined
   let forkTurnId: string | undefined
   let providerTurnIdAmbiguous = false
@@ -161,10 +170,18 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
       : request.prompt
     // Start this run's daemon before any input is attempted: a start failure leaves the
     // prompt unsent, exactly like a missing CLI.
-    lease = await startQoderDaemon({
+    const starting = startQoderDaemon({
       managedRecorder: request.managedRecorder === true,
       managedIdentity: request.managedRecorderIdentity
     })
+    // A daemon start takes seconds and cannot be aborted; a stop must not wait for it.
+    const started = await Promise.race([starting, stoppedEarly])
+    if (started === 'stopped') {
+      void starting.then((late) => late.stop(), () => {})
+      return { externalSessionId: request.resume, providerTurnId: undefined, forkTurnId: undefined,
+        stopped: true, status: 'interrupted', mcp: undefined }
+    }
+    lease = started
     lease.onFailure((error) => {
       if (stopped || streamSettled) return
       rejectUnexpectedExit(new Error(`Qoder 守护进程已失效，但 SDK 事件流未结束：${error.message}`))
@@ -188,6 +205,7 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
       prompt: prompt.stream,
       options: {
         ...qoderSessionOptions(request.cwd, request.resume, request.permissionMode, request.mcpExecution),
+        ...(requestedSessionId ? { sessionId: requestedSessionId } : {}),
         ...(request.model && !request.effort ? { model: request.model.id } : {}),
         ...(request.model && request.effort
           ? {
@@ -213,12 +231,11 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
               credits.observe(raw)
               backgroundTasks.observe(raw)
               observeProviderTurnId(qoderProviderTurnId(raw))
-              if (typeof raw.session_id === 'string' && raw.session_id !== externalSessionId) {
-                externalSessionId = raw.session_id
-                // A resumed run must never accept input into a different native session.
-                history.verifySession(raw.session_id)
-                request.onExternalSessionId?.(raw.session_id)
-              }
+              // An empty id is no id. The first Provider frame proves the requested session is
+              // open, so a new session adopts its requested id until the Provider names one.
+              const reported = typeof raw.session_id === 'string' && raw.session_id.trim() ? raw.session_id : undefined
+              if (reported) adoptSessionId(reported)
+              else if (!externalSessionId && requestedSessionId) adoptSessionId(requestedSessionId)
               if (raw.type === 'system' && raw.subtype === 'init' && Array.isArray(raw.mcp_servers)) {
                 statuses = (raw.mcp_servers as Array<{ name: string; status: McpServerStatus['status'] }>).map((server) => ({
                   name: server.name,
@@ -283,42 +300,21 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
       // The daemon flushes and closes its run log on exit; read it only afterwards.
       await lease.stop()
     }
-    const logHooksEnabled = process.env.SCRY_QODER_LOG_HOOKS?.trim() !== '0'
-    if ((request.managedRecorder === true || logHooksEnabled) && lease.pid) {
-      try {
-        const log = await qoderHookLog(lease.pid)
-        observeProviderTurnId(qoderProviderTurnIdFromLog(log, externalSessionId))
-        const backgroundFailures = parseQoderBackgroundTaskFailures(request.runId, log, externalSessionId)
-        for (const event of backgroundFailures) {
-          if (event.toolUseId) backgroundTasks.settleCall(event.toolUseId, 'Bash')
-          request.emit(event)
-        }
-        if (backgroundFailures.length > 0) providerStatus = 'failed'
-        const subagentTerminals = parseQoderSubagentTerminals(request.runId, log, externalSessionId)
-        const missingSubagentTerminals = subagentTerminals.filter(
-          (event) => event.toolUseId && !terminalAgentCalls.has(event.toolUseId)
-        )
-        for (const event of missingSubagentTerminals) emitAgentFallback(event, true)
-        if (!stopped && missingSubagentTerminals.some((event) => observedAgentStatus(event) !== 'completed')) {
-          providerStatus = 'failed'
-        }
-        if (logHooksEnabled) {
-          const fallback = parseQoderHookLog(request.runId, log, externalSessionId)
-          for (const event of qoderHookFallbackOnly(sdkHooks, fallback)) request.emit(event)
-          deps.hookFallback.observed = true
-        }
-        deps.hookFallback.error = undefined
-      } catch (error) {
-        deps.hookFallback.error = String((error as Error).message)
-        request.emit({
-          id: newId(), runId: request.runId, ts: new Date().toISOString(),
-          kind: 'harness', stage: 'runtime:telemetry_degraded', text: deps.hookFallback.error,
-          runtimeMetadata: { source: 'qoder_cli_log', capability: 'hooks' }
-        })
-      }
-    } else if ((request.managedRecorder === true || logHooksEnabled) && !lease.pid) {
-      deps.hookFallback.error = 'Qoder log fallback could not identify this run\'s daemon process'
-    }
+    const fromLog = await reconcileQoderRunLog({
+      runId: request.runId,
+      pid: lease.pid,
+      externalSessionId,
+      stopped,
+      managedRecorder: request.managedRecorder === true,
+      sdkHooks,
+      hookFallback: deps.hookFallback,
+      emit: request.emit,
+      observeProviderTurnId,
+      settleBackgroundBash: (toolUseId) => backgroundTasks.settleCall(toolUseId, 'Bash'),
+      hasAgentTerminal: (toolUseId) => terminalAgentCalls.has(toolUseId),
+      emitAgentTerminal: (event) => emitAgentFallback(event, true)
+    })
+    if (fromLog.failed) providerStatus = 'failed'
     if (backgroundTasks.pending && !stopped) {
       providerStatus = 'failed'
       request.emit({
@@ -383,6 +379,7 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
   })()
   const interrupt = (): void => {
     stopped = true
+    signalStopped()
     backgroundMonitor.pause()
     releaseProviderPrompt()
     controller.abort()

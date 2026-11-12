@@ -17,8 +17,8 @@ import {
   resolveQoderSdkExecutable
 } from './qoder'
 
-const { sdk, diagnostics } = t
-const { useLease } = bindQoderTestHelpers(t)
+const { sdk, diagnostics, daemonFake } = t
+const { useLease, untilQueried } = bindQoderTestHelpers(t)
 
 describe('Qoder provider adapter · daemon lifecycle and process control', () => {
   beforeEach(() => resetQoderTestState(t))
@@ -176,5 +176,62 @@ describe('Qoder provider adapter · daemon lifecycle and process control', () =>
       text: 'Unknown slash command: /rate-workflow',
       isError: true
     }))
+  })
+
+  it('settles a stop during the daemon start at once and stops the daemon that arrives later', async () => {
+    let arrive!: (lease: unknown) => void
+    daemonFake.next = new Promise((resolve) => { arrive = resolve }) as never
+    const handle = createQoderAdapter().run({ runId: 'run-early-stop', prompt: 'work', cwd: '/repo', attachments: [], emit: () => {} })
+    await Promise.resolve()
+    handle.interrupt()
+    await expect(handle.promise).resolves.toMatchObject({ stopped: true, status: 'interrupted' })
+    expect(sdk.query).not.toHaveBeenCalled()
+    const stop = vi.fn().mockResolvedValue(undefined)
+    arrive({ daemon: {}, stderrTail: () => '', onFailure: () => () => {}, stop })
+    for (let attempt = 0; attempt < 10 && !stop.mock.calls.length; attempt += 1) await Promise.resolve()
+    expect(stop).toHaveBeenCalledOnce()
+  })
+
+  it('names a new session itself and adopts that id from the first Provider frame without one', async () => {
+    useLease({ pid: 903 })
+    let release = (): void => {}
+    sdk.query.mockImplementation(() => ({
+      async *[Symbol.asyncIterator]() {
+        // Hooks can arrive before any frame names the session; an empty id is no id.
+        yield { type: 'system', subtype: 'hook_started', hook_id: 'h1', hook_name: 'SessionStart', hook_event: 'SessionStart', session_id: '' }
+        await new Promise<void>((resolve) => { release = resolve })
+      },
+      close: vi.fn().mockResolvedValue(undefined),
+      interrupt: vi.fn(async () => release())
+    }))
+    const seen: string[] = []
+    const handle = createQoderAdapter().run({
+      runId: 'run-preset-session', prompt: 'work', cwd: '/repo', attachments: [], emit: () => {},
+      onExternalSessionId: (id) => seen.push(id)
+    })
+    await untilQueried()
+    const requested = sdk.query.mock.calls[0][0].options.sessionId as string
+    expect(requested).toMatch(/^[0-9a-f-]{36}$/)
+    for (let attempt = 0; attempt < 20 && !seen.length; attempt += 1) await Promise.resolve()
+    expect(seen).toEqual([requested])
+    expect(handle.getExternalSessionId?.()).toBe(requested)
+    handle.interrupt()
+    await expect(handle.promise).resolves.toMatchObject({ externalSessionId: requested, stopped: true })
+  })
+
+  it('does not name a resumed session, and follows an id the Provider reports', async () => {
+    useLease({ pid: 904 })
+    sdk.query.mockImplementation(() => ({
+      async *[Symbol.asyncIterator]() {
+        yield { type: 'result', subtype: 'success', session_id: 'qoder-resumed' }
+      },
+      close: vi.fn().mockResolvedValue(undefined),
+      interrupt: vi.fn().mockResolvedValue(undefined)
+    }))
+    const result = await createQoderAdapter().run({
+      runId: 'run-resume-session', prompt: 'work', cwd: '/repo', attachments: [], resume: 'qoder-resumed', emit: () => {}
+    }).promise
+    expect(sdk.query.mock.calls[0][0].options).not.toHaveProperty('sessionId')
+    expect(result.externalSessionId).toBe('qoder-resumed')
   })
 })

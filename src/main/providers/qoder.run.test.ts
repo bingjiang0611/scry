@@ -131,6 +131,24 @@ describe('Qoder provider adapter · managed runs, plugins and commands', () => {
     }))
   })
 
+  it('names the session of a /plugins reload that never receives a message', async () => {
+    sdk.query.mockReturnValue({
+      async *[Symbol.asyncIterator]() {},
+      reloadPlugins: vi.fn().mockResolvedValue({ commands: [], agents: [], plugins: [], mcpServers: [], error_count: 0 }),
+      close: vi.fn().mockResolvedValue(undefined),
+      interrupt: vi.fn().mockResolvedValue(undefined)
+    })
+    const seen: string[] = []
+    const result = await createQoderAdapter().run({
+      runId: 'run-plugin-reload-silent', prompt: '/plugins reload', cwd: '/repo', attachments: [], emit: () => {},
+      onExternalSessionId: (id) => seen.push(id)
+    }).promise
+    const requested = sdk.query.mock.calls[0][0].options.sessionId
+    expect(requested).toMatch(/^[0-9a-f-]{36}$/)
+    expect(result).toMatchObject({ externalSessionId: requested, status: 'completed' })
+    expect(seen).toEqual([requested])
+  })
+
   it('把 Qoder 日志中的后台 shell 失败回写为本轮失败', async () => {
     const configDir = await mkdtemp(join(tmpdir(), 'scry-qoder-background-test-'))
     const runLogDir = join(configDir, 'logs', 'runs', 'run-p126')
