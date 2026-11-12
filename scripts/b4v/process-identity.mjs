@@ -10,7 +10,7 @@
 // and nothing selects processes by name: only by recorded identity, by parentage of a
 // verified process, or by an environment value that names this run's temporary directory.
 import { execFileSync } from 'node:child_process'
-import { readdirSync, readFileSync } from 'node:fs'
+import { readdirSync, readFileSync, readlinkSync } from 'node:fs'
 
 const PS_ROW = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(\w+\s+\w+\s+\d+\s+[\d:]+\s+\d+)\s+(.*)$/
 const PS_ENV = { ...process.env, LC_ALL: 'C', TZ: 'UTC' }
@@ -53,6 +53,28 @@ export function readIdentity(pid, { platform = process.platform, readFile, ps = 
   let output
   try { output = ps(['-o', 'pid=,ppid=,stat=,lstart=,command=', '-p', String(pid)]) } catch { return undefined }
   return parsePsRows(output).get(pid)
+}
+
+/**
+ * The image a live process runs and the argv it was started with. Linux reads /proc, so
+ * argv is exact; macOS has only `ps`: `comm=` is the executable path and `command=` the
+ * space-joined argv, so callers compare it against an exact expected string.
+ */
+export function readLaunch(pid, { platform = process.platform, readFile = (path) => readFileSync(path, 'utf8'), readLink = readlinkSync, ps = defaultPs } = {}) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return { status: 'unavailable', reason: 'invalid_pid' }
+  try {
+    if (platform === 'linux') {
+      const argv = readFile(`/proc/${pid}/cmdline`).split('\0')
+      if (argv.at(-1) === '') argv.pop()
+      return { status: 'available', executable: readLink(`/proc/${pid}/exe`), argv, command: argv.join(' ') }
+    }
+    const executable = ps(['-o', 'comm=', '-p', String(pid)]).trim()
+    const command = ps(['-ww', '-o', 'command=', '-p', String(pid)]).trim()
+    if (!executable || !command) return { status: 'unavailable', reason: 'ps_empty' }
+    return { status: 'available', executable, command }
+  } catch (error) {
+    return { status: 'unavailable', reason: String(error?.code ?? error?.message ?? error) }
+  }
 }
 
 /**

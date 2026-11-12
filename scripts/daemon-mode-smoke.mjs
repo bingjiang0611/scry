@@ -2,6 +2,14 @@
 // M3 / S1: does the real App work when the daemon owns its runs?
 //
 //   npm run build && node scripts/daemon-mode-smoke.mjs
+//   node scripts/daemon-mode-smoke.mjs --app dist/linux-unpacked/scry           (S0-5)
+//   node scripts/daemon-mode-smoke.mjs --app dist/mac-arm64/Scry.app/Contents/MacOS/Scry
+//
+// Without --app it drives the source build (`electron <repo root>`). With --app it drives
+// that packaged executable and additionally proves, from the live processes and from
+// disk, that the daemon and supervisor run from the packaged binary and app.asar and
+// that the private CLI they resolve is inside the packaged resources. A packaged target
+// that cannot be resolved fails before any App is launched.
 //
 // One isolated userData + workspace + HOME, the packaged smoke Provider, and
 // SCRY_HOST_DAEMON=1. Everything is driven through the App's own preload API from the
@@ -14,17 +22,32 @@
 //   stop -> cancelled
 //   SIGKILL the daemon -> the App brings up a new one and a new run settles
 //   first-text and streaming-update latency, in the same instance, for S1
+//   daemon + supervisor: executable image, entry and environment match the target
+//   a terminal through the daemon records into userData/terminal-recordings (worker path)
+//   the streamed run's output is in the run output worker's files
+//   packaged only: the private CLI the daemon resolves is inside the resources and runs
 //   the daemon this run started is stopped afterwards (it outlives the App by design)
 //
 // No screenshot and no DOM clicking: the runner asserts run evidence, not pixels. A
 // failure exits non-zero with the step name; nothing is reported as passed unrun.
-import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { spawn } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { connectCdp, createEvaluate, freePort, launch, waitForTarget } from './desktop-remote-host-smoke/harness.mjs'
+import { stopFixtureDaemon } from './b4v/fixture.mjs'
+import { readIdentity, signalVerified, verifyHolder } from './b4v/process-identity.mjs'
+import { devTarget, parseSmokeArguments, privateCliEvidence, resolvePackagedApp } from './daemon-mode-smoke/packaged.mjs'
+import { daemonProcessEvidence } from './daemon-mode-smoke/processes.mjs'
+import { recordingFiles, runOutputFiles, terminalFinishExpression, terminalStartExpression } from './daemon-mode-smoke/workers.mjs'
 
 const root = process.cwd()
-const temp = mkdtempSync('/tmp/scry-daemon-m3-')
+const options = parseSmokeArguments(process.argv.slice(2))
+if (!options.ok) {
+  process.stdout.write(`${JSON.stringify({ mode: 'daemon', error: `arguments: ${options.reason}`, ...options })}\n`)
+  process.exit(2)
+}
+// Real path: on macOS /tmp is a symlink, and the daemon's state directory is compared by path.
+const temp = realpathSync(mkdtempSync('/tmp/scry-daemon-m3-'))
 const userDataDir = join(temp, 'userData')
 const home = join(temp, 'home')
 // Inside the fixture HOME: the App only accepts a working directory it can prove is
@@ -40,50 +63,13 @@ writeFileSync(join(userDataDir, 'projects.json'), JSON.stringify([{ cwd: workspa
 
 const log = []
 const appendLog = (chunk) => { log.push(chunk); if (log.length > 4000) log.splice(0, 2000) }
-const results = { mode: 'daemon', steps: {} }
+const results = { mode: 'daemon', target: options.app ? 'packaged' : 'source', steps: {} }
+const logPath = options.app && options.log === undefined ? join(root, 'daemon-mode-smoke-packaged.log') : options.log ?? join(root, 'daemon-mode-smoke.log')
 let child
 let cdp
-
-const electron = process.platform === 'darwin'
-  ? join(root, 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron')
-  : join(root, 'node_modules/electron/dist/electron')
+let terminalIdentity
 
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms))
-
-const commandOf = (pid) => {
-  try { return execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).trim() } catch { return undefined }
-}
-// Linux records `linux:<boot_id>:<starttime>`; a pid reused since the lock was written
-// has another start time. Other platforms rely on the command check alone.
-const sameLinuxProcess = (pid, startedAt) => {
-  if (process.platform !== 'linux') return true
-  try {
-    const fields = readFileSync(`/proc/${pid}/stat`, 'utf8').replace(/^.*\) /s, '').split(' ')
-    const bootId = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim()
-    return startedAt === `linux:${bootId}:${fields[19]}`
-  } catch { return false }
-}
-
-// The daemon outlives the App by design, so stopping the App leaves it running with a
-// deleted state directory. Stop the one this run recorded, through its supervisor
-// (SIGTERM there stops both), and only while each pid still runs this checkout's entry.
-async function stopRecordedDaemon(stateDir) {
-  let lock
-  try { lock = JSON.parse(readFileSync(join(stateDir, 'daemon.lock'), 'utf8')) } catch { return { ok: true, state: 'no-daemon-lock' } }
-  const supervisor = Number(/^supervisor:(\d+)$/.exec(String(lock.startedBy ?? ''))?.[1])
-  const owned = [[supervisor, 'daemon-supervisor.js'], [lock.pid, 'daemon.js']].filter(([pid, entry]) =>
-    Number.isSafeInteger(pid) && commandOf(pid)?.endsWith(join(root, 'out', 'main', entry)) &&
-    (entry !== 'daemon.js' || sameLinuxProcess(pid, lock.startedAt)))
-  for (const [pid] of owned) { try { process.kill(pid, 'SIGTERM') } catch { /* already gone */ } }
-  const deadline = Date.now() + 10_000
-  let alive = owned.filter(([pid]) => commandOf(pid) !== undefined)
-  while (alive.length > 0 && Date.now() < deadline) {
-    await sleep(100)
-    alive = owned.filter(([pid]) => commandOf(pid) !== undefined)
-  }
-  for (const [pid] of alive) { try { process.kill(pid, 'SIGKILL') } catch { /* already gone */ } }
-  return { ok: alive.length === 0, stopped: owned.map(([pid, entry]) => `${entry}:${pid}`), ...(alive.length ? { forced: alive.map(([pid]) => pid) } : {}) }
-}
 
 function fail(step, detail) {
   results.steps[step] = { ok: false, detail }
@@ -102,10 +88,14 @@ async function until(step, evaluate, expression, predicate, timeoutMs = 30_000) 
 }
 
 try {
-  if (!existsSync(join(root, 'out/main/index.js'))) throw new Error('build first: npm run build')
+  const target = options.app ? resolvePackagedApp(options.app) : devTarget(root)
+  if (options.app) {
+    if (!target.ok) fail('packagedArtifact', JSON.stringify(target))
+    results.steps.packagedArtifact = { ok: true, executable: target.executable, version: target.version }
+  } else if (!existsSync(join(root, 'out/main/index.js'))) throw new Error('build first: npm run build')
   const port = await freePort()
   child = launch({
-    spawn, executable: electron, devApp: true, root, port, userDataDir, home, appendLog,
+    spawn, executable: target.executable, devApp: !target.packaged, root, port, userDataDir, home, appendLog,
     // The daemon switch, plus the daemon-side smoke fixture gate (the App-side one needs
     // a debug port, which a Node daemon does not have). The inherited host gate must be
     // off: an App that is itself the lease owner makes the daemon refuse to start
@@ -115,8 +105,8 @@ try {
       SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1', SCRY_REMOTE_HOST: '0'
     }
   })
-  const target = await waitForTarget(port)
-  cdp = connectCdp(target.webSocketDebuggerUrl)
+  const page = await waitForTarget(port)
+  cdp = connectCdp(page.webSocketDebuggerUrl)
   const evaluate = createEvaluate(cdp)
   await until('renderer-ready', evaluate, 'Boolean(window.scry && window.scry.start)', (ready) => ready === true)
 
@@ -130,6 +120,9 @@ try {
     'window.scry.activeRuns().then(runs => runs.length >= 0).catch(() => false)',
     (value) => value === true, 60_000)
   results.steps.daemonAnswered = { ok: existsSync(join(daemonState, 'daemon.lock')) }
+  // Which binary and entry the daemon and its supervisor really run.
+  const processes = daemonProcessEvidence(daemonState, target)
+  results.steps.daemonProcesses = processes
 
   await evaluate(`window.scry.setCwd(${JSON.stringify(workspace)})`)
 
@@ -174,6 +167,9 @@ try {
     ok: stream.length >= 8 && medianGap >= 80 && medianGap <= 250,
     arrivals: stream.length, medianGap, viewText: streamSettled.text
   }
+  // The streamed text went through the run output worker (beside daemon.js, in app.asar
+  // when packaged) into its files.
+  results.steps.runOutput = runOutputFiles(userDataDir, paced.runId)
 
   // 2. question -> answer (twice) -> settled
   // Questions arrive on their own channel, exactly as the chat view receives them; the
@@ -216,6 +212,25 @@ try {
     (value) => value && value.done === true)
   results.steps.stop = { ok: stopAccepted === true && stopped.done === true, stopAccepted, stopState: stopped.stopState }
 
+  // 3b. terminal through the daemon, recorded by the recording worker. The shell must be
+  // the daemon's child (the daemon owns the pty), and the recording must be readable back
+  // through the App and present on disk.
+  const shell = await evaluate(terminalStartExpression(workspace))
+  terminalIdentity = readIdentity(Number(shell.pid))
+  const daemonPid = JSON.parse(readFileSync(join(daemonState, 'daemon.lock'), 'utf8')).pid
+  const finished = await evaluate(terminalFinishExpression())
+  const files = recordingFiles(userDataDir, shell.id)
+  results.steps.terminalRecording = {
+    ok: terminalIdentity?.ppid === daemonPid && shell.recording === 'available' && finished.exited === true &&
+      finished.exit?.code === 0 && finished.outputHasMarker === true && finished.recording?.state === 'complete' &&
+      finished.recording?.hasMarker === true && finished.listed?.state === 'complete' && files.ok,
+    shellParent: terminalIdentity?.ppid ?? null, daemonPid, descriptor: shell.recording, exit: finished.exit,
+    outputHasMarker: finished.outputHasMarker, recording: finished.recording, files
+  }
+
+  // The private CLI the packaged daemon resolved from the resources it was given.
+  if (target.packaged) results.steps.privateCli = privateCliEvidence(target, processes.daemonResources, { env: { ...process.env, HOME: home } })
+
   // 4. SIGKILL the daemon: the App must bring up a new one and a new run must settle.
   const lockPath = join(daemonState, 'daemon.lock')
   if (!existsSync(lockPath)) fail('daemon-lock', 'no daemon.lock before SIGKILL')
@@ -226,6 +241,8 @@ try {
     `window.scry.activeRuns().then(runs => runs.length >= 0)`,
     (value) => value === true, 60_000)
   results.steps.daemonRelaunched = { ok: recovered === true }
+  // The supervisor relaunched the daemon from the same binary and entry.
+  results.steps.daemonProcessesAfterRestart = daemonProcessEvidence(daemonState, target)
   const afterRestart = await evaluate(`window.scry.start({ prompt: 'native composer complete daemon mode after restart', providerId: 'codex', cwd: ${JSON.stringify(workspace)} })`)
   if (!afterRestart || typeof afterRestart.runId !== 'string') fail('after-restart-start', JSON.stringify(afterRestart))
   const restartSettled = await until('after-restart-settled', evaluate,
@@ -239,11 +256,17 @@ try {
   if (child && child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
   await sleep(1500)
   if (child && child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
-  results.steps.daemonStopped = await stopRecordedDaemon(join(userDataDir, 'daemon'))
+  // The daemon outlives the App by design. Stop the one this run started: found by its
+  // lock and by the state directory in its environment, each signal re-verified.
+  const stopped = await stopFixtureDaemon({ daemonState: join(userDataDir, 'daemon') })
+  results.steps.daemonStopped = { ok: stopped.remaining.length === 0 && !stopped.processScan, ...stopped }
+  // A shell that outlived its daemon would be ours to stop, and a defect to report.
+  if (terminalIdentity && verifyHolder(terminalIdentity, readIdentity(terminalIdentity.pid)) === 'verified') {
+    results.steps.terminalStopped = { ok: false, pid: terminalIdentity.pid, ...signalVerified(terminalIdentity, 'SIGKILL') }
+  }
   const failed = !results.error && Object.values(results.steps).some((step) => step.ok !== true)
   if (results.error || failed) {
-    writeFileSync(join(root, 'daemon-mode-smoke.log'), log.join(''))
-    results.log = join(root, 'daemon-mode-smoke.log')
+    try { writeFileSync(logPath, log.join('')); results.log = logPath } catch (error) { results.log = `unwritable:${error?.code ?? error}` }
   }
   results.cleanup = (() => { rmSync(temp, { recursive: true, force: true }); return !existsSync(temp) })()
 }
