@@ -20,7 +20,7 @@
 `CI infrastructure recovery` 在 CI 完成后读取 job、日志和 check annotations，分类写入其 Actions summary，并发出 `Infrastructure retry (1/1)` notice：
 
 - runner 未启动：必须有明确的 runner 未领取/启动 annotation；没有日志本身不是证据。
-- 软件源下载或 DNS 失败：必须发生在依赖安装/runner 准备步骤，并匹配明确的网络失败证据。
+- 软件源下载或 DNS 失败：必须发生在依赖安装/runner 准备步骤，并匹配明确的网络失败证据。日志按 GitHub step 起止时间归属，只用唯一属于失败步骤的日志秒；共享边界秒、缺失时间或无时间戳时不猜测，避免成功步骤的 DNS 负对照污染后续错误。
 - 测试断言、测试步骤中的 DNS 负对照、依赖合同错误及未知失败：不自动重试，保留原始失败，先调查。
 
 只调用失败的基础设施 job 的 rerun API（及 GitHub 自动安排的依赖聚合 job），不用重跑全部失败 job 的 API，因此不顺带重跑失败断言。每个完成事件最多请求一个 job；下一次完成后继续处理尚未重试的基础设施 job，避免并发 rerun 冲突。读取所有历史 attempts，按本 CI 唯一的 job 名（含 matrix 坐标）限制每个 job 最多一次；人工先行重跑也消耗额度。重复/过期事件、重名有歧义时不重试。不取消或覆盖首轮日志。

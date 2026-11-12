@@ -1,5 +1,25 @@
 // Runs only from the default branch in a workflow_run observer. Never import or
 // execute code from the observed PR with the observer's actions:write token.
+// Job logs mix every step. GitHub timestamps step boundaries at second precision;
+// only lines whose second belongs exclusively to a failed step are attributable.
+// Shared boundary seconds and missing metadata stay unknown, never retry evidence.
+export function failedStepLog(job, log) {
+  const steps = (job.steps ?? []).filter(step => step.conclusion !== 'skipped')
+  const ranges = steps.map(step => ({
+    failed: step.conclusion === 'failure',
+    start: Math.floor(Date.parse(step.started_at) / 1000),
+    end: Math.floor(Date.parse(step.completed_at) / 1000)
+  }))
+  if (ranges.some(range => !Number.isFinite(range.start) || !Number.isFinite(range.end))) return ''
+  return log.split('\n').filter(line => {
+    const timestamp = line.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.\d+)?Z /)?.[1]
+    if (!timestamp) return false
+    const second = Date.parse(`${timestamp}Z`) / 1000
+    const owners = ranges.filter(range => second >= range.start && second <= range.end)
+    return owners.length === 1 && owners[0].failed
+  }).join('\n')
+}
+
 export function classifyFailure(job, log = '', annotations = []) {
   const failed = (job.steps ?? []).filter(step => step.conclusion === 'failure')
   const messages = annotations.map(item => item.message).join('\n')
@@ -63,7 +83,7 @@ export async function observeInfrastructure({ github, context, core }) {
       const response = await github.rest.actions.downloadJobLogsForWorkflowRun({ ...repo, job_id: job.id })
       log = typeof response.data === 'string' ? response.data : Buffer.from(response.data).toString('utf8')
     }
-    const result = classifyFailure(job, log, annotations)
+    const result = classifyFailure(job, failedStepLog(job, log), annotations)
     const eligible = result.category === 'infrastructure' && history.length === 1 && job.run_attempt === 1
     let action = 'no retry'
     if (eligible) {
