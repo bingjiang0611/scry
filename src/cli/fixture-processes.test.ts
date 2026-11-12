@@ -4,13 +4,26 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { createServer, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { FixtureProcesses } from './fixture-processes.test-fixture.js'
 
 let testSignal: AbortSignal
-beforeEach(({ signal }) => { testSignal = signal })
+let fixtureTest: Promise<void> | undefined
+beforeEach(({ signal }) => {
+  testSignal = signal
+  fixtureTest = undefined
+})
+afterEach(async () => { await fixtureTest })
 
-it.each(['node', 'shell'])('cancels a blocked %s writer and its descendant before directory cleanup', async kind => {
+function runFixtureTest(body: () => Promise<void>): Promise<void> {
+  const operation = body()
+  // A Vitest timeout does not join its test continuation. Restore the signal spy
+  // and close this test's pipes before the next case can reuse process.kill.
+  fixtureTest = operation.then(() => undefined, () => undefined)
+  return operation
+}
+
+it.each(['node', 'shell'])('cancels a blocked %s writer and its descendant before directory cleanup', kind => runFixtureTest(async () => {
   const signal = testSignal
   const root = await mkdtemp(join(tmpdir(), 'scry-owned-child-'))
   const path = join(root, 'gate.sock')
@@ -19,13 +32,19 @@ it.each(['node', 'shell'])('cancels a blocked %s writer and its descendant befor
   await once(server, 'listening', { signal })
   const abort = new AbortController()
   const owned = new FixtureProcesses(AbortSignal.any([signal, abort.signal]))
-  const leaf = `require('node:net').connect(${JSON.stringify(path)}).on('connect', function () { this.write('ready') })`
-  const parent = `require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(leaf)}], { stdio: 'inherit' })`
+  const parent = `
+const child = require('node:child_process').spawn('/bin/sh', ['-c', 'printf ready; IFS= read -r line <&3'], { stdio: ['inherit', 'pipe', 'inherit', 'pipe'] })
+child.stdout.once('data', () => {
+  const socket = require('node:net').connect(${JSON.stringify(path)})
+  socket.once('connect', () => socket.write('ready'))
+})
+`
   const control = spawn('/bin/sh', ['-c', 'IFS= read -r line; printf "%s" "$line"; IFS= read -r line'])
   const controlClosed = once(control, 'close')
   const signalled = vi.spyOn(process, 'kill')
   let socket: Socket | undefined
   let operation: Promise<void> | undefined
+  let rejected: Promise<unknown> | undefined
   let phase = 'control ready'
   try {
     control.stdin.write('control ready\n')
@@ -43,7 +62,7 @@ it.each(['node', 'shell'])('cancels a blocked %s writer and its descendant befor
       }
     })
     // Observe rejection immediately: cancellation can break the blocked stdin pipe.
-    const rejected = expect(operation).rejects.toThrow()
+    rejected = expect(operation).rejects.toThrow()
     ;[socket] = await connected
     phase = 'callback ready'
     await once(socket!, 'data', { signal })
@@ -60,7 +79,7 @@ it.each(['node', 'shell'])('cancels a blocked %s writer and its descendant befor
     if (signal.aborted) console.error('Fixture cancellation timeout phase:', phase)
     socket?.destroy()
     await owned.close().finally(async () => {
-      if (operation) await Promise.allSettled([operation])
+      if (operation) await Promise.allSettled([operation, rejected])
       await new Promise<void>(resolve => server.close(() => resolve()))
       control.stdin.end()
       await controlClosed
@@ -68,13 +87,45 @@ it.each(['node', 'shell'])('cancels a blocked %s writer and its descendant befor
       signalled.mockRestore()
     })
   }
-})
+}))
 
-it('does not launch another fixture process after cancellation', async () => {
+it('cancels the remaining groups and joins before reporting a signal failure', () => runFixtureTest(async () => {
+  const owned = new FixtureProcesses(testSignal)
+  const first = owned.spawn('/bin/sh', ['-c', 'printf ready; IFS= read -r line'])
+  const second = owned.spawn('/bin/sh', ['-c', 'printf ready; IFS= read -r line'])
+  const firstClosed = once(first, 'close')
+  const secondClosed = once(second, 'close')
+  const kill = process.kill.bind(process)
+  const denied = Object.assign(new Error('injected EPERM'), { code: 'EPERM' })
+  const signalled = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
+    if (pid === -first.pid!) throw denied
+    return kill(pid, signal)
+  })
+  try {
+    await Promise.all([once(first.stdout, 'data', { signal: testSignal }), once(second.stdout, 'data', { signal: testSignal })])
+    const closed = owned.close()
+    let settled = false
+    void closed.then(() => { settled = true }, () => { settled = true })
+    await Promise.race([once(second, 'close', { signal: testSignal }), closed])
+    expect(signalled.mock.calls.filter(([pid]) => pid < 0).map(([pid]) => pid)).toEqual([-first.pid!, -second.pid!])
+    expect(settled).toBe(false)
+    expect(first.exitCode).toBeNull()
+    first.stdin.end()
+    await expect(closed).rejects.toMatchObject({ errors: [denied] })
+  } finally {
+    // Release the deliberately denied group without retrying its signal.
+    first.stdin.end()
+    second.stdin.end()
+    await Promise.allSettled([firstClosed, secondClosed, owned.close()])
+    signalled.mockRestore()
+  }
+}))
+
+it('does not launch another fixture process after cancellation', () => runFixtureTest(async () => {
   const abort = new AbortController()
   const owned = new FixtureProcesses(abort.signal)
   abort.abort()
   expect(() => owned.spawn(process.execPath, ['-e', 'process.exit(0)'])).toThrow()
   expect(() => owned.run(async () => undefined)).toThrow()
   await owned.close()
-})
+}))

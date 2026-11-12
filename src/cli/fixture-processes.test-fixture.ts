@@ -7,6 +7,7 @@ export class FixtureProcesses {
   private readonly controller = new AbortController()
   private readonly children = new Map<ChildProcess, Promise<void>>()
   private readonly pending = new Set<Promise<unknown>>()
+  private readonly cancellationErrors: unknown[] = []
   private closing?: Promise<void>
   readonly signal = this.controller.signal
 
@@ -25,7 +26,7 @@ export class FixtureProcesses {
       try {
         process.kill(-child.pid, 'SIGKILL')
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') this.cancellationErrors.push(error)
       }
     }
   }
@@ -83,5 +84,6 @@ export class FixtureProcesses {
     // Vitest's timeout aborts the signal, not the async test continuation. Join
     // that continuation before its workspace may be removed by afterEach.
     await Promise.allSettled(this.pending)
+    if (this.cancellationErrors.length) throw new AggregateError(this.cancellationErrors, 'Fixture cancellation failed')
   }
 }
