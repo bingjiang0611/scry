@@ -34,3 +34,13 @@
 
 - 一个连接上的 MCP 请求排队执行。一次重认证要等浏览器登录，在它结束之前，另一个 Provider 的 MCP 测试要排在它后面；进程内这两者可以并行。重认证很少用，所以接受。
 - 未在 macOS 与真实 App 中验证，包括真实 MCP server、OAuth 登录（浏览器能否弹出、回调能否完成）、首次 npx 安装耗时。
+
+## c860e7f 本机验证（macOS，两种模式对照，临时 userData/HOME）
+
+- guard scan、快照（不刷新）、测试连接两种模式结果一致，包括 targetId。
+- 修改 `.mcp.json` 的参数和 env 后再测试连接：指纹变化后重新校验，新命令实际执行（`echo_v2`）。加入 `NODE_OPTIONS` 后，两种模式都拒绝，原因可读，server 没有被执行。
+- 测试连接耗时 589–605 ms，两种模式相差 ≤11 ms。
+- 「走 long lane」由路由函数确认。运行时没有逐请求的 lane 日志可查，daemon 日志只记录失败。
+- **已修（两种模式都有）**：快照为「不可用」（如 Claude Code executable 未找到）时，下方还显示「当前来源没有 MCP」，把没读到说成了没有。现在 `data` 为 null 时显示「未能读取当前来源的 MCP（原因见上方）」；只有真读到空列表才说「没有」。Skill 面板同样修了。
+- 本提交没有渲染 guard scan 的界面（`McpTrustPanel` 只被引用了类型）。这是 daemon 迁移之前就有的状态，不在本次范围。
+- 未执行（需要授权）：真实 MCP OAuth 重新认证。

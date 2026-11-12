@@ -36,3 +36,11 @@
 - 未在 macOS 与真实 App 中验证，也没有和真实手机走完整配对（需要 relay；按规定用 iCTRL 操作真实手机）。
 - daemon 的 `SCRY_REMOTE_HOST` 取自 daemon 自己的环境。如果 supervisor 启动 daemon 时清洗掉了这个变量，开发版里显式设置的开关在 daemon 侧不生效，会回落到按是否打包判断。未核实。
 - `remote:desktop:*`（让另一台桌面 App 配对到本机宿主）：维护者 2026-11-11 同意交给 daemon，已实现。新增本机 op `localDesktopHost`（status / invite / disable），在共用的 `pairing-channels.ts` 里，启用规则相同。真实 daemon 测试覆盖：未启用时拒绝；开启后能生成 `scry-desktop1:` 邀请码、状态变为已启用；关闭后状态变回未启用。对照实验：不按启用规则判断时测试失败。
+
+## c860e7f 本机验证
+
+- 两种模式下，配对页的「未启用」、开始与取消配对、桌面接入的开启（生成 `scry-desktop1:` 邀请）与关闭，都通过界面走通。
+- daemon 的授权文件里确有一条 `source: local_socket, scope: local` 的 App 授权。设备列表把它过滤掉了；撤销它被拒绝，之后连接仍在。
+- **`SCRY_REMOTE_HOST` 不会被清洗**：supervisor 的 `FORWARDED_ENV` 包含这个变量，`ps eww` 看到 daemon 环境里有它。上文「未核实」的那条风险关闭。
+- 测试环境提示：daemon 模式下设了 `SCRY_TEST_APP=1` 而没设 `SCRY_DAEMON_CREDENTIAL_PLAINTEXT=1` 时，macOS Keychain 上的 `safeStorage.isEncryptionAvailable()` 会挂住，窗口一直不出现。
+- 未执行（需要授权）：用 iCTRL 操作真机完整配对。

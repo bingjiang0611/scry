@@ -30,3 +30,9 @@
 
 - 未在 macOS 与真实 App 中验证。
 - 未用真实 admin key 做同步；需要授权后另行验证。
+
+## c860e7f 本机验证
+
+- 状态、fixture 导入、无 key 同步，两种模式完全一致。导入写入 2 行（`usage_ledger`、`provider_raw_usage`），回答来自 daemon 持有的 `scry.db`。无 key 时同步返回 `missing Anthropic/OpenAI/Qoder Admin configuration`，没有堆栈或 HTTP 细节。
+- 本提交没有计费面板（渲染端只有 hook，没有组件使用）。分析面板按会话取数，看不到 gateway 账单行。这些都是迁移之前就有的状态，不在本次范围。
+- 未执行（需要授权）：用真实 admin key 同步。

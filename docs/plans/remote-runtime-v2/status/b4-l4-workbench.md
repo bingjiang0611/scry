@@ -85,3 +85,16 @@ daemon 侧不需要改：`host-process.ts` 已经把 `createHostRuntime` 的 `de
 - 源代码管理：读取、diff、提交草稿的保存与回读都通过。
 - **推送被拒**（「工作目录尚未通过 Scry 目录选择器授权」）：推送到本地路径 remote 时，这个路径本身必须是已授权的目录（`authorizeLocalRemote` 走 `resolveKnownProjectDirectory`），两种模式一致，属于已有的安全规则。补测时，在启动前把 bare remote 的路径写进临时 userData 的 `recent-folders.json` 即可，不需要原生选择器。
 - 「推送中途点停止」要测的是 **Agent 运行的停止按钮**，不是源代码管理里的取消：用来确认工作台写操作走单独的 lane 之后，一次慢推送不会让运行的停止排队。尚未测。
+
+## A8 补测：慢推送期间点 Agent 运行的停止（d75cfca）
+
+本地 bare remote 的 pre-receive 钩子里 `sleep 10`，路径事先写入 recent-folders 完成授权。Agent 运行（paced prompt）进行中发起推送，推送挂起时点「停止本轮」：
+
+| 模式 | 点击到运行停止 | 流是否被截断 | 推送结果 |
+|---|---|---|---|
+| daemon | 224 ms | 是（11/20 段） | 停止之后独立完成，11.7 s，远端 HEAD 与本地一致 |
+| 关闭 | 297 ms | 是（12/20 段） | 停止之后独立完成，11.4 s |
+
+对照（没有推送在途）：daemon 422 ms、关闭 395 ms。停止没有被慢推送挡住，工作台写操作走单独 lane 的目的达到了。推送进行中，其他调用（`listProjects`）3 ms 返回。
+
+附带确认：同一仓库里 Agent 运行还没结束时，`SourceControlService.busy()` 会拒绝 Git 写入（daemon 模式已验证；关闭模式这次没有构造出来，不算通过）。
