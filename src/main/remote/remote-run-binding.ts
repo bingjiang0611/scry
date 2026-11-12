@@ -20,6 +20,8 @@ import { claimConversationLaunch, type ConversationRunMarker, type ManagedLaunch
 //   - The canonical start callback is invoked exactly once with a freshly minted
 //     scry runId. The ledgerRunId <-> scryRunId correlation is emitted as the
 //     FIRST progress marker so the device can join the two ids.
+//   - `admitted` follows once the canonical pipeline registered the run, so a reader
+//     can tell a run refused at admission from one that started and then failed.
 //   - Native Provider clarification, editor, and permission prompts are routed
 //     through the authenticated remote interaction broker. The binding never
 //     synthesizes an approval or substitutes an empty answer.
@@ -228,10 +230,14 @@ export function createRemoteRunBinding<M extends ConversationRunMarker = Convers
           ...(routing.effort ? { effort: routing.effort } : {}), ...(routing.permissionMode ? { permissionMode: routing.permissionMode } : {})
         },
         ...(!launch && providerPrompt !== prompt ? { providerPrompt } : {}),
-        ...(launch ? {
-          managedConversation: launch.managedConversation,
-          onStarted: (runId: string) => { launchStarted = true; launch.started(runId) }
-        } : {}),
+        ...(launch ? { managedConversation: launch.managedConversation } : {}),
+        // Admission passed and the run is registered: the moment an in-process start
+        // returns. A refusal before it (trust gate, session conflict) ends the intent
+        // failed with no `admitted`, so the App rejects the start instead of following it.
+        onStarted: (runId: string) => {
+          progress(marker({ event: 'admitted', ledgerRunId, scryRunId: runId }))
+          if (launch) { launchStarted = true; launch.started(runId) }
+        },
         stopSignal: stopSignal ?? new AbortController().signal,
         requestUserInput: async (question, signal) => {
           if (!requestUserInput) throw new Error('remote_interactive_input_unsupported')

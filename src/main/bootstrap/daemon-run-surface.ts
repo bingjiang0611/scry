@@ -94,7 +94,7 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
       const intent = payload.commandId?.trim() || intentId || randomUUID()
       let receipt: { runId: string; bound: boolean }
       try {
-        receipt = await runtime.start({ intentId: intent, detail: routingDetail(payload, deps.currentCwd()), context })
+        receipt = await runtime.start({ intentId: intent, detail: routingDetail(payload, deps.currentCwd()), context, userText: payload.prompt })
       } catch (error) {
         if (!(error instanceof DaemonRunError) || error.reason !== 'daemon_outcome_unknown') throw error
         // The submit was written and the reply never arrived. Re-submitting would be a

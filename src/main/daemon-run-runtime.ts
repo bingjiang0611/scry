@@ -1,4 +1,5 @@
 import { boundMarker } from './daemon-run-evidence'
+import { admissionPhase, awaitAdmission, DaemonRunRefusedError, DEFAULT_ADMIT_BUDGET_MS, lateRefusalNotice, noteAdmission } from './daemon-run-admission'
 import { planDelivery } from './daemon-run-delivery'
 import { PerformanceTrace } from './performance-timing'
 import { TraceOutputBridge } from './trace-output'
@@ -26,13 +27,13 @@ const DEFAULT_WAIT_MS = 15_000
 // not bound by then is still recorded; the caller gets the ledger id and `bound:
 // false`, and the window resynchronises from `agent:activeRun`.
 const DEFAULT_BIND_BUDGET_MS = 3_000
-const BIND_WAIT_MS = 250
 const TERMINAL = new Set(['settled', 'failed', 'cancelled'])
 
 export interface DaemonStartInput {
   intentId: string
   detail: string
   context: DesktopRemoteContext
+  userText?: string
 }
 
 export interface DaemonStartReceipt {
@@ -49,6 +50,7 @@ export interface DaemonRunRuntimeDeps {
   // Long-poll window. The daemon answers earlier when something changes.
   waitMs?: number
   bindBudgetMs?: number
+  admitBudgetMs?: number
   bridge?: TraceOutputBridge
   onWarn?: (message: string, detail?: unknown) => void
   // P3f W2: the App's run-level subscriptions (RunTraceRouter). A view that subscribes to
@@ -93,11 +95,18 @@ export class DaemonRunRuntime {
     const stamp = new PerformanceTrace('daemon.run.firstText', input.context ? { provider: input.context.providerId } : {})
     const receipt = await this.#deps.transport.submit({ intentId: input.intentId, detail: input.detail })
     stamp.mark('submitted')
-    this.#track(receipt.runId, input.context, receipt.seq, stamp)
+    this.#track(receipt.runId, input.context, receipt.seq, stamp, input.userText)
     // The window identifies a run by the canonical id its trace events carry, not
-    // by the ledger id it submitted. Wait for the daemon's bind, and say so when it
-    // did not arrive instead of handing back an id the trace will never match.
+    // by the ledger id it submitted. Wait for the daemon's bind and admission, and say
+    // so when it did not bind instead of handing back an id the trace will never match.
     const bound = await this.#awaitBound(receipt.runId)
+    const cursor = this.#runs.get(receipt.runId)
+    if (cursor && admissionPhase(cursor) === 'refused') {
+      // Refused before admission, as an in-process start rejects: no run is handed out.
+      this.#runs.delete(receipt.runId)
+      throw new DaemonRunRefusedError(cursor.failure)
+    }
+    if (cursor && bound !== undefined) cursor.handedOut = true
     return { ...receipt, runId: bound ?? receipt.runId, bound: bound !== undefined }
   }
 
@@ -114,7 +123,7 @@ export class DaemonRunRuntime {
 
   // Synchronous on purpose: a start answers right after its bind, exactly as before
   // this was shared, so nothing it awaits moves.
-  #track(runId: string, context: DesktopRemoteContext | undefined, seq: number | undefined, stamp?: PerformanceTrace): void {
+  #track(runId: string, context: DesktopRemoteContext | undefined, seq: number | undefined, stamp?: PerformanceTrace, userText?: string): void {
     // A duplicate submit is the same logical run: keep its existing cursor rather
     // than restarting the trace from zero.
     if (!this.#runs.has(runId)) {
@@ -124,7 +133,7 @@ export class DaemonRunRuntime {
         runId, context, lifecycle: 'recorded',
         watch: seq !== undefined ? Math.max(0, seq - 1) : this.#seen, output: 0,
         pushed: [], askedQuestions: new Set(), answerIds: new Map(), resyncRequired: false, pumping: false, stopped: false,
-        ...(stamp ? { stamp } : {}), sawText: false
+        ...(stamp ? { stamp } : {}), ...(userText !== undefined ? { userText } : {}), sawText: false
       })
     }
     void this.pump(runId)
@@ -196,26 +205,11 @@ export class DaemonRunRuntime {
     return cursor.latest ?? null
   }
 
-  async #awaitBound(runId: string): Promise<string | undefined> {
-    const budgetMs = this.#deps.bindBudgetMs ?? DEFAULT_BIND_BUDGET_MS
-    const deadline = Date.now() + budgetMs
-    for (;;) {
-      const cursor = this.#runs.get(runId)
-      if (!cursor) return undefined
-      if (cursor.scryRunId) return cursor.scryRunId
-      if (cursor.stopped || Date.now() >= deadline) return undefined
-      try {
-        const wait = Math.min(BIND_WAIT_MS, Math.max(0, deadline - Date.now()))
-        const live = this.#wakes.live
-        if (live) this.#wakes.consume(runId)
-        await this.step(runId, { waitMs: live ? 0 : wait })
-        if (live && !this.#runs.get(runId)?.scryRunId) await this.#wakes.wait(runId, wait)
-      } catch {
-        // The intent is already recorded. A denied or broken read must not turn a
-        // recorded submit into a failed start; the pump reports the reason.
-        return undefined
-      }
-    }
+  #awaitBound(runId: string): Promise<string | undefined> {
+    return awaitAdmission({
+      runId, cursor: () => this.#runs.get(runId), step: (waitMs) => this.step(runId, { waitMs }), wakes: this.#wakes,
+      bindBudgetMs: this.#deps.bindBudgetMs ?? DEFAULT_BIND_BUDGET_MS, admitBudgetMs: this.#deps.admitBudgetMs ?? DEFAULT_ADMIT_BUDGET_MS
+    })
   }
 
   /** The run ids the daemon reports as live, whether or not this window started them. */
@@ -287,6 +281,7 @@ export class DaemonRunRuntime {
       }
       if (watch.state !== cursor.lifecycle) { cursor.lifecycle = watch.state; changed = true }
       for (const entry of watch.events) {
+        noteAdmission(cursor, entry)
         if (entry.kind !== 'run_progress' || entry.detail === undefined) continue
         const bound = boundMarker(entry.detail)
         if (!bound) continue
@@ -355,6 +350,9 @@ export class DaemonRunRuntime {
       if (cursor.stopped) this.#bridge.flushAll()
       // The run ended: its subscription gets its end after the last text, as in process.
       if (cursor.stopped && TERMINAL.has(cursor.lifecycle ?? '')) this.#deps.runTraces?.settle(cursor.scryRunId ?? runId)
+      // Refused after it was handed out: the window gets the in-process failure notice.
+      const refused = cursor.stopped ? lateRefusalNotice(cursor) : undefined
+      if (refused) this.#deps.send('agent:error', refused)
     }
   }
 
