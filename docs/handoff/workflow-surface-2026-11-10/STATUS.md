@@ -37,7 +37,7 @@
 | E1 | 三种时机的停止，之后能再发 | 未通过、按必须停下条件停止本包 | [reports/E1.md](reports/E1.md)：启动窗口 3 次，Hook 窗口两次有效中断；一次 `managed recorder open identity is not available yet`，未达到三种时机各 3 次。native hook 帧 55 个非空 ID、0 空串、0 缺失。 |
 | E2 | `/plugins reload` 后能再发 | 未通过、按必须停下条件停止本包 | [reports/E2.md](reports/E2.md)：Provider 重载成功（6 插件、84 命令），recorder 报 `requires canonical Provider or observed interruption timing`；后续消息留在暂停队列。 |
 | E3 | 两个会话并发的采证 | 部分完成，旧 A 退出原因未知 | [reports/E3.md](reports/E3.md)：新样本 A 已输出后切 B，两个 PID 独立；B 停止后 12 秒 A PID 仍存活，但切回未读到新增正文。旧样本无 native 终态或 main stop 日志，不能归因。 |
-| E4 | 第四轮其余项与未验证项 | 未开始 | |
+| E4 | 第四轮其余项与未验证项 | 部分通过 | [reports/E4.md](reports/E4.md)：审批拒绝及重启后续发通过；普通工具轮次成功写文件但 recorder 报 invalid canonical record；分支未证实新会话；两后台 Agent 完成但根轮次 aborted。 |
 | E5 | 全部通过才改清单；干净依赖门禁 | 未开始 | |
 
 ## 审查方对第四轮的核验（2026-11-12）

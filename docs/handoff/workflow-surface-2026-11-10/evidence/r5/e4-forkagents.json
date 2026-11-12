@@ -1,0 +1,58 @@
+{
+  "mode": "forkagents",
+  "cli": "1.1.86",
+  "workspace": "/tmp/scry-r5/e4-forkagents/workspace",
+  "approval": [],
+  "ps": {
+    "before": [
+      {
+        "pid": 52999,
+        "ppid": 52453,
+        "started": "Thu Nov 12 04:03:35 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      }
+    ],
+    "beforeClose": [],
+    "afterClose": [],
+    "atClose": [],
+    "afterFinalClose": []
+  },
+  "bound": true,
+  "firstSettled": true,
+  "firstPane": "本机 | workspace | 只回复：第一轮。不要用工具。 | Q | Qoder | run · run-mwdi1wje-0 | tok | 0 | tools | 0 | 第一轮。 | 本轮 Hook | 5 个周期 · 25 个处理器实例 | dur | 13.9s | api | 9.3s | tools | 0 | 在新会话中分支 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+  "forkButton": true,
+  "forkSessions": 1,
+  "forkSettled": true,
+  "forkPane": "本机 | workspace | 只回复：第一轮。不要用工具。 | Q | Qoder | run · run-mwdi1wje-0 | tok | 0 | tools | 0 | 第一轮。 | 本轮 Hook | 5 个周期 · 26 个处理器实例 | dur | 13.9s | api | 9.3s | tools | 0 | 在新会话中分支 | 在分支里只回复：分支。不要用工具。 | Q | Qoder | run · run-mwdi31rd-1 | tok | 54.1k | tools | 0 | 分支。 | 本轮 Hook | 5 个周期 · 23 个处理器实例 | in | 30.9k | out | 5 | cache·r | 23.1k | dur | 9.7s | api | 4.0s | tools | 0 | 在新会话中分支 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+  "agentsSettled": true,
+  "agentsPane": " run-mwdi31rd-1 | tok | 54.1k | tools | 0 | 分支。 | 本轮 Hook | 5 个周期 · 23 个处理器实例 | in | 30.9k | out | 5 | cache·r | 23.1k | dur | 9.7s | api | 4.0s | tools | 0 | 在新会话中分支 | 使用两个后台 Agent 并行计算：一个计算 21*2，一个计算 20+22。只报告两者的真实结果。 | Q | Qoder | run · run-mwdi3osm-2 | tok | 0 | tools | 2 | 思考过程 | I should launch both background agents together in one message using run_in_background. | 2 | Task×2 | 两个后台 Agent 都在运行，还没有返回结果。等它们完成后，我再报告实际结果。 | Operation aborted | → 检查该轮 Provider 结果与日志后重试 | 本轮 Hook | 7 个周期 · 33 个处理器实例 | dur | 0.0s | api | 0.0s | tools | 2 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+  "agentSurface": "总览\nAgents\n子 Agent\n2\n运行 0\n完成 2\ngeneral-purpose\n…PuHGUz9ecgvK\n已完成\nqoder\n0 个工具调用\n04:05\nAgent 完成\n04:05\n输出 · 42\n04:05\n后台 Agent 已启动\n04:05\ngeneral-purpose\n…Mjiwbpk2B1KD\n已完成\nqoder\n0 个工具调用\n04:05\nAgent 完成\n04:05\n输出 · 42\n04:05\n后台 Agent 已启动\n04:05",
+  "agentCards": [],
+  "resumeListed": true,
+  "resumeBefore": "本机 | workspace | 只回复：第一轮。不要用工具。 | Q | Qoder | run · run-mwdi1wje-0 | tok | 0 | tools | 0 | 第一轮。 | 本轮 Hook | 5 个周期 · 26 个处理器实例 | dur | 13.9s | api | 9.3s | tools | 0 | 在新会话中分支 | 在分支里只回复：分支。不要用工具。 | Q | Qoder | run · run-mwdi31rd-1 | tok | 54.1k | tools | 0 | 分支。 | 本轮 Hook | 5 个周期 · 23 个处理器实例 | in | 30.9k | out | 5 | cache·r | 23.1k | dur | 9.7s | api | 4.0s | tools | 0 | 在新会话中分支 | 使用两个后台 Agent 并行计算：一个计算 21*2，一个计算 20+22。只报告两者的真实结果。 | Q | Qoder | run · run-mwdi3osm-2 | tok | 0 | tools | 2 | 显示更早的 113 条活动 | Operation aborted | → 检查该轮 Provider 结果与日志后重试 | 本轮 Hook | 7 个周期 · 34 个处理器实例 | dur | 0.0s | api | 0.0s | tools | 2 | 从失败处恢复 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+  "resumeSettled": true,
+  "resumePane": "| Qoder | run · run-mwdi31rd-1 | tok | 54.1k | tools | 0 | 分支。 | 本轮 Hook | 5 个周期 · 23 个处理器实例 | in | 30.9k | out | 5 | cache·r | 23.1k | dur | 9.7s | api | 4.0s | tools | 0 | 在新会话中分支 | 使用两个后台 Agent 并行计算：一个计算 21*2，一个计算 20+22。只报告两者的真实结果。 | Q | Qoder | run · run-mwdi3osm-2 | tok | 0 | tools | 2 | 显示更早的 113 条活动 | Operation aborted | → 检查该轮 Provider 结果与日志后重试 | 本轮 Hook | 7 个周期 · 34 个处理器实例 | dur | 0.0s | api | 0.0s | tools | 2 | 从失败处恢复 | 重启后只回复：已恢复。不要用工具。 | Q | Qoder | run · run-mwdi4zo7-0 | tok | 64.8k | tools | 0 | 已恢复。 | 本轮 Hook | 5 个周期 · 22 个处理器实例 | in | 32.8k | out | 7 | cache·r | 32.0k | dur | 7.8s | api | 4.0s | tools | 0 | 在新会话中分支 | 版本探测超时（5s） | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+  "events": {
+    "qoder-run-mwdi1wje-0": {
+      "native": 21,
+      "canonical": 57,
+      "workflow_activity": 0
+    },
+    "qoder-run-mwdi31rd-1": {
+      "native": 19,
+      "canonical": 53,
+      "workflow_activity": 0
+    },
+    "qoder-run-mwdi3osm-2": {
+      "native": 39,
+      "canonical": 124,
+      "workflow_activity": 0
+    },
+    "qoder-run-mwdi4zo7-0": {
+      "native": 19,
+      "canonical": 53,
+      "workflow_activity": 0
+    }
+  }
+}

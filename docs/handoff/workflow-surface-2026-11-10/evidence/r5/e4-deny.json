@@ -1,0 +1,41 @@
+{
+  "mode": "deny",
+  "cli": "1.1.86",
+  "workspace": "/tmp/scry-r5/e4-deny/workspace",
+  "approval": [
+    {
+      "choice": "拒绝",
+      "options": [
+        "允许一次",
+        "拒绝",
+        "其他"
+      ],
+      "form": "Qoder 需要你的选择\nEdit denied-e4.txt\n允许 Write 执行这项操作吗？\n允许一次\nWrites a file to the loca"
+    }
+  ],
+  "ps": {
+    "before": [
+      {
+        "pid": 38515,
+        "ppid": 38244,
+        "started": "Thu Nov 12 04:02:35 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      }
+    ],
+    "beforeClose": [],
+    "afterClose": []
+  },
+  "bound": true,
+  "settled": true,
+  "pane": "t 写入 nope，只做这一步。 | Q | Qoder | run · run-mwdi0is9-0 | tok | 108.5k | tools | 1 | err | 1 | 思考过程 | The user explicitly said \"只做这一步\" — only this step — so even though the default behavior is to commit and push, I should skip that here and just create the file. | 1 | Write denied-e4.txt | 1 失败 | 思考过程 | The user rejected this action, so I shouldn't retry it. I'll just report back. | 文件没有创建，因为写入 denied-e4.txt 的操作被你拒绝了。我没有重试，也没有做别的改动。 | 本轮 Hook | 6 个周期 · 25 个处理器实例 | 本轮改动 | 0 files | +0 | −0 | Review | in | 62.0k | out | 212 | cache·r | 46.3k | dur | 19.0s | api | 13.1s | tools | 1 | files | 0 r · 1 w | human | 1 · 1q | err | 1 | 在新会话中分支 | 版本探测超时（5s） | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+  "fileExists": false,
+  "formRemaining": false,
+  "events": {
+    "qoder-run-mwdi0is9-0": {
+      "native": 28,
+      "canonical": 63,
+      "workflow_activity": 0
+    }
+  }
+}

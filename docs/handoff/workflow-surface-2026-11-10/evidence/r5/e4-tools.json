@@ -1,0 +1,49 @@
+{
+  "mode": "tools",
+  "cli": "1.1.86",
+  "workspace": "/tmp/scry-r5/e4-tools/workspace",
+  "approval": [
+    {
+      "choice": "允许一次",
+      "options": [
+        "允许一次",
+        "拒绝",
+        "其他"
+      ],
+      "form": "Qoder 需要你的选择\nEdit e4.txt\n允许 Write 执行这项操作吗？\n允许一次\nWrites a file to the local files"
+    },
+    {
+      "choice": "允许一次",
+      "options": [
+        "允许一次",
+        "拒绝",
+        "其他"
+      ],
+      "form": "Qoder 需要你的选择\ngit add e4.txt && git commit -m \"$(cat <<'EOF' Add e4.txt with hell"
+    }
+  ],
+  "ps": {
+    "before": [
+      {
+        "pid": 3280,
+        "ppid": 2505,
+        "started": "Thu Nov 12 04:00:51 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      }
+    ],
+    "beforeClose": [],
+    "afterClose": []
+  },
+  "bound": true,
+  "settled": true,
+  "pane": "本机 | workspace | 在当前工作区创建 e4.txt 写入 hello，读回该文件，再运行 wc -c e4.txt，用一句话总结。 | Q | Qoder | run · run-mwdhy59l-0 | tok | 298.7k | tools | 5 | 显示更早的 147 条活动 | 模型已完成，但 Scry 精确记录提交失败：managed recorder produced an invalid canonical record | → 不要开始下一轮；保留 userData/trace-turn-progress、managed-turn-progress、managed-turn-commits 与 workspace/.scry 后重试恢复 | 本轮 Hook | 7 个周期 · 67 个处理器实例 | 本轮改动 | 1 files | +1 | −0 | Review | in | 157.1k | out | 1.2k | cache·r | 140.4k | dur | 55.7s | api | 34.2s | tools | 5 | files | 0 r · 1 w | human | 2 · 2q | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+  "file": "hello",
+  "events": {
+    "qoder-run-mwdhy59l-0": {
+      "native": 38,
+      "canonical": 156,
+      "workflow_activity": 0
+    }
+  }
+}
