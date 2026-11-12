@@ -6,7 +6,7 @@ import { parseTranscriptSnapshot } from './recorder-transcript-parse.js'
 import { piTranscriptOffsets } from './recorder-pi-transcript.js'
 import { nestedRecord, stringAt, type PiTranscriptAnchor, type TranscriptRead } from './recorder-contracts.js'
 import { textContent } from './recorder-codex-calls.js'
-import { recordTranscriptAnchorBytes, type TranscriptSnapshotIdentity } from './recorder-transcript-io.js'
+import { recordTranscriptAnchorBytes, transcriptIdentity, type TranscriptSnapshotIdentity } from './recorder-transcript-io.js'
 
 interface TranscriptSnapshotCacheEntry {
   key: string
@@ -380,6 +380,17 @@ async function cachedTranscriptSnapshot(args: {
   return read
 }
 
+function missingTranscript(providerTurnId?: string, promptHash?: string): TranscriptRead {
+  return {
+    stable: true,
+    observed: false,
+    ...(providerTurnId || promptHash ? { identityMatched: false } : {}),
+    complete: true,
+    events: [],
+    observable: { tools: false, skills: false, mcps: false, hooks: false, usage: false, files: false, errors: false }
+  }
+}
+
 export async function stableTranscript(
   path: string,
   runId: string,
@@ -390,7 +401,12 @@ export async function stableTranscript(
   requestSetId?: string,
   sessionId?: string,
   cwd?: string,
-  piTranscriptAnchor?: PiTranscriptAnchor
+  piTranscriptAnchor?: PiTranscriptAnchor,
+  /**
+   * Frozen end of the readable window. A captured session records this at stop time so the next
+   * prompt, written after stop, can never be parsed back into the turn that just ended.
+   */
+  endOffsetLimit?: number
 ): Promise<TranscriptRead> {
   path = await readableTranscriptPath(path, provider)
   if (provider === 'pi' && !piTranscriptAnchor) {
@@ -403,34 +419,35 @@ export async function stableTranscript(
   startOffset = 0
   let previous = -1
   let latestIdentity: TranscriptSnapshotIdentity | undefined
+  if (endOffsetLimit != null && !(provider === 'pi' && piTranscriptAnchor)) {
+    let frozenIdentity: TranscriptSnapshotIdentity
+    try {
+      frozenIdentity = transcriptIdentity(await stat(path))
+    } catch {
+      return missingTranscript(providerTurnId, promptHash)
+    }
+    const boundary = Math.min(frozenIdentity.size, Math.max(0, endOffsetLimit))
+    return cachedTranscriptSnapshot({
+      path,
+      startOffset: await anchorOffsetFor(path, boundary, provider, promptHash, providerTurnId),
+      stable: true,
+      runId,
+      provider,
+      promptHash,
+      providerTurnId,
+      requestSetId,
+      sessionId,
+      cwd,
+      endOffset: boundary,
+      identity: frozenIdentity
+    })
+  }
   for (let attempt = 0; attempt < 3; attempt++) {
     let identity: TranscriptSnapshotIdentity
     try {
-      const info = await stat(path)
-      identity = {
-        dev: info.dev,
-        ino: info.ino,
-        size: info.size,
-        mtimeMs: info.mtimeMs,
-        ctimeMs: info.ctimeMs
-      }
+      identity = transcriptIdentity(await stat(path))
     } catch {
-      return {
-        stable: true,
-        observed: false,
-        ...(providerTurnId || promptHash ? { identityMatched: false } : {}),
-        complete: true,
-        events: [],
-        observable: {
-          tools: false,
-          skills: false,
-          mcps: false,
-          hooks: false,
-          usage: false,
-          files: false,
-          errors: false
-        }
-      }
+      return missingTranscript(providerTurnId, promptHash)
     }
     latestIdentity = identity
     if (identity.size === previous) {

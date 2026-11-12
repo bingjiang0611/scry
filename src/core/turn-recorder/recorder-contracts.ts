@@ -18,6 +18,11 @@ export interface RecorderHookInput {
   /** Persist an uncertain transport delivery for lifecycle-deduplicated recovery, without applying it. */
   queueOnly?: boolean
   /**
+   * Session capture context, present only for `--capture-mode session` delivery. A workspace in
+   * `capture.sessions: opt-in` mode records nothing without it.
+   */
+  capture?: import('./session-capture-contract.js').SessionCaptureContext
+  /**
    * Skip commit-hook delivery so a long-lived caller can run it after answering the Provider.
    * Recording is what the hook must wait for; waking an external uploader is not, and its budget
    * is paid on every event. Only a caller that outlives the response may set this — a one-shot CLI

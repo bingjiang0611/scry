@@ -263,6 +263,15 @@ export function validateAgentTurnRecord(value: unknown): TurnRecordValidationRes
   '$.turnRoleStatus', 'must match the structurally observed turn role')
   require(raw.turnRole === undefined || raw.turnRoleStatus === 'observed',
     '$.turnRole', 'requires an observed turn role status')
+  if (raw.capture !== undefined) {
+    const capture = raw.capture as Record<string, unknown> | undefined
+    require(!!capture && typeof capture === 'object' && !Array.isArray(capture) &&
+      typeof capture.protocol === 'string' && capture.protocol.length > 0 &&
+      typeof capture.captureId === 'string' && capture.captureId.length > 0 &&
+      typeof capture.source === 'string' && capture.source.length > 0 &&
+      (capture.task === null || typeof capture.task === 'string'),
+    '$.capture', 'must be the claiming session capture identity')
+  }
 
   const sections: Array<[string, (payload: unknown) => boolean, boolean?]> = [
     ['user', isUserTextPayload], ['assistant', isTextPayload],

@@ -17,6 +17,7 @@ import { degradeEvidenceSections, persistRecorderEventContent, persistTurnDiffCo
 import { turnChangeHints } from './change-journal.js'
 import { newWorktreeTurnDiffs } from './recorder-worktree-diff.js'
 import { rm } from 'node:fs/promises'
+import { applyCaptureBaselineCaveat, captureRecordMetadata } from './record-capture-metadata.js'
 
 export async function finalizeOpenTurn(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
@@ -46,7 +47,8 @@ export async function finalizeOpenTurn(
         open.requestSetId,
         open.sessionId,
         enablement.workspaceRoot,
-        open.piTranscriptAnchor
+        open.piTranscriptAnchor,
+        open.captureTranscriptEndOffset
       )
     : {
         stable: true,
@@ -222,6 +224,7 @@ export async function finalizeOpenTurn(
       requestedRoots: open.captures.map(capture => capture.repository)
     }
   }
+  applyCaptureBaselineCaveat(evidence, open.capture)
   if ((diffs.length > 0 || evidence.diff.discovery) && !evidence.diff.source.includes('repository_discovery')) {
     evidence.diff.source.push('repository_discovery')
   }
@@ -315,6 +318,7 @@ export async function finalizeOpenTurn(
     linkedTaskId: boundTask ? String(boundTask.taskId) : null,
     ...(boundTask ? { linkedTaskGeneration: String(boundTask.taskGeneration) } : {}),
     taskLinkStatus: boundTask ? 'bound' : taskEvents.length ? 'conflict' : 'unbound',
+    ...captureRecordMetadata(open.capture),
     // Absence of a host-supplied role is reported as `unobserved`, never as a
     // main-agent turn: text prefixes are not an identity boundary.
     turnRoleStatus: observedTurnRole ? 'observed' : turnRoleEvents.length ? 'conflict' : 'unobserved',

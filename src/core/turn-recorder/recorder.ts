@@ -34,7 +34,7 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
     uploadEnvironment: captureUploadEnvironment(input.env ?? process.env),
     payload: trustedManagedIdentityPayload(input.payload, input.managed, input.env ?? process.env)
   }
-  const enablement = await resolveRecorderEnablement(input.workspace, input.env)
+  const enablement = await resolveRecorderEnablement(input.workspace, input.env, input.capture == null)
   if (!enablement.enabled) {
     if (enablement.reason === 'invalid_config') {
       // Observational hook remains fail-open even if the diagnostic directory is unwritable.

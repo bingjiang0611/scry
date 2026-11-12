@@ -60,6 +60,22 @@ export interface RecorderOpenTurnState {
   terminalIdentityConfirmedBySessionEnd?: boolean
   repositoryDiscovery?: Pick<RepositoryDiscovery, 'maxDepth' | 'depthLimitedDirectories' | 'worktreeDiscovery'>
   captures: Array<{ repository: string; capture: GitTurnDiffCapture }>
+  /**
+   * Present only for a turn recorded under an explicit session capture. `baselineAt` says the Git
+   * baseline was taken mid-turn (at the claim), so earlier work in the same turn is not in the diff.
+   */
+  capture?: {
+    protocol: string
+    captureId: string
+    source: string
+    task: string | null
+    openedAt: string
+    baselineAt?: string
+  }
+  /** Stop intent for a captured session; the turn still finishes from its own terminal events. */
+  captureStopRequestedAt?: string
+  /** Transcript bytes at stop time, so a later prompt can never be read back into this turn. */
+  captureTranscriptEndOffset?: number
 }
 
 export const SESSION_LOCK_WAIT_MS = 10_000

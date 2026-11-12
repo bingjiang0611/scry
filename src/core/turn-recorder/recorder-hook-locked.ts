@@ -107,7 +107,7 @@ export async function applyHookLocked(
       input.payload,
       input.managed === true,
       protectNextStart,
-      input.uploadEnvironment
+      input.uploadEnvironment, input.capture
     )
     if (!open.managedByScry) await storeLifecycleEvent(enablement, open, input.event, input.payload)
     return { status: 'started' as const }

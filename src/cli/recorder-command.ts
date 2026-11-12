@@ -2,6 +2,7 @@ import { join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { type ParsedArgs, workspaceOf, readStdin, flag, intFlag, providerOf, print, listFlags } from './command-args.js'
 import { sendRecorderDaemonHook, startRecorderDaemon, serveRecorderDaemon, recorderDaemonStatus, stopRecorderDaemon, RecorderHookRejected } from '../core/turn-recorder/daemon.js'
+import { captureCommand, sessionHookCommand } from './capture-command.js'
 import { handleRecorderHook, recorderEnablement, recoverRecorder, refreshRecorderPendingHealth, type RecorderRecoveryScope } from '../core/turn-recorder/recorder.js'
 import { recordError, drainCommitNotifications, retryCommitNotifications, RECORDER_VERSION, readHealth, commitNotificationStatus } from '../core/turn-recorder/store.js'
 import { resolveCommitHookActivation, commitHookEnv, revokeCommitHookGrant, inspectCommitHookBundle, writeCommitHookGrant } from '../core/turn-recorder/commit-hook-grant.js'
@@ -13,6 +14,7 @@ import { appTraceContentRoots } from '../core/turn-recorder/app-trace-content.js
 
 
 export async function hookCommand(args: ParsedArgs): Promise<number> {
+  if (flag(args, 'capture-mode') !== undefined) return sessionHookCommand(args)
   const quiet = args.flags.has('quiet')
   const verbose = args.flags.has('verbose') && !quiet
   const workspace = workspaceOf(args)
@@ -113,6 +115,7 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
 export async function recorderCommand(args: ParsedArgs): Promise<number> {
   const action = args.positionals[1]
   if (action === 'hook') return hookCommand(args)
+  if (action === 'capture') return captureCommand(args)
   if (action === 'content') return contentCommand(args)
   if (action === 'recover') {
     const providerFlag = flag(args, 'provider')
