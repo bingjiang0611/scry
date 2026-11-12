@@ -1,8 +1,7 @@
 import { lstat, readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { homedir } from 'node:os'
-import { readPiNativeSession } from './pi-native-history'
-import { piCreditRequests } from './pi-credit-usage'
+import { readPiCreditRequests } from './pi-credit-reader'
+import { PI_CREDIT_COPY } from '../shared/constants/pi-credit-copy'
 import type { QoderCreditEvidence, UsageAnalytics, UsageAnalyticsAggregate } from '../shared/trace'
 import { QODER_USD_PER_CREDIT } from '../shared/qoder-pricing'
 import { dedupeCreditRequests, isCreditUsageEvidence, type CreditRequest } from '../shared/credit-usage'
@@ -12,6 +11,7 @@ import { readTraceArchiveAsync } from './transcript-archive'
 export { qoderCreditRequests } from '../shared/qoder-credit-requests'
 
 export interface QoderCreditScope {
+  recordedEvidence?: QoderCreditEvidence
   providerId?: 'qoder' | 'pi'
   hasUsdCost?: number
   runId: string
@@ -30,14 +30,17 @@ const emptyEvidence = (): QoderCreditEvidence => ({
 })
 
 const scopeKey = (scope: QoderCreditScope): string =>
-  `${scope.providerId ?? 'qoder'}\0${scope.runId}\0${scope.sessionId}\0${scope.cwd}\0${scope.tsStart}`
+  `${scope.providerId ?? 'qoder'}\0${scope.runId}\0${scope.sessionId}\0${scope.cwd}\0${scope.tsStart}\0${JSON.stringify(scope.recordedEvidence)}`
 
 /** Reconcile an asynchronously read Credit snapshot with the latest SQLite scope.
  * Stable rows keep their lower-bound evidence, deleted/changed rows are dropped,
  * and newly arrived rows remain explicitly unavailable until the next refresh. */
 export function reconcileQoderCreditRows(scopes: QoderCreditScope[], rows: QoderCreditRow[]): QoderCreditRow[] {
   const previous = new Map(rows.map((row) => [scopeKey(row), row.evidence]))
-  return scopes.map((scope) => ({ ...scope, evidence: previous.get(scopeKey(scope)) ?? emptyEvidence() }))
+  return scopes.map((scope) => ({ ...scope, evidence: scope.recordedEvidence?.credits != null
+    ? scope.recordedEvidence : previous.get(scopeKey(scope)) ?? scope.recordedEvidence ?? {
+      ...emptyEvidence(), source: scope.providerId === 'pi' ? 'pi_qoder_credit_observation' : 'qoder_native_transcript'
+    } }))
 }
 
 /** Prefer the same TurnUsage evidence persisted by managed recorder. Native reads
@@ -49,17 +52,20 @@ export async function readQoderCreditRows(args: {
   projectsDir: string
   piSessionRoot?: string
 }): Promise<QoderCreditRow[]> {
-  const native = await readNativeQoderCreditRows({ ...args, scopes: args.scopes.filter((scope) => scope.providerId !== 'pi') })
+  const recorded = args.scopes.filter((scope) => scope.recordedEvidence?.credits != null).map((scope) => ({ ...scope, evidence: scope.recordedEvidence! }))
+  const pending = args.scopes.filter((scope) => scope.recordedEvidence?.credits == null)
+  const native = await readNativeQoderCreditRows({ ...args, scopes: pending.filter((scope) => scope.providerId !== 'pi') })
   const sessions = new Map<string, QoderCreditScope[]>()
-  for (const scope of args.scopes.filter((scope) => scope.providerId === 'pi')) {
+  for (const scope of pending.filter((scope) => scope.providerId === 'pi')) {
     const key = `${scope.cwd}\0${scope.sessionId}`
     sessions.set(key, [...sessions.get(key) ?? [], scope])
   }
   const pi: QoderCreditRow[] = []
   let scanned = 0
-  let bytes = 0
+  const budget = { remainingEntries: 1_000_000 }
   for (const scopes of sessions.values()) {
-    const rows: QoderCreditRow[] = scopes.map((scope) => ({ ...scope, evidence: { ...emptyEvidence(), source: 'pi_qoder_credit_observation' } }))
+    const rows: QoderCreditRow[] = scopes.map((scope) => ({ ...scope,
+      evidence: { ...(scope.recordedEvidence ?? emptyEvidence()), source: 'pi_qoder_credit_observation' } }))
     pi.push(...rows)
     if (++scanned > 200) {
       for (const row of rows) row.evidence.omissionReason = 'Pi 计量扫描达到 200 个会话上限；未扫描轮次保留为不可用。'
@@ -69,17 +75,14 @@ export async function readQoderCreditRows(args: {
       const identity = scopes[0]
       const archive = await readTraceArchiveAsync({ ...identity, userDataDir: args.userDataDir, providerId: 'pi' })
       if (!archive) continue
-      const content = await readPiNativeSession({ ...identity, sessionRoot: args.piSessionRoot ?? join(homedir(), '.pi', 'agent', 'sessions'),
-        maxBytes: 64 * 1024 * 1024 - bytes })
-      if (content == null) continue
-      bytes += Buffer.byteLength(content, 'utf8')
       const turns = scopes.map((scope) => ({ runId: scope.runId,
         providerTurnId: archive.turns.find((turn) => turn.runId === scope.runId)?.providerTurnId }))
-      const parsed = piCreditRequests(content, identity, turns)
+      const parsed = await readPiCreditRequests({ ...identity, turns, sessionRoot: args.piSessionRoot, budget })
       for (const row of rows) {
-        if (parsed.incomplete) row.evidence.omissionReason = 'Pi 日志末尾尚未写完；仅计入完整记录前缀。'
         const requests = parsed.requests.filter((request) => request.runId === row.runId)
-        row.evidence.matchedTurns = parsed.matched.has(row.runId) ? 1 : 0
+        if (requests.length) row.evidence = { ...emptyEvidence(), source: 'pi_qoder_credit_observation' }
+        if (parsed.incomplete) row.evidence.omissionReason = 'Pi 日志末尾尚未写完；仅计入完整记录前缀。'
+        if (parsed.matched.has(row.runId)) row.evidence.matchedTurns = 1
         for (const request of requests) {
           if (request.credits == null) row.evidence.missingRequests++
           else {
@@ -90,12 +93,11 @@ export async function readQoderCreditRows(args: {
         if (row.evidence.credits != null && !Number.isFinite(row.evidence.credits)) row.evidence.credits = null
       }
     } catch (error) {
-      for (const row of rows) row.evidence.omissionReason = error instanceof Error && error.message === 'Pi metering aggregate byte budget reached'
-        ? 'Pi 计量扫描达到 64 MiB 总预算；此轮计量保留为不可用。'
-        : 'Pi 计量记录不可读取或身份未关联；不推断费用。'
+      for (const row of rows) row.evidence.omissionReason = error instanceof Error && error.message === 'Pi credit entry budget reached'
+        ? PI_CREDIT_COPY.entryBudgetReached : PI_CREDIT_COPY.unreadable
     }
   }
-  return [...native, ...pi]
+  return [...recorded, ...native, ...pi]
 }
 
 async function readNativeQoderCreditRows(args: {
@@ -103,7 +105,7 @@ async function readNativeQoderCreditRows(args: {
   userDataDir: string
   projectsDir: string
 }): Promise<QoderCreditRow[]> {
-  const rows = new Map(args.scopes.map((scope) => [scope.runId, { ...scope, evidence: emptyEvidence() }]))
+  const rows = new Map(args.scopes.map((scope) => [scope.runId, { ...scope, evidence: { ...(scope.recordedEvidence ?? emptyEvidence()) } }]))
   const sessions = new Map<string, QoderCreditScope[]>()
   for (const scope of rows.values()) {
     const key = `${scope.cwd}\0${scope.sessionId}`

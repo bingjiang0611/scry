@@ -98,7 +98,7 @@ try {
     process.env.QODER_CONFIG_DIR = join(root, 'qoder')
     app.whenReady().then(async () => {
       app.dock?.hide()
-      const { initDb, recordTurn, usageAnalyticsWithCreditsQuery } = await import('./db.mjs')
+      const { initDb, recordTurn, usageAnalyticsQuery, usageAnalyticsWithCreditsQuery } = await import('./db.mjs')
       const { upsertTraceArchiveTurn } = await import('./transcript-archive.mjs')
       const { aggregateTurnEvidence } = await import('./aggregate.mjs')
       const { creditUsageEvidence } = await import('./credit-usage.mjs')
@@ -166,6 +166,20 @@ try {
         !analytics.byModel.some(row => row.provider === 'cc-switch' && row.model === 'claude-opus-5')) throw new Error('Pi Qoder/Claude projection missing')
       const again = await usageAnalyticsWithCreditsQuery(7)
       if (JSON.stringify(again.totals) !== JSON.stringify(analytics.totals)) throw new Error('Pi refresh doubled usage')
+      // Persist Pi Credits, then remove their native shadow: both the first SQLite
+      // snapshot and subsequent refresh must retain the exact amount, once only.
+      const piRecorded = { ...piTurns[0], items: [...piTurns[0].items, {
+        id: 'pi-credits', runId: 'pi-qoder', ts: new Date().toISOString(), kind: 'harness', stage: 'credit_usage',
+        creditUsage: creditUsageEvidence([{ id: 'pi-request', runId: 'pi-qoder', credits: 2.909718812000001 }], 'pi_qoder_credit_observation')
+      }] }
+      if (!recordTurn(piRecorded)) throw new Error('Pi credits ledger write failed')
+      require('node:fs').unlinkSync(join(piDirectory, '2026-09-09_' + piSession + '.jsonl'))
+      for (const snapshot of [usageAnalyticsQuery(7), await usageAnalyticsWithCreditsQuery(7)]) {
+        const amount = snapshot.totals.qoderCredits?.credits
+        const cost = snapshot.byProvider.find(row => row.provider === 'qoder')?.costUsd
+        if (!Number.isFinite(amount) || Math.abs(amount - 15.409718812000001) > 1e-10 ||
+          !Number.isFinite(cost) || Math.abs(cost - 0.15409718812000001) > 1e-10) throw new Error('Ledger-first Pi Credits missing or doubled')
+      }
       // Add a real measured-zero day only after the original deduplication/count contracts.
       const zeroDate = new Date()
       zeroDate.setDate(zeroDate.getDate() - 2)

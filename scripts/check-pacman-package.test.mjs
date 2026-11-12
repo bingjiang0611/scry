@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const script = fileURLToPath(new URL('./check-pacman-package.mjs', import.meta.url))
@@ -33,31 +33,37 @@ function check(descriptionRecords) {
     'opt/Scry/resources/bin/scry': '',
     'usr/share/applications/scry.desktop': '[Desktop Entry]\nName=Scry\nExec=/opt/Scry/scry %U\nStartupWMClass=scry\n'
   }
-  writeFileSync(artifact, JSON.stringify(files))
-  const argvLog = join(root, 'archive-argv.jsonl')
+  writeFileSync(artifact, 'controlled archive fixture')
+  const contents = join(root, 'archive contents')
+  for (const [name, content] of Object.entries(files)) {
+    const path = join(contents, name)
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, content)
+  }
+  writeFileSync(join(contents, 'listing'), Object.keys(files).join('\n') + '\n')
+  const argvLog = join(root, 'archive-argv')
   const reader = join(bin, 'bsdtar')
-  writeFileSync(reader, `#!/usr/bin/env node
-const fs = require('node:fs')
-const args = process.argv.slice(2)
-fs.appendFileSync(${JSON.stringify(argvLog)}, JSON.stringify(args) + '\\n')
-if (args.length === 1 && args[0] === '--version') {
-  console.log('controlled archive reader')
-} else if (args.length === 2 && args[0] === '-tf') {
-  console.log(Object.keys(JSON.parse(fs.readFileSync(args[1], 'utf8'))).join('\\n'))
-} else if (args.length === 3 && args[0] === '-xOf') {
-  process.stdout.write(JSON.parse(fs.readFileSync(args[1], 'utf8'))[args[2]])
-} else {
-  process.exit(2)
-}
+  // The fixture only returns bytes; starting Node for every tar operation made
+  // archive checks depend on repeated JS runtime startup, not parser behavior.
+  writeFileSync(reader, `#!/bin/sh
+printf '%s\\0' "$@" >> "$SCRY_ARCHIVE_ARGV"
+printf '\\n' >> "$SCRY_ARCHIVE_ARGV"
+case "$#:$1" in
+  1:--version) printf '%s\\n' 'controlled archive reader' ;;
+  2:-tf) [ "$2" = "$SCRY_ARCHIVE_PATH" ] || exit 2; cat "$SCRY_ARCHIVE_CONTENTS/listing" ;;
+  3:-xOf) [ "$2" = "$SCRY_ARCHIVE_PATH" ] || exit 2; cat "$SCRY_ARCHIVE_CONTENTS/$3" ;;
+  *) exit 2 ;;
+esac
 `)
   chmodSync(reader, 0o755)
   const result = spawnSync(process.execPath, [script, `--artifact=${artifact}`], {
     cwd: root,
     encoding: 'utf8',
-    env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` }
+    env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}`,
+      SCRY_ARCHIVE_ARGV: argvLog, SCRY_ARCHIVE_PATH: artifact, SCRY_ARCHIVE_CONTENTS: contents }
   })
   expect(result.error).toBeUndefined()
-  const argv = readFileSync(argvLog, 'utf8').trim().split('\n').map((line) => JSON.parse(line))
+  const argv = readFileSync(argvLog, 'utf8').trimEnd().split('\n').map((line) => line.split('\0').slice(0, -1))
   expect(argv).toContainEqual(['-xOf', artifact, '.PKGINFO'])
   return result
 }
