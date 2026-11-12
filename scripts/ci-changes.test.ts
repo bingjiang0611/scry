@@ -49,6 +49,10 @@ function fixture() {
   return { git, write, commit, detect }
 }
 
+const SKIP = 'required=false\ndesktop=false\n'
+const FULL = 'required=true\ndesktop=true\n'
+const NO_DESKTOP = 'required=true\ndesktop=false\n'
+
 // Real Git pathspecs, including renames/deletions, not a second matcher.
 // Separate cases keep subprocess-heavy fixtures under the ordinary test deadline.
 describe('documentation-only validation skips', () => {
@@ -59,36 +63,58 @@ describe('documentation-only validation skips', () => {
   ])('skips only documentation: %s', path => {
     const { write, commit, detect } = fixture()
     write(path); commit()
-    expect(detect()).toEqual({ status: 0, output: 'required=false\n' })
-    expect(detect(undefined, 'push')).toEqual({ status: 0, output: 'required=false\n' })
+    expect(detect()).toEqual({ status: 0, output: SKIP })
   })
 
-  it.each(['src/main.ts', 'package.json', 'docs/build.mjs', 'docs/fixture.json', '.github/workflows/ci.yml', '.agents/skills/test/SKILL.md', 'CLAUDE.md'])(
-    'requires validation for executable/configuration inputs mixed with docs: %s', path => {
-      const { write, commit, detect } = fixture()
-      write('README.md'); write(path); commit()
-      expect(detect()).toEqual({ status: 0, output: 'required=true\n' })
-      expect(detect(undefined, 'push')).toEqual({ status: 0, output: 'required=true\n' })
-    }
-  )
+  it.each([
+    'src/main.ts', 'package.json', 'docs/build.mjs', 'docs/fixture.json', '.github/workflows/ci.yml',
+    '.github/actions/cache-electron/action.yml', 'THIRD_PARTY_NOTICES.md', 'scripts/model-picker-ui-smoke.mjs',
+    '.agents/skills/test/scripts/timing-run.mjs', '.claude/skills/test/run.mjs', 'src/core/recorder-tests/fixture.ts',
+    'experiments/remote-g0/generated/wire.ts', 'fixtures/billing/response.json'
+  ])('requires every gate for App, packaging or harness inputs mixed with docs: %s', path => {
+    const { write, commit, detect } = fixture()
+    write('README.md'); write(path); commit()
+    expect(detect()).toEqual({ status: 0, output: FULL })
+  })
 
-  it('detects code renamed into documentation', () => {
+  it.each([
+    'src/main.test.ts', 'src/renderer/view.test.tsx', 'scripts/ci-workflow.test.ts', 'CLAUDE.md', 'CONTRIBUTING.md',
+    'DESIGN.md', 'PRODUCT.md', '.agents/skills/test/SKILL.md', '.claude/skills/test/SKILL.md',
+    '.github/pull_request_template.md', '.github/ISSUE_TEMPLATE/bug_report.yml', '.github/VOUCHED.td',
+    '.github/TRIAGE_EXEMPTIONS.td', 'apps/ios/ScryRemote/App.swift'
+  ])('validates on Ubuntu but skips macOS App gates for inputs that cannot reach the App: %s', path => {
+    const { write, commit, detect } = fixture()
+    write('README.md'); write(path); commit()
+    expect(detect()).toEqual({ status: 0, output: NO_DESKTOP })
+  })
+
+  it('keeps macOS App gates when an App input is mixed with desktop-free changes', () => {
+    const { write, commit, detect } = fixture()
+    write('src/main.test.ts'); write('CLAUDE.md'); write('src/main.ts'); commit()
+    expect(detect()).toEqual({ status: 0, output: FULL })
+  })
+
+  it('detects code renamed into documentation or a test file', () => {
     const { git, commit, detect } = fixture()
     git('mv', 'src/main.ts', 'docs/renamed.md'); commit()
-    expect(detect()).toEqual({ status: 0, output: 'required=true\n' })
+    expect(detect()).toEqual({ status: 0, output: FULL })
+    const renamed = fixture()
+    renamed.git('mv', 'src/main.ts', 'src/main.test.ts'); renamed.commit()
+    expect(renamed.detect()).toEqual({ status: 0, output: FULL })
   })
 
   it('skips documentation deletions', () => {
     const { git, commit, detect } = fixture()
     git('rm', 'docs/guide.md'); commit()
-    expect(detect()).toEqual({ status: 0, output: 'required=false\n' })
+    expect(detect()).toEqual({ status: 0, output: SKIP })
   })
 
-  it('always validates dispatch/new branches and fails closed on an unreadable base', () => {
+  it('always validates dispatch, coalesced main pushes and new branches, and fails closed on an unreadable base', () => {
     const { detect } = fixture()
-    expect(detect()).toEqual({ status: 0, output: 'required=false\n' })
-    expect(detect(undefined, 'workflow_dispatch')).toEqual({ status: 0, output: 'required=true\n' })
-    expect(detect('0'.repeat(40))).toEqual({ status: 0, output: 'required=true\n' })
+    expect(detect()).toEqual({ status: 0, output: SKIP })
+    expect(detect(undefined, 'workflow_dispatch')).toEqual({ status: 0, output: FULL })
+    expect(detect(undefined, 'push')).toEqual({ status: 0, output: FULL })
+    expect(detect('0'.repeat(40))).toEqual({ status: 0, output: FULL })
     expect(detect('f'.repeat(40)).status).not.toBe(0)
     expect(detect('f'.repeat(40)).output).toBe('')
   })

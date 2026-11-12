@@ -123,7 +123,8 @@ jobs:
 
   native:
     needs: changes
-    if: ${{ needs.changes.outputs.required == 'true' }}
+    # Diffs that cannot reach the App (tests, Agent docs, iOS) do not change native timings.
+    if: ${{ needs.changes.outputs.desktop == 'true' }}
     # Same frozen driver, two real source builds, one runner, serial measurements.
     runs-on: macos-latest
     timeout-minutes: 30
@@ -263,13 +264,16 @@ jobs:
           RESULTS: ${{ toJSON(needs) }}
         run: |
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
-          echo "$RESULTS" | jq -e '
-            length == 3 and .changes.result == "success" and (
-              (.changes.outputs.required == "true" and
-                (del(.changes) | all(.[]; .result == "success"))) or
-              (.changes.outputs.required == "false" and
-                (del(.changes) | all(.[]; .result == "skipped")))
-            )' > /dev/null
+          # Every job must succeed, except jobs proven unaffected, which must be skipped.
+          echo "$RESULTS" | jq -e --argjson desktop '["native"]' '
+            length == 3 and .changes.result == "success" and
+            (.changes.outputs as $out
+              | ($out.required == "true" and ($out.desktop == "true" or $out.desktop == "false"))
+                or ($out.required == "false" and $out.desktop == "false")) and
+            (.changes.outputs as $out | del(.changes) | to_entries | all(.[];
+              .key as $job | .value.result == (
+                if $out.required == "false" or ($out.desktop == "false" and any($desktop[]; . == $job))
+                then "skipped" else "success" end)))' > /dev/null
 
   comment:
     # Fork PRs retain a read-only summary/artifact. Never run PR code with a write token.
@@ -294,6 +298,7 @@ jobs:
             const fs = require('node:fs')
             const sections = [['Node', 'performance-results'], ['Native', 'performance-native-results']].map(([label, artifact]) => {
               const file = `reports/${artifact}/report.md`
+              if (label === 'Native' && process.env.NATIVE_RESULT === 'skipped') return `## ${label}\nNot measured: this diff cannot reach the packaged App (validation changes reported desktop=false).`
               return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : `## ${label}\nNo valid comparison was produced. Missing measurements are not a pass.`
             })
             const body = (`<!-- scry-performance -->\nNode job: ${process.env.NODE_RESULT} · Native job: ${process.env.NATIVE_RESULT}\n\n` + sections.join('\n\n')).slice(0, 60000)

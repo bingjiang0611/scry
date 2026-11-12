@@ -87,21 +87,37 @@ const SERIAL_RENDERER_UI_ORDER = [
 ]
 
 describe('required PR checks', () => {
-  for (const [file, dependencies] of [
-    ['ci.yml', ['changes', 'node', 'unit', 'unit-coverage', 'cli-compat', 'packaged-electron', 'packaged-linux']],
-    ['performance.yml', ['changes', 'compare', 'native']]
+  for (const [file, dependencies, desktopJobs] of [
+    ['ci.yml', ['changes', 'node', 'unit', 'unit-coverage', 'cli-compat', 'packaged-electron', 'packaged-linux'], ['packaged-electron']],
+    ['performance.yml', ['changes', 'compare', 'native'], ['native']]
   ] as const) {
-    const success = Object.fromEntries(dependencies.map(key => [key, key === 'changes' ? { result: 'success', outputs: { required: 'true' } } : { result: 'success' }]))
-    const skipped = Object.fromEntries(dependencies.map(key => [key, key === 'changes' ? { result: 'success', outputs: { required: 'false' } } : { result: 'skipped' }]))
-    it(`${file} includes every validation and accepts only proven pass or doc skip`, () => {
+    const changes = (required: string, desktop: string) => ({ result: 'success', outputs: { required, desktop } })
+    const success = Object.fromEntries(dependencies.map(key => [key, key === 'changes' ? changes('true', 'true') : { result: 'success' }]))
+    const skipped = Object.fromEntries(dependencies.map(key => [key, key === 'changes' ? changes('false', 'false') : { result: 'skipped' }]))
+    const isDesktop = (key: string) => (desktopJobs as readonly string[]).includes(key)
+    const noDesktop = Object.fromEntries(dependencies.map(key => [key, key === 'changes' ? changes('true', 'false') : { result: isDesktop(key) ? 'skipped' : 'success' }]))
+    it(`${file} includes every validation and accepts only proven pass, doc skip or macOS App skip`, () => {
       const jobs = workflow(file).jobs
       expect(jobs.check.needs).toEqual([...dependencies])
       expect(Object.keys(jobs).filter(key => key !== 'check' && key !== 'comment').sort()).toEqual([...dependencies].sort())
       expect(gate(file, success)).toBe(0)
       expect(gate(file, skipped)).toBe(0)
+      expect(gate(file, noDesktop)).toBe(0)
       expect(gate(file, {})).not.toBe(0)
       expect(gate(file, { ...success, changes: { result: 'success', outputs: {} } })).not.toBe(0)
+      expect(gate(file, { ...success, changes: { result: 'success', outputs: { required: 'true' } } })).not.toBe(0)
       expect(gate(file, { ...success, changes: { result: 'success', outputs: { required: 'unknown' } } })).not.toBe(0)
+      expect(gate(file, { ...noDesktop, changes: changes('true', 'unknown') })).not.toBe(0)
+      // desktop=true without required=true is contradictory, never a skip.
+      expect(gate(file, { ...skipped, changes: changes('false', 'true') })).not.toBe(0)
+      for (const key of desktopJobs) expect(jobs[key].if).toBe("${{ needs.changes.outputs.desktop == 'true' }}")
+    })
+    it.each(dependencies.filter(key => key !== 'changes'))(`${file} with desktop=false requires the exact skip/pass for %s`, key => {
+      const results = isDesktop(key) ? ['success', 'failure', 'cancelled'] : ['skipped', 'failure', 'cancelled']
+      for (const result of results) expect(gate(file, { ...noDesktop, [key]: { result } }), result).not.toBe(0)
+      const missing = { ...noDesktop }
+      delete missing[key]
+      expect(gate(file, missing)).not.toBe(0)
     })
     it.each(dependencies)(`${file} rejects failed, missing or unexpectedly skipped %s`, key => {
       for (const result of ['failure', 'cancelled', 'skipped']) {
@@ -234,12 +250,21 @@ describe('required PR checks', () => {
     expect(fixture).toContain("join(process.env.RUNNER_TEMP ?? tmpdir(), 'scry-workspace-session-ui-')")
   })
 
-  it('cancels obsolete PR runs but never coalesces main commits', () => {
-    for (const file of ['ci.yml', 'performance.yml', 'remote-g0.yml']) {
+  it('cancels obsolete PR runs and coalesces only fully validated main CI runs', () => {
+    for (const file of ['performance.yml', 'remote-g0.yml']) {
       const ci = workflow(file)
       expect(ci.concurrency['cancel-in-progress']).toBe("${{ github.event_name == 'pull_request' }}")
       expect(ci.concurrency.group).toMatch(/github.event.pull_request.number \|\| github\.(sha|run_id)/)
     }
+    // A coalesced main run validates everything, since its before..HEAD diff can omit
+    // commits whose run was cancelled; manual dispatch keeps a unique group.
+    const ci = workflow('ci.yml')
+    expect(ci.concurrency.group).toBe("ci-${{ github.event_name == 'push' && github.ref || github.event.pull_request.number || github.run_id }}")
+    expect(ci.concurrency['cancel-in-progress']).toBe("${{ github.event_name != 'workflow_dispatch' }}")
+    expect(Object.keys(ci.on).sort()).toEqual(['pull_request', 'push', 'workflow_dispatch'])
+    const detect = load(readFileSync(join(root, '.github/workflows/validation-changes.yml'), 'utf8')) as { jobs: { changes: { steps: Step[] } } }
+    expect(detect.jobs.changes.steps.find(step => step.name === 'Detect executable changes')!.run)
+      .toContain('if [ "$EVENT_NAME" = workflow_dispatch ] || [ "$EVENT_NAME" = push ] ||')
   })
 
   it('never filters the required workflows at the trigger level', () => {
@@ -252,7 +277,8 @@ describe('required PR checks', () => {
       for (const [name, job] of Object.entries(jobs)) {
         if (['changes', 'check', 'comment', 'unit-coverage'].includes(name)) continue
         expect(job.needs).toBe('changes')
-        expect(job.if).toBe("${{ needs.changes.outputs.required == 'true' }}")
+        const output = ['packaged-electron', 'native'].includes(name) ? 'desktop' : 'required'
+        expect(job.if).toBe(`\${{ needs.changes.outputs.${output} == 'true' }}`)
       }
     }
   })
