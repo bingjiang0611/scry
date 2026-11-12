@@ -14,10 +14,11 @@
 //   stop -> cancelled
 //   SIGKILL the daemon -> the App brings up a new one and a new run settles
 //   first-text and streaming-update latency, in the same instance, for S1
+//   the daemon this run started is stopped afterwards (it outlives the App by design)
 //
 // No screenshot and no DOM clicking: the runner asserts run evidence, not pixels. A
 // failure exits non-zero with the step name; nothing is reported as passed unrun.
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { connectCdp, createEvaluate, freePort, launch, waitForTarget } from './desktop-remote-host-smoke/harness.mjs'
@@ -48,6 +49,41 @@ const electron = process.platform === 'darwin'
   : join(root, 'node_modules/electron/dist/electron')
 
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms))
+
+const commandOf = (pid) => {
+  try { return execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).trim() } catch { return undefined }
+}
+// Linux records `linux:<boot_id>:<starttime>`; a pid reused since the lock was written
+// has another start time. Other platforms rely on the command check alone.
+const sameLinuxProcess = (pid, startedAt) => {
+  if (process.platform !== 'linux') return true
+  try {
+    const fields = readFileSync(`/proc/${pid}/stat`, 'utf8').replace(/^.*\) /s, '').split(' ')
+    const bootId = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim()
+    return startedAt === `linux:${bootId}:${fields[19]}`
+  } catch { return false }
+}
+
+// The daemon outlives the App by design, so stopping the App leaves it running with a
+// deleted state directory. Stop the one this run recorded, through its supervisor
+// (SIGTERM there stops both), and only while each pid still runs this checkout's entry.
+async function stopRecordedDaemon(stateDir) {
+  let lock
+  try { lock = JSON.parse(readFileSync(join(stateDir, 'daemon.lock'), 'utf8')) } catch { return { ok: true, state: 'no-daemon-lock' } }
+  const supervisor = Number(/^supervisor:(\d+)$/.exec(String(lock.startedBy ?? ''))?.[1])
+  const owned = [[supervisor, 'daemon-supervisor.js'], [lock.pid, 'daemon.js']].filter(([pid, entry]) =>
+    Number.isSafeInteger(pid) && commandOf(pid)?.endsWith(join(root, 'out', 'main', entry)) &&
+    (entry !== 'daemon.js' || sameLinuxProcess(pid, lock.startedAt)))
+  for (const [pid] of owned) { try { process.kill(pid, 'SIGTERM') } catch { /* already gone */ } }
+  const deadline = Date.now() + 10_000
+  let alive = owned.filter(([pid]) => commandOf(pid) !== undefined)
+  while (alive.length > 0 && Date.now() < deadline) {
+    await sleep(100)
+    alive = owned.filter(([pid]) => commandOf(pid) !== undefined)
+  }
+  for (const [pid] of alive) { try { process.kill(pid, 'SIGKILL') } catch { /* already gone */ } }
+  return { ok: alive.length === 0, stopped: owned.map(([pid, entry]) => `${entry}:${pid}`), ...(alive.length ? { forced: alive.map(([pid]) => pid) } : {}) }
+}
 
 function fail(step, detail) {
   results.steps[step] = { ok: false, detail }
@@ -203,6 +239,7 @@ try {
   if (child && child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
   await sleep(1500)
   if (child && child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+  results.steps.daemonStopped = await stopRecordedDaemon(join(userDataDir, 'daemon'))
   const failed = !results.error && Object.values(results.steps).some((step) => step.ok !== true)
   if (results.error || failed) {
     writeFileSync(join(root, 'daemon-mode-smoke.log'), log.join(''))
