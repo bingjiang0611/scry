@@ -29,6 +29,7 @@ export async function exerciseSideChatInput({ cdp, evaluate, check, childId, con
   await cdp.send('Input.insertText', { text: 'side chat reply <img src=x onerror=alert(1)>' })
   await wait(`document.querySelector('${CHILD_COMPOSER}')?.value.includes('img src') === true`)
   const turnsBeforeInjection = (await conversation(childId)).turns.length
+  const inputsBeforeInjection = inputs().length
   await click(`${CHILD_PANEL} .send`)
   await wait(`window.scry.conversations.read(${json(childId)}).then(page => page.turns.length === ${turnsBeforeInjection + 1}
     && page.turns.at(-1)?.delivery.outcome === 'completed')`, 40000)
@@ -48,7 +49,8 @@ export async function exerciseSideChatInput({ cdp, evaluate, check, childId, con
   }
   await wait(`document.querySelector('${CHILD_PANEL} .chat-body')?.textContent.includes('onerror=alert(1)') === true`, 15000)
     .catch(() => undefined)
-  const injected = await evaluate(`(() => {
+  const injected = await evaluate(`(async () => {
+    const page = await window.scry.conversations.read(${json(childId)})
     const body = document.querySelector('${CHILD_PANEL} .chat-body')
     const text = body.textContent ?? ''
     const start = text.indexOf('side chat reply')
@@ -56,10 +58,15 @@ export async function exerciseSideChatInput({ cdp, evaluate, check, childId, con
     return { img: body.querySelectorAll('img').length, script: body.querySelectorAll('script').length,
       text: text.includes('<img src=x onerror=alert(1)>'), context: start < 0 ? text.slice(-200) : text.slice(start, start + 160),
       childId: body.closest('[data-side-chat-id]')?.dataset.sideChatId, expectedChildId: ${json(childId)},
+      revision: page.summary.revision, activeRunId: page.summary.activeRunId,
+      latestTurns: page.turns.slice(-3).map(turn => ({ runId: turn.runId, delivery: turn.delivery,
+        hasHistory: Boolean(turn.history), hasLiteral: JSON.stringify(turn.history ?? null).includes('onerror=alert(1)'),
+        unavailableReason: turn.unavailableReason })),
       scroll: { top: scroller.scrollTop, height: scroller.scrollHeight, client: scroller.clientHeight },
       renderedRuns: [...body.querySelectorAll('[data-run-id]')].slice(-5).map(node => node.dataset.runId),
       olderPage: [...document.querySelector('${CHILD_PANEL}').querySelectorAll('.unified-pagination button')].some(node => node.textContent === '最近记录' && !node.disabled) }
   })()`)
+  injected.dispatchedPrompts = inputs().slice(inputsBeforeInjection).map(entry => entry.prompt)
   check(injected.img === 0 && injected.script === 0, `Provider text was rendered as markup: ${json(injected)}`)
   check(injected.text, `Provider text was not shown verbatim: ${json(injected)}`)
   await capture('layout-untrusted-text')
