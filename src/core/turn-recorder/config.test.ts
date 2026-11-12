@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { discoverRepositories, parseRecorderConfig, repositoryDiscoveryStats, resetRepositoryDiscoveryStats, resolveRecorderEnablement, resolveRecorderLocation, WORKTREE_DISCOVERY_MAX_REPOSITORIES, type RecorderConfig } from './config'
 
 // Keep recorder configuration fixtures Node-only: check:cli-runtime must run
-// this suite without launching the desktop App or relying on Electron state.
+// this suite on Node 20/22/24 without launching the App or using Electron state.
 const config: RecorderConfig = {
   schemaVersion: 1,
   enabled: true,
