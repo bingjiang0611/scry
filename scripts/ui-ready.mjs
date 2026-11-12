@@ -23,16 +23,22 @@ export async function reloadUi(cdp, ready, options, reloadParams = {}) {
   await cdp.send('Page.enable')
   let unsubscribe
   let timer
-  const loaded = new Promise((resolve, reject) => {
+  let resolveLoaded
+  const loaded = new Promise(resolve => { resolveLoaded = resolve })
+  const failed = new Promise((_, reject) => {
     unsubscribe = cdp.on(event => {
-      if (event.method === 'Page.loadEventFired') resolve()
+      if (event.method === 'Page.loadEventFired') resolveLoaded()
       if (event.method === 'Inspector.targetCrashed') reject(new Error('Renderer crashed during reload (Inspector.targetCrashed)'))
     })
-    timer = setTimeout(() => reject(new Error('Renderer reload did not finish before its readiness deadline')), timeoutMs)
+    timer = setTimeout(() => reject(new Error('Renderer reload/readiness did not finish before its deadline')), Math.max(1, deadline - Date.now()))
   })
   try {
-    await Promise.all([loaded, cdp.send('Page.reload', reloadParams)])
-    await ready({ ...options, timeoutMs: Math.max(1, deadline - Date.now()) })
+    const restored = async () => {
+      await Promise.all([loaded, cdp.send('Page.reload', reloadParams)])
+      await ready({ ...options, timeoutMs: Math.max(1, deadline - Date.now()) })
+    }
+    // Crash/deadline rejection must remain live after loadEventFired resolves.
+    await Promise.race([failed, restored()])
   } finally {
     clearTimeout(timer)
     unsubscribe()

@@ -98,6 +98,47 @@ it('waits for actual bottom following after resize without scrolling on the test
   expect(wait).toHaveBeenCalledOnce()
 })
 
+it('reports a crash during readiness after the load event instead of accepting a late ready result', async () => {
+  const { cdp, emit, listeners } = cdpFixture()
+  let finishReady!: () => void
+  const ready = vi.fn(() => new Promise<void>(resolve => { finishReady = resolve }))
+  const pending = reloadUi(cdp, ready, { documentEpoch: 1 })
+  let outcome = 'pending'
+  const observed = pending.then(() => { outcome = 'resolved' }, error => { outcome = 'rejected'; return error })
+  await vi.waitFor(() => expect(cdp.send).toHaveBeenCalledWith('Page.reload', {}))
+  emit('Page.loadEventFired')
+  await vi.waitFor(() => expect(ready).toHaveBeenCalledOnce())
+  try {
+    emit('Inspector.targetCrashed')
+    await vi.waitFor(() => expect(outcome).toBe('rejected'))
+    expect((await observed).message).toContain('Renderer crashed during reload')
+    expect(listeners.size).toBe(0)
+  } finally {
+    finishReady()
+    await observed
+  }
+})
+
+it('keeps the shared deadline active while readiness is pending after load', async () => {
+  vi.useFakeTimers()
+  const { cdp, emit, listeners } = cdpFixture()
+  let finishReady!: () => void
+  const ready = vi.fn(() => new Promise<void>(resolve => { finishReady = resolve }))
+  try {
+    const pending = reloadUi(cdp, ready, { documentEpoch: 1, timeoutMs: 30000 })
+    await vi.waitFor(() => expect(cdp.send).toHaveBeenCalledWith('Page.reload', {}))
+    emit('Page.loadEventFired')
+    await vi.waitFor(() => expect(ready).toHaveBeenCalledOnce())
+    const failure = expect(pending).rejects.toThrow('Renderer reload/readiness did not finish before its deadline')
+    await vi.advanceTimersByTimeAsync(30000)
+    await failure
+    expect(listeners.size).toBe(0)
+  } finally {
+    finishReady()
+    vi.useRealTimers()
+  }
+})
+
 it('reports a renderer crash during reload, without readiness retry or a leaked listener', async () => {
   const { cdp, emit, listeners } = cdpFixture()
   const ready = vi.fn()
