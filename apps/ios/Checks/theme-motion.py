@@ -145,7 +145,9 @@ for element in ['sessionTitle', 'sessionProvider']:
     assert f'.conversationElement(session.label.isEmpty ? nil : destinationIdentity.map(ConversationTransition.Element.{element}))' in row
 header = (root / 'apps/ios/ScryRemote/Components.swift').read_text()
 assert 'transition?.state.focusDestination == .session(transitionIdentity)' in header
-print('PASS empty-title source parity and motion-independent header focus wiring')
+transcript = (root / 'apps/ios/ScryRemote/SessionTranscriptView.swift').read_text()
+assert 'transitionIdentity: sessionIdentity,' in transcript
+print('PASS empty-title source parity and motion-independent header focus wiring, including fallback titles')
 
 workspace = (root / 'apps/ios/ScryRemote/WorkspaceShell.swift').read_text()
 assert '.offset(x: reduceMotion ? 0 : (drawerProgress - 1) * width)' in workspace
