@@ -15,6 +15,7 @@ export const CONVERSATION_MATRIX_DOC = join(root, 'docs/plans/remote-runtime-v2/
 const ROUTING = join(root, 'scripts/daemon-ipc-routing.json')
 const ROUTING_WORKBENCH = join(root, 'scripts/daemon-ipc-routing-workbench.json')
 const ROUTING_CLIENT = join(root, 'scripts/daemon-ipc-routing-client.json')
+const ROUTING_SERVICE = join(root, 'scripts/daemon-ipc-routing-service.json')
 const OPS = join(root, 'scripts/daemon-ipc-ops.json')
 const DIFFERENCES = join(root, 'scripts/daemon-ipc-differences.json')
 const APPROVALS = join(root, 'scripts/daemon-ipc-remote-approvals.json')
@@ -130,20 +131,21 @@ export function performancePaths() {
  * new op looks like, how each forwarded op differs from the device protocol, and which
  * new ops a remote device may reach. Each file stays under the staged size budget.
  */
-export function loadRouting(routingPath = ROUTING, opsPath = OPS, differencesPath = DIFFERENCES, approvalsPath = APPROVALS, workbenchPath = ROUTING_WORKBENCH, clientPath = ROUTING_CLIENT) {
+export function loadRouting(routingPath = ROUTING, opsPath = OPS, differencesPath = DIFFERENCES, approvalsPath = APPROVALS, workbenchPath = ROUTING_WORKBENCH, clientPath = ROUTING_CLIENT, servicePath = ROUTING_SERVICE) {
   const routing = JSON.parse(readFileSync(routingPath, 'utf8'))
   const workbench = JSON.parse(readFileSync(workbenchPath, 'utf8'))
   const client = JSON.parse(readFileSync(clientPath, 'utf8'))
+  const service = JSON.parse(readFileSync(servicePath, 'utf8'))
   const ops = JSON.parse(readFileSync(opsPath, 'utf8'))
   const differences = JSON.parse(readFileSync(differencesPath, 'utf8'))
   const approvals = JSON.parse(readFileSync(approvalsPath, 'utf8'))
-  for (const [name, data] of [['routing', routing], ['workbench routing', workbench], ['client routing', client], ['ops', ops], ['differences', differences], ['approvals', approvals]]) {
+  for (const [name, data] of [['routing', routing], ['workbench routing', workbench], ['client routing', client], ['service routing', service], ['ops', ops], ['differences', differences], ['approvals', approvals]]) {
     if (data.schema !== 1) throw new Error(`${name} schema must be 1`)
   }
-  if (!Array.isArray(routing.channels) || !Array.isArray(workbench.channels) || !Array.isArray(client.channels) || !ops.ops || !differences.differences || !Array.isArray(approvals.approved)) {
+  if (!Array.isArray(routing.channels) || !Array.isArray(workbench.channels) || !Array.isArray(client.channels) || !Array.isArray(service.channels) || !ops.ops || !differences.differences || !Array.isArray(approvals.approved)) {
     throw new Error('routing inputs are incomplete')
   }
-  return { schema: 1, channels: [...routing.channels, ...workbench.channels, ...client.channels], ops: ops.ops, differences: differences.differences, approved: new Set(approvals.approved) }
+  return { schema: 1, channels: [...routing.channels, ...workbench.channels, ...client.channels, ...service.channels], ops: ops.ops, differences: differences.differences, approved: new Set(approvals.approved) }
 }
 
 /**

@@ -10,6 +10,7 @@ import { TERMINAL_LOCAL_OPS } from './daemon-local-ops/terminal'
 import { MCP_LOCAL_OPS } from './daemon-local-ops/mcp'
 import { BILLING_LOCAL_OPS } from './daemon-local-ops/billing'
 import { PAIRING_LOCAL_OPS } from './daemon-local-ops/pairing'
+import { BACKGROUND_SERVICE_LOCAL_OPS } from './daemon-local-ops/background-service'
 
 // Development switch for "the daemon owns runs". Kept here, free of Electron, so the IPC
 // registrar can consult it without importing the daemon client assembly.
@@ -43,6 +44,8 @@ export const DAEMON_MODE_IN_PROCESS_CHANNELS: ReadonlySet<string> = new Set([
   'agent:traceAck', 'agent:traceResynchronized', 'agent:unreadSessions', 'agent:viewSessions',
   'app:copyText', 'app:performanceDiagnosticsEnabled', 'app:rendererRestart',
   'app:reportRendererPerformance', 'app:setTheme',
+  // «后台服务» actions: dialogs, signals to the verified daemon.lock holder, app.quit (B4-S).
+  'remote:backgroundService:quit', 'remote:backgroundService:reconnect', 'remote:backgroundService:restart',
   'runTraces:ack', 'runTraces:confirm', 'runTraces:resync', 'runTraces:setLegacyDemand',
   'runTraces:subscribe', 'runTraces:unsubscribe',
   'workspace:openExternal', 'workspace:openKnownExternal', 'workspace:readKnown', 'workspace:readPageKnown',
@@ -71,7 +74,8 @@ export const DAEMON_LOCAL_OP_CHANNELS: DaemonLocalOpTable = {
   ...TERMINAL_LOCAL_OPS,
   ...MCP_LOCAL_OPS,
   ...BILLING_LOCAL_OPS,
-  ...PAIRING_LOCAL_OPS
+  ...PAIRING_LOCAL_OPS,
+  ...BACKGROUND_SERVICE_LOCAL_OPS
 }
 
 /** Channels the daemon answers through an op it already serves paired devices (route `forward`). */

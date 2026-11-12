@@ -342,6 +342,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       remoteHost: () => remoteHostEnabled(process.env.SCRY_REMOTE_HOST, options.isPackaged) ? remoteHostService : null,
       startupManagedRecovery: () => startupManagedRecovery,
       userDataDir: options.userDataDir,
+      appVersion: options.appVersion,
       sourceControl,
       providerDiscovery
     }),

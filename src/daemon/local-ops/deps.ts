@@ -40,6 +40,8 @@ export interface DaemonLocalEndpointDeps {
   remoteHost: () => import('../../main/bootstrap/pairing-channels').PairingHost | null
   forkSessionWithAuthority: (request: DesktopRemoteForkSessionRequest) => Promise<AgentForkSessionResult>
   userDataDir: string
+  // What this daemon reports as its version (the «后台服务» section, B4-S S0-1).
+  appVersion: string
   // Worktree selection reads, and the repository ids they hand out, live in this one service.
   sourceControl: SourceControlService
   // The metadata paired devices see; Provider context and Pi profile changes invalidate it.

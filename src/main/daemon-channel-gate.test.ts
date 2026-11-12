@@ -7,7 +7,8 @@ const off = {} as NodeJS.ProcessEnv
 const routing = [
   ...JSON.parse(readFileSync(new URL('../../scripts/daemon-ipc-routing.json', import.meta.url), 'utf8')).channels,
   ...JSON.parse(readFileSync(new URL('../../scripts/daemon-ipc-routing-workbench.json', import.meta.url), 'utf8')).channels,
-  ...JSON.parse(readFileSync(new URL('../../scripts/daemon-ipc-routing-client.json', import.meta.url), 'utf8')).channels
+  ...JSON.parse(readFileSync(new URL('../../scripts/daemon-ipc-routing-client.json', import.meta.url), 'utf8')).channels,
+  ...JSON.parse(readFileSync(new URL('../../scripts/daemon-ipc-routing-service.json', import.meta.url), 'utf8')).channels
 ] as Array<{ channel: string; route: string; op?: string; method?: string }>
 const routeOf = (channel: string) => routing.find((row) => row.channel === channel)?.route
 

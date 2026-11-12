@@ -41,6 +41,16 @@
         "local"
       ]
     },
+    "localBackgroundService": {
+      "path": "remote",
+      "request": "{ op:'localBackgroundService', method:'status', args: [] }；带参数返回 invalid_request",
+      "response": "{ version, pid, startedAt（进程启动的 epoch 毫秒）, devices（{ state:'remote-disabled' } 或 { state:'known', paired }）, activeRuns }；paired 只数未撤销、未过期的已配对设备，与 remote:status 一样不含 App 自己的本机连接（scope: local）",
+      "authorize": "只在 unix socket 上、且调用方持有 scope: local grant；只读",
+      "why": "版本、进程、运行时长、已配对设备与运行中的 run 只有 daemon 知道",
+      "scopes": [
+        "local"
+      ]
+    },
     "localHostStatus": {
       "path": "remote",
       "request": "{ op:'localHostStatus', method:'status', args: [] }",

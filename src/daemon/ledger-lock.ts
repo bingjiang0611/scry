@@ -72,8 +72,15 @@ export function readDaemonIdentity(pid: number): DaemonLockRecord | undefined {
 
 /** Parse one lock file; undefined when it is absent or does not describe a holder. */
 export function readDaemonLockRecord(path: string): DaemonLockRecord | undefined {
+  let text: string
+  try { text = readFileSync(path, 'utf8') } catch { return undefined }
+  return parseDaemonLockRecord(text)
+}
+
+/** One lock file's text; callers that must not block read the file themselves. */
+export function parseDaemonLockRecord(text: string): DaemonLockRecord | undefined {
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<DaemonLockRecord>
+    const parsed = JSON.parse(text) as Partial<DaemonLockRecord>
     if (typeof parsed.pid !== 'number' || typeof parsed.startedAt !== 'string') return undefined
     return {
       pid: parsed.pid,

@@ -19,6 +19,16 @@ import { installDaemonChannelForwarder, installDaemonRequestForwarder, installDa
 export interface LazyDaemonRunSurface extends DaemonRunSurface {
   /** Resolves once the daemon question is answered; safe to call repeatedly. */
   ready(): Promise<DaemonRunModeResult>
+  /**
+   * Replace the session's outcome with a fresh connect (adopt, launch, enroll). Only the
+   * «后台服务» actions call this, after the user asked to restart or reconnect.
+   */
+  restart(): Promise<DaemonRunModeResult>
+  /**
+   * Refuse daemon launches until every returned release has run: a stop is in flight, and
+   * a retried read must not bring the stopped daemon back. Each release is idempotent.
+   */
+  holdLaunches(): () => void
   dispose(): void
 }
 
@@ -31,9 +41,16 @@ const FAILURE_STATUS = {
 } as const
 
 export function createLazyDaemonRunSurface(
-  deps: DaemonRunModeDeps,
+  modeDeps: DaemonRunModeDeps,
   createMode: (deps: DaemonRunModeDeps) => Promise<DaemonRunModeResult> = createDaemonRunMode
 ): LazyDaemonRunSurface {
+  // Every mode this surface builds launches through here, including the run mode's own
+  // reconnect, so one hold covers both paths.
+  let holds = 0
+  const launch = modeDeps.launch
+  const deps: DaemonRunModeDeps = launch
+    ? { ...modeDeps, launch: async () => holds > 0 ? { status: 'failed' as const, reason: 'daemon_stopping' } : await launch() }
+    : modeDeps
   let pending: Promise<DaemonRunModeResult> | undefined
   const remember = (result: Promise<DaemonRunModeResult>): Promise<DaemonRunModeResult> => {
     pending = result
@@ -73,6 +90,18 @@ export function createLazyDaemonRunSurface(
   }
   const lazy: LazyDaemonRunSurface = {
     ready: ensure,
+    restart(): Promise<DaemonRunModeResult> {
+      const previous = pending
+      return remember((previous ?? Promise.resolve(undefined)).then(
+        (value) => { value?.dispose?.(); return createMode(deps) },
+        () => createMode(deps)
+      ))
+    },
+    holdLaunches(): () => void {
+      holds += 1
+      let released = false
+      return () => { if (!released) { released = true; holds -= 1 } }
+    },
     start(payload: AgentStartRequest): Promise<AgentStartResult> {
       // One intent id per logical start, fixed BEFORE the first attempt: the retry path
       // below may run the call on a new connection, and a fresh id there would record a

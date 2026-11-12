@@ -11,6 +11,7 @@ import { projectLocalOps } from './local-ops/project'
 import { mcpLocalOps } from './local-ops/mcp'
 import { billingLocalOps } from './local-ops/billing'
 import { pairingLocalOps } from './local-ops/pairing'
+import { backgroundServiceLocalOps } from './local-ops/background-service'
 
 export type { DaemonLocalEndpointDeps } from './local-ops/deps'
 
@@ -39,6 +40,7 @@ export function daemonLocalEndpoint(endpointDeps: DaemonLocalEndpointDeps): Loca
       ...mcpLocalOps(deps),
       ...billingLocalOps(deps),
       ...pairingLocalOps(deps),
+      ...backgroundServiceLocalOps(deps),
       ...deps.terminal.localOps
     }),
     events: deps.events,

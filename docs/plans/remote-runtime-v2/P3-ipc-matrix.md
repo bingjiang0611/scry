@@ -2,8 +2,8 @@
 
 本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑；改 `scripts/daemon-ipc-routing.json` 后重新生成。
 
-- 生产特权 IPC channel：168 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
-- 留在 main：53，一半 main 一半 daemon（`split`）：6，转发到现有 op：25，需要新增 op：84
+- 生产特权 IPC channel：172 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
+- 留在 main：56，一半 main 一半 daemon（`split`）：7，转发到现有 op：25，需要新增 op：84
 - 新增 op 的请求、响应、授权与调用方范围见 [P3-ipc-ops](P3-ipc-ops.md)；设计正文见 [P3 §13](P3-batch4-design.md)
 - 统一对话（`conversation:*`，共 17 行）见 [P3-ipc-matrix-conversation](P3-ipc-matrix-conversation.md)
 - 工作台行（`desktopWorkbench` 转发的 workspace / sourceControl，与 App 终端 op `terminal`，共 30 行）见 [P3-ipc-matrix-workbench](P3-ipc-matrix-workbench.md)
@@ -123,6 +123,10 @@
 | `desktopRemote:traceDelta` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
 | `desktopRemote:updateSsh` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
 | `desktopRemote:workbench` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `remote:backgroundService:quit` | main | `—` | — | — | 原生二次确认框、向 daemon.lock 登记且身份复核一致的进程发 SIGTERM、app.quit；撤销或停止中 App 无法调用 daemon op |
+| `remote:backgroundService:reconnect` | main | `—` | — | — | §13.2 链路：本机 grant 已被撤销，App 不能再调用 daemon 的任何 op；确认框、按身份停止、删除被拒的本机凭据、重新入网都在 App |
+| `remote:backgroundService:restart` | main | `—` | — | — | 版本不一致时 App 不与 daemon 通话；确认框、按身份停止与启动对应版本的后台服务都在 App |
+| `remote:backgroundService:status` | split | `localBackgroundService:status` | remote | main: 连接结果（就绪、版本不一致、未授权、不可用及原因）、userData 位置与 daemon.lock 登记且身份复核一致的 pid 由 App 自己确定；连接就绪时才向 daemon 询问其余字段，问不到的显示为未知 | 设置页「后台服务」状态 |
 | `remote:desktop:disable` | new-op | `localDesktopHost:disable` | remote | — | 本机宿主的桌面接入：daemon 模式下宿主在 daemon |
 | `remote:desktop:invite` | new-op | `localDesktopHost:invite` | remote | — | 本机宿主的桌面接入：daemon 模式下宿主在 daemon |
 | `remote:desktop:status` | new-op | `localDesktopHost:status` | remote | — | 本机宿主的桌面接入：daemon 模式下宿主在 daemon |

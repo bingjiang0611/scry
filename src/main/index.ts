@@ -35,6 +35,7 @@ import { initializeAppEnvironment, registerAppLifecycle } from './bootstrap/app-
 import { registerAgentRuntimeHandlers } from './bootstrap/agent-runtime-ipc'
 import { appDaemonModeDeps, daemonModeEnabled } from './bootstrap/daemon-run-mode'
 import { createLazyDaemonRunSurface } from './bootstrap/daemon-run-lazy'
+import { registerBackgroundServiceHandlers } from './bootstrap/background-service'
 import { createRunPipeline } from '../host-runtime/create-run-pipeline'
 import { deleteConversationHistory } from './conversation-history'
 import { createWindow as createBootstrapWindow } from './bootstrap/window'
@@ -305,6 +306,7 @@ registerAgentRuntimeHandlers({
   getRemoteRunLedgerId: (runId) => remoteRunLedgerIds.get(runId),
   getRemoteHostService: () => remoteHostService
 })
+registerBackgroundServiceHandlers({ handleTrusted, daemon: daemonRun, getWindow: () => win })
 
 // Shared by the Mac stop button and a paired device stopping a Mac run.
 function requestRunStop(runId: string): boolean {
