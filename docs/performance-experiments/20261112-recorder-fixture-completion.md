@@ -43,7 +43,7 @@ npm run test:unit -- src/cli/managed-tool-hooks.test.ts src/core/turn-recorder/c
 
 最新两文件并行轮仍有3个5秒超时；commit-environment全部通过，无EPERM/ENOENT/AggregateError清理失败。
 
-对应`delivery-after-review.json`，macOS arm64、10逻辑核，UTC 2026-11-12 09:36:18–09:37:13，load 28.91→24.59、highLoad=true。三个用例均位于`src/cli/managed-tool-hooks.test.ts`：
+对应`delivery-after-review.json`，macOS arm64、10逻辑核，Vitest JSON记录UTC开始时间2026-11-12 09:36:20.940（不以wrapper墙钟反推时间戳），load 28.91→24.59、highLoad=true。三个用例均位于`src/cli/managed-tool-hooks.test.ts`：
 
 | 用例 | 实测耗时 | 原时限 |
 |---|---:|---:|
