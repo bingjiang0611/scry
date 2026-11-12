@@ -80,7 +80,7 @@ SCRY_RELEASE_BUILD=1 node scripts/run-electron-builder.mjs
 npm run check:pacman-package
 ```
 
-- pacman 构建/检查需要 `bsdtar`（Ubuntu 包名 `libarchive-tools`，Arch 为 `libarchive`）。`packaged-linux` CI 检查解包 App 与 pacman 元数据，并在 Xvfb + setuid `chrome-sandbox` 下用开发布局的真实 Electron 跑 `daemon-config-smoke` 与 `daemon-mode-smoke`（凭据为 smoke 专用编码）；不包含 GUI/Hyprland、真实密钥环或打包布局 daemon 验收。
+- pacman 构建/检查需要 `bsdtar`（Ubuntu 包名 `libarchive-tools`，Arch 为 `libarchive`）。`packaged-linux` CI 检查解包 App 与 pacman 元数据，并在 Xvfb + setuid `chrome-sandbox` 下用真实 Electron 跑 `daemon-config-smoke` 与 `daemon-mode-smoke`：先开发布局，再用 `--app dist/linux-unpacked/scry` 驱动打包产物，核对 daemon/supervisor 的可执行文件与 app.asar 入口、终端录制和 run 输出 worker、私有 CLI（凭据为 smoke 专用编码）；不包含 GUI/Hyprland 或真实密钥环验收。macOS 打包产物用同一命令加 `--app <Scry.app>/Contents/MacOS/Scry`。
 - 当前 `npm run pack:artifact` / `npm run pack` 会调用整套 `smoke:electron`，其中 `scripts/desktop-remote-host-smoke.mjs` 仍按 macOS 布局取可执行文件；它们不是 Linux 全套可用入口。需要改该 smoke 时适配共享布局并补 Linux 验证，不能静默 skip 或声称整套通过。
 - Linux 显示环境与 Chromium sandbox 可用时，运行 `node scripts/electron-security-smoke.mjs`；无桌面但有 Xvfb 时可用 `xvfb-run -a node scripts/electron-security-smoke.mjs`。不使用 `--no-sandbox` 或默认禁用 GPU；fixture 环境配置不写进产品默认值。
 - Xvfb 下动画可能 pending。布局坐标、视觉动画、原生命中与焦点是不同证据；布局检查不得冒充视觉/交互验收，也不得删除共同布局断言来消除平台失败。

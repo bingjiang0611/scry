@@ -187,7 +187,8 @@ jobs:
           echo "$RESULTS" | jq -e 'length > 0 and all(.[]; .result == "success")' > /dev/null
 
   # Linux 打包门禁：验证产物布局、原生模块、私有 CLI、locale 裁剪与资源 allowlist，
-  # 再在 Xvfb 下用真实 Electron（开发布局、setuid chrome-sandbox，不关 sandbox）跑 daemon 模式 smoke。
+  # 再在 Xvfb 下用真实 Electron（setuid chrome-sandbox，不关 sandbox）跑 daemon 模式 smoke：
+  # 先开发布局，再用 dist/linux-unpacked 的打包可执行文件（B4-S S0-5）。
   # pack:artifact 里的整套 smoke:electron 仍按 macOS 布局取可执行文件，不在这里运行；
   # Xvfb 不是目标桌面，界面、Wayland 与真实密钥环行为在目标 Omarchy 机器上验收。
   packaged-linux:
@@ -221,12 +222,14 @@ jobs:
       - name: Check pacman package metadata
         run: npm run check:pacman-package
       # Ubuntu 24.04 runner 用 AppArmor 限制非特权 user namespace，Chromium 需要 setuid sandbox helper；与 unit job 相同，不用 --no-sandbox。
+      # 开发布局的 Electron 与打包产物各自用可执行文件旁边的 chrome-sandbox。
       - name: Enable the Chromium setuid sandbox helper
         run: |
           electron_bin="$(node -e "process.stdout.write(require('electron'))")"
-          sandbox="$(dirname "${electron_bin}")/chrome-sandbox"
-          sudo chown root:root "${sandbox}"
-          sudo chmod 4755 "${sandbox}"
+          for sandbox in "$(dirname "${electron_bin}")/chrome-sandbox" dist/linux-unpacked/chrome-sandbox; do
+            sudo chown root:root "${sandbox}"
+            sudo chmod 4755 "${sandbox}"
+          done
       - name: Daemon entry configuration smoke
         run: node scripts/daemon-config-smoke.mjs
       # 真实 Electron 以 ELECTRON_RUN_AS_NODE 拉起 supervisor 与 daemon，经本机 mTLS unix socket 跑完
@@ -240,5 +243,18 @@ jobs:
         with:
           name: daemon-mode-smoke-linux
           path: daemon-mode-smoke.log
+          if-no-files-found: ignore
+          retention-days: 3
+      # 同一 smoke 驱动打包产物：另外从进程证据核对 daemon 与 supervisor 运行的是打包可执行文件和
+      # app.asar 内入口、终端录制与 run 输出 worker 在打包布局下写出文件、私有 CLI 位于 resources 内并可运行。
+      - name: Daemon mode smoke against the packaged app
+        id: daemon-smoke-packaged
+        run: xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24' node scripts/daemon-mode-smoke.mjs --app dist/linux-unpacked/scry
+      - name: Keep the packaged daemon smoke log on failure
+        if: ${{ failure() && steps.daemon-smoke-packaged.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-mode-smoke-linux-packaged
+          path: daemon-mode-smoke-packaged.log
           if-no-files-found: ignore
           retention-days: 3
