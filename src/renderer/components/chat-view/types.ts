@@ -7,7 +7,6 @@ import type {
   AgentQuestionResponse,
   AgentRunControlCatalog,
   AgentSteerCapability,
-  AgentSteerEvidence,
   AgentRunControls,
   AgentStopState
 } from '@shared/runtime'
@@ -17,6 +16,7 @@ import type { DraftAttachment, QueuedPrompt } from '../../App'
 import type { WorkspaceFileTarget } from '../../workspace-links'
 import type { SessionHistoryWindow, TraceLiveHealth } from '../../hooks/useAgentSession'
 import type { ComposerDraftStore } from '../../composer-drafts'
+import type { RendererSteerEvidence } from '../../steer'
 
 export interface ChatViewProps {
   turns: Turn[]
@@ -56,7 +56,7 @@ export interface ChatViewProps {
   draftAttachments: DraftAttachment[]
   queuedPrompts: QueuedPrompt[]
   steerCapability?: AgentSteerCapability | null
-  steerEvidenceByMessageId?: ReadonlyMap<string, AgentSteerEvidence & { eventId: string }>
+  steerEvidenceByMessageId?: ReadonlyMap<string, RendererSteerEvidence>
   steerInFlightMessageIds?: ReadonlySet<string>
   onSteerQueuedPrompt?: (messageId: string) => void
   editingQueuedId?: string | null

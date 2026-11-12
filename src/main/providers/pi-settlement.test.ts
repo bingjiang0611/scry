@@ -216,6 +216,41 @@ describe('Pi RPC Provider', () => {
     })
   })
 
+  it('asks for a new session instead of retrying a Qoder account binding failure', async () => {
+    await withFixture(async (profile, cwd) => {
+      const events: TraceEvent[] = []
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const handle = adapter.run({
+        runId: 'run-account-changed', prompt: 'provider-account-changed', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: event => events.push(event)
+      })
+      await expect(handle.promise).rejects.toMatchObject({
+        message: 'Qoder: account_changed_start_new_session',
+        brief: { nextAction: expect.stringContaining('请新建会话') }
+      })
+      expect(events.find(event => event.stage === 'result')).toMatchObject({
+        isError: true, providerStopReason: 'error', text: 'Qoder: account_changed_start_new_session'
+      })
+    })
+  })
+
+  it('keeps transport recovery alongside a Qoder account binding failure', async () => {
+    await withFixture(async (profile, cwd) => {
+      const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
+      const handle = adapter.run({
+        runId: 'run-account-transport', prompt: 'provider-account-changed-transport', cwd, agentProfileId: profile.id,
+        attachments: [], permissionMode: 'full_access', emit: () => undefined
+      })
+      await expect(handle.promise).rejects.toMatchObject({
+        message: 'Qoder: account_changed_start_new_session (WebSocket error)',
+        brief: { nextAction: expect.stringContaining('请新建会话') }
+      })
+      await expect(handle.promise).rejects.toMatchObject({
+        brief: { nextAction: expect.stringContaining('WebSocket 与 SSE') }
+      })
+    })
+  })
+
   it('classifies Qoder 413 and points to the failed-turn recovery branch', async () => {
     await withFixture(async (profile, cwd) => {
       const events: TraceEvent[] = []
