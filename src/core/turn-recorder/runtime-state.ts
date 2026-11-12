@@ -37,6 +37,11 @@ export interface RecorderOpenTurnState {
   closingAt?: string
   /** Credible end of Agent work, set only by a real terminal observation. */
   terminalAt?: string
+  /**
+   * When a Stop that turned out not to be the end was cancelled. Transcript terminal evidence from
+   * before this instant describes the cancelled Stop, so recovery must not re-close the turn on it.
+   */
+  reopenedAt?: string
   terminalAtSource?: 'provider_terminal_event' | 'recorder_observed_terminal'
   /** Verdict pinned when closing was deferred, so background finalize cannot upgrade it. */
   terminalFallbackStatus?: AgentTurnRecord['status']
@@ -60,6 +65,12 @@ export interface RecorderOpenTurnState {
   deferredTerminalEventId?: string
   /** SessionEnd proved that a deferred unidentified terminal belongs to the final open turn. */
   terminalIdentityConfirmedBySessionEnd?: boolean
+  /**
+   * When the Provider session ended while this turn was open. A session end closes the turn on the
+   * evidence it has, even if an earlier terminal already set `endReason`; it does not rewrite that
+   * earlier verdict.
+   */
+  sessionEndedAt?: string
   repositoryDiscovery?: Pick<RepositoryDiscovery, 'maxDepth' | 'depthLimitedDirectories' | 'worktreeDiscovery'>
   captures: Array<{ repository: string; capture: GitTurnDiffCapture }>
   /**

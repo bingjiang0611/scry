@@ -24,7 +24,7 @@ export interface CaptureClaimIdentity {
   providerTurnId?: string
   baselineAt?: string
 }
-import { type StoredLifecycleEvent, observedNow, piTranscriptAnchorOf, promptOf, startFingerprintOf, stringAt, subagentScopedPayload, timestampOf, transcriptPathOf, providerTurnIdOf, TERMINAL_CLOCK_SKEW_MS } from './recorder-contracts.js'
+import { type StoredLifecycleEvent, observedNow, piTranscriptAnchorOf, promptOf, requestSetIdOf, startFingerprintOf, stringAt, subagentScopedPayload, timestampOf, transcriptPathOf, providerTurnIdOf, TERMINAL_CLOCK_SKEW_MS } from './recorder-contracts.js'
 
 export async function nextSessionState(dataRoot: string, root: string, provider: ProviderId, sessionId: string): Promise<SessionState> {
   const cached = await readJson<SessionState>(statePath(root))
@@ -62,7 +62,7 @@ export async function beginOpenTurn(
     ? rawManagedPromptHash
     : undefined
   const providerTurnId = claim?.providerTurnId ?? providerTurnIdOf(payload, provider)
-  const requestSetId = provider === 'qoder' ? stringAt(payload, 'request_set_id', 'requestSetId') : undefined
+  const requestSetId = requestSetIdOf(payload, provider)
   const transcriptPath = transcriptPathOf(payload)
   const transcriptOffset = transcriptPath ? 0 : undefined
   const piTranscriptAnchor = provider === 'pi' ? piTranscriptAnchorOf(payload) : undefined
@@ -179,6 +179,31 @@ export async function beginCaptureTurn(
     ...(transcript?.providerTurnId ? { providerTurnId: transcript.providerTurnId } : {}),
     baselineAt: new Date().toISOString()
   })
+}
+
+/**
+ * A closing turn is not final. A Provider that a background task woke keeps writing into the same
+ * turn, so the Stop that closed it was not the end. Reopening clears the boundary markers and any
+ * terminal diff frozen at that Stop, so the next Stop is the one that ends the turn. The baseline
+ * captured at the turn start stays live: that is what keeps the diff attributable to the turn.
+ */
+export async function reopenClosingTurn(root: string, open: OpenTurnState): Promise<void> {
+  if (open.deferredTerminalEventId) {
+    await rm(join(turnRoot(root, open.generation), 'events', `${open.deferredTerminalEventId}.json`), { force: true })
+  }
+  open.status = 'open'
+  open.reopenedAt = new Date().toISOString()
+  delete open.closingAt
+  delete open.terminalAt
+  delete open.terminalAtSource
+  delete open.terminalFallbackStatus
+  delete open.endReason
+  delete open.deferredTerminalAt
+  delete open.deferredTerminalEventId
+  delete open.terminalDiffs
+  delete open.terminalIdentityConfirmedBySessionEnd
+  delete open.staleTerminalProtection
+  await writeJsonAtomic(openPath(root), open, { sync: false })
 }
 
 /** A timestamp is usable as an end time only inside this turn's own window. */

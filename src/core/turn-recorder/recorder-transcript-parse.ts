@@ -8,7 +8,8 @@ import { creditUsageEvidence } from '../../shared/credit-usage.js'
 import { qoderCreditRequests } from '../../shared/qoder-credit-requests.js'
 import { parseCodexRollout } from './recorder-codex-rollout.js'
 import { qoderSidecarEvents } from './recorder-qoder-sidecars.js'
-import { type CodexRolloutIdentity, type ParsedTranscriptTurn, type TranscriptRead, overlapsTurn } from './recorder-contracts.js'
+import { type CodexRolloutIdentity, type ParsedTranscriptTurn, type TranscriptRead, overlapsTurn, BACKGROUND_WAKE_PROVIDERS } from './recorder-contracts.js'
+import { pendingBackgroundTasks } from './recorder-transcript-background.js'
 import { readTranscriptWindow, transcriptIdentity, type TranscriptSnapshotIdentity } from './recorder-transcript-io.js'
 import { parsePiTranscript } from './recorder-pi-transcript.js'
 
@@ -297,6 +298,9 @@ export async function parseTranscriptSnapshot(args: {
     observed: turns.length > 0,
     ...(identityMatched != null ? { identityMatched } : {}),
     ...(turn?.providerTurnId ? { providerTurnId: turn.providerTurnId } : {}),
+    ...(BACKGROUND_WAKE_PROVIDERS.has(args.provider)
+      ? { pendingBackgroundTasks: pendingBackgroundTasks(snapshot.content) }
+      : {}),
     complete: stable && !snapshot.truncated && qoderSidecarsComplete,
     ...(turn?.userText ? { userText: turn.userText } : {}),
     events,
@@ -311,3 +315,13 @@ export async function parseTranscriptSnapshot(args: {
     }
   }
 }
+
+/**
+ * The turn a forced close can still own after its identity row left the transcript.
+ *
+ * Selection is by the turn's own start time inside the lifetime the recorder observed from hooks -
+ * never "the last turn" and never "whatever the file starts with". A parsed turn ends where the next
+ * real user prompt begins, so content after that prompt is structurally excluded: the window can
+ * only contain rows this turn wrote before the user asked anything else. Returns undefined when no
+ * turn starts inside that lifetime, because borrowing a neighbour would be a false attribution.
+ */

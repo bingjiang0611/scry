@@ -4,12 +4,12 @@ import type { ProviderId } from '../../shared/provider.js'
 import { appendRotatingLog, readJson, writeJsonAtomic } from './io.js'
 import { findRecordById, recordError, safeKey } from './store.js'
 import { recorderInboxEntries, INBOX_MAX_ATTEMPTS, quarantineInboxEntry, readInboxFailure, readInboxJson } from './inbox.js'
-import { recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
+import { recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
 import type { RecorderEnablement } from './config.js'
-import { END_EVENTS, SESSION_END_EVENTS, START_EVENTS, hookArrival, type RecorderHookInput, type RecorderHookResult, type QueuedHook, explicitTimestampOf, providerTurnIdOf, promptOf, stringAt, subagentScopedPayload, terminalStatus, timestampOf, startFingerprintOf, STALE_TERMINAL_PROVIDERS, STOP_HOOK_ACTIVE_PROVIDERS, STALE_TERMINAL_WINDOW_MS } from './recorder-contracts.js'
-import { beginOpenTurn, quarantineOpenTurn, storeLifecycleEvent } from './recorder-turn-state.js'
+import { END_EVENTS, SESSION_END_EVENTS, START_EVENTS, TASK_NOTIFICATION_PROVIDERS, hookArrival, type RecorderHookInput, type RecorderHookResult, type QueuedHook, explicitTimestampOf, providerTurnIdOf, promptOf, stringAt, subagentScopedPayload, terminalStatus, timestampOf, startFingerprintOf, STALE_TERMINAL_PROVIDERS, STOP_HOOK_ACTIVE_PROVIDERS, STALE_TERMINAL_WINDOW_MS } from './recorder-contracts.js'
+import { beginOpenTurn, quarantineOpenTurn, reopenClosingTurn, storeLifecycleEvent } from './recorder-turn-state.js'
 import { finalizeOpenTurn } from './recorder-turn-finalize.js'
-import { isClaudeTaskNotification, isCommittedProviderTurn, isContinuationProviderTurn, isLateQoderTerminalDuplicate, recordClaudeTaskNotification, storeOrphanEvent, continuationProviderTurnIds, consumeCodexInternalTurn } from './recorder-hook-support.js'
+import { isTaskNotificationPrompt, isCommittedProviderTurn, isContinuationProviderTurn, isLateQoderTerminalDuplicate, recordTaskNotificationContinuation, storeOrphanEvent, continuationProviderTurnIds, consumeCodexInternalTurn } from './recorder-hook-support.js'
 import { snapshotSessionNetDiff } from './git.js'
 import { terminalSnapshot } from './git-capture.js'
 
@@ -18,9 +18,9 @@ export async function applyHookLocked(
   input: RecorderHookInput,
   sessionId: string
 ): Promise<RecorderHookResult> {
-  const taskNotification = input.provider === 'claude' &&
+  const taskNotification = TASK_NOTIFICATION_PROVIDERS.has(input.provider) &&
     START_EVENTS.has(input.event) &&
-    isClaudeTaskNotification(input.payload)
+    isTaskNotificationPrompt(input.payload)
   const root = sessionRoot(enablement.dataRoot, input.provider, sessionId)
   let open = await readJson<OpenTurnState>(openPath(root))
   const incomingProviderTurnId = providerTurnIdOf(input.payload, input.provider)
@@ -28,7 +28,7 @@ export async function applyHookLocked(
     await isLateQoderTerminalDuplicate(enablement.dataRoot, root, sessionId, input.payload, open)) {
     return { status: 'duplicate' as const, reason: 'late Qoder terminal matches the last completed assistant' }
   }
-  if (taskNotification) return recordClaudeTaskNotification(enablement, root, open, input, incomingProviderTurnId)
+  if (taskNotification) return recordTaskNotificationContinuation(enablement, root, open, input, incomingProviderTurnId)
   if (START_EVENTS.has(input.event) && subagentScopedPayload(input.payload)) {
     // A sub-agent prompt is not a new user turn: superseding the open parent turn here would end
     // it early and orphan every later parent event.
@@ -177,24 +177,13 @@ export async function applyHookLocked(
     if (sessionEndEvent && open.terminalFallbackStatus === 'interrupted') {
       await storeLifecycleEvent(enablement, open, input.event, input.payload)
       open.terminalIdentityConfirmedBySessionEnd = true
+      open.sessionEndedAt ??= timestampOf(input.payload)
       delete open.deferredTerminalAt
       delete open.deferredTerminalEventId
       await writeJsonAtomic(openPath(root), open)
       return { status: 'pending' as const, reason: 'session end confirmed the deferred terminal; aggregation deferred to recovery' }
     }
-    await rm(join(turnRoot(root, open.generation), 'events', `${open.deferredTerminalEventId}.json`), { force: true })
-    open.status = 'open'
-    delete open.closingAt
-    delete open.terminalAt
-    delete open.terminalAtSource
-    delete open.terminalFallbackStatus
-    delete open.endReason
-    delete open.deferredTerminalAt
-    delete open.deferredTerminalEventId
-    delete open.terminalDiffs
-    delete open.terminalIdentityConfirmedBySessionEnd
-    delete open.staleTerminalProtection
-    await writeJsonAtomic(openPath(root), open, { sync: false })
+    await reopenClosingTurn(root, open)
   }
   const explicitTerminalAt = endEvent && !incomingProviderTurnId ? explicitTimestampOf(input.payload) : undefined
   // Stale-terminal protection weighs one Provider terminal against a possibly newer one. A session
@@ -251,7 +240,13 @@ export async function applyHookLocked(
   // under a tight hook budget. Pin the boundary and verdict durably here, then let recovery do
   // transcript parsing and Git diff work: the end time is already fixed, so deferring cannot
   // stretch it, and a killed hook leaves a closing turn that recovery still finalizes.
-  if (sessionEndEvent) open.terminalFallbackStatus ??= 'interrupted'
+  if (sessionEndEvent) {
+    open.terminalFallbackStatus ??= 'interrupted'
+    // The session is the fact that lets a turn close even when an earlier terminal already claimed
+    // the endReason and its transcript identity never resolved. Recorded separately so the earlier
+    // terminal keeps its own verdict instead of being relabelled as a session end.
+    open.sessionEndedAt ??= timestampOf(input.payload)
+  }
   await writeJsonAtomic(openPath(root), open)
   if (sessionEndEvent) {
     return { status: 'pending' as const, reason: 'session end persisted; turn aggregation deferred to recovery' }

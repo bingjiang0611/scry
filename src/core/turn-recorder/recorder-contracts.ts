@@ -77,6 +77,12 @@ export interface TranscriptRead {
   }
   observed: boolean
   identityMatched?: boolean
+  /**
+   * Background tasks launched inside this turn whose completion notification has not been written
+   * yet. A Provider can extend the same turn after a Stop when one of them reports, so publishing
+   * the turn now would split it into a second record.
+   */
+  pendingBackgroundTasks?: string[]
   providerTurnId?: string
   complete?: boolean
   terminalStatus?: AgentTurnRecord['status']
@@ -304,6 +310,29 @@ export interface NormalizedCodexCall {
   suffix?: string
 }
 
+/**
+ * Providers that deliver a finished background task as a `UserPromptSubmit` which continues the
+ * current turn instead of starting a new one. The native transcript merges that notification into
+ * the same turn, so the turn keeps its original prompt identity. Claude marks it with
+ * `origin.kind`; Qoder CLI 1.1.88 sends the `<task-notification>` prompt text plus a fresh
+ * `request_set_id` (verified on a real Qoder session).
+ */
+export const TASK_NOTIFICATION_PROVIDERS = new Set<ProviderId>(['claude', 'qoder'])
+/**
+ * Providers whose transcript records a background launch as a structured receipt
+ * (`toolUseResult.kind === 'backgrounded'`) and the completion as a `<task-notification>` row.
+ * Only these can prove that a stopped turn is still waiting for a background task.
+ */
+export const BACKGROUND_WAKE_PROVIDERS = new Set<ProviderId>(['qoder'])
+
+/**
+ * How long the recorder keeps a turn from an earlier Stop open while a background task it launched
+ * has not reported. Observed wakes arrive minutes after the Stop, so a plain Stop cannot close the
+ * turn; a task that never reports must not hold it until `OPEN_TURN_EXPIRY_MS`. Past this silence the
+ * turn is closed with the content it already has, marked partial.
+ */
+export const CLOSING_TURN_SILENCE_MS = 60 * 60 * 1_000
+
 export const START_EVENTS = new Set(['UserPromptSubmit', 'chat.message', 'turn.started'])
 export const END_EVENTS = new Set(['Stop', 'session.idle', 'session.stop', 'turn/completed', 'turn.completed'])
 // These Provider Stop contracts expose the same-turn continuation flag; do not infer parity.
@@ -314,6 +343,19 @@ export const STALE_TERMINAL_PROVIDERS = new Set<ProviderId>(['qoder', 'opencode'
 export const STALE_TERMINAL_WINDOW_MS = 30_000
 export const DEFERRED_TERMINAL_GRACE_MS = 180_000
 export const OPEN_TURN_EXPIRY_MS = 24 * 60 * 60 * 1_000
+
+/**
+ * Qoder keeps two identity keys: `request_set_id` on a prompt and `parent_request_set_id` on the
+ * terminal of the turn that prompt started. They share one id space, but they are request-set ids,
+ * not the native prompt id the transcript indexes turns by.
+ */
+export function requestSetIdOf(payload: Record<string, unknown>, provider: ProviderId): string | undefined {
+  return provider === 'qoder' ? stringAt(payload, 'request_set_id', 'requestSetId') : undefined
+}
+
+export function terminalRequestSetIdOf(payload: Record<string, unknown>, provider: ProviderId): string | undefined {
+  return provider === 'qoder' ? stringAt(payload, 'parent_request_set_id', 'parentRequestSetId') : undefined
+}
 
 export interface QueuedHook {
   schemaVersion: 1

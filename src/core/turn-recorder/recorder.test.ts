@@ -7,6 +7,7 @@ import { registerSuite5 } from './recorder-tests/state-machine-5.test'
 import { registerSuite6 } from './recorder-tests/state-machine-6.test'
 import { registerSuite7 } from './recorder-tests/state-machine-7.test'
 import { registerQoderSessionEndSuite } from './recorder-tests/state-machine-qoder-sessionend.test'
+import { registerBackgroundWakeSuite } from './recorder-tests/state-machine-background-wake.test'
 import { registerSuite8 } from './recorder-tests/merge.test'
 import { registerSuite9 } from './recorder-tests/codex-1.test'
 import { registerSuite10 } from './recorder-tests/codex-2.test'
@@ -36,6 +37,7 @@ describe('turn recorder state machine', () => {
   registerSuite6()
   registerSuite7()
   registerQoderSessionEndSuite()
+  registerBackgroundWakeSuite()
 })
 
 registerSuite8()

@@ -13,6 +13,7 @@ import type { RecorderEnablement } from './config.js'
 import { terminalStatus, type RecorderHookResult, resolveModelIdentity } from './recorder-contracts.js'
 import { readStoredEvents, mergeTurnTraceEvents, dedupeTraceEvents } from './recorder-trace-merge.js'
 import { stableTranscript } from './recorder-transcript-cache.js'
+import { degradeUnmatchedIdentity, emptyTranscript, retainedWindowTranscript, unmatchedIdentityReason } from './recorder-transcript-background.js'
 import { degradeEvidenceSections, persistRecorderEventContent, persistTurnDiffContent, resolveTurnEnd, nextSessionState } from './recorder-turn-state.js'
 import { turnChangeHints } from './change-journal.js'
 import { newWorktreeTurnDiffs } from './recorder-worktree-diff.js'
@@ -50,43 +51,30 @@ export async function finalizeOpenTurn(
         open.piTranscriptAnchor,
         open.captureTranscriptEndOffset
       )
-    : {
-        stable: true,
-        observed: false,
-        complete: true,
-        events: [],
-        observable: {
-          tools: false,
-          skills: false,
-          mcps: false,
-          hooks: false,
-          usage: false,
-          files: false,
-          errors: false
-        }
-      }
+    : emptyTranscript(true)
   if (!transcript.stable && !options.allowUnstableTranscript) return { status: 'pending', reason: 'transcript is still changing' }
+  // A Provider that launched background work can wake this same turn after its Stop: the wake folds
+  // into the same native turn and its completion notification removes the task from this list.
+  // Publishing now would truncate the turn and turn the wake into a second record.
+  if (!options.forcedReason && open.endReason === 'provider_terminal' &&
+    (transcript.pendingBackgroundTasks?.length ?? 0) > 0) {
+    return {
+      status: 'pending',
+      reason: `${transcript.pendingBackgroundTasks!.length} background task(s) launched by this turn have not reported; the turn may still continue`
+    }
+  }
   let identityUnmatched = false
-  const unmatchedReason = options.forcedReason
-    ? `${options.forcedReason}; the transcript no longer contains this turn`
-    : open.endReason === 'session_end'
-      ? 'provider session ended without a matching transcript; only lifecycle-hook evidence remains'
-      : open.terminalIdentityConfirmedBySessionEnd
-        ? 'provider session ended after the terminal hook without a matching transcript; only lifecycle-hook evidence remains'
-        : undefined
+  const unmatchedReason = unmatchedIdentityReason(open, options.forcedReason)
+  let retainedWindow = false
   if (transcript.identityMatched === false) {
-    // A prompt cancelled before model execution may never reach the native transcript. A real
-    // session end can close that turn on lifecycle evidence alone; discard every unmatched byte.
-    // Ordinary turn ends still wait for identity, unless the existing closing-expiry rule applies.
+    // A prompt cancelled before model execution may never reach the transcript. Waiting for identity
+    // is still right for an ordinary terminal; once the recorder gives up, keep the rows this turn
+    // already wrote instead of publishing hooks only.
     if (!unmatchedReason) return { status: 'pending', reason: 'target turn is not present in transcript snapshot' }
     identityUnmatched = true
-    transcript = {
-      stable: true,
-      observed: false,
-      complete: false,
-      events: [],
-      observable: { tools: false, skills: false, mcps: false, hooks: false, usage: false, files: false, errors: false }
-    }
+    const retained = await retainedWindowTranscript(open, runId, enablement.workspaceRoot).catch(() => undefined)
+    retainedWindow = !!retained
+    transcript = retained ?? emptyTranscript(false)
   }
   const effectiveProviderTurnId = open.providerTurnId ?? transcript.providerTurnId
   const contentPolicy = open.toolContentPolicy ?? enablement.config.capture
@@ -202,7 +190,9 @@ export async function finalizeOpenTurn(
   // the transcript window itself parsed cleanly.
   if (options.forcedReason) {
     const reason = identityUnmatched
-      ? `${options.forcedReason}; the transcript no longer contains this turn, so only lifecycle-hook evidence remains`
+      ? retainedWindow
+        ? `${options.forcedReason}; this turn's transcript identity is gone, so its content is bounded by the recorded turn start and the next user prompt`
+        : `${options.forcedReason}; the transcript no longer contains this turn, so only lifecycle-hook evidence remains`
       : options.forcedReason
     degradeEvidenceSections(evidence, reason)
     evidence.diff = unavailable(
@@ -210,11 +200,11 @@ export async function finalizeOpenTurn(
     )
   }
   if (identityUnmatched) {
-    evidence.assistant = unavailable(unmatchedReason!)
-    evidence.modelSegments = unavailable(unmatchedReason!)
+    const reason = unmatchedReason!
+    degradeUnmatchedIdentity(evidence, reason, retainedWindow)
     if (enablement.config.capture.diff && open.captures.some(({ capture }) => capture.status === 'ready')) {
       evidence.diff = unavailable(
-        `${unmatchedReason!}; the Git baseline may include work after the unmatched turn boundary`
+        `${reason}; the Git baseline may include work after the unmatched turn boundary`
       )
     }
   }
