@@ -42,6 +42,6 @@ describe('native interleaved measurement', () => {
     expect(control.if).toBe("failure() && steps.native_measurements.outcome == 'success' && steps.native_comparison.outcome == 'failure'")
     expect(control.run).toContain('combine ../native-results/control.json "${control_shards[@]}"')
     expect(source('Compare native evidence and budgets').run)
-      .toBe('node candidate/scripts/performance-native.mjs compare native-results/baseline.json native-results/candidate.json native-results/report.md')
+      .toBe('node candidate/scripts/performance-native-run.mjs compare native-results/baseline.json native-results/candidate.json native-results/report.md')
   })
 })
