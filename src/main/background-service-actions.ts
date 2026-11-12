@@ -9,7 +9,7 @@ import { reasonMessage } from './background-service-copy'
 //
 // Order is the rule: identify the holder (daemon.lock + identity) → ask when runs may be
 // interrupted → re-verify and signal once (background-service-stop.ts) → only then
-// launch or enroll. While a stop is in flight the App launches no daemon of its own
+// launch or enroll. Reconnect also covers a credential the App lost (A6). While a stop is in flight the App launches no daemon of its own
 // (holdLaunches), so a retried read cannot bring the old one back mid-stop.
 
 export interface BackgroundServiceActionDeps {
@@ -27,6 +27,11 @@ export interface BackgroundServiceActionDeps {
   reconnect(): Promise<BackgroundServiceConnection>
   /** Delete the App's stored local credential, which the daemon refused (revoked). */
   discardLocalCredential(): Promise<void>
+  /**
+   * Ask the next daemon start for an enrollment secret although a local grant is live
+   * (daemon/local-enrollment-request.ts). Written only here: confirmed, daemon stopped.
+   */
+  requestLocalEnrollment(): Promise<void>
   /** What the stopped daemon left behind, before the App quits. */
   reportLeftovers(leftovers: string[]): Promise<void>
   quitApp(): void
@@ -104,6 +109,11 @@ export async function reconnectBackgroundService(deps: BackgroundServiceActionDe
     // The daemon refused this credential; keeping it would make the next connect present
     // it again instead of enrolling with the new secret the restarted daemon writes.
     await deps.discardLocalCredential()
+    // A revoked grant leaves no live local grant, so the restarted daemon writes a secret
+    // anyway. A grant the App lost (credential deleted) or another instance holds is still
+    // live, and without this request the restarted daemon would write none (A6). The new
+    // enrollment then revokes that grant, as the confirmation said.
+    await deps.requestLocalEnrollment()
   } finally {
     release()
   }

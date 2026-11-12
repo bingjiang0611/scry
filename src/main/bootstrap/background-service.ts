@@ -3,6 +3,7 @@ import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { BackgroundServiceActionResult, BackgroundServiceConnection } from '../../shared/background-service'
 import { daemonClientPaths } from '../daemon-client'
+import { requestLocalEnrollment } from '../../daemon/local-enrollment-request'
 import { callDaemonChannel, installDaemonChannelGuard } from '../daemon-channel-gate'
 import { prepareBackgroundServiceStop, stopBackgroundService, type BackgroundServiceStopDeps } from '../background-service-stop'
 import { connectionFromMode, parseSelfReport, readBackgroundServiceStatus } from '../background-service-status'
@@ -69,6 +70,7 @@ export function registerBackgroundServiceHandlers(input: {
     reconnect: async () => daemon ? connectionFromMode(await daemon.restart(), appVersion) : DISABLED,
     // The credential the daemon refused; its 0600 file is the App's own (daemon-client.ts).
     discardLocalCredential: () => rm(daemonClientPaths(stopDeps.paths.stateDirectory, userDataDir).statePath, { force: true }),
+    requestLocalEnrollment: () => requestLocalEnrollment(stopDeps.paths.stateDirectory),
     reportLeftovers: async (leftovers) => { await show(leftoverNotice(leftovers)) },
     // After the IPC reply is sent; before-quit runs the usual bounded cleanup.
     quitApp: () => { setImmediate(() => app.quit()) }

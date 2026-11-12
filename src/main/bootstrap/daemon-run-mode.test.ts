@@ -87,4 +87,44 @@ describe('daemon run mode', () => {
     // The daemon already answered; launching another one would only be refused again.
     expect(launch).not.toHaveBeenCalled()
   })
+
+  it('offers reconnect instead of launching when a live daemon has no secret for an App without a grant (A6)', async () => {
+    vi.stubEnv('SCRY_HOST_DAEMON', '1')
+    // The App lost daemon-client.json; the daemon that is up answers its enrollment socket
+    // but has no secret, because the grant it issued to that credential is still live.
+    // Launching cannot change that: the second daemon finds the lock held and exits.
+    const launch = vi.fn(async () => ({ status: 'started' as const }))
+    const probe = vi.fn(async () => { throw new DaemonClientError('daemon_enrollment_unavailable') })
+    const result = await createDaemonRunMode({ ...base, credentialCipher: cipher, launch, probe })
+    expect(result).toEqual({ status: 'device-not-authorized', reason: 'daemon_enrollment_unavailable' })
+    expect(launch).not.toHaveBeenCalled()
+    expect(probe).toHaveBeenCalledTimes(1)
+  })
+
+  it('names the same refusal when it first appears while waiting for a daemon it launched', async () => {
+    vi.stubEnv('SCRY_HOST_DAEMON', '1')
+    let probes = 0
+    const launch = vi.fn(async () => ({ status: 'started' as const }))
+    // Not answering at first (absence), then up without a secret: the wait stops there
+    // instead of running out as daemon_ready_timeout.
+    const probe = vi.fn(async () => {
+      probes += 1
+      if (probes === 1) return undefined
+      throw new DaemonClientError('daemon_enrollment_unavailable')
+    })
+    const started = Date.now()
+    const result = await createDaemonRunMode({ ...base, credentialCipher: cipher, launch, probe })
+    expect(result).toEqual({ status: 'device-not-authorized', reason: 'daemon_enrollment_unavailable' })
+    expect(launch).toHaveBeenCalledTimes(1)
+    expect(Date.now() - started).toBeLessThan(5_000)
+  })
+
+  it('still launches when nothing answers at all (control)', async () => {
+    vi.stubEnv('SCRY_HOST_DAEMON', '1')
+    const launch = vi.fn(async () => ({ status: 'failed' as const, reason: 'daemon_binary_missing' }))
+    const probe = vi.fn(async () => { throw new DaemonClientError('daemon_not_running') })
+    const result = await createDaemonRunMode({ ...base, credentialCipher: cipher, launch, probe })
+    expect(result).toEqual({ status: 'unavailable', reason: 'daemon_binary_missing' })
+    expect(launch).toHaveBeenCalledTimes(1)
+  })
 })

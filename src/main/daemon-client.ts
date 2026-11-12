@@ -249,12 +249,20 @@ export class DaemonClient {
   }
 
   async #enroll(): Promise<StoredLocalGrant> {
-    const secret = this.#readSecret()
-    const key = await (this.#options.generateKey ?? generateDesktopDeviceIdentity)()
+    // The socket first (A6). The daemon decides on its secret before it opens enroll.sock,
+    // so a daemon that answers here and left no secret is up with a live local grant held by
+    // another credential: daemon_enrollment_unavailable, a state a launch cannot change.
+    // Nothing answering is daemon_not_running, which the supervisor answers by launching.
     let socket: LocalSocket
     try {
       socket = await (this.#options.connectEnroll ?? ((path) => oneShot(path)))(this.#options.paths.enrollSocketPath)
     } catch { throw new DaemonClientError('daemon_not_running') }
+    let secret: string
+    let key: { keyPEM: string; csrPEM: string; publicKeySHA256: string }
+    try {
+      secret = this.#readSecret()
+      key = await (this.#options.generateKey ?? generateDesktopDeviceIdentity)()
+    } catch (error) { socket.close(); throw error }
     let reply: { version?: unknown; certificatePEM?: unknown; caCertificatePEM?: unknown; deviceId?: unknown; daemonVersion?: unknown; daemonBuild?: unknown; error?: unknown }
     try {
       const line = await socket.exchange(`${JSON.stringify({ version: 1, secret, csrPEM: key.csrPEM, deviceLabel: `Scry App ${this.#options.appVersion}` })}\n`, ENROLL_TIMEOUT_MS)
@@ -282,8 +290,8 @@ export class DaemonClient {
   #readSecret(): string {
     let raw: string
     try { raw = readFileSync(this.#options.paths.secretPath, 'utf8') } catch {
-      // No secret means no pending enrollment: the daemon is starting, has a live
-      // local grant, or was revoked. All three need the user, not a retry loop.
+      // No secret while enroll.sock answers means no pending enrollment: a local grant is
+      // live (another credential holds it) or was revoked. Both need the user, not a retry.
       throw new DaemonClientError('daemon_enrollment_unavailable')
     }
     const parsed = JSON.parse(raw) as { version?: unknown; secret?: unknown }

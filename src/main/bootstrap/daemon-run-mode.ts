@@ -76,6 +76,11 @@ export interface DaemonRunModeDeps {
   runTraces?: NonNullable<DaemonRunRuntimeDeps['runTraces']> & Pick<RunTraceRouter, 'attachRuns' | 'publishStopState'>
 }
 
+// Answers from the daemon that a launch or a retry cannot change.
+const REFUSALS: ReadonlySet<string> = new Set([
+  'daemon_version_mismatch', 'daemon_device_not_authorized', 'daemon_local_grant_corrupt', 'daemon_enrollment_unavailable'
+])
+
 export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<DaemonRunModeResult> {
   if (!daemonModeEnabled()) return { status: 'disabled' }
   const mismatch = (running: string, runningBuild: string | undefined): DaemonRunModeResult => ({
@@ -103,36 +108,43 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
     client.hasGrant ? await client.daemonInfo() : await client.connect()
   // A refusal is an answer, not "not there yet". The supervisor treats a thrown probe
   // as absent and would launch a daemon that refuses again, so the refusal is
-  // remembered here and short-circuits before any launch.
+  // remembered here and short-circuits before any launch, or ends the wait for one.
   let refused: DaemonClientError | undefined
   const probe: DaemonProbe = async () => {
     try {
       return deps.probe ? await deps.probe() : await connect()
     } catch (error) {
-      if (error instanceof DaemonClientError &&
-          (error.reason === 'daemon_version_mismatch' || error.reason === 'daemon_device_not_authorized' || error.reason === 'daemon_local_grant_corrupt')) {
-        refused ??= error
-      }
+      if (error instanceof DaemonClientError && REFUSALS.has(error.reason)) refused ??= error
       return undefined
     }
   }
-
-  await probe()
-  if (refused) {
+  const refusal = (error: DaemonClientError): DaemonRunModeResult => {
     client.close()
-    if (refused.reason === 'daemon_version_mismatch') {
-      // Before the first grant the enrollment reply is the only place the daemon says
-      // which version it is; without it the version stays unknown, never guessed.
-      return mismatch(refused.running ?? 'unknown', refused.runningBuild)
+    // Before the first grant the enrollment reply is the only place the daemon says
+    // which version it is; without it the version stays unknown, never guessed.
+    if (error.reason === 'daemon_version_mismatch') return mismatch(error.running ?? 'unknown', error.runningBuild)
+    // A6: a daemon that answers its enrollment socket with no secret for an App without a
+    // grant holds a live local grant for another credential (this App's lost one, or
+    // another instance's). For the user that is a refused local connection: the same
+    // reconnect state, and only the confirmed 「重新连接本机后台服务」 changes it. Launching
+    // cannot: the new daemon finds daemon.lock held and exits.
+    if (error.reason === 'daemon_device_not_authorized' || error.reason === 'daemon_enrollment_unavailable') {
+      return { status: 'device-not-authorized', reason: error.reason }
     }
-    return refused.reason === 'daemon_device_not_authorized'
-      ? { status: 'device-not-authorized', reason: refused.reason }
-      : { status: 'unavailable', reason: refused.reason }
+    return { status: 'unavailable', reason: error.reason }
   }
 
+  await probe()
+  if (refused) return refusal(refused)
+
   const launch: DaemonLaunch = deps.launch ?? (async () => ({ status: 'failed' as const, reason: 'daemon_launch_unavailable' }))
-  const supervision = { probe, launch, appVersion: deps.appVersion, ...(deps.appBuild === undefined ? {} : { appBuild: deps.appBuild }), launchFailure: deps.launchFailure }
+  const supervision = {
+    probe, launch, appVersion: deps.appVersion, ...(deps.appBuild === undefined ? {} : { appBuild: deps.appBuild }),
+    // Polled while waiting for a launched daemon: a refusal ends the wait by name.
+    launchFailure: async (): Promise<string | undefined> => refused?.reason ?? await deps.launchFailure?.()
+  }
   const supervised = await ensureDaemon(supervision)
+  if (refused) return refusal(refused)
   if (supervised.status === 'version-mismatch') {
     return { ...mismatch(supervised.running, supervised.runningBuild), dispose: () => client.close() }
   }

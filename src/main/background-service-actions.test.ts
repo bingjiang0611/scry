@@ -37,6 +37,7 @@ function harness(script: Script = {}) {
     holdLaunches: () => { holds += 1; steps.push('hold'); return () => { holds -= 1; steps.push('release') } },
     reconnect: async () => { steps.push('reconnect'); return script.after ?? { state: 'ready' } },
     discardLocalCredential: async () => { steps.push('discard') },
+    requestLocalEnrollment: async () => { steps.push('request') },
     reportLeftovers: async (left) => { steps.push(`leftovers:${left.join(',')}`) },
     quitApp: () => { steps.push('quit') }
   }
@@ -134,16 +135,25 @@ describe('quit Scry and background service', () => {
 })
 
 describe('reconnect after revocation', () => {
-  it('runs the §13.2 chain only after a second confirmation: verify, stop, drop the refused credential, enroll', async () => {
+  it('runs the §13.2 chain only after a second confirmation: verify, stop, drop the refused credential, ask for a secret, enroll', async () => {
     const { deps, steps, holds } = harness({ connection: { state: 'device-not-authorized' } })
     await expect(reconnectBackgroundService(deps)).resolves.toEqual({ status: 'done' })
-    expect(steps).toEqual(['connection', 'prepare', 'confirm:reconnect:null', 'hold', 'stop:4242:held=1', 'discard', 'release', 'reconnect'])
+    // The enrollment request is written while the daemon is stopped and launches are held,
+    // so the daemon that reads it is the one this reconnect starts (A6).
+    expect(steps).toEqual(['connection', 'prepare', 'confirm:reconnect:null', 'hold', 'stop:4242:held=1', 'discard', 'request', 'release', 'reconnect'])
     expect(holds()).toBe(0)
+  })
+
+  it('asks for a secret also when no daemon was running to stop', async () => {
+    const { deps, steps } = harness({ connection: { state: 'device-not-authorized' }, prepared: { status: 'not-running' } })
+    await expect(reconnectBackgroundService(deps)).resolves.toEqual({ status: 'done' })
+    expect(steps).toEqual(['connection', 'prepare', 'confirm:reconnect:null', 'hold', 'discard', 'request', 'release', 'reconnect'])
   })
 
   it('does nothing without consent and keeps the stored credential', async () => {
     const { deps, steps } = harness({ connection: { state: 'device-not-authorized' }, answer: false })
     await expect(reconnectBackgroundService(deps)).resolves.toEqual({ status: 'cancelled' })
+    // Nothing was stopped, discarded or requested.
     expect(steps).toEqual(['connection', 'prepare', 'confirm:reconnect:null'])
   })
 
@@ -157,6 +167,7 @@ describe('reconnect after revocation', () => {
     const { deps, steps, holds } = harness({ connection: { state: 'device-not-authorized' }, stopped: { status: 'refused', reason: 'identity-changed' } })
     await expect(reconnectBackgroundService(deps)).resolves.toMatchObject({ status: 'failed', reason: 'identity-changed' })
     expect(steps).not.toContain('discard')
+    expect(steps).not.toContain('request')
     expect(steps).not.toContain('reconnect')
     expect(holds()).toBe(0)
   })

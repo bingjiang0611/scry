@@ -4,6 +4,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, write
 import { timingSafeEqual, randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import type { BuildIdentity } from '../shared/build-identity'
+import { takeLocalEnrollmentRequest } from './local-enrollment-request'
 
 // Bootstrapping the App's own device grant. The App has no certificate yet, so it
 // cannot use inner mTLS; enrollment runs over a second unix socket in the same 0700
@@ -24,7 +25,10 @@ const MAX_REQUEST_BYTES = 20_480
 
 export interface LocalEnrollmentStore {
   readonly secretPath: string
-  /** Create a secret when no local grant is live, otherwise delete any stale one. */
+  /**
+   * Create a secret when no local grant is live, otherwise delete any stale one. The one
+   * exception is a request left by the App's confirmed reconnect (local-enrollment-request.ts).
+   */
   ensure(hasValidLocalGrant: boolean): void
   /** True exactly once per secret; deletes the file. */
   consume(secret: unknown): boolean
@@ -65,7 +69,8 @@ export function openLocalEnrollmentStore(directory: string, options: { clock?: (
   return {
     secretPath,
     ensure(hasValidLocalGrant) {
-      if (hasValidLocalGrant) { rmSync(secretPath, { force: true }); return }
+      const requested = takeLocalEnrollmentRequest(directory, (options.clock ?? Date.now)())
+      if (hasValidLocalGrant && !requested) { rmSync(secretPath, { force: true }); return }
       write()
     },
     consume(secret) {

@@ -72,7 +72,7 @@ const REASONS: Readonly<Record<string, string>> = {
   'stop-timeout': `已向后台服务发送一次停止信号，但它在 ${Math.round(BACKGROUND_SERVICE_STOP_TIMEOUT_MS / 1000)} 秒内没有退出。Scry 没有再次发送信号，也没有强制结束；请稍后刷新查看，或手动检查该进程。`,
   daemon_device_authorized: '本机连接没有被撤销，不需要重新连接。',
   daemon_version_mismatch: '重新启动后连接到的后台服务版本仍与本 App 不一致（可能有另一个监护进程又拉起了旧版本）。',
-  daemon_device_not_authorized: '后台服务拒绝了本 App 的连接（本机连接已被撤销或已在另一实例入网）。',
+  daemon_device_not_authorized: '后台服务拒绝了本 App 的连接（本机连接已被撤销、已在另一实例入网，或本 App 保存的连接凭据已丢失）。',
   daemon_stopping: '后台服务正在停止，暂不启动新的后台服务。',
   daemon_ready_timeout: '后台服务在限定时间内没有就绪。',
   action_in_progress: '另一个后台服务操作正在进行，请等它结束。'

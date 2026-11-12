@@ -64,7 +64,7 @@ export function projectBackgroundService(
     state = '本机连接已被撤销'
     notice = {
       tone: 'bad',
-      text: '后台服务拒绝了本 App 的连接：本机连接已被撤销，或已在另一个 Scry 实例入网。Scry 不会自动重新连接；需要时点「重新连接本机后台服务」。'
+      text: '后台服务拒绝了本 App 的连接：本机连接已被撤销、已在另一个 Scry 实例入网，或本 App 保存的连接凭据已丢失。Scry 不会自动重新连接；需要时点「重新连接本机后台服务」。'
     }
   } else if (isDaemonCredentialUnavailable(connection.reason)) {
     // Restarting the daemon does not give the App a keyring, so it is not offered as the fix.

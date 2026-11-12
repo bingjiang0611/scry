@@ -9,7 +9,8 @@ export type BackgroundServiceConnection =
   // refused before saying which version it is. Both are labels: a version, or a version
   // with its build id when the versions are equal (shared/build-identity.ts).
   | { state: 'version-mismatch'; running: string | null; expected: string }
-  // The daemon refused this App's local grant (revoked, or enrolled by another instance).
+  // The daemon refused this App's local grant (revoked, or enrolled by another instance),
+  // or has no secret for an App that lost its stored grant while the daemon's is live (A6).
   | { state: 'device-not-authorized' }
   | { state: 'unavailable'; reason: string }
 

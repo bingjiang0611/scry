@@ -30,11 +30,13 @@ export interface TestDaemon {
 const ENV = { SCRY_REMOTE_RELAY_ENABLED: '0', SCRY_ELECTRON_SMOKE_PROVIDER: '1', ELECTRON_ENABLE_LOGGING: '1' }
 const DEBUG_PORT = '--remote-debugging-port=0'
 
-export async function startTestDaemon(options: Pick<DaemonHostProcessOptions, 'terminal'> = {}): Promise<TestDaemon> {
-  const root = tempDir()
+/** `root`: start again on the userData a disposed test daemon left, as a restart would. */
+export async function startTestDaemon(options: Pick<DaemonHostProcessOptions, 'terminal'> & { root?: string } = {}): Promise<TestDaemon> {
+  const { root: previous, ...hostOptions } = options
+  const root = previous ?? tempDir()
   const userDataDir = join(root, 'userData')
   mkdirSync(join(userDataDir, 'remote', 'ledger'), { recursive: true, mode: 0o700 })
-  mkdirSync(join(root, 'workspace'), { mode: 0o700 })
+  mkdirSync(join(root, 'workspace'), { recursive: true, mode: 0o700 })
   const workspace = realpathSync(join(root, 'workspace'))
   createRecentFoldersStore(userDataDir).push(workspace)
   const saved = Object.fromEntries(Object.keys(ENV).map((key) => [key, process.env[key]]))
@@ -59,7 +61,7 @@ export async function startTestDaemon(options: Pick<DaemonHostProcessOptions, 't
       isPackaged: false,
       createOutputStore: () => new MemoryOutputStore(),
       log: () => undefined,
-      ...options
+      ...hostOptions
     })
   } catch (error) {
     restore()

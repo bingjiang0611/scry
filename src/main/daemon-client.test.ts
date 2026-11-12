@@ -224,7 +224,27 @@ describe('daemon client admission (L2: probe, enroll, version)', () => {
   it('reports a daemon that is not running instead of inventing a grant', async () => {
     const env = await harness()
     const offline = client(env, { paths: daemonClientPaths(join(env.root, 'absent'), env.userDataDir) })
-    await expect(offline.connect()).rejects.toMatchObject({ reason: 'daemon_enrollment_unavailable' })
+    // Nothing answers the enrollment socket: that is absence, which the supervisor answers
+    // by launching. It used to read as daemon_enrollment_unavailable, the same name as a
+    // live daemon that has no secret for us, so the two could not be told apart (A6).
+    await expect(offline.connect()).rejects.toMatchObject({ reason: 'daemon_not_running' })
+  })
+
+  it('tells a live daemon whose grant another credential holds from one that is not there (A6)', async () => {
+    const env = await harness()
+    const paths = daemonClientPaths(env.daemonStateDirectory, env.userDataDir)
+    const first = client(env)
+    await first.connect()
+    first.close()
+    // The App lost its stored credential; the daemon still holds the grant issued for it
+    // and, by design, writes no new secret while that grant is live.
+    rmSync(paths.statePath)
+    const lost = client(env)
+    expect(lost.hasGrant).toBe(false)
+    await expect(lost.connect()).rejects.toMatchObject({ reason: 'daemon_enrollment_unavailable' })
+    // Control: with the enrollment socket gone the same client reports absence instead.
+    const gone = client(env, { connectEnroll: async () => { throw new Error('ECONNREFUSED') } })
+    await expect(gone.connect()).rejects.toMatchObject({ reason: 'daemon_not_running' })
   })
 
   it('fails closed on a corrupted stored grant rather than overwriting it', async () => {
