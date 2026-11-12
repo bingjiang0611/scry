@@ -94,4 +94,10 @@ export interface ConversationServiceDeps {
    */
   loadTurns?: (conversation: Conversation, turns: readonly Conversation['turns'][number][]) => Promise<ReadonlyMap<string, LoadedSessionTurn>>
   sideChatSource?: SideChatSourceDeps
+  /**
+   * A send's turn left both the pending ledger and the active set. Called after both,
+   * so a window that re-reads on it sees one settled state, never the stale page it read
+   * mid-run. Observation only: a failing notice never changes the recorded outcome.
+   */
+  onTurnSettled?: (conversationId: string) => void
 }

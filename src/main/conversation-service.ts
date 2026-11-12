@@ -38,6 +38,14 @@ export class ConversationService {
 
   constructor(private readonly deps: ConversationServiceDeps) {}
 
+  /** The turn's record settled first, then its run left the active set; only now say so. */
+  private settled(conversationId: string, runId: string): void {
+    this.active.delete(runId)
+    try { this.deps.onTurnSettled?.(conversationId) } catch (error) {
+      console.warn('[scry] conversation settle notice failed:', conversationId, error)
+    }
+  }
+
   private async target(cwd: string, request: ConversationTargetRequest): Promise<ConversationTarget> {
     const continuationKey = await this.deps.resolveContinuationKey({
       providerId: request.providerId,
@@ -335,7 +343,7 @@ export class ConversationService {
               console.error('[scry] failed to record unknown managed outcome:', settlementError)
             }
             throw error
-          } finally { this.active.delete(runId); await reader?.close() }
+          } finally { this.settled(request.conversationId, runId); await reader?.close() }
         }
       }})
       if (started.runId !== runId) throw new Error('统一对话 runner 返回了不同的 runId')
@@ -349,7 +357,7 @@ export class ConversationService {
             { contextHash: context?.contentHash ?? null, status: 'not_sent', reason: String((error as Error).message ?? error) }
         })
       } finally {
-        this.active.delete(runId)
+        this.settled(request.conversationId, runId)
         await reader?.close()
       }
       throw error
