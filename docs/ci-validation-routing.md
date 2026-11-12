@@ -4,7 +4,7 @@
 
 `validation-changes.yml` 用真实 Git diff（包括删除与重命名两端）输出 `required`、`desktop`。不在工作流触发器上加 path filter，避免必需的 `Check` 永久 pending。未知路径走完整验证，无法读取 diff 则失败。
 
-| 改动范围 | CI 必跑 | 桌面产物 / macOS UI |
+| PR / 手动运行的改动范围 | CI 必跑 | 桌面产物 / macOS UI |
 | --- | --- | --- |
 | 仅 `**/README.md`、`docs/**/*.md` | 路径检测、聚合 Check | 不触发 |
 | 仅 `src/core/turn-recorder/**`、`src/cli/**`、`packages/turn-recorder-cli/**`，可混合上述文档 | node 检查、全部 unit/contract/coverage 分片及合并、CLI Node 20/22/24 回归、clean tarball 打包冒烟 | 不触发 |
@@ -14,6 +14,16 @@
 共享合同（如 `src/shared/turn-record.ts`）、依赖/锁文件、构建配置、CI 与 UI 脚本不列入 recorder 白名单。白名单只允许 recorder 自有目录；若以后移出共享运行代码，先重新审查依赖边界再改规则。没有删除测试或缩小 unit/coverage 范围。`check:cli-runtime` 保留 recorder 单测、CLI 合同、CLI build 和 clean tarball 安装/运行冒烟。Performance、Remote G0 继续沿用原有 `required` 规则，本次不放宽其门禁。
 
 聚合 `Check` 根据两个输出逐项核对 success/skipped；需要的检查跳过、取消、失败、缺失或出现未知输出均不通过。
+
+## Recorder-only 保留桌面消费者单测
+
+“全部 unit/coverage”不是 recorder 目录子集。`unit` job 只依赖 `required=true`，不依赖 `desktop`；四个分片统一执行 `npm run test:coverage`（`vitest run --coverage`），只按文件分片，没有 recorder 路径过滤。`src/main` 和 `src/renderer` 的单测与覆盖率都保留，包括 managed-turn、conversation-history、transcript-archive、db、git-diff-history 等消费者。`vitest.config.ts` 的 coverage include 为 `src/**/*.{ts,tsx}`；排除的测试文件、声明和 fixture/helper 不是桌面消费者业务源码。它不等于真实桌面 UI 验证，后者仍由桌面矩阵承担。
+
+## 合并 main 后的完整矩阵兜底
+
+CI 已监听 `push.branches: [main]`。任何可执行改动推入 main（包括仅 recorder 自有路径），路径检测都会强制 `desktop=true`，立即运行完整矩阵：全部 unit/coverage、CLI、桌面 build、macOS 三个 UI/打包分片、Linux App/pacman 检查。Performance 与 Remote G0 仍按原有 `required` 门禁运行。这样 recorder 对桌面消费者的影响不必等到下一次桌面路径 PR 或夜间任务才接受 UI 检查。
+
+仅文档的 main push 仍跳过验证；普通 recorder-only PR 仍走轻量通道；默认手动运行仍为完整验证。主分支完整矩阵由 merge 后的真实 push 触发，不使用 `recorder_base`，不因 PR 路径分类而省略桌面检查。触发不代表执行一定成功或按时完成；排队、平台/API 故障仍需维护者处理失败与延迟。
 
 ## 基础设施分类与一次重试
 
