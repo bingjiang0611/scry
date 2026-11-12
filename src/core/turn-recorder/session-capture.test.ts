@@ -281,3 +281,37 @@ it('routes delivery by the payload session, and an unclaimed session in the same
   expect([...new Set(records.map((record) => record.sessionId))]).toEqual(['sess-2'])
   expect(records.every((record) => record.capture?.captureId === 'capture-2')).toBe(true)
 })
+
+it('a workspace that already ran scry init becomes opt-in when a session claims it', async () => {
+  const root = await workspace()
+  const transcriptPath = await transcript(root, [CURRENT_TURN])
+  // Exactly what `scry init` writes today: no `capture.sessions`, and other keys the user may rely on.
+  await writeFile(join(root, 'scry.config.json'), JSON.stringify({
+    schemaVersion: 1,
+    enabled: true,
+    workspaceId: 'already-initialised',
+    dataDir: '.scry',
+    repositories: { mode: 'discover-nested-git', maxDepth: 2 },
+    storage: { maxBytes: 536870912 },
+    capture: { prompt: true, assistant: true, toolOutput: 'full', diff: true, hooks: true }
+  }, null, 2))
+
+  await claim(root, transcriptPath)
+  const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8')) as {
+    workspaceId: string
+    storage?: { maxBytes?: number }
+    capture: { sessions?: string }
+  }
+  expect(config.capture.sessions).toBe('opt-in')
+  expect(config.workspaceId).toBe('already-initialised')
+  expect(config.storage?.maxBytes).toBe(536870912)
+
+  // The ordinary-hook gate now applies to this workspace: an unclaimed session records nothing.
+  const ordinary = await handleRecorderHook({
+    workspace: root,
+    event: 'UserPromptSubmit',
+    payload: { session_id: 'sess-unclaimed', prompt: 'no claim here', transcript_path: transcriptPath, timestamp: '2026-07-19T12:00:09.000Z' }
+  })
+  expect(ordinary.status).toBe('disabled')
+  expect(await listRecords(join(root, '.scry'))).toHaveLength(0)
+})

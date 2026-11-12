@@ -28,6 +28,16 @@ export async function canonicalDataRoot(workspaceRoot: string, dataDir: string):
   return real
 }
 
+async function enableOptIn(workspaceRoot: string, fromRoot: string): Promise<void> {
+  const path = join(workspaceRoot, 'scry.config.json')
+  const raw = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>
+  const capture = raw.capture && typeof raw.capture === 'object' && !Array.isArray(raw.capture)
+    ? raw.capture as Record<string, unknown>
+    : {}
+  await writeJsonAtomic(path, { ...raw, capture: { ...capture, sessions: 'opt-in' } })
+  await excludeFromStatus(workspaceRoot, ['scry.config.json', `${fromRoot}/`])
+}
+
 function workspaceIdFor(workspaceRoot: string): string {
   return workspaceRoot.replace(/[\\/]+$/, '').split(/[\\/]/).pop()?.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'workspace'
 }
@@ -50,7 +60,14 @@ export async function ensureWorkspaceConfig(workspaceRoot: string, dataDir: stri
       throw new CaptureRequestError('invalid_request', 'scry.config.json dataDir does not match --data-dir')
     }
     if (!location.config.enabled) throw new CaptureRequestError('recorder_unavailable', 'this workspace config disables the recorder')
-    return location.config
+    if (location.config.capture.sessions === 'opt-in') return location.config
+    // A workspace that already ran `scry init` has a config without `capture.sessions`, so ordinary
+    // hooks there would keep recording. Claiming a session is the point where this workspace becomes
+    // opt-in; every other key is left as the user wrote it.
+    await enableOptIn(location.workspaceRoot, fromRoot)
+    const updated = await resolveRecorderLocation(workspaceRoot)
+    if (!updated.valid) throw new CaptureRequestError('recorder_unavailable', 'scry.config.json could not be read back')
+    return updated.config
   }
   if (location.reason === 'invalid_config') {
     throw new CaptureRequestError('recorder_unavailable', `scry.config.json is invalid: ${location.detail ?? 'unknown reason'}`)
