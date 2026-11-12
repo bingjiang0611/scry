@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import type { TraceEvent, TurnDiffSnapshot } from '../../shared/trace.js'
 import { available, disabled, partial, unavailable, type AgentTurnRecord, type TurnEvidence } from '../../shared/turn-record.js'
 import { aggregateTurnEvidence } from './aggregate.js'
+import { isCodexAppContextInput } from './recorder-codex-user-input.js'
 import { isFullToolContentPolicy } from './tool-content.js'
 import { writeRecorderContent } from './content-store.js'
 import { limitTurnDiffPatchBytes, cancelGitTurnDiff, finishGitTurnDiff } from './git.js'
@@ -164,10 +165,14 @@ export async function finalizeOpenTurn(
     event.stage !== 'tool_result' && ['tool', 'skill', 'agent'].includes(event.kind) && !!(event.tool || event.name)
   )
   const hasHookEvidence = events.some((event) => event.kind === 'hook')
+  let userText = open.provider === 'qoder' || open.provider === 'claude'
+    ? open.prompt ?? transcript.userText
+    : transcript.userText ?? open.prompt
+  // A context-only Codex turn has no transcript prompt. Do not restore an app
+  // envelope from the lifecycle hook; undefined uses the existing unavailable state.
+  if (open.provider === 'codex' && userText && isCodexAppContextInput(userText)) userText = undefined
   const evidence = aggregateTurnEvidence({
-    userText: open.provider === 'qoder' || open.provider === 'claude'
-      ? open.prompt ?? transcript.userText
-      : transcript.userText ?? open.prompt,
+    userText,
     events,
     source: transcript.observed ? 'provider_transcript+lifecycle_hooks' : 'lifecycle_hooks',
     toolContentPolicy: open.toolContentPolicy ?? enablement.config.capture,

@@ -5,12 +5,16 @@ import { stableHash } from './store.js'
 export type CodexUserInputSource = 'event_msg_user_message' | 'response_item_user'
 
 const CONTEXT_INPUT = /^\s*(?:<recommended_plugins>|# AGENTS\.md instructions|<environment_context>)/
-const EMPTY_APP_PAGE_INPUT = '<external_codex_apps_open_page>{"page_id":null}</external_codex_apps_open_page>'
+
+export function isCodexAppContextInput(text: string): boolean {
+  // Stop at the first matching close tag: a second packet or surrounding prose
+  // is not a single app envelope. Payload JSON and part counts are opaque.
+  const packet = /^\s*<(external_codex_apps_[A-Za-z0-9_.:-]+)>[\s\S]*?<\/\1>/.exec(text)
+  return !!packet && text.slice(packet[0].length).trim() === ''
+}
 
 function isContextInput(text: string): boolean {
-  // Only the observed null-page packet is excluded. Other payload shapes stay
-  // visible until native evidence establishes their meaning; never drop the turn.
-  return CONTEXT_INPUT.test(text) || text.trim() === EMPTY_APP_PAGE_INPUT
+  return CONTEXT_INPUT.test(text) || isCodexAppContextInput(text)
 }
 
 type PendingCodexUserInput = {

@@ -8,6 +8,11 @@ import { listRecords } from './store'
 import { payload, workspace } from './recorder-tests/fixture.test'
 
 const openPage = '<external_codex_apps_open_page>{"page_id":null}</external_codex_apps_open_page>'
+// Sanitized native packets from the supplied Nov 10 (912–916) / Nov 3 (229–231) rollouts.
+const selectedPage = '<external_codex_apps_selected_page_part_1_of_1>Companion Page snapshot part 1 of 1:\n{"page_id":null,"document_view":null}</external_codex_apps_selected_page_part_1_of_1>'
+const nonEmptyPage = '<external_codex_apps_open_page>{"page_id":"<PAGE_ID>"}</external_codex_apps_open_page>'
+const typedPrompt = '<TYPED_PROMPT>'
+const pastedPrompt = '\n# Files mentioned by the user:\n\n## <PASTED_FILE_NAME>: <TMP_PATH>\n<TYPED_PROMPT>'
 const skillName = 'fixture-investigator:inspect'
 const skill = `<skill>\n<name>${skillName}</name>\n<path>/fixture/SKILL.md</path>\nRead-only investigation.\n</skill>`
 const question = `[$${skillName}](/fixture/SKILL.md)\nWhy is the progress bar missing?`
@@ -27,6 +32,9 @@ const rollout = (inputs: string[]) => [
 
 const capturedShape = () => rollout([
   user(openPage, 'open-page'),
+  row('response_item', { type: 'message', role: 'developer', content: [{ type: 'input_text', text: '<codex_apps_open_page_instructions>…</codex_apps_open_page_instructions>' }] }),
+  row('response_item', { type: 'message', role: 'developer', content: [{ type: 'input_text', text: '<codex_apps_selected_page_instructions_0000>…</codex_apps_selected_page_instructions_0000>' }] }),
+  user(selectedPage, 'selected-page'),
   user(question, 'question'),
   user(skill, 'skill'),
   user(openPage, 'open-page-again'),
@@ -49,9 +57,26 @@ describe('Codex app controls and namespaced skill input', () => {
     ])
   })
 
-  it('does not let a canonical control packet suppress a legacy human message', () => {
+  it.each([
+    [openPage, selectedPage, typedPrompt],
+    [nonEmptyPage, pastedPrompt],
+    ['<external_codex_apps_active_page>opaque payload</external_codex_apps_active_page>', typedPrompt],
+    ['<external_codex_apps_open_page>{broken json}</external_codex_apps_open_page>', typedPrompt],
+    ...[openPage, nonEmptyPage, selectedPage].map(packet => [typedPrompt, packet]),
+    [...Array.from({ length: 3 }, (_, index) => {
+      const name = `external_codex_apps_selected_page_part_${index + 1}_of_3`
+      return `<${name}>Companion Page snapshot part ${index + 1} of 3:\n{"document_view":"<PAGE_BODY>"}</${name}>`
+    }), typedPrompt]
+  ])('excludes complete app packets from input and steering: %j', (...texts) => {
+    const { turns } = parseCodexRollout(rollout(texts.map((text, i) => user(text, `message-${i}`))), 'packet-run')
+    expect(turns).toHaveLength(1)
+    expect(turns[0].userText).toBe(texts.includes(pastedPrompt) ? pastedPrompt : typedPrompt)
+    expect(turns[0].events.filter(event => event.kind === 'human')).toEqual([])
+  })
+
+  it.each([openPage, nonEmptyPage, selectedPage])('does not let a canonical control packet suppress a legacy human message: %s', packet => {
     const { turns } = parseCodexRollout(rollout([
-      user(openPage, 'control'),
+      user(packet, 'control'),
       row('event_msg', { type: 'user_message', message: 'Investigate the response.' })
     ]), 'legacy-input-run')
     expect(turns[0].userText).toBe('Investigate the response.')
@@ -59,7 +84,7 @@ describe('Codex app controls and namespaced skill input', () => {
   })
 
   it('keeps control-only input empty without dropping its native turn or terminal', () => {
-    const { turns } = parseCodexRollout(rollout([user(` \n${openPage}\n`, 'control')]), 'control-only-run')
+    const { turns } = parseCodexRollout(rollout([openPage, selectedPage, nonEmptyPage].map((packet, i) => user(` \n${packet}\n`, `control-${i}`))), 'control-only-run')
     expect(turns).toHaveLength(1)
     expect(turns[0].userText).toBe('')
     expect(turns[0].terminalStatus).toBe('completed')
@@ -69,12 +94,18 @@ describe('Codex app controls and namespaced skill input', () => {
   it.each([
     `Explain this packet: ${openPage}`,
     `${openPage}\nWhy does this appear?`,
-    '<external_codex_apps_open_page>{"page_id":"unverified-shape"}</external_codex_apps_open_page>',
-    '<external_codex_apps_open_page>{broken json}</external_codex_apps_open_page>',
+    'Why does "<external_codex_apps_open_page>" appear here?',
+    '<external_codex_apps_open_page>{}</external_codex_apps_selected_page_part_1_of_1>',
+    '<external_codex_apps_open_page>{}',
+    '<codex_apps_active_page>{}</codex_apps_active_page>',
+    `${openPage}\n${openPage}`,
+    `<external_codex_apps_open_page>{}</external_codex_apps_open_page>\n${typedPrompt}\n${openPage}`,
+    `${selectedPage}\nPlease explain.`,
+    `Please explain.\n${selectedPage}`,
     `Explain this skill declaration: ${skill}`,
     `${skill}\nIs this declaration correct?`,
     '<skill><name>team:first</name></skill>\nCompare these skills.\n<skill><name>team:second</name></skill>'
-  ])('retains ordinary questions, quoted markup and unverified packet shapes: %s', text => {
+  ])('retains questions, mismatched markup and non-app prefixes: %s', text => {
     const { turns } = parseCodexRollout(rollout([user(text, 'question')]), 'ordinary-input-run')
     expect(turns[0].userText).toBe(text)
     expect(turns[0].events.filter(event => event.kind === 'skill')).toEqual([])
@@ -88,6 +119,27 @@ describe('Codex app controls and namespaced skill input', () => {
     expect(turns[0].userText).toBe(`/${name} Investigate.`)
     expect(turns[0].events.filter(event => event.kind === 'skill').map(event => event.name)).toEqual([name])
     expect(turns[0].events.filter(event => event.kind === 'human')).toEqual([])
+  })
+
+  it.each([undefined, openPage, nonEmptyPage, selectedPage])('persists a context-only turn with unavailable human input (hook prompt: %s)', async prompt => {
+    const root = await workspace()
+    const path = join(root, 'context-only-rollout.jsonl')
+    const content = rollout([openPage, selectedPage, nonEmptyPage].map((packet, i) => user(packet, `control-${i}`)))
+    await writeFile(path, content)
+    await handleRecorderHook({
+      provider: 'codex', event: 'turn.started', workspace: root,
+      payload: payload('context-session', { ...(prompt ? { prompt } : {}), turn_id: 'input-turn', rollout_path: path })
+    })
+    await handleRecorderHook({
+      provider: 'codex', event: 'turn/completed', workspace: root,
+      payload: payload('context-session', { turn_id: 'input-turn', rollout_path: path, timestamp: completedAt })
+    })
+    const records = await listRecords(join(root, '.scry'))
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({ providerTurnId: 'input-turn', status: 'completed', user: { status: 'unavailable' } })
+    expect(records[0].user.value).toBeUndefined()
+    expect(records[0].user.omissionReason).toBe('top-level user prompt was not observable')
+    expect(await readFile(path, 'utf8')).toBe(content)
   })
 
   it('persists the corrected input and skill while retaining raw transcript evidence', async () => {
