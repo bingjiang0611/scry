@@ -15,6 +15,7 @@ import { chatBottomStickinessAfterScroll, observeChatBottomLayout, scrollChatToB
 import { attachmentsAfterSuccessfulSubmit, fileToDraftAttachment, clipboardAttachmentToDraft, inputAttachments } from './composer-drafts'
 import { requestDockBadgePermission } from './dock-badge-permission'
 import { useAppPromptStart } from './hooks/useAppPromptStart'
+import { ipcErrorMessage } from './constants/ipc-error-copy'
 
 export interface AppComposerContext {
   view: 'chat' | 'conversation' | 'analytics' | 'meta-prompts' | 'remote'
@@ -207,7 +208,7 @@ export function useAppComposer(context: AppComposerContext) {
         // head is the explicit "skip" action, so later prompts can never overtake it.
         queuedStartInFlightRef.current = false
         queuedStartPendingRef.current = true
-        setComposerError(`${error instanceof Error ? error.message : String(error)}；这条消息仍保留在队列，队列已暂停`)
+        setComposerError(`${ipcErrorMessage(error)}；这条消息仍保留在队列，队列已暂停`)
       })
   }, [draftKey, editingQueuedPromptId, integrations.agents, queuedPrompts, session.busy, sessionLoading, startPrompt, steerEvidenceByMessageId])
 
@@ -314,7 +315,7 @@ export function useAppComposer(context: AppComposerContext) {
       // overwriting anything the user typed or pasted while main was starting the Provider.
       setInput((current) => inputAfterFailedSubmit(current, originalInput))
       setDraftAttachments((current) => attachmentsAfterFailedSubmit(current, submittedAttachments))
-      setComposerError(error instanceof Error ? error.message : String(error))
+      setComposerError(ipcErrorMessage(error))
     } finally {
       draftStartPendingRef.current = false
       setComposerSubmitting(false)

@@ -35,6 +35,15 @@ describe('IPC error copy', () => {
     expect(ipcErrorMessage(new Error('daemon_credential_unavailable'), 'linux')).toContain('（daemon_credential_unavailable）')
   })
 
+  it('shows a refused start the same in both modes: no wrapper, no internal class name (B4-S)', () => {
+    const inProcess = new Error("Error invoking remote method 'agent:start': AgentRuntimeError: 同一会话已有一轮正在运行")
+    const daemon = new Error("Error invoking remote method 'agent:start': Error: 同一会话已有一轮正在运行")
+    expect(ipcErrorMessage(inProcess)).toBe('同一会话已有一轮正在运行')
+    expect(ipcErrorMessage(daemon)).toBe('同一会话已有一轮正在运行')
+    // Only the wrapper's own class prefix goes: a message that merely mentions one stays.
+    expect(ipcErrorMessage(new Error("Error invoking remote method 'agent:start': 配置 AgentRuntimeError: x"))).toBe('配置 AgentRuntimeError: x')
+  })
+
   it('never answers with an empty line', () => {
     expect(ipcErrorMessage(new Error("Error invoking remote method 'x:y': Error: "))).toBe('未知错误')
     expect(ipcErrorMessage('plain')).toBe('plain')
