@@ -9,9 +9,11 @@ on:
 permissions:
   contents: read
 
+# PR pushes and main pushes each keep only their newest run; manual dispatch is never
+# coalesced. Main runs validate fully because a cancelled run's commits are not re-diffed.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.event_name == 'push' && github.ref || github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   changes:
@@ -180,9 +182,10 @@ jobs:
   # Preserve the serial smoke order in three contiguous slices. Packaging runs
   # with the shortest slice. Normal PRs use four macOS slots including native
   # performance; remote/iOS changes may queue one of the six jobs at the five-slot cap.
+  # Diffs that cannot reach the App (tests, Agent docs, iOS) skip only this macOS job.
   packaged-electron:
     needs: changes
-    if: ${{ needs.changes.outputs.required == 'true' }}
+    if: ${{ needs.changes.outputs.desktop == 'true' }}
     runs-on: macos-15
     timeout-minutes: 30
     strategy:
@@ -276,13 +279,16 @@ jobs:
           RESULTS: ${{ toJSON(needs) }}
         run: |
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
-          echo "$RESULTS" | jq -e '
-            length == 7 and .changes.result == "success" and (
-              (.changes.outputs.required == "true" and
-                (del(.changes) | all(.[]; .result == "success"))) or
-              (.changes.outputs.required == "false" and
-                (del(.changes) | all(.[]; .result == "skipped")))
-            )' > /dev/null
+          # Every job must succeed, except jobs proven unaffected, which must be skipped.
+          echo "$RESULTS" | jq -e --argjson desktop '["packaged-electron"]' '
+            length == 7 and .changes.result == "success" and
+            (.changes.outputs as $out
+              | ($out.required == "true" and ($out.desktop == "true" or $out.desktop == "false"))
+                or ($out.required == "false" and $out.desktop == "false")) and
+            (.changes.outputs as $out | del(.changes) | to_entries | all(.[];
+              .key as $job | .value.result == (
+                if $out.required == "false" or ($out.desktop == "false" and any($desktop[]; . == $job))
+                then "skipped" else "success" end)))' > /dev/null
 
   # Linux 打包门禁：只验证产物布局、原生模块、私有 CLI、locale 裁剪与资源 allowlist。
   # GUI smoke（pack:artifact 里的 smoke:electron）需要可用的 Chromium sandbox setuid 和显示环境，

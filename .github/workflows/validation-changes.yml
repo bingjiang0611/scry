@@ -6,6 +6,9 @@ on:
       required:
         description: Whether executable inputs changed (unknown diffs fail closed)
         value: ${{ jobs.changes.outputs.required }}
+      desktop:
+        description: Whether the desktop App or its macOS gates may be affected (implies required)
+        value: ${{ jobs.changes.outputs.desktop }}
 
 permissions:
   contents: read
@@ -16,6 +19,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       required: ${{ steps.diff.outputs.required }}
+      desktop: ${{ steps.diff.outputs.desktop }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,14 +32,37 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           # Dispatch always validates. A new branch has no readable before commit.
-          if [ "$EVENT_NAME" = workflow_dispatch ] || [[ "$BASE_SHA" =~ ^0+$ ]]; then
-            echo 'required=true' >> "$GITHUB_OUTPUT"
-          elif git diff --quiet --no-ext-diff --no-textconv "$BASE_SHA" HEAD -- . \
-            ':(top,glob,exclude)**/README.md' \
-            ':(top,glob,exclude)docs/**/*.md'; then
-            echo 'required=false' >> "$GITHUB_OUTPUT"
+          # CI coalesces main pushes, so before..HEAD can omit a cancelled run's commits.
+          if [ "$EVENT_NAME" = workflow_dispatch ] || [ "$EVENT_NAME" = push ] || [[ "$BASE_SHA" =~ ^0+$ ]]; then
+            printf 'required=true\ndesktop=true\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Exit 0 when matching paths changed, 1 when none did; an unreadable diff fails closed.
+          changed() {
+            git diff --quiet --no-ext-diff --no-textconv "$BASE_SHA" HEAD -- . "$@" || {
+              status=$?
+              if [ "$status" -ne 1 ]; then exit "$status"; fi
+              return 0
+            }
+            return 1
+          }
+          documentation=(':(top,glob,exclude)**/README.md' ':(top,glob,exclude)docs/**/*.md')
+          # Inputs that never reach the packaged App, its renderer UI smoke or native
+          # performance harness. Ubuntu jobs still validate them; every other path,
+          # including workflows, scripts and THIRD_PARTY_NOTICES.md, keeps macOS gates.
+          desktop_free=(
+            "${documentation[@]}"
+            ':(top,glob,exclude)**/*.test.ts' ':(top,glob,exclude)**/*.test.tsx'
+            ':(top,exclude)CLAUDE.md' ':(top,exclude)CONTRIBUTING.md' ':(top,exclude)DESIGN.md' ':(top,exclude)PRODUCT.md'
+            ':(top,glob,exclude).agents/**/*.md' ':(top,glob,exclude).claude/**/*.md'
+            ':(top,exclude).github/pull_request_template.md' ':(top,glob,exclude).github/ISSUE_TEMPLATE/**'
+            ':(top,exclude).github/VOUCHED.td' ':(top,exclude).github/TRIAGE_EXEMPTIONS.td'
+            ':(top,glob,exclude)apps/ios/**'
+          )
+          if ! changed "${documentation[@]}"; then
+            printf 'required=false\ndesktop=false\n' >> "$GITHUB_OUTPUT"
+          elif changed "${desktop_free[@]}"; then
+            printf 'required=true\ndesktop=true\n' >> "$GITHUB_OUTPUT"
           else
-            status=$?
-            if [ "$status" -ne 1 ]; then exit "$status"; fi
-            echo 'required=true' >> "$GITHUB_OUTPUT"
+            printf 'required=true\ndesktop=false\n' >> "$GITHUB_OUTPUT"
           fi
