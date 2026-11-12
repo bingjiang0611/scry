@@ -32,12 +32,12 @@ node scripts/performance-native.mjs compare /tmp/scry-native-baseline.json /tmp/
 
 这是本地计算、文件和本机进程基准，不是 HTTP/WebSocket 压缩后字节、真实 Provider、浏览器 paint 或真机结果。测试只创建临时文件/Git/archive，不写用户会话或用户 DB，不运行真实 Provider Agent。生产路径正确性断言必须先通过，删除内容带来的变快不能通过。
 
-每个场景有显式 `lane`、`workload`、warmup、sample 和迭代数。原有 `trace.delivery`、`renderer.batch`、`history.page`、`terminal.delivery` 均保持 3 批预热、15 批采样、每批 20 次；磁盘/进程场景只运行 2 或 5 次并使用 1 批预热、7 批采样，不盲目重复大型 I/O。计时含固定正确性检查。这是批均值的 p95，不是单次用户请求 p95。门禁同时检查：
+每个场景有显式 `lane`、`workload`、warmup、sample 和迭代数。原有 `trace.delivery`、`renderer.batch`、`history.page`、`terminal.delivery` 均保持 3 批预热、20 批采样、每批 20 次；磁盘/进程场景也保留原 workload、1 批预热并采用正式 20 批采样，不盲目改变大型 I/O。计时含固定正确性检查。这是批均值的 p95，不是单次用户请求 p95。门禁同时检查：
 
 - 两侧 fixture/config 指纹与运行环境一致，全部场景/指标存在且有效；缺指标失败，不能补 0。
 - 绝对预算防止逐次累积退化；相对基线序列化 bytes 最多 +5%，消息数不能增长；事件、turn、输出正文大小等工作量计数必须相等，减少内容也失败。
 - Relay 响应读取到 EOF，并用 `Buffer.equals` 校验完整字节与长度。避免把通用断言框架遍历 64 KiB Buffer 的 CPU 开销算作传输耗时；重复响应的负向实验必须失败，不能只校验预期前缀。
-- 原有四项批均值 p95 的绝对 20 ms 预算不变。新增磁盘/进程场景使用 `performance-budgets.json` 中显式上限。所有场景仍受基线加上 max(2 ms, 基线的 50%) 的相对门禁约束，不承诺拦住亚毫秒抖动。
+- 原有四项批均值 p95 的绝对 20 ms 预算不变。新增磁盘/进程场景使用 `performance-budgets.json` 中显式上限。所有场景仍受 `min(1000, baselineP95 + max(10 ms, baselineP95*50%))` 的相对门禁约束，不承诺拦住亚毫秒抖动。
 - 回退退出码为 1，写 Markdown/JSON 报告。真实重复发布和截断 renderer 输出有负对照测试。
 
 `.github/workflows/performance.yml` 的 Node job 对 base SHA 与候选 merge checkout 分别安装对应 lockfile 的依赖，将**同一份候选 harness、bench runner 和 Vitest 配置**放入两侧，串行测量，保留原始样本/清单/预算/报告 30 天。独立的 macOS native job 同样冻结夹具、构建 base/candidate，并在同一 runner 上**按场景交替**运行四种固定历史负载：`markdown`、`short`、`short-heavy`、`paged` 每个场景先 base 后 candidate 背靠背各测一次，再用 `combine` 合并成两侧完整报告。阈值、指标、样本数、每次工作量、warmup 与 App 启动次数均未改变，只改变测量顺序，避免某个持续数十秒的机器状态窗口整体落在单侧并伪装成代码回归。合并校验收到的分片必须同 revision、同 harness、同环境，缺场景、重复场景或任一分片含失败 lane 均直接失败，且失败时不留下半成品报告。比较 12 个原生点击到两帧就绪样本、单次启动/原生输入观测，以及每负载三次完成、三次中断的真实 main/preload/archive 生命周期。发送回执、首输出接收、终态通知、停止回执、停止终态及可读归档分别计时，并在 App 退出后独立读取 canonical turn 文件核对输出；这些 IPC 阶段继续独立列出，不冒充按钮时间。启动含驱动等待开销，不是 OS 冷启动。

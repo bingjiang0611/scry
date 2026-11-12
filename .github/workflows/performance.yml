@@ -69,52 +69,35 @@ jobs:
           node candidate/scripts/performance-ratchet.mjs guard "$base" candidate/scripts/performance-ratchet.json | tee performance-results/ratchet-guard.json
       - name: Freeze candidate harness for both source revisions
         run: |
-          cp candidate/scripts/performance-baseline.test.ts baseline/scripts/
-          cp candidate/scripts/performance-bench.mjs baseline/scripts/
-          cp candidate/.agents/skills/scry-performance-climb/scripts/timing-{run,observation}.mjs baseline/.agents/skills/scry-performance-climb/scripts/
-          cp candidate/vitest.config.ts baseline/vitest.config.ts
-          cp candidate/src/main/providers/fixtures/codex-app-server.mjs baseline/src/main/providers/fixtures/codex-app-server.mjs
-      - name: Measure baseline then candidate on the same runner (never parallel)
+          while IFS= read -r file; do
+            mkdir -p "baseline/$(dirname "$file")"
+            cp "candidate/$file" "baseline/$file"
+          done < <(cd candidate && node --input-type=module -e "import { performanceAbabHarnessFiles } from './scripts/performance-abab-harness.mjs'; for (const file of performanceAbabHarnessFiles) console.log(file)")
+      - name: Measure one formal serial ABAB round on the same runner
         id: node_measurements
         run: |
           set -o pipefail
           mkdir -p performance-results
-          (cd baseline && node .agents/skills/scry-performance-climb/scripts/timing-run.mjs node-baseline -- node scripts/performance-bench.mjs ../performance-results/baseline.json) 2>&1 | tee performance-results/baseline-timing.log
-          (cd candidate && node .agents/skills/scry-performance-climb/scripts/timing-run.mjs node-candidate -- node scripts/performance-bench.mjs ../performance-results/candidate.json) 2>&1 | tee performance-results/candidate-timing.log
+          (cd candidate && node .agents/skills/scry-performance-climb/scripts/timing-run.mjs node-abab -- node scripts/performance-abab.mjs --baseline "$GITHUB_WORKSPACE/baseline" --candidate "$GITHUB_WORKSPACE/candidate" --output "$GITHUB_WORKSPACE/performance-results" --batches 20) 2>&1 | tee performance-results/abab-timing.log
       - name: Compare fixed budgets and base-relative regressions
         id: node_comparison
+        if: always()
         run: |
-          node candidate/scripts/performance-compare.mjs performance-results/baseline.json performance-results/candidate.json candidate/scripts/performance-budgets.json performance-results/report.md
-      # Diagnostic only, before the counter workload. A comparison report exists
-      # only after the primary evidence passed the completeness/methodology checks.
+          set -o pipefail
+          node candidate/scripts/performance-abab-report.mjs performance-results 2>&1 | tee performance-results/report.log
+      # Diagnostic only, before the counter workload. The primary ABAB result remains unchanged.
       - name: Measure one same-source Node diagnostic control
         id: node_control
         if: failure() && steps.node_measurements.outcome == 'success' && steps.node_comparison.outcome == 'failure' && hashFiles('performance-results/report.md.json') != ''
         run: |
           set -o pipefail
-          (cd candidate && node .agents/skills/scry-performance-climb/scripts/timing-run.mjs node-control -- node scripts/performance-bench.mjs ../performance-results/control.json) 2>&1 | tee performance-results/control-timing.log
-      - name: Compare Node diagnostic control in both directions
+          (cd candidate && node .agents/skills/scry-performance-climb/scripts/timing-run.mjs node-control -- node scripts/performance-abab.mjs --candidate "$GITHUB_WORKSPACE/candidate" --same-source --output "$GITHUB_WORKSPACE/performance-results/control" --batches 20) 2>&1 | tee performance-results/control-timing.log
+      - name: Compare Node diagnostic control
         id: node_control_comparison
         if: failure() && steps.node_control.outcome == 'success'
         run: |
-          node --input-type=module <<'JS'
-          import assert from 'node:assert/strict'
-          import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
-          import { comparePerformance, formatComparison } from './candidate/scripts/performance-compare.mjs'
-          const read = name => JSON.parse(readFileSync(`performance-results/${name}.json`, 'utf8'))
-          const original = read('candidate'), control = read('control')
-          assert.match(original.revision, /^[0-9a-f]{40}$/)
-          assert.equal(control.revision, original.revision, 'Diagnostic source revision changed')
-          const policy = JSON.parse(readFileSync('candidate/scripts/performance-budgets.json', 'utf8'))
-          for (const [name, first, second] of [['forward', original, control], ['reverse', control, original]]) {
-            const report = comparePerformance(first, second, policy)
-            const markdown = `# Same-source Node diagnostic: ${name}\n\nNot a merge gate. Forward is original candidate to control; reverse is control to original candidate. The primary failure remains unchanged.\n\n${formatComparison(report)}`
-            writeFileSync(`performance-results/control-${name}.md`, markdown)
-            writeFileSync(`performance-results/control-${name}.md.json`, JSON.stringify(report, null, 2))
-            appendFileSync(process.env.GITHUB_STEP_SUMMARY, markdown)
-            if (!report.passed) process.exitCode = 1
-          }
-          JS
+          set -o pipefail
+          node candidate/scripts/performance-abab-report.mjs performance-results/control 2>&1 | tee performance-results/control-report.log
       - name: Collect candidate work counters and check the ratchet ledger
         id: node_counters
         if: ${{ !cancelled() && steps.node_measurements.outcome == 'success' }}

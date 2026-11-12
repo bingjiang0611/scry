@@ -16,7 +16,7 @@ const summarize = (records, baseline, candidate) => summarizeRecords([
 
 const policy = JSON.parse(readFileSync(new URL('./performance-budgets.json', import.meta.url), 'utf8'))
 const benchmark = () => ({
-  schema: 1, measurement: { kind: 'batch-mean-ms', warmups: 3, samples: 15, iterationsPerSample: 20, perScenario: true }, harness: 'same-fixture', revision: 'base', environment: { node: '22', platform: 'test' },
+  schema: 1, measurement: { kind: 'batch-mean-ms', warmups: 3, samples: 20, iterationsPerSample: 20, perScenario: true, interleaved: true }, harness: 'same-fixture', revision: 'base', environment: { node: '22', platform: 'test' },
   results: Object.fromEntries(Object.entries(policy.scenarios).map(([name, budget]) => [name, {
     lane: (budget as { lane: string }).lane, workload: (budget as { workload: string }).workload,
     iterations: (budget as { iterations: number }).iterations, warmups: (budget as { warmups: number }).warmups, samples: (budget as { samples: number }).samples, outcome: 'completed',
@@ -41,12 +41,12 @@ describe('performance feedback contract', () => {
     const base = benchmark()
     const head = structuredClone(base)
     // startup.recovery settles near 1.4 ms; one 5.4 ms batch is the spike seen on the PR runner.
-    base.results['startup.recovery'].durationMs = Array(7).fill(1.4)
-    head.results['startup.recovery'].durationMs = [1.4, 5.4, 1.4, 1.4, 1.4, 1.4, 1.4]
+    base.results['startup.recovery'].durationMs = Array(20).fill(1.4)
+    head.results['startup.recovery'].durationMs = [...Array(19).fill(1.4), 5.4]
     const row = comparePerformance(base, head, policy).rows.find(candidate => candidate.scenario === 'startup.recovery' && candidate.metric === 'batchMeanP95Ms')!
     expect(row.ceiling).toBeCloseTo(11.4, 5)
     expect(row.status).toBe('pass')
-    head.results['startup.recovery'].durationMs = Array(7).fill(12)
+    head.results['startup.recovery'].durationMs = Array(20).fill(12)
     expect(comparePerformance(base, head, policy).rows.some(candidate => candidate.scenario === 'startup.recovery' && candidate.metric === 'batchMeanP95Ms' && candidate.status === 'regressed')).toBe(true)
   })
 
@@ -60,7 +60,7 @@ describe('performance feedback contract', () => {
     expect(report.passed).toBe(false)
     expect(formatComparison(report)).toContain('regressed')
     expect(formatComparison(report)).toContain('Baseline')
-    head.results['trace.delivery'].durationMs = Array(15).fill(100)
+    head.results['trace.delivery'].durationMs = Array(20).fill(100)
     expect(comparePerformance(base, head, policy).rows.some(row => row.metric === 'batchMeanP95Ms' && row.status === 'regressed')).toBe(true)
     delete head.results['history.page']
     expect(() => comparePerformance(base, head, policy)).toThrow('scenarios')
