@@ -22,7 +22,9 @@ function serializableValue(value: unknown, seen: Set<object>, depth: number): un
   seen.add(value)
   try {
     const out: Record<string, unknown> | unknown[] = Array.isArray(value) ? [] : Object.create(null) as Record<string, unknown>
-    for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
+    const descriptors = Object.getOwnPropertyDescriptors(value)
+    for (const key of Object.keys(descriptors)) {
+      const descriptor = descriptors[key]
       if (!descriptor.enumerable) continue
       // Do not invoke getters or toJSON on an untrusted tool payload.
       if (!('value' in descriptor)) throw new Error('accessor')
@@ -64,7 +66,7 @@ export function captureToolContent(value: unknown, options: {
   }
   if (value === undefined) return { ...base, reasons: [...new Set([...base.reasons, 'provider_missing' as const])] }
   try {
-    const safe = serializableValue(value, new Set(), 0)
+    const safe = typeof value === 'string' ? value : serializableValue(value, new Set(), 0)
     const content = typeof safe === 'string' ? safe : JSON.stringify(safe)
     // Only serialize the inspected clone, never invoke the original object's toJSON.
     const captured: ToolContent = {
