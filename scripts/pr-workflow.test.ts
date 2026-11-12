@@ -61,6 +61,14 @@ function gate(file: string, results: Record<string, unknown>) {
 
 // Execute GitHub's own gate scripts rather than a second implementation.
 describe('required PR checks', () => {
+  it('executes the native comparison CLI instead of silently loading an exports-only module', () => {
+    const command = source(workflow('performance.yml').jobs.native, 'Compare native evidence and budgets').run!
+    const [, entry, ...args] = command.split(' ')
+    const result = spawnSync(process.execPath, [join(root, entry.replace(/^candidate\//, '')), ...args], { cwd: temp(), encoding: 'utf8' })
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('ENOENT')
+  })
+
   it('keeps the failed native comparison authoritative when collecting one diagnostic control', () => {
     const job = workflow('performance.yml').jobs.native
     const primary = source(job, 'Measure baseline then candidate, retaining failures')
@@ -71,7 +79,7 @@ describe('required PR checks', () => {
     expect(primary.run).toContain('set -o pipefail')
     expect(primary.run?.match(/timing-run.mjs/g)).toHaveLength(2)
     expect(comparison['continue-on-error']).toBeUndefined()
-    expect(comparison.run).toBe('node candidate/scripts/performance-native.mjs compare native-results/baseline.json native-results/candidate.json native-results/report.md')
+    expect(comparison.run).toBe('node candidate/scripts/performance-native-run.mjs compare native-results/baseline.json native-results/candidate.json native-results/report.md')
     expect(control.if).toBe("failure() && steps.native_measurements.outcome == 'success' && steps.native_comparison.outcome == 'failure'")
     expect(control.run?.match(/ bench /g)).toHaveLength(1)
     expect(directions.if).toBe("failure() && steps.native_control.outcome == 'success'")

@@ -203,7 +203,7 @@ jobs:
       - name: Compare native evidence and budgets
         id: native_comparison
         if: always()
-        run: node candidate/scripts/performance-native.mjs compare native-results/baseline.json native-results/candidate.json native-results/report.md
+        run: node candidate/scripts/performance-native-run.mjs compare native-results/baseline.json native-results/candidate.json native-results/report.md
       # Diagnostic only: the failed primary comparison remains failed. Never
       # repeat an incomplete/incorrect fixture or replace its primary samples.
       - name: Measure one same-artifact diagnostic control

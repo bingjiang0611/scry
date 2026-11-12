@@ -17,9 +17,11 @@ node scripts/performance-abab-report.mjs /tmp/scry-node-abab
 ```bash
 # macOS：真实隐藏 Electron + 离线 Provider 夹具；不使用付费 Provider/手机
 npm run build
-node scripts/performance-native.mjs bench /tmp/scry-native-candidate.json
-node scripts/performance-native.mjs compare /tmp/scry-native-baseline.json /tmp/scry-native-candidate.json /tmp/scry-native-report.md
+node scripts/performance-native-run.mjs bench /tmp/scry-native-candidate.json
+node scripts/performance-native-run.mjs compare /tmp/scry-native-baseline.json /tmp/scry-native-candidate.json /tmp/scry-native-report.md
 ```
+
+Native 命令必须调用 `performance-native-run.mjs`。`performance-native.mjs` 是函数库，直接传入 `compare` 只会导入模块，不会执行预算比较；不能把其退出码 0 当作通过。
 
 `performance-baseline.test.ts` 直接调用生产实现，固定场景与路径组一一对应：
 
