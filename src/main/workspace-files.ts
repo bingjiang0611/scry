@@ -112,6 +112,7 @@ export async function listWorkspace(request: WorkspaceListRequest): Promise<Work
   const limit = request.limit ?? WORKSPACE_DIRECTORY_LIMIT
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > WORKSPACE_DIRECTORY_LIMIT) throw new Error('目录分页大小无效')
   const all = await readdir(target.realPath, { withFileTypes: true })
+  const nameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
   const visible = (await Promise.all(all.map(async (entry) => {
     try {
       const path = portablePath([...pathParts(target.portable), entry.name])
@@ -125,7 +126,7 @@ export async function listWorkspace(request: WorkspaceListRequest): Promise<Work
     .filter((entry): entry is { name: string; info: Stats } => entry !== null)
     .sort((a, b) => {
       if (a.info.isDirectory() !== b.info.isDirectory()) return a.info.isDirectory() ? -1 : 1
-      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+      return nameCollator.compare(a.name, b.name)
     })
   const snapshot = createHash('sha256')
     .update(visible.map((entry) => `${entry.info.isDirectory() ? 'd' : 'f'}\0${entry.name}`).join('\0'))
