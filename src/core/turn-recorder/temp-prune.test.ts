@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -74,6 +74,22 @@ describe('recorder stale temp files', () => {
     expect(result).toMatchObject({ removed: 0, scanned: true })
     await expect(stat(inContent)).resolves.toBeTruthy()
     await expect(stat(inArchive)).resolves.toBeTruthy()
+  })
+
+  it('does not follow a symlinked scan entry out of the workspace', async () => {
+    const dataRoot = await tempRoot('scry-temp-prune-link-')
+    const outside = await tempRoot('scry-temp-prune-outside-')
+    const stray = join(outside, 'stray.tmp')
+    await writeFile(stray, '')
+    const old = new Date(Date.now() - 3 * day)
+    await utimes(stray, old, old)
+    await mkdir(join(dataRoot), { recursive: true })
+    await symlink(outside, join(dataRoot, 'runtime'))
+
+    const result = await pruneStaleTemps(dataRoot)
+
+    expect(result).toMatchObject({ removed: 0, scanned: true })
+    await expect(stat(stray)).resolves.toBeTruthy()
   })
 
   it('cleans leftovers at commit time, where every writer converges', async () => {

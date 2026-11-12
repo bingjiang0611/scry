@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -247,6 +247,17 @@ describe('record content budget at the shared commit boundary', () => {
     expect(bounded.diff.omissionReason).toContain(CONTENT_ENVELOPE_REASON)
     expect(recordTransportBytes(bounded)).toBeLessThanOrEqual(RECORDER_TRANSPORT_MAX_BYTES)
     expect(isAgentTurnRecord(bounded)).toBe(true)
+  }, 60_000)
+
+  it('refuses to commit a record that cannot converge inside the envelope', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-content-budget-'))
+    roots.push(root)
+    // 没有引用的内联正文只能靠收缩 diff 预览来减，装不下就别写进 store：接收方会拒收。
+    const text = 'z'.repeat(RECORDER_TRANSPORT_MAX_BYTES + 1024)
+    const draft = record({ assistant: { status: 'available', quality: 'exact', source: ['fixture'], value: { text } } })
+    expect(recordTransportBytes(draft as never)).toBeGreaterThan(RECORDER_TRANSPORT_MAX_BYTES)
+    await expect(commitRecord(root, draft as never)).rejects.toThrow('above the transport envelope')
+    expect(await readdir(join(root, 'records')).catch(() => [])).toEqual([])
   }, 60_000)
 
   it('counts the envelope wrapper even when nothing is referenced', () => {

@@ -48,8 +48,16 @@ function rememberVerified(path: string, identity: string): void {
   }
 }
 
+const CORRUPTION_PREFIX = 'recorder content collision or corruption'
+
 function assertContentBytes(existing: Buffer, expected: Buffer, sha256: string): void {
-  if (!existing.equals(expected)) throw new Error(`recorder content collision or corruption: ${sha256}`)
+  if (!existing.equals(expected)) throw new Error(`${CORRUPTION_PREFIX}: ${sha256}`)
+}
+
+/** A blob exists under this address but its bytes are not what the address promises. */
+export function isContentCorruptionError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  return error.message.startsWith(CORRUPTION_PREFIX) || error.message.startsWith('recorder content integrity check failed')
 }
 
 async function verifyAndSyncContent(path: string, existing: Buffer, expected: Buffer, sha256: string): Promise<void> {

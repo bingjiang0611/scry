@@ -1,4 +1,4 @@
-import { readdir, rm, stat } from 'node:fs/promises'
+import { lstat, readdir, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { readJson, writeJsonAtomic } from './io.js'
 
@@ -72,7 +72,13 @@ export async function pruneStaleTemps(
   // 数据根只扫它自己这一层的临时文件：往下一层就是 `content/`（几十万个 blob）和 `archive/`
   // （历史证据），既不产生这类临时文件，也不该为了清理临时文件去遍历。
   await pruneDir(dataRoot, cutoff, 0, result, false)
-  for (const dir of SCAN_DIRS) await pruneDir(join(dataRoot, dir), cutoff, 0, result)
+  for (const dir of SCAN_DIRS) {
+    // 入口必须是真实目录：沿符号链接清理会跑到工作区外，且那不是 recorder 写的字节。
+    const path = join(dataRoot, dir)
+    const info = await lstat(path).catch(() => null)
+    if (info?.isDirectory() !== true) continue
+    await pruneDir(path, cutoff, 0, result)
+  }
   await writeJsonAtomic(markerPath, { at: new Date(now).toISOString() })
   return result
 }

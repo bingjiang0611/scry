@@ -165,12 +165,15 @@ describe('recorder content repair', () => {
     await writeFile(path, 'x'.repeat(appOnly.ref.bytes))
     await writeRecord(dataRoot, record(1, 'f0'.repeat(16), [content('the real body')]))
 
+    const plan = await repairRecordContent({ dataRoot, sourceRoots: [appRoot] })
     const report = await repairRecordContent({ dataRoot, sourceRoots: [appRoot], apply: true })
 
-    expect(report).toMatchObject({ repairable: 1, repaired: 0, corrupt: 1, missing: 0 })
-    expect(report.corruptItems).toEqual([
-      { recordId: 'f0'.repeat(16), path: 'tools.0.output', sha256: appOnly.ref.sha256, bytes: appOnly.ref.bytes }
-    ])
+    // 演练与 --apply 必须给出同一个分类：损坏既不是可修复，也不是缺失。
+    expect(plan).toMatchObject({ repairable: 0, repaired: 0, corrupt: 1, missing: 0, bytes: 0, applied: false })
+    expect(report).toMatchObject({ repairable: 0, repaired: 0, corrupt: 1, missing: 0, bytes: 0, applied: false })
+    const corruptItem = { recordId: 'f0'.repeat(16), path: 'tools.0.output', sha256: appOnly.ref.sha256, bytes: appOnly.ref.bytes }
+    expect(plan.corruptItems).toEqual([corruptItem])
+    expect(report.corruptItems).toEqual([corruptItem])
     // 字节原样保留：删除或覆盖已存在的证据需要人来做。
     expect(await readFile(path, 'utf8')).toBe('x'.repeat(appOnly.ref.bytes))
   })

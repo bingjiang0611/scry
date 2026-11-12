@@ -6,7 +6,7 @@ import { type AgentTurnRecord, validateAgentTurnRecord } from '../../shared/turn
 import { copyRecorderContent } from './content-store.js'
 import { withDirectoryLock, writeJsonAtomic, mkdirDurable, syncDirectory, readJson, appendRotatingLog } from './io.js'
 import { recordFiles, readRecordFile, invalidateRecordIndex, addContentRefs, parseRecordName } from './store-index.js'
-import { applyRecordContentBudget } from './record-content-budget.js'
+import { applyRecordContentBudget, recordTransportBytes, RECORDER_TRANSPORT_MAX_BYTES } from './record-content-budget.js'
 import { archiveJournal, readArchiveState, archivePathsOverlap } from './store-archive.js'
 import { nextSequence, reserveSequence } from './sequence-watermark.js'
 import { pruneStaleTemps } from './temp-prune.js'
@@ -62,6 +62,11 @@ export async function commitRecord(
     // Both the App-managed path and the standalone CLI publish here, so one convergence point keeps
     // every committed record inside the transport envelope the receiver validates.
     const record: AgentTurnRecord = { ...applyRecordContentBudget(draft), sequence }
+    // 收缩之后仍然超出信封就拒绝提交：接收方会拒收，写进 store 只会制造一条永远传不出去的记录。
+    const transportBytes = recordTransportBytes(record)
+    if (transportBytes > RECORDER_TRANSPORT_MAX_BYTES) {
+      throw new Error(`refusing to commit record above the transport envelope: ${transportBytes} > ${RECORDER_TRANSPORT_MAX_BYTES} bytes`)
+    }
     const validation = validateAgentTurnRecord(record)
     if (!validation.ok) {
       const detail = validation.issues.slice(0, 4).map((issue) => `${issue.path}: ${issue.message}`).join('; ')

@@ -1,4 +1,4 @@
-import { readRecorderContent, writeRecorderContent } from './content-store.js'
+import { isContentCorruptionError, readRecorderContent, writeRecorderContent } from './content-store.js'
 import { findRecordById, listRecordsReport, recordContentItems, type SkippedRecordFile } from './store.js'
 import type { ToolContentRef } from '../../shared/tool-content.js'
 import type { AgentTurnRecord } from '../../shared/turn-record.js'
@@ -92,47 +92,48 @@ export async function repairRecordContent(options: ContentRepairOptions): Promis
       if (seen.has(item.ref.sha256)) continue
       seen.set(item.ref.sha256, item.ref)
       report.refs++
+      const corruptItem = { recordId: record.recordId, path: item.path, sha256: item.ref.sha256, bytes: item.ref.bytes }
+      let corruptHere = false
       try {
         await readRecorderContent(options.dataRoot, item.ref)
         report.present++
         continue
-      } catch {
-        // 缺失或校验失败都表示本库无法兑现这条引用：按缺失处理，继续找来源库。
+      } catch (error) {
+        // 本库有这个名字的字节但校验不过：它不是缺失，来源库也补不上（同名地址只能有一份字节）。
+        // 把它单独计为损坏，演练与 --apply 得到同一个分类。真正没有这份文件时才算缺失。
+        if (isContentCorruptionError(error)) corruptHere = true
+        else if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      }
+      if (corruptHere) {
+        // 删除或覆盖已存在的字节属于证据处理，修复工具不做，只如实报告，让用户自己决定。
+        report.corrupt++
+        if (report.corruptItems.length < MISSING_ITEM_LIMIT) report.corruptItems.push(corruptItem)
+        else report.corruptItemsTruncated = true
+        continue
       }
       const content = await readFromSources(options.sourceRoots, item.ref)
       if (content === undefined) {
         report.missing++
-        if (report.missingItems.length < MISSING_ITEM_LIMIT) {
-          report.missingItems.push({ recordId: record.recordId, path: item.path, sha256: item.ref.sha256, bytes: item.ref.bytes })
-        } else {
-          report.missingItemsTruncated = true
-        }
+        if (report.missingItems.length < MISSING_ITEM_LIMIT) report.missingItems.push(corruptItem)
+        else report.missingItemsTruncated = true
         continue
       }
       report.repairable++
-      report.bytes += item.ref.bytes
-      if (!apply) continue
-      try {
-        const written = await writeRecorderContent(options.dataRoot, content, item.ref.encoding)
-        if (written.sha256 !== item.ref.sha256 || written.bytes !== item.ref.bytes) {
-          throw new Error(`recorder content collision or corruption: ${item.ref.sha256}`)
-        }
-        report.repaired++
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        // 本库同名 blob 与它的地址不符：那是损坏的字节，不是缺失。删除或覆盖它属于证据处理，
-        // 修复工具不做这件事，只把它单独报出来，让用户自己决定。
-        if (!message.includes('collision or corruption')) throw error
-        report.corrupt++
-        if (report.corruptItems.length < MISSING_ITEM_LIMIT) {
-          report.corruptItems.push({ recordId: record.recordId, path: item.path, sha256: item.ref.sha256, bytes: item.ref.bytes })
-        } else {
-          report.corruptItemsTruncated = true
-        }
+      if (!apply) {
+        // 演练报告“将会复制多少字节”；只有真正写成功才在 --apply 里计入。
+        report.bytes += item.ref.bytes
+        continue
       }
+      const written = await writeRecorderContent(options.dataRoot, content, item.ref.encoding)
+      if (written.sha256 !== item.ref.sha256 || written.bytes !== item.ref.bytes) {
+        throw new Error(`recorder content repair wrote unexpected bytes for ${item.ref.sha256}`)
+      }
+      report.repaired++
+      report.bytes += item.ref.bytes
     }
   }
-  report.applied = apply
+  // `applied` 指真正写入了字节，而不是“带 --apply 跑过一次”。
+  report.applied = apply && report.repaired > 0
   return report
 }
 
