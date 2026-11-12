@@ -1,5 +1,6 @@
 import { CHILD_COMPOSER, CHILD_PANEL, SIDE_CHAT_SURFACE, json, sideChatDriver } from './side-chat-driving.mjs'
 import { createWindowResize } from './side-chat-window-control.mjs'
+import { exerciseSideChatUntrustedText } from './side-chat-untrusted-text-checks.mjs'
 
 /**
  * Side-chat layout, keyboard and composition acceptance in the isolated production App.
@@ -259,31 +260,7 @@ export async function exerciseSideChatLayout({ cdp, evaluate, check, ipcCountsPa
   await capture('layout-ime')
 
   // 7. Snapshot and Provider text is untrusted: it renders as text, never as markup.
-  await click(CHILD_COMPOSER)
-  await cdp.send('Input.insertText', { text: 'side chat reply <img src=x onerror=alert(1)>' })
-  await wait(`document.querySelector('${CHILD_COMPOSER}')?.value.includes('img src') === true`)
-  const turnsBeforeInjection = (await conversation(childId)).turns.length
-  await click(`${CHILD_PANEL} .send`)
-  await wait(`window.scry.conversations.read(${json(childId)}).then(page => page.turns.length === ${turnsBeforeInjection + 1}
-    && page.turns.at(-1)?.delivery.outcome === 'completed')`, 40000)
-  // The child transcript is windowed, so the newest turn is reached by a real scroll.
-  const bodyPoint = await driver.pointerAt(`document.querySelector('${CHILD_PANEL} .chat-body')`)
-  for (let wheel = 0; wheel < 8; wheel += 1) {
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...bodyPoint, deltaX: 0, deltaY: 1200 })
-    await new Promise(resolve => setTimeout(resolve, 120))
-  }
-  await wait(`document.querySelector('${CHILD_PANEL} .chat-body')?.textContent.includes('onerror=alert(1)') === true`, 15000)
-    .catch(() => undefined)
-  const injected = await evaluate(`(() => {
-    const body = document.querySelector('${CHILD_PANEL} .chat-body')
-    const text = body.textContent ?? ''
-    const start = text.indexOf('side chat reply')
-    return { img: body.querySelectorAll('img').length, script: body.querySelectorAll('script').length,
-      text: text.includes('<img src=x onerror=alert(1)>'), context: start < 0 ? text.slice(-200) : text.slice(start, start + 160) }
-  })()`)
-  check(injected.img === 0 && injected.script === 0, `Provider text was rendered as markup: ${json(injected)}`)
-  check(injected.text, `Provider text was not shown verbatim: ${json(injected)}`)
-  await capture('layout-untrusted-text')
+  const injected = await exerciseSideChatUntrustedText({ cdp, evaluate, check, childId, driver, click, wait, capture, conversation })
 
   await resize(1400, 900)
   await showChild()
