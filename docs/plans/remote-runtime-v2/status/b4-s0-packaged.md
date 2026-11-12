@@ -109,4 +109,9 @@ macOS 上有以下几点没有验证。如果某项拿不到证据，对应步�
 
 ## 附带发现
 
-- `scripts/daemon-packaged-recorder-smoke.mjs` 写死了 `dist/mac-arm64`，而且用打包二进制运行的是 **checkout 的** `out/main/daemon.js`，不是 asar 内的入口。它验证的是私有 CLI 缺失时 fail closed，不能证明打包入口能工作。本 lane 没有改动它，是否改为 asar 入口由维护者决定。
+- `scripts/daemon-packaged-recorder-smoke.mjs` 原来写死了 `dist/mac-arm64`，用打包二进制运行的是 **checkout 的** `out/main/daemon.js`，版本号也写死。维护者 2026-11-12 同意改为 asar 内的入口，已改：
+  - 用法 `node scripts/daemon-packaged-recorder-smoke.mjs [--app <打包可执行文件>]`，不带参数时按平台取默认产物（macOS `dist/mac-arm64/Scry.app/Contents/MacOS/Scry`，Linux `dist/linux-unpacked/scry`）；
+  - 目标经同一个 `resolvePackagedApp` 校验（布局、asar 内入口、产物版本与源码一致），入口为 `resources/app.asar/out/main/daemon.js`，`SCRY_DAEMON_APP_VERSION` 取产物版本；
+  - 新增进程证据：daemon 起来后读它的 argv（Linux `/proc`，macOS `ps -ww -o command=`），必须与「打包可执行文件 + asar 入口」完全一致；
+  - 启动参数由 `scripts/daemon-mode-smoke/recorder.mjs` 生成，单测 `recorder.test.mjs`；把入口换回 checkout 的 `out/main/daemon.js` 时单测失败（对照）。
+  - 本容器实测（产物用 `electron-builder --linux dir --config.npmRebuild=false` 构建，原生模块未按 Electron ABI 重编，daemon 以 `ELECTRON_RUN_AS_NODE` 运行）：`--app dist/linux-unpacked/scry` 与不带参数各一次，`ranPackagedEntry: true`、`liveCode: 0`、`missingCode: 4`；`--app node_modules/electron/dist/electron` 在启动前被拒（`app_executable_not_packaged_layout`）；结束后没有残留进程。macOS 未运行。

@@ -98,3 +98,11 @@ S0 里可以并行的：S0-1（界面）、S0-3（场景脚本）、S0-6（性�
 4. 逃生开关：不再适用（见第 1 条）。
 5. Linux 与 macOS 同步打开，前提是 Ubuntu runner 验收通过；不过的话，Linux 单独保持关闭，并在状态里写明。
 6. S0-1 设置页的范围：状态、重启、退出、重新连接四项，不加日志查看。
+
+## S0 期间的决定（2026-11-12，按执行方建议）
+
+1. **F1（Hyprland 下 safeStorage 选成 `basic_text`）选方案 A**：Linux 上用户没有显式指定 `--password-store`、且桌面为 Hyprland 或未设置时，App 在 ready 之前追加 `password-store=gnome-libsecret`。方案 B（本机 grant 明文保存）不采用；没有密钥环时仍然 fail closed（F2），界面需说明原因。见 [status/b4-s0-linux](status/b4-s0-linux.md)。
+2. 「退出 Scry 与后台服务」**不加菜单项**，只在设置页。
+3. App 启动时检测到版本不一致，**弹一次原生对话框**，提供「重启后台服务」（走 S0-1 的同一个重启动作）与「稍后」。
+4. 通道名 `remote:backgroundService:*` 保持不变。
+5. `daemon-packaged-recorder-smoke.mjs` 改为运行 asar 内的 daemon 入口（已完成，见 [status/b4-s0-packaged](status/b4-s0-packaged.md)）。

@@ -1,43 +1,48 @@
 import { spawn } from 'node:child_process'
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { once } from 'node:events'
+import { readLaunch } from './b4v/process-identity.mjs'
+import { resolvePackagedApp } from './daemon-mode-smoke/packaged.mjs'
+import { parseRecorderArguments, recorderDaemonLaunch } from './daemon-mode-smoke/recorder.mjs'
 
-const app = resolve('dist/mac-arm64/Scry.app')
-const resources = join(app, 'Contents', 'Resources')
-const executable = join(app, 'Contents', 'MacOS', 'Scry')
-const daemonEntry = resolve('out/main/daemon.js')
-const privateCli = join(resources, 'bin', 'scry')
-if (!existsSync(executable) || !existsSync(daemonEntry) || !existsSync(privateCli)) {
-  throw new Error('packaged_daemon_fixture_missing')
-}
-const root = mkdtempSync('/tmp/scry-packaged-recorder-')
+// The packaged daemon and its private recorder CLI: started from the packaged binary
+// with the entry inside app.asar (what the packaged App's supervisor starts), it must
+// come up with the App's own CLI and ignore a `scry` on PATH; given resources without
+// that CLI it must refuse to start with exit 4 (daemon_recorder_cli_unavailable).
+//   node scripts/daemon-packaged-recorder-smoke.mjs [--app <packaged executable>]
+
+const parsed = parseRecorderArguments(process.argv.slice(2))
+if (!parsed.ok) throw new Error(parsed.reason)
+const target = resolvePackagedApp(parsed.app)
+if (!target.ok) throw new Error(`packaged_daemon_fixture_missing: ${JSON.stringify(target)}`)
+const privateCli = join(target.resources, 'bin', 'scry')
+if (!existsSync(privateCli)) throw new Error(`packaged_daemon_fixture_missing: ${privateCli}`)
+
+const root = mkdtempSync(join(tmpdir(), 'scry-packaged-recorder-'))
 const fakeBin = join(root, 'fake-bin')
 mkdirSync(fakeBin, { recursive: true })
 writeFileSync(join(fakeBin, 'scry'), '#!/bin/sh\nexit 77\n')
 chmodSync(join(fakeBin, 'scry'), 0o755)
 
-function environment(state, userData, resourcesPath) {
-  return {
-    ...process.env,
-    PATH: fakeBin,
-    ELECTRON_RUN_AS_NODE: '1',
-    SCRY_REMOTE_RELAY_ENABLED: '0',
-    SCRY_DAEMON_STATE_DIR: state,
-    SCRY_DAEMON_USER_DATA_DIR: userData,
-    SCRY_DAEMON_APP_PATH: join(resources, 'app.asar'),
-    SCRY_DAEMON_RESOURCES_PATH: resourcesPath,
-    SCRY_DAEMON_APP_VERSION: '0.2.237',
-    SCRY_DAEMON_PACKAGED: '1',
-    SCRY_DAEMON_STARTED_BY: 'packaged-recorder-smoke'
-  }
+function start(name, resources) {
+  const state = join(root, `${name}-state`)
+  const launch = recorderDaemonLaunch(target, { state, userData: join(root, `${name}-user`), resources, fakeBin })
+  const child = spawn(launch.executable, launch.args, { env: launch.env, stdio: ['ignore', 'ignore', 'pipe'] })
+  let stderr = ''
+  child.stderr.setEncoding('utf8')
+  child.stderr.on('data', (chunk) => { stderr = `${stderr}${chunk}`.slice(-4096) })
+  return { child, launch, socket: join(state, 'local.sock'), stderr: () => stderr }
 }
 
-async function waitForSocket(path, child) {
+async function waitForSocket({ socket, child, stderr }) {
   const deadline = Date.now() + 30_000
   while (Date.now() < deadline) {
-    if (existsSync(path)) return
-    if (child.exitCode !== null || child.signalCode !== null) throw new Error(`packaged daemon exited before ready: ${child.exitCode ?? child.signalCode}`)
+    if (existsSync(socket)) return
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(`packaged daemon exited before ready: ${child.exitCode ?? child.signalCode} ${stderr().slice(-400)}`)
+    }
     await new Promise((resolveWait) => setTimeout(resolveWait, 25))
   }
   throw new Error('packaged_daemon_ready_timeout')
@@ -45,29 +50,31 @@ async function waitForSocket(path, child) {
 
 let live
 try {
-  const userData = join(root, 'live-user')
-  const state = join(root, 'live-state')
-  live = spawn(executable, [daemonEntry], { env: environment(state, userData, resources), stdio: ['ignore', 'ignore', 'pipe'] })
-  await waitForSocket(join(state, 'local.sock'), live)
-  live.kill('SIGTERM')
-  const [liveCode, liveSignal] = await once(live, 'exit')
+  live = start('live', target.resources)
+  await waitForSocket(live)
+  // Evidence, not assumption: the process that answered runs the packaged binary with
+  // the archive's entry (Linux: /proc argv; macOS: ps command, compared exactly).
+  const observed = readLaunch(live.child.pid)
+  const expectedCommand = [live.launch.executable, ...live.launch.args].join(' ')
+  const ranPackagedEntry = observed.status === 'available' && observed.command === expectedCommand
+  live.child.kill('SIGTERM')
+  const [liveCode, liveSignal] = await once(live.child, 'exit')
+  if (!ranPackagedEntry) throw new Error(`packaged daemon launch not observed: ${JSON.stringify({ observed, expectedCommand })}`)
   if (liveCode !== 0 || liveSignal !== null) throw new Error(`packaged daemon stop failed: ${liveCode ?? liveSignal}`)
 
   const missingResources = join(root, 'missing-resources')
   mkdirSync(missingResources, { recursive: true })
-  const missing = spawn(executable, [daemonEntry], {
-    env: environment(join(root, 'missing-state'), join(root, 'missing-user'), missingResources),
-    stdio: ['ignore', 'ignore', 'pipe']
-  })
-  let stderr = ''
-  missing.stderr.setEncoding('utf8')
-  missing.stderr.on('data', (chunk) => { stderr = `${stderr}${chunk}`.slice(-4096) })
-  const [missingCode] = await once(missing, 'exit')
-  if (missingCode !== 4 || !stderr.includes('daemon_recorder_cli_unavailable')) {
+  const missing = start('missing', missingResources)
+  const [missingCode] = await once(missing.child, 'exit')
+  if (missingCode !== 4 || !missing.stderr().includes('daemon_recorder_cli_unavailable')) {
     throw new Error(`packaged daemon did not fail closed with exit 4: code=${missingCode}`)
   }
-  console.log(JSON.stringify({ privateCli, fakePathIgnored: true, liveCode, missingCode, missingReason: 'daemon_recorder_cli_unavailable' }))
+  console.log(JSON.stringify({
+    executable: target.executable, entry: live.launch.args[0], version: target.version, privateCli,
+    fakePathIgnored: true, ranPackagedEntry, liveCode, missingCode, missingReason: 'daemon_recorder_cli_unavailable'
+  }))
 } finally {
-  if (live && live.exitCode === null && live.signalCode === null) live.kill('SIGKILL')
+  // Only the child this script started, through its own handle.
+  if (live && live.child.exitCode === null && live.child.signalCode === null) live.child.kill('SIGKILL')
   rmSync(root, { recursive: true, force: true })
 }
