@@ -1,11 +1,14 @@
-import { appendFile, readFile, utimes, writeFile } from 'node:fs/promises'
+import { appendFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { it, expect } from 'vitest'
 import { handleRecorderHook, recoverRecorder } from '../recorder'
-import { recorderOpenPath, recorderSessionRoot } from '../runtime-state'
 import { listRecords } from '../store'
 import { startSessionCapture } from '../session-capture'
 import { workspace } from './fixture.test'
+import {
+  assistantText, captureHook, launchReceipt, notification, notificationPrompt, sealQuietSegment,
+  session, start, stop, toolUse, user
+} from './state-machine-continuation-fixture'
 
 /**
  * Qoder continues one logical turn after its Stop when a background task reports: the wake arrives
@@ -17,57 +20,6 @@ import { workspace } from './fixture.test'
  * segment that links back to the question instead of inventing a prompt nobody sent.
  */
 export function registerContinuationSuite(): void {
-  const session = 'qoder-continuation'
-  const silence = 181_000
-
-  const user = (promptId: string, content: string, extra: Record<string, unknown> = {}) => JSON.stringify({
-    type: 'user', timestamp: '2026-07-19T12:00:10.000Z', promptId,
-    message: { role: 'user', content }, ...extra
-  })
-  const assistantText = (promptId: string, text: string, ts = '2026-07-19T12:00:11.000Z') => JSON.stringify({
-    type: 'assistant', timestamp: ts, promptId, message: { role: 'assistant', content: [{ type: 'text', text }] }
-  })
-  const toolUse = (promptId: string, id: string, command: string) => JSON.stringify({
-    type: 'assistant', timestamp: '2026-07-19T12:00:12.000Z', promptId,
-    message: { role: 'assistant', content: [{ type: 'tool_use', id, name: 'Bash', input: { command, run_in_background: true } }] }
-  })
-  const launchReceipt = (id: string, taskId: string) => JSON.stringify({
-    type: 'user', timestamp: '2026-07-19T12:00:13.000Z', toolUseResult: { kind: 'backgrounded', taskId },
-    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: `Command running in background with ID: ${taskId}` }] }
-  })
-  const notification = (promptId: string, taskId: string, toolUseId: string) => JSON.stringify({
-    type: 'user', timestamp: '2026-07-19T12:00:40.000Z', promptId, isMeta: true,
-    origin: { kind: 'task-notification' },
-    message: { role: 'user', content: notificationPrompt(taskId, toolUseId) }
-  })
-  const notificationPrompt = (taskId: string, toolUseId: string) =>
-    `<task-notification>\n<task-id>${taskId}</task-id>\n<tool-use-id>${toolUseId}</tool-use-id>\n<status>completed</status>\n<summary>Background command completed</summary>\n</task-notification>`
-
-  const start = (transcript: string, requestSetId: string, prompt: string, timestamp: string) => ({
-    session_id: session, cwd: '/tmp', transcript_path: transcript,
-    request_set_id: requestSetId, prompt, timestamp, hook_event_name: 'UserPromptSubmit'
-  })
-  // Real Qoder Stop hooks carry no timestamp of their own, only the request they terminate.
-  const stop = (transcript: string) => ({
-    session_id: session, cwd: '/tmp', transcript_path: transcript,
-    stop_hook_active: false, hook_event_name: 'Stop'
-  })
-
-  /** Recovery only seals a held Stop once the silence window has passed. */
-  const openStatePath = (root: string) =>
-    recorderOpenPath(recorderSessionRoot(join(root, '.scry'), 'qoder', session))
-  const ageHeldStop = async (root: string): Promise<void> => {
-    const path = openStatePath(root)
-    const state = JSON.parse(await readFile(path, 'utf8')) as { deferredTerminalAt?: string }
-    expect(state.deferredTerminalAt).toBeDefined()
-    state.deferredTerminalAt = new Date(Date.now() - silence).toISOString()
-    await writeFile(path, JSON.stringify(state))
-  }
-  const sealQuietSegment = async (root: string): Promise<void> => {
-    await ageHeldStop(root)
-    await expect(recoverRecorder(root)).resolves.toMatchObject({ recovered: 1, pending: 0 })
-  }
-
   it('同一个提问之后多次 Stop，间隔超过静默窗口：每段一条记录，内容不重不漏且能关联回原提问', async () => {
     const root = await workspace()
     const transcript = join(root, 'qoder-segments.jsonl')
@@ -326,20 +278,19 @@ export function registerContinuationSuite(): void {
       cli: {}
     })).resolves.toMatchObject({ status: 'started' })
 
-    await expect(handleRecorderHook({ provider: 'qoder', event: 'Stop', workspace: root, payload: stop(transcript) }))
-      .resolves.toMatchObject({ status: 'pending', reason: expect.stringContaining('background task') })
+    await expect(captureHook(root, 'Stop', stop(transcript)))
+      .resolves.toMatchObject({ status: 'accepted', ack: { result: 'pending' } })
     await sealQuietSegment(root)
 
     await appendFile(transcript, `${[
       notification('prompt-2', 'task-1', 'call-bg-1'),
       assistantText('prompt-2', 'Captured task finished.')
     ].join('\n')}\n`)
-    await handleRecorderHook({
-      provider: 'qoder', event: 'UserPromptSubmit', workspace: root,
-      payload: start(transcript, 'request-2', notificationPrompt('task-1', 'call-bg-1'), '2026-07-19T12:00:41.000Z')
-    })
-    await expect(handleRecorderHook({ provider: 'qoder', event: 'Stop', workspace: root, payload: stop(transcript) }))
-      .resolves.toMatchObject({ status: 'committed' })
+    await expect(captureHook(root, 'UserPromptSubmit',
+      start(transcript, 'request-2', notificationPrompt('task-1', 'call-bg-1'), '2026-07-19T12:00:41.000Z')))
+      .resolves.toMatchObject({ status: 'accepted', ack: { result: 'started' } })
+    await expect(captureHook(root, 'Stop', stop(transcript)))
+      .resolves.toMatchObject({ status: 'accepted', ack: { result: 'committed' } })
 
     const records = await listRecords(join(root, '.scry'))
     expect(records).toHaveLength(2)
