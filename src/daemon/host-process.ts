@@ -32,6 +32,7 @@ import { createForkOperations } from '../main/bootstrap/run-fork'
 import { remoteHostEnabled } from '../main/remote/remote-defaults'
 import { createDaemonTerminalService, type DaemonTerminalServiceDeps } from './terminal-service'
 import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore, type LocalEnrollSocket } from './local-enrollment'
+import { buildIdentity } from '../shared/build-identity'
 
 export interface DaemonHostProcessOptions {
   userDataDir: string
@@ -358,7 +359,8 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   await service.start()
   // The App's own endpoint: same controller and TLS materials, marked as the local
   // transport so a locally enrolled grant cannot be replayed over the network.
-  const localHost = service.createLocalHost({ version: options.appVersion })
+  const identity = buildIdentity(options.appVersion)
+  const localHost = service.createLocalHost(identity)
   const channel = await openLocalChannel({
     directory: options.daemonStateDirectory,
     serve: (stream) => localHost.serve(stream)
@@ -371,7 +373,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     directory: options.daemonStateDirectory,
     enroll: localEnrollHandlers(enrollment, {
       enrollLocal: (input, consumeSecret) => service.enrollLocalDevice(input, consumeSecret)
-    }, service.caCertificatePEM, options.appVersion)
+    }, service.caCertificatePEM, identity)
   })
   log(`daemon.host-ready socket=${channel.socketPath} enroll=${enrollSocket.socketPath}`)
 

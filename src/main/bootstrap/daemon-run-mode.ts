@@ -12,6 +12,7 @@ import type { DockBadgeState } from '../dock-badge'
 import { DaemonRunTransport } from '../daemon-run-transport'
 import { laneForRequest } from '../remote/desktop-lane'
 import { createDaemonRunSurface, type DaemonRunSurface } from './daemon-run-surface'
+import { scryBuildId, type BuildIdentity } from '../../shared/build-identity'
 
 // Daemon mode for the App's own run surface. One switch, one decision: either the
 // App talks to the daemon that owns the ledger and the runs, or it does not start
@@ -43,6 +44,9 @@ export interface DaemonRunModeResult {
   version?: string
   running?: string
   expected?: string
+  /** version-mismatch: the build ids behind `running` and `expected`, when each side has one (A5). */
+  runningBuild?: string
+  expectedBuild?: string
   action?: 'restart_daemon'
   reason?: string
   dispose?: () => void
@@ -52,12 +56,14 @@ export interface DaemonRunModeDeps {
   userDataDir: string
   daemonStateDirectory: string
   appVersion: string
+  /** This bundle's build id (shared/build-identity.ts); absent when unbundled. */
+  appBuild?: string
   /** Returns the credential cipher, or the reason it must not be used. */
   credentialCipher: () => { ok: true; encrypt: (value: string) => Buffer; decrypt: (value: Buffer) => string } | { ok: false; reason: string }
   send: (channel: string, payload: unknown) => void
   currentCwd: () => string | undefined
   /** Client-level probe: a thrown DaemonClientError is a refusal, `undefined` is absence. */
-  probe?: () => Promise<{ version: string } | undefined>
+  probe?: () => Promise<BuildIdentity | undefined>
   launch?: DaemonLaunch
   launchFailure?: () => Promise<string | undefined>
   waitMs?: number
@@ -72,6 +78,11 @@ export interface DaemonRunModeDeps {
 
 export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<DaemonRunModeResult> {
   if (!daemonModeEnabled()) return { status: 'disabled' }
+  const mismatch = (running: string, runningBuild: string | undefined): DaemonRunModeResult => ({
+    status: 'version-mismatch', running, expected: deps.appVersion, action: 'restart_daemon',
+    ...(runningBuild === undefined ? {} : { runningBuild }),
+    ...(deps.appBuild === undefined ? {} : { expectedBuild: deps.appBuild })
+  })
 
   const cipher = deps.credentialCipher()
   if (!cipher.ok) return { status: 'credential-unavailable', reason: cipher.reason }
@@ -79,24 +90,24 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   const client = new DaemonClient({
     paths: daemonClientPaths(deps.daemonStateDirectory, deps.userDataDir),
     appVersion: deps.appVersion,
+    ...(deps.appBuild === undefined ? {} : { appBuild: deps.appBuild }),
     encrypt: cipher.encrypt,
     decrypt: cipher.decrypt
   })
   // The probe answers "is one there, and may we use it?" without spending the grant:
   // `connect()` discards a credential when the daemon does not answer, which would
   // make a daemon that is merely stopped look like a revoked device.
-  const connect = async (): Promise<string | undefined> =>
+  const connect = async (): Promise<BuildIdentity | undefined> =>
     // Before the first grant the only way to learn the daemon is ready is to enroll;
     // afterwards a stopped daemon must not cost the credential its restart needs.
-    client.hasGrant ? await client.daemonInfo() : (await client.connect()).version
+    client.hasGrant ? await client.daemonInfo() : await client.connect()
   // A refusal is an answer, not "not there yet". The supervisor treats a thrown probe
   // as absent and would launch a daemon that refuses again, so the refusal is
   // remembered here and short-circuits before any launch.
   let refused: DaemonClientError | undefined
   const probe: DaemonProbe = async () => {
     try {
-      const probed = deps.probe ? await deps.probe() : await connect().then((version) => version === undefined ? undefined : { version })
-      return probed
+      return deps.probe ? await deps.probe() : await connect()
     } catch (error) {
       if (error instanceof DaemonClientError &&
           (error.reason === 'daemon_version_mismatch' || error.reason === 'daemon_device_not_authorized' || error.reason === 'daemon_local_grant_corrupt')) {
@@ -112,7 +123,7 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
     if (refused.reason === 'daemon_version_mismatch') {
       // Before the first grant the enrollment reply is the only place the daemon says
       // which version it is; without it the version stays unknown, never guessed.
-      return { status: 'version-mismatch', running: refused.running ?? 'unknown', expected: deps.appVersion, action: 'restart_daemon' }
+      return mismatch(refused.running ?? 'unknown', refused.runningBuild)
     }
     return refused.reason === 'daemon_device_not_authorized'
       ? { status: 'device-not-authorized', reason: refused.reason }
@@ -120,12 +131,10 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   }
 
   const launch: DaemonLaunch = deps.launch ?? (async () => ({ status: 'failed' as const, reason: 'daemon_launch_unavailable' }))
-  const supervised = await ensureDaemon({ probe, launch, appVersion: deps.appVersion, launchFailure: deps.launchFailure })
+  const supervision = { probe, launch, appVersion: deps.appVersion, ...(deps.appBuild === undefined ? {} : { appBuild: deps.appBuild }), launchFailure: deps.launchFailure }
+  const supervised = await ensureDaemon(supervision)
   if (supervised.status === 'version-mismatch') {
-    return {
-      status: 'version-mismatch', running: supervised.running, expected: supervised.expected, action: supervised.action,
-      dispose: () => client.close()
-    }
+    return { ...mismatch(supervised.running, supervised.runningBuild), dispose: () => client.close() }
   }
   if (supervised.status === 'unavailable') {
     client.close()
@@ -139,7 +148,7 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   } catch (error) {
     client.close()
     if (error instanceof DaemonClientError && error.reason === 'daemon_version_mismatch') {
-      return { status: 'version-mismatch', running: error.running ?? supervised.version, expected: deps.appVersion, action: 'restart_daemon' }
+      return mismatch(error.running ?? supervised.version, error.runningBuild)
     }
     return { status: 'unavailable', reason: error instanceof Error ? error.message : 'daemon_connect_failed' }
   }
@@ -154,7 +163,7 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
       // The channels to the daemon that exited are dead sockets; keeping them would
       // fail every retried read on a lane that can never answer.
       client.close()
-      const again = await ensureDaemon({ probe, launch, appVersion: deps.appVersion, launchFailure: deps.launchFailure })
+      const again = await ensureDaemon(supervision)
       if (again.status === 'unavailable' || again.status === 'version-mismatch') {
         throw new DaemonClientError('daemon_not_running')
       }
@@ -219,6 +228,7 @@ export function appDaemonModeDeps(input: {
   const userDataDir = app.getPath('userData')
   const daemonStateDirectory = join(userDataDir, 'daemon')
   const appVersion = app.getVersion()
+  const appBuild = scryBuildId()
   const appPath = app.getAppPath()
   const isPackaged = app.isPackaged
   let launchedAt = Number.POSITIVE_INFINITY
@@ -226,6 +236,7 @@ export function appDaemonModeDeps(input: {
     userDataDir,
     daemonStateDirectory,
     appVersion,
+    ...(appBuild === undefined ? {} : { appBuild }),
     credentialCipher: () => {
       // Acceptance only. A dev Electron cannot answer the macOS "Safe Storage" Keychain
       // prompt, and isEncryptionAvailable() blocks on it, so an isolated test instance

@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { startTestDaemon } from './host-process.harness'
 import { cleanupTempDirs } from './host-process.fixtures'
 import { createLazyDaemonRunSurface } from '../main/bootstrap/daemon-run-lazy'
@@ -21,6 +21,7 @@ const decrypt = (value: Buffer) => value.toString('utf8').split('').reverse().jo
 
 afterEach(() => {
   delete process.env.SCRY_HOST_DAEMON
+  vi.unstubAllGlobals()
   cleanupTempDirs()
 })
 
@@ -99,6 +100,44 @@ describe('version mismatch prompt against a real daemon', () => {
       expect(connectionFromMode(outcomes[0]!, '2.0.0')).toEqual({ state: 'version-mismatch', running: 'test', expected: '2.0.0' })
     } finally {
       lazy.dispose()
+      await daemon.dispose()
+    }
+  }, 60_000)
+
+  it('refuses a daemon of the same version from another build (A5) and names both builds', async () => {
+    const oldBuild = '3b04ee8'.padEnd(64, 'a')
+    const newBuild = '0bf3e97'.padEnd(64, 'b')
+    // The daemon reads its build id from its own bundle; unbundled, the define is the
+    // global the test sets, so the daemon answers as the older build.
+    vi.stubGlobal('__SCRY_BUILD_ID__', oldBuild)
+    const daemon = await startTestDaemon()
+    process.env.SCRY_HOST_DAEMON = '1'
+    const stateDirectory = join(daemon.userDataDir, 'daemon')
+    const app = (appBuild: string) => createLazyDaemonRunSurface({
+      userDataDir: daemon.userDataDir,
+      daemonStateDirectory: stateDirectory,
+      appVersion: 'test',
+      appBuild,
+      credentialCipher: () => ({ ok: true, encrypt, decrypt }),
+      send: () => undefined,
+      currentCwd: () => daemon.workspace
+    })
+    // Control: the build the daemon came from enrolls, stores its grant and works.
+    const previous = app(oldBuild)
+    const reinstalled = app(newBuild)
+    try {
+      await expect(previous.activeRuns()).resolves.toEqual([])
+      previous.dispose()
+      // `install:mac:dev` reinstalled the same version; the old daemon kept running.
+      const outcomes: DaemonRunModeResult[] = []
+      reinstalled.onOutcome((result) => { outcomes.push(result) })
+      await expect(reinstalled.activeRuns()).rejects.toThrow('daemon_version_mismatch')
+      expect(outcomes).toHaveLength(1)
+      expect(outcomes[0]).toMatchObject({ status: 'version-mismatch', running: 'test', runningBuild: oldBuild, expected: 'test', expectedBuild: newBuild })
+      expect(connectionFromMode(outcomes[0]!, 'test')).toEqual({ state: 'version-mismatch', running: 'test (3b04ee8)', expected: 'test (0bf3e97)' })
+    } finally {
+      previous.dispose()
+      reinstalled.dispose()
       await daemon.dispose()
     }
   }, 60_000)

@@ -3,6 +3,7 @@ import { trackConnections } from './socket-server-close'
 import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { timingSafeEqual, randomBytes } from 'node:crypto'
 import { join } from 'node:path'
+import type { BuildIdentity } from '../shared/build-identity'
 
 // Bootstrapping the App's own device grant. The App has no certificate yet, so it
 // cannot use inner mTLS; enrollment runs over a second unix socket in the same 0700
@@ -160,7 +161,7 @@ export function localEnrollHandlers(store: LocalEnrollmentStore, authority: {
     deviceId: string
     expiresAt: number
   }>
-}, caCertificatePEM: string, daemonVersion: string) {
+}, caCertificatePEM: string, daemon: BuildIdentity) {
   return async (request: unknown): Promise<unknown> => {
     if (!request || typeof request !== 'object' || Array.isArray(request)) throw new Error('invalid_local_enrollment_request')
     const input = request as { version?: unknown; secret?: unknown; csrPEM?: unknown; deviceLabel?: unknown }
@@ -174,7 +175,9 @@ export function localEnrollHandlers(store: LocalEnrollmentStore, authority: {
       certificatePEM: grant.certificatePEM,
       certificateSHA256: grant.certificateSHA256,
       caCertificatePEM,
-      daemonVersion,
+      daemonVersion: daemon.version,
+      // Same rule as daemonInfo: the App compares the build too (A5).
+      ...(daemon.build ? { daemonBuild: daemon.build } : {}),
       deviceId: grant.deviceId,
       expiresAt: grant.expiresAt
     }

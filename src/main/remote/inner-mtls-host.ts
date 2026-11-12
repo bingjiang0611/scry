@@ -41,8 +41,8 @@ export interface InnerMtlsHostOptions {
   // replayed from another machine even if its certificate leaks.
   transport?: 'local' | 'network'
   // Answers `daemonInfo` on this endpoint. The local socket serves it so the App can
-  // check the daemon's version before it enrolls a grant.
-  info?: { version: string }
+  // check the daemon's version and build (shared/build-identity.ts) before it uses a grant.
+  info?: { version: string; build?: string }
   // App-only work: run controls over the daemon's own registry and the App channels the
   // daemon answers (local ops). Supplied on the local endpoint only; on the network
   // endpoint the ops are absent, not merely refused.
@@ -62,7 +62,7 @@ export class InnerMtlsHost {
   #server: Server
   #maxFrame: number
   #transport: 'local' | 'network'
-  #info?: { version: string }
+  #info?: InnerMtlsHostOptions['info']
   #connections = new Set<TLSSocket>()
   // Open sockets by verified peer fingerprint, so revoking a device closes the
   // tunnels it holds open instead of waiting for their idle timeout.
@@ -170,7 +170,8 @@ export class InnerMtlsHost {
       // Version handshake: answered here because it describes this endpoint's
       // process, and it must be reachable before the App owns a run or a catalog.
       if (this.#info && parsed && typeof parsed === 'object' && (parsed as { op?: unknown }).op === 'daemonInfo') {
-        const info = { op: 'daemonInfo', version: this.#info.version, protocol: REMOTE_PROTOCOL_VERSION }
+        const { version, build } = this.#info
+        const info = { op: 'daemonInfo', version, ...(build ? { build } : {}), protocol: REMOTE_PROTOCOL_VERSION }
         if (keepAlive) { socket.write(`${JSON.stringify({ keepAlive: true, ...info })}\n`); armIdleTimeout() }
         else socket.end(`${JSON.stringify(info)}\n`)
         return

@@ -65,6 +65,19 @@ describe('background service status', () => {
     expect(connectionFromMode({ status: 'credential-unavailable', reason: 'unsafe_credential_storage' }, '2'))
       .toEqual({ state: 'unavailable', reason: 'daemon_credential_unavailable:unsafe_credential_storage' })
   })
+
+  it('shows the build next to a version that is the same on both sides (A5)', () => {
+    const old = '3b04ee8'.padEnd(64, 'a')
+    const current = '0bf3e97'.padEnd(64, 'b')
+    expect(connectionFromMode({ status: 'version-mismatch', running: '0.2.237', runningBuild: old, expected: '0.2.237', expectedBuild: current }, '0.2.237'))
+      .toEqual({ state: 'version-mismatch', running: '0.2.237 (3b04ee8)', expected: '0.2.237 (0bf3e97)' })
+    // A daemon from before build ids says only its version.
+    expect(connectionFromMode({ status: 'version-mismatch', running: '0.2.237', expected: '0.2.237', expectedBuild: current }, '0.2.237'))
+      .toEqual({ state: 'version-mismatch', running: '0.2.237 (构建号未知)', expected: '0.2.237 (0bf3e97)' })
+    // Control: different versions stay plain versions; the build adds nothing there.
+    expect(connectionFromMode({ status: 'version-mismatch', running: '0.2.236', runningBuild: old, expected: '0.2.237', expectedBuild: current }, '0.2.237'))
+      .toEqual({ state: 'version-mismatch', running: '0.2.236', expected: '0.2.237' })
+  })
 })
 
 describe('readProcessIdentity', () => {

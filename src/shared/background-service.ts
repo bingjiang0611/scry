@@ -6,7 +6,8 @@
 export type BackgroundServiceConnection =
   | { state: 'ready' }
   // The daemon answers but was built from other sources; `running` is null when it
-  // refused before saying which version it is.
+  // refused before saying which version it is. Both are labels: a version, or a version
+  // with its build id when the versions are equal (shared/build-identity.ts).
   | { state: 'version-mismatch'; running: string | null; expected: string }
   // The daemon refused this App's local grant (revoked, or enrolled by another instance).
   | { state: 'device-not-authorized' }

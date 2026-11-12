@@ -1,5 +1,6 @@
 import type { BackgroundServiceConnection, BackgroundServiceDevices, BackgroundServiceSelfReport, BackgroundServiceStatus } from '../shared/background-service'
 import type { DaemonRunModeResult } from './bootstrap/daemon-run-mode'
+import { mismatchLabels } from '../shared/build-identity'
 
 // The «后台服务» status, composed from what the App can establish itself (its connection
 // outcome, the verified daemon.lock holder) and what only the daemon knows (its local op
@@ -25,8 +26,11 @@ export function connectionFromMode(result: DaemonRunModeResult, appVersion: stri
     case 'version-mismatch':
       return {
         state: 'version-mismatch',
-        running: result.running && result.running !== 'unknown' ? result.running : null,
-        expected: result.expected ?? appVersion
+        // Shown with the build ids only when the versions alone would read as equal (A5).
+        ...mismatchLabels(
+          { version: result.running && result.running !== 'unknown' ? result.running : null, ...(result.runningBuild ? { build: result.runningBuild } : {}) },
+          { version: result.expected ?? appVersion, ...(result.expectedBuild ? { build: result.expectedBuild } : {}) }
+        )
       }
     case 'device-not-authorized':
       return { state: 'device-not-authorized' }
