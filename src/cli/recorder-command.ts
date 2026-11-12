@@ -1,5 +1,5 @@
 import { type ParsedArgs, workspaceOf, readStdin, flag, intFlag, providerOf, print } from './command-args.js'
-import { sendRecorderDaemonHook, startRecorderDaemon, serveRecorderDaemon, recorderDaemonStatus, stopRecorderDaemon } from '../core/turn-recorder/daemon.js'
+import { sendRecorderDaemonHook, startRecorderDaemon, serveRecorderDaemon, recorderDaemonStatus, stopRecorderDaemon, RecorderHookRejected } from '../core/turn-recorder/daemon.js'
 import { handleRecorderHook, recorderEnablement, recoverRecorder, refreshRecorderPendingHealth, type RecorderRecoveryScope } from '../core/turn-recorder/recorder.js'
 import { recordError, drainCommitNotifications, retryCommitNotifications, RECORDER_VERSION, readHealth, commitNotificationStatus } from '../core/turn-recorder/store.js'
 import { resolveCommitHookActivation, commitHookEnv, revokeCommitHookGrant, inspectCommitHookBundle, writeCommitHookGrant } from '../core/turn-recorder/commit-hook-grant.js'
@@ -22,20 +22,46 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
     const managed = args.flags.has('managed')
     const daemonEnabled = !managed && process.env.SCRY_RECORDER_TRANSPORT !== 'direct'
     const daemonTried = daemonEnabled && process.env.SCRY_RECORDER_DAEMON_TRIED === '1'
+    // The shell fast path already saw an explicit pre-apply refusal (404 on a legacy daemon, or the
+    // version handshake): replace the owner and deliver once instead of repeating that attempt.
+    const daemonRejected = daemonEnabled && !daemonTried && process.env.SCRY_RECORDER_DAEMON_REJECTED !== undefined
+    const send = (): Promise<Record<string, unknown>> => sendRecorderDaemonHook({
+      provider,
+      event,
+      workspace,
+      payload,
+      // A versioned endpoint answers immediately; the timeout only bounds the applied path.
+      timeoutMs: event === 'UserPromptSubmit' || event === 'Stop' ? 4_000 : 1_000
+    })
+    const replaceDaemon = async (): Promise<boolean> => {
+      const scriptPath = process.argv[1]
+      if (!scriptPath) return false
+      // Existing replacement path: stop the current owner, wait for the socket, start this CLI.
+      return startRecorderDaemon({ workspace, scriptPath }).then(() => true, () => false)
+    }
     if (daemonEnabled && !daemonTried) {
-      try {
-        const result = await sendRecorderDaemonHook({
-          provider,
-          event,
-          workspace,
-          payload,
-          timeoutMs: event === 'UserPromptSubmit' || event === 'Stop' ? 4_000 : 1_000
-        })
-        if (verbose) print(result)
-        return 0
-      } catch {
-        // Cold start or stale socket: record this event directly, then start the daemon.
+      const redeliver = async (): Promise<boolean> => {
+        if (daemonRejected && !await replaceDaemon()) return false
+        try {
+          const result = await send()
+          if (verbose) print(result)
+          return true
+        } catch (error) {
+          if (daemonRejected) return false
+          // Only a completed 404/409 proves the event was not applied; replace the owner and resend
+          // exactly once. A timeout stays unknown delivery and is never resent.
+          if (!(error instanceof RecorderHookRejected) || !error.replaceDaemon) return false
+          if (!await replaceDaemon()) return false
+          try {
+            const result = await send()
+            if (verbose) print(result)
+            return true
+          } catch {
+            return false
+          }
+        }
       }
+      if (await redeliver()) return 0
     }
     delegatedToCore = true
     const result = await handleRecorderHook({
@@ -229,3 +255,4 @@ export async function commitHookCommand(args: ParsedArgs): Promise<number> {
   })
   return activation.status === 'bundle-invalid' ? 5 : 0
 }
+
