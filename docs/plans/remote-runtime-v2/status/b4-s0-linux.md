@@ -5,8 +5,8 @@
 ## 结论
 
 - **Ubuntu 容器 + Xvfb 下，daemon 模式在真实 Electron 中跑通**：开发布局完整 smoke 连续 3 次通过；打包布局（`dist/linux-unpacked`）用探针跑通 daemon 启动、终端、录制和一次 run。全程没有 `--no-sandbox`，renderer 在 Chromium sandbox 内。
-- **目标桌面有阻断项（F1）**：Electron 42 在 `XDG_CURRENT_DESKTOP=Hyprland` 时把 `safeStorage` 选成 `basic_text`，**即使 gnome-keyring 已解锁也是如此**。daemon 模式会因此 fail closed（`daemon_credential_unavailable:unsafe_credential_storage`），所有 run、终端调用都失败。Omarchy 用的就是 Hyprland。在 S1 + S3 之后，daemon 是唯一路径、没有逃生开关，这一项不解决，Linux 目标机就无法运行任何 Agent。
-- **建议**：按维护者决定第 5 条，**Linux 先不随 macOS 切换**，在状态里写明 F1/F2。另外需要维护者决定：S3 删除进程内管线后，"Linux 保持关闭"靠什么实现。修复方向见 F1，需要维护者先决定凭据策略，本 lane 不改产品代码。
+- **目标桌面有阻断项（F1，2026-11-12 已按方案 A 修复，目标机未验证）**：Electron 42 在 `XDG_CURRENT_DESKTOP=Hyprland` 时把 `safeStorage` 选成 `basic_text`，**即使 gnome-keyring 已解锁也是如此**。daemon 模式会因此 fail closed（`daemon_credential_unavailable:unsafe_credential_storage`），所有 run、终端调用都失败。Omarchy 用的就是 Hyprland。在 S1 + S3 之后，daemon 是唯一路径、没有逃生开关，这一项不解决，Linux 目标机就无法运行任何 Agent。维护者 2026-11-12 批准方案 A（Linux 上按桌面追加 `--password-store=gnome-libsecret`），**没有批准方案 B（明文/放宽凭据）**。改动与本容器结果见 F1。
+- **建议**：按维护者决定第 5 条，**Linux 先不随 macOS 切换**，在状态里写明 F1/F2。另外需要维护者决定：S3 删除进程内管线后，"Linux 保持关闭"靠什么实现。F1 的代码修复只在 Xvfb 容器内验证过，Omarchy 默认是否运行并解锁 Secret Service 密钥环仍未确认（第 16 项）。
 - GitHub Actions 的 `packaged-linux` job 已加入 daemon 模式 smoke（见“CI 改动”）。真实 runner 的结果要等第一次 CI 运行，目前记为 **pending**，不当作通过。
 
 ## 环境
@@ -41,7 +41,7 @@
 | 10 | 凭据：smoke 专用编码（`SCRY_TEST_APP=1` + `SCRY_DAEMON_CREDENTIAL_PLAINTEXT=1`） | **pass**（仅 fixture） | `daemon-client.json` 是明文 JSON（PEM 可见），符合这个开关的定义；只用于验收 |
 | 11 | 凭据：没有密钥环（容器默认） | **fail closed（符合合同）** | `safeStorage` 不可用，所有调用返回 `daemon_credential_unavailable:unsafe_credential_storage`，没有写出凭据，也没有启动 daemon。见 F2 |
 | 12 | 凭据：gnome-keyring 已解锁，`XDG_CURRENT_DESKTOP=GNOME` | **pass** | 后端为 `gnome_libsecret`；`daemon-client.json` 以 `v11` 开头（密文，不是 JSON）；daemon、终端、录制、run 全部通过 |
-| 13 | 凭据：gnome-keyring 已解锁，`XDG_CURRENT_DESKTOP=Hyprland` | **fail** | 后端为 `basic_text`，`isEncryptionAvailable() = false`，App 返回 `daemon_credential_unavailable`。见 F1 |
+| 13 | 凭据：gnome-keyring 已解锁，`XDG_CURRENT_DESKTOP=Hyprland` | 修复前 **fail**；修复后（`65e4fd1`）**pass**（仅容器） | 修复前：后端为 `basic_text`，`isEncryptionAvailable() = false`，App 返回 `daemon_credential_unavailable`。修复后：构建后的 App 选中 `gnome_libsecret`，daemon 连接 `ready`，`daemon-client.json` 以 `v11` 开头。见 F1 |
 | 14 | 打包布局 `dist/linux-unpacked` + `check:packaged-app` | **pass** | `check:packaged-app` 通过（`nodePty: true`，私有 CLI 在包内）；探针以 gnome-keyring（GNOME）跑通第 5–9 项 |
 | 15 | 打包布局跑完整 `daemon-mode-smoke` | **not-run** | 这个 smoke 只支持开发布局（`devApp: true`）。打包布局的完整 daemon smoke 属于 S0-5 |
 | 16 | Arch/Omarchy x86_64、Hyprland/Wayland 目标机 | **not-run** | 目标机不可用。Xvfb 与 `XDG_CURRENT_DESKTOP=Hyprland` 环境变量模拟都不能代替目标机；没有验证 Omarchy 默认是否运行并解锁 gnome-keyring |
@@ -62,16 +62,41 @@
 | 任一值 + `--password-store=gnome-libsecret`（命令行，或在 ready 之前调用 `app.commandLine.appendSwitch`） | `gnome_libsecret` | 是 |
 | 任一值 + 上述开关，但没有运行密钥环 | `gnome_libsecret` | 否 |
 
-`unsafeCredentialStorageReason` 把 `basic_text` 和不可用的后端都判为不安全，这是正确的 fail closed。问题在于，切到 daemon 模式后，**本机 run 也要求这份凭据**：`daemon-run-mode.ts` 用 `safeStorage` 加密 App 访问本机 daemon 的 grant。而 `remote-connections.ts` 原来的注释写的是"纯本地项目不经过这条路径，密钥环不可用不应阻断它"。daemon 模式改变了这个前提。
+`unsafeCredentialStorageReason` 把 `basic_text` 和不可用的后端都判为不安全，这是正确的 fail closed。问题在于，切到 daemon 模式后，**本机 run 也要求这份凭据**：`daemon-run-mode.ts` 用 `safeStorage` 加密 App 访问本机 daemon 的 grant。而 `remote-connections.ts` 原来的注释写的是"纯本地项目不经过这条路径，密钥环不可用不应阻断它"。daemon 模式改变了这个前提（该注释本次没有改）。
 
-可选方向（都需要维护者决定，本 lane 没有实现）：
+当时列出的两个方向：
 
-1. 在 Linux 上，如果用户没有显式指定 `--password-store`，App 在 ready 之前追加 `password-store=gnome-libsecret`。探针已验证这样做后 Hyprland 下能选中 libsecret。但没有运行密钥环时仍然不可用（回到 F2），Omarchy 默认是否带 gnome-keyring 需要目标机确认。
-2. 重新决定本机 daemon grant 是否需要 `safeStorage`。这份 grant 是 0700 目录内、指向 0600 socket 的客户端证书；同一用户的攻击者不在信任模型保证范围内；daemon 自己的宿主身份私钥本来就是 0600 明文文件（`userData/remote/identity/host-identity.json`，见 P3b 设计表）。但 CLAUDE.md 要求 Linux 默认不用明文凭据后端，所以改动必须由维护者明确批准。
+1. 在 Linux 上，如果用户没有显式指定 `--password-store`，App 在 ready 之前追加 `password-store=gnome-libsecret`。
+2. 重新决定本机 daemon grant 是否需要 `safeStorage`（等于在 Linux 上允许明文或弱保护的凭据）。
+
+**决定（维护者，2026-11-12）**：采用方案 1（A）；**方案 2（B）没有批准**，`unsafeCredentialStorageReason` 与 daemon grant 的 fail closed 规则保持不变，没有任何明文回退。
+
+**改动（`65e4fd1`）**：新模块 `src/main/bootstrap/linux-password-store.ts`，纯函数 `linuxPasswordStoreSwitch({ platform, hasPasswordStoreSwitch, env })`，加上 `applyLinuxPasswordStore(app.commandLine)`；`app-lifecycle.ts` 的 `initializeAppEnvironment`（模块顶层、ready 之前，和现有平台开关放在一起）调用它，追加时打一行 `[scry] safeStorage: --password-store=gnome-libsecret …` 日志。`src/main/index.ts` 没有改动。规则：
+
+- 只在 `process.platform === 'linux'` 生效；macOS 与其他平台不动。
+- 命令行上已有 `--password-store`（`app.commandLine.hasSwitch('password-store')`，包括 `--password-store=basic` 和空值）时一律不改。
+- `XDG_CURRENT_DESKTOP` 按冒号拆分、忽略大小写：含 `Hyprland` 且不含 `KDE` 时追加；含 `KDE` 时不改（保留 kwallet）；其他任何桌面（GNOME、sway 等）不改。
+- `XDG_CURRENT_DESKTOP` 未设置或为空：`DESKTOP_SESSION=hyprland` 时追加；`DESKTOP_SESSION`、`KDE_FULL_SESSION`、`GNOME_DESKTOP_SESSION_ID` 任一非空时不改（Chromium 会继续用这些变量识别桌面）；都没有时追加。这一条比批准范围更保守：未命名桌面但旧变量指向其他桌面时不改。
+
+单元测试 `linux-password-store.test.ts` 9 项通过。先写测试并确认因模块不存在而失败；负对照（逐一破坏后重跑，均已恢复）：去掉显式开关判断 → "never overrides a store the user chose" 失败；去掉 KDE 判断 → "leaves every other desktop to Chromium, KDE included" 失败；任意命名桌面都追加 → 同一项失败；去掉平台判断 → "never touches macOS" 失败。
+
+**本容器结果（详见 [b4-s0-linux-credentials.md](b4-s0-linux-credentials.md)）**：有已解锁的 gnome-keyring 时，`Hyprland`、未设置、`hyprland:wlroots` 都选中 `gnome_libsecret` 且加解密往返成功；不接线的对照仍为 `basic_text`。`GNOME` 不追加、行为不变；`KDE` 不追加、仍为 `kwallet` 且不可用；显式 `--password-store=basic` 被尊重。会话总线上没有任何 Secret Service 时选中 `gnome_libsecret` 但不可用，App 返回 `daemon_credential_unavailable:unsafe_credential_storage`，没有写出凭据（fail closed）。构建后的 App（daemon 模式、不用明文编码）在 `Hyprland` + 密钥环下连接 `ready`，`daemon-client.json` 以 `v11` 开头。另有一种情况**未得出结果**：gnome-keyring 已安装但没启动、也没有已有密钥环时，D-Bus 激活后弹出 `gcr-prompter` 要求新建密钥环，Electron 主进程一直等待，Xvfb 下无法回答，取消路径未验证。
+
+**仍未验证**：Arch/Omarchy x86_64 + Hyprland/Wayland 目标机（第 16 项），包括 Omarchy 默认是否安装、启动并在登录时解锁 gnome-keyring 或其他 Secret Service 实现；目标机上密钥环被锁或尚未创建时的提示与取消路径（见上面"未得出结果"一条）；打包布局（`dist/linux-unpacked` / pacman）下的同一探针；macOS 构建没有在本次运行（改动在 Linux 以外不生效，由单元测试覆盖）。
 
 ### F2 · 没有密钥环的 Linux 会话里，daemon 模式下无法运行任何 Agent
 
-这一项符合 fail closed 合同，但对用户的影响和 F1 相同：每次调用都报 `daemon_credential_unavailable`，界面上只能看到失败。与 F1 一起决定；最少也要在 S0-1 设置页把这个原因说清楚。
+这一项符合 fail closed 合同，但对用户的影响和 F1 相同：每次调用都报 `daemon_credential_unavailable`，界面上只能看到失败。方案 A 之后，Hyprland 上有可用密钥环时已经不再失败；没有密钥环时仍然失败，这是有意的。
+
+**改动（`168aa9a`）：把原因说清楚**。`src/shared/background-service.ts` 新增 `isDaemonCredentialUnavailable` 与 `daemonCredentialUnavailableMessage`，三处现有文案都用这一句，而不是各写一份：
+
+- 错误行 `ipcErrorMessage`（`src/renderer/constants/ipc-error-copy.ts`）；
+- 「后台服务」设置页的提示（`src/renderer/background-service-view.ts`）；
+- 该设置页操作失败的原因（`src/main/background-service-copy.ts` 的 `reasonMessage`）。
+
+文案：「系统密钥环不可用，Scry 无法保存本机后台服务的连接凭据，因此不能连接后台服务（`<原始代码>`）。」在 Linux 上再加：「Linux 上需要一个正在运行且已解锁的 Secret Service 密钥环（例如 gnome-keyring），然后重启 Scry。」其他平台不加这句建议，因为没有在那里验证过。原始代码保留在括号里便于排查。这一原因下「重启后台服务」不再是主按钮（重启 daemon 不会让 App 获得密钥环），按钮仍然保留。
+
+测试：先写测试并确认 3 项失败，再实现；相关单元测试 17 个文件 127 项通过。构建后的 App 在"无任何 Secret Service、`Hyprland`"条件下打开设置 →「后台服务」，页面实际显示上述两句与 `不可用（daemon_credential_unavailable:unsafe_credential_storage）`，没有主按钮。macOS 上的显示没有在真实 App 中验证。
 
 ### F3 · `daemon-mode-smoke.mjs` 结束后遗留 daemon 与 supervisor（已修复，fixture 问题）
 
@@ -97,6 +122,6 @@ daemon 按设计比 App 活得久，smoke 只停止 App，然后删除临时目�
 ## 仍未验证
 
 - 真实 runner 上的 `packaged-linux` 结果（第 17 项）。
-- Arch/Omarchy、Hyprland/Wayland、真实密钥环的默认状态（第 16 项，F1/F2）。
+- Arch/Omarchy、Hyprland/Wayland、真实密钥环的默认状态（第 16 项，F1/F2）。F1 方案 A 只在 Xvfb 容器内验证；密钥环被锁或尚未创建时的提示与取消路径未验证。
 - 打包布局的完整 daemon smoke（S0-5）；pacman 安装、升级、卸载。
 - daemon 模式下的真实 Provider（另有授权项，不在本 lane）。
